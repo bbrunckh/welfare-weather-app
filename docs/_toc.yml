@@ -2,7 +2,7 @@ format: jb-book
 root: README
 
 parts:
-  - caption: Methodology
+  - caption: WISE-APP
     numbered: True
     chapters:
       - file: docs/0_summary
