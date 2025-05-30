@@ -2,29 +2,20 @@ format: jb-book
 root: README
 
 parts:
-  - caption: Examples
+  - caption: Methodology
     numbered: True
     chapters:
-      - file: notebooks/world-bank-api.ipynb
-      - file: notebooks/world-bank-package.ipynb
-      - file: notebooks/nasa-apod.ipynb
-      - file: notebooks/bibliography.ipynb
-  - caption: Recommended Workflows
+      - file: docs/0_summary
+      - file: docs/1_step1
+      - file: docs/2_step2
+      - file: docs/3_step3
+      - file: docs/4_data
+  - caption: Links
     chapters:
-      - file: docs/folders-and-naming
-      - file: docs/git-workflows
-      - file: docs/notebooks-workflows
-      - file: docs/presenting-results
-  - caption: Gallery
-    chapters:
-      - file: docs/gallery
-  - caption: Additional Resources
-    chapters:
-      - url: https://datapartnership.org
-        title: Development Data Partnership
-      - url: https://wbdatalab.org
-        title: World Bank Data Lab
-      - url: https://www.worldbank.org/en/about/unit/unit-dec
-        title: World Bank DEC
-      - url: https://www.worldbank.org/en/research/dime
-        title: World Bank DIME
+      - url: https://worldbank.github.io/gmd
+        title: GMD
+      - url: https://worldbank.github.io/DECAT_Space2Stats
+        title: Space2Stats
+      - url: https://h3geo.org
+        title: H3
+        
