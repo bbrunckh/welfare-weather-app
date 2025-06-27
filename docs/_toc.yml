@@ -3,7 +3,6 @@ root: README
 
 parts:
   - caption: WISE-APP
-    numbered: True
     chapters:
       - file: docs/0_summary
       - file: docs/1_step1
