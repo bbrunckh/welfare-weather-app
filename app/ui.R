@@ -1,7 +1,10 @@
 # Define the User Interface (UI)
 ui <- navbarPage(
   "WISE-APP",  
-  
+  tags$head(
+    tags$script(src = "https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.7/MathJax.js?config=TeX-MML-AM_CHTML",
+                type = "text/javascript")
+  ),
   # Page 1: Overview
   tabPanel(
     "Overview",
@@ -69,10 +72,6 @@ ui <- navbarPage(
                 options = list(maxItems = 2)
               ),
               uiOutput("weather_construction_ui"), # Conditional on weather variable
-              
-              hr(),
-              p("Weather summary statistics:"),
-              actionButton("weather_stats", "Weather stats")
             )
           ) |>
           bs_append(
@@ -80,14 +79,12 @@ ui <- navbarPage(
             content = tagList(
               radioButtons("modelspec", 
                            "Model:", 
-                           choices = c("Linear regression", "Lasso", "XGBoost")), 
+                           # choices = c("Linear regression", "Lasso", "XGBoost")), 
+                           choices = c("Linear regression")), 
               
+              helpText("Lasso and XGBoost options will be added soon."),
               actionButton("model_covariates", "Define covariates"), # Changed label for clarity
-              
-              conditionalPanel(
-                condition = "input.model_covariates % 2 == 1",
-                uiOutput("model_specs_ui"), # Conditional on survey data
-              ),
+              uiOutput("model_specs_ui"), # Conditional on survey data
               hr(),
               actionButton("run_model", "Run model"),
               hr(),
@@ -104,9 +101,9 @@ ui <- navbarPage(
           h4("Welfare function"),
           h3("\\(W_{hkt} = f(Haz_{kt}, X_{hk}, E_{hk}) + \\epsilon_{hkt}\\)"),
           p("\\(W_{hkt}\\): welfare of household \\(h\\) in location \\(k\\) at time \\(t\\)"),
-          p("\\(Haz_{kt}\\): observed weather conditions in location \\(k\\) at time \\(t\\)"),
-          p("\\(X_{hkt}\\): observed characteristics of household \\(h\\) in location \\(k\\) at time \\(t\\)"),
-          p("\\(E_{kt}\\): observed characteristics of location \\(k\\) at time \\(t\\)"),
+          p("\\(Haz_{kt}\\): weather conditions in location \\(k\\) at time \\(t\\)"),
+          p("\\(X_{hkt}\\): characteristics of household \\(h\\) in location \\(k\\) at time \\(t\\)"),
+          p("\\(E_{kt}\\): characteristics of location \\(k\\) at time \\(t\\)"),
           p("\\(\\epsilon_{hkt}\\): error term"),
         )
     )
@@ -144,6 +141,7 @@ ui <- navbarPage(
           )
           ),
         mainPanel(
+          h3("Step 2 will be added soon."),
           p("Map showing weather over time used in simulation (animate?)"),
           p("Histogram/ridgeplot of weather distributions over time (linked to map) for (1) survey sample, (2) population (3) weather distribution used to train model"),
           p("Histogram/ridgeplot of predicted welfare distribution over time (linked to map) for (1) survey sample, (2) population (survey weights) (3) actual welfare distribution used to train model"),
@@ -245,6 +243,7 @@ ui <- navbarPage(
             )
         ),
         mainPanel(
+          h3("Step 3 will be added soon."),
           p("Map showing difference in weather between climate change scenario and historical climate used in simulation (animate?)"),
           p("Histogram/ridgeplot of weather distributions over time (linked to map) for (1) historical climate (sample), (2) climate change scenario (sample) (3) weather distribution used to train model"),
           p("Histogram/ridgeplot of predicted welfare distribution over time (linked to map) for (1) policy baseline, historical climate, (2) policy baseline, climate scenario, (3) policy scenario, historical climate, (4) policy scenario, climate scenario, (5) actual welfare distribution used to train model"),

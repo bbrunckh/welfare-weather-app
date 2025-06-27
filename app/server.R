@@ -537,9 +537,10 @@ server <- function(input, output, session) {
             # Continuous or binned
             radioButtons(paste0(id_prefix, "contOrBinned"),
               "Continuous or binned",
-              choices = c("Continuous", "Binned")
+              # choices = c("Continuous", "Binned")
+              choices = c("Continuous")
             ),
-            helpText("The binned specification is yet to be implemented"),
+            helpText("A binned option will be added soon."),
 
             # Conditional UI for binned options
             conditionalPanel(
@@ -576,7 +577,11 @@ server <- function(input, output, session) {
     }) # End of lapply
     # Return the list of UI elements. Shiny will render them sequentially.
     # do.call is essential here to unpack the list of tagLists into individual arguments for tagList()
-    do.call(tagList, ui_list)
+    tagList(
+      do.call(tagList, ui_list),
+      hr(),
+      actionButton("weather_stats", "Weather stats")
+    )
   })
 
   #----------------------------------------------------------------------------#
@@ -587,7 +592,8 @@ server <- function(input, output, session) {
   survey_h3 <- reactive({
     req(input$country)
     files <- sub("\\.parquet$", "_H3.parquet", survey_data_files())
-    read_parquet_duckdb(files, options = list(union_by_name = TRUE)) |>
+    read_parquet_duckdb(files, options = list(union_by_name = TRUE),
+                        prudence = "lavish") |>
       mutate(loc_id = as.character(loc_id))
   })
   
@@ -602,7 +608,7 @@ server <- function(input, output, session) {
   
   # load selected weather variables for survey locations (lazily)
   weather_data <- reactive({
-    req(input$weather_variable_selector, input$country)
+    req(input$weather_variable_selector, input$country, input$survey_stats)
     
     # lookup weather data files
     codes <- filter(survey_list, countryname %in% input$country) |>
@@ -616,7 +622,7 @@ server <- function(input, output, session) {
     survey_h3 <- survey_h3()
     
     # dates for weather vars (use 1991-2020 as default)
-    survey_dates <- survey_data() |> pull(int_date)
+    survey_dates <- survey_data() |> pull(int_date) |> na.omit()
     survey_date_min <- floor_date(min(survey_dates), 
                                   "month") - months(12)
     survey_date_max <- floor_date(max(survey_dates), "month")
@@ -763,15 +769,34 @@ server <- function(input, output, session) {
       filter(!is.na(loc_id) & loc_id !="" & !is.na(int_date)) |>
       mutate(timestamp = floor_date(int_date, "month")) 
     
-    survey_weather <- survey_h3 |>
+    loc_weather <- survey_h3 |>
       left_join(survey_dates) |>
       left_join(weather_timeseries) |>
       summarise(across(starts_with("haz"), ~sum(.x*pop_2020)/sum(pop_2020)),
-                .by = c(code, year, survname, loc_id, int_date)) |>
+                .by = c(code, year, survname, loc_id, int_date)) 
+    
+    cats <- filter(varlist, !is.na(wiseapp) & datatype == "Categorical") |>
+      pull("varname")
+    fe <- filter(varlist, !is.na(wiseapp) & wiseapp == "ID & Fixed effects") |>
+      pull("varname")
+    welfare <- welf_select()$varname
+    
+    survey_weather <- loc_weather |>
       left_join(survey_data) |>
-      mutate(year = as.integer(year))
-      
+      mutate(year = as.integer(year),
+             countryyear = paste0(countryname, ", ", year),
+             log_welf = log(.data[[welfare]]))  |>
+      collect() |>
+      filter(countryname!="") |>
+      mutate(across(where(is.logical), as.integer),
+             across(any_of(cats), as.factor),
+             across(any_of(fe), as.factor))
+    
       return(survey_weather)
+  })
+  
+  haz_vars <- reactive({
+    paste0("haz_",weather_vars())
   })
 
   #----------------------------------------------------------------------------#
@@ -786,27 +811,16 @@ server <- function(input, output, session) {
     {
       req(input$weather_stats > 0) # Ensure the button has been clicked
       
-      welfare <- welf_select()$varname
-      weather_vars <- paste0("haz_",weather_vars())
-      survey_weather <- survey_weather() |>
-        select(countryname, code, year, starts_with(c("haz", welfare)), weight) |>
-        mutate(countryyear = paste0(countryname, ", ", year),
-               log_welf = log(.data[[welfare]]))  |>
-        collect() |>
-        filter(countryname!="")
-        
-      
       # Weather distribution plots
         
       output$weather_dist1 <- renderPlot({
-        h <- weather_vars[1]
-        p <- ggplot(survey_weather, aes(
-          x = .data[[h]],
+        p <- ggplot(survey_weather(), aes(
+          x = .data[[haz_vars()[1]]],
           y = countryyear,
           fill = code
         )) +
           geom_density_ridges(alpha = 0.7, scale = 2)
-        label <- filter(varlist, varname==h, !is.na(varname)) |> pull(label)
+        label <- filter(varlist, varname==haz_vars()[1], !is.na(varname)) |> pull(label)
         p + theme_minimal() +
           labs(
             title = "", x = paste0(label,"\n (as configured)"),
@@ -816,14 +830,15 @@ server <- function(input, output, session) {
       })
       
       output$weather_dist2 <- renderPlot({
-        h <- weather_vars[2]
-        p <- ggplot(survey_weather, aes(
-          x = .data[[h]],
+        req(length(input$weather_variable_selector) > 1)
+        
+        p <- ggplot(survey_weather(), aes(
+          x = .data[[haz_vars()[2]]],
           y = countryyear,
           fill = code
         )) +
           geom_density_ridges(alpha = 0.7, scale = 2)
-        label <- filter(varlist, varname==h, !is.na(varname)) |> pull(label)
+        label <- filter(varlist, varname==haz_vars()[2], !is.na(varname)) |> pull(label)
         p + theme_minimal() +
           labs(
             title = "", x = paste0(label,"\n (as configured)"),
@@ -836,14 +851,13 @@ server <- function(input, output, session) {
       
       # binned scatter plots
       output$binscatter1 <- renderPlot({
-        h <- weather_vars[1]
-        p <- ggplot(survey_weather, aes(x = .data[[h]],
+        p <- ggplot(survey_weather(), aes(x = .data[[haz_vars()[1]]],
                             y = log_welf)) +
           geom_point(alpha = 0.1) +
           stat_summary_bin(fun.y='mean', bins=20,
                            color='orange', size=2, geom='point')
         
-        xlabel <- filter(varlist, varname==h, !is.na(varname)) |> pull(label)
+        xlabel <- filter(varlist, varname==haz_vars()[1], !is.na(varname)) |> pull(label)
         
         p + theme_minimal() +
           labs(
@@ -853,15 +867,15 @@ server <- function(input, output, session) {
       })
       
       output$binscatter2 <- renderPlot({
-        h <- weather_vars[2]
+        req(length(input$weather_variable_selector) > 1)
         
-        p <- ggplot(survey_weather, aes(x = .data[[h]],
+        p <- ggplot(survey_weather(), aes(x = .data[[haz_vars()[2]]],
                             y = log_welf)) +
           geom_point(alpha = 0.1) +
           stat_summary_bin(fun.y='mean', bins=20,
                            color='orange', size=2, geom='point')
         
-        xlabel <- filter(varlist, varname==h, !is.na(varname)) |> pull(label)
+        xlabel <- filter(varlist, varname==haz_vars()[2], !is.na(varname)) |> pull(label)
         
         p + theme_minimal() +
           labs(
@@ -889,7 +903,7 @@ server <- function(input, output, session) {
             br(),
             
             h4("Weather over time and space"),
-            helpText("To be added..."),
+            helpText("Weather maps to be added..."),
           br(),
           
           h4("Welfare vs weather"),
@@ -908,7 +922,7 @@ server <- function(input, output, session) {
             helpText("Summary statistics are shown for the configured weather variables. Sample weights are used."),
             output$weather_stats <- renderDT(
               {
-                weather_desc <- survey_weather |>
+                weather_desc <- survey_weather() |>
                   select(countryyear, weight, starts_with("haz"))
                 lookup_vec <- setNames(varlist$label, varlist$varname)
                 current_names <- colnames(weather_desc)
@@ -930,6 +944,7 @@ server <- function(input, output, session) {
               },
               rownames = FALSE
             ),
+          br(),
           ),
           select = TRUE # Select this tab when it's first added
         )
@@ -965,15 +980,14 @@ server <- function(input, output, session) {
     filter(varlist, wiseapp == "ID & Fixed effects") |>
     select(varname, label) |> filter(varname %in% colnames(survey_data()) & !varname %in% c("countryname", "survname","hhid"))
   })
-  
+
 output$model_specs_ui <- renderUI({
-  req(input$country)
+  req(input$country, input$weather_variable_selector)
   
   hh_vars <- hh_varlist()$label
   
   hh_vars_default <- hh_varlist() |>
-    filter(varname %in% c("urban", "hhsize", "primarycomp", "imp_wat_rec",
-                          "imp_san_rec", "electricity", "agriland")) |>
+    filter(varname %in% c("urban", "hhsize", "primarycomp")) |>
     pull(label)
 
   area_vars <- area_varlist()$label
@@ -981,19 +995,21 @@ output$model_specs_ui <- renderUI({
     filter(varname %in% c("built_area")) |>
     pull(label)
   
-  interactions <- hh_varlist() |>
-    filter(varname %in% c("urban", "literacy", "primarycomp", "imp_wat_rec", "imp_san_rec", 
-                          "electricity", "agriland", "male")) |>
+  interactions <- hh_varlist() |> filter(
+    varname %in% c("urban", "literacy", "primarycomp", "imp_wat_rec", 
+                   "imp_san_rec", "electricity", "agriland", "male")) |>
     pull(label)
+  
   interactions_default <- c()
   
   fe_vars <- fe_varlist()$label
   fe_vars_default <- fe_varlist() |>
     filter(varname %in% c("year", "subnatid1"))|>
     pull(label)
-             
-  tagList(
-    withMathJax(), # Initialize MathJax to render LaTeX equations
+  
+  conditionalPanel(
+    condition = "input.model_covariates % 2 == 1", 
+    tagList(           
     
     selectizeInput(
       inputId = "hhcov",
@@ -1041,6 +1057,7 @@ output$model_specs_ui <- renderUI({
         ) 
       )
     )
+)
 })
 
   #------------------------------------------------------------------------------#
@@ -1055,42 +1072,17 @@ output$model_specs_ui <- renderUI({
   observeEvent(input$run_model,
     {
       req(input$run_model > 0) # Ensure the button has been clicked
-      # Model data
-      model_data <- reactive({
-        
-        cats <- filter(varlist, !is.na(wiseapp) & datatype == "Categorical") |>
-          pull("varname")
-        fe <- filter(varlist, !is.na(wiseapp) & wiseapp == "ID & Fixed effects") |>
-          pull("varname")
-        
-        welfare <- welf_select()
-        
-        model_data <- survey_weather() |>
-          collect() |>
-          mutate(
-            across(starts_with(welfare$varname), ~ log(.x),
-                     .names = "log_welf"
-              ),
-            across(where(is.logical), as.integer),
-            across(any_of(cats), as.factor),
-            across(any_of(fe), as.factor)
-          )
-        
-        return(model_data)
-      })
 
       # Run model
       model_fit <- reactive({
         
-      if (input$modelspec == "Linear regression"){
-        
-        model_data <- model_data()
-        
+      # if (input$modelspec == "Linear regression"){
+      
         # welfare outcome
         out <- "log_welf"
         
         # weather variables
-        weather_vars <- select(model_data, starts_with("haz")) |> colnames()
+        weather_vars <- select(survey_weather(), starts_with("haz")) |> colnames()
         
         # add polynomials if specified
         for (w in weather_vars){
@@ -1139,165 +1131,124 @@ output$model_specs_ui <- renderUI({
         formula3 <- as.formula(paste(out, "~", main_effects,interaction_terms))
         
         # linear model fits
-        fit1 <- lm(formula1, model_data, weight = weight)
-        fit2 <- lm(formula2, model_data, weights = weight)
-        fit3 <- lm(formula3, model_data, weights = weight)
+        fit1 <- lm(formula1, survey_weather(), weight = weight)
+        fit2 <- lm(formula2, survey_weather(), weights = weight)
+        fit3 <- lm(formula3, survey_weather(), weights = weight)
         
         model_fit <- list(fit1, fit2, fit3)
         
-          } else if (input$modelspec == "Lasso"){
-            
-          } else if (input$modelspec == "XGBoost"){
-            
-          }
+          # } else if (input$modelspec == "Lasso"){
+          #   
+          # } else if (input$modelspec == "XGBoost"){
+          #   
+          # }
         return(model_fit)
         })
       
+      # labelling
+      label_lookup <- setNames(varlist$label, varlist$varname)
+      labels_df <- filter(varlist, !is.na(varname)) |> select(varname, label) 
+      
+      get_term_label <- function(term, labels_df) {
+        if (grepl("^I\\((.*)\\^2\\)$", term)) {
+          varname <- sub("^I\\((.*)\\^2\\)$", "\\1", term)
+          base_label <- labels_df$label[labels_df$varname == varname]
+          return(paste0(base_label, "^2"))
+        } else if (grepl("^I\\((.*)\\^3\\)$", term)) {
+          varname <- sub("^I\\((.*)\\^3\\)$", "\\1", term)
+          base_label <- labels_df$label[labels_df$varname == varname]
+          return(paste0(base_label, "^3"))
+        } else {
+          return(labels_df$label[labels_df$varname == term])
+        }
+      }
+      create_named_vector <- function(coefs_to_plot, labels_df) {
+        named_vector <- sapply(coefs_to_plot, function(coef) {
+          sub_terms <- unlist(strsplit(coef, ":"))
+          term_labels <- sapply(sub_terms, get_term_label, labels_df = labels_df, USE.NAMES = FALSE)
+          final_label <- paste(term_labels, collapse = " * ")
+          return(final_label)
+        })
+        final_named_vector <- setNames(names(named_vector), named_vector)
+        return(final_named_vector)
+      }
+      
+      # regression table
       output$regtable <- renderUI({
-        model_fit <- model_fit()
-        coefs <- names(coef(model_fit[[3]]))
+        coefs <- names(coef(model_fit()[[3]]))
         weather_vars <- grep("haz", coefs, value = TRUE) 
         hh_cov <- filter(varlist, label %in% input$hhcov) |> pull(varname)
         area_cov <- filter(varlist, label %in% input$areacov) |> pull(varname)
         coefs_to_plot <- c(weather_vars, hh_cov, area_cov)
-        # get labels
-        labels_df <- filter(varlist, !is.na(varname)) |> select(varname, label) 
-        
-        get_term_label <- function(term, labels_df) {
-          if (grepl("^I\\((.*)\\^2\\)$", term)) {
-            varname <- sub("^I\\((.*)\\^2\\)$", "\\1", term)
-            base_label <- labels_df$label[labels_df$varname == varname]
-            return(paste0(base_label, "^2"))
-          } else if (grepl("^I\\((.*)\\^3\\)$", term)) {
-            varname <- sub("^I\\((.*)\\^3\\)$", "\\1", term)
-            base_label <- labels_df$label[labels_df$varname == varname]
-            return(paste0(base_label, "^3"))
-          } else {
-            return(labels_df$label[labels_df$varname == term])
-          }
-        }
-        create_named_vector <- function(coefs_to_plot, labels_df) {
-          named_vector <- sapply(coefs_to_plot, function(coef) {
-            sub_terms <- unlist(strsplit(coef, ":"))
-            term_labels <- sapply(sub_terms, get_term_label, labels_df = labels_df, USE.NAMES = FALSE)
-            final_label <- paste(term_labels, collapse = " * ")
-            return(final_label)
-          })
-          final_named_vector <- setNames(names(named_vector), named_vector)
-          return(final_named_vector)
-        }
         named_coefs <- create_named_vector(coefs_to_plot, labels_df)
         
-        ht <- export_summs(model_fit[[1]], model_fit[[2]], model_fit[[3]], 
+        ht <- export_summs(model_fit()[[1]], model_fit()[[2]], model_fit()[[3]], 
                      robust = "HC3",
                      model.names = c("No FE", "FE", "FE + controls"),
                      coefs = named_coefs, digits = 3)
         HTML(huxtable::to_html(ht))
       })
       
+      # effect size plot
       output$coefplot <- renderPlot({
-        model_fit <- model_fit()
-        coefs <- names(coef(model_fit[[3]]))
+        coefs <- names(coef(model_fit()[[3]]))
         coefs_to_plot <- grep("haz", coefs, value = TRUE)
-        
-        # get labels
-        labels_df <- filter(varlist, !is.na(varname)) |> select(varname, label) 
-        
-        get_term_label <- function(term, labels_df) {
-          if (grepl("^I\\((.*)\\^2\\)$", term)) {
-            varname <- sub("^I\\((.*)\\^2\\)$", "\\1", term)
-            base_label <- labels_df$label[labels_df$varname == varname]
-            return(paste0(base_label, "^2"))
-          } else if (grepl("^I\\((.*)\\^3\\)$", term)) {
-            varname <- sub("^I\\((.*)\\^3\\)$", "\\1", term)
-            base_label <- labels_df$label[labels_df$varname == varname]
-            return(paste0(base_label, "^3"))
-          } else {
-            return(labels_df$label[labels_df$varname == term])
-          }
-        }
-        create_named_vector <- function(coefs_to_plot, labels_df) {
-          named_vector <- sapply(coefs_to_plot, function(coef) {
-            sub_terms <- unlist(strsplit(coef, ":"))
-            term_labels <- sapply(sub_terms, get_term_label, labels_df = labels_df, USE.NAMES = FALSE)
-            final_label <- paste(term_labels, collapse = " * ")
-            return(final_label)
-          })
-          final_named_vector <- setNames(names(named_vector), named_vector)
-          return(final_named_vector)
-        }
         named_coefs <- create_named_vector(coefs_to_plot, labels_df)
       
-        plot_summs(model_fit[[1]], model_fit[[2]], model_fit[[3]],
+        plot_summs(model_fit()[[1]], model_fit()[[2]], model_fit()[[3]],
                    robust = "HC3", coefs = named_coefs,
                    model.names = c("No FE", "FE", "FE + controls"))
       })
       
+      # simple effects plot
       output$effectplot1 <- renderPlot({
-        model_fit <- model_fit()
-        weather_vars <- model_data() |> select(starts_with("haz")) |> colnames()
-        label_lookup <- setNames(varlist$label, varlist$varname)
-        weather_label <- label_lookup[weather_vars[1]]
-        effect_plot(model_fit[[3]], pred = !!weather_vars[1], 
+        effect_plot(model_fit()[[3]], pred = !!haz_vars()[1], 
                     interval = TRUE, plot.points = FALSE, line.colors = "orange",
-                    x.label = weather_label, y.label = "Log welfare")
+                    x.label = label_lookup[haz_vars()[1]], y.label = "Log welfare")
       })
       
+      # simple effects plot
       output$effectplot2 <- renderPlot({
-        model_fit <- model_fit()
-        weather_vars <- model_data() |> select(starts_with("haz")) |> colnames()
-        label_lookup <- setNames(varlist$label, varlist$varname)
-        weather_label <- label_lookup[weather_vars[2]]
-        effect_plot(model_fit[[3]], pred = !!weather_vars[2], 
+        req(length(input$weather_variable_selector) > 1)
+        effect_plot(model_fit()[[3]], pred = !!haz_vars()[2], 
                     interval = TRUE, plot.points = FALSE, line.colors = "orange",
-                    x.label = weather_label,y.label = "Log welfare"
+                    x.label = label_lookup[haz_vars()[2]],y.label = "Log welfare"
         )
       })
+       # interactions plots
+      
+      mod <- filter(varlist, label %in% input$interactions) |> pull(varname)
       
       output$interactplot1 <- renderPlot({
-        model_fit <- model_fit()
-        label_lookup <- setNames(varlist$label, varlist$varname)
-        weather_vars <- model_data() |> select(starts_with("haz")) |> colnames()
-        mod <- filter(varlist, label %in% input$interactions) |> pull(varname)
-        weather_label <- label_lookup[weather_vars[1]]
-        
-        interact_plot(model_fit[[3]], pred = !!weather_vars[1], modx = !!mod,
-                    interval = TRUE, plot.points = FALSE,
-                    x.label = weather_label, y.label = "Log welfare")
+        req(length(input$interactions) > 0)
+        interact_plot(model_fit()[[3]], pred = !!haz_vars()[1], modx = !!mod,
+                      interval = TRUE, plot.points = FALSE,
+                      x.label = label_lookup[haz_vars()[1]], 
+                      y.label = "Log welfare") +
+          theme(legend.position = "bottom")
       })
       
       output$interactplot2 <- renderPlot({
-        model_fit <- model_fit()
-        label_lookup <- setNames(varlist$label, varlist$varname)
-        weather_vars <- model_data() |> select(starts_with("haz")) |> colnames()
-        mod <- filter(varlist, label %in% input$interactions) |> pull(varname)
-        weather_label <- label_lookup[weather_vars[2]]
-        
-        interact_plot(model_fit[[3]], pred = !!weather_vars[2], modx = !!mod,
+        req(length(input$interactions) > 0, 
+            length(input$weather_variable_selector) > 1)
+        interact_plot(model_fit()[[3]], pred = !!haz_vars()[2], modx = !!mod,
                       interval = TRUE, plot.points = FALSE,
-                      x.label = weather_label, y.label = "Log welfare")
+                      x.label = label_lookup[haz_vars()[2]], 
+                      y.label = "Log welfare") +
+          theme(legend.position = "bottom")
       })
       
       output$simslopes1 <- renderPlot({
-        model_fit <- model_fit()
-        label_lookup <- setNames(varlist$label, varlist$varname)
-        weather_vars <- model_data() |> select(starts_with("haz")) |> colnames()
-        mod <- filter(varlist, label %in% input$interactions) |> pull(varname)
-        weather_label <- label_lookup[weather_vars[1]]
-        
-        plot(sim_slopes(model_fit[[3]], pred = !!weather_vars[1], modx = !!mod))
+        req(length(input$interactions) > 0)
+        plot(sim_slopes(model_fit()[[3]], pred = !!haz_vars()[1], modx = !!mod))
       })
       
       output$simslopes2 <- renderPlot({
-        model_fit <- model_fit()
-        label_lookup <- setNames(varlist$label, varlist$varname)
-        weather_vars <- model_data() |> select(starts_with("haz")) |> colnames()
-        mod <- filter(varlist, label %in% input$interactions) |> pull(varname)
-        weather_label <- label_lookup[weather_vars[2]]
-        
-        plot(sim_slopes(model_fit[[3]], pred = !!weather_vars[2], modx = !!mod))
+        req(length(input$interactions) > 0, 
+            length(input$weather_variable_selector) > 1)
+        plot(sim_slopes(model_fit()[[3]], pred = !!haz_vars()[2], modx = !!mod))
       })
-
+        
       # Add "Results" tab if not already added
       if (!model_results_tab_added()) {
         appendTab(
@@ -1321,30 +1272,34 @@ output$model_specs_ui <- renderUI({
             ),
             br(),
             h4("Interactions & adaptation"),
-            layout_columns(
-              col_widths = c(6, 6),
-              card(
-                plotOutput("interactplot1", height = "300px")
-              ),
-              card(
-                plotOutput("interactplot2", height = "300px")
-              ),
-              card(
-                plotOutput("simslopes1", height = "300px")
-              ),
-              card(
-                plotOutput("simslopes2", height = "300px")
-              )
-            ),
+            output$interactplots1 <- renderUI({
+              if (length(input$interactions) > 0){
+                tagList(
+                  layout_columns(
+                    col_widths = c(6, 6),
+                    card(plotOutput("interactplot1", height = "300px")),
+                    card(plotOutput("interactplot2", height = "300px")),
+                    card(plotOutput("simslopes1", height = "300px")),
+                    card(plotOutput("simslopes2", height = "300px")),
+                    )
+                  )
+              } else {
+                output$no_interactions <- renderText({
+                  "No interaction term specified."
+                })
+              }
+            }),
             br(),
             h4("Regression results"),
             tableOutput("regtable"),
-            
+            br(),
+            h4("Features to add:"),
             helpText("Some outputs depend on method and whether outcome is binary/continuous"),
             h6("Plot more damage functions..."),
             p("∆ Predicted poverty rate/gap/total welfare/gini vs weather (with CIs, by interaction)"),
             h6("Plot marginal effect of interaction terms on welfare outcome vs weather?"),
             p("Print the regression formula"),
+            br(),
           ),
           select = TRUE # Select this tab when it's first added
         )
@@ -1354,15 +1309,54 @@ output$model_specs_ui <- renderUI({
       # Add "Model fit" tab if not already added
       if (!model_fit_tab_added()) {
         
-        
         # # Residuals vs weather plots
-        # output$residweather1 <- renderPlot({
-        #   model <- model_fit()[[3]]
-        #   actual_values <- model.frame(model)[[1]] 
-        #   })
+        output$resid_weather1 <- renderPlot({
+          model <- model_fit()[[3]]
           
-        # Relative contribution of variables to model fit
+          plot_data <- model.frame(model) |>
+            select(starts_with("haz_")) |>
+            mutate(residuals = residuals(model))
+          
+          h <- colnames(select(plot_data, starts_with("haz_")))[1]
+          xlabel <- filter(varlist, varname==h, !is.na(varname)) |> pull(label)
+          
+          ggplot(plot_data, aes(x = .data[[h]],
+                                y = residuals)) +
+            geom_point(alpha = 0.1) +
+            geom_hline(yintercept = 0, color = "red", linetype = "dotted") +
+            stat_summary_bin(fun.y='mean', bins=20,
+                             color='orange', size=2, geom='point') + 
+            theme_minimal() +
+            labs(title = "", x = paste0(xlabel,"\n (as configured)"),
+                 y = "Residuals", fill = ""
+            ) 
+          })
+        output$resid_weather2 <- renderPlot({
+          req(length(input$weather_variable_selector) > 1)
+          
+          model <- model_fit()[[3]]
+          plot_data <- model.frame(model) |>
+            select(starts_with("haz_")) |>
+            mutate(residuals = residuals(model))
+          
+          h <- colnames(select(plot_data, starts_with("haz_")))[2]
+          xlabel <- filter(varlist, varname==h, !is.na(varname)) |> pull(label)
+          
+          ggplot(plot_data, aes(x = .data[[h]],
+                                     y = residuals)) +
+            geom_point(alpha = 0.1) +
+            geom_hline(yintercept = 0, color = "red", linetype = "dotted") +
+            stat_summary_bin(fun.y='mean', bins=20,
+                             color='orange', size=2, geom='point') + 
+            theme_minimal() +
+            labs(title = "", x = paste0(xlabel,"\n (as configured)"),
+              y = "Residuals", fill = ""
+            ) 
+        })
+          
+        # Predicted welfare distribution
         output$pred_welf_dist <- renderPlot({
+          
           model <- model_fit()[[3]]
           actual_values <- model.frame(model)[[1]] 
           predicted_values <- predict(model)
@@ -1385,26 +1379,35 @@ output$model_specs_ui <- renderUI({
         
         # Relative contribution of variables to model fit
         output$relaimpo <- renderPlot({
+          
           model <- model_fit()[[3]]
           total_r2 <- summary(model)$r.squared
           rel_importance <- relaimpo::calc.relimp(model, type = "lmg")
+          
           importance_df <- data.frame(
             Variable = names(rel_importance$lmg),
             Contribution = rel_importance$lmg
-          )
+          ) |>
+            left_join(select(varlist, varname, label), 
+                      join_by("Variable" == "varname"))
           
-          ggplot(importance_df, aes(x = reorder(Variable, -Contribution), y = Contribution)) +
-            geom_bar(stat = "identity", fill = "steelblue") +
-            # Add text labels on top of the bars
-            geom_text(aes(label = round(Contribution, 3)), vjust = -0.5, size = 4) +
-            # Add a horizontal line for the total R-squared
+          ggplot(importance_df, 
+                 aes(x = reorder(label, Contribution), 
+                     y = Contribution, fill = Variable)) +
+            geom_bar(stat = "identity") +
+            geom_text(aes(label = round(Contribution, 3)), hjust = -0.3, size = 4) +
             geom_hline(yintercept = total_r2, linetype = "dashed", color = "red") +
-            annotate("text", x = Inf, y = total_r2, label = paste("Total R² =", round(total_r2, 3)), hjust = 1.1, vjust = -0.5, color = "red") +
+            annotate("text", y = Inf, x = total_r2, 
+                     label = paste("Total R² =", round(total_r2, 3)), 
+                     hjust = 1.1, vjust = -0.5, color = "red") +
+            coord_flip() + # Flip the coordinates for horizontal bars
             labs(
-              x = "Variable",
+              x = "",
               y = "R-squared Contribution"
             ) +
-            theme_minimal()
+            theme_minimal() +
+            theme(legend.position = "none")
+          
         })
         
         # Output: Model summary
@@ -1414,21 +1417,25 @@ output$model_specs_ui <- renderUI({
         
         # Output: Diagnostic plots
         output$diagnostic_plots <- renderPlot({
+          model <- model_fit()[[3]]
           par(mfrow = c(2, 2))  # Set up a 2x2 plot layout
-          plot(model_fit()[[3]])
+          plot(model)
         })
         
         # Output: Residuals vs Fitted plot
         output$residuals_fitted <- renderPlot({
-          plot(model_fit()[[3]], which = 1)  # Residuals vs Fitted
+          model <- model_fit()[[3]]
+          plot(model, which = 1)  # Residuals vs Fitted
         })
         
         # Output: Additional statistics
         output$additional_stats <- renderTable({
           model <- model_fit()[[3]]
           data.frame(
-            Statistic = c("R-squared", "Adjusted R-squared", "F-statistic"),
-            Value = c(summary(model)$r.squared, summary(model)$adj.r.squared, summary(model)$fstatistic[1])
+            Stat = c("Observations", "Adjusted R-squared", "F-statistic"),
+            Value = c(format(round(nobs(model)),big.mark = ","), 
+                      round(summary(model)$adj.r.squared,3),
+                      round(summary(model)$fstatistic[1]))
           )
         })
         appendTab(
@@ -1437,14 +1444,26 @@ output$model_specs_ui <- renderUI({
             value = "model_fit",
             
             h4("Fit statistics"),
+            p("(Model with FE and controls)"),
             tableOutput("additional_stats"),
             
-            h4("Predicted welfare distribution"),
-            plotOutput("pred_welf_dist"),
+            h4("Residuals vs weather"),
+            layout_columns(
+              col_widths = c(6, 6),
+              card(
+                plotOutput("resid_weather1", height = "300px")
+              ),
+              card(
+                plotOutput("resid_weather2", height = "300px")
+              )
+            ),
             
             h4("Contribution of Each Variable to Model R-squared"),
             plotOutput("relaimpo"),
-            helpText("Using the LMG method from the 'relaimpo' package"),
+            helpText("Using the Lindeman, Merenda, and Gold (LMG) method, which calculates the average increase in R-squared when a predictor is added to the model across all possible orderings of predictors."),
+            
+            h4("Predicted welfare distribution"),
+            plotOutput("pred_welf_dist"),
             
             h4("Residuals vs Fitted plot"),
             plotOutput("residuals_fitted"),
@@ -1455,9 +1474,12 @@ output$model_specs_ui <- renderUI({
             h4("Diagnostic plots"),
             plotOutput("diagnostic_plots"),
             
+            br(),
+            h4("Features to add:"),
             helpText("Model fit diagnostics probably need to depend on whether outcome is binary of continuous, and on method selected"),
             p("SHAP for XGBoost method"),
             p("Plot correlation matrix (all variables used by model)"),
+            br(),
           )
         )
         model_fit_tab_added(TRUE)
