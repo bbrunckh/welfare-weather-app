@@ -983,7 +983,6 @@ server <- function(input, output, session) {
 
 output$model_specs_ui <- renderUI({
   req(input$country, input$weather_variable_selector)
-  
   hh_vars <- hh_varlist()$label
   
   hh_vars_default <- hh_varlist() |>
@@ -1009,6 +1008,7 @@ output$model_specs_ui <- renderUI({
   
   conditionalPanel(
     condition = "input.model_covariates % 2 == 1", 
+    withMathJax(),
     tagList(           
     
     selectizeInput(

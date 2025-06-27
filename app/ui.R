@@ -1,6 +1,9 @@
 # Define the User Interface (UI)
 ui <- navbarPage(
-  "WISE-APP",  
+  tagList(
+  "WISE-APP",
+  tags$small(app_version, style = "color: #777777; margin-top: 0px; font-size: 0.5em;")
+  ),
   tags$head(
     tags$script(src = "https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.7/MathJax.js?config=TeX-MML-AM_CHTML",
                 type = "text/javascript")
@@ -125,16 +128,16 @@ ui <- navbarPage(
                       "Years defining the distribution of weather", 
                       min = 1950, 
                       max = 2024, 
-                      value = c(1991, 2024),
+                      value = c(1991, 2020),
                       sep = ""
                       ),
-          radioButtons("outofsample", 
-                      "Predict welfare when weather is outside the range used to fit the model", 
-                      choices = c("Yes", 
-                                  "No, use upper and lower bounds of weather in sample",
-                                  "No"),
-                      selected = "Yes"
-                      ),
+          # radioButtons("outofsample", 
+          #             "Predict welfare when weather is outside the range used to fit the model", 
+          #             choices = c("Yes", 
+          #                         "No, use upper and lower bounds of weather in sample",
+          #                         "No"),
+          #             selected = "Yes"
+          #             ),
           hr(),
           actionButton("run_sim", "Run simulation")
           )

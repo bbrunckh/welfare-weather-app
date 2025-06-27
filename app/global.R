@@ -23,9 +23,7 @@ library(jtools)
 library(margins)
 library(interactions)
 
-
-
-# App
+app_version <- "v0.0.1"
 
 # Survey list
 survey_list <- read.csv("data/surveys.csv")
