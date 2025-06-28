@@ -38,62 +38,6 @@ server <- function(input, output, session) {
     )
   })
 
-  #------------------------------------------------------------------------------#
-  # LOAD SURVEY DATA
-  #------------------------------------------------------------------------------#
-
-  # Get survey data file paths for selected sample
-  survey_data_files <- reactive({
-    req(input$country)
-    selected_countries <- input$country
-    survey_files <- c()
-    for (country in selected_countries) {
-      year_input_id <- paste0("survey_year_", gsub(" ", "_", country))
-      selected_years <- input[[year_input_id]]
-
-      if (!is.null(selected_years) && length(selected_years) > 0) {
-        country_data <- survey_list |>
-          filter(countryname == country & year %in% selected_years) |>
-          pull(filename)
-        survey_files <- c(survey_files, country_data)
-      }
-    }
-    return(paste0("data/surveys/", as.list(as.character(survey_files))))
-  })
-  
-  # load survey data for selected sample
-  survey_data <- reactive({
-    
-    # read relevant parquet files (lazily)
-    req(input$country)
-    survey_data <- read_parquet_duckdb(survey_data_files(),
-                      options = list(union_by_name = TRUE)) 
-    
-    # filter by sample type
-  if (input$sample_type == "Rural households"){
-    survey_data <- filter(survey_data, urban ==0)
-  } else if (input$sample_type == "Rural households"){
-    survey_data <- filter(survey_data, urban ==1)
-  }
-    # logical data columns > integer, categorical data columns > factors
-    
-    # add var labels
-    
-  return(survey_data)
-  })
-
-  # Loads survey interview location data
-  survey_geo <- reactive({
-    req(input$country)
-    files <- sub("\\.parquet$", "_LOC.gpkg", survey_data_files())
-    do.call(rbind, lapply(files, st_read)) |>
-      filter(case_when(
-        input$sample_type == "All households" ~ !is.na(loc_id),
-        input$sample_type == "Rural households" ~ urban == 0,
-        input$sample_type == "Urban households" ~ urban == 1
-      ))
-  })
-
   #----------------------------------------------------------------------------#
   # WELFARE UI
   #----------------------------------------------------------------------------#
@@ -153,8 +97,8 @@ server <- function(input, output, session) {
         paste0("welf_lcu_", input$lcu_year)
       ),
       label = ifelse(grepl("PPP", input$welfare_outcome),
-        paste0("$/day (PPP, ", input$ppp_year, ")"),
-        paste0("LCU/day (", input$lcu_year, ")")
+        paste0("$ per person per day (", input$ppp_year, " PPP)"),
+        paste0("LCU per person per day (", input$lcu_year, ")")
       ),
       pre = ifelse(grepl("PPP", input$welfare_outcome), "$", "LCU"),
       type = ifelse(grepl("Log", input$welfare_outcome), "Continuous", "Binary"),
@@ -167,6 +111,118 @@ server <- function(input, output, session) {
     )
   })
 
+  
+  #----------------------------------------------------------------------------#
+  # LOAD SURVEY DATA
+  #----------------------------------------------------------------------------#
+  
+  # Get survey data file paths for selected sample
+  survey_data_files <- reactive({
+    req(input$country)
+    selected_countries <- input$country
+    survey_files <- c()
+    for (country in selected_countries) {
+      year_input_id <- paste0("survey_year_", gsub(" ", "_", country))
+      selected_years <- input[[year_input_id]]
+      
+      if (!is.null(selected_years) && length(selected_years) > 0) {
+        country_data <- survey_list |>
+          filter(countryname == country & year %in% selected_years) |>
+          pull(filename)
+        survey_files <- c(survey_files, country_data)
+      }
+    }
+    return(paste0("data/surveys/", as.list(as.character(survey_files))))
+  })
+  
+  # load survey data for selected sample
+  survey_data <- reactive({
+    
+    # read relevant parquet files (lazily)
+    req(input$country)
+    survey_data <- read_parquet_duckdb(survey_data_files(),
+                                       options = list(union_by_name = TRUE),
+                                       prudence = "lavish") 
+    
+    # filter by sample type
+    if (input$sample_type == "Rural households"){
+      survey_data <- filter(survey_data, urban ==0)
+    } else if (input$sample_type == "Rural households"){
+      survey_data <- filter(survey_data, urban ==1)
+    }
+    
+    # selected welfare variable
+    survey_data <- survey_data |>
+      filter(welfare != 0, !is.na(welfare)) |>
+      mutate(log_welf = log(.data[[welf_select()$varname]]))
+             
+    # add log welfare variable to varlist
+    varlist <- varlist |>
+      bind_rows(data.frame(varname = "log_welf",
+                           label = paste0("Log ", welf_select()$label)))
+    
+    if(welf_select()$type == "Binary"){
+      if (welf_select()$pre == "$"){ 
+      survey_data <- survey_data |>
+        mutate(poor = (welfare/.data[[paste0("cpi",welf_select()$year)]]/.data[[paste0("icp",welf_select()$year)]]/365) < welf_select()$pline)
+      
+      } else if (welf_select()$pre == "LCU"){
+      survey_data <- survey_data |>
+        mutate(poor = (welfare/.data[[paste0("cpi",welf_select()$year)]]/365) < welf_select()$pline)
+      }
+      # add poor welfare variable to varlist
+      varlist <- varlist |>
+        bind_rows(data.frame(varname = "poor",
+                             label = paste0("Poor, living below ", 
+                                            welf_select()$pre,
+                                            sprintf("%.2f", welf_select()$pline),
+                                            " ", welf_select()$label)))
+    }
+    # logical data columns > integer, categorical and FE data columns > factors
+    cats <- filter(varlist, !is.na(wiseapp) & datatype == "Categorical") |>
+      pull("varname")
+    fe <- filter(varlist, !is.na(wiseapp) & wiseapp == "ID & Fixed effects" & varname != "year") |>
+      pull("varname")
+    
+    survey_data <- survey_data |>
+      mutate(timestamp = floor_date(int_date, "month"),
+             year = as.integer(year),
+             countryyear = paste0(countryname, ", ", year),
+             across(where(is.logical), as.integer),
+             across(any_of(cats), as.factor),
+             across(any_of(fe), as.factor)) |>
+      collect()
+  
+    # add var labels
+    add_labels <- function(data, labels) {
+      for (i in 1:nrow(labels)) {
+        var_name <- labels$varname[i]
+        var_label <- labels$label[i]
+        if (var_name %in% names(data)) {
+          var_labelled <- labelled::set_variable_labels(data[[var_name]], var_label)
+          data[[var_name]] <- var_labelled
+        }
+      }
+      return(data)
+    }
+    survey_data <- add_labels(survey_data, varlist)
+    
+    return(survey_data)
+  })
+  
+  # Loads survey interview location data
+  survey_geo <- reactive({
+    req(input$country)
+    files <- sub("\\.parquet$", "_LOC.gpkg", survey_data_files())
+    survey_geo <- do.call(rbind, lapply(files, st_read)) |>
+      filter(case_when(
+        input$sample_type == "All households" ~ !is.na(loc_id),
+        input$sample_type == "Rural households" ~ urban == 0,
+        input$sample_type == "Urban households" ~ urban == 1
+      ))
+    return(survey_geo)
+  })
+  
   #----------------------------------------------------------------------------#
   # SURVEY STATS OUTPUT
   #----------------------------------------------------------------------------#
@@ -180,16 +236,12 @@ server <- function(input, output, session) {
       if (!survey_tab_added()) {
         # interview date plot
         output$interview_date <- renderPlot({
-          plot1 <- survey_data() |>
-            collect() |>
-            mutate(month = floor_date(int_date, "month")) |>
-            summarise(hh = n(), .by = c(countryname, code, year, month))
+          
+          interview_dates <- survey_data() |>
+            summarise(hh = n(), .by = c(code, countryyear, timestamp))
 
-          ggplot(plot1, aes(
-            x = month,
-            y = hh,
-            fill = countryname
-          )) +
+          ggplot(interview_dates, 
+                 aes(x = timestamp ,y = hh, fill = code)) +
             geom_bar(stat = "identity") +
             theme_minimal() +
             labs(
@@ -248,21 +300,9 @@ server <- function(input, output, session) {
         # welfare distribution plot
         output$welfare_dist <- renderPlot({
           # summarise data
-          welfare <- welf_select()
-
-          plot2 <- survey_data() |>
-            filter(welfare != 0, !is.na(welfare)) |>
-            select(countryname, code, year, any_of(welfare$varname), weight) |>
-            mutate(
-              across(starts_with("welf"), ~ log(.x),
-                .names = "log_welf"
-              ),
-              countryyear = paste0(countryname, ", ", year)
-            ) |>
-            collect()
 
           # Create plot
-          p <- ggplot(plot2, aes(
+          p <- ggplot(survey_data() , aes(
             x = log_welf,
             y = countryyear,
             fill = code
@@ -270,8 +310,8 @@ server <- function(input, output, session) {
             geom_density_ridges(alpha = 0.7, scale = 2)
 
           # Add PPP poverty lines
-          if (welfare$pre == "$") {
-            povln <- pov_lines[pov_lines$ppp_year == welfare$year, "ln"]
+          if (welf_select()$pre == "$") {
+            povln <- pov_lines[pov_lines$ppp_year == welf_select()$year, "ln"]
             log_povln <- log(povln)
             p <- p + geom_vline(xintercept = log_povln) +
               annotate("text",
@@ -293,18 +333,18 @@ server <- function(input, output, session) {
 
           # User specified poverty line
           if (input$welfare_outcome == "Poor (PPP)" | input$welfare_outcome == "Poor (LCU)") {
-            log_pline <- log(welfare$pline)
+            log_pline <- log(welf_select()$pline)
             p <- p + geom_vline(xintercept = log_pline, color = "darkred") +
               annotate("text",
                 x = log_pline - 0.1, y = 1,
-                label = paste0(welfare$pre, sprintf("%.2f", welfare$pline), "/day"),
+                label = paste0(welf_select()$pre, sprintf("%.2f", welf_select()$pline), "/day"),
                 angle = 90, size = 4, color = "darkred"
               )
           }
 
           p + theme_minimal() +
             labs(
-              title = "", x = paste0("Log ", welfare$label),
+              title = "", x = paste0("Log ", welf_select()$label),
               y = "", fill = ""
             ) +
             theme(legend.position = "none")
@@ -335,40 +375,15 @@ server <- function(input, output, session) {
             h4("Welfare summary stats"),
             output$data_table <- renderDT(
               {
-                welfare <- welf_select()
+                desc <- survey_data() |>
+                  select(countryyear, weight, welf_ppp_2021, welf_lcu_2021,
+                    poor_300ln, poor_420ln, poor_830ln,any_of(c("log_welf", "poor")))
 
-                welf_desc <- survey_data() |>
-                  select(
-                    countryname, code, year, weight,
-                    welf_ppp_2021,
-                    poor_300ln, poor_420ln, poor_830ln,
-                    welf_lcu_2021,
-                    any_of(welfare$varname)
-                  ) |>
-                  mutate(
-                    across(
-                      c(poor_300ln, poor_420ln, poor_830ln),
-                      ~ as.integer(.x)
-                    ),
-                    Survey = paste0(countryname, ", ", year)
-                  ) |>
-                  collect()
-
-                lookup_vec <- setNames(varlist$label, varlist$varname)
-                current_names <- colnames(welf_desc)
-                names_to_change <- intersect(colnames(welf_desc), names(lookup_vec))
-                match_indices <- match(names_to_change, colnames(welf_desc))
-                var_label(welf_desc)[match_indices] <- lookup_vec[names_to_change]
-
-                sumtable(welf_desc,
-                  vars = grep("welf|poor",
-                    colnames(welf_desc),
-                    value = TRUE,
-                    ignore.case = TRUE
-                  ),
+                sumtable(desc,
+                  vars = colnames(desc)[-c(1,2)],
                   summ = c("weighted.mean(x, w = wts)", "weighted.sd(x, w = wts)", "min(x)", "max(x)", "notNA(x)"),
                   summ.names = c("Mean", "Std. Dev.", "Min", "Max", "N"),
-                  group = "Survey",
+                  group = "countryyear",
                   group.long = TRUE,
                   group.weights = "weight",
                   labels = TRUE,
@@ -380,34 +395,16 @@ server <- function(input, output, session) {
             h4("Household characteristics"),
             output$hh_stats <- renderDT(
               {
-                categorical_cols <- filter(varlist, !is.na(wiseapp) & datatype == "Categorical") |>
-                  pull("varname")
-                binary_cols <- filter(varlist, !is.na(wiseapp) & datatype == "Binary") |>
-                  pull("varname")
-
-                hh_desc <- survey_data() |>
-                  select(
-                    countryname, code, year, weight,
+                desc <- survey_data() |>
+                  select(countryyear, weight,
                     any_of(varlist[varlist$wiseapp == "HH characteristics" & !is.na(varlist$wiseapp), "varname"])
-                  ) |>
-                  mutate(Survey = paste0(countryname, ", ", year)) |>
-                  collect() |>
-                  mutate(
-                    across(where(is.logical), as.integer),
-                    across(any_of(categorical_cols), as.factor)
-                  )
+                  ) 
 
-                lookup_vec <- setNames(varlist$label, varlist$varname)
-                current_names <- colnames(hh_desc)
-                names_to_change <- intersect(colnames(hh_desc), names(lookup_vec))
-                match_indices <- match(names_to_change, colnames(hh_desc))
-                var_label(hh_desc)[match_indices] <- lookup_vec[names_to_change]
-
-                sumtable(hh_desc,
-                  vars = colnames(hh_desc)[6:length(hh_desc) - 1],
+                sumtable(desc,
+                  vars = colnames(desc)[-c(1,2)],
                   summ = c("weighted.mean(x, w = wts)", "weighted.sd(x, w = wts)", "min(x)", "max(x)", "notNA(x)"),
                   summ.names = c("Mean", "Std. Dev.", "Min", "Max", "N"),
-                  group = "Survey",
+                  group = "countryyear",
                   group.long = TRUE,
                   group.weights = "weight",
                   labels = TRUE,
@@ -419,26 +416,17 @@ server <- function(input, output, session) {
             h4("Area characteristics"),
             output$area_stats <- renderDT(
               {
-                area_desc <- survey_data() |>
-                  select(
-                    countryname, code, year, weight,
+                desc <- survey_data() |>
+                  select(countryyear, weight,
                     any_of(varlist[varlist$wiseapp == "Area characteristics" & !is.na(varlist$wiseapp), "varname"])
-                  ) |>
-                  mutate(Survey = paste0(countryname, ", ", year)) |>
-                  collect()
-
-                lookup_vec <- setNames(varlist$label, varlist$varname)
-                current_names <- colnames(area_desc)
-                names_to_change <- intersect(colnames(area_desc), names(lookup_vec))
-                match_indices <- match(names_to_change, colnames(area_desc))
-                var_label(area_desc)[match_indices] <- lookup_vec[names_to_change]
-
-                sumtable(area_desc,
-                  vars = colnames(area_desc)[6:length(area_desc) - 1],
+                  ) 
+                
+                sumtable(desc,
+                  vars = colnames(desc)[-c(1,2)],
                   summ = c("weighted.mean(x, w = wts)", "weighted.sd(x, w = wts)", 
                            "min(x)", "max(x)", "notNA(x)"),
                   summ.names = c("Mean", "Std. Dev.", "Min", "Max", "N"),
-                  group = "Survey",
+                  group = "countryyear",
                   group.long = TRUE,
                   group.weights = "weight",
                   labels = TRUE,
@@ -592,14 +580,15 @@ server <- function(input, output, session) {
   survey_h3 <- reactive({
     req(input$country)
     files <- sub("\\.parquet$", "_H3.parquet", survey_data_files())
-    read_parquet_duckdb(files, options = list(union_by_name = TRUE),
+    survey_h3 <- read_parquet_duckdb(files, options = list(union_by_name = TRUE),
                         prudence = "lavish") |>
       mutate(loc_id = as.character(loc_id))
+    return(survey_h3)
   })
   
   # selected weather variables
   weather_vars <- reactive({
-    req(input$weather_variable_selector, input$country)
+    req(input$weather_variable_selector)
     weather_vars <- weather_list |>
       filter(name %in% input$weather_variable_selector) |>
       pull(varname)
@@ -608,24 +597,17 @@ server <- function(input, output, session) {
   
   # load selected weather variables for survey locations (lazily)
   weather_data <- reactive({
-    req(input$weather_variable_selector, input$country, input$survey_stats)
+    req(input$country)
     
     # lookup weather data files
     codes <- filter(survey_list, countryname %in% input$country) |>
       pull(code) |> unique()
     files <- paste0("data/weather/",codes,"_weather.parquet")
     
-    # selected weather variables
-    weather_vars <- weather_vars()
-    
-    # sample locations
-    survey_h3 <- survey_h3()
-    
     # dates for weather vars (use 1991-2020 as default)
-    survey_dates <- survey_data() |> pull(int_date) |> na.omit()
-    survey_date_min <- floor_date(min(survey_dates), 
-                                  "month") - months(12)
-    survey_date_max <- floor_date(max(survey_dates), "month")
+    survey_dates <- survey_data() |> pull(timestamp) |> na.omit()
+    survey_date_min <- min(survey_dates) - months(12)
+    survey_date_max <- max(survey_dates)
     
     weather_dates <- seq(min(survey_date_min, as.Date("1990-12-01")- months(12)),
                          max(survey_date_max, as.Date("2020-12-01")), 
@@ -636,8 +618,8 @@ server <- function(input, output, session) {
     
     # filter to selected weather variables, sample h3 cells & date range
     weather <- weather |>
-      select(h3_6, timestamp, all_of(weather_vars)) |>
-      filter(h3_6 %in% survey_h3$h3_6) |>
+      select(h3_6, timestamp, all_of(weather_vars())) |>
+      filter(h3_6 %in% survey_h3()$h3_6) |>
       filter(timestamp %in% weather_dates) |>
       distinct() 
     
@@ -645,12 +627,10 @@ server <- function(input, output, session) {
   })
   
   # configure weather variables 
-  weather_timeseries <- reactive({
-    
-    weather_vars <- weather_vars()
+  h3_weather <- reactive({
     
     # loop over selected weather variables
-    for (i in weather_vars){
+    for (i in weather_vars()){
       
       # get configuration for selected weather variable
       id_prefix <- paste0(i, "_")
@@ -740,8 +720,9 @@ server <- function(input, output, session) {
       }
     }
     
-    # Binned !!Not implemented yet
+    # Binned 
     if (cont_binned == "Binned"){
+      # !!Not implemented yet
     }
     
     # keep only the configured weather variable
@@ -750,49 +731,32 @@ server <- function(input, output, session) {
       rename_with(~ paste0("haz_",i), .cols = starts_with("haz")) |>
       arrange(h3_6, timestamp) 
     
-    if (i == weather_vars[1]){weather_timeseries <- weather } else{
-      weather_timeseries <- full_join(weather_timeseries, weather)}
+    if (i == weather_vars()[1]){h3_weather <- weather } else{
+      h3_weather <- full_join(h3_weather, weather)}
     }
-    return(weather_timeseries)
+    return(h3_weather)
   })
   
   # Reactive expression that matches survey data to weather data
-  survey_weather <- reactive({
+  loc_weather <- reactive({
     req(input$weather_variable_selector, input$country)
     
-    survey_h3 <- survey_h3()
-    survey_data <- survey_data()
-    weather_timeseries <- weather_timeseries()
-    
-    survey_dates <- survey_data |>
-      distinct(code, year, loc_id, int_date) |>
-      filter(!is.na(loc_id) & loc_id !="" & !is.na(int_date)) |>
-      mutate(timestamp = floor_date(int_date, "month")) 
-    
-    loc_weather <- survey_h3 |>
-      left_join(survey_dates) |>
-      left_join(weather_timeseries) |>
+    loc_weather <- survey_h3() |>
+      left_join(h3_weather()) |>
       summarise(across(starts_with("haz"), ~sum(.x*pop_2020)/sum(pop_2020)),
-                .by = c(code, year, survname, loc_id, int_date)) 
+                .by = c(code, year, survname, loc_id)) 
     
-    cats <- filter(varlist, !is.na(wiseapp) & datatype == "Categorical") |>
-      pull("varname")
-    fe <- filter(varlist, !is.na(wiseapp) & wiseapp == "ID & Fixed effects") |>
-      pull("varname")
-    welfare <- welf_select()$varname
+    return(loc_weather)
+  })
     
-    survey_weather <- loc_weather |>
-      left_join(survey_data) |>
-      mutate(year = as.integer(year),
-             countryyear = paste0(countryname, ", ", year),
-             log_welf = log(.data[[welfare]]))  |>
-      collect() |>
-      filter(countryname!="") |>
-      mutate(across(where(is.logical), as.integer),
-             across(any_of(cats), as.factor),
-             across(any_of(fe), as.factor))
+    survey_weather <- reactive({
+    req(input$weather_variable_selector, input$country)
     
-      return(survey_weather)
+    survey_weather <- survey_data() |>
+      left_join(loc_weather()) |>
+      mutate(year = as.factor(year)) # for Fixed Effects
+      
+    return(survey_weather)
   })
   
   haz_vars <- reactive({
@@ -986,7 +950,7 @@ output$model_specs_ui <- renderUI({
   hh_vars <- hh_varlist()$label
   
   hh_vars_default <- hh_varlist() |>
-    filter(varname %in% c("urban", "hhsize", "primarycomp")) |>
+    filter(varname %in% c("urban", "hhsize")) |>
     pull(label)
 
   area_vars <- area_varlist()$label
@@ -999,7 +963,7 @@ output$model_specs_ui <- renderUI({
                    "imp_san_rec", "electricity", "agriland", "male")) |>
     pull(label)
   
-  interactions_default <- c()
+  interactions_default <- c("Urban")
   
   fe_vars <- fe_varlist()$label
   fe_vars_default <- fe_varlist() |>
