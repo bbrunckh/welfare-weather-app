@@ -58,7 +58,7 @@ ui <- navbarPage(
                 selected = "Log welfare per day (PPP)"
               ),
               uiOutput("welfare_ui"), # Welfare year and poverty line - conditional
-              helpText("A log transformation is used to normalize continous outcomes (e.g., $/day) and allow coefficients to be interpreted in terms of percentage changes. Binary outcomes (Poor...) define the poverty status of a household."),
+              helpText("Continous outcomes ($/day) are log transformed. Binary outcomes (Poor...) define the poverty status of a household."),
               p("Sample summary statistics:"),
               actionButton("survey_stats", "Survey stats")
             )

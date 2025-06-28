@@ -14,6 +14,8 @@ library(labelled)
 
 library(ggplot2)
 library(ggridges)
+library(scales)
+library(stringr)
 library(leaflet)
 library(vtable)
 library(DT)

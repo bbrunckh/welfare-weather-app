@@ -181,7 +181,7 @@ server <- function(input, output, session) {
     # logical data columns > integer, categorical and FE data columns > factors
     cats <- filter(varlist, !is.na(wiseapp) & datatype == "Categorical") |>
       pull("varname")
-    fe <- filter(varlist, !is.na(wiseapp) & wiseapp == "ID & Fixed effects" & varname != "year") |>
+    fe <- filter(varlist, !is.na(wiseapp) & wiseapp == "ID & Fixed effects" & !varname %in% c("countryname", "survname","hhid", "year")) |>
       pull("varname")
     
     survey_data <- survey_data |>
@@ -456,7 +456,6 @@ server <- function(input, output, session) {
 
   # Dynamically render weather variable constructor based on variable(s) chosen
   output$weather_construction_ui <- renderUI({
-    req(input$weather_variable_selector) # Ensure at least one variable is selected
 
     # Use lapply to generate UI for each selected weather variable
     ui_list <- lapply(seq_along(input$weather_variable_selector), function(i) {
@@ -670,21 +669,15 @@ server <- function(input, output, session) {
     }
     if (temporal_agg == "Median") {
       weather <- weather |>
-        rowwise() |>
-        mutate(haz = median(c_across(starts_with(paste0(i,"_"))))) |> 
-        ungroup()
+        mutate(haz = apply(select(., starts_with(paste0(i, "_"))), 1, median, na.rm = TRUE))
     }
     if (temporal_agg == "Min") {
       weather <- weather |>
-        rowwise() |>
-        mutate(haz = min(c_across(starts_with(paste0(i,"_"))))) |> 
-        ungroup()
+        mutate(haz = do.call(pmin, c(across(starts_with(paste0(i, "_"))), na.rm = TRUE)))
     }
     if (temporal_agg == "Max") {
       weather <- weather |>
-        rowwise() |>
-        mutate(haz = max(c_across(starts_with(paste0(i,"_"))))) |> 
-        ungroup()
+        mutate(haz = do.call(pmax, c(across(starts_with(paste0(i, "_"))), na.rm = TRUE)))
     }
     if (temporal_agg == "Sum") {
       weather <- weather |>
@@ -743,8 +736,8 @@ server <- function(input, output, session) {
     
     loc_weather <- survey_h3() |>
       left_join(h3_weather()) |>
-      summarise(across(starts_with("haz"), ~sum(.x*pop_2020)/sum(pop_2020)),
-                .by = c(code, year, survname, loc_id)) 
+      summarise(across(starts_with("haz"), ~sum(.x*pop_2020, na.rm = TRUE)/sum(pop_2020, na.rm = TRUE)),
+                .by = c(code, year, survname, loc_id, timestamp)) 
     
     return(loc_weather)
   })
@@ -754,7 +747,10 @@ server <- function(input, output, session) {
     
     survey_weather <- survey_data() |>
       left_join(loc_weather()) |>
-      mutate(year = as.factor(year)) # for Fixed Effects
+      mutate(year = as.factor(year)) |> # for Fixed Effects
+      group_by(code, year, survname) |>
+      mutate(weight = weight / sum(weight)) |> # normalize weights per survey.
+      ungroup()
       
     return(survey_weather)
   })
@@ -805,7 +801,7 @@ server <- function(input, output, session) {
         label <- filter(varlist, varname==haz_vars()[2], !is.na(varname)) |> pull(label)
         p + theme_minimal() +
           labs(
-            title = "", x = paste0(label,"\n (as configured)"),
+            title = "", x = str_wrap(paste0(label,"\n (as configured)"), 40),
             y = "", fill = ""
           ) +
           theme(legend.position = "none")
@@ -825,7 +821,7 @@ server <- function(input, output, session) {
         
         p + theme_minimal() +
           labs(
-            title = "", x = paste0(xlabel,"\n (as configured)"),
+            title = "", x = str_wrap(paste0(xlabel,"\n (as configured)"), 40),
             y = "Log welfare", fill = ""
           ) 
       })
@@ -843,7 +839,7 @@ server <- function(input, output, session) {
         
         p + theme_minimal() +
           labs(
-            title = "", x = paste0(xlabel,"\n (as configured)"),
+            title = "", x = str_wrap(paste0(xlabel,"\n (as configured)"), 40),
             y = "Log welfare", fill = ""
           ) 
       })
@@ -1095,7 +1091,7 @@ output$model_specs_ui <- renderUI({
         formula3 <- as.formula(paste(out, "~", main_effects,interaction_terms))
         
         # linear model fits
-        fit1 <- lm(formula1, survey_weather(), weight = weight)
+        fit1 <- lm(formula1, survey_weather(), weights = weight)
         fit2 <- lm(formula2, survey_weather(), weights = weight)
         fit3 <- lm(formula3, survey_weather(), weights = weight)
         
@@ -1161,14 +1157,15 @@ output$model_specs_ui <- renderUI({
       
         plot_summs(model_fit()[[1]], model_fit()[[2]], model_fit()[[3]],
                    robust = "HC3", coefs = named_coefs,
-                   model.names = c("No FE", "FE", "FE + controls"))
+                   model.names = c("No FE", "FE", "FE + controls")) +
+          scale_y_discrete(labels = label_wrap(20))
       })
       
       # simple effects plot
       output$effectplot1 <- renderPlot({
         effect_plot(model_fit()[[3]], pred = !!haz_vars()[1], 
                     interval = TRUE, plot.points = FALSE, line.colors = "orange",
-                    x.label = label_lookup[haz_vars()[1]], y.label = "Log welfare")
+                    x.label = str_wrap(label_lookup[haz_vars()[1]], 40), y.label = "Log welfare")
       })
       
       # simple effects plot
@@ -1176,7 +1173,7 @@ output$model_specs_ui <- renderUI({
         req(length(input$weather_variable_selector) > 1)
         effect_plot(model_fit()[[3]], pred = !!haz_vars()[2], 
                     interval = TRUE, plot.points = FALSE, line.colors = "orange",
-                    x.label = label_lookup[haz_vars()[2]],y.label = "Log welfare"
+                    x.label = str_wrap(label_lookup[haz_vars()[2]], 40),y.label = "Log welfare"
         )
       })
        # interactions plots
@@ -1187,7 +1184,7 @@ output$model_specs_ui <- renderUI({
         req(length(input$interactions) > 0)
         interact_plot(model_fit()[[3]], pred = !!haz_vars()[1], modx = !!mod,
                       interval = TRUE, plot.points = FALSE,
-                      x.label = label_lookup[haz_vars()[1]], 
+                      x.label = str_wrap(label_lookup[haz_vars()[1]], 40), 
                       y.label = "Log welfare") +
           theme(legend.position = "bottom")
       })
@@ -1197,7 +1194,7 @@ output$model_specs_ui <- renderUI({
             length(input$weather_variable_selector) > 1)
         interact_plot(model_fit()[[3]], pred = !!haz_vars()[2], modx = !!mod,
                       interval = TRUE, plot.points = FALSE,
-                      x.label = label_lookup[haz_vars()[2]], 
+                      x.label = str_wrap(label_lookup[haz_vars()[2]], 40), 
                       y.label = "Log welfare") +
           theme(legend.position = "bottom")
       })
@@ -1291,7 +1288,7 @@ output$model_specs_ui <- renderUI({
             stat_summary_bin(fun.y='mean', bins=20,
                              color='orange', size=2, geom='point') + 
             theme_minimal() +
-            labs(title = "", x = paste0(xlabel,"\n (as configured)"),
+            labs(title = "", x = str_wrap(paste0(xlabel,"\n (as configured)"), 40),
                  y = "Residuals", fill = ""
             ) 
           })
@@ -1313,7 +1310,7 @@ output$model_specs_ui <- renderUI({
             stat_summary_bin(fun.y='mean', bins=20,
                              color='orange', size=2, geom='point') + 
             theme_minimal() +
-            labs(title = "", x = paste0(xlabel,"\n (as configured)"),
+            labs(title = "", x = str_wrap(paste0(xlabel,"\n (as configured)"), 40),
               y = "Residuals", fill = ""
             ) 
         })
@@ -1370,7 +1367,8 @@ output$model_specs_ui <- renderUI({
               y = "R-squared Contribution"
             ) +
             theme_minimal() +
-            theme(legend.position = "none")
+            theme(legend.position = "none") +
+            scale_x_discrete(labels = label_wrap(20))
           
         })
         
