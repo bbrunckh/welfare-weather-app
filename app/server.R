@@ -456,6 +456,7 @@ server <- function(input, output, session) {
 
   # Dynamically render weather variable constructor based on variable(s) chosen
   output$weather_construction_ui <- renderUI({
+    req(input$weather_variable_selector)
 
     # Use lapply to generate UI for each selected weather variable
     ui_list <- lapply(seq_along(input$weather_variable_selector), function(i) {
