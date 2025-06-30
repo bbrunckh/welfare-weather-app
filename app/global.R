@@ -3,6 +3,7 @@ library(shiny)
 library(bslib)
 library(bsplus)
 
+library(igraph)
 library(duckplyr)
 library(dplyr)
 library(sf)
@@ -24,6 +25,7 @@ library(openxlsx2)
 library(jtools)
 library(margins)
 library(interactions)
+library(broom)
 
 app_version <- "v0.0.1"
 

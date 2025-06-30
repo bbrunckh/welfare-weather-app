@@ -30,7 +30,7 @@ ui <- navbarPage(
       sidebarPanel(
         bs_accordion(id = "step1_sidebar_accordion") |>
           bs_append(
-            title = "Define sample",
+            title = "1 Define sample",
             content = tagList(
               selectizeInput(
                 inputId = "country",
@@ -49,7 +49,7 @@ ui <- navbarPage(
             )
           ) |>
           bs_append(
-            title = "Define welfare outcome",
+            title = "2 Define welfare outcome",
             content = tagList(
               selectizeInput(
                 inputId = "welfare_outcome",
@@ -59,12 +59,12 @@ ui <- navbarPage(
               ),
               uiOutput("welfare_ui"), # Welfare year and poverty line - conditional
               helpText("Continous outcomes ($/day) are log transformed. Binary outcomes (Poor...) define the poverty status of a household."),
-              p("Sample summary statistics:"),
+              
               actionButton("survey_stats", "Survey stats")
             )
           ) |>
           bs_append(
-            title = "Define weather variable",
+            title = "3 Define weather variable",
             content = tagList(
               selectizeInput(
                 inputId = "weather_variable_selector",
@@ -78,7 +78,7 @@ ui <- navbarPage(
             )
           ) |>
           bs_append(
-            title = "Specify model",
+            title = "4 Specify model",
             content = tagList(
               radioButtons("modelspec", 
                            "Model:", 
@@ -102,7 +102,7 @@ ui <- navbarPage(
           # Main panel now contains a tabsetPanel for outputs
           tabsetPanel(id = "step1_output_tabs"),
           h4("Welfare function"),
-          h3("\\(W_{hkt} = f(Haz_{kt}, X_{hk}, E_{hk}) + \\epsilon_{hkt}\\)"),
+          h3("\\(W_{hkt} = f(Haz_{kt}, X_{hkt}, E_{kt}) + \\epsilon_{hkt}\\)"),
           p("\\(W_{hkt}\\): welfare of household \\(h\\) in location \\(k\\) at time \\(t\\)"),
           p("\\(Haz_{kt}\\): weather conditions in location \\(k\\) at time \\(t\\)"),
           p("\\(X_{hkt}\\): characteristics of household \\(h\\) in location \\(k\\) at time \\(t\\)"),
@@ -128,7 +128,7 @@ ui <- navbarPage(
                       "Years defining the distribution of weather", 
                       min = 1950, 
                       max = 2024, 
-                      value = c(1991, 2020),
+                      value = c(1990, 2024),
                       sep = ""
                       ),
           # radioButtons("outofsample", 
@@ -144,7 +144,34 @@ ui <- navbarPage(
           )
           ),
         mainPanel(
-          h3("Step 2 will be added soon."),
+          h4("Predicted welfare"),
+          h3("\\(\\widehat{W_{hkt}} = f(Haz_{kt}, \\widehat{X_{hkt}}, \\widehat{E_{kt}}) + \\widehat{\\epsilon_{hkt}}\\)"),
+          br(),
+          h4("Historical weather distribution vs weather used to fit model"),
+          layout_columns(
+            col_widths = c(6, 6),
+            card(
+              plotOutput("sim_weather1", height = "300px"),
+            ),
+            card(
+              plotOutput("sim_weather2", height = "300px"),
+            )
+          ),
+          br(),
+          h4("Poverty rate  vs probability"),
+          p("(conditional on the selected weather variable)"),
+          layout_columns(
+            col_widths = c(6, 6),
+            card(
+              plotOutput("sim_pov3_ep", height = "300px"),
+            ),
+            card(
+              plotOutput("sim_pov8_ep", height = "300px"),
+            )
+          ),
+          br(),
+          hr(),
+          h3("Under development - Step 2 will be updated soon."),
           p("Map showing weather over time used in simulation (animate?)"),
           p("Histogram/ridgeplot of weather distributions over time (linked to map) for (1) survey sample, (2) population (3) weather distribution used to train model"),
           p("Histogram/ridgeplot of predicted welfare distribution over time (linked to map) for (1) survey sample, (2) population (survey weights) (3) actual welfare distribution used to train model"),
@@ -171,8 +198,61 @@ ui <- navbarPage(
         sidebarPanel(
           bs_accordion(id = "step3_sidebar_accordion") |>
             bs_append(
+              title = "Policy scenario",
+              content = tagList(
+                checkboxGroupInput("policy_edu", 
+                             "Education scenario", 
+                             choices = c("Every household has at least primary education")
+                ),
+                hr(),
+                checkboxGroupInput("policy_infra", 
+                                   "Infrastructure scenario", 
+                                   choices = c("Every household has access to electricity in the dwelling", 
+                                               "Every household has access to improved drinking water source", 
+                                               "Every household has access to improved sanitation")
+                ),
+                hr(),
+                h4("Yet to be implemented"),
+                h5("Adaptive SP - cash transfer"),
+                # radioButtons("trigger_type", 
+                #              "Trigger type", 
+                #              choices = c("Modelled welfare loss", 
+                #                          "Modelled increase in poverty gap", 
+                #                          "Modelled increase in poverty rate", 
+                #                          "Hazard intensity",  
+                #                          "Hazard frequency"),
+                #              select = "Hazard frequency"
+                # ),
+                # radioButtons("trigger", 
+                #              "Trigger", 
+                #              choices = c("1-5 year (historical) event", 
+                #                          "1-10 year (historical) event", 
+                #                          "1-20 year (historical) event"),
+                #              selected = "1-10 year (historical) event"
+                # ),
+                # radioButtons("cash_value", 
+                #              "Total value of cash transfers", 
+                #              choices = c("Share of modelled welfare loss",
+                #                          "Share of modelled increase in poverty gap",
+                #                          "Fixed budget"),
+                #              selected = "Share of modelled increase in poverty gap"
+                # ),
+                # radioButtons("cash_targeting", 
+                #              "Targeting of cash transfers", 
+                #              choices = c("Universal (fixed amount)",
+                #                          "Poor (fixed amount)",
+                #                          "Poor (proportional to welfare)",
+                #                          "Poor (proportional to welfare loss)"),
+                #              selected = "Universal (fixed amount)"
+                # ),
+                hr(),
+                actionButton("run_sim", "Run policy simulation")
+              )
+            ) |>
+            bs_append(
               title = "Climate scenario",
               content = tagList(
+                h4("Yet to be implemented"),
                 radioButtons("climate", 
                              "Climate", 
                              choices = c("2050 SSP2-4.5", 
@@ -188,77 +268,22 @@ ui <- navbarPage(
                 hr(),
                 actionButton("run_sim", "Run climate simulation")
               )
-            ) |>
-            bs_append(
-              title = "Policy scenario",
-              content = tagList(
-                h5("Adaptive social protection - cash transfer"),
-                radioButtons("trigger_type", 
-                             "Trigger type", 
-                             choices = c("Modelled welfare loss", 
-                                         "Modelled increase in poverty gap", 
-                                         "Modelled increase in poverty rate", 
-                                         "Hazard intensity",  
-                                         "Hazard frequency"),
-                             select = "Hazard frequency"
-                             ),
-                radioButtons("trigger", 
-                             "Trigger", 
-                             choices = c("1-5 year (historical) event", 
-                                         "1-10 year (historical) event", 
-                                         "1-20 year (historical) event"),
-                             selected = "1-10 year (historical) event"
-                ),
-                radioButtons("cash_value", 
-                             "Total value of cash transfers", 
-                             choices = c("Share of modelled welfare loss",
-                                         "Share of modelled increase in poverty gap",
-                                         "Fixed budget"),
-                             selected = "Share of modelled increase in poverty gap"
-                ),
-                radioButtons("cash_targeting", 
-                               "Targeting of cash transfers", 
-                               choices = c("Universal (fixed amount)",
-                                           "Poor (fixed amount)",
-                                           "Poor (proportional to welfare)",
-                                           "Poor (proportional to welfare loss)"),
-                               selected = "Universal (fixed amount)"
-                ),
-                hr(),
-                h5("Education"),
-                radioButtons("trigger_type", 
-                             "Education scenario", 
-                             choices = c("Every household has primary education", 
-                                         "Every household has secondary education"),
-                             select = "Every household has secondary education"
-                ),
-                hr(),
-                h5("Infrastructure"),
-                checkboxGroupInput("trigger_type", 
-                             "Infrastructure scenario", 
-                             choices = c("Every household has access to electricity", 
-                                         "Every household has access to improved drinking water", 
-                                         "Every household has access to improved sanitation")
-                ),
-                hr(),
-                actionButton("run_sim", "Run policy simulation")
-              )
-            )
+            ) 
         ),
         mainPanel(
-          h3("Step 3 will be added soon."),
-          p("Map showing difference in weather between climate change scenario and historical climate used in simulation (animate?)"),
-          p("Histogram/ridgeplot of weather distributions over time (linked to map) for (1) historical climate (sample), (2) climate change scenario (sample) (3) weather distribution used to train model"),
-          p("Histogram/ridgeplot of predicted welfare distribution over time (linked to map) for (1) policy baseline, historical climate, (2) policy baseline, climate scenario, (3) policy scenario, historical climate, (4) policy scenario, climate scenario, (5) actual welfare distribution used to train model"),
-          h6("Exceedance probability curves (each scenario vs baseline)"),
-          p("1. ∆ Poverty rate vs probability"),
-          p("2. ∆ Poverty gap vs probability"),
-          p("3. ∆ Total welfare vs probability"),
-          p("4. ∆ Gini vs probability"),
-          p("5. ∆ Prosperity gap vs probability"),
-          h6("CDFs ... vs cumulative probability? (each scenario vs baseline)"),
-          h6("'vulnerability to poverty' (each scenario vs baseline)"),
-          p("Households with probability of being poor > X")
+          h3("Under development - Step 3 will be updated soon."),
+          # p("Map showing difference in weather between climate change scenario and historical climate used in simulation (animate?)"),
+          # p("Histogram/ridgeplot of weather distributions over time (linked to map) for (1) historical climate (sample), (2) climate change scenario (sample) (3) weather distribution used to train model"),
+          # p("Histogram/ridgeplot of predicted welfare distribution over time (linked to map) for (1) policy baseline, historical climate, (2) policy baseline, climate scenario, (3) policy scenario, historical climate, (4) policy scenario, climate scenario, (5) actual welfare distribution used to train model"),
+          # h6("Exceedance probability curves (each scenario vs baseline)"),
+          # p("1. ∆ Poverty rate vs probability"),
+          # p("2. ∆ Poverty gap vs probability"),
+          # p("3. ∆ Total welfare vs probability"),
+          # p("4. ∆ Gini vs probability"),
+          # p("5. ∆ Prosperity gap vs probability"),
+          # h6("CDFs ... vs cumulative probability? (each scenario vs baseline)"),
+          # h6("'vulnerability to poverty' (each scenario vs baseline)"),
+          # p("Households with probability of being poor > X")
         )
       )
     )
