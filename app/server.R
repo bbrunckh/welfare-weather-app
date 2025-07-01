@@ -1038,22 +1038,20 @@ output$model_specs_ui <- renderUI({
         pull(label),
       multiple = TRUE
     ),
-    checkboxInput( 
-      inputId = "fixedeffects_interact", 
-      label = "Interact fixed effects",
-      value = FALSE
-    ),
-    
-    helpText("Yet to be implemented..."),
-    checkboxGroupInput( 
-      inputId = "checkbox_group", 
-      label = "Robustness checks", 
-      choices = c( 
-        "Include lagged weather" = "a", 
-        "Include displaced weather" = "b",
-        "Include future weather (placebo test)" = "c"
-        ) 
-      )
+    # checkboxInput( 
+    #   inputId = "fixedeffects_interact", 
+    #   label = "Interact fixed effects",
+    #   value = FALSE
+    # ),
+    # checkboxGroupInput( 
+    #   inputId = "checkbox_group", 
+    #   label = "Robustness checks", 
+    #   choices = c( 
+    #     "Include lagged weather" = "a", 
+    #     "Include displaced weather" = "b",
+    #     "Include future weather (placebo test)" = "c"
+    #     ) 
+    #   )
     )
 )
 })
@@ -1108,9 +1106,9 @@ output$model_specs_ui <- renderUI({
         
         # fixed effects - interacted
         fe <- filter(varlist, label %in% input$fixedeffects) |> pull(varname) 
-        if (input$fixedeffects_interact==TRUE){ 
-          fe <- paste0("(", paste(fe, collapse = " * "),")")
-          }
+        # if (input$fixedeffects_interact==TRUE){ 
+        #   fe <- paste0("(", paste(fe, collapse = " * "),")")
+        #   }
         
         # construct formulas
         main_effects <- paste(c(weather_vars, hh_cov, area_cov, fe), collapse = " + ")
@@ -1310,13 +1308,13 @@ output$model_specs_ui <- renderUI({
             h4("Regression results"),
             tableOutput("regtable"),
             br(),
-            h4("Features to add:"),
-            helpText("Some outputs depend on method and whether outcome is binary/continuous"),
-            h6("Plot more damage functions..."),
-            p("∆ Predicted poverty rate/gap/total welfare/gini vs weather (with CIs, by interaction)"),
-            h6("Plot marginal effect of interaction terms on welfare outcome vs weather?"),
-            p("Print the regression formula"),
-            br(),
+            # h4("Features to add:"),
+            # helpText("Some outputs depend on method and whether outcome is binary/continuous"),
+            # h6("Plot more damage functions..."),
+            # p("∆ Predicted poverty rate/gap/total welfare/gini vs weather (with CIs, by interaction)"),
+            # h6("Plot marginal effect of interaction terms on welfare outcome vs weather?"),
+            # p("Print the regression formula"),
+            # br(),
           ),
           select = TRUE # Select this tab when it's first added
         )
@@ -1494,11 +1492,11 @@ output$model_specs_ui <- renderUI({
             verbatimTextOutput("model_summary"),
             
             br(),
-            h4("Features to add:"),
-            helpText("Model fit diagnostics probably need to depend on whether outcome is binary of continuous, and on method selected"),
-            p("SHAP for XGBoost method"),
-            p("Plot correlation matrix (all variables used by model)"),
-            br(),
+            # h4("Features to add:"),
+            # helpText("Model fit diagnostics probably need to depend on whether outcome is binary of continuous, and on method selected"),
+            # p("SHAP for XGBoost method"),
+            # p("Plot correlation matrix (all variables used by model)"),
+            # br(),
           )
         )
         model_fit_tab_added(TRUE)
@@ -1572,12 +1570,12 @@ output$model_specs_ui <- renderUI({
       output$sim_pov3_ep <- renderPlot({
         req(input$run_sim > 0, model_fit())
         
-        if (welf_select()$varname =="welf_ppp_2021"){
+        if (welf_select()$varname =="welf_ppp_2021" & welf_select()$type == "Continuous"){
           plot_data <- welf_sim() |>
             summarise(pov300 = weighted.mean(welf_pred < log(3),weight), 
                       pov420 = weighted.mean(welf_pred < log(4.2),weight), 
                       pov830 = weighted.mean(welf_pred < log(8.3),weight), 
-                      .by = c(code, year, survname, sim_year))
+                      .by = c(code, year, sim_year))
           
           ggplot(plot_data, aes(x = pov300)) +
             stat_ecdf(geom = "point", aes(y = 1 - ..y..), color = "lightblue") +
@@ -1587,7 +1585,7 @@ output$model_specs_ui <- renderUI({
               y = "Exceedance Probability (P(X > x))"
             ) +
             theme_minimal() +
-            coord_flip()
+            coord_flip()  
           
         } else NULL
       })
@@ -1595,12 +1593,12 @@ output$model_specs_ui <- renderUI({
       output$sim_pov8_ep <- renderPlot({
         req(input$run_sim > 0, model_fit())
         
-        if (welf_select()$varname =="welf_ppp_2021"){
+        if (welf_select()$varname =="welf_ppp_2021" & welf_select()$type == "Continuous"){
           plot_data <- welf_sim() |>
             summarise(pov300 = weighted.mean(welf_pred < log(3),weight), 
                       pov420 = weighted.mean(welf_pred < log(4.2),weight), 
                       pov830 = weighted.mean(welf_pred < log(8.3),weight), 
-                      .by = c(code, year, survname, sim_year))
+                      .by = c(code, year, sim_year))
           
           ggplot(plot_data, aes(x = pov830)) +
             stat_ecdf(geom = "point", aes(y = 1 - ..y..), color = "lightblue") +
@@ -1610,7 +1608,7 @@ output$model_specs_ui <- renderUI({
               y = "Exceedance Probability (P(X > x))"
             ) +
             theme_minimal() +
-            coord_flip()
+            coord_flip() 
           
         } else NULL
       })
@@ -1629,6 +1627,72 @@ output$model_specs_ui <- renderUI({
       #       theme_minimal()
 # 
 #       })
+      
+      welf_sim_policy <- reactive({
+        req(welf_sim(), input$run_sim > 0)
+        
+      sim_policy <- welf_sim() 
+      
+      if (!is.null(input$policy_edu)){
+        if (input$policy_edu == "Every household has at least primary education"){
+          sim_policy <- mutate(sim_policy, primarycomp = 1)
+        } 
+      }
+      if (!is.null(input$policy_infra)){
+        if ("Every household has access to electricity in the dwelling" %in% input$policy_infra){
+          sim_policy <- mutate(sim_policy, electricity = 1)
+        }
+        if ("Every household has access to improved drinking water" %in% input$policy_infra){
+          sim_policy <- mutate(sim_policy, imp_wat_rec = 1)
+        }
+        if ("Every household has access to improved sanitation" %in% input$policy_infra){
+          sim_policy <- mutate(sim_policy, imp_san_rec = 1)
+        }
+      }
+      
+      sim_policy <- augment(model_fit()[[3]], newdata = sim_policy) |>
+        mutate(welf_pred_pol = .fitted + error) # add error term
+      
+      return(sim_policy)
+    })
+      
+      output$sim_pov3_pol_ep <- renderPlot({
+        req(input$run_sim > 0, model_fit(), welf_sim_policy())
+        
+        if (welf_select()$varname =="welf_ppp_2021" & welf_select()$type == "Continuous"){
+          plot_data <- welf_sim_policy() |>
+            summarise(pov300 = weighted.mean(welf_pred < log(3),weight), 
+                      pov300_pol = weighted.mean(welf_pred_pol < log(3),weight), 
+                      pov830 = weighted.mean(welf_pred < log(8.3),weight), 
+                      pov830_pol = weighted.mean(welf_pred_pol < log(8.3),weight), 
+                      .by = c(code, year, sim_year))
+          
+          ggplot(plot_data) +
+            stat_ecdf(geom = "point", 
+                      aes(x = pov300_pol, y = 1 - ..y..), 
+                      color = "lightblue") +
+            stat_ecdf(geom = "line", 
+                      aes(x = pov300_pol, y = 1 - ..y.., color = "policy"), 
+                      linewidth = 1) +
+            stat_ecdf(geom = "point", 
+                      aes(x = pov300, y = 1 - ..y..), 
+                      color = "lightblue") +
+            stat_ecdf(geom = "line", 
+                      aes(x = pov300, y = 1 - ..y.., color = "baseline"), 
+                      linewidth = 1) +
+            
+            scale_color_manual(values = c("baseline" = "red", "policy" = "blue"), 
+                               labels = c("Baseline","Policy")) +
+            labs(x = "Poverty rate ($3.00, 2021 PPP)",
+                 y = "Exceedance Probability (P(X > x))",
+                 color = "") +
+            coord_flip() + 
+            theme_minimal() +
+            theme(legend.position = "top")
+          
+        } else NULL
+      })  
+      
       
       # If the "Results" tab is present (either just added or previously added), ensure it's selected
       if (model_results_tab_added()) {

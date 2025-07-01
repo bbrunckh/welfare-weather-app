@@ -92,9 +92,16 @@ ui <- navbarPage(
               actionButton("run_model", "Run model"),
               hr(),
               helpText("Linear regression (OLS) will include all specified covariates."),
-              helpText("Lasso will use the Post-Double Selection Lasso method to select the specified covariates that best predict the weather variable and the welfare outcome. The selected variables are then used in a linear regression (OLS)."),
-              helpText("XGBoost will use the extreme gradient boosting method, building an ensemble of decision trees considering all specified covariates. SHAP (SHapley Additive exPlanations) are used to interpret the results. They explain how much each variable contributes to the predicted outcome.")
-            )
+              # helpText("Lasso will use the Post-Double Selection Lasso method to select the specified covariates that best predict the weather variable and the welfare outcome. The selected variables are then used in a linear regression (OLS)."),
+              # helpText("XGBoost will use the extreme gradient boosting method, building an ensemble of decision trees considering all specified covariates. SHAP (SHapley Additive exPlanations) are used to interpret the results. They explain how much each variable contributes to the predicted outcome.")
+              br(),
+              helpText("To be added:"),
+              helpText("Option to interact fixed effects"),
+              helpText("Robustness check:"),
+              helpText("-Include lagged weather"),
+              helpText("-Include displaced weather"),
+              helpText("-Include future weather (placebo test"),
+              )
           )
       ), 
       mainPanel(
@@ -144,8 +151,10 @@ ui <- navbarPage(
           )
           ),
         mainPanel(
+          h3("Under development"),
+          h3("Step 2 will be updated soon"),
           h4("Predicted welfare"),
-          h3("\\(\\widehat{W_{hkt}} = f(Haz_{kt}, \\widehat{X_{hkt}}, \\widehat{E_{kt}}) + \\widehat{\\epsilon_{hkt}}\\)"),
+          h3("\\(\\widehat{W_{hkt}} = f(Haz_{kt}, X_{hkt}, E_{kt}) + \\widehat{\\epsilon_{hkt}}\\)"),
           br(),
           h4("Historical weather distribution vs weather used to fit model"),
           layout_columns(
@@ -170,20 +179,18 @@ ui <- navbarPage(
             )
           ),
           br(),
-          hr(),
-          h3("Under development - Step 2 will be updated soon."),
-          p("Map showing weather over time used in simulation (animate?)"),
-          p("Histogram/ridgeplot of weather distributions over time (linked to map) for (1) survey sample, (2) population (3) weather distribution used to train model"),
-          p("Histogram/ridgeplot of predicted welfare distribution over time (linked to map) for (1) survey sample, (2) population (survey weights) (3) actual welfare distribution used to train model"),
-          h6("Exceedance probability curves"),
-          p("1. ∆ Poverty rate vs probability"),
-          p("2. ∆ Poverty gap vs probability"),
-          p("3. ∆ Total welfare vs probability"),
-          p("4. ∆ Gini vs probability"),
-          p("5. ∆ Prosperity gap vs probability"),
-          h6("CDFs ... vs cumulative probability?"),
-          h6("'vulnerability to poverty'"),
-          p("Households with probability of being poor > X")
+          # p("Map showing weather over time used in simulation (animate?)"),
+          # p("Histogram/ridgeplot of weather distributions over time (linked to map) for (1) survey sample, (2) population (3) weather distribution used to train model"),
+          # p("Histogram/ridgeplot of predicted welfare distribution over time (linked to map) for (1) survey sample, (2) population (survey weights) (3) actual welfare distribution used to train model"),
+          # h6("Exceedance probability curves"),
+          # p("1. ∆ Poverty rate vs probability"),
+          # p("2. ∆ Poverty gap vs probability"),
+          # p("3. ∆ Total welfare vs probability"),
+          # p("4. ∆ Gini vs probability"),
+          # p("5. ∆ Prosperity gap vs probability"),
+          # h6("CDFs ... vs cumulative probability?"),
+          # h6("'vulnerability to poverty'"),
+          # p("Households with probability of being poor > X")
         )
       )
     )
@@ -208,7 +215,7 @@ ui <- navbarPage(
                 checkboxGroupInput("policy_infra", 
                                    "Infrastructure scenario", 
                                    choices = c("Every household has access to electricity in the dwelling", 
-                                               "Every household has access to improved drinking water source", 
+                                               "Every household has access to improved drinking water", 
                                                "Every household has access to improved sanitation")
                 ),
                 hr(),
@@ -271,7 +278,19 @@ ui <- navbarPage(
             ) 
         ),
         mainPanel(
-          h3("Under development - Step 3 will be updated soon."),
+          h3("Under development"),
+          h3("Step 3 will be updated soon"),
+          h4("Poverty rate  vs probability"),
+          p("(conditional on the selected weather variable)"),
+          layout_columns(
+            col_widths = c(6, 6),
+            card(
+              plotOutput("sim_pov3_pol_ep", height = "300px"),
+            ),
+            card(
+              plotOutput("sim_pov8_pol_ep", height = "300px"),
+            )
+          ),
           # p("Map showing difference in weather between climate change scenario and historical climate used in simulation (animate?)"),
           # p("Histogram/ridgeplot of weather distributions over time (linked to map) for (1) historical climate (sample), (2) climate change scenario (sample) (3) weather distribution used to train model"),
           # p("Histogram/ridgeplot of predicted welfare distribution over time (linked to map) for (1) policy baseline, historical climate, (2) policy baseline, climate scenario, (3) policy scenario, historical climate, (4) policy scenario, climate scenario, (5) actual welfare distribution used to train model"),

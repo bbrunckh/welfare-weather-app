@@ -8,6 +8,8 @@ library(haven)
 library(openxlsx2)
 library(sf)
 
+setwd("../app/")
+
 #------------------------------------------------------------------------------#
 # Get WISE-APP variable lists
 
@@ -37,7 +39,7 @@ loc_path <- paste0("~/Library/CloudStorage/OneDrive-WBG/",
 survey_list <- list.files(loc_path, recursive = TRUE, "SPAT.dta$")
 
 # filter survey list for loop (optional)
-survey_list <- survey_list[grepl("^BFA|^CIV|^MLI|^MWI|^SEN|^TGO|^VNM", survey_list)]
+survey_list <- survey_list[grepl("SEN_2021|TGO_2018", survey_list)]
 
 #------------------------------------------------------------------------------#
 # Loop over surveys 
