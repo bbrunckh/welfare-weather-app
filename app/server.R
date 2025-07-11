@@ -2,18 +2,123 @@ source("global.R")
 
 # Define the Server logic
 server <- function(input, output, session) {
+  
+  #----------------------------------------------------------------------------#
+  # INITIALIZE REACTIVE VALUES
+  #----------------------------------------------------------------------------#
+  
+  internalpanel <- reactiveVal(FALSE) # visibility of the password panel
+  auth_message <- reactiveVal("")
+  surveys <- reactiveVal(survey_list_master |> filter(access == "public"))
+  
   #----------------------------------------------------------------------------#
   # SAMPLE UI
   #----------------------------------------------------------------------------#
-
+  
+  # Observe the action button click
+  observeEvent(input$internal_user, {
+    # Toggle the visibility state
+    internalpanel(!internalpanel())
+  })
+  
+  # Render the password panel conditionally
+  output$dlw_token_input <- renderUI({
+    if (internalpanel()) {
+      tagList(
+        passwordInput("dlw_token", "Enter datalibweb token:", ""),
+        actionButton("authorize", "Authorize"),
+        hr(),
+      )
+    }
+  })
+  
+  output$authorize_status <- renderText({
+    auth_message()
+  })
+  
+  # Observe the action button click
+  observeEvent(input$authorize, {
+    internalpanel(!internalpanel())
+    auth_message("Checking data subscriptions...")
+    tryCatch({
+      
+      # Function to create a single request
+      create_request <- function(code, year) {
+        
+        url <- "https://datalibwebapiprod.ase.worldbank.org/dlw/api/v1/"
+        endpoint <- "FileInformation/GetFileInfo"
+        
+        # Define the form data for this specific request
+        form_data <- list(
+          Server = "GMD", 
+          Country = code, 
+          Collection = "GMD", 
+          Year = year
+        )
+        
+        # Build the httr2 request
+        req <- httr2::request(url) |>
+          httr2::req_url_path_append(endpoint) |>
+          httr2::req_auth_bearer_token(input$dlw_token) |>
+          httr2::req_body_form(!!!form_data) 
+      }
+      # list of requests
+      req_list <- mapply(
+        create_request,
+        code = survey_list_master$code,
+        year = survey_list_master$year,
+        SIMPLIFY = FALSE 
+      )
+      
+      # get successful responses
+      resps <- httr2::req_perform_parallel(
+        req_list, on_error = "continue", progress = FALSE) |> 
+        httr2::resps_successes()
+      
+      # read csv responses
+      csv_list <- function(response) {
+        response |> 
+          httr2::resp_body_string() |>
+          readr::read_csv(show_col_types = FALSE)
+      }
+      # combine csv responses, filter to subscribed files
+      subscribed <- do.call(rbind, lapply(resps, csv_list)) |>
+        filter(UserSubscribed == "Subscribed")
+      
+      dlw_survey_list <- survey_list_master |>
+        filter(gmd_all %in% subscribed$FileName) |>
+        bind_rows(surveys())
+      
+      surveys(dlw_survey_list)
+      auth_message("Authorization complete")
+      
+    }, error = function(e) {
+      auth_message("Authorization failed")
+    })
+    
+  })
+  
+  # country selection
+  output$sample_ui <- renderUI({
+    req(surveys())
+    selectizeInput(
+      inputId = "country",
+      label = "Country",
+      choices = surveys()$countryname,
+      multiple = TRUE,
+      options = list(maxItems = 1, placeholder = "Select country")
+    )
+  })
+  
   # Get available survey years for selected countries
   available_years <- reactive({
-    req(input$country)
+    req(input$country, surveys())
     selected_countries <- input$country
     years_list <- list()
 
     for (country in selected_countries) {
-      years_list[[country]] <- survey_list[survey_list$countryname == country, "year"]
+      years_list[[country]] <- surveys() |>
+        filter(countryname == country) |> pull(year)
     }
     return(years_list)
   })
@@ -111,7 +216,6 @@ server <- function(input, output, session) {
     )
   })
 
-  
   #----------------------------------------------------------------------------#
   # LOAD SURVEY DATA
   #----------------------------------------------------------------------------#
@@ -126,13 +230,13 @@ server <- function(input, output, session) {
       selected_years <- input[[year_input_id]]
       
       if (!is.null(selected_years) && length(selected_years) > 0) {
-        country_data <- survey_list |>
+        country_data <- surveys() |>
           filter(countryname == country & year %in% selected_years) |>
-          pull(filename)
+          pull(wiseapp_pin)
         survey_files <- c(survey_files, country_data)
       }
     }
-    return(paste0("data/surveys/", as.list(as.character(survey_files))))
+    return(paste0("data/surveys/", as.list(as.character(survey_files)), ".parquet"))
   })
   
   # load survey data for selected sample
@@ -183,14 +287,12 @@ server <- function(input, output, session) {
     # logical data columns > integer, categorical and FE data columns > factors
     cats <- filter(varlist, !is.na(wiseapp) & datatype == "Categorical") |>
       pull("varname")
-    fe <- filter(varlist, !is.na(wiseapp) & wiseapp == "ID & Fixed effects" & !varname %in% c("countryname", "survname","hhid", "year")) |>
+    fe <- filter(varlist, !is.na(wiseapp) & wiseapp == "ID & Fixed effects" & !varname %in% c("countryname", "survname","hhid", "year", "timestamp", "int_date")) |>
       pull("varname")
     
     survey_data <- survey_data |>
-      mutate(timestamp = floor_date(int_date, "month"),
-             year = as.integer(year),
+      mutate(year = as.integer(year),
              countryyear = paste0(countryname, ", ", year),
-             across(where(is.logical), as.integer),
              across(any_of(cats), as.factor),
              across(any_of(fe), as.factor)) |>
       collect()
@@ -215,13 +317,15 @@ server <- function(input, output, session) {
   # Loads survey interview location data
   survey_geo <- reactive({
     req(input$country)
-    files <- sub("\\.parquet$", "_LOC.gpkg", survey_data_files())
-    survey_geo <- do.call(rbind, lapply(files, st_read)) |>
+    files <- sub("\\.parquet$", "_LOC.parquet", survey_data_files())
+
+    survey_geo <- do.call(rbind, lapply(files, read_parquet)) |>
       filter(case_when(
         input$sample_type == "All households" ~ !is.na(loc_id),
         input$sample_type == "Rural households" ~ urban == 0,
         input$sample_type == "Urban households" ~ urban == 1
-      ))
+      )) |>
+        st_as_sf(wkt = "geom", crs = 4326)
     return(survey_geo)
   })
   
@@ -631,7 +735,7 @@ server <- function(input, output, session) {
     req(input$country)
     
     # lookup weather data files
-    codes <- filter(survey_list, countryname %in% input$country) |>
+    codes <- filter(surveys(), countryname %in% input$country) |>
       pull(code) |> unique()
     files <- paste0("data/weather/",codes,"_weather.parquet")
     
@@ -1572,18 +1676,20 @@ output$model_specs_ui <- renderUI({
         
         if (welf_select()$varname =="welf_ppp_2021" & welf_select()$type == "Continuous"){
           plot_data <- welf_sim() |>
-            summarise(pov300 = weighted.mean(welf_pred < log(3),weight), 
-                      pov420 = weighted.mean(welf_pred < log(4.2),weight), 
-                      pov830 = weighted.mean(welf_pred < log(8.3),weight), 
-                      .by = c(code, year, sim_year))
+            summarise(pov300 = weighted.mean(welf_pred < log(3),weight),
+                      .by = c(code, year, sim_year)) |>
+            group_by(code, year) |>
+            mutate(pov300d = pov300 - mean(pov300, na.rm = TRUE)) |>
+            ungroup()
           
-          ggplot(plot_data, aes(x = pov300)) +
+          ggplot(plot_data, aes(x = 100*pov300d)) +
             stat_ecdf(geom = "point", aes(y = 1 - ..y..), color = "lightblue") +
             stat_ecdf(geom = "line", aes(y = 1 - ..y..), color = "red", linewidth = 1) +
+            geom_vline(xintercept = 0, color = "black", linetype = "dotted") +
             labs(
-              x = "Poverty rate ($3.00, 2021 PPP)",
-              y = "Exceedance Probability (P(X > x))"
-            ) +
+              x = "Change in $3.00 poverty rate (pp.)",
+              y = "Annual Exceedance Probability (P(pov > y))",
+              caption = "Change in poverty is relative to the mean (expected) poverty \n  over all simulated weather years.") +
             theme_minimal() +
             coord_flip()  
           
@@ -1595,18 +1701,20 @@ output$model_specs_ui <- renderUI({
         
         if (welf_select()$varname =="welf_ppp_2021" & welf_select()$type == "Continuous"){
           plot_data <- welf_sim() |>
-            summarise(pov300 = weighted.mean(welf_pred < log(3),weight), 
-                      pov420 = weighted.mean(welf_pred < log(4.2),weight), 
-                      pov830 = weighted.mean(welf_pred < log(8.3),weight), 
-                      .by = c(code, year, sim_year))
+            summarise(pov830 = weighted.mean(welf_pred < log(8.3),weight), 
+                      .by = c(code, year, sim_year)) |>
+            group_by(code, year) |>
+            mutate(pov830d = pov830 - mean(pov830, na.rm = TRUE)) |>
+            ungroup()
           
-          ggplot(plot_data, aes(x = pov830)) +
+          ggplot(plot_data, aes(x = 100*pov830d)) +
             stat_ecdf(geom = "point", aes(y = 1 - ..y..), color = "lightblue") +
             stat_ecdf(geom = "line", aes(y = 1 - ..y..), color = "red", linewidth = 1) +
+            geom_vline(xintercept = 0, color = "black", linetype = "dotted") +
             labs(
-              x = "Poverty rate ($8.30, 2021 PPP)",
-              y = "Exceedance Probability (P(X > x))"
-            ) +
+              x = "Change in $8.30 poverty rate (pp.)",
+              y = "Annual Exceedance Probability (P(pov > y))",
+              caption = "Change in poverty is relative to the mean (expected) poverty \n  over all simulated weather years.") +
             theme_minimal() +
             coord_flip() 
           
@@ -1622,14 +1730,14 @@ output$model_specs_ui <- renderUI({
       #       stat_ecdf(geom = "step", pad = FALSE) +
       #       labs(
       #         x = "Gini",
-      #         y = "Exceedance Probability (P(X > x))"
+      #         y = "Annual Exceedance Probability (P(pov > y))"
       #       ) +
       #       theme_minimal()
 # 
 #       })
       
       welf_sim_policy <- reactive({
-        req(welf_sim(), input$run_sim > 0)
+        req(welf_sim(), input$run_policy_sim > 0)
         
       sim_policy <- welf_sim() 
       
@@ -1663,29 +1771,32 @@ output$model_specs_ui <- renderUI({
           plot_data <- welf_sim_policy() |>
             summarise(pov300 = weighted.mean(welf_pred < log(3),weight), 
                       pov300_pol = weighted.mean(welf_pred_pol < log(3),weight), 
-                      pov830 = weighted.mean(welf_pred < log(8.3),weight), 
-                      pov830_pol = weighted.mean(welf_pred_pol < log(8.3),weight), 
-                      .by = c(code, year, sim_year))
+                      .by = c(code, year, sim_year)) |>
+            group_by(code, year) |>
+            mutate(pov300d = pov300 - mean(pov300, na.rm = TRUE),
+                   pov300d_pol = pov300_pol - mean(pov300_pol, na.rm = TRUE)) |>
+            ungroup()
           
           ggplot(plot_data) +
             stat_ecdf(geom = "point", 
-                      aes(x = pov300_pol, y = 1 - ..y..), 
+                      aes(x = 100*pov300d_pol, y = 1 - ..y..), 
                       color = "lightblue") +
             stat_ecdf(geom = "line", 
-                      aes(x = pov300_pol, y = 1 - ..y.., color = "policy"), 
+                      aes(x = 100*pov300d_pol, y = 1 - ..y.., color = "policy"), 
                       linewidth = 1) +
             stat_ecdf(geom = "point", 
-                      aes(x = pov300, y = 1 - ..y..), 
+                      aes(x = 100*pov300d, y = 1 - ..y..), 
                       color = "lightblue") +
             stat_ecdf(geom = "line", 
-                      aes(x = pov300, y = 1 - ..y.., color = "baseline"), 
+                      aes(x = 100*pov300d, y = 1 - ..y.., color = "baseline"), 
                       linewidth = 1) +
-            
             scale_color_manual(values = c("baseline" = "red", "policy" = "blue"), 
                                labels = c("Baseline","Policy")) +
-            labs(x = "Poverty rate ($3.00, 2021 PPP)",
-                 y = "Exceedance Probability (P(X > x))",
-                 color = "") +
+            geom_vline(xintercept = 0, color = "black", linetype = "dotted") +
+            labs(x = "Change in $3.00 poverty rate (pp.)",
+                 y = "Annual Exceedance Probability (P(pov > y))",
+                 color = "",
+                 caption = "Change in poverty rate is relative to the mean (expected) \n poverty over all simulated weather years.") +
             coord_flip() + 
             theme_minimal() +
             theme(legend.position = "top")
@@ -1707,5 +1818,4 @@ output$model_specs_ui <- renderUI({
   #----------------------------------------------------------------------------#
   
 
-  
 }

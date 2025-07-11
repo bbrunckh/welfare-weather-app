@@ -2,8 +2,7 @@
 ui <- navbarPage(
   tagList(
   "WISE-APP",
-  tags$small(app_version, style = "color: #777777; margin-top: 0px; font-size: 0.5em;")
-  ),
+  tags$small(version, style = "color: #777777; font-size: 0.5em;")),
   tags$head(
     tags$script(src = "https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.7/MathJax.js?config=TeX-MML-AM_CHTML",
                 type = "text/javascript")
@@ -18,6 +17,10 @@ ui <- navbarPage(
       h5("Weather Impact Simulation and Evaluation for Adaptation Policy and Planning"),
       p("This tool is designed to help you understand the relationship between welfare and weather."),
       p("Follow the steps to perform simulations and explore policy impacts."),
+      actionButton("internal_user", "Internal user"),
+      hr(),
+      uiOutput("dlw_token_input"),
+      textOutput("authorize_status")
     )
   ),
   
@@ -32,13 +35,7 @@ ui <- navbarPage(
           bs_append(
             title = "1 Define sample",
             content = tagList(
-              selectizeInput(
-                inputId = "country",
-                label = "Country",
-                choices = survey_list$countryname,
-                multiple = TRUE,
-                options = list(maxItems = 3, placeholder = "Select country")
-              ),
+              uiOutput("sample_ui"), # Survey countries, depends on data access
               uiOutput("survey_year_ui"), # Survey years - conditional on country selection
               radioButtons(
                 inputId = "sample_type",
@@ -124,15 +121,15 @@ ui <- navbarPage(
   tabPanel(
     "Step 2 - Simulate welfare",
     fluidPage(
-      h4("What welfare is expected given historical weather conditions?"),
+      h4("What welfare is expected given historical weather conditions? In future climate scenarios?"),
       sidebarLayout(
         sidebarPanel(
           bs_accordion(id = "step2_sidebar_accordion") |>
             bs_append(
-              title = "Simulation settings",
+              title = "Historical weather",
               content = tagList(
           sliderInput("yearRange", 
-                      "Years defining the distribution of weather", 
+                      "Period defining the distribution of weather", 
                       min = 1950, 
                       max = 2024, 
                       value = c(1990, 2024),
@@ -148,7 +145,33 @@ ui <- navbarPage(
           hr(),
           actionButton("run_sim", "Run simulation")
           )
-          )
+          ) |>
+            bs_append(
+              title = "Climate change",
+              content = tagList(
+                h4("Yet to be implemented"),
+                radioButtons("climate", 
+                             "Scenario", 
+                             choices = c("SSP2-4.5","SSP3-7.0","SSP5-8.5"),
+                             selected = "SSP5-8.5"
+                ),
+                radioButtons("climatemethod", 
+                             "Method", 
+                             choices = c("Delta"),
+                             selected = "Delta"
+                ),
+                helpText("Delta: adds CMIP6 ensemble 'delta' fields to historical observations."),
+                sliderInput("yearRange_climate", 
+                            "Period defining the distribution of weather in climate change scenario", 
+                            min = 2020, 
+                            max = 2100, 
+                            value = c(2040, 2060),
+                            sep = ""
+                ),
+                hr(),
+                actionButton("run_climate_sim", "Run climate simulation")
+              )
+            ) 
           ),
         mainPanel(
           h3("Under development"),
@@ -167,7 +190,7 @@ ui <- navbarPage(
             )
           ),
           br(),
-          h4("Poverty rate  vs probability"),
+          h4("∆ poverty vs exceedance probability"),
           p("(conditional on the selected weather variable)"),
           layout_columns(
             col_widths = c(6, 6),
@@ -196,91 +219,103 @@ ui <- navbarPage(
     )
   ),
   
-  # Page 4: Step 3 - Policy and climate scenarios
+  # Page 4: Step 3 - Policy scenarios
   tabPanel(
-    "Step 3 - Policy & climate scenarios",
+    "Step 3 - Policy & adaptation",
     fluidPage(
-      h4("What welfare is expected in alternate climate and policy scenarios?"),
+      h4("What welfare is expected in alternate policy scenarios?"),
       sidebarLayout(
         sidebarPanel(
           bs_accordion(id = "step3_sidebar_accordion") |>
             bs_append(
-              title = "Policy scenario",
+              title = "Infrastructure",
               content = tagList(
-                checkboxGroupInput("policy_edu", 
-                             "Education scenario", 
-                             choices = c("Every household has at least primary education")
-                ),
-                hr(),
                 checkboxGroupInput("policy_infra", 
-                                   "Infrastructure scenario", 
+                                   "Infrastructure", 
                                    choices = c("Every household has access to electricity in the dwelling", 
                                                "Every household has access to improved drinking water", 
                                                "Every household has access to improved sanitation")
                 ),
-                hr(),
-                h4("Yet to be implemented"),
-                h5("Adaptive SP - cash transfer"),
-                # radioButtons("trigger_type", 
-                #              "Trigger type", 
-                #              choices = c("Modelled welfare loss", 
-                #                          "Modelled increase in poverty gap", 
-                #                          "Modelled increase in poverty rate", 
-                #                          "Hazard intensity",  
-                #                          "Hazard frequency"),
-                #              select = "Hazard frequency"
-                # ),
-                # radioButtons("trigger", 
-                #              "Trigger", 
-                #              choices = c("1-5 year (historical) event", 
-                #                          "1-10 year (historical) event", 
-                #                          "1-20 year (historical) event"),
-                #              selected = "1-10 year (historical) event"
-                # ),
-                # radioButtons("cash_value", 
-                #              "Total value of cash transfers", 
-                #              choices = c("Share of modelled welfare loss",
-                #                          "Share of modelled increase in poverty gap",
-                #                          "Fixed budget"),
-                #              selected = "Share of modelled increase in poverty gap"
-                # ),
-                # radioButtons("cash_targeting", 
-                #              "Targeting of cash transfers", 
-                #              choices = c("Universal (fixed amount)",
-                #                          "Poor (fixed amount)",
-                #                          "Poor (proportional to welfare)",
-                #                          "Poor (proportional to welfare loss)"),
-                #              selected = "Universal (fixed amount)"
-                # ),
-                hr(),
-                actionButton("run_sim", "Run policy simulation")
+                h5("Add something on accessibility?"),
               )
             ) |>
             bs_append(
-              title = "Climate scenario",
+              title = "Education",
+              content = tagList(
+                checkboxGroupInput("policy_edu", 
+                             "Education", 
+                             choices = c("Every household has at least primary education",
+                                         "Every household has at least secondary education")
+                ),
+              )
+            ) |>
+            bs_append(
+              title = "Financial inclusion",
               content = tagList(
                 h4("Yet to be implemented"),
-                radioButtons("climate", 
-                             "Climate", 
-                             choices = c("2050 SSP2-4.5", 
-                                         "2050 SSP5-8.5"),
-                             selected = "2050 SSP5-8.5"
+                checkboxGroupInput("policy_fin", 
+                                   "Financial inclusion", 
+                                   choices = c("Every household owns a financial account")
                 ),
-                radioButtons("climatemethod", 
-                             "Method", 
-                             choices = c("Delta"),
-                             selected = "Delta"
+              )
+            )
+          |>
+            bs_append(
+              title = "Digital inclusion",
+              content = tagList(
+                h4("Yet to be implemented"),
+                checkboxGroupInput("policy_dig", 
+                                   "Digital inclusion", 
+                                   choices = c("Every household has internet access",
+                                               "Every household has a mobile phone")
                 ),
-                helpText("Delta: adds CMIP6 ensemble 'delta' fields to historical observations."),
+              )
+            ) |>
+            bs_append(
+              title = "Social protection",
+              content = tagList(
+                h4("Yet to be implemented"),
+                h5("Adaptive SP - cash transfer"),
+                radioButtons("budget_type",
+                             "Budget",
+                             choices = c("Fixed",
+                                         "Share of modelled welfare loss",
+                                         "Share of modelled increase in poverty gap",
+                                         "Proportional to increase in poverty headcount"),
+                             selected = "Fixed"
+                ),
+                radioButtons("trigger_type",
+                             "Trigger",
+                             choices = c("Modelled welfare loss > x",
+                                         "Modelled increase in poverty gap > x",
+                                         "Modelled increase in poverty rate > x",
+                                         "Modelled increase in number of poor > x"),
+                             select = "Modelled increase in poverty rate > x"
+                ),
+                radioButtons("trigger_value",
+                             "Trigger",
+                             choices = c("1-5 year (historical) event",
+                                         "1-10 year (historical) event",
+                                         "1-20 year (historical) event"),
+                             selected = "1-10 year (historical) event"
+                ),
+                radioButtons("cash_targeting",
+                             "Targeting",
+                             choices = c("Universal",
+                                         "Poor",
+                                         "Poor - proportional to welfare",
+                                         "Poor - proportional to modelled welfare loss"),
+                             selected = "Universal"
+                ),
                 hr(),
-                actionButton("run_sim", "Run climate simulation")
+                actionButton("run_policy_sim", "Run policy experiment")
               )
             ) 
         ),
         mainPanel(
           h3("Under development"),
           h3("Step 3 will be updated soon"),
-          h4("Poverty rate  vs probability"),
+          h4("∆ poverty vs exceedance probability"),
           p("(conditional on the selected weather variable)"),
           layout_columns(
             col_widths = c(6, 6),

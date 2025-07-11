@@ -1,54 +1,82 @@
-# Prep surveys v2
+# Prep survey data for wise-app
 
 # load libraries
+library(pins)
+library(haven)
+library(lubridate)
 library(dlw)
+options(dlw.local_dir = "~/dlw/")
 library(duckdbfs)
 library(dplyr)
-library(haven)
-library(openxlsx2)
-library(sf)
+library(nanoparquet)
 
 setwd("../app/")
+#------------------------------------------------------------------------------#
+# Posit connect board for pins
+
+board <- board_connect()
+
+# # remove all existing pins from board
+# pin_delete(board, pin_list(board))
 
 #------------------------------------------------------------------------------#
-# Get WISE-APP variable lists
+# WISE-APP variable list
 
-varlist <- read_xlsx("data/wiseapp_variables.xlsx")
+varlist <- open_dataset("data/wiseapp_variables.csv") |> collect()
 
 gmd_vars <- c(
-  filter(varlist, !is.na(ALL)) |> pull("gmd varname"),
-  filter(varlist, !is.na(`gmd altname`)) |> pull("gmd altname"))
+  filter(varlist, !is.na(ALL)) |> pull(`gmd varname`),
+  filter(varlist, !is.na(`gmd altname`)) |> pull(`gmd altname`))
 
 gmd_hh_vars <- filter(
-  varlist, !is.na(`wiseapp`) & !is.na(ALL) & is.na(`hh aggregation`)) |> 
-  pull("varname")
+  varlist, !is.na(wiseapp) & !is.na(ALL) & is.na(`hh aggregation`)) |> 
+  pull(varname)
+
+wise_vars <- filter(varlist, !is.na(wiseapp)) |> 
+  select(wiseapp, varname, label, datatype)
+
+integer_cols <- filter(wise_vars, datatype == "Integer") |> pull(varname)
+numeric_cols <- filter(wise_vars, datatype == "Numeric") |> pull(varname)
+logical_cols <- filter(wise_vars, datatype == "Binary") |> pull(varname)
+cat_cols <- filter(wise_vars, datatype == "Categorical") |> pull(varname)
+string_cols <- filter(wise_vars, datatype == "String") |> pull(varname)
+
+# pin wiseapp variable list to Posit Connect board for app
+pin_write(board, wise_vars, "varlist", type = "parquet")
 
 #------------------------------------------------------------------------------#
-# Get latest CPI/ICP conversion factors from datalibweb, keep select vars
+# Get latest CPI/ICP conversion factors from datalibweb, keep key vars
 
 cpiicp <- dlw_get_gmd_support("CPIICP") |>
   select(code, countryname, year, survname, datalevel, 
-         cpi2011:cpi2021, icp2011:icp2021)
+         cpi2011:cpi2021, icp2011:icp2021) 
+
+  # could also get from PIP?
 
 #------------------------------------------------------------------------------#
-# Get list of geocoded GMD surveys with H3 module
+# Get list of geocoded GMD surveys with SPAT module
 
 loc_path <- paste0("~/Library/CloudStorage/OneDrive-WBG/",
                    "Household survey locations to H3/LOC/")
 
-survey_list <- list.files(loc_path, recursive = TRUE, "SPAT.dta$")
+spat_list <- list.files(loc_path, recursive = TRUE, "SPAT.dta$")
 
-# filter survey list for loop (optional)
-survey_list <- survey_list[grepl("SEN_2021|TGO_2018", survey_list)]
+  # # filter survey list for loop (optional)
+  # spat_list <- spat_list[grepl("SEN_2021|TGO_2018", spat_list)]
+
+# Initialize survey list for app
+survey_list <- tibble()
+# survey_list <- read_pin(board, "survey_list")
+errors <- c()
 
 #------------------------------------------------------------------------------#
 # Loop over surveys 
 #------------------------------------------------------------------------------#
 
-for (n in 1:length(survey_list)){
+for (n in 1:length(spat_list)){
   
-  code <- sub("/.*", "", survey_list[n])
-  year <- sub("^[^_]*_([^_]*)_.*$", "\\1", survey_list[n])
+  code <- sub("/.*", "", spat_list[n])
+  year <- sub("^[^_]*_([^_]*)_.*$", "\\1", spat_list[n])
   print(paste0(code, " ", year))
   
   # skip if file exists
@@ -63,60 +91,112 @@ for (n in 1:length(survey_list)){
     
     survey <- dlw_get_gmd(code, year, "ALL") 
     
+    if(length(survey)<5){
+      survey <- eval(survey[[1]])
+    }
+    
   }, error = function(e) {
     cat(paste0("Failed to get GMD ALL module for ", code, " ", year))
+    errors <<- c(errors, paste0("Failed to get GMD ALL module for ", code, " ", year))
     error_occurred <<- TRUE
   })
-  if (error_occurred) {next} #skip if fail
+  if (error_occurred || is.character(survey)) {next} #skip if fail
   
-  # convert to duckdb dataset
-  survey <- as_dataset(survey) 
+  # get filename
+  fname_all <- paste0(
+    sub("\\..*", "",list.files(getOption("dlw.local_dir"), 
+                   paste0(code, "_", year,".+GMD_ALL.qs"))[1]), ".dta")
+  
+  # to duckdb
+  survey_db <- as_dataset(survey)
   
   # add GMD variables not in dataset
-  gmd_add <- setdiff(gmd_vars, colnames(survey))
-  for (col in gmd_add) {
-    survey <- mutate(survey, !!col := NA_real_)
+  gmd_add <- setdiff(gmd_vars, colnames(survey_db))
+  if (length(gmd_add)>0){
+  survey_db <- survey_db |>
+    mutate(!!!setNames(rep(list(NA), length(gmd_add)), gmd_add))
   }
-
-  # harmonize different names for variables
-  vars <- colnames(survey)
-   survey <- survey |> 
+  
+  # harmonize different names for the same variable
+   survey_db <- survey_db |> 
      mutate(code = countrycode,
+            hhid = as.character(hhid),
             hhsize = if_else(is.na(hhsize),hsize,hhsize),
             weight = if_else(is.na(weight),weight_p,weight),
             subnatid1 = if_else(is.na(subnatid1),subnatid,subnatid1))
    
   # summarise variables at household level
-   survey <- survey |>
+   survey_db <- survey_db |>
      summarise(
        across(c("t_wage_total", "laborincome", "weight"),
               ~ sum(.x, na.rm = TRUE)),
+       across(c("cellphone"),
+              ~ max(.x, na.rm = TRUE)),
        across(c("literacy", "educat7", "educat5", "educat4","primarycomp"),
               ~ max(.x[age>=15], na.rm = TRUE)),
        educy = mean(educy[age>=15], na.rm = TRUE),
-       depend = if_else(sum(age>=15 & age <65)>0,
-                        (sum(age<15) + sum(age>=65))/sum(age>=15 & age <65),
+       depend = if_else(sum(age>=15 & age <65, na.rm = TRUE)>0,
+                        (sum(age<15, na.rm = TRUE) + sum(age>=65, na.rm = TRUE))/sum(age>=15 & age <65, na.rm = TRUE),
                         NA),
        across(c("male", "lstatus", "empstat", "ocusec", "industrycat10",
                 "industrycat4", "occup", "lstatus_year", "empstat_year", 
                 "ocusec_year", "industrycat10_year", "industrycat4_year", 
                 "occup_year", "njobs"),
               ~ first(.x[relationharm==1])),
-     .by = all_of(gmd_hh_vars)) |> 
-     ungroup() 
+     .by = all_of(gmd_hh_vars)) |> ungroup()
    
-  # check no duplicate hhid
-  if (any(duplicated(pull(survey, hhid)))){
-    cat(paste0("hhid not unique for ", code, " ", year))
-    next
-    }
+   # CHECK no duplicate hhid
+   if (any(duplicated(pull(survey_db, hhid)))){
+     cat(paste0("hhid not unique in ", code, " ", year))
+     errors <- c(errors, paste0("hhid not unique in ", code, " ", year))
+     next
+   }
    
-  # construct household welfare outcomes
-   cpiicp_duckdb <- as_dataset(cpiicp)
-   survey <- survey |>
-     mutate(datalevel = if_else(code %in% c("CHN", "IND"), 
-                                as.numeric(urban), 2)) |>
-     left_join(cpiicp_duckdb) |>
+   # construct binary education variables (missing = no educ / lower bound)
+   survey_db <- survey_db |>
+     mutate(
+       educ_com1 = case_when(
+         educat7>=3 ~ 1, educat5>=3 ~ 1, educat4>=2 ~ 1, .default = 0),
+       educ_com2 = case_when(
+         educat7>=3 ~ 1, educat5>=4 ~ 1, educat4>=5 ~ 1, .default = 0),
+       educ_com3 = case_when(
+         educat7>=4 ~ 1, educat5>=5 ~ 1,  educat4>=6 ~ 1, .default = 0))
+   
+   # construct binary labor force variables (missing = NA)
+   survey_db <- survey_db |>
+     mutate(
+       employed = case_when(lstatus == 1 ~ 1, !is.na(lstatus) ~ 0),
+       unemployed = case_when(lstatus == 2 ~ 1, !is.na(lstatus) ~ 0),
+       notinlf = case_when(lstatus == 3 ~ 1, !is.na(lstatus) ~ 0),
+       employed_year = case_when(lstatus_year == 1 ~ 1, !is.na(lstatus_year) ~ 0),
+       unemployed_year = case_when(lstatus_year == 2 ~ 1, !is.na(lstatus_year) ~ 0),
+       notinlf_year = case_when(lstatus_year == 3 ~ 1, !is.na(lstatus_year) ~ 0),
+       selfemployed = case_when(empstat == 4 ~ 1, !is.na(empstat) ~ 0),
+       selfemployed_year = case_when(empstat_year == 4 ~ 1, !is.na(empstat_year) ~ 0),
+       agriculture = case_when(industrycat4 == 1 ~ 1, !is.na(industrycat4) ~ 0),
+       industry = case_when(industrycat4 == 2 ~ 1, !is.na(industrycat4) ~ 0),
+       services = case_when(industrycat4 == 3 ~ 1, !is.na(industrycat4) ~ 0),
+       agriculture_year = case_when(industrycat4_year == 1 ~ 1, !is.na(industrycat4_year) ~ 0),
+       industry_year = case_when(industrycat4_year == 2 ~ 1, !is.na(industrycat4_year) ~ 0),
+       services_year = case_when(industrycat4_year == 3 ~ 1, !is.na(industrycat4_year) ~ 0))
+   
+   # construct other binary variables (missing = NA)
+   survey_db <- survey_db |>
+     mutate(
+       solidcookfuel = case_when(cooksource == 1 || cooksource == 3 ~ 1, !is.na(cooksource) ~ 0),
+       internet_access = case_when(internet <= 3 ~ 1, internet ==4 ~ 0),
+       roof_finished = case_when(roof > 30 & roof < 40 ~ 1, !is.na(roof) ~ 0),
+       wall_finished = case_when(wall > 30 & wall < 40 ~ 1, !is.na(wall) ~ 0),
+       floor_finished = case_when(floor > 30 & floor < 40 ~ 1, !is.na(floor) ~ 0),
+       ownhouse_secure = case_when(ownhouse == 1 ~ 1, !is.na(ownhouse) ~ 0),
+       renthouse = case_when(ownhouse == 2 ~ 1, !is.na(ownhouse) ~ 0))
+   
+  # construct household level welfare outcomes
+   cpiicp_db <- as_dataset(cpiicp)
+   survey_db <- survey_db |>
+     mutate(
+       datalevel = if_else(code %in% c("CHN", "IND"), as.numeric(urban), 2)) |> 
+     left_join(cpiicp_db) |>
      mutate(
        welf_ppp_2021 = welfare/cpi2021/icp2021/365,
        welf_ppp_2017 = welfare/cpi2017/icp2017/365,
@@ -145,122 +225,161 @@ for (n in 1:length(survey_list)){
        laborincome_lcu_2021 = laborincome/hhsize/cpi2021/365,
        laborincome_lcu_2017 = laborincome/hhsize/cpi2017/365,
        laborincome_lcu_2011 = laborincome/hhsize/cpi2011/365
-     ) |>
-     collect()
+     ) 
    
-  # check $3.00 poverty rate
-   weighted.mean(survey$poor_300ln, survey$weight)
+  # try to merge SPAT data
+   error_occurred <- FALSE
+   tryCatch({
    
-   # merge SPAT data
-  spat <- read_dta(paste0(loc_path, survey_list[n]), encoding = "latin1") 
+  spat <- read_dta(paste0(loc_path, spat_list[n]), encoding = "latin1") 
+  fname_spat <- sub("^(?:[^/]*/){4}(.*)$","\\1", spat_list[n])
+  
+    # spat <- dlw_get_gmd(code, year, "SPAT") # from datalibweb
+  
+  # try merge on hhid_orig if no hhid
+  if (!"hhid" %in% colnames(spat) & "hhid_orig" %in% colnames(spat)){
+    spat$hhid <- spat$hhid_orig 
+  }
+  
+  # add missing date variables
+  add_dates <- setdiff(c("int_year","int_month","int_day"), colnames(spat))
+  if (length(add_dates)>0){
+    spat <- spat |>
+      mutate(!!!setNames(rep(list(NA), length(add_dates)), add_dates))
+  }
+  
+  # fix invalid dates in spat
+  correct_invalid_date <- function(year, month, day) {
+    if (is.na(day)) day <- 1
+    date <- ymd(paste(year, month, day, sep = "-"), quiet = TRUE)
+    if (is.na(date)) {
+      last_day <- days_in_month(ymd(paste(year, month, "01", sep = "-")))
+      if (day > last_day) day <- last_day
+    }
+    return(day)
+  }
+  
+  spat <- spat |>
+    rowwise() |>
+    mutate(
+      int_day = if_else(is.na(int_year) | is.na(int_month), NA,
+                        correct_invalid_date(int_year, int_month, int_day)))
   
   built_area_var <- paste0("built_area_",5*round(as.numeric(year)/5))
-  ntl_var <- paste0("viirs_ntl_",max(2012,as.numeric(year)))
+  ntl_var <- paste0("viirs_ntl_",as.numeric(year))
   
-  spat <- as_dataset(spat) |>
+  spat_db <- as_dataset(spat) |>
       mutate(built_area = .data[[built_area_var]]/1e6/area,
-             viirs_ntl = .data[[ntl_var]]*built_area) |>
+             viirs_ntl = if_else(year>=2012, .data[[ntl_var]]/pop_2020, NA),
+             hhid = as.character(hhid)) |>
       select(-starts_with(c("urban", "survname","built_area_", "viirs_ntl_"))) 
-
-  add_dates <- setdiff(c("int_year","int_month","int_day"), colnames(spat))
-  for (col in add_dates) {
-    spat <- mutate(spat, !!col := NA_real_)
-  }
-  # use dates available from GMD or SPAT
-    survey <- as_dataset(survey) |>
-      rename(int_year_gmd = int_year, int_month_gmd = int_month) |>
-      left_join(spat) |>
-      mutate(int_year = if_else(is.na(int_year), int_year_gmd, int_year),
-             int_month = if_else(is.na(int_month), int_month_gmd, int_month)) |>
-      select(-int_year_gmd, int_month_gmd)
   
-  # construct interview date variable
-  survey <- survey |>
+ # use interview dates from either GMD_SPAT (1st) or GMD_ALL (2nd)
+  survey_db <- survey_db |>
+    rename(int_year_gmd = int_year, int_month_gmd = int_month) |>
+    left_join(spat_db) |>
+    mutate(int_year = if_else(is.na(int_year), int_year_gmd, int_year),
+             int_month = if_else(is.na(int_month), int_month_gmd, int_month))
+  
+   }, error = function(e) {
+     cat(paste0("Failed to merge GMD SPAT module for ", code, " ", year))
+     errors <<- c(errors, paste0("Failed to merge GMD SPAT module for ", code, " ", year))
+     error_occurred <<- TRUE
+   })
+   if (error_occurred) {next} #skip if fail
+   
+  # construct interview date and timestamp variables
+     
+  survey_db <- survey_db |>
     mutate(
       across(c(int_year, int_month, int_day), ~as.integer(.x)),
       int_date = if_else(is.na(int_year) | is.na(int_month), NA,
                          as.Date(if_else(is.na(int_day),
                                  paste0(int_year,"-",int_month,"-01"),
                                  paste0(int_year,"-",int_month,"-",
-                                        int_day)))))
-  
-  # final clean and order variables
-  wise_vars <- filter(varlist, !is.na(wiseapp)) |> pull("varname")
-  
-  integer_cols <- filter(varlist, !is.na(wiseapp) & datatype == "Integer") |>
-    pull("varname")
-  numeric_cols <- filter(varlist, !is.na(wiseapp) & datatype == "Numeric") |>
-    pull("varname")
-  binary_cols <- filter(varlist, !is.na(wiseapp) & datatype == "Binary") |>
-    pull("varname")
-  categorical_cols <- filter(varlist, !is.na(wiseapp) & datatype == "Categorical") |>
-    pull("varname")
-  string_cols <- filter(varlist, !is.na(wiseapp) & datatype == "String" & !varname %in% c("hhid", "loc_id")) |>
-    pull("varname")
-
-  survey_clean <- survey |>
-    select(any_of(wise_vars)) |>
-    mutate(across(any_of(integer_cols), ~ as.integer(.x)),
-           across(any_of(numeric_cols), ~ as.numeric(.x)),
-           across(any_of(binary_cols), ~ as.logical(.x)),
-           across(any_of(categorical_cols), ~ as.integer(.x)),
-           across(any_of(string_cols), ~ as.character(.x))) |>
-    collect() |>
-    mutate(across(any_of(c("hhid", "loc_id")), ~ as.character(.x))) |>
-    select(where(~ !( (all(is.na(.))) || is.character(.) && all(is.na(.) | . == ""))))
+                                        int_day)))),
+      timestamp = case_when(
+        !is.na(int_date) ~ as.Date(paste0(int_year,"-",int_month,"-01"))))
    
-  # save HH level data to parquet
-  write_dataset(survey_clean, paste0("data/surveys/",code, "_", year, ".parquet"))
+  error_occurred <- FALSE
+  tryCatch({
+    
+  # clean and order variables
+  survey_clean <- survey_db |>
+    select(any_of(pull(wise_vars,varname))) |>
+    mutate(across(any_of(c(integer_cols, cat_cols, logical_cols)), as.integer),
+           across(any_of(numeric_cols), as.numeric)) |>
+    collect() |> 
+    mutate(across(any_of(string_cols), as.character)) 
   
-  #----------------------------------------------------------------------------#
-  # Location data for WISE-APP
-  #----------------------------------------------------------------------------#
-  # Load H3 module
-  fname <- paste0(loc_path,
-                  substr(survey_list[n], 1, nchar(survey_list[n]) - 8), 
-                  "H3.dta")
+  }, error = function(e) {
+    cat(paste0("Error collecting data frame for ", code, " ", year))
+    errors <<- c(errors, paste0("Error collecting data frame for ", code, " ", year))
+    error_occurred <<- TRUE
+  })
+  if (error_occurred) {next} #skip if fail
   
-  h3 <- read_dta(fname, encoding = "latin1") 
-  
-  # Save H3 data to parquet
-  write_dataset(h3, paste0("data/surveys/",code, "_", year, "_H3.parquet"))
-  
-  # Aggregate H3 hexagon boundaries to spatial unit (loc_id) level
-  load_h3()
-  load_spatial()
-  
-  loc_dates <- survey |> 
-    distinct(loc_id, urban, int_date) |>
-    summarise(int_dates = str_flatten(int_date, ", "), .by = c(loc_id, urban)) 
-  
-  loc_geo <- as_dataset(h3) |>
-    mutate(geom = st_geomfromtext(h3_cell_to_boundary_wkt(h3_7))) |> 
-    summarise(geom = st_union_agg(geom), .by = c(code, year, loc_id)) |>
-    left_join(loc_dates) |>
-    to_sf(crs = 4326) 
-  
-  # Save interview location data as geopackage
-  st_write(loc_geo,
-           paste0("data/surveys/",code, "_", year, "_LOC.gpkg"),
-           append = FALSE)
+  # add factor levels ??
 
-  rm(survey, spat, h3, loc_geo)
+  # add variable labels? No, labels dropped in parquet file
+  # for (i in 1:nrow(wise_vars)) {
+  #   var <- as.character(wise_vars$varname[i])
+  #   if (var %in% colnames(survey_clean)) {
+  #     attr(survey_clean[[var]], "label") <- as.character(wise_vars$label[i])
+  #   }
+  # }
+  
+  # drop empty columns
+  survey_clean <- survey_clean |>
+    select(where(~ !((all(is.na(.))) || is.character(.) && all(is.na(.) | . == ""))))
+  
+  if(!"loc_id" %in% colnames(survey_clean) & !"int_date" %in% colnames(survey_clean)){
+    next
+    errors <- c(errors, paste0("No loc_id or int_date in ", code, " ", year))
+    }
+  
+  # CHECK $3.00 poverty rate
+  weighted.mean(survey_clean$poor_300ln, survey_clean$weight)
+  
+  # save HH level parquet data to disk
+  write_parquet(survey_clean, 
+                paste0("data/surveys/",code, "_", year, ".parquet"),
+                options = parquet_options(write_minmax_values = FALSE))
+  
+  # Pin HH level parquet data to Posit Connect board for app
+  pin_write(board, survey_clean, paste0(code, "_", year), type = "parquet")
+  
+  #----------------------------------------------------------------------------#
+  # Add survey to list for app
+  #----------------------------------------------------------------------------#
+
+  survey_list = bind_rows(survey_list,
+    data.frame(
+      countryname = pull(survey_clean[1,],countryname), 
+      code = code, 
+      year = year, 
+      hh = nrow(survey_clean), 
+      wiseapp_pin = paste0(code, "_", year),
+      gmd_all = fname_all, 
+      gmd_spat = fname_spat
+    )
+  )
+
+  rm(survey, survey_db, survey_clean, spat)
   close_connection()
 }
 
 #------------------------------------------------------------------------------#
-# Get country listing for app UI
-#------------------------------------------------------------------------------#
 
-files <- list.files("data/surveys", "\\d{4}\\.parquet", full.names = TRUE)
-all_surveys <- open_dataset(files)
+# fix country names in survey list
+survey_list <- survey_list |>
+  mutate(countryname = if_else(code =="CIV", "Côte d'Ivoire", countryname))
 
-survey_list <- all_surveys |> 
-  summarise(n = n(), .by = c(countryname, code, year)) |> 
-  mutate(filename = paste0(code, "_", year, ".parquet"),
-         countryname = if_else(code=="CIV","Cote dIvoire", countryname)) |>
-  arrange(code, year) |>
-  collect() 
+# save country listing to file
+write_parquet(survey_list, "data/surveys.parquet")
 
-write.csv(survey_list, "data/surveys.csv", 
-          row.names = FALSE)
+# pin country listing to Posit Connect board for app
+pin_write(board, survey_list, "surveys", type = "parquet")
+
+# save error log
+write.csv(errors, "data/survey_prep_errors.csv", row.names = FALSE)
