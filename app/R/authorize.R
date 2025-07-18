@@ -1,6 +1,7 @@
 # Check datalibweb subscriptions to GMD data
 
 check_gmd_access <- function(dlw_token) {
+  req(nchar(dlw_token)>20)
 
     # Define base url
     base_url <- "https://datalibwebapiprod.ase.worldbank.org/dlw/api/v1/"
@@ -37,5 +38,4 @@ check_gmd_access <- function(dlw_token) {
   
   # Return the final data frame
   return(surveys)
-  
 }
