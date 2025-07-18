@@ -47,7 +47,7 @@ weather_codes <- gsub("_weather", "",
 # Survey data list
 survey_list_master <- pin_read(board, "bbrunckhorst/surveys") |>
   filter(code %in% weather_codes) |> # keep if there is weather data
-  mutate(external = FALSE) # use to tag surveys with external access
+  mutate(external = TRUE) # use to tag surveys with external access
 
 # Survey variable list
 varlist <- pin_read(board, "bbrunckhorst/varlist")

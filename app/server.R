@@ -57,8 +57,8 @@ server <- function(input, output, session) {
           SearchAll = "Data",
           SearchColumn = "collection",
           SearchValue = "GMD"
-        ) |>
-        req_timeout(60)
+        ) |> 
+        httr2::req_proxy("https://w0lxdshyprd1c01.worldbank.org", 344)
       
       httr2::req_dry_run(req)
       
