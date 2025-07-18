@@ -40,14 +40,44 @@ server <- function(input, output, session) {
   # Observe the action button click
   observeEvent(input$authorize, {
     auth_message("Checking data access...")
-    source("R/authorize.R")
-    tryCatch({
-      surveys(check_gmd_access(input$dlw_token))
+      
+      # Define base url
+      base_url <- "https://datalibwebapiprod.ase.worldbank.org/dlw/api/v1/"
+      
+      # Define the endpoint for the request
+      endpoint <- "SubscriptionRequest"
+      
+      # Build and perform the HTTP request, 
+      req <- httr2::request(base_url) |>
+        httr2::req_url_path_append(endpoint) |>
+        httr2::req_auth_bearer_token(input$dlw_token) |>
+        httr2::req_url_query(
+          PageIndex = "1",
+          PageSize = "3000",
+          SearchAll = "Data",
+          SearchColumn = "collection",
+          SearchValue = "GMD"
+        ) 
+      req_dry_run(req)
+      response <- req |>
+        httr2::req_perform()
+      
+      # Process the response
+      subscriptions_data <- response |>
+        httr2::resp_body_string() |>
+        jsonlite::fromJSON()
+      
+      # Extract, filter, and select the required data
+      subscriptions <- subscriptions_data$subscriptions |>
+        dplyr::filter(region == "GMD") |>
+        dplyr::select(country, year, surveyName, collection, classification) |>
+        dplyr::mutate(code_year = paste0(country, "_", year))
+      
+      surveys(survey_list_master |>
+        dplyr::filter(wiseapp_pin %in% subscriptions$code_year))
+      
       auth_message("Authorization complete")
-    }, error = function(e) {
-      surveys(survey_list_master |> filter(external))
-      auth_message("Authorization failed")
-    })
+
     internalpanel(!internalpanel())
   })
   
