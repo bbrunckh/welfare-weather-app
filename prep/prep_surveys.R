@@ -51,8 +51,6 @@ cpiicp <- dlw_get_gmd_support("CPIICP") |>
   select(code, countryname, year, survname, datalevel, 
          cpi2011:cpi2021, icp2011:icp2021) 
 
-  # could also get from PIP?
-
 #------------------------------------------------------------------------------#
 # Get list of geocoded GMD surveys with SPAT module
 
@@ -62,11 +60,11 @@ loc_path <- paste0("~/Library/CloudStorage/OneDrive-WBG/",
 spat_list <- list.files(loc_path, recursive = TRUE, "SPAT.dta$")
 
   # # filter survey list for loop (optional)
-  # spat_list <- spat_list[grepl("SEN_2021|TGO_2018", spat_list)]
+  # spat_list <- spat_list[grepl("GTM_", spat_list)]
 
 # Initialize survey list for app
 survey_list <- tibble()
-# survey_list <- read_pin(board, "survey_list")
+survey_list <- read_pin(board, "survey_list")
 errors <- c()
 
 #------------------------------------------------------------------------------#

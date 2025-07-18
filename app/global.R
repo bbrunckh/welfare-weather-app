@@ -30,16 +30,28 @@ library(margins)
 library(interactions)
 library(broom)
 
+library(pins)
+
 # App version
-version <- "v0.0.1"
+version <- "v0.0.2"
 
+# connect to Posit board
+board <- board_connect()
+httr::set_config(httr::config(ssl_verifypeer = FALSE, ssl_verifyhost = FALSE))
+
+# Countries with pinned weather data
+weather_codes <- gsub("_weather", "", 
+                      pin_read(board, "bbrunckhorst/weather_data")$plist)
 # Survey data list
-survey_list_master <- read_parquet("data/surveys.parquet") 
+survey_list_master <- pin_read(board, "bbrunckhorst/surveys") |>
+  filter(code %in% weather_codes) |> # keep if there is weather data
+  mutate(external = FALSE) # use to tag surveys with external access
 
-# For testing only!!
-survey_list_master <- survey_list_master |>
-  mutate(access = if_else(code %in% c("BFA", "SEN", "TGO"), 
-                          "public","need dlw subscription"))
+# Survey variable list
+varlist <- pin_read(board, "bbrunckhorst/varlist")
+
+# Weather variable list
+weather_list <- pin_read(board, "bbrunckhorst/weather_varlist")
 
 # Welfare outcomes
 outcomes <- c(
@@ -47,17 +59,12 @@ outcomes <- c(
   "Poor (PPP)",
   "Log welfare (LCU/day)",
   "Poor (LCU)"
-  )
-
-# Survey variable list
-varlist <- read.csv("data/wiseapp_variables.csv")
-
-# Weather variable list
-weather_list <- read.csv("data/weather.csv")
-
+)
 # Intl poverty lines
 pov_lines <- data.frame(
   ppp_year = c(rep(2021,3),rep(2017,3),rep(2011,3)),
   ln = c(3.00, 4.20, 8.30, 2.15, 3.65, 6.85, 1.90, 3.20, 5.50)
   )
-                                 
+          
+# functions
+source("R/authorize.R")

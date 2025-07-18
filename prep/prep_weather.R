@@ -1,112 +1,48 @@
-# H3 indexed weather data for wise-app and GMD_SPAT
+# pins H3 indexed weather data for wise-app
 
 # Load libraries
-library(duckdbfs)
-load_h3()
-load_spatial()
-library(dplyr)
-library(terra)
-library(ecmwfr)
-library(data.table)
-library(sf)
+library(pins)
+library(nanoparquet)
 
-setwd("../app/")
+#------------------------------------------------------------------------------#
+# Posit connect board for pins
+
+board <- board_connect()
+
 #------------------------------------------------------------------------------#
 
-# Get list of countries with H3 survey data
-loc_path <- paste0("~/Library/CloudStorage/OneDrive-WBG/",
-                   "Household survey locations to H3/LOC/")
-codes <- list.files(loc_path, recursive = TRUE, "H3.dta$") |>
-  substr(1, 3) |> unique()
+# countries with processed surveys
+survey_codes <- pin_read(board, "bbrunckhorst/surveys")$code
 
-# weather variables
-weather_list <- read.csv("data/weather.csv")
-weather_names <- gsub(" |-", "_", weather_list$name) |> tolower()
-weather_vars <- weather_list$varname
+# weather data files
+era5_land_path <- "~/Library/CloudStorage/OneDrive-WBG/Household survey locations to H3/02_data/h3/era5land"
+weather_data <- list.files(era5_land_path,".parquet$", full.names = TRUE)
 
-# world bank admin-0 h3_6 cell centroids
-path <- "~/Library/CloudStorage/OneDrive-WBG/Household survey locations to H3/02_data/"
-adm0_h3_6 <- open_dataset(paste0(path, "boundaries_h3_7.parquet")) |>
-  mutate(h3 = h3_cell_to_parent(h3_7, 6L)) |>
-  distinct(code, h3) |>
-  mutate(lon = h3_cell_to_lng(h3), lat = h3_cell_to_lat(h3)) |>
-  write_dataset("data/temp/adm0_h3_6.parquet")
+# filter to files < 250 MB
+file_info <- file.info(weather_data)
+max_size_bytes <- 250 * 1024^2 
+small_files <- rownames(file_info)[file_info$size < max_size_bytes]
 
-# loop over countries
-for (c in codes){
+# pin files
+plist <- c()
+for (f in small_files){
+  code <- substr(f, 108, 110)
+  print(code)
   
-  print(c)
+  # skip if no processed survey data
+  if (!code %in% survey_codes) next
   
-  # skip if no survey data prepared...
-  if(length(list.files("data/surveys/",paste0(c,"_.+.parquet")))==0){next}
-  
-  # skip if file exists
-  if(file.exists(paste0("data/weather/", c,"_weather.parquet"))){next}
-  
-  # get H3 cell centroids covering country 
-  h3_points <- open_dataset("data/temp/adm0_h3_6.parquet") |>
-  filter(code == c) |>
-  collect() 
-  
-  #aoi
-  area <- c(ceiling(max(h3_points$lat)*10)/10,
-            floor(min(h3_points$lon)*10)/10,
-            floor(min(h3_points$lat)*10)/10,
-            ceiling(max(h3_points$lon)*10)/10)
-  
-  # build batch request - all weather variables in list
-  dynamic_request <- wf_archetype(    
-    request <- list(
-      dataset_short_name = "multi-origin-c3s-atlas",
-      origin = "era5_land",
-      domain = "global",
-      period = "1950-2024",
-      variable = "monthly_temperature",
-      bias_adjustment = "no_bias_adjustment",
-      area = area,
-      target = "t.zip"
-    ),
-    dynamic_fields = c("variable", "target"))
-  
-  # get data - all weather variables in list
-  batch_request <- lapply(1:length(weather_vars), function(n) {
-    dynamic_request(variable = weather_names[n], target = paste0(weather_vars[n], ".zip"))
-  })
-  
-  wf_request_batch(batch_request, workers = 10, path = "data/temp",
-                   time_out = 10000, retry = 10)
-  
-  # unzip and open files
-  lapply(list.files("data/temp",".zip", full.names = T), function(zip_file) {
-    unzip(zip_file, exdir = "data/temp")
-  })
-  
-  raster <- rast(list.files("data/temp",".nc$", full.names = T))
-  names(raster) <- paste0(sub("_.*$", "", names(raster)),"_",time(raster))
-  crs(raster) <- "EPSG:4326"
-  
-  # extract values at H3 centroids
-  h3_weather <- cbind(as.data.frame(h3_points[,1:2]),
-                      extract(raster,h3_points[,3:4], method = "simple",ID = FALSE)) |>
-    setDT() |>
-    melt(id.vars = c("code", "h3"),
-         measure.vars = measure(value.name, timestamp, sep = "_")) 
-
-  # clean and save H3 weather (full country coverage)
-  h3_weather_pqt <- as_dataset(h3_weather) |>
-    mutate(timestamp = as.Date(timestamp),
-           across(c("tx35","tx40","tr","r01","r10","r20"), ~ round(.x, 0)),
-           across(c("t","tn","tx","dtr","tnn","txx","r","sdii",
-                    "rx1day","rx5day"), ~ round(.x, 1)),
-           across(c("mrsos","spi6","spei6"), ~ round(.x, 2))) |>
-    rename(h3_6 = h3) |>
-    select(code, h3_6, timestamp, all_of(weather_vars)) |>
-    write_dataset(paste0("data/weather/",c, "_weather.parquet"))
-  
-  # delete temporary files
-  rm(raster, h3_points, h3_weather)
-  unlink("data/temp/*")
+  # pin to connect board
+  pin_name <- paste0(code, "_weather")
+  weather <- read_parquet(f)
+  pin_write(board, weather, pin_name, type = "parquet")
+  plist <- c(plist, pin_name)
 }
 
-#------------------------------------------------------------------------------#
+# save list of pinned weather data
+write.csv(plist, "../app/data/weather_data.csv", row.names = FALSE)
+pin_write(board, as.data.frame(plist), "weather_data", type = "parquet")
 
+# pin weather variable list
+weather_list <- read.csv("~/Library/CloudStorage/OneDrive-WBG/Household survey locations to H3/02_data/era5land_varlist.csv")
+pin_write(board, weather_list, "weather_varlist", type = "parquet")

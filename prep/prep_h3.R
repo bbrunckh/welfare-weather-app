@@ -27,6 +27,9 @@ loc_path <- paste0("~/Library/CloudStorage/OneDrive-WBG/",
 
 h3_list <- list.files(loc_path, recursive = TRUE, "H3.dta$") 
 
+weather_codes <- gsub("_weather", "", 
+                      pin_read(board, "bbrunckhorst/weather_data")$plist)
+
 #------------------------------------------------------------------------------#
 # Loop over surveys 
 
@@ -39,6 +42,9 @@ for (n in 1:length(h3_list)){
   
   # skip if no survey data prepared...
   if(!file.exists(paste0("data/surveys/",code,"_", year, ".parquet"))){next}
+  
+  # skip if no weather data
+  if(!code %in% weather_codes){next}
   
   # skip if file exists
   # if(file.exists(paste0("data/surveys/",code,"_", year, "_H3.parquet")) & 
@@ -54,7 +60,7 @@ for (n in 1:length(h3_list)){
                 options = parquet_options(write_minmax_values = FALSE))
   
   # Pin H3 level parquet data to Posit Connect board for app
-  # pin_write(board, h3, paste0(code, "_", year,"_H3"), type = "parquet")
+  pin_write(board, h3, paste0(code, "_", year,"_H3"), type = "parquet")
 
   # get interview dates and number of households from processed survey data
   loc_dates <- open_dataset(paste0("data/surveys/",code,"_", year, ".parquet")) |>
@@ -75,7 +81,7 @@ for (n in 1:length(h3_list)){
                 options = parquet_options(write_minmax_values = FALSE))
   
   # Pin loc_id level parquet data to Posit Connect board for app
-  # pin_write(board, loc_geo, paste0(code, "_", year,"_LOC"), type = "parquet")
+  pin_write(board, loc_geo, paste0(code, "_", year,"_LOC"), type = "parquet")
   
 }
 #------------------------------------------------------------------------------#

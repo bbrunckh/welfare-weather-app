@@ -8,8 +8,8 @@ server <- function(input, output, session) {
   #----------------------------------------------------------------------------#
   
   internalpanel <- reactiveVal(FALSE) # visibility of the password panel
-  auth_message <- reactiveVal("")
-  surveys <- reactiveVal(survey_list_master |> filter(access == "public"))
+  auth_message <- reactiveVal("Checking data access...")
+  surveys <- reactiveVal(survey_list_master |> filter(external))
   
   #----------------------------------------------------------------------------#
   # SAMPLE UI
@@ -32,70 +32,22 @@ server <- function(input, output, session) {
     }
   })
   
+  # Authorization status
   output$authorize_status <- renderText({
+    req(input$authorize)
     auth_message()
   })
   
   # Observe the action button click
   observeEvent(input$authorize, {
-    internalpanel(!internalpanel())
-    auth_message("Checking data subscriptions...")
     tryCatch({
-      
-      # Function to create a single request
-      create_request <- function(code, year) {
-        
-        url <- "https://datalibwebapiprod.ase.worldbank.org/dlw/api/v1/"
-        endpoint <- "FileInformation/GetFileInfo"
-        
-        # Define the form data for this specific request
-        form_data <- list(
-          Server = "GMD", 
-          Country = code, 
-          Collection = "GMD", 
-          Year = year
-        )
-        
-        # Build the httr2 request
-        req <- httr2::request(url) |>
-          httr2::req_url_path_append(endpoint) |>
-          httr2::req_auth_bearer_token(input$dlw_token) |>
-          httr2::req_body_form(!!!form_data) 
-      }
-      # list of requests
-      req_list <- mapply(
-        create_request,
-        code = survey_list_master$code,
-        year = survey_list_master$year,
-        SIMPLIFY = FALSE 
-      )
-      
-      # get successful responses
-      resps <- httr2::req_perform_parallel(
-        req_list, on_error = "continue", progress = FALSE) |> 
-        httr2::resps_successes()
-      
-      # read csv responses
-      csv_list <- function(response) {
-        response |> 
-          httr2::resp_body_string() |>
-          readr::read_csv(show_col_types = FALSE)
-      }
-      # combine csv responses, filter to subscribed files
-      subscribed <- do.call(rbind, lapply(resps, csv_list)) |>
-        filter(UserSubscribed == "Subscribed")
-      
-      dlw_survey_list <- survey_list_master |>
-        filter(gmd_all %in% subscribed$FileName) |>
-        bind_rows(surveys())
-      
-      surveys(dlw_survey_list)
+      surveys(check_gmd_access(input$dlw_token))
       auth_message("Authorization complete")
-      
     }, error = function(e) {
+      surveys(survey_list_master |> filter(external))
       auth_message("Authorization failed")
     })
-    
+    internalpanel(!internalpanel())
   })
   
   # country selection
@@ -236,15 +188,18 @@ server <- function(input, output, session) {
         survey_files <- c(survey_files, country_data)
       }
     }
-    return(paste0("data/surveys/", as.list(as.character(survey_files)), ".parquet"))
+    return(paste0("bbrunckhorst/", as.character(survey_files)))
   })
   
   # load survey data for selected sample
   survey_data <- reactive({
-    
-    # read relevant parquet files (lazily)
     req(input$country)
-    survey_data <- read_parquet_duckdb(survey_data_files(),
+    
+    # read relevant parquet files
+    local_paths <- lapply(survey_data_files(), function(pin) {
+      pin_download(board, pin)
+    })
+    survey_data <- read_parquet_duckdb(unlist(local_paths),
                                        options = list(union_by_name = TRUE),
                                        prudence = "lavish") 
     
@@ -285,8 +240,8 @@ server <- function(input, output, session) {
                                                 welf_select()$label))))
     }
     # logical data columns > integer, categorical and FE data columns > factors
-    cats <- filter(varlist, !is.na(wiseapp) & datatype == "Categorical") |>
-      pull("varname")
+    
+    cats <- filter(varlist, !is.na(wiseapp), datatype == "Categorical") |> pull(varname)
     fe <- filter(varlist, !is.na(wiseapp) & wiseapp == "ID & Fixed effects" & !varname %in% c("countryname", "survname","hhid", "year", "timestamp", "int_date")) |>
       pull("varname")
     
@@ -317,9 +272,10 @@ server <- function(input, output, session) {
   # Loads survey interview location data
   survey_geo <- reactive({
     req(input$country)
-    files <- sub("\\.parquet$", "_LOC.parquet", survey_data_files())
+    
+    pin_names <- paste0(survey_data_files(), "_LOC")
 
-    survey_geo <- do.call(rbind, lapply(files, read_parquet)) |>
+    survey_geo <- do.call(rbind, lapply(pin_names, function(pin) pin_read(board, pin))) |>
       filter(case_when(
         input$sample_type == "All households" ~ !is.na(loc_id),
         input$sample_type == "Rural households" ~ urban == 0,
@@ -688,35 +644,38 @@ server <- function(input, output, session) {
   # Reactive expression that loads survey H3 data
   survey_h3 <- reactive({
     req(input$country)
-    files <- sub("\\.parquet$", "_H3.parquet", survey_data_files())
-    survey_h3 <- read_parquet_duckdb(files, options = list(union_by_name = TRUE),
-                        prudence = "lavish") 
     
-    # create h3 panel ID
-    edge_list <- survey_h3 |>
-      inner_join(survey_h3, by = "h3_7", relationship = "many-to-many") |>
-      filter(loc_id.x != loc_id.y) |>
-      select(from = loc_id.x, to = loc_id.y) |>
-      distinct() |> collect() # Get unique pairs
+    pin_names <- paste0(survey_data_files(), "_H3")
+    local_paths <- lapply(pin_names, function(pin) pin_download(board, pin))
     
-    loc_graph <- graph_from_data_frame(edge_list, directed = FALSE)
-    all_loc_ids <- as.character(unique(survey_h3$loc_id))
-    loc_graph <- add_vertices(
-      loc_graph,
-      nv = length(setdiff(all_loc_ids, V(loc_graph)$name)),
-      attr = list(name = setdiff(all_loc_ids, V(loc_graph)$name))
-    )
-    components <- components(loc_graph)
-    group_mapping <- tibble(
-      loc_id = as.numeric(names(components$membership)),
-      h3_loc_id = components$membership
-    )
-    survey_h3 <- survey_h3 |>
-      left_join(group_mapping, by = "loc_id") |>
-      mutate(loc_id = as.character(loc_id),
-             h3_loc_id = as.character(h3_loc_id)) |> 
-      as_duckdb_tibble()
+    survey_h3 <- read_parquet_duckdb(unlist(local_paths), 
+                                     options = list(union_by_name = TRUE),
+                                     prudence = "lavish") 
     
+    # # create h3 panel ID
+    # edge_list <- survey_h3 |>
+    #   inner_join(survey_h3, by = "h3_7", relationship = "many-to-many") |>
+    #   filter(loc_id.x != loc_id.y) |>
+    #   select(from = loc_id.x, to = loc_id.y) |>
+    #   distinct() |> collect() # Get unique pairs
+    # 
+    # loc_graph <- graph_from_data_frame(edge_list, directed = FALSE)
+    # all_loc_ids <- as.character(unique(survey_h3$loc_id))
+    # loc_graph <- add_vertices(
+    #   loc_graph,
+    #   nv = length(setdiff(all_loc_ids, V(loc_graph)$name)),
+    #   attr = list(name = setdiff(all_loc_ids, V(loc_graph)$name))
+    # )
+    # components <- components(loc_graph)
+    # group_mapping <- tibble(
+    #   loc_id = as.numeric(names(components$membership)),
+    #   h3_loc_id = components$membership
+    # )
+    # survey_h3 <- survey_h3 |>
+    #   left_join(group_mapping, by = "loc_id") |>
+    #   mutate(loc_id = as.character(loc_id),
+    #          h3_loc_id = as.character(h3_loc_id)) |> 
+    #   as_duckdb_tibble()
     
     return(survey_h3)
   })
@@ -730,14 +689,9 @@ server <- function(input, output, session) {
     return(weather_vars)
   })
   
-  # load selected weather variables for survey locations (lazily)
+  # load selected weather variables for survey locations 
   weather_data <- reactive({
     req(input$country)
-    
-    # lookup weather data files
-    codes <- filter(surveys(), countryname %in% input$country) |>
-      pull(code) |> unique()
-    files <- paste0("data/weather/",codes,"_weather.parquet")
     
     # dates for weather vars (use 1990-2024 as default)
     survey_dates <- survey_data() |> pull(timestamp) |> na.omit()
@@ -748,7 +702,12 @@ server <- function(input, output, session) {
                          max(survey_date_max, as.Date(paste0(max(input$yearRange),"-12-01"))), 
                          by = "1 month")
     # get data
-    weather <- read_parquet_duckdb(files, options = list(union_by_name = TRUE),
+    pin_names <- paste0(unique(
+      substr(survey_data_files(), 1, nchar(survey_data_files())-4)), "weather")
+    local_paths <- lapply(pin_names, function(pin) pin_download(board, pin))
+    
+    weather <- read_parquet_duckdb(unlist(local_paths), 
+                                   options = list(union_by_name = TRUE),
                                    prudence = "lavish") 
     
     # filter to selected weather variables, sample h3 cells & date range
@@ -868,23 +827,23 @@ server <- function(input, output, session) {
   
   # Reactive expression that matches survey data to weather data
   loc_weather <- reactive({
-    req(input$weather_variable_selector, input$country)
+    req(input$weather_variable_selector, input$country, survey_h3(), h3_weather())
     
     loc_weather <- survey_h3() |>
       left_join(h3_weather()) |>
       summarise(across(starts_with("haz"), ~sum(.x*pop_2020, na.rm = TRUE)/sum(pop_2020, na.rm = TRUE)),
-                .by = c(code, year, survname, h3_loc_id, loc_id, timestamp)) 
+                .by = c(code, year, survname, loc_id, timestamp)) |>
+      mutate(loc_id = as.character(loc_id))
     
     return(loc_weather)
   })
     
     survey_weather <- reactive({
-    req(input$weather_variable_selector, input$country)
+    req(input$weather_variable_selector, input$country, loc_weather())
     
     survey_weather <- survey_data() |>
       left_join(loc_weather()) |>
-      mutate(year = as.factor(year),
-             h3_loc_id = as.factor(h3_loc_id)) |> # for Fixed Effects
+      mutate(year = as.factor(year)) |>
       group_by(code, year, survname) |>
       mutate(weight = weight / sum(weight)) |> # normalize weights per survey.
       ungroup()
@@ -925,7 +884,8 @@ server <- function(input, output, session) {
       # Weather distribution plots
         
       output$weather_dist1 <- renderPlot({
-        req(survey_weather(),haz_vars())
+        req(survey_weather(), haz_vars())
+        
         p <- ggplot(survey_weather(), aes(
           x = .data[[haz_vars()[1]]],
           y = countryyear,
@@ -942,7 +902,7 @@ server <- function(input, output, session) {
       })
       
       output$weather_dist2 <- renderPlot({
-        req(length(input$weather_variable_selector) > 1,survey_weather(),haz_vars())
+        req(length(input$weather_variable_selector) > 1, survey_weather(), haz_vars())
         
         p <- ggplot(survey_weather(), aes(
           x = .data[[haz_vars()[2]]],
@@ -1079,7 +1039,7 @@ server <- function(input, output, session) {
 
   hh_varlist <- reactive({
     req(input$country)
-    filter(varlist, wiseapp == "HH characteristics") |>
+    filter(varlist, wiseapp == "HH characteristics" & datatype %in% c("Numeric","Binary")) |>
     select(varname, label) |> filter(varname %in% colnames(survey_weather()))
   })
   

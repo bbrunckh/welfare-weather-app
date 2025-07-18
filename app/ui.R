@@ -307,10 +307,11 @@ ui <- navbarPage(
                                          "Poor - proportional to modelled welfare loss"),
                              selected = "Universal"
                 ),
-                hr(),
-                actionButton("run_policy_sim", "Run policy experiment")
+                
               )
-            ) 
+            ),
+          hr(),
+          actionButton("run_policy_sim", "Run policy experiment")
         ),
         mainPanel(
           h3("Under development"),
