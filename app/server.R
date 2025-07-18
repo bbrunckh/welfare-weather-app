@@ -40,6 +40,7 @@ server <- function(input, output, session) {
   # Observe the action button click
   observeEvent(input$authorize, {
     auth_message("Checking data access...")
+    source("R/authorize.R")
     tryCatch({
       surveys(check_gmd_access(input$dlw_token))
       auth_message("Authorization complete")
