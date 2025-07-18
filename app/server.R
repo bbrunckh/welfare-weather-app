@@ -8,7 +8,7 @@ server <- function(input, output, session) {
   #----------------------------------------------------------------------------#
   
   internalpanel <- reactiveVal(FALSE) # visibility of the password panel
-  auth_message <- reactiveVal("Checking data access...")
+  auth_message <- reactiveVal("")
   surveys <- reactiveVal(survey_list_master |> filter(external))
   
   #----------------------------------------------------------------------------#
@@ -40,6 +40,7 @@ server <- function(input, output, session) {
   
   # Observe the action button click
   observeEvent(input$authorize, {
+    auth_message("Checking data access...")
     tryCatch({
       surveys(check_gmd_access(input$dlw_token))
       auth_message("Authorization complete")
