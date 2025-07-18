@@ -57,8 +57,11 @@ server <- function(input, output, session) {
           SearchAll = "Data",
           SearchColumn = "collection",
           SearchValue = "GMD"
-        ) 
-      req_dry_run(req)
+        ) |>
+        req_timeout(60)
+      
+      httr2::req_dry_run(req)
+      
       response <- req |>
         httr2::req_perform()
       
