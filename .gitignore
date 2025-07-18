@@ -55,7 +55,7 @@
 !/**/*.Rmd
 !/**/*.Rproj
 !/**/*.qmd
-!/**/*.Rprofile
+# !/**/*.Rprofile
 !/**/renv/
 
 # Still ignore user file for R projects
