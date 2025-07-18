@@ -1,4 +1,5 @@
 source("global.R")
+source("R/authorize.R")
 
 # Define the Server logic
 server <- function(input, output, session) {
