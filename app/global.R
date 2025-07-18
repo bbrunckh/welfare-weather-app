@@ -6,7 +6,7 @@ library(bsplus)
 library(readr)
 library(nanoparquet)
 
-library(igraph)
+# library(igraph)
 library(duckplyr)
 library(dplyr)
 library(sf)

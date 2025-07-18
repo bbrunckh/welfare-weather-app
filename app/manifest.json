@@ -2094,6 +2094,79 @@
         "RemoteSha": "1.6.16"
       }
     },
+    "httr": {
+      "Source": "CRAN",
+      "Repository": "https://packagemanager.posit.co/cran/latest",
+      "description": {
+        "Package": "httr",
+        "Title": "Tools for Working with URLs and HTTP",
+        "Version": "1.4.7",
+        "Authors@R": "c(\n    person(\"Hadley\", \"Wickham\", , \"hadley@posit.co\", role = c(\"aut\", \"cre\")),\n    person(\"Posit, PBC\", role = c(\"cph\", \"fnd\"))\n  )",
+        "Description": "Useful tools for working with HTTP organised by HTTP verbs\n    (GET(), POST(), etc). Configuration functions make it easy to control\n    additional request components (authenticate(), add_headers() and so\n    on).",
+        "License": "MIT + file LICENSE",
+        "URL": "https://httr.r-lib.org/, https://github.com/r-lib/httr",
+        "BugReports": "https://github.com/r-lib/httr/issues",
+        "Depends": "R (>= 3.5)",
+        "Imports": "curl (>= 5.0.2), jsonlite, mime, openssl (>= 0.8), R6",
+        "Suggests": "covr, httpuv, jpeg, knitr, png, readr, rmarkdown, testthat\n(>= 0.8.0), xml2",
+        "VignetteBuilder": "knitr",
+        "Config/Needs/website": "tidyverse/tidytemplate",
+        "Encoding": "UTF-8",
+        "RoxygenNote": "7.2.3",
+        "NeedsCompilation": "no",
+        "Packaged": "2023-08-15 02:56:56 UTC; hadleywickham",
+        "Author": "Hadley Wickham [aut, cre],\n  Posit, PBC [cph, fnd]",
+        "Maintainer": "Hadley Wickham <hadley@posit.co>",
+        "Repository": "RSPM",
+        "Date/Publication": "2023-08-15 09:00:02 UTC",
+        "Built": "R 4.5.0; ; 2025-04-06 04:43:05 UTC; unix",
+        "RemoteType": "standard",
+        "RemotePkgRef": "httr",
+        "RemoteRef": "httr",
+        "RemoteRepos": "https://packagemanager.posit.co/cran/latest",
+        "RemoteReposName": "CRAN",
+        "RemotePkgPlatform": "aarch64-apple-darwin20",
+        "RemoteSha": "1.4.7"
+      }
+    },
+    "httr2": {
+      "Source": "CRAN",
+      "Repository": "https://packagemanager.posit.co/cran/latest",
+      "description": {
+        "Package": "httr2",
+        "Title": "Perform HTTP Requests and Process the Responses",
+        "Version": "1.1.2",
+        "Authors@R": "c(\n    person(\"Hadley\", \"Wickham\", , \"hadley@posit.co\", role = c(\"aut\", \"cre\")),\n    person(\"Posit Software, PBC\", role = c(\"cph\", \"fnd\")),\n    person(\"Maximilian\", \"Girlich\", role = \"ctb\")\n  )",
+        "Description": "Tools for creating and modifying HTTP requests, then\n    performing them and processing the results. 'httr2' is a modern\n    re-imagining of 'httr' that uses a pipe-based interface and solves\n    more of the problems that API wrapping packages face.",
+        "License": "MIT + file LICENSE",
+        "URL": "https://httr2.r-lib.org, https://github.com/r-lib/httr2",
+        "BugReports": "https://github.com/r-lib/httr2/issues",
+        "Depends": "R (>= 4.0)",
+        "Imports": "cli (>= 3.0.0), curl (>= 6.2.1), glue, lifecycle, magrittr,\nopenssl, R6, rappdirs, rlang (>= 1.1.0), vctrs (>= 0.6.3),\nwithr",
+        "Suggests": "askpass, bench, clipr, covr, docopt, httpuv, jose, jsonlite,\nknitr, later (>= 1.4.0), nanonext, paws.common, promises,\nrmarkdown, testthat (>= 3.1.8), tibble, webfakes, xml2",
+        "VignetteBuilder": "knitr",
+        "Config/Needs/website": "tidyverse/tidytemplate",
+        "Config/testthat/edition": "3",
+        "Config/testthat/parallel": "true",
+        "Config/testthat/start-first": "multi-req, resp-stream, req-perform",
+        "Encoding": "UTF-8",
+        "RoxygenNote": "7.3.2",
+        "NeedsCompilation": "no",
+        "Packaged": "2025-03-25 18:33:11 UTC; hadleywickham",
+        "Author": "Hadley Wickham [aut, cre],\n  Posit Software, PBC [cph, fnd],\n  Maximilian Girlich [ctb]",
+        "Maintainer": "Hadley Wickham <hadley@posit.co>",
+        "Repository": "RSPM",
+        "Date/Publication": "2025-03-26 06:20:02 UTC",
+        "Built": "R 4.5.0; ; 2025-04-09 06:26:37 UTC; unix",
+        "RemoteType": "standard",
+        "RemoteRef": "httr2",
+        "RemotePkgRef": "httr2",
+        "RemoteRepos": "https://packagemanager.posit.co/cran/latest",
+        "RemoteReposName": "CRAN",
+        "RemotePkgPlatform": "aarch64-apple-darwin20",
+        "RemoteSha": "1.1.2"
+      }
+    },
     "huxtable": {
       "Source": "CRAN",
       "Repository": "https://packagemanager.posit.co/cran/latest",
@@ -3036,6 +3109,42 @@
         "RemoteSha": "2.4"
       }
     },
+    "nanoparquet": {
+      "Source": "CRAN",
+      "Repository": "https://packagemanager.posit.co/cran/latest",
+      "description": {
+        "Package": "nanoparquet",
+        "Title": "Read and Write 'Parquet' Files",
+        "Version": "0.4.2",
+        "Authors@R": "c(\n    person(\"Gábor\", \"Csárdi\", role = c(\"aut\", \"cre\"), email = \"csardi.gabor@gmail.com\"),\n    person(\"Hannes\", \"Mühleisen\", role = c(\"aut\", \"cph\"), comment = c(ORCID = \"0000-0001-8552-0029\")),\n    person(\"Google Inc.\", role = \"cph\"),\n    person(\"Apache Software Foundation\", role = \"cph\"),\n    person(\"Posit Software, PBC\", role = \"cph\"),\n    person(\"RAD Game Tools\", role = \"cph\"),\n    person(\"Valve Software\", role = \"cph\"),\n    person(\"Tenacious Software LLC\", role = \"cph\"),\n    person(\"Facebook, Inc.\", role = \"cph\"))",
+        "Description": "Self-sufficient reader and writer for flat 'Parquet' files.\n    Can read most 'Parquet' data types. Can write many 'R' data types,\n    including factors and temporal types. See docs for limitations.",
+        "Depends": "R (>= 4.0.0)",
+        "License": "MIT + file LICENSE",
+        "URL": "https://github.com/r-lib/nanoparquet,\nhttps://nanoparquet.r-lib.org/",
+        "BugReports": "https://github.com/r-lib/nanoparquet/issues",
+        "Encoding": "UTF-8",
+        "Suggests": "arrow, bit64, DBI, duckdb, hms, mockery, pillar, processx,\nrprojroot, spelling, testthat, tzdb, withr",
+        "RoxygenNote": "7.3.2.9000",
+        "Config/testthat/edition": "3",
+        "Config/Needs/website": "tidyverse/tidytemplate, r-lib/pkgdown, dplyr, gt,\ngtExtras, knitr, nycflights13, prettyunits, quarto, rmarkdown,\nsessioninfo, svglite",
+        "Language": "en-US",
+        "Biarch": "true",
+        "NeedsCompilation": "yes",
+        "Packaged": "2025-02-22 10:23:40 UTC; gaborcsardi",
+        "Author": "Gábor Csárdi [aut, cre],\n  Hannes Mühleisen [aut, cph] (<https://orcid.org/0000-0001-8552-0029>),\n  Google Inc. [cph],\n  Apache Software Foundation [cph],\n  Posit Software, PBC [cph],\n  RAD Game Tools [cph],\n  Valve Software [cph],\n  Tenacious Software LLC [cph],\n  Facebook, Inc. [cph]",
+        "Maintainer": "Gábor Csárdi <csardi.gabor@gmail.com>",
+        "Repository": "RSPM",
+        "Date/Publication": "2025-02-22 10:50:03 UTC",
+        "Built": "R 4.5.0; x86_64-pc-linux-gnu; 2025-04-09 06:08:32 UTC; unix",
+        "RemoteType": "standard",
+        "RemoteRef": "nanoparquet",
+        "RemotePkgRef": "nanoparquet",
+        "RemoteRepos": "https://packagemanager.posit.co/cran/latest",
+        "RemoteReposName": "CRAN",
+        "RemotePkgPlatform": "aarch64-apple-darwin20",
+        "RemoteSha": "0.4.2"
+      }
+    },
     "nlme": {
       "Source": "CRAN",
       "Repository": "https://packagemanager.posit.co/cran/latest",
@@ -3312,6 +3421,43 @@
         "Repository": "CRAN",
         "Date/Publication": "2025-04-05 13:40:02 UTC",
         "Built": "R 4.5.0; ; 2025-04-05 15:16:23 UTC; unix"
+      }
+    },
+    "pins": {
+      "Source": "CRAN",
+      "Repository": "https://packagemanager.posit.co/cran/latest",
+      "description": {
+        "Type": "Package",
+        "Package": "pins",
+        "Title": "Pin, Discover, and Share Resources",
+        "Version": "1.4.1",
+        "Authors@R": "c(\n    person(\"Julia\", \"Silge\", , \"julia.silge@posit.co\", role = c(\"cre\", \"aut\"),\n           comment = c(ORCID = \"0000-0002-3671-836X\")),\n    person(\"Hadley\", \"Wickham\", , \"hadley@posit.co\", role = \"aut\",\n           comment = c(ORCID = \"0000-0003-4757-117X\")),\n    person(\"Javier\", \"Luraschi\", , \"jluraschi@gmail.com\", role = \"aut\"),\n    person(\"Posit Software, PBC\", role = c(\"cph\", \"fnd\"))\n  )",
+        "Description": "Publish data sets, models, and other R objects, making it\n    easy to share them across projects and with your colleagues. You can\n    pin objects to a variety of \"boards\", including local folders (to\n    share on a networked drive or with 'DropBox'), 'Posit Connect',\n    'AWS S3', and more.",
+        "License": "Apache License (>= 2)",
+        "URL": "https://pins.rstudio.com/, https://github.com/rstudio/pins-r",
+        "BugReports": "https://github.com/rstudio/pins-r/issues",
+        "Depends": "R (>= 3.6)",
+        "Imports": "cli, digest, fs, generics, glue, httr, jsonlite, lifecycle,\nmagrittr, purrr (>= 1.0.0), rappdirs, rlang (>= 1.1.0), tibble,\nwhisker, withr (>= 2.4.3), yaml",
+        "Suggests": "archive, arrow, AzureStor, covr, data.table, datasets,\nfilelock, gitcreds, googleCloudStorageR, googledrive, httr2,\nids, knitr, Microsoft365R, mime, mockery, nanoparquet, openssl,\npaws.storage, qs, R.utils, rmarkdown, rsconnect, shiny, sodium,\ntestthat (>= 3.1.7), webfakes (>= 1.2.0), xml2, zip",
+        "VignetteBuilder": "knitr",
+        "Config/Needs/website": "tidyverse/tidytemplate",
+        "Config/testthat/edition": "3",
+        "Encoding": "UTF-8",
+        "RoxygenNote": "7.3.2",
+        "NeedsCompilation": "no",
+        "Packaged": "2025-04-30 01:40:13 UTC; juliasilge",
+        "Author": "Julia Silge [cre, aut] (<https://orcid.org/0000-0002-3671-836X>),\n  Hadley Wickham [aut] (<https://orcid.org/0000-0003-4757-117X>),\n  Javier Luraschi [aut],\n  Posit Software, PBC [cph, fnd]",
+        "Maintainer": "Julia Silge <julia.silge@posit.co>",
+        "Repository": "RSPM",
+        "Date/Publication": "2025-04-30 02:30:06 UTC",
+        "Built": "R 4.5.0; ; 2025-04-30 06:39:08 UTC; unix",
+        "RemoteType": "standard",
+        "RemoteRef": "pins",
+        "RemotePkgRef": "pins",
+        "RemoteRepos": "https://packagemanager.posit.co/cran/latest",
+        "RemoteReposName": "CRAN",
+        "RemotePkgPlatform": "aarch64-apple-darwin20",
+        "RemoteSha": "1.4.1"
       }
     },
     "pkgconfig": {
@@ -4882,6 +5028,37 @@
         "RemoteSha": "1.4.8"
       }
     },
+    "whisker": {
+      "Source": "CRAN",
+      "Repository": "https://packagemanager.posit.co/cran/latest",
+      "description": {
+        "Package": "whisker",
+        "Maintainer": "Edwin de Jonge <edwindjonge@gmail.com>",
+        "License": "GPL-3",
+        "Title": "{{mustache}} for R, Logicless Templating",
+        "Type": "Package",
+        "LazyLoad": "yes",
+        "Author": "Edwin de Jonge",
+        "Description": "Implements 'Mustache' logicless templating.",
+        "Version": "0.4.1",
+        "URL": "https://github.com/edwindj/whisker",
+        "Suggests": "markdown",
+        "RoxygenNote": "6.1.1",
+        "NeedsCompilation": "no",
+        "Packaged": "2022-12-05 15:15:55 UTC; hornik",
+        "Repository": "RSPM",
+        "Date/Publication": "2022-12-05 15:33:50 UTC",
+        "Encoding": "UTF-8",
+        "Built": "R 4.5.0; ; 2025-04-09 06:25:31 UTC; unix",
+        "RemoteType": "standard",
+        "RemoteRef": "whisker",
+        "RemotePkgRef": "whisker",
+        "RemoteRepos": "https://packagemanager.posit.co/cran/latest",
+        "RemoteReposName": "CRAN",
+        "RemotePkgPlatform": "aarch64-apple-darwin20",
+        "RemoteSha": "0.4.1"
+      }
+    },
     "withr": {
       "Source": "CRAN",
       "Repository": "https://packagemanager.posit.co/cran/latest",
@@ -5137,9 +5314,6 @@
     }
   },
   "files": {
-    ".Rprofile": {
-      "checksum": "cd9a95b3954e698f9f9b2bd85abcf590"
-    },
     "data/survey_prep_errors.csv": {
       "checksum": "e93a9e9ee46974c97f80641b4814e2fd"
     },
@@ -5450,7 +5624,7 @@
       "checksum": "006f672272c17b81a7790a19de673ab8"
     },
     "global.R": {
-      "checksum": "4dd9c103a772e4ee889f98dc61c84da8"
+      "checksum": "6d0e8580fc31a5f1b5a20010462bdd1d"
     },
     "R/authorize.R": {
       "checksum": "8fc59da5a0a4d5a8d53b731586818985"
@@ -5459,7 +5633,7 @@
       "checksum": "c7d992530577391fa676560324026ab1"
     },
     "renv.lock": {
-      "checksum": "58001ed8c00fd282f8a65af70a27cce6"
+      "checksum": "d874830c6fe6ad5910d286e503deed5a"
     },
     "server.R": {
       "checksum": "0eeaf971d2b844f28787a514c0f09bb2"
