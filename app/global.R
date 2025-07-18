@@ -39,7 +39,7 @@ version <- "v0.0.2"
 # connect to Posit board
 board <- board_connect()
 
-# httr::set_config(httr::config(ssl_verifypeer = FALSE, ssl_verifyhost = FALSE))
+httr::set_config(httr::config(ssl_verifypeer = FALSE, ssl_verifyhost = FALSE))
 
 # Countries with pinned weather data
 weather_codes <- gsub("_weather", "", 
@@ -69,4 +69,4 @@ pov_lines <- data.frame(
   )
           
 # functions
-
+source("R/authorize.R")
