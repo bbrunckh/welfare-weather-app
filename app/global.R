@@ -40,11 +40,12 @@ version <- "v0.0.2"
 
   # If on Posit Connect server, use Connect pin board
 if (Sys.getenv("R_CONFIG_ACTIVE") == "rsconnect") {
-  board <- board_connect(account = "bbrunckhorst", server = "external-server")
-  
+  board <- board_connect(server = "external-server")
+  pin_prefix <- "bbrunckhorst/"
   # otherwise use local pin board
 } else {
   board <- board_folder("data/pins")
+  pin_prefix <- ""
 }
 
 httr::set_config(httr::config(ssl_verifypeer = FALSE, ssl_verifyhost = FALSE))
