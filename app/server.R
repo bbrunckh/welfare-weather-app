@@ -1,6 +1,3 @@
-source("global.R")
-source("R/authorize.R")
-
 # Define the Server logic
 server <- function(input, output, session) {
   
@@ -22,36 +19,36 @@ server <- function(input, output, session) {
     internalpanel(!internalpanel())
   })
   
-  # Render the password panel conditionally
-  output$dlw_token_input <- renderUI({
-    if (internalpanel()) {
-      tagList(
-        passwordInput("dlw_token", "Enter datalibweb token:", ""),
-        actionButton("authorize", "Authorize"),
-        hr(),
-      )
-    }
-  })
-  
-  # Authorization status
-  output$authorize_status <- renderText({
-    req(input$authorize)
-    auth_message()
-  })
-  
-  # Observe the action button click
-  observeEvent(input$authorize, {
-    surveys(survey_list_master |> filter(external))
-    auth_message("Checking data access...")
-    tryCatch({
-      surveys(check_gmd_access(input$dlw_token))
-        auth_message("Authorization complete")
-      }, error = function(e){
-        auth_message("Authorization failed")
-        surveys(survey_list_master |> filter(external))
-      })
-      internalpanel(!internalpanel())
-  })
+  # # Render the password panel conditionally
+  # output$dlw_token_input <- renderUI({
+  #   if (internalpanel()) {
+  #     tagList(
+  #       passwordInput("dlw_token", "Enter datalibweb token:", ""),
+  #       actionButton("authorize", "Authorize"),
+  #       hr(),
+  #     )
+  #   }
+  # })
+  # 
+  # # Authorization status
+  # output$authorize_status <- renderText({
+  #   req(input$authorize)
+  #   auth_message()
+  # })
+  # 
+  # # Observe the action button click
+  # observeEvent(input$authorize, {
+  #   surveys(survey_list_master |> filter(external))
+  #   auth_message("Checking data access...")
+  #   tryCatch({
+  #     surveys(check_gmd_access(input$dlw_token))
+  #       auth_message("Authorization complete")
+  #     }, error = function(e){
+  #       auth_message("Authorization failed")
+  #       surveys(survey_list_master |> filter(external))
+  #     })
+  #     internalpanel(!internalpanel())
+  # })
   
   # country selection
   output$sample_ui <- renderUI({
@@ -191,7 +188,7 @@ server <- function(input, output, session) {
         survey_files <- c(survey_files, country_data)
       }
     }
-    return(paste0(as.character(survey_files)))
+    return(paste0(pin_prefix, as.character(survey_files)))
   })
   
   # load survey data for selected sample

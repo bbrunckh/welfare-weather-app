@@ -38,23 +38,25 @@ version <- "v0.0.2"
 
 # connect to pin board
 
-  # If on Posit Connect server, use Connect pin board
+  # use local pin board if no R config active
   if (Sys.getenv("R_CONFIG_ACTIVE") == "") {
     board <- board_folder("data/pins")
-    # otherwise use local pin board
+    pin_prefix <- ""
+    # If on Posit Connect server, use Connect pin board
   } else {
-    board <- board_connect(server = "external-server")
+    board <- board_connect()
+    pin_prefix <- "bbrunckhorst/"
   }
 
 # Survey data list
-survey_list_master <- pin_read(board, "surveys") |>
+survey_list_master <- pin_read(board, paste0(pin_prefix, "surveys")) |>
   mutate(external = TRUE)
 
 # Survey variable list
-varlist <- pin_read(board, "varlist")
+varlist <- pin_read(board, paste0(pin_prefix, "varlist"))
 
 # Weather variable list
-weather_list <- pin_read(board, "weather_varlist")
+weather_list <- pin_read(board, paste0(pin_prefix, "weather_varlist"))
 
 # Welfare outcomes
 outcomes <- c(
@@ -70,4 +72,3 @@ pov_lines <- data.frame(
   ln = c(3.00, 4.20, 8.30, 2.15, 3.65, 6.85, 1.90, 3.20, 5.50)
   )
           
-# functions

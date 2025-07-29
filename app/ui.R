@@ -17,10 +17,10 @@ ui <- navbarPage(
       h5("Weather Impact Simulation and Evaluation for Adaptation Policy and Planning"),
       p("This tool is designed to help you understand the relationship between welfare and weather."),
       p("Follow the steps to perform simulations and explore policy impacts."),
-      actionButton("internal_user", "Internal user"),
-      hr(),
-      uiOutput("dlw_token_input"),
-      textOutput("authorize_status")
+      # actionButton("internal_user", "Internal user"),
+      # hr(),
+      # uiOutput("dlw_token_input"),
+      # textOutput("authorize_status")
     )
   ),
   
