@@ -12,9 +12,16 @@ library(nanoparquet)
 
 setwd("../app/")
 #------------------------------------------------------------------------------#
-# Posit connect board for pins
+# Board for pins
 
-board <- board_connect()
+# Local folder
+board_local <- board_folder("../app/data/pins")
+
+# Posit - external
+board_posit <- board_connect(server = "external-server")
+
+# # Posit - internal
+# board_posit <- board_connect(server = "internal-server")
 
 # # remove all existing pins from board
 # pin_delete(board, pin_list(board))
@@ -42,7 +49,8 @@ cat_cols <- filter(wise_vars, datatype == "Categorical") |> pull(varname)
 string_cols <- filter(wise_vars, datatype == "String") |> pull(varname)
 
 # pin wiseapp variable list to Posit Connect board for app
-pin_write(board, wise_vars, "varlist", type = "parquet")
+pin_write(board_posit, wise_vars, "varlist", type = "parquet")
+pin_write(board_local, wise_vars, "varlist", type = "parquet")
 
 #------------------------------------------------------------------------------#
 # Get latest CPI/ICP conversion factors from datalibweb, keep key vars
@@ -64,7 +72,7 @@ spat_list <- list.files(loc_path, recursive = TRUE, "SPAT.dta$")
 
 # Initialize survey list for app
 survey_list <- tibble()
-survey_list <- read_pin(board, "survey_list")
+# survey_list <- read_pin(board, "survey_list")
 errors <- c()
 
 #------------------------------------------------------------------------------#
@@ -89,6 +97,7 @@ for (n in 1:length(spat_list)){
     
     survey <- dlw_get_gmd(code, year, "ALL") 
     
+    # use first option when above does not identify a unique file (GHA_2016)
     if(length(survey)<5){
       survey <- eval(survey[[1]])
     }
@@ -100,7 +109,7 @@ for (n in 1:length(spat_list)){
   })
   if (error_occurred || is.character(survey)) {next} #skip if fail
   
-  # get filename
+  # get GMD_ALL filename
   fname_all <- paste0(
     sub("\\..*", "",list.files(getOption("dlw.local_dir"), 
                    paste0(code, "_", year,".+GMD_ALL.qs"))[1]), ".dta")
@@ -108,7 +117,7 @@ for (n in 1:length(spat_list)){
   # to duckdb
   survey_db <- as_dataset(survey)
   
-  # add GMD variables not in dataset
+  # add standard GMD variables not in dataset
   gmd_add <- setdiff(gmd_vars, colnames(survey_db))
   if (length(gmd_add)>0){
   survey_db <- survey_db |>
@@ -234,43 +243,16 @@ for (n in 1:length(spat_list)){
   
     # spat <- dlw_get_gmd(code, year, "SPAT") # from datalibweb
   
-  # try merge on hhid_orig if no hhid
-  if (!"hhid" %in% colnames(spat) & "hhid_orig" %in% colnames(spat)){
-    spat$hhid <- spat$hhid_orig 
-  }
-  
   # add missing date variables
   add_dates <- setdiff(c("int_year","int_month","int_day"), colnames(spat))
   if (length(add_dates)>0){
     spat <- spat |>
       mutate(!!!setNames(rep(list(NA), length(add_dates)), add_dates))
   }
-  
-  # fix invalid dates in spat
-  correct_invalid_date <- function(year, month, day) {
-    if (is.na(day)) day <- 1
-    date <- ymd(paste(year, month, day, sep = "-"), quiet = TRUE)
-    if (is.na(date)) {
-      last_day <- days_in_month(ymd(paste(year, month, "01", sep = "-")))
-      if (day > last_day) day <- last_day
-    }
-    return(day)
-  }
-  
-  spat <- spat |>
-    rowwise() |>
-    mutate(
-      int_day = if_else(is.na(int_year) | is.na(int_month), NA,
-                        correct_invalid_date(int_year, int_month, int_day)))
-  
-  built_area_var <- paste0("built_area_",5*round(as.numeric(year)/5))
-  ntl_var <- paste0("viirs_ntl_",as.numeric(year))
-  
+
   spat_db <- as_dataset(spat) |>
-      mutate(built_area = .data[[built_area_var]]/1e6/area,
-             viirs_ntl = if_else(year>=2012, .data[[ntl_var]]/pop_2020, NA),
-             hhid = as.character(hhid)) |>
-      select(-starts_with(c("urban", "survname","built_area_", "viirs_ntl_"))) 
+      mutate(hhid = as.character(hhid)) |>
+      select(-starts_with(c("urban", "survname"))) 
   
  # use interview dates from either GMD_SPAT (1st) or GMD_ALL (2nd)
   survey_db <- survey_db |>
@@ -297,7 +279,8 @@ for (n in 1:length(spat_list)){
                                  paste0(int_year,"-",int_month,"-",
                                         int_day)))),
       timestamp = case_when(
-        !is.na(int_date) ~ as.Date(paste0(int_year,"-",int_month,"-01"))))
+        !is.na(int_date) ~ as.Date(paste0(int_year,"-",int_month,"-01")))) |>
+    collect()
    
   error_occurred <- FALSE
   tryCatch({
@@ -317,16 +300,6 @@ for (n in 1:length(spat_list)){
   })
   if (error_occurred) {next} #skip if fail
   
-  # add factor levels ??
-
-  # add variable labels? No, labels dropped in parquet file
-  # for (i in 1:nrow(wise_vars)) {
-  #   var <- as.character(wise_vars$varname[i])
-  #   if (var %in% colnames(survey_clean)) {
-  #     attr(survey_clean[[var]], "label") <- as.character(wise_vars$label[i])
-  #   }
-  # }
-  
   # drop empty columns
   survey_clean <- survey_clean |>
     select(where(~ !((all(is.na(.))) || is.character(.) && all(is.na(.) | . == ""))))
@@ -345,7 +318,8 @@ for (n in 1:length(spat_list)){
                 options = parquet_options(write_minmax_values = FALSE))
   
   # Pin HH level parquet data to Posit Connect board for app
-  pin_write(board, survey_clean, paste0(code, "_", year), type = "parquet")
+  pin_write(board_local, survey_clean, paste0(code, "_", year), type = "parquet")
+  pin_write(board_posit, survey_clean, paste0(code, "_", year), type = "parquet")
   
   #----------------------------------------------------------------------------#
   # Add survey to list for app
@@ -377,7 +351,8 @@ survey_list <- survey_list |>
 write_parquet(survey_list, "data/surveys.parquet")
 
 # pin country listing to Posit Connect board for app
-pin_write(board, survey_list, "surveys", type = "parquet")
+pin_write(board_local, survey_list, "surveys", type = "parquet")
+pin_write(board_posit, survey_list, "surveys", type = "parquet")
 
 # save error log
 write.csv(errors, "data/survey_prep_errors.csv", row.names = FALSE)

@@ -189,7 +189,7 @@ server <- function(input, output, session) {
         survey_files <- c(survey_files, country_data)
       }
     }
-    return(paste0("bbrunckhorst/", as.character(survey_files)))
+    return(paste0(as.character(survey_files)))
   })
   
   # load survey data for selected sample

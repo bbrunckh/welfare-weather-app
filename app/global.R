@@ -36,24 +36,28 @@ library(httr2)
 # App version
 version <- "v0.0.2"
 
-# connect to Posit board
-board <- board_connect()
+# connect to pin board
+
+  # If on Posit Connect server, use Connect pin board
+if (Sys.getenv("R_CONFIG_ACTIVE") == "rsconnect") {
+  board <- board_connect(account = "bbrunckhorst", server = "external-server")
+  
+  # otherwise use local pin board
+} else {
+  board <- board_folder("data/pins")
+}
 
 httr::set_config(httr::config(ssl_verifypeer = FALSE, ssl_verifyhost = FALSE))
 
-# Countries with pinned weather data
-weather_codes <- gsub("_weather", "", 
-                      pin_read(board, "bbrunckhorst/weather_data")$plist)
 # Survey data list
-survey_list_master <- pin_read(board, "bbrunckhorst/surveys") |>
-  filter(code %in% weather_codes) |> # keep if there is weather data
-  mutate(external = FALSE) # use to tag surveys with external access
+survey_list_master <- pin_read(board, "surveys") |>
+  mutate(external = TRUE)
 
 # Survey variable list
-varlist <- pin_read(board, "bbrunckhorst/varlist")
+varlist <- pin_read(board, "varlist")
 
 # Weather variable list
-weather_list <- pin_read(board, "bbrunckhorst/weather_varlist")
+weather_list <- pin_read(board, "weather_varlist")
 
 # Welfare outcomes
 outcomes <- c(

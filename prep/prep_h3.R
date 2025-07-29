@@ -10,13 +10,19 @@ library(pins)
 library(nanoparquet)
 
 # library(dlw)
-
 setwd("../app/")
 
 #------------------------------------------------------------------------------#
-# Posit connect board for pins
+# Board for pins
 
-board <- board_connect()
+# Local folder
+board_local <- board_folder("../app/data/pins")
+
+# Posit - external
+board_posit <- board_connect(server = "external-server")
+
+# # Posit - internal
+# board_posit <- board_connect(server = "internal-server")
 
 #----------------------------------------------------------------------------#
 # Location data for WISE-APP
@@ -27,8 +33,7 @@ loc_path <- paste0("~/Library/CloudStorage/OneDrive-WBG/",
 
 h3_list <- list.files(loc_path, recursive = TRUE, "H3.dta$") 
 
-weather_codes <- gsub("_weather", "", 
-                      pin_read(board, "bbrunckhorst/weather_data")$plist)
+surveys <- pin_read(board_local, "surveys")$wiseapp_pin |> unique()
 
 #------------------------------------------------------------------------------#
 # Loop over surveys 
@@ -36,15 +41,11 @@ weather_codes <- gsub("_weather", "",
 # loop over H3 files
 for (n in 1:length(h3_list)){
   
-  code <- sub("/.*", "", h3_list[n])
-  year <- sub("^[^_]*_([^_]*)_.*$", "\\1", h3_list[n])
-  print(paste0(code, " ", year))
+  pin_name <- substring(h3_list[n], 5, 12)
+  print(pin_name)
   
-  # skip if no survey data prepared...
-  if(!file.exists(paste0("data/surveys/",code,"_", year, ".parquet"))){next}
-  
-  # skip if no weather data
-  if(!code %in% weather_codes){next}
+  # skip if no survey data
+  if(!pin_name %in% surveys){next}
   
   # skip if file exists
   # if(file.exists(paste0("data/surveys/",code,"_", year, "_H3.parquet")) & 
@@ -56,16 +57,19 @@ for (n in 1:length(h3_list)){
   
   # save H3 level parquet data to disk
   write_parquet(h3, 
-                paste0("data/surveys/",code, "_", year, "_H3.parquet"),
+                paste0("data/surveys/",pin_name, "_H3.parquet"),
                 options = parquet_options(write_minmax_values = FALSE))
   
   # Pin H3 level parquet data to Posit Connect board for app
-  pin_write(board, h3, paste0(code, "_", year,"_H3"), type = "parquet")
+  pin_write(board_local, h3, paste0(pin_name,"_H3"), type = "parquet")
+  pin_write(board_posit, h3, paste0(pin_name,"_H3"), type = "parquet")
 
   # get interview dates and number of households from processed survey data
-  loc_dates <- open_dataset(paste0("data/surveys/",code,"_", year, ".parquet")) |>
+  loc_dates <- pin_read(board_local, pin_name) |> 
+    as_dataset() |>
     distinct(loc_id, urban, int_date) |>
-    summarise(int_dates = str_flatten(int_date, ", "), .by = c(loc_id, urban)) 
+    summarise(int_dates = str_flatten(int_date, ", "), .by = c(loc_id, urban))
+    
 
   # Aggregate H3 hexagon boundaries to spatial units (loc_id)
   loc_geo <- as_dataset(h3) |>
@@ -77,11 +81,12 @@ for (n in 1:length(h3_list)){
 
   # save loc_id level parquet data to disk
   write_parquet(loc_geo, 
-                paste0("data/surveys/",code, "_", year, "_LOC.parquet"),
+                paste0("data/surveys/",pin_name, "_LOC.parquet"),
                 options = parquet_options(write_minmax_values = FALSE))
   
   # Pin loc_id level parquet data to Posit Connect board for app
-  pin_write(board, loc_geo, paste0(code, "_", year,"_LOC"), type = "parquet")
+  pin_write(board_local, loc_geo, paste0(pin_name,"_LOC"), type = "parquet")
+  pin_write(board_posit, loc_geo, paste0(pin_name,"_LOC"), type = "parquet")
   
 }
 #------------------------------------------------------------------------------#

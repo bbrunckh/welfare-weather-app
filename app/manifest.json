@@ -1089,11 +1089,11 @@
         "Package": "curl",
         "Type": "Package",
         "Title": "A Modern and Flexible Web Client for R",
-        "Version": "6.2.2",
+        "Version": "6.4.0",
         "Authors@R": "c(\n    person(\"Jeroen\", \"Ooms\", role = c(\"aut\", \"cre\"), email = \"jeroenooms@gmail.com\",\n      comment = c(ORCID = \"0000-0002-4035-0289\")),\n    person(\"Hadley\", \"Wickham\", role = \"ctb\"),\n    person(\"Posit Software, PBC\", role = \"cph\"))",
         "Description": "Bindings to 'libcurl' <https://curl.se/libcurl/> for performing fully\n    configurable HTTP/FTP requests where responses can be processed in memory, on\n    disk, or streaming via the callback or connection interfaces. Some knowledge\n    of 'libcurl' is recommended; for a more-user-friendly web client see the \n    'httr2' package which builds on this package with http specific tools and logic.",
         "License": "MIT + file LICENSE",
-        "SystemRequirements": "libcurl (>= 7.62): libcurl-devel (rpm) or\nlibcurl4-openssl-dev (deb)",
+        "SystemRequirements": "libcurl (>= 7.73): libcurl-devel (rpm) or\nlibcurl4-openssl-dev (deb)",
         "URL": "https://jeroen.r-universe.dev/curl",
         "BugReports": "https://github.com/jeroen/curl/issues",
         "Suggests": "spelling, testthat (>= 1.0.0), knitr, jsonlite, later,\nrmarkdown, httpuv (>= 1.4.4), webutils",
@@ -1103,19 +1103,20 @@
         "Encoding": "UTF-8",
         "Language": "en-US",
         "NeedsCompilation": "yes",
-        "Packaged": "2025-03-23 13:24:53 UTC; jeroen",
-        "Author": "Jeroen Ooms [aut, cre] (<https://orcid.org/0000-0002-4035-0289>),\n  Hadley Wickham [ctb],\n  Posit Software, PBC [cph]",
+        "Packaged": "2025-06-21 19:18:13 UTC; jeroen",
+        "Author": "Jeroen Ooms [aut, cre] (ORCID: <https://orcid.org/0000-0002-4035-0289>),\n  Hadley Wickham [ctb],\n  Posit Software, PBC [cph]",
         "Maintainer": "Jeroen Ooms <jeroenooms@gmail.com>",
-        "Repository": "RSPM",
-        "Date/Publication": "2025-03-24 07:00:02 UTC",
-        "Built": "R 4.5.0; x86_64-pc-linux-gnu; 2025-04-06 04:42:33 UTC; unix",
+        "Repository": "CRAN",
+        "Date/Publication": "2025-06-22 10:40:02 UTC",
+        "Built": "R 4.5.0; aarch64-apple-darwin20; 2025-06-23 23:21:48 UTC; unix",
+        "Archs": "curl.so.dSYM",
         "RemoteType": "standard",
-        "RemotePkgRef": "curl",
         "RemoteRef": "curl",
-        "RemoteRepos": "https://packagemanager.posit.co/cran/latest",
+        "RemotePkgRef": "curl",
+        "RemoteRepos": "https://cloud.r-project.org",
         "RemoteReposName": "CRAN",
         "RemotePkgPlatform": "aarch64-apple-darwin20",
-        "RemoteSha": "6.2.2"
+        "RemoteSha": "6.4.0"
       }
     },
     "data.table": {
@@ -1264,7 +1265,7 @@
       "description": {
         "Package": "duckdb",
         "Title": "DBI Package for the DuckDB Database Management System",
-        "Version": "1.2.2",
+        "Version": "1.3.2",
         "Authors@R": "c(\n    person(\"Hannes\", \"Mühleisen\", , \"hannes@cwi.nl\", role = \"aut\",\n           comment = c(ORCID = \"0000-0001-8552-0029\")),\n    person(\"Mark\", \"Raasveldt\", , \"mark.raasveldt@cwi.nl\", role = \"aut\",\n           comment = c(ORCID = \"0000-0001-5005-6844\")),\n    person(\"Kirill\", \"Müller\", , \"kirill@cynkra.com\", role = \"cre\",\n           comment = c(ORCID = \"0000-0002-1416-3412\")),\n    person(\"Stichting DuckDB Foundation\", role = \"cph\"),\n    person(\"Apache Software Foundation\", role = \"cph\"),\n    person(\"PostgreSQL Global Development Group\", role = \"cph\"),\n    person(\"The Regents of the University of California\", role = \"cph\"),\n    person(\"Cameron Desrochers\", role = \"cph\"),\n    person(\"Victor Zverovich\", role = \"cph\"),\n    person(\"RAD Game Tools\", role = \"cph\"),\n    person(\"Valve Software\", role = \"cph\"),\n    person(\"Rich Geldreich\", role = \"cph\"),\n    person(\"Tenacious Software LLC\", role = \"cph\"),\n    person(\"The RE2 Authors\", role = \"cph\"),\n    person(\"Google Inc.\", role = \"cph\"),\n    person(\"Facebook Inc.\", role = \"cph\"),\n    person(\"Steven G. Johnson\", role = \"cph\"),\n    person(\"Jiahao Chen\", role = \"cph\"),\n    person(\"Tony Kelman\", role = \"cph\"),\n    person(\"Jonas Fonseca\", role = \"cph\"),\n    person(\"Lukas Fittl\", role = \"cph\"),\n    person(\"Salvatore Sanfilippo\", role = \"cph\"),\n    person(\"Art.sy, Inc.\", role = \"cph\"),\n    person(\"Oran Agra\", role = \"cph\"),\n    person(\"Redis Labs, Inc.\", role = \"cph\"),\n    person(\"Melissa O'Neill\", role = \"cph\"),\n    person(\"PCG Project contributors\", role = \"cph\")\n  )",
         "Description": "The DuckDB project is an embedded analytical data management\n    system with support for the Structured Query Language (SQL). This\n    package includes all of DuckDB and an R Database Interface (DBI)\n    connector.",
         "License": "MIT + file LICENSE",
@@ -1280,13 +1281,21 @@
         "Encoding": "UTF-8",
         "RoxygenNote": "7.3.2.9000",
         "SystemRequirements": "xz (for building from source)",
+        "Biarch": "true",
         "NeedsCompilation": "yes",
-        "Packaged": "2025-04-29 09:31:19 UTC; kirill",
-        "Author": "Hannes Mühleisen [aut] (<https://orcid.org/0000-0001-8552-0029>),\n  Mark Raasveldt [aut] (<https://orcid.org/0000-0001-5005-6844>),\n  Kirill Müller [cre] (<https://orcid.org/0000-0002-1416-3412>),\n  Stichting DuckDB Foundation [cph],\n  Apache Software Foundation [cph],\n  PostgreSQL Global Development Group [cph],\n  The Regents of the University of California [cph],\n  Cameron Desrochers [cph],\n  Victor Zverovich [cph],\n  RAD Game Tools [cph],\n  Valve Software [cph],\n  Rich Geldreich [cph],\n  Tenacious Software LLC [cph],\n  The RE2 Authors [cph],\n  Google Inc. [cph],\n  Facebook Inc. [cph],\n  Steven G. Johnson [cph],\n  Jiahao Chen [cph],\n  Tony Kelman [cph],\n  Jonas Fonseca [cph],\n  Lukas Fittl [cph],\n  Salvatore Sanfilippo [cph],\n  Art.sy, Inc. [cph],\n  Oran Agra [cph],\n  Redis Labs, Inc. [cph],\n  Melissa O'Neill [cph],\n  PCG Project contributors [cph]",
+        "Packaged": "2025-07-09 14:25:12 UTC; kirill",
+        "Author": "Hannes Mühleisen [aut] (ORCID: <https://orcid.org/0000-0001-8552-0029>),\n  Mark Raasveldt [aut] (ORCID: <https://orcid.org/0000-0001-5005-6844>),\n  Kirill Müller [cre] (ORCID: <https://orcid.org/0000-0002-1416-3412>),\n  Stichting DuckDB Foundation [cph],\n  Apache Software Foundation [cph],\n  PostgreSQL Global Development Group [cph],\n  The Regents of the University of California [cph],\n  Cameron Desrochers [cph],\n  Victor Zverovich [cph],\n  RAD Game Tools [cph],\n  Valve Software [cph],\n  Rich Geldreich [cph],\n  Tenacious Software LLC [cph],\n  The RE2 Authors [cph],\n  Google Inc. [cph],\n  Facebook Inc. [cph],\n  Steven G. Johnson [cph],\n  Jiahao Chen [cph],\n  Tony Kelman [cph],\n  Jonas Fonseca [cph],\n  Lukas Fittl [cph],\n  Salvatore Sanfilippo [cph],\n  Art.sy, Inc. [cph],\n  Oran Agra [cph],\n  Redis Labs, Inc. [cph],\n  Melissa O'Neill [cph],\n  PCG Project contributors [cph]",
         "Maintainer": "Kirill Müller <kirill@cynkra.com>",
-        "Repository": "CRAN",
-        "Date/Publication": "2025-04-29 12:40:06 UTC",
-        "Built": "R 4.5.0; aarch64-apple-darwin20; 2025-04-29 14:10:43 UTC; unix"
+        "Repository": "RSPM",
+        "Date/Publication": "2025-07-09 17:50:02 UTC",
+        "Built": "R 4.5.0; x86_64-pc-linux-gnu; 2025-07-10 05:51:12 UTC; unix",
+        "RemoteType": "standard",
+        "RemoteRef": "duckdb",
+        "RemotePkgRef": "duckdb",
+        "RemoteRepos": "https://packagemanager.posit.co/cran/latest",
+        "RemoteReposName": "CRAN",
+        "RemotePkgPlatform": "aarch64-apple-darwin20",
+        "RemoteSha": "1.3.2"
       }
     },
     "duckplyr": {
@@ -2135,36 +2144,36 @@
       "description": {
         "Package": "httr2",
         "Title": "Perform HTTP Requests and Process the Responses",
-        "Version": "1.1.2",
+        "Version": "1.2.1",
         "Authors@R": "c(\n    person(\"Hadley\", \"Wickham\", , \"hadley@posit.co\", role = c(\"aut\", \"cre\")),\n    person(\"Posit Software, PBC\", role = c(\"cph\", \"fnd\")),\n    person(\"Maximilian\", \"Girlich\", role = \"ctb\")\n  )",
         "Description": "Tools for creating and modifying HTTP requests, then\n    performing them and processing the results. 'httr2' is a modern\n    re-imagining of 'httr' that uses a pipe-based interface and solves\n    more of the problems that API wrapping packages face.",
         "License": "MIT + file LICENSE",
         "URL": "https://httr2.r-lib.org, https://github.com/r-lib/httr2",
         "BugReports": "https://github.com/r-lib/httr2/issues",
-        "Depends": "R (>= 4.0)",
-        "Imports": "cli (>= 3.0.0), curl (>= 6.2.1), glue, lifecycle, magrittr,\nopenssl, R6, rappdirs, rlang (>= 1.1.0), vctrs (>= 0.6.3),\nwithr",
-        "Suggests": "askpass, bench, clipr, covr, docopt, httpuv, jose, jsonlite,\nknitr, later (>= 1.4.0), nanonext, paws.common, promises,\nrmarkdown, testthat (>= 3.1.8), tibble, webfakes, xml2",
+        "Depends": "R (>= 4.1)",
+        "Imports": "cli (>= 3.0.0), curl (>= 6.4.0), glue, lifecycle, magrittr,\nopenssl, R6, rappdirs, rlang (>= 1.1.0), vctrs (>= 0.6.3),\nwithr",
+        "Suggests": "askpass, bench, clipr, covr, docopt, httpuv, jose, jsonlite,\nknitr, later (>= 1.4.0), nanonext, paws.common, promises,\nrmarkdown, testthat (>= 3.1.8), tibble, webfakes (>= 1.4.0),\nxml2",
         "VignetteBuilder": "knitr",
         "Config/Needs/website": "tidyverse/tidytemplate",
         "Config/testthat/edition": "3",
         "Config/testthat/parallel": "true",
-        "Config/testthat/start-first": "multi-req, resp-stream, req-perform",
+        "Config/testthat/start-first": "resp-stream, req-perform",
         "Encoding": "UTF-8",
         "RoxygenNote": "7.3.2",
         "NeedsCompilation": "no",
-        "Packaged": "2025-03-25 18:33:11 UTC; hadleywickham",
+        "Packaged": "2025-07-21 17:36:04 UTC; hadleywickham",
         "Author": "Hadley Wickham [aut, cre],\n  Posit Software, PBC [cph, fnd],\n  Maximilian Girlich [ctb]",
         "Maintainer": "Hadley Wickham <hadley@posit.co>",
         "Repository": "RSPM",
-        "Date/Publication": "2025-03-26 06:20:02 UTC",
-        "Built": "R 4.5.0; ; 2025-04-09 06:26:37 UTC; unix",
+        "Date/Publication": "2025-07-22 04:40:55 UTC",
+        "Built": "R 4.5.0; ; 2025-07-23 04:56:52 UTC; unix",
         "RemoteType": "standard",
         "RemoteRef": "httr2",
         "RemotePkgRef": "httr2",
         "RemoteRepos": "https://packagemanager.posit.co/cran/latest",
         "RemoteReposName": "CRAN",
         "RemotePkgPlatform": "aarch64-apple-darwin20",
-        "RemoteSha": "1.1.2"
+        "RemoteSha": "1.2.1"
       }
     },
     "huxtable": {
@@ -2314,42 +2323,6 @@
         "RemoteReposName": "CRAN",
         "RemotePkgPlatform": "aarch64-apple-darwin20",
         "RemoteSha": "0.2.7"
-      }
-    },
-    "jose": {
-      "Source": "CRAN",
-      "Repository": "https://packagemanager.posit.co/cran/latest",
-      "description": {
-        "Package": "jose",
-        "Type": "Package",
-        "Title": "JavaScript Object Signing and Encryption",
-        "Version": "1.2.1",
-        "Authors@R": "person(\"Jeroen\", \"Ooms\", role = c(\"aut\", \"cre\"), \n    email = \"jeroenooms@gmail.com\", comment = c(ORCID = \"0000-0002-4035-0289\"))",
-        "Description": "Read and write JSON Web Keys (JWK, rfc7517), generate and verify JSON\n    Web Signatures (JWS, rfc7515) and encode/decode JSON Web Tokens (JWT, rfc7519)\n    <https://datatracker.ietf.org/wg/jose/documents/>. These standards provide \n    modern signing and encryption formats that are natively supported by browsers\n    via the JavaScript WebCryptoAPI <https://www.w3.org/TR/WebCryptoAPI/#jose>, \n    and used by services like OAuth 2.0, LetsEncrypt, and Github Apps.",
-        "License": "MIT + file LICENSE",
-        "URL": "https://r-lib.r-universe.dev/jose",
-        "BugReports": "https://github.com/r-lib/jose/issues",
-        "Depends": "openssl (>= 1.2.1)",
-        "Imports": "jsonlite",
-        "RoxygenNote": "7.1.2",
-        "VignetteBuilder": "knitr",
-        "Suggests": "spelling, testthat, knitr, rmarkdown",
-        "Encoding": "UTF-8",
-        "Language": "en-US",
-        "NeedsCompilation": "no",
-        "Packaged": "2024-10-03 14:12:53 UTC; jeroen",
-        "Author": "Jeroen Ooms [aut, cre] (<https://orcid.org/0000-0002-4035-0289>)",
-        "Maintainer": "Jeroen Ooms <jeroenooms@gmail.com>",
-        "Repository": "RSPM",
-        "Date/Publication": "2024-10-04 12:20:01 UTC",
-        "Built": "R 4.5.0; ; 2025-04-09 06:20:55 UTC; unix",
-        "RemoteType": "standard",
-        "RemoteRef": "jose",
-        "RemotePkgRef": "jose",
-        "RemoteRepos": "https://packagemanager.posit.co/cran/latest",
-        "RemoteReposName": "CRAN",
-        "RemotePkgPlatform": "aarch64-apple-darwin20",
-        "RemoteSha": "1.2.1"
       }
     },
     "jquerylib": {
@@ -3205,7 +3178,7 @@
         "Type": "Package",
         "Package": "openxlsx2",
         "Title": "Read, Write and Edit 'xlsx' Files",
-        "Version": "1.15",
+        "Version": "1.17",
         "Language": "en-US",
         "Authors@R": "c(\n  person(\"Jordan Mark\", \"Barbone\", email = \"jmbarbone@gmail.com\", role = \"aut\", comment = c(ORCID = \"0000-0001-9788-3628\")),\n  person(\"Jan Marvin\", \"Garbuszus\", email = \"jan.garbuszus@ruhr-uni-bochum.de\", role = c(\"aut\", \"cre\")),\n  person(\"Olivier\", \"Roy\", role = \"ctb\"),\n  person(family = \"openxlsx authors\", role = \"cph\", comment = \"openxlsx package\"),\n  person(\"Arseny\", \"Kapoulkine\", role = c(\"ctb\", \"cph\"), comment = \"Author of included pugixml code\")\n  )",
         "Description": "Simplifies the creation of 'xlsx' files by\n    providing a high level interface to writing, styling and editing\n    worksheets.",
@@ -3222,19 +3195,19 @@
         "Config/testthat/edition": "3",
         "Config/testthat/parallel": "true",
         "NeedsCompilation": "yes",
-        "Packaged": "2025-04-25 06:30:07 UTC; janmarvingarbuszus",
-        "Author": "Jordan Mark Barbone [aut] (<https://orcid.org/0000-0001-9788-3628>),\n  Jan Marvin Garbuszus [aut, cre],\n  Olivier Roy [ctb],\n  openxlsx authors [cph] (openxlsx package),\n  Arseny Kapoulkine [ctb, cph] (Author of included pugixml code)",
+        "Packaged": "2025-07-04 06:09:03 UTC; janmarvingarbuszus",
+        "Author": "Jordan Mark Barbone [aut] (ORCID:\n    <https://orcid.org/0000-0001-9788-3628>),\n  Jan Marvin Garbuszus [aut, cre],\n  Olivier Roy [ctb],\n  openxlsx authors [cph] (openxlsx package),\n  Arseny Kapoulkine [ctb, cph] (Author of included pugixml code)",
         "Maintainer": "Jan Marvin Garbuszus <jan.garbuszus@ruhr-uni-bochum.de>",
         "Repository": "RSPM",
-        "Date/Publication": "2025-04-25 07:50:02 UTC",
-        "Built": "R 4.5.0; x86_64-pc-linux-gnu; 2025-04-26 13:40:32 UTC; unix",
+        "Date/Publication": "2025-07-04 07:00:01 UTC",
+        "Built": "R 4.5.0; x86_64-pc-linux-gnu; 2025-07-05 04:41:07 UTC; unix",
         "RemoteType": "standard",
-        "RemotePkgRef": "openxlsx2",
         "RemoteRef": "openxlsx2",
+        "RemotePkgRef": "openxlsx2",
         "RemoteRepos": "https://packagemanager.posit.co/cran/latest",
         "RemoteReposName": "CRAN",
         "RemotePkgPlatform": "aarch64-apple-darwin20",
-        "RemoteSha": "1.15"
+        "RemoteSha": "1.17"
       }
     },
     "packrat": {
@@ -3926,14 +3899,14 @@
         "Type": "Package",
         "Package": "rsconnect",
         "Title": "Deploy Docs, Apps, and APIs to 'Posit Connect', 'shinyapps.io',\nand 'RPubs'",
-        "Version": "1.4.2",
+        "Version": "1.5.0",
         "Authors@R": "c(\n    person(\"Aron\", \"Atkins\", , \"aron@posit.co\", role = c(\"aut\", \"cre\")),\n    person(\"Toph\", \"Allen\", role = \"aut\"),\n    person(\"Hadley\", \"Wickham\", role = \"aut\"),\n    person(\"Jonathan\", \"McPherson\", role = \"aut\"),\n    person(\"JJ\", \"Allaire\", role = \"aut\"),\n    person(\"Posit Software, PBC\", role = c(\"cph\", \"fnd\"))\n  )",
         "Description": "Programmatic deployment interface for 'RPubs',\n    'shinyapps.io', and 'Posit Connect'. Supported content types include R\n    Markdown documents, Shiny applications, Plumber APIs, plots, and\n    static web content.",
         "License": "GPL-2",
         "URL": "https://rstudio.github.io/rsconnect/,\nhttps://github.com/rstudio/rsconnect",
         "BugReports": "https://github.com/rstudio/rsconnect/issues",
         "Depends": "R (>= 3.5.0)",
-        "Imports": "cli, curl, digest, jsonlite, lifecycle, openssl (>= 2.0.0),\nPKI, packrat (>= 0.6), renv (>= 1.0.0), rlang (>= 1.0.0),\nrstudioapi (>= 0.5), tools, yaml (>= 2.1.5), RcppTOML, jose,\nutils",
+        "Imports": "cli, curl, digest, jsonlite, lifecycle, openssl (>= 2.0.0),\nPKI, packrat (>= 0.6), renv (>= 1.0.0), rlang (>= 1.0.0),\nrstudioapi (>= 0.5), snowflakeauth, tools, yaml (>= 2.1.5),\nutils",
         "Suggests": "Biobase, BiocManager, foreign, knitr, MASS, plumber (>=\n0.3.2), quarto, RCurl, reticulate, rmarkdown (>= 1.1), shiny,\ntestthat (>= 3.1.9), webfakes, withr",
         "VignetteBuilder": "knitr, rmarkdown",
         "Config/Needs/website": "tidyverse/tidytemplate",
@@ -3942,19 +3915,19 @@
         "Encoding": "UTF-8",
         "RoxygenNote": "7.3.2",
         "NeedsCompilation": "no",
-        "Packaged": "2025-06-17 18:13:20 UTC; aron",
+        "Packaged": "2025-06-26 15:08:33 UTC; aron",
         "Author": "Aron Atkins [aut, cre],\n  Toph Allen [aut],\n  Hadley Wickham [aut],\n  Jonathan McPherson [aut],\n  JJ Allaire [aut],\n  Posit Software, PBC [cph, fnd]",
         "Maintainer": "Aron Atkins <aron@posit.co>",
         "Repository": "RSPM",
-        "Date/Publication": "2025-06-18 04:40:02 UTC",
-        "Built": "R 4.5.0; ; 2025-06-19 04:32:10 UTC; unix",
+        "Date/Publication": "2025-06-26 15:50:02 UTC",
+        "Built": "R 4.5.0; ; 2025-06-27 04:39:35 UTC; unix",
         "RemoteType": "standard",
         "RemoteRef": "rsconnect",
         "RemotePkgRef": "rsconnect",
         "RemoteRepos": "https://packagemanager.posit.co/cran/latest",
         "RemoteReposName": "CRAN",
         "RemotePkgPlatform": "aarch64-apple-darwin20",
-        "RemoteSha": "1.4.2"
+        "RemoteSha": "1.5.0"
       }
     },
     "rstudioapi": {
@@ -4166,35 +4139,34 @@
         "Package": "shiny",
         "Type": "Package",
         "Title": "Web Application Framework for R",
-        "Version": "1.10.0",
-        "Authors@R": "c(\n    person(\"Winston\", \"Chang\", role = c(\"aut\", \"cre\"), email = \"winston@posit.co\", comment = c(ORCID = \"0000-0002-1576-2126\")),\n    person(\"Joe\", \"Cheng\", role = \"aut\", email = \"joe@posit.co\"),\n    person(\"JJ\", \"Allaire\", role = \"aut\", email = \"jj@posit.co\"),\n    person(\"Carson\", \"Sievert\", role = \"aut\", email = \"carson@posit.co\", comment = c(ORCID = \"0000-0002-4958-2844\")),\n    person(\"Barret\", \"Schloerke\", role = \"aut\", email = \"barret@posit.co\", comment = c(ORCID = \"0000-0001-9986-114X\")),\n    person(\"Yihui\", \"Xie\", role = \"aut\", email = \"yihui@posit.co\"),\n    person(\"Jeff\", \"Allen\", role = \"aut\"),\n    person(\"Jonathan\", \"McPherson\", role = \"aut\", email = \"jonathan@posit.co\"),\n    person(\"Alan\", \"Dipert\", role = \"aut\"),\n    person(\"Barbara\", \"Borges\", role = \"aut\"),\n    person(\"Posit Software, PBC\", role = c(\"cph\", \"fnd\")),\n    person(family = \"jQuery Foundation\", role = \"cph\",\n    comment = \"jQuery library and jQuery UI library\"),\n    person(family = \"jQuery contributors\", role = c(\"ctb\", \"cph\"),\n    comment = \"jQuery library; authors listed in inst/www/shared/jquery-AUTHORS.txt\"),\n    person(family = \"jQuery UI contributors\", role = c(\"ctb\", \"cph\"),\n    comment = \"jQuery UI library; authors listed in inst/www/shared/jqueryui/AUTHORS.txt\"),\n    person(\"Mark\", \"Otto\", role = \"ctb\",\n    comment = \"Bootstrap library\"),\n    person(\"Jacob\", \"Thornton\", role = \"ctb\",\n    comment = \"Bootstrap library\"),\n    person(family = \"Bootstrap contributors\", role = \"ctb\",\n    comment = \"Bootstrap library\"),\n    person(family = \"Twitter, Inc\", role = \"cph\",\n    comment = \"Bootstrap library\"),\n    person(\"Prem Nawaz\", \"Khan\", role = \"ctb\",\n    comment = \"Bootstrap accessibility plugin\"),\n    person(\"Victor\", \"Tsaran\", role = \"ctb\",\n    comment = \"Bootstrap accessibility plugin\"),\n    person(\"Dennis\", \"Lembree\", role = \"ctb\",\n    comment = \"Bootstrap accessibility plugin\"),\n    person(\"Srinivasu\", \"Chakravarthula\", role = \"ctb\",\n    comment = \"Bootstrap accessibility plugin\"),\n    person(\"Cathy\", \"O'Connor\", role = \"ctb\",\n    comment = \"Bootstrap accessibility plugin\"),\n    person(family = \"PayPal, Inc\", role = \"cph\",\n    comment = \"Bootstrap accessibility plugin\"),\n    person(\"Stefan\", \"Petre\", role = c(\"ctb\", \"cph\"),\n    comment = \"Bootstrap-datepicker library\"),\n    person(\"Andrew\", \"Rowls\", role = c(\"ctb\", \"cph\"),\n    comment = \"Bootstrap-datepicker library\"),\n    person(\"Brian\", \"Reavis\", role = c(\"ctb\", \"cph\"),\n    comment = \"selectize.js library\"),\n    person(\"Salmen\", \"Bejaoui\", role = c(\"ctb\", \"cph\"),\n    comment = \"selectize-plugin-a11y library\"),\n    person(\"Denis\", \"Ineshin\", role = c(\"ctb\", \"cph\"),\n    comment = \"ion.rangeSlider library\"),\n    person(\"Sami\", \"Samhuri\", role = c(\"ctb\", \"cph\"),\n    comment = \"Javascript strftime library\"),\n    person(family = \"SpryMedia Limited\", role = c(\"ctb\", \"cph\"),\n    comment = \"DataTables library\"),\n    person(\"John\", \"Fraser\", role = c(\"ctb\", \"cph\"),\n    comment = \"showdown.js library\"),\n    person(\"John\", \"Gruber\", role = c(\"ctb\", \"cph\"),\n    comment = \"showdown.js library\"),\n    person(\"Ivan\", \"Sagalaev\", role = c(\"ctb\", \"cph\"),\n    comment = \"highlight.js library\"),\n    person(family = \"R Core Team\", role = c(\"ctb\", \"cph\"),\n    comment = \"tar implementation from R\")\n    )",
+        "Version": "1.11.1",
+        "Authors@R": "c(\n    person(\"Winston\", \"Chang\", role = c(\"aut\", \"cre\"), email = \"winston@posit.co\", comment = c(ORCID = \"0000-0002-1576-2126\")),\n    person(\"Joe\", \"Cheng\", role = \"aut\", email = \"joe@posit.co\"),\n    person(\"JJ\", \"Allaire\", role = \"aut\", email = \"jj@posit.co\"),\n    person(\"Carson\", \"Sievert\", role = \"aut\", email = \"carson@posit.co\", comment = c(ORCID = \"0000-0002-4958-2844\")),\n    person(\"Barret\", \"Schloerke\", role = \"aut\", email = \"barret@posit.co\", comment = c(ORCID = \"0000-0001-9986-114X\")),\n    person(\"Yihui\", \"Xie\", role = \"aut\", email = \"yihui@posit.co\"),\n    person(\"Jeff\", \"Allen\", role = \"aut\"),\n    person(\"Jonathan\", \"McPherson\", role = \"aut\", email = \"jonathan@posit.co\"),\n    person(\"Alan\", \"Dipert\", role = \"aut\"),\n    person(\"Barbara\", \"Borges\", role = \"aut\"),\n    person(\"Posit Software, PBC\", role = c(\"cph\", \"fnd\")),\n    person(family = \"jQuery Foundation\", role = \"cph\",\n    comment = \"jQuery library and jQuery UI library\"),\n    person(family = \"jQuery contributors\", role = c(\"ctb\", \"cph\"),\n    comment = \"jQuery library; authors listed in inst/www/shared/jquery-AUTHORS.txt\"),\n    person(family = \"jQuery UI contributors\", role = c(\"ctb\", \"cph\"),\n    comment = \"jQuery UI library; authors listed in inst/www/shared/jqueryui/AUTHORS.txt\"),\n    person(\"Mark\", \"Otto\", role = \"ctb\",\n    comment = \"Bootstrap library\"),\n    person(\"Jacob\", \"Thornton\", role = \"ctb\",\n    comment = \"Bootstrap library\"),\n    person(family = \"Bootstrap contributors\", role = \"ctb\",\n    comment = \"Bootstrap library\"),\n    person(family = \"Twitter, Inc\", role = \"cph\",\n    comment = \"Bootstrap library\"),\n    person(\"Prem Nawaz\", \"Khan\", role = \"ctb\",\n    comment = \"Bootstrap accessibility plugin\"),\n    person(\"Victor\", \"Tsaran\", role = \"ctb\",\n    comment = \"Bootstrap accessibility plugin\"),\n    person(\"Dennis\", \"Lembree\", role = \"ctb\",\n    comment = \"Bootstrap accessibility plugin\"),\n    person(\"Srinivasu\", \"Chakravarthula\", role = \"ctb\",\n    comment = \"Bootstrap accessibility plugin\"),\n    person(\"Cathy\", \"O'Connor\", role = \"ctb\",\n    comment = \"Bootstrap accessibility plugin\"),\n    person(family = \"PayPal, Inc\", role = \"cph\",\n    comment = \"Bootstrap accessibility plugin\"),\n    person(\"Stefan\", \"Petre\", role = c(\"ctb\", \"cph\"),\n    comment = \"Bootstrap-datepicker library\"),\n    person(\"Andrew\", \"Rowls\", role = c(\"ctb\", \"cph\"),\n    comment = \"Bootstrap-datepicker library\"),\n    person(\"Brian\", \"Reavis\", role = c(\"ctb\", \"cph\"),\n    comment = \"selectize.js library\"),\n    person(\"Salmen\", \"Bejaoui\", role = c(\"ctb\", \"cph\"),\n    comment = \"selectize-plugin-a11y library\"),\n    person(\"Denis\", \"Ineshin\", role = c(\"ctb\", \"cph\"),\n    comment = \"ion.rangeSlider library\"),\n    person(\"Sami\", \"Samhuri\", role = c(\"ctb\", \"cph\"),\n    comment = \"Javascript strftime library\"),\n    person(family = \"SpryMedia Limited\", role = c(\"ctb\", \"cph\"),\n    comment = \"DataTables library\"),\n    person(\"John\", \"Fraser\", role = c(\"ctb\", \"cph\"),\n    comment = \"showdown.js library\"),\n    person(\"John\", \"Gruber\", role = c(\"ctb\", \"cph\"),\n    comment = \"showdown.js library\"),\n    person(\"Ivan\", \"Sagalaev\", role = c(\"ctb\", \"cph\"),\n    comment = \"highlight.js library\"),\n    person(given = \"R Core Team\", role = c(\"ctb\", \"cph\"),\n    comment = \"tar implementation from R\")\n    )",
         "Description": "Makes it incredibly easy to build interactive web\n    applications with R. Automatic \"reactive\" binding between inputs and\n    outputs and extensive prebuilt widgets make it possible to build\n    beautiful, responsive, and powerful applications with minimal effort.",
         "License": "GPL-3 | file LICENSE",
         "Depends": "R (>= 3.0.2), methods",
-        "Imports": "utils, grDevices, httpuv (>= 1.5.2), mime (>= 0.3), jsonlite\n(>= 0.9.16), xtable, fontawesome (>= 0.4.0), htmltools (>=\n0.5.4), R6 (>= 2.0), sourcetools, later (>= 1.0.0), promises\n(>= 1.3.2), tools, crayon, rlang (>= 0.4.10), fastmap (>=\n1.1.1), withr, commonmark (>= 1.7), glue (>= 1.3.2), bslib (>=\n0.6.0), cachem (>= 1.1.0), lifecycle (>= 0.2.0)",
-        "Suggests": "coro (>= 1.1.0), datasets, DT, Cairo (>= 1.5-5), testthat (>=\n3.0.0), knitr (>= 1.6), markdown, rmarkdown, ggplot2, reactlog\n(>= 1.0.0), magrittr, yaml, future, dygraphs, ragg, showtext,\nsass",
+        "Imports": "utils, grDevices, httpuv (>= 1.5.2), mime (>= 0.3), jsonlite\n(>= 0.9.16), xtable, fontawesome (>= 0.4.0), htmltools (>=\n0.5.4), R6 (>= 2.0), sourcetools, later (>= 1.0.0), promises\n(>= 1.3.2), tools, cli, rlang (>= 0.4.10), fastmap (>= 1.1.1),\nwithr, commonmark (>= 1.7), glue (>= 1.3.2), bslib (>= 0.6.0),\ncachem (>= 1.1.0), lifecycle (>= 0.2.0)",
+        "Suggests": "coro (>= 1.1.0), datasets, DT, Cairo (>= 1.5-5), testthat (>=\n3.2.1), knitr (>= 1.6), markdown, rmarkdown, ggplot2, reactlog\n(>= 1.0.0), magrittr, yaml, mirai, future, dygraphs, ragg,\nshowtext, sass, watcher",
         "URL": "https://shiny.posit.co/, https://github.com/rstudio/shiny",
         "BugReports": "https://github.com/rstudio/shiny/issues",
         "Collate": "'globals.R' 'app-state.R' 'app_template.R' 'bind-cache.R'\n'bind-event.R' 'bookmark-state-local.R' 'bookmark-state.R'\n'bootstrap-deprecated.R' 'bootstrap-layout.R' 'conditions.R'\n'map.R' 'utils.R' 'bootstrap.R' 'busy-indicators-spinners.R'\n'busy-indicators.R' 'cache-utils.R' 'deprecated.R' 'devmode.R'\n'diagnose.R' 'extended-task.R' 'fileupload.R' 'graph.R'\n'reactives.R' 'reactive-domains.R' 'history.R' 'hooks.R'\n'html-deps.R' 'image-interact-opts.R' 'image-interact.R'\n'imageutils.R' 'input-action.R' 'input-checkbox.R'\n'input-checkboxgroup.R' 'input-date.R' 'input-daterange.R'\n'input-file.R' 'input-numeric.R' 'input-password.R'\n'input-radiobuttons.R' 'input-select.R' 'input-slider.R'\n'input-submit.R' 'input-text.R' 'input-textarea.R'\n'input-utils.R' 'insert-tab.R' 'insert-ui.R' 'jqueryui.R'\n'knitr.R' 'middleware-shiny.R' 'middleware.R' 'timer.R'\n'shiny.R' 'mock-session.R' 'modal.R' 'modules.R'\n'notifications.R' 'priorityqueue.R' 'progress.R' 'react.R'\n'reexports.R' 'render-cached-plot.R' 'render-plot.R'\n'render-table.R' 'run-url.R' 'runapp.R' 'serializers.R'\n'server-input-handlers.R' 'server-resource-paths.R' 'server.R'\n'shiny-options.R' 'shiny-package.R' 'shinyapp.R' 'shinyui.R'\n'shinywrappers.R' 'showcase.R' 'snapshot.R' 'staticimports.R'\n'tar.R' 'test-export.R' 'test-server.R' 'test.R'\n'update-input.R' 'utils-lang.R' 'version_bs_date_picker.R'\n'version_ion_range_slider.R' 'version_jquery.R'\n'version_jqueryui.R' 'version_selectize.R' 'version_strftime.R'\n'viewer.R'",
         "RoxygenNote": "7.3.2",
         "Encoding": "UTF-8",
-        "RdMacros": "lifecycle",
         "Config/testthat/edition": "3",
         "Config/Needs/check": "shinytest2",
         "NeedsCompilation": "no",
-        "Packaged": "2024-12-13 21:47:15 UTC; cpsievert",
-        "Author": "Winston Chang [aut, cre] (<https://orcid.org/0000-0002-1576-2126>),\n  Joe Cheng [aut],\n  JJ Allaire [aut],\n  Carson Sievert [aut] (<https://orcid.org/0000-0002-4958-2844>),\n  Barret Schloerke [aut] (<https://orcid.org/0000-0001-9986-114X>),\n  Yihui Xie [aut],\n  Jeff Allen [aut],\n  Jonathan McPherson [aut],\n  Alan Dipert [aut],\n  Barbara Borges [aut],\n  Posit Software, PBC [cph, fnd],\n  jQuery Foundation [cph] (jQuery library and jQuery UI library),\n  jQuery contributors [ctb, cph] (jQuery library; authors listed in\n    inst/www/shared/jquery-AUTHORS.txt),\n  jQuery UI contributors [ctb, cph] (jQuery UI library; authors listed in\n    inst/www/shared/jqueryui/AUTHORS.txt),\n  Mark Otto [ctb] (Bootstrap library),\n  Jacob Thornton [ctb] (Bootstrap library),\n  Bootstrap contributors [ctb] (Bootstrap library),\n  Twitter, Inc [cph] (Bootstrap library),\n  Prem Nawaz Khan [ctb] (Bootstrap accessibility plugin),\n  Victor Tsaran [ctb] (Bootstrap accessibility plugin),\n  Dennis Lembree [ctb] (Bootstrap accessibility plugin),\n  Srinivasu Chakravarthula [ctb] (Bootstrap accessibility plugin),\n  Cathy O'Connor [ctb] (Bootstrap accessibility plugin),\n  PayPal, Inc [cph] (Bootstrap accessibility plugin),\n  Stefan Petre [ctb, cph] (Bootstrap-datepicker library),\n  Andrew Rowls [ctb, cph] (Bootstrap-datepicker library),\n  Brian Reavis [ctb, cph] (selectize.js library),\n  Salmen Bejaoui [ctb, cph] (selectize-plugin-a11y library),\n  Denis Ineshin [ctb, cph] (ion.rangeSlider library),\n  Sami Samhuri [ctb, cph] (Javascript strftime library),\n  SpryMedia Limited [ctb, cph] (DataTables library),\n  John Fraser [ctb, cph] (showdown.js library),\n  John Gruber [ctb, cph] (showdown.js library),\n  Ivan Sagalaev [ctb, cph] (highlight.js library),\n  R Core Team [ctb, cph] (tar implementation from R)",
+        "Packaged": "2025-07-03 01:15:18 UTC; cpsievert",
+        "Author": "Winston Chang [aut, cre] (ORCID:\n    <https://orcid.org/0000-0002-1576-2126>),\n  Joe Cheng [aut],\n  JJ Allaire [aut],\n  Carson Sievert [aut] (ORCID: <https://orcid.org/0000-0002-4958-2844>),\n  Barret Schloerke [aut] (ORCID: <https://orcid.org/0000-0001-9986-114X>),\n  Yihui Xie [aut],\n  Jeff Allen [aut],\n  Jonathan McPherson [aut],\n  Alan Dipert [aut],\n  Barbara Borges [aut],\n  Posit Software, PBC [cph, fnd],\n  jQuery Foundation [cph] (jQuery library and jQuery UI library),\n  jQuery contributors [ctb, cph] (jQuery library; authors listed in\n    inst/www/shared/jquery-AUTHORS.txt),\n  jQuery UI contributors [ctb, cph] (jQuery UI library; authors listed in\n    inst/www/shared/jqueryui/AUTHORS.txt),\n  Mark Otto [ctb] (Bootstrap library),\n  Jacob Thornton [ctb] (Bootstrap library),\n  Bootstrap contributors [ctb] (Bootstrap library),\n  Twitter, Inc [cph] (Bootstrap library),\n  Prem Nawaz Khan [ctb] (Bootstrap accessibility plugin),\n  Victor Tsaran [ctb] (Bootstrap accessibility plugin),\n  Dennis Lembree [ctb] (Bootstrap accessibility plugin),\n  Srinivasu Chakravarthula [ctb] (Bootstrap accessibility plugin),\n  Cathy O'Connor [ctb] (Bootstrap accessibility plugin),\n  PayPal, Inc [cph] (Bootstrap accessibility plugin),\n  Stefan Petre [ctb, cph] (Bootstrap-datepicker library),\n  Andrew Rowls [ctb, cph] (Bootstrap-datepicker library),\n  Brian Reavis [ctb, cph] (selectize.js library),\n  Salmen Bejaoui [ctb, cph] (selectize-plugin-a11y library),\n  Denis Ineshin [ctb, cph] (ion.rangeSlider library),\n  Sami Samhuri [ctb, cph] (Javascript strftime library),\n  SpryMedia Limited [ctb, cph] (DataTables library),\n  John Fraser [ctb, cph] (showdown.js library),\n  John Gruber [ctb, cph] (showdown.js library),\n  Ivan Sagalaev [ctb, cph] (highlight.js library),\n  R Core Team [ctb, cph] (tar implementation from R)",
         "Maintainer": "Winston Chang <winston@posit.co>",
         "Repository": "RSPM",
-        "Date/Publication": "2024-12-14 00:10:02 UTC",
-        "Built": "R 4.5.0; ; 2025-04-06 04:46:51 UTC; unix",
+        "Date/Publication": "2025-07-03 06:20:02 UTC",
+        "Built": "R 4.5.0; ; 2025-07-04 04:45:28 UTC; unix",
         "RemoteType": "standard",
         "RemoteRef": "shiny",
         "RemotePkgRef": "shiny",
         "RemoteRepos": "https://packagemanager.posit.co/cran/latest",
         "RemoteReposName": "CRAN",
         "RemotePkgPlatform": "aarch64-apple-darwin20",
-        "RemoteSha": "1.10.0"
+        "RemoteSha": "1.11.1"
       }
     },
     "sjlabelled": {
@@ -4230,6 +4202,32 @@
         "RemoteReposName": "CRAN",
         "RemotePkgPlatform": "aarch64-apple-darwin20",
         "RemoteSha": "1.2.0"
+      }
+    },
+    "snowflakeauth": {
+      "Source": "CRAN",
+      "Repository": "https://packagemanager.posit.co/cran/latest",
+      "description": {
+        "Package": "snowflakeauth",
+        "Title": "Authentication Helpers for 'Snowflake'",
+        "Version": "0.1.2",
+        "Authors@R": "c(\n    person(\"Aaron\", \"Jacobs\", , \"aaron.jacobs@posit.co\", role = c(\"aut\")),\n    person(\"E. David\", \"Aja\", , \"david@posit.co\", role = c(\"aut\", \"cre\")),\n    person(\"Posit Software, PBC\", role = c(\"cph\", \"fnd\"))\n  )",
+        "Description": "Authentication helpers for 'Snowflake'.\n    It provides compatibility with authentication approaches supported\n    by the 'Snowflake Connector for Python' <https://pypi.org/project/snowflake-connector-python>\n    and the 'Snowflake CLI' <https://pypi.org/project/snowflake-cli>.",
+        "License": "MIT + file LICENSE",
+        "Encoding": "UTF-8",
+        "Imports": "cli, curl, jsonlite, RcppTOML, rlang",
+        "Suggests": "jose, openssl, testthat (>= 3.0.0), withr",
+        "RoxygenNote": "7.3.2",
+        "Config/testthat/edition": "3",
+        "URL": "https://posit-dev.github.io/snowflakeauth/,\nhttps://github.com/posit-dev/snowflakeauth",
+        "BugReports": "https://github.com/posit-dev/snowflakeauth/issues",
+        "NeedsCompilation": "no",
+        "Packaged": "2025-06-18 13:05:51 UTC; edavidaja",
+        "Author": "Aaron Jacobs [aut],\n  E. David Aja [aut, cre],\n  Posit Software, PBC [cph, fnd]",
+        "Maintainer": "E. David Aja <david@posit.co>",
+        "Repository": "CRAN",
+        "Date/Publication": "2025-06-19 15:20:02 UTC",
+        "Built": "R 4.5.0; ; 2025-06-19 16:38:53 UTC; unix"
       }
     },
     "sourcetools": {
@@ -4516,13 +4514,13 @@
         "Package": "terra",
         "Type": "Package",
         "Title": "Spatial Data Analysis",
-        "Version": "1.8-50",
-        "Date": "2025-05-09",
+        "Version": "1.8-60",
+        "Date": "2025-07-18",
         "Depends": "R (>= 3.5.0)",
         "Suggests": "parallel, tinytest, ncdf4, sf (>= 0.9-8), deldir, XML,\nleaflet (>= 2.2.1), htmlwidgets",
         "LinkingTo": "Rcpp",
         "Imports": "methods, Rcpp (>= 1.0-10)",
-        "SystemRequirements": "C++17, GDAL (>= 2.2.3), GEOS (>= 3.4.0), PROJ (>=\n4.9.3), netcdf (>=4.1.3), TBB, sqlite3",
+        "SystemRequirements": "C++17, GDAL (>= 2.2.3), GEOS (>= 3.4.0), PROJ (>=\n4.9.3), TBB, sqlite3",
         "Encoding": "UTF-8",
         "Language": "en-US",
         "Maintainer": "Robert J. Hijmans <r.hijmans@gmail.com>",
@@ -4531,14 +4529,20 @@
         "URL": "https://rspatial.org/, https://rspatial.github.io/terra/",
         "BugReports": "https://github.com/rspatial/terra/issues/",
         "LazyLoad": "yes",
-        "Authors@R": "c(\n\tperson(\"Robert J.\", \"Hijmans\", role=c(\"cre\", \"aut\"),  \n\t\t\temail=\"r.hijmans@gmail.com\", comment=c(ORCID=\"0000-0001-5872-2872\")),\t\t\t\n    person(\"Márcia\", \"Barbosa\", role=\"ctb\"),\n    person(\"Roger\", \"Bivand\", role=\"ctb\", comment=c(ORCID=\"0000-0003-2392-6140\")),\n    person(\"Andrew\", \"Brown\", role=\"ctb\"),\n    person(\"Michael\", \"Chirico\", role=\"ctb\"),\n    person(\"Emanuele\", \"Cordano\", role=\"ctb\",comment=c(ORCID=\"0000-0002-3508-5898\")),\n    person(\"Krzysztof\", \"Dyba\", role=\"ctb\", comment=c(ORCID=\"0000-0002-8614-3816\")),\n    person(\"Edzer\", \"Pebesma\", role=\"ctb\", comment=c(ORCID=\"0000-0001-8049-7069\")),\n    person(\"Barry\", \"Rowlingson\", role=\"ctb\"),\n    person(\"Michael D.\", \"Sumner\", role=\"ctb\"))",
+        "Authors@R": "c(\n\tperson(\"Robert J.\", \"Hijmans\", role=c(\"cre\", \"aut\"),  \n\t\t\temail=\"r.hijmans@gmail.com\", comment=c(ORCID=\"0000-0001-5872-2872\")),\t\t\t\n    person(\"Márcia\", \"Barbosa\", role=\"ctb\", comment=c(ORCID=\"0000-0001-8972-7713\")),\n    person(\"Roger\", \"Bivand\", role=\"ctb\", comment=c(ORCID=\"0000-0003-2392-6140\")),\n    person(\"Andrew\", \"Brown\", role=\"ctb\", comment=c(ORCID=\"0000-0002-4565-533X\")),\n    person(\"Michael\", \"Chirico\", role=\"ctb\", comment=c(ORCID=\"0000-0003-0787-087X\")),\n    person(\"Emanuele\", \"Cordano\", role=\"ctb\",comment=c(ORCID=\"0000-0002-3508-5898\")),\n    person(\"Krzysztof\", \"Dyba\", role=\"ctb\", comment=c(ORCID=\"0000-0002-8614-3816\")),\n    person(\"Edzer\", \"Pebesma\", role=\"ctb\", comment=c(ORCID=\"0000-0001-8049-7069\")),\n    person(\"Barry\", \"Rowlingson\", role=\"ctb\", comment=c(ORCID=\"0000-0002-8586-6625\")),\n    person(\"Michael D.\", \"Sumner\", role=\"ctb\", comment=c(ORCID=\"0000-0002-2471-7511\")))",
         "NeedsCompilation": "yes",
-        "Packaged": "2025-05-09 08:00:07 UTC; rhijm",
-        "Author": "Robert J. Hijmans [cre, aut] (ORCID:\n    <https://orcid.org/0000-0001-5872-2872>),\n  Márcia Barbosa [ctb],\n  Roger Bivand [ctb] (ORCID: <https://orcid.org/0000-0003-2392-6140>),\n  Andrew Brown [ctb],\n  Michael Chirico [ctb],\n  Emanuele Cordano [ctb] (ORCID: <https://orcid.org/0000-0002-3508-5898>),\n  Krzysztof Dyba [ctb] (ORCID: <https://orcid.org/0000-0002-8614-3816>),\n  Edzer Pebesma [ctb] (ORCID: <https://orcid.org/0000-0001-8049-7069>),\n  Barry Rowlingson [ctb],\n  Michael D. Sumner [ctb]",
-        "Repository": "CRAN",
-        "Date/Publication": "2025-05-09 11:20:02 UTC",
-        "Built": "R 4.5.0; aarch64-apple-darwin20; 2025-05-09 13:01:50 UTC; unix",
-        "Archs": "terra.so.dSYM"
+        "Packaged": "2025-07-18 09:43:54 UTC; rhijm",
+        "Author": "Robert J. Hijmans [cre, aut] (ORCID:\n    <https://orcid.org/0000-0001-5872-2872>),\n  Márcia Barbosa [ctb] (ORCID: <https://orcid.org/0000-0001-8972-7713>),\n  Roger Bivand [ctb] (ORCID: <https://orcid.org/0000-0003-2392-6140>),\n  Andrew Brown [ctb] (ORCID: <https://orcid.org/0000-0002-4565-533X>),\n  Michael Chirico [ctb] (ORCID: <https://orcid.org/0000-0003-0787-087X>),\n  Emanuele Cordano [ctb] (ORCID: <https://orcid.org/0000-0002-3508-5898>),\n  Krzysztof Dyba [ctb] (ORCID: <https://orcid.org/0000-0002-8614-3816>),\n  Edzer Pebesma [ctb] (ORCID: <https://orcid.org/0000-0001-8049-7069>),\n  Barry Rowlingson [ctb] (ORCID: <https://orcid.org/0000-0002-8586-6625>),\n  Michael D. Sumner [ctb] (ORCID:\n    <https://orcid.org/0000-0002-2471-7511>)",
+        "Repository": "RSPM",
+        "Date/Publication": "2025-07-21 04:10:02 UTC",
+        "Built": "R 4.5.0; x86_64-pc-linux-gnu; 2025-07-22 05:11:09 UTC; unix",
+        "RemoteType": "standard",
+        "RemoteRef": "terra",
+        "RemotePkgRef": "terra",
+        "RemoteRepos": "https://packagemanager.posit.co/cran/latest",
+        "RemoteReposName": "CRAN",
+        "RemotePkgPlatform": "aarch64-apple-darwin20",
+        "RemoteSha": "1.8-60"
       }
     },
     "textshaping": {
@@ -5272,331 +5276,175 @@
   },
   "files": {
     ".Rprofile": {
-      "checksum": "d6bea77cacf18bca109471e85d67b22c"
+      "checksum": "17a5338dd49fa0307d6e913b4d16af85"
+    },
+    "data/pins/BFA_2018_H3/20250729T114058Z-cb328/BFA_2018_H3.parquet": {
+      "checksum": "1e628ae5ea705021d2bc76c9512eb57a"
+    },
+    "data/pins/BFA_2018_H3/20250729T114058Z-cb328/data.txt": {
+      "checksum": "3feb6c4f9e684949f8a5cc8870f1df34"
+    },
+    "data/pins/BFA_2018_LOC/20250729T114651Z-db297/BFA_2018_LOC.parquet": {
+      "checksum": "b50911f422357d1891f97a5d8890fba5"
+    },
+    "data/pins/BFA_2018_LOC/20250729T114651Z-db297/data.txt": {
+      "checksum": "948c5238d04bf9aea74b4101d80e01ae"
+    },
+    "data/pins/BFA_2018/20250729T111934Z-e6fc2/BFA_2018.parquet": {
+      "checksum": "224708cc2852ca1fb0c63d62a48a8452"
+    },
+    "data/pins/BFA_2018/20250729T111934Z-e6fc2/data.txt": {
+      "checksum": "11d6c81cd5a065c2b4c12dcf7301ec73"
+    },
+    "data/pins/BFA_2021_H3/20250729T114652Z-5dfca/BFA_2021_H3.parquet": {
+      "checksum": "1f29cff6bb8aa5441196ccc6222ff6fe"
+    },
+    "data/pins/BFA_2021_H3/20250729T114652Z-5dfca/data.txt": {
+      "checksum": "50a900db86bc12e267fbf6225caf4ddb"
+    },
+    "data/pins/BFA_2021_LOC/20250729T114653Z-aedd5/BFA_2021_LOC.parquet": {
+      "checksum": "00848f4e86ed610ac519e260c12b4813"
+    },
+    "data/pins/BFA_2021_LOC/20250729T114653Z-aedd5/data.txt": {
+      "checksum": "f167c168c22df06f5fbfdd8c7ad22a11"
+    },
+    "data/pins/BFA_2021/20250729T111939Z-53338/BFA_2021.parquet": {
+      "checksum": "a911db919812272f6733c06fa180d218"
+    },
+    "data/pins/BFA_2021/20250729T111939Z-53338/data.txt": {
+      "checksum": "5eb8cae39a364d6e5892d11028aae041"
+    },
+    "data/pins/BFA_weather/20250729T112601Z-e5049/BFA_weather.parquet": {
+      "checksum": "164c846afc7b6be3d94fe8beb66e5fc7"
+    },
+    "data/pins/BFA_weather/20250729T112601Z-e5049/data.txt": {
+      "checksum": "d6710847d533a1e667b9853d5f95b590"
+    },
+    "data/pins/SEN_2018_H3/20250729T114654Z-726c6/data.txt": {
+      "checksum": "49c963e08ae737bf4e823f6ab78c2b46"
+    },
+    "data/pins/SEN_2018_H3/20250729T114654Z-726c6/SEN_2018_H3.parquet": {
+      "checksum": "9b7e837ae079abd9ece7c89ad334df9e"
+    },
+    "data/pins/SEN_2018_LOC/20250729T114655Z-e9d4a/data.txt": {
+      "checksum": "f4b0c0c8a54a0bc07acdd21aa6a5e21b"
+    },
+    "data/pins/SEN_2018_LOC/20250729T114655Z-e9d4a/SEN_2018_LOC.parquet": {
+      "checksum": "58a41a850a645d00143c705874416794"
+    },
+    "data/pins/SEN_2018/20250729T111943Z-03246/data.txt": {
+      "checksum": "db5c81b197f17c79997cc4ca1b3c11ac"
+    },
+    "data/pins/SEN_2018/20250729T111943Z-03246/SEN_2018.parquet": {
+      "checksum": "27efaec8cef000279e0a5bb8183730d6"
+    },
+    "data/pins/SEN_2021_H3/20250729T114656Z-cfe62/data.txt": {
+      "checksum": "228235292fa548e875c25b0dec51b0f9"
+    },
+    "data/pins/SEN_2021_H3/20250729T114656Z-cfe62/SEN_2021_H3.parquet": {
+      "checksum": "bbe68e6291bcd7a9eef57d36a252babd"
+    },
+    "data/pins/SEN_2021_LOC/20250729T114657Z-07d90/data.txt": {
+      "checksum": "8ac377002b4b3211af17ad791476633e"
+    },
+    "data/pins/SEN_2021_LOC/20250729T114657Z-07d90/SEN_2021_LOC.parquet": {
+      "checksum": "1c8977901ceabfec1f3e14cd69556064"
+    },
+    "data/pins/SEN_2021/20250729T111948Z-29ce0/data.txt": {
+      "checksum": "92ed6ae46c3a8093d36c6fd1625ce084"
+    },
+    "data/pins/SEN_2021/20250729T111948Z-29ce0/SEN_2021.parquet": {
+      "checksum": "9efc95fbd5d7767152dc81f4d635e10a"
+    },
+    "data/pins/SEN_weather/20250729T112635Z-9cb49/data.txt": {
+      "checksum": "c2b29a2084ed1a87a80e1d854cdb5d6a"
+    },
+    "data/pins/SEN_weather/20250729T112635Z-9cb49/SEN_weather.parquet": {
+      "checksum": "cba97b3444bd923ebefe01a805d67ebc"
+    },
+    "data/pins/surveys/20250729T111957Z-e47c6/data.txt": {
+      "checksum": "5a400245ce89f67e0e91e9919fd1e5c4"
+    },
+    "data/pins/surveys/20250729T111957Z-e47c6/surveys.parquet": {
+      "checksum": "0f2fafa541612423bc42f9174c5c9289"
+    },
+    "data/pins/TGO_2018_H3/20250729T114658Z-187c8/data.txt": {
+      "checksum": "a33269b26ec2643e7c207dc73a547712"
+    },
+    "data/pins/TGO_2018_H3/20250729T114658Z-187c8/TGO_2018_H3.parquet": {
+      "checksum": "b817ab3890a3778acf2e8c8036e16bc7"
+    },
+    "data/pins/TGO_2018_LOC/20250729T114659Z-50e60/data.txt": {
+      "checksum": "ce3de425e7e3956eaa37c143c88639ed"
+    },
+    "data/pins/TGO_2018_LOC/20250729T114659Z-50e60/TGO_2018_LOC.parquet": {
+      "checksum": "ee82047b328fc009c4b54c690a36b8a5"
+    },
+    "data/pins/TGO_2018/20250729T111952Z-8e605/data.txt": {
+      "checksum": "7fc15148e032c1a051901ca185e083fc"
+    },
+    "data/pins/TGO_2018/20250729T111952Z-8e605/TGO_2018.parquet": {
+      "checksum": "0e2f628ba79b13121ec1199465c3b290"
+    },
+    "data/pins/TGO_2021_H3/20250729T114700Z-f94eb/data.txt": {
+      "checksum": "c355b4715f60402b4f52a5089c2b986e"
+    },
+    "data/pins/TGO_2021_H3/20250729T114700Z-f94eb/TGO_2021_H3.parquet": {
+      "checksum": "7269ee94a079ab06cdf5b025b0210b4a"
+    },
+    "data/pins/TGO_2021_LOC/20250729T114702Z-9ac50/data.txt": {
+      "checksum": "e6f27890b581954c022296ba84d1fc1b"
+    },
+    "data/pins/TGO_2021_LOC/20250729T114702Z-9ac50/TGO_2021_LOC.parquet": {
+      "checksum": "b4d14afbe7ca64811eca4f08b09b2250"
+    },
+    "data/pins/TGO_2021/20250729T111956Z-23a6c/data.txt": {
+      "checksum": "bf94c8a83bd0a817058d959044915299"
+    },
+    "data/pins/TGO_2021/20250729T111956Z-23a6c/TGO_2021.parquet": {
+      "checksum": "128ec8fc21bb3bbbbe33d918665a00b2"
+    },
+    "data/pins/TGO_weather/20250729T112654Z-b5df4/data.txt": {
+      "checksum": "b6b65cbaeb64d395edf1ad969e98ef6a"
+    },
+    "data/pins/TGO_weather/20250729T112654Z-b5df4/TGO_weather.parquet": {
+      "checksum": "0e2ab106a3b3d51b9844cdef2202c42b"
+    },
+    "data/pins/varlist/20250729T111931Z-a5387/data.txt": {
+      "checksum": "f3627def35038ec4463de0b3572af05b"
+    },
+    "data/pins/varlist/20250729T111931Z-a5387/varlist.parquet": {
+      "checksum": "823efa70da8f623a0f92eae45105945c"
+    },
+    "data/pins/weather_varlist/20250729T112700Z-6e32c/data.txt": {
+      "checksum": "ea6a89a2ccb81b1c9a34d5a1e7716d60"
+    },
+    "data/pins/weather_varlist/20250729T112700Z-6e32c/weather_varlist.parquet": {
+      "checksum": "48e67d22e7ebff841cbb7ff49567ba11"
     },
     "data/survey_prep_errors.csv": {
-      "checksum": "e93a9e9ee46974c97f80641b4814e2fd"
-    },
-    "data/surveys.parquet": {
-      "checksum": "fca849543e5ac641e2fb9309b6c4f35f"
-    },
-    "data/surveys/AGO_2018.parquet": {
-      "checksum": "4128cd3e12bd939dce003b857b013ee0"
-    },
-    "data/surveys/BEN_2018_H3.parquet": {
-      "checksum": "9dc6352ba0a57483f65c9a2cf47b9bd6"
-    },
-    "data/surveys/BEN_2018_LOC.parquet": {
-      "checksum": "1f6d4392e9be871e558a009780cde4fb"
-    },
-    "data/surveys/BEN_2018.parquet": {
-      "checksum": "483fba33eb4d0bf4f4c2b8b4ddb4cf24"
-    },
-    "data/surveys/BEN_2021_H3.parquet": {
-      "checksum": "b0ca1a8c3d552b324b1dab37e9b7c9a8"
-    },
-    "data/surveys/BEN_2021_LOC.parquet": {
-      "checksum": "cd1fbb408a6f3e853f52f87bbfc27f84"
-    },
-    "data/surveys/BEN_2021.parquet": {
-      "checksum": "4a98291d877b5cb41534ddaea286b6f7"
-    },
-    "data/surveys/BFA_2018_H3.parquet": {
-      "checksum": "d9ea7da7da34599a28d581311f29ef7f"
-    },
-    "data/surveys/BFA_2018_LOC.parquet": {
-      "checksum": "4d2a098760a0a7bf4ac49b38db5e1cc3"
-    },
-    "data/surveys/BFA_2018.parquet": {
-      "checksum": "635d52c323490b20f9f1ab587ad831a0"
-    },
-    "data/surveys/BFA_2021_H3.parquet": {
-      "checksum": "60d40a17d407a76464b57cbdb159952d"
-    },
-    "data/surveys/BFA_2021_LOC.parquet": {
-      "checksum": "67c6e843222dc06642d8a023acccabaf"
-    },
-    "data/surveys/BFA_2021.parquet": {
-      "checksum": "8e8b2762c9980852866004a8ee8d191f"
-    },
-    "data/surveys/CIV_2018_H3.parquet": {
-      "checksum": "e4e07e5ae79d1148a173ab4fe117a592"
-    },
-    "data/surveys/CIV_2018_LOC.parquet": {
-      "checksum": "89082e178131ce818a70fa0802c7fb9c"
-    },
-    "data/surveys/CIV_2018.parquet": {
-      "checksum": "bff8b75cca8d306dae92755299e66c4c"
-    },
-    "data/surveys/CIV_2021_H3.parquet": {
-      "checksum": "e37865cf56e877125a7cace63e31f2f7"
-    },
-    "data/surveys/CIV_2021_LOC.parquet": {
-      "checksum": "c3596180305974d2ac52336d14a09b48"
-    },
-    "data/surveys/CIV_2021.parquet": {
-      "checksum": "49236cf9a51d30f83980aaa88a630d01"
-    },
-    "data/surveys/GHA_2016_H3.parquet": {
-      "checksum": "5b8b8bd842656888bdfeb1f9cb933639"
-    },
-    "data/surveys/GHA_2016_LOC.parquet": {
-      "checksum": "1912036353d62379767fe1760b449be3"
-    },
-    "data/surveys/GHA_2016.parquet": {
-      "checksum": "36372ec3fe821e4791fbb6a8488a57a1"
-    },
-    "data/surveys/GMB_2020_H3.parquet": {
-      "checksum": "8ca0cdc55e2986f1bf513b18bb9e1ffb"
-    },
-    "data/surveys/GMB_2020_LOC.parquet": {
-      "checksum": "edaecdea8496fa7b81bf0b8f55bd5430"
-    },
-    "data/surveys/GMB_2020.parquet": {
-      "checksum": "ef8e34cc0b99df0c1c660a25a53e11ca"
-    },
-    "data/surveys/GNB_2018_H3.parquet": {
-      "checksum": "a00ec50df6a6090b3234aea1ed3619d9"
-    },
-    "data/surveys/GNB_2018_LOC.parquet": {
-      "checksum": "e8d965d04f58aacac6513ff0247c37fe"
-    },
-    "data/surveys/GNB_2018.parquet": {
-      "checksum": "2c65c9a0d13715246979b2e59ab7a5a2"
-    },
-    "data/surveys/GNB_2021_H3.parquet": {
-      "checksum": "8b304c6d0b23c0ec94ab8fd664836449"
-    },
-    "data/surveys/GNB_2021_LOC.parquet": {
-      "checksum": "01f93567fde312d671c03984a72cba7c"
-    },
-    "data/surveys/GNB_2021.parquet": {
-      "checksum": "24d9154f6731b270a785ce1b4df40101"
-    },
-    "data/surveys/LKA_2012_H3.parquet": {
-      "checksum": "10e25efd7a966484ddf1f0f926c3e179"
-    },
-    "data/surveys/LKA_2012_LOC.parquet": {
-      "checksum": "92cb75e5a694492d3fba00c9fe905827"
-    },
-    "data/surveys/LKA_2012.parquet": {
-      "checksum": "f61e835e211810e9ae378c6ac669ff1c"
-    },
-    "data/surveys/MLI_2018_H3.parquet": {
-      "checksum": "6c4b617205e03902912366774c008ac5"
-    },
-    "data/surveys/MLI_2018_LOC.parquet": {
-      "checksum": "d8c69ecf535c279ea39e76732953fdb4"
-    },
-    "data/surveys/MLI_2018.parquet": {
-      "checksum": "c2b830135ce7af6390ff926ee40e204b"
-    },
-    "data/surveys/MLI_2021_H3.parquet": {
-      "checksum": "7a76ba3064ae8f4f2ce964fd398b7365"
-    },
-    "data/surveys/MLI_2021_LOC.parquet": {
-      "checksum": "2f9904465e0f0a1fa5e46c1eb35c08e1"
-    },
-    "data/surveys/MLI_2021.parquet": {
-      "checksum": "f244ac22f3de0de54546efaf4aff78ed"
-    },
-    "data/surveys/MRT_2014_H3.parquet": {
-      "checksum": "43cf8a4187883ca19323ba2aa62bef02"
-    },
-    "data/surveys/MRT_2014_LOC.parquet": {
-      "checksum": "d22297fe66c0fc5925dfb27c9ac87c3e"
-    },
-    "data/surveys/MRT_2014.parquet": {
-      "checksum": "0cf3c71f2f0e8d20cd76c298b9d21446"
-    },
-    "data/surveys/MRT_2019.parquet": {
-      "checksum": "3ddf674a0ae206e76392cc069bb8cb9a"
-    },
-    "data/surveys/NER_2018_H3.parquet": {
-      "checksum": "859675b7970188f5e73418c0144cfbf6"
-    },
-    "data/surveys/NER_2018_LOC.parquet": {
-      "checksum": "1666415d00fd880ec1f546558c2c63e7"
-    },
-    "data/surveys/NER_2018.parquet": {
-      "checksum": "869f798ce9afe51a83a2d2529fd570f4"
-    },
-    "data/surveys/NER_2021_H3.parquet": {
-      "checksum": "f8c972150481459158119c33a75199b3"
-    },
-    "data/surveys/NER_2021_LOC.parquet": {
-      "checksum": "21ec12deb218ed119f5cde7d4a4e9b7a"
-    },
-    "data/surveys/NER_2021.parquet": {
-      "checksum": "79083a409c020c52a1e6a7c7cfb70b66"
-    },
-    "data/surveys/PHL_2012.parquet": {
-      "checksum": "7b145753a41ec9be7d3109c7dc892320"
-    },
-    "data/surveys/SEN_2018_H3.parquet": {
-      "checksum": "27bb9fe90e2c0766652437f765b2e697"
-    },
-    "data/surveys/SEN_2018_LOC.parquet": {
-      "checksum": "f8badcb5fc70249354e0d8cbe7dd6ab9"
-    },
-    "data/surveys/SEN_2018.parquet": {
-      "checksum": "4c455663cec8c784b6dcb1975026ebf2"
-    },
-    "data/surveys/SEN_2021_H3.parquet": {
-      "checksum": "9f56c7bfd993aae1e82f2e843190ed8f"
-    },
-    "data/surveys/SEN_2021_LOC.parquet": {
-      "checksum": "a4ce91c909a9e0925aed8f28ec164e47"
-    },
-    "data/surveys/SEN_2021.parquet": {
-      "checksum": "3c3b20631cf55c6bc28b35fd4cd77140"
-    },
-    "data/surveys/TCD_2022_H3.parquet": {
-      "checksum": "e68b5bbb64bfe7a1fba67b180b6a31bd"
-    },
-    "data/surveys/TCD_2022_LOC.parquet": {
-      "checksum": "68d86f779456c55f6077a056cc70a0d5"
-    },
-    "data/surveys/TCD_2022.parquet": {
-      "checksum": "3f9df3f8c6443c266878cc455c2e496d"
-    },
-    "data/surveys/TGO_2018_H3.parquet": {
-      "checksum": "66a9a7a230c86ee9780d37614206a9ea"
-    },
-    "data/surveys/TGO_2018_LOC.parquet": {
-      "checksum": "555049c1324bfeacf24a6e5ad487045c"
-    },
-    "data/surveys/TGO_2018.parquet": {
-      "checksum": "f257a2df7bef2987ba37f76e766f459a"
-    },
-    "data/surveys/TGO_2021_H3.parquet": {
-      "checksum": "9332e670f3d1443513673d661da5c6d9"
-    },
-    "data/surveys/TGO_2021_LOC.parquet": {
-      "checksum": "940fa6bb57416129c63d6de57cff6c8a"
-    },
-    "data/surveys/TGO_2021.parquet": {
-      "checksum": "baf445cb0f83c6cbf49010b6a82f250b"
-    },
-    "data/surveys/TLS_2014_H3.parquet": {
-      "checksum": "e13452d74689637fc4e48a3cc594832a"
-    },
-    "data/surveys/TLS_2014_LOC.parquet": {
-      "checksum": "92d88c6a6b9704be7c6bfc2264f87147"
-    },
-    "data/surveys/TLS_2014.parquet": {
-      "checksum": "db50511b1c602e9527dfdb1a46e3d745"
-    },
-    "data/surveys/VNM_2012_H3.parquet": {
-      "checksum": "af8a467ef80ced09256d8ae43facc3ac"
-    },
-    "data/surveys/VNM_2012_LOC.parquet": {
-      "checksum": "83c1bba8e4b7c0b6d879a2d1ddd2923b"
-    },
-    "data/surveys/VNM_2012.parquet": {
-      "checksum": "e765c54c7eacd43c088a30eee5d30782"
-    },
-    "data/surveys/VNM_2014_H3.parquet": {
-      "checksum": "af1fc1c59f92e6d095789afffba8ad2e"
-    },
-    "data/surveys/VNM_2014_LOC.parquet": {
-      "checksum": "751c7d283a7d0b647884f6bc50b9613d"
-    },
-    "data/surveys/VNM_2014.parquet": {
-      "checksum": "c6a3afebe119b2cae511a5c29b5180c4"
-    },
-    "data/surveys/VNM_2018_H3.parquet": {
-      "checksum": "271c494f2ca24fe43577462c78441049"
-    },
-    "data/surveys/VNM_2018_LOC.parquet": {
-      "checksum": "761eafe5b2457fc2325627aeda09eaee"
-    },
-    "data/surveys/VNM_2018.parquet": {
-      "checksum": "d9b1ae8f5307b884a962b2430c9c3de2"
-    },
-    "data/surveys/VNM_2020_H3.parquet": {
-      "checksum": "604428555b121dd9b634fc7711fdb948"
-    },
-    "data/surveys/VNM_2020_LOC.parquet": {
-      "checksum": "44f7b9250a89edc1375a627b9d72ad8a"
-    },
-    "data/surveys/VNM_2020.parquet": {
-      "checksum": "3a779ac92e0f01e6376614571c17ed66"
-    },
-    "data/surveys/VNM_2022_H3.parquet": {
-      "checksum": "00ec23be69d4454a8993df2fac9c25e1"
-    },
-    "data/surveys/VNM_2022_LOC.parquet": {
-      "checksum": "8d864f911a6fac7d403f823ebebbac6a"
-    },
-    "data/surveys/VNM_2022.parquet": {
-      "checksum": "d933acffbfdf2db517b03326175b9a58"
-    },
-    "data/weather_data.csv": {
-      "checksum": "5b5722d1d1fda7275fe4d87fa44d234c"
-    },
-    "data/weather.csv": {
-      "checksum": "692d3d8b5c515d8f17d8f5f33ba1b655"
-    },
-    "data/weather/AGO_weather.parquet": {
-      "checksum": "9f3aac099024e6cf61f60d34db820f68"
-    },
-    "data/weather/BEN_weather.parquet": {
-      "checksum": "a3742886cf4487fb2a3e35787ae92c1c"
-    },
-    "data/weather/BFA_weather.parquet": {
-      "checksum": "6acde1bb99c5093944946c88d1bf71d0"
-    },
-    "data/weather/BGD_weather.parquet": {
-      "checksum": "6a85d63cfd23644d483a9806c996fca9"
-    },
-    "data/weather/BOL_weather.parquet": {
-      "checksum": "d58cbfc92bdb0d5efeb3329fce696e26"
-    },
-    "data/weather/BTN_weather.parquet": {
-      "checksum": "f70acf19bf7ac16a069b734fc7832f3a"
-    },
-    "data/weather/CHL_weather.parquet": {
-      "checksum": "af3c6b01900ec69eeb5d823c82868b26"
-    },
-    "data/weather/CIV_weather.parquet": {
-      "checksum": "ba06712b5e0433faf23f36cf0641f083"
-    },
-    "data/weather/DOM_weather.parquet": {
-      "checksum": "729cce77ee41792b43ada7588f33d899"
-    },
-    "data/weather/ECU_weather.parquet": {
-      "checksum": "eef2a99ccd562045f4b493d933dbbc29"
-    },
-    "data/weather/ETH_weather.parquet": {
-      "checksum": "3f5dbe282ca34931b5d11c46c2f6b9e3"
-    },
-    "data/weather/SEN_weather.parquet": {
-      "checksum": "72a47a6d05daad7fdd769208b54574b9"
-    },
-    "data/weather/TGO_weather.parquet": {
-      "checksum": "dd23945709184ffa79541621aad55679"
+      "checksum": "a227d42afbcc590b4e949075cde4a5b6"
     },
     "data/wiseapp_variables.csv": {
-      "checksum": "de4987364ebca5c9d91de9bea893232e"
+      "checksum": "229c0399900bf5a9dcfb2f4b3fc276ab"
     },
     "data/wiseapp_variables.xlsx": {
-      "checksum": "006f672272c17b81a7790a19de673ab8"
+      "checksum": "4dc8da06a35289ad149c71c4f9965892"
     },
     "global.R": {
-      "checksum": "dfac4203fb4d66c21931fdfab854e935"
+      "checksum": "c5f4fdd3edec40d423b1a68d12af99f2"
     },
     "R/authorize.R": {
-      "checksum": "8fc59da5a0a4d5a8d53b731586818985"
+      "checksum": "462ec87a89aa7ffcee5818eb9460def8"
     },
     "readme.md": {
       "checksum": "c7d992530577391fa676560324026ab1"
     },
     "renv.lock": {
-      "checksum": "a815dd4dae5b144719898a5f04f0ef20"
+      "checksum": "4d4213da7e2631bda5af56707be38d69"
     },
     "server.R": {
-      "checksum": "b6800ba5afebbd6a671496db5badbb94"
+      "checksum": "5bfe62ac65bed1e90584ccb182e21000"
     },
     "ui.R": {
       "checksum": "b5ad273dd4ccf1745d5d4aca41da61da"
