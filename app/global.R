@@ -39,11 +39,11 @@ version <- "v0.0.2"
 # connect to pin board
 
   # If on Posit Connect server, use Connect pin board
-  if (Sys.getenv("R_CONFIG_ACTIVE") == "rsconnect") {
-    board <- board_connect(server = "external-server")
+  if (Sys.getenv("R_CONFIG_ACTIVE") == "") {
+    board <- board_folder("data/pins")
     # otherwise use local pin board
   } else {
-    board <- board_folder("data/pins")
+    board <- board_connect(server = "external-server")
   }
 
 # Survey data list
@@ -63,6 +63,7 @@ outcomes <- c(
   "Log welfare (LCU/day)",
   "Poor (LCU)"
 )
+
 # Intl poverty lines
 pov_lines <- data.frame(
   ppp_year = c(rep(2021,3),rep(2017,3),rep(2011,3)),
@@ -70,4 +71,3 @@ pov_lines <- data.frame(
   )
           
 # functions
-source("R/authorize.R")
