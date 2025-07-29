@@ -39,16 +39,12 @@ version <- "v0.0.2"
 # connect to pin board
 
   # If on Posit Connect server, use Connect pin board
-if (Sys.getenv("R_CONFIG_ACTIVE") == "rsconnect") {
-  board <- board_connect(server = "external-server")
-  pin_prefix <- "bbrunckhorst/"
-  # otherwise use local pin board
-} else {
-  board <- board_folder("data/pins")
-  pin_prefix <- ""
-}
-
-httr::set_config(httr::config(ssl_verifypeer = FALSE, ssl_verifyhost = FALSE))
+  if (Sys.getenv("R_CONFIG_ACTIVE") == "rsconnect") {
+    board <- board_connect(server = "external-server")
+    # otherwise use local pin board
+  } else {
+    board <- board_folder("data/pins")
+  }
 
 # Survey data list
 survey_list_master <- pin_read(board, "surveys") |>
