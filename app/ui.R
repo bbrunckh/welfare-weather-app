@@ -19,8 +19,8 @@ ui <- navbarPage(
       p("Follow the steps to perform simulations and explore policy impacts."),
       actionButton("internal_user", "Internal user"),
       hr(),
-      uiOutput("dlw_token_input"),
-      textOutput("authorize_status")
+      # uiOutput("dlw_token_input"),
+      # textOutput("authorize_status")
     )
   ),
   

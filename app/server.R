@@ -1,3 +1,4 @@
+source("global.R")
 
 # Define the Server logic
 server <- function(input, output, session) {
