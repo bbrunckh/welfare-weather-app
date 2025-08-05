@@ -1,4 +1,5 @@
 # Prep survey data for wise-app
+rm(list = ls())
 
 # load libraries
 library(pins)
@@ -6,6 +7,7 @@ library(haven)
 library(lubridate)
 library(dlw)
 options(dlw.local_dir = "~/dlw/")
+library(pipr)
 library(duckdbfs)
 library(dplyr)
 library(nanoparquet)
@@ -17,14 +19,17 @@ setwd("../app/")
 # Local folder
 board_local <- board_folder("../app/data/pins")
 
-# Posit - external
-board_posit <- board_connect(server = "external-server")
+# Posit - internal
+board_posit <- board_connect(auth = "envvar", versioned = FALSE)
 
-# # Posit - internal
-# board_posit <- board_connect(server = "internal-server")
+# Posit - external
+# board_posit <- board_connect(server = "external-server")
 
 # # remove all existing pins from board
 # pin_delete(board, pin_list(board))
+
+# overwrite existing data 
+overwrite <- TRUE
 
 #------------------------------------------------------------------------------#
 # WISE-APP variable list
@@ -60,33 +65,63 @@ cpiicp <- dlw_get_gmd_support("CPIICP") |>
          cpi2011:cpi2021, icp2011:icp2021) 
 
 #------------------------------------------------------------------------------#
-# Get list of geocoded GMD surveys with SPAT module
+# Get GMD catalog of geocoded GMD surveys (SPAT module)
 
-loc_path <- paste0("~/Library/CloudStorage/OneDrive-WBG/",
-                   "Household survey locations to H3/LOC/")
-
-spat_list <- list.files(loc_path, recursive = TRUE, "SPAT.dta$")
-
-  # # filter survey list for loop (optional)
-  # spat_list <- spat_list[grepl("GTM_", spat_list)]
+spat_cat <- dlw_server_catalog("GMD")[
+  Collection == "GMD" & Module == "SPAT"][
+    , .SD[toupper(Vermast) == max(toupper(Vermast))],
+    by = .(Year, Country)][
+      , .SD[toupper(Veralt) == max(toupper(Veralt), na.rm = TRUE)],
+      by = .(Year, Country)][
+        , fname := substr(FileName, 1, nchar(FileName) - 8)][
+          order(Country)]
 
 # Initialize survey list for app
 survey_list <- tibble()
-# survey_list <- read_pin(board, "survey_list")
+
+# continue existing survey list if not overwriting data
+if (!overwrite) survey_list <- pin_read(board_local, "surveys")
+
+# error log
 errors <- c()
 
 #------------------------------------------------------------------------------#
 # Loop over surveys 
 #------------------------------------------------------------------------------#
 
-for (n in 1:length(spat_list)){
+for (n in 1:nrow(spat_cat)){
   
-  code <- sub("/.*", "", spat_list[n])
-  year <- sub("^[^_]*_([^_]*)_.*$", "\\1", spat_list[n])
+  code <- spat_cat$Country_code[n]
+  year <- spat_cat$Survey_year[n]
   print(paste0(code, " ", year))
   
+  fname <- substr(spat_cat$FileName[n], 1, nchar(spat_cat$FileName[n]) - 8)
+  print(fname)
+  
   # skip if file exists
-  # if(file.exists(paste0("data/surveys/",code,"_",year,".parquet"))){next}
+  if (!overwrite) if (pin_exists(board_local, paste0(code,"_",year))) next
+  
+  #----------------------------------------------------------------------------#
+  # Check if SPAT module has interview date
+  #----------------------------------------------------------------------------#
+  error_occurred <- FALSE
+  tryCatch({
+  
+      spat <- dlw_get_data(code, paste0(fname,"SPAT.dta"))
+    
+  }, error = function(e) {
+    cat(paste0("Failed to get GMD SPAT module for ", code, " ", year))
+    errors <<- c(errors, paste0("Failed to get SPAT ALL module for ", code, " ", year))
+    error_occurred <<- TRUE
+  })
+  if (error_occurred) {next} #skip if fail
+  
+  # skip if interview month missing for > 50% households
+  if (sum(is.na(spat$int_month))/nrow(spat)>0.5) {
+    cat(paste0("No inverview month in SPAT for ", code, " ", year))
+    errors <<- c(errors, paste0("No inverview month in SPAT for ", code, " ", year))
+    next
+  }
   
   #----------------------------------------------------------------------------#
   # Standardised HH level data for WISE-APP
@@ -95,11 +130,13 @@ for (n in 1:length(spat_list)){
   error_occurred <- FALSE
   tryCatch({
     
-    survey <- dlw_get_gmd(code, year, "ALL") 
-    
-    # use first option when above does not identify a unique file (GHA_2016)
-    if(length(survey)<5){
-      survey <- eval(survey[[1]])
+    if (code == "IND" & year %in% c("2019", "2020", "2021")){
+      survey <- dlw_get_data(code, paste0(fname,"GPWG.dta"))
+    } else if (code == "GHA" & year %in% c("2016")){
+      survey <- dlw_get_data(code, paste0(fname,"ALL.dta"))
+    } else {
+      
+      survey <- dlw_get_gmd(code, year, "ALL", latest_version = TRUE)
     }
     
   }, error = function(e) {
@@ -109,10 +146,6 @@ for (n in 1:length(spat_list)){
   })
   if (error_occurred || is.character(survey)) {next} #skip if fail
   
-  # get GMD_ALL filename
-  fname_all <- paste0(
-    sub("\\..*", "",list.files(getOption("dlw.local_dir"), 
-                   paste0(code, "_", year,".+GMD_ALL.qs"))[1]), ".dta")
   
   # to duckdb
   survey_db <- as_dataset(survey)
@@ -124,22 +157,25 @@ for (n in 1:length(spat_list)){
     mutate(!!!setNames(rep(list(NA), length(gmd_add)), gmd_add))
   }
   
-  # harmonize different names for the same variable
+  # harmonize different names for the same variable, drop missing welfare
    survey_db <- survey_db |> 
-     mutate(code = countrycode,
+     mutate(code = if_else(is.na(code), countrycode, code),
             hhid = as.character(hhid),
             hhsize = if_else(is.na(hhsize),hsize,hhsize),
             weight = if_else(is.na(weight),weight_p,weight),
-            subnatid1 = if_else(is.na(subnatid1),subnatid,subnatid1))
+            subnatid1 = if_else(is.na(subnatid1),subnatid,subnatid1)) |>
+     filter(!is.na(welfare), !is.na(weight), !is.na(urban))
    
   # summarise variables at household level
    survey_db <- survey_db |>
      summarise(
+       across(c("welfare"), # use mean welfare (simulated GMD data has >1 per hhid)
+              ~ mean(.x, na.rm = TRUE)), 
        across(c("t_wage_total", "laborincome", "weight"),
               ~ sum(.x, na.rm = TRUE)),
        across(c("cellphone"),
               ~ max(.x, na.rm = TRUE)),
-       across(c("literacy", "educat7", "educat5", "educat4","primarycomp"),
+       across(c("literacy", "educat7", "educat5", "educat4"),
               ~ max(.x[age>=15], na.rm = TRUE)),
        educy = mean(educy[age>=15], na.rm = TRUE),
        depend = if_else(sum(age>=15 & age <65, na.rm = TRUE)>0,
@@ -150,7 +186,7 @@ for (n in 1:length(spat_list)){
                 "ocusec_year", "industrycat10_year", "industrycat4_year", 
                 "occup_year", "njobs"),
               ~ first(.x[relationharm==1])),
-     .by = all_of(gmd_hh_vars)) |> ungroup()
+     .by = all_of(setdiff(gmd_hh_vars, "welfare"))) |> ungroup()
    
    # CHECK no duplicate hhid
    if (any(duplicated(pull(survey_db, hhid)))){
@@ -159,15 +195,15 @@ for (n in 1:length(spat_list)){
      next
    }
    
-   # construct binary education variables (missing = no educ / lower bound)
+   # construct binary education variables (missing = NA)
    survey_db <- survey_db |>
      mutate(
        educ_com1 = case_when(
-         educat7>=3 ~ 1, educat5>=3 ~ 1, educat4>=2 ~ 1, .default = 0),
+         educat7>=3 ~ 1, educat5>=3 ~ 1, educat4>=2 ~ 1),
        educ_com2 = case_when(
-         educat7>=3 ~ 1, educat5>=4 ~ 1, educat4>=5 ~ 1, .default = 0),
+         educat7>=3 ~ 1, educat5>=4 ~ 1, educat4>=5 ~ 1),
        educ_com3 = case_when(
-         educat7>=4 ~ 1, educat5>=5 ~ 1,  educat4>=6 ~ 1, .default = 0))
+         educat7>=4 ~ 1, educat5>=5 ~ 1,  educat4>=6 ~ 1))
    
    # construct binary labor force variables (missing = NA)
    survey_db <- survey_db |>
@@ -203,7 +239,7 @@ for (n in 1:length(spat_list)){
    survey_db <- survey_db |>
      mutate(
        datalevel = if_else(code %in% c("CHN", "IND"), as.numeric(urban), 2)) |> 
-     left_join(cpiicp_db) |>
+     left_join(cpiicp_db) |> 
      mutate(
        welf_ppp_2021 = welfare/cpi2021/icp2021/365,
        welf_ppp_2017 = welfare/cpi2017/icp2017/365,
@@ -237,22 +273,10 @@ for (n in 1:length(spat_list)){
   # try to merge SPAT data
    error_occurred <- FALSE
    tryCatch({
-   
-  spat <- read_dta(paste0(loc_path, spat_list[n]), encoding = "latin1") 
-  fname_spat <- sub("^(?:[^/]*/){4}(.*)$","\\1", spat_list[n])
-  
-    # spat <- dlw_get_gmd(code, year, "SPAT") # from datalibweb
-  
-  # add missing date variables
-  add_dates <- setdiff(c("int_year","int_month","int_day"), colnames(spat))
-  if (length(add_dates)>0){
-    spat <- spat |>
-      mutate(!!!setNames(rep(list(NA), length(add_dates)), add_dates))
-  }
 
   spat_db <- as_dataset(spat) |>
       mutate(hhid = as.character(hhid)) |>
-      select(-starts_with(c("urban", "survname"))) 
+    select(-survname, -urban, -ends_with(c("_m1", "_sy", "_ref")))
   
  # use interview dates from either GMD_SPAT (1st) or GMD_ALL (2nd)
   survey_db <- survey_db |>
@@ -284,7 +308,6 @@ for (n in 1:length(spat_list)){
    
   error_occurred <- FALSE
   tryCatch({
-    
   # clean and order variables
   survey_clean <- survey_db |>
     select(any_of(pull(wise_vars,varname))) |>
@@ -304,18 +327,16 @@ for (n in 1:length(spat_list)){
   survey_clean <- survey_clean |>
     select(where(~ !((all(is.na(.))) || is.character(.) && all(is.na(.) | . == ""))))
   
-  if(!"loc_id" %in% colnames(survey_clean) & !"int_date" %in% colnames(survey_clean)){
-    next
-    errors <- c(errors, paste0("No loc_id or int_date in ", code, " ", year))
+  # CHECK $3.00 poverty rate vs PIP
+  pip_poor_300ln <- get_stats(code, year) |> pull(headcount)
+  svy_poor_300ln <- weighted.mean(survey_clean$poor_300ln, survey_clean$weight)
+  
+  if (length(pip_poor_300ln)>0) { #IND 2019, 2020, 2021 no longer in PIP
+    if (round(pip_poor_300ln, 2) != round(svy_poor_300ln, 2)){
+      errors <- c(errors, paste0("$3.00 poverty rates does not match PIP for ", code, " ", year))
+      next
     }
-  
-  # CHECK $3.00 poverty rate
-  weighted.mean(survey_clean$poor_300ln, survey_clean$weight)
-  
-  # save HH level parquet data to disk
-  write_parquet(survey_clean, 
-                paste0("data/surveys/",code, "_", year, ".parquet"),
-                options = parquet_options(write_minmax_values = FALSE))
+  }
   
   # Pin HH level parquet data to Posit Connect board for app
   pin_write(board_local, survey_clean, paste0(code, "_", year), type = "parquet")
@@ -324,7 +345,7 @@ for (n in 1:length(spat_list)){
   #----------------------------------------------------------------------------#
   # Add survey to list for app
   #----------------------------------------------------------------------------#
-
+  
   survey_list = bind_rows(survey_list,
     data.frame(
       countryname = pull(survey_clean[1,],countryname), 
@@ -332,8 +353,8 @@ for (n in 1:length(spat_list)){
       year = year, 
       hh = nrow(survey_clean), 
       wiseapp_pin = paste0(code, "_", year),
-      gmd_all = fname_all, 
-      gmd_spat = fname_spat
+      gmd_all = paste0(fname, "ALL.dta"), 
+      gmd_spat = paste0(fname, "SPAT.dta")
     )
   )
 
@@ -342,17 +363,13 @@ for (n in 1:length(spat_list)){
 }
 
 #------------------------------------------------------------------------------#
+# save error log
+write.csv(errors, "data/survey_prep_errors.csv", row.names = FALSE)
 
 # fix country names in survey list
 survey_list <- survey_list |>
   mutate(countryname = if_else(code =="CIV", "Côte d'Ivoire", countryname))
 
-# save country listing to file
-write_parquet(survey_list, "data/surveys.parquet")
-
 # pin country listing to Posit Connect board for app
 pin_write(board_local, survey_list, "surveys", type = "parquet")
 pin_write(board_posit, survey_list, "surveys", type = "parquet")
-
-# save error log
-write.csv(errors, "data/survey_prep_errors.csv", row.names = FALSE)
