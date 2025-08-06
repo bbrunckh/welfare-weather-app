@@ -1069,53 +1069,83 @@ output$model_specs_ui <- renderUI({
   req(input$country, input$weather_variable_selector)
 
   conditionalPanel(
-    condition = "input.model_covariates % 2 == 1", 
+    condition = "input.model_covariates % 2 == 1",
     withMathJax(),
-    tagList(           
-    
-    selectizeInput(
-      inputId = "interactions",
-      label = "Interactions  with \\(Haz_{kt}\\):",
-      choices = hh_varlist() |> filter(
-        varname %in% c("urban", "literacy", "primarycomp", "imp_wat_rec", 
-                       "imp_san_rec", "electricity", "agriland", "male")) |>
-        pull(label),
-      selected = c("Urban"),
-      multiple = TRUE,
-      options = list(maxItems = 1)
-    ),
+    tagList(
 
-    selectizeInput(
-      inputId = "fixedeffects",
-      label = "Fixed effects",
-      choices = fe_varlist()$label,
-      selected = fe_varlist() |>
-        filter(varname %in% c("year"))|>
-        pull(label),
-      multiple = TRUE
-    ),
+      ## static widgets shown for both model types -------------------------
+      selectizeInput(
+        "interactions",
+        label   = "Interactions with \\(Haz_{kt}\\):",
+        choices = hh_varlist() |>
+                  dplyr::filter(varname %in%
+                      c("urban","literacy","primarycomp","imp_wat_rec",
+                        "imp_san_rec","electricity","agriland","male")) |>
+                  dplyr::pull(label),
+        selected = "Urban",
+        multiple = TRUE,
+        options  = list(maxItems = 1)
+      ),
 
-    radioButtons("modelspec", 
-                 "Choose model type for covariate selection:", 
-                 choices = c("Linear regression", "Lasso")),
+      selectizeInput(
+        "fixedeffects",
+        label   = "Fixed effects",
+        choices = fe_varlist()$label,
+        selected = fe_varlist() |>
+                   dplyr::filter(varname == "year") |>
+                   dplyr::pull(label),
+        multiple = TRUE
+      ),
 
-    helpText("XGBoost option will be added soon."),
-    # checkboxInput( 
-    #   inputId = "fixedeffects_interact", 
-    #   label = "Interact fixed effects",
-    #   value = FALSE
-    # ),
-    # checkboxGroupInput( 
-    #   inputId = "checkbox_group", 
-    #   label = "Robustness checks", 
-    #   choices = c( 
-    #     "Include lagged weather" = "a", 
-    #     "Include displaced weather" = "b",
-    #     "Include future weather (placebo test)" = "c"
-    #     ) 
-    #   )
+      radioButtons(
+        "modelspec",
+        "Choose model type for covariate selection:",
+        choices  = c("Linear regression", "Lasso"),
+        selected = isolate(input$modelspec) %||% "Linear regression"
+      ),
+
+      helpText("XGBoost option will be added soon."),
+
+      ## widgets that depend on the chosen model ---------------------------
+      uiOutput("model_specific_inputs")   # rendered below
     )
-)
+  )
+})
+
+# second renderUI produces only the model-specific widgets
+output$model_specific_inputs <- renderUI({
+  req(input$modelspec)
+
+  withMathJax(               # ⟵ one wrapper is enough
+    if (input$modelspec == "Linear regression") {
+
+      tagList(
+        selectizeInput(
+          "hhcov",
+          label   = "Household characteristics \\(X_{hkt}\\)",
+          choices = hh_varlist()$label,
+          selected = hh_varlist() |>
+                     dplyr::filter(varname %in% c("urban", "hhsize")) |>
+                     dplyr::pull(label),
+          multiple = TRUE
+        ),
+        selectizeInput(
+          "areacov",
+          label   = "Area characteristics \\(E_{kt}\\)",
+          choices = area_varlist()$label,
+          selected = area_varlist() |>
+                     dplyr::filter(varname == "built_area") |>
+                     dplyr::pull(label),
+          multiple = TRUE
+        )
+      )
+
+    } else if (input$modelspec == "Lasso") {
+
+      helpText("No manual covariate selection needed: Lasso decides automatically.")
+
+    }
+  )
 })
 
     # selectizeInput(
