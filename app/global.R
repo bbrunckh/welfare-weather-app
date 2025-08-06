@@ -54,7 +54,7 @@ pin_list <- pin_list(board)
 survey_list_master <- pin_read(board, paste0(pin_prefix, "surveys")) |>
   mutate(external = TRUE, 
          weather = paste0(code, "_weather")) |>
-  filter(weather %in% pin_list)
+  filter(paste0(pin_prefix,weather) %in% pin_list)
 
 # Survey variable list
 varlist <- pin_read(board, paste0(pin_prefix, "varlist"))

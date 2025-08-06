@@ -4,6 +4,7 @@ rm(list = ls())
 
 # Load libraries
 library(pins)
+library(nanoparquet)
 
 #------------------------------------------------------------------------------#
 # Board for pins
