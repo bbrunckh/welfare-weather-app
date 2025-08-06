@@ -224,6 +224,7 @@ for (n in 1:nrow(spat_cat)){
        services_year = case_when(industrycat4_year == 3 ~ 1, !is.na(industrycat4_year) ~ 0))
    
    # construct other binary variables (missing = NA)
+    # !! seems to be a problem with encoding of roof, floor, wall not being harmonized???
    survey_db <- survey_db |>
      mutate(
        solidcookfuel = case_when(cooksource == 1 || cooksource == 3 ~ 1, !is.na(cooksource) ~ 0),
