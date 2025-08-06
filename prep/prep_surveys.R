@@ -368,7 +368,7 @@ write.csv(errors, "data/survey_prep_errors.csv", row.names = FALSE)
 
 # fix country names in survey list
 survey_list <- survey_list |>
-  mutate(countryname = if_else(code =="CIV", "Côte d'Ivoire", countryname))
+  mutate(countryname = if_else(code =="CIV", "Côte d`Ivoire", countryname))
 
 # pin country listing to Posit Connect board for app
 pin_write(board_local, survey_list, "surveys", type = "parquet")
