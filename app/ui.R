@@ -83,7 +83,13 @@ ui <- navbarPage(
               actionButton("run_model", "Run model"),
               hr(),
               helpText("Linear regression (OLS) will include all specified covariates."),
-              # helpText("Lasso will use the Post-Double Selection Lasso method to select the specified covariates that best predict the weather variable and the welfare outcome. The selected variables are then used in a linear regression (OLS)."),
+              helpText(
+                "Lasso (Belloni & Chernozhukov, 2014) first removes the part of welfare already",
+                "explained by weather, interactions and chosen fixed effects, then runs a",
+                "group-lasso on the residuals to pick the household- and area-covariates that",
+                "still matter. Weather terms and the fixed-effect groups you chose are always",
+                "kept; only the remaining controls are selected automatically."
+              ),
               # helpText("XGBoost will use the extreme gradient boosting method, building an ensemble of decision trees considering all specified covariates. SHAP (SHapley Additive exPlanations) are used to interpret the results. They explain how much each variable contributes to the predicted outcome.")
               br(),
               helpText("To be added:"),

@@ -439,7 +439,7 @@ server <- function(input, output, session) {
             output$data_table <- renderDT({
               req(survey_data())
                 desc <- survey_data() |>
-                  select(countryyear, weight, welf_ppp_2021, welf_lcu_2021,
+                  dplyr::select(countryyear, weight, welf_ppp_2021, welf_lcu_2021,
                     poor_300ln, poor_420ln, poor_830ln,any_of(c("log_welf", "poor")))
 
                 sumtable(desc,
@@ -460,7 +460,7 @@ server <- function(input, output, session) {
               {
                 req(survey_data())
                 desc <- survey_data() |>
-                  select(countryyear, weight,
+                  dplyr::select(countryyear, weight,
                     any_of(varlist[varlist$wiseapp == "HH characteristics" & !is.na(varlist$wiseapp), "varname"])
                   ) 
 
@@ -482,7 +482,7 @@ server <- function(input, output, session) {
               {
                 req(survey_data())
                 desc <- survey_data() |>
-                  select(countryyear, weight,
+                  dplyr::select(countryyear, weight,
                     any_of(varlist[varlist$wiseapp == "Area characteristics" & !is.na(varlist$wiseapp), "varname"])
                   ) 
                 
@@ -712,7 +712,7 @@ server <- function(input, output, session) {
     
     # filter to selected weather variables, sample h3 cells & date range
     weather <- weather |>
-      select(h3_6, timestamp, all_of(weather_vars())) |>
+      dplyr::select(h3_6, timestamp, all_of(weather_vars())) |>
       filter(h3_6 %in% survey_h3()$h3_6) |>
       filter(timestamp %in% weather_dates) |>
       distinct() 
@@ -764,7 +764,7 @@ server <- function(input, output, session) {
     }
     if (temporal_agg == "Median") {
       weather <- weather |>
-        mutate(haz = apply(select(., starts_with(paste0(i, "_"))), 1, median, na.rm = TRUE))
+        mutate(haz = apply(dplyr::select(., starts_with(paste0(i, "_"))), 1, median, na.rm = TRUE))
     }
     if (temporal_agg == "Min") {
       weather <- weather |>
@@ -815,7 +815,7 @@ server <- function(input, output, session) {
     
     # keep only the configured weather variable
     weather <- weather |>
-      select(h3_6, timestamp, haz) |>
+      dplyr::select(h3_6, timestamp, haz) |>
       rename_with(~ paste0("haz_",i), .cols = starts_with("haz")) |>
       arrange(h3_6, timestamp) 
     
@@ -1049,20 +1049,20 @@ server <- function(input, output, session) {
   hh_varlist <- reactive({
     req(input$country)
     filter(varlist, wiseapp == "HH characteristics" & datatype %in% c("Numeric","Binary")) |>
-    select(varname, label) |> filter(varname %in% colnames(survey_weather()))
+    dplyr::select(varname, label) |> filter(varname %in% colnames(survey_weather()))
   })
   
   area_varlist <- reactive({
     req(input$country)
     filter(varlist, wiseapp == "Area characteristics") |>
-    select(varname, label) |> filter(varname %in% colnames(survey_weather()))
+    dplyr::select(varname, label) |> filter(varname %in% colnames(survey_weather()))
   })
   
   fe_varlist <- reactive({
     req(input$country)
     fe_exclude <- c("countryname", "survname","hhid","psu","strata")
     filter(varlist, wiseapp == "ID & Fixed effects") |>
-    select(varname, label) |> filter(varname %in% colnames(survey_weather()) & !varname %in% fe_exclude)
+    dplyr::select(varname, label) |> filter(varname %in% colnames(survey_weather()) & !varname %in% fe_exclude)
   })
 
 output$model_specs_ui <- renderUI({
@@ -1143,29 +1143,11 @@ output$model_specific_inputs <- renderUI({
     } else if (input$modelspec == "Lasso") {
 
       helpText("No manual covariate selection needed: Lasso decides automatically.")
+      helpText("Automatically selected variables will be shown in model results.")
 
     }
   )
 })
-
-    # selectizeInput(
-    #   inputId = "hhcov",
-    #   label = "Household characteristics (\\(X_{hkt}\\))",
-    #   choices = hh_varlist()$label,
-    #   selected = hh_varlist() |>
-    #     filter(varname %in% c("urban", "hhsize")) |>
-    #     pull(label),
-    #   multiple = TRUE
-    # ),
-    # selectizeInput(
-    #   inputId = "areacov",
-    #   label = "Area characteristics (\\(E_{kt}\\))",
-    #   choices = area_varlist()$label,
-    #   selected = area_varlist() |>
-    #     filter(varname %in% c("built_area")) |>
-    #     pull(label),
-    #   multiple = TRUE
-    # ),
 
   #------------------------------------------------------------------------------#
   # MODEL OUTPUTS
@@ -1182,15 +1164,13 @@ output$model_specific_inputs <- renderUI({
 
       # Run model
       model_fit <- reactive({
-        
-      # if (input$modelspec == "Linear regression"){
       
         # welfare outcome
         if (welf_select()$type == "Continuous"){ out <- "log_welf"
         } else {out <- "poor"}
         
         # weather variables
-        weather_vars <- select(survey_weather(), starts_with("haz")) |> colnames()
+        weather_vars <- dplyr::select(survey_weather(), starts_with("haz")) |> colnames()
         
         # add polynomials if specified
         for (w in weather_vars){
@@ -1209,61 +1189,96 @@ output$model_specific_inputs <- renderUI({
             }
           }
         }
-        
-        # survey variables
-        hh_cov <- filter(varlist, label %in% input$hhcov) |> pull(varname)
-        area_cov <- filter(varlist, label %in% input$areacov) |> pull(varname)
+
+        # interaction terms
         interactions <- filter(varlist, label %in% input$interactions) |> pull(varname)
-        
-        # fixed effects - interacted
-        fe <- filter(varlist, label %in% input$fixedeffects) |> pull(varname) 
-        # if (input$fixedeffects_interact==TRUE){ 
-        #   fe <- paste0("(", paste(fe, collapse = " * "),")")
-        #   }
-        
-        # construct formulas
-        main_effects <- paste(c(weather_vars, hh_cov, area_cov, fe), collapse = " + ")
-        
         if (length(interactions) > 0){
           term_matrix <- outer(interactions,weather_vars, 
-                               FUN = function(inter, weather) {
-                                 sprintf("(%s * %s)", inter, weather)
-                                 })
+                                FUN = function(inter, weather) {
+                                  sprintf("(%s * %s)", inter, weather)
+                                  })
           term_vector <- c(t(term_matrix))
           interaction_terms <- paste0(" + ", paste(term_vector, collapse = " + "))
           
         } else {interaction_terms <- " "}
+
+        # fixed effects
+        fe <- filter(varlist, label %in% input$fixedeffects) |> pull(varname) 
+        # if (input$fixedeffects_interact==TRUE){ 
+        #   fe <- paste0("(", paste(fe, collapse = " * "),")")
+        #   }
+
+        if (input$modelspec == "Linear regression"){
         
-        ############################################################################
-        # TODO: Only run FE model or interaction model if specified
-        ############################################################################
+          # survey variables
+          hh_cov <- filter(varlist, label %in% input$hhcov) |> pull(varname)
+          area_cov <- filter(varlist, label %in% input$areacov) |> pull(varname)
+
+          # construct formulas
+          main_effects <- paste(c(weather_vars, hh_cov, area_cov, fe), collapse = " + ")
+
+        } else if (input$modelspec == "Lasso") {
+
+          ## 1 · residuals from the weather/interactions/FE model ------------
+          f_resid <- as.formula(
+            paste(out, "~",
+                  paste(c(weather_vars, interaction_terms, fe), collapse = " + "))
+          )
+          fit_resid <- if (out == "poor") glm(f_resid, data = survey_weather(),
+                                              family = binomial())
+                      else               lm(f_resid, data = survey_weather())
+
+          y_res   <- resid(fit_resid)                        # step-1 residuals
+          X_ctrl  <- model.matrix(                           # household + area only
+                        ~ -1 + .
+                        , data = survey_weather()[ , c(hh_varlist()$varname,
+                                                      area_varlist()$varname)]
+                      )
+
+          cn <- colnames(X_ctrl)                    # design-matrix column names
+          grp_ctrl <- ifelse(cn %in% hh_cols,   1L,   # household block
+                            ifelse(cn %in% area_cols, 2L,  NA_integer_))
+
+          ## 3 · cross-validated group-lasso ------------------------------
+          cv_ctrl <- cv.grpreg(X_ctrl, y_res,
+                              group  = grp_ctrl,
+                              family = if (out == "poor") "gaussian" else "gaussian", # residuals are continuous always
+                              seed   = 42)
+
+          keep <- rownames(coef(cv_ctrl, s = "lambda.min"))[-1]   # drop intercept
+          keep <- keep[coef(cv_ctrl, s = "lambda.min")[-1] != 0]
+
+          main_effects <- paste(c(weather_vars, keep, fe), collapse = " + ")
+
+        } # else if (input$modelspec == "XGBoost"){
+        #   
+        # }
         
         formula1 <- as.formula(paste(out, "~", paste(weather_vars, collapse = " + ")))
         formula2 <- as.formula(paste(out, "~", paste(c(weather_vars, fe), collapse = " + ")))
-        formula3 <- as.formula(paste(out, "~", main_effects,interaction_terms))
+        formula3 <- as.formula(paste(out, "~", main_effects, interaction_terms))
+
+        # helper that returns the right fit function ------------------------
+        fit_fun <- if (out == "poor") {
+          \(form) glm(form, data = survey_weather(), family = binomial())
+        } else {
+          \(form) lm(form,  data = survey_weather())
+        }
         
         # generalised linear model fits
-        fit1 <- lm(formula1, data = survey_weather())
-        fit2 <- lm(formula2, data = survey_weather())
-        fit3 <- lm(formula3, data = survey_weather())
+        fit1 <- fit_fun(formula1)
+        fit2 <- fit_fun(formula2)
+        fit3 <- fit_fun(formula3)
         
-        model_fit <- list(fit1, fit2, fit3)
-        
-        ############################################################################
-        # TODO: This is where Lasso or XGBoost models would be fitted if selected, add those here
-        ############################################################################        
-        
-          # } else if (input$modelspec == "Lasso"){
-          #   
-          # } else if (input$modelspec == "XGBoost"){
-          #   
-          # }
-        return(model_fit)
-        })
+        model_fit <- list(fit1, fit2, fit3)  
+
+      return(model_fit)
+    }
+  )
       
       # labelling
       label_lookup <- setNames(varlist$label, varlist$varname)
-      labels_df <- filter(varlist, !is.na(varname)) |> select(varname, label) 
+      labels_df <- filter(varlist, !is.na(varname)) |> dplyr::select(varname, label) 
       
       get_term_label <- function(term, labels_df) {
         if (grepl("^I\\((.*)\\^2\\)$", term)) {
@@ -1454,10 +1469,10 @@ output$model_specific_inputs <- renderUI({
           model <- model_fit()[[3]]
           
           plot_data <- model.frame(model) |>
-            select(starts_with("haz_")) |>
+            dplyr::select(starts_with("haz_")) |>
             mutate(residuals = residuals(model))
           
-          h <- colnames(select(plot_data, starts_with("haz_")))[1]
+          h <- colnames(dplyr::select(plot_data, starts_with("haz_")))[1]
           xlabel <- filter(varlist, varname==h, !is.na(varname)) |> pull(label)
           
           ggplot(plot_data, aes(x = .data[[h]],
@@ -1476,10 +1491,10 @@ output$model_specific_inputs <- renderUI({
           
           model <- model_fit()[[3]]
           plot_data <- model.frame(model) |>
-            select(starts_with("haz_")) |>
+            dplyr::select(starts_with("haz_")) |>
             mutate(residuals = residuals(model))
           
-          h <- colnames(select(plot_data, starts_with("haz_")))[2]
+          h <- colnames(dplyr::select(plot_data, starts_with("haz_")))[2]
           xlabel <- filter(varlist, varname==h, !is.na(varname)) |> pull(label)
           
           ggplot(plot_data, aes(x = .data[[h]],
@@ -1534,7 +1549,7 @@ output$model_specific_inputs <- renderUI({
             Variable = names(rel_importance$lmg),
             Contribution = rel_importance$lmg
           ) |>
-            left_join(select(varlist, varname, label), 
+            left_join(dplyr::select(varlist, varname, label), 
                       join_by("Variable" == "varname")) |>
             mutate(label = if_else(is.na(label),Variable,label))
           
@@ -1634,7 +1649,7 @@ output$model_specific_inputs <- renderUI({
         sim_data <- augment(model_fit()[[3]], newdata = survey_weather()) |>
           filter(!is.na(.fitted)) |>
           mutate(month = month(timestamp)) |>
-          select(code, year, survname, loc_id, hhid, weight, .resid,
+          dplyr::select(code, year, survname, loc_id, hhid, weight, .resid,
                  any_of(colnames(model.frame(model_fit()[[3]]))), -timestamp, 
                  -starts_with("haz"), -any_of(c('log_welf', 'welf'))) |>
           left_join(mutate(loc_weather(), 
@@ -1652,10 +1667,10 @@ output$model_specific_inputs <- renderUI({
       
       sim_weather <- reactive({
         mod_weather <- model.frame(model_fit()[[3]]) |>
-          select(starts_with("haz_")) |> 
+          dplyr::select(starts_with("haz_")) |> 
           mutate(type = "Model fit")
         hist_weather <- welf_sim() |>
-          select(starts_with("haz_")) |> 
+          dplyr::select(starts_with("haz_")) |> 
           mutate(type = "Historical")
         sim_weather <- bind_rows(mod_weather, hist_weather)
         return(sim_weather)

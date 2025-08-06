@@ -33,6 +33,8 @@ library(broom)
 library(pins)
 library(httr2)
 
+library(grpreg)
+
 # App version
 version <- "v0.1.1"
 
