@@ -77,13 +77,7 @@ ui <- navbarPage(
           bs_append(
             title = "4 Specify model",
             content = tagList(
-              radioButtons("modelspec", 
-                           "Model:", 
-                           # choices = c("Linear regression", "Lasso", "XGBoost")), 
-                           choices = c("Linear regression")), 
-              
-              helpText("Lasso and XGBoost options will be added soon."),
-              actionButton("model_covariates", "Define covariates"), # Changed label for clarity
+              actionButton("model_covariates", "Define covariates",  style = "margin-bottom:12px;"), # Changed label for clarity
               uiOutput("model_specs_ui"), # Conditional on survey data
               hr(),
               actionButton("run_model", "Run model"),

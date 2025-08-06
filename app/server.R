@@ -1074,24 +1074,6 @@ output$model_specs_ui <- renderUI({
     tagList(           
     
     selectizeInput(
-      inputId = "hhcov",
-      label = "Household characteristics (\\(X_{hkt}\\))",
-      choices = hh_varlist()$label,
-      selected = hh_varlist() |>
-        filter(varname %in% c("urban", "hhsize")) |>
-        pull(label),
-      multiple = TRUE
-    ),
-    selectizeInput(
-      inputId = "areacov",
-      label = "Area characteristics (\\(E_{kt}\\))",
-      choices = area_varlist()$label,
-      selected = area_varlist() |>
-        filter(varname %in% c("built_area")) |>
-        pull(label),
-      multiple = TRUE
-    ),
-    selectizeInput(
       inputId = "interactions",
       label = "Interactions  with \\(Haz_{kt}\\):",
       choices = hh_varlist() |> filter(
@@ -1102,6 +1084,7 @@ output$model_specs_ui <- renderUI({
       multiple = TRUE,
       options = list(maxItems = 1)
     ),
+
     selectizeInput(
       inputId = "fixedeffects",
       label = "Fixed effects",
@@ -1111,6 +1094,12 @@ output$model_specs_ui <- renderUI({
         pull(label),
       multiple = TRUE
     ),
+
+    radioButtons("modelspec", 
+                 "Choose model type for covariate selection:", 
+                 choices = c("Linear regression", "Lasso")),
+
+    helpText("XGBoost option will be added soon."),
     # checkboxInput( 
     #   inputId = "fixedeffects_interact", 
     #   label = "Interact fixed effects",
@@ -1128,6 +1117,25 @@ output$model_specs_ui <- renderUI({
     )
 )
 })
+
+    # selectizeInput(
+    #   inputId = "hhcov",
+    #   label = "Household characteristics (\\(X_{hkt}\\))",
+    #   choices = hh_varlist()$label,
+    #   selected = hh_varlist() |>
+    #     filter(varname %in% c("urban", "hhsize")) |>
+    #     pull(label),
+    #   multiple = TRUE
+    # ),
+    # selectizeInput(
+    #   inputId = "areacov",
+    #   label = "Area characteristics (\\(E_{kt}\\))",
+    #   choices = area_varlist()$label,
+    #   selected = area_varlist() |>
+    #     filter(varname %in% c("built_area")) |>
+    #     pull(label),
+    #   multiple = TRUE
+    # ),
 
   #------------------------------------------------------------------------------#
   # MODEL OUTPUTS
