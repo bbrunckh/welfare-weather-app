@@ -882,6 +882,10 @@ server <- function(input, output, session) {
       req(input$weather_stats > 0) # Ensure the button has been clicked
       
       # Weather distribution plots
+      
+      ############################################################################
+      # TODO: Plots can be made dynamic based on number of selected weather variables
+      ############################################################################
         
       output$weather_dist1 <- renderPlot({
         req(survey_weather(), haz_vars())
@@ -1013,6 +1017,11 @@ server <- function(input, output, session) {
               rownames = FALSE
             ),
           br(),
+        
+          ############################################################################
+          # TODO: Weather variable list to be shown before weather variables is chosen (to aid selection)
+          ############################################################################  
+          
           h4("Weather variable list"),
           output$weather_stats <- renderDT({
             req(survey_weather(), haz_vars())
@@ -1187,6 +1196,10 @@ output$model_specs_ui <- renderUI({
           
         } else {interaction_terms <- " "}
         
+        ############################################################################
+        # TODO: Only run FE model or interaction model if specified
+        ############################################################################
+        
         formula1 <- as.formula(paste(out, "~", paste(weather_vars, collapse = " + ")))
         formula2 <- as.formula(paste(out, "~", paste(c(weather_vars, fe), collapse = " + ")))
         formula3 <- as.formula(paste(out, "~", main_effects,interaction_terms))
@@ -1197,6 +1210,10 @@ output$model_specs_ui <- renderUI({
         fit3 <- lm(formula3, data = survey_weather())
         
         model_fit <- list(fit1, fit2, fit3)
+        
+        ############################################################################
+        # TODO: This is where Lasso or XGBoost models would be fitted if selected, add those here
+        ############################################################################        
         
           # } else if (input$modelspec == "Lasso"){
           #   
@@ -1262,6 +1279,11 @@ output$model_specs_ui <- renderUI({
         coefs <- names(coef(model_fit()[[3]]))
         coefs_to_plot <- grep("haz", coefs, value = TRUE)
         named_coefs <- create_named_vector(coefs_to_plot, labels_df)
+        
+        ############################################################################
+        # TODO: This is where we'd need to specify for OLS how many of the specifications need to be plotted
+        #       e.g. if only FE model is specified, then only plot that one.
+        ############################################################################
       
         plot_summs(model_fit()[[1]], model_fit()[[2]], model_fit()[[3]],
                    robust = "HC3", coefs = named_coefs,
@@ -1695,6 +1717,7 @@ output$model_specs_ui <- renderUI({
       #       theme_minimal()
 # 
 #       })
+
       
       welf_sim_policy <- reactive({
         req(welf_sim(), input$run_policy_sim > 0)

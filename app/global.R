@@ -48,9 +48,13 @@ version <- "v0.0.2"
     pin_prefix <- "bbrunckhorst/"
   }
 
+pin_list <- pin_list(board)
+
 # Survey data list
 survey_list_master <- pin_read(board, paste0(pin_prefix, "surveys")) |>
-  mutate(external = TRUE)
+  mutate(external = TRUE, 
+         weather = paste0(code, "_weather")) |>
+  filter(weather %in% pin_list)
 
 # Survey variable list
 varlist <- pin_read(board, paste0(pin_prefix, "varlist"))
