@@ -1219,27 +1219,34 @@ output$model_specific_inputs <- renderUI({
 
         } else if (input$modelspec == "Lasso") {
 
-          ## 1 · residuals from the weather/interactions/FE model ------------
+          ## survey variables ------------------------------------------------
+          hh_cov   <- intersect(hh_varlist()$varname,   colnames(survey_weather()))
+          area_cov <- intersect(area_varlist()$varname, colnames(survey_weather()))
+
+          ## residuals from the weather/interactions/FE model ------------
           f_resid <- as.formula(
             paste(out, "~",
                   paste(c(weather_vars, interaction_terms, fe), collapse = " + "))
           )
           fit_resid <- if (out == "poor") glm(f_resid, data = survey_weather(),
                                               family = binomial())
-                      else               lm(f_resid, data = survey_weather())
+                      else                lm(f_resid, data = survey_weather())
 
-          y_res   <- resid(fit_resid)                        # step-1 residuals
+          # Drop any columns that have a proportion of NA greater than specified threshold
           X_ctrl  <- model.matrix(                           # household + area only
                         ~ -1 + .
-                        , data = survey_weather()[ , c(hh_varlist()$varname,
-                                                      area_varlist()$varname)]
+                        , data = survey_weather()[ , c(hh_cov,
+                                                       area_cov)]
                       )
+          y_res   <- residuals(fit_resid, type = "response") # residuals from the model
+          # drop rows in y_res that do not have corresponding rows in X_ctrl,
+          # because of the model.matrix, which drops any rows with NA in any column
 
           cn <- colnames(X_ctrl)                    # design-matrix column names
-          grp_ctrl <- ifelse(cn %in% hh_cols,   1L,   # household block
-                            ifelse(cn %in% area_cols, 2L,  NA_integer_))
+          grp_ctrl <- ifelse(cn %in% hh_cov,   1L,   # household block
+                            ifelse(cn %in% area_cov, 2L,  NA_integer_))
 
-          ## 3 · cross-validated group-lasso ------------------------------
+          ## cross-validated group-lasso ------------------------------
           cv_ctrl <- cv.grpreg(X_ctrl, y_res,
                               group  = grp_ctrl,
                               family = if (out == "poor") "gaussian" else "gaussian", # residuals are continuous always
