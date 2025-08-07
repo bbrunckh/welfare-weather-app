@@ -229,9 +229,9 @@ for (n in 1:nrow(spat_cat)){
      mutate(
        solidcookfuel = case_when(cooksource == 1 || cooksource == 3 ~ 1, !is.na(cooksource) ~ 0),
        internet_access = case_when(internet <= 3 ~ 1, internet ==4 ~ 0),
-       roof_finished = case_when(roof > 30 & roof < 40 ~ 1, !is.na(roof) ~ 0),
-       wall_finished = case_when(wall > 30 & wall < 40 ~ 1, !is.na(wall) ~ 0),
-       floor_finished = case_when(floor > 30 & floor < 40 ~ 1, !is.na(floor) ~ 0),
+       # roof_finished = case_when(roof > 30 & roof < 40 ~ 1, !is.na(roof) ~ 0),
+       # wall_finished = case_when(wall > 30 & wall < 40 ~ 1, !is.na(wall) ~ 0),
+       # floor_finished = case_when(floor > 30 & floor < 40 ~ 1, !is.na(floor) ~ 0),
        ownhouse_secure = case_when(ownhouse == 1 ~ 1, !is.na(ownhouse) ~ 0),
        renthouse = case_when(ownhouse == 2 ~ 1, !is.na(ownhouse) ~ 0))
    
