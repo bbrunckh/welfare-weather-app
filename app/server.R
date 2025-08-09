@@ -1219,34 +1219,47 @@ output$model_specific_inputs <- renderUI({
 
         } else if (input$modelspec == "Lasso") {
 
-          ## survey variables ------------------------------------------------
-          hh_cov   <- intersect(hh_varlist()$varname,   colnames(survey_weather()))
-          area_cov <- intersect(area_varlist()$varname, colnames(survey_weather()))
+          ## 1) Residual model (weather + interactions + FE)
+          f_resid <- as.formula(paste(
+            out, "~", paste(c(weather_vars, interaction_terms, fe), collapse = " + ")
+          ))
+          fit_resid <- if (out == "poor") glm(f_resid, data = survey_weather(), family = binomial())
+                      else               lm (f_resid, data = survey_weather())
 
-          ## residuals from the weather/interactions/FE model ------------
-          f_resid <- as.formula(
-            paste(out, "~",
-                  paste(c(weather_vars, interaction_terms, fe), collapse = " + "))
-          )
-          fit_resid <- if (out == "poor") glm(f_resid, data = survey_weather(),
-                                              family = binomial())
-                      else                lm(f_resid, data = survey_weather())
+          ## 2) Rows actually used by the residual fit
+          df_all   <- as.data.frame(survey_weather())
+          mf       <- model.frame(fit_resid)                # has the same rownames the fit used
+          used_ids <- rownames(mf)
+          idx      <- match(used_ids, rownames(df_all))     # robust even if rownames aren't 1..N
+          df_used  <- df_all[idx, , drop = FALSE]
+          y_res    <- residuals(fit_resid, type = "response")[idx]
 
-          # Drop any columns that have a proportion of NA greater than specified threshold
-          X_ctrl  <- model.matrix(                           # household + area only
-                        ~ -1 + .
-                        , data = survey_weather()[ , c(hh_cov,
-                                                       area_cov)]
-                      )
-          y_res   <- residuals(fit_resid, type = "response") # residuals from the model
-          # drop rows in y_res that do not have corresponding rows in X_ctrl,
-          # because of the model.matrix, which drops any rows with NA in any column
+          ## 3) Only candidate control columns (hh + area)
+          hh_cov   <- intersect(hh_varlist()$varname,   colnames(df_used))
+          area_cov <- intersect(area_varlist()$varname, colnames(df_used))
+          ctrl_pool <- intersect(c(hh_cov, area_cov), colnames(df_used))
 
-          cn <- colnames(X_ctrl)                    # design-matrix column names
-          grp_ctrl <- ifelse(cn %in% hh_cov,   1L,   # household block
+          ## 4) Drop columns with low non-missing proportion, computed on *used rows*
+          na_thr       <- 0.80   # keep cols with ≥ 80% non-missing
+          prop_nonmiss <- sapply(df_used[ , ctrl_pool, drop = FALSE], function(x) mean(!is.na(x)))
+          keep_cols    <- names(prop_nonmiss[prop_nonmiss >= na_thr])
+
+          ## Guard: if nothing passes, keep_cols is character(0)
+          df_ <- df_used[ , keep_cols, drop = FALSE]
+
+          ## 6) Drop any remaining rows with NA in controls OR y_res
+          ok   <- stats::complete.cases(df_) & !is.na(y_res)
+          df_  <- df_[ok, , drop = FALSE]
+          y_res <- y_res[ok]
+
+          ## 7) Build model matrix and groups for Lasso
+          X_ctrl  <- model.matrix(~ -1 + ., data = df_)
+
+          cn <- colnames(X_ctrl)                     # design-matrix column names
+          grp_ctrl <- ifelse(cn %in% hh_cov, 1L,     
                             ifelse(cn %in% area_cov, 2L,  NA_integer_))
 
-          ## cross-validated group-lasso ------------------------------
+          ## 8) cross-validated group-lasso ------------------------------
           cv_ctrl <- cv.grpreg(X_ctrl, y_res,
                               group  = grp_ctrl,
                               family = if (out == "poor") "gaussian" else "gaussian", # residuals are continuous always
