@@ -1254,11 +1254,25 @@ output$model_specific_inputs <- renderUI({
 
           ## 7) Build model matrix and groups for Lasso
           X_ctrl  <- model.matrix(~ -1 + ., data = df_)
+          cn <- colnames(X_ctrl)
+          # TODO: Check for zero-variance cols
 
-          cn <- colnames(X_ctrl)                     # design-matrix column names
-          grp_ctrl <- ifelse(cn %in% hh_cov, 1L,     
-                            ifelse(cn %in% area_cov, 2L,  NA_integer_))
+          # match groups on fuzzy colnames because of expansion into dummy cols for X_ctrl
+          safe_pat <- function(vars) {
+            if (!length(vars)) return(NULL)
+            roots <- make.names(vars)                                   
+            esc   <- gsub("([.^$|()*+?{}\\[\\]\\\\])", "\\\\\\1", roots)
+            paste0("^(", paste0(esc, collapse = "|"), ")")              
+          }
 
+          pat_hh   <- safe_pat(hh_cov)
+          pat_area <- safe_pat(area_cov)
+
+          is_hh   <- if (!is.null(pat_hh))   grepl(pat_hh,   cn) else rep(FALSE, length(cn))
+          is_area <- if (!is.null(pat_area)) grepl(pat_area, cn) else rep(FALSE, length(cn))
+
+          grp_ctrl <- ifelse(is_hh, 1L, ifelse(is_area, 2L, NA_integer_))
+        
           ## 8) cross-validated group-lasso ------------------------------
           cv_ctrl <- cv.grpreg(X_ctrl, y_res,
                               group  = grp_ctrl,
