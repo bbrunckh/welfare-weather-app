@@ -1198,7 +1198,7 @@ output$model_specific_inputs <- renderUI({
                                   sprintf("(%s * %s)", inter, weather)
                                   })
           term_vector <- c(t(term_matrix))
-          interaction_terms <- paste0(" + ", paste(term_vector, collapse = " + "))
+          interaction_terms <- paste(term_vector, collapse = " + ")
           
         } else {interaction_terms <- " "}
 
@@ -1290,7 +1290,7 @@ output$model_specific_inputs <- renderUI({
         
         formula1 <- as.formula(paste(out, "~", paste(weather_vars, collapse = " + ")))
         formula2 <- as.formula(paste(out, "~", paste(c(weather_vars, fe), collapse = " + ")))
-        formula3 <- as.formula(paste(out, "~", main_effects, interaction_terms))
+        formula3 <- as.formula(paste(out, "~", paste(c(main_effects, interaction_terms), collapse = " + ")))
 
         # helper that returns the right fit function ------------------------
         fit_fun <- if (out == "poor") {
@@ -1299,10 +1299,24 @@ output$model_specific_inputs <- renderUI({
           \(form) lm(form,  data = survey_weather())
         }
         
-        # generalised linear model fits
-        fit1 <- fit_fun(formula1)
-        fit2 <- fit_fun(formula2)
-        fit3 <- fit_fun(formula3)
+        # fix the call to the fit object so that it can be re-evaluated later
+        sw <- isolate(as.data.frame(survey_weather()))
+
+        fit_fun <- if (out == "poor") {
+          \(form) glm(form, data = sw, family = binomial())
+        } else {
+          \(form) lm(form,  data = sw)
+        }
+
+        fix_call <- function(fit) {
+          fit$call$formula <- stats::formula(fit)  # literal formula, not a symbol
+          fit$call$data    <- quote(sw)            # stable object available later
+          fit
+        }
+
+        fit1 <- fix_call(fit_fun(formula1))
+        fit2 <- fix_call(fit_fun(formula2))
+        fit3 <- fix_call(fit_fun(formula3))
         
         model_fit <- list(fit1, fit2, fit3)  
 
@@ -1347,12 +1361,15 @@ output$model_specific_inputs <- renderUI({
       output$regtable <- renderUI({
         req(model_fit(), outlab())
         coefs <- names(coef(model_fit()[[3]]))
-        weather_vars <- grep("haz", coefs, value = TRUE) 
+        weather_vars <- grep("haz", coefs, value = TRUE)
         hh_cov <- filter(varlist, label %in% input$hhcov) |> pull(varname)
         area_cov <- filter(varlist, label %in% input$areacov) |> pull(varname)
-        coefs_to_plot <- c(weather_vars, hh_cov, area_cov)
-        named_coefs <- create_named_vector(coefs_to_plot, labels_df)
+
+        want  <- c(weather_vars, hh_cov, area_cov)
+        coefs_to_plot <- intersect(coefs, unique(want))
         
+        named_coefs <- create_named_vector(coefs_to_plot, labels_df)
+
         ht <- export_summs(model_fit()[[1]], model_fit()[[2]], model_fit()[[3]], 
                      robust = "HC3",
                      model.names = c("No FE", "FE", "FE + controls"),
