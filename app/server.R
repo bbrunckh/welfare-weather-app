@@ -1283,6 +1283,7 @@ output$model_specific_inputs <- renderUI({
           keep <- keep[coef(cv_ctrl, s = "lambda.min")[-1] != 0]
 
           main_effects <- paste(c(weather_vars, keep, fe), collapse = " + ")
+          # TODO: Check why Lasso drops all covariates
 
         } # else if (input$modelspec == "XGBoost"){
         #   
