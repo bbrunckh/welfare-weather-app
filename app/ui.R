@@ -16,7 +16,7 @@ ui <- navbarPage(
       h2("Welcome to the WISE-APP"),
       h5("Weather Impact Simulation and Evaluation for Adaptation Policy and Planning"),
       p("This tool is designed to help you understand the relationship between welfare and weather."),
-      p("Follow the steps to perform simulations and explore policy impacts."),
+      p("Follow the steps to perform simulations and explore policy scenarios."),
       # actionButton("internal_user", "Internal user"),
       # hr(),
       # uiOutput("dlw_token_input"),
@@ -33,7 +33,7 @@ ui <- navbarPage(
       sidebarPanel(
         bs_accordion(id = "step1_sidebar_accordion") |>
           bs_append(
-            title = "1 Define sample",
+            title = "1 Sample",
             content = tagList(
               uiOutput("sample_ui"), # Survey countries, depends on data access
               uiOutput("survey_year_ui"), # Survey years - conditional on country selection
@@ -46,22 +46,23 @@ ui <- navbarPage(
             )
           ) |>
           bs_append(
-            title = "2 Define welfare outcome",
+            title = "2 Welfare outcome",
             content = tagList(
               selectizeInput(
                 inputId = "welfare_outcome",
                 label = "Welfare (\\(W_{hkt}\\))",
-                choices = outcomes,
+                choices = welfare$outcome,
                 selected = "Log welfare per day (PPP)"
               ),
               uiOutput("welfare_ui"), # Welfare year and poverty line - conditional
-              helpText("Continous outcomes ($/day) are log transformed. Binary outcomes (Poor...) define the poverty status of a household."),
+              helpText("Continous outcomes ($/day) are log transformed. Binary outcomes (Poor...) define the poverty status of a household.", 
+                       style = "font-size: 12px;"),
               
               actionButton("survey_stats", "Survey stats")
             )
           ) |>
           bs_append(
-            title = "3 Define weather variable",
+            title = "3 Weather variable",
             content = tagList(
               selectizeInput(
                 inputId = "weather_variable_selector",
@@ -72,32 +73,73 @@ ui <- navbarPage(
                 options = list(maxItems = 2)
               ),
               uiOutput("weather_construction_ui"), # Conditional on weather variable
+              hr(),
+              # Single button to show/hide download options
+              actionButton(
+                "show_download_weather", 
+                "Download merged data",
+                class = "btn-primary mb-3",
+                style = "width: 100%;"
+              ),
+              # Conditional panel that appears when download button is clicked
+              conditionalPanel(
+                condition = "input.show_download_weather % 2 == 1",
+                div(
+                  style = "border: 1px solid #dee2e6; border-radius: 0.375rem; padding: 15px; background-color: #f8f9fa;",
+                  h5("Choose Format:", style = "margin-bottom: 15px;"),
+                  
+                  # Format selection radio buttons
+                  radioButtons(
+                    "download_format",
+                    NULL,
+                    choices = list(
+                      "CSV (.csv)" = "csv",
+                      "Stata (.dta)" = "dta",
+                      "Parquet (.parquet)" = "parquet"
+                    ),
+                    selected = "csv"
+                  ),
+                  # Actual download button
+                  downloadButton(
+                    "download_file", 
+                    "Download",
+                    class = "btn-success",
+                    style = "width: 100%; margin-top: 10px;"
+                  )
+                )
+              ),
             )
           ) |>
           bs_append(
-            title = "4 Specify model",
+            title = "4 Model",
             content = tagList(
-              actionButton("model_covariates", "Define covariates",  style = "margin-bottom:12px;"), # Changed label for clarity
+              uiOutput("model_selector_ui"),
+              helpText("Extreme gradient boosting and random forest models are yet to be implemented.", 
+                       style = "color: red; font-size: 12px;"),
+              hr(),
+              actionButton("model_covariates", "Model parameters",  style = "margin-bottom:12px;"), # Changed label for clarity
               uiOutput("model_specs_ui"), # Conditional on survey data
               hr(),
               actionButton("run_model", "Run model"),
               hr(),
-              helpText("Linear regression (OLS) will include all specified covariates."),
+              helpText("Linear regression (OLS) will include all specified covariates.", 
+                       style = "font-size: 12px;"),
               helpText(
                 "Lasso (Belloni & Chernozhukov, 2014) first removes the part of welfare already",
                 "explained by weather, interactions and chosen fixed effects, then runs a",
                 "group-lasso on the residuals to pick the household- and area-covariates that",
                 "still matter. Weather terms and the fixed-effect groups you chose are always",
-                "kept; only the remaining controls are selected automatically."
+                "kept; only the remaining controls are selected automatically.", 
+                style = "font-size: 12px;"
               ),
               # helpText("XGBoost will use the extreme gradient boosting method, building an ensemble of decision trees considering all specified covariates. SHAP (SHapley Additive exPlanations) are used to interpret the results. They explain how much each variable contributes to the predicted outcome.")
               br(),
-              helpText("To be added:"),
-              helpText("Option to interact fixed effects"),
-              helpText("Robustness check:"),
-              helpText("-Include lagged weather"),
-              helpText("-Include displaced weather"),
-              helpText("-Include future weather (placebo test"),
+              # helpText("To be added:"),
+              # helpText("Option to interact fixed effects"),
+              # helpText("Robustness checks:"),
+              # helpText("-Include lagged weather"),
+              # helpText("-Include displaced weather"),
+              # helpText("-Include future weather (placebo test"),
               )
           )
       ), 
@@ -149,7 +191,8 @@ ui <- navbarPage(
             bs_append(
               title = "Climate change",
               content = tagList(
-                h4("Yet to be implemented"),
+                h4("Yet to be implemented", 
+                   style = "color: red; font-size: 12px;"),
                 radioButtons("climate", 
                              "Scenario", 
                              choices = c("SSP2-4.5","SSP3-7.0","SSP5-8.5"),
@@ -160,10 +203,11 @@ ui <- navbarPage(
                              choices = c("Delta"),
                              selected = "Delta"
                 ),
-                helpText("Delta: adds CMIP6 ensemble 'delta' fields to historical observations."),
+                helpText("Delta: adds CMIP6 ensemble 'delta' fields to historical observations.", 
+                         style = "font-size: 12px;"),
                 sliderInput("yearRange_climate", 
                             "Period defining the distribution of weather in climate change scenario", 
-                            min = 2020, 
+                            min = 2015, 
                             max = 2100, 
                             value = c(2040, 2060),
                             sep = ""
@@ -174,8 +218,8 @@ ui <- navbarPage(
             ) 
           ),
         mainPanel(
-          h3("Under development"),
-          h3("Step 2 will be updated soon"),
+          h3("Under development. Step 2 will be updated soon.", 
+             style = "color: red; font-size: 16px;"),
           h4("Predicted welfare"),
           h3("\\(\\widehat{W_{hkt}} = f(Haz_{kt}, X_{hkt}, E_{kt}) + \\widehat{\\epsilon_{hkt}}\\)"),
           br(),
@@ -236,23 +280,26 @@ ui <- navbarPage(
                                                "Every household has access to improved drinking water", 
                                                "Every household has access to improved sanitation")
                 ),
-                h5("Add something on accessibility?"),
+                # h5("Add something on accessibility?"),
               )
             ) |>
             bs_append(
               title = "Education",
               content = tagList(
-                checkboxGroupInput("policy_edu", 
+                radioButtons("policy_edu", 
                              "Education", 
                              choices = c("Every household has at least primary education",
-                                         "Every household has at least secondary education")
+                                         "Every household has at least secondary education",
+                                         "Every household has post-secondary education"),
+                             selected = character(0) 
                 ),
               )
             ) |>
             bs_append(
               title = "Financial inclusion",
               content = tagList(
-                h4("Yet to be implemented"),
+                h4("Yet to be implemented", 
+                   style = "color: red; font-size: 12px;"),
                 checkboxGroupInput("policy_fin", 
                                    "Financial inclusion", 
                                    choices = c("Every household owns a financial account")
@@ -263,7 +310,8 @@ ui <- navbarPage(
             bs_append(
               title = "Digital inclusion",
               content = tagList(
-                h4("Yet to be implemented"),
+                h4("Yet to be implemented", 
+                   style = "color: red; font-size: 12px;"),
                 checkboxGroupInput("policy_dig", 
                                    "Digital inclusion", 
                                    choices = c("Every household has internet access",
@@ -274,7 +322,8 @@ ui <- navbarPage(
             bs_append(
               title = "Social protection",
               content = tagList(
-                h4("Yet to be implemented"),
+                h4("Yet to be implemented", 
+                   style = "color: red; font-size: 12px;"),
                 h5("Adaptive SP - cash transfer"),
                 radioButtons("budget_type",
                              "Budget",
@@ -314,8 +363,8 @@ ui <- navbarPage(
           actionButton("run_policy_sim", "Run policy experiment")
         ),
         mainPanel(
-          h3("Under development"),
-          h3("Step 3 will be updated soon"),
+          h3("Under development. Step 3 will be updated soon", 
+             style = "color: red; font-size: 16px;"),
           h4("∆ poverty vs exceedance probability"),
           p("(conditional on the selected weather variable)"),
           layout_columns(

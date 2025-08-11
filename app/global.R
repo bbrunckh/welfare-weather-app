@@ -40,11 +40,11 @@ version <- "v0.1.1"
 
 # connect to pin board
 
-  # use local pin board if no R config active
+  # use local pin board if null R config active
   if (Sys.getenv("R_CONFIG_ACTIVE") == "") {
     board <- board_folder("data/pins")
     pin_prefix <- ""
-    # If on Posit Connect server, use Connect pin board
+    # Posit Connect server, use Connect pin board
   } else {
     board <- board_connect()
     pin_prefix <- "bbrunckhorst/"
@@ -64,17 +64,41 @@ varlist <- pin_read(board, paste0(pin_prefix, "varlist"))
 # Weather variable list
 weather_list <- pin_read(board, paste0(pin_prefix, "weather_varlist"))
 
+
 # Welfare outcomes
-outcomes <- c(
-  "Log welfare ($/day, PPP)",
-  "Poor (PPP)",
-  "Log welfare (LCU/day)",
-  "Poor (LCU)"
-)
+welfare <- data.frame(
+  outcome = c("Log welfare ($/day, PPP)",
+              "Poor (PPP)",
+              "Log welfare (LCU/day)", 
+              "Poor (LCU)"),
+  type = c("Continuous",
+           "Binary",
+           "Continuous",
+           "Binary")
+  )
 
 # Intl poverty lines
 pov_lines <- data.frame(
-  ppp_year = c(rep(2021,3),rep(2017,3),rep(2011,3)),
-  ln = c(3.00, 4.20, 8.30, 2.15, 3.65, 6.85, 1.90, 3.20, 5.50)
+  ppp_year = c(rep(2021,3),
+               rep(2017,3),
+               rep(2011,3)),
+  ln = c(3.00, 4.20, 8.30, 
+         2.15, 3.65, 6.85, 
+         1.90, 3.20, 5.50)
   )
-          
+
+# Supported models
+models <- data.frame(
+  model_type = c("Linear regression", 
+                 "Logistic regression", 
+                 "Extreme Gradient Boosting",
+                 "Random forest"),
+  model_mode = c("Regression", 
+                  "Classification", 
+                  "Regression or Classification", 
+                  "Regression or Classification"),
+  model_engine = c("lm", 
+                   "glm",
+                   "xgboost",
+                   "ranger")
+  )

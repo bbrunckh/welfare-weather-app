@@ -199,11 +199,14 @@ for (n in 1:nrow(spat_cat)){
    survey_db <- survey_db |>
      mutate(
        educ_com1 = case_when(
-         educat7>=3 ~ 1, educat5>=3 ~ 1, educat4>=2 ~ 1),
+         educat7>=3 ~ 1, educat5>=3 ~ 1, educat4>=2 ~ 1, 
+         !is.na(educat7) | !is.na(educat5) | !is.na(educat4) ~ 0),
        educ_com2 = case_when(
-         educat7>=3 ~ 1, educat5>=4 ~ 1, educat4>=5 ~ 1),
+         educat7>=3 ~ 1, educat5>=4 ~ 1, educat4>=5 ~ 1, 
+         !is.na(educat7) | !is.na(educat5) | !is.na(educat4) ~ 0),
        educ_com3 = case_when(
-         educat7>=4 ~ 1, educat5>=5 ~ 1,  educat4>=6 ~ 1))
+         educat7>=4 ~ 1, educat5>=5 ~ 1,  educat4>=6 ~ 1, 
+         !is.na(educat7) | !is.na(educat5) | !is.na(educat4) ~ 0))
    
    # construct binary labor force variables (missing = NA)
    survey_db <- survey_db |>

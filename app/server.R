@@ -461,9 +461,8 @@ server <- function(input, output, session) {
                 req(survey_data())
                 desc <- survey_data() |>
                   dplyr::select(countryyear, weight,
-                    any_of(varlist[varlist$wiseapp == "HH characteristics" & !is.na(varlist$wiseapp), "varname"])
+                    any_of(varlist[varlist$wiseapp == "HH characteristics" & varlist$datatype %in% c("Numeric","Binary","Integer") & !is.na(varlist$wiseapp), "varname"])
                   ) 
-
                 sumtable(desc,
                   vars = colnames(desc)[-c(1,2)],
                   summ = c("weighted.mean(x, w = wts)", "weighted.sd(x, w = wts)", "min(x)", "max(x)", "notNA(x)"),
@@ -590,10 +589,10 @@ server <- function(input, output, session) {
             # Continuous or binned
             radioButtons(paste0(id_prefix, "contOrBinned"),
               "Continuous or binned",
-              # choices = c("Continuous", "Binned")
-              choices = c("Continuous")
+              choices = c("Continuous", "Binned")
             ),
-            helpText("A binned option will be added soon."),
+            helpText("Binned option is yet to be implemented.",
+                     style = "color: red; font-size: 12px;"),
 
             # Conditional UI for binned options
             conditionalPanel(
@@ -868,6 +867,38 @@ server <- function(input, output, session) {
   haz_vars <- reactive({
     paste0("haz_",weather_vars())
   })
+  
+  #----------------------------------------------------------------------------#
+  # DOWNLOAD WEATHER DATA
+  #----------------------------------------------------------------------------#
+  
+  output$download_file <- downloadHandler(
+
+    filename = function() {
+      format <- input$download_format
+      extension <- switch(format,
+                          "csv" = ".csv",
+                          "dta" = ".dta",
+                          "parquet" = ".parquet")
+      paste("survey_weather", extension, sep = "")
+    },
+    content = function(file) {
+      
+      haz_data <- survey_weather() |> 
+        dplyr::select(code,year,survname,hhid,timestamp,starts_with("haz_")) |>
+        mutate(year = as.integer(year), 
+               hhid = ifelse(grepl("^[0-9]*\\.?[0-9]+$", hhid), 
+                             as.numeric(hhid), hhid))
+      
+      format <- input$download_format
+      
+      switch(format,
+             "csv" = write.csv(haz_data, file, row.names = FALSE),
+             "dta" = haven::write_dta(haz_data, file),
+             "parquet" = nanoparquet::write_parquet(haz_data, file)
+      )
+    }
+  )
 
   #----------------------------------------------------------------------------#
   # WEATHER STATS OUTPUT
@@ -981,7 +1012,8 @@ server <- function(input, output, session) {
             br(),
             
             h4("Weather over time and space"),
-            helpText("Weather maps to be added..."),
+            helpText("Weather maps to be added...", 
+                     style = "font-size: 12px;"),
           br(),
           
           h4("Welfare vs weather"),
@@ -997,7 +1029,8 @@ server <- function(input, output, session) {
           br(),
           
             h4("Weather summary stats"),
-            helpText("Summary statistics are shown for the configured weather variables. Sample weights are used."),
+            helpText("Summary statistics are shown for the configured weather variables. Sample weights are used.", 
+                     style = "font-size: 12px;"),
             output$weather_stats <- renderDT(
               {
                 req(survey_weather(), haz_vars())
@@ -1048,7 +1081,7 @@ server <- function(input, output, session) {
 
   hh_varlist <- reactive({
     req(input$country)
-    filter(varlist, wiseapp == "HH characteristics" & datatype %in% c("Numeric","Binary")) |>
+    filter(varlist, wiseapp == "HH characteristics" & datatype %in% c("Numeric","Binary","Integer")) |>
     dplyr::select(varname, label) |> filter(varname %in% colnames(survey_weather()))
   })
   
@@ -1064,7 +1097,36 @@ server <- function(input, output, session) {
     filter(varlist, wiseapp == "ID & Fixed effects") |>
     dplyr::select(varname, label) |> filter(varname %in% colnames(survey_weather()) & !varname %in% fe_exclude)
   })
-
+  output$model_selector_ui <- renderUI({
+    
+    req(input$welfare_outcome) # Ensure an outcome is selected
+    
+    # Determine if the selected outcome is "Binary" or "Continuous"
+    outcome_type <- welfare |> 
+      filter(outcome == input$welfare_outcome) |> 
+      pull(type)
+    
+    # Prepare the choices for the radio buttons based on the outcome type
+    if (outcome_type == "Binary") {
+      model_choices <- models |> 
+        filter(grepl("Classification", model_mode)) |> 
+        pull(model_type)
+      label_text <- "Classification model:"
+    } else { # Assumes "Continuous"
+      model_choices <- models |> 
+        filter(grepl("Regression", model_mode)) |> 
+        pull(model_type)
+      label_text <- "Regression model:"
+    }
+    
+    # Create the radio buttons with the determined choices
+    radioButtons(
+      inputId = "model_type", # The ID for the new input
+      label = label_text,
+      choices = model_choices
+    )
+  })
+  
 output$model_specs_ui <- renderUI({
   req(input$country, input$weather_variable_selector)
 
@@ -1078,9 +1140,7 @@ output$model_specs_ui <- renderUI({
         "interactions",
         label   = "Interactions with \\(Haz_{kt}\\):",
         choices = hh_varlist() |>
-                  dplyr::filter(varname %in%
-                      c("urban","literacy","primarycomp","imp_wat_rec",
-                        "imp_san_rec","electricity","agriland","male")) |>
+                  dplyr::filter(varname %in% varlist[varlist$datatype=="Binary","varname"]) |>
                   dplyr::pull(label),
         selected = "Urban",
         multiple = TRUE,
@@ -1091,20 +1151,16 @@ output$model_specs_ui <- renderUI({
         "fixedeffects",
         label   = "Fixed effects",
         choices = fe_varlist()$label,
-        selected = fe_varlist() |>
-                   dplyr::filter(varname == "year") |>
-                   dplyr::pull(label),
+        selected = "",
         multiple = TRUE
       ),
 
       radioButtons(
-        "modelspec",
-        "Choose model type for covariate selection:",
-        choices  = c("Linear regression", "Lasso"),
-        selected = isolate(input$modelspec) %||% "Linear regression"
+        "covariates",
+        "Covariate selection:",
+        choices  = c("User-defined", "Lasso"),
+        selected = isolate(input$covariates) %||% "User-defined"
       ),
-
-      helpText("XGBoost option will be added soon."),
 
       ## widgets that depend on the chosen model ---------------------------
       uiOutput("model_specific_inputs")   # rendered below
@@ -1114,19 +1170,17 @@ output$model_specs_ui <- renderUI({
 
 # second renderUI produces only the model-specific widgets
 output$model_specific_inputs <- renderUI({
-  req(input$modelspec)
+  req(input$covariates)
 
   withMathJax(               # ⟵ one wrapper is enough
-    if (input$modelspec == "Linear regression") {
+    if (input$model_type %in% c("Linear regression", "Logistic regression")) {
 
       tagList(
         selectizeInput(
           "hhcov",
           label   = "Household characteristics \\(X_{hkt}\\)",
           choices = hh_varlist()$label,
-          selected = hh_varlist() |>
-                     dplyr::filter(varname %in% c("urban", "hhsize")) |>
-                     dplyr::pull(label),
+          selected = c("Household size", input$interactions),
           multiple = TRUE
         ),
         selectizeInput(
@@ -1134,16 +1188,18 @@ output$model_specific_inputs <- renderUI({
           label   = "Area characteristics \\(E_{kt}\\)",
           choices = area_varlist()$label,
           selected = area_varlist() |>
-                     dplyr::filter(varname == "built_area") |>
+                     dplyr::filter(varname == "area_h3_7") |>
                      dplyr::pull(label),
           multiple = TRUE
         )
       )
 
-    } else if (input$modelspec == "Lasso") {
+    } else if (input$covariates == "Lasso") {
 
-      helpText("No manual covariate selection needed: Lasso decides automatically.")
-      helpText("Automatically selected variables will be shown in model results.")
+      helpText("No manual covariate selection needed: Lasso decides automatically.", 
+               style = "font-size: 12px;")
+      helpText("Automatically selected variables will be shown in model results.", 
+               style = "font-size: 12px;")
 
     }
   )
@@ -1208,7 +1264,7 @@ output$model_specific_inputs <- renderUI({
         #   fe <- paste0("(", paste(fe, collapse = " * "),")")
         #   }
 
-        if (input$modelspec == "Linear regression"){
+        if (input$covariates == "User-defined"){
         
           # survey variables
           hh_cov <- filter(varlist, label %in% input$hhcov) |> pull(varname)
@@ -1217,13 +1273,13 @@ output$model_specific_inputs <- renderUI({
           # construct formulas
           main_effects <- paste(c(weather_vars, hh_cov, area_cov, fe), collapse = " + ")
 
-        } else if (input$modelspec == "Lasso") {
+        } else if (input$covariates == "Lasso") {
 
           ## 1) Residual model (weather + interactions + FE)
           f_resid <- as.formula(paste(
             out, "~", paste(c(weather_vars, interaction_terms, fe), collapse = " + ")
           ))
-          fit_resid <- if (out == "poor") glm(f_resid, data = survey_weather(), family = binomial())
+          fit_resid <- if (out == "poor") glm(f_resid, data = survey_weather(), family = "binomial")
                       else               lm (f_resid, data = survey_weather())
 
           ## 2) Rows actually used by the residual fit
@@ -1285,7 +1341,7 @@ output$model_specific_inputs <- renderUI({
           main_effects <- paste(c(weather_vars, keep, fe), collapse = " + ")
           # TODO: Check why Lasso drops all covariates
 
-        } # else if (input$modelspec == "XGBoost"){
+        } # else if (input$covariates == "XGBoost"){
         #   
         # }
         
@@ -1295,7 +1351,7 @@ output$model_specific_inputs <- renderUI({
 
         # helper that returns the right fit function ------------------------
         fit_fun <- if (out == "poor") {
-          \(form) glm(form, data = survey_weather(), family = binomial())
+          \(form) glm(form, data = survey_weather(), family = "binomial")
         } else {
           \(form) lm(form,  data = survey_weather())
         }
@@ -1304,7 +1360,7 @@ output$model_specific_inputs <- renderUI({
         sw <- isolate(as.data.frame(survey_weather()))
 
         fit_fun <- if (out == "poor") {
-          \(form) glm(form, data = sw, family = binomial())
+          \(form) glm(form, data = sw, family = "binomial")
         } else {
           \(form) lm(form,  data = sw)
         }
@@ -1569,7 +1625,7 @@ output$model_specific_inputs <- renderUI({
           actual_values <- model.frame(model)[[1]] 
           predicted_values <- predict(model)
           if (welf_select()$type == "Binary") {
-            predicted_values <- round(predicted_values) # If pr(poor) > 0.5 >> poor
+            predicted_values <- predict(model, type = "response") |> round()
           }
           
           plot_data <- data.frame(
@@ -1671,7 +1727,8 @@ output$model_specific_inputs <- renderUI({
             
             h4("Contribution of Each Variable to Model R-squared"),
             plotOutput("relaimpo"),
-            helpText("Using the Lindeman, Merenda, and Gold (LMG) method, which calculates the average increase in R-squared when a predictor is added to the model across all possible orderings of predictors."),
+            helpText("Using the Lindeman, Merenda, and Gold (LMG) method, which calculates the average increase in R-squared when a predictor is added to the model across all possible orderings of predictors.", 
+                     style = "font-size: 12px;"),
             
             h4("Predicted welfare"),
             plotOutput("pred_welf_dist"),
@@ -1776,7 +1833,9 @@ output$model_specific_inputs <- renderUI({
             labs(
               x = "Change in $3.00 poverty rate (pp.)",
               y = "Annual Exceedance Probability (P(pov > y))",
-              caption = "Change in poverty is relative to the mean (expected) poverty \n  over all simulated weather years.") +
+              caption =  paste0("Change relative to the mean (expected) poverty over all simulations. \n",
+                                "Expected poverty = ",
+                                round(100*mean(plot_data$pov300, na.rm= TRUE)), "%")) +
             theme_minimal() +
             coord_flip()  
           
@@ -1801,7 +1860,9 @@ output$model_specific_inputs <- renderUI({
             labs(
               x = "Change in $8.30 poverty rate (pp.)",
               y = "Annual Exceedance Probability (P(pov > y))",
-              caption = "Change in poverty is relative to the mean (expected) poverty \n  over all simulated weather years.") +
+              caption =  paste0("Change relative to the mean (expected) poverty over all simulations. \n",
+                              "Expected poverty = ",
+                              round(100*mean(plot_data$pov830, na.rm= TRUE)), "%")) +
             theme_minimal() +
             coord_flip() 
           
@@ -1831,7 +1892,13 @@ output$model_specific_inputs <- renderUI({
       
       if (!is.null(input$policy_edu)){
         if (input$policy_edu == "Every household has at least primary education"){
-          sim_policy <- mutate(sim_policy, primarycomp = 1)
+          sim_policy <- mutate(sim_policy, educ_com1 = 1)
+        } 
+        if (input$policy_edu == "Every household has at least secondary education"){
+          sim_policy <- mutate(sim_policy, educ_com2 = 1)
+        } 
+        if (input$policy_edu == "Every household has post-secondary education"){
+          sim_policy <- mutate(sim_policy, educ_com3 = 1)
         } 
       }
       if (!is.null(input$policy_infra)){
@@ -1884,7 +1951,55 @@ output$model_specific_inputs <- renderUI({
             labs(x = "Change in $3.00 poverty rate (pp.)",
                  y = "Annual Exceedance Probability (P(pov > y))",
                  color = "",
-                 caption = "Change in poverty rate is relative to the mean (expected) \n poverty over all simulated weather years.") +
+                 caption =  paste0("Change relative to the mean (expected) poverty over all simulations. \n",
+                                   "Baseline expected poverty = ",
+                                   round(100*mean(plot_data$pov300, na.rm= TRUE)), "%", "\n",
+                                   "Policy expected poverty = ",
+                                   round(100*mean(plot_data$pov300_pol, na.rm= TRUE)), "%")) +
+            coord_flip() + 
+            theme_minimal() +
+            theme(legend.position = "top")
+          
+        } else NULL
+      })  
+      
+      output$sim_pov8_pol_ep <- renderPlot({
+        req(input$run_sim > 0, model_fit(), welf_sim_policy())
+        
+        if (welf_select()$varname =="welf_ppp_2021" & welf_select()$type == "Continuous"){
+          plot_data <- welf_sim_policy() |>
+            summarise(pov830 = weighted.mean(welf_pred < log(8.3),weight), 
+                      pov830_pol = weighted.mean(welf_pred_pol < log(8.3),weight), 
+                      .by = c(code, year, sim_year)) |>
+            group_by(code, year) |>
+            mutate(pov830d = pov830 - mean(pov830, na.rm = TRUE),
+                   pov830d_pol = pov830_pol - mean(pov830_pol, na.rm = TRUE)) |>
+            ungroup()
+          
+          ggplot(plot_data) +
+            stat_ecdf(geom = "point", 
+                      aes(x = 100*pov830d_pol, y = 1 - ..y..), 
+                      color = "lightblue") +
+            stat_ecdf(geom = "line", 
+                      aes(x = 100*pov830d_pol, y = 1 - ..y.., color = "policy"), 
+                      linewidth = 1) +
+            stat_ecdf(geom = "point", 
+                      aes(x = 100*pov830d, y = 1 - ..y..), 
+                      color = "lightblue") +
+            stat_ecdf(geom = "line", 
+                      aes(x = 100*pov830d, y = 1 - ..y.., color = "baseline"), 
+                      linewidth = 1) +
+            scale_color_manual(values = c("baseline" = "red", "policy" = "blue"), 
+                               labels = c("Baseline","Policy")) +
+            geom_vline(xintercept = 0, color = "black", linetype = "dotted") +
+            labs(x = "Change in $8.30 poverty rate (pp.)",
+                 y = "Annual Exceedance Probability (P(pov > y))",
+                 color = "",
+                 caption =  paste0("Change relative to the mean (expected) poverty over all simulations. \n",
+                                   "Baseline expected poverty = ",
+                                   round(100*mean(plot_data$pov830, na.rm= TRUE)), "%", "\n",
+                                   "Policy expected poverty = ",
+                                   round(100*mean(plot_data$pov830_pol, na.rm= TRUE)), "%")) +
             coord_flip() + 
             theme_minimal() +
             theme(legend.position = "top")
