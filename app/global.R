@@ -7,6 +7,7 @@ library(readr)
 library(nanoparquet)
 
 # library(igraph)
+library(grpreg)
 library(duckplyr)
 library(dplyr)
 library(sf)
@@ -33,7 +34,6 @@ library(broom)
 library(pins)
 library(httr2)
 
-library(grpreg)
 
 # App version
 version <- "v0.1.1"
