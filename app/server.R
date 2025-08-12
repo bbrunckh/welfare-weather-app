@@ -884,7 +884,7 @@ server <- function(input, output, session) {
       
       haz_data <- survey_weather() |> 
         select(code,year,survname,hhid,timestamp,starts_with("haz_")) |>
-        mutate(year = as.integer(year), 
+        mutate(year = as.integer(as.character(year)), 
                hhid = ifelse(grepl("^[0-9]*\\.?[0-9]+$", hhid), 
                              as.numeric(hhid), hhid))
       
