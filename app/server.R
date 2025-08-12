@@ -439,7 +439,7 @@ server <- function(input, output, session) {
             output$data_table <- renderDT({
               req(survey_data())
                 desc <- survey_data() |>
-                  dplyr::select(countryyear, weight, welf_ppp_2021, welf_lcu_2021,
+                  select(countryyear, weight, welf_ppp_2021, welf_lcu_2021,
                     poor_300ln, poor_420ln, poor_830ln,any_of(c("log_welf", "poor")))
 
                 sumtable(desc,
@@ -460,7 +460,7 @@ server <- function(input, output, session) {
               {
                 req(survey_data())
                 desc <- survey_data() |>
-                  dplyr::select(countryyear, weight,
+                  select(countryyear, weight,
                     any_of(varlist[varlist$wiseapp == "HH characteristics" & varlist$datatype %in% c("Numeric","Binary","Integer") & !is.na(varlist$wiseapp), "varname"])
                   ) 
                 sumtable(desc,
@@ -481,7 +481,7 @@ server <- function(input, output, session) {
               {
                 req(survey_data())
                 desc <- survey_data() |>
-                  dplyr::select(countryyear, weight,
+                  select(countryyear, weight,
                     any_of(varlist[varlist$wiseapp == "Area characteristics" & !is.na(varlist$wiseapp), "varname"])
                   ) 
                 
@@ -709,7 +709,7 @@ server <- function(input, output, session) {
     
     # filter to selected weather variables, sample h3 cells & date range
     weather <- weather |>
-      dplyr::select(h3_6, timestamp, all_of(weather_vars())) |>
+      select(h3_6, timestamp, all_of(weather_vars())) |>
       filter(h3_6 %in% survey_h3()$h3_6) |>
       filter(timestamp %in% weather_dates) |>
       distinct() 
@@ -761,7 +761,7 @@ server <- function(input, output, session) {
     }
     if (temporal_agg == "Median") {
       weather <- weather |>
-        mutate(haz = apply(dplyr::select(., starts_with(paste0(i, "_"))), 1, median, na.rm = TRUE))
+        mutate(haz = apply(select(., starts_with(paste0(i, "_"))), 1, median, na.rm = TRUE))
     }
     if (temporal_agg == "Min") {
       weather <- weather |>
@@ -812,7 +812,7 @@ server <- function(input, output, session) {
     
     # keep only the configured weather variable
     weather <- weather |>
-      dplyr::select(h3_6, timestamp, haz) |>
+      select(h3_6, timestamp, haz) |>
       rename_with(~ paste0("haz_",i), .cols = starts_with("haz")) |>
       arrange(h3_6, timestamp) 
     
@@ -883,7 +883,7 @@ server <- function(input, output, session) {
     content = function(file) {
       
       haz_data <- survey_weather() |> 
-        dplyr::select(code,year,survname,hhid,timestamp,starts_with("haz_")) |>
+        select(code,year,survname,hhid,timestamp,starts_with("haz_")) |>
         mutate(year = as.integer(year), 
                hhid = ifelse(grepl("^[0-9]*\\.?[0-9]+$", hhid), 
                              as.numeric(hhid), hhid))
@@ -1080,20 +1080,20 @@ server <- function(input, output, session) {
   hh_varlist <- reactive({
     req(input$country)
     filter(varlist, wiseapp == "HH characteristics" & datatype %in% c("Numeric","Binary","Integer")) |>
-    dplyr::select(varname, label) |> filter(varname %in% colnames(survey_weather()))
+    select(varname, label) |> filter(varname %in% colnames(survey_weather()))
   })
   
   area_varlist <- reactive({
     req(input$country)
     filter(varlist, wiseapp == "Area characteristics") |>
-    dplyr::select(varname, label) |> filter(varname %in% colnames(survey_weather()))
+    select(varname, label) |> filter(varname %in% colnames(survey_weather()))
   })
   
   fe_varlist <- reactive({
     req(input$country)
     fe_exclude <- c("countryname", "survname","hhid","psu","strata")
     filter(varlist, wiseapp == "ID & Fixed effects") |>
-    dplyr::select(varname, label) |> filter(varname %in% colnames(survey_weather()) & !varname %in% fe_exclude)
+    select(varname, label) |> filter(varname %in% colnames(survey_weather()) & !varname %in% fe_exclude)
   })
   
   # Model types conditional on whether the selected welfare outcome is continuous or binary
@@ -1226,7 +1226,7 @@ output$covariate_inputs <- renderUI({
         } else {out <- "poor"}
         
         # weather variables
-        weather_vars <- dplyr::select(survey_weather(), starts_with("haz")) |> colnames()
+        weather_vars <- select(survey_weather(), starts_with("haz")) |> colnames()
         
         # add polynomials if specified
         for (w in weather_vars){
@@ -1384,7 +1384,7 @@ output$covariate_inputs <- renderUI({
       
       # labelling
       label_lookup <- setNames(varlist$label, varlist$varname)
-      labels_df <- filter(varlist, !is.na(varname)) |> dplyr::select(varname, label) 
+      labels_df <- filter(varlist, !is.na(varname)) |> select(varname, label) 
       
       get_term_label <- function(term, labels_df) {
         if (grepl("^I\\((.*)\\^2\\)$", term)) {
@@ -1578,10 +1578,10 @@ output$covariate_inputs <- renderUI({
           model <- model_fit()[[3]]
           
           plot_data <- model.frame(model) |>
-            dplyr::select(starts_with("haz_")) |>
+            select(starts_with("haz_")) |>
             mutate(residuals = residuals(model))
           
-          h <- colnames(dplyr::select(plot_data, starts_with("haz_")))[1]
+          h <- colnames(select(plot_data, starts_with("haz_")))[1]
           xlabel <- filter(varlist, varname==h, !is.na(varname)) |> pull(label)
           
           ggplot(plot_data, aes(x = .data[[h]],
@@ -1600,10 +1600,10 @@ output$covariate_inputs <- renderUI({
           
           model <- model_fit()[[3]]
           plot_data <- model.frame(model) |>
-            dplyr::select(starts_with("haz_")) |>
+            select(starts_with("haz_")) |>
             mutate(residuals = residuals(model))
           
-          h <- colnames(dplyr::select(plot_data, starts_with("haz_")))[2]
+          h <- colnames(select(plot_data, starts_with("haz_")))[2]
           xlabel <- filter(varlist, varname==h, !is.na(varname)) |> pull(label)
           
           ggplot(plot_data, aes(x = .data[[h]],
@@ -1658,7 +1658,7 @@ output$covariate_inputs <- renderUI({
             Variable = names(rel_importance$lmg),
             Contribution = rel_importance$lmg
           ) |>
-            left_join(dplyr::select(varlist, varname, label), 
+            left_join(select(varlist, varname, label), 
                       join_by("Variable" == "varname")) |>
             mutate(label = if_else(is.na(label),Variable,label))
           
@@ -1759,7 +1759,7 @@ output$covariate_inputs <- renderUI({
         sim_data <- augment(model_fit()[[3]], newdata = survey_weather()) |>
           filter(!is.na(.fitted)) |>
           mutate(month = month(timestamp)) |>
-          dplyr::select(code, year, survname, loc_id, hhid, weight, .resid,
+          select(code, year, survname, loc_id, hhid, weight, .resid,
                  any_of(colnames(model.frame(model_fit()[[3]]))), -timestamp, 
                  -starts_with("haz"), -any_of(c('log_welf', 'welf'))) |>
           left_join(mutate(loc_weather(), 
@@ -1777,10 +1777,10 @@ output$covariate_inputs <- renderUI({
       
       sim_weather <- reactive({
         mod_weather <- model.frame(model_fit()[[3]]) |>
-          dplyr::select(starts_with("haz_")) |> 
+          select(starts_with("haz_")) |> 
           mutate(type = "Model fit")
         hist_weather <- welf_sim() |>
-          dplyr::select(starts_with("haz_")) |> 
+          select(starts_with("haz_")) |> 
           mutate(type = "Historical")
         sim_weather <- bind_rows(mod_weather, hist_weather)
         return(sim_weather)
