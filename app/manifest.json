@@ -545,6 +545,32 @@
         "RemoteSha": "4.6.0-1"
       }
     },
+    "boot": {
+      "Source": "CRAN",
+      "Repository": "https://packagemanager.posit.co/cran/latest",
+      "description": {
+        "Package": "boot",
+        "Priority": "recommended",
+        "Version": "1.3-31",
+        "Date": "2024-08-28",
+        "Authors@R": "c(person(\"Angelo\", \"Canty\", role = \"aut\",\n\t             email = \"cantya@mcmaster.ca\", \n                     comment = \"author of original code for S\"),\n             person(\"Brian\", \"Ripley\", role = c(\"aut\", \"trl\"),\n                    email = \"ripley@stats.ox.ac.uk\",\n\t\t    comment = \"conversion to R, maintainer 1999--2022, author of parallel support\"),\n             person(\"Alessandra R.\", \"Brazzale\", role = c(\"ctb\", \"cre\"),\n                    email = \"brazzale@stat.unipd.it\",\n\t\t    comment = \"minor bug fixes\"))",
+        "Maintainer": "Alessandra R. Brazzale <brazzale@stat.unipd.it>",
+        "Note": "Maintainers are not available to give advice on using a package\nthey did not author.",
+        "Description": "Functions and datasets for bootstrapping from the\n  book \"Bootstrap Methods and Their Application\" by A. C. Davison and \n  D. V. Hinkley (1997, CUP), originally written by Angelo Canty for S.",
+        "Title": "Bootstrap Functions (Originally by Angelo Canty for S)",
+        "Depends": "R (>= 3.0.0), graphics, stats",
+        "Suggests": "MASS, survival",
+        "LazyData": "yes",
+        "ByteCompile": "yes",
+        "License": "Unlimited",
+        "NeedsCompilation": "no",
+        "Packaged": "2024-08-28 08:17:05 UTC; brazzale",
+        "Author": "Angelo Canty [aut] (author of original code for S),\n  Brian Ripley [aut, trl] (conversion to R, maintainer 1999--2022, author\n    of parallel support),\n  Alessandra R. Brazzale [ctb, cre] (minor bug fixes)",
+        "Repository": "CRAN",
+        "Date/Publication": "2024-08-28 13:20:02 UTC",
+        "Built": "R 4.5.1; ; 2025-06-14 01:30:34 UTC; unix"
+      }
+    },
     "broom": {
       "Source": "CRAN",
       "Repository": "https://packagemanager.posit.co/cran/latest",
@@ -880,6 +906,27 @@
         "RemoteReposName": "CRAN",
         "RemotePkgPlatform": "aarch64-apple-darwin20",
         "RemoteSha": "0.19-4.1"
+      }
+    },
+    "codetools": {
+      "Source": "CRAN",
+      "Repository": "https://packagemanager.posit.co/cran/latest",
+      "description": {
+        "Package": "codetools",
+        "Version": "0.2-20",
+        "Priority": "recommended",
+        "Author": "Luke Tierney <luke-tierney@uiowa.edu>",
+        "Description": "Code analysis tools for R.",
+        "Title": "Code Analysis Tools for R",
+        "Depends": "R (>= 2.1)",
+        "Maintainer": "Luke Tierney <luke-tierney@uiowa.edu>",
+        "URL": "https://gitlab.com/luke-tierney/codetools",
+        "License": "GPL",
+        "NeedsCompilation": "no",
+        "Packaged": "2024-03-31 18:18:09 UTC; luke",
+        "Repository": "CRAN",
+        "Date/Publication": "2024-03-31 20:10:06 UTC",
+        "Built": "R 4.5.1; ; 2025-06-14 01:29:47 UTC; unix"
       }
     },
     "collections": {
@@ -1844,6 +1891,42 @@
         "Date/Publication": "2024-09-30 22:30:01 UTC",
         "Built": "R 4.5.0; aarch64-apple-darwin20; 2025-03-31 21:41:36 UTC; unix",
         "Archs": "glue.so.dSYM"
+      }
+    },
+    "grpreg": {
+      "Source": "CRAN",
+      "Repository": "https://packagemanager.posit.co/cran/latest",
+      "description": {
+        "Package": "grpreg",
+        "Title": "Regularization Paths for Regression Models with Grouped\nCovariates",
+        "Version": "3.5.0",
+        "Date": "2024-09-03",
+        "Authors@R": "c(\n  person(\"Patrick\", \"Breheny\", role=c(\"aut\",\"cre\"), email=\"patrick-breheny@uiowa.edu\", comment=c(ORCID=\"0000-0002-0650-1119\")),\n  person(\"Yaohui\", \"Zeng\", role=\"ctb\"),\n  person(\"Ryan\", \"Kurth\", role=\"ctb\"))",
+        "Depends": "R (>= 3.1.0)",
+        "Imports": "Matrix",
+        "Suggests": "knitr, rmarkdown, splines, survival, tinytest",
+        "VignetteBuilder": "knitr",
+        "Description": "Efficient algorithms for fitting the regularization path of linear\n  regression, GLM, and Cox regression models with grouped penalties.  This\n  includes group selection methods such as group lasso, group MCP, and\n  group SCAD as well as bi-level selection methods such as the group\n  exponential lasso, the composite MCP, and the group bridge.  For more\n  information, see Breheny and Huang (2009) <doi:10.4310/sii.2009.v2.n3.a10>,\n  Huang, Breheny, and Ma (2012) <doi:10.1214/12-sts392>, Breheny and Huang\n  (2015) <doi:10.1007/s11222-013-9424-2>, and Breheny (2015)\n  <doi:10.1111/biom.12300>, or visit the package homepage\n  <https://pbreheny.github.io/grpreg/>.",
+        "BugReports": "https://github.com/pbreheny/grpreg/issues",
+        "License": "GPL-3",
+        "URL": "https://pbreheny.github.io/grpreg/,\nhttps://github.com/pbreheny/grpreg",
+        "LazyData": "TRUE",
+        "RoxygenNote": "7.3.2",
+        "Encoding": "UTF-8",
+        "NeedsCompilation": "yes",
+        "Packaged": "2024-09-03 15:37:26 UTC; pbreheny",
+        "Author": "Patrick Breheny [aut, cre] (<https://orcid.org/0000-0002-0650-1119>),\n  Yaohui Zeng [ctb],\n  Ryan Kurth [ctb]",
+        "Maintainer": "Patrick Breheny <patrick-breheny@uiowa.edu>",
+        "Repository": "RSPM",
+        "Date/Publication": "2024-09-03 17:00:02 UTC",
+        "Built": "R 4.5.0; x86_64-pc-linux-gnu; 2025-04-09 06:04:58 UTC; unix",
+        "RemoteType": "standard",
+        "RemoteRef": "grpreg",
+        "RemotePkgRef": "grpreg",
+        "RemoteRepos": "https://packagemanager.posit.co/cran/latest",
+        "RemoteReposName": "CRAN",
+        "RemotePkgPlatform": "aarch64-apple-darwin20",
+        "RemoteSha": "3.5.0"
       }
     },
     "gtable": {
@@ -4394,6 +4477,33 @@
         "RemoteSha": "4.4-2"
       }
     },
+    "survival": {
+      "Source": "CRAN",
+      "Repository": "https://packagemanager.posit.co/cran/latest",
+      "description": {
+        "Title": "Survival Analysis",
+        "Priority": "recommended",
+        "Package": "survival",
+        "Version": "3.8-3",
+        "Date": "2024-12-17",
+        "Depends": "R (>= 3.5.0)",
+        "Imports": "graphics, Matrix, methods, splines, stats, utils",
+        "LazyData": "Yes",
+        "LazyDataCompression": "xz",
+        "ByteCompile": "Yes",
+        "Authors@R": "c(person(c(\"Terry\", \"M\"), \"Therneau\",\n                    email=\"therneau.terry@mayo.edu\",\n\t            role=c(\"aut\", \"cre\")),\n               person(\"Thomas\", \"Lumley\", role=c(\"ctb\", \"trl\"),\n\t       comment=\"original S->R port and R maintainer until 2009\"),\n\t       person(\"Atkinson\", \"Elizabeth\", role=\"ctb\"),\n\t       person(\"Crowson\", \"Cynthia\", role=\"ctb\"))",
+        "Description": "Contains the core survival analysis routines, including\n\t     definition of Surv objects, \n\t     Kaplan-Meier and Aalen-Johansen (multi-state) curves, Cox models,\n\t     and parametric accelerated failure time models.",
+        "License": "LGPL (>= 2)",
+        "URL": "https://github.com/therneau/survival",
+        "NeedsCompilation": "yes",
+        "Packaged": "2024-12-17 16:37:18 UTC; therneau",
+        "Author": "Terry M Therneau [aut, cre],\n  Thomas Lumley [ctb, trl] (original S->R port and R maintainer until\n    2009),\n  Atkinson Elizabeth [ctb],\n  Crowson Cynthia [ctb]",
+        "Maintainer": "Terry M Therneau <therneau.terry@mayo.edu>",
+        "Repository": "CRAN",
+        "Date/Publication": "2024-12-17 20:20:02 UTC",
+        "Built": "R 4.5.1; aarch64-apple-darwin20; 2025-06-14 01:30:21 UTC; unix"
+      }
+    },
     "svglite": {
       "Source": "CRAN",
       "Repository": "https://packagemanager.posit.co/cran/latest",
@@ -5276,7 +5386,7 @@
   },
   "files": {
     ".Rprofile": {
-      "checksum": "d5de222db1aa48dc43008dff05c5a0e7"
+      "checksum": "d52b225a480f1b0c1cbbd6f3abb5d67e"
     },
     "data/pins/GNB_2018_H3/20250806T072709Z-d97d3/data.txt": {
       "checksum": "22e6e46a3afc20d26d507e27f3d74fa0"
@@ -5390,7 +5500,7 @@
       "checksum": "174abae6d152992af153aaf9fb0ea0e9"
     },
     "global.R": {
-      "checksum": "0e879524240086ebc55a35ed977ba3e9"
+      "checksum": "4d4907a893512eefe81987cecfd3e655"
     },
     "R/authorize.R": {
       "checksum": "462ec87a89aa7ffcee5818eb9460def8"
@@ -5399,13 +5509,13 @@
       "checksum": "c7d992530577391fa676560324026ab1"
     },
     "renv.lock": {
-      "checksum": "4d4213da7e2631bda5af56707be38d69"
+      "checksum": "e701bed25d70d0fa71020ce17a6c7a8c"
     },
     "server.R": {
-      "checksum": "63eaf19c240f80a46527c197edfd6bae"
+      "checksum": "5f496cd70dbee176343298c330ad10eb"
     },
     "ui.R": {
-      "checksum": "900e0a7af483d7bdaa557adf77a66f35"
+      "checksum": "cf37f33513d5becd68a7cfe9e446d68b"
     }
   },
   "users": null
