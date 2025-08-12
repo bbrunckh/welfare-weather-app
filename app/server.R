@@ -1091,9 +1091,14 @@ server <- function(input, output, session) {
   
   fe_varlist <- reactive({
     req(input$country)
-    fe_exclude <- c("countryname", "survname","hhid","psu","strata")
-    filter(varlist, wiseapp == "ID & Fixed effects") |>
-    select(varname, label) |> filter(varname %in% colnames(survey_weather()) & !varname %in% fe_exclude)
+    fe_include <- c("year", "int_year", "int_month", "int_day", "int_date", 
+                    "timestamp", "ADM1CD_c", "ADM2CD_c", "h3_loc_id", "eFUA_ID", 
+                    "ID_UC_G0", "urb_id", "fbcz_id_num")
+    if (length(input$country > 1)) fe_include <- c("code", fe_include)
+    filter(varlist, wiseapp == "ID & Fixed effects",
+           varname %in% fe_include,
+           varname %in% colnames(survey_weather())) |>
+    select(varname, label)
   })
   
   # Model types conditional on whether the selected welfare outcome is continuous or binary
@@ -1155,7 +1160,7 @@ output$model_specs_ui <- renderUI({
         "fixedeffects",
         label   = "Fixed effects",
         choices = fe_varlist()$label,
-        selected = "",
+        selected = filter(fe_varlist(),varname=="ADM1CD_c") |> pull(label),
         multiple = TRUE
       ),
       radioButtons(
@@ -1756,11 +1761,32 @@ output$covariate_inputs <- renderUI({
         req(model_fit())
         
         # merge weather data for different years
-        sim_data <- augment(model_fit()[[3]], newdata = survey_weather()) |>
+        
+        newdata <- survey_weather() 
+        model <- model_fit()[[3]]
+          # Get the names of all factor predictors from the model object
+          factor_predictors <- names(model$xlevels) 
+        
+            # Loop through each factor predictor
+            for (var_name in factor_predictors) {
+              
+              # Check if this factor exists in the new data before trying to modify it
+              if (var_name %in% names(newdata)) {
+                
+                # Get the levels that the model was trained on for this variable
+                training_levels <- model$xlevels[[var_name]]
+                
+              # Coerce the corresponding column in the new data to a factor with
+                # the same levels as the training data.
+              newdata[[var_name]] <- factor(newdata[[var_name]], levels = training_levels)
+          }
+        }
+        
+        sim_data <- augment(model, newdata = newdata) |>
           filter(!is.na(.fitted)) |>
           mutate(month = month(timestamp)) |>
           select(code, year, survname, loc_id, hhid, weight, .resid,
-                 any_of(colnames(model.frame(model_fit()[[3]]))), -timestamp, 
+                 any_of(colnames(model.frame(model))), -timestamp, 
                  -starts_with("haz"), -any_of(c('log_welf', 'welf'))) |>
           left_join(mutate(loc_weather(), 
                            month = month(timestamp), 
