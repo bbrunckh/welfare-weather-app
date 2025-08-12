@@ -531,7 +531,6 @@ server <- function(input, output, session) {
       # --- Start of UI block for one weather variable ---
 
       tagList( # Added tagList to group the button and its conditional panel
-        hr(),
         p(paste0(current_var_name, ":")),
         actionButton(
           paste0(id_prefix, "toggle"),
@@ -631,8 +630,7 @@ server <- function(input, output, session) {
     # do.call is essential here to unpack the list of tagLists into individual arguments for tagList()
     tagList(
       do.call(tagList, ui_list),
-      hr(),
-      actionButton("weather_stats", "Weather stats")
+      hr()
     )
   })
 
@@ -910,7 +908,7 @@ server <- function(input, output, session) {
   # Observer for "Weather stats" button
   observeEvent(input$weather_stats,
     {
-      req(input$weather_stats > 0) # Ensure the button has been clicked
+      req(input$weather_stats > 0, survey_tab_added()) # Ensure the button has been clicked
       
       # Weather distribution plots
       
@@ -1097,6 +1095,8 @@ server <- function(input, output, session) {
     filter(varlist, wiseapp == "ID & Fixed effects") |>
     dplyr::select(varname, label) |> filter(varname %in% colnames(survey_weather()) & !varname %in% fe_exclude)
   })
+  
+  # Model types conditional on whether the selected welfare outcome is continuous or binary
   output$model_selector_ui <- renderUI({
     
     req(input$welfare_outcome) # Ensure an outcome is selected
@@ -1120,21 +1120,26 @@ server <- function(input, output, session) {
     }
     
     # Create the radio buttons with the determined choices
-    radioButtons(
+    tagList(
+      p(paste0("A ", tolower(outcome_type), " welfare outcome is selected."),
+        style = "font-size: 12px;"),
+      radioButtons(
       inputId = "model_type", # The ID for the new input
       label = label_text,
       choices = model_choices
     )
+    )
   })
   
 output$model_specs_ui <- renderUI({
-  req(input$country, input$weather_variable_selector)
+  req(input$country, input$weather_variable_selector, input$model_type)
 
   conditionalPanel(
-    condition = "input.model_covariates % 2 == 1",
+    condition = "input.model_specs % 2 == 1",
     withMathJax(),
+    
+    if (input$model_type %in% c("Linear regression", "Logistic regression")){
     tagList(
-
       ## static widgets shown for both model types -------------------------
       selectizeInput(
         "interactions",
@@ -1146,7 +1151,6 @@ output$model_specs_ui <- renderUI({
         multiple = TRUE,
         options  = list(maxItems = 1)
       ),
-
       selectizeInput(
         "fixedeffects",
         label   = "Fixed effects",
@@ -1154,27 +1158,25 @@ output$model_specs_ui <- renderUI({
         selected = "",
         multiple = TRUE
       ),
-
       radioButtons(
         "covariates",
         "Covariate selection:",
         choices  = c("User-defined", "Lasso"),
-        selected = isolate(input$covariates) %||% "User-defined"
+        selected = "User-defined"
       ),
-
-      ## widgets that depend on the chosen model ---------------------------
-      uiOutput("model_specific_inputs")   # rendered below
+      helpText("Lasso variable selection is yet to be implemented.",
+               style = "color: red; font-size: 12px;"),
+      uiOutput("covariate_inputs"),
     )
+    } # else if input$model_type %in% c("Extreme Gradient Boosting")) {
   )
 })
 
 # second renderUI produces only the model-specific widgets
-output$model_specific_inputs <- renderUI({
-  req(input$covariates)
-
-  withMathJax(               # ⟵ one wrapper is enough
-    if (input$model_type %in% c("Linear regression", "Logistic regression")) {
-
+output$covariate_inputs <- renderUI({
+  req(input$covariates, input$interactions)
+  withMathJax( 
+    if (input$covariates == "User-defined") {
       tagList(
         selectizeInput(
           "hhcov",
@@ -1188,19 +1190,17 @@ output$model_specific_inputs <- renderUI({
           label   = "Area characteristics \\(E_{kt}\\)",
           choices = area_varlist()$label,
           selected = area_varlist() |>
-                     dplyr::filter(varname == "area_h3_7") |>
-                     dplyr::pull(label),
+            dplyr::filter(varname == "area_h3_7") |>
+            dplyr::pull(label),
           multiple = TRUE
         )
       )
-
     } else if (input$covariates == "Lasso") {
-
-      helpText("No manual covariate selection needed: Lasso decides automatically.", 
-               style = "font-size: 12px;")
-      helpText("Automatically selected variables will be shown in model results.", 
-               style = "font-size: 12px;")
-
+      tagList(
+        helpText("Placeholder for Lasso variable selection parameters.", 
+                 style = "font-size: 12px;"),
+        actionButton("run_lasso", "Run Lasso")
+      )
     }
   )
 })
@@ -1264,7 +1264,7 @@ output$model_specific_inputs <- renderUI({
         #   fe <- paste0("(", paste(fe, collapse = " * "),")")
         #   }
 
-        if (input$covariates == "User-defined"){
+        if (input$covariates %in% c("User-defined", "Lasso")){
         
           # survey variables
           hh_cov <- filter(varlist, label %in% input$hhcov) |> pull(varname)
@@ -1273,75 +1273,76 @@ output$model_specific_inputs <- renderUI({
           # construct formulas
           main_effects <- paste(c(weather_vars, hh_cov, area_cov, fe), collapse = " + ")
 
-        } else if (input$covariates == "Lasso") {
-
-          ## 1) Residual model (weather + interactions + FE)
-          f_resid <- as.formula(paste(
-            out, "~", paste(c(weather_vars, interaction_terms, fe), collapse = " + ")
-          ))
-          fit_resid <- if (out == "poor") glm(f_resid, data = survey_weather(), family = "binomial")
-                      else               lm (f_resid, data = survey_weather())
-
-          ## 2) Rows actually used by the residual fit
-          df_all   <- as.data.frame(survey_weather())
-          mf       <- model.frame(fit_resid)                # has the same rownames the fit used
-          used_ids <- rownames(mf)
-          idx      <- match(used_ids, rownames(df_all))     # robust even if rownames aren't 1..N
-          df_used  <- df_all[idx, , drop = FALSE]
-          y_res    <- residuals(fit_resid, type = "response")[idx]
-
-          ## 3) Only candidate control columns (hh + area)
-          hh_cov   <- intersect(hh_varlist()$varname,   colnames(df_used))
-          area_cov <- intersect(area_varlist()$varname, colnames(df_used))
-          ctrl_pool <- intersect(c(hh_cov, area_cov), colnames(df_used))
-
-          ## 4) Drop columns with low non-missing proportion, computed on *used rows*
-          na_thr       <- 0.80   # keep cols with ≥ 80% non-missing
-          prop_nonmiss <- sapply(df_used[ , ctrl_pool, drop = FALSE], function(x) mean(!is.na(x)))
-          keep_cols    <- names(prop_nonmiss[prop_nonmiss >= na_thr])
-
-          ## Guard: if nothing passes, keep_cols is character(0)
-          df_ <- df_used[ , keep_cols, drop = FALSE]
-
-          ## 6) Drop any remaining rows with NA in controls OR y_res
-          ok   <- stats::complete.cases(df_) & !is.na(y_res)
-          df_  <- df_[ok, , drop = FALSE]
-          y_res <- y_res[ok]
-
-          ## 7) Build model matrix and groups for Lasso
-          X_ctrl  <- model.matrix(~ -1 + ., data = df_)
-          cn <- colnames(X_ctrl)
-          # TODO: Check for zero-variance cols
-
-          # match groups on fuzzy colnames because of expansion into dummy cols for X_ctrl
-          safe_pat <- function(vars) {
-            if (!length(vars)) return(NULL)
-            roots <- make.names(vars)                                   
-            esc   <- gsub("([.^$|()*+?{}\\[\\]\\\\])", "\\\\\\1", roots)
-            paste0("^(", paste0(esc, collapse = "|"), ")")              
-          }
-
-          pat_hh   <- safe_pat(hh_cov)
-          pat_area <- safe_pat(area_cov)
-
-          is_hh   <- if (!is.null(pat_hh))   grepl(pat_hh,   cn) else rep(FALSE, length(cn))
-          is_area <- if (!is.null(pat_area)) grepl(pat_area, cn) else rep(FALSE, length(cn))
-
-          grp_ctrl <- ifelse(is_hh, 1L, ifelse(is_area, 2L, NA_integer_))
-        
-          ## 8) cross-validated group-lasso ------------------------------
-          cv_ctrl <- cv.grpreg(X_ctrl, y_res,
-                              group  = grp_ctrl,
-                              family = if (out == "poor") "gaussian" else "gaussian", # residuals are continuous always
-                              seed   = 42)
-
-          keep <- rownames(coef(cv_ctrl, s = "lambda.min"))[-1]   # drop intercept
-          keep <- keep[coef(cv_ctrl, s = "lambda.min")[-1] != 0]
-
-          main_effects <- paste(c(weather_vars, keep, fe), collapse = " + ")
-          # TODO: Check why Lasso drops all covariates
-
-        } # else if (input$covariates == "XGBoost"){
+        } 
+        # else if (input$covariates == "Lasso") {
+        # 
+        #   ## 1) Residual model (weather + interactions + FE)
+        #   f_resid <- as.formula(paste(
+        #     out, "~", paste(c(weather_vars, interaction_terms, fe), collapse = " + ")
+        #   ))
+        #   fit_resid <- if (out == "poor") glm(f_resid, data = survey_weather(), family = "binomial")
+        #               else               lm (f_resid, data = survey_weather())
+        # 
+        #   ## 2) Rows actually used by the residual fit
+        #   df_all   <- as.data.frame(survey_weather())
+        #   mf       <- model.frame(fit_resid)                # has the same rownames the fit used
+        #   used_ids <- rownames(mf)
+        #   idx      <- match(used_ids, rownames(df_all))     # robust even if rownames aren't 1..N
+        #   df_used  <- df_all[idx, , drop = FALSE]
+        #   y_res    <- residuals(fit_resid, type = "response")[idx]
+        # 
+        #   ## 3) Only candidate control columns (hh + area)
+        #   hh_cov   <- intersect(hh_varlist()$varname,   colnames(df_used))
+        #   area_cov <- intersect(area_varlist()$varname, colnames(df_used))
+        #   ctrl_pool <- intersect(c(hh_cov, area_cov), colnames(df_used))
+        # 
+        #   ## 4) Drop columns with low non-missing proportion, computed on *used rows*
+        #   na_thr       <- 0.80   # keep cols with ≥ 80% non-missing
+        #   prop_nonmiss <- sapply(df_used[ , ctrl_pool, drop = FALSE], function(x) mean(!is.na(x)))
+        #   keep_cols    <- names(prop_nonmiss[prop_nonmiss >= na_thr])
+        # 
+        #   ## Guard: if nothing passes, keep_cols is character(0)
+        #   df_ <- df_used[ , keep_cols, drop = FALSE]
+        # 
+        #   ## 6) Drop any remaining rows with NA in controls OR y_res
+        #   ok   <- stats::complete.cases(df_) & !is.na(y_res)
+        #   df_  <- df_[ok, , drop = FALSE]
+        #   y_res <- y_res[ok]
+        # 
+        #   ## 7) Build model matrix and groups for Lasso
+        #   X_ctrl  <- model.matrix(~ -1 + ., data = df_)
+        #   cn <- colnames(X_ctrl)
+        #   # TODO: Check for zero-variance cols
+        # 
+        #   # match groups on fuzzy colnames because of expansion into dummy cols for X_ctrl
+        #   safe_pat <- function(vars) {
+        #     if (!length(vars)) return(NULL)
+        #     roots <- make.names(vars)                                   
+        #     esc   <- gsub("([.^$|()*+?{}\\[\\]\\\\])", "\\\\\\1", roots)
+        #     paste0("^(", paste0(esc, collapse = "|"), ")")              
+        #   }
+        # 
+        #   pat_hh   <- safe_pat(hh_cov)
+        #   pat_area <- safe_pat(area_cov)
+        # 
+        #   is_hh   <- if (!is.null(pat_hh))   grepl(pat_hh,   cn) else rep(FALSE, length(cn))
+        #   is_area <- if (!is.null(pat_area)) grepl(pat_area, cn) else rep(FALSE, length(cn))
+        # 
+        #   grp_ctrl <- ifelse(is_hh, 1L, ifelse(is_area, 2L, NA_integer_))
+        # 
+        #   ## 8) cross-validated group-lasso ------------------------------
+        #   cv_ctrl <- cv.grpreg(X_ctrl, y_res,
+        #                       group  = grp_ctrl,
+        #                       family = if (out == "poor") "gaussian" else "gaussian", # residuals are continuous always
+        #                       seed   = 42)
+        # 
+        #   keep <- rownames(coef(cv_ctrl, s = "lambda.min"))[-1]   # drop intercept
+        #   keep <- keep[coef(cv_ctrl, s = "lambda.min")[-1] != 0]
+        # 
+        #   main_effects <- paste(c(weather_vars, keep, fe), collapse = " + ")
+        #   # TODO: Check why Lasso drops all covariates
+        # 
+        # } # else if (input$covariates == "XGBoost"){
         #   
         # }
         

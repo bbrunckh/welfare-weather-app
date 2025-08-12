@@ -58,7 +58,8 @@ ui <- navbarPage(
               helpText("Continous outcomes ($/day) are log transformed. Binary outcomes (Poor...) define the poverty status of a household.", 
                        style = "font-size: 12px;"),
               
-              actionButton("survey_stats", "Survey stats")
+              actionButton("survey_stats", "Survey stats", 
+                           style = "width: 100%;")
             )
           ) |>
           bs_append(
@@ -73,20 +74,26 @@ ui <- navbarPage(
                 options = list(maxItems = 2)
               ),
               uiOutput("weather_construction_ui"), # Conditional on weather variable
-              hr(),
+              actionButton("weather_stats", "Weather stats", 
+                           style = "width: 100%;"),
+              br(),br(),
+              uiOutput("dowload_weather_data"),
               # Single button to show/hide download options
+              conditionalPanel(
+                condition = "input.weather_stats % 2 == 1",
               actionButton(
                 "show_download_weather", 
-                "Download merged data",
+                "Download data",
                 class = "btn-primary mb-3",
                 style = "width: 100%;"
+              )
               ),
               # Conditional panel that appears when download button is clicked
               conditionalPanel(
                 condition = "input.show_download_weather % 2 == 1",
                 div(
-                  style = "border: 1px solid #dee2e6; border-radius: 0.375rem; padding: 15px; background-color: #f8f9fa;",
-                  h5("Choose Format:", style = "margin-bottom: 15px;"),
+                  style = "border: 1px solid #dee2e6; border-radius: 0.375rem; padding: 5px; background-color: #f8f9fa;",
+                  h5("Choose Format:", style = "margin-bottom: 5px;"),
                   
                   # Format selection radio buttons
                   radioButtons(
@@ -104,8 +111,10 @@ ui <- navbarPage(
                     "download_file", 
                     "Download",
                     class = "btn-success",
-                    style = "width: 100%; margin-top: 10px;"
-                  )
+                    style = "width: 100%; margin-top: 2px;"
+                  ),
+                  helpText("Downloads household level microdata with the specified weather variable(s).", 
+                           style = "font-size: 12px;"),
                 )
               ),
             )
@@ -114,24 +123,23 @@ ui <- navbarPage(
             title = "4 Model",
             content = tagList(
               uiOutput("model_selector_ui"),
+              actionButton("model_specs", "Model parameters",  style = "margin-bottom:12px;"), 
+              uiOutput("model_specs_ui"),
               helpText("Extreme gradient boosting and random forest models are yet to be implemented.", 
                        style = "color: red; font-size: 12px;"),
               hr(),
-              actionButton("model_covariates", "Model parameters",  style = "margin-bottom:12px;"), # Changed label for clarity
-              uiOutput("model_specs_ui"), # Conditional on survey data
-              hr(),
-              actionButton("run_model", "Run model"),
-              hr(),
-              helpText("Linear regression (OLS) will include all specified covariates.", 
-                       style = "font-size: 12px;"),
-              helpText(
-                "Lasso (Belloni & Chernozhukov, 2014) first removes the part of welfare already",
-                "explained by weather, interactions and chosen fixed effects, then runs a",
-                "group-lasso on the residuals to pick the household- and area-covariates that",
-                "still matter. Weather terms and the fixed-effect groups you chose are always",
-                "kept; only the remaining controls are selected automatically.", 
-                style = "font-size: 12px;"
-              ),
+              actionButton("run_model", "Run model",
+                           style = "width: 100%;"),
+              # helpText("Linear regression (OLS) will include all specified covariates.", 
+              #          style = "font-size: 12px;"),
+              # helpText(
+              #   "Lasso (Belloni & Chernozhukov, 2014) first removes the part of welfare already",
+              #   "explained by weather, interactions and chosen fixed effects, then runs a",
+              #   "group-lasso on the residuals to pick the household- and area-covariates that",
+              #   "still matter. Weather terms and the fixed-effect groups you chose are always",
+              #   "kept; only the remaining controls are selected automatically.", 
+              #   style = "font-size: 12px;"
+              # ),
               # helpText("XGBoost will use the extreme gradient boosting method, building an ensemble of decision trees considering all specified covariates. SHAP (SHapley Additive exPlanations) are used to interpret the results. They explain how much each variable contributes to the predicted outcome.")
               br(),
               # helpText("To be added:"),
@@ -184,8 +192,10 @@ ui <- navbarPage(
           #                         "No"),
           #             selected = "Yes"
           #             ),
+          # Options for residuals?
           hr(),
-          actionButton("run_sim", "Run simulation")
+          actionButton("run_sim", "Run simulation",
+                       style = "width: 100%;")
           )
           ) |>
             bs_append(
@@ -203,7 +213,7 @@ ui <- navbarPage(
                              choices = c("Delta"),
                              selected = "Delta"
                 ),
-                helpText("Delta: adds CMIP6 ensemble 'delta' fields to historical observations.", 
+                helpText("Adds CMIP6 ensemble 'delta' fields to historical observations.", 
                          style = "font-size: 12px;"),
                 sliderInput("yearRange_climate", 
                             "Period defining the distribution of weather in climate change scenario", 
@@ -213,7 +223,8 @@ ui <- navbarPage(
                             sep = ""
                 ),
                 hr(),
-                actionButton("run_climate_sim", "Run climate simulation")
+                actionButton("run_climate_sim", "Run climate simulation",
+                             style = "width: 100%;")
               )
             ) 
           ),
@@ -330,19 +341,20 @@ ui <- navbarPage(
                              choices = c("Fixed",
                                          "Share of modelled welfare loss",
                                          "Share of modelled increase in poverty gap",
-                                         "Proportional to increase in poverty headcount"),
+                                         "Proportional to increase in poverty"),
                              selected = "Fixed"
                 ),
                 radioButtons("trigger_type",
-                             "Trigger",
-                             choices = c("Modelled welfare loss > x",
-                                         "Modelled increase in poverty gap > x",
-                                         "Modelled increase in poverty rate > x",
-                                         "Modelled increase in number of poor > x"),
-                             select = "Modelled increase in poverty rate > x"
+                             "Trigger type",
+                             choices = c("Return period of event ≥ x years",
+                                         "Modelled welfare loss ≥ x ",
+                                         "Modelled increase in poverty gap ≥ x",
+                                         "Modelled increase in poverty rate ≥ x",
+                                         "Modelled increase in number of poor ≥ x"),
+                             select = "Modelled increase in poverty rate ≥ x"
                 ),
                 radioButtons("trigger_value",
-                             "Trigger",
+                             "Trigger - return period",
                              choices = c("1-5 year (historical) event",
                                          "1-10 year (historical) event",
                                          "1-20 year (historical) event"),
@@ -351,16 +363,16 @@ ui <- navbarPage(
                 radioButtons("cash_targeting",
                              "Targeting",
                              choices = c("Universal",
-                                         "Poor",
-                                         "Poor - proportional to welfare",
-                                         "Poor - proportional to modelled welfare loss"),
+                                         "Poor at baseline",
+                                         "Expected to be poor at trigger",
+                                         "Geographic"),
                              selected = "Universal"
                 ),
-                
               )
             ),
           hr(),
-          actionButton("run_policy_sim", "Run policy experiment")
+          actionButton("run_policy_sim", "Run policy experiment",
+                       style = "width: 100%;")
         ),
         mainPanel(
           h3("Under development. Step 3 will be updated soon", 
