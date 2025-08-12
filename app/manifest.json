@@ -168,6 +168,36 @@
         "Built": "R 4.5.0; aarch64-apple-darwin20; 2025-04-11 20:16:02 UTC; unix"
       }
     },
+    "PKI": {
+      "Source": "CRAN",
+      "Repository": "https://packagemanager.posit.co/cran/latest",
+      "description": {
+        "Package": "PKI",
+        "Version": "0.1-14",
+        "Title": "Public Key Infrastucture for R Based on the X.509 Standard",
+        "Author": "Simon Urbanek <Simon.Urbanek@r-project.org>",
+        "Maintainer": "Simon Urbanek <Simon.Urbanek@r-project.org>",
+        "Depends": "R (>= 2.9.0), base64enc",
+        "Enhances": "gmp",
+        "Description": "Public Key Infrastucture functions such as verifying certificates, RSA encription and signing which can be used to build PKI infrastructure and perform cryptographic tasks.",
+        "License": "GPL-2 | GPL-3 | file LICENSE",
+        "URL": "http://www.rforge.net/PKI",
+        "SystemRequirements": "OpenSSL library and headers (openssl-dev or\nsimilar)",
+        "NeedsCompilation": "yes",
+        "Packaged": "2024-06-15 19:22:05 UTC; rforge",
+        "Repository": "RSPM",
+        "Date/Publication": "2024-06-15 19:40:02 UTC",
+        "Encoding": "UTF-8",
+        "Built": "R 4.5.0; x86_64-pc-linux-gnu; 2025-04-09 05:57:02 UTC; unix",
+        "RemoteType": "standard",
+        "RemoteRef": "PKI",
+        "RemotePkgRef": "PKI",
+        "RemoteRepos": "https://packagemanager.posit.co/cran/latest",
+        "RemoteReposName": "CRAN",
+        "RemotePkgPlatform": "aarch64-apple-darwin20",
+        "RemoteSha": "0.1-14"
+      }
+    },
     "R6": {
       "Source": "CRAN",
       "Repository": "https://packagemanager.posit.co/cran/latest",
@@ -230,8 +260,8 @@
       "description": {
         "Package": "Rcpp",
         "Title": "Seamless R and C++ Integration",
-        "Version": "1.1.0",
-        "Date": "2025-07-01",
+        "Version": "1.0.14",
+        "Date": "2025-01-11",
         "Authors@R": "c(person(\"Dirk\", \"Eddelbuettel\", role = c(\"aut\", \"cre\"), email = \"edd@debian.org\",\n                    comment = c(ORCID = \"0000-0001-6419-907X\")),\n             person(\"Romain\", \"Francois\", role = \"aut\",\n                    comment = c(ORCID = \"0000-0002-2444-4226\")),\n             person(\"JJ\", \"Allaire\", role = \"aut\",\n                    comment = c(ORCID = \"0000-0003-0174-9868\")),\n             person(\"Kevin\", \"Ushey\", role = \"aut\",\n                    comment = c(ORCID = \"0000-0003-2880-7407\")),\n             person(\"Qiang\", \"Kou\", role = \"aut\",\n                    comment = c(ORCID = \"0000-0001-6786-5453\")),\n             person(\"Nathan\", \"Russell\", role = \"aut\"),\n             person(\"Iñaki\", \"Ucar\", role = \"aut\",\n                    comment = c(ORCID = \"0000-0001-6403-5550\")),\n             person(\"Doug\", \"Bates\", role = \"aut\",\n                    comment = c(ORCID = \"0000-0001-8316-9503\")),\n             person(\"John\", \"Chambers\", role = \"aut\"))",
         "Description": "The 'Rcpp' package provides R functions as well as C++ classes which\n offer a seamless integration of R and C++. Many R data types and objects can be\n mapped back and forth to C++ equivalents which facilitates both writing of new\n code as well as easier integration of third-party libraries. Documentation\n about 'Rcpp' is provided by several vignettes included in this package, via the\n 'Rcpp Gallery' site at <https://gallery.rcpp.org>, the paper by Eddelbuettel and\n Francois (2011, <doi:10.18637/jss.v040.i08>), the book by Eddelbuettel (2013,\n <doi:10.1007/978-1-4614-6868-4>) and the paper by Eddelbuettel and Balamuta (2018,\n <doi:10.1080/00031305.2017.1375990>); see 'citation(\"Rcpp\")' for details.",
         "Imports": "methods, utils",
@@ -243,12 +273,12 @@
         "RoxygenNote": "6.1.1",
         "Encoding": "UTF-8",
         "NeedsCompilation": "yes",
-        "Packaged": "2025-07-01 12:58:41 UTC; edd",
-        "Author": "Dirk Eddelbuettel [aut, cre] (ORCID:\n    <https://orcid.org/0000-0001-6419-907X>),\n  Romain Francois [aut] (ORCID: <https://orcid.org/0000-0002-2444-4226>),\n  JJ Allaire [aut] (ORCID: <https://orcid.org/0000-0003-0174-9868>),\n  Kevin Ushey [aut] (ORCID: <https://orcid.org/0000-0003-2880-7407>),\n  Qiang Kou [aut] (ORCID: <https://orcid.org/0000-0001-6786-5453>),\n  Nathan Russell [aut],\n  Iñaki Ucar [aut] (ORCID: <https://orcid.org/0000-0001-6403-5550>),\n  Doug Bates [aut] (ORCID: <https://orcid.org/0000-0001-8316-9503>),\n  John Chambers [aut]",
+        "Packaged": "2025-01-11 20:21:25 UTC; edd",
+        "Author": "Dirk Eddelbuettel [aut, cre] (<https://orcid.org/0000-0001-6419-907X>),\n  Romain Francois [aut] (<https://orcid.org/0000-0002-2444-4226>),\n  JJ Allaire [aut] (<https://orcid.org/0000-0003-0174-9868>),\n  Kevin Ushey [aut] (<https://orcid.org/0000-0003-2880-7407>),\n  Qiang Kou [aut] (<https://orcid.org/0000-0001-6786-5453>),\n  Nathan Russell [aut],\n  Iñaki Ucar [aut] (<https://orcid.org/0000-0001-6403-5550>),\n  Doug Bates [aut] (<https://orcid.org/0000-0001-8316-9503>),\n  John Chambers [aut]",
         "Maintainer": "Dirk Eddelbuettel <edd@debian.org>",
         "Repository": "CRAN",
-        "Date/Publication": "2025-07-02 16:40:02 UTC",
-        "Built": "R 4.5.0; aarch64-apple-darwin20; 2025-07-04 07:28:39 UTC; unix",
+        "Date/Publication": "2025-01-12 16:10:02 UTC",
+        "Built": "R 4.5.0; aarch64-apple-darwin20; 2025-03-31 21:43:45 UTC; unix",
         "Archs": "Rcpp.so.dSYM"
       }
     },
@@ -259,8 +289,8 @@
         "Package": "RcppArmadillo",
         "Type": "Package",
         "Title": "'Rcpp' Integration for the 'Armadillo' Templated Linear Algebra\nLibrary",
-        "Version": "14.6.0-1",
-        "Date": "2025-07-02",
+        "Version": "14.4.3-1",
+        "Date": "2025-05-21",
         "Authors@R": "c(person(\"Dirk\", \"Eddelbuettel\", role = c(\"aut\", \"cre\"), email = \"edd@debian.org\",\n                    comment = c(ORCID = \"0000-0001-6419-907X\")),\n             person(\"Romain\", \"Francois\", role = \"aut\",\n                    comment = c(ORCID = \"0000-0002-2444-4226\")),\n             person(\"Doug\", \"Bates\", role = \"aut\",\n                    comment = c(ORCID = \"0000-0001-8316-9503\")),\n             person(\"Binxiang\", \"Ni\", role = \"aut\"),\n             person(\"Conrad\", \"Sanderson\", role = \"aut\",\n                    comment = c(ORCID = \"0000-0002-0049-4501\")))",
         "Description": "'Armadillo' is a templated C++ linear algebra library (by Conrad\n Sanderson) that aims towards a good balance between speed and ease of\n use. Integer, floating point and complex numbers are supported, as\n well as a subset of trigonometric and statistics functions. Various\n matrix decompositions are provided through optional integration with\n LAPACK and ATLAS libraries.  The 'RcppArmadillo' package includes the\n header files from the templated 'Armadillo' library. Thus users do\n not need to install 'Armadillo' itself in order to use\n 'RcppArmadillo'. From release 7.800.0 on, 'Armadillo' is licensed\n under Apache License 2; previous releases were under licensed as MPL\n 2.0 from version 3.800.0 onwards and LGPL-3 prior to that;\n 'RcppArmadillo' (the 'Rcpp' bindings/bridge to Armadillo) is licensed\n under the GNU GPL version 2 or later, as is the rest of 'Rcpp'.",
         "License": "GPL (>= 2)",
@@ -273,20 +303,56 @@
         "BugReports": "https://github.com/RcppCore/RcppArmadillo/issues",
         "RoxygenNote": "6.0.1",
         "NeedsCompilation": "yes",
-        "Packaged": "2025-07-02 13:16:08 UTC; edd",
+        "Packaged": "2025-05-21 08:29:11 UTC; edd",
         "Author": "Dirk Eddelbuettel [aut, cre] (ORCID:\n    <https://orcid.org/0000-0001-6419-907X>),\n  Romain Francois [aut] (ORCID: <https://orcid.org/0000-0002-2444-4226>),\n  Doug Bates [aut] (ORCID: <https://orcid.org/0000-0001-8316-9503>),\n  Binxiang Ni [aut],\n  Conrad Sanderson [aut] (ORCID: <https://orcid.org/0000-0002-0049-4501>)",
         "Maintainer": "Dirk Eddelbuettel <edd@debian.org>",
         "Repository": "RSPM",
-        "Date/Publication": "2025-07-02 20:10:06 UTC",
+        "Date/Publication": "2025-05-21 14:30:02 UTC",
         "Encoding": "UTF-8",
-        "Built": "R 4.5.0; x86_64-pc-linux-gnu; 2025-07-03 13:49:25 UTC; unix",
+        "Built": "R 4.5.0; x86_64-pc-linux-gnu; 2025-05-22 12:56:58 UTC; unix",
         "RemoteType": "standard",
         "RemoteRef": "RcppArmadillo",
         "RemotePkgRef": "RcppArmadillo",
         "RemoteRepos": "https://packagemanager.posit.co/cran/latest",
         "RemoteReposName": "CRAN",
         "RemotePkgPlatform": "aarch64-apple-darwin20",
-        "RemoteSha": "14.6.0-1"
+        "RemoteSha": "14.4.3-1"
+      }
+    },
+    "RcppTOML": {
+      "Source": "CRAN",
+      "Repository": "https://packagemanager.posit.co/cran/latest",
+      "description": {
+        "Package": "RcppTOML",
+        "Type": "Package",
+        "Title": "'Rcpp' Bindings to Parser for \"Tom's Obvious Markup Language\"",
+        "Version": "0.2.3",
+        "Date": "2025-03-08",
+        "Authors@R": "c(person(\"Dirk\", \"Eddelbuettel\", role = c(\"aut\", \"cre\"), email = \"edd@debian.org\",\n                    comment = c(ORCID = \"0000-0001-6419-907X\")),\n             person(\"Mark\", \"Gillard\", role = \"aut\",\n                    comment = \"Author of 'toml++' header library\"))",
+        "Description": "The configuration format defined by 'TOML' (which expands to\n \"Tom's Obvious Markup Language\") specifies an excellent format\n (described at <https://toml.io/en/>) suitable for both human editing\n as well as the common uses of a machine-readable format. This package\n uses 'Rcpp' to connect to the 'toml++' parser written by Mark Gillard\n to R.",
+        "SystemRequirements": "A C++17 compiler",
+        "BugReports": "https://github.com/eddelbuettel/rcpptoml/issues",
+        "URL": "http://dirk.eddelbuettel.com/code/rcpp.toml.html",
+        "Imports": "Rcpp (>= 1.0.8)",
+        "Depends": "R (>= 3.3.0)",
+        "LinkingTo": "Rcpp",
+        "Suggests": "tinytest",
+        "License": "GPL (>= 2)",
+        "NeedsCompilation": "yes",
+        "Packaged": "2025-03-08 13:54:57 UTC; edd",
+        "Author": "Dirk Eddelbuettel [aut, cre] (<https://orcid.org/0000-0001-6419-907X>),\n  Mark Gillard [aut] (Author of 'toml++' header library)",
+        "Maintainer": "Dirk Eddelbuettel <edd@debian.org>",
+        "Repository": "RSPM",
+        "Date/Publication": "2025-03-08 14:30:06 UTC",
+        "Encoding": "UTF-8",
+        "Built": "R 4.5.0; x86_64-pc-linux-gnu; 2025-04-09 05:53:12 UTC; unix",
+        "RemoteType": "standard",
+        "RemoteRef": "RcppTOML",
+        "RemotePkgRef": "RcppTOML",
+        "RemoteRepos": "https://packagemanager.posit.co/cran/latest",
+        "RemoteReposName": "CRAN",
+        "RemotePkgPlatform": "aarch64-apple-darwin20",
+        "RemoteSha": "0.2.3"
       }
     },
     "askpass": {
@@ -1058,7 +1124,7 @@
       "Repository": "https://packagemanager.posit.co/cran/latest",
       "description": {
         "Package": "data.table",
-        "Version": "1.17.8",
+        "Version": "1.17.6",
         "Title": "Extension of `data.frame`",
         "Depends": "R (>= 3.3.0)",
         "Imports": "methods",
@@ -1072,19 +1138,20 @@
         "ByteCompile": "TRUE",
         "Authors@R": "c(\n  person(\"Tyson\",\"Barrett\",        role=c(\"aut\",\"cre\"), email=\"t.barrett88@gmail.com\", comment = c(ORCID=\"0000-0002-2137-1391\")),\n  person(\"Matt\",\"Dowle\",           role=\"aut\",          email=\"mattjdowle@gmail.com\"),\n  person(\"Arun\",\"Srinivasan\",      role=\"aut\",          email=\"asrini@pm.me\"),\n  person(\"Jan\",\"Gorecki\",          role=\"aut\"),\n  person(\"Michael\",\"Chirico\",      role=\"aut\", comment = c(ORCID=\"0000-0003-0787-087X\")),\n  person(\"Toby\",\"Hocking\",         role=\"aut\", comment = c(ORCID=\"0000-0002-3146-0865\")),\n  person(\"Benjamin\",\"Schwendinger\",role=\"aut\", comment = c(ORCID=\"0000-0003-3315-8114\")),\n  person(\"Ivan\", \"Krylov\",         role=\"aut\",          email=\"ikrylov@disroot.org\",   comment = c(ORCID=\"0000-0002-0172-3812\")),\n  person(\"Pasha\",\"Stetsenko\",      role=\"ctb\"),\n  person(\"Tom\",\"Short\",            role=\"ctb\"),\n  person(\"Steve\",\"Lianoglou\",      role=\"ctb\"),\n  person(\"Eduard\",\"Antonyan\",      role=\"ctb\"),\n  person(\"Markus\",\"Bonsch\",        role=\"ctb\"),\n  person(\"Hugh\",\"Parsonage\",       role=\"ctb\"),\n  person(\"Scott\",\"Ritchie\",        role=\"ctb\"),\n  person(\"Kun\",\"Ren\",              role=\"ctb\"),\n  person(\"Xianying\",\"Tan\",         role=\"ctb\"),\n  person(\"Rick\",\"Saporta\",         role=\"ctb\"),\n  person(\"Otto\",\"Seiskari\",        role=\"ctb\"),\n  person(\"Xianghui\",\"Dong\",        role=\"ctb\"),\n  person(\"Michel\",\"Lang\",          role=\"ctb\"),\n  person(\"Watal\",\"Iwasaki\",        role=\"ctb\"),\n  person(\"Seth\",\"Wenchel\",         role=\"ctb\"),\n  person(\"Karl\",\"Broman\",          role=\"ctb\"),\n  person(\"Tobias\",\"Schmidt\",       role=\"ctb\"),\n  person(\"David\",\"Arenburg\",       role=\"ctb\"),\n  person(\"Ethan\",\"Smith\",          role=\"ctb\"),\n  person(\"Francois\",\"Cocquemas\",   role=\"ctb\"),\n  person(\"Matthieu\",\"Gomez\",       role=\"ctb\"),\n  person(\"Philippe\",\"Chataignon\",  role=\"ctb\"),\n  person(\"Nello\",\"Blaser\",         role=\"ctb\"),\n  person(\"Dmitry\",\"Selivanov\",     role=\"ctb\"),\n  person(\"Andrey\",\"Riabushenko\",   role=\"ctb\"),\n  person(\"Cheng\",\"Lee\",            role=\"ctb\"),\n  person(\"Declan\",\"Groves\",        role=\"ctb\"),\n  person(\"Daniel\",\"Possenriede\",   role=\"ctb\"),\n  person(\"Felipe\",\"Parages\",       role=\"ctb\"),\n  person(\"Denes\",\"Toth\",           role=\"ctb\"),\n  person(\"Mus\",\"Yaramaz-David\",    role=\"ctb\"),\n  person(\"Ayappan\",\"Perumal\",      role=\"ctb\"),\n  person(\"James\",\"Sams\",           role=\"ctb\"),\n  person(\"Martin\",\"Morgan\",        role=\"ctb\"),\n  person(\"Michael\",\"Quinn\",        role=\"ctb\"),\n  person(\"@javrucebo\",\"\",          role=\"ctb\"),\n  person(\"@marc-outins\",\"\",        role=\"ctb\"),\n  person(\"Roy\",\"Storey\",           role=\"ctb\"),\n  person(\"Manish\",\"Saraswat\",      role=\"ctb\"),\n  person(\"Morgan\",\"Jacob\",         role=\"ctb\"),\n  person(\"Michael\",\"Schubmehl\",    role=\"ctb\"),\n  person(\"Davis\",\"Vaughan\",        role=\"ctb\"),\n  person(\"Leonardo\",\"Silvestri\",   role=\"ctb\"),\n  person(\"Jim\",\"Hester\",           role=\"ctb\"),\n  person(\"Anthony\",\"Damico\",       role=\"ctb\"),\n  person(\"Sebastian\",\"Freundt\",    role=\"ctb\"),\n  person(\"David\",\"Simons\",         role=\"ctb\"),\n  person(\"Elliott\",\"Sales de Andrade\", role=\"ctb\"),\n  person(\"Cole\",\"Miller\",          role=\"ctb\"),\n  person(\"Jens Peder\",\"Meldgaard\", role=\"ctb\"),\n  person(\"Vaclav\",\"Tlapak\",        role=\"ctb\"),\n  person(\"Kevin\",\"Ushey\",          role=\"ctb\"),\n  person(\"Dirk\",\"Eddelbuettel\",    role=\"ctb\"),\n  person(\"Tony\",\"Fischetti\",       role=\"ctb\"),\n  person(\"Ofek\",\"Shilon\",          role=\"ctb\"),\n  person(\"Vadim\",\"Khotilovich\",    role=\"ctb\"),\n  person(\"Hadley\",\"Wickham\",       role=\"ctb\"),\n  person(\"Bennet\",\"Becker\",        role=\"ctb\"),\n  person(\"Kyle\",\"Haynes\",          role=\"ctb\"),\n  person(\"Boniface Christian\",\"Kamgang\", role=\"ctb\"),\n  person(\"Olivier\",\"Delmarcell\",   role=\"ctb\"),\n  person(\"Josh\",\"O'Brien\",         role=\"ctb\"),\n  person(\"Dereck\",\"de Mezquita\",   role=\"ctb\"),\n  person(\"Michael\",\"Czekanski\",    role=\"ctb\"),\n  person(\"Dmitry\", \"Shemetov\",     role=\"ctb\"),\n  person(\"Nitish\", \"Jha\",          role=\"ctb\"),\n  person(\"Joshua\", \"Wu\",           role=\"ctb\"),\n  person(\"Iago\", \"Giné-Vázquez\",   role=\"ctb\"),\n  person(\"Anirban\", \"Chetia\",      role=\"ctb\"),\n  person(\"Doris\", \"Amoakohene\",    role=\"ctb\"),\n  person(\"Angel\", \"Feliz\",         role=\"ctb\"),\n  person(\"Michael\",\"Young\",        role=\"ctb\"),\n  person(\"Mark\", \"Seeto\",          role=\"ctb\"),\n  person(\"Philippe\", \"Grosjean\",   role=\"ctb\"),\n  person(\"Vincent\", \"Runge\",       role=\"ctb\"),\n  person(\"Christian\", \"Wia\",       role=\"ctb\"),\n  person(\"Elise\", \"Maigné\",        role=\"ctb\"),\n  person(\"Vincent\", \"Rocher\",      role=\"ctb\"),\n  person(\"Vijay\", \"Lulla\",         role=\"ctb\"),\n  person(\"Aljaž\", \"Sluga\",         role=\"ctb\"),\n  person(\"Bill\", \"Evans\",          role=\"ctb\")\n  )",
         "NeedsCompilation": "yes",
-        "Packaged": "2025-07-07 16:02:15 UTC; root",
+        "Packaged": "2025-06-15 18:20:39 UTC; tysonbarrett",
         "Author": "Tyson Barrett [aut, cre] (ORCID:\n    <https://orcid.org/0000-0002-2137-1391>),\n  Matt Dowle [aut],\n  Arun Srinivasan [aut],\n  Jan Gorecki [aut],\n  Michael Chirico [aut] (ORCID: <https://orcid.org/0000-0003-0787-087X>),\n  Toby Hocking [aut] (ORCID: <https://orcid.org/0000-0002-3146-0865>),\n  Benjamin Schwendinger [aut] (ORCID:\n    <https://orcid.org/0000-0003-3315-8114>),\n  Ivan Krylov [aut] (ORCID: <https://orcid.org/0000-0002-0172-3812>),\n  Pasha Stetsenko [ctb],\n  Tom Short [ctb],\n  Steve Lianoglou [ctb],\n  Eduard Antonyan [ctb],\n  Markus Bonsch [ctb],\n  Hugh Parsonage [ctb],\n  Scott Ritchie [ctb],\n  Kun Ren [ctb],\n  Xianying Tan [ctb],\n  Rick Saporta [ctb],\n  Otto Seiskari [ctb],\n  Xianghui Dong [ctb],\n  Michel Lang [ctb],\n  Watal Iwasaki [ctb],\n  Seth Wenchel [ctb],\n  Karl Broman [ctb],\n  Tobias Schmidt [ctb],\n  David Arenburg [ctb],\n  Ethan Smith [ctb],\n  Francois Cocquemas [ctb],\n  Matthieu Gomez [ctb],\n  Philippe Chataignon [ctb],\n  Nello Blaser [ctb],\n  Dmitry Selivanov [ctb],\n  Andrey Riabushenko [ctb],\n  Cheng Lee [ctb],\n  Declan Groves [ctb],\n  Daniel Possenriede [ctb],\n  Felipe Parages [ctb],\n  Denes Toth [ctb],\n  Mus Yaramaz-David [ctb],\n  Ayappan Perumal [ctb],\n  James Sams [ctb],\n  Martin Morgan [ctb],\n  Michael Quinn [ctb],\n  @javrucebo [ctb],\n  @marc-outins [ctb],\n  Roy Storey [ctb],\n  Manish Saraswat [ctb],\n  Morgan Jacob [ctb],\n  Michael Schubmehl [ctb],\n  Davis Vaughan [ctb],\n  Leonardo Silvestri [ctb],\n  Jim Hester [ctb],\n  Anthony Damico [ctb],\n  Sebastian Freundt [ctb],\n  David Simons [ctb],\n  Elliott Sales de Andrade [ctb],\n  Cole Miller [ctb],\n  Jens Peder Meldgaard [ctb],\n  Vaclav Tlapak [ctb],\n  Kevin Ushey [ctb],\n  Dirk Eddelbuettel [ctb],\n  Tony Fischetti [ctb],\n  Ofek Shilon [ctb],\n  Vadim Khotilovich [ctb],\n  Hadley Wickham [ctb],\n  Bennet Becker [ctb],\n  Kyle Haynes [ctb],\n  Boniface Christian Kamgang [ctb],\n  Olivier Delmarcell [ctb],\n  Josh O'Brien [ctb],\n  Dereck de Mezquita [ctb],\n  Michael Czekanski [ctb],\n  Dmitry Shemetov [ctb],\n  Nitish Jha [ctb],\n  Joshua Wu [ctb],\n  Iago Giné-Vázquez [ctb],\n  Anirban Chetia [ctb],\n  Doris Amoakohene [ctb],\n  Angel Feliz [ctb],\n  Michael Young [ctb],\n  Mark Seeto [ctb],\n  Philippe Grosjean [ctb],\n  Vincent Runge [ctb],\n  Christian Wia [ctb],\n  Elise Maigné [ctb],\n  Vincent Rocher [ctb],\n  Vijay Lulla [ctb],\n  Aljaž Sluga [ctb],\n  Bill Evans [ctb]",
         "Maintainer": "Tyson Barrett <t.barrett88@gmail.com>",
-        "Repository": "RSPM",
-        "Date/Publication": "2025-07-10 10:30:05 UTC",
-        "Built": "R 4.5.0; x86_64-pc-linux-gnu; 2025-07-11 05:04:47 UTC; unix",
+        "Repository": "CRAN",
+        "Date/Publication": "2025-06-17 03:40:02 UTC",
+        "Built": "R 4.5.0; aarch64-apple-darwin20; 2025-06-17 03:54:50 UTC; unix",
+        "Archs": "data_table.so.dSYM",
         "RemoteType": "standard",
         "RemoteRef": "data.table",
         "RemotePkgRef": "data.table",
-        "RemoteRepos": "https://packagemanager.posit.co/cran/latest",
+        "RemoteRepos": "https://cloud.r-project.org",
         "RemoteReposName": "CRAN",
         "RemotePkgPlatform": "aarch64-apple-darwin20",
-        "RemoteSha": "1.17.8"
+        "RemoteSha": "1.17.6"
       }
     },
     "datawizard": {
@@ -1094,7 +1161,7 @@
         "Type": "Package",
         "Package": "datawizard",
         "Title": "Easy Data Wrangling and Statistical Transformations",
-        "Version": "1.2.0",
+        "Version": "1.1.0",
         "Authors@R": "c(\n    person(\"Indrajeet\", \"Patil\", , \"patilindrajeet.science@gmail.com\", role = \"aut\",\n           comment = c(ORCID = \"0000-0003-1995-6531\")),\n    person(\"Etienne\", \"Bacher\", , \"etienne.bacher@protonmail.com\", role = c(\"aut\", \"cre\"),\n           comment = c(ORCID = \"0000-0002-9271-5075\")),\n    person(\"Dominique\", \"Makowski\", , \"dom.makowski@gmail.com\", role = \"aut\",\n           comment = c(ORCID = \"0000-0001-5375-9967\")),\n    person(\"Daniel\", \"Lüdecke\", , \"d.luedecke@uke.de\", role = \"aut\",\n           comment = c(ORCID = \"0000-0002-8895-3206\")),\n    person(\"Mattan S.\", \"Ben-Shachar\", , \"matanshm@post.bgu.ac.il\", role = \"aut\",\n           comment = c(ORCID = \"0000-0002-4287-4801\")),\n    person(\"Brenton M.\", \"Wiernik\", , \"brenton@wiernik.org\", role = \"aut\",\n           comment = c(ORCID = \"0000-0001-9560-6336\")),\n    person(\"Rémi\", \"Thériault\", , \"remi.theriault@mail.mcgill.ca\", role = \"ctb\",\n           comment = c(ORCID = \"0000-0003-4315-6788\")),\n    person(\"Thomas J.\", \"Faulkenberry\", , \"faulkenberry@tarleton.edu\", role = \"rev\"),\n    person(\"Robert\", \"Garrett\", , \"rcg4@illinois.edu\", role = \"rev\")\n  )",
         "Maintainer": "Etienne Bacher <etienne.bacher@protonmail.com>",
         "Description": "A lightweight package to assist in key steps involved in any data\n    analysis workflow: (1) wrangling the raw data to get it in the needed form,\n    (2) applying preprocessing steps and statistical transformations, and\n    (3) compute statistical summaries of data properties and distributions.\n    It is also the data wrangling backend for packages in 'easystats' ecosystem.\n    References: Patil et al. (2022) <doi:10.21105/joss.04684>.",
@@ -1102,8 +1169,8 @@
         "URL": "https://easystats.github.io/datawizard/",
         "BugReports": "https://github.com/easystats/datawizard/issues",
         "Depends": "R (>= 4.0)",
-        "Imports": "insight (>= 1.3.1), stats, utils",
-        "Suggests": "bayestestR, boot, BH, brms, curl, data.table, dplyr (>= 1.1),\neffectsize, emmeans, gamm4, ggplot2 (>= 3.5.0), gt, haven,\nhttr, knitr, lme4, mediation, modelbased, nanoparquet,\nparameters (>= 0.21.7), performance (>= 0.14.0), poorman (>=\n0.2.7), psych, readxl, readr, rio, rmarkdown, rstanarm, see,\ntestthat (>= 3.2.1), tibble, tidyr, withr",
+        "Imports": "insight (>= 1.2.0), stats, utils",
+        "Suggests": "bayestestR, boot, BH, brms, curl, data.table, dplyr (>= 1.1),\neffectsize, emmeans, gamm4, ggplot2 (>= 3.5.0), gt, haven,\nhttr, knitr, lme4, mediation, modelbased, parameters (>=\n0.21.7), poorman (>= 0.2.7), psych, readxl, readr, rio,\nrmarkdown, rstanarm, see, testthat (>= 3.2.1), tibble, tidyr,\nwithr",
         "VignetteBuilder": "knitr",
         "Encoding": "UTF-8",
         "Language": "en-US",
@@ -1112,18 +1179,18 @@
         "Config/testthat/parallel": "true",
         "Config/Needs/website": "easystats/easystatstemplate",
         "NeedsCompilation": "no",
-        "Packaged": "2025-07-17 11:33:03 UTC; etienne",
+        "Packaged": "2025-05-09 16:54:52 UTC; etienne",
         "Author": "Indrajeet Patil [aut] (ORCID: <https://orcid.org/0000-0003-1995-6531>),\n  Etienne Bacher [aut, cre] (ORCID:\n    <https://orcid.org/0000-0002-9271-5075>),\n  Dominique Makowski [aut] (ORCID:\n    <https://orcid.org/0000-0001-5375-9967>),\n  Daniel Lüdecke [aut] (ORCID: <https://orcid.org/0000-0002-8895-3206>),\n  Mattan S. Ben-Shachar [aut] (ORCID:\n    <https://orcid.org/0000-0002-4287-4801>),\n  Brenton M. Wiernik [aut] (ORCID:\n    <https://orcid.org/0000-0001-9560-6336>),\n  Rémi Thériault [ctb] (ORCID: <https://orcid.org/0000-0003-4315-6788>),\n  Thomas J. Faulkenberry [rev],\n  Robert Garrett [rev]",
         "Repository": "RSPM",
-        "Date/Publication": "2025-07-17 12:10:02 UTC",
-        "Built": "R 4.5.0; ; 2025-07-18 10:58:25 UTC; unix",
+        "Date/Publication": "2025-05-09 17:40:02 UTC",
+        "Built": "R 4.5.0; ; 2025-05-10 11:00:26 UTC; unix",
         "RemoteType": "standard",
         "RemoteRef": "datawizard",
         "RemotePkgRef": "datawizard",
         "RemoteRepos": "https://packagemanager.posit.co/cran/latest",
         "RemoteReposName": "CRAN",
         "RemotePkgPlatform": "aarch64-apple-darwin20",
-        "RemoteSha": "1.2.0"
+        "RemoteSha": "1.1.0"
       }
     },
     "digest": {
@@ -1577,7 +1644,7 @@
       "Repository": "https://packagemanager.posit.co/cran/latest",
       "description": {
         "Package": "future",
-        "Version": "1.67.0",
+        "Version": "1.58.0",
         "Title": "Unified Parallel and Distributed Processing in R for Everyone",
         "Depends": "R (>= 3.2.0)",
         "Imports": "digest, globals (>= 0.18.0), listenv (>= 0.8.0), parallel,\nparallelly (>= 1.44.0), utils",
@@ -1593,21 +1660,20 @@
         "Language": "en-US",
         "Encoding": "UTF-8",
         "RoxygenNote": "7.3.2",
-        "Collate": "'000.bquote.R' '000.import.R' '000.re-exports.R'\n'010.tweakable.R' '010.utils-parallelly.R'\n'backend_api-01-FutureBackend-class.R'\n'backend_api-03.MultiprocessFutureBackend-class.R'\n'backend_api-11.ClusterFutureBackend-class.R'\n'backend_api-11.MulticoreFutureBackend-class.R'\n'backend_api-11.SequentialFutureBackend-class.R'\n'backend_api-13.MultisessionFutureBackend-class.R'\n'backend_api-ConstantFuture-class.R'\n'backend_api-Future-class.R' 'backend_api-FutureRegistry.R'\n'backend_api-UniprocessFuture-class.R'\n'backend_api-evalFuture.R' 'core_api-cancel.R'\n'core_api-future.R' 'core_api-reset.R' 'core_api-resolved.R'\n'core_api-value.R' 'delayed_api-futureAssign.R'\n'delayed_api-futureOf.R' 'demo_api-mandelbrot.R'\n'infix_api-01-futureAssign_OP.R' 'infix_api-02-globals_OP.R'\n'infix_api-03-seed_OP.R' 'infix_api-04-stdout_OP.R'\n'infix_api-05-conditions_OP.R' 'infix_api-06-lazy_OP.R'\n'infix_api-07-label_OP.R' 'infix_api-08-plan_OP.R'\n'infix_api-09-tweak_OP.R'\n'protected_api-FutureCondition-class.R'\n'protected_api-FutureGlobals-class.R'\n'protected_api-FutureResult-class.R' 'protected_api-futures.R'\n'protected_api-globals.R' 'protected_api-journal.R'\n'protected_api-resolve.R' 'protected_api-signalConditions.R'\n'testme.R' 'utils-basic.R' 'utils-conditions.R'\n'utils-connections.R' 'utils-debug.R'\n'utils-immediateCondition.R' 'utils-marshalling.R'\n'utils-objectSize.R' 'utils-options.R' 'utils-prune_pkg_code.R'\n'utils-registerClusterTypes.R' 'utils-rng_utils.R'\n'utils-signalEarly.R' 'utils-stealth_sample.R'\n'utils-sticky_globals.R' 'utils-tweakExpression.R'\n'utils-uuid.R' 'utils-whichIndex.R' 'utils_api-backtrace.R'\n'utils_api-capture_journals.R' 'utils_api-futureCall.R'\n'utils_api-futureSessionInfo.R' 'utils_api-makeClusterFuture.R'\n'utils_api-minifuture.R' 'utils_api-nbrOfWorkers.R'\n'utils_api-plan.R' 'utils_api-plan-with.R'\n'utils_api-sessionDetails.R' 'utils_api-tweak.R' 'zzz.R'",
         "NeedsCompilation": "no",
-        "Packaged": "2025-07-29 10:07:18 UTC; henrik",
+        "Packaged": "2025-06-05 01:03:35 UTC; henrik",
         "Author": "Henrik Bengtsson [aut, cre, cph] (ORCID:\n    <https://orcid.org/0000-0002-7579-5165>)",
         "Maintainer": "Henrik Bengtsson <henrikb@braju.com>",
-        "Repository": "RSPM",
-        "Date/Publication": "2025-07-29 12:50:07 UTC",
-        "Built": "R 4.5.0; ; 2025-07-30 05:31:51 UTC; unix",
+        "Repository": "CRAN",
+        "Date/Publication": "2025-06-05 05:30:06 UTC",
+        "Built": "R 4.5.0; ; 2025-06-05 06:25:48 UTC; unix",
         "RemoteType": "standard",
         "RemoteRef": "future",
         "RemotePkgRef": "future",
-        "RemoteRepos": "https://packagemanager.posit.co/cran/latest",
+        "RemoteRepos": "https://cloud.r-project.org",
         "RemoteReposName": "CRAN",
         "RemotePkgPlatform": "aarch64-apple-darwin20",
-        "RemoteSha": "1.67.0"
+        "RemoteSha": "1.58.0"
       }
     },
     "generics": {
@@ -2155,7 +2221,7 @@
         "Type": "Package",
         "Package": "insight",
         "Title": "Easy Access to Model Information for Various Model Objects",
-        "Version": "1.3.1",
+        "Version": "1.3.0",
         "Authors@R": "\n    c(person(given = \"Daniel\",\n             family = \"Lüdecke\",\n             role = c(\"aut\", \"cre\"),\n             email = \"officialeasystats@gmail.com\",\n             comment = c(ORCID = \"0000-0002-8895-3206\")),\n      person(given = \"Dominique\",\n             family = \"Makowski\",\n             role = c(\"aut\", \"ctb\"),\n             email = \"dom.makowski@gmail.com\",\n             comment = c(ORCID = \"0000-0001-5375-9967\")),\n      person(given = \"Indrajeet\",\n             family = \"Patil\",\n             role = c(\"aut\", \"ctb\"),\n             email = \"patilindrajeet.science@gmail.com\",\n             comment = c(ORCID = \"0000-0003-1995-6531\")),\n      person(given = \"Philip\",\n             family = \"Waggoner\",\n             role = c(\"aut\", \"ctb\"),\n             email = \"philip.waggoner@gmail.com\",\n             comment = c(ORCID = \"0000-0002-7825-7573\")),\n      person(given = \"Mattan S.\",\n             family = \"Ben-Shachar\",\n             role = c(\"aut\", \"ctb\"),\n             email = \"matanshm@post.bgu.ac.il\",\n             comment = c(ORCID = \"0000-0002-4287-4801\")),\n      person(given = \"Brenton M.\",\n             family = \"Wiernik\",\n             role = c(\"aut\", \"ctb\"),\n             email = \"brenton@wiernik.org\",\n             comment = c(ORCID = \"0000-0001-9560-6336\")),\n      person(given = \"Vincent\",\n             family = \"Arel-Bundock\",\n             email = \"vincent.arel-bundock@umontreal.ca\",\n             role = c(\"aut\", \"ctb\"),\n             comment = c(ORCID = \"0000-0003-2042-7063\")),\n      person(given = \"Etienne\",\n             family = \"Bacher\",\n             email = \"etienne.bacher@protonmail.com\",\n             role = c(\"aut\", \"ctb\"),\n             comment = c(ORCID = \"0000-0002-9271-5075\")),\n      person(given = \"Alex\",\n             family = \"Hayes\",\n             role = c(\"rev\"),\n             email = \"alexpghayes@gmail.com\",\n             comment = c(ORCID = \"0000-0002-4985-5160\")),\n      person(given = \"Grant\",\n             family = \"McDermott\",\n             role = c(\"ctb\"),\n             email = \"grantmcd@uoregon.edu\",\n             comment = c(ORCID = \"0000-0001-7883-8573\")),\n      person(given = \"Rémi\",\n             family = \"Thériault\",\n             role = \"ctb\",\n             email = \"remi.theriault@mail.mcgill.ca\",\n             comment = c(ORCID = \"0000-0003-4315-6788\")),\n      person(given = \"Alex\",\n             family = \"Reinhart\",\n             role = \"ctb\",\n             email = \"areinhar@stat.cmu.edu\",\n             comment = c(ORCID = \"0000-0002-6658-514X\")))",
         "Maintainer": "Daniel Lüdecke <officialeasystats@gmail.com>",
         "Description": "A tool to provide an easy, intuitive and consistent\n    access to information contained in various R models, like model\n    formulas, model terms, information about random effects, data that was\n    used to fit the model or data from response variables. 'insight'\n    mainly revolves around two types of functions: Functions that find\n    (the names of) information, starting with 'find_', and functions that\n    get the underlying data, starting with 'get_'. The package has a\n    consistent syntax and works with many different model objects, where\n    otherwise functions to access these information are missing.",
@@ -2164,7 +2230,7 @@
         "BugReports": "https://github.com/easystats/insight/issues",
         "Depends": "R (>= 3.6)",
         "Imports": "methods, stats, utils",
-        "Suggests": "AER, afex, aod, ape, BayesFactor, bayestestR, bbmle,\nbdsmatrix, betareg, bife, biglm, BH, blavaan (>= 0.5-5), blme,\nboot, brms, broom, car, carData, censReg, cgam, clubSandwich,\ncobalt, coxme, cplm, crch, curl, datawizard, dbarts,\neffectsize, emmeans, epiR, estimatr, feisr, fixest (>= 0.11.2),\nfungible, fwb, gam, gamlss, gamlss.data, gamm4, gbm, gee,\ngeepack, geoR, GLMMadaptive, glmmTMB (>= 1.1.10), glmtoolbox,\ngmnl, grDevices, gt, httptest2, httr2, interp, ivreg, JM,\nknitr, lavaan, lavaSearch2, lfe, lme4, lmerTest, lmtest,\nlogistf, logitr, marginaleffects (>= 0.26.0), MASS, Matrix,\nmclogit, mclust, MCMCglmm, merTools, metaBMA, metadat, metafor,\nmetaplus, mgcv, mice (>= 3.17.0), mlogit, mmrm, modelbased (>=\n0.9.0), multgee, MuMIn, nestedLogit, nlme, nnet, nonnest2,\nordinal, panelr, parameters, parsnip, pbkrtest, performance,\nphylolm, plm, poorman, PROreg (>= 1.3.0), pscl, psych,\nquantreg, Rcpp, RcppEigen, rmarkdown, rms, robustbase,\nrobustlmm, rpart, rstanarm (>= 2.21.1), rstantools (>= 2.1.0),\nrstudioapi, RWiener, sandwich, sdmTMB, serp, speedglm, splines,\nstatmod, survey, survival, svylme, testthat, tinytable (>=\n0.8.0), TMB, truncreg, tune, tweedie, VGAM, WeightIt, withr",
+        "Suggests": "AER, afex, aod, ape, BayesFactor, bayestestR, bbmle,\nbdsmatrix, betareg, bife, biglm, BH, blavaan (>= 0.5-5), blme,\nboot, brms, broom, car, carData, censReg, cgam, clubSandwich,\ncobalt, coxme, cplm, crch, curl, datawizard, dbarts,\neffectsize, emmeans, epiR, estimatr, feisr, fixest (>= 0.11.2),\nfungible, fwb, gam, gamlss, gamlss.data, gamm4, gbm, gee,\ngeepack, geoR, GLMMadaptive, glmmTMB (>= 1.1.10), glmtoolbox,\ngmnl, grDevices, gt, httptest2, httr2, interp, ivreg, JM,\nknitr, lavaan, lavaSearch2, lfe, lme4, lmerTest, lmtest,\nlogistf, logitr, marginaleffects (>= 0.26.0), MASS, Matrix,\nmclogit, mclust, MCMCglmm, merTools, metaBMA, metadat, metafor,\nmetaplus, mgcv, mice (>= 3.17.0), mlogit, mmrm, modelbased (>=\n0.9.0), multgee, MuMIn, nestedLogit, nlme, nnet, nonnest2,\nordinal, panelr, parameters, parsnip, pbkrtest, performance,\nphylolm, plm, poorman, PROreg (>= 1.3.0), pscl, psych,\nquantreg, Rcpp, RcppEigen, rmarkdown, rms, robustbase,\nrobustlmm, rpart, rstanarm (>= 2.21.1), rstantools (>= 2.1.0),\nrstudioapi, RWiener, sandwich, serp, speedglm, splines,\nstatmod, survey, survival, svylme, testthat, tinytable (>=\n0.8.0), TMB, truncreg, tune, tweedie, VGAM, WeightIt, withr",
         "VignetteBuilder": "knitr",
         "Encoding": "UTF-8",
         "Language": "en-US",
@@ -2174,18 +2240,18 @@
         "Config/Needs/website": "easystats/easystatstemplate",
         "Config/Needs/check": "stan-dev/cmdstanr",
         "NeedsCompilation": "no",
-        "Packaged": "2025-06-30 19:37:43 UTC; Daniel",
+        "Packaged": "2025-05-20 09:43:25 UTC; mail",
         "Author": "Daniel Lüdecke [aut, cre] (ORCID:\n    <https://orcid.org/0000-0002-8895-3206>),\n  Dominique Makowski [aut, ctb] (ORCID:\n    <https://orcid.org/0000-0001-5375-9967>),\n  Indrajeet Patil [aut, ctb] (ORCID:\n    <https://orcid.org/0000-0003-1995-6531>),\n  Philip Waggoner [aut, ctb] (ORCID:\n    <https://orcid.org/0000-0002-7825-7573>),\n  Mattan S. Ben-Shachar [aut, ctb] (ORCID:\n    <https://orcid.org/0000-0002-4287-4801>),\n  Brenton M. Wiernik [aut, ctb] (ORCID:\n    <https://orcid.org/0000-0001-9560-6336>),\n  Vincent Arel-Bundock [aut, ctb] (ORCID:\n    <https://orcid.org/0000-0003-2042-7063>),\n  Etienne Bacher [aut, ctb] (ORCID:\n    <https://orcid.org/0000-0002-9271-5075>),\n  Alex Hayes [rev] (ORCID: <https://orcid.org/0000-0002-4985-5160>),\n  Grant McDermott [ctb] (ORCID: <https://orcid.org/0000-0001-7883-8573>),\n  Rémi Thériault [ctb] (ORCID: <https://orcid.org/0000-0003-4315-6788>),\n  Alex Reinhart [ctb] (ORCID: <https://orcid.org/0000-0002-6658-514X>)",
         "Repository": "RSPM",
-        "Date/Publication": "2025-06-30 22:10:02 UTC",
-        "Built": "R 4.5.0; ; 2025-07-01 05:05:47 UTC; unix",
+        "Date/Publication": "2025-05-20 11:00:02 UTC",
+        "Built": "R 4.5.0; ; 2025-05-21 04:40:39 UTC; unix",
         "RemoteType": "standard",
         "RemoteRef": "insight",
         "RemotePkgRef": "insight",
         "RemoteRepos": "https://packagemanager.posit.co/cran/latest",
         "RemoteReposName": "CRAN",
         "RemotePkgPlatform": "aarch64-apple-darwin20",
-        "RemoteSha": "1.3.1"
+        "RemoteSha": "1.3.0"
       }
     },
     "interactions": {
@@ -2471,7 +2537,7 @@
         "Package": "labelled",
         "Type": "Package",
         "Title": "Manipulating Labelled Data",
-        "Version": "2.14.1",
+        "Version": "2.14.0",
         "Maintainer": "Joseph Larmarange <joseph@larmarange.net>",
         "Authors@R": "c(\n  person(\"Joseph\", \"Larmarange\", email = \"joseph@larmarange.net\", role = c(\"aut\", \"cre\"), comment = c(ORCID = \"0000-0001-7097-700X\")),\n  person(\"Daniel\", \"Ludecke\", role = \"ctb\"),\n  person(\"Hadley\", \"Wickham\", role = \"ctb\"),\n  person(\"Michal\", \"Bojanowski\", role = \"ctb\"),\n  person(\"François\", \"Briatte\", role = \"ctb\")\n  )",
         "Description": "Work with labelled data imported from 'SPSS'\n    or 'Stata' with 'haven' or 'foreign'. This package\n    provides useful functions to deal with \"haven_labelled\" and\n    \"haven_labelled_spss\" classes introduced by 'haven' package.",
@@ -2490,18 +2556,11 @@
         "Config/testthat/edition": "3",
         "Config/Needs/check": "memisc",
         "NeedsCompilation": "no",
-        "Packaged": "2025-05-06 18:26:13 UTC; josep",
-        "Author": "Joseph Larmarange [aut, cre] (ORCID:\n    <https://orcid.org/0000-0001-7097-700X>),\n  Daniel Ludecke [ctb],\n  Hadley Wickham [ctb],\n  Michal Bojanowski [ctb],\n  François Briatte [ctb]",
-        "Repository": "RSPM",
-        "Date/Publication": "2025-05-06 19:00:02 UTC",
-        "Built": "R 4.5.0; ; 2025-05-07 05:21:34 UTC; unix",
-        "RemoteType": "standard",
-        "RemoteRef": "labelled",
-        "RemotePkgRef": "labelled",
-        "RemoteRepos": "https://packagemanager.posit.co/cran/latest",
-        "RemoteReposName": "CRAN",
-        "RemotePkgPlatform": "aarch64-apple-darwin20",
-        "RemoteSha": "2.14.1"
+        "Packaged": "2025-01-08 08:12:06 UTC; josep",
+        "Author": "Joseph Larmarange [aut, cre] (<https://orcid.org/0000-0001-7097-700X>),\n  Daniel Ludecke [ctb],\n  Hadley Wickham [ctb],\n  Michal Bojanowski [ctb],\n  François Briatte [ctb]",
+        "Repository": "CRAN",
+        "Date/Publication": "2025-01-08 08:50:02 UTC",
+        "Built": "R 4.5.0; ; 2025-04-02 22:18:23 UTC; unix"
       }
     },
     "later": {
@@ -3084,7 +3143,7 @@
         "Package": "openssl",
         "Type": "Package",
         "Title": "Toolkit for Encryption, Signatures and Certificates Based on\nOpenSSL",
-        "Version": "2.3.3",
+        "Version": "2.3.2",
         "Authors@R": "c(person(\"Jeroen\", \"Ooms\", role = c(\"aut\", \"cre\"), email = \"jeroenooms@gmail.com\",\n    comment = c(ORCID = \"0000-0002-4035-0289\")),\n    person(\"Oliver\", \"Keyes\", role = \"ctb\"))",
         "Description": "Bindings to OpenSSL libssl and libcrypto, plus custom SSH key parsers.\n    Supports RSA, DSA and EC curves P-256, P-384, P-521, and curve25519. Cryptographic\n    signatures can either be created and verified manually or via x509 certificates. \n    AES can be used in cbc, ctr or gcm mode for symmetric encryption; RSA for asymmetric\n    (public key) encryption or EC for Diffie Hellman. High-level envelope functions \n    combine RSA and AES for encrypting arbitrary sized data. Other utilities include key\n    generators, hash functions (md5, sha1, sha256, etc), base64 encoder, a secure random\n    number generator, and 'bignum' math methods for manually performing crypto \n    calculations on large multibyte integers.",
         "License": "MIT + file LICENSE",
@@ -3097,19 +3156,19 @@
         "RoxygenNote": "7.3.2",
         "Encoding": "UTF-8",
         "NeedsCompilation": "yes",
-        "Packaged": "2025-05-26 09:13:50 UTC; jeroen",
-        "Author": "Jeroen Ooms [aut, cre] (ORCID: <https://orcid.org/0000-0002-4035-0289>),\n  Oliver Keyes [ctb]",
+        "Packaged": "2025-02-03 10:27:29 UTC; jeroen",
+        "Author": "Jeroen Ooms [aut, cre] (<https://orcid.org/0000-0002-4035-0289>),\n  Oliver Keyes [ctb]",
         "Maintainer": "Jeroen Ooms <jeroenooms@gmail.com>",
         "Repository": "RSPM",
-        "Date/Publication": "2025-05-26 13:00:02 UTC",
-        "Built": "R 4.5.0; x86_64-pc-linux-gnu; 2025-05-27 04:55:44 UTC; unix",
+        "Date/Publication": "2025-02-03 14:20:02 UTC",
+        "Built": "R 4.5.0; x86_64-pc-linux-gnu; 2025-04-06 04:42:22 UTC; unix",
         "RemoteType": "standard",
-        "RemoteRef": "openssl",
         "RemotePkgRef": "openssl",
+        "RemoteRef": "openssl",
         "RemoteRepos": "https://packagemanager.posit.co/cran/latest",
         "RemoteReposName": "CRAN",
         "RemotePkgPlatform": "aarch64-apple-darwin20",
-        "RemoteSha": "2.3.3"
+        "RemoteSha": "2.3.2"
       }
     },
     "openxlsx2": {
@@ -3149,6 +3208,41 @@
         "RemoteReposName": "CRAN",
         "RemotePkgPlatform": "aarch64-apple-darwin20",
         "RemoteSha": "1.17"
+      }
+    },
+    "packrat": {
+      "Source": "CRAN",
+      "Repository": "https://packagemanager.posit.co/cran/latest",
+      "description": {
+        "Type": "Package",
+        "Package": "packrat",
+        "Title": "A Dependency Management System for Projects and their R Package\nDependencies",
+        "Version": "0.9.3",
+        "Authors@R": "c(\n    person(\"Aron\", \"Atkins\", , \"aron@posit.co\", role = c(\"aut\", \"cre\")),\n    person(\"Toph\", \"Allen\", role = \"aut\"),\n    person(\"Kevin\", \"Ushey\", role = \"aut\"),\n    person(\"Jonathan\", \"McPherson\", role = \"aut\"),\n    person(\"Joe\", \"Cheng\", role = \"aut\"),\n    person(\"JJ\", \"Allaire\", role = \"aut\"),\n    person(\"Posit Software, PBC\", role = c(\"cph\", \"fnd\"))\n  )",
+        "Description": "Manage the R packages your project depends on in an isolated,\n    portable, and reproducible way.",
+        "License": "GPL-2",
+        "URL": "https://github.com/rstudio/packrat",
+        "BugReports": "https://github.com/rstudio/packrat/issues",
+        "Depends": "R (>= 3.0.0)",
+        "Imports": "tools, utils",
+        "Suggests": "devtools, httr, knitr, mockery, rmarkdown, testthat (>=\n3.0.0), webfakes, withr",
+        "Config/testthat/edition": "3",
+        "Encoding": "UTF-8",
+        "RoxygenNote": "7.3.2",
+        "NeedsCompilation": "no",
+        "Packaged": "2025-06-16 19:37:19 UTC; aron",
+        "Author": "Aron Atkins [aut, cre],\n  Toph Allen [aut],\n  Kevin Ushey [aut],\n  Jonathan McPherson [aut],\n  Joe Cheng [aut],\n  JJ Allaire [aut],\n  Posit Software, PBC [cph, fnd]",
+        "Maintainer": "Aron Atkins <aron@posit.co>",
+        "Repository": "RSPM",
+        "Date/Publication": "2025-06-16 20:00:02 UTC",
+        "Built": "R 4.5.0; ; 2025-06-17 04:39:30 UTC; unix",
+        "RemoteType": "standard",
+        "RemoteRef": "packrat",
+        "RemotePkgRef": "packrat",
+        "RemoteRepos": "https://packagemanager.posit.co/cran/latest",
+        "RemoteReposName": "CRAN",
+        "RemotePkgPlatform": "aarch64-apple-darwin20",
+        "RemoteSha": "0.9.3"
       }
     },
     "pander": {
@@ -3194,7 +3288,7 @@
       "Repository": "https://packagemanager.posit.co/cran/latest",
       "description": {
         "Package": "parallelly",
-        "Version": "1.45.1",
+        "Version": "1.45.0",
         "Title": "Enhancing the 'parallel' Package",
         "Imports": "parallel, tools, utils",
         "Suggests": "commonmark, base64enc",
@@ -3210,19 +3304,20 @@
         "Encoding": "UTF-8",
         "RoxygenNote": "7.3.2",
         "NeedsCompilation": "yes",
-        "Packaged": "2025-07-24 14:11:31 UTC; henrik",
+        "Packaged": "2025-06-02 19:35:12 UTC; henrik",
         "Author": "Henrik Bengtsson [aut, cre, cph] (ORCID:\n    <https://orcid.org/0000-0002-7579-5165>),\n  Mike Cheng [ctb]",
         "Maintainer": "Henrik Bengtsson <henrikb@braju.com>",
-        "Repository": "RSPM",
-        "Date/Publication": "2025-07-24 15:50:02 UTC",
-        "Built": "R 4.5.0; x86_64-pc-linux-gnu; 2025-07-25 05:16:49 UTC; unix",
+        "Repository": "CRAN",
+        "Date/Publication": "2025-06-02 20:50:02 UTC",
+        "Built": "R 4.5.0; aarch64-apple-darwin20; 2025-06-02 22:00:02 UTC; unix",
+        "Archs": "parallelly.so.dSYM",
         "RemoteType": "standard",
         "RemoteRef": "parallelly",
         "RemotePkgRef": "parallelly",
-        "RemoteRepos": "https://packagemanager.posit.co/cran/latest",
+        "RemoteRepos": "https://cloud.r-project.org",
         "RemoteReposName": "CRAN",
         "RemotePkgPlatform": "aarch64-apple-darwin20",
-        "RemoteSha": "1.45.1"
+        "RemoteSha": "1.45.0"
       }
     },
     "pillar": {
@@ -3231,7 +3326,7 @@
       "description": {
         "Package": "pillar",
         "Title": "Coloured Formatting for Columns",
-        "Version": "1.11.0",
+        "Version": "1.10.2",
         "Authors@R": "\n    c(person(given = \"Kirill\",\n             family = \"M\\u00fcller\",\n             role = c(\"aut\", \"cre\"),\n             email = \"kirill@cynkra.com\",\n             comment = c(ORCID = \"0000-0002-1416-3412\")),\n      person(given = \"Hadley\",\n             family = \"Wickham\",\n             role = \"aut\"),\n      person(given = \"RStudio\",\n             role = \"cph\"))",
         "Description": "Provides 'pillar' and 'colonnade' generics designed\n    for formatting columns of data using the full range of colours\n    provided by modern terminals.",
         "License": "MIT + file LICENSE",
@@ -3250,12 +3345,12 @@
         "Config/gha/extra-packages": "units=?ignore-before-r=4.3.0",
         "Config/Needs/website": "tidyverse/tidytemplate",
         "NeedsCompilation": "no",
-        "Packaged": "2025-07-04 18:25:31 UTC; kirill",
-        "Author": "Kirill Müller [aut, cre] (ORCID:\n    <https://orcid.org/0000-0002-1416-3412>),\n  Hadley Wickham [aut],\n  RStudio [cph]",
+        "Packaged": "2025-04-05 12:40:18 UTC; kirill",
+        "Author": "Kirill Müller [aut, cre] (<https://orcid.org/0000-0002-1416-3412>),\n  Hadley Wickham [aut],\n  RStudio [cph]",
         "Maintainer": "Kirill Müller <kirill@cynkra.com>",
         "Repository": "CRAN",
-        "Date/Publication": "2025-07-04 19:20:02 UTC",
-        "Built": "R 4.5.0; ; 2025-07-04 19:58:20 UTC; unix"
+        "Date/Publication": "2025-04-05 13:40:02 UTC",
+        "Built": "R 4.5.0; ; 2025-04-05 15:16:23 UTC; unix"
       }
     },
     "pins": {
@@ -3519,15 +3614,15 @@
       "description": {
         "Package": "purrr",
         "Title": "Functional Programming Tools",
-        "Version": "1.1.0",
-        "Authors@R": "c(\n    person(\"Hadley\", \"Wickham\", , \"hadley@posit.co\", role = c(\"aut\", \"cre\"),\n           comment = c(ORCID = \"0000-0003-4757-117X\")),\n    person(\"Lionel\", \"Henry\", , \"lionel@posit.co\", role = \"aut\"),\n    person(\"Posit Software, PBC\", role = c(\"cph\", \"fnd\"),\n           comment = c(ROR = \"https://ror.org/03wc8by49\"))\n  )",
+        "Version": "1.0.4",
+        "Authors@R": "c(\n    person(\"Hadley\", \"Wickham\", , \"hadley@posit.co\", role = c(\"aut\", \"cre\"),\n           comment = c(ORCID = \"0000-0003-4757-117X\")),\n    person(\"Lionel\", \"Henry\", , \"lionel@posit.co\", role = \"aut\"),\n    person(\"Posit Software, PBC\", role = c(\"cph\", \"fnd\"),\n           comment = c(ROR = \"03wc8by49\"))\n  )",
         "Description": "A complete and consistent functional programming toolkit for\n    R.",
         "License": "MIT + file LICENSE",
         "URL": "https://purrr.tidyverse.org/, https://github.com/tidyverse/purrr",
         "BugReports": "https://github.com/tidyverse/purrr/issues",
-        "Depends": "R (>= 4.1)",
+        "Depends": "R (>= 4.0)",
         "Imports": "cli (>= 3.6.1), lifecycle (>= 1.0.3), magrittr (>= 1.5.0),\nrlang (>= 1.1.1), vctrs (>= 0.6.3)",
-        "Suggests": "carrier (>= 0.2.0), covr, dplyr (>= 0.7.8), httr, knitr,\nlubridate, mirai (>= 2.4.0), rmarkdown, testthat (>= 3.0.0),\ntibble, tidyselect",
+        "Suggests": "covr, dplyr (>= 0.7.8), httr, knitr, lubridate, rmarkdown,\ntestthat (>= 3.0.0), tibble, tidyselect",
         "LinkingTo": "cli",
         "VignetteBuilder": "knitr",
         "Biarch": "true",
@@ -3538,19 +3633,19 @@
         "Encoding": "UTF-8",
         "RoxygenNote": "7.3.2",
         "NeedsCompilation": "yes",
-        "Packaged": "2025-07-10 12:22:53 UTC; hadleywickham",
-        "Author": "Hadley Wickham [aut, cre] (ORCID:\n    <https://orcid.org/0000-0003-4757-117X>),\n  Lionel Henry [aut],\n  Posit Software, PBC [cph, fnd] (ROR: <https://ror.org/03wc8by49>)",
+        "Packaged": "2025-01-29 21:33:56 UTC; hadleywickham",
+        "Author": "Hadley Wickham [aut, cre] (<https://orcid.org/0000-0003-4757-117X>),\n  Lionel Henry [aut],\n  Posit Software, PBC [cph, fnd] (03wc8by49)",
         "Maintainer": "Hadley Wickham <hadley@posit.co>",
-        "Repository": "CRAN",
-        "Date/Publication": "2025-07-10 17:50:02 UTC",
-        "Built": "R 4.5.0; aarch64-apple-darwin20; 2025-07-10 17:59:18 UTC; unix",
-        "Archs": "purrr.so.dSYM",
+        "Repository": "RSPM",
+        "Date/Publication": "2025-02-05 18:00:01 UTC",
+        "Built": "R 4.5.0; x86_64-pc-linux-gnu; 2025-04-06 04:43:38 UTC; unix",
         "RemoteType": "standard",
         "RemotePkgRef": "purrr",
         "RemoteRef": "purrr",
-        "RemoteRepos": "https://cran.rstudio.com/",
+        "RemoteRepos": "https://packagemanager.posit.co/cran/latest",
+        "RemoteReposName": "CRAN",
         "RemotePkgPlatform": "aarch64-apple-darwin20",
-        "RemoteSha": "1.1.0"
+        "RemoteSha": "1.0.4"
       }
     },
     "rappdirs": {
@@ -3702,14 +3797,14 @@
         "Package": "renv",
         "Type": "Package",
         "Title": "Project Environments",
-        "Version": "1.1.5",
+        "Version": "1.1.4",
         "Authors@R": "c(\n    person(\"Kevin\", \"Ushey\", role = c(\"aut\", \"cre\"), email = \"kevin@rstudio.com\",\n           comment = c(ORCID = \"0000-0003-2880-7407\")),\n    person(\"Hadley\", \"Wickham\", role = c(\"aut\"), email = \"hadley@rstudio.com\",\n           comment = c(ORCID = \"0000-0003-4757-117X\")),\n    person(\"Posit Software, PBC\", role = c(\"cph\", \"fnd\"))\n    )",
         "Description": "A dependency management toolkit for R. Using 'renv', you can create\n    and manage project-local R libraries, save the state of these libraries to\n    a 'lockfile', and later restore your library as required. Together, these\n    tools can help make your projects more isolated, portable, and reproducible.",
         "License": "MIT + file LICENSE",
         "URL": "https://rstudio.github.io/renv/, https://github.com/rstudio/renv",
         "BugReports": "https://github.com/rstudio/renv/issues",
         "Imports": "utils",
-        "Suggests": "BiocManager, cli, compiler, covr, cpp11, devtools, generics,\ngitcreds, jsonlite, jsonvalidate, knitr, miniUI, modules,\npackrat, pak, R6, remotes, reticulate, rmarkdown, rstudioapi,\nshiny, testthat, uuid, waldo, yaml, webfakes",
+        "Suggests": "BiocManager, cli, compiler, covr, cpp11, devtools, gitcreds,\njsonlite, jsonvalidate, knitr, miniUI, modules, packrat, pak,\nR6, remotes, reticulate, rmarkdown, rstudioapi, shiny,\ntestthat, uuid, waldo, yaml, webfakes",
         "Encoding": "UTF-8",
         "RoxygenNote": "7.3.2",
         "VignetteBuilder": "knitr",
@@ -3718,12 +3813,12 @@
         "Config/testthat/parallel": "true",
         "Config/testthat/start-first": "bioconductor,python,install,restore,snapshot,retrieve,remotes",
         "NeedsCompilation": "no",
-        "Packaged": "2025-07-24 20:47:34 UTC; kevin",
-        "Author": "Kevin Ushey [aut, cre] (ORCID: <https://orcid.org/0000-0003-2880-7407>),\n  Hadley Wickham [aut] (ORCID: <https://orcid.org/0000-0003-4757-117X>),\n  Posit Software, PBC [cph, fnd]",
+        "Packaged": "2025-03-20 16:43:40 UTC; kevin",
+        "Author": "Kevin Ushey [aut, cre] (<https://orcid.org/0000-0003-2880-7407>),\n  Hadley Wickham [aut] (<https://orcid.org/0000-0003-4757-117X>),\n  Posit Software, PBC [cph, fnd]",
         "Maintainer": "Kevin Ushey <kevin@rstudio.com>",
         "Repository": "CRAN",
-        "Date/Publication": "2025-07-24 21:40:02 UTC",
-        "Built": "R 4.5.0; ; 2025-07-24 22:11:42 UTC; unix"
+        "Date/Publication": "2025-03-20 18:10:01 UTC",
+        "Built": "R 4.5.0; ; 2025-03-31 22:17:26 UTC; unix"
       }
     },
     "rlang": {
@@ -3797,6 +3892,44 @@
         "RemoteSha": "2.29"
       }
     },
+    "rsconnect": {
+      "Source": "CRAN",
+      "Repository": "https://packagemanager.posit.co/cran/latest",
+      "description": {
+        "Type": "Package",
+        "Package": "rsconnect",
+        "Title": "Deploy Docs, Apps, and APIs to 'Posit Connect', 'shinyapps.io',\nand 'RPubs'",
+        "Version": "1.5.0",
+        "Authors@R": "c(\n    person(\"Aron\", \"Atkins\", , \"aron@posit.co\", role = c(\"aut\", \"cre\")),\n    person(\"Toph\", \"Allen\", role = \"aut\"),\n    person(\"Hadley\", \"Wickham\", role = \"aut\"),\n    person(\"Jonathan\", \"McPherson\", role = \"aut\"),\n    person(\"JJ\", \"Allaire\", role = \"aut\"),\n    person(\"Posit Software, PBC\", role = c(\"cph\", \"fnd\"))\n  )",
+        "Description": "Programmatic deployment interface for 'RPubs',\n    'shinyapps.io', and 'Posit Connect'. Supported content types include R\n    Markdown documents, Shiny applications, Plumber APIs, plots, and\n    static web content.",
+        "License": "GPL-2",
+        "URL": "https://rstudio.github.io/rsconnect/,\nhttps://github.com/rstudio/rsconnect",
+        "BugReports": "https://github.com/rstudio/rsconnect/issues",
+        "Depends": "R (>= 3.5.0)",
+        "Imports": "cli, curl, digest, jsonlite, lifecycle, openssl (>= 2.0.0),\nPKI, packrat (>= 0.6), renv (>= 1.0.0), rlang (>= 1.0.0),\nrstudioapi (>= 0.5), snowflakeauth, tools, yaml (>= 2.1.5),\nutils",
+        "Suggests": "Biobase, BiocManager, foreign, knitr, MASS, plumber (>=\n0.3.2), quarto, RCurl, reticulate, rmarkdown (>= 1.1), shiny,\ntestthat (>= 3.1.9), webfakes, withr",
+        "VignetteBuilder": "knitr, rmarkdown",
+        "Config/Needs/website": "tidyverse/tidytemplate",
+        "Config/testthat/edition": "3",
+        "Config/testthat/parallel": "true",
+        "Encoding": "UTF-8",
+        "RoxygenNote": "7.3.2",
+        "NeedsCompilation": "no",
+        "Packaged": "2025-06-26 15:08:33 UTC; aron",
+        "Author": "Aron Atkins [aut, cre],\n  Toph Allen [aut],\n  Hadley Wickham [aut],\n  Jonathan McPherson [aut],\n  JJ Allaire [aut],\n  Posit Software, PBC [cph, fnd]",
+        "Maintainer": "Aron Atkins <aron@posit.co>",
+        "Repository": "RSPM",
+        "Date/Publication": "2025-06-26 15:50:02 UTC",
+        "Built": "R 4.5.0; ; 2025-06-27 04:39:35 UTC; unix",
+        "RemoteType": "standard",
+        "RemoteRef": "rsconnect",
+        "RemotePkgRef": "rsconnect",
+        "RemoteRepos": "https://packagemanager.posit.co/cran/latest",
+        "RemoteReposName": "CRAN",
+        "RemotePkgPlatform": "aarch64-apple-darwin20",
+        "RemoteSha": "1.5.0"
+      }
+    },
     "rstudioapi": {
       "Source": "CRAN",
       "Repository": "https://packagemanager.posit.co/cran/latest",
@@ -3835,14 +3968,14 @@
       "description": {
         "Package": "s2",
         "Title": "Spherical Geometry Operators Using the S2 Geometry Library",
-        "Version": "1.1.9",
+        "Version": "1.1.8",
         "Authors@R": "c(\n     person(given = \"Dewey\",\n           family = \"Dunnington\",\n           role = c(\"aut\"),\n           email = \"dewey@fishandwhistle.net\",\n           comment = c(ORCID = \"0000-0002-9415-4582\")),\n     person(given = \"Edzer\",\n             family = \"Pebesma\",\n             role = c(\"aut\", \"cre\"),\n             email = \"edzer.pebesma@uni-muenster.de\",\n             comment = c(ORCID = \"0000-0001-8049-7069\")),\n    person(\"Ege\", \"Rubak\", email=\"rubak@math.aau.dk\", role = c(\"aut\")),\n    person(\"Jeroen\", \"Ooms\", , \"jeroen.ooms@stat.ucla.edu\", role = \"ctb\", comment = \"configure script\"),\n    person(family = \"Google, Inc.\", role = \"cph\", comment = \"Original s2geometry.io source code\")\n  )",
         "Description": "Provides R bindings for Google's s2 library for geometric calculations on\n    the sphere. High-performance constructors and exporters provide high compatibility\n    with existing spatial packages, transformers construct new geometries from existing\n    geometries, predicates provide a means to select geometries based on spatial\n    relationships, and accessors extract information about geometries.",
         "License": "Apache License (== 2.0)",
         "Encoding": "UTF-8",
         "LazyData": "true",
         "RoxygenNote": "7.3.2",
-        "SystemRequirements": "cmake, OpenSSL >= 1.0.1, Abseil >= 20230802.0",
+        "SystemRequirements": "OpenSSL >= 1.0.1, Abseil >= 20230802.0",
         "LinkingTo": "Rcpp, wk",
         "Imports": "Rcpp, wk (>= 0.6.0)",
         "Suggests": "bit64, testthat (>= 3.0.0), vctrs",
@@ -3851,20 +3984,13 @@
         "Depends": "R (>= 3.0.0)",
         "Config/testthat/edition": "3",
         "NeedsCompilation": "yes",
-        "Packaged": "2025-05-23 14:44:45 UTC; edzer",
+        "Packaged": "2025-05-12 07:28:50 UTC; edzer",
         "Author": "Dewey Dunnington [aut] (ORCID: <https://orcid.org/0000-0002-9415-4582>),\n  Edzer Pebesma [aut, cre] (ORCID:\n    <https://orcid.org/0000-0001-8049-7069>),\n  Ege Rubak [aut],\n  Jeroen Ooms [ctb] (configure script),\n  Google, Inc. [cph] (Original s2geometry.io source code)",
         "Maintainer": "Edzer Pebesma <edzer.pebesma@uni-muenster.de>",
         "Repository": "CRAN",
-        "Date/Publication": "2025-05-23 15:50:02 UTC",
-        "Built": "R 4.5.0; aarch64-apple-darwin20; 2025-05-23 16:44:23 UTC; unix",
-        "Archs": "s2.so.dSYM",
-        "RemoteType": "standard",
-        "RemoteRef": "s2",
-        "RemotePkgRef": "s2",
-        "RemoteRepos": "https://cloud.r-project.org",
-        "RemoteReposName": "CRAN",
-        "RemotePkgPlatform": "aarch64-apple-darwin20",
-        "RemoteSha": "1.1.9"
+        "Date/Publication": "2025-05-12 08:20:08 UTC",
+        "Built": "R 4.5.0; aarch64-apple-darwin20; 2025-05-12 09:02:41 UTC; unix",
+        "Archs": "s2.so.dSYM"
       }
     },
     "sandwich": {
@@ -4076,6 +4202,32 @@
         "RemoteReposName": "CRAN",
         "RemotePkgPlatform": "aarch64-apple-darwin20",
         "RemoteSha": "1.2.0"
+      }
+    },
+    "snowflakeauth": {
+      "Source": "CRAN",
+      "Repository": "https://packagemanager.posit.co/cran/latest",
+      "description": {
+        "Package": "snowflakeauth",
+        "Title": "Authentication Helpers for 'Snowflake'",
+        "Version": "0.1.2",
+        "Authors@R": "c(\n    person(\"Aaron\", \"Jacobs\", , \"aaron.jacobs@posit.co\", role = c(\"aut\")),\n    person(\"E. David\", \"Aja\", , \"david@posit.co\", role = c(\"aut\", \"cre\")),\n    person(\"Posit Software, PBC\", role = c(\"cph\", \"fnd\"))\n  )",
+        "Description": "Authentication helpers for 'Snowflake'.\n    It provides compatibility with authentication approaches supported\n    by the 'Snowflake Connector for Python' <https://pypi.org/project/snowflake-connector-python>\n    and the 'Snowflake CLI' <https://pypi.org/project/snowflake-cli>.",
+        "License": "MIT + file LICENSE",
+        "Encoding": "UTF-8",
+        "Imports": "cli, curl, jsonlite, RcppTOML, rlang",
+        "Suggests": "jose, openssl, testthat (>= 3.0.0), withr",
+        "RoxygenNote": "7.3.2",
+        "Config/testthat/edition": "3",
+        "URL": "https://posit-dev.github.io/snowflakeauth/,\nhttps://github.com/posit-dev/snowflakeauth",
+        "BugReports": "https://github.com/posit-dev/snowflakeauth/issues",
+        "NeedsCompilation": "no",
+        "Packaged": "2025-06-18 13:05:51 UTC; edavidaja",
+        "Author": "Aaron Jacobs [aut],\n  E. David Aja [aut, cre],\n  Posit Software, PBC [cph, fnd]",
+        "Maintainer": "E. David Aja <david@posit.co>",
+        "Repository": "CRAN",
+        "Date/Publication": "2025-06-19 15:20:02 UTC",
+        "Built": "R 4.5.0; ; 2025-06-19 16:38:53 UTC; unix"
       }
     },
     "sourcetools": {
@@ -4438,18 +4590,18 @@
       "description": {
         "Package": "tibble",
         "Title": "Simple Data Frames",
-        "Version": "3.3.0",
+        "Version": "3.2.1",
         "Authors@R": "\n    c(person(given = \"Kirill\",\n             family = \"M\\u00fcller\",\n             role = c(\"aut\", \"cre\"),\n             email = \"kirill@cynkra.com\",\n             comment = c(ORCID = \"0000-0002-1416-3412\")),\n      person(given = \"Hadley\",\n             family = \"Wickham\",\n             role = \"aut\",\n             email = \"hadley@rstudio.com\"),\n      person(given = \"Romain\",\n             family = \"Francois\",\n             role = \"ctb\",\n             email = \"romain@r-enthusiasts.com\"),\n      person(given = \"Jennifer\",\n             family = \"Bryan\",\n             role = \"ctb\",\n             email = \"jenny@rstudio.com\"),\n      person(given = \"RStudio\",\n             role = c(\"cph\", \"fnd\")))",
         "Description": "Provides a 'tbl_df' class (the 'tibble') with stricter checking and better formatting than the traditional\n    data frame.",
         "License": "MIT + file LICENSE",
         "URL": "https://tibble.tidyverse.org/, https://github.com/tidyverse/tibble",
         "BugReports": "https://github.com/tidyverse/tibble/issues",
         "Depends": "R (>= 3.4.0)",
-        "Imports": "cli, lifecycle (>= 1.0.0), magrittr, methods, pillar (>=\n1.8.1), pkgconfig, rlang (>= 1.0.2), utils, vctrs (>= 0.5.0)",
-        "Suggests": "bench, bit64, blob, brio, callr, DiagrammeR, dplyr, evaluate,\nformattable, ggplot2, here, hms, htmltools, knitr, lubridate,\nnycflights13, pkgload, purrr, rmarkdown, stringi, testthat (>=\n3.0.2), tidyr, withr",
+        "Imports": "fansi (>= 0.4.0), lifecycle (>= 1.0.0), magrittr, methods,\npillar (>= 1.8.1), pkgconfig, rlang (>= 1.0.2), utils, vctrs\n(>= 0.4.2)",
+        "Suggests": "bench, bit64, blob, brio, callr, cli, covr, crayon (>=\n1.3.4), DiagrammeR, dplyr, evaluate, formattable, ggplot2,\nhere, hms, htmltools, knitr, lubridate, mockr, nycflights13,\npkgbuild, pkgload, purrr, rmarkdown, stringi, testthat (>=\n3.0.2), tidyr, withr",
         "VignetteBuilder": "knitr",
         "Encoding": "UTF-8",
-        "RoxygenNote": "7.3.2.9000",
+        "RoxygenNote": "7.2.3",
         "Config/testthat/edition": "3",
         "Config/testthat/parallel": "true",
         "Config/testthat/start-first": "vignette-formats, as_tibble, add,\ninvariants",
@@ -4458,20 +4610,13 @@
         "Config/autostyle/rmd": "false",
         "Config/Needs/website": "tidyverse/tidytemplate",
         "NeedsCompilation": "yes",
-        "Packaged": "2025-06-07 08:54:33 UTC; kirill",
-        "Author": "Kirill Müller [aut, cre] (ORCID:\n    <https://orcid.org/0000-0002-1416-3412>),\n  Hadley Wickham [aut],\n  Romain Francois [ctb],\n  Jennifer Bryan [ctb],\n  RStudio [cph, fnd]",
+        "Packaged": "2023-03-19 09:23:10 UTC; kirill",
+        "Author": "Kirill Müller [aut, cre] (<https://orcid.org/0000-0002-1416-3412>),\n  Hadley Wickham [aut],\n  Romain Francois [ctb],\n  Jennifer Bryan [ctb],\n  RStudio [cph, fnd]",
         "Maintainer": "Kirill Müller <kirill@cynkra.com>",
         "Repository": "CRAN",
-        "Date/Publication": "2025-06-08 12:10:02 UTC",
-        "Built": "R 4.5.0; aarch64-apple-darwin20; 2025-06-08 13:50:10 UTC; unix",
-        "Archs": "tibble.so.dSYM",
-        "RemoteType": "standard",
-        "RemoteRef": "tibble",
-        "RemotePkgRef": "tibble",
-        "RemoteRepos": "https://cloud.r-project.org",
-        "RemoteReposName": "CRAN",
-        "RemotePkgPlatform": "aarch64-apple-darwin20",
-        "RemoteSha": "3.3.0"
+        "Date/Publication": "2023-03-20 06:30:02 UTC",
+        "Built": "R 4.5.0; aarch64-apple-darwin20; 2025-04-01 20:30:34 UTC; unix",
+        "Archs": "tibble.so.dSYM"
       }
     },
     "tidyr": {
@@ -4676,12 +4821,12 @@
       "description": {
         "Package": "utf8",
         "Title": "Unicode Text Processing",
-        "Version": "1.2.6",
-        "Authors@R": "\n    c(person(given = c(\"Patrick\", \"O.\"),\n             family = \"Perry\",\n             role = c(\"aut\", \"cph\")),\n      person(given = \"Kirill\",\n             family = \"M\\u00fcller\",\n             role = \"cre\",\n             email = \"kirill@cynkra.com\",\n             comment = c(ORCID = \"0000-0002-1416-3412\")),\n      person(given = \"Unicode, Inc.\",\n             role = c(\"cph\", \"dtc\"),\n             comment = \"Unicode Character Database\"))",
+        "Version": "1.2.5",
+        "Authors@R": "\n    c(person(given = c(\"Patrick\", \"O.\"),\n             family = \"Perry\",\n             role = c(\"aut\", \"cph\")),\n      person(given = \"Kirill\",\n             family = \"M\\u00fcller\",\n             role = \"cre\",\n             email = \"kirill@cynkra.com\"),\n      person(given = \"Unicode, Inc.\",\n             role = c(\"cph\", \"dtc\"),\n             comment = \"Unicode Character Database\"))",
         "Description": "Process and print 'UTF-8' encoded international\n    text (Unicode). Input, validate, normalize, encode, format, and\n    display.",
         "License": "Apache License (== 2.0) | file LICENSE",
-        "URL": "https://krlmlr.github.io/utf8/, https://github.com/krlmlr/utf8",
-        "BugReports": "https://github.com/krlmlr/utf8/issues",
+        "URL": "https://ptrckprry.com/r-utf8/, https://github.com/patperry/r-utf8",
+        "BugReports": "https://github.com/patperry/r-utf8/issues",
         "Depends": "R (>= 2.10)",
         "Suggests": "cli, covr, knitr, rlang, rmarkdown, testthat (>= 3.0.0),\nwithr",
         "VignetteBuilder": "knitr, rmarkdown",
@@ -4689,20 +4834,19 @@
         "Encoding": "UTF-8",
         "RoxygenNote": "7.3.2.9000",
         "NeedsCompilation": "yes",
-        "Packaged": "2025-06-08 18:28:11 UTC; kirill",
-        "Author": "Patrick O. Perry [aut, cph],\n  Kirill Müller [cre] (ORCID: <https://orcid.org/0000-0002-1416-3412>),\n  Unicode, Inc. [cph, dtc] (Unicode Character Database)",
+        "Packaged": "2025-05-01 07:56:23 UTC; kirill",
+        "Author": "Patrick O. Perry [aut, cph],\n  Kirill Müller [cre],\n  Unicode, Inc. [cph, dtc] (Unicode Character Database)",
         "Maintainer": "Kirill Müller <kirill@cynkra.com>",
-        "Repository": "CRAN",
-        "Date/Publication": "2025-06-08 19:00:02 UTC",
-        "Built": "R 4.5.0; aarch64-apple-darwin20; 2025-06-08 20:24:56 UTC; unix",
-        "Archs": "utf8.so.dSYM",
+        "Repository": "RSPM",
+        "Date/Publication": "2025-05-01 08:20:02 UTC",
+        "Built": "R 4.5.0; x86_64-pc-linux-gnu; 2025-05-02 04:55:01 UTC; unix",
         "RemoteType": "standard",
         "RemoteRef": "utf8",
         "RemotePkgRef": "utf8",
-        "RemoteRepos": "https://cloud.r-project.org",
+        "RemoteRepos": "https://packagemanager.posit.co/cran/latest",
         "RemoteReposName": "CRAN",
         "RemotePkgPlatform": "aarch64-apple-darwin20",
-        "RemoteSha": "1.2.6"
+        "RemoteSha": "1.2.5"
       }
     },
     "vctrs": {
@@ -5077,8 +5221,8 @@
       "description": {
         "Package": "zip",
         "Title": "Cross-Platform 'zip' Compression",
-        "Version": "2.3.3",
-        "Authors@R": "c(\n    person(\"Gábor\", \"Csárdi\", , \"csardi.gabor@gmail.com\", role = c(\"aut\", \"cre\")),\n    person(\"Kuba\", \"Podgórski\", role = \"ctb\"),\n    person(\"Rich\", \"Geldreich\", role = \"ctb\"),\n    person(\"Posit Software, PBC\", role = c(\"cph\", \"fnd\"),\n           comment = c(ROR = \"03wc8by49\"))\n  )",
+        "Version": "2.3.2",
+        "Authors@R": "c(\n    person(\"Gábor\", \"Csárdi\", , \"csardi.gabor@gmail.com\", role = c(\"aut\", \"cre\")),\n    person(\"Kuba\", \"Podgórski\", role = \"ctb\"),\n    person(\"Rich\", \"Geldreich\", role = \"ctb\"),\n    person(\"Posit Software, PBC\", role = c(\"cph\", \"fnd\"))\n  )",
         "Description": "Cross-Platform 'zip' Compression Library. A replacement for\n    the 'zip' function, that does not require any additional external\n    tools on any platform.",
         "License": "MIT + file LICENSE",
         "URL": "https://github.com/r-lib/zip, https://r-lib.github.io/zip/",
@@ -5086,23 +5230,15 @@
         "Suggests": "covr, pillar, processx, R6, testthat, withr",
         "Config/Needs/website": "tidyverse/tidytemplate",
         "Config/testthat/edition": "3",
-        "Config/usethis/last-upkeep": "2025-05-07",
         "Encoding": "UTF-8",
-        "RoxygenNote": "7.3.2.9000",
+        "RoxygenNote": "7.2.3",
         "NeedsCompilation": "yes",
-        "Packaged": "2025-05-13 13:31:44 UTC; gaborcsardi",
-        "Author": "Gábor Csárdi [aut, cre],\n  Kuba Podgórski [ctb],\n  Rich Geldreich [ctb],\n  Posit Software, PBC [cph, fnd] (ROR: <https://ror.org/03wc8by49>)",
+        "Packaged": "2025-02-01 22:18:43 UTC; gaborcsardi",
+        "Author": "Gábor Csárdi [aut, cre],\n  Kuba Podgórski [ctb],\n  Rich Geldreich [ctb],\n  Posit Software, PBC [cph, fnd]",
         "Maintainer": "Gábor Csárdi <csardi.gabor@gmail.com>",
-        "Repository": "RSPM",
-        "Date/Publication": "2025-05-13 14:10:02 UTC",
-        "Built": "R 4.5.0; x86_64-pc-linux-gnu; 2025-05-14 05:26:56 UTC; unix",
-        "RemoteType": "standard",
-        "RemoteRef": "zip",
-        "RemotePkgRef": "zip",
-        "RemoteRepos": "https://packagemanager.posit.co/cran/latest",
-        "RemoteReposName": "CRAN",
-        "RemotePkgPlatform": "aarch64-apple-darwin20",
-        "RemoteSha": "2.3.3"
+        "Repository": "CRAN",
+        "Date/Publication": "2025-02-01 23:00:02 UTC",
+        "Built": "R 4.5.0; aarch64-apple-darwin20; 2025-02-01 23:48:36 UTC; unix"
       }
     },
     "zoo": {
@@ -5140,277 +5276,7 @@
   },
   "files": {
     ".Rprofile": {
-      "checksum": "69ff1d641e900295c16718e58b01fe0f"
-    },
-    "data/pins/AGO_2018_H3/20250805T183805Z-ab220/AGO_2018_H3.parquet": {
-      "checksum": "5fa4da558e50b0cf0b68448857e9266e"
-    },
-    "data/pins/AGO_2018_H3/20250805T183805Z-ab220/data.txt": {
-      "checksum": "d8cd8beadda8dcb0baeaefd5ab9a9520"
-    },
-    "data/pins/AGO_2018_LOC/20250806T072354Z-717e9/AGO_2018_LOC.parquet": {
-      "checksum": "ddd631f05efeb4ef9cdc989c0ac1e768"
-    },
-    "data/pins/AGO_2018_LOC/20250806T072354Z-717e9/data.txt": {
-      "checksum": "68a89534dc2c2e15f4cb18a12e5e2cfe"
-    },
-    "data/pins/AGO_2018/20250805T155828Z-25016/AGO_2018.parquet": {
-      "checksum": "27ff5e8b1a64b8f03303c897733d931f"
-    },
-    "data/pins/AGO_2018/20250805T155828Z-25016/data.txt": {
-      "checksum": "1e175912c4affd12ce6027061912f0c9"
-    },
-    "data/pins/BEN_2018_H3/20250805T183816Z-c457f/BEN_2018_H3.parquet": {
-      "checksum": "97c8ed4ef845f7f69cb8fa3247187853"
-    },
-    "data/pins/BEN_2018_H3/20250805T183816Z-c457f/data.txt": {
-      "checksum": "8d38872bf26e5826455895304b3b782f"
-    },
-    "data/pins/BEN_2018_LOC/20250806T072400Z-3ff1d/BEN_2018_LOC.parquet": {
-      "checksum": "77475cb521f4f8f8febea42575cae8b0"
-    },
-    "data/pins/BEN_2018_LOC/20250806T072400Z-3ff1d/data.txt": {
-      "checksum": "a466a56c67ad3f4851c26886085d1b0b"
-    },
-    "data/pins/BEN_2018/20250805T155840Z-049da/BEN_2018.parquet": {
-      "checksum": "feaa93ff7fb217f75bb050b397d2f5da"
-    },
-    "data/pins/BEN_2018/20250805T155840Z-049da/data.txt": {
-      "checksum": "45955ff980fdad7d19c78ef42c4c34dc"
-    },
-    "data/pins/BEN_2021_H3/20250805T183810Z-fdcdf/BEN_2021_H3.parquet": {
-      "checksum": "154426d6acb417e35a4907ecb057fbee"
-    },
-    "data/pins/BEN_2021_H3/20250805T183810Z-fdcdf/data.txt": {
-      "checksum": "9b83d1e09b0ef686fe0845f072a927dc"
-    },
-    "data/pins/BEN_2021_LOC/20250806T072357Z-54a0c/BEN_2021_LOC.parquet": {
-      "checksum": "f85f6d6eaebabbca48afe08815c0d5f3"
-    },
-    "data/pins/BEN_2021_LOC/20250806T072357Z-54a0c/data.txt": {
-      "checksum": "c22bfa92f8312350799c82f692022303"
-    },
-    "data/pins/BEN_2021/20250805T155834Z-7aa27/BEN_2021.parquet": {
-      "checksum": "bdfc2c5bb5cca792d48ff7df8a52326d"
-    },
-    "data/pins/BEN_2021/20250805T155834Z-7aa27/data.txt": {
-      "checksum": "f906b170fb8bfd1efcc799539c702ba2"
-    },
-    "data/pins/BFA_2018_H3/20250805T183824Z-1f7af/BFA_2018_H3.parquet": {
-      "checksum": "3295a7238c8c92c3ff02315ca4bc28cc"
-    },
-    "data/pins/BFA_2018_H3/20250805T183824Z-1f7af/data.txt": {
-      "checksum": "eb9b79588e49bf867c15d48bfe9f7239"
-    },
-    "data/pins/BFA_2018_LOC/20250806T072406Z-760dd/BFA_2018_LOC.parquet": {
-      "checksum": "e60dc1da671bef6c0853664c8c91facb"
-    },
-    "data/pins/BFA_2018_LOC/20250806T072406Z-760dd/data.txt": {
-      "checksum": "cf2033a88d1e848c60440013f854e567"
-    },
-    "data/pins/BFA_2018/20250805T155852Z-4d333/BFA_2018.parquet": {
-      "checksum": "91c5c5c05ce58b083f191b0a613f11f7"
-    },
-    "data/pins/BFA_2018/20250805T155852Z-4d333/data.txt": {
-      "checksum": "cf37739a14a7ccc9ad39719951672912"
-    },
-    "data/pins/BFA_2021_H3/20250805T183820Z-1a89b/BFA_2021_H3.parquet": {
-      "checksum": "5a0eac04b08e18ad7c01310d6c3c3139"
-    },
-    "data/pins/BFA_2021_H3/20250805T183820Z-1a89b/data.txt": {
-      "checksum": "3df87929cadb20a521920b10b53ab046"
-    },
-    "data/pins/BFA_2021_LOC/20250806T072403Z-256a4/BFA_2021_LOC.parquet": {
-      "checksum": "f449a654b74bf162939c3f4b530235ff"
-    },
-    "data/pins/BFA_2021_LOC/20250806T072403Z-256a4/data.txt": {
-      "checksum": "4bc57f410d6161b5fb0cef87dacbdccd"
-    },
-    "data/pins/BFA_2021/20250805T155846Z-bfec1/BFA_2021.parquet": {
-      "checksum": "2f55ea961a989c1b0de88bcdebf72a45"
-    },
-    "data/pins/BFA_2021/20250805T155846Z-bfec1/data.txt": {
-      "checksum": "d0b6d6cea3a2daaa615d0c9c1f751e8c"
-    },
-    "data/pins/BFA_weather/20250729T112601Z-e5049/BFA_weather.parquet": {
-      "checksum": "164c846afc7b6be3d94fe8beb66e5fc7"
-    },
-    "data/pins/BFA_weather/20250729T112601Z-e5049/data.txt": {
-      "checksum": "d6710847d533a1e667b9853d5f95b590"
-    },
-    "data/pins/BRA_2020_H3/20250805T183911Z-5e33f/BRA_2020_H3.parquet": {
-      "checksum": "14ed7bdc97bc5ef542c10377e9e5ea7d"
-    },
-    "data/pins/BRA_2020_H3/20250805T183911Z-5e33f/data.txt": {
-      "checksum": "077fad0b36bcb4a7eef36f924e07f35c"
-    },
-    "data/pins/BRA_2020_LOC/20250806T072442Z-fc248/BRA_2020_LOC.parquet": {
-      "checksum": "2020c4949426cd276aa9c4a63f656c53"
-    },
-    "data/pins/BRA_2020_LOC/20250806T072442Z-fc248/data.txt": {
-      "checksum": "26f4ddcbb3b193d5f240ed6661032830"
-    },
-    "data/pins/BRA_2020/20250805T155911Z-258e1/BRA_2020.parquet": {
-      "checksum": "30e649d742096d02f90b8df762a5c4e2"
-    },
-    "data/pins/BRA_2020/20250805T155911Z-258e1/data.txt": {
-      "checksum": "78e055061f1fe8fe98c9fd8ceaa351b9"
-    },
-    "data/pins/BRA_2021_H3/20250805T183839Z-87b45/BRA_2021_H3.parquet": {
-      "checksum": "070bfec0d6e0f0664ea41573a45585d9"
-    },
-    "data/pins/BRA_2021_H3/20250805T183839Z-87b45/data.txt": {
-      "checksum": "41f930fb94791b089529daa550218485"
-    },
-    "data/pins/BRA_2021_LOC/20250806T072419Z-8743a/BRA_2021_LOC.parquet": {
-      "checksum": "ba763856ef004aa24d5b0092d5c93111"
-    },
-    "data/pins/BRA_2021_LOC/20250806T072419Z-8743a/data.txt": {
-      "checksum": "94a3473911cb9a5338addfe74da0756e"
-    },
-    "data/pins/BRA_2021/20250805T155901Z-cf8d9/BRA_2021.parquet": {
-      "checksum": "87fee1bb494ab09c7998b1e6a5be36cd"
-    },
-    "data/pins/BRA_2021/20250805T155901Z-cf8d9/data.txt": {
-      "checksum": "5dad41c0f465d5ceb2ba4aedbc6c08eb"
-    },
-    "data/pins/CIV_2018_H3/20250805T183936Z-52fc6/CIV_2018_H3.parquet": {
-      "checksum": "1f72c38969e8863553ffdc1e1ca4a007"
-    },
-    "data/pins/CIV_2018_H3/20250805T183936Z-52fc6/data.txt": {
-      "checksum": "c86c4e16a64b2840cc8dfefcff47f6fa"
-    },
-    "data/pins/CIV_2018_LOC/20250806T072457Z-b493a/CIV_2018_LOC.parquet": {
-      "checksum": "9fa7f1d8b154e41f7d6adfc8a2ead661"
-    },
-    "data/pins/CIV_2018_LOC/20250806T072457Z-b493a/data.txt": {
-      "checksum": "575c2681462e3c76455475ae40683e00"
-    },
-    "data/pins/CIV_2018/20250805T155926Z-b6634/CIV_2018.parquet": {
-      "checksum": "d94fbb336f87b3cbcf630219071e99e5"
-    },
-    "data/pins/CIV_2018/20250805T155926Z-b6634/data.txt": {
-      "checksum": "f48540b47a41513a06bb15cd1f142cf8"
-    },
-    "data/pins/CIV_2021_H3/20250805T183932Z-0a94e/CIV_2021_H3.parquet": {
-      "checksum": "fd6e8393145bbe6b6335fc0bb896c03c"
-    },
-    "data/pins/CIV_2021_H3/20250805T183932Z-0a94e/data.txt": {
-      "checksum": "b242441c60ddc0b949cc094f6488c61b"
-    },
-    "data/pins/CIV_2021_LOC/20250806T072453Z-7ca9d/CIV_2021_LOC.parquet": {
-      "checksum": "09e6012b8a06d367c6c26b9372faf4b4"
-    },
-    "data/pins/CIV_2021_LOC/20250806T072453Z-7ca9d/data.txt": {
-      "checksum": "aaf84b45dd8c9c197bb6929298fefa63"
-    },
-    "data/pins/CIV_2021/20250805T155919Z-4bbee/CIV_2021.parquet": {
-      "checksum": "71ad3b67ed3055face97b34a8754ddeb"
-    },
-    "data/pins/CIV_2021/20250805T155919Z-4bbee/data.txt": {
-      "checksum": "7267c2cb7437178ac9b6371a26f1d9fb"
-    },
-    "data/pins/DOM_2022_H3/20250805T183942Z-abe3b/data.txt": {
-      "checksum": "b3b0ca2768b400ddde2650bae42a7776"
-    },
-    "data/pins/DOM_2022_H3/20250805T183942Z-abe3b/DOM_2022_H3.parquet": {
-      "checksum": "caa1a7c5dd2b561c5ba1c23f9fd5f014"
-    },
-    "data/pins/DOM_2022_LOC/20250806T072500Z-f7e8b/data.txt": {
-      "checksum": "51194a34257c4eb1fc126a4721266dd2"
-    },
-    "data/pins/DOM_2022_LOC/20250806T072500Z-f7e8b/DOM_2022_LOC.parquet": {
-      "checksum": "1d9cb4c7112c6e005513763dfede176d"
-    },
-    "data/pins/DOM_2022/20250805T155932Z-98fb7/data.txt": {
-      "checksum": "d2da5018746eead4758d2b2d90f9587c"
-    },
-    "data/pins/DOM_2022/20250805T155932Z-98fb7/DOM_2022.parquet": {
-      "checksum": "890c24376d203bdf9e7dc431f74cc64e"
-    },
-    "data/pins/FJI_2019_H3/20250805T183946Z-50a2e/data.txt": {
-      "checksum": "4db4b9c7e3e05d3a54017b2a50bff2bf"
-    },
-    "data/pins/FJI_2019_H3/20250805T183946Z-50a2e/FJI_2019_H3.parquet": {
-      "checksum": "099267985f508dc0e50594ec2f3e4dc0"
-    },
-    "data/pins/FJI_2019/20250805T155937Z-837c5/data.txt": {
-      "checksum": "10e95d0f8a581d5b8aba64cff36f1ca5"
-    },
-    "data/pins/FJI_2019/20250805T155937Z-837c5/FJI_2019.parquet": {
-      "checksum": "84d6999232abbebbfe2d5a84b10836ed"
-    },
-    "data/pins/GAB_2017_H3/20250806T072646Z-deb76/data.txt": {
-      "checksum": "a19556620aa4f5859c0eb137e9d199f6"
-    },
-    "data/pins/GAB_2017_H3/20250806T072646Z-deb76/GAB_2017_H3.parquet": {
-      "checksum": "b374308b6c9b5401ef6739da7d0a7e5f"
-    },
-    "data/pins/GAB_2017_LOC/20250806T072650Z-123b1/data.txt": {
-      "checksum": "d862a18c252a128694fadd9e65938ccc"
-    },
-    "data/pins/GAB_2017_LOC/20250806T072650Z-123b1/GAB_2017_LOC.parquet": {
-      "checksum": "acae1af90f416a944b436ddb5c248233"
-    },
-    "data/pins/GAB_2017/20250805T155943Z-ebb49/data.txt": {
-      "checksum": "b7134a54d97e65c31c4e666dcb661659"
-    },
-    "data/pins/GAB_2017/20250805T155943Z-ebb49/GAB_2017.parquet": {
-      "checksum": "eb4bb66dada44ea9869e40fdd30e5d62"
-    },
-    "data/pins/GHA_2016_H3/20250806T072655Z-addd7/data.txt": {
-      "checksum": "641a21e0f0bdde453327fb7d094e1867"
-    },
-    "data/pins/GHA_2016_H3/20250806T072655Z-addd7/GHA_2016_H3.parquet": {
-      "checksum": "4406fecb384fbc35b7c8829590389dd5"
-    },
-    "data/pins/GHA_2016_LOC/20250806T072656Z-b47c4/data.txt": {
-      "checksum": "2e100469f526a04e77c086cc51bcb843"
-    },
-    "data/pins/GHA_2016_LOC/20250806T072656Z-b47c4/GHA_2016_LOC.parquet": {
-      "checksum": "56b6b790ca7c27738784b2f702cfe387"
-    },
-    "data/pins/GHA_2016/20250805T155949Z-5e8d4/data.txt": {
-      "checksum": "5317801d4c49f4ec405c0f79e8be1e17"
-    },
-    "data/pins/GHA_2016/20250805T155949Z-5e8d4/GHA_2016.parquet": {
-      "checksum": "eae601551d5d481a920e673a76b4ba45"
-    },
-    "data/pins/GMB_2015_H3/20250806T072702Z-efdcd/data.txt": {
-      "checksum": "9bfb2c12b2e5704380367019f38a3942"
-    },
-    "data/pins/GMB_2015_H3/20250806T072702Z-efdcd/GMB_2015_H3.parquet": {
-      "checksum": "6feab97037a1d993c470bf5de66ab262"
-    },
-    "data/pins/GMB_2015_LOC/20250806T072704Z-03578/data.txt": {
-      "checksum": "c31fd9c56717a57918aaac2a7a5edb11"
-    },
-    "data/pins/GMB_2015_LOC/20250806T072704Z-03578/GMB_2015_LOC.parquet": {
-      "checksum": "9f3606aca6c89f959db8bd970b135e5e"
-    },
-    "data/pins/GMB_2015/20250805T160003Z-88472/data.txt": {
-      "checksum": "5bd3e63cb50e4912d68b8aa5a72497bb"
-    },
-    "data/pins/GMB_2015/20250805T160003Z-88472/GMB_2015.parquet": {
-      "checksum": "71eea7705a2578f6c62b74f15cf9e6a1"
-    },
-    "data/pins/GMB_2020_H3/20250806T072658Z-ef4d3/data.txt": {
-      "checksum": "58f6310a563f9502e3e70fdb3e260aac"
-    },
-    "data/pins/GMB_2020_H3/20250806T072658Z-ef4d3/GMB_2020_H3.parquet": {
-      "checksum": "3e6522f9d860ecabd00e0793c7f1951a"
-    },
-    "data/pins/GMB_2020_LOC/20250806T072700Z-93974/data.txt": {
-      "checksum": "7f8f6e2d0086d54aef4707cb19887b5d"
-    },
-    "data/pins/GMB_2020_LOC/20250806T072700Z-93974/GMB_2020_LOC.parquet": {
-      "checksum": "a12df7ba61ff5c228b7f13d62b00d2f9"
-    },
-    "data/pins/GMB_2020/20250805T155956Z-c64ec/data.txt": {
-      "checksum": "0f1214c95a058db318a11c7efbdd4fc1"
-    },
-    "data/pins/GMB_2020/20250805T155956Z-c64ec/GMB_2020.parquet": {
-      "checksum": "db6d346ebbe6e3bb7df752c5ba406701"
+      "checksum": "d5de222db1aa48dc43008dff05c5a0e7"
     },
     "data/pins/GNB_2018_H3/20250806T072709Z-d97d3/data.txt": {
       "checksum": "22e6e46a3afc20d26d507e27f3d74fa0"
@@ -5424,11 +5290,11 @@
     "data/pins/GNB_2018_LOC/20250806T072710Z-71144/GNB_2018_LOC.parquet": {
       "checksum": "9fdd67c0244a8195c01c5e820feffc9c"
     },
-    "data/pins/GNB_2018/20250805T160015Z-fdcc9/data.txt": {
-      "checksum": "a80a111e9f058dc82adab6d10e73aa03"
+    "data/pins/GNB_2018/20250806T161949Z-e9885/data.txt": {
+      "checksum": "a9373a7f4aea8be9d5e5869fc0c1ac69"
     },
-    "data/pins/GNB_2018/20250805T160015Z-fdcc9/GNB_2018.parquet": {
-      "checksum": "f8a09b6df2638c946fbb1ac36508254c"
+    "data/pins/GNB_2018/20250806T161949Z-e9885/GNB_2018.parquet": {
+      "checksum": "3acc6d2147665dfff1e1113ffced1960"
     },
     "data/pins/GNB_2021_H3/20250806T072705Z-af66a/data.txt": {
       "checksum": "de064b92381ecbbd519f6672c0cbf1e0"
@@ -5442,671 +5308,23 @@
     "data/pins/GNB_2021_LOC/20250806T072707Z-4b45b/GNB_2021_LOC.parquet": {
       "checksum": "74cbcedd56cb7b54feadcdd56db5c7a1"
     },
-    "data/pins/GNB_2021/20250805T160009Z-78564/data.txt": {
-      "checksum": "9c13c4f2c8446d4fdc91e16508b0bb13"
+    "data/pins/GNB_2021/20250806T161943Z-28428/data.txt": {
+      "checksum": "feff7196de15cc39610fda1bd286bab0"
     },
-    "data/pins/GNB_2021/20250805T160009Z-78564/GNB_2021.parquet": {
-      "checksum": "81d1caabfaa9d1a45d09895e30fa7569"
+    "data/pins/GNB_2021/20250806T161943Z-28428/GNB_2021.parquet": {
+      "checksum": "0fca1b5b9326701123ee5ce1f2c920ba"
     },
-    "data/pins/GTM_2006_H3/20250806T072721Z-80014/data.txt": {
-      "checksum": "8e2ac389b52733d9fb46c97516f0cdad"
+    "data/pins/GNB_weather/20250806T091411Z-9ac41/data.txt": {
+      "checksum": "c6abb44ce9bfc4c4602d5fa2ae5e0f15"
     },
-    "data/pins/GTM_2006_H3/20250806T072721Z-80014/GTM_2006_H3.parquet": {
-      "checksum": "b6b9b47322becf0b0abbd4a88132f11f"
+    "data/pins/GNB_weather/20250806T091411Z-9ac41/GNB_weather.parquet": {
+      "checksum": "c0c61df72bdb786664ab5f5e282275f7"
     },
-    "data/pins/GTM_2006_LOC/20250806T072723Z-83537/data.txt": {
-      "checksum": "b0010e256b73f0727235a5d982528c52"
+    "data/pins/surveys/20250806T122122Z-2aaab/data.txt": {
+      "checksum": "df9a15259e5d91047cab0e5fd4bcd1e9"
     },
-    "data/pins/GTM_2006_LOC/20250806T072723Z-83537/GTM_2006_LOC.parquet": {
-      "checksum": "b1a44fb6c95549bebee4b4fa555ab36f"
-    },
-    "data/pins/GTM_2006/20250805T160034Z-4699a/data.txt": {
-      "checksum": "3aaa6d5a24a3b50f1ecde914ebbd023c"
-    },
-    "data/pins/GTM_2006/20250805T160034Z-4699a/GTM_2006.parquet": {
-      "checksum": "1cdb7c6d16cf48c3e33f77c8897d1c3b"
-    },
-    "data/pins/GTM_2014_H3/20250806T072717Z-5dbe5/data.txt": {
-      "checksum": "c56efe4c9a3323fe2abf2b48faa3697f"
-    },
-    "data/pins/GTM_2014_H3/20250806T072717Z-5dbe5/GTM_2014_H3.parquet": {
-      "checksum": "3e243424610482dffaf8c3e82f51db2d"
-    },
-    "data/pins/GTM_2014_LOC/20250806T072718Z-06d8a/data.txt": {
-      "checksum": "6e25dd2b5f4770b439ab88a33158ee56"
-    },
-    "data/pins/GTM_2014_LOC/20250806T072718Z-06d8a/GTM_2014_LOC.parquet": {
-      "checksum": "0a9ddf66e50c4f8cc41b2ec10b8ca93c"
-    },
-    "data/pins/GTM_2014/20250805T160028Z-fe69c/data.txt": {
-      "checksum": "5c9e3a3c46feaf1272a3902fca045d5e"
-    },
-    "data/pins/GTM_2014/20250805T160028Z-fe69c/GTM_2014.parquet": {
-      "checksum": "e926407edc35a06f032ecd01508d43b2"
-    },
-    "data/pins/GTM_2023_H3/20250806T072713Z-3b0c0/data.txt": {
-      "checksum": "4e41f69b6ff0b3062c13f89ca8d688be"
-    },
-    "data/pins/GTM_2023_H3/20250806T072713Z-3b0c0/GTM_2023_H3.parquet": {
-      "checksum": "ff87178621fec12b7fea57f93baf0ebf"
-    },
-    "data/pins/GTM_2023_LOC/20250806T072714Z-734f6/data.txt": {
-      "checksum": "670232c99d51447dd066bf45196c363d"
-    },
-    "data/pins/GTM_2023_LOC/20250806T072714Z-734f6/GTM_2023_LOC.parquet": {
-      "checksum": "88636d47993607582171fadf5a85e416"
-    },
-    "data/pins/GTM_2023/20250805T160021Z-0215e/data.txt": {
-      "checksum": "f8c784b94c3ca1a2b3f6a23f550f2627"
-    },
-    "data/pins/GTM_2023/20250805T160021Z-0215e/GTM_2023.parquet": {
-      "checksum": "4369f30d4a852fa8974700b3d9f1b52b"
-    },
-    "data/pins/IND_2009_H3/20250806T072844Z-1b63c/data.txt": {
-      "checksum": "16e4e1444a907db1058dc0660203f8e3"
-    },
-    "data/pins/IND_2009_H3/20250806T072844Z-1b63c/IND_2009_H3.parquet": {
-      "checksum": "4eabd1d742ee18999fa74217a3794afc"
-    },
-    "data/pins/IND_2009_LOC/20250806T072850Z-6c2f5/data.txt": {
-      "checksum": "02c0b3ad600dc41ed0c72e25b4ba85a3"
-    },
-    "data/pins/IND_2009_LOC/20250806T072850Z-6c2f5/IND_2009_LOC.parquet": {
-      "checksum": "4e339dd038e26f43f570e94641e30637"
-    },
-    "data/pins/IND_2009/20250805T160356Z-ab89a/data.txt": {
-      "checksum": "672723bc5b29d2c85b5591d75acc6180"
-    },
-    "data/pins/IND_2009/20250805T160356Z-ab89a/IND_2009.parquet": {
-      "checksum": "83677809c322918eb37b451ecb9818aa"
-    },
-    "data/pins/IND_2011_H3/20250806T072827Z-23f57/data.txt": {
-      "checksum": "6bfcd8df12231127662cdc6c0f615112"
-    },
-    "data/pins/IND_2011_H3/20250806T072827Z-23f57/IND_2011_H3.parquet": {
-      "checksum": "66367eb7207ac47ef9fb5860f60f92f5"
-    },
-    "data/pins/IND_2011_LOC/20250806T072834Z-5bf5f/data.txt": {
-      "checksum": "2e5e78ba0a970485434c848e488ecbe1"
-    },
-    "data/pins/IND_2011_LOC/20250806T072834Z-5bf5f/IND_2011_LOC.parquet": {
-      "checksum": "22267b3773d56115be81506d0f7ad8ea"
-    },
-    "data/pins/IND_2011/20250805T160201Z-11b38/data.txt": {
-      "checksum": "c2e43f4565bf9686301aa6af4dcf371f"
-    },
-    "data/pins/IND_2011/20250805T160201Z-11b38/IND_2011.parquet": {
-      "checksum": "c49d19af3480cc0cad2012fd67d5ef84"
-    },
-    "data/pins/IND_2019_H3/20250806T072811Z-c16d5/data.txt": {
-      "checksum": "fec0d21639b3076b655d44336bd4565d"
-    },
-    "data/pins/IND_2019_H3/20250806T072811Z-c16d5/IND_2019_H3.parquet": {
-      "checksum": "a3a34f23e5f0e3adb8b0c12097300893"
-    },
-    "data/pins/IND_2019_LOC/20250806T072817Z-a17eb/data.txt": {
-      "checksum": "db914d03971c142963f3c05d9f3ff2c4"
-    },
-    "data/pins/IND_2019_LOC/20250806T072817Z-a17eb/IND_2019_LOC.parquet": {
-      "checksum": "3040045aa02b22c6b337beab86d35274"
-    },
-    "data/pins/IND_2019/20250805T160120Z-3f2d7/data.txt": {
-      "checksum": "dbb03b15c77e37341845a1d0198b62dc"
-    },
-    "data/pins/IND_2019/20250805T160120Z-3f2d7/IND_2019.parquet": {
-      "checksum": "45c02d65f36532c83d619b2d5c9c0868"
-    },
-    "data/pins/IND_2020_H3/20250806T072753Z-c20aa/data.txt": {
-      "checksum": "b3b9251af49e8506db489d98c7229aaa"
-    },
-    "data/pins/IND_2020_H3/20250806T072753Z-c20aa/IND_2020_H3.parquet": {
-      "checksum": "e26f773ab5927cc58e3b5857183df294"
-    },
-    "data/pins/IND_2020_LOC/20250806T072800Z-1c8a3/data.txt": {
-      "checksum": "91c851594c87e5ddf16b32da484aab64"
-    },
-    "data/pins/IND_2020_LOC/20250806T072800Z-1c8a3/IND_2020_LOC.parquet": {
-      "checksum": "654f05ebd60fcbdbf5ca52d5c8e8d685"
-    },
-    "data/pins/IND_2020/20250805T160054Z-b907d/data.txt": {
-      "checksum": "3668c90987519fefa2b1931a3f234f89"
-    },
-    "data/pins/IND_2020/20250805T160054Z-b907d/IND_2020.parquet": {
-      "checksum": "eaf7edb8a032a715e3a192387f3071ee"
-    },
-    "data/pins/IND_2021_H3/20250806T072734Z-55070/data.txt": {
-      "checksum": "23e43256b5c2649390858009e3eedf00"
-    },
-    "data/pins/IND_2021_H3/20250806T072734Z-55070/IND_2021_H3.parquet": {
-      "checksum": "5a6bb7c464913015793fcc5384c33bd7"
-    },
-    "data/pins/IND_2021_LOC/20250806T072740Z-497ed/data.txt": {
-      "checksum": "925147e3a9309b59d9fad5ebf13d58f3"
-    },
-    "data/pins/IND_2021_LOC/20250806T072740Z-497ed/IND_2021_LOC.parquet": {
-      "checksum": "7a8eca892e79bc649d571ffaa4a99653"
-    },
-    "data/pins/IND_2021/20250805T160044Z-ad955/data.txt": {
-      "checksum": "bcf09f3232b17cc0a801e8f55f77aa22"
-    },
-    "data/pins/IND_2021/20250805T160044Z-ad955/IND_2021.parquet": {
-      "checksum": "12482c3c4b75c6f755344bab3f407c31"
-    },
-    "data/pins/IRN_2013_H3/20250806T072949Z-96fd2/data.txt": {
-      "checksum": "4ad614ebfacdd0c8359f33e22889d11f"
-    },
-    "data/pins/IRN_2013_H3/20250806T072949Z-96fd2/IRN_2013_H3.parquet": {
-      "checksum": "97409a979e34f2aaf970cb3b082964b7"
-    },
-    "data/pins/IRN_2013_LOC/20250806T072952Z-1bd17/data.txt": {
-      "checksum": "73cf62aa935abc9a7120bf6dbd987472"
-    },
-    "data/pins/IRN_2013_LOC/20250806T072952Z-1bd17/IRN_2013_LOC.parquet": {
-      "checksum": "300d640cfbce147bd39a82a8af4484c6"
-    },
-    "data/pins/IRN_2013/20250805T160920Z-da595/data.txt": {
-      "checksum": "5dc57da5a5eb344c09cfbfc4eb747936"
-    },
-    "data/pins/IRN_2013/20250805T160920Z-da595/IRN_2013.parquet": {
-      "checksum": "4ccf4ac93b2fac056a2802ddfec3ce7a"
-    },
-    "data/pins/IRN_2014_H3/20250806T072942Z-6faf7/data.txt": {
-      "checksum": "33c9451903734a1be4f8bb0436027b72"
-    },
-    "data/pins/IRN_2014_H3/20250806T072942Z-6faf7/IRN_2014_H3.parquet": {
-      "checksum": "60fde203784a2ff772e7cb696c5b8fdb"
-    },
-    "data/pins/IRN_2014_LOC/20250806T072945Z-d5d14/data.txt": {
-      "checksum": "ed73ae40faa232f2b750e93bf6e147e7"
-    },
-    "data/pins/IRN_2014_LOC/20250806T072945Z-d5d14/IRN_2014_LOC.parquet": {
-      "checksum": "2940f8e3114209c75e9ab0947a40bf14"
-    },
-    "data/pins/IRN_2014/20250805T160905Z-471b4/data.txt": {
-      "checksum": "8899e94a4ad39de573d392de639a3a5c"
-    },
-    "data/pins/IRN_2014/20250805T160905Z-471b4/IRN_2014.parquet": {
-      "checksum": "29741fbc644b865ce479bbae7b009574"
-    },
-    "data/pins/IRN_2015_H3/20250806T072932Z-843cd/data.txt": {
-      "checksum": "c74987c34839ed323472e0a441588b2f"
-    },
-    "data/pins/IRN_2015_H3/20250806T072932Z-843cd/IRN_2015_H3.parquet": {
-      "checksum": "51bb8f60bb845b6488b1897521b00713"
-    },
-    "data/pins/IRN_2015_LOC/20250806T072934Z-b7168/data.txt": {
-      "checksum": "28e44ee96834e4104edd657df8718caf"
-    },
-    "data/pins/IRN_2015_LOC/20250806T072934Z-b7168/IRN_2015_LOC.parquet": {
-      "checksum": "acdeb039854b04d2e84f4acfc8f46e22"
-    },
-    "data/pins/IRN_2015/20250805T160826Z-f6f8e/data.txt": {
-      "checksum": "a6151fbbc735369b1e331432ef455f29"
-    },
-    "data/pins/IRN_2015/20250805T160826Z-f6f8e/IRN_2015.parquet": {
-      "checksum": "376b21bec60dea82063c6fb4b2b2953a"
-    },
-    "data/pins/IRN_2016_H3/20250806T072925Z-09c25/data.txt": {
-      "checksum": "663f706f7ff6c5451986e8e61570b98a"
-    },
-    "data/pins/IRN_2016_H3/20250806T072925Z-09c25/IRN_2016_H3.parquet": {
-      "checksum": "4c0b43906979694850ad9ca8ba535e74"
-    },
-    "data/pins/IRN_2016_LOC/20250806T072928Z-fc975/data.txt": {
-      "checksum": "0157e0dd0a2fbb95b492a5bfd832274c"
-    },
-    "data/pins/IRN_2016_LOC/20250806T072928Z-fc975/IRN_2016_LOC.parquet": {
-      "checksum": "3fdffeefc32af854a19698dcb4e4bcfc"
-    },
-    "data/pins/IRN_2016/20250805T160554Z-895d3/data.txt": {
-      "checksum": "8bd8e65c37e807f5a46162710f66f8c9"
-    },
-    "data/pins/IRN_2016/20250805T160554Z-895d3/IRN_2016.parquet": {
-      "checksum": "f6618f3163417075a43b13f864c9499f"
-    },
-    "data/pins/IRN_2017_H3/20250806T072918Z-6697e/data.txt": {
-      "checksum": "d10821c5bddc3cf3a699f0ceb8e6237c"
-    },
-    "data/pins/IRN_2017_H3/20250806T072918Z-6697e/IRN_2017_H3.parquet": {
-      "checksum": "3cb4f31e3ab51bddf2ff47f6c7a1978e"
-    },
-    "data/pins/IRN_2017_LOC/20250806T072921Z-4ca32/data.txt": {
-      "checksum": "9ae584064c970aa51eb4ee1e01626f1b"
-    },
-    "data/pins/IRN_2017_LOC/20250806T072921Z-4ca32/IRN_2017_LOC.parquet": {
-      "checksum": "2dd6b18546387ef9c710a0549f4cc231"
-    },
-    "data/pins/IRN_2017/20250805T160426Z-7917a/data.txt": {
-      "checksum": "dede32075b5c26f7abd246f611f92f42"
-    },
-    "data/pins/IRN_2017/20250805T160426Z-7917a/IRN_2017.parquet": {
-      "checksum": "f3932c592cdeb574d85ae4dcfce17514"
-    },
-    "data/pins/IRN_2018_H3/20250806T072912Z-8a96e/data.txt": {
-      "checksum": "582071d3a3ab5683254323c909611e7a"
-    },
-    "data/pins/IRN_2018_H3/20250806T072912Z-8a96e/IRN_2018_H3.parquet": {
-      "checksum": "cdb981f1af57b4c9e0a2145775709b54"
-    },
-    "data/pins/IRN_2018_LOC/20250806T072914Z-ca872/data.txt": {
-      "checksum": "88bb0f7c96bcafb4d231309416293eb5"
-    },
-    "data/pins/IRN_2018_LOC/20250806T072914Z-ca872/IRN_2018_LOC.parquet": {
-      "checksum": "2999ffc9a63c3c605b042ea7afc42d9e"
-    },
-    "data/pins/IRN_2018/20250805T160419Z-0986f/data.txt": {
-      "checksum": "cfd7d88b98edd9958932bb682a02af93"
-    },
-    "data/pins/IRN_2018/20250805T160419Z-0986f/IRN_2018.parquet": {
-      "checksum": "5cf5c57bcc84512bb5563d56e4255a52"
-    },
-    "data/pins/IRN_2019_H3/20250806T072903Z-d5d76/data.txt": {
-      "checksum": "3f6d96eb55ccb5c23f1b7214de26d283"
-    },
-    "data/pins/IRN_2019_H3/20250806T072903Z-d5d76/IRN_2019_H3.parquet": {
-      "checksum": "3766b5e68f2407c9fb0a31a5d3fe6663"
-    },
-    "data/pins/IRN_2019_LOC/20250806T072906Z-d0469/data.txt": {
-      "checksum": "de6856dd080dac35a35cfe73f40ed7d8"
-    },
-    "data/pins/IRN_2019_LOC/20250806T072906Z-d0469/IRN_2019_LOC.parquet": {
-      "checksum": "92f8fe8a1769ffee1ce7b91c707e15c1"
-    },
-    "data/pins/IRN_2019/20250805T160411Z-401cf/data.txt": {
-      "checksum": "a33739767017a19010ee94d414967a63"
-    },
-    "data/pins/IRN_2019/20250805T160411Z-401cf/IRN_2019.parquet": {
-      "checksum": "4fbba5c01abc715e6968d5c868999b8b"
-    },
-    "data/pins/IRN_2020_H3/20250806T072856Z-751a4/data.txt": {
-      "checksum": "f8857f2e33210dada428739f9ef2dbec"
-    },
-    "data/pins/IRN_2020_H3/20250806T072856Z-751a4/IRN_2020_H3.parquet": {
-      "checksum": "4e2232e9bdf1a95557465063240deceb"
-    },
-    "data/pins/IRN_2020_LOC/20250806T072859Z-eb408/data.txt": {
-      "checksum": "ad847037b417972832d06637c60d748c"
-    },
-    "data/pins/IRN_2020_LOC/20250806T072859Z-eb408/IRN_2020_LOC.parquet": {
-      "checksum": "13e33e6c930c141e545dfa5d1bbcec8e"
-    },
-    "data/pins/IRN_2020/20250805T160403Z-ed582/data.txt": {
-      "checksum": "9eb0ad234ae5d7df29861089973af51f"
-    },
-    "data/pins/IRN_2020/20250805T160403Z-ed582/IRN_2020.parquet": {
-      "checksum": "e54fa70c4217f02d031a80b2ee95cca8"
-    },
-    "data/pins/LKA_2012_H3/20250806T072959Z-52368/data.txt": {
-      "checksum": "aaff3049d8fe629912e69244dbc1dfbb"
-    },
-    "data/pins/LKA_2012_H3/20250806T072959Z-52368/LKA_2012_H3.parquet": {
-      "checksum": "6fe5816354814041954dfa7ad5ae3257"
-    },
-    "data/pins/LKA_2012_LOC/20250806T073000Z-beade/data.txt": {
-      "checksum": "a64e9b407d273dd8ae06f29417e4b4c4"
-    },
-    "data/pins/LKA_2012_LOC/20250806T073000Z-beade/LKA_2012_LOC.parquet": {
-      "checksum": "220dd01f4d73a9e5547f9151c5744a9f"
-    },
-    "data/pins/LKA_2012/20250805T161027Z-e104e/data.txt": {
-      "checksum": "195b5c0c00632ad15b6d221107556f7a"
-    },
-    "data/pins/LKA_2012/20250805T161027Z-e104e/LKA_2012.parquet": {
-      "checksum": "b105c739d3262cae49c80005d3afd9ce"
-    },
-    "data/pins/LKA_2016_H3/20250806T072955Z-9a086/data.txt": {
-      "checksum": "79f0f60c8851d1078ff6656a6b93fedf"
-    },
-    "data/pins/LKA_2016_H3/20250806T072955Z-9a086/LKA_2016_H3.parquet": {
-      "checksum": "0c7a8eb9753a9e5194c7c5ee39a640c4"
-    },
-    "data/pins/LKA_2016_LOC/20250806T072957Z-30337/data.txt": {
-      "checksum": "25d586aed6660703fdbeb7ed31ad9a2d"
-    },
-    "data/pins/LKA_2016_LOC/20250806T072957Z-30337/LKA_2016_LOC.parquet": {
-      "checksum": "2e85ef1b11ef996c877f94fd0b17eb8b"
-    },
-    "data/pins/LKA_2016/20250805T160926Z-50d3e/data.txt": {
-      "checksum": "1c1779e5b9dcf4c4bbfb7be22e8f065d"
-    },
-    "data/pins/LKA_2016/20250805T160926Z-50d3e/LKA_2016.parquet": {
-      "checksum": "f40c383e63f17be8184f237545983ff6"
-    },
-    "data/pins/MLI_2018_H3/20250806T073006Z-7ec05/data.txt": {
-      "checksum": "c259632e9386cf92f68fdf52f10857cc"
-    },
-    "data/pins/MLI_2018_H3/20250806T073006Z-7ec05/MLI_2018_H3.parquet": {
-      "checksum": "c78105a6ae25e7dd8a27878096cb3177"
-    },
-    "data/pins/MLI_2018_LOC/20250806T073007Z-952e4/data.txt": {
-      "checksum": "d031bc068fdfa1799315dfdac0f23d70"
-    },
-    "data/pins/MLI_2018_LOC/20250806T073007Z-952e4/MLI_2018_LOC.parquet": {
-      "checksum": "721be342e3a25b9a35c5b42a318d77e2"
-    },
-    "data/pins/MLI_2018/20250805T161053Z-6a4c9/data.txt": {
-      "checksum": "0c207da5818874181247c2683610e808"
-    },
-    "data/pins/MLI_2018/20250805T161053Z-6a4c9/MLI_2018.parquet": {
-      "checksum": "0c89aed40991f2b0f6b58adbd16c795d"
-    },
-    "data/pins/MLI_2021_H3/20250806T073002Z-eec16/data.txt": {
-      "checksum": "ddf467b2d1b2121e1a9189a775ae203f"
-    },
-    "data/pins/MLI_2021_H3/20250806T073002Z-eec16/MLI_2021_H3.parquet": {
-      "checksum": "3ea4e0c478c18e70efd56fe7e4ed2b4a"
-    },
-    "data/pins/MLI_2021_LOC/20250806T073004Z-90df2/data.txt": {
-      "checksum": "4cc72ed66478aaf28591a376bfee22cb"
-    },
-    "data/pins/MLI_2021_LOC/20250806T073004Z-90df2/MLI_2021_LOC.parquet": {
-      "checksum": "707e7ec273d9cf431e0807b10556f18d"
-    },
-    "data/pins/MLI_2021/20250805T161039Z-9fcfc/data.txt": {
-      "checksum": "1cfc34aad981cd9cc272988117c4e309"
-    },
-    "data/pins/MLI_2021/20250805T161039Z-9fcfc/MLI_2021.parquet": {
-      "checksum": "0ed7b394ecabebb93d1558cb6210f5e3"
-    },
-    "data/pins/MMR_2017_H3/20250806T073012Z-4d6da/data.txt": {
-      "checksum": "6ba3997c5475287c327f4f784608bb7b"
-    },
-    "data/pins/MMR_2017_H3/20250806T073012Z-4d6da/MMR_2017_H3.parquet": {
-      "checksum": "a156a765b1f7b7341c64d4e6bd726b15"
-    },
-    "data/pins/MMR_2017_LOC/20250806T073014Z-01f31/data.txt": {
-      "checksum": "7641f2b1dbfccc923438db2ead74af4d"
-    },
-    "data/pins/MMR_2017_LOC/20250806T073014Z-01f31/MMR_2017_LOC.parquet": {
-      "checksum": "bbd08d44ea9fafa2024859c541520366"
-    },
-    "data/pins/MMR_2017/20250805T161122Z-e26e6/data.txt": {
-      "checksum": "d2010c65df43f97e54f7f0e1c236c18c"
-    },
-    "data/pins/MMR_2017/20250805T161122Z-e26e6/MMR_2017.parquet": {
-      "checksum": "73a129dab037d4b4edbd4afc904b1bb6"
-    },
-    "data/pins/MNG_2022_H3/20250806T073017Z-6a06b/data.txt": {
-      "checksum": "9e3478934f7b6136f79dcdecb38e94ed"
-    },
-    "data/pins/MNG_2022_H3/20250806T073017Z-6a06b/MNG_2022_H3.parquet": {
-      "checksum": "a5cac0e5bec6bc782d61c80f2b99485a"
-    },
-    "data/pins/MNG_2022_LOC/20250806T073019Z-fbcaa/data.txt": {
-      "checksum": "312ecb4e180fb1d9d350bcef0c3854fd"
-    },
-    "data/pins/MNG_2022_LOC/20250806T073019Z-fbcaa/MNG_2022_LOC.parquet": {
-      "checksum": "7261fa0a1ea98e7c568aa4c7a93dfdd7"
-    },
-    "data/pins/MNG_2022/20250805T161132Z-f9c53/data.txt": {
-      "checksum": "94fd66f6f1ffe453f1cd3425c86ba5f2"
-    },
-    "data/pins/MNG_2022/20250805T161132Z-f9c53/MNG_2022.parquet": {
-      "checksum": "fb96656bd9e1ac6efdc8417bfb2c9944"
-    },
-    "data/pins/MRT_2014_H3/20250806T073029Z-5bfaa/data.txt": {
-      "checksum": "a7fd4eddc0f973460f63d9fcddb69694"
-    },
-    "data/pins/MRT_2014_H3/20250806T073029Z-5bfaa/MRT_2014_H3.parquet": {
-      "checksum": "b3b745b8f10a9527a2a8f7efe95036ea"
-    },
-    "data/pins/MRT_2014_LOC/20250806T073031Z-f4bb7/data.txt": {
-      "checksum": "3438f837fdb6a98e4e35e90dfd7f4354"
-    },
-    "data/pins/MRT_2014_LOC/20250806T073031Z-f4bb7/MRT_2014_LOC.parquet": {
-      "checksum": "901f0da3db135d00cdf851e133010375"
-    },
-    "data/pins/MRT_2014/20250805T161156Z-8fe7c/data.txt": {
-      "checksum": "231f97a5aa2f8c6277accc99462da4fa"
-    },
-    "data/pins/MRT_2014/20250805T161156Z-8fe7c/MRT_2014.parquet": {
-      "checksum": "f1f61f455c4eec28625c1116876c3630"
-    },
-    "data/pins/MRT_2019_H3/20250806T073022Z-2e4fd/data.txt": {
-      "checksum": "a5f4c3f7ecba17e0a943c756ff13e56c"
-    },
-    "data/pins/MRT_2019_H3/20250806T073022Z-2e4fd/MRT_2019_H3.parquet": {
-      "checksum": "63551b622dfa555c25a829e5db5f9962"
-    },
-    "data/pins/MRT_2019_LOC/20250806T073024Z-ebfe1/data.txt": {
-      "checksum": "66c23292cff55c4d9b0cbbfe7a405c8e"
-    },
-    "data/pins/MRT_2019_LOC/20250806T073024Z-ebfe1/MRT_2019_LOC.parquet": {
-      "checksum": "70eee1413de255c1a492685efd50c503"
-    },
-    "data/pins/MRT_2019/20250805T161147Z-2f86e/data.txt": {
-      "checksum": "7975915dc1e340d5e503a5ffb989529f"
-    },
-    "data/pins/MRT_2019/20250805T161147Z-2f86e/MRT_2019.parquet": {
-      "checksum": "443da8f9c45c0134a45ba9c3b856c7de"
-    },
-    "data/pins/MWI_2010_H3/20250806T073041Z-344e0/data.txt": {
-      "checksum": "05d4931a0e618bafa43de61d181d6305"
-    },
-    "data/pins/MWI_2010_H3/20250806T073041Z-344e0/MWI_2010_H3.parquet": {
-      "checksum": "7764dc28efcc1c160f3387e16151f988"
-    },
-    "data/pins/MWI_2010_LOC/20250806T073043Z-c9ddc/data.txt": {
-      "checksum": "9296fad66ac53ae48c2df53961a30575"
-    },
-    "data/pins/MWI_2010_LOC/20250806T073043Z-c9ddc/MWI_2010_LOC.parquet": {
-      "checksum": "0e162968d2602c25709d7399e1e7a672"
-    },
-    "data/pins/MWI_2010/20250805T161229Z-d4542/data.txt": {
-      "checksum": "90e54500d264dbfd9f55b9ebbbcc1ee1"
-    },
-    "data/pins/MWI_2010/20250805T161229Z-d4542/MWI_2010.parquet": {
-      "checksum": "9556de074f3bf1784005fcfe7930753d"
-    },
-    "data/pins/MWI_2016_H3/20250806T073038Z-07397/data.txt": {
-      "checksum": "4067de782391bb8fdeed3ce65c851a31"
-    },
-    "data/pins/MWI_2016_H3/20250806T073038Z-07397/MWI_2016_H3.parquet": {
-      "checksum": "83d51504e2e65ef354ed9ad221c7e4f0"
-    },
-    "data/pins/MWI_2016_LOC/20250806T073039Z-161ef/data.txt": {
-      "checksum": "a61b151020a77b6a3581441d71d725c1"
-    },
-    "data/pins/MWI_2016_LOC/20250806T073039Z-161ef/MWI_2016_LOC.parquet": {
-      "checksum": "fc2d888393a70f1c1d9e19eabed26044"
-    },
-    "data/pins/MWI_2016/20250805T161216Z-af84a/data.txt": {
-      "checksum": "ef2eced7b3227f84d4cca6b28047c16e"
-    },
-    "data/pins/MWI_2016/20250805T161216Z-af84a/MWI_2016.parquet": {
-      "checksum": "64dea747b1eeaa593fa6b440e185585b"
-    },
-    "data/pins/MWI_2019_H3/20250806T073034Z-35738/data.txt": {
-      "checksum": "53106ef7a6a4946bb35ad6e345809247"
-    },
-    "data/pins/MWI_2019_H3/20250806T073034Z-35738/MWI_2019_H3.parquet": {
-      "checksum": "299e1a1eb8e34005ec5af6946cb5c6b3"
-    },
-    "data/pins/MWI_2019_LOC/20250806T073036Z-62e00/data.txt": {
-      "checksum": "e4d8a18d89ca1d0425e0c18cf1fef356"
-    },
-    "data/pins/MWI_2019_LOC/20250806T073036Z-62e00/MWI_2019_LOC.parquet": {
-      "checksum": "af9e185b3d8da1626891679355210ca2"
-    },
-    "data/pins/MWI_2019/20250805T161205Z-1ce2c/data.txt": {
-      "checksum": "32a6cf7ab369f5c7b88614ae9d8eb817"
-    },
-    "data/pins/MWI_2019/20250805T161205Z-1ce2c/MWI_2019.parquet": {
-      "checksum": "c3210f5b328a51a6faf1793439eb7ed5"
-    },
-    "data/pins/NER_2018_H3/20250806T073050Z-da303/data.txt": {
-      "checksum": "0de4a83250113511d09df0d2f0ae3a53"
-    },
-    "data/pins/NER_2018_H3/20250806T073050Z-da303/NER_2018_H3.parquet": {
-      "checksum": "43c154316505ce0fd3b7012e45e4cee6"
-    },
-    "data/pins/NER_2018_LOC/20250806T073051Z-9544c/data.txt": {
-      "checksum": "c7121df45d6d3fac81214a9fc7a40e3b"
-    },
-    "data/pins/NER_2018_LOC/20250806T073051Z-9544c/NER_2018_LOC.parquet": {
-      "checksum": "7142385e004a5271d3cb081f9a0f341a"
-    },
-    "data/pins/NER_2018/20250805T161254Z-54d18/data.txt": {
-      "checksum": "3e6cbacda46683c87f5bec99216e983e"
-    },
-    "data/pins/NER_2018/20250805T161254Z-54d18/NER_2018.parquet": {
-      "checksum": "de5c32421024f1489984d30e005c2974"
-    },
-    "data/pins/NER_2021_H3/20250806T073045Z-34596/data.txt": {
-      "checksum": "d1cebfd8f87e8532d8eadf00a9797ecd"
-    },
-    "data/pins/NER_2021_H3/20250806T073045Z-34596/NER_2021_H3.parquet": {
-      "checksum": "afa16831660fb0d75d33f716b7c2db6d"
-    },
-    "data/pins/NER_2021_LOC/20250806T073046Z-345f9/data.txt": {
-      "checksum": "e242354fed3345b0c1763cc7ea0130e6"
-    },
-    "data/pins/NER_2021_LOC/20250806T073046Z-345f9/NER_2021_LOC.parquet": {
-      "checksum": "a290ffbd468c890c6879fffdd486d481"
-    },
-    "data/pins/NER_2021/20250805T161244Z-283ad/data.txt": {
-      "checksum": "3ab412225d65b0edfeea3a089310bbdb"
-    },
-    "data/pins/NER_2021/20250805T161244Z-283ad/NER_2021.parquet": {
-      "checksum": "b279f4e2bfaeb300083abee3415ae58f"
-    },
-    "data/pins/NGA_2018_H3/20250806T073056Z-b4f7a/data.txt": {
-      "checksum": "8490d96b26314a7e9d6f18eb62bfd747"
-    },
-    "data/pins/NGA_2018_H3/20250806T073056Z-b4f7a/NGA_2018_H3.parquet": {
-      "checksum": "8149cd667ee53688cdc76bc83e2ec794"
-    },
-    "data/pins/NGA_2018_LOC/20250806T073059Z-4a422/data.txt": {
-      "checksum": "0736f403238f3a983d4d835a669fc071"
-    },
-    "data/pins/NGA_2018_LOC/20250806T073059Z-4a422/NGA_2018_LOC.parquet": {
-      "checksum": "4e19deef1fdadf5c8eaf796583373735"
-    },
-    "data/pins/NGA_2018/20250805T161311Z-bd0a2/data.txt": {
-      "checksum": "359958864f7f5f199db34e9703a28710"
-    },
-    "data/pins/NGA_2018/20250805T161311Z-bd0a2/NGA_2018.parquet": {
-      "checksum": "fc2145a17dc58aaa5d000907e44e7240"
-    },
-    "data/pins/NPL_2010_H3/20250806T073103Z-20817/data.txt": {
-      "checksum": "53e67497583f98284bca2430fd331098"
-    },
-    "data/pins/NPL_2010_H3/20250806T073103Z-20817/NPL_2010_H3.parquet": {
-      "checksum": "8297009451cb87edec9f63dddf48173d"
-    },
-    "data/pins/NPL_2010_LOC/20250806T073106Z-fd118/data.txt": {
-      "checksum": "53b3c3a7e366c33636f64d1d4dbbda3d"
-    },
-    "data/pins/NPL_2010_LOC/20250806T073106Z-fd118/NPL_2010_LOC.parquet": {
-      "checksum": "0388af007d9f6831f32331599a1503f5"
-    },
-    "data/pins/NPL_2010/20250805T161325Z-12056/data.txt": {
-      "checksum": "13699d02ae33227205e83554a195e74c"
-    },
-    "data/pins/NPL_2010/20250805T161325Z-12056/NPL_2010.parquet": {
-      "checksum": "68bf750e877aa0dce52a9e8bea6c8031"
-    },
-    "data/pins/PER_2022_H3/20250806T073110Z-e9210/data.txt": {
-      "checksum": "125af5d698886597d7baa295b6d2ad21"
-    },
-    "data/pins/PER_2022_H3/20250806T073110Z-e9210/PER_2022_H3.parquet": {
-      "checksum": "9ae71ac498cf92dfebcd4ea0b29c7ce9"
-    },
-    "data/pins/PER_2022_LOC/20250806T073113Z-9a05f/data.txt": {
-      "checksum": "74b02a5b8ad4d26f598519170a0432bd"
-    },
-    "data/pins/PER_2022_LOC/20250806T073113Z-9a05f/PER_2022_LOC.parquet": {
-      "checksum": "224806d28f3b5b39e6e18b534b52ec2e"
-    },
-    "data/pins/PER_2022/20250805T161337Z-308ff/data.txt": {
-      "checksum": "d14a35b1a73db2fb0e9ceca21c40b6bd"
-    },
-    "data/pins/PER_2022/20250805T161337Z-308ff/PER_2022.parquet": {
-      "checksum": "32b7aea778be561491321e79b10ef192"
-    },
-    "data/pins/SEN_2018_H3/20250806T073119Z-99755/data.txt": {
-      "checksum": "4fddb50bc55d8291597a468136804e00"
-    },
-    "data/pins/SEN_2018_H3/20250806T073119Z-99755/SEN_2018_H3.parquet": {
-      "checksum": "1492ba01effb72db28d4d12e4849f9ec"
-    },
-    "data/pins/SEN_2018_LOC/20250806T073121Z-a597d/data.txt": {
-      "checksum": "f8061401672a5e970f906810c1fee264"
-    },
-    "data/pins/SEN_2018_LOC/20250806T073121Z-a597d/SEN_2018_LOC.parquet": {
-      "checksum": "2d52888b8ae4464c1eb3ecf2dc2a8644"
-    },
-    "data/pins/SEN_2018/20250805T161359Z-cc1ef/data.txt": {
-      "checksum": "154cc0ea902ed82876fa66262eace501"
-    },
-    "data/pins/SEN_2018/20250805T161359Z-cc1ef/SEN_2018.parquet": {
-      "checksum": "c17319a13ab4c87f22587cbbd054388a"
-    },
-    "data/pins/SEN_2021_H3/20250806T073115Z-eab6b/data.txt": {
-      "checksum": "7f9d280c314f77b3bac8c0a887231f40"
-    },
-    "data/pins/SEN_2021_H3/20250806T073115Z-eab6b/SEN_2021_H3.parquet": {
-      "checksum": "ba4987446b7926d51abcde08eb2d4187"
-    },
-    "data/pins/SEN_2021_LOC/20250806T073117Z-94dee/data.txt": {
-      "checksum": "820dbbad4dd31772c21ed326d6bdf3a9"
-    },
-    "data/pins/SEN_2021_LOC/20250806T073117Z-94dee/SEN_2021_LOC.parquet": {
-      "checksum": "18c66f9ab7e61e068d17a66767166e4f"
-    },
-    "data/pins/SEN_2021/20250805T161350Z-2fffe/data.txt": {
-      "checksum": "3e26c6b445e54c6f9b82142515307efe"
-    },
-    "data/pins/SEN_2021/20250805T161350Z-2fffe/SEN_2021.parquet": {
-      "checksum": "b5dc5f13bb13cf9642f20ad1dc9ad476"
-    },
-    "data/pins/SEN_weather/20250729T112635Z-9cb49/data.txt": {
-      "checksum": "c2b29a2084ed1a87a80e1d854cdb5d6a"
-    },
-    "data/pins/SEN_weather/20250729T112635Z-9cb49/SEN_weather.parquet": {
-      "checksum": "cba97b3444bd923ebefe01a805d67ebc"
-    },
-    "data/pins/surveys/20250805T163406Z-79e2c/data.txt": {
-      "checksum": "946f15f014cd205ee0a065c7292c7058"
-    },
-    "data/pins/surveys/20250805T163406Z-79e2c/surveys.parquet": {
-      "checksum": "c5dc204403026b6f5a1fdcc6ec025b78"
-    },
-    "data/pins/TCD_2018_H3/20250806T073128Z-8f43d/data.txt": {
-      "checksum": "3d4a95a042e69d4d5c101887d32c3946"
-    },
-    "data/pins/TCD_2018_H3/20250806T073128Z-8f43d/TCD_2018_H3.parquet": {
-      "checksum": "cccb7ab378d31cca35fe3d51558a5fe0"
-    },
-    "data/pins/TCD_2018_LOC/20250806T073129Z-e9133/data.txt": {
-      "checksum": "ec801e423d24cf70044f2531f4e3016c"
-    },
-    "data/pins/TCD_2018_LOC/20250806T073129Z-e9133/TCD_2018_LOC.parquet": {
-      "checksum": "b10191df3b6897ef014172f2e002d610"
-    },
-    "data/pins/TCD_2018/20250805T161426Z-329d2/data.txt": {
-      "checksum": "5cc1bdc999dd268b4afa32b078bcf72b"
-    },
-    "data/pins/TCD_2018/20250805T161426Z-329d2/TCD_2018.parquet": {
-      "checksum": "24712061c3e85faf59c1b026d1a43199"
-    },
-    "data/pins/TCD_2022_H3/20250806T073123Z-81212/data.txt": {
-      "checksum": "2e4fb9c4931cc6ae62a62b23f1be3c8b"
-    },
-    "data/pins/TCD_2022_H3/20250806T073123Z-81212/TCD_2022_H3.parquet": {
-      "checksum": "08a6041302d4de909a5c431cfe88affd"
-    },
-    "data/pins/TCD_2022_LOC/20250806T073124Z-ca132/data.txt": {
-      "checksum": "7408c19706a11c98187b56cb70b71868"
-    },
-    "data/pins/TCD_2022_LOC/20250806T073124Z-ca132/TCD_2022_LOC.parquet": {
-      "checksum": "9edcc07f632a40b6bc1b505b0bccdcfb"
-    },
-    "data/pins/TCD_2022/20250805T161413Z-6dd8a/data.txt": {
-      "checksum": "68ccdb4ceb6477127ce38524076fd203"
-    },
-    "data/pins/TCD_2022/20250805T161413Z-6dd8a/TCD_2022.parquet": {
-      "checksum": "50dc7648ef30e964a64f95a15778826e"
+    "data/pins/surveys/20250806T122122Z-2aaab/surveys.parquet": {
+      "checksum": "c697238b57fc88ea9ffbf36804def3b8"
     },
     "data/pins/TGO_2018_H3/20250806T073136Z-d6a92/data.txt": {
       "checksum": "28a4510dd0800b29e23bfdcc4873a636"
@@ -6120,11 +5338,11 @@
     "data/pins/TGO_2018_LOC/20250806T073138Z-4b8ea/TGO_2018_LOC.parquet": {
       "checksum": "587de99cbc4bdb65312eaad40c9ef231"
     },
-    "data/pins/TGO_2018/20250805T161446Z-72b80/data.txt": {
-      "checksum": "5e4135a8c786fc1a68b06707de65ca41"
+    "data/pins/TGO_2018/20250806T162416Z-254d2/data.txt": {
+      "checksum": "52539b1d50391fd0b4c745176f564ead"
     },
-    "data/pins/TGO_2018/20250805T161446Z-72b80/TGO_2018.parquet": {
-      "checksum": "f2bf33bbecbd291b83e3596e0f943c2f"
+    "data/pins/TGO_2018/20250806T162416Z-254d2/TGO_2018.parquet": {
+      "checksum": "838316cbe900c69f6a5b38308cc672f8"
     },
     "data/pins/TGO_2021_H3/20250806T073133Z-8fe71/data.txt": {
       "checksum": "c074faa01f7dfe079238e39b9ae5ddd8"
@@ -6138,11 +5356,11 @@
     "data/pins/TGO_2021_LOC/20250806T073134Z-c7970/TGO_2021_LOC.parquet": {
       "checksum": "b4fe73e6db83b19bea057142ef08a3fc"
     },
-    "data/pins/TGO_2021/20250805T161437Z-9e7a7/data.txt": {
-      "checksum": "5a28e1fbcc122aa22291422d1b28a60c"
+    "data/pins/TGO_2021/20250806T162410Z-00919/data.txt": {
+      "checksum": "cc9b3687a6e3a42008dd040d2f312ff9"
     },
-    "data/pins/TGO_2021/20250805T161437Z-9e7a7/TGO_2021.parquet": {
-      "checksum": "4593679e95da4a1d3c1f836eabe53c5e"
+    "data/pins/TGO_2021/20250806T162410Z-00919/TGO_2021.parquet": {
+      "checksum": "609f1da585c4c04e56d1f84011be1dc6"
     },
     "data/pins/TGO_weather/20250729T112654Z-b5df4/data.txt": {
       "checksum": "b6b65cbaeb64d395edf1ad969e98ef6a"
@@ -6150,137 +5368,11 @@
     "data/pins/TGO_weather/20250729T112654Z-b5df4/TGO_weather.parquet": {
       "checksum": "0e2ab106a3b3d51b9844cdef2202c42b"
     },
-    "data/pins/TLS_2014_H3/20250806T073140Z-11a76/data.txt": {
-      "checksum": "7a2ac4d482b68dade816940cdd8da26a"
+    "data/pins/varlist/20250806T161754Z-fa55a/data.txt": {
+      "checksum": "c39e0b8ca448897a58f215c13431dfce"
     },
-    "data/pins/TLS_2014_H3/20250806T073140Z-11a76/TLS_2014_H3.parquet": {
-      "checksum": "1e685fe37be1c46e92c094f5ea425429"
-    },
-    "data/pins/TLS_2014_LOC/20250806T073142Z-a9f7a/data.txt": {
-      "checksum": "aa0e42b67d6ff24401aa8824c95eb7a4"
-    },
-    "data/pins/TLS_2014_LOC/20250806T073142Z-a9f7a/TLS_2014_LOC.parquet": {
-      "checksum": "9b612d2efc3a1e474069ad092b493ebd"
-    },
-    "data/pins/TLS_2014/20250805T161455Z-54d37/data.txt": {
-      "checksum": "8286c2236e9389be5b33c96f47413b65"
-    },
-    "data/pins/TLS_2014/20250805T161455Z-54d37/TLS_2014.parquet": {
-      "checksum": "86b4f9c1ba9055f8114c8d7b0e2dff73"
-    },
-    "data/pins/varlist/20250804T140130Z-b7058/data.txt": {
-      "checksum": "e6688326d6c9af5dee267850473ac59b"
-    },
-    "data/pins/varlist/20250804T140130Z-b7058/varlist.parquet": {
-      "checksum": "aec9de53a298c332a4a025101b90d996"
-    },
-    "data/pins/VNM_2012_H3/20250806T073210Z-e2764/data.txt": {
-      "checksum": "6b0028a2a3331ac0af244781c19a5adb"
-    },
-    "data/pins/VNM_2012_H3/20250806T073210Z-e2764/VNM_2012_H3.parquet": {
-      "checksum": "46e9c4251f47e895fbe5bc3b2c238c3a"
-    },
-    "data/pins/VNM_2012_LOC/20250806T073211Z-5b762/data.txt": {
-      "checksum": "4122fbf67689e99b345622d6ef94331e"
-    },
-    "data/pins/VNM_2012_LOC/20250806T073211Z-5b762/VNM_2012_LOC.parquet": {
-      "checksum": "b3210e21c1907d51da4fcdcdc794b7af"
-    },
-    "data/pins/VNM_2012/20250805T163221Z-d6028/data.txt": {
-      "checksum": "110329d408b2ce6af2f0531d88627ea6"
-    },
-    "data/pins/VNM_2012/20250805T163221Z-d6028/VNM_2012.parquet": {
-      "checksum": "1bfed54a039f60baf984b0d3803166c2"
-    },
-    "data/pins/VNM_2014_H3/20250806T073205Z-7a739/data.txt": {
-      "checksum": "931d9b6f92f3d9755de1b99320e52fda"
-    },
-    "data/pins/VNM_2014_H3/20250806T073205Z-7a739/VNM_2014_H3.parquet": {
-      "checksum": "ad8c25fdf238e4233a637fe5c61d6903"
-    },
-    "data/pins/VNM_2014_LOC/20250806T073207Z-145ad/data.txt": {
-      "checksum": "4166cde65cb15582c03dee2c87fdafb2"
-    },
-    "data/pins/VNM_2014_LOC/20250806T073207Z-145ad/VNM_2014_LOC.parquet": {
-      "checksum": "d32fdba45b3341862f4d472e447cb03d"
-    },
-    "data/pins/VNM_2014/20250805T161624Z-5de0c/data.txt": {
-      "checksum": "36dcb029009537251f48302d047876fc"
-    },
-    "data/pins/VNM_2014/20250805T161624Z-5de0c/VNM_2014.parquet": {
-      "checksum": "6fb594ac62fb7dcfcfbac0543e078403"
-    },
-    "data/pins/VNM_2016_H3/20250806T073200Z-8fcc9/data.txt": {
-      "checksum": "bdbb4534b173304d02787236f2c41df4"
-    },
-    "data/pins/VNM_2016_H3/20250806T073200Z-8fcc9/VNM_2016_H3.parquet": {
-      "checksum": "c6ab5f4a4797c44615c7a192b939d784"
-    },
-    "data/pins/VNM_2016_LOC/20250806T073202Z-b8bb7/data.txt": {
-      "checksum": "eb1b26c366a154de3ac6f9c699b90bb3"
-    },
-    "data/pins/VNM_2016_LOC/20250806T073202Z-b8bb7/VNM_2016_LOC.parquet": {
-      "checksum": "ef903519525b30ce2dfafe88f4ff63e6"
-    },
-    "data/pins/VNM_2016/20250805T161603Z-6fb2c/data.txt": {
-      "checksum": "f6e7ae5cd25355aa2a1c86a70ff16643"
-    },
-    "data/pins/VNM_2016/20250805T161603Z-6fb2c/VNM_2016.parquet": {
-      "checksum": "c036ade0e4ef1f9a38734104a5cb9306"
-    },
-    "data/pins/VNM_2018_H3/20250806T073156Z-997fa/data.txt": {
-      "checksum": "fa10704dfcc555c9ef1464a2b57baf5f"
-    },
-    "data/pins/VNM_2018_H3/20250806T073156Z-997fa/VNM_2018_H3.parquet": {
-      "checksum": "e35948ca3a714b80b6c5a3d1e7b4a5f9"
-    },
-    "data/pins/VNM_2018_LOC/20250806T073158Z-1483f/data.txt": {
-      "checksum": "0a10e799c502a56eecfb0d19b79a51bc"
-    },
-    "data/pins/VNM_2018_LOC/20250806T073158Z-1483f/VNM_2018_LOC.parquet": {
-      "checksum": "702887f7c0d358ad4eac148fc2974389"
-    },
-    "data/pins/VNM_2018/20250805T161542Z-87072/data.txt": {
-      "checksum": "19701cf7d1b9aaeeacddbfaf0ee3f3f5"
-    },
-    "data/pins/VNM_2018/20250805T161542Z-87072/VNM_2018.parquet": {
-      "checksum": "61667cffa3f0641daedb515fe6f7c944"
-    },
-    "data/pins/VNM_2020_H3/20250806T073151Z-840b7/data.txt": {
-      "checksum": "fe0472380d553a34059d6c99ca8c4a7a"
-    },
-    "data/pins/VNM_2020_H3/20250806T073151Z-840b7/VNM_2020_H3.parquet": {
-      "checksum": "d43ce2938d05e3f04b1837d3cfc119f8"
-    },
-    "data/pins/VNM_2020_LOC/20250806T073154Z-60f18/data.txt": {
-      "checksum": "ed9fac2a1bf85e3a83be586112547127"
-    },
-    "data/pins/VNM_2020_LOC/20250806T073154Z-60f18/VNM_2020_LOC.parquet": {
-      "checksum": "39fc449ef1688b180dc1eac08cdf8a96"
-    },
-    "data/pins/VNM_2020/20250805T161524Z-bb01e/data.txt": {
-      "checksum": "db0bda34bafc792925627c580da0f8c4"
-    },
-    "data/pins/VNM_2020/20250805T161524Z-bb01e/VNM_2020.parquet": {
-      "checksum": "6a0726f6e666ee6ca7e441e3ef16416d"
-    },
-    "data/pins/VNM_2022_H3/20250806T073147Z-f8217/data.txt": {
-      "checksum": "4f40c69b24ef485b10b894fd2361e409"
-    },
-    "data/pins/VNM_2022_H3/20250806T073147Z-f8217/VNM_2022_H3.parquet": {
-      "checksum": "b6c5d475fad6b6ce0dbf06c5eaa2b099"
-    },
-    "data/pins/VNM_2022_LOC/20250806T073149Z-17034/data.txt": {
-      "checksum": "2abbbee7ef8b2deb65a5de47b3293ee9"
-    },
-    "data/pins/VNM_2022_LOC/20250806T073149Z-17034/VNM_2022_LOC.parquet": {
-      "checksum": "945cb66c67791eb183c300dd37277e80"
-    },
-    "data/pins/VNM_2022/20250805T161509Z-699e5/data.txt": {
-      "checksum": "c27a4c085da6a697bd3aecb10bd55799"
-    },
-    "data/pins/VNM_2022/20250805T161509Z-699e5/VNM_2022.parquet": {
-      "checksum": "3a625ed795ebff8eb6301f4278813551"
+    "data/pins/varlist/20250806T161754Z-fa55a/varlist.parquet": {
+      "checksum": "83511d15ee332e54695240d62fba2b1f"
     },
     "data/pins/weather_varlist/20250729T112700Z-6e32c/data.txt": {
       "checksum": "ea6a89a2ccb81b1c9a34d5a1e7716d60"
@@ -6289,16 +5381,16 @@
       "checksum": "48e67d22e7ebff841cbb7ff49567ba11"
     },
     "data/survey_prep_errors.csv": {
-      "checksum": "9077eba8e7ec72aa141f5d68487323b2"
+      "checksum": "a227d42afbcc590b4e949075cde4a5b6"
     },
     "data/wiseapp_variables.csv": {
-      "checksum": "b1b5a8482531777ac340f1b77beec608"
+      "checksum": "53280aea02455368e3fb2c11972518f6"
     },
     "data/wiseapp_variables.xlsx": {
-      "checksum": "bbb46492aadc240a5108d996f625e0ed"
+      "checksum": "174abae6d152992af153aaf9fb0ea0e9"
     },
     "global.R": {
-      "checksum": "b34a5f0e384abff3b5813b3d75d2f97b"
+      "checksum": "0e879524240086ebc55a35ed977ba3e9"
     },
     "R/authorize.R": {
       "checksum": "462ec87a89aa7ffcee5818eb9460def8"
@@ -6307,7 +5399,7 @@
       "checksum": "c7d992530577391fa676560324026ab1"
     },
     "renv.lock": {
-      "checksum": "528cad1669d82413df966b1597542543"
+      "checksum": "4d4213da7e2631bda5af56707be38d69"
     },
     "server.R": {
       "checksum": "63eaf19c240f80a46527c197edfd6bae"
