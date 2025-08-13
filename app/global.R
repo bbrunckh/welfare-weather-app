@@ -2,6 +2,7 @@
 library(shiny)
 library(bslib)
 library(bsplus)
+library(waiter)
 
 library(readr)
 library(nanoparquet)

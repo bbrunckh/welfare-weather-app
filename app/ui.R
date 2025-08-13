@@ -28,6 +28,7 @@ ui <- navbarPage(
   tabPanel(
     "Step 1 - Model welfare",
     fluidPage(
+      autoWaiter(html = spin_2(), color = transparent(.5)),
       h4("How much does weather affect welfare? Who is most affected?"),
     sidebarLayout(
       sidebarPanel(
@@ -171,6 +172,7 @@ ui <- navbarPage(
   tabPanel(
     "Step 2 - Simulate welfare",
     fluidPage(
+      autoWaiter(html = spin_2(), color = transparent(.5)),
       h4("What welfare is expected given historical weather conditions? In future climate scenarios?"),
       sidebarLayout(
         sidebarPanel(
@@ -278,6 +280,7 @@ ui <- navbarPage(
   tabPanel(
     "Step 3 - Policy & adaptation",
     fluidPage(
+      autoWaiter(html = spin_2(), color = transparent(.5)),
       h4("What welfare is expected in alternate policy scenarios?"),
       sidebarLayout(
         sidebarPanel(
