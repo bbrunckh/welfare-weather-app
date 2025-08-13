@@ -5099,6 +5099,40 @@
         "RemoteSha": "1.4.8"
       }
     },
+    "waiter": {
+      "Source": "CRAN",
+      "Repository": "https://packagemanager.posit.co/cran/latest",
+      "description": {
+        "Package": "waiter",
+        "Title": "Loading Screen for 'Shiny'",
+        "Version": "0.2.5",
+        "Date": "2022-01-02",
+        "Authors@R": "c(\n    person(given = \"John\",\n           family = \"Coene\",\n           role = c(\"aut\", \"cre\"),\n           email = \"jcoenep@gmail.com\"),\n    person(given = \"Jinhwan\",\n           family = \"Kim\",\n           role = \"ctb\",\n           email = 'hwanistic@gmail.com'),\n    person(given = \"Victor\",\n           family = \"Granda\",\n           role = c(\"ctb\"),\n           email = \"victorgrandagarcia@gmail.com\",\n           comment = c(ORCID = \"0000-0002-0469-1991\")))",
+        "Description": "Full screen and partial loading screens for 'Shiny' with spinners, progress bars, and notifications.",
+        "License": "MIT + file LICENSE",
+        "URL": "https://waiter.john-coene.com/,\nhttps://github.com/JohnCoene/waiter",
+        "BugReports": "https://github.com/JohnCoene/waiter/issues",
+        "Encoding": "UTF-8",
+        "Imports": "R6, shiny, htmltools",
+        "RoxygenNote": "7.1.2",
+        "Suggests": "httr, knitr, packer, rmarkdown",
+        "VignetteBuilder": "knitr",
+        "NeedsCompilation": "no",
+        "Packaged": "2022-01-03 13:33:14 UTC; john",
+        "Author": "John Coene [aut, cre],\n  Jinhwan Kim [ctb],\n  Victor Granda [ctb] (<https://orcid.org/0000-0002-0469-1991>)",
+        "Maintainer": "John Coene <jcoenep@gmail.com>",
+        "Repository": "RSPM",
+        "Date/Publication": "2022-01-03 14:30:02 UTC",
+        "Built": "R 4.5.0; ; 2025-04-08 03:13:11 UTC; unix",
+        "RemoteType": "standard",
+        "RemoteRef": "waiter",
+        "RemotePkgRef": "waiter",
+        "RemoteRepos": "https://packagemanager.posit.co/cran/latest",
+        "RemoteReposName": "CRAN",
+        "RemotePkgPlatform": "aarch64-apple-darwin20",
+        "RemoteSha": "0.2.5"
+      }
+    },
     "whisker": {
       "Source": "CRAN",
       "Repository": "https://packagemanager.posit.co/cran/latest",
@@ -5386,7 +5420,7 @@
   },
   "files": {
     ".Rprofile": {
-      "checksum": "d52b225a480f1b0c1cbbd6f3abb5d67e"
+      "checksum": "8b57c4bbce3eb4a62f09b9e061a87010"
     },
     "data/pins/GNB_2018_H3/20250806T072709Z-d97d3/data.txt": {
       "checksum": "22e6e46a3afc20d26d507e27f3d74fa0"
@@ -5500,7 +5534,7 @@
       "checksum": "174abae6d152992af153aaf9fb0ea0e9"
     },
     "global.R": {
-      "checksum": "4d4907a893512eefe81987cecfd3e655"
+      "checksum": "49f1990d021ca1045e2c67f5ed5927cf"
     },
     "R/authorize.R": {
       "checksum": "462ec87a89aa7ffcee5818eb9460def8"
@@ -5509,13 +5543,13 @@
       "checksum": "c7d992530577391fa676560324026ab1"
     },
     "renv.lock": {
-      "checksum": "e701bed25d70d0fa71020ce17a6c7a8c"
+      "checksum": "a11c1ce70f0cbc14877588716ad68e83"
     },
     "server.R": {
-      "checksum": "5f496cd70dbee176343298c330ad10eb"
+      "checksum": "3cc58ab08318e5a0681fef371caa99ee"
     },
     "ui.R": {
-      "checksum": "cf37f33513d5becd68a7cfe9e446d68b"
+      "checksum": "7a4443794664e9f5384a9c120a50f162"
     }
   },
   "users": null
