@@ -1285,7 +1285,7 @@ output$covariate_inputs <- renderUI({
         #   f_resid <- as.formula(paste(
         #     out, "~", paste(c(weather_vars, interaction_terms, fe), collapse = " + ")
         #   ))
-        #   fit_resid <- if (out == "poor") glm(f_resid, data = survey_weather(), family = "binomial")
+        #   fit_resid <- if (out == "poor") glm(f_resid, data = survey_weather(), family = stats::binomial(link = "logit"))
         #               else               lm (f_resid, data = survey_weather())
         # 
         #   ## 2) Rows actually used by the residual fit
@@ -1357,7 +1357,7 @@ output$covariate_inputs <- renderUI({
 
         # helper that returns the right fit function ------------------------
         fit_fun <- if (out == "poor") {
-          \(form) glm(form, data = survey_weather(), family = "binomial")
+          \(form) glm(form, data = survey_weather(), family = stats::binomial(link = "logit"))
         } else {
           \(form) lm(form,  data = survey_weather())
         }
@@ -1366,7 +1366,7 @@ output$covariate_inputs <- renderUI({
         sw <- isolate(as.data.frame(survey_weather()))
 
         fit_fun <- if (out == "poor") {
-          \(form) glm(form, data = sw, family = "binomial")
+          \(form) glm(form, data = sw, family = stats::binomial(link = "logit"))
         } else {
           \(form) lm(form,  data = sw)
         }
@@ -1628,6 +1628,9 @@ output$covariate_inputs <- renderUI({
           req(model_fit(), outlab())
           
           model <- model_fit()[[3]]
+          
+          if (welf_select()$type == "Continuous"){
+            
           actual_values <- model.frame(model)[[1]] 
           predicted_values <- predict(model)
           if (welf_select()$type == "Binary") {
@@ -1649,11 +1652,37 @@ output$covariate_inputs <- renderUI({
             theme_minimal() +
             scale_fill_manual(values = c("Survey" = "steelblue", "Predicted" = "orange"))
           
+        } else if (welf_select()$type == "Binary"){
+          
+          conf_matrix <- table(
+            Predicted = ifelse(predict(model, type = "response") > 0.5, 1, 0), 
+            Actual = model$y)
+          
+          cm_df <- as.data.frame(conf_matrix)
+          colnames(cm_df) <- c("Predicted", "Actual", "Freq")
+          total <- sum(conf_matrix)
+          cm_df$Percent <- cm_df$Freq / total * 100
+          cm_df$Actual <- factor(cm_df$Actual, 
+                                 levels = c(0, 1), 
+                                 labels = c("Not poor", "Poor"))
+          cm_df$Predicted <- factor(cm_df$Predicted, 
+                                    levels = c(0, 1), 
+                                    labels = c("Not poor", "Poor"))
+          
+          ggplot(cm_df, aes(x = Actual, y = Predicted, fill = Percent)) +
+            geom_tile(color = "white") +
+            geom_text(aes(label = sprintf("%.1f%%", Percent)), vjust = 1) +
+            scale_fill_gradient(low = "lightblue", high = "steelblue") +
+            labs(title = "Confusion Matrix", x = "Actual", y = "Predicted") +
+            theme_minimal()+
+            theme(legend.position = "none")
+        }
+        
         })
         
         # Relative contribution of variables to model fit
         output$relaimpo <- renderPlot({
-          req(model_fit())
+          req(model_fit(), welf_select()$type == "Continuous")
           
           model <- model_fit()[[3]]
           total_r2 <- summary(model)$r.squared
@@ -1704,12 +1733,45 @@ output$covariate_inputs <- renderUI({
         output$additional_stats <- renderTable({
           req(model_fit())
           model <- model_fit()[[3]]
+          
+          if(welf_select()$type == "Continuous"){ # regression mode
+            
           data.frame(
             Stat = c("Observations", "Adjusted R-squared", "F-statistic"),
             Value = c(format(round(nobs(model)),big.mark = ","), 
                       round(summary(model)$adj.r.squared,3),
                       round(summary(model)$fstatistic[1]))
           )
+          } else if (welf_select()$type == "Binary"){ # classification mode
+            
+            logLik_model <- logLik(model)
+            logLik_null <- -0.5 * model$null.deviance
+            mcfadden_r2 <- as.numeric(1 - (logLik_model / logLik_null))
+            
+            conf_matrix <- table(
+              Predicted = ifelse(predict(model, type = "response") > 0.5, 1, 0), 
+              Actual = model$y)
+            
+            TP <- conf_matrix["1", "1"]
+            TN <- conf_matrix["0", "0"]
+            FP <- conf_matrix["1", "0"]
+            FN <- conf_matrix["0", "1"]
+          
+            accuracy <- (TP + TN) / (TP + TN + FP + FN)
+            precision <- TP / (TP + FP)
+            recall <- TP / (TP + FN)
+            
+            data.frame(
+              Stat = c("Observations", "Pseudo R-squared", "AIC",
+                       "Accuracy", "Precision", "Recall"),
+              Value = c(format(round(nobs(model)),big.mark = ","), 
+                        round(mcfadden_r2,3),
+                        round(AIC(model)),
+                        round(accuracy, 3),
+                        round(precision, 3),
+                        round(recall, 3))
+            )
+          }
         })
         appendTab(
           inputId = "step1_output_tabs",
@@ -1731,10 +1793,16 @@ output$covariate_inputs <- renderUI({
               )
             ),
             
-            h4("Contribution of Each Variable to Model R-squared"),
-            plotOutput("relaimpo"),
-            helpText("Using the Lindeman, Merenda, and Gold (LMG) method, which calculates the average increase in R-squared when a predictor is added to the model across all possible orderings of predictors.", 
-                     style = "font-size: 12px;"),
+            output$interactplots1 <- renderUI({
+              if (welf_select()$type == "Continuous"){
+                tagList(
+                  h4("Contribution of Each Variable to Model R-squared"),
+                  plotOutput("relaimpo"),
+                  helpText("Uses the Lindeman, Merenda, and Gold (LMG) method, which calculates the average increase in R-squared when a predictor is added to the model across all possible orderings of predictors.", 
+                           style = "font-size: 12px;")
+                )
+              } else NULL
+            }),
             
             h4("Predicted welfare"),
             plotOutput("pred_welf_dist"),
@@ -1782,6 +1850,8 @@ output$covariate_inputs <- renderUI({
           }
         }
         
+        if (welf_select()$type == "Continuous"){
+          
         sim_data <- augment(model, newdata = newdata) |>
           filter(!is.na(.fitted)) |>
           mutate(month = month(timestamp)) |>
@@ -1791,12 +1861,32 @@ output$covariate_inputs <- renderUI({
           left_join(mutate(loc_weather(), 
                            month = month(timestamp), 
                            year = as.factor(year))) |>
-          mutate(sim_year = year(timestamp),
-                 error = .resid)
+          mutate(sim_year = year(timestamp))
         
-        # get fitted values
+        # get predicted welfare
         welf_sim <- augment(model_fit()[[3]], newdata = sim_data) |>
-          mutate(welf_pred = .fitted + error) # add error term
+          mutate(welf_pred = .fitted + .resid) # add error term
+        
+        } else if (welf_select()$type == "Binary"){
+          
+          sim_data <- augment(model, newdata = newdata,
+                              type.predict = "response") |>
+            filter(!is.na(.fitted)) |>
+            mutate(month = month(timestamp),
+                   .resid = as.numeric(poor) - .fitted) |>
+            select(code, year, survname, loc_id, hhid, weight, .resid,
+                   any_of(colnames(model.frame(model))), -timestamp, 
+                   -starts_with("haz"), -any_of(c('log_welf', 'welf'))) |>
+            left_join(mutate(loc_weather(), 
+                             month = month(timestamp), 
+                             year = as.factor(year))) |>
+            mutate(sim_year = year(timestamp))
+        
+          # get predicted welfare
+          welf_sim <- augment(model_fit()[[3]], newdata = sim_data,
+                              type.predict = "response") |>
+            mutate(welf_pred = .fitted + .resid) # add error term
+          }
         
         return(welf_sim)
       })
@@ -1840,6 +1930,38 @@ output$covariate_inputs <- renderUI({
           theme_minimal() +
           labs(fill = "") +
           theme(legend.position = "top")
+      })
+      
+      # FIX ERROR
+      output$sim_ridges <- renderPlot({
+        req(input$run_sim > 0, welf_sim())
+        
+        if (welf_select()$type == "Continuous"){
+          
+          plot_data <-  welf_sim() |>
+            group_by(code, year, sim_year) |>
+            mutate(med_welf = exp(median(welf_pred)),
+                   mean_haz = mean(.data[[haz_vars()[1]]]),
+                   group = paste0(code, year, sim_year)) |>
+            ungroup()
+          
+          indices <- round(seq(1, length(unique(na.omit(plot_data$med_welf))), length.out = 5))
+          selected_levels <- sort(unique(na.omit(plot_data$med_welf)))[indices]
+          
+          ggplot(plot_data, 
+                 aes(x = welf_pred, 
+                     y = as.factor(med_welf),
+                     fill = mean_haz)) +
+            geom_density_ridges(alpha = 0.5, scale = 3, rel_min_height = 0.02, 
+                                linewidth = 0.2, 
+                                quantile_lines = TRUE, quantiles = 5) +
+            scale_fill_viridis_c(name = "Mean \n hazard \n value", option = "C") +
+            scale_y_discrete(breaks = selected_levels,
+                             labels = function(x) paste0("$", round(as.numeric(x), 2))) +
+            labs(x = "Log welfare", y = "Median welfare") +
+            theme_ridges(center_axis_labels = TRUE)
+          
+        } else NULL
       })
       
       output$sim_pov3_ep <- renderPlot({
@@ -1941,7 +2063,7 @@ output$covariate_inputs <- renderUI({
       }
       
       sim_policy <- augment(model_fit()[[3]], newdata = sim_policy) |>
-        mutate(welf_pred_pol = .fitted + error) # add error term
+        mutate(welf_pred_pol = .fitted + .fitted) # add error term
       
       return(sim_policy)
     })
