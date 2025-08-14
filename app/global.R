@@ -37,7 +37,7 @@ library(httr2)
 
 
 # App version
-version <- "v0.1.1"
+version <- "v0.1.2"
 
 # connect to pin board
 

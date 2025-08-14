@@ -247,6 +247,8 @@ ui <- navbarPage(
             )
           ),
           br(),
+          helpText("Results below are shown for continuous outcomes", 
+                   style = "font-size: 12px;"),
           h4("∆ poverty vs exceedance probability"),
           p("(conditional on the selected weather variable)"),
           layout_columns(
@@ -259,6 +261,9 @@ ui <- navbarPage(
             )
           ),
           br(),
+          h4("Simulated welfare distributions, by median welfare"),
+          br(),
+          plotOutput("sim_ridges", height = "600px"),
           # p("Map showing weather over time used in simulation (animate?)"),
           # p("Histogram/ridgeplot of weather distributions over time (linked to map) for (1) survey sample, (2) population (3) weather distribution used to train model"),
           # p("Histogram/ridgeplot of predicted welfare distribution over time (linked to map) for (1) survey sample, (2) population (survey weights) (3) actual welfare distribution used to train model"),
@@ -391,6 +396,8 @@ ui <- navbarPage(
               plotOutput("sim_pov8_pol_ep", height = "300px"),
             )
           ),
+          helpText("Results are shown for continuous outcomes", 
+                   style = "font-size: 12px;"),
           # p("Map showing difference in weather between climate change scenario and historical climate used in simulation (animate?)"),
           # p("Histogram/ridgeplot of weather distributions over time (linked to map) for (1) historical climate (sample), (2) climate change scenario (sample) (3) weather distribution used to train model"),
           # p("Histogram/ridgeplot of predicted welfare distribution over time (linked to map) for (1) policy baseline, historical climate, (2) policy baseline, climate scenario, (3) policy scenario, historical climate, (4) policy scenario, climate scenario, (5) actual welfare distribution used to train model"),

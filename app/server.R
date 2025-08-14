@@ -1850,11 +1850,12 @@ output$covariate_inputs <- renderUI({
           }
         }
         
+        if (welf_select()$type == "Continuous"){
+          
         sim_data <- augment(model, newdata = newdata) |>
           filter(!is.na(.fitted)) |>
           mutate(month = month(timestamp)) |>
-          select(code, year, survname, loc_id, hhid, weight, 
-                 any_of(c('.resid', '.fitted')),
+          select(code, year, survname, loc_id, hhid, weight, .resid,
                  any_of(colnames(model.frame(model))), -timestamp, 
                  -starts_with("haz"), -any_of(c('log_welf', 'welf'))) |>
           left_join(mutate(loc_weather(), 
@@ -1862,15 +1863,30 @@ output$covariate_inputs <- renderUI({
                            year = as.factor(year))) |>
           mutate(sim_year = year(timestamp))
         
-        # NEED TO CHECK THIS FOR LOGISTIC REGRESSIONS
-        if (welf_select()$type == "Binary"){
-          sim_data <- sim_data |>
-            mutate(.resid = as.numeric(poor) - (exp(.fitted) / (1 + exp(.fitted))))
-        }
-        
-        # get fitted values 
+        # get predicted welfare
         welf_sim <- augment(model_fit()[[3]], newdata = sim_data) |>
           mutate(welf_pred = .fitted + .resid) # add error term
+        
+        } else if (welf_select()$type == "Binary"){
+          
+          sim_data <- augment(model, newdata = newdata,
+                              type.predict = "response") |>
+            filter(!is.na(.fitted)) |>
+            mutate(month = month(timestamp),
+                   .resid = as.numeric(poor) - .fitted) |>
+            select(code, year, survname, loc_id, hhid, weight, .resid,
+                   any_of(colnames(model.frame(model))), -timestamp, 
+                   -starts_with("haz"), -any_of(c('log_welf', 'welf'))) |>
+            left_join(mutate(loc_weather(), 
+                             month = month(timestamp), 
+                             year = as.factor(year))) |>
+            mutate(sim_year = year(timestamp))
+        
+          # get predicted welfare
+          welf_sim <- augment(model_fit()[[3]], newdata = sim_data,
+                              type.predict = "response") |>
+            mutate(welf_pred = .fitted + .resid) # add error term
+          }
         
         return(welf_sim)
       })
@@ -1914,6 +1930,38 @@ output$covariate_inputs <- renderUI({
           theme_minimal() +
           labs(fill = "") +
           theme(legend.position = "top")
+      })
+      
+      # FIX ERROR
+      output$sim_ridges <- renderPlot({
+        req(input$run_sim > 0, welf_sim())
+        
+        if (welf_select()$type == "Continuous"){
+          
+          plot_data <-  welf_sim() |>
+            group_by(code, year, sim_year) |>
+            mutate(med_welf = exp(median(welf_pred)),
+                   mean_haz = mean(.data[[haz_vars()[1]]]),
+                   group = paste0(code, year, sim_year)) |>
+            ungroup()
+          
+          indices <- round(seq(1, length(unique(na.omit(plot_data$med_welf))), length.out = 5))
+          selected_levels <- sort(unique(na.omit(plot_data$med_welf)))[indices]
+          
+          ggplot(plot_data, 
+                 aes(x = welf_pred, 
+                     y = as.factor(med_welf),
+                     fill = mean_haz)) +
+            geom_density_ridges(alpha = 0.5, scale = 3, rel_min_height = 0.02, 
+                                linewidth = 0.2, 
+                                quantile_lines = TRUE, quantiles = 5) +
+            scale_fill_viridis_c(name = "Mean \n hazard \n value", option = "C") +
+            scale_y_discrete(breaks = selected_levels,
+                             labels = function(x) paste0("$", round(as.numeric(x), 2))) +
+            labs(x = "Log welfare", y = "Median welfare") +
+            theme_ridges(center_axis_labels = TRUE)
+          
+        } else NULL
       })
       
       output$sim_pov3_ep <- renderPlot({
@@ -2015,7 +2063,7 @@ output$covariate_inputs <- renderUI({
       }
       
       sim_policy <- augment(model_fit()[[3]], newdata = sim_policy) |>
-        mutate(welf_pred_pol = .fitted + error) # add error term
+        mutate(welf_pred_pol = .fitted + .fitted) # add error term
       
       return(sim_policy)
     })
