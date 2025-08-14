@@ -1932,38 +1932,6 @@ output$covariate_inputs <- renderUI({
           theme(legend.position = "top")
       })
       
-      # FIX ERROR
-      output$sim_ridges <- renderPlot({
-        req(input$run_sim > 0, welf_sim())
-        
-        if (welf_select()$type == "Continuous"){
-          
-          plot_data <-  welf_sim() |>
-            group_by(code, year, sim_year) |>
-            mutate(med_welf = exp(median(welf_pred)),
-                   mean_haz = mean(.data[[haz_vars()[1]]]),
-                   group = paste0(code, year, sim_year)) |>
-            ungroup()
-          
-          indices <- round(seq(1, length(unique(na.omit(plot_data$med_welf))), length.out = 5))
-          selected_levels <- sort(unique(na.omit(plot_data$med_welf)))[indices]
-          
-          ggplot(plot_data, 
-                 aes(x = welf_pred, 
-                     y = as.factor(med_welf),
-                     fill = mean_haz)) +
-            geom_density_ridges(alpha = 0.5, scale = 3, rel_min_height = 0.02, 
-                                linewidth = 0.2, 
-                                quantile_lines = TRUE, quantiles = 5) +
-            scale_fill_viridis_c(name = "Mean \n hazard \n value", option = "C") +
-            scale_y_discrete(breaks = selected_levels,
-                             labels = function(x) paste0("$", round(as.numeric(x), 2))) +
-            labs(x = "Log welfare", y = "Median welfare") +
-            theme_ridges(center_axis_labels = TRUE)
-          
-        } else NULL
-      })
-      
       output$sim_pov3_ep <- renderPlot({
         req(input$run_sim > 0, model_fit())
         
@@ -2014,6 +1982,36 @@ output$covariate_inputs <- renderUI({
                               round(100*mean(plot_data$pov830, na.rm= TRUE)), "%")) +
             theme_minimal() +
             coord_flip() 
+          
+        } else NULL
+      })
+      output$sim_ridges <- renderPlot({
+        req(input$run_sim > 0, model_fit())
+        
+        if (welf_select()$type == "Continuous"){
+          
+          plot_data <-  welf_sim() |>
+            group_by(code, year, sim_year) |>
+            mutate(med_welf = exp(median(welf_pred)),
+                   mean_haz = mean(.data[[haz_vars()[1]]]),
+                   group = paste0(code, year, sim_year)) |>
+            ungroup()
+          
+          indices <- round(seq(1, length(unique(na.omit(plot_data$med_welf))), length.out = 5))
+          selected_levels <- sort(unique(na.omit(plot_data$med_welf)))[indices]
+          
+          ggplot(plot_data, 
+                 aes(x = welf_pred, 
+                     y = as.factor(med_welf),
+                     fill = mean_haz)) +
+            geom_density_ridges(alpha = 0.5, scale = 3, rel_min_height = 0.02, 
+                                linewidth = 0.2, 
+                                quantile_lines = TRUE, quantiles = 5) +
+            scale_fill_viridis_c(name = "Mean \n hazard \n value", option = "C") +
+            scale_y_discrete(breaks = selected_levels,
+                             labels = function(x) paste0("$", round(as.numeric(x), 2))) +
+            labs(x = "Log welfare", y = "Median welfare") +
+            theme_ridges(center_axis_labels = TRUE)
           
         } else NULL
       })
