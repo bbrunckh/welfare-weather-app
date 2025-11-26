@@ -4,15 +4,24 @@
 #'     DO NOT REMOVE.
 #' @import shiny
 #' @noRd
+
 app_ui <- function(request) {
-	tagList(
-		# Leave this function for adding external resources
-		golem_add_external_resources(),
-		# Your application UI logic
-		fluidPage(
-			golem::golem_welcome_page() # Remove this line to start building your UI
-		)
-	)
+  navbarPage(
+    title = tagList(
+      "WISE-APP",
+      tags$small(version, style = "color: #777; font-size: 0.5em;")
+    ),
+
+    # MathJax once
+    header = tags$head(
+      tags$script(src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.7/MathJax.js?config=TeX-MML-AM_CHTML")
+    ),
+
+	# Page modules
+    tabPanel("Overview", mod_overview_ui("overview_ui")), # welcome message
+    tabPanel("Step 1 - Model welfare", mod_step1_ui("step1_ui")) # step 1 module
+	
+  )
 }
 
 #' Add external Resources to the Application
@@ -35,7 +44,5 @@ golem_add_external_resources <- function() {
 			path = app_sys("app/www"),
 			app_title = "wiseapp"
 		)
-		# Add here other external resources
-		# for example, you can add shinyalert::useShinyalert()
 	)
 }
