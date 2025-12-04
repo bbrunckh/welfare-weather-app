@@ -112,8 +112,8 @@
 !/**/Output/**/*.xml
 !/**/images/**/*.eps
 !/**/images/**/*.svg
-!/**/images/**/*.png
-!/**/images/**/*.ico
+!/**/inst/app/www/**/*.png
+!/**/inst/app/www/**/*.ico
 
 #######################
 # Include all the files with passwords or tokens here. All files named

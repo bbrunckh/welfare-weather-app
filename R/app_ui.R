@@ -20,7 +20,7 @@ app_ui <- function(request) {
 	# Page modules
     tabPanel("Overview", mod_overview_ui("overview_ui")), # welcome message
     tabPanel("Step 1 - Model welfare", mod_step1_ui("step1_ui")) # step 1 module
-	
+
   )
 }
 
@@ -39,7 +39,7 @@ golem_add_external_resources <- function() {
 	)
 
 	tags$head(
-		favicon(),
+		favicon(ext = 'png'),
 		bundle_resources(
 			path = app_sys("app/www"),
 			app_title = "wiseapp"
