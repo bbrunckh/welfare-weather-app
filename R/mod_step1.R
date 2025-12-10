@@ -28,10 +28,25 @@ mod_step1_ui <- function(id) {
   )
 }
 
-mod_step1_server <- function(id) {
+mod_step1_server <- function(id, survey_list_master, pin_prefix, board) {
   moduleServer(id, function(input, output, session) {
-
-    mod_step1_sample_server("sample")
-
+    
+    # Pass reactives into the child module; use the plain child id "sample"
+    step1_api <- mod_step1_sample_server(
+      "sample",
+      survey_list_master = survey_list_master_r,
+      pin_prefix = pin_prefix_r,
+      board = board_r
+    )
+    
+    # React when data is loaded
+    observeEvent(step1_api$data_loaded(), {
+      if (step1_api$data_loaded()) {
+        df <- step1_api$survey_data()
+        # do something with df
+        message("Parent saw data_loaded; rows = ", nrow(df))
+      }
+    })
+    
   })
 }

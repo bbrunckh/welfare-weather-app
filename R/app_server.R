@@ -9,25 +9,26 @@ app_server <- function(input, output, session) {
 	runtime <- load_runtime_data()
 
 	# assign to reactiveVal/values for use across modules
-	rv <- reactiveValues()
-	rv$board <- runtime$board
-	rv$pin_prefix <- runtime$pin_prefix
-	rv$survey_list_master <- runtime$survey_list_master
-	rv$varlist <- runtime$varlist
-	rv$weather_list <- runtime$weather_list
-
-	# Step 1 module
-	step1_sample <- mod_step1_sample_server(
-		id = "step1_sample",
-		survey_list_master = rv$survey_list_master,  # defined in app_config.R
-		pin_prefix = rv$pin_prefix,
-		board = rv$board
-		)
-
-		# use the returned reactives
-		observeEvent(step1_sample$survey_data(), {
-		df <- step1_sample$survey_data()
-		# do something with df
-		}
-		)
+	rv <- reactiveValues(
+	  board = runtime$board,
+	  pin_prefix = runtime$pin_prefix,
+	  varlist = runtime$varlist,
+	  weather_list = runtime$weather_list,
+	  welfare = runtime$welfare,
+	  pov_lines = runtime$pov_lines,
+	  survey_list_master = runtime$survey_list_master
+	)
+	
+	# Create reactive accessors for dynamic values
+	survey_list_master_r <- reactive({ rv$survey_list_master })
+	pin_prefix_r <- reactive({ rv$pin_prefix })
+	board_r <- reactive({ rv$board })
+	
+	# Call parent module, passing reactives
+	mod_step1_server(
+	  id = "step1",
+	  survey_list_master = survey_list_master_r,
+	  pin_prefix = pin_prefix_r,
+	  board = board_r
+	)
 }

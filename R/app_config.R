@@ -82,28 +82,30 @@ load_runtime_data <- function() {
   varlist <- safe_pin_read(board, "varlist", prefix)
   weather_list <- safe_pin_read(board, "weather_varlist", prefix)
   
+  # Lightweight constants (no I/O)
+  welfare <- data.frame(
+    outcome = c("Log welfare ($/day, PPP)",
+                "Poor (PPP)",
+                "Log welfare (LCU/day)",
+                "Poor (LCU)"),
+    type = c("Continuous", "Binary", "Continuous", "Binary"),
+    stringsAsFactors = FALSE
+  )
+  
+  pov_lines <- data.frame(
+    ppp_year = c(rep(2021,3), rep(2017,3), rep(2011,3)),
+    ln = c(3.00,4.20,8.30, 2.15,3.65,6.85, 1.90,3.20,5.50),
+    stringsAsFactors = FALSE
+  )
+  
   list(
     board = board,
     pin_prefix = prefix,
     pin_list = safe_pin_list(board),
     survey_list_master = survey_list_master,
     varlist = varlist,
-    weather_list = weather_list
+    weather_list = weather_list,
+    welfare = welfare,
+    pov_lines = pov_lines
   )
 }
-
-# Lightweight constants (no I/O)
-welfare <- data.frame(
-  outcome = c("Log welfare ($/day, PPP)",
-              "Poor (PPP)",
-              "Log welfare (LCU/day)",
-              "Poor (LCU)"),
-  type = c("Continuous", "Binary", "Continuous", "Binary"),
-  stringsAsFactors = FALSE
-)
-
-pov_lines <- data.frame(
-  ppp_year = c(rep(2021,3), rep(2017,3), rep(2011,3)),
-  ln = c(3.00,4.20,8.30, 2.15,3.65,6.85, 1.90,3.20,5.50),
-  stringsAsFactors = FALSE
-)
