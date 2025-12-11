@@ -34,9 +34,9 @@ mod_step1_server <- function(id, survey_list_master, pin_prefix, board) {
     # Pass reactives into the child module; use the plain child id "sample"
     step1_api <- mod_step1_sample_server(
       "sample",
-      survey_list_master = survey_list_master_r,
-      pin_prefix = pin_prefix_r,
-      board = board_r
+      survey_list_master = survey_list_master,
+      pin_prefix = pin_prefix,
+      board = board
     )
     
     # React when data is loaded
