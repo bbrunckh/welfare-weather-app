@@ -7,16 +7,14 @@
 #' @noRd 
 #'
 #' @importFrom shiny NS tagList 
+#' @importFrom dplyr filter pull
 mod_1_01_sample_ui <- function(id) {
   ns <- NS(id)
-  tags$style(".shiny-notification { z-index: 99999 !important; }")
   tagList(
-    # container for the country and year selectors
     wellPanel(
       uiOutput(ns("sample_ui")),
       uiOutput(ns("survey_year_ui")),
-      # Load button (user must click to trigger download)
-      actionButton(ns("load_data"), "Load Data", class = "btn-primary")
+      uiOutput(ns("load_button_ui"))
     )
   )
 }
@@ -31,7 +29,7 @@ mod_1_01_sample_server <- function(id, survey_list_master, pin_prefix, board) {
     # --- Reactive surveys table filtered to 'external' ---
     surveys <- reactive({
       req(survey_list_master())
-      dplyr::filter(survey_list_master(), external)
+      filter(survey_list_master(), external)
     })
     
     # --------- Country selector UI -----------
@@ -51,8 +49,8 @@ mod_1_01_sample_server <- function(id, survey_list_master, pin_prefix, board) {
       req(input$country)
       yrs <- lapply(input$country, function(country) {
         surveys() %>%
-          dplyr::filter(countryname == country) %>%
-          dplyr::pull(year) %>% sort()
+          filter(countryname == country) %>%
+          pull(year) %>% sort()
       })
       names(yrs) <- input$country
       yrs
@@ -61,40 +59,54 @@ mod_1_01_sample_server <- function(id, survey_list_master, pin_prefix, board) {
     # --------- Render year selectors -----------
     output$survey_year_ui <- renderUI({
       req(input$country)
-      yrs <- available_years()
-      tagList(
-        lapply(input$country, function(country_name) {
-          selectizeInput(
-            inputId = ns(paste0("survey_year_", gsub(" ", "_", country_name))),
-            label = paste("Survey years for", country_name),
-            choices = yrs[[country_name]],
-            selected = yrs[[country_name]],
-            multiple = TRUE,
-            options = list(placeholder = paste("Select years for", country_name))
-          )
-        })
+      
+      country_name <- input$country
+      yrs <- available_years()[[country_name]]
+      
+      selectizeInput(
+        inputId = ns("survey_year"),
+        label   = paste("Survey years for", country_name),
+        choices = yrs,
+        selected = NULL,
+        multiple = TRUE,
+        options = list(
+          placeholder = paste("Select years for", country_name)
+        )
       )
+    })
+    
+    # debug: watch country and survey_year changes
+    observeEvent(input$country, {
+      message("[DEBUG] module id = ", session$ns(NULL))
+      message("[DEBUG] input$country = ", paste0(input$country, collapse = ","))
+    })
+    
+    observeEvent(input$survey_year, {
+      message("[DEBUG] input$survey_year changed: ", paste0(input$survey_year, collapse = ","))
+    })
+    
+    # --------- Reactive Load Data button, only when at least one year is selected -----------
+    output$load_button_ui <- renderUI({
+      req(input$country)
+      
+      if (is.null(input$survey_year) || length(input$survey_year) == 0) {
+        return(NULL)
+      }
+      
+      actionButton(ns("load_data"), "Load Data", class = "btn-primary")
     })
     
     # --------- Reactive list of pin IDs to download -----------
     survey_data_files <- reactive({
-      req(input$country)
-      all_files <- character(0)
+      req(input$country, input$survey_year, pin_prefix())
       
-      for (country in input$country) {
-        year_input_id <- paste0("survey_year_", gsub(" ", "_", country))
-        selected_years <- input[[year_input_id]]
-        
-        if (!is.null(selected_years) && length(selected_years) > 0) {
-          country_files <- surveys() %>%
-            dplyr::filter(countryname == country, year %in% selected_years) %>%
-            dplyr::pull(wiseapp_pin)
-          all_files <- c(all_files, country_files)
-        }
-      }
-      
-      req(pin_prefix())
-      paste0(pin_prefix(), all_files)
+      surveys() %>%
+        filter(
+          countryname == input$country,
+          year %in% input$survey_year
+        ) %>%
+        pull(wiseapp_pin) %>%
+        paste0(pin_prefix(), .)
     })
     
     # --------- ReactiveVal to hold loaded data (set by observeEvent below) -----------
@@ -179,9 +191,3 @@ mod_1_01_sample_server <- function(id, survey_list_master, pin_prefix, board) {
     )
   })
 }
-    
-## To be copied in the UI
-# mod_1_01_sample_ui("1_01_sample_1")
-    
-## To be copied in the server
-# mod_1_01_sample_server("1_01_sample_1")

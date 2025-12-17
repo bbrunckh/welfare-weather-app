@@ -23,13 +23,9 @@ app_server <- function(input, output, session) {
   pin_prefix_r         <- reactive({ rv$pin_prefix })
   board_r              <- reactive({ rv$board })
   
-  # Debug: confirm they exist
-  message("DEBUG app_server: survey_list_master_r exists? ", exists("survey_list_master_r"))
-  message("DEBUG app_server: is.function(survey_list_master_r)? ", is.function(survey_list_master_r))
-  
   # Now call the step1 module and pass reactives
-  mod_step1_server(
-    id = "step1",                     # must match the UI id (mod_step1_ui("step1"))
+  mod_1_modelling_server(
+    id = "step1",
     survey_list_master = survey_list_master_r,
     pin_prefix = pin_prefix_r,
     board = board_r
