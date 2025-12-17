@@ -75,16 +75,6 @@ mod_1_01_sample_server <- function(id, survey_list_master, pin_prefix, board) {
       )
     })
     
-    # debug: watch country and survey_year changes
-    observeEvent(input$country, {
-      message("[DEBUG] module id = ", session$ns(NULL))
-      message("[DEBUG] input$country = ", paste0(input$country, collapse = ","))
-    })
-    
-    observeEvent(input$survey_year, {
-      message("[DEBUG] input$survey_year changed: ", paste0(input$survey_year, collapse = ","))
-    })
-    
     # --------- Reactive Load Data button, only when at least one year is selected -----------
     output$load_button_ui <- renderUI({
       req(input$country)
@@ -96,7 +86,7 @@ mod_1_01_sample_server <- function(id, survey_list_master, pin_prefix, board) {
       actionButton(ns("load_data"), "Load Data", class = "btn-primary")
     })
     
-    # --------- Reactive list of pin IDs to download -----------
+    # --------- Reactive list of pin IDs to download ----------- -> THIS FAILS TO FETCH THE DATA BY BEING IDLE (MOST LIKELY)
     survey_data_files <- reactive({
       req(input$country, input$survey_year, pin_prefix())
       
@@ -107,6 +97,7 @@ mod_1_01_sample_server <- function(id, survey_list_master, pin_prefix, board) {
         ) %>%
         pull(wiseapp_pin) %>%
         paste0(pin_prefix(), .)
+      
     })
     
     # --------- ReactiveVal to hold loaded data (set by observeEvent below) -----------
@@ -117,18 +108,11 @@ mod_1_01_sample_server <- function(id, survey_list_master, pin_prefix, board) {
       # Debug log for button click
       message("DEBUG: Load Data button pressed; input$load_data = ", input$load_data)
       
-      files <- isolate(survey_data_files())
-      if (length(files) == 0) {
-        showNotification("No survey files selected. Please choose country and years first.", type = "warning")
-        survey_data_r(tibble::tibble())  # indicate a load attempt but empty
-        return(invisible())
-      }
+      try({
+        message("DEBUG: files selected: ", isolate(survey_data_files()))
+      }, silent = TRUE)
       
-      if (is.null(board())) {
-        showNotification("No board configured. Cannot download files.", type = "error")
-        survey_data_r(tibble::tibble())
-        return(invisible())
-      }
+      files <- isolate(survey_data_files())
       
       # persistent "busy" notification (remove when finished)
       busy_id <- showNotification("Downloading files...", duration = NULL, type = "message")
