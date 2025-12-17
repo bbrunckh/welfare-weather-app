@@ -1,5 +1,13 @@
-# UI function
-mod_step1_sample_ui <- function(id) {
+#' 1_01_sample UI Function
+#'
+#' @description A shiny Module.
+#'
+#' @param id,input,output,session Internal parameters for {shiny}.
+#'
+#' @noRd 
+#'
+#' @importFrom shiny NS tagList 
+mod_1_01_sample_ui <- function(id) {
   ns <- NS(id)
   tags$style(".shiny-notification { z-index: 99999 !important; }")
   tagList(
@@ -12,9 +20,11 @@ mod_step1_sample_ui <- function(id) {
     )
   )
 }
-
-# Server function
-mod_step1_sample_server <- function(id, survey_list_master, pin_prefix, board) {
+    
+#' 1_01_sample Server Functions
+#'
+#' @noRd 
+mod_1_01_sample_server <- function(id, survey_list_master, pin_prefix, board) {
   moduleServer(id, function(input, output, session) {
     ns <- session$ns
     
@@ -169,3 +179,9 @@ mod_step1_sample_server <- function(id, survey_list_master, pin_prefix, board) {
     )
   })
 }
+    
+## To be copied in the UI
+# mod_1_01_sample_ui("1_01_sample_1")
+    
+## To be copied in the server
+# mod_1_01_sample_server("1_01_sample_1")

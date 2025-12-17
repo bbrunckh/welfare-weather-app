@@ -19,7 +19,7 @@ app_ui <- function(request) {
 
 	# Page modules
     tabPanel("Overview", mod_overview_ui("overview_ui")), # welcome message
-    tabPanel("Step 1 - Model welfare", mod_step1_ui("step1")) # step 1 module
+    tabPanel("Step 1 - Model welfare", mod_1_modelling_ui("step1")) # step 1 module
 
   )
 }

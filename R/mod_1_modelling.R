@@ -1,13 +1,19 @@
-#' @importFrom bsplus bs_accordion bs_append
-NULL
-
-mod_step1_ui <- function(id) {
+#' 1_modelling UI Function
+#'
+#' @description A shiny Module.
+#'
+#' @param id,input,output,session Internal parameters for {shiny}.
+#'
+#' @noRd 
+#'
+#' @importFrom shiny NS bsplus bs_accordion bs_append
+mod_1_modelling_ui <- function(id) {
   ns <- NS(id)
-
+  
   fluidPage(
     waiter::autoWaiter(html = waiter::spin_2(), color = waiter::transparent(.5)),
     h4("How much does weather affect welfare? Who is most affected?"),
-
+    
     sidebarLayout(
       sidebarPanel(
         bs_accordion(id = ns("accordion")) |>
@@ -16,23 +22,26 @@ mod_step1_ui <- function(id) {
             content = mod_step1_sample_ui(ns("sample"))
           )
       ),
-
+      
       mainPanel(
-
+        
         includeMarkdown(
           system.file("app/www/equation.md", package = "wiseapp")
         )
-
+        
       )
     )
   )
 }
-
-mod_step1_server <- function(id, survey_list_master, pin_prefix, board) {
+    
+#' 1_modelling Server Functions
+#'
+#' @noRd 
+mod_1_modelling_server <- function(id, survey_list_master, pin_prefix, board) {
   moduleServer(id, function(input, output, session) {
     
-    # Pass reactives into the child module; use the plain child id "sample"
-    step1_api <- mod_step1_sample_server(
+    # Pass reactives
+    step1_api <- mod_1_01_sample_server(
       "sample",
       survey_list_master = survey_list_master,
       pin_prefix = pin_prefix,
@@ -50,3 +59,9 @@ mod_step1_server <- function(id, survey_list_master, pin_prefix, board) {
     
   })
 }
+
+## To be copied in the UI
+# mod_1_modelling_ui("1_modelling_1")
+    
+## To be copied in the server
+# mod_1_modelling_server("1_modelling_1")
