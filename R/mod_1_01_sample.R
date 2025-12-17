@@ -8,6 +8,7 @@
 #'
 #' @importFrom shiny NS tagList 
 #' @importFrom dplyr filter pull
+#' @importFrom pins pin_download
 mod_1_01_sample_ui <- function(id) {
   ns <- NS(id)
   tagList(
@@ -86,18 +87,19 @@ mod_1_01_sample_server <- function(id, survey_list_master, pin_prefix, board) {
       actionButton(ns("load_data"), "Load Data", class = "btn-primary")
     })
     
-    # --------- Reactive list of pin IDs to download ----------- -> THIS FAILS TO FETCH THE DATA BY BEING IDLE (MOST LIKELY)
+    # --------- Reactive list of pin IDs to download -----------
     survey_data_files <- reactive({
-      req(input$country, input$survey_year, pin_prefix())
+      req(input$country, input$survey_year)
+      
+      prefix <- pin_prefix() %||% ""
       
       surveys() %>%
         filter(
           countryname == input$country,
-          year %in% input$survey_year
+          as.integer(year) %in% as.integer(input$survey_year)
         ) %>%
         pull(wiseapp_pin) %>%
-        paste0(pin_prefix(), .)
-      
+        paste0(prefix, .)
     })
     
     # --------- ReactiveVal to hold loaded data (set by observeEvent below) -----------
@@ -105,62 +107,40 @@ mod_1_01_sample_server <- function(id, survey_list_master, pin_prefix, board) {
     
     # --------- Download and read the selected survey files WHEN the user clicks Load Data -----------
     observeEvent(input$load_data, {
-      # Debug log for button click
-      message("DEBUG: Load Data button pressed; input$load_data = ", input$load_data)
-      
-      try({
-        message("DEBUG: files selected: ", isolate(survey_data_files()))
-      }, silent = TRUE)
-      
       files <- isolate(survey_data_files())
+      brd <- board()
       
-      # persistent "busy" notification (remove when finished)
-      busy_id <- showNotification("Downloading files...", duration = NULL, type = "message")
+      busy_id <- showNotification(
+        "Downloading files…",
+        duration = NULL,
+        type = "message"
+      )
       
-      # attempt downloads
+      # download pins → local parquet paths
       paths <- lapply(files, function(pin_id) {
-        tryCatch(
-          pins::pin_download(board(), pin_id),
-          error = function(e) {
-            warning("download failed for ", pin_id, ": ", e$message)
-            NULL
-          }
-        )
+        pin_download(brd, pin_id)
       })
       paths <- Filter(Negate(is.null), paths)
       
-      if (length(paths) == 0) {
-        removeNotification(busy_id)
-        showNotification("No files could be downloaded for the selected options.", type = "error")
-        survey_data_r(tibble::tibble())
-        return(invisible())
-      }
-      
-      # read into a single tibble (wrap in tryCatch)
-      df <- tryCatch({
-        read_parquet_duckdb(unlist(paths), options = list(union_by_name = TRUE), prudence = "lavish")
-      }, error = function(e) {
-        removeNotification(busy_id)
-        showNotification(paste0("Error reading files: ", e$message), type = "error")
-        warning(e)
-        return(tibble::tibble())
-      })
+      # read with DuckDB helper
+      df <- read_parquet_duckdb(unlist(paths))
       
       removeNotification(busy_id)
       
-      # final notification & set reactiveVal
-      showNotification(paste0("Loaded ", length(paths), " files (", nrow(df), " rows)."), type = "message")
-      survey_data_r(df)
+      showNotification(
+        paste0("Loaded ", length(paths), " files (", nrow(df), " rows)."),
+        type = "message"
+      )
       
-      # Debug print
-      message("DEBUG: Loaded df rows = ", ifelse(is.data.frame(df), nrow(df), NA))
+      survey_data_r(df)
     }, ignoreInit = TRUE)
     
-    # --------- Expose survey_data() reactive and a flag data_loaded() -----------
+    # --------- Expose survey_data() reactive -----------
     survey_data <- reactive({
       survey_data_r()
     })
     
+    # --------- Flag: has data been successfully loaded? -----------
     data_loaded <- reactive({
       df <- survey_data_r()
       !is.null(df) && nrow(df) > 0
@@ -170,8 +150,8 @@ mod_1_01_sample_server <- function(id, survey_list_master, pin_prefix, board) {
     list(
       surveys = surveys,
       survey_data_files = survey_data_files,
-      survey_data = survey_data,   # reactive: call survey_data()
-      data_loaded = data_loaded    # reactive: call data_loaded()
+      survey_data = survey_data,
+      data_loaded = data_loaded
     )
   })
 }

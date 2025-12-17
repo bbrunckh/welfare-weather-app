@@ -55,7 +55,6 @@ mod_1_modelling_server <- function(id, survey_list_master, pin_prefix, board) {
     observeEvent(mod_1_01_sample_api$data_loaded(), {
       if (mod_1_01_sample_api$data_loaded()) {
         df <- mod_1_01_sample_api$survey_data()
-        # do something with df
         message("Parent saw data_loaded; rows = ", nrow(df))
       }
     })
