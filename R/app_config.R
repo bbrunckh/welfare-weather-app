@@ -79,18 +79,55 @@ load_runtime_data <- function() {
     ) %>%
     dplyr::filter(paste0(prefix, weather) %in% safe_pin_list(board))
   
-  varlist <- safe_pin_read(board, "varlist", prefix)
+  # Old varlist pin (preferred, just needs to be embedded in pins as .parquet)
+  # varlist <- safe_pin_read(board, "varlist", prefix)
+  # New varlist (load via xlsx)
+  varlist_path <- system.file(
+    "data/pins/outcome_varlist/wiseapp_variablesv2.xlsx",
+    package = "wiseapp"
+  )
+  # When running in dev mode (pkgload::load_all()), the file isn't in inst/.
+  # Fall back to the repo path so this works without installing.
+  if (identical(varlist_path, "")) {
+    varlist_path <- file.path(
+      getwd(),
+      "data",
+      "pins",
+      "outcome_varlist",
+      "wiseapp_variablesv2.xlsx"
+    )
+  }
+  varlist <- readxl::read_excel(varlist_path)
+
   weather_list <- safe_pin_read(board, "weather_varlist", prefix)
   
-  # Lightweight constants (no I/O)
-  welfare <- data.frame(
-    outcome = c("Log welfare ($/day, PPP)",
-                "Poor (PPP)",
-                "Log welfare (LCU/day)",
-                "Poor (LCU)"),
-    type = c("Continuous", "Binary", "Continuous", "Binary"),
-    stringsAsFactors = FALSE
+  # Old welfare (now outcome_varlist)
+  # welfare <- data.frame(
+  #   outcome = c("Log welfare ($/day, PPP)",
+  #               "Poor (PPP)",
+  #               "Log welfare (LCU/day)",
+  #               "Poor (LCU)"),
+  #   type = c("Continuous", "Binary", "Continuous", "Binary"),
+  #   stringsAsFactors = FALSE
+  # )
+
+  # Survey metadata schema lives in the repo under data/pins/ as a CSV.
+  survey_metadata_path <- system.file(
+    "data/pins/survey_metadata/survey_parquet_schema_v2.csv",
+    package = "wiseapp"
   )
+  # When running in dev mode (pkgload::load_all()), the file isn't in inst/.
+  # Fall back to the repo path so this works without installing.
+  if (identical(survey_metadata_path, "")) {
+    survey_metadata_path <- file.path(
+      getwd(),
+      "data",
+      "pins",
+      "survey_metadata",
+      "survey_parquet_schema_v2.csv"
+    )
+  }
+  survey_metadata <- readr::read_csv(survey_metadata_path, show_col_types = FALSE)
   
   pov_lines <- data.frame(
     ppp_year = c(rep(2021,3), rep(2017,3), rep(2011,3)),
@@ -105,7 +142,8 @@ load_runtime_data <- function() {
     survey_list_master = survey_list_master,
     varlist = varlist,
     weather_list = weather_list,
-    welfare = welfare,
-    pov_lines = pov_lines
+    # welfare = welfare,
+    pov_lines = pov_lines,
+    survey_metadata = survey_metadata
   )
 }
