@@ -7,6 +7,7 @@
 #' @noRd 
 #'
 #' @importFrom shiny NS tagList 
+#' @importFrom ggplot2 ggplot aes geom_line geom_point geom_bar theme_minimal labs theme 
 mod_1_03_surveystats_ui <- function(id) {
   ns <- NS(id)
   tagList(
@@ -23,6 +24,7 @@ mod_1_03_surveystats_server <- function(
     data_loaded,
     selected_outcome,
     tabset_id,
+    tabset_session = NULL,
     varlist,
     pov_lines,
     survey_geo = NULL,
@@ -30,6 +32,19 @@ mod_1_03_surveystats_server <- function(
 ) {
   moduleServer(id, function(input, output, session){
     ns <- session$ns
+
+    if (is.null(tabset_session)) {
+      tabset_session <- session$parent %||% session
+    }
+
+    # Selecting a tabsetPanel that lives outside this module's namespace can fail silently.
+    # `sendInputMessage()` is a robust fallback that works with fully qualified ids.
+    select_tab <- function(value) {
+      if (is.null(tabset_id) || !nzchar(tabset_id)) return(invisible(FALSE))
+      try(shiny::updateTabsetPanel(tabset_session, inputId = tabset_id, selected = value), silent = TRUE)
+      try(tabset_session$sendInputMessage(tabset_session$ns(tabset_id), list(value = value)), silent = TRUE)
+      invisible(TRUE)
+    }
 
     message_survey_stats <- function(msg, type = c("message", "warning", "error")) {
       type <- match.arg(type)
@@ -58,20 +73,26 @@ mod_1_03_surveystats_server <- function(
         req(selected_outcome())
 
         message_survey_stats("Building survey stats…")
-        message("[surveystats] click; tabset_id=", tabset_id)
+  message("[surveystats] click; tabset_id=", tabset_id)
 
         if (!survey_tab_added()) {
         output$interview_date <- renderPlot({
           req(survey_data())
-          interview_dates <- survey_data() |>
+          df <- survey_data()
+          if (!"countryyear" %in% names(df) && all(c("countryname", "year") %in% names(df))) {
+            df$countryyear <- paste0(df$countryname, ", ", df$year)
+          }
+          req(all(c("countryname", "countryyear", "timestamp") %in% names(df)))
+
+          interview_dates <- df |>
             dplyr::summarise(hh = dplyr::n(), .by = c(countryname, countryyear, timestamp))
 
-          ggplot2::ggplot(interview_dates,
-            ggplot2::aes(x = timestamp, y = hh, fill = countryname)
+          ggplot(interview_dates,
+            aes(x = timestamp, y = hh, fill = countryname)
           ) +
-            ggplot2::geom_bar(stat = "identity") +
-            ggplot2::theme_minimal() +
-            ggplot2::labs(title = "", x = "", y = "Number of households", fill = "")
+            geom_bar(stat = "identity") +
+            theme_minimal() +
+            labs(title = "", x = "", y = "Number of households", fill = "")
         })
 
         map_available <- !is.null(survey_geo) && requireNamespace("leaflet", quietly = TRUE)
@@ -121,8 +142,22 @@ mod_1_03_surveystats_server <- function(
         output$welfare_dist <- renderPlot({
           req(survey_data())
 
-          p <- ggplot2::ggplot(survey_data(), ggplot2::aes(
-            x = log_welf,
+          df <- survey_data()
+          if (!"countryyear" %in% names(df) && all(c("countryname", "year") %in% names(df))) {
+          df$countryyear <- paste0(df$countryname, ", ", df$year)
+          }
+          outcome_var <- selected_outcome()
+          x_var <- if (!is.null(outcome_var) && outcome_var %in% names(df)) {
+            outcome_var
+          } else if ("log_welf" %in% names(df)) {
+            "log_welf"
+          } else {
+            NULL
+          }
+          req(!is.null(x_var), "countryyear" %in% names(df))
+
+          p <- ggplot2::ggplot(df, ggplot2::aes(
+            x = !!rlang::sym(x_var),
             y = countryyear,
             fill = code
           )) +
@@ -130,7 +165,9 @@ mod_1_03_surveystats_server <- function(
 
           # Add PPP poverty lines
           if (!is.null(welf_select) && is.function(welf_select) && isTRUE(welf_select()$pre == "$")) {
-            povln <- pov_lines[pov_lines$ppp_year == welf_select()$year, "ln"]
+            pl <- if (is.function(pov_lines)) pov_lines() else pov_lines
+            req(pl)
+            povln <- pl[pl$ppp_year == welf_select()$year, "ln"]
             log_povln <- log(povln)
             p <- p + ggplot2::geom_vline(xintercept = log_povln) +
               ggplot2::annotate("text",
@@ -153,7 +190,9 @@ mod_1_03_surveystats_server <- function(
           p + ggplot2::theme_minimal() +
             ggplot2::labs(
               title = "",
-              x = if (!is.null(welf_select) && is.function(welf_select)) {
+              x = if (!is.null(outcome_var) && outcome_var %in% names(df)) {
+                outcome_var
+              } else if (!is.null(welf_select) && is.function(welf_select)) {
                 paste0("Log ", welf_select()$label)
               } else {
                 "Log welfare"
@@ -165,62 +204,61 @@ mod_1_03_surveystats_server <- function(
 
         output$data_table <- DT::renderDT({
           req(survey_data())
-          desc <- survey_data() |>
-            dplyr::select(countryyear, weight, welf_ppp_2021, welf_lcu_2021,
-              poor_300ln, poor_420ln, poor_830ln, dplyr::any_of(c("log_welf", "poor"))
-            )
-
-          sumtable::sumtable(desc,
-            vars = colnames(desc)[-c(1, 2)],
-            summ = c("weighted.mean(x, w = wts)", "weighted.sd(x, w = wts)", "min(x)", "max(x)", "notNA(x)"),
-            summ.names = c("Mean", "Std. Dev.", "Min", "Max", "N"),
-            group = "countryyear",
-            group.long = TRUE,
-            group.weights = "weight",
-            labels = TRUE,
-            out = "return"
+          df <- survey_data()
+          if (!"countryyear" %in% names(df) && all(c("countryname", "year") %in% names(df))) {
+            df$countryyear <- paste0(df$countryname, ", ", df$year)
+          }
+          vars <- intersect(
+            c(
+              "welf_ppp_2021", "welf_lcu_2021",
+              "poor_300ln", "poor_420ln", "poor_830ln",
+              "log_welf", "poor"
+            ),
+            names(df)
           )
+          if (!length(vars)) return(data.frame())
+          weighted_summary_long(df, vars = vars)
         }, rownames = FALSE)
 
         output$hh_stats <- DT::renderDT({
-          req(survey_data(), varlist())
-          desc <- survey_data() |>
-            dplyr::select(countryyear, weight,
-              dplyr::any_of(varlist()[varlist()$wiseapp == "HH characteristics" &
-                varlist()$datatype %in% c("Numeric", "Binary", "Integer") &
-                !is.na(varlist()$wiseapp), "varname"]) 
-            )
-
-          sumtable::sumtable(desc,
-            vars = colnames(desc)[-c(1, 2)],
-            summ = c("weighted.mean(x, w = wts)", "weighted.sd(x, w = wts)", "min(x)", "max(x)", "notNA(x)"),
-            summ.names = c("Mean", "Std. Dev.", "Min", "Max", "N"),
-            group = "countryyear",
-            group.long = TRUE,
-            group.weights = "weight",
-            labels = TRUE,
-            out = "return"
-          )
+          req(survey_data())
+          df <- survey_data()
+          if (!"countryyear" %in% names(df) && all(c("countryname", "year") %in% names(df))) {
+          df$countryyear <- paste0(df$countryname, ", ", df$year)
+          }
+          v <- if (is.function(varlist)) varlist() else varlist
+          if (is.null(v) || !"wiseapp" %in% names(v)) {
+            num_vars <- names(df)[vapply(df, is.numeric, logical(1))]
+            num_vars <- setdiff(num_vars, c("year", "weight"))
+            if (!length(num_vars)) return(data.frame(note = "No household variables found."))
+            return(weighted_summary_long(df, vars = num_vars))
+          }
+          vars <- v[v$wiseapp == "HH characteristics" &
+            v$datatype %in% c("Numeric", "Binary", "Integer") &
+            !is.na(v$wiseapp), "varname"]
+          vars <- intersect(vars, names(df))
+          if (!length(vars)) return(data.frame(note = "No household variables found."))
+          weighted_summary_long(df, vars = vars)
         }, rownames = FALSE)
 
         output$area_stats <- DT::renderDT({
-          req(survey_data(), varlist())
-          desc <- survey_data() |>
-            dplyr::select(countryyear, weight,
-              dplyr::any_of(varlist()[varlist()$wiseapp == "Area characteristics" &
-                !is.na(varlist()$wiseapp), "varname"]) 
-            )
-
-          sumtable::sumtable(desc,
-            vars = colnames(desc)[-c(1, 2)],
-            summ = c("weighted.mean(x, w = wts)", "weighted.sd(x, w = wts)", "min(x)", "max(x)", "notNA(x)"),
-            summ.names = c("Mean", "Std. Dev.", "Min", "Max", "N"),
-            group = "countryyear",
-            group.long = TRUE,
-            group.weights = "weight",
-            labels = TRUE,
-            out = "return"
-          )
+          req(survey_data())
+          df <- survey_data()
+          if (!"countryyear" %in% names(df) && all(c("countryname", "year") %in% names(df))) {
+          df$countryyear <- paste0(df$countryname, ", ", df$year)
+          }
+          v <- if (is.function(varlist)) varlist() else varlist
+          if (is.null(v) || !"wiseapp" %in% names(v)) {
+            area_vars <- grep("area", names(df), value = TRUE, ignore.case = TRUE)
+            area_vars <- intersect(area_vars, names(df)[vapply(df, is.numeric, logical(1))])
+            if (!length(area_vars)) return(data.frame(note = "No area variables found."))
+            return(weighted_summary_long(df, vars = area_vars))
+          }
+          vars <- v[v$wiseapp == "Area characteristics" &
+            !is.na(v$wiseapp), "varname"]
+          vars <- intersect(vars, names(df))
+          if (!length(vars)) return(data.frame(note = "No area variables found."))
+          weighted_summary_long(df, vars = vars)
         }, rownames = FALSE)
 
           # Render survey stat outputs
@@ -237,7 +275,7 @@ mod_1_03_surveystats_server <- function(
 
               shiny::appendTab(
                 inputId = tabset_id,
-                tab = shiny::tabPanel(
+                shiny::tabPanel(
                   title = "Survey stats",
                   value = "desc_stats",
                     shiny::div(
@@ -269,7 +307,9 @@ mod_1_03_surveystats_server <- function(
                     shiny::h4("Area characteristics"),
                     DT::DTOutput(ns("area_stats"))
                 ),
-                select = TRUE
+                select = TRUE,
+                menuName = NULL,
+                session = tabset_session
               )
             },
             error = function(e) {
@@ -283,7 +323,7 @@ mod_1_03_surveystats_server <- function(
         }
 
         if (survey_tab_added()) {
-          shiny::updateTabsetPanel(session, inputId = tabset_id, selected = "desc_stats")
+          select_tab("desc_stats")
         }
       }, error = function(e) {
         # Catch-any: show something even if an output render crashes

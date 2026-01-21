@@ -33,8 +33,15 @@ mod_1_modelling_ui <- function(id) {
       ),
       
       mainPanel(
-        tabsetPanel(id = ns("step1_output_tabs")),
-        includeMarkdown(system.file("app/www/equation.md", package = "wiseapp"))
+        tabsetPanel(
+          id = ns("step1_output_tabs"),
+          tabPanel(
+            title = "Overview",
+            value = "overview",
+            p("Outputs will appear here after you load data and click the relevant buttons in the sidebar."),
+            includeMarkdown(system.file("app/www/equation.md", package = "wiseapp"))
+          )
+        )
         
       )
     )
@@ -71,7 +78,8 @@ mod_1_modelling_server <- function(id, survey_list_master, pin_prefix, board, su
       survey_data = mod_1_01_sample_api$survey_data,
       data_loaded = mod_1_01_sample_api$data_loaded,
       selected_outcome = mod_1_02_outcome_api$selected_outcome,
-      tabset_id = session$ns("step1_output_tabs"),
+      tabset_id = "step1_output_tabs",
+      tabset_session = session,
       varlist = varlist,
       pov_lines = reactive({ golem::get_golem_options("pov_lines") }),
       survey_geo = mod_1_01_sample_api$survey_geo

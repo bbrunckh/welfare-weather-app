@@ -142,9 +142,6 @@ mod_1_01_sample_server <- function(id, survey_list_master, pin_prefix, board, su
     })
 
     # --------- Survey interview locations (sf polygons/points) -----------
-    # NOTE: This mirrors the legacy `server.R` logic, but is made robust to:
-    # - missing `sample_type` input in this module
-    # - sf not installed (falls back to returning a data.frame)
     survey_geo <- reactive({
       # Only try to read geo after the user has loaded data (keeps it cheap)
       req(isTRUE(data_loaded()))
@@ -157,7 +154,7 @@ mod_1_01_sample_server <- function(id, survey_list_master, pin_prefix, board, su
 
       geo_list <- lapply(pin_names, function(pin_id) {
         # Prefer downloading first so pins works for local/remote boards.
-  try(pins::pin_download(brd, pin_id), silent = TRUE)
+      try(pins::pin_download(brd, pin_id), silent = TRUE)
         tryCatch(
           pins::pin_read(brd, pin_id),
           error = function(e) NULL
