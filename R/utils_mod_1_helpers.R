@@ -77,3 +77,48 @@ weighted_summary_long <- function(df, vars, group = "countryyear", weight = "wei
 	rownames(res) <- NULL
 	res
 }
+
+#' Ridge distribution plot helper
+#'
+#' @param df A data.frame.
+#' @param x_var Column name for the x-axis.
+#' @param group_var Column name for the ridges (y-axis).
+#' @param fill_var Column name for the fill aesthetic.
+#' @param x_label Optional x-axis label.
+#' @param wrap_width Optional integer to wrap x-axis label text.
+#'
+#' @return A ggplot object or NULL if inputs are invalid.
+#'
+#' @noRd
+ridge_distribution_plot <- function(
+	df,
+	x_var,
+	group_var = "countryyear",
+	fill_var = "code",
+	x_label = NULL,
+	wrap_width = NULL
+) {
+	if (is.null(df) || !nrow(df)) return(NULL)
+	if (!all(c(x_var, group_var, fill_var) %in% names(df))) return(NULL)
+
+	df_plot <- df[is.finite(df[[x_var]]), , drop = FALSE]
+	if (!nrow(df_plot)) return(NULL)
+
+	label <- x_label
+	if (!is.null(label) && !is.null(wrap_width)) {
+		label <- stringr::str_wrap(label, wrap_width)
+	}
+
+	ggplot2::ggplot(
+		df_plot,
+		ggplot2::aes(x = .data[[x_var]], y = .data[[group_var]], fill = .data[[fill_var]])
+	) +
+		ggridges::geom_density_ridges(alpha = 0.7, scale = 2) +
+		ggplot2::theme_minimal() +
+		ggplot2::labs(
+			title = "",
+			x = label %||% x_var,
+			y = "", fill = ""
+		) +
+		ggplot2::theme(legend.position = "none")
+}

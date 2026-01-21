@@ -167,12 +167,25 @@ mod_1_03_surveystats_server <- function(
               return(invisible(NULL))
             }
 
-            p <- ggplot2::ggplot(df, ggplot2::aes(
-              x = !!rlang::sym(x_var),
-              y = countryyear,
-              fill = code
-            )) +
-              ggridges::geom_density_ridges(alpha = 0.7, scale = 2)
+            x_label <- if (!is.null(outcome_var) && outcome_var %in% names(df)) {
+              outcome_var
+            } else if (!is.null(welf_select) && is.function(welf_select)) {
+              paste0("Log ", welf_select()$label)
+            } else {
+              "Log welfare"
+            }
+
+            p <- ridge_distribution_plot(
+              df,
+              x_var = x_var,
+              x_label = x_label,
+              wrap_width = 40
+            )
+
+            if (is.null(p)) {
+              plot.new(); title(main = "Welfare distribution unavailable")
+              return(invisible(NULL))
+            }
 
             # Add PPP poverty lines
             if (!is.null(welf_select) && is.function(welf_select) && isTRUE(welf_select()$pre == "$")) {
@@ -194,19 +207,7 @@ mod_1_03_surveystats_server <- function(
               }
             }
 
-            p + ggplot2::theme_minimal() +
-              ggplot2::labs(
-                title = "",
-                x = if (!is.null(outcome_var) && outcome_var %in% names(df)) {
-                  outcome_var
-                } else if (!is.null(welf_select) && is.function(welf_select)) {
-                  paste0("Log ", welf_select()$label)
-                } else {
-                  "Log welfare"
-                },
-                y = "", fill = ""
-              ) +
-              ggplot2::theme(legend.position = "none")
+            p
           }, error = function(e) {
             message_survey_stats(paste("welfare_dist failed:", conditionMessage(e)), type = "error")
             message("[surveystats] welfare_dist ERROR: ", conditionMessage(e))

@@ -25,6 +25,7 @@ app_server <- function(input, output, session) {
   board_r              <- reactive({ rv$board })
   survey_metadata_r    <- reactive({ rv$survey_metadata })
   varlist_r            <- reactive({ rv$varlist })
+  weather_list_r      <- reactive({ rv$weather_list })
   
   # Now call the step1 module and pass reactives
   mod_1_modelling_server(
@@ -33,6 +34,7 @@ app_server <- function(input, output, session) {
     pin_prefix = pin_prefix_r,
     board = board_r,
     survey_metadata = survey_metadata_r,
-    varlist = varlist_r
+    varlist = varlist_r,
+    weather_list = weather_list_r
   )
 }
