@@ -8,11 +8,13 @@
 #'
 #' @importFrom shiny NS 
 #' @importFrom bsplus bs_accordion bs_append
+#' @importFrom waiter autoWaiter spin_2 transparent
+#' 
 mod_1_modelling_ui <- function(id) {
   ns <- NS(id)
   
   fluidPage(
-    waiter::autoWaiter(html = waiter::spin_2(), color = waiter::transparent(.5)),
+    autoWaiter(html = spin_2(), color = transparent(.5)),
     h4("How much does weather affect welfare? Who is most affected?"),
     
     sidebarLayout(
