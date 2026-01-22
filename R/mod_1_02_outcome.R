@@ -32,7 +32,7 @@ mod_1_02_outcome_server <- function(id, survey_metadata, varlist, country, surve
       varlist()
     })
 
-    # --------- Available outcome variables per selected country ----------- ADJUST TO NEW METADATA STRUCTURE
+    # --------- Available outcome variables per selected country -----------
     available_outcomes <- reactive({
       req(country())
 
@@ -41,7 +41,7 @@ mod_1_02_outcome_server <- function(id, survey_metadata, varlist, country, surve
         # outcome groups for this country (comma-separated in survey_metadata$outcome_group)
         og_raw <- survey_metadata_r() %>%
           dplyr::filter(countryname == ctry) %>%
-          dplyr::pull(outcome_group) %>%
+          dplyr::pull(outcome) %>%
           unique()
 
         og <- og_raw |>
@@ -52,12 +52,21 @@ mod_1_02_outcome_server <- function(id, survey_metadata, varlist, country, surve
         og <- og[nzchar(og)]
         og <- unique(og)
 
-        # match outcome groups to varlist$outcome_grp and return var names
-        varlist_r() %>%
-          dplyr::filter(.data$outcome_grp %in% og) %>%
-          dplyr::pull(.data$varname) %>%
-          unique() %>%
-          sort()
+        # match outcome groups to varlist$outcome and return named choices
+        v <- varlist_r()
+        opts <- v %>%
+          dplyr::filter(.data$outcome %in% og)
+
+        names_vec <- opts$name
+        labels_vec <- if ("label" %in% names(opts)) opts$label else opts$name
+        display <- ifelse(is.na(labels_vec) | labels_vec == "" | labels_vec == names_vec,
+                          names_vec,
+                          paste0(names_vec, " (", labels_vec, ")"))
+
+        out <- stats::setNames(names_vec, display)
+        out <- out[!is.na(names(out)) & !is.na(out)]
+        out <- out[order(names(out))]
+        out
       })
 
       names(outs) <- country()

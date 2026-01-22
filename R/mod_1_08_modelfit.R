@@ -38,8 +38,9 @@ mod_1_08_modelfit_server <- function(
     observeEvent(model_fit(), {
       req(model_fit())
 
-      vl <- if (is.function(varlist)) varlist() else varlist
-      label_lookup <- if (!is.null(vl)) stats::setNames(vl$label, vl$varname) else NULL
+  vl <- if (is.function(varlist)) varlist() else varlist
+  name_col <- if (!is.null(vl) && "name" %in% names(vl)) "name" else "varname"
+  label_lookup <- if (!is.null(vl) && name_col %in% names(vl)) stats::setNames(vl$label, vl[[name_col]]) else NULL
 
       out_lab <- outcome_label()
       if (is.null(out_lab)) out_lab <- selected_outcome() %||% "Outcome"
@@ -142,11 +143,12 @@ mod_1_08_modelfit_server <- function(
               ggplot2::annotate("text", x = 0.5, y = 0.5, label = msg, hjust = 0.5, vjust = 0.5) +
               ggplot2::theme_void()
           } else {
+            join_key <- "name"
             importance_df <- data.frame(
               Variable = names(rel_importance$lmg),
               Contribution = rel_importance$lmg
             ) |>
-              dplyr::left_join(vl[, c("varname", "label"), drop = FALSE], by = c("Variable" = "varname")) |>
+              dplyr::left_join(vl[, c(join_key, "label"), drop = FALSE], by = c("Variable" = join_key)) |>
               dplyr::mutate(label = dplyr::if_else(is.na(.data$label), .data$Variable, .data$label))
 
             ggplot2::ggplot(importance_df, ggplot2::aes(x = reorder(label, Contribution), y = Contribution, fill = Variable)) +

@@ -1,0 +1,63 @@
+﻿countryname,code,year,unit_ind,unit_hh,unit_firm,n_ind,n_hh,n_firm,outcome,wiseapp_pin
+Angola,AGO,2018,0,1,0,,11974,,welfare,AGO_2018
+Benin,BEN,2021,0,1,0,,8032,,welfare,BEN_2021
+Benin,BEN,2018,0,1,0,,8012,,welfare,BEN_2018
+Burkina Faso,BFA,2021,0,1,0,,7176,,welfare,BFA_2021
+Burkina Faso,BFA,2018,0,1,0,,7010,,welfare,BFA_2018
+Brazil,BRA,2021,0,1,0,,116860,,welfare,BRA_2021
+Brazil,BRA,2020,0,1,0,,122711,,welfare,BRA_2020
+Côte d'Ivoire,CIV,2021,0,1,0,,12965,,welfare,CIV_2021
+Côte d'Ivoire,CIV,2018,0,1,0,,12992,,welfare,CIV_2018
+Dominican Republic,DOM,2022,0,1,0,,6155,,welfare,DOM_2022
+Fiji,FJI,2019,0,1,0,,6000,,welfare,FJI_2019
+Gabon,GAB,2017,0,1,0,,7915,,welfare,GAB_2017
+Ghana,GHA,2016,0,1,0,,14009,,welfare,GHA_2016
+"Gambia, The",GMB,2020,0,1,0,,13488,,welfare,GMB_2020
+"Gambia, The",GMB,2015,0,1,0,,13189,,welfare,GMB_2015
+Guinea-Bissau,GNB,2021,0,1,0,,5351,,welfare,GNB_2021
+Guinea-Bissau,GNB,2018,0,1,0,,5351,,welfare,GNB_2018
+Guatemala,GTM,2023,0,1,0,,10964,,welfare,GTM_2023
+Guatemala,GTM,2014,0,1,0,,11512,,welfare,GTM_2014
+Guatemala,GTM,2006,0,1,0,,13686,,welfare,GTM_2006
+India,IND,2021,0,1,0,,155745,,welfare,IND_2021
+India,IND,2020,0,1,0,,152230,,welfare,IND_2020
+India,IND,2019,0,1,0,,165871,,welfare,IND_2019
+India,IND,2011,0,1,0,,101651,,welfare,IND_2011
+India,IND,2009,0,1,0,,100855,,welfare,IND_2009
+"Iran, Islamic Rep.",IRN,2020,0,1,0,,37557,,welfare,IRN_2020
+"Iran, Islamic Rep.",IRN,2019,0,1,0,,38327,,welfare,IRN_2019
+"Iran, Islamic Rep.",IRN,2018,0,1,0,,38959,,welfare,IRN_2018
+"Iran, Islamic Rep.",IRN,2017,0,1,0,,37962,,welfare,IRN_2017
+"Iran, Islamic Rep.",IRN,2016,0,1,0,,38146,,welfare,IRN_2016
+"Iran, Islamic Rep.",IRN,2015,0,1,0,,38252,,welfare,IRN_2015
+"Iran, Islamic Rep.",IRN,2014,0,1,0,,38275,,welfare,IRN_2014
+"Iran, Islamic Rep.",IRN,2013,0,1,0,,38316,,welfare,IRN_2013
+Sri Lanka,LKA,2016,0,1,0,,21756,,welfare,LKA_2016
+Sri Lanka,LKA,2012,0,1,0,,20540,,welfare,LKA_2012
+Mali,MLI,2021,0,1,0,,6143,,welfare,MLI_2021
+Mali,MLI,2018,0,1,0,,6602,,welfare,MLI_2018
+Myanmar,MMR,2017,0,1,0,,13730,,welfare,MMR_2017
+Mongolia,MNG,2022,0,1,0,,22995,,welfare,MNG_2022
+Mauritania,MRT,2019,0,1,0,,9910,,welfare,MRT_2019
+Mauritania,MRT,2014,0,1,0,,9341,,welfare,MRT_2014
+Malawi,MWI,2019,0,1,0,,11434,,welfare,MWI_2019
+Malawi,MWI,2016,0,1,0,,12447,,welfare,MWI_2016
+Malawi,MWI,2010,0,1,0,,11975,,welfare,MWI_2010
+Niger,NER,2021,0,1,0,,6622,,welfare,NER_2021
+Niger,NER,2018,0,1,0,,6024,,welfare,NER_2018
+Nigeria,NGA,2018,0,1,0,,21580,,welfare,NGA_2018
+Nepal,NPL,2010,0,1,0,,5988,,welfare,NPL_2010
+Peru,PER,2022,0,1,0,,34189,,welfare,PER_2022
+Senegal,SEN,2021,0,1,0,,7120,,welfare,SEN_2021
+Senegal,SEN,2018,0,1,0,,7156,,welfare,SEN_2018
+Chad,TCD,2022,0,1,0,,7532,,welfare,TCD_2022
+Chad,TCD,2018,0,1,0,,7493,,welfare,TCD_2018
+Togo,TGO,2021,0,1,0,,6462,,welfare,TGO_2021
+Togo,TGO,2018,0,1,0,,6171,,welfare,TGO_2018
+Timor-Leste,TLS,2014,0,1,0,,5916,,welfare,TLS_2014
+Viet Nam,VNM,2022,0,1,0,,9398,,welfare,VNM_2022
+Viet Nam,VNM,2020,0,1,0,,9396,,welfare,VNM_2020
+Viet Nam,VNM,2018,0,1,0,,9396,,welfare,VNM_2018
+Viet Nam,VNM,2016,0,1,0,,9399,,welfare,VNM_2016
+Viet Nam,VNM,2014,0,1,0,,9399,,welfare,VNM_2014
+Viet Nam,VNM,2012,0,1,0,,9396,,welfare,VNM_2012

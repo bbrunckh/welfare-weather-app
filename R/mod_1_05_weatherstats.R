@@ -36,20 +36,6 @@ mod_1_05_weatherstats_server <- function(
       tabset_session <- session$parent %||% session
     }
 
-    get_label <- function(varname) {
-      wl <- if (is.function(weather_list)) weather_list() else weather_list
-      if (is.null(wl)) return(varname)
-
-      if ("name" %in% names(wl)) {
-        name <- wl[wl$varname == varname, "name"]
-        if (length(name)) {
-          name_val <- as.character(name[[1]])
-          if (!is.na(name_val) && nzchar(name_val)) return(name_val)
-        }
-      }
-      varname
-    }
-
     weather_tab_added <- reactiveVal(FALSE)
 
     output$weather_stats_button_ui <- renderUI({
@@ -78,7 +64,7 @@ mod_1_05_weatherstats_server <- function(
             df <- dplyr::mutate(df, countryyear = paste0(countryname, ", ", year))
           }
 
-          label <- get_label(weather_vars()[1])
+          label <- get_label(weather_vars()[1], var_type = "weather", weather_list = weather_list)
           ridge_distribution_plot(
             df,
             x_var = hv,
@@ -95,7 +81,7 @@ mod_1_05_weatherstats_server <- function(
             df <- dplyr::mutate(df, countryyear = paste0(countryname, ", ", year))
           }
 
-          label <- get_label(weather_vars()[2])
+          label <- get_label(weather_vars()[2], var_type = "weather", weather_list = weather_list)
           ridge_distribution_plot(
             df,
             x_var = hv,
@@ -109,18 +95,15 @@ mod_1_05_weatherstats_server <- function(
           df <- survey_weather()
           hv <- haz_vars()[1]
           so <- selected_outcome()
-          y_var <- if (!is.null(so) && so %in% names(df)) {
-            so
-          } else {
-            dplyr::first(intersect(c("log_welf", "welf_ppp_2021", "welf_lcu_2021"), names(df)))
-          }
+          y_var <- so
 
           if (is.null(y_var)) {
             plot.new(); title(main = "Welfare variable not available")
             return(invisible(NULL))
           }
 
-          label <- get_label(weather_vars()[1])
+          x_label <- get_label(weather_vars()[1], var_type = "weather", weather_list = weather_list)
+          y_label <- get_label(y_var, var_type = "general", varlist = varlist)
 
           df_plot <- df |>
             dplyr::filter(is.finite(.data[[hv]]), is.finite(.data[[y_var]]))
@@ -138,8 +121,8 @@ mod_1_05_weatherstats_server <- function(
             ggplot2::theme_minimal() +
             ggplot2::labs(
               title = "",
-              x = stringr::str_wrap(paste0(label, "\n (as configured)"), 40),
-              y = y_var
+              x = stringr::str_wrap(paste0(x_label, "\n (as configured)"), 40),
+              y = stringr::str_wrap(y_label, 40)
             )
 
           if (is_binary) {
@@ -173,7 +156,8 @@ mod_1_05_weatherstats_server <- function(
             return(invisible(NULL))
           }
 
-          label <- get_label(weather_vars()[2])
+          x_label <- get_label(weather_vars()[2], var_type = "weather", weather_list = weather_list)
+          y_label <- get_label(y_var, var_type = "general", varlist = varlist)
 
           df_plot <- df |>
             dplyr::filter(is.finite(.data[[hv]]), is.finite(.data[[y_var]]))
@@ -191,8 +175,8 @@ mod_1_05_weatherstats_server <- function(
             ggplot2::theme_minimal() +
             ggplot2::labs(
               title = "",
-              x = stringr::str_wrap(paste0(label, "\n (as configured)"), 40),
-              y = y_var
+              x = stringr::str_wrap(paste0(x_label, "\n (as configured)"), 40),
+              y = stringr::str_wrap(y_label, 40)
             )
 
           if (is_binary) {

@@ -390,7 +390,7 @@ mod_1_04_weather_server <- function(
       vl <- if (is.function(varlist)) varlist() else varlist
       if (!is.null(vl)) {
         for (i in seq_len(nrow(vl))) {
-          var_name <- vl$varname[i]
+          var_name <- vl$name[i]
           var_label <- vl$label[i]
           if (var_name %in% names(sw)) {
             attr(sw[[var_name]], "label") <- var_label

@@ -166,18 +166,7 @@ mod_1_03_surveystats_server <- function(
             }
 
             x_label <- if (!is.null(outcome_var)) {
-              v <- if (is.function(varlist)) varlist() else varlist
-              if (is.null(v)) return(outcome_var)
-
-              if (all(c("varname", "label") %in% names(v))) {
-                lbl <- v$label[v$varname == outcome_var]
-                if (length(lbl) && !is.na(lbl[[1]])) lbl[[1]] else outcome_var
-              } else if ("label" %in% names(v)) {
-                lbl <- v$label[match(outcome_var, v$label)]
-                if (length(lbl) && !is.na(lbl[[1]])) lbl[[1]] else outcome_var
-              } else {
-                outcome_var
-              }
+              get_label(outcome_var, var_type = "general", varlist = varlist)
             }
 
             p <- ridge_distribution_plot(
@@ -247,7 +236,7 @@ mod_1_03_surveystats_server <- function(
             }
 
             v <- if (is.function(varlist)) varlist() else varlist
-            if (is.null(v) || !"wiseapp" %in% names(v)) {
+            if (is.null(v) || !"hh" %in% names(v) || !"type" %in% names(v) || !"name" %in% names(v)) {
               num_vars <- names(df)[vapply(df, is.numeric, logical(1))]
               num_vars <- setdiff(num_vars, c("year", "weight"))
               if (!length(num_vars)) return(data.frame(note = "No household variables found."))
@@ -256,9 +245,7 @@ mod_1_03_surveystats_server <- function(
 
             v_df <- tryCatch(as.data.frame(v), error = function(e) NULL)
             if (is.null(v_df)) return(data.frame(note = "varlist unavailable"))
-            vars <- v_df |>
-              dplyr::filter(.data$wiseapp == "HH characteristics", .data$datatype %in% c("Numeric", "Binary", "Integer")) |>
-              dplyr::pull(.data$varname)
+            vars <- v_df$name[v_df$hh == 1 & tolower(v_df$type) %in% c("numeric", "integer", "logical")]
             vars <- intersect(vars, names(df))
             if (!length(vars)) return(data.frame(note = "No household variables found."))
             weighted_summary_long(df, vars = vars)
@@ -278,7 +265,7 @@ mod_1_03_surveystats_server <- function(
             }
 
             v <- if (is.function(varlist)) varlist() else varlist
-            if (is.null(v) || !"wiseapp" %in% names(v)) {
+            if (is.null(v) || !"area" %in% names(v) || !"name" %in% names(v)) {
               area_vars <- grep("area", names(df), value = TRUE, ignore.case = TRUE)
               area_vars <- intersect(area_vars, names(df)[vapply(df, is.numeric, logical(1))])
               if (!length(area_vars)) return(data.frame(note = "No area variables found."))
@@ -287,9 +274,7 @@ mod_1_03_surveystats_server <- function(
 
             v_df <- tryCatch(as.data.frame(v), error = function(e) NULL)
             if (is.null(v_df)) return(data.frame(note = "varlist unavailable"))
-            vars <- v_df |>
-              dplyr::filter(.data$wiseapp == "Area characteristics") |>
-              dplyr::pull(.data$varname)
+            vars <- v_df$name[v_df$area == 1]
             vars <- intersect(vars, names(df))
             if (!length(vars)) return(data.frame(note = "No area variables found."))
             weighted_summary_long(df, vars = vars)

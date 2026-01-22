@@ -122,3 +122,35 @@ ridge_distribution_plot <- function(
 		) +
 		ggplot2::theme(legend.position = "none")
 }
+
+#' Shared label lookup helper
+#'
+#' @param varname Variable name to look up.
+#' @param var_type "weather" or "general".
+#' @param weather_list Weather metadata (data.frame or reactive).
+#' @param varlist General varlist (data.frame or reactive).
+#'
+#' @return A label string if found, otherwise the original varname.
+#'
+#' @noRd
+get_label <- function(varname, var_type = "weather", weather_list = NULL, varlist = NULL) {
+	if (var_type == "weather") {
+		vl <- if (is.function(weather_list)) weather_list() else weather_list
+		label_col <- "name"
+		var_col <- "varname"
+	} else {
+		vl <- if (is.function(varlist)) varlist() else varlist
+		label_col <- "label"
+		var_col <- if (!is.null(vl) && "name" %in% names(vl)) "name" else "varname"
+	}
+	if (is.null(vl)) return(varname)
+
+	if (label_col %in% names(vl) && var_col %in% names(vl)) {
+		name <- vl[vl[[var_col]] == varname, label_col]
+		if (length(name)) {
+			name_val <- as.character(name[[1]])
+			if (!is.na(name_val) && nzchar(name_val)) return(name_val)
+		}
+	}
+	varname
+}

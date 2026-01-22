@@ -115,7 +115,8 @@ load_runtime_data <- function() {
       "survey_list.csv"
     )
   }
-  survey_metadata <- readr::read_csv(survey_metadata_path, show_col_types = FALSE)
+  survey_metadata <- readr::read_csv(survey_metadata_path, show_col_types = FALSE) %>%
+    dplyr::filter(code %in% c("TGO", "GNB"))
   
   pov_lines <- data.frame(
     ppp_year = c(rep(2021,3), rep(2017,3), rep(2011,3)),

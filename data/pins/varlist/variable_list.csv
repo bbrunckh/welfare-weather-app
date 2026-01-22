@@ -1,0 +1,209 @@
+﻿name,label,type,unit_hh,unit_ind,unit_firm,outcome,weather,interact,hh,ind,firm,area,fe,weight
+code,Country code,character,1,1,1,,0,0,0,0,0,0,1,0
+countryname,Country name,character,1,1,1,,0,0,0,0,0,0,1,0
+year,Starting year of household survey,integer,1,1,1,,0,0,0,0,0,0,1,0
+survname,Survey acronym,character,1,1,1,,0,0,0,0,0,0,1,0
+hhid,Household unique identifier ,character,1,1,1,,0,0,0,0,0,0,1,0
+int_year,Year of household survey interview,integer,1,1,1,,0,0,0,0,0,0,1,0
+int_month,Month of household survey interview,integer,1,1,1,,0,0,0,0,0,0,1,0
+int_day,Day of household survey interview,integer,1,1,1,,0,0,0,0,0,0,1,0
+int_date,Date of household survey interview,Date,1,1,1,,0,0,0,0,0,0,1,0
+timestamp,Start date of month of household survey interview,Date,1,1,1,,0,0,0,0,0,0,1,0
+subnatid1,Subnational ID - highest level,character,1,1,1,,0,0,0,0,0,0,1,0
+subnatid2,Subnational ID - second highest level,character,1,1,1,,0,0,0,0,0,0,1,0
+subnatid3,Subnational ID - third highest level,character,1,1,1,,0,0,0,0,0,0,1,0
+subnatid4,Subnational ID - fourth highest level,character,1,1,1,,0,0,0,0,0,0,1,0
+subnatidsurvey,Lowest level of Subnational ID,character,1,1,1,,0,0,0,0,0,0,1,0
+strata,Strata,character,1,1,1,,0,0,0,0,0,0,1,0
+psu,PSU,character,1,1,1,,0,0,0,0,0,0,1,0
+h3_loc_id,H3 location panel ID,character,1,1,1,,0,0,0,0,0,0,1,0
+welfare,Welfare aggregate used for estimating international poverty (LCU),numeric,1,1,0,welfare,0,0,0,0,0,0,0,0
+cpi2011,Weighted CPI conversion factor for 2011,numeric,1,1,0,welfare,0,0,0,0,0,0,0,0
+cpi2017,Weighted CPI conversion factor for 2017,numeric,1,1,0,welfare,0,0,0,0,0,0,0,0
+cpi2021,Weighted CPI conversion factor for 2021,numeric,1,1,0,welfare,0,0,0,0,0,0,0,0
+icp2011,PPP conversion factor for 2011,numeric,1,1,0,welfare,0,0,0,0,0,0,0,0
+icp2017,PPP conversion factor for 2017,numeric,1,1,0,welfare,0,0,0,0,0,0,0,0
+icp2021,PPP conversion factor for 2021,numeric,1,1,0,welfare,0,0,0,0,0,0,0,0
+welf_ppp_2011,$ per person per day (2011 PPP),numeric,1,1,0,welfare,0,0,0,0,0,0,0,0
+welf_ppp_2017,$ per person per day (2017 PPP),numeric,1,1,0,welfare,0,0,0,0,0,0,0,0
+welf_ppp_2021,$ per person per day (2021 PPP),numeric,1,1,0,welfare,0,0,0,0,0,0,0,0
+welf_lcu_2011,LCU per day (2011),numeric,1,1,0,welfare,0,0,0,0,0,0,0,0
+welf_lcu_2017,LCU per day (2017),numeric,1,1,0,welfare,0,0,0,0,0,0,0,0
+welf_lcu_2021,LCU per day (2021),numeric,1,1,0,welfare,0,0,0,0,0,0,0,0
+poor_190ln,"Poor, living below $1.90 per day (2011 PPP)",logical,1,1,0,welfare,0,1,0,0,0,0,0,0
+poor_320ln,"Poor, living below $3.20 per day (2011 PPP)",logical,1,1,0,welfare,0,1,0,0,0,0,0,0
+poor_550ln,"Poor, living below $5.50 per day (2011 PPP)",logical,1,1,0,welfare,0,1,0,0,0,0,0,0
+poor_215ln,"Poor, living below $2.15 per day (2017 PPP)",logical,1,1,0,welfare,0,1,0,0,0,0,0,0
+poor_365ln,"Poor, living below $3.65 per day (2017 PPP)",logical,1,1,0,welfare,0,1,0,0,0,0,0,0
+poor_685ln,"Poor, living below $6.85 per day (2017 PPP)",logical,1,1,0,welfare,0,1,0,0,0,0,0,0
+poor_300ln,"Poor, living below $3.00 per day (2021 PPP)",logical,1,1,0,welfare,0,1,0,0,0,0,0,0
+poor_420ln,"Poor, living below $4.20 per day (2021 PPP)",logical,1,1,0,welfare,0,1,0,0,0,0,0,0
+poor_830ln,"Poor, living below $8.30 per day (2021 PPP)",logical,1,1,0,welfare,0,1,0,0,0,0,0,0
+t_wage_total,Annualized total wage for all jobs (7-day ref period),numeric,1,1,0,wage,0,0,0,0,0,0,0,0
+wages_ppp_2011,"Wages per person per day  ($, 2011 PPP)",numeric,1,1,0,wage,0,0,0,0,0,0,0,0
+wages_ppp_2017,"Wages per person per day  ($, 2017 PPP)",numeric,1,1,0,wage,0,0,0,0,0,0,0,0
+wages_ppp_2021,"Wages per person per day  ($, 2021 PPP)",numeric,1,1,0,wage,0,0,0,0,0,0,0,0
+wages_lcu_2011,"Wages per person per day  (LCU, 2011)",numeric,1,1,0,wage,0,0,0,0,0,0,0,0
+wages_lcu_2017,"Wages per person per day  (LCU, 2017)",numeric,1,1,0,wage,0,0,0,0,0,0,0,0
+wages_lcu_2021,"Wages per person per day (LCU, 2021)",numeric,1,1,0,wage,0,0,0,0,0,0,0,0
+laborincome,"Total annual labor income in all jobs, incl. bonuses, etc.",numeric,1,1,0,labor_inc,0,0,0,0,0,0,0,0
+laborincome_ppp_2011,"Labor income per person per day  ($, 2011 PPP)",numeric,1,1,0,labor_inc,0,0,0,0,0,0,0,0
+laborincome_ppp_2017,"Labor income per person per day  ($, 2017 PPP)",numeric,1,1,0,labor_inc,0,0,0,0,0,0,0,0
+laborincome_ppp_2021,"Labor income per person per day  ($, 2021 PPP)",numeric,1,1,0,labor_inc,0,0,0,0,0,0,0,0
+laborincome_lcu_2011,"Labor income per person per day  (LCU, 2011)",numeric,1,1,0,labor_inc,0,0,0,0,0,0,0,0
+laborincome_lcu_2017,"Labor income per person per day  (LCU, 2017)",numeric,1,1,0,labor_inc,0,0,0,0,0,0,0,0
+laborincome_lcu_2021,"Labor income per person per day  (LCU, 2021)",numeric,1,1,0,labor_inc,0,0,0,0,0,0,0,0
+weight,Sample weight,numeric,1,1,1,,0,0,0,0,0,0,0,1
+urban,Urban,logical,1,1,0,,0,1,1,0,0,0,0,0
+hhsize,Household size,integer,1,1,0,,0,0,1,0,0,0,0,0
+depend,Dependency ratio,numeric,1,1,0,,0,0,1,0,0,0,0,0
+literacy,Any member ≥ 15 years can both read and write,logical,1,1,0,,0,0,1,0,0,0,0,0
+educat7,Highest level of education for any member ≥ 15 years (7 categories),factor,1,1,0,,0,0,1,0,0,0,0,0
+educat5,Highest level of education for any member ≥ 15 years (5 categories),factor,1,1,0,,0,0,1,0,0,0,0,0
+educat4,Highest level of education for any member ≥ 15 years (4 categories),factor,1,1,0,,0,0,1,0,0,0,0,0
+educy,Mean years of education (members ≥ 15 years),numeric,1,1,0,,0,0,1,0,0,0,0,0
+educ_com1,Any member ≥ 15 years completed primary education,logical,1,1,0,,0,0,1,0,0,0,0,0
+educ_com2,Any member ≥ 15 years completed secondary education,logical,1,1,0,,0,0,1,0,0,0,0,0
+educ_com3,Any member ≥ 15 years completed post-secondary education,logical,1,1,0,,0,0,1,0,0,0,0,0
+male,Male household head,logical,1,1,0,,0,1,1,0,0,0,0,0
+lstatus,Labor status of household head (7-day ref period),factor,1,1,0,,0,0,1,0,0,0,0,0
+employed,Household head employed (7-day ref period),logical,1,1,0,,0,0,1,0,0,0,0,0
+unemployed,Household head unemployed (7-day ref period),logical,1,1,0,,0,0,1,0,0,0,0,0
+notinlf,Household head not in labor force (7-day ref period),logical,1,1,0,,0,0,1,0,0,0,0,0
+empstat,"Employment status of household head, primary job (7-day ref period)",factor,1,1,0,,0,0,1,0,0,0,0,0
+selfemployed,Household head self-employed (7-day ref period),logical,1,1,0,,0,0,1,0,0,0,0,0
+ocusec,"Sector of activity of household head, primary job (7-day ref period)",factor,1,1,0,,0,0,1,0,0,0,0,0
+industrycat10,"1 digit industry classification of household head, primary job (7-day ref period)",factor,1,1,0,,0,0,1,0,0,0,0,0
+industrycat4,"4-category industry classification of household head, primary job (7-day ref period)",factor,1,1,0,,0,0,1,0,0,0,0,0
+agriculture,Household head primary job in agriculture (7-day ref period),logical,1,1,0,,0,0,1,0,0,0,0,0
+industry,Household head primary job in industry (7-day ref period),logical,1,1,0,,0,0,1,0,0,0,0,0
+services,Household head primary job in services (7-day ref period),logical,1,1,0,,0,0,1,0,0,0,0,0
+occup,"1-digit occupation classification of household head, primary job (7-day ref period)",factor,1,1,0,,0,0,1,0,0,0,0,0
+lstatus_year,Labor status of household head (12-month ref period),factor,1,1,0,,0,0,1,0,0,0,0,0
+employed_year,Household head employed  (12-month ref period),logical,1,1,0,,0,0,1,0,0,0,0,0
+unemployed_year,Household head unemployed (12-month ref period),logical,1,1,0,,0,0,1,0,0,0,0,0
+notinlf_year,Household head not in labor force (12-month ref period),logical,1,1,0,,0,0,1,0,0,0,0,0
+empstat_year,"Employment status of household head, primary job (12-month ref period)",factor,1,1,0,,0,0,1,0,0,0,0,0
+selfemployed_year,Household head self-employed (12-month ref period),logical,1,1,0,,0,0,1,0,0,0,0,0
+ocusec_year,"Sector of activity of household head, primary job (12-month ref period)",factor,1,1,0,,0,0,1,0,0,0,0,0
+industrycat10_year,"1 digit industry classification of household head, primary job (12-month ref period)",factor,1,1,0,,0,0,1,0,0,0,0,0
+industrycat4_year,"4-category industry classification of household head, primary job (12-month ref period)",factor,1,1,0,,0,0,1,0,0,0,0,0
+agriculture_year,Household head primary job in agriculture (12-month ref period),logical,1,1,0,,0,0,1,0,0,0,0,0
+industry_year,Household head primary job in industry (12-month ref period),logical,1,1,0,,0,0,1,0,0,0,0,0
+services_year,Household head primary job in services (12-month ref period),logical,1,1,0,,0,0,1,0,0,0,0,0
+occup_year,"1-digit occupation classification of household head, primary job (12-month ref period)",factor,1,1,0,,0,0,1,0,0,0,0,0
+njobs,Total number of jobs of household head,integer,1,1,0,,0,0,1,0,0,0,0,0
+water_source,Main source of drinking water,factor,1,1,0,,0,0,1,0,0,0,0,0
+imp_wat_rec,Improved water source,logical,1,1,0,,0,0,1,0,0,0,0,0
+piped,Access to piped water,logical,1,1,0,,0,0,1,0,0,0,0,0
+piped_to_prem,Access to piped water on premises,logical,1,1,0,,0,0,1,0,0,0,0,0
+w_30m,Access to water within 30 minutes,logical,1,1,0,,0,0,1,0,0,0,0,0
+w_avail,Water is available when needed,logical,1,1,0,,0,0,1,0,0,0,0,0
+sanitation_source,Main toilet facility,factor,1,1,0,,0,0,1,0,0,0,0,0
+toilet_acc,Access to a flush toilet,factor,1,1,0,,0,0,1,0,0,0,0,0
+sewer,Access to sewer,logical,1,1,0,,0,0,1,0,0,0,0,0
+open_def,Access to any sanitation facility,logical,1,1,0,,0,0,1,0,0,0,0,0
+imp_san_rec,Improved sanitation facility ,logical,1,1,0,,0,0,1,0,0,0,0,0
+central_acc,Access to central heating ,logical,1,1,0,,0,0,1,0,0,0,0,0
+heatsource,Main source of heating,factor,1,1,0,,0,0,1,0,0,0,0,0
+cooksource,Main source of cooking fuel,factor,1,1,0,,0,0,1,0,0,0,0,0
+solidcookfuel,Household uses solid cooking fuel,logical,1,1,0,,0,0,1,0,0,0,0,0
+lightsource,Main source of lighting,factor,1,1,0,,0,0,1,0,0,0,0,0
+elec_acc,Access to electricity,factor,1,1,0,,0,0,1,0,0,0,0,0
+electricity,Access to electricity in dwelling,logical,1,1,0,,0,0,1,0,0,0,0,0
+elechr_acc,Electricity availability (hr/day),numeric,1,1,0,,0,0,1,0,0,0,0,0
+electyp,Lighting and/or electricity type,factor,1,1,0,,0,0,1,0,0,0,0,0
+landphone,Ownership of a land phone,logical,1,1,0,,0,0,1,0,0,0,0,0
+cellphone,Ownership of a cell phone,logical,1,1,0,,0,0,1,0,0,0,0,0
+phone,Ownership of a telephone,logical,1,1,0,,0,0,1,0,0,0,0,0
+computer,Ownership of a computer,logical,1,1,0,,0,0,1,0,0,0,0,0
+etablet,Ownership of a electronic tablet,logical,1,1,0,,0,0,1,0,0,0,0,0
+internet,Internet connection,factor,1,1,0,,0,1,1,0,0,0,0,0
+internet_access,Household has access to internet (within or outside the house),logical,1,1,0,,0,0,1,0,0,0,0,0
+radio,Ownership of a radio,logical,1,1,0,,0,0,1,0,0,0,0,0
+tv,Ownership of a tv,logical,1,1,0,,0,0,1,0,0,0,0,0
+tv_cable,Ownership of a cable tv,logical,1,1,0,,0,0,1,0,0,0,0,0
+video,Ownership of a video,logical,1,1,0,,0,0,1,0,0,0,0,0
+fridge,Ownership of a refrigerator,logical,1,1,0,,0,0,1,0,0,0,0,0
+sewmach,Ownership of a sewing machine,logical,1,1,0,,0,0,1,0,0,0,0,0
+washmach,Ownership of a washing machine,logical,1,1,0,,0,0,1,0,0,0,0,0
+stove,Ownership of a stove,logical,1,1,0,,0,0,1,0,0,0,0,0
+ricecook,Ownership of a rice cooker,logical,1,1,0,,0,0,1,0,0,0,0,0
+fan,Ownership of an electric fan,logical,1,1,0,,0,0,1,0,0,0,0,0
+ac,Ownership of an air conditioner,logical,1,1,0,,0,0,1,0,0,0,0,0
+ewpump,Ownership of a electric water pump,logical,1,1,0,,0,0,1,0,0,0,0,0
+car,Ownership of a Car,logical,1,1,0,,0,0,1,0,0,0,0,0
+bcycle,Ownership of a bicycle,logical,1,1,0,,0,0,1,0,0,0,0,0
+mcycle,Ownership of a motorcycle,logical,1,1,0,,0,0,1,0,0,0,0,0
+oxcart,Ownership of an oxcart,logical,1,1,0,,0,0,1,0,0,0,0,0
+boat,Ownership of a boat,logical,1,1,0,,0,0,1,0,0,0,0,0
+canoe,Ownership of a canoes,logical,1,1,0,,0,0,1,0,0,0,0,0
+roof,Main material used for roof,factor,1,1,0,,0,0,1,0,0,0,0,0
+roof_finished,Main material used for roof is a finished material (not natural or rudimentary),logical,1,1,0,,0,0,1,0,0,0,0,0
+wall,Main material used for external walls,factor,1,1,0,,0,0,1,0,0,0,0,0
+wall_finished,Main material used for external walls is a finished material (not natural or rudimentary),logical,1,1,0,,0,0,1,0,0,0,0,0
+floor,Main material used for floor,factor,1,1,0,,0,0,1,0,0,0,0,0
+floor_finished,Main material used for floor is a finished material (not natural or rudimentary),logical,1,1,0,,0,0,1,0,0,0,0,0
+rooms,Number of habitable rooms ,integer,1,1,0,,0,0,1,0,0,0,0,0
+ownhouse,Ownership of house,factor,1,1,0,,0,0,1,0,0,0,0,0
+ownhouse_secure,Own house,logical,1,1,0,,0,0,1,0,0,0,0,0
+renthouse,Rent house,logical,1,1,0,,0,0,1,0,0,0,0,0
+ownland,Ownership of residential land,logical,1,1,0,,0,0,1,0,0,0,0,0
+agriland,Use agricultural land,logical,1,1,0,,0,0,1,0,0,0,0,0
+area_agriland,Area of agricultural land used (Ha),numeric,1,1,0,,0,0,1,0,0,0,0,0
+ownagriland,Own agricultural land,logical,1,1,0,,0,0,1,0,0,0,0,0
+area_ownagriland,Area of agricultural land owned (Ha),numeric,1,1,0,,0,0,1,0,0,0,0,0
+loc_type,Type of location data,character,1,1,1,,0,0,0,0,0,1,0,0
+loc_id,Spatial unit ID,character,1,1,1,,0,0,0,0,0,1,0,0
+road_density,Road density (m/km^2),numeric,1,1,1,,0,0,0,0,0,1,0,0
+pop_road_2km,Percent of population living within 2km of an all season road,numeric,1,1,1,,0,0,0,0,0,1,0,0
+ttime_city,Travel time to nearest urban centre  (min),numeric,1,1,1,,0,0,0,0,0,1,0,0
+ttime_health,Motorized travel time to nearest health care facility (min),numeric,1,1,1,,0,0,0,0,0,1,0,0
+viirs_ntl,VIIRS nighttime lights brightness for survey year (nW/cm^2/sr),numeric,1,1,1,,0,0,0,0,0,1,0,0
+viirs_ntl_5y,Percent change in VIIRS nighttime lights brightness (5 years),numeric,1,1,1,,0,0,0,0,0,1,0,0
+flood_pop_pct,Percent of population exposed to 1 in 100 year flood > 15 cm,numeric,1,1,1,,0,0,0,0,0,1,0,0
+built_area,"Built up area (H3 resolution 6, km^2)",numeric,1,1,1,,0,0,0,0,0,1,0,0
+area_h3_6,"Area of spatial unit (H3 resolution 6, km^2)",numeric,1,1,1,,0,0,0,0,0,1,0,0
+area_h3_7,"Area of spatial unit (H3 resolution 7, km^2)",numeric,1,1,1,,0,0,0,0,0,1,0,0
+dou_11_pop,Percent of population in very low density areas,numeric,1,1,1,,0,0,0,0,0,1,0,0
+dou_12_pop,Percent of population in low density areas,numeric,1,1,1,,0,0,0,0,0,1,0,0
+dou_13_pop,Percent of population in rural areas,numeric,1,1,1,,0,0,0,0,0,1,0,0
+dou_21_pop,Percent of population in suburban areas,numeric,1,1,1,,0,0,0,0,0,1,0,0
+dou_22_pop,Percent of population in semi-dense urban clusters,numeric,1,1,1,,0,0,0,0,0,1,0,0
+dou_23_pop,Percent of population in dense urban clusters,numeric,1,1,1,,0,0,0,0,0,1,0,0
+dou_30_pop,Percent of population in urban centers,numeric,1,1,1,,0,0,0,0,0,1,0,0
+pop_2020,Population of spatial unit in 2020,numeric,1,1,1,,0,0,0,0,0,1,0,0
+pop_2020_density,Population density in 2020 (people/km^2),numeric,1,1,1,,0,0,0,0,0,1,0,0
+pop_2020_f,Percent of population female,numeric,1,1,1,,0,0,0,0,0,1,0,0
+pop_2020_m,Percent of population male,numeric,1,1,1,,0,0,0,0,0,1,0,0
+NAM_1,Name of level 1 administrative unit (World Bank),character,1,1,1,,0,0,0,0,0,0,1,0
+ADM1CD_c,Code of level 1 administrative unit (World Bank),character,1,1,1,,0,0,0,0,0,0,1,0
+NAM_2,Name of level 2 administrative unit (World Bank),character,1,1,1,,0,0,0,0,0,0,1,0
+ADM2CD_c,Code of level 2 administrative unit (World Bank),character,1,1,1,,0,0,0,0,0,0,1,0
+eFUA_ID,Functional Urban Area ID (GHS-FUA_UCDB2015_R2019A),character,1,1,1,,0,0,0,0,0,0,1,0
+fbcz_id_num,Commuting Zone ID (Meta),numeric,1,1,1,,0,0,0,0,0,0,1,0
+gaul1_code,GAUL 2024 level 1 code (FAO),character,1,1,1,,0,0,0,0,0,0,1,0
+gaul2_code,GAUL 2024 level 2 code (FAO),character,1,1,1,,0,0,0,0,0,0,1,0
+GID_1,GADM4.1 level 1 code,character,1,1,1,,0,0,0,0,0,0,1,0
+GID_2,GADM4.1 level 2 code,character,1,1,1,,0,0,0,0,0,0,1,0
+ID_UC_G0,Urban Centre ID (GHS-UCDB-R2024A),character,1,1,1,,0,0,0,0,0,0,1,0
+urb_id,Global Urban Area ID (Meta),character,1,1,1,,0,0,0,0,0,0,1,0
+haz_t,Monthly temperature,numeric,1,1,1,,1,0,0,0,0,0,0,0
+haz_tn,Monthly daily minimum temperature,numeric,1,1,1,,1,0,0,0,0,0,0,0
+haz_tx,Monthly daily maximum temperature,numeric,1,1,1,,1,0,0,0,0,0,0,0
+haz_dtr,Monthly daily temperature range,numeric,1,1,1,,1,0,0,0,0,0,0,0
+haz_tnn,Monthly minimum of daily minimum temperature,numeric,1,1,1,,1,0,0,0,0,0,0,0
+haz_txx,Monthly maximum of daily maximum temperature,numeric,1,1,1,,1,0,0,0,0,0,0,0
+haz_tx35,Monthly extreme hot days,numeric,1,1,1,,1,0,0,0,0,0,0,0
+haz_tx40,Monthly very extreme hot days,numeric,1,1,1,,1,0,0,0,0,0,0,0
+haz_tr,Monthly tropical nights,numeric,1,1,1,,1,0,0,0,0,0,0,0
+haz_r,Monthly precipitation,numeric,1,1,1,,1,0,0,0,0,0,0,0
+haz_r01,Monthly wet days,numeric,1,1,1,,1,0,0,0,0,0,0,0
+haz_sdii,Monthly precipitation intensity,numeric,1,1,1,,1,0,0,0,0,0,0,0
+haz_rx1day,Monthly maximum 1-day precipitation,numeric,1,1,1,,1,0,0,0,0,0,0,0
+haz_rx5day,Monthly maximum 5-day precipitation,numeric,1,1,1,,1,0,0,0,0,0,0,0
+haz_r10,Monthly heavy precipitation days,numeric,1,1,1,,1,0,0,0,0,0,0,0
+haz_r20,Monthly very heavy precipitation days,numeric,1,1,1,,1,0,0,0,0,0,0,0
+haz_mrsos,Monthly soil moisture in upper soil portion,numeric,1,1,1,,1,0,0,0,0,0,0,0
+haz_spi6,Monthly Standardised Precipitation Index for 6 months cumulation period,numeric,1,1,1,,1,0,0,0,0,0,0,0
+haz_spei6,Monthly Standardised Precipitation-Evapotranspiration Index for 6 months cumulation period,numeric,1,1,1,,1,0,0,0,0,0,0,0

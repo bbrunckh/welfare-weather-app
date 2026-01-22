@@ -51,7 +51,7 @@ mod_1_06_model_server <- function(
       so <- selected_outcome()
       vl <- varlist_r()
       if (is.null(so) || is.null(vl)) return(NULL)
-      lab <- vl$label[vl$varname == so]
+      lab <- vl$label[vl$name == so]
       if (length(lab)) as.character(lab[[1]]) else so
     })
 
@@ -59,9 +59,9 @@ mod_1_06_model_server <- function(
       so <- selected_outcome()
       vl <- varlist_r()
       if (is.null(so)) return(NULL)
-      if (!is.null(vl) && "datatype" %in% names(vl)) {
-        dt <- vl$datatype[vl$varname == so]
-        if (length(dt) && !is.na(dt[[1]]) && dt[[1]] == "Binary") return("Binary")
+      if (!is.null(vl) && "type" %in% names(vl)) {
+        dt <- vl$type[vl$name == so]
+        if (length(dt) && !is.na(dt[[1]]) && tolower(dt[[1]]) == "logical") return("Binary")
       }
       df <- survey_weather()
       if (!is.null(df) && so %in% names(df)) {
@@ -71,35 +71,32 @@ mod_1_06_model_server <- function(
       "Continuous"
     })
 
-    group_col <- reactive({
+    safe_varlist <- function(df, flag_col = NULL, types = NULL) {
       vl <- varlist_r()
-      if (is.null(vl)) return(NULL)
-      intersect(c("wiseapp", "group", "category", "section", "module", "group_name"), names(vl))[1]
-    })
-
-    safe_varlist <- function(df, group_name = NULL, datatype = NULL) {
-      vl <- varlist_r()
-      if (is.null(vl)) return(data.frame(varname = character(), label = character(), stringsAsFactors = FALSE))
+      if (is.null(vl)) return(data.frame(name = character(), label = character(), stringsAsFactors = FALSE))
 
       keep <- rep(TRUE, nrow(vl))
-      gcol <- group_col()
-
-      if (!is.null(group_name) && !is.null(gcol) && !is.na(gcol)) {
-        keep <- keep & (vl[[gcol]] == group_name)
+      if (!is.null(flag_col) && flag_col %in% names(vl)) {
+        keep <- keep & vl[[flag_col]] == 1
       }
 
-      if (!is.null(datatype) && "datatype" %in% names(vl)) {
-        keep <- keep & (vl$datatype %in% datatype)
+      if (!is.null(types) && "type" %in% names(vl)) {
+        keep <- keep & tolower(vl$type) %in% tolower(types)
       }
 
       out <- vl[keep, , drop = FALSE]
-      if (nrow(out) == 0) return(data.frame(varname = character(), label = character(), stringsAsFactors = FALSE))
+      if (nrow(out) == 0) return(data.frame(name = character(), label = character(), stringsAsFactors = FALSE))
 
-      out <- out[, intersect(c("varname", "label"), names(out)), drop = FALSE]
-      if (!"label" %in% names(out)) out$label <- out$varname
+      name_col <- "name"
+      label_col <- "label"
+      if (is.null(name_col)) return(data.frame(name = character(), label = character(), stringsAsFactors = FALSE))
+
+      out <- out[, unique(c(name_col, label_col)), drop = FALSE]
+      names(out)[names(out) == name_col] <- "name"
+      if (!"label" %in% names(out)) out$label <- out$name
 
       if (!is.null(df)) {
-        out <- out[out$varname %in% names(df), , drop = FALSE]
+        out <- out[out$name %in% names(df), , drop = FALSE]
       }
 
       out
@@ -107,29 +104,17 @@ mod_1_06_model_server <- function(
 
     hh_varlist <- reactive({
       df <- survey_weather()
-      safe_varlist(df, group_name = "HH characteristics", datatype = c("Numeric", "Binary", "Integer"))
+      safe_varlist(df, flag_col = "hh", types = c("numeric", "integer", "logical"))
     })
 
     area_varlist <- reactive({
       df <- survey_weather()
-      safe_varlist(df, group_name = "Area characteristics", datatype = c("Numeric", "Binary", "Integer"))
+      safe_varlist(df, flag_col = "area", types = c("numeric", "integer", "logical"))
     })
 
     fe_varlist <- reactive({
       df <- survey_weather()
-      fe_include <- c(
-        "year", "int_year", "int_month", "int_day", "int_date",
-        "timestamp", "ADM1CD_c", "ADM2CD_c", "h3_loc_id", "eFUA_ID",
-        "ID_UC_G0", "urb_id", "fbcz_id_num"
-      )
-      if (!is.null(df$code)) fe_include <- c("code", fe_include)
-
-      out <- safe_varlist(df, group_name = "ID & Fixed effects")
-      if (nrow(out) == 0) {
-        out <- safe_varlist(df, group_name = NULL)
-      }
-
-      out[out$varname %in% fe_include, , drop = FALSE]
+      safe_varlist(df, flag_col = "fe", types = c("numeric", "integer", "logical", "character", "Date"))
     })
 
     output$model_selector_ui <- renderUI({
@@ -171,40 +156,48 @@ mod_1_06_model_server <- function(
         if (input$model_type %in% c("Logistic regression", "Linear regression (OLS)", "Linear regression")) {
           tagList(
             {
-              hh_choices <- hh_varlist()
               df <- survey_weather()
-              if ("datatype" %in% names(varlist_r())) {
-                bin_vars <- varlist_r()[varlist_r()$datatype == "Binary", "varname"]
-                hh_choices <- hh_choices[hh_choices$varname %in% bin_vars, , drop = FALSE]
+              vl <- varlist_r()
+              name_col <- "name"
+
+              choices <- character(0)
+              if (!is.null(name_col) && !is.null(vl) && "interact" %in% names(vl)) {
+                has_hh <- "hh" %in% names(vl)
+                has_outcome <- "outcome" %in% names(vl)
+
+                ok_hh <- if (has_hh) vl$hh == 1 else rep(FALSE, nrow(vl))
+                ok_outcome <- if (has_outcome) !is.na(vl$outcome) & nzchar(vl$outcome) else rep(FALSE, nrow(vl))
+
+                interact_df <- vl[vl$interact == 1 & (ok_hh | ok_outcome), , drop = FALSE]
+                interact_df <- interact_df[, intersect(c(name_col, "label"), names(interact_df)), drop = FALSE]
+                names(interact_df)[names(interact_df) == name_col] <- "name"
+                if (!"label" %in% names(interact_df)) interact_df$label <- interact_df$name
+
+                if (!is.null(df)) {
+                  interact_df <- interact_df[interact_df$name %in% names(df), , drop = FALSE]
+                }
+
+                exclude <- c(selected_outcome(), haz_vars())
+                interact_df <- interact_df[!interact_df$name %in% exclude, , drop = FALSE]
+                choices <- interact_df$label
               }
-              if (!nrow(hh_choices) && !is.null(df)) {
-                fallback_vars <- setdiff(names(df), c(selected_outcome(), haz_vars()))
-                hh_choices <- data.frame(varname = fallback_vars, label = fallback_vars, stringsAsFactors = FALSE)
-              }
-              choices <- hh_choices$label
-              selected <- if (length(choices) && "Urban" %in% choices) "Urban" else if (length(choices)) choices[[1]] else NULL
+
               shiny::selectizeInput(
                 ns("interactions"),
                 label = "Interactions with \\(Haz_{kt}\\):",
                 choices = choices,
-                selected = selected,
+                selected = NULL,
                 multiple = TRUE,
-                options = list(maxItems = 1)
+                options = list(maxItems = 3, placeholder = "Select (several) interaction variables")
               )
             },
             shiny::selectizeInput(
               ns("fixedeffects"),
               label = "Fixed effects",
               choices = fe_varlist()$label,
-              selected = {
-                fe <- fe_varlist()
-                if (nrow(fe) && "ADM1CD_c" %in% fe$varname) {
-                  fe$label[fe$varname == "ADM1CD_c"]
-                } else if (nrow(fe)) {
-                  fe$label[[1]]
-                } else NULL
-              },
-              multiple = TRUE
+              selected = NULL,
+              multiple = TRUE,
+              options = list(placeholder = "Please select (several) fixed effects")
             ),
             shiny::radioButtons(
               ns("covariates"),
@@ -226,31 +219,24 @@ mod_1_06_model_server <- function(
           tagList(
             {
               hh_choices <- hh_varlist()$label
-              interaction_sel <- if (!is.null(input$interactions)) input$interactions else character(0)
-              selected <- intersect(c("Household size", interaction_sel), hh_choices)
-              if (!length(selected) && length(hh_choices)) selected <- hh_choices[[1]]
               shiny::selectizeInput(
                 ns("hhcov"),
                 label = "Household characteristics \\(X_{hkt}\\)",
                 choices = hh_choices,
-                selected = selected,
-                multiple = TRUE
+                selected = NULL,
+                multiple = TRUE,
+                options = list(placeholder = "Please select (several) hh covariates")
               )
             },
             {
               area_choices <- area_varlist()
-              selected <- NULL
-              if (nrow(area_choices) && "area_h3_7" %in% area_choices$varname) {
-                selected <- area_choices$label[area_choices$varname == "area_h3_7"]
-              } else if (nrow(area_choices)) {
-                selected <- area_choices$label[[1]]
-              }
               shiny::selectizeInput(
                 ns("areacov"),
                 label = "Area characteristics \\(E_{kt}\\)",
                 choices = area_choices$label,
-                selected = selected,
-                multiple = TRUE
+                selected = NULL,
+                multiple = TRUE,
+                options = list(placeholder = "Please select (several) area covariates")
               )
             },
             {
@@ -260,7 +246,8 @@ mod_1_06_model_server <- function(
                 label = "Additional covariates",
                 choices = extra_choices$label,
                 selected = NULL,
-                multiple = TRUE
+                multiple = TRUE,
+                options = list(placeholder = "Please select (several) other covariates")
               )
             }
           )
@@ -276,7 +263,9 @@ mod_1_06_model_server <- function(
     interaction_vars <- reactive({
       vl <- varlist_r()
       if (is.null(vl) || is.null(input$interactions) || !length(input$interactions)) return(character(0))
-      label_to_var <- stats::setNames(vl$varname, vl$label)
+      name_col <- "name"
+      if (is.null(name_col) || !"label" %in% names(vl)) return(character(0))
+      label_to_var <- stats::setNames(vl[[name_col]], vl$label)
       vars <- label_to_var[input$interactions]
       vars[!is.na(vars)]
     })
@@ -284,17 +273,21 @@ mod_1_06_model_server <- function(
     extra_covariates <- reactive({
       vl <- varlist_r()
       df <- survey_weather()
-      if (is.null(vl)) return(data.frame(varname = character(), label = character(), stringsAsFactors = FALSE))
+      if (is.null(vl)) return(data.frame(name = character(), label = character(), stringsAsFactors = FALSE))
 
       base_vars <- c(selected_outcome(), haz_vars())
-      hh_vars <- hh_varlist()$varname
-      area_vars <- area_varlist()$varname
-      fe_vars <- fe_varlist()$varname
+      hh_vars <- hh_varlist()$name
+      area_vars <- area_varlist()$name
+      fe_vars <- fe_varlist()$name
 
       exclude <- unique(c(base_vars, hh_vars, area_vars, fe_vars))
-      out <- vl[vl$varname %in% names(df) & !vl$varname %in% exclude, , drop = FALSE]
-      out <- out[, intersect(c("varname", "label"), names(out)), drop = FALSE]
-      if (!"label" %in% names(out)) out$label <- out$varname
+      name_col <- "name"
+      if (is.null(name_col)) return(data.frame(name = character(), label = character(), stringsAsFactors = FALSE))
+
+      out <- vl[vl[[name_col]] %in% names(df) & !vl[[name_col]] %in% exclude, , drop = FALSE]
+      out <- out[, intersect(c(name_col, "label"), names(out)), drop = FALSE]
+      names(out)[names(out) == name_col] <- "name"
+      if (!"label" %in% names(out)) out$label <- out$name
 
       out
     })
@@ -345,8 +338,9 @@ mod_1_06_model_server <- function(
 
       label_to_var <- NULL
       vl <- varlist_r()
-      if (!is.null(vl) && all(c("label", "varname") %in% names(vl))) {
-        label_to_var <- stats::setNames(vl$varname, vl$label)
+      name_col <- if (!is.null(vl) && "name" %in% names(vl)) "name" else "varname"
+      if (!is.null(vl) && all(c("label", name_col) %in% names(vl))) {
+        label_to_var <- stats::setNames(vl[[name_col]], vl$label)
       }
 
       interactions <- interaction_vars()
