@@ -128,26 +128,38 @@ mod_1_08_modelfit_server <- function(
         output$relaimpo <- renderPlot({
           req(model_fit(), outcome_type() == "Continuous")
           model <- model_fit()[[3]]
-          total_r2 <- summary(model)$r.squared
-          rel_importance <- relaimpo::calc.relimp(model, type = "lmg")
+          total_r2 <- tryCatch({ summary(model)$r.squared }, error = function(e) NA_real_)
 
-          importance_df <- data.frame(
-            Variable = names(rel_importance$lmg),
-            Contribution = rel_importance$lmg
-          ) |>
-            dplyr::left_join(vl[, c("varname", "label"), drop = FALSE], by = c("Variable" = "varname")) |>
-            dplyr::mutate(label = dplyr::if_else(is.na(.data$label), .data$Variable, .data$label))
+          rel_importance <- tryCatch(
+            relaimpo::calc.relimp(model, type = "lmg"),
+            error = function(e) e
+          )
 
-          ggplot2::ggplot(importance_df, ggplot2::aes(x = reorder(label, Contribution), y = Contribution, fill = Variable)) +
-            ggplot2::geom_bar(stat = "identity") +
-            ggplot2::geom_text(ggplot2::aes(label = round(Contribution, 3)), hjust = -0.3, size = 4) +
-            ggplot2::geom_hline(yintercept = total_r2, linetype = "dashed", color = "red") +
-            ggplot2::annotate("text", y = Inf, x = total_r2, label = paste("Total R² =", round(total_r2, 3)), hjust = 1.1, vjust = -0.5, color = "red") +
-            ggplot2::coord_flip() +
-            ggplot2::labs(x = "", y = "R-squared Contribution") +
-            ggplot2::theme_minimal() +
-            ggplot2::theme(legend.position = "none") +
-            ggplot2::scale_x_discrete(labels = stringr::str_wrap)
+          if (inherits(rel_importance, "error")) {
+            # Show a friendly message in the plot area when relaimpo fails
+            msg <- paste0("Relative importance could not be calculated: ", conditionMessage(rel_importance))
+            ggplot2::ggplot() +
+              ggplot2::annotate("text", x = 0.5, y = 0.5, label = msg, hjust = 0.5, vjust = 0.5) +
+              ggplot2::theme_void()
+          } else {
+            importance_df <- data.frame(
+              Variable = names(rel_importance$lmg),
+              Contribution = rel_importance$lmg
+            ) |>
+              dplyr::left_join(vl[, c("varname", "label"), drop = FALSE], by = c("Variable" = "varname")) |>
+              dplyr::mutate(label = dplyr::if_else(is.na(.data$label), .data$Variable, .data$label))
+
+            ggplot2::ggplot(importance_df, ggplot2::aes(x = reorder(label, Contribution), y = Contribution, fill = Variable)) +
+              ggplot2::geom_bar(stat = "identity") +
+              ggplot2::geom_text(ggplot2::aes(label = round(Contribution, 3)), hjust = -0.3, size = 4) +
+              ggplot2::geom_hline(yintercept = total_r2, linetype = "dashed", color = "red") +
+              ggplot2::annotate("text", y = Inf, x = total_r2, label = paste("Total R² =", round(total_r2, 3)), hjust = 1.1, vjust = -0.5, color = "red") +
+              ggplot2::coord_flip() +
+              ggplot2::labs(x = "", y = "R-squared Contribution") +
+              ggplot2::theme_minimal() +
+              ggplot2::theme(legend.position = "none") +
+              ggplot2::scale_x_discrete(labels = stringr::str_wrap)
+          }
         })
 
         output$model_summary <- renderPrint({
@@ -223,7 +235,7 @@ mod_1_08_modelfit_server <- function(
             shiny::verbatimTextOutput(ns("model_summary")),
             shiny::br()
           ),
-          select = TRUE,
+          select = FALSE,
           session = tabset_session
         )
 
@@ -243,9 +255,6 @@ mod_1_08_modelfit_server <- function(
         modelfit_tab_added(TRUE)
       }
 
-      if (modelfit_tab_added()) {
-        try(shiny::updateTabsetPanel(tabset_session, inputId = tabset_id, selected = "model_fit"), silent = TRUE)
-      }
     }, ignoreInit = TRUE)
   })
 }

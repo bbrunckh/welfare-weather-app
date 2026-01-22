@@ -73,7 +73,7 @@ mod_1_03_surveystats_server <- function(
         req(selected_outcome())
 
         message_survey_stats("Building survey stats…")
-  message("[surveystats] click; tabset_id=", tabset_id)
+        message("[surveystats] click; tabset_id=", tabset_id)
 
         if (!survey_tab_added()) {
         output$interview_date <- renderPlot({
@@ -156,8 +156,6 @@ mod_1_03_surveystats_server <- function(
             outcome_var <- selected_outcome()
             x_var <- if (!is.null(outcome_var) && outcome_var %in% names(df)) {
               outcome_var
-            } else if ("log_welf" %in% names(df)) {
-              "log_welf"
             } else {
               NULL
             }
@@ -167,12 +165,20 @@ mod_1_03_surveystats_server <- function(
               return(invisible(NULL))
             }
 
-            x_label <- if (!is.null(outcome_var) && outcome_var %in% names(df)) {
-              outcome_var
-            } else if (!is.null(welf_select) && is.function(welf_select)) {
-              paste0("Log ", welf_select()$label)
+            x_label <- if (!is.null(outcome_var) && "label" %in% names(df)) {
+              x_label <- df[df$outcome_var == outcome_var, "label"]
+              if (length(x_label)) {
+                x_label_val <- as.character(x_label[[1]])
+                if (!is.na(x_label_val) && nzchar(x_label_val)) {
+                  x_label <- x_label_val
+                } else {
+                  x_label <- NULL
+                }
+              } else {
+                x_label <- NULL
+              }
             } else {
-              "Log welfare"
+              x_label <- NULL
             }
 
             p <- ridge_distribution_plot(

@@ -20,7 +20,7 @@ mod_1_07_results_server <- function(
     run_model,
     haz_vars,
     varlist,
-  interactions,
+    interactions,
     selected_outcome,
     outcome_label,
     tabset_id,
@@ -39,8 +39,8 @@ mod_1_07_results_server <- function(
       req(model_fit())
 
       vl <- if (is.function(varlist)) varlist() else varlist
-    label_lookup <- if (!is.null(vl)) stats::setNames(vl$label, vl$varname) else NULL
-    labels_df <- if (!is.null(vl)) vl[, c("varname", "label"), drop = FALSE] else NULL
+      label_lookup <- if (!is.null(vl)) stats::setNames(vl$label, vl$varname) else NULL
+      labels_df <- if (!is.null(vl)) vl[, c("varname", "label"), drop = FALSE] else NULL
 
       get_term_label <- function(term, labels_df) {
         if (grepl("^I\\((.*)\\^2\\)$", term)) {

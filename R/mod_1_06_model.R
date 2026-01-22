@@ -302,6 +302,7 @@ mod_1_06_model_server <- function(
     model_fit_val <- reactiveVal(NULL)
 
     observeEvent(input$run_model, {
+      id_run <- shiny::showNotification("Running model. Results presented once model finished running.", type = "message", duration = NULL)
       fit_list <- tryCatch({
         if (is.null(selected_outcome()) || !length(selected_outcome())) {
           shiny::showNotification("Select an outcome before running the model.", type = "warning")
@@ -437,12 +438,15 @@ mod_1_06_model_server <- function(
         NULL
       })
 
+      # remove the persistent 'running' notification
+      try(if (exists("id_run") && !is.null(id_run)) shiny::removeNotification(id_run), silent = TRUE)
+
       model_fit_val(fit_list)
     }, ignoreInit = TRUE)
 
       list(
       run_model = reactive(input$run_model),
-  model_fit = model_fit_val,
+      model_fit = model_fit_val,
       outcome_type = outcome_type,
       outcome_label = outcome_label,
       interactions = interaction_vars

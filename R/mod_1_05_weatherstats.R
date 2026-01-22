@@ -36,7 +36,7 @@ mod_1_05_weatherstats_server <- function(
       tabset_session <- session$parent %||% session
     }
 
-    get_weather_label <- function(varname) {
+    get_label <- function(varname) {
       wl <- if (is.function(weather_list)) weather_list() else weather_list
       if (is.null(wl)) return(varname)
 
@@ -47,7 +47,6 @@ mod_1_05_weatherstats_server <- function(
           if (!is.na(name_val) && nzchar(name_val)) return(name_val)
         }
       }
-
       varname
     }
 
@@ -79,7 +78,7 @@ mod_1_05_weatherstats_server <- function(
             df <- dplyr::mutate(df, countryyear = paste0(countryname, ", ", year))
           }
 
-          label <- get_weather_label(weather_vars()[1])
+          label <- get_label(weather_vars()[1])
           ridge_distribution_plot(
             df,
             x_var = hv,
@@ -96,7 +95,7 @@ mod_1_05_weatherstats_server <- function(
             df <- dplyr::mutate(df, countryyear = paste0(countryname, ", ", year))
           }
 
-          label <- get_weather_label(weather_vars()[2])
+          label <- get_label(weather_vars()[2])
           ridge_distribution_plot(
             df,
             x_var = hv,
@@ -121,7 +120,7 @@ mod_1_05_weatherstats_server <- function(
             return(invisible(NULL))
           }
 
-          label <- get_weather_label(weather_vars()[1])
+          label <- get_label(weather_vars()[1])
 
           df_plot <- df |>
             dplyr::filter(is.finite(.data[[hv]]), is.finite(.data[[y_var]]))
@@ -174,7 +173,7 @@ mod_1_05_weatherstats_server <- function(
             return(invisible(NULL))
           }
 
-          label <- get_weather_label(weather_vars()[2])
+          label <- get_label(weather_vars()[2])
 
           df_plot <- df |>
             dplyr::filter(is.finite(.data[[hv]]), is.finite(.data[[y_var]]))
