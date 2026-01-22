@@ -165,20 +165,19 @@ mod_1_03_surveystats_server <- function(
               return(invisible(NULL))
             }
 
-            x_label <- if (!is.null(outcome_var) && "label" %in% names(df)) {
-              x_label <- df[df$outcome_var == outcome_var, "label"]
-              if (length(x_label)) {
-                x_label_val <- as.character(x_label[[1]])
-                if (!is.na(x_label_val) && nzchar(x_label_val)) {
-                  x_label <- x_label_val
-                } else {
-                  x_label <- NULL
-                }
+            x_label <- if (!is.null(outcome_var)) {
+              v <- if (is.function(varlist)) varlist() else varlist
+              if (is.null(v)) return(outcome_var)
+
+              if (all(c("varname", "label") %in% names(v))) {
+                lbl <- v$label[v$varname == outcome_var]
+                if (length(lbl) && !is.na(lbl[[1]])) lbl[[1]] else outcome_var
+              } else if ("label" %in% names(v)) {
+                lbl <- v$label[match(outcome_var, v$label)]
+                if (length(lbl) && !is.na(lbl[[1]])) lbl[[1]] else outcome_var
               } else {
-                x_label <- NULL
+                outcome_var
               }
-            } else {
-              x_label <- NULL
             }
 
             p <- ridge_distribution_plot(

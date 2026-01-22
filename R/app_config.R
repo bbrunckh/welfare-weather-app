@@ -100,16 +100,6 @@ load_runtime_data <- function() {
   varlist <- readxl::read_excel(varlist_path)
 
   weather_list <- safe_pin_read(board, "weather_varlist", prefix)
-  
-  # Old welfare (now outcome_varlist)
-  # welfare <- data.frame(
-  #   outcome = c("Log welfare ($/day, PPP)",
-  #               "Poor (PPP)",
-  #               "Log welfare (LCU/day)",
-  #               "Poor (LCU)"),
-  #   type = c("Continuous", "Binary", "Continuous", "Binary"),
-  #   stringsAsFactors = FALSE
-  # )
 
   # Survey metadata schema lives in the repo under data/pins/ as a CSV.
   survey_metadata_path <- system.file(
@@ -142,7 +132,6 @@ load_runtime_data <- function() {
     survey_list_master = survey_list_master,
     varlist = varlist,
     weather_list = weather_list,
-    # welfare = welfare,
     pov_lines = pov_lines,
     survey_metadata = survey_metadata
   )
