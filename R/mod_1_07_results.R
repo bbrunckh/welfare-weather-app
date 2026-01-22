@@ -35,8 +35,7 @@ mod_1_07_results_server <- function(
 
     results_tab_added <- reactiveVal(FALSE)
 
-    observeEvent(run_model(), {
-      req(run_model() > 0)
+    observeEvent(model_fit(), {
       req(model_fit())
 
       vl <- if (is.function(varlist)) varlist() else varlist
@@ -47,14 +46,18 @@ mod_1_07_results_server <- function(
         if (grepl("^I\\((.*)\\^2\\)$", term)) {
           varname <- sub("^I\\((.*)\\^2\\)$", "\\1", term)
           base_label <- labels_df$label[labels_df$varname == varname]
-          return(paste0(base_label, "^2"))
+          if (!length(base_label) || is.na(base_label[[1]])) return(paste0(varname, "^2"))
+          return(paste0(base_label[[1]], "^2"))
         }
         if (grepl("^I\\((.*)\\^3\\)$", term)) {
           varname <- sub("^I\\((.*)\\^3\\)$", "\\1", term)
           base_label <- labels_df$label[labels_df$varname == varname]
-          return(paste0(base_label, "^3"))
+          if (!length(base_label) || is.na(base_label[[1]])) return(paste0(varname, "^3"))
+          return(paste0(base_label[[1]], "^3"))
         }
-        labels_df$label[labels_df$varname == term]
+        base_label <- labels_df$label[labels_df$varname == term]
+        if (!length(base_label) || is.na(base_label[[1]])) return(term)
+        base_label[[1]]
       }
 
       create_named_vector <- function(coefs_to_plot, labels_df) {
@@ -104,7 +107,7 @@ mod_1_07_results_server <- function(
 
         output$effectplot1 <- renderPlot({
           req(model_fit(), haz_vars())
-          interactions::effect_plot(
+          jtools::effect_plot(
             model_fit()[[3]], pred = !!haz_vars()[1],
             interval = TRUE, plot.points = FALSE, line.colors = "orange",
             x.label = stringr::str_wrap(label_lookup[haz_vars()[1]] %||% haz_vars()[1], 40),
@@ -114,7 +117,7 @@ mod_1_07_results_server <- function(
 
         output$effectplot2 <- renderPlot({
           req(length(haz_vars()) > 1, model_fit(), haz_vars())
-          interactions::effect_plot(
+          jtools::effect_plot(
             model_fit()[[3]], pred = !!haz_vars()[2],
             interval = TRUE, plot.points = FALSE, line.colors = "orange",
             x.label = stringr::str_wrap(label_lookup[haz_vars()[2]] %||% haz_vars()[2], 40),

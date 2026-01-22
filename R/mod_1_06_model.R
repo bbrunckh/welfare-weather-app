@@ -37,6 +37,12 @@ mod_1_06_model_server <- function(
   moduleServer(id, function(input, output, session){
     ns <- session$ns
 
+    model_specs_open <- reactiveVal(FALSE)
+
+    observeEvent(input$model_specs, {
+      model_specs_open(!isTRUE(model_specs_open()))
+    })
+
     varlist_r <- reactive({
       if (is.function(varlist)) varlist() else varlist
     })
@@ -133,7 +139,7 @@ mod_1_06_model_server <- function(
       if (is.null(type)) return(NULL)
 
       if (type == "Binary") {
-        model_choices <- c("Logistic regression")
+        model_choices <- c("Logistic regression", "Linear regression (OLS)")
         label_text <- "Classification model:"
       } else {
         model_choices <- c("Linear regression")
@@ -151,19 +157,29 @@ mod_1_06_model_server <- function(
     })
 
     output$model_specs_ui <- renderUI({
-      req(varlist_r(), input$model_type)
-      nsid <- ns("model_specs")
+      req(varlist_r())
 
-      shiny::conditionalPanel(
-        condition = paste0("input['", nsid, "'] % 2 == 1"),
-        shiny::withMathJax(),
-        if (input$model_type %in% c("Linear regression", "Logistic regression")) {
+      if (!isTRUE(model_specs_open())) {
+        return(NULL)
+      }
+
+      if (is.null(input$model_type)) {
+        return(shiny::p("Select a model type to configure parameters."))
+      }
+
+      shiny::withMathJax(
+        if (input$model_type %in% c("Logistic regression", "Linear regression (OLS)", "Linear regression")) {
           tagList(
             {
               hh_choices <- hh_varlist()
+              df <- survey_weather()
               if ("datatype" %in% names(varlist_r())) {
                 bin_vars <- varlist_r()[varlist_r()$datatype == "Binary", "varname"]
                 hh_choices <- hh_choices[hh_choices$varname %in% bin_vars, , drop = FALSE]
+              }
+              if (!nrow(hh_choices) && !is.null(df)) {
+                fallback_vars <- setdiff(names(df), c(selected_outcome(), haz_vars()))
+                hh_choices <- data.frame(varname = fallback_vars, label = fallback_vars, stringsAsFactors = FALSE)
               }
               choices <- hh_choices$label
               selected <- if (length(choices) && "Urban" %in% choices) "Urban" else if (length(choices)) choices[[1]] else NULL
@@ -204,13 +220,14 @@ mod_1_06_model_server <- function(
     })
 
     output$covariate_inputs <- renderUI({
-      req(input$covariates, input$interactions)
+      req(input$covariates)
       shiny::withMathJax(
         if (input$covariates == "User-defined") {
           tagList(
             {
               hh_choices <- hh_varlist()$label
-              selected <- intersect(c("Household size", input$interactions), hh_choices)
+              interaction_sel <- if (!is.null(input$interactions)) input$interactions else character(0)
+              selected <- intersect(c("Household size", interaction_sel), hh_choices)
               if (!length(selected) && length(hh_choices)) selected <- hh_choices[[1]]
               shiny::selectizeInput(
                 ns("hhcov"),
@@ -235,6 +252,16 @@ mod_1_06_model_server <- function(
                 selected = selected,
                 multiple = TRUE
               )
+            },
+            {
+              extra_choices <- extra_covariates()
+              shiny::selectizeInput(
+                ns("othercov"),
+                label = "Additional covariates",
+                choices = extra_choices$label,
+                selected = NULL,
+                multiple = TRUE
+              )
             }
           )
         } else if (input$covariates == "Lasso") {
@@ -254,20 +281,51 @@ mod_1_06_model_server <- function(
       vars[!is.na(vars)]
     })
 
-    model_fit <- eventReactive(input$run_model, {
-      req(survey_weather(), selected_outcome())
+    extra_covariates <- reactive({
+      vl <- varlist_r()
       df <- survey_weather()
-      y_var <- selected_outcome()
-      if (!y_var %in% names(df)) {
-        shiny::showNotification("Selected outcome is not available in survey data.", type = "warning")
-        return(NULL)
-      }
+      if (is.null(vl)) return(data.frame(varname = character(), label = character(), stringsAsFactors = FALSE))
 
-      weather_terms <- haz_vars()
-      if (is.null(weather_terms) || !length(weather_terms)) {
-        shiny::showNotification("Weather variables are not available.", type = "warning")
-        return(NULL)
-      }
+      base_vars <- c(selected_outcome(), haz_vars())
+      hh_vars <- hh_varlist()$varname
+      area_vars <- area_varlist()$varname
+      fe_vars <- fe_varlist()$varname
+
+      exclude <- unique(c(base_vars, hh_vars, area_vars, fe_vars))
+      out <- vl[vl$varname %in% names(df) & !vl$varname %in% exclude, , drop = FALSE]
+      out <- out[, intersect(c("varname", "label"), names(out)), drop = FALSE]
+      if (!"label" %in% names(out)) out$label <- out$varname
+
+      out
+    })
+
+    model_fit_val <- reactiveVal(NULL)
+
+    observeEvent(input$run_model, {
+      fit_list <- tryCatch({
+        if (is.null(selected_outcome()) || !length(selected_outcome())) {
+          shiny::showNotification("Select an outcome before running the model.", type = "warning")
+          return(NULL)
+        }
+
+        df <- survey_weather()
+        if (is.null(df) || !nrow(as.data.frame(df))) {
+          shiny::showNotification("Load survey and weather data before running the model.", type = "warning")
+          return(NULL)
+        }
+
+        shiny::showNotification("Fitting model...", type = "message")
+        y_var <- selected_outcome()
+        if (!y_var %in% names(df)) {
+          shiny::showNotification("Selected outcome is not available in survey data.", type = "warning")
+          return(NULL)
+        }
+
+        weather_terms <- haz_vars()
+        if (is.null(weather_terms) || !length(weather_terms)) {
+          shiny::showNotification("Weather variables are not available.", type = "warning")
+          return(NULL)
+        }
 
       if (!is.null(weather_settings) && is.function(weather_settings)) {
         ws <- weather_settings()
@@ -292,12 +350,12 @@ mod_1_06_model_server <- function(
 
       interactions <- interaction_vars()
 
-      interaction_terms <- ""
+      interaction_terms <- character(0)
       if (length(interactions) > 0) {
         term_matrix <- outer(interactions, weather_terms, FUN = function(inter, weather) {
           sprintf("(%s * %s)", inter, weather)
         })
-        interaction_terms <- paste(c(t(term_matrix)), collapse = " + ")
+        interaction_terms <- c(t(term_matrix))
       }
 
       fe <- character(0)
@@ -308,6 +366,7 @@ mod_1_06_model_server <- function(
 
       hh_cov <- character(0)
       area_cov <- character(0)
+      other_cov <- character(0)
       if (!is.null(input$covariates) && input$covariates %in% c("User-defined", "Lasso") && !is.null(label_to_var)) {
         if (!is.null(input$hhcov)) {
           hh_cov <- label_to_var[input$hhcov]
@@ -317,18 +376,45 @@ mod_1_06_model_server <- function(
           area_cov <- label_to_var[input$areacov]
           area_cov <- area_cov[!is.na(area_cov)]
         }
+        if (!is.null(input$othercov)) {
+          other_cov <- label_to_var[input$othercov]
+          other_cov <- other_cov[!is.na(other_cov)]
+        }
       }
 
-      main_effects <- paste(c(weather_terms, hh_cov, area_cov, fe), collapse = " + ")
+      build_formula <- function(y, terms) {
+        terms <- terms[nzchar(terms)]
+        terms <- terms[!is.na(terms)]
+        if (!length(terms)) return(NULL)
+        stats::as.formula(paste(y, "~", paste(terms, collapse = " + ")))
+      }
 
-      formula1 <- stats::as.formula(paste(y_var, "~", paste(weather_terms, collapse = " + ")))
-      formula2 <- stats::as.formula(paste(y_var, "~", paste(c(weather_terms, fe), collapse = " + ")))
-      formula3 <- stats::as.formula(paste(y_var, "~", paste(c(main_effects, interaction_terms), collapse = " + ")))
+      terms1 <- weather_terms
+      terms2 <- c(weather_terms, fe)
+      terms3 <- c(weather_terms, hh_cov, area_cov, other_cov, fe, interaction_terms)
+
+      formula1 <- build_formula(y_var, terms1)
+      formula2 <- build_formula(y_var, terms2)
+      formula3 <- build_formula(y_var, terms3)
+
+      if (is.null(formula1) || is.null(formula2) || is.null(formula3)) {
+        shiny::showNotification("Model terms are incomplete. Check covariates and fixed effects selections.", type = "warning")
+        return(NULL)
+      }
 
       is_binary <- isTRUE(outcome_type() == "Binary")
       sw <- isolate(as.data.frame(df))
 
-      fit_fun <- if (is_binary) {
+      use_logit <- is_binary && identical(input$model_type, "Logistic regression")
+      if (use_logit) {
+        y_vals <- sw[[y_var]]
+        y_vals <- y_vals[!is.na(y_vals)]
+        if (!length(y_vals) || any(!(y_vals %in% c(0, 1)))) {
+          shiny::showNotification("Outcome values are not 0/1. Falling back to OLS.", type = "warning")
+          use_logit <- FALSE
+        }
+      }
+      fit_fun <- if (use_logit) {
         function(form) stats::glm(form, data = sw, family = stats::binomial(link = "logit"))
       } else {
         function(form) stats::lm(form, data = sw)
@@ -344,12 +430,19 @@ mod_1_06_model_server <- function(
       fit2 <- fix_call(fit_fun(formula2))
       fit3 <- fix_call(fit_fun(formula3))
 
-      list(fit1, fit2, fit3)
+        shiny::showNotification("Model fitted successfully.", type = "message")
+        list(fit1, fit2, fit3)
+      }, error = function(e) {
+        shiny::showNotification(paste("Model failed:", conditionMessage(e)), type = "error")
+        NULL
+      })
+
+      model_fit_val(fit_list)
     }, ignoreInit = TRUE)
 
       list(
       run_model = reactive(input$run_model),
-      model_fit = model_fit,
+  model_fit = model_fit_val,
       outcome_type = outcome_type,
       outcome_label = outcome_label,
       interactions = interaction_vars

@@ -1643,8 +1643,8 @@ output$covariate_inputs <- renderUI({
           )
           
           ggplot(plot_data, aes(x = Values, fill = Type)) +
-            geom_histogram(aes(y = 100*..count../sum(..count..)),
-                           position = "dodge", alpha = 0.7) +
+            geom_histogram(aes(y = 100 * after_stat(count) / sum(after_stat(count))),
+                           position = "dodge", alpha = 0.7, bins = 30) +
             labs(
               x = str_wrap(outlab(),40),
               y = "Share of households (%)"

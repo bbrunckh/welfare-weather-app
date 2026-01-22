@@ -35,8 +35,7 @@ mod_1_08_modelfit_server <- function(
 
     modelfit_tab_added <- reactiveVal(FALSE)
 
-    observeEvent(run_model(), {
-      req(run_model() > 0)
+    observeEvent(model_fit(), {
       req(model_fit())
 
       vl <- if (is.function(varlist)) varlist() else varlist
@@ -85,7 +84,8 @@ mod_1_08_modelfit_server <- function(
         output$pred_welf_dist <- renderPlot({
           req(model_fit())
           model <- model_fit()[[3]]
-          is_binary <- isTRUE(outcome_type() == "Binary")
+          is_binary <- isTRUE(outcome_type() == "Binary") && inherits(model, "glm") &&
+            identical(stats::family(model)$family, "binomial")
 
           if (!is_binary) {
             actual_values <- model.frame(model)[[1]]
@@ -96,14 +96,17 @@ mod_1_08_modelfit_server <- function(
             )
 
             ggplot2::ggplot(plot_data, ggplot2::aes(x = Values, fill = Type)) +
-              ggplot2::geom_histogram(aes(y = 100 * ..count.. / sum(..count..)), position = "dodge", alpha = 0.7) +
+              ggplot2::geom_histogram(ggplot2::aes(y = 100 * ggplot2::after_stat(count) / sum(ggplot2::after_stat(count))),
+                                       position = "dodge", alpha = 0.7, bins = 30) +
               ggplot2::labs(x = stringr::str_wrap(out_lab, 40), y = "Share of households (%)") +
               ggplot2::theme_minimal() +
               ggplot2::scale_fill_manual(values = c("Survey" = "steelblue", "Predicted" = "orange"))
           } else {
+            actual <- model.frame(model)[[1]]
+            predicted <- stats::predict(model, type = "response")
             conf_matrix <- table(
-              Predicted = ifelse(stats::predict(model, type = "response") > 0.5, 1, 0),
-              Actual = model$y
+              Predicted = ifelse(predicted > 0.5, 1, 0),
+              Actual = actual
             )
             cm_df <- as.data.frame(conf_matrix)
             colnames(cm_df) <- c("Predicted", "Actual", "Freq")
@@ -161,7 +164,8 @@ mod_1_08_modelfit_server <- function(
         output$additional_stats <- renderTable({
           req(model_fit())
           model <- model_fit()[[3]]
-          is_binary <- isTRUE(outcome_type() == "Binary")
+          is_binary <- isTRUE(outcome_type() == "Binary") && inherits(model, "glm") &&
+            identical(stats::family(model)$family, "binomial")
 
           if (!is_binary) {
             data.frame(
@@ -173,9 +177,11 @@ mod_1_08_modelfit_server <- function(
             logLik_null <- -0.5 * model$null.deviance
             mcfadden_r2 <- as.numeric(1 - (logLik_model / logLik_null))
 
+            actual <- model.frame(model)[[1]]
+            predicted <- stats::predict(model, type = "response")
             conf_matrix <- table(
-              Predicted = ifelse(stats::predict(model, type = "response") > 0.5, 1, 0),
-              Actual = model$y
+              Predicted = ifelse(predicted > 0.5, 1, 0),
+              Actual = actual
             )
 
             TP <- conf_matrix["1", "1"]

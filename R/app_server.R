@@ -7,25 +7,13 @@
 app_server <- function(input, output, session) {
   runtime <- load_runtime_data()
   
-  # correct reactiveValues creation
-  rv <- reactiveValues(
-    board = runtime$board,
-    pin_prefix = runtime$pin_prefix,
-    varlist = runtime$varlist,
-    weather_list = runtime$weather_list,
-    # welfare = runtime$welfare,
-    pov_lines = runtime$pov_lines,
-    survey_list_master = runtime$survey_list_master,
-    survey_metadata = runtime$survey_metadata
-  )
-  
-  # CREATE THESE BEFORE CALLING THE MODULE
-  survey_list_master_r <- reactive({ rv$survey_list_master })
-  pin_prefix_r         <- reactive({ rv$pin_prefix })
-  board_r              <- reactive({ rv$board })
-  survey_metadata_r    <- reactive({ rv$survey_metadata })
-  varlist_r            <- reactive({ rv$varlist })
-  weather_list_r      <- reactive({ rv$weather_list })
+  # Provide runtime data as simple reactives
+  survey_list_master_r <- reactive({ runtime$survey_list_master })
+  pin_prefix_r         <- reactive({ runtime$pin_prefix })
+  board_r              <- reactive({ runtime$board })
+  survey_metadata_r    <- reactive({ runtime$survey_metadata })
+  varlist_r            <- reactive({ runtime$varlist })
+  weather_list_r       <- reactive({ runtime$weather_list })
   
   # Now call the step1 module and pass reactives
   mod_1_modelling_server(
