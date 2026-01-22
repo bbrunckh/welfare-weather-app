@@ -13,6 +13,7 @@ mod_1_01_sample_ui <- function(id) {
   ns <- NS(id)
   tagList(
     wellPanel(
+      uiOutput(ns("unit_ui")),
       uiOutput(ns("sample_ui")),
       uiOutput(ns("survey_year_ui")),
       uiOutput(ns("load_button_ui"))
@@ -33,6 +34,17 @@ mod_1_01_sample_server <- function(id, survey_list_master, pin_prefix, board, su
       filter(survey_list_master(), external)
     })
     
+        # --------- Level of analysis selector UI -----------
+    output$unit_ui <- renderUI({
+
+            radioButtons(
+        inputId = ns("unit"),
+        label   = "Level of analysis",
+        choices = c("Individual", "Household", "Firm"),
+        selected = "Household"
+      )
+    })
+
     # --------- Country selector UI -----------
     output$sample_ui <- renderUI({
       req(surveys())
@@ -76,7 +88,7 @@ mod_1_01_sample_server <- function(id, survey_list_master, pin_prefix, board, su
       )
     })
 
-    
+  
     # --------- Reactive Load Data button, only when at least one year is selected -----------
     output$load_button_ui <- renderUI({
       req(input$country)
