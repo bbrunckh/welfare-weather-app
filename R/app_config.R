@@ -79,11 +79,9 @@ load_runtime_data <- function() {
     ) %>%
     dplyr::filter(paste0(prefix, weather) %in% safe_pin_list(board))
   
-  # Old varlist pin (preferred, just needs to be embedded in pins as .parquet)
-  # varlist <- safe_pin_read(board, "varlist", prefix)
   # New varlist (load via xlsx)
   varlist_path <- system.file(
-    "data/pins/outcome_varlist/wiseapp_variablesv2.xlsx",
+    "data/pins/varlist/variable_list.csv",
     package = "wiseapp"
   )
   # When running in dev mode (pkgload::load_all()), the file isn't in inst/.
@@ -93,17 +91,17 @@ load_runtime_data <- function() {
       getwd(),
       "data",
       "pins",
-      "outcome_varlist",
-      "wiseapp_variablesv2.xlsx"
+      "varlist",
+      "variable_list.csv"
     )
   }
-  varlist <- readxl::read_excel(varlist_path)
+  varlist <- readr::read_csv(varlist_path, show_col_types = FALSE)
 
   weather_list <- safe_pin_read(board, "weather_varlist", prefix)
 
   # Survey metadata schema lives in the repo under data/pins/ as a CSV.
   survey_metadata_path <- system.file(
-    "data/pins/survey_metadata/survey_parquet_schema_v2.csv",
+    "data/pins/survey_metadata/survey_list.csv",
     package = "wiseapp"
   )
   # When running in dev mode (pkgload::load_all()), the file isn't in inst/.
@@ -114,7 +112,7 @@ load_runtime_data <- function() {
       "data",
       "pins",
       "survey_metadata",
-      "survey_parquet_schema_v2.csv"
+      "survey_list.csv"
     )
   }
   survey_metadata <- readr::read_csv(survey_metadata_path, show_col_types = FALSE)
