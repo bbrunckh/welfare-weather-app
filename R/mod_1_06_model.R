@@ -316,6 +316,9 @@ mod_1_06_model_server <- function(
         }
 
         weather_terms <- haz_vars()
+        if (!is.null(df)) {
+          weather_terms <- intersect(weather_terms, names(df))
+        }
         if (is.null(weather_terms) || !length(weather_terms)) {
           shiny::showNotification("Weather variables are not available.", type = "warning")
           return(NULL)

@@ -106,22 +106,61 @@ mod_1_07_results_server <- function(
         })
 
         get_model_frame <- function() {
-          tryCatch(stats::model.frame(model_fit()[[3]]), error = function(e) NULL)
+          fit <- model_fit()[[3]]
+          if (!is.null(fit$model)) return(fit$model)
+          tryCatch(stats::model.frame(fit), error = function(e) NULL)
+        }
+
+        get_model_terms <- function() {
+          fit <- model_fit()[[3]]
+          vars <- tryCatch(all.vars(stats::terms(fit)), error = function(e) character(0))
+          setdiff(unique(vars), as.character(stats::formula(fit)[[2]]))
+        }
+
+        get_haz_terms <- function() {
+          mf <- get_model_frame()
+          if (!is.null(mf)) {
+            haz <- names(mf)[grepl("^haz_", names(mf))]
+            if (length(haz)) return(haz)
+          }
+          haz_terms <- get_model_terms()
+          haz_terms[grepl("^haz_", haz_terms)]
         }
 
         get_pred <- function(idx) {
-          hv <- haz_vars()
-          if (is.null(hv) || length(hv) < idx) return(NULL)
-          pred <- as.character(hv[[idx]])
           mf <- get_model_frame()
-          if (!is.null(mf) && !pred %in% names(mf)) return(NULL)
-          pred
+          if (is.null(mf)) return(NULL)
+
+          hv <- haz_vars()
+          if (!is.null(hv) && length(hv) >= idx) {
+            pred <- as.character(hv[[idx]])
+            if (pred %in% names(mf)) return(pred)
+          }
+
+          haz_terms <- get_haz_terms()
+          if (length(haz_terms) >= idx && haz_terms[[idx]] %in% names(mf)) {
+            return(haz_terms[[idx]])
+          }
+          NULL
+        }
+
+        normalize_var <- function(vars) {
+          if (is.null(vl) || !all(c("name", "label") %in% names(vl))) return(vars)
+          label_to_name <- stats::setNames(vl$name, vl$label)
+          vapply(vars, function(v) {
+            if (!is.null(v) && !is.na(v) && v %in% names(label_to_name)) {
+              mapped <- unname(label_to_name[[v]])
+              if (!is.na(mapped) && nzchar(mapped)) return(mapped)
+            }
+            v
+          }, FUN.VALUE = character(1))
         }
 
         get_mod <- function() {
           mods <- interactions()
           if (is.null(mods) || !length(mods)) return(NULL)
           mods <- as.character(mods)
+          mods <- normalize_var(mods)
           mf <- get_model_frame()
           if (!is.null(mf)) {
             mods <- mods[mods %in% names(mf)]
