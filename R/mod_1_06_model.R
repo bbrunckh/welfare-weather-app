@@ -446,7 +446,8 @@ mod_1_06_model_server <- function(
       model_fit = model_fit_val,
       outcome_type = outcome_type,
       outcome_label = outcome_label,
-      interactions = interaction_vars
+      interactions = interaction_vars#,
+      # other covariates list
     )
   })
 }

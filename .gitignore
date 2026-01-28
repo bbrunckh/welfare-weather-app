@@ -20,6 +20,10 @@
 
 !.reproducibility_report_RR_2024_WLD_175-v02.pdf
 
+# Keep description and namespace
+!DESCRIPTION
+!NAMESPACE
+
 # Git placeholder file (to commit empty folders)
 !/**/*.gitkeep
 
