@@ -23,6 +23,7 @@ mod_1_07_results_server <- function(
     interactions,
     selected_outcome,
     outcome_label,
+    outcome_type,
     tabset_id,
     tabset_session = NULL
 ){
@@ -39,7 +40,6 @@ mod_1_07_results_server <- function(
       req(model_fit())
 
       vl <- if (is.function(varlist)) varlist() else varlist
-      label_lookup <- if (!is.null(vl)) stats::setNames(vl$label, vl$name) else NULL
       labels_df <- if (!is.null(vl)) vl[, c("name", "label"), drop = FALSE] else NULL
 
       get_term_label <- function(term, labels_df) {
@@ -75,6 +75,11 @@ mod_1_07_results_server <- function(
       }
 
       if (!results_tab_added()) {
+        output$model_fit_obj <- renderPrint({
+          req(model_fit())
+          model_fit()[[3]]
+        })
+
         output$regtable <- renderUI({
           req(model_fit(), labels_df)
           coefs <- names(stats::coef(model_fit()[[3]]))
@@ -107,8 +112,8 @@ mod_1_07_results_server <- function(
 
         get_model_frame <- function() {
           fit <- model_fit()[[3]]
-          if (!is.null(fit$model)) return(fit$model)
-          tryCatch(stats::model.frame(fit), error = function(e) NULL)
+          if (!is.null(fit$model)) return(as.data.frame(fit$model))
+          tryCatch(as.data.frame(stats::model.frame(fit)), error = function(e) NULL)
         }
 
         get_model_terms <- function() {
@@ -120,11 +125,11 @@ mod_1_07_results_server <- function(
         get_haz_terms <- function() {
           mf <- get_model_frame()
           if (!is.null(mf)) {
-            haz <- names(mf)[grepl("^haz_", names(mf))]
+            haz <- names(mf)[grepl("haz_", names(mf)) & !grepl(":", names(mf))]
             if (length(haz)) return(haz)
           }
           haz_terms <- get_model_terms()
-          haz_terms[grepl("^haz_", haz_terms)]
+          haz_terms[grepl("haz_", haz_terms) & !grepl(":", haz_terms)]
         }
 
         get_pred <- function(idx) {
@@ -133,12 +138,16 @@ mod_1_07_results_server <- function(
 
           hv <- haz_vars()
           if (!is.null(hv) && length(hv) >= idx) {
-            pred <- as.character(hv[[idx]])
-            if (pred %in% names(mf)) return(pred)
+            base <- as.character(hv[[idx]])
+            if (base %in% names(mf)) return(base)
+
+            candidates <- names(mf)[grepl(base, names(mf), fixed = TRUE) & !grepl(":", names(mf))]
+            if (length(candidates)) return(candidates[[1]])
           }
 
           haz_terms <- get_haz_terms()
-          if (length(haz_terms) >= idx && haz_terms[[idx]] %in% names(mf)) {
+          haz_terms <- haz_terms[haz_terms %in% names(mf)]
+          if (length(haz_terms) >= idx) {
             return(haz_terms[[idx]])
           }
           NULL
@@ -178,10 +187,11 @@ mod_1_07_results_server <- function(
           req(model_fit(), haz_vars())
           pred <- get_pred(1)
           if (is.null(pred)) return(empty_plot("Selected weather variable not in model."))
+          x_lab <- if (!is.null(labels_df)) get_term_label(pred, labels_df) else pred
           jtools::effect_plot(
-            model_fit()[[3]], pred = pred,
+            model_fit()[[3]], pred = pred, data = get_model_frame(),
             interval = TRUE, plot.points = FALSE, line.colors = "orange",
-            x.label = stringr::str_wrap(label_lookup[pred] %||% pred, 40),
+            x.label = stringr::str_wrap(x_lab %||% pred, 40),
             y.label = stringr::str_wrap(out_lab, 40)
           )
         })
@@ -190,10 +200,11 @@ mod_1_07_results_server <- function(
           req(length(haz_vars()) > 1, model_fit(), haz_vars())
           pred <- get_pred(2)
           if (is.null(pred)) return(empty_plot("Selected weather variable not in model."))
+          x_lab <- if (!is.null(labels_df)) get_term_label(pred, labels_df) else pred
           jtools::effect_plot(
-            model_fit()[[3]], pred = pred,
+            model_fit()[[3]], pred = pred, data = get_model_frame(),
             interval = TRUE, plot.points = FALSE, line.colors = "orange",
-            x.label = stringr::str_wrap(label_lookup[pred] %||% pred, 40),
+            x.label = stringr::str_wrap(x_lab %||% pred, 40),
             y.label = stringr::str_wrap(out_lab, 40)
           )
         })
@@ -205,10 +216,11 @@ mod_1_07_results_server <- function(
           if (is.null(mod) || is.null(pred)) {
             return(empty_plot("Interaction variables not in model."))
           }
+          x_lab <- if (!is.null(labels_df)) get_term_label(pred, labels_df) else pred
           interactions::interact_plot(
-            model_fit()[[3]], pred = pred, modx = mod,
+            model_fit()[[3]], pred = pred, modx = mod, data = get_model_frame(),
             interval = TRUE, plot.points = FALSE,
-            x.label = stringr::str_wrap(label_lookup[pred] %||% pred, 40),
+            x.label = stringr::str_wrap(x_lab %||% pred, 40),
             y.label = stringr::str_wrap(out_lab, 40)
           ) + ggplot2::theme(legend.position = "bottom")
         })
@@ -220,10 +232,11 @@ mod_1_07_results_server <- function(
           if (is.null(mod) || is.null(pred)) {
             return(empty_plot("Interaction variables not in model."))
           }
+          x_lab <- if (!is.null(labels_df)) get_term_label(pred, labels_df) else pred
           interactions::interact_plot(
-            model_fit()[[3]], pred = pred, modx = mod,
+            model_fit()[[3]], pred = pred, modx = mod, data = get_model_frame(),
             interval = TRUE, plot.points = FALSE,
-            x.label = stringr::str_wrap(label_lookup[pred] %||% pred, 40),
+            x.label = stringr::str_wrap(x_lab %||% pred, 40),
             y.label = stringr::str_wrap(out_lab, 40)
           ) + ggplot2::theme(legend.position = "bottom")
         })
@@ -235,7 +248,7 @@ mod_1_07_results_server <- function(
           if (is.null(mod) || is.null(pred)) {
             return(empty_plot("Interaction variables not in model."))
           }
-          plot(interactions::sim_slopes(model_fit()[[3]], pred = pred, modx = mod))
+          plot(interactions::sim_slopes(model_fit()[[3]], pred = pred, modx = mod, data = get_model_frame()))
         })
 
         output$simslopes2 <- renderPlot({
@@ -245,7 +258,7 @@ mod_1_07_results_server <- function(
           if (is.null(mod) || is.null(pred)) {
             return(empty_plot("Interaction variables not in model."))
           }
-          plot(interactions::sim_slopes(model_fit()[[3]], pred = pred, modx = mod))
+          plot(interactions::sim_slopes(model_fit()[[3]], pred = pred, modx = mod, data = get_model_frame()))
         })
 
         shiny::appendTab(
@@ -253,6 +266,9 @@ mod_1_07_results_server <- function(
           shiny::tabPanel(
             title = "Results",
             value = "results",
+            shiny::h4("Model object (FE + controls)"),
+            shiny::verbatimTextOutput(ns("model_fit_obj")),
+            shiny::br(),
             shiny::h4("Marginal effect of weather on welfare"),
             bslib::card(shiny::plotOutput(ns("coefplot"))),
             shiny::br(),

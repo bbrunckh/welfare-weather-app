@@ -141,6 +141,7 @@ mod_1_modelling_server <- function(id, survey_list_master, pin_prefix, board, su
       interactions = mod_1_model$interactions,
       selected_outcome = mod_1_02_outcome_api$selected_outcome,
       outcome_label = mod_1_model$outcome_label,
+      outcome_type = mod_1_model$outcome_type,
       tabset_id = "step1_output_tabs",
       tabset_session = session
     )

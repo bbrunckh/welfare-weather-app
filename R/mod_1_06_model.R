@@ -117,6 +117,28 @@ mod_1_06_model_server <- function(
       safe_varlist(df, flag_col = "fe", types = c("numeric", "integer", "logical", "character", "Date"))
     })
 
+    extra_covariates <- reactive({
+      vl <- varlist_r()
+      df <- survey_weather()
+      if (is.null(vl)) return(data.frame(name = character(), label = character(), stringsAsFactors = FALSE))
+
+      base_vars <- c(selected_outcome(), haz_vars())
+      hh_vars <- hh_varlist()$name
+      area_vars <- area_varlist()$name
+      fe_vars <- fe_varlist()$name
+
+      exclude <- unique(c(base_vars, hh_vars, area_vars, fe_vars))
+      name_col <- "name"
+      if (is.null(name_col)) return(data.frame(name = character(), label = character(), stringsAsFactors = FALSE))
+
+      out <- vl[vl[[name_col]] %in% names(df) & !vl[[name_col]] %in% exclude, , drop = FALSE]
+      out <- out[, intersect(c(name_col, "label"), names(out)), drop = FALSE]
+      names(out)[names(out) == name_col] <- "name"
+      if (!"label" %in% names(out)) out$label <- out$name
+
+      out
+    })
+
     output$model_selector_ui <- renderUI({
       req(selected_outcome())
       type <- outcome_type()
@@ -124,7 +146,7 @@ mod_1_06_model_server <- function(
       if (is.null(type)) return(NULL)
 
       if (type == "Binary") {
-        model_choices <- c("Logistic regression", "Linear regression (OLS)")
+        model_choices <- c("Logistic regression", "Linear regression")
         label_text <- "Classification model:"
       } else {
         model_choices <- c("Linear regression")
@@ -153,7 +175,7 @@ mod_1_06_model_server <- function(
       }
 
       shiny::withMathJax(
-        if (input$model_type %in% c("Logistic regression", "Linear regression (OLS)", "Linear regression")) {
+        if (input$model_type %in% c("Logistic regression", "Linear regression")) {
           tagList(
             {
               df <- survey_weather()
@@ -247,7 +269,7 @@ mod_1_06_model_server <- function(
                 choices = extra_choices$label,
                 selected = NULL,
                 multiple = TRUE,
-                options = list(placeholder = "Please select (several) other covariates")
+                options = list(placeholder = "Please select (several) extra covariates")
               )
             }
           )
@@ -268,28 +290,6 @@ mod_1_06_model_server <- function(
       label_to_var <- stats::setNames(vl[[name_col]], vl$label)
       vars <- label_to_var[input$interactions]
       vars[!is.na(vars)]
-    })
-
-    extra_covariates <- reactive({
-      vl <- varlist_r()
-      df <- survey_weather()
-      if (is.null(vl)) return(data.frame(name = character(), label = character(), stringsAsFactors = FALSE))
-
-      base_vars <- c(selected_outcome(), haz_vars())
-      hh_vars <- hh_varlist()$name
-      area_vars <- area_varlist()$name
-      fe_vars <- fe_varlist()$name
-
-      exclude <- unique(c(base_vars, hh_vars, area_vars, fe_vars))
-      name_col <- "name"
-      if (is.null(name_col)) return(data.frame(name = character(), label = character(), stringsAsFactors = FALSE))
-
-      out <- vl[vl[[name_col]] %in% names(df) & !vl[[name_col]] %in% exclude, , drop = FALSE]
-      out <- out[, intersect(c(name_col, "label"), names(out)), drop = FALSE]
-      names(out)[names(out) == name_col] <- "name"
-      if (!"label" %in% names(out)) out$label <- out$name
-
-      out
     })
 
     model_fit_val <- reactiveVal(NULL)
