@@ -4,21 +4,21 @@
 #'
 #' @param id,input,output,session Internal parameters for {shiny}.
 #'
-#' @noRd 
+#' @noRd
 #'
-#' @importFrom shiny NS 
+#' @importFrom shiny NS
 #' @importFrom bsplus bs_accordion bs_append
 #' @importFrom waiter autoWaiter spin_2 transparent
-#' 
+#'
 mod_1_modelling_ui <- function(id) {
   ns <- NS(id)
-  
+
   fluidPage(
     autoWaiter(html = spin_2(), color = transparent(.5)),
     h4("How much does weather affect welfare? Who is most affected?"),
-    
+
     sidebarLayout(
-      
+
       sidebarPanel(
         bs_accordion(id = ns("accordion")) |>
           bs_append(
@@ -44,7 +44,7 @@ mod_1_modelling_ui <- function(id) {
             content = mod_1_06_model_ui(ns("model"))
           )
       ),
-      
+
       mainPanel(
         tabsetPanel(
           id = ns("step1_output_tabs"),
@@ -55,18 +55,18 @@ mod_1_modelling_ui <- function(id) {
             includeMarkdown(system.file("app/www/equation.md", package = "wiseapp"))
           )
         )
-        
+
       )
     )
   )
 }
-    
+
 #' 1_modelling Server Functions
 #'
-#' @noRd 
-mod_1_modelling_server <- function(id, survey_list_master, pin_prefix, board, survey_metadata, varlist, weather_list) {
+#' @noRd
+mod_1_modelling_server <- function(id, survey_list_master, pin_prefix, board, survey_metadata, varlist, weather_list, pov_lines) {
   moduleServer(id, function(input, output, session) {
-    
+
     # Pass reactives
     mod_1_01_sample_api <- mod_1_01_sample_server(
       "sample",
@@ -94,7 +94,8 @@ mod_1_modelling_server <- function(id, survey_list_master, pin_prefix, board, su
       tabset_id = "step1_output_tabs",
       tabset_session = session,
       varlist = varlist,
-      pov_lines = reactive({ golem::get_golem_options("pov_lines") }),
+      #pov_lines = reactive({ golem::get_golem_options("pov_lines") }),
+      pov_lines = pov_lines,
       survey_geo = mod_1_01_sample_api$survey_geo
     )
 
@@ -158,7 +159,46 @@ mod_1_modelling_server <- function(id, survey_list_master, pin_prefix, board, su
       tabset_id = "step1_output_tabs",
       tabset_session = session
     )
-    
-    
+
+    # Convenience reactive: "final model" (your convention is [[3]])
+    final_model <- reactive({
+      fits <- mod_1_model$model_fit()
+      if (is.null(fits) || !length(fits)) return(NULL)
+      fits[[3]] %||% fits[[length(fits)]]
+    })
+
+    # NEW: export Step 1 API for Step 2 / Step 3
+    list(
+      # nested (optional but nice)
+      sample_api  = mod_1_01_sample_api,
+      outcome_api = mod_1_02_outcome_api,
+      weather_api = mod_1_04_weather_api,
+      model_api   = mod_1_model,
+
+      # flattened (what downstream modules will actually use)
+      survey_data       = mod_1_01_sample_api$survey_data,
+      survey_data_files = mod_1_01_sample_api$survey_data_files,
+      data_loaded       = mod_1_01_sample_api$data_loaded,
+      survey_geo        = mod_1_01_sample_api$survey_geo,
+
+      selected_outcome  = mod_1_02_outcome_api$selected_outcome,
+
+      survey_weather    = mod_1_04_weather_api$survey_weather,
+      loc_weather       = mod_1_04_weather_api$loc_weather,
+      weather_vars      = mod_1_04_weather_api$weather_vars,
+      haz_vars          = mod_1_04_weather_api$haz_vars,
+      haz_spec          = mod_1_04_weather_api$haz_spec,        # added in section 3
+      weather_settings  = mod_1_04_weather_api$weather_settings,
+
+      model_fit         = mod_1_model$model_fit,
+      final_model       = final_model,
+      outcome_type      = mod_1_model$outcome_type,
+      outcome_label     = mod_1_model$outcome_label,
+
+      pov_lines         = pov_lines
+    )
+
+
+
   })
 }

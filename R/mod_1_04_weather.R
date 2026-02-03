@@ -4,9 +4,9 @@
 #'
 #' @param id,input,output,session Internal parameters for {shiny}.
 #'
-#' @noRd 
+#' @noRd
 #'
-#' @importFrom shiny NS tagList 
+#' @importFrom shiny NS tagList
 mod_1_04_weather_ui <- function(id) {
   ns <- NS(id)
   tagList(
@@ -14,10 +14,10 @@ mod_1_04_weather_ui <- function(id) {
     uiOutput(ns("weather_construction_ui"))
   )
 }
-    
+
 #' 1_04_weather Server Functions
 #'
-#' @noRd 
+#' @noRd
 mod_1_04_weather_server <- function(
     id,
     survey_data,
@@ -180,6 +180,51 @@ mod_1_04_weather_server <- function(
         stringsAsFactors = FALSE
       )
     })
+
+    # NEW: Full hazard specification (needed for Step 2 & Step 3 reproducibility)
+    haz_spec <- reactive({
+      req(weather_vars())
+      wl <- if (is.function(weather_list)) weather_list() else weather_list
+      req(wl)
+
+      vars <- weather_vars()
+
+      specs <- lapply(vars, function(v) {
+        id_prefix <- paste0(v, "_")
+
+        # Defaults consistent with UI logic
+        wl_row <- wl[wl$varname == v, , drop = FALSE]
+        units <- if (nrow(wl_row) && "units" %in% names(wl_row)) as.character(wl_row$units[[1]]) else NA_character_
+
+        ref_period <- input[[paste0(id_prefix, "relativePeriod")]] %||% c(1, 1)
+        ref_start  <- as.integer(ref_period[1])
+        ref_end    <- as.integer(ref_period[2])
+
+        temporal_default <- if (!is.na(units) && units %in% c("days", "mm")) "Sum" else "Mean"
+        temporal_agg <- input[[paste0(id_prefix, "temporalAgg")]] %||% temporal_default
+
+        trans_default <- if (!is.na(units) && units %in% c("Dimensionless")) "Standardized anomaly" else "None"
+        transformation <- input[[paste0(id_prefix, "varConstruction")]] %||% trans_default
+
+        cont_binned <- input[[paste0(id_prefix, "contOrBinned")]] %||% "Continuous"
+
+        poly <- input[[paste0(id_prefix, "polynomial")]] %||% character(0)
+
+        tibble::tibble(
+          varname          = v,
+          haz_name         = paste0("haz_", v),
+          ref_start        = ref_start,
+          ref_end          = ref_end,
+          temporalAgg      = temporal_agg,
+          varConstruction  = transformation,
+          contOrBinned     = cont_binned,
+          polynomial       = list(poly)
+        )
+      })
+
+      dplyr::bind_rows(specs)
+    })
+
 
     weather_data <- reactive({
       req(data_loaded(), weather_vars())
@@ -408,6 +453,7 @@ mod_1_04_weather_server <- function(
     list(
       weather_vars = weather_vars,
       weather_settings = weather_settings,
+      haz_spec = haz_spec,
       survey_h3 = survey_h3,
       weather_data = weather_data,
       h3_weather = h3_weather,

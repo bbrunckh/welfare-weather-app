@@ -35,17 +35,28 @@ mod_2_simulation_ui <- function(id) {
   )
 }
 
-mod_2_simulation_server <- function(id) {
+mod_2_simulation_server <- function(id, step1 = NULL, pov_lines = NULL, varlist = NULL) {
   moduleServer(id, function(input, output, session) {
 
     # Stub submodules (no dependencies yet)
     mod_2_01_historical_server("historical")
     mod_2_02_climate_server("climate")
 
-    # Simple “is this page alive?” output
     output$step2_status <- renderText({
-      paste("Loaded OK at", format(Sys.time(), "%Y-%m-%d %H:%M:%S"))
+      if (is.null(step1)) return("Step 1 API not provided (wiring issue).")
+
+      has_model <- !is.null(step1$final_model())  # reactive
+      n_sw <- tryCatch(nrow(step1$survey_weather()), error = function(e) NA_integer_)
+      n_haz <- tryCatch(length(step1$haz_vars()), error = function(e) NA_integer_)
+
+      paste0(
+        "Step 1 linked: YES | ",
+        "Model available: ", if (has_model) "YES" else "NO", " | ",
+        "survey_weather rows: ", n_sw, " | ",
+        "haz vars: ", n_haz
+      )
     })
+
 
     # Later, this server will accept Step 1 exports as arguments.
   })
