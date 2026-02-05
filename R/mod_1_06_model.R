@@ -210,7 +210,7 @@ mod_1_06_model_server <- function(
                 choices = choices,
                 selected = NULL,
                 multiple = TRUE,
-                options = list(maxItems = 3, placeholder = "Select (several) interaction variables")
+                options = list(maxItems = 1, placeholder = "Select interaction variable")
               )
             },
             shiny::selectizeInput(
@@ -292,11 +292,27 @@ mod_1_06_model_server <- function(
       vars[!is.na(vars)]
     })
 
+    weather_terms_val <- reactiveVal(character(0))
+    hh_cov_val <- reactiveVal(character(0))
+    area_cov_val <- reactiveVal(character(0))
+    other_cov_val <- reactiveVal(character(0))
+    fe_val <- reactiveVal(character(0))
+    interaction_terms_val <- reactiveVal(character(0))
+    y_var_val <- reactiveVal(NULL)
+
     model_fit_val <- reactiveVal(NULL)
 
     observeEvent(input$run_model, {
       id_run <- shiny::showNotification("Running model. Results presented once model finished running.", type = "message", duration = NULL)
       fit_list <- tryCatch({
+        weather_terms_val(character(0))
+        hh_cov_val(character(0))
+        area_cov_val(character(0))
+        other_cov_val(character(0))
+        fe_val(character(0))
+        interaction_terms_val(character(0))
+        y_var_val(NULL)
+
         if (is.null(selected_outcome()) || !length(selected_outcome())) {
           shiny::showNotification("Select an outcome before running the model.", type = "warning")
           return(NULL)
@@ -310,6 +326,7 @@ mod_1_06_model_server <- function(
 
         shiny::showNotification("Fitting model...", type = "message")
         y_var <- selected_outcome()
+        y_var_val(y_var)
         if (!y_var %in% names(df)) {
           shiny::showNotification("Selected outcome is not available in survey data.", type = "warning")
           return(NULL)
@@ -319,6 +336,7 @@ mod_1_06_model_server <- function(
         if (!is.null(df)) {
           weather_terms <- intersect(weather_terms, names(df))
         }
+        weather_terms_val(weather_terms)
         if (is.null(weather_terms) || !length(weather_terms)) {
           shiny::showNotification("Weather variables are not available.", type = "warning")
           return(NULL)
@@ -355,12 +373,14 @@ mod_1_06_model_server <- function(
         })
         interaction_terms <- c(t(term_matrix))
       }
+      interaction_terms_val(interaction_terms)
 
       fe <- character(0)
       if (!is.null(input$fixedeffects) && length(input$fixedeffects) > 0 && !is.null(label_to_var)) {
         fe <- label_to_var[input$fixedeffects]
         fe <- fe[!is.na(fe)]
       }
+      fe_val(fe)
 
       hh_cov <- character(0)
       area_cov <- character(0)
@@ -379,6 +399,9 @@ mod_1_06_model_server <- function(
           other_cov <- other_cov[!is.na(other_cov)]
         }
       }
+      hh_cov_val(hh_cov)
+      area_cov_val(area_cov)
+      other_cov_val(other_cov)
 
       build_formula <- function(y, terms) {
         terms <- terms[nzchar(terms)]
@@ -442,12 +465,18 @@ mod_1_06_model_server <- function(
     }, ignoreInit = TRUE)
 
       list(
-      run_model = reactive(input$run_model),
-      model_fit = model_fit_val,
-      outcome_type = outcome_type,
-      outcome_label = outcome_label,
-      interactions = interaction_vars#,
-      # other covariates list
-    )
+        run_model = reactive(input$run_model),
+        model_fit = model_fit_val,
+        outcome_type = outcome_type,
+        outcome_label = outcome_label,
+        interaction_terms = interaction_vars,
+        weather_terms = weather_terms_val,
+        hh_cov = hh_cov_val,
+        area_cov = area_cov_val,
+        other_cov = other_cov_val,
+        fe = fe_val,
+        interaction_terms = interaction_terms_val,
+        y_var = y_var_val
+      )
   })
 }

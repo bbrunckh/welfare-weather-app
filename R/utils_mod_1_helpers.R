@@ -154,3 +154,60 @@ get_label <- function(varname, var_type = "weather", weather_list = NULL, varlis
 	}
 	varname
 }
+
+#' Resolve a variable's name and label
+#'
+#' @param var Variable name or label.
+#' @param varlist General varlist (data.frame or reactive).
+#' @param weather_list Weather metadata (data.frame or reactive).
+#'
+#' @return A list with `name` and `label` entries.
+#'
+#' @noRd
+get_name_label <- function(var, varlist = NULL, weather_list = NULL) {
+	if (is.null(var) || !nzchar(var)) {
+		return(list(name = var, label = var))
+	}
+
+	vl <- if (is.function(varlist)) varlist() else varlist
+	wl <- if (is.function(weather_list)) weather_list() else weather_list
+
+	term <- as.character(var)
+	base <- term
+	power <- NULL
+	if (grepl("^I\\((.*)\\^([23])\\)$", term)) {
+		base <- sub("^I\\((.*)\\^([23])\\)$", "\\1", term)
+		power <- sub("^I\\((.*)\\^([23])\\)$", "\\2", term)
+	}
+
+	name <- NULL
+	label <- NULL
+
+	if (!is.null(vl) && all(c("name", "label") %in% names(vl))) {
+		if (base %in% vl$name) {
+			name <- base
+			label <- vl$label[vl$name == base][1]
+		} else if (base %in% vl$label) {
+			name <- vl$name[vl$label == base][1]
+			label <- base
+		}
+	}
+
+	if ((is.null(name) || is.null(label)) && !is.null(wl) && all(c("varname", "name") %in% names(wl))) {
+		if (base %in% wl$varname) {
+			name <- base
+			label <- wl$name[wl$varname == base][1]
+		} else if (base %in% wl$name) {
+			name <- wl$varname[wl$name == base][1]
+			label <- base
+		}
+	}
+
+	name <- name %||% base
+	label <- label %||% base
+	if (!is.null(power) && nzchar(power)) {
+		label <- paste0(label, "^", power)
+	}
+
+	list(name = name, label = label)
+}

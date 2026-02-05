@@ -19,8 +19,9 @@ mod_1_07_results_server <- function(
     model_fit,
     run_model,
     haz_vars,
+    weather_terms,
     varlist,
-    interactions,
+    interaction_terms,
     selected_outcome,
     outcome_label,
     outcome_type,
@@ -39,25 +40,12 @@ mod_1_07_results_server <- function(
     observeEvent(model_fit(), {
       req(model_fit())
 
-      vl <- if (is.function(varlist)) varlist() else varlist
-      labels_df <- if (!is.null(vl)) vl[, c("name", "label"), drop = FALSE] else NULL
+    vl <- if (is.function(varlist)) varlist() else varlist
+    labels_df <- if (!is.null(vl)) vl[, c("name", "label"), drop = FALSE] else NULL
 
       get_term_label <- function(term, labels_df) {
-        if (grepl("^I\\((.*)\\^2\\)$", term)) {
-          varname <- sub("^I\\((.*)\\^2\\)$", "\\1", term)
-          base_label <- labels_df$label[labels_df$name == varname]
-          if (!length(base_label) || is.na(base_label[[1]])) return(paste0(varname, "^2"))
-          return(paste0(base_label[[1]], "^2"))
-        }
-        if (grepl("^I\\((.*)\\^3\\)$", term)) {
-          varname <- sub("^I\\((.*)\\^3\\)$", "\\1", term)
-          base_label <- labels_df$label[labels_df$name == varname]
-          if (!length(base_label) || is.na(base_label[[1]])) return(paste0(varname, "^3"))
-          return(paste0(base_label[[1]], "^3"))
-        }
-        base_label <- labels_df$label[labels_df$name == term]
-        if (!length(base_label) || is.na(base_label[[1]])) return(term)
-        base_label[[1]]
+        res <- get_name_label(term, varlist = vl)
+        res$label %||% term
       }
 
       create_named_vector <- function(coefs_to_plot, labels_df) {
@@ -110,155 +98,77 @@ mod_1_07_results_server <- function(
             ggplot2::labs(x = stringr::str_wrap(paste0("Effect on ", out_lab), 50))
         })
 
-        get_model_frame <- function() {
-          fit <- model_fit()[[3]]
-          if (!is.null(fit$model)) return(as.data.frame(fit$model))
-          tryCatch(as.data.frame(stats::model.frame(fit)), error = function(e) NULL)
-        }
-
-        get_model_terms <- function() {
-          fit <- model_fit()[[3]]
-          vars <- tryCatch(all.vars(stats::terms(fit)), error = function(e) character(0))
-          setdiff(unique(vars), as.character(stats::formula(fit)[[2]]))
-        }
-
-        get_haz_terms <- function() {
-          mf <- get_model_frame()
-          if (!is.null(mf)) {
-            haz <- names(mf)[grepl("haz_", names(mf)) & !grepl(":", names(mf))]
-            if (length(haz)) return(haz)
-          }
-          haz_terms <- get_model_terms()
-          haz_terms[grepl("haz_", haz_terms) & !grepl(":", haz_terms)]
-        }
-
-        get_pred <- function(idx) {
-          mf <- get_model_frame()
-          if (is.null(mf)) return(NULL)
-
-          hv <- haz_vars()
-          if (!is.null(hv) && length(hv) >= idx) {
-            base <- as.character(hv[[idx]])
-            if (base %in% names(mf)) return(base)
-
-            candidates <- names(mf)[grepl(base, names(mf), fixed = TRUE) & !grepl(":", names(mf))]
-            if (length(candidates)) return(candidates[[1]])
-          }
-
-          haz_terms <- get_haz_terms()
-          haz_terms <- haz_terms[haz_terms %in% names(mf)]
-          if (length(haz_terms) >= idx) {
-            return(haz_terms[[idx]])
-          }
-          NULL
-        }
-
-        normalize_var <- function(vars) {
-          if (is.null(vl) || !all(c("name", "label") %in% names(vl))) return(vars)
-          label_to_name <- stats::setNames(vl$name, vl$label)
-          vapply(vars, function(v) {
-            if (!is.null(v) && !is.na(v) && v %in% names(label_to_name)) {
-              mapped <- unname(label_to_name[[v]])
-              if (!is.na(mapped) && nzchar(mapped)) return(mapped)
-            }
-            v
-          }, FUN.VALUE = character(1))
-        }
-
-        get_mod <- function() {
-          mods <- interactions()
-          if (is.null(mods) || !length(mods)) return(NULL)
-          mods <- as.character(mods)
-          mods <- normalize_var(mods)
-          mf <- get_model_frame()
-          if (!is.null(mf)) {
-            mods <- mods[mods %in% names(mf)]
-          }
-          if (!length(mods)) return(NULL)
-          mods[[1]]
-        }
-
         empty_plot <- function(msg) {
           graphics::plot.new()
           graphics::text(0.5, 0.5, msg)
         }
 
         output$effectplot1 <- renderPlot({
-          req(model_fit(), haz_vars())
-          pred <- get_pred(1)
-          if (is.null(pred)) return(empty_plot("Selected weather variable not in model."))
-          x_lab <- if (!is.null(labels_df)) get_term_label(pred, labels_df) else pred
+          req(model_fit(), length(weather_terms()) > 0)
           jtools::effect_plot(
-            model_fit()[[3]], pred = pred, data = get_model_frame(),
+            model_fit()[[3]], pred = !!weather_terms()[1], 
             interval = TRUE, plot.points = FALSE, line.colors = "orange",
-            x.label = stringr::str_wrap(x_lab %||% pred, 40),
-            y.label = stringr::str_wrap(out_lab, 40)
-          )
+            x.label = stringr::str_wrap(get_name_label(weather_terms()[1], varlist = vl)$label, 40), 
+            y.label = stringr::str_wrap(out_lab ,40))
         })
 
         output$effectplot2 <- renderPlot({
-          req(length(haz_vars()) > 1, model_fit(), haz_vars())
-          pred <- get_pred(2)
-          if (is.null(pred)) return(empty_plot("Selected weather variable not in model."))
-          x_lab <- if (!is.null(labels_df)) get_term_label(pred, labels_df) else pred
+          req(model_fit(), length(weather_terms()) > 1)
           jtools::effect_plot(
-            model_fit()[[3]], pred = pred, data = get_model_frame(),
+            model_fit()[[3]], pred = !!weather_terms()[2], 
             interval = TRUE, plot.points = FALSE, line.colors = "orange",
-            x.label = stringr::str_wrap(x_lab %||% pred, 40),
-            y.label = stringr::str_wrap(out_lab, 40)
-          )
+            x.label = stringr::str_wrap(get_name_label(weather_terms()[2], varlist = vl)$label, 40), 
+            y.label = stringr::str_wrap(out_lab ,40))
         })
 
         output$interactplot1 <- renderPlot({
-          req(length(interactions()) > 0, model_fit(), haz_vars())
-          mod <- get_mod()
-          pred <- get_pred(1)
-          if (is.null(mod) || is.null(pred)) {
-            return(empty_plot("Interaction variables not in model."))
-          }
-          x_lab <- if (!is.null(labels_df)) get_term_label(pred, labels_df) else pred
+          req(interaction_terms(), length(weather_terms()) > 0, model_fit())
           interactions::interact_plot(
-            model_fit()[[3]], pred = pred, modx = mod, data = get_model_frame(),
+            model_fit()[[3]], pred = !!weather_terms()[1], modx = !!interaction_terms()[1],
             interval = TRUE, plot.points = FALSE,
-            x.label = stringr::str_wrap(x_lab %||% pred, 40),
+            x.label = stringr::str_wrap(get_name_label(weather_terms()[1], varlist = vl)$label, 40),
             y.label = stringr::str_wrap(out_lab, 40)
           ) + ggplot2::theme(legend.position = "bottom")
         })
 
         output$interactplot2 <- renderPlot({
-          req(length(interactions()) > 0, length(haz_vars()) > 1, model_fit(), haz_vars())
-          mod <- get_mod()
-          pred <- get_pred(2)
-          if (is.null(mod) || is.null(pred)) {
-            return(empty_plot("Interaction variables not in model."))
-          }
-          x_lab <- if (!is.null(labels_df)) get_term_label(pred, labels_df) else pred
+          req(interaction_terms(), length(weather_terms()) > 1, model_fit())
           interactions::interact_plot(
-            model_fit()[[3]], pred = pred, modx = mod, data = get_model_frame(),
+            model_fit()[[3]], pred = !!weather_terms()[2], modx = !!interaction_terms()[1],
             interval = TRUE, plot.points = FALSE,
-            x.label = stringr::str_wrap(x_lab %||% pred, 40),
+            x.label = stringr::str_wrap(get_name_label(weather_terms()[2], varlist = vl)$label, 40),
             y.label = stringr::str_wrap(out_lab, 40)
           ) + ggplot2::theme(legend.position = "bottom")
         })
 
         output$simslopes1 <- renderPlot({
-          req(length(interactions()) > 0, model_fit(), haz_vars())
-          mod <- get_mod()
-          pred <- get_pred(1)
-          if (is.null(mod) || is.null(pred)) {
-            return(empty_plot("Interaction variables not in model."))
-          }
-          plot(interactions::sim_slopes(model_fit()[[3]], pred = pred, modx = mod, data = get_model_frame()))
+          req(interaction_terms(), model_fit(), weather_terms())
+          plot(interactions::sim_slopes(model_fit()[[3]], pred = !!weather_terms()[1], modx = !!interaction_terms()[1]))
         })
 
         output$simslopes2 <- renderPlot({
-          req(length(interactions()) > 0, length(haz_vars()) > 1, model_fit(), haz_vars())
-          mod <- get_mod()
-          pred <- get_pred(2)
-          if (is.null(mod) || is.null(pred)) {
-            return(empty_plot("Interaction variables not in model."))
+          req(interaction_terms(), model_fit(), weather_terms())
+          plot(interactions::sim_slopes(model_fit()[[3]], pred = !!weather_terms()[2], modx = !!interaction_terms()[1]))
+        })
+
+        output$interactplots <- renderUI({
+          if (length(interaction_terms()) > 0 && length(haz_vars()) > 1) {
+            bslib::layout_columns(
+              col_widths = c(6, 6),
+              bslib::card(shiny::plotOutput(ns("interactplot1"), height = "300px")),
+              bslib::card(shiny::plotOutput(ns("simslopes1"), height = "300px")),
+              bslib::card(shiny::plotOutput(ns("interactplot2"), height = "300px")),
+              bslib::card(shiny::plotOutput(ns("simslopes2"), height = "300px"))
+            )
+          } else if (length(interaction_terms()) > 0) {
+            bslib::layout_columns(
+              col_widths = c(6, 6),
+              bslib::card(shiny::plotOutput(ns("interactplot1"), height = "300px")),
+              bslib::card(shiny::plotOutput(ns("simslopes1"), height = "300px"))
+            )
+          } else {
+            shiny::p("No interaction term specified.")
           }
-          plot(interactions::sim_slopes(model_fit()[[3]], pred = pred, modx = mod, data = get_model_frame()))
         })
 
         shiny::appendTab(
@@ -288,26 +198,6 @@ mod_1_07_results_server <- function(
           select = TRUE,
           session = tabset_session
         )
-
-        output$interactplots <- renderUI({
-          if (length(interactions()) > 0 && length(haz_vars()) > 1) {
-            bslib::layout_columns(
-              col_widths = c(6, 6),
-              bslib::card(shiny::plotOutput(ns("interactplot1"), height = "300px")),
-              bslib::card(shiny::plotOutput(ns("simslopes1"), height = "300px")),
-              bslib::card(shiny::plotOutput(ns("interactplot2"), height = "300px")),
-              bslib::card(shiny::plotOutput(ns("simslopes2"), height = "300px"))
-            )
-          } else if (length(interactions()) > 0) {
-            bslib::layout_columns(
-              col_widths = c(6, 6),
-              bslib::card(shiny::plotOutput(ns("interactplot1"), height = "300px")),
-              bslib::card(shiny::plotOutput(ns("simslopes1"), height = "300px"))
-            )
-          } else {
-            shiny::p("No interaction term specified.")
-          }
-        })
 
         results_tab_added(TRUE)
       }

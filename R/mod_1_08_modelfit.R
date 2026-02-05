@@ -19,6 +19,7 @@ mod_1_08_modelfit_server <- function(
     model_fit,
     run_model,
     haz_vars,
+  weather_terms = NULL,
     varlist,
     selected_outcome,
     outcome_type,
@@ -45,6 +46,12 @@ mod_1_08_modelfit_server <- function(
       out_lab <- outcome_label()
       if (is.null(out_lab)) out_lab <- selected_outcome() %||% "Outcome"
 
+      get_weather_terms <- function() {
+        terms <- if (is.function(weather_terms)) weather_terms() else weather_terms
+        if (is.null(terms) || !length(terms)) return(haz_vars())
+        terms
+      }
+
       if (!modelfit_tab_added()) {
         output$resid_weather1 <- renderPlot({
           req(model_fit())
@@ -53,8 +60,12 @@ mod_1_08_modelfit_server <- function(
             dplyr::select(dplyr::starts_with("haz_")) |>
             dplyr::mutate(residuals = stats::residuals(model))
 
-          h <- colnames(dplyr::select(plot_data, dplyr::starts_with("haz_")))[1]
-          xlabel <- label_lookup[h] %||% h
+          haz_cols <- intersect(get_weather_terms(), names(plot_data))
+          if (!length(haz_cols)) {
+            haz_cols <- colnames(dplyr::select(plot_data, dplyr::starts_with("haz_")))
+          }
+          h <- haz_cols[[1]]
+          xlabel <- get_name_label(h, varlist = vl)$label %||% (label_lookup[h] %||% h)
 
           ggplot2::ggplot(plot_data, ggplot2::aes(x = .data[[h]], y = residuals)) +
             ggplot2::geom_point(alpha = 0.1) +
@@ -71,8 +82,12 @@ mod_1_08_modelfit_server <- function(
             dplyr::select(dplyr::starts_with("haz_")) |>
             dplyr::mutate(residuals = stats::residuals(model))
 
-          h <- colnames(dplyr::select(plot_data, dplyr::starts_with("haz_")))[2]
-          xlabel <- label_lookup[h] %||% h
+          haz_cols <- intersect(get_weather_terms(), names(plot_data))
+          if (length(haz_cols) < 2) {
+            haz_cols <- colnames(dplyr::select(plot_data, dplyr::starts_with("haz_")))
+          }
+          h <- haz_cols[[2]]
+          xlabel <- get_name_label(h, varlist = vl)$label %||% (label_lookup[h] %||% h)
 
           ggplot2::ggplot(plot_data, ggplot2::aes(x = .data[[h]], y = residuals)) +
             ggplot2::geom_point(alpha = 0.1) +
