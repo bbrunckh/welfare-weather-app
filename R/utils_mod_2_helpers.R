@@ -201,3 +201,155 @@ format_step2_status <- function(step1, board = NULL) {
     "haz vars: ", n_haz
   )
 }
+
+
+
+#Pulled from prior version: Phase B
+# Derive weather pin names from survey pin IDs (mirrors Step 1 approach).
+# Keep this consistent with mod_1_04_weather.R to avoid surprises.
+derive_weather_pin_names <- function(survey_pin_ids) {
+  if (!length(survey_pin_ids)) return(character(0))
+  # Step 1 removes the last 4 chars then appends "weather"
+  unique(paste0(substr(survey_pin_ids, 1, nchar(survey_pin_ids) - 4), "weather"))
+}
+
+# Build H3-level hazards from wide weather data using haz_spec.
+# Expects: weather_df has h3_6, timestamp (Date), and one column per weather var.
+build_h3_hazards <- function(weather_df, haz_spec) {
+  if (is.null(weather_df) || !nrow(weather_df)) return(NULL)
+  if (is.null(haz_spec) || !nrow(haz_spec)) return(NULL)
+
+  out <- NULL
+
+  for (i in haz_spec$varname) {
+    spec_i <- haz_spec[haz_spec$varname == i, , drop = FALSE]
+    ref_start <- as.numeric(spec_i$ref_start[[1]])
+    ref_end   <- as.numeric(spec_i$ref_end[[1]])
+    temporal_agg <- as.character(spec_i$temporalAgg[[1]])
+    transformation <- as.character(spec_i$varConstruction[[1]])
+    cont_binned <- as.character(spec_i$contOrBinned[[1]])
+
+    w <- weather_df |>
+      dplyr::group_by(.data$h3_6) |>
+      dplyr::arrange(.data$timestamp, .by_group = TRUE)
+
+    # Lags
+    if (is.finite(ref_start) && is.finite(ref_end)) {
+      for (l in seq(ref_start, ref_end)) {
+        colname <- paste0(i, "_", l)
+        w <- w |>
+          dplyr::mutate(
+            !!rlang::sym(colname) := dplyr::lag(.data[[i]], n = l, order_by = .data$timestamp)
+          )
+      }
+    }
+
+    # Drop leading rows without full lag support
+    if (is.finite(ref_start) && is.finite(ref_end)) {
+      end_col <- paste0(i, "_", max(ref_start, ref_end))
+      if (end_col %in% names(w)) {
+        w <- w |>
+          dplyr::filter(!is.na(.data[[end_col]])) |>
+          dplyr::ungroup()
+      } else {
+        w <- w |> dplyr::ungroup()
+      }
+    } else {
+      w <- w |> dplyr::ungroup()
+    }
+
+    # Temporal aggregation across lag columns
+    lag_prefix <- paste0(i, "_")
+    if (temporal_agg == "Mean") {
+      w <- w |> dplyr::mutate(haz = rowMeans(dplyr::across(dplyr::starts_with(lag_prefix))))
+    } else if (temporal_agg == "Median") {
+      w <- w |>
+        dplyr::mutate(haz = apply(dplyr::select(., dplyr::starts_with(lag_prefix)), 1, stats::median, na.rm = TRUE))
+    } else if (temporal_agg == "Min") {
+      w <- w |>
+        dplyr::mutate(haz = do.call(pmin, c(dplyr::across(dplyr::starts_with(lag_prefix)), na.rm = TRUE)))
+    } else if (temporal_agg == "Max") {
+      w <- w |>
+        dplyr::mutate(haz = do.call(pmax, c(dplyr::across(dplyr::starts_with(lag_prefix)), na.rm = TRUE)))
+    } else if (temporal_agg == "Sum") {
+      w <- w |> dplyr::mutate(haz = rowSums(dplyr::across(dplyr::starts_with(lag_prefix))))
+    } else {
+      w <- w |> dplyr::mutate(haz = NA_real_)
+    }
+
+    # Transformation (match Step 1 logic: skip for spi6/spei6 and for "None")
+    if (!is.na(transformation) &&
+        !(transformation == "None" || i %in% c("spi6", "spei6")) &&
+        "haz" %in% names(w)) {
+
+      w <- w |>
+        dplyr::mutate(
+          year  = lubridate::year(.data$timestamp),
+          month = lubridate::month(.data$timestamp)
+        )
+
+      climate_ref <- w |>
+        dplyr::filter(.data$year >= 1991 & .data$year <= 2020) |>
+        dplyr::summarise(
+          mean = mean(.data$haz, na.rm = TRUE),
+          sd   = stats::sd(.data$haz, na.rm = TRUE),
+          .by = c(.data$h3_6, .data$month)
+        )
+
+      if (transformation == "Deviation from mean") {
+        w <- w |>
+          dplyr::left_join(climate_ref, by = c("h3_6", "month")) |>
+          dplyr::mutate(haz = .data$haz - .data$mean)
+      } else if (transformation == "Standardized anomaly") {
+        w <- w |>
+          dplyr::left_join(climate_ref, by = c("h3_6", "month")) |>
+          dplyr::mutate(haz = (.data$haz - .data$mean) / .data$sd)
+      }
+    }
+
+    if (!is.na(cont_binned) && cont_binned == "Binned") {
+      # Not implemented yet (consistent with Step 1)
+    }
+
+    w <- w |>
+      dplyr::select(.data$h3_6, .data$timestamp, haz = .data$haz) |>
+      dplyr::rename(!!paste0("haz_", i) := .data$haz) |>
+      dplyr::arrange(.data$h3_6, .data$timestamp)
+
+    out <- if (is.null(out)) w else dplyr::full_join(out, w, by = c("h3_6", "timestamp"))
+  }
+
+  out
+}
+
+# Aggregate H3 hazards to loc_id using survey_h3 mapping and pop_2020 weights (mirrors Step 1)
+aggregate_h3_to_loc <- function(survey_h3, h3_haz) {
+  if (is.null(survey_h3) || !nrow(survey_h3)) return(NULL)
+  if (is.null(h3_haz) || !nrow(h3_haz)) return(NULL)
+
+  join_cols <- intersect(c("h3_6", "timestamp"), intersect(names(survey_h3), names(h3_haz)))
+  if (!length(join_cols)) return(NULL)
+
+  data <- dplyr::left_join(survey_h3, h3_haz, by = join_cols)
+
+  by_cols <- intersect(c("code", "year", "survname", "loc_id", "timestamp"), names(data))
+  if (!length(by_cols)) return(NULL)
+
+  if ("pop_2020" %in% names(data)) {
+    data <- data |>
+      dplyr::summarise(
+        dplyr::across(dplyr::starts_with("haz_"),
+                      ~ sum(.x * .data$pop_2020, na.rm = TRUE) / sum(.data$pop_2020, na.rm = TRUE)),
+        .by = dplyr::all_of(by_cols)
+      )
+  } else {
+    data <- data |>
+      dplyr::summarise(
+        dplyr::across(dplyr::starts_with("haz_"), ~ mean(.x, na.rm = TRUE)),
+        .by = dplyr::all_of(by_cols)
+      )
+  }
+
+  data |>
+    dplyr::mutate(loc_id = as.character(.data$loc_id))
+}
