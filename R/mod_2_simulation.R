@@ -62,11 +62,25 @@ mod_2_simulation_server <- function(id, step1 = NULL, pov_lines = NULL, varlist 
       lw_n <- tryCatch(nrow(historical_api$loc_weather_sim()), error = function(e) NA_integer_)
       lw_ok <- isTRUE(!is.na(lw_n) && lw_n > 0)
 
+      #Phase C
+      sp_n <- tryCatch({
+        sp <- historical_api$sim_panel()
+        if (is.null(sp)) NA_integer_ else nrow(sp)
+      }, error = function(e) NA_integer_)
+      sp_ok <- isTRUE(!is.na(sp_n) && sp_n > 0)
+      sp_ok <- isTRUE(!is.na(sp_n) && sp_n > 0)
+
+      #Output
       paste0(
         format_step2_status(step1 = step1, board = board),
         "\nPhase B hazards built: ", if (lw_ok) "YES" else "NO",
-        " | loc_weather_sim rows: ", lw_n
+        " | loc_weather_sim rows: ", lw_n,
+        "\nPhase C sim panel built: ", if (sp_ok) "YES" else "NO",
+        " | sim_panel rows: ", sp_n
       )
+
+
+
     })
 
     # Later, this server will accept Step 1 exports as arguments.
