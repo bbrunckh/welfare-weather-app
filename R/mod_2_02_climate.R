@@ -6,10 +6,15 @@ mod_2_02_climate_ui <- function(id) {
   )
 }
 
-mod_2_02_climate_server <- function(id) {
+mod_2_02_climate_server <- function(id, step1 = NULL, pov_lines = NULL, varlist = NULL, board = NULL) {
   moduleServer(id, function(input, output, session) {
     observeEvent(input$run_climate, {
-      showNotification("TBD: climate simulation not implemented yet", type = "message")
+      if (is.null(step1)) {
+        showNotification("Step 1 API missing (wiring).", type = "error")
+        return()
+      }
+      showNotification("Wired OK (climate stub).", type = "message")
     })
   })
 }
+

@@ -33,6 +33,7 @@ app_server <- function(input, output, session) {
     id = "step2",
     step1 = step1_api,
     pov_lines = pov_lines_r,
-    varlist = varlist_r
+    varlist = varlist_r,
+    board = board_r
     )
 }

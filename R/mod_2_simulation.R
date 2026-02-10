@@ -35,28 +35,30 @@ mod_2_simulation_ui <- function(id) {
   )
 }
 
-mod_2_simulation_server <- function(id, step1 = NULL, pov_lines = NULL, varlist = NULL) {
+mod_2_simulation_server <- function(id, step1 = NULL, pov_lines = NULL, varlist = NULL, board = NULL) {
   moduleServer(id, function(input, output, session) {
 
-    # Stub submodules (no dependencies yet)
-    mod_2_01_historical_server("historical")
-    mod_2_02_climate_server("climate")
+    # Submodules (wired, even if they don't use args yet)
+    mod_2_01_historical_server(
+      "historical",
+      step1 = step1,
+      pov_lines = pov_lines,
+      varlist = varlist,
+      board = board
+    )
+
+    mod_2_02_climate_server(
+      "climate",
+      step1 = step1,
+      pov_lines = pov_lines,
+      varlist = varlist,
+      board = board
+    )
 
     output$step2_status <- renderText({
       if (is.null(step1)) return("Step 1 API not provided (wiring issue).")
-
-      has_model <- !is.null(step1$final_model())  # reactive
-      n_sw <- tryCatch(nrow(step1$survey_weather()), error = function(e) NA_integer_)
-      n_haz <- tryCatch(length(step1$haz_vars()), error = function(e) NA_integer_)
-
-      paste0(
-        "Step 1 linked: YES | ",
-        "Model available: ", if (has_model) "YES" else "NO", " | ",
-        "survey_weather rows: ", n_sw, " | ",
-        "haz vars: ", n_haz
-      )
+      format_step2_status(step1 = step1, board = board)
     })
-
 
     # Later, this server will accept Step 1 exports as arguments.
   })
