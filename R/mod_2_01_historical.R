@@ -114,6 +114,16 @@ mod_2_01_historical_server <- function(id, step1 = NULL, pov_lines = NULL, varli
         loc_haz <- aggregate_h3_to_loc(survey_h3, h3_haz)
         if (is.null(loc_haz) || !nrow(loc_haz)) stop("aggregate_h3_to_loc() returned 0 rows.")
 
+        keys <- intersect(c("code", "loc_id", "timestamp"), names(loc_haz))
+        key_check <- check_unique_key(loc_haz, keys = keys, context = "Phase B loc_weather_sim")
+        if (!isTRUE(key_check$ok)) stop(paste0("Phase B failed unique key check: ", key_check$msg))
+        #NOTE:if I change for loc_weather_sim to use year/mon instead of timestamp, need to change keys to that.
+
+        #NA table for missing columns
+        haz_cols <- grep("^haz_", names(loc_haz), value = TRUE)
+        cov <- summarize_missingness(loc_haz, cols = haz_cols)
+        if (wise_debug_enabled()) print(cov)
+
         built_haz_r(list(
           weather_data_sim = weather,
           h3_weather_sim   = h3_haz,

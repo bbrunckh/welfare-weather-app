@@ -322,34 +322,51 @@ build_h3_hazards <- function(weather_df, haz_spec) {
   out
 }
 
-# Aggregate H3 hazards to loc_id using survey_h3 mapping and pop_2020 weights (mirrors Step 1)
+# Aggregate H3 hazards to loc_id for SIMULATION (Step 2):
+# produces one row per (code, loc_id, timestamp), NOT per survey year/survname.
 aggregate_h3_to_loc <- function(survey_h3, h3_haz) {
   if (is.null(survey_h3) || !nrow(survey_h3)) return(NULL)
   if (is.null(h3_haz) || !nrow(h3_haz)) return(NULL)
 
-  join_cols <- intersect(c("h3_6", "timestamp"), intersect(names(survey_h3), names(h3_haz)))
-  if (!length(join_cols)) return(NULL)
+  # We only need an H3->loc mapping (optionally with weights)
+  keep <- intersect(c("code", "h3_6", "loc_id", "pop_2020"), names(survey_h3))
+  if (!all(c("h3_6", "loc_id") %in% keep)) return(NULL)
 
-  data <- dplyr::left_join(survey_h3, h3_haz, by = join_cols)
+  map <- survey_h3 |>
+    dplyr::select(dplyr::all_of(keep)) |>
+    dplyr::mutate(loc_id = as.character(.data$loc_id)) |>
+    dplyr::distinct()
 
-  by_cols <- intersect(c("code", "year", "survname", "loc_id", "timestamp"), names(data))
-  if (!length(by_cols)) return(NULL)
-
-  if ("pop_2020" %in% names(data)) {
-    data <- data |>
-      dplyr::summarise(
-        dplyr::across(dplyr::starts_with("haz_"),
-                      ~ sum(.x * .data$pop_2020, na.rm = TRUE) / sum(.data$pop_2020, na.rm = TRUE)),
-        .by = dplyr::all_of(by_cols)
-      )
+  # Collapse any duplicates in the mapping (common if survey_h3 is at HH-row level)
+  if ("pop_2020" %in% names(map)) {
+    by_map <- intersect(c("code", "h3_6", "loc_id"), names(map))
+    map <- map |>
+      dplyr::summarise(pop_2020 = max(.data$pop_2020, na.rm = TRUE), .by = dplyr::all_of(by_map))
   } else {
-    data <- data |>
-      dplyr::summarise(
-        dplyr::across(dplyr::starts_with("haz_"), ~ mean(.x, na.rm = TRUE)),
-        .by = dplyr::all_of(by_cols)
-      )
+    map <- map |>
+      dplyr::mutate(pop_2020 = 1)
   }
 
-  data |>
+  # Join hazards by h3 only (hazards already have timestamp)
+  data <- dplyr::left_join(map, h3_haz, by = "h3_6")
+
+  haz_cols <- grep("^haz_", names(data), value = TRUE)
+  if (!length(haz_cols)) return(NULL)
+
+  by_cols <- intersect(c("code", "loc_id", "timestamp"), names(data))
+  if (!all(c("loc_id", "timestamp") %in% by_cols)) return(NULL)
+
+  # Weighted aggregation to loc-month
+  out <- data |>
+    dplyr::summarise(
+      dplyr::across(
+        dplyr::all_of(haz_cols),
+        ~ sum(.x * .data$pop_2020, na.rm = TRUE) / sum(.data$pop_2020, na.rm = TRUE)
+      ),
+      .by = dplyr::all_of(by_cols)
+    )
+
+  out |>
     dplyr::mutate(loc_id = as.character(.data$loc_id))
 }
+

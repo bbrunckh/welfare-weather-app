@@ -39,7 +39,7 @@ mod_2_simulation_server <- function(id, step1 = NULL, pov_lines = NULL, varlist 
   moduleServer(id, function(input, output, session) {
 
     # Submodules (wired, even if they don't use args yet)
-    mod_2_01_historical_server(
+    historical_api <- mod_2_01_historical_server(
       "historical",
       step1 = step1,
       pov_lines = pov_lines,
@@ -57,7 +57,16 @@ mod_2_simulation_server <- function(id, step1 = NULL, pov_lines = NULL, varlist 
 
     output$step2_status <- renderText({
       if (is.null(step1)) return("Step 1 API not provided (wiring issue).")
-      format_step2_status(step1 = step1, board = board)
+
+      # Phase B status
+      lw_n <- tryCatch(nrow(historical_api$loc_weather_sim()), error = function(e) NA_integer_)
+      lw_ok <- isTRUE(!is.na(lw_n) && lw_n > 0)
+
+      paste0(
+        format_step2_status(step1 = step1, board = board),
+        "\nPhase B hazards built: ", if (lw_ok) "YES" else "NO",
+        " | loc_weather_sim rows: ", lw_n
+      )
     })
 
     # Later, this server will accept Step 1 exports as arguments.
