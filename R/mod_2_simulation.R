@@ -28,6 +28,33 @@ mod_2_simulation_ui <- function(id) {
             tags$hr(),
             strong("Status:"),
             textOutput(ns("step2_status"))
+          ),
+          tabPanel(
+            title = "Diagnostics",
+            value = "diagnostics",
+
+            h4("Phase D prediction diagnostics"),
+            shiny::checkboxInput(ns("historical-show_pred_diag"), "Show prediction diagnostics", TRUE),
+
+            shiny::conditionalPanel(
+              condition = paste0("input['", ns("historical-show_pred_diag"), "']"),
+
+              tags$hr(),
+              h5("NA predictions summary"),
+              tableOutput(ns("historical-pred_na_rate_tbl")),
+
+              h5("NA predictions by simulated year"),
+              tableOutput(ns("historical-pred_na_by_year_tbl")),
+
+              h5("NA predictions by interview month"),
+              tableOutput(ns("historical-pred_na_by_month_tbl")),
+
+              h5("Top locations by NA count"),
+              tableOutput(ns("historical-pred_na_by_loc_tbl")),
+
+              h5("Which predictors are missing among NA predictions?"),
+              tableOutput(ns("historical-pred_na_drivers_tbl"))
+            )
           )
         )
       )

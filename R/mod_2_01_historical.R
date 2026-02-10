@@ -25,7 +25,14 @@ mod_2_01_historical_ui <- function(id) {
     shiny::actionButton(ns("build_panel"), "Build simulation panel (Phase C)", class = "btn-primary"),
     tags$br(), tags$br(),
     strong("Phase C status:"),
-    verbatimTextOutput(ns("phase_c_status"))
+    verbatimTextOutput(ns("phase_c_status")),
+
+    #Phase D Block (Simulate Welfare with Hazards)
+    tags$hr(),
+    shiny::actionButton(ns("predict_welfare"), "Predict welfare (Phase D)", class = "btn-primary"),
+    tags$br(), tags$br(),
+    strong("Phase D status:"),
+    verbatimTextOutput(ns("phase_d_status"))
 
   )
 }
@@ -221,13 +228,34 @@ mod_2_01_historical_server <- function(id, step1 = NULL, pov_lines = NULL, varli
         if (!"timestamp" %in% names(sw)) stop("survey_weather missing timestamp.")
         sw$timestamp <- as.Date(sw$timestamp)
 
+        mod <- step1$final_model()
+        if (is.null(mod)) stop("final_model() is NULL.")
+
+        tt <- stats::terms(mod)
+        pred_vars <- all.vars(stats::delete.response(tt))  # predictors only
+
+        # Do NOT carry haz_* from sw; we join simulated haz_* from lw
+        haz_cols_sw <- grep("^haz_", names(sw), value = TRUE)
+        pred_vars   <- setdiff(pred_vars, haz_cols_sw)
+
+        # Keep only predictors that exist in sw
+        pred_vars <- intersect(pred_vars, names(sw))
+
+        # Always keep core keys
+        vars_to_keep <- unique(c(hh_col, "loc_id", "timestamp", pred_vars))
+
+
         base <- sw |>
           dplyr::arrange(.data$timestamp) |>
+
+          dplyr::mutate(.miss = rowSums(is.na(dplyr::across(dplyr::all_of(vars_to_keep))))) |>
           dplyr::group_by(.data[[hh_col]]) |>
-          dplyr::slice(1) |>
+          dplyr::slice_min(.data$.miss, with_ties = FALSE) |>
           dplyr::ungroup() |>
+          dplyr::select(-.data$.miss) |>
+
           dplyr::mutate(int_month = lubridate::month(.data$timestamp)) |>
-          dplyr::select(dplyr::all_of(hh_col), .data$loc_id, .data$int_month)
+          dplyr::select(dplyr::all_of(vars_to_keep), .data$int_month)
 
         # Expand households across simulated years, month-matched
         panel <- tidyr::crossing(base, sim_year = sim_years) |>
@@ -269,6 +297,200 @@ mod_2_01_historical_server <- function(id, step1 = NULL, pov_lines = NULL, varli
     }, ignoreInit = TRUE)
 
 
+    #Phase D state (predicting with simulated hazards)
+
+    #State
+    phase_d_error_r  <- reactiveVal("")
+    phase_d_last_run <- reactiveVal(NULL)
+    pred_panel_r     <- reactiveVal(NULL)
+
+
+
+    #Output
+    output$phase_d_status <- renderText({
+      if (nzchar(phase_d_error_r())) return(paste0("ERROR: ", phase_d_error_r()))
+      pp <- pred_panel_r()
+      if (is.null(pp)) return("Not run yet.")
+      paste0(
+        "OK | rows=", nrow(pp),
+        " | NA preds=", sum(is.na(pp$pred)),
+        " (", round(mean(is.na(pp$pred)), 4), ")",
+        " | last_run=", as.character(phase_d_last_run())
+      )
+    })
+
+    #Output Subgroup - NA table analysis
+    output$pred_na_rate_tbl <- renderTable({
+      d <- pred_diag()
+      if (is.null(d)) return(NULL)
+      d$na_rate
+    }, rownames = FALSE)
+
+    output$pred_na_by_year_tbl <- renderTable({
+      d <- pred_diag()
+      if (is.null(d)) return(NULL)
+      d$na_by_year
+    }, rownames = FALSE)
+
+    output$pred_na_by_month_tbl <- renderTable({
+      d <- pred_diag()
+      if (is.null(d)) return(NULL)
+      d$na_by_month
+    }, rownames = FALSE)
+
+    output$pred_na_by_loc_tbl <- renderTable({
+      d <- pred_diag()
+      if (is.null(d)) return(NULL)
+      d$na_by_loc
+    }, rownames = FALSE)
+
+    output$pred_na_drivers_tbl <- renderTable({
+      d <- pred_diag()
+      if (is.null(d)) return(NULL)
+      d$na_drivers
+    }, rownames = FALSE)
+
+
+    #Event
+    observeEvent(input$predict_welfare, {
+      phase_d_error_r("")
+      pred_panel_r(NULL)
+
+      tryCatch({
+        if (is.null(step1)) stop("Step 1 API missing.")
+        sp <- sim_panel_r()
+        if (is.null(sp) || !nrow(sp)) stop("Phase C sim_panel missing. Run Phase C first.")
+
+        mod <- step1$final_model()
+        if (is.null(mod)) stop("final_model() is NULL.")
+
+        # Figure out required predictors from model terms
+        tt <- stats::terms(mod)
+        pred_vars <- all.vars(stats::delete.response(tt))
+        missing_vars <- setdiff(pred_vars, names(sp))
+        if (length(missing_vars)) {
+          stop(paste0(
+            "sim_panel is missing predictors required for prediction: ",
+            paste(missing_vars, collapse = ", "),
+            " | Fix by carrying these from survey_weather into Phase C base."
+          ))
+        }
+
+        # Coerce factor levels to match training (xlevels) if present
+        if (!is.null(mod$xlevels) && length(mod$xlevels)) {
+          for (nm in names(mod$xlevels)) {
+            if (nm %in% names(sp)) {
+              if (is.character(sp[[nm]])) sp[[nm]] <- as.factor(sp[[nm]])
+              if (is.factor(sp[[nm]])) sp[[nm]] <- factor(sp[[nm]], levels = mod$xlevels[[nm]])
+            }
+          }
+        }
+
+        # Predict
+        is_glm_binom <- inherits(mod, "glm") &&
+          !is.null(mod$family) &&
+          identical(mod$family$family, "binomial")
+
+        pred <- if (is_glm_binom) {
+          stats::predict(mod, newdata = sp, type = "response")   # probability
+        } else {
+          stats::predict(mod, newdata = sp)                      # model scale
+        }
+
+        out <- sp
+        out$pred <- as.numeric(pred)
+
+        pred_panel_r(out)
+        phase_d_last_run(Sys.time())
+        showNotification("Phase D complete: predictions built.", type = "message", duration = 4)
+
+      }, error = function(e) {
+        phase_d_error_r(conditionMessage(e))
+        showNotification(paste0("Phase D failed: ", conditionMessage(e)), type = "error", duration = 12)
+      })
+    }, ignoreInit = TRUE)
+
+    #Diagnostics for Prediction/NA
+    pred_diag <- reactive({
+      pp <- pred_panel_r()
+      if (is.null(pp) || !nrow(pp) || !"pred" %in% names(pp)) return(NULL)
+
+      is_na <- is.na(pp$pred)
+
+      # Find required predictors from model
+      mod <- step1$final_model()
+      tt <- stats::terms(mod)
+      pred_vars <- all.vars(stats::delete.response(tt))
+      pred_vars <- intersect(pred_vars, names(pp))
+
+      # NA rate table
+      na_rate <- data.frame(
+        n = nrow(pp),
+        na = sum(is_na),
+        na_rate = mean(is_na),
+        stringsAsFactors = FALSE
+      )
+
+      # By sim year
+      na_by_year <- if ("sim_year" %in% names(pp)) {
+        pp |>
+          dplyr::summarise(
+            n       = dplyr::n(),
+            na      = sum(is.na(.data$pred)),
+            na_rate = mean(is.na(.data$pred)),
+            .by     = "sim_year"
+          ) |>
+          dplyr::arrange(dplyr::desc(.data$na_rate))
+      } else NULL
+
+      # By interview month (if present)
+      na_by_month <- if ("int_month" %in% names(pp)) {
+        pp |>
+          dplyr::summarise(
+            n       = dplyr::n(),
+            na      = sum(is.na(.data$pred)),
+            na_rate = mean(is.na(.data$pred)),
+            .by     = "int_month"
+          )  |>
+          dplyr::arrange(dplyr::desc(.data$na_rate))
+      } else NULL
+
+      # By location
+      na_by_loc <- if ("loc_id" %in% names(pp)) {
+        pp |>
+          dplyr::summarise(
+            n       = dplyr::n(),
+            na      = sum(is.na(.data$pred)),
+            na_rate = mean(is.na(.data$pred)),
+            .by     = "loc_id"
+          )  |>
+          dplyr::arrange(dplyr::desc(.data$na)) |>
+          dplyr::slice_head(n = 20)
+      } else NULL
+
+      # What’s missing among NA prediction rows?
+      na_drivers <- NULL
+      if (sum(is_na) > 0 && length(pred_vars) > 0) {
+        na_drivers <- data.frame(
+          var = pred_vars,
+          share_na_among_na_preds = vapply(pred_vars, function(v) mean(is.na(pp[[v]][is_na])), numeric(1)),
+          share_na_overall = vapply(pred_vars, function(v) mean(is.na(pp[[v]])), numeric(1)),
+          stringsAsFactors = FALSE
+        ) |>
+          dplyr::arrange(dplyr::desc(.data$share_na_among_na_preds))
+      }
+
+      list(
+        na_rate = na_rate,
+        na_by_year = na_by_year,
+        na_by_month = na_by_month,
+        na_by_loc = na_by_loc,
+        na_drivers = na_drivers
+      )
+    })
+
+
+
 
 
 
@@ -287,14 +509,18 @@ mod_2_01_historical_server <- function(id, step1 = NULL, pov_lines = NULL, varli
       weather_data_sim = reactive({ x <- built_haz_r(); if (is.null(x)) NULL else x$weather_data_sim }),
       loc_weather_sim = loc_weather_sim,
       sim_year_range  = sim_year_range,
-      sim_year_range   = reactive({ x <- built_haz_r(); if (is.null(x)) NULL else x$sim_year_range }),
       phase_b_error    = reactive(phase_b_error_r()),
       phase_b_last_run = reactive(phase_b_last_run),
 
       #Phase C (Building Simulations)
       sim_panel = reactive(sim_panel_r()),
       phase_c_error = reactive(phase_c_error_r()),
-      phase_c_last_run = reactive(phase_c_last_run)
+      phase_c_last_run = reactive(phase_c_last_run),
+
+      #Phase D (Predicting Outcome)
+      pred_panel = reactive(pred_panel_r()),
+      phase_d_error = reactive(phase_d_error_r()),
+      phase_d_last_run = reactive(phase_d_last_run)
     )
   })
 }
