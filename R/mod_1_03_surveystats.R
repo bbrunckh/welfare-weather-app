@@ -4,9 +4,9 @@
 #'
 #' @param id,input,output,session Internal parameters for {shiny}.
 #'
-#' @noRd 
+#' @noRd
 #'
-#' @importFrom shiny NS tagList 
+#' @importFrom shiny NS tagList
 #' @importFrom ggplot2 ggplot aes geom_line geom_point geom_bar theme_minimal labs theme
 mod_1_03_surveystats_ui <- function(id) {
   ns <- NS(id)
@@ -14,10 +14,10 @@ mod_1_03_surveystats_ui <- function(id) {
     uiOutput(ns("survey_stats_button_ui"))
   )
 }
-    
+
 #' 1_03_surveystats Server Functions
 #'
-#' @noRd 
+#' @noRd
 mod_1_03_surveystats_server <- function(
     id,
     survey_data,

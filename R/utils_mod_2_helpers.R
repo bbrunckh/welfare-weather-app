@@ -370,3 +370,133 @@ aggregate_h3_to_loc <- function(survey_h3, h3_haz) {
     dplyr::mutate(loc_id = as.character(.data$loc_id))
 }
 
+infer_model_kind <- function(mod) {
+  if (inherits(mod, "glm") &&
+      !is.null(mod$family) &&
+      identical(mod$family$family, "binomial")) {
+    return("glm_binomial")
+  }
+  if (inherits(mod, "lm")) return("lm")
+  "other"
+}
+
+infer_pred_scale_lm <- function(mod, pred_sample = NULL) {
+  resp <- tryCatch(as.character(stats::formula(mod))[2], error = function(e) "")
+
+
+  # If formula explicitly logs/ln()'s the response, it's log-scale.
+  if (grepl("(^ln_|^log_|\\blog\\s*\\(|\\bln\\s*\\()", resp, ignore.case = TRUE)) {
+    return("log")
+  }
+
+
+  # If we can inspect fitted response values, use simple heuristics.
+  y <- tryCatch(stats::model.response(stats::model.frame(mod)), error = function(e) NULL)
+  if (!is.null(y) && is.numeric(y)) {
+    if (any(y < 0, na.rm = TRUE)) return("log")
+    if (stats::quantile(y, 0.99, na.rm = TRUE) > 100) return("level")
+  }
+
+
+  # Optional: look at prediction magnitudes
+  if (!is.null(pred_sample) && is.numeric(pred_sample)) {
+    if (any(pred_sample < 0, na.rm = TRUE)) return("log")
+    if (stats::quantile(pred_sample, 0.99, na.rm = TRUE) > 100) return("level")
+  }
+
+
+  # Default
+  "level"
+}
+
+detect_weight_col <- function(df, varlist = NULL) {
+  # allow varlist override
+  if (!is.null(varlist) && is.list(varlist) && "wt_hh" %in% names(varlist)) {
+    if (is.character(varlist$wt_hh) && varlist$wt_hh %in% names(df)) return(varlist$wt_hh)
+  }
+  cands <- c("hh_wt", "hh_weight", "weight", "wgt", "pweight", "final_weight")
+  cands[cands %in% names(df)][1] |> (\(x) if (is.na(x) || !nzchar(x)) NULL else x)()
+}
+
+wmean_safe <- function(x, w) {
+  ok <- !is.na(x) & !is.na(w)
+  if (!any(ok)) return(NA_real_)
+  sum(x[ok] * w[ok]) / sum(w[ok])
+}
+
+# Coerce poverty lines to a named numeric vector on the MODEL SCALE for lm()
+# Supports:
+# - named numeric vector (assumed already on model scale)
+# - data.frame with columns: name + value (+ optional scale="log"/"level")
+coerce_pov_lines_modelscale <- function(pov_lines,
+                                        pred_scale = c("log", "level"),
+                                        ppp_year = NULL) {
+  pred_scale <- match.arg(pred_scale)
+
+  if (is.null(pov_lines)) return(NULL)
+
+  # allow reactive/function
+  if (is.function(pov_lines)) pov_lines <- pov_lines()
+
+  # numeric vector
+  if (is.numeric(pov_lines)) {
+    v <- as.numeric(pov_lines)
+    nm <- names(pov_lines)
+    if (is.null(nm) || any(!nzchar(nm))) nm <- paste0("pline_", seq_along(v))
+    names(v) <- nm
+    return(v)
+  }
+
+  # list -> named numeric
+  if (is.list(pov_lines) && !is.data.frame(pov_lines)) {
+    v <- unlist(pov_lines, recursive = TRUE, use.names = TRUE)
+    if (is.numeric(v) && length(v) > 0) {
+      if (is.null(names(v))) names(v) <- paste0("pline_", seq_along(v))
+      return(as.numeric(v))
+    }
+  }
+
+  # data.frame formats
+  if (is.data.frame(pov_lines)) {
+    df <- pov_lines
+
+
+    # --- Format A: (ppp_year, ln) where `ln` is LEVEL poverty line in USD PPP (often $/day) ---
+    if (all(c("ppp_year", "ln") %in% names(df))) {
+      if (!is.null(ppp_year)) df <- dplyr::filter(df, .data$ppp_year == !!ppp_year)
+      if (!nrow(df)) return(NULL)
+
+
+      pl_level <- as.numeric(df$ln)
+      vals <- if (pred_scale == "log") log(pl_level) else pl_level
+
+
+      nm <- if ("name" %in% names(df)) as.character(df$name) else paste0("pline_", seq_along(vals))
+      names(vals) <- nm
+      return(as.numeric(vals))
+    }
+
+
+    # --- Format B: generic (name, value[, scale]) ---
+    if (all(c("name", "value") %in% names(df))) {
+      vals <- as.numeric(df$value)
+      names(vals) <- as.character(df$name)
+
+
+      if ("scale" %in% names(df)) {
+        from <- as.character(df$scale)
+        if (pred_scale == "log") {
+          vals[from == "level"] <- log(vals[from == "level"])
+        } else {
+          vals[from == "log"] <- exp(vals[from == "log"])
+        }
+      }
+      return(as.numeric(vals))
+    }
+
+
+    rlang::abort("pov_lines data.frame must have either (ppp_year, ln) or (name, value[, scale]).")
+  }
+
+  rlang::abort("Unsupported pov_lines format. Use named numeric vector, list, or data.frame(...).")
+}

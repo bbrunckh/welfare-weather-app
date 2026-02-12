@@ -32,7 +32,14 @@ mod_2_01_historical_ui <- function(id) {
     shiny::actionButton(ns("predict_welfare"), "Predict welfare (Phase D)", class = "btn-primary"),
     tags$br(), tags$br(),
     strong("Phase D status:"),
-    verbatimTextOutput(ns("phase_d_status"))
+    verbatimTextOutput(ns("phase_d_status")),
+
+    #Phase E Block (Output)
+    tags$hr(),
+    shiny::actionButton(ns("compute_poverty"), "Compute poverty (Phase E)", class = "btn-primary"),
+    tags$br(), tags$br(),
+    strong("Phase E status:"),
+    verbatimTextOutput(ns("phase_e_status"))
 
   )
 }
@@ -55,6 +62,8 @@ mod_2_01_historical_server <- function(id, step1 = NULL, pov_lines = NULL, varli
       x <- built_haz_r()
       if (is.null(x)) NULL else x$sim_year_range
     })
+#DRK NOTE: This suggests replacing all 'sim_year_range' with 'loc_weather_sim',
+
 
     # Small status readout (shown in sidebar)
     output$phase_b_status <- renderText({
@@ -490,6 +499,261 @@ mod_2_01_historical_server <- function(id, step1 = NULL, pov_lines = NULL, varli
     })
 
 
+    #Phase E State
+    phase_e_error_r  <- reactiveVal("")
+    phase_e_last_run <- reactiveVal(NULL)
+    poverty_r        <- reactiveVal(NULL)
+
+    #Output
+    output$phase_e_status <- renderText({
+      if (nzchar(phase_e_error_r())) return(paste0("ERROR: ", phase_e_error_r()))
+      res <- poverty_r()
+      if (is.null(res)) return("Not run yet.")
+      paste0(
+        "OK | kind=", res$meta$model_kind,
+        " | coverage_w=", round(res$meta$coverage_weight_overall, 4),
+        " | last_run=", as.character(phase_e_last_run())
+      )
+    })
+
+    #Event
+    observeEvent(input$compute_poverty, {
+      phase_e_error_r("")
+      poverty_r(NULL)
+
+      tryCatch({
+        if (is.null(step1)) stop("Step 1 API missing.")
+        mod <- step1$final_model()
+        if (is.null(mod)) stop("final_model() is NULL.")
+
+        pp <- pred_panel_r()
+        if (is.null(pp) || !nrow(pp) || !"pred" %in% names(pp)) {
+          stop("Phase D predictions missing. Run Phase D first.")
+        }
+        if (!"sim_year" %in% names(pp)) stop("pred_panel missing sim_year.")
+
+        model_kind <- infer_model_kind(mod)
+
+        # weights (optional)
+        wt_col <- detect_weight_col(pp, varlist = varlist)
+        w <- if (is.null(wt_col)) rep(1, nrow(pp)) else pp[[wt_col]]
+        if (anyNA(w)) w[is.na(w)] <- 0
+
+        used <- !is.na(pp$pred)
+        cov_n_overall <- mean(used)
+        cov_w_overall <- if (sum(w) > 0) sum(w[used]) / sum(w) else NA_real_
+
+        if (model_kind == "glm_binomial") {
+          # pred is poverty probability; poverty rate is mean(pred) among usable rows
+          by_year <- tidyr::crossing(sim_year = sort(unique(cc$sim_year)), pl) |>
+            dplyr::group_by(.data$sim_year, .data$pline_name, .data$pline_level, .data$pline_model) |>
+            dplyr::summarise(
+              pov_rate = {
+                d <- dplyr::cur_data_all()
+                # (cur_data_all() includes pl columns too; instead filter cc explicitly)
+                dd <- dplyr::filter(cc, .data$sim_year == dplyr::first(.data$sim_year))
+                ww <- if ("weight" %in% names(dd)) dd$weight else rep(1, nrow(dd))
+                th <- dplyr::first(.data$pline_model)
+                poor <- if (pr$pred_scale == "log") dd$pred_lin < th else dd$pred_level < th
+                weight_mean(poor, ww)
+              },
+              .groups = "drop"
+            ) |>
+            dplyr::transmute(
+              sim_year,
+              pline = .data$pline_name,
+              pline_value = .data$pline_level,
+              pline_model = .data$pline_model,
+              pov_rate
+            )
+
+          overall <- data.frame(
+            pov_rate = wmean_safe(pp$pred[used], w[used]),
+            coverage_n = cov_n_overall,
+            coverage_w = cov_w_overall,
+            stringsAsFactors = FALSE
+          )
+
+          poverty_r(list(
+            overall = overall,
+            by_year = by_year,
+            meta = list(
+              model_kind = model_kind,
+              poverty_line_mode = "implicit_in_logit_model",
+              coverage_weight_overall = cov_w_overall,
+              weight_col = wt_col
+            )
+          ))
+
+        } else if (model_kind == "lm") {
+
+          p_year <- if (!is.null(step1) && is.function(step1$ppp_year)) {
+            as.integer(step1$ppp_year())
+          } else {
+            2021L
+          }
+
+
+          # Then ensure BOTH calls use ppp_year:
+          plines_level <- coerce_pov_lines_modelscale(pov_lines, pred_scale = "level", ppp_year = ppp_year)
+
+
+          plines_model <- coerce_pov_lines_modelscale(
+            pov_lines,
+            pred_scale = pred_scale,
+            ppp_year = ppp_year
+          )
+
+
+          # 1) Always coerce poverty lines in *LEVEL* (USD PPP/day)
+          pl_level <- coerce_pov_lines_modelscale(
+            pov_lines,
+            pred_scale = "level",
+            ppp_year = ppp
+          )
+          if (is.null(pl_level) || !length(pl_level)) {
+            stop("pov_lines is required for lm(). Provide a named numeric vector or a data.frame.")
+          }
+          if (is.null(names(pl_level)) || any(!nzchar(names(pl_level)))) {
+            names(pl_level) <- paste0("pline_", seq_along(pl_level))
+          }
+
+
+          # 2) Guess model prediction scale
+          pred_scale_guess <- infer_pred_scale_lm(mod, pred_sample = pp$pred)
+
+
+          # Helper to get the model-scale threshold for a LEVEL poverty line
+          to_model_scale <- function(x_level, scale) {
+            if (scale == "log") log(x_level) else x_level
+          }
+
+
+          # 3) Sanity-check the guessed scale (avoid the "everything is poor" trap)
+          pred_scale <- pred_scale_guess
+          used_pred <- pp$pred[used]
+
+
+          # Use the LOWEST line for a simple diagnostic
+          lowest_level <- min(pl_level, na.rm = TRUE)
+          pov_level_low <- wmean_safe(as.numeric(used_pred < lowest_level), w[used])
+          pov_log_low <- wmean_safe(as.numeric(used_pred < log(lowest_level)), w[used])
+
+
+          if (isTRUE(pred_scale_guess == "level") && isTRUE(pov_level_low > 0.995) && isTRUE(pov_log_low < 0.995)) {
+            pred_scale <- "log"
+            showNotification(
+              "Phase E: predictions look like LOG welfare; switching poverty-line comparison to log scale.",
+              type = "warning", duration = 10
+            )
+          }
+          if (isTRUE(pred_scale_guess == "log") && isTRUE(pov_log_low > 0.995) && isTRUE(pov_level_low < 0.995)) {
+            pred_scale <- "level"
+            showNotification(
+              "Phase E: predictions look like LEVEL welfare; switching poverty-line comparison to level scale.",
+              type = "warning", duration = 10
+            )
+          }
+
+
+          # 4) Build results for each poverty line
+          out_by_year <- list()
+          out_overall <- list()
+
+
+          # Precompute model-scale thresholds
+          pl_model <- vapply(pl_level, to_model_scale, numeric(1), scale = pred_scale)
+
+
+          for (nm in names(pl_level)) {
+            plv_level <- pl_level[[nm]]
+            plv_model <- pl_model[[nm]]
+
+
+            pov_ind <- pp$pred < plv_model
+            pov_ind[!used] <- NA
+
+
+            by_year <- pp |>
+              dplyr::mutate(w = w, used = used, pov = pov_ind) |>
+              dplyr::summarise(
+                n_total = dplyr::n(),
+                n_used = sum(.data$used),
+                coverage_n = mean(.data$used),
+                w_total = sum(.data$w),
+                w_used = sum(.data$w[.data$used]),
+                coverage_w = ifelse(.data$w_total > 0, .data$w_used / .data$w_total, NA_real_),
+                pov_rate = wmean_safe(as.numeric(.data$pov[.data$used]), .data$w[.data$used]),
+                .by = "sim_year"
+              ) |>
+              dplyr::mutate(
+                pline = nm,
+                pline_value = plv_level, # ALWAYS level for display
+                pline_value_model = plv_model, # threshold actually used
+                pred_scale = pred_scale
+              ) |>
+              dplyr::arrange(.data$sim_year)
+
+
+            overall <- data.frame(
+              pline = nm,
+              pline_value = plv_level,
+              pline_value_model = plv_model,
+              pov_rate = wmean_safe(as.numeric(pov_ind[used]), w[used]),
+              coverage_n = cov_n_overall,
+              coverage_w = cov_w_overall,
+              pred_scale = pred_scale,
+              stringsAsFactors = FALSE
+            )
+
+
+            out_by_year[[nm]] <- by_year
+            out_overall[[nm]] <- overall
+          }
+
+
+          # Prediction quantiles for debugging (model scale + implied level)
+          q <- stats::quantile(used_pred, probs = c(0, .05, .25, .5, .75, .95, 1), na.rm = TRUE)
+          pred_summary <- data.frame(
+            scale = pred_scale,
+            stat = names(q),
+            pred_model = as.numeric(q),
+            pred_level = if (pred_scale == "log") exp(as.numeric(q)) else as.numeric(q),
+            stringsAsFactors = FALSE
+          )
+
+
+          poverty_r(list(
+            overall = dplyr::bind_rows(out_overall),
+            by_year = dplyr::bind_rows(out_by_year),
+            meta = list(
+              model_kind = model_kind,
+              pred_scale = pred_scale,
+              pred_scale_guess = pred_scale_guess,
+              coverage_weight_overall = cov_w_overall,
+              weight_col = wt_col,
+              plines_level = pl_level,
+              plines_model = pl_model,
+              pred_summary = pred_summary
+            )
+          ))
+
+
+        } else {
+          stop(paste0("Unsupported model kind for Phase E: ", model_kind))
+        }
+
+        phase_e_last_run(Sys.time())
+        showNotification("Phase E complete: poverty metrics computed.", type = "message", duration = 4)
+
+      }, error = function(e) {
+        phase_e_error_r(conditionMessage(e))
+        showNotification(paste0("Phase E failed: ", conditionMessage(e)), type = "error", duration = 12)
+      })
+    }, ignoreInit = TRUE)
+
+
+
 
 
 
@@ -520,7 +784,12 @@ mod_2_01_historical_server <- function(id, step1 = NULL, pov_lines = NULL, varli
       #Phase D (Predicting Outcome)
       pred_panel = reactive(pred_panel_r()),
       phase_d_error = reactive(phase_d_error_r()),
-      phase_d_last_run = reactive(phase_d_last_run)
+      phase_d_last_run = reactive(phase_d_last_run),
+
+      #Phase E (Outcome)
+      poverty_results = reactive(poverty_r()),
+      phase_e_error   = reactive(phase_e_error_r()),
+      phase_e_last_run = reactive(phase_e_last_run)
     )
   })
 }
