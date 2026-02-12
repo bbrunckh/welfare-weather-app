@@ -24,8 +24,7 @@ app_server <- function(input, output, session) {
     board = board_r,
     survey_metadata = survey_metadata_r,
     varlist = varlist_r,
-    weather_list = weather_list_r,
-    pov_lines = pov_lines_r
+    weather_list = weather_list_r
   )
 
   #Step 2 (placeholder)
