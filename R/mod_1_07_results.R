@@ -62,10 +62,6 @@ mod_1_07_results_server <- function(
       }
 
       if (!results_tab_added()) {
-        output$model_fit_obj <- renderPrint({
-          req(model_fit())
-          model_fit()[[3]]
-        })
 
         output$regtable <- renderUI({
           req(model_fit(), labels_df)
@@ -219,9 +215,9 @@ mod_1_07_results_server <- function(
           shiny::tabPanel(
             title = "Results",
             value = "results",
-            shiny::h4("Model object (FE + controls)"),
-            shiny::verbatimTextOutput(ns("model_fit_obj")),
-            shiny::br(),
+            # shiny::h4("Model object (FE + controls)"),
+            # shiny::verbatimTextOutput(ns("model_fit_obj")),
+            # shiny::br(),
             shiny::h4("Marginal effect of weather on welfare"),
             bslib::card(shiny::plotOutput(ns("coefplot"))),
             shiny::br(),

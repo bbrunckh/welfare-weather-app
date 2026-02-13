@@ -302,12 +302,6 @@ mod_1_03_surveystats_server <- function(
                 shiny::tabPanel(
                   title = "Survey stats",
                   value = "desc_stats",
-                    shiny::div(
-                      style = "margin-bottom: 10px;",
-                      shiny::strong("Survey stats loaded."),
-                      shiny::tags$div(class = "text-muted", paste0("Rows: ", nrow(survey_data()))),
-                      shiny::tags$div(class = "text-muted", paste0("Outcome: ", selected_outcome()))
-                    ),
                     bslib::layout_columns(
                       col_widths = c(6, 6),
                       bslib::card(
