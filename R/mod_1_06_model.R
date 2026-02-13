@@ -297,7 +297,6 @@ mod_1_06_model_server <- function(
     area_cov_val <- reactiveVal(character(0))
     other_cov_val <- reactiveVal(character(0))
     fe_val <- reactiveVal(character(0))
-    interaction_terms_val <- reactiveVal(character(0))
     y_var_val <- reactiveVal(NULL)
 
     model_fit_val <- reactiveVal(NULL)
@@ -310,7 +309,6 @@ mod_1_06_model_server <- function(
         area_cov_val(character(0))
         other_cov_val(character(0))
         fe_val(character(0))
-        interaction_terms_val(character(0))
         y_var_val(NULL)
 
         if (is.null(selected_outcome()) || !length(selected_outcome())) {
@@ -336,7 +334,6 @@ mod_1_06_model_server <- function(
         if (!is.null(df)) {
           weather_terms <- intersect(weather_terms, names(df))
         }
-        weather_terms_val(weather_terms)
         if (is.null(weather_terms) || !length(weather_terms)) {
           shiny::showNotification("Weather variables are not available.", type = "warning")
           return(NULL)
@@ -357,6 +354,8 @@ mod_1_06_model_server <- function(
         }
       }
 
+      weather_terms_val(weather_terms)
+
       label_to_var <- NULL
       vl <- varlist_r()
       name_col <- if (!is.null(vl) && "name" %in% names(vl)) "name" else "varname"
@@ -373,7 +372,6 @@ mod_1_06_model_server <- function(
         })
         interaction_terms <- c(t(term_matrix))
       }
-      interaction_terms_val(interaction_terms)
 
       fe <- character(0)
       if (!is.null(input$fixedeffects) && length(input$fixedeffects) > 0 && !is.null(label_to_var)) {
@@ -465,7 +463,6 @@ mod_1_06_model_server <- function(
     }, ignoreInit = TRUE)
 
       list(
-        run_model = reactive(input$run_model),
         model_fit = model_fit_val,
         outcome_type = outcome_type,
         outcome_label = outcome_label,
@@ -475,7 +472,6 @@ mod_1_06_model_server <- function(
         area_cov = area_cov_val,
         other_cov = other_cov_val,
         fe = fe_val,
-        interaction_terms = interaction_terms_val,
         y_var = y_var_val
       )
   })

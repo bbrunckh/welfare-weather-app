@@ -17,7 +17,6 @@ mod_1_07_results_ui <- function(id) {
 mod_1_07_results_server <- function(
     id,
     model_fit,
-    run_model,
     haz_vars,
     weather_terms,
     varlist,
@@ -121,35 +120,79 @@ mod_1_07_results_server <- function(
             y.label = stringr::str_wrap(out_lab ,40))
         })
 
-        output$interactplot1 <- renderPlot({
-          req(interaction_terms(), length(weather_terms()) > 0, model_fit())
+        interactplot1_obj <- shiny::eventReactive(model_fit(), {
+          req(model_fit(), interaction_terms(), length(weather_terms()) > 0)
           interactions::interact_plot(
             model_fit()[[3]], pred = !!weather_terms()[1], modx = !!interaction_terms()[1],
             interval = TRUE, plot.points = FALSE,
             x.label = stringr::str_wrap(get_name_label(weather_terms()[1], varlist = vl)$label, 40),
             y.label = stringr::str_wrap(out_lab, 40)
           ) + ggplot2::theme(legend.position = "bottom")
+        }, ignoreInit = FALSE)
+
+        output$interactplot1 <- renderPlot({
+          p <- interactplot1_obj()
+          if (is.null(p)) return(empty_plot("Run model after updating interaction terms."))
+          p
         })
 
-        output$interactplot2 <- renderPlot({
-          req(interaction_terms(), length(weather_terms()) > 1, model_fit())
+        interactplot2_obj <- shiny::eventReactive(model_fit(), {
+          req(model_fit(), interaction_terms(), length(weather_terms()) > 1)
           interactions::interact_plot(
             model_fit()[[3]], pred = !!weather_terms()[2], modx = !!interaction_terms()[1],
             interval = TRUE, plot.points = FALSE,
             x.label = stringr::str_wrap(get_name_label(weather_terms()[2], varlist = vl)$label, 40),
             y.label = stringr::str_wrap(out_lab, 40)
           ) + ggplot2::theme(legend.position = "bottom")
+        }, ignoreInit = FALSE)
+
+        output$interactplot2 <- renderPlot({
+          p <- interactplot2_obj()
+          if (is.null(p)) return(empty_plot("Run model after updating interaction terms."))
+          p
         })
+
+        # output$interactplot2 <- renderPlot({
+        #   req(interaction_terms(), length(weather_terms()) > 1, model_fit())
+        #   interactions::interact_plot(
+        #     model_fit()[[3]], pred = !!weather_terms()[2], modx = !!interaction_terms()[1],
+        #     interval = TRUE, plot.points = FALSE,
+        #     x.label = stringr::str_wrap(get_name_label(weather_terms()[2], varlist = vl)$label, 40),
+        #     y.label = stringr::str_wrap(out_lab, 40)
+        #   ) + ggplot2::theme(legend.position = "bottom")
+        # })
+
+        simslopes1_obj <- shiny::eventReactive(model_fit(), {
+          req(model_fit(), interaction_terms(), length(weather_terms()) > 0)
+          interactions::sim_slopes(model_fit()[[3]], pred = !!weather_terms()[1], modx = !!interaction_terms()[1])
+        }, ignoreInit = FALSE)
 
         output$simslopes1 <- renderPlot({
-          req(interaction_terms(), model_fit(), weather_terms())
-          plot(interactions::sim_slopes(model_fit()[[3]], pred = !!weather_terms()[1], modx = !!interaction_terms()[1]))
+          p <- simslopes1_obj()
+          if (is.null(p)) return(empty_plot("Run model after updating interaction terms."))
+          plot(p)
         })
 
+        # output$simslopes1 <- renderPlot({
+        #   req(interaction_terms(), model_fit(), weather_terms())
+        #   plot(interactions::sim_slopes(model_fit()[[3]], pred = !!weather_terms()[1], modx = !!interaction_terms()[1]))
+        # })
+
+        simslopes2_obj <- shiny::eventReactive(model_fit(), {
+          req(model_fit(), interaction_terms(), length(weather_terms()) > 1)
+          interactions::sim_slopes(model_fit()[[3]], pred = !!weather_terms()[2], modx = !!interaction_terms()[1])
+        }, ignoreInit = FALSE)
+
         output$simslopes2 <- renderPlot({
-          req(interaction_terms(), model_fit(), weather_terms())
-          plot(interactions::sim_slopes(model_fit()[[3]], pred = !!weather_terms()[2], modx = !!interaction_terms()[1]))
+          p <- simslopes2_obj()
+          if (is.null(p)) return(empty_plot("Run model after updating interaction terms."))
+          plot(p)
         })
+
+        # output$simslopes2 <- renderPlot({
+        #   req(interaction_terms(), model_fit(), weather_terms())
+        #   plot(interactions::sim_slopes(model_fit()[[3]], pred = !!weather_terms()[2], modx = !!interaction_terms()[1]))
+        # })
 
         output$interactplots <- renderUI({
           if (length(interaction_terms()) > 0 && length(haz_vars()) > 1) {

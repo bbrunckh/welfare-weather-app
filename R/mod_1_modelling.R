@@ -135,7 +135,6 @@ mod_1_modelling_server <- function(id, survey_list_master, pin_prefix, board, su
     mod_1_07_results_server(
       "results",
       model_fit = mod_1_model$model_fit,
-      run_model = mod_1_model$run_model,
       haz_vars = mod_1_04_weather_api$haz_vars,
       weather_terms = mod_1_model$weather_terms,
       varlist = varlist,
@@ -150,7 +149,6 @@ mod_1_modelling_server <- function(id, survey_list_master, pin_prefix, board, su
     mod_1_08_modelfit_server(
       "modelfit",
       model_fit = mod_1_model$model_fit,
-      run_model = mod_1_model$run_model,
       haz_vars = mod_1_04_weather_api$haz_vars,
       weather_terms = mod_1_model$weather_terms,
       varlist = varlist,

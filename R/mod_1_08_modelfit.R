@@ -17,7 +17,6 @@ mod_1_08_modelfit_ui <- function(id) {
 mod_1_08_modelfit_server <- function(
     id,
     model_fit,
-    run_model,
     haz_vars,
     weather_terms = NULL,
     varlist,

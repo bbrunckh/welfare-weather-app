@@ -37,6 +37,7 @@ mod_1_04_weather_server <- function(
         inputId = ns("weather_variable_selector"),
         label = "Weather variables",
         choices = wl$name,
+        selected = c(wl$name[1], wl$name[10]),
         multiple = TRUE,
         options = list(
           placeholder = "Select up to 2 weather variables",

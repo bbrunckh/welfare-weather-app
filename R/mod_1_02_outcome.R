@@ -86,7 +86,7 @@ mod_1_02_outcome_server <- function(id, survey_metadata, varlist, country, surve
         inputId = ns("outcome_var"),
         label   = paste("Outcome variable for", country_name),
         choices = outs,
-        selected = NULL,
+        selected = outs[9],
         multiple = TRUE,
         options = list(
           maxItems = 1,

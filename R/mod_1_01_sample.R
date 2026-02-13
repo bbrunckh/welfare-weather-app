@@ -52,6 +52,7 @@ mod_1_01_sample_server <- function(id, survey_list_master, pin_prefix, board, su
         inputId = ns("country"),
         label = "Country",
         choices = surveys()$countryname,
+        selected = surveys()$countryname[1],
         multiple = TRUE,
         options = list(maxItems = 1, placeholder = "Select country")
       )
@@ -80,7 +81,7 @@ mod_1_01_sample_server <- function(id, survey_list_master, pin_prefix, board, su
         inputId = ns("survey_year"),
         label   = paste("Survey years for", country_name),
         choices = yrs,
-        selected = NULL,
+        selected = yrs,
         multiple = TRUE,
         options = list(
           placeholder = paste("Select years for", country_name)
