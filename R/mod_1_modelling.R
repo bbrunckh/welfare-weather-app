@@ -194,9 +194,7 @@ mod_1_modelling_server <- function(id, survey_list_master, pin_prefix, board, su
       model_fit         = mod_1_model$model_fit,
       final_model       = final_model,
       outcome_type      = mod_1_model$outcome_type,
-      outcome_label     = mod_1_model$outcome_label,
-
-      pov_lines         = pov_lines
+      outcome_label     = mod_1_model$outcome_label
     )
 
 

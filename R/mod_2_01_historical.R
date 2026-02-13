@@ -1,3 +1,5 @@
+#DRK Version 20260212 1500
+
 mod_2_01_historical_ui <- function(id) {
   ns <- NS(id)
   tagList(
@@ -62,7 +64,6 @@ mod_2_01_historical_server <- function(id, step1 = NULL, pov_lines = NULL, varli
       x <- built_haz_r()
       if (is.null(x)) NULL else x$sim_year_range
     })
-#DRK NOTE: This suggests replacing all 'sim_year_range' with 'loc_weather_sim',
 
 
     # Small status readout (shown in sidebar)
@@ -359,6 +360,14 @@ mod_2_01_historical_server <- function(id, step1 = NULL, pov_lines = NULL, varli
       d$na_drivers
     }, rownames = FALSE)
 
+    #My addition
+    output$pred_summary_tbl <- renderTable({
+      d <- pred_diag()
+      if (is.null(d)) return(NULL)
+      d$pred_summary
+    }, rownames = FALSE)
+
+
 
     #Event
     observeEvent(input$predict_welfare, {
@@ -407,7 +416,7 @@ mod_2_01_historical_server <- function(id, step1 = NULL, pov_lines = NULL, varli
         }
 
         out <- sp
-        out$pred <- as.numeric(pred)
+        out$pred <- as.numeric(pred) #Predictions are here.
 
         pred_panel_r(out)
         phase_d_last_run(Sys.time())
@@ -418,6 +427,11 @@ mod_2_01_historical_server <- function(id, step1 = NULL, pov_lines = NULL, varli
         showNotification(paste0("Phase D failed: ", conditionMessage(e)), type = "error", duration = 12)
       })
     }, ignoreInit = TRUE)
+
+
+
+
+
 
     #Diagnostics for Prediction/NA
     pred_diag <- reactive({
@@ -437,6 +451,33 @@ mod_2_01_historical_server <- function(id, step1 = NULL, pov_lines = NULL, varli
         n = nrow(pp),
         na = sum(is_na),
         na_rate = mean(is_na),
+        stringsAsFactors = FALSE
+      )
+
+      #Summary rate table
+      # Summary stats for predictions (ignore NA / non-finite)
+      is_bad <- is.na(pp$pred) | !is.finite(pp$pred)
+      pred_ok <- pp$pred[!is_bad]
+      has_ok <- length(pred_ok) > 0
+
+      pred_summary <- data.frame(
+        n        = nrow(pp),
+        n_ok     = sum(!is_bad),
+        bad      = sum(is_bad),
+        bad_rate = mean(is_bad),
+
+        mean   = if (has_ok) mean(pred_ok) else NA_real_,
+        median = if (has_ok) stats::median(pred_ok) else NA_real_,
+        sd     = if (has_ok) stats::sd(pred_ok) else NA_real_,
+        iqr    = if (has_ok) stats::IQR(pred_ok) else NA_real_,
+
+        min    = if (has_ok) min(pred_ok) else NA_real_,
+        p01    = if (has_ok) as.numeric(stats::quantile(pred_ok, 0.01, na.rm = TRUE)) else NA_real_,
+        p05    = if (has_ok) as.numeric(stats::quantile(pred_ok, 0.05, na.rm = TRUE)) else NA_real_,
+        p95    = if (has_ok) as.numeric(stats::quantile(pred_ok, 0.95, na.rm = TRUE)) else NA_real_,
+        p99    = if (has_ok) as.numeric(stats::quantile(pred_ok, 0.99, na.rm = TRUE)) else NA_real_,
+        max    = if (has_ok) max(pred_ok) else NA_real_,
+
         stringsAsFactors = FALSE
       )
 
@@ -489,12 +530,18 @@ mod_2_01_historical_server <- function(id, step1 = NULL, pov_lines = NULL, varli
           dplyr::arrange(dplyr::desc(.data$share_na_among_na_preds))
       }
 
+
+      #Overall
+
+
       list(
         na_rate = na_rate,
         na_by_year = na_by_year,
         na_by_month = na_by_month,
         na_by_loc = na_by_loc,
-        na_drivers = na_drivers
+        na_drivers = na_drivers,
+
+        pred_summary = pred_summary
       )
     })
 
@@ -503,18 +550,26 @@ mod_2_01_historical_server <- function(id, step1 = NULL, pov_lines = NULL, varli
     phase_e_error_r  <- reactiveVal("")
     phase_e_last_run <- reactiveVal(NULL)
     poverty_r        <- reactiveVal(NULL)
+    plines_levels_r <- reactiveVal(NULL)
 
     #Output
     output$phase_e_status <- renderText({
       if (nzchar(phase_e_error_r())) return(paste0("ERROR: ", phase_e_error_r()))
       res <- poverty_r()
       if (is.null(res)) return("Not run yet.")
+      pl_now <- plines_levels_r()
       paste0(
         "OK | kind=", res$meta$model_kind,
         " | coverage_w=", round(res$meta$coverage_weight_overall, 4),
-        " | last_run=", as.character(phase_e_last_run())
+        " | last_run=", as.character(phase_e_last_run()),
+        " | Pline values = ", as.character(pl_now)
       )
     })
+
+
+
+
+
 
     #Event
     observeEvent(input$compute_poverty, {
@@ -542,6 +597,9 @@ mod_2_01_historical_server <- function(id, step1 = NULL, pov_lines = NULL, varli
         used <- !is.na(pp$pred)
         cov_n_overall <- mean(used)
         cov_w_overall <- if (sum(w) > 0) sum(w[used]) / sum(w) else NA_real_
+
+
+
 
         if (model_kind == "glm_binomial") {
           # pred is poverty probability; poverty rate is mean(pred) among usable rows
@@ -587,153 +645,177 @@ mod_2_01_historical_server <- function(id, step1 = NULL, pov_lines = NULL, varli
 
         } else if (model_kind == "lm") {
 
-          p_year <- if (!is.null(step1) && is.function(step1$ppp_year)) {
-            as.integer(step1$ppp_year())
-          } else {
-            2021L
+          # PovLine Section
+          p_year <- 2021L
+
+          pv_safe <- if (is.null(pov_lines)) NULL else if (is.function(pov_lines)) pov_lines() else pov_lines
+          if (is.null(pv_safe) || !is.data.frame(pv_safe)) {
+            stop("pov_lines must be a data.frame OR a reactive/function returning a data.frame.")
+          }
+          if (!all(c("ppp_year", "ln") %in% names(pv_safe))) {
+            stop("pov_lines is missing required columns: ppp_year and ln.")
           }
 
+          plines_levels <- pv_safe |>
+            dplyr::filter(.data$ppp_year == p_year) |>
+            dplyr::pull(.data$ln)
 
-          # Then ensure BOTH calls use ppp_year:
-          plines_level <- coerce_pov_lines_modelscale(pov_lines, pred_scale = "level", ppp_year = ppp_year)
+          plines_levels_r(plines_levels)
 
+          plines_levels[1] #dplyr #Can iterate, and need to be reactive
 
-          plines_model <- coerce_pov_lines_modelscale(
-            pov_lines,
-            pred_scale = pred_scale,
-            ppp_year = ppp_year
-          )
+# # FROM HERE REDUNDANT
+#           # Then ensure BOTH calls use ppp_year:
+#           #plines_level <- coerce_pov_lines_modelscale(pov_lines, pred_scale = "level", ppp_year = ppp_year)
+#
+#
+#           plines_model <- coerce_pov_lines_modelscale(
+#             pov_lines,
+#             pred_scale = pred_scale,
+#             ppp_year = ppp_year
+#           )
+#
+#
+#           # 1) Always coerce poverty lines in *LEVEL* (USD PPP/day)
+#           pl_level <- coerce_pov_lines_modelscale(
+#             pov_lines,
+#             pred_scale = "level",
+#             ppp_year = ppp
+#           )
+#           if (is.null(pl_level) || !length(pl_level)) {
+#             stop("pov_lines is required for lm(). Provide a named numeric vector or a data.frame.")
+#           }
+#           if (is.null(names(pl_level)) || any(!nzchar(names(pl_level)))) {
+#             names(pl_level) <- paste0("pline_", seq_along(pl_level))
+#           }
+#
+#
+#           # 2) Guess model prediction scale
+#           pred_scale_guess <- infer_pred_scale_lm(mod, pred_sample = pp$pred)
+#
+#
+#           # Helper to get the model-scale threshold for a LEVEL poverty line
+#           to_model_scale <- function(x_level, scale) {
+#             if (scale == "log") log(x_level) else x_level
+#           }
+#
+#
+#           # 3) Sanity-check the guessed scale (avoid the "everything is poor" trap)
+#           pred_scale <- pred_scale_guess
+#           used_pred <- pp$pred[used]
+#
+#
+#           ####### JANK
+#           ###########
+#
+#           # Use the LOWEST line for a simple diagnostic
+#           lowest_level <- min(plines_levels, na.rm = TRUE)
+#
+#           pov_level_low <- wmean_safe(as.numeric(used_pred < lowest_level), w[used])
+#           pov_log_low <- wmean_safe(as.numeric(used_pred < log(lowest_level)), w[used])
+#
+# ########################### JANK
+#           if (isTRUE(pred_scale_guess == "level") && isTRUE(pov_level_low > 0.995) && isTRUE(pov_log_low < 0.995)) {
+#             pred_scale <- "log"
+#             showNotification(
+#               "Phase E: predictions look like LOG welfare; switching poverty-line comparison to log scale.",
+#               type = "warning", duration = 10
+# #            )
+# #          }
+# #          if (isTRUE(pred_scale_guess == "log") && isTRUE(pov_log_low > 0.995) && isTRUE(pov_level_low < 0.995)) {
+# #            pred_scale <- "level"
+# #            showNotification(
+# #              "Phase E: predictions look like LEVEL welfare; switching poverty-line comparison to level scale.",
+# #              type = "warning", duration = 10
+# #            )
+# #          }
+# ###################### JANK
 
+          # --- ASSUMPTION for simplified Phase E ---
+          # pp$pred is already in the same LEVEL units as plines_levels (e.g., USD PPP/day).
+          # plines_levels is a named numeric vector, e.g. c(pline_1=3, pline_2=4.2, pline_3=8.3)
 
-          # 1) Always coerce poverty lines in *LEVEL* (USD PPP/day)
-          pl_level <- coerce_pov_lines_modelscale(
-            pov_lines,
-            pred_scale = "level",
-            ppp_year = ppp
-          )
-          if (is.null(pl_level) || !length(pl_level)) {
-            stop("pov_lines is required for lm(). Provide a named numeric vector or a data.frame.")
+          # 4) Build results for each poverty line (LEVEL-on-LEVEL comparison)
+          if (is.null(plines_levels) || !length(plines_levels)) {
+            stop("plines_levels is NULL/empty. Provide a named numeric vector of poverty lines in PPP/day.")
           }
-          if (is.null(names(pl_level)) || any(!nzchar(names(pl_level)))) {
-            names(pl_level) <- paste0("pline_", seq_along(pl_level))
+          if (!is.numeric(plines_levels)) {
+            stop("plines_levels must be numeric.")
+          }
+          if (is.null(names(plines_levels)) || any(!nzchar(names(plines_levels)))) {
+            names(plines_levels) <- paste0("pline_", seq_along(plines_levels))
           }
 
-
-          # 2) Guess model prediction scale
-          pred_scale_guess <- infer_pred_scale_lm(mod, pred_sample = pp$pred)
-
-
-          # Helper to get the model-scale threshold for a LEVEL poverty line
-          to_model_scale <- function(x_level, scale) {
-            if (scale == "log") log(x_level) else x_level
+          # Optional sanity check: are preds wildly below lines?
+          if (any(used, na.rm = TRUE)) {
+            q_pred <- stats::quantile(pp$pred[used], probs = c(.01, .05, .5, .95, .99), na.rm = TRUE)
+            # If 99% of predictions are below the minimum poverty line, warn loudly
+            if (is.finite(q_pred[["99%"]]) && q_pred[["99%"]] < min(plines_levels, na.rm = TRUE)) {
+              showNotification(
+                "Phase E warning: nearly all predictions are below the lowest poverty line. Check welfare units (per day vs per month, PPP vs LCU, log vs level).",
+                type = "warning", duration = 10
+              )
+            }
           }
 
+          out_by_year  <- list()
+          out_overall  <- list()
 
-          # 3) Sanity-check the guessed scale (avoid the "everything is poor" trap)
-          pred_scale <- pred_scale_guess
-          used_pred <- pp$pred[used]
+          for (nm in names(plines_levels)) {
+            pl <- as.numeric(plines_levels[[nm]])
 
-
-          # Use the LOWEST line for a simple diagnostic
-          lowest_level <- min(pl_level, na.rm = TRUE)
-          pov_level_low <- wmean_safe(as.numeric(used_pred < lowest_level), w[used])
-          pov_log_low <- wmean_safe(as.numeric(used_pred < log(lowest_level)), w[used])
-
-
-          if (isTRUE(pred_scale_guess == "level") && isTRUE(pov_level_low > 0.995) && isTRUE(pov_log_low < 0.995)) {
-            pred_scale <- "log"
-            showNotification(
-              "Phase E: predictions look like LOG welfare; switching poverty-line comparison to log scale.",
-              type = "warning", duration = 10
-            )
-          }
-          if (isTRUE(pred_scale_guess == "log") && isTRUE(pov_log_low > 0.995) && isTRUE(pov_level_low < 0.995)) {
-            pred_scale <- "level"
-            showNotification(
-              "Phase E: predictions look like LEVEL welfare; switching poverty-line comparison to level scale.",
-              type = "warning", duration = 10
-            )
-          }
-
-
-          # 4) Build results for each poverty line
-          out_by_year <- list()
-          out_overall <- list()
-
-
-          # Precompute model-scale thresholds
-          pl_model <- vapply(pl_level, to_model_scale, numeric(1), scale = pred_scale)
-
-
-          for (nm in names(pl_level)) {
-            plv_level <- pl_level[[nm]]
-            plv_model <- pl_model[[nm]]
-
-
-            pov_ind <- pp$pred < plv_model
+            # poverty indicator per row (NA where prediction missing)
+            pov_ind <- pp$pred < pl
             pov_ind[!used] <- NA
-
 
             by_year <- pp |>
               dplyr::mutate(w = w, used = used, pov = pov_ind) |>
+              dplyr::group_by(.data$sim_year) |>
               dplyr::summarise(
-                n_total = dplyr::n(),
-                n_used = sum(.data$used),
+                n_total    = dplyr::n(),
+                n_used     = sum(.data$used),
                 coverage_n = mean(.data$used),
-                w_total = sum(.data$w),
-                w_used = sum(.data$w[.data$used]),
+                w_total    = sum(.data$w),
+                w_used     = sum(.data$w[.data$used]),
                 coverage_w = ifelse(.data$w_total > 0, .data$w_used / .data$w_total, NA_real_),
-                pov_rate = wmean_safe(as.numeric(.data$pov[.data$used]), .data$w[.data$used]),
-                .by = "sim_year"
+                pov_rate   = wmean_safe(as.numeric(.data$pov[.data$used]), .data$w[.data$used]),
+                .groups = "drop"
               ) |>
               dplyr::mutate(
                 pline = nm,
-                pline_value = plv_level, # ALWAYS level for display
-                pline_value_model = plv_model, # threshold actually used
-                pred_scale = pred_scale
+                pline_value = pl
               ) |>
               dplyr::arrange(.data$sim_year)
 
-
             overall <- data.frame(
               pline = nm,
-              pline_value = plv_level,
-              pline_value_model = plv_model,
+              pline_value = pl,
               pov_rate = wmean_safe(as.numeric(pov_ind[used]), w[used]),
               coverage_n = cov_n_overall,
               coverage_w = cov_w_overall,
-              pred_scale = pred_scale,
               stringsAsFactors = FALSE
             )
-
 
             out_by_year[[nm]] <- by_year
             out_overall[[nm]] <- overall
           }
 
-
-          # Prediction quantiles for debugging (model scale + implied level)
-          q <- stats::quantile(used_pred, probs = c(0, .05, .25, .5, .75, .95, 1), na.rm = TRUE)
+          # Prediction quantiles (LEVEL) for debugging
+          q <- stats::quantile(pp$pred[used], probs = c(0, .05, .25, .5, .75, .95, 1), na.rm = TRUE)
           pred_summary <- data.frame(
-            scale = pred_scale,
             stat = names(q),
-            pred_model = as.numeric(q),
-            pred_level = if (pred_scale == "log") exp(as.numeric(q)) else as.numeric(q),
+            pred_level = as.numeric(q),
             stringsAsFactors = FALSE
           )
-
 
           poverty_r(list(
             overall = dplyr::bind_rows(out_overall),
             by_year = dplyr::bind_rows(out_by_year),
             meta = list(
               model_kind = model_kind,
-              pred_scale = pred_scale,
-              pred_scale_guess = pred_scale_guess,
               coverage_weight_overall = cov_w_overall,
               weight_col = wt_col,
-              plines_level = pl_level,
-              plines_model = pl_model,
+              plines_levels = plines_levels,
               pred_summary = pred_summary
             )
           ))
@@ -751,7 +833,6 @@ mod_2_01_historical_server <- function(id, step1 = NULL, pov_lines = NULL, varli
         showNotification(paste0("Phase E failed: ", conditionMessage(e)), type = "error", duration = 12)
       })
     }, ignoreInit = TRUE)
-
 
 
 
