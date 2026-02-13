@@ -40,8 +40,8 @@ mod_1_07_results_server <- function(
     observeEvent(model_fit(), {
       req(model_fit())
 
-    vl <- if (is.function(varlist)) varlist() else varlist
-    labels_df <- if (!is.null(vl)) vl[, c("name", "label"), drop = FALSE] else NULL
+      vl <- if (is.function(varlist)) varlist() else varlist
+      labels_df <- if (!is.null(vl)) vl[, c("name", "label"), drop = FALSE] else NULL
 
       get_term_label <- function(term, labels_df) {
         res <- get_name_label(term, varlist = vl)
@@ -202,9 +202,9 @@ mod_1_07_results_server <- function(
         results_tab_added(TRUE)
       }
 
-      if (results_tab_added()) {
-        try(shiny::updateTabsetPanel(tabset_session, inputId = tabset_id, selected = "results"), silent = TRUE)
-      }
-    }, ignoreInit = TRUE)
-  })
+    if (results_tab_added()) {
+      try(shiny::updateTabsetPanel(tabset_session, inputId = tabset_id, selected = "results"), silent = TRUE)
+    }
+  }, ignoreInit = TRUE)
+})
 }

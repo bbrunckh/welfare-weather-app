@@ -94,7 +94,6 @@ mod_1_modelling_server <- function(id, survey_list_master, pin_prefix, board, su
       tabset_id = "step1_output_tabs",
       tabset_session = session,
       varlist = varlist,
-      #pov_lines = reactive({ golem::get_golem_options("pov_lines") }),
       pov_lines = pov_lines,
       survey_geo = mod_1_01_sample_api$survey_geo
     )

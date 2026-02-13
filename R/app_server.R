@@ -14,7 +14,7 @@ app_server <- function(input, output, session) {
   survey_metadata_r    <- reactive({ runtime$survey_metadata })
   varlist_r            <- reactive({ runtime$varlist })
   weather_list_r       <- reactive({ runtime$weather_list })
-  pov_lines_r <- reactive({runtime$pov_lines})
+  pov_lines_r          <- reactive({ runtime$pov_lines })
 
   # Now call the step1 module and pass reactives (Now With return value so I can use in STEP 2)
   step1_api <- mod_1_modelling_server(

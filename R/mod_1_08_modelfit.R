@@ -19,7 +19,7 @@ mod_1_08_modelfit_server <- function(
     model_fit,
     run_model,
     haz_vars,
-  weather_terms = NULL,
+    weather_terms = NULL,
     varlist,
     selected_outcome,
     outcome_type,
