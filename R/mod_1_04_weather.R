@@ -21,8 +21,7 @@ mod_1_04_weather_ui <- function(id) {
 mod_1_04_weather_server <- function(
     id,
     survey_data,
-    survey_data_files,
-    board,
+    survey_data_filenames,
     weather_list,
     varlist,
     data_loaded
@@ -31,13 +30,17 @@ mod_1_04_weather_server <- function(
     ns <- session$ns
 
     output$weather_selector_ui <- renderUI({
-      wl <- if (is.function(weather_list)) weather_list() else weather_list
-      req(wl)
+
+      # get weather variables from varlist
+      wl <- varlist() |> 
+        dplyr::filter(weather == 1) |> 
+        dplyr::pull(name, label, units)
+
       shiny::selectizeInput(
         inputId = ns("weather_variable_selector"),
         label = "Weather variables",
-        choices = wl$name,
-        selected = c(wl$name[1], wl$name[10]),
+        choices = wl$label,
+        selected = c(wl$label[1], wl$label[10]),
         multiple = TRUE,
         options = list(
           placeholder = "Select up to 2 weather variables",
@@ -49,12 +52,15 @@ mod_1_04_weather_server <- function(
     # Dynamically render weather variable constructor based on variable(s) chosen
     output$weather_construction_ui <- renderUI({
       req(input$weather_variable_selector)
-      wl <- if (is.function(weather_list)) weather_list() else weather_list
-      req(wl)
+
+      # get weather variables from varlist
+      wl <- varlist() |> 
+        dplyr::filter(weather == 1) |> 
+        dplyr::pull(name, label, units)
 
       ui_list <- lapply(seq_along(input$weather_variable_selector), function(i) {
         current_var_name <- input$weather_variable_selector[i]
-        id_prefix <- paste0(wl[wl$name == current_var_name, "varname"], "_")
+        id_prefix <- paste0(wl[wl$label == current_var_name, "name"], "_")
 
         tagList(
           shiny::p(paste0(current_var_name, ":")),
@@ -86,7 +92,7 @@ mod_1_04_weather_server <- function(
                   selected = "Mean"
                 )
               },
-              if (wl[wl$name == current_var_name, ]$units %in% c("Dimensionless")) {
+              if (wl[wl$name == current_var_name, ]$units %in% c("")) {
                 shiny::radioButtons(
                   ns(paste0(id_prefix, "varConstruction")),
                   "Transformation",
@@ -144,33 +150,23 @@ mod_1_04_weather_server <- function(
     })
 
     survey_h3 <- reactive({
-      req(data_loaded())
-      files <- survey_data_files()
-      brd <- board()
-      req(files)
-
-      pin_names <- paste0(files, "_H3")
-      local_paths <- lapply(pin_names, function(pin) pins::pin_download(brd, pin))
-      read_parquet_duckdb(unlist(local_paths))
+      req(survey_data_filenames())
+      files <- survey_data_filenames()
+      h3_files <- sub("_[^_]+\\.parquet$", "_h3.parquet", files)
+      read_parquet_duckdb(h3_files)
     })
 
     weather_vars <- reactive({
       req(input$weather_variable_selector)
-      wl <- if (is.function(weather_list)) weather_list() else weather_list
-      wl |>
-        dplyr::filter(.data$name %in% input$weather_variable_selector) |>
-        dplyr::pull(.data$varname)
+      # get weather variables from varlist
+      wl <- varlist() |> 
+        dplyr::filter(weather == 1, label %in% input$weather_variable_selector) |> 
+        dplyr::pull(name)
     })
 
     weather_settings <- reactive({
       req(input$weather_variable_selector)
-      wl <- if (is.function(weather_list)) weather_list() else weather_list
-      req(wl)
-
-      vars <- wl |>
-        dplyr::filter(.data$name %in% input$weather_variable_selector) |>
-        dplyr::pull(.data$varname)
-
+      vars <- weather_vars()
       polynomials <- lapply(vars, function(v) {
         input[[paste0(v, "_polynomial")]] %||% character(0)
       })
@@ -185,16 +181,12 @@ mod_1_04_weather_server <- function(
     # NEW: Full hazard specification (needed for Step 2 & Step 3 reproducibility)
     haz_spec <- reactive({
       req(weather_vars())
-      wl <- if (is.function(weather_list)) weather_list() else weather_list
-      req(wl)
-
       vars <- weather_vars()
-
       specs <- lapply(vars, function(v) {
         id_prefix <- paste0(v, "_")
 
         # Defaults consistent with UI logic
-        wl_row <- wl[wl$varname == v, , drop = FALSE]
+        wl_row <- wl[wl$name == v, , drop = FALSE]
         units <- if (nrow(wl_row) && "units" %in% names(wl_row)) as.character(wl_row$units[[1]]) else NA_character_
 
         ref_period <- input[[paste0(id_prefix, "relativePeriod")]] %||% c(1, 1)
@@ -253,11 +245,9 @@ mod_1_04_weather_server <- function(
         )
       }
 
-      files <- survey_data_files()
-      brd <- board()
-      pin_names <- paste0(unique(substr(files, 1, nchar(files) - 4)), "weather")
-      local_paths <- lapply(pin_names, function(pin) pins::pin_download(brd, pin))
-  weather <- read_parquet_duckdb(unlist(local_paths))
+      files <- survey_data_filenames()
+      weather_files <- paste0(unique(substr(files, 1, nchar(files) - 4)), "weather.parquet")
+      weather <- read_parquet_duckdb(weather_files)
 
       weather |>
         dplyr::select(.data$h3_6, .data$timestamp, dplyr::all_of(weather_vars())) |>
@@ -384,7 +374,7 @@ mod_1_04_weather_server <- function(
       req(weather_vars(), survey_h3(), h3_weather())
       h3 <- survey_h3()
       hw <- h3_weather()
-      join_cols <- intersect(c("h3_6", "timestamp"), intersect(names(h3), names(hw)))
+      join_cols <- intersect(c("h3", "timestamp"), intersect(names(h3), names(hw)))
       if (!length(join_cols)) {
         return(NULL)
       }
