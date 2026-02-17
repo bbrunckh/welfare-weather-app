@@ -139,9 +139,13 @@ safe_pin_read <- function(board, name, prefix = "") {
 
 # New data loading function
 load_local_data <- function(data_root) {
-  if (is.null(data_root) || data_root == "") {
-    stop("Data root path is not set. Please provide a valid path.")
+
+  # allow either character path or reactive returning a character path
+  root <- if (is.function(data_root)) data_root() else data_root
+  if (is.null(root) || !nzchar(root)) {
+    stop("[app_config] data_root is empty. Please apply a valid folder path.")
   }
+  root <- normalizePath(path.expand(root), winslash = "/", mustWork = TRUE)
   
   survey_list_master <- readr::read_csv(file.path(data_root, "survey_list.csv"), show_col_types = FALSE)
   varlist <- readr::read_csv(file.path(data_root, "variable_list.csv"), show_col_types = FALSE)
@@ -159,3 +163,4 @@ load_local_data <- function(data_root) {
     cpi_ppp = cpi_ppp,
     pov_lines = pov_lines
    )
+}

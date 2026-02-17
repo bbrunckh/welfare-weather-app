@@ -12,33 +12,29 @@ mod_0_overview_ui <- function(id) {
       width = "100%"
     ),
     shiny::actionButton(ns("apply_folder_path"), "Use this folder"),
-    shiny::verbatimTextOutput(ns("folder_path_echo"))
+    shiny::verbatimTextOutput(ns("folder_path_echo")),
+    shiny::verbatimTextOutput(ns("folder_contents_echo"))
   )
 }
 
 mod_0_overview_server <- function(id) {
   shiny::moduleServer(id, function(input, output, session) {
 
-    raw_path <- shiny::reactive({
-      p <- if (is.null(input$folder_path)) "" else input$folder_path
-      trimws(p)
-    })
+    applied_folder_path <- shiny::reactiveVal(NULL)
 
-    folder_path <- shiny::eventReactive(input$apply_folder_path, {
-      p <- raw_path()
-      shiny::req(nzchar(p))
-      normalizePath(path.expand(p), winslash = "/", mustWork = FALSE)
+    observeEvent(input$apply_folder_path, {
+      p <- trimws(input$folder_path %||% "")
+      if (!nzchar(p)) {
+        applied_folder_path(NULL)
+        return()
+      }
+      p <- normalizePath(path.expand(p), winslash = "/", mustWork = FALSE)
+      applied_folder_path(p)
+      message("[overview] applied folder: ", p)
     }, ignoreInit = TRUE)
 
-    output$folder_path_echo <- shiny::renderText({
-      if (input$apply_folder_path < 1) return("No folder path applied yet.")
-      p <- folder_path()
-      paste("Using data folder:", p)
-    })
-
     list(
-      folder_path = folder_path,
-      apply_folder_path = shiny::reactive(input$apply_folder_path)
+      folder_path = shiny::reactive(applied_folder_path())
     )
   })
 }

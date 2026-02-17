@@ -6,9 +6,11 @@
 #' @noRd
 app_server <- function(input, output, session) {
   overview_api <- mod_0_overview_server("overview")  # returns list(data_dir = reactive(...))
+  data_dir_r <- overview_api$folder_path
 
   runtime_r <- reactive({
-    data_dir <- overview_api$data_dir()
+    req(data_dir_r())
+    data_dir <- data_dir_r()
     load_local_data(data_root = data_dir)  # add data_root arg in app_config.R
   })
 
@@ -27,7 +29,8 @@ app_server <- function(input, output, session) {
     # survey_metadata = survey_metadata_r,
     varlist = varlist_r,
     pov_lines = pov_lines_r,
-    cpi_ppp = cpi_ppp_r
+    cpi_ppp = cpi_ppp_r,
+    data_dir = data_dir_r()
     # weather_list = weather_list_r
   )
 

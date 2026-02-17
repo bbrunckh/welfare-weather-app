@@ -64,17 +64,18 @@ mod_1_modelling_ui <- function(id) {
 #' 1_modelling Server Functions
 #'
 #' @noRd
-mod_1_modelling_server <- function(id, survey_list_master, pin_prefix, board, survey_metadata, varlist, weather_list, pov_lines) {
+mod_1_modelling_server <- function(id, survey_list_master, varlist, pov_lines, cpi_ppp, data_dir) { #pin_prefix, board, survey_metadata, varlist, weather_list, pov_lines) {
   moduleServer(id, function(input, output, session) {
 
     # Pass reactives
     mod_1_01_sample_api <- mod_1_01_sample_server(
       "sample",
       survey_list_master = survey_list_master,
-      pin_prefix = pin_prefix,
-      board = board,
-      survey_metadata = survey_metadata,
-      varlist = varlist
+      # pin_prefix = pin_prefix,
+      # board = board,
+      # survey_metadata = survey_metadata,
+      varlist = varlist,
+      data_dir = data_dir
     )
 
     mod_1_02_outcome_api <- mod_1_02_outcome_server(
@@ -102,7 +103,7 @@ mod_1_modelling_server <- function(id, survey_list_master, pin_prefix, board, su
     mod_1_04_weather_api <- mod_1_04_weather_server(
       "weather",
       survey_data = mod_1_01_sample_api$survey_data,
-      survey_data_files = mod_1_01_sample_api$survey_data_files,
+      survey_data_filenames = mod_1_01_sample_api$survey_data_filenames,
       board = board,
       weather_list = weather_list,
       varlist = varlist,
@@ -176,7 +177,7 @@ mod_1_modelling_server <- function(id, survey_list_master, pin_prefix, board, su
 
       # flattened (what downstream modules will actually use)
       survey_data       = mod_1_01_sample_api$survey_data,
-      survey_data_files = mod_1_01_sample_api$survey_data_files,
+      survey_data_filenames = mod_1_01_sample_api$survey_data_filenames,
       data_loaded       = mod_1_01_sample_api$data_loaded,
       survey_geo        = mod_1_01_sample_api$survey_geo,
 
