@@ -68,56 +68,85 @@ safe_pin_read <- function(board, name, prefix = "") {
 
 # Main runtime loader (call this at app/server start)
 # returns a list with board, prefix, and metadata tibbles (may be empty)
-load_runtime_data <- function() {
-  board <- get_pin_board()
-  prefix <- if (Sys.getenv("R_CONFIG_ACTIVE") == "") "" else "bbrunckhorst/"
+# load_runtime_data <- function() {
+#   board <- get_pin_board()
+#   prefix <- if (Sys.getenv("R_CONFIG_ACTIVE") == "") "" else "bbrunckhorst/"
   
-  survey_list_master <- safe_pin_read(board, "surveys", prefix) %>%
-    dplyr::mutate(
-      external = TRUE,
-      weather = paste0(code, "_weather")
-    ) %>%
-    dplyr::filter(paste0(prefix, weather) %in% safe_pin_list(board))
+#   survey_list_master <- safe_pin_read(board, "surveys", prefix) %>%
+#     dplyr::mutate(
+#       external = TRUE,
+#       weather = paste0(code, "_weather")
+#     ) %>%
+#     dplyr::filter(paste0(prefix, weather) %in% safe_pin_list(board))
   
-  # New varlist (load via xlsx)
-  varlist_path <- system.file(
-    "data/pins/varlist/variable_list.csv",
-    package = "wiseapp"
-  )
-  # When running in dev mode (pkgload::load_all()), the file isn't in inst/.
-  # Fall back to the repo path so this works without installing.
-  if (identical(varlist_path, "")) {
-    varlist_path <- file.path(
-      getwd(),
-      "data",
-      "pins",
-      "varlist",
-      "variable_list.csv"
-    )
-  }
-  varlist <- readr::read_csv(varlist_path, show_col_types = FALSE)
+#   # New varlist (load via xlsx)
+#   varlist_path <- system.file(
+#     "data/pins/varlist/variable_list.csv",
+#     package = "wiseapp"
+#   )
+#   # When running in dev mode (pkgload::load_all()), the file isn't in inst/.
+#   # Fall back to the repo path so this works without installing.
+#   if (identical(varlist_path, "")) {
+#     varlist_path <- file.path(
+#       getwd(),
+#       "data",
+#       "pins",
+#       "varlist",
+#       "variable_list.csv"
+#     )
+#   }
+#   varlist <- readr::read_csv(varlist_path, show_col_types = FALSE)
 
-  weather_list <- safe_pin_read(board, "weather_varlist", prefix)
+#   weather_list <- safe_pin_read(board, "weather_varlist", prefix)
 
-  # Survey metadata schema lives in the repo under data/pins/ as a CSV.
-  survey_metadata_path <- system.file(
-    "data/pins/survey_metadata/survey_list.csv",
-    package = "wiseapp"
-  )
-  # When running in dev mode (pkgload::load_all()), the file isn't in inst/.
-  # Fall back to the repo path so this works without installing.
-  if (identical(survey_metadata_path, "")) {
-    survey_metadata_path <- file.path(
-      getwd(),
-      "data",
-      "pins",
-      "survey_metadata",
-      "survey_list.csv"
-    )
-  }
-  survey_metadata <- readr::read_csv(survey_metadata_path, show_col_types = FALSE) %>%
-    dplyr::filter(code %in% c("TGO", "GNB"))
+#   # Survey metadata schema lives in the repo under data/pins/ as a CSV.
+#   survey_metadata_path <- system.file(
+#     "data/pins/survey_metadata/survey_list.csv",
+#     package = "wiseapp"
+#   )
+#   # When running in dev mode (pkgload::load_all()), the file isn't in inst/.
+#   # Fall back to the repo path so this works without installing.
+#   if (identical(survey_metadata_path, "")) {
+#     survey_metadata_path <- file.path(
+#       getwd(),
+#       "data",
+#       "pins",
+#       "survey_metadata",
+#       "survey_list.csv"
+#     )
+#   }
+#   survey_metadata <- readr::read_csv(survey_metadata_path, show_col_types = FALSE) %>%
+#     dplyr::filter(code %in% c("TGO", "GNB"))
   
+#   pov_lines <- data.frame(
+#     ppp_year = c(rep(2021,3), rep(2017,3), rep(2011,3)),
+#     ln = c(3.00,4.20,8.30, 2.15,3.65,6.85, 1.90,3.20,5.50),
+#     stringsAsFactors = FALSE
+#   )
+  
+#   list(
+#     board = board,
+#     pin_prefix = prefix,
+#     pin_list = safe_pin_list(board),
+#     survey_list_master = survey_list_master,
+#     varlist = varlist,
+#     weather_list = weather_list,
+#     pov_lines = pov_lines,
+#     survey_metadata = survey_metadata
+#   )
+# }
+
+
+# New data loading function
+load_local_data <- function(data_root) {
+  if (is.null(data_root) || data_root == "") {
+    stop("Data root path is not set. Please provide a valid path.")
+  }
+  
+  survey_list_master <- readr::read_csv(file.path(data_root, "survey_list.csv"), show_col_types = FALSE)
+  varlist <- readr::read_csv(file.path(data_root, "variable_list.csv"), show_col_types = FALSE)
+  cpi_ppp <- readr::read_csv(file.path(data_root, "cpi_ppp.csv"), show_col_types = FALSE)
+
   pov_lines <- data.frame(
     ppp_year = c(rep(2021,3), rep(2017,3), rep(2011,3)),
     ln = c(3.00,4.20,8.30, 2.15,3.65,6.85, 1.90,3.20,5.50),
@@ -125,13 +154,8 @@ load_runtime_data <- function() {
   )
   
   list(
-    board = board,
-    pin_prefix = prefix,
-    pin_list = safe_pin_list(board),
     survey_list_master = survey_list_master,
     varlist = varlist,
-    weather_list = weather_list,
-    pov_lines = pov_lines,
-    survey_metadata = survey_metadata
-  )
-}
+    cpi_ppp = cpi_ppp,
+    pov_lines = pov_lines
+   )
