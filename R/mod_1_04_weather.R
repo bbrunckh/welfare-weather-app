@@ -55,7 +55,7 @@ mod_1_04_weather_server <- function(id, varlist, selected_surveys, survey_data, 
       ui_list <- lapply(seq_along(input$weather_variable_selector), function(i) {
         current_var_name <- input$weather_variable_selector[i]
         current_var_info <- wl[wl$name == current_var_name, ]
-        id_prefix <- paste0(current_var_info$name[i], "_")
+        id_prefix <- paste0(current_var_info$name, "_")
 
         tagList(
           shiny::p(paste0(current_var_info$label, ":")),
@@ -107,7 +107,6 @@ mod_1_04_weather_server <- function(id, varlist, selected_surveys, survey_data, 
                 "Continuous or binned",
                 choices = c("Continuous", "Binned")
               ),
-              shiny::helpText("Binned option is yet to be implemented.", style = "color: red; font-size: 12px;"),
               shiny::conditionalPanel(
                 condition = paste0("input['", ns(paste0(id_prefix, "contOrBinned")), "'] == 'Binned'"),
                 tagList(
@@ -121,7 +120,7 @@ mod_1_04_weather_server <- function(id, varlist, selected_surveys, survey_data, 
                   shiny::radioButtons(
                     ns(paste0(id_prefix, "binningMethod")),
                     "Binning method:",
-                    choices = c("Equal frequency", "Equal size", "K-means clustering")
+                    choices = c("Equal frequency", "Equal width", "K-means")
                   )
                 )
               ),

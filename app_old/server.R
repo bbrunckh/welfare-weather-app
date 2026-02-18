@@ -751,10 +751,6 @@ server <- function(input, output, session) {
     }
     
     # temporal aggregation over reference period
-    weather <- weather |> 
-      filter(!is.na(pick(paste0(i, "_", max(ref_start,ref_end))))) |> # drop NA
-      ungroup()
-    
     if (temporal_agg == "Mean") {
       weather <- weather |>
         mutate(haz = rowMeans(across(starts_with(paste0(i,"_")))))

@@ -44,340 +44,363 @@ mod_1_05_weatherstats_server <- function(
 
     shiny::outputOptions(output, "weather_stats_button_ui", suspendWhenHidden = FALSE)
 
-    # Reactive to store bin cutoffs
-    bin_cutoffs <- reactiveVal(list())
+    # Get haz variable names
+    haz_vars <- reactive({
+      req(selected_weather())
+      paste0("haz_", selected_weather()$name)
+    })
 
-    observeEvent(input$weather_stats, {
-      req(selected_weather(), selected_surveys(), survey_data(), survey_h3())
+    # Reactive placeholders for weather data and bin cutoffs
+    
+    weather_data <- reactiveVal(NULL)
+    loc_weather  <- reactiveVal(NULL)
+    survey_weather  <- reactiveVal(NULL)
 
-      if (!weather_tab_added()) {
-        
-        # Load weather data for selected surveys
-        weather_data <- reactive({
-          req(selected_surveys(), selected_weather(), survey_data(), survey_h3())
+observeEvent(input$weather_stats, {
+  req(selected_weather(), selected_surveys(), survey_data(), survey_h3())
+    
+    # Reactives inside observeEvent
+  
+    # notification for loading weather data
+    notif_load <- showNotification(
+      "Loading weather data...", 
+      duration = NULL, type = "message"
+    )
 
-          # Get selected weather variables
-          sw <- selected_weather()
+    # weather data for selected surveys and variables at loc_id level
+    wd <- {
+      req(selected_surveys(), selected_weather(), survey_data(), survey_h3())
+      ss <- selected_surveys()
+      sw <- selected_weather()
+      sd <- survey_data()
+      h3 <- survey_h3()
+
+      # get date range for weather data
+      
+      survey_dates <- sd |>
+        dplyr::distinct(timestamp) |>
+        dplyr::filter(!is.na(timestamp))
+      survey_date_min <- min(survey_dates$timestamp) - months(12) # max reference period is 12 months, so need to go back at least 12 months 
+      survey_date_max <- max(survey_dates$timestamp)
+
+      # years needed for simulation
+      sim_date_min <- as.Date("1991-01-01") - months(12)
+      sim_date_max <- as.Date("2020-12-01")
+    
+      weather_dates <- seq(min(survey_date_min, sim_date_min),
+                          max(survey_date_max, sim_date_max), 
+                          by = "1 month")
+
+      # load weather data for countries with selected surveys
+      codes <- unique(ss$code)
+      root <- unique(dirname(ss$fpath))
+      paths_weather <- file.path(root, paste0(codes, "_weather.parquet"))
+      
+      weather <- read_parquet_duckdb(paths_weather) |>
+        # filter to date range needed for surveys and simulation years
+        dplyr::filter(timestamp %in% !!weather_dates) |>
+        # filter to h3 cells that are in survey_h3
+        dplyr::inner_join( 
+          survey_h3() |> dplyr::select(code, year, survname, h3, loc_id, pop_2020) |> dplyr::distinct(),
+          by = "h3"
+        ) |> 
+        # aggregate to loc_id level using h3 mapping in survey_h3
+        dplyr::group_by(code, year, survname, loc_id, timestamp) |>
+        dplyr::summarise(
+          across(all_of(sw$name), ~ sum(.x * pop_2020, na.rm = TRUE) / sum(pop_2020, na.rm = TRUE)),
+          .groups = "drop"
+        )
+      
+      weather
+    }
+    weather_data(wd) # assign to reactiveVal so it can be accessed by other reactives and outputs
+
+    # remove loading notification, add notification for configuring weather variables
+    removeNotification(notif_load)
+    notif_config <- showNotification(
+      "Configuring weather variables...", 
+      duration = NULL, type = "message"
+    )
+
+    # configure weather variables according to user specifications and merge with survey data at loc_id level
+    loc_wd <- {
+      req(weather_data(), selected_weather(), survey_data(), survey_h3())
+      wd <- weather_data() 
+      sw <- selected_weather()
+      sd <- survey_data() 
+      h3 <- survey_h3()
+
+      out <- NULL
+      
+      # loop over each weather variable
+      for (idx in seq_len(nrow(sw))) {
+
+        var_name <- sw$name[idx]
+        ref_start <- sw$ref_start[idx]
+        ref_end <- sw$ref_end[idx]
+        temporal_agg <- sw$temporalAgg[idx]
+        transformation <- sw$transformation[idx]
+        cont_binned <- sw$cont_binned[idx]
+        num_bins <- sw$num_bins[idx]
+        binning_method <- sw$binning_method[idx]
+
+        # get variable for each month in selected reference period
+        weather <- wd  # start with full data
+        for (l in seq(ref_start, ref_end)) {
+          colname <- paste0(var_name, "_", l)
+          weather <- weather |>
+            dplyr::group_by(loc_id) |>
+            dplyr::mutate("{colname}" := dplyr::lag(.data[[var_name]], n = l, order_by = timestamp)) |>
+            dplyr::ungroup()
+        }
+
+        # temporal aggregation over reference period
+        lag_cols <- paste0(var_name, "_", seq(ref_start, ref_end))
+
+        # Extract lag columns as a matrix once — avoids repeated across()/pick() calls
+        lag_mat <- as.matrix(weather[, lag_cols])
+
+        weather <- weather |>
+          dplyr::mutate(
+            haz = switch(temporal_agg,
+              "Mean"   = rowMeans(lag_mat, na.rm = TRUE),
+              "Median" = matrixStats::rowMedians(lag_mat, na.rm = TRUE),
+              "Min"    = matrixStats::rowMins(lag_mat, na.rm = TRUE),
+              "Max"    = matrixStats::rowMaxs(lag_mat, na.rm = TRUE),
+              "Sum"    = rowSums(lag_mat,    na.rm = TRUE)
+            )
+          ) |>
+          dplyr::select(-dplyr::all_of(lag_cols)) # clean up lag columns after aggregation
+
+
+        # apply transformation if specified
+        if (!(transformation == "None" || var_name %in% c("spi6", "spei6"))) {
+
+          # calculate mean and sd for reference climate by loc_id and month
+          climate_ref <- weather |>
+            dplyr::filter(timestamp >= as.Date("1991-01-01"), timestamp <= as.Date("2020-12-31")) |>
+            dplyr::mutate(month = lubridate::month(timestamp)) |>
+            dplyr::group_by(loc_id, month) |>
+            dplyr::summarise(mean = mean(haz, na.rm = TRUE), sd = sd(haz, na.rm = TRUE), .groups = "drop")
           
-          # Get survey dates from survey data 
-          df <- survey_data()
+          # standardize weather variable using reference climate stats
+          if (transformation == "Deviation from mean") {
+          weather <- weather |>
+            dplyr::mutate(month = lubridate::month(timestamp)) |>
+            dplyr::left_join(climate_ref, by = c("loc_id", "month")) |>
+            dplyr::mutate(haz = (haz - mean)) |>
+            dplyr::select(-month, -mean, -sd)         # clean up temp columns
+            
+          } else if (transformation == "Standardized anomaly") {
+            weather <- weather |>
+            dplyr::mutate(month = lubridate::month(timestamp)) |>
+            dplyr::left_join(climate_ref, by = c("loc_id", "month")) |>
+            dplyr::mutate(haz = (haz - mean)/sd) |>
+            dplyr::select(-month, -mean, -sd)         # clean up temp columns
+          }
+        }
 
-          # Create timestamp from int_year and int_month
-          survey_dates <- df |>
-            dplyr::mutate(
-              int_year = as.integer(.data$int_year),
-              int_month = as.integer(.data$int_month),
-              timestamp = as.Date(paste0(.data$int_year, "-", .data$int_month, "-01"))
+        # Bin variable if specified
+        if (!is.na(cont_binned) && cont_binned == "Binned") {
+
+          # define cutoffs for bins from weather in survey data
+          weather_svy <- weather |>
+            dplyr::inner_join(
+              sd |> dplyr::select(loc_id, timestamp) |> dplyr::distinct(),
+              by = c("loc_id", "timestamp")
             ) |>
-            dplyr::pull(.data$timestamp) |>
-            stats::na.omit() |>
-            as.Date()
-
-          if (!length(survey_dates) || all(!is.finite(survey_dates))) return(NULL)
-
-          survey_date_min <- min(survey_dates, na.rm = TRUE)
-          survey_date_max <- max(survey_dates, na.rm = TRUE)
-          if (!is.finite(survey_date_min) || !is.finite(survey_date_max)) return(NULL)
+            dplyr::filter(!is.na(haz)) |>
+            dplyr::pull(haz)
           
-          weather_dates <- seq.Date(from = survey_date_min, to = survey_date_max, by = "1 month")
-          if (length(weather_dates)) {
-            weather_dates <- seq.Date(
-              from = min(weather_dates) - 365,
-              to = max(weather_dates),
-              by = "1 month"
+            
+            # equal frequency binning
+            if (binning_method == "Equal frequency") {
+
+              cutoffs <- unique(quantile(weather_svy, probs = seq(0, 1, length.out = num_bins + 1), na.rm = TRUE))
+              
+              if (length(cutoffs) > 1) {
+                weather <- weather |>
+                  dplyr::mutate(haz = cut(.data$haz, breaks = cutoffs, include.lowest = TRUE))
+                message("Equal frequency cutoffs for ", var_name, ": ", paste(round(cutoffs, 3), collapse = ", "))
+              } else {
+                message("Insufficient variation in ", var_name, " for Equal frequency binning. Keeping continuous.")
+              }
+              # equal width binning
+            } else if (binning_method == "Equal width") {
+
+              cutoffs <- unique(seq(min(weather_svy, na.rm = TRUE), max(weather_svy, na.rm = TRUE), length.out = num_bins + 1))
+
+              if (length(cutoffs) > 1) {
+                weather <- weather |>
+                  dplyr::mutate(haz = cut(.data$haz, breaks = cutoffs, include.lowest = TRUE))
+                message("Equal width cutoffs for ", var_name, ": ", paste(round(cutoffs, 3), collapse = ", "))
+              } else {
+                message("Insufficient variation in ", var_name, " for Equal width binning. Keeping continuous.")
+              }
+              # k-means binning
+            } else if (binning_method == "K-means") {
+              tryCatch({
+                if (length(unique(weather_svy)) >= num_bins) {
+                  set.seed(123)
+
+                  km <- kmeans(weather_svy, centers = num_bins)
+                  centers <- sort(as.numeric(km$centers))
+                  cutoffs <- unique(c(min(weather_svy, na.rm = TRUE), (centers[-length(centers)] + centers[-1]) / 2, max(weather_svy, na.rm = TRUE)))
+
+                  if (length(cutoffs) > 1) {
+                    weather <- weather |>
+                      dplyr::mutate(haz = cut(.data$haz, breaks = cutoffs, include.lowest = TRUE))
+                    message("K-means cutoffs for ", var_name, ": ", paste(round(cutoffs, 3), collapse = ", "))
+                  } else {
+                    message("Insufficient variation in ", var_name, " for K-means binning. Keeping continuous.")
+                  }
+                } else {
+                  message("Not enough unique values in ", var_name, " for K-means (need >= num_bins). Keeping continuous.")
+                }
+              }, error = function(e) {
+                message("K-means clustering failed for ", var_name, ": ", e$message, ". Keeping continuous.")
+              })
+          }
+        }
+          # Rename haz column to haz_{var_name}
+          weather <- weather |>
+            dplyr::rename(!!paste0("haz_", var_name) := haz)
+
+          # Combine with other weather variables
+          if (is.null(out)) { 
+            out <- weather
+            } else { 
+            out <- dplyr::full_join(out, weather, by = c("code", "year", "survname", "loc_id", "timestamp"))
+          }
+      } # end loop over weather variables
+
+
+      # return final data frame with all weather variables configured and merged at loc_id level
+      out
+    }
+    loc_weather(loc_wd) # assign to reactiveVal so it can be accessed by other reactives and outputs
+
+    # remove loading notification, add notification for merging data
+    removeNotification(notif_config)
+    notif_merge <- showNotification(
+      "Merging survey and weather data...", 
+      duration = NULL, type = "message"
+    )
+
+    # merge survey and weather data (unit level)
+    survey_wd <- {
+      req(loc_weather(), survey_data())
+      sd <- survey_data() 
+        
+      survey_weather <- sd |>
+        dplyr::left_join(loc_weather(), by = c("code", "year", "survname", "loc_id", "timestamp")) |>
+        # ensure year is a factor for plotting
+        dplyr::mutate(year = as.factor(.data$year)) |>
+        # re-normalize weights after filtering to non-missing weather data
+        dplyr::group_by(.data$code, .data$year, .data$survname) |>
+        dplyr::mutate(weight = .data$weight / sum(.data$weight, na.rm = TRUE)) |>
+        dplyr::ungroup()
+
+      # add labels (NOT IMPLEMENTED)
+      
+      survey_weather
+    }
+    survey_weather(survey_wd) # assign to reactiveVal so it can be accessed by other reactives and outputs
+
+    removeNotification(notif_merge)
+    showNotification("Weather data ready.", duration = 3, type = "message")
+
+    if (!weather_tab_added()) {
+    
+    # -------- UI Outputs -----------
+    # Output: Weather distributions and stats
+        output$weather_dist1 <- renderPlot({
+          req(survey_weather())                        # reactiveVal — fine, triggers on new data
+          df <- survey_weather() |>
+            dplyr::mutate(countryyear = paste0(economy, ", ", year)) 
+          hv <- isolate(haz_vars()[1])                 # isolate: don't re-render if config changes
+          label <- isolate(selected_weather()$label[1])
+          var_name <- isolate(selected_weather()$name[1])
+          cont_binned <- isolate(selected_weather()$cont_binned[1])
+
+          # Check if this is a binned variable
+          if (!is.na(cont_binned) && cont_binned == "Binned") {
+            # Create bar chart for binned (categorical) data
+            
+            df_plot <- df |> dplyr::filter(!is.na(.data[[hv]]))
+            
+            p <- ggplot2::ggplot(df_plot, ggplot2::aes(x = .data[[hv]])) +
+              ggplot2::geom_bar(fill = "steelblue", alpha = 0.7) +
+              ggplot2::theme_minimal() +
+              ggplot2::labs(
+                title = "Distribution of bins",
+                x = stringr::str_wrap(paste0(label, "\n(as configured)"), 40),
+                y = "Count"
+              ) +
+              ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 45, hjust = 1))
+            
+            p
+          } else {
+            # Use ridge plot for continuous variables
+            ridge_distribution_plot(
+              df,
+              x_var = hv,
+              x_label = paste0(label, "\n(as configured)")
             )
           }
-          
-          # Load weather data for selected surveys
-          codes <- unique(selected_surveys()$code)
-          root <- unique(dirname(selected_surveys()$fpath))
-          paths_weather <- file.path(root, paste0(codes, "_weather.parquet"))
-          
-          # Only read files that exist
-          paths_weather <- paths_weather[file.exists(paths_weather)]
-          req(length(paths_weather) > 0)
-          
-          weather <- read_parquet_duckdb(paths_weather)
-
-          weather |>
-            # Keep h3 index, timestamp and selected weather variables
-            dplyr::select(h3, timestamp, dplyr::all_of(sw$name)) |>
-            # Filter to survey dates and h3 in survey, and distinct
-            dplyr::filter(h3 %in% survey_h3()$h3) |>
-            dplyr::filter(timestamp %in% weather_dates) |>
-            dplyr::distinct()
-        })
-
-        h3_weather <- reactive({
-          req(weather_data(), selected_weather())
-          
-          sw <- selected_weather()
-          out <- NULL
-          cutoffs_list <- list()
-
-          for (idx in seq_len(nrow(sw))) {
-            var_name <- sw$name[idx]
-            ref_start <- sw$ref_start[idx]
-            ref_end <- sw$ref_end[idx]
-            temporal_agg <- sw$temporalAgg[idx]
-            transformation <- sw$transformation[idx]
-            cont_binned <- sw$cont_binned[idx]
-            num_bins <- sw$num_bins[idx]
-            binning_method <- sw$binning_method[idx]
-
-            weather <- weather_data() |>
-              dplyr::group_by(.data$h3)
-
-            # Temporal aggregation - create lagged columns
-            if (is.finite(ref_start) && is.finite(ref_end)) {
-              for (l in seq(ref_start, ref_end)) {
-                colname <- paste0(var_name, "_", l)
-                weather <- weather |>
-                  dplyr::mutate(!!rlang::sym(colname) := dplyr::lag(.data[[var_name]], n = l, order_by = .data$timestamp))
-              }
-            }
-
-            # Filter out rows with missing data in the reference period
-            if (is.finite(ref_start) && is.finite(ref_end)) {
-              end_col <- paste0(var_name, "_", max(ref_start, ref_end))
-              if (end_col %in% names(weather)) {
-                weather <- weather |>
-                  dplyr::filter(!is.na(.data[[end_col]])) |>
-                  dplyr::ungroup()
-              } else {
-                weather <- weather |>
-                  dplyr::ungroup()
-              }
-            } else {
-              weather <- weather |>
-                dplyr::ungroup()
-            }
-
-            # Apply temporal aggregation function
-            if (temporal_agg == "Mean") {
-              weather <- weather |>
-                dplyr::mutate(haz = rowMeans(dplyr::across(dplyr::starts_with(paste0(var_name, "_"))), na.rm = TRUE))
-            } else if (temporal_agg == "Median") {
-              lag_cols <- names(weather)[grepl(paste0("^", var_name, "_"), names(weather))]
-              weather <- weather |>
-                dplyr::rowwise() |>
-                dplyr::mutate(haz = stats::median(dplyr::c_across(dplyr::all_of(lag_cols)), na.rm = TRUE)) |>
-                dplyr::ungroup()
-            } else if (temporal_agg == "Min") {
-              weather <- weather |>
-                dplyr::mutate(haz = do.call(pmin, c(dplyr::across(dplyr::starts_with(paste0(var_name, "_"))), na.rm = TRUE)))
-            } else if (temporal_agg == "Max") {
-              weather <- weather |>
-                dplyr::mutate(haz = do.call(pmax, c(dplyr::across(dplyr::starts_with(paste0(var_name, "_"))), na.rm = TRUE)))
-            } else if (temporal_agg == "Sum") {
-              weather <- weather |>
-                dplyr::mutate(haz = rowSums(dplyr::across(dplyr::starts_with(paste0(var_name, "_"))), na.rm = TRUE))
-            }
-
-            if (!"haz" %in% names(weather)) {
-              weather <- weather |>
-                dplyr::mutate(haz = NA_real_)
-            }
-
-            # Transform weather variable (standardize, anomaly, etc.)
-            if (!is.na(transformation) && 
-                !(transformation == "None" || var_name %in% c("spi6", "spei6")) && 
-                "haz" %in% names(weather)) {
-              
-              weather <- weather |>
-                dplyr::mutate(
-                  year = lubridate::year(.data$timestamp),
-                  month = lubridate::month(.data$timestamp)
-                )
-
-              climate_ref <- weather |>
-                dplyr::filter(.data$year >= 1991 & .data$year <= 2020) |>
-                dplyr::summarise(
-                  mean = mean(.data$haz, na.rm = TRUE),
-                  sd = stats::sd(.data$haz, na.rm = TRUE),
-                  .by = c(.data$h3, .data$month)
-                )
-
-              if (transformation == "Deviation from mean") {
-                weather <- weather |>
-                  dplyr::left_join(climate_ref, by = c("h3", "month")) |>
-                  dplyr::mutate(haz = .data$haz - .data$mean)
-              } else if (transformation == "Standardized anomaly") {
-                weather <- weather |>
-                  dplyr::left_join(climate_ref, by = c("h3", "month")) |>
-                  dplyr::mutate(haz = (.data$haz - .data$mean) / .data$sd)
-              }
-            }
-
-            # Bin weather variable (non-linear effects)
-            if (!is.na(cont_binned) && cont_binned == "Binned") {
-              haz_clean <- weather$haz[!is.na(weather$haz)]
-              
-              if (length(haz_clean) > 0 && !is.na(num_bins) && !is.na(binning_method)) {
-                
-                if (binning_method == "Equal frequency") {
-                  cutoffs <- quantile(haz_clean, probs = seq(0, 1, length.out = num_bins + 1), na.rm = TRUE)
-                  weather <- weather |>
-                    dplyr::mutate(haz = cut(.data$haz, breaks = cutoffs, include.lowest = TRUE))
-                  
-                  cutoffs_list[[var_name]] <- cutoffs
-                  message("Equal frequency cutoffs for ", var_name, ": ", paste(round(cutoffs, 3), collapse = ", "))
-                  
-                } else if (binning_method == "Equal width") {
-                  cutoffs <- seq(min(haz_clean, na.rm = TRUE), max(haz_clean, na.rm = TRUE), length.out = num_bins + 1)
-                  weather <- weather |>
-                    dplyr::mutate(haz = cut(.data$haz, breaks = cutoffs, include.lowest = TRUE))
-                  
-                  cutoffs_list[[var_name]] <- cutoffs
-                  message("Equal width cutoffs for ", var_name, ": ", paste(round(cutoffs, 3), collapse = ", "))
-                  
-                } else if (binning_method == "K-means") {
-                  set.seed(123) # for reproducibility
-                  km <- kmeans(haz_clean, centers = num_bins)
-                  
-                  # Create cutoffs from cluster centers
-                  centers <- sort(km$centers[, 1])
-                  cutoffs <- c(min(haz_clean), (centers[-length(centers)] + centers[-1]) / 2, max(haz_clean))
-                  
-                  weather <- weather |>
-                    dplyr::mutate(haz = cut(.data$haz, breaks = cutoffs, include.lowest = TRUE, labels = FALSE))
-                  
-                  cutoffs_list[[var_name]] <- cutoffs
-                  message("K-means cutoffs for ", var_name, ": ", paste(round(cutoffs, 3), collapse = ", "))
-                }
-              }
-            }
-
-            weather <- weather |>
-              dplyr::select(.data$h3, .data$timestamp, .data$haz) |>
-              dplyr::rename_with(~ paste0("haz_", var_name), .cols = dplyr::starts_with("haz")) |>
-              dplyr::arrange(.data$h3, .data$timestamp)
-
-            if (is.null(out)) {
-              out <- weather
-            } else {
-              out <- dplyr::full_join(out, weather, by = c("h3", "timestamp"))
-            }
-          }
-
-          # Store cutoffs
-          bin_cutoffs(cutoffs_list)
-          
-          out
-        })
-
-        # Get haz variable names
-        haz_vars <- reactive({
-          req(selected_weather())
-          paste0("haz_", selected_weather()$name)
-        })
-
-        loc_weather <- reactive({
-          req(h3_weather(), survey_h3())
-          h3 <- survey_h3()
-          hw <- h3_weather()
-          join_cols <- intersect(c("h3", "timestamp"), intersect(names(h3), names(hw)))
-          if (!length(join_cols)) {
-            return(NULL)
-          }
-
-          data <- dplyr::left_join(h3, hw, by = join_cols)
-
-          by_cols <- intersect(
-            c("code", "year", "survname", "loc_id", "timestamp"),
-            names(data)
-          )
-          if (!length(by_cols)) {
-            return(NULL)
-          }
-
-          if ("pop_2020" %in% names(data)) {
-            data <- data |>
-              dplyr::summarise(
-                dplyr::across(dplyr::starts_with("haz"), ~ sum(.x * .data$pop_2020, na.rm = TRUE) / sum(.data$pop_2020, na.rm = TRUE)),
-                .by = dplyr::all_of(by_cols)
-              )
-          } else {
-            data <- data |>
-              dplyr::summarise(
-                dplyr::across(dplyr::starts_with("haz"), ~ mean(.x, na.rm = TRUE)),
-                .by = dplyr::all_of(by_cols)
-              )
-          }
-
-          data |>
-            dplyr::mutate(loc_id = as.character(.data$loc_id))
-        })
-
-        survey_weather <- reactive({
-          req(loc_weather(), survey_data())
-          sd <- survey_data()
-          lw <- loc_weather()
-          join_cols <- intersect(c("code", "year", "survname", "loc_id", "timestamp"), intersect(names(sd), names(lw)))
-          if (!length(join_cols)) {
-            return(NULL)
-          }
-
-          sw <- sd |>
-            dplyr::left_join(lw, by = join_cols) |>
-            dplyr::mutate(year = as.factor(.data$year)) |>
-            dplyr::group_by(.data$code, .data$year, .data$survname) |>
-            dplyr::mutate(weight = .data$weight / sum(.data$weight, na.rm = TRUE)) |>
-            dplyr::ungroup()
-
-          sw
-        })
-
-        # Output: Weather distributions and stats
-        output$weather_dist1 <- renderPlot({
-          req(survey_weather(), haz_vars())
-          df <- survey_weather()
-          hv <- haz_vars()[1]
-
-          if (!"countryyear" %in% names(df) && all(c("economy", "year") %in% names(df))) {
-            df <- dplyr::mutate(df, countryyear = paste0(economy, ", ", year))
-          }
-
-          label <- selected_weather()$label[1]
-          ridge_distribution_plot(
-            df,
-            x_var = hv,
-            x_label = paste0(label, "\n(as configured)")
-          )
         })
 
         output$weather_dist2 <- renderPlot({
-          req(length(haz_vars()) > 1, survey_weather(), haz_vars())
-          df <- survey_weather()
-          hv <- haz_vars()[2]
-
-          if (!"countryyear" %in% names(df) && all(c("economy", "year") %in% names(df))) {
-            df <- dplyr::mutate(df, countryyear = paste0(economy, ", ", year))
+          req(survey_weather())                        # reactiveVal — fine, triggers on new data
+          df <- survey_weather() |>
+            dplyr::mutate(countryyear = paste0(economy, ", ", year)) 
+          hv <- isolate(haz_vars()[2])                 # isolate: don't re-render if config changes
+          label <- isolate(selected_weather()$label[2])
+          var_name <- isolate(selected_weather()$name[2])
+          cont_binned <- isolate(selected_weather()$cont_binned[2])
+          
+          # Check if this is a binned variable
+          if (!is.na(cont_binned) && cont_binned == "Binned") {
+            # Create bar chart for binned (categorical) data
+            
+            df_plot <- df |> dplyr::filter(!is.na(.data[[hv]]))
+            
+            p <- ggplot2::ggplot(df_plot, ggplot2::aes(x = .data[[hv]])) +
+              ggplot2::geom_bar(fill = "steelblue", alpha = 0.7) +
+              ggplot2::theme_minimal() +
+              ggplot2::labs(
+                title = "Distribution of bins",
+                x = stringr::str_wrap(paste0(label, "\n(as configured)"), 40),
+                y = "Count"
+              ) +
+              ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 45, hjust = 1))
+            
+            p
+          } else {
+            # Use ridge plot for continuous variables
+            ridge_distribution_plot(
+              df,
+              x_var = hv,
+              x_label = paste0(label, "\n(as configured)"),
+              wrap_width = 40
+            )
           }
-
-          label <- selected_weather()$label[2]
-          ridge_distribution_plot(
-            df,
-            x_var = hv,
-            x_label = paste0(label, "\n(as configured)"),
-            wrap_width = 40
-          )
         })
 
         output$binscatter1 <- renderPlot({
-          req(survey_weather(), haz_vars(), selected_outcome())
+          req(survey_weather(), selected_outcome())                        # reactiveVal — fine, triggers on new data
           df <- survey_weather()
-          hv <- haz_vars()[1]
           so <- selected_outcome()
-          y_var <- so$name[1]
+          sw <- isolate(selected_weather())
+          y_var <- so$name
+          y_label <- so$label
+          x_label <- sw$label[1]
+          hv <- isolate(haz_vars()[1])   
 
           if (is.null(y_var) || !(y_var %in% names(df))) {
             plot.new(); title(main = "Outcome variable not available")
             return(invisible(NULL))
           }
-
-          x_label <- selected_weather()$label[1]
-          y_label <- so$label[1]
 
           df_plot <- df |>
             dplyr::filter(is.finite(.data[[hv]]), is.finite(.data[[y_var]]))
@@ -420,19 +443,19 @@ mod_1_05_weatherstats_server <- function(
         })
 
         output$binscatter2 <- renderPlot({
-          req(length(haz_vars()) > 1, survey_weather(), haz_vars(), selected_outcome())
+          req(survey_weather(), selected_outcome())                        # reactiveVal — fine, triggers on new data
           df <- survey_weather()
-          hv <- haz_vars()[2]
           so <- selected_outcome()
-          y_var <- so$name[1]
+          sw <- isolate(selected_weather())
+          y_var <- so$name
+          y_label <- so$label
+          x_label <- sw$label[2]
+          hv <- isolate(haz_vars()[2])  
 
           if (is.null(y_var) || !(y_var %in% names(df))) {
             plot.new(); title(main = "Outcome variable not available")
             return(invisible(NULL))
           }
-
-          x_label <- selected_weather()$label[2]
-          y_label <- so$label[1]
 
           df_plot <- df |>
             dplyr::filter(is.finite(.data[[hv]]), is.finite(.data[[y_var]]))
@@ -470,33 +493,29 @@ mod_1_05_weatherstats_server <- function(
               size = 3
             )
           }
-
           p
         })
 
-        output$weather_stats <- DT::renderDT({
-          req(survey_weather(), haz_vars())
-          weighted_summary_long(survey_weather(), vars = haz_vars())
-        }, rownames = FALSE)
-
-        output$weather_varlist <- DT::renderDT({
-          req(selected_weather())
+        # summary stats for weather variables
+        output$weather_stats_table <- DT::renderDT({
+          req(survey_weather())
+          df <- survey_weather()
+          # weather variables start with haz_
+          df <- dplyr::mutate(df, countryyear = paste0(economy, ", ", year))
+          vars <- names(df)[grepl("^haz_", names(df))]
+          if (length(vars) == 0) return(data.frame(Note = "No weather variables found"))  
+          weighted_summary_long(df, vars = vars)
+        }, rownames = FALSE,
+          options = list(dom = "t", paging = FALSE, searching = FALSE, info = FALSE),
+          class = "compact")
+    
+        # selected weather data
+        output$selected_weather <- DT::renderDT({
           selected_weather()
-        }, rownames = FALSE)
+        }, rownames = FALSE,
+          options = list(dom = "t", paging = FALSE, searching = FALSE, info = FALSE),
+          class = "compact")
 
-        output$bin_cutoffs_display <- renderText({
-          cutoffs <- bin_cutoffs()
-          if (length(cutoffs) == 0) {
-            "No binned variables"
-          } else {
-            paste(
-              sapply(names(cutoffs), function(var) {
-                paste0(var, ": ", paste(round(cutoffs[[var]], 3), collapse = ", "))
-              }),
-              collapse = "\n"
-            )
-          }
-        })
 
         shiny::appendTab(
           inputId = tabset_id,
@@ -522,29 +541,28 @@ mod_1_05_weatherstats_server <- function(
             shiny::br(),
             shiny::h4("Weather summary stats"),
             shiny::helpText("Summary statistics are shown for the configured weather variables. Sample weights are used.", style = "font-size: 12px;"),
-            DT::DTOutput(ns("weather_stats")),
+            DT::DTOutput(ns("weather_stats_table")),
             shiny::br(),
-            shiny::h4("Bin cutoffs (if applicable)"),
-            shiny::verbatimTextOutput(ns("bin_cutoffs_display")),
-            shiny::br(),
-            shiny::h4("Weather variable configuration"),
-            DT::DTOutput(ns("weather_varlist"))
+            shiny::h4("Selected weather variables"),
+            DT::DTOutput(ns("selected_weather"))
           ),
           select = TRUE,
           session = tabset_session
         )
-
+    
         weather_tab_added(TRUE)
       }
 
       if (weather_tab_added()) {
         try(shiny::updateTabsetPanel(tabset_session, inputId = tabset_id, selected = "weather_desc"), silent = TRUE)
       }
-    }, ignoreInit = TRUE, ignoreNULL = TRUE)
+}, ignoreInit = TRUE, ignoreNULL = TRUE)
     
-    # Return API
+    # --------- Module return API -----------
     list(
-      bin_cutoffs = bin_cutoffs
+      weather_data = weather_data,
+      loc_weather = loc_weather,
+      survey_weather = survey_weather
     )
-  })
+      })
 }

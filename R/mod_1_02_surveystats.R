@@ -22,6 +22,7 @@ mod_1_02_surveystats_server <- function(
     id,
     varlist, 
     selected_surveys,
+    selected_outcome = NULL,
     cpi_ppp = cpi_ppp, 
     tabset_id,
     tabset_session = NULL
@@ -128,6 +129,14 @@ mod_1_02_surveystats_server <- function(
         
         paths <- isolate(selected_surveys()$fpath)
         df <- read_parquet_duckdb(paths)
+
+        # add timestamp for interview month/year to merge with weather later
+        df <- df |>
+          dplyr::mutate(
+            timestamp = as.Date(paste0(int_year, "-", int_month, "-01")),
+            month = lubridate::month(timestamp)
+          )
+        # store in reactiveVal for reuse
         survey_data_r(df)
         
         removeNotification(busy_id)
@@ -143,10 +152,7 @@ mod_1_02_surveystats_server <- function(
           # Define all outputs
           output$interview_date <- renderPlot({
             req(survey_data())
-            df <- survey_data() |>
-              dplyr::mutate(
-                timestamp = as.Date(paste0(.data$int_year, "-", .data$int_month, "-01"))
-              )
+            df <- survey_data() 
 
             if (!"countryyear" %in% names(df) && all(c("economy", "year") %in% names(df))) {
               df <- dplyr::mutate(df, countryyear = paste0(economy, ", ", year))
@@ -164,8 +170,6 @@ mod_1_02_surveystats_server <- function(
               labs(title = "", x = "", y = "Number of households", fill = "")
           })
 
-          map_available <- !is.null(survey_geo) && requireNamespace("leaflet", quietly = TRUE)
-          if (map_available) {
             output$map <- leaflet::renderLeaflet({
               req(survey_geo())
               polygon_data <- survey_geo()
@@ -200,7 +204,6 @@ mod_1_02_surveystats_server <- function(
                   lat2 = max(sf::st_bbox(polygon_data)[4])
                 )
             })
-          }
           
           # welfare distribution plot
           output$welfare_dist <- renderPlot({
@@ -342,18 +345,39 @@ mod_1_02_surveystats_server <- function(
             weighted_summary_long(df, vars = vars)
           }, rownames = FALSE)
 
+          # selected surveys table
+          output$selected_surveys <- DT::renderDT({
+            req(selected_surveys())
+            df <- selected_surveys() |>
+              dplyr::select(-fpath)
+          }, rownames = FALSE,
+              options = list(dom = "t", paging = FALSE, searching = FALSE, info = FALSE),
+              class = "compact")
+
+          # selected outcome variable from mod_1_03_outcome if it exists
+          output$selected_outcome_section <- renderUI({
+          if (is.null(selected_outcome)) return(NULL)  # selected_outcome not passed at all
+          req(!is.null(selected_outcome()))             # selected_outcome() returns NULL
+          shiny::tagList(
+            shiny::br(),
+            shiny::h4("Selected outcome variable"),
+            DT::DTOutput(ns("selected_outcome"))
+          )
+        })
+
+        output$selected_outcome <- DT::renderDT({
+          if (is.null(selected_outcome)) return(NULL)
+          req(!is.null(selected_outcome()))
+          selected_outcome()
+        }, rownames = FALSE,
+          options = list(dom = "t", paging = FALSE, searching = FALSE, info = FALSE),
+          class = "compact")
+
           # Render survey stat outputs
           tryCatch(
             {
-              map_ui <- if (map_available) {
-                leaflet::leafletOutput(ns("map"), height = "300px")
-              } else {
-                shiny::div(
-                  class = "text-muted",
-                  "Map unavailable (missing leaflet and/or survey_geo)."
-                )
-              }
-
+              map_ui <- leaflet::leafletOutput(ns("map"), height = "300px")
+              
               shiny::appendTab(
                 inputId = tabset_id,
                 shiny::tabPanel(
@@ -384,7 +408,12 @@ mod_1_02_surveystats_server <- function(
                   shiny::h4("Firm characteristics"),
                   DT::DTOutput(ns("firm_stats")),
                   shiny::h4("Area characteristics"),
-                  DT::DTOutput(ns("area_stats"))
+                  DT::DTOutput(ns("area_stats")),
+                  shiny::br(),
+                  shiny::h4("Selected surveys"),
+                  DT::DTOutput(ns("selected_surveys")),
+                  shiny::br(),
+                  shiny::uiOutput(ns("selected_outcome_section"))
                 ),
                 select = TRUE,
                 menuName = NULL,

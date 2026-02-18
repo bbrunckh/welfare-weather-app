@@ -83,6 +83,7 @@ mod_1_modelling_server <- function(id, survey_list_master, varlist, pov_lines, c
       varlist = varlist,
       cpi_ppp = cpi_ppp,
       selected_surveys = mod_1_01_sample_api$selected_surveys,
+      selected_outcome = mod_1_03_outcome_api$selected_outcome,
       tabset_id = "step1_output_tabs",
       tabset_session = session
     )
