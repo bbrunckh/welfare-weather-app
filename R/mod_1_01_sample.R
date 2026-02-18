@@ -144,21 +144,21 @@ output$sample_ui <- renderUI({
       Filter(Negate(is.null), years_list)
     })
 
-    # --------- Reactive Load Data button -----------
-    output$load_button_ui <- renderUI({
-      req(input$economy)
+    # # --------- Reactive Load Data button -----------
+    # output$load_button_ui <- renderUI({
+    #   req(input$economy)
       
-      years <- selected_years_by_code()
+    #   years <- selected_years_by_code()
       
-      # Check if at least one economy has years selected
-      if (length(years) == 0 || all(sapply(years, length) == 0)) {
-        return(NULL)
-      }
+    #   # Check if at least one economy has years selected
+    #   if (length(years) == 0 || all(sapply(years, length) == 0)) {
+    #     return(NULL)
+    #   }
       
-      actionButton(ns("load_data"), "Load Data", class = "btn-primary")
-    })
+    #   actionButton(ns("load_data"), "Load Data", class = "btn-primary")
+    # })
 
-    # --------- Reactive list of selected surveys -----------
+    # --------- Reactive to hold selected surveys -----------
     selected_surveys <- reactive({
       req(input$economy)
       years_by_code <- selected_years_by_code()
@@ -176,89 +176,10 @@ output$sample_ui <- renderUI({
       selected_surveys
     })
     
-    # --------- ReactiveVal to hold loaded data (set by observeEvent below) -----------
-    survey_data_r <- reactiveVal(NULL)
-    
-    # --------- Download and read the selected survey files WHEN the user clicks Load Data -----------
-    observeEvent(input$load_data, {
-
-      # require that selected_surveys() is not empty
-      req(length(selected_surveys()) > 0)
-      selected_surveys <- isolate(selected_surveys())
-
-      busy_id <- showNotification(
-        "Loading local files…",
-        duration = NULL,
-        type = "message"
-      )
-      # Read all parquet files
-      paths <- selected_surveys$fpath
-      df <- read_parquet_duckdb(paths)
-
-      removeNotification(busy_id)
-      showNotification(
-        paste0("Loaded ", length(paths), " files (", nrow(df), " rows)."),
-        type = "message"
-      )
-
-      survey_data_r(df)
-    }, ignoreInit = TRUE)
-    
-    # --------- Expose survey_data() reactive -----------
-    survey_data <- reactive({
-      survey_data_r()
-    })
-
-    # --------- Survey H3 data (used for survey_geo & weather merge) ---
-    survey_h3 <- reactive({
-      req(survey_data())  
-      # Build expected H3 file paths 
-      paths <- selected_surveys()$fpath
-      paths_h3 <- sub("_[^_]+\\.parquet$", "_h3.parquet", paths)
-      read_parquet_duckdb(paths_h3)
-    })
-
-    # --------- Survey interview locations (sf polygons/points) -----------
-    survey_geo <- reactive({
-      req(survey_h3())
-
-      h3 <- survey_h3() 
-
-      # Connect to DuckDB and load extensions
-      con <- DBI::dbConnect(duckdb::duckdb(), dbdir = ":memory:")
-      DBI::dbExecute(con, "INSTALL spatial;")
-      DBI::dbExecute(con, "INSTALL h3;")
-      DBI::dbExecute(con, "LOAD spatial;")
-      DBI::dbExecute(con, "LOAD h3;")
-
-      # Register the data frame as a DuckDB table
-      DBI::dbWriteTable(con, "h3", h3)
-
-      # Run the spatial query
-      loc <- DBI::dbGetQuery(con, "
-        SELECT 
-          code, 
-          year, 
-          survname, 
-          loc_id,
-          ST_AsText(st_union_agg(st_geomfromtext(h3_cell_to_boundary_wkt(h3)))) AS geom
-        FROM h3
-        GROUP BY code, year, survname, loc_id
-      ")
-
-      DBI::dbDisconnect(con, shutdown = TRUE)
-
-      # Convert WKT geometry to sf if possible.
-      loc_geo <- sf::st_as_sf(loc, wkt = "geom", crs = 4326)
-      loc_geo
-    })
     
     # --------- Module return API -----------
     list(
-      selected_surveys = selected_surveys,
-      survey_data = survey_data,
-      survey_geo = survey_geo,
-      survey_h3 = survey_h3
+      selected_surveys = selected_surveys
     )
   })
 }

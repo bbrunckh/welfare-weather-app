@@ -1,4 +1,4 @@
-#' 1_02_outcome UI Function
+#' 1_03_outcome UI Function
 #'
 #' @description A shiny Module.
 #'
@@ -7,7 +7,7 @@
 #' @noRd 
 #'
 #' @importFrom shiny NS tagList 
-mod_1_02_outcome_ui <- function(id) {
+mod_1_03_outcome_ui <- function(id) {
   ns <- NS(id)
   tagList(
     wellPanel(
@@ -19,10 +19,10 @@ mod_1_02_outcome_ui <- function(id) {
   )
 }
     
-#' 1_02_outcome Server Functions
+#' 1_03_outcome Server Functions
 #'
 #' @noRd 
-mod_1_02_outcome_server <- function(id, varlist, survey_data) {
+mod_1_03_outcome_server <- function(id, varlist, survey_data) {
   moduleServer(id, function(input, output, session){
     ns <- session$ns
 
@@ -85,7 +85,7 @@ mod_1_02_outcome_server <- function(id, varlist, survey_data) {
   
       radioButtons(
         inputId = ns("currency"),
-        label = "Currency units",
+        label = "Currency",
         choices = c(
           "PPP (2021)" = "PPP",
           "LCU (2021)" = "LCU"

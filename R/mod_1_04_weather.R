@@ -34,7 +34,7 @@ mod_1_04_weather_server <- function(id, varlist, selected_surveys, survey_data, 
         inputId = ns("weather_variable_selector"),
         label = "Weather variables",
         choices = setNames(wl$name, wl$label),
-        selected = c(wl$name[1], wl$name[10]),
+        selected = c(wl$name[1]),
         multiple = TRUE,
         options = list(
           placeholder = "Select up to 2 weather variables",
@@ -50,14 +50,15 @@ mod_1_04_weather_server <- function(id, varlist, selected_surveys, survey_data, 
       # get weather variables from varlist
       wl <- varlist() |> 
         dplyr::filter(weather == 1) |> 
-        dplyr::pull(name, label, units)
+        dplyr::select(name, label, units)
 
       ui_list <- lapply(seq_along(input$weather_variable_selector), function(i) {
         current_var_name <- input$weather_variable_selector[i]
-        id_prefix <- paste0(wl[wl$name == current_var_name, "name"], "_")
+        current_var_info <- wl[wl$name == current_var_name, ]
+        id_prefix <- paste0(current_var_info$name[i], "_")
 
         tagList(
-          shiny::p(paste0(current_var_name, ":")),
+          shiny::p(paste0(current_var_info$label, ":")),
           shiny::actionButton(ns(paste0(id_prefix, "toggle")), "Configure"),
           shiny::conditionalPanel(
             condition = paste0("input['", ns(paste0(id_prefix, "toggle")), "'] % 2 == 1"),
@@ -71,7 +72,7 @@ mod_1_04_weather_server <- function(id, varlist, selected_surveys, survey_data, 
                 max = 12,
                 value = c(1, 1)
               ),
-              if (wl[wl$name == current_var_name, ]$units %in% c("days", "mm")) {
+              if (current_var_info$units %in% c("days", "mm")) {
                 shiny::selectInput(
                   ns(paste0(id_prefix, "temporalAgg")),
                   "Aggregation over reference period:",
@@ -86,7 +87,7 @@ mod_1_04_weather_server <- function(id, varlist, selected_surveys, survey_data, 
                   selected = "Mean"
                 )
               },
-              if (wl[wl$name == current_var_name, ]$units %in% c("")) {
+              if (current_var_info$units %in% c("")) {
                 shiny::radioButtons(
                   ns(paste0(id_prefix, "varConstruction")),
                   "Transformation",
@@ -172,7 +173,9 @@ selected_weather <- reactive({
     transformation <- input[[paste0(id_prefix, "varConstruction")]] %||% trans_default
     
     cont_binned <- input[[paste0(id_prefix, "contOrBinned")]] %||% "Continuous"
-    
+    num_bins <- if (cont_binned == "Binned") input[[paste0(id_prefix, "numBins")]] %||% 5 else NA_integer_
+    binning_method <- if (cont_binned == "Binned") input[[paste0(id_prefix, "binningMethod")]] %||% "Equal frequency" else NA_character_
+
     poly <- input[[paste0(id_prefix, "polynomial")]] %||% character(0)
     poly_str <- if (length(poly) > 0) paste(poly, collapse = ", ") else ""
     
@@ -183,6 +186,8 @@ selected_weather <- reactive({
       temporalAgg = temporal_agg,
       transformation = transformation,
       cont_binned = cont_binned,
+      num_bins = num_bins,
+      binning_method = binning_method,
       polynomial = poly_str
     )
   })
@@ -193,228 +198,9 @@ selected_weather <- reactive({
   var_info |>
     dplyr::left_join(specs_df, by = "name")
 })
-
-    weather_data <- reactive({
-      req(selected_surveys(), selected_weather(), survey_data(), survey_h3())
-      
-      # get survey dates from survey data 
-      df <- survey_data()
-
-      # int_year and int_month variables, create timestamp date variable as first day of interview month
-      survey_dates <- df |>
-        dplyr::mutate(
-          int_year = as.integer(.data$int_year),
-          int_month = as.integer(.data$int_month),
-          timestamp = as.Date(paste0(.data$int_year, "-", .data$int_month, "-01"))
-        ) |>
-        dplyr::pull(.data$timestamp) |>
-        stats::na.omit() |>
-        as.Date()
-
-  if (!length(survey_dates) || all(!is.finite(survey_dates))) return(NULL)
-
-  survey_date_min <- min(survey_dates, na.rm = TRUE)
-  survey_date_max <- max(survey_dates, na.rm = TRUE)
-  if (!is.finite(survey_date_min) || !is.finite(survey_date_max)) return(NULL)
-      weather_dates <- seq.Date(from = survey_date_min, to = survey_date_max, by = "1 month")
-      if (length(weather_dates)) {
-        weather_dates <- seq.Date(
-          from = min(weather_dates) - 365,
-          to = max(weather_dates),
-          by = "1 month"
-        )
-      }
-      
-      # load weather data for selected surveys
-      codes <- unique(selected_surveys()$code)
-      root <- unique(dirname(selected_surveys()$fpath))
-      paths_weather <- file.path(root, paste0(codes, "_weather.parquet"))
-      weather <- read_parquet_duckdb(paths_weather)
-
-      weather |>
-        # keep h3 index, timestamp and selected weather variables
-        dplyr::select(h3, timestamp, input$weather_variable_selector ) |>
-        # filter to survey dates and h3 in survey, and distinct
-        dplyr::filter(h3 %in% survey_h3()$h3) |>
-        dplyr::filter(timestamp %in% weather_dates) |>
-        dplyr::distinct()
-    })
-
-    h3_weather <- reactive({
-      req(weather_data(), survey_h3())
-      out <- NULL
-
-      for (i in input$weather_variable_selector) {
-        id_prefix <- paste0(i, "_")
-        ref_period <- input[[paste0(id_prefix, "relativePeriod")]]
-        if (is.null(ref_period) || length(ref_period) < 2 || anyNA(ref_period)) {
-          ref_period <- c(1, 1)
-        }
-        ref_start <- as.numeric(ref_period[1])
-        ref_end <- as.numeric(ref_period[2])
-
-        temporal_agg <- input[[paste0(id_prefix, "temporalAgg")]] %||% ""
-        transformation <- input[[paste0(id_prefix, "varConstruction")]] %||% ""
-        cont_binned <- input[[paste0(id_prefix, "contOrBinned")]] %||% ""
-
-        weather <- weather_data() |>
-          dplyr::group_by(.data$h3)
-
-        if (is.finite(ref_start) && is.finite(ref_end)) {
-          for (l in seq(ref_start, ref_end)) {
-          colname <- paste0(i, "_", l)
-          weather <- weather |>
-            dplyr::mutate(!!rlang::sym(colname) := dplyr::lag(.data[[i]], n = l, order_by = .data$timestamp))
-          }
-        }
-
-        if (is.finite(ref_start) && is.finite(ref_end)) {
-          end_col <- paste0(i, "_", max(ref_start, ref_end))
-          if (end_col %in% names(weather)) {
-            weather <- weather |>
-              dplyr::filter(!is.na(.data[[end_col]])) |>
-              dplyr::ungroup()
-          } else {
-            weather <- weather |>
-              dplyr::ungroup()
-          }
-        } else {
-          weather <- weather |>
-            dplyr::ungroup()
-        }
-
-        if (temporal_agg == "Mean") {
-          weather <- weather |>
-            dplyr::mutate(haz = rowMeans(dplyr::across(dplyr::starts_with(paste0(i, "_")))))
-        }
-        if (temporal_agg == "Median") {
-          weather <- weather |>
-            dplyr::mutate(haz = apply(dplyr::select(., dplyr::starts_with(paste0(i, "_"))), 1, stats::median, na.rm = TRUE))
-        }
-        if (temporal_agg == "Min") {
-          weather <- weather |>
-            dplyr::mutate(haz = do.call(pmin, c(dplyr::across(dplyr::starts_with(paste0(i, "_"))), na.rm = TRUE)))
-        }
-        if (temporal_agg == "Max") {
-          weather <- weather |>
-            dplyr::mutate(haz = do.call(pmax, c(dplyr::across(dplyr::starts_with(paste0(i, "_"))), na.rm = TRUE)))
-        }
-        if (temporal_agg == "Sum") {
-          weather <- weather |>
-            dplyr::mutate(haz = rowSums(dplyr::across(dplyr::starts_with(paste0(i, "_")))))
-        }
-
-        if (!"haz" %in% names(weather)) {
-          weather <- weather |>
-            dplyr::mutate(haz = NA_real_)
-        }
-
-        if (!(transformation == "None" || i %in% c("spi6", "spei6")) && "haz" %in% names(weather)) {
-          weather <- weather |>
-            dplyr::mutate(
-              year = lubridate::year(.data$timestamp),
-              month = lubridate::month(.data$timestamp)
-            )
-
-          climate_ref <- weather |>
-            dplyr::filter(.data$year >= 1991 & .data$year <= 2020) |>
-            dplyr::summarise(
-              mean = mean(.data$haz, na.rm = TRUE),
-              sd = stats::sd(.data$haz, na.rm = TRUE),
-              .by = c(.data$h3, .data$month)
-            )
-
-          if (transformation == "Deviation from mean") {
-            weather <- weather |>
-              dplyr::left_join(climate_ref, by = c("h3", "month")) |>
-              dplyr::mutate(haz = .data$haz - .data$mean)
-          } else if (transformation == "Standardized anomaly") {
-            weather <- weather |>
-              dplyr::left_join(climate_ref, by = c("h3", "month")) |>
-              dplyr::mutate(haz = (.data$haz - .data$mean) / .data$sd)
-          }
-        }
-
-        if (cont_binned == "Binned") {
-          # not implemented yet
-        }
-
-        weather <- weather |>
-          dplyr::select(.data$h3, .data$timestamp, .data$haz) |>
-          dplyr::rename_with(~ paste0("haz_", i), .cols = dplyr::starts_with("haz")) |>
-          dplyr::arrange(.data$h3, .data$timestamp)
-
-        if (is.null(out)) {
-          out <- weather
-        } else {
-          out <- dplyr::full_join(out, weather, by = c("h3", "timestamp"))
-        }
-      }
-
-      out
-    })
-
-    loc_weather <- reactive({
-      req(h3_weather())
-      h3 <- survey_h3()
-      hw <- h3_weather()
-      join_cols <- intersect(c("h3", "timestamp"), intersect(names(h3), names(hw)))
-      if (!length(join_cols)) {
-        return(NULL)
-      }
-
-      data <- dplyr::left_join(h3, hw, by = join_cols)
-
-      by_cols <- intersect(
-        c("code", "year", "survname", "loc_id", "timestamp"),
-        names(data)
-      )
-      if (!length(by_cols)) {
-        return(NULL)
-      }
-
-      if ("pop_2020" %in% names(data)) {
-        data <- data |>
-          dplyr::summarise(
-            dplyr::across(dplyr::starts_with("haz"), ~ sum(.x * .data$pop_2020, na.rm = TRUE) / sum(.data$pop_2020, na.rm = TRUE)),
-            .by = dplyr::all_of(by_cols)
-          )
-      } else {
-        data <- data |>
-          dplyr::summarise(
-            dplyr::across(dplyr::starts_with("haz"), ~ mean(.x, na.rm = TRUE)),
-            .by = dplyr::all_of(by_cols)
-          )
-      }
-
-      data |>
-        dplyr::mutate(loc_id = as.character(.data$loc_id))
-    })
-
-    survey_weather <- reactive({
-      req(loc_weather())
-      sd <- survey_data()
-      lw <- loc_weather()
-      join_cols <- intersect(c("code", "year", "survname", "loc_id", "timestamp"), intersect(names(sd), names(lw)))
-      if (!length(join_cols)) {
-        return(NULL)
-      }
-
-      sw <- sd |>
-        dplyr::left_join(lw, by = join_cols) |>
-        dplyr::mutate(year = as.factor(.data$year)) |>
-        dplyr::group_by(.data$code, .data$year, .data$survname) |>
-        dplyr::mutate(weight = .data$weight / sum(.data$weight, na.rm = TRUE)) |>
-        dplyr::ungroup()
-
-      sw
-    })
-
+    # --------- Module return API -----------
     list(
-      selected_weather = selected_weather,
-      h3_weather = h3_weather,
-      loc_weather = loc_weather,
-      survey_weather = survey_weather
+      selected_weather = selected_weather
     )
   })
 }

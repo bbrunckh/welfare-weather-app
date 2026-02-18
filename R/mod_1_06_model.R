@@ -51,7 +51,7 @@ mod_1_06_model_server <- function(
       so <- selected_outcome()
       vl <- varlist_r()
       if (is.null(so) || is.null(vl)) return(NULL)
-      lab <- vl$label[vl$name == so]
+      lab <- vl$label[vl$name == so$name$name]
       if (length(lab)) as.character(lab[[1]]) else so
     })
 
@@ -60,7 +60,7 @@ mod_1_06_model_server <- function(
       vl <- varlist_r()
       if (is.null(so)) return(NULL)
       if (!is.null(vl) && "type" %in% names(vl)) {
-        dt <- vl$type[vl$name == so]
+        dt <- vl$type[vl$name == so$name]
         if (length(dt) && !is.na(dt[[1]]) && tolower(dt[[1]]) == "logical") return("Binary")
       }
       df <- survey_weather()
