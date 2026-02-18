@@ -28,11 +28,11 @@ mod_1_06_model_ui <- function(id) {
 #' @noRd 
 mod_1_06_model_server <- function(
     id,
-    survey_weather,
-    haz_vars,
-    weather_settings,
     varlist,
-    selected_outcome
+    selected_surveys,
+    selected_outcome,
+    selected_weather,
+    survey_weather
 ){
   moduleServer(id, function(input, output, session){
     ns <- session$ns
@@ -463,16 +463,8 @@ mod_1_06_model_server <- function(
     }, ignoreInit = TRUE)
 
       list(
-        model_fit = model_fit_val,
-        outcome_type = outcome_type,
-        outcome_label = outcome_label,
-        interaction_terms = interaction_vars,
-        weather_terms = weather_terms_val,
-        hh_cov = hh_cov_val,
-        area_cov = area_cov_val,
-        other_cov = other_cov_val,
-        fe = fe_val,
-        y_var = y_var_val
+        # selected_model = selected_model,
+        model_fit = model_fit_val
       )
   })
 }

@@ -19,13 +19,12 @@ mod_1_05_weatherstats_ui <- function(id) {
 #' @noRd 
 mod_1_05_weatherstats_server <- function(
     id,
-    survey_weather,
-    weather_vars,
-    haz_vars,
-    weather_list,
-    varlist,
-    selected_outcome,
-    data_loaded,
+    varlist = varlist,
+    selected_surveys = selected_surveys,
+    selected_outcome = selected_outcome,
+    selected_weather = selected_weather,
+    survey_weather = survey_weather,
+    survey_geo = survey_geo,
     tabset_id,
     tabset_session = NULL
 ) {
@@ -39,9 +38,8 @@ mod_1_05_weatherstats_server <- function(
     weather_tab_added <- reactiveVal(FALSE)
 
     output$weather_stats_button_ui <- renderUI({
-      if (!isTRUE(data_loaded())) return(NULL)
-      if (is.null(weather_vars()) || !length(weather_vars())) return(NULL)
-      shiny::actionButton(ns("weather_stats"), "Weather stats", class = "btn-primary", style = "width: 100%;")
+      req(survey_weather())  # Check if weather data exists directly
+      actionButton(ns("weather_stats"), "Weather stats", class = "btn-primary", style = "width: 100%;")
     })
 
     shiny::outputOptions(output, "weather_stats_button_ui", suspendWhenHidden = FALSE)
@@ -64,7 +62,7 @@ mod_1_05_weatherstats_server <- function(
             df <- dplyr::mutate(df, countryyear = paste0(countryname, ", ", year))
           }
 
-          label <- get_label(weather_vars()[1], var_type = "weather", weather_list = weather_list)
+          label <- get_label(selected_weather()$name[1], var_type = "weather", weather_list = weather_list)
           ridge_distribution_plot(
             df,
             x_var = hv,
@@ -81,7 +79,7 @@ mod_1_05_weatherstats_server <- function(
             df <- dplyr::mutate(df, countryyear = paste0(countryname, ", ", year))
           }
 
-          label <- get_label(weather_vars()[2], var_type = "weather", weather_list = weather_list)
+          label <- get_label(selected_weather()$name[2], var_type = "weather", weather_list = weather_list)
           ridge_distribution_plot(
             df,
             x_var = hv,
@@ -102,7 +100,7 @@ mod_1_05_weatherstats_server <- function(
             return(invisible(NULL))
           }
 
-          x_label <- get_label(weather_vars()[1], var_type = "weather", weather_list = weather_list)
+          x_label <- get_label(selected_weather()$name[1], var_type = "weather", weather_list = weather_list)
           y_label <- get_label(y_var, var_type = "general", varlist = varlist)
 
           df_plot <- df |>
@@ -156,7 +154,7 @@ mod_1_05_weatherstats_server <- function(
             return(invisible(NULL))
           }
 
-          x_label <- get_label(weather_vars()[2], var_type = "weather", weather_list = weather_list)
+          x_label <- get_label(selected_weather()$name[2], var_type = "weather", weather_list = weather_list)
           y_label <- get_label(y_var, var_type = "general", varlist = varlist)
 
           df_plot <- df |>

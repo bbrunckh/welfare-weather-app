@@ -24,14 +24,10 @@ app_server <- function(input, output, session) {
   step1_api <- mod_1_modelling_server(
     id = "step1",
     survey_list_master = survey_list_master_r,
-    # pin_prefix = pin_prefix_r,
-    # board = board_r,
-    # survey_metadata = survey_metadata_r,
     varlist = varlist_r,
     pov_lines = pov_lines_r,
     cpi_ppp = cpi_ppp_r,
-    data_dir = data_dir_r()
-    # weather_list = weather_list_r
+    data_dir = data_dir_r
   )
 
   #Step 2 (placeholder)
@@ -39,7 +35,15 @@ app_server <- function(input, output, session) {
     id = "step2",
     step1 = step1_api,
     pov_lines = pov_lines_r,
-    varlist = varlist_r,
+    varlist = varlist_r
     # board = board_r
     )
+  
+  #Step 3 (placeholder)
+  mod_3_scenario_server(
+    id = "step3",
+    step1 = step1_api,
+    pov_lines = pov_lines_r,
+    varlist = varlist_r
+  )
 }

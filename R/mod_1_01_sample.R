@@ -7,7 +7,7 @@
 #' @noRd 
 #'
 #' @importFrom shiny NS tagList 
-#' @importFrom dplyr filter pull mutate
+#' @importFrom dplyr filter pull mutate inner_join select arrange bind_rows
 #' @importFrom pins pin_download
 mod_1_01_sample_ui <- function(id) {
   ns <- NS(id)
@@ -28,27 +28,6 @@ mod_1_01_sample_server <- function(id, survey_list_master, varlist, data_dir) { 
   moduleServer(id, function(input, output, session) {
     ns <- session$ns
 
-    # codes available from local parquet files (first token before "_")
-    available_codes <- reactive({
-      req(data_dir)
-      root <- normalizePath(path.expand(data_dir), winslash = "/", mustWork = TRUE)
-
-      fs <- list.files(root, pattern = "\\.parquet$", full.names = FALSE)
-      if (!length(fs)) return(character(0))
-
-      codes <- sub("_.*$", "", fs)   # take text before first underscore
-      toupper(unique(codes))
-    })
-
-    surveys <- reactive({
-      slm <- survey_list_master()
-      req(slm)
-
-      codes <- available_codes()
-      if (!length(codes)) return(slm[0, , drop = FALSE])
-
-      dplyr::filter(slm, toupper(code) %in% codes)
-    })
     
     # --------- Level of analysis selector UI -----------
     output$unit_ui <- renderUI({
@@ -64,80 +43,137 @@ mod_1_01_sample_server <- function(id, survey_list_master, varlist, data_dir) { 
       )
     })
 
-    # observe({
-    #   cat("[mod_1_01] survey_list_master available:", !is.null(tryCatch(survey_list_master(), error = function(e) NULL)), "\n")
-    # })
+    # --------- Sample selector UI (economies) -----------
+    # surveys with data files in folder for selected level of analysis
+    surveys <- reactive({
+      req(input$unit)
+      slm <- survey_list_master()
+      req(slm)
+      dir_path <- data_dir()
+      req(dir_path)
+
+      # get list of expected file paths
+      slm <- slm |>
+        mutate(
+          fpath = file.path(
+            dir_path,
+             paste0(code, "_", year, "_", survname, "_", level, ".parquet")
+          )) |>
+        # filter survey list to files that exist and selected level
+        filter(file.exists(fpath), level == input$unit)
+      slm
+    })
 
     # --------- Country selector UI -----------
-    output$sample_ui <- renderUI({
-      req(surveys())
-      selectizeInput(
-        inputId = ns("country"),
-        label = "Country",
-        choices = surveys()$economy,
-        selected = surveys()$economy[1],
-        multiple = TRUE,
-        options = list(maxItems = 1, placeholder = "Select country")
-      )
-    })
+output$sample_ui <- renderUI({
+  req(surveys())
+  
+  # Create named vector: display economy names, but values are codes
+  choices <- setNames(surveys()$code, surveys()$economy)
+  
+  selectizeInput(
+    inputId = ns("economy"),
+    label = "Economy",
+    choices = choices,
+    selected = choices[1],
+    multiple = TRUE,
+    options = list(maxItems = 2, placeholder = "Select countries")
+  )
+})
+
+  # --------- Available survey years per selected code -----------
+  available_years <- reactive({
+    req(input$economy)  # Now contains codes, not economy names
     
-    # --------- Available survey years per selected country ----------- ADJUST TO NEW METADATA STRUCTURE
-    available_years <- reactive({
-      req(input$country)
-      yrs <- lapply(input$country, function(country) {
-        surveys() %>%
-          filter(economy == country) %>%
-          pull(year) %>% sort()
-      })
-      names(yrs) <- input$country
-      yrs
+    yrs <- lapply(input$economy, function(code) {
+      surveys() |>
+        filter(code == code) |>
+        pull(year) |> 
+        sort()
     })
+    names(yrs) <- input$economy
+    yrs
+  })
+
+  # --------- Year selector UI -----------
+  output$survey_year_ui <- renderUI({
+    req(input$economy)
     
-    # --------- Year selector UI -----------
-    output$survey_year_ui <- renderUI({
-      req(input$country)
+    codes <- input$economy
+    all_years <- available_years()
+    
+    # Create a selectizeInput for each selected economy code
+    year_inputs <- lapply(codes, function(code) {
+      yrs <- all_years[[code]]
       
-      country_name <- input$country
-      yrs <- available_years()[[country_name]]
+      # Get the economy name for the label
+      economy_name <- surveys() |>
+        filter(code == code) |>
+        pull(economy) |>
+        head(1)
       
-      selectizeInput(
-        inputId = ns("survey_year"),
-        label   = paste("Survey years for", country_name),
-        choices = yrs,
-        selected = yrs,
-        multiple = TRUE,
-        options = list(
-          placeholder = paste("Select years for", country_name)
+      tagList(
+        selectizeInput(
+          inputId = ns(paste0("survey_year_", code)),
+          label = paste("Survey years for", economy_name),
+          choices = yrs,
+          selected = yrs,
+          multiple = TRUE,
+          options = list(
+            placeholder = paste("Select years for", economy_name)
+          )
         )
       )
     })
+    
+    tagList(year_inputs)
+  })
 
-  
-    # --------- Reactive Load Data button, only when at least one year is selected -----------
-    output$load_button_ui <- renderUI({
-      req(input$country)
+    # --------- Collect selected years from all dynamic inputs -----------
+    selected_years_by_code <- reactive({
+      req(input$economy)
       
-      if (is.null(input$survey_year) || length(input$survey_year) == 0) {
+      codes <- input$economy
+      years_list <- lapply(codes, function(code) {
+        input_name <- paste0("survey_year_", code)
+        input[[input_name]]
+      })
+      names(years_list) <- codes
+      
+      # Filter out NULL values
+      Filter(Negate(is.null), years_list)
+    })
+
+    # --------- Reactive Load Data button -----------
+    output$load_button_ui <- renderUI({
+      req(input$economy)
+      
+      years <- selected_years_by_code()
+      
+      # Check if at least one economy has years selected
+      if (length(years) == 0 || all(sapply(years, length) == 0)) {
         return(NULL)
       }
       
       actionButton(ns("load_data"), "Load Data", class = "btn-primary")
     })
-    
-    # --------- Reactive list of pin IDs to download -----------
-    survey_data_filenames <- reactive({
-      req(input$country, input$survey_year)
+
+    # --------- Reactive list of selected surveys -----------
+    selected_surveys <- reactive({
+      req(input$economy)
+      years_by_code <- selected_years_by_code()
+      req(length(years_by_code) > 0)
       
-      surveys() %>%
-        filter(
-          economy == input$country,
-          as.integer(year) %in% as.integer(input$survey_year),
-          level == input$unit
-        ) %>%
-        mutate(
-          fname = paste(code, year, survname, level, sep = "_")
-        ) %>%
-        pull(fname)
+      # Create a data frame of all selected code/year combinations
+      selected_combos <- do.call(rbind, lapply(names(years_by_code), function(code) {
+        years <- years_by_code[[code]]
+        if (length(years) == 0) return(NULL)
+        data.frame(code = code, year = as.numeric(years), stringsAsFactors = FALSE)
+      }))
+      # Filter surveys() by the selected combinations 
+      selected_surveys <- surveys() |> 
+        inner_join(selected_combos, by = c("code", "year")) 
+      selected_surveys
     })
     
     # --------- ReactiveVal to hold loaded data (set by observeEvent below) -----------
@@ -145,51 +181,21 @@ mod_1_01_sample_server <- function(id, survey_list_master, varlist, data_dir) { 
     
     # --------- Download and read the selected survey files WHEN the user clicks Load Data -----------
     observeEvent(input$load_data, {
-      files <- isolate(survey_data_filenames())
-      root  <- isolate(data_dir)
 
-      req(length(files) > 0, !is.null(root), nzchar(root))
-      root <- normalizePath(path.expand(root), winslash = "/", mustWork = TRUE)
+      # require that selected_surveys() is not empty
+      req(length(selected_surveys()) > 0)
+      selected_surveys <- isolate(selected_surveys())
 
       busy_id <- showNotification(
         "Loading local files…",
         duration = NULL,
         type = "message"
       )
-
-      # Build candidate full paths from file stems in `files`
-      # Tries common extensions in order.
-      paths <- unlist(lapply(files, function(stem) {
-        c(
-          file.path(root, paste0(stem, ".parquet")),
-          file.path(root, paste0(stem, ".csv")),
-          file.path(root, stem) # if stem already includes extension
-        )
-      }), use.names = FALSE)
-
-      # keep existing files only, unique
-      paths <- unique(paths[file.exists(paths)])
-
-      # Read files (parquet via helper; csv via readr)
-      parquet_paths <- paths[grepl("\\.parquet$", paths, ignore.case = TRUE)]
-      csv_paths     <- paths[grepl("\\.csv$", paths, ignore.case = TRUE)]
-
-      df_list <- list()
-
-      if (length(parquet_paths)) {
-        df_list <- c(df_list, list(read_parquet_duckdb(parquet_paths)))
-      }
-
-      if (length(csv_paths)) {
-        csv_dfs <- lapply(csv_paths, function(p) readr::read_csv(p, show_col_types = FALSE))
-        df_list <- c(df_list, csv_dfs)
-      }
-
-      df_list <- Filter(Negate(is.null), df_list)
-      df <- dplyr::bind_rows(df_list)
+      # Read all parquet files
+      paths <- selected_surveys$fpath
+      df <- read_parquet_duckdb(paths)
 
       removeNotification(busy_id)
-
       showNotification(
         paste0("Loaded ", length(paths), " files (", nrow(df), " rows)."),
         type = "message"
@@ -203,71 +209,56 @@ mod_1_01_sample_server <- function(id, survey_list_master, varlist, data_dir) { 
       survey_data_r()
     })
 
+    # --------- Survey H3 data (used for survey_geo & weather merge) ---
+    survey_h3 <- reactive({
+      req(survey_data())  
+      # Build expected H3 file paths 
+      paths <- selected_surveys()$fpath
+      paths_h3 <- sub("_[^_]+\\.parquet$", "_h3.parquet", paths)
+      read_parquet_duckdb(paths_h3)
+    })
+
     # --------- Survey interview locations (sf polygons/points) -----------
-    # survey_geo <- reactive({
-    #   # Only try to read geo after the user has loaded data (keeps it cheap)
-    #   req(isTRUE(data_loaded()))
+    survey_geo <- reactive({
+      req(survey_h3())
 
-    #   brd <- board()
-    #   files <- survey_data_files()
-    #   req(length(files) > 0)
+      h3 <- survey_h3() 
 
-    #   pin_names <- paste0(files, "_LOC")
+      # Connect to DuckDB and load extensions
+      con <- DBI::dbConnect(duckdb::duckdb(), dbdir = ":memory:")
+      DBI::dbExecute(con, "INSTALL spatial;")
+      DBI::dbExecute(con, "INSTALL h3;")
+      DBI::dbExecute(con, "LOAD spatial;")
+      DBI::dbExecute(con, "LOAD h3;")
 
-    #   geo_list <- lapply(pin_names, function(pin_id) {
-    #     # Prefer downloading first so pins works for local/remote boards.
-    #   try(pins::pin_download(brd, pin_id), silent = TRUE)
-    #     tryCatch(
-    #       pins::pin_read(brd, pin_id),
-    #       error = function(e) NULL
-    #     )
-    #   })
+      # Register the data frame as a DuckDB table
+      DBI::dbWriteTable(con, "h3", h3)
 
-    #   geo_list <- Filter(Negate(is.null), geo_list)
-    #   if (!length(geo_list)) return(NULL)
+      # Run the spatial query
+      loc <- DBI::dbGetQuery(con, "
+        SELECT 
+          code, 
+          year, 
+          survname, 
+          loc_id,
+          ST_AsText(st_union_agg(st_geomfromtext(h3_cell_to_boundary_wkt(h3)))) AS geom
+        FROM h3
+        GROUP BY code, year, survname, loc_id
+      ")
 
-    #   survey_geo_df <- dplyr::bind_rows(geo_list)
+      DBI::dbDisconnect(con, shutdown = TRUE)
 
-    #   # Filter by sample type if available.
-    #   st <- if (!is.null(input$sample_type)) input$sample_type else "All households"
-    #   if (all(c("loc_id", "urban") %in% names(survey_geo_df))) {
-    #     survey_geo_df <- dplyr::filter(
-    #       survey_geo_df,
-    #       dplyr::case_when(
-    #         st == "All households" ~ !is.na(.data$loc_id),
-    #         st == "Rural households" ~ .data$urban == 0,
-    #         st == "Urban households" ~ .data$urban == 1,
-    #         TRUE ~ TRUE
-    #       )
-    #     )
-    #   }
-
-    #   # Convert WKT geometry to sf if possible.
-    #   if ("geom" %in% names(survey_geo_df) && requireNamespace("sf", quietly = TRUE)) {
-    #     survey_geo_df <- sf::st_as_sf(survey_geo_df, wkt = "geom", crs = 4326)
-    #   }
-
-    #   survey_geo_df
-    # })
-    
-    # --------- Flag: has data been successfully loaded? -----------
-    data_loaded <- reactive({
-      df <- survey_data_r()
-      !is.null(df) && nrow(df) > 0
+      # Convert WKT geometry to sf if possible.
+      loc_geo <- sf::st_as_sf(loc, wkt = "geom", crs = 4326)
+      loc_geo
     })
     
     # --------- Module return API -----------
     list(
-      selected_countries = reactive({
-        input$country
-      }),
-      selected_years = reactive({
-        input$survey_year
-      }),
-      survey_data_filenames = survey_data_filenames,
+      selected_surveys = selected_surveys,
       survey_data = survey_data,
-      data_loaded = data_loaded#,
-      # survey_geo = survey_geo
+      survey_geo = survey_geo,
+      survey_h3 = survey_h3
     )
   })
 }

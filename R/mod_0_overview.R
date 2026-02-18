@@ -6,8 +6,8 @@ mod_0_overview_ui <- function(id) {
     ),
     shiny::textInput(
       inputId = ns("folder_path"),
-      label = "Enter folder path",
-      value = "",
+      label = "Enter path to data folder",
+      value = "data/", #default for convenience
       placeholder = "/path/to/datafolder",
       width = "100%"
     ),

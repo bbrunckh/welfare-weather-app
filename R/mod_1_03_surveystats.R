@@ -20,15 +20,14 @@ mod_1_03_surveystats_ui <- function(id) {
 #' @noRd
 mod_1_03_surveystats_server <- function(
     id,
-    survey_data,
-    data_loaded,
+    varlist, 
+    selected_surveys,
     selected_outcome,
-    tabset_id,
-    tabset_session = NULL,
-    varlist,
-    pov_lines,
+    survey_data,
+    cpi_ppp = cpi_ppp, 
     survey_geo = NULL,
-    welf_select = NULL
+    tabset_id,
+    tabset_session = NULL
 ) {
   moduleServer(id, function(input, output, session){
     ns <- session$ns
@@ -55,10 +54,9 @@ mod_1_03_surveystats_server <- function(
 
     # Show the button only after data has been loaded AND an outcome has been selected
     output$survey_stats_button_ui <- renderUI({
-      dl <- isTRUE(data_loaded())
+      req(selected_outcome())  
       so <- selected_outcome()
-      if (!dl) return(NULL)
-      if (is.null(so) || !nzchar(so)) return(NULL)
+      if (is.null(so)) return(NULL)
       actionButton(ns("survey_stats"), "Survey stats", class = "btn-primary", style = "width: 100%;")
     })
 
@@ -69,7 +67,6 @@ mod_1_03_surveystats_server <- function(
 
     observeEvent(input$survey_stats, {
       tryCatch({
-        req(isTRUE(data_loaded()))
         req(selected_outcome())
 
         message_survey_stats("Building survey stats…")
@@ -78,17 +75,21 @@ mod_1_03_surveystats_server <- function(
         if (!survey_tab_added()) {
         output$interview_date <- renderPlot({
           req(survey_data())
-          df <- survey_data()
-          if (!"countryyear" %in% names(df) && all(c("countryname", "year") %in% names(df))) {
-            df <- dplyr::mutate(df, countryyear = paste0(countryname, ", ", year))
+          df <- survey_data() |>
+            dplyr::mutate(
+            timestamp = as.Date(paste0(.data$int_year, "-", .data$int_month, "-01"))
+            )
+
+          if (!"countryyear" %in% names(df) && all(c("economy", "year") %in% names(df))) {
+            df <- dplyr::mutate(df, countryyear = paste0(economy, ", ", year))
           }
-          req(all(c("countryname", "countryyear", "timestamp") %in% names(df)))
+          req(all(c("economy", "countryyear", "timestamp") %in% names(df)))
 
           interview_dates <- df |>
-            dplyr::summarise(hh = dplyr::n(), .by = c(countryname, countryyear, timestamp))
+            dplyr::summarise(hh = dplyr::n(), .by = c(economy, countryyear, timestamp))
 
           ggplot(interview_dates,
-            aes(x = timestamp, y = hh, fill = countryname)
+            aes(x = timestamp, y = hh, fill = economy)
           ) +
             geom_bar(stat = "identity") +
             theme_minimal() +
@@ -122,12 +123,6 @@ mod_1_03_surveystats_server <- function(
                   dashArray = "",
                   fillOpacity = 0.5,
                   bringToFront = TRUE
-                ),
-                label = ~paste("Interview dates:", int_dates),
-                labelOptions = leaflet::labelOptions(
-                  style = list("font-weight" = "normal", padding = "3px 8px"),
-                  textsize = "15px",
-                  direction = "auto"
                 )
               ) |>
               leaflet::fitBounds(
@@ -138,7 +133,8 @@ mod_1_03_surveystats_server <- function(
               )
           })
         }
-
+          
+        # welfare distribution plot
         output$welfare_dist <- renderPlot({
           tryCatch({
             df <- survey_data()
@@ -147,33 +143,42 @@ mod_1_03_surveystats_server <- function(
               return(invisible(NULL))
             }
 
-            if (!"countryyear" %in% names(df) && all(c("countryname", "year") %in% names(df))) {
-              df <- dplyr::mutate(df, countryyear = paste0(countryname, ", ", year))
+            if (!"countryyear" %in% names(df) && all(c("economy", "year") %in% names(df))) {
+              df <- dplyr::mutate(df, countryyear = paste0(economy, ", ", year))
             } else if (!"countryyear" %in% names(df) && all(c("code", "year") %in% names(df))) {
               df <- dplyr::mutate(df, countryyear = paste0(code, ", ", year))
             }
 
-            outcome_var <- selected_outcome()
-            x_var <- if (!is.null(outcome_var) && outcome_var %in% names(df)) {
-              outcome_var
-            } else {
-              NULL
+            # Check if welfare column exists
+            if (!("welfare" %in% names(df))) {
+              plot.new(); title(main = "Welfare variable not found")
+              return(invisible(NULL))
             }
-
-            if (is.null(x_var) || !("countryyear" %in% names(df))) {
-              plot.new(); title(main = "Welfare distribution unavailable")
+            
+            if (!("countryyear" %in% names(df))) {
+              plot.new(); title(main = "Country-year variable not found")
               return(invisible(NULL))
             }
 
-            x_label <- if (!is.null(outcome_var)) {
-              get_label(outcome_var, var_type = "general", varlist = varlist)
+            # Convert welfare to 2021 PPP for plotting distribution
+            cpi_ppp_data <- cpi_ppp()
+            
+            df <- df |>
+              dplyr::left_join(cpi_ppp_data, by = c("code", "year")) |>
+              dplyr::mutate(welfare_ppp = welfare / cpi / ppp2021)
+            
+            # Check if conversion was successful
+            if (!("welfare_ppp" %in% names(df)) || all(is.na(df$welfare_ppp))) {
+              plot.new(); title(main = "Could not convert welfare to PPP")
+              return(invisible(NULL))
             }
 
             p <- ridge_distribution_plot(
               df,
-              x_var = x_var,
-              x_label = x_label,
-              wrap_width = 40
+              x_var = "welfare_ppp",  # ✅ Pass as string
+              x_label = "$ per day (2021 PPP)",
+              wrap_width = 40,
+              log_transform = TRUE
             )
 
             if (is.null(p)) {
@@ -181,108 +186,92 @@ mod_1_03_surveystats_server <- function(
               return(invisible(NULL))
             }
 
-            # Add PPP poverty lines
-            if (!is.null(welf_select) && is.function(welf_select) && isTRUE(welf_select()$pre == "$")) {
-              pl <- if (is.function(pov_lines)) pov_lines() else pov_lines
-              if (!is.null(pl)) {
-                povln <- pl[pl$ppp_year == welf_select()$year, "ln"]
-                if (length(povln)) {
-                  log_povln <- log(povln)
-                  p <- p + ggplot2::geom_vline(xintercept = log_povln)
-                  for (i in seq_len(min(3, length(log_povln)))) {
-                    p <- p + ggplot2::annotate(
-                      "text",
-                      x = log_povln[i] - 0.1, y = 1,
-                      label = paste0("$", sprintf("%.2f", povln[i]), "/day"),
-                      angle = 90, size = 4
-                    )
-                  }
-                }
+            # Add fixed PPP poverty lines at $3.00, $4.20, and $8.30
+            poverty_lines <- c(3.00, 4.20, 8.30)
+            poverty_labels <- c("$3.00", "$4.20", "$8.30")
+              
+              # Add vertical lines (ggplot2 handles log transformation automatically)
+              for (i in seq_along(poverty_lines)) {
+                p <- p + 
+                  ggplot2::geom_vline(
+                    xintercept = poverty_lines[i], 
+                    linetype = "dashed", 
+                    color = "red",
+                    linewidth = 0.5
+                  ) +
+                  ggplot2::annotate(
+                    "text",
+                    x = poverty_lines[i] * 1.15,  # Slight offset to the right
+                    y = 0.5,  # Adjust y position as needed
+                    label = poverty_labels[i],
+                    angle = 90,
+                    size = 3,
+                    color = "red",
+                    hjust = 0
+                  )
               }
-            }
 
             p
           }, error = function(e) {
             message_survey_stats(paste("welfare_dist failed:", conditionMessage(e)), type = "error")
             message("[surveystats] welfare_dist ERROR: ", conditionMessage(e))
-            plot.new(); title(main = "Error rendering welfare distribution")
+            plot.new(); title(main = paste("Error:", conditionMessage(e)))
           })
         })
-
-        output$data_table <- DT::renderDT({
-          req(survey_data())
-          df <- survey_data()
-          if (!"countryyear" %in% names(df) && all(c("countryname", "year") %in% names(df))) {
-            df <- dplyr::mutate(df, countryyear = paste0(countryname, ", ", year))
-          }
-          vars <- intersect(
-            c(
-              "welf_ppp_2021", "welf_lcu_2021",
-              "poor_300ln", "poor_420ln", "poor_830ln",
-              "log_welf", "poor"
-            ),
-            names(df)
-          )
-          if (!length(vars)) return(data.frame())
-          weighted_summary_long(df, vars = vars)
+        
+        # Summary stats for outcome variables
+        output$outcome_stats <- DT::renderDT({
+        req(survey_data())
+        df <- survey_data()
+        df <- dplyr::mutate(df, countryyear = paste0(economy, ", ", year))
+        vl <- if (is.function(varlist)) varlist() else varlist
+        vars <- intersect(vl$name[vl$outcome == 1], names(df))
+        if (length(vars) == 0) return(data.frame(Note = "No outcome variables found"))  
+        weighted_summary_long(df, vars = vars)
         }, rownames = FALSE)
-
+          
+        # summary stats for individual characteristics (if in data)
+        output$ind_stats <- DT::renderDT({
+        req(survey_data())
+        df <- survey_data()
+        df <- dplyr::mutate(df, countryyear = paste0(economy, ", ", year))
+        vl <- if (is.function(varlist)) varlist() else varlist
+        vars <- intersect(vl$name[vl$ind == 1], names(df))
+        if (length(vars) == 0) return(data.frame(Note = "No individual variables found"))  
+        weighted_summary_long(df, vars = vars)
+        }, rownames = FALSE)
+          
+        # summary stats for household characteristics (if in data)
         output$hh_stats <- DT::renderDT({
-          tryCatch({
-            df <- survey_data()
-            if (is.null(df) || !nrow(df)) return(data.frame(note = "No survey data loaded."))
-            if (!"countryyear" %in% names(df) && all(c("countryname", "year") %in% names(df))) {
-              df <- dplyr::mutate(df, countryyear = paste0(countryname, ", ", year))
-            }
-
-            v <- if (is.function(varlist)) varlist() else varlist
-            if (is.null(v) || !"hh" %in% names(v) || !"type" %in% names(v) || !"name" %in% names(v)) {
-              num_vars <- names(df)[vapply(df, is.numeric, logical(1))]
-              num_vars <- setdiff(num_vars, c("year", "weight"))
-              if (!length(num_vars)) return(data.frame(note = "No household variables found."))
-              return(weighted_summary_long(df, vars = num_vars))
-            }
-
-            v_df <- tryCatch(as.data.frame(v), error = function(e) NULL)
-            if (is.null(v_df)) return(data.frame(note = "varlist unavailable"))
-            vars <- v_df$name[v_df$hh == 1 & tolower(v_df$type) %in% c("numeric", "integer", "logical")]
-            vars <- intersect(vars, names(df))
-            if (!length(vars)) return(data.frame(note = "No household variables found."))
-            weighted_summary_long(df, vars = vars)
-          }, error = function(e) {
-            message_survey_stats(paste("hh_stats failed:", conditionMessage(e)), type = "error")
-            message("[surveystats] hh_stats ERROR: ", conditionMessage(e))
-            data.frame()
-          })
+        req(survey_data())
+        df <- survey_data()
+        df <- dplyr::mutate(df, countryyear = paste0(economy, ", ", year))
+        vl <- if (is.function(varlist)) varlist() else varlist
+        vars <- intersect(vl$name[vl$hh == 1], names(df))
+        if (length(vars) == 0) return(data.frame(Note = "No household variables found"))  
+        weighted_summary_long(df, vars = vars)
         }, rownames = FALSE)
-
+          
+        # summary stats for firm characteristics (if in data)
+        output$firm_stats <- DT::renderDT({
+        req(survey_data())
+        df <- survey_data()
+        df <- dplyr::mutate(df, countryyear = paste0(economy, ", ", year))
+        vl <- if (is.function(varlist)) varlist() else varlist
+        vars <- intersect(vl$name[vl$firm == 1], names(df))
+        if (length(vars) == 0) return(data.frame(Note = "No firm variables found"))  
+        weighted_summary_long(df, vars = vars)
+        }, rownames = FALSE)
+          
+        # summary stats for area characteristics (if in data)
         output$area_stats <- DT::renderDT({
-          tryCatch({
-            df <- survey_data()
-            if (is.null(df) || !nrow(df)) return(data.frame(note = "No survey data loaded."))
-            if (!"countryyear" %in% names(df) && all(c("countryname", "year") %in% names(df))) {
-              df <- dplyr::mutate(df, countryyear = paste0(countryname, ", ", year))
-            }
-
-            v <- if (is.function(varlist)) varlist() else varlist
-            if (is.null(v) || !"area" %in% names(v) || !"name" %in% names(v)) {
-              area_vars <- grep("area", names(df), value = TRUE, ignore.case = TRUE)
-              area_vars <- intersect(area_vars, names(df)[vapply(df, is.numeric, logical(1))])
-              if (!length(area_vars)) return(data.frame(note = "No area variables found."))
-              return(weighted_summary_long(df, vars = area_vars))
-            }
-
-            v_df <- tryCatch(as.data.frame(v), error = function(e) NULL)
-            if (is.null(v_df)) return(data.frame(note = "varlist unavailable"))
-            vars <- v_df$name[v_df$area == 1]
-            vars <- intersect(vars, names(df))
-            if (!length(vars)) return(data.frame(note = "No area variables found."))
-            weighted_summary_long(df, vars = vars)
-          }, error = function(e) {
-            message_survey_stats(paste("area_stats failed:", conditionMessage(e)), type = "error")
-            message("[surveystats] area_stats ERROR: ", conditionMessage(e))
-            data.frame()
-          })
+        req(survey_data())
+        df <- survey_data()
+        df <- dplyr::mutate(df, countryyear = paste0(economy, ", ", year))
+        vl <- if (is.function(varlist)) varlist() else varlist
+        vars <- intersect(vl$name[vl$area == 1], names(df))
+        if (length(vars) == 0) return(data.frame(Note = "No area variables found"))  
+        weighted_summary_long(df, vars = vars)
         }, rownames = FALSE)
 
           # Render survey stat outputs
@@ -318,10 +307,14 @@ mod_1_03_surveystats_server <- function(
                       shiny::h4("Welfare distribution"),
                       shiny::plotOutput(ns("welfare_dist"), height = "300px")
                     ),
-                    shiny::h4("Welfare summary stats"),
-                    DT::DTOutput(ns("data_table")),
+                    shiny::h4("Outcome stats"),
+                    DT::DTOutput(ns("outcome_stats")),
+                    shiny::h4("Individual characteristics"),
+                    DT::DTOutput(ns("ind_stats")),
                     shiny::h4("Household characteristics"),
                     DT::DTOutput(ns("hh_stats")),
+                    shiny::h4("Firm characteristics"),
+                    DT::DTOutput(ns("firm_stats")),
                     shiny::h4("Area characteristics"),
                     DT::DTOutput(ns("area_stats"))
                 ),
@@ -348,7 +341,7 @@ mod_1_03_surveystats_server <- function(
         message_survey_stats(paste("Survey stats failed:", conditionMessage(e)), type = "error")
         message("[surveystats] ERROR: ", conditionMessage(e))
       })
-    }, ignoreInit = TRUE, ignoreNULL = TRUE)
+        }, ignoreInit = TRUE, ignoreNULL = TRUE)
 
   })
 }

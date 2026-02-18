@@ -26,14 +26,14 @@ mod_1_modelling_ui <- function(id) {
             content = mod_1_01_sample_ui(ns("sample"))
           ) |>
           bs_append(
-            title = "2 Outcome Variable",
+            title = "2 Outcome",
             content = tagList(
               mod_1_02_outcome_ui(ns("outcome")),
               mod_1_03_surveystats_ui(ns("surveystats"))
             )
           ) |>
           bs_append(
-            title = "3 Weather variables",
+            title = "3 Weather",
             content = tagList(
               mod_1_04_weather_ui(ns("weather")),
               mod_1_05_weatherstats_ui(ns("weatherstats"))
@@ -67,95 +67,84 @@ mod_1_modelling_ui <- function(id) {
 mod_1_modelling_server <- function(id, survey_list_master, varlist, pov_lines, cpi_ppp, data_dir) { #pin_prefix, board, survey_metadata, varlist, weather_list, pov_lines) {
   moduleServer(id, function(input, output, session) {
 
-    # Pass reactives
+    # Pass reactives to sub-modules and get their APIs (return values)
     mod_1_01_sample_api <- mod_1_01_sample_server(
       "sample",
       survey_list_master = survey_list_master,
-      # pin_prefix = pin_prefix,
-      # board = board,
-      # survey_metadata = survey_metadata,
       varlist = varlist,
       data_dir = data_dir
     )
 
     mod_1_02_outcome_api <- mod_1_02_outcome_server(
       "outcome",
-      survey_metadata = survey_metadata,
       varlist = varlist,
-      country = mod_1_01_sample_api$selected_countries,
-      survey_year = mod_1_01_sample_api$selected_years
+      survey_data = mod_1_01_sample_api$survey_data
     )
 
     # Survey stats module (adds a tab to the main panel after data load + button click)
     mod_1_03_surveystats_server(
       "surveystats",
-      survey_data = mod_1_01_sample_api$survey_data,
-      data_loaded = mod_1_01_sample_api$data_loaded,
-      selected_outcome = mod_1_02_outcome_api$selected_outcome,
-      tabset_id = "step1_output_tabs",
-      tabset_session = session,
       varlist = varlist,
-      pov_lines = pov_lines,
-      survey_geo = mod_1_01_sample_api$survey_geo
+      cpi_ppp = cpi_ppp,
+      selected_surveys = mod_1_01_sample_api$selected_surveys,
+      selected_outcome = mod_1_02_outcome_api$selected_outcome,
+      survey_data = mod_1_01_sample_api$survey_data,
+      survey_geo = mod_1_01_sample_api$survey_geo,
+      tabset_id = "step1_output_tabs",
+      tabset_session = session
     )
 
     # Weather selection and configuration module
     mod_1_04_weather_api <- mod_1_04_weather_server(
       "weather",
-      survey_data = mod_1_01_sample_api$survey_data,
-      survey_data_filenames = mod_1_01_sample_api$survey_data_filenames,
-      board = board,
-      weather_list = weather_list,
       varlist = varlist,
-      data_loaded = mod_1_01_sample_api$data_loaded
+      selected_surveys = mod_1_01_sample_api$selected_surveys,
+      survey_data = mod_1_01_sample_api$survey_data,
+      survey_h3 = mod_1_01_sample_api$survey_h3
     )
 
     # Weather stats module (adds a tab after weather selection + button click)
     mod_1_05_weatherstats_server(
       "weatherstats",
-      survey_weather = mod_1_04_weather_api$survey_weather,
-      weather_vars = mod_1_04_weather_api$weather_vars,
-      haz_vars = mod_1_04_weather_api$haz_vars,
-      weather_list = mod_1_04_weather_api$weather_list,
       varlist = varlist,
+      selected_surveys = mod_1_01_sample_api$selected_surveys,
       selected_outcome = mod_1_02_outcome_api$selected_outcome,
-      data_loaded = mod_1_01_sample_api$data_loaded,
+      selected_weather = mod_1_04_weather_api$selected_weather,
+      survey_weather = mod_1_04_weather_api$survey_weather,
+      survey_geo = mod_1_01_sample_api$survey_geo,
       tabset_id = "step1_output_tabs",
       tabset_session = session
     )
 
     mod_1_model <- mod_1_06_model_server(
       "model",
-      survey_weather = mod_1_04_weather_api$survey_weather,
-      haz_vars = mod_1_04_weather_api$haz_vars,
-      weather_settings = mod_1_04_weather_api$weather_settings,
       varlist = varlist,
-      selected_outcome = mod_1_02_outcome_api$selected_outcome
+      selected_surveys = mod_1_01_sample_api$selected_surveys,
+      selected_outcome = mod_1_02_outcome_api$selected_outcome,
+      selected_weather = mod_1_04_weather_api$selected_weather,
+      survey_weather = mod_1_04_weather_api$survey_weather
     )
 
     mod_1_07_results_server(
       "results",
-      model_fit = mod_1_model$model_fit,
-      haz_vars = mod_1_04_weather_api$haz_vars,
-      weather_terms = mod_1_model$weather_terms,
       varlist = varlist,
-      interaction_terms = mod_1_model$interaction_terms,
+      selected_surveys = mod_1_01_sample_api$selected_surveys,
       selected_outcome = mod_1_02_outcome_api$selected_outcome,
-      outcome_label = mod_1_model$outcome_label,
-      outcome_type = mod_1_model$outcome_type,
+      selected_weather = mod_1_04_weather_api$selected_weather,
+      # selected_model = mod_1_model$selected_model,
+      model_fit = mod_1_model$model_fit,
       tabset_id = "step1_output_tabs",
       tabset_session = session
     )
 
     mod_1_08_modelfit_server(
       "modelfit",
-      model_fit = mod_1_model$model_fit,
-      haz_vars = mod_1_04_weather_api$haz_vars,
-      weather_terms = mod_1_model$weather_terms,
       varlist = varlist,
+      selected_surveys = mod_1_01_sample_api$selected_surveys,
       selected_outcome = mod_1_02_outcome_api$selected_outcome,
-      outcome_type = mod_1_model$outcome_type,
-      outcome_label = mod_1_model$outcome_label,
+      selected_weather = mod_1_04_weather_api$selected_weather,
+      # selected_model = mod_1_model$selected_model,
+      model_fit = mod_1_model$model_fit,
       tabset_id = "step1_output_tabs",
       tabset_session = session
     )
@@ -176,27 +165,18 @@ mod_1_modelling_server <- function(id, survey_list_master, varlist, pov_lines, c
       model_api   = mod_1_model,
 
       # flattened (what downstream modules will actually use)
+      selected_surveys = mod_1_01_sample_api$selected_surveys,
+      selected_outcome = mod_1_02_outcome_api$selected_outcome,
+      selected_weather = mod_1_04_weather_api$selected_weather,
+      # selected_model = mod_1_model$selected_model,
+
       survey_data       = mod_1_01_sample_api$survey_data,
-      survey_data_filenames = mod_1_01_sample_api$survey_data_filenames,
-      data_loaded       = mod_1_01_sample_api$data_loaded,
-      survey_geo        = mod_1_01_sample_api$survey_geo,
-
-      selected_outcome  = mod_1_02_outcome_api$selected_outcome,
-
+      survey_h3         = mod_1_01_sample_api$survey_h3,
+      survey_geo       = mod_1_01_sample_api$survey_geo,
       survey_weather    = mod_1_04_weather_api$survey_weather,
-      loc_weather       = mod_1_04_weather_api$loc_weather,
-      weather_vars      = mod_1_04_weather_api$weather_vars,
-      haz_vars          = mod_1_04_weather_api$haz_vars,
-      haz_spec          = mod_1_04_weather_api$haz_spec,        # added in section 3
-      weather_settings  = mod_1_04_weather_api$weather_settings,
 
       model_fit         = mod_1_model$model_fit,
-      final_model       = final_model,
-      outcome_type      = mod_1_model$outcome_type,
-      outcome_label     = mod_1_model$outcome_label
+      final_model       = final_model
     )
-
-
-
   })
 }

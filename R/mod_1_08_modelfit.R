@@ -16,13 +16,12 @@ mod_1_08_modelfit_ui <- function(id) {
 #' @noRd 
 mod_1_08_modelfit_server <- function(
     id,
-    model_fit,
-    haz_vars,
-    weather_terms = NULL,
     varlist,
+    selected_surveys,
     selected_outcome,
-    outcome_type,
-    outcome_label,
+    selected_weather,
+    survey_weather,
+    model_fit,
     tabset_id,
     tabset_session = NULL
 ){
