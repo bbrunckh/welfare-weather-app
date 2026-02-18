@@ -18,6 +18,3 @@ devtools::load_all()
 
 # Run the application
 run_app()
-
-check <- arrow::open_dataset("data/TGO_2018_EHCVM_hh.parquet") |>
-  dplyr::collect()
