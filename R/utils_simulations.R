@@ -15,9 +15,10 @@
 #'   fitted values. One of:
 #'   \describe{
 #'     `"none"` — return fitted values only (default).
-#'     `"original"` — add the residuals from the original training data,
-#'       resampled with replacement to match the number of rows in
-#'       `newdata`.
+#'     `"original"` — add the residuals from the original training data, matched 
+#'       by row position. This requires `newdata` to have the same number of rows 
+#'       as the training data used to fit `model`, and that the rows are in the same order, 
+#'       so that residuals can be matched correctly. 
 #'     `"normal"` — draw residuals from a normal distribution with mean 0
 #'       and standard deviation equal to the residual standard deviation of the
 #'       original model fit.
@@ -72,19 +73,26 @@ predict_outcome <- function(model,
 
   residuals <- match.arg(residuals)
 
-  # Get fitted values on new data
   preds <- broom::augment(model, newdata = newdata, type.predict = type)
 
-  # Extract training residuals for residual simulation methods
-  if (residuals != "none") {
-    train_resid <- broom::augment(model)$.resid
-  }
+  train_aug <- if (residuals != "none") broom::augment(model) else NULL
 
   resid_draw <- switch(residuals,
     none      = 0,
-    original  = sample(train_resid, size = nrow(newdata), replace = TRUE),
-    normal    = rnorm(nrow(newdata), mean = 0, sd = sd(train_resid, na.rm = TRUE)),
-    empirical = sample(train_resid, size = nrow(newdata), replace = TRUE)
+    original  = {
+      if (nrow(newdata) != nrow(train_aug)) {
+        stop("`residuals = 'original'` requires `newdata` to be the same size as the training data, so residuals can be matched by row position.")
+      }
+      train_aug$.resid
+    },
+    normal    = {
+      train_resid <- train_aug$.resid
+      rnorm(nrow(newdata), mean = 0, sd = sd(train_resid, na.rm = TRUE))
+    },
+    empirical = {
+      train_resid <- train_aug$.resid
+      sample(train_resid, size = nrow(newdata), replace = TRUE)
+    }
   )
 
   preds |>
