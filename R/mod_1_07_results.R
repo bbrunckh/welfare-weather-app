@@ -4,16 +4,19 @@
 #'
 #' @param id,input,output,session Internal parameters for {shiny}.
 #'
-#' @noRd 
+#' @noRd
 #'
-#' @importFrom shiny NS tagList 
+#' @importFrom shiny NS tagList
 mod_1_07_results_ui <- function(id) {
-  tagList()
+  ns <- NS(id)
+  tagList(
+    shiny::actionButton(ns("run_model"), "Run model", class = "btn-primary", style = "width: 100%;")
+  )
 }
-    
+
 #' 1_07_results Server Functions
 #'
-#' @noRd 
+#' @noRd
 mod_1_07_results_server <- function(
     id,
     varlist,
@@ -21,201 +24,320 @@ mod_1_07_results_server <- function(
     selected_outcome,
     selected_weather,
     survey_weather,
-    model_fit,
+    selected_model,     # reactive list from mod_1_06_model
     tabset_id,
     tabset_session = NULL
-){
-  moduleServer(id, function(input, output, session){
+) {
+  moduleServer(id, function(input, output, session) {
     ns <- session$ns
 
     if (is.null(tabset_session)) {
       tabset_session <- session$parent %||% session
     }
 
+    # ---- Internal state ------------------------------------------------------
+
+    model_fit_val     <- reactiveVal(NULL)   # stores the list returned by fit_weather_model()
     results_tab_added <- reactiveVal(FALSE)
 
-    observeEvent(model_fit(), {
-      req(model_fit())
+    # ---- Helpers ---------------------------------------------------------------
 
+    # Unwrap parsnip fit to native lm/glm object (required by jtools/interactions)
+    native_fit <- function(parsnip_fit) parsnip_fit$fit
+
+    # Look up a human-readable label for a variable name from varlist.
+    # Strips the haz_ prefix added by mod_1_05_weatherstats before lookup,
+    # since varlist$name stores the raw variable name (e.g. "spei" not "haz_spei").
+    get_label <- function(var_name) {
       vl <- if (is.function(varlist)) varlist() else varlist
-      labels_df <- if (!is.null(vl)) vl[, c("name", "label"), drop = FALSE] else NULL
+      if (is.null(vl)) return(var_name)
+      lookup_name <- sub("^haz_", "", var_name)
+      idx <- match(lookup_name, vl$name)
+      if (is.na(idx)) var_name else vl$label[idx]
+    }
 
-      get_term_label <- function(term, labels_df) {
-        res <- get_name_label(term, varlist = vl)
-        res$label %||% term
+    # Turn a coefficient name (possibly "haz_spei:urban" or "I(haz_spei^2):urban")
+    # into a readable label by looking up each component
+    coef_label <- function(coef_name) {
+      parts <- strsplit(coef_name, ":")[[1]]
+      paste(vapply(parts, get_label, character(1)), collapse = " \u00d7 ")
+    }
+
+    # Build a named vector: names = readable labels, values = coefficient names
+    # Used by jtools to select and label coefficients in plots / tables
+    make_coef_map <- function(coef_names) {
+      readable <- vapply(coef_names, coef_label, character(1))
+      stats::setNames(coef_names, readable)
+    }
+
+    # Placeholder plot for when a required plot cannot be rendered
+    empty_plot <- function(msg = "No data to display.") {
+      graphics::plot.new()
+      graphics::text(0.5, 0.5, msg, cex = 0.9, col = "grey40")
+    }
+
+    # ---- Run model on button click -------------------------------------------
+
+    observeEvent(input$run_model, {
+
+      req(selected_outcome(), selected_weather(), selected_model(), survey_weather())
+
+      fitting_id <- shiny::showNotification(
+        "Fitting models — please wait...",
+        type        = "message",
+        duration    = NULL,
+        closeButton = FALSE
+      )
+      on.exit(shiny::removeNotification(fitting_id), add = TRUE)
+
+      # construct specified outcome variable
+      so <- selected_outcome()
+      df <- as.data.frame(survey_weather())
+
+      # Step 1: convert to LCU if specified
+      if (isTRUE(so$units == "LCU")) {
+        df <- df |>
+          dplyr::mutate(!!so$name := .data[[so$name]] * ppp2021)
       }
 
-      create_named_vector <- function(coefs_to_plot, labels_df) {
-        named_vector <- vapply(coefs_to_plot, function(coef) {
-          sub_terms <- unlist(strsplit(coef, ":"))
-          term_labels <- vapply(sub_terms, get_term_label, labels_df = labels_df, FUN.VALUE = character(1))
-          paste(term_labels, collapse = " * ")
-        }, FUN.VALUE = character(1))
-        stats::setNames(coefs_to_plot, named_vector)
+      # Step 2: log transform if specified
+      if (isTRUE(so$transform == "log")) {
+        df <- df |>
+          dplyr::mutate(!!so$name := log(.data[[so$name]]))
       }
 
-      out_lab <- outcome_label()
-      if (is.null(out_lab)) {
-        out_lab <- selected_outcome() %||% "Outcome"
+      # Step 3: create binary poor indicator if poverty line is specified
+      if (!is.na(so$povline) && so$name == "poor") {
+        df <- df |>
+          dplyr::mutate(!!so$name := as.numeric(.data[["welfare"]] < so$povline))
       }
 
-      if (!results_tab_added()) {
+      fit_list <- tryCatch({
+        fit_weather_model(
+          df               = df,
+          selected_outcome = so,
+          selected_weather = selected_weather(),
+          selected_model   = selected_model()
+        )
+      }, error = function(e) {
+        shiny::showNotification(
+          paste("Model failed:", conditionMessage(e)),
+          type     = "error",
+          duration = 10
+        )
+        NULL
+      })
 
-        output$regtable <- renderUI({
-          req(model_fit(), labels_df)
-          coefs <- names(stats::coef(model_fit()[[3]]))
-          coefs_to_plot <- setdiff(coefs, "(Intercept)")
-          named_coefs <- create_named_vector(coefs_to_plot, labels_df)
-          ht <- jtools::export_summs(
-            model_fit()[[1]], model_fit()[[2]], model_fit()[[3]],
-            robust = "HC3",
-            model.names = c("No FE", "FE", "FE + controls"),
-            coefs = named_coefs,
-            digits = 3
-          )
-          htmltools::HTML(huxtable::to_html(ht))
-        })
+      if (!is.null(fit_list)) {
+        model_fit_val(fit_list)
+        shiny::showNotification("Models fitted successfully.", type = "message", duration = 3)
+      }
 
-        output$coefplot <- renderPlot({
-          req(model_fit(), labels_df)
-          coefs <- names(stats::coef(model_fit()[[3]]))
-          weather_terms <- grep("haz", coefs, value = TRUE)
-          named_coefs <- create_named_vector(weather_terms, labels_df)
-          jtools::plot_summs(
-            model_fit()[[1]], model_fit()[[2]], model_fit()[[3]],
-            robust = "HC3",
-            coefs = named_coefs,
-            model.names = c("No FE", "FE", "FE + controls")
-          ) +
-            ggplot2::scale_y_discrete(labels = function(x) stringr::str_wrap(x, 20)) +
-            ggplot2::labs(x = stringr::str_wrap(paste0("Effect on ", out_lab), 50))
-        })
+    }, ignoreInit = TRUE)
 
-        empty_plot <- function(msg) {
-          graphics::plot.new()
-          graphics::text(0.5, 0.5, msg)
+    # ---- Render outputs and add Results tab ----------------------------------
+
+    observeEvent(model_fit_val(), {
+      req(model_fit_val())
+
+      preparing_id <- shiny::showNotification(
+        "Preparing results...",
+        type        = "message",
+        duration    = NULL,
+        closeButton = FALSE
+      )
+      on.exit(shiny::removeNotification(preparing_id), add = TRUE)
+
+      mf      <- model_fit_val()
+      out_lab <- get_label(mf$y_var)
+
+      # ---- Coefficient plot --------------------------------------------------
+      # Weather + interaction coefficients across the three progressive models
+
+      output$coefplot <- renderPlot({
+        req(model_fit_val())
+        mf            <- model_fit_val()
+        coefs_to_plot <- make_coef_map(c(mf$weather_terms, mf$interaction_terms))
+
+        jtools::plot_summs(
+          native_fit(mf$fit1),
+          native_fit(mf$fit2),
+          native_fit(mf$fit3),
+          robust      = "HC3",
+          coefs       = coefs_to_plot,
+          model.names = c("No FE", "FE", "FE + controls")
+        ) +
+          ggplot2::scale_y_discrete(labels = function(x) stringr::str_wrap(x, 25)) +
+          ggplot2::labs(x = stringr::str_wrap(paste0("Effect on ", out_lab), 50))
+      })
+
+      # ---- Regression table --------------------------------------------------
+
+      output$regtable <- renderUI({
+        req(model_fit_val())
+        mf            <- model_fit_val()
+        coefs_to_plot <- make_coef_map(c(mf$weather_terms, mf$interaction_terms))
+
+        ht <- jtools::export_summs(
+          native_fit(mf$fit1),
+          native_fit(mf$fit2),
+          native_fit(mf$fit3),
+          robust      = "HC3",
+          model.names = c("No FE", "FE", "FE + controls"),
+          coefs       = coefs_to_plot,
+          digits      = 3
+        )
+        htmltools::HTML(huxtable::to_html(ht))
+      })
+
+      # ---- Effect plots ------------------------------------------------------
+      # Predicted welfare vs each weather variable (full model, fit3).
+      # jtools::effect_plot uses NSE for pred — must convert string to symbol
+      # with rlang::sym() and inject with !! to avoid "pred not found" error.
+
+      output$effectplot1 <- renderPlot({
+        req(model_fit_val(), length(model_fit_val()$weather_terms) >= 1)
+        mf   <- model_fit_val()
+        pred <- rlang::sym(mf$weather_terms[1])
+        jtools::effect_plot(
+          native_fit(mf$fit3),
+          pred        = !!pred,
+          interval    = TRUE,
+          plot.points = FALSE,
+          line.colors = "orange",
+          x.label     = stringr::str_wrap(get_label(mf$weather_terms[1]), 40),
+          y.label     = stringr::str_wrap(out_lab, 40)
+        )
+      })
+
+      output$effectplot2 <- renderPlot({
+        mf <- model_fit_val()
+        if (is.null(mf) || length(mf$weather_terms) < 2) {
+          return(empty_plot("Select a second weather variable to see this plot."))
+        }
+        pred <- rlang::sym(mf$weather_terms[2])
+        jtools::effect_plot(
+          native_fit(mf$fit3),
+          pred        = !!pred,
+          interval    = TRUE,
+          plot.points = FALSE,
+          line.colors = "orange",
+          x.label     = stringr::str_wrap(get_label(mf$weather_terms[2]), 40),
+          y.label     = stringr::str_wrap(out_lab, 40)
+        )
+      })
+
+      # ---- Interaction plots -------------------------------------------------
+      # interact_plot and sim_slopes use the model's stored data frame directly.
+      # modx_from_term() extracts the plain moderator name from an interaction
+      # term string e.g. "haz_t:urban" -> "urban", "I(haz_t^2):urban" -> "urban"
+
+      modx_from_term <- function(interaction_term) {
+        parts <- strsplit(interaction_term, ":")[[1]]
+        parts[!grepl("^haz_|^I\\(", parts)][1]
+      }
+
+      make_interact_plot <- function(weather_term, modx_term) {
+        pred_sym <- rlang::sym(weather_term)
+        modx_sym <- rlang::sym(modx_term)
+        tryCatch(
+          interactions::interact_plot(
+            native_fit(model_fit_val()$fit3),
+            pred        = !!pred_sym,
+            modx        = !!modx_sym,
+            interval    = TRUE,
+            plot.points = FALSE,
+            x.label     = stringr::str_wrap(get_label(weather_term), 40),
+            y.label     = stringr::str_wrap(out_lab, 40)
+          ) + ggplot2::theme(legend.position = "bottom"),
+          error = function(e) empty_plot(paste("Interaction plot failed:", conditionMessage(e)))
+        )
+      }
+
+      make_simslopes_plot <- function(weather_term, modx_term) {
+        pred_sym <- rlang::sym(weather_term)
+        modx_sym <- rlang::sym(modx_term)
+        tryCatch(
+          plot(interactions::sim_slopes(
+            native_fit(model_fit_val()$fit3),
+            pred = !!pred_sym,
+            modx = !!modx_sym
+          )),
+          error = function(e) empty_plot(paste("Sim slopes failed:", conditionMessage(e)))
+        )
+      }
+
+      output$interactplot1 <- renderPlot({
+        mf <- model_fit_val()
+        req(mf, length(mf$weather_terms) >= 1, length(mf$interaction_terms) >= 1)
+        make_interact_plot(
+          weather_term = mf$weather_terms[1],
+          modx_term    = modx_from_term(mf$interaction_terms[1])
+        )
+      })
+
+      output$simslopes1 <- renderPlot({
+        mf <- model_fit_val()
+        req(mf, length(mf$weather_terms) >= 1, length(mf$interaction_terms) >= 1)
+        make_simslopes_plot(
+          weather_term = mf$weather_terms[1],
+          modx_term    = modx_from_term(mf$interaction_terms[1])
+        )
+      })
+
+      output$interactplot2 <- renderPlot({
+        mf <- model_fit_val()
+        req(mf, length(mf$weather_terms) >= 2, length(mf$interaction_terms) >= 1)
+        make_interact_plot(
+          weather_term = mf$weather_terms[2],
+          modx_term    = modx_from_term(mf$interaction_terms[1])
+        )
+      })
+
+      output$simslopes2 <- renderPlot({
+        mf <- model_fit_val()
+        req(mf, length(mf$weather_terms) >= 2, length(mf$interaction_terms) >= 1)
+        make_simslopes_plot(
+          weather_term = mf$weather_terms[2],
+          modx_term    = modx_from_term(mf$interaction_terms[1])
+        )
+      })
+
+      # Dynamic interaction panel layout
+      output$interactplots <- renderUI({
+        mf           <- model_fit_val()
+        has_interact <- length(mf$interaction_terms) > 0
+        has_two_haz  <- length(mf$weather_terms) > 1
+
+        if (!has_interact) {
+          return(shiny::p("No interaction term specified.", style = "color: grey;"))
         }
 
-        output$effectplot1 <- renderPlot({
-          req(model_fit(), length(weather_terms()) > 0)
-          jtools::effect_plot(
-            model_fit()[[3]], pred = !!weather_terms()[1], 
-            interval = TRUE, plot.points = FALSE, line.colors = "orange",
-            x.label = stringr::str_wrap(get_name_label(weather_terms()[1], varlist = vl)$label, 40), 
-            y.label = stringr::str_wrap(out_lab ,40))
-        })
+        if (has_two_haz) {
+          bslib::layout_columns(
+            col_widths = c(6, 6),
+            bslib::card(shiny::plotOutput(ns("interactplot1"), height = "300px")),
+            bslib::card(shiny::plotOutput(ns("simslopes1"),    height = "300px")),
+            bslib::card(shiny::plotOutput(ns("interactplot2"), height = "300px")),
+            bslib::card(shiny::plotOutput(ns("simslopes2"),    height = "300px"))
+          )
+        } else {
+          bslib::layout_columns(
+            col_widths = c(6, 6),
+            bslib::card(shiny::plotOutput(ns("interactplot1"), height = "300px")),
+            bslib::card(shiny::plotOutput(ns("simslopes1"),    height = "300px"))
+          )
+        }
+      })
 
-        output$effectplot2 <- renderPlot({
-          req(model_fit(), length(weather_terms()) > 1)
-          jtools::effect_plot(
-            model_fit()[[3]], pred = !!weather_terms()[2], 
-            interval = TRUE, plot.points = FALSE, line.colors = "orange",
-            x.label = stringr::str_wrap(get_name_label(weather_terms()[2], varlist = vl)$label, 40), 
-            y.label = stringr::str_wrap(out_lab ,40))
-        })
+      # ---- Add Results tab (once); switch to it on subsequent runs ------------
 
-        interactplot1_obj <- shiny::eventReactive(model_fit(), {
-          req(model_fit(), interaction_terms(), length(weather_terms()) > 0)
-          interactions::interact_plot(
-            model_fit()[[3]], pred = !!weather_terms()[1], modx = !!interaction_terms()[1],
-            interval = TRUE, plot.points = FALSE,
-            x.label = stringr::str_wrap(get_name_label(weather_terms()[1], varlist = vl)$label, 40),
-            y.label = stringr::str_wrap(out_lab, 40)
-          ) + ggplot2::theme(legend.position = "bottom")
-        }, ignoreInit = FALSE)
-
-        output$interactplot1 <- renderPlot({
-          p <- interactplot1_obj()
-          if (is.null(p)) return(empty_plot("Run model after updating interaction terms."))
-          p
-        })
-
-        interactplot2_obj <- shiny::eventReactive(model_fit(), {
-          req(model_fit(), interaction_terms(), length(weather_terms()) > 1)
-          interactions::interact_plot(
-            model_fit()[[3]], pred = !!weather_terms()[2], modx = !!interaction_terms()[1],
-            interval = TRUE, plot.points = FALSE,
-            x.label = stringr::str_wrap(get_name_label(weather_terms()[2], varlist = vl)$label, 40),
-            y.label = stringr::str_wrap(out_lab, 40)
-          ) + ggplot2::theme(legend.position = "bottom")
-        }, ignoreInit = FALSE)
-
-        output$interactplot2 <- renderPlot({
-          p <- interactplot2_obj()
-          if (is.null(p)) return(empty_plot("Run model after updating interaction terms."))
-          p
-        })
-
-        # output$interactplot2 <- renderPlot({
-        #   req(interaction_terms(), length(weather_terms()) > 1, model_fit())
-        #   interactions::interact_plot(
-        #     model_fit()[[3]], pred = !!weather_terms()[2], modx = !!interaction_terms()[1],
-        #     interval = TRUE, plot.points = FALSE,
-        #     x.label = stringr::str_wrap(get_name_label(weather_terms()[2], varlist = vl)$label, 40),
-        #     y.label = stringr::str_wrap(out_lab, 40)
-        #   ) + ggplot2::theme(legend.position = "bottom")
-        # })
-
-        simslopes1_obj <- shiny::eventReactive(model_fit(), {
-          req(model_fit(), interaction_terms(), length(weather_terms()) > 0)
-          interactions::sim_slopes(model_fit()[[3]], pred = !!weather_terms()[1], modx = !!interaction_terms()[1])
-        }, ignoreInit = FALSE)
-
-        output$simslopes1 <- renderPlot({
-          p <- simslopes1_obj()
-          if (is.null(p)) return(empty_plot("Run model after updating interaction terms."))
-          plot(p)
-        })
-
-        # output$simslopes1 <- renderPlot({
-        #   req(interaction_terms(), model_fit(), weather_terms())
-        #   plot(interactions::sim_slopes(model_fit()[[3]], pred = !!weather_terms()[1], modx = !!interaction_terms()[1]))
-        # })
-
-        simslopes2_obj <- shiny::eventReactive(model_fit(), {
-          req(model_fit(), interaction_terms(), length(weather_terms()) > 1)
-          interactions::sim_slopes(model_fit()[[3]], pred = !!weather_terms()[2], modx = !!interaction_terms()[1])
-        }, ignoreInit = FALSE)
-
-        output$simslopes2 <- renderPlot({
-          p <- simslopes2_obj()
-          if (is.null(p)) return(empty_plot("Run model after updating interaction terms."))
-          plot(p)
-        })
-
-        # output$simslopes2 <- renderPlot({
-        #   req(interaction_terms(), model_fit(), weather_terms())
-        #   plot(interactions::sim_slopes(model_fit()[[3]], pred = !!weather_terms()[2], modx = !!interaction_terms()[1]))
-        # })
-
-        output$interactplots <- renderUI({
-          if (length(interaction_terms()) > 0 && length(haz_vars()) > 1) {
-            bslib::layout_columns(
-              col_widths = c(6, 6),
-              bslib::card(shiny::plotOutput(ns("interactplot1"), height = "300px")),
-              bslib::card(shiny::plotOutput(ns("simslopes1"), height = "300px")),
-              bslib::card(shiny::plotOutput(ns("interactplot2"), height = "300px")),
-              bslib::card(shiny::plotOutput(ns("simslopes2"), height = "300px"))
-            )
-          } else if (length(interaction_terms()) > 0) {
-            bslib::layout_columns(
-              col_widths = c(6, 6),
-              bslib::card(shiny::plotOutput(ns("interactplot1"), height = "300px")),
-              bslib::card(shiny::plotOutput(ns("simslopes1"), height = "300px"))
-            )
-          } else {
-            shiny::p("No interaction term specified.")
-          }
-        })
-
+      if (!results_tab_added()) {
         shiny::appendTab(
           inputId = tabset_id,
           shiny::tabPanel(
             title = "Results",
             value = "results",
-            # shiny::h4("Model object (FE + controls)"),
-            # shiny::verbatimTextOutput(ns("model_fit_obj")),
-            # shiny::br(),
             shiny::h4("Marginal effect of weather on welfare"),
             bslib::card(shiny::plotOutput(ns("coefplot"))),
             shiny::br(),
@@ -232,16 +354,27 @@ mod_1_07_results_server <- function(
             shiny::h4("Regression results"),
             shiny::uiOutput(ns("regtable"))
           ),
-          select = TRUE,
+          select  = TRUE,
           session = tabset_session
         )
-
         results_tab_added(TRUE)
+
+      } else {
+        try(
+          shiny::updateTabsetPanel(tabset_session, inputId = tabset_id, selected = "results"),
+          silent = TRUE
+        )
       }
 
-    if (results_tab_added()) {
-      try(shiny::updateTabsetPanel(tabset_session, inputId = tabset_id, selected = "results"), silent = TRUE)
-    }
-  }, ignoreInit = TRUE)
-})
+      shiny::showNotification("Results ready.", type = "message", duration = 3)
+
+    }, ignoreInit = TRUE)
+
+    # ---- Return ---------------------------------------------------------------
+
+    list(
+      model_fit = model_fit_val
+    )
+
+  })
 }

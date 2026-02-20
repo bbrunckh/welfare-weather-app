@@ -115,7 +115,6 @@ mod_1_02_surveystats_server <- function(
     
     # --------- Load data and show stats when button is clicked -----------
     observeEvent(input$survey_stats, {
-      tryCatch({
         req(length(selected_surveys()) > 0)
 
         message("[surveystats] click; tabset_id=", tabset_id)
@@ -130,12 +129,31 @@ mod_1_02_surveystats_server <- function(
         paths <- isolate(selected_surveys()$fpath)
         df <- read_parquet_duckdb(paths)
 
-        # add timestamp for interview month/year to merge with weather later
+        # add timestamp, month and countryyear columns for later use
         df <- df |>
           dplyr::mutate(
             timestamp = as.Date(paste0(int_year, "-", int_month, "-01")),
-            month = lubridate::month(timestamp)
+            month = lubridate::month(timestamp),
+            countryyear = paste0(economy, ", ", year)
           )
+        
+        # convert LCU monetary variables to 2021 PPP as default
+        cpi_ppp_data <- cpi_ppp()
+
+        lcu_vars <- varlist() |> 
+          dplyr::filter(units == "LCU" & name %in% colnames(df)) |> 
+          dplyr::pull(name)
+
+        df <- df |>
+          dplyr::mutate(data_level = dplyr::case_when(
+            code == "CHN" & urban ==1 ~ "urban", 
+            code == "CHN" & urban ==1 ~ "urban",
+            .default = "national")) |> # for cpi merge
+          dplyr::left_join(cpi_ppp_data, by = c("code", "year", "data_level")) |>
+          dplyr::mutate(
+            dplyr::across(dplyr::any_of(lcu_vars), ~ .x / cpi / ppp2021)
+          )
+          
         # store in reactiveVal for reuse
         survey_data_r(df)
         
@@ -154,11 +172,6 @@ mod_1_02_surveystats_server <- function(
             req(survey_data())
             df <- survey_data() 
 
-            if (!"countryyear" %in% names(df) && all(c("economy", "year") %in% names(df))) {
-              df <- dplyr::mutate(df, countryyear = paste0(economy, ", ", year))
-            }
-            req(all(c("economy", "countryyear", "timestamp") %in% names(df)))
-
             interview_dates <- df |>
               dplyr::summarise(hh = dplyr::n(), .by = c(economy, countryyear, timestamp))
 
@@ -170,83 +183,54 @@ mod_1_02_surveystats_server <- function(
               labs(title = "", x = "", y = "Number of households", fill = "")
           })
 
-            output$map <- leaflet::renderLeaflet({
-              req(survey_geo())
-              polygon_data <- survey_geo()
+          output$map <- leaflet::renderLeaflet({
+            req(survey_geo())
+            polygon_data <- survey_geo()
 
-              gg_color_hue <- scales::hue_pal()
-              n_colors <- length(unique(polygon_data$code))
-              default_colors <- gg_color_hue(n_colors)
-              pal <- leaflet::colorFactor(palette = default_colors, domain = polygon_data$code)
+            gg_color_hue <- scales::hue_pal()
+            n_colors <- length(unique(polygon_data$code))
+            default_colors <- gg_color_hue(n_colors)
+            pal <- leaflet::colorFactor(palette = default_colors, domain = polygon_data$code)
 
-              leaflet::leaflet() %>%
-                leaflet::addProviderTiles(leaflet::providers$CartoDB.Positron) %>%
-                leaflet::addPolygons(
-                  data = polygon_data,
-                  fillColor = "transparent",
+            leaflet::leaflet() %>%
+              leaflet::addProviderTiles(leaflet::providers$CartoDB.Positron) %>%
+              leaflet::addPolygons(
+                data = polygon_data,
+                fillColor = "transparent",
+                weight = 1,
+                opacity = 0.5,
+                color = ~pal(code),
+                dashArray = "",
+                fillOpacity = 0.5,
+                highlight = leaflet::highlightOptions(
                   weight = 1,
-                  opacity = 0.5,
-                  color = ~pal(code),
+                  color = "#FF0000",
                   dashArray = "",
                   fillOpacity = 0.5,
-                  highlight = leaflet::highlightOptions(
-                    weight = 1,
-                    color = "#FF0000",
-                    dashArray = "",
-                    fillOpacity = 0.5,
-                    bringToFront = TRUE
-                  )
-                ) |>
-                leaflet::fitBounds(
-                  lng1 = min(sf::st_bbox(polygon_data)[1]),
-                  lat1 = min(sf::st_bbox(polygon_data)[2]),
-                  lng2 = max(sf::st_bbox(polygon_data)[3]),
-                  lat2 = max(sf::st_bbox(polygon_data)[4])
+                  bringToFront = TRUE
                 )
-            })
+              ) |>
+              leaflet::fitBounds(
+                lng1 = min(sf::st_bbox(polygon_data)[1]),
+                lat1 = min(sf::st_bbox(polygon_data)[2]),
+                lng2 = max(sf::st_bbox(polygon_data)[3]),
+                lat2 = max(sf::st_bbox(polygon_data)[4])
+              )
+          })
           
           # welfare distribution plot
           output$welfare_dist <- renderPlot({
-            tryCatch({
               df <- survey_data()
-              if (is.null(df) || !nrow(df)) {
-                plot.new(); title(main = "No survey data loaded")
-                return(invisible(NULL))
-              }
-
-              if (!"countryyear" %in% names(df) && all(c("economy", "year") %in% names(df))) {
-                df <- dplyr::mutate(df, countryyear = paste0(economy, ", ", year))
-              } else if (!"countryyear" %in% names(df) && all(c("code", "year") %in% names(df))) {
-                df <- dplyr::mutate(df, countryyear = paste0(code, ", ", year))
-              }
 
               # Check if welfare column exists
               if (!("welfare" %in% names(df))) {
                 plot.new(); title(main = "Welfare variable not found")
                 return(invisible(NULL))
               }
-              
-              if (!("countryyear" %in% names(df))) {
-                plot.new(); title(main = "Country-year variable not found")
-                return(invisible(NULL))
-              }
-
-              # Convert welfare to 2021 PPP for plotting distribution
-              cpi_ppp_data <- cpi_ppp()
-              
-              df <- df |>
-                dplyr::left_join(cpi_ppp_data, by = c("code", "year")) |>
-                dplyr::mutate(welfare_ppp = welfare / cpi / ppp2021)
-              
-              # Check if conversion was successful
-              if (!("welfare_ppp" %in% names(df)) || all(is.na(df$welfare_ppp))) {
-                plot.new(); title(main = "Could not convert welfare to PPP")
-                return(invisible(NULL))
-              }
 
               p <- ridge_distribution_plot(
                 df,
-                x_var = "welfare_ppp",
+                x_var = "welfare",
                 x_label = "$ per day (2021 PPP)",
                 wrap_width = 40,
                 log_transform = TRUE
@@ -280,21 +264,14 @@ mod_1_02_surveystats_server <- function(
                     color = "red",
                     hjust = 0
                   )
-              }
-
+                }
               p
-            }, error = function(e) {
-              message_survey_stats(paste("welfare_dist failed:", conditionMessage(e)), type = "error")
-              message("[surveystats] welfare_dist ERROR: ", conditionMessage(e))
-              plot.new(); title(main = paste("Error:", conditionMessage(e)))
-            })
           })
           
           # Summary stats for outcome variables
           output$outcome_stats <- DT::renderDT({
             req(survey_data())
             df <- survey_data()
-            df <- dplyr::mutate(df, countryyear = paste0(economy, ", ", year))
             vl <- if (is.function(varlist)) varlist() else varlist
             vars <- intersect(vl$name[vl$outcome == 1], names(df))
             if (length(vars) == 0) return(data.frame(Note = "No outcome variables found"))  
@@ -305,7 +282,6 @@ mod_1_02_surveystats_server <- function(
           output$ind_stats <- DT::renderDT({
             req(survey_data())
             df <- survey_data()
-            df <- dplyr::mutate(df, countryyear = paste0(economy, ", ", year))
             vl <- if (is.function(varlist)) varlist() else varlist
             vars <- intersect(vl$name[vl$ind == 1], names(df))
             if (length(vars) == 0) return(data.frame(Note = "No individual variables found"))  
@@ -316,7 +292,6 @@ mod_1_02_surveystats_server <- function(
           output$hh_stats <- DT::renderDT({
             req(survey_data())
             df <- survey_data()
-            df <- dplyr::mutate(df, countryyear = paste0(economy, ", ", year))
             vl <- if (is.function(varlist)) varlist() else varlist
             vars <- intersect(vl$name[vl$hh == 1], names(df))
             if (length(vars) == 0) return(data.frame(Note = "No household variables found"))  
@@ -327,7 +302,6 @@ mod_1_02_surveystats_server <- function(
           output$firm_stats <- DT::renderDT({
             req(survey_data())
             df <- survey_data()
-            df <- dplyr::mutate(df, countryyear = paste0(economy, ", ", year))
             vl <- if (is.function(varlist)) varlist() else varlist
             vars <- intersect(vl$name[vl$firm == 1], names(df))
             if (length(vars) == 0) return(data.frame(Note = "No firm variables found"))  
@@ -338,7 +312,6 @@ mod_1_02_surveystats_server <- function(
           output$area_stats <- DT::renderDT({
             req(survey_data())
             df <- survey_data()
-            df <- dplyr::mutate(df, countryyear = paste0(economy, ", ", year))
             vl <- if (is.function(varlist)) varlist() else varlist
             vars <- intersect(vl$name[vl$area == 1], names(df))
             if (length(vars) == 0) return(data.frame(Note = "No area variables found"))  
@@ -356,22 +329,37 @@ mod_1_02_surveystats_server <- function(
 
           # selected outcome variable from mod_1_03_outcome if it exists
           output$selected_outcome_section <- renderUI({
-          if (is.null(selected_outcome)) return(NULL)  # selected_outcome not passed at all
-          req(!is.null(selected_outcome()))             # selected_outcome() returns NULL
-          shiny::tagList(
-            shiny::br(),
-            shiny::h4("Selected outcome variable"),
-            DT::DTOutput(ns("selected_outcome"))
-          )
-        })
+            # ensure selected_outcome was passed as a reactive/function
+            if (is.null(selected_outcome) || !is.function(selected_outcome)) return(NULL)
 
-        output$selected_outcome <- DT::renderDT({
-          if (is.null(selected_outcome)) return(NULL)
-          req(!is.null(selected_outcome()))
-          selected_outcome()
-        }, rownames = FALSE,
-          options = list(dom = "t", paging = FALSE, searching = FALSE, info = FALSE),
-          class = "compact")
+            # call reactive safely
+            sel <- tryCatch(selected_outcome(), error = function(e) NULL)
+            if (is.null(sel)) return(NULL)
+
+            shiny::tagList(
+              shiny::br(),
+              shiny::h4("Selected outcome variable"),
+              DT::DTOutput(ns("selected_outcome"))
+            )
+          })
+
+          output$selected_outcome <- DT::renderDT({
+            if (is.null(selected_outcome) || !is.function(selected_outcome)) return(NULL)
+
+            sel <- tryCatch(selected_outcome(), error = function(e) {
+              message("[surveystats] selected_outcome() error: ", conditionMessage(e))
+              NULL
+            })
+
+            if (is.null(sel)) return(data.frame(Note = "No outcome selected"))
+            # if sel is not a data frame, try to coerce or return a simple note
+            if (!is.data.frame(sel)) return(data.frame(Note = "Selected outcome not available"))
+            if (nrow(sel) == 0) return(data.frame(Note = "No outcome selected"))
+
+            sel
+          }, rownames = FALSE,
+            options = list(dom = "t", paging = FALSE, searching = FALSE, info = FALSE),
+            class = "compact")
 
           # Render survey stat outputs
           tryCatch(
@@ -433,10 +421,6 @@ mod_1_02_surveystats_server <- function(
         if (survey_tab_added()) {
           select_tab("desc_stats")
         }
-      }, error = function(e) {
-        message_survey_stats(paste("Survey stats failed:", conditionMessage(e)), type = "error")
-        message("[surveystats] ERROR: ", conditionMessage(e))
-      })
     }, ignoreInit = TRUE, ignoreNULL = TRUE)
 
     # --------- Return list of reactives for other modules -----------

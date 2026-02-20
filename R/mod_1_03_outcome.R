@@ -41,7 +41,7 @@ mod_1_03_outcome_server <- function(id, varlist, survey_data) {
           data.frame(
             name = "poor", 
             label = "Poor (welfare < poverty line)",
-            units = "Binary",
+            units = "",
             type = "logical",
             stringsAsFactors = FALSE)
         )
@@ -81,8 +81,11 @@ mod_1_03_outcome_server <- function(id, varlist, survey_data) {
       req(selected_outcome_info())
       info <- selected_outcome_info()
 
-      if (!(info$name %in% c("welfare", "poor") || info$units == "LCU")) return(NULL)
-  
+      name_match  <- any(info$name %in% c("welfare", "poor"))
+      units_match <- any(info$units == "LCU", na.rm = TRUE)
+
+      if (!(name_match || units_match)) return(NULL)
+
       radioButtons(
         inputId = ns("currency"),
         label = "Currency",
@@ -98,21 +101,24 @@ mod_1_03_outcome_server <- function(id, varlist, survey_data) {
     output$poverty_line_ui <- renderUI({
       req(selected_outcome_info())
       info <- selected_outcome_info()
-      
-      if (nrow(info) == 0 || info$name != "poor") return(NULL)
+      if (nrow(info) == 0) return(NULL)
+
+      # require that at least one row has name == "poor"
+      if (!any(info$name == "poor")) return(NULL)
 
       current_currency <- input$currency
-      
+
       # Default poverty line based on currency
       default_line <- if (is.null(current_currency) || current_currency == "PPP") {
         3.00
       } else {
         # Calculate 20th percentile of weighted welfare for LCU
         tryCatch({
-          df <- survey_data()
+          df <- survey_data() |>
+            dplyr::mutate(welfare_lcu = welfare*ppp2021)
           if ("welfare" %in% names(df)) {
             if ("weight" %in% names(df)) {
-              p20 <- Hmisc::wtd.quantile(df$welfare, weights = df$weight, probs = 0.2, na.rm = TRUE)
+              p20 <- Hmisc::wtd.quantile(df$welfare_lcu, weights = df$weight, probs = 0.2, na.rm = TRUE)
               round(as.numeric(p20), 2)
             } else {
               round(quantile(df$welfare, probs = 0.2, na.rm = TRUE), 2)
@@ -125,14 +131,14 @@ mod_1_03_outcome_server <- function(id, varlist, survey_data) {
           1.00
         })
       }
-      
+
       # Label based on currency
       label_text <- if (is.null(current_currency) || current_currency == "PPP") {
         "Poverty line ($/day, 2021 PPP)"
       } else {
         "Poverty line (LCU/day)"
       }
-      
+
       numericInput(
         inputId = ns("poverty_line"),
         label = label_text,
@@ -146,13 +152,13 @@ mod_1_03_outcome_server <- function(id, varlist, survey_data) {
     output$outcome_info <- renderUI({
       req(selected_outcome_info())
       info <- selected_outcome_info()
-      
       if (nrow(info) == 0) return(NULL)
-      
-      messages <- tagList()  # Start with empty tagList, not list()
-      
-      # Message about continuous variables (will be log-transformed)
-      if (tolower(info$type) == "numeric") {
+
+      messages <- tagList()
+
+      info_type <- tolower(as.character(info$type)[1])
+
+      if (info_type == "numeric") {
         messages <- tagList(
           messages,
           tags$div(
@@ -161,9 +167,8 @@ mod_1_03_outcome_server <- function(id, varlist, survey_data) {
           )
         )
       }
-      
-      # Message about binary outcomes
-      if (tolower(info$type) == "logical") {
+
+      if (info_type == "logical") {
         messages <- tagList(
           messages,
           tags$div(
@@ -172,20 +177,46 @@ mod_1_03_outcome_server <- function(id, varlist, survey_data) {
           )
         )
       }
-      
-      messages  # Return the tagList directly, not wrapped again
+
+      messages
     })
 
     # --------- Get selected outcome info  -----------
     selected_outcome <- reactive({
       req(selected_outcome_info())
-      info <- selected_outcome_info()  
-      
-      # Add currency and poverty line to the info
-      if (nrow(info) > 0) {
-        info$currency <- if (!is.null(input$currency)) input$currency else NA_character_
-        info$poverty_line <- if (!is.null(input$poverty_line)) input$poverty_line else NA_real_
+      info <- selected_outcome_info()
+      if (nrow(info) == 0) return(info)
+
+      # work with first selected row and coerce to character to avoid factor comparisons
+      name  <- as.character(info$name[1])
+      units <- as.character(info$units[1])
+      type  <- as.character(info$type[1])
+
+      # transform: log for numeric, identity otherwise
+      if (identical(type, "numeric")) {
+        info$transform <- "log"
+      } else {
+        info$transform <- NA_character_
       }
+
+      # decide whether to show/override currency: only when name == "poor" OR units == "LCU"
+      is_poor <- identical(name, "poor")
+      is_lcu  <- !is.na(units) && units == "LCU"
+
+      if (is_poor || is_lcu) {
+        # safe: input$currency may be NULL during init — guard with req when needed downstream
+        info$units <- input$currency
+      } else {
+        # preserve original (possibly NA) unit value as character
+        info$units <- units
+      }
+
+      if (is_poor && !is.null(input$poverty_line)) {
+        info$povline <- input$poverty_line
+      } else {
+        info$povline <- NA_real_
+      }
+
       info
     })
 

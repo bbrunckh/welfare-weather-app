@@ -43,7 +43,10 @@ mod_1_modelling_ui <- function(id) {
           ) |>
           bs_append(
             title = "4 Model",
-            content = mod_1_06_model_ui(ns("model"))
+            content = tagList(
+              mod_1_06_model_ui(ns("model")),
+              mod_1_07_results_ui(ns("results"))
+            )
           )
       ),
 
@@ -77,13 +80,13 @@ mod_1_modelling_server <- function(id, survey_list_master, varlist, pov_lines, c
       data_dir = data_dir
     )
 
-     # Survey stats module (adds a tab to the main panel after data load + button click)
+    # Survey stats module (adds a tab to the main panel after data load + button click)
     mod_1_02_surveystats_api <- mod_1_02_surveystats_server(
       "surveystats",
       varlist = varlist,
       cpi_ppp = cpi_ppp,
       selected_surveys = mod_1_01_sample_api$selected_surveys,
-      selected_outcome = mod_1_03_outcome_api$selected_outcome,
+      selected_outcome = NULL,
       tabset_id = "step1_output_tabs",
       tabset_session = session
     )
@@ -104,7 +107,7 @@ mod_1_modelling_server <- function(id, survey_list_master, varlist, pov_lines, c
     )
 
     # Weather stats module (adds a tab after weather selection + button click)
-    mod_1_05_weatherstats_server(
+    mod_1_05_weatherstats_api <- mod_1_05_weatherstats_server(
       "weatherstats",
       varlist = varlist,
       selected_surveys = mod_1_01_sample_api$selected_surveys,
@@ -122,17 +125,17 @@ mod_1_modelling_server <- function(id, survey_list_master, varlist, pov_lines, c
       selected_surveys = mod_1_01_sample_api$selected_surveys,
       selected_outcome = mod_1_03_outcome_api$selected_outcome,
       selected_weather = mod_1_04_weather_api$selected_weather,
-      survey_weather = mod_1_05_weatherstats_server$survey_weather
+      survey_weather = mod_1_05_weatherstats_api$survey_weather
     )
 
-    mod_1_07_results_server(
+    mod_1_07_results_api <- mod_1_07_results_server(
       "results",
       varlist = varlist,
       selected_surveys = mod_1_01_sample_api$selected_surveys,
       selected_outcome = mod_1_03_outcome_api$selected_outcome,
       selected_weather = mod_1_04_weather_api$selected_weather,
-      # selected_model = mod_1_model$selected_model,
-      model_fit = mod_1_model$model_fit,
+      survey_weather = mod_1_05_weatherstats_api$survey_weather,
+      selected_model = mod_1_model$selected_model,
       tabset_id = "step1_output_tabs",
       tabset_session = session
     )
@@ -143,18 +146,17 @@ mod_1_modelling_server <- function(id, survey_list_master, varlist, pov_lines, c
       selected_surveys = mod_1_01_sample_api$selected_surveys,
       selected_outcome = mod_1_03_outcome_api$selected_outcome,
       selected_weather = mod_1_04_weather_api$selected_weather,
-      # selected_model = mod_1_model$selected_model,
-      model_fit = mod_1_model$model_fit,
+      model_fit = mod_1_07_results_api$model_fit,
       tabset_id = "step1_output_tabs",
       tabset_session = session
     )
 
     # Convenience reactive: "final model" (your convention is [[3]])
-    final_model <- reactive({
-      fits <- mod_1_model$model_fit()
-      if (is.null(fits) || !length(fits)) return(NULL)
-      fits[[3]] %||% fits[[length(fits)]]
-    })
+    # final_model <- reactive({
+    #   fits <- mod_1_07_results_api$model_fit()
+    #   if (is.null(fits) || !length(fits)) return(NULL)
+    #   fits[[3]] %||% fits[[length(fits)]]
+    # })
 
     # NEW: export Step 1 API for Step 2 / Step 3
     list(
@@ -168,15 +170,15 @@ mod_1_modelling_server <- function(id, survey_list_master, varlist, pov_lines, c
       selected_surveys = mod_1_01_sample_api$selected_surveys,
       selected_outcome = mod_1_03_outcome_api$selected_outcome,
       selected_weather = mod_1_04_weather_api$selected_weather,
-      # selected_model = mod_1_model$selected_model,
+      selected_model = mod_1_model$selected_model,
 
       survey_data       = mod_1_02_surveystats_api$survey_data,
       survey_h3         = mod_1_02_surveystats_api$survey_h3,
       survey_geo        = mod_1_02_surveystats_api$survey_geo,
       survey_weather    = mod_1_04_weather_api$survey_weather,
 
-      model_fit         = mod_1_model$model_fit,
-      final_model       = final_model
+      model_fit         = mod_1_07_results_api$model_fit
+      # final_model       = final_model
     )
   })
 }

@@ -4,28 +4,27 @@
 #'
 #' @param id,input,output,session Internal parameters for {shiny}.
 #'
-#' @noRd 
+#' @noRd
 #'
-#' @importFrom shiny NS tagList 
+#' @importFrom shiny NS tagList
 mod_1_08_modelfit_ui <- function(id) {
   tagList()
 }
-    
+
 #' 1_08_modelfit Server Functions
 #'
-#' @noRd 
+#' @noRd
 mod_1_08_modelfit_server <- function(
     id,
     varlist,
     selected_surveys,
     selected_outcome,
     selected_weather,
-    survey_weather,
-    model_fit,
+    model_fit,          # reactive — list returned by fit_weather_model()
     tabset_id,
     tabset_session = NULL
-){
-  moduleServer(id, function(input, output, session){
+) {
+  moduleServer(id, function(input, output, session) {
     ns <- session$ns
 
     if (is.null(tabset_session)) {
@@ -34,198 +33,253 @@ mod_1_08_modelfit_server <- function(
 
     modelfit_tab_added <- reactiveVal(FALSE)
 
+    # ---- Helpers -------------------------------------------------------------
+
+    # Unwrap parsnip fit to native lm/glm object
+    native_fit <- function(parsnip_fit) parsnip_fit$fit
+
+    # Look up a human-readable label for a variable name
+    get_label <- function(var_name) {
+      vl <- if (is.function(varlist)) varlist() else varlist
+      if (is.null(vl)) return(var_name)
+      idx <- match(var_name, vl$name)
+      if (is.na(idx)) var_name else vl$label[idx]
+    }
+
+    # Convenience: the full model (fit3) as a native object
+    full_model <- reactive({
+      req(model_fit())
+      native_fit(model_fit()$fit3)
+    })
+
+    # Is the model logistic?
+    is_logistic <- reactive({
+      req(model_fit())
+      identical(model_fit()$model_type, "logistic")
+    })
+
+    # Outcome label from selected_outcome
+    out_lab <- reactive({
+      req(selected_outcome())
+      get_label(selected_outcome()$name)
+    })
+
+    # ---- Outputs -------------------------------------------------------------
+
+    # Residuals vs weather variable 1
+    output$resid_weather1 <- renderPlot({
+      req(full_model(), model_fit())
+      mf     <- model_fit()
+      model  <- full_model()
+      h      <- mf$weather_terms[1]
+      df     <- model.frame(model)
+      req(h %in% names(df))
+
+      plot_data <- data.frame(x = df[[h]], residuals = stats::residuals(model))
+      ggplot2::ggplot(plot_data, ggplot2::aes(x = x, y = residuals)) +
+        ggplot2::geom_point(alpha = 0.1) +
+        ggplot2::geom_hline(yintercept = 0, color = "red", linetype = "dotted") +
+        ggplot2::stat_summary_bin(fun = "mean", bins = 20, color = "orange", size = 2, geom = "point") +
+        ggplot2::theme_minimal() +
+        ggplot2::labs(x = stringr::str_wrap(get_label(h), 40), y = "Residuals")
+    })
+
+    # Residuals vs weather variable 2 (only shown when two weather vars selected)
+    output$resid_weather2 <- renderPlot({
+      req(full_model(), model_fit(), length(model_fit()$weather_terms) >= 2)
+      mf     <- model_fit()
+      model  <- full_model()
+      h      <- mf$weather_terms[2]
+      df     <- model.frame(model)
+      req(h %in% names(df))
+
+      plot_data <- data.frame(x = df[[h]], residuals = stats::residuals(model))
+      ggplot2::ggplot(plot_data, ggplot2::aes(x = x, y = residuals)) +
+        ggplot2::geom_point(alpha = 0.1) +
+        ggplot2::geom_hline(yintercept = 0, color = "red", linetype = "dotted") +
+        ggplot2::stat_summary_bin(fun = "mean", bins = 20, color = "orange", size = 2, geom = "point") +
+        ggplot2::theme_minimal() +
+        ggplot2::labs(x = stringr::str_wrap(get_label(h), 40), y = "Residuals")
+    })
+
+    # Predicted vs actual distribution (histogram for linear, confusion matrix for logistic)
+    output$pred_welf_dist <- renderPlot({
+      req(full_model())
+      model <- full_model()
+
+      if (!is_logistic()) {
+        actual    <- model.frame(model)[[1]]
+        predicted <- stats::predict(model)
+        plot_data <- data.frame(
+          Type   = rep(c("Survey", "Predicted"), each = length(actual)),
+          Values = c(actual, predicted)
+        )
+        ggplot2::ggplot(plot_data, ggplot2::aes(x = Values, fill = Type)) +
+          ggplot2::geom_histogram(
+            ggplot2::aes(y = 100 * ggplot2::after_stat(count) / sum(ggplot2::after_stat(count))),
+            position = "dodge", alpha = 0.7, bins = 30
+          ) +
+          ggplot2::scale_fill_manual(values = c("Survey" = "steelblue", "Predicted" = "orange")) +
+          ggplot2::labs(x = stringr::str_wrap(out_lab(), 40), y = "Share of households (%)") +
+          ggplot2::theme_minimal()
+
+      } else {
+        actual    <- model.frame(model)[[1]]
+        predicted <- stats::predict(model, type = "response")
+        conf_matrix <- table(
+          Predicted = factor(ifelse(predicted > 0.5, 1, 0), levels = c(0, 1)),
+          Actual    = factor(actual, levels = c(0, 1))
+        )
+        cm_df <- as.data.frame(conf_matrix)
+        cm_df$Percent  <- cm_df$Freq / sum(conf_matrix) * 100
+        levels(cm_df$Actual)    <- c("No", "Yes")
+        levels(cm_df$Predicted) <- c("No", "Yes")
+
+        ggplot2::ggplot(cm_df, ggplot2::aes(x = Actual, y = Predicted, fill = Percent)) +
+          ggplot2::geom_tile(color = "white") +
+          ggplot2::geom_text(ggplot2::aes(label = sprintf("%.1f%%", Percent)), vjust = 1) +
+          ggplot2::scale_fill_gradient(low = "lightblue", high = "steelblue") +
+          ggplot2::labs(title = "Confusion Matrix", x = "Actual", y = "Predicted") +
+          ggplot2::theme_minimal() +
+          ggplot2::theme(legend.position = "none")
+      }
+    })
+
+    # Relative importance (linear only — uses relaimpo::calc.relimp)
+    output$relaimpo <- renderPlot({
+      req(full_model(), !is_logistic())
+      model    <- full_model()
+      total_r2 <- tryCatch(summary(model)$r.squared, error = function(e) NA_real_)
+
+      rel_imp <- tryCatch(
+        relaimpo::calc.relimp(model, type = "lmg"),
+        error = function(e) e
+      )
+
+      if (inherits(rel_imp, "error")) {
+        return(
+          ggplot2::ggplot() +
+            ggplot2::annotate(
+              "text", x = 0.5, y = 0.5,
+              label = paste("Relative importance unavailable:", conditionMessage(rel_imp)),
+              hjust = 0.5
+            ) +
+            ggplot2::theme_void()
+        )
+      }
+
+      vl <- if (is.function(varlist)) varlist() else varlist
+      importance_df <- data.frame(
+        Variable     = names(rel_imp$lmg),
+        Contribution = as.numeric(rel_imp$lmg)
+      )
+      if (!is.null(vl)) {
+        importance_df <- dplyr::left_join(
+          importance_df,
+          vl[, c("name", "label"), drop = FALSE],
+          by = c("Variable" = "name")
+        ) |>
+          dplyr::mutate(label = dplyr::if_else(is.na(label), Variable, label))
+      } else {
+        importance_df$label <- importance_df$Variable
+      }
+
+      ggplot2::ggplot(importance_df, ggplot2::aes(x = reorder(label, Contribution), y = Contribution)) +
+        ggplot2::geom_bar(stat = "identity", fill = "steelblue") +
+        ggplot2::geom_text(ggplot2::aes(label = round(Contribution, 3)), hjust = -0.2, size = 3.5) +
+        ggplot2::geom_hline(yintercept = total_r2, linetype = "dashed", color = "red") +
+        ggplot2::annotate(
+          "text", x = Inf, y = total_r2,
+          label = paste("Total R\u00b2 =", round(total_r2, 3)),
+          hjust = 1.1, vjust = -0.5, color = "red", size = 3.5
+        ) +
+        ggplot2::coord_flip() +
+        ggplot2::scale_x_discrete(labels = function(x) stringr::str_wrap(x, 30)) +
+        ggplot2::labs(x = "", y = "R-squared contribution") +
+        ggplot2::theme_minimal()
+    })
+
+    # Relative importance panel — only rendered for linear models
+    output$relaimpo_ui <- renderUI({
+      req(model_fit())
+      if (!is_logistic()) {
+        tagList(
+          shiny::h4("Relative importance of predictors"),
+          shiny::plotOutput(ns("relaimpo")),
+          shiny::helpText(
+            "Uses the LMG method (Lindeman, Merenda & Gold): average increase in R\u00b2
+             when each predictor is added across all possible orderings.",
+            style = "font-size: 12px;"
+          )
+        )
+      }
+    })
+
+    # Fit statistics table
+    output$additional_stats <- renderTable({
+      req(full_model())
+      model <- full_model()
+
+      if (!is_logistic()) {
+        s <- summary(model)
+        data.frame(
+          Statistic = c("Observations", "R-squared", "Adjusted R-squared", "F-statistic"),
+          Value     = c(
+            format(stats::nobs(model), big.mark = ","),
+            round(s$r.squared, 3),
+            round(s$adj.r.squared, 3),
+            round(s$fstatistic[1], 1)
+          )
+        )
+      } else {
+        ll_model  <- as.numeric(stats::logLik(model))
+        ll_null   <- as.numeric(-0.5 * model$null.deviance)
+        mcfadden  <- round(1 - ll_model / ll_null, 3)
+
+        actual    <- model.frame(model)[[1]]
+        predicted <- stats::predict(model, type = "response")
+        pred_class <- ifelse(predicted > 0.5, 1, 0)
+        cm        <- table(Predicted = pred_class, Actual = actual)
+
+        TP <- cm["1", "1"]; TN <- cm["0", "0"]
+        FP <- cm["1", "0"]; FN <- cm["0", "1"]
+
+        data.frame(
+          Statistic = c("Observations", "McFadden R\u00b2", "AIC",
+                        "Accuracy", "Precision", "Recall"),
+          Value     = c(
+            format(stats::nobs(model), big.mark = ","),
+            mcfadden,
+            round(stats::AIC(model)),
+            round((TP + TN) / (TP + TN + FP + FN), 3),
+            round(TP / (TP + FP), 3),
+            round(TP / (TP + FN), 3)
+          )
+        )
+      }
+    })
+
+    # Standard diagnostic plots
+    output$diagnostic_plots <- renderPlot({
+      req(full_model())
+      par(mfrow = c(2, 2))
+      plot(full_model())
+    })
+
+    # Full model summary (console-style)
+    output$model_summary <- renderPrint({
+      req(full_model())
+      summary(full_model())
+    })
+
+    # ---- Add tab (once) ------------------------------------------------------
+
     observeEvent(model_fit(), {
       req(model_fit())
 
-  vl <- if (is.function(varlist)) varlist() else varlist
-  name_col <- if (!is.null(vl) && "name" %in% names(vl)) "name" else "varname"
-  label_lookup <- if (!is.null(vl) && name_col %in% names(vl)) stats::setNames(vl$label, vl[[name_col]]) else NULL
-
-      out_lab <- outcome_label()
-      if (is.null(out_lab)) out_lab <- selected_outcome() %||% "Outcome"
-
-      get_weather_terms <- function() {
-        terms <- if (is.function(weather_terms)) weather_terms() else weather_terms
-        if (is.null(terms) || !length(terms)) return(haz_vars())
-        terms
-      }
-
       if (!modelfit_tab_added()) {
-        output$resid_weather1 <- renderPlot({
-          req(model_fit())
-          model <- model_fit()[[3]]
-          plot_data <- model.frame(model) |>
-            dplyr::select(dplyr::starts_with("haz_")) |>
-            dplyr::mutate(residuals = stats::residuals(model))
 
-          haz_cols <- intersect(get_weather_terms(), names(plot_data))
-          if (!length(haz_cols)) {
-            haz_cols <- colnames(dplyr::select(plot_data, dplyr::starts_with("haz_")))
-          }
-          h <- haz_cols[[1]]
-          xlabel <- get_name_label(h, varlist = vl)$label %||% (label_lookup[h] %||% h)
-
-          ggplot2::ggplot(plot_data, ggplot2::aes(x = .data[[h]], y = residuals)) +
-            ggplot2::geom_point(alpha = 0.1) +
-            ggplot2::geom_hline(yintercept = 0, color = "red", linetype = "dotted") +
-            ggplot2::stat_summary_bin(fun = "mean", bins = 20, color = "orange", size = 2, geom = "point") +
-            ggplot2::theme_minimal() +
-            ggplot2::labs(title = "", x = stringr::str_wrap(paste0(xlabel, "\n (as configured)"), 40), y = "Residuals")
-        })
-
-        output$resid_weather2 <- renderPlot({
-          req(length(haz_vars()) > 1, model_fit())
-          model <- model_fit()[[3]]
-          plot_data <- model.frame(model) |>
-            dplyr::select(dplyr::starts_with("haz_")) |>
-            dplyr::mutate(residuals = stats::residuals(model))
-
-          haz_cols <- intersect(get_weather_terms(), names(plot_data))
-          if (length(haz_cols) < 2) {
-            haz_cols <- colnames(dplyr::select(plot_data, dplyr::starts_with("haz_")))
-          }
-          h <- haz_cols[[2]]
-          xlabel <- get_name_label(h, varlist = vl)$label %||% (label_lookup[h] %||% h)
-
-          ggplot2::ggplot(plot_data, ggplot2::aes(x = .data[[h]], y = residuals)) +
-            ggplot2::geom_point(alpha = 0.1) +
-            ggplot2::geom_hline(yintercept = 0, color = "red", linetype = "dotted") +
-            ggplot2::stat_summary_bin(fun = "mean", bins = 20, color = "orange", size = 2, geom = "point") +
-            ggplot2::theme_minimal() +
-            ggplot2::labs(title = "", x = stringr::str_wrap(paste0(xlabel, "\n (as configured)"), 40), y = "Residuals")
-        })
-
-        output$pred_welf_dist <- renderPlot({
-          req(model_fit())
-          model <- model_fit()[[3]]
-          is_binary <- isTRUE(outcome_type() == "Binary") && inherits(model, "glm") &&
-            identical(stats::family(model)$family, "binomial")
-
-          if (!is_binary) {
-            actual_values <- model.frame(model)[[1]]
-            predicted_values <- stats::predict(model)
-            plot_data <- data.frame(
-              Type = rep(c("Survey", "Predicted"), each = length(actual_values)),
-              Values = c(actual_values, predicted_values)
-            )
-
-            ggplot2::ggplot(plot_data, ggplot2::aes(x = Values, fill = Type)) +
-              ggplot2::geom_histogram(ggplot2::aes(y = 100 * ggplot2::after_stat(count) / sum(ggplot2::after_stat(count))),
-                                       position = "dodge", alpha = 0.7, bins = 30) +
-              ggplot2::labs(x = stringr::str_wrap(out_lab, 40), y = "Share of households (%)") +
-              ggplot2::theme_minimal() +
-              ggplot2::scale_fill_manual(values = c("Survey" = "steelblue", "Predicted" = "orange"))
-          } else {
-            actual <- model.frame(model)[[1]]
-            predicted <- stats::predict(model, type = "response")
-            conf_matrix <- table(
-              Predicted = ifelse(predicted > 0.5, 1, 0),
-              Actual = actual
-            )
-            cm_df <- as.data.frame(conf_matrix)
-            colnames(cm_df) <- c("Predicted", "Actual", "Freq")
-            total <- sum(conf_matrix)
-            cm_df$Percent <- cm_df$Freq / total * 100
-            cm_df$Actual <- factor(cm_df$Actual, levels = c(0, 1), labels = c("Not poor", "Poor"))
-            cm_df$Predicted <- factor(cm_df$Predicted, levels = c(0, 1), labels = c("Not poor", "Poor"))
-
-            ggplot2::ggplot(cm_df, ggplot2::aes(x = Actual, y = Predicted, fill = Percent)) +
-              ggplot2::geom_tile(color = "white") +
-              ggplot2::geom_text(ggplot2::aes(label = sprintf("%.1f%%", Percent)), vjust = 1) +
-              ggplot2::scale_fill_gradient(low = "lightblue", high = "steelblue") +
-              ggplot2::labs(title = "Confusion Matrix", x = "Actual", y = "Predicted") +
-              ggplot2::theme_minimal() +
-              ggplot2::theme(legend.position = "none")
-          }
-        })
-
-        output$relaimpo <- renderPlot({
-          req(model_fit(), outcome_type() == "Continuous")
-          model <- model_fit()[[3]]
-          total_r2 <- tryCatch({ summary(model)$r.squared }, error = function(e) NA_real_)
-
-          rel_importance <- tryCatch(
-            relaimpo::calc.relimp(model, type = "lmg"),
-            error = function(e) e
-          )
-
-          if (inherits(rel_importance, "error")) {
-            # Show a friendly message in the plot area when relaimpo fails
-            msg <- paste0("Relative importance could not be calculated: ", conditionMessage(rel_importance))
-            ggplot2::ggplot() +
-              ggplot2::annotate("text", x = 0.5, y = 0.5, label = msg, hjust = 0.5, vjust = 0.5) +
-              ggplot2::theme_void()
-          } else {
-            join_key <- "name"
-            importance_df <- data.frame(
-              Variable = names(rel_importance$lmg),
-              Contribution = rel_importance$lmg
-            ) |>
-              dplyr::left_join(vl[, c(join_key, "label"), drop = FALSE], by = c("Variable" = join_key)) |>
-              dplyr::mutate(label = dplyr::if_else(is.na(.data$label), .data$Variable, .data$label))
-
-            ggplot2::ggplot(importance_df, ggplot2::aes(x = reorder(label, Contribution), y = Contribution, fill = Variable)) +
-              ggplot2::geom_bar(stat = "identity") +
-              ggplot2::geom_text(ggplot2::aes(label = round(Contribution, 3)), hjust = -0.3, size = 4) +
-              ggplot2::geom_hline(yintercept = total_r2, linetype = "dashed", color = "red") +
-              ggplot2::annotate("text", y = Inf, x = total_r2, label = paste("Total R² =", round(total_r2, 3)), hjust = 1.1, vjust = -0.5, color = "red") +
-              ggplot2::coord_flip() +
-              ggplot2::labs(x = "", y = "R-squared Contribution") +
-              ggplot2::theme_minimal() +
-              ggplot2::theme(legend.position = "none") +
-              ggplot2::scale_x_discrete(labels = stringr::str_wrap)
-          }
-        })
-
-        output$model_summary <- renderPrint({
-          req(model_fit())
-          summary(model_fit()[[3]])
-        })
-
-        output$diagnostic_plots <- renderPlot({
-          req(model_fit())
-          par(mfrow = c(2, 2))
-          plot(model_fit()[[3]])
-        })
-
-        output$additional_stats <- renderTable({
-          req(model_fit())
-          model <- model_fit()[[3]]
-          is_binary <- isTRUE(outcome_type() == "Binary") && inherits(model, "glm") &&
-            identical(stats::family(model)$family, "binomial")
-
-          if (!is_binary) {
-            data.frame(
-              Stat = c("Observations", "Adjusted R-squared", "F-statistic"),
-              Value = c(format(round(stats::nobs(model)), big.mark = ","), round(summary(model)$adj.r.squared, 3), round(summary(model)$fstatistic[1]))
-            )
-          } else {
-            logLik_model <- stats::logLik(model)
-            logLik_null <- -0.5 * model$null.deviance
-            mcfadden_r2 <- as.numeric(1 - (logLik_model / logLik_null))
-
-            actual <- model.frame(model)[[1]]
-            predicted <- stats::predict(model, type = "response")
-            conf_matrix <- table(
-              Predicted = ifelse(predicted > 0.5, 1, 0),
-              Actual = actual
-            )
-
-            TP <- conf_matrix["1", "1"]
-            TN <- conf_matrix["0", "0"]
-            FP <- conf_matrix["1", "0"]
-            FN <- conf_matrix["0", "1"]
-
-            accuracy <- (TP + TN) / (TP + TN + FP + FN)
-            precision <- TP / (TP + FP)
-            recall <- TP / (TP + FN)
-
-            data.frame(
-              Stat = c("Observations", "Pseudo R-squared", "AIC", "Accuracy", "Precision", "Recall"),
-              Value = c(format(round(stats::nobs(model)), big.mark = ","), round(mcfadden_r2, 3), round(stats::AIC(model)), round(accuracy, 3), round(precision, 3), round(recall, 3))
-            )
-          }
-        })
+        has_two_weather <- length(model_fit()$weather_terms) >= 2
 
         shiny::appendTab(
           inputId = tabset_id,
@@ -233,43 +287,39 @@ mod_1_08_modelfit_server <- function(
             title = "Model fit",
             value = "model_fit",
             shiny::h4("Fit statistics"),
-            shiny::p("(Model with FE and controls)"),
+            shiny::p("Full model (FE + controls)", style = "color: grey; font-size: 12px;"),
             shiny::tableOutput(ns("additional_stats")),
+            shiny::hr(),
             shiny::h4("Residuals vs weather"),
-            bslib::layout_columns(
-              col_widths = c(6, 6),
-              bslib::card(shiny::plotOutput(ns("resid_weather1"), height = "300px")),
-              bslib::card(shiny::plotOutput(ns("resid_weather2"), height = "300px"))
-            ),
+            if (has_two_weather) {
+              bslib::layout_columns(
+                col_widths = c(6, 6),
+                bslib::card(shiny::plotOutput(ns("resid_weather1"), height = "300px")),
+                bslib::card(shiny::plotOutput(ns("resid_weather2"), height = "300px"))
+              )
+            } else {
+              bslib::card(shiny::plotOutput(ns("resid_weather1"), height = "300px"))
+            },
+            shiny::hr(),
             shiny::uiOutput(ns("relaimpo_ui")),
-            shiny::h4("Predicted welfare"),
-            shiny::plotOutput(ns("pred_welf_dist")),
+            shiny::hr(),
+            shiny::h4("Predicted vs actual welfare"),
+            bslib::card(shiny::plotOutput(ns("pred_welf_dist"))),
+            shiny::hr(),
             shiny::h4("Diagnostic plots"),
-            shiny::plotOutput(ns("diagnostic_plots")),
+            bslib::card(shiny::plotOutput(ns("diagnostic_plots"))),
+            shiny::hr(),
             shiny::h4("Model summary"),
-            shiny::verbatimTextOutput(ns("model_summary")),
-            shiny::br()
+            shiny::verbatimTextOutput(ns("model_summary"))
           ),
-          select = FALSE,
+          select  = FALSE,
           session = tabset_session
         )
 
-        output$relaimpo_ui <- renderUI({
-          if (isTRUE(outcome_type() == "Continuous")) {
-            tagList(
-              shiny::h4("Contribution of Each Variable to Model R-squared"),
-              shiny::plotOutput(ns("relaimpo")),
-              shiny::helpText(
-                "Uses the Lindeman, Merenda, and Gold (LMG) method, which calculates the average increase in R-squared when a predictor is added to the model across all possible orderings of predictors.",
-                style = "font-size: 12px;"
-              )
-            )
-          } else NULL
-        })
-
         modelfit_tab_added(TRUE)
-      }
 
+      }
     }, ignoreInit = TRUE)
+
   })
 }

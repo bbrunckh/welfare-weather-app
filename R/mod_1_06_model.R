@@ -10,19 +10,18 @@
 mod_1_06_model_ui <- function(id) {
   ns <- NS(id)
   tagList(
+    uiOutput(ns("selected_outcome")),
+    uiOutput(ns("selected_weather")),
     uiOutput(ns("model_selector_ui")),
-    shiny::actionButton(ns("model_specs"), "Model parameters", style = "margin-bottom:12px;"),
+    uiOutput(ns("model_specs_button_ui")),
     uiOutput(ns("model_specs_ui")),
     shiny::helpText(
-      "Extreme gradient boosting and random forest models are yet to be implemented.",
+      "More model types and covariate selection methods will be added in future updates.",
       style = "color: red; font-size: 12px;"
-    ),
-    shiny::hr(),
-    shiny::actionButton(ns("run_model"), "Run model", style = "width: 100%;"),
-    shiny::br()
+    )
   )
 }
-    
+
 #' 1_06_model Server Functions
 #'
 #' @noRd 
@@ -37,434 +36,280 @@ mod_1_06_model_server <- function(
   moduleServer(id, function(input, output, session){
     ns <- session$ns
 
+    # --- Helper: filter varlist to valid vars present in survey_weather --------
+    # "valid" = present in df AND at least 50% non-missing
+    valid_varlist <- reactive({
+      req(survey_weather(), varlist())
+      df <- survey_weather()
+      vl <- varlist()
+      valid_vars <- names(df)[colMeans(!is.na(df)) >= 0.5]
+      vl[vl$name %in% valid_vars, , drop = FALSE]
+    })
+
+    # Subsets by variable role, built once and reused throughout
+    fe_varlist <- reactive({
+      vl <- valid_varlist()
+      vl[vl$fe == 1, , drop = FALSE]
+    })
+
+    interaction_varlist <- reactive({
+      vl <- valid_varlist()
+      # Keep only variables flagged for interaction that are NOT numeric,
+      # to avoid overfitting (numeric interaction vars would need binning first)
+      vl[vl$interact == 1 & vl$type != "numeric", , drop = FALSE]
+    })
+
+    hh_varlist <- reactive({
+      vl <- valid_varlist()
+      vl[vl$hh == 1, , drop = FALSE]
+    })
+
+    area_varlist <- reactive({
+      vl <- valid_varlist()
+      vl[vl$area == 1, , drop = FALSE]
+    })
+
+    ind_varlist <- reactive({
+      vl <- valid_varlist()
+      vl[vl$ind == 1, , drop = FALSE]
+    })
+
+    firm_varlist <- reactive({
+      vl <- valid_varlist()
+      vl[vl$firm == 1, , drop = FALSE]
+    })
+
+    # --- Display selected outcome and weather for reference -------------------
+
+    output$selected_outcome <- renderUI({
+      req(selected_outcome())
+      shiny::p(paste0("Selected outcome: ", selected_outcome()$label))
+    })
+
+    output$selected_weather <- renderUI({
+      req(selected_weather())
+      shiny::p(paste0("Selected weather: ",
+        paste(selected_weather()$label, collapse = ", ")))
+    })
+
+    # --- Model type selector --------------------------------------------------
+
+    output$model_selector_ui <- renderUI({
+
+      if (is.null(selected_outcome()) || !length(selected_outcome())) {
+        return(shiny::helpText(
+          "Select an outcome variable to choose model type.",
+          style = "color: red; font-size: 12px;"
+        ))
+      }
+
+      if (is.null(survey_weather()) || !nrow(as.data.frame(survey_weather()))) {
+        return(shiny::helpText(
+          "Load survey and weather data to select model type.",
+          style = "color: red; font-size: 12px;"
+        ))
+      }
+
+      type <- selected_outcome()$type
+      if (type == "logical") {
+        model_choices <- c("Logistic regression", "Linear regression")
+        label_text    <- "Classification model:"
+      } else {
+        model_choices <- c("Linear regression")
+        label_text    <- "Regression model:"
+      }
+
+      shiny::radioButtons(
+        inputId  = ns("model_type"),
+        label    = label_text,
+        choices  = model_choices
+      )
+    })
+
+    # --- Model parameters toggle button --------------------------------------
+
     model_specs_open <- reactiveVal(FALSE)
+
+    output$model_specs_button_ui <- renderUI({
+      req(input$model_type)
+      shiny::actionButton(ns("model_specs"), "Model parameters", style = "margin-bottom:12px;")
+    })
 
     observeEvent(input$model_specs, {
       model_specs_open(!isTRUE(model_specs_open()))
     })
 
-    varlist_r <- reactive({
-      if (is.function(varlist)) varlist() else varlist
-    })
-
-    outcome_label <- reactive({
-      so <- selected_outcome()
-      vl <- varlist_r()
-      if (is.null(so) || is.null(vl)) return(NULL)
-      lab <- vl$label[vl$name == so$name$name]
-      if (length(lab)) as.character(lab[[1]]) else so
-    })
-
-    outcome_type <- reactive({
-      so <- selected_outcome()
-      vl <- varlist_r()
-      if (is.null(so)) return(NULL)
-      if (!is.null(vl) && "type" %in% names(vl)) {
-        dt <- vl$type[vl$name == so$name]
-        if (length(dt) && !is.na(dt[[1]]) && tolower(dt[[1]]) == "logical") return("Binary")
-      }
-      df <- survey_weather()
-      if (!is.null(df) && so %in% names(df)) {
-        vals <- unique(stats::na.omit(df[[so]]))
-        if (length(vals) <= 2) return("Binary")
-      }
-      "Continuous"
-    })
-
-    safe_varlist <- function(df, flag_col = NULL, types = NULL) {
-      vl <- varlist_r()
-      if (is.null(vl)) return(data.frame(name = character(), label = character(), stringsAsFactors = FALSE))
-
-      keep <- rep(TRUE, nrow(vl))
-      if (!is.null(flag_col) && flag_col %in% names(vl)) {
-        keep <- keep & vl[[flag_col]] == 1
-      }
-
-      if (!is.null(types) && "type" %in% names(vl)) {
-        keep <- keep & tolower(vl$type) %in% tolower(types)
-      }
-
-      out <- vl[keep, , drop = FALSE]
-      if (nrow(out) == 0) return(data.frame(name = character(), label = character(), stringsAsFactors = FALSE))
-
-      name_col <- "name"
-      label_col <- "label"
-      if (is.null(name_col)) return(data.frame(name = character(), label = character(), stringsAsFactors = FALSE))
-
-      out <- out[, unique(c(name_col, label_col)), drop = FALSE]
-      names(out)[names(out) == name_col] <- "name"
-      if (!"label" %in% names(out)) out$label <- out$name
-
-      if (!is.null(df)) {
-        out <- out[out$name %in% names(df), , drop = FALSE]
-      }
-
-      out
-    }
-
-    hh_varlist <- reactive({
-      df <- survey_weather()
-      safe_varlist(df, flag_col = "hh", types = c("numeric", "integer", "logical"))
-    })
-
-    area_varlist <- reactive({
-      df <- survey_weather()
-      safe_varlist(df, flag_col = "area", types = c("numeric", "integer", "logical"))
-    })
-
-    fe_varlist <- reactive({
-      df <- survey_weather()
-      safe_varlist(df, flag_col = "fe", types = c("numeric", "integer", "logical", "character", "Date"))
-    })
-
-    extra_covariates <- reactive({
-      vl <- varlist_r()
-      df <- survey_weather()
-      if (is.null(vl)) return(data.frame(name = character(), label = character(), stringsAsFactors = FALSE))
-
-      base_vars <- c(selected_outcome(), haz_vars())
-      hh_vars <- hh_varlist()$name
-      area_vars <- area_varlist()$name
-      fe_vars <- fe_varlist()$name
-
-      exclude <- unique(c(base_vars, hh_vars, area_vars, fe_vars))
-      name_col <- "name"
-      if (is.null(name_col)) return(data.frame(name = character(), label = character(), stringsAsFactors = FALSE))
-
-      out <- vl[vl[[name_col]] %in% names(df) & !vl[[name_col]] %in% exclude, , drop = FALSE]
-      out <- out[, intersect(c(name_col, "label"), names(out)), drop = FALSE]
-      names(out)[names(out) == name_col] <- "name"
-      if (!"label" %in% names(out)) out$label <- out$name
-
-      out
-    })
-
-    output$model_selector_ui <- renderUI({
-      req(selected_outcome())
-      type <- outcome_type()
-
-      if (is.null(type)) return(NULL)
-
-      if (type == "Binary") {
-        model_choices <- c("Logistic regression", "Linear regression")
-        label_text <- "Classification model:"
-      } else {
-        model_choices <- c("Linear regression")
-        label_text <- "Regression model:"
-      }
-
-      tagList(
-        shiny::p(paste0("A ", tolower(type), " welfare outcome is selected."), style = "font-size: 12px;"),
-        shiny::radioButtons(
-          inputId = ns("model_type"),
-          label = label_text,
-          choices = model_choices
-        )
-      )
-    })
+    # --- Model specification panel -------------------------------------------
 
     output$model_specs_ui <- renderUI({
-      req(varlist_r())
+      req(input$model_type)
 
-      if (!isTRUE(model_specs_open())) {
-        return(NULL)
-      }
+      if (!isTRUE(model_specs_open())) return(NULL)
 
-      if (is.null(input$model_type)) {
-        return(shiny::p("Select a model type to configure parameters."))
-      }
+      if (input$model_type %in% c("Logistic regression", "Linear regression")) {
 
-      shiny::withMathJax(
-        if (input$model_type %in% c("Logistic regression", "Linear regression")) {
+        interactions <- interaction_varlist()
+        fe           <- fe_varlist()
+
+        shiny::withMathJax(
           tagList(
-            {
-              df <- survey_weather()
-              vl <- varlist_r()
-              name_col <- "name"
 
-              choices <- character(0)
-              if (!is.null(name_col) && !is.null(vl) && "interact" %in% names(vl)) {
-                has_hh <- "hh" %in% names(vl)
-                has_outcome <- "outcome" %in% names(vl)
-
-                ok_hh <- if (has_hh) vl$hh == 1 else rep(FALSE, nrow(vl))
-                ok_outcome <- if (has_outcome) !is.na(vl$outcome) & nzchar(vl$outcome) else rep(FALSE, nrow(vl))
-
-                interact_df <- vl[vl$interact == 1 & (ok_hh | ok_outcome), , drop = FALSE]
-                interact_df <- interact_df[, intersect(c(name_col, "label"), names(interact_df)), drop = FALSE]
-                names(interact_df)[names(interact_df) == name_col] <- "name"
-                if (!"label" %in% names(interact_df)) interact_df$label <- interact_df$name
-
-                if (!is.null(df)) {
-                  interact_df <- interact_df[interact_df$name %in% names(df), , drop = FALSE]
-                }
-
-                exclude <- c(selected_outcome(), haz_vars())
-                interact_df <- interact_df[!interact_df$name %in% exclude, , drop = FALSE]
-                choices <- interact_df$label
-              }
-
+            # Interaction variable with weather hazard
+            # Only render if there are valid interaction variables available
+            if (nrow(interactions) > 0) {
               shiny::selectizeInput(
                 ns("interactions"),
-                label = "Interactions with \\(Haz_{kt}\\):",
-                choices = choices,
-                selected = NULL,
+                label    = "Interactions with \\(Haz_{kt}\\):",
+                choices  = setNames(interactions$name, interactions$label),
+                selected = if ("urban" %in% interactions$name) "urban" else NULL,
                 multiple = TRUE,
-                options = list(maxItems = 1, placeholder = "Select interaction variable")
+                options  = list(
+                  maxItems    = 1,
+                  placeholder = "Select interaction variable"
+                )
               )
+            } else {
+              shiny::helpText("No interaction variables available.", style = "color: grey; font-size: 12px;")
             },
-            shiny::selectizeInput(
-              ns("fixedeffects"),
-              label = "Fixed effects",
-              choices = fe_varlist()$label,
-              selected = NULL,
-              multiple = TRUE,
-              options = list(placeholder = "Please select (several) fixed effects")
-            ),
+
+            # Fixed effects
+            # Only render if there are valid fixed effect variables available
+            if (nrow(fe) > 0) {
+              shiny::selectizeInput(
+                ns("fixedeffects"),
+                label    = "Fixed effects:",
+                choices  = setNames(fe$name, fe$label),
+                selected = intersect(c("year", "gaul1_code"), fe$name),
+                multiple = TRUE,
+                options  = list(placeholder = "Select (several) fixed effects")
+              )
+            } else {
+              shiny::helpText("No fixed effect variables available.", style = "color: grey; font-size: 12px;")
+            },
+
+            # Covariate selection method
             shiny::radioButtons(
               ns("covariates"),
               "Covariate selection:",
-              choices = c("User-defined", "Lasso"),
+              choices  = c("User-defined", "Lasso"),
               selected = "User-defined"
             ),
-            shiny::helpText("Lasso variable selection is yet to be implemented.", style = "color: red; font-size: 12px;"),
+            shiny::helpText(
+              "Lasso variable selection is yet to be implemented.",
+              style = "color: red; font-size: 12px;"
+            ),
+
             uiOutput(ns("covariate_inputs"))
           )
-        }
-      )
+        )
+      }
     })
+
+    # --- Covariate inputs (user-defined or Lasso) ----------------------------
+
+    # Helper: remove variables already used as outcome, weather, interaction,
+    # or fixed effect from a candidate varlist data frame
+    exclude_already_selected <- function(candidate_vl) {
+      exclude <- c(
+        selected_outcome()$name,
+        selected_weather()$name,
+        input$interactions,
+        input$fixedeffects
+      )
+      candidate_vl[!candidate_vl$name %in% exclude, , drop = FALSE]
+    }
 
     output$covariate_inputs <- renderUI({
       req(input$covariates)
-      shiny::withMathJax(
-        if (input$covariates == "User-defined") {
+
+      if (input$covariates == "User-defined") {
+
+        ind  <- exclude_already_selected(ind_varlist())
+        hh   <- exclude_already_selected(hh_varlist())
+        firm <- exclude_already_selected(firm_varlist())
+        area <- exclude_already_selected(area_varlist())
+
+        shiny::withMathJax(
           tagList(
-            {
-              hh_choices <- hh_varlist()$label
+
+            # Individual-level covariates
+            if (nrow(ind) > 0) {
+              shiny::selectizeInput(
+                ns("indcov"),
+                label    = "Individual characteristics \\(X_{ijt}\\):",
+                choices  = setNames(ind$name, ind$label),
+                selected = NULL,
+                multiple = TRUE,
+                options  = list(placeholder = "Select individual covariates")
+              )
+            },
+
+            # Household-level covariates
+            if (nrow(hh) > 0) {
               shiny::selectizeInput(
                 ns("hhcov"),
-                label = "Household characteristics \\(X_{hkt}\\)",
-                choices = hh_choices,
+                label    = "Household characteristics \\(X_{ijt}\\):",
+                choices  = setNames(hh$name, hh$label),
                 selected = NULL,
                 multiple = TRUE,
-                options = list(placeholder = "Please select (several) hh covariates")
+                options  = list(placeholder = "Select household covariates")
               )
             },
-            {
-              area_choices <- area_varlist()
+
+            # Firm-level covariates
+            if (nrow(firm) > 0) {
+              shiny::selectizeInput(
+                ns("firmcov"),
+                label    = "Firm characteristics:",
+                choices  = setNames(firm$name, firm$label),
+                selected = NULL,
+                multiple = TRUE,
+                options  = list(placeholder = "Select firm covariates")
+              )
+            },
+
+            # Area-level covariates
+            if (nrow(area) > 0) {
               shiny::selectizeInput(
                 ns("areacov"),
-                label = "Area characteristics \\(E_{kt}\\)",
-                choices = area_choices$label,
+                label    = "Area characteristics \\(E_{jt}\\):",
+                choices  = setNames(area$name, area$label),
                 selected = NULL,
                 multiple = TRUE,
-                options = list(placeholder = "Please select (several) area covariates")
-              )
-            },
-            {
-              extra_choices <- extra_covariates()
-              shiny::selectizeInput(
-                ns("othercov"),
-                label = "Additional covariates",
-                choices = extra_choices$label,
-                selected = NULL,
-                multiple = TRUE,
-                options = list(placeholder = "Please select (several) extra covariates")
+                options  = list(placeholder = "Select area covariates")
               )
             }
           )
-        } else if (input$covariates == "Lasso") {
-          tagList(
-            shiny::helpText("Placeholder for Lasso variable selection parameters.", style = "font-size: 12px;"),
-            shiny::actionButton(ns("run_lasso"), "Run Lasso")
-          )
-        }
-      )
+        )
+
+      } else if (input$covariates == "Lasso") {
+        tagList(
+          shiny::helpText(
+            "Placeholder for Lasso variable selection parameters.",
+            style = "font-size: 12px;"
+          ),
+          shiny::actionButton(ns("run_lasso"), "Run Lasso")
+        )
+      }
     })
 
-    interaction_vars <- reactive({
-      vl <- varlist_r()
-      if (is.null(vl) || is.null(input$interactions) || !length(input$interactions)) return(character(0))
-      name_col <- "name"
-      if (is.null(name_col) || !"label" %in% names(vl)) return(character(0))
-      label_to_var <- stats::setNames(vl[[name_col]], vl$label)
-      vars <- label_to_var[input$interactions]
-      vars[!is.na(vars)]
-    })
+    # --- Collect and return selected model spec --------------------------------
 
-    weather_terms_val <- reactiveVal(character(0))
-    hh_cov_val <- reactiveVal(character(0))
-    area_cov_val <- reactiveVal(character(0))
-    other_cov_val <- reactiveVal(character(0))
-    fe_val <- reactiveVal(character(0))
-    y_var_val <- reactiveVal(NULL)
-
-    model_fit_val <- reactiveVal(NULL)
-
-    observeEvent(input$run_model, {
-      id_run <- shiny::showNotification("Running model. Results presented once model finished running.", type = "message", duration = NULL)
-      fit_list <- tryCatch({
-        weather_terms_val(character(0))
-        hh_cov_val(character(0))
-        area_cov_val(character(0))
-        other_cov_val(character(0))
-        fe_val(character(0))
-        y_var_val(NULL)
-
-        if (is.null(selected_outcome()) || !length(selected_outcome())) {
-          shiny::showNotification("Select an outcome before running the model.", type = "warning")
-          return(NULL)
-        }
-
-        df <- survey_weather()
-        if (is.null(df) || !nrow(as.data.frame(df))) {
-          shiny::showNotification("Load survey and weather data before running the model.", type = "warning")
-          return(NULL)
-        }
-
-        shiny::showNotification("Fitting model...", type = "message")
-        y_var <- selected_outcome()
-        y_var_val(y_var)
-        if (!y_var %in% names(df)) {
-          shiny::showNotification("Selected outcome is not available in survey data.", type = "warning")
-          return(NULL)
-        }
-
-        weather_terms <- haz_vars()
-        if (!is.null(df)) {
-          weather_terms <- intersect(weather_terms, names(df))
-        }
-        if (is.null(weather_terms) || !length(weather_terms)) {
-          shiny::showNotification("Weather variables are not available.", type = "warning")
-          return(NULL)
-        }
-
-      if (!is.null(weather_settings) && is.function(weather_settings)) {
-        ws <- weather_settings()
-        if (!is.null(ws) && nrow(ws)) {
-          for (w in weather_terms) {
-            base <- sub("^haz_", "", w)
-            poly_vals <- ws$polynomial[ws$varname == base]
-            if (length(poly_vals)) {
-              poly_vals <- poly_vals[[1]]
-              if ("a" %in% poly_vals) weather_terms <- c(weather_terms, paste0("I(", w, "^2)"))
-              if ("b" %in% poly_vals) weather_terms <- c(weather_terms, paste0("I(", w, "^3)"))
-            }
-          }
-        }
-      }
-
-      weather_terms_val(weather_terms)
-
-      label_to_var <- NULL
-      vl <- varlist_r()
-      name_col <- if (!is.null(vl) && "name" %in% names(vl)) "name" else "varname"
-      if (!is.null(vl) && all(c("label", name_col) %in% names(vl))) {
-        label_to_var <- stats::setNames(vl[[name_col]], vl$label)
-      }
-
-      interactions <- interaction_vars()
-
-      interaction_terms <- character(0)
-      if (length(interactions) > 0) {
-        term_matrix <- outer(interactions, weather_terms, FUN = function(inter, weather) {
-          sprintf("(%s * %s)", inter, weather)
-        })
-        interaction_terms <- c(t(term_matrix))
-      }
-
-      fe <- character(0)
-      if (!is.null(input$fixedeffects) && length(input$fixedeffects) > 0 && !is.null(label_to_var)) {
-        fe <- label_to_var[input$fixedeffects]
-        fe <- fe[!is.na(fe)]
-      }
-      fe_val(fe)
-
-      hh_cov <- character(0)
-      area_cov <- character(0)
-      other_cov <- character(0)
-      if (!is.null(input$covariates) && input$covariates %in% c("User-defined", "Lasso") && !is.null(label_to_var)) {
-        if (!is.null(input$hhcov)) {
-          hh_cov <- label_to_var[input$hhcov]
-          hh_cov <- hh_cov[!is.na(hh_cov)]
-        }
-        if (!is.null(input$areacov)) {
-          area_cov <- label_to_var[input$areacov]
-          area_cov <- area_cov[!is.na(area_cov)]
-        }
-        if (!is.null(input$othercov)) {
-          other_cov <- label_to_var[input$othercov]
-          other_cov <- other_cov[!is.na(other_cov)]
-        }
-      }
-      hh_cov_val(hh_cov)
-      area_cov_val(area_cov)
-      other_cov_val(other_cov)
-
-      build_formula <- function(y, terms) {
-        terms <- terms[nzchar(terms)]
-        terms <- terms[!is.na(terms)]
-        if (!length(terms)) return(NULL)
-        stats::as.formula(paste(y, "~", paste(terms, collapse = " + ")))
-      }
-
-      terms1 <- weather_terms
-      terms2 <- c(weather_terms, fe)
-      terms3 <- c(weather_terms, hh_cov, area_cov, other_cov, fe, interaction_terms)
-
-      formula1 <- build_formula(y_var, terms1)
-      formula2 <- build_formula(y_var, terms2)
-      formula3 <- build_formula(y_var, terms3)
-
-      if (is.null(formula1) || is.null(formula2) || is.null(formula3)) {
-        shiny::showNotification("Model terms are incomplete. Check covariates and fixed effects selections.", type = "warning")
-        return(NULL)
-      }
-
-      is_binary <- isTRUE(outcome_type() == "Binary")
-      sw <- isolate(as.data.frame(df))
-
-      use_logit <- is_binary && identical(input$model_type, "Logistic regression")
-      if (use_logit) {
-        y_vals <- sw[[y_var]]
-        y_vals <- y_vals[!is.na(y_vals)]
-        if (!length(y_vals) || any(!(y_vals %in% c(0, 1)))) {
-          shiny::showNotification("Outcome values are not 0/1. Falling back to OLS.", type = "warning")
-          use_logit <- FALSE
-        }
-      }
-      fit_fun <- if (use_logit) {
-        function(form) stats::glm(form, data = sw, family = stats::binomial(link = "logit"))
-      } else {
-        function(form) stats::lm(form, data = sw)
-      }
-
-      fix_call <- function(fit) {
-        fit$call$formula <- stats::formula(fit)
-        fit$call$data <- quote(sw)
-        fit
-      }
-
-      fit1 <- fix_call(fit_fun(formula1))
-      fit2 <- fix_call(fit_fun(formula2))
-      fit3 <- fix_call(fit_fun(formula3))
-
-        shiny::showNotification("Model fitted successfully.", type = "message")
-        list(fit1, fit2, fit3)
-      }, error = function(e) {
-        shiny::showNotification(paste("Model failed:", conditionMessage(e)), type = "error")
-        NULL
-      })
-
-      # remove the persistent 'running' notification
-      try(if (exists("id_run") && !is.null(id_run)) shiny::removeNotification(id_run), silent = TRUE)
-
-      model_fit_val(fit_list)
-    }, ignoreInit = TRUE)
-
+    selected_model <- reactive({
       list(
-        # selected_model = selected_model,
-        model_fit = model_fit_val
+        type                = input$model_type,
+        interactions        = input$interactions,
+        fixedeffects        = input$fixedeffects,
+        covariate_selection = input$covariates,
+        hh_covariates       = input$hhcov,
+        area_covariates     = input$areacov,
+        ind_covariates      = input$indcov,
+        firm_covariates     = input$firmcov
       )
+    })
+
+    list(
+      selected_model = selected_model
+    )
   })
 }

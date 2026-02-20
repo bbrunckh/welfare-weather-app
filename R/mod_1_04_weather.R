@@ -129,7 +129,7 @@ mod_1_04_weather_server <- function(id, varlist, selected_surveys, survey_data, 
                 shiny::checkboxGroupInput(
                   inputId = ns(paste0(id_prefix, "polynomial")),
                   label = "Include polynomial terms",
-                  choices = c("Quadratic" = "a", "Cubic" = "b")
+                  choices = c("Quadratic" = "2", "Cubic" = "3")
                 )
               )
             )
@@ -176,8 +176,10 @@ selected_weather <- reactive({
     binning_method <- if (cont_binned == "Binned") input[[paste0(id_prefix, "binningMethod")]] %||% "Equal frequency" else NA_character_
 
     poly <- input[[paste0(id_prefix, "polynomial")]] %||% character(0)
-    poly_str <- if (length(poly) > 0) paste(poly, collapse = ", ") else ""
-    
+    # Store maximum degree as a single integer. Selecting "Cubic" gives c("2","3")
+    # so max() gives 3, and fit_weather_model adds I(x^2) + I(x^3).
+    poly_degree <- if (length(poly) > 0) max(as.integer(poly), na.rm = TRUE) else 1L
+
     tibble::tibble(
       name = v,
       ref_start = ref_start,
@@ -187,7 +189,7 @@ selected_weather <- reactive({
       cont_binned = cont_binned,
       num_bins = num_bins,
       binning_method = binning_method,
-      polynomial = poly_str
+      polynomial = poly_degree
     )
   })
   

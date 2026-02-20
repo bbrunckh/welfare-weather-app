@@ -1,9 +1,9 @@
 #### Welfare function
 
-### $W_{hkt} = f(Haz_{kt}, X_{hkt}, E_{kt}) + \epsilon_{hkt}$
+### $W_{ijt} = f(Haz_{jt}, X_{ijt}, E_{jt}) + \epsilon_{ijt}$
 
-- $W_{hkt}$: welfare of household $h$ in location $k$ at time $t$
-- $Haz_{kt}$: weather conditions in location $k$ at time $t$
-- $X_{hkt}$: characteristics of household $h$ in location $k$ at time $t$
-- $E_{kt}$: characteristics of location $k$ at time $t$
-- $\epsilon_{hkt}$: error term
+- $W_{ijt}$: outcome of individual/household $i$ in location $j$ at time $t$
+- $Haz_{jt}$: weather conditions in location $j$ at time $t$
+- $X_{ijt}$: characteristics of individual/household $h$ in location $j$ at time $t$
+- $E_{jt}$: characteristics of location $j$ at time $t$
+- $\epsilon_{ijt}$: error term
