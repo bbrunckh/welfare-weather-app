@@ -2,8 +2,8 @@
 #'
 #' Generates predictions from a fitted model object using new data, with
 #' flexible options for incorporating residual uncertainty around the fitted
-#' values. This is useful for simulation workflows where you want predictions
-#' that reflect both model uncertainty and unexplained variance.
+#' values. Useful for simulation workflows where predictions reflect both
+#' model uncertainty and unexplained variance.
 #'
 #' @param model A fitted model object supported by `broom::augment()`,
 #'   such as those produced by `lm()`, `glm()`, or `parsnip`.
@@ -12,93 +12,132 @@
 #'   `broom::augment()`. Common values are `"response"` (default)
 #'   and `"link"`.
 #' @param residuals A character string specifying how residuals are added to
-#'   fitted values. One of:
-#'   \describe{
-#'     `"none"` — return fitted values only (default).
-#'     `"original"` — add the residuals from the original training data, matched 
-#'       by row position. This requires `newdata` to have the same number of rows 
-#'       as the training data used to fit `model`, and that the rows are in the same order, 
-#'       so that residuals can be matched correctly. 
-#'     `"normal"` — draw residuals from a normal distribution with mean 0
-#'       and standard deviation equal to the residual standard deviation of the
-#'       original model fit.
-#'     `"empirical"` — draw residuals by resampling from the empirical
-#'       distribution of training residuals (equivalent to a non-parametric
-#'       bootstrap of the error term).
-#'   `
+#'   fitted values. One of `"none"`, `"original"`, `"normal"`, `"empirical"`.
+#'   See details in the help above for behaviour of each option.
+#' @param id An optional character string naming an identifier column used to
+#'   match original residuals from the training data to rows in `newdata`.
+#'   If `NULL` (default), residuals are matched by row position or repeated
+#'   to fill `newdata` as described above.
 #' @param outcome A character string giving the name to assign to the predicted
 #'   outcome column in the returned data frame. Defaults to `"predicted"`.
+#' @param train_data Optional data.frame with the original training data used
+#'   to fit `model`. When supplied, `broom::augment(model, data = train_data)`
+#'   is used to obtain training residuals and any `id` column that was not
+#'   included in the model frame.
 #'
-#' @return The `newdata` data frame with additional columns `.fitted`,
-#'   `.residual` (if `residuals != "none"`), and the predicted outcome
-#'   column named by `outcome`.
+#' @return The `newdata` data frame (tibble) with additional columns `.fitted`,
+#'   `.residual` (if `residuals != "none"`), and the predicted outcome column
+#'   named by `outcome`.
 #'
 #' @examples
 #' library(dplyr)
-#' library(broom)
-#'
-#' # Fit a simple model
 #' set.seed(42)
 #' train_data <- data.frame(
-#'   welfare = exp(rnorm(1000, mean = log(3.50), sd = 0.8)),
+#'   id      = 1:1000,
+#'   welfare = exp(rnorm(1000, mean = log(3.5), sd = 0.8)),
 #'   age     = rnorm(1000, mean = 35, sd = 10),
 #'   educ    = rnorm(1000, mean = 8,  sd = 3)
 #' )
 #' model <- lm(log(welfare) ~ age + educ, data = train_data)
+#' new_data <- data.frame(id = 1:500, age = rnorm(500), educ = rnorm(500))
 #'
-#' # New data to predict on
-#' new_data <- data.frame(
-#'   age  = rnorm(500, mean = 35, sd = 10),
-#'   educ = rnorm(500, mean = 8,  sd = 3)
-#' )
+#' # Use original training residuals matched by id by supplying train_data
+#' predict_outcome(model, new_data, residuals = "original", id = "id", train_data = train_data)
 #'
-#' # Fitted values only
-#' predict_outcome(model, new_data)
-#'
-#' # Fitted values plus resampled residuals
-#' predict_outcome(model, new_data, residuals = "original", outcome = "welfare_pred")
-#'
-#' # Fitted values plus normally distributed residuals
-#' predict_outcome(model, new_data, residuals = "normal",   outcome = "welfare_pred")
+#' # Or avoid needing train_data / id by using parametric residuals
+#' predict_outcome(model, new_data, residuals = "normal")
 #'
 #' @importFrom broom augment
-#' @importFrom dplyr mutate
+#' @importFrom dplyr mutate left_join select
 #' @importFrom stats rnorm sd
 #' @export
 predict_outcome <- function(model,
                             newdata,
                             type      = "response",
                             residuals = c("none", "original", "normal", "empirical"),
-                            outcome   = "predicted") {
+                            id        = NULL,
+                            outcome   = "predicted",
+                            train_data = NULL) {
 
   residuals <- match.arg(residuals)
 
+  # Predictions on newdata (uses broom to get .fitted)
   preds <- broom::augment(model, newdata = newdata, type.predict = type)
 
-  train_aug <- if (residuals != "none") broom::augment(model) else NULL
+  # When residuals are requested, obtain training augmentation;
+  # prefer train_data (if supplied) so id/.resid are available.
+  train_aug <- if (residuals != "none") {
+    if (!is.null(train_data)) broom::augment(model, data = train_data)
+    else broom::augment(model)
+  } else NULL
 
   resid_draw <- switch(residuals,
-    none      = 0,
-    original  = {
-      if (nrow(newdata) != nrow(train_aug)) {
-        stop("`residuals = 'original'` requires `newdata` to be the same size as the training data, so residuals can be matched by row position.")
+    none = 0,
+    original = {
+      if (is.null(train_aug)) {
+        stop("No training augmentation available for `residuals = 'original'`.")
       }
-      train_aug$.resid
-    },
-    normal    = {
       train_resid <- train_aug$.resid
+      if (length(train_resid) == 0) {
+        stop("No training residuals available to use with `residuals = 'original'`.")
+      }
+
+      if (!is.null(id)) {
+        # Ensure id present in both training augmentation and preds/newdata
+        if (!id %in% names(train_aug)) {
+          stop("`id` column not found in training data (needed to match original residuals). Supply `train_data` containing the id or include id in the model frame.")
+        }
+        if (!id %in% names(preds)) {
+          stop("`id` column not found in `newdata` (needed to match original residuals).")
+        }
+
+        train_resid_df <- train_aug |> dplyr::select(!!rlang::sym(id), .resid)
+        joined <- dplyr::left_join(preds, train_resid_df, by = id)
+        resid_vec <- joined$.resid
+
+        missing <- is.na(resid_vec)
+        if (any(missing)) {
+          warning("Some IDs in `newdata` were not present in the training data; filling missing residuals by resampling training residuals.")
+          resid_vec[missing] <- sample(train_resid, size = sum(missing), replace = TRUE)
+        }
+
+        resid_vec
+      } else {
+        # repeat training residuals to match newdata rows
+        if (nrow(newdata) != length(train_resid)) {
+          if (nrow(newdata) %% length(train_resid) != 0) {
+            warning("`residuals = 'original'`: repeating training residuals to match newdata (length not an integer multiple).")
+          }
+        }
+        rep(train_resid, length.out = nrow(newdata))
+      }
+    },
+    normal = {
+      if (is.null(train_aug)) {
+        stop("No training augmentation available to estimate residual SD for `residuals = 'normal'`.")
+      }
+      train_resid <- train_aug$.resid
+      if (length(train_resid) == 0) {
+        stop("No training residuals available to use with `residuals = 'normal'`.")
+      }
       rnorm(nrow(newdata), mean = 0, sd = sd(train_resid, na.rm = TRUE))
     },
     empirical = {
+      if (is.null(train_aug)) {
+        stop("No training augmentation available to resample residuals for `residuals = 'empirical'`.")
+      }
       train_resid <- train_aug$.resid
+      if (length(train_resid) == 0) {
+        stop("No training residuals available to use with `residuals = 'empirical'`.")
+      }
       sample(train_resid, size = nrow(newdata), replace = TRUE)
     }
   )
 
   preds |>
-    mutate(
-      .residual    = if (residuals == "none") NA_real_ else resid_draw,
-      "{outcome}" := .fitted + resid_draw
+    dplyr::mutate(
+      .residual = if (residuals == "none") NA_real_ else resid_draw,
+      !!rlang::sym(outcome) := .fitted + resid_draw
     )
 }
 
@@ -368,30 +407,32 @@ plot_exceedance <- function(df, variables, x_label, labels = NULL) {
 }
 
 # # EXAMPLE LINKING ALL FUNCTIONS TOGETHER IN A SIMULATION PIPELINE
-
+# #
+# # Fit the model on a training set that contains an `id` column so we can
+# # match original residuals to simulated individuals across years.
 # library(dplyr)
 # library(ggplot2)
 # library(broom)
 
-# # ── 1. Training data & model fit ─────────────────────────────────────────────
+# set.seed(123)
+# n_years <- 100
+# n_obs   <- 1000
 
-# set.seed(42)
+# # 1. Training data with one row per individual (id)
 # train_data <- data.frame(
-#   welfare = exp(rnorm(5000, mean = log(3.50), sd = 0.8)),
-#   age     = rnorm(5000, mean = 35, sd = 10),
-#   educ    = rnorm(5000, mean = 8,  sd = 3)
+#   id      = 1:n_obs,
+#   welfare = exp(rnorm(n_obs, mean = log(3.50), sd = 0.8)),
+#   age     = rnorm(n_obs, mean = 35, sd = 10),
+#   educ    = rnorm(n_obs, mean = 8,  sd = 3)
 # )
 
 # model <- lm(log(welfare) ~ age + educ, data = train_data)
 
-# # ── 2. Simulate new population data across 100 years ─────────────────────────
-# # Baseline and policy scenarios differ by a small education intervention
-
-# n_years <- 100
-# n_obs   <- 1000
-
+# # 2. Simulate new population data across n_years where the same individuals
+# #    (ids 1:n_obs) are repeated each simulation year
 # sim_base <- data.frame(
 #   sim_year = rep(1:n_years, each = n_obs),
+#   id       = rep(1:n_obs, times = n_years),
 #   age      = rnorm(n_years * n_obs, mean = 35, sd = 10),
 #   educ     = rnorm(n_years * n_obs, mean = 8,  sd = 3)
 # )
@@ -399,14 +440,16 @@ plot_exceedance <- function(df, variables, x_label, labels = NULL) {
 # sim_policy <- sim_base |>
 #   mutate(educ = educ + rnorm(n(), mean = 1, sd = 0.5))  # policy raises education
 
-# # ── 3. Predict welfare for each scenario, adding empirical residuals ──────────
-
+# # 3. Predict welfare for each scenario, matching original residuals by id
+# #    (rows with ids not found in the training set would be filled by resampling)
 # pred_base <- predict_outcome(
 #   model     = model,
 #   newdata   = sim_base,
 #   type      = "response",
-#   residuals = "empirical",
-#   outcome   = "welfare"
+#   residuals = "original",
+#   outcome   = "welfare",
+#   id        = "id",
+#   train_data = train_data
 # ) |>
 #   mutate(welfare = exp(welfare))   # back-transform from log scale
 
@@ -414,13 +457,14 @@ plot_exceedance <- function(df, variables, x_label, labels = NULL) {
 #   model     = model,
 #   newdata   = sim_policy,
 #   type      = "response",
-#   residuals = "empirical",
-#   outcome   = "welfare"
+#   residuals = "original",
+#   outcome   = "welfare",
+#   id        = "id",
+#   train_data = train_data
 # ) |>
 #   mutate(welfare = exp(welfare))
 
-# # ── 4. Aggregate to poverty headcount per simulation year ─────────────────────
-
+# # 4. Aggregate to poverty headcount per simulation year
 # pov_base <- aggregate_outcome(
 #   df        = pred_base,
 #   outcome   = "welfare",
@@ -439,21 +483,18 @@ plot_exceedance <- function(df, variables, x_label, labels = NULL) {
 #   pov_line  = 3.00
 # )
 
-# # ── 5. Express each year as deviation from the cross-year mean ────────────────
-# # loss = TRUE so that positive values mean "worse than expected"
-
-# pov_base_d <- deviation_from_centre(pov_base,   centre = "mean", loss = TRUE)
+# # 5. Express each year as deviation from the cross-year mean (loss = TRUE so
+# #    positive values mean "worse than expected")
+# pov_base_d   <- deviation_from_centre(pov_base,   centre = "mean", loss = TRUE)
 # pov_policy_d <- deviation_from_centre(pov_policy, centre = "mean", loss = TRUE)
 
-# # ── 6. Combine into a single wide data frame for plotting ────────────────────
-
+# # 6. Combine into a single wide data frame for plotting
 # plot_data <- data.frame(
 #   baseline = pov_base_d$value,
 #   policy   = pov_policy_d$value
 # )
 
-# # ── 7. Plot exceedance curves for both scenarios ──────────────────────────────
-
+# # 7. Plot exceedance curves for both scenarios
 # plot_exceedance(
 #   df        = plot_data,
 #   variables = c("baseline", "policy"),
