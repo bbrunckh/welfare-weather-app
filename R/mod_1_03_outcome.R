@@ -97,14 +97,16 @@ mod_1_03_outcome_server <- function(id, variable_list, survey_data) {
       )
     })
 
-    # --------- Poverty line input (for "poor" outcome) -----------
+    # --------- Poverty line input (for monetary outcomes) ---------
     output$poverty_line_ui <- renderUI({
       req(selected_outcome_info())
       info <- selected_outcome_info()
       if (nrow(info) == 0) return(NULL)
 
-      # require that at least one row has name == "poor"
-      if (!any(info$name == "poor")) return(NULL)
+      # Show poverty line for monetary welfare outcomes (welfare or poor) so Step 2 can use it.
+      name_match  <- any(info$name %in% c("welfare", "poor"))
+      units_match <- any(info$units == "LCU", na.rm = TRUE)
+      if (!(name_match || units_match)) return(NULL)
 
       current_currency <- input$currency
 
@@ -199,21 +201,31 @@ mod_1_03_outcome_server <- function(id, variable_list, survey_data) {
         info$transform <- NA_character_
       }
 
-      # decide whether to show/override currency: only when name == "poor" OR units == "LCU"
+      # Monetary outcomes: welfare/poor (PPP or LCU). We allow currency choice for welfare too.
       is_poor <- identical(name, "poor")
+      is_welf <- identical(name, "welfare")
       is_lcu  <- !is.na(units) && units == "LCU"
+      is_monetary <- is_poor || is_welf || is_lcu
 
-      if (is_poor || is_lcu) {
-        # safe: input$currency may be NULL during init — guard with req when needed downstream
-        info$units <- input$currency
+      if (is_monetary) {
+        # safe: input$currency may be NULL during init — fall back to existing units
+        info$units <- input$currency %||% units
+
+        # Poverty line is needed for Step 2 poverty calculations even when modeling continuous welfare.
+        # numericInput should provide a default, but during init input$poverty_line can be NULL.
+        pl_raw <- input$poverty_line
+        if (is.null(pl_raw)) {
+          cur0 <- input$currency %||% "PPP"
+          pl_raw <- if (identical(cur0, "PPP")) 3.00 else NA_real_
+        }
+        pl <- suppressWarnings(as.numeric(pl_raw))
+        if (is.finite(pl) && !is.na(pl) && pl > 0) {
+          info$povline <- pl
+        } else {
+          info$povline <- NA_real_
+        }
       } else {
-        # preserve original (possibly NA) unit value as character
         info$units <- units
-      }
-
-      if (is_poor && !is.null(input$poverty_line)) {
-        info$povline <- input$poverty_line
-      } else {
         info$povline <- NA_real_
       }
 
