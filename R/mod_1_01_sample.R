@@ -83,12 +83,13 @@ output$sample_ui <- renderUI({
 
   # --------- Available survey years per selected code -----------
   available_years <- reactive({
-    req(input$economy)  # Now contains codes, not economy names
-    
-    yrs <- lapply(input$economy, function(code) {
+    req(input$economy)  # contains codes, not economy names
+
+    # IMPORTANT: use .data$code to avoid NSE capturing the column name on both sides
+    yrs <- lapply(input$economy, function(code_i) {
       surveys() |>
-        filter(code == code) |>
-        pull(year) |> 
+        dplyr::filter(.data$code == code_i) |>
+        dplyr::pull(year) |>
         sort()
     })
     names(yrs) <- input$economy
@@ -103,18 +104,18 @@ output$sample_ui <- renderUI({
     all_years <- available_years()
     
     # Create a selectizeInput for each selected economy code
-    year_inputs <- lapply(codes, function(code) {
-      yrs <- all_years[[code]]
+    year_inputs <- lapply(codes, function(code_i) {
+      yrs <- all_years[[code_i]]
       
       # Get the economy name for the label
       economy_name <- surveys() |>
-        filter(code == code) |>
+        dplyr::filter(.data$code == code_i) |>
         pull(economy) |>
         head(1)
       
       tagList(
         selectizeInput(
-          inputId = ns(paste0("survey_year_", code)),
+          inputId = ns(paste0("survey_year_", code_i)),
           label = paste("Survey years for", economy_name),
           choices = yrs,
           selected = yrs,

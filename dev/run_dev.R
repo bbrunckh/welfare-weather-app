@@ -17,4 +17,5 @@ devtools::document()
 devtools::load_all()
 
 # Run the application
+#options(wise.debug = T)
 run_app()

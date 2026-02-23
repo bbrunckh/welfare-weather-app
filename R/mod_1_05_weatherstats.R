@@ -4,19 +4,19 @@
 #'
 #' @param id,input,output,session Internal parameters for {shiny}.
 #'
-#' @noRd 
+#' @noRd
 #'
-#' @importFrom shiny NS tagList 
+#' @importFrom shiny NS tagList
 mod_1_05_weatherstats_ui <- function(id) {
   ns <- NS(id)
   tagList(
     uiOutput(ns("weather_stats_button_ui"))
   )
 }
-    
+
 #' 1_05_weatherstats Server Functions
 #'
-#' @noRd 
+#' @noRd
 mod_1_05_weatherstats_server <- function(
     id,
     varlist = varlist,
@@ -30,6 +30,15 @@ mod_1_05_weatherstats_server <- function(
 ) {
   moduleServer(id, function(input, output, session) {
     ns <- session$ns
+    `%||%` <- function(a, b) if (!is.null(a)) a else b
+
+    # Helper: map raw weather varname -> haz_* column name
+    to_haz <- function(x) {
+      x <- trimws(as.character(x))
+      if (is.na(x) || !nzchar(x)) return(NA_character_)
+      if (startsWith(x, "haz_")) return(x)
+      paste0("haz_", x)
+    }
 
     if (is.null(tabset_session)) {
       tabset_session <- session$parent %||% session
@@ -37,117 +46,141 @@ mod_1_05_weatherstats_server <- function(
 
     weather_tab_added <- reactiveVal(FALSE)
 
+
+    has_w2 <- reactive({
+      sw <- selected_weather()
+      is.data.frame(sw) && nrow(sw) >= 2 && !is.na(sw$name[2]) && nzchar(as.character(sw$name[2]))
+    })
+
     output$weather_stats_button_ui <- renderUI({
       req(selected_weather())
       actionButton(ns("weather_stats"), "Weather stats", class = "btn-primary", style = "width: 100%;")
     })
-
     shiny::outputOptions(output, "weather_stats_button_ui", suspendWhenHidden = FALSE)
 
-    # Reactive placeholders for weather data and bin cutoffs
-    
-    weather_data <- reactiveVal(NULL)
-    loc_weather  <- reactiveVal(NULL)
-    survey_weather  <- reactiveVal(NULL)
+    # ---- Cached weather objects (computed lazily; NOT dependent on a UI click) ----
+    weather_data_rv   <- reactiveVal(NULL)  # loc-month base (raw variables aggregated to loc_id)
+    loc_weather_rv    <- reactiveVal(NULL)  # loc-month configured hazards (haz_*)
+    survey_weather_rv <- reactiveVal(NULL)  # unit-level survey joined to loc_weather
+    last_key_rv       <- reactiveVal(NULL)
 
-observeEvent(input$weather_stats, {
-  req(selected_weather(), selected_surveys(), survey_data(), survey_h3())
-    
-    # Reactives inside observeEvent
-  
-    # notification for loading weather data
-    notif_load <- showNotification(
-      "Loading weather data...", 
-      duration = NULL, type = "message"
-    )
+    # helper: shift Date by N months (negative allowed)
+    shift_months <- function(d, n) {
+      if (is.na(d)) return(as.Date(NA))
+      as.Date(seq.Date(as.Date(d), by = paste0(n, ' months'), length.out = 2)[2])
+    }
 
-    # weather data for selected surveys and variables at loc_id level
-    wd <- {
-      req(selected_surveys(), selected_weather(), survey_data(), survey_h3())
+
+    # Key for cache invalidation (keep simple & stable)
+    make_key <- function() {
       ss <- selected_surveys()
       sw <- selected_weather()
       sd <- survey_data()
-      h3 <- survey_h3()
 
-      # get date range for weather data
-      
+
+
+
+
+      ss_key <- ""
+      if (!is.null(ss) && is.data.frame(ss) && nrow(ss)) {
+        cols <- intersect(c("code","year","survname","fpath"), names(ss))
+        ss_key <- paste0(apply(unique(ss[, cols, drop = FALSE]), 1, paste, collapse = ":"), collapse = "|")
+      }
+
+      sw_key <- ""
+      if (!is.null(sw) && is.data.frame(sw) && nrow(sw)) {
+        cols <- intersect(
+          c("name","ref_start","ref_end","temporalAgg","transformation","cont_binned","num_bins","binning_method","polynomial"),
+          names(sw)
+        )
+        sw_key <- paste0(apply(sw[, cols, drop = FALSE], 1, paste, collapse = ":"), collapse = "|")
+      }
+
+      # include a small fingerprint of survey timestamps so a new sample triggers rebuild
+      sd_key <- ""
+      if (!is.null(sd) && is.data.frame(sd) && nrow(sd) && "timestamp" %in% names(sd)) {
+        ts <- unique(sd$timestamp)
+        ts <- ts[!is.na(ts)]
+        if (length(ts)) {
+          sd_key <- paste0(as.character(min(ts)), "_", as.character(max(ts)), "_", length(ts))
+        }
+      }
+
+      paste(ss_key, sw_key, sd_key, sep = " :: ")
+    }
+
+    # Compute and cache weather objects; called lazily (e.g., by model fit) and by the Weather stats button
+    ensure_built <- function(notify = FALSE) {
+      req(selected_weather(), selected_surveys(), survey_data(), survey_h3())
+
+      key <- make_key()
+      already <- !is.null(last_key_rv()) && identical(last_key_rv(), key) &&
+        !is.null(survey_weather_rv()) && is.data.frame(survey_weather_rv()) && nrow(survey_weather_rv()) > 0
+
+      if (already) return(invisible(TRUE))
+
+      notif_id <- NULL
+      if (isTRUE(notify)) {
+        notif_id <- showNotification("Building weather data…", duration = NULL, type = "message")
+      }
+
+      # ---- 1) Load + aggregate base weather data to loc_id-month ----
+      ss <- selected_surveys()
+      sw <- selected_weather()
+      sd <- survey_data()
+
+      # date bounds (survey window + simulation window)
       survey_dates <- sd |>
         dplyr::distinct(timestamp) |>
         dplyr::filter(!is.na(timestamp))
 
       if (length(survey_dates$timestamp) > 0) {
-        survey_date_min <- min(survey_dates$timestamp) - months(12) # ensure at least 12 months prior
+        survey_date_min <- shift_months(min(survey_dates$timestamp), -12)
         survey_date_max <- max(survey_dates$timestamp)
       } else {
         survey_date_min <- as.Date(NA)
         survey_date_max <- as.Date(NA)
       }
 
-      # max required simulation bounds (fallback)
-      sim_date_min <- as.Date("1950-01-01") - months(12)
+      sim_date_min <- shift_months(as.Date("1950-01-01"), -12)
       sim_date_max <- as.Date("2024-12-01")
 
-      # combine bounds safely; prefer real survey bounds but fall back to simulation bounds
       start_date <- min(c(survey_date_min, sim_date_min), na.rm = TRUE)
       end_date   <- max(c(survey_date_max, sim_date_max), na.rm = TRUE)
+      weather_dates <- seq.Date(start_date, end_date, by = "month")
 
-      weather_dates <- seq(start_date, end_date, by = "1 month")
-
-      # load weather data for countries with selected surveys
       codes <- unique(ss$code)
       root <- unique(dirname(ss$fpath))
       paths_weather <- file.path(root, paste0(codes, "_weather.parquet"))
-      
-      weather <- read_parquet_duckdb(paths_weather) |>
-        # filter to date range needed for surveys and simulation years
+
+      wd <- read_parquet_duckdb(paths_weather) |>
         dplyr::filter(timestamp %in% !!weather_dates) |>
-        # filter to h3 cells that are in survey_h3
-        dplyr::inner_join( 
+        dplyr::inner_join(
           survey_h3() |> dplyr::select(code, year, survname, h3, loc_id, pop_2020) |> dplyr::distinct(),
           by = "h3"
-        ) |> 
-        # aggregate to loc_id level using h3 mapping in survey_h3
+        ) |>
         dplyr::group_by(code, year, survname, loc_id, timestamp) |>
         dplyr::summarise(
           across(all_of(sw$name), ~ sum(.x * pop_2020, na.rm = TRUE) / sum(pop_2020, na.rm = TRUE)),
           .groups = "drop"
         )
-      
-      weather
-    }
-    weather_data(wd) # assign to reactiveVal so it can be accessed by other reactives and outputs
 
-    # remove loading notification, add notification for configuring weather variables
-    removeNotification(notif_load)
-    notif_config <- showNotification(
-      "Configuring weather variables...", 
-      duration = NULL, type = "message"
-    )
+      weather_data_rv(wd)
 
-    # configure weather variables according to user specifications and merge with survey data at loc_id level
-    loc_wd <- {
-      req(weather_data(), selected_weather(), survey_data(), survey_h3())
-      wd <- weather_data() 
-      sw <- selected_weather()
-      sd <- survey_data() 
-      h3 <- survey_h3()
-
+      # ---- 2) Configure hazards (haz_*) at loc_id-month ----
       out <- NULL
-      
-      # loop over each weather variable
       for (idx in seq_len(nrow(sw))) {
 
-        var_name <- sw$name[idx]
-        ref_start <- sw$ref_start[idx]
-        ref_end <- sw$ref_end[idx]
-        temporal_agg <- sw$temporalAgg[idx]
+        var_name      <- sw$name[idx]
+        ref_start     <- sw$ref_start[idx]
+        ref_end       <- sw$ref_end[idx]
+        temporal_agg  <- sw$temporalAgg[idx]
         transformation <- sw$transformation[idx]
-        cont_binned <- sw$cont_binned[idx]
-        num_bins <- sw$num_bins[idx]
+        cont_binned   <- sw$cont_binned[idx]
+        num_bins      <- sw$num_bins[idx]
         binning_method <- sw$binning_method[idx]
 
-        # get variable for each month in selected reference period
-        weather <- wd  # start with full data
+        weather <- wd
         for (l in seq(ref_start, ref_end)) {
           colname <- paste0(var_name, "_", l)
           weather <- weather |>
@@ -156,10 +189,7 @@ observeEvent(input$weather_stats, {
             dplyr::ungroup()
         }
 
-        # temporal aggregation over reference period
         lag_cols <- paste0(var_name, "_", seq(ref_start, ref_end))
-
-        # Extract lag columns as a matrix once — avoids repeated across()/pick() calls
         lag_mat <- as.matrix(weather[, lag_cols])
 
         weather <- weather |>
@@ -172,352 +202,292 @@ observeEvent(input$weather_stats, {
               "Sum"    = rowSums(lag_mat,    na.rm = TRUE)
             )
           ) |>
-          dplyr::select(-dplyr::all_of(lag_cols)) # clean up lag columns after aggregation
-
+          dplyr::select(-dplyr::all_of(lag_cols))
 
         # apply transformation if specified
         if (!(transformation == "None" || var_name %in% c("spi6", "spei6"))) {
 
-          # calculate mean and sd for reference climate by loc_id and month
           climate_ref <- weather |>
             dplyr::filter(timestamp >= as.Date("1991-01-01"), timestamp <= as.Date("2020-12-31")) |>
             dplyr::mutate(month = lubridate::month(timestamp)) |>
             dplyr::group_by(loc_id, month) |>
             dplyr::summarise(mean = mean(haz, na.rm = TRUE), sd = sd(haz, na.rm = TRUE), .groups = "drop")
-          
-          # standardize weather variable using reference climate stats
+
           if (transformation == "Deviation from mean") {
-          weather <- weather |>
-            dplyr::mutate(month = lubridate::month(timestamp)) |>
-            dplyr::left_join(climate_ref, by = c("loc_id", "month")) |>
-            dplyr::mutate(haz = (haz - mean)) |>
-            dplyr::select(-month, -mean, -sd)         # clean up temp columns
-            
+            weather <- weather |>
+              dplyr::mutate(month = lubridate::month(timestamp)) |>
+              dplyr::left_join(climate_ref, by = c("loc_id", "month")) |>
+              dplyr::mutate(haz = (haz - mean)) |>
+              dplyr::select(-month, -mean, -sd)
           } else if (transformation == "Standardized anomaly") {
             weather <- weather |>
-            dplyr::mutate(month = lubridate::month(timestamp)) |>
-            dplyr::left_join(climate_ref, by = c("loc_id", "month")) |>
-            dplyr::mutate(haz = (haz - mean)/sd) |>
-            dplyr::select(-month, -mean, -sd)         # clean up temp columns
+              dplyr::mutate(month = lubridate::month(timestamp)) |>
+              dplyr::left_join(climate_ref, by = c("loc_id", "month")) |>
+              dplyr::mutate(haz = (haz - mean) / sd) |>
+              dplyr::select(-month, -mean, -sd)
           }
         }
 
-        # Bin variable if specified
+        # Binning
         if (!is.na(cont_binned) && cont_binned == "Binned") {
 
-          # define cutoffs for bins from weather in survey data (to ensure bins are meaningful for survey sample)
           weather_svy <- weather |>
             dplyr::inner_join(
               sd |> dplyr::select(loc_id, timestamp) |> dplyr::distinct(),
-              by = c("loc_id", "timestamp")) |>
+              by = c("loc_id", "timestamp")
+            ) |>
             dplyr::filter(!is.na(haz)) |>
             dplyr::pull(haz)
-          
-            # equal frequency binning
+
+          if (length(weather_svy)) {
             if (binning_method == "Equal frequency") {
-
               cutoffs <- unique(quantile(weather_svy, probs = seq(0, 1, length.out = num_bins + 1), na.rm = TRUE))
-              
               if (length(cutoffs) > 1) {
-                # extend breaks so outer bins capture values outside the survey-derived range
                 breaks_ext <- c(-Inf, cutoffs[-1], Inf)
-                weather <- weather |>
-                  dplyr::mutate(haz = cut(.data$haz, breaks = breaks_ext, include.lowest = TRUE))
-                message("Equal frequency cutoffs for ", var_name, ": ", paste(round(cutoffs, 3), collapse = ", "))
-              } else {
-                message("Insufficient variation in ", var_name, " for Equal frequency binning. Keeping continuous.")
+                weather <- weather |> dplyr::mutate(haz = cut(.data$haz, breaks = breaks_ext, include.lowest = TRUE))
               }
-              # equal width binning
             } else if (binning_method == "Equal width") {
-
               cutoffs <- unique(seq(min(weather_svy, na.rm = TRUE), max(weather_svy, na.rm = TRUE), length.out = num_bins + 1))
-
               if (length(cutoffs) > 1) {
-                # extend breaks so outer bins capture values outside the survey-derived range
                 breaks_ext <- c(-Inf, cutoffs[-1], Inf)
-                weather <- weather |>
-                  dplyr::mutate(haz = cut(.data$haz, breaks = breaks_ext, include.lowest = TRUE))
-                message("Equal width cutoffs for ", var_name, ": ", paste(round(cutoffs, 3), collapse = ", "))
-              } else {
-                message("Insufficient variation in ", var_name, " for Equal width binning. Keeping continuous.")
+                weather <- weather |> dplyr::mutate(haz = cut(.data$haz, breaks = breaks_ext, include.lowest = TRUE))
               }
-              # k-means binning
             } else if (binning_method == "K-means") {
               tryCatch({
                 if (length(unique(weather_svy)) >= num_bins) {
                   set.seed(123)
-
                   km <- kmeans(weather_svy, centers = num_bins)
                   centers <- sort(as.numeric(km$centers))
                   cutoffs <- unique(c(min(weather_svy, na.rm = TRUE), (centers[-length(centers)] + centers[-1]) / 2, max(weather_svy, na.rm = TRUE)))
-
                   if (length(cutoffs) > 1) {
-                    # extend breaks so outer bins capture values outside the survey-derived range
                     breaks_ext <- c(-Inf, cutoffs[-1], Inf)
-                    weather <- weather |>
-                      dplyr::mutate(haz = cut(.data$haz, breaks = breaks_ext, include.lowest = TRUE))
-                    message("K-means cutoffs for ", var_name, ": ", paste(round(cutoffs, 3), collapse = ", "))
-                  } else {
-                    message("Insufficient variation in ", var_name, " for K-means binning. Keeping continuous.")
+                    weather <- weather |> dplyr::mutate(haz = cut(.data$haz, breaks = breaks_ext, include.lowest = TRUE))
                   }
-                } else {
-                  message("Not enough unique values in ", var_name, " for K-means (need >= num_bins). Keeping continuous.")
                 }
-              }, error = function(e) {
-                message("K-means clustering failed for ", var_name, ": ", e$message, ". Keeping continuous.")
-              })
+              }, error = function(e) NULL)
+            }
           }
         }
-          # Rename haz column to haz_{var_name}
-          weather <- weather |>
-            dplyr::rename(!!paste0("haz_", var_name) := haz)
 
-          # Combine with other weather variables
-          if (is.null(out)) { 
-            out <- weather
-            } else { 
-            out <- dplyr::full_join(out, weather, by = c("code", "year", "survname", "loc_id", "timestamp"))
-          }
-      } # end loop over weather variables
+        # Rename haz -> haz_{var_name} and merge
+        weather <- weather |> dplyr::rename(!!paste0("haz_", var_name) := haz)
 
+        if (is.null(out)) {
+          out <- weather
+        } else {
+          out <- dplyr::full_join(out, weather, by = c("code", "year", "survname", "loc_id", "timestamp"))
+        }
+      } # end weather variable loop
 
-      # return final data frame with all weather variables configured and merged at loc_id level
-      out
-    }
-    loc_weather(loc_wd) # assign to reactiveVal so it can be accessed by other reactives and outputs
+      loc_weather_rv(out)
 
-    # remove loading notification, add notification for merging data
-    removeNotification(notif_config)
-    notif_merge <- showNotification(
-      "Merging survey and weather data...", 
-      duration = NULL, type = "message"
-    )
-
-    # merge survey and weather data (unit level)
-    survey_wd <- {
-      req(loc_weather(), survey_data())
-      sd <- survey_data() 
-        
-      survey_weather <- sd |>
-        dplyr::left_join(loc_weather(), by = c("code", "year", "survname", "loc_id", "timestamp")) |>
-        # ensure year is a factor for plotting
+      # ---- 3) Join to unit-level survey ----
+      survey_wd <- sd |>
+        dplyr::left_join(out, by = c("code", "year", "survname", "loc_id", "timestamp")) |>
         dplyr::mutate(year = as.factor(.data$year)) |>
-        # re-normalize weights after filtering to non-missing weather data
         dplyr::group_by(.data$code, .data$year, .data$survname) |>
         dplyr::mutate(weight = .data$weight / sum(.data$weight, na.rm = TRUE)) |>
         dplyr::ungroup()
 
-      # add labels (NOT IMPLEMENTED)
-      
-      survey_weather
+      survey_weather_rv(survey_wd)
+      last_key_rv(key)
+
+      if (!is.null(notif_id)) removeNotification(notif_id)
+      if (isTRUE(notify)) showNotification("Weather data ready.", duration = 2, type = "message")
+
+      invisible(TRUE)
     }
-    survey_weather(survey_wd) # assign to reactiveVal so it can be accessed by other reactives and outputs
 
-    removeNotification(notif_merge)
-    showNotification("Weather data ready.", duration = 3, type = "message")
+    # Public accessors (reactive) used by other modules.
+    weather_data <- reactive({ ensure_built(FALSE); weather_data_rv() })
+    loc_weather  <- reactive({ ensure_built(FALSE); loc_weather_rv() })
+    survey_weather <- reactive({ ensure_built(FALSE); survey_weather_rv() })
 
-    if (!weather_tab_added()) {
-    
-    # -------- UI Outputs -----------
-    # Output: Weather distributions and stats
-      
-      output$weather_dist1 <- renderPlot({
-        req(survey_weather())
-        df <- survey_weather() |> dplyr::mutate(countryyear = paste0(economy, ", ", year))
-        hv_vec <- isolate(selected_weather()$name)
-        hv <- hv_vec[1]
-        if (is.na(hv) || !(hv %in% names(df))) {
-          plot.new(); title(main = "Weather variable not configured"); return(invisible(NULL))
-        }
-        label <- isolate(selected_weather()$label[1])
-        cont_binned <- isolate(selected_weather()$cont_binned[1])
+    # ---- Weather stats UI click: ensure built + add/open tab ----
+    observeEvent(input$weather_stats, {
+      ensure_built(TRUE)
 
-        if (!is.na(cont_binned) && cont_binned == "Binned") {
-          df_plot <- df |> dplyr::filter(!is.na(.data[[hv]]))
-          p <- ggplot2::ggplot(df_plot, ggplot2::aes(x = .data[[hv]])) +
-            ggplot2::geom_bar(fill = "steelblue", alpha = 0.7) +
-            ggplot2::theme_minimal() +
-            ggplot2::labs(
-              title = "Distribution of bins",
-              x = stringr::str_wrap(paste0(label, "\n(as configured)"), 40),
-              y = "Count"
-            ) +
-            ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 45, hjust = 1))
-          p
-        } else {
-          ridge_distribution_plot(
-            df,
-            x_var = hv,
-            x_label = paste0(label, "\n(as configured)")
-          )
-        }
-      })
+      if (!weather_tab_added()) {
 
-      # safer weather_dist2
-      output$weather_dist2 <- renderPlot({
-        req(survey_weather())
-        df <- survey_weather() |> dplyr::mutate(countryyear = paste0(economy, ", ", year))
-        hv_vec <- isolate(selected_weather()$name)
-        hv <- hv_vec[2]
-        if (is.na(hv) || !(hv %in% names(df))) {
-          plot.new(); title(main = "Weather variable not configured"); return(invisible(NULL))
-        }
-        label <- isolate(selected_weather()$label[2])
-        cont_binned <- isolate(selected_weather()$cont_binned[2])
+        # Weather distribution plots and binned scatterplots
+        output$weather_dist1 <- renderPlot({
+          req(survey_weather(), selected_weather())
+          df <- survey_weather() |> dplyr::mutate(countryyear = paste0(economy, ", ", year))
 
-        if (!is.na(cont_binned) && cont_binned == "Binned") {
-          df_plot <- df |> dplyr::filter(!is.na(.data[[hv]]))
-          p <- ggplot2::ggplot(df_plot, ggplot2::aes(x = .data[[hv]])) +
-            ggplot2::geom_bar(fill = "steelblue", alpha = 0.7) +
-            ggplot2::theme_minimal() +
-            ggplot2::labs(
-              title = "Distribution of bins",
-              x = stringr::str_wrap(paste0(label, "\n(as configured)"), 40),
-              y = "Count"
-            ) +
-            ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 45, hjust = 1))
-          p
-        } else {
-          ridge_distribution_plot(
-            df,
-            x_var = hv,
-            x_label = paste0(label, "\n(as configured)"),
-            wrap_width = 40
-          )
-        }
-      })
+          hv_raw <- isolate(selected_weather()$name[1])
+          hv <- to_haz(hv_raw)
+          if (is.na(hv) || !(hv %in% names(df))) {
+            plot.new(); title(main = "Weather variable not configured"); return(invisible(NULL))
+          }
 
-        # Binned scatterplots of outcome vs weather
+          label <- isolate(selected_weather()$label[1])
+          cont_binned <- isolate(selected_weather()$cont_binned[1])
+
+          if (!is.na(cont_binned) && cont_binned == "Binned") {
+            df_plot <- df |> dplyr::filter(!is.na(.data[[hv]]))
+            ggplot2::ggplot(df_plot, ggplot2::aes(x = .data[[hv]])) +
+              ggplot2::geom_bar(alpha = 0.7) +
+              ggplot2::theme_minimal() +
+              ggplot2::labs(title = "Distribution of bins", x = stringr::str_wrap(paste0(label, "\n(as configured)"), 40), y = "Count") +
+              ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 45, hjust = 1))
+          } else {
+            ridge_distribution_plot(df, x_var = hv, x_label = paste0(label, "\n(as configured)"))
+          }
+        })
+
+        output$weather_dist2 <- renderPlot({
+          req(survey_weather(), selected_weather())
+          df <- survey_weather() |> dplyr::mutate(countryyear = paste0(economy, ", ", year))
+
+          hv_raw <- isolate(selected_weather()$name[2])
+          hv <- to_haz(hv_raw)
+          if (is.na(hv) || !(hv %in% names(df))) {
+            plot.new(); title(main = "Weather variable not configured"); return(invisible(NULL))
+          }
+
+          label <- isolate(selected_weather()$label[2])
+          cont_binned <- isolate(selected_weather()$cont_binned[2])
+
+          if (!is.na(cont_binned) && cont_binned == "Binned") {
+            df_plot <- df |> dplyr::filter(!is.na(.data[[hv]]))
+            ggplot2::ggplot(df_plot, ggplot2::aes(x = .data[[hv]])) +
+              ggplot2::geom_bar(alpha = 0.7) +
+              ggplot2::theme_minimal() +
+              ggplot2::labs(title = "Distribution of bins", x = stringr::str_wrap(paste0(label, "\n(as configured)"), 40), y = "Count") +
+              ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 45, hjust = 1))
+          } else {
+            ridge_distribution_plot(df, x_var = hv, x_label = paste0(label, "\n(as configured)"), wrap_width = 40)
+          }
+        })
+
         output$binscatter1 <- renderPlot({
-          req(survey_weather(), selected_outcome())
+          req(survey_weather(), selected_outcome(), selected_weather())
           df <- survey_weather()
           so <- selected_outcome()
           sw <- isolate(selected_weather())
+
           y_var <- so$name
           y_label <- so$label
-          hv_vec <- isolate(selected_weather()$name)
-          hv <- hv_vec[1]
+
+          hv_raw <- isolate(selected_weather()$name[1])
+          hv <- to_haz(hv_raw)
 
           if (is.null(y_var) || !(y_var %in% names(df)) || is.na(hv) || !(hv %in% names(df))) {
             plot.new(); title(main = "Outcome or weather variable not available"); return(invisible(NULL))
           }
 
-          # build logical masks safely (call is.finite only on numeric vectors)
-          hv_vec_vals <- df[[hv]]
-          y_vec_vals  <- df[[y_var]]
-          hv_ok <- if (is.numeric(hv_vec_vals)) is.finite(hv_vec_vals) else !is.na(hv_vec_vals)
-          y_ok  <- if (is.numeric(y_vec_vals)) is.finite(y_vec_vals) else !is.na(y_vec_vals)
+          hv_vals <- df[[hv]]
+          y_vals  <- df[[y_var]]
+          hv_ok <- if (is.numeric(hv_vals)) is.finite(hv_vals) else !is.na(hv_vals)
+          y_ok  <- if (is.numeric(y_vals)) is.finite(y_vals) else !is.na(y_vals)
 
           df_plot <- df[hv_ok & y_ok, ]
-          if (nrow(df_plot) == 0) {
-            plot.new(); title(main = "No data available"); return(invisible(NULL))
-          }
+          if (!nrow(df_plot)) { plot.new(); title(main = "No data available"); return(invisible(NULL)) }
 
           is_binary <- length(unique(df_plot[[y_var]])) <= 2
           p <- ggplot2::ggplot(df_plot, ggplot2::aes(x = .data[[hv]], y = .data[[y_var]]))
           if (is_binary) {
-            p <- p + ggplot2::stat_summary_bin(fun = "mean", bins = 20, color = "orange", linewidth = 1, geom = "line")
+            p <- p + ggplot2::stat_summary_bin(fun = "mean", bins = 20, linewidth = 1, geom = "line")
           } else {
             p <- p + ggplot2::geom_point(alpha = 0.1) +
-              ggplot2::stat_summary_bin(fun = "mean", bins = 20, color = "orange", size = 2, geom = "point")
+              ggplot2::stat_summary_bin(fun = "mean", bins = 20, size = 2, geom = "point")
           }
 
-          p +
-            ggplot2::theme_minimal() +
+          p + ggplot2::theme_minimal() +
             ggplot2::labs(
-              title = "",
               x = stringr::str_wrap(paste0(sw$label[1], "\n(as configured)"), 40),
               y = stringr::str_wrap(y_label, 40)
-            ) +
-            { if (is_binary) ggplot2::annotate("text", x = Inf, y = Inf, label = "Binary outcome: mean by bin", hjust = 1.05, vjust = 1.2, size = 3) else NULL }
+            )
         })
 
         output$binscatter2 <- renderPlot({
-          req(survey_weather(), selected_outcome())
+          req(survey_weather(), selected_outcome(), selected_weather())
           df <- survey_weather()
           so <- selected_outcome()
           sw <- isolate(selected_weather())
+
           y_var <- so$name
           y_label <- so$label
-          hv_vec <- isolate(selected_weather()$name)
-          hv <- hv_vec[2]
+
+          hv_raw <- isolate(selected_weather()$name[2])
+          hv <- to_haz(hv_raw)
 
           if (is.null(y_var) || !(y_var %in% names(df)) || is.na(hv) || !(hv %in% names(df))) {
             plot.new(); title(main = "Outcome or weather variable not available"); return(invisible(NULL))
           }
 
-          hv_vec_vals <- df[[hv]]
-          y_vec_vals  <- df[[y_var]]
-          hv_ok <- if (is.numeric(hv_vec_vals)) is.finite(hv_vec_vals) else !is.na(hv_vec_vals)
-          y_ok  <- if (is.numeric(y_vec_vals)) is.finite(y_vec_vals) else !is.na(y_vec_vals)
+          hv_vals <- df[[hv]]
+          y_vals  <- df[[y_var]]
+          hv_ok <- if (is.numeric(hv_vals)) is.finite(hv_vals) else !is.na(hv_vals)
+          y_ok  <- if (is.numeric(y_vals)) is.finite(y_vals) else !is.na(y_vals)
 
           df_plot <- df[hv_ok & y_ok, ]
-          if (nrow(df_plot) == 0) {
-            plot.new(); title(main = "No data available"); return(invisible(NULL))
-          }
+          if (!nrow(df_plot)) { plot.new(); title(main = "No data available"); return(invisible(NULL)) }
 
           is_binary <- length(unique(df_plot[[y_var]])) <= 2
           p <- ggplot2::ggplot(df_plot, ggplot2::aes(x = .data[[hv]], y = .data[[y_var]]))
           if (is_binary) {
-            p <- p + ggplot2::stat_summary_bin(fun = "mean", bins = 20, color = "orange", linewidth = 1, geom = "line")
+            p <- p + ggplot2::stat_summary_bin(fun = "mean", bins = 20, linewidth = 1, geom = "line")
           } else {
             p <- p + ggplot2::geom_point(alpha = 0.1) +
-              ggplot2::stat_summary_bin(fun = "mean", bins = 20, color = "orange", size = 2, geom = "point")
+              ggplot2::stat_summary_bin(fun = "mean", bins = 20, size = 2, geom = "point")
           }
 
-          p +
-            ggplot2::theme_minimal() +
+          p + ggplot2::theme_minimal() +
             ggplot2::labs(
-              title = "",
               x = stringr::str_wrap(paste0(sw$label[2], "\n(as configured)"), 40),
               y = stringr::str_wrap(y_label, 40)
-            ) +
-            { if (is_binary) ggplot2::annotate("text", x = Inf, y = Inf, label = "Binary outcome: mean by bin", hjust = 1.05, vjust = 1.2, size = 3) else NULL }
+            )
         })
 
-        # summary stats for weather variables
+
+        output$weather_dist2_ui <- renderUI({
+          if (!has_w2()) {
+            return(shiny::helpText("Select a second weather variable to populate this panel."))
+          }
+          shiny::plotOutput(ns("weather_dist2"), height = "250px")
+        })
+        shiny::outputOptions(output, "weather_dist2_ui", suspendWhenHidden = FALSE)
+
+        output$binscatter2_ui <- renderUI({
+          if (!has_w2()) {
+            return(shiny::helpText("Select a second weather variable to populate this panel."))
+          }
+          shiny::plotOutput(ns("binscatter2"), height = "250px")
+        })
+        shiny::outputOptions(output, "binscatter2_ui", suspendWhenHidden = FALSE)
+
         output$weather_stats_table <- DT::renderDT({
           req(survey_weather())
           df <- survey_weather()
-          # weather variables start with haz_
           df <- dplyr::mutate(df, countryyear = paste0(economy, ", ", year))
           vars <- names(df)[grepl("^haz_", names(df))]
-          if (length(vars) == 0) return(data.frame(Note = "No weather variables found"))  
+          if (!length(vars)) return(data.frame(Note = "No weather variables found"))
           weighted_summary_long(df, vars = vars)
         }, rownames = FALSE,
-          options = list(dom = "t", paging = FALSE, searching = FALSE, info = FALSE),
-          class = "compact")
-    
-        # selected weather data
+        options = list(dom = "t", paging = FALSE, searching = FALSE, info = FALSE),
+        class = "compact")
+
         output$selected_weather <- DT::renderDT({
           selected_weather()
         }, rownames = FALSE,
-          options = list(dom = "t", paging = FALSE, searching = FALSE, info = FALSE),
-          class = "compact")
-
+        options = list(dom = "t", paging = FALSE, searching = FALSE, info = FALSE),
+        class = "compact")
 
         shiny::appendTab(
           inputId = tabset_id,
           shiny::tabPanel(
             title = "Weather stats",
             value = "weather_desc",
-            shiny::h4("Distribution of weather (household survey sample)"),
-            bslib::layout_columns(
-              col_widths = c(6, 6),
-              bslib::card(shiny::plotOutput(ns("weather_dist1"), height = "300px")),
-              bslib::card(shiny::plotOutput(ns("weather_dist2"), height = "300px"))
+            shiny::fluidRow(
+              shiny::column(6, shiny::h4("Weather distribution"), plotOutput(ns("weather_dist1"), height = "250px")),
+              shiny::column(6, shiny::h4("Weather distribution (2)"), uiOutput(ns("weather_dist2_ui")))
             ),
-            shiny::br(),
-            shiny::h4("Weather over time and space"),
-            shiny::helpText("Weather maps to be added...", style = "font-size: 12px;"),
-            shiny::br(),
-            shiny::h4("Outcome vs weather"),
-            bslib::layout_columns(
-              col_widths = c(6, 6),
-              bslib::card(shiny::plotOutput(ns("binscatter1"), height = "300px")),
-              bslib::card(shiny::plotOutput(ns("binscatter2"), height = "300px"))
+            shiny::fluidRow(
+              shiny::column(6, shiny::h4("Binscatter"), plotOutput(ns("binscatter1"), height = "250px")),
+              shiny::column(6, shiny::h4("Binscatter (2)"), uiOutput(ns("binscatter2_ui")))
             ),
-            shiny::br(),
+            shiny::hr(),
             shiny::h4("Weather summary stats"),
             shiny::helpText("Summary statistics are shown for the configured weather variables. Sample weights are used.", style = "font-size: 12px;"),
             DT::DTOutput(ns("weather_stats_table")),
@@ -528,20 +498,20 @@ observeEvent(input$weather_stats, {
           select = TRUE,
           session = tabset_session
         )
-    
+
         weather_tab_added(TRUE)
       }
 
       if (weather_tab_added()) {
         try(shiny::updateTabsetPanel(tabset_session, inputId = tabset_id, selected = "weather_desc"), silent = TRUE)
       }
-}, ignoreInit = TRUE, ignoreNULL = TRUE)
-    
+    }, ignoreInit = TRUE, ignoreNULL = TRUE)
+
     # --------- Module return API -----------
     list(
-      weather_data = weather_data,
-      loc_weather = loc_weather,
+      weather_data   = weather_data,
+      loc_weather    = loc_weather,
       survey_weather = survey_weather
     )
-      })
+  })
 }
