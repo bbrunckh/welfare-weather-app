@@ -27,7 +27,7 @@ mod_1_06_model_ui <- function(id) {
 #' @noRd 
 mod_1_06_model_server <- function(
     id,
-    varlist,
+    variable_list,
     selected_surveys,
     selected_outcome,
     selected_weather,
@@ -36,46 +36,46 @@ mod_1_06_model_server <- function(
   moduleServer(id, function(input, output, session){
     ns <- session$ns
 
-    # --- Helper: filter varlist to valid vars present in survey_weather --------
+    # --- Helper: filter variable_list to valid vars present in survey_weather --------
     # "valid" = present in df AND at least 50% non-missing
-    valid_varlist <- reactive({
-      req(survey_weather(), varlist())
+    valid_variable_list <- reactive({
+      req(survey_weather(), variable_list())
       df <- survey_weather()
-      vl <- varlist()
+      vl <- variable_list()
       valid_vars <- names(df)[colMeans(!is.na(df)) >= 0.5]
       vl[vl$name %in% valid_vars, , drop = FALSE]
     })
 
     # Subsets by variable role, built once and reused throughout
-    fe_varlist <- reactive({
-      vl <- valid_varlist()
+    fe_variable_list <- reactive({
+      vl <- valid_variable_list()
       vl[vl$fe == 1, , drop = FALSE]
     })
 
-    interaction_varlist <- reactive({
-      vl <- valid_varlist()
+    interaction_variable_list <- reactive({
+      vl <- valid_variable_list()
       # Keep only variables flagged for interaction that are NOT numeric,
       # to avoid overfitting (numeric interaction vars would need binning first)
       vl[vl$interact == 1 & vl$type != "numeric", , drop = FALSE]
     })
 
-    hh_varlist <- reactive({
-      vl <- valid_varlist()
+    hh_variable_list <- reactive({
+      vl <- valid_variable_list()
       vl[vl$hh == 1, , drop = FALSE]
     })
 
-    area_varlist <- reactive({
-      vl <- valid_varlist()
+    area_variable_list <- reactive({
+      vl <- valid_variable_list()
       vl[vl$area == 1, , drop = FALSE]
     })
 
-    ind_varlist <- reactive({
-      vl <- valid_varlist()
+    ind_variable_list <- reactive({
+      vl <- valid_variable_list()
       vl[vl$ind == 1, , drop = FALSE]
     })
 
-    firm_varlist <- reactive({
-      vl <- valid_varlist()
+    firm_variable_list <- reactive({
+      vl <- valid_variable_list()
       vl[vl$firm == 1, , drop = FALSE]
     })
 
@@ -148,8 +148,8 @@ mod_1_06_model_server <- function(
 
       if (input$model_type %in% c("Logistic regression", "Linear regression")) {
 
-        interactions <- interaction_varlist()
-        fe           <- fe_varlist()
+        interactions <- interaction_variable_list()
+        fe           <- fe_variable_list()
 
         shiny::withMathJax(
           tagList(
@@ -208,7 +208,7 @@ mod_1_06_model_server <- function(
     # --- Covariate inputs (user-defined or Lasso) ----------------------------
 
     # Helper: remove variables already used as outcome, weather, interaction,
-    # or fixed effect from a candidate varlist data frame
+    # or fixed effect from a candidate variable_list data frame
     exclude_already_selected <- function(candidate_vl) {
       exclude <- c(
         selected_outcome()$name,
@@ -224,10 +224,10 @@ mod_1_06_model_server <- function(
 
       if (input$covariates == "User-defined") {
 
-        ind  <- exclude_already_selected(ind_varlist())
-        hh   <- exclude_already_selected(hh_varlist())
-        firm <- exclude_already_selected(firm_varlist())
-        area <- exclude_already_selected(area_varlist())
+        ind  <- exclude_already_selected(ind_variable_list())
+        hh   <- exclude_already_selected(hh_variable_list())
+        firm <- exclude_already_selected(firm_variable_list())
+        area <- exclude_already_selected(area_variable_list())
 
         shiny::withMathJax(
           tagList(

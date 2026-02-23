@@ -5,45 +5,34 @@
 #' @import shiny
 #' @noRd
 app_server <- function(input, output, session) {
-  overview_api <- mod_0_overview_server("overview")  # returns list(data_dir = reactive(...))
-  data_dir_r <- overview_api$folder_path
 
-  runtime_r <- reactive({
-    req(data_dir_r())
-    data_dir <- data_dir_r()
-    load_local_data(data_root = data_dir)  # add data_root arg in app_config.R
-  })
+  # ---- Step 0: data connection, config, and metadata loading ---------------
 
-  # Reactive wrappers for data and config
-  survey_list_master_r <- reactive(runtime_r()$survey_list_master)
-  varlist_r <- reactive(runtime_r()$varlist)
-  cpi_ppp_r <- reactive(runtime_r()$cpi_ppp)
-  pov_lines_r <- reactive(runtime_r()$pov_lines)
+  overview_api <- mod_0_overview_server(id = "overview")
 
-  # Now call the step1 module and pass reactives (Now With return value so I can use in STEP 2)
+  # ---- Step 1: modelling ---------------------------------------------------
+  # Pass reactives from overview_api
+
   step1_api <- mod_1_modelling_server(
-    id = "step1",
-    survey_list_master = survey_list_master_r,
-    varlist = varlist_r,
-    pov_lines = pov_lines_r,
-    cpi_ppp = cpi_ppp_r,
-    data_dir = data_dir_r
+    id                = "step1",
+    connection_params = overview_api$connection_params,
+    survey_list       = overview_api$survey_list,
+    variable_list     = overview_api$variable_list,
+    cpi_ppp           = overview_api$cpi_ppp,
+    pov_lines         = overview_api$pov_lines
   )
 
-  #Step 2 (placeholder)
+  # ---- Step 2: simulation (placeholder) ------------------------------------
+
   mod_2_simulation_server(
-    id = "step2",
-    step1 = step1_api,
-    pov_lines = pov_lines_r,
-    varlist = varlist_r
-    # board = board_r
-    )
-  
-  #Step 3 (placeholder)
+    id    = "step2",
+    step1 = step1_api
+  )
+
+  # ---- Step 3: scenario (placeholder) --------------------------------------
+
   mod_3_scenario_server(
-    id = "step3",
-    step1 = step1_api,
-    pov_lines = pov_lines_r,
-    varlist = varlist_r
+    id    = "step3",
+    step1 = step1_api
   )
 }

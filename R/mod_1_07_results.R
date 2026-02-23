@@ -19,7 +19,7 @@ mod_1_07_results_ui <- function(id) {
 #' @noRd
 mod_1_07_results_server <- function(
     id,
-    varlist,
+    variable_list,
     selected_surveys,
     selected_outcome,
     selected_weather,
@@ -45,18 +45,50 @@ mod_1_07_results_server <- function(
     # Unwrap parsnip fit to native lm/glm object (required by jtools/interactions)
     native_fit <- function(parsnip_fit) parsnip_fit$fit
 
-    # Look up a human-readable label for a variable name from varlist.
-    # Strips the haz_ prefix added by mod_1_05_weatherstats before lookup,
-    # since varlist$name stores the raw variable name (e.g. "spei" not "haz_spei").
+    # Look up a human-readable label for a variable name from variable_list.
     get_label <- function(var_name) {
-      vl <- if (is.function(varlist)) varlist() else varlist
+      vl <- if (is.function(variable_list)) variable_list() else variable_list
       if (is.null(vl)) return(var_name)
-      lookup_name <- sub("^haz_", "", var_name)
-      idx <- match(lookup_name, vl$name)
+      idx <- match(var_name, vl$name)
       if (is.na(idx)) var_name else vl$label[idx]
     }
 
-    # Turn a coefficient name (possibly "haz_spei:urban" or "I(haz_spei^2):urban")
+    # Helper to extract weather-related coef names from a fitted model
+      # Covers: base terms, factor level expansions, polynomial terms,
+      # and interaction terms
+      weather_coef_names <- function(fit, weather_terms, interaction_terms) {
+        all_coefs <- names(stats::coef(native_fit(fit)))
+
+        # Match base weather terms (including factor level expansions like tx[1,2])
+        weather_pattern <- paste(
+          paste0("^", weather_terms, "$"),          # exact continuous match
+          paste0("^", weather_terms, "[\\[\\(]"),   # factor level expansion
+          paste0("^I\\(", weather_terms, "\\^"),    # polynomial terms
+          sep = "|"
+        )
+        weather_pattern <- paste(weather_pattern, collapse = "|")
+
+        # Match interaction terms (base and factor-expanded)
+        interact_pattern <- if (length(interaction_terms) > 0) {
+          paste(
+            vapply(interaction_terms, function(t) {
+              # escape special regex chars in the term string
+              paste0("^", gsub("([\\(\\)\\^])", "\\\\\\1", t))
+            }, character(1)),
+            collapse = "|"
+          )
+        } else {
+          NULL
+        }
+
+        keep <- grepl(weather_pattern, all_coefs)
+        if (!is.null(interact_pattern)) {
+          keep <- keep | grepl(interact_pattern, all_coefs)
+        }
+        all_coefs[keep]
+      }
+
+    # Turn a coefficient name (possibly "spei:urban" or "I(spei^2):urban")
     # into a readable label by looking up each component
     coef_label <- function(coef_name) {
       parts <- strsplit(coef_name, ":")[[1]]
@@ -99,17 +131,15 @@ mod_1_07_results_server <- function(
         df <- df |>
           dplyr::mutate(!!so$name := .data[[so$name]] * ppp2021)
       }
-
       # Step 2: log transform if specified
       if (isTRUE(so$transform == "log")) {
         df <- df |>
           dplyr::mutate(!!so$name := log(.data[[so$name]]))
       }
-
       # Step 3: create binary poor indicator if poverty line is specified
-      if (!is.na(so$povline) && so$name == "poor") {
+      if (isTRUE(!is.na(so$povline[1])) && isTRUE(so$name == "poor")) {
         df <- df |>
-          dplyr::mutate(!!so$name := as.numeric(.data[["welfare"]] < so$povline))
+          dplyr::mutate(!!so$name := as.numeric(.data[["welfare"]] < so$povline[1]))
       }
 
       fit_list <- tryCatch({
@@ -156,8 +186,21 @@ mod_1_07_results_server <- function(
 
       output$coefplot <- renderPlot({
         req(model_fit_val())
-        mf            <- model_fit_val()
-        coefs_to_plot <- make_coef_map(c(mf$weather_terms, mf$interaction_terms))
+        mf <- model_fit_val()
+
+        # Use fit3 as the reference for which coefs exist; filter to those
+        # present in all three models to avoid plot_summs alignment errors
+        coef_names <- weather_coef_names(mf$fit3, mf$weather_terms, mf$interaction_terms)
+        coef_names <- coef_names[
+          coef_names %in% names(stats::coef(native_fit(mf$fit1))) &
+          coef_names %in% names(stats::coef(native_fit(mf$fit2)))
+        ]
+
+        if (length(coef_names) == 0) {
+          return(empty_plot("No weather coefficients found to plot."))
+        }
+
+        coefs_to_plot <- make_coef_map(coef_names)
 
         jtools::plot_summs(
           native_fit(mf$fit1),
@@ -175,8 +218,10 @@ mod_1_07_results_server <- function(
 
       output$regtable <- renderUI({
         req(model_fit_val())
-        mf            <- model_fit_val()
-        coefs_to_plot <- make_coef_map(c(mf$weather_terms, mf$interaction_terms))
+        mf <- model_fit_val()
+
+        coef_names    <- weather_coef_names(mf$fit3, mf$weather_terms, mf$interaction_terms)
+        coefs_to_plot <- make_coef_map(coef_names)
 
         ht <- jtools::export_summs(
           native_fit(mf$fit1),
@@ -192,142 +237,44 @@ mod_1_07_results_server <- function(
 
       # ---- Effect plots ------------------------------------------------------
       # Predicted welfare vs each weather variable (full model, fit3).
-      # jtools::effect_plot uses NSE for pred — must convert string to symbol
-      # with rlang::sym() and inject with !! to avoid "pred not found" error.
 
       output$effectplot1 <- renderPlot({
         req(model_fit_val(), length(model_fit_val()$weather_terms) >= 1)
-        mf   <- model_fit_val()
-        pred <- rlang::sym(mf$weather_terms[1])
-        jtools::effect_plot(
-          native_fit(mf$fit3),
-          pred        = !!pred,
-          interval    = TRUE,
-          plot.points = FALSE,
-          line.colors = "orange",
-          x.label     = stringr::str_wrap(get_label(mf$weather_terms[1]), 40),
-          y.label     = stringr::str_wrap(out_lab, 40)
+        
+        mf <- model_fit_val()
+        fit <- native_fit(mf$fit3) # Use the fully specified model
+        
+        # Extract metadata for the 1st weather variable
+        pred_var <- mf$weather_terms[1]
+        is_binned <- identical(selected_weather()$cont_binned[1], "Binned")
+        
+        make_weather_effect_plot(
+          fit = fit, 
+          pred_var = pred_var, 
+          interaction_terms = mf$interaction_terms, 
+          is_binned = is_binned,
+          label_fun = get_label
         )
       })
 
       output$effectplot2 <- renderPlot({
+        # Only render if at least 2 weather variables were selected
+        req(model_fit_val(), length(model_fit_val()$weather_terms) >= 2)
+        
         mf <- model_fit_val()
-        if (is.null(mf) || length(mf$weather_terms) < 2) {
-          return(empty_plot("Select a second weather variable to see this plot."))
-        }
-        pred <- rlang::sym(mf$weather_terms[2])
-        jtools::effect_plot(
-          native_fit(mf$fit3),
-          pred        = !!pred,
-          interval    = TRUE,
-          plot.points = FALSE,
-          line.colors = "orange",
-          x.label     = stringr::str_wrap(get_label(mf$weather_terms[2]), 40),
-          y.label     = stringr::str_wrap(out_lab, 40)
+        fit <- native_fit(mf$fit3) 
+        
+        # Extract metadata for the 2nd weather variable
+        pred_var <- mf$weather_terms[2]
+        is_binned <- identical(selected_weather()$cont_binned[2], "Binned")
+        
+        make_weather_effect_plot(
+          fit = fit, 
+          pred_var = pred_var, 
+          interaction_terms = mf$interaction_terms, 
+          is_binned = is_binned,
+          label_fun = get_label
         )
-      })
-
-      # ---- Interaction plots -------------------------------------------------
-      # interact_plot and sim_slopes use the model's stored data frame directly.
-      # modx_from_term() extracts the plain moderator name from an interaction
-      # term string e.g. "haz_t:urban" -> "urban", "I(haz_t^2):urban" -> "urban"
-
-      modx_from_term <- function(interaction_term) {
-        parts <- strsplit(interaction_term, ":")[[1]]
-        parts[!grepl("^haz_|^I\\(", parts)][1]
-      }
-
-      make_interact_plot <- function(weather_term, modx_term) {
-        pred_sym <- rlang::sym(weather_term)
-        modx_sym <- rlang::sym(modx_term)
-        tryCatch(
-          interactions::interact_plot(
-            native_fit(model_fit_val()$fit3),
-            pred        = !!pred_sym,
-            modx        = !!modx_sym,
-            interval    = TRUE,
-            plot.points = FALSE,
-            x.label     = stringr::str_wrap(get_label(weather_term), 40),
-            y.label     = stringr::str_wrap(out_lab, 40)
-          ) + ggplot2::theme(legend.position = "bottom"),
-          error = function(e) empty_plot(paste("Interaction plot failed:", conditionMessage(e)))
-        )
-      }
-
-      make_simslopes_plot <- function(weather_term, modx_term) {
-        pred_sym <- rlang::sym(weather_term)
-        modx_sym <- rlang::sym(modx_term)
-        tryCatch(
-          plot(interactions::sim_slopes(
-            native_fit(model_fit_val()$fit3),
-            pred = !!pred_sym,
-            modx = !!modx_sym
-          )),
-          error = function(e) empty_plot(paste("Sim slopes failed:", conditionMessage(e)))
-        )
-      }
-
-      output$interactplot1 <- renderPlot({
-        mf <- model_fit_val()
-        req(mf, length(mf$weather_terms) >= 1, length(mf$interaction_terms) >= 1)
-        make_interact_plot(
-          weather_term = mf$weather_terms[1],
-          modx_term    = modx_from_term(mf$interaction_terms[1])
-        )
-      })
-
-      output$simslopes1 <- renderPlot({
-        mf <- model_fit_val()
-        req(mf, length(mf$weather_terms) >= 1, length(mf$interaction_terms) >= 1)
-        make_simslopes_plot(
-          weather_term = mf$weather_terms[1],
-          modx_term    = modx_from_term(mf$interaction_terms[1])
-        )
-      })
-
-      output$interactplot2 <- renderPlot({
-        mf <- model_fit_val()
-        req(mf, length(mf$weather_terms) >= 2, length(mf$interaction_terms) >= 1)
-        make_interact_plot(
-          weather_term = mf$weather_terms[2],
-          modx_term    = modx_from_term(mf$interaction_terms[1])
-        )
-      })
-
-      output$simslopes2 <- renderPlot({
-        mf <- model_fit_val()
-        req(mf, length(mf$weather_terms) >= 2, length(mf$interaction_terms) >= 1)
-        make_simslopes_plot(
-          weather_term = mf$weather_terms[2],
-          modx_term    = modx_from_term(mf$interaction_terms[1])
-        )
-      })
-
-      # Dynamic interaction panel layout
-      output$interactplots <- renderUI({
-        mf           <- model_fit_val()
-        has_interact <- length(mf$interaction_terms) > 0
-        has_two_haz  <- length(mf$weather_terms) > 1
-
-        if (!has_interact) {
-          return(shiny::p("No interaction term specified.", style = "color: grey;"))
-        }
-
-        if (has_two_haz) {
-          bslib::layout_columns(
-            col_widths = c(6, 6),
-            bslib::card(shiny::plotOutput(ns("interactplot1"), height = "300px")),
-            bslib::card(shiny::plotOutput(ns("simslopes1"),    height = "300px")),
-            bslib::card(shiny::plotOutput(ns("interactplot2"), height = "300px")),
-            bslib::card(shiny::plotOutput(ns("simslopes2"),    height = "300px"))
-          )
-        } else {
-          bslib::layout_columns(
-            col_widths = c(6, 6),
-            bslib::card(shiny::plotOutput(ns("interactplot1"), height = "300px")),
-            bslib::card(shiny::plotOutput(ns("simslopes1"),    height = "300px"))
-          )
-        }
       })
 
       # ---- Add Results tab (once); switch to it on subsequent runs ------------
@@ -338,18 +285,15 @@ mod_1_07_results_server <- function(
           shiny::tabPanel(
             title = "Results",
             value = "results",
-            shiny::h4("Marginal effect of weather on welfare"),
+            shiny::h4("Marginal effect of weather on outcome"),
             bslib::card(shiny::plotOutput(ns("coefplot"))),
             shiny::br(),
-            shiny::h4("Predicted welfare vs weather"),
+            shiny::h4("Predicted outcome vs weather"),
             bslib::layout_columns(
               col_widths = c(6, 6),
               bslib::card(shiny::plotOutput(ns("effectplot1"), height = "300px")),
               bslib::card(shiny::plotOutput(ns("effectplot2"), height = "300px"))
             ),
-            shiny::br(),
-            shiny::h4("Interactions & adaptation"),
-            shiny::uiOutput(ns("interactplots")),
             shiny::br(),
             shiny::h4("Regression results"),
             shiny::uiOutput(ns("regtable"))

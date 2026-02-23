@@ -139,12 +139,15 @@ fit_weather_model <- function(df, selected_outcome, selected_weather, selected_m
 
   weather_vars <- selected_weather$name
   weather_vars <- weather_vars[nzchar(weather_vars) & !is.na(weather_vars)]
-  weather_vars <- paste0("haz_", weather_vars)
 
   # Per-variable weather properties — recycle to length of weather_vars if needed
   n_weather    <- length(weather_vars)
   cont_binned  <- rep_len(selected_weather$cont_binned  %||% "Continuous", n_weather)
-  polynomial   <- rep_len(selected_weather$polynomial   %||% 1L,           n_weather)
+  polynomial <- if (is.list(selected_weather$polynomial)) {
+    rep_len(selected_weather$polynomial, n_weather)
+  } else {
+    rep_len(list(selected_weather$polynomial %||% character(0)), n_weather)
+  }
 
   interaction_vars <- selected_model$interactions %||% character(0)
   interaction_vars <- interaction_vars[nzchar(interaction_vars) & !is.na(interaction_vars)]
@@ -226,19 +229,17 @@ fit_weather_model <- function(df, selected_outcome, selected_weather, selected_m
 
   # Build the set of formula terms for each weather variable
   weather_formula_terms <- unlist(lapply(seq_along(weather_vars), function(i) {
-    v    <- weather_vars[i]
+    v         <- weather_vars[i]
     is_binned <- identical(cont_binned[i], "Binned")
-    poly <- if (is_binned) 1L else as.integer(polynomial[i] %||% 1L)
+    poly      <- if (is_binned) character(0) else (polynomial[[i]] %||% character(0))
 
-    base <- v
-    if (is_binned || poly <= 1L) {
-      base
-    } else if (poly == 2L) {
-      c(base, sprintf("I(%s^2)", v))
-    } else {
-      # poly >= 3: include quadratic and cubic
-      c(base, sprintf("I(%s^2)", v), sprintf("I(%s^3)", v))
+    # poly is a character vector of selected degrees e.g. character(0), "2", c("2","3")
+    terms <- v
+    if (!is_binned) {
+      if ("2" %in% poly) terms <- c(terms, sprintf("I(%s^2)", v))
+      if ("3" %in% poly) terms <- c(terms, sprintf("I(%s^3)", v))
     }
+    terms
   }))
 
   # Interaction terms: all weather formula terms × moderator (including polynomials).
@@ -247,18 +248,32 @@ fit_weather_model <- function(df, selected_outcome, selected_weather, selected_m
   # I(x^2):moderator is valid R formula syntax and correctly computes the
   # product of the squared term with the moderator.
   if (length(interaction_vars) > 0) {
+    # For each weather formula term, create a fully saturated term with each moderator
+    interaction_formula_terms <- as.vector(outer(
+      weather_formula_terms, interaction_vars,
+      FUN = function(h, m) paste0(h, " * ", m)
+    ))
+
+    # Colon terms for reporting only (not used in formula)
     interaction_terms <- as.vector(outer(
       weather_formula_terms, interaction_vars,
       FUN = function(h, m) paste0(h, ":", m)
     ))
+
+    # The * expansion includes weather main effects and moderator main effects,
+    # so we only need the interaction_formula_terms on the RHS — no need to
+    # separately list weather_formula_terms or interaction_vars
+    rhs_weather <- interaction_formula_terms
+
   } else {
-    interaction_terms <- character(0)
+    interaction_formula_terms <- character(0)
+    interaction_terms         <- character(0)
+    rhs_weather               <- weather_formula_terms
   }
 
-  # Assemble RHS term sets for each of the three models
-  terms1 <- c(weather_formula_terms, interaction_vars, interaction_terms)
-  terms2 <- c(weather_formula_terms, interaction_vars, interaction_terms, fe_vars)
-  terms3 <- c(weather_formula_terms, interaction_vars, interaction_terms, fe_vars, covariate_vars)
+  terms1 <- rhs_weather
+  terms2 <- c(rhs_weather, fe_vars)
+  terms3 <- c(rhs_weather, fe_vars, covariate_vars)
 
   build_formula <- function(y, rhs_terms) {
     # unique() would drop duplicate I(x^2) strings — safe here since each is distinct
@@ -302,7 +317,6 @@ fit_weather_model <- function(df, selected_outcome, selected_weather, selected_m
   # ---------------------------------------------------------------------------
   # 6. Fit the three models
   # ---------------------------------------------------------------------------
-
   fit_one <- function(formula, label) {
     tryCatch(
       parsnip::fit(model_spec, formula = formula, data = df),
@@ -311,6 +325,15 @@ fit_weather_model <- function(df, selected_outcome, selected_weather, selected_m
       }
     )
   }
+
+  # Drop rows with NA in any variable used by the most complete model (fit3)
+  # to avoid "missing value where TRUE/FALSE needed" from lm/glm internals
+  vars_used <- unique(c(y_var, weather_formula_terms, interaction_vars,
+                        fe_vars, covariate_vars))
+  vars_used <- vars_used[vars_used %in% names(df)]
+  df <- df[complete.cases(df[, vars_used, drop = FALSE]), ]
+
+  if (nrow(df) == 0) stop("No complete cases after dropping NA rows.")
 
   fit1 <- fit_one(formula1, "weather only")
   fit2 <- fit_one(formula2, "weather + FE")

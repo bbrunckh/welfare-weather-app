@@ -146,91 +146,168 @@ ridge_distribution_plot <- function(
     p
 }
 
-#' Shared label lookup helper
+# #' Shared label lookup helper
+# #'
+# #' @param varname Variable name to look up.
+# #' @param var_type "weather" or "general".
+# #' @param weather_list Weather metadata (data.frame or reactive).
+# #' @param varlist General varlist (data.frame or reactive).
+# #'
+# #' @return A label string if found, otherwise the original varname.
+# #'
+# #' @noRd
+# get_label <- function(varname, var_type = "weather", weather_list = NULL, varlist = NULL) {
+# 	if (var_type == "weather") {
+# 		vl <- if (is.function(weather_list)) weather_list() else weather_list
+# 		label_col <- "name"
+# 		var_col <- "varname"
+# 	} else {
+# 		vl <- if (is.function(varlist)) varlist() else varlist
+# 		label_col <- "label"
+# 		var_col <- if (!is.null(vl) && "name" %in% names(vl)) "name" else "varname"
+# 	}
+# 	if (is.null(vl)) return(varname)
+
+# 	if (label_col %in% names(vl) && var_col %in% names(vl)) {
+# 		name <- vl[vl[[var_col]] == varname, label_col]
+# 		if (length(name)) {
+# 			name_val <- as.character(name[[1]])
+# 			if (!is.na(name_val) && nzchar(name_val)) return(name_val)
+# 		}
+# 	}
+# 	varname
+# }
+
+# #' Resolve a variable's name and label
+# #'
+# #' @param var Variable name or label.
+# #' @param varlist General varlist (data.frame or reactive).
+# #' @param weather_list Weather metadata (data.frame or reactive).
+# #'
+# #' @return A list with `name` and `label` entries.
+# #'
+# #' @noRd
+# get_name_label <- function(var, varlist = NULL, weather_list = NULL) {
+# 	if (is.null(var) || !nzchar(var)) {
+# 		return(list(name = var, label = var))
+# 	}
+
+# 	vl <- if (is.function(varlist)) varlist() else varlist
+# 	wl <- if (is.function(weather_list)) weather_list() else weather_list
+
+# 	term <- as.character(var)
+# 	base <- term
+# 	power <- NULL
+# 	if (grepl("^I\\((.*)\\^([23])\\)$", term)) {
+# 		base <- sub("^I\\((.*)\\^([23])\\)$", "\\1", term)
+# 		power <- sub("^I\\((.*)\\^([23])\\)$", "\\2", term)
+# 	}
+
+# 	name <- NULL
+# 	label <- NULL
+
+# 	if (!is.null(vl) && all(c("name", "label") %in% names(vl))) {
+# 		if (base %in% vl$name) {
+# 			name <- base
+# 			label <- vl$label[vl$name == base][1]
+# 		} else if (base %in% vl$label) {
+# 			name <- vl$name[vl$label == base][1]
+# 			label <- base
+# 		}
+# 	}
+
+# 	if ((is.null(name) || is.null(label)) && !is.null(wl) && all(c("varname", "name") %in% names(wl))) {
+# 		if (base %in% wl$varname) {
+# 			name <- base
+# 			label <- wl$name[wl$varname == base][1]
+# 		} else if (base %in% wl$name) {
+# 			name <- wl$varname[wl$name == base][1]
+# 			label <- base
+# 		}
+# 	}
+
+# 	name <- name %||% base
+# 	label <- label %||% base
+# 	if (!is.null(power) && nzchar(power)) {
+# 		label <- paste0(label, "^", power)
+# 	}
+
+# 	list(name = name, label = label)
+# }
+
+#' Generate Marginal Effect / Interaction Plots with human-readable labels
 #'
-#' @param varname Variable name to look up.
-#' @param var_type "weather" or "general".
-#' @param weather_list Weather metadata (data.frame or reactive).
-#' @param varlist General varlist (data.frame or reactive).
-#'
-#' @return A label string if found, otherwise the original varname.
-#'
-#' @noRd
-get_label <- function(varname, var_type = "weather", weather_list = NULL, varlist = NULL) {
-	if (var_type == "weather") {
-		vl <- if (is.function(weather_list)) weather_list() else weather_list
-		label_col <- "name"
-		var_col <- "varname"
-	} else {
-		vl <- if (is.function(varlist)) varlist() else varlist
-		label_col <- "label"
-		var_col <- if (!is.null(vl) && "name" %in% names(vl)) "name" else "varname"
-	}
-	if (is.null(vl)) return(varname)
+#' @param fit A native model object.
+#' @param pred_var Character. The base name of the weather variable.
+#' @param interaction_terms Character vector of interaction strings.
+#' @param is_binned Logical.
+#' @param label_fun The get_label function from your server environment.
+#' @return A ggplot object.
+make_weather_effect_plot <- function(fit, pred_var, interaction_terms = character(0), is_binned = FALSE, label_fun = identity) {
+  
+  # 1. Resolve Human-Readable Labels
+  pred_lab <- label_fun(pred_var)
+  
+  # Extract Y variable name from the model formula and label it
+  y_var_name <- as.character(stats::formula(fit)[[2]])
+  y_lab <- label_fun(y_var_name)
 
-	if (label_col %in% names(vl) && var_col %in% names(vl)) {
-		name <- vl[vl[[var_col]] == varname, label_col]
-		if (length(name)) {
-			name_val <- as.character(name[[1]])
-			if (!is.na(name_val) && nzchar(name_val)) return(name_val)
-		}
-	}
-	varname
-}
+  # 2. Look for moderator
+  modx_var <- NULL
+  modx_lab <- NULL
+  if (length(interaction_terms) > 0) {
+    match_term <- grep(paste0("^", pred_var, ":"), interaction_terms, value = TRUE)
+    if (length(match_term) > 0) {
+      modx_var <- strsplit(match_term[1], ":")[[1]][2]
+      modx_lab <- label_fun(modx_var)
+    }
+  }
 
-#' Resolve a variable's name and label
-#'
-#' @param var Variable name or label.
-#' @param varlist General varlist (data.frame or reactive).
-#' @param weather_list Weather metadata (data.frame or reactive).
-#'
-#' @return A list with `name` and `label` entries.
-#'
-#' @noRd
-get_name_label <- function(var, varlist = NULL, weather_list = NULL) {
-	if (is.null(var) || !nzchar(var)) {
-		return(list(name = var, label = var))
-	}
+  # 3. Build Plot
+  if (is.null(modx_var)) {
+    p <- jtools::effect_plot(
+      model = fit, 
+      pred = !!rlang::sym(pred_var), 
+      interval = TRUE,
+      colors = "blue",
+      main.title = paste("Predicted", y_lab, "vs", pred_lab)
+    )
+    
+  } else {
+    if (is_binned) {
+      p <- interactions::cat_plot(
+        model = fit, 
+        pred = !!rlang::sym(pred_var), 
+        modx = !!rlang::sym(modx_var), 
+        geom = "line", 
+        interval = TRUE,
+        modx.labels = NULL, # Let it use levels from data, but label the legend later
+        main.title = paste("Impact of", pred_lab, "by", modx_lab)
+      )
+    } else {
+      p <- interactions::interact_plot(
+        model = fit, 
+        pred = !!rlang::sym(pred_var), 
+        modx = !!rlang::sym(modx_var), 
+        interval = TRUE,
+        main.title = paste("Impact of", pred_lab, "by", modx_lab)
+      )
+    }
+  }
 
-	vl <- if (is.function(varlist)) varlist() else varlist
-	wl <- if (is.function(weather_list)) weather_list() else weather_list
-
-	term <- as.character(var)
-	base <- term
-	power <- NULL
-	if (grepl("^I\\((.*)\\^([23])\\)$", term)) {
-		base <- sub("^I\\((.*)\\^([23])\\)$", "\\1", term)
-		power <- sub("^I\\((.*)\\^([23])\\)$", "\\2", term)
-	}
-
-	name <- NULL
-	label <- NULL
-
-	if (!is.null(vl) && all(c("name", "label") %in% names(vl))) {
-		if (base %in% vl$name) {
-			name <- base
-			label <- vl$label[vl$name == base][1]
-		} else if (base %in% vl$label) {
-			name <- vl$name[vl$label == base][1]
-			label <- base
-		}
-	}
-
-	if ((is.null(name) || is.null(label)) && !is.null(wl) && all(c("varname", "name") %in% names(wl))) {
-		if (base %in% wl$varname) {
-			name <- base
-			label <- wl$name[wl$varname == base][1]
-		} else if (base %in% wl$name) {
-			name <- wl$varname[wl$name == base][1]
-			label <- base
-		}
-	}
-
-	name <- name %||% base
-	label <- label %||% base
-	if (!is.null(power) && nzchar(power)) {
-		label <- paste0(label, "^", power)
-	}
-
-	list(name = name, label = label)
+  # 4. Final Theme and Label Overrides
+  p <- p + 
+    ggplot2::theme_minimal() +
+    ggplot2::labs(
+      x = pred_lab, 
+      y = paste("Predicted", y_lab),
+      colour = modx_lab, # Updates legend title for interactions
+      fill = modx_lab    # Updates legend title for confidence ribbons
+    ) +
+    ggplot2::theme(
+      plot.title = ggplot2::element_text(face = "bold", hjust = 0.5, size = 11),
+      legend.position = "bottom"
+    )
+  
+  return(p)
 }

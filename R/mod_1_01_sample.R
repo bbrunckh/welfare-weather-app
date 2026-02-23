@@ -4,11 +4,10 @@
 #'
 #' @param id,input,output,session Internal parameters for {shiny}.
 #'
-#' @noRd 
+#' @noRd
 #'
-#' @importFrom shiny NS tagList 
-#' @importFrom dplyr filter pull mutate inner_join select arrange bind_rows
-#' @importFrom pins pin_download
+#' @importFrom shiny NS tagList
+#' @importFrom dplyr filter pull mutate inner_join select arrange
 mod_1_01_sample_ui <- function(id) {
   ns <- NS(id)
   tagList(
@@ -20,21 +19,49 @@ mod_1_01_sample_ui <- function(id) {
     )
   )
 }
-    
+
 #' 1_01_sample Server Functions
 #'
-#' @noRd 
-mod_1_01_sample_server <- function(id, survey_list_master, varlist, data_dir) { #pin_prefix, board, survey_metadata, varlist) {
+#' @param id Module id.
+#' @param survey_list Reactive tibble from mod_0_overview (survey metadata).
+#' @param variable_list Reactive tibble from mod_0_overview (variable metadata).
+#' @param connection_params Reactive named list from mod_0_overview
+#'   (connection type + credentials/path).
+#'
+#' @noRd
+mod_1_01_sample_server <- function(id, connection_params, survey_list, variable_list) {
   moduleServer(id, function(input, output, session) {
     ns <- session$ns
 
-    
-    # --------- Level of analysis selector UI -----------
+    # ---- List available files at the connection endpoint --------------------
+    #
+    # Returns a character vector of filenames (basename only, no path) that
+    # exist at the root of the connected data source.
+    # For local: uses list.files(). For remote: uses duckdbfs or falls back to
+    # attempting open_dataset() per file — not feasible at scale, so for remote
+    # sources we trust survey_list and skip the existence filter.
+
+    available_files <- reactive({
+      req(connection_params())
+      p <- connection_params()
+
+      if (identical(p$type, "local")) {
+        if (!dir.exists(p$path)) return(character(0))
+        list.files(p$path, recursive = FALSE)
+      } else {
+        # For remote sources we cannot cheaply list files without S3 ListObjects
+        # or equivalent. Return NULL to signal "skip existence filter".
+        NULL
+      }
+    })
+
+    # ---- Level of analysis selector -----------------------------------------
+
     output$unit_ui <- renderUI({
       radioButtons(
-        inputId = ns("unit"),
-        label   = "Level of analysis",
-        choices = c(
+        inputId  = ns("unit"),
+        label    = "Level of analysis",
+        choices  = c(
           "Individual" = "ind",
           "Household"  = "hh",
           "Firm"       = "firm"
@@ -43,141 +70,131 @@ mod_1_01_sample_server <- function(id, survey_list_master, varlist, data_dir) { 
       )
     })
 
-    # --------- Sample selector UI (economies) -----------
-    # surveys with data files in folder for selected level of analysis
+    # ---- Surveys with data files available at the endpoint ------------------
+    #
+    # Constructs expected filenames from survey_list metadata, filters to the
+    # selected unit level, then cross-checks against available_files().
+    # For remote connections where available_files() is NULL, skips the
+    # existence check and trusts survey_list.
+
     surveys <- reactive({
-      req(input$unit)
-      slm <- survey_list_master()
-      req(slm)
-      dir_path <- data_dir()
-      req(dir_path)
+      req(input$unit, survey_list())
+      sl    <- survey_list()
+      files <- available_files()  # NULL for remote, character vector for local
 
-      # get list of expected file paths
-      slm <- slm |>
-        mutate(
-          fpath = file.path(
-            dir_path,
-             paste0(code, "_", year, "_", survname, "_", level, ".parquet")
-          )) |>
-        # filter survey list to files that exist and selected level
-        filter(file.exists(fpath), level == input$unit)
-      slm
+      sl <- sl |>
+        dplyr::mutate(
+          fname = paste0(code, "_", year, "_", survname, "_", input$unit, ".parquet"),
+          fpath = if (identical(connection_params()$type, "local")) {
+            file.path(connection_params()$path, fname)
+          } else {
+            fname  # bare filename for remote — not used in existence check
+          }
+        ) |>
+        dplyr::filter(level == input$unit)
+
+      # For local connections, filter to files that actually exist on disk
+      if (!is.null(files)) {
+        sl <- sl |> dplyr::filter(fname %in% files)
+      }
+
+      sl
     })
 
-    # --------- Country selector UI -----------
-output$sample_ui <- renderUI({
-  req(surveys())
-  
-  # Create named vector: display economy names, but values are codes
-  choices <- setNames(surveys()$code, surveys()$economy)
-  
-  selectizeInput(
-    inputId = ns("economy"),
-    label = "Economy",
-    choices = choices,
-    selected = choices[1],
-    multiple = TRUE,
-    options = list(maxItems = 2, placeholder = "Select countries")
-  )
-})
+    # ---- Economy selector ---------------------------------------------------
 
-  # --------- Available survey years per selected code -----------
-  available_years <- reactive({
-    req(input$economy)  # Now contains codes, not economy names
-    
-    yrs <- lapply(input$economy, function(code) {
-      surveys() |>
-        filter(code == code) |>
-        pull(year) |> 
-        sort()
-    })
-    names(yrs) <- input$economy
-    yrs
-  })
+    output$sample_ui <- renderUI({
+      req(surveys())
+      sv <- surveys()
+      if (nrow(sv) == 0) {
+        return(helpText(
+          "No data files found for the selected level of analysis.",
+          style = "color: red; font-size: 12px;"
+        ))
+      }
 
-  # --------- Year selector UI -----------
-  output$survey_year_ui <- renderUI({
-    req(input$economy)
-    
-    codes <- input$economy
-    all_years <- available_years()
-    
-    # Create a selectizeInput for each selected economy code
-    year_inputs <- lapply(codes, function(code) {
-      yrs <- all_years[[code]]
-      
-      # Get the economy name for the label
-      economy_name <- surveys() |>
-        filter(code == code) |>
-        pull(economy) |>
-        head(1)
-      
-      tagList(
-        selectizeInput(
-          inputId = ns(paste0("survey_year_", code)),
-          label = paste("Survey years for", economy_name),
-          choices = yrs,
-          selected = yrs,
-          multiple = TRUE,
-          options = list(
-            placeholder = paste("Select years for", economy_name)
-          )
-        )
+      choices <- setNames(sv$code, sv$economy)
+      choices <- choices[!duplicated(choices)]  # one entry per country
+
+      selectizeInput(
+        inputId  = ns("economy"),
+        label    = "Economy",
+        choices  = choices,
+        selected = choices[1],
+        multiple = TRUE,
+        options  = list(maxItems = 2, placeholder = "Select up to 2 economies")
       )
     })
-    
-    tagList(year_inputs)
-  })
 
-    # --------- Collect selected years from all dynamic inputs -----------
+    # ---- Available survey years per selected economy ------------------------
+
+    available_years <- reactive({
+      req(input$economy, surveys())
+      lapply(stats::setNames(input$economy, input$economy), function(code) {
+        surveys() |>
+          dplyr::filter(code == !!code) |>
+          dplyr::pull(year) |>
+          sort()
+      })
+    })
+
+    # ---- Year selector UI ---------------------------------------------------
+
+    output$survey_year_ui <- renderUI({
+      req(input$economy, available_years())
+      codes    <- input$economy
+      all_yrs  <- available_years()
+
+      year_inputs <- lapply(codes, function(code) {
+        yrs <- all_yrs[[code]]
+        economy_name <- surveys() |>
+          dplyr::filter(code == !!code) |>
+          dplyr::pull(economy) |>
+          head(1)
+
+        selectizeInput(
+          inputId  = ns(paste0("year_", code)),
+          label    = paste("Survey years —", economy_name),
+          choices  = yrs,
+          selected = yrs,
+          multiple = TRUE,
+          options  = list(placeholder = paste("Select years for", economy_name))
+        )
+      })
+
+      tagList(year_inputs)
+    })
+
+    # ---- Collect selected years from dynamic inputs -------------------------
+
     selected_years_by_code <- reactive({
       req(input$economy)
-      
-      codes <- input$economy
-      years_list <- lapply(codes, function(code) {
-        input_name <- paste0("survey_year_", code)
-        input[[input_name]]
-      })
-      names(years_list) <- codes
-      
-      # Filter out NULL values
+      years_list <- lapply(
+        stats::setNames(input$economy, input$economy),
+        function(code) input[[paste0("year_", code)]]
+      )
       Filter(Negate(is.null), years_list)
     })
 
-    # # --------- Reactive Load Data button -----------
-    # output$load_button_ui <- renderUI({
-    #   req(input$economy)
-      
-    #   years <- selected_years_by_code()
-      
-    #   # Check if at least one economy has years selected
-    #   if (length(years) == 0 || all(sapply(years, length) == 0)) {
-    #     return(NULL)
-    #   }
-      
-    #   actionButton(ns("load_data"), "Load Data", class = "btn-primary")
-    # })
+    # ---- Selected surveys ---------------------------------------------------
 
-    # --------- Reactive to hold selected surveys -----------
     selected_surveys <- reactive({
       req(input$economy)
       years_by_code <- selected_years_by_code()
       req(length(years_by_code) > 0)
-      
-      # Create a data frame of all selected code/year combinations
-      selected_combos <- do.call(rbind, lapply(names(years_by_code), function(code) {
-        years <- years_by_code[[code]]
-        if (length(years) == 0) return(NULL)
-        data.frame(code = code, year = as.numeric(years), stringsAsFactors = FALSE)
+
+      combos <- do.call(rbind, lapply(names(years_by_code), function(code) {
+        yrs <- years_by_code[[code]]
+        if (length(yrs) == 0) return(NULL)
+        data.frame(code = code, year = as.numeric(yrs), stringsAsFactors = FALSE)
       }))
-      # Filter surveys() by the selected combinations 
-      selected_surveys <- surveys() |> 
-        inner_join(selected_combos, by = c("code", "year")) 
-      selected_surveys
+
+      surveys() |>
+        dplyr::inner_join(combos, by = c("code", "year"))
     })
-    
-    
-    # --------- Module return API -----------
+
+    # ---- Return API ---------------------------------------------------------
+
     list(
       selected_surveys = selected_surveys
     )

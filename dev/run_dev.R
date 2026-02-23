@@ -18,3 +18,4 @@ devtools::load_all()
 
 # Run the application
 run_app()
+

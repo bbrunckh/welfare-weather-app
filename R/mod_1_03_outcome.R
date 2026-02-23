@@ -22,16 +22,16 @@ mod_1_03_outcome_ui <- function(id) {
 #' 1_03_outcome Server Functions
 #'
 #' @noRd 
-mod_1_03_outcome_server <- function(id, varlist, survey_data) {
+mod_1_03_outcome_server <- function(id, variable_list, survey_data) {
   moduleServer(id, function(input, output, session){
     ns <- session$ns
 
     # --------- Available outcome variables in data -----------
     available_outcomes <- reactive({
-      req(varlist(), survey_data())
+      req(variable_list(), survey_data())
 
-      # Filter varlist for outcomes that are present in survey data
-      outs <- varlist() |>
+      # Filter variable_list for outcomes that are present in survey data
+      outs <- variable_list() |>
         dplyr::filter(outcome == 1 & name %in% colnames(survey_data())) |>
         dplyr::select(name, label, units, type)
         

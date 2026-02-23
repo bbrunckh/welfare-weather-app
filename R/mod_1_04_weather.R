@@ -18,15 +18,15 @@ mod_1_04_weather_ui <- function(id) {
 #' 1_04_weather Server Functions
 #'
 #' @noRd
-mod_1_04_weather_server <- function(id, varlist, selected_surveys, survey_data, survey_h3 
+mod_1_04_weather_server <- function(id, variable_list, selected_surveys, survey_data
 ) {
   moduleServer(id, function(input, output, session) {
     ns <- session$ns
 
     output$weather_selector_ui <- renderUI({
 
-      # get weather variables from varlist
-      wl <- varlist() |> 
+      # get weather variables from variable_list
+      wl <- variable_list() |> 
         dplyr::filter(weather == 1) |> 
         dplyr::select(name, label, units)
 
@@ -47,8 +47,8 @@ mod_1_04_weather_server <- function(id, varlist, selected_surveys, survey_data, 
     output$weather_construction_ui <- renderUI({
       req(input$weather_variable_selector)
 
-      # get weather variables from varlist
-      wl <- varlist() |> 
+      # get weather variables from variable_list
+      wl <- variable_list() |> 
         dplyr::filter(weather == 1) |> 
         dplyr::select(name, label, units)
 
@@ -146,8 +146,8 @@ mod_1_04_weather_server <- function(id, varlist, selected_surveys, survey_data, 
 selected_weather <- reactive({
   req(input$weather_variable_selector)
   
-  # Get basic variable info from varlist
-  var_info <- varlist() |> 
+  # Get basic variable info from variable_list
+  var_info <- variable_list() |> 
     dplyr::filter(weather == 1) |>
     dplyr::filter(name %in% input$weather_variable_selector) |>
     dplyr::select(name, label, units)
@@ -176,9 +176,6 @@ selected_weather <- reactive({
     binning_method <- if (cont_binned == "Binned") input[[paste0(id_prefix, "binningMethod")]] %||% "Equal frequency" else NA_character_
 
     poly <- input[[paste0(id_prefix, "polynomial")]] %||% character(0)
-    # Store maximum degree as a single integer. Selecting "Cubic" gives c("2","3")
-    # so max() gives 3, and fit_weather_model adds I(x^2) + I(x^3).
-    poly_degree <- if (length(poly) > 0) max(as.integer(poly), na.rm = TRUE) else 1L
 
     tibble::tibble(
       name = v,
@@ -189,7 +186,7 @@ selected_weather <- reactive({
       cont_binned = cont_binned,
       num_bins = num_bins,
       binning_method = binning_method,
-      polynomial = poly_degree
+      polynomial = list(poly)
     )
   })
   

@@ -16,7 +16,7 @@ mod_1_08_modelfit_ui <- function(id) {
 #' @noRd
 mod_1_08_modelfit_server <- function(
     id,
-    varlist,
+    variable_list,
     selected_surveys,
     selected_outcome,
     selected_weather,
@@ -40,7 +40,7 @@ mod_1_08_modelfit_server <- function(
 
     # Look up a human-readable label for a variable name
     get_label <- function(var_name) {
-      vl <- if (is.function(varlist)) varlist() else varlist
+      vl <- if (is.function(variable_list)) variable_list() else variable_list
       if (is.null(vl)) return(var_name)
       idx <- match(var_name, vl$name)
       if (is.na(idx)) var_name else vl$label[idx]
@@ -168,7 +168,7 @@ mod_1_08_modelfit_server <- function(
         )
       }
 
-      vl <- if (is.function(varlist)) varlist() else varlist
+      vl <- if (is.function(variable_list)) variable_list() else variable_list
       importance_df <- data.frame(
         Variable     = names(rel_imp$lmg),
         Contribution = as.numeric(rel_imp$lmg)

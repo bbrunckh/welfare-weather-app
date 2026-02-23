@@ -30,41 +30,41 @@ get_golem_config <- function(
 #  The helpers below are safe to call at runtime from server/startup.
 # -------------------------
 
-# Helper: choose pin board (no side-effects beyond returning a board object)
-get_pin_board <- function() {
-  if (Sys.getenv("R_CONFIG_ACTIVE") == "") {
-    message("[app_config] Using LOCAL pin board (data/pins)")
-    pins::board_folder("data/pins")
-  } else {
-    message("[app_config] Using CONNECT pin board")
-    pins::board_connect()
-  }
-}
+# # Helper: choose pin board (no side-effects beyond returning a board object)
+# get_pin_board <- function() {
+#   if (Sys.getenv("R_CONFIG_ACTIVE") == "") {
+#     message("[app_config] Using LOCAL pin board (data/pins)")
+#     pins::board_folder("data/pins")
+#   } else {
+#     message("[app_config] Using CONNECT pin board")
+#     pins::board_connect()
+#   }
+# }
 
-# Safe pin_list wrapper: returns character vector on error
-safe_pin_list <- function(board) {
-  tryCatch(pins::pin_list(board), error = function(e) {
-    message("[app_config] pin_list() failed: ", conditionMessage(e))
-    character(0)
-  })
-}
+# # Safe pin_list wrapper: returns character vector on error
+# safe_pin_list <- function(board) {
+#   tryCatch(pins::pin_list(board), error = function(e) {
+#     message("[app_config] pin_list() failed: ", conditionMessage(e))
+#     character(0)
+#   })
+# }
 
-# Safe pin_read: returns tibble() on missing pin or error
-safe_pin_read <- function(board, name, prefix = "") {
-  fullname <- paste0(prefix, name)
-  pins_available <- safe_pin_list(board)
-  if (!(fullname %in% pins_available)) {
-    warning("[app_config] Pin not found: ", fullname)
-    return(tibble::tibble())  # lightweight empty tibble
-  }
-  tryCatch(
-    pins::pin_read(board, fullname),
-    error = function(e) {
-      warning("[app_config] pin_read(", fullname, ") failed: ", conditionMessage(e))
-      tibble::tibble()
-    }
-  )
-}
+# # Safe pin_read: returns tibble() on missing pin or error
+# safe_pin_read <- function(board, name, prefix = "") {
+#   fullname <- paste0(prefix, name)
+#   pins_available <- safe_pin_list(board)
+#   if (!(fullname %in% pins_available)) {
+#     warning("[app_config] Pin not found: ", fullname)
+#     return(tibble::tibble())  # lightweight empty tibble
+#   }
+#   tryCatch(
+#     pins::pin_read(board, fullname),
+#     error = function(e) {
+#       warning("[app_config] pin_read(", fullname, ") failed: ", conditionMessage(e))
+#       tibble::tibble()
+#     }
+#   )
+# }
 
 # Main runtime loader (call this at app/server start)
 # returns a list with board, prefix, and metadata tibbles (may be empty)
@@ -136,30 +136,30 @@ safe_pin_read <- function(board, name, prefix = "") {
 #   )
 # }
 
-# New data loading function
-load_local_data <- function(data_root) {
+# # New data loading function
+# load_local_data <- function(data_root) {
 
-  # allow either character path or reactive returning a character path
-  root <- if (is.function(data_root)) data_root() else data_root
-  if (is.null(root) || !nzchar(root)) {
-    stop("[app_config] data_root is empty. Please apply a valid folder path.")
-  }
-  root <- normalizePath(path.expand(root), winslash = "/", mustWork = TRUE)
+#   # allow either character path or reactive returning a character path
+#   root <- if (is.function(data_root)) data_root() else data_root
+#   if (is.null(root) || !nzchar(root)) {
+#     stop("[app_config] data_root is empty. Please apply a valid folder path.")
+#   }
+#   root <- normalizePath(path.expand(root), winslash = "/", mustWork = TRUE)
   
-  survey_list_master <- readr::read_csv(file.path(data_root, "survey_list.csv"), show_col_types = FALSE)
-  varlist <- readr::read_csv(file.path(data_root, "variable_list.csv"), show_col_types = FALSE)
-  cpi_ppp <- readr::read_csv(file.path(data_root, "cpi_ppp.csv"), show_col_types = FALSE)
+#   survey_list_master <- readr::read_csv(file.path(data_root, "survey_list.csv"), show_col_types = FALSE)
+#   varlist <- readr::read_csv(file.path(data_root, "variable_list.csv"), show_col_types = FALSE)
+#   cpi_ppp <- readr::read_csv(file.path(data_root, "cpi_ppp.csv"), show_col_types = FALSE)
 
-  pov_lines <- data.frame(
-    ppp_year = c(rep(2021,3), rep(2017,3), rep(2011,3)),
-    ln = c(3.00,4.20,8.30, 2.15,3.65,6.85, 1.90,3.20,5.50),
-    stringsAsFactors = FALSE
-  )
+#   pov_lines <- data.frame(
+#     ppp_year = c(rep(2021,3), rep(2017,3), rep(2011,3)),
+#     ln = c(3.00,4.20,8.30, 2.15,3.65,6.85, 1.90,3.20,5.50),
+#     stringsAsFactors = FALSE
+#   )
   
-  list(
-    survey_list_master = survey_list_master,
-    varlist = varlist,
-    cpi_ppp = cpi_ppp,
-    pov_lines = pov_lines
-   )
-}
+#   list(
+#     survey_list_master = survey_list_master,
+#     varlist = varlist,
+#     cpi_ppp = cpi_ppp,
+#     pov_lines = pov_lines
+#    )
+# }
