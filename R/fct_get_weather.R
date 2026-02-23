@@ -179,148 +179,143 @@ get_weather <- function(survey_data, selected_weather, dates, connection_params)
   # Cutoffs are derived from the survey-sample distribution of the (possibly
   # transformed) variable. cut() is then applied to the collected frame.
   for (i in seq_len(nrow(selected_weather))) {
-    v              <- selected_weather$name[i]
-    cont_binned    <- selected_weather$cont_binned[i]
-    num_bins       <- selected_weather$num_bins[i]
-    binning_method <- selected_weather$binning_method[i]
+  v              <- selected_weather$name[i]
+  cont_binned    <- selected_weather$cont_binned[i]
+  num_bins       <- selected_weather$num_bins[i]
+  binning_method <- selected_weather$binning_method[i]
 
-    if (is.na(cont_binned) || cont_binned != "Binned") next
+  if (is.na(cont_binned) || cont_binned != "Binned") next
 
-    haz_vals <- result[[v]][is.finite(result[[v]])]
+  # Only use weather values for timestamps present in survey_data
+  survey_timestamps <- unique(survey_data$timestamp)
+  haz_vals <- result[[v]][is.finite(result[[v]]) & result$timestamp %in% survey_timestamps]
 
-    cutoffs <- switch(binning_method,
-      "Equal frequency" = {
-        unique(quantile(haz_vals, probs = seq(0, 1, length.out = num_bins + 1), na.rm = TRUE))
-      },
-      "Equal width" = {
-        unique(seq(min(haz_vals, na.rm = TRUE), max(haz_vals, na.rm = TRUE), length.out = num_bins + 1))
-      },
-      "K-means" = {
-        tryCatch({
-          if (length(unique(haz_vals)) >= num_bins) {
-            set.seed(123)
-            km      <- kmeans(haz_vals, centers = num_bins)
-            centers <- sort(as.numeric(km$centers))
-            unique(c(
-              min(haz_vals, na.rm = TRUE),
-              (centers[-length(centers)] + centers[-1]) / 2,
-              max(haz_vals, na.rm = TRUE)
-            ))
-          } else {
-            message("Not enough unique values for K-means in ", v, ". Keeping continuous.")
-            NULL
-          }
-        }, error = function(e) {
-          message("K-means failed for ", v, ": ", e$message)
+  cutoffs <- switch(binning_method,
+    "Equal frequency" = {
+      unique(quantile(haz_vals, probs = seq(0, 1, length.out = num_bins + 1), na.rm = TRUE))
+    },
+    "Equal width" = {
+      unique(seq(min(haz_vals, na.rm = TRUE), max(haz_vals, na.rm = TRUE), length.out = num_bins + 1))
+    },
+    "K-means" = {
+      tryCatch({
+        if (length(unique(haz_vals)) >= num_bins) {
+          set.seed(123)
+          km      <- kmeans(haz_vals, centers = num_bins)
+          centers <- sort(as.numeric(km$centers))
+          unique(c(
+            min(haz_vals, na.rm = TRUE),
+            (centers[-length(centers)] + centers[-1]) / 2,
+            max(haz_vals, na.rm = TRUE)
+          ))
+        } else {
+          message("Not enough unique values for K-means in ", v, ". Keeping continuous.")
           NULL
-        })
-      },
-      NULL
-    )
+        }
+      }, error = function(e) {
+        message("K-means failed for ", v, ": ", e$message)
+        NULL
+      })
+    },
+    NULL
+  )
 
-    if (!is.null(cutoffs) && length(cutoffs) > 1) {
-      # Strip the outer bounds before adding -Inf/Inf to avoid duplicate
-      # boundary values that would cause cut() to produce empty intervals
-      breaks_ext  <- c(-Inf, cutoffs[-c(1, length(cutoffs))], Inf)
-      result[[v]] <- cut(result[[v]], breaks = breaks_ext, include.lowest = TRUE)
-      message(binning_method, " cutoffs for ", v, ": ", paste(round(cutoffs, 3), collapse = ", "))
-    } else {
-      message("Insufficient variation in ", v, ". Keeping continuous.")
-    }
+  if (!is.null(cutoffs) && length(cutoffs) > 1) {
+    breaks_ext  <- c(-Inf, cutoffs[-c(1, length(cutoffs))], Inf)
+    result[[v]] <- cut(result[[v]], breaks = breaks_ext, include.lowest = TRUE)
+    message(binning_method, " cutoffs for ", v, ": ", paste(round(cutoffs, 3), collapse = ", "))
+  } else {
+    message("Insufficient variation in ", v, ". Keeping continuous.")
   }
+}
   result
 }
 
 #___________________________________________
-# # TEST
+# TEST
 
-# # inputs
-# survey_data <- load_data("/Users/bbrunckhorst/Github/wise-app-dev/data/GNB_2021_EHCVM_hh.parquet", collect = TRUE) |>
-#     dplyr::mutate(
-#       timestamp = as.Date(paste(int_year, int_month, "01", sep = "-")),
-#       month = int_month
-#     ) 
+# inputs
+survey_data <- load_data("/Users/bbrunckhorst/Github/wise-app-dev/data/GNB_2021_EHCVM_hh.parquet", collect = TRUE) |>
+    dplyr::mutate(
+      timestamp = as.Date(paste(int_year, int_month, "01", sep = "-")),
+      month = int_month
+    ) 
 
-# dates <- survey_data |>
-#     dplyr::filter(!is.na(timestamp)) |>
-#     dplyr::pull(timestamp)
+dates <- survey_data |>
+    dplyr::filter(!is.na(timestamp)) |>
+    dplyr::pull(timestamp)
 
-# connection_params <- list(type = "local", path = "/Users/bbrunckhorst/Github/wise-app-dev/data")
+connection_params <- list(type = "local", path = "/Users/bbrunckhorst/Github/wise-app-dev/data")
 
-# # 1. Baseline: Mean, no transformation, continuous
-# sw1 <- data.frame(
-#   name = "tx",
-#   ref_start = 1,
-#   ref_end = 7,
-#   temporalAgg = "Mean",
-#   cont_binned = "Continuous",
-#   binning_method = NA_character_,
-#   num_bins = NA_integer_,
-#   transformation = "None"
-# )
-# res1 <- get_weather(survey_data, sw1, dates, connection_params)
+# 1. Baseline: Mean, no transformation, continuous
+sw1 <- data.frame(
+  name = "tx",
+  ref_start = 1,
+  ref_end = 7,
+  temporalAgg = "Mean",
+  cont_binned = "Continuous",
+  binning_method = NA_character_,
+  num_bins = NA_integer_,
+  transformation = "None"
+)
+res1 <- get_weather(survey_data, sw1, dates, connection_params)
 
-# # 2. Median, no transformation, binned (equal frequency)
-# sw2 <- data.frame(
-#   name = "tx",
-#   ref_start = 1,
-#   ref_end = 7,
-#   temporalAgg = "Median",
-#   cont_binned = "Binned",
-#   binning_method = "Equal frequency",
-#   num_bins = 4,
-#   transformation = "None"
-# )
-# res2 <- get_weather(survey_data, sw2, dates, connection_params)
+# 2. Median, no transformation, binned (equal frequency)
+sw2 <- data.frame(
+  name = "tx",
+  ref_start = 1,
+  ref_end = 7,
+  temporalAgg = "Median",
+  cont_binned = "Binned",
+  binning_method = "Equal frequency",
+  num_bins = 4,
+  transformation = "None"
+)
+res2 <- get_weather(survey_data, sw2, dates, connection_params)
 
-# # 3. Max, deviation from mean, continuous
-# sw3 <- data.frame(
-#   name = "tx",
-#   ref_start = 0,
-#   ref_end = 11,
-#   temporalAgg = "Max",
-#   cont_binned = "Continuous",
-#   binning_method = NA_character_,
-#   num_bins = NA_integer_,
-#   transformation = "Deviation from mean"
-# )
-# res3 <- get_weather(survey_data, sw3, dates, connection_params)
+# 3. Min, standardised anomaly, binned (equal width)
+sw3 <- data.frame(
+  name = "tx",
+  ref_start = 3,
+  ref_end = 6,
+  temporalAgg = "Min",
+  cont_binned = "Binned",
+  binning_method = "Equal width",
+  num_bins = 5,
+  transformation = "Standardized anomaly"
+)
+res3 <- get_weather(survey_data, sw3, dates, connection_params)
 
-# # 4. Min, standardised anomaly, binned (equal width)
-# sw4 <- data.frame(
-#   name = "tx",
-#   ref_start = 3,
-#   ref_end = 6,
-#   temporalAgg = "Min",
-#   cont_binned = "Binned",
-#   binning_method = "Equal width",
-#   num_bins = 5,
-#   transformation = "Standardized anomaly"
-# )
-# res4 <- get_weather(survey_data, sw4, dates, connection_params)
+# 4. Multiple variables, mixed settings
+sw4 <- data.frame(
+  name = c("tx", "t"),
+  ref_start = c(1, 0),
+  ref_end = c(7, 11),
+  temporalAgg = c("Mean", "Max"),
+  cont_binned = c("Continuous", "Binned"),
+  binning_method = c(NA_character_, "Equal frequency"),
+  num_bins = c(NA, 4),
+  transformation = c("None", "Deviation from mean")
+)
+res4 <- get_weather(survey_data, sw4, dates, connection_params)
 
-# # 5. Sum, no transformation, binned (K-means)
-# sw5 <- data.frame(
-#   name = "tx",
-#   ref_start = 1,
-#   ref_end = 3,
-#   temporalAgg = "Sum",
-#   cont_binned = "Binned",
-#   binning_method = "K-means",
-#   num_bins = 3,
-#   transformation = "None"
-# )
-# res5 <- get_weather(survey_data, sw5, dates, connection_params)
+# FOR SIMULATIONS - get weather data for survey locations across many weather years
+start_year <- 1990
+end_year <- 2024
 
-# # 6. Multiple variables, mixed settings
-# sw6 <- data.frame(
-#   name = c("tx", "t"),
-#   ref_start = c(1, 0),
-#   ref_end = c(7, 11),
-#   temporalAgg = c("Mean", "Max"),
-#   cont_binned = c("Continuous", "Binned"),
-#   binning_method = c(NA_character_, "Equal frequency"),
-#   num_bins = c(NA, 4),
-#   transformation = c("None", "Deviation from mean")
-# )
-# res6 <- get_weather(survey_data, sw6, dates, connection_params)
+  # get dates for every year in range with month in survey data
+  dates_sim <- with(
+  expand.grid(
+    int_month = unique(survey_data$int_month),
+    int_year  = start_year:end_year
+  ),
+  as.Date(paste(int_year, int_month, "01", sep = "-"))
+)
+
+  # get weather for simulations in every year in range, using same settings as sw4
+  sim_weather <- get_weather(survey_data, sw4, dates_sim, connection_params) |>
+    dplyr::mutate(int_month=as.integer(format(timestamp, "%m")), # month for merging with survey data
+      sim_year = as.integer(format(timestamp, "%Y"))) |> # simulation weather year for reference
+    dplyr::select(-timestamp) # drop timestamp to avoid confusion with survey interview timestamps
+
+
