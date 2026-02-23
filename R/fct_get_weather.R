@@ -232,90 +232,89 @@ get_weather <- function(survey_data, selected_weather, dates, connection_params)
 }
 
 #___________________________________________
-# TEST
+# # TEST
 
-# inputs
-survey_data <- load_data("/Users/bbrunckhorst/Github/wise-app-dev/data/GNB_2021_EHCVM_hh.parquet", collect = TRUE) |>
-    dplyr::mutate(
-      timestamp = as.Date(paste(int_year, int_month, "01", sep = "-")),
-      month = int_month
-    ) 
+# # inputs
+# survey_data <- load_data("/Users/bbrunckhorst/Github/wise-app-dev/data/GNB_2021_EHCVM_hh.parquet", collect = TRUE) |>
+#     dplyr::mutate(
+#       timestamp = as.Date(paste(int_year, int_month, "01", sep = "-")),
+#       month = int_month
+#     ) 
 
-dates <- survey_data |>
-    dplyr::filter(!is.na(timestamp)) |>
-    dplyr::pull(timestamp)
+# dates <- survey_data |>
+#     dplyr::filter(!is.na(timestamp)) |>
+#     dplyr::pull(timestamp)
 
-connection_params <- list(type = "local", path = "/Users/bbrunckhorst/Github/wise-app-dev/data")
+# connection_params <- list(type = "local", path = "/Users/bbrunckhorst/Github/wise-app-dev/data")
 
-# 1. Baseline: Mean, no transformation, continuous
-sw1 <- data.frame(
-  name = "tx",
-  ref_start = 1,
-  ref_end = 7,
-  temporalAgg = "Mean",
-  cont_binned = "Continuous",
-  binning_method = NA_character_,
-  num_bins = NA_integer_,
-  transformation = "None"
-)
-res1 <- get_weather(survey_data, sw1, dates, connection_params)
+# # 1. Baseline: Mean, no transformation, continuous
+# sw1 <- data.frame(
+#   name = "tx",
+#   ref_start = 1,
+#   ref_end = 7,
+#   temporalAgg = "Mean",
+#   cont_binned = "Continuous",
+#   binning_method = NA_character_,
+#   num_bins = NA_integer_,
+#   transformation = "None"
+# )
+# res1 <- get_weather(survey_data, sw1, dates, connection_params)
 
-# 2. Median, no transformation, binned (equal frequency)
-sw2 <- data.frame(
-  name = "tx",
-  ref_start = 1,
-  ref_end = 7,
-  temporalAgg = "Median",
-  cont_binned = "Binned",
-  binning_method = "Equal frequency",
-  num_bins = 4,
-  transformation = "None"
-)
-res2 <- get_weather(survey_data, sw2, dates, connection_params)
+# # 2. Median, no transformation, binned (equal frequency)
+# sw2 <- data.frame(
+#   name = "tx",
+#   ref_start = 1,
+#   ref_end = 7,
+#   temporalAgg = "Median",
+#   cont_binned = "Binned",
+#   binning_method = "Equal frequency",
+#   num_bins = 4,
+#   transformation = "None"
+# )
+# res2 <- get_weather(survey_data, sw2, dates, connection_params)
 
-# 3. Min, standardised anomaly, binned (equal width)
-sw3 <- data.frame(
-  name = "tx",
-  ref_start = 3,
-  ref_end = 6,
-  temporalAgg = "Min",
-  cont_binned = "Binned",
-  binning_method = "Equal width",
-  num_bins = 5,
-  transformation = "Standardized anomaly"
-)
-res3 <- get_weather(survey_data, sw3, dates, connection_params)
+# # 3. Min, standardised anomaly, binned (equal width)
+# sw3 <- data.frame(
+#   name = "tx",
+#   ref_start = 3,
+#   ref_end = 6,
+#   temporalAgg = "Min",
+#   cont_binned = "Binned",
+#   binning_method = "Equal width",
+#   num_bins = 5,
+#   transformation = "Standardized anomaly"
+# )
+# res3 <- get_weather(survey_data, sw3, dates, connection_params)
 
-# 4. Multiple variables, mixed settings
-sw4 <- data.frame(
-  name = c("tx", "t"),
-  ref_start = c(1, 0),
-  ref_end = c(7, 11),
-  temporalAgg = c("Mean", "Max"),
-  cont_binned = c("Continuous", "Binned"),
-  binning_method = c(NA_character_, "Equal frequency"),
-  num_bins = c(NA, 4),
-  transformation = c("None", "Deviation from mean")
-)
-res4 <- get_weather(survey_data, sw4, dates, connection_params)
+# # 4. Multiple variables, mixed settings
+# sw4 <- data.frame(
+#   name = c("tx", "t"),
+#   ref_start = c(1, 0),
+#   ref_end = c(7, 11),
+#   temporalAgg = c("Mean", "Max"),
+#   cont_binned = c("Continuous", "Binned"),
+#   binning_method = c(NA_character_, "Equal frequency"),
+#   num_bins = c(NA, 4),
+#   transformation = c("None", "Deviation from mean")
+# )
+# res4 <- get_weather(survey_data, sw4, dates, connection_params)
 
-# FOR SIMULATIONS - get weather data for survey locations across many weather years
-start_year <- 1990
-end_year <- 2024
+# # FOR SIMULATIONS - get weather data for survey locations across many weather years
+# start_year <- 1990
+# end_year <- 2024
 
-  # get dates for every year in range with month in survey data
-  dates_sim <- with(
-  expand.grid(
-    int_month = unique(survey_data$int_month),
-    int_year  = start_year:end_year
-  ),
-  as.Date(paste(int_year, int_month, "01", sep = "-"))
-)
+#   # get dates for every year in range with month in survey data
+#   dates_sim <- with(
+#   expand.grid(
+#     int_month = unique(survey_data$int_month),
+#     int_year  = start_year:end_year
+#   ),
+#   as.Date(paste(int_year, int_month, "01", sep = "-"))
+# )
 
-  # get weather for simulations in every year in range, using same settings as sw4
-  sim_weather <- get_weather(survey_data, sw4, dates_sim, connection_params) |>
-    dplyr::mutate(int_month=as.integer(format(timestamp, "%m")), # month for merging with survey data
-      sim_year = as.integer(format(timestamp, "%Y"))) |> # simulation weather year for reference
-    dplyr::select(-timestamp) # drop timestamp to avoid confusion with survey interview timestamps
-
-
+#   # get weather for simulations in every year in range, using same settings as sw4
+#
+#   sim_weather <- get_weather(survey_data, sw4, dates_sim, connection_params) |>
+#     dplyr::mutate(int_month=as.integer(format(timestamp, "%m")), # month for merging with survey data
+#       sim_year = as.integer(format(timestamp, "%Y"))) |> # simulation weather year for reference
+#     dplyr::select(-timestamp) # drop timestamp to avoid confusion with survey interview timestamps
