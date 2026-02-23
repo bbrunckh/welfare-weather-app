@@ -5,9 +5,7 @@
 #' @param id,input,output,session Internal parameters for {shiny}.
 #'
 #' @noRd
-#' @noRd
 #'
-#' @importFrom shiny NS tagList
 #' @importFrom shiny NS tagList
 mod_1_05_weatherstats_ui <- function(id) {
   ns <- NS(id)
@@ -19,7 +17,6 @@ mod_1_05_weatherstats_ui <- function(id) {
 
 #' 1_05_weatherstats Server Functions
 #'
-#' @noRd
 #' @noRd
 mod_1_05_weatherstats_server <- function(
     id,
@@ -34,27 +31,12 @@ mod_1_05_weatherstats_server <- function(
 ) {
   moduleServer(id, function(input, output, session) {
     ns <- session$ns
-    `%||%` <- function(a, b) if (!is.null(a)) a else b
-
-    # Helper: map raw weather varname -> haz_* column name
-    to_haz <- function(x) {
-      x <- trimws(as.character(x))
-      if (is.na(x) || !nzchar(x)) return(NA_character_)
-      if (startsWith(x, "haz_")) return(x)
-      paste0("haz_", x)
-    }
 
     if (is.null(tabset_session)) {
       tabset_session <- session$parent %||% session
     }
 
     weather_tab_added <- reactiveVal(FALSE)
-
-
-    has_w2 <- reactive({
-      sw <- selected_weather()
-      is.data.frame(sw) && nrow(sw) >= 2 && !is.na(sw$name[2]) && nzchar(as.character(sw$name[2]))
-    })
 
     output$weather_stats_button_ui <- renderUI({
       req(selected_weather())
@@ -290,6 +272,5 @@ mod_1_05_weatherstats_server <- function(
     list(
       survey_weather = survey_weather
     )
-  })
   })
 }
