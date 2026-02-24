@@ -103,10 +103,8 @@ mod_1_03_outcome_server <- function(id, variable_list, survey_data) {
       info <- selected_outcome_info()
       if (nrow(info) == 0) return(NULL)
 
-      # Show poverty line for monetary welfare outcomes (welfare or poor) so Step 2 can use it.
-      name_match  <- any(info$name %in% c("welfare", "poor"))
-      units_match <- any(info$units == "LCU", na.rm = TRUE)
-      if (!(name_match || units_match)) return(NULL)
+      # Show poverty line for Poor outcomes so Step 2 can use it.
+      if (!(info$name == "poor")) return(NULL)
 
       current_currency <- input$currency
 
@@ -114,7 +112,7 @@ mod_1_03_outcome_server <- function(id, variable_list, survey_data) {
       default_line <- if (is.null(current_currency) || current_currency == "PPP") {
         3.00
       } else {
-        # Calculate 20th percentile of weighted welfare for LCU
+        # Calculate 20th percentile of weighted welfare for LCU default line
         tryCatch({
           df <- survey_data() |>
             dplyr::mutate(welfare_lcu = welfare*ppp2021)

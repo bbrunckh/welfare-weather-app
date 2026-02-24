@@ -12,7 +12,8 @@
 You can install the development version of `{wiseapp}` like so:
 
 ``` r
-# FILL THIS IN! HOW CAN PEOPLE INSTALL YOUR DEV PACKAGE?
+install.packages("pak")
+pak::pak("github::bbrunckh/welfare-weather-app")
 ```
 
 ## Run
