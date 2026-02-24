@@ -1,27 +1,22 @@
 #' Load, aggregate, and construct weather variables for survey locations
 #'
-#' Executes as much as possible lazily in DuckDB before collecting:
-#' 1. Loads weather and H3-to-location parquet files
-#' 2. Aggregates weather to survey locations (population-weighted mean)
-#' 3. Materialises the unperturbed rolled series (loc_weather_base) by
-#'    applying the rolling window to loc_monthly. This is the stable
-#'    reference used for climate_ref and bin cutoffs in all scenarios,
-#'    ensuring consistency with and without climate change arguments.
-#' 4. If a climate scenario is supplied: loads CMIP6 baseline (period
-#'    derived from dates) and future files, aggregates each H3 -> loc_id,
-#'    computes the delta at loc_id level, applies it to loc_monthly
-#'    (monthly observations, before rolling), then rolls and materialises
-#'    the perturbed series as loc_weather. The delta is applied before the
-#'    rolling window so that month-specific deltas are correctly propagated
-#'    across the window. Skipped entirely when ssp is NULL.
-#' 5. Applies transformation (deviation from mean / standardised anomaly)
-#'    using climate_ref always derived from loc_weather_base (unperturbed).
-#'    When binning is needed under a climate scenario, the same
-#'    transformation is applied to loc_base_t in the same loop pass.
-#' 6. Filters to interview dates only and collects
-#' 7. Computes binning cutoffs from the unperturbed (transformed) distribution
-#'    (loc_base_t, filtered to survey timestamps) then applies the same
-#'    breaks to the collected result — consistent across scenarios.
+#' 1. Loads weather and H3-to-location parquet files lazily in DuckDB.
+#' 2. Joins weather to H3 population weights and aggregates to loc_id
+#'    (population-weighted mean) to give loc_monthly.
+#' 3. Applies the rolling temporal window to loc_monthly and materialises
+#'    the result as loc_weather_base — the stable unperturbed reference used
+#'    for transformation climate_ref and bin cutoffs across all scenarios.
+#' 4. If ssp is supplied: loads CMIP6 historical and future parquet files,
+#'    aggregates each to loc_id level, computes the per-month delta, applies
+#'    it to loc_monthly (before rolling so month-specific deltas propagate
+#'    correctly across the window), then rolls and materialises the perturbed
+#'    series as loc_weather. Skipped entirely when ssp = NULL.
+#' 5. Applies deviation-from-mean or standardised-anomaly transformation
+#'    using climate_ref always derived from loc_weather_base (1991-2020).
+#' 6. Filters to the requested dates and collects to R.
+#' 7. Computes bin cutoffs from the unperturbed transformed distribution
+#'    restricted to survey interview timestamps (not simulation timestamps),
+#'    then applies the same breaks to the full collected result.
 #'
 #' @param survey_data       Data frame with columns: code, year, survname,
 #'   loc_id, timestamp. Used to derive file paths.
@@ -275,12 +270,6 @@ get_weather <- function(
   }
 
   # -- Transformation: deviation from mean / standardised anomaly ------------
-  # climate_ref is always computed from loc_weather_base (unperturbed rolled
-  # series), ensuring reference statistics are identical across scenarios.
-  # The transformation is applied to loc_weather (perturbed or not).
-  # When binning cutoffs need to be derived from the unperturbed distribution,
-  # the same transformation is applied to loc_base_t in the same loop pass,
-  # avoiding a second separate loop.
   skip_transform <- c("spi6", "spei6")
   needs_binning  <- any(!is.na(selected_weather$cont_binned) & selected_weather$cont_binned == "Binned")
 
@@ -305,48 +294,50 @@ get_weather <- function(
         .groups  = "drop"
       )
 
-    # Closure captures v, transformation, and climate_ref for this iteration
-    add_transform <- function(tbl) {
-      tbl |>
-        dplyr::mutate(month = dbplyr::sql("MONTH(timestamp)")) |>
-        dplyr::left_join(climate_ref, by = c("code", "year", "survname", "loc_id", "month")) |>
-        dplyr::mutate(
-          !!v := if (transformation == "Deviation from mean") {
-            dbplyr::sql(paste0(v, " - ref_mean"))
-          } else if (transformation == "Standardized anomaly") {
-            dbplyr::sql(paste0("(", v, " - ref_mean) / ref_sd"))
-          }
-        ) |>
-        dplyr::select(-month, -ref_mean, -ref_sd)
-    }
+    # Use local() to force v and transformation into the closure immediately,
+    # avoiding the classic R loop-variable capture bug.
+    add_transform <- local({
+      .v              <- v
+      .transformation <- transformation
+      .climate_ref    <- climate_ref
+      function(tbl) {
+        tbl |>
+          dplyr::mutate(month = dbplyr::sql("MONTH(timestamp)")) |>
+          dplyr::left_join(.climate_ref, by = c("code", "year", "survname", "loc_id", "month")) |>
+          dplyr::mutate(
+            !!.v := if (.transformation == "Deviation from mean") {
+              dbplyr::sql(paste0(.v, " - ref_mean"))
+            } else if (.transformation == "Standardized anomaly") {
+              dbplyr::sql(paste0("(", .v, " - ref_mean) / ref_sd"))
+            }
+          ) |>
+          dplyr::select(-month, -ref_mean, -ref_sd)
+      }
+    })
 
     loc_weather <- add_transform(loc_weather)
     if (climate_scenario && needs_binning) loc_base_t <- add_transform(loc_base_t)
   }
 
   # -- Filter to interview dates and collect ---------------------------------
-  # Filtering to dates serves double duty:
-  # (a) drops the climate reference period rows (1991-2020) loaded solely
-  #     for transformation statistics
-  # (b) drops any rows with NA window values where the rolling window could
-  #     not be filled (loc_id x timestamps before enough history existed)
   result <- loc_weather |>
     dplyr::filter(timestamp %in% dates) |>
     dplyr::collect()
 
-  # Collect unperturbed transformed values for bin cutoff computation.
-  # Filtered to actual survey timestamps so cutoffs reflect the survey-sample
-  # distribution, not the full simulation range.
-  survey_timestamps <- unique(survey_data$timestamp)
+  # Guard survey_timestamps against NAs; used for bin cutoff computation.
+  # Filtered to actual survey interview timestamps so cutoffs reflect the
+  # survey-sample distribution, not the full simulation range.
+  survey_timestamps <- unique(survey_data$timestamp[!is.na(survey_data$timestamp)])
 
   if (climate_scenario && needs_binning) {
+    # loc_base_t is already filtered to survey_timestamps here — no need to
+    # re-filter inside the binning loop below.
     base_for_bins <- loc_base_t |>
       dplyr::filter(timestamp %in% survey_timestamps) |>
       dplyr::collect()
   }
 
   # -- Cleanup temporary tables ----------------------------------------------
-  # Done after all DuckDB queries (including base_for_bins collect) are complete.
   con_cleanup <- dbplyr::remote_con(loc_weather_base)
   DBI::dbRemoveTable(con_cleanup, tmp_base_name)
   if (!is.null(tmp_name)) {
@@ -365,12 +356,17 @@ get_weather <- function(
 
     if (is.na(cont_binned) || cont_binned != "Binned") next
 
-    # Source for cutoff computation: unperturbed transformed values when a
-    # climate scenario is active; the result itself otherwise.
-    bin_source <- if (climate_scenario) base_for_bins else result
-    haz_vals   <- bin_source[[v]][
-      is.finite(bin_source[[v]]) & bin_source$timestamp %in% survey_timestamps
-    ]
+    # When a climate scenario is active: use unperturbed + transformed values
+    # (base_for_bins, already collected and filtered to survey_timestamps).
+    # Otherwise: filter result to survey_timestamps before computing cutoffs
+    # (important when result spans simulation years beyond the survey period).
+    bin_source <- if (climate_scenario) {
+      base_for_bins
+    } else {
+      result[result$timestamp %in% survey_timestamps, ]
+    }
+
+    haz_vals <- bin_source[[v]][is.finite(bin_source[[v]])]
 
     cutoffs <- switch(binning_method,
       "Equal frequency" = {
@@ -506,4 +502,4 @@ get_weather <- function(
 #       # simulation weather year for reference
 #       sim_year = as.integer(format(timestamp, "%Y"))) |> 
 #     # drop timestamp to avoid confusion with survey interview timestamps
-#     dplyr::select(-timestamp) 
+#     dplyr::select(-timestamp)
