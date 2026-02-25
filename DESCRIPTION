@@ -37,4 +37,6 @@ Imports:
     huxtable,
     interactions,
     jtools,
-    relaimpo
+    relaimpo,
+    parsnip,
+    duckdbfs
