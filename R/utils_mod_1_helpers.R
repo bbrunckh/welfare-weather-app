@@ -65,8 +65,8 @@ weighted_summary_long <- function(df, vars, group = "countryyear", weight = "wei
 				variable = v,
 				Mean = mu,
 				`Std. Dev.` = sdw,
-				Min = min(x),
-				Max = max(x),
+				Min = if (length(x) && any(is.finite(x))) min(x[is.finite(x)]) else NA_real_,
+        Max = if (length(x) && any(is.finite(x))) max(x[is.finite(x)]) else NA_real_,
 				N = sum(!is.na(x))
 			)
 		})

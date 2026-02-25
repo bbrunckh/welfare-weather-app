@@ -35,9 +35,31 @@ get_weather <- function(survey_data, selected_weather, dates, connection_params)
     dplyr::pull(fname)
 
   # -- Date range ------------------------------------------------------------
-  max_lag  <- max(selected_weather$ref_end, na.rm = TRUE)
-  date_min <- min(dates) - months(max_lag)
-  date_max <- max(dates)
+  if (is.null(selected_weather) || nrow(selected_weather) == 0) {
+    warning("[get_weather] selected_weather is empty or NULL.")
+    return(NULL)
+  }
+  if (is.null(dates) || length(dates) == 0) {
+    warning("[get_weather] dates is empty or NULL.")
+    return(NULL)
+  }
+  if (all(is.na(selected_weather$ref_end))) {
+    warning("[get_weather] All ref_end values are NA.")
+    return(NULL)
+  }
+  if (all(is.na(dates))) {
+    warning("[get_weather] All dates are NA.")
+    return(NULL)
+  }
+
+  tryCatch({
+    max_lag  <- max(selected_weather$ref_end, na.rm = TRUE)
+    date_min <- min(dates, na.rm = TRUE) - months(max_lag)
+    date_max <- max(dates, na.rm = TRUE)
+  }, error = function(e) {
+    warning("[get_weather] Error: ", e$message)
+    return(NULL)
+  })
 
   # Extend back to cover the 1991-2020 climate reference period (plus max lag)
   # if any variable requires a deviation-from-mean or standardised anomaly
