@@ -64,6 +64,7 @@ mod_0_overview_server <- function(id) {
 
     # ---- Per-type connection options UI -------------------------------------
 
+    
     output$connection_options_ui <- renderUI({
       req(input$connection_type)
 
@@ -128,66 +129,36 @@ mod_0_overview_server <- function(id) {
       )
     })
 
-    # ---- Collect connection parameters --------------------------------------
+    # ---- Collect connection parameters (delegates to fct_connection.R) ------
 
     connection_params <- reactive({
       req(input$connection_type)
-
-      switch(
-        input$connection_type,
-
-        "local" = list(
-          type = "local",
-          path = input$local_path %||% "/data"
-        ),
-
-        "s3" = list(
-          type   = "s3",
-          bucket = input$s3_bucket  %||% "",
-          prefix = input$s3_prefix  %||% "",
-          region = input$s3_region  %||% "us-east-1",
-          key_id = input$s3_key_id  %||% "",
-          secret = input$s3_secret  %||% ""
-        ),
-
-        "gcs" = list(
-          type    = "gcs",
-          bucket  = input$gcs_bucket  %||% "",
-          prefix  = input$gcs_prefix  %||% "",
-          keyfile = input$gcs_keyfile %||% ""
-        ),
-
-        "azure" = list(
-          type      = "azure",
-          account   = input$azure_account   %||% "",
-          container = input$azure_container %||% "",
-          prefix    = input$azure_prefix    %||% "",
-          key       = input$azure_key       %||% ""
-        ),
-
-        "hf" = list(
-          type   = "hf",
-          repo   = input$hf_repo   %||% "",
-          subdir = input$hf_subdir %||% "",
-          token  = input$hf_token  %||% ""
-        )
+      build_connection_params(
+        type            = input$connection_type,
+        path            = input$local_path,
+        s3_bucket       = input$s3_bucket,
+        s3_prefix       = input$s3_prefix,
+        s3_region       = input$s3_region,
+        s3_key_id       = input$s3_key_id,
+        s3_secret       = input$s3_secret,
+        gcs_bucket      = input$gcs_bucket,
+        gcs_prefix      = input$gcs_prefix,
+        gcs_keyfile     = input$gcs_keyfile,
+        azure_account   = input$azure_account,
+        azure_container = input$azure_container,
+        azure_prefix    = input$azure_prefix,
+        azure_key       = input$azure_key,
+        hf_repo         = input$hf_repo,
+        hf_subdir       = input$hf_subdir,
+        hf_token        = input$hf_token
       )
     })
 
-    # ---- Validation ---------------------------------------------------------
+    # ---- Validation (delegates to fct_connection.R) -------------------------
 
     connection_valid <- reactive({
       req(connection_params())
-      p <- connection_params()
-      switch(
-        p$type,
-        "local" = nzchar(p$path),
-        "s3"    = nzchar(p$bucket),
-        "gcs"   = nzchar(p$bucket),
-        "azure" = nzchar(p$account) && nzchar(p$container),
-        "hf"    = nzchar(p$repo),
-        FALSE
-      )
+      validate_connection_params(connection_params())
     })
 
     output$connection_status_ui <- renderUI({
@@ -211,7 +182,7 @@ mod_0_overview_server <- function(id) {
     survey_list        <- reactiveVal(NULL)
     variable_list      <- reactiveVal(NULL)
     cpi_ppp            <- reactiveVal(NULL)
-    pov_lines           <- reactiveVal(NULL)
+    pov_lines          <- reactiveVal(NULL)
 
     observeEvent(input$apply_connection, {
 
@@ -226,12 +197,12 @@ mod_0_overview_server <- function(id) {
       params <- connection_params()
 
       if (identical(params$type, "local")) {
-        p <- trimws(params$path %||% "")
-        if (!nzchar(p)) {
-          showNotification("Please enter a folder path.", type = "warning", duration = 4)
+        tryCatch({
+          params$path <- normalise_local_path(params$path)
+        }, error = function(e) {
+          showNotification("Please enter a valid folder path.", type = "warning", duration = 4)
           return()
-        }
-        params$path <- normalizePath(path.expand(p), winslash = "/", mustWork = FALSE)
+        })
         message("[overview] applied local folder: ", params$path)
       } else {
         message("[overview] applied connection: ", params$type)
@@ -240,12 +211,10 @@ mod_0_overview_server <- function(id) {
       applied_connection(params)
 
       # ---- Load metadata files ----------------------------------------------
-       # Pass bare filenames — load_data() resolves them against connection_params
 
       load_notif <- showNotification("Loading metadata files...", duration = NULL, type = "message")
       on.exit(removeNotification(load_notif), add = TRUE)
 
-      # survey_list.csv
       tryCatch({
         survey_list(load_data("survey_list.csv", params, collect = TRUE))
         showNotification(paste0("Survey list loaded (", nrow(survey_list()), " rows)"), type = "message", duration = 2)
@@ -253,7 +222,6 @@ mod_0_overview_server <- function(id) {
         showNotification("Failed to load survey_list.csv", type = "error", duration = 5)
       })
 
-      # variable_list.csv
       tryCatch({
         variable_list(load_data("variable_list.csv", params, collect = TRUE))
         showNotification(paste0("Variable list loaded (", nrow(variable_list()), " rows)"), type = "message", duration = 2)
@@ -261,7 +229,6 @@ mod_0_overview_server <- function(id) {
         showNotification("Failed to load variable_list.csv", type = "error", duration = 5)
       })
 
-      # cpi_ppp.csv
       tryCatch({
         cpi_ppp(load_data("cpi_ppp.csv", params, collect = TRUE))
         showNotification("CPI / PPP conversions loaded", type = "message", duration = 2)
@@ -271,11 +238,9 @@ mod_0_overview_server <- function(id) {
 
       showNotification(paste0("Connected to ", input$connection_type, " data source."), type = "message", duration = 3)
 
-      # poverty lines
-      pov_lines(
-        data.frame(ppp_year = c(rep(2021,3)),ln = c(3.00,4.20,8.30),stringsAsFactors = FALSE)
-      )
-      
+      # poverty lines (delegates to fct_connection.R)
+      pov_lines(default_poverty_lines())
+
     }, ignoreInit = TRUE)
 
     # ---- Diagnostic outputs -------------------------------------------------

@@ -1,22 +1,19 @@
 #' Load, aggregate, and construct weather variables for survey locations
 #'
 #' 1. Loads weather and H3-to-location parquet files lazily in DuckDB.
-#' 2. Joins weather to H3 population weights and aggregates to loc_id
-#'    (population-weighted mean) to give loc_monthly.
-#' 3. Applies the rolling temporal window to loc_monthly and materialises
-#'    the result as loc_weather_base — the stable unperturbed reference used
-#'    for transformation climate_ref and bin cutoffs across all scenarios.
+#' 2. Spatially aggregates weather to loc_id (population-weighted mean) 
+#' 3. Temporally aggregates to reference period, stores the stable 
+#'    unperturbed reference climate for transformation and bin cutoffs.
 #' 4. If ssp is supplied: loads CMIP6 historical and future parquet files,
 #'    aggregates each to loc_id level, computes the per-month delta, applies
-#'    it to loc_monthly (before rolling so month-specific deltas propagate
-#'    correctly across the window), then rolls and materialises the perturbed
-#'    series as loc_weather. Skipped entirely when ssp = NULL.
+#'    it to loc_id level weather (before temporal aggregation), applies
+#'    temporal aggregation to perturbed weather. Skipped when ssp = NULL.
 #' 5. Applies deviation-from-mean or standardised-anomaly transformation
-#'    using climate_ref always derived from loc_weather_base (1991-2020).
-#' 6. Filters to the requested dates and collects to R.
+#'    using climate reference period (1991-2020).
+#' 6. Filters to the requested dates and collects result
 #' 7. Computes bin cutoffs from the unperturbed transformed distribution
 #'    restricted to survey interview timestamps (not simulation timestamps),
-#'    then applies the same breaks to the full collected result.
+#'    then applies the same breaks to the result.
 #'
 #' @param survey_data       Data frame with columns: code, year, survname,
 #'   loc_id, timestamp. Used to derive file paths.
@@ -24,18 +21,16 @@
 #'   columns: name, ref_start, ref_end, temporalAgg, transformation,
 #'   cont_binned, num_bins, binning_method.
 #' @param dates             Date vector of unique survey timestamps (monthly).
-#'   Only these rows are retained after temporal aggregation. When a climate
-#'   scenario is active, the range of dates also defines the CMIP6 baseline
-#'   period (min(dates) to max(dates)).
+#'   Only these rows are retained after temporal aggregation.
 #' @param connection_params List passed to load_data().
 #' @param ssp               SSP scenario string: `"ssp2_4_5"`, `"ssp3_7_0"`,
-#'   or `"ssp5_8_5"`. NULL (default) skips climate perturbation entirely.
-#' @param future_period     Length-2 vector of dates for the future projection
-#'   period, e.g. c("2045-01-01", "2055-12-31"). Required when ssp != NULL.
+#'   or `"ssp5_8_5"`. `NULL` (default) skips climate perturbation entirely.
+#' @param future_period     Length-2 vector of dates for the projection
+#'   period, e.g. `c("2045-01-01", "2055-12-31")`. Required when `ssp != NULL`.
 #' @param perturbation_method Named character vector mapping each variable to
-#'   `"additive"` or `"multiplicative"`. Required when ssp != NULL.
+#'   `"additive"` or `"multiplicative"`. Required when `ssp != NULL`.
 #' @param epsilon           Guard constant for multiplicative delta denominators.
-#'   Default 0.001.
+#'   Default `0.001`.
 #'
 #' @return A collected data frame with columns loc_id, timestamp, and one
 #'   column per weather variable (numeric, or factor if binned).
@@ -210,8 +205,25 @@ get_weather <- function(
         )
     }
 
-    # Baseline period derived from dates (the observational period)
-    loc_hist <- cmip6_to_loc(hist_fnames,   min(dates), max(dates))
+    # Baseline period for CMIP6 delta computation is derived directly from
+    # `dates` (the simulation date grid passed by the caller). Both hist + SSP
+    # files are unioned before computing per-month means so no months are
+    # dropped when the window straddles the 2014/2015 file boundary.
+    bp             <- range(dates)
+    baseline_start <- as.Date(bp[1])
+    baseline_end   <- as.Date(bp[2])
+
+    loc_hist_raw <- cmip6_to_loc(hist_fnames,   baseline_start, baseline_end)
+    loc_ssp_raw  <- cmip6_to_loc(future_fnames, baseline_start, baseline_end)
+
+    # Union hist + ssp rows, then re-aggregate to one per-month mean per loc_id.
+    loc_hist <- dplyr::union_all(loc_hist_raw, loc_ssp_raw) |>
+      dplyr::group_by(code, year, survname, loc_id, month) |>
+      dplyr::summarise(
+        dplyr::across(dplyr::all_of(weather_vars), ~ mean(.x, na.rm = TRUE)),
+        .groups = "drop"
+      )
+
     loc_fut  <- cmip6_to_loc(future_fnames, future_start, future_end)
 
     # Compute delta at loc_id level lazily.
@@ -319,9 +331,12 @@ get_weather <- function(
     if (climate_scenario && needs_binning) loc_base_t <- add_transform(loc_base_t)
   }
 
-  # -- Filter to interview dates and collect ---------------------------------
+  # -- Collect and filter to requested dates ------------------------------------
+  # date_min was extended back by max_lag months to warm up rolling windows and
+  # may also extend back to 1991 for climate reference stats. Filter to exactly
+  # the requested `dates` so callers only receive rows they asked for.
   result <- loc_weather |>
-    dplyr::filter(timestamp %in% dates) |>
+    dplyr::filter(timestamp %in% !!dates) |>
     dplyr::collect()
 
   # Guard survey_timestamps against NAs; used for bin cutoff computation.

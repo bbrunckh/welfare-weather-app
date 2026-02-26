@@ -1,5 +1,16 @@
-#DRK Version 20260218 0849
-
+#' 3_scenario UI Function
+#'
+#' @description A shiny Module. Provides the Step 3 "What if?" scenario
+#'   explorer, allowing users to compare historical and future simulation
+#'   baselines against alternative policy scenarios.
+#'
+#' @param id,input,output,session Internal parameters for {shiny}.
+#'
+#' @noRd
+#'
+#' @importFrom shiny NS tagList
+#' @importFrom bsplus bs_accordion bs_append
+#' @importFrom waiter autoWaiter spin_2 transparent
 mod_3_scenario_ui <- function(id) {
   ns <- NS(id)
 
@@ -11,14 +22,13 @@ mod_3_scenario_ui <- function(id) {
       sidebarPanel(
         bsplus::bs_accordion(id = ns("accordion")) |>
           bsplus::bs_append(
-            title = "Policy scenario",
+            title   = "Policy scenario",
             content = tagList(
               p("Configure your policy scenario parameters here.")
-              # Add your scenario configuration inputs
             )
           ) |>
           bsplus::bs_append(
-            title = "Run scenario",
+            title   = "Run scenario",
             content = tagList(
               p("Run scenario analysis.")
             )
@@ -32,16 +42,13 @@ mod_3_scenario_ui <- function(id) {
           tabPanel(
             title = "Results",
             value = "results",
-            
-h4("Scenario results"),
-
-bslib::card(
-  bslib::card_header("Baseline run (Step 2)"),
-  verbatimTextOutput(ns("baseline_summary"))
-),
-
-tags$hr(),
-p("Scenario comparison results will be displayed here.")
+            h4("Scenario results"),
+            bslib::card(
+              bslib::card_header("Historical simulation baseline (Step 2)"),
+              verbatimTextOutput(ns("baseline_summary"))
+            ),
+            tags$hr(),
+            p("Scenario comparison results will be displayed here.")
           ),
 
           tabPanel(
@@ -56,66 +63,81 @@ p("Scenario comparison results will be displayed here.")
   )
 }
 
-
-mod_3_scenario_server <- function(id, step1, step2 = NULL, pov_lines, varlist) {
+#' 3_scenario Server Functions
+#'
+#' Displays Step 2 simulation baselines and (in future) scenario comparison
+#' results. Consumes the flat API returned by `mod_2_simulation_server()`.
+#'
+#' @param id               Module id.
+#' @param connection_params Reactive named list from `mod_0_overview_server()`.
+#' @param selected_outcome Reactive one-row data frame of selected outcome
+#'   from `mod_1_modelling_server()`.
+#' @param selected_weather Reactive data frame of selected weather variables
+#'   from `mod_1_modelling_server()`.
+#' @param survey_weather   Reactive data frame of merged survey-weather data
+#'   from `mod_1_modelling_server()`.
+#' @param model_fit        Reactive list of fitted model objects from
+#'   `mod_1_modelling_server()`.
+#' @param hist_sim         Reactive returning the historical simulation raw
+#'   predictions list from `mod_2_simulation_server()`.
+#' @param fut_sim          Reactive returning the future simulation raw
+#'   predictions list from `mod_2_simulation_server()`. May be `NULL` if the
+#'   future simulation has not yet been run.
+#'
+#' @noRd
+mod_3_scenario_server <- function(id,
+                                   connection_params,
+                                   selected_outcome,
+                                   selected_weather,
+                                   survey_weather,
+                                   model_fit,
+                                   hist_sim,
+                                   fut_sim = NULL) {
   moduleServer(id, function(input, output, session) {
 
-    # Namespace helper for server-side UI generation
     ns <- session$ns
 
+    # ---- Baseline summary --------------------------------------------------
+    # Display a concise summary of whatever Step 2 simulations have been run.
 
-`%||%` <- function(a, b) if (!is.null(a)) a else b
+    output$baseline_summary <- renderText({
+      hist <- tryCatch(hist_sim(), error = function(e) NULL)
+      fut  <- if (!is.null(fut_sim)) tryCatch(fut_sim(), error = function(e) NULL) else NULL
 
-baseline_run <- reactive({
-  if (is.null(step2) || !is.list(step2) || is.null(step2$run)) return(NULL)
-  tryCatch(step2$run(), error = function(e) NULL)
-})
+      if (is.null(hist) && is.null(fut)) {
+        return(
+          "No Step 2 simulations available yet.\n\nRun a historical or future simulation in Step 2 first."
+        )
+      }
 
-output$baseline_summary <- renderText({
-  r <- baseline_run()
-  if (is.null(r)) {
-    return("No baseline Step 2 run available yet.\n\nRun a historical simulation in Step 2 first, then return here.")
-  }
+      so   <- tryCatch(selected_outcome(), error = function(e) NULL)
+      sw   <- tryCatch(selected_weather(),  error = function(e) NULL)
 
-  meta <- r$meta %||% list()
-  out <- character()
+      out <- character()
 
-  if (!is.null(meta$step1_spec_summary) && nzchar(meta$step1_spec_summary)) {
-    out <- c(out, paste0("Spec: ", meta$step1_spec_summary))
-  }
-  if (!is.null(meta$povline_label) && nzchar(meta$povline_label)) {
-    out <- c(out, paste0("Poverty line: ", meta$povline_label))
-  } else if (!is.null(meta$step1_spec) && is.list(meta$step1_spec)) {
-    # fallback: attempt to read povline from spec
-    so <- meta$step1_spec$outcome
-    if (!is.null(so) && "povline" %in% names(so)) {
-      pv <- suppressWarnings(as.numeric(so$povline[[1]]))
-      if (is.finite(pv)) out <- c(out, paste0("Poverty line: ", pv))
-    }
-  }
+      if (!is.null(so)) {
+        out <- c(out, paste0("Outcome:  ", so$name))
+        if (!is.null(so$type)) out <- c(out, paste0("Type:     ", so$type))
+      }
 
-  if (!is.null(meta$board_path) && nzchar(meta$board_path)) {
-    out <- c(out, paste0("Board: ", meta$board_path))
-  }
+      if (!is.null(sw) && nrow(sw) > 0) {
+        out <- c(out, paste0("Weather:  ", paste(sw$variable, collapse = ", ")))
+      }
 
-  sc <- meta$scenario_spec
-  if (!is.null(sc) && is.list(sc) && !is.null(sc$id) && nzchar(sc$id)) {
-    out <- c(out, paste0("Scenario ID: ", sc$id))
-  }
+      if (!is.null(hist)) {
+        n_hist <- if (is.data.frame(hist$preds)) nrow(hist$preds) else NA_integer_
+        out <- c(out, paste0("Hist sim: ", if (!is.na(n_hist)) paste0(n_hist, " predictions") else "available"))
+      }
 
-  pe <- r$phase_e
-  if (!is.null(pe) && isTRUE(pe$ok) && !is.null(pe$last_run)) {
-    out <- c(out, paste0("Last run: ", as.character(pe$last_run)))
-  }
+      if (!is.null(fut)) {
+        n_fut <- if (is.data.frame(fut$preds)) nrow(fut$preds) else NA_integer_
+        out <- c(out, paste0("Fut sim:  ", if (!is.na(n_fut)) paste0(n_fut, " predictions") else "available"))
+      }
 
-  if (!length(out)) out <- c("Baseline run is available, but metadata is missing.")
+      paste(out, collapse = "\n")
+    })
 
-  paste(out, collapse = "\n")
-})
-
-    # Return API for downstream use
-    list(
-      # Add your return values here
-    )
+    # ---- Return API --------------------------------------------------------
+    list()
   })
 }

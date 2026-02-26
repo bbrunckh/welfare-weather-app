@@ -22,18 +22,28 @@ app_server <- function(input, output, session) {
     pov_lines         = overview_api$pov_lines
   )
 
-  # ---- Step 2: simulation (placeholder) ------------------------------------
+  # ---- Step 2: simulation --------------------------------------------------
+  # Pass selected Step 1 reactives
 
-  mod_2_simulation_server(
-    id    = "step2",
-    step1 = step1_api
+  step2_api <- mod_2_simulation_server(
+    id                = "step2",
+    connection_params = overview_api$connection_params,
+    selected_outcome  = step1_api$selected_outcome,
+    selected_weather  = step1_api$selected_weather,
+    survey_weather    = step1_api$survey_weather,
+    model_fit         = step1_api$model_fit
   )
 
-  # ---- Step 3: scenario (placeholder) --------------------------------------
-
+  # ---- Step 3: policy scenarios --------------------------------------------
+  # Pass selected Step 1 & 2 reactives
   mod_3_scenario_server(
-    id    = "step3",
-    step1 = step1_api
+    id                = "step3",
+    connection_params = overview_api$connection_params,
+    selected_outcome  = step1_api$selected_outcome,
+    selected_weather  = step1_api$selected_weather,
+    survey_weather    = step1_api$survey_weather,
+    model_fit         = step1_api$model_fit,
+    hist_sim          = step2_api$hist_sim,
+    fut_sim           = step2_api$fut_sim
   )
-  #)
 }

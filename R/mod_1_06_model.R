@@ -4,7 +4,7 @@
 #'
 #' @param id,input,output,session Internal parameters for {shiny}.
 #'
-#' @noRd 
+#' @noRd
 #'
 #' @importFrom shiny NS tagList 
 #' @importFrom glmnet cv.glmnet glmnet
@@ -26,62 +26,45 @@ mod_1_06_model_ui <- function(id) {
 
 #' 1_06_model Server Functions
 #'
-#' @noRd 
-mod_1_06_model_server <- function(
-    id,
-    variable_list,
-    selected_surveys,
-    selected_outcome,
-    selected_weather,
-    survey_weather
-){
-  moduleServer(id, function(input, output, session){
+#' @param id               Module id.
+#' @param variable_list    Reactive data frame of variable metadata.
+#' @param selected_surveys Reactive data frame of selected surveys.
+#' @param selected_outcome Reactive data frame row for the selected outcome.
+#' @param selected_weather Reactive data frame of selected weather specs.
+#' @param survey_weather   Reactive data frame of merged survey + weather data.
+#'
+#' @noRd
+mod_1_06_model_server <- function(id,
+                                   variable_list,
+                                   selected_surveys,
+                                   selected_outcome,
+                                   selected_weather,
+                                   survey_weather) {
+  moduleServer(id, function(input, output, session) {
     ns <- session$ns
 
-    # --- Helper: filter variable_list to valid vars present in survey_weather --------
-    # "valid" = present in df AND at least 50% non-missing
-    valid_variable_list <- reactive({
+    # ---- Valid variable list (present + >= 50 % non-missing) ----------------
+
+    valid_vl <- reactive({
       req(survey_weather(), variable_list())
-      df <- survey_weather()
-      vl <- variable_list()
-      valid_vars <- names(df)[colMeans(!is.na(df)) >= 0.5]
-      vl[vl$name %in% valid_vars, , drop = FALSE]
+      filter_valid_vars(survey_weather(), variable_list())
     })
 
-    # Subsets by variable role, built once and reused throughout
-    fe_variable_list <- reactive({
-      vl <- valid_variable_list()
-      vl[vl$fe == 1, , drop = FALSE]
-    })
+    # ---- Role-filtered variable lists ---------------------------------------
 
-    interaction_variable_list <- reactive({
-      vl <- valid_variable_list()
-      # Keep only variables flagged for interaction that are NOT numeric,
-      # to avoid overfitting (numeric interaction vars would need binning first)
-      vl[vl$interact == 1 & vl$type != "numeric", , drop = FALSE]
-    })
+    fe_vars      <- reactive(filter_vars_by_role(valid_vl(), "fe"))
+    hh_vars      <- reactive(filter_vars_by_role(valid_vl(), "hh"))
+    ind_vars     <- reactive(filter_vars_by_role(valid_vl(), "ind"))
+    area_vars    <- reactive(filter_vars_by_role(valid_vl(), "area"))
+    firm_vars    <- reactive(filter_vars_by_role(valid_vl(), "firm"))
 
-    hh_variable_list <- reactive({
-      vl <- valid_variable_list()
-      vl[vl$hh == 1, , drop = FALSE]
-    })
+    # Interaction vars: flagged for interaction AND not numeric (avoids
+    # overfitting — numeric vars should be binned first)
+    interact_vars <- reactive(
+      filter_vars_by_role(valid_vl(), "interact", extra_filter = list(type = "numeric"))
+    )
 
-    area_variable_list <- reactive({
-      vl <- valid_variable_list()
-      vl[vl$area == 1, , drop = FALSE]
-    })
-
-    ind_variable_list <- reactive({
-      vl <- valid_variable_list()
-      vl[vl$ind == 1, , drop = FALSE]
-    })
-
-    firm_variable_list <- reactive({
-      vl <- valid_variable_list()
-      vl[vl$firm == 1, , drop = FALSE]
-    })
-
-    # --- Display selected outcome and weather for reference -------------------
+    # ---- Summary display ----------------------------------------------------
 
     output$selected_outcome <- renderUI({
       req(selected_outcome())
@@ -90,21 +73,21 @@ mod_1_06_model_server <- function(
 
     output$selected_weather <- renderUI({
       req(selected_weather())
-      shiny::p(paste0("Selected weather: ",
-        paste(selected_weather()$label, collapse = ", ")))
+      shiny::p(paste0(
+        "Selected weather: ",
+        paste(selected_weather()$label, collapse = ", ")
+      ))
     })
 
-    # --- Model type selector --------------------------------------------------
+    # ---- Model type selector ------------------------------------------------
 
     output$model_selector_ui <- renderUI({
-
       if (is.null(selected_outcome()) || !length(selected_outcome())) {
         return(shiny::helpText(
           "Select an outcome variable to choose model type.",
           style = "color: red; font-size: 12px;"
         ))
       }
-
       if (is.null(survey_weather()) || !nrow(as.data.frame(survey_weather()))) {
         return(shiny::helpText(
           "Load survey and weather data to select model type.",
@@ -112,110 +95,82 @@ mod_1_06_model_server <- function(
         ))
       }
 
-      type <- selected_outcome()$type
-      if (type == "logical") {
-        model_choices <- c("Logistic regression", "Linear regression")
-        label_text    <- "Classification model:"
-      } else {
-        model_choices <- c("Linear regression")
-        label_text    <- "Regression model:"
-      }
-
+      mc <- model_type_choices(selected_outcome()$type)
       shiny::radioButtons(
         inputId  = ns("model_type"),
-        label    = label_text,
-        choices  = model_choices
+        label    = mc$label,
+        choices  = mc$choices
       )
     })
 
-    # --- Model parameters toggle button --------------------------------------
+    # ---- Model parameters toggle --------------------------------------------
 
     model_specs_open <- reactiveVal(FALSE)
 
     output$model_specs_button_ui <- renderUI({
       req(input$model_type)
-      shiny::actionButton(ns("model_specs"), "Model parameters", style = "margin-bottom:12px;")
+      shiny::actionButton(ns("model_specs"), "Model parameters",
+                          style = "margin-bottom:12px;")
     })
 
     observeEvent(input$model_specs, {
       model_specs_open(!isTRUE(model_specs_open()))
     })
 
-    # --- Model specification panel -------------------------------------------
+    # ---- Model specification panel ------------------------------------------
 
     output$model_specs_ui <- renderUI({
       req(input$model_type)
-
       if (!isTRUE(model_specs_open())) return(NULL)
 
-      if (input$model_type %in% c("Logistic regression", "Linear regression")) {
+      ixn <- interact_vars()
+      fe  <- fe_vars()
 
-        interactions <- interaction_variable_list()
-        fe           <- fe_variable_list()
+      shiny::withMathJax(tagList(
 
-        shiny::withMathJax(
-          tagList(
-
-            # Interaction variable with weather hazard
-            # Only render if there are valid interaction variables available
-            if (nrow(interactions) > 0) {
-              shiny::selectizeInput(
-                ns("interactions"),
-                label    = "Interactions with \\(Haz_{kt}\\):",
-                choices  = setNames(interactions$name, interactions$label),
-                selected = if ("urban" %in% interactions$name) "urban" else NULL,
-                multiple = TRUE,
-                options  = list(
-                  maxItems    = 1,
-                  placeholder = "Select interaction variable"
-                )
-              )
-            } else {
-              shiny::helpText("No interaction variables available.", style = "color: grey; font-size: 12px;")
-            },
-
-            # Fixed effects
-            # Only render if there are valid fixed effect variables available
-            if (nrow(fe) > 0) {
-              shiny::selectizeInput(
-                ns("fixedeffects"),
-                label    = "Fixed effects:",
-                choices  = setNames(fe$name, fe$label),
-                selected = intersect(c("year", "gaul1_code"), fe$name),
-                multiple = TRUE,
-                options  = list(placeholder = "Select (several) fixed effects")
-              )
-            } else {
-              shiny::helpText("No fixed effect variables available.", style = "color: grey; font-size: 12px;")
-            },
-
-            # Covariate selection method
-            shiny::radioButtons(
-              ns("covariates"),
-              "Covariate selection:",
-              choices  = c("User-defined", "Lasso"),
-              selected = "User-defined"
-            ),
-            hr(),
-            uiOutput(ns("covariate_inputs"))
+        # Interaction with weather hazard
+        if (nrow(ixn) > 0) {
+          shiny::selectizeInput(
+            ns("interactions"),
+            label    = "Interactions with \\(Haz_{kt}\\):",
+            choices  = setNames(ixn$name, ixn$label),
+            selected = if ("urban" %in% ixn$name) "urban" else NULL,
+            multiple = TRUE,
+            options  = list(maxItems = 1, placeholder = "Select interaction variable")
           )
-        )
-      }
+        } else {
+          shiny::helpText("No interaction variables available.",
+                          style = "color: grey; font-size: 12px;")
+        },
+
+        # Fixed effects
+        if (nrow(fe) > 0) {
+          shiny::selectizeInput(
+            ns("fixedeffects"),
+            label    = "Fixed effects:",
+            choices  = setNames(fe$name, fe$label),
+            selected = intersect(c("year", "gaul1_code"), fe$name),
+            multiple = TRUE,
+            options  = list(placeholder = "Select (several) fixed effects")
+          )
+        } else {
+          shiny::helpText("No fixed effect variables available.",
+                          style = "color: grey; font-size: 12px;")
+        },
+
+        # Covariate selection method
+        shiny::radioButtons(
+          ns("covariates"),
+          "Covariate selection:",
+          choices  = c("User-defined", "Lasso"),
+          selected = "User-defined"
+        ),
+        hr(),
+        uiOutput(ns("covariate_inputs"))
+      ))
     })
 
-    # --- Covariate inputs (user-defined or Lasso) ----------------------------
-
-    # Helper: remove variables already used as outcome, weather, interaction,
-    # or fixed effect from a candidate variable_list data frame
-    exclude_already_selected <- function(candidate_vl) {
-      exclude <- c(
-        selected_outcome()$name,
-        selected_weather()$name,
-        input$interactions,
-        input$fixedeffects
-      )
-      candidate_vl[!candidate_vl$name %in% exclude, , drop = FALSE]
-    }
+    # ---- Covariate inputs ---------------------------------------------------
 
     output$covariate_inputs <- renderUI({
       req(input$covariates)
@@ -223,10 +178,10 @@ mod_1_06_model_server <- function(
       # --- USER-DEFINED COVARIATES ---------------------------------------------------------
       if (input$covariates == "User-defined") {
 
-        ind  <- exclude_already_selected(ind_variable_list())
-        hh   <- exclude_already_selected(hh_variable_list())
-        firm <- exclude_already_selected(firm_variable_list())
-        area <- exclude_already_selected(area_variable_list())
+        ind  <- exclude_selected_vars(ind_vars(),  outcome_name = selected_outcome()$name, weather_names = selected_weather()$name, interactions = input$interactions, fixedeffects = input$fixedeffects)
+        hh   <- exclude_selected_vars(hh_vars(),   outcome_name = selected_outcome()$name, weather_names = selected_weather()$name, interactions = input$interactions, fixedeffects = input$fixedeffects)
+        firm <- exclude_selected_vars(firm_vars(),  outcome_name = selected_outcome()$name, weather_names = selected_weather()$name, interactions = input$interactions, fixedeffects = input$fixedeffects)
+        area <- exclude_selected_vars(area_vars(),  outcome_name = selected_outcome()$name, weather_names = selected_weather()$name, interactions = input$interactions, fixedeffects = input$fixedeffects)
 
         shiny::withMathJax(
           tagList(
@@ -465,7 +420,7 @@ mod_1_06_model_server <- function(
         # To be conservative we exclude the literal core_terms and the outcome.
         exclude <- unique(c(outcome_var, core_terms))
 
-        vl <- valid_variable_list()
+        vl <- valid_vl()
         if (is.null(vl) || nrow(vl) == 0) {
           stop("Variable list not available or empty.")
         }
@@ -485,7 +440,7 @@ mod_1_06_model_server <- function(
 
         incProgress(0.2, detail = "Defining multiple imputation strategy")
 
-        # -------------------------------------------------
+        # ------------------------------------------------
         # 4) MULTIPLE IMPUTATION (robust)
         # -------------------------------------------------
         m <- max(1, as.integer(m_val))
@@ -702,50 +657,47 @@ mod_1_06_model_server <- function(
       }
     })
 
-    # --- Collect and return selected model spec --------------------------------
+    # ---- Return API ---------------------------------------------------------
 
     selected_model <- reactive({
 
-      if (input$covariates == "User-defined") {
+      req(input$model_type, input$covariates)
 
-        return(list(
-          type                = input$model_type,
-          interactions        = input$interactions,
-          fixedeffects        = input$fixedeffects,
-          covariate_selection = input$covariates,
-          hh_covariates       = input$hhcov,
-          area_covariates     = input$areacov,
-          ind_covariates      = input$indcov,
-          firm_covariates     = input$firmcov
-        ))
-
-      } else if (input$covariates == "Lasso") {
-
+      # Resolve covariates by role — differs only for Lasso
+      covs <- if (input$covariates == "Lasso") {
         selected <- lasso_result()$selected_covariates
-        vl <- valid_variable_list()
-
-        # Match selected variables back to roles
-        hh_selected   <- vl$name[vl$hh == 1   & vl$name %in% selected]
-        area_selected <- vl$name[vl$area == 1 & vl$name %in% selected]
-        ind_selected  <- vl$name[vl$ind == 1  & vl$name %in% selected]
-        firm_selected <- vl$name[vl$firm == 1 & vl$name %in% selected]
-
-        return(list(
-          type                = input$model_type,
-          interactions        = input$interactions,
-          fixedeffects        = input$fixedeffects,
-          covariate_selection = input$covariates,
-          hh_covariates       = hh_selected,
-          area_covariates     = area_selected,
-          ind_covariates      = ind_selected,
-          firm_covariates     = firm_selected
-        ))
+        vl       <- valid_vl()
+        list(
+          hh   = vl$name[vl$hh   == 1 & vl$name %in% selected],
+          area = vl$name[vl$area  == 1 & vl$name %in% selected],
+          ind  = vl$name[vl$ind   == 1 & vl$name %in% selected],
+          firm = vl$name[vl$firm  == 1 & vl$name %in% selected]
+        )
+      } else {
+        list(hh = input$hhcov, area = input$areacov,
+             ind = input$indcov, firm = input$firmcov)
       }
+
+      build_selected_model(
+        model_type          = input$model_type,
+        interactions        = input$interactions,
+        fixedeffects        = input$fixedeffects,
+        covariate_selection = input$covariates,
+        hh_covariates       = covs$hh,
+        area_covariates     = covs$area,
+        ind_covariates      = covs$ind,
+        firm_covariates     = covs$firm,
+        lasso_alpha         = input$lasso_alpha,
+        lasso_lambda        = input$lasso_interactions,
+        lasso_nfolds        = input$lasso_nfolds,
+        lasso_standardize   = isTRUE(input$lasso_standardize == "Standardize"),
+        mi_m                = input$mi_m,
+        mi_maxit            = input$mi_maxit,
+        stability_threshold = input$stability_threshold
+      )
 
     })
 
-    list(
-      selected_model = selected_model
-    )
+    list(selected_model = selected_model)
   })
 }

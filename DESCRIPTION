@@ -33,6 +33,8 @@ Imports:
     bsplus,
     magrittr,
     broom,
+    fixest,
+    parsnip,
     htmltools,
     huxtable,
     interactions,

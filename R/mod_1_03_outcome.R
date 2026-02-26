@@ -4,9 +4,9 @@
 #'
 #' @param id,input,output,session Internal parameters for {shiny}.
 #'
-#' @noRd 
+#' @noRd
 #'
-#' @importFrom shiny NS tagList 
+#' @importFrom shiny NS tagList
 mod_1_03_outcome_ui <- function(id) {
   ns <- NS(id)
   tagList(
@@ -18,221 +18,114 @@ mod_1_03_outcome_ui <- function(id) {
     )
   )
 }
-    
+
 #' 1_03_outcome Server Functions
 #'
-#' @noRd 
+#' @param id Module id.
+#' @param variable_list Reactive data frame — variable metadata from
+#'   `mod_0_overview`.
+#' @param survey_data Reactive data frame — loaded survey data from
+#'   `mod_1_02_surveystats`.
+#'
+#' @noRd
 mod_1_03_outcome_server <- function(id, variable_list, survey_data) {
-  moduleServer(id, function(input, output, session){
+  moduleServer(id, function(input, output, session) {
     ns <- session$ns
 
-    # --------- Available outcome variables in data -----------
+    # ---- Available outcome variables present in the survey data -------------
+
     available_outcomes <- reactive({
       req(variable_list(), survey_data())
-
-      # Filter variable_list for outcomes that are present in survey data
-      outs <- variable_list() |>
-        dplyr::filter(outcome == 1 & name %in% colnames(survey_data())) |>
-        dplyr::select(name, label, units, type)
-        
-      # if any name is "welfare", add new row with name "poor", label "Poor", and type "logical"
-      if (any(grepl("welfare", outs$name))) {
-        outs <- dplyr::bind_rows(outs, 
-          data.frame(
-            name = "poor", 
-            label = "Poor (welfare < poverty line)",
-            units = "",
-            type = "logical",
-            stringsAsFactors = FALSE)
-        )
-      }
-      # order welfare/poor first if they exist, then by label
-      outs <- outs |>
-        dplyr::arrange(factor(name, levels = c("welfare", "poor", setdiff(name, c("welfare", "poor")))))
-      outs
+      filter_outcome_vars(variable_list(), colnames(survey_data()))
     })
 
-    # --------- Outcome selector UI -----------
+    # ---- Outcome selector UI ------------------------------------------------
+
     output$outcome_ui <- renderUI({
       req(available_outcomes())
-      
       outs <- available_outcomes()
-      
       selectizeInput(
-        inputId = ns("outcome"),
-        label = "Outcome variable",
-        choices = setNames(outs$name, outs$label),  
+        inputId  = ns("outcome"),
+        label    = "Outcome variable",
+        choices  = setNames(outs$name, outs$label),
         selected = outs$name[1],
         multiple = FALSE
       )
     })
 
-    # --------- Get selected outcome info  -----------
+    # ---- Selected outcome info (single row from available_outcomes) ---------
+
     selected_outcome_info <- reactive({
       req(input$outcome, available_outcomes())
-      
       outs <- available_outcomes()
-      info <- outs[outs$name == input$outcome, , drop = FALSE]
-      info
+      outs[outs$name == input$outcome, , drop = FALSE]
     })
 
-    # --------- Currency selector UI (for monetary outcomes) -----------
+    # ---- Currency selector (monetary outcomes only) -------------------------
+
     output$currency_ui <- renderUI({
       req(selected_outcome_info())
       info <- selected_outcome_info()
+      if (nrow(info) == 0) return(NULL)
 
-      name_match  <- any(info$name %in% c("welfare", "poor"))
-      units_match <- any(info$units == "LCU", na.rm = TRUE)
-
-      if (!(name_match || units_match)) return(NULL)
+      if (!is_monetary_outcome(info$name[1], info$units[1])) return(NULL)
 
       radioButtons(
-        inputId = ns("currency"),
-        label = "Currency",
-        choices = c(
-          "PPP (2021)" = "PPP",
-          "LCU (2021)" = "LCU"
-        ),
+        inputId  = ns("currency"),
+        label    = "Currency",
+        choices  = c("PPP (2021)" = "PPP", "LCU (2021)" = "LCU"),
         selected = "PPP"
       )
     })
 
-    # --------- Poverty line input (for monetary outcomes) ---------
+    # ---- Poverty line input (poor outcome only) -----------------------------
+
     output$poverty_line_ui <- renderUI({
       req(selected_outcome_info())
       info <- selected_outcome_info()
-      if (nrow(info) == 0) return(NULL)
+      if (nrow(info) == 0 || !identical(as.character(info$name[1]), "poor")) return(NULL)
 
-      # Show poverty line for Poor outcomes so Step 2 can use it.
-      if (!(info$name == "poor")) return(NULL)
-
-      current_currency <- input$currency
-
-      # Default poverty line based on currency
-      default_line <- if (is.null(current_currency) || current_currency == "PPP") {
+      currency <- input$currency
+      default_line <- if (is.null(currency) || identical(currency, "PPP")) {
         3.00
       } else {
-        # Calculate 20th percentile of weighted welfare for LCU default line
-        tryCatch({
-          df <- survey_data() |>
-            dplyr::mutate(welfare_lcu = welfare*ppp2021)
-          if ("welfare" %in% names(df)) {
-            if ("weight" %in% names(df)) {
-              p20 <- Hmisc::wtd.quantile(df$welfare_lcu, weights = df$weight, probs = 0.2, na.rm = TRUE)
-              round(as.numeric(p20), 2)
-            } else {
-              round(quantile(df$welfare, probs = 0.2, na.rm = TRUE), 2)
-            }
-          } else {
-            1.00
-          }
-        }, error = function(e) {
-          message("Error calculating LCU poverty line: ", e$message)
-          1.00
-        })
-      }
-
-      # Label based on currency
-      label_text <- if (is.null(current_currency) || current_currency == "PPP") {
-        "Poverty line ($/day, 2021 PPP)"
-      } else {
-        "Poverty line (LCU/day)"
+        default_lcu_poverty_line(survey_data())
       }
 
       numericInput(
         inputId = ns("poverty_line"),
-        label = label_text,
-        value = default_line,
-        min = 0,
-        step = 0.01
+        label   = poverty_line_label(currency),
+        value   = default_line,
+        min     = 0,
+        step    = 0.01
       )
     })
 
-    # --------- Informational message about outcome -----------
+    # ---- Informational message about selected outcome type ------------------
+
     output$outcome_info <- renderUI({
       req(selected_outcome_info())
       info <- selected_outcome_info()
       if (nrow(info) == 0) return(NULL)
-
-      messages <- tagList()
-
-      info_type <- tolower(as.character(info$type)[1])
-
-      if (info_type == "numeric") {
-        messages <- tagList(
-          messages,
-          tags$div(
-            style = "margin-top: 10px; padding: 8px; background-color: #d1ecf1; border: 1px solid #bee5eb; border-radius: 4px; color: #0c5460;",
-            "Continuous outcomes will be log-transformed."
-          )
-        )
-      }
-
-      if (info_type == "logical") {
-        messages <- tagList(
-          messages,
-          tags$div(
-            style = "margin-top: 10px; padding: 8px; background-color: #d4edda; border: 1px solid #c3e6cb; border-radius: 4px; color: #155724;",
-            "Binary outcome selected."
-          )
-        )
-      }
-
-      messages
+      outcome_info_message(info$type[1])
     })
 
-    # --------- Get selected outcome info  -----------
+    # ---- Augmented selected outcome row (with transform/units/povline) ------
+
     selected_outcome <- reactive({
       req(selected_outcome_info())
       info <- selected_outcome_info()
       if (nrow(info) == 0) return(info)
-
-      # work with first selected row and coerce to character to avoid factor comparisons
-      name  <- as.character(info$name[1])
-      units <- as.character(info$units[1])
-      type  <- as.character(info$type[1])
-
-      # transform: log for numeric, identity otherwise
-      if (identical(type, "numeric")) {
-        info$transform <- "log"
-      } else {
-        info$transform <- NA_character_
-      }
-
-      # Monetary outcomes: welfare/poor (PPP or LCU). We allow currency choice for welfare too.
-      is_poor <- identical(name, "poor")
-      is_welf <- identical(name, "welfare")
-      is_lcu  <- !is.na(units) && units == "LCU"
-      is_monetary <- is_poor || is_welf || is_lcu
-
-      if (is_monetary) {
-        # safe: input$currency may be NULL during init — fall back to existing units
-        info$units <- input$currency %||% units
-
-        # Poverty line is needed for Step 2 poverty calculations even when modeling continuous welfare.
-        # numericInput should provide a default, but during init input$poverty_line can be NULL.
-        pl_raw <- input$poverty_line
-        if (is.null(pl_raw)) {
-          cur0 <- input$currency %||% "PPP"
-          pl_raw <- if (identical(cur0, "PPP")) 3.00 else NA_real_
-        }
-        pl <- suppressWarnings(as.numeric(pl_raw))
-        if (is.finite(pl) && !is.na(pl) && pl > 0) {
-          info$povline <- pl
-        } else {
-          info$povline <- NA_real_
-        }
-      } else {
-        info$units <- units
-        info$povline <- NA_real_
-      }
-
-      info
+      build_selected_outcome(
+        info         = info,
+        currency     = input$currency,
+        poverty_line = input$poverty_line
+      )
     })
 
-    # Module return API
+    # ---- Module return API --------------------------------------------------
+
     list(
-      # Return selected outcome name, label, type, units, currency, and poverty line as a reactive
       selected_outcome = selected_outcome
     )
   })

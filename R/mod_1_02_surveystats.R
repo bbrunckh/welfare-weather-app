@@ -7,7 +7,7 @@
 #' @noRd
 #'
 #' @importFrom shiny NS tagList
-#' @importFrom ggplot2 ggplot aes geom_line geom_point geom_bar theme_minimal labs theme
+#' @importFrom ggplot2 ggplot aes geom_bar theme_minimal labs theme
 mod_1_02_surveystats_ui <- function(id) {
   ns <- NS(id)
   tagList(
@@ -16,6 +16,15 @@ mod_1_02_surveystats_ui <- function(id) {
 }
 
 #' 1_02_surveystats Server Functions
+#'
+#' @param id Module id.
+#' @param connection_params Reactive named list of connection parameters.
+#' @param variable_list Reactive data frame of variable metadata.
+#' @param selected_surveys Reactive data frame of selected surveys (from mod_1_01_sample).
+#' @param selected_outcome Optional reactive returning the selected outcome row.
+#' @param cpi_ppp Reactive data frame of CPI/PPP deflators.
+#' @param tabset_id Character id of the parent tabset panel to append the tab to.
+#' @param tabset_session Shiny session for the parent tabset. Defaults to the parent session.
 #'
 #' @noRd
 mod_1_02_surveystats_server <- function(
@@ -60,7 +69,7 @@ mod_1_02_surveystats_server <- function(
 
     survey_data <- reactiveVal(NULL)
 
-    # ---- Load data on button click ------------------------------------------
+    # ---- Load and prepare data on button click ------------------------------
 
     observeEvent(input$survey_stats, {
       req(length(selected_surveys()) > 0)
@@ -70,7 +79,6 @@ mod_1_02_surveystats_server <- function(
 
       ss <- selected_surveys()
 
-      # load_data() resolves bare fnames against connection_params
       df <- tryCatch(
         load_data(ss$fname, connection_params(), collect = TRUE, unify_schemas = TRUE),
         error = function(e) {
@@ -81,32 +89,14 @@ mod_1_02_surveystats_server <- function(
 
       req(!is.null(df))
 
-      # Add derived time columns
-      df <- df |>
-        dplyr::mutate(
-          timestamp   = as.Date(paste0(int_year, "-", int_month, "-01")),
-          month       = lubridate::month(timestamp),
-          countryyear = paste0(economy, ", ", year)
-        )
+      # Add derived time columns (timestamp, month, countryyear)
+      df <- add_time_columns(df)
 
-      # Convert LCU monetary variables to 2021 PPP
-      cpi_ppp_data <- cpi_ppp()
-      lcu_vars <- variable_list() |>
-        dplyr::filter(units == "LCU", name %in% colnames(df)) |>
-        dplyr::pull(name)
-
-      df <- df |>
-        dplyr::mutate(
-          data_level = dplyr::case_when(
-            code == "CHN" & urban == 1 ~ "urban",
-            code == "CHN" & urban == 0 ~ "rural",
-            .default = "national"
-          )
-        ) |>
-        dplyr::left_join(cpi_ppp_data, by = c("code", "year", "data_level")) |>
-        dplyr::mutate(
-          dplyr::across(dplyr::any_of(lcu_vars), ~ .x / cpi / ppp2021)
-        )
+      # Assign data level then convert LCU variables to 2021 PPP
+      lcu_vars <- get_lcu_vars(df, variable_list())
+      df       <- df |>
+        assign_data_level() |>
+        convert_lcu_to_ppp(cpi_ppp(), lcu_vars)
 
       survey_data(df)
 
@@ -115,93 +105,56 @@ mod_1_02_surveystats_server <- function(
         type = "message", duration = 3
       )
 
+      # ---- H3 map data (reactive) -----------------------------------------
+
       map_data <- eventReactive(input$survey_stats, {
         ss <- selected_surveys()
         req(nrow(ss) > 0)
-        
-        h3_fnames <- sub("_[^_]+\\.parquet$", "_h3.parquet", ss$fname)
-        h3_data <- load_data(h3_fnames, connection_params())
-        
+
+        h3_fnames <- derive_h3_fnames(ss$fname)
+        h3_data   <- load_data(h3_fnames, connection_params())
+
         duckdbfs::load_spatial()
         duckdbfs::load_h3()
 
-        loc <- h3_data |> 
+        loc <- h3_data |>
           dplyr::summarise(
             geom = st_union_agg(st_geomfromtext(h3_cell_to_boundary_wkt(h3))),
-            .by = c(code, year, survname, loc_id)
+            .by  = c(code, year, survname, loc_id)
           ) |>
           duckdbfs::to_sf(crs = 4326)
-        loc <- loc[!sf::st_is_empty(loc), ]
-        loc
+
+        loc[!sf::st_is_empty(loc), ]
       })
 
       # ---- Outputs (defined once on first click) ---------------------------
 
       if (!survey_tab_added()) {
 
-        # plot of interview dates by survey
+        # Interview dates bar chart
         output$interview_date <- renderPlot({
-          df <- survey_data()
-          
-          # Summarize with error handling
-          plot_data <- df |> 
-            dplyr::filter(!is.na(timestamp)) |>  # ← Remove invalid dates
-            dplyr::summarise(hh = dplyr::n(), .by = c(economy, countryyear, timestamp))
-          
-          req(!is.null(plot_data), nrow(plot_data) > 0)
-          
-          ggplot(plot_data, aes(x = timestamp, y = hh, fill = economy)) +
-            geom_bar(stat = "identity") +
-            theme_minimal() +
-            labs(title = "", x = "", y = "Number of households", fill = "") +
-            theme(legend.position = "bottom")  
+          p <- plot_interview_dates(summarise_interview_dates(survey_data()))
+          req(!is.null(p))
+          p
         })
 
-        # map of interview locations 
+        # Leaflet map of interview locations
         output$map <- leaflet::renderLeaflet({
-          loc <- map_data() 
-          req(nrow(loc) > 0)
-          
-          pal <- leaflet::colorFactor(scales::hue_pal()(length(unique(loc$code))), loc$code)
-          bounds <- sf::st_bbox(loc)
-
-          leaflet::leaflet() |>
-            leaflet::addProviderTiles(leaflet::providers$CartoDB.Positron) |>
-            leaflet::addPolygons(
-              data = loc, color = ~pal(code), opacity = 0.5, fillOpacity = 0, weight = 1,
-              highlight = leaflet::highlightOptions(weight = 2, color = "#FF0000", bringToFront = TRUE)
-            ) |>
-            leaflet::fitBounds(
-              lng1 = as.numeric(bounds[1]), lat1 = as.numeric(bounds[2]),
-              lng2 = as.numeric(bounds[3]), lat2 = as.numeric(bounds[4])
-            )
+          m <- plot_survey_map(map_data())
+          req(!is.null(m))
+          m
         })
 
-        # Welfare distribution plot (log scale) with poverty lines at $3.00, $4.20, and $8.30 (2021 PPP)
+        # Welfare distribution ridge plot with standard poverty line annotations
         output$welfare_dist <- renderPlot({
-          df <- survey_data()
-          if (!("welfare" %in% names(df))) {
-            plot.new(); title(main = "Welfare variable not found"); return(invisible(NULL))
-          }
-          p <- ridge_distribution_plot(df, x_var = "welfare",
-            x_label = "$ per day (2021 PPP)", wrap_width = 40, log_transform = TRUE)
+          p <- plot_welfare_dist(survey_data())
           if (is.null(p)) {
             plot.new(); title(main = "Welfare distribution unavailable"); return(invisible(NULL))
-          }
-          poverty_lines  <- c(3.00, 4.20, 8.30)
-          poverty_labels <- c("$3.00", "$4.20", "$8.30")
-          for (i in seq_along(poverty_lines)) {
-            p <- p +
-              ggplot2::geom_vline(xintercept = poverty_lines[i], linetype = "dashed",
-                                  color = "red", linewidth = 0.5) +
-              ggplot2::annotate("text", x = poverty_lines[i] * 1.15, y = 0.5,
-                                label = poverty_labels[i], angle = 90, size = 3,
-                                color = "red", hjust = 0)
           }
           p
         })
 
-        # Helper to avoid repeating DT output boilerplate for each variable group
+        # Summary stats DT tables — one helper avoids repetition
         make_stats_dt <- function(flag_col) {
           DT::renderDT({
             req(survey_data())
@@ -222,7 +175,6 @@ mod_1_02_surveystats_server <- function(
 
         output$selected_surveys <- DT::renderDT({
           req(selected_surveys())
-          # drop internal path columns from display
           selected_surveys() |> dplyr::select(-dplyr::any_of(c("fname", "fpath")))
         }, rownames = FALSE,
           options = list(dom = "t", paging = FALSE, searching = FALSE, info = FALSE),
@@ -245,6 +197,7 @@ mod_1_02_surveystats_server <- function(
           options = list(dom = "t", paging = FALSE, searching = FALSE, info = FALSE),
           class = "compact")
 
+        # Append Survey stats tab to parent tabset
         tryCatch(
           shiny::appendTab(
             inputId = tabset_id,
@@ -261,7 +214,7 @@ mod_1_02_surveystats_server <- function(
               br(),
               bslib::card(h4("Welfare distribution"),
                           plotOutput(ns("welfare_dist"), height = "300px")),
-              h4("Outcome stats"),             DT::DTOutput(ns("outcome_stats")),
+              h4("Outcome stats"),              DT::DTOutput(ns("outcome_stats")),
               h4("Individual characteristics"), DT::DTOutput(ns("ind_stats")),
               h4("Household characteristics"),  DT::DTOutput(ns("hh_stats")),
               h4("Firm characteristics"),       DT::DTOutput(ns("firm_stats")),
