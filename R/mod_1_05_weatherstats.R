@@ -167,7 +167,7 @@ mod_1_05_weatherstats_server <- function(
             if (is.null(y_var) || !(y_var %in% names(df)) ||
                 is.na(hv)      || !(hv %in% names(df))) {
               plot.new()
-              title(main = "Outcome or weather variable not available")
+              title(main = "Weather variable not configured")
               return(invisible(NULL))
             }
 

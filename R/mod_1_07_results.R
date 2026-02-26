@@ -24,7 +24,7 @@ mod_1_07_results_server <- function(
     selected_outcome,
     selected_weather,
     survey_weather,
-    selected_model,     # reactive list from mod_1_06_model
+    selected_model,
     tabset_id,
     tabset_session = NULL
 ) {
@@ -54,39 +54,39 @@ mod_1_07_results_server <- function(
     }
 
     # Helper to extract weather-related coef names from a fitted model
-      # Covers: base terms, factor level expansions, polynomial terms,
-      # and interaction terms
-      weather_coef_names <- function(fit, weather_terms, interaction_terms) {
-        all_coefs <- names(stats::coef(native_fit(fit)))
+    # Covers: base terms, factor level expansions, polynomial terms,
+    # and interaction terms
+    weather_coef_names <- function(fit, weather_terms, interaction_terms) {
+      all_coefs <- names(stats::coef(native_fit(fit)))
 
-        # Match base weather terms (including factor level expansions like tx[1,2])
-        weather_pattern <- paste(
-          paste0("^", weather_terms, "$"),          # exact continuous match
-          paste0("^", weather_terms, "[\\[\\(]"),   # factor level expansion
-          paste0("^I\\(", weather_terms, "\\^"),    # polynomial terms
-          sep = "|"
+      # Match base weather terms (including factor level expansions like tx[1,2])
+      weather_pattern <- paste(
+        paste0("^", weather_terms, "$"),          # exact continuous match
+        paste0("^", weather_terms, "[\\[\\(]"),   # factor level expansion
+        paste0("^I\\(", weather_terms, "\\^"),    # polynomial terms
+        sep = "|"
+      )
+      weather_pattern <- paste(weather_pattern, collapse = "|")
+
+      # Match interaction terms (base and factor-expanded)
+      interact_pattern <- if (length(interaction_terms) > 0) {
+        paste(
+          vapply(interaction_terms, function(t) {
+            # escape special regex chars in the term string
+            paste0("^", gsub("([\\(\\)\\^])", "\\\\\\1", t))
+          }, character(1)),
+          collapse = "|"
         )
-        weather_pattern <- paste(weather_pattern, collapse = "|")
-
-        # Match interaction terms (base and factor-expanded)
-        interact_pattern <- if (length(interaction_terms) > 0) {
-          paste(
-            vapply(interaction_terms, function(t) {
-              # escape special regex chars in the term string
-              paste0("^", gsub("([\\(\\)\\^])", "\\\\\\1", t))
-            }, character(1)),
-            collapse = "|"
-          )
-        } else {
-          NULL
-        }
-
-        keep <- grepl(weather_pattern, all_coefs)
-        if (!is.null(interact_pattern)) {
-          keep <- keep | grepl(interact_pattern, all_coefs)
-        }
-        all_coefs[keep]
+      } else {
+        NULL
       }
+
+      keep <- grepl(weather_pattern, all_coefs)
+      if (!is.null(interact_pattern)) {
+        keep <- keep | grepl(interact_pattern, all_coefs)
+      }
+      all_coefs[keep]
+    }
 
     # Turn a coefficient name (possibly "spei:urban" or "I(spei^2):urban")
     # into a readable label by looking up each component

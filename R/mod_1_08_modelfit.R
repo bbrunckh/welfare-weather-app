@@ -7,6 +7,7 @@
 #' @noRd
 #'
 #' @importFrom shiny NS tagList
+#' @importFrom vip vi_permute
 mod_1_08_modelfit_ui <- function(id) {
   tagList()
 }
@@ -145,74 +146,106 @@ mod_1_08_modelfit_server <- function(
       }
     })
 
-    # Relative importance (linear only — uses relaimpo::calc.relimp)
+    # Relative importance plot (standardized coefficients)
     output$relaimpo <- renderPlot({
-      req(full_model(), !is_logistic())
-      model    <- full_model()
-      total_r2 <- tryCatch(summary(model)$r.squared, error = function(e) NA_real_)
+      req(full_model())
 
-      rel_imp <- tryCatch(
-        relaimpo::calc.relimp(model, type = "lmg"),
-        error = function(e) e
-      )
+      model <- full_model()
 
-      if (inherits(rel_imp, "error")) {
+      # Extract model matrix and coefficients safely
+      mm <- tryCatch(model.matrix(model), error = function(e) NULL)
+      coefs <- tryCatch(coef(model), error = function(e) NULL)
+
+      if (is.null(mm) || is.null(coefs)) {
         return(
           ggplot2::ggplot() +
             ggplot2::annotate(
               "text", x = 0.5, y = 0.5,
-              label = paste("Relative importance unavailable:", conditionMessage(rel_imp)),
+              label = "Variable importance unavailable.",
               hjust = 0.5
             ) +
             ggplot2::theme_void()
         )
       }
 
-      vl <- if (is.function(variable_list)) variable_list() else variable_list
+      # Remove intercept
+      keep <- names(coefs) != "(Intercept)"
+      beta <- coefs[keep]
+
+      if (length(beta) == 0) {
+        return(
+          ggplot2::ggplot() +
+            ggplot2::annotate(
+              "text", x = 0.5, y = 0.5,
+              label = "No predictors available.",
+              hjust = 0.5
+            ) +
+            ggplot2::theme_void()
+        )
+      }
+
+      # Align matrix columns
+      X <- mm[, names(beta), drop = FALSE]
+
+      # Compute standardized importance
+      sd_x <- apply(X, 2, stats::sd, na.rm = TRUE)
+      sd_x[is.na(sd_x)] <- 0
+
       importance_df <- data.frame(
-        Variable     = names(rel_imp$lmg),
-        Contribution = as.numeric(rel_imp$lmg)
+        Variable = names(beta),
+        Importance = abs(beta) * sd_x,
+        stringsAsFactors = FALSE
       )
+
+      # Optional: attach human-readable labels
+      vl <- if (is.function(variable_list)) variable_list() else variable_list
       if (!is.null(vl)) {
         importance_df <- dplyr::left_join(
           importance_df,
           vl[, c("name", "label"), drop = FALSE],
           by = c("Variable" = "name")
-        ) |>
-          dplyr::mutate(label = dplyr::if_else(is.na(label), Variable, label))
+        )
+        importance_df$label <- ifelse(
+          is.na(importance_df$label),
+          importance_df$Variable,
+          importance_df$label
+        )
       } else {
         importance_df$label <- importance_df$Variable
       }
 
-      ggplot2::ggplot(importance_df, ggplot2::aes(x = reorder(label, Contribution), y = Contribution)) +
-        ggplot2::geom_bar(stat = "identity", fill = "steelblue") +
-        ggplot2::geom_text(ggplot2::aes(label = round(Contribution, 3)), hjust = -0.2, size = 3.5) +
-        ggplot2::geom_hline(yintercept = total_r2, linetype = "dashed", color = "red") +
-        ggplot2::annotate(
-          "text", x = Inf, y = total_r2,
-          label = paste("Total R\u00b2 =", round(total_r2, 3)),
-          hjust = 1.1, vjust = -0.5, color = "red", size = 3.5
-        ) +
+      # Order and cap to top 30
+      importance_df <- importance_df |>
+        dplyr::arrange(dplyr::desc(Importance)) |>
+        head(30)
+
+      ggplot2::ggplot(
+        importance_df,
+        ggplot2::aes(x = reorder(label, Importance), y = Importance)
+      ) +
+        ggplot2::geom_col(fill = "steelblue") +
         ggplot2::coord_flip() +
-        ggplot2::scale_x_discrete(labels = function(x) stringr::str_wrap(x, 30)) +
-        ggplot2::labs(x = "", y = "R-squared contribution") +
+        ggplot2::labs(
+          x = "",
+          y = "Standardized coefficient importance"
+        ) +
         ggplot2::theme_minimal()
     })
 
     # Relative importance panel — only rendered for linear models
     output$relaimpo_ui <- renderUI({
       req(model_fit())
-      if (!is_logistic()) {
-        tagList(
-          shiny::h4("Relative importance of predictors"),
-          shiny::plotOutput(ns("relaimpo")),
-          shiny::helpText(
-            "Uses the LMG method (Lindeman, Merenda & Gold): average increase in R\u00b2
-             when each predictor is added across all possible orderings.",
-            style = "font-size: 12px;"
-          )
+
+      tagList(
+        shiny::h4("Relative importance of predictors"),
+        shiny::plotOutput(ns("relaimpo")),
+        shiny::helpText(
+          "Importance is computed as |β| × sd(X), i.e. the absolute standardized coefficient.
+          This fast method works for both linear and logistic models and handles
+          interactions and many predictors robustly.",
+          style = "font-size: 12px;"
         )
-      }
+      )
     })
 
     # Fit statistics table
