@@ -134,28 +134,17 @@ make_coef_map <- function(coef_names, label_fun = identity) {
 
 #' Extract the native model object from a fit_model result
 #'
-#' For the `"lm"` engine, `fit_model()` stores parsnip objects. The underlying
-#' `lm`/`glm` lives at `fit$fit$fit`. For `"fixest"`, `"ranger"`, and
-#' `"xgboost"` the object is already native. This function unwraps the parsnip
-#' layer when needed so downstream plot/table functions always receive a plain
-#' R model object.
+#' For `"fixest"`, `"ranger"`, and `"xgboost"` engines the object stored by
+#' `fit_model()` is already a native R model object — no unwrapping needed.
 #'
 #' @param fit    A model object as stored in `fit_model()$fit1` etc.
-#' @param engine Scalar character engine key (e.g. `"lm"`, `"fixest"`).
+#' @param engine Scalar character engine key (e.g. `"fixest"`). Kept for
+#'   backward compatibility but currently unused.
 #'
-#' @return The native model object (e.g. an `lm`, `glm`, `fixest`, or
-#'   `ranger` object).
+#' @return The native model object.
 #'
 #' @export
 extract_native_fit <- function(fit, engine = "fixest") {
-  if (identical(engine, "lm")) {
-    # parsnip wraps the fit: ._parsnip_model$fit$fit -> native lm/glm
-    native <- tryCatch(fit$fit$fit, error = function(e) NULL)
-    if (!is.null(native)) return(native)
-    # fallback: maybe already unwrapped
-    return(fit)
-  }
-  # fixest, ranger, xgboost — object is already native
   fit
 }
 
@@ -176,19 +165,18 @@ is_logistic_fit <- function(fit_list) {
 }
 
 
-#' Plot standard diagnostic panels for a fitted model
+#' Plot standard diagnostic panels for a fixest fitted model
 #'
-#' For `lm` / `glm` objects uses base-R `plot()` (four panels). For fixest
-#' objects produces a residual-vs-fitted ggplot since base-R plot dispatch
-#' doesn't support fixest. Returns a blank plot on error.
+#' Produces a residual-vs-fitted ggplot. Returns a blank plot on error.
 #'
 #' @param model  A native model object (output of `extract_native_fit()`).
 #' @param engine Scalar character engine key from `fit_model()$engine`.
+#'   Kept for backward compatibility.
 #'
-#' @return A `ggplot` object, or a recorded-plot wrapped in `cowplot::ggdraw`.
+#' @return A `ggplot` object.
 #'
 #' @export
-plot_diagnostics <- function(model, engine = "lm") {
+plot_diagnostics <- function(model, engine = "fixest") {
   blank_plot <- function(msg) {
     ggplot2::ggplot() +
       ggplot2::annotate("text", x = 0.5, y = 0.5, label = msg,
@@ -196,33 +184,20 @@ plot_diagnostics <- function(model, engine = "lm") {
       ggplot2::theme_void()
   }
 
-  if (identical(engine, "fixest")) {
-    p <- tryCatch({
-      res    <- stats::residuals(model)
-      fitted <- stats::fitted(model)
-      ggplot2::ggplot(
-        data.frame(fitted = fitted, residuals = res),
-        ggplot2::aes(x = .data$fitted, y = .data$residuals)
-      ) +
-        ggplot2::geom_point(alpha = 0.15) +
-        ggplot2::geom_hline(yintercept = 0, color = "red", linetype = "dashed") +
-        ggplot2::geom_smooth(method = "loess", se = FALSE, color = "steelblue",
-                             linewidth = 0.8, formula = y ~ x) +
-        ggplot2::theme_minimal() +
-        ggplot2::labs(title = "Residuals vs Fitted",
-                      x = "Fitted values", y = "Residuals")
-    }, error = function(e) blank_plot(paste("Diagnostic plot error:", conditionMessage(e))))
-    return(p)
-  }
-
-  # lm / glm branch — base-R plot(), capture as grob
   tryCatch({
-    grDevices::dev.new(width = 8, height = 8, noRStudioGD = TRUE)
-    on.exit(grDevices::dev.off(), add = TRUE)
-    graphics::par(mfrow = c(2, 2))
-    plot(model)
-    rp <- grDevices::recordPlot()
-    cowplot::ggdraw() + cowplot::draw_grob(grid::rasterGrob(rp))
+    res    <- stats::residuals(model)
+    fitted <- stats::fitted(model)
+    ggplot2::ggplot(
+      data.frame(fitted = fitted, residuals = res),
+      ggplot2::aes(x = .data$fitted, y = .data$residuals)
+    ) +
+      ggplot2::geom_point(alpha = 0.15) +
+      ggplot2::geom_hline(yintercept = 0, color = "red", linetype = "dashed") +
+      ggplot2::geom_smooth(method = "loess", se = FALSE, color = "steelblue",
+                           linewidth = 0.8, formula = y ~ x) +
+      ggplot2::theme_minimal() +
+      ggplot2::labs(title = "Residuals vs Fitted",
+                    x = "Fitted values", y = "Residuals")
   }, error = function(e) blank_plot(paste("Diagnostic plot error:", conditionMessage(e))))
 }
 
@@ -233,18 +208,15 @@ plot_diagnostics <- function(model, engine = "lm") {
 
 #' Build a coefficient plot across three progressive model fits
 #'
-#' Dispatches on engine type:
-#' - `"fixest"` — uses `fixest::iplot()` to show weather coefficients with
-#'   clustered SEs, respecting the absorbed fixed effects.
-#' - All other engines — uses `jtools::plot_summs()` on three native
-#'   `lm`/`glm` objects.
+#' Uses `fixest` HC-robust SEs and plots all three models side-by-side,
+#' replicating the `jtools::plot_summs()` style.
 #'
-#' @param fit1,fit2,fit3    Native model objects — no FE / FE / FE + controls.
+#' @param fit1,fit2,fit3    Native fixest model objects.
 #' @param weather_terms     Character vector of base weather variable names.
 #' @param interaction_terms Character vector of interaction term strings.
 #' @param outcome_label     Scalar character label for the x-axis.
 #' @param label_fun         Function mapping variable names to readable labels.
-#' @param engine            Scalar character engine key from `mf$engine`.
+#' @param engine            Scalar character engine key (kept for compat).
 #'
 #' @return A `ggplot` object.
 #'
@@ -254,7 +226,7 @@ make_coefplot <- function(fit1, fit2, fit3,
                            interaction_terms,
                            outcome_label = "outcome",
                            label_fun     = identity,
-                           engine        = "lm") {
+                           engine        = "fixest") {
 
   blank_plot <- function(msg) {
     ggplot2::ggplot() +
@@ -262,117 +234,84 @@ make_coefplot <- function(fit1, fit2, fit3,
       ggplot2::theme_void()
   }
 
-  # --- fixest branch ---------------------------------------------------------
-  if (identical(engine, "fixest")) {
-    if (!requireNamespace("fixest", quietly = TRUE))
-      return(blank_plot("Package 'fixest' is required for engine = 'fixest'."))
+  if (!requireNamespace("fixest", quietly = TRUE))
+    return(blank_plot("Package 'fixest' is required."))
 
-    model_list <- list(
-      "No FE"         = fit1,
-      "FE"            = fit2,
-      "FE + controls" = fit3
-    )
-
-    p <- tryCatch({
-      # Collect HC-robust coefficient tables from all three models.
-      coef_data <- purrr::imap_dfr(model_list, function(fit, model_name) {
-        ct <- tryCatch(
-          as.data.frame(fixest::coeftable(fit, se = "hetero")),
-          error = function(e) NULL
-        )
-        if (is.null(ct)) return(NULL)
-        ct$term  <- rownames(ct)
-        ct$model <- model_name
-        ct
-      })
-
-      if (nrow(coef_data) == 0)
-        return(blank_plot("No coefficients returned by fixest."))
-
-      # Filter to weather + interaction terms using the same helper as lm/glm.
-      keep_terms <- weather_coef_names(fit3, weather_terms, interaction_terms)
-      coef_data  <- coef_data[coef_data$term %in% keep_terms, ]
-
-      if (nrow(coef_data) == 0)
-        return(blank_plot("No weather coefficients found to plot."))
-
-      # Apply human-readable labels via label_fun, same as make_coef_map().
-      coef_map            <- make_coef_map(keep_terms, label_fun)
-      coef_data$label     <- coef_map[coef_data$term]
-      coef_data$label     <- ifelse(is.na(coef_data$label), coef_data$term, coef_data$label)
-      coef_data$conf.low  <- coef_data$Estimate - 1.96 * coef_data$`Std. Error`
-      coef_data$conf.high <- coef_data$Estimate + 1.96 * coef_data$`Std. Error`
-      coef_data$model     <- factor(coef_data$model,
-                                    levels = c("No FE", "FE", "FE + controls"))
-
-      ggplot2::ggplot(
-        coef_data,
-        ggplot2::aes(
-          x      = Estimate,
-          y      = stringr::str_wrap(label, 25),
-          colour = model,
-          shape  = model
-        )
-      ) +
-        ggplot2::geom_vline(xintercept = 0, linetype = "dashed", colour = "grey50") +
-        ggplot2::geom_pointrange(
-          ggplot2::aes(xmin = conf.low, xmax = conf.high),
-          position = ggplot2::position_dodge(width = 0.5)
-        ) +
-        ggplot2::scale_colour_brewer(palette = "Set1", name = NULL) +
-        ggplot2::scale_shape_discrete(name = NULL) +
-        ggplot2::labs(
-          x = stringr::str_wrap(paste0("Effect on ", outcome_label), 50),
-          y = NULL
-        ) +
-        ggplot2::theme_bw() +
-        ggplot2::theme(legend.position = "bottom")
-    },
-    error = function(e) blank_plot(paste0("fixest coefplot error: ", conditionMessage(e)))
-    )
-    return(p)
-  }
-
-  # --- lm / glm branch -------------------------------------------------------
-  safe_coef <- function(fit) {
-    tryCatch(names(stats::coef(fit)), error = function(e) character(0))
-  }
-
-  coef_names <- weather_coef_names(fit3, weather_terms, interaction_terms)
-  coef_names <- coef_names[
-    coef_names %in% safe_coef(fit1) &
-    coef_names %in% safe_coef(fit2)
-  ]
-
-  if (length(coef_names) == 0)
-    return(blank_plot("No weather coefficients found to plot."))
-
-  tryCatch(
-    jtools::plot_summs(
-      fit1, fit2, fit3,
-      robust      = "HC3",
-      coefs       = make_coef_map(coef_names, label_fun),
-      model.names = c("No FE", "FE", "FE + controls")
-    ) +
-      ggplot2::scale_y_discrete(labels = function(x) stringr::str_wrap(x, 25)) +
-      ggplot2::labs(x = stringr::str_wrap(paste0("Effect on ", outcome_label), 50)),
-    error = function(e) blank_plot(paste0("Coefficient plot error: ", conditionMessage(e)))
+  model_list <- list(
+    "No FE"         = fit1,
+    "FE"            = fit2,
+    "FE + controls" = fit3
   )
+
+  p <- tryCatch({
+    coef_data <- purrr::imap_dfr(model_list, function(fit, model_name) {
+      ct <- tryCatch(
+        as.data.frame(fixest::coeftable(fit, se = "hetero")),
+        error = function(e) NULL
+      )
+      if (is.null(ct)) return(NULL)
+      ct$term  <- rownames(ct)
+      ct$model <- model_name
+      ct
+    })
+
+    if (nrow(coef_data) == 0)
+      return(blank_plot("No coefficients returned by fixest."))
+
+    keep_terms <- weather_coef_names(fit3, weather_terms, interaction_terms)
+    coef_data  <- coef_data[coef_data$term %in% keep_terms, ]
+
+    if (nrow(coef_data) == 0)
+      return(blank_plot("No weather coefficients found to plot."))
+
+    coef_map            <- make_coef_map(keep_terms, label_fun)
+    coef_data$label     <- coef_map[coef_data$term]
+    coef_data$label     <- ifelse(is.na(coef_data$label), coef_data$term, coef_data$label)
+    coef_data$conf.low  <- coef_data$Estimate - 1.96 * coef_data$`Std. Error`
+    coef_data$conf.high <- coef_data$Estimate + 1.96 * coef_data$`Std. Error`
+    coef_data$model     <- factor(coef_data$model,
+                                  levels = c("No FE", "FE", "FE + controls"))
+
+    ggplot2::ggplot(
+      coef_data,
+      ggplot2::aes(
+        x      = Estimate,
+        y      = stringr::str_wrap(label, 25),
+        colour = model,
+        shape  = model
+      )
+    ) +
+      ggplot2::geom_vline(xintercept = 0, linetype = "dashed", colour = "grey50") +
+      ggplot2::geom_pointrange(
+        ggplot2::aes(xmin = conf.low, xmax = conf.high),
+        position = ggplot2::position_dodge(width = 0.5)
+      ) +
+      ggplot2::scale_colour_brewer(palette = "Set1", name = NULL) +
+      ggplot2::scale_shape_discrete(name = NULL) +
+      ggplot2::labs(
+        x = stringr::str_wrap(paste0("Effect on ", outcome_label), 50),
+        y = NULL
+      ) +
+      ggplot2::theme_bw() +
+      ggplot2::theme(legend.position = "bottom")
+  },
+  error = function(e) blank_plot(paste0("Coefficient plot error: ", conditionMessage(e)))
+  )
+  p
 }
 
 #' Generate Marginal Effect / Interaction Plots with human-readable labels
 #'
-#' For `"fixest"` engine models, uses `fixest::coefplot()` since
-#' `jtools`/`interactions` do not support fixest objects directly.
-#' For all other engines, dispatches to `jtools::effect_plot()` or
-#' `interactions::interact_plot()` / `interactions::cat_plot()`.
+#' Predicts over a grid of `pred_var` × moderator levels using manual linear
+#' prediction (bypassing `stats::predict()` which requires FE columns in
+#' `newdata`). Replicates the `interactions::interact_plot()` style.
 #'
-#' @param fit A native model object.
+#' @param fit A native fixest model object.
 #' @param pred_var Character. The base name of the weather variable.
 #' @param interaction_terms Character vector of interaction strings.
 #' @param is_binned Logical. Whether `pred_var` is a binned/factor variable.
 #' @param label_fun Function mapping variable names to readable labels.
-#' @param engine Scalar character engine key from `mf$engine`.
+#' @param engine Scalar character engine key (kept for compat).
 #'
 #' @return A `ggplot` object.
 #'
@@ -381,9 +320,8 @@ make_weather_effect_plot <- function(fit, pred_var,
                                      interaction_terms = character(0),
                                      is_binned         = FALSE,
                                      label_fun         = identity,
-                                     engine            = "lm") {
+                                     engine            = "fixest") {
 
-  # 1. Resolve Human-Readable Labels
   pred_lab   <- label_fun(pred_var)
   y_var_name <- tryCatch(
     as.character(stats::formula(fit)[[2]]),
@@ -391,12 +329,8 @@ make_weather_effect_plot <- function(fit, pred_var,
   )
   y_lab <- label_fun(y_var_name)
 
-  # 2. Guard: pred_var must exist in model frame with at least one finite value.
   mf <- tryCatch(
-    {
-      mm <- stats::model.matrix(fit)
-      as.data.frame(mm)
-    },
+    as.data.frame(stats::model.matrix(fit)),
     error = function(e) tryCatch(stats::model.frame(fit), error = function(e2) NULL)
   )
   pred_vals <- if (!is.null(mf) && pred_var %in% names(mf)) mf[[pred_var]] else NULL
@@ -408,164 +342,16 @@ make_weather_effect_plot <- function(fit, pred_var,
       ggplot2::theme_void()
   }
 
-  if (is.null(pred_vals)) {
+  if (is.null(pred_vals))
     return(blank_plot(paste0("'", pred_var, "' not found in model frame.")))
-  }
 
-  if (!is.factor(pred_vals) && !any(is.finite(pred_vals))) {
+  if (!is.factor(pred_vals) && !any(is.finite(pred_vals)))
     return(blank_plot(paste0("No finite values for '", pred_var, "' — cannot build effect plot.")))
-  }
 
-  # 3. fixest branch: predict over a grid of pred_var x moderator levels,
-  #    replicating the interactions::interact_plot() style from the lm/glm branch.
-  if (identical(engine, "fixest")) {
-    if (!requireNamespace("fixest", quietly = TRUE))
-      return(blank_plot("Package 'fixest' is required for engine = 'fixest'."))
+  if (!requireNamespace("fixest", quietly = TRUE))
+    return(blank_plot("Package 'fixest' is required."))
 
-    # Resolve moderator (same logic as lm/glm branch below)
-    modx_var <- NULL
-    modx_lab <- NULL
-    if (length(interaction_terms) > 0) {
-      match_term <- grep(paste0("^", pred_var, ":"), interaction_terms, value = TRUE)
-      if (length(match_term) > 0) {
-        modx_var <- strsplit(match_term[1], ":")[[1]][2]
-        modx_lab <- label_fun(modx_var)
-      }
-    }
-
-    p <- tryCatch({
-      mm     <- as.data.frame(stats::model.matrix(fit))
-      betas  <- stats::coef(fit)
-      vcov_m <- stats::vcov(fit)
-      n_grid <- 50L
-
-      # Manual prediction: avoids stats::predict.fixest() which requires FE
-      # columns in newdata (they are absorbed; absent from model.matrix()).
-      # fit = X_new %*% beta; SE from delta method sqrt(diag(X V X'))
-      fixest_predict_manual <- function(X_new) {
-        common <- intersect(colnames(X_new), names(betas[!is.na(betas)]))
-        X_sub  <- as.matrix(X_new[, common, drop = FALSE])
-        b_sub  <- betas[common]
-        v_sub  <- vcov_m[common, common, drop = FALSE]
-        list(
-          fit = as.numeric(X_sub %*% b_sub),
-          se  = sqrt(pmax(0, rowSums((X_sub %*% v_sub) * X_sub)))
-        )
-      }
-
-      x_seq <- if (is_binned || is.factor(mm[[pred_var]])) {
-        sort(unique(mm[[pred_var]]))
-      } else {
-        seq(min(mm[[pred_var]], na.rm = TRUE),
-            max(mm[[pred_var]], na.rm = TRUE),
-            length.out = n_grid)
-      }
-
-      # Hold all other predictors at their mean/mode
-      other_means <- lapply(mm, function(col) {
-        if (is.numeric(col)) mean(col, na.rm = TRUE)
-        else names(sort(table(col), decreasing = TRUE))[1]
-      })
-
-      if (!is.null(modx_var) && modx_var %in% names(mm)) {
-        modx_col    <- mm[[modx_var]]
-        modx_uniq   <- sort(unique(modx_col))
-        is_cat_modx <- is.factor(modx_col) || is.character(modx_col) ||
-                       length(modx_uniq) <= 5
-
-        modx_vals <- if (is_cat_modx) {
-          modx_uniq
-        } else {
-          modx_mean <- mean(modx_col, na.rm = TRUE)
-          modx_sd   <- stats::sd(modx_col, na.rm = TRUE)
-          c(modx_mean - modx_sd, modx_mean, modx_mean + modx_sd)
-        }
-
-        grid     <- expand.grid(.pred = x_seq, .modx = modx_vals, stringsAsFactors = FALSE)
-        new_data <- as.data.frame(lapply(other_means, rep, times = nrow(grid)))
-        new_data[[pred_var]] <- grid$.pred
-        new_data[[modx_var]] <- grid$.modx
-
-        # Rebuild interaction columns present in the original model matrix
-        for (nm in colnames(mm)) {
-          if (grepl(":", nm, fixed = TRUE) && !nm %in% names(new_data)) {
-            parts <- strsplit(nm, ":")[[1]]
-            if (all(parts %in% names(new_data)))
-              new_data[[nm]] <- Reduce(`*`, new_data[parts])
-          }
-        }
-        if ("(Intercept)" %in% colnames(mm)) new_data[["(Intercept)"]] <- 1
-
-        preds        <- fixest_predict_manual(new_data)
-        new_data$fit <- preds$fit
-        new_data$se  <- preds$se
-
-        # Categorical/binary: use raw values as labels; continuous: mean ± SD
-        new_data$.modx_label <- factor(
-          if (is_cat_modx) as.character(new_data[[modx_var]])
-          else paste0(modx_lab, " = ", round(new_data[[modx_var]], 2))
-        )
-
-        ggplot2::ggplot(
-          new_data,
-          ggplot2::aes(
-            x      = .data[[pred_var]],
-            y      = .data$fit,
-            colour = .data$.modx_label,
-            fill   = .data$.modx_label
-          )
-        ) +
-          ggplot2::geom_ribbon(
-            ggplot2::aes(ymin = fit - 1.96 * se, ymax = fit + 1.96 * se),
-            alpha = 0.15, colour = NA
-          ) +
-          ggplot2::geom_line(linewidth = 0.9) +
-          ggplot2::scale_colour_brewer(palette = "Set1", name = modx_lab) +
-          ggplot2::scale_fill_brewer(palette = "Set1", name = modx_lab) +
-          ggplot2::labs(
-            title = paste("Impact of", pred_lab, "by", modx_lab),
-            x     = pred_lab,
-            y     = paste("Predicted", y_lab)
-          ) +
-          ggplot2::theme_minimal() +
-          ggplot2::theme(
-            plot.title      = ggplot2::element_text(face = "bold", hjust = 0.5, size = 11),
-            legend.position = "bottom"
-          )
-
-      } else {
-        new_data             <- as.data.frame(lapply(other_means, rep, times = length(x_seq)))
-        new_data[[pred_var]] <- x_seq
-
-        if ("(Intercept)" %in% colnames(mm)) new_data[["(Intercept)"]] <- 1
-
-        preds        <- fixest_predict_manual(new_data)
-        new_data$fit <- preds$fit
-        new_data$se  <- preds$se
-
-        ggplot2::ggplot(new_data, ggplot2::aes(x = .data[[pred_var]], y = .data$fit)) +
-          ggplot2::geom_ribbon(
-            ggplot2::aes(ymin = fit - 1.96 * se, ymax = fit + 1.96 * se),
-            alpha = 0.2, fill = "steelblue"
-          ) +
-          ggplot2::geom_line(colour = "steelblue", linewidth = 0.9) +
-          ggplot2::labs(
-            title = paste("Predicted", y_lab, "vs", pred_lab),
-            x     = pred_lab,
-            y     = paste("Predicted", y_lab)
-          ) +
-          ggplot2::theme_minimal() +
-          ggplot2::theme(
-            plot.title = ggplot2::element_text(face = "bold", hjust = 0.5, size = 11)
-          )
-      }
-    },
-    error = function(e) blank_plot(paste0("fixest effect plot error: ", conditionMessage(e)))
-    )
-    return(p)
-  }
-
-  # 4. Look for moderator (lm / glm path)
+  # Resolve moderator
   modx_var <- NULL
   modx_lab <- NULL
   if (length(interaction_terms) > 0) {
@@ -576,116 +362,169 @@ make_weather_effect_plot <- function(fit, pred_var,
     }
   }
 
-  # 5. Build plot — tryCatch converts internal range/Inf errors to a blank plot
-  build <- function() {
-    if (is.null(modx_var)) {
-      jtools::effect_plot(
-        model      = fit,
-        pred       = !!rlang::sym(pred_var),
-        interval   = TRUE,
-        colors     = "blue",
-        main.title = paste("Predicted", y_lab, "vs", pred_lab)
+  p <- tryCatch({
+    mm     <- as.data.frame(stats::model.matrix(fit))
+    betas  <- stats::coef(fit)
+    vcov_m <- stats::vcov(fit)
+    n_grid <- 50L
+
+    # Manual prediction: X_new %*% beta, SE via delta method sqrt(diag(X V X'))
+    fixest_predict_manual <- function(X_new) {
+      common <- intersect(colnames(X_new), names(betas[!is.na(betas)]))
+      X_sub  <- as.matrix(X_new[, common, drop = FALSE])
+      b_sub  <- betas[common]
+      v_sub  <- vcov_m[common, common, drop = FALSE]
+      list(
+        fit = as.numeric(X_sub %*% b_sub),
+        se  = sqrt(pmax(0, rowSums((X_sub %*% v_sub) * X_sub)))
       )
-    } else if (is_binned) {
-      interactions::cat_plot(
-        model       = fit,
-        pred        = !!rlang::sym(pred_var),
-        modx        = !!rlang::sym(modx_var),
-        geom        = "line",
-        interval    = TRUE,
-        modx.labels = NULL,
-        main.title  = paste("Impact of", pred_lab, "by", modx_lab)
-      )
+    }
+
+    x_seq <- if (is_binned || is.factor(mm[[pred_var]])) {
+      sort(unique(mm[[pred_var]]))
     } else {
-      interactions::interact_plot(
-        model      = fit,
-        pred       = !!rlang::sym(pred_var),
-        modx       = !!rlang::sym(modx_var),
-        interval   = TRUE,
-        main.title = paste("Impact of", pred_lab, "by", modx_lab)
-      )
+      seq(min(mm[[pred_var]], na.rm = TRUE),
+          max(mm[[pred_var]], na.rm = TRUE),
+          length.out = n_grid)
     }
-  }
 
-  p <- withCallingHandlers(
-    tryCatch(build(), error = function(e) {
-      blank_plot(paste0("Effect plot error:\n", conditionMessage(e)))
-    }),
-    warning = function(w) {
-      if (grepl("Inf|-Inf|non-missing|returning Inf", conditionMessage(w), ignore.case = TRUE)) {
-        invokeRestart("muffleWarning")
+    other_means <- lapply(mm, function(col) {
+      if (is.numeric(col)) mean(col, na.rm = TRUE)
+      else names(sort(table(col), decreasing = TRUE))[1]
+    })
+
+    if (!is.null(modx_var) && modx_var %in% names(mm)) {
+      modx_col    <- mm[[modx_var]]
+      modx_uniq   <- sort(unique(modx_col))
+      is_cat_modx <- is.factor(modx_col) || is.character(modx_col) ||
+                     length(modx_uniq) <= 5
+
+      modx_vals <- if (is_cat_modx) {
+        modx_uniq
+      } else {
+        modx_mean <- mean(modx_col, na.rm = TRUE)
+        modx_sd   <- stats::sd(modx_col, na.rm = TRUE)
+        c(modx_mean - modx_sd, modx_mean, modx_mean + modx_sd)
       }
-    }
-  )
 
-  # 6. Final theme and label overrides
-  p +
-    ggplot2::theme_minimal() +
-    ggplot2::labs(
-      x      = pred_lab,
-      y      = paste("Predicted", y_lab),
-      colour = modx_lab,
-      fill   = modx_lab
-    ) +
-    ggplot2::theme(
-      plot.title      = ggplot2::element_text(face = "bold", hjust = 0.5, size = 11),
-      legend.position = "bottom"
-    )
+      grid     <- expand.grid(.pred = x_seq, .modx = modx_vals, stringsAsFactors = FALSE)
+      new_data <- as.data.frame(lapply(other_means, rep, times = nrow(grid)))
+      new_data[[pred_var]] <- grid$.pred
+      new_data[[modx_var]] <- grid$.modx
+
+      for (nm in colnames(mm)) {
+        if (grepl(":", nm, fixed = TRUE) && !nm %in% names(new_data)) {
+          parts <- strsplit(nm, ":")[[1]]
+          if (all(parts %in% names(new_data)))
+            new_data[[nm]] <- Reduce(`*`, new_data[parts])
+        }
+      }
+      if ("(Intercept)" %in% colnames(mm)) new_data[["(Intercept)"]] <- 1
+
+      preds        <- fixest_predict_manual(new_data)
+      new_data$fit <- preds$fit
+      new_data$se  <- preds$se
+
+      new_data$.modx_label <- factor(
+        if (is_cat_modx) as.character(new_data[[modx_var]])
+        else paste0(modx_lab, " = ", round(new_data[[modx_var]], 2))
+      )
+
+      ggplot2::ggplot(
+        new_data,
+        ggplot2::aes(
+          x      = .data[[pred_var]],
+          y      = .data$fit,
+          colour = .data$.modx_label,
+          fill   = .data$.modx_label
+        )
+      ) +
+        ggplot2::geom_ribbon(
+          ggplot2::aes(ymin = fit - 1.96 * se, ymax = fit + 1.96 * se),
+          alpha = 0.15, colour = NA
+        ) +
+        ggplot2::geom_line(linewidth = 0.9) +
+        ggplot2::scale_colour_brewer(palette = "Set1", name = modx_lab) +
+        ggplot2::scale_fill_brewer(palette = "Set1", name = modx_lab) +
+        ggplot2::labs(
+          title = paste("Impact of", pred_lab, "by", modx_lab),
+          x     = pred_lab,
+          y     = paste("Predicted", y_lab)
+        ) +
+        ggplot2::theme_minimal() +
+        ggplot2::theme(
+          plot.title      = ggplot2::element_text(face = "bold", hjust = 0.5, size = 11),
+          legend.position = "bottom"
+        )
+
+    } else {
+      new_data             <- as.data.frame(lapply(other_means, rep, times = length(x_seq)))
+      new_data[[pred_var]] <- x_seq
+      if ("(Intercept)" %in% colnames(mm)) new_data[["(Intercept)"]] <- 1
+
+      preds        <- fixest_predict_manual(new_data)
+      new_data$fit <- preds$fit
+      new_data$se  <- preds$se
+
+      ggplot2::ggplot(new_data, ggplot2::aes(x = .data[[pred_var]], y = .data$fit)) +
+        ggplot2::geom_ribbon(
+          ggplot2::aes(ymin = fit - 1.96 * se, ymax = fit + 1.96 * se),
+          alpha = 0.2, fill = "steelblue"
+        ) +
+        ggplot2::geom_line(colour = "steelblue", linewidth = 0.9) +
+        ggplot2::labs(
+          title = paste("Predicted", y_lab, "vs", pred_lab),
+          x     = pred_lab,
+          y     = paste("Predicted", y_lab)
+        ) +
+        ggplot2::theme_minimal() +
+        ggplot2::theme(
+          plot.title = ggplot2::element_text(face = "bold", hjust = 0.5, size = 11)
+        )
+    }
+  },
+  error = function(e) blank_plot(paste0("fixest effect plot error: ", conditionMessage(e)))
+  )
+  p
 }
 
 
 #' Build an HTML regression table across three progressive model fits
 #'
-#' For `"fixest"` engine models, uses `fixest::etable()` and converts to HTML
-#' via `knitr::kable()`. For all other engines, uses `jtools::export_summs()`
-#' with `huxtable`.
+#' Uses `fixest::etable()` for all engines.
 #'
 #' @param fit1,fit2,fit3    Native model objects.
-#' @param weather_terms     Character vector of base weather variable names.
-#' @param interaction_terms Character vector of interaction term strings.
-#' @param label_fun         Function mapping variable names to readable labels.
-#' @param engine            Scalar character engine key from `mf$engine`.
+#' @param weather_terms     Unused. Kept for backward compatibility.
+#' @param interaction_terms Unused. Kept for backward compatibility.
+#' @param label_fun         Unused. Kept for backward compatibility.
+#' @param engine            Scalar character engine key (kept for compat).
 #'
 #' @return An `htmltools::HTML` string.
 #'
 #' @export
 make_regtable <- function(fit1, fit2, fit3,
-                           weather_terms,
-                           interaction_terms,
-                           label_fun = identity,
-                           engine    = "lm") {
+                           weather_terms     = character(0),
+                           interaction_terms = character(0),
+                           label_fun         = identity,
+                           engine            = "fixest") {
 
-  # fixest objects are not supported by jtools::export_summs()
-  if (identical(engine, "fixest")) {
-    if (!requireNamespace("fixest", quietly = TRUE))
-      return(htmltools::HTML("<p>Package 'fixest' required for regression table.</p>"))
+  if (!requireNamespace("fixest", quietly = TRUE))
+    return(htmltools::HTML("<p>Package 'fixest' required for regression table.</p>"))
 
-    tryCatch({
-      et <- fixest::etable(
-        fit1, fit2, fit3,
-        headers  = c("No FE", "FE", "FE + controls"),
-        se.below = TRUE,
-        digits   = 3
-      )
-      htmltools::HTML(
-        knitr::kable(et, format = "html",
-                     table.attr = "class='table table-sm table-bordered'")
-      )
-    }, error = function(e) {
-      htmltools::HTML(paste0("<p>Regression table error: ", conditionMessage(e), "</p>"))
-    })
-  } else {
-    # lm / glm path
-    coef_names <- weather_coef_names(fit3, weather_terms, interaction_terms)
-    ht <- jtools::export_summs(
+  tryCatch({
+    et <- fixest::etable(
       fit1, fit2, fit3,
-      robust      = "HC3",
-      model.names = c("No FE", "FE", "FE + controls"),
-      coefs       = make_coef_map(coef_names, label_fun),
-      digits      = 3
+      headers  = c("No FE", "FE", "FE + controls"),
+      se.below = TRUE,
+      digits   = 3
     )
-    htmltools::HTML(huxtable::to_html(ht))
-  }
+    htmltools::HTML(
+      knitr::kable(et, format = "html",
+                   table.attr = "class='table table-sm table-bordered'")
+    )
+  }, error = function(e) {
+    htmltools::HTML(paste0("<p>Regression table error: ", conditionMessage(e), "</p>"))
+  })
 }
 
 
@@ -755,8 +594,8 @@ plot_pred_vs_actual <- function(model, is_logistic, outcome_label = "outcome") {
   actual <- tryCatch(
     stats::model.frame(model)[[1]],
     error = function(e) {
-      f <- tryCatch(stats::fitted(model),    error = function(e2) NULL)
-      r <- tryCatch(stats::residuals(model), error = function(e2) NULL)
+      f <- tryCatch(stats::fitted(model),    error = function(e) NULL)
+      r <- tryCatch(stats::residuals(model), error = function(e) NULL)
       if (!is.null(f) && !is.null(r)) f + r else NULL
     }
   )
@@ -817,19 +656,17 @@ plot_pred_vs_actual <- function(model, is_logistic, outcome_label = "outcome") {
 
 #' Compute model fit statistics as a data frame
 #'
-#' Returns a two-column data frame (`Statistic`, `Value`) appropriate for the
-#' model type and engine. For `"fixest"` engine models, pulls fit stats from
-#' `fixest::fitstat()` rather than `summary()` which returns a different
-#' structure incompatible with `round()`.
+#' Returns a two-column data frame (`Statistic`, `Value`) using
+#' `fixest::fitstat()` / `fixest::r2()`.
 #'
-#' @param model       A native model object (output of `extract_native_fit()`).
+#' @param model       A native fixest model object.
 #' @param is_logistic Scalar logical.
-#' @param engine      Scalar character engine key from `fit_model()$engine`.
+#' @param engine      Scalar character engine key (kept for compat).
 #'
 #' @return A data frame with columns `Statistic` and `Value`.
 #'
 #' @export
-calc_fit_stats <- function(model, is_logistic, engine = "lm") {
+calc_fit_stats <- function(model, is_logistic, engine = "fixest") {
 
   fmt_num <- function(x, digits = 3) {
     x <- suppressWarnings(as.numeric(x))
@@ -837,72 +674,29 @@ calc_fit_stats <- function(model, is_logistic, engine = "lm") {
     as.character(round(x, digits))
   }
 
-  # ---- fixest branch --------------------------------------------------------
-  if (identical(engine, "fixest")) {
-    nobs_val <- tryCatch(format(stats::nobs(model), big.mark = ","),
-                         error = function(e) NA_character_)
+  nobs_val <- tryCatch(format(stats::nobs(model), big.mark = ","),
+                       error = function(e) NA_character_)
 
-    if (!is_logistic) {
-      r2_val   <- tryCatch(fmt_num(fixest::r2(model, "r2")),   error = function(e) NA_character_)
-      ar2_val  <- tryCatch(fmt_num(fixest::r2(model, "ar2")),  error = function(e) NA_character_)
-      wr2_val  <- tryCatch(fmt_num(fixest::r2(model, "wr2")),  error = function(e) NA_character_)
-      return(data.frame(
-        Statistic = c("Observations", "R-squared", "Adj. R-squared", "Within R-squared"),
-        Value     = c(nobs_val, r2_val, ar2_val, wr2_val),
-        stringsAsFactors = FALSE
-      ))
-    } else {
-      aic_val <- tryCatch(fmt_num(stats::AIC(model), 0), error = function(e) NA_character_)
-      pr2_val <- tryCatch(fmt_num(fixest::r2(model, "pr2")), error = function(e) NA_character_)
-      return(data.frame(
-        Statistic = c("Observations", "McFadden R\u00b2", "AIC"),
-        Value     = c(nobs_val, pr2_val, aic_val),
-        stringsAsFactors = FALSE
-      ))
-    }
-  }
-
-  # ---- lm / glm branch ------------------------------------------------------
   if (!is_logistic) {
-    s <- summary(model)
+    r2_val  <- tryCatch(fmt_num(fixest::r2(model, "r2")),  error = function(e) NA_character_)
+    ar2_val <- tryCatch(fmt_num(fixest::r2(model, "ar2")), error = function(e) NA_character_)
+    wr2_val <- tryCatch(fmt_num(fixest::r2(model, "wr2")), error = function(e) NA_character_)
     data.frame(
-      Statistic = c("Observations", "R-squared", "Adjusted R-squared", "F-statistic"),
-      Value     = c(
-        format(stats::nobs(model), big.mark = ","),
-        fmt_num(s$r.squared),
-        fmt_num(s$adj.r.squared),
-        fmt_num(s$fstatistic[1], 1)
-      ),
+      Statistic = c("Observations", "R-squared", "Adj. R-squared", "Within R-squared"),
+      Value     = c(nobs_val, r2_val, ar2_val, wr2_val),
       stringsAsFactors = FALSE
     )
   } else {
-    ll_model <- as.numeric(stats::logLik(model))
-    ll_null  <- as.numeric(-0.5 * model$null.deviance)
-    mcfadden <- round(1 - ll_model / ll_null, 3)
-
-    actual     <- stats::model.frame(model)[[1]]
-    predicted  <- stats::predict(model, type = "response")
-    pred_class <- ifelse(predicted > 0.5, 1, 0)
-    cm         <- table(Predicted = pred_class, Actual = actual)
-
-    TP <- cm["1", "1"]; TN <- cm["0", "0"]
-    FP <- cm["1", "0"]; FN <- cm["0", "1"]
-
+    aic_val <- tryCatch(fmt_num(stats::AIC(model), 0), error = function(e) NA_character_)
+    pr2_val <- tryCatch(fmt_num(fixest::r2(model, "pr2")), error = function(e) NA_character_)
     data.frame(
-      Statistic = c("Observations", "McFadden R\u00b2", "AIC",
-                    "Accuracy", "Precision", "Recall"),
-      Value     = c(
-        format(stats::nobs(model), big.mark = ","),
-        fmt_num(mcfadden),
-        fmt_num(stats::AIC(model), 0),
-        fmt_num((TP + TN) / (TP + TN + FP + FN)),
-        fmt_num(TP / (TP + FP)),
-        fmt_num(TP / (TP + FN))
-      ),
+      Statistic = c("Observations", "McFadden R\u00b2", "AIC"),
+      Value     = c(nobs_val, pr2_val, aic_val),
       stringsAsFactors = FALSE
     )
   }
 }
+
 
 #' Plot relative importance of predictors (LMG method, linear models only)
 #'

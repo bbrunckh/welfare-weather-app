@@ -35,46 +35,6 @@
 ENGINE_REGISTRY <- list(
 
   # -------------------------------------------------------------------------- #
-  # lm / glm via parsnip                                                        #
-  # -------------------------------------------------------------------------- #
-  lm = list(
-
-    requires    = "parsnip",
-    model_types = c("Linear regression", "Logistic regression"),
-
-    # Fixed effects included as dummy-encoded covariates (standard lm behaviour)
-    build_formulas = function(y_var, terms, fe_vars) {
-      build <- function(rhs) {
-        rhs <- unique(rhs[nzchar(rhs) & !is.na(rhs)])
-        if (length(rhs) == 0) rhs <- "1"
-        stats::as.formula(paste(y_var, "~", paste(rhs, collapse = " + ")))
-      }
-      list(
-        formula1 = build(terms$weather),
-        formula2 = build(c(terms$weather, fe_vars)),
-        formula3 = build(c(terms$weather, fe_vars, terms$covariates))
-      )
-    },
-
-    fit_one = function(formula, data, model_type, model_spec, opts) {
-      parsnip::fit(model_spec, formula = formula, data = data)
-    },
-
-    make_spec = function(model_type, use_logit) {
-      if (model_type == "logistic" && use_logit) {
-        parsnip::logistic_reg() |> parsnip::set_engine("glm")
-      } else {
-        parsnip::linear_reg() |> parsnip::set_engine("lm")
-      }
-    },
-
-    prepare_outcome = function(df, y_var, use_logit) {
-      if (use_logit) df[[y_var]] <- factor(df[[y_var]], levels = c(0, 1))
-      df
-    }
-  ),
-
-  # -------------------------------------------------------------------------- #
   # fixest (feols / feglm) — high-dimensional fixed effects                    #
   # -------------------------------------------------------------------------- #
   fixest = list(
@@ -370,18 +330,6 @@ fit_model <- function(df, selected_outcome, selected_weather, selected_model) {
   # ---------------------------------------------------------------------------
   # 3. Prepare variables in df
   # ---------------------------------------------------------------------------
-
-  # Binned weather vars -> factor
-  for (i in seq_along(weather_vars)) {
-    if (identical(cont_binned[i], "Binned"))
-      df[[weather_vars[i]]] <- as.factor(df[[weather_vars[i]]])
-  }
-
-  # FE vars -> factor for lm engine only (fixest handles its own encoding)
-  if (engine_key == "lm") {
-    for (fe in fe_vars)
-      if (fe %in% names(df)) df[[fe]] <- as.factor(df[[fe]])
-  }
 
   # Outcome coercion delegated to backend (factor, integer, or unchanged)
   df <- backend$prepare_outcome(df, y_var, use_logit)

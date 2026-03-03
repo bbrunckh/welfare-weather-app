@@ -161,9 +161,9 @@ test_that("build_selected_model defaults covariate_selection to User-defined", {
   expect_equal(out$covariate_selection, "User-defined")
 })
 
-test_that("build_selected_model defaults engine to lm", {
+test_that("build_selected_model defaults engine to fixest", {
   out <- build_selected_model()
-  expect_equal(out$engine, "lm")
+  expect_equal(out$engine, "fixest")
 })
 
 test_that("build_selected_model defaults interaction_mode to pairwise", {
