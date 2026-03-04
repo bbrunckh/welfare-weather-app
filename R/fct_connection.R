@@ -13,11 +13,21 @@ build_connection_params <- function(type, ...) {
                    key_id = args$s3_key_id %||% "", secret = args$s3_secret %||% ""),
     "gcs"   = list(type = "gcs",   bucket = args$gcs_bucket  %||% "",
                    prefix = args$gcs_prefix  %||% "", keyfile = args$gcs_keyfile %||% ""),
-    "azure" = list(type = "azure", account = args$azure_account   %||% "",
-                   container = args$azure_container %||% "",
-                   prefix = args$azure_prefix %||% "", key = args$azure_key %||% ""),
+    "azure" = list(type           = "azure",
+                   account        = args$azure_account        %||% "",
+                   container      = args$azure_container      %||% "",
+                   prefix         = args$azure_prefix         %||% "",
+                   key            = args$azure_key            %||% "",
+                   client_id      = args$azure_client_id      %||% Sys.getenv("AZURE_CLIENT_ID"),
+                   client_secret  = args$azure_client_secret  %||% Sys.getenv("AZURE_CLIENT_SECRET"),
+                   tenant_id      = args$azure_tenant_id      %||% Sys.getenv("AZURE_TENANT_ID")),
     "hf"    = list(type = "hf",    repo = args$hf_repo   %||% "",
                    subdir = args$hf_subdir %||% "", token = args$hf_token %||% ""),
+    "databricks" = list(type      = "databricks",
+                        workspace = args$db_workspace %||% Sys.getenv("DATABRICKS_HOST"),
+                        token     = args$db_token     %||% Sys.getenv("DATABRICKS_TOKEN"),
+                        catalog   = args$db_catalog   %||% "main",
+                        schema    = args$db_schema    %||% "default"),
     stop("Unknown connection type: ", type)
   )
 }
@@ -30,11 +40,12 @@ validate_connection_params <- function(params) {
   if (is.null(params) || !is.list(params)) return(FALSE)
   switch(
     params$type,
-    "local" = nzchar(params$path %||% ""),
-    "s3"    = nzchar(params$bucket %||% ""),
-    "gcs"   = nzchar(params$bucket %||% ""),
-    "azure" = nzchar(params$account %||% "") && nzchar(params$container %||% ""),
-    "hf"    = nzchar(params$repo %||% ""),
+    "local"      = nzchar(params$path      %||% ""),
+    "s3"         = nzchar(params$bucket    %||% ""),
+    "gcs"        = nzchar(params$bucket    %||% ""),
+    "azure"      = nzchar(params$account   %||% "") && nzchar(params$container %||% ""),
+    "hf"         = nzchar(params$repo      %||% ""),
+    "databricks" = nzchar(params$workspace %||% "") && nzchar(params$token %||% ""),
     FALSE
   )
 }

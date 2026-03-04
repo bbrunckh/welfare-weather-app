@@ -38,4 +38,6 @@ Imports:
     htmltools,
     relaimpo,
     duckdbfs,
+    DBI,
+    dbplyr,
     glmnet

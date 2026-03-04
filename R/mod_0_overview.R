@@ -25,7 +25,8 @@ mod_0_overview_ui <- function(id) {
         "Amazon S3"            = "s3",
         "Google Cloud Storage" = "gcs",
         "Azure Blob Storage"   = "azure",
-        "Hugging Face"         = "hf"
+        "Hugging Face"         = "hf",
+        "Databricks"           = "databricks"
       ),
       selected = "local"
     ),
@@ -107,12 +108,17 @@ mod_0_overview_server <- function(id) {
         ),
 
         "azure" = tagList(
-          textInput(ns("azure_account"),   "Storage account",   placeholder = "myaccount"),
-          textInput(ns("azure_container"), "Container",         placeholder = "my-container"),
-          textInput(ns("azure_prefix"),    "Prefix (optional)", placeholder = "data/"),
-          passwordInput(ns("azure_key"),   "Account key",       placeholder = ""),
+          textInput(ns("azure_account"),          "Storage account",          placeholder = "datalakeesouoprod"),
+          textInput(ns("azure_container"),        "Container",                placeholder = "data"),
+          textInput(ns("azure_prefix"),           "Prefix (optional)",        placeholder = "DAP/data/wiseapp/"),
+          passwordInput(ns("azure_key"),          "Account key (optional)",   placeholder = ""),
+          passwordInput(ns("azure_client_id"),    "Client ID (optional)",     placeholder = ""),
+          passwordInput(ns("azure_client_secret"),"Client secret (optional)", placeholder = ""),
+          textInput(ns("azure_tenant_id"),        "Tenant ID (optional)",     placeholder = ""),
           helpText(
-            "Leave account key blank to use the AZURE_STORAGE_KEY environment variable.",
+            "Credentials are optional if a service principal is set via AZURE_CLIENT_ID /",
+            "AZURE_CLIENT_SECRET / AZURE_TENANT_ID in .Renviron.",
+            "Alternatively supply an account key or SAS token (?sv=...) in the key field.",
             style = "font-size: 12px;"
           )
         ),
@@ -123,6 +129,20 @@ mod_0_overview_server <- function(id) {
           passwordInput(ns("hf_token"),     "HF token (private repos)", placeholder = "hf_..."),
           helpText(
             "Leave token blank for public repositories.",
+            style = "font-size: 12px;"
+          )
+        ),
+
+        "databricks" = tagList(
+          textInput(ns("db_workspace"), "Workspace URL",
+                    placeholder = "https://adb-XXXXXXX.azuredatabricks.net"),
+          passwordInput(ns("db_token"), "Personal access token",
+                    placeholder = "dapi..."),
+          textInput(ns("db_catalog"),   "Catalog",  value = "main"),
+          textInput(ns("db_schema"),    "Schema",   value = "default"),
+          helpText(
+            "Token: Databricks \u2192 Settings \u2192 Developer \u2192 Access tokens.",
+            "Leave blank to use DATABRICKS_HOST / DATABRICKS_TOKEN env vars.",
             style = "font-size: 12px;"
           )
         )
@@ -148,9 +168,16 @@ mod_0_overview_server <- function(id) {
         azure_container = input$azure_container,
         azure_prefix    = input$azure_prefix,
         azure_key       = input$azure_key,
+        azure_client_id      = input$azure_client_id,
+        azure_client_secret  = input$azure_client_secret,
+        azure_tenant_id      = input$azure_tenant_id,
         hf_repo         = input$hf_repo,
         hf_subdir       = input$hf_subdir,
-        hf_token        = input$hf_token
+        hf_token        = input$hf_token,
+        db_workspace    = input$db_workspace,
+        db_token        = input$db_token,
+        db_catalog      = input$db_catalog,
+        db_schema       = input$db_schema
       )
     })
 

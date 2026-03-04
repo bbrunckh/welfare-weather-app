@@ -19,8 +19,15 @@
 #' fields empty to fall back on environment variables or default credential
 #' chains.
 #'
-#' @param paths Character vector of file paths, bare filenames, URIs, or URLs
-#'   to load. Bare filenames are resolved using \code{connection_params}.
+#' For Databricks Unity Catalog, use \code{type = "databricks"} with
+#' \code{workspace}, \code{token}, \code{catalog}, \code{schema}, and
+#' optionally \code{prefix} in \code{connection_params}. Bare table names are
+#' resolved to \code{s3://|abfss://} Delta table paths via the Unity Catalog
+#' external location, or passed as \code{delta_scan('...')} directly.
+#'
+#' @param paths Character vector of file paths, bare filenames, URIs, URLs,
+#'   or Delta table paths to load. For Databricks, bare names are resolved
+#'   to \code{<catalog>.<schema>.<table>} Delta paths automatically.
 #'
 #' @param connection_params Named list of connection parameters as returned by
 #'   \code{mod_0_overview_server()$connection_params}. Must contain at least
@@ -94,11 +101,18 @@ load_data <- function(
     if (!is_bare(p)) return(p)
     switch(
       type,
-      "local" = file.path(connection_params$path %||% "data/", p),
-      "s3"    = paste0("s3://",  connection_params$bucket,    "/", connection_params$prefix %||% "", p),
-      "gcs"   = paste0("gs://",  connection_params$bucket,    "/", connection_params$prefix %||% "", p),
-      "azure" = paste0("az://",  connection_params$container, "/", connection_params$prefix %||% "", p),
-      "hf"    = paste0("hf://datasets/", connection_params$repo, "/", connection_params$subdir %||% "", p),
+      "local"      = file.path(connection_params$path %||% "data/", p),
+      "s3"         = paste0("s3://",  connection_params$bucket,    "/", connection_params$prefix %||% "", p),
+      "gcs"        = paste0("gs://",  connection_params$bucket,    "/", connection_params$prefix %||% "", p),
+      "azure"      = paste0("abfss://", connection_params$container, "@",
+                             connection_params$account, ".dfs.core.windows.net/",
+                             connection_params$prefix %||% "", p),
+      "hf"         = paste0("hf://datasets/", connection_params$repo, "/", connection_params$subdir %||% "", p),
+      "databricks" = paste0(
+        connection_params$catalog %||% "main", ".",
+        connection_params$schema  %||% "default", ".",
+        p
+      ),
       p  # fallback: return unchanged
     )
   }
@@ -142,11 +156,107 @@ load_data <- function(
 
   } else if (type == "azure") {
 
-    key <- connection_params$key %||% Sys.getenv("AZURE_STORAGE_KEY")
+    con           <- duckdbfs:::cached_connection()
+    DBI::dbExecute(con, "INSTALL azure; LOAD azure;")
+    DBI::dbExecute(con, "INSTALL delta;  LOAD delta;")
+
+    key           <- connection_params$key           %||% Sys.getenv("AZURE_STORAGE_KEY")
+    client_id     <- connection_params$client_id     %||% Sys.getenv("AZURE_CLIENT_ID")
+    client_secret <- connection_params$client_secret %||% Sys.getenv("AZURE_CLIENT_SECRET")
+    tenant_id     <- connection_params$tenant_id     %||% Sys.getenv("AZURE_TENANT_ID")
+
     if (nzchar(key)) {
-      Sys.setenv(AZURE_STORAGE_ACCOUNT = connection_params$account %||% "")
-      Sys.setenv(AZURE_STORAGE_KEY     = key)
+      DBI::dbExecute(con, sprintf("
+        CREATE OR REPLACE SECRET azure_secret (
+          TYPE AZURE,
+          CONNECTION_STRING 'AccountName=%s;AccountKey=%s'
+        );", connection_params$account %||% "", key))
+    } else if (nzchar(client_id) && nzchar(client_secret) && nzchar(tenant_id)) {
+      DBI::dbExecute(con, sprintf("
+        CREATE OR REPLACE SECRET azure_secret (
+          TYPE AZURE,
+          PROVIDER SERVICE_PRINCIPAL,
+          TENANT_ID '%s',
+          CLIENT_ID '%s',
+          CLIENT_SECRET '%s'
+        );", tenant_id, client_id, client_secret))
+    } else {
+      # No CLI available — try managed identity / workload identity (Azure VMs/AKS).
+      # On a local work laptop without az CLI, supply credentials explicitly instead.
+      tryCatch(
+        DBI::dbExecute(con, "
+          CREATE OR REPLACE SECRET azure_secret (
+            TYPE AZURE,
+            PROVIDER CREDENTIAL_CHAIN,
+            CHAIN 'managed_identity;workload_identity'
+          );"),
+        error = function(e) {
+          stop(
+            "load_data(): No Azure credentials found. Provide one of:\n",
+            "  1. Account key         : set azure_key in the connection panel, ",
+            "or AZURE_STORAGE_KEY in .Renviron\n",
+            "  2. SAS token           : set azure_key to a SAS token (?sv=...) ",
+            "in the connection panel\n",
+            "  3. Service principal   : AZURE_CLIENT_ID + AZURE_CLIENT_SECRET + ",
+            "AZURE_TENANT_ID in .Renviron\n",
+            "  (Azure CLI not available on this machine)"
+          )
+        }
+      )
     }
+
+  } else if (type == "databricks") {
+
+    # Databricks uses its S3-compatible or ADLS endpoint exposed via Unity
+    # Catalog external locations. We connect via the Databricks SQL connector
+    # using a personal access token, then read Delta tables with delta_scan().
+    #
+    # Credentials are read from connection_params or environment variables:
+    #   DATABRICKS_HOST  — e.g. "https://adb-123456.azuredatabricks.net"
+    #   DATABRICKS_TOKEN — personal access token (dapi...)
+
+    host  <- connection_params$workspace %||% Sys.getenv("DATABRICKS_HOST")
+    token <- connection_params$token     %||% Sys.getenv("DATABRICKS_TOKEN")
+
+    if (!nzchar(host) || !nzchar(token)) {
+      stop(
+        "load_data(): Databricks requires `workspace` and `token` in ",
+        "connection_params, or DATABRICKS_HOST / DATABRICKS_TOKEN env vars."
+      )
+    }
+
+    # Configure DuckDB's built-in Databricks connector (requires delta + httpfs
+    # extensions). This sets up the Unity Catalog credential chain so that
+    # delta_scan() can resolve <catalog>.<schema>.<table> paths directly.
+    con <- duckdbfs:::get_default_connection()
+    DBI::dbExecute(con, "INSTALL delta;   LOAD delta;")
+    DBI::dbExecute(con, "INSTALL httpfs;  LOAD httpfs;")
+    DBI::dbExecute(con, sprintf(
+      "CREATE SECRET IF NOT EXISTS __databricks (
+         TYPE        DATABRICKS,
+         token       '%s',
+         workspace   '%s'
+       );",
+      token, host
+    ))
+
+    # For Databricks the path IS the query — delta_scan('<catalog>.<schema>.<table>')
+    # open_dataset() is bypassed; return a DBI result wrapped in a tbl instead.
+    tbl <- tryCatch({
+      scan_sql <- sprintf(
+        "SELECT * FROM delta_scan('%s')",
+        paste(paths, collapse = "', '")
+      )
+      dplyr::tbl(con, dbplyr::sql(scan_sql))
+    }, error = function(e) {
+      stop(sprintf(
+        "load_data() failed to open Databricks Delta table.\n  paths: %s\n  error: %s",
+        paste(head(paths, 3), collapse = ", "),
+        conditionMessage(e)
+      ))
+    })
+
+    if (collect) return(dplyr::collect(tbl)) else return(tbl)
 
   }
 
