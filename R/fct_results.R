@@ -292,8 +292,11 @@ make_coefplot <- function(fit1, fit2, fit3,
         x = stringr::str_wrap(paste0("Effect on ", outcome_label), 50),
         y = NULL
       ) +
-      ggplot2::theme_bw() +
-      ggplot2::theme(legend.position = "bottom")
+      ggplot2::theme_bw(base_size = 14) +
+      ggplot2::theme(
+        legend.position = "bottom",
+        panel.border = ggplot2::element_blank()
+      )
   },
   error = function(e) blank_plot(paste0("Coefficient plot error: ", conditionMessage(e)))
   )
@@ -451,7 +454,7 @@ make_weather_effect_plot <- function(fit, pred_var,
           x     = pred_lab,
           y     = paste("Predicted", y_lab)
         ) +
-        ggplot2::theme_minimal() +
+        ggplot2::theme_minimal(base_size = 14) +
         ggplot2::theme(
           plot.title      = ggplot2::element_text(face = "bold", hjust = 0.5, size = 11),
           legend.position = "bottom"
@@ -477,7 +480,7 @@ make_weather_effect_plot <- function(fit, pred_var,
           x     = pred_lab,
           y     = paste("Predicted", y_lab)
         ) +
-        ggplot2::theme_minimal() +
+        ggplot2::theme_minimal(base_size = 14) +
         ggplot2::theme(
           plot.title = ggplot2::element_text(face = "bold", hjust = 0.5, size = 11)
         )
@@ -489,42 +492,146 @@ make_weather_effect_plot <- function(fit, pred_var,
 }
 
 
-#' Build an HTML regression table across three progressive model fits
+#' Build an AER-style regression table from up to 3 fixest models
 #'
-#' Uses `fixest::etable()` for all engines.
+#' @param fit1,fit2,fit3 fixest model objects.
+#' @param weather_terms  Character vector of weather variable names.
+#' @param interaction_terms Character vector of interaction variable names.
+#' @param label_fun      Function mapping variable names to human labels.
+#' @param engine         Character, estimation engine (default "fixest").
 #'
-#' @param fit1,fit2,fit3    Native model objects.
-#' @param weather_terms     Unused. Kept for backward compatibility.
-#' @param interaction_terms Unused. Kept for backward compatibility.
-#' @param label_fun         Unused. Kept for backward compatibility.
-#' @param engine            Scalar character engine key (kept for compat).
-#'
-#' @return An `htmltools::HTML` string.
-#'
-#' @export
+#' @return A data.frame suitable for renderTable().
+#' @noRd
 make_regtable <- function(fit1, fit2, fit3,
-                           weather_terms     = character(0),
-                           interaction_terms = character(0),
-                           label_fun         = identity,
-                           engine            = "fixest") {
+                          weather_terms     = character(0),
+                          interaction_terms = character(0),
+                          label_fun         = identity,
+                          engine            = "fixest") {
 
-  if (!requireNamespace("fixest", quietly = TRUE))
-    return(htmltools::HTML("<p>Package 'fixest' required for regression table.</p>"))
+  if (!inherits(fit1, "fixest") || !inherits(fit2, "fixest") || !inherits(fit3, "fixest")) {
+    return(htmltools::tags$p("All models must be fixest objects."))
+  }
 
-  tryCatch({
-    et <- fixest::etable(
-      fit1, fit2, fit3,
-      headers  = c("No FE", "FE", "FE + controls"),
-      se.below = TRUE,
-      digits   = 3
+  # --- Extract coefficients and SEs -----------------------------------------
+  extract_coefs <- function(fit) {
+    ct  <- summary(fit)$coeftable
+    nms <- rownames(ct)
+    cf  <- ct[, 1]
+    se  <- ct[, 2]
+    pv  <- ct[, 4]
+
+    stars <- ifelse(pv < 0.001, "***",
+             ifelse(pv < 0.01,  "**",
+             ifelse(pv < 0.05,  "*",
+             ifelse(pv < 0.1,   "\u2020", ""))))
+
+    est <- paste0(formatC(cf, format = "f", digits = 3), stars)
+    se_fmt <- paste0("(", formatC(se, format = "f", digits = 3), ")")
+
+    list(names = nms, est = est, se = se_fmt)
+  }
+
+  c1 <- extract_coefs(fit1)
+  c2 <- extract_coefs(fit2)
+  c3 <- extract_coefs(fit3)
+
+  all_vars <- unique(c(c1$names, c2$names, c3$names))
+
+  lookup <- function(coef_list, var) {
+    idx <- match(var, coef_list$names)
+    if (is.na(idx)) list(est = "", se = "") else list(est = coef_list$est[idx], se = coef_list$se[idx])
+  }
+
+  # --- Build HTML table -----------------------------------------------------
+  css <- "
+    .aer-table { border-collapse:collapse; font-family:'Times New Roman',Times,serif; font-size:14px; margin:20px 0; }
+    .aer-table th, .aer-table td { padding:2px 14px; text-align:center; }
+    .aer-table th { font-weight:normal; border-bottom:1px solid #000; }
+    .aer-table .topline { border-top:2px solid #000; }
+    .aer-table .midline td { border-bottom:1px solid #000; }
+    .aer-table .botline td { border-top:1px solid #000; }
+    .aer-table .var-name { text-align:left; font-style:italic; }
+    .aer-table .se-row td { color:#555; }
+    .aer-table .stat-label { text-align:left; }
+  "
+
+  header <- paste0(
+    "<tr class='topline'>",
+    "<th style='text-align:left; border-top:2px solid #000; border-bottom:1px solid #000;'></th>",
+    "<th style='border-top:2px solid #000; border-bottom:1px solid #000;'>(1)</th>",
+    "<th style='border-top:2px solid #000; border-bottom:1px solid #000;'>(2)</th>",
+    "<th style='border-top:2px solid #000; border-bottom:1px solid #000;'>(3)</th>",
+    "</tr>",
+    "<tr>",
+    "<th style='text-align:left;'></th>",
+    "<th>No FE</th>",
+    "<th>FE</th>",
+    "<th>FE + Controls</th>",
+    "</tr>"
+  )
+
+  body_rows <- ""
+  for (v in all_vars) {
+    lab <- tryCatch(label_fun(v), error = function(e) v)
+    v1 <- lookup(c1, v); v2 <- lookup(c2, v); v3 <- lookup(c3, v)
+
+    body_rows <- paste0(body_rows,
+      "<tr><td class='var-name'>", htmltools::htmlEscape(lab), "</td>",
+      "<td>", v1$est, "</td>",
+      "<td>", v2$est, "</td>",
+      "<td>", v3$est, "</td></tr>",
+      "<tr class='se-row'><td></td>",
+      "<td>", v1$se, "</td>",
+      "<td>", v2$se, "</td>",
+      "<td>", v3$se, "</td></tr>"
     )
-    htmltools::HTML(
-      knitr::kable(et, format = "html",
-                   table.attr = "class='table table-sm table-bordered'")
-    )
-  }, error = function(e) {
-    htmltools::HTML(paste0("<p>Regression table error: ", conditionMessage(e), "</p>"))
-  })
+  }
+
+  # --- Fit statistics -------------------------------------------------------
+  safe_nobs <- function(fit) tryCatch(formatC(fit$nobs, format = "d", big.mark = ","), error = function(e) "")
+  safe_r2   <- function(fit) tryCatch(formatC(fixest::r2(fit, "r2"), format = "f", digits = 3), error = function(e) "")
+  safe_wr2  <- function(fit) tryCatch(formatC(fixest::r2(fit, "wr2"), format = "f", digits = 3), error = function(e) "")
+  safe_fe   <- function(fit) {
+    nms <- names(fit$fixef_sizes)
+    if (is.null(nms)) "\u2014" else paste(nms, collapse = ", ")
+  }
+
+  stat_row <- function(label, fn) {
+    paste0("<tr><td class='stat-label'>", label, "</td>",
+           "<td>", fn(fit1), "</td>",
+           "<td>", fn(fit2), "</td>",
+           "<td>", fn(fit3), "</td></tr>")
+  }
+
+  stats <- paste0(
+    "<tr class='botline'><td style='border-top:1px solid #000;'></td>",
+    "<td style='border-top:1px solid #000;'></td>",
+    "<td style='border-top:1px solid #000;'></td>",
+    "<td style='border-top:1px solid #000;'></td></tr>",
+    stat_row("Observations", safe_nobs),
+    stat_row("R\u00B2", safe_r2),
+    stat_row("Within R\u00B2", safe_wr2),
+    stat_row("Fixed effects", safe_fe),
+    "<tr><td style='border-bottom:2px solid #000;'></td>",
+    "<td style='border-bottom:2px solid #000;'></td>",
+    "<td style='border-bottom:2px solid #000;'></td>",
+    "<td style='border-bottom:2px solid #000;'></td></tr>"
+  )
+
+  # --- Significance note ----------------------------------------------------
+  note <- "<tr><td colspan='4' style='text-align:left; font-size:11px; padding-top:6px; color:#555;'>
+    \u2020 p&lt;0.1, * p&lt;0.05, ** p&lt;0.01, *** p&lt;0.001
+  </td></tr>"
+
+  html <- paste0(
+    "<style>", css, "</style>",
+    "<table class='aer-table'>",
+    "<thead>", header, "</thead>",
+    "<tbody>", body_rows, stats, note, "</tbody>",
+    "</table>"
+  )
+
+  htmltools::HTML(html)
 }
 
 

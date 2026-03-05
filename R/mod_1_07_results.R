@@ -125,15 +125,16 @@ mod_1_07_results_server <- function(id,
         req(model_fit_val())
         mf <- model_fit_val()
         make_regtable(
-          fit1              = native_fit(mf$fit1),
-          fit2              = native_fit(mf$fit2),
-          fit3              = native_fit(mf$fit3),
+          fit1 = extract_native_fit(mf$fit1, mf$engine),
+          fit2 = extract_native_fit(mf$fit2, mf$engine),
+          fit3 = extract_native_fit(mf$fit3, mf$engine),
           weather_terms     = mf$weather_terms,
           interaction_terms = mf$interaction_terms,
           label_fun         = get_label,
           engine            = mf$engine
         )
       })
+
 
       # Marginal effects plots (one per weather variable)
       output$effectplot1 <- renderPlot({
@@ -181,7 +182,10 @@ mod_1_07_results_server <- function(id,
             ),
             shiny::br(),
             shiny::h4("Regression results"),
-            shiny::uiOutput(ns("regtable"))
+            shiny::div(
+              style = "display:flex; justify-content:center;",
+              shiny::uiOutput(ns("regtable"))
+            )
           ),
           select  = TRUE,
           session = tabset_session
