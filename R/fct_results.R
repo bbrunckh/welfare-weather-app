@@ -50,45 +50,27 @@ prepare_outcome_df <- function(df, so) {
 # Coefficient helpers                                                          #
 # ---------------------------------------------------------------------------- #
 
-#' Extract weather-related coefficient names from a fitted native model
+#' Extract coefficient names associated with selected weather predictors
 #'
-#' Covers base terms, factor-level expansions, polynomial terms (`I(x^n)`),
-#' and interaction terms.
+#' Returns coefficient names from `fit` that contain any entry in
+#' `weather_terms` (using a word-boundary regex match). This typically captures
+#' main weather effects as well as transformed/factor-expanded terms and
+#' interactions that include those weather variable names.
 #'
-#' @param fit               A native `lm`/`glm` object (unwrapped from
-#'   parsnip with `$fit`).
-#' @param weather_terms     Character vector of base weather variable names.
-#' @param interaction_terms Character vector of interaction term strings.
-#'   Pass `character(0)` when there are none.
+#' @param fit A native fitted model object (e.g. `fixest`, `lm`, `glm`).
+#' @param weather_terms Character vector of weather variable names to match.
 #'
-#' @return Character vector of matching coefficient names.
+#' @return Character vector of coefficient names matching `weather_terms`.
 #'
 #' @export
-weather_coef_names <- function(fit, weather_terms, interaction_terms) {
+weather_coef_names <- function(fit, weather_terms) {
   all_coefs <- names(stats::coef(fit))
-
-  weather_pattern <- paste(
-    paste0("^", weather_terms, "$"),
-    paste0("^", weather_terms, "[\\[\\(]"),
-    paste0("^I\\(", weather_terms, "\\^"),
-    sep = "|"
-  )
-  weather_pattern <- paste(weather_pattern, collapse = "|")
-
-  interact_pattern <- if (length(interaction_terms) > 0) {
-    paste(
-      vapply(interaction_terms, function(t) {
-        paste0("^", gsub("([\\(\\)\\^])", "\\\\\\1", t))
-      }, character(1)),
-      collapse = "|"
-    )
-  } else {
-    NULL
-  }
-
-  keep <- grepl(weather_pattern, all_coefs)
-  if (!is.null(interact_pattern)) keep <- keep | grepl(interact_pattern, all_coefs)
-  all_coefs[keep]
+  
+  # Build safe word-boundary pattern
+  pattern <- paste0("\\b(", paste(weather_terms, collapse = "|"), ")\\b")
+  
+  # Return matching coefficient names
+  all_coefs[grepl(pattern, all_coefs)]
 }
 
 
@@ -281,7 +263,7 @@ make_coefplot <- function(fit1, fit2, fit3,
     if (nrow(coef_data) == 0)
       return(blank_plot("No coefficients returned by fixest."))
 
-    keep_terms <- weather_coef_names(fit3, weather_terms, interaction_terms)
+    keep_terms <- weather_coef_names(fit3, weather_terms)
     coef_data  <- coef_data[coef_data$term %in% keep_terms, ]
 
     if (nrow(coef_data) == 0)
@@ -326,20 +308,28 @@ make_coefplot <- function(fit1, fit2, fit3,
   p
 }
 
-#' Generate Marginal Effect / Interaction Plots with human-readable labels
+#' Generate weather effect plots (continuous or binned) with readable labels
 #'
-#' Predicts over a grid of `pred_var` × moderator levels using manual linear
-#' prediction (bypassing `stats::predict()` which requires FE columns in
-#' `newdata`). Replicates the `interactions::interact_plot()` style.
+#' Builds effect plots for a selected weather predictor from a fitted `fixest`
+#' model. For continuous predictors, predictions are computed manually over a
+#' grid of `pred_var` (and moderator values when interactions are present).
+#' For binned predictors, coefficient paths are plotted by bin, optionally
+#' overlaid by moderator levels. When `weather_df` is supplied for binned
+#' predictors, the plot caption reports the first configured bin as the omitted
+#' reference category.
 #'
-#' @param fit A native fixest model object.
-#' @param pred_var Character. The base name of the weather variable.
-#' @param interaction_terms Character vector of interaction strings.
-#' @param is_binned Logical. Whether `pred_var` is a binned/factor variable.
-#' @param label_fun Function mapping variable names to readable labels.
-#' @param engine Scalar character engine key (kept for compat).
+#' @param fit A native `fixest` model object.
+#' @param pred_var Scalar character. Weather predictor name.
+#' @param interaction_terms Character vector of interaction term strings.
+#' @param is_binned Scalar logical. Whether `pred_var` is binned.
+#' @param label_fun Function mapping variable names to human-readable labels.
+#' @param engine Scalar character engine key (kept for compatibility).
+#' @param selected_weather Optional data frame of selected weather metadata.
+#'   Kept for compatibility.
+#' @param weather_df Optional data frame used to recover configured bin labels
+#'   (via `get_first_bin_label()`), for omitted-reference caption text.
 #'
-#' @return A `ggplot` object.
+#' @return A `ggplot` object. Returns an informative blank plot on error.
 #'
 #' @export
 make_weather_effect_plot <- function(fit, pred_var, interaction_terms, is_binned,
@@ -347,6 +337,7 @@ make_weather_effect_plot <- function(fit, pred_var, interaction_terms, is_binned
                                      weather_df = NULL) {
 
   pred_lab <- label_fun(pred_var)
+  pred_x_lab <- paste0(pred_var, " (", pred_lab, ")")
   y_var_name <- tryCatch(
     as.character(stats::formula(fit)[[2]]),
     error = function(e) "outcome"
@@ -455,7 +446,7 @@ make_weather_effect_plot <- function(fit, pred_var, interaction_terms, is_binned
             ggplot2::scale_x_continuous(breaks = bins_df$bin_index, labels = bins_df$bin_label) +
             ggplot2::labs(
               title = paste("Effect of", pred_lab, "bins on", y_lab),
-              x = pred_lab,
+              x = pred_x_lab,
               y = paste("Effect on", y_lab),
               caption = omitted_note
             ) +
@@ -537,7 +528,7 @@ make_weather_effect_plot <- function(fit, pred_var, interaction_terms, is_binned
         ggplot2::scale_x_continuous(breaks = bins_df$bin_index, labels = bins_df$bin_label) +
         ggplot2::labs(
           title = paste("Effect of", pred_lab, "bins by", modx_lab),
-          x = pred_lab,
+          x = pred_x_lab,
           y = paste("Effect on", y_lab),
           caption = omitted_note
         ) +
@@ -659,7 +650,7 @@ make_weather_effect_plot <- function(fit, pred_var, interaction_terms, is_binned
           ggplot2::scale_fill_brewer(palette = "Set1", name = modx_lab) +
           ggplot2::labs(
             title = paste("Impact of", pred_lab, "by", modx_lab),
-            x     = pred_lab,
+            x     = pred_x_lab,
             y     = paste("Predicted", y_lab)
           ) +
           ggplot2::theme_minimal(base_size = 14) +
@@ -685,7 +676,7 @@ make_weather_effect_plot <- function(fit, pred_var, interaction_terms, is_binned
           ggplot2::geom_line(colour = "steelblue", linewidth = 0.9) +
           ggplot2::labs(
             title = paste("Predicted", y_lab, "vs", pred_lab),
-            x     = pred_lab,
+            x     = pred_x_lab,
             y     = paste("Predicted", y_lab)
           ) +
           ggplot2::theme_minimal(base_size = 14) +
@@ -781,8 +772,11 @@ make_regtable <- function(fit1, fit2, fit3,
 
   body_rows <- ""
   for (v in all_vars) {
-    lab <- tryCatch(label_fun(v), error = function(e) v)
-    v1 <- lookup(c1, v); v2 <- lookup(c2, v); v3 <- lookup(c3, v)
+    # lab <- tryCatch(label_fun(v), error = function(e) v) # old, where it matches variable lables to names, but this is inconsistent.
+    lab <- v
+    v1 <- lookup(c1, v)
+    v2 <- lookup(c2, v)
+    v3 <- lookup(c3, v)
 
     body_rows <- paste0(body_rows,
       "<tr><td class='var-name'>", htmltools::htmlEscape(lab), "</td>",
@@ -850,45 +844,80 @@ make_regtable <- function(fit1, fit2, fit3,
 
 #' Plot residuals against a single weather predictor
 #'
-#' Scatters raw residuals against `haz_var` with a horizontal zero-line and
-#' binned mean overlay. Returns `NULL` invisibly when `haz_var` is absent from
-#' the model frame.
+#' For continuous predictors, scatters raw residuals against `haz_var` with a
+#' horizontal zero-line and binned mean overlay. For categorical/binned
+#' predictors, shows jittered residuals plus category means.
+#' Returns `NULL` invisibly when `haz_var` is absent from the model frame.
 #'
-#' @param model   A native `lm`/`glm` object.
+#' @param model   A native `lm`/`glm`/`fixest` object.
 #' @param haz_var Scalar character name of the weather predictor.
 #' @param x_label Scalar character x-axis label.
 #'
 #' @return A `ggplot` object, or `NULL` invisibly.
 #'
 #' @export
-plot_resid_weather <- function(model, haz_var, x_label = haz_var) {
-  # stats::model.frame() fails on fixest objects; try model.matrix() as fallback.
+plot_resid_weather <- function(model, haz_var, weather_df, x_label = haz_var) {
   df <- tryCatch(stats::model.frame(model), error = function(e) NULL)
 
   if (is.null(df) || !haz_var %in% names(df)) {
     mm <- tryCatch(as.data.frame(stats::model.matrix(model)), error = function(e) NULL)
-    if (!is.null(mm) && haz_var %in% names(mm)) {
+    if (is.null(mm)) return(invisible(NULL))
+
+    if (haz_var %in% names(mm)) {
       df <- mm
     } else {
-      return(invisible(NULL))
+      # Local binned match: haz_var[...], haz_var(...)
+      haz_esc  <- gsub("([\\[\\]\\(\\)\\^\\$\\.\\*\\+\\?])", "\\\\\\1", haz_var)
+      bin_cols <- grep(paste0("^", haz_esc, "[\\[\\(]"), names(mm), value = TRUE)
+      bin_cols <- bin_cols[!grepl(":", bin_cols)]
+      if (length(bin_cols) == 0) return(invisible(NULL))
+
+      Xb <- mm[, bin_cols, drop = FALSE]
+      idx <- max.col(as.matrix(Xb), ties.method = "first")
+      none_active <- rowSums(Xb != 0, na.rm = TRUE) == 0
+
+      x_from_bins <- bin_cols[idx]
+      x_from_bins[none_active] <- get_first_bin_label(weather_df, haz_var)
+
+      df <- data.frame(.haz_x = x_from_bins, stringsAsFactors = FALSE)
+      haz_var <- ".haz_x"
     }
   }
 
   res <- tryCatch(stats::residuals(model), error = function(e) NULL)
   if (is.null(res)) return(invisible(NULL))
 
-  # Lengths may differ after NA removal in fixest
   x_vals <- df[[haz_var]]
-  n      <- min(length(x_vals), length(res))
-  plot_data <- data.frame(x = x_vals[seq_len(n)], residuals = res[seq_len(n)])
+  n <- min(length(x_vals), length(res))
+  x_vals <- x_vals[seq_len(n)]
+  res    <- res[seq_len(n)]
 
-  ggplot2::ggplot(plot_data, ggplot2::aes(x = .data$x, y = .data$residuals)) +
-    ggplot2::geom_point(alpha = 0.1) +
-    ggplot2::geom_hline(yintercept = 0, color = "red", linetype = "dotted") +
-    ggplot2::stat_summary_bin(fun = "mean", bins = 20,
-                              color = "orange", size = 2, geom = "point") +
-    ggplot2::theme_minimal() +
-    ggplot2::labs(x = stringr::str_wrap(x_label, 40), y = "Residuals")
+  is_binned <- is.factor(x_vals) || is.character(x_vals)
+
+  if (is_binned) {
+    plot_data <- data.frame(
+      x = as.factor(x_vals),
+      residuals = res,
+      stringsAsFactors = FALSE
+    )
+
+    ggplot2::ggplot(plot_data, ggplot2::aes(x = .data$x, y = .data$residuals)) +
+      ggplot2::geom_hline(yintercept = 0, color = "red", linetype = "dotted") +
+      ggplot2::geom_jitter(width = 0.15, alpha = 0.12) +
+      ggplot2::stat_summary(fun = mean, geom = "point", color = "orange", size = 2.5) +
+      ggplot2::theme_minimal(base_size = 14) +
+      ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 90, hjust = 1, vjust = 0.5)) +
+      ggplot2::labs(x = stringr::str_wrap(x_label, 40), y = "Residuals")
+  } else {
+    plot_data <- data.frame(x = as.numeric(x_vals), residuals = res)
+
+    ggplot2::ggplot(plot_data, ggplot2::aes(x = .data$x, y = .data$residuals)) +
+      ggplot2::geom_point(alpha = 0.1) +
+      ggplot2::geom_hline(yintercept = 0, color = "red", linetype = "dotted") +
+      ggplot2::stat_summary_bin(fun = mean, bins = 20, color = "orange", size = 2, geom = "point") +
+      ggplot2::theme_minimal(base_size = 14) +
+      ggplot2::labs(x = stringr::str_wrap(x_label, 40), y = "Residuals")
+  }
 }
 
 
@@ -1014,62 +1043,51 @@ calc_fit_stats <- function(model, is_logistic, engine = "fixest") {
 }
 
 
-#' Plot relative importance of predictors (LMG method, linear models only)
+#' Plot standardized coefficient importance (linear models)
 #'
-#' Calls `relaimpo::calc.relimp()` and renders a horizontal bar chart. Returns
-#' an informative blank plot on failure.
+#' Computes predictor importance as `abs(beta) * sd(X)` from the fitted model
+#' matrix (excluding intercept), then renders a horizontal bar chart of the top
+#' predictors.
 #'
-#' @param model     A native `lm` object.
-#' @param var_info  Optional data frame with columns `name` and `label` used
-#'   to map variable names to readable labels.
+#' @param model A native fitted model object supporting `model.matrix()` and
+#'   `coef()`.
+#' @param var_info Optional data frame (unused; kept for interface compatibility).
 #'
 #' @return A `ggplot` object.
 #'
 #' @export
 plot_relaimpo <- function(model, var_info = NULL) {
-  total_r2 <- tryCatch(summary(model)$r.squared, error = function(e) NA_real_)
+  mm    <- stats::model.matrix(model)
+  coefs <- stats::coef(model)
 
-  rel_imp <- tryCatch(
-    relaimpo::calc.relimp(model, type = "lmg"),
-    error = function(e) e
-  )
+  keep <- names(coefs) != "(Intercept)"
+  beta <- coefs[keep]
 
-  if (inherits(rel_imp, "error")) {
-    return(
-      ggplot2::ggplot() +
-        ggplot2::annotate("text", x = 0.5, y = 0.5,
-                          label = paste("Relative importance unavailable:",
-                                        conditionMessage(rel_imp)),
-                          hjust = 0.5) +
-        ggplot2::theme_void()
-    )
-  }
+  X <- mm[, names(beta), drop = FALSE]
+  sd_x <- apply(X, 2, stats::sd, na.rm = TRUE)
+  sd_x[is.na(sd_x)] <- 0
 
-  imp_df <- data.frame(
-    Variable     = names(rel_imp$lmg),
-    Contribution = as.numeric(rel_imp$lmg),
+  importance_df <- data.frame(
+    Variable   = names(beta),
+    Importance = abs(as.numeric(beta)) * as.numeric(sd_x),
     stringsAsFactors = FALSE
   )
 
-  if (!is.null(var_info)) {
-    imp_df <- dplyr::left_join(imp_df, var_info[, c("name", "label")],
-                                by = c("Variable" = "name")) |>
-      dplyr::mutate(label = dplyr::if_else(is.na(.data$label), .data$Variable, .data$label))
-  } else {
-    imp_df$label <- imp_df$Variable
-  }
+  importance_df$label <- importance_df$Variable
 
-  ggplot2::ggplot(imp_df, ggplot2::aes(x = reorder(.data$label, .data$Contribution),
-                                        y = .data$Contribution)) +
-    ggplot2::geom_bar(stat = "identity", fill = "steelblue") +
-    ggplot2::geom_text(ggplot2::aes(label = round(.data$Contribution, 3)),
-                       hjust = -0.2, size = 3.5) +
-    ggplot2::geom_hline(yintercept = total_r2, linetype = "dashed", color = "red") +
-    ggplot2::annotate("text", x = Inf, y = total_r2,
-                      label = paste("Total R\u00b2 =", round(total_r2, 3)),
-                      hjust = 1.1, vjust = -0.5, color = "red", size = 3.5) +
+  importance_df <- importance_df |>
+    dplyr::arrange(dplyr::desc(.data$Importance)) |>
+    utils::head(30)
+
+  ggplot2::ggplot(
+    importance_df,
+    ggplot2::aes(x = reorder(.data$label, .data$Importance), y = .data$Importance)
+  ) +
+    ggplot2::geom_col(fill = "steelblue") +
     ggplot2::coord_flip() +
-    ggplot2::scale_x_discrete(labels = function(x) stringr::str_wrap(x, 30)) +
-    ggplot2::labs(x = "", y = "R-squared contribution") +
-    ggplot2::theme_minimal()
+    ggplot2::labs(
+      x = "",
+      y = "Standardized coefficient importance"
+    ) +
+    ggplot2::theme_minimal(base_size = 14)
 }

@@ -28,6 +28,7 @@ mod_1_08_modelfit_server <- function(id,
                                       selected_outcome,
                                       model_fit,
                                       tabset_id,
+                                      survey_weather,
                                       tabset_session = NULL) {
   moduleServer(id, function(input, output, session) {
     ns <- session$ns
@@ -63,14 +64,14 @@ mod_1_08_modelfit_server <- function(id,
       req(full_model(), model_fit())
       h <- model_fit()$weather_terms[1]
       req(!is.na(h))
-      plot_resid_weather(full_model(), h, get_label(h))
+      plot_resid_weather(full_model(), h, weather_df = survey_weather(), x_label = get_label(h))
     })
 
     output$resid_weather2 <- renderPlot({
       req(full_model(), model_fit(), length(model_fit()$weather_terms) >= 2)
       h <- model_fit()$weather_terms[2]
       req(!is.na(h))
-      plot_resid_weather(full_model(), h, get_label(h))
+      plot_resid_weather(full_model(), h, weather_df = survey_weather(), x_label = get_label(h))
     })
 
     output$pred_welf_dist <- renderPlot({
@@ -95,86 +96,11 @@ mod_1_08_modelfit_server <- function(id,
     output$relaimpo <- renderPlot({
       req(full_model())
 
-      model <- full_model()
-
-      # Extract model matrix and coefficients safely
-      mm <- tryCatch(model.matrix(model), error = function(e) NULL)
-      coefs <- tryCatch(coef(model), error = function(e) NULL)
-
-      if (is.null(mm) || is.null(coefs)) {
-        return(
-          ggplot2::ggplot() +
-            ggplot2::annotate(
-              "text", x = 0.5, y = 0.5,
-              label = "Variable importance unavailable.",
-              hjust = 0.5
-            ) +
-            ggplot2::theme_void()
-        )
-      }
-
-      # Remove intercept
-      keep <- names(coefs) != "(Intercept)"
-      beta <- coefs[keep]
-
-      if (length(beta) == 0) {
-        return(
-          ggplot2::ggplot() +
-            ggplot2::annotate(
-              "text", x = 0.5, y = 0.5,
-              label = "No predictors available.",
-              hjust = 0.5
-            ) +
-            ggplot2::theme_void()
-        )
-      }
-
-      # Align matrix columns
-      X <- mm[, names(beta), drop = FALSE]
-
-      # Compute standardized importance
-      sd_x <- apply(X, 2, stats::sd, na.rm = TRUE)
-      sd_x[is.na(sd_x)] <- 0
-
-      importance_df <- data.frame(
-        Variable = names(beta),
-        Importance = abs(beta) * sd_x,
-        stringsAsFactors = FALSE
-      )
-
-      # Optional: attach human-readable labels
       vl <- if (is.function(variable_list)) variable_list() else variable_list
-      if (!is.null(vl)) {
-        importance_df <- dplyr::left_join(
-          importance_df,
-          vl[, c("name", "label"), drop = FALSE],
-          by = c("Variable" = "name")
-        )
-        importance_df$label <- ifelse(
-          is.na(importance_df$label),
-          importance_df$Variable,
-          importance_df$label
-        )
-      } else {
-        importance_df$label <- importance_df$Variable
-      }
-
-      # Order and cap to top 30
-      importance_df <- importance_df |>
-        dplyr::arrange(dplyr::desc(Importance)) |>
-        head(30)
-
-      ggplot2::ggplot(
-        importance_df,
-        ggplot2::aes(x = reorder(label, Importance), y = Importance)
-      ) +
-        ggplot2::geom_col(fill = "steelblue") +
-        ggplot2::coord_flip() +
-        ggplot2::labs(
-          x = "",
-          y = "Standardized coefficient importance"
-        ) +
-        ggplot2::theme_minimal()
+      plot_relaimpo(
+        model = full_model(),
+        var_info = vl
+      )
     })
 
     output$relaimpo_ui <- renderUI({
