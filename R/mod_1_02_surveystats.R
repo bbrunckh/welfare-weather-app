@@ -68,6 +68,7 @@ mod_1_02_surveystats_server <- function(
     # ---- Data storage -------------------------------------------------------
 
     survey_data <- reactiveVal(NULL)
+    map_data    <- reactiveVal(NULL)
 
     # ---- Load and prepare data on button click ------------------------------
 
@@ -89,10 +90,8 @@ mod_1_02_surveystats_server <- function(
 
       req(!is.null(df))
 
-      # Add derived time columns (timestamp, month, countryyear)
       df <- add_time_columns(df)
 
-      # Assign data level then convert LCU variables to 2021 PPP
       lcu_vars <- get_lcu_vars(df, variable_list())
       df       <- df |>
         assign_data_level() |>
@@ -100,32 +99,40 @@ mod_1_02_surveystats_server <- function(
 
       survey_data(df)
 
+      # ---- H3 map data (computed once per button click) -------------------
+      h3_fnames <- df |>
+        dplyr::distinct(code, year, survname) |>
+        dplyr::mutate(fname = paste0(code, "_", year, "_", survname, "_h3.parquet")) |>
+        dplyr::pull(fname)
+
+      h3_df <- tryCatch(
+        load_data(h3_fnames, connection_params()),
+        error = function(e) {
+          notify(paste("Failed to load H3 data:", conditionMessage(e)), type = "warning", duration = 5)
+          NULL
+        }
+      )
+
+      if (!is.null(h3_df)) {
+        tryCatch({
+          duckdbfs::load_spatial()
+          duckdbfs::load_h3()
+          loc <- h3_df |>
+            dplyr::summarise(
+              geom = st_union_agg(st_geomfromtext(h3_cell_to_boundary_wkt(h3))),
+              .by  = c(code, year, survname, loc_id)
+            ) |>
+            duckdbfs::to_sf(crs = 4326)
+          map_data(loc[!sf::st_is_empty(loc), ])
+        }, error = function(e) {
+          notify(paste("Failed to build map data:", conditionMessage(e)), type = "warning", duration = 5)
+        })
+      }
+
       notify(
         paste0("Loaded ", nrow(ss), " survey file(s) — ", nrow(df), " rows."),
         type = "message", duration = 3
       )
-
-      # ---- H3 map data (reactive) -----------------------------------------
-
-      map_data <- eventReactive(input$survey_stats, {
-        ss <- selected_surveys()
-        req(nrow(ss) > 0)
-
-        h3_fnames <- derive_h3_fnames(ss$fname)
-        h3_data   <- load_data(h3_fnames, connection_params())
-
-        duckdbfs::load_spatial()
-        duckdbfs::load_h3()
-
-        loc <- h3_data |>
-          dplyr::summarise(
-            geom = st_union_agg(st_geomfromtext(h3_cell_to_boundary_wkt(h3))),
-            .by  = c(code, year, survname, loc_id)
-          ) |>
-          duckdbfs::to_sf(crs = 4326)
-
-        loc[!sf::st_is_empty(loc), ]
-      })
 
       # ---- Outputs (defined once on first click) ---------------------------
 

@@ -117,28 +117,6 @@ convert_lcu_to_ppp <- function(df, cpi_ppp_data, lcu_vars) {
     )
 }
 
-
-# ---------------------------------------------------------------------------- #
-# H3 filename derivation                                                        #
-# ---------------------------------------------------------------------------- #
-
-#' Derive H3 parquet filenames from survey parquet filenames
-#'
-#' Replaces the unit suffix (e.g. `_hh`, `_ind`, `_firm`) in survey parquet
-#' filenames with `_h3` to produce the corresponding H3 grid lookup file
-#' names. Duplicate names are dropped so each unique H3 file is listed once.
-#'
-#' @param fnames A character vector of survey parquet filenames, e.g.
-#'   `c("ZAF_2018_NIDS_hh.parquet", "NGA_2019_GHS_hh.parquet")`.
-#'
-#' @return A character vector of unique H3 parquet filenames (basenames).
-#'
-#' @export
-derive_h3_fnames <- function(fnames) {
-  unique(sub("_[^_]+\\.parquet$", "_h3.parquet", fnames))
-}
-
-
 # ---------------------------------------------------------------------------- #
 # Interview date summary                                                        #
 # ---------------------------------------------------------------------------- #
