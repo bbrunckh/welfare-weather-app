@@ -355,280 +355,52 @@ mod_1_06_model_server <- function(id,
     lasso_status <- reactiveVal("idle")
 
     # --- LASSO MODEL ---------------------------------------------------------
+
     lasso_result <- eventReactive(input$run_lasso, {
       req(survey_weather())
       req(selected_outcome())
       req(selected_weather())
 
       withProgress(message = "Running Lasso...", value = 0, {
+        incProgress(0.05, detail = "Preparing inputs")
 
-        df <- as.data.frame(survey_weather())
+        df <- prepare_outcome_df(as.data.frame(survey_weather()), selected_outcome())
 
-        outcome_var  <- selected_outcome()$name
-        weather_vars <- selected_weather()$name
-        fe_vars      <- input$fixedeffects
-        int_vars     <- input$interactions
+        outcome_var <- trimws(as.character(selected_outcome()$name)[1])
+        weather_vars <- as.character(selected_weather()$name)
+        fe_vars      <- as.character(input$fixedeffects)
+        int_vars     <- as.character(input$interactions)
 
-        # --- advanced params (sensible defaults) --------------------------------
         alpha_val <- if (is.null(input$lasso_alpha)) 1 else input$lasso_alpha
-        lambda_choice <- if (is.null(input$lasso_lambda)) "lambda.1se" else input$lasso_lambda
+        lambda_choice <- if (is.null(input$lasso_interactions)) "lambda.1se" else input$lasso_interactions
         nfolds_val <- if (is.null(input$lasso_nfolds)) 10 else input$lasso_nfolds
         standardize_val <- if (is.null(input$lasso_standardize)) TRUE else {
-          # allow checkbox or character toggle "Standardize"
           if (is.logical(input$lasso_standardize)) input$lasso_standardize else input$lasso_standardize == "Standardize"
         }
         m_val <- if (is.null(input$mi_m)) 5 else input$mi_m
         maxit_val <- if (is.null(input$mi_maxit)) 5 else input$mi_maxit
         threshold_val <- if (is.null(input$stability_threshold)) 0.5 else input$stability_threshold
 
-        incProgress(0.05, detail = "Preparing data")
+        incProgress(0.15, detail = "Running MI + LASSO")
 
-        # -------------------------------------------------
-        # 1) DROP ONLY IF OUTCOME MISSING
-        # -------------------------------------------------
-        if (!outcome_var %in% names(df)) stop("Outcome variable not found in data.")
-        df <- df[!is.na(df[[outcome_var]]), , drop = FALSE]
-
-        if (nrow(df) < 30) {
-          stop("Too few observations after removing missing outcome.")
-        }
-
-        # -------------------------------------------------
-        # 2) Build core formula (use formula-based interactions, NOT manual multiplication)
-        # -------------------------------------------------
-        interaction_terms <- character(0)
-        if (!is.null(int_vars) && length(int_vars) > 0) {
-          # create all iv:wv pairs using ":" so model.matrix handles factor/numeric combinations robustly
-          interaction_terms <- as.vector(outer(int_vars, weather_vars, paste, sep = ":"))
-        }
-
-        # Keep only terms that actually exist in df (we'll check per-imputation again)
-        core_terms <- unique(c(weather_vars, fe_vars, interaction_terms))
-        core_terms <- core_terms[core_terms %in% names(df)]
-
-        if (length(core_terms) == 0) {
-          # permitted: no core terms, but risk of empty protected set
-          core_formula <- as.formula("~ 1")
-        } else {
-          core_formula <- as.formula(paste("~", paste(core_terms, collapse = " + ")))
-        }
-
-        # -------------------------------------------------
-        # 3) Define candidate covariates
-        # -------------------------------------------------
-        # Exclude outcome and any columns produced by model.matrix(core_formula) later.
-        # To be conservative we exclude the literal core_terms and the outcome.
-        exclude <- unique(c(outcome_var, core_terms))
-
-        vl <- valid_vl()
-        if (is.null(vl) || nrow(vl) == 0) {
-          stop("Variable list not available or empty.")
-        }
-        allowed <- vl$name[vl$ind == 1 | vl$hh == 1 | vl$area == 1 | vl$firm == 1]
-
-        candidate_vars <- intersect(setdiff(names(df), exclude), allowed)
-
-        # Keep only numeric candidates for glmnet
-        if (length(candidate_vars) > 0) {
-          is_num <- sapply(df[, candidate_vars, drop = FALSE], is.numeric)
-          candidate_vars <- candidate_vars[is_num]
-        }
-
-        if (length(candidate_vars) == 0) {
-          stop("No valid numeric candidate covariates available for LASSO.")
-        }
-
-        incProgress(0.2, detail = "Defining multiple imputation strategy")
-
-        # ------------------------------------------------
-        # 4) MULTIPLE IMPUTATION (robust)
-        # -------------------------------------------------
-        m <- max(1, as.integer(m_val))
-
-        # mice can fail if all-NA columns present; ensure candidate columns exist and have some non-NA
-        non_all_na <- sapply(df[, candidate_vars, drop = FALSE], function(x) any(!is.na(x)))
-        if (!all(non_all_na)) {
-          # drop fully-missing candidate vars
-          dropped <- candidate_vars[!non_all_na]
-          candidate_vars <- candidate_vars[non_all_na]
-          showNotification(paste("Dropped candidate vars with no observed values:", paste(dropped, collapse = ", ")), type = "warning")
-        }
-        if (length(candidate_vars) == 0) stop("No candidate variables with observed values remain for imputation/LASSO.")
-
-        # run mice on only candidate_vars (lightweight: pmm). If mice errors, bubble up.
-        imp <- tryCatch({
-          mice::mice(df[, candidate_vars, drop = FALSE], m = m, maxit = max(1, as.integer(maxit_val)), method = "pmm", print = FALSE)
-        }, error = function(e) {
-          stop("mice failed: ", e$message)
-        })
-
-        # Prepare storage
-        selected_list <- vector("list", m)
-        final_models  <- vector("list", m)
-
-        family_type <- if (input$model_type == "Logistic regression") "binomial" else "gaussian"
-
-        incProgress(0.3, detail = "Running Lasso per imputation")
-
-        # -------------------------------------------------
-        # 5) LASSO per imputation (rebuild core design matrix after imputation)
-        # -------------------------------------------------
-        for (i in seq_len(m)) {
-          incProgress(0.3 + 0.5 * (i - 1) / m, detail = paste("Lasso — imputation", i, "of", m))
-
-          df_imp <- df
-          # replace candidate columns with imputed values for this imputation
-          df_imp[, candidate_vars] <- mice::complete(imp, action = i)
-
-          # Rebuild core matrix via formula so factors/interactions are handled correctly
-          mm_core <- tryCatch({
-            stats::model.matrix(core_formula, data = df_imp)
-          }, error = function(e) {
-            showNotification(paste("model.matrix failed for core terms on imputation", i, ":", e$message), type = "error")
-            return(NULL)
-          })
-          if (is.null(mm_core)) {
-            selected_list[[i]] <- character(0)
-            next
-          }
-
-          # X_core: drop intercept column if present
-          X_core <- if (ncol(mm_core) > 1) mm_core[, -1, drop = FALSE] else matrix(nrow = nrow(df_imp), ncol = 0)
-
-          # X_lasso: numeric candidate vars (after imputation)
-          X_lasso <- as.matrix(df_imp[, candidate_vars, drop = FALSE])
-
-          # Remove zero-variance columns from X_lasso (can't be penalized meaningfully)
-          keep_cols <- apply(X_lasso, 2, function(x) length(unique(na.omit(x))) > 1)
-          if (!all(keep_cols)) X_lasso <- X_lasso[, keep_cols, drop = FALSE]
-          kept_candidate_vars <- candidate_vars[keep_cols]
-
-          # if no lasso columns left, skip this imputation
-          if (ncol(X_lasso) == 0) {
-            selected_list[[i]] <- character(0)
-            next
-          }
-
-          # Ensure rows match between X_core and X_lasso
-          if (nrow(X_core) != nrow(X_lasso)) {
-            # defensive: this should not happen since both are built from df_imp, but check anyway
-            showNotification("Row mismatch between core and lasso matrices — aborting this imputation", type = "error")
-            selected_list[[i]] <- character(0)
-            next
-          }
-
-          X_full <- if (ncol(X_core) > 0) cbind(X_core, X_lasso) else X_lasso
-
-          penalty <- c(rep(0, ncol(X_core)), rep(1, ncol(X_lasso)))
-
-          # run cross-validated glmnet — wrap in tryCatch to avoid halting app
-          cvfit <- tryCatch({
-            glmnet::cv.glmnet(x = X_full, y = df_imp[[outcome_var]], alpha = alpha_val,
-                              nfolds = max(2, as.integer(nfolds_val)),
-                              family = family_type, standardize = standardize_val,
-                              penalty.factor = penalty)
-          }, error = function(e) {
-            showNotification(paste("cv.glmnet failed on imputation", i, ":", e$message), type = "error")
-            return(NULL)
-          })
-          if (is.null(cvfit)) {
-            selected_list[[i]] <- character(0)
-            next
-          }
-
-          # Extract coefficients at chosen lambda (lambda_choice can be "lambda.1se" or "lambda.min")
-          coefs <- coef(cvfit, s = lambda_choice)
-          sel <- rownames(coefs)[as.numeric(coefs) != 0]
-          sel <- setdiff(sel, "(Intercept)")
-
-          # keep only those that correspond to candidate (X_lasso) columns
-          # note: glmnet names should match colnames(X_full); X_lasso columns are last ncol(X_lasso)
-          sel <- intersect(sel, colnames(X_lasso))
-
-          # map selections back to original candidate variable names (kept_candidate_vars)
-          # Usually column names match candidate_vars, so this is direct
-          selected_list[[i]] <- sel
-        } # end imputations loop
-
-        incProgress(0.9, detail = "Stability-based selection")
-
-        # -------------------------------------------------
-        # 6) Stability-based selection across imputations
-        # -------------------------------------------------
-        all_selected <- unique(unlist(selected_list))
-        if (length(all_selected) == 0) {
-          stop("No covariates selected across imputations.")
-        }
-
-        selection_freq <- sapply(all_selected, function(v) {
-          mean(sapply(selected_list, function(x) v %in% x))
-        })
-
-        final_selected <- names(selection_freq)[selection_freq >= threshold_val]
-        if (length(final_selected) == 0) {
-          stop("No covariates stable across imputations.")
-        }
-
-        incProgress(0.95, detail = "Refitting final model across imputations")
-
-        # -------------------------------------------------
-        # 7) POST-LASSO REFIT per imputation
-        # -------------------------------------------------
-        # Build final formula using core_terms (formula syntax) + final_selected (raw var names)
-        # final_selected are columns from X_lasso (should match candidate var names)
-        final_rhs_terms <- c(core_terms, final_selected)
-        final_rhs_terms <- unique(final_rhs_terms)
-        final_formula <- as.formula(paste(outcome_var, "~", paste(final_rhs_terms, collapse = " + ")))
-
-        for (i in seq_len(m)) {
-          df_imp <- df
-          df_imp[, candidate_vars] <- mice::complete(imp, action = i)
-
-          # fit final model on imputed set
-          final_models[[i]] <- tryCatch({
-            if (family_type == "gaussian") {
-              stats::lm(final_formula, data = df_imp)
-            } else {
-              stats::glm(final_formula, data = df_imp, family = stats::binomial())
-            }
-          }, error = function(e) {
-            showNotification(paste("Final refit failed on imputation", i, ":", e$message), type = "warning")
-            return(NULL)
-          })
-        }
-
-        # Remove nulls (failed fits)
-        final_models <- final_models[!sapply(final_models, is.null)]
-        if (length(final_models) == 0) stop("All post-LASSO refits failed.")
-
-        # -------------------------------------------------
-        # 8) Pooling: try to pool if as.mira is available; otherwise return per-imputation list
-        # -------------------------------------------------
-        pooled_model <- NULL
-        if (exists("as.mira", where = asNamespace("mice"), inherits = FALSE)) {
-          # as.mira sometimes isn't exported; try mice::as.mira
-          mira_obj <- tryCatch(mice::as.mira(final_models), error = function(e) NULL)
-          if (!is.null(mira_obj)) {
-            pooled_model <- tryCatch(mice::pool(mira_obj), error = function(e) {
-              showNotification(paste("Pooling failed:", e$message), type = "warning")
-              NULL
-            })
-          }
-        }
-
-        # If pooling not available, keep per-imputation models and warn
-        if (is.null(pooled_model)) {
-          showNotification("Pooled model not available; returning per-imputation models.", type = "message", duration = 3)
-        }
-
-        list(
-          model = if (!is.null(pooled_model)) pooled_model else final_models,
-          per_imputation_models = final_models,
-          selected_covariates = final_selected,
-          selection_frequency = selection_freq
+        run_lasso_selection(
+          df = df,
+          selected_outcome = selected_outcome(),
+          weather_vars = weather_vars,
+          fe_vars = fe_vars,
+          int_vars = int_vars,
+          valid_vl = valid_vl(),
+          model_type = input$model_type,
+          alpha = alpha_val,
+          lambda_choice = lambda_choice,
+          nfolds = nfolds_val,
+          standardize = standardize_val,
+          mi_m = m_val,
+          mi_maxit = maxit_val,
+          stability_threshold = threshold_val
         )
-      }) # end withProgress
-    }) # end eventReactive
+      })
+    })
 
     # Showing notifications and updating status based on Lasso execution
     observeEvent(input$run_lasso, {

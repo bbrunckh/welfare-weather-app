@@ -35,6 +35,7 @@ mod_1_07_results_server <- function(id,
                                      selected_weather,
                                      survey_weather,
                                      selected_model,
+                                     model_type,
                                      tabset_id,
                                      tabset_session = NULL) {
   moduleServer(id, function(input, output, session) {
@@ -131,7 +132,8 @@ mod_1_07_results_server <- function(id,
           weather_terms     = mf$weather_terms,
           interaction_terms = mf$interaction_terms,
           label_fun         = get_label,
-          engine            = mf$engine
+          engine            = mf$engine,
+          is_logistic       = is_logistic_fit(mf)
         )
       })
 

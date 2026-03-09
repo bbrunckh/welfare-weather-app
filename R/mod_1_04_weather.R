@@ -38,10 +38,14 @@ mod_1_04_weather_server <- function(id, variable_list, selected_surveys, survey_
 
     output$weather_selector_ui <- renderUI({
       wl <- weather_vars()
+
+      choice_labels <- paste0(wl$label, " (", wl$name, ")")
+      choice_map <- stats::setNames(wl$name, choice_labels)
+
       shiny::selectizeInput(
         inputId  = ns("weather_variable_selector"),
         label    = "Weather variables",
-        choices  = setNames(wl$name, wl$label),
+        choices  = choice_map,
         selected = wl$name[1],
         multiple = TRUE,
         options  = list(

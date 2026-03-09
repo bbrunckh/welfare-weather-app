@@ -706,7 +706,8 @@ make_regtable <- function(fit1, fit2, fit3,
                           weather_terms     = character(0),
                           interaction_terms = character(0),
                           label_fun         = identity,
-                          engine            = "fixest") {
+                          engine            = "fixest",
+                          is_logistic       = FALSE) {
 
   if (!inherits(fit1, "fixest") || !inherits(fit2, "fixest") || !inherits(fit3, "fixest")) {
     return(htmltools::tags$p("All models must be fixest objects."))
@@ -742,7 +743,6 @@ make_regtable <- function(fit1, fit2, fit3,
     if (is.na(idx)) list(est = "", se = "") else list(est = coef_list$est[idx], se = coef_list$se[idx])
   }
 
-  # --- Build HTML table -----------------------------------------------------
   css <- "
     .aer-table { border-collapse:collapse; font-family:'Times New Roman',Times,serif; font-size:14px; margin:20px 0; }
     .aer-table th, .aer-table td { padding:2px 14px; text-align:center; }
@@ -772,7 +772,6 @@ make_regtable <- function(fit1, fit2, fit3,
 
   body_rows <- ""
   for (v in all_vars) {
-    # lab <- tryCatch(label_fun(v), error = function(e) v) # old, where it matches variable lables to names, but this is inconsistent.
     lab <- v
     v1 <- lookup(c1, v)
     v2 <- lookup(c2, v)
@@ -791,9 +790,11 @@ make_regtable <- function(fit1, fit2, fit3,
   }
 
   # --- Fit statistics -------------------------------------------------------
-  safe_nobs <- function(fit) tryCatch(formatC(fit$nobs, format = "d", big.mark = ","), error = function(e) "")
-  safe_r2   <- function(fit) tryCatch(formatC(fixest::r2(fit, "r2"), format = "f", digits = 3), error = function(e) "")
+  safe_nobs <- function(fit) tryCatch(formatC(stats::nobs(fit), format = "d", big.mark = ","), error = function(e) "")
+  safe_r2   <- function(fit) tryCatch(formatC(fixest::r2(fit, "r2"),  format = "f", digits = 3), error = function(e) "")
   safe_wr2  <- function(fit) tryCatch(formatC(fixest::r2(fit, "wr2"), format = "f", digits = 3), error = function(e) "")
+  safe_pr2  <- function(fit) tryCatch(formatC(fixest::r2(fit, "pr2"), format = "f", digits = 3), error = function(e) "")
+  safe_aic  <- function(fit) tryCatch(formatC(stats::AIC(fit), format = "f", digits = 0, big.mark = ","), error = function(e) "")
   safe_fe   <- function(fit) {
     nms <- names(fit$fixef_sizes)
     if (is.null(nms)) "\u2014" else paste(nms, collapse = ", ")
@@ -806,22 +807,34 @@ make_regtable <- function(fit1, fit2, fit3,
            "<td>", fn(fit3), "</td></tr>")
   }
 
+  stats_core <- if (is_logistic) {
+    paste0(
+      stat_row("Observations", safe_nobs),
+      stat_row("McFadden R\u00B2", safe_pr2),
+      stat_row("AIC", safe_aic),
+      stat_row("Fixed effects", safe_fe)
+    )
+  } else {
+    paste0(
+      stat_row("Observations", safe_nobs),
+      stat_row("R\u00B2", safe_r2),
+      stat_row("Within R\u00B2", safe_wr2),
+      stat_row("Fixed effects", safe_fe)
+    )
+  }
+
   stats <- paste0(
     "<tr class='botline'><td style='border-top:1px solid #000;'></td>",
     "<td style='border-top:1px solid #000;'></td>",
     "<td style='border-top:1px solid #000;'></td>",
     "<td style='border-top:1px solid #000;'></td></tr>",
-    stat_row("Observations", safe_nobs),
-    stat_row("R\u00B2", safe_r2),
-    stat_row("Within R\u00B2", safe_wr2),
-    stat_row("Fixed effects", safe_fe),
+    stats_core,
     "<tr><td style='border-bottom:2px solid #000;'></td>",
     "<td style='border-bottom:2px solid #000;'></td>",
     "<td style='border-bottom:2px solid #000;'></td>",
     "<td style='border-bottom:2px solid #000;'></td></tr>"
   )
 
-  # --- Significance note ----------------------------------------------------
   note <- "<tr><td colspan='4' style='text-align:left; font-size:11px; padding-top:6px; color:#555;'>
     \u2020 p&lt;0.1, * p&lt;0.05, ** p&lt;0.01, *** p&lt;0.001
   </td></tr>"

@@ -44,10 +44,14 @@ mod_1_03_outcome_server <- function(id, variable_list, survey_data) {
     output$outcome_ui <- renderUI({
       req(available_outcomes())
       outs <- available_outcomes()
+
+      choice_labels <- paste0(outs$label, " (", outs$name, ")")
+      choice_map <- stats::setNames(outs$name, choice_labels)
+
       selectizeInput(
         inputId  = ns("outcome"),
         label    = "Outcome variable",
-        choices  = setNames(outs$name, outs$label),
+        choices  = choice_map,
         selected = outs$name[1],
         multiple = FALSE
       )

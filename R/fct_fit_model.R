@@ -191,7 +191,213 @@ ENGINE_REGISTRY <- list(
 )
 
 # ---------------------------------------------------------------------------- #
-# fit_model()                                                                   #
+# run_lasso()                                                                  #
+# ---------------------------------------------------------------------------- #
+
+#' Run MI + stability LASSO and post-LASSO refits
+#'
+#' @param df data.frame with analysis variables
+#' @param outcome_var character scalar outcome name
+#' @param weather_vars character vector weather vars
+#' @param fe_vars character vector fixed-effect vars (kept unpenalized)
+#' @param int_vars character vector interaction moderators
+#' @param valid_vl data.frame variable list with columns name, ind, hh, area, firm
+#' @param model_type character scalar ("Linear regression" / "Logistic regression")
+#' @param alpha numeric glmnet alpha
+#' @param lambda_choice character lambda selector ("lambda.1se" / "lambda.min")
+#' @param nfolds integer CV folds
+#' @param standardize logical
+#' @param mi_m integer number of imputations
+#' @param mi_maxit integer mice iterations
+#' @param stability_threshold numeric in (0,1)
+#'
+#' @return list(model, per_imputation_models, selected_covariates, selection_frequency)
+#' @export
+run_lasso_selection <- function(
+  df,
+  selected_outcome,
+  weather_vars,
+  fe_vars = character(0),
+  int_vars = character(0),
+  valid_vl,
+  model_type = "Linear regression",
+  alpha = 1,
+  lambda_choice = "lambda.1se",
+  nfolds = 10,
+  standardize = TRUE,
+  mi_m = 5,
+  mi_maxit = 5,
+  stability_threshold = 0.5
+) {
+  df <- as.data.frame(df)
+
+  # Same outcome handling pattern as fit_model()
+  y_var        <- selected_outcome$name
+  outcome_type <- selected_outcome$type
+
+  if (!y_var %in% names(df)) {
+    stop(sprintf("Outcome variable '%s' not found in data.", y_var))
+  }
+
+  is_logit <- identical(model_type, "Logistic regression")
+
+  if (is_logit) {
+    if (!identical(outcome_type, "logical")) {
+      warning("Logistic regression requested but outcome type is not 'logical' — falling back to linear.")
+      is_logit <- FALSE
+    } else {
+      y_vals <- df[[y_var]][!is.na(df[[y_var]])]
+      if (!all(y_vals %in% c(0, 1, TRUE, FALSE))) {
+        warning("Outcome values are not 0/1 — falling back to linear.")
+        is_logit <- FALSE
+      }
+    }
+  }
+
+  if (is_logit) {
+    df[[y_var]] <- as.integer(as.logical(df[[y_var]]))
+  }
+
+  df <- df[!is.na(df[[y_var]]), , drop = FALSE]
+  if (nrow(df) < 30) stop("Too few observations after removing missing outcome.")
+
+  interaction_terms <- character(0)
+  if (length(int_vars) > 0 && length(weather_vars) > 0) {
+    interaction_terms <- as.vector(outer(int_vars, weather_vars, paste, sep = ":"))
+  }
+
+  core_terms <- unique(c(weather_vars, fe_vars, interaction_terms))
+  core_terms <- core_terms[core_terms %in% names(df)]
+
+  # Drop FE terms with <2 observed levels (prevents contrasts errors)
+  if (length(fe_vars) > 0) {
+    fe_keep <- vapply(fe_vars, function(v) {
+      if (!v %in% names(df)) return(FALSE)
+      xv <- df[[v]]
+      length(unique(stats::na.omit(xv))) >= 2
+    }, logical(1))
+    fe_vars <- fe_vars[fe_keep]
+    core_terms <- unique(c(weather_vars, fe_vars, interaction_terms))
+    core_terms <- core_terms[core_terms %in% names(df)]
+  }
+
+  if (is.null(valid_vl) || nrow(valid_vl) == 0) stop("Variable list not available or empty.")
+  allowed <- valid_vl$name[valid_vl$ind == 1 | valid_vl$hh == 1 | valid_vl$area == 1 | valid_vl$firm == 1]
+  exclude <- unique(c(y_var, core_terms))
+  candidate_vars <- intersect(setdiff(names(df), exclude), allowed)
+
+  if (length(candidate_vars) > 0) {
+    is_num <- vapply(df[, candidate_vars, drop = FALSE], is.numeric, logical(1))
+    candidate_vars <- candidate_vars[is_num]
+  }
+  if (length(candidate_vars) == 0) stop("No valid numeric candidate covariates available for LASSO.")
+
+  non_all_na <- vapply(df[, candidate_vars, drop = FALSE], function(x) any(!is.na(x)), logical(1))
+  candidate_vars <- candidate_vars[non_all_na]
+  if (length(candidate_vars) == 0) stop("No candidate variables with observed values remain for imputation/LASSO.")
+
+  m <- max(1, as.integer(mi_m))
+  imp <- mice::mice(
+    df[, candidate_vars, drop = FALSE],
+    m = m,
+    maxit = max(1, as.integer(mi_maxit)),
+    method = "pmm",
+    print = FALSE
+  )
+
+  selected_list <- vector("list", m)
+  final_models  <- vector("list", m)
+  family_type <- if (is_logit) "binomial" else "gaussian"
+
+  for (i in seq_len(m)) {
+    df_imp <- df
+    df_imp[, candidate_vars] <- mice::complete(imp, action = i)
+
+    # Re-drop FE terms that collapse to one level in this imputation
+    fe_vars_i <- fe_vars[vapply(fe_vars, function(v) {
+      length(unique(stats::na.omit(df_imp[[v]]))) >= 2
+    }, logical(1))]
+    core_terms_i <- unique(c(weather_vars, fe_vars_i, interaction_terms))
+    core_terms_i <- core_terms_i[core_terms_i %in% names(df_imp)]
+    core_formula_i <- if (length(core_terms_i) == 0) stats::as.formula("~ 1")
+    else stats::as.formula(paste("~", paste(core_terms_i, collapse = " + ")))
+
+    mm_core <- stats::model.matrix(core_formula_i, data = df_imp)
+    X_core <- if (ncol(mm_core) > 1) mm_core[, -1, drop = FALSE] else matrix(nrow = nrow(df_imp), ncol = 0)
+
+    X_lasso <- as.matrix(df_imp[, candidate_vars, drop = FALSE])
+    keep_cols <- apply(X_lasso, 2, function(x) length(unique(stats::na.omit(x))) > 1)
+    X_lasso <- X_lasso[, keep_cols, drop = FALSE]
+
+    if (ncol(X_lasso) == 0) {
+      selected_list[[i]] <- character(0)
+      next
+    }
+
+    X_full <- if (ncol(X_core) > 0) cbind(X_core, X_lasso) else X_lasso
+    penalty <- c(rep(0, ncol(X_core)), rep(1, ncol(X_lasso)))
+
+    cvfit <- glmnet::cv.glmnet(
+      x = X_full,
+      y = df_imp[[y_var]],
+      alpha = alpha,
+      nfolds = max(2, as.integer(nfolds)),
+      family = family_type,
+      standardize = isTRUE(standardize),
+      penalty.factor = penalty
+    )
+
+    coefs <- stats::coef(cvfit, s = lambda_choice)
+    sel <- rownames(coefs)[as.numeric(coefs) != 0]
+    sel <- setdiff(sel, "(Intercept)")
+    sel <- intersect(sel, colnames(X_lasso))
+    selected_list[[i]] <- sel
+  }
+
+  all_selected <- unique(unlist(selected_list))
+  if (length(all_selected) == 0) stop("No covariates selected across imputations.")
+
+  selection_freq <- sapply(all_selected, function(v) mean(vapply(selected_list, function(x) v %in% x, logical(1))))
+  final_selected <- names(selection_freq)[selection_freq >= stability_threshold]
+  if (length(final_selected) == 0) stop("No covariates stable across imputations.")
+
+  for (i in seq_len(m)) {
+    df_imp <- df
+    df_imp[, candidate_vars] <- mice::complete(imp, action = i)
+
+    fe_vars_i <- fe_vars[vapply(fe_vars, function(v) {
+      length(unique(stats::na.omit(df_imp[[v]]))) >= 2
+    }, logical(1))]
+    rhs_i <- unique(c(weather_vars, fe_vars_i, interaction_terms, final_selected))
+    rhs_i <- rhs_i[rhs_i %in% names(df_imp)]
+    final_formula_i <- stats::as.formula(paste(y_var, "~", paste(rhs_i, collapse = " + ")))
+
+    final_models[[i]] <- if (family_type == "gaussian") {
+      stats::lm(final_formula_i, data = df_imp)
+    } else {
+      stats::glm(final_formula_i, data = df_imp, family = stats::binomial())
+    }
+  }
+
+  final_models <- final_models[!vapply(final_models, is.null, logical(1))]
+  if (length(final_models) == 0) stop("All post-LASSO refits failed.")
+
+  pooled_model <- NULL
+  mira_obj <- tryCatch(mice::as.mira(final_models), error = function(e) NULL)
+  if (!is.null(mira_obj)) {
+    pooled_model <- tryCatch(mice::pool(mira_obj), error = function(e) NULL)
+  }
+
+  list(
+    model = if (!is.null(pooled_model)) pooled_model else final_models,
+    per_imputation_models = final_models,
+    selected_covariates = final_selected,
+    selection_frequency = selection_freq
+  )
+}
+
+# ---------------------------------------------------------------------------- #
+# fit_model()                                                                  #
 # ---------------------------------------------------------------------------- #
 
 #' Fit progressive weather-welfare regression models
