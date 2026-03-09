@@ -94,7 +94,7 @@ mod_1_07_results_server <- function(id,
     # ---- Render outputs ------------------------------------------------------
 
     observeEvent(model_fit_val(), {
-      req(model_fit_val())
+      req(model_fit_val(), selected_weather())
 
       nid <- shiny::showNotification("Preparing results...",
                                      type = "message", duration = NULL,
@@ -140,26 +140,32 @@ mod_1_07_results_server <- function(id,
       output$effectplot1 <- renderPlot({
         req(model_fit_val(), length(model_fit_val()$weather_terms) >= 1)
         mf <- model_fit_val()
+        sw <- selected_weather()
         make_weather_effect_plot(
           fit               = native_fit(mf$fit3),
           pred_var          = mf$weather_terms[1],
           interaction_terms = mf$interaction_terms,
-          is_binned         = identical(selected_weather()$cont_binned[1], "Binned"),
+          is_binned         = identical(sw$cont_binned[1], "Binned"),
           label_fun         = get_label,
-          engine            = mf$engine
+          engine            = mf$engine,
+          selected_weather  = sw,
+          weather_df        = survey_weather()
         )
       })
 
       output$effectplot2 <- renderPlot({
         req(model_fit_val(), length(model_fit_val()$weather_terms) >= 2)
         mf <- model_fit_val()
+        sw <- selected_weather()
         make_weather_effect_plot(
           fit               = native_fit(mf$fit3),
           pred_var          = mf$weather_terms[2],
           interaction_terms = mf$interaction_terms,
-          is_binned         = identical(selected_weather()$cont_binned[2], "Binned"),
+          is_binned         = identical(sw$cont_binned[2], "Binned"),
           label_fun         = get_label,
-          engine            = mf$engine
+          engine            = mf$engine,
+          selected_weather  = sw,
+          weather_df        = survey_weather()
         )
       })
 
@@ -171,15 +177,15 @@ mod_1_07_results_server <- function(id,
           shiny::tabPanel(
             title = "Results",
             value = "results",
-            shiny::h4("Marginal effect of weather on outcome"),
-            bslib::card(shiny::plotOutput(ns("coefplot"))),
-            shiny::br(),
             shiny::h4("Predicted outcome vs weather"),
             bslib::layout_columns(
               col_widths = c(6, 6),
               bslib::card(shiny::plotOutput(ns("effectplot1"), height = "300px")),
               bslib::card(shiny::plotOutput(ns("effectplot2"), height = "300px"))
             ),
+            shiny::br(),
+            shiny::h4("Marginal effect of weather on outcome"),
+            bslib::card(shiny::plotOutput(ns("coefplot"))),
             shiny::br(),
             shiny::h4("Regression results"),
             shiny::div(

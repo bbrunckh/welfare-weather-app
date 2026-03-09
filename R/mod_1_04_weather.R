@@ -106,6 +106,10 @@ mod_1_04_weather_server <- function(id, variable_list, selected_surveys, survey_
                     ns(paste0(prefix, "binningMethod")),
                     "Binning method:",
                     choices = c("Equal frequency", "Equal width", "K-means")
+                  ),
+                  shiny::helpText(
+                    "Binning keeps only unique bins, duplicates are dropped. This can lead to fewer bins than specified.",
+                    style = "color: red; font-size: 12px;"
                   )
                 )
               ),

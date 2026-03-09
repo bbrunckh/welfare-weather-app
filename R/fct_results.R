@@ -202,6 +202,29 @@ plot_diagnostics <- function(model, engine = "fixest") {
 }
 
 
+#' Get first displayed bin label for a binned weather variable
+#'
+#' Uses the same ordering logic as `plot_weather_dist()`: factor level order
+#' if factor, otherwise sorted unique character values.
+#'
+#' @param df A data frame containing column `hv`.
+#' @param hv Scalar character. Weather variable column name.
+#'
+#' @return Character scalar first bin label, or `NA_character_`.
+#' @export
+get_first_bin_label <- function(df, hv) {
+  if (is.null(df) || is.na(hv) || !(hv %in% names(df))) return(NA_character_)
+
+  x <- df[[hv]]
+  x <- x[!is.na(x)]
+  if (length(x) == 0) return(NA_character_)
+
+  labels <- if (is.factor(x)) levels(x) else sort(unique(as.character(x)))
+  if (length(labels) == 0) return(NA_character_)
+
+  labels[[1]]
+}
+
 # ---------------------------------------------------------------------------- #
 # Plot / table builders                                                        #
 # ---------------------------------------------------------------------------- #
@@ -319,13 +342,11 @@ make_coefplot <- function(fit1, fit2, fit3,
 #' @return A `ggplot` object.
 #'
 #' @export
-make_weather_effect_plot <- function(fit, pred_var,
-                                     interaction_terms = character(0),
-                                     is_binned         = FALSE,
-                                     label_fun         = identity,
-                                     engine            = "fixest") {
+make_weather_effect_plot <- function(fit, pred_var, interaction_terms, is_binned,
+                                     label_fun, engine, selected_weather = NULL,
+                                     weather_df = NULL) {
 
-  pred_lab   <- label_fun(pred_var)
+  pred_lab <- label_fun(pred_var)
   y_var_name <- tryCatch(
     as.character(stats::formula(fit)[[2]]),
     error = function(e) "outcome"
@@ -336,7 +357,6 @@ make_weather_effect_plot <- function(fit, pred_var,
     as.data.frame(stats::model.matrix(fit)),
     error = function(e) tryCatch(stats::model.frame(fit), error = function(e2) NULL)
   )
-  pred_vals <- if (!is.null(mf) && pred_var %in% names(mf)) mf[[pred_var]] else NULL
 
   blank_plot <- function(msg) {
     ggplot2::ggplot() +
@@ -345,150 +365,339 @@ make_weather_effect_plot <- function(fit, pred_var,
       ggplot2::theme_void()
   }
 
-  if (is.null(pred_vals))
-    return(blank_plot(paste0("'", pred_var, "' not found in model frame.")))
+  # --- Resolve pred columns (exact or binned prefix match) ------------------
+  pred_esc <- gsub("([\\[\\]\\(\\)\\^\\$\\.\\*\\+\\?])", "\\\\\\1", pred_var)
 
-  if (!is.factor(pred_vals) && !any(is.finite(pred_vals)))
-    return(blank_plot(paste0("No finite values for '", pred_var, "' — cannot build effect plot.")))
-
-  if (!requireNamespace("fixest", quietly = TRUE))
-    return(blank_plot("Package 'fixest' is required."))
-
-  # Resolve moderator
-  modx_var <- NULL
-  modx_lab <- NULL
-  if (length(interaction_terms) > 0) {
-    match_term <- grep(paste0("^", pred_var, ":"), interaction_terms, value = TRUE)
-    if (length(match_term) > 0) {
-      modx_var <- strsplit(match_term[1], ":")[[1]][2]
-      modx_lab <- label_fun(modx_var)
-    }
+  if (!is.null(mf) && pred_var %in% names(mf) && !is_binned) {
+    # Continuous: exact column exists
+    pred_cols     <- pred_var
+  } else if (!is.null(mf) && is_binned) {
+    # Binned: match columns containing pred_var[
+    pred_cols <- grep(paste0("^", pred_esc, "[\\[\\(]"), names(mf), value = TRUE)
+  } else {
+    pred_cols     <- character(0)
   }
 
-  p <- tryCatch({
-    mm     <- as.data.frame(stats::model.matrix(fit))
-    betas  <- stats::coef(fit)
-    vcov_m <- stats::vcov(fit)
-    n_grid <- 50L
+  if (!length(pred_cols))
+    return(blank_plot(paste0("'", pred_cols, "' not found in model frame.")))
 
-    # Manual prediction: X_new %*% beta, SE via delta method sqrt(diag(X V X'))
-    fixest_predict_manual <- function(X_new) {
-      common <- intersect(colnames(X_new), names(betas[!is.na(betas)]))
-      X_sub  <- as.matrix(X_new[, common, drop = FALSE])
-      b_sub  <- betas[common]
-      v_sub  <- vcov_m[common, common, drop = FALSE]
-      list(
-        fit = as.numeric(X_sub %*% b_sub),
-        se  = sqrt(pmax(0, rowSums((X_sub %*% v_sub) * X_sub)))
-      )
-    }
+  # ========================================================================= #
+  # BINNED PATH                                                               #
+  # ========================================================================= #
+  if (is_binned) {
+    p <- tryCatch({
+      if (!requireNamespace("fixest", quietly = TRUE))
+        return(blank_plot("Package 'fixest' is required."))
 
-    x_seq <- if (is_binned || is.factor(mm[[pred_var]])) {
-      sort(unique(mm[[pred_var]]))
-    } else {
-      seq(min(mm[[pred_var]], na.rm = TRUE),
-          max(mm[[pred_var]], na.rm = TRUE),
-          length.out = n_grid)
-    }
+      mm <- as.data.frame(stats::model.matrix(fit))
+      ct <- as.data.frame(fixest::coeftable(fit, se = "hetero"))
+      ct$term <- rownames(ct)
 
-    other_means <- lapply(mm, function(col) {
-      if (is.numeric(col)) mean(col, na.rm = TRUE)
-      else names(sort(table(col), decreasing = TRUE))[1]
-    })
+      bin_cols <- grep(paste0("^", pred_esc, "[\\[\\(]"), names(mm), value = TRUE)
+      bin_cols <- bin_cols[!grepl(":", bin_cols)]
+      if (length(bin_cols) == 0) return(blank_plot("No binned columns found in model matrix."))
 
-    if (!is.null(modx_var) && modx_var %in% names(mm)) {
-      modx_col    <- mm[[modx_var]]
-      modx_uniq   <- sort(unique(modx_col))
-      is_cat_modx <- is.factor(modx_col) || is.character(modx_col) ||
-                     length(modx_uniq) <= 5
+      ct_main <- ct[
+        grepl(paste0("^", pred_esc, "[\\[\\(]"), ct$term) & !grepl(":", ct$term),
+        c("term", "Estimate", "Std. Error"),
+        drop = FALSE
+      ]
 
-      modx_vals <- if (is_cat_modx) {
-        modx_uniq
-      } else {
-        modx_mean <- mean(modx_col, na.rm = TRUE)
-        modx_sd   <- stats::sd(modx_col, na.rm = TRUE)
-        c(modx_mean - modx_sd, modx_mean, modx_mean + modx_sd)
-      }
+      bins_df <- data.frame(term = sort(bin_cols), stringsAsFactors = FALSE)
+      bins_df <- dplyr::left_join(bins_df, ct_main, by = "term")
+      bins_df$Estimate[is.na(bins_df$Estimate)] <- 0
+      bins_df$`Std. Error`[is.na(bins_df$`Std. Error`)] <- 0
+      bins_df$bin_index <- seq_len(nrow(bins_df))
+      bins_df$bin_label <- bins_df$term
 
-      grid     <- expand.grid(.pred = x_seq, .modx = modx_vals, stringsAsFactors = FALSE)
-      new_data <- as.data.frame(lapply(other_means, rep, times = nrow(grid)))
-      new_data[[pred_var]] <- grid$.pred
-      new_data[[modx_var]] <- grid$.modx
-
-      for (nm in colnames(mm)) {
-        if (grepl(":", nm, fixed = TRUE) && !nm %in% names(new_data)) {
-          parts <- strsplit(nm, ":")[[1]]
-          if (all(parts %in% names(new_data)))
-            new_data[[nm]] <- Reduce(`*`, new_data[parts])
+      # Omitted note from first bin label in configured weather data
+      omitted_note <- NULL
+      if (!is.null(weather_df)) {
+        first_bin <- get_first_bin_label(weather_df, pred_var)
+        if (!is.na(first_bin) && nzchar(first_bin)) {
+          omitted_note <- paste0("Omitted reference bin: ", first_bin, " at y = 0.")
         }
       }
-      if ("(Intercept)" %in% colnames(mm)) new_data[["(Intercept)"]] <- 1
 
-      preds        <- fixest_predict_manual(new_data)
-      new_data$fit <- preds$fit
-      new_data$se  <- preds$se
+      # Rebuild full table with all bins; missing coefficient => omitted reference (0 effect)
+      bins_df <- data.frame(term = sort(bin_cols), stringsAsFactors = FALSE)
+      bins_df <- dplyr::left_join(bins_df, ct_main, by = "term")
+      bins_df$Estimate[is.na(bins_df$Estimate)] <- 0
+      bins_df$`Std. Error`[is.na(bins_df$`Std. Error`)] <- 0
+      bins_df$bin_index <- seq_len(nrow(bins_df))
+      bins_df$bin_label <- bins_df$term
 
-      new_data$.modx_label <- factor(
-        if (is_cat_modx) as.character(new_data[[modx_var]])
-        else paste0(modx_lab, " = ", round(new_data[[modx_var]], 2))
+      # Detect moderator (if any)
+      modx_var <- NULL
+      modx_lab <- NULL
+      if (length(interaction_terms) > 0) {
+        mt <- interaction_terms[grepl(pred_var, interaction_terms, fixed = TRUE)]
+        if (length(mt) > 0) {
+          parts <- strsplit(mt[1], ":")[[1]]
+          modx_var <- parts[parts != pred_var][1]
+          if (!is.na(modx_var) && nzchar(modx_var)) modx_lab <- label_fun(modx_var)
+        }
+      }
+
+      # No moderator: single line
+      if (is.null(modx_var)) {
+        bins_df$conf.low  <- bins_df$Estimate - 1.96 * bins_df$`Std. Error`
+        bins_df$conf.high <- bins_df$Estimate + 1.96 * bins_df$`Std. Error`
+
+        return(
+          ggplot2::ggplot(
+            bins_df,
+            ggplot2::aes(x = bin_index, y = Estimate, ymin = conf.low, ymax = conf.high)
+          ) +
+            ggplot2::geom_hline(yintercept = 0, linetype = "dashed", colour = "grey50") +
+            ggplot2::geom_pointrange(colour = "steelblue", size = 0.65) +
+            ggplot2::geom_line(ggplot2::aes(group = 1), colour = "steelblue", linewidth = 0.6) +
+            ggplot2::scale_x_continuous(breaks = bins_df$bin_index, labels = bins_df$bin_label) +
+            ggplot2::labs(
+              title = paste("Effect of", pred_lab, "bins on", y_lab),
+              x = pred_lab,
+              y = paste("Effect on", y_lab),
+              caption = omitted_note
+            ) +
+            ggplot2::theme_minimal(base_size = 14) +
+            ggplot2::theme(
+              plot.title = ggplot2::element_text(face = "bold", hjust = 0.5, size = 11),
+              plot.caption = ggplot2::element_text(hjust = 0, size = 9, colour = "grey40"),
+              axis.text.x = ggplot2::element_text(angle = 90, hjust = 1, vjust = 0.5)
+            )
+        )
+      }
+
+      # Moderator present: overlay lines (same plot, different colors)
+      ct_int <- ct[
+        grepl(paste0(pred_esc, "[\\[\\(]"), ct$term) &
+          grepl(":", ct$term) &
+          grepl(modx_var, ct$term, fixed = TRUE),
+        c("term", "Estimate", "Std. Error"),
+        drop = FALSE
+      ]
+      int_est <- stats::setNames(ct_int$Estimate, ct_int$term)
+      int_se  <- stats::setNames(ct_int$`Std. Error`, ct_int$term)
+
+      # Moderator values
+      if (modx_var %in% names(mm)) {
+        modx_vals <- sort(unique(mm[[modx_var]]))
+        if (length(modx_vals) > 5 && is.numeric(modx_vals)) {
+          mu <- mean(mm[[modx_var]], na.rm = TRUE)
+          sd <- stats::sd(mm[[modx_var]], na.rm = TRUE)
+          modx_vals <- c(mu - sd, mu, mu + sd)
+        }
+      } else {
+        modx_vals <- c(0, 1)
+      }
+
+      # Build predictions/effects for every bin x moderator value
+      plot_df <- do.call(
+        rbind,
+        lapply(seq_len(nrow(bins_df)), function(i) {
+          bin_term <- bins_df$term[i]
+          b0 <- bins_df$Estimate[i]
+          v0 <- bins_df$`Std. Error`[i]^2
+
+          t1 <- paste0(bin_term, ":", modx_var)
+          t2 <- paste0(modx_var, ":", bin_term)
+          iterm <- if (t1 %in% names(int_est)) t1 else if (t2 %in% names(int_est)) t2 else NA_character_
+          has_int <- !is.na(iterm)
+
+          do.call(rbind, lapply(modx_vals, function(mv) {
+            b <- b0 + if (has_int) int_est[[iterm]] * mv else 0
+            s <- sqrt(v0 + if (has_int) (mv^2) * int_se[[iterm]]^2 else 0)
+            data.frame(
+              bin_index = bins_df$bin_index[i],
+              bin_label = bins_df$bin_label[i],
+              est = b,
+              conf.low = b - 1.96 * s,
+              conf.high = b + 1.96 * s,
+              modx = as.character(mv),
+              stringsAsFactors = FALSE
+            )
+          }))
+        })
       )
 
+      plot_df <- plot_df[order(plot_df$modx, plot_df$bin_index), , drop = FALSE]
+      plot_df$modx <- factor(plot_df$modx)
+
       ggplot2::ggplot(
-        new_data,
+        plot_df,
         ggplot2::aes(
-          x      = .data[[pred_var]],
-          y      = .data$fit,
-          colour = .data$.modx_label,
-          fill   = .data$.modx_label
+          x = bin_index, y = est, ymin = conf.low, ymax = conf.high,
+          colour = modx, group = modx
         )
       ) +
-        ggplot2::geom_ribbon(
-          ggplot2::aes(ymin = fit - 1.96 * se, ymax = fit + 1.96 * se),
-          alpha = 0.15, colour = NA
-        ) +
-        ggplot2::geom_line(linewidth = 0.9) +
+        ggplot2::geom_hline(yintercept = 0, linetype = "dashed", colour = "grey50") +
+        ggplot2::geom_pointrange(position = ggplot2::position_dodge(width = 0.2), size = 0.5) +
+        ggplot2::geom_line(position = ggplot2::position_dodge(width = 0.2), linewidth = 0.6) +
         ggplot2::scale_colour_brewer(palette = "Set1", name = modx_lab) +
-        ggplot2::scale_fill_brewer(palette = "Set1", name = modx_lab) +
+        ggplot2::scale_x_continuous(breaks = bins_df$bin_index, labels = bins_df$bin_label) +
         ggplot2::labs(
-          title = paste("Impact of", pred_lab, "by", modx_lab),
-          x     = pred_lab,
-          y     = paste("Predicted", y_lab)
+          title = paste("Effect of", pred_lab, "bins by", modx_lab),
+          x = pred_lab,
+          y = paste("Effect on", y_lab),
+          caption = omitted_note
         ) +
         ggplot2::theme_minimal(base_size = 14) +
         ggplot2::theme(
-          plot.title      = ggplot2::element_text(face = "bold", hjust = 0.5, size = 11),
-          legend.position = "bottom"
+          plot.title = ggplot2::element_text(face = "bold", hjust = 0.5, size = 11),
+          plot.caption = ggplot2::element_text(hjust = 0, size = 9, colour = "grey40"),
+          legend.position = "bottom",
+          axis.text.x = ggplot2::element_text(angle = 90, hjust = 1, vjust = 0.5)
         )
 
-    } else {
-      new_data             <- as.data.frame(lapply(other_means, rep, times = length(x_seq)))
-      new_data[[pred_var]] <- x_seq
-      if ("(Intercept)" %in% colnames(mm)) new_data[["(Intercept)"]] <- 1
+    }, error = function(e) blank_plot(paste0("Binned effect plot error: ", conditionMessage(e))))
 
-      preds        <- fixest_predict_manual(new_data)
-      new_data$fit <- preds$fit
-      new_data$se  <- preds$se
+    return(p)
+  }
 
-      ggplot2::ggplot(new_data, ggplot2::aes(x = .data[[pred_var]], y = .data$fit)) +
-        ggplot2::geom_ribbon(
-          ggplot2::aes(ymin = fit - 1.96 * se, ymax = fit + 1.96 * se),
-          alpha = 0.2, fill = "steelblue"
-        ) +
-        ggplot2::geom_line(colour = "steelblue", linewidth = 0.9) +
-        ggplot2::labs(
-          title = paste("Predicted", y_lab, "vs", pred_lab),
-          x     = pred_lab,
-          y     = paste("Predicted", y_lab)
-        ) +
-        ggplot2::theme_minimal(base_size = 14) +
-        ggplot2::theme(
-          plot.title = ggplot2::element_text(face = "bold", hjust = 0.5, size = 11)
-        )
+  # ========================================================================= #
+  # CONTINUOUS PATH                                                            #
+  # ========================================================================= #
+  if(!is_binned) {
+    pred_vals <- mf[[pred_var]]
+
+    if (!any(is.finite(pred_vals)))
+      return(blank_plot(paste0("No finite values for '", pred_var, "' — cannot build effect plot.")))
+
+    if (!requireNamespace("fixest", quietly = TRUE))
+      return(blank_plot("Package 'fixest' is required."))
+
+    # Resolve moderator
+    modx_var <- NULL
+    modx_lab <- NULL
+    if (length(interaction_terms) > 0) {
+      match_term <- grep(paste0("^", pred_var, ":"), interaction_terms, value = TRUE)
+      if (length(match_term) > 0) {
+        modx_var <- strsplit(match_term[1], ":")[[1]][2]
+        modx_lab <- label_fun(modx_var)
+      }
     }
-  },
-  error = function(e) blank_plot(paste0("fixest effect plot error: ", conditionMessage(e)))
-  )
-  p
+
+    p <- tryCatch({
+      mm     <- as.data.frame(stats::model.matrix(fit))
+      betas  <- stats::coef(fit)
+      vcov_m <- stats::vcov(fit)
+      n_grid <- 50L
+
+      # Manual prediction: X_new %*% beta, SE via delta method sqrt(diag(X V X'))
+      fixest_predict_manual <- function(X_new) {
+        common <- intersect(colnames(X_new), names(betas[!is.na(betas)]))
+        X_sub  <- as.matrix(X_new[, common, drop = FALSE])
+        b_sub  <- betas[common]
+        v_sub  <- vcov_m[common, common, drop = FALSE]
+        list(
+          fit = as.numeric(X_sub %*% b_sub),
+          se  = sqrt(pmax(0, rowSums((X_sub %*% v_sub) * X_sub)))
+        )
+      }
+
+      x_seq <- seq(min(mm[[pred_var]], na.rm = TRUE),
+                  max(mm[[pred_var]], na.rm = TRUE),
+                  length.out = n_grid)
+
+      other_means <- lapply(mm, function(col) {
+        if (is.numeric(col)) mean(col, na.rm = TRUE)
+        else names(sort(table(col), decreasing = TRUE))[1]
+      })
+
+      if (!is.null(modx_var) && modx_var %in% names(mm)) {
+        modx_col    <- mm[[modx_var]]
+        modx_uniq   <- sort(unique(modx_col))
+        is_cat_modx <- is.factor(modx_col) || is.character(modx_col) ||
+                      length(modx_uniq) <= 5
+
+        modx_vals <- if (is_cat_modx) {
+          modx_uniq
+        } else {
+          modx_mean <- mean(modx_col, na.rm = TRUE)
+          modx_sd   <- stats::sd(modx_col, na.rm = TRUE)
+          c(modx_mean - modx_sd, modx_mean, modx_mean + modx_sd)
+        }
+
+        grid     <- expand.grid(.pred = x_seq, .modx = modx_vals, stringsAsFactors = FALSE)
+        new_data <- as.data.frame(lapply(other_means, rep, times = nrow(grid)))
+        new_data[[pred_var]] <- grid$.pred
+        new_data[[modx_var]] <- grid$.modx
+
+        for (nm in colnames(mm)) {
+          if (grepl(":", nm, fixed = TRUE) && !nm %in% names(new_data)) {
+            parts <- strsplit(nm, ":")[[1]]
+            if (all(parts %in% names(new_data)))
+              new_data[[nm]] <- Reduce(`*`, new_data[parts])
+          }
+        }
+        if ("(Intercept)" %in% colnames(mm)) new_data[["(Intercept)"]] <- 1
+
+        preds        <- fixest_predict_manual(new_data)
+        new_data$fit <- preds$fit
+        new_data$se  <- preds$se
+
+        new_data$.modx_label <- factor(
+          if (is_cat_modx) as.character(new_data[[modx_var]])
+          else paste0(modx_lab, " = ", round(new_data[[modx_var]], 2))
+        )
+
+        ggplot2::ggplot(
+          new_data,
+          ggplot2::aes(
+            x      = .data[[pred_var]],
+            y      = .data$fit,
+            colour = .data$.modx_label,
+            fill   = .data$.modx_label
+          )
+        ) +
+          ggplot2::geom_ribbon(
+            ggplot2::aes(ymin = fit - 1.96 * se, ymax = fit + 1.96 * se),
+            alpha = 0.15, colour = NA
+          ) +
+          ggplot2::geom_line(linewidth = 0.9) +
+          ggplot2::scale_colour_brewer(palette = "Set1", name = modx_lab) +
+          ggplot2::scale_fill_brewer(palette = "Set1", name = modx_lab) +
+          ggplot2::labs(
+            title = paste("Impact of", pred_lab, "by", modx_lab),
+            x     = pred_lab,
+            y     = paste("Predicted", y_lab)
+          ) +
+          ggplot2::theme_minimal(base_size = 14) +
+          ggplot2::theme(
+            plot.title      = ggplot2::element_text(face = "bold", hjust = 0.5, size = 11),
+            legend.position = "bottom"
+          )
+
+      } else {
+        new_data             <- as.data.frame(lapply(other_means, rep, times = length(x_seq)))
+        new_data[[pred_var]] <- x_seq
+        if ("(Intercept)" %in% colnames(mm)) new_data[["(Intercept)"]] <- 1
+
+        preds        <- fixest_predict_manual(new_data)
+        new_data$fit <- preds$fit
+        new_data$se  <- preds$se
+
+        ggplot2::ggplot(new_data, ggplot2::aes(x = .data[[pred_var]], y = .data$fit)) +
+          ggplot2::geom_ribbon(
+            ggplot2::aes(ymin = fit - 1.96 * se, ymax = fit + 1.96 * se),
+            alpha = 0.2, fill = "steelblue"
+          ) +
+          ggplot2::geom_line(colour = "steelblue", linewidth = 0.9) +
+          ggplot2::labs(
+            title = paste("Predicted", y_lab, "vs", pred_lab),
+            x     = pred_lab,
+            y     = paste("Predicted", y_lab)
+          ) +
+          ggplot2::theme_minimal(base_size = 14) +
+          ggplot2::theme(
+            plot.title = ggplot2::element_text(face = "bold", hjust = 0.5, size = 11)
+          )
+      }
+    },
+    error = function(e) blank_plot(paste0("fixest effect plot error: ", conditionMessage(e)))
+    )
+    return(p)
+  }
 }
 
 
