@@ -174,18 +174,10 @@ mod_1_05_weatherstats_server <- function(
         output$binscatter2 <- make_binscatter(2)
 
         # -- Summary stats table ----------------------------------------------
-
-        output$weather_stats_table <- DT::renderDT({
-          req(survey_weather())
-          df   <- survey_weather() |>
-            dplyr::mutate(countryyear = paste0(economy, ", ", year))
-          vars <- isolate(selected_weather())$name
-          if (length(vars) == 0) return(data.frame(Note = "No weather variables found"))
-          weighted_summary_long(df, vars = vars)
-        },
-        rownames = FALSE,
-        options  = list(dom = "t", paging = FALSE, searching = FALSE, info = FALSE),
-        class    = "compact")
+        output$weather_stats_table <- make_weather_stats_dt(
+          survey_weather   = survey_weather,
+          selected_weather = selected_weather
+        )
 
         # -- Selected weather config table ------------------------------------
 

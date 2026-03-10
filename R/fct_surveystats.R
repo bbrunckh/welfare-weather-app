@@ -247,7 +247,7 @@ plot_welfare_dist <- function(df, poverty_lines = welfare_poverty_lines()) {
 
 
 # ---------------------------------------------------------------------------- #
-# Leaflet survey location map                                                   #
+# Leaflet survey location map                                                  #
 # ---------------------------------------------------------------------------- #
 
 #' Build a leaflet map of survey interview locations
@@ -291,4 +291,123 @@ plot_survey_map <- function(loc) {
       lng2 = as.numeric(bounds[3]),
       lat2 = as.numeric(bounds[4])
     )
+}
+
+
+# ---------------------------------------------------------------------------- #
+# Summary stats tables                                                         #
+# ---------------------------------------------------------------------------- #
+
+#' Build a formatted DT summary table by variable group flag
+#'
+#' Creates a `DT::renderDT()` expression for survey summary statistics of the
+#' variables flagged in `variable_list[[flag_col]] == 1` and present in
+#' `survey_data()`.
+#'
+#' The returned table includes:
+#' \itemize{
+#'   \item Weighted summary statistics from `weighted_summary_long()`
+#'   \item Wave-specific missingness (`% Missing`) by `countryyear` and variable
+#'   \item Variable labels joined from `variable_list` (`Variable Label`)
+#'   \item Standardized column names (capitalized first letter)
+#'   \item Basic display formatting (numeric columns to 2 decimals except `N`)
+#'   \item Soft text wrapping for long character/factor fields
+#' }
+#'
+#' @param survey_data A reactive expression returning a survey `data.frame`.
+#'   The data should include `countryyear` when wave-specific missingness is
+#'   required.
+#' @param variable_list A reactive expression or `data.frame` containing at least
+#'   columns `name`, `label`, and the grouping flag column given in `flag_col`.
+#' @param flag_col Character scalar naming the grouping flag column in
+#'   `variable_list` (e.g., `"outcome"`, `"ind"`, `"hh"`, `"firm"`, `"area"`).
+#'
+#' @return A `shiny.render.function` (from `DT::renderDT`) that renders the
+#'   formatted summary statistics table.
+#' @export
+make_stats_dt <- function(survey_data, variable_list, flag_col) {
+  DT::renderDT({
+    shiny::req(survey_data())
+    df <- survey_data()
+    vl <- if (is.function(variable_list)) variable_list() else variable_list
+
+    vars <- intersect(vl$name[vl[[flag_col]] == 1], names(df))
+    if (length(vars) == 0) {
+      return(data.frame(Note = paste("No", flag_col, "variables found")))
+    }
+
+    tab <- weighted_summary_long(df, vars = vars)
+
+    # Add missingness by survey wave (countryyear) and variable
+    if ("variable" %in% names(tab) && "countryyear" %in% names(tab)) {
+      if (!"countryyear" %in% names(df)) {
+        stop("countryyear column is required in survey_data() to compute wave-specific missingness.")
+      }
+
+      # Build long missingness table by wave
+      miss_list <- lapply(vars, function(v) {
+        df |>
+          dplyr::group_by(countryyear) |>
+          dplyr::summarise(
+            `% Missing` = 100 * mean(is.na(.data[[v]])),
+            .groups = "drop"
+          ) |>
+          dplyr::mutate(variable = v)
+      })
+
+      fill_df <- dplyr::bind_rows(miss_list)
+
+      tab <- tab |>
+        dplyr::left_join(fill_df, by = c("countryyear", "variable"))
+    }
+
+    if ("variable" %in% names(tab)) {
+      lab_map <- vl[, c("name", "label"), drop = FALSE]
+      tab <- tab |>
+        dplyr::left_join(lab_map, by = c("variable" = "name")) |>
+        dplyr::mutate(variable_label = dplyr::coalesce(.data$label, .data$variable)) |>
+        dplyr::select(variable, variable_label, dplyr::everything(), -dplyr::any_of("label"))
+    }
+
+    # ---- Column renaming ----------------------------------------------------
+    if ("variable_label" %in% names(tab)) names(tab)[names(tab) == "variable_label"] <- "Variable Label"
+    if ("countryyear" %in% names(tab))    names(tab)[names(tab) == "countryyear"]    <- "Country, Year"
+
+    names(tab) <- vapply(names(tab), function(nm) {
+      if (!nzchar(nm)) return(nm)
+      paste0(toupper(substr(nm, 1, 1)), substr(nm, 2, nchar(nm)))
+    }, character(1))
+
+    wrap_width <- 28
+    text_cols <- names(tab)[vapply(tab, function(x) is.character(x) || is.factor(x), logical(1))]
+    if (length(text_cols) > 0) {
+      tab[text_cols] <- lapply(tab[text_cols], function(x) {
+        x_chr <- as.character(x)
+        vapply(x_chr, function(s) {
+          if (is.na(s)) return(NA_character_)
+          paste(strwrap(s, width = wrap_width), collapse = "<br>")
+        }, character(1))
+      })
+    }
+
+    dt <- DT::datatable(
+      tab,
+      rownames = FALSE,
+      escape = FALSE,
+      options = list(
+        autoWidth = TRUE,
+        pageLength = 10,
+        columnDefs = list(list(className = "dt-wrap", targets = "_all"))
+      )
+    )
+
+    # 2 decimals for numeric columns except N
+    num_cols <- names(tab)[vapply(tab, is.numeric, logical(1))]
+    num_cols <- setdiff(num_cols, "N")
+    if (length(num_cols) > 0) {
+      dt <- DT::formatRound(dt, columns = num_cols, digits = 2)
+    }
+
+    dt
+  })
 }

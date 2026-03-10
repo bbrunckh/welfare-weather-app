@@ -137,53 +137,162 @@ plot_weather_dist <- function(df, hv, label, cont_binned) {
 #'   no finite data remain after filtering.
 #'
 #' @export
-plot_binscatter <- function(df, hv, hv_label, y_var, y_label) {
-  if (is.null(df) || is.null(y_var) || is.na(hv)) return(invisible(NULL))
-  if (!(hv %in% names(df)) || !(y_var %in% names(df))) return(invisible(NULL))
+plot_binscatter <- function(df, hv, hv_label = hv, y_var, y_label = y_var) {
+  if (is.null(df) || !all(c(hv, y_var) %in% names(df))) return(NULL)
 
-  hv_vals <- df[[hv]]
-  y_vals  <- df[[y_var]]
-  hv_ok   <- if (is.numeric(hv_vals)) is.finite(hv_vals) else !is.na(hv_vals)
-  y_ok    <- if (is.numeric(y_vals))  is.finite(y_vals)  else !is.na(y_vals)
+  d <- df[, c(hv, y_var), drop = FALSE]
+  names(d) <- c("x", "y")
+  d <- d[stats::complete.cases(d), , drop = FALSE]
+  if (nrow(d) == 0) return(NULL)
 
-  df_plot <- df[hv_ok & y_ok, ]
-  if (nrow(df_plot) == 0) return(invisible(NULL))
+  # Outcome: detect binary vs continuous
+  y_raw <- d$y
+  y_num <- suppressWarnings(as.numeric(as.character(y_raw)))
+  is_binary_y <- FALSE
 
-  is_binary <- length(unique(df_plot[[y_var]])) <= 2
-
-  if (is_binary) {
-    df_plot[[y_var]] <- as.numeric(as.character(df_plot[[y_var]]))
+  if (!all(is.na(y_num))) {
+    uy <- sort(unique(y_num[!is.na(y_num)]))
+    is_binary_y <- length(uy) <= 2 && all(uy %in% c(0, 1))
   }
 
-  p <- ggplot2::ggplot(df_plot, ggplot2::aes(x = .data[[hv]], y = .data[[y_var]]))
+  if (!is_binary_y && (is.logical(y_raw) || is.factor(y_raw))) {
+    y_fac <- as.factor(y_raw)
+    if (nlevels(y_fac) == 2) {
+      is_binary_y <- TRUE
+      y_num <- as.integer(y_fac) - 1
+    }
+  }
 
-  if (is_binary) {
-    p <- p +
-      ggplot2::stat_summary_bin(
-        fun = "mean", bins = 10, color = "orange", size = 2, geom = "point"
-      ) 
+  if (is_binary_y) {
+    d$y <- y_num
   } else {
-    p <- p +
-      ggplot2::geom_point(alpha = 0.1) +
-      ggplot2::stat_summary_bin(
-        fun = "mean", bins = 10, color = "orange", size = 2, geom = "point"
-      )
+    d$y <- suppressWarnings(as.numeric(d$y))
+    d <- d[!is.na(d$y), , drop = FALSE]
+    if (nrow(d) == 0) return(NULL)
   }
 
-  p <- p +
-    ggplot2::theme_minimal() +
+  # X: detect binned/categorical vs continuous
+  is_binned_x <- is.factor(d$x) || is.character(d$x)
+
+  if (is_binned_x) {
+    d$x <- as.factor(d$x)
+
+    p <- ggplot2::ggplot(d, ggplot2::aes(x = .data$x, y = .data$y)) +
+      ggplot2::theme_minimal(base_size = 14) +
+      ggplot2::theme(
+        axis.text.x = ggplot2::element_text(angle = 90, hjust = 1, vjust = 0.5)
+      ) +
+      ggplot2::labs(
+        x = stringr::str_wrap(hv_label, 40),
+        y = stringr::str_wrap(y_label, 40)
+      )
+
+    if (is_binary_y) {
+      p <- p +
+        ggplot2::geom_jitter(width = 0.15, height = 0.03, alpha = 0.10) +
+        ggplot2::stat_summary(fun = mean, geom = "point", color = "orange", size = 2.5) +
+        ggplot2::scale_y_continuous(limits = c(0, 1))
+    } else {
+      p <- p +
+        ggplot2::geom_jitter(width = 0.15, alpha = 0.10) +
+        ggplot2::stat_summary(fun = mean, geom = "point", color = "orange", size = 2.5)
+    }
+
+    return(p)
+  }
+
+  # Continuous x
+  d$x <- suppressWarnings(as.numeric(d$x))
+  d <- d[!is.na(d$x), , drop = FALSE]
+  if (nrow(d) == 0) return(NULL)
+
+  p <- ggplot2::ggplot(d, ggplot2::aes(x = .data$x, y = .data$y)) +
+    ggplot2::geom_point(alpha = 0.10) +
+    ggplot2::stat_summary_bin(fun = mean, bins = 20, color = "orange", size = 2, geom = "point") +
+    ggplot2::theme_minimal(base_size = 14) +
     ggplot2::labs(
       x = stringr::str_wrap(hv_label, 40),
-      y = stringr::str_wrap(y_label,  40)
+      y = stringr::str_wrap(y_label, 40)
     )
 
-  if (is_binary) {
-    p <- p + ggplot2::annotate(
-      "text", x = Inf, y = Inf,
-      label = "Binary outcome: mean by bin",
-      hjust = 1.05, vjust = 1.2, size = 3
-    )
+  if (is_binary_y) {
+    p <- p + ggplot2::scale_y_continuous(limits = c(0, 1))
   }
 
   p
+}
+
+# ---------------------------------------------------------------------------- #
+# Summary stats table                                                          #
+# ---------------------------------------------------------------------------- #
+
+
+#' Weather summary stats DT renderer
+#'
+#' @param survey_weather Reactive returning merged survey-weather data.
+#' @param selected_weather Reactive returning selected weather rows (needs name/label).
+#'
+#' @return A DT render function.
+#' @export
+make_weather_stats_dt <- function(survey_weather, selected_weather) {
+  DT::renderDT({
+    shiny::req(survey_weather(), selected_weather())
+
+    df <- survey_weather() |>
+      dplyr::mutate(countryyear = paste0(.data$economy, ", ", .data$year))
+
+    sw <- selected_weather()
+    vars <- intersect(sw$name, names(df))
+    if (length(vars) == 0) return(data.frame(Note = "No weather variables found"))
+
+    tab <- weighted_summary_long(df, vars = vars)
+
+    # Add wave-specific missingness (% Missing) by countryyear and variable
+    if ("countryyear" %in% names(tab) && "variable" %in% names(tab)) {
+      miss_list <- lapply(vars, function(v) {
+        df |>
+          dplyr::group_by(.data$countryyear) |>
+          dplyr::summarise(`% Missing` = 100 * mean(is.na(.data[[v]]), na.rm = TRUE), .groups = "drop") |>
+          dplyr::mutate(variable = v)
+      })
+      miss_df <- dplyr::bind_rows(miss_list)
+      tab <- dplyr::left_join(tab, miss_df, by = c("countryyear", "variable"))
+    }
+
+    # Add variable label
+    if ("variable" %in% names(tab)) {
+      lab_map <- sw |>
+        dplyr::select(name, label) |>
+        dplyr::distinct()
+      tab <- tab |>
+        dplyr::left_join(lab_map, by = c("variable" = "name")) |>
+        dplyr::mutate(variable_label = dplyr::coalesce(.data$label, .data$variable)) |>
+        dplyr::select(variable, variable_label, dplyr::everything(), -dplyr::any_of("label"))
+    }
+
+    # Rename key columns
+    if ("variable" %in% names(tab))       names(tab)[names(tab) == "variable"] <- "Variable"
+    if ("variable_label" %in% names(tab)) names(tab)[names(tab) == "variable_label"] <- "Variable Label"
+    if ("countryyear" %in% names(tab))    names(tab)[names(tab) == "countryyear"] <- "County, Year"
+
+    # Capitalize first letter of all column names
+    names(tab) <- vapply(names(tab), function(nm) {
+      if (!nzchar(nm)) return(nm)
+      paste0(toupper(substr(nm, 1, 1)), substr(nm, 2, nchar(nm)))
+    }, character(1))
+
+    dt <- DT::datatable(
+      tab,
+      rownames = FALSE,
+      options = list(dom = "t", paging = FALSE, searching = FALSE, info = FALSE),
+      class = "compact"
+    )
+
+    # Formatting: N no decimals, others numeric 2 decimals
+    num_cols <- names(tab)[vapply(tab, is.numeric, logical(1))]
+    num_cols <- setdiff(num_cols, "N")
+    if (length(num_cols) > 0) dt <- DT::formatRound(dt, columns = num_cols, digits = 2)
+
+    dt
+  })
 }

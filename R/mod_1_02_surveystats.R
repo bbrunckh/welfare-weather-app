@@ -10,6 +10,12 @@
 #' @importFrom ggplot2 ggplot aes geom_bar theme_minimal labs theme
 mod_1_02_surveystats_ui <- function(id) {
   ns <- NS(id)
+  tags$style(HTML("
+    table.dataTable td.dt-wrap {
+      white-space: normal !important;
+      word-break: break-word;
+    }
+  "))
   tagList(
     uiOutput(ns("survey_stats_button_ui"))
   )
@@ -161,24 +167,11 @@ mod_1_02_surveystats_server <- function(
           p
         })
 
-        # Summary stats DT tables — one helper avoids repetition
-        make_stats_dt <- function(flag_col) {
-          DT::renderDT({
-            req(survey_data())
-            df <- survey_data()
-            vl <- if (is.function(variable_list)) variable_list() else variable_list
-            vars <- intersect(vl$name[vl[[flag_col]] == 1], names(df))
-            if (length(vars) == 0)
-              return(data.frame(Note = paste("No", flag_col, "variables found")))
-            weighted_summary_long(df, vars = vars)
-          }, rownames = FALSE)
-        }
-
-        output$outcome_stats <- make_stats_dt("outcome")
-        output$ind_stats     <- make_stats_dt("ind")
-        output$hh_stats      <- make_stats_dt("hh")
-        output$firm_stats    <- make_stats_dt("firm")
-        output$area_stats    <- make_stats_dt("area")
+        output$outcome_stats <- make_stats_dt(survey_data, variable_list, "outcome")
+        output$ind_stats     <- make_stats_dt(survey_data, variable_list, "ind")
+        output$hh_stats      <- make_stats_dt(survey_data, variable_list, "hh")
+        output$firm_stats    <- make_stats_dt(survey_data, variable_list, "firm")
+        output$area_stats    <- make_stats_dt(survey_data, variable_list, "area")
 
         output$selected_surveys <- DT::renderDT({
           req(selected_surveys())
