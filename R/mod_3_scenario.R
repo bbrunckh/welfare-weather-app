@@ -1,8 +1,7 @@
 #' 3_scenario UI Function
 #'
-#' @description A shiny Module. Provides the Step 3 "What if?" scenario
-#'   explorer, allowing users to compare historical and future simulation
-#'   baselines against alternative policy scenarios.
+#' @description A shiny Module. Orchestrates the Step 3 policy scenario pipeline:
+#'   social protection, infrastructure, labor market, digital & financial inclusion.
 #'
 #' @param id,input,output,session Internal parameters for {shiny}.
 #'
@@ -15,47 +14,44 @@ mod_3_scenario_ui <- function(id) {
   ns <- NS(id)
 
   fluidPage(
-    waiter::autoWaiter(html = waiter::spin_2(), color = waiter::transparent(.5)),
-    h4("What if...? Explore alternative climate and policy scenarios"),
-
+    autoWaiter(html = spin_2(), color = transparent(.5)),
+    h4("How could policy and structural adjustments mitigate the welfare impacts of weather?"),
     sidebarLayout(
       sidebarPanel(
-        bsplus::bs_accordion(id = ns("accordion")) |>
-          bsplus::bs_append(
-            title   = "Policy scenario",
-            content = tagList(
-              p("Configure your policy scenario parameters here.")
-            )
+        bs_accordion(id = ns("accordion")) |>
+          bs_append(
+            title   = "Social protection",
+            content = mod_3_01_sp_ui(ns("sp"))
           ) |>
-          bsplus::bs_append(
-            title   = "Run scenario",
-            content = tagList(
-              p("Run scenario analysis.")
-            )
-          )
+          bs_append(
+            title   = "Infrastructure",
+            content = mod_3_02_infra_ui(ns("infra"))
+          ) |>
+          bs_append(
+            title   = "Digital inclusion",
+            content = mod_3_03_digital_ui(ns("digital"))
+          ) |>
+          bs_append(
+            title   = "Labor market",
+            content = mod_3_04_labor_ui(ns("labor"))
+          ),
+        hr(),
+        actionButton(
+          ns("run_policy_sim"),
+          "Run simulation",
+          class = "btn-primary",
+          width = "100%"
+        )
       ),
-
       mainPanel(
         tabsetPanel(
           id = ns("step3_output_tabs"),
-
           tabPanel(
-            title = "Results",
-            value = "results",
-            h4("Scenario results"),
-            bslib::card(
-              bslib::card_header("Historical simulation baseline (Step 2)"),
-              verbatimTextOutput(ns("baseline_summary"))
-            ),
-            tags$hr(),
-            p("Scenario comparison results will be displayed here.")
-          ),
-
-          tabPanel(
-            title = "Configuration",
-            value = "config",
-            h4("Scenario configuration"),
-            p("Summary of scenario configuration and parameters will be shown here.")
+            title = "Overview",
+            value = "overview",
+            p("Outputs will appear here after you run the policy simulation in the sidebar."),
+            includeMarkdown(system.file("app/www/equation2.md", package = "wiseapp")),
+            mod_3_05_policy_sim_ui(ns("policy_sim"))
           )
         )
       )
@@ -65,8 +61,7 @@ mod_3_scenario_ui <- function(id) {
 
 #' 3_scenario Server Functions
 #'
-#' Displays Step 2 simulation baselines and (in future) scenario comparison
-#' results. Consumes the flat API returned by `mod_2_simulation_server()`.
+#' Orchestrates sub-modules 01-05.
 #'
 #' @param id               Module id.
 #' @param connection_params Reactive named list from `mod_0_overview_server()`.
@@ -95,49 +90,52 @@ mod_3_scenario_server <- function(id,
                                    fut_sim = NULL) {
   moduleServer(id, function(input, output, session) {
 
-    ns <- session$ns
+    # ---- Social Protection scenario --------------------------------------
 
-    # ---- Baseline summary --------------------------------------------------
-    # Display a concise summary of whatever Step 2 simulations have been run.
+    s1 <- mod_3_01_sp_server("sp")
 
-    output$baseline_summary <- renderText({
-      hist <- tryCatch(hist_sim(), error = function(e) NULL)
-      fut  <- if (!is.null(fut_sim)) tryCatch(fut_sim(), error = function(e) NULL) else NULL
+    # ---- Infrastructure scenario -----------------------------------------
 
-      if (is.null(hist) && is.null(fut)) {
-        return(
-          "No Step 2 simulations available yet.\n\nRun a historical or future simulation in Step 2 first."
-        )
-      }
+    s2 <- mod_3_02_infra_server("infra")
 
-      so   <- tryCatch(selected_outcome(), error = function(e) NULL)
-      sw   <- tryCatch(selected_weather(),  error = function(e) NULL)
+    # ---- Digital & financial inclusion scenario --------------------------
 
-      out <- character()
+    s3 <- mod_3_03_digital_server("digital")
 
-      if (!is.null(so)) {
-        out <- c(out, paste0("Outcome:  ", so$name))
-        if (!is.null(so$type)) out <- c(out, paste0("Type:     ", so$type))
-      }
+    # ---- Labor market scenario -------------------------------------------
 
-      if (!is.null(sw) && nrow(sw) > 0) {
-        out <- c(out, paste0("Weather:  ", paste(sw$variable, collapse = ", ")))
-      }
+    s4 <- mod_3_04_labor_server("labor")
 
-      if (!is.null(hist)) {
-        n_hist <- if (is.data.frame(hist$preds)) nrow(hist$preds) else NA_integer_
-        out <- c(out, paste0("Hist sim: ", if (!is.na(n_hist)) paste0(n_hist, " predictions") else "available"))
-      }
+    # ---- Policy simulation module (initialised once at startup) ----------
 
-      if (!is.null(fut)) {
-        n_fut <- if (is.data.frame(fut$preds)) nrow(fut$preds) else NA_integer_
-        out <- c(out, paste0("Fut sim:  ", if (!is.na(n_fut)) paste0(n_fut, " predictions") else "available"))
-      }
+    s5 <- mod_3_05_policy_sim_server(
+      "policy_sim",
+      connection_params  = connection_params,
+      selected_outcome   = selected_outcome,
+      selected_weather   = selected_weather,
+      survey_weather     = survey_weather,
+      model_fit          = model_fit,
+      hist_sim           = hist_sim,
+      fut_sim            = fut_sim,
+      sp_scenario        = s1$sp_scenario,
+      infra_scenario     = s2$infra_scenario,
+      digital_scenario   = s3$digital_scenario,
+      labor_scenario     = s4$labor_scenario
+    )
 
-      paste(out, collapse = "\n")
+    # ---- Run policy simulation on button click ---------------------------
+
+    observeEvent(input$run_policy_sim, {
+      s5$run()
     })
 
-    # ---- Return API --------------------------------------------------------
-    list()
+    # ---- Return API ------------------------------------------------------
+
+    list(
+      selected_hist = s1$selected_hist,
+      selected_fut  = s3$selected_fut,
+      hist_sim      = s2$hist_sim,
+      fut_sim       = s4$fut_sim
+    )
   })
 }
