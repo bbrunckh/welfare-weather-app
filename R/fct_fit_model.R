@@ -282,7 +282,11 @@ run_lasso_selection <- function(
   }
 
   if (is.null(valid_vl) || nrow(valid_vl) == 0) stop("Variable list not available or empty.")
-  allowed <- valid_vl$name[valid_vl$ind == 1 | valid_vl$hh == 1 | valid_vl$area == 1 | valid_vl$firm == 1]
+  # allowed <- valid_vl$name[valid_vl$ind == 1 | valid_vl$hh == 1 | valid_vl$area == 1 | valid_vl$firm == 1]
+  allowed <- valid_vl$name[
+    (valid_vl$ind == 1 | valid_vl$hh == 1 | valid_vl$area == 1 | valid_vl$firm == 1) &
+      (is.na(valid_vl$outcome) | valid_vl$outcome == 0)
+  ]
   exclude <- unique(c(y_var, core_terms))
   candidate_vars <- intersect(setdiff(names(df), exclude), allowed)
 
