@@ -19,7 +19,7 @@ mod_2_01_historical_ui <- function(id) {
 #' 2_01_historical Server Functions
 #'
 #' Manages historical climate variable selection and reference period
-#' configuration. Returns selected_cc for use by mod_2_02_historical_sim.
+#' configuration. Returns selected_hist for use by mod_2_02_historical_sim.
 #'
 #' @param id               Module id.
 #'
@@ -28,18 +28,54 @@ mod_2_01_historical_server <- function(id) {
   moduleServer(id, function(input, output, session) {
     ns <- session$ns
 
-# ---- Climate years selector ---------------------------------------------
+    # ---- Climate years selector ---------------------------------------------
 
     output$hist_years_select <- renderUI({
-      shiny::sliderInput(
-        inputId = ns("hist_years"),
-        label   = "Period defining the historical weather distribution",
-        min     = 1950,
-        max     = 2024,
-        value   = c(1990, 2024),
-        sep     = ""
+      tagList(
+        shiny::sliderInput(
+          inputId = ns("hist_years"),
+          label   = "Period defining the historical weather distribution",
+          min     = 1950,
+          max     = 2024,
+          value   = c(1990, 2024),
+          sep     = ""
+        ),
+        uiOutput(ns("hist_years_warning")),
+        textInput(
+          inputId = ns("scenario_name"),
+          label   = "Scenario name",
+          value   = "Historical / 1990–2024"
+        )
       )
     })
+
+    # ---- 20-year minimum window warning ------------------------------------
+
+    output$hist_years_warning <- renderUI({
+      req(input$hist_years)
+      if ((input$hist_years[2] - input$hist_years[1]) < 20) {
+        helpText(
+          "⚠️ Window is less than 20 years. Results may be unreliable.",
+          style = "color: #c0392b; font-size: 12px;"
+        )
+      }
+    })
+
+    # ---- Auto-update scenario name when years change -----------------------
+
+    prev_hist_years <- reactiveVal(c(1990L, 2024L))
+
+    observeEvent(input$hist_years, {
+      req(input$hist_years)
+      yr  <- input$hist_years
+      old <- paste0("Historical / ", prev_hist_years()[1], "–", prev_hist_years()[2])
+      if (!is.null(input$scenario_name) &&
+          (input$scenario_name == old || input$scenario_name == "Historical")) {
+        updateTextInput(session, "scenario_name",
+                        value = paste0("Historical / ", yr[1], "–", yr[2]))
+      }
+      prev_hist_years(yr)
+    }, ignoreInit = TRUE)
 
     # ---- Simulation parameters toggle ---------------------------------------
 
@@ -78,14 +114,16 @@ mod_2_01_historical_server <- function(id) {
       )
     })
 
-    # ---- Selected historical weather simulation configuration -----------------------------
+    # ---- Selected historical weather simulation configuration ---------------
 
     selected_hist <- reactive({
       data.frame(
-        type       = "historical",
-        year_range = input$hist_years          %||% c(1990, 2024),
-        residuals  = input$hist_sim_residuals  %||% "original",
-        stringsAsFactors = FALSE)
+        type          = "historical",
+        year_range    = I(list(input$hist_years         %||% c(1990, 2024))),
+        residuals     = input$hist_sim_residuals         %||% "original",
+        scenario_name = as.character(input$scenario_name %||% "Historical"),
+        stringsAsFactors = FALSE
+      )
     })
 
     # ---- Module return API --------------------------------------------------

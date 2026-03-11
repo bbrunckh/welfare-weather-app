@@ -1,8 +1,6 @@
 #' 2_04_future_sim UI Function
 #'
 #' @description A shiny Module. Triggers the future climate welfare simulation.
-#'   Results are overlaid on the historical simulation Results tab - no
-#'   separate tab is created.
 #'
 #' @param id,input,output,session Internal parameters for {shiny}.
 #'
@@ -16,34 +14,28 @@ mod_2_04_future_sim_ui <- function(id) {
       ns("run_fut_sim"),
       "Run future simulation",
       class = "btn-primary",
-      style = "width: 100%; margin-top: 8px;"
+      style = "width:100%; margin-top:8px;"
     )
   )
 }
 
 #' 2_04_future_sim Server Functions
 #'
-#' Runs the future climate welfare simulation using CMIP6 delta perturbation
-#' applied to historical weather observations. Mirrors the pipeline of
-#' mod_2_02_historical_sim_server() but passes SSP scenario arguments to
-#' get_weather(). Results are stored in pred_fut_raw and overlaid on the
-#' historical Results tab - no separate output tab is created here.
+#' Runs the future climate welfare simulation using CMIP6 delta perturbation.
+#' Iterates over every row of selected_fut (one row per SSP x anchor year),
+#' calling get_weather() once per row. A persistent progress notification is
+#' shown throughout and updated at each step.
 #'
 #' @param id               Module id.
 #' @param connection_params Reactive named list from mod_0_overview.
 #' @param selected_outcome Reactive one-row data frame of selected outcome.
 #' @param selected_weather Reactive data frame of selected weather variables.
 #' @param survey_weather   Reactive data frame of merged survey-weather data.
-#' @param model_fit        Reactive list returned by fit_model() (via
-#'   mod_1_07_results). Must contain \code{$fit3} (the fitted model object),
-#'   \code{$engine} (character), and \code{$train_data} (the complete-case
-#'   data frame used for fitting).
+#' @param model_fit        Reactive list with fit3, engine, train_data.
 #' @param selected_hist    Reactive one-row data frame from mod_2_01_historical.
-#' @param selected_fut     Reactive one-row data frame from mod_2_03_future,
-#'   containing columns year_range, ssp, method, and residuals.
-#' @param hist_run_id      Reactive integer from mod_2_02_historical_sim that
-#'   increments each time the historical sim runs. Stamped onto the result so
-#'   the historical plot can detect and drop stale future overlays.
+#' @param selected_fut     Reactive data frame from mod_2_03_future:
+#'   one row per SSP x anchor year.
+#' @param hist_run_id      Reactive integer from mod_2_02_historical_sim.
 #'
 #' @noRd
 mod_2_04_future_sim_server <- function(id,
@@ -59,7 +51,6 @@ mod_2_04_future_sim_server <- function(id,
 
     pred_fut_raw <- reactiveVal(NULL)
 
-    # ---- main simulation observer ------------------------------------------
     observeEvent(input$run_fut_sim, {
       req(selected_weather(), selected_outcome(), survey_weather(),
           selected_hist(), selected_fut(), model_fit())
@@ -71,80 +62,112 @@ mod_2_04_future_sim_server <- function(id,
       svy <- survey_weather()
       mf  <- model_fit()
 
-      # Unpack what predict_outcome() needs from the fit_model() result.
-      # Mirrors the same pattern used in mod_2_02_historical_sim_server().
       model      <- mf$fit3
       engine     <- mf$engine
       train_data <- mf$train_data
 
-      # date grid uses survey months + full historical year range (same as
-      # historical sim) so the CMIP6 baseline period matches exactly
-      sim_dates <- build_hist_sim_dates(svy, sh$year_range)
-
-      # future period from selected_fut year_range
-      yr <- unlist(sf$year_range)
-      future_period <- c(
-        paste0(yr[1], "-01-01"),
-        paste0(yr[2], "-12-31")
-      )
-
-      # perturbation method inferred from variable units
+      sim_dates           <- build_hist_sim_dates(svy, unlist(sh$year_range))
       perturbation_method <- build_perturbation_method(sw)
 
-      notif_load <- shiny::showNotification(
-        paste0("Loading future climate weather (", sf$ssp[1], ")..."),
-        duration = NULL, type = "message"
+      n_total    <- nrow(sf)
+      preds_list <- vector("list", n_total)
+      yr_lookup  <- vector("list", n_total)
+
+      # ---- persistent progress notification ---------------------------------
+      shiny::showNotification(
+        ui          = paste0("Future simulation: starting (0 / ", n_total, ")..."),
+        id          = "fut_sim_progress",
+        duration    = NULL,
+        type        = "message",
+        closeButton = FALSE,
+        session     = session
+      )
+      on.exit(
+        shiny::removeNotification("fut_sim_progress", session = session),
+        add = TRUE
       )
 
-      weather_raw <- tryCatch(
-        get_weather(
-          survey_data         = svy,
-          selected_weather    = sw,
-          dates               = sim_dates,
-          connection_params   = connection_params(),
-          ssp                 = sf$ssp[1],
-          future_period       = future_period,
-          perturbation_method = perturbation_method
-        ),
-        error = function(e) {
-          shiny::showNotification(
-            paste("Failed to load future weather data:", conditionMessage(e)),
-            type = "error", duration = 8
-          )
-          NULL
-        }
-      )
+      for (i in seq_len(n_total)) {
+        row         <- sf[i, , drop = FALSE]
+        ssp_val     <- as.character(row$ssp)
+        scenario_nm <- as.character(row$scenario_name)
+        yr          <- unlist(row$year_range)
 
-      shiny::removeNotification(notif_load)
-      req(!is.null(weather_raw))
+        # update the persistent notification in-place (no new ID = no leak)
+        shiny::showNotification(
+          ui          = paste0("Future simulation: ", scenario_nm,
+                               " (", i, " / ", n_total, ")..."),
+          id          = "fut_sim_progress",
+          duration    = NULL,
+          type        = "message",
+          closeButton = FALSE,
+          session     = session
+        )
 
-      # join weather back to survey covariates
-      survey_wd_sim <- prepare_hist_weather(weather_raw, svy, sw, so$name)
+        future_period <- c(
+          paste0(yr[1], "-01-01"),
+          paste0(yr[2], "-12-31")
+        )
 
-      # simulate outcomes
-      preds <- predict_outcome(
-        model      = model,
-        newdata    = survey_wd_sim,
-        residuals  = sf$residuals,
-        outcome    = so$name,
-        id         = NULL,
-        train_data = train_data,
-        engine     = engine
-      )
+        weather_raw <- tryCatch(
+          get_weather(
+            survey_data         = svy,
+            selected_weather    = sw,
+            dates               = sim_dates,
+            connection_params   = connection_params(),
+            ssp                 = ssp_val,
+            future_period       = future_period,
+            perturbation_method = perturbation_method
+          ),
+          error = function(e) {
+            shiny::showNotification(
+              paste0("Failed: ", scenario_nm, "  ", conditionMessage(e)),
+              type = "error", duration = 8
+            )
+            NULL
+          }
+        )
 
-      preds <- apply_log_backtransform(preds, so)
+        if (is.null(weather_raw)) next
 
-      # stamp the current hist_run_id so the historical renderPlot knows
-      # this overlay was produced from the same historical run
+        survey_wd_sim <- prepare_hist_weather(weather_raw, svy, sw, so$name)
+
+        preds <- predict_outcome(
+          model      = model,
+          newdata    = survey_wd_sim,
+          residuals  = as.character(row$residuals),
+          outcome    = so$name,
+          id         = NULL,
+          train_data = train_data,
+          engine     = engine
+        )
+
+        preds <- apply_log_backtransform(preds, so)
+
+        preds_list[[i]] <- preds
+        yr_lookup[[i]]  <- yr
+      }
+
+      # drop NULLs (failed runs)
+      ok                  <- !vapply(preds_list, is.null, logical(1))
+      preds_list          <- preds_list[ok]
+      yr_lookup           <- yr_lookup[ok]
+      names(preds_list)   <- sf$scenario_name[ok]
+      names(yr_lookup)    <- sf$scenario_name[ok]
+
+      if (length(preds_list) == 0) return()
+
       pred_fut_raw(list(
-        preds       = preds,
+        preds_list  = preds_list,
         so          = so,
-        hist_run_id = hist_run_id()
+        hist_run_id = hist_run_id(),
+        year_range  = yr_lookup
       ))
 
+      completed <- paste(names(preds_list), collapse = ", ")
       shiny::showNotification(
-        paste0("Future simulation (", sf$ssp[1], ") complete - results overlaid on Results tab."),
-        type = "message", duration = 4
+        paste0("\u2713 Future simulation complete: ", completed, "."),
+        type = "message", duration = 6
       )
 
     }, ignoreInit = TRUE)

@@ -13,7 +13,6 @@
 #' @importFrom waiter autoWaiter spin_2 transparent
 mod_2_simulation_ui <- function(id) {
   ns <- NS(id)
-
   fluidPage(
     autoWaiter(html = spin_2(), color = transparent(.5)),
     h4("What welfare is expected given historical weather conditions? In future climate scenarios?"),
@@ -33,7 +32,15 @@ mod_2_simulation_ui <- function(id) {
               mod_2_03_future_ui(ns("future")),
               mod_2_04_future_sim_ui(ns("future_sim"))
             )
-          )
+          ),
+        shiny::hr(),
+        shiny::actionButton(
+          ns("clear_scenarios"),
+          label = "Clear all scenarios",
+          icon  = shiny::icon("trash"),
+          width = "100%",
+          style = "margin-top: 8px; color: #fff; background-color: #c0392b; border-color: #a93226;"
+        )
       ),
       mainPanel(
         tabsetPanel(
@@ -52,7 +59,7 @@ mod_2_simulation_ui <- function(id) {
 
 #' 2_simulation Server Functions
 #'
-#' Orchestrates sub-modules 01–06. Returns a flat API list consumed by Step 3.
+#' Orchestrates sub-modules 01-06. Returns a flat API list consumed by Step 3.
 #'
 #' @param id               Module id.
 #' @param connection_params Reactive named list from mod_0_overview.
@@ -67,30 +74,23 @@ mod_2_simulation_ui <- function(id) {
 #'
 #' @noRd
 mod_2_simulation_server <- function(id,
-                                     connection_params,
-                                     selected_outcome,
-                                     selected_weather,
-                                     survey_weather,
-                                     model_fit) {
+                                    connection_params,
+                                    selected_outcome,
+                                    selected_weather,
+                                    survey_weather,
+                                    model_fit) {
   moduleServer(id, function(input, output, session) {
 
-    # ---- 1. Historical climate selection ------------------------------------
+    # ---- Scenario storage ---------------------------------------------------
+    saved_scenarios <- reactiveVal(list())
 
-    s1 <- mod_2_01_historical_server(
-      "historical"
-    )
+    # ---- 1. Historical climate selection ------------------------------------
+    s1 <- mod_2_01_historical_server("historical")
 
     # ---- 3. Future climate selection ----------------------------------------
-
-    s3 <- mod_2_03_future_server(
-      "future"
-    )
+    s3 <- mod_2_03_future_server("future")
 
     # ---- 2. Historical simulation -------------------------------------------
-    # Instantiated before s4 so s2$hist_run_id exists when s4 is created.
-    # fut_sim reference is wrapped in reactive() so the forward reference to
-    # s4 resolves lazily at runtime (s4 is assigned below).
-
     s2 <- mod_2_02_historical_sim_server(
       "historical_sim",
       connection_params = connection_params,
@@ -105,9 +105,6 @@ mod_2_simulation_server <- function(id,
     )
 
     # ---- 4. Future simulation -----------------------------------------------
-    # hist_run_id stamped on result so the historical renderPlot drops stale
-    # overlays when the user re-runs historical without re-running future.
-
     s4 <- mod_2_04_future_sim_server(
       "future_sim",
       connection_params = connection_params,
@@ -121,35 +118,39 @@ mod_2_simulation_server <- function(id,
     )
 
     # ---- 5. Simulation diagnostics ------------------------------------------
-
     mod_2_05_sim_diag_server(
       "sim_diag",
-      hist_sim  = s2$hist_sim,
-      fut_sim   = s4$fut_sim,
-      tabset_id = "step2_output_tabs",
+      hist_sim       = s2$hist_sim,
+      fut_sim        = s4$fut_sim,
+      tabset_id      = "step2_output_tabs",
       tabset_session = session
     )
 
-    # ---- 6. Compare simulations ---------------------------------------------
+    # ---- Clear scenarios button ---------------------------------------------
+    observeEvent(input$clear_scenarios, {
+      saved_scenarios(list())
+      shiny::showNotification(
+        "All scenarios cleared. Re-run simulations to populate.",
+        type = "message", duration = 4
+      )
+    })
 
+    # ---- 6. Compare simulations ---------------------------------------------
     mod_2_06_sim_compare_server(
       "sim_compare",
-      hist_sim  = s2$hist_sim,
-      fut_sim   = s4$fut_sim,
-      tabset_id = "step2_output_tabs",
-      tabset_session = session
+      hist_sim        = s2$hist_sim,
+      fut_sim         = s4$fut_sim,
+      saved_scenarios = saved_scenarios,
+      selected_hist   = s1$selected_hist
     )
 
     # ---- Return API ---------------------------------------------------------
-
     list(
-      # Selections
-      selected_hist = s1$selected_hist,
-      selected_fut  = s3$selected_fut,
-
-      # Data
-      hist_sim     = s2$hist_sim,
-      fut_sim      = s4$fut_sim
+      selected_hist   = s1$selected_hist,
+      selected_fut    = s3$selected_fut,
+      hist_sim        = s2$hist_sim,
+      fut_sim         = s4$fut_sim,
+      saved_scenarios = saved_scenarios
     )
   })
 }

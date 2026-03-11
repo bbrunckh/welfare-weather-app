@@ -42,6 +42,16 @@ mod_2_02_historical_sim_ui <- function(id) {
 #' @param tabset_id        Character id of the parent tabset panel.
 #' @param tabset_session   Shiny session for the tabset.
 #'
+#'#' @details
+#'   Internal state:
+#'   \itemize{
+#'     \item \code{pred_hist_raw} — raw predictions before aggregation;
+#'       persisted so the compare module can re-aggregate on demand.
+#'     \item \code{hist_run_id} — integer counter incremented on each run;
+#'       future sim stores this id so stale overlays can be detected.
+#'     \item \code{fut_sim_val} — normalised wrapper around the optional
+#'       \code{fut_sim} argument; always callable as \code{fut_sim_val()}.
+#'   }
 #' @noRd
 mod_2_02_historical_sim_server <- function(id,
                                             connection_params,
@@ -97,7 +107,7 @@ mod_2_02_historical_sim_server <- function(id,
 
       # ---- load weather data -----------------------------------------------
 
-      sim_dates <- build_hist_sim_dates(svy, sh$year_range)
+      sim_dates <- build_hist_sim_dates(svy, unlist(sh$year_range))
 
       notif_load <- shiny::showNotification(
         "Loading historical weather data...", duration = NULL, type = "message"
@@ -135,7 +145,7 @@ mod_2_02_historical_sim_server <- function(id,
       # back-transform log outcomes
       preds <- apply_log_backtransform(preds, so)
 
-      # store raw predictions — aggregation happens in renderPlot
+      # store raw predictions — comparison plots rendered in mod_2_06
       pred_hist_raw(list(preds = preds, so = so))
 
       # bump run id — future sim overlay is now considered stale until re-run
@@ -148,53 +158,13 @@ mod_2_02_historical_sim_server <- function(id,
           shiny::tabPanel(
             title = "Results",
             value = "sim_tab",
-            shiny::fluidRow(
-              shiny::column(
-                width = 4,
-                shiny::selectInput(
-                  ns("agg_method"),
-                  label    = "Aggregation method",
-                  choices  = isolate(aggregate_choices()),
-                  selected = if (identical(so$type, "logical")) "mean" else "headcount_ratio"
-                )
-              ),
-              shiny::column(
-                width = 4,
-                shiny::selectInput(
-                  ns("deviation"),
-                  label    = "Express as deviation from",
-                  choices  = c(
-                    "None (raw value)" = "none",
-                    "Mean year"        = "mean",
-                    "Median year"      = "median"
-                  ),
-                  selected = "median"
-                )
-              ),
-              shiny::column(
-                width = 4,
-                shiny::checkboxInput(
-                  ns("loss_frame"),
-                  label = "Loss framing (flip sign)",
-                  value = FALSE
-                )
-              )
-            ),
-            shiny::uiOutput(ns("pov_line_ui")),
-            shiny::plotOutput(ns("sim_plot"), height = "400px")
+            shiny::div(id = "compare_section")
           ),
           select  = TRUE,
           session = tabset_session
         )
         hist_tab_added(TRUE)
       } else {
-        # refresh choices if outcome type has changed
-        shiny::updateSelectInput(
-          session  = session,
-          inputId  = "agg_method",
-          choices  = aggregate_choices(),
-          selected = if (identical(so$type, "logical")) "mean" else input$agg_method
-        )
         shiny::updateTabsetPanel(
           session = tabset_session,
           inputId = tabset_id,
@@ -204,59 +174,7 @@ mod_2_02_historical_sim_server <- function(id,
 
     }, ignoreInit = TRUE)
 
-    # ---- show poverty-line input only when relevant ------------------------
-    output$pov_line_ui <- renderUI({
-      req(input$agg_method)
-      if (input$agg_method %in% c("headcount_ratio", "gap")) {
-        shiny::fluidRow(
-          shiny::column(
-            width = 4,
-            shiny::numericInput(
-              ns("pov_line"),
-              label = "Poverty line (daily, 2021 PPP USD)",
-              value = 3.00,
-              min   = 0,
-              step  = 0.5
-            )
-          )
-        )
-      }
-    })
 
-    # ---- reactive plot -----------------------------------------------------
-    output$sim_plot <- renderPlot({
-      req(pred_hist_raw(), input$agg_method, input$deviation)
-
-      raw <- pred_hist_raw()
-
-      pov_line_val <- if (input$agg_method %in% c("headcount_ratio", "gap")) {
-        req(input$pov_line)
-        input$pov_line
-      } else {
-        NULL
-      }
-
-      # overlay future preds only when they come from the current hist run
-      fd <- fut_sim_val()
-      fut_preds_val <- if (
-        !is.null(fd) &&
-        isTRUE(fd$hist_run_id == hist_run_id())
-      ) {
-        fd$preds
-      } else {
-        NULL
-      }
-
-      plot_hist_sim(
-        preds      = raw$preds,
-        so         = raw$so,
-        agg_method = input$agg_method,
-        deviation  = input$deviation,
-        loss_frame = isTRUE(input$loss_frame),
-        pov_line   = pov_line_val,
-        fut_preds  = fut_preds_val
-      )
-    })
 
     # expose hist_run_id so mod_2_04 can stamp its result
     list(

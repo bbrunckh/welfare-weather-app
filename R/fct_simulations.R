@@ -1,7 +1,43 @@
 # ============================================================================ #
-# Used by mod_2_02_historical_sim_server() and mod_2_04_future_sim_server().
+# Used by mod_2_02_historical_sim_server() and mod_2_04_future_sim_server(),
+# and 2_06_sim_compare_server().
+#
 # Stateless and testable without Shiny.
+
 # ============================================================================ #
+
+# ---- Internal colour / style helpers ---------------------------------------
+# Used by plot_bar_climate() and enhance_exceedance(). Not exported.
+
+# Canonical SSP keys  must match what .normalise_ssp() returns
+.ssp_colours <- c(
+  "SSP2-4.5" = "#4dac26",   # green  (SSP2 = lower emissions = better)
+  "SSP3-7.0" = "#2166ac",   # blue   (SSP3 = mid)
+  "SSP5-8.5" = "#c0392b"    # red    (SSP5 = high emissions = worse)
+)
+
+
+
+# Normalise any SSP token found in a scenario name to a canonical key
+# e.g. "SSP2" -> "SSP2-4.5", "SSP3-7.0" -> "SSP3-7.0", NA -> NA
+.normalise_ssp <- function(nm) {
+  # Try full form first: SSP2-4.5 / SSP3-7.0 / SSP5-8.5
+  m_full <- regmatches(nm, regexpr("SSP[0-9]-[0-9.]+", nm))
+  if (length(m_full) > 0) return(m_full)
+  # Try short form: SSP2 / SSP3 / SSP5
+  m_short <- regmatches(nm, regexpr("SSP([2-9])", nm))
+  if (length(m_short) == 0) return(NA_character_)
+  digit <- sub("SSP", "", m_short)
+  lookup <- c("2" = "SSP2-4.5", "3" = "SSP3-7.0", "5" = "SSP5-8.5")
+  if (digit %in% names(lookup)) lookup[[digit]] else NA_character_
+}
+
+.parse_year <- function(nm) {
+  m <- regmatches(nm, regexpr("[0-9]{4}(?= \u00b1)", nm, perl = TRUE))
+  if (length(m) == 0) NA_character_ else m
+}
+
+
 
 # ---------------------------------------------------------------------------- #
 # Simulation date grid                                                         #
@@ -39,7 +75,7 @@ build_hist_sim_dates <- function(survey_weather, year_range) {
 }
 
 # ---------------------------------------------------------------------------- #
-# Residual choice helpers                                                                #
+# Residual choice helpers                                                      #
 # ---------------------------------------------------------------------------- #
 
 #' Available residual handling choices
@@ -62,7 +98,7 @@ residual_choices <- function() {
 
 #' Build a Perturbation Method Vector for Climate Simulations
 #'
-#' Derives the named `perturbation_method` vector required by [get_weather()]
+#' Derives the named `perturbation_method` vector required by `get_weather()`
 #' when an SSP scenario is active. Precipitation and similar accumulation
 #' variables (units `"mm"` or `"days"`) use `"multiplicative"` scaling;
 #' all other variables (e.g. temperature in `"°C"`) use `"additive"` delta.
@@ -182,9 +218,10 @@ hist_aggregate_choices <- function(outcome_type) {
     c(
       "Mean"            = "mean",
       "Median"          = "median",
-      "Headcount ratio" = "headcount_ratio",
-      "Poverty gap"     = "gap",
-      "Gini"            = "gini"
+      "Headcount Ratio (FGT0)" = "headcount_ratio",
+      "Outcome Gap (FGT1)"     = "gap",
+      "Outcome Severity (FGT2)"     = "fgt2",
+      "Gini coefficient"            = "gini"
     )
   }
 }
@@ -260,7 +297,7 @@ aggregate_outcome <- function(df,
                               group     = "sim_year",
                               type      = c("continuous", "binary"),
                               aggregate = c("mean", "sum", "median",
-                                            "headcount_ratio", "gap", "gini"),
+                                            "headcount_ratio", "gap", "fgt2", "gini"),
                               pov_line  = NULL,
                               weights   = NULL) {
 
@@ -272,6 +309,14 @@ aggregate_outcome <- function(df,
   }
 
   gini_coef <- function(x, w) {
+    # Remove NA / non-finite values (present in future sim predictions)
+    ok <- is.finite(x)
+    if (!is.null(w)) ok <- ok & is.finite(w)
+    x  <- x[ok]
+    w  <- if (!is.null(w)) w[ok] else NULL
+
+    if (length(x) < 2) return(NA_real_)
+
     ord    <- order(x)
     x      <- x[ord]
     w      <- if (is.null(w)) rep(1, length(x)) else w[ord]
@@ -311,6 +356,12 @@ aggregate_outcome <- function(df,
           if (is.null(w)) mean(shortfall, na.rm = TRUE)
           else sum(shortfall * w, na.rm = TRUE) / sum(w, na.rm = TRUE)
         },
+        fgt2 = {
+          if (is.null(pov_line)) stop("`pov_line` must be supplied for fgt2")
+          shortfall <- pmax(pov_line - x, 0) / pov_line
+          if (is.null(w)) mean(shortfall^2, na.rm = TRUE)
+          else sum((shortfall^2) * w, na.rm = TRUE) / sum(w, na.rm = TRUE)
+        },
         gini            = gini_coef(x, w)
       )
     }
@@ -328,7 +379,7 @@ aggregate_outcome <- function(df,
 }
 
 #---------------------------------------------------------------------------- #
-# Convert to deviation from centre for plotting                               
+# Convert to deviation from centre for plotting
 #---------------------------------------------------------------------------- #
 
 #' Express Aggregate Values as Deviation from a Central Tendency
@@ -493,7 +544,7 @@ plot_exceedance <- function(df, variables, x_label, labels = NULL) {
 #' @param agg_method Character. One of `"mean"`, `"median"`,
 #'   `"headcount_ratio"`, `"gap"`, `"gini"`.
 #' @param deviation  Character. One of `"none"`, `"mean"`, `"median"`.
-#' @param loss_frame Logical. Passed to [deviation_from_centre()] as `loss`.
+#' @param loss_frame Logical. Passed to `deviation_from_centre()` as `loss`.
 #' @param pov_line   Numeric or `NULL`. Required for `"headcount_ratio"` /
 #'   `"gap"`.
 #'
@@ -505,9 +556,9 @@ plot_exceedance <- function(df, variables, x_label, labels = NULL) {
 aggregate_sim_preds <- function(preds, so, agg_method, deviation, loss_frame,
                                 pov_line = NULL) {
 
-  if (agg_method %in% c("headcount_ratio", "gap") && is.null(pov_line)) {
+  if (agg_method %in% c("headcount_ratio", "gap", "fgt2") && is.null(pov_line)) {
     rlang::abort(
-      "`pov_line` must be supplied when `agg_method` is 'headcount_ratio' or 'gap'."
+      "`pov_line` must be supplied when `agg_method` is 'headcount_ratio','gap', or 'fgt2'."
     )
   }
 
@@ -562,23 +613,23 @@ aggregate_sim_preds <- function(preds, so, agg_method, deviation, loss_frame,
 #' Build the Historical Simulation Exceedance Plot
 #'
 #' Pure function that aggregates individual-level predictions and returns a
-#' [plot_exceedance()] ggplot object. When `fut_preds` is also supplied the
+#' `plot_exceedance()` ggplot object. When `fut_preds` is also supplied the
 #' future climate series is overlaid as a second curve labelled
 #' `"Future climate"`.
 #'
 #' @param preds      A data frame of individual-level predictions from
-#'   [predict_outcome()], containing at least a `sim_year` column and the
+#'   `predict_outcome()`, containing at least a `sim_year` column and the
 #'   outcome column named by `so$name`.
 #' @param so         A one-row data frame of outcome metadata (must contain
 #'   `name`, `label`, and `type`).
 #' @param agg_method Character. One of `"mean"`, `"median"`,
 #'   `"headcount_ratio"`, `"gap"`, or `"gini"`.
 #' @param deviation  Character. One of `"none"`, `"mean"`, or `"median"`.
-#' @param loss_frame Logical. Passed to [deviation_from_centre()] as `loss`.
+#' @param loss_frame Logical. Passed to `deviation_from_centre()` as `loss`.
 #' @param pov_line   Numeric or `NULL`. Required when `agg_method` is
 #'   `"headcount_ratio"` or `"gap"`.
 #' @param fut_preds  Optional data frame of future-climate individual-level
-#'   predictions from [predict_outcome()]. When supplied a second exceedance
+#'   predictions from `predict_outcome()`. When supplied a second exceedance
 #'   curve labelled `"Future climate"` is overlaid on the same plot.
 #'
 #' @return A `ggplot` object.
@@ -615,3 +666,5 @@ plot_hist_sim <- function(preds, so, agg_method, deviation, loss_frame,
     )
   }
 }
+
+
