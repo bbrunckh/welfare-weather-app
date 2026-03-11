@@ -1,4 +1,4 @@
-#' 2_04_future_sim UI Function
+﻿#' 2_04_future_sim UI Function
 #'
 #' @description A shiny Module. Triggers the future climate welfare simulation.
 #'
@@ -22,9 +22,16 @@ mod_2_04_future_sim_ui <- function(id) {
 #' 2_04_future_sim Server Functions
 #'
 #' Runs the future climate welfare simulation using CMIP6 delta perturbation.
-#' Iterates over every row of selected_fut (one row per SSP x anchor year),
-#' calling get_weather() once per row. A persistent progress notification is
-#' shown throughout and updated at each step.
+#' Iterates sequentially over every row of selected_fut (one row per SSP x
+#' anchor year), calling get_weather() once per row. Progress is shown via
+#' Shiny's withProgress so the user sees per-scenario updates.
+#'
+#' Sequential execution is used rather than parallel (furrr/future) because:
+#'   1. get_weather() opens a DuckDB connection to parquet files on disk.
+#'      Concurrent DuckDB writers/readers on the same files (especially on
+#'      OneDrive) cause file-locking stalls.
+#'   2. multisession on Windows serialises the full R environment per worker,
+#'      adding overhead that exceeds the compute saving for typical n=9 runs.
 #'
 #' @param id               Module id.
 #' @param connection_params Reactive named list from mod_0_overview.
@@ -68,94 +75,107 @@ mod_2_04_future_sim_server <- function(id,
 
       sim_dates           <- build_hist_sim_dates(svy, unlist(sh$year_range))
       perturbation_method <- build_perturbation_method(sw)
+      cp                  <- connection_params()
+      n_total             <- nrow(sf)
 
-      n_total    <- nrow(sf)
-      preds_list <- vector("list", n_total)
-      yr_lookup  <- vector("list", n_total)
+      preds_list_raw <- vector("list", n_total)
 
-      # ---- persistent progress notification ---------------------------------
-      shiny::showNotification(
-        ui          = paste0("Future simulation: starting (0 / ", n_total, ")..."),
-        id          = "fut_sim_progress",
-        duration    = NULL,
-        type        = "message",
-        closeButton = FALSE,
-        session     = session
-      )
-      on.exit(
-        shiny::removeNotification("fut_sim_progress", session = session),
-        add = TRUE
-      )
+      # ---- sequential loop with per-scenario progress ----------------------
+      # withProgress renders a progress bar in the Shiny UI. Each scenario
+      # increments the bar so the user can see work is proceeding.
+      shiny::withProgress(
+        message = paste0("Running future simulation (0 / ", n_total, ")"),
+        value   = 0,
+        {
+          for (i in seq_len(n_total)) {
+            row       <- sf[i, , drop = FALSE]
+            ssp_val   <- as.character(row$ssp)
+            yr        <- unlist(row$year_range)
+            scen_name <- row$scenario_name
 
-      for (i in seq_len(n_total)) {
-        row         <- sf[i, , drop = FALSE]
-        ssp_val     <- as.character(row$ssp)
-        scenario_nm <- as.character(row$scenario_name)
-        yr          <- unlist(row$year_range)
-
-        # update the persistent notification in-place (no new ID = no leak)
-        shiny::showNotification(
-          ui          = paste0("Future simulation: ", scenario_nm,
-                               " (", i, " / ", n_total, ")..."),
-          id          = "fut_sim_progress",
-          duration    = NULL,
-          type        = "message",
-          closeButton = FALSE,
-          session     = session
-        )
-
-        future_period <- c(
-          paste0(yr[1], "-01-01"),
-          paste0(yr[2], "-12-31")
-        )
-
-        weather_raw <- tryCatch(
-          get_weather(
-            survey_data         = svy,
-            selected_weather    = sw,
-            dates               = sim_dates,
-            connection_params   = connection_params(),
-            ssp                 = ssp_val,
-            future_period       = future_period,
-            perturbation_method = perturbation_method
-          ),
-          error = function(e) {
-            shiny::showNotification(
-              paste0("Failed: ", scenario_nm, "  ", conditionMessage(e)),
-              type = "error", duration = 8
+            shiny::setProgress(
+              value   = (i - 1) / n_total,
+              message = paste0("Running future simulation (", i - 1, " / ", n_total, ")"),
+              detail  = scen_name
             )
-            NULL
+
+            future_period <- c(
+              paste0(yr[1], "-01-01"),
+              paste0(yr[2], "-12-31")
+            )
+
+            weather_raw <- tryCatch(
+              get_weather(
+                survey_data         = svy,
+                selected_weather    = sw,
+                dates               = sim_dates,
+                connection_params   = cp,
+                ssp                 = ssp_val,
+                future_period       = future_period,
+                perturbation_method = perturbation_method
+              ),
+              error = function(e) {
+                message("[future_sim] get_weather() failed for '", scen_name,
+                        "': ", conditionMessage(e))
+                NULL
+              }
+            )
+
+            if (is.null(weather_raw)) {
+              preds_list_raw[[i]] <- NULL
+              next
+            }
+
+            survey_wd_sim <- prepare_hist_weather(weather_raw, svy, sw, so$name)
+
+            preds <- tryCatch(
+              predict_outcome(
+                model      = model,
+                newdata    = survey_wd_sim,
+                residuals  = as.character(row$residuals),
+                outcome    = so$name,
+                id         = NULL,
+                train_data = train_data,
+                engine     = engine
+              ),
+              error = function(e) {
+                message("[future_sim] predict_outcome() failed for '", scen_name,
+                        "': ", conditionMessage(e))
+                NULL
+              }
+            )
+
+            if (is.null(preds)) {
+              preds_list_raw[[i]] <- NULL
+              next
+            }
+
+            preds_list_raw[[i]] <- apply_log_backtransform(preds, so)
           }
+
+          shiny::setProgress(value = 1, message = "Future simulation complete")
+        }
+      )
+
+      # ---- collect results --------------------------------------------------
+      names(preds_list_raw) <- sf$scenario_name
+
+      ok         <- !vapply(preds_list_raw, is.null, logical(1))
+      preds_list <- preds_list_raw[ok]
+
+      failed_nms <- sf$scenario_name[!ok]
+      if (length(failed_nms) > 0) {
+        shiny::showNotification(
+          paste0("Failed scenarios: ", paste(failed_nms, collapse = ", ")),
+          type = "error", duration = 10
         )
-
-        if (is.null(weather_raw)) next
-
-        survey_wd_sim <- prepare_hist_weather(weather_raw, svy, sw, so$name)
-
-        preds <- predict_outcome(
-          model      = model,
-          newdata    = survey_wd_sim,
-          residuals  = as.character(row$residuals),
-          outcome    = so$name,
-          id         = NULL,
-          train_data = train_data,
-          engine     = engine
-        )
-
-        preds <- apply_log_backtransform(preds, so)
-
-        preds_list[[i]] <- preds
-        yr_lookup[[i]]  <- yr
       }
 
-      # drop NULLs (failed runs)
-      ok                  <- !vapply(preds_list, is.null, logical(1))
-      preds_list          <- preds_list[ok]
-      yr_lookup           <- yr_lookup[ok]
-      names(preds_list)   <- sf$scenario_name[ok]
-      names(yr_lookup)    <- sf$scenario_name[ok]
-
       if (length(preds_list) == 0) return()
+
+      sf_rows              <- seq_len(n_total)
+      yr_lookup            <- lapply(sf_rows[ok], function(i) unlist(sf[i, ]$year_range))
+      names(yr_lookup)     <- sf$scenario_name[ok]
 
       pred_fut_raw(list(
         preds_list  = preds_list,
@@ -166,7 +186,8 @@ mod_2_04_future_sim_server <- function(id,
 
       completed <- paste(names(preds_list), collapse = ", ")
       shiny::showNotification(
-        paste0("\u2713 Future simulation complete: ", completed, "."),
+        paste0("\u2713 Future simulation complete: ", length(preds_list), " / ",
+               n_total, " scenario(s) succeeded."),
         type = "message", duration = 6
       )
 

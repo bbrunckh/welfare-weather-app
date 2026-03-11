@@ -202,7 +202,7 @@ mod_3_01_sp_server <- function(id,
         tags$label(
           class = "control-label",
           tags$i(class = "fa fa-link me-1"),
-          "Budget mode"
+          "Budget"
         ),
         radioButtons(
           inputId  = ns("budget_mode"),
@@ -269,34 +269,34 @@ mod_3_01_sp_server <- function(id,
           tags$i(class = "fa fa-money-bill-transfer me-1"),
           "Transfer amount"
         ),
-        selectInput(
-          inputId  = ns("amount_type"),
-          label    = NULL,
-          choices  = c(
-            "Equal across beneficiaries"             = "equal",
-            "Varies by ex-ante welfare"              = "exante_welfare",
-            "Varies by predicted welfare at trigger" = "predicted_welfare",
-            "Varies by household characteristic"    = "hh_characteristic"
-          ),
-          selected = "equal"
-        ),
+        # selectInput(
+        #   inputId  = ns("amount_type"),
+        #   label    = NULL,
+        #   choices  = c(
+        #     "Equal across beneficiaries"             = "equal",
+        #     "Varies by ex-ante welfare"              = "exante_welfare",
+        #     "Varies by predicted welfare at trigger" = "predicted_welfare",
+        #     "Varies by household characteristic"    = "hh_characteristic"
+        #   ),
+        #   selected = "equal"
+        # ),
         conditionalPanel(
           condition = paste0(
-            "input['", ns("amount_type"), "'] == 'equal' && ",
+            # "input['", ns("amount_type"), "'] == 'equal' && ",
             "input['", ns("budget_mode"), "'] == 'transfer_first'"
           ),
           numericInput(
             inputId = ns("transfer_amount_usd"),
             label   = tags$span(
               tags$i(class = "fa fa-dollar-sign me-1"),
-              "Transfer per household (USD)"
+              "Transfer per household ($)"
             ),
             value = 50, min = 0, step = 10
           )
         ),
         conditionalPanel(
           condition = paste0(
-            "input['", ns("amount_type"), "'] == 'equal' && ",
+            # "input['", ns("amount_type"), "'] == 'equal' && ",
             "input['", ns("budget_mode"), "'] == 'budget_first'"
           ),
           tags$div(
@@ -378,31 +378,31 @@ mod_3_01_sp_server <- function(id,
         ),
 
         # Anticipatory vs ex-post — hidden for regular programs
-        if (!is_regular) {
-          tagList(
-            radioButtons(
-              inputId  = ns("transfer_timing"),
-              label    = tags$span(
-                tags$i(class = "fa fa-calendar-check me-1"),
-                "Anticipatory vs ex-post"
-              ),
-              choices  = c(
-                "Anticipatory (pre-event)" = "anticipatory",
-                "Ex-post (post-event)"     = "expost"
-              ),
-              selected = isolate(input$transfer_timing) %||% "expost",
-              inline   = TRUE
-            ),
-            sliderInput(
-              inputId = ns("timeliness_weeks"),
-              label   = tags$span(
-                tags$i(class = "fa fa-hourglass-half me-1"),
-                "Timeliness (weeks after trigger)"
-              ),
-              min = 0, max = 26, value = 4, step = 1, post = " wks"
-            )
-          )
-        },
+        # if (!is_regular) {
+        #   tagList(
+        #     radioButtons(
+        #       inputId  = ns("transfer_timing"),
+        #       label    = tags$span(
+        #         tags$i(class = "fa fa-calendar-check me-1"),
+        #         "Anticipatory vs ex-post"
+        #       ),
+        #       choices  = c(
+        #         "Anticipatory (pre-event)" = "anticipatory",
+        #         "Ex-post (post-event)"     = "expost"
+        #       ),
+        #       selected = isolate(input$transfer_timing) %||% "expost",
+        #       inline   = TRUE
+        #     ),
+        #     sliderInput(
+        #       inputId = ns("timeliness_weeks"),
+        #       label   = tags$span(
+        #         tags$i(class = "fa fa-hourglass-half me-1"),
+        #         "Timeliness (weeks after trigger)"
+        #       ),
+        #       min = 0, max = 26, value = 4, step = 1, post = " wks"
+        #     )
+        #   )
+        # },
 
         tags$hr(style = "margin: 8px 0;")
       )

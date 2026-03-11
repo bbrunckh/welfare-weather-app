@@ -22,6 +22,7 @@ mod_2_03_future_ui <- function(id) {
 #'
 #' Manages future climate anchor year selection, SSP selection, band width,
 #' and residual handling. Returns selected_fut: one row per SSP x anchor year.
+#' Scenario labels use hardcoded SSP prefixes (no user-editable label inputs).
 #'
 #' @param id Module id.
 #'
@@ -40,7 +41,6 @@ mod_2_03_future_server <- function(id, selected_hist = NULL) {
       "SSP3-7.0" = "ssp3_7_0",
       "SSP5-8.5" = "ssp5_8_5"
     )
-    ssp_choices_rev <- setNames(names(ssp_choices), unname(ssp_choices))
 
     # ---- Anchor year inputs + band width ------------------------------------
 
@@ -50,14 +50,15 @@ mod_2_03_future_server <- function(id, selected_hist = NULL) {
         helpText(
           "Each timeframe generates one scenario run per climate scenario.",
           "Year range = Selected year \u00b1 band width.",
+          "Years 2 and 3 are optional; leave blank to omit.",
           style = "font-size:11px; margin-top:0;"
         ),
         fluidRow(
           column(4, shiny::numericInput(ns("anchor1"), "Year 1", value = 2030,
                                         min = 2020, max = 2090, step = 5)),
-          column(4, shiny::numericInput(ns("anchor2"), "Year 2", value = 2050,
+          column(4, shiny::numericInput(ns("anchor2"), "Year 2 (optional)", value = 2050,
                                         min = 2020, max = 2090, step = 5)),
-          column(4, shiny::numericInput(ns("anchor3"), "Year 3", value = 2070,
+          column(4, shiny::numericInput(ns("anchor3"), "Year 3 (optional)", value = 2070,
                                         min = 2020, max = 2090, step = 5))
         ),
         shiny::sliderInput(
@@ -82,7 +83,6 @@ mod_2_03_future_server <- function(id, selected_hist = NULL) {
       if (n_yrs < 10)
         warns <- c(warns, paste0("\u26a0\ufe0f Band \u00b1", bw, "yr = ", n_yrs,
                                  " years. 1:5 requires \u22655 yrs, 1:10 requires \u226510 yrs."))
-      # check for overlapping bands
       if (length(anchors) > 1) {
         for (i in seq_len(length(anchors) - 1)) {
           for (j in (i + 1):length(anchors)) {
@@ -97,7 +97,8 @@ mod_2_03_future_server <- function(id, selected_hist = NULL) {
         helpText(w, style = "color:#c0392b; font-size:11px;")))
     })
 
-    # ---- Climate scenario selector + per-SSP name inputs -------------------
+    # ---- Climate scenario selector -----------------------------------------
+    # Labels are hardcoded (SSP2/SSP3/SSP5); no editable per-SSP name inputs.
 
     output$climate_scenario <- renderUI({
       tagList(
@@ -110,38 +111,9 @@ mod_2_03_future_server <- function(id, selected_hist = NULL) {
         helpText(
           "CMIP6 ensemble 'delta' fields are used to perturb historical observations.",
           style = "font-size:12px;"
-        ),
-        uiOutput(ns("ssp_name_inputs"))
+        )
       )
     })
-
-    # ---- Per-SSP name inputs -----------------------------------------------
-    # One textInput per SSP (not per anchor year)  used as a prefix.
-    # Final scenario name = "<ssp_name> / <anchor> \u00b1<band>yr"
-
-    output$ssp_name_inputs <- renderUI({
-      req(input$climate)
-
-      # Build historical year range suffix if available
-      hist_suffix <- ""
-      if (!is.null(selected_hist)) {
-        yr <- tryCatch(unlist(selected_hist()$year_range), error = function(e) NULL)
-        if (!is.null(yr) && length(yr) == 2)
-          hist_suffix <- paste0(" (", yr[1], "\u2013", yr[2], ")")
-      }
-
-      inputs <- lapply(input$climate, function(ssp) {
-        input_id      <- paste0("scenario_name_", ssp)
-        default_label <- paste0(ssp_labels[ssp], hist_suffix)
-        textInput(
-          inputId = ns(input_id),
-          label = paste0("Label prefix: ", ssp_choices_rev[ssp]),
-          value   = default_label
-        )
-      })
-      do.call(tagList, inputs)
-    })
-
 
     # ---- Simulation parameters toggle --------------------------------------
 
@@ -179,6 +151,7 @@ mod_2_03_future_server <- function(id, selected_hist = NULL) {
     })
 
     # ---- selected_fut: one row per SSP x anchor year -----------------------
+    # Scenario name = "<SSP> (<hist yr1>-<hist yr2>) / <anchor> \u00b1<bw>yr"
 
     selected_fut <- reactive({
       req(input$climate, input$band_width)
@@ -187,8 +160,16 @@ mod_2_03_future_server <- function(id, selected_hist = NULL) {
       anchors <- sort(unique(anchors[!is.na(anchors)]))
       bw      <- as.integer(input$band_width)
 
+      # build historical year range suffix once
+      hist_suffix <- ""
+      if (!is.null(selected_hist)) {
+        yr <- tryCatch(unlist(selected_hist()$year_range), error = function(e) NULL)
+        if (!is.null(yr) && length(yr) == 2)
+          hist_suffix <- paste0(" (", yr[1], "\u2013", yr[2], ")")
+      }
+
       rows <- lapply(input$climate, function(ssp) {
-        prefix   <- input[[paste0("scenario_name_", ssp)]] %||% ssp_labels[ssp]
+        prefix <- paste0(ssp_labels[ssp], hist_suffix)
         lapply(anchors, function(anchor) {
           yr         <- c(anchor - bw, anchor + bw)
           scene_name <- paste0(prefix, " / ", anchor, " \u00b1", bw, "yr")
@@ -212,4 +193,3 @@ mod_2_03_future_server <- function(id, selected_hist = NULL) {
     list(selected_fut = selected_fut)
   })
 }
-
