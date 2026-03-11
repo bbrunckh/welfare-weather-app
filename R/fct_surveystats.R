@@ -369,6 +369,12 @@ make_stats_dt <- function(survey_data, variable_list, flag_col) {
         dplyr::select(variable, variable_label, dplyr::everything(), -dplyr::any_of("label"))
     }
 
+    # Sort by variable name, then wave (countryyear) where available
+    if (all(c("variable", "countryyear") %in% names(tab))) {
+      tab <- tab |>
+        dplyr::arrange(.data$variable, .data$countryyear)
+    }
+
     # ---- Column renaming ----------------------------------------------------
     if ("variable_label" %in% names(tab)) names(tab)[names(tab) == "variable_label"] <- "Variable Label"
     if ("countryyear" %in% names(tab))    names(tab)[names(tab) == "countryyear"]    <- "Country, Year"
