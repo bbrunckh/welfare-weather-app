@@ -478,10 +478,10 @@ mod_3_01_sp_server <- function(id,
           # program type
           sp_type               = input$sp_type                 %||% "shock",
           # Trigger (shock only)
-          trigger_type          = input$trigger_type            %||% "weather_threshold",
+          trigger_type          = input$trigger_type            %||% "return_period",
           trigger_value         = input$trigger_value           %||% 10,
           # Budget mode
-          budget_mode           = input$budget_mode             %||% "budget_first",
+          budget_mode           = input$budget_mode             %||% "transfer_first",
           budget_type           = input$budget_type             %||% "fixed",
           budget_fixed          = input$budget_fixed            %||% 1000000,
           budget_share_pct      = input$budget_share_pct        %||% 50,
