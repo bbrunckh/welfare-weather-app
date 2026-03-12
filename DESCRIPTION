@@ -1,0 +1,43 @@
+Package: wiseapp
+Title: WISE App — Weather Impact Simulation & Evaluation
+Version: 0.0.0.9000
+Authors@R: 
+    person("First", "Last", , "first.last@example.com", role = c("aut", "cre"))
+Description: Interactive app for analysing welfare impacts of weather and policy scenarios. See package README for details.
+License: MIT + file LICENSE
+Encoding: UTF-8
+Roxygen: list(markdown = TRUE)
+RoxygenNote: 7.3.3
+Imports:
+    shiny,
+    golem,
+    waiter,
+    bsplus,
+    ggplot2,
+    scales,
+    DT,
+    ggridges,
+    pins,
+    dplyr,
+    tidyr,
+    purrr,
+    tibble,
+    stringr,
+    readr,
+    arrow,
+    duckdb,
+    bslib,
+    shinyWidgets,
+    leaflet,
+    sf,
+    bsplus,
+    magrittr,
+    broom,
+    parsnip,
+    fixest,
+    htmltools,
+    relaimpo,
+    duckdbfs,
+    DBI,
+    dbplyr,
+    glmnet

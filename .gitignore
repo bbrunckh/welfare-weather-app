@@ -20,6 +20,10 @@
 
 !.reproducibility_report_RR_2024_WLD_175-v02.pdf
 
+# Keep description and namespace
+!DESCRIPTION
+!NAMESPACE
+
 # Git placeholder file (to commit empty folders)
 !/**/*.gitkeep
 
@@ -43,6 +47,9 @@
 # The following file types are code that should always be
 # included no matter where in the repository folder they are
 # located unless you explicitly ignore that folder
+
+# Data
+!/**/data/pins/**/*.csv
 
 # Stata
 !/**/*.do
@@ -112,8 +119,8 @@
 !/**/Output/**/*.xml
 !/**/images/**/*.eps
 !/**/images/**/*.svg
-!/**/images/**/*.png
-!/**/images/**/*.ico
+!/**/inst/app/www/**/*.png
+!/**/inst/app/www/**/*.ico
 
 #######################
 # Include all the files with passwords or tokens here. All files named
