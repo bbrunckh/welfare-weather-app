@@ -76,7 +76,7 @@ mod_0_overview_server <- function(id) {
           textInput(
             ns("local_path"),
             label       = "Path",
-            value       = "/Users/madshoefer/Documents/GitHub/wiseapp/data_new/",
+            value       = "data/",
             placeholder = "/path/to/data"
           ),
           helpText(
