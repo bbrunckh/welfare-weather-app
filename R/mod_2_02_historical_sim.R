@@ -80,7 +80,7 @@ mod_2_02_historical_sim_server <- function(id,
 
     # ---- aggregation choices depend on outcome type ------------------------
     aggregate_choices <- reactive({
-      hist_aggregate_choices(selected_outcome()$type)
+      hist_aggregate_choices(selected_outcome()$type, selected_outcome()$name)
     })
 
     # ---- main simulation observer ------------------------------------------

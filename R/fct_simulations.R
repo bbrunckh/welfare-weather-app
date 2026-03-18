@@ -211,18 +211,24 @@ apply_log_backtransform <- function(preds, so) {
 #' @return A named character vector suitable for use in `shiny::selectInput()`.
 #'
 #' @export
-hist_aggregate_choices <- function(outcome_type) {
+hist_aggregate_choices <- function(outcome_type, outcome_name = NULL) {
   if (identical(outcome_type, "logical")) {
-    c("Rate" = "mean")
-  } else {
+    # Binary outcomes: Mean and Median
+    c("Mean" = "mean", "Median" = "median")
+  } else if (identical(outcome_type, "numeric") &&
+             identical(outcome_name, "welfare")) {
+    # Welfare / monetary outcomes: full suite including FGT and Gini
     c(
-      "Mean"            = "mean",
-      "Median"          = "median",
-      "Headcount Ratio (FGT0)" = "headcount_ratio",
-      "Outcome Gap (FGT1)"     = "gap",
-      "Outcome Severity (FGT2)"     = "fgt2",
-      "Gini coefficient"            = "gini"
+      "Mean"                    = "mean",
+      "Median"                  = "median",
+      "Headcount Ratio (FGT0)"  = "headcount_ratio",
+      "Outcome Gap (FGT1)"      = "gap",
+      "Outcome Severity (FGT2)" = "fgt2",
+      "Gini coefficient"        = "gini"
     )
+  } else {
+    # All other numeric outcomes (hours, employment, etc.): mean and median only
+    c("Mean" = "mean", "Median" = "median")
   }
 }
 

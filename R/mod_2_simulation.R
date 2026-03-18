@@ -129,8 +129,9 @@ mod_2_simulation_server <- function(id,
     # ---- Clear scenarios button ---------------------------------------------
     observeEvent(input$clear_scenarios, {
       saved_scenarios(list())
+      s2$hist_sim(NULL)
       shiny::showNotification(
-        "All scenarios cleared. Re-run simulations to populate.",
+        "All scenarios and historical baseline cleared. Re-run simulations to populate.",
         type = "message", duration = 4
       )
     })

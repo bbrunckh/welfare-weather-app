@@ -37,14 +37,25 @@ mod_2_01_historical_server <- function(id) {
           label   = "Period defining the historical weather distribution",
           min     = 1950,
           max     = 2024,
-          value   = c(1990, 2024),
+          value   = c(1994, 2024),
           sep     = ""
         ),
         uiOutput(ns("hist_years_warning")),
+        helpText(
+          tags$b("Note:"), " Historical weather data is used to inform the",
+          " underlying variability of weather, which is then perturbed with",
+          " climate scenario forecasts to estimate outcomes given this",
+          " perturbation and historical variability. There is therefore a",
+          " balance between additional years (which can encompass rarer events)",
+          " and the representativeness of this underlying weather data, which",
+          " may shift due to climate change.",
+          tags$b(" 30 years (e.g. 1994–2024) is the recommended default."),
+          style = "font-size: 11px; color: #555; margin-top: 4px;"
+        ),
         textInput(
           inputId = ns("scenario_name"),
           label   = "Scenario name",
-          value   = "Historical / 1990–2024"
+          value   = "Historical / 1994–2024"
         )
       )
     })
@@ -63,7 +74,7 @@ mod_2_01_historical_server <- function(id) {
 
     # ---- Auto-update scenario name when years change -----------------------
 
-    prev_hist_years <- reactiveVal(c(1990L, 2024L))
+    prev_hist_years <- reactiveVal(c(1994L, 2024L))
 
     observeEvent(input$hist_years, {
       req(input$hist_years)
@@ -107,7 +118,7 @@ mod_2_01_historical_server <- function(id) {
           " preserving individual-level heterogeneity across simulation years.", tags$br(),
           tags$b("empirical:"), " resample residuals from the training distribution",
           " (non-parametric bootstrap).", tags$br(),
-          tags$b("normal:"), " draw residuals from N(0, \u03c3) where \u03c3 is the",
+          tags$b("normal:"), " draw residuals from N(0, σ) where σ is the",
           " training residual SD.",
           style = "font-size: 11px;"
         )
@@ -119,7 +130,7 @@ mod_2_01_historical_server <- function(id) {
     selected_hist <- reactive({
       data.frame(
         type          = "historical",
-        year_range    = I(list(input$hist_years         %||% c(1990, 2024))),
+        year_range    = I(list(input$hist_years         %||% c(1994, 2024))),
         residuals     = input$hist_sim_residuals         %||% "original",
         scenario_name = as.character(input$scenario_name %||% "Historical"),
         stringsAsFactors = FALSE
@@ -133,3 +144,4 @@ mod_2_01_historical_server <- function(id) {
     )
   })
 }
+

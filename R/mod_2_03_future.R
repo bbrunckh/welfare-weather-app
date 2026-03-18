@@ -11,7 +11,7 @@
 mod_2_03_future_ui <- function(id) {
   ns <- NS(id)
   tagList(
-    uiOutput(ns("anchor_year_inputs")),
+    uiOutput(ns("future_timeframes")),
     uiOutput(ns("climate_scenario")),
     uiOutput(ns("fut_sim_specs_button")),
     uiOutput(ns("fut_sim_specs"))
@@ -42,35 +42,79 @@ mod_2_03_future_server <- function(id, selected_hist = NULL) {
       "SSP5-8.5" = "ssp5_8_5"
     )
 
-    # ---- Anchor year inputs + band width ------------------------------------
+    # Default anchor years and band width
+    default_anchors  <- c(2030L, 2040L, 2050L)
+    default_bw       <- 10L
 
-    output$anchor_year_inputs <- renderUI({
+    # ---- Advanced settings toggle ------------------------------------------
+
+    adv_open <- reactiveVal(FALSE)
+
+    # ---- Future timeframes UI ----------------------------------------------
+
+    output$future_timeframes <- renderUI({
       tagList(
         h6("Future timeframes", style = "margin-bottom:4px; font-weight:600;"),
         helpText(
-          "Each timeframe generates one scenario run per climate scenario.",
-          "Year range = Selected year \u00b1 band width.",
-          "Years 2 and 3 are optional; leave blank to omit.",
-          style = "font-size:11px; margin-top:0;"
+          "Select which future periods to model.",
+          "Each selected timeframe generates one scenario run per climate scenario.",
+          style = "font-size:11px; margin-top:0; margin-bottom:6px;"
+        ),
+        # Simple default: three toggleable checkboxes
+        checkboxInput(ns("use_2030"), "2030 ±10 years (2020–2040)", value = TRUE),
+        checkboxInput(ns("use_2040"), "2040 ±10 years (2030–2050)", value = TRUE),
+        checkboxInput(ns("use_2050"), "2050 ±10 years (2040–2060)", value = TRUE),
+        tags$div(
+          style = "margin-top:8px;",
+          actionLink(ns("toggle_adv"), uiOutput(ns("adv_link_label")))
+        ),
+        uiOutput(ns("adv_settings_panel"))
+      )
+    })
+
+    output$adv_link_label <- renderUI({
+      if (isTRUE(adv_open())) {
+        tags$span("▼ Advanced settings", style = "font-size:12px;")
+      } else {
+        tags$span("► Advanced settings", style = "font-size:12px;")
+      }
+    })
+
+    observeEvent(input$toggle_adv, {
+      adv_open(!isTRUE(adv_open()))
+    })
+
+    # ---- Advanced settings panel -------------------------------------------
+
+    output$adv_settings_panel <- renderUI({
+      if (!isTRUE(adv_open())) return(NULL)
+
+      tagList(
+        tags$hr(style = "margin: 8px 0;"),
+        helpText(
+          "Override the default timeframes by specifying anchor years and band width manually.",
+          "When set, these replace the checkbox selections above.",
+          "Leave Year 2 and Year 3 blank to omit them.",
+          style = "font-size:11px;"
         ),
         fluidRow(
-          column(4, shiny::numericInput(ns("anchor1"), "Year 1", value = 2030,
-                                        min = 2020, max = 2090, step = 5)),
-          column(4, shiny::numericInput(ns("anchor2"), "Year 2 (optional)", value = 2050,
-                                        min = 2020, max = 2090, step = 5)),
-          column(4, shiny::numericInput(ns("anchor3"), "Year 3 (optional)", value = 2070,
-                                        min = 2020, max = 2090, step = 5))
+          column(4, shiny::numericInput(ns("anchor1"), "Year 1",
+                                        value = 2030, min = 2020, max = 2090, step = 5)),
+          column(4, shiny::numericInput(ns("anchor2"), "Year 2 (optional)",
+                                        value = NA, min = 2020, max = 2090, step = 5)),
+          column(4, shiny::numericInput(ns("anchor3"), "Year 3 (optional)",
+                                        value = NA, min = 2020, max = 2090, step = 5))
         ),
         shiny::sliderInput(
           ns("band_width"),
-          label = "Band width (\u00b1 years around each selected year)",
+          label = "Band width (± years around each selected year)",
           min   = 5, max = 25, value = 10, step = 5, sep = ""
         ),
         uiOutput(ns("anchor_warnings"))
       )
     })
 
-    # ---- Anchor year warnings -----------------------------------------------
+    # ---- Anchor year warnings (advanced mode) ------------------------------
 
     output$anchor_warnings <- renderUI({
       req(input$band_width)
@@ -81,14 +125,14 @@ mod_2_03_future_server <- function(id, selected_hist = NULL) {
 
       warns <- character(0)
       if (n_yrs < 10)
-        warns <- c(warns, paste0("\u26a0\ufe0f Band \u00b1", bw, "yr = ", n_yrs,
-                                 " years. 1:5 requires \u22655 yrs, 1:10 requires \u226510 yrs."))
+        warns <- c(warns, paste0("⚠️ Band ±", bw, "yr = ", n_yrs,
+                                 " years. 1:5 requires ≥5 yrs, 1:10 requires ≥10 yrs."))
       if (length(anchors) > 1) {
         for (i in seq_len(length(anchors) - 1)) {
           for (j in (i + 1):length(anchors)) {
             if (abs(anchors[i] - anchors[j]) < 2 * bw)
-              warns <- c(warns, paste0("\u26a0\ufe0f Years ", anchors[i], " and ",
-                                       anchors[j], " bands overlap (\u00b1", bw, "yr)."))
+              warns <- c(warns, paste0("⚠️ Years ", anchors[i], " and ",
+                                       anchors[j], " bands overlap (±", bw, "yr)."))
           }
         }
       }
@@ -98,7 +142,6 @@ mod_2_03_future_server <- function(id, selected_hist = NULL) {
     })
 
     # ---- Climate scenario selector -----------------------------------------
-    # Labels are hardcoded (SSP2/SSP3/SSP5); no editable per-SSP name inputs.
 
     output$climate_scenario <- renderUI({
       tagList(
@@ -143,36 +186,62 @@ mod_2_03_future_server <- function(id, selected_hist = NULL) {
           " preserving individual-level heterogeneity across simulation years.", tags$br(),
           tags$b("empirical:"), " resample residuals from the training distribution",
           " (non-parametric bootstrap).", tags$br(),
-          tags$b("normal:"), " draw residuals from N(0, \u03c3) where \u03c3 is the",
+          tags$b("normal:"), " draw residuals from N(0, σ) where σ is the",
           " training residual SD.",
           style = "font-size:11px;"
         )
       )
     })
 
+    # ---- Resolve active anchors & band width --------------------------------
+    # When advanced panel is open AND has valid anchor1, use advanced values.
+    # Otherwise fall back to the checkbox defaults.
+
+    active_anchors <- reactive({
+      if (isTRUE(adv_open()) && !is.na(input$anchor1)) {
+        # Advanced mode
+        anchors <- c(input$anchor1, input$anchor2, input$anchor3)
+        sort(unique(anchors[!is.na(anchors)]))
+      } else {
+        # Simple checkbox mode
+        selected <- c(
+          if (isTRUE(input$use_2030)) 2030L,
+          if (isTRUE(input$use_2040)) 2040L,
+          if (isTRUE(input$use_2050)) 2050L
+        )
+        if (length(selected) == 0) 2030L else selected
+      }
+    })
+
+    active_bw <- reactive({
+      if (isTRUE(adv_open()) && !is.na(input$band_width)) {
+        as.integer(input$band_width)
+      } else {
+        default_bw
+      }
+    })
+
     # ---- selected_fut: one row per SSP x anchor year -----------------------
-    # Scenario name = "<SSP> (<hist yr1>-<hist yr2>) / <anchor> \u00b1<bw>yr"
 
     selected_fut <- reactive({
-      req(input$climate, input$band_width)
+      req(input$climate)
 
-      anchors <- c(input$anchor1, input$anchor2, input$anchor3)
-      anchors <- sort(unique(anchors[!is.na(anchors)]))
-      bw      <- as.integer(input$band_width)
+      anchors <- active_anchors()
+      bw      <- active_bw()
 
       # build historical year range suffix once
       hist_suffix <- ""
       if (!is.null(selected_hist)) {
         yr <- tryCatch(unlist(selected_hist()$year_range), error = function(e) NULL)
         if (!is.null(yr) && length(yr) == 2)
-          hist_suffix <- paste0(" (", yr[1], "\u2013", yr[2], ")")
+          hist_suffix <- paste0(" (", yr[1], "–", yr[2], ")")
       }
 
       rows <- lapply(input$climate, function(ssp) {
         prefix <- paste0(ssp_labels[ssp], hist_suffix)
         lapply(anchors, function(anchor) {
           yr         <- c(anchor - bw, anchor + bw)
-          scene_name <- paste0(prefix, " / ", anchor, " \u00b1", bw, "yr")
+          scene_name <- paste0(prefix, " / ", anchor, " ±", bw, "yr")
           data.frame(
             type          = "future",
             year_range    = I(list(yr)),
@@ -193,3 +262,4 @@ mod_2_03_future_server <- function(id, selected_hist = NULL) {
     list(selected_fut = selected_fut)
   })
 }
+

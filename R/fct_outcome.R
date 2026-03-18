@@ -170,6 +170,7 @@ outcome_transform <- function(type) {
 #'
 #' @export
 build_selected_outcome <- function(info, currency = NULL, poverty_line = NULL) {
+
   if (is.null(info) || nrow(info) == 0) return(info)
 
   name  <- as.character(info$name[1])
@@ -177,6 +178,7 @@ build_selected_outcome <- function(info, currency = NULL, poverty_line = NULL) {
   type  <- as.character(info$type[1])
 
   info$transform <- outcome_transform(type)
+  info$direction <- outcome_direction(name, type)
 
   if (is_monetary_outcome(name, units)) {
     info$units <- if (!is.null(currency) && nzchar(currency)) currency else units
@@ -230,4 +232,27 @@ outcome_info_message <- function(type) {
   }
 
   messages
+}
+
+
+# ---------------------------------------------------------------------------- #
+# Outcome directionality                                                        #
+# ---------------------------------------------------------------------------- #
+
+#' Classify whether larger simulated values are better or worse for an outcome
+#'
+#' Returns `"lower_is_better"` for poverty/inequality measures where a higher
+#' simulated value represents a worse outcome. Returns `"higher_is_better"` for
+#' all other outcomes (welfare, employment, hours worked, etc.).
+#'
+#' @param name A single character string — the outcome variable name.
+#' @param type A single character string — the outcome type.
+#'
+#' @return `"lower_is_better"` or `"higher_is_better"`.
+#'
+#' @export
+outcome_direction <- function(name, type) {
+  name <- tolower(as.character(name[1]))
+  lower_is_better_names <- c("poor", "headcount_ratio", "gap", "fgt2", "gini")
+  if (name %in% lower_is_better_names) "lower_is_better" else "higher_is_better"
 }

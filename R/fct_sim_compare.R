@@ -419,12 +419,13 @@ build_impact_table <- function(scenarios,
 #' @param return_period Logical. Show return period lines. Default TRUE.
 #' @param n_sim_years   Integer. Triggers reliability annotation.
 #' @param show_error    Logical stub (reserved). Default FALSE.
-#' @param log_x         Logical. Use log10 scale on the probability axis. Default FALSE.
+#' @param logit_x       Logical. Use logit scale on the probability axis to
+#'   emphasise both tails symmetrically. Default FALSE.
 #' @return A ggplot object.
 #' @importFrom ggplot2 ggplot aes stat_ecdf geom_vline geom_hline annotate
 #'   labs theme_minimal theme scale_color_manual scale_linetype_manual
-#'   scale_y_log10 after_stat coord_flip guide_legend element_text
-#' @importFrom scales label_percent
+#'   after_stat coord_flip guide_legend element_text
+#' @importFrom scales label_percent logit_trans
 #' @importFrom dplyr bind_rows
 #' @importFrom rlang .data
 #' @export
@@ -434,7 +435,7 @@ enhance_exceedance <- function(scenarios,
                                return_period = TRUE,
                                n_sim_years   = NULL,
                                show_error    = FALSE,
-                               log_x         = FALSE) {
+                               logit_x       = FALSE) {
 
   stopifnot(is.list(scenarios), length(scenarios) > 0)
   labels <- names(scenarios)
@@ -468,16 +469,17 @@ enhance_exceedance <- function(scenarios,
   hist_mean <- mean(hist_agg$out$value, na.rm = TRUE)
 
 
-  # Pre-compute ECDF per group and filter to strictly (0, 1) so log10 scale
-  # never receives zero (which becomes -Inf and removes all lines).
+  # Logit limits: keep exceedance strictly within (eps, 1-eps) so the
+  # logit transform never hits -Inf / +Inf. Log10 only needs > 0.
+  eps <- if (isTRUE(logit_x)) 0.005 else 0
+
   ecdf_df <- dplyr::bind_rows(lapply(levels(long_df$group), function(grp) {
     sub    <- long_df[long_df$group == grp & is.finite(long_df$value), ]
     if (nrow(sub) == 0) return(NULL)
     fn     <- stats::ecdf(sub$value)
     xs     <- sort(unique(sub$value))
     exceed <- 1 - fn(xs)
-    # keep only rows where exceedance is strictly in (0, 1) for log safety
-    keep   <- exceed > 0 & exceed < 1
+    keep   <- exceed > eps & exceed < (1 - eps)
     data.frame(
       value   = xs[keep],
       exceed  = exceed[keep],
@@ -488,13 +490,16 @@ enhance_exceedance <- function(scenarios,
     )
   }))
 
+  # annotation y-position: use 0.95 on linear scale, 0.97 on logit (avoid clipping)
+  ann_y <- if (isTRUE(logit_x)) 0.97 else 0.95
+
   p <- ggplot2::ggplot(
     ecdf_df, ggplot2::aes(x = value, y = exceed, colour = ssp_key, linetype = yr)
   ) +
     ggplot2::geom_line(linewidth = 0.9) +
     ggplot2::geom_vline(xintercept = hist_mean, linetype = "dotted",
                         colour = "black", linewidth = 0.5) +
-    ggplot2::annotate("text", x = hist_mean, y = 0.97,
+    ggplot2::annotate("text", x = hist_mean, y = ann_y,
                       label = "Hist. mean", hjust = 1.05, vjust = -0.4,
                       size = 2.8, colour = "grey30") +
     ggplot2::scale_color_manual(
@@ -524,37 +529,47 @@ enhance_exceedance <- function(scenarios,
     ) +
     ggplot2::coord_flip()
 
-  # --- return period lines ---
+  # --- return period lines (both tails, symmetric) ---
   if (isTRUE(return_period)) {
-    rp_map <- c("1:5" = 0.20, "1:10" = 0.10, "1:20" = 0.05, "1:50" = 0.02)
-    for (nm in names(rp_map)) {
-      prob     <- rp_map[nm]
+    # Low-probability tail (rare low outcomes): 1:50, 1:20, 1:10, 1:5
+    rp_low  <- c("1:50" = 0.02, "1:20" = 0.05, "1:10" = 0.10, "1:5" = 0.20)
+    # High-probability tail (rare high outcomes): 49:50, 19:20, 9:10, 4:5
+    rp_high <- c("49:50" = 0.98, "19:20" = 0.95, "9:10" = 0.90, "4:5" = 0.80)
+    rp_all  <- c(rp_low, rp_high)
+
+    for (nm in names(rp_all)) {
+      prob <- rp_all[nm]
+      # Reliability check only applies to the rare low-probability lines
       reliable <- is.null(n_sim_years) ||
         (!(nm == "1:20" && n_sim_years < 40) &&
          !(nm == "1:50" && n_sim_years < 100))
       rp_label  <- if (reliable) nm else paste0(nm, "*")
-      label_col <- if (reliable) "black" else "grey50"
+      label_col <- if (reliable) "grey40" else "grey65"
       p <- p +
         ggplot2::geom_hline(yintercept = prob, linetype = "dashed",
-                            colour = "black", linewidth = 0.4) +
+                            colour = "grey60", linewidth = 0.35) +
         ggplot2::annotate("text", x = -Inf, y = prob, label = rp_label,
-                          hjust = -0.1, vjust = -0.3, size = 3, colour = label_col)
+                          hjust = -0.1, vjust = -0.3, size = 2.8, colour = label_col)
     }
     if (!is.null(n_sim_years) && n_sim_years < 100) {
       p <- p + ggplot2::annotate(
         "text", x = Inf, y = 0.02,
-        label  = paste0("\u26a0 1:50 estimate unreliable (n = ", n_sim_years, " yrs)"),
-        hjust  = 1.05, vjust = 1.5, size = 3, colour = "grey50"
+        label  = paste0("\u26a0 unreliable (n = ", n_sim_years, " yrs)"),
+        hjust  = 1.05, vjust = 1.5, size = 2.8, colour = "grey50"
       )
     }
   }
 
-  # --- optional log10 probability axis (applied to y after coord_flip) ---
-  # ecdf_df is pre-filtered to exceed in (0,1) exclusive, so log10 is safe.
-  if (isTRUE(log_x)) {
-    p <- p + ggplot2::scale_y_log10(
-      breaks = c(0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.5),
-      labels = scales::label_percent(accuracy = 1)
+  # --- optional logit probability axis (applied to y after coord_flip) ---
+  # Emphasises both tails symmetrically. ecdf_df is pre-clipped to (eps, 1-eps).
+  if (isTRUE(logit_x)) {
+    logit_breaks <- c(0.02, 0.05, 0.10, 0.20, 0.50, 0.80, 0.90, 0.95, 0.98)
+    logit_labels <- c("1:50", "1:20", "1:10", "1:5", "Median", "4:5", "9:10", "19:20", "49:50")
+    p <- p + ggplot2::scale_y_continuous(
+      trans  = scales::logit_trans(),
+      breaks = logit_breaks,
+      labels = logit_labels,
+      limits = c(0.005, 0.995)
     )
   }
 
