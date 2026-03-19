@@ -86,6 +86,12 @@ mod_1_07_results_server <- function(id,
       )
 
       if (!is.null(fit_list)) {
+        # Extract and store training-time bin cutoffs so simulation calls
+        # can reuse them via fixed_breaks, ensuring identical factor levels.
+        fit_list$bin_cutoffs <- extract_bin_cutoffs(
+          fit_list$train_data,
+          selected_weather()$name
+        )
         model_fit_val(fit_list)
         shiny::showNotification("Models fitted successfully.",
                                 type = "message", duration = 3)

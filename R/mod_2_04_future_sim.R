@@ -105,18 +105,25 @@ mod_2_04_future_sim_server <- function(id,
             )
 
             weather_raw <- tryCatch(
-              get_weather(
-                survey_data         = svy,
-                selected_weather    = sw,
-                dates               = sim_dates,
-                connection_params   = cp,
-                ssp                 = ssp_val,
-                future_period       = future_period,
-                perturbation_method = perturbation_method
-              ),
+              {
+                wr <- get_weather(
+                  survey_data         = svy,
+                  selected_weather    = sw,
+                  dates               = sim_dates,
+                  connection_params   = cp,
+                  ssp                 = ssp_val,
+                  future_period       = future_period,
+                  perturbation_method = perturbation_method,
+                  fixed_breaks        = mf$bin_cutoffs
+                )
+                wr$result
+              },
               error = function(e) {
-                message("[future_sim] get_weather() failed for '", scen_name,
-                        "': ", conditionMessage(e))
+                shiny::showNotification(
+                  paste0("Failed to load weather for '", scen_name, "': ",
+                         conditionMessage(e)),
+                  type = "warning", duration = 6
+                )
                 NULL
               }
             )
@@ -126,31 +133,21 @@ mod_2_04_future_sim_server <- function(id,
               next
             }
 
-            survey_wd_sim <- prepare_hist_weather(weather_raw, svy, sw, so$name)
+            # ---- simulate outcomes -----------------------------------------
+            # run_sim_pipeline(): join weather -> predict_outcome -> back-transform
 
-            preds <- tryCatch(
-              predict_outcome(
-                model      = model,
-                newdata    = survey_wd_sim,
-                residuals  = as.character(row$residuals),
-                outcome    = so$name,
-                id         = NULL,
-                train_data = train_data,
-                engine     = engine
-              ),
-              error = function(e) {
-                message("[future_sim] predict_outcome() failed for '", scen_name,
-                        "': ", conditionMessage(e))
-                NULL
-              }
+            preds <- run_sim_pipeline(
+              weather_raw = weather_raw,
+              svy         = svy,
+              sw          = sw,
+              so          = so,
+              model       = model,
+              residuals   = as.character(row$residuals),
+              train_data  = train_data,
+              engine      = engine
             )
 
-            if (is.null(preds)) {
-              preds_list_raw[[i]] <- NULL
-              next
-            }
-
-            preds_list_raw[[i]] <- apply_log_backtransform(preds, so)
+            preds_list_raw[[i]] <- preds   # NULL if pipeline failed (already warned)
           }
 
           shiny::setProgress(value = 1, message = "Future simulation complete")
@@ -173,9 +170,9 @@ mod_2_04_future_sim_server <- function(id,
 
       if (length(preds_list) == 0) return()
 
-      sf_rows              <- seq_len(n_total)
-      yr_lookup            <- lapply(sf_rows[ok], function(i) unlist(sf[i, ]$year_range))
-      names(yr_lookup)     <- sf$scenario_name[ok]
+      sf_rows          <- seq_len(n_total)
+      yr_lookup        <- lapply(sf_rows[ok], function(i) unlist(sf[i, ]$year_range))
+      names(yr_lookup) <- sf$scenario_name[ok]
 
       pred_fut_raw(list(
         preds_list  = preds_list,
@@ -184,7 +181,6 @@ mod_2_04_future_sim_server <- function(id,
         year_range  = yr_lookup
       ))
 
-      completed <- paste(names(preds_list), collapse = ", ")
       shiny::showNotification(
         paste0("\u2713 Future simulation complete: ", length(preds_list), " / ",
                n_total, " scenario(s) succeeded."),

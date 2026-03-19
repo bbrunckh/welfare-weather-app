@@ -76,7 +76,7 @@ mod_1_05_weatherstats_server <- function(
           selected_weather  = sw,
           dates             = extract_survey_dates(svy),
           connection_params = connection_params()
-        )
+        )$result
       }, error = function(e) {
         removeNotification(notif_load)
         shiny::showNotification(

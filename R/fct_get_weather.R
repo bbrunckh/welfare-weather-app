@@ -1,3 +1,39 @@
+#' Extract bin break vectors from factor columns in a data frame
+#'
+#' Reads the `levels()` of any factor column in `df` and reconstructs the
+#' numeric break vector that `cut()` used to produce those levels.  The
+#' result is suitable for passing directly as `fixed_breaks` to
+#' `get_weather()` so that simulation calls apply identical factor levels to
+#' the ones the model was trained on.
+#'
+#' @param df            A data frame, typically `mf$train_data`.
+#' @param weather_names Character vector of weather variable names to check.
+#'   Non-factor columns are silently skipped.
+#' @return A named list of numeric break vectors (one entry per binned
+#'   variable).  Variables that are not factors are omitted.
+extract_bin_cutoffs <- function(df, weather_names) {
+  out <- list()
+  for (v in weather_names) {
+    col <- df[[v]]
+    if (!is.factor(col)) next
+    lvls <- levels(col)
+    # levels look like "(-Inf,-0.334]" or "[-Inf,-0.334]"
+    # Extract all unique boundary numbers to rebuild the breaks vector.
+    nums <- suppressWarnings(
+      as.numeric(
+        unique(
+          unlist(regmatches(lvls, gregexpr("-?Inf|-?[0-9]+\\.?[0-9]*(?:[eE][+-]?[0-9]+)?", lvls, perl = TRUE)))
+        )
+      )
+    )
+    nums <- sort(unique(nums[is.finite(nums) | is.infinite(nums)]))
+    if (length(nums) >= 2) out[[v]] <- nums
+  }
+  out
+}
+
+# ---------------------------------------------------------------------------- #
+
 #' Load, aggregate, and construct weather variables for survey locations
 #'
 #' 1. Loads weather and H3-to-location parquet files lazily in DuckDB.
@@ -31,6 +67,9 @@
 #'   `"additive"` or `"multiplicative"`. Required when `ssp != NULL`.
 #' @param epsilon           Guard constant for multiplicative delta denominators.
 #'   Default `0.001`.
+#' @param fixed_breaks        List of named numeric vectors. Each vector contains
+#'   fixed bin breakpoints for a weather variable. Supplying this argument
+#'   bypasses automatic binning and uses the provided breaks directly.
 #'
 #' @return A collected data frame with columns loc_id, timestamp, and one
 #'   column per weather variable (numeric, or factor if binned).
@@ -42,7 +81,8 @@ get_weather <- function(
   ssp                 = NULL,
   future_period       = NULL,
   perturbation_method = NULL,
-  epsilon             = 0.001
+  epsilon             = 0.001,
+  fixed_breaks        = NULL
 ) {
 
   # -- Validate climate change arguments -------------------------------------
@@ -363,6 +403,8 @@ get_weather <- function(
   }
 
   # -- Apply bin labels (R only) ---------------------------------------------
+  stored_breaks <- list()
+
   for (i in seq_len(nrow(selected_weather))) {
     v              <- selected_weather$name[i]
     cont_binned    <- selected_weather$cont_binned[i]
@@ -370,6 +412,17 @@ get_weather <- function(
     binning_method <- selected_weather$binning_method[i]
 
     if (is.na(cont_binned) || cont_binned != "Binned") next
+
+    # If caller supplied fixed breaks for this variable, use them directly
+    # and skip K-means/cutoff computation entirely.  This is the correct
+    # behaviour for simulation calls: the factor levels must match what the
+    # model was trained on.
+    if (!is.null(fixed_breaks) && !is.null(fixed_breaks[[v]])) {
+      breaks_ext     <- fixed_breaks[[v]]
+      result[[v]]    <- cut(result[[v]], breaks = breaks_ext, include.lowest = TRUE)
+      stored_breaks[[v]] <- breaks_ext
+      next
+    }
 
     # When a climate scenario is active: use unperturbed + transformed values
     # (base_for_bins, already collected and filtered to survey_timestamps).
@@ -414,15 +467,16 @@ get_weather <- function(
     )
 
     if (!is.null(cutoffs) && length(cutoffs) > 1) {
-      breaks_ext  <- c(-Inf, cutoffs[-c(1, length(cutoffs))], Inf)
-      result[[v]] <- cut(result[[v]], breaks = breaks_ext, include.lowest = TRUE)
+      breaks_ext         <- c(-Inf, cutoffs[-c(1, length(cutoffs))], Inf)
+      result[[v]]        <- cut(result[[v]], breaks = breaks_ext, include.lowest = TRUE)
+      stored_breaks[[v]] <- breaks_ext
       message(binning_method, " cutoffs for ", v, ": ", paste(round(cutoffs, 3), collapse = ", "))
     } else {
       message("Insufficient variation in ", v, ". Keeping continuous.")
     }
   }
 
-  result
+  list(result = result, bin_cutoffs = stored_breaks)
 }
 
 

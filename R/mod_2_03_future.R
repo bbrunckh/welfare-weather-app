@@ -22,29 +22,29 @@ mod_2_03_future_ui <- function(id) {
 #'
 #' Manages future climate anchor year selection, SSP selection, band width,
 #' and residual handling. Returns selected_fut: one row per SSP x anchor year.
-#' Scenario labels use hardcoded SSP prefixes (no user-editable label inputs).
 #'
 #' @param id Module id.
-#'
+#' @param selected_hist Reactive one-row data frame from mod_2_01_historical
+#'   (used to include the historical period in scenario labels).
 #' @noRd
 mod_2_03_future_server <- function(id, selected_hist = NULL) {
   moduleServer(id, function(input, output, session) {
     ns <- session$ns
 
-    ssp_labels <- c(
-      "ssp2_4_5" = "SSP2",
-      "ssp3_7_0" = "SSP3",
-      "ssp5_8_5" = "SSP5"
-    )
+    # SSP display choices — use SSP_SHORT_LABELS from fct_simulations.R
+    # Keys match the climate file naming convention (ssp2_4_5, etc.)
     ssp_choices <- c(
       "SSP2-4.5" = "ssp2_4_5",
       "SSP3-7.0" = "ssp3_7_0",
       "SSP5-8.5" = "ssp5_8_5"
     )
+    # Short labels indexed by ssp_choices value (for scenario name construction)
+    ssp_labels <- setNames(
+      SSP_SHORT_LABELS[names(ssp_choices)],
+      unname(ssp_choices)
+    )
 
-    # Default anchor years and band width
-    default_anchors  <- c(2030L, 2040L, 2050L)
-    default_bw       <- 10L
+    default_bw <- 10L
 
     # ---- Advanced settings toggle ------------------------------------------
 
@@ -61,9 +61,9 @@ mod_2_03_future_server <- function(id, selected_hist = NULL) {
           style = "font-size:11px; margin-top:0; margin-bottom:6px;"
         ),
         # Simple default: three toggleable checkboxes
-        checkboxInput(ns("use_2030"), "2030 ±10 years (2020–2040)", value = TRUE),
-        checkboxInput(ns("use_2040"), "2040 ±10 years (2030–2050)", value = TRUE),
-        checkboxInput(ns("use_2050"), "2050 ±10 years (2040–2060)", value = TRUE),
+        checkboxInput(ns("use_2030"), "2030 \u00b110 years (2020-2040)", value = TRUE),
+        checkboxInput(ns("use_2040"), "2040 \u00b110 years (2030-2050)", value = TRUE),
+        checkboxInput(ns("use_2050"), "2050 \u00b110 years (2040-2060)", value = TRUE),
         tags$div(
           style = "margin-top:8px;",
           actionLink(ns("toggle_adv"), uiOutput(ns("adv_link_label")))
@@ -74,9 +74,9 @@ mod_2_03_future_server <- function(id, selected_hist = NULL) {
 
     output$adv_link_label <- renderUI({
       if (isTRUE(adv_open())) {
-        tags$span("▼ Advanced settings", style = "font-size:12px;")
+        tags$span("\u25bc Advanced settings", style = "font-size:12px;")
       } else {
-        tags$span("► Advanced settings", style = "font-size:12px;")
+        tags$span("\u25ba Advanced settings", style = "font-size:12px;")
       }
     })
 
@@ -92,9 +92,8 @@ mod_2_03_future_server <- function(id, selected_hist = NULL) {
       tagList(
         tags$hr(style = "margin: 8px 0;"),
         helpText(
-          "Override the default timeframes by specifying anchor years and band width manually.",
-          "When set, these replace the checkbox selections above.",
-          "Leave Year 2 and Year 3 blank to omit them.",
+          "Override the default timeframes by specifying anchor years and band",
+          "width manually. Leave Year 2 and Year 3 blank to omit them.",
           style = "font-size:11px;"
         ),
         fluidRow(
@@ -107,8 +106,8 @@ mod_2_03_future_server <- function(id, selected_hist = NULL) {
         ),
         shiny::sliderInput(
           ns("band_width"),
-          label = "Band width (± years around each selected year)",
-          min   = 5, max = 25, value = 10, step = 5, sep = ""
+          label = "Band width (\u00b1 years around each selected year)",
+          min = 5, max = 25, value = 10, step = 5, sep = ""
         ),
         uiOutput(ns("anchor_warnings"))
       )
@@ -125,14 +124,14 @@ mod_2_03_future_server <- function(id, selected_hist = NULL) {
 
       warns <- character(0)
       if (n_yrs < 10)
-        warns <- c(warns, paste0("⚠️ Band ±", bw, "yr = ", n_yrs,
-                                 " years. 1:5 requires ≥5 yrs, 1:10 requires ≥10 yrs."))
+        warns <- c(warns, paste0("\u26a0\ufe0f Band \u00b1", bw, "yr = ", n_yrs,
+                                 " years. 1:5 requires \u22655 yrs, 1:10 requires \u226510 yrs."))
       if (length(anchors) > 1) {
         for (i in seq_len(length(anchors) - 1)) {
           for (j in (i + 1):length(anchors)) {
             if (abs(anchors[i] - anchors[j]) < 2 * bw)
-              warns <- c(warns, paste0("⚠️ Years ", anchors[i], " and ",
-                                       anchors[j], " bands overlap (±", bw, "yr)."))
+              warns <- c(warns, paste0("\u26a0\ufe0f Years ", anchors[i], " and ",
+                                       anchors[j], " bands overlap (\u00b1", bw, "yr)."))
           }
         }
       }
@@ -163,43 +162,29 @@ mod_2_03_future_server <- function(id, selected_hist = NULL) {
     fut_sim_specs_open <- reactiveVal(FALSE)
 
     output$fut_sim_specs_button <- renderUI({
-      shiny::actionButton(ns("fut_sim_specs"), "Simulation parameters",
+      shiny::actionButton(ns("fut_sim_specs_toggle"),
+                          "Simulation parameters",
                           style = "margin-bottom:12px;")
     })
 
-    observeEvent(input$fut_sim_specs, {
+    observeEvent(input$fut_sim_specs_toggle, {
       fut_sim_specs_open(!isTRUE(fut_sim_specs_open()))
     })
 
+    # ---- Simulation parameters panel ----------------------------------------
+    # Uses shared residual_method_ui() from fct_simulations.R
+
     output$fut_sim_specs <- renderUI({
       if (!isTRUE(fut_sim_specs_open())) return(NULL)
-      tagList(
-        radioButtons(
-          inputId  = ns("fut_sim_residuals"),
-          label    = "Residuals method",
-          choices  = residual_choices(),
-          selected = "original"
-        ),
-        helpText(
-          tags$b("none:"), " return fitted values only.", tags$br(),
-          tags$b("original:"), " match each observation's own training residual by ID,",
-          " preserving individual-level heterogeneity across simulation years.", tags$br(),
-          tags$b("empirical:"), " resample residuals from the training distribution",
-          " (non-parametric bootstrap).", tags$br(),
-          tags$b("normal:"), " draw residuals from N(0, σ) where σ is the",
-          " training residual SD.",
-          style = "font-size:11px;"
-        )
-      )
+      residual_method_ui(ns, "fut_sim_residuals")
     })
 
-    # ---- Resolve active anchors & band width --------------------------------
+    # ---- Resolve active anchors and band width ------------------------------
     # When advanced panel is open AND has valid anchor1, use advanced values.
-    # Otherwise fall back to the checkbox defaults.
+    # Otherwise fall back to the simple checkbox defaults.
 
     active_anchors <- reactive({
       if (isTRUE(adv_open()) && !is.na(input$anchor1)) {
-        # Advanced mode
         anchors <- c(input$anchor1, input$anchor2, input$anchor3)
         sort(unique(anchors[!is.na(anchors)]))
       } else {
@@ -229,27 +214,24 @@ mod_2_03_future_server <- function(id, selected_hist = NULL) {
       anchors <- active_anchors()
       bw      <- active_bw()
 
-      # build historical year range suffix once
-      hist_suffix <- ""
-      if (!is.null(selected_hist)) {
-        yr <- tryCatch(unlist(selected_hist()$year_range), error = function(e) NULL)
-        if (!is.null(yr) && length(yr) == 2)
-          hist_suffix <- paste0(" (", yr[1], "–", yr[2], ")")
-      }
+      # Scenario names use "SSP2 / 2030 ±10yr" only.
+      # The historical year range is NOT embedded — it is displayed separately
+      # in the results header so that names remain clean and parseable by the
+      # SSP / timeframe filter reactives in mod_2_06.
 
       rows <- lapply(input$climate, function(ssp) {
-        prefix <- paste0(ssp_labels[ssp], hist_suffix)
+        prefix <- ssp_labels[ssp]
         lapply(anchors, function(anchor) {
           yr         <- c(anchor - bw, anchor + bw)
-          scene_name <- paste0(prefix, " / ", anchor, " ±", bw, "yr")
+          scene_name <- paste0(prefix, " / ", anchor, " \u00b1", bw, "yr")
           data.frame(
             type          = "future",
             year_range    = I(list(yr)),
             ssp           = ssp,
             anchor_year   = as.integer(anchor),
             band_width    = bw,
-            method        = input$climatemethod      %||% "delta",
-            residuals     = input$fut_sim_residuals  %||% "original",
+            method        = "delta",
+            residuals     = input$fut_sim_residuals %||% "original",
             scenario_name = scene_name,
             stringsAsFactors = FALSE
           )
@@ -258,6 +240,8 @@ mod_2_03_future_server <- function(id, selected_hist = NULL) {
 
       do.call(rbind, do.call(c, rows))
     })
+
+    # ---- Module return API --------------------------------------------------
 
     list(selected_fut = selected_fut)
   })

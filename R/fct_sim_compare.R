@@ -1,17 +1,61 @@
 # ============================================================================ #
 # fct_sim_compare.R
 #
-# Pure comparison/visualisation functions for Module 2.
+# Pure comparison and visualisation functions for Module 2.
 # Called by mod_2_06_sim_compare_server() only.
 #
 # Functions:
-#   .resolve_year_styles()  -- internal; dynamic linetype map by sorted year
-#   plot_boxplot_climate()  -- HERO: grouped vertical boxplot (SSP x timeframe)
-#   plot_bar_climate()      -- grouped bar chart (kept for reference)
-#   build_impact_table()    -- return-period threshold table
-#   enhance_exceedance()    -- exceedance curve with return-period axis
+#   label_agg_method(key)     -- human-readable label for aggregation method
+#   label_deviation(key)      -- human-readable label for deviation choice
+#   .resolve_year_styles()    -- internal; dynamic linetype map by sorted year
+#   plot_pointrange_climate() -- HERO: grouped point-range chart (SSP x timeframe)
+#   build_impact_table()      -- return-period threshold table
+#   enhance_exceedance()      -- exceedance curve with symmetric return-period lines
+#
+# NOTE: plot_bar_climate() has been archived to
+#   dev/archived_fct/plot_bar_climate_archived.R (no active call sites).
 # ============================================================================ #
 
+# ---------------------------------------------------------------------------- #
+# Label helpers                                                                #
+# ---------------------------------------------------------------------------- #
+
+#' Human-Readable Label for Aggregation Method
+#'
+#' Converts the internal `agg_method` key used in `selectInput` to a short
+#' display string for table headers and the results banner.
+#'
+#' @param key Character. One of `"mean"`, `"median"`, `"headcount_ratio"`,
+#'   `"gap"`, `"fgt2"`, `"gini"`.
+#' @return A character string.
+#' @export
+label_agg_method <- function(key) {
+  switch(key,
+    mean            = "Mean",
+    median          = "Median",
+    headcount_ratio = "Poverty headcount ratio",
+    gap             = "Poverty gap",
+    fgt2            = "FGT2 severity index",
+    gini            = "Gini coefficient",
+    key   # fallback: return key unchanged
+  )
+}
+
+#' Human-Readable Label for Deviation Choice
+#'
+#' Converts the internal `deviation` key to a short display string.
+#'
+#' @param key Character. One of `"none"`, `"mean"`, `"median"`.
+#' @return A character string.
+#' @export
+label_deviation <- function(key) {
+  switch(key,
+    none   = "raw value",
+    mean   = "deviation from mean year",
+    median = "deviation from median year",
+    key
+  )
+}
 
 # ---- Internal: dynamic year linetype helper --------------------------------
 .resolve_year_styles <- function(year_labels) {
@@ -205,142 +249,6 @@ plot_pointrange_climate <- function(scenarios, hist_agg) {
 # ---------------------------------------------------------------------------- #
 # Bar chart: scenario comparison (kept for reference)                          #
 # ---------------------------------------------------------------------------- #
-
-#' Bar Chart Comparing Scenarios at Timeframes
-#'
-#' @param scenarios    Named list; each element is from aggregate_sim_preds().
-#' @param hist_agg     Full result of aggregate_sim_preds() for historical.
-#' @param centre_years Integer vector of anchor years, or NULL for summary mode.
-#' @param band_width   Half-width in years. Defaults to 10L.
-#' @param show_error   Logical. Draw p10/p90 error bars. Defaults to TRUE.
-#' @return A ggplot object.
-#' @importFrom ggplot2 ggplot aes geom_col geom_errorbar geom_hline annotate
-#'   labs theme_minimal theme scale_fill_manual position_dodge element_text
-#' @importFrom colorspace lighten
-#' @importFrom dplyr bind_rows
-#' @importFrom stats quantile
-#' @importFrom rlang .data
-#' @export
-plot_bar_climate <- function(scenarios,
-                             hist_agg,
-                             centre_years = c(2030L, 2040L, 2050L),
-                             band_width   = 10L,
-                             show_error   = TRUE) {
-
-  stopifnot(is.list(scenarios), length(scenarios) > 0)
-  stopifnot(is.list(hist_agg), all(c("out", "x_label") %in% names(hist_agg)))
-
-  summarise_band <- function(vals) {
-    if (length(vals) == 0) return(NULL)
-    list(mean = mean(vals, na.rm = TRUE),
-         p10  = as.numeric(stats::quantile(vals, 0.10, na.rm = TRUE)),
-         p90  = as.numeric(stats::quantile(vals, 0.90, na.rm = TRUE)))
-  }
-  band_vals <- function(out_df, cy, bw) {
-    if (is.null(cy)) return(out_df$value)
-    out_df$value[out_df$sim_year >= cy - bw & out_df$sim_year <= cy + bw]
-  }
-
-  cy_list <- if (is.null(centre_years)) list(NULL) else as.list(centre_years)
-
-  rows <- lapply(names(scenarios), function(nm) {
-    sc_out   <- scenarios[[nm]]$out
-    ssp_key  <- .normalise_ssp(nm)
-    yr_label <- .parse_year(nm)
-    lapply(cy_list, function(cy) {
-      vals <- band_vals(sc_out, cy, band_width)
-      s    <- summarise_band(vals)
-      if (is.null(s)) return(NULL)
-      data.frame(
-        scenario    = nm,
-        ssp_key     = if (is.na(ssp_key)) "Historical" else ssp_key,
-        anchor_year = if (is.null(cy)) "All years" else as.character(as.integer(cy)),
-        yr_label    = if (is.na(yr_label)) "Historical" else yr_label,
-        mean = s$mean, p10 = s$p10, p90 = s$p90,
-        stringsAsFactors = FALSE
-      )
-    })
-  })
-
-  plot_df <- dplyr::bind_rows(Filter(Negate(is.null), unlist(rows, recursive = FALSE)))
-
-  hist_in_scenarios <- Filter(function(nm) is.na(.normalise_ssp(nm)), names(scenarios))
-  if (length(hist_in_scenarios) == 0) {
-    hist_s <- summarise_band(hist_agg$out$value)
-    if (!is.null(hist_s)) {
-      hist_row <- data.frame(
-        scenario = "Historical", ssp_key = "Historical",
-        anchor_year = "Historical", yr_label = "Historical",
-        mean = hist_s$mean, p10 = hist_s$p10, p90 = hist_s$p90,
-        stringsAsFactors = FALSE
-      )
-      plot_df <- dplyr::bind_rows(hist_row, plot_df)
-    }
-  }
-
-  if (nrow(plot_df) == 0)
-    return(ggplot2::ggplot() + ggplot2::labs(title = "No data in selected range"))
-
-  anchor_levels <- c("Historical",
-    sort(unique(plot_df$anchor_year[plot_df$anchor_year != "Historical"])))
-  plot_df$anchor_year <- factor(plot_df$anchor_year, levels = anchor_levels)
-  plot_df$fill_key    <- paste(plot_df$ssp_key, plot_df$yr_label, sep = "__")
-
-  fut_yr_labels <- sort(unique(plot_df$yr_label[plot_df$yr_label != "Historical"]))
-  n_yrs         <- length(fut_yr_labels)
-  shade_palette <- c("Historical__Historical" = "black")
-  for (ssp in intersect(names(.ssp_colours), unique(plot_df$ssp_key))) {
-    base_col <- .ssp_colours[ssp]
-    if (n_yrs == 0) next
-    lightens <- seq(0.45, 0.0, length.out = n_yrs)
-    for (i in seq_along(fut_yr_labels)) {
-      fk <- paste(ssp, fut_yr_labels[i], sep = "__")
-      shade_palette[fk] <- colorspace::lighten(base_col, lightens[i])
-    }
-  }
-
-  present_fill_keys <- unique(plot_df$fill_key)
-  nice_labels       <- sub("__", " / ", present_fill_keys)
-  hist_mean         <- mean(hist_agg$out$value, na.rm = TRUE)
-  dodge             <- ggplot2::position_dodge(width = 0.8)
-
-  p <- ggplot2::ggplot(
-    plot_df,
-    ggplot2::aes(x = .data$anchor_year, y = .data$mean,
-                 fill = .data$fill_key, group = .data$scenario)
-  ) +
-    ggplot2::geom_col(position = dodge, width = 0.7) +
-    ggplot2::geom_hline(yintercept = hist_mean, linetype = "dashed",
-                        colour = "grey30", linewidth = 0.6) +
-    ggplot2::annotate("text", x = Inf, y = hist_mean,
-                      label = "Hist. mean", hjust = 1.05, vjust = -0.5,
-                      size = 3, colour = "grey30") +
-    ggplot2::scale_fill_manual(
-      values = shade_palette, breaks = present_fill_keys,
-      labels = nice_labels, name = "Climate scenario / Timeframe"
-    ) +
-    ggplot2::labs(
-      title = "Distribution by climate scenario and timeframe",
-      x     = if (is.null(centre_years)) NULL else "Timeframe",
-      y     = hist_agg$x_label
-    ) +
-    ggplot2::theme_minimal() +
-    ggplot2::theme(
-      plot.title      = ggplot2::element_text(face = "bold", size = 12, hjust = 0.5),
-      legend.position = "bottom"
-    )
-
-  if (isTRUE(show_error)) {
-    p <- p + ggplot2::geom_errorbar(
-      ggplot2::aes(ymin = .data$p10, ymax = .data$p90),
-      position = dodge, width = 0.25, linewidth = 0.5, colour = "grey40"
-    )
-  }
-  p
-}
-
-
-# ---------------------------------------------------------------------------- #
 # Impact table                                                                 #
 # ---------------------------------------------------------------------------- #
 
@@ -418,7 +326,6 @@ build_impact_table <- function(scenarios,
 #' @param x_label       Axis label for the welfare outcome.
 #' @param return_period Logical. Show return period lines. Default TRUE.
 #' @param n_sim_years   Integer. Triggers reliability annotation.
-#' @param show_error    Logical stub (reserved). Default FALSE.
 #' @param logit_x       Logical. Use logit scale on the probability axis to
 #'   emphasise both tails symmetrically. Default FALSE.
 #' @return A ggplot object.
@@ -434,7 +341,6 @@ enhance_exceedance <- function(scenarios,
                                x_label,
                                return_period = TRUE,
                                n_sim_years   = NULL,
-                               show_error    = FALSE,
                                logit_x       = FALSE) {
 
   stopifnot(is.list(scenarios), length(scenarios) > 0)
@@ -532,10 +438,8 @@ enhance_exceedance <- function(scenarios,
   # --- return period lines (both tails, symmetric) ---
   if (isTRUE(return_period)) {
     # Low-probability tail (rare low outcomes): 1:50, 1:20, 1:10, 1:5
-    rp_low  <- c("1:50" = 0.02, "1:20" = 0.05, "1:10" = 0.10, "1:5" = 0.20)
-    # High-probability tail (rare high outcomes): 49:50, 19:20, 9:10, 4:5
-    rp_high <- c("49:50" = 0.98, "19:20" = 0.95, "9:10" = 0.90, "4:5" = 0.80)
-    rp_all  <- c(rp_low, rp_high)
+    # RP_LOW / RP_HIGH are defined in fct_simulations.R and cover both tails.
+    rp_all <- c(RP_LOW, RP_HIGH)
 
     for (nm in names(rp_all)) {
       prob <- rp_all[nm]
@@ -563,8 +467,9 @@ enhance_exceedance <- function(scenarios,
   # --- optional logit probability axis (applied to y after coord_flip) ---
   # Emphasises both tails symmetrically. ecdf_df is pre-clipped to (eps, 1-eps).
   if (isTRUE(logit_x)) {
-    logit_breaks <- c(0.02, 0.05, 0.10, 0.20, 0.50, 0.80, 0.90, 0.95, 0.98)
-    logit_labels <- c("1:50", "1:20", "1:10", "1:5", "Median", "4:5", "9:10", "19:20", "49:50")
+    # Logit breaks align with RP_LOW / RP_HIGH probability values
+    logit_breaks <- c(unname(RP_LOW), 0.50, rev(1 - unname(RP_LOW)))
+    logit_labels <- c(names(RP_LOW), "Median", rev(names(RP_HIGH)))
     p <- p + ggplot2::scale_y_continuous(
       trans  = scales::logit_trans(),
       breaks = logit_breaks,

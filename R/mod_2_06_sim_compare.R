@@ -1,15 +1,115 @@
-#' 2_06_sim_compare UI Function
+﻿#' 2_06_sim_compare UI Function
 #'
 #' @description No sidebar UI. Compare outputs are inserted into the
 #'   existing Results tab via insertUI / removeUI.
 #'
 #' @param id,input,output,session Internal parameters for {shiny}.
-#'
 #' @noRd
 #'
 #' @importFrom shiny NS tagList
 mod_2_06_sim_compare_ui <- function(id) {
   tagList()
+}
+
+# ---------------------------------------------------------------------------- #
+# compare_content_ui: inserted once into #compare_section                     #
+# Extracted from the insertUI observeEvent to keep the observer readable.     #
+# ---------------------------------------------------------------------------- #
+
+compare_content_ui <- function(ns, so) {
+  tagList(
+
+    # ---- 1. Results header (outcome name, agg method, baseline period) -----
+    shiny::uiOutput(ns("results_header_ui")),
+
+    # ---- 2. Analysis controls (agg method, deviation, poverty line, filters) -
+    shiny::wellPanel(
+      style = "padding: 10px 14px 6px 14px;",
+      shiny::tags$p("Analysis Settings",
+                    style = "font-weight:600; margin-bottom:4px;"),
+      shiny::tags$div(
+        style = "display:flex; align-items:flex-end; gap:12px; flex-wrap:wrap;",
+        shiny::tags$div(style = "flex:1; min-width:160px;",
+          shiny::selectInput(
+            ns("cmp_agg_method"),
+            label   = "Aggregation method",
+            choices = hist_aggregate_choices(so$type, so$name),
+            selected = "mean"
+          )
+        ),
+        shiny::tags$div(style = "flex:1; min-width:160px;",
+          shiny::selectInput(
+            ns("cmp_deviation"),
+            label   = "Express as deviation from",
+            choices = c(
+              "None (raw value)" = "none",
+              "Mean year"        = "mean",
+              "Median year"      = "median"
+            ),
+            selected = "none"
+          )
+        ),
+        shiny::tags$div(style = "flex:1; min-width:160px;",
+          shiny::uiOutput(ns("cmp_pov_line_ui"))
+        )
+      ),
+      shiny::tags$hr(style = "margin: 6px 0;"),
+      shiny::tags$p("Scenario Filters",
+                    style = "font-weight:600; margin-bottom:4px;"),
+      shiny::fluidRow(
+        shiny::column(12, shiny::uiOutput(ns("scenario_filter_ui")))
+      )
+    ),
+
+    # ---- 3. Hero point-range chart -----------------------------------------
+    shiny::wellPanel(
+      shiny::h4("Distribution of outcomes across climate scenarios and timeframes"),
+      shiny::plotOutput(ns("summary_box_plot"), height = "600px"),
+      shiny::tags$p(
+        style = "font-size:11px; color:#666; margin-top:6px;",
+        "The central dot shows the mean annual simulated value; the thick",
+        "coloured line spans the 90% interval (P5-P95); the thin grey line",
+        "spans the 95% interval (P2.5-P97.5).",
+        shiny::tags$br(),
+        "Future scenarios apply climate-adjusted shifts to the same historical annual base.",
+        shiny::tags$br(),
+        "Dashed line = historical mean."
+      )
+    ),
+
+    # ---- 4. Summary distribution statistics table --------------------------
+    shiny::wellPanel(
+      shiny::uiOutput(ns("dist_table_header")),
+      DT::DTOutput(ns("summary_dist_table"))
+    ),
+
+    # ---- 5. Return-period threshold table (both tails) ---------------------
+    shiny::wellPanel(
+      shiny::uiOutput(ns("threshold_table_header")),
+      DT::DTOutput(ns("summary_threshold_table")),
+      shiny::uiOutput(ns("threshold_table_footer"))
+    ),
+
+    # ---- 6. Exceedance probability curve -----------------------------------
+    shiny::wellPanel(
+      shiny::h4("Exceedance probability by climate scenario"),
+      shiny::tags$div(
+        style = "display:flex; gap:20px; flex-wrap:wrap; margin-bottom:6px;",
+        shiny::checkboxInput(
+          ns("exceedance_logit_x"),
+          "Logit probability axis (emphasise both tails)",
+          value = FALSE
+        ),
+        shiny::checkboxInput(
+          ns("show_return_period"),
+          "Show return period lines",
+          value = TRUE
+        )
+      ),
+      shiny::plotOutput(ns("exceedance_plot"), height = "400px"),
+      shiny::uiOutput(ns("exceedance_caption"))
+    )
+  )
 }
 
 #' 2_06_sim_compare Server Functions
@@ -89,7 +189,7 @@ mod_2_06_sim_compare_server <- function(id,
       sc <- saved_scenarios()
       if (length(sc) == 0) return(character(0))
       yrs <- vapply(names(sc), function(nm) {
-        m <- regexpr('[0-9]{4}', nm)
+        m <- regexpr("(?<=/ )[0-9]{4}", nm, perl = TRUE)
         if (m == -1L) NA_character_ else regmatches(nm, m)
       }, character(1))
       sort(unique(yrs[!is.na(yrs)]))
@@ -105,20 +205,6 @@ mod_2_06_sim_compare_server <- function(id,
       }
     })
 
-    # Loss framing is auto-derived from outcome direction:
-    # flip sign when higher simulated values = worse outcome (poverty, gini).
-
-    agg_one <- function(preds, so, pov = pov_line_val()) {
-      req(input$cmp_agg_method, input$cmp_deviation)
-      aggregate_sim_preds(
-        preds, so,
-        input$cmp_agg_method,
-        input$cmp_deviation,
-        FALSE,
-        pov
-      )
-    }
-
     # ---- Insert compare section into Results tab -------------------------
 
     compare_inserted <- reactiveVal(FALSE)
@@ -130,163 +216,51 @@ mod_2_06_sim_compare_server <- function(id,
       so <- hist_sim()$so
 
       shiny::insertUI(
-        selector = '#compare_section',
-        where    = 'afterBegin',
-        ui = tagList(
-
-          # ---- 1. Results Header ------------------------------------------
-          shiny::uiOutput(ns('results_header_ui')),
-
-          # ---- 2. Controls: two-row compact layout -------------------------
-          shiny::wellPanel(
-            style = "padding: 10px 14px 6px 14px;",
-            # --- Row 1: Analysis Settings ---
-            shiny::tags$p("Analysis Settings",
-                          style = "font-weight:600; margin-bottom:4px;"),
-            shiny::tags$div(
-              style = "display:flex; align-items:flex-end; gap:12px; flex-wrap:wrap;",
-              shiny::tags$div(style = "flex:1; min-width:160px;",
-                shiny::selectInput(
-                  ns('cmp_agg_method'),
-                  label    = 'Aggregation method',
-                  choices  = hist_aggregate_choices(so$type, so$name),
-                  selected = 'mean'
-                )
-              ),
-              shiny::tags$div(style = "flex:1; min-width:160px;",
-                shiny::selectInput(
-                  ns('cmp_deviation'),
-                  label    = 'Express as deviation from',
-                  choices  = c(
-                    'None (raw value)' = 'none',
-                    'Mean year'        = 'mean',
-                    'Median year'      = 'median'
-                  ),
-                  selected = 'none'
-                )
-              ),
-              shiny::tags$div(style = "flex:1; min-width:160px;",
-                shiny::uiOutput(ns('cmp_pov_line_ui'))
-              ),
-            ),
-            shiny::tags$hr(style = "margin: 6px 0;"),
-            # --- Row 2: Scenario Filters ---
-            shiny::tags$p("Scenario Filters",
-                          style = "font-weight:600; margin-bottom:4px;"),
-            shiny::fluidRow(
-              shiny::column(12,
-                shiny::uiOutput(ns('scenario_filter_ui'))
-              )
-            )
-          ),
-
-          # ---- 3. Hero boxplot --------------------------------------------
-          shiny::wellPanel(
-            shiny::h4("Distribution of outcomes across climate scenarios and timeframes"),
-            shiny::plotOutput(ns('summary_box_plot'), height = '600px'),
-            shiny::tags$p(
-                        style = "font-size:11px; color:#666; margin-top:6px;",
-                        "The central dot shows the mean annual simulated value; the thick coloured ",
-                        "line spans the 90% interval (P5–P95); the thin grey line spans the 95% ",
-                        "interval (P2.5–P97.5).",
-                        shiny::tags$br(),
-                        "Future scenarios apply climate-adjusted shifts to the same historical annual base.",
-                        shiny::tags$br(),
-                        "Dashed line = historical mean."
-                      )
-          ),
-
-          # ---- 4. Summary distribution statistics table -------------------
-          shiny::wellPanel(
-            shiny::uiOutput(ns('dist_table_header')),
-            DT::DTOutput(ns('summary_dist_table'))
-          ),
-
-          # ---- 5. Thresholds for rare adverse years table -----------------
-          shiny::wellPanel(
-            shiny::uiOutput(ns('threshold_table_header')),
-            DT::DTOutput(ns('summary_threshold_table')),
-            shiny::uiOutput(ns('threshold_table_footer'))
-          ),
-
-          # ---- 6. Exceedance curve ----------------------------------------
-          shiny::wellPanel(
-            shiny::h4('Exceedance probability by climate scenario'),
-            shiny::tags$div(
-              style = "display:flex; gap:20px; flex-wrap:wrap; margin-bottom:6px;",
-              shiny::checkboxInput(
-                ns('exceedance_logit_x'),
-                'Logit probability axis (emphasise both tails)',
-                value = FALSE
-              ),
-              shiny::checkboxInput(
-                ns('show_return_period'),
-                'Show return period lines',
-                value = TRUE
-              )
-            ),
-            shiny::plotOutput(ns('exceedance_plot'), height = '400px'),
-            shiny::uiOutput(ns('exceedance_caption'))
-          )
-        )
+        selector = "#compare_section",
+        where    = "afterBegin",
+        ui       = compare_content_ui(ns, so)
       )
 
       compare_inserted(TRUE)
     }, ignoreInit = TRUE)
 
+    # ---- Reactive: all series (historical + filtered scenarios) ----------
+    # Single definition used by all three render outputs below.
+
+    all_series <- reactive({
+      c(setNames(list(agg_hist()), hist_label()), agg_scenarios())
+    })
+
     # ---- Render: Results Header ------------------------------------------
-    # Displays outcome, agg method, deviation, poverty line, baseline period,
-    # and an auto-generated notes sentence.
+    # Uses label_agg_method() and label_deviation() from fct_sim_compare.R.
 
     output$results_header_ui <- renderUI({
       req(hist_sim(), input$cmp_agg_method, input$cmp_deviation)
       so  <- hist_sim()$so
       yr  <- tryCatch(unlist(hist_sim()$year_range), error = function(e) NULL)
 
-      agg_label <- switch(input$cmp_agg_method,
-        mean            = 'Mean',
-        median          = 'Median',
-        headcount_ratio = 'Poverty headcount ratio',
-        gap             = 'Poverty gap',
-        fgt2            = 'FGT2 severity index',
-        gini            = 'Gini coefficient',
-        input$cmp_agg_method
-      )
-      dev_label <- switch(input$cmp_deviation,
-        none   = 'raw value',
-        mean   = 'deviation from mean year',
-        median = 'deviation from median year',
-        input$cmp_deviation
-      )
+      agg_label  <- label_agg_method(input$cmp_agg_method)
+      dev_label  <- label_deviation(input$cmp_deviation)
       baseline_txt <- if (!is.null(yr) && length(yr) == 2)
-        paste0(yr[1], '\u2013', yr[2]) else 'historical baseline'
-
+        paste0(yr[1], "\u2013", yr[2]) else "historical baseline"
       pov_txt <- if (!is.null(pov_line_val()))
-        paste0(' | Poverty line: $', pov_line_val(), '/day') else ''
+        paste0(" | Poverty line: $", pov_line_val(), "/day") else ""
 
       notes_txt <- paste0(
-        'Showing ', agg_label, ' of ', so$label %||% so$name,
-        ' expressed as ', dev_label,
-        ' over the ', baseline_txt, ' baseline period', pov_txt, '.'
+        "Showing ", agg_label, " of ", so$label %||% so$name,
+        " expressed as ", dev_label,
+        " over the ", baseline_txt, " baseline period", pov_txt, "."
       )
 
       shiny::div(
         style = paste0(
-          "border-left: 4px solid #2166ac; ",
-          "background: #f4f8fd; ",
-          "padding: 10px 14px; ",
-          "margin-bottom: 12px; ",
-          "border-radius: 3px;"
+          "border-left: 4px solid #2166ac; background: #f4f8fd; ",
+          "padding: 10px 14px; margin-bottom: 12px; border-radius: 3px;"
         ),
-        shiny::tags$strong(
-          style = "font-size:15px;",
-          paste0('Results: ', so$label %||% so$name)
-        ),
+        shiny::tags$strong(style = "font-size:15px;",
+                           paste0("Results: ", so$label %||% so$name)),
         shiny::tags$br(),
-        shiny::tags$span(
-          style = "color:#555; font-size:12px;",
-          notes_txt
-        )
+        shiny::tags$span(style = "color:#555; font-size:12px;", notes_txt)
       )
     })
 
@@ -302,32 +276,6 @@ mod_2_06_sim_compare_server <- function(id,
         )
       }
     })
-
-    # ---- Render: direction badge -----------------------------------------
-
-    output$direction_badge_ui <- renderUI({
-      req(hist_sim())
-      so        <- hist_sim()$so
-      direction <- so$direction %||% "higher_is_better"
-      if (direction == "lower_is_better") {
-        shiny::tags$div(
-          style = "padding:6px 10px; background:#fdecea; border:1px solid #f5c6cb;
-                   border-radius:4px; font-size:11px; color:#721c24;",
-          shiny::tags$b("\u2193 Lower is better"),
-          shiny::tags$br(),
-          "Sign auto-flipped for display."
-        )
-      } else {
-        shiny::tags$div(
-          style = "padding:6px 10px; background:#d4edda; border:1px solid #c3e6cb;
-                   border-radius:4px; font-size:11px; color:#155724;",
-          shiny::tags$b("\u2191 Higher is better"),
-          shiny::tags$br(),
-          "No sign adjustment."
-        )
-      }
-    })
-
     # ---- Render: scenario filter UI --------------------------------------
 
     output$scenario_filter_ui <- renderUI({
@@ -368,8 +316,9 @@ mod_2_06_sim_compare_server <- function(id,
         is_ssp <- grepl('^SSP', nm)
         if (!is_ssp) return(TRUE)
         ssp_match <- any(sapply(ssps, function(s) startsWith(nm, s)))
+        # Match anchor year after the '/' separator: "SSP2 / 2030 ±10yr"
         yr_match  <- length(yrs) == 0 ||
-          any(sapply(yrs, function(y) grepl(paste0('/ ', y, ' '), nm)))
+          any(sapply(yrs, function(y) grepl(paste0("/ ", y, " "), nm, fixed = TRUE)))
         ssp_match && yr_match
       }, logical(1))
       nms[keep]
@@ -397,7 +346,7 @@ mod_2_06_sim_compare_server <- function(id,
       method <- input$cmp_agg_method
       pov    <- pov_line_val()
       if (isTRUE(method %in% c("headcount_ratio", "gap", "fgt2"))) req(pov)
-      agg_one(hist_sim()$preds, hist_sim()$so, pov)
+      aggregate_sim_preds(hist_sim()$preds, hist_sim()$so, method, input$cmp_deviation, FALSE, pov)
     })
 
     # ---- Reactive: aggregated future scenarios (filtered) ----------------
@@ -410,28 +359,19 @@ mod_2_06_sim_compare_server <- function(id,
       selected <- selected_scenario_names()
       sc       <- sc[intersect(selected, names(sc))]
       if (length(sc) == 0) return(list())
-      lapply(sc, function(s) agg_one(s$preds, s$so, pov))
+      lapply(sc, function(s) aggregate_sim_preds(s$preds, s$so, input$cmp_agg_method, input$cmp_deviation, FALSE, pov))
     })
 
     # ---- Reactive: table subtitle ----------------------------------------
+    # Uses label_agg_method() and label_deviation() from fct_sim_compare.R.
 
     table_subtitle <- reactive({
       req(agg_hist(), input$cmp_agg_method, input$cmp_deviation)
-      agg_label <- switch(input$cmp_agg_method,
-        mean            = 'Mean',
-        median          = 'Median',
-        headcount_ratio = 'Poverty headcount ratio',
-        gap             = 'Poverty gap',
-        gini            = 'Gini coefficient',
-        input$cmp_agg_method
+      paste0(
+        agg_hist()$x_label, " \u2014 ",
+        label_agg_method(input$cmp_agg_method), " | ",
+        label_deviation(input$cmp_deviation)
       )
-      dev_label <- switch(input$cmp_deviation,
-        none   = 'raw value',
-        mean   = 'deviation from mean year',
-        median = 'deviation from median year',
-        input$cmp_deviation
-      )
-      paste0(agg_hist()$x_label, ' \u2014 ', agg_label, ' | ', dev_label)
     })
 
     # ---- Render: table headers -------------------------------------------
@@ -458,10 +398,8 @@ mod_2_06_sim_compare_server <- function(id,
 
     output$summary_dist_table <- DT::renderDT({
       req(agg_hist())
-      all_series <- c(setNames(list(agg_hist()), hist_label()), agg_scenarios())
-
-      rows <- lapply(names(all_series), function(nm) {
-        vals <- all_series[[nm]]$out$value
+      rows <- lapply(names(all_series()), function(nm) {
+        vals <- all_series()[[nm]]$out$value
         vals <- vals[is.finite(vals)]
         if (length(vals) == 0) return(NULL)
         data.frame(
@@ -499,26 +437,21 @@ mod_2_06_sim_compare_server <- function(id,
 
     output$summary_threshold_table <- DT::renderDT({
       req(agg_hist())
-      all_series <- c(setNames(list(agg_hist()), hist_label()), agg_scenarios())
-
-      # Symmetric return-period map: name -> quantile probability
-      rp_low  <- c("1:50" = 0.02, "1:20" = 0.05, "1:10" = 0.10, "1:5" = 0.20)
-      rp_high <- c("4:5"  = 0.80, "9:10" = 0.90, "19:20" = 0.95, "49:50" = 0.98)
-
-      rows <- lapply(names(all_series), function(nm) {
-        vals <- all_series[[nm]]$out$value
+      # RP_LOW / RP_HIGH constants from fct_simulations.R (both tails)
+      rows <- lapply(names(all_series()), function(nm) {
+        vals <- all_series()[[nm]]$out$value
         vals <- vals[is.finite(vals)]
         n    <- length(vals)
 
-        keep_low  <- names(rp_low)[c(n >= 50, n >= 20, n >= 10, n >= 5)]
-        keep_high <- names(rp_high)[c(n >= 5, n >= 10, n >= 20, n >= 50)]
+        keep_low  <- names(RP_LOW)[c(n >= 50, n >= 20, n >= 10, n >= 5)]
+        keep_high <- names(RP_HIGH)[c(n >= 5,  n >= 10, n >= 20, n >= 50)]
         if (length(keep_low) == 0 && length(keep_high) == 0) return(NULL)
 
         low_df  <- as.data.frame(
-          t(sapply(keep_low,  function(th) round(stats::quantile(vals, rp_low[th]),  3)))
+          t(sapply(keep_low,  function(th) round(stats::quantile(vals, RP_LOW[th]),  3)))
         )
         high_df <- as.data.frame(
-          t(sapply(keep_high, function(th) round(stats::quantile(vals, rp_high[th]), 3)))
+          t(sapply(keep_high, function(th) round(stats::quantile(vals, RP_HIGH[th]), 3)))
         )
         names(low_df)  <- keep_low
         names(high_df) <- keep_high
@@ -564,14 +497,10 @@ mod_2_06_sim_compare_server <- function(id,
     output$threshold_table_footer <- renderUI({
       req(agg_hist())
       tagList(
-        shiny::tags$p(
-          style = 'font-size:11px; color:#666; margin-top:6px; margin-bottom:2px;',
-          'Low odds show the value exceeded in only 1-in-N years.'
-        ),
-        shiny::tags$p(
-          style = 'font-size:11px; color:#666; margin-top:0;',
-          'High odds show the value reached in all but 1-in-N years.'
-        )
+        shiny::tags$p(style = 'font-size:11px; color:#666; margin-top:6px; margin-bottom:2px;',
+                      'Low odds show the value exceeded in only 1-in-N years.'),
+        shiny::tags$p(style = 'font-size:11px; color:#666; margin-top:0;',
+                      'High odds show the value reached in all but 1-in-N years.')
       )
     })
 
@@ -579,9 +508,8 @@ mod_2_06_sim_compare_server <- function(id,
 
     output$exceedance_plot <- renderPlot({
       req(agg_hist())
-      all_series <- c(setNames(list(agg_hist()), hist_label()), agg_scenarios())
       enhance_exceedance(
-        scenarios     = all_series,
+        scenarios     = all_series(),
         hist_agg      = agg_hist(),
         x_label       = agg_hist()$x_label,
         return_period = isTRUE(input$show_return_period),
@@ -593,22 +521,15 @@ mod_2_06_sim_compare_server <- function(id,
     output$exceedance_caption <- renderUI({
       req(agg_hist())
       axis_txt <- if (isTRUE(input$exceedance_logit_x))
-        "Probability axis is logit-scaled, giving equal visual weight to both tails."
+        'Probability axis is logit-scaled, giving equal visual weight to both tails.'
       else
-        "The curve shows the estimated annual exceedance probability for each outcome value."
+        'The curve shows the estimated annual exceedance probability for each outcome value.'
       tagList(
-        shiny::tags$p(
-          style = "font-size:11px; color:#666; margin-top:6px; margin-bottom:2px;",
-          axis_txt
-        ),
-        shiny::tags$p(
-          style = "font-size:11px; color:#666; margin-top:0; margin-bottom:2px;",
-          'Low odds show the value exceeded in only 1-in-N years.'
-        ),
-        shiny::tags$p(
-          style = "font-size:11px; color:#666; margin-top:0;",
-          'High odds show the value reached in all but 1-in-N years.'
-        )
+        shiny::tags$p(style = 'font-size:11px; color:#666; margin-top:6px; margin-bottom:2px;', axis_txt),
+        shiny::tags$p(style = 'font-size:11px; color:#666; margin-top:0; margin-bottom:2px;',
+                      'Low odds show the value exceeded in only 1-in-N years.'),
+        shiny::tags$p(style = 'font-size:11px; color:#666; margin-top:0;',
+                      'High odds show the value reached in all but 1-in-N years.')
       )
     })
 

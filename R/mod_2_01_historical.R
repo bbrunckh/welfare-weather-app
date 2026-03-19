@@ -21,14 +21,15 @@ mod_2_01_historical_ui <- function(id) {
 #' Manages historical climate variable selection and reference period
 #' configuration. Returns selected_hist for use by mod_2_02_historical_sim.
 #'
-#' @param id               Module id.
-#'
+#' @param id Module id.
 #' @noRd
 mod_2_01_historical_server <- function(id) {
   moduleServer(id, function(input, output, session) {
     ns <- session$ns
 
     # ---- Climate years selector ---------------------------------------------
+    # Rendered as plain UI (not reactive renderUI) since it never needs
+    # to change dynamically after mount.
 
     output$hist_years_select <- renderUI({
       tagList(
@@ -49,13 +50,13 @@ mod_2_01_historical_server <- function(id) {
           " balance between additional years (which can encompass rarer events)",
           " and the representativeness of this underlying weather data, which",
           " may shift due to climate change.",
-          tags$b(" 30 years (e.g. 1994–2024) is the recommended default."),
+          tags$b(" 30 years (e.g. 1994-2024) is the recommended default."),
           style = "font-size: 11px; color: #555; margin-top: 4px;"
         ),
         textInput(
           inputId = ns("scenario_name"),
           label   = "Scenario name",
-          value   = "Historical / 1994–2024"
+          value   = "Historical / 1994-2024"
         )
       )
     })
@@ -66,7 +67,7 @@ mod_2_01_historical_server <- function(id) {
       req(input$hist_years)
       if ((input$hist_years[2] - input$hist_years[1]) < 20) {
         helpText(
-          "⚠️ Window is less than 20 years. Results may be unreliable.",
+          "\u26a0\ufe0f Window is less than 20 years. Results may be unreliable.",
           style = "color: #c0392b; font-size: 12px;"
         )
       }
@@ -79,11 +80,11 @@ mod_2_01_historical_server <- function(id) {
     observeEvent(input$hist_years, {
       req(input$hist_years)
       yr  <- input$hist_years
-      old <- paste0("Historical / ", prev_hist_years()[1], "–", prev_hist_years()[2])
+      old <- paste0("Historical / ", prev_hist_years()[1], "-", prev_hist_years()[2])
       if (!is.null(input$scenario_name) &&
           (input$scenario_name == old || input$scenario_name == "Historical")) {
         updateTextInput(session, "scenario_name",
-                        value = paste0("Historical / ", yr[1], "–", yr[2]))
+                        value = paste0("Historical / ", yr[1], "-", yr[2]))
       }
       prev_hist_years(yr)
     }, ignoreInit = TRUE)
@@ -93,45 +94,31 @@ mod_2_01_historical_server <- function(id) {
     hist_sim_specs_open <- reactiveVal(FALSE)
 
     output$hist_sim_specs_button <- renderUI({
-      shiny::actionButton(ns("hist_sim_specs"), "Simulation parameters", style = "margin-bottom:12px;")
+      shiny::actionButton(ns("hist_sim_specs_toggle"),
+                          "Simulation parameters",
+                          style = "margin-bottom:12px;")
     })
 
-    observeEvent(input$hist_sim_specs, {
+    observeEvent(input$hist_sim_specs_toggle, {
       hist_sim_specs_open(!isTRUE(hist_sim_specs_open()))
     })
 
     # ---- Simulation parameters panel ----------------------------------------
+    # Uses shared residual_method_ui() from fct_simulations.R
 
     output$hist_sim_specs <- renderUI({
       if (!isTRUE(hist_sim_specs_open())) return(NULL)
-
-      tagList(
-        radioButtons(
-          inputId  = ns("hist_sim_residuals"),
-          label    = "Residuals method",
-          choices  = residual_choices(),
-          selected = "original"
-        ),
-        helpText(
-          tags$b("none:"), " return fitted values only.", tags$br(),
-          tags$b("original:"), " match each observation's own training residual by ID,",
-          " preserving individual-level heterogeneity across simulation years.", tags$br(),
-          tags$b("empirical:"), " resample residuals from the training distribution",
-          " (non-parametric bootstrap).", tags$br(),
-          tags$b("normal:"), " draw residuals from N(0, σ) where σ is the",
-          " training residual SD.",
-          style = "font-size: 11px;"
-        )
-      )
+      residual_method_ui(ns, "hist_sim_residuals")
     })
 
     # ---- Selected historical weather simulation configuration ---------------
 
     selected_hist <- reactive({
+      req(input$hist_years)
       data.frame(
         type          = "historical",
-        year_range    = I(list(input$hist_years         %||% c(1994, 2024))),
-        residuals     = input$hist_sim_residuals         %||% "original",
+        year_range    = I(list(input$hist_years)),
+        residuals     = input$hist_sim_residuals  %||% "original",
         scenario_name = as.character(input$scenario_name %||% "Historical"),
         stringsAsFactors = FALSE
       )
@@ -139,9 +126,7 @@ mod_2_01_historical_server <- function(id) {
 
     # ---- Module return API --------------------------------------------------
 
-    list(
-      selected_hist = selected_hist
-    )
+    list(selected_hist = selected_hist)
   })
 }
 

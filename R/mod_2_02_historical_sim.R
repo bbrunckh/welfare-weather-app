@@ -78,11 +78,6 @@ mod_2_02_historical_sim_server <- function(id,
     # hist_run_id at the time it ran so the plot can detect a stale overlay
     hist_run_id <- reactiveVal(0L)
 
-    # ---- aggregation choices depend on outcome type ------------------------
-    aggregate_choices <- reactive({
-      hist_aggregate_choices(selected_outcome()$type, selected_outcome()$name)
-    })
-
     # ---- main simulation observer ------------------------------------------
     observeEvent(input$run_hist_sim, {
       req(selected_weather(), selected_outcome(),
@@ -114,7 +109,13 @@ mod_2_02_historical_sim_server <- function(id,
       )
 
       weather_raw <- tryCatch(
-        get_weather(svy, sw, sim_dates, connection_params()),
+        {
+          wr <- get_weather(
+            svy, sw, sim_dates, connection_params(),
+            fixed_breaks = mf$bin_cutoffs
+          )
+          wr$result
+        },
         error = function(e) {
           shiny::showNotification(
             paste("Failed to load weather data:", conditionMessage(e)),
@@ -127,23 +128,20 @@ mod_2_02_historical_sim_server <- function(id,
       shiny::removeNotification(notif_load)
       req(!is.null(weather_raw))
 
-      # join weather back to survey covariates
-      survey_wd_sim <- prepare_hist_weather(weather_raw, svy, sw, so$name)
-
       # ---- simulate outcomes -----------------------------------------------
+      # run_sim_pipeline(): join weather -> predict_outcome -> back-transform
 
-      preds <- predict_outcome(
-        model      = model,
-        newdata    = survey_wd_sim,
-        residuals  = sh$residuals,
-        outcome    = so$name,
-        id         = NULL,
-        train_data = train_data,
-        engine     = engine
+      preds <- run_sim_pipeline(
+        weather_raw = weather_raw,
+        svy         = svy,
+        sw          = sw,
+        so          = so,
+        model       = model,
+        residuals   = sh$residuals,
+        train_data  = train_data,
+        engine      = engine
       )
-
-      # back-transform log outcomes
-      preds <- apply_log_backtransform(preds, so)
+      req(!is.null(preds))
 
       # store raw predictions — comparison plots rendered in mod_2_06
       pred_hist_raw(list(preds = preds, so = so))

@@ -1,19 +1,28 @@
-# ============================================================================ #
-# Used by mod_2_02_historical_sim_server() and mod_2_04_future_sim_server(),
-# and 2_06_sim_compare_server().
-#
+﻿# ============================================================================ #
+# Pure functions used by mod_2_02, mod_2_04, and mod_2_06.
 # Stateless and testable without Shiny.
+#
+# Shared constants (used across multiple modules):
+#   RP_LOW            -- low-tail return period map  (name -> quantile prob)
+#   RP_HIGH           -- high-tail return period map (name -> quantile prob)
+#   SSP_SHORT_LABELS  -- canonical SSP key -> short display label
+#
+# Shared UI helpers (called inside module server functions):
+#   residual_method_ui(ns, input_id)  -- radio buttons + helpText for residuals
+#
+# Simulation pipeline helper:
+#   run_sim_pipeline()  -- weather join -> predict -> back-transform in one call
 
 # ============================================================================ #
 
 # ---- Internal colour / style helpers ---------------------------------------
-# Used by plot_bar_climate() and enhance_exceedance(). Not exported.
+# Used by enhance_exceedance() and plot_pointrange_climate(). Not exported.
 
-# Canonical SSP keys  must match what .normalise_ssp() returns
+# Canonical SSP keys must match what .normalise_ssp() returns
 .ssp_colours <- c(
-  "SSP2-4.5" = "#4dac26",   # green  (SSP2 = lower emissions = better)
-  "SSP3-7.0" = "#2166ac",   # blue   (SSP3 = mid)
-  "SSP5-8.5" = "#c0392b"    # red    (SSP5 = high emissions = worse)
+  "SSP2-4.5" = "#4dac26",   # green  (lower emissions)
+  "SSP3-7.0" = "#2166ac",   # blue   (mid emissions)
+  "SSP5-8.5" = "#c0392b"    # red    (high emissions)
 )
 
 
@@ -21,13 +30,11 @@
 # Normalise any SSP token found in a scenario name to a canonical key
 # e.g. "SSP2" -> "SSP2-4.5", "SSP3-7.0" -> "SSP3-7.0", NA -> NA
 .normalise_ssp <- function(nm) {
-  # Try full form first: SSP2-4.5 / SSP3-7.0 / SSP5-8.5
   m_full <- regmatches(nm, regexpr("SSP[0-9]-[0-9.]+", nm))
   if (length(m_full) > 0) return(m_full)
-  # Try short form: SSP2 / SSP3 / SSP5
   m_short <- regmatches(nm, regexpr("SSP([2-9])", nm))
   if (length(m_short) == 0) return(NA_character_)
-  digit <- sub("SSP", "", m_short)
+  digit  <- sub("SSP", "", m_short)
   lookup <- c("2" = "SSP2-4.5", "3" = "SSP3-7.0", "5" = "SSP5-8.5")
   if (digit %in% names(lookup)) lookup[[digit]] else NA_character_
 }
@@ -37,7 +44,127 @@
   if (length(m) == 0) NA_character_ else m
 }
 
+# ---------------------------------------------------------------------------- #
+# Shared constants                                                             #
+# ---------------------------------------------------------------------------- #
 
+#' Symmetric Return-Period Probability Maps
+#'
+#' Named numeric vectors mapping return-period labels to exceedance
+#' probabilities. Used consistently across the threshold table and exceedance
+#' curve in mod_2_06 and fct_sim_compare.
+#'
+#' \describe{
+#'   \item{RP_LOW}{Rare low-outcome tail: 1:50, 1:20, 1:10, 1:5}
+#'   \item{RP_HIGH}{Rare high-outcome tail: 4:5, 9:10, 19:20, 49:50}
+#' }
+#' @export
+RP_LOW  <- c("1:50" = 0.02, "1:20" = 0.05, "1:10" = 0.10, "1:5" = 0.20)
+
+#' @rdname RP_LOW
+#' @export
+RP_HIGH <- c("4:5" = 0.80, "9:10" = 0.90, "19:20" = 0.95, "49:50" = 0.98)
+
+#' Short Display Labels for SSP Scenarios
+#'
+#' Maps canonical SSP keys (as returned by `.normalise_ssp()`) to short labels
+#' used in UI checkboxes and plot legends.
+#'
+#' @export
+SSP_SHORT_LABELS <- c(
+  "SSP2-4.5" = "SSP2",
+  "SSP3-7.0" = "SSP3",
+  "SSP5-8.5" = "SSP5"
+)
+
+# ---------------------------------------------------------------------------- #
+# Shared UI helper                                                             #
+# ---------------------------------------------------------------------------- #
+
+#' Residual Method Radio Buttons UI
+#'
+#' Produces a consistent `radioButtons` widget + `helpText` block for choosing
+#' how prediction residuals are handled. Used in both `mod_2_01_historical` and
+#' `mod_2_03_future` to avoid duplicating the same 24-line block.
+#'
+#' @param ns       The module namespace function (from `session$ns`).
+#' @param input_id The input id for the radio buttons (unnamespaced).
+#'
+#' @return A `tagList` containing `radioButtons` and `helpText`.
+#' @export
+residual_method_ui <- function(ns, input_id) {
+  shiny::tagList(
+    shiny::radioButtons(
+      inputId  = ns(input_id),
+      label    = "Residuals method",
+      choices  = residual_choices(),
+      selected = "original"
+    ),
+    shiny::helpText(
+      shiny::tags$b("none:"), " return fitted values only.", shiny::tags$br(),
+      shiny::tags$b("original:"), " match each observation's own training residual",
+      " by ID, preserving individual-level heterogeneity across simulation years.",
+      shiny::tags$br(),
+      shiny::tags$b("empirical:"), " resample residuals from the training",
+      " distribution (non-parametric bootstrap).", shiny::tags$br(),
+      shiny::tags$b("normal:"), " draw residuals from N(0, \u03c3) where \u03c3",
+      " is the training residual SD.",
+      style = "font-size:11px;"
+    )
+  )
+}
+
+# ---------------------------------------------------------------------------- #
+# Simulation pipeline helper                                                   #
+# ---------------------------------------------------------------------------- #
+
+#' Run the Full Simulation Pipeline for One Scenario Row
+#'
+#' Combines the three steps that are identical between historical and future
+#' simulation:
+#' \enumerate{
+#'   \item Join raw weather output back to survey covariates via
+#'     `prepare_hist_weather()`.
+#'   \item Generate outcome predictions via `predict_outcome()`.
+#'   \item Back-transform log-scale outcomes via `apply_log_backtransform()`.
+#' }
+#'
+#' @param weather_raw  Data frame returned by `get_weather()$result`.
+#' @param svy          Survey-weather data frame (from `survey_weather()`).
+#' @param sw           Selected weather metadata (from `selected_weather()`).
+#' @param so           Selected outcome metadata (from `selected_outcome()`).
+#' @param model        Fitted model object (`mf$fit3`).
+#' @param residuals    Character. Residual method, e.g. `"original"`.
+#' @param train_data   Data frame used at fit time (`mf$train_data`).
+#' @param engine       Character. Model engine, e.g. `"fixest"`.
+#'
+#' @return A data frame of individual-level predictions with the outcome column
+#'   back-transformed where applicable, or `NULL` if `predict_outcome()` fails.
+#'
+#' @export
+run_sim_pipeline <- function(weather_raw, svy, sw, so,
+                             model, residuals, train_data, engine) {
+  survey_wd_sim <- prepare_hist_weather(weather_raw, svy, sw, so$name)
+
+  preds <- tryCatch(
+    predict_outcome(
+      model      = model,
+      newdata    = survey_wd_sim,
+      residuals  = residuals,
+      outcome    = so$name,
+      id         = NULL,
+      train_data = train_data,
+      engine     = engine
+    ),
+    error = function(e) {
+      warning("[run_sim_pipeline] predict_outcome() failed: ", conditionMessage(e))
+      NULL
+    }
+  )
+
+  if (is.null(preds)) return(NULL)
+  apply_log_backtransform(preds, so)
+}
 
 # ---------------------------------------------------------------------------- #
 # Simulation date grid                                                         #
@@ -451,86 +578,9 @@ deviation_from_centre <- function(df,
     mutate(value = sign * (value - ref))
 }
 
-#---------------------------------------------------------------------------- #
-# Plot exceedance curve for one or more variables
-#---------------------------------------------------------------------------- #
-
-#' Plot Exceedance Probability Curve
-#'
-#' Creates an exceedance probability curve (1 - ECDF) for one or more variables,
-#' with the probability axis on the y-axis and the variable axis on the x-axis
-#' (via `coord_flip`). Useful for visualizing the probability that a
-#' variable exceeds a given threshold. When multiple variables are provided,
-#' each is drawn in a distinct color with a legend.
-#'
-#' @param df A data frame containing the variables to plot.
-#' @param variables A character vector of column names in `df` to plot.
-#'   Each variable will be drawn as a separate exceedance curve.
-#' @param x_label A character string for the axis label of the plotted variable
-#'   (displayed on the y-axis after `coord_flip`).
-#' @param labels An optional character vector of labels corresponding to each
-#'   entry in `variables`, used in the legend. Must be the same length as
-#'   `variables`. If `NULL` (default), the column names are used.
-#'
-#' @return A `ggplot` object.
-#'
-#' @examples
-#' library(ggplot2)
-#'
-#' # Simulate poverty rate changes across 500 scenarios
-#' set.seed(42)
-#' sim_data <- data.frame(
-#'   pov300d_base   = rnorm(500, mean = 0.02, sd = 0.05),
-#'   pov300d_policy = rnorm(500, mean = -0.01, sd = 0.04)
-#' )
-#'
-#' # Single variable (no legend)
-#' plot_exceedance(sim_data, "pov300d_base", "Change in $3.00 poverty rate (pp.)")
-#'
-#' # Multiple variables with custom labels
-#' plot_exceedance(
-#'   sim_data,
-#'   variables = c("pov300d_base", "pov300d_policy"),
-#'   x_label   = "Change in $3.00 poverty rate (pp.)",
-#'   labels    = c("Baseline", "Policy")
-#' )
-#'
-#' @importFrom ggplot2 ggplot aes stat_ecdf geom_vline labs theme_minimal
-#'   coord_flip after_stat scale_color_brewer
-#' @importFrom dplyr bind_rows mutate
-#' @export
-plot_exceedance <- function(df, variables, x_label, labels = NULL) {
-
-  if (is.null(labels)) labels <- variables
-  stopifnot(length(labels) == length(variables))
-
-  # Reshape to long format so ggplot can map color to group
-  long_df <- do.call(bind_rows, lapply(seq_along(variables), function(i) {
-    data.frame(
-      value = df[[variables[i]]],
-      group = labels[i]
-    )
-  }))
-
-  # Preserve label order in the legend
-  long_df$group <- factor(long_df$group, levels = labels)
-
-  ggplot(long_df, aes(x = value, color = group)) +
-    stat_ecdf(geom = "point", aes(y = 1 - after_stat(y)), alpha = 0.5) +
-    stat_ecdf(geom = "line",  aes(y = 1 - after_stat(y)), linewidth = 1) +
-    geom_vline(xintercept = 0, color = "black", linetype = "dotted") +
-    labs(
-      x     = x_label,
-      y     = "Annual Exceedance Probability (P(X > x))",
-      color = NULL
-    ) +
-    scale_color_brewer(palette = "Set1") +
-    theme_minimal() +
-    theme(legend.position = "bottom") +
-    coord_flip()
-}
-
-
+# NOTE: plot_exceedance() and plot_hist_sim() have been archived to
+# dev/archived_fct/plot_exceedance_archived.R. They are superseded by
+# enhance_exceedance() in fct_sim_compare.R and have no active call sites.
 
 # ---------------------------------------------------------------------------- #
 # Shared aggregation helper                                                    #
@@ -538,11 +588,8 @@ plot_exceedance <- function(df, variables, x_label, labels = NULL) {
 
 #' Aggregate Simulation Predictions for Exceedance Plotting
 #'
-#' Helper shared by `plot_hist_sim()` and `plot_fut_sim()`. Aggregates
-#' individual-level predictions by `sim_year`, optionally applies
-#' `deviation_from_centre()`, and returns the aggregated data frame together
-#' with a resolved x-axis label.
-#'
+#' Aggregates individual-level predictions by sim_year, optionally applies
+#' deviation_from_centre(), and returns the aggregated data frame with x_label.
 #' @param preds      Data frame of individual-level predictions with a
 #'   `sim_year` column and the outcome column named by `so$name`.
 #' @param so         One-row outcome metadata data frame (columns `name`,
@@ -610,67 +657,4 @@ aggregate_sim_preds <- function(preds, so, agg_method, deviation, loss_frame,
 
   list(out = out, x_label = x_label)
 }
-
-
-# ---------------------------------------------------------------------------- #
-# Plot builders                                                                #
-# ---------------------------------------------------------------------------- #
-
-#' Build the Historical Simulation Exceedance Plot
-#'
-#' Pure function that aggregates individual-level predictions and returns a
-#' `plot_exceedance()` ggplot object. When `fut_preds` is also supplied the
-#' future climate series is overlaid as a second curve labelled
-#' `"Future climate"`.
-#'
-#' @param preds      A data frame of individual-level predictions from
-#'   `predict_outcome()`, containing at least a `sim_year` column and the
-#'   outcome column named by `so$name`.
-#' @param so         A one-row data frame of outcome metadata (must contain
-#'   `name`, `label`, and `type`).
-#' @param agg_method Character. One of `"mean"`, `"median"`,
-#'   `"headcount_ratio"`, `"gap"`, or `"gini"`.
-#' @param deviation  Character. One of `"none"`, `"mean"`, or `"median"`.
-#' @param loss_frame Logical. Passed to `deviation_from_centre()` as `loss`.
-#' @param pov_line   Numeric or `NULL`. Required when `agg_method` is
-#'   `"headcount_ratio"` or `"gap"`.
-#' @param fut_preds  Optional data frame of future-climate individual-level
-#'   predictions from `predict_outcome()`. When supplied a second exceedance
-#'   curve labelled `"Future climate"` is overlaid on the same plot.
-#'
-#' @return A `ggplot` object.
-#'
-#' @importFrom rlang abort
-#' @export
-plot_hist_sim <- function(preds, so, agg_method, deviation, loss_frame,
-                          pov_line = NULL, fut_preds = NULL) {
-
-  agg <- aggregate_sim_preds(preds, so, agg_method, deviation, loss_frame,
-                             pov_line)
-
-  if (!is.null(fut_preds)) {
-    agg_fut <- aggregate_sim_preds(fut_preds, so, agg_method, deviation,
-                                   loss_frame, pov_line)
-
-    plot_df <- data.frame(
-      historical = agg$out$value,
-      future     = agg_fut$out$value
-    )
-
-    plot_exceedance(
-      df        = plot_df,
-      variables = c("historical", "future"),
-      x_label   = agg$x_label,
-      labels    = c("Historical weather", "Future climate")
-    )
-  } else {
-    plot_exceedance(
-      df        = agg$out,
-      variables = "value",
-      x_label   = agg$x_label,
-      labels    = "Historical weather"
-    )
-  }
-}
-
 
