@@ -143,8 +143,8 @@
   }
 
   # ---- Colour map: Full historical anchor + regression + scenarios ------
-  colour_map   <- c("Full historical" = "#808080", ssp_colour_map)
-  linetype_map <- c("Full historical" = "solid",   ssp_linetype_map)
+  colour_map   <- ssp_colour_map
+  linetype_map <- ssp_linetype_map
   if (isTRUE(show_regression)) {
     colour_map["Regression input"]   <- "black"
     linetype_map["Regression input"] <- "dashed"
@@ -155,12 +155,10 @@
 
   # Full historical: grey fill + colour mapped for legend swatch
   p <- p + ggplot2::geom_density(
-    data      = data.frame(value = hist_vals, src = "Full historical",
-                           stringsAsFactors = FALSE),
-    mapping   = ggplot2::aes(x = .data$value, colour = .data$src,
-                             fill = .data$src),
+    data      = data.frame(value = hist_vals, stringsAsFactors = FALSE),
+    mapping   = ggplot2::aes(x = .data$value, fill = "Full historical"),
+    colour    = NA,
     alpha     = 0.35,
-    linetype  = "solid",
     linewidth = 0.7
   )
 
@@ -190,33 +188,26 @@
   # Dual-scale legend:
   #   scale_fill_manual  -- grey swatch for Full historical
   #   scale_colour_manual -- dashed/coloured lines for Regression + SSPs
+  # Legend: fill swatch for Full historical; colour/linetype for lines.
+  # override.aes is intentionally avoided -- ggplot2 builds the correct
+  # grey fill swatch automatically from the fill = src mapping.
   fill_map_all <- c("Full historical" = "#808080")
-  # All other sources have fill = NA
-  for (nm in names(colour_map)) {
-    if (!nm %in% names(fill_map_all)) fill_map_all[nm] <- NA_character_
-  }
 
   p <- p +
     ggplot2::scale_fill_manual(
       values   = fill_map_all,
       na.value = NA,
-      name     = NULL,
-      guide    = ggplot2::guide_legend(
-        override.aes = list(
-          fill      = unname(fill_map_all),
-          colour    = unname(colour_map),
-          linetype  = unname(linetype_map),
-          linewidth = rep(0.8, length(fill_map_all))
-        )
-      )
+      name     = NULL
     ) +
     ggplot2::scale_colour_manual(
       values = colour_map,
+      name   = NULL
+    ) +
+    ggplot2::scale_linetype_manual(
+      values = linetype_map,
       name   = NULL,
       guide  = "none"
-    ) +
-    ggplot2::scale_linetype_manual(values = linetype_map, name = NULL,
-                                   guide  = "none")
+    )
 
   n_scen_shown <- length(ssp_df_list)
   p <- p +
