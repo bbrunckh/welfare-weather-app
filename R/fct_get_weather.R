@@ -402,6 +402,11 @@ get_weather <- function(
     )
   }
 
+  # Snapshot the numeric (pre-binning) result so callers that need raw
+  # numeric values (e.g. Diagnostics tab density plot) are not affected
+  # by factor conversion. Stored as result_raw in the return list.
+  result_raw <- result
+
   # -- Apply bin labels (R only) ---------------------------------------------
   stored_breaks <- list()
 
@@ -476,7 +481,7 @@ get_weather <- function(
     }
   }
 
-  list(result = result, bin_cutoffs = stored_breaks)
+  list(result = result, result_raw = result_raw, bin_cutoffs = stored_breaks)
 }
 
 

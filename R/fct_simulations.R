@@ -138,12 +138,21 @@ residual_method_ui <- function(ns, input_id) {
 #' @param train_data   Data frame used at fit time (`mf$train_data`).
 #' @param engine       Character. Model engine, e.g. `"fixest"`.
 #'
-#' @return A data frame of individual-level predictions with the outcome column
-#'   back-transformed where applicable, or `NULL` if `predict_outcome()` fails.
+#' @return A named list with three elements:
+#'   \describe{
+#'     \item{preds}{Data frame of individual-level predictions with the outcome
+#'       column back-transformed where applicable, or \code{NULL} on failure.}
+#'     \item{n_pre_join}{Integer. Number of rows in \code{svy} before the
+#'       weather join. Used by the Diagnostics tab to compute the drop rate.}
+#'     \item{weather_raw}{The raw weather data frame passed in as
+#'       \code{weather_raw}. Stored so the Diagnostics tab can construct the
+#'       full historical weather distribution without a second DB query.}
+#'   }
 #'
 #' @export
 run_sim_pipeline <- function(weather_raw, svy, sw, so,
                              model, residuals, train_data, engine) {
+  n_pre_join    <- nrow(svy)
   survey_wd_sim <- prepare_hist_weather(weather_raw, svy, sw, so$name)
 
   preds <- tryCatch(
@@ -163,7 +172,11 @@ run_sim_pipeline <- function(weather_raw, svy, sw, so,
   )
 
   if (is.null(preds)) return(NULL)
-  apply_log_backtransform(preds, so)
+  list(
+    preds       = apply_log_backtransform(preds, so),
+    n_pre_join  = n_pre_join,
+    weather_raw = weather_raw
+  )
 }
 
 # ---------------------------------------------------------------------------- #

@@ -95,7 +95,8 @@ label_deviation <- function(key) {
 #' @importFrom stats quantile
 #' @importFrom rlang .data
 #' @export
-plot_pointrange_climate <- function(scenarios, hist_agg) {
+plot_pointrange_climate <- function(scenarios, hist_agg,
+                                    group_order = "scenario_x_year") {
 
   stopifnot(is.list(hist_agg), all(c("out", "x_label") %in% names(hist_agg)))
 
@@ -120,11 +121,11 @@ plot_pointrange_climate <- function(scenarios, hist_agg) {
       ggplot2::labs(title = "Run a simulation to see results."))
   }
   hist_mean <- hist_s$mean
-  hist_s$pt_key    <- "Historical"
+  hist_s$pt_key     <- "Historical"
   hist_s$colour_key <- "Historical"
 
   # ---- future scenario summaries ------------------------------------------
-  fut_df <- NULL
+  fut_df        <- NULL
   ssp_short_map <- c("SSP2-4.5" = "SSP2", "SSP3-7.0" = "SSP3", "SSP5-8.5" = "SSP5")
 
   if (length(scenarios) > 0) {
@@ -158,8 +159,8 @@ plot_pointrange_climate <- function(scenarios, hist_agg) {
     for (ssp in intersect(names(.ssp_colours), unique(fut_df$ssp_key))) {
       base_col <- .ssp_colours[ssp]
       for (i in seq_along(yrs_present)) {
-        ck                  <- paste(ssp, yrs_present[i], sep = "__")
-        colour_palette[ck]  <- colorspace::lighten(base_col, light_seq[i])
+        ck                 <- paste(ssp, yrs_present[i], sep = "__")
+        colour_palette[ck] <- colorspace::lighten(base_col, light_seq[i])
       }
     }
   }
@@ -169,16 +170,36 @@ plot_pointrange_climate <- function(scenarios, hist_agg) {
   spacer_ids     <- character(0)
 
   if (!is.null(fut_df) && nrow(fut_df) > 0) {
-    ssps_present <- intersect(c("SSP2", "SSP3", "SSP5"), unique(fut_df$ssp_short))
-    spacer_n <- 0L
-    for (ssp in ssps_present) {
-      spacer_n       <- spacer_n + 1L
-      sid            <- strrep(" ", spacer_n)
-      spacer_ids     <- c(spacer_ids, sid)
-      ordered_levels <- c(ordered_levels, sid)
-      ssp_yrs <- sort(unique(as.integer(fut_df$yr[fut_df$ssp_short == ssp])))
-      for (yr_i in ssp_yrs) {
-        ordered_levels <- c(ordered_levels, paste0(ssp, "\n", yr_i))
+
+    if (isTRUE(group_order == "year_x_scenario")) {
+      # Outer: year; inner: SSP
+      yrs_present  <- sort(unique(as.integer(fut_df$yr)))
+      ssps_present <- intersect(c("SSP2", "SSP3", "SSP5"), unique(fut_df$ssp_short))
+      spacer_n <- 0L
+      for (yr_i in yrs_present) {
+        spacer_n       <- spacer_n + 1L
+        sid            <- strrep(" ", spacer_n)
+        spacer_ids     <- c(spacer_ids, sid)
+        ordered_levels <- c(ordered_levels, sid)
+        for (ssp in ssps_present) {
+          if (any(fut_df$ssp_short == ssp & fut_df$yr == as.character(yr_i))) {
+            ordered_levels <- c(ordered_levels, paste0(ssp, "\n", yr_i))
+          }
+        }
+      }
+    } else {
+      # Default: Scenario x Year — outer: SSP; inner: year
+      ssps_present <- intersect(c("SSP2", "SSP3", "SSP5"), unique(fut_df$ssp_short))
+      spacer_n <- 0L
+      for (ssp in ssps_present) {
+        spacer_n       <- spacer_n + 1L
+        sid            <- strrep(" ", spacer_n)
+        spacer_ids     <- c(spacer_ids, sid)
+        ordered_levels <- c(ordered_levels, sid)
+        ssp_yrs <- sort(unique(as.integer(fut_df$yr[fut_df$ssp_short == ssp])))
+        for (yr_i in ssp_yrs) {
+          ordered_levels <- c(ordered_levels, paste0(ssp, "\n", yr_i))
+        }
       }
     }
   }
@@ -190,9 +211,9 @@ plot_pointrange_climate <- function(scenarios, hist_agg) {
   data_levels <- setdiff(ordered_levels, spacer_ids)
 
   # ---- combine into one data frame -----------------------------------------
-  hist_row <- hist_s[, c("pt_key","colour_key","mean","lo90","hi90","lo95","hi95")]
+  hist_row <- hist_s[, c("pt_key", "colour_key", "mean", "lo90", "hi90", "lo95", "hi95")]
   fut_rows <- if (!is.null(fut_df) && nrow(fut_df) > 0)
-    fut_df[, c("pt_key","colour_key","mean","lo90","hi90","lo95","hi95")] else NULL
+    fut_df[, c("pt_key", "colour_key", "mean", "lo90", "hi90", "lo95", "hi95")] else NULL
 
   plot_df <- dplyr::bind_rows(hist_row, fut_rows)
   plot_df$pt_key <- factor(plot_df$pt_key, levels = ordered_levels)
@@ -246,8 +267,7 @@ plot_pointrange_climate <- function(scenarios, hist_agg) {
       legend.position    = "none"
     )
 }
-# ---------------------------------------------------------------------------- #
-# Bar chart: scenario comparison (kept for reference)                          #
+
 # ---------------------------------------------------------------------------- #
 # Impact table                                                                 #
 # ---------------------------------------------------------------------------- #
@@ -266,7 +286,7 @@ plot_pointrange_climate <- function(scenarios, hist_agg) {
 #' @export
 build_impact_table <- function(scenarios,
                                hist_agg,
-                               thresholds              = c("mean","1:5","1:10","1:20","1:50"),
+                               thresholds              = c("mean", "1:5", "1:10", "1:20", "1:50"),
                                hist_centre_years       = 2010L,
                                scenario_centre_years   = c(2030L, 2040L, 2050L),
                                band_width              = 10L,
@@ -386,12 +406,17 @@ enhance_exceedance <- function(scenarios,
     xs     <- sort(unique(sub$value))
     exceed <- 1 - fn(xs)
     keep   <- exceed > eps & exceed < (1 - eps)
+    # Guard: when all observations share one value (e.g. band = 1 year),
+    # ecdf() returns exceed = 0 for the single unique point, so keep is all
+    # FALSE. The data.frame() call below would then have 0-length vectors
+    # mixed with 1-length scalars, crashing with 'differing number of rows'.
+    if (!any(keep)) return(NULL)
     data.frame(
-      value   = xs[keep],
-      exceed  = exceed[keep],
-      group   = grp,
-      ssp_key = sub$ssp_key[1],
-      yr      = sub$yr[1],
+      value            = xs[keep],
+      exceed           = exceed[keep],
+      group            = grp,
+      ssp_key          = sub$ssp_key[1],
+      yr               = sub$yr[1],
       stringsAsFactors = FALSE
     )
   }))
@@ -437,14 +462,13 @@ enhance_exceedance <- function(scenarios,
 
   # --- return period lines (both tails, symmetric) ---
   if (isTRUE(return_period)) {
-    # Low-probability tail (rare low outcomes): 1:50, 1:20, 1:10, 1:5
     # RP_LOW / RP_HIGH are defined in fct_simulations.R and cover both tails.
     rp_all <- c(RP_LOW, RP_HIGH)
 
     for (nm in names(rp_all)) {
       prob <- rp_all[nm]
       # Reliability check only applies to the rare low-probability lines
-      reliable <- is.null(n_sim_years) ||
+      reliable  <- is.null(n_sim_years) ||
         (!(nm == "1:20" && n_sim_years < 40) &&
          !(nm == "1:50" && n_sim_years < 100))
       rp_label  <- if (reliable) nm else paste0(nm, "*")

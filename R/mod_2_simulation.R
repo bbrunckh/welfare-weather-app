@@ -127,10 +127,13 @@ mod_2_simulation_server <- function(id,
     # ---- 5. Simulation diagnostics ------------------------------------------
     mod_2_05_sim_diag_server(
       "sim_diag",
-      hist_sim       = s2$hist_sim,
-      fut_sim        = s4$fut_sim,
-      tabset_id      = "step2_output_tabs",
-      tabset_session = session
+      hist_sim         = s2$hist_sim,
+      fut_sim          = s4$fut_sim,
+      saved_scenarios  = saved_scenarios,
+      survey_weather   = survey_weather,
+      selected_weather = selected_weather,
+      tabset_id        = "step2_output_tabs",
+      tabset_session   = session
     )
 
     # ---- Clear scenarios button ---------------------------------------------

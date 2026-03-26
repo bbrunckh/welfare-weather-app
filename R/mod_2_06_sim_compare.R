@@ -1,6 +1,6 @@
-﻿#' 2_06_sim_compare UI Function
+#' 2_06_sim_compare UI Function
 #'
-#' @description No sidebar UI. Compare outputs are inserted into the
+#' @description A shiny Module. Populates the comparison section within the
 #'   existing Results tab via insertUI / removeUI.
 #'
 #' @param id,input,output,session Internal parameters for {shiny}.
@@ -32,15 +32,15 @@ compare_content_ui <- function(ns, so) {
         shiny::tags$div(style = "flex:1; min-width:160px;",
           shiny::selectInput(
             ns("cmp_agg_method"),
-            label   = "Aggregation method",
-            choices = hist_aggregate_choices(so$type, so$name),
+            label    = "Aggregation method",
+            choices  = hist_aggregate_choices(so$type, so$name),
             selected = "mean"
           )
         ),
         shiny::tags$div(style = "flex:1; min-width:160px;",
           shiny::selectInput(
             ns("cmp_deviation"),
-            label   = "Express as deviation from",
+            label    = "Express as deviation from",
             choices = c(
               "None (raw value)" = "none",
               "Mean year"        = "mean",
@@ -58,6 +58,17 @@ compare_content_ui <- function(ns, so) {
                     style = "font-weight:600; margin-bottom:4px;"),
       shiny::fluidRow(
         shiny::column(12, shiny::uiOutput(ns("scenario_filter_ui")))
+      ),
+      shiny::tags$hr(style = "margin: 6px 0;"),
+      shiny::radioButtons(
+        ns("cmp_group_order"),
+        label    = "Group charts and tables by",
+        choices  = c(
+          "Scenario \u00d7 Year" = "scenario_x_year",
+          "Year \u00d7 Scenario" = "year_x_scenario"
+        ),
+        selected = "scenario_x_year",
+        inline   = TRUE
       )
     ),
 
@@ -77,20 +88,14 @@ compare_content_ui <- function(ns, so) {
       )
     ),
 
-    # ---- 4. Summary distribution statistics table --------------------------
-    shiny::wellPanel(
-      shiny::uiOutput(ns("dist_table_header")),
-      DT::DTOutput(ns("summary_dist_table"))
-    ),
-
-    # ---- 5. Return-period threshold table (both tails) ---------------------
+    # ---- 4. Return-period threshold table (both tails) ---------------------
     shiny::wellPanel(
       shiny::uiOutput(ns("threshold_table_header")),
       DT::DTOutput(ns("summary_threshold_table")),
       shiny::uiOutput(ns("threshold_table_footer"))
     ),
 
-    # ---- 6. Exceedance probability curve -----------------------------------
+    # ---- 5. Exceedance probability curve -----------------------------------
     shiny::wellPanel(
       shiny::h4("Exceedance probability by climate scenario"),
       shiny::tags$div(
@@ -156,9 +161,10 @@ mod_2_06_sim_compare_server <- function(id,
           break
         }
         current[[nm]] <- list(
-          preds      = fd$preds_list[[nm]],
-          so         = fd$so,
-          year_range = fd$year_range[[nm]]
+          preds       = fd$preds_list[[nm]]$preds,
+          weather_raw = fd$preds_list[[nm]]$weather_raw,
+          so          = fd$so,
+          year_range  = fd$year_range[[nm]]
         )
       }
       saved_scenarios(current)
@@ -225,7 +231,7 @@ mod_2_06_sim_compare_server <- function(id,
     }, ignoreInit = TRUE)
 
     # ---- Reactive: all series (historical + filtered scenarios) ----------
-    # Single definition used by all three render outputs below.
+    # Single definition used by all render outputs below.
 
     all_series <- reactive({
       c(setNames(list(agg_hist()), hist_label()), agg_scenarios())
@@ -239,8 +245,8 @@ mod_2_06_sim_compare_server <- function(id,
       so  <- hist_sim()$so
       yr  <- tryCatch(unlist(hist_sim()$year_range), error = function(e) NULL)
 
-      agg_label  <- label_agg_method(input$cmp_agg_method)
-      dev_label  <- label_deviation(input$cmp_deviation)
+      agg_label    <- label_agg_method(input$cmp_agg_method)
+      dev_label    <- label_deviation(input$cmp_deviation)
       baseline_txt <- if (!is.null(yr) && length(yr) == 2)
         paste0(yr[1], "\u2013", yr[2]) else "historical baseline"
       pov_txt <- if (!is.null(pov_line_val()))
@@ -276,6 +282,7 @@ mod_2_06_sim_compare_server <- function(id,
         )
       }
     })
+
     # ---- Render: scenario filter UI --------------------------------------
 
     output$scenario_filter_ui <- renderUI({
@@ -374,69 +381,26 @@ mod_2_06_sim_compare_server <- function(id,
       )
     })
 
-    # ---- Render: table headers -------------------------------------------
-
-    output$dist_table_header <- renderUI({
-      req(agg_hist())
-      tagList(
-        shiny::h4('Summary distribution statistics'),
-        shiny::tags$small(class = 'text-muted', table_subtitle())
-      )
-    })
-
     # ---- Render: Hero boxplot --------------------------------------------
 
     output$summary_box_plot <- renderPlot({
       req(agg_hist())
       plot_pointrange_climate(
-        scenarios = agg_scenarios(),
-        hist_agg  = agg_hist()
+        scenarios   = agg_scenarios(),
+        hist_agg    = agg_hist(),
+        group_order = input$cmp_group_order %||% "scenario_x_year"
       )
     }, height = 600)
 
-    # ---- Render: Distribution statistics table ---------------------------
-
-    output$summary_dist_table <- DT::renderDT({
-      req(agg_hist())
-      rows <- lapply(names(all_series()), function(nm) {
-        vals <- all_series()[[nm]]$out$value
-        vals <- vals[is.finite(vals)]
-        if (length(vals) == 0) return(NULL)
-        data.frame(
-          Scenario = nm, N = length(vals),
-          Mean   = round(mean(vals),   3),
-          Median = round(stats::median(vals), 3),
-          P10    = round(as.numeric(stats::quantile(vals, 0.10)), 3),
-          P90    = round(as.numeric(stats::quantile(vals, 0.90)), 3),
-          Min    = round(min(vals),    3),
-          Max    = round(max(vals),    3),
-          check.names = FALSE
-        )
-      })
-
-      df <- do.call(rbind, Filter(Negate(is.null), rows))
-
-      DT::datatable(
-        df,
-        rownames = FALSE,
-        class    = 'compact stripe',
-        options  = list(
-          pageLength = 15, dom = 't', ordering = FALSE,
-          columnDefs = list(
-            list(className = 'dt-center', targets = '_all'),
-            list(visible = FALSE,
-                 targets = which(names(df) %in% c("Min", "Max")) - 1L)
-          )
-        )
-      )
-    })
-
     # ---- Render: Return period threshold table ---------------------------
-    # Shows BOTH tails for every available return period.
-    # Columns: 1:50, 1:20, 1:10, 1:5 (low tail) | 4:5, 9:10, 19:20, 49:50 (high tail)
+    # Columns: 1:50 ... 1:5 (low tail) | 1:1 (median) | 4:5 ... 49:50 (high tail)
+    # Row order follows input$cmp_group_order: scenario_x_year sorts by SSP
+    # then year; year_x_scenario sorts by year then SSP.
 
     output$summary_threshold_table <- DT::renderDT({
       req(agg_hist())
+      group_order <- input$cmp_group_order %||% "scenario_x_year"
+
       # RP_LOW / RP_HIGH constants from fct_simulations.R (both tails)
       rows <- lapply(names(all_series()), function(nm) {
         vals <- all_series()[[nm]]$out$value
@@ -444,10 +408,10 @@ mod_2_06_sim_compare_server <- function(id,
         n    <- length(vals)
 
         keep_low  <- names(RP_LOW)[c(n >= 50, n >= 20, n >= 10, n >= 5)]
-        keep_high <- names(RP_HIGH)[c(n >= 5,  n >= 10, n >= 20, n >= 50)]
+        keep_high <- names(RP_HIGH)[c(n >= 5, n >= 10, n >= 20, n >= 50)]
         if (length(keep_low) == 0 && length(keep_high) == 0) return(NULL)
 
-        low_df  <- as.data.frame(
+        low_df <- as.data.frame(
           t(sapply(keep_low,  function(th) round(stats::quantile(vals, RP_LOW[th]),  3)))
         )
         high_df <- as.data.frame(
@@ -459,8 +423,11 @@ mod_2_06_sim_compare_server <- function(id,
         if (nrow(low_df)  == 0) low_df  <- data.frame()
         if (nrow(high_df) == 0) high_df <- data.frame()
 
+        median_df <- data.frame("1:1" = round(stats::median(vals), 3),
+                                check.names = FALSE)
+
         cbind(data.frame(Scenario = nm, Obs = n, check.names = FALSE),
-              low_df, high_df)
+              low_df, median_df, high_df)
       })
 
       rows <- Filter(Negate(is.null), rows)
@@ -475,8 +442,32 @@ mod_2_06_sim_compare_server <- function(id,
         r[all_cols]
       })
 
+      df <- do.call(rbind, rows)
+
+      # ---- Sort rows by group_order ---
+      # Extract SSP and year tokens from Scenario name for ordering.
+      hist_rows <- df[df$Scenario == "Historical" | !grepl("^SSP", df$Scenario), , drop = FALSE]
+      ssp_rows  <- df[grepl("^SSP", df$Scenario), , drop = FALSE]
+
+      if (nrow(ssp_rows) > 0) {
+        ssp_rows$ssp_sort <- sub(" /.*", "", ssp_rows$Scenario)
+        ssp_rows$yr_sort  <- as.integer(
+          regmatches(ssp_rows$Scenario,
+                     regexpr("[0-9]{4}", ssp_rows$Scenario))
+        )
+        if (isTRUE(group_order == "year_x_scenario")) {
+          ssp_rows <- ssp_rows[order(ssp_rows$yr_sort, ssp_rows$ssp_sort), ]
+        } else {
+          ssp_rows <- ssp_rows[order(ssp_rows$ssp_sort, ssp_rows$yr_sort), ]
+        }
+        ssp_rows$ssp_sort <- NULL
+        ssp_rows$yr_sort  <- NULL
+      }
+
+      df <- rbind(hist_rows, ssp_rows)
+
       DT::datatable(
-        do.call(rbind, rows),
+        df,
         rownames  = FALSE,
         class     = 'compact stripe',
         options   = list(
@@ -499,8 +490,10 @@ mod_2_06_sim_compare_server <- function(id,
       tagList(
         shiny::tags$p(style = 'font-size:11px; color:#666; margin-top:6px; margin-bottom:2px;',
                       'Low odds show the value exceeded in only 1-in-N years.'),
+        shiny::tags$p(style = 'font-size:11px; color:#666; margin-top:0; margin-bottom:2px;',
+                      'High odds show the value reached in all but 1-in-N years.'),
         shiny::tags$p(style = 'font-size:11px; color:#666; margin-top:0;',
-                      'High odds show the value reached in all but 1-in-N years.')
+                      '1:1 shows the median (50th percentile) simulated value.')
       )
     })
 

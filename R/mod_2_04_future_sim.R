@@ -1,4 +1,4 @@
-﻿#' 2_04_future_sim UI Function
+#' 2_04_future_sim UI Function
 #'
 #' @description A shiny Module. Triggers the future climate welfare simulation.
 #'
@@ -116,7 +116,7 @@ mod_2_04_future_sim_server <- function(id,
                   perturbation_method = perturbation_method,
                   fixed_breaks        = mf$bin_cutoffs
                 )
-                wr$result
+                wr$result_raw
               },
               error = function(e) {
                 shiny::showNotification(
@@ -135,8 +135,9 @@ mod_2_04_future_sim_server <- function(id,
 
             # ---- simulate outcomes -----------------------------------------
             # run_sim_pipeline(): join weather -> predict_outcome -> back-transform
+            # Returns list(preds, n_pre_join).
 
-            preds <- run_sim_pipeline(
+            pipeline_out <- run_sim_pipeline(
               weather_raw = weather_raw,
               svy         = svy,
               sw          = sw,
@@ -147,7 +148,10 @@ mod_2_04_future_sim_server <- function(id,
               engine      = engine
             )
 
-            preds_list_raw[[i]] <- preds   # NULL if pipeline failed (already warned)
+            preds_list_raw[[i]] <- if (is.null(pipeline_out)) NULL else list(
+              preds       = pipeline_out$preds,
+              weather_raw = weather_raw
+            )
           }
 
           shiny::setProgress(value = 1, message = "Future simulation complete")

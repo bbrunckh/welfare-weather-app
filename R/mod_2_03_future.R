@@ -1,12 +1,7 @@
 #' 2_03_future UI Function
 #'
-#' @description A shiny Module. Selects the future climate configuration
-#'   (SSP scenarios, anchor years, band width, residual handling).
-#'
 #' @param id,input,output,session Internal parameters for {shiny}.
-#'
 #' @noRd
-#'
 #' @importFrom shiny NS tagList
 mod_2_03_future_ui <- function(id) {
   ns <- NS(id)
@@ -44,7 +39,7 @@ mod_2_03_future_server <- function(id, selected_hist = NULL) {
       unname(ssp_choices)
     )
 
-    default_bw <- 10L
+    default_bw <- 0L
 
     # ---- Advanced settings toggle ------------------------------------------
 
@@ -60,16 +55,42 @@ mod_2_03_future_server <- function(id, selected_hist = NULL) {
           "Each selected timeframe generates one scenario run per climate scenario.",
           style = "font-size:11px; margin-top:0; margin-bottom:6px;"
         ),
-        # Simple default: three toggleable checkboxes
-        checkboxInput(ns("use_2030"), "2030 \u00b110 years (2020-2040)", value = TRUE),
-        checkboxInput(ns("use_2040"), "2040 \u00b110 years (2030-2050)", value = TRUE),
-        checkboxInput(ns("use_2050"), "2050 \u00b110 years (2040-2060)", value = TRUE),
+        # Simple default: three toggleable checkboxes with dynamic labels
+        uiOutput(ns("cb_2030_ui")),
+        uiOutput(ns("cb_2040_ui")),
+        uiOutput(ns("cb_2050_ui")),
         tags$div(
           style = "margin-top:8px;",
           actionLink(ns("toggle_adv"), uiOutput(ns("adv_link_label")))
         ),
         uiOutput(ns("adv_settings_panel"))
       )
+    })
+
+    # ---- Dynamic checkbox labels (reflect current bandwidth) ---------------
+    # Labels update whenever the advanced slider moves so simple-mode and
+    # advanced-mode always show the same effective year range.
+
+    .cb_label <- function(anchor) {
+      bw <- tryCatch(
+        if (isTRUE(adv_open())) input$band_width %||% default_bw else default_bw,
+        error = function(e) default_bw
+      )
+      if (is.na(bw) || bw == 0L) {
+        paste0(anchor, " \u00b10 years")
+      } else {
+        paste0(anchor, " \u00b1", bw, " years (", anchor - bw, "\u2013", anchor + bw, ")")
+      }
+    }
+
+    output$cb_2030_ui <- renderUI({
+      checkboxInput(ns("use_2030"), .cb_label(2030), value = TRUE)
+    })
+    output$cb_2040_ui <- renderUI({
+      checkboxInput(ns("use_2040"), .cb_label(2040), value = TRUE)
+    })
+    output$cb_2050_ui <- renderUI({
+      checkboxInput(ns("use_2050"), .cb_label(2050), value = TRUE)
     })
 
     output$adv_link_label <- renderUI({
@@ -107,7 +128,7 @@ mod_2_03_future_server <- function(id, selected_hist = NULL) {
         shiny::sliderInput(
           ns("band_width"),
           label = "Band width (\u00b1 years around each selected year)",
-          min = 5, max = 25, value = 10, step = 5, sep = ""
+          min = 0, max = 25, value = 0, step = 5, sep = ""
         ),
         uiOutput(ns("anchor_warnings"))
       )
@@ -120,12 +141,8 @@ mod_2_03_future_server <- function(id, selected_hist = NULL) {
       anchors <- c(input$anchor1, input$anchor2, input$anchor3)
       anchors <- anchors[!is.na(anchors)]
       bw      <- input$band_width
-      n_yrs   <- bw * 2L
 
       warns <- character(0)
-      if (n_yrs < 10)
-        warns <- c(warns, paste0("\u26a0\ufe0f Band \u00b1", bw, "yr = ", n_yrs,
-                                 " years. 1:5 requires \u22655 yrs, 1:10 requires \u226510 yrs."))
       if (length(anchors) > 1) {
         for (i in seq_len(length(anchors) - 1)) {
           for (j in (i + 1):length(anchors)) {

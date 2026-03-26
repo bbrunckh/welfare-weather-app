@@ -114,7 +114,7 @@ mod_2_02_historical_sim_server <- function(id,
             svy, sw, sim_dates, connection_params(),
             fixed_breaks = mf$bin_cutoffs
           )
-          wr$result
+          wr$result_raw
         },
         error = function(e) {
           shiny::showNotification(
@@ -130,8 +130,10 @@ mod_2_02_historical_sim_server <- function(id,
 
       # ---- simulate outcomes -----------------------------------------------
       # run_sim_pipeline(): join weather -> predict_outcome -> back-transform
+      # Returns list(preds, n_pre_join). n_pre_join is the pre-join row count
+      # from svy, stored so the Diagnostics tab can compute the drop rate.
 
-      preds <- run_sim_pipeline(
+      pipeline_out <- run_sim_pipeline(
         weather_raw = weather_raw,
         svy         = svy,
         sw          = sw,
@@ -141,10 +143,15 @@ mod_2_02_historical_sim_server <- function(id,
         train_data  = train_data,
         engine      = engine
       )
-      req(!is.null(preds))
+      req(!is.null(pipeline_out))
 
-      # store raw predictions — comparison plots rendered in mod_2_06
-      pred_hist_raw(list(preds = preds, so = so))
+      # store raw predictions and pre-join count — consumed by mod_2_05 / mod_2_06
+      pred_hist_raw(list(
+        preds       = pipeline_out$preds,
+        so          = so,
+        n_pre_join  = pipeline_out$n_pre_join,
+        weather_raw = pipeline_out$weather_raw
+      ))
 
       # bump run id — future sim overlay is now considered stale until re-run
       hist_run_id(hist_run_id() + 1L)
