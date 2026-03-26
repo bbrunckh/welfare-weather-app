@@ -410,9 +410,11 @@ build_ridge_kde_data <- function(hist_preds,
   #              falls back to outcome_name column if .fitted absent
   #   actual    = observed survey outcome from train_data (passed in as actual_vals)
   #               back-transformed from log-scale when so$transform == "log"
+  # predicted = unique back-transformed outcome values (outcome_name col is
+  # already back-transformed by apply_log_backtransform(); .fitted is NOT).
+  # Deduplicate across draws so bandwidth is estimated at training-sample scale.
   predicted_vals <- tryCatch({
-    col <- if (".fitted" %in% names(hist_preds)) ".fitted" else outcome_name
-    v   <- as.numeric(hist_preds[[col]])
+    v <- unique(as.numeric(hist_preds[[outcome_name]]))
     v[is.finite(v)]
   }, error = function(e) numeric(0))
 
