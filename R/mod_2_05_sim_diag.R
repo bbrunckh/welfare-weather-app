@@ -340,10 +340,10 @@ mod_2_05_sim_diag_server <- function(id,
           if (!is.null(td) && nm %in% names(td)) {
             v <- as.numeric(td[[nm]])
             v <- v[is.finite(v)]
-            # back-transform: train_data stores log(y) when transform == "log";
-            # hist_preds has been back-transformed via apply_log_backtransform()
-            # so both curves must be on the same (linear) scale.
-            if (isTRUE(so$transform == "log") && length(v) > 0) v <- exp(v)
+            # train_data stores raw survey values already in linear space.
+            # hist_preds$.fitted is back-transformed by apply_log_backtransform().
+            # Both are on the same scale -- no further transform needed.
+            # (Previous exp() call here was incorrect and has been removed.)
             v
           } else numeric(0)
         }
