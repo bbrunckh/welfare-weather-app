@@ -109,7 +109,7 @@
       visible_nms <- intersect(visible_nms, active_scenarios)
 
     yr_of <- function(nm) {
-      m <- regmatches(nm, regexpr("[0-9]{4}(?= \u00b1)", nm, perl = TRUE))
+      m <- regmatches(nm, regexpr("[0-9]{4}", nm))
       if (length(m) == 0L) NA_integer_ else as.integer(m)
     }
     yrs_visible    <- vapply(visible_nms, yr_of, integer(1))
@@ -434,7 +434,7 @@ build_ridge_kde_data <- function(hist_preds,
   scen_nms     <- names(scenario_groups)
   ssp_keys     <- vapply(scen_nms, .normalise_ssp, character(1))
   fore_yrs_raw <- vapply(scen_nms, function(nm) {
-    m <- regmatches(nm, regexpr("[0-9]{4}(?= \u00b1)", nm, perl = TRUE))
+    m <- regmatches(nm, regexpr("[0-9]{4}", nm))
     if (length(m) == 0L) NA_integer_ else as.integer(m)
   }, integer(1))
 

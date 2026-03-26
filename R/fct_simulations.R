@@ -1,4 +1,4 @@
-﻿# ============================================================================ #
+# ============================================================================ #
 # Pure functions used by mod_2_02, mod_2_04, and mod_2_06.
 # Stateless and testable without Shiny.
 #
@@ -40,7 +40,7 @@
 }
 
 .parse_year <- function(nm) {
-  m <- regmatches(nm, regexpr("[0-9]{4}(?= \u00b1)", nm, perl = TRUE))
+  m <- regmatches(nm, regexpr("[0-9]{4}", nm))
   if (length(m) == 0) NA_character_ else m
 }
 

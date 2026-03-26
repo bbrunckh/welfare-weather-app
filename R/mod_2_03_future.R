@@ -6,8 +6,7 @@
 mod_2_03_future_ui <- function(id) {
   ns <- NS(id)
   tagList(
-    uiOutput(ns("future_timeframes")),
-    uiOutput(ns("climate_scenario")),
+    uiOutput(ns("future_selectors")),
     uiOutput(ns("fut_sim_specs_button")),
     uiOutput(ns("fut_sim_specs"))
   )
@@ -15,25 +14,22 @@ mod_2_03_future_ui <- function(id) {
 
 #' 2_03_future Server Functions
 #'
-#' Manages future climate anchor year selection, SSP selection, band width,
+#' Manages future climate forecast year selection, SSP selection, band width,
 #' and residual handling. Returns selected_fut: one row per SSP x anchor year.
 #'
 #' @param id Module id.
-#' @param selected_hist Reactive one-row data frame from mod_2_01_historical
-#'   (used to include the historical period in scenario labels).
+#' @param selected_hist Reactive one-row data frame from mod_2_01_historical.
 #' @noRd
 mod_2_03_future_server <- function(id, selected_hist = NULL) {
   moduleServer(id, function(input, output, session) {
     ns <- session$ns
 
-    # SSP display choices — use SSP_SHORT_LABELS from fct_simulations.R
-    # Keys match the climate file naming convention (ssp2_4_5, etc.)
+    # SSP display choices
     ssp_choices <- c(
       "SSP2-4.5" = "ssp2_4_5",
       "SSP3-7.0" = "ssp3_7_0",
       "SSP5-8.5" = "ssp5_8_5"
     )
-    # Short labels indexed by ssp_choices value (for scenario name construction)
     ssp_labels <- setNames(
       SSP_SHORT_LABELS[names(ssp_choices)],
       unname(ssp_choices)
@@ -45,53 +41,63 @@ mod_2_03_future_server <- function(id, selected_hist = NULL) {
 
     adv_open <- reactiveVal(FALSE)
 
-    # ---- Future timeframes UI ----------------------------------------------
+    # ---- Combined selector UI: forecast years (left) + SSP (right) --------
 
-    output$future_timeframes <- renderUI({
+    output$future_selectors <- renderUI({
       tagList(
-        h6("Future timeframes", style = "margin-bottom:4px; font-weight:600;"),
+        # Two-column selector row
+        tags$div(
+          style = "display:flex; gap:32px; flex-wrap:wrap; margin-bottom:8px;",
+
+          # Left column: Forecast year(s)
+          tags$div(
+            style = "min-width:160px;",
+            tags$h6(
+              "Forecast year(s)",
+              style = "margin-bottom:6px; font-weight:600;"
+            ),
+            checkboxInput(ns("use_2030"), "2030", value = TRUE),
+            checkboxInput(ns("use_2040"), "2040", value = TRUE),
+            checkboxInput(ns("use_2050"), "2050", value = TRUE)
+          ),
+
+          # Right column: Climate scenario(s)
+          tags$div(
+            style = "min-width:200px;",
+            tags$h6(
+              "Climate scenario(s)",
+              style = "margin-bottom:6px; font-weight:600;"
+            ),
+            checkboxGroupInput(
+              inputId  = ns("climate"),
+              label    = NULL,
+              choices  = ssp_choices,
+              selected = unname(ssp_choices)
+            )
+          )
+        ),
+
+        # Description text (full width, below both columns)
         helpText(
           "Select which future periods to model.",
-          "Each selected timeframe generates one scenario run per climate scenario.",
-          style = "font-size:11px; margin-top:0; margin-bottom:6px;"
+          "Each selected forecast year generates one scenario run per climate scenario.",
+          style = "font-size:11px; margin-top:0; margin-bottom:4px;"
         ),
-        # Simple default: three toggleable checkboxes with dynamic labels
-        uiOutput(ns("cb_2030_ui")),
-        uiOutput(ns("cb_2040_ui")),
-        uiOutput(ns("cb_2050_ui")),
+        helpText(
+          "CMIP6 ensemble \u2018delta\u2019 fields are used to perturb historical observations.",
+          style = "font-size:11px; margin-top:0; margin-bottom:8px;"
+        ),
+
+        # Advanced settings toggle (full width, below description)
         tags$div(
-          style = "margin-top:8px;",
+          style = "margin-top:4px;",
           actionLink(ns("toggle_adv"), uiOutput(ns("adv_link_label")))
         ),
         uiOutput(ns("adv_settings_panel"))
       )
     })
 
-    # ---- Dynamic checkbox labels (reflect current bandwidth) ---------------
-    # Labels update whenever the advanced slider moves so simple-mode and
-    # advanced-mode always show the same effective year range.
-
-    .cb_label <- function(anchor) {
-      bw <- tryCatch(
-        if (isTRUE(adv_open())) input$band_width %||% default_bw else default_bw,
-        error = function(e) default_bw
-      )
-      if (is.na(bw) || bw == 0L) {
-        paste0(anchor, " \u00b10 years")
-      } else {
-        paste0(anchor, " \u00b1", bw, " years (", anchor - bw, "\u2013", anchor + bw, ")")
-      }
-    }
-
-    output$cb_2030_ui <- renderUI({
-      checkboxInput(ns("use_2030"), .cb_label(2030), value = TRUE)
-    })
-    output$cb_2040_ui <- renderUI({
-      checkboxInput(ns("use_2040"), .cb_label(2040), value = TRUE)
-    })
-    output$cb_2050_ui <- renderUI({
-      checkboxInput(ns("use_2050"), .cb_label(2050), value = TRUE)
-    })
+    # ---- Advanced settings toggle label ------------------------------------
 
     output$adv_link_label <- renderUI({
       if (isTRUE(adv_open())) {
@@ -113,17 +119,17 @@ mod_2_03_future_server <- function(id, selected_hist = NULL) {
       tagList(
         tags$hr(style = "margin: 8px 0;"),
         helpText(
-          "Override the default timeframes by specifying anchor years and band",
-          "width manually. Leave Year 2 and Year 3 blank to omit them.",
+          "Override the default forecast years by specifying anchor years and",
+          "band width manually. Leave Year 2 and Year 3 blank to omit them.",
           style = "font-size:11px;"
         ),
         fluidRow(
           column(4, shiny::numericInput(ns("anchor1"), "Year 1",
                                         value = 2030, min = 2020, max = 2090, step = 5)),
           column(4, shiny::numericInput(ns("anchor2"), "Year 2 (optional)",
-                                        value = NA, min = 2020, max = 2090, step = 5)),
+                                        value = NA,   min = 2020, max = 2090, step = 5)),
           column(4, shiny::numericInput(ns("anchor3"), "Year 3 (optional)",
-                                        value = NA, min = 2020, max = 2090, step = 5))
+                                        value = NA,   min = 2020, max = 2090, step = 5))
         ),
         shiny::sliderInput(
           ns("band_width"),
@@ -147,8 +153,10 @@ mod_2_03_future_server <- function(id, selected_hist = NULL) {
         for (i in seq_len(length(anchors) - 1)) {
           for (j in (i + 1):length(anchors)) {
             if (abs(anchors[i] - anchors[j]) < 2 * bw)
-              warns <- c(warns, paste0("\u26a0\ufe0f Years ", anchors[i], " and ",
-                                       anchors[j], " bands overlap (\u00b1", bw, "yr)."))
+              warns <- c(warns, paste0(
+                "\u26a0\ufe0f Years ", anchors[i], " and ", anchors[j],
+                " bands overlap (\u00b1", bw, "yr)."
+              ))
           }
         }
       }
@@ -157,39 +165,21 @@ mod_2_03_future_server <- function(id, selected_hist = NULL) {
         helpText(w, style = "color:#c0392b; font-size:11px;")))
     })
 
-    # ---- Climate scenario selector -----------------------------------------
-
-    output$climate_scenario <- renderUI({
-      tagList(
-        checkboxGroupInput(
-          inputId  = ns("climate"),
-          label    = "Climate scenario(s)",
-          choices  = ssp_choices,
-          selected = unname(ssp_choices)
-        ),
-        helpText(
-          "CMIP6 ensemble 'delta' fields are used to perturb historical observations.",
-          style = "font-size:12px;"
-        )
-      )
-    })
-
     # ---- Simulation parameters toggle --------------------------------------
 
     fut_sim_specs_open <- reactiveVal(FALSE)
 
     output$fut_sim_specs_button <- renderUI({
-      shiny::actionButton(ns("fut_sim_specs_toggle"),
-                          "Simulation parameters",
-                          style = "margin-bottom:12px;")
+      shiny::actionButton(
+        ns("fut_sim_specs_toggle"),
+        "Simulation parameters",
+        style = "margin-bottom:12px;"
+      )
     })
 
     observeEvent(input$fut_sim_specs_toggle, {
       fut_sim_specs_open(!isTRUE(fut_sim_specs_open()))
     })
-
-    # ---- Simulation parameters panel ----------------------------------------
-    # Uses shared residual_method_ui() from fct_simulations.R
 
     output$fut_sim_specs <- renderUI({
       if (!isTRUE(fut_sim_specs_open())) return(NULL)
@@ -197,21 +187,18 @@ mod_2_03_future_server <- function(id, selected_hist = NULL) {
     })
 
     # ---- Resolve active anchors and band width ------------------------------
-    # When advanced panel is open AND has valid anchor1, use advanced values.
-    # Otherwise fall back to the simple checkbox defaults.
 
     active_anchors <- reactive({
       if (isTRUE(adv_open()) && !is.na(input$anchor1)) {
         anchors <- c(input$anchor1, input$anchor2, input$anchor3)
         sort(unique(anchors[!is.na(anchors)]))
       } else {
-        # Simple checkbox mode
         selected <- c(
           if (isTRUE(input$use_2030)) 2030L,
           if (isTRUE(input$use_2040)) 2040L,
           if (isTRUE(input$use_2050)) 2050L
         )
-        if (length(selected) == 0) 2030L else selected
+        if (length(selected) == 0L) 2030L else selected
       }
     })
 
@@ -231,16 +218,16 @@ mod_2_03_future_server <- function(id, selected_hist = NULL) {
       anchors <- active_anchors()
       bw      <- active_bw()
 
-      # Scenario names use "SSP2 / 2030 ±10yr" only.
-      # The historical year range is NOT embedded — it is displayed separately
-      # in the results header so that names remain clean and parseable by the
-      # SSP / timeframe filter reactives in mod_2_06.
-
       rows <- lapply(input$climate, function(ssp) {
         prefix <- ssp_labels[ssp]
         lapply(anchors, function(anchor) {
-          yr         <- c(anchor - bw, anchor + bw)
-          scene_name <- paste0(prefix, " / ", anchor, " \u00b1", bw, "yr")
+          yr <- c(anchor - bw, anchor + bw)
+          # Scenario name: drop band suffix when bw = 0
+          scene_name <- if (bw == 0L) {
+            paste0(prefix, " / ", anchor)
+          } else {
+            paste0(prefix, " / ", anchor, " \u00b1", bw, "yr")
+          }
           data.frame(
             type          = "future",
             year_range    = I(list(yr)),
