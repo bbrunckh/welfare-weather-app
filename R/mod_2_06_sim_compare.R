@@ -325,7 +325,7 @@ mod_2_06_sim_compare_server <- function(id,
         ssp_match <- any(sapply(ssps, function(s) startsWith(nm, s)))
         # Match anchor year after the '/' separator: "SSP2 / 2030 ±10yr"
         yr_match  <- length(yrs) == 0 ||
-          any(sapply(yrs, function(y) grepl(paste0("/ ", y, " "), nm, fixed = TRUE)))
+          any(sapply(yrs, function(y) grepl(paste0("/ ", y, "( |$)"), nm)))
         ssp_match && yr_match
       }, logical(1))
       nms[keep]
