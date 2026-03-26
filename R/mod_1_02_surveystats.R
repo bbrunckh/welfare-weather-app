@@ -121,15 +121,28 @@ mod_1_02_surveystats_server <- function(
 
       if (!is.null(h3_df)) {
         tryCatch({
-          duckdbfs::load_spatial()
-          duckdbfs::load_h3()
-          loc <- h3_df |>
+          # Ensure the extensions are active on the existing connection
+          con <- dbplyr::remote_con(h3_df)
+          DBI::dbExecute(con, "INSTALL spatial; LOAD spatial;")
+          DBI::dbExecute(con, "INSTALL h3; LOAD h3;")
+
+          # Process and convert to sf
+          loc_sf <- h3_df |>
             dplyr::summarise(
-              geom = st_union_agg(st_geomfromtext(h3_cell_to_boundary_wkt(h3))),
+              # These functions are passed as strings to DuckDB SQL
+              geom = st_aswkb(st_union_agg(st_geomfromtext(h3_cell_to_boundary_wkt(h3)))),
               .by  = c(code, year, survname, loc_id)
             ) |>
-            duckdbfs::to_sf(crs = 4326)
-          map_data(loc[!sf::st_is_empty(loc), ])
+            # Pull data from database into R memory
+            dplyr::collect() |> 
+            # Convert the binary 'geom' column into an sf geometry list column
+            dplyr::mutate(
+              geom = sf::st_as_sfc(geom)
+            ) |>
+            # Finalize as an sf object with the correct CRS for leaflet
+            sf::st_as_sf(crs = 4326)
+          map_data(loc_sf[!sf::st_is_empty(loc_sf), ])
+
         }, error = function(e) {
           notify(paste("Failed to build map data:", conditionMessage(e)), type = "warning", duration = 5)
         })

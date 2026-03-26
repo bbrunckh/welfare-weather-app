@@ -5,6 +5,10 @@
 #' @export
 build_connection_params <- function(type, ...) {
   args <- list(...)
+  # Like %||% but also treats empty strings as missing — needed so blank UI
+  # inputs don't shadow .Renviron values
+  `%|||%` <- function(a, b) if (!is.null(a) && nzchar(a %||% "")) a else b
+
   switch(
     type,
     "local" = list(type = "local", path = args$path %||% "data/"),
@@ -18,16 +22,18 @@ build_connection_params <- function(type, ...) {
                    container      = args$azure_container      %||% "",
                    prefix         = args$azure_prefix         %||% "",
                    key            = args$azure_key            %||% "",
-                   client_id      = args$azure_client_id      %||% Sys.getenv("AZURE_CLIENT_ID"),
-                   client_secret  = args$azure_client_secret  %||% Sys.getenv("AZURE_CLIENT_SECRET"),
-                   tenant_id      = args$azure_tenant_id      %||% Sys.getenv("AZURE_TENANT_ID")),
+                   client_id      = args$azure_client_id      %|||% Sys.getenv("AZURE_CLIENT_ID"),
+                   client_secret  = args$azure_client_secret  %|||% Sys.getenv("AZURE_CLIENT_SECRET"),
+                   tenant_id      = args$azure_tenant_id      %|||% Sys.getenv("AZURE_TENANT_ID")),
     "hf"    = list(type = "hf",    repo = args$hf_repo   %||% "",
                    subdir = args$hf_subdir %||% "", token = args$hf_token %||% ""),
-    "databricks" = list(type      = "databricks",
-                        workspace = args$db_workspace %||% Sys.getenv("DATABRICKS_HOST"),
-                        token     = args$db_token     %||% Sys.getenv("DATABRICKS_TOKEN"),
-                        catalog   = args$db_catalog   %||% "main",
-                        schema    = args$db_schema    %||% "default"),
+    "databricks" = list(
+      type          = "databricks",
+      workspace     = args$db_workspace     %|||% Sys.getenv("DATABRICKS_HOST"),
+      client_id     = args$db_client_id     %|||% Sys.getenv("DATABRICKS_CLIENT_ID"),
+      client_secret = args$db_client_secret %|||% Sys.getenv("DATABRICKS_CLIENT_SECRET"),
+      volume_path   = args$db_volume_path   %|||% Sys.getenv("DATABRICKS_VOLUME_PATH")
+    ),
     stop("Unknown connection type: ", type)
   )
 }
@@ -45,7 +51,10 @@ validate_connection_params <- function(params) {
     "gcs"        = nzchar(params$bucket    %||% ""),
     "azure"      = nzchar(params$account   %||% "") && nzchar(params$container %||% ""),
     "hf"         = nzchar(params$repo      %||% ""),
-    "databricks" = nzchar(params$workspace %||% "") && nzchar(params$token %||% ""),
+    "databricks" = nzchar(params$workspace     %||% Sys.getenv("DATABRICKS_HOST")          %||% "") &&
+                   nzchar(params$client_id     %||% Sys.getenv("DATABRICKS_CLIENT_ID")     %||% "") &&
+                   nzchar(params$client_secret %||% Sys.getenv("DATABRICKS_CLIENT_SECRET") %||% "") &&
+                   nzchar(params$volume_path   %||% Sys.getenv("DATABRICKS_VOLUME_PATH")   %||% ""),
     FALSE
   )
 }

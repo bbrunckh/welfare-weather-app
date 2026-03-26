@@ -11,6 +11,20 @@
 #' @importFrom shiny NS tagList
 mod_0_overview_ui <- function(id) {
   ns <- NS(id)
+
+  # On Posit Connect with Databricks env vars: skip the connection form
+  # entirely and just show the status badge — server auto-connects on startup.
+  if (.auto_connect()) {
+    return(tagList(
+      includeMarkdown(
+        system.file("app/www/welcome_message.md", package = "wiseapp")
+      ),
+      hr(),
+      h4("Data"),
+      uiOutput(ns("connection_status_ui"))
+    ))
+  }
+
   tagList(
     includeMarkdown(
       system.file("app/www/welcome_message.md", package = "wiseapp")
@@ -39,8 +53,7 @@ mod_0_overview_ui <- function(id) {
       class = "btn-primary",
       style = "width: 100%;"
     ),
-    br(),
-    br(),
+    br(), br(),
     verbatimTextOutput(ns("folder_path_echo")),
     verbatimTextOutput(ns("folder_contents_echo"))
   )
@@ -134,15 +147,17 @@ mod_0_overview_server <- function(id) {
         ),
 
         "databricks" = tagList(
-          textInput(ns("db_workspace"), "Workspace URL",
-                    placeholder = "https://adb-XXXXXXX.azuredatabricks.net"),
-          passwordInput(ns("db_token"), "Personal access token",
-                    placeholder = "dapi..."),
-          textInput(ns("db_catalog"),   "Catalog",  value = "main"),
-          textInput(ns("db_schema"),    "Schema",   value = "default"),
+          textInput(ns("db_workspace"),
+                    "Workspace URL",
+                    placeholder = "https://adb-xxxxxxxxxxxxxxxxx.xx.azuredatabricks.net"),
+          passwordInput(ns("db_client_id"),    "Client ID",     placeholder = ""),
+          passwordInput(ns("db_client_secret"), "Client secret", placeholder = ""),
+          textInput(ns("db_volume_path"),
+                    "Volume path",
+                    placeholder = "/Volumes/prd_decdg/swisea170/vwisea170/Documents"),
           helpText(
-            "Token: Databricks \u2192 Settings \u2192 Developer \u2192 Access tokens.",
-            "Leave blank to use DATABRICKS_HOST / DATABRICKS_TOKEN env vars.",
+            "Set DATABRICKS_HOST, DATABRICKS_CLIENT_ID, DATABRICKS_CLIENT_SECRET,",
+            "and DATABRICKS_VOLUME_PATH in .Renviron to leave all fields blank.",
             style = "font-size: 12px;"
           )
         )
@@ -174,10 +189,10 @@ mod_0_overview_server <- function(id) {
         hf_repo         = input$hf_repo,
         hf_subdir       = input$hf_subdir,
         hf_token        = input$hf_token,
-        db_workspace    = input$db_workspace,
-        db_token        = input$db_token,
-        db_catalog      = input$db_catalog,
-        db_schema       = input$db_schema
+        db_workspace     = input$db_workspace,
+        db_client_id     = input$db_client_id,
+        db_client_secret = input$db_client_secret,
+        db_volume_path   = input$db_volume_path
       )
     })
 
@@ -210,6 +225,20 @@ mod_0_overview_server <- function(id) {
     variable_list      <- reactiveVal(NULL)
     cpi_ppp            <- reactiveVal(NULL)
     pov_lines          <- reactiveVal(NULL)
+
+    # On Posit Connect with env vars set: auto-connect once on startup,
+    # no button click or UI input required.
+    if (.auto_connect()) {
+      observe({
+        params <- build_connection_params("databricks")
+        message("[overview] auto-connecting to Databricks (Posit Connect)")
+        applied_connection(params)
+        output$connection_status_ui <- renderUI({
+          p(icon("circle-check"), " Connected to Databricks.",
+            style = "color: #2e7d32; font-size: 12px; margin-top: 4px;")
+        })
+      }) |> bindEvent(TRUE, once = TRUE)
+    }
 
     observeEvent(input$apply_connection, {
 
