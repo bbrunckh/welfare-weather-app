@@ -150,7 +150,8 @@ mod_2_02_historical_sim_server <- function(id,
         preds       = pipeline_out$preds,
         so          = so,
         n_pre_join  = pipeline_out$n_pre_join,
-        weather_raw = pipeline_out$weather_raw
+        weather_raw = pipeline_out$weather_raw,
+        train_data  = train_data
       ))
 
       # bump run id — future sim overlay is now considered stale until re-run

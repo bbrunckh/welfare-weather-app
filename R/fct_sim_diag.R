@@ -142,9 +142,9 @@
     }
   }
 
-  # ---- Colour map: scenario lines only (no Full historical entry) -------
-  colour_map   <- c(ssp_colour_map)
-  linetype_map <- c(ssp_linetype_map)
+  # ---- Colour map: Full historical anchor + regression + scenarios ------
+  colour_map   <- c("Full historical" = "#808080", ssp_colour_map)
+  linetype_map <- c("Full historical" = "solid",   ssp_linetype_map)
   if (isTRUE(show_regression)) {
     colour_map["Regression input"]   <- "black"
     linetype_map["Regression input"] <- "dashed"
@@ -153,12 +153,12 @@
   # ---- Build plot -------------------------------------------------------
   p <- ggplot2::ggplot()
 
-  # Full historical: grey fill only, no colour aesthetic (avoids dup legend)
+  # Full historical: grey fill + colour mapped for legend swatch
   p <- p + ggplot2::geom_density(
-    data      = data.frame(value = hist_vals, stringsAsFactors = FALSE),
-    mapping   = ggplot2::aes(x = .data$value),
-    fill      = "#808080",
-    colour    = "#555555",
+    data      = data.frame(value = hist_vals, src = "Full historical",
+                           stringsAsFactors = FALSE),
+    mapping   = ggplot2::aes(x = .data$value, colour = .data$src,
+                             fill = .data$src),
     alpha     = 0.35,
     linetype  = "solid",
     linewidth = 0.7
@@ -187,13 +187,36 @@
     )
   }
 
-  # Only add colour scale when there are named series (regression or scenarios)
-  if (length(colour_map) > 0) {
-    p <- p +
-      ggplot2::scale_colour_manual(values = colour_map, name = NULL) +
-      ggplot2::scale_linetype_manual(values = linetype_map, name = NULL,
-                                     guide  = "none")
+  # Dual-scale legend:
+  #   scale_fill_manual  -- grey swatch for Full historical
+  #   scale_colour_manual -- dashed/coloured lines for Regression + SSPs
+  fill_map_all <- c("Full historical" = "#808080")
+  # All other sources have fill = NA
+  for (nm in names(colour_map)) {
+    if (!nm %in% names(fill_map_all)) fill_map_all[nm] <- NA_character_
   }
+
+  p <- p +
+    ggplot2::scale_fill_manual(
+      values   = fill_map_all,
+      na.value = NA,
+      name     = NULL,
+      guide    = ggplot2::guide_legend(
+        override.aes = list(
+          fill      = unname(fill_map_all),
+          colour    = unname(colour_map),
+          linetype  = unname(linetype_map),
+          linewidth = rep(0.8, length(fill_map_all))
+        )
+      )
+    ) +
+    ggplot2::scale_colour_manual(
+      values = colour_map,
+      name   = NULL,
+      guide  = "none"
+    ) +
+    ggplot2::scale_linetype_manual(values = linetype_map, name = NULL,
+                                   guide  = "none")
 
   n_scen_shown <- length(ssp_df_list)
   p <- p +
@@ -335,7 +358,8 @@ plot_weather_density_panel <- function(survey_weather,
 build_ridge_kde_data <- function(hist_preds,
                                  scenario_list,
                                  outcome_name,
-                                 log_scale = FALSE) {
+                                 actual_vals = NULL,
+                                 log_scale   = FALSE) {
 
   if (is.null(hist_preds) || !outcome_name %in% names(hist_preds))
     return(NULL)
@@ -390,10 +414,16 @@ build_ridge_kde_data <- function(hist_preds,
 
   qs <- stats::quantile(all_vals, probs = c(0.01, 0.99), na.rm = TRUE)
 
-  # Regression sample: pool ALL hist_preds outcome values (full training
-  # predicted distribution, all sim_years combined).
-  regression_vals <- tryCatch({
+  # Regression output: predicted = simulated preds pooled across all sim_years;
+  # actual = survey observed outcome passed in from train_data$<outcome_name>.
+  predicted_vals <- tryCatch({
     v <- as.numeric(hist_preds[[outcome_name]])
+    v[is.finite(v)]
+  }, error = function(e) numeric(0))
+
+  actual_vals_clean <- tryCatch({
+    if (is.null(actual_vals)) return(numeric(0))
+    v <- as.numeric(actual_vals)
     v[is.finite(v)]
   }, error = function(e) numeric(0))
 
@@ -416,7 +446,8 @@ build_ridge_kde_data <- function(hist_preds,
     sim_years       = sim_years,
     log_scale       = log_scale,
     outcome_name    = outcome_name,
-    regression_vals = regression_vals
+    predicted_vals  = predicted_vals,
+    actual_vals     = actual_vals_clean
   )
 }
 
@@ -474,7 +505,8 @@ plot_year_anchored_ridge <- function(kde_data,
   scen_nms        <- kde_data$scen_nms
   ssp_keys        <- kde_data$ssp_keys
   fore_yrs_raw    <- kde_data$fore_yrs_raw
-  regression_vals <- kde_data$regression_vals %||% numeric(0)
+  predicted_vals  <- kde_data$predicted_vals  %||% numeric(0)
+  actual_vals     <- kde_data$actual_vals     %||% numeric(0)
 
 
   hist_fill    <- "#d0d0d0"
@@ -707,35 +739,64 @@ plot_year_anchored_ridge <- function(kde_data,
   }
 
   # -- Regression output overlay (when show_regression = TRUE) ----------
-  if (isTRUE(show_regression) && length(regression_vals) >= 2L) {
-    kd_reg <- .run_kde(regression_vals)
-    # y_pos = 0 (below all year rows) for hist_year mode; for scenario modes
-    # overlay at y = 0 as a standalone reference band at the bottom.
-    y_reg  <- min(as.numeric(if (exists('yr_rank')) yr_rank else row_rank)) - row_gap * 0.8
-    reg_df <- data.frame(
-      x    = kd_reg$x,
-      y    = y_reg + kd_reg$density_raw * ridge_scale * 0.85,
-      ymin = y_reg,
-      stringsAsFactors = FALSE
-    )
-    p <- p +
-      ggplot2::geom_ribbon(
-        data    = reg_df,
-        mapping = ggplot2::aes(x = .data$x, ymin = .data$ymin, ymax = .data$y),
-        fill    = '#cccccc',
-        alpha   = 0.3,
-        colour  = NA
-      ) +
-      ggplot2::geom_line(
-        data      = reg_df,
-        mapping   = ggplot2::aes(x = .data$x, y = .data$y),
-        colour    = 'black',
-        linetype  = 'dashed',
-        linewidth = 0.8
+  # Two curves at the same y_reg baseline:
+  #   predicted_vals  -- dashed black line  (simulated outcome distribution)
+  #   actual_vals     -- dotted black line  (observed survey outcomes)
+  has_predicted <- isTRUE(show_regression) && length(predicted_vals) >= 2L
+  has_actual    <- isTRUE(show_regression) && length(actual_vals)    >= 2L
+
+  if (has_predicted || has_actual) {
+    rank_vec <- tryCatch(yr_rank, error = function(e)
+                  tryCatch(row_rank, error = function(e2) c(1)))
+    y_reg <- min(as.numeric(rank_vec)) - row_gap * 0.8
+
+    if (has_predicted) {
+      kd_pred <- .run_kde(predicted_vals)
+      pred_df <- data.frame(
+        x    = kd_pred$x,
+        y    = y_reg + kd_pred$density_raw * ridge_scale * 0.85,
+        ymin = y_reg,
+        stringsAsFactors = FALSE
       )
-    # Extend y-axis to show regression row
+      p <- p +
+        ggplot2::geom_ribbon(
+          data    = pred_df,
+          mapping = ggplot2::aes(x = .data$x, ymin = .data$ymin,
+                                 ymax = .data$y),
+          fill    = "#cccccc",
+          alpha   = 0.25,
+          colour  = NA
+        ) +
+        ggplot2::geom_line(
+          data      = pred_df,
+          mapping   = ggplot2::aes(x = .data$x, y = .data$y),
+          colour    = "black",
+          linetype  = "dashed",
+          linewidth = 0.8
+        )
+    }
+
+    if (has_actual) {
+      kd_act <- .run_kde(actual_vals)
+      act_df <- data.frame(
+        x    = kd_act$x,
+        y    = y_reg + kd_act$density_raw * ridge_scale * 0.85,
+        ymin = y_reg,
+        stringsAsFactors = FALSE
+      )
+      p <- p +
+        ggplot2::geom_line(
+          data      = act_df,
+          mapping   = ggplot2::aes(x = .data$x, y = .data$y),
+          colour    = "black",
+          linetype  = "dotted",
+          linewidth = 0.9
+        )
+    }
+
+    # Extend y-axis to include the regression row
     y_breaks <- c(y_reg, y_breaks)
-    y_labels <- c('  Regression', y_labels)
+    y_labels <- c("  Regression", y_labels)
   }
 
   if (primary_group == "hist_year") {

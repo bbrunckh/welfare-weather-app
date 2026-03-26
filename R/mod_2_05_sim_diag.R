@@ -69,41 +69,39 @@ diag_content_ui <- function(ns, so, weather_var_choices, scenario_names = charac
       ),
 
       # -- Welfare output-specific controls ---------------------------------
+      # Row 1: checkboxes
       shiny::tags$div(
-        style = "display:flex; gap:24px; flex-wrap:wrap; margin-bottom:8px; align-items:center;",
+        style = "display:flex; gap:24px; flex-wrap:wrap; margin-bottom:4px; align-items:center;",
         shiny::tags$div(
           shiny::checkboxInput(
             ns("diag_ridge_log"),
             label = "Log₁₀ x-axis",
             value = FALSE
           )
-        ),
-        shiny::tags$div(
-          shiny::checkboxInput(
-            ns("diag_ridge_show_regression"),
-            label = "Include regression output",
-            value = FALSE
-          )
-        ),
-        shiny::tags$div(style = "min-width:220px;",
-          shiny::sliderInput(
-            ns("diag_ridge_scale"),
-            label = "Ridge height",
-            min   = 0.3,
-            max   = 3.0,
-            value = 1.5,
-            step  = 0.1
-          )
-        ),
-        shiny::tags$div(style = "min-width:220px;",
-          shiny::sliderInput(
-            ns("diag_ridge_spacing"),
-            label = "Row spacing",
-            min   = 0.2,
-            max   = 3.0,
-            value = 1.0,
-            step  = 0.1
-          )
+        )
+      ),
+      # Row 2: ridge height slider
+      shiny::tags$div(
+        style = "max-width:380px; margin-bottom:2px;",
+        shiny::sliderInput(
+          ns("diag_ridge_scale"),
+          label = "Ridge height",
+          min   = 0.3,
+          max   = 3.0,
+          value = 1.5,
+          step  = 0.1
+        )
+      ),
+      # Row 3: row spacing slider
+      shiny::tags$div(
+        style = "max-width:380px; margin-bottom:8px;",
+        shiny::sliderInput(
+          ns("diag_ridge_spacing"),
+          label = "Row spacing",
+          min   = 0.2,
+          max   = 3.0,
+          value = 1.0,
+          step  = 0.1
         )
       ),
 
@@ -334,7 +332,15 @@ mod_2_05_sim_diag_server <- function(id,
       build_ridge_kde_data(
         hist_preds    = hist_sim()$preds,
         scenario_list = scen_list,
-        outcome_name  = hist_sim()$so$name
+        outcome_name  = hist_sim()$so$name,
+        actual_vals   = {
+          td <- hist_sim()$train_data
+          nm <- hist_sim()$so$name
+          if (!is.null(td) && nm %in% names(td)) {
+            v <- as.numeric(td[[nm]])
+            v[is.finite(v)]
+          } else numeric(0)
+        }
       )
     })
 
@@ -349,7 +355,7 @@ mod_2_05_sim_diag_server <- function(id,
           ridge_scale   = input$diag_ridge_scale   %||% 1.5,
           row_gap       = input$diag_ridge_spacing %||% 1.0,
             primary_group   = input$diag_ridge_primary_group %||% "hist_year",
-            show_regression = isTRUE(input$diag_ridge_show_regression)
+            show_regression = isTRUE(input$show_regression_input)
         )
       }),
       350
