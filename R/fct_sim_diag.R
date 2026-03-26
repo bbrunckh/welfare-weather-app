@@ -51,17 +51,33 @@
 
 # Single-variable density plot (internal).
 #' @noRd
+# Single-variable density plot (internal).
+#' @param survey_weather Data frame with loc_id, int_month, timestamp.
+#' @param weather_raw    Data frame. hist_sim()$weather_raw.
+#' @param weather_var    Character scalar. Column name in weather_raw.
+#' @param weather_label  Character scalar. Display label (title/x-axis).
+#'   Defaults to weather_var when NULL.
+#' @param scenario_weather Named list of perturbed weather_raw data frames.
+#' @param active_scenarios Character vector. Subset of scenario names to show.
+#' @param log_x          Logical. Log10 x-axis. Default FALSE.
+#' @param show_legend    Logical. Show legend. Default TRUE.
+#' @param show_regression Logical. Overlay regression input curve. Default FALSE.
+#' @noRd
 .plot_density_one <- function(survey_weather,
                               weather_raw,
                               weather_var,
+                              weather_label    = NULL,
                               scenario_weather = NULL,
                               active_scenarios = NULL,
                               log_x            = FALSE,
-                              show_legend      = TRUE) {
+                              show_legend      = TRUE,
+                              show_regression  = FALSE) {
+
+  disp_label <- weather_label %||% weather_var
 
   if (!weather_var %in% names(weather_raw))
     return(ggplot2::ggplot() +
-      ggplot2::labs(title = paste0("'", weather_var, "' not found.")))
+      ggplot2::labs(title = paste0("'", disp_label, "' not found.")))
 
   hist_filt <- .filter_hist_weather(weather_raw, survey_weather)
 
@@ -72,19 +88,17 @@
   sw_years  <- unique(survey_weather$cal_year)
   reg_filt  <- hist_filt[hist_filt$cal_year %in% sw_years, ]
 
-  reg_vals  <- as.numeric(reg_filt[[weather_var]])
   hist_vals <- as.numeric(hist_filt[[weather_var]])
-  reg_vals  <- reg_vals[is.finite(reg_vals)]
   hist_vals <- hist_vals[is.finite(hist_vals)]
+  reg_vals  <- if (isTRUE(show_regression)) {
+    v <- as.numeric(reg_filt[[weather_var]])
+    v[is.finite(v)]
+  } else numeric(0)
 
-  if (length(reg_vals) == 0 && length(hist_vals) == 0)
+  if (length(hist_vals) == 0)
     return(ggplot2::ggplot() + ggplot2::labs(title = "No finite values to plot."))
 
-  base_df <- rbind(
-    data.frame(value = reg_vals,  source = "Regression input", stringsAsFactors = FALSE),
-    data.frame(value = hist_vals, source = "Full historical",   stringsAsFactors = FALSE)
-  )
-
+  # ---- SSP scenario overlays -------------------------------------------
   ssp_colour_map   <- character(0)
   ssp_linetype_map <- character(0)
   ssp_df_list      <- list()
@@ -128,34 +142,41 @@
     }
   }
 
-  colour_map <- c(
-    "Full historical"  = "#808080",
-    "Regression input" = "black",
-    ssp_colour_map
-  )
-  linetype_map <- c(
-    "Full historical"  = "solid",
-    "Regression input" = "dashed",
-    ssp_linetype_map
-  )
-  fill_map <- c("Full historical" = "#808080", "Regression input" = NA)
+  # ---- Colour map: scenario lines only (no Full historical entry) -------
+  colour_map   <- c(ssp_colour_map)
+  linetype_map <- c(ssp_linetype_map)
+  if (isTRUE(show_regression)) {
+    colour_map["Regression input"]   <- "black"
+    linetype_map["Regression input"] <- "dashed"
+  }
 
-  p <- ggplot2::ggplot() +
-    ggplot2::geom_density(
-      data      = base_df[base_df$source == "Full historical", ],
-      ggplot2::aes(x = .data$value, colour = .data$source, fill = .data$source),
-      alpha     = 0.18,
-      linetype  = "solid",
-      linewidth = 0.9
-    ) +
-    ggplot2::geom_density(
-      data      = base_df[base_df$source == "Regression input", ],
-      ggplot2::aes(x = .data$value, colour = .data$source),
+  # ---- Build plot -------------------------------------------------------
+  p <- ggplot2::ggplot()
+
+  # Full historical: grey fill only, no colour aesthetic (avoids dup legend)
+  p <- p + ggplot2::geom_density(
+    data      = data.frame(value = hist_vals, stringsAsFactors = FALSE),
+    mapping   = ggplot2::aes(x = .data$value),
+    fill      = "#808080",
+    colour    = "#555555",
+    alpha     = 0.35,
+    linetype  = "solid",
+    linewidth = 0.7
+  )
+
+  # Regression input: black dashed line, no fill (only when show_regression)
+  if (isTRUE(show_regression) && length(reg_vals) > 0) {
+    p <- p + ggplot2::geom_density(
+      data      = data.frame(value = reg_vals, source = "Regression input",
+                             stringsAsFactors = FALSE),
+      mapping   = ggplot2::aes(x = .data$value, colour = .data$source),
       fill      = NA,
       linetype  = "dashed",
       linewidth = 0.9
     )
+  }
 
+  # SSP scenario overlay lines
   for (scen_nm in names(ssp_df_list)) {
     p <- p + ggplot2::geom_density(
       data      = ssp_df_list[[scen_nm]],
@@ -166,24 +187,25 @@
     )
   }
 
+  # Only add colour scale when there are named series (regression or scenarios)
+  if (length(colour_map) > 0) {
+    p <- p +
+      ggplot2::scale_colour_manual(values = colour_map, name = NULL) +
+      ggplot2::scale_linetype_manual(values = linetype_map, name = NULL,
+                                     guide  = "none")
+  }
+
+  n_scen_shown <- length(ssp_df_list)
   p <- p +
-    ggplot2::scale_colour_manual(values = colour_map, name = NULL) +
-    ggplot2::scale_linetype_manual(values = linetype_map, name = NULL,
-                                   guide  = "none") +
-    ggplot2::scale_fill_manual(
-      values   = fill_map,
-      na.value = NA,
-      name     = NULL,
-      breaks   = names(fill_map)
-    ) +
     ggplot2::labs(
-      title    = weather_var,
+      title = disp_label,
       subtitle = paste0(
-        "Reg: ", length(reg_vals), " cells  |  ",
         "Hist: ", length(hist_vals), " cells",
-        if (length(ssp_df_list) > 0) paste0("  |  Scen: ", length(ssp_df_list)) else ""
+        if (isTRUE(show_regression) && length(reg_vals) > 0)
+          paste0("  |  Reg: ", length(reg_vals), " cells") else "",
+        if (n_scen_shown > 0) paste0("  |  Scen: ", n_scen_shown) else ""
       ),
-      x = weather_var,
+      x = disp_label,
       y = "Density"
     ) +
     ggplot2::theme_minimal(base_size = 11) +
@@ -201,29 +223,36 @@
 #' Side-by-Side Weather Input Density Panel
 #'
 #' Renders one density plot per weather variable selected, arranged in a
-#' single row using patchwork.
+#' single row using patchwork. The Full historical distribution is drawn as
+#' a grey filled area; regression input (when show_regression = TRUE) as a
+#' black dashed overlay; scenario perturbations as coloured lines.
 #'
 #' @param survey_weather   Data frame. Must contain loc_id, int_month, timestamp.
 #' @param weather_raw      Data frame. hist_sim()$weather_raw.
-#' @param weather_vars     Character vector. One or more column names to plot.
+#' @param weather_vars     Character vector. Column names to plot.
+#' @param weather_labels   Named character vector (name -> label). Display
+#'   labels for titles and x-axes. NULL falls back to column names.
 #' @param scenario_weather Named list of perturbed weather_raw data frames.
 #' @param active_scenarios Character vector. Subset of names(scenario_weather).
-#' @param log_x            Logical. Log10 x-axis. Default FALSE.
+#' @param log_x            Logical or logical vector (one per variable).
+#'   Log10 x-axis. Default FALSE.
+#' @param show_regression  Logical. Overlay regression input curve. Default FALSE.
 #'
 #' @return A patchwork / ggplot object.
 #'
 #' @importFrom ggplot2 ggplot aes geom_density scale_colour_manual
-#'   scale_fill_manual scale_linetype_manual scale_x_log10 labs
-#'   theme_minimal theme element_text
+#'   scale_linetype_manual scale_x_log10 labs theme_minimal theme element_text
 #' @importFrom patchwork wrap_plots plot_layout
 #' @importFrom rlang .data
 #' @export
 plot_weather_density_panel <- function(survey_weather,
                                        weather_raw,
                                        weather_vars,
+                                       weather_labels   = NULL,
                                        scenario_weather = NULL,
                                        active_scenarios = NULL,
-                                       log_x            = FALSE) {
+                                       log_x            = FALSE,
+                                       show_regression  = FALSE) {
 
   stopifnot(
     is.data.frame(survey_weather),
@@ -236,25 +265,32 @@ plot_weather_density_panel <- function(survey_weather,
     return(ggplot2::ggplot() +
       ggplot2::labs(title = "No selected weather variables found in weather_raw."))
 
+  # Vectorise log_x to one value per variable
+  if (length(log_x) == 1L) log_x <- rep(log_x, length(weather_vars))
+
   panels <- lapply(seq_along(weather_vars), function(i) {
+    wv  <- weather_vars[[i]]
+    lbl <- if (!is.null(weather_labels) && wv %in% names(weather_labels))
+      weather_labels[[wv]] else wv
     .plot_density_one(
       survey_weather   = survey_weather,
       weather_raw      = weather_raw,
-      weather_var      = weather_vars[[i]],
+      weather_var      = wv,
+      weather_label    = lbl,
       scenario_weather = scenario_weather,
       active_scenarios = active_scenarios,
-      log_x            = log_x,
-      show_legend      = TRUE
+      log_x            = isTRUE(log_x[[i]]),
+      show_legend      = TRUE,
+      show_regression  = isTRUE(show_regression)
     )
   })
 
-  if (length(panels) == 1) return(panels[[1]])
+  if (length(panels) == 1L) return(panels[[1L]])
 
   patchwork::wrap_plots(panels, nrow = 1) +
     patchwork::plot_layout(guides = "collect") &
     ggplot2::theme(legend.position = "bottom")
 }
-
 
 # ---------------------------------------------------------------------------- #
 # Year-anchored welfare ridge plot                                             #
@@ -723,7 +759,7 @@ plot_year_anchored_ridge <- function(kde_data,
       axis.text.y        = ggplot2::element_text(size = 9, colour = "#333333"),
       axis.text.x        = ggplot2::element_text(size = 9),
       plot.subtitle      = ggplot2::element_text(size = 9, colour = "grey45"),
-      legend.position    = "bottom",
+      legend.position    = "top",
       legend.box         = "horizontal",
       legend.text        = ggplot2::element_text(size = 9),
       legend.title       = ggplot2::element_text(size = 9, face = "bold")
