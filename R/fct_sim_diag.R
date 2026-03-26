@@ -390,6 +390,13 @@ build_ridge_kde_data <- function(hist_preds,
 
   qs <- stats::quantile(all_vals, probs = c(0.01, 0.99), na.rm = TRUE)
 
+  # Regression sample: pool ALL hist_preds outcome values (full training
+  # predicted distribution, all sim_years combined).
+  regression_vals <- tryCatch({
+    v <- as.numeric(hist_preds[[outcome_name]])
+    v[is.finite(v)]
+  }, error = function(e) numeric(0))
+
   scen_nms     <- names(scenario_groups)
   ssp_keys     <- vapply(scen_nms, .normalise_ssp, character(1))
   fore_yrs_raw <- vapply(scen_nms, function(nm) {
@@ -408,7 +415,8 @@ build_ridge_kde_data <- function(hist_preds,
     fore_yrs_raw    = fore_yrs_raw,
     sim_years       = sim_years,
     log_scale       = log_scale,
-    outcome_name    = outcome_name
+    outcome_name    = outcome_name,
+    regression_vals = regression_vals
   )
 }
 
@@ -433,6 +441,9 @@ build_ridge_kde_data <- function(hist_preds,
 #'   Default NULL (inherit from kde_data).
 #' @param ridge_scale   Numeric. Vertical height multiplier. Default 1.5.
 #' @param row_gap       Numeric. Spacing between rows. Default 1.0.
+#' @param show_regression Logical. When TRUE, overlays regression sample
+#'   predicted (black dashed) and actual outcome (black dotted) density
+#'   curves from hist_preds training rows. Default FALSE.
 #'
 #' @return A ggplot object.
 #'
@@ -447,7 +458,8 @@ plot_year_anchored_ridge <- function(kde_data,
                                      primary_group = "hist_year",
                                      log_scale     = NULL,
                                      ridge_scale   = 1.5,
-                                     row_gap       = 1.0) {
+                                     row_gap         = 1.0,
+                                     show_regression = FALSE) {
 
   if (is.null(kde_data))
     return(ggplot2::ggplot() + ggplot2::labs(title = "No simulation data available."))
@@ -462,6 +474,8 @@ plot_year_anchored_ridge <- function(kde_data,
   scen_nms        <- kde_data$scen_nms
   ssp_keys        <- kde_data$ssp_keys
   fore_yrs_raw    <- kde_data$fore_yrs_raw
+  regression_vals <- kde_data$regression_vals %||% numeric(0)
+
 
   hist_fill    <- "#d0d0d0"
   hist_colour  <- "#333333"
@@ -690,6 +704,38 @@ plot_year_anchored_ridge <- function(kde_data,
         linetype  = d$lty[1],
         linewidth = 0.65
       )
+  }
+
+  # -- Regression output overlay (when show_regression = TRUE) ----------
+  if (isTRUE(show_regression) && length(regression_vals) >= 2L) {
+    kd_reg <- .run_kde(regression_vals)
+    # y_pos = 0 (below all year rows) for hist_year mode; for scenario modes
+    # overlay at y = 0 as a standalone reference band at the bottom.
+    y_reg  <- min(as.numeric(if (exists('yr_rank')) yr_rank else row_rank)) - row_gap * 0.8
+    reg_df <- data.frame(
+      x    = kd_reg$x,
+      y    = y_reg + kd_reg$density_raw * ridge_scale * 0.85,
+      ymin = y_reg,
+      stringsAsFactors = FALSE
+    )
+    p <- p +
+      ggplot2::geom_ribbon(
+        data    = reg_df,
+        mapping = ggplot2::aes(x = .data$x, ymin = .data$ymin, ymax = .data$y),
+        fill    = '#cccccc',
+        alpha   = 0.3,
+        colour  = NA
+      ) +
+      ggplot2::geom_line(
+        data      = reg_df,
+        mapping   = ggplot2::aes(x = .data$x, y = .data$y),
+        colour    = 'black',
+        linetype  = 'dashed',
+        linewidth = 0.8
+      )
+    # Extend y-axis to show regression row
+    y_breaks <- c(y_reg, y_breaks)
+    y_labels <- c('  Regression', y_labels)
   }
 
   if (primary_group == "hist_year") {

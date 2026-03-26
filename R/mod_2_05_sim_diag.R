@@ -49,9 +49,10 @@ diag_content_ui <- function(ns, so, weather_var_choices, scenario_names = charac
     # ---- 2. Welfare distributions panel -----------------------------------
     shiny::wellPanel(
       shiny::h4("Welfare output distributions"),
-      # Controls above the plot
+
+      # -- Primary grouping radio -------------------------------------------
       shiny::tags$div(
-        style = "display:flex; align-items:flex-end; gap:16px; flex-wrap:wrap; margin-bottom:8px;",
+        style = "display:flex; align-items:flex-end; gap:16px; flex-wrap:wrap; margin-bottom:4px;",
         shiny::tags$div(style = "flex:2; min-width:260px;",
           shiny::radioButtons(
             ns("diag_ridge_primary_group"),
@@ -66,26 +67,21 @@ diag_content_ui <- function(ns, so, weather_var_choices, scenario_names = charac
           )
         )
       ),
-      shiny::tags$p(
-        style = "font-size:11px; color:#666; margin-bottom:8px;",
-        shiny::tags$b("Historical year mode:"),
-        " one grey filled ridge per simulation year; coloured lines = scenario perturbations.",
-        shiny::tags$br(),
-        shiny::tags$b("Scenario / Forecast year mode:"),
-        " one row per scenario or forecast year; grey-scale lines = individual historical years",
-        " (darkest = most recent).",
-        shiny::tags$br(),
-        "All ridges share a common global bandwidth. X-axis clipped to P1–P99."
-      ),
-      # Dynamic height plotOutput
-      shiny::uiOutput(ns("diag_ridge_plot_ui")),
-      # Controls below the plot
+
+      # -- Welfare output-specific controls ---------------------------------
       shiny::tags$div(
-        style = "display:flex; gap:24px; flex-wrap:wrap; margin-top:8px; align-items:center;",
+        style = "display:flex; gap:24px; flex-wrap:wrap; margin-bottom:8px; align-items:center;",
         shiny::tags$div(
           shiny::checkboxInput(
             ns("diag_ridge_log"),
             label = "Log₁₀ x-axis",
+            value = FALSE
+          )
+        ),
+        shiny::tags$div(
+          shiny::checkboxInput(
+            ns("diag_ridge_show_regression"),
+            label = "Include regression output",
             value = FALSE
           )
         ),
@@ -109,7 +105,26 @@ diag_content_ui <- function(ns, so, weather_var_choices, scenario_names = charac
             step  = 0.1
           )
         )
-      )
+      ),
+
+      # -- Caption ----------------------------------------------------------
+      shiny::tags$p(
+        style = "font-size:11px; color:#666; margin-bottom:8px;",
+        shiny::tags$b("Historical year mode:"),
+        " one grey filled ridge per simulation year; coloured lines = scenario perturbations.",
+        shiny::tags$br(),
+        shiny::tags$b("Scenario / Forecast year mode:"),
+        " one row per scenario or forecast year; grey-scale lines = individual historical years",
+        " (darkest = most recent).",
+        shiny::tags$br(),
+        shiny::tags$b("Include regression output:"),
+        " overlays predicted (dashed) and actual (dotted) outcome densities from training data.",
+        shiny::tags$br(),
+        "All ridges share a common global bandwidth. X-axis clipped to P1–P99."
+      ),
+
+      # -- Dynamic height plotOutput ----------------------------------------
+      shiny::uiOutput(ns("diag_ridge_plot_ui"))
     )
   )
 }
@@ -333,7 +348,8 @@ mod_2_05_sim_diag_server <- function(id,
           log_scale     = isTRUE(input$diag_ridge_log),
           ridge_scale   = input$diag_ridge_scale   %||% 1.5,
           row_gap       = input$diag_ridge_spacing %||% 1.0,
-          primary_group = input$diag_ridge_primary_group %||% "hist_year"
+            primary_group   = input$diag_ridge_primary_group %||% "hist_year",
+            show_regression = isTRUE(input$diag_ridge_show_regression)
         )
       }),
       350
@@ -421,7 +437,8 @@ mod_2_05_sim_diag_server <- function(id,
         primary_group = ri$primary_group,
         log_scale     = ri$log_scale,
         ridge_scale   = ri$ridge_scale,
-        row_gap       = ri$row_gap
+        row_gap         = ri$row_gap,
+        show_regression = ri$show_regression
       )
     })
 
