@@ -219,7 +219,7 @@ mod_2_03_future_server <- function(id, selected_hist = NULL) {
       bw      <- active_bw()
 
       rows <- lapply(input$climate, function(ssp) {
-        prefix <- ssp_labels[ssp]
+        prefix <- names(ssp_choices)[ssp_choices == ssp]
         lapply(anchors, function(anchor) {
           yr <- c(anchor - bw, anchor + bw)
           # Scenario name: drop band suffix when bw = 0
