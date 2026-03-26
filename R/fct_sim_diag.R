@@ -405,10 +405,14 @@ build_ridge_kde_data <- function(hist_preds,
 
   qs <- stats::quantile(all_vals, probs = c(0.01, 0.99), na.rm = TRUE)
 
-  # Regression output: predicted = simulated preds pooled across all sim_years;
-  # actual = survey observed outcome passed in from train_data$<outcome_name>.
+  # Regression output:
+  #   predicted = clean model fitted values (.fitted column, no residual noise)
+  #              falls back to outcome_name column if .fitted absent
+  #   actual    = observed survey outcome from train_data (passed in as actual_vals)
+  #               back-transformed from log-scale when so$transform == "log"
   predicted_vals <- tryCatch({
-    v <- as.numeric(hist_preds[[outcome_name]])
+    col <- if (".fitted" %in% names(hist_preds)) ".fitted" else outcome_name
+    v   <- as.numeric(hist_preds[[col]])
     v[is.finite(v)]
   }, error = function(e) numeric(0))
 
@@ -417,6 +421,13 @@ build_ridge_kde_data <- function(hist_preds,
     v <- as.numeric(actual_vals)
     v[is.finite(v)]
   }, error = function(e) numeric(0))
+
+  # Separate bandwidth for regression curves: estimated from the regression
+  # sample alone so it is not dominated by the 30yr x N hist_groups pool.
+  reg_bw <- if (length(predicted_vals) >= 2L) {
+    tryCatch(stats::bw.nrd0(predicted_vals[is.finite(predicted_vals)]),
+             error = function(e) global_bw)
+  } else global_bw
 
   scen_nms     <- names(scenario_groups)
   ssp_keys     <- vapply(scen_nms, .normalise_ssp, character(1))
@@ -438,7 +449,8 @@ build_ridge_kde_data <- function(hist_preds,
     log_scale       = log_scale,
     outcome_name    = outcome_name,
     predicted_vals  = predicted_vals,
-    actual_vals     = actual_vals_clean
+    actual_vals     = actual_vals_clean,
+    reg_bw          = reg_bw
   )
 }
 
@@ -742,10 +754,14 @@ plot_year_anchored_ridge <- function(kde_data,
     y_reg <- min(as.numeric(rank_vec)) - row_gap * 0.8
 
     if (has_predicted) {
-      kd_pred <- .run_kde(predicted_vals)
+      reg_bw_use  <- kde_data$reg_bw %||% global_bw
+      kd_pred_raw <- .kde_group(predicted_vals[is.finite(predicted_vals)],
+                                reg_bw_use, x_lo_tr, x_hi_tr)
+      pred_dns    <- kd_pred_raw$density_raw
+      pred_dns    <- pred_dns / max(pred_dns[is.finite(pred_dns) & pred_dns > 0], 1e-12)
       pred_df <- data.frame(
-        x    = kd_pred$x,
-        y    = y_reg + kd_pred$density_raw * ridge_scale * 0.85,
+        x    = kd_pred_raw$x,
+        y    = y_reg + pred_dns * ridge_scale * 0.85,
         ymin = y_reg,
         stringsAsFactors = FALSE
       )
@@ -768,10 +784,15 @@ plot_year_anchored_ridge <- function(kde_data,
     }
 
     if (has_actual) {
-      kd_act <- .run_kde(actual_vals)
+      reg_bw_use  <- kde_data$reg_bw %||% global_bw
+      act_vals_fi <- actual_vals[is.finite(actual_vals)]
+      # Use reg_bw from predicted_vals since both are on the same scale
+      kd_act_raw  <- .kde_group(act_vals_fi, reg_bw_use, x_lo_tr, x_hi_tr)
+      act_dns     <- kd_act_raw$density_raw
+      act_dns     <- act_dns / max(act_dns[is.finite(act_dns) & act_dns > 0], 1e-12)
       act_df <- data.frame(
-        x    = kd_act$x,
-        y    = y_reg + kd_act$density_raw * ridge_scale * 0.85,
+        x    = kd_act_raw$x,
+        y    = y_reg + act_dns * ridge_scale * 0.85,
         ymin = y_reg,
         stringsAsFactors = FALSE
       )
@@ -866,4 +887,3 @@ plot_year_anchored_ridge <- function(kde_data,
   if (isTRUE(use_log)) p <- p + ggplot2::scale_x_log10()
   p
 }
-

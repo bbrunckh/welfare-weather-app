@@ -335,10 +335,16 @@ mod_2_05_sim_diag_server <- function(id,
         outcome_name  = hist_sim()$so$name,
         actual_vals   = {
           td <- hist_sim()$train_data
-          nm <- hist_sim()$so$name
+          so <- hist_sim()$so
+          nm <- so$name
           if (!is.null(td) && nm %in% names(td)) {
             v <- as.numeric(td[[nm]])
-            v[is.finite(v)]
+            v <- v[is.finite(v)]
+            # back-transform: train_data stores log(y) when transform == "log";
+            # hist_preds has been back-transformed via apply_log_backtransform()
+            # so both curves must be on the same (linear) scale.
+            if (isTRUE(so$transform == "log") && length(v) > 0) v <- exp(v)
+            v
           } else numeric(0)
         }
       )
