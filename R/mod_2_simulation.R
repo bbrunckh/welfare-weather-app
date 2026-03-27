@@ -88,9 +88,9 @@ mod_2_simulation_server <- function(id,
     s1 <- mod_2_01_historical_server("historical")
 
     # ---- 3. Future climate selection ----------------------------------------
-    # NOTE: s3 is wired before s2 so that s2 can receive fut_sim from s4, which
-    # in turn depends on s3. The declaration order here does NOT affect reactivity;
-    # Shiny resolves the reactive graph lazily at run time.
+    # NOTE: s3 is declared before s2 so that s4 (which depends on s3$selected_fut)
+    # can be referenced when wiring s4$hist_run_id. Declaration order does NOT
+    # affect reactivity -- Shiny resolves the reactive graph lazily at run time.
     s3 <- mod_2_03_future_server("future", selected_hist = s1$selected_hist)
 
     # ---- 2. Historical simulation -------------------------------------------
@@ -102,16 +102,11 @@ mod_2_simulation_server <- function(id,
       survey_weather    = survey_weather,
       model_fit         = model_fit,
       selected_hist     = s1$selected_hist,
-      fut_sim           = reactive(s4$fut_sim()),
       tabset_id         = "step2_output_tabs",
       tabset_session    = session
     )
 
     # ---- 4. Future simulation -----------------------------------------------
-    # NOTE: forward reference to s4 via reactive() in s2 above is safe because
-    # s4 is defined in the same moduleServer closure before any reactive graph
-    # evaluation begins. s2$fut_sim_val is only resolved when input$run_hist_sim
-    # fires, by which time s4 is already registered.
     s4 <- mod_2_04_future_sim_server(
       "future_sim",
       connection_params = connection_params,
@@ -128,7 +123,6 @@ mod_2_simulation_server <- function(id,
     mod_2_05_sim_diag_server(
       "sim_diag",
       hist_sim         = s2$hist_sim,
-      fut_sim          = s4$fut_sim,
       saved_scenarios  = saved_scenarios,
       survey_weather   = survey_weather,
       selected_weather = selected_weather,

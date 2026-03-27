@@ -55,8 +55,13 @@ mod_2_04_future_sim_server <- function(id,
                                         selected_fut,
                                         hist_run_id = reactive(NULL)) {
   moduleServer(id, function(input, output, session) {
+    ns <- session$ns
+
+    # ---- Internal state ----------------------------------------------------
 
     pred_fut_raw <- reactiveVal(NULL)
+
+    # ---- observeEvent handlers ---------------------------------------------
 
     observeEvent(input$run_fut_sim, {
       req(selected_weather(), selected_outcome(), survey_weather(),
@@ -80,7 +85,7 @@ mod_2_04_future_sim_server <- function(id,
 
       preds_list_raw <- vector("list", n_total)
 
-      # ---- sequential loop with per-scenario progress ----------------------
+      # ---- Sequential loop with per-scenario progress ----------------------
       # withProgress renders a progress bar in the Shiny UI. Each scenario
       # increments the bar so the user can see work is proceeding.
       shiny::withProgress(
@@ -133,8 +138,8 @@ mod_2_04_future_sim_server <- function(id,
               next
             }
 
-            # ---- simulate outcomes -----------------------------------------
-            # run_sim_pipeline(): join weather -> predict_outcome -> back-transform
+            # ---- Simulate outcomes -----------------------------------------
+            # run_sim_pipeline(): join weather -> predict_outcome -> back-transform.
             # Returns list(preds, n_pre_join).
 
             pipeline_out <- run_sim_pipeline(
@@ -158,7 +163,8 @@ mod_2_04_future_sim_server <- function(id,
         }
       )
 
-      # ---- collect results --------------------------------------------------
+      # ---- Collect results --------------------------------------------------
+
       names(preds_list_raw) <- sf$scenario_name
 
       ok         <- !vapply(preds_list_raw, is.null, logical(1))
@@ -192,6 +198,8 @@ mod_2_04_future_sim_server <- function(id,
       )
 
     }, ignoreInit = TRUE)
+
+    # ---- Return API --------------------------------------------------------
 
     list(fut_sim = pred_fut_raw)
   })

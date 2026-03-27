@@ -61,13 +61,13 @@ mod_2_01_historical_server <- function(id) {
       )
     })
 
-    # ---- 20-year minimum window warning ------------------------------------
+    # ---- 30-year minimum window warning ------------------------------------
 
     output$hist_years_warning <- renderUI({
       req(input$hist_years)
-      if ((input$hist_years[2] - input$hist_years[1]) < 20) {
+      if ((input$hist_years[2] - input$hist_years[1]) < 30) {
         helpText(
-          "\u26a0\ufe0f Window is less than 20 years. Results may be unreliable.",
+          "\u26a0\ufe0f Window is less than 30 years. Results may be unreliable.",
           style = "color: #c0392b; font-size: 12px;"
         )
       }
@@ -76,6 +76,7 @@ mod_2_01_historical_server <- function(id) {
     # ---- Auto-update scenario name when years change -----------------------
 
     prev_hist_years <- reactiveVal(c(1994L, 2024L))
+    #DRK Note - currently hard-set, may want to make dynamic based on latest available weather range. 
 
     observeEvent(input$hist_years, {
       req(input$hist_years)

@@ -1,7 +1,12 @@
 #' 2_03_future UI Function
 #'
+#' @description A shiny Module. UI for future climate simulation year and
+#'   SSP scenario selection, including advanced perturbation settings.
+#'
 #' @param id,input,output,session Internal parameters for {shiny}.
+#'
 #' @noRd
+#'
 #' @importFrom shiny NS tagList
 mod_2_03_future_ui <- function(id) {
   ns <- NS(id)
@@ -14,11 +19,13 @@ mod_2_03_future_ui <- function(id) {
 
 #' 2_03_future Server Functions
 #'
-#' Manages future climate forecast year selection, SSP selection, band width,
-#' and residual handling. Returns selected_fut: one row per SSP x anchor year.
+#' Manages future climate simulation year and SSP scenario selection,
+#' band width, and residual handling. Returns selected_fut: one row per
+#' SSP x anchor year.
 #'
 #' @param id Module id.
 #' @param selected_hist Reactive one-row data frame from mod_2_01_historical.
+#'
 #' @noRd
 mod_2_03_future_server <- function(id, selected_hist = NULL) {
   moduleServer(id, function(input, output, session) {
@@ -49,16 +56,16 @@ mod_2_03_future_server <- function(id, selected_hist = NULL) {
         tags$div(
           style = "display:flex; gap:32px; flex-wrap:wrap; margin-bottom:8px;",
 
-          # Left column: Forecast year(s)
+          # Left column: Simulation year(s)
           tags$div(
             style = "min-width:160px;",
             tags$h6(
-              "Forecast year(s)",
+              "Simulation year(s)",
               style = "margin-bottom:6px; font-weight:600;"
             ),
             checkboxInput(ns("use_2030"), "2030", value = TRUE),
-            checkboxInput(ns("use_2040"), "2040", value = TRUE),
-            checkboxInput(ns("use_2050"), "2050", value = TRUE)
+            checkboxInput(ns("use_2040"), "2040", value = FALSE),
+            checkboxInput(ns("use_2050"), "2050", value = FALSE)
           ),
 
           # Right column: Climate scenario(s)
@@ -72,7 +79,7 @@ mod_2_03_future_server <- function(id, selected_hist = NULL) {
               inputId  = ns("climate"),
               label    = NULL,
               choices  = ssp_choices,
-              selected = unname(ssp_choices)
+              selected = "ssp3_7_0"
             )
           )
         ),
@@ -80,7 +87,7 @@ mod_2_03_future_server <- function(id, selected_hist = NULL) {
         # Description text (full width, below both columns)
         helpText(
           "Select which future periods to model.",
-          "Each selected forecast year generates one scenario run per climate scenario.",
+          "Each selected simulation year generates one scenario run per climate scenario.",
           style = "font-size:11px; margin-top:0; margin-bottom:4px;"
         ),
         helpText(
@@ -125,11 +132,11 @@ mod_2_03_future_server <- function(id, selected_hist = NULL) {
         ),
         fluidRow(
           column(4, shiny::numericInput(ns("anchor1"), "Year 1",
-                                        value = 2030, min = 2020, max = 2090, step = 5)),
+                                        value = 2030, min = 2020, max = 2090, step = 1)),
           column(4, shiny::numericInput(ns("anchor2"), "Year 2 (optional)",
-                                        value = NA,   min = 2020, max = 2090, step = 5)),
+                                        value = NA,   min = 2020, max = 2090, step = 1)),
           column(4, shiny::numericInput(ns("anchor3"), "Year 3 (optional)",
-                                        value = NA,   min = 2020, max = 2090, step = 5))
+                                        value = NA,   min = 2020, max = 2090, step = 1))
         ),
         shiny::sliderInput(
           ns("band_width"),

@@ -8,9 +8,9 @@
 #   label_agg_method(key)     -- human-readable label for aggregation method
 #   label_deviation(key)      -- human-readable label for deviation choice
 #   .resolve_year_styles()    -- internal; dynamic linetype map by sorted year
-#   plot_pointrange_climate() -- HERO: grouped point-range chart (SSP x timeframe)
-#   build_impact_table()      -- return-period threshold table
-#   enhance_exceedance()      -- exceedance curve with symmetric return-period lines
+#   build_threshold_table_df()  -- return-period threshold data frame for DT
+#   plot_threshold_points()     -- point plot of return-period thresholds (free y-axis)
+#   enhance_exceedance()        -- exceedance curve with symmetric return-period lines
 #
 # NOTE: plot_bar_climate() has been archived to
 #   dev/archived_fct/plot_bar_climate_archived.R (no active call sites).
@@ -269,68 +269,178 @@ plot_pointrange_climate <- function(scenarios, hist_agg,
 }
 
 # ---------------------------------------------------------------------------- #
-# Impact table                                                                 #
+# Threshold table data frame                                                   #
 # ---------------------------------------------------------------------------- #
 
-#' Build a Welfare Impact Table at Return Period Thresholds
-#' @param scenarios             Named list from `aggregate_sim_preds()`.
-#' @param hist_agg              Historical aggregate from `aggregate_sim_preds()`.
-#' @param thresholds            Character vector of threshold labels.
-#' @param hist_centre_years     Anchor years for historical. Defaults to 2010L.
-#' @param scenario_centre_years Anchor years for future scenarios.
-#' @param band_width            Half-width in years.
-#' @param n_sim_years           Total years; n<40 flags 1:20, n<100 flags 1:50.
-#' @return Data frame: scenario, anchor_year, threshold, value, reliable.
-#' @importFrom dplyr bind_rows
-#' @importFrom stats quantile
+#' Build Return-Period Threshold Table Data Frame
+#'
+#' Pure function that converts a named list of aggregated series (output of
+#' \code{aggregate_sim_preds()}) into a sorted data frame suitable for
+#' \code{DT::datatable()}. Replaces the inline wrangling that previously
+#' lived inside \code{renderDT} in mod_2_06_sim_compare_server().
+#'
+#' @param all_series  Named list. Each element must have \code{$out$value}.
+#'   Typically \code{c(list(Historical = agg_hist), agg_scenarios)}.
+#' @param group_order Character. \code{"scenario_x_year"} (default) or
+#'   \code{"year_x_scenario"}.
+#'
+#' @return A data frame with columns: Scenario, Obs, one column per
+#'   return-period threshold label, sorted by \code{group_order}. Returns
+#'   NULL when every series has insufficient data.
+#'
+#' @importFrom stats quantile median
 #' @export
-build_impact_table <- function(scenarios,
-                               hist_agg,
-                               thresholds              = c("mean", "1:5", "1:10", "1:20", "1:50"),
-                               hist_centre_years       = 2010L,
-                               scenario_centre_years   = c(2030L, 2040L, 2050L),
-                               band_width              = 10L,
-                               n_sim_years             = NULL) {
+build_threshold_table_df <- function(all_series, group_order = "scenario_x_year") {
 
-  rp_map <- c("1:5" = 0.20, "1:10" = 0.10, "1:20" = 0.05, "1:50" = 0.02)
+  rows <- lapply(names(all_series), function(nm) {
+    vals <- all_series[[nm]]$out$value
+    vals <- vals[is.finite(vals)]
+    n    <- length(vals)
 
-  extract_val <- function(vals, threshold) {
-    if (threshold == "mean") mean(vals, na.rm = TRUE)
-    else as.numeric(stats::quantile(vals, probs = 1 - rp_map[threshold], na.rm = TRUE))
+    keep_low  <- names(RP_LOW)[c(n >= 50, n >= 20, n >= 10, n >= 5)]
+    keep_high <- names(RP_HIGH)[c(n >= 5, n >= 10, n >= 20, n >= 50)]
+    if (length(keep_low) == 0 && length(keep_high) == 0) return(NULL)
+
+    low_df <- if (length(keep_low) > 0)
+      as.data.frame(t(sapply(keep_low,  function(th) round(stats::quantile(vals, RP_LOW[th]),  3))))
+    else data.frame()
+    high_df <- if (length(keep_high) > 0)
+      as.data.frame(t(sapply(keep_high, function(th) round(stats::quantile(vals, RP_HIGH[th]), 3))))
+    else data.frame()
+
+    names(low_df)  <- keep_low
+    names(high_df) <- keep_high
+    median_df <- data.frame("1:1" = round(stats::median(vals), 3), check.names = FALSE)
+
+    cbind(data.frame(Scenario = nm, Obs = n, check.names = FALSE),
+          low_df, median_df, high_df)
+  })
+
+  rows <- Filter(Negate(is.null), rows)
+  if (length(rows) == 0) return(NULL)
+
+  all_cols <- unique(unlist(lapply(rows, names)))
+  rows <- lapply(rows, function(r) {
+    for (m in setdiff(all_cols, names(r))) r[[m]] <- NA_real_
+    r[all_cols]
+  })
+  df <- do.call(rbind, rows)
+
+  # Sort by group_order: Historical rows first, then SSP rows.
+  hist_rows <- df[df$Scenario == "Historical" | !grepl("^SSP", df$Scenario), , drop = FALSE]
+  ssp_rows  <- df[grepl("^SSP", df$Scenario), , drop = FALSE]
+
+  if (nrow(ssp_rows) > 0) {
+    ssp_rows$ssp_sort <- sub(" /.*", "", ssp_rows$Scenario)
+    ssp_rows$yr_sort  <- as.integer(
+      regmatches(ssp_rows$Scenario, regexpr("[0-9]{4}", ssp_rows$Scenario))
+    )
+    ssp_rows <- if (isTRUE(group_order == "year_x_scenario"))
+      ssp_rows[order(ssp_rows$yr_sort, ssp_rows$ssp_sort), ]
+    else
+      ssp_rows[order(ssp_rows$ssp_sort, ssp_rows$yr_sort), ]
+    ssp_rows$ssp_sort <- NULL
+    ssp_rows$yr_sort  <- NULL
   }
 
-  make_rows <- function(nm, out_df, centre_years) {
-    dplyr::bind_rows(lapply(centre_years, function(cy) {
-      band     <- out_df[out_df$sim_year >= cy - band_width &
-                           out_df$sim_year <= cy + band_width, , drop = FALSE]
-      vals     <- band$value
-      in_range <- length(vals) > 0
-      dplyr::bind_rows(lapply(thresholds, function(th) {
-        reliable <- TRUE
-        if (!is.null(n_sim_years)) {
-          if (th == "1:20" && n_sim_years < 40)  reliable <- FALSE
-          if (th == "1:50" && n_sim_years < 100) reliable <- FALSE
-        }
-        data.frame(
-          scenario    = nm,
-          anchor_year = as.integer(cy),
-          threshold   = th,
-          value       = if (in_range) extract_val(vals, th) else NA_real_,
-          reliable    = reliable,
-          in_range    = in_range,
-          stringsAsFactors = FALSE
-        )
-      }))
-    }))
-  }
-
-  hist_rows <- make_rows("Historical", hist_agg$out, hist_centre_years)
-  sc_rows   <- dplyr::bind_rows(lapply(names(scenarios), function(nm) {
-    make_rows(nm, scenarios[[nm]]$out, scenario_centre_years)
-  }))
-  dplyr::bind_rows(hist_rows, sc_rows)
+  rbind(hist_rows, ssp_rows)
 }
 
+
+
+# ---------------------------------------------------------------------------- #
+# Threshold point chart                                                        #
+# ---------------------------------------------------------------------------- #
+
+#' Threshold Point Chart Across Scenarios
+#'
+#' Scatter plot showing the simulated outcome value at each return-period
+#' threshold for every scenario. Points are dodged per threshold; the y-axis
+#' is free-scaled so small differences between scenarios are visible.
+#' The median (1:1) threshold is highlighted with a larger filled point.
+#' Colour follows the SSP palette; Historical is grey.
+#'
+#' @param all_series  Named list. Each element must have \code{$out$alue}.
+#'   Same input as \code{build_threshold_table_df()}.
+#' @param group_order Character. \code{"scenario_x_year"} (default) or
+#'   \code{"year_x_scenario"}. Controls scenario order in the legend.
+#'
+#' @return A ggplot object, or a blank placeholder when data are insufficient.
+#'
+#' @importFrom ggplot2 ggplot aes geom_point scale_colour_manual
+#'   scale_size_manual scale_shape_manual labs theme_minimal theme
+#'   element_text element_blank element_line
+#' @importFrom tidyr pivot_longer
+#' @importFrom rlang .data
+#' @export
+plot_threshold_points <- function(all_series, group_order = "scenario_x_year") {
+
+  df <- build_threshold_table_df(all_series, group_order)
+  if (is.null(df) || nrow(df) == 0)
+    return(ggplot2::ggplot() +
+      ggplot2::labs(title = "Insufficient data for threshold chart."))
+
+  thresh_cols <- setdiff(names(df), c("Scenario", "Obs"))
+  if (length(thresh_cols) == 0)
+    return(ggplot2::ggplot() +
+      ggplot2::labs(title = "No threshold columns found."))
+
+  # Pivot to long: one row per Scenario x threshold.
+  long <- tidyr::pivot_longer(
+    df,
+    cols      = tidyr::all_of(thresh_cols),
+    names_to  = "threshold",
+    values_to = "value"
+  )
+  long$threshold <- factor(long$threshold, levels = thresh_cols)
+  long$Scenario  <- factor(long$Scenario,  levels = unique(df$Scenario))
+
+  # Median column: large filled circle; all others: smaller open circle.
+  long$is_median <- long$threshold == "1:1"
+
+  # ---- Colour palette: mirrors plot_pointrange_climate() -----------------
+  scenarios_present <- levels(long$Scenario)
+  colour_map <- vapply(scenarios_present, function(nm) {
+    ssp <- .normalise_ssp(nm)
+    if (!is.na(ssp) && ssp %in% names(.ssp_colours)) .ssp_colours[ssp] else "#808080"
+  }, character(1))
+
+  # ---- Plot --------------------------------------------------------------
+  ggplot2::ggplot(long,
+    ggplot2::aes(
+      x      = .data$threshold,
+      y      = .data$value,
+      colour = .data$Scenario,
+      size   = .data$is_median,
+      shape  = .data$is_median,
+      group  = .data$Scenario
+    )
+  ) +
+    ggplot2::geom_line(linewidth = 0.4, alpha = 0.5, na.rm = TRUE) +
+    ggplot2::geom_point(na.rm = TRUE) +
+    ggplot2::scale_colour_manual(values = colour_map, name = "Scenario") +
+    # Median: large filled circle (16); others: smaller open circle (1)
+    ggplot2::scale_size_manual(
+      values = c("TRUE" = 3.5, "FALSE" = 2.0),
+      guide  = "none"
+    ) +
+    ggplot2::scale_shape_manual(
+      values = c("TRUE" = 16L, "FALSE" = 1L),
+      guide  = "none"
+    ) +
+    ggplot2::labs(
+      title = "Outcome value at return-period thresholds",
+      x     = "Return period threshold",
+      y     = NULL
+    ) +
+    ggplot2::theme_minimal(base_size = 12) +
+    ggplot2::theme(
+      panel.grid.major.x = ggplot2::element_blank(),
+      panel.grid.minor   = ggplot2::element_blank(),
+      axis.text.x        = ggplot2::element_text(size = 10),
+      legend.position    = "bottom"
+    )
+}
 
 # ---------------------------------------------------------------------------- #
 # Enhanced exceedance curve                                                    #
@@ -339,7 +449,7 @@ build_impact_table <- function(scenarios,
 #' Enhanced Exceedance Probability Curve with Return Period Axis
 #'
 #' Colour = climate scenario (fixed palette). Line type = timeframe (dynamic).
-#' Historical = black/solid. Optional log10 probability axis.
+#' Historical = black/solid. Optional logit probability axis.
 #'
 #' @param scenarios     Named list from `aggregate_sim_preds()`.
 #' @param hist_agg      Historical aggregate from `aggregate_sim_preds()`.
@@ -349,10 +459,10 @@ build_impact_table <- function(scenarios,
 #' @param logit_x       Logical. Use logit scale on the probability axis to
 #'   emphasise both tails symmetrically. Default FALSE.
 #' @return A ggplot object.
-#' @importFrom ggplot2 ggplot aes stat_ecdf geom_vline geom_hline annotate
+#' @importFrom ggplot2 ggplot aes geom_line geom_vline geom_hline annotate
 #'   labs theme_minimal theme scale_color_manual scale_linetype_manual
-#'   after_stat coord_flip guide_legend element_text
-#' @importFrom scales label_percent logit_trans
+#'   coord_flip guide_legend element_text
+#' @importFrom scales logit_trans
 #' @importFrom dplyr bind_rows
 #' @importFrom rlang .data
 #' @export
@@ -394,9 +504,8 @@ enhance_exceedance <- function(scenarios,
 
   hist_mean <- mean(hist_agg$out$value, na.rm = TRUE)
 
-
   # Logit limits: keep exceedance strictly within (eps, 1-eps) so the
-  # logit transform never hits -Inf / +Inf. Log10 only needs > 0.
+  # logit transform never hits -Inf / +Inf.
   eps <- if (isTRUE(logit_x)) 0.005 else 0
 
   ecdf_df <- dplyr::bind_rows(lapply(levels(long_df$group), function(grp) {
@@ -406,10 +515,6 @@ enhance_exceedance <- function(scenarios,
     xs     <- sort(unique(sub$value))
     exceed <- 1 - fn(xs)
     keep   <- exceed > eps & exceed < (1 - eps)
-    # Guard: when all observations share one value (e.g. band = 1 year),
-    # ecdf() returns exceed = 0 for the single unique point, so keep is all
-    # FALSE. The data.frame() call below would then have 0-length vectors
-    # mixed with 1-length scalars, crashing with 'differing number of rows'.
     if (!any(keep)) return(NULL)
     data.frame(
       value            = xs[keep],
@@ -421,11 +526,11 @@ enhance_exceedance <- function(scenarios,
     )
   }))
 
-  # annotation y-position: use 0.95 on linear scale, 0.97 on logit (avoid clipping)
   ann_y <- if (isTRUE(logit_x)) 0.97 else 0.95
 
   p <- ggplot2::ggplot(
-    ecdf_df, ggplot2::aes(x = value, y = exceed, colour = ssp_key, linetype = yr)
+    ecdf_df, ggplot2::aes(x = value, y = exceed,
+                          colour = ssp_key, linetype = yr)
   ) +
     ggplot2::geom_line(linewidth = 0.9) +
     ggplot2::geom_vline(xintercept = hist_mean, linetype = "dotted",
@@ -444,7 +549,7 @@ enhance_exceedance <- function(scenarios,
       values = ltype_map_yr,
       breaks = c("Historical", present_yrs),
       labels = c("Historical", present_yrs),
-      name   = "Timeframe",
+      name   = "Simulation year",
       guide  = ggplot2::guide_legend(order = 2)
     ) +
     ggplot2::labs(
@@ -454,20 +559,17 @@ enhance_exceedance <- function(scenarios,
     ) +
     ggplot2::theme_minimal() +
     ggplot2::theme(
-      plot.title      = ggplot2::element_text(face = "bold", size = 12, hjust = 0.5),
-      plot.subtitle   = ggplot2::element_text(size = 10, colour = "grey40"),
+      plot.title      = ggplot2::element_text(face = "bold", size = 12,
+                                              hjust = 0.5),
       legend.position = "bottom"
     ) +
     ggplot2::coord_flip()
 
-  # --- return period lines (both tails, symmetric) ---
+  # ---- Return period lines (both tails, symmetric) -----------------------
   if (isTRUE(return_period)) {
-    # RP_LOW / RP_HIGH are defined in fct_simulations.R and cover both tails.
     rp_all <- c(RP_LOW, RP_HIGH)
-
     for (nm in names(rp_all)) {
-      prob <- rp_all[nm]
-      # Reliability check only applies to the rare low-probability lines
+      prob      <- rp_all[nm]
       reliable  <- is.null(n_sim_years) ||
         (!(nm == "1:20" && n_sim_years < 40) &&
          !(nm == "1:50" && n_sim_years < 100))
@@ -477,7 +579,8 @@ enhance_exceedance <- function(scenarios,
         ggplot2::geom_hline(yintercept = prob, linetype = "dashed",
                             colour = "grey60", linewidth = 0.35) +
         ggplot2::annotate("text", x = -Inf, y = prob, label = rp_label,
-                          hjust = -0.1, vjust = -0.3, size = 2.8, colour = label_col)
+                          hjust = -0.1, vjust = -0.3, size = 2.8,
+                          colour = label_col)
     }
     if (!is.null(n_sim_years) && n_sim_years < 100) {
       p <- p + ggplot2::annotate(
@@ -488,10 +591,8 @@ enhance_exceedance <- function(scenarios,
     }
   }
 
-  # --- optional logit probability axis (applied to y after coord_flip) ---
-  # Emphasises both tails symmetrically. ecdf_df is pre-clipped to (eps, 1-eps).
+  # ---- Optional logit probability axis -----------------------------------
   if (isTRUE(logit_x)) {
-    # Logit breaks align with RP_LOW / RP_HIGH probability values
     logit_breaks <- c(unname(RP_LOW), 0.50, rev(1 - unname(RP_LOW)))
     logit_labels <- c(names(RP_LOW), "Median", rev(names(RP_HIGH)))
     p <- p + ggplot2::scale_y_continuous(

@@ -112,7 +112,9 @@
       m <- regmatches(nm, regexpr("[0-9]{4}", nm))
       if (length(m) == 0L) NA_integer_ else as.integer(m)
     }
-    yrs_visible    <- vapply(visible_nms, yr_of, integer(1))
+    yrs_visible    <- vapply(visible_nms,
+                             function(nm) suppressWarnings(as.integer(.parse_year(nm))),
+                             integer(1))
     unique_yrs     <- sort(unique(yrs_visible[!is.na(yrs_visible)]))
     yr_lty_palette <- c("solid", "dashed", "dotted", "dotdash", "longdash")
     yr_lty_map     <- setNames(
@@ -129,7 +131,7 @@
       ssp_key <- .normalise_ssp(scen_nm)
       col     <- if (!is.na(ssp_key) && ssp_key %in% names(.ssp_colours))
         .ssp_colours[ssp_key] else "#cccccc"
-      yr_chr  <- as.character(yr_of(scen_nm))
+      yr_chr  <- as.character(suppressWarnings(as.integer(.parse_year(scen_nm))))
       lty     <- if (!is.na(yr_chr) && yr_chr %in% names(yr_lty_map))
         yr_lty_map[yr_chr] else "solid"
       ssp_colour_map[scen_nm]   <- col
@@ -469,17 +471,19 @@ build_ridge_kde_data <- function(hist_preds,
 #'     grey-scale lines = historical years (darkest = most recent).}
 #' }
 #'
-#' @param kde_data      List. Output of \code{build_ridge_kde_data()}.
-#' @param x_label       Character scalar. X-axis label.
-#' @param primary_group Character. \code{"hist_year"} (default) or
-#'   \code{"scenario"}.
-#' @param log_scale     Logical. Log10 x-axis. Overrides kde_data$log_scale.
+#' @param kde_data       List. Output of \code{build_ridge_kde_data()}.
+#' @param x_label        Character scalar. X-axis label.
+#' @param primary_group  Character. \code{"hist_year"} (default),
+#'   \code{"scenario"}, or \code{"forecast_yr"}.
+#' @param log_scale      Logical. Log10 x-axis. Overrides kde_data$log_scale.
 #'   Default NULL (inherit from kde_data).
-#' @param ridge_scale   Numeric. Vertical height multiplier. Default 1.5.
-#' @param row_gap       Numeric. Spacing between rows. Default 1.0.
+#' @param ridge_scale    Numeric. Vertical height multiplier. Default 1.5.
+#' @param row_gap        Numeric. Spacing between rows. Default 1.0.
 #' @param show_regression Logical. When TRUE, overlays regression sample
 #'   predicted (black dashed) and actual outcome (black dotted) density
 #'   curves from hist_preds training rows. Default FALSE.
+#' @param scenario_names Character vector. Subset of scenario names to render.
+#'   NULL (default) renders all scenarios in kde_data.
 #'
 #' @return A ggplot object.
 #'
@@ -491,11 +495,12 @@ build_ridge_kde_data <- function(hist_preds,
 #' @export
 plot_year_anchored_ridge <- function(kde_data,
                                      x_label,
-                                     primary_group = "hist_year",
-                                     log_scale     = NULL,
-                                     ridge_scale   = 1.5,
+                                     primary_group   = "hist_year",
+                                     log_scale       = NULL,
+                                     ridge_scale     = 1.5,
                                      row_gap         = 1.0,
-                                     show_regression = FALSE) {
+                                     show_regression = FALSE,
+                                     scenario_names  = NULL) {
 
   if (is.null(kde_data))
     return(ggplot2::ggplot() + ggplot2::labs(title = "No simulation data available."))
@@ -503,13 +508,21 @@ plot_year_anchored_ridge <- function(kde_data,
   use_log <- if (!is.null(log_scale)) isTRUE(log_scale) else isTRUE(kde_data$log_scale)
 
   hist_groups     <- kde_data$hist_groups
-  scenario_groups <- kde_data$scenario_groups
+  # Apply scenario filter: NULL means show all; otherwise subset to named keys.
+  scenario_groups <- if (!is.null(scenario_names))
+    kde_data$scenario_groups[intersect(scenario_names, names(kde_data$scenario_groups))]
+  else
+    kde_data$scenario_groups
   global_bw       <- kde_data$global_bw
   x_lo_tr         <- kde_data$x_lo_tr
   x_hi_tr         <- kde_data$x_hi_tr
-  scen_nms        <- kde_data$scen_nms
-  ssp_keys        <- kde_data$ssp_keys
-  fore_yrs_raw    <- kde_data$fore_yrs_raw
+  # Derive scen_nms / ssp_keys / fore_yrs_raw from filtered scenario_groups
+  # so they stay in sync when scenario_names subsets the full KDE data.
+  scen_nms     <- names(scenario_groups)
+  ssp_keys     <- vapply(scen_nms, .normalise_ssp, character(1))
+  fore_yrs_raw <- suppressWarnings(
+    vapply(scen_nms, function(nm) as.integer(.parse_year(nm)), integer(1))
+  )
   predicted_vals  <- kde_data$predicted_vals  %||% numeric(0)
   actual_vals     <- kde_data$actual_vals     %||% numeric(0)
 
