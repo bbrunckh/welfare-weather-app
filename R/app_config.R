@@ -29,7 +29,7 @@ get_golem_config <- function(
   nzchar(Sys.getenv("DATABRICKS_HOST"))          &&
   nzchar(Sys.getenv("DATABRICKS_CLIENT_ID"))     &&
   nzchar(Sys.getenv("DATABRICKS_CLIENT_SECRET")) &&
-  nzchar(Sys.getenv("DATABRICKS_STORAGE_PATH"))
+  nzchar(Sys.getenv("DATABRICKS_VOLUME_PATH"))
 }
 
 #' TRUE when deployed on Posit Connect

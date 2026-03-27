@@ -154,7 +154,7 @@ mod_0_overview_server <- function(id) {
           passwordInput(ns("db_client_secret"), "Client secret", placeholder = ""),
           textInput(ns("db_volume_path"),
                     "Volume path",
-                    placeholder = "/Volumes/prd_decdg/swisea170/vwisea170/Documents"),
+                    placeholder = "/Volumes/..."),
           helpText(
             "Set DATABRICKS_HOST, DATABRICKS_CLIENT_ID, DATABRICKS_CLIENT_SECRET,",
             "and DATABRICKS_VOLUME_PATH in .Renviron to leave all fields blank.",
@@ -233,6 +233,12 @@ mod_0_overview_server <- function(id) {
         params <- build_connection_params("databricks")
         message("[overview] auto-connecting to Databricks (Posit Connect)")
         applied_connection(params)
+
+        survey_list(load_data("survey_list.csv", params, collect = TRUE))
+        variable_list(load_data("variable_list.csv", params, collect = TRUE))
+        cpi_ppp(load_data("cpi_ppp.csv", params, collect = TRUE))
+        pov_lines(default_poverty_lines())
+
         output$connection_status_ui <- renderUI({
           p(icon("circle-check"), " Connected to Databricks.",
             style = "color: #2e7d32; font-size: 12px; margin-top: 4px;")
