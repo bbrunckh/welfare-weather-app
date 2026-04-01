@@ -10,11 +10,11 @@
 
 #' Filter a variable list to weather variables
 #'
-#' @param variable_list A data frame with columns `weather` (0/1), `name`,
+#' @param variable_list A data frame with columns `hazard` (0/1), `name`,
 #'   `label`, and `units`.
 #'
 #' @return A data frame with columns `name`, `label`, `units` filtered to rows
-#'   where `weather == 1`.
+#'   where `hazard == 1`.
 #'
 #' @export
 get_weather_vars <- function(variable_list) {
@@ -23,7 +23,7 @@ get_weather_vars <- function(variable_list) {
                       units = character(), stringsAsFactors = FALSE))
   }
   variable_list |>
-    dplyr::filter(.data$weather == 1) |>
+    dplyr::filter(.data$hazard == 1) |>
     dplyr::select("name", "label", "units")
 }
 

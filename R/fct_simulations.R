@@ -28,11 +28,14 @@
 
 
 # Normalise any SSP token found in a scenario name to a canonical key
+# Strips trailing " / P{pct}" suffix first so keys like "SSP3-7.0 / 2030 / P50"
+# are handled identically to the old "SSP3-7.0 / 2030" format.
 # e.g. "SSP2" -> "SSP2-4.5", "SSP3-7.0" -> "SSP3-7.0", NA -> NA
 .normalise_ssp <- function(nm) {
-  m_full <- regmatches(nm, regexpr("SSP[0-9]-[0-9.]+", nm))
+  nm_clean <- sub(" / P[0-9]+$", "", nm)
+  m_full <- regmatches(nm_clean, regexpr("SSP[0-9]-[0-9.]+", nm_clean))
   if (length(m_full) > 0) return(m_full)
-  m_short <- regmatches(nm, regexpr("SSP([2-9])", nm))
+  m_short <- regmatches(nm_clean, regexpr("SSP([2-9])", nm_clean))
   if (length(m_short) == 0) return(NA_character_)
   digit  <- sub("SSP", "", m_short)
   lookup <- c("2" = "SSP2-4.5", "3" = "SSP3-7.0", "5" = "SSP5-8.5")
@@ -40,7 +43,9 @@
 }
 
 .parse_year <- function(nm) {
-  m <- regmatches(nm, regexpr("[0-9]{4}", nm))
+  # Strip percentile suffix before extracting year
+  nm_clean <- sub(" / P[0-9]+$", "", nm)
+  m <- regmatches(nm_clean, regexpr("[0-9]{4}", nm_clean))
   if (length(m) == 0) NA_character_ else m
 }
 
@@ -361,14 +366,15 @@ hist_aggregate_choices <- function(outcome_type, outcome_name = NULL) {
     c(
       "Mean"                    = "mean",
       "Median"                  = "median",
+      "Total"                   = "total",
       "Headcount Ratio (FGT0)"  = "headcount_ratio",
       "Outcome Gap (FGT1)"      = "gap",
       "Outcome Severity (FGT2)" = "fgt2",
       "Gini coefficient"        = "gini"
     )
   } else {
-    # All other numeric outcomes (hours, employment, etc.): mean and median only
-    c("Mean" = "mean", "Median" = "median")
+    # All other numeric outcomes (hours, employment, etc.): mean, median, total
+    c("Mean" = "mean", "Median" = "median", "Total" = "total")
   }
 }
 
@@ -442,7 +448,7 @@ aggregate_outcome <- function(df,
                               outcome,
                               group     = "sim_year",
                               type      = c("continuous", "binary"),
-                              aggregate = c("mean", "sum", "median",
+                              aggregate = c("mean", "sum", "total", "median",
                                             "headcount_ratio", "gap", "fgt2", "gini"),
                               pov_line  = NULL,
                               weights   = NULL) {
@@ -452,6 +458,8 @@ aggregate_outcome <- function(df,
   # share). Skip match.arg so UI values like "binary" don't cause an error.
   if (type != "binary") {
     aggregate <- match.arg(aggregate)
+    # 'total' is a user-facing alias for 'sum'
+    if (aggregate == "total") aggregate <- "sum"
   }
 
   gini_coef <- function(x, w) {

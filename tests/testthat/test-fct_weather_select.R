@@ -7,7 +7,7 @@ make_var_info <- function() {
     name    = c("tx", "pr", "spi6"),
     label   = c("Max temp", "Precipitation", "SPI-6"),
     units   = c("°C", "mm", ""),
-    weather = c(1L, 1L, 1L),
+    hazard  = c(1L, 1L, 1L),
     stringsAsFactors = FALSE
   )
 }
@@ -16,10 +16,10 @@ make_var_info <- function() {
 # get_weather_vars                                                             #
 # ============================================================================ #
 
-test_that("get_weather_vars filters to weather == 1", {
+test_that("get_weather_vars filters to hazard == 1", {
   vl <- rbind(make_var_info(),
               data.frame(name = "age", label = "Age", units = "years",
-                         weather = 0L, stringsAsFactors = FALSE))
+                         hazard = 0L, stringsAsFactors = FALSE))
   out <- get_weather_vars(vl)
   expect_equal(nrow(out), 3L)
   expect_false("age" %in% out$name)

@@ -28,7 +28,7 @@ list_available_files <- function(connection_params) {
   if (identical(connection_params$type, "local")) {
     path <- connection_params$path %||% ""
     if (!nzchar(path) || !dir.exists(path)) return(character(0))
-    list.files(path, recursive = FALSE)
+    list.files(path, recursive = TRUE)
   } else {
     # Remote sources (S3, GCS, Azure, HF) cannot cheaply list files without
     # provider-specific ListObjects calls. Return NULL to skip existence filter.
@@ -67,7 +67,8 @@ build_survey_fnames <- function(survey_list, unit, connection_params) {
   survey_list |>
     dplyr::filter(.data$level == unit) |>
     dplyr::mutate(
-      fname = paste0(.data$code, "_", .data$year, "_", .data$survname, "_", unit, ".parquet"),
+      fname = paste0("microdata/",unit, "/", .data$code, "/",
+      .data$code, "_", .data$year, "_", .data$survname, "_", .data$source, "_", unit, ".parquet"),
       fpath = if (is_local) file.path(base_path, .data$fname) else .data$fname
     )
 }

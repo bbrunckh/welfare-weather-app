@@ -11,22 +11,19 @@
 
 #' Add derived time columns to a survey data frame
 #'
-#' Constructs `timestamp` (first day of interview month/year), `month`
-#' (integer 1-12), and `countryyear` (character label) from the integer
+#' Constructs `month` (integer 1-12), and `countryyear` (character label) from the integer
 #' columns `int_year` and `int_month` that are present in raw survey parquet
 #' files.
 #'
 #' @param df A data frame containing integer columns `int_year`, `int_month`,
 #'   `economy`, and `year`.
 #'
-#' @return `df` with three additional columns: `timestamp` (Date),
-#'   `month` (integer), and `countryyear` (character).
+#' @return `df` with two additional columns: `month` (integer), and `countryyear` (character).
 #'
 #' @export
 add_time_columns <- function(df) {
   df |>
     dplyr::mutate(
-      timestamp   = as.Date(paste0(int_year, "-", int_month, "-01")),
       month       = lubridate::month(timestamp),
       countryyear = paste0(economy, ", ", year)
     )

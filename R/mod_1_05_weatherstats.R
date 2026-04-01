@@ -66,6 +66,7 @@ mod_1_05_weatherstats_server <- function(
 
       sw  <- selected_weather()
       svy <- survey_data()
+      ss  <- selected_surveys()
 
       # -- Load weather -------------------------------------------------------
       notif_load <- showNotification("Loading weather data...", duration = NULL, type = "message")
@@ -73,10 +74,11 @@ mod_1_05_weatherstats_server <- function(
       loc_wd <- tryCatch({
         get_weather(
           survey_data       = svy,
+          selected_surveys  = ss,
           selected_weather  = sw,
           dates             = extract_survey_dates(svy),
           connection_params = connection_params()
-        )$result
+        )$historical
       }, error = function(e) {
         removeNotification(notif_load)
         shiny::showNotification(

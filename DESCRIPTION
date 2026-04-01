@@ -44,4 +44,5 @@ Imports:
     patchwork,
     stats,
     tools,
-    ranger
+    ranger,
+    pkgload

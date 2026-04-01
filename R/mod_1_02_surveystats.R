@@ -106,9 +106,12 @@ mod_1_02_surveystats_server <- function(
       survey_data(df)
 
       # ---- H3 map data (computed once per button click) -------------------
-      h3_fnames <- df |>
-        dplyr::distinct(code, year, survname) |>
-        dplyr::mutate(fname = paste0(code, "_", year, "_", survname, "_h3.parquet")) |>
+      h3_fnames <- ss |>
+        dplyr::distinct(code, year, survname, source) |>
+        dplyr::mutate(fname = paste0(
+          "microdata/h3/", code, "/",
+          code, "_", year, "_", survname, "_", source, "_h3.parquet"
+        )) |>
         dplyr::pull(fname)
 
       h3_df <- tryCatch(

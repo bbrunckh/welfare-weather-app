@@ -54,8 +54,7 @@ mod_0_overview_ui <- function(id) {
       style = "width: 100%;"
     ),
     br(), br(),
-    verbatimTextOutput(ns("folder_path_echo")),
-    verbatimTextOutput(ns("folder_contents_echo"))
+    verbatimTextOutput(ns("folder_path_echo"))
   )
 }
 
@@ -234,9 +233,9 @@ mod_0_overview_server <- function(id) {
         message("[overview] auto-connecting to Databricks (Posit Connect)")
         applied_connection(params)
 
-        survey_list(load_data("survey_list.csv", params, collect = TRUE))
-        variable_list(load_data("variable_list.csv", params, collect = TRUE))
-        cpi_ppp(load_data("cpi_ppp.csv", params, collect = TRUE))
+        survey_list(load_data("metadata/survey_list.csv", params, collect = TRUE))
+        variable_list(load_data("metadata/variable_list.csv", params, collect = TRUE))
+        cpi_ppp(load_data("metadata/cpi_ppp.csv", params, collect = TRUE))
         pov_lines(default_poverty_lines())
 
         output$connection_status_ui <- renderUI({
@@ -278,24 +277,24 @@ mod_0_overview_server <- function(id) {
       on.exit(removeNotification(load_notif), add = TRUE)
 
       tryCatch({
-        survey_list(load_data("survey_list.csv", params, collect = TRUE))
+        survey_list(load_data("metadata/survey_list.csv", params, collect = TRUE))
         showNotification(paste0("Survey list loaded (", nrow(survey_list()), " rows)"), type = "message", duration = 2)
       }, error = function(e) {
-        showNotification("Failed to load survey_list.csv", type = "error", duration = 5)
+        showNotification("Failed to load metadata/survey_list.csv", type = "error", duration = 5)
       })
 
       tryCatch({
-        variable_list(load_data("variable_list.csv", params, collect = TRUE))
+        variable_list(load_data("metadata/variable_list.csv", params, collect = TRUE))
         showNotification(paste0("Variable list loaded (", nrow(variable_list()), " rows)"), type = "message", duration = 2)
       }, error = function(e) {
-        showNotification("Failed to load variable_list.csv", type = "error", duration = 5)
+        showNotification("Failed to load metadata/variable_list.csv", type = "error", duration = 5)
       })
 
       tryCatch({
-        cpi_ppp(load_data("cpi_ppp.csv", params, collect = TRUE))
+        cpi_ppp(load_data("metadata/cpi_ppp.csv", params, collect = TRUE))
         showNotification("CPI / PPP conversions loaded", type = "message", duration = 2)
       }, error = function(e) {
-        showNotification("Failed to load cpi_ppp.csv", type = "error", duration = 5)
+        showNotification("Failed to load metadata/cpi_ppp.csv", type = "error", duration = 5)
       })
 
       showNotification(paste0("Connected to ", input$connection_type, " data source."), type = "message", duration = 3)
@@ -312,15 +311,6 @@ mod_0_overview_server <- function(id) {
       if (is.null(p)) return("No connection applied yet.")
       if (identical(p$type, "local")) paste0("Connected: local folder — ", p$path)
       else paste0("Connected: ", p$type)
-    })
-
-    output$folder_contents_echo <- renderText({
-      p <- applied_connection()
-      if (is.null(p) || !identical(p$type, "local")) return(NULL)
-      if (!dir.exists(p$path)) return(paste0("Path does not exist: ", p$path))
-      files <- list.files(p$path, recursive = FALSE)
-      if (length(files) == 0) return("Folder is empty.")
-      paste(files, collapse = "\n")
     })
 
     # ---- Return API ---------------------------------------------------------
