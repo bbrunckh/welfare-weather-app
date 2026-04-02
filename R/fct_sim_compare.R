@@ -111,8 +111,26 @@ label_deviation <- function(key) {
   )
 }
 
+# ---- Internal: sort percentile / member labels within one SSP x year group -
+# Percentile mode (all labels match "P{digits}"): sorted numerically ascending.
+# All-members mode: sorted by ascending mean value within the group.
+.sort_pct_labels <- function(pcts, fut_df, ssp, yr) {
+  is_pct <- all(grepl("^P[0-9]+$", pcts))
+  if (is_pct) {
+    nums <- as.integer(sub("^P", "", pcts))
+    return(pcts[order(nums)])
+  }
+  # All-members: sort by mean value ascending
+  means <- vapply(pcts, function(p) {
+    rows <- fut_df$ssp_short == ssp & fut_df$yr == yr & fut_df$pct_label == p
+    if (!any(rows)) return(NA_real_)
+    fut_df$mean[rows][1]
+  }, numeric(1))
+  pcts[order(means, na.last = TRUE)]
+}
+
 # ---------------------------------------------------------------------------- #
-# HERO: Grouped point-range chart (mean + 90% CI + 95% CI)                    #
+# Grouped point-range chart (mean + 90% CI + 95% CI)                    #
 # ---------------------------------------------------------------------------- #
 
 #' Grouped Point-Range Chart Comparing Scenarios
@@ -221,6 +239,13 @@ plot_pointrange_climate <- function(scenarios, hist_agg,
         yr_col    <- colorspace::lighten(base_col, yr_lighten[i])
         pcts_here <- unique(fut_df$pct_label[
           fut_df$ssp_key == ssp & fut_df$yr == yrs_present[i]])
+        # Sort so the lighten ramp aligns with x-axis order:
+        # numeric order for P{n} mode, ascending mean for all-members mode.
+        pcts_here <- .sort_pct_labels(
+          pcts_here, fut_df,
+          ssp_short_map[ssp] %||% ssp,
+          yrs_present[i]
+        )
         n_pcts    <- length(pcts_here)
         lighten_vals <- if (all(pcts_here %in% names(pct_lighten_named))) {
           pct_lighten_named[pcts_here]
@@ -253,10 +278,7 @@ plot_pointrange_climate <- function(scenarios, hist_agg,
         for (ssp in ssps_present) {
           pcts_here <- unique(fut_df$pct_label[
             fut_df$ssp_short == ssp & fut_df$yr == yr_i])
-          pcts_here <- c(
-            intersect(c("P10", "P50", "P90"), pcts_here),
-            setdiff(pcts_here, c("P10", "P50", "P90"))
-          )
+          pcts_here <- .sort_pct_labels(pcts_here, fut_df, ssp, yr_i)
           ordered_levels <- c(ordered_levels,
             paste0(ssp, "\n", yr_i, "\n", pcts_here))
         }
@@ -273,10 +295,7 @@ plot_pointrange_climate <- function(scenarios, hist_agg,
         for (yr_i in ssp_yrs) {
           pcts_here <- unique(fut_df$pct_label[
             fut_df$ssp_short == ssp & fut_df$yr == yr_i])
-          pcts_here <- c(
-            intersect(c("P10", "P50", "P90"), pcts_here),
-            setdiff(pcts_here, c("P10", "P50", "P90"))
-          )
+          pcts_here <- .sort_pct_labels(pcts_here, fut_df, ssp, yr_i)
           ordered_levels <- c(ordered_levels,
             paste0(ssp, "\n", yr_i, "\n", pcts_here))
         }
@@ -285,18 +304,15 @@ plot_pointrange_climate <- function(scenarios, hist_agg,
   }
 
   # Show axis label on the centre tick of each SSP x year group.
-  # Percentile mode: centre = P50, flanks (P10/P90) blank.
-  # All-members mode: centre = middle member, others show member name only.
+  # Percentile mode: centre = median percentile, flanks blank.
+  # All-members mode: centre = middle member (by mean), others show member name only.
   centre_ticks <- character(0)
   if (!is.null(fut_df) && nrow(fut_df) > 0) {
     for (ssp in unique(fut_df$ssp_short)) {
       for (yr_i in unique(fut_df$yr[fut_df$ssp_short == ssp])) {
         grp_pcts <- unique(fut_df$pct_label[
           fut_df$ssp_short == ssp & fut_df$yr == yr_i])
-        grp_pcts <- c(
-          intersect(c("P10", "P50", "P90"), grp_pcts),
-          setdiff(grp_pcts, c("P10", "P50", "P90"))
-        )
+        grp_pcts <- .sort_pct_labels(grp_pcts, fut_df, ssp, yr_i)
         mid <- grp_pcts[ceiling(length(grp_pcts) / 2)]
         centre_ticks <- c(centre_ticks, paste0(ssp, "\n", yr_i, "\n", mid))
       }
@@ -308,9 +324,9 @@ plot_pointrange_climate <- function(scenarios, hist_agg,
       if (lv %in% spacer_ids) return("")
       if (lv == "Historical")  return(lv)
       if (is_pct_mode) {
-        # Percentile mode: show SSP+period on P50, blank on P10/P90
-        if (grepl("\nP50$", lv))          return(sub("\nP50$", "", lv))
-        if (grepl("\nP(10|90)$", lv))     return("")
+        # Percentile mode: show SSP+period on centre tick, blank on all flanks
+        if (lv %in% centre_ticks)          return(sub("\n[^\n]+$", "", lv))
+        if (grepl("\nP[0-9]+$", lv))       return("")
         return(lv)
       } else {
         # All-members: show SSP+period on centre tick, member name on others
