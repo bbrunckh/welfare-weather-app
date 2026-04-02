@@ -234,6 +234,9 @@
     if (is.na(cont_binned) || cont_binned != "Binned") next
 
     haz_vals <- ref_df[[v]][is.finite(ref_df[[v]])]
+    
+    # sort for consistent quantile breaks and k-means results
+    haz_vals <- sort(haz_vals)
 
     cutoffs <- switch(binning_method,
       "Equal frequency" = {
@@ -416,6 +419,7 @@ get_weather <- function(
   )
   if (needs_climate_ref) {
     date_min <- min(date_min, seq.Date(as.Date("1991-01-01"), by = paste0("-", max_lag, " months"), length.out = 2L)[[2L]])
+    date_max <- max(date_max, as.Date("2020-12-31"))
   }
 
   # -- Load weather lazily -------------------------------------------------------
@@ -513,10 +517,36 @@ get_weather <- function(
     any(!is.na(selected_weather$cont_binned) & selected_weather$cont_binned == "Binned")
 
   if (has_binning) {
-    # Bin breaks are always derived from the *survey-period* distribution of
-    # the fully constructed (rolled + transformed) but *unperturbed* weather.
+    # Bin breaks are derived from:
+    #   (a) columns already present in survey_data (same-named weather vars), or
+    #   (b) the survey-period slice of the rolled+transformed historical result.
+    # Per-variable, (a) takes priority over (b) so that pre-computed breaks
+    # from an earlier pipeline stage are respected.
     survey_timestamps <- unique(survey_data$timestamp[!is.na(survey_data$timestamp)])
-    bin_ref <- result[["historical"]][result[["historical"]]$timestamp %in% survey_timestamps, ]
+    hist_ref <- result[["historical"]][result[["historical"]]$timestamp %in% survey_timestamps, ]
+
+    binned_vars <- selected_weather$name[
+      !is.na(selected_weather$cont_binned) & selected_weather$cont_binned == "Binned"
+    ]
+
+    # For each binned variable, prefer the raw column from survey_data
+    # (if it exists and is numeric) over the rolled historical values —
+    # BUT only when no transformation is active.  If a transformation is
+    # applied (deviation-from-mean, standardised anomaly, …) then
+    # survey_data[[bv]] holds pre-transformation values on a different
+    # scale than hist_ref, so using them would derive breaks in the wrong
+    # domain and produce degenerate / non-reproducible bins.
+    bin_ref <- hist_ref
+    for (bv in binned_vars) {
+      sw_row         <- selected_weather[selected_weather$name == bv, ]
+      transformation <- if (nrow(sw_row) > 0L) sw_row$transformation[[1L]] else NA
+      no_transform   <- is.na(transformation) || transformation == "None"
+
+      if (no_transform && bv %in% names(survey_data) && is.numeric(survey_data[[bv]])) {
+        bin_ref[[bv]] <- survey_data[[bv]]
+      }
+    }
+
     stored_breaks <- .compute_breaks(bin_ref, selected_weather)
 
     # Apply to historical slice immediately

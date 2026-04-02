@@ -98,23 +98,49 @@ mod_2_01_weathersim_ui <- function(id) {
 
       shiny::tags$hr(style = "margin: 6px 0;"),
 
-      # -- Ensemble percentiles -----------------------------------------------
-      shiny::tags$h6("Ensemble model spread",
+      # -- Ensemble spread -----------------------------------------------
+      shiny::tags$h6("Ensemble model uncertainty",
                      style = "font-weight:600; margin-bottom:4px;"),
       shiny::radioButtons(
         inputId  = ns("ensemble_choice"),
         label    = NULL,
         choices  = c(
-          "All members"                    = "all",
-          "Percentiles (P10, P50, P90)"    = "percentiles"
+          "Percentiles"    = "percentiles",
+          "All members"    = "all"
         ),
         selected = "percentiles"
       ),
 
-      shiny::tags$hr(style = "margin: 6px 0;"),
+      shiny::helpText(tags$b("Note:"), " CMIP6 climate projections include multiple model runs (\"ensemble members\")",
+        " that reflect uncertainty in future climate outcomes for a given SSP. The default is to show key percentiles of the ensemble spread.",
+      style = "font-size: 11px; color: #555; margin-top: 2px; margin-bottom: 8px;"
+      ),
+
+      # -- Ensemble spread percentiles ---------------------------------------
+
+      # conditional UI: only show if "Percentiles" is selected
+      shiny::conditionalPanel(
+        condition = paste0("input['", ns("ensemble_choice"), "'] == 'percentiles'"),
+          
+        shiny::tags$h6("Ensemble percentiles",
+                        style = "font-weight:400; margin-bottom:4px;"),
+
+        # Percentiles
+        shiny::tags$div(
+          style = "display:flex; gap:8px; align-items:center; margin-bottom:4px;",
+          shiny::numericInput(ns("ssp_p_1"), label = NULL, value = 10,
+                              min = 1, max = 99, step = 1, width = "60px"),
+          shiny::numericInput(ns("ssp_p_2"), label = NULL, value = 50,
+                              min = 1, max = 99, step = 1, width = "60px"),
+          shiny::numericInput(ns("ssp_p_3"), label = NULL, value = 90,
+                              min = 1, max = 99, step = 1, width = "60px")
+        ),
+    ),
+
+    shiny::tags$hr(style = "margin: 6px 0;"),
 
       # -- Residual method ----------------------------------------------------
-      shiny::tags$h6("Residual method",
+      shiny::tags$h6("Simulation residuals",
                      style = "font-weight:600; margin-bottom:4px;"),
       shiny::radioButtons(
         inputId  = ns("residuals"),
@@ -297,7 +323,9 @@ mod_2_01_weathersim_server <- function(id,
     })
 
     ensemble_percentiles <- reactive({
-      if (identical(input$ensemble_choice, "all")) NULL else c(10, 50, 90)
+      if (identical(input$ensemble_choice, "all")) NULL else 
+      # selected percentiles, sorted and returned as numeric vector (e.g. c(10, 50, 90)), shortened if any are NA or invalid
+      sort(unique(na.omit(c(input$ssp_p_1, input$ssp_p_2, input$ssp_p_3))))
     })
 
     # ---- Run simulation on button click ------------------------------------

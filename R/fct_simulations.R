@@ -358,23 +358,33 @@ apply_log_backtransform <- function(preds, so) {
 #' @export
 hist_aggregate_choices <- function(outcome_type, outcome_name = NULL) {
   if (identical(outcome_type, "logical")) {
-    # Binary outcomes: Mean and Median
-    c("Mean" = "mean", "Median" = "median")
+    # Binary outcomes: Mean
+    c("Mean" = "mean")
   } else if (identical(outcome_type, "numeric") &&
              identical(outcome_name, "welfare")) {
-    # Welfare / monetary outcomes: full suite including FGT and Gini
+    # Welfare outcomes: full suite including FGT, Gini, prosperity gap, and average poverty
+    c(
+      "Mean"                     = "mean",
+      "Median"                   = "median",
+      "Total"                    = "total",
+      "Poverty rate"             = "headcount_ratio",
+      "Poverty Gap"              = "gap",
+      "Poverty Severity"         = "fgt2",
+      "Gini"                     = "gini",
+      "Prosperity gap"           = "prosperity_gap",
+      "Average poverty (days/$)" = "avg_poverty"
+    )
+  } else {
+    # All other numeric outcomes (wage, hours, employment, etc.)
     c(
       "Mean"                    = "mean",
       "Median"                  = "median",
       "Total"                   = "total",
-      "Headcount Ratio (FGT0)"  = "headcount_ratio",
-      "Outcome Gap (FGT1)"      = "gap",
-      "Outcome Severity (FGT2)" = "fgt2",
-      "Gini coefficient"        = "gini"
+      "Outcome headcount ratio" = "headcount_ratio",
+      "Outcome gap"             = "gap",
+      "Outcome severity"        = "fgt2",
+      "Gini"                    = "gini"
     )
-  } else {
-    # All other numeric outcomes (hours, employment, etc.): mean, median, total
-    c("Mean" = "mean", "Median" = "median", "Total" = "total")
   }
 }
 
@@ -449,7 +459,8 @@ aggregate_outcome <- function(df,
                               group     = "sim_year",
                               type      = c("continuous", "binary"),
                               aggregate = c("mean", "sum", "total", "median",
-                                            "headcount_ratio", "gap", "fgt2", "gini"),
+                                            "headcount_ratio", "gap", "fgt2", "gini",
+                                            "prosperity_gap", "avg_poverty"),
                               pov_line  = NULL,
                               weights   = NULL) {
 
@@ -516,7 +527,24 @@ aggregate_outcome <- function(df,
           if (is.null(w)) mean(shortfall^2, na.rm = TRUE)
           else sum((shortfall^2) * w, na.rm = TRUE) / sum(w, na.rm = TRUE)
         },
-        gini            = gini_coef(x, w)
+        gini            = gini_coef(x, w),
+        prosperity_gap  = {
+          # Average factor by which incomes must be multiplied to reach $28/day.
+          # For incomes already >= 28 the gap factor is 1 (no gap).
+          pg <- pmax(28 / x, 1)
+          if (is.null(w)) mean(pg, na.rm = TRUE)
+          else sum(pg * w, na.rm = TRUE) / sum(w, na.rm = TRUE)
+        },
+        avg_poverty     = {
+          # Average poverty = mean(1 / x): days needed to earn $1.
+          # Non-positive incomes are excluded to avoid Inf / NaN.
+          ok <- is.finite(x) & x > 0
+          xp <- x[ok]
+          wp <- if (!is.null(w)) w[ok] else NULL
+          if (length(xp) == 0) return(NA_real_)
+          if (is.null(wp)) mean(1 / xp, na.rm = TRUE)
+          else sum((1 / xp) * wp, na.rm = TRUE) / sum(wp, na.rm = TRUE)
+        }
       )
     }
   }
