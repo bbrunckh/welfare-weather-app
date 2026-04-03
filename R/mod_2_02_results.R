@@ -160,8 +160,8 @@ mod_2_02_results_server <- function(id,
     all_anchor_years <- reactive({
       sc <- saved_scenarios()
       if (length(sc) == 0) return(character(0))
-      ranges <- .parse_year(names(sc))
-      unique(ranges)
+      ranges <- sort(na.omit(unique(.parse_year(names(sc)))))
+      setNames(sub("-", "_", ranges), ranges)
     })
 
     all_percentiles <- reactive({
@@ -180,18 +180,19 @@ mod_2_02_results_server <- function(id,
     })
 
     selected_scenario_names <- reactive({
-      sc <- saved_scenarios()
+      sc   <- saved_scenarios()
       if (length(sc) == 0) return(character(0))
       nms  <- names(sc)
-      ssps <- if (length(input$filter_ssp)  == 0) all_ssps()         else input$filter_ssp
-      yrs  <- if (length(input$filter_year) == 0) all_anchor_years() else input$filter_year
-      pcts <- if (length(input$filter_pct)  == 0) all_percentiles()  else input$filter_pct
+      ssps <- if (length(input$filter_ssp)  == 0) all_ssps()                          else input$filter_ssp
+      # Decode safe values back to "YYYY-YYYY" ranges for grepl matching
+      yr_vals <- if (length(input$filter_year) == 0) names(all_anchor_years())        else sub("_", "-", input$filter_year)
+      pcts <- if (length(input$filter_pct)  == 0) all_percentiles()                   else input$filter_pct
       keep <- vapply(nms, function(nm) {
         is_ssp <- grepl("^SSP", nm)
         if (!is_ssp) return(TRUE)
         ssp_match <- any(vapply(ssps, function(s) startsWith(nm, s), logical(1)))
-        yr_match  <- length(yrs) == 0 ||
-          any(vapply(yrs, function(y) grepl(y, nm, fixed = TRUE), logical(1)))
+        yr_match  <- length(yr_vals) == 0 ||
+          any(vapply(yr_vals, function(y) grepl(y, nm, fixed = TRUE), logical(1)))
         pct_match <- length(pcts) == 0 ||
           any(vapply(pcts, function(p) grepl(paste0("/ ", p, "$"), nm), logical(1)))
         ssp_match && yr_match && pct_match
@@ -284,30 +285,30 @@ mod_2_02_results_server <- function(id,
     output$scenario_filter_ui <- renderUI({
       sc <- saved_scenarios()
       if (length(sc) == 0)
-        return(shiny::helpText("Run a simulation with future periods to add climate scenarios."))
+        return(shiny::helpText("Run a simulation."))
       ssps <- all_ssps()
       yrs  <- all_anchor_years()
       pcts <- all_percentiles()
       tagList(
         shiny::fluidRow(
           shiny::column(4,
-            if (length(ssps) > 0)
+            if (length(yrs) > 0)
               shiny::checkboxGroupInput(
-                ns("filter_ssp"), label = "Climate scenario",
-                choices = ssps, selected = ssps, inline = TRUE
+                ns("filter_year"), label = "Projection periods",
+                choices = yrs, selected = yrs, inline = TRUE
               )
           ),
           shiny::column(4,
-            if (length(yrs) > 0)
+            if (length(ssps) > 0)
               shiny::checkboxGroupInput(
-                ns("filter_year"), label = "Future period",
-                choices = yrs, selected = yrs, inline = TRUE
+                ns("filter_ssp"), label = "SSPs",
+                choices = ssps, selected = ssps, inline = TRUE
               )
           ),
           shiny::column(4,
             if (length(pcts) > 0)
               shiny::checkboxGroupInput(
-                ns("filter_pct"), label = "Ensemble percentile",
+                ns("filter_pct"), label = "Ensemble percentiles",
                 choices = pcts, selected = pcts, inline = TRUE
               )
           )

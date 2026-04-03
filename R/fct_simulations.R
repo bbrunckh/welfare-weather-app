@@ -43,10 +43,17 @@
 }
 
 .parse_year <- function(nm) {
-  # Strip percentile suffix before extracting year
-  nm_clean <- sub(" / P[0-9]+$", "", nm)
-  m <- regmatches(nm_clean, regexpr("[0-9]{4}", nm_clean))
-  if (length(m) == 0) NA_character_ else m
+  if (length(nm) == 1L) {
+    m <- regexpr("\\d{4}-\\d{4}", nm)
+    if (m == -1L) return(NA_character_)
+    return(regmatches(nm, m))
+  }
+  # Vectorised path
+  m <- gregexpr("\\d{4}-\\d{4}", nm)
+  vapply(seq_along(nm), function(i) {
+    matches <- regmatches(nm[i], m[i])[[1]]
+    if (length(matches) == 0) NA_character_ else matches[1]
+  }, character(1))
 }
 
 # ---------------------------------------------------------------------------- #

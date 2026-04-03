@@ -75,20 +75,6 @@ label_deviation <- function(key) {
   )
 }
 
-.parse_year <- function(nm) {
-  if (length(nm) == 1L) {
-    m <- regexpr("\\d{4}-\\d{4}", nm)
-    if (m == -1L) return(NA_character_)
-    return(regmatches(nm, m))
-  }
-  # Vectorised path
-  m <- gregexpr("\\d{4}-\\d{4}", nm)
-  vapply(seq_along(nm), function(i) {
-    matches <- regmatches(nm[i], m[i])[[1]]
-    if (length(matches) == 0) NA_character_ else matches[1]
-  }, character(1))
-}
-
 #' Extract ensemble percentile label from a scenario key.
 #' @param nm Character. e.g. "SSP2-4.5 / 2050 / P50".
 #' @return e.g. "P50", or NA_character_ for keys without a percentile suffix.

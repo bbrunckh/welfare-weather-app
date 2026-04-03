@@ -30,7 +30,7 @@ Imports:
     DBI,
     dbplyr,
     leaflet,
-    sf,
+    colorspace,
     htmltools,
     broom,
     fixest,

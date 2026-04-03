@@ -1,10 +1,5 @@
-#' Harmonise H3 cell identifiers between microdata and weather lazy tables.
-#'
-#' Microdata H3 cells are stored as **strings** (e.g. `"8928308280fffff"`);
-#' weather (and CMIP6) H3 cells are stored as **bigint / int64**.  The two
-#' datasets may also be at different H3 resolutions — the weather grid is
-#' often coarser (lower resolution number) than the microdata grid.
-#'
+#' Harmonise H3 resolution and type between microdata and weather tables.
+#' 
 #' This helper:
 #' 1. Detects the H3 resolution of each table by sampling one row.
 #' 2. Chooses the **coarser** (lower numeric) resolution as the join key.
@@ -364,7 +359,8 @@ get_weather <- function(
   epsilon              = 0.001,
   weather_source       = "era5land",
   proj_source          = "cmip6",
-  ensemble_percentiles = c(10, 50, 90)
+  ensemble_percentiles = c(10, 50, 90),
+  stored_breaks        = NULL
 ) {
 
   # -- Validate ---------------------------------------------------------------
@@ -517,37 +513,13 @@ get_weather <- function(
     any(!is.na(selected_weather$cont_binned) & selected_weather$cont_binned == "Binned")
 
   if (has_binning) {
-    # Bin breaks are derived from:
-    #   (a) columns already present in survey_data (same-named weather vars), or
-    #   (b) the survey-period slice of the rolled+transformed historical result.
-    # Per-variable, (a) takes priority over (b) so that pre-computed breaks
-    # from an earlier pipeline stage are respected.
-    survey_timestamps <- unique(survey_data$timestamp[!is.na(survey_data$timestamp)])
-    hist_ref <- result[["historical"]][result[["historical"]]$timestamp %in% survey_timestamps, ]
+    if (is.null(stored_breaks) || length(stored_breaks) == 0) {
+      # First call (regression): compute breaks from survey-period historical data
+      survey_timestamps <- unique(survey_data$timestamp[!is.na(survey_data$timestamp)])
+      hist_ref <- result[["historical"]][result[["historical"]]$timestamp %in% survey_timestamps, ]
 
-    binned_vars <- selected_weather$name[
-      !is.na(selected_weather$cont_binned) & selected_weather$cont_binned == "Binned"
-    ]
-
-    # For each binned variable, prefer the raw column from survey_data
-    # (if it exists and is numeric) over the rolled historical values —
-    # BUT only when no transformation is active.  If a transformation is
-    # applied (deviation-from-mean, standardised anomaly, …) then
-    # survey_data[[bv]] holds pre-transformation values on a different
-    # scale than hist_ref, so using them would derive breaks in the wrong
-    # domain and produce degenerate / non-reproducible bins.
-    bin_ref <- hist_ref
-    for (bv in binned_vars) {
-      sw_row         <- selected_weather[selected_weather$name == bv, ]
-      transformation <- if (nrow(sw_row) > 0L) sw_row$transformation[[1L]] else NA
-      no_transform   <- is.na(transformation) || transformation == "None"
-
-      if (no_transform && bv %in% names(survey_data) && is.numeric(survey_data[[bv]])) {
-        bin_ref[[bv]] <- survey_data[[bv]]
-      }
+      stored_breaks <- .compute_breaks(hist_ref, selected_weather)
     }
-
-    stored_breaks <- .compute_breaks(bin_ref, selected_weather)
 
     # Apply to historical slice immediately
     result[["historical"]] <- .apply_binning(result[["historical"]], stored_breaks)
@@ -775,6 +747,11 @@ get_weather <- function(
   # -- Cleanup base temp table -----------------------------------------------
   con_cleanup <- dbplyr::remote_con(loc_weather_base)
   DBI::dbRemoveTable(con_cleanup, tmp_base_name)
+
+  # Attach computed breaks so the caller can reuse them in subsequent calls
+  if (has_binning && !is.null(stored_breaks)) {
+    attr(result, "stored_breaks") <- stored_breaks
+  }
 
   result
 }

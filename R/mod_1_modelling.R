@@ -183,7 +183,8 @@ mod_1_modelling_server <- function(id,
       # Data
       survey_data    = s2$survey_data,
       survey_weather = s5$survey_weather,
-      model_fit      = s7$model_fit
+      model_fit      = s7$model_fit,
+      stored_breaks  = s5$stored_breaks
     )
   })
 }

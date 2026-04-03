@@ -96,7 +96,7 @@ mod_1_04_weather_server <- function(id, variable_list, selected_surveys, survey_
               shiny::radioButtons(
                 ns(paste0(prefix, "contOrBinned")),
                 "Continuous or binned",
-                choices = c("Continuous", "Binned")
+                choices = c("Binned", "Continuous")
               ),
               shiny::conditionalPanel(
                 condition = paste0("input['", ns(paste0(prefix, "contOrBinned")), "'] == 'Binned'"),

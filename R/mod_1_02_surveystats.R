@@ -124,27 +124,36 @@ mod_1_02_surveystats_server <- function(
 
       if (!is.null(h3_df)) {
         tryCatch({
-          # Ensure the extensions are active on the existing connection
           con <- dbplyr::remote_con(h3_df)
-          DBI::dbExecute(con, "INSTALL spatial; LOAD spatial;")
-          DBI::dbExecute(con, "INSTALL h3; LOAD h3;")
+            .duck_load_ext("spatial")
+            .duck_load_ext("h3")
 
-          # Process and convert to sf
-          loc_sf <- h3_df |>
+          loc_df <- h3_df |>
             dplyr::summarise(
-              # These functions are passed as strings to DuckDB SQL
-              geom = st_aswkb(st_union_agg(st_geomfromtext(h3_cell_to_boundary_wkt(h3)))),
+              # Emit GeoJSON string directly from DuckDB — no WKB or sf needed
+              geom = st_asgeojson(st_union_agg(st_geomfromtext(h3_cell_to_boundary_wkt(h3)))),
               .by  = c(code, year, survname, loc_id)
             ) |>
-            # Pull data from database into R memory
-            dplyr::collect() |> 
-            # Convert the binary 'geom' column into an sf geometry list column
-            dplyr::mutate(
-              geom = sf::st_as_sfc(geom)
-            ) |>
-            # Finalize as an sf object with the correct CRS for leaflet
-            sf::st_as_sf(crs = 4326)
-          map_data(loc_sf[!sf::st_is_empty(loc_sf), ])
+            dplyr::collect() |>
+            dplyr::filter(!is.na(geom), nchar(geom) > 2)   # drop NULLs and empty "{}"
+
+          # Assemble a GeoJSON FeatureCollection
+          features <- lapply(seq_len(nrow(loc_df)), function(i) {
+            row <- loc_df[i, ]
+            list(
+              type     = "Feature",
+              geometry = jsonlite::fromJSON(row$geom),       # parse the geometry JSON string
+              properties = list(
+                code     = row$code,
+                year     = row$year,
+                survname = row$survname,
+                loc_id   = row$loc_id
+              )
+            )
+          })
+
+          geojson <- list(type = "FeatureCollection", features = features)
+          map_data(geojson)
 
         }, error = function(e) {
           notify(paste("Failed to build map data:", conditionMessage(e)), type = "warning", duration = 5)

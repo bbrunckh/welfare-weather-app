@@ -47,6 +47,7 @@ mod_1_05_weatherstats_server <- function(
 
     weather_tab_added <- reactiveVal(FALSE)
     survey_weather    <- reactiveVal(NULL)
+    stored_breaks     <- reactiveVal(NULL)
 
     # ---- Weather stats button -----------------------------------------------
 
@@ -71,14 +72,14 @@ mod_1_05_weatherstats_server <- function(
       # -- Load weather -------------------------------------------------------
       notif_load <- showNotification("Loading weather data...", duration = NULL, type = "message")
 
-      loc_wd <- tryCatch({
+      weather_full <- tryCatch({
         get_weather(
           survey_data       = svy,
           selected_surveys  = ss,
           selected_weather  = sw,
           dates             = extract_survey_dates(svy),
           connection_params = connection_params()
-        )$historical
+        )
       }, error = function(e) {
         removeNotification(notif_load)
         shiny::showNotification(
@@ -89,6 +90,13 @@ mod_1_05_weatherstats_server <- function(
       })
 
       removeNotification(notif_load)
+      req(!is.null(weather_full))
+
+      # Cache bin breaks so Step 2 simulation uses identical factor levels
+      brks <- attr(weather_full, "stored_breaks")
+      if (!is.null(brks)) stored_breaks(brks)
+
+      loc_wd <- weather_full$historical
       req(!is.null(loc_wd))
 
       # -- Merge with survey data ---------------------------------------------
@@ -241,6 +249,7 @@ mod_1_05_weatherstats_server <- function(
 
     # ---- Return API ---------------------------------------------------------
 
-    list(survey_weather = survey_weather)
+    list(survey_weather = survey_weather,
+         stored_breaks  = stored_breaks)
   })
 }

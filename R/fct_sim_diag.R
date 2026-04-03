@@ -85,9 +85,175 @@
     survey_weather$int_month <- as.integer(format(as.Date(survey_weather$timestamp), "%m"))
   if ("timestamp" %in% names(survey_weather))
     survey_weather$cal_year <- as.integer(format(as.Date(survey_weather$timestamp), "%Y"))
-  sw_years  <- unique(survey_weather$cal_year)
-  reg_filt  <- hist_filt[hist_filt$cal_year %in% sw_years, ]
+  sw_years <- unique(survey_weather$cal_year)
+  reg_filt <- hist_filt[hist_filt$cal_year %in% sw_years, ]
 
+  # ---- Detect variable type -------------------------------------------
+  raw_col   <- weather_raw[[weather_var]]
+  is_factor <- is.factor(raw_col) || is.character(raw_col) ||
+               (is.integer(raw_col) && length(unique(raw_col[is.finite(raw_col)])) <= 20)
+
+  # ======================================================================
+  # FACTOR / CATEGORICAL PATH
+  # ======================================================================
+      if (is_factor) {
+    # Preserve original factor levels for correct bin ordering on x-axis
+    raw_levels <- if (is.factor(raw_col)) levels(raw_col) else NULL
+
+    .to_ordered_factor <- function(x) {
+      x <- as.character(x)
+      if (!is.null(raw_levels)) {
+        factor(x, levels = raw_levels)
+      } else {
+        # No pre-existing levels: sort as-is but put special sentinels first
+        lvls <- sort(unique(x[!is.na(x)]))
+        factor(x, levels = lvls)
+      }
+    }
+
+    hist_vals <- .to_ordered_factor(hist_filt[[weather_var]])
+    hist_vals <- hist_vals[!is.na(hist_vals)]
+    if (length(hist_vals) == 0)
+      return(ggplot2::ggplot() + ggplot2::labs(title = "No values to plot."))
+
+    all_df <- data.frame(
+      value  = hist_vals,
+      source = "Full historical",
+      stringsAsFactors = FALSE
+    )
+
+    if (isTRUE(show_regression)) {
+      reg_vals_fct <- .to_ordered_factor(reg_filt[[weather_var]])
+      reg_vals_fct <- reg_vals_fct[!is.na(reg_vals_fct)]
+      if (length(reg_vals_fct) > 0)
+        all_df <- rbind(all_df, data.frame(
+          value  = reg_vals_fct,
+          source = "Regression input",
+          stringsAsFactors = FALSE
+        ))
+    }
+
+    if (!is.null(scenario_weather) && length(scenario_weather) > 0) {
+      visible_nms <- names(scenario_weather)
+      if (!is.null(active_scenarios))
+        visible_nms <- intersect(visible_nms, active_scenarios)
+      for (scen_nm in visible_nms) {
+        sw_df <- scenario_weather[[scen_nm]]
+        if (is.null(sw_df) || !weather_var %in% names(sw_df)) next
+        vals <- .to_ordered_factor(sw_df[[weather_var]])
+        vals <- vals[!is.na(vals)]
+        if (length(vals) == 0) next
+        all_df <- rbind(all_df, data.frame(
+          value  = vals,
+          source = scen_nm,
+          stringsAsFactors = FALSE
+        ))
+      }
+    }
+
+    # Re-apply factor with correct level order after rbind (which drops factor)
+    all_df$value <- factor(all_df$value,
+                           levels = if (!is.null(raw_levels)) raw_levels
+                                    else sort(unique(as.character(all_df$value))))
+
+    # Regression input overlay
+    if (isTRUE(show_regression)) {
+      reg_vals_chr <- as.character(reg_filt[[weather_var]])
+      reg_vals_chr <- reg_vals_chr[!is.na(reg_vals_chr)]
+      if (length(reg_vals_chr) > 0)
+        all_df <- rbind(all_df, data.frame(
+          value  = reg_vals_chr,
+          source = "Regression input",
+          stringsAsFactors = FALSE
+        ))
+    }
+
+    # SSP scenario overlays
+    if (!is.null(scenario_weather) && length(scenario_weather) > 0) {
+      visible_nms <- names(scenario_weather)
+      if (!is.null(active_scenarios))
+        visible_nms <- intersect(visible_nms, active_scenarios)
+      for (scen_nm in visible_nms) {
+        sw_df <- scenario_weather[[scen_nm]]
+        if (is.null(sw_df) || !weather_var %in% names(sw_df)) next
+        vals <- as.character(sw_df[[weather_var]])
+        vals <- vals[!is.na(vals)]
+        if (length(vals) == 0) next
+        all_df <- rbind(all_df, data.frame(
+          value  = vals,
+          source = scen_nm,
+          stringsAsFactors = FALSE
+        ))
+      }
+    }
+
+    all_df$source <- factor(all_df$source,
+                            levels = c("Full historical", "Regression input",
+                                       setdiff(unique(all_df$source),
+                                               c("Full historical", "Regression input"))))
+
+    sources    <- levels(all_df$source)
+    colour_map <- vapply(sources, function(s) {
+      if (s == "Full historical")  return("#808080")
+      if (s == "Regression input") return("#000000")
+      ssp_key <- .normalise_ssp(s)
+      if (!is.na(ssp_key) && ssp_key %in% names(.ssp_colours))
+        .ssp_colours[ssp_key] else "#cccccc"
+    }, character(1))
+    fill_map           <- colour_map
+    fill_map["Regression input"] <- NA  # no fill for regression — outline only
+
+    n_scen_shown <- length(unique(all_df$source)) -
+                    sum(c("Full historical", "Regression input") %in% all_df$source)
+
+    p <- ggplot2::ggplot(all_df,
+           ggplot2::aes(
+             x      = .data$value,
+             y      = ggplot2::after_stat(prop),
+             group  = .data$source,
+             fill   = .data$source,
+             colour = .data$source
+           )
+         ) +
+      ggplot2::geom_bar(
+        position  = ggplot2::position_dodge(preserve = "single"),
+        alpha     = 0.6,
+        linewidth = 0.4
+      ) +
+      ggplot2::scale_fill_manual(
+        values   = fill_map,
+        na.value = NA,
+        name     = NULL
+      ) +
+      ggplot2::scale_colour_manual(values = colour_map, name = NULL) +
+      ggplot2::scale_y_continuous(labels = scales::percent_format(accuracy = 1)) +
+      ggplot2::labs(
+        title    = disp_label,
+        subtitle = paste0(
+          "Hist: ", length(hist_vals), " cells",
+          if (isTRUE(show_regression)) {
+            reg_n <- sum(all_df$source == "Regression input")
+            if (reg_n > 0) paste0("  |  Reg: ", reg_n, " cells") else ""
+          } else "",
+          if (n_scen_shown > 0) paste0("  |  Scen: ", n_scen_shown) else ""
+        ),
+        x = disp_label,
+        y = "Relative frequency"
+      ) +
+      ggplot2::theme_minimal(base_size = 11) +
+      ggplot2::theme(
+        legend.position = if (show_legend) "bottom" else "none",
+        plot.subtitle   = ggplot2::element_text(size = 9, colour = "grey40"),
+        plot.title      = ggplot2::element_text(size = 11, face = "bold"),
+        axis.text.x     = ggplot2::element_text(angle = 30, hjust = 1)
+      )
+
+    return(p)
+  }
+
+  # ======================================================================
+  # CONTINUOUS PATH  (unchanged from original)
+  # ======================================================================
   hist_vals <- as.numeric(hist_filt[[weather_var]])
   hist_vals <- hist_vals[is.finite(hist_vals)]
   reg_vals  <- if (isTRUE(show_regression)) {
@@ -108,12 +274,8 @@
     if (!is.null(active_scenarios))
       visible_nms <- intersect(visible_nms, active_scenarios)
 
-    yr_of <- function(nm) {
-      m <- regmatches(nm, regexpr("[0-9]{4}", nm))
-      if (length(m) == 0L) NA_integer_ else as.integer(m)
-    }
     yrs_visible    <- vapply(visible_nms,
-                             function(nm) suppressWarnings(as.integer(.parse_year(nm))),
+                             function(nm) as.integer(sub("-.*", "", .parse_year(nm))),
                              integer(1))
     unique_yrs     <- sort(unique(yrs_visible[!is.na(yrs_visible)]))
     yr_lty_palette <- c("solid", "dashed", "dotted", "dotdash", "longdash")
@@ -131,7 +293,7 @@
       ssp_key <- .normalise_ssp(scen_nm)
       col     <- if (!is.na(ssp_key) && ssp_key %in% names(.ssp_colours))
         .ssp_colours[ssp_key] else "#cccccc"
-      yr_chr  <- as.character(suppressWarnings(as.integer(.parse_year(scen_nm))))
+      yr_chr  <- as.character(as.integer(sub("-.*", "", .parse_year(scen_nm))))
       lty     <- if (!is.na(yr_chr) && yr_chr %in% names(yr_lty_map))
         yr_lty_map[yr_chr] else "solid"
       ssp_colour_map[scen_nm]   <- col
@@ -144,7 +306,6 @@
     }
   }
 
-  # ---- Colour map: Full historical anchor + regression + scenarios ------
   colour_map   <- ssp_colour_map
   linetype_map <- ssp_linetype_map
   if (isTRUE(show_regression)) {
@@ -152,10 +313,8 @@
     linetype_map["Regression input"] <- "dashed"
   }
 
-  # ---- Build plot -------------------------------------------------------
   p <- ggplot2::ggplot()
 
-  # Full historical: grey fill + colour mapped for legend swatch
   p <- p + ggplot2::geom_density(
     data      = data.frame(value = hist_vals, stringsAsFactors = FALSE),
     mapping   = ggplot2::aes(x = .data$value, fill = "Full historical"),
@@ -164,7 +323,6 @@
     linewidth = 0.7
   )
 
-  # Regression input: black dashed line, no fill (only when show_regression)
   if (isTRUE(show_regression) && length(reg_vals) > 0) {
     p <- p + ggplot2::geom_density(
       data      = data.frame(value = reg_vals, source = "Regression input",
@@ -176,7 +334,6 @@
     )
   }
 
-  # SSP scenario overlay lines
   for (scen_nm in names(ssp_df_list)) {
     p <- p + ggplot2::geom_density(
       data      = ssp_df_list[[scen_nm]],
@@ -187,12 +344,6 @@
     )
   }
 
-  # Dual-scale legend:
-  #   scale_fill_manual  -- grey swatch for Full historical
-  #   scale_colour_manual -- dashed/coloured lines for Regression + SSPs
-  # Legend: fill swatch for Full historical; colour/linetype for lines.
-  # override.aes is intentionally avoided -- ggplot2 builds the correct
-  # grey fill swatch automatically from the fill = src mapping.
   fill_map_all <- c("Full historical" = "#808080")
 
   p <- p +
@@ -234,7 +385,6 @@
   if (isTRUE(log_x)) p <- p + ggplot2::scale_x_log10()
   p
 }
-
 
 #' Side-by-Side Weather Input Density Panel
 #'

@@ -113,9 +113,9 @@ weather_spec_defaults <- function(units) {
     ref_end        = 1L,
     temporal_agg   = temporal_agg_default(units),
     transformation = transformation_default(units),
-    cont_binned    = "Continuous",
-    num_bins       = NA_integer_,
-    binning_method = NA_character_,
+    cont_binned    = "Binned",
+    num_bins       = 5L,
+    binning_method = "Equal frequency",
     polynomial     = character(0)
   )
 }

@@ -42,17 +42,53 @@
   .duck$con
 }
 
-
 #' Install and load a DuckDB extension exactly once per process.
+#'
+#' On Posit Connect, fetches the binary from Databricks Files API to bypass
+#' the unavailable extensions.duckdb.org endpoint. Locally, uses the standard
+#' DuckDB INSTALL mechanism.
+#'
+#' @param ext        Extension name e.g. "httpfs", "spatial", "h3".
+#' @param db_token   Bearer token — only required on Posit Connect.
+#' @param ext_base_url Databricks Files API URL to the folder containing
+#'   pre-uploaded .duckdb_extension binaries. Only required on Posit Connect.
 #' @noRd
-.duck_load_ext <- function(ext) {
+.duck_load_ext <- function(ext, db_token = NULL, ext_base_url = NULL) {
   if (ext %in% (.duck$extensions %||% character(0))) return(invisible(NULL))
   con <- .duck_con()
-  DBI::dbExecute(con, sprintf("INSTALL '%s'; LOAD '%s';", ext, ext))
+
+  if (.auto_connect()) {
+    # Check for a bundled binary first (avoids any network call)
+    bundled <- system.file(
+      paste0("duckdb_extensions/", ext, ".duckdb_extension"),
+      package = "wiseapp"
+    )
+
+    if (nzchar(bundled)) {
+      DBI::dbExecute(con, sprintf("INSTALL '%s';", bundled))
+      DBI::dbExecute(con, sprintf("LOAD '%s';",    ext))
+    } 
+
+  } else {
+    # Local: load from cache, otherwise install from network if missing
+      .core_extensions <- c("azure",  "delta", "httpfs", "spatial")
+      tryCatch(
+      DBI::dbExecute(con, sprintf("LOAD '%s';", ext)),
+      error = function(e) {
+        if (ext %in% .core_extensions) {
+          DBI::dbExecute(con, sprintf("INSTALL '%s'; LOAD '%s';", ext, ext))
+        } else {
+          DBI::dbExecute(con, sprintf(
+            "INSTALL '%s' FROM community; LOAD '%s';", ext, ext
+          ))
+        }
+      }
+    )
+  }
+
   .duck$extensions <- c(.duck$extensions, ext)
   invisible(NULL)
 }
-
 
 # -----------------------------------------------------------------------------
 # Credential helpers
@@ -80,6 +116,7 @@
   resp <- httr2::request(paste0(host, "/oidc/v1/token")) |>
     httr2::req_auth_basic(client_id, client_secret) |>
     httr2::req_body_form(grant_type = "client_credentials", scope = "all-apis") |>
+    httr2::req_options(http_version = 2L) |> 
     httr2::req_error(is_error = \(r) FALSE) |>
     httr2::req_perform()
 
@@ -162,6 +199,7 @@
 .fetch_db_csv_direct <- function(url, token) {
   resp <- httr2::request(url) |>
     httr2::req_headers(Authorization = paste("Bearer", token)) |>
+    httr2::req_options(http_version = 2L) |> 
     httr2::req_error(is_error = \(r) FALSE) |>
     httr2::req_perform()
 
@@ -172,6 +210,7 @@
 
   readr::read_csv(httr2::resp_body_raw(resp), show_col_types = FALSE)
 }
+
 
 
 # -----------------------------------------------------------------------------
@@ -373,7 +412,7 @@ load_data <- function(
       )
     }
 
-  } else if (type == "databricks") {
+    } else if (type == "databricks") {
 
     host          <- connection_params$workspace     %||% Sys.getenv("DATABRICKS_HOST")
     client_id     <- connection_params$client_id     %||% Sys.getenv("DATABRICKS_CLIENT_ID")
@@ -392,7 +431,14 @@ load_data <- function(
       return(.fetch_db_csv_direct(paths, db_token))
     }
 
-    .duck_load_ext("httpfs")
+    # Build the extensions base URL — points to the folder you uploaded binaries to
+    vol_path    <- connection_params$volume_path %||% Sys.getenv("DATABRICKS_VOLUME_PATH")
+    ext_base_url <- paste0(
+      host, "/api/2.0/fs/files",
+      sub("/$", "", vol_path), "/duckdb_extensions"
+    )
+
+    .duck_load_ext("httpfs",  db_token, ext_base_url)
     .register_db_secret(con, db_token, params_hash)
 
   }

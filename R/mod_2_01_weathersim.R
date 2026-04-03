@@ -46,17 +46,17 @@ mod_2_01_weathersim_ui <- function(id) {
       shiny::tags$hr(style = "margin: 6px 0;"),
 
       # -- Future periods (up to 3) -------------------------------------------
-      shiny::tags$h6("Future climate periods",
+      shiny::tags$h6("Projection periods",
                      style = "font-weight:600; margin-bottom:4px;"),
 
       # Period 1
       shiny::tags$div(
         style = "display:flex; gap:8px; align-items:center; margin-bottom:4px;",
         shiny::tags$span("Period 1:", style = "min-width:60px; font-weight:500;"),
-        shiny::numericInput(ns("fut_start_1"), label = NULL, value = 2020,
+        shiny::numericInput(ns("fut_start_1"), label = NULL, value = 2025,
                             min = 2015, max = 2100, step = 1, width = "90px"),
         shiny::tags$span("\u2013"),
-        shiny::numericInput(ns("fut_end_1"), label = NULL, value = 2040,
+        shiny::numericInput(ns("fut_end_1"), label = NULL, value = 2035,
                             min = 2015, max = 2100, step = 1, width = "90px")
       ),
       # Period 2 (optional)
@@ -99,7 +99,7 @@ mod_2_01_weathersim_ui <- function(id) {
       shiny::tags$hr(style = "margin: 6px 0;"),
 
       # -- Ensemble spread -----------------------------------------------
-      shiny::tags$h6("Ensemble model uncertainty",
+      shiny::tags$h6("Ensemble results",
                      style = "font-weight:600; margin-bottom:4px;"),
       shiny::radioButtons(
         inputId  = ns("ensemble_choice"),
@@ -125,7 +125,7 @@ mod_2_01_weathersim_ui <- function(id) {
         shiny::tags$h6("Ensemble percentiles",
                         style = "font-weight:400; margin-bottom:4px;"),
 
-        # Percentiles
+        # Percentile selectors (default to P10, P50, P90)
         shiny::tags$div(
           style = "display:flex; gap:8px; align-items:center; margin-bottom:4px;",
           shiny::numericInput(ns("ssp_p_1"), label = NULL, value = 10,
@@ -193,7 +193,8 @@ mod_2_01_weathersim_server <- function(id,
                                         selected_weather,
                                         selected_surveys,
                                         survey_weather,
-                                        model_fit) {
+                                        model_fit,
+                                        stored_breaks = reactive(NULL)) {
   moduleServer(id, function(input, output, session) {
     ns <- session$ns
 
@@ -243,12 +244,12 @@ mod_2_01_weathersim_server <- function(id,
           "padding: 8px 12px; margin-bottom: 10px; border-radius: 3px; ",
           "font-size: 12px; color: #444;"
         ),
-        shiny::tags$b("Historical period:", style = "color:#333;"),
+        shiny::tags$b("Historical baseline:", style = "color:#333;"),
         paste0(hist_yr[1], "\u2013", hist_yr[2]),
         shiny::tags$br(),
-        shiny::tags$b("Future climate:", style = "color:#333;"), fut_txt,
-        shiny::tags$b(" \u00b7 SSP:", style = "color:#333;"), ssp_txt,
-        shiny::tags$b(" \u00b7 Ensemble:", style = "color:#333;"), ens_txt,
+        shiny::tags$b("Projection periods:", style = "color:#333;"), fut_txt,
+        shiny::tags$b(" \u00b7 SSPs:", style = "color:#333;"), ssp_txt,
+        shiny::tags$b(" \u00b7 Ensemble result:", style = "color:#333;"), ens_txt,
         shiny::tags$br(),
         shiny::tags$b("Simulation residuals:", style = "color:#333;"), res_txt
       )
@@ -260,7 +261,7 @@ mod_2_01_weathersim_server <- function(id,
       req(input$hist_years)
       if (length(input$hist_years[1]:input$hist_years[2]) < 30) {
         shiny::helpText(
-          "\u26a0\ufe0f Window is less than 30 years. Results may be unreliable.",
+          "\u26a0\ufe0f Window is less than 30 years. This may not capture the full range of weather variability, which could lead to underestimation of future risks.",
           style = "color: #c0392b; font-size: 12px;"
         )
       }
@@ -393,6 +394,7 @@ mod_2_01_weathersim_server <- function(id,
         {
           new_scenarios    <- list()
           hist_sim_result  <- NULL
+          cached_breaks    <- stored_breaks()   # seed from Step 1 breaks if available
 
           for (i in seq_along(weather_calls)) {
             wc <- weather_calls[[i]]
@@ -414,7 +416,8 @@ mod_2_01_weathersim_server <- function(id,
                 ssp                  = wc$ssp,
                 future_period        = wc$future_period,
                 perturbation_method  = perturbation_method,
-                ensemble_percentiles = ens_pct
+                ensemble_percentiles = ens_pct,
+                stored_breaks        = cached_breaks
               ),
               error = function(e) {
                 shiny::showNotification(
@@ -427,6 +430,11 @@ mod_2_01_weathersim_server <- function(id,
               }
             )
             if (is.null(weather_result)) next
+
+            # Capture breaks from the first call so subsequent calls reuse them
+            if (is.null(cached_breaks)) {
+              cached_breaks <- attr(weather_result, "stored_breaks")
+            }
 
             # Run sim pipeline on every key returned by get_weather()
             for (key in names(weather_result)) {
