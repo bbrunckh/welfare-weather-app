@@ -137,3 +137,4 @@ tokens.*
 token/
 tokens/
 rsconnect/
+inst/duckdb_extensions/

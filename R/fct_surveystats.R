@@ -11,22 +11,19 @@
 
 #' Add derived time columns to a survey data frame
 #'
-#' Constructs `timestamp` (first day of interview month/year), `month`
-#' (integer 1-12), and `countryyear` (character label) from the integer
+#' Constructs `month` (integer 1-12), and `countryyear` (character label) from the integer
 #' columns `int_year` and `int_month` that are present in raw survey parquet
 #' files.
 #'
 #' @param df A data frame containing integer columns `int_year`, `int_month`,
 #'   `economy`, and `year`.
 #'
-#' @return `df` with three additional columns: `timestamp` (Date),
-#'   `month` (integer), and `countryyear` (character).
+#' @return `df` with two additional columns: `month` (integer), and `countryyear` (character).
 #'
 #' @export
 add_time_columns <- function(df) {
   df |>
     dplyr::mutate(
-      timestamp   = as.Date(paste0(int_year, "-", int_month, "-01")),
       month       = lubridate::month(timestamp),
       countryyear = paste0(economy, ", ", year)
     )
@@ -250,47 +247,113 @@ plot_welfare_dist <- function(df, poverty_lines = welfare_poverty_lines()) {
 # Leaflet survey location map                                                  #
 # ---------------------------------------------------------------------------- #
 
+#' Extract bounding box from a GeoJSON FeatureCollection
+#'
+#' Iterates over all Polygon and MultiPolygon coordinate arrays to find the
+#' overall lng/lat extent. No spatial libraries required.
+#'
+#' @param geojson A GeoJSON FeatureCollection list, as produced by
+#'   `jsonlite::fromJSON` or assembled manually.
+#' @return A named list with `lng1`, `lat1`, `lng2`, `lat2`.
+#' 
+.geojson_bounds <- function(geojson) {
+  all_lng <- numeric()
+  all_lat <- numeric()
+
+  # Recursively extract all coordinate pairs from any nesting depth
+  extract_coords <- function(coords) {
+    if (is.numeric(coords) && length(coords) == 2) {
+      # A single [lng, lat] pair
+      all_lng <<- c(all_lng, coords[1])
+      all_lat <<- c(all_lat, coords[2])
+    } else if (is.matrix(coords)) {
+      # A ring already coerced to a matrix by jsonlite
+      all_lng <<- c(all_lng, coords[, 1])
+      all_lat <<- c(all_lat, coords[, 2])
+    } else if (is.list(coords)) {
+      lapply(coords, extract_coords)
+    }
+  }
+
+  for (f in geojson$features) {
+    extract_coords(f$geometry$coordinates)
+  }
+
+  list(
+    lng1 = min(all_lng), lat1 = min(all_lat),
+    lng2 = max(all_lng), lat2 = max(all_lat)
+  )
+}
+
+
+
 #' Build a leaflet map of survey interview locations
 #'
-#' Renders a `leaflet` widget from an `sf` polygon data frame of H3-aggregated
+#' Renders a `leaflet` widget from a GeoJSON FeatureCollection of H3-aggregated
 #' survey locations. Polygons are coloured by economy code and the viewport is
-#' fitted to the bounding box.
+#' fitted to the bounding box. Accepts both Polygon and MultiPolygon geometries.
 #'
-#' @param loc An `sf` data frame with a `code` column (character ISO3) and
-#'   polygon/multipolygon geometries, as produced by the H3-to-polygon
-#'   aggregation step in `mod_1_02_surveystats_server()`.
+#' @param loc A GeoJSON FeatureCollection list with a `code` property on each
+#'   feature, as produced by the H3-to-polygon aggregation step in
+#'   `mod_1_02_surveystats_server()`.
 #'
 #' @return A `leaflet` widget, or `NULL` invisibly when `loc` is `NULL` or
-#'   has zero rows.
+#'   has no features.
 #'
 #' @export
 plot_survey_map <- function(loc) {
-  if (is.null(loc) || nrow(loc) == 0) return(invisible(NULL))
+  if (is.null(loc) || length(loc$features) == 0) return(invisible(NULL))
 
-  n_codes <- length(unique(loc$code))
-  pal     <- leaflet::colorFactor(scales::hue_pal()(n_codes), loc$code)
-  bounds  <- sf::st_bbox(loc)
+  codes      <- sapply(loc$features, function(f) f$properties$code)
+  u_codes    <- unique(codes)
+  code_color <- setNames(scales::hue_pal()(length(u_codes)), u_codes)
+  bounds     <- .geojson_bounds(loc)
 
-  leaflet::leaflet() |>
-    leaflet::addProviderTiles(leaflet::providers$CartoDB.Positron) |>
-    leaflet::addPolygons(
-      data        = loc,
-      color       = ~pal(code),
-      opacity     = 0.5,
-      fillOpacity = 0,
-      weight      = 1,
-      highlight   = leaflet::highlightOptions(
-        weight       = 2,
-        color        = "#FF0000",
-        bringToFront = TRUE
+  m <- leaflet::leaflet() |>
+    leaflet::addProviderTiles(leaflet::providers$CartoDB.Positron)
+
+  # One addGeoJSON call per code so each gets a static colour
+  for (cd in u_codes) {
+    features_for_code <- loc$features[codes == cd]
+    sub_geojson <- list(type = "FeatureCollection", features = features_for_code)
+
+    m <- m |>
+      leaflet::addGeoJSON(
+        geojson     = sub_geojson,
+        color       = code_color[[cd]],
+        opacity     = 0.5,
+        fillOpacity = 0,
+        weight      = 1
       )
-    ) |>
+  }
+
+  # Hover highlight via vanilla Leaflet JS
+  hover_js <- htmlwidgets::JS("
+    function(el, x) {
+      this.eachLayer(function(layer) {
+        if (layer.eachLayer) {         // it's a GeoJSON layer group
+          layer.eachLayer(function(sublayer) {
+            var origColor  = sublayer.options.color;
+            var origWeight = sublayer.options.weight;
+            sublayer.on('mouseover', function(e) {
+              e.target.setStyle({ weight: 2, color: '#FF0000' });
+              e.target.bringToFront();
+            });
+            sublayer.on('mouseout', function(e) {
+              e.target.setStyle({ weight: origWeight, color: origColor });
+            });
+          });
+        }
+      });
+    }
+  ")
+
+  m |>
     leaflet::fitBounds(
-      lng1 = as.numeric(bounds[1]),
-      lat1 = as.numeric(bounds[2]),
-      lng2 = as.numeric(bounds[3]),
-      lat2 = as.numeric(bounds[4])
-    )
+      lng1 = bounds$lng1, lat1 = bounds$lat1,
+      lng2 = bounds$lng2, lat2 = bounds$lat2
+    ) |>
+    htmlwidgets::onRender(hover_js)
 }
 
 

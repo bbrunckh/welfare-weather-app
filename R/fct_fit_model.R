@@ -57,9 +57,9 @@ ENGINE_REGISTRY <- list(
         stats::as.formula(paste(y_var, "~", rhs))
       }
       list(
-        formula1 = build(terms$weather),
-        formula2 = build(c(terms$weather, terms$interactions_main), fe_vars),
-        formula3 = build(c(terms$weather, terms$interactions_main,
+        formula1 = build(terms$hazard),
+        formula2 = build(c(terms$hazard, terms$interactions_main), fe_vars),
+        formula3 = build(c(terms$hazard, terms$interactions_main,
                            terms$covariates),                        fe_vars)
       )
     },
@@ -107,9 +107,9 @@ ENGINE_REGISTRY <- list(
         stats::as.formula(paste(y_var, "~", paste(rhs, collapse = " + ")))
       }
       list(
-        formula1 = build(terms$weather),
-        formula2 = build(c(terms$weather, fe_vars)),
-        formula3 = build(c(terms$weather, fe_vars, terms$covariates))
+        formula1 = build(terms$hazard),
+        formula2 = build(c(terms$hazard, fe_vars)),
+        formula3 = build(c(terms$hazard, fe_vars, terms$covariates))
       )
     },
 
@@ -146,9 +146,9 @@ ENGINE_REGISTRY <- list(
         stats::as.formula(paste(y_var, "~", paste(rhs, collapse = " + ")))
       }
       list(
-        formula1 = build(terms$weather),
-        formula2 = build(c(terms$weather, fe_vars)),
-        formula3 = build(c(terms$weather, fe_vars, terms$covariates))
+        formula1 = build(terms$hazard),
+        formula2 = build(c(terms$hazard, fe_vars)),
+        formula3 = build(c(terms$hazard, fe_vars, terms$covariates))
       )
     },
 
@@ -633,7 +633,7 @@ fit_model <- function(df, selected_outcome, selected_weather, selected_model) {
   # benefit (fixest needs them on the main-effects side of |, not absorbed).
   # For lm/parsnip the * expansion in rhs_weather already includes them.
   terms_bundle <- list(
-    weather           = rhs_weather,
+    hazard            = rhs_weather,
     interactions_main = interaction_vars,   # all moderator variables, any length
     covariates        = covariate_vars
   )

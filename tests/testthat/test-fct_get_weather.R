@@ -103,6 +103,129 @@ make_test_fixtures <- function(
 }
 
 
+# ---------------------------------------------------------------------------
+# Cross-resolution fixture helper
+#
+# Creates microdata (h3 strings at `micro_res`) and weather (h3 bigint at
+# `weather_res`) parquet files where the resolutions differ.  Uses the live
+# DuckDB H3 extension to derive valid parent/child cells from a seed cell so
+# every join key is a real, valid H3 index.
+#
+# Parameters:
+#   dir          temp directory to write parquet files into
+#   seed_cell    a valid H3 string at `micro_res`
+#   micro_res    H3 resolution for microdata strings  (default 5)
+#   weather_res  H3 resolution for weather bigints    (default 4)
+#   n_months     number of monthly weather rows per cell (default 12)
+# ---------------------------------------------------------------------------
+make_test_fixtures_cross_res <- function(
+    dir,
+    seed_cell   = "85283473fffffff",   # valid res-5 cell (San Francisco area)
+    micro_res   = 5L,
+    weather_res = 4L,
+    code        = "TST",
+    year        = 2018L,
+    survname    = "SRV",
+    n_months    = 12L
+) {
+  skip_if_not_installed("arrow")
+  skip_if_not_installed("duckdb")
+  skip_if_not_installed("bit64")
+
+  con <- DBI::dbConnect(duckdb::duckdb())
+  on.exit(DBI::dbDisconnect(con, shutdown = TRUE), add = TRUE)
+
+  # Install / load H3 extension
+  tryCatch(DBI::dbExecute(con, "INSTALL h3 FROM community"), error = function(e) NULL)
+  DBI::dbExecute(con, "LOAD h3")
+
+  # Derive micro-res cell strings from the seed.
+  # seed_cell is assumed to already be at micro_res; use it and a few
+  # siblings (children of its parent) so we have multiple h3 values.
+  parent_cell <- DBI::dbGetQuery(
+    con,
+    sprintf(
+      "SELECT h3_h3_to_string(h3_cell_to_parent('%s'::VARCHAR, %d)) AS h3",
+      seed_cell, micro_res - 1L
+    )
+  )$h3[[1L]]
+
+  micro_strings <- DBI::dbGetQuery(
+    con,
+    sprintf(
+      "SELECT h3_h3_to_string(unnest(h3_cell_to_children('%s'::VARCHAR, %d))) AS h3",
+      parent_cell, micro_res
+    )
+  )$h3
+  micro_strings <- head(micro_strings, 4L)
+
+  # Derive weather bigint cells at weather_res (parents of micro cells)
+  weather_ints <- DBI::dbGetQuery(
+    con,
+    sprintf(
+      "SELECT DISTINCT h3_cell_to_parent(h3_string_to_h3(h3), %d) AS h3
+       FROM (VALUES %s) t(h3)",
+      weather_res,
+      paste0("('", micro_strings, "')", collapse = ", ")
+    )
+  )$h3
+
+  # Build h3 lookup (microdata strings -> loc_id)
+  h3_df <- data.frame(
+    h3       = micro_strings,
+    code     = code,
+    year     = year,
+    survname = survname,
+    loc_id   = paste0("loc_", (seq_along(micro_strings) - 1L) %% 2L + 1L),
+    pop_2020 = c(100L, 200L, 150L, 50L)[seq_along(micro_strings)],
+    stringsAsFactors = FALSE
+  )
+
+  # Build weather (bigint h3 at weather_res x monthly timestamps)
+  timestamps <- seq(as.Date("2017-01-01"), by = "1 month", length.out = n_months)
+  weather_df <- expand.grid(
+    h3        = weather_ints,
+    timestamp = timestamps,
+    stringsAsFactors = FALSE
+  )
+  set.seed(99)
+  weather_df$tx <- rnorm(nrow(weather_df), mean = 25, sd = 3)
+
+  # weather$h3 must be stored as integer64 / bigint
+  weather_df$h3 <- bit64::as.integer64(weather_df$h3)
+
+  # Write parquet files
+  h3_path      <- file.path(dir, paste0(code, "_", year, "_", survname, "_h3.parquet"))
+  weather_path <- file.path(dir, paste0(code, "_weather.parquet"))
+  arrow::write_parquet(h3_df,      h3_path)
+  arrow::write_parquet(weather_df, weather_path)
+
+  survey_timestamps <- tail(timestamps, 6L)
+  survey_data <- expand.grid(
+    timestamp = survey_timestamps,
+    loc_id    = unique(h3_df$loc_id),
+    stringsAsFactors = FALSE
+  ) |>
+    dplyr::mutate(
+      code      = code,
+      year      = year,
+      survname  = survname,
+      int_month = as.integer(format(.data$timestamp, "%m")),
+      int_year  = as.integer(format(.data$timestamp, "%Y"))
+    )
+
+  list(
+    connection_params = list(type = "local", path = dir),
+    survey_data       = survey_data,
+    dates             = sort(unique(survey_timestamps)),
+    micro_res         = micro_res,
+    weather_res       = weather_res,
+    micro_strings     = micro_strings,
+    weather_ints      = weather_ints
+  )
+}
+
+
 # ============================================================================ #
 # 1. Argument validation — climate scenario guards                             #
 # ============================================================================ #
@@ -417,4 +540,187 @@ test_that("get_weather: bin cutoffs use only survey timestamps (not all dates)",
   # Cutoffs are derived from survey timestamps only so all result rows should
   # have a non-NA bin assignment (outer bins catch extremes)
   expect_false(any(is.na(result$tx)))
+})
+
+
+# ============================================================================ #
+# 5. H3 resolution + type harmonisation                                        #
+# ============================================================================ #
+
+# Helper: open a fresh in-process DuckDB connection with H3 loaded
+make_h3_con <- function() {
+  con <- DBI::dbConnect(duckdb::duckdb())
+  tryCatch(DBI::dbExecute(con, "INSTALL h3 FROM community"), error = function(e) NULL)
+  DBI::dbExecute(con, "LOAD h3")
+  con
+}
+
+test_that(".harmonise_h3: same-resolution adds h3_weather string->bigint cast", {
+  skip_if_not_installed("duckdb")
+  skip_if_not_installed("bit64")
+
+  con <- make_h3_con()
+  on.exit(DBI::dbDisconnect(con, shutdown = TRUE), add = TRUE)
+
+  # Both tables at res 5 — no parent lookup needed, only type cast
+  cell_str <- "85283473fffffff"
+  cell_int <- DBI::dbGetQuery(
+    con, sprintf("SELECT h3_string_to_h3('%s') AS h3", cell_str)
+  )$h3[[1L]]
+
+  h3_slim <- dplyr::tbl(con, dplyr::sql(
+    sprintf("SELECT '%s'::VARCHAR AS h3, 'L1' AS loc_id, 100 AS pop_2020", cell_str)
+  ))
+  weather <- dplyr::tbl(con, dplyr::sql(
+    sprintf("SELECT %s::UBIGINT AS h3, 25.0 AS tx", cell_int)
+  ))
+
+  result <- wiseapp:::.harmonise_h3(h3_slim, weather, con)
+
+  expect_equal(result$target_res, 5L)
+  expect_true(result$same_res)
+  expect_true("h3_weather" %in% colnames(result$h3_slim))
+
+  joined <- dplyr::collect(
+    dplyr::inner_join(result$weather, result$h3_slim, by = c("h3" = "h3_weather"))
+  )
+  expect_equal(nrow(joined), 1L)
+  expect_equal(joined$loc_id, "L1")
+})
+
+test_that(".harmonise_h3: microdata finer than weather maps micro up to weather res", {
+  skip_if_not_installed("duckdb")
+  skip_if_not_installed("bit64")
+
+  con <- make_h3_con()
+  on.exit(DBI::dbDisconnect(con, shutdown = TRUE), add = TRUE)
+
+  # micro at res 5, weather at res 4
+  micro_cell  <- "85283473fffffff"
+  weather_int <- DBI::dbGetQuery(
+    con,
+    sprintf("SELECT h3_cell_to_parent(h3_string_to_h3('%s'), 4) AS h3", micro_cell)
+  )$h3[[1L]]
+
+  h3_slim <- dplyr::tbl(con, dplyr::sql(
+    sprintf("SELECT '%s'::VARCHAR AS h3, 'L1' AS loc_id, 100 AS pop_2020", micro_cell)
+  ))
+  weather <- dplyr::tbl(con, dplyr::sql(
+    sprintf("SELECT %s::UBIGINT AS h3, 25.0 AS tx", weather_int)
+  ))
+
+  result <- wiseapp:::.harmonise_h3(h3_slim, weather, con)
+
+  expect_equal(result$target_res,  4L)
+  expect_false(result$same_res)
+  expect_equal(result$res_micro,   5L)
+  expect_equal(result$res_weather, 4L)
+
+  joined <- dplyr::collect(
+    dplyr::inner_join(result$weather, result$h3_slim, by = c("h3" = "h3_weather"))
+  )
+  expect_equal(nrow(joined), 1L)
+  expect_equal(joined$loc_id, "L1")
+})
+
+test_that(".harmonise_h3: weather finer than microdata maps weather up to micro res", {
+  skip_if_not_installed("duckdb")
+  skip_if_not_installed("bit64")
+
+  con <- make_h3_con()
+  on.exit(DBI::dbDisconnect(con, shutdown = TRUE), add = TRUE)
+
+  # micro at res 4, weather at res 5 (unusual corner case)
+  micro_cell      <- "84283473fffffff"
+  weather_child   <- DBI::dbGetQuery(
+    con,
+    sprintf(
+      "SELECT h3_h3_to_string((h3_cell_to_children('%s'::VARCHAR, 5))[1]) AS h3",
+      micro_cell
+    )
+  )$h3[[1L]]
+  weather_int <- DBI::dbGetQuery(
+    con,
+    sprintf("SELECT h3_string_to_h3('%s') AS h3", weather_child)
+  )$h3[[1L]]
+
+  h3_slim <- dplyr::tbl(con, dplyr::sql(
+    sprintf("SELECT '%s'::VARCHAR AS h3, 'L1' AS loc_id, 100 AS pop_2020", micro_cell)
+  ))
+  weather <- dplyr::tbl(con, dplyr::sql(
+    sprintf("SELECT %s::UBIGINT AS h3, 25.0 AS tx", weather_int)
+  ))
+
+  result <- wiseapp:::.harmonise_h3(h3_slim, weather, con)
+
+  expect_equal(result$target_res,  4L)
+  expect_false(result$same_res)
+  expect_equal(result$res_micro,   4L)
+  expect_equal(result$res_weather, 5L)
+
+  # weather$h3 should have been mapped to res 4 → joins with h3_slim$h3_weather
+  joined <- dplyr::collect(
+    dplyr::inner_join(result$weather, result$h3_slim, by = c("h3" = "h3_weather"))
+  )
+  expect_equal(nrow(joined), 1L)
+  expect_equal(joined$loc_id, "L1")
+})
+
+test_that("get_weather joins correctly when weather is coarser than microdata", {
+  skip_if_not_installed("arrow")
+  skip_if_not_installed("duckdb")
+  skip_if_not_installed("duckdbfs")
+  skip_if_not_installed("bit64")
+
+  tmp <- withr::local_tempdir()
+
+  # micro res 5, weather res 4  (the common production case)
+  fx <- make_test_fixtures_cross_res(
+    tmp,
+    seed_cell   = "85283473fffffff",
+    micro_res   = 5L,
+    weather_res = 4L
+  )
+
+  result <- get_weather(
+    survey_data       = fx$survey_data,
+    selected_weather  = sw_continuous("tx"),
+    dates             = fx$dates,
+    connection_params = fx$connection_params
+  )
+
+  expect_s3_class(result, "data.frame")
+  expect_true("tx" %in% names(result))
+  expect_false(anyNA(result$tx))
+  expect_true(all(result$timestamp %in% fx$dates))
+  expect_setequal(unique(result$loc_id), c("loc_1", "loc_2"))
+})
+
+test_that("get_weather joins correctly when weather is finer than microdata", {
+  skip_if_not_installed("arrow")
+  skip_if_not_installed("duckdb")
+  skip_if_not_installed("duckdbfs")
+  skip_if_not_installed("bit64")
+
+  tmp <- withr::local_tempdir()
+
+  # micro res 4, weather res 5  (unusual but must be handled)
+  fx <- make_test_fixtures_cross_res(
+    tmp,
+    seed_cell   = "84283473fffffff",
+    micro_res   = 4L,
+    weather_res = 5L
+  )
+
+  result <- get_weather(
+    survey_data       = fx$survey_data,
+    selected_weather  = sw_continuous("tx"),
+    dates             = fx$dates,
+    connection_params = fx$connection_params
+  )
+
+  expect_s3_class(result, "data.frame")
+  expect_true("tx" %in% names(result))
+  expect_false(anyNA(result$tx))
+  expect_true(all(result$timestamp %in% fx$dates))
 })

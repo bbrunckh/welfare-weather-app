@@ -30,8 +30,10 @@ app_server <- function(input, output, session) {
     connection_params = overview_api$connection_params,
     selected_outcome  = step1_api$selected_outcome,
     selected_weather  = step1_api$selected_weather,
+    selected_surveys  = step1_api$selected_surveys,
     survey_weather    = step1_api$survey_weather,
-    model_fit         = step1_api$model_fit
+    model_fit         = step1_api$model_fit,
+    stored_breaks     = step1_api$stored_breaks
   )
 
   # ---- Step 3: policy scenarios --------------------------------------------
@@ -43,7 +45,6 @@ app_server <- function(input, output, session) {
     selected_weather  = step1_api$selected_weather,
     survey_weather    = step1_api$survey_weather,
     model_fit         = step1_api$model_fit,
-    hist_sim          = step2_api$hist_sim,
-    fut_sim           = step2_api$fut_sim
+    hist_sim          = step2_api$hist_sim
   )
 }

@@ -11,6 +11,20 @@
 #' @importFrom shiny NS tagList
 mod_0_overview_ui <- function(id) {
   ns <- NS(id)
+
+  # On Posit Connect with Databricks env vars: skip the connection form
+  # entirely and just show the status badge — server auto-connects on startup.
+  if (.auto_connect()) {
+    return(tagList(
+      includeMarkdown(
+        system.file("app/www/welcome_message.md", package = "wiseapp")
+      ),
+      hr(),
+      h4("Data"),
+      uiOutput(ns("connection_status_ui"))
+    ))
+  }
+
   tagList(
     includeMarkdown(
       system.file("app/www/welcome_message.md", package = "wiseapp")
@@ -39,10 +53,8 @@ mod_0_overview_ui <- function(id) {
       class = "btn-primary",
       style = "width: 100%;"
     ),
-    br(),
-    br(),
-    verbatimTextOutput(ns("folder_path_echo")),
-    verbatimTextOutput(ns("folder_contents_echo"))
+    br(), br(),
+    verbatimTextOutput(ns("folder_path_echo"))
   )
 }
 
@@ -134,15 +146,17 @@ mod_0_overview_server <- function(id) {
         ),
 
         "databricks" = tagList(
-          textInput(ns("db_workspace"), "Workspace URL",
-                    placeholder = "https://adb-XXXXXXX.azuredatabricks.net"),
-          passwordInput(ns("db_token"), "Personal access token",
-                    placeholder = "dapi..."),
-          textInput(ns("db_catalog"),   "Catalog",  value = "main"),
-          textInput(ns("db_schema"),    "Schema",   value = "default"),
+          textInput(ns("db_workspace"),
+                    "Workspace URL",
+                    placeholder = "https://adb-xxxxxxxxxxxxxxxxx.xx.azuredatabricks.net"),
+          passwordInput(ns("db_client_id"),    "Client ID",     placeholder = ""),
+          passwordInput(ns("db_client_secret"), "Client secret", placeholder = ""),
+          textInput(ns("db_volume_path"),
+                    "Volume path",
+                    placeholder = "/Volumes/..."),
           helpText(
-            "Token: Databricks \u2192 Settings \u2192 Developer \u2192 Access tokens.",
-            "Leave blank to use DATABRICKS_HOST / DATABRICKS_TOKEN env vars.",
+            "Set DATABRICKS_HOST, DATABRICKS_CLIENT_ID, DATABRICKS_CLIENT_SECRET,",
+            "and DATABRICKS_VOLUME_PATH in .Renviron to leave all fields blank.",
             style = "font-size: 12px;"
           )
         )
@@ -174,10 +188,10 @@ mod_0_overview_server <- function(id) {
         hf_repo         = input$hf_repo,
         hf_subdir       = input$hf_subdir,
         hf_token        = input$hf_token,
-        db_workspace    = input$db_workspace,
-        db_token        = input$db_token,
-        db_catalog      = input$db_catalog,
-        db_schema       = input$db_schema
+        db_workspace     = input$db_workspace,
+        db_client_id     = input$db_client_id,
+        db_client_secret = input$db_client_secret,
+        db_volume_path   = input$db_volume_path
       )
     })
 
@@ -211,6 +225,26 @@ mod_0_overview_server <- function(id) {
     cpi_ppp            <- reactiveVal(NULL)
     pov_lines          <- reactiveVal(NULL)
 
+    # On Posit Connect with env vars set: auto-connect once on startup,
+    # no button click or UI input required.
+    if (.auto_connect()) {
+      observe({
+        params <- build_connection_params("databricks")
+        message("[overview] auto-connecting to Databricks (Posit Connect)")
+        applied_connection(params)
+
+        survey_list(load_data("metadata/survey_list.csv", params, collect = TRUE))
+        variable_list(load_data("metadata/variable_list.csv", params, collect = TRUE))
+        cpi_ppp(load_data("metadata/cpi_ppp.csv", params, collect = TRUE))
+        pov_lines(default_poverty_lines())
+
+        output$connection_status_ui <- renderUI({
+          p(icon("circle-check"), " Connected to Databricks.",
+            style = "color: #2e7d32; font-size: 12px; margin-top: 4px;")
+        })
+      }) |> bindEvent(TRUE, once = TRUE)
+    }
+
     observeEvent(input$apply_connection, {
 
       if (!isTRUE(connection_valid())) {
@@ -243,24 +277,24 @@ mod_0_overview_server <- function(id) {
       on.exit(removeNotification(load_notif), add = TRUE)
 
       tryCatch({
-        survey_list(load_data("survey_list.csv", params, collect = TRUE))
+        survey_list(load_data("metadata/survey_list.csv", params, collect = TRUE))
         showNotification(paste0("Survey list loaded (", nrow(survey_list()), " rows)"), type = "message", duration = 2)
       }, error = function(e) {
-        showNotification("Failed to load survey_list.csv", type = "error", duration = 5)
+        showNotification("Failed to load metadata/survey_list.csv", type = "error", duration = 5)
       })
 
       tryCatch({
-        variable_list(load_data("variable_list.csv", params, collect = TRUE))
+        variable_list(load_data("metadata/variable_list.csv", params, collect = TRUE))
         showNotification(paste0("Variable list loaded (", nrow(variable_list()), " rows)"), type = "message", duration = 2)
       }, error = function(e) {
-        showNotification("Failed to load variable_list.csv", type = "error", duration = 5)
+        showNotification("Failed to load metadata/variable_list.csv", type = "error", duration = 5)
       })
 
       tryCatch({
-        cpi_ppp(load_data("cpi_ppp.csv", params, collect = TRUE))
+        cpi_ppp(load_data("metadata/cpi_ppp.csv", params, collect = TRUE))
         showNotification("CPI / PPP conversions loaded", type = "message", duration = 2)
       }, error = function(e) {
-        showNotification("Failed to load cpi_ppp.csv", type = "error", duration = 5)
+        showNotification("Failed to load metadata/cpi_ppp.csv", type = "error", duration = 5)
       })
 
       showNotification(paste0("Connected to ", input$connection_type, " data source."), type = "message", duration = 3)
@@ -277,15 +311,6 @@ mod_0_overview_server <- function(id) {
       if (is.null(p)) return("No connection applied yet.")
       if (identical(p$type, "local")) paste0("Connected: local folder — ", p$path)
       else paste0("Connected: ", p$type)
-    })
-
-    output$folder_contents_echo <- renderText({
-      p <- applied_connection()
-      if (is.null(p) || !identical(p$type, "local")) return(NULL)
-      if (!dir.exists(p$path)) return(paste0("Path does not exist: ", p$path))
-      files <- list.files(p$path, recursive = FALSE)
-      if (length(files) == 0) return("Folder is empty.")
-      paste(files, collapse = "\n")
     })
 
     # ---- Return API ---------------------------------------------------------

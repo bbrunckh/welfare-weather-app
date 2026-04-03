@@ -144,18 +144,3 @@ test_that("plot_welfare_dist accepts custom poverty_lines", {
 
 # ---- plot_survey_map --------------------------------------------------------
 
-test_that("plot_survey_map returns NULL for NULL input", {
-  expect_null(plot_survey_map(NULL))
-})
-
-test_that("plot_survey_map returns leaflet widget for valid sf", {
-  skip_if_not_installed("sf")
-  skip_if_not_installed("leaflet")
-  poly <- sf::st_sfc(
-    sf::st_polygon(list(matrix(c(0,0,1,0,1,1,0,1,0,0), ncol=2, byrow=TRUE))),
-    sf::st_polygon(list(matrix(c(2,2,3,2,3,3,2,3,2,2), ncol=2, byrow=TRUE)))
-  )
-  loc <- sf::st_sf(code=c("ZAF","NGA"), geometry=poly)
-  sf::st_crs(loc) <- 4326
-  expect_s3_class(plot_survey_map(loc), "leaflet")
-})

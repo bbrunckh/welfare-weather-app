@@ -1,15 +1,14 @@
 #' 2_simulation UI Function
 #'
-#' @description A shiny Module. Orchestrates the Step 2 simulation pipeline:
-#'   historical climate selection, historical simulation, future climate
-#'   selection, and future climate simulation.
+#' @description A shiny Module. Orchestrates Step 2: unified sidebar for
+#'   simulation configuration (mod_2_01_weathersim), Results tab
+#'   (mod_2_02_results), and Diagnostics tab (mod_2_03_diagnostics).
 #'
 #' @param id,input,output,session Internal parameters for {shiny}.
 #'
 #' @noRd
 #'
 #' @importFrom shiny NS tagList
-#' @importFrom bsplus bs_accordion bs_append
 #' @importFrom waiter autoWaiter spin_2 transparent
 mod_2_simulation_ui <- function(id) {
   ns <- NS(id)
@@ -18,21 +17,7 @@ mod_2_simulation_ui <- function(id) {
     h4("What welfare is expected given historical weather conditions? In future climate scenarios?"),
     sidebarLayout(
       sidebarPanel(
-        bs_accordion(id = ns("accordion")) |>
-          bs_append(
-            title   = "1 Historical climate",
-            content = tagList(
-              mod_2_01_historical_ui(ns("historical")),
-              mod_2_02_historical_sim_ui(ns("historical_sim"))
-            )
-          ) |>
-          bs_append(
-            title   = "2 Future climate",
-            content = tagList(
-              mod_2_03_future_ui(ns("future")),
-              mod_2_04_future_sim_ui(ns("future_sim"))
-            )
-          ),
+        mod_2_01_weathersim_ui(ns("weathersim")),
         shiny::hr(),
         shiny::actionButton(
           ns("clear_scenarios"),
@@ -48,7 +33,7 @@ mod_2_simulation_ui <- function(id) {
           tabPanel(
             title = "Overview",
             value = "overview",
-            p("Outputs will appear here after you load data and make selections in the sidebar."),
+            p("Outputs will appear here after you configure settings and click 'Run simulation'."),
             includeMarkdown(system.file("app/www/equation2.md", package = "wiseapp"))
           )
         )
@@ -59,98 +44,77 @@ mod_2_simulation_ui <- function(id) {
 
 #' 2_simulation Server Functions
 #'
-#' Orchestrates sub-modules 01-06. Returns a flat API list consumed by Step 3.
+#' Orchestrates the unified sub-modules. Returns a flat API list consumed
+#' by Step 3.
 #'
 #' @param id               Module id.
 #' @param connection_params Reactive named list from mod_0_overview.
-#' @param selected_outcome Reactive one-row data frame of selected outcome
-#'   from mod_1_modelling (s3).
-#' @param selected_weather Reactive data frame of selected weather variables
-#'   from mod_1_modelling (s4).
-#' @param survey_weather   Reactive data frame of merged survey-weather data
-#'   from mod_1_modelling (s5).
-#' @param model_fit        Reactive list of fitted model objects from
-#'   mod_1_modelling (s7).
+#' @param selected_outcome Reactive one-row data frame of selected outcome.
+#' @param selected_weather Reactive data frame of selected weather variables.
+#' @param selected_surveys Reactive data frame from the survey list.
+#' @param survey_weather   Reactive data frame of merged survey-weather data.
+#' @param model_fit        Reactive list of fitted model objects.
 #'
 #' @noRd
 mod_2_simulation_server <- function(id,
                                     connection_params,
                                     selected_outcome,
                                     selected_weather,
+                                    selected_surveys,
                                     survey_weather,
-                                    model_fit) {
+                                    model_fit,
+                                    stored_breaks = reactive(NULL)) {
   moduleServer(id, function(input, output, session) {
 
-    # ---- Scenario storage ---------------------------------------------------
-    saved_scenarios <- reactiveVal(list())
-
-    # ---- 1. Historical climate selection ------------------------------------
-    s1 <- mod_2_01_historical_server("historical")
-
-    # ---- 3. Future climate selection ----------------------------------------
-    s3 <- mod_2_03_future_server("future")
-
-    # ---- 2. Historical simulation -------------------------------------------
-    s2 <- mod_2_02_historical_sim_server(
-      "historical_sim",
+    # ---- 1. Unified sidebar + simulation engine ----------------------------
+    s1 <- mod_2_01_weathersim_server(
+      "weathersim",
       connection_params = connection_params,
       selected_outcome  = selected_outcome,
       selected_weather  = selected_weather,
+      selected_surveys  = selected_surveys,
       survey_weather    = survey_weather,
       model_fit         = model_fit,
-      selected_hist     = s1$selected_hist,
-      fut_sim           = reactive(s4$fut_sim()),
-      tabset_id         = "step2_output_tabs",
-      tabset_session    = session
+      stored_breaks     = stored_breaks
     )
 
-    # ---- 4. Future simulation -----------------------------------------------
-    s4 <- mod_2_04_future_sim_server(
-      "future_sim",
-      connection_params = connection_params,
-      selected_outcome  = selected_outcome,
-      selected_weather  = selected_weather,
-      survey_weather    = survey_weather,
-      model_fit         = model_fit,
-      selected_hist     = s1$selected_hist,
-      selected_fut      = s3$selected_fut,
-      hist_run_id       = s2$hist_run_id
+    # ---- 2. Results tab ----------------------------------------------------
+    mod_2_02_results_server(
+      "results",
+      hist_sim        = s1$hist_sim,
+      saved_scenarios = s1$saved_scenarios,
+      selected_hist   = s1$selected_hist,
+      tabset_id       = "step2_output_tabs",
+      tabset_session  = session
     )
 
-    # ---- 5. Simulation diagnostics ------------------------------------------
-    mod_2_05_sim_diag_server(
-      "sim_diag",
-      hist_sim       = s2$hist_sim,
-      fut_sim        = s4$fut_sim,
-      tabset_id      = "step2_output_tabs",
-      tabset_session = session
+    # ---- 3. Diagnostics tab ------------------------------------------------
+    mod_2_03_diagnostics_server(
+      "diagnostics",
+      hist_sim         = s1$hist_sim,
+      saved_scenarios  = s1$saved_scenarios,
+      survey_weather   = survey_weather,
+      selected_weather = selected_weather,
+      tabset_id        = "step2_output_tabs",
+      tabset_session   = session
     )
 
-    # ---- Clear scenarios button ---------------------------------------------
+    # ---- Clear scenarios button --------------------------------------------
     observeEvent(input$clear_scenarios, {
-      saved_scenarios(list())
+      s1$saved_scenarios(list())
+      s1$hist_sim(NULL)
       shiny::showNotification(
-        "All scenarios cleared. Re-run simulations to populate.",
+        "All scenarios and historical baseline cleared. Re-run simulations to populate.",
         type = "message", duration = 4
       )
     })
 
-    # ---- 6. Compare simulations ---------------------------------------------
-    mod_2_06_sim_compare_server(
-      "sim_compare",
-      hist_sim        = s2$hist_sim,
-      fut_sim         = s4$fut_sim,
-      saved_scenarios = saved_scenarios,
-      selected_hist   = s1$selected_hist
-    )
-
-    # ---- Return API ---------------------------------------------------------
+    # ---- Return API --------------------------------------------------------
     list(
       selected_hist   = s1$selected_hist,
-      selected_fut    = s3$selected_fut,
-      hist_sim        = s2$hist_sim,
-      fut_sim         = s4$fut_sim,
-      saved_scenarios = saved_scenarios
+      selected_fut    = s1$selected_fut,
+      hist_sim        = s1$hist_sim,
+      saved_scenarios = s1$saved_scenarios
     )
   })
 }
