@@ -29,13 +29,20 @@ golem::fill_desc(
 		role = c("aut", "cre") # Your role (here author/creator)
 	),
 	repo_url = "https://github.com/worldbank/welfare-weather-app", # The URL of the GitHub repo (optional),
-	pkg_version = "0.0.0.9000", # The version of the package containing the app
+	pkg_version = "0.0.1", # The version of the package containing the app
 	set_options = TRUE # Set the global golem options
 )
 
 usethis::use_author(
   given = "Mads",
   family = "Hoefer",
+  email = "", # leave blank if not available
+  role = "aut"
+)
+
+usethis::use_author(
+  given = "Daniel",
+  family = "Kryger",
   email = "", # leave blank if not available
   role = "aut"
 )
@@ -60,7 +67,7 @@ golem::use_recommended_tests()
 
 ## Favicon ----
 # If you want to change the favicon (default is golem's one)
-golem::use_favicon("inst/app/www/hex-wiseapp.png") # path = "path/to/ico". Can be an online file.
+golem::use_favicon("inst/app/www/favicon.png") # path = "path/to/ico". Can be an online file.
 # golem::remove_favicon() # Uncomment to remove the default favicon
 
 ## Add helper functions ----
