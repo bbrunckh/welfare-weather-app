@@ -1,9 +1,12 @@
 Package: wiseapp
-Title: WISE App — Weather Impact Simulation & Evaluation
-Version: 0.0.0.9000
-Authors@R: 
-    person("First", "Last", , "first.last@example.com", role = c("aut", "cre"))
-Description: Interactive app for analysing welfare impacts of weather and policy scenarios. See package README for details.
+Title: Weather Impact Simulation and Evaluation for Adaptation Policy and Planning
+Version: 0.0.1
+Authors@R: c(
+    person("Ben", "Brunckhorst", , "bbrunckhorst@worldbank.org", role = c("aut", "cre")),
+    person("Mads", "Hoefer", role = "aut"),
+    person("Daniel", "Kryger", role = "aut")
+  )
+Description: A tool to estimate the relationship between weather and household welfare, simulate welfare in different weather conditions and climates, and simulate adaptation policy scenarios.
 License: MIT + file LICENSE
 Encoding: UTF-8
 Roxygen: list(markdown = TRUE)
@@ -46,3 +49,5 @@ Imports:
     tools,
     ranger,
     pkgload
+URL: https://github.com/worldbank/welfare-weather-app
+BugReports: https://github.com/worldbank/welfare-weather-app/issues

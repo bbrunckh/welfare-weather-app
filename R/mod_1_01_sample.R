@@ -79,7 +79,8 @@ mod_1_01_sample_server <- function(id, connection_params, survey_list, variable_
         inputId  = ns("economy"),
         label    = "Economy",
         choices  = choices,
-        selected = choices[1],
+        # make default "BFA" if it exists, otherwise first in list
+        selected = if ("BFA" %in% sv$code) "BFA" else choices[1],
         multiple = TRUE,
         options  = list(maxItems = 2, placeholder = "Select up to 2 economies")
       )

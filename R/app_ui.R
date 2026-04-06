@@ -9,7 +9,7 @@ app_ui <- function(request) {
   navbarPage(
     title = tagList(
       "WISE-APP",
-      tags$small(version, style = "color: #777; font-size: 0.5em;")
+      tags$small(golem::get_golem_version(), style = "color: #777; font-size: 0.5em;")
     ),
 
     # MathJax once

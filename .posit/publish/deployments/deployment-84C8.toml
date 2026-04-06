@@ -11,9 +11,9 @@ id = '5163b09e-1eb3-47e6-bb6a-4f0abcf7a28f'
 dashboard_url = 'https://w0lxdrconn01.worldbank.org/connect/#/apps/5163b09e-1eb3-47e6-bb6a-4f0abcf7a28f'
 direct_url = 'https://w0lxdrconn01.worldbank.org/content/5163b09e-1eb3-47e6-bb6a-4f0abcf7a28f/'
 logs_url = 'https://w0lxdrconn01.worldbank.org/connect/#/apps/5163b09e-1eb3-47e6-bb6a-4f0abcf7a28f/logs'
-deployed_at = '2026-04-03T13:00:02+01:00'
-bundle_id = '20974'
-bundle_url = 'https://w0lxdrconn01.worldbank.org/__api__/v1/content/5163b09e-1eb3-47e6-bb6a-4f0abcf7a28f/bundles/20974/download'
+deployed_at = '2026-04-06T09:59:48+01:00'
+bundle_id = '21358'
+bundle_url = 'https://w0lxdrconn01.worldbank.org/__api__/v1/content/5163b09e-1eb3-47e6-bb6a-4f0abcf7a28f/bundles/21358/download'
 files = [
   '.posit/publish/deployments/deployment-84C8.toml',
   '.posit/publish/wise-app-dev-9Q24.toml',
