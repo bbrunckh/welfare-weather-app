@@ -78,7 +78,7 @@
 !/**/requirements.txt
 !/**/Pipfile
 !/**/Pipfile.lock
-!/**/*.toml
+# !/**/*.toml
 # Still ignore .ipynb files in checkpoint folders
 .ipynb_checkpoints
 
@@ -138,3 +138,5 @@ token/
 tokens/
 rsconnect/
 inst/duckdb_extensions/
+.claude/settings.local.json
+.posit/
