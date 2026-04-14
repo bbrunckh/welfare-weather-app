@@ -454,6 +454,9 @@ hist_aggregate_choices <- function(outcome_type, outcome_name = NULL) {
 #'   `type = "binary`.
 #' @param pov_line A numeric poverty line required when `aggregate` is
 #'   `headcount_ratio` or `gap`. Ignored otherwise.
+#' @param weights  An optional character string giving the name of a survey
+#'   weight column in `preds`. When supplied, passed to `aggregate_outcome()`;
+#'   `NULL` (default) weights all observations equally.
 #' @param weights An optional character string giving the name of a survey
 #'   weight column in `df`. If `NULL` (default) all observations are
 #'   weighted equally.
@@ -680,6 +683,9 @@ deviation_from_centre <- function(df,
 #' @param loss_frame Logical. Passed to `deviation_from_centre()` as `loss`.
 #' @param pov_line   Numeric or `NULL`. Required for `"headcount_ratio"` /
 #'   `"gap"`.
+#' @param weights    Character or `NULL`. Name of the survey weight column in
+#'   `preds`. When non-`NULL` and present in `preds`, passed to
+#'   `aggregate_outcome()`. Default `NULL` (unweighted).
 #'
 #' @return A list with elements `out` (aggregated data frame with `sim_year`
 #'   and `value` columns) and `x_label` (character).
@@ -687,7 +693,7 @@ deviation_from_centre <- function(df,
 #' @importFrom rlang abort
 #' @export
 aggregate_sim_preds <- function(preds, so, agg_method, deviation, loss_frame,
-                                pov_line = NULL) {
+                                pov_line = NULL, weights = NULL) {
 
   if (agg_method %in% c("headcount_ratio", "gap", "fgt2") && is.null(pov_line)) {
     rlang::abort(
@@ -705,7 +711,8 @@ aggregate_sim_preds <- function(preds, so, agg_method, deviation, loss_frame,
     group     = grp_cols,
     type      = if (identical(so$type, "logical")) "binary" else "continuous",
     aggregate = agg_method,
-    pov_line  = pov_line
+    pov_line  = pov_line,
+    weights  = if (!is.null(weights) && weights %in% names(preds)) weights else NULL
   )
 
   if (!identical(deviation, "none")) {

@@ -24,6 +24,13 @@ mod_2_01_weathersim_ui <- function(id) {
         "Simulation settings \u25bc"
       ),
 
+      # -- Baseline survey ------------------------------------------------
+      shiny::tags$h6("Baseline survey",
+                     style = "font-weight:600; margin-top:8px; margin-bottom:4px;"),
+      shiny::uiOutput(ns("baseline_survey_ui")),
+      shiny::uiOutput(ns("baseline_warning_ui")),
+      shiny::tags$hr(style = "margin: 6px 0;"),
+
       # -- Historical period --------------------------------------------------
       shiny::tags$h6("Historical weather distribution period",
                      style = "font-weight:600; margin-top:8px; margin-bottom:4px;"),
@@ -161,7 +168,83 @@ mod_2_01_weathersim_server <- function(id,
     hist_sim        <- reactiveVal(NULL)
     saved_scenarios <- reactiveVal(list())
 
+    # ---- Baseline survey reactives ----------------------------------------
+
+    # Derive available survey x year choices from survey_weather.
+    # Returns a named character vector: label -> "survname|year" value.
+    # ---- Baseline survey reactives -----------------------------------------
+
+    baseline_survey_choices <- reactive({
+      req(survey_weather())
+      svy  <- survey_weather()
+      if (!all(c('code', 'survname', 'year') %in% names(svy))) return(character(0))
+      combos <- unique(svy[, c('code', 'survname', 'year')])
+      combos <- combos[order(combos$code, combos$year), ]
+      # Join economy (country) name from selected_surveys via code column.
+      # NOTE: code (e.g. TGO, GNB) is unique per country; survname (e.g. EHCVM)
+      # is shared across countries in the same survey programme and must NOT
+      # be used as the join key -- this was the bug causing Togo to disappear.
+      ss <- tryCatch(selected_surveys(), error = function(e) NULL)
+      if (!is.null(ss) && all(c('code', 'economy') %in% names(ss))) {
+        lbl_map <- unique(ss[, c('code', 'economy')])
+        combos  <- merge(combos, lbl_map, by = 'code', all.x = TRUE)
+        combos$economy[is.na(combos$economy)] <- combos$code[is.na(combos$economy)]
+      } else {
+        combos$economy <- combos$code
+      }
+      vals <- paste0(combos$code, '|', combos$year)
+      lbls <- paste0(combos$economy, ' ', combos$year)
+      setNames(vals, lbls)
+    })
+
+    # Default selection: latest year per unique economy (code), not survname.
+    baseline_default <- reactive({
+      ch <- baseline_survey_choices()
+      if (length(ch) == 0) return(character(0))
+      df <- data.frame(
+        val      = ch,
+        code = sub("^(.*?)\\|.*$", "\\1", ch),
+        year = as.integer(sub("^.*\\|", "", ch)),
+        stringsAsFactors = FALSE
+      )
+
+      latest <- tapply(df$year, df$code, max)
+      keep   <- mapply(function(c, y) latest[c] == y, df$code, df$year)
+      unname(ch[keep])
+    })
+
+
     # ---- Settings summary banner -------------------------------------------
+
+    output$baseline_survey_ui <- shiny::renderUI({
+      ch  <- baseline_survey_choices()
+      def <- baseline_default()
+      if (length(ch) == 0)
+        return(shiny::helpText("No survey data loaded.", style = "font-size:11px;"))
+      shiny::selectInput(
+        ns("baseline_survey"),
+        label    = NULL,
+        choices  = ch,
+        selected = def,
+        multiple = TRUE,
+        selectize = TRUE
+      )
+    })
+
+    output$baseline_warning_ui <- shiny::renderUI({
+      sel <- input$baseline_survey %||% baseline_default()
+      if (length(sel) <= 1) return(NULL)
+      # Multiple economies or years selected -- show warning
+      n_economies <- length(unique(sub("\\|.*$", "", sel)))
+      n_years     <- length(unique(sub("^.*\\|", "", sel)))
+      if (n_economies > 1 || n_years > 1) {
+        shiny::helpText(
+          shiny::tags$b("\u26a0 Warning:"),
+           "Using multiple survey years or economies is not recommended. Requires normalizing weights based on sample design, which is not currently implemented — verify before interpreting results.",
+          style = "color: #c0392b; font-size: 11px; margin-top: 2px;"
+        )
+      }
+    })
 
     output$settings_summary <- shiny::renderUI({
       hist_yr <- input$hist_years %||% c(1991, 2020)
@@ -209,7 +292,14 @@ mod_2_01_weathersim_server <- function(id,
         shiny::tags$b(" \u00b7 SSPs:", style = "color:#333;"), ssp_txt,
         shiny::tags$b(" \u00b7 Ensemble result:", style = "color:#333;"), ens_txt,
         shiny::tags$br(),
-        shiny::tags$b("Simulation residuals:", style = "color:#333;"), res_txt
+        shiny::tags$b("Simulation residuals:", style = "color:#333;"), res_txt,
+        shiny::tags$br(),
+        shiny::tags$b("Baseline survey:", style = "color:#333;"), {
+          sel  <- input$baseline_survey %||% baseline_default()
+          ch   <- baseline_survey_choices()
+          nms  <- names(ch)[ch %in% sel]
+          if (length(nms) == 0) "None" else paste(nms, collapse = ", ")
+        }
       )
     })
 
@@ -226,6 +316,16 @@ mod_2_01_weathersim_server <- function(id,
     })
 
     # ---- Derived config reactives ------------------------------------------
+
+    # survey_weather filtered to the selected baseline rows.
+    # Used in place of survey_weather() inside observeEvent(run_sim).
+    baseline_svy <- reactive({
+      sel <- input$baseline_survey %||% baseline_default()
+      if (length(sel) == 0) return(survey_weather())
+      svy <- survey_weather()
+      vals <- paste0(svy$code, "|", as.character(svy$year))
+      svy[vals %in% sel, , drop = FALSE]
+    })
 
     selected_hist <- reactive({
       req(input$hist_years)

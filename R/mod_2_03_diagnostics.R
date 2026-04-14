@@ -181,6 +181,39 @@ mod_2_03_diagnostics_server <- function(id,
       if (length(out) == 0) NULL else out
     })
 
+    # Detect weight column once -- passed to aggregate_sim_preds() when toggle is on.
+    weight_col_diag <- reactive({
+      req(hist_sim())
+      if (!isTRUE(input$use_weights_diag)) return(NULL)
+      w <- grep("^weight$|^hhweight$|^wgt$|^pw$", names(hist_sim()$preds),
+                value = TRUE, ignore.case = TRUE)[1]
+      if (is.na(w)) NULL else w
+    })
+
+    output$weight_status_diag_ui <- shiny::renderUI({
+      req(hist_sim())
+      # Detect weight column independently of the toggle -- this allows
+      # the amber state when the column exists but the toggle is OFF.
+      w      <- grep("^weight$|^hhweight$|^wgt$|^pw$",
+                     names(hist_sim()$preds),
+                     value = TRUE, ignore.case = TRUE)[1]
+      has_w  <- length(w) > 0 && !is.na(w)
+      tog_on <- isTRUE(input$use_weights_diag)
+      if (has_w && tog_on)
+        shiny::tags$p(
+          style = "font-size:11px; color:#2e7d32; margin:2px 0 6px 0;",
+          "✅ Survey weights found and applied (",
+          shiny::tags$code(w), ")")
+      else if (has_w && !tog_on)
+        shiny::tags$p(
+          style = "font-size:11px; color:#e65100; margin:2px 0 6px 0;",
+          "⚠ Survey weights available but not applied")
+      else
+        shiny::tags$p(
+          style = "font-size:11px; color:#c62828; margin:2px 0 6px 0;",
+          "🔴 No weight column found — unweighted")
+    })
+
     ridge_kde_data <- reactive({
       req(hist_sim())
 
@@ -210,7 +243,7 @@ mod_2_03_diagnostics_server <- function(id,
     agg_hist_diag <- reactive({
       req(hist_sim())
       aggregate_sim_preds(hist_sim()$preds, hist_sim()$so,
-                          "mean", "none", FALSE, NULL)
+                          "mean", "none", FALSE, NULL, weight_col_diag())
     })
 
     agg_scenarios_diag <- reactive({
@@ -218,7 +251,7 @@ mod_2_03_diagnostics_server <- function(id,
       if (length(sc) == 0) return(list())
       lapply(sc, function(s) {
         tryCatch(
-          aggregate_sim_preds(s$preds, s$so, "mean", "none", FALSE, NULL),
+           aggregate_sim_preds(s$preds, s$so, "mean", "none", FALSE, NULL, weight_col_diag()),
           error = function(e) NULL
         )
       })
@@ -287,7 +320,13 @@ mod_2_03_diagnostics_server <- function(id,
             ns("show_regression_input"),
             label = "Include regression output",
             value = TRUE
-          )
+          ),
+          shiny::checkboxInput(
+            ns("use_weights_diag"),
+            label = "Use survey weights (if available)",
+            value = TRUE
+          ),
+          shiny::uiOutput(ns("weight_status_diag_ui"))
         )
       )
     })

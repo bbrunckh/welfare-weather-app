@@ -61,6 +61,12 @@ mod_2_02_results_ui <- function(id) {
         shiny::column(12, shiny::uiOutput(ns("scenario_filter_ui")))
       ),
       shiny::tags$hr(style = "margin: 6px 0;"),
+      shiny::checkboxInput(
+        ns("use_weights"),
+        label = "Use survey weights (if available)",
+        value = TRUE
+      ),
+      shiny::uiOutput(ns("weight_status_ui")),
       shiny::radioButtons(
         ns("cmp_group_order"),
         label    = "Group charts and tables by",
@@ -171,6 +177,41 @@ mod_2_02_results_server <- function(id,
       vapply(sc, function(s) s$n_models %||% 1L, integer(1))
     })
 
+
+    # Detect weight column name once -- passed to aggregate_sim_preds().
+    # NULL when no weight column exists in preds or toggle is off.
+    weight_col <- reactive({
+      req(hist_sim())
+      if (!isTRUE(input$use_weights)) return(NULL)
+      w <- grep("^weight$|^hhweight$|^wgt$|^pw$", names(hist_sim()$preds),
+                value = TRUE, ignore.case = TRUE)[1]
+      if (is.na(w)) NULL else w
+    })
+
+    output$weight_status_ui <- shiny::renderUI({
+      req(hist_sim())
+      # Detect weight column independently of the toggle -- this allows
+      # the amber state when the column exists but the toggle is OFF.
+      w      <- grep("^weight$|^hhweight$|^wgt$|^pw$",
+                     names(hist_sim()$preds),
+                     value = TRUE, ignore.case = TRUE)[1]
+      has_w  <- length(w) > 0 && !is.na(w)
+      tog_on <- isTRUE(input$use_weights)
+      if (has_w && tog_on)
+        shiny::tags$p(
+          style = "font-size:11px; color:#2e7d32; margin:2px 0 6px 0;",
+          "✅ Survey weights found and applied (",
+          shiny::tags$code(w), ")")
+      else if (has_w && !tog_on)
+        shiny::tags$p(
+          style = "font-size:11px; color:#e65100; margin:2px 0 6px 0;",
+          "⚠ Survey weights available but not applied")
+      else
+        shiny::tags$p(
+          style = "font-size:11px; color:#c62828; margin:2px 0 6px 0;",
+          "🔴 No weight column found — unweighted")
+    })
+
     pov_line_val <- reactive({
       if (isTRUE(input$cmp_agg_method %in% c("headcount_ratio", "gap", "fgt2"))) {
         input$cmp_pov_line %||% NULL
@@ -203,7 +244,7 @@ mod_2_02_results_server <- function(id,
       deviation <- input$cmp_deviation  %||% "none"
       pov       <- pov_line_val()
       if (isTRUE(method %in% c("headcount_ratio", "gap", "fgt2"))) req(pov)
-      aggregate_sim_preds(hist_sim()$preds, hist_sim()$so, method, deviation, FALSE, pov)
+      aggregate_sim_preds(hist_sim()$preds, hist_sim()$so, method, deviation, FALSE, pov, weight_col())
     })
 
     agg_scenarios <- reactive({
@@ -215,7 +256,7 @@ mod_2_02_results_server <- function(id,
       if (isTRUE(method %in% c("headcount_ratio", "gap", "fgt2"))) req(pov)
       result <- lapply(sc, function(s) {
         tryCatch(
-          aggregate_sim_preds(s$preds, s$so, method, deviation, FALSE, pov),
+          aggregate_sim_preds(s$preds, s$so, method, deviation, FALSE, pov, weight_col()),
           error = function(e) {
             message("[agg_scenarios] ERROR: ", conditionMessage(e))
             NULL
