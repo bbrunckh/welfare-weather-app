@@ -10,4 +10,4 @@ Follow the steps to perform simulations and explore policy scenarios:
 2. **Simulate welfare** — Apply the fitted model to historical and future climate scenarios to produce a distribution of weather-driven outcomes.
 3. **Policy scenarios** _<span style="color: red; font-weight: bold;">[Under development]</span>_ — Re-simulate outcomes under counterfactual policy settings to quantify direct welfare gains and changes in climate resilience. 
 
-<a href="https://datanalytics-int.worldbank.org/content/a24b499b-46b7-420e-9e77-5475b45cc7c5" target="_blank">WISE-APP Documentation</a>
+[WISE-APP Documentation](https://datanalytics-int.worldbank.org/content/a24b499b-46b7-420e-9e77-5475b45cc7c5){target="_blank"}
