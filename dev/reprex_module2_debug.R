@@ -114,7 +114,7 @@ sc_names  <- names(future_scenarios)
 # Use the package's internal helpers directly
 all_ssps  <- sort(unique(na.omit(vapply(sc_names, wiseapp:::.normalise_ssp,   character(1)))))
 all_years <- sort(unique(na.omit(vapply(sc_names, wiseapp:::.parse_year,       character(1)))))
-all_pcts  <- sort(unique(na.omit(vapply(sc_names, wiseapp:::.parse_percentile, character(1)))))
+all_pcts  <- character(0)  # Percentile selection removed; all models grouped by SSP
 
 cat("  Detected SSPs: ", paste(all_ssps,  collapse = ", "), "\n")
 cat("  Detected years:", paste(all_years, collapse = ", "), "\n")

@@ -59,30 +59,17 @@ label_deviation <- function(key) {
 }
 
 # ---- Internal helpers: parse scenario key components ----------------------
-# Strips the trailing " / P{pct}" suffix before regex-matching so helpers
-# work identically on old keys ("SSP2-4.5 / 2050") and new keys
-# ("SSP2-4.5 / 2050 / P50").
+# Keys are of the form "SSP2-4.5 / 2025-2035".
 .normalise_ssp <- function(nm) {
-  nm_clean <- sub(" / P[0-9]+$", "", nm)
-  m <- regexpr("SSP[0-9]-[0-9.]+", nm_clean)
+  m <- regexpr("SSP[0-9]-[0-9.]+", nm)
   if (m == -1L) return(NA_character_)
-  raw <- regmatches(nm_clean, m)
+  raw <- regmatches(nm, m)
   switch(raw,
     "SSP2-4.5" = "SSP2-4.5",
     "SSP3-7.0" = "SSP3-7.0",
     "SSP5-8.5" = "SSP5-8.5",
     raw
   )
-}
-
-#' Extract ensemble percentile label from a scenario key.
-#' @param nm Character. e.g. "SSP2-4.5 / 2050 / P50".
-#' @return e.g. "P50", or NA_character_ for keys without a percentile suffix.
-#' @noRd
-.parse_percentile <- function(nm) {
-  m <- regexpr("P[0-9]+$", nm)
-  if (m == -1L) return(NA_character_)
-  regmatches(nm, m)
 }
 
 # ---- Internal: dynamic year linetype helper --------------------------------
@@ -97,22 +84,39 @@ label_deviation <- function(key) {
   )
 }
 
-# ---- Internal: sort percentile / member labels within one SSP x year group -
-# Percentile mode (all labels match "P{digits}"): sorted numerically ascending.
-# All-members mode: sorted by ascending mean value within the group.
-.sort_pct_labels <- function(pcts, fut_df, ssp, yr) {
-  is_pct <- all(grepl("^P[0-9]+$", pcts))
-  if (is_pct) {
-    nums <- as.integer(sub("^P", "", pcts))
-    return(pcts[order(nums)])
-  }
-  # All-members: sort by mean value ascending
-  means <- vapply(pcts, function(p) {
-    rows <- fut_df$ssp_short == ssp & fut_df$yr == yr & fut_df$pct_label == p
-    if (!any(rows)) return(NA_real_)
-    fut_df$mean[rows][1]
-  }, numeric(1))
-  pcts[order(means, na.last = TRUE)]
+# ---------------------------------------------------------------------------- #
+# Shared CI summary helper                                                     #
+# ---------------------------------------------------------------------------- #
+
+# Used by both plot_pointrange_climate() and plot_uncertainty_decomposition().
+.summarise_vals <- function(vals) {
+  vals <- vals[is.finite(vals)]
+  if (length(vals) < 2) return(NULL)
+  data.frame(
+    mean  = mean(vals),
+    lo95  = as.numeric(stats::quantile(vals, 0.025)),
+    hi95  = as.numeric(stats::quantile(vals, 0.975)),
+    lo90  = as.numeric(stats::quantile(vals, 0.05)),
+    hi90  = as.numeric(stats::quantile(vals, 0.95)),
+    stringsAsFactors = FALSE
+  )
+}
+
+# Decompose a scenario's aggregated $out tibble into three uncertainty sources.
+# Returns a named list:
+#   $total  — all N_models × N_years values (combined)
+#   $annual — model-averaged annual means   (N_years values)
+#   $model  — year-averaged model means     (N_models values; NULL for historical)
+.decompose_scenario_uncertainty <- function(out_df) {
+  has_model <- "model" %in% names(out_df)
+  total     <- out_df$value
+  annual    <- if (has_model)
+    as.numeric(tapply(out_df$value, out_df$sim_year, mean, na.rm = TRUE))
+  else total
+  model_means <- if (has_model)
+    as.numeric(tapply(out_df$value, out_df$model, mean, na.rm = TRUE))
+  else NULL
+  list(total = total, annual = annual, model = model_means)
 }
 
 # ---------------------------------------------------------------------------- #
@@ -146,19 +150,7 @@ plot_pointrange_climate <- function(scenarios, hist_agg,
 
   stopifnot(is.list(hist_agg), all(c("out", "x_label") %in% names(hist_agg)))
 
-  # ---- summarise one vector into mean + CI bounds --------------------------
-  summarise_vals <- function(vals) {
-    vals <- vals[is.finite(vals)]
-    if (length(vals) < 2) return(NULL)
-    data.frame(
-      mean  = mean(vals),
-      lo95  = as.numeric(stats::quantile(vals, 0.025)),
-      hi95  = as.numeric(stats::quantile(vals, 0.975)),
-      lo90  = as.numeric(stats::quantile(vals, 0.05)),
-      hi90  = as.numeric(stats::quantile(vals, 0.95)),
-      stringsAsFactors = FALSE
-    )
-  }
+  summarise_vals <- .summarise_vals
 
   # ---- historical summary --------------------------------------------------
   hist_s <- summarise_vals(hist_agg$out$value)
@@ -171,6 +163,8 @@ plot_pointrange_climate <- function(scenarios, hist_agg,
   hist_s$colour_key <- "Historical"
 
   # ---- future scenario summaries ------------------------------------------
+  # Each scenario key is "SSP2-4.5 / 2025-2035" (one entry per SSP x period,
+  # with all ensemble model predictions already pooled in the preds data frame).
   fut_df        <- NULL
   ssp_short_map <- c("SSP2-4.5" = "SSP2", "SSP3-7.0" = "SSP3", "SSP5-8.5" = "SSP5")
 
@@ -184,36 +178,19 @@ plot_pointrange_climate <- function(scenarios, hist_agg,
         if (is.null(s)) return(NULL)
         ssp_key   <- .normalise_ssp(nm)
         ssp_short <- ssp_short_map[ssp_key] %||% ssp_key
-        yr        <- .parse_year(nm)                       # "2020-2040"
-        pct       <- .parse_percentile(nm)
-        # For "all members" mode pct is NA; extract the member name from the
-        # last " / " segment of the display key instead.
-        pct_label <- if (!is.na(pct)) pct else {
-          parts <- strsplit(nm, " / ", fixed = TRUE)[[1]]
-          if (length(parts) >= 3) parts[length(parts)] else nm
-        }
-        s$pt_key      <- paste0(ssp_short, "\n", yr, "\n", pct_label)
-        s$colour_key  <- paste(ssp_key, yr, pct_label, sep = "__")
+        yr        <- .parse_year(nm)
+        s$pt_key      <- paste0(ssp_short, "\n", yr)
+        s$colour_key  <- paste(ssp_key, yr, sep = "__")
         s$ssp_key     <- ssp_key
         s$ssp_short   <- ssp_short
         s$yr          <- yr
-        s$pct_label   <- pct_label
         s
       })
       fut_df <- dplyr::bind_rows(Filter(Negate(is.null), rows))
     }
   }
 
-  # ---- colour palette: Historical = grey; one shade per SSP x year x member
-  # Percentile mode: P10 lighter, P50 = base, P90 darker.
-  # All-members mode: evenly spread shades within each SSP x year group.
-  pct_lighten_named <- c("P10" = 0.40, "P50" = 0.0, "P90" = -0.25)
-
-  # Canonical member order from fut_df (insertion order preserved)
-  pct_order_all <- if (!is.null(fut_df) && nrow(fut_df) > 0)
-    unique(fut_df$pct_label) else character(0)
-  is_pct_mode <- all(pct_order_all %in% c("P10", "P50", "P90"))
-
+  # ---- colour palette: Historical = grey; one colour per SSP x year --------
   colour_palette <- c("Historical" = "#808080")
   if (!is.null(fut_df) && nrow(fut_df) > 0) {
     yrs_present <- sort(unique(fut_df$yr))
@@ -222,26 +199,8 @@ plot_pointrange_climate <- function(scenarios, hist_agg,
     for (ssp in intersect(names(.ssp_colours), unique(fut_df$ssp_key))) {
       base_col <- .ssp_colours[ssp]
       for (i in seq_along(yrs_present)) {
-        yr_col    <- colorspace::lighten(base_col, yr_lighten[i])
-        pcts_here <- unique(fut_df$pct_label[
-          fut_df$ssp_key == ssp & fut_df$yr == yrs_present[i]])
-        # Sort so the lighten ramp aligns with x-axis order:
-        # numeric order for P{n} mode, ascending mean for all-members mode.
-        pcts_here <- .sort_pct_labels(
-          pcts_here, fut_df,
-          ssp_short_map[ssp] %||% ssp,
-          yrs_present[i]
-        )
-        n_pcts    <- length(pcts_here)
-        lighten_vals <- if (all(pcts_here %in% names(pct_lighten_named))) {
-          pct_lighten_named[pcts_here]
-        } else {
-          seq(0.35, -0.25, length.out = max(n_pcts, 1L))
-        }
-        for (j in seq_along(pcts_here)) {
-          ck                 <- paste(ssp, yrs_present[i], pcts_here[j], sep = "__")
-          colour_palette[ck] <- colorspace::lighten(yr_col, lighten_vals[j])
-        }
+        ck <- paste(ssp, yrs_present[i], sep = "__")
+        colour_palette[ck] <- colorspace::lighten(base_col, yr_lighten[i])
       }
     }
   }
@@ -262,11 +221,7 @@ plot_pointrange_climate <- function(scenarios, hist_agg,
         spacer_ids     <- c(spacer_ids, sid)
         ordered_levels <- c(ordered_levels, sid)
         for (ssp in ssps_present) {
-          pcts_here <- unique(fut_df$pct_label[
-            fut_df$ssp_short == ssp & fut_df$yr == yr_i])
-          pcts_here <- .sort_pct_labels(pcts_here, fut_df, ssp, yr_i)
-          ordered_levels <- c(ordered_levels,
-            paste0(ssp, "\n", yr_i, "\n", pcts_here))
+          ordered_levels <- c(ordered_levels, paste0(ssp, "\n", yr_i))
         }
       }
     } else {
@@ -279,28 +234,8 @@ plot_pointrange_climate <- function(scenarios, hist_agg,
         ordered_levels <- c(ordered_levels, sid)
         ssp_yrs <- sort(unique(fut_df$yr[fut_df$ssp_short == ssp]))
         for (yr_i in ssp_yrs) {
-          pcts_here <- unique(fut_df$pct_label[
-            fut_df$ssp_short == ssp & fut_df$yr == yr_i])
-          pcts_here <- .sort_pct_labels(pcts_here, fut_df, ssp, yr_i)
-          ordered_levels <- c(ordered_levels,
-            paste0(ssp, "\n", yr_i, "\n", pcts_here))
+          ordered_levels <- c(ordered_levels, paste0(ssp, "\n", yr_i))
         }
-      }
-    }
-  }
-
-  # Show axis label on the centre tick of each SSP x year group.
-  # Percentile mode: centre = median percentile, flanks blank.
-  # All-members mode: centre = middle member (by mean), others show member name only.
-  centre_ticks <- character(0)
-  if (!is.null(fut_df) && nrow(fut_df) > 0) {
-    for (ssp in unique(fut_df$ssp_short)) {
-      for (yr_i in unique(fut_df$yr[fut_df$ssp_short == ssp])) {
-        grp_pcts <- unique(fut_df$pct_label[
-          fut_df$ssp_short == ssp & fut_df$yr == yr_i])
-        grp_pcts <- .sort_pct_labels(grp_pcts, fut_df, ssp, yr_i)
-        mid <- grp_pcts[ceiling(length(grp_pcts) / 2)]
-        centre_ticks <- c(centre_ticks, paste0(ssp, "\n", yr_i, "\n", mid))
       }
     }
   }
@@ -309,20 +244,7 @@ plot_pointrange_climate <- function(scenarios, hist_agg,
     vapply(ordered_levels, function(lv) {
       if (lv %in% spacer_ids) return("")
       if (lv == "Historical")  return(lv)
-      if (is_pct_mode) {
-        # Percentile mode: show SSP+period on centre tick, blank on all flanks
-        if (lv %in% centre_ticks)          return(sub("\n[^\n]+$", "", lv))
-        if (grepl("\nP[0-9]+$", lv))       return("")
-        return(lv)
-      } else {
-        # All-members: show SSP+period on centre tick, member name on others
-        if (lv %in% centre_ticks) {
-          parts <- strsplit(lv, "\n")[[1]]
-          return(paste(parts[1], parts[2], sep = "\n"))
-        }
-        parts <- strsplit(lv, "\n")[[1]]
-        return(if (length(parts) >= 3) parts[3] else lv)
-      }
+      lv  # SSP\nyear label shown as-is
     }, character(1)),
     ordered_levels
   )
@@ -342,23 +264,9 @@ plot_pointrange_climate <- function(scenarios, hist_agg,
       ggplot2::labs(title = "Run a future simulation to see scenario comparisons."))
 
   # ---- plot ----------------------------------------------------------------
-  # Per-point size and linewidth encoding: P50 full; P10/P90 smaller/thinner
-  pct_size_map      <- c("P10" = 1.8, "P50" = 3.0, "P90" = 1.8, "Historical" = 3.0)
-  pct_linewidth_map <- c("P10" = 1.2, "P50" = 2.0, "P90" = 1.2, "Historical" = 2.0)
-
-  get_pct <- function(lv) {
-    m <- regexpr("P[0-9]+$", lv)
-    if (m > 0) regmatches(lv, m) else "Historical"
-  }
-
-  default_sz <- if (is_pct_mode) 2.2 else 2.2
-  default_lw <- if (is_pct_mode) 1.4 else 1.4
-  plot_df$pt_size <- vapply(as.character(plot_df$pt_key), function(k) {
-    v <- pct_size_map[get_pct(k)]; if (!is.na(v)) v else default_sz
-  }, numeric(1))
-  plot_df$pt_lw   <- vapply(as.character(plot_df$pt_key), function(k) {
-    v <- pct_linewidth_map[get_pct(k)]; if (!is.na(v)) v else default_lw
-  }, numeric(1))
+  # Uniform point size and linewidth (one point per SSP x year)
+  plot_df$pt_size <- 3.0
+  plot_df$pt_lw   <- 2.0
 
   ggplot2::ggplot(plot_df,
     ggplot2::aes(x = .data$pt_key, colour = .data$colour_key)
@@ -400,6 +308,230 @@ plot_pointrange_climate <- function(scenarios, hist_agg,
       panel.grid.minor.x = ggplot2::element_blank(),
       axis.text.x        = ggplot2::element_text(size = 10),
       legend.position    = "none"
+    )
+}
+
+# ---------------------------------------------------------------------------- #
+# Uncertainty decomposition chart                                              #
+# ---------------------------------------------------------------------------- #
+
+#' Decomposed Uncertainty Point-Range Chart
+#'
+#' Three-facet chart showing annual variability, model uncertainty, and combined
+#' uncertainty separately, using the same x-axis layout and colour palette as
+#' \code{plot_pointrange_climate()}.
+#'
+#' \describe{
+#'   \item{Annual variability}{CI from model-averaged annual means (N_years values).
+#'     Represents weather-driven year-to-year variation.}
+#'   \item{Model uncertainty}{CI from year-averaged per-model means (N_models values).
+#'     Represents disagreement across CMIP6 ensemble members.}
+#'   \item{Combined}{CI from all N_models × N_years values — same as the main
+#'     results chart above.}
+#' }
+#'
+#' Historical is shown only in the Annual variability and Combined facets (it has
+#' no model dimension).
+#'
+#' @param scenarios Named list of \code{aggregate_sim_preds()} outputs for future
+#'   scenarios, as produced by \code{agg_scenarios()}.
+#' @param hist_agg  \code{aggregate_sim_preds()} output for the historical series.
+#' @param group_order Character. \code{"scenario_x_year"} (default) or
+#'   \code{"year_x_scenario"}.
+#'
+#' @return A ggplot object.
+#' @importFrom ggplot2 ggplot aes geom_linerange geom_point geom_hline
+#'   scale_colour_manual scale_x_discrete facet_wrap labs theme_minimal theme
+#'   element_blank element_text element_rect
+#' @importFrom colorspace lighten
+#' @importFrom dplyr bind_rows
+#' @importFrom stats quantile
+#' @importFrom rlang .data
+#' @export
+plot_uncertainty_decomposition <- function(scenarios, hist_agg,
+                                           group_order = "scenario_x_year") {
+
+  stopifnot(is.list(hist_agg), all(c("out", "x_label") %in% names(hist_agg)))
+
+  ssp_short_map <- c("SSP2-4.5" = "SSP2", "SSP3-7.0" = "SSP3", "SSP5-8.5" = "SSP5")
+  sources       <- c("Annual variability", "Model uncertainty", "Combined")
+
+  hist_mean <- mean(hist_agg$out$value, na.rm = TRUE)
+
+  # ---- historical rows (Annual + Combined; no Model facet) ------------------
+  hist_decomp <- .decompose_scenario_uncertainty(hist_agg$out)
+  hist_rows   <- dplyr::bind_rows(lapply(c("Annual variability", "Combined"), function(src) {
+    vals <- if (src == "Annual variability") hist_decomp$annual else hist_decomp$total
+    s <- .summarise_vals(vals)
+    if (is.null(s)) return(NULL)
+    cbind(s, data.frame(
+      pt_key     = "Historical",
+      colour_key = "Historical",
+      ssp_key    = "Historical",
+      ssp_short  = "Historical",
+      yr         = NA_character_,
+      source     = src,
+      n_vals     = length(vals),
+      stringsAsFactors = FALSE
+    ))
+  }))
+
+  # ---- future scenario rows -------------------------------------------------
+  fut_rows <- NULL
+  future_nms <- if (length(scenarios) > 0)
+    names(scenarios)[vapply(names(scenarios),
+      function(nm) !is.na(.normalise_ssp(nm)), logical(1))]
+  else character(0)
+
+  if (length(future_nms) > 0) {
+    row_list <- lapply(future_nms, function(nm) {
+      decomp    <- .decompose_scenario_uncertainty(scenarios[[nm]]$out)
+      ssp_key   <- .normalise_ssp(nm)
+      ssp_short <- ssp_short_map[ssp_key] %||% ssp_key
+      yr        <- .parse_year(nm)
+      pt_key    <- paste0(ssp_short, "\n", yr)
+      ck        <- paste(ssp_key, yr, sep = "__")
+      dplyr::bind_rows(lapply(sources, function(src) {
+        vals <- switch(src,
+          "Annual variability" = decomp$annual,
+          "Model uncertainty"  = decomp$model,
+          "Combined"           = decomp$total
+        )
+        if (is.null(vals)) return(NULL)
+        s <- .summarise_vals(vals)
+        if (is.null(s)) return(NULL)
+        cbind(s, data.frame(
+          pt_key     = pt_key,
+          colour_key = ck,
+          ssp_key    = ssp_key,
+          ssp_short  = ssp_short,
+          yr         = yr,
+          source     = src,
+          n_vals     = length(vals),
+          stringsAsFactors = FALSE
+        ))
+      }))
+    })
+    fut_rows <- dplyr::bind_rows(Filter(Negate(is.null), row_list))
+  }
+
+  plot_df <- dplyr::bind_rows(hist_rows, fut_rows)
+  if (is.null(plot_df) || nrow(plot_df) == 0)
+    return(ggplot2::ggplot() +
+      ggplot2::labs(title = "Run a simulation to see uncertainty decomposition."))
+
+  # ---- colour palette (mirrors plot_pointrange_climate) --------------------
+  colour_palette <- c("Historical" = "#808080")
+  if (!is.null(fut_rows) && nrow(fut_rows) > 0) {
+    yrs_present <- sort(unique(fut_rows$yr))
+    n_yrs       <- length(yrs_present)
+    yr_lighten  <- if (n_yrs > 1) seq(0.30, 0.0, length.out = n_yrs) else 0.0
+    for (ssp in intersect(names(.ssp_colours), unique(fut_rows$ssp_key))) {
+      base_col <- .ssp_colours[ssp]
+      for (i in seq_along(yrs_present)) {
+        ck <- paste(ssp, yrs_present[i], sep = "__")
+        colour_palette[ck] <- colorspace::lighten(base_col, yr_lighten[i])
+      }
+    }
+  }
+
+  # ---- x-axis ordering (same logic as plot_pointrange_climate) -------------
+  ordered_levels <- "Historical"
+  spacer_ids     <- character(0)
+
+  if (!is.null(fut_rows) && nrow(fut_rows) > 0) {
+    fut_meta <- unique(fut_rows[, c("pt_key", "ssp_short", "yr")])
+    if (isTRUE(group_order == "year_x_scenario")) {
+      yrs_present  <- sort(unique(fut_meta$yr))
+      ssps_present <- intersect(c("SSP2", "SSP3", "SSP5"), unique(fut_meta$ssp_short))
+      spacer_n <- 0L
+      for (yr_i in yrs_present) {
+        spacer_n <- spacer_n + 1L; sid <- strrep(" ", spacer_n)
+        spacer_ids <- c(spacer_ids, sid); ordered_levels <- c(ordered_levels, sid)
+        for (ssp in ssps_present) ordered_levels <- c(ordered_levels, paste0(ssp, "\n", yr_i))
+      }
+    } else {
+      ssps_present <- intersect(c("SSP2", "SSP3", "SSP5"), unique(fut_meta$ssp_short))
+      spacer_n <- 0L
+      for (ssp in ssps_present) {
+        spacer_n <- spacer_n + 1L; sid <- strrep(" ", spacer_n)
+        spacer_ids <- c(spacer_ids, sid); ordered_levels <- c(ordered_levels, sid)
+        ssp_yrs <- sort(unique(fut_meta$yr[fut_meta$ssp_short == ssp]))
+        for (yr_i in ssp_yrs) ordered_levels <- c(ordered_levels, paste0(ssp, "\n", yr_i))
+      }
+    }
+  }
+
+  x_label_map <- setNames(
+    vapply(ordered_levels, function(lv) {
+      if (lv %in% spacer_ids) "" else lv
+    }, character(1)),
+    ordered_levels
+  )
+  data_levels <- setdiff(ordered_levels, spacer_ids)
+
+  # ---- facet factor ---------------------------------------------------------
+  plot_df$source <- factor(plot_df$source, levels = sources)
+  plot_df$pt_key <- factor(plot_df$pt_key, levels = ordered_levels)
+  plot_df <- plot_df[plot_df$pt_key %in% data_levels, ]
+  if (nrow(plot_df) == 0)
+    return(ggplot2::ggplot() +
+      ggplot2::labs(title = "Run a future simulation to see uncertainty decomposition."))
+
+  plot_df$pt_size <- 3.0
+  plot_df$pt_lw   <- 2.0
+
+  # Reference line data: one row per facet, but only show for relevant sources
+  hline_df <- data.frame(
+    source       = factor(c("Annual variability", "Combined"), levels = sources),
+    hist_mean    = hist_mean
+  )
+
+  ggplot2::ggplot(plot_df,
+    ggplot2::aes(x = .data$pt_key, colour = .data$colour_key)
+  ) +
+    ggplot2::geom_linerange(
+      ggplot2::aes(ymin = .data$lo95, ymax = .data$hi95),
+      linewidth = 0.5, colour = "grey70"
+    ) +
+    ggplot2::geom_linerange(
+      ggplot2::aes(ymin = .data$lo90, ymax = .data$hi90,
+                   linewidth = I(.data$pt_lw))
+    ) +
+    ggplot2::geom_point(
+      ggplot2::aes(y = .data$mean, size = I(.data$pt_size)),
+      shape = 21, fill = "white", stroke = 1.4
+    ) +
+    ggplot2::geom_hline(
+      data      = hline_df,
+      ggplot2::aes(yintercept = hist_mean),
+      linetype  = "dashed", colour = "#808080", linewidth = 0.55,
+      inherit.aes = FALSE
+    ) +
+    ggplot2::scale_colour_manual(values = colour_palette, guide = "none") +
+    ggplot2::scale_x_discrete(
+      limits = ordered_levels,
+      labels = x_label_map,
+      drop   = FALSE
+    ) +
+    ggplot2::facet_wrap(
+      ~ source, ncol = 1, scales = "fixed",
+      strip.position = "left"
+    ) +
+    ggplot2::labs(
+      title = NULL,
+      x     = NULL,
+      y     = hist_agg$x_label
+    ) +
+    ggplot2::theme_minimal(base_size = 13) +
+    ggplot2::theme(
+      panel.grid.major.x  = ggplot2::element_blank(),
+      panel.grid.minor.x  = ggplot2::element_blank(),
+      axis.text.x         = ggplot2::element_text(size = 10),
+      strip.text.y.left   = ggplot2::element_text(angle = 90, face = "bold", size = 11),
+      strip.placement     = "outside",
+      panel.spacing.y     = ggplot2::unit(12, "pt"),
+      legend.position     = "none"
     )
 }
 
@@ -635,22 +767,11 @@ enhance_exceedance <- function(scenarios,
     vals    <- scenarios[[nm]]$out$value
     ssp_key <- .normalise_ssp(nm)
     yr      <- .parse_year(nm)
-    pct_raw <- .parse_percentile(nm)
-    # For all-members mode, extract member name from the last " / " segment
-    pct <- if (!is.na(pct_raw)) {
-      pct_raw
-    } else if (!is.na(ssp_key)) {
-      parts <- strsplit(nm, " / ", fixed = TRUE)[[1]]
-      if (length(parts) >= 3) parts[length(parts)] else "Member"
-    } else {
-      NA_character_
-    }
     data.frame(
       value   = vals,
       group   = nm,
       ssp_key = if (is.na(ssp_key)) "Historical" else ssp_key,
       yr      = if (is.na(yr))      "Historical" else yr,
-      pct     = if (is.na(pct))     "Historical" else pct,
       stringsAsFactors = FALSE
     )
   }))
@@ -668,22 +789,6 @@ enhance_exceedance <- function(scenarios,
 
   present_yrs  <- names(yr_styles$linetype_map)
   ltype_map_yr <- c("Historical" = "solid", yr_styles$linetype_map)
-
-  # Linewidth/alpha encodes the percentile or member dimension.
-  # Percentile mode (P10/P50/P90): P50 full weight, flanks narrow and faded.
-  # All-members mode: uniform linewidth, evenly spread alpha.
-  present_pcts    <- unique(long_df$pct[long_df$pct != "Historical"])
-  is_pct_mode_exc <- all(present_pcts %in% c("P10", "P50", "P90"))
-
-  if (is_pct_mode_exc) {
-    lw_map_pct    <- c("Historical" = 0.9, "P10" = 0.45, "P50" = 0.9, "P90" = 0.45)
-    alpha_map_pct <- c("Historical" = 1.0, "P10" = 0.55, "P50" = 1.0, "P90" = 0.55)
-  } else {
-    n_m           <- length(present_pcts)
-    alphas        <- if (n_m > 1) seq(0.40, 0.90, length.out = n_m) else 0.75
-    lw_map_pct    <- c(setNames(rep(0.65, n_m), present_pcts), "Historical" = 0.9)
-    alpha_map_pct <- c(setNames(alphas,          present_pcts), "Historical" = 1.0)
-  }
 
   hist_mean <- mean(hist_agg$out$value, na.rm = TRUE)
   eps       <- if (isTRUE(logit_x)) 0.005 else 0
@@ -703,7 +808,6 @@ enhance_exceedance <- function(scenarios,
       group   = grp,
       ssp_key = sub$ssp_key[1],
       yr      = sub$yr[1],
-      pct     = sub$pct[1],
       stringsAsFactors = FALSE
     )
   }))
@@ -711,17 +815,6 @@ enhance_exceedance <- function(scenarios,
   if (is.null(ecdf_df) || nrow(ecdf_df) == 0)
     return(ggplot2::ggplot() +
       ggplot2::labs(title = "Run a simulation to see exceedance probabilities."))
-
-  ecdf_df$alpha <- alpha_map_pct[ecdf_df$pct]
-  ecdf_df$lw    <- lw_map_pct[ecdf_df$pct]
-
-  # ---- Build percentile / member legend labels ---------------------------
-  pct_legend_vals  <- if (is_pct_mode_exc)
-    intersect(c("P10", "P50", "P90"), present_pcts)
-  else
-    present_pcts   # show all member names
-  pct_lw_legend    <- lw_map_pct[c("Historical",   pct_legend_vals)]
-  pct_alpha_legend <- alpha_map_pct[c("Historical", pct_legend_vals)]
 
   ann_y <- if (isTRUE(logit_x)) 0.97 else 0.95
 
@@ -733,12 +826,10 @@ enhance_exceedance <- function(scenarios,
       y         = exceed,
       colour    = ssp_key,
       linetype  = yr,
-      linewidth = pct,
-      alpha     = I(.data$alpha),
       group     = group
     )
   ) +
-    ggplot2::geom_line() +
+    ggplot2::geom_line(linewidth = 0.9) +
     ggplot2::geom_vline(
       xintercept = hist_mean, linetype = "dotted",
       colour = "black", linewidth = 0.5
@@ -754,8 +845,7 @@ enhance_exceedance <- function(scenarios,
       labels = c("Historical", present_ssps),
       name   = "Climate scenario",
       guide  = ggplot2::guide_legend(order = 1,
-                                     override.aes = list(linewidth = 0.9,
-                                                         alpha = 1))
+                                     override.aes = list(linewidth = 0.9))
     ) +
     ggplot2::scale_linetype_manual(
       values = ltype_map_yr,
@@ -763,17 +853,7 @@ enhance_exceedance <- function(scenarios,
       labels = c("Historical", present_yrs),
       name   = "Period",
       guide  = ggplot2::guide_legend(order = 2,
-                                     override.aes = list(linewidth = 0.9,
-                                                         alpha = 1))
-    ) +
-    ggplot2::scale_linewidth_manual(
-      values = lw_map_pct,
-      breaks = c("Historical", pct_legend_vals),
-      labels = c("Historical", pct_legend_vals),
-      name   = "Ensemble percentile",
-      guide  = if (length(pct_legend_vals) > 0)
-        ggplot2::guide_legend(order = 3, override.aes = list(alpha = 1))
-      else "none"
+                                     override.aes = list(linewidth = 0.9))
     ) +
     ggplot2::labs(
       title = "Exceedance probability by climate scenario",

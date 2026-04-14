@@ -9,7 +9,7 @@ source("R/fct_get_weather.R")
 
 # inputs
 
-  # connection params for local testing
+  # connection params for local testing (update local path as needed) 
   connection_params <- list(type = "local", path = "/Users/bbrunckhorst/Library/CloudStorage/OneDrive-WBG/wiseapp - Documents")
 
   # selected surveys
@@ -124,8 +124,12 @@ range(res4$historical$tx, na.rm = TRUE)
   # SSPs to run
   ssps <- c("ssp2_4_5", "ssp5_8_5")
 
-  # future period to perturb
+  # future period(s) to perturb — single or list for multiple
   future_period <- c("2045-01-01", "2055-12-31")
+  future_periods_multi <- list(
+    c("2035-01-01", "2045-12-31"),
+    c("2045-01-01", "2055-12-31")
+  )
 
   # perturbation method: additive for temperature, multiplicative for precipitation
   perturbation_method <- c(tx = "additive", r = "multiplicative")
@@ -150,7 +154,7 @@ str(res5$historical)
 nrow(res5$historical)
 range(res5$historical$timestamp)
 
-# 6. Single SSP, default percentiles (p10/p50/p90) — two variables
+# 6. Single SSP, single period, all models — two variables
 res6 <- get_weather(
   survey_data         = survey_data,
   selected_surveys    = selected_surveys,
@@ -167,14 +171,13 @@ res6 <- get_weather(
   ssp                 = "ssp2_4_5",
   future_period       = future_period,
   perturbation_method = perturbation_method
-  # ensemble_percentiles defaults to c(10, 50, 90)
 )
-# result: $historical + $ssp2_4_5_p10 + $ssp2_4_5_p50 + $ssp2_4_5_p90
+# result: $historical + ssp2_4_5_2045_2055_<model> entries
 names(res6)
-str(res6$ssp2_4_5_p50)
-range(res6$ssp2_4_5_p50$timestamp)
+str(res6[[2]])
+range(res6[[2]]$timestamp)
 
-# 7. Two SSPs, default percentiles
+# 7. Two SSPs, single period, all models
 res7 <- get_weather(
   survey_data         = survey_data,
   selected_surveys    = selected_surveys,
@@ -192,10 +195,10 @@ res7 <- get_weather(
   future_period       = future_period,
   perturbation_method = perturbation_method
 )
-# result: $historical + 3 entries per SSP = 7 entries total
+# result: $historical + <ssp>_2045_2055_<model> per SSP
 names(res7)
 
-# 8. Single SSP, all ensemble members (ensemble_percentiles = NULL)
+# 8. Single SSP, single period — single variable
 res8 <- get_weather(
   survey_data         = survey_data,
   selected_surveys    = selected_surveys,
@@ -211,12 +214,33 @@ res8 <- get_weather(
   connection_params   = connection_params,
   ssp                 = "ssp2_4_5",
   future_period       = future_period,
-  perturbation_method = c(tx = "additive"),
-  ensemble_percentiles = NULL
+  perturbation_method = c(tx = "additive")
 )
-# result: $historical + one entry per CMIP6 model (sanitised names)
+# result: $historical + ssp2_4_5_2045_2055_<model> entries
 names(res8)
 length(res8)
+
+# 9. Single SSP, multiple periods — tests multi-period support
+res9 <- get_weather(
+  survey_data         = survey_data,
+  selected_surveys    = selected_surveys,
+  selected_weather    = data.frame(
+    name           = "tx",
+    ref_start      = 1L,
+    ref_end        = 3L,
+    temporalAgg    = "Mean",
+    transformation = "None",
+    stringsAsFactors = FALSE
+  ),
+  dates               = dates_sim,
+  connection_params   = connection_params,
+  ssp                 = "ssp2_4_5",
+  future_period       = future_periods_multi,
+  perturbation_method = c(tx = "additive")
+)
+# result: $historical + ssp2_4_5_2035_2045_<model> + ssp2_4_5_2045_2055_<model>
+names(res9)
+length(res9)
 
 
 # Test: K-means binning

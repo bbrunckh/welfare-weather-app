@@ -57,7 +57,9 @@
   if (ext %in% (.duck$extensions %||% character(0))) return(invisible(NULL))
   con <- .duck_con()
 
-  if (.auto_connect()) {
+  # auto_connect() is a proxy for "running on Posit Connect" 
+  # if it exists and returns TRUE, otherwise assume local environment
+  if (exists(".auto_connect") && .auto_connect()) {
     # Check for a bundled binary first (avoids any network call)
     bundled <- system.file(
       paste0("duckdb_extensions/", ext, ".duckdb_extension"),

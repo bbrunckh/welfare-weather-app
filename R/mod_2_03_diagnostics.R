@@ -51,7 +51,26 @@ mod_2_03_diagnostics_ui <- function(id) {
       )
     ),
 
-    # ---- 2. Welfare distributions panel ------------------------------------
+    # ---- 2. Uncertainty decomposition chart ----------------------------------
+    shiny::wellPanel(
+      shiny::h4("Decomposed uncertainty: annual variability vs. model spread"),
+      shiny::plotOutput(ns("uncertainty_decomp_plot"), height = "750px"),
+      shiny::tags$p(
+        style = "font-size:11px; color:#666; margin-top:6px;",
+        shiny::tags$b("Annual variability:"),
+        " CI from model-averaged annual outcomes \u2014 captures weather-driven year-to-year variation.",
+        shiny::tags$br(),
+        shiny::tags$b("Model uncertainty:"),
+        " CI from year-averaged per-model outcomes \u2014 captures disagreement across CMIP6 ensemble members.",
+        shiny::tags$br(),
+        shiny::tags$b("Combined:"),
+        " both sources pooled.",
+        shiny::tags$br(),
+        "Aggregation: mean. Dashed line = historical mean."
+      )
+    ),
+
+    # ---- 3. Welfare distributions panel ------------------------------------
     shiny::wellPanel(
       shiny::h4("Welfare output distributions"),
       shiny::radioButtons(
@@ -186,6 +205,25 @@ mod_2_03_diagnostics_server <- function(id,
       )
     })
 
+    # Aggregated series for the uncertainty decomposition chart.
+    # Fixed at mean / no deviation — appropriate for a diagnostic view.
+    agg_hist_diag <- reactive({
+      req(hist_sim())
+      aggregate_sim_preds(hist_sim()$preds, hist_sim()$so,
+                          "mean", "none", FALSE, NULL)
+    })
+
+    agg_scenarios_diag <- reactive({
+      sc <- if (!is.null(saved_scenarios)) saved_scenarios() else list()
+      if (length(sc) == 0) return(list())
+      lapply(sc, function(s) {
+        tryCatch(
+          aggregate_sim_preds(s$preds, s$so, "mean", "none", FALSE, NULL),
+          error = function(e) NULL
+        )
+      })
+    })
+
     debounced_ridge_inputs <- shiny::debounce(
       reactive({
         list(
@@ -253,6 +291,19 @@ mod_2_03_diagnostics_server <- function(id,
         )
       )
     })
+
+    output$uncertainty_decomp_plot <- renderPlot({
+      req(agg_hist_diag())
+      all_series_diag <- c(
+        list(Historical = agg_hist_diag()),
+        Filter(Negate(is.null), agg_scenarios_diag())
+      )
+      plot_uncertainty_decomposition(
+        scenarios = all_series_diag,
+        hist_agg  = agg_hist_diag()
+      )
+    }, height = 750)
+    outputOptions(output, "uncertainty_decomp_plot", suspendWhenHidden = FALSE)
 
     output$diag_weather_log_ui <- shiny::renderUI({
       vars <- input$diag_weather_vars

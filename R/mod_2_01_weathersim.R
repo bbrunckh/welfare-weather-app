@@ -98,47 +98,6 @@ mod_2_01_weathersim_ui <- function(id) {
 
       shiny::tags$hr(style = "margin: 6px 0;"),
 
-      # -- Ensemble spread -----------------------------------------------
-      shiny::tags$h6("Ensemble results",
-                     style = "font-weight:600; margin-bottom:4px;"),
-      shiny::radioButtons(
-        inputId  = ns("ensemble_choice"),
-        label    = NULL,
-        choices  = c(
-          "Percentiles"    = "percentiles",
-          "All members"    = "all"
-        ),
-        selected = "percentiles"
-      ),
-
-      shiny::helpText(tags$b("Note:"), " CMIP6 climate projections include multiple model runs (\"ensemble members\")",
-        " that reflect uncertainty in future climate outcomes for a given SSP. The default is to show key percentiles of the ensemble spread.",
-      style = "font-size: 11px; color: #555; margin-top: 2px; margin-bottom: 8px;"
-      ),
-
-      # -- Ensemble spread percentiles ---------------------------------------
-
-      # conditional UI: only show if "Percentiles" is selected
-      shiny::conditionalPanel(
-        condition = paste0("input['", ns("ensemble_choice"), "'] == 'percentiles'"),
-          
-        shiny::tags$h6("Ensemble percentiles",
-                        style = "font-weight:400; margin-bottom:4px;"),
-
-        # Percentile selectors (default to P10, P50, P90)
-        shiny::tags$div(
-          style = "display:flex; gap:8px; align-items:center; margin-bottom:4px;",
-          shiny::numericInput(ns("ssp_p_1"), label = NULL, value = 10,
-                              min = 1, max = 99, step = 1, width = "60px"),
-          shiny::numericInput(ns("ssp_p_2"), label = NULL, value = 50,
-                              min = 1, max = 99, step = 1, width = "60px"),
-          shiny::numericInput(ns("ssp_p_3"), label = NULL, value = 90,
-                              min = 1, max = 99, step = 1, width = "60px")
-        ),
-    ),
-
-    shiny::tags$hr(style = "margin: 6px 0;"),
-
       # -- Residual method ----------------------------------------------------
       shiny::tags$h6("Simulation residuals",
                      style = "font-weight:600; margin-bottom:4px;"),
@@ -227,8 +186,7 @@ mod_2_01_weathersim_server <- function(id,
       ssp_txt <- if (length(ssp_sel) > 0)
         paste(ssp_map[ssp_sel], collapse = ", ") else "None"
 
-      ens_txt <- if (identical(input$ensemble_choice, "all"))
-        "All models" else "P10, P50, P90"
+      ens_txt <- "All models"
 
       res_labels <- c(
         "none"      = "None",
@@ -323,12 +281,6 @@ mod_2_01_weathersim_server <- function(id,
       do.call(rbind, do.call(c, rows))
     })
 
-    ensemble_percentiles <- reactive({
-      if (identical(input$ensemble_choice, "all")) NULL else 
-      # selected percentiles, sorted and returned as numeric vector (e.g. c(10, 50, 90)), shortened if any are NA or invalid
-      sort(unique(na.omit(c(input$ssp_p_1, input$ssp_p_2, input$ssp_p_3))))
-    })
-
     # ---- Run simulation on button click ------------------------------------
 
     observeEvent(input$run_sim, {
@@ -349,38 +301,22 @@ mod_2_01_weathersim_server <- function(id,
       residuals  <- sh$residuals
 
       sim_dates <- build_hist_sim_dates(svy, unlist(sh$year_range))
-      ens_pct   <- ensemble_percentiles()
 
-      # ---- Group future scenarios by period --------------------------------
-      # get_weather() always returns a "historical" key alongside any SSP
-      # results, so we never need a separate historical-only call when future
-      # periods are configured. One call per unique period, all SSPs batched.
+      # ---- Build get_weather() arguments ------------------------------------
       fut_periods <- future_periods()
       sf          <- selected_fut()
       has_future  <- !is.null(sf) && length(fut_periods) > 0
       ssps        <- if (has_future) unique(sf$ssp) else character(0)
       perturbation_method <- if (has_future) build_perturbation_method(sw) else NULL
 
-      # Build ordered list of get_weather() calls.
-      # Historical-only when no future periods; otherwise one per period.
-      if (has_future) {
-        weather_calls <- lapply(fut_periods, function(yr) {
-          list(
-            ssp           = ssps,
-            future_period = c(paste0(yr[1], "-01-01"),
-                              paste0(yr[2], "-12-31")),
-            period_label  = paste0(yr[1], "-", yr[2]),
-            year_range    = yr
-          )
+      # Build the list of future_period vectors (or NULL for historical-only)
+      fp_list <- if (has_future) {
+        lapply(fut_periods, function(yr) {
+          c(paste0(yr[1], "-01-01"), paste0(yr[2], "-12-31"))
         })
       } else {
-        weather_calls <- list(
-          list(ssp = NULL, future_period = NULL,
-               period_label = "historical", year_range = NULL)
-        )
+        NULL
       }
-
-      n_calls <- length(weather_calls)
 
       ssp_labels <- c(
         "ssp2_4_5" = "SSP2-4.5",
@@ -394,98 +330,144 @@ mod_2_01_weathersim_server <- function(id,
         {
           new_scenarios    <- list()
           hist_sim_result  <- NULL
-          cached_breaks    <- stored_breaks()   # seed from Step 1 breaks if available
+          cached_breaks    <- stored_breaks()
 
-          for (i in seq_along(weather_calls)) {
-            wc <- weather_calls[[i]]
-            shiny::setProgress(
-              value  = i / n_calls,
-              detail = if (is.null(wc$ssp))
-                "Loading historical weather..."
-              else
-                paste("Loading weather:", wc$period_label)
-            )
+          # Single get_weather() call — handles all SSPs × all periods
+          shiny::setProgress(value = 0.15, detail = "Loading weather data...")
 
-            weather_result <- tryCatch(
-              get_weather(
-                survey_data          = svy,
-                selected_surveys     = ss,
-                selected_weather     = sw,
-                dates                = sim_dates,
-                connection_params    = cp,
-                ssp                  = wc$ssp,
-                future_period        = wc$future_period,
-                perturbation_method  = perturbation_method,
-                ensemble_percentiles = ens_pct,
-                stored_breaks        = cached_breaks
-              ),
-              error = function(e) {
-                shiny::showNotification(
-                  paste0("Weather load failed (",
-                         wc$period_label, "): ",
-                         conditionMessage(e)),
-                  type = "error", duration = 8
-                )
-                NULL
-              }
-            )
-            if (is.null(weather_result)) next
-
-            # Capture breaks from the first call so subsequent calls reuse them
-            if (is.null(cached_breaks)) {
-              cached_breaks <- attr(weather_result, "stored_breaks")
-            }
-
-            # Run sim pipeline on every key returned by get_weather()
-            for (key in names(weather_result)) {
-              out <- run_sim_pipeline(
-                weather_raw = weather_result[[key]],
-                svy         = svy,
-                sw          = sw,
-                so          = so,
-                model       = model,
-                residuals   = residuals,
-                train_data  = train_data,
-                engine      = engine
+          weather_result <- tryCatch(
+            get_weather(
+              survey_data          = svy,
+              selected_surveys     = ss,
+              selected_weather     = sw,
+              dates                = sim_dates,
+              connection_params    = cp,
+              ssp                  = if (has_future) ssps else NULL,
+              future_period        = fp_list,
+              perturbation_method  = perturbation_method,
+              stored_breaks        = cached_breaks
+            ),
+            error = function(e) {
+              shiny::showNotification(
+                paste0("Weather load failed: ", conditionMessage(e)),
+                type = "error", duration = 8
               )
-              if (is.null(out)) next
+              NULL
+            }
+          )
+          req(!is.null(weather_result))
 
-              if (key == "historical" && is.null(hist_sim_result)) {
-                # First historical result — store as baseline
-                hist_sim_result <- list(
-                  preds       = out$preds,
-                  so          = so,
-                  n_pre_join  = out$n_pre_join,
-                  weather_raw = out$weather_raw,
-                  train_data  = train_data
-                )
-              } else if (key != "historical") {
-                # Future scenario
-                ssp_code    <- sub("_p\\d+$|_[A-Za-z].*$", "", key)
-                ssp_pretty  <- ssp_labels[ssp_code] %||% ssp_code
+          if (is.null(cached_breaks)) {
+            cached_breaks <- attr(weather_result, "stored_breaks")
+          }
 
-                # Extract percentile label (e.g. "P50") from key suffix
-                pct_m <- regexpr("p(\\d+)$", key)
-                pct_label <- if (pct_m > 0) {
-                  paste0("P", regmatches(key, pct_m) |>
-                           sub(pattern = "^p", replacement = ""))
-                } else {
-                  # Individual model member — use model name as label
-                  sub(paste0("^", ssp_code, "_"), "", key)
-                }
+          shiny::setProgress(value = 0.5, detail = "Running simulations...")
 
-                display_key <- paste0(ssp_pretty, " / ",
-                                      wc$period_label, " / ", pct_label)
+          # Run sim pipeline on every key returned by get_weather().
+          # Keys are "historical" or "<ssp>_<start>_<end>_<model>".
+          # Future results are grouped by SSP + period.  To limit peak memory,
+          # predictions are trimmed (slim = TRUE) and incrementally bound into
+          # a running data frame per group instead of accumulating a list.
 
-                new_scenarios[[display_key]] <- list(
-                  preds       = out$preds,
-                  weather_raw = out$weather_raw,
-                  so          = so,
-                  year_range  = wc$year_range
+          # group_key -> running combined data frames
+          group_preds   <- list()
+          group_weather <- list()
+          group_meta    <- list()
+          group_n       <- list()
+
+          future_keys <- setdiff(names(weather_result), "historical")
+          all_keys    <- c("historical", future_keys)
+          n_keys      <- length(all_keys)
+
+          for (ki in seq_along(all_keys)) {
+            key <- all_keys[[ki]]
+            is_hist <- identical(key, "historical")
+
+            if (ki %% 5L == 0L || is_hist) {
+              shiny::setProgress(
+                value  = 0.5 + 0.45 * (ki / n_keys),
+                detail = if (is_hist) "Historical simulation..."
+                         else sprintf("Model %d / %d", ki - 1L, length(future_keys))
+              )
+            }
+
+            # Process historical with full output; future with slim output
+            out <- run_sim_pipeline(
+              weather_raw = weather_result[[key]],
+              svy         = svy,
+              sw          = sw,
+              so          = so,
+              model       = model,
+              residuals   = residuals,
+              train_data  = train_data,
+              engine      = engine,
+              slim        = !is_hist
+            )
+
+            # Free the raw weather for this model immediately
+            weather_result[[key]] <- NULL
+
+            if (is.null(out)) next
+
+            if (is_hist && is.null(hist_sim_result)) {
+              hist_sim_result <- list(
+                preds       = out$preds,
+                so          = so,
+                n_pre_join  = out$n_pre_join,
+                weather_raw = out$weather_raw,
+                train_data  = train_data
+              )
+            } else if (!is_hist) {
+              # Key is "<ssp>_<start>_<end>_<model>"
+              ssp_code   <- sub("^(ssp[0-9]_[0-9]_[0-9])_.*$", "\\1", key)
+              rest       <- sub(paste0("^", ssp_code, "_"), "", key)
+              period_str <- sub("^([0-9]{4}_[0-9]{4})_.*$", "\\1", rest)
+              model_name <- sub(paste0("^", period_str, "_"), "", rest)
+              yr_parts   <- as.integer(strsplit(period_str, "_")[[1]])
+              gk         <- paste0(ssp_code, "_", period_str)
+
+              # Tag each model's predictions so aggregation can group by
+              # (model, sim_year) — producing N_models × N_years values
+              # for the CI in the point-range chart.
+              out$preds$model <- model_name
+
+              # Incrementally bind instead of accumulating a list of dfs.
+              # Peak memory = existing combined df + one new model df.
+              group_preds[[gk]]   <- dplyr::bind_rows(group_preds[[gk]],   out$preds)
+              group_weather[[gk]] <- dplyr::bind_rows(group_weather[[gk]], out$weather_raw)
+              group_n[[gk]]       <- (group_n[[gk]] %||% 0L) + 1L
+
+              if (is.null(group_meta[[gk]])) {
+                group_meta[[gk]] <- list(
+                  ssp_code   = ssp_code,
+                  year_range = yr_parts
                 )
               }
             }
+            rm(out)
+
+            # Periodic garbage collection to release freed model weather
+            if (ki %% 10L == 0L) gc(verbose = FALSE)
           }
+
+          rm(weather_result); gc(verbose = FALSE)
+
+          # Build display entries: one per SSP + period
+          for (gk in names(group_preds)) {
+            meta        <- group_meta[[gk]]
+            ssp_pretty  <- ssp_labels[meta$ssp_code] %||% meta$ssp_code
+            period_lbl  <- paste0(meta$year_range[1], "-", meta$year_range[2])
+            display_key <- paste0(ssp_pretty, " / ", period_lbl)
+            new_scenarios[[display_key]] <- list(
+              preds       = group_preds[[gk]],
+              weather_raw = group_weather[[gk]],
+              so          = so,
+              year_range  = meta$year_range,
+              n_models    = group_n[[gk]]
+            )
+          }
+          rm(group_preds, group_weather, group_meta, group_n)
+          gc(verbose = FALSE)
 
           req(!is.null(hist_sim_result))
           hist_sim(hist_sim_result)
