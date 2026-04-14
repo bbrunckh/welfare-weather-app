@@ -1,5 +1,5 @@
 # ============================================================================ #
-# Pure functions used by mod_2_02, mod_2_04, and mod_2_06.
+# Pure functions used by mod_2_01.
 # Stateless and testable without Shiny.
 #
 # Shared constants (used across multiple modules):
@@ -149,21 +149,29 @@ residual_method_ui <- function(ns, input_id) {
 #' @param residuals    Character. Residual method, e.g. `"original"`.
 #' @param train_data   Data frame used at fit time (`mf$train_data`).
 #' @param engine       Character. Model engine, e.g. `"fixest"`.
+#' @param slim         Logical. When `TRUE`, trim `preds` to only the columns
+#'   required by downstream aggregation and diagnostics (`sim_year`, outcome,
+#'   `.fitted`, `.residual`, and any `weight` column) and trim `weather_raw`
+#'   to location/time keys and weather variable columns.  Dramatically reduces
+#'   memory when processing many ensemble models.  Default `FALSE`.
 #'
 #' @return A named list with three elements:
 #'   \describe{
 #'     \item{preds}{Data frame of individual-level predictions with the outcome
-#'       column back-transformed where applicable, or \code{NULL} on failure.}
+#'       column back-transformed where applicable, or \code{NULL} on failure.
+#'       When \code{slim = TRUE}, only essential columns are retained.}
 #'     \item{n_pre_join}{Integer. Number of rows in \code{svy} before the
 #'       weather join. Used by the Diagnostics tab to compute the drop rate.}
 #'     \item{weather_raw}{The raw weather data frame passed in as
 #'       \code{weather_raw}. Stored so the Diagnostics tab can construct the
-#'       full historical weather distribution without a second DB query.}
+#'       full historical weather distribution without a second DB query.
+#'       When \code{slim = TRUE}, only key + weather columns are kept.}
 #'   }
 #'
 #' @export
 run_sim_pipeline <- function(weather_raw, svy, sw, so,
-                             model, residuals, train_data, engine) {
+                             model, residuals, train_data, engine,
+                             slim = FALSE) {
   n_pre_join    <- nrow(svy)
   survey_wd_sim <- prepare_hist_weather(weather_raw, svy, sw, so$name)
 
@@ -182,10 +190,26 @@ run_sim_pipeline <- function(weather_raw, svy, sw, so,
       NULL
     }
   )
+  rm(survey_wd_sim)
 
   if (is.null(preds)) return(NULL)
+  preds <- apply_log_backtransform(preds, so)
+
+  if (slim) {
+    # Keep only columns needed by aggregate_sim_preds() and
+    # build_ridge_kde_data(): sim_year, year, the outcome column,
+    # .fitted, .residual, and any weight column for aggregation.
+    keep <- c("sim_year", "year", so$name, ".fitted", ".residual")
+    if ("weight" %in% names(preds)) keep <- c(keep, "weight")
+    preds <- preds[, intersect(keep, names(preds)), drop = FALSE]
+
+    # Keep only key + weather columns from weather_raw for diagnostics.
+    weather_keep <- c("code", "year", "survname", "loc_id", "timestamp", sw$name)
+    weather_raw  <- weather_raw[, intersect(weather_keep, names(weather_raw)), drop = FALSE]
+  }
+
   list(
-    preds       = apply_log_backtransform(preds, so),
+    preds       = preds,
     n_pre_join  = n_pre_join,
     weather_raw = weather_raw
   )
@@ -557,7 +581,7 @@ aggregate_outcome <- function(df,
   }
 
   df |>
-    group_by(!!sym(group)) |>
+    dplyr::group_by(dplyr::across(dplyr::all_of(group))) |>
     summarise(
       value = compute(
         x = .data[[outcome]],
@@ -671,10 +695,14 @@ aggregate_sim_preds <- function(preds, so, agg_method, deviation, loss_frame,
     )
   }
 
+  # Group by (model, sim_year) when a model column is present (future scenarios
+  # with all ensemble members pooled), so the CI reflects model × year variation.
+  grp_cols <- if ("model" %in% names(preds)) c("model", "sim_year") else "sim_year"
+
   out <- aggregate_outcome(
     df        = preds,
     outcome   = so$name,
-    group     = "sim_year",
+    group     = grp_cols,
     type      = if (identical(so$type, "logical")) "binary" else "continuous",
     aggregate = agg_method,
     pov_line  = pov_line

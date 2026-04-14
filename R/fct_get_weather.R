@@ -80,55 +80,6 @@
 
 # ---------------------------------------------------------------------------- #
 
-#' Rank ensemble models by their climate change signal across weather variables.
-#'
-#' For each model, computes a normalised composite score from per-variable
-#' deltas, then selects the model whose empirical percentile rank is closest
-#' to each requested percentile.
-#'
-#' Algorithm:
-#' 1. For each variable, normalise cross-model deltas by their SD:
-#'    \eqn{z_{m,v} = \Delta_{m,v} / \sigma_v}  (a model with SD = 0 is skipped)
-#' 2. Average z-scores across variables per model: \eqn{\bar{z}_m}
-#' 3. Convert to empirical percentile rank (0-100, ties = average)
-#' 4. For each requested percentile, pick the model with the closest rank
-#'
-#' @param delta_df   Collected data frame with one row per model.  Must have
-#'   a `model` column and one `delta_{v}` column per weather variable.
-#' @param weather_vars Character vector of weather variable names (without the
-#'   `delta_` prefix).
-#' @param percentiles Numeric vector of percentiles in \[0, 100\].
-#'
-#' @return Named character vector, e.g.
-#'   `c("p10" = "MPI-ESM1-2-HR", "p50" = "IPSL-CM6A-LR", "p90" = "GFDL-ESM4")`
-#' @noRd
-.rank_ensemble_models <- function(delta_df, weather_vars, percentiles) {
-
-  delta_cols <- paste0("delta_", weather_vars)
-
-  delta_df <- delta_df[stats::complete.cases(delta_df[, delta_cols, drop = FALSE]), ]
-
-  if (nrow(delta_df) == 0L) {
-    stop("No models with complete delta values — cannot rank ensemble.")
-  }
-
-  n_models <- nrow(delta_df)
-
-  z_matrix <- scale(delta_df[, delta_cols, drop = FALSE])
-  z_matrix[is.nan(z_matrix)] <- 0
-
-  z_bar    <- rowMeans(z_matrix, na.rm = TRUE)
-  pct_rank <- 100 * (rank(z_bar, ties.method = "average") - 1) / (n_models - 1)
-
-  stats::setNames(
-    vapply(percentiles, function(p) {
-      delta_df$model[[which.min(abs(pct_rank - p))]]
-    }, character(1L)),
-    paste0("p", percentiles)
-  )
-}
-
-# ---------------------------------------------------------------------------- #
 
 #' Apply deviation-from-mean or standardised-anomaly transformations lazily.
 #'
@@ -301,11 +252,10 @@
 #' 3. Applies rolling temporal aggregation and materialises the unperturbed
 #'    weather series as a temp table (`loc_weather_base`).
 #' 4. If `ssp` is supplied: loads CMIP6 files for each scenario.
-#'    For each SSP, computes population-weighted loc-level raw deltas (before
-#'    rolling/transforming) for model ranking, then runs a single per-model
-#'    loop — perturb raw monthly values → roll → transform → collect.
-#'    When `ensemble_percentiles = NULL` all models are returned; otherwise
-#'    the model closest to each requested percentile is selected.
+#'    For each SSP, computes population-weighted loc-level raw deltas,
+#'    then processes all models in a single batched DuckDB query —
+#'    perturb raw monthly values → roll → transform → collect.
+#'    All models with a complete set of weather variable deltas are returned.
 #' 5. Transformations (deviation-from-mean, standardised anomaly) are applied
 #'    using the 1991–2020 climate reference, always derived from
 #'    `loc_weather_base`.
@@ -322,8 +272,9 @@
 #' @param connection_params List passed to `load_data()`.
 #' @param ssp               Character vector of SSP scenario identifiers, e.g.
 #'   `c("ssp2_4_5", "ssp5_8_5")`. `NULL` (default) skips climate perturbation.
-#' @param future_period     Length-2 vector of dates for the projection period,
-#'   e.g. `c("2045-01-01", "2055-12-31")`. Required when `ssp != NULL`.
+#' @param future_period     A length-2 character vector of dates for a single
+#'   projection period, e.g. `c("2045-01-01", "2055-12-31")`, **or** a list
+#'   of such vectors for multiple periods.  Required when `ssp != NULL`.
 #' @param perturbation_method Named character vector mapping each weather
 #'   variable name to `"additive"` or `"multiplicative"`. Required when
 #'   `ssp != NULL`.
@@ -333,18 +284,13 @@
 #'   Default `"era5land"`.
 #' @param proj_source       Source identifier for climate projection files.
 #'   Default `"cmip6"`.
-#' @param ensemble_percentiles Numeric vector of percentiles in \[0, 100\] used
-#'   to select representative ensemble members.  Default `c(10, 50, 90)`.
-#'   Set to `NULL` to return results for every available model.  Only used
-#'   when `ssp != NULL`.
-#'
 #' @return A named list of collected data frames with columns
 #'   `code, year, survname, loc_id, timestamp, <weather_vars>`:
 #'   * `"historical"` — unperturbed result filtered to `dates`.
-#'   * `"<ssp>_p<pct>"` — e.g. `"ssp2_4_5_p50"` when `ensemble_percentiles`
-#'     is supplied.
-#'   * `"<ssp>_<model>"` — e.g. `"ssp2_4_5_MPI.ESM1.2.HR"` (model name
-#'     sanitised via `make.names()`) when `ensemble_percentiles = NULL`.
+#'   * `"<ssp>_<start>_<end>_<model>"` — e.g.
+#'     `"ssp2_4_5_2045_2055_MPI.ESM1.2.HR"` (model name sanitised via
+#'     `make.names()`).  All models with a complete set of weather variable
+#'     deltas are returned.
 #'
 #' @export
 get_weather <- function(
@@ -359,7 +305,6 @@ get_weather <- function(
   epsilon              = 0.001,
   weather_source       = "era5land",
   proj_source          = "cmip6",
-  ensemble_percentiles = c(10, 50, 90),
   stored_breaks        = NULL
 ) {
 
@@ -377,14 +322,11 @@ get_weather <- function(
       "perturbation_method values must be 'additive' or 'multiplicative'" =
         all(perturbation_method[selected_weather$name] %in% c("additive", "multiplicative"))
     )
-  }
 
-  if (!is.null(ensemble_percentiles)) {
-    stopifnot(
-      "ensemble_percentiles must be numeric" = is.numeric(ensemble_percentiles),
-      "ensemble_percentiles values must be in [0, 100]" =
-        all(ensemble_percentiles >= 0 & ensemble_percentiles <= 100)
-    )
+    # Normalise future_period: a bare length-2 vector → single-element list
+    if (is.character(future_period) || inherits(future_period, "Date")) {
+      future_period <- list(future_period)
+    }
   }
 
   # -- File paths -------------------------------------------------------------
@@ -528,8 +470,6 @@ get_weather <- function(
   # -- Climate perturbation ---------------------------------------------------
   if (climate_scenario) {
 
-    future_start <- as.Date(future_period[1])
-    future_end   <- as.Date(future_period[2])
     bp           <- range(dates)
     baseline_start <- as.Date(bp[1])
     baseline_end   <- as.Date(bp[2])
@@ -569,6 +509,23 @@ get_weather <- function(
 
     delta_exprs_h3 <- .make_delta_exprs(perturbation_method, weather_vars, epsilon)
     perturb_exprs  <- .make_perturb_exprs(perturbation_method, weather_vars)
+
+    # Rolling window expressions with `model` added to PARTITION BY.
+    # Used in the batch climate query so each model gets its own independent
+    # rolling window over its own perturbed series.
+    roll_exprs_climate <- stats::setNames(
+      lapply(seq_len(nrow(selected_weather)), function(i) {
+        v      <- selected_weather$name[i]
+        agg_fn <- agg_fn_map[[selected_weather$temporalAgg[i]]]
+        dbplyr::sql(sprintf(
+          "%s(%s) FILTER (WHERE %s IS NOT NULL) OVER (PARTITION BY model, code, year, survname, loc_id ORDER BY timestamp ROWS BETWEEN %d PRECEDING AND %d PRECEDING)",
+          agg_fn, v, v,
+          as.integer(selected_weather$ref_end[i]),
+          as.integer(selected_weather$ref_start[i])
+        ))
+      }),
+      weather_vars
+    )
 
     # Detect CMIP6 H3 resolution once using the first SSP's historical file
     hist_fnames_probe <- paste0(
@@ -638,7 +595,10 @@ get_weather <- function(
     h3_hist_raw <- .cmip6_h3_monthly(hist_fnames_probe, baseline_start, baseline_end)
 
     # -- Per-SSP worker -------------------------------------------------------
-    # Returns a named list of data frames keyed by model/percentile label.
+    # Processes all models × all future periods.  The CMIP6 historical
+    # baseline and SSP baseline-period data are loaded once and shared
+    # across periods; only the future-period projection varies.
+    # Returns a named list keyed by "<ssp>_<start>_<end>_<model>".
     .process_ssp <- function(ssp_i) {
 
       ssp_fname     <- gsub("_", "", ssp_i)
@@ -647,9 +607,8 @@ get_weather <- function(
         survey_codes, "_", proj_source, "_", ssp_fname, ".parquet"
       )
 
-      # Lazy future tables
+      # SSP baseline overlap — shared across all future periods
       h3_ssp_raw <- .cmip6_h3_monthly(future_fnames, baseline_start, baseline_end)
-      h3_fut     <- .cmip6_h3_monthly(future_fnames, future_start, future_end)
 
       # Combined CMIP6 historical baseline (hist + ssp overlap period)
       h3_hist <- dplyr::union_all(h3_hist_raw, h3_ssp_raw) |>
@@ -659,84 +618,91 @@ get_weather <- function(
           .groups = "drop"
         )
 
-      # Lazy per-model H3-level delta table
-      h3_deltas <- dplyr::inner_join(
-        h3_hist, h3_fut,
-        by     = c("model", "h3", "month"),
-        suffix = c("_hist", "_fut")
-      ) |>
-        dplyr::mutate(!!!delta_exprs_h3) |>
-        dplyr::select(model, h3, month, dplyr::all_of(delta_vars))
+      # -- Loop over future periods ------------------------------------------
+      out <- list()
+      for (fp in future_period) {
+        fp_start <- as.Date(fp[1])
+        fp_end   <- as.Date(fp[2])
+        fp_label <- paste0(
+          format(fp_start, "%Y"), "_", format(fp_end, "%Y")
+        )
 
-      # -- Ranking: population-weighted loc-level raw deltas -----------------
-      loc_deltas_by_model <- h3_deltas |>
-        dplyr::inner_join(h3_slim, by = c("h3" = "h3_cmip6")) |>
-        dplyr::group_by(model, code, year, survname, loc_id, month) |>
-        .pop_weighted_mean(delta_vars)
+        h3_fut <- .cmip6_h3_monthly(future_fnames, fp_start, fp_end)
 
-      global_deltas <- loc_deltas_by_model |>
-        dplyr::group_by(model) |>
-        dplyr::summarise(
-          dplyr::across(dplyr::all_of(delta_vars), ~ mean(.x, na.rm = TRUE)),
-          .groups = "drop"
+        # Lazy per-model H3-level delta table
+        h3_deltas <- dplyr::inner_join(
+          h3_hist, h3_fut,
+          by     = c("model", "h3", "month"),
+          suffix = c("_hist", "_fut")
         ) |>
-        dplyr::collect() |>
-        dplyr::mutate(dplyr::across(dplyr::all_of(delta_vars), ~ ifelse(is.nan(.), NA_real_, .)))
+          dplyr::mutate(!!!delta_exprs_h3) |>
+          dplyr::select(model, h3, month, dplyr::all_of(delta_vars))
 
-      # Warn if any models have incomplete deltas (missing variables in parquet)
-      n_incomplete <- sum(!complete.cases(global_deltas[, delta_vars, drop = FALSE]))
-      if (n_incomplete > 0L) {
-        incomplete_models <- global_deltas$model[
-          !complete.cases(global_deltas[, delta_vars, drop = FALSE])
-        ]
-        warning(sprintf(
-          "%s: %d model(s) dropped from ranking due to missing variables (%s): %s",
-          ssp_i, n_incomplete,
-          paste(delta_vars, collapse = ", "),
-          paste(incomplete_models, collapse = ", ")
-        ), call. = FALSE)
-      }
+        # Population-weighted loc-level deltas
+        loc_deltas_by_model <- h3_deltas |>
+          dplyr::inner_join(h3_slim, by = c("h3" = "h3_cmip6")) |>
+          dplyr::group_by(model, code, year, survname, loc_id, month) |>
+          .pop_weighted_mean(delta_vars)
 
-      # Determine which models to process
-      if (!is.null(ensemble_percentiles)) {
-        selected <- .rank_ensemble_models(global_deltas, weather_vars, ensemble_percentiles)
-        # named vector: c(p10 = "model-A", p50 = "model-B", ...)
-        model_keys <- stats::setNames(
-          paste0(ssp_i, "_", names(selected)),
-          unname(selected)
+        # Filter incomplete models
+        complete_model_tbl <- loc_deltas_by_model |>
+          dplyr::group_by(model) |>
+          dplyr::summarise(
+            n_complete = sum(
+              dplyr::if_all(dplyr::all_of(delta_vars), ~ !is.na(.x)),
+              na.rm = TRUE
+            ),
+            .groups = "drop"
+          ) |>
+          dplyr::collect()
+
+        incomplete_models <- complete_model_tbl$model[complete_model_tbl$n_complete == 0L]
+        if (length(incomplete_models) > 0L) {
+          warning(sprintf(
+            "%s / %s: %d model(s) excluded due to missing variables (%s): %s",
+            ssp_i, fp_label, length(incomplete_models),
+            paste(delta_vars, collapse = ", "),
+            paste(incomplete_models, collapse = ", ")
+          ), call. = FALSE)
+        }
+
+        complete_models <- complete_model_tbl$model[complete_model_tbl$n_complete > 0L]
+        if (length(complete_models) == 0L) next
+
+        loc_deltas_by_model <- loc_deltas_by_model |>
+          dplyr::filter(model %in% complete_models)
+
+        # -- Batch query: all models in one DuckDB execution -----------------
+        batch <- loc_monthly |>
+          dplyr::mutate(month = dbplyr::sql("MONTH(timestamp)")) |>
+          dplyr::inner_join(
+            loc_deltas_by_model,
+            by = c("code", "year", "survname", "loc_id", "month")
+          ) |>
+          dplyr::mutate(!!!perturb_exprs) |>
+          dplyr::select(
+            model, code, year, survname, loc_id, timestamp,
+            dplyr::all_of(weather_vars)
+          ) |>
+          dplyr::mutate(!!!roll_exprs_climate) |>
+          .apply_transformations(selected_weather, loc_weather_base) |>
+          dplyr::filter(timestamp %in% !!dates) |>
+          dplyr::collect()
+
+        if (nrow(batch) == 0L) next
+
+        # Split into per-model data frames
+        model_list <- split(batch, batch$model)
+        period_out <- stats::setNames(
+          lapply(model_list, function(df) {
+            df$model <- NULL
+            if (has_binning) df <- .apply_binning(df, stored_breaks)
+            df
+          }),
+          paste0(ssp_i, "_", fp_label, "_", make.names(names(model_list)))
         )
-      } else {
-        all_models <- global_deltas$model
-        model_keys <- stats::setNames(
-          paste0(ssp_i, "_", make.names(all_models)),
-          all_models
-        )
+        out <- c(out, period_out)
       }
-
-      # -- Per-model: perturb → roll → transform → collect individually ----------
-      out <- stats::setNames(
-        lapply(names(model_keys), function(model_name) {
-          model_deltas <- loc_deltas_by_model |>
-            dplyr::filter(model == !!model_name) |>
-            dplyr::select(-model)
-
-          df <- loc_monthly |>
-            dplyr::mutate(month = dbplyr::sql("MONTH(timestamp)")) |>
-            dplyr::left_join(model_deltas, by = c("code", "year", "survname", "loc_id", "month")) |>
-            dplyr::mutate(!!!perturb_exprs) |>
-            dplyr::select(code, year, survname, loc_id, timestamp, dplyr::all_of(weather_vars)) |>
-            dplyr::mutate(!!!roll_exprs) |>
-            .apply_transformations(selected_weather, loc_weather_base) |>
-            dplyr::filter(timestamp %in% !!dates) |>
-            dplyr::collect()
-
-          # Apply same bin breaks derived from the historical survey period
-          if (has_binning) df <- .apply_binning(df, stored_breaks)
-          df
-        }),
-        model_keys[names(model_keys)]
-      )
-
       out
     }
 

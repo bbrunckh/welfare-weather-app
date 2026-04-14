@@ -164,11 +164,11 @@ mod_2_02_results_server <- function(id,
       setNames(sub("-", "_", ranges), ranges)
     })
 
-    all_percentiles <- reactive({
+    all_models_info <- reactive({
       sc <- saved_scenarios()
       if (length(sc) == 0) return(character(0))
-      pcts <- vapply(names(sc), .parse_percentile, character(1))
-      sort(unique(pcts[!is.na(pcts)]))
+      # Return model counts per scenario for display
+      vapply(sc, function(s) s$n_models %||% 1L, integer(1))
     })
 
     pov_line_val <- reactive({
@@ -186,16 +186,13 @@ mod_2_02_results_server <- function(id,
       ssps <- if (length(input$filter_ssp)  == 0) all_ssps()                          else input$filter_ssp
       # Decode safe values back to "YYYY-YYYY" ranges for grepl matching
       yr_vals <- if (length(input$filter_year) == 0) names(all_anchor_years())        else sub("_", "-", input$filter_year)
-      pcts <- if (length(input$filter_pct)  == 0) all_percentiles()                   else input$filter_pct
       keep <- vapply(nms, function(nm) {
         is_ssp <- grepl("^SSP", nm)
         if (!is_ssp) return(TRUE)
         ssp_match <- any(vapply(ssps, function(s) startsWith(nm, s), logical(1)))
         yr_match  <- length(yr_vals) == 0 ||
           any(vapply(yr_vals, function(y) grepl(y, nm, fixed = TRUE), logical(1)))
-        pct_match <- length(pcts) == 0 ||
-          any(vapply(pcts, function(p) grepl(paste0("/ ", p, "$"), nm), logical(1)))
-        ssp_match && yr_match && pct_match
+        ssp_match && yr_match
       }, logical(1))
       nms[keep]
     })
@@ -288,7 +285,7 @@ mod_2_02_results_server <- function(id,
         return(shiny::helpText("Run a simulation."))
       ssps <- all_ssps()
       yrs  <- all_anchor_years()
-      pcts <- all_percentiles()
+      mi   <- all_models_info()
       tagList(
         shiny::fluidRow(
           shiny::column(4,
@@ -306,10 +303,11 @@ mod_2_02_results_server <- function(id,
               )
           ),
           shiny::column(4,
-            if (length(pcts) > 0)
-              shiny::checkboxGroupInput(
-                ns("filter_pct"), label = "Ensemble percentiles",
-                choices = pcts, selected = pcts, inline = TRUE
+            if (any(mi > 1L))
+              shiny::helpText(
+                style = "font-size:11px; color:#555; margin-top:24px;",
+                paste0("Each SSP aggregates results from ",
+                       max(mi), " ensemble model(s).")
               )
           )
         )
