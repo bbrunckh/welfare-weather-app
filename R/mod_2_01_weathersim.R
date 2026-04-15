@@ -529,7 +529,8 @@ mod_2_01_weathersim_server <- function(id,
               # Tag each model's predictions so aggregation can group by
               # (model, sim_year) — producing N_models × N_years values
               # for the CI in the point-range chart.
-              out$preds$model <- model_name
+              out$preds$model       <- model_name
+              out$weather_raw$model <- model_name
 
               # Incrementally bind instead of accumulating a list of dfs.
               # Peak memory = existing combined df + one new model df.

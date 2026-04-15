@@ -49,7 +49,6 @@ mod_3_scenario_ui <- function(id) {
           tabPanel(
             title = "Overview",
             value = "overview",
-            p("Outputs will appear here after you run the policy simulation in the sidebar."),
             includeMarkdown(system.file("app/www/equation2.md", package = "wiseapp")),
             mod_3_05_policy_sim_ui(ns("policy_sim"))
           )
@@ -73,22 +72,26 @@ mod_3_scenario_ui <- function(id) {
 #'   from `mod_1_modelling_server()`.
 #' @param model_fit        Reactive list of fitted model objects from
 #'   `mod_1_modelling_server()`.
-#' @param hist_sim         Reactive returning the historical simulation raw
-#'   predictions list from `mod_2_simulation_server()`.
-#' @param fut_sim          Reactive returning the future simulation raw
-#'   predictions list from `mod_2_simulation_server()`. May be `NULL` if the
-#'   future simulation has not yet been run.
+#' @param hist_sim         Reactive returning the historical simulation list
+#'   from `mod_2_simulation_server()`.
+#' @param saved_scenarios  Reactive returning the named list of saved future
+#'   scenarios from `mod_2_simulation_server()`.
 #'
 #' @noRd
 mod_3_scenario_server <- function(id,
                                    connection_params,
                                    selected_outcome,
                                    selected_weather,
+                                   selected_model,
                                    survey_weather,
                                    model_fit,
                                    hist_sim,
-                                   fut_sim = NULL) {
+                                   saved_scenarios = reactive(list()),
+                                   variable_list   = reactive(NULL)) {
   moduleServer(id, function(input, output, session) {
+
+    # s1-s4 require the relevant variables to be selected in Step 1
+    # We should surface only included variables from Step 1 (possibly very restrictive but also indicative 
 
     # ---- Social Protection scenario --------------------------------------
 
@@ -96,15 +99,24 @@ mod_3_scenario_server <- function(id,
 
     # ---- Infrastructure scenario -----------------------------------------
 
-    s2 <- mod_3_02_infra_server("infra")
+    s2 <- mod_3_02_infra_server(
+      "infra",
+      selected_model = selected_model,
+      variable_list  = variable_list)
 
     # ---- Digital & financial inclusion scenario --------------------------
 
-    s3 <- mod_3_03_digital_server("digital")
+    s3 <- mod_3_03_digital_server(
+      "digital",
+      selected_model = selected_model,
+      variable_list  = variable_list)
 
     # ---- Labor market scenario -------------------------------------------
 
-    s4 <- mod_3_04_labor_server("labor")
+    s4 <- mod_3_04_labor_server(
+      "labor",
+      selected_model = selected_model,
+      variable_list  = variable_list)
 
     # ---- Policy simulation module (initialised once at startup) ----------
 
@@ -116,11 +128,25 @@ mod_3_scenario_server <- function(id,
       survey_weather     = survey_weather,
       model_fit          = model_fit,
       hist_sim           = hist_sim,
-      fut_sim            = fut_sim,
+      saved_scenarios    = saved_scenarios,
       sp_scenario        = s1$sp_scenario,
       infra_scenario     = s2$infra_scenario,
       digital_scenario   = s3$digital_scenario,
       labor_scenario     = s4$labor_scenario
+    )
+
+    # ---- Results tab: Step 3-specific module (baseline vs policy) --------
+    mod_3_06_results_server(
+      "results3",
+      baseline_hist_sim        = hist_sim,
+      baseline_saved_scenarios = saved_scenarios,
+      policy_hist_sim          = s5$policy_hist_sim,
+      policy_saved_scenarios   = s5$policy_saved_scenarios,
+      baseline_svy             = s5$baseline_svy,
+      policy_svy               = s5$policy_svy,
+      selected_model           = selected_model,
+      tabset_id                = "step3_output_tabs",
+      tabset_session           = session
     )
 
     # ---- Run policy simulation on button click ---------------------------
@@ -132,10 +158,8 @@ mod_3_scenario_server <- function(id,
     # ---- Return API ------------------------------------------------------
 
     list(
-      selected_hist = s1$selected_hist,
-      selected_fut  = s3$selected_fut,
-      hist_sim      = s2$hist_sim,
-      fut_sim       = s4$fut_sim
+      policy_hist_sim        = s5$policy_hist_sim,
+      policy_saved_scenarios = s5$policy_saved_scenarios
     )
   })
 }

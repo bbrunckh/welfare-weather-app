@@ -43,8 +43,11 @@ app_server <- function(input, output, session) {
     connection_params = overview_api$connection_params,
     selected_outcome  = step1_api$selected_outcome,
     selected_weather  = step1_api$selected_weather,
+    selected_model    = step1_api$selected_model,
     survey_weather    = step1_api$survey_weather,
     model_fit         = step1_api$model_fit,
-    hist_sim          = step2_api$hist_sim
+    hist_sim          = step2_api$hist_sim,
+    saved_scenarios   = step2_api$saved_scenarios,
+    variable_list     = overview_api$variable_list
   )
 }

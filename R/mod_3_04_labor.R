@@ -12,6 +12,7 @@
 mod_3_04_labor_ui <- function(id) {
   ns <- NS(id)
   tagList(
+    uiOutput(ns("placeholder_ui")),
     uiOutput(ns("labor_lfp_ui")),
     uiOutput(ns("labor_emp_ui")),
     uiOutput(ns("labor_sector_ui"))
@@ -24,10 +25,9 @@ mod_3_04_labor_ui <- function(id) {
 #' to be consumed by the policy simulation sub-module.
 #'
 #' @param id Module id.
-#' @param selected_outcome Reactive one-row data frame of selected outcome
-#'   from \code{mod_1_modelling_server()}.
-#' @param survey_weather Reactive data frame of merged survey-weather data
-#'   from \code{mod_1_modelling_server()}.
+#' @param selected_model Reactive named list of the selected model's parameters
+#'   from Step 1. Used to determine which labor variables are in the model
+#'   and should be shown in the UI.
 #'
 #' @return A named list of reactives:
 #'   \describe{
@@ -37,60 +37,127 @@ mod_3_04_labor_ui <- function(id) {
 #'
 #' @noRd
 mod_3_04_labor_server <- function(id,
-                                   selected_outcome = reactive(NULL),
-                                   survey_weather   = reactive(NULL)) {
+                                   selected_model = reactive(NULL),
+                                   variable_list  = reactive(NULL)) {
   moduleServer(id, function(input, output, session) {
     ns <- session$ns
 
-    # ---- Labor force participation change -------------------------------
+    # ---- Get model coefficients ------------------------------------------
+    sm <- reactive({
+      req(selected_model())
+      selected_model()
+    })
 
-    output$labor_lfp_ui <- renderUI({
+    extract_cov_names <- function(x) {
+      if (is.null(x)) return(character(0))
+      nms <- names(x)
+      if (!is.null(nms) && any(nzchar(nms))) {
+        unique(nms[nzchar(nms)])
+      } else {
+        unique(as.character(unlist(x, use.names = FALSE)))
+      }
+    }
+
+    ind_coeff <- reactive({
+      s <- sm()
+      extract_cov_names(s$individual_covariates)
+    })
+    hh_coeff <- reactive({
+      s <- sm()
+      extract_cov_names(s$hh_covariates)
+    })
+    firm_coeff <- reactive({
+      s <- sm()
+      extract_cov_names(s$firm_covariates)
+    })
+    area_coeff <- reactive({
+      s <- sm()
+      extract_cov_names(s$area_covariates)
+    })
+
+    coeffs <- reactive({
+      unique(c(ind_coeff(), hh_coeff(), firm_coeff(), area_coeff()))
+    })
+
+    # ---- Candidate variables for this category --------------------------
+    labor_patterns <- c("lstatus", "empstat", "agriculture", "industry", "services")
+
+    any_selected <- reactive({
+      any(vapply(labor_patterns, function(p) {
+        any(grepl(p, coeffs(), ignore.case = TRUE))
+      }, logical(1)))
+    })
+
+    output$placeholder_ui <- renderUI({
+      if (isTRUE(any_selected())) return(NULL)
+      cand <- policy_candidate_info(variable_list(), labor_patterns)
+      policy_placeholder_tag("labor market", cand)
+    })
+
+    # ---- Helper: pp slider ---------------------------------------------
+    # Renders a simple percentage-point slider with icon label.
+
+    labor_pp_ui <- function(input_id, label, icon_class,
+                            min = -20, max = 20, value = 0, step = 1,
+                            post = "pp") {
       tagList(
         tags$label(
           class = "control-label",
-          tags$i(class = "fa fa-person-walking me-1"),
-          "Change in labor force participation (pp)"
+          tags$i(class = paste("fa", icon_class, "me-1")),
+          label
         ),
         sliderInput(
-          inputId = ns("labor_lfp"),
+          inputId = ns(input_id),
           label   = NULL,
-          min     = -20,
-          max     = 20,
-          value   = 0,
-          step    = 1,
-          post    = "pp"
+          min     = min,
+          max     = max,
+          value   = value,
+          step    = step,
+          post    = post
         ),
         tags$hr(style = "margin: 8px 0;")
       )
+    }
+
+    # ---- Labor force participation change -------------------------------
+
+    show_lfp <- reactive({
+      any(grepl("lstatus", coeffs(), ignore.case = TRUE))
+    })
+
+    output$labor_lfp_ui <- renderUI({
+      req(show_lfp())
+      labor_pp_ui("labor_lfp",
+                  "Change in labor force participation (pp)",
+                  "fa-person-walking")
     })
 
     # ---- Employment rate change -----------------------------------------
 
+    show_emp <- reactive({
+      any(grepl("empstat", coeffs(), ignore.case = TRUE))
+    })
+
     output$labor_emp_ui <- renderUI({
-      tagList(
-        tags$label(
-          class = "control-label",
-          tags$i(class = "fa fa-briefcase me-1"),
-          "Change in employment rate (pp)"
-        ),
-        sliderInput(
-          inputId = ns("labor_emp"),
-          label   = NULL,
-          min     = -20,
-          max     = 20,
-          value   = 0,
-          step    = 1,
-          post    = "pp"
-        ),
-        tags$hr(style = "margin: 8px 0;")
-      )
+      req(show_emp())
+      labor_pp_ui("labor_emp",
+                  "Change in employment rate (pp)",
+                  "fa-briefcase")
     })
 
     # ---- Sectoral composition ------------------------------------------
     # Three sliders sum to 100pp — agriculture anchors, manufacturing and
     # services are user-controlled, agriculture = 100 - mfg - services.
 
+    show_sector <- reactive({
+      cv <- coeffs()
+      any(grepl("agriculture", cv, ignore.case = TRUE)) &&
+      any(grepl("industry",    cv, ignore.case = TRUE)) &&
+      any(grepl("services",    cv, ignore.case = TRUE))
+    })
+
     output$labor_sector_ui <- renderUI({
+      req(show_sector())
       tagList(
         tags$label(
           class = "control-label",

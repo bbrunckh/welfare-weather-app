@@ -12,6 +12,7 @@
 mod_3_02_infra_ui <- function(id) {
   ns <- NS(id)
   tagList(
+    uiOutput(ns("placeholder_ui")),
     uiOutput(ns("elec_ui")),
     uiOutput(ns("water_ui")),
     uiOutput(ns("sanitation_ui")),
@@ -25,10 +26,7 @@ mod_3_02_infra_ui <- function(id) {
 #' parameters to be consumed by the policy simulation sub-module.
 #'
 #' @param id Module id.
-#' @param selected_outcome Reactive one-row data frame of selected outcome
-#'   from \code{mod_1_modelling_server()}.
-#' @param survey_weather Reactive data frame of merged survey-weather data
-#'   from \code{mod_1_modelling_server()}.
+#' @param selected_model Reactive named list of the selected model's parameters from Step 1. Used to determine which infrastructure variables are in the model and should be shown in the UI.
 #'
 #' @return A named list of reactives:
 #'   \describe{
@@ -38,10 +36,63 @@ mod_3_02_infra_ui <- function(id) {
 #'
 #' @noRd
 mod_3_02_infra_server <- function(id,
-                                   selected_outcome = reactive(NULL),
-                                   survey_weather   = reactive(NULL)) {
+                                  selected_model = reactive(NULL),
+                                  variable_list  = reactive(NULL)) {
   moduleServer(id, function(input, output, session) {
     ns <- session$ns
+    
+    # ---- Get model coefficients ------------------------------------------
+    sm <- reactive({
+      req(selected_model())
+      selected_model()
+    })
+
+    extract_cov_names <- function(x) {
+      if (is.null(x)) return(character(0))
+      # if named list/vector, use names; otherwise use values
+      nms <- names(x)
+      if (!is.null(nms) && any(nzchar(nms))) {
+        unique(nms[nzchar(nms)])
+      } else {
+        unique(as.character(unlist(x, use.names = FALSE)))
+      }
+    }
+
+    ind_coeff <- reactive({
+      s <- sm()
+      extract_cov_names(s$individual_covariates)
+    })
+    hh_coeff <- reactive({
+      s <- sm()
+      extract_cov_names(s$hh_covariates)
+    })
+    firm_coeff <- reactive({
+      s <- sm()
+      extract_cov_names(s$firm_covariates)
+    })
+    area_coeff <- reactive({
+      s <- sm()
+      extract_cov_names(s$area_covariates)
+    })
+
+    coeffs <- reactive({
+      unique(c(ind_coeff(), hh_coeff(), firm_coeff(), area_coeff()))
+    })
+
+    # ---- Candidate variables for this category --------------------------
+    infra_patterns <- c("electricity", "imp_wat_rec", "imp_san_rec", "ttime_health")
+
+    any_selected <- reactive({
+      any(vapply(infra_patterns, function(p) {
+        any(grepl(p, coeffs(), ignore.case = TRUE))
+      }, logical(1)))
+    })
+
+    output$placeholder_ui <- renderUI({
+      if (isTRUE(any_selected())) return(NULL)
+      cand <- policy_candidate_info(variable_list(), infra_patterns)
+      policy_placeholder_tag("infrastructure", cand)
+    })
 
     # ---- Helper: slider + universal access toggle -----------------------
     # Renders a sliderInput with a checkbox for universal access.
@@ -77,26 +128,46 @@ mod_3_02_infra_server <- function(id,
 
     # ---- Electricity access ---------------------------------------------
 
+    show_elec <- reactive({
+      any(grepl("electricity", coeffs(), ignore.case = TRUE))
+    })
+
     output$elec_ui <- renderUI({
+      req(show_elec())
       infra_access_ui("elec", "Access to electricity", "fa-bolt")
     })
 
     # ---- Improved water access ------------------------------------------
 
+    show_water <- reactive({
+      any(grepl("imp_wat_rec", coeffs(), ignore.case = TRUE))
+    })
+
     output$water_ui <- renderUI({
+      req(show_water())
       infra_access_ui("water", "Access to improved water", "fa-droplet")
     })
 
     # ---- Improved sanitation access -------------------------------------
 
+    show_sanitation <- reactive({
+      any(grepl("imp_san_rec", coeffs(), ignore.case = TRUE))
+    })
+
     output$sanitation_ui <- renderUI({
+      req(show_sanitation())
       infra_access_ui("sanitation", "Access to improved sanitation", "fa-toilet")
     })
 
     # ---- Health facility access -----------------------------------------
     # Two modes: reduce travel time by % OR cap at maximum minutes.
 
+    show_health <- reactive({
+      any(grepl("ttime_health", coeffs(), ignore.case = TRUE))
+    })
+
     output$health_ui <- renderUI({
+      req(show_health())
       tagList(
         tags$label(
           class = "control-label",

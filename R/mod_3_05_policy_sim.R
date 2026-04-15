@@ -1,10 +1,10 @@
 #' 3_05_policy_sim UI Function
 #'
-#' @description A shiny Module. Renders the policy simulation outputs —
-#'   welfare impact tables and distributional charts — in the main panel of
-#'   \code{mod_3_scenario}.
+#' @description A shiny Module. Renders status banner for the Step 3 policy
+#'   simulation. Visualisations live in a separate Results tab populated by
+#'   \code{mod_2_02_results_server()} (reused from Step 2).
 #'
-#' @param id,input,output,session Internal parameters for {shiny}.
+#' @param id Internal parameter for {shiny}.
 #'
 #' @noRd
 #'
@@ -12,40 +12,38 @@
 mod_3_05_policy_sim_ui <- function(id) {
   ns <- NS(id)
   tagList(
-    uiOutput(ns("sim_status_ui")),
-    uiOutput(ns("sim_results_ui"))
+    uiOutput(ns("sim_status_ui"))
   )
 }
 
 #' 3_05_policy_sim Server Functions
 #'
-#' Runs the combined policy simulation when triggered from
-#' \code{mod_3_scenario_server()}. Combines scenario parameters from the four
-#' upstream sub-modules with the weather-welfare model and climate simulation
-#' results to produce counterfactual welfare predictions.
+#' Orchestrates the Step 3 policy simulation. On \code{run()}:
+#' \enumerate{
+#'   \item Applies policy-scenario adjustments to the survey covariates via
+#'     \code{apply_policy_to_svy()}.
+#'   \item Re-runs the prediction pipeline across the Step 2 historical and
+#'     future scenarios (reusing their \code{weather_raw}) via
+#'     \code{run_policy_pipeline()}.
+#' }
+#' Exposes reactives with the same shape as the Step 2 sidebar output so that
+#' the Step 2 Results module can render them directly.
 #'
-#' @param id               Module id.
+#' @param id                Module id.
 #' @param connection_params Reactive named list from \code{mod_0_overview_server()}.
-#' @param selected_outcome Reactive one-row data frame of selected outcome
-#'   from \code{mod_1_modelling_server()}.
-#' @param selected_weather Reactive data frame of selected weather variables
-#'   from \code{mod_1_modelling_server()}.
-#' @param survey_weather   Reactive data frame of merged survey-weather data
-#'   from \code{mod_1_modelling_server()}.
-#' @param model_fit        Reactive list of fitted model objects from
-#'   \code{mod_1_modelling_server()}.
-#' @param hist_sim         Reactive returning the historical simulation raw
-#'   predictions list from \code{mod_2_simulation_server()}.
-#' @param fut_sim          Reactive returning the future simulation raw
-#'   predictions list from \code{mod_2_simulation_server()}. May be
-#'   \code{NULL} if the future simulation has not yet been run.
-#' @param sp_scenario      Reactive named list from \code{mod_3_01_sp_server()}.
-#' @param infra_scenario   Reactive named list from \code{mod_3_02_infra_server()}.
-#' @param digital_scenario Reactive named list from \code{mod_3_03_digital_server()}.
-#' @param labor_scenario   Reactive named list from \code{mod_3_04_labor_server()}.
+#' @param selected_outcome  Reactive one-row data frame of selected outcome.
+#' @param selected_weather  Reactive data frame of selected weather variables.
+#' @param survey_weather    Reactive data frame of merged survey-weather data.
+#' @param model_fit         Reactive list of fitted model objects.
+#' @param hist_sim          Reactive Step 2 historical simulation list.
+#' @param saved_scenarios   Reactive Step 2 saved scenarios named list.
+#' @param sp_scenario       Reactive named list from \code{mod_3_01_sp_server()}.
+#' @param infra_scenario    Reactive named list from \code{mod_3_02_infra_server()}.
+#' @param digital_scenario  Reactive named list from \code{mod_3_03_digital_server()}.
+#' @param labor_scenario    Reactive named list from \code{mod_3_04_labor_server()}.
 #'
-#' @return \code{NULL} invisibly. All outputs are rendered directly into the
-#'   session via \code{output$}.
+#' @return Named list exposing \code{run}, \code{policy_hist_sim},
+#'   \code{policy_saved_scenarios}, \code{policy_selected_hist}.
 #'
 #' @noRd
 mod_3_05_policy_sim_server <- function(id,
@@ -55,7 +53,7 @@ mod_3_05_policy_sim_server <- function(id,
                                         survey_weather     = reactive(NULL),
                                         model_fit          = reactive(NULL),
                                         hist_sim           = reactive(NULL),
-                                        fut_sim            = reactive(NULL),
+                                        saved_scenarios    = reactive(list()),
                                         sp_scenario        = reactive(NULL),
                                         infra_scenario     = reactive(NULL),
                                         digital_scenario   = reactive(NULL),
@@ -63,65 +61,134 @@ mod_3_05_policy_sim_server <- function(id,
   moduleServer(id, function(input, output, session) {
     ns <- session$ns
 
-    # ---- Simulation result storage --------------------------------------
+    # ---- Reactive result stores ----------------------------------------
+    policy_hist_sim        <- reactiveVal(NULL)
+    policy_saved_scenarios <- reactiveVal(list())
+    baseline_svy_rv        <- reactiveVal(NULL)
+    policy_svy_rv          <- reactiveVal(NULL)
+    sim_error              <- reactiveVal(NULL)
 
-    sim_result <- reactiveVal(NULL)
-
-    # ---- Status banner --------------------------------------------------
-
-    output$sim_status_ui <- renderUI({
-      res <- sim_result()
-      if (is.null(res)) return(NULL)
-      if (inherits(res, "error")) {
-        div(class = "alert alert-danger", conditionMessage(res))
-      } else {
-        div(class = "alert alert-success", "Simulation complete.")
-      }
-    })
-
-    # ---- Results placeholder --------------------------------------------
-    # Replace with tables/charts once fct_policy_sim.R is implemented.
-
-    output$sim_results_ui <- renderUI({
-      req(sim_result())
-      res <- sim_result()
-      if (inherits(res, "error")) return(NULL)
-      tagList(
-        h5("Policy simulation results"),
-        p("Output charts and tables will appear here.")
+    # Synthetic selected_hist so mod_2_02_results can label the baseline row.
+    policy_selected_hist <- reactive({
+      data.frame(
+        scenario_name = "Policy baseline (historical)",
+        stringsAsFactors = FALSE
       )
     })
 
-    # ---- Run triggered externally via observeEvent in mod_3_scenario ---
+    # ---- Status banner -------------------------------------------------
+    output$sim_status_ui <- renderUI({
+      err <- sim_error()
+      if (!is.null(err)) {
+        return(div(class = "alert alert-danger", conditionMessage(err)))
+      }
+      if (!is.null(policy_hist_sim())) {
+        n <- length(policy_saved_scenarios())
+        return(div(
+          class = "alert alert-success",
+          paste0(
+            "Policy simulation complete.",
+            if (n > 0) paste0(" ", n, " future scenario(s) recomputed.") else ""
+          )
+        ))
+      }
+      NULL
+    })
 
+    # ---- Runner invoked externally -------------------------------------
     run <- function() {
-      sim_result(NULL)
+      sim_error(NULL)
+
+      hs <- hist_sim()
+      if (is.null(hs)) {
+        sim_error(simpleError(
+          "Run the Step 2 simulation first — no historical baseline available."
+        ))
+        return(invisible(NULL))
+      }
+
+      svy <- survey_weather()
+      mf  <- model_fit()
+      so  <- selected_outcome()
+      sw  <- selected_weather()
+      if (is.null(svy) || is.null(mf) || is.null(so) || is.null(sw)) {
+        sim_error(simpleError(
+          "Missing Step 1 inputs (survey, model, outcome, or weather selection)."
+        ))
+        return(invisible(NULL))
+      }
+
       result <- tryCatch(
         {
-          # TODO: replace with call to fct_policy_sim() once implemented
-          infra <- infra_scenario()
-          list(
-            sp_scenario      = sp_scenario(),
-            infra_scenario   = infra,
-            digital_scenario = digital_scenario(),
-            labor_scenario   = labor_scenario(),
-            # Pre-resolved infra policy flags for fct_predict_outcomes()
-            infra_policy = list(
-              electricity       = infra$elec_universal       || infra$elec_access_change_pct > 0,
-              imp_wat_rec       = infra$water_universal      || infra$water_access_change_pct > 0,
-              imp_san_rec       = infra$sanitation_universal || infra$sanitation_access_change_pct > 0,
-              health_mode       = infra$health_mode,
-              health_travel_pct = infra$health_travel_pct,
-              health_travel_max = infra$health_travel_max
-            )
+          svy_mod <- apply_policy_to_svy(
+            svy,
+            infra   = infra_scenario(),
+            sp      = sp_scenario(),
+            digital = digital_scenario(),
+            labor   = labor_scenario()
+          )
+          baseline_svy_rv(svy)
+          policy_svy_rv(svy_mod)
+
+          residuals <- "normal"
+
+          shiny::withProgress(
+            message = "Running policy simulation...",
+            value   = 0.1,
+            {
+              shiny::setProgress(value = 0.3, detail = "Re-predicting outcomes...")
+              res <- run_policy_pipeline(
+                hist_sim        = hs,
+                saved_scenarios = saved_scenarios(),
+                svy_mod         = svy_mod,
+                sw              = sw,
+                so              = so,
+                model           = mf$fit3,
+                residuals       = residuals,
+                train_data      = mf$train_data,
+                engine          = mf$engine
+              )
+              shiny::setProgress(value = 1, detail = "Complete")
+              res
+            }
           )
         },
         error = function(e) e
       )
-      sim_result(result)
+
+      if (inherits(result, "error")) {
+        sim_error(result)
+        policy_hist_sim(NULL)
+        policy_saved_scenarios(list())
+        shiny::showNotification(
+          paste0("Policy simulation failed: ", conditionMessage(result)),
+          type = "error", duration = 8
+        )
+        return(invisible(NULL))
+      }
+
+      policy_hist_sim(result$hist_sim)
+      policy_saved_scenarios(result$saved_scenarios)
+
+      shiny::showNotification(
+        paste0(
+          "\u2713 Policy simulation complete.",
+          if (length(result$saved_scenarios) > 0)
+            paste0(" ", length(result$saved_scenarios), " future scenario(s).")
+          else ""
+        ),
+        type = "message", duration = 5
+      )
+      invisible(NULL)
     }
 
-    # Expose run() so mod_3_scenario can call it inside observeEvent
-    list(run = run)
+    list(
+      run                    = run,
+      policy_hist_sim        = policy_hist_sim,
+      policy_saved_scenarios = policy_saved_scenarios,
+      policy_selected_hist   = policy_selected_hist,
+      baseline_svy           = baseline_svy_rv,
+      policy_svy             = policy_svy_rv
+    )
   })
 }
