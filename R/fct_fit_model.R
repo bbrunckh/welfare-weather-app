@@ -174,20 +174,73 @@ ENGINE_REGISTRY <- list(
       if (use_logit) df[[y_var]] <- factor(df[[y_var]], levels = c(0, 1))
       df
     }
-  )
+  ),
 
   # -------------------------------------------------------------------------- #
-  # Template for a new engine — copy and fill in
+  # RIF — Unconditional Quantile Regression (Firpo, Fortin & Lemieux 2009)     #
   # -------------------------------------------------------------------------- #
-  # my_engine = list(
-  #   requires    = c("parsnip", "my_pkg"),
-  #   model_types = c("Linear regression"),
-  #
-  #   build_formulas = function(y_var, terms, fe_vars) { ... },
-  #   fit_one        = function(formula, data, model_type, model_spec, opts) { ... },
-  #   make_spec      = function(model_type, use_logit) { ... },
-  #   prepare_outcome = function(df, y_var, use_logit) df
-  # )
+  # Estimates distributional impacts by transforming the outcome into its
+  # Recentered Influence Function at each quantile, then fitting standard OLS
+  # (via fixest::feols) on the transformed outcome. The stacked multi-LHS
+  # syntax fits all quantiles simultaneously. Returns a fixest_multi object.
+  # -------------------------------------------------------------------------- #
+  rif = list(
+
+    requires    = c("fixest", "broom"),
+    model_types = c("Quantile regression"),
+
+    # Same FE-absorbing formula structure as fixest; fit_one replaces the LHS
+    # with stacked RIF columns.
+    build_formulas = function(y_var, terms, fe_vars) {
+      build <- function(rhs_main, rhs_fe = character(0)) {
+        rhs_main <- unique(rhs_main[nzchar(rhs_main) & !is.na(rhs_main)])
+        if (length(rhs_main) == 0) rhs_main <- "1"
+        rhs_fe <- rhs_fe[nzchar(rhs_fe) & !is.na(rhs_fe)]
+        rhs <- if (length(rhs_fe) > 0) {
+          paste(paste(rhs_main, collapse = " + "), "|",
+                paste(rhs_fe,   collapse = " + "))
+        } else {
+          paste(rhs_main, collapse = " + ")
+        }
+        # Store as character — fit_one will prepend the stacked RIF LHS
+        rhs
+      }
+      list(
+        formula1 = build(terms$hazard),
+        formula2 = build(c(terms$hazard, terms$interactions_main), fe_vars),
+        formula3 = build(c(terms$hazard, terms$interactions_main,
+                           terms$covariates),                        fe_vars)
+      )
+    },
+
+    fit_one = function(formula, data, model_type, model_spec, opts) {
+      # formula is actually the RHS string from build_formulas above
+      rhs_str  <- formula
+      rif_cols <- opts$rif$rif_cols
+      lhs      <- paste0("c(", paste(rif_cols, collapse = ", "), ")")
+      stacked_fml <- stats::as.formula(paste(lhs, "~", rhs_str))
+      args <- list(fml = stacked_fml, data = data, warn = FALSE)
+      if (!is.null(opts$fixest) && length(opts$fixest) > 0) {
+        args <- c(args, opts$fixest)
+      }
+      do.call(fixest::feols, args)
+    },
+
+    make_spec = function(model_type, use_logit) NULL,
+
+    prepare_outcome = function(df, y_var, use_logit) {
+      taus     <- seq(0.1, 0.9, by = 0.1)
+      rif_cols <- paste0("rif_", formatC(taus * 100, format = "d"))
+      y        <- df[[y_var]]
+      for (i in seq_along(taus)) {
+        df[[rif_cols[i]]] <- compute_rif(y, tau = taus[i])
+      }
+      attr(df, "rif_taus") <- taus
+      attr(df, "rif_cols") <- rif_cols
+      df
+    }
+  )
+
 )
 
 # ---------------------------------------------------------------------------- #
@@ -544,6 +597,11 @@ fit_model <- function(df, selected_outcome, selected_weather, selected_model) {
   # Outcome coercion delegated to backend (factor, integer, or unchanged)
   df <- backend$prepare_outcome(df, y_var, use_logit)
 
+  # Extract RIF metadata (set by the rif engine's prepare_outcome)
+  rif_taus <- attr(df, "rif_taus")
+  rif_cols <- attr(df, "rif_cols")
+  is_rif   <- !is.null(rif_taus)
+
   # ---------------------------------------------------------------------------
   # 4. Build formula terms
   # ---------------------------------------------------------------------------
@@ -674,6 +732,11 @@ fit_model <- function(df, selected_outcome, selected_weather, selected_model) {
     }
   )
 
+  # Pass RIF column names and quantile vector to fit_one via engine_opts
+  if (is_rif) {
+    engine_opts$rif <- list(taus = rif_taus, rif_cols = rif_cols)
+  }
+
   # ---------------------------------------------------------------------------
   # 8. Fit the three models
   # ---------------------------------------------------------------------------
@@ -690,7 +753,20 @@ fit_model <- function(df, selected_outcome, selected_weather, selected_model) {
   fit3 <- fit_one(formulas$formula3, "weather + FE + controls")
 
   # ---------------------------------------------------------------------------
-  # 9. Return
+  # 9. Build RIF grid (beta curves) from all three model specifications
+  # ---------------------------------------------------------------------------
+
+  rif_grid <- NULL
+  if (is_rif) {
+    rif_grid <- rbind(
+      build_rif_grid(fit1, rif_taus, model_id = 1L),
+      build_rif_grid(fit2, rif_taus, model_id = 2L),
+      build_rif_grid(fit3, rif_taus, model_id = 3L)
+    )
+  }
+
+  # ---------------------------------------------------------------------------
+  # 10. Return
   # ---------------------------------------------------------------------------
 
   list(
@@ -704,6 +780,8 @@ fit_model <- function(df, selected_outcome, selected_weather, selected_model) {
     model_type        = model_type,
     engine            = engine_key,
     train_data        = df,
-    formulas          = formulas
+    formulas          = formulas,
+    rif_grid          = rif_grid,
+    taus              = rif_taus
   )
 }

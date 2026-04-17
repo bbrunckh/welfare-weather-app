@@ -117,7 +117,8 @@ mod_1_07_results_server <- function(id,
           interaction_terms = mf$interaction_terms,
           outcome_label     = selected_outcome()$label,
           label_fun         = get_label,
-          engine            = mf$engine
+          engine            = mf$engine,
+          rif_grid          = mf$rif_grid
         )
       })
 
@@ -133,7 +134,8 @@ mod_1_07_results_server <- function(id,
           interaction_terms = mf$interaction_terms,
           label_fun         = get_label,
           engine            = mf$engine,
-          is_logistic       = is_logistic_fit(mf)
+          is_logistic       = is_logistic_fit(mf),
+          rif_grid          = mf$rif_grid
         )
       })
 
@@ -151,7 +153,8 @@ mod_1_07_results_server <- function(id,
           label_fun         = get_label,
           engine            = mf$engine,
           selected_weather  = sw,
-          weather_df        = survey_weather()
+          weather_df        = survey_weather(),
+          rif_grid          = mf$rif_grid
         )
       })
 
@@ -167,11 +170,14 @@ mod_1_07_results_server <- function(id,
           label_fun         = get_label,
           engine            = mf$engine,
           selected_weather  = sw,
-          weather_df        = survey_weather()
+          weather_df        = survey_weather(),
+          rif_grid          = mf$rif_grid
         )
       })
 
       # ---- Add / switch Results tab -----------------------------------------
+
+      is_rif <- identical(mf$engine, "rif")
 
       if (!results_tab_added()) {
         shiny::appendTab(
@@ -179,17 +185,20 @@ mod_1_07_results_server <- function(id,
           shiny::tabPanel(
             title = "Results",
             value = "results",
-            shiny::h4("Predicted outcome vs weather"),
+            shiny::h4(if (is_rif) "Weather sensitivity across the distribution"
+                      else "Predicted outcome vs weather"),
             bslib::layout_columns(
               col_widths = c(6, 6),
               bslib::card(shiny::plotOutput(ns("effectplot1"), height = "300px")),
               bslib::card(shiny::plotOutput(ns("effectplot2"), height = "300px"))
             ),
             shiny::br(),
-            shiny::h4("Marginal effect of weather on outcome"),
+            shiny::h4(if (is_rif) "UQR coefficients by model specification"
+                      else "Marginal effect of weather on outcome"),
             bslib::card(shiny::plotOutput(ns("coefplot"))),
             shiny::br(),
-            shiny::h4("Regression results"),
+            shiny::h4(if (is_rif) "Quantile regression results"
+                      else "Regression results"),
             shiny::div(
               style = "display:flex; justify-content:center;",
               shiny::uiOutput(ns("regtable"))

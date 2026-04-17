@@ -118,16 +118,41 @@ make_coef_map <- function(coef_names, label_fun = identity) {
 #'
 #' For `"fixest"`, `"ranger"`, and `"xgboost"` engines the object stored by
 #' `fit_model()` is already a native R model object — no unwrapping needed.
+#' For the `"rif"` engine, each fit is a `fixest_multi` (list of 9 models).
+#' This function returns the object as-is; use `extract_rif_median()` to
+#' get a single representative model for diagnostics.
 #'
 #' @param fit    A model object as stored in `fit_model()$fit1` etc.
-#' @param engine Scalar character engine key (e.g. `"fixest"`). Kept for
-#'   backward compatibility but currently unused.
+#' @param engine Scalar character engine key (e.g. `"fixest"`).
 #'
 #' @return The native model object.
 #'
 #' @export
 extract_native_fit <- function(fit, engine = "fixest") {
   fit
+}
+
+
+#' Extract the median quantile model from a RIF fixest_multi
+#'
+#' For diagnostic functions that require a single fixest model, this extracts
+#' the median quantile (tau = 0.5, index 5) from the 9-quantile stack.
+#' Returns the input unchanged for non-RIF engines.
+#'
+#' @param fit    A model object (fixest_multi for RIF, or single model).
+#' @param engine Scalar character engine key.
+#'
+#' @return A single fixest model object.
+#'
+#' @export
+extract_rif_median <- function(fit, engine = "fixest") {
+  if (identical(engine, "rif") && (inherits(fit, "fixest_multi") || is.list(fit))) {
+    # Index 5 = tau = 0.5 (median)
+    idx <- min(5L, length(fit))
+    fit[[idx]]
+  } else {
+    fit
+  }
 }
 
 
@@ -214,14 +239,17 @@ get_first_bin_label <- function(df, hv) {
 #' Build a coefficient plot across three progressive model fits
 #'
 #' Uses `fixest` HC-robust SEs and plots all three models side-by-side,
-#' replicating the `jtools::plot_summs()` style.
+#' replicating the `jtools::plot_summs()` style. For RIF engines, produces
+#' beta-curve plots (coefficient vs quantile, faceted by term).
 #'
-#' @param fit1,fit2,fit3    Native fixest model objects.
+#' @param fit1,fit2,fit3    Native fixest model objects (or fixest_multi for RIF).
 #' @param weather_terms     Character vector of base weather variable names.
 #' @param interaction_terms Character vector of interaction term strings.
 #' @param outcome_label     Scalar character label for the x-axis.
 #' @param label_fun         Function mapping variable names to readable labels.
-#' @param engine            Scalar character engine key (kept for compat).
+#' @param engine            Scalar character engine key.
+#' @param rif_grid          Optional tidy data frame of RIF beta curves (from
+#'   \code{fit_model()$rif_grid}). Used only when \code{engine = "rif"}.
 #'
 #' @return A `ggplot` object.
 #'
@@ -231,12 +259,69 @@ make_coefplot <- function(fit1, fit2, fit3,
                            interaction_terms,
                            outcome_label = "outcome",
                            label_fun     = identity,
-                           engine        = "fixest") {
+                           engine        = "fixest",
+                           rif_grid      = NULL) {
 
   blank_plot <- function(msg) {
     ggplot2::ggplot() +
       ggplot2::annotate("text", x = 0.5, y = 0.5, label = msg, color = "grey40") +
       ggplot2::theme_void()
+  }
+
+  # --- RIF branch: beta curve plot -------------------------------------------
+  if (identical(engine, "rif") && !is.null(rif_grid)) {
+    return(tryCatch({
+      taus <- sort(unique(rif_grid$tau))
+
+      # Filter to weather-related terms
+      all_terms <- unique(rif_grid$term)
+      weather_pattern <- paste0("\\b(", paste(weather_terms, collapse = "|"), ")\\b")
+      keep <- grepl(weather_pattern, all_terms)
+      if (!any(keep)) keep <- rep(TRUE, length(all_terms))  # fallback: show all
+      plot_terms <- all_terms[keep]
+
+      plot_data <- rif_grid[rif_grid$term %in% plot_terms, ]
+      plot_data$model_label <- factor(
+        dplyr::case_when(
+          plot_data$model == 1L ~ "No FE",
+          plot_data$model == 2L ~ "FE",
+          TRUE                  ~ "FE + controls"
+        ),
+        levels = c("No FE", "FE", "FE + controls")
+      )
+      plot_data$term_label <- vapply(
+        plot_data$term, function(t) coef_label(t, label_fun), character(1)
+      )
+
+      ggplot2::ggplot(plot_data, ggplot2::aes(x = tau, y = estimate,
+                                               colour = model_label,
+                                               fill   = model_label)) +
+        ggplot2::geom_hline(yintercept = 0, linetype = "dashed", colour = "grey60") +
+        ggplot2::geom_ribbon(
+          ggplot2::aes(ymin = conf.low, ymax = conf.high),
+          alpha = 0.10, colour = NA
+        ) +
+        ggplot2::geom_line(linewidth = 0.8) +
+        ggplot2::geom_point(size = 2) +
+        ggplot2::facet_wrap(~ term_label, scales = "free_y") +
+        ggplot2::scale_x_continuous(
+          breaks = taus,
+          labels = scales::percent_format(1)
+        ) +
+        ggplot2::scale_colour_brewer(palette = "Set1", name = NULL) +
+        ggplot2::scale_fill_brewer(palette = "Set1", name = NULL) +
+        ggplot2::labs(
+          title    = "UQR coefficients across the welfare distribution",
+          subtitle = "Ribbon = 95% CI",
+          x        = "Welfare quantile",
+          y        = stringr::str_wrap(paste0("Effect on ", outcome_label), 50)
+        ) +
+        ggplot2::theme_bw(base_size = 14) +
+        ggplot2::theme(
+          legend.position = "bottom",
+          panel.border = ggplot2::element_blank()
+        )
+    }, error = function(e) blank_plot(paste0("RIF coefficient plot error: ", conditionMessage(e)))))
   }
 
   if (!requireNamespace("fixest", quietly = TRUE))
@@ -334,7 +419,73 @@ make_coefplot <- function(fit1, fit2, fit3,
 #' @export
 make_weather_effect_plot <- function(fit, pred_var, interaction_terms, is_binned,
                                      label_fun, engine, selected_weather = NULL,
-                                     weather_df = NULL) {
+                                     weather_df = NULL, rif_grid = NULL) {
+
+  blank_plot <- function(msg) {
+    ggplot2::ggplot() +
+      ggplot2::annotate("text", x = 0.5, y = 0.5, label = msg,
+                        size = 3.5, color = "grey40", hjust = 0.5, vjust = 0.5) +
+      ggplot2::theme_void()
+  }
+
+  # --- RIF branch: weather beta curve across quantiles -----------------------
+  if (identical(engine, "rif") && !is.null(rif_grid)) {
+    return(tryCatch({
+      pred_lab <- label_fun(pred_var)
+
+      # Filter rif_grid to model 3, terms containing pred_var
+      grid3 <- rif_grid[rif_grid$model == 3L, ]
+      pred_esc <- gsub("([\\[\\]\\(\\)\\^\\$\\.\\*\\+\\?])", "\\\\\\1", pred_var)
+      mask <- grepl(paste0("\\b", pred_esc, "\\b"), grid3$term)
+      if (!any(mask)) return(blank_plot(paste0("No RIF terms found for '", pred_var, "'.")))
+      plot_data <- grid3[mask, ]
+
+      taus <- sort(unique(plot_data$tau))
+      plot_data$term_label <- vapply(
+        plot_data$term, function(t) coef_label(t, label_fun), character(1)
+      )
+
+      n_terms <- length(unique(plot_data$term))
+      if (n_terms == 1) {
+        # Single term: simple beta curve
+        ggplot2::ggplot(plot_data, ggplot2::aes(x = tau, y = estimate)) +
+          ggplot2::geom_hline(yintercept = 0, linetype = "dashed", colour = "grey60") +
+          ggplot2::geom_ribbon(
+            ggplot2::aes(ymin = conf.low, ymax = conf.high),
+            alpha = 0.15, fill = "steelblue"
+          ) +
+          ggplot2::geom_line(colour = "steelblue", linewidth = 0.9) +
+          ggplot2::geom_point(colour = "steelblue", size = 2.5) +
+          ggplot2::scale_x_continuous(breaks = taus, labels = scales::percent_format(1)) +
+          ggplot2::labs(
+            title = paste("Effect of", pred_lab, "across the welfare distribution"),
+            x     = "Welfare quantile",
+            y     = paste("UQR coefficient")
+          ) +
+          ggplot2::theme_bw(base_size = 14) +
+          ggplot2::theme(plot.title = ggplot2::element_text(face = "bold", hjust = 0.5, size = 11))
+      } else {
+        # Multiple terms (main + interactions): faceted
+        ggplot2::ggplot(plot_data, ggplot2::aes(x = tau, y = estimate)) +
+          ggplot2::geom_hline(yintercept = 0, linetype = "dashed", colour = "grey60") +
+          ggplot2::geom_ribbon(
+            ggplot2::aes(ymin = conf.low, ymax = conf.high),
+            alpha = 0.15, fill = "steelblue"
+          ) +
+          ggplot2::geom_line(colour = "steelblue", linewidth = 0.9) +
+          ggplot2::geom_point(colour = "steelblue", size = 2) +
+          ggplot2::facet_wrap(~ term_label, scales = "free_y") +
+          ggplot2::scale_x_continuous(breaks = taus, labels = scales::percent_format(1)) +
+          ggplot2::labs(
+            title = paste("Effect of", pred_lab, "across the welfare distribution"),
+            x     = "Welfare quantile",
+            y     = "UQR coefficient"
+          ) +
+          ggplot2::theme_bw(base_size = 14) +
+          ggplot2::theme(plot.title = ggplot2::element_text(face = "bold", hjust = 0.5, size = 11))
+      }
+    }, error = function(e) blank_plot(paste0("RIF effect plot error: ", conditionMessage(e)))))
+  }
 
   pred_lab <- label_fun(pred_var)
   pred_x_lab <- paste0(pred_var, " (", pred_lab, ")")
@@ -348,13 +499,6 @@ make_weather_effect_plot <- function(fit, pred_var, interaction_terms, is_binned
     as.data.frame(stats::model.matrix(fit)),
     error = function(e) tryCatch(stats::model.frame(fit), error = function(e2) NULL)
   )
-
-  blank_plot <- function(msg) {
-    ggplot2::ggplot() +
-      ggplot2::annotate("text", x = 0.5, y = 0.5, label = msg,
-                        size = 3.5, color = "grey40", hjust = 0.5, vjust = 0.5) +
-      ggplot2::theme_void()
-  }
 
   # --- Resolve pred columns (exact or binned prefix match) ------------------
   pred_esc <- gsub("([\\[\\]\\(\\)\\^\\$\\.\\*\\+\\?])", "\\\\\\1", pred_var)
@@ -707,7 +851,113 @@ make_regtable <- function(fit1, fit2, fit3,
                           interaction_terms = character(0),
                           label_fun         = identity,
                           engine            = "fixest",
-                          is_logistic       = FALSE) {
+                          is_logistic       = FALSE,
+                          rif_grid          = NULL) {
+
+  # --- RIF branch: quantile coefficient table --------------------------------
+  if (identical(engine, "rif") && !is.null(rif_grid)) {
+    return(tryCatch({
+      grid3 <- rif_grid[rif_grid$model == 3L, ]
+      taus  <- sort(unique(grid3$tau))
+      terms <- unique(grid3$term)
+
+      # Build pivot: rows = terms, columns = quantiles
+      pv_fn <- function(grid_row) {
+        est <- formatC(grid_row$estimate, format = "f", digits = 3)
+        pv  <- grid_row$p.value
+        stars <- ifelse(pv < 0.001, "***",
+                 ifelse(pv < 0.01,  "**",
+                 ifelse(pv < 0.05,  "*",
+                 ifelse(pv < 0.1,   "\u2020", ""))))
+        se <- formatC(grid_row$std.error, format = "f", digits = 3)
+        list(est = paste0(est, stars), se = paste0("(", se, ")"))
+      }
+
+      # CSS
+      css <- "
+        .rif-table { border-collapse:collapse; font-family:'Times New Roman',Times,serif; font-size:13px; margin:20px 0; }
+        .rif-table th, .rif-table td { padding:2px 10px; text-align:center; }
+        .rif-table th { font-weight:normal; border-bottom:1px solid #000; }
+        .rif-table .topline { border-top:2px solid #000; }
+        .rif-table .var-name { text-align:left; font-style:italic; }
+        .rif-table .se-row td { color:#555; }
+        .rif-table .stat-label { text-align:left; }
+      "
+
+      tau_labels <- paste0("\u03C4=", formatC(taus, format = "f", digits = 1))
+      header <- paste0(
+        "<tr class='topline'>",
+        "<th style='text-align:left; border-top:2px solid #000; border-bottom:1px solid #000;'></th>",
+        paste(sprintf("<th style='border-top:2px solid #000; border-bottom:1px solid #000;'>%s</th>", tau_labels), collapse = ""),
+        "</tr>"
+      )
+
+      body_rows <- ""
+      for (v in terms) {
+        est_cells <- ""
+        se_cells  <- ""
+        for (tau in taus) {
+          row <- grid3[grid3$term == v & grid3$tau == tau, ]
+          if (nrow(row) == 1) {
+            pv <- pv_fn(row)
+            est_cells <- paste0(est_cells, "<td>", pv$est, "</td>")
+            se_cells  <- paste0(se_cells,  "<td>", pv$se,  "</td>")
+          } else {
+            est_cells <- paste0(est_cells, "<td></td>")
+            se_cells  <- paste0(se_cells,  "<td></td>")
+          }
+        }
+        body_rows <- paste0(body_rows,
+          "<tr><td class='var-name'>", htmltools::htmlEscape(v), "</td>", est_cells, "</tr>",
+          "<tr class='se-row'><td></td>", se_cells, "</tr>"
+        )
+      }
+
+      # Per-quantile fit stats from model 3 (fit3 is fixest_multi)
+      stats_rows <- ""
+      if (inherits(fit3, "fixest_multi") || is.list(fit3)) {
+        nobs_vals <- vapply(seq_along(taus), function(i) {
+          tryCatch(formatC(stats::nobs(fit3[[i]]), format = "d", big.mark = ","),
+                   error = function(e) "")
+        }, character(1))
+        r2_vals <- vapply(seq_along(taus), function(i) {
+          tryCatch(formatC(fixest::r2(fit3[[i]], "wr2"), format = "f", digits = 3),
+                   error = function(e) tryCatch(formatC(fixest::r2(fit3[[i]], "r2"), format = "f", digits = 3),
+                                                error = function(e2) ""))
+        }, character(1))
+
+        stats_rows <- paste0(
+          "<tr><td style='border-top:1px solid #000;'></td>",
+          paste(rep("<td style='border-top:1px solid #000;'></td>", length(taus)), collapse = ""),
+          "</tr>",
+          "<tr><td class='stat-label'>Observations</td>",
+          paste(sprintf("<td>%s</td>", nobs_vals), collapse = ""),
+          "</tr>",
+          "<tr><td class='stat-label'>Within R\u00B2</td>",
+          paste(sprintf("<td>%s</td>", r2_vals), collapse = ""),
+          "</tr>",
+          "<tr><td style='border-bottom:2px solid #000;'></td>",
+          paste(rep("<td style='border-bottom:2px solid #000;'></td>", length(taus)), collapse = ""),
+          "</tr>"
+        )
+      }
+
+      note <- paste0("<tr><td colspan='", length(taus) + 1,
+                     "' style='text-align:left; font-size:11px; padding-top:6px; color:#555;'>",
+                     "Full specification (FE + controls). ",
+                     "\u2020 p&lt;0.1, * p&lt;0.05, ** p&lt;0.01, *** p&lt;0.001</td></tr>")
+
+      html <- paste0(
+        "<style>", css, "</style>",
+        "<table class='rif-table'>",
+        "<thead>", header, "</thead>",
+        "<tbody>", body_rows, stats_rows, note, "</tbody>",
+        "</table>"
+      )
+
+      htmltools::HTML(html)
+    }, error = function(e) htmltools::tags$p(paste("RIF table error:", conditionMessage(e)))))
+  }
 
   if (!inherits(fit1, "fixest") || !inherits(fit2, "fixest") || !inherits(fit3, "fixest")) {
     return(htmltools::tags$p("All models must be fixest objects."))
@@ -1030,6 +1280,23 @@ calc_fit_stats <- function(model, is_logistic, engine = "fixest") {
     x <- suppressWarnings(as.numeric(x))
     if (is.na(x)) return(NA_character_)
     as.character(round(x, digits))
+  }
+
+  # RIF: per-quantile R² table
+  if (identical(engine, "rif") && (inherits(model, "fixest_multi") || is.list(model))) {
+    taus <- seq(0.1, 0.9, by = 0.1)
+    n <- min(length(model), length(taus))
+    rows <- lapply(seq_len(n), function(i) {
+      m <- model[[i]]
+      data.frame(
+        Statistic = paste0("\u03C4 = ", formatC(taus[i], format = "f", digits = 1)),
+        Nobs = tryCatch(format(stats::nobs(m), big.mark = ","), error = function(e) ""),
+        R2 = tryCatch(fmt_num(fixest::r2(m, "r2")), error = function(e) ""),
+        `Within R2` = tryCatch(fmt_num(fixest::r2(m, "wr2")), error = function(e) ""),
+        stringsAsFactors = FALSE, check.names = FALSE
+      )
+    })
+    return(do.call(rbind, rows))
   }
 
   nobs_val <- tryCatch(format(stats::nobs(model), big.mark = ","),

@@ -83,7 +83,7 @@ model_type_choices <- function(outcome_type) {
     )
   } else {
     list(
-      choices = "Linear regression",
+      choices = c("Linear regression", "Quantile regression"),
       label   = "Regression model:"
     )
   }
@@ -148,6 +148,7 @@ infer_engine <- function(model_type) {
     "Logistic regression" = "fixest",
     "Random forest"       = "ranger",
     "XGBoost"             = "xgboost",
+    "Quantile regression" = "rif",
     "fixest"  # safe default
   )
 }
