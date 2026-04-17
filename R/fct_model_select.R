@@ -83,7 +83,7 @@ model_type_choices <- function(outcome_type) {
     )
   } else {
     list(
-      choices = c("Linear regression", "Quantile regression"),
+      choices = c("Linear regression", "Quantile regression (RIF)"),
       label   = "Regression model:"
     )
   }
@@ -144,11 +144,11 @@ exclude_selected_vars <- function(candidate_vl,
 infer_engine <- function(model_type) {
   switch(
     model_type %||% "",
-    "Linear regression"   = "fixest",
-    "Logistic regression" = "fixest",
-    "Random forest"       = "ranger",
-    "XGBoost"             = "xgboost",
-    "Quantile regression" = "rif",
+    "Linear regression"       = "fixest",
+    "Logistic regression"     = "fixest",
+    "Random forest"           = "ranger",
+    "XGBoost"                 = "xgboost",
+    "Quantile regression (RIF)" = "rif",
     "fixest"  # safe default
   )
 }
