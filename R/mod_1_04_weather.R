@@ -10,8 +10,10 @@
 mod_1_04_weather_ui <- function(id) {
   ns <- NS(id)
   tagList(
-    uiOutput(ns("weather_selector_ui")),
-    uiOutput(ns("weather_construction_ui"))
+    wellPanel(
+      uiOutput(ns("weather_selector_ui")),
+      uiOutput(ns("weather_construction_ui"))
+    )
   )
 }
 
@@ -61,6 +63,7 @@ mod_1_04_weather_server <- function(id, variable_list, selected_surveys, survey_
       req(input$weather_variable_selector)
       wl <- weather_vars()
 
+      n_vars <- length(input$weather_variable_selector)
       ui_list <- lapply(seq_along(input$weather_variable_selector), function(i) {
         v        <- input$weather_variable_selector[i]
         var_info <- wl[wl$name == v, ]
@@ -68,13 +71,15 @@ mod_1_04_weather_server <- function(id, variable_list, selected_surveys, survey_
         prefix   <- paste0(v, "_")
 
         tagList(
-          shiny::p(paste0(var_info$label, ":")),
-          shiny::actionButton(ns(paste0(prefix, "toggle")), "Configure"),
+          if (i > 1 && n_vars > 1) hr(),
+          tags$p(tags$strong(paste0(var_info$label, ":")),
+                 style = "font-size: 15px;"),
+          shiny::actionButton(ns(paste0(prefix, "toggle")), "Configure",
+                 style = "margin-bottom: 10px;"),
           shiny::conditionalPanel(
             condition = paste0("input['", ns(paste0(prefix, "toggle")), "'] % 2 == 1"),
             tagList(
-              if (i > 1) shiny::hr(),
-              shiny::h5("Reference period"),
+
               shiny::sliderInput(
                 ns(paste0(prefix, "relativePeriod")),
                 "Months before interview",
@@ -130,7 +135,7 @@ mod_1_04_weather_server <- function(id, variable_list, selected_surveys, survey_
         )
       })
 
-      tagList(do.call(tagList, ui_list), shiny::hr())
+      tagList(do.call(tagList, ui_list))
     })
 
     # ---- Selected weather spec ----------------------------------------------

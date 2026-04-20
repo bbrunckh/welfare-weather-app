@@ -175,10 +175,11 @@ mod_1_modelling_server <- function(id,
 
     list(
       # Selections
-      selected_surveys = s1$selected_surveys,
-      selected_outcome = s3$selected_outcome,
-      selected_weather = s4$selected_weather,
-      selected_model   = s6$selected_model,
+      selected_surveys  = s1$selected_surveys,
+      selected_outcome  = s3$selected_outcome,
+      selected_weather  = s4$selected_weather,
+      selected_model    = s6$selected_model,
+      selected_policies = s6$selected_policies,
 
       # Data
       survey_data    = s2$survey_data,

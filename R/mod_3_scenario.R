@@ -18,6 +18,7 @@ mod_3_scenario_ui <- function(id) {
     h4("How could policy and structural adjustments mitigate the welfare impacts of weather?"),
     sidebarLayout(
       sidebarPanel(
+        uiOutput(ns("policy_info_ui")),
         bs_accordion(id = ns("accordion")) |>
           bs_append(
             title   = "Social protection",
@@ -83,6 +84,7 @@ mod_3_scenario_server <- function(id,
                                    selected_outcome,
                                    selected_weather,
                                    selected_model,
+                                   selected_policies = reactive(NULL),
                                    survey_weather,
                                    model_fit,
                                    hist_sim,
@@ -90,8 +92,41 @@ mod_3_scenario_server <- function(id,
                                    variable_list   = reactive(NULL)) {
   moduleServer(id, function(input, output, session) {
 
-    # s1-s4 require the relevant variables to be selected in Step 1
-    # We should surface only included variables from Step 1 (possibly very restrictive but also indicative 
+    # ---- Display selected policy scenarios above accordion -----------------
+
+    output$policy_info_ui <- renderUI({
+      pols <- selected_policies()
+      if (is.null(pols) || length(pols) == 0) {
+        return(div(
+          class = "alert alert-warning",
+          style = "padding: 8px; margin-bottom: 10px; font-size: 13px;",
+          tags$strong("No policy scenarios selected."),
+          " Go to Step 1 \u2192 Policy scenarios to select one (if desired)."
+        ))
+      }
+
+      vl <- variable_list()
+      items <- lapply(pols, function(k) {
+        def <- POLICY_DEFINITIONS[[k]]
+        if (is.null(def)) return(NULL)
+        var_labels <- vapply(def$vars, function(v) {
+          lbl <- if (!is.null(vl) && v %in% vl$name) vl$label[vl$name == v][1] else v
+          paste0(lbl, " (", v, ")")
+        }, character(1))
+        tags$li(
+          tags$strong(def$label),
+          tags$br(),
+          tags$small(class = "text-muted", paste(var_labels, collapse = ", "))
+        )
+      })
+
+      div(
+        class = "alert alert-info",
+        style = "padding: 8px; margin-bottom: 10px; font-size: 13px;",
+        tags$strong("Selected policy scenario:"),
+        do.call(tags$ul, Filter(Negate(is.null), items))
+      )
+    })
 
     # ---- Social Protection scenario --------------------------------------
 

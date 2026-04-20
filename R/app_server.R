@@ -44,6 +44,7 @@ app_server <- function(input, output, session) {
     selected_outcome  = step1_api$selected_outcome,
     selected_weather  = step1_api$selected_weather,
     selected_model    = step1_api$selected_model,
+    selected_policies = step1_api$selected_policies,
     survey_weather    = step1_api$survey_weather,
     model_fit         = step1_api$model_fit,
     hist_sim          = step2_api$hist_sim,

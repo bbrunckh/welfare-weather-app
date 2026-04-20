@@ -5,6 +5,85 @@
 
 
 # ---------------------------------------------------------------------------- #
+# Policy scenario definitions                                                   #
+# ---------------------------------------------------------------------------- #
+
+#' Predefined policy scenario definitions
+#'
+#' Each entry maps a short key to a human-readable label and a character vector
+#' of variable names that the policy requires in the model.
+#'
+#' @export
+POLICY_DEFINITIONS <- list(
+  "A" = list(
+    label = "Energy / Electricity access",
+    vars  = c("electricity")
+  ),
+  "B" = list(
+    label = "Drinking Water access",
+    vars  = c("imp_wat_rec")
+  ),
+  "C" = list(
+    label = "Sanitation access",
+    vars  = c("imp_san_rec")
+  ),
+  "D" = list(
+    label = "Health access",
+    vars  = c("ttime_health")
+  ),
+  "E" = list(
+    label = "Internet access",
+    vars  = c("internet")
+  ),
+  "F" = list(
+    label = "Mobile phone access",
+    vars  = c("cellphone")
+  )
+)
+
+#' Named vector of policy choices for selectize input
+#' @return Named character vector (display label → key).
+#' @export
+get_policy_choices <- function() {
+  setNames(
+    names(POLICY_DEFINITIONS),
+    vapply(POLICY_DEFINITIONS, `[[`, character(1), "label")
+  )
+}
+
+#' Determine which variables are locked by selected policies, split by level
+#'
+#' @param selected_policies Character vector of policy keys (e.g. \code{"A"}).
+#' @param variable_list     Data frame with \code{name} column and role flags
+#'   \code{ind}, \code{hh}, \code{firm}, \code{area}.
+#'
+#' @return Named list with elements \code{ind}, \code{hh}, \code{firm},
+#'   \code{area}, each a character vector of locked variable names.
+#' @export
+get_policy_locked_vars <- function(selected_policies, variable_list = NULL) {
+  empty <- list(ind = character(0), hh = character(0),
+                firm = character(0), area = character(0))
+  if (is.null(selected_policies) || length(selected_policies) == 0) return(empty)
+  if (is.null(variable_list) || nrow(variable_list) == 0) return(empty)
+
+  all_vars <- unique(unlist(lapply(selected_policies, function(k) {
+    POLICY_DEFINITIONS[[k]]$vars
+  })))
+
+  vl <- variable_list[variable_list$name %in% all_vars, , drop = FALSE]
+  if (nrow(vl) == 0) return(empty)
+
+  get_role <- function(role) {
+    v <- vl[[role]]
+    if (is.null(v)) return(character(0))
+    vl$name[!is.na(v) & v == 1L]
+  }
+  list(ind = get_role("ind"), hh = get_role("hh"),
+       firm = get_role("firm"), area = get_role("area"))
+}
+
+
+# ---------------------------------------------------------------------------- #
 # Variable list filtering                                                       #
 # ---------------------------------------------------------------------------- #
 
