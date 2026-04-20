@@ -187,7 +187,7 @@ ENGINE_REGISTRY <- list(
   rif = list(
 
     requires    = c("fixest", "broom"),
-    model_types = c("Quantile regression"),
+    model_types = c("Quantile regression (RIF)"),
 
     # Same FE-absorbing formula structure as fixest; fit_one replaces the LHS
     # with stacked RIF columns.
