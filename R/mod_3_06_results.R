@@ -82,6 +82,30 @@ mod_3_06_results_ui <- function(id) {
       )
     ),
 
+    # ---- Exceedance curves -----------------------------------------------
+    shiny::wellPanel(
+      shiny::h4("Exceedance probability by climate scenario"),
+      shiny::tags$div(
+        style = "display:flex; gap:20px; flex-wrap:wrap; margin-bottom:6px;",
+        shiny::checkboxInput(
+          ns("exceedance_logit_x"),
+          "Logit probability axis (emphasise both tails)",
+          value = FALSE
+        ),
+        shiny::checkboxInput(
+          ns("show_return_period"),
+          "Show return period lines",
+          value = TRUE
+        )
+      ),
+      shiny::tags$p(style = "font-weight:600; margin-bottom:2px;", "Baseline"),
+      shiny::plotOutput(ns("exceedance_baseline"), height = "400px"),
+      shiny::tags$p(style = "font-weight:600; margin-bottom:2px; margin-top:12px;",
+                    "Policy-adjusted"),
+      shiny::plotOutput(ns("exceedance_policy"), height = "400px"),
+      shiny::uiOutput(ns("exceedance_caption"))
+    ),
+
     # ---- Threshold table ------------------------------------------------
     shiny::wellPanel(
       shiny::h4("Outcome value at return-period thresholds"),
@@ -351,6 +375,50 @@ mod_3_06_results_server <- function(id,
       )
     }, height = 600)
     outputOptions(output, "comparison_plot", suspendWhenHidden = FALSE)
+
+    # ---- Exceedance plots -------------------------------------------------
+
+    output$exceedance_baseline <- renderPlot({
+      req(baseline_hist_agg(), baseline_series())
+      enhance_exceedance(
+        scenarios     = baseline_series(),
+        hist_agg      = baseline_hist_agg(),
+        x_label       = baseline_hist_agg()$x_label,
+        return_period = isTRUE(input$show_return_period),
+        n_sim_years   = nrow(baseline_hist_agg()$out),
+        logit_x       = isTRUE(input$exceedance_logit_x)
+      )
+    })
+    outputOptions(output, "exceedance_baseline", suspendWhenHidden = FALSE)
+
+    output$exceedance_policy <- renderPlot({
+      req(policy_hist_agg(), policy_series())
+      enhance_exceedance(
+        scenarios     = policy_series(),
+        hist_agg      = policy_hist_agg(),
+        x_label       = policy_hist_agg()$x_label,
+        return_period = isTRUE(input$show_return_period),
+        n_sim_years   = nrow(policy_hist_agg()$out),
+        logit_x       = isTRUE(input$exceedance_logit_x)
+      )
+    })
+    outputOptions(output, "exceedance_policy", suspendWhenHidden = FALSE)
+
+    output$exceedance_caption <- renderUI({
+      req(baseline_hist_agg())
+      axis_txt <- if (isTRUE(input$exceedance_logit_x))
+        "Probability axis is logit-scaled, giving equal visual weight to both tails."
+      else
+        "The curve shows the estimated annual exceedance probability for each outcome value."
+      tagList(
+        shiny::tags$p(style = "font-size:11px; color:#666; margin-top:6px; margin-bottom:2px;",
+                      axis_txt),
+        shiny::tags$p(style = "font-size:11px; color:#666; margin-top:0; margin-bottom:2px;",
+                      "Low odds show the value exceeded in only 1-in-N years."),
+        shiny::tags$p(style = "font-size:11px; color:#666; margin-top:0;",
+                      "High odds show the value reached in all but 1-in-N years.")
+      )
+    })
 
     output$threshold_table <- DT::renderDT({
       req(baseline_series(), policy_series())
