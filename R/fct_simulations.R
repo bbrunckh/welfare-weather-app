@@ -457,9 +457,6 @@ hist_aggregate_choices <- function(outcome_type, outcome_name = NULL) {
 #' @param weights  An optional character string giving the name of a survey
 #'   weight column in `preds`. When supplied, passed to `aggregate_outcome()`;
 #'   `NULL` (default) weights all observations equally.
-#' @param weights An optional character string giving the name of a survey
-#'   weight column in `df`. If `NULL` (default) all observations are
-#'   weighted equally.
 #'
 #' @return A tibble with one row per group containing the grouping column
 #'   and a column named `value` holding the computed aggregate.

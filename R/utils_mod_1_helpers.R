@@ -44,6 +44,7 @@ weighted_summary_long <- function(df, vars, group = "countryyear", weight = "wei
 				return(data.frame(
 					countryyear = gval,
 					variable = v,
+					unweighted_mean = NA_real_,
 					Mean = NA_real_,
 					`Std. Dev.` = NA_real_,
 					Min = NA_real_,
@@ -63,6 +64,7 @@ weighted_summary_long <- function(df, vars, group = "countryyear", weight = "wei
 			data.frame(
 				countryyear = gval,
 				variable = v,
+				unweighted_mean = mean(x, na.rm = T),
 				Mean = mu,
 				`Std. Dev.` = sdw,
 				Min = if (length(x) && any(is.finite(x))) min(x[is.finite(x)]) else NA_real_,
@@ -104,19 +106,19 @@ ridge_distribution_plot <- function(
     if (!all(c(x_var, group_var, fill_var) %in% names(df))) return(NULL)
 
     df_plot <- df[is.finite(df[[x_var]]), , drop = FALSE]
-    
+
     # For log transform, filter out non-positive values
     if (log_transform) {
         df_plot <- df_plot[df_plot[[x_var]] > 0, , drop = FALSE]
     }
-    
+
     if (!nrow(df_plot)) return(NULL)
 
     label <- x_label
     if (!is.null(label) && !is.null(wrap_width)) {
         label <- stringr::str_wrap(label, wrap_width)
     }
-    
+
     # Add log transform note to label if applicable
     if (log_transform && !is.null(label)) {
         label <- paste0(label, " (log scale)")
@@ -131,18 +133,18 @@ ridge_distribution_plot <- function(
         ggplot2::labs(
             title = "",
             x = label %||% x_var,
-            y = "", 
+            y = "",
             fill = ""
         ) +
         ggplot2::theme(legend.position = "none")
-    
+
     # Apply log10 scale to x-axis if requested
     if (log_transform) {
         p <- p + ggplot2::scale_x_log10(
             labels = scales::comma_format()
         )
     }
-    
+
     p
 }
 
