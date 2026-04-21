@@ -94,19 +94,56 @@ get_policy_locked_vars <- function(selected_policies, variable_list = NULL) {
 #' Filter a variable list to columns present and sufficiently non-missing in df
 #'
 #' A variable is considered valid when it exists as a column in `df` and at
-#' least `min_complete` proportion of its values are non-missing.
+#' least `min_complete` proportion of its values are non-missing. When
+#' `group_cols` are present in `df`, completeness is evaluated within each
+#' group (e.g. each survey-year combination) and a variable must meet the
+#' threshold in **every** group to be retained. When `outcome` is supplied,
+#' completeness is computed only over rows where the outcome is non-missing —
+#' i.e. the rows that would actually be used in the model.
 #'
 #' @param df            A data frame (e.g. `survey_weather()`).
 #' @param variable_list A data frame with at minimum a `name` column.
-#' @param min_complete  Numeric in \[0, 1\]. Minimum proportion non-missing.
+#' @param min_complete  Numeric in \[0, 1\]. Minimum proportion non-missing
+#'   required in each group (or overall when no group columns are found).
 #'   Default `0.5`.
+#' @param group_cols    Character vector of column names used to define groups
+#'   for per-group completeness checks. Only columns actually present in `df`
+#'   are used. Default `c("code", "year", "survname")`.
+#' @param outcome       Scalar character. Name of the outcome column in `df`.
+#'   When non-`NULL` and present in `df`, only rows where the outcome is
+#'   non-missing are used for completeness calculations. Default `NULL`.
 #'
 #' @return The filtered `variable_list`.
 #'
 #' @export
-filter_valid_vars <- function(df, variable_list, min_complete = 0.5) {
+filter_valid_vars <- function(df, variable_list, min_complete = 0.5,
+                              group_cols = c("code", "year", "survname"),
+                              outcome = NULL) {
   if (is.null(df) || is.null(variable_list)) return(variable_list)
-  valid <- names(df)[colMeans(!is.na(df)) >= min_complete]
+
+  if (!is.null(outcome) && outcome %in% names(df)) {
+    df <- df[!is.na(df[[outcome]]), , drop = FALSE]
+  }
+
+  group_cols <- intersect(group_cols, names(df))
+
+  if (length(group_cols) == 0) {
+    valid <- names(df)[colMeans(!is.na(df)) >= min_complete]
+  } else {
+    data_cols  <- setdiff(names(df), group_cols)
+    group_key  <- do.call(paste, c(df[group_cols], sep = "\x01"))
+    groups     <- unique(group_key)
+
+    # completeness matrix: rows = data columns, cols = groups
+    comp_mat <- vapply(groups, function(g) {
+      colMeans(!is.na(df[group_key == g, data_cols, drop = FALSE]))
+    }, numeric(length(data_cols)))
+
+    # a column is valid only if it meets the threshold in every group
+    min_comp <- if (is.matrix(comp_mat)) apply(comp_mat, 1, min) else comp_mat
+    valid    <- c(group_cols, data_cols[min_comp >= min_complete])
+  }
+
   variable_list[variable_list$name %in% valid, , drop = FALSE]
 }
 

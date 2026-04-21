@@ -51,11 +51,13 @@ mod_1_06_model_server <- function(id,
   moduleServer(id, function(input, output, session) {
     ns <- session$ns
 
-    # ---- Valid variable list (present + >= 50 % non-missing) ----------------
+    # ---- Valid variable list (present + >= 90 % non-missing) ----------------
 
     valid_vl <- reactive({
       req(survey_weather(), variable_list())
-      filter_valid_vars(survey_weather(), variable_list())
+      filter_valid_vars(survey_weather(), variable_list(), min_complete = 0.9,
+                        group_cols = c("code", "year", "survname"),
+                        outcome = selected_outcome()$name)
     })
 
     # ---- Role-filtered variable lists ---------------------------------------
