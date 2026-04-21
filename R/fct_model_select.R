@@ -53,6 +53,10 @@ get_policy_choices <- function() {
 
 #' Determine which variables are locked by selected policies, split by level
 #'
+#' Returns a level-based list so that policy availability can be checked against
+#' the current analysis level (ind/hh/firm/area). The locked variables are added
+#' to the model as interaction terms with the weather hazard.
+#'
 #' @param selected_policies Character vector of policy keys (e.g. \code{"A"}).
 #' @param variable_list     Data frame with \code{name} column and role flags
 #'   \code{ind}, \code{hh}, \code{firm}, \code{area}.

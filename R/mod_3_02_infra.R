@@ -75,8 +75,13 @@ mod_3_02_infra_server <- function(id,
       extract_cov_names(s$area_covariates)
     })
 
+    interaction_names <- reactive({
+      s <- sm()
+      extract_cov_names(s$interactions)
+    })
+
     coeffs <- reactive({
-      unique(c(ind_coeff(), hh_coeff(), firm_coeff(), area_coeff()))
+      unique(c(ind_coeff(), hh_coeff(), firm_coeff(), area_coeff(), interaction_names()))
     })
 
     # ---- Candidate variables for this category --------------------------

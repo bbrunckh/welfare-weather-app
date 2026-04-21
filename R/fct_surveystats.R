@@ -120,22 +120,28 @@ convert_lcu_to_ppp <- function(df, cpi_ppp_data, lcu_vars) {
 
 #' Summarise interview dates for the timing-of-interviews bar chart
 #'
-#' Groups survey microdata by `economy`, `countryyear`, and `timestamp` and
-#' counts the number of household records (`hh`) at each date. Rows with
-#' missing timestamps are dropped before aggregating.
+#' Groups survey microdata by `economy`, `countryyear`, and a year-month floor
+#' date, counting the number of household records (`hh`) in each month. Rows
+#' with missing timestamps are dropped before aggregating.
 #'
 #' @param df A data frame with columns `economy` (character), `countryyear`
 #'   (character), and `timestamp` (Date), as produced by `add_time_columns()`.
 #'
-#' @return A data frame with columns `economy`, `countryyear`, `timestamp`,
-#'   and `hh` (integer count). Returns a zero-row data frame when `df` is
-#'   empty or all timestamps are `NA`.
+#' @return A data frame with columns `economy`, `countryyear`, `month`
+#'   (Date, first of month), and `hh` (integer count). Returns a zero-row
+#'   data frame when `df` is empty or all timestamps are `NA`.
 #'
 #' @export
 summarise_interview_dates <- function(df) {
   df |>
     dplyr::filter(!is.na(timestamp)) |>
-    dplyr::summarise(hh = dplyr::n(), .by = c(economy, countryyear, timestamp))
+    dplyr::mutate(
+      month_num = as.integer(format(timestamp, "%m"))
+    ) |>
+    dplyr::summarise(
+      hh = dplyr::n(),
+      .by = c(economy, countryyear, month_num)
+    )
 }
 
 
@@ -166,82 +172,55 @@ welfare_poverty_lines <- function() {
 # Interview date bar chart                                                      #
 # ---------------------------------------------------------------------------- #
 
-#' Plot timing of survey interviews as a stacked bar chart
+#' Plot timing of survey interviews as a monthly bar chart, faceted by wave
 #'
-#' @param plot_data A data frame with columns `timestamp` (Date), `hh`
-#'   (integer count), `economy` (character), and `countryyear` (character),
-#'   as returned by `summarise_interview_dates()`.
+#' @param plot_data A data frame with columns `month` (Date, first of month),
+#'   `hh` (integer count), `economy` (character), and `countryyear`
+#'   (character), as returned by `summarise_interview_dates()`.
 #'
 #' @return A `ggplot` object, or `NULL` invisibly when `plot_data` is
 #'   `NULL` or has zero rows.
 #'
+#' @importFrom ggplot2 ggplot aes geom_col facet_wrap scale_x_date labs
+#'   theme_minimal theme element_text
 #' @export
 plot_interview_dates <- function(plot_data) {
   if (is.null(plot_data) || nrow(plot_data) == 0) return(invisible(NULL))
 
-  ggplot2::ggplot(plot_data, ggplot2::aes(x = timestamp, y = hh, fill = economy)) +
-    ggplot2::geom_bar(stat = "identity") +
-    ggplot2::theme_minimal() +
-    ggplot2::labs(title = "", x = "", y = "Number of households", fill = "") +
-    ggplot2::theme(legend.position = "bottom")
-}
-
-
-# ---------------------------------------------------------------------------- #
-# Welfare distribution ridge plot                                               #
-# ---------------------------------------------------------------------------- #
-
-#' Plot welfare distribution with poverty line annotations
-#'
-#' Calls `ridge_distribution_plot()` on the `welfare` column of `df`
-#' (log scale) and overlays dashed reference lines for each threshold in
-#' `poverty_lines`.
-#'
-#' @param df A data frame with a numeric `welfare` column (2021 PPP USD/day)
-#'   and a `countryyear` column for ridge grouping.
-#' @param poverty_lines A data frame with columns `value` (numeric) and
-#'   `label` (character). Defaults to `welfare_poverty_lines()`.
-#'
-#' @return A `ggplot` object, or `NULL` invisibly when welfare is absent or
-#'   the ridge plot cannot be built.
-#'
-#' @export
-plot_welfare_dist <- function(df, poverty_lines = welfare_poverty_lines()) {
-  if (is.null(df) || !("welfare" %in% names(df))) return(invisible(NULL))
-
-  p <- ridge_distribution_plot(
-    df,
-    x_var         = "welfare",
-    x_label       = "$ per day (2021 PPP)",
-    wrap_width    = 40,
-    log_transform = TRUE
+  month_labels <- c("Jan", "Feb", "Mar", "Apr", "May", "Jun",
+                     "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+  plot_data$month_fct <- factor(
+    plot_data$month_num,
+    levels = 1:12,
+    labels = month_labels
   )
 
-  if (is.null(p)) return(invisible(NULL))
-
-  for (i in seq_len(nrow(poverty_lines))) {
-    p <- p +
-      ggplot2::geom_vline(
-        xintercept = poverty_lines$value[i],
-        linetype   = "dashed",
-        color      = "red",
-        linewidth  = 0.5
-      ) +
-      ggplot2::annotate(
-        "text",
-        x     = poverty_lines$value[i] * 1.15,
-        y     = 0.5,
-        label = poverty_lines$label[i],
-        angle = 90,
-        size  = 3,
-        color = "red",
-        hjust = 0
-      )
-  }
-
-  p
+  ggplot2::ggplot(
+    plot_data,
+    ggplot2::aes(
+      x = .data$month_fct,
+      y = .data$hh,
+      fill = .data$countryyear
+    )
+  ) +
+    ggplot2::geom_col(width = 0.7) +
+    ggplot2::scale_x_discrete(drop = FALSE) +
+    ggplot2::theme_minimal(base_size = 12) +
+    ggplot2::labs(
+      x = NULL, y = "Households", fill = "Survey wave"
+    ) +
+    ggplot2::theme(
+      axis.text.x        = ggplot2::element_text(
+        angle = 0, hjust = 0.5, size = 9
+      ),
+      axis.ticks.x       = ggplot2::element_line(),
+      panel.grid.major.x = ggplot2::element_blank(),
+      panel.grid.minor.x = ggplot2::element_blank(),
+      panel.grid.major.y = ggplot2::element_blank(),
+      panel.grid.minor.y = ggplot2::element_blank(),
+      legend.position    = "bottom"
+    )
 }
-
 
 # ---------------------------------------------------------------------------- #
 # Leaflet survey location map                                                  #

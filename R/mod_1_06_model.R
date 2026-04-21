@@ -186,7 +186,7 @@ mod_1_06_model_server <- function(id,
       tagList(
         tags$small(
           class = "text-muted",
-          "The following variables are locked into the model by the selected policies:"
+          "The following variables are locked as interaction terms with the weather hazard:"
         ),
         do.call(tags$ul, c(items, list(style = "font-size: 12px;")))
       )
@@ -197,21 +197,17 @@ mod_1_06_model_server <- function(id,
       get_policy_locked_vars(input$selected_policies, valid_vl())
     })
 
-    # Enforce locked vars: re-add if user removes them from selectize inputs
+    # Enforce locked vars in the interactions selectize
     observe({
       locked <- policy_locked()
-      for (role in c("ind", "hh", "firm", "area")) {
-        input_id <- switch(role, ind = "indcov", hh = "hhcov",
-                           firm = "firmcov", area = "areacov")
-        lvars <- locked[[role]]
-        if (length(lvars) > 0) {
-          current <- input[[input_id]]
-          if (!all(lvars %in% current)) {
-            shiny::updateSelectizeInput(
-              session, input_id,
-              selected = unique(c(current, lvars))
-            )
-          }
+      all_locked <- unique(c(locked$ind, locked$hh, locked$firm, locked$area))
+      if (length(all_locked) > 0) {
+        current <- input$interactions
+        if (!all(all_locked %in% current)) {
+          shiny::updateSelectizeInput(
+            session, "interactions",
+            selected = unique(c(current, all_locked))
+          )
         }
       }
     })
@@ -242,18 +238,57 @@ mod_1_06_model_server <- function(id,
       shiny::withMathJax(tagList(
 
         # Interaction with weather hazard
-        if (nrow(ixn) > 0) {
-          shiny::selectizeInput(
-            ns("interactions"),
-            label    = "Interactions with \\(Haz_{kt}\\):",
-            choices  = setNames(ixn$name, ixn$label),
-            selected = if ("urban" %in% ixn$name) "urban" else NULL,
-            multiple = TRUE,
-            options  = list(maxItems = 1, placeholder = "Select interaction variable")
-          )
-        } else {
-          shiny::helpText("No interaction variables available.",
-                          style = "color: grey; font-size: 12px;")
+        {
+          locked <- policy_locked()
+          all_locked <- unique(c(locked$ind, locked$hh, locked$firm, locked$area))
+          has_policy <- length(all_locked) > 0
+
+          if (has_policy) {
+            vl_all <- valid_vl()
+            choices_locked <- stats::setNames(all_locked, vapply(
+              all_locked, function(v) {
+                l <- if (!is.null(vl_all)) vl_all$label[vl_all$name == v]
+                if (length(l) > 0) l[1] else v
+              }, character(1)
+            ))
+            tagList(
+              shiny::selectizeInput(
+                ns("interactions"),
+                label    = "Interaction with \\(Haz_{kt}\\):",
+                choices  = choices_locked,
+                selected = all_locked,
+                multiple = TRUE,
+                options  = list(
+                  maxItems = length(all_locked),
+                  plugins  = list("remove_button")
+                )
+              ),
+              tags$script(shiny::HTML(sprintf(
+                "setTimeout(function(){var el=$('#%s');if(el.length&&el[0].selectize)el[0].selectize.lock();},200);",
+                ns("interactions")
+              ))),
+              tags$small(
+                class = "text-muted",
+                style = "display:block;margin-top:-10px;margin-bottom:8px;",
+                "Set by the selected policy scenario."
+              )
+            )
+          } else if (nrow(ixn) > 0) {
+            shiny::selectizeInput(
+              ns("interactions"),
+              label    = "Interactions with \\(Haz_{kt}\\):",
+              choices  = setNames(ixn$name, ixn$label),
+              selected = if ("urban" %in% ixn$name) "urban" else NULL,
+              multiple = TRUE,
+              options  = list(
+                maxItems = 1,
+                placeholder = "Select interaction variable"
+              )
+            )
+          } else {
+            shiny::helpText("No interaction variables available.",
+                            style = "color: grey; font-size: 12px;")
+          }
         },
 
         # Fixed effects
@@ -292,23 +327,10 @@ mod_1_06_model_server <- function(id,
       # --- USER-DEFINED COVARIATES ---------------------------------------------------------
       if (input$covariates == "User-defined") {
 
-        locked <- policy_locked()
-
         ind  <- exclude_selected_vars(ind_vars(),  outcome_name = selected_outcome()$name, weather_names = selected_weather()$name, interactions = input$interactions, fixedeffects = input$fixedeffects)
         hh   <- exclude_selected_vars(hh_vars(),   outcome_name = selected_outcome()$name, weather_names = selected_weather()$name, interactions = input$interactions, fixedeffects = input$fixedeffects)
         firm <- exclude_selected_vars(firm_vars(),  outcome_name = selected_outcome()$name, weather_names = selected_weather()$name, interactions = input$interactions, fixedeffects = input$fixedeffects)
         area <- exclude_selected_vars(area_vars(),  outcome_name = selected_outcome()$name, weather_names = selected_weather()$name, interactions = input$interactions, fixedeffects = input$fixedeffects)
-
-        # Ensure policy-locked vars are always available as choices
-        vl_all <- valid_vl()
-        for (role in c("ind", "hh", "firm", "area")) {
-          tgt <- switch(role, ind = "ind", hh = "hh", firm = "firm", area = "area")
-          missing <- setdiff(locked[[role]], get(tgt)$name)
-          if (length(missing) > 0 && !is.null(vl_all)) {
-            extra <- vl_all[vl_all$name %in% missing, , drop = FALSE]
-            assign(tgt, rbind(get(tgt), extra))
-          }
-        }
 
         shiny::withMathJax(
           tagList(
@@ -319,7 +341,7 @@ mod_1_06_model_server <- function(id,
                 ns("indcov"),
                 label    = "Individual characteristics \\(X_{ijt}\\):",
                 choices  = setNames(ind$name, ind$label),
-                selected = if (length(locked$ind) > 0) locked$ind else NULL,
+                selected = NULL,
                 multiple = TRUE,
                 options  = list(placeholder = "Select individual covariates")
               )
@@ -331,7 +353,7 @@ mod_1_06_model_server <- function(id,
                 ns("hhcov"),
                 label    = "Household characteristics \\(X_{ijt}\\):",
                 choices  = setNames(hh$name, hh$label),
-                selected = if (length(locked$hh) > 0) locked$hh else NULL,
+                selected = NULL,
                 multiple = TRUE,
                 options  = list(placeholder = "Select household covariates")
               )
@@ -343,7 +365,7 @@ mod_1_06_model_server <- function(id,
                 ns("firmcov"),
                 label    = "Firm characteristics:",
                 choices  = setNames(firm$name, firm$label),
-                selected = if (length(locked$firm) > 0) locked$firm else NULL,
+                selected = NULL,
                 multiple = TRUE,
                 options  = list(placeholder = "Select firm covariates")
               )
@@ -355,7 +377,7 @@ mod_1_06_model_server <- function(id,
                 ns("areacov"),
                 label    = "Area characteristics \\(E_{jt}\\):",
                 choices  = setNames(area$name, area$label),
-                selected = if (length(locked$area) > 0) locked$area else NULL,
+                selected = NULL,
                 multiple = TRUE,
                 options  = list(placeholder = "Select area covariates")
               )
@@ -558,27 +580,31 @@ mod_1_06_model_server <- function(id,
 
       req(input$model_type, input$covariates)
 
-      # Resolve covariates by role — differs only for Lasso
-      locked <- policy_locked()
+      # Resolve covariates by role
       covs <- if (input$covariates == "Lasso") {
         selected <- lasso_result()$selected_covariates
         vl       <- valid_vl()
         list(
-          hh   = unique(c(vl$name[vl$hh   == 1 & vl$name %in% selected], locked$hh)),
-          area = unique(c(vl$name[vl$area  == 1 & vl$name %in% selected], locked$area)),
-          ind  = unique(c(vl$name[vl$ind   == 1 & vl$name %in% selected], locked$ind)),
-          firm = unique(c(vl$name[vl$firm  == 1 & vl$name %in% selected], locked$firm))
+          hh   = vl$name[vl$hh   == 1 & vl$name %in% selected],
+          area = vl$name[vl$area  == 1 & vl$name %in% selected],
+          ind  = vl$name[vl$ind   == 1 & vl$name %in% selected],
+          firm = vl$name[vl$firm  == 1 & vl$name %in% selected]
         )
       } else {
-        list(hh   = unique(c(input$hhcov,   locked$hh)),
-             area = unique(c(input$areacov, locked$area)),
-             ind  = unique(c(input$indcov,  locked$ind)),
-             firm = unique(c(input$firmcov, locked$firm)))
+        list(hh   = input$hhcov   %||% character(0),
+             area = input$areacov %||% character(0),
+             ind  = input$indcov  %||% character(0),
+             firm = input$firmcov %||% character(0))
       }
+
+      # Policy-locked vars are enforced as interactions
+      locked <- policy_locked()
+      all_locked <- unique(c(locked$ind, locked$hh, locked$firm, locked$area))
+      interactions <- unique(c(input$interactions, all_locked))
 
       build_selected_model(
         model_type          = input$model_type,
-        interactions        = input$interactions,
+        interactions        = interactions,
         fixedeffects        = input$fixedeffects,
         covariate_selection = input$covariates,
         hh_covariates       = covs$hh,

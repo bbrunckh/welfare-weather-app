@@ -183,15 +183,6 @@ mod_1_02_surveystats_server <- function(
           m
         })
 
-        # Welfare distribution ridge plot with standard poverty line annotations
-        output$welfare_dist <- renderPlot({
-          p <- plot_welfare_dist(survey_data())
-          if (is.null(p)) {
-            plot.new(); title(main = "Welfare distribution unavailable"); return(invisible(NULL))
-          }
-          p
-        })
-
         output$outcome_stats <- make_stats_dt(survey_data, variable_list, "outcome")
         output$ind_stats     <- make_stats_dt(survey_data, variable_list, "ind")
         output$hh_stats      <- make_stats_dt(survey_data, variable_list, "hh")
@@ -236,9 +227,6 @@ mod_1_02_surveystats_server <- function(
                 bslib::card(h4("Location of interviews"),
                             leaflet::leafletOutput(ns("map"), height = "300px"))
               ),
-              br(),
-              bslib::card(h4("Welfare distribution"),
-                          plotOutput(ns("welfare_dist"), height = "300px")),
               h4("Outcome stats"),              DT::DTOutput(ns("outcome_stats")),
               h4("Individual characteristics"), DT::DTOutput(ns("ind_stats")),
               h4("Household characteristics"),  DT::DTOutput(ns("hh_stats")),
@@ -268,7 +256,8 @@ mod_1_02_surveystats_server <- function(
     # ---- Return API ---------------------------------------------------------
 
     list(
-      survey_data = survey_data
+      survey_data = survey_data,
+      map_data    = map_data
     )
   })
 }

@@ -72,15 +72,17 @@ test_that("derive_h3_fnames deduplicates when hh and ind both present", {
 
 # ---- summarise_interview_dates ----------------------------------------------
 
-test_that("summarise_interview_dates counts hh and drops NA timestamps", {
+test_that("summarise_interview_dates counts hh by month_num and drops NA timestamps", {
   df <- data.frame(
     economy     = rep("A", 4),
     countryyear = rep("A, 2018", 4),
-    timestamp   = as.Date(c("2018-01-01","2018-01-01","2018-02-01",NA))
+    timestamp   = as.Date(c("2018-01-15","2018-01-20","2018-02-10",NA))
   )
   out <- summarise_interview_dates(df)
   expect_equal(nrow(out), 2L)
   expect_equal(sum(out$hh), 3L)
+  expect_true("month_num" %in% names(out))
+  expect_equal(sort(out$month_num), c(1L, 2L))
 })
 
 test_that("summarise_interview_dates returns zero rows when all timestamps NA", {
@@ -105,16 +107,16 @@ test_that("plot_interview_dates returns NULL for empty/NULL input", {
 
 test_that("plot_interview_dates returns ggplot for valid data", {
   skip_if_not_installed("ggplot2")
-  d <- data.frame(timestamp=as.Date("2018-01-01"), hh=50L, economy="A", countryyear="A, 2018")
+  d <- data.frame(month_num=1L, hh=50L, economy="A", countryyear="A, 2018")
   expect_s3_class(plot_interview_dates(d), "ggplot")
 })
 
-test_that("plot_interview_dates maps x=timestamp, y=hh", {
+test_that("plot_interview_dates maps x and y aesthetics", {
   skip_if_not_installed("ggplot2")
-  d <- data.frame(timestamp=as.Date("2018-01-01"), hh=50L, economy="A", countryyear="A, 2018")
+  d <- data.frame(month_num=1L, hh=50L, economy="A", countryyear="A, 2018")
   p <- plot_interview_dates(d)
-  expect_equal(rlang::as_label(p$mapping$x), "timestamp")
-  expect_equal(rlang::as_label(p$mapping$y), "hh")
+  expect_true(grepl("month_fct", rlang::as_label(p$mapping$x)))
+  expect_true(grepl("hh", rlang::as_label(p$mapping$y)))
 })
 
 # ---- plot_welfare_dist ------------------------------------------------------
@@ -129,7 +131,8 @@ test_that("plot_welfare_dist returns ggplot for valid data", {
   skip_if_not_installed("ggridges")
   set.seed(1)
   df <- data.frame(welfare=exp(rnorm(200, log(3.5), 0.8)),
-                   countryyear=rep(c("A, 2018","B, 2019"), each=100))
+                   countryyear=rep(c("A, 2018","B, 2019"), each=100),
+                   code=rep(c("A","B"), each=100))
   expect_s3_class(plot_welfare_dist(df), "ggplot")
 })
 
@@ -137,7 +140,9 @@ test_that("plot_welfare_dist accepts custom poverty_lines", {
   skip_if_not_installed("ggplot2")
   skip_if_not_installed("ggridges")
   set.seed(1)
-  df <- data.frame(welfare=exp(rnorm(100, log(3.5), 0.8)), countryyear=rep("A, 2018", 100))
+  df <- data.frame(welfare=exp(rnorm(100, log(3.5), 0.8)),
+                   countryyear=rep("A, 2018", 100),
+                   code=rep("A", 100))
   pl <- data.frame(value=2.15, label="$2.15", stringsAsFactors=FALSE)
   expect_s3_class(plot_welfare_dist(df, poverty_lines=pl), "ggplot")
 })

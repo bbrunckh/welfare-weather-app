@@ -236,6 +236,215 @@ outcome_info_message <- function(type) {
 
 
 # ---------------------------------------------------------------------------- #
+# Outcome missingness summary                                                   #
+# ---------------------------------------------------------------------------- #
+
+#' Compute missingness summary for the selected outcome variable
+#'
+#' @param df      Survey data frame.
+#' @param outcome Single character string — the outcome variable name.
+#'
+#' @return A one-row data frame with columns \code{variable}, \code{n_total},
+#'   \code{n_available}, \code{n_missing}, \code{pct_available}.
+#' @export
+outcome_missing_summary <- function(df, outcome) {
+  if (is.null(df) || !outcome %in% names(df))
+    return(data.frame(variable = outcome, n_total = NA_integer_,
+                      n_available = NA_integer_, n_missing = NA_integer_,
+                      pct_available = NA_real_, stringsAsFactors = FALSE))
+  x     <- df[[outcome]]
+  n     <- length(x)
+  n_ok  <- sum(!is.na(x))
+  data.frame(
+    variable      = outcome,
+    n_total       = n,
+    n_available   = n_ok,
+    n_missing     = n - n_ok,
+    pct_available = round(100 * n_ok / max(n, 1), 1),
+    stringsAsFactors = FALSE
+  )
+}
+
+
+# # ---------------------------------------------------------------------------- #
+# # Outcome histogram / density                                                   #
+# # ---------------------------------------------------------------------------- #
+
+# #' Plot a histogram of the selected outcome variable
+# #'
+# #' For numeric outcomes, draws a histogram with an optional log-x scale. For
+# #' binary/logical outcomes, draws a bar chart of 0/1 counts.
+# #'
+# #' @param df      Survey data frame.
+# #' @param outcome Single character string — the outcome variable name.
+# #' @param label   Human-readable label for the x axis.
+# #' @param type    Outcome type: \code{"numeric"} or \code{"logical"}.
+# #'
+# #' @return A \code{ggplot} object, or \code{NULL} invisibly.
+# #' @export
+# plot_outcome_histogram <- function(df, outcome, label = outcome,
+#                                    type = "numeric") {
+#   if (is.null(df) || !outcome %in% names(df)) return(invisible(NULL))
+#   vals <- df[[outcome]]
+#   vals <- vals[!is.na(vals)]
+#   if (length(vals) == 0) return(invisible(NULL))
+
+#   if (identical(type, "logical") || all(vals %in% c(0L, 1L, TRUE, FALSE))) {
+#     plot_df <- data.frame(value = factor(as.integer(vals),
+#                                          levels = c(0L, 1L),
+#                                          labels = c("0 (No)", "1 (Yes)")))
+#     ggplot2::ggplot(plot_df, ggplot2::aes(x = .data$value)) +
+#       ggplot2::geom_bar(fill = "#3498db", width = 0.5) +
+#       ggplot2::labs(x = label, y = "Count") +
+#       ggplot2::theme_minimal(base_size = 13)
+#   } else {
+#     plot_df <- data.frame(value = as.numeric(vals))
+#     p <- ggplot2::ggplot(plot_df, ggplot2::aes(x = .data$value)) +
+#       ggplot2::geom_histogram(bins = 50, fill = "#3498db", colour = "white",
+#                               linewidth = 0.2) +
+#       ggplot2::labs(x = label, y = "Count") +
+#       ggplot2::theme_minimal(base_size = 13)
+#     if (all(plot_df$value > 0, na.rm = TRUE)) {
+#       p <- p + ggplot2::scale_x_log10()
+#     }
+#     p
+#   }
+# }
+
+# ---------------------------------------------------------------------------- #
+# Outcome distribution ridge plot (by survey wave)                              #
+# ---------------------------------------------------------------------------- #
+
+#' Plot outcome distribution by survey wave
+#'
+#' Calls `ridge_distribution_plot()` on the specified outcome column.
+#' For welfare, overlays dashed poverty line references. Numeric outcomes use
+#' log scale when all values are positive.
+#'
+#' @param df A data frame with a `countryyear` column for ridge grouping.
+#' @param outcome Single character string — outcome variable name. Defaults to
+#'   `"welfare"`.
+#' @param label Human-readable label for the x axis.
+#' @param type Outcome type: `"numeric"` or `"logical"`.
+#' @param poverty_lines A data frame with columns `value` and `label`.
+#'   Only used when `outcome == "welfare"`.
+#'
+#' @return A `ggplot` object, or `NULL` invisibly.
+#'
+#' @export
+plot_welfare_dist <- function(df,
+                              outcome = "welfare",
+                              label = NULL,
+                              type = "numeric",
+                              poverty_lines = welfare_poverty_lines()) {
+  if (is.null(df) || !(outcome %in% names(df))) return(invisible(NULL))
+
+  use_log <- identical(type, "numeric") &&
+    all(df[[outcome]][!is.na(df[[outcome]])] > 0)
+
+  x_label <- label %||% outcome
+  if (identical(outcome, "welfare")) x_label <- "$ per day (2021 PPP)"
+
+  p <- ridge_distribution_plot(
+    df,
+    x_var         = outcome,
+    x_label       = x_label,
+    wrap_width    = 40,
+    log_transform = use_log
+  )
+
+  if (is.null(p)) return(invisible(NULL))
+
+  if (identical(outcome, "welfare") && !is.null(poverty_lines)) {
+    for (i in seq_len(nrow(poverty_lines))) {
+      p <- p +
+        ggplot2::geom_vline(
+          xintercept = poverty_lines$value[i],
+          linetype   = "dashed",
+          color      = "red",
+          linewidth  = 0.5
+        ) +
+        ggplot2::annotate(
+          "text",
+          x     = poverty_lines$value[i] * 1.15,
+          y     = 0.5,
+          label = poverty_lines$label[i],
+          angle = 90,
+          size  = 3,
+          color = "red",
+          hjust = 0
+        )
+    }
+  }
+
+  p
+}
+
+
+# ---------------------------------------------------------------------------- #
+# Outcome spatial coverage map                                                  #
+# ---------------------------------------------------------------------------- #
+
+#' Build a leaflet map highlighting locations with outcome data
+#'
+#' Colours H3 polygons by whether the outcome variable is available (non-NA)
+#' at each location. Uses the same GeoJSON FeatureCollection as the survey
+#' map but overlays availability shading.
+#'
+#' @param geojson  GeoJSON FeatureCollection (from Survey Stats H3 pipeline).
+#' @param df       Survey data frame with \code{loc_id} and the outcome column.
+#' @param outcome  Single character string — the outcome variable name.
+#'
+#' @return A \code{leaflet} widget, or \code{NULL}.
+#' @export
+plot_outcome_coverage_map <- function(geojson, df, outcome) {
+  if (is.null(geojson) || length(geojson$features) == 0) return(invisible(NULL))
+  if (is.null(df) || !outcome %in% names(df) || !"loc_id" %in% names(df))
+    return(invisible(NULL))
+
+  loc_avail <- df |>
+    dplyr::mutate(.has = !is.na(.data[[outcome]])) |>
+    dplyr::summarise(pct = mean(.data$.has) * 100, .by = "loc_id")
+
+  avail_map <- stats::setNames(loc_avail$pct, as.character(loc_avail$loc_id))
+
+  pal <- leaflet::colorNumeric(
+    palette = c("#e74c3c", "#f1c40f", "#2ecc71"),
+    domain  = c(0, 100)
+  )
+
+  bounds <- .geojson_bounds(geojson)
+
+  m <- leaflet::leaflet() |>
+    leaflet::addProviderTiles(leaflet::providers$CartoDB.Positron)
+
+  for (f in geojson$features) {
+    lid <- as.character(f$properties$loc_id)
+    pct <- avail_map[lid]
+    if (is.na(pct)) pct <- 0
+    col <- pal(pct)
+    sub_gc <- list(type = "FeatureCollection", features = list(f))
+    m <- m |>
+      leaflet::addGeoJSON(
+        geojson     = sub_gc,
+        color       = col,
+        fillColor   = col,
+        fillOpacity = 0.5,
+        weight      = 1
+      )
+  }
+
+  m <- m |>
+    leaflet::fitBounds(bounds$lng1, bounds$lat1, bounds$lng2, bounds$lat2) |>
+    leaflet::addLegend(
+      position = "bottomright", pal = pal,
+      values = c(0, 100), title = "% available"
+    )
+  m
+}
+
+
+# ---------------------------------------------------------------------------- #
 # Outcome directionality                                                        #
 # ---------------------------------------------------------------------------- #
 

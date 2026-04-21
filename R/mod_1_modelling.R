@@ -107,8 +107,11 @@ mod_1_modelling_server <- function(id,
 
     s3 <- mod_1_03_outcome_server(
       "outcome",
-      variable_list = variable_list,
-      survey_data   = s2$survey_data
+      variable_list  = variable_list,
+      survey_data    = s2$survey_data,
+      map_data       = s2$map_data,
+      tabset_id      = "step1_output_tabs",
+      tabset_session = session
     )
 
     # ---- 4. Weather ---------------------------------------------------------
