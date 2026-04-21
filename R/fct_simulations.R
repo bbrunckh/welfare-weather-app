@@ -260,10 +260,10 @@ build_hist_sim_dates <- function(survey_weather, year_range) {
 #' @export
 residual_choices <- function() {
   c(
-    "None (fitted values only)"         = "none",
-    "Original (match by individual ID)" = "original",
-    "Resample from training residuals"  = "empirical",
-    "Draw from normal distribution"     = "normal"
+    "Original" = "original",
+    "Resample"  = "resample",
+    "Normal"     = "normal",
+    "None"      = "none"
   )
 }
 

@@ -112,7 +112,7 @@
 predict_outcome <- function(model,
                             newdata,
                             type       = "response",
-                            residuals  = c("none", "original", "normal", "empirical"),
+                            residuals  = c("none", "original", "normal", "resample"),
                             id         = NULL,
                             outcome    = "predicted",
                             train_data = NULL,
@@ -331,10 +331,10 @@ predict_outcome <- function(model,
       stats::rnorm(nrow(newdata), mean = 0, sd = stats::sd(train_resid, na.rm = TRUE))
     },
 
-    empirical = {
+    resample = {
       train_resid <- train_aug$.resid
       if (length(train_resid) == 0)
-        stop("No training residuals available for `residuals = 'empirical'`.")
+        stop("No training residuals available for `residuals = 'resample'`.")
       sample(train_resid, size = nrow(newdata), replace = TRUE)
     }
   )

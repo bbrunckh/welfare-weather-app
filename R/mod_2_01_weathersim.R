@@ -112,15 +112,17 @@ mod_2_01_weathersim_ui <- function(id) {
         inputId  = ns("residuals"),
         label    = NULL,
         choices  = residual_choices(),
-        selected = "normal"
+        selected = "original"
       ),
       shiny::helpText(
-        shiny::tags$b("none:"), " return fitted values only.", shiny::tags$br(),
-        shiny::tags$b("original:"), " match each observation\u2019s own training residual.",
+        shiny::tags$b("original:"), " Recommended Default: match each observation\u2019s own residual -  assumes no changes due to changing hazards ",
         shiny::tags$br(),
-        shiny::tags$b("empirical:"), " resample residuals from the training distribution.",
+        shiny::tags$b("resample:"), " Secondary Recommendation: randomly resample residuals from the model.",
         shiny::tags$br(),
-        shiny::tags$b("normal:"), " draw residuals from N(0, \u03c3).",
+        shiny::tags$b("normal:"), " Caution: draw residuals from N(0, \u03c3) which assumes normal tails and no heteroskedasticity",
+        shiny::tags$br(),
+        shiny::tags$b("none:"), " DIAGNOSTIC: return fitted values only. not including residuals understates variance and for any log-transformed variable will understate mean",
+        shiny::tags$br(),
         style = "font-size:11px;"
       )
     ),
@@ -266,9 +268,9 @@ mod_2_01_weathersim_server <- function(id,
       ens_txt <- "All models"
 
       res_labels <- c(
-        "none"      = "None",
         "original"  = "Original",
-        "empirical" = "Empirical resample",
+        "resample" = "Resample",
+        "none"      = "None",
         "normal"    = "Normal distribution"
       )
       res_txt <- res_labels[input$residuals %||% "normal"] %||% input$residuals
