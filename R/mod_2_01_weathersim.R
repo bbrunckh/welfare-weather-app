@@ -127,14 +127,8 @@ mod_2_01_weathersim_ui <- function(id) {
 
     shiny::tags$hr(style = "margin: 10px 0;"),
 
-    # ---- Run simulation button (always visible) ----------------------------
-    shiny::actionButton(
-      ns("run_sim"),
-      label = "Run simulation",
-      class = "btn-primary",
-      icon  = shiny::icon("play"),
-      style = "width: 100%; margin-top: 4px;"
-    )
+    # ---- Run simulation button (hidden for RIF engine) ---------------------
+    shiny::uiOutput(ns("run_sim_ui"))
   )
 }
 
@@ -379,6 +373,28 @@ mod_2_01_weathersim_server <- function(id,
       })
 
       do.call(rbind, do.call(c, rows))
+    })
+
+    # ---- Run simulation button (hidden for RIF engine) --------------------
+
+    output$run_sim_ui <- shiny::renderUI({
+      mf <- model_fit()
+      if (!is.null(mf) && identical(mf$engine, "rif")) {
+        shiny::div(
+          class = "alert alert-warning",
+          style = "font-size: 13px; margin-top: 4px;",
+          shiny::tags$b("\u26a0 Simulations are not yet implemented for Quantile Regression (RIF)."),
+          " Please select a different model engine to run simulations."
+        )
+      } else {
+        shiny::actionButton(
+          ns("run_sim"),
+          label = "Run simulation",
+          class = "btn-primary",
+          icon  = shiny::icon("play"),
+          style = "width: 100%; margin-top: 4px;"
+        )
+      }
     })
 
     # ---- Run simulation on button click ------------------------------------

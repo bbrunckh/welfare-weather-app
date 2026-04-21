@@ -37,12 +37,7 @@ mod_3_scenario_ui <- function(id) {
             content = mod_3_04_labor_ui(ns("labor"))
           ),
         hr(),
-        actionButton(
-          ns("run_policy_sim"),
-          "Run simulation",
-          class = "btn-primary",
-          width = "100%"
-        )
+        uiOutput(ns("run_policy_sim_ui"))
       ),
       mainPanel(
         tabsetPanel(
@@ -91,6 +86,7 @@ mod_3_scenario_server <- function(id,
                                    saved_scenarios = reactive(list()),
                                    variable_list   = reactive(NULL)) {
   moduleServer(id, function(input, output, session) {
+    ns <- session$ns
 
     # ---- Display selected policy scenarios above accordion -----------------
 
@@ -183,6 +179,27 @@ mod_3_scenario_server <- function(id,
       tabset_id                = "step3_output_tabs",
       tabset_session           = session
     )
+
+    # ---- Run policy simulation button (hidden for RIF engine) -----------
+
+    output$run_policy_sim_ui <- renderUI({
+      mf <- model_fit()
+      if (!is.null(mf) && identical(mf$engine, "rif")) {
+        div(
+          class = "alert alert-warning",
+          style = "font-size: 13px; margin-top: 4px;",
+          tags$b("\u26a0 Simulations are not yet implemented for Quantile Regression (RIF)."),
+          " Please select a different model engine to run simulations."
+        )
+      } else {
+        actionButton(
+          ns("run_policy_sim"),
+          "Run simulation",
+          class = "btn-primary",
+          width = "100%"
+        )
+      }
+    })
 
     # ---- Run policy simulation on button click ---------------------------
 
