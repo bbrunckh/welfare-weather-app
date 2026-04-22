@@ -130,6 +130,19 @@ residual_method_ui <- function(ns, input_id) {
 # Simulation pipeline helper                                                   #
 # ---------------------------------------------------------------------------- #
 
+#' Resolve the ID Column for Residual Matching
+#'
+#' Returns the first of `c("pid", "hhid", "fid")` that exists in both data
+#' frames, or `NULL` if none match.  Used by `run_sim_pipeline()` to enable
+#' ID-based residual matching when `residuals = "original"`.
+#' @noRd
+resolve_id_col <- function(a, b) {
+  candidates <- c("pid", "hhid", "fid")
+  shared     <- intersect(names(a), names(b))
+  match      <- candidates[candidates %in% shared]
+  if (length(match) == 0L) NULL else match[[1L]]
+}
+
 #' Run the Full Simulation Pipeline for One Scenario Row
 #'
 #' Combines the three steps that are identical between historical and future
@@ -174,6 +187,7 @@ run_sim_pipeline <- function(weather_raw, svy, sw, so,
                              slim = FALSE) {
   n_pre_join    <- nrow(svy)
   survey_wd_sim <- prepare_hist_weather(weather_raw, svy, sw, so$name)
+  id_col        <- if (residuals == "original") resolve_id_col(train_data, survey_wd_sim) else NULL
 
   preds <- tryCatch(
     predict_outcome(
@@ -181,7 +195,7 @@ run_sim_pipeline <- function(weather_raw, svy, sw, so,
       newdata    = survey_wd_sim,
       residuals  = residuals,
       outcome    = so$name,
-      id         = NULL,
+      id         = id_col,
       train_data = train_data,
       engine     = engine
     ),
@@ -399,8 +413,8 @@ hist_aggregate_choices <- function(outcome_type, outcome_name = NULL) {
       "Median"                   = "median",
       "Total"                    = "total",
       "Poverty rate"             = "headcount_ratio",
-      "Poverty Gap"              = "gap",
-      "Poverty Severity"         = "fgt2",
+      "Poverty gap"              = "gap",
+      "Poverty severity"         = "fgt2",
       "Gini"                     = "gini",
       "Prosperity gap"           = "prosperity_gap",
       "Average poverty (days/$)" = "avg_poverty"
