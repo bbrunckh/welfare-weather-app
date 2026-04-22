@@ -185,25 +185,20 @@ mod_2_03_diagnostics_server <- function(id,
     weight_col_diag <- reactive({
       req(hist_sim())
       if (!isTRUE(input$use_weights_diag)) return(NULL)
-      w <- grep("^weight$|^hhweight$|^wgt$|^pw$", names(hist_sim()$preds),
-                value = TRUE, ignore.case = TRUE)[1]
-      if (is.na(w)) NULL else w
+      if ("weight" %in% names(hist_sim()$preds)) "weight" else NULL
     })
 
     output$weight_status_diag_ui <- shiny::renderUI({
       req(hist_sim())
       # Detect weight column independently of the toggle -- this allows
       # the amber state when the column exists but the toggle is OFF.
-      w      <- grep("^weight$|^hhweight$|^wgt$|^pw$",
-                     names(hist_sim()$preds),
-                     value = TRUE, ignore.case = TRUE)[1]
-      has_w  <- length(w) > 0 && !is.na(w)
+      has_w  <- "weight" %in% names(hist_sim()$preds)
       tog_on <- isTRUE(input$use_weights_diag)
       if (has_w && tog_on)
         shiny::tags$p(
           style = "font-size:11px; color:#2e7d32; margin:2px 0 6px 0;",
           "✅ Survey weights found and applied (",
-          shiny::tags$code(w), ")")
+          shiny::tags$code("weight"), ")")
       else if (has_w && !tog_on)
         shiny::tags$p(
           style = "font-size:11px; color:#e65100; margin:2px 0 6px 0;",

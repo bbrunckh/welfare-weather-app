@@ -58,6 +58,12 @@ mod_3_06_results_ui <- function(id) {
         shiny::column(12, shiny::uiOutput(ns("scenario_filter_ui")))
       ),
       shiny::tags$hr(style = "margin: 6px 0;"),
+      shiny::checkboxInput(
+        ns("use_weights"),
+        label = "Use survey weights (if available)",
+        value = TRUE
+      ),
+      shiny::uiOutput(ns("weight_status_ui")),
       shiny::radioButtons(
         ns("cmp_group_order"),
         label    = "Group charts and tables by",
@@ -198,11 +204,36 @@ mod_3_06_results_server <- function(id,
       }
     })
 
+    weight_col <- reactive({
+      req(baseline_hist_sim())
+      if (!isTRUE(input$use_weights)) return(NULL)
+      if ("weight" %in% names(baseline_hist_sim()$preds)) "weight" else NULL
+    })
+
+    output$weight_status_ui <- shiny::renderUI({
+      req(baseline_hist_sim())
+      has_w  <- "weight" %in% names(baseline_hist_sim()$preds)
+      tog_on <- isTRUE(input$use_weights)
+      if (has_w && tog_on)
+        shiny::tags$p(
+          style = "font-size:11px; color:#2e7d32; margin:2px 0 6px 0;",
+          "\u2705 Survey weights found and applied (",
+          shiny::tags$code("weight"), ")")
+      else if (has_w && !tog_on)
+        shiny::tags$p(
+          style = "font-size:11px; color:#e65100; margin:2px 0 6px 0;",
+          "\u26a0 Survey weights available but not applied")
+      else
+        shiny::tags$p(
+          style = "font-size:11px; color:#c62828; margin:2px 0 6px 0;",
+          "\U0001f534 No weight column found \u2014 unweighted")
+    })
+
     agg_one <- function(preds, so) {
       method    <- input$cmp_agg_method %||% "mean"
       deviation <- input$cmp_deviation  %||% "none"
       pov       <- pov_line_val()
-      aggregate_sim_preds(preds, so, method, deviation, FALSE, pov)
+      aggregate_sim_preds(preds, so, method, deviation, FALSE, pov, weight_col())
     }
 
     # ---- Filter-related reactives (mirrors mod_2_02_results) ------------
