@@ -183,26 +183,22 @@ mod_2_02_results_server <- function(id,
     weight_col <- reactive({
       req(hist_sim())
       if (!isTRUE(input$use_weights)) return(NULL)
-      # has_weights is stored at simulation time in hist_sim_result.
-      # Falls back to scanning preds column names for backward compatibility.
-      has_w <- hist_sim()$has_weights %||%
-        (length(grep("^weight$|^hhweight$|^wgt$|^pw$", names(hist_sim()$preds),
-                     ignore.case = TRUE)) > 0)
-      if (isTRUE(has_w)) TRUE else NULL
+
+      if ("weight" %in% names(hist_sim()$preds)) "weight" else NULL
     })
 
     output$weight_status_ui <- shiny::renderUI({
       req(hist_sim())
-      # Use has_weights flag stored at simulation time.
-      # Falls back to scanning preds column names for backward compatibility.
-      has_w  <- isTRUE(hist_sim()$has_weights %||%
-        (length(grep("^weight$|^hhweight$|^wgt$|^pw$", names(hist_sim()$preds),
-                     ignore.case = TRUE)) > 0))
+      # Detect weight column independently of the toggle -- this allows
+      # the amber state when the column exists but the toggle is OFF.
+      has_w  <- "weight" %in% names(hist_sim()$preds)
+
       tog_on <- isTRUE(input$use_weights)
       if (has_w && tog_on)
         shiny::tags$p(
           style = "font-size:11px; color:#2e7d32; margin:2px 0 6px 0;",
-          "✅ Survey weights found and applied at simulation time.")
+          "✅ Survey weights found and applied (",
+          shiny::tags$code("weight"), ")")
       else if (has_w && !tog_on)
         shiny::tags$p(
           style = "font-size:11px; color:#e65100; margin:2px 0 6px 0;",
