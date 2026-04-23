@@ -116,7 +116,8 @@ predict_outcome <- function(model,
                             id         = NULL,
                             outcome    = "predicted",
                             train_data = NULL,
-                            engine     = NULL) {
+                            engine     = NULL,
+                            beta_override = NULL) {
 
   if (length(residuals) == 0) stop("`residuals` must be a single string; got length 0.")
   if (length(residuals) > 1)  residuals <- residuals[[1]]
@@ -150,11 +151,49 @@ predict_outcome <- function(model,
     # Use predict.fixest directly:
     #   feols  → numeric fitted values
     #   feglm  → P(Y=1) when type = "response" (the default)
+    # Point-estimate prediction (used as base and as-is when beta_override is NULL)
     preds_vec <- tryCatch(
       stats::predict(model, newdata = newdata, type = "response"),
       error = function(e) stop(sprintf("fixest predict failed: %s", conditionMessage(e)))
-    )
-    preds <- dplyr::mutate(newdata, .fitted = as.numeric(preds_vec))
+)
+# fixest::predict() silently drops rows where FE levels are absent from
+# training data. Trim newdata to match preds_vec length before mutating,
+# so that preds, X_nonFE (from model.matrix), and resid_draw are all
+# sized consistently downstream.
+    # fixest::predict() silently drops rows where FE levels are absent from
+    # training data. Trim newdata to match preds_vec length before mutating,
+    # so that preds, X_nonFE (from model.matrix), and resid_draw are all
+    # sized consistently downstream.
+    predicted_rows <- attr(preds_vec, "rowids") %||% seq_along(preds_vec)
+    preds <- dplyr::mutate(newdata[predicted_rows, ], .fitted = as.numeric(preds_vec))
+    #
+    # ASSUMPTION: additive fixed effects only. If the model ever uses varying
+    # slopes (e.g. loc_id[Haz_jt] in fixest notation), FE estimates would
+    # depend on beta and this delta approach would be incorrect. Revisit if
+    # location-specific hazard slopes are added.
+    if (!is.null(beta_override)) {
+      beta_pt  <- coef(model)  # point-estimate coefficients (non-FE only)
+      delta    <- beta_override[names(beta_pt)] - beta_pt
+
+      # Build non-FE design matrix. fixest::model.matrix with type = "rhs"
+      # returns only the non-FE columns, matching coef() names.
+      X_nonFE <- tryCatch(
+        stats::model.matrix(model, data = newdata, type = "rhs"),
+        error = function(e) stop(sprintf(
+          "beta_override: model.matrix failed on newdata: %s", conditionMessage(e)
+        ))
+      )
+
+      # Guard: column names must align exactly with delta names before multiply.
+      # model.matrix() can silently reorder or drop columns when factor levels
+      # in newdata differ from training data.
+      stopifnot(
+        "beta_override column mismatch: check factor levels in newdata vs training data" =
+          all(colnames(X_nonFE) == names(delta))
+      )
+
+      preds <- dplyr::mutate(preds, .fitted = .fitted + as.numeric(X_nonFE %*% delta))
+    }
 
   } else if (is_parsnip) {
 
@@ -309,7 +348,7 @@ predict_outcome <- function(model,
 
         train_resid_df <- dplyr::select(train_aug, !!rlang::sym(id), .resid)
         joined    <- dplyr::left_join(preds, train_resid_df, by = id)
-        resid_vec <- joined$.resid
+        resid_vec <- joined$.resid[seq_len(nrow(preds))]
         missing   <- is.na(resid_vec)
         if (any(missing)) {
           warning("Some IDs in `newdata` not in training data; filling by resampling.")
@@ -317,10 +356,10 @@ predict_outcome <- function(model,
         }
         resid_vec
       } else {
-        if (nrow(newdata) %% length(train_resid) != 0)
+        if (nrow(preds) %% length(train_resid) != 0)
           warning("`residuals = 'original'`: repeating training residuals ",
                   "(length not an integer multiple).")
-        rep(train_resid, length.out = nrow(newdata))
+        rep(train_resid, length.out = nrow(preds))
       }
     },
 
@@ -328,14 +367,18 @@ predict_outcome <- function(model,
       train_resid <- train_aug$.resid
       if (length(train_resid) == 0)
         stop("No training residuals available for `residuals = 'normal'`.")
-      stats::rnorm(nrow(newdata), mean = 0, sd = stats::sd(train_resid, na.rm = TRUE))
+      # Use nrow(preds) not nrow(newdata): fixest::predict() silently drops rows
+      # with FE levels absent from training data, so preds may have fewer rows
+      # than newdata. Sizing resid_draw to nrow(newdata) causes a mutate() error.
+      stats::rnorm(nrow(preds), mean = 0, sd = stats::sd(train_resid, na.rm = TRUE))
     },
 
     resample = {
       train_resid <- train_aug$.resid
       if (length(train_resid) == 0)
         stop("No training residuals available for `residuals = 'resample'`.")
-      sample(train_resid, size = nrow(newdata), replace = TRUE)
+      # Same reason as normal above — use nrow(preds).
+      sample(train_resid, size = nrow(preds), replace = TRUE)
     }
   )
 

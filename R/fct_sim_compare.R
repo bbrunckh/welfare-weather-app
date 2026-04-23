@@ -38,6 +38,8 @@ label_agg_method <- function(key) {
     gap             = "Poverty gap",
     fgt2            = "Poverty severity",
     gini            = "Gini coefficient",
+    prosperity_gap  = "Prosperity gap",
+    avg_poverty     = "Average poverty",
     key   # fallback: return key unchanged
   )
 }
@@ -109,6 +111,10 @@ label_deviation <- function(key) {
 #   $model  — year-averaged model means     (N_models values; NULL for historical)
 .decompose_scenario_uncertainty <- function(out_df) {
   has_model <- "model" %in% names(out_df)
+  # Coefficient uncertainty: when draw_id is present, use draw-level value_p50
+  # (the median across draws) as the per-draw aggregate, then spread across
+  # draw_id gives the coefficient uncertainty distribution.
+  has_coef  <- all(c("value_p05", "value_p50", "value_p95") %in% names(out_df))
   total     <- out_df$value
   annual    <- if (has_model)
     as.numeric(tapply(out_df$value, out_df$sim_year, mean, na.rm = TRUE))
@@ -116,7 +122,12 @@ label_deviation <- function(key) {
   model_means <- if (has_model)
     as.numeric(tapply(out_df$value, out_df$model, mean, na.rm = TRUE))
   else NULL
-  list(total = total, annual = annual, model = model_means)
+  # Coefficient uncertainty band: p05 and p95 are already aggregated scalars
+  # per (sim_year [, model]) from aggregate_sim_preds() Stage 2.
+  coef_lo <- if (has_coef) out_df$value_p05 else NULL
+  coef_hi <- if (has_coef) out_df$value_p95 else NULL
+  list(total = total, annual = annual, model = model_means,
+       coef_lo = coef_lo, coef_hi = coef_hi)
 }
 
 # ---------------------------------------------------------------------------- #
@@ -354,14 +365,20 @@ plot_uncertainty_decomposition <- function(scenarios, hist_agg,
   stopifnot(is.list(hist_agg), all(c("out", "x_label") %in% names(hist_agg)))
 
   ssp_short_map <- c("SSP2-4.5" = "SSP2", "SSP3-7.0" = "SSP3", "SSP5-8.5" = "SSP5")
-  sources       <- c("Annual variability", "Model uncertainty", "Combined")
+  sources       <- c("Annual variability", "Model uncertainty", "Coefficient uncertainty", "Combined")
 
   hist_mean <- mean(hist_agg$out$value, na.rm = TRUE)
 
   # ---- historical rows (Annual + Combined; no Model facet) ------------------
   hist_decomp <- .decompose_scenario_uncertainty(hist_agg$out)
-  hist_rows   <- dplyr::bind_rows(lapply(c("Annual variability", "Combined"), function(src) {
-    vals <- if (src == "Annual variability") hist_decomp$annual else hist_decomp$total
+  hist_rows   <- dplyr::bind_rows(lapply(c("Annual variability", "Coefficient uncertainty", "Combined"), function(src) {
+    vals <- switch(src,
+      "Annual variability"      = hist_decomp$annual,
+      "Coefficient uncertainty" = if (!is.null(hist_decomp$coef_lo))
+                                    c(hist_decomp$coef_lo, hist_decomp$coef_hi)
+                                  else NULL,
+      "Combined"                = hist_decomp$total
+    )
     s <- .summarise_vals(vals)
     if (is.null(s)) return(NULL)
     cbind(s, data.frame(
@@ -393,9 +410,12 @@ plot_uncertainty_decomposition <- function(scenarios, hist_agg,
       ck        <- paste(ssp_key, yr, sep = "__")
       dplyr::bind_rows(lapply(sources, function(src) {
         vals <- switch(src,
-          "Annual variability" = decomp$annual,
-          "Model uncertainty"  = decomp$model,
-          "Combined"           = decomp$total
+          "Annual variability"      = decomp$annual,
+          "Model uncertainty"       = decomp$model,
+          "Coefficient uncertainty" = if (!is.null(decomp$coef_lo))
+                                        c(decomp$coef_lo, decomp$coef_hi)
+                                      else NULL,
+          "Combined"                = decomp$total
         )
         if (is.null(vals)) return(NULL)
         s <- .summarise_vals(vals)
@@ -483,7 +503,7 @@ plot_uncertainty_decomposition <- function(scenarios, hist_agg,
 
   # Reference line data: one row per facet, but only show for relevant sources
   hline_df <- data.frame(
-    source       = factor(c("Annual variability", "Combined"), levels = sources),
+    source       = factor(c("Annual variability", "Coefficient uncertainty", "Combined"), levels = sources),
     hist_mean    = hist_mean
   )
 

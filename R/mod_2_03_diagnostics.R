@@ -214,15 +214,14 @@ mod_2_03_diagnostics_server <- function(id,
           "🔴 No weight column found — unweighted")
     })
 
+    # TODO: pending decision on household-level draw storage — unlinked.
+    # Future scenarios no longer store raw preds (replaced by pre-aggregated $agg).
+    # ridge_kde_data now only uses hist preds; scenario ridges are unavailable.
     ridge_kde_data <- reactive({
       req(hist_sim())
-
-      sc_raw    <- if (!is.null(saved_scenarios)) saved_scenarios() else list()
-      scen_list <- lapply(sc_raw, function(e) list(preds = e$preds, so = e$so))
-
       build_ridge_kde_data(
         hist_preds    = hist_sim()$preds,
-        scenario_list = scen_list,
+        scenario_list = list(),  # scenario preds not retained — see architecture note
         outcome_name  = hist_sim()$so$name,
         actual_vals   = {
           td <- hist_sim()$train_data
@@ -250,13 +249,18 @@ mod_2_03_diagnostics_server <- function(id,
       sc <- if (!is.null(saved_scenarios)) saved_scenarios() else list()
       if (length(sc) == 0) return(list())
       lapply(sc, function(s) {
-        tryCatch(
-           aggregate_sim_preds(s$preds, s$so, "mean", "none", FALSE, NULL, weight_col_diag()),
-          error = function(e) NULL
-        )
+        tryCatch({
+          if (!is.null(s$agg)) {
+            # New schema: filter pre-aggregated summary by method = "mean"
+            out <- dplyr::filter(s$agg, .data$agg_method == "mean")
+            list(out = out, x_label = "Mean welfare")
+          } else if (!is.null(s$preds)) {
+            # Legacy fallback
+            aggregate_sim_preds(s$preds, s$so, "mean", "none", FALSE, NULL, weight_col_diag())
+          } else NULL
+        }, error = function(e) NULL)
       })
     })
-
     debounced_ridge_inputs <- shiny::debounce(
       reactive({
         list(
@@ -390,38 +394,21 @@ mod_2_03_diagnostics_server <- function(id,
     }) |> shiny::bindEvent(input$diag_update_weather, hist_sim(),
                            ignoreNULL = TRUE, ignoreInit = FALSE)
 
+    # DEPRECATED — welfare ridge plot unlinked pending architectural review.
+    # Future scenario preds are no longer stored household-level (replaced by $agg).
+    # Historical ridge (hist only) still works but is hidden from UI.
+    # TODO: revisit if household-level draw storage is reintroduced.
     output$diag_ridge_plot_ui <- shiny::renderUI({
-      req(hist_sim())
-      ri      <- debounced_ridge_inputs()
-      hp      <- hist_sim()$preds
-      yr_col  <- intersect(c("sim_year", "year"), names(hp))[1]
-      n_yrs   <- if (!is.na(yr_col)) length(unique(hp[[yr_col]])) else 20L
-      n_scen  <- length(active_scenarios_data())
-      n_rows  <- if (ri$primary_group %in% c("scenario", "forecast_yr"))
-        max(1L, n_scen) else n_yrs
-      plot_ht <- min(4000L, max(500L, as.integer(n_rows * 80L * ri$row_gap + 160L)))
-      shiny::plotOutput(ns("diag_ridge"), height = paste0(plot_ht, "px"))
-    }) |> shiny::bindEvent(input$diag_update_ridge, hist_sim(),
-                           ignoreNULL = TRUE, ignoreInit = FALSE)
-
-    output$diag_ridge <- renderPlot({
-      req(hist_sim())
-      kd <- ridge_kde_data()
-      req(!is.null(kd))
-      ri <- debounced_ridge_inputs()
-
-      plot_year_anchored_ridge(
-        kde_data        = kd,
-        x_label         = hist_sim()$so$label %||% hist_sim()$so$name,
-        primary_group   = ri$primary_group,
-        log_scale       = ri$log_scale,
-        ridge_scale     = ri$ridge_scale,
-        row_gap         = ri$row_gap,
-        show_regression = ri$show_regression,
-        scenario_names  = active_scenarios_data()
+      shiny::tags$p(
+        style = "color:#888; font-size:12px; padding:8px;",
+        "Welfare ridge plot temporarily unavailable.",
+        "Scenario-level household predictions are not retained in the current",
+        "memory-efficient architecture. Historical ridge remains available below."
       )
-    }) |> shiny::bindEvent(input$diag_update_ridge, hist_sim(),
-                           ignoreNULL = TRUE, ignoreInit = FALSE)
+    })
+
+    # output$diag_ridge is unlinked — kept for reference
+    # output$diag_ridge <- renderPlot({ ... })
 
     # ---- Insert Diagnostics tab once (first hist_sim only) -----------------
 

@@ -183,25 +183,26 @@ mod_2_02_results_server <- function(id,
     weight_col <- reactive({
       req(hist_sim())
       if (!isTRUE(input$use_weights)) return(NULL)
-      w <- grep("^weight$|^hhweight$|^wgt$|^pw$", names(hist_sim()$preds),
-                value = TRUE, ignore.case = TRUE)[1]
-      if (is.na(w)) NULL else w
+      # has_weights is stored at simulation time in hist_sim_result.
+      # Falls back to scanning preds column names for backward compatibility.
+      has_w <- hist_sim()$has_weights %||%
+        (length(grep("^weight$|^hhweight$|^wgt$|^pw$", names(hist_sim()$preds),
+                     ignore.case = TRUE)) > 0)
+      if (isTRUE(has_w)) TRUE else NULL
     })
 
     output$weight_status_ui <- shiny::renderUI({
       req(hist_sim())
-      # Detect weight column independently of the toggle -- this allows
-      # the amber state when the column exists but the toggle is OFF.
-      w      <- grep("^weight$|^hhweight$|^wgt$|^pw$",
-                     names(hist_sim()$preds),
-                     value = TRUE, ignore.case = TRUE)[1]
-      has_w  <- length(w) > 0 && !is.na(w)
+      # Use has_weights flag stored at simulation time.
+      # Falls back to scanning preds column names for backward compatibility.
+      has_w  <- isTRUE(hist_sim()$has_weights %||%
+        (length(grep("^weight$|^hhweight$|^wgt$|^pw$", names(hist_sim()$preds),
+                     ignore.case = TRUE)) > 0))
       tog_on <- isTRUE(input$use_weights)
       if (has_w && tog_on)
         shiny::tags$p(
           style = "font-size:11px; color:#2e7d32; margin:2px 0 6px 0;",
-          "✅ Survey weights found and applied (",
-          shiny::tags$code(w), ")")
+          "✅ Survey weights found and applied at simulation time.")
       else if (has_w && !tog_on)
         shiny::tags$p(
           style = "font-size:11px; color:#e65100; margin:2px 0 6px 0;",
@@ -213,8 +214,11 @@ mod_2_02_results_server <- function(id,
     })
 
     pov_line_val <- reactive({
+      # Poverty line is baked in at simulation time (input$pov_line_sim).
+      # Read it back from hist_sim()$pov_line for the historical fallback path.
+      # For future scenarios, pov_line is already embedded in s$agg.
       if (isTRUE(input$cmp_agg_method %in% c("headcount_ratio", "gap", "fgt2"))) {
-        input$cmp_pov_line %||% NULL
+        if (!is.null(hist_sim())) hist_sim()$pov_line %||% NULL else NULL
       } else {
         NULL
       }
@@ -242,9 +246,51 @@ mod_2_02_results_server <- function(id,
       req(hist_sim())
       method    <- input$cmp_agg_method %||% "mean"
       deviation <- input$cmp_deviation  %||% "none"
-      pov       <- pov_line_val()
-      if (isTRUE(method %in% c("headcount_ratio", "gap", "fgt2"))) req(pov)
-      aggregate_sim_preds(hist_sim()$preds, hist_sim()$so, method, deviation, FALSE, pov, weight_col())
+      use_w     <- isTRUE(input$use_weights)
+
+      req(!is.null(hist_sim()$agg))
+
+      out <- dplyr::filter(hist_sim()$agg,
+                           .data$agg_method == method,
+                           .data$weighted   == use_w)
+
+      # Weighted fallback: if use_weights = TRUE but no weighted rows exist
+      # (survey has no weight column or pre-aggregation failed), fall back to
+      # unweighted to avoid returning an empty tibble that crashes charts.
+      if (nrow(out) == 0L && isTRUE(use_w)) {
+        warning("[agg_hist] No weighted rows found — falling back to unweighted")
+        out <- dplyr::filter(hist_sim()$agg,
+                             .data$agg_method == method,
+                             .data$weighted   == FALSE)
+      }
+
+      # ⚠️ METHODOLOGICAL FLAG (Option B):
+      # Deviation is computed relative to each scenario's OWN mean/median.
+      # Option A would centre future scenarios relative to the historical mean —
+      # preserving the direction of climate impact but losing within-scenario variance.
+      # Option B centres each scenario on itself — useful for comparing spread/variance
+      # across scenarios but not for showing directional welfare loss.
+      # Pending theoretical review before production use of deviation mode.
+      if (!identical(deviation, "none") && nrow(out) > 0) {
+        out <- deviation_from_centre(
+          df     = out,
+          group  = "sim_year",
+          centre = deviation,
+          loss   = FALSE
+        )
+        if ("deviation" %in% names(out)) {
+          out$value <- out$deviation
+          out$deviation <- NULL
+        }
+      }
+
+      x_label <- if (identical(deviation, "none")) {
+        label_agg_method(method)
+      } else {
+        paste0(label_agg_method(method), " — ", label_deviation(deviation))
+      }
+
+      list(out = out, x_label = x_label)
     })
 
     agg_scenarios <- reactive({
@@ -252,20 +298,53 @@ mod_2_02_results_server <- function(id,
       if (length(sc) == 0) return(list())
       method    <- input$cmp_agg_method %||% "mean"
       deviation <- input$cmp_deviation  %||% "none"
-      pov       <- pov_line_val()
-      if (isTRUE(method %in% c("headcount_ratio", "gap", "fgt2"))) req(pov)
+      use_w     <- isTRUE(input$use_weights)
+
+      x_label <- if (identical(deviation, "none")) {
+        label_agg_method(method)
+      } else {
+        paste0(label_agg_method(method), " — ", label_deviation(deviation))
+      }
+
       result <- lapply(sc, function(s) {
-        tryCatch(
-          aggregate_sim_preds(s$preds, s$so, method, deviation, FALSE, pov, weight_col()),
-          error = function(e) {
-            message("[agg_scenarios] ERROR: ", conditionMessage(e))
-            NULL
-          }
-        )
+        tryCatch({
+          if (!is.null(s$agg)) {
+            out <- dplyr::filter(s$agg,
+                                 .data$agg_method == method,
+                                 .data$weighted   == use_w)
+            # Weighted fallback: if use_weights = TRUE but no weighted rows
+            # exist, fall back to unweighted rather than returning empty tibble.
+            if (nrow(out) == 0L && isTRUE(use_w)) {
+              out <- dplyr::filter(s$agg,
+                                   .data$agg_method == method,
+                                   .data$weighted   == FALSE)
+            }
+            # ⚠️ METHODOLOGICAL FLAG (Option B): see agg_hist above.
+            if (!identical(deviation, "none") && nrow(out) > 0) {
+              out <- deviation_from_centre(
+                df     = out,
+                group  = "sim_year",
+                centre = deviation,
+                loss   = FALSE
+              )
+              if ("deviation" %in% names(out)) {
+                out$value <- out$deviation
+                out$deviation <- NULL
+              }
+            }
+            list(out = out, x_label = x_label)
+          } else if (!is.null(s$preds)) {
+            # Legacy fallback: raw preds still present (e.g. older saved state)
+            pov <- if (method %in% c("headcount_ratio", "gap", "fgt2")) pov_line_val() else NULL
+            aggregate_sim_preds(s$preds, s$so, method, deviation, FALSE, pov, weight_col())
+          } else NULL
+        }, error = function(e) {
+          message("[agg_scenarios] ERROR: ", conditionMessage(e))
+          NULL
+        })
       })
       result
     })
-
     all_series <- reactive({
       sc  <- agg_scenarios()
       sel <- selected_scenario_names()
@@ -312,10 +391,12 @@ mod_2_02_results_server <- function(id,
     output$cmp_pov_line_ui <- renderUI({
       req(input$cmp_agg_method)
       if (input$cmp_agg_method %in% c("headcount_ratio", "gap", "fgt2")) {
-        shiny::numericInput(
-          ns("cmp_pov_line"),
-          label = "Poverty line (daily, 2021 PPP USD)",
-          value = 3.00, min = 0, step = 0.5
+        # Poverty line is set at simulation time (input$pov_line_sim in mod_2_01).
+        # Post-hoc adjustment requires re-running the simulation.
+        pov_val <- if (!is.null(hist_sim()$pov_line)) sprintf("$%.2f", hist_sim()$pov_line) else "not yet set"
+        shiny::helpText(
+          style = "font-size:11px; color:#555; margin-bottom:6px;",
+          paste0("Poverty line: ", pov_val, "/day (set at simulation time). To change, update simulation settings and re-run.")
         )
       }
     })

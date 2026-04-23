@@ -90,6 +90,70 @@ SSP_SHORT_LABELS <- c(
 )
 
 # ---------------------------------------------------------------------------- #
+# Coefficient-draw constants and helpers                                       #
+# ---------------------------------------------------------------------------- #
+
+#' Format elapsed seconds into a human-readable string (e.g. "2m 14s")
+#' Used by the simulation progress bar.
+#' @noRd
+format_elapsed <- function(secs) {
+  secs <- round(secs)
+  if (secs < 60L) return(sprintf("%ds", secs))
+  sprintf("%dm %02ds", secs %/% 60L, secs %% 60L)
+}
+
+# PROVISIONAL: SE spec pending discussion. See methodology note.
+# Options:
+#   ~loc_id:int_month  -- Moulton minimum (cluster at regressor level)
+#   ~loc_id            -- default used here; more conservative, common in
+#                         applied weather-econometrics literature
+#   ~region            -- most conservative; requires >30-50 clusters
+COEF_VCOV_SPEC <- ~loc_id
+
+#' Draw Coefficient Vectors from a Fitted Model
+#'
+#' Generates \code{S} draws of the full coefficient vector for propagating
+#' parameter uncertainty into counterfactual simulations. The parametric
+#' (VCV) branch draws from the multivariate normal defined by the fitted
+#' coefficient vector and its variance-covariance matrix. Bootstrap branches
+#' are stubbed so call sites do not need to change when they are implemented.
+#'
+#' @param fit      A fitted \code{feols} model object.
+#' @param S        Integer. Number of draws. Default 500.
+#' @param method   Character. One of \code{"vcov"} (default),
+#'   \code{"bootstrap"}, \code{"wild_bootstrap"}. The latter two are
+#'   not yet implemented.
+#' @param vcov_spec Formula or character passed to \code{vcov(fit, vcov = ...)}.
+#'   Defaults to \code{COEF_VCOV_SPEC}.
+#' @param seed     Optional integer seed for reproducibility.
+#'
+#' @return An \code{S x K} numeric matrix with column names matching
+#'   \code{coef(fit)}.
+#'
+#' @export
+draw_coefs <- function(fit,
+                       S         = 500,
+                       method    = c("vcov", "bootstrap", "wild_bootstrap"),
+                       vcov_spec = COEF_VCOV_SPEC,
+                       seed      = NULL) {
+  method <- match.arg(method)
+  if (!is.null(seed)) set.seed(seed)
+
+  if (method == "vcov") {
+    beta_hat <- coef(fit)
+    Sigma    <- vcov(fit, vcov = vcov_spec)
+    draws    <- MASS::mvrnorm(n = S, mu = beta_hat, Sigma = Sigma)
+    # Ensure matrix form even when S = 1
+    if (is.null(dim(draws))) {
+      draws <- matrix(draws, nrow = 1L, dimnames = list(NULL, names(beta_hat)))
+    }
+    return(draws)
+  }
+
+  stop(sprintf("draw_coefs: method '%s' not yet implemented", method))
+}
+
+# ---------------------------------------------------------------------------- #
 # Shared UI helper                                                             #
 # ---------------------------------------------------------------------------- #
 
@@ -119,7 +183,7 @@ residual_method_ui <- function(ns, input_id) {
       shiny::tags$br(),
       shiny::tags$b("empirical:"), " resample residuals from the training",
       " distribution (non-parametric bootstrap).", shiny::tags$br(),
-      shiny::tags$b("normal:"), " draw residuals from N(0, \u03c3) where \u03c3",
+      shiny::tags$b("normal:"), " draw residuals from N(0, \u03c6) where \u03c6",
       " is the training residual SD.",
       style = "font-size:11px;"
     )
@@ -184,38 +248,90 @@ resolve_id_col <- function(a, b) {
 #' @export
 run_sim_pipeline <- function(weather_raw, svy, sw, so,
                              model, residuals, train_data, engine,
+                             coef_draws = NULL,
                              slim = FALSE) {
   n_pre_join    <- nrow(svy)
   survey_wd_sim <- prepare_hist_weather(weather_raw, svy, sw, so$name)
   id_col        <- if (residuals == "original") resolve_id_col(train_data, survey_wd_sim) else NULL
 
-  preds <- tryCatch(
+  # If coef_draws supplied, loop over S draws; otherwise single point-estimate run.
+  # draw_id is NA for the point-estimate path (coef_draws = NULL).
+  run_one_draw <- function(beta_s = NULL) {
     predict_outcome(
-      model      = model,
-      newdata    = survey_wd_sim,
-      residuals  = residuals,
-      outcome    = so$name,
-      id         = id_col,
-      train_data = train_data,
-      engine     = engine
-    ),
-    error = function(e) {
-      warning("[run_sim_pipeline] predict_outcome() failed: ", conditionMessage(e))
-      NULL
+      model         = model,
+      newdata       = survey_wd_sim,
+      residuals     = residuals,
+      outcome       = so$name,
+      id            = id_col,
+      train_data    = train_data,
+      engine        = engine,
+      beta_override = beta_s
+    )
+  }
+
+  preds <- tryCatch({
+    if (is.null(coef_draws)) {
+      # Point-estimate path — existing behaviour, draw_id = NA
+      out <- run_one_draw(NULL)
+      if (!is.null(out)) out$draw_id <- NA_integer_
+      out
+    } else {
+      # Coefficient-draw path: iterate over S rows of coef_draws matrix.
+      # Order of operations:
+      #   1. predict_outcome() with beta_override -> fitted values for this draw
+      #   2. rbind across all S draws, tagging each with draw_id
+      # Residual noise (if requested) is applied independently inside each
+      # predict_outcome() call, preserving the existing residual logic.
+      S            <- nrow(coef_draws)
+      draw_list    <- vector("list", S)
+      t_loop_start <- proc.time()[["elapsed"]]
+      for (s in seq_len(S)) {
+        beta_s         <- coef_draws[s, ]
+        draw_out       <- run_one_draw(beta_s)
+        if (!is.null(draw_out)) draw_out$draw_id <- s
+        draw_list[[s]] <- draw_out
+        # Fire timing messages to console in real time even while Shiny UI
+        # is blocked — gives user feedback within key 1 before any
+        # setProgress() update fires between keys.
+        if (s == 1L) {
+          t_first <- proc.time()[["elapsed"]] - t_loop_start
+          message(sprintf(
+            "[wiseapp]   Draw 1/%d done in %.1fs | projecting ~%s for this key",
+            S, t_first, format_elapsed(t_first * S)
+          ))
+        }
+        if (s %% 10L == 0L || s == S) {
+          t_so_far <- proc.time()[["elapsed"]] - t_loop_start
+          message(sprintf(
+            "[wiseapp]   Draw %d/%d | %.0fs elapsed | ~%.0fs remaining",
+            s, S, t_so_far, max(0, (t_so_far / s) * (S - s))
+          ))
+        }
+      }
+      do.call(rbind, draw_list)
     }
-  )
+  }, error = function(e) {
+    warning("[run_sim_pipeline] predict_outcome() failed: ", conditionMessage(e))
+    NULL
+  })
   rm(survey_wd_sim)
 
   if (is.null(preds)) return(NULL)
   preds <- apply_log_backtransform(preds, so)
 
   if (slim) {
-    # Keep only columns needed by aggregate_sim_preds() and
-    # build_ridge_kde_data(): sim_year, year, the outcome column,
-    # .fitted, .residual, and any weight column for aggregation.
-    keep <- c("sim_year", "year", so$name, ".fitted", ".residual")
-    if ("weight" %in% names(preds)) keep <- c(keep, "weight")
-    preds <- preds[, intersect(keep, names(preds)), drop = FALSE]
+    # Keep only columns needed by aggregate_sim_preds():
+    # sim_year, year, outcome, .fitted, .residual, draw_id (coefficient
+    # uncertainty bands), and any weight column for aggregation.
+    # NOTE: weight column may have any of several names depending on survey —
+    # grep all known variants rather than checking only "weight".
+    # draw_id must be retained here or the two-stage aggregation in
+    # aggregate_sim_preds() cannot separate coefficient draws.
+    keep    <- c("sim_year", "year", so$name, ".fitted", ".residual", "draw_id")
+    wt_cols <- grep("^weight$|^hhweight$|^wgt$|^pw$", names(preds),
+                    value = TRUE, ignore.case = TRUE)
+    keep    <- c(keep, wt_cols)
+    preds   <- preds[, intersect(keep, names(preds)), drop = FALSE]
 
     # Keep only key + weather columns from weather_raw for diagnostics.
     weather_keep <- c("code", "year", "survname", "loc_id", "timestamp", sw$name)
@@ -550,6 +666,9 @@ aggregate_outcome <- function(df,
         sum             = if (is.null(w)) sum(x, na.rm = TRUE)
                           else sum(x * w, na.rm = TRUE),
         median          = if (is.null(w)) median(x, na.rm = TRUE) else {
+                            valid <- is.finite(x) & is.finite(w) & w > 0
+                            if (sum(valid) == 0L) return(NA_real_)
+                            x <- x[valid]; w <- w[valid]
                             ord  <- order(x); x <- x[ord]; w <- w[ord]
                             cumw <- cumsum(w) / sum(w)
                             x[which(cumw >= 0.5)[1]]
@@ -605,9 +724,9 @@ aggregate_outcome <- function(df,
     )
 }
 
-#---------------------------------------------------------------------------- #
+# ---------------------------------------------------------------------------- #
 # Convert to deviation from centre for plotting
-#---------------------------------------------------------------------------- #
+# ---------------------------------------------------------------------------- #
 
 #' Express Aggregate Values as Deviation from a Central Tendency
 #'
@@ -714,7 +833,24 @@ aggregate_sim_preds <- function(preds, so, agg_method, deviation, loss_frame,
 
   # Group by (model, sim_year) when a model column is present (future scenarios
   # with all ensemble members pooled), so the CI reflects model × year variation.
-  grp_cols <- if ("model" %in% names(preds)) c("model", "sim_year") else "sim_year"
+  # --- Two-stage aggregation ----------------------------------------------- #
+  # IMPORTANT: order of operations matters for coefficient uncertainty bands.  #
+  # Stage 1: aggregate within each (draw_id, model, sim_year) to a scalar.    #
+  #          This gives one aggregate statistic per coefficient draw.           #
+  # Stage 2: take percentiles of that scalar across draw_id.                   #
+  # Taking percentiles BEFORE aggregating gives quantiles of the individual    #
+  # welfare distribution — a completely different quantity. Don't mix these up. #
+  # --------------------------------------------------------------------------- #
+
+  has_draws <- "draw_id" %in% names(preds) && !all(is.na(preds$draw_id))
+
+  # Stage 1 grouping: always include draw_id when present so each draw
+  # produces its own aggregate scalar before we summarise across draws.
+  grp_cols <- c(
+    if (has_draws)                          "draw_id",
+    if ("model" %in% names(preds))          "model",
+    "sim_year"
+  )
 
   out <- aggregate_outcome(
     df        = preds,
@@ -723,40 +859,32 @@ aggregate_sim_preds <- function(preds, so, agg_method, deviation, loss_frame,
     type      = if (identical(so$type, "logical")) "binary" else "continuous",
     aggregate = agg_method,
     pov_line  = pov_line,
-    weights  = if (!is.null(weights) && weights %in% names(preds)) weights else NULL
+    weights   = if (!is.null(weights) && weights %in% names(preds)) weights else NULL
   )
 
-  if (!identical(deviation, "none")) {
-    out <- deviation_from_centre(
-      out,
-      centre = deviation,
-      loss   = isTRUE(loss_frame)
-    )
-    if (!identical(so$type, "logical")) {
-      x_label <- paste0(
-        "Change in ", so$label,
-        " relative to typical year (", deviation, ")"
+  # Stage 2: collapse across draw_id to get coefficient-uncertainty percentiles.
+  # IMPORTANT: percentiles are taken ACROSS draw_id (one scalar per draw),
+  # NOT across household-level predictions. These are uncertainty bands on the
+  # aggregate statistic, not quantiles of the individual welfare distribution.
+  if (has_draws) {
+    out <- out |>
+      dplyr::group_by(dplyr::across(dplyr::any_of(c("model", "sim_year")))) |>
+      dplyr::summarise(
+        value_p05 = stats::quantile(value, 0.05, na.rm = TRUE),
+        value_p50 = stats::quantile(value, 0.50, na.rm = TRUE),
+        value_p95 = stats::quantile(value, 0.95, na.rm = TRUE),
+        value     = value_p50,
+        .groups   = "drop"
       )
-    } else {
-      x_label <- paste0(
-        "Change in ", so$label,
-        " relative to typical year (pp.)"
-      )
-    }
-  } else {
-    if (!identical(so$type, "logical")) {
-      x_label <- paste0(
-        "Simulated ", so$label,
-        " [", agg_method, "]"
-      )
-    } else {
-      x_label <- paste0(
-        "Simulated ", so$label,
-        " rate (pp.)"
-      )
-    }
   }
 
-  list(out = out, x_label = x_label)
-}
+  if (!identical(deviation, "none")) {
+    out <- deviation_from_centre(out, "sim_year", deviation, loss_frame)
+    names(out)[names(out) == "value"] <- "deviation"
+  }
 
+  list(
+    out     = out,
+    x_label = "Simulation year"
+  )
+}
