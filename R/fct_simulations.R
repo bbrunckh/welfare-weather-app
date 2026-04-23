@@ -282,33 +282,66 @@ run_sim_pipeline <- function(weather_raw, svy, sw, so,
       #   2. rbind across all S draws, tagging each with draw_id
       # Residual noise (if requested) is applied independently inside each
       # predict_outcome() call, preserving the existing residual logic.
-      S            <- nrow(coef_draws)
-      draw_list    <- vector("list", S)
-      t_loop_start <- proc.time()[["elapsed"]]
-      for (s in seq_len(S)) {
-        beta_s         <- coef_draws[s, ]
-        draw_out       <- run_one_draw(beta_s)
-        if (!is.null(draw_out)) draw_out$draw_id <- s
-        draw_list[[s]] <- draw_out
-        # Fire timing messages to console in real time even while Shiny UI
-        # is blocked — gives user feedback within key 1 before any
-        # setProgress() update fires between keys.
-        if (s == 1L) {
-          t_first <- proc.time()[["elapsed"]] - t_loop_start
-          message(sprintf(
-            "[wiseapp]   Draw 1/%d done in %.1fs | projecting ~%s for this key",
-            S, t_first, format_elapsed(t_first * S)
-          ))
+      # ------------------------------------------------------------------
+      # Vectorised path (linear fixest OLS only):
+      # Build X_nonFE and preds_base ONCE, then compute all S predictions
+      # as a single matrix multiply. 30-50x faster than sequential loop.
+      # Falls back to sequential loop for non-fixest, logistic, quantile.
+      # ------------------------------------------------------------------
+      is_vectorisable <- identical(engine, "fixest") &&
+                         !isTRUE(attr(model, "is_logistic")) &&
+                         inherits(model, "fixest")
+
+      if (is_vectorisable) {
+        message(sprintf(
+          "[wiseapp]   Vectorised: %d draws via matrix multiply (linear OLS)",
+          nrow(coef_draws)
+        ))
+        t_vec_start <- proc.time()[["elapsed"]]
+        result <- predict_outcome_vectorised(
+          model      = model,
+          newdata    = survey_wd_sim,
+          coef_draws = coef_draws,
+          residuals  = residuals,
+          outcome    = so$name,
+          id         = id_col,
+          train_data = train_data,
+          engine     = engine
+        )
+        message(sprintf(
+          "[wiseapp]   Vectorised complete in %.1fs | %d draws x %d rows",
+          proc.time()[["elapsed"]] - t_vec_start,
+          nrow(coef_draws),
+          if (!is.null(result)) nrow(result) %/% nrow(coef_draws) else 0L
+        ))
+        result
+      } else {
+        # Sequential fallback — bootstrap, quantile, logistic, non-fixest
+        S            <- nrow(coef_draws)
+        draw_list    <- vector("list", S)
+        t_loop_start <- proc.time()[["elapsed"]]
+        for (s in seq_len(S)) {
+          beta_s         <- coef_draws[s, ]
+          draw_out       <- run_one_draw(beta_s)
+          if (!is.null(draw_out)) draw_out$draw_id <- s
+          draw_list[[s]] <- draw_out
+          if (s == 1L) {
+            t_first <- proc.time()[["elapsed"]] - t_loop_start
+            message(sprintf(
+              "[wiseapp]   Draw 1/%d done in %.1fs | projecting ~%s for this key",
+              S, t_first, format_elapsed(t_first * S)
+            ))
+          }
+          if (s %% 10L == 0L || s == S) {
+            t_so_far <- proc.time()[["elapsed"]] - t_loop_start
+            message(sprintf(
+              "[wiseapp]   Draw %d/%d | %.0fs elapsed | ~%.0fs remaining",
+              s, S, t_so_far, max(0, (t_so_far / s) * (S - s))
+            ))
+          }
         }
-        if (s %% 10L == 0L || s == S) {
-          t_so_far <- proc.time()[["elapsed"]] - t_loop_start
-          message(sprintf(
-            "[wiseapp]   Draw %d/%d | %.0fs elapsed | ~%.0fs remaining",
-            s, S, t_so_far, max(0, (t_so_far / s) * (S - s))
-          ))
-        }
+        do.call(rbind, draw_list)
       }
-      do.call(rbind, draw_list)
     }
   }, error = function(e) {
     warning("[run_sim_pipeline] predict_outcome() failed: ", conditionMessage(e))

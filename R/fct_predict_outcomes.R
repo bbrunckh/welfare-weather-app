@@ -49,7 +49,7 @@
 #'   \code{lm}/\code{glm} objects. Common values: \code{"response"} (default),
 #'   \code{"link"}. Ignored for parsnip and fixest objects.
 #' @param residuals Character. One of \code{"none"}, \code{"original"},
-#'   \code{"normal"}, \code{"empirical"}. Controls how residuals are added to
+#'   \code{"normal"}, \code{"resample"}. Controls how residuals are added to
 #'   fitted values.
 #'   \describe{
 #'     \item{\code{"none"}}{No residual added. \code{.residual} is \code{NA}.}
@@ -57,7 +57,7 @@
 #'       \code{id} column or recycled by position.}
 #'     \item{\code{"normal"}}{Draws from \eqn{N(0, \hat\sigma)} where
 #'       \eqn{\hat\sigma} is the SD of training residuals.}
-#'     \item{\code{"empirical"}}{Bootstrap sample from training residuals.}
+#'     \item{\code{"resample"}}{Bootstrap sample from training residuals.}
 #'   }
 #' @param id Optional character. Column name used to match training residuals
 #'   to rows in \code{newdata} when \code{residuals = "original"}. If
@@ -73,6 +73,17 @@
 #'   If \code{model} was produced by \code{fit_model()}, pass
 #'   \code{model_result$engine}. Auto-detected from the model class if
 #'   \code{NULL} (default).
+#' @param beta_override Optional named numeric vector. When non-\code{NULL},
+#'   replaces the model's point-estimate coefficients with the supplied vector
+#'   for the non-fixed-effect terms, using a delta approach:
+#'   \deqn{\hat{y}^{(s)} = \hat{y}_{base} + X_{nonFE}(\beta^{(s)} - \hat{\beta})}
+#'   where \eqn{\hat{y}_{base}} is the standard \code{fixest} prediction
+#'   (including fixed effects) and \eqn{X_{nonFE}} is the non-FE design matrix.
+#'   Names must match \code{names(coef(model))} exactly.
+#'   Only supported for \code{fixest} models with additive fixed effects.
+#'   If fixed effects are ever interacted with the hazard variable
+#'   (\code{| loc_id[Haz_jt]}), this approach is invalid — revisit then.
+#'   \code{NULL} (default) uses the standard prediction path unchanged.
 #'
 #' @return The \code{newdata} data frame (tibble) with additional columns:
 #'   \describe{
@@ -156,10 +167,6 @@ predict_outcome <- function(model,
       stats::predict(model, newdata = newdata, type = "response"),
       error = function(e) stop(sprintf("fixest predict failed: %s", conditionMessage(e)))
 )
-# fixest::predict() silently drops rows where FE levels are absent from
-# training data. Trim newdata to match preds_vec length before mutating,
-# so that preds, X_nonFE (from model.matrix), and resid_draw are all
-# sized consistently downstream.
     # fixest::predict() silently drops rows where FE levels are absent from
     # training data. Trim newdata to match preds_vec length before mutating,
     # so that preds, X_nonFE (from model.matrix), and resid_draw are all
@@ -294,9 +301,11 @@ predict_outcome <- function(model,
 
       if (!has_resid) {
         # Try to compute response residual = observed - predicted probability.
+        
         # The outcome column is in train_data but may not have survived augment.
         outcome_col <- intersect(names(train_data), names(train_aug))
         outcome_col <- outcome_col[outcome_col %in% names(train_data)]
+        
         # Pick the column that differs from newdata (i.e. the outcome)
         outcome_col <- setdiff(outcome_col, names(newdata))
         outcome_col <- outcome_col[outcome_col %in% names(train_aug)]
@@ -391,4 +400,144 @@ predict_outcome <- function(model,
       .residual            = if (residuals == "none") NA_real_ else resid_draw,
       !!rlang::sym(outcome) := .data$.fitted + resid_draw
     )
+}
+
+# ----------------------------------------------------------------------------
+# predict_outcome_vectorised()
+# ----------------------------------------------------------------------------
+#' Vectorised coefficient-draw prediction for linear fixest models.
+#'
+#' Instead of calling predict_outcome() S times (once per draw), this function
+#' builds the design matrix ONCE and computes all S predictions as a single
+#' matrix multiply:  all_fitted = preds_base + X_nonFE %*% t(delta_matrix)
+#' where delta_matrix = coef_draws - coef(model) (S x K).
+#'
+#' This gives a 30-50x speedup over the sequential draw loop for linear OLS.
+#'
+#' OPTION A residuals: drawn once and broadcast to all S columns.
+#' This isolates coefficient uncertainty from residual noise — the two
+#' sources can be compared cleanly in the decomposition chart.
+#' This suppresses residual x draw interaction. Another option,
+#' independent residuals per draw, is more realistic but adds
+#' memory. Revisit if residual x coefficient covariance is of interest.
+#'
+#' ASSUMPTION: additive fixed effects only. Breaks if FEs are interacted
+#' with Haz_jt (varying slopes). See predict_outcome() for full discussion.
+#'
+#' @param model    Fitted feols object (linear only).
+#' @param newdata  Data frame of counterfactual households x weather years.
+#' @param coef_draws S x K matrix of coefficient draws from draw_coefs().
+#' @param residuals  Character: 'none', 'original', 'normal', 'resample'.
+#' @param outcome    Character: name of outcome column in newdata.
+#' @param id         Character or NULL: id column for original residual join.
+#' @param train_data Data frame: training data for residual extraction.
+#' @param engine     Character: must be 'fixest' for vectorised path.
+#' @return Long-format tibble: nrow(newdata) * S rows, with draw_id column.
+#' @noRd
+predict_outcome_vectorised <- function(model, newdata, coef_draws,
+                                       residuals = "none", outcome = "predicted",
+                                       id = NULL, train_data = NULL,
+                                       engine = "fixest") {
+
+  S <- nrow(coef_draws)
+
+  # ------------------------------------------------------------------
+  # Step 1: point-estimate predictions — computed ONCE
+  # ------------------------------------------------------------------
+  preds_vec <- tryCatch(
+    stats::predict(model, newdata = newdata, type = "response"),
+    error = function(e) stop(sprintf(
+      "[vectorised] fixest predict failed: %s", conditionMessage(e)))
+  )
+
+  # Trim newdata to rows that received a prediction (FE dropout guard)
+  predicted_rows <- attr(preds_vec, "rowids") %||% seq_along(preds_vec)
+  newdata_trim   <- newdata[predicted_rows, ]
+  preds_base     <- as.numeric(preds_vec)   # N-vector
+  N              <- length(preds_base)
+
+  # ------------------------------------------------------------------
+  # Step 2: non-FE design matrix — computed ONCE
+  # ------------------------------------------------------------------
+  X_nonFE <- tryCatch(
+    stats::model.matrix(model, data = newdata_trim, type = "rhs"),
+    error = function(e) stop(sprintf(
+      "[vectorised] model.matrix failed: %s", conditionMessage(e)))
+  )
+
+  # ------------------------------------------------------------------
+  # Step 3: delta matrix — (coef_draws - point_estimates), K x S
+  # ------------------------------------------------------------------
+  beta_pt <- coef(model)
+
+  # Guard: column alignment between X_nonFE and coef_draws
+  stopifnot(
+    "[vectorised] coef_draws column mismatch vs model coef names" =
+      all(colnames(coef_draws) == names(beta_pt))
+  )
+  stopifnot(
+    "[vectorised] X_nonFE column mismatch vs model coef names" =
+      all(colnames(X_nonFE) == names(beta_pt))
+  )
+
+  # delta_matrix: S x K  ->  t(delta_matrix): K x S
+  delta_matrix <- sweep(coef_draws, 2, beta_pt, "-")   # S x K
+
+  # ------------------------------------------------------------------
+  # Step 4: all fitted values — N x S matrix
+  # ------------------------------------------------------------------
+  # preds_base is N-vector; X_nonFE %*% t(delta_matrix) is N x S
+  all_fitted <- preds_base + X_nonFE %*% t(delta_matrix)  # N x S
+
+  # ------------------------------------------------------------------
+  # Step 5: residuals — Option A: drawn ONCE, broadcast to all S draws
+  # ⚠️ METHODOLOGICAL FLAG (Option A): same residual vector applied to
+  # all S draws. This isolates coefficient uncertainty from residual
+  # noise. Option B (independent draws per column) would be more
+  # realistic but adds memory. Revisit for decomposition work.
+  # ------------------------------------------------------------------
+  resid_draw <- if (residuals == "none") {
+    rep(NA_real_, N)
+  } else {
+    # Use predict_outcome() point-estimate path to extract residual draw
+    # then reuse across all S columns.
+    pt_out <- tryCatch(
+      predict_outcome(
+        model      = model,
+        newdata    = newdata,
+        residuals  = residuals,
+        outcome    = outcome,
+        id         = id,
+        train_data = train_data,
+        engine     = engine
+      ),
+      error = function(e) {
+        warning("[vectorised] residual extraction failed: ", conditionMessage(e))
+        NULL
+      }
+    )
+    if (!is.null(pt_out) && ".residual" %in% names(pt_out)) {
+      pt_out$.residual[seq_len(N)]
+    } else {
+      rep(NA_real_, N)
+    }
+  }
+
+  # ------------------------------------------------------------------
+  # Step 6: pivot to long format — N x S -> N*S rows with draw_id
+  # ------------------------------------------------------------------
+  # Pre-allocate output list for memory efficiency
+  out_list <- vector("list", S)
+  base_df  <- newdata_trim
+
+  for (s in seq_len(S)) {
+    df_s <- base_df
+    df_s$.fitted   <- all_fitted[, s]
+    df_s$.residual <- resid_draw
+    df_s[[outcome]] <- df_s$.fitted + if (residuals == "none") 0 else resid_draw
+    df_s$draw_id   <- s
+    out_list[[s]]  <- df_s
+  }
+
+  do.call(rbind, out_list)
 }

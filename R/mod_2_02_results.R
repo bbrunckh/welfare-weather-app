@@ -41,11 +41,11 @@ mod_2_02_results_ui <- function(id) {
         shiny::tags$div(style = "flex:1; min-width:160px;",
           shiny::selectInput(
             ns("cmp_deviation"),
-            label    = "Express as deviation from",
+            label    = "Deviation from historical baseline",
             choices  = c(
               "None (raw value)" = "none",
-              "Mean year"        = "mean",
-              "Median year"      = "median"
+              "Historical mean"   = "mean",
+              "Historical median" = "median"
             ),
             selected = "none"
           )
@@ -86,7 +86,8 @@ mod_2_02_results_ui <- function(id) {
       shiny::tags$p(
         style = "font-size:11px; color:#666; margin-top:6px;",
         "The central dot shows the mean annual simulated value; the thick",
-        "coloured line spans the 90% interval (P5-P95); the thin grey line",
+        # TODO: update percentile labels below if p05/p95 thresholds change.
+        "The central dot shows the mean annual simulated value; the thick", # TODO: update caption if percentile thresholds change from P5/P95
         "spans the 95% interval (P2.5-P97.5).",
         shiny::tags$br(),
         "Future scenarios apply climate-adjusted shifts to the same historical annual base.",
@@ -131,7 +132,12 @@ mod_2_02_results_ui <- function(id) {
 #' has run. All comparison outputs update reactively as saved_scenarios change.
 #'
 #' @param id              Module id.
-#' @param hist_sim        ReactiveVal list with preds, so, weather_raw, train_data.
+#' @param hist_sim        ReactiveVal. Named list with slots:
+#'   \code{$preds} (full prediction data frame), \code{$agg} (pre-aggregated
+#'   summary by method x weighted x deviation x sim_year), \code{$so}
+#'   (selected outcome metadata), \code{$pov_line} (simulation-time poverty
+#'   line), \code{$has_weights} (logical weight flag), \code{$weather_raw},
+#'   \code{$train_data}, \code{$n_pre_join}.
 #' @param saved_scenarios ReactiveVal holding named scenario entries.
 #' @param selected_hist   Reactive one-row data frame from weathersim.
 #' @param tabset_id       Character id of the parent tabset panel.
@@ -260,13 +266,10 @@ mod_2_02_results_server <- function(id,
                              .data$weighted   == FALSE)
       }
 
-      # ⚠️ METHODOLOGICAL FLAG (Option B):
-      # Deviation is computed relative to each scenario's OWN mean/median.
-      # Option A would centre future scenarios relative to the historical mean —
-      # preserving the direction of climate impact but losing within-scenario variance.
-      # Option B centres each scenario on itself — useful for comparing spread/variance
-      # across scenarios but not for showing directional welfare loss.
-      # Pending theoretical review before production use of deviation mode.
+      # Option A deviation: historical is its own baseline — centred on its own
+      # mean/median (which IS the reference for future scenarios). This is
+      # methodologically consistent with Option A since historical deviation
+      # from itself = zero shift, showing only within-historical variance.
       if (!identical(deviation, "none") && nrow(out) > 0) {
         out <- deviation_from_centre(
           df     = out,
@@ -315,17 +318,40 @@ mod_2_02_results_server <- function(id,
                                    .data$agg_method == method,
                                    .data$weighted   == FALSE)
             }
-            # ⚠️ METHODOLOGICAL FLAG (Option B): see agg_hist above.
+            # Option A deviation: centre future scenario relative to historical
+            # baseline mean/median — preserves direction of climate impact.
+            # hist_ref is the historical agg$value for this method/weighted combo,
+            # computed from hist_sim()$agg 'none' rows.
             if (!identical(deviation, "none") && nrow(out) > 0) {
-              out <- deviation_from_centre(
-                df     = out,
-                group  = "sim_year",
-                centre = deviation,
-                loss   = FALSE
+              hist_none <- tryCatch(
+                dplyr::filter(hist_sim()$agg,
+                              .data$agg_method == method,
+                              .data$weighted   == use_w),
+                error = function(e) NULL
               )
-              if ("deviation" %in% names(out)) {
-                out$value <- out$deviation
-                out$deviation <- NULL
+              if (!is.null(hist_none) && nrow(hist_none) == 0) {
+                hist_none <- tryCatch(
+                  dplyr::filter(hist_sim()$agg,
+                                .data$agg_method == method,
+                                .data$weighted   == FALSE),
+                  error = function(e) NULL
+                )
+              }
+              hist_ref <- if (!is.null(hist_none) && nrow(hist_none) > 0) {
+                if (identical(deviation, "mean"))   mean(hist_none$value, na.rm = TRUE)
+                else if (identical(deviation, "median")) median(hist_none$value, na.rm = TRUE)
+                else NA_real_
+              } else NA_real_
+              if (!is.na(hist_ref)) {
+                out <- dplyr::mutate(out, value = value - hist_ref)
+              } else {
+                # Fallback: no historical reference available — apply own-mean deviation
+                out <- deviation_from_centre(
+                  df = out, group = "sim_year", centre = deviation, loss = FALSE
+                )
+                if ("deviation" %in% names(out)) {
+                  out$value <- out$deviation; out$deviation <- NULL
+                }
               }
             }
             list(out = out, x_label = x_label)

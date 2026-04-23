@@ -5,16 +5,16 @@
 #'
 #' @param id Internal parameter for {shiny}.
 #'
-#' @param sim_n Integer. Number of coefficient draws (S) for VCV uncertainty
-#'   propagation. Default 50. Range 10-1000. Higher values give more stable
-#'   tail percentiles but increase computation time linearly.
-#'
-#' @param pov_line_sim Numeric. Poverty line in daily 2021 PPP USD used for
-#'   headcount ratio (FGT0), poverty gap (FGT1), and FGT2 calculations.
-#'   Fixed at simulation time — re-run simulation to change.
-#'
-#' @param coef_draws Matrix (S x K). Pre-computed coefficient draw matrix from
-#'   \code{draw_coefs()}. NULL falls back to point-estimate predictions.
+#' @section Simulation inputs (configured in server via input$):
+#'   \describe{
+#'     \item{\code{sim_n}}{Integer. Number of VCV coefficient draws (S).}
+#'     \item{\code{pov_line_sim}}{Numeric. Poverty line in daily 2021 PPP USD.
+#'       Fixed at simulation time.}
+#'     \item{\code{skip_coef_draws}}{Logical. If TRUE, bypasses VCV draws
+#'       and uses point estimates only. Default TRUE.}
+#'     \item{\code{dev_mode}}{Logical. If TRUE, limits to 1 ensemble model
+#'       per SSP/period for fast testing.}
+#'   }
 #'
 #' @noRd
 #'
@@ -168,7 +168,7 @@ mod_2_01_weathersim_ui <- function(id) {
           style = "font-size:11px; font-weight:600; color:#b45309;",
           "⚠ Dev mode: 1 ensemble model only"
         ),
-        value   = FALSE
+        value   = TRUE
       ),
       shiny::helpText(
         "When checked, only the first CMIP6 ensemble member per SSP/period is used.",
@@ -181,7 +181,7 @@ mod_2_01_weathersim_ui <- function(id) {
           style = "font-size:11px; font-weight:600; color:#555;",
           "Skip coefficient draws (point estimates only)"
         ),
-        value   = FALSE
+        value   = TRUE
       ),
       shiny::helpText(
         "When checked, S draws are skipped and point estimates are used.",
@@ -209,6 +209,9 @@ mod_2_01_weathersim_ui <- function(id) {
 #' @param selected_surveys Reactive data frame from the survey list.
 #' @param survey_weather   Reactive data frame of merged survey-weather data.
 #' @param model_fit        Reactive list with fit3, engine, train_data.
+#' @param stored_breaks Reactive returning a named list of pre-computed
+#'   histogram break points for the weather density plot. Defaults to
+#'   \code{reactive(NULL)} — breaks computed on demand when not supplied.
 #'
 #' @noRd
 mod_2_01_weathersim_server <- function(id,
@@ -230,7 +233,6 @@ mod_2_01_weathersim_server <- function(id,
 
     # Derive available survey x year choices from survey_weather.
     # Returns a named character vector: label -> "survname|year" value.
-    # ---- Baseline survey reactives -----------------------------------------
 
     baseline_survey_choices <- reactive({
       req(survey_weather())
@@ -584,11 +586,8 @@ mod_2_01_weathersim_server <- function(id,
           }
 
           # Poverty line for FGT methods — set before simulation runs.
-          pov_line_sim_val <- as.numeric(input$pov_line_sim %||% 3.0)
+          pov_line_sim_val  <- as.numeric(input$pov_line_sim)
 
-          # All aggregation methods to pre-compute.
-          # User can switch between them post-hoc in Results without re-running.
-          # --------------------------------------------------------------------
           # Aggregation methods pre-computed at simulation time.
           # All 9 methods x weighted/unweighted x deviation combinations are
           # computed once so the user can switch between them post-hoc in the
@@ -596,9 +595,11 @@ mod_2_01_weathersim_server <- function(id,
           # NOTE: poverty line (pov_line_sim_val) is baked in here — changing
           # the poverty line requires a full re-run.
           # --------------------------------------------------------------------
-          agg_methods_all <- c("mean", "median", "total",
-                                  "headcount_ratio", "gap", "fgt2",
-                                  "gini", "prosperity_gap", "avg_poverty")
+
+          # Derive from hist_aggregate_choices() so the list stays in sync
+          # with what the Results tab UI offers — single source of truth.
+          agg_methods_all <- unname(hist_aggregate_choices(so$type, so$name))
+          
           # Pre-aggregate immediately after each future key to avoid accumulating
           # N_households x S_draws x N_keys rows in memory.
           # group_agg stores ~(S_draws x 5_methods x N_years) rows per group.
@@ -608,6 +609,11 @@ mod_2_01_weathersim_server <- function(id,
           group_n           <- list()
 
           future_keys <- setdiff(names(weather_result), "historical")
+          # Dev mode: keep first model per SSP/period group.
+          # Key format: ssp{x}_{lo}_{hi}_{start}_{end}_{ModelName}.
+          # Regex extracts first 5 underscore-segments (the group prefix).
+          # {4} matches exactly 4 separators = 5 segments. Update if key
+          # naming convention changes.
           if (isTRUE(input$dev_mode)) future_keys <- future_keys[!duplicated(stringr::str_extract(future_keys, "^(?:[^_]+_){4}[^_]+"))]
           all_keys    <- c("historical", future_keys)
           n_keys      <- length(all_keys)
@@ -652,7 +658,6 @@ mod_2_01_weathersim_server <- function(id,
             t_elapsed <- proc.time()[["elapsed"]] - t_start
             t_remain  <- if (ki > 1L) (t_elapsed / (ki - 1L)) * (n_keys - ki + 1L) else NA_real_
 
-            # message() fires to R console in real time even while Shiny UI is blocked.
             # message() fires to R console in real time even while Shiny UI is blocked.
             # setProgress() only updates between blocking R calls (i.e. between keys).
             key_runs <- S_val * n_hist_yrs
@@ -707,16 +712,14 @@ mod_2_01_weathersim_server <- function(id,
               # Historical: keep full preds for weather density plot, but also
               # pre-aggregate all methods so agg_hist reactive can filter cheaply
               # without re-processing S_draws x N_households rows per UI interaction.
+
               # Pre-aggregate all methods x weighted/unweighted combinations.
               # Running both at simulation time avoids re-processing S_draws x N_households
               # rows reactively when user toggles weights in the Results tab.
-              # ⚠️ METHODOLOGICAL FLAG — Option B deviation (pending review):
-              # Deviation is computed relative to each scenario's OWN mean/median.
-              # This shows internal spread but suppresses the absolute climate
-              # signal (direction of welfare change). Option A would centre future
-              # scenarios relative to the historical baseline mean — preserving
-              # direction. Confirm with supervisor before production use.
-              # See: https://github.com/bbrunckh/welfare-weather-app/issues/22
+
+              # Option A deviation: historical pre-aggregation uses 'none' only.
+              # Future scenario deviation is computed relative to the historical
+              # baseline mean/median in agg_scenarios reactive (mod_2_02_results.R).
               hist_agg <- dplyr::bind_rows(lapply(agg_methods_all, function(meth) {
                 dplyr::bind_rows(lapply(c(TRUE, FALSE), function(use_w) {
                   wt  <- if (use_w) weight_col_sim else NULL
