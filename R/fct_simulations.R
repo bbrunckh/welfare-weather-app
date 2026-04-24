@@ -493,17 +493,20 @@ prepare_hist_weather <- function(weather_raw,
                                  outcome_name) {
   drop_cols <- c(selected_weather$name, outcome_name)
 
-  weather_raw |>
+    weather_raw |>
     dplyr::mutate(
-      year      = as.factor(year),
+      year      = as.character(year),
       int_month = as.integer(format(timestamp, "%m")),
       sim_year  = as.integer(format(timestamp, "%Y"))
     ) |>
     dplyr::select(-timestamp) |>
     dplyr::inner_join(
-      survey_weather |> dplyr::select(-dplyr::any_of(drop_cols)),
+      survey_weather |>
+        dplyr::mutate(year = as.character(year)) |>
+        dplyr::select(-dplyr::any_of(drop_cols)),
       by = c("code", "year", "survname", "loc_id", "int_month")
-    )
+    ) |>
+    dplyr::mutate(year = as.factor(year))
 }
 
 

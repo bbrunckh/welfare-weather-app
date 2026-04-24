@@ -721,3 +721,160 @@ get_weather <- function(
 
   result
 }
+
+# ---------------------------------------------------------------------------- #
+# Ensemble precompute                                                           #
+# ---------------------------------------------------------------------------- #
+
+#' Summarise CMIP6 Ensemble to Representative Weather Series
+#'
+#' Replaces the full set of per-model weather keys with three representative
+#' series per SSP \eqn{\times} period group: the ensemble mean and the
+#' \code{lo_q}/\code{hi_q} quantile of monthly weather values across models.
+#' Reduces future weather keys from ~20--30 per group to 3, giving a ~6--13x
+#' speedup in the simulation loop with no loss of coefficient uncertainty.
+#'
+#' @param weather_result Named list returned by \code{get_weather()}. Must
+#'   contain an entry named \code{"historical"} plus one entry per CMIP6 model
+#'   key (\code{ssp\{x\}_\{start\}_\{end\}_\{ModelName\}}).
+#' @param lo_q Numeric in (0, 0.5). Lower quantile for ensemble spread band.
+#'   Default \code{0.10} (10th percentile).
+#' @param hi_q Numeric in (0.5, 1). Upper quantile for ensemble spread band.
+#'   Default \code{0.90} (90th percentile).
+#' @param weather_vars Optional character vector of weather variable column
+#'   names to summarise across models. If \code{NULL} (default), detected
+#'   automatically as numeric non-identifier columns.
+#'
+#' @return Named list with the same structure as \code{weather_result}:
+#'   \code{"historical"} entry unchanged; each SSP \eqn{\times} period group
+#'   replaced by three entries (\code{_ensemble_mean}, \code{_ensemble_lo},
+#'   \code{_ensemble_hi}). Any \code{stored_breaks} attribute is preserved.
+#'
+#' @section Methodology note:
+#' Ensemble uncertainty bounds are constructed from the \code{lo_q}/\code{hi_q}
+#' quantile of monthly weather variable values across CMIP6 models. This
+#' synthetic series does not preserve cross-month physical coherence and should
+#' be interpreted as a spread indicator rather than a specific climate
+#' trajectory. Full per-model simulation is required for physically coherent
+#' ensemble bounds.
+#'
+#' @importFrom dplyr bind_rows group_by summarise across all_of mutate
+#' @export
+summarise_ensemble <- function(weather_result,
+                               lo_q         = 0.10,
+                               hi_q         = 0.90,
+                               weather_vars = NULL) {
+
+  # ---- Input validation ----------------------------------------------------- #
+  stopifnot(
+    "weather_result must be a named list"      = is.list(weather_result),
+    "weather_result must contain 'historical'" = "historical" %in% names(weather_result),
+    "lo_q must be in (0, 0.5)"                 = is.numeric(lo_q) && lo_q > 0 && lo_q < 0.5,
+    "hi_q must be in (0.5, 1)"                 = is.numeric(hi_q) && hi_q > 0.5 && hi_q < 1
+  )
+
+  future_keys <- setdiff(names(weather_result), "historical")
+  if (length(future_keys) == 0L) return(weather_result)
+
+  # ---- Key prefix parsing --------------------------------------------------- #
+  # Key format: ssp{x}_{lo}_{hi}_{start}_{end}_{ModelName}
+  # Regex extracts the SSP/period prefix: first 5 underscore-separated
+  # segments. {4} matches exactly 4 separators = 5 segments.
+  # Update this regex if the key naming convention changes.
+  .key_prefix <- function(key) {
+    m <- regmatches(key, regexpr("^(?:[^_]+_){4}[^_]+", key, perl = TRUE))
+    if (length(m) == 0L || nchar(m) == 0L) key else m
+  }
+
+  prefixes        <- vapply(future_keys, .key_prefix, character(1L))
+  unique_prefixes <- unique(prefixes)
+
+  # ---- Identifier columns --------------------------------------------------- #
+  # These columns identify the observation and are NEVER averaged across models.
+  # IMPORTANT: year is numeric (integer from DuckDB) but is a survey identifier
+  # — it must not be averaged. Explicit listing here prevents the is.numeric()
+  # filter below from including it in w_vars.
+  meta_cols <- c("code", "year", "survname", "loc_id", "timestamp")
+
+  # Detect weather variable columns from the first future data frame.
+  # If weather_vars supplied explicitly, use those — more robust.
+  ref_df <- weather_result[[future_keys[[1L]]]]
+
+  if (is.null(weather_vars)) {
+    weather_vars <- names(ref_df)[
+      vapply(ref_df, is.numeric, logical(1L)) &
+      !names(ref_df) %in% meta_cols
+    ]
+  }
+
+  if (length(weather_vars) == 0L) {
+    warning("[summarise_ensemble] No weather variable columns detected — returning unchanged.")
+    return(weather_result)
+  }
+
+  # ---- Build representative series per SSP/period group -------------------- #
+  rep_entries <- lapply(unique_prefixes, function(pfx) {
+    member_keys <- future_keys[prefixes == pfx]
+    if (length(member_keys) == 0L) return(list())
+
+    # Stack all model data frames for this SSP/period group
+    stacked <- dplyr::bind_rows(
+      lapply(seq_along(member_keys), function(i) {
+        df              <- weather_result[[member_keys[[i]]]]
+        df[[".member"]] <- i
+        df
+      })
+    )
+
+    # Grouping columns: identifier columns present in the stacked data
+    group_cols <- intersect(meta_cols, names(stacked))
+
+    # Summarise weather variables across models per (loc_id × timestamp × ...)
+    # Using dplyr::summarise to preserve column types exactly — avoids
+    # stats::aggregate() which coerces factor/integer types unpredictably.
+    mean_df <- stacked |>
+      dplyr::group_by(dplyr::across(dplyr::all_of(group_cols))) |>
+      dplyr::summarise(
+        dplyr::across(dplyr::all_of(weather_vars), \(x) mean(x, na.rm = TRUE)),
+        .groups = "drop"
+      )
+
+    lo_df <- stacked |>
+      dplyr::group_by(dplyr::across(dplyr::all_of(group_cols))) |>
+      dplyr::summarise(
+        dplyr::across(
+          dplyr::all_of(weather_vars),
+          \(x) stats::quantile(x, lo_q, na.rm = TRUE)
+        ),
+        .groups = "drop"
+      )
+
+    hi_df <- stacked |>
+      dplyr::group_by(dplyr::across(dplyr::all_of(group_cols))) |>
+      dplyr::summarise(
+        dplyr::across(
+          dplyr::all_of(weather_vars),
+          \(x) stats::quantile(x, hi_q, na.rm = TRUE)
+        ),
+        .groups = "drop"
+      )
+
+    stats::setNames(
+      list(mean_df, lo_df, hi_df),
+      paste0(pfx, c("_ensemble_mean", "_ensemble_lo", "_ensemble_hi"))
+    )
+  })
+
+  # ---- Assemble output ----------------------------------------------------- #
+  # Preserve historical entry unchanged; replace future keys with the three
+  # representative series per SSP/period group.
+  out <- list(historical = weather_result[["historical"]])
+  for (entry in rep_entries) out <- c(out, entry)
+
+  # Preserve stored_breaks attribute from get_weather() if present
+  if (!is.null(attr(weather_result, "stored_breaks"))) {
+    attr(out, "stored_breaks") <- attr(weather_result, "stored_breaks")
+  }
+
+  out
+}
