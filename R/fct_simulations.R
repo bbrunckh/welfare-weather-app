@@ -102,13 +102,90 @@ format_elapsed <- function(secs) {
   sprintf("%dm %02ds", secs %/% 60L, secs %% 60L)
 }
 
-# PROVISIONAL: SE spec pending discussion. See methodology note.
-# Options:
-#   ~loc_id:int_month  -- Moulton minimum (cluster at regressor level)
-#   ~loc_id            -- default used here; more conservative, common in
-#                         applied weather-econometrics literature
-#   ~region            -- most conservative; requires >30-50 clusters
-COEF_VCOV_SPEC <- ~loc_id
+# SE clustering specification — confirmed default: ~loc_id
+# Methodological justification: more conservative than ~loc_id:int_month
+# (Moulton minimum). Absorbs within-location serial correlation across
+# months and years. Weather data has real within-location temporal
+# correlation that ~loc_id:int_month does not correct.
+#
+# Cluster count decision tree:
+#   G >= 50 at ~loc_id : use ~loc_id (default)
+#   40 <= G < 50        : use ~loc_id, flag in methodology note
+#   G < 40              : warn user, wild cluster bootstrap recommended
+#
+# Named alternatives — available as constants, not default.
+# Use compute_cluster_counts() to check G before switching.
+COEF_VCOV_SPEC              <- ~loc_id
+COEF_VCOV_SPEC_MOULTON      <- ~loc_id:int_month
+COEF_VCOV_SPEC_CONSERVATIVE <- ~code + year + survname + loc_id
+
+#' Compute Cluster Counts for SE Specification Diagnostics
+#'
+#' Computes the number of clusters at each relevant clustering level for the
+#' fitted model data. Used to validate the SE specification and warn when
+#' cluster counts are too small for reliable asymptotic inference.
+#'
+#' @param data Data frame used at model fit time. Must contain \code{loc_id}
+#'   and \code{int_month} columns. Optionally \code{code}, \code{year},
+#'   \code{survname} for the conservative multi-way spec.
+#'
+#' @return Named list with integer cluster counts:
+#'   \describe{
+#'     \item{loc_id}{Number of distinct location clusters (primary spec).}
+#'     \item{loc_id_int_month}{Number of distinct location × month clusters
+#'       (Moulton minimum).}
+#'     \item{conservative}{Number of distinct code × year × survname × loc_id
+#'       clusters (conservative multi-way spec). \code{NA} if any column
+#'       is absent.}
+#'   }
+#'
+#' @section Cluster count thresholds:
+#' \itemize{
+#'   \item G >= 50: reliable asymptotic inference, use \code{COEF_VCOV_SPEC}
+#'   \item 40 <= G < 50: flag in methodology note
+#'   \item G < 40: wild cluster bootstrap recommended (not yet implemented)
+#' }
+#'
+#' @export
+compute_cluster_counts <- function(data) {
+  has_cols <- function(...) all(c(...) %in% names(data))
+
+  g_loc        <- if (has_cols("loc_id"))
+                    dplyr::n_distinct(data[["loc_id"]])
+                  else NA_integer_
+
+  g_loc_month  <- if (has_cols("loc_id", "int_month"))
+                    dplyr::n_distinct(paste(data[["loc_id"]], data[["int_month"]]))
+                  else NA_integer_
+
+  g_conserv    <- if (has_cols("code", "year", "survname", "loc_id"))
+                    dplyr::n_distinct(paste(data[["code"]], data[["year"]],
+                                           data[["survname"]], data[["loc_id"]]))
+                  else NA_integer_
+
+  counts <- list(
+    loc_id           = g_loc,
+    loc_id_int_month = g_loc_month,
+    conservative     = g_conserv
+  )
+
+  # Runtime warnings — surface immediately at model fit time
+  if (!is.na(g_loc) && g_loc < 40L) {
+    warning(sprintf(
+      "[SE] Only %d clusters at loc_id. VCV SEs may be unreliable. ",
+      "Wild cluster bootstrap recommended (not yet implemented).",
+      G = g_loc
+    ))
+  } else if (!is.na(g_loc) && g_loc < 50L) {
+    message(sprintf(
+      "[SE] %d clusters at loc_id — borderline. Flag in methodology note.",
+      g_loc
+    ))
+  }
+
+  counts
+}
+
 
 #' Draw Coefficient Vectors from a Fitted Model
 #'
