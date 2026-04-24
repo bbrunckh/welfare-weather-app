@@ -856,8 +856,7 @@ deviation_from_centre <- function(df,
 #' @importFrom rlang abort
 #' @export
 aggregate_sim_preds <- function(preds, so, agg_method, deviation, loss_frame,
-                                pov_line = NULL, weights = NULL,
-                                lo_q = 0.10, hi_q = 0.90) {
+                                pov_line = NULL, weights = NULL) {
 
   if (agg_method %in% c("headcount_ratio", "gap", "fgt2") && is.null(pov_line)) {
     rlang::abort(
@@ -904,9 +903,9 @@ aggregate_sim_preds <- function(preds, so, agg_method, deviation, loss_frame,
     out <- out |>
       dplyr::group_by(dplyr::across(dplyr::any_of(c("model", "sim_year")))) |>
       dplyr::summarise(
-        value_lo  = stats::quantile(value, lo_q, na.rm = TRUE),
+        value_p05 = stats::quantile(value, 0.05, na.rm = TRUE),
         value_p50 = stats::quantile(value, 0.50, na.rm = TRUE),
-        value_hi  = stats::quantile(value, hi_q, na.rm = TRUE),
+        value_p95 = stats::quantile(value, 0.95, na.rm = TRUE),
         value     = value_p50,
         .groups   = "drop"
       )

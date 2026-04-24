@@ -23,231 +23,197 @@ mod_2_01_weathersim_ui <- function(id) {
 
   ns <- NS(id)
 
-  # Band width choices — shared between coef and ensemble dropdowns.
-  # Single source of truth: update here to change all dropdowns.
-  band_choices <- c(
-    "80% band (10th / 90th)"    = "p10_p90",
-    "95% band (2.5th / 97.5th)" = "p025_p975",
-    "99% band (0.5th / 99.5th)" = "p005_p995",
-    "Min / Max"                  = "minmax",
-    "None (point estimate only)" = "none"
-  )
-
   tagList(
-
-    # ---- Settings summary banner (always visible above accordion) ----------
-    # Shows a reactive one-line summary of all current simulation settings
-    # so the user can verify parameters at a glance without opening panels.
+    # ---- Settings summary banner (always visible) --------------------------
     shiny::htmlOutput(ns("settings_summary")),
 
-    # ---- Five-section bsplus accordion (matches Module 1 styling) ----------
-    bsplus::bs_accordion(id = ns("sim_accordion")) |>
+    # ---- Collapsible simulation settings -----------------------------------
+    shiny::tags$details(
+      id = ns("settings_details"),
+      shiny::tags$summary(
+        style = "cursor:pointer; font-weight:600; font-size:13px; margin-bottom:8px;",
+        "Simulation settings \u25bc"
+      ),
 
-    # ---- 1. Baseline survey ------------------------------------------------
-    bsplus::bs_append(
-      title   = "1. Baseline survey",
-      content = tagList(
-        shiny::uiOutput(ns("baseline_survey_ui")),
-        shiny::uiOutput(ns("baseline_warning_ui"))
-      )
-    ) |>
+      # -- Baseline survey ------------------------------------------------
+      shiny::tags$h6("Baseline survey",
+                     style = "font-weight:600; margin-top:8px; margin-bottom:4px;"),
+      shiny::uiOutput(ns("baseline_survey_ui")),
+      shiny::uiOutput(ns("baseline_warning_ui")),
+      shiny::tags$hr(style = "margin: 6px 0;"),
 
-    # ---- 2. Historical reference period ------------------------------------
-    bsplus::bs_append(
-      title   = "2. Historical reference period",
-      content = tagList(
-        shiny::sliderInput(
-          inputId = ns("hist_years"),
-          label   = NULL,
-          min     = 1950,
-          max     = 2024,
-          value   = c(1991, 2020),
-          sep     = ""
-        ),
-        shiny::uiOutput(ns("hist_years_warning")),
-        shiny::helpText(
-          tags$b("Note:"), " Historical weather informs the underlying variability,",
-          " which is then perturbed with climate scenario forecasts.",
-          tags$b(" 30 years is the recommended default."),
-          style = "font-size: 11px; color: #555; margin-top: 2px; margin-bottom: 8px;"
-        )
-      )
-    ) |>
+      # -- Historical period --------------------------------------------------
+      shiny::tags$h6("Historical weather distribution period",
+                     style = "font-weight:600; margin-top:8px; margin-bottom:4px;"),
+      shiny::sliderInput(
+        inputId = ns("hist_years"),
+        label   = NULL,
+        min     = 1950,
+        max     = 2024,
+        value   = c(1991, 2020),
+        sep     = ""
+      ),
+      shiny::uiOutput(ns("hist_years_warning")),
+      shiny::helpText(
+        tags$b("Note:"), " Historical weather informs the underlying variability,",
+        " which is then perturbed with climate scenario forecasts.",
+        tags$b(" 30 years is the recommended default."),
+        style = "font-size: 11px; color: #555; margin-top: 2px; margin-bottom: 8px;"
+      ),
 
-    # ---- 3. Projection & climate scenarios ---------------------------------
-    bsplus::bs_append(
-      title   = "3. Projection & climate scenarios",
-      content = tagList(
-        # Projection periods (up to 3)
-        shiny::tags$h6("Projection periods",
-                       style = "font-weight:600; margin-bottom:4px;"),
-        shiny::tags$div(
-          style = "display:flex; gap:8px; align-items:center; margin-bottom:4px;",
-          shiny::tags$span("Period 1:", style = "min-width:60px; font-weight:500;"),
-          shiny::numericInput(ns("fut_start_1"), label = NULL, value = 2025,
-                              min = 2015, max = 2100, step = 1, width = "90px"),
-          shiny::tags$span("–"),
-          shiny::numericInput(ns("fut_end_1"), label = NULL, value = 2035,
-                              min = 2015, max = 2100, step = 1, width = "90px")
-        ),
-        shiny::tags$div(
-          style = "display:flex; gap:8px; align-items:center; margin-bottom:4px;",
-          shiny::tags$span("Period 2:", style = "min-width:60px; font-weight:500;"),
-          shiny::numericInput(ns("fut_start_2"), label = NULL, value = NA,
-                              min = 2015, max = 2100, step = 1, width = "90px"),
-          shiny::tags$span("–"),
-          shiny::numericInput(ns("fut_end_2"), label = NULL, value = NA,
-                              min = 2015, max = 2100, step = 1, width = "90px")
-        ),
-        shiny::tags$div(
-          style = "display:flex; gap:8px; align-items:center; margin-bottom:4px;",
-          shiny::tags$span("Period 3:", style = "min-width:60px; font-weight:500;"),
-          shiny::numericInput(ns("fut_start_3"), label = NULL, value = NA,
-                              min = 2015, max = 2100, step = 1, width = "90px"),
-          shiny::tags$span("–"),
-          shiny::numericInput(ns("fut_end_3"), label = NULL, value = NA,
-                              min = 2015, max = 2100, step = 1, width = "90px")
-        ),
-        shiny::tags$hr(style = "margin: 6px 0;"),
-        # Climate scenarios
-        shiny::tags$h6("Climate scenarios",
-                       style = "font-weight:600; margin-bottom:4px;"),
-        shiny::checkboxGroupInput(
-          inputId  = ns("climate"),
-          label    = NULL,
-          choices  = c(
-            "SSP2-4.5" = "ssp2_4_5",
-            "SSP3-7.0" = "ssp3_7_0",
-            "SSP5-8.5" = "ssp5_8_5"
-          ),
-          selected = "ssp3_7_0"
-        ),
-        shiny::tags$hr(style = "margin: 6px 0;"),
-        # Ensemble uncertainty
-        shiny::tags$h6("Ensemble uncertainty",
-                       style = "font-weight:600; margin-bottom:4px;"),
-        shiny::selectInput(
-          inputId  = ns("ensemble_band_width"),
-          label    = "Ensemble spread band",
-          choices  = band_choices,
-          selected = "p10_p90"
-        ),
-        shiny::helpText(
-          "Controls the width of the CMIP6 ensemble spread band in results charts.",
-          style = "font-size:11px; color:#555; margin-top:2px; margin-bottom:8px;"
-        ),
-        shiny::checkboxInput(
-          inputId = ns("full_ensemble"),
-          label   = shiny::tags$span(
-            style = "font-size:11px; font-weight:600; color:#555;",
-            "Full ensemble (all CMIP6 models — slow)"
-          ),
-          value   = FALSE
-        ),
-        shiny::checkboxInput(
-          inputId = ns("dev_mode"),
-          label   = shiny::tags$span(
-            style = "font-size:11px; font-weight:600; color:#b45309;",
-            "⚠ Dev mode: 1 ensemble model only"
-          ),
-          value   = TRUE
-        ),
-        shiny::helpText(
-          "Dev mode uses 1 CMIP6 model per SSP/period for fast testing.",
-          " Disable for final runs.",
-          style = "font-size:11px; color:#b45309; margin-top:2px; margin-bottom:8px;"
-        )
-      )
-    ) |>
+      shiny::tags$hr(style = "margin: 6px 0;"),
 
-    # ---- 4. Simulation parameters ------------------------------------------
-    bsplus::bs_append(
-      title   = "4. Simulation parameters",
-      content = tagList(
-        # Coefficient uncertainty
-        shiny::tags$h6("Coefficient uncertainty",
-                       style = "font-weight:600; margin-bottom:4px;"),
-        shiny::numericInput(
-          inputId = ns("sim_n"),
-          label   = "Coefficient draws (S)",
-          value   = 50, min = 10, max = 1000, step = 10
-        ),
-        shiny::helpText(
-          "200–500 recommended for final runs; 50 for speed. Upper bound 1,000.",
-          style = "font-size:11px; color:#555; margin-top:2px; margin-bottom:8px;"
-        ),
-        shiny::selectInput(
-          inputId  = ns("coef_band_width"),
-          label    = "Coefficient uncertainty band",
-          choices  = band_choices,
-          selected = "p10_p90"
-        ),
-        shiny::helpText(
-          "Controls the width of the coefficient uncertainty band in results charts.",
-          style = "font-size:11px; color:#555; margin-top:2px; margin-bottom:8px;"
-        ),
-        shiny::checkboxInput(
-          inputId = ns("skip_coef_draws"),
-          label   = shiny::tags$span(
-            style = "font-size:11px; font-weight:600; color:#555;",
-            "Skip coefficient draws (point estimates only)"
-          ),
-          value   = TRUE
-        ),
-        shiny::helpText(
-          "When checked, S draws are skipped and point estimates are used.",
-          " Faster for testing. Coefficient uncertainty bands will not appear.",
-          style = "font-size:11px; color:#555; margin-top:2px; margin-bottom:8px;"
-        ),
-        shiny::tags$hr(style = "margin: 6px 0;"),
-        # Residual treatment
-        shiny::tags$h6("Residual treatment",
-                       style = "font-weight:600; margin-bottom:4px;"),
-        shiny::radioButtons(
-          inputId  = ns("residuals"),
-          label    = NULL,
-          choices  = residual_choices(),
-          selected = "original"
-        ),
-        shiny::helpText(
-          tags$b("original:"), " Recommended default: match each observation’s",
-          " own residual — assumes no changes due to changing hazards.",
-          tags$br(),
-          tags$b("resample:"), " Secondary recommendation: randomly resample",
-          " residuals from the model.",
-          tags$br(),
-          tags$b("normal:"), " Caution: draw residuals from N(0, σ) — assumes",
-          " normal tails and no heteroskedasticity.",
-          tags$br(),
-          tags$b("none:"), " Diagnostic: return fitted values only.",
-          style = "font-size:11px;"
-        )
-      )
-    ) |>
+      # -- Future periods (up to 3) -------------------------------------------
+      shiny::tags$h6("Projection periods",
+                     style = "font-weight:600; margin-bottom:4px;"),
 
-    # ---- 5. Poverty line ---------------------------------------------------
-    bsplus::bs_append(
-      title   = "5. Poverty line",
-      content = tagList(
-        shiny::numericInput(
-          inputId = ns("pov_line_sim"),
-          label   = "Poverty line (daily, 2021 PPP USD)",
-          value   = 3.00, min = 0, step = 0.5
+      # Period 1
+      shiny::tags$div(
+        style = "display:flex; gap:8px; align-items:center; margin-bottom:4px;",
+        shiny::tags$span("Period 1:", style = "min-width:60px; font-weight:500;"),
+        shiny::numericInput(ns("fut_start_1"), label = NULL, value = 2025,
+                            min = 2015, max = 2100, step = 1, width = "90px"),
+        shiny::tags$span("\u2013"),
+        shiny::numericInput(ns("fut_end_1"), label = NULL, value = 2035,
+                            min = 2015, max = 2100, step = 1, width = "90px")
+      ),
+      # Period 2 (optional)
+      shiny::tags$div(
+        style = "display:flex; gap:8px; align-items:center; margin-bottom:4px;",
+        shiny::tags$span("Period 2:", style = "min-width:60px; font-weight:500;"),
+        shiny::numericInput(ns("fut_start_2"), label = NULL, value = NA,
+                            min = 2015, max = 2100, step = 1, width = "90px"),
+        shiny::tags$span("\u2013"),
+        shiny::numericInput(ns("fut_end_2"), label = NULL, value = NA,
+                            min = 2015, max = 2100, step = 1, width = "90px")
+      ),
+      # Period 3 (optional)
+      shiny::tags$div(
+        style = "display:flex; gap:8px; align-items:center; margin-bottom:4px;",
+        shiny::tags$span("Period 3:", style = "min-width:60px; font-weight:500;"),
+        shiny::numericInput(ns("fut_start_3"), label = NULL, value = NA,
+                            min = 2015, max = 2100, step = 1, width = "90px"),
+        shiny::tags$span("\u2013"),
+        shiny::numericInput(ns("fut_end_3"), label = NULL, value = NA,
+                            min = 2015, max = 2100, step = 1, width = "90px")
+      ),
+
+      shiny::tags$hr(style = "margin: 6px 0;"),
+
+      # -- Climate scenarios ---------------------------------------------------
+      shiny::tags$h6("Climate scenarios",
+                     style = "font-weight:600; margin-bottom:4px;"),
+      shiny::checkboxGroupInput(
+        inputId  = ns("climate"),
+        label    = NULL,
+        choices  = c(
+          "SSP2-4.5" = "ssp2_4_5",
+          "SSP3-7.0" = "ssp3_7_0",
+          "SSP5-8.5" = "ssp5_8_5"
         ),
-        shiny::helpText(
-          "Used for headcount / FGT calculations.",
-          " Poverty line is fixed at simulation time.",
-          " To change, update here and re-run simulation.",
-          style = "font-size:11px; color:#555; margin-top:2px; margin-bottom:8px;"
-        )
-      )
+        selected = "ssp3_7_0"
+      ),
+
+      shiny::tags$hr(style = "margin: 6px 0;"),
+
+      # -- Residual method ----------------------------------------------------
+      shiny::tags$h6("Simulation residuals",
+                     style = "font-weight:600; margin-bottom:4px;"),
+      shiny::radioButtons(
+        inputId  = ns("residuals"),
+        label    = NULL,
+        choices  = residual_choices(),
+        selected = "original"
+      ),
+      shiny::helpText(
+        shiny::tags$b("original:"), " Recommended Default: match each observation\u2019s own residual -  assumes no changes due to changing hazards ",
+        shiny::tags$br(),
+        shiny::tags$b("resample:"), " Secondary Recommendation: randomly resample residuals from the model.",
+        shiny::tags$br(),
+        shiny::tags$b("normal:"), " Caution: draw residuals from N(0, \u03c3) which assumes normal tails and no heteroskedasticity",
+        shiny::tags$br(),
+        shiny::tags$b("none:"), " DIAGNOSTIC: return fitted values only. not including residuals understates variance and for any log-transformed variable will understate mean",
+        shiny::tags$br(),
+        style = "font-size:11px;"
+      ),
+
+
+      shiny::tags$hr(style = "margin: 6px 0;"),
+
+      # -- Simulation parameters -------------------------------------------
+      shiny::tags$h6("Simulation parameters",
+                     style = "font-weight:600; margin-bottom:4px;"),
+      shiny::numericInput(
+        inputId = ns("sim_n"),
+        label   = "Coefficient draws (S)",
+        value   = 50, min = 10, max = 1000, step = 10
+      ),
+      shiny::helpText(
+        "200-500 recommended for final runs; 50 for speed. Upper bound 1,000.",
+        style = "font-size:11px; color:#555; margin-top:2px; margin-bottom:8px;"
+      ),
+      shiny::numericInput(
+        inputId = ns("pov_line_sim"),
+        label   = "Poverty line (daily, 2021 PPP USD)",
+        value   = 3.00, min = 0, step = 0.5
+      ),
+      shiny::helpText(
+        "Used for headcount / FGT calculations. Poverty line is fixed at simulation time.",
+        style = "font-size:11px; color:#555; margin-top:2px; margin-bottom:8px;"
+      ),
+      shiny::tags$hr(style = "margin: 6px 0;"),
+      shiny::checkboxInput(
+        inputId = ns("dev_mode"),
+        label   = shiny::tags$span(
+          style = "font-size:11px; font-weight:600; color:#b45309;",
+          "⚠ Dev mode: 1 ensemble model only"
+        ),
+        value   = TRUE
+      ),
+      shiny::helpText(
+        "When checked, only the first CMIP6 ensemble member per SSP/period is used.",
+        " Speeds up testing. Disable for final runs.",
+        style = "font-size:11px; color:#b45309; margin-top:2px; margin-bottom:8px;"
+      ),
+      shiny::checkboxInput(
+        inputId = ns("skip_coef_draws"),
+        label   = shiny::tags$span(
+          style = "font-size:11px; font-weight:600; color:#555;",
+          "Skip coefficient draws (point estimates only)"
+        ),
+        value   = TRUE
+      ),
+      shiny::helpText(
+        "When checked, S draws are skipped and point estimates are used.",
+        " Faster for testing. Coefficient uncertainty bands will not appear.",
+        style = "font-size:11px; color:#555; margin-top:2px; margin-bottom:8px;"
+      ),
     ),
-
-    # ---- Run simulation button ---------------------------------------------
     shiny::tags$hr(style = "margin: 10px 0;"),
+
+    # ---- Run simulation button (hidden for RIF engine) ---------------------
     shiny::uiOutput(ns("run_sim_ui"))
   )
 }
+
+
+#' 2_01_weathersim Server Functions
+#'
+#' Handles the unified simulation sidebar: validates settings, runs historical
+#' and future simulations on button click, and returns reactive results.
+#'
+#' @param id               Module id.
+#' @param connection_params Reactive named list from mod_0_overview.
+#' @param selected_outcome Reactive one-row data frame of selected outcome.
+#' @param selected_weather Reactive data frame of selected weather variables.
+#' @param selected_surveys Reactive data frame from the survey list.
+#' @param survey_weather   Reactive data frame of merged survey-weather data.
+#' @param model_fit        Reactive list with fit3, engine, train_data.
+#' @param stored_breaks Reactive returning a named list of pre-computed
+#'   histogram break points for the weather density plot. Defaults to
+#'   \code{reactive(NULL)} — breaks computed on demand when not supplied.
+#'
+#' @noRd
 mod_2_01_weathersim_server <- function(id,
                                         connection_params,
                                         selected_outcome,
@@ -349,7 +315,7 @@ mod_2_01_weathersim_server <- function(id,
         s <- input[[paste0("fut_start_", i)]]
         e <- input[[paste0("fut_end_", i)]]
         if (!is.null(s) && !is.na(s) && !is.null(e) && !is.na(e)) {
-          fut_parts <- c(fut_parts, paste0(s, "–", e))
+          fut_parts <- c(fut_parts, paste0(s, "\u2013", e))
         }
       }
       fut_txt <- if (length(fut_parts) > 0) paste(fut_parts, collapse = ", ") else "None"
@@ -363,48 +329,15 @@ mod_2_01_weathersim_server <- function(id,
       ssp_txt <- if (length(ssp_sel) > 0)
         paste(ssp_map[ssp_sel], collapse = ", ") else "None"
 
-      # Ensemble mode
-      ens_txt <- if (isTRUE(input$full_ensemble)) "All models (full ensemble)"
-                 else if (isTRUE(input$dev_mode))  "Dev mode (1 model/SSP)"
-                 else                               "Summarised (mean + band)"
+      ens_txt <- "All models"
 
-      # Residual treatment
       res_labels <- c(
-        "original" = "Original",
+        "original"  = "Original",
         "resample" = "Resample",
-        "none"     = "None",
-        "normal"   = "Normal distribution"
+        "none"      = "None",
+        "normal"    = "Normal distribution"
       )
-      res_txt <- res_labels[input$residuals %||% "normal"] %||% "Normal distribution"
-
-      # Band width labels
-      band_labels <- c(
-        "p10_p90"   = "80% (10/90)",
-        "p025_p975" = "95% (2.5/97.5)",
-        "p005_p995" = "99% (0.5/99.5)",
-        "minmax"    = "Min/Max",
-        "none"      = "None"
-      )
-      coef_band_txt <- band_labels[input$coef_band_width %||% "p10_p90"] %||% "80% (10/90)"
-      ens_band_txt  <- band_labels[input$ensemble_band_width %||% "p10_p90"] %||% "80% (10/90)"
-
-      # Coefficient draws status
-      coef_txt <- if (isTRUE(input$skip_coef_draws)) {
-        "Skipped (point estimates only)"
-      } else {
-        paste0("S = ", input$sim_n %||% 50, " draws (VCV)")
-      }
-
-      # Poverty line
-      pov_txt <- paste0("$", sprintf("%.2f", input$pov_line_sim %||% 3.00), "/day")
-
-      # Baseline survey
-      surv_txt <- {
-        sel <- input$baseline_survey %||% baseline_default()
-        ch  <- baseline_survey_choices()
-        nms <- names(ch)[ch %in% sel]
-        if (length(nms) == 0) "None" else paste(nms, collapse = ", ")
-      }
+      res_txt <- res_labels[input$residuals %||% "normal"] %||% input$residuals
 
       shiny::tags$div(
         style = paste0(
@@ -412,27 +345,21 @@ mod_2_01_weathersim_server <- function(id,
           "padding: 8px 12px; margin-bottom: 10px; border-radius: 3px; ",
           "font-size: 12px; color: #444;"
         ),
-        # Line 1 — survey + historical
-        shiny::tags$b("Survey:", style = "color:#333;"), surv_txt,
+        shiny::tags$b("Historical baseline:", style = "color:#333;"),
+        paste0(hist_yr[1], "\u2013", hist_yr[2]),
         shiny::tags$br(),
-        shiny::tags$b("Historical Range:", style = "color:#333;"),
-        paste0(hist_yr[1], "–", hist_yr[2]),
+        shiny::tags$b("Projection periods:", style = "color:#333;"), fut_txt,
+        shiny::tags$b(" \u00b7 SSPs:", style = "color:#333;"), ssp_txt,
+        shiny::tags$b(" \u00b7 Ensemble result:", style = "color:#333;"), ens_txt,
         shiny::tags$br(),
-        # Line 2 — scenarios
-        shiny::tags$b("Scenarios:", style = "color:#333;"), ssp_txt,
-        shiny::tags$b(" · Periods:", style = "color:#333;"), fut_txt,
-        shiny::tags$b("Ensemble use:", style = "color:#333;"), ens_txt,
+        shiny::tags$b("Simulation residuals:", style = "color:#333;"), res_txt,
         shiny::tags$br(),
-        shiny::tags$b("Ensemble band:", style = "color:#333;"), ens_band_txt,
-        shiny::tags$br(),
-        # Line 3 — coefficient uncertainty
-        shiny::tags$b("Coef uncertainty:", style = "color:#333;"), coef_txt,
-        shiny::tags$br(),
-        shiny::tags$b("Coef band:", style = "color:#333;"), coef_band_txt,
-        shiny::tags$br(),
-        # Line 4 — residuals + poverty line
-        shiny::tags$b("Residuals:", style = "color:#333;"), res_txt,
-        shiny::tags$b(" · Poverty line:", style = "color:#333;"), pov_txt
+        shiny::tags$b("Baseline survey:", style = "color:#333;"), {
+          sel  <- input$baseline_survey %||% baseline_default()
+          ch   <- baseline_survey_choices()
+          nms  <- names(ch)[ch %in% sel]
+          if (length(nms) == 0) "None" else paste(nms, collapse = ", ")
+        }
       )
     })
 
