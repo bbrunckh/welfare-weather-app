@@ -767,10 +767,16 @@ mod_2_01_weathersim_server <- function(id,
               )
             } else if (!is_hist) {
               # Parse SSP/period group from key
-              ssp_parts <- regmatches(key, regexpr("^ssp[^_]+_[^_]+_[^_]+", key))
+              # Group key includes SSP code + period years to avoid collision
+              # across different projection periods for the same SSP.
+              # Key format: ssp{x}_{lo}_{hi}_{start}_{end}_{member}
+              # gk example: ssp3_7_0_2025_2035
+              ssp_code  <- sub("^(ssp[^_]+_[^_]+_[^_]+)_.*", "\\1", key)
               yr_parts  <- regmatches(key, gregexpr("[0-9]{4}", key))[[1L]]
-              ssp_code  <- sub("^(ssp[^_]+)_.*", "\\1", key)
-              gk        <- if (length(ssp_parts) > 0L) ssp_parts else key
+              period    <- if (length(yr_parts) >= 2L)
+                             paste0(yr_parts[[1L]], "_", yr_parts[[2L]])
+                           else "unknown"
+              gk        <- paste0(ssp_code, "_", period)
 
               if (is.null(group_agg[[gk]])) group_agg[[gk]]         <- list()
               if (is.null(group_weather_rep[[gk]])) group_weather_rep[[gk]] <- out$weather_raw
@@ -856,7 +862,8 @@ mod_2_01_weathersim_server <- function(id,
       hist_sim        = hist_sim,
       saved_scenarios = saved_scenarios,
       selected_hist   = selected_hist,
-      selected_fut    = selected_fut
+      selected_fut    = selected_fut,
+      pov_line_sim    = reactive(input$pov_line_sim)
     )
   })
 }

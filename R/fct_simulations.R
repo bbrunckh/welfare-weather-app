@@ -717,10 +717,14 @@ combine_ensemble_results <- function(model_results) {
               else
                 model_results[[1L]]
 
+  # Filter to non-NULL entries with valid value fields before extracting
+  model_results <- Filter(function(x) !is.null(x) && !is.null(x$value), model_results)
+  if (length(model_results) == 0L) return(NULL)
+
   values   <- vapply(model_results, `[[`, numeric(1L), "value")
   value_lo <- vapply(model_results, `[[`, numeric(1L), "value_lo")
   value_hi <- vapply(model_results, `[[`, numeric(1L), "value_hi")
-
+  
   list(
     value       = central$value,
     value_lo    = mean(value_lo, na.rm = TRUE),   # inner band — avg coef uncertainty

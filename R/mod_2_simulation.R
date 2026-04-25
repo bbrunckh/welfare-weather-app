@@ -85,7 +85,8 @@ mod_2_simulation_server <- function(id,
       saved_scenarios = s1$saved_scenarios,
       selected_hist   = s1$selected_hist,
       tabset_id       = "step2_output_tabs",
-      tabset_session  = session
+      tabset_session  = session,
+      pov_line_sim    = reactive(s1$pov_line_sim())
     )
 
     # ---- 3. Diagnostics tab ------------------------------------------------
