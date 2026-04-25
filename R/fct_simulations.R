@@ -829,174 +829,170 @@ resolve_id_col <- function(a, b) {
   if (length(match) == 0L) NULL else match[[1L]]
 }
 
-#' Run the Full Simulation Pipeline for One Scenario Row
+#' Run Simulation Pipeline for One Weather Key
 #'
-#' Combines the three steps that are identical between historical and future
-#' simulation:
-#' \enumerate{
-#'   \item Join raw weather output back to survey covariates via
-#'     `prepare_hist_weather()`.
-#'   \item Generate outcome predictions via `predict_outcome()`.
-#'   \item Back-transform log-scale outcomes via `apply_log_backtransform()`.
-#' }
+#' Prepares counterfactual survey data for one weather key, computes point-
+#' estimate log-welfare predictions, and returns the factor loading matrix for
+#' downstream coefficient uncertainty propagation via
+#' \code{aggregate_with_uncertainty()}.
 #'
-#' @param weather_raw  Data frame returned by `get_weather()$result`.
-#' @param svy          Survey-weather data frame (from `survey_weather()`).
-#' @param sw           Selected weather metadata (from `selected_weather()`).
-#' @param so           Selected outcome metadata (from `selected_outcome()`).
-#' @param model        Fitted model object (`mf$fit3`).
-#' @param residuals    Character. Residual method, e.g. `"original"`.
-#' @param train_data   Data frame used at fit time (`mf$train_data`).
-#' @param engine       Character. Model engine, e.g. `"fixest"`.
-#' @param slim         Logical. When `TRUE`, trim `preds` to only the columns
-#'   required by downstream aggregation and diagnostics (`sim_year`, outcome,
-#'   `.fitted`, `.residual`, and any `weight` column) and trim `weather_raw`
-#'   to location/time keys and weather variable columns.  Dramatically reduces
-#'   memory when processing many ensemble models.  Default `FALSE`.
+#' This function is called once per weather key (historical + future
+#' representatives). It does NOT draw coefficient perturbations — all
+#' uncertainty propagation is deferred to display time via
+#' \code{aggregate_with_uncertainty()}, making poverty line, weights, and
+#' aggregation method fully reactive without re-simulation.
 #'
-#' @return A named list with three elements:
+#' @param weather_raw Data frame. One weather key's prepared data from
+#'   \code{get_weather()} or \code{summarise_ensemble()}.
+#' @param svy Data frame. Survey microdata joined to weather reference data.
+#' @param sw One-row data frame of selected weather variable metadata.
+#' @param so One-row data frame of selected outcome variable metadata.
+#' @param model Fitted \code{fixest} model object.
+#' @param residuals Character. Residual treatment passed through to
+#'   \code{aggregate_with_uncertainty()}. One of \code{"none"},
+#'   \code{"original"}, \code{"normal"}, \code{"resample"}.
+#' @param train_data Data frame. Training data used to fit \code{model}.
+#'   Used to compute training residuals for \code{train_aug}.
+#' @param engine Character. Model engine identifier (e.g. \code{"fixest"}).
+#' @param chol_obj Named list from \code{compute_chol_vcov()} or \code{NULL}.
+#'   When \code{NULL}, \code{F_loading} in the return value is \code{NULL}
+#'   (point estimates only — no coefficient uncertainty).
+#'
+#' @return Named list or \code{NULL} on prediction failure:
 #'   \describe{
-#'     \item{preds}{Data frame of individual-level predictions with the outcome
-#'       column back-transformed where applicable, or \code{NULL} on failure.
-#'       When \code{slim = TRUE}, only essential columns are retained.}
-#'     \item{n_pre_join}{Integer. Number of rows in \code{svy} before the
-#'       weather join. Used by the Diagnostics tab to compute the drop rate.}
-#'     \item{weather_raw}{The raw weather data frame passed in as
-#'       \code{weather_raw}. Stored so the Diagnostics tab can construct the
-#'       full historical weather distribution without a second DB query.
-#'       When \code{slim = TRUE}, only key + weather columns are kept.}
+#'     \item{y_point}{Numeric vector length N. Log-scale point-estimate welfare
+#'       predictions. Back-transformation via \code{exp()} happens inside
+#'       \code{aggregate_with_uncertainty()}, not here.}
+#'     \item{F_loading}{N \eqn{\times} K numeric matrix from
+#'       \code{compute_factor_loading()}, or \code{NULL} when
+#'       \code{chol_obj = NULL}.}
+#'     \item{sim_year}{Integer vector length N. Simulation year per row.}
+#'     \item{weight}{Numeric vector length N or \code{NULL}. Survey weights.}
+#'     \item{id_vec}{Vector length N or \code{NULL}. Household IDs for
+#'       \code{residuals = "original"} matching.}
+#'     \item{id_col}{Character or \code{NULL}. Name of the ID column.}
+#'     \item{n_pre_join}{Integer. Number of survey rows before weather join.}
+#'     \item{weather_raw}{Data frame. The input weather key data (for
+#'       diagnostics).}
+#'     \item{train_aug}{Data frame. Training data augmented with \code{.fitted}
+#'       and \code{.resid} columns for residual drawing in
+#'       \code{aggregate_with_uncertainty()}.}
 #'   }
 #'
+#' @seealso \code{\link{aggregate_with_uncertainty}},
+#'   \code{\link{compute_chol_vcov}}, \code{\link{compute_factor_loading}}
 #' @export
-run_sim_pipeline <- function(weather_raw, svy, sw, so,
-                             model, residuals, train_data, engine,
-                             coef_draws = NULL,
-                             slim = FALSE) {
+run_sim_pipeline <- function(weather_raw,
+                             svy,
+                             sw,
+                             so,
+                             model,
+                             residuals,
+                             train_data,
+                             engine,
+                             chol_obj = NULL) {
+
   n_pre_join    <- nrow(svy)
   survey_wd_sim <- prepare_hist_weather(weather_raw, svy, sw, so$name)
-  id_col        <- if (residuals == "original") resolve_id_col(train_data, survey_wd_sim) else NULL
 
-  # If coef_draws supplied, loop over S draws; otherwise single point-estimate run.
-  # draw_id is NA for the point-estimate path (coef_draws = NULL).
-  run_one_draw <- function(beta_s = NULL) {
+  # Resolve ID column for "original" residual matching
+  id_col <- if (residuals == "original")
+               resolve_id_col(train_data, survey_wd_sim)
+             else
+               NULL
+
+  # ---- Point estimate prediction ------------------------------------------ #
+  # predict_outcome() called ONCE — no coefficient draws here.
+  # All uncertainty propagation is deferred to aggregate_with_uncertainty().
+  pred_out <- tryCatch(
     predict_outcome(
-      model         = model,
-      newdata       = survey_wd_sim,
-      residuals     = residuals,
-      outcome       = so$name,
-      id            = id_col,
-      train_data    = train_data,
-      engine        = engine,
-      beta_override = beta_s
-    )
+      model      = model,
+      newdata    = survey_wd_sim,
+      residuals  = "none",     # residuals drawn at display time, not here
+      outcome    = so$name,
+      id         = id_col,
+      train_data = train_data,
+      engine     = engine
+    ),
+    error = function(e) {
+      warning("[run_sim_pipeline] predict_outcome() failed: ", conditionMessage(e))
+      NULL
+    }
+  )
+
+  if (is.null(pred_out)) {
+    rm(survey_wd_sim)
+    return(NULL)
   }
 
-  preds <- tryCatch({
-    if (is.null(coef_draws)) {
-      # Point-estimate path — existing behaviour, draw_id = NA
-      out <- run_one_draw(NULL)
-      if (!is.null(out)) out$draw_id <- NA_integer_
-      out
-    } else {
-      # Coefficient-draw path: iterate over S rows of coef_draws matrix.
-      # Order of operations:
-      #   1. predict_outcome() with beta_override -> fitted values for this draw
-      #   2. rbind across all S draws, tagging each with draw_id
-      # Residual noise (if requested) is applied independently inside each
-      # predict_outcome() call, preserving the existing residual logic.
-      # ------------------------------------------------------------------
-      # Vectorised path (linear fixest OLS only):
-      # Build X_nonFE and preds_base ONCE, then compute all S predictions
-      # as a single matrix multiply. 30-50x faster than sequential loop.
-      # Falls back to sequential loop for non-fixest, logistic, quantile.
-      # ------------------------------------------------------------------
-      is_vectorisable <- identical(engine, "fixest") &&
-                         !isTRUE(attr(model, "is_logistic")) &&
-                         inherits(model, "fixest")
+  # y_point stays log-scale — back-transformation happens inside
+  # aggregate_with_uncertainty() after coefficient perturbation.
+  # NOTE: apply_log_backtransform() is NOT called here.
+  y_point  <- pred_out$.fitted
 
-      if (is_vectorisable) {
-        message(sprintf(
-          "[wiseapp]   Vectorised: %d draws via matrix multiply (linear OLS)",
-          nrow(coef_draws)
-        ))
-        t_vec_start <- proc.time()[["elapsed"]]
-        result <- predict_outcome_vectorised(
-          model      = model,
-          newdata    = survey_wd_sim,
-          coef_draws = coef_draws,
-          residuals  = residuals,
-          outcome    = so$name,
-          id         = id_col,
-          train_data = train_data,
-          engine     = engine
-        )
-        message(sprintf(
-          "[wiseapp]   Vectorised complete in %.1fs | %d draws x %d rows",
-          proc.time()[["elapsed"]] - t_vec_start,
-          nrow(coef_draws),
-          if (!is.null(result)) nrow(result) %/% nrow(coef_draws) else 0L
-        ))
-        result
-      } else {
-        # Sequential fallback — bootstrap, quantile, logistic, non-fixest
-        S            <- nrow(coef_draws)
-        draw_list    <- vector("list", S)
-        t_loop_start <- proc.time()[["elapsed"]]
-        for (s in seq_len(S)) {
-          beta_s         <- coef_draws[s, ]
-          draw_out       <- run_one_draw(beta_s)
-          if (!is.null(draw_out)) draw_out$draw_id <- s
-          draw_list[[s]] <- draw_out
-          if (s == 1L) {
-            t_first <- proc.time()[["elapsed"]] - t_loop_start
-            message(sprintf(
-              "[wiseapp]   Draw 1/%d done in %.1fs | projecting ~%s for this key",
-              S, t_first, format_elapsed(t_first * S)
-            ))
-          }
-          if (s %% 10L == 0L || s == S) {
-            t_so_far <- proc.time()[["elapsed"]] - t_loop_start
-            message(sprintf(
-              "[wiseapp]   Draw %d/%d | %.0fs elapsed | ~%.0fs remaining",
-              s, S, t_so_far, max(0, (t_so_far / s) * (S - s))
-            ))
-          }
-        }
-        do.call(rbind, draw_list)
+  # ---- Simulation year and weights ---------------------------------------- #
+  sim_year <- pred_out$sim_year
+
+  wt_col   <- grep("^weight$|^hhweight$|^wgt$|^pw$", names(pred_out),
+                   value = TRUE, ignore.case = TRUE)
+  weight   <- if (length(wt_col) > 0L) pred_out[[wt_col[[1L]]]] else NULL
+
+  id_vec   <- if (!is.null(id_col) && id_col %in% names(pred_out))
+                pred_out[[id_col]]
+              else
+                NULL
+
+  # ---- Factor loading matrix ---------------------------------------------- #
+  # Computed once per key — not per draw.
+  # F_loading = X_nonFE %*% L  where L is the Cholesky factor of Sigma.
+  # NULL when chol_obj = NULL (point estimates only).
+  F_loading <- NULL
+  if (!is.null(chol_obj)) {
+    X_nonFE <- tryCatch(
+      model.matrix(model, data = survey_wd_sim, type = "rhs"),
+      error = function(e) {
+        warning("[run_sim_pipeline] model.matrix() failed: ", conditionMessage(e))
+        NULL
       }
+    )
+
+    if (!is.null(X_nonFE)) {
+      # Column alignment guard — surfaces misalignment bugs immediately
+      stopifnot(
+        "X_nonFE columns must match chol_obj$beta names" =
+          identical(colnames(X_nonFE), names(chol_obj$beta))
+      )
+      F_loading <- compute_factor_loading(X_nonFE, chol_obj)
     }
+  }
+
+  # ---- Training augmentation for residual drawing ------------------------- #
+  # train_aug carries .resid for "original" and "resample" residual paths
+  # inside aggregate_with_uncertainty(). Computed once per pipeline call.
+  train_aug <- tryCatch({
+    fitted_train <- as.numeric(stats::predict(model, newdata = train_data))
+    train_data |>
+      dplyr::mutate(
+        .fitted = fitted_train,
+        .resid  = !!rlang::sym(so$name) - fitted_train
+      )
   }, error = function(e) {
-    warning("[run_sim_pipeline] predict_outcome() failed: ", conditionMessage(e))
+    warning("[run_sim_pipeline] train_aug computation failed: ", conditionMessage(e))
     NULL
   })
+
   rm(survey_wd_sim)
 
-  if (is.null(preds)) return(NULL)
-  preds <- apply_log_backtransform(preds, so)
-
-  if (slim) {
-    # Keep only columns needed by aggregate_sim_preds():
-    # sim_year, year, outcome, .fitted, .residual, draw_id (coefficient
-    # uncertainty bands), and any weight column for aggregation.
-    # NOTE: weight column may have any of several names depending on survey —
-    # grep all known variants rather than checking only "weight".
-    # draw_id must be retained here or the two-stage aggregation in
-    # aggregate_sim_preds() cannot separate coefficient draws.
-    keep    <- c("sim_year", "year", so$name, ".fitted", ".residual", "draw_id")
-    wt_cols <- grep("^weight$|^hhweight$|^wgt$|^pw$", names(preds),
-                    value = TRUE, ignore.case = TRUE)
-    keep    <- c(keep, wt_cols)
-    preds   <- preds[, intersect(keep, names(preds)), drop = FALSE]
-
-    # Keep only key + weather columns from weather_raw for diagnostics.
-    weather_keep <- c("code", "year", "survname", "loc_id", "timestamp", sw$name)
-    weather_raw  <- weather_raw[, intersect(weather_keep, names(weather_raw)), drop = FALSE]
-  }
-
   list(
-    preds       = preds,
+    y_point     = y_point,
+    F_loading   = F_loading,
+    sim_year    = sim_year,
+    weight      = weight,
+    id_vec      = id_vec,
+    id_col      = id_col,
     n_pre_join  = n_pre_join,
-    weather_raw = weather_raw
+    weather_raw = weather_raw,
+    train_aug   = train_aug
   )
 }
 
