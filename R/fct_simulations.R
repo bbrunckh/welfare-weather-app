@@ -172,13 +172,12 @@ compute_cluster_counts <- function(data) {
   # Runtime warnings — surface immediately at model fit time
   if (!is.na(g_loc) && g_loc < 40L) {
     warning(sprintf(
-      "[SE] Only %d clusters at loc_id. VCV SEs may be unreliable. ",
-      "Wild cluster bootstrap recommended (not yet implemented).",
-      G = g_loc
+      "[SE] Only %d clusters at ~loc_id. VCV SEs may be unreliable. Wild cluster bootstrap recommended (not yet implemented).",
+      g_loc
     ))
   } else if (!is.na(g_loc) && g_loc < 50L) {
     message(sprintf(
-      "[SE] %d clusters at loc_id — borderline. Flag in methodology note.",
+      "[SE] %d clusters at ~loc_id — borderline. Flag in methodology note.",
       g_loc
     ))
   }
@@ -186,6 +185,552 @@ compute_cluster_counts <- function(data) {
   counts
 }
 
+# ---------------------------------------------------------------------------- #
+# Cholesky uncertainty propagation                                              #
+# ---------------------------------------------------------------------------- #
+
+#' Compute Cholesky Factor of Model VCV Matrix
+#'
+#' Computes the lower-triangular Cholesky factor of the coefficient covariance
+#' matrix for the non-fixed-effect coefficients of a fitted \code{fixest}
+#' model. Used once per fitted model — not per weather key.
+#'
+#' The Cholesky decomposition \eqn{L L' = \Sigma} allows efficient K-dimensional
+#' Monte Carlo draws: instead of drawing full N-dimensional prediction vectors,
+#' draw \eqn{z_s \sim N(0, I_K)} and compute the perturbation as
+#' \eqn{F_i \cdot z_s} where \eqn{F = X_{nonFE} L'} is the factor loading
+#' matrix computed once per key in \code{compute_factor_loading()}.
+#'
+#' @param fit A fitted \code{fixest} model object (from \code{fixest::feols()}).
+#' @param vcov_spec A one-sided formula specifying the clustering structure for
+#'   the VCV matrix. Defaults to \code{COEF_VCOV_SPEC} (\code{~loc_id}).
+#'   See \code{COEF_VCOV_SPEC_MOULTON} and \code{COEF_VCOV_SPEC_CONSERVATIVE}
+#'   for alternatives.
+#'
+#' @return A named list:
+#'   \describe{
+#'     \item{L}{K \eqn{\times} K lower-triangular Cholesky factor of
+#'       \eqn{\Sigma}.}
+#'     \item{K}{Integer. Number of non-FE coefficients.}
+#'     \item{beta}{Named numeric vector of point-estimate non-FE
+#'       coefficients.}
+#'     \item{spec}{The VCV formula used.}
+#'   }
+#'
+#' @seealso \code{\link{compute_factor_loading}},
+#'   \code{\link{aggregate_with_uncertainty}}
+#' @export
+compute_chol_vcov <- function(fit, vcov_spec = COEF_VCOV_SPEC) {
+  stopifnot(
+    "fit must be a fixest model" = inherits(fit, "fixest")
+  )
+
+  beta  <- coef(fit)
+  Sigma <- vcov(fit, vcov = vcov_spec)
+
+  # Cholesky decomposition — chol() returns upper triangular R such that
+  # t(R) %*% R == Sigma. We store L = t(R) (lower triangular) so that
+  # L %*% t(L) == Sigma, consistent with the factor loading formula
+  # F = X_nonFE %*% t(L).
+  L <- tryCatch(
+    t(chol(Sigma)),
+    error = function(e) stop(sprintf(
+      "[compute_chol_vcov] Cholesky decomposition failed. ",
+      "Check that VCV matrix is positive definite at spec '%s': %s",
+      deparse(vcov_spec), conditionMessage(e)
+    ))
+  )
+
+  list(
+    L    = L,
+    K    = nrow(L),
+    beta = beta,
+    spec = vcov_spec
+  )
+}
+
+
+#' Compute Factor Loading Matrix for Coefficient Uncertainty
+#'
+#' Computes the N \eqn{\times} K factor loading matrix
+#' \eqn{F = X_{nonFE} L'} where \eqn{L} is the Cholesky factor from
+#' \code{compute_chol_vcov()} and \eqn{X_{nonFE}} is the non-fixed-effect
+#' design matrix for the counterfactual data.
+#'
+#' The factor loading encodes how coefficient uncertainty propagates to
+#' prediction uncertainty for each household. Given a K-dimensional standard
+#' normal draw \eqn{z_s \sim N(0, I_K)}, the perturbed log-welfare prediction
+#' for household \eqn{i} under draw \eqn{s} is:
+#' \deqn{y_i^{(s)} = y_i^{point} + F_i \cdot z_s}
+#'
+#' This is mathematically identical to the previous N \eqn{\times} S matrix
+#' approach but requires only K-dimensional draws (K ~ 5-20) instead of
+#' N-dimensional draws (N ~ 10,000), giving ~200x speedup.
+#'
+#' @param X_nonFE Numeric matrix. N \eqn{\times} K non-FE design matrix from
+#'   \code{model.matrix(model, data = newdata, type = "rhs")}. Column names
+#'   must match \code{names(chol_obj$beta)} exactly.
+#' @param chol_obj Named list returned by \code{compute_chol_vcov()}.
+#'
+#' @return Numeric matrix of dimensions N \eqn{\times} K. Each row \eqn{i}
+#'   is the factor loading vector for household \eqn{i}.
+#'
+#' @seealso \code{\link{compute_chol_vcov}},
+#'   \code{\link{aggregate_with_uncertainty}}
+#' @export
+compute_factor_loading <- function(X_nonFE, chol_obj) {
+  stopifnot(
+    "X_nonFE must be a numeric matrix"        = is.matrix(X_nonFE) && is.numeric(X_nonFE),
+    "chol_obj must contain L and beta"        = all(c("L", "beta") %in% names(chol_obj)),
+    "X_nonFE columns must match chol_obj$beta names" =
+      identical(colnames(X_nonFE), names(chol_obj$beta))
+  )
+
+  # F = X_nonFE %*% t(L)   →   N × K loading matrix
+  # Each row i: F_i = x_i' L'  such that  F_i F_i' = x_i' Σ x_i
+  X_nonFE %*% chol_obj$L #Bug fixed here, orriginally t(chol_obj$L) - may require other fixes in description.
+}
+#' Resolve Aggregation Function from Method String
+#'
+#' Maps an aggregation method string to a function of the form
+#' \code{function(welfare, weights, pov_line) -> scalar}. Used by
+#' \code{aggregate_with_uncertainty()} to compute the headline statistic
+#' for each Monte Carlo draw.
+#'
+#' @param method Character. One of \code{"mean"}, \code{"median"},
+#'   \code{"headcount_ratio"}, \code{"gap"}, \code{"fgt2"},
+#'   \code{"gini"}, \code{"prosperity_gap"}, \code{"avg_poverty"},
+#'   \code{"total"}.
+#'
+#' @return A function \code{function(welfare, weights, pov_line)} returning
+#'   a single numeric scalar.
+#'
+#' @export
+resolve_agg_fn <- function(method) {
+  switch(method,
+
+    mean = function(welfare, weights, pov_line) {
+      if (!is.null(weights))
+        stats::weighted.mean(welfare, weights, na.rm = TRUE)
+      else
+        mean(welfare, na.rm = TRUE)
+    },
+
+    median = function(welfare, weights, pov_line) {
+      if (!is.null(weights)) {
+        # Weighted median via cumulative weight
+        ord  <- order(welfare)
+        w    <- weights[ord] / sum(weights, na.rm = TRUE)
+        cumw <- cumsum(w)
+        welfare[ord][which(cumw >= 0.5)[1L]]
+      } else {
+        stats::median(welfare, na.rm = TRUE)
+      }
+    },
+
+    total = function(welfare, weights, pov_line) {
+      if (!is.null(weights))
+        sum(welfare * weights, na.rm = TRUE)
+      else
+        sum(welfare, na.rm = TRUE)
+    },
+
+    headcount_ratio = function(welfare, weights, pov_line) {
+      stopifnot("pov_line required for headcount_ratio" = !is.null(pov_line))
+      poor <- as.numeric(welfare < pov_line)
+      if (!is.null(weights))
+        stats::weighted.mean(poor, weights, na.rm = TRUE)
+      else
+        mean(poor, na.rm = TRUE)
+    },
+
+    gap = function(welfare, weights, pov_line) {
+      stopifnot("pov_line required for gap" = !is.null(pov_line))
+      gaps <- pmax(pov_line - welfare, 0) / pov_line
+      if (!is.null(weights))
+        stats::weighted.mean(gaps, weights, na.rm = TRUE)
+      else
+        mean(gaps, na.rm = TRUE)
+    },
+
+    fgt2 = function(welfare, weights, pov_line) {
+      stopifnot("pov_line required for fgt2" = !is.null(pov_line))
+      sq <- (pmax(pov_line - welfare, 0) / pov_line)^2
+      if (!is.null(weights))
+        stats::weighted.mean(sq, weights, na.rm = TRUE)
+      else
+        mean(sq, na.rm = TRUE)
+    },
+
+    gini = function(welfare, weights, pov_line) {
+      # Weighted Gini via the covariance formula
+      n <- length(welfare)
+      if (n < 2L) return(NA_real_)
+      if (!is.null(weights)) {
+        ord  <- order(welfare)
+        w    <- weights[ord] / sum(weights, na.rm = TRUE)
+        y    <- welfare[ord]
+        F_i  <- cumsum(w) - w / 2
+        2 * sum(w * y * F_i) / sum(w * y) - 1
+      } else {
+        ord <- order(welfare)
+        y   <- welfare[ord]
+        n   <- length(y)
+        2 * sum((seq_len(n) / n - 0.5) * y) / (n * mean(y))
+      }
+    },
+
+    prosperity_gap = function(welfare, weights, pov_line) {
+      stopifnot("pov_line required for prosperity_gap" = !is.null(pov_line))
+      gaps <- pmax(pov_line - welfare, 0)
+      if (!is.null(weights))
+        stats::weighted.mean(gaps, weights, na.rm = TRUE)
+      else
+        mean(gaps, na.rm = TRUE)
+    },
+
+    avg_poverty = function(welfare, weights, pov_line) {
+      stopifnot("pov_line required for avg_poverty" = !is.null(pov_line))
+      poor <- welfare < pov_line
+      if (sum(poor, na.rm = TRUE) == 0L) return(NA_real_)
+      if (!is.null(weights))
+        stats::weighted.mean(welfare[poor], weights[poor], na.rm = TRUE)
+      else
+        mean(welfare[poor], na.rm = TRUE)
+    },
+
+    stop(sprintf("[resolve_agg_fn] Unknown method: '%s'", method))
+  )
+}
+
+
+#' Resolve Number of Monte Carlo Draws from Band Width Selection
+#'
+#' Maps the user-facing band width UI selection to the number of K-dimensional
+#' Monte Carlo draws \code{S} for \code{aggregate_with_uncertainty()}.
+#'
+#' After the Cholesky rewrite, S draws are K-dimensional (K ~ 5-20
+#' coefficients) rather than N-dimensional (N ~ 10,000 households).
+#' S is no longer a performance constraint — targets are set by the
+#' precision required for the selected percentile band.
+#'
+#' @param band_width Character. One of \code{"p10_p90"} (default),
+#'   \code{"p025_p975"}, \code{"p005_p995"}, \code{"minmax"},
+#'   \code{"none"}.
+#'
+#' @return Integer. Number of Monte Carlo draws. \code{0L} when
+#'   \code{band_width = "none"} (point estimate only).
+#'
+#' @export
+resolve_S <- function(band_width) {
+  switch(band_width %||% "p10_p90",
+    p10_p90   = 150L,
+    p025_p975 = 250L,
+    p005_p995 = 350L,
+    minmax    = 150L,
+    none      = 0L,
+              150L    # default fallback
+  )
+}
+
+
+#' Resolve Band Quantiles from Band Width Selection
+#'
+#' Maps the user-facing band width UI selection to a named numeric vector
+#' of lower and upper quantile values for percentile band computation.
+#'
+#' @param band_width Character. One of \code{"p10_p90"}, \code{"p025_p975"},
+#'   \code{"p005_p995"}, \code{"minmax"}, \code{"none"}.
+#'
+#' @return Named numeric vector \code{c(lo = ..., hi = ...)} or \code{NULL}
+#'   when \code{band_width = "none"}.
+#'
+#' @export
+resolve_band_q <- function(band_width) {
+  switch(band_width %||% "p10_p90",
+    p10_p90   = c(lo = 0.10,  hi = 0.90),
+    p025_p975 = c(lo = 0.025, hi = 0.975),
+    p005_p995 = c(lo = 0.005, hi = 0.995),
+    minmax    = c(lo = 0.00,  hi = 1.00),
+    none      = NULL,
+              c(lo = 0.10,  hi = 0.90)
+  )
+}
+
+# ---------------------------------------------------------------------------- #
+# Residual drawing helper                                                       #
+# ---------------------------------------------------------------------------- #
+
+#' Draw a Residual Vector for Welfare Simulation
+#'
+#' Draws a length-N residual vector for addition to log-scale welfare
+#' predictions. Called once per \code{aggregate_with_uncertainty()} invocation
+#' and broadcast across all S Monte Carlo draws (Option A: residuals are
+#' independent of coefficient perturbations).
+#'
+#' @param residuals Character. One of \code{"none"}, \code{"original"},
+#'   \code{"normal"}, \code{"resample"}.
+#' @param train_aug Data frame. Augmented training data with \code{.resid}
+#'   column and optionally an id column for household matching. Returned by
+#'   \code{run_sim_pipeline()} as \code{$train_aug}. Required for all
+#'   \code{residuals} options except \code{"none"}.
+#' @param N Integer. Number of households in the simulation newdata.
+#' @param id_vec Optional character/integer vector of length N. Household IDs
+#'   in simulation newdata for \code{residuals = "original"} matching.
+#' @param id_col Optional character. Name of the ID column in \code{train_aug}.
+#'
+#' @return Numeric vector of length N. Zero vector when
+#'   \code{residuals = "none"}.
+#'
+#' @noRd
+draw_residuals_vec <- function(residuals,
+                               train_aug = NULL,
+                               N,
+                               id_vec  = NULL,
+                               id_col  = NULL) {
+  switch(residuals,
+
+    none = rep(0, N),
+
+    original = {
+      if (is.null(train_aug) || !".resid" %in% names(train_aug))
+        stop("[draw_residuals_vec] train_aug with .resid required for residuals = 'original'.")
+      if (is.null(id_vec) || is.null(id_col))
+        stop("[draw_residuals_vec] id_vec and id_col required for residuals = 'original'.")
+      if (!id_col %in% names(train_aug))
+        stop(sprintf("[draw_residuals_vec] id_col '%s' not found in train_aug.", id_col))
+
+      # Match simulation households to their training residuals by ID.
+      # Unmatched households fall back to resampled residual.
+      resid_lookup <- stats::setNames(train_aug$.resid, train_aug[[id_col]])
+      matched      <- as.character(id_vec) %in% names(resid_lookup)
+
+      out <- numeric(N)
+      out[matched]  <- resid_lookup[as.character(id_vec[matched])]
+      out[!matched] <- sample(train_aug$.resid, sum(!matched), replace = TRUE)
+      out
+    },
+
+    normal = {
+      if (is.null(train_aug) || !".resid" %in% names(train_aug))
+        stop("[draw_residuals_vec] train_aug with .resid required for residuals = 'normal'.")
+      sigma_hat <- stats::sd(train_aug$.resid, na.rm = TRUE)
+      stats::rnorm(N, mean = 0, sd = sigma_hat)
+    },
+
+    resample = {
+      if (is.null(train_aug) || !".resid" %in% names(train_aug))
+        stop("[draw_residuals_vec] train_aug with .resid required for residuals = 'resample'.")
+      sample(train_aug$.resid, N, replace = TRUE)
+    },
+
+    stop(sprintf("[draw_residuals_vec] Unknown residuals option: '%s'", residuals))
+  )
+}
+
+
+# ---------------------------------------------------------------------------- #
+# Core uncertainty aggregation                                                  #
+# ---------------------------------------------------------------------------- #
+
+#' Aggregate Welfare Predictions with Coefficient Uncertainty
+#'
+#' The core function of the Cholesky uncertainty propagation architecture.
+#' Given point-estimate log-welfare predictions and a factor loading matrix,
+#' draws S K-dimensional perturbations, back-transforms to welfare levels,
+#' applies residuals, and computes any aggregate statistic with full
+#' coefficient uncertainty bands.
+#'
+#' Residuals are drawn once and broadcast to all S draws (Option A), so
+#' residual noise is independent of coefficient perturbations. This is
+#' methodologically correct for isolating coefficient uncertainty.
+#'
+#' @param y_point Numeric vector of length N. Log-scale point-estimate welfare
+#'   predictions from \code{run_sim_pipeline()$y_point}.
+#' @param F_loading Numeric matrix N \eqn{\times} K. Factor loading matrix
+#'   from \code{compute_factor_loading()}. Pass \code{NULL} to skip
+#'   coefficient uncertainty (point estimate only).
+#' @param agg_fn Function of the form
+#'   \code{function(welfare, weights, pov_line) -> scalar}. Created by
+#'   \code{resolve_agg_fn()}.
+#' @param S Integer. Number of K-dimensional Monte Carlo draws. Use
+#'   \code{resolve_S()} to set from UI band width selection. \code{0L}
+#'   returns point estimate only.
+#' @param residuals Character. Residual treatment. One of \code{"none"},
+#'   \code{"original"}, \code{"normal"}, \code{"resample"}.
+#'   See \code{draw_residuals_vec()} for details.
+#' @param train_aug Data frame or \code{NULL}. Augmented training data with
+#'   \code{.resid} column. Required for all residual options except
+#'   \code{"none"}.
+#' @param weights Numeric vector of length N or \code{NULL}. Survey weights.
+#' @param pov_line Numeric scalar or \code{NULL}. Poverty line in welfare
+#'   units (post back-transformation). Required for FGT/headcount methods.
+#' @param id_vec Vector of length N or \code{NULL}. Household IDs for
+#'   \code{residuals = "original"} matching.
+#' @param id_col Character or \code{NULL}. ID column name in
+#'   \code{train_aug}.
+#' @param is_log Logical. If \code{TRUE} (default), back-transforms via
+#'   \code{exp()} before aggregation. Set \code{FALSE} for non-log outcomes.
+#' @param band_q Named numeric vector \code{c(lo = ..., hi = ...)} from
+#'   \code{resolve_band_q()}. Determines the percentile band reported.
+#'   Defaults to 80\% band (10th/90th).
+#' @param seed Integer or \code{NULL}. Random seed for reproducibility.
+#'
+#' @return Named list:
+#'   \describe{
+#'     \item{value}{Numeric scalar. Point estimate of the aggregate statistic.}
+#'     \item{value_lo}{Numeric scalar. Lower percentile across S draws.}
+#'     \item{value_p50}{Numeric scalar. Median across S draws.}
+#'     \item{value_hi}{Numeric scalar. Upper percentile across S draws.}
+#'     \item{draw_values}{Numeric vector length S. Per-draw scalar aggregates
+#'       for paired difference uncertainty in Module 3.}
+#'   }
+#'
+#' @seealso \code{\link{compute_chol_vcov}}, \code{\link{compute_factor_loading}},
+#'   \code{\link{resolve_agg_fn}}, \code{\link{combine_ensemble_results}}
+#' @export
+aggregate_with_uncertainty <- function(y_point,
+                                       F_loading,
+                                       agg_fn,
+                                       S          = 150L,
+                                       residuals  = "none",
+                                       train_aug  = NULL,
+                                       weights    = NULL,
+                                       pov_line   = NULL,
+                                       id_vec     = NULL,
+                                       id_col     = NULL,
+                                       is_log     = TRUE,
+                                       band_q     = c(lo = 0.10, hi = 0.90),
+                                       seed       = NULL) {
+
+  N <- length(y_point)
+  stopifnot(
+    "y_point must be a numeric vector"    = is.numeric(y_point) && length(y_point) > 0,
+    "S must be a non-negative integer"    = is.numeric(S) && S >= 0,
+    "band_q must have names lo and hi"    = is.null(band_q) ||
+                                            (all(c("lo", "hi") %in% names(band_q)))
+  )
+
+  if (!is.null(seed)) set.seed(seed)
+
+  # ---- Point estimate ------------------------------------------------------- #
+  # Residuals drawn once — broadcast across all S draws (Option A).
+  resid_vec  <- draw_residuals_vec(residuals, train_aug, N, id_vec, id_col)
+  welfare_pt <- if (is_log) exp(y_point + resid_vec) else y_point + resid_vec
+  value_pt   <- agg_fn(welfare_pt, weights, pov_line)
+
+  # ---- No uncertainty path -------------------------------------------------- #
+  if (is.null(F_loading) || S == 0L) {
+    return(list(
+      value       = value_pt,
+      value_lo    = value_pt,
+      value_p50   = value_pt,
+      value_hi    = value_pt,
+      draw_values = value_pt
+    ))
+  }
+
+  stopifnot(
+    "F_loading must be a numeric matrix"  = is.matrix(F_loading) && is.numeric(F_loading),
+    "F_loading rows must match y_point"   = nrow(F_loading) == N
+  )
+
+  K <- ncol(F_loading)
+
+  # ---- K-dimensional Monte Carlo draws -------------------------------------- #
+  # Draw S × K standard normal matrix — each row z_s ~ N(0, I_K).
+  # Perturbation for household i under draw s:
+  #   delta_i_s = F_loading[i, ] %*% z_s
+  # Full perturbed log-welfare:
+  #   y_i_s = y_point_i + delta_i_s + resid_vec_i
+  Z <- matrix(stats::rnorm(S * K), nrow = S, ncol = K)
+
+  # F_loading %*% t(Z) gives N × S perturbation matrix — each column is
+  # one draw's perturbation across all N households.
+  perturbations <- F_loading %*% t(Z)   # N × S
+
+  draw_vals <- vapply(seq_len(S), function(s) {
+    y_s       <- y_point + perturbations[, s] + resid_vec
+    welfare_s <- if (is_log) exp(y_s) else y_s
+    agg_fn(welfare_s, weights, pov_line)
+  }, numeric(1L))
+
+  # ---- Percentile bands ----------------------------------------------------- #
+  lo_q <- if (!is.null(band_q)) band_q[["lo"]] else 0.10
+  hi_q <- if (!is.null(band_q)) band_q[["hi"]] else 0.90
+
+  list(
+    value       = value_pt,
+    value_lo    = stats::quantile(draw_vals, lo_q, na.rm = TRUE),
+    value_p50   = stats::quantile(draw_vals, 0.50, na.rm = TRUE),
+    value_hi    = stats::quantile(draw_vals, hi_q, na.rm = TRUE),
+    draw_values = draw_vals
+  )
+}
+
+
+#' Combine Per-Model Ensemble Results into Inner and Outer Uncertainty Bands
+#'
+#' Takes a named list of \code{aggregate_with_uncertainty()} outputs — one per
+#' ensemble representative key (\code{ensemble_mean}, \code{ensemble_lo},
+#' \code{ensemble_hi}) — and produces a single row with:
+#' \itemize{
+#'   \item Inner band: average coefficient uncertainty across ensemble members
+#'   \item Outer band: spread of point estimates across ensemble members
+#'   \item Paired \code{draw_values} from the mean representative for Module 3
+#' }
+#'
+#' @param model_results Named list. Each entry is the return value of
+#'   \code{aggregate_with_uncertainty()} for one ensemble representative key.
+#'   Must contain at least one entry named \code{*_ensemble_mean} or the
+#'   first entry is used as the central estimate.
+#'
+#' @return Named list:
+#'   \describe{
+#'     \item{value}{Numeric. Central estimate (from mean representative).}
+#'     \item{value_lo}{Numeric. Inner band lower (avg \code{value_lo} across
+#'       members).}
+#'     \item{value_hi}{Numeric. Inner band upper (avg \code{value_hi} across
+#'       members).}
+#'     \item{model_lo}{Numeric. Outer band lower (min point estimate across
+#'       members).}
+#'     \item{model_hi}{Numeric. Outer band upper (max point estimate across
+#'       members).}
+#'     \item{draw_values}{Numeric vector. Paired draws from the mean
+#'       representative — used for Module 3 difference uncertainty.}
+#'     \item{n_members}{Integer. Number of ensemble members combined.}
+#'   }
+#'
+#' @seealso \code{\link{aggregate_with_uncertainty}}
+#' @export
+combine_ensemble_results <- function(model_results) {
+  stopifnot(
+    "model_results must be a non-empty named list" =
+      is.list(model_results) && length(model_results) > 0
+  )
+
+  # Identify the mean representative as the central estimate.
+  # Falls back to first entry if no *_ensemble_mean key present.
+  mean_key <- grep("ensemble_mean", names(model_results), value = TRUE)
+  central  <- if (length(mean_key) > 0L)
+                model_results[[mean_key[[1L]]]]
+              else
+                model_results[[1L]]
+
+  values   <- vapply(model_results, `[[`, numeric(1L), "value")
+  value_lo <- vapply(model_results, `[[`, numeric(1L), "value_lo")
+  value_hi <- vapply(model_results, `[[`, numeric(1L), "value_hi")
+
+  list(
+    value       = central$value,
+    value_lo    = mean(value_lo, na.rm = TRUE),   # inner band — avg coef uncertainty
+    value_hi    = mean(value_hi, na.rm = TRUE),   # inner band — avg coef uncertainty
+    model_lo    = min(values,    na.rm = TRUE),   # outer band — ensemble spread
+    model_hi    = max(values,    na.rm = TRUE),   # outer band — ensemble spread
+    draw_values = central$draw_values,            # paired draws from mean representative
+    n_members   = length(model_results)
+  )
+}
 
 #' Draw Coefficient Vectors from a Fitted Model
 #'
