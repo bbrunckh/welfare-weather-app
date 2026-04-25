@@ -382,7 +382,6 @@ run_policy_pipeline <- function(hist_sim,
     residuals   = residuals,
     train_data  = train_data,
     engine      = engine,
-    slim        = FALSE
   )
 
   hist_out <- list(
@@ -420,7 +419,6 @@ run_policy_pipeline <- function(hist_sim,
             residuals   = residuals,
             train_data  = train_data,
             engine      = engine,
-            slim        = TRUE
           ),
           error = function(e) {
             warning("[run_policy_pipeline] scenario '", nm, "' model '", mn,
@@ -457,7 +455,6 @@ run_policy_pipeline <- function(hist_sim,
           residuals   = residuals,
           train_data  = train_data,
           engine      = engine,
-          slim        = TRUE
         ),
         error = function(e) {
           warning("[run_policy_pipeline] scenario '", nm, "' failed: ",

@@ -185,14 +185,14 @@ mod_2_03_diagnostics_server <- function(id,
     weight_col_diag <- reactive({
       req(hist_sim())
       if (!isTRUE(input$use_weights_diag)) return(NULL)
-      if ("weight" %in% names(hist_sim()$preds)) "weight" else NULL
+      if (!is.null(hist_sim()$pipeline$weight)) "weight" else NULL
     })
 
     output$weight_status_diag_ui <- shiny::renderUI({
       req(hist_sim())
       # Detect weight column independently of the toggle -- this allows
       # the amber state when the column exists but the toggle is OFF.
-      has_w  <- "weight" %in% names(hist_sim()$preds)
+      has_w  <- !is.null(hist_sim()$pipeline$weight)
       tog_on <- isTRUE(input$use_weights_diag)
       if (has_w && tog_on)
         shiny::tags$p(
@@ -215,7 +215,7 @@ mod_2_03_diagnostics_server <- function(id,
     ridge_kde_data <- reactive({
       req(hist_sim())
       build_ridge_kde_data(
-        hist_preds    = hist_sim()$preds,
+        hist_preds    = hist_sim()$pipeline,
         scenario_list = list(),  # scenario preds not retained — see architecture note
         outcome_name  = hist_sim()$so$name,
         actual_vals   = {
@@ -236,8 +236,37 @@ mod_2_03_diagnostics_server <- function(id,
     # Fixed at mean / no deviation — appropriate for a diagnostic view.
     agg_hist_diag <- reactive({
       req(hist_sim())
-      aggregate_sim_preds(hist_sim()$preds, hist_sim()$so,
-                          "mean", "none", FALSE, NULL, weight_col_diag())
+      req(!is.null(hist_sim()$pipeline))
+      # Stub — calls aggregate_with_uncertainty() for mean aggregate.
+      # Full diagnostics decomposition chart to be reworked in Phase 3.
+      tryCatch({
+        sim_years <- sort(unique(hist_sim()$pipeline$sim_year))
+        agg_fn    <- resolve_agg_fn("mean")
+        out <- dplyr::bind_rows(lapply(sim_years, function(yr) {
+          idx    <- hist_sim()$pipeline$sim_year == yr
+          yr_res <- aggregate_with_uncertainty(
+            y_point   = hist_sim()$pipeline$y_point[idx],
+            F_loading = NULL,
+            agg_fn    = agg_fn,
+            S         = 0L,
+            residuals = "none",
+            is_log    = isTRUE(hist_sim()$so$transform == "log")
+          )
+          tibble::tibble(
+            sim_year  = yr,
+            value     = yr_res$value,
+            value_lo  = yr_res$value_lo,
+            value_hi  = yr_res$value_hi,
+            agg_method = "mean",
+            weighted   = FALSE,
+            scenario   = "Historical"
+          )
+        }))
+        list(out = out, x_label = "Mean welfare")
+      }, error = function(e) {
+        warning("[agg_hist_diag] failed: ", conditionMessage(e))
+        NULL
+      })
     })
 
     agg_scenarios_diag <- reactive({
@@ -245,13 +274,30 @@ mod_2_03_diagnostics_server <- function(id,
       if (length(sc) == 0) return(list())
       lapply(sc, function(s) {
         tryCatch({
-          if (!is.null(s$agg)) {
-            # New schema: filter pre-aggregated summary by method = "mean"
-            out <- dplyr::filter(s$agg, .data$agg_method == "mean")
+          if (!is.null(s$pipelines)) {
+            pipe      <- s$pipelines[[1L]]
+            sim_years <- sort(unique(pipe$sim_year))
+            agg_fn    <- resolve_agg_fn("mean")
+            out <- dplyr::bind_rows(lapply(sim_years, function(yr) {
+              idx    <- pipe$sim_year == yr
+              yr_res <- aggregate_with_uncertainty(
+                y_point   = pipe$y_point[idx],
+                F_loading = NULL,
+                agg_fn    = agg_fn,
+                S         = 0L,
+                residuals = "none",
+                is_log    = isTRUE(s$so$transform == "log")
+              )
+              tibble::tibble(
+                sim_year   = yr,
+                value      = yr_res$value,
+                value_lo   = yr_res$value_lo,
+                value_hi   = yr_res$value_hi,
+                agg_method = "mean",
+                weighted   = FALSE
+              )
+            }))
             list(out = out, x_label = "Mean welfare")
-          } else if (!is.null(s$preds)) {
-            # Legacy fallback
-            aggregate_sim_preds(s$preds, s$so, "mean", "none", FALSE, NULL, weight_col_diag())
           } else NULL
         }, error = function(e) NULL)
       })
@@ -365,7 +411,7 @@ mod_2_03_diagnostics_server <- function(id,
 
     output$diag_weather_density <- renderPlot({
       req(hist_sim(), survey_weather())
-      req(!is.null(hist_sim()$weather_raw))
+      req(!is.null(hist_sim()$pipeline$weather_prepared))
       vars <- input$diag_weather_vars
       req(length(vars) > 0)
 
@@ -378,7 +424,7 @@ mod_2_03_diagnostics_server <- function(id,
 
       plot_weather_density_panel(
         survey_weather   = survey_weather(),
-        weather_raw      = hist_sim()$weather_raw,
+        weather_raw      = hist_sim()$pipeline$weather_prepared,
         weather_vars     = vars,
         weather_labels   = lbl_map,
         scenario_weather = scenario_weather_data(),

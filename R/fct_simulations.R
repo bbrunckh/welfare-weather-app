@@ -724,7 +724,7 @@ combine_ensemble_results <- function(model_results) {
   values   <- vapply(model_results, `[[`, numeric(1L), "value")
   value_lo <- vapply(model_results, `[[`, numeric(1L), "value_lo")
   value_hi <- vapply(model_results, `[[`, numeric(1L), "value_hi")
-  
+
   list(
     value       = central$value,
     value_lo    = mean(value_lo, na.rm = TRUE),   # inner band — avg coef uncertainty
@@ -984,7 +984,10 @@ run_sim_pipeline <- function(weather_raw,
     warning("[run_sim_pipeline] train_aug computation failed: ", conditionMessage(e))
     NULL
   })
-
+  
+  # Store prepared weather data for diagnostics plots — has loc_id, int_month
+  # joined from svy. Used by plot_weather_density_panel() in mod_2_03.
+  weather_prepared <- survey_wd_sim
   rm(survey_wd_sim)
 
   list(
@@ -996,6 +999,7 @@ run_sim_pipeline <- function(weather_raw,
     id_col      = id_col,
     n_pre_join  = n_pre_join,
     weather_raw = weather_raw,
+    weather_prepared = weather_prepared,
     train_aug   = train_aug
   )
 }

@@ -207,12 +207,12 @@ mod_3_06_results_server <- function(id,
     weight_col <- reactive({
       req(baseline_hist_sim())
       if (!isTRUE(input$use_weights)) return(NULL)
-      if ("weight" %in% names(baseline_hist_sim()$preds)) "weight" else NULL
+      if (!is.null(baseline_hist_sim()$pipeline$weight)) "weight" else NULL
     })
 
     output$weight_status_ui <- shiny::renderUI({
       req(baseline_hist_sim())
-      has_w  <- "weight" %in% names(baseline_hist_sim()$preds)
+      has_w  <- !is.null(baseline_hist_sim()$pipeline$weight)
       tog_on <- isTRUE(input$use_weights)
       if (has_w && tog_on)
         shiny::tags$p(
@@ -229,11 +229,62 @@ mod_3_06_results_server <- function(id,
           "\U0001f534 No weight column found \u2014 unweighted")
     })
 
-    agg_one <- function(preds, so) {
-      method    <- input$cmp_agg_method %||% "mean"
-      deviation <- input$cmp_deviation  %||% "none"
-      pov       <- pov_line_val()
-      aggregate_sim_preds(preds, so, method, deviation, FALSE, pov, weight_col())
+    agg_one <- function(pipeline_obj, so, chol_obj = NULL) {
+      # Minimal stub — calls aggregate_with_uncertainty() per sim_year.
+      # Full policy comparison architecture (paired draws, difference bands)
+      # to be implemented after Module 3 conversation.
+      req(!is.null(pipeline_obj))
+      method  <- input$cmp_agg_method %||% "mean"
+      use_w   <- isTRUE(input$use_weights) && !is.null(pipeline_obj$weight)
+      band_q  <- resolve_band_q("p10_p90")
+      S       <- resolve_S("p10_p90")
+      agg_fn  <- resolve_agg_fn(method)
+
+      sim_years <- sort(unique(pipeline_obj$sim_year))
+
+      out <- dplyr::bind_rows(lapply(sim_years, function(yr) {
+        idx    <- pipeline_obj$sim_year == yr
+        yr_res <- tryCatch(
+          aggregate_with_uncertainty(
+            y_point   = pipeline_obj$y_point[idx],
+            F_loading = if (!is.null(chol_obj) && !is.null(pipeline_obj$F_loading))
+                          pipeline_obj$F_loading[idx, , drop = FALSE] else NULL,
+            agg_fn    = agg_fn,
+            S         = S,
+            residuals = "none",
+            weights   = if (use_w) pipeline_obj$weight[idx] else NULL,
+            pov_line  = pov_line_val(),
+            is_log    = isTRUE(so$transform == "log"),
+            band_q    = band_q
+          ),
+          error = function(e) NULL
+        )
+        if (is.null(yr_res)) return(NULL)
+        tibble::tibble(
+          sim_year   = yr,
+          value      = yr_res$value,
+          value_lo   = yr_res$value_lo,
+          value_p50  = yr_res$value_p50,
+          value_hi   = yr_res$value_hi,
+          draw_values = list(yr_res$draw_values),
+          agg_method  = method,
+          weighted    = use_w,
+          scenario    = "Historical"
+        )
+      }))
+
+      # Option A deviation
+      deviation <- input$cmp_deviation %||% "none"
+      if (!identical(deviation, "none") && !is.null(out) && nrow(out) > 0) {
+        hist_ref <- if (identical(deviation, "mean"))
+                      mean(out$value, na.rm = TRUE)
+                    else
+                      stats::median(out$value, na.rm = TRUE)
+        if (!is.null(out) && nrow(out) > 0)
+          out <- dplyr::mutate(out, value = value - hist_ref)
+      }
+
+      list(out = out, x_label = label_agg_method(method))
     }
 
     # ---- Filter-related reactives (mirrors mod_2_02_results) ------------
@@ -283,26 +334,38 @@ mod_3_06_results_server <- function(id,
 
     baseline_hist_agg <- reactive({
       req(baseline_hist_sim())
-      agg_one(baseline_hist_sim()$preds, baseline_hist_sim()$so)
+      tryCatch(
+        agg_one(baseline_hist_sim()$pipeline, baseline_hist_sim()$so,
+                baseline_hist_sim()$chol_obj),
+        error = function(e) { warning("[mod_3] baseline_hist_agg failed: ", conditionMessage(e)); NULL }
+      )
     })
 
     baseline_scen_agg <- reactive({
       sc <- baseline_saved_scenarios() %||% list()
       if (length(sc) == 0) return(list())
-      lapply(sc, function(s)
-        tryCatch(agg_one(s$preds, s$so), error = function(e) NULL))
+      lapply(sc, function(s) tryCatch(
+        agg_one(s$pipelines[[1L]], s$so, s$chol_obj),
+        error = function(e) NULL
+      ))
     })
 
     policy_hist_agg <- reactive({
       req(policy_hist_sim())
-      agg_one(policy_hist_sim()$preds, policy_hist_sim()$so)
+      tryCatch(
+        agg_one(policy_hist_sim()$pipeline, policy_hist_sim()$so,
+                policy_hist_sim()$chol_obj),
+        error = function(e) { warning("[mod_3] policy_hist_agg failed: ", conditionMessage(e)); NULL }
+      )
     })
 
     policy_scen_agg <- reactive({
       sc <- policy_saved_scenarios() %||% list()
       if (length(sc) == 0) return(list())
-      lapply(sc, function(s)
-        tryCatch(agg_one(s$preds, s$so), error = function(e) NULL))
+      lapply(sc, function(s) tryCatch(
+        agg_one(s$pipelines[[1L]], s$so, s$chol_obj),
+        error = function(e) NULL
+      ))
     })
 
     baseline_series <- reactive({
