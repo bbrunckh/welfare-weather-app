@@ -63,3 +63,9 @@
      magnitudes, SE, cluster counts. Exportable to PDF/CSV.
      Useful for methodology notes and sanity checking.
    Priority: Low — UX improvement, post-Phase 3
+
+## 8. Dev mode label misleading — rename to 'Single model (fast)' vs 'Full ensemble'
+   Flagged: 2026-04-25 19:42:01
+   Current label: 'Dev mode: 1 ensemble model only'
+   Better: 'Fast mode: single model per SSP/period' vs 'Full ensemble (slow)'
+   Priority: Low — UX, before merge back into golem

@@ -729,6 +729,9 @@ mod_2_01_weathersim_server <- function(id,
               chol_obj    = chol_obj
             )
 
+            # Save weather_raw before freeing — needed for diagnostics plots
+            key_weather_raw <- if (is_hist) weather_result[[key]] else NULL
+
             # Free raw weather for this key immediately
             weather_result[[key]] <- NULL
 
@@ -761,7 +764,7 @@ mod_2_01_weathersim_server <- function(id,
                 chol_obj    = chol_obj,
                 so          = so,
                 has_weights = !is.null(out$weight),
-                weather_raw = weather_result[[key]],
+                weather_raw = key_weather_raw,
                 train_data  = train_data,
                 cluster_counts = cluster_counts
               )

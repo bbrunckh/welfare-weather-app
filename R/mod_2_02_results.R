@@ -191,7 +191,7 @@ mod_2_02_results_server <- function(id,
       req(hist_sim())
       if (!isTRUE(input$use_weights)) return(NULL)
 
-      if ("weight" %in% names(hist_sim()$preds)) "weight" else NULL
+        if (!is.null(hist_sim()$pipeline$weight)) "weight" else NULL
     })
 
     output$weight_status_ui <- shiny::renderUI({
@@ -216,10 +216,7 @@ mod_2_02_results_server <- function(id,
           "🔴 No weight column found — unweighted")
     })
 
-    pov_line_val <- reactive({
-      # Poverty line passed in as reactive from mod_2_simulation.R —
-      # reads input$pov_line_sim from the simulation settings namespace.
-      # Returns NULL for non-poverty aggregation methods.
+    pov_line_raw <- reactive({
       if (isTRUE(input$cmp_agg_method %in%
                  c("headcount_ratio", "gap", "fgt2",
                    "prosperity_gap", "avg_poverty"))) {
@@ -228,6 +225,10 @@ mod_2_02_results_server <- function(id,
         NULL
       }
     })
+    # Debounce — wait 800ms after last change before recomputing
+    # Prevents 300 recomputes per keypress when typing a poverty line value
+    pov_line_val <- debounce(pov_line_raw, 800)
+
     selected_scenario_names <- reactive({
       sc   <- saved_scenarios()
       if (length(sc) == 0) return(character(0))
@@ -260,41 +261,20 @@ mod_2_02_results_server <- function(id,
       chol_obj <- hist_sim()$chol_obj
       agg_fn   <- resolve_agg_fn(method)
       weights  <- if (use_w) pipe$weight else NULL
+      is_log   <- isTRUE(hist_sim()$so$transform == "log")
 
-      # Aggregate with coefficient uncertainty — deferred from simulation time
-      result <- tryCatch(
-        aggregate_with_uncertainty(
-          y_point   = pipe$y_point,
-          F_loading = if (!is.null(chol_obj)) pipe$F_loading else NULL,
-          agg_fn    = agg_fn,
-          S         = S,
-          residuals = input$residuals %||% "none",
-          train_aug = pipe$train_aug,
-          weights   = weights,
-          pov_line  = pov_line_val(),
-          id_vec    = pipe$id_vec,
-          id_col    = pipe$id_col,
-          is_log    = isTRUE(hist_sim()$so$transform == "log"),
-          band_q    = band_q
-        ),
-        error = function(e) {
-          warning("[agg_hist] aggregate_with_uncertainty() failed: ",
-                  conditionMessage(e))
-          NULL
-        }
-      )
+      # Draw Z once — shared across all sim_years (Option A batching)
+      # This reduces 30 separate Z draws to 1, giving ~10x speedup
+      K      <- if (!is.null(pipe$F_loading)) ncol(pipe$F_loading) else 0L
+      Z_shared <- if (K > 0L && S > 0L)
+                    matrix(stats::rnorm(S * K), nrow = S, ncol = K)
+                  else NULL
 
-      req(!is.null(result))
-
-      # Build per-sim_year tibble from draw_values
-      # aggregate_with_uncertainty() operates on all years pooled —
-      # we need to aggregate per sim_year for the time series charts.
-      # Split y_point by sim_year and aggregate each year independently.
       sim_years <- sort(unique(pipe$sim_year))
 
       out <- dplyr::bind_rows(lapply(sim_years, function(yr) {
-        idx     <- pipe$sim_year == yr
-        yr_res  <- tryCatch(
+        idx    <- pipe$sim_year == yr
+        yr_res <- tryCatch(
           aggregate_with_uncertainty(
             y_point   = pipe$y_point[idx],
             F_loading = if (!is.null(chol_obj) && !is.null(pipe$F_loading))
@@ -307,18 +287,19 @@ mod_2_02_results_server <- function(id,
             pov_line  = pov_line_val(),
             id_vec    = if (!is.null(pipe$id_vec)) pipe$id_vec[idx] else NULL,
             id_col    = pipe$id_col,
-            is_log    = isTRUE(hist_sim()$so$transform == "log"),
-            band_q    = band_q
+            is_log    = is_log,
+            band_q    = band_q,
+            Z_fixed   = Z_shared
           ),
           error = function(e) NULL
         )
         if (is.null(yr_res)) return(NULL)
         tibble::tibble(
-          sim_year   = yr,
-          value      = yr_res$value,
-          value_lo   = yr_res$value_lo,
-          value_p50  = yr_res$value_p50,
-          value_hi   = yr_res$value_hi,
+          sim_year    = yr,
+          value       = yr_res$value,
+          value_lo    = yr_res$value_lo,
+          value_p50   = yr_res$value_p50,
+          value_hi    = yr_res$value_hi,
           draw_values = list(yr_res$draw_values),
           agg_method  = method,
           weighted    = use_w,
@@ -326,8 +307,7 @@ mod_2_02_results_server <- function(id,
         )
       }))
 
-      # Option A deviation: apply post-aggregation on scalar table
-      if (!identical(deviation, "none") && nrow(out) > 0) {
+      if (!identical(deviation, "none") && !is.null(out) && nrow(out) > 0) {
         hist_ref <- if (identical(deviation, "mean"))
                       mean(out$value, na.rm = TRUE)
                     else
@@ -342,7 +322,16 @@ mod_2_02_results_server <- function(id,
       }
 
       list(out = out, x_label = x_label)
-    })
+
+    }) |> bindCache(
+      input$cmp_agg_method,
+      input$cmp_deviation,
+      input$use_weights,
+      input$coef_band_width,
+      input$residuals,
+      pov_line_val(),
+      hist_sim()$pipeline$y_point[1L]
+    )
 
     agg_scenarios <- reactive({
       sc <- saved_scenarios()
@@ -361,7 +350,6 @@ mod_2_02_results_server <- function(id,
         paste0(label_agg_method(method), " — ", label_deviation(deviation))
       }
 
-      # Historical reference for Option A deviation
       hist_ref <- if (!identical(deviation, "none") && !is.null(agg_hist())) {
         if (identical(deviation, "mean"))
           mean(agg_hist()$out$value, na.rm = TRUE)
@@ -374,14 +362,19 @@ mod_2_02_results_server <- function(id,
           req(!is.null(s$pipelines))
 
           chol_obj  <- s$chol_obj
-          sim_years <- sort(unique(s$pipelines[[1]]$sim_year))
-          weights   <- if (use_w && !is.null(s$pipelines[[1]]$weight))
-                         s$pipelines[[1]]$weight else NULL
+          is_log    <- isTRUE(s$so$transform == "log")
+          sim_years <- sort(unique(s$pipelines[[1L]]$sim_year))
+          weights   <- if (use_w && !is.null(s$pipelines[[1L]]$weight))
+                         s$pipelines[[1L]]$weight else NULL
 
-          # Aggregate each sim_year across ensemble members
+          # Draw Z once per scenario — shared across years AND ensemble members
+          K_s      <- if (!is.null(s$pipelines[[1L]]$F_loading))
+                        ncol(s$pipelines[[1L]]$F_loading) else 0L
+          Z_shared <- if (K_s > 0L && S > 0L)
+                        matrix(stats::rnorm(S * K_s), nrow = S, ncol = K_s)
+                      else NULL
+
           yr_rows <- dplyr::bind_rows(lapply(sim_years, function(yr) {
-
-            # Per-member results for this year
             member_results <- lapply(s$pipelines, function(pipe) {
               idx <- pipe$sim_year == yr
               tryCatch(
@@ -397,8 +390,9 @@ mod_2_02_results_server <- function(id,
                   pov_line  = pov_line_val(),
                   id_vec    = if (!is.null(pipe$id_vec)) pipe$id_vec[idx] else NULL,
                   id_col    = pipe$id_col,
-                  is_log    = isTRUE(s$so$transform == "log"),
-                  band_q    = band_q
+                  is_log    = is_log,
+                  band_q    = band_q,
+                  Z_fixed   = Z_shared
                 ),
                 error = function(e) NULL
               )
@@ -406,14 +400,14 @@ mod_2_02_results_server <- function(id,
             member_results <- Filter(Negate(is.null), member_results)
             if (length(member_results) == 0L) return(NULL)
 
-            # Combine ensemble members
             combined <- combine_ensemble_results(member_results)
+            if (is.null(combined)) return(NULL)
 
             tibble::tibble(
               sim_year    = yr,
               value       = combined$value,
               value_lo    = combined$value_lo,
-              value_p50   = combined$value %||% combined$value,
+              value_p50   = combined$value,
               value_hi    = combined$value_hi,
               model_lo    = combined$model_lo,
               model_hi    = combined$model_hi,
@@ -425,7 +419,6 @@ mod_2_02_results_server <- function(id,
 
           if (is.null(yr_rows) || nrow(yr_rows) == 0L) return(NULL)
 
-          # Option A deviation — relative to historical baseline
           if (!identical(deviation, "none") && !is.na(hist_ref)) {
             yr_rows <- dplyr::mutate(yr_rows, value = value - hist_ref)
           }
@@ -433,19 +426,38 @@ mod_2_02_results_server <- function(id,
           list(out = yr_rows, x_label = x_label)
 
         }, error = function(e) {
-          warning("[agg_scenarios] failed for scenario: ", conditionMessage(e))
+          warning("[agg_scenarios] failed: ", conditionMessage(e))
           NULL
         })
       })
 
-      Filter(Negate(is.null), result)
-    })
+      Filter(function(x) !is.null(x) && !is.null(x$out) && nrow(x$out) > 0, result)
+
+    }) |> bindCache(
+      input$cmp_agg_method,
+      input$cmp_deviation,
+      input$use_weights,
+      input$coef_band_width,
+      input$residuals,
+      pov_line_val(),
+      length(saved_scenarios()),
+      hist_sim()$pipeline$y_point[1L]
+    )
+
     all_series <- reactive({
       sc  <- agg_scenarios()
       sel <- selected_scenario_names()
-      c(setNames(list(agg_hist()), hist_label()), sc[intersect(sel, names(sc))])
+      hist_entry <- list(agg_hist())
+      if (is.null(agg_hist()) || is.null(agg_hist()$out) || nrow(agg_hist()$out) == 0)
+        return(list())
+      names(hist_entry) <- hist_label()
+      sc_filtered <- sc[intersect(sel, names(sc))]
+      sc_filtered <- Filter(
+        function(x) !is.null(x) && !is.null(x$out) && nrow(x$out) > 0,
+        sc_filtered
+      )
+      c(hist_entry, sc_filtered)
     })
-
     table_subtitle <- reactive({
       req(agg_hist(), input$cmp_agg_method, input$cmp_deviation)
       paste0(

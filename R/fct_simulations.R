@@ -601,7 +601,8 @@ aggregate_with_uncertainty <- function(y_point,
                                        id_col     = NULL,
                                        is_log     = TRUE,
                                        band_q     = c(lo = 0.10, hi = 0.90),
-                                       seed       = NULL) {
+                                       seed       = NULL,
+                                       Z_fixed    = NULL) {
 
   N <- length(y_point)
   stopifnot(
@@ -643,7 +644,7 @@ aggregate_with_uncertainty <- function(y_point,
   #   delta_i_s = F_loading[i, ] %*% z_s
   # Full perturbed log-welfare:
   #   y_i_s = y_point_i + delta_i_s + resid_vec_i
-  Z <- matrix(stats::rnorm(S * K), nrow = S, ncol = K)
+  Z <- if (!is.null(Z_fixed)) Z_fixed else matrix(stats::rnorm(S * K), nrow = S, ncol = K)
 
   # F_loading %*% t(Z) gives N × S perturbation matrix — each column is
   # one draw's perturbation across all N households.
@@ -718,7 +719,7 @@ combine_ensemble_results <- function(model_results) {
                 model_results[[1L]]
 
   # Filter to non-NULL entries with valid value fields before extracting
-  model_results <- Filter(function(x) !is.null(x) && !is.null(x$value), model_results)
+  model_results <- Filter(function(x) !is.null(x) && !is.null(x$value) && !is.na(x$value), model_results)
   if (length(model_results) == 0L) return(NULL)
 
   values   <- vapply(model_results, `[[`, numeric(1L), "value")
