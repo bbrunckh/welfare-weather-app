@@ -892,8 +892,8 @@ mod_2_01_weathersim_server <- function(id,
       t_total <- proc.time()[["elapsed"]] - t_start
       n_scen  <- length(saved_scenarios())
       message(sprintf(
-        "[wiseapp] Simulation complete in %s | %d key(s) | ~%d total runs",
-        format_elapsed(t_total), n_keys, total_runs
+        "[wiseapp] Simulation complete in %s | %d key(s) | S=%d | ~%d total runs",
+        format_elapsed(t_total), n_keys, S_sim, total_runs
       ))
       shiny::showNotification(
         ui = tagList(

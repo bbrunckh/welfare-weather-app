@@ -687,8 +687,14 @@ get_weather <- function(
         loc_deltas_by_model <- loc_deltas_by_model |>
           dplyr::filter(model %in% complete_models)
 
-        # -- Batch query: all models in one DuckDB execution -----------------
-        batch <- loc_monthly |>
+        # -- Batch query: split into two steps to help DuckDB plan ----------
+        # Step 1: join + perturb + select → materialise before rolling window
+        tmp_perturb_name <- paste0("lw_perturb_",
+                                    paste0(sample(letters, 8L, replace = TRUE),
+                                           collapse = ""))
+        tmp_delta_tables <- c(tmp_delta_tables, tmp_perturb_name)
+
+        perturbed <- loc_monthly |>
           dplyr::mutate(month = dbplyr::sql("MONTH(timestamp)")) |>
           dplyr::inner_join(
             loc_deltas_by_model,
@@ -699,6 +705,10 @@ get_weather <- function(
             model, code, year, survname, loc_id, timestamp,
             dplyr::all_of(weather_vars)
           ) |>
+          dplyr::compute(name = tmp_perturb_name, temporary = TRUE)
+
+        # Step 2: rolling window + transformations + filter → collect
+        batch <- perturbed |>
           dplyr::mutate(!!!roll_exprs_climate) |>
           .apply_transformations(selected_weather, loc_weather_base) |>
           dplyr::filter(timestamp %in% !!dates) |>
