@@ -241,13 +241,12 @@ mod_2_03_diagnostics_server <- function(id,
       # Full diagnostics decomposition chart to be reworked in Phase 3.
       tryCatch({
         sim_years <- sort(unique(hist_sim()$pipeline$sim_year))
-        agg_fn    <- resolve_agg_fn("mean")
         out <- dplyr::bind_rows(lapply(sim_years, function(yr) {
           idx    <- hist_sim()$pipeline$sim_year == yr
           yr_res <- aggregate_with_uncertainty(
             y_point   = hist_sim()$pipeline$y_point[idx],
             F_loading = NULL,
-            agg_fn    = agg_fn,
+            method = "mean",
             S         = 0L,
             residuals = "none",
             is_log    = isTRUE(hist_sim()$so$transform == "log")
@@ -277,13 +276,12 @@ mod_2_03_diagnostics_server <- function(id,
           if (!is.null(s$pipelines)) {
             pipe      <- s$pipelines[[1L]]
             sim_years <- sort(unique(pipe$sim_year))
-            agg_fn    <- resolve_agg_fn("mean")
             out <- dplyr::bind_rows(lapply(sim_years, function(yr) {
               idx    <- pipe$sim_year == yr
               yr_res <- aggregate_with_uncertainty(
                 y_point   = pipe$y_point[idx],
                 F_loading = NULL,
-                agg_fn    = agg_fn,
+                method = "mean",
                 S         = 0L,
                 residuals = "none",
                 is_log    = isTRUE(s$so$transform == "log")

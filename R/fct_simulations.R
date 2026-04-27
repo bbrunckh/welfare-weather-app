@@ -528,6 +528,99 @@ draw_residuals_vec <- function(residuals,
   )
 }
 
+#' Vectorized draw aggregation — replaces vapply loop inside
+#' aggregate_with_uncertainty(). Handles 7 of 9 methods natively.
+#' Falls back to vapply for median and gini (sort-dependent, rarely used).
+#'
+#' @param Y_mat   N × S numeric matrix. Each column is one welfare draw.
+#' @param method  Character. Aggregation method name.
+#' @param weights Numeric vector length N or NULL.
+#' @param pov_line Numeric or NULL.
+#' @return Numeric vector length S — one aggregate per draw.
+#' @noRd
+aggregate_draws_vectorized <- function(Y_mat, method, weights, pov_line) {
+
+  N <- nrow(Y_mat)
+  S <- ncol(Y_mat)
+
+  # Normalise weights once — reused across all S columns
+  w_norm <- if (!is.null(weights)) weights / sum(weights, na.rm = TRUE) else NULL
+
+  switch(method,
+
+    mean = {
+      if (!is.null(w_norm))
+        as.numeric(w_norm %*% Y_mat)          # 1×N %*% N×S = 1×S → S-vector
+      else
+        colMeans(Y_mat, na.rm = TRUE)
+    },
+
+    total = {
+      if (!is.null(w_norm))
+        as.numeric(weights %*% Y_mat)         # unnormalised weights for total
+      else
+        colSums(Y_mat, na.rm = TRUE)
+    },
+
+    headcount_ratio = {
+      stopifnot(!is.null(pov_line))
+      poor_mat <- Y_mat < pov_line            # N×S logical matrix
+      if (!is.null(w_norm))
+        as.numeric(w_norm %*% poor_mat)
+      else
+        colMeans(poor_mat, na.rm = TRUE)
+    },
+
+    gap = {
+      stopifnot(!is.null(pov_line))
+      gap_mat <- pmax(pov_line - Y_mat, 0) / pov_line   # N×S
+      if (!is.null(w_norm))
+        as.numeric(w_norm %*% gap_mat)
+      else
+        colMeans(gap_mat, na.rm = TRUE)
+    },
+
+    fgt2 = {
+      stopifnot(!is.null(pov_line))
+      sq_mat <- (pmax(pov_line - Y_mat, 0) / pov_line)^2   # N×S
+      if (!is.null(w_norm))
+        as.numeric(w_norm %*% sq_mat)
+      else
+        colMeans(sq_mat, na.rm = TRUE)
+    },
+
+    prosperity_gap = {
+      stopifnot(!is.null(pov_line))
+      gap_mat <- pmax(pov_line - Y_mat, 0)   # N×S
+      if (!is.null(w_norm))
+        as.numeric(w_norm %*% gap_mat)
+      else
+        colMeans(gap_mat, na.rm = TRUE)
+    },
+
+    avg_poverty = {
+      stopifnot(!is.null(pov_line))
+      poor_mat <- Y_mat < pov_line            # N×S logical
+      vapply(seq_len(S), function(s) {
+        poor_idx <- poor_mat[, s]
+        if (sum(poor_idx, na.rm = TRUE) == 0L) return(NA_real_)
+        if (!is.null(w_norm))
+          sum(w_norm[poor_idx] * Y_mat[poor_idx, s], na.rm = TRUE) /
+            sum(w_norm[poor_idx], na.rm = TRUE)
+        else
+          mean(Y_mat[poor_idx, s], na.rm = TRUE)
+      }, numeric(1L))
+    },
+
+    # --- Fallback: sort-dependent methods (median, gini) --- #
+    {
+      agg_fn <- resolve_agg_fn(method)
+      vapply(seq_len(S), function(s)
+        agg_fn(Y_mat[, s], weights, pov_line),
+        numeric(1L))
+    }
+  )
+}
 
 # ---------------------------------------------------------------------------- #
 # Core uncertainty aggregation                                                  #
@@ -591,7 +684,7 @@ draw_residuals_vec <- function(residuals,
 #' @export
 aggregate_with_uncertainty <- function(y_point,
                                        F_loading,
-                                       agg_fn,
+                                       method,
                                        S          = 150L,
                                        residuals  = "none",
                                        train_aug  = NULL,
@@ -617,8 +710,11 @@ aggregate_with_uncertainty <- function(y_point,
   # ---- Point estimate ------------------------------------------------------- #
   # Residuals drawn once — broadcast across all S draws (Option A).
   resid_vec  <- draw_residuals_vec(residuals, train_aug, N, id_vec, id_col)
-  welfare_pt <- if (is_log) exp(y_point + resid_vec) else y_point + resid_vec
-  value_pt   <- agg_fn(welfare_pt, weights, pov_line)
+  y_pt_vec   <- y_point + resid_vec
+  welfare_pt <- if (is_log) exp(y_pt_vec) else y_pt_vec
+  value_pt   <- aggregate_draws_vectorized(
+                matrix(welfare_pt, ncol = 1L), method, weights, pov_line
+              )[[1L]]
 
   # ---- No uncertainty path -------------------------------------------------- #
   if (is.null(F_loading) || S == 0L) {
@@ -650,11 +746,9 @@ aggregate_with_uncertainty <- function(y_point,
   # one draw's perturbation across all N households.
   perturbations <- F_loading %*% t(Z)   # N × S
 
-  draw_vals <- vapply(seq_len(S), function(s) {
-    y_s       <- y_point + perturbations[, s] + resid_vec
-    welfare_s <- if (is_log) exp(y_s) else y_s
-    agg_fn(welfare_s, weights, pov_line)
-  }, numeric(1L))
+  Y_mat     <- y_point + perturbations + resid_vec   # N×S broadcast
+  if (is_log) Y_mat <- exp(Y_mat)
+  draw_vals <- aggregate_draws_vectorized(Y_mat, method, weights, pov_line)
 
   # ---- Percentile bands ----------------------------------------------------- #
   lo_q <- if (!is.null(band_q)) band_q[["lo"]] else 0.10
@@ -780,7 +874,7 @@ compute_hist_agg <- function(pipeline,
               else NULL
 
   setNames(lapply(methods, function(method) {
-    agg_fn <- resolve_agg_fn(method)
+    method = method
     out <- dplyr::bind_rows(lapply(sim_years, function(yr) {
       idx    <- pipeline$sim_year == yr
       yr_res <- tryCatch(
@@ -788,7 +882,7 @@ compute_hist_agg <- function(pipeline,
           y_point   = pipeline$y_point[idx],
           F_loading = if (!is.null(chol_obj) && !is.null(pipeline$F_loading))
                         pipeline$F_loading[idx, , drop = FALSE] else NULL,
-          agg_fn    = agg_fn,
+          method    = method,
           S         = S,
           residuals = residuals,
           train_aug = pipeline$train_aug,
@@ -863,7 +957,7 @@ compute_scenario_agg <- function(scenarios,
                 else NULL
 
     setNames(lapply(methods, function(method) {
-      agg_fn <- resolve_agg_fn(method)
+      method = method
       yr_rows <- dplyr::bind_rows(lapply(sim_years, function(yr) {
         member_results <- lapply(pipes, function(pipe) {
           idx <- pipe$sim_year == yr
@@ -872,7 +966,7 @@ compute_scenario_agg <- function(scenarios,
               y_point   = pipe$y_point[idx],
               F_loading = if (!is.null(chol_obj) && !is.null(pipe$F_loading))
                             pipe$F_loading[idx, , drop = FALSE] else NULL,
-              agg_fn    = agg_fn,
+              method = method,
               S         = S,
               residuals = residuals,
               train_aug = pipe$train_aug,
