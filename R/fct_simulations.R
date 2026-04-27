@@ -550,14 +550,14 @@ aggregate_draws_vectorized <- function(Y_mat, method, weights, pov_line) {
 
     mean = {
       if (!is.null(w_norm))
-        as.numeric(w_norm %*% Y_mat)          # 1×N %*% N×S = 1×S → S-vector
+        as.numeric(colSums(w_norm * Y_mat, na.rm = TRUE))          # element-wise N×S broadcast, then colSums → S-vector
       else
         colMeans(Y_mat, na.rm = TRUE)
     },
 
     total = {
       if (!is.null(w_norm))
-        as.numeric(weights %*% Y_mat)         # unnormalised weights for total
+        as.numeric(colSums(weights * Y_mat, na.rm = TRUE))         # unnormalised weights for total
       else
         colSums(Y_mat, na.rm = TRUE)
     },
@@ -566,7 +566,7 @@ aggregate_draws_vectorized <- function(Y_mat, method, weights, pov_line) {
       stopifnot(!is.null(pov_line))
       poor_mat <- Y_mat < pov_line            # N×S logical matrix
       if (!is.null(w_norm))
-        as.numeric(w_norm %*% poor_mat)
+        as.numeric(colSums(w_norm * poor_mat, na.rm = TRUE))
       else
         colMeans(poor_mat, na.rm = TRUE)
     },
@@ -575,7 +575,7 @@ aggregate_draws_vectorized <- function(Y_mat, method, weights, pov_line) {
       stopifnot(!is.null(pov_line))
       gap_mat <- pmax(pov_line - Y_mat, 0) / pov_line   # N×S
       if (!is.null(w_norm))
-        as.numeric(w_norm %*% gap_mat)
+        as.numeric(colSums(w_norm * gap_mat, na.rm = TRUE))
       else
         colMeans(gap_mat, na.rm = TRUE)
     },
@@ -584,7 +584,7 @@ aggregate_draws_vectorized <- function(Y_mat, method, weights, pov_line) {
       stopifnot(!is.null(pov_line))
       sq_mat <- (pmax(pov_line - Y_mat, 0) / pov_line)^2   # N×S
       if (!is.null(w_norm))
-        as.numeric(w_norm %*% sq_mat)
+        as.numeric(colSums(w_norm * sq_mat, na.rm = TRUE))
       else
         colMeans(sq_mat, na.rm = TRUE)
     },
@@ -593,23 +593,25 @@ aggregate_draws_vectorized <- function(Y_mat, method, weights, pov_line) {
       stopifnot(!is.null(pov_line))
       gap_mat <- pmax(pov_line - Y_mat, 0)   # N×S
       if (!is.null(w_norm))
-        as.numeric(w_norm %*% gap_mat)
+        as.numeric(colSums(w_norm * gap_mat, na.rm = TRUE))
       else
         colMeans(gap_mat, na.rm = TRUE)
     },
 
     avg_poverty = {
       stopifnot(!is.null(pov_line))
-      poor_mat <- Y_mat < pov_line            # N×S logical
-      vapply(seq_len(S), function(s) {
-        poor_idx <- poor_mat[, s]
-        if (sum(poor_idx, na.rm = TRUE) == 0L) return(NA_real_)
-        if (!is.null(w_norm))
-          sum(w_norm[poor_idx] * Y_mat[poor_idx, s], na.rm = TRUE) /
-            sum(w_norm[poor_idx], na.rm = TRUE)
-        else
-          mean(Y_mat[poor_idx, s], na.rm = TRUE)
-      }, numeric(1L))
+      poor_mat  <- Y_mat < pov_line                    # N×S logical
+      Y_poor    <- Y_mat * poor_mat                    # zero out non-poor
+      if (!is.null(w_norm)) {
+        poor_w    <- w_norm * poor_mat                 # N×S weighted poor indicator
+        col_poor_w <- colSums(poor_w, na.rm = TRUE)    # S — weighted poor count
+        col_poor_w[col_poor_w == 0] <- NA_real_
+        as.numeric(colSums(w_norm * Y_poor, na.rm = TRUE)) / col_poor_w
+      } else {
+        col_poor_n <- colSums(poor_mat, na.rm = TRUE)  # S — poor count
+        col_poor_n[col_poor_n == 0] <- NA_real_
+        colSums(Y_poor, na.rm = TRUE) / col_poor_n
+      }
     },
 
     # --- Fallback: sort-dependent methods (median, gini) --- #
@@ -874,45 +876,71 @@ compute_hist_agg <- function(pipeline,
 
   run_one_hist <- function(use_w) {
     weights <- if (use_w) pipeline$weight else NULL
-    setNames(lapply(methods, function(method) {
-      dplyr::bind_rows(lapply(sim_years, function(yr) {
-        idx    <- pipeline$sim_year == yr
-        yr_res <- tryCatch(
-          aggregate_with_uncertainty(
-            y_point   = pipeline$y_point[idx],
-            F_loading = if (!is.null(chol_obj) && !is.null(pipeline$F_loading))
-                          pipeline$F_loading[idx, , drop = FALSE] else NULL,
-            method    = method,
-            S         = S,
-            residuals = residuals,
-            train_aug = pipeline$train_aug,
-            weights   = if (!is.null(weights)) weights[idx] else NULL,
-            pov_line  = pov_line,
-            id_vec    = if (!is.null(pipeline$id_vec)) pipeline$id_vec[idx] else NULL,
-            id_col    = pipeline$id_col,
-            is_log    = is_log,
-            band_q    = band_q,
-            Z_fixed   = Z_shared
-          ),
+
+    # Build results: loop year FIRST, then apply all methods to same Y_mat
+    all_rows <- dplyr::bind_rows(lapply(sim_years, function(yr) {
+      idx   <- pipeline$sim_year == yr
+      y_pt  <- pipeline$y_point[idx]
+      F_idx <- if (!is.null(pipeline$F_loading))
+                 pipeline$F_loading[idx, , drop = FALSE] else NULL
+      w_idx <- if (!is.null(weights)) weights[idx] else NULL
+      N_yr  <- sum(idx)
+
+      # ---- Residuals drawn once per year ----------------------------------- #
+      resid_vec <- draw_residuals_vec(
+        residuals, pipeline$train_aug, N_yr,
+        if (!is.null(pipeline$id_vec)) pipeline$id_vec[idx] else NULL,
+        pipeline$id_col
+      )
+
+      # ---- Point estimate welfare (no perturbation) ------------------------ #
+      y_pt_vec   <- y_pt + resid_vec
+      welfare_pt <- if (is_log) exp(y_pt_vec) else y_pt_vec
+
+      # ---- Y_mat built ONCE per year --------------------------------------- #
+      if (!is.null(F_idx) && !is.null(Z_shared) && S > 0L) {
+        perturbations <- F_idx %*% t(Z_shared)          # N_yr × S
+        Y_mat         <- y_pt + perturbations + resid_vec
+        if (is_log) Y_mat <- exp(Y_mat)                 # exp() called ONCE
+      } else {
+        Y_mat <- matrix(welfare_pt, ncol = 1L)
+      }
+
+      lo_q <- band_q[["lo"]]
+      hi_q <- band_q[["hi"]]
+
+      # ---- Apply all methods to the same Y_mat ----------------------------- #
+      dplyr::bind_rows(lapply(methods, function(method) {
+        draw_vals <- tryCatch(
+          aggregate_draws_vectorized(Y_mat, method, w_idx, pov_line),
           error = function(e) {
             warning("[compute_hist_agg] method=", method, " yr=", yr, ": ", conditionMessage(e))
             NULL
           }
         )
-        if (is.null(yr_res)) return(NULL)
+        if (is.null(draw_vals)) return(NULL)
+        value_pt_m <- aggregate_draws_vectorized(
+          matrix(welfare_pt, ncol = 1L), method, w_idx, pov_line
+        )[[1L]]
         tibble::tibble(
           sim_year    = yr,
-          value       = yr_res$value,
-          value_lo    = yr_res$value_lo,
-          value_p50   = yr_res$value_p50,
-          value_hi    = yr_res$value_hi,
-          draw_values = list(yr_res$draw_values),
+          value       = value_pt_m,
+          value_lo    = stats::quantile(draw_vals, lo_q, na.rm = TRUE),
+          value_p50   = stats::quantile(draw_vals, 0.50, na.rm = TRUE),
+          value_hi    = stats::quantile(draw_vals, hi_q, na.rm = TRUE),
+          draw_values = list(draw_vals),
           agg_method  = method,
           weighted    = use_w,
           scenario    = "Historical"
         )
       }))
-    }), methods)
+    }))
+
+    # Split flat tibble into named list by method — matches expected structure
+    setNames(
+      lapply(methods, function(m) dplyr::filter(all_rows, agg_method == m)),
+      methods
+    )
   }
 
   list(
@@ -960,29 +988,56 @@ compute_scenario_agg <- function(scenarios,
 
     run_one_scen <- function(use_w) {
       weights_base <- if (use_w && has_weights_s) pipes[[1L]]$weight else NULL
-      setNames(lapply(methods, function(method) {
-        dplyr::bind_rows(lapply(sim_years, function(yr) {
-          member_results <- lapply(pipes, function(pipe) {
-            idx <- pipe$sim_year == yr
-            tryCatch(
-              aggregate_with_uncertainty(
-                y_point   = pipe$y_point[idx],
-                F_loading = if (!is.null(chol_obj) && !is.null(pipe$F_loading))
-                              pipe$F_loading[idx, , drop = FALSE] else NULL,
-                method    = method,
-                S         = S,
-                residuals = residuals,
-                train_aug = pipe$train_aug,
-                weights   = if (!is.null(weights_base)) weights_base[idx] else NULL,
-                pov_line  = pov_line,
-                id_vec    = if (!is.null(pipe$id_vec)) pipe$id_vec[idx] else NULL,
-                id_col    = pipe$id_col,
-                is_log    = is_log,
-                band_q    = band_q,
-                Z_fixed   = Z_shared
-              ),
-              error = function(e) NULL
-            )
+
+      all_rows <- dplyr::bind_rows(lapply(sim_years, function(yr) {
+        # ---- Build Y_mat per ensemble member, then combine ---------------- #
+        member_Y_mats <- lapply(pipes, function(pipe) {
+          idx   <- pipe$sim_year == yr
+          y_pt  <- pipe$y_point[idx]
+          F_idx <- if (!is.null(pipe$F_loading))
+                     pipe$F_loading[idx, , drop = FALSE] else NULL
+          N_yr  <- sum(idx)
+          w_idx <- if (!is.null(weights_base)) weights_base[idx] else NULL
+
+          resid_vec <- draw_residuals_vec(
+            residuals, pipe$train_aug, N_yr,
+            if (!is.null(pipe$id_vec)) pipe$id_vec[idx] else NULL,
+            pipe$id_col
+          )
+
+          y_pt_vec   <- y_pt + resid_vec
+          welfare_pt <- if (is_log) exp(y_pt_vec) else y_pt_vec
+
+          if (!is.null(F_idx) && !is.null(Z_shared) && S > 0L) {
+            perturbations <- F_idx %*% t(Z_shared)
+            Y_mat         <- y_pt + perturbations + resid_vec
+            if (is_log) Y_mat <- exp(Y_mat)            # exp() called ONCE per member per year
+          } else {
+            Y_mat <- matrix(welfare_pt, ncol = 1L)
+          }
+
+          list(Y_mat = Y_mat, welfare_pt = welfare_pt, w_idx = w_idx)
+        })
+
+        lo_q <- band_q[["lo"]]
+        hi_q <- band_q[["hi"]]
+
+        dplyr::bind_rows(lapply(methods, function(method) {
+          # Aggregate each member then combine
+          member_results <- lapply(member_Y_mats, function(m) {
+            tryCatch({
+              draw_vals  <- aggregate_draws_vectorized(m$Y_mat, method, m$w_idx, pov_line)
+              value_pt_m <- aggregate_draws_vectorized(
+                matrix(m$welfare_pt, ncol = 1L), method, m$w_idx, pov_line
+              )[[1L]]
+              list(
+                value       = value_pt_m,
+                value_lo    = stats::quantile(draw_vals, lo_q, na.rm = TRUE),
+                value_p50   = stats::quantile(draw_vals, 0.50, na.rm = TRUE),
+                value_hi    = stats::quantile(draw_vals, hi_q, na.rm = TRUE),
+                draw_values = draw_vals
+              )
+            }, error = function(e) NULL)
           })
           member_results <- Filter(Negate(is.null), member_results)
           if (length(member_results) == 0L) return(NULL)
@@ -1001,7 +1056,12 @@ compute_scenario_agg <- function(scenarios,
             weighted    = use_w
           )
         }))
-      }), methods)
+      }))
+
+      setNames(
+        lapply(methods, function(m) dplyr::filter(all_rows, agg_method == m)),
+        methods
+      )
     }
 
     list(

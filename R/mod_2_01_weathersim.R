@@ -840,10 +840,13 @@ mod_2_01_weathersim_server <- function(id,
           saved_scenarios(new_scenarios)
 
           # ---- Pre-aggregate all methods at simulation time -------------------------
-          S_sim     <- resolve_S(input$coef_band_width %||% "p10_p90")
-          bq_sim    <- resolve_band_q(input$coef_band_width %||% "p10_p90")
+          S_sim     <- as.integer(input$sim_n %||% 150L)
+          #bq_sim    <- resolve_band_q(input$coef_band_width %||% "p10_p90")
+          bq_sim <- c(lo = 0.10, hi = 0.90)
           res_sim   <- input$residuals %||% "none"
           pov_sim   <- as.numeric(input$pov_line_sim)
+
+
 
           hist_agg_rv(
             compute_hist_agg(
