@@ -280,9 +280,10 @@ mod_1_03_outcome_server <- function(id, variable_list, survey_data,
               ),
               shiny::br(),
               bslib::card(
-                shiny::h4("Distribution (by survey wave)"),
+                shiny::h4("Outcome Distribution (by survey wave)"),
                 shiny::plotOutput(ns("outcome_dist"), height = "300px")
-              )
+              ),
+              tags$div(style = "height: 40px;")
             ),
             select  = TRUE,
             session = tabset_session

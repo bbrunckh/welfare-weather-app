@@ -51,7 +51,6 @@ mod_1_modelling_ui <- function(id) {
           tabPanel(
             title = "Overview",
             value = "overview",
-            p("Outputs will appear here after you load data and make selections in the sidebar."),
             includeMarkdown(system.file("app/www/equation.md", package = "wiseapp"))
           )
         )
