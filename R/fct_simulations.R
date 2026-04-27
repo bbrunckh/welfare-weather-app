@@ -737,6 +737,179 @@ combine_ensemble_results <- function(model_results) {
   )
 }
 
+# ---------------------------------------------------------------------------- #
+# Aggregation helpers — called at simulation time, not display time            #
+# ---------------------------------------------------------------------------- #
+
+#' Aggregate historical simulation pipeline across all methods
+#'
+#' Pure function. Called once at simulation time inside observeEvent(input$run_sim).
+#' Returns a named list — one tibble per aggregation method — so the Results tab
+#' can switch methods instantly without recomputation.
+#'
+#' @param pipeline   List. Output of run_sim_pipeline() for the historical key.
+#' @param chol_obj   List or NULL. Cholesky VCV object from compute_chol_vcov().
+#' @param methods    Character vector. Aggregation method names (e.g. "mean", "fgt0").
+#' @param use_w      Logical. Whether to apply survey weights.
+#' @param S          Integer. Number of coefficient draws.
+#' @param band_q     Named numeric. Quantile bounds c(lo=, hi=).
+#' @param residuals  Character. Residual method — "none", "original", etc.
+#' @param pov_line   Numeric. Poverty line value (baked in at simulation time).
+#' @param is_log     Logical. Whether outcome is on log scale.
+#'
+#' @return Named list keyed by method name. Each entry is a tibble with columns
+#'   sim_year, value, value_lo, value_p50, value_hi, draw_values, agg_method,
+#'   weighted, scenario.
+#' @noRd
+compute_hist_agg <- function(pipeline,
+                             chol_obj,
+                             methods,
+                             use_w,
+                             S        = 150L,
+                             band_q   = c(lo = 0.10, hi = 0.90),
+                             residuals = "none",
+                             pov_line  = NULL,
+                             is_log    = TRUE) {
+
+  weights   <- if (use_w) pipeline$weight else NULL
+  sim_years <- sort(unique(pipeline$sim_year))
+
+  K        <- if (!is.null(pipeline$F_loading)) ncol(pipeline$F_loading) else 0L
+  Z_shared <- if (K > 0L && S > 0L)
+                matrix(stats::rnorm(S * K), nrow = S, ncol = K)
+              else NULL
+
+  setNames(lapply(methods, function(method) {
+    agg_fn <- resolve_agg_fn(method)
+    out <- dplyr::bind_rows(lapply(sim_years, function(yr) {
+      idx    <- pipeline$sim_year == yr
+      yr_res <- tryCatch(
+        aggregate_with_uncertainty(
+          y_point   = pipeline$y_point[idx],
+          F_loading = if (!is.null(chol_obj) && !is.null(pipeline$F_loading))
+                        pipeline$F_loading[idx, , drop = FALSE] else NULL,
+          agg_fn    = agg_fn,
+          S         = S,
+          residuals = residuals,
+          train_aug = pipeline$train_aug,
+          weights   = if (!is.null(weights)) weights[idx] else NULL,
+          pov_line  = pov_line,
+          id_vec    = if (!is.null(pipeline$id_vec)) pipeline$id_vec[idx] else NULL,
+          id_col    = pipeline$id_col,
+          is_log    = is_log,
+          band_q    = band_q,
+          Z_fixed   = Z_shared
+        ),
+        error = function(e) {
+          warning("[compute_hist_agg] method=", method, " yr=", yr, ": ", conditionMessage(e))
+          NULL
+        }
+      )
+      if (is.null(yr_res)) return(NULL)
+      tibble::tibble(
+        sim_year    = yr,
+        value       = yr_res$value,
+        value_lo    = yr_res$value_lo,
+        value_p50   = yr_res$value_p50,
+        value_hi    = yr_res$value_hi,
+        draw_values = list(yr_res$draw_values),
+        agg_method  = method,
+        weighted    = use_w,
+        scenario    = "Historical"
+      )
+    }))
+    out
+  }), methods)
+}
+
+
+#' Aggregate scenario simulation pipelines across all methods
+#'
+#' Pure function. Called once at simulation time inside observeEvent(input$run_sim).
+#' Returns a named list keyed by display_key, then method name.
+#'
+#' @param scenarios  Named list. Each entry is a saved_scenarios() entry with
+#'   $pipelines (named list of run_sim_pipeline() outputs), $chol_obj, $so.
+#' @param methods    Character vector. Aggregation method names.
+#' @param use_w      Logical. Whether to apply survey weights.
+#' @param S          Integer. Number of coefficient draws.
+#' @param band_q     Named numeric. Quantile bounds c(lo=, hi=).
+#' @param residuals  Character. Residual method.
+#' @param pov_line   Numeric. Poverty line value.
+#'
+#' @return Named list keyed by display_key. Each entry is a named list keyed
+#'   by method, containing a tibble with the same columns as compute_hist_agg().
+#' @noRd
+compute_scenario_agg <- function(scenarios,
+                                 methods,
+                                 use_w,
+                                 S         = 150L,
+                                 band_q    = c(lo = 0.10, hi = 0.90),
+                                 residuals = "none",
+                                 pov_line  = NULL) {
+
+  setNames(lapply(names(scenarios), function(display_key) {
+    s        <- scenarios[[display_key]]
+    is_log   <- isTRUE(s$so$transform == "log")
+    chol_obj <- s$chol_obj
+    pipes    <- s$pipelines
+    sim_years <- sort(unique(pipes[[1L]]$sim_year))
+    weights_base <- if (use_w && !is.null(pipes[[1L]]$weight))
+                      pipes[[1L]]$weight else NULL
+
+    K_s      <- if (!is.null(pipes[[1L]]$F_loading)) ncol(pipes[[1L]]$F_loading) else 0L
+    Z_shared <- if (K_s > 0L && S > 0L)
+                  matrix(stats::rnorm(S * K_s), nrow = S, ncol = K_s)
+                else NULL
+
+    setNames(lapply(methods, function(method) {
+      agg_fn <- resolve_agg_fn(method)
+      yr_rows <- dplyr::bind_rows(lapply(sim_years, function(yr) {
+        member_results <- lapply(pipes, function(pipe) {
+          idx <- pipe$sim_year == yr
+          tryCatch(
+            aggregate_with_uncertainty(
+              y_point   = pipe$y_point[idx],
+              F_loading = if (!is.null(chol_obj) && !is.null(pipe$F_loading))
+                            pipe$F_loading[idx, , drop = FALSE] else NULL,
+              agg_fn    = agg_fn,
+              S         = S,
+              residuals = residuals,
+              train_aug = pipe$train_aug,
+              weights   = if (!is.null(weights_base)) weights_base[idx] else NULL,
+              pov_line  = pov_line,
+              id_vec    = if (!is.null(pipe$id_vec)) pipe$id_vec[idx] else NULL,
+              id_col    = pipe$id_col,
+              is_log    = is_log,
+              band_q    = band_q,
+              Z_fixed   = Z_shared
+            ),
+            error = function(e) NULL
+          )
+        })
+        member_results <- Filter(Negate(is.null), member_results)
+        if (length(member_results) == 0L) return(NULL)
+        combined <- combine_ensemble_results(member_results)
+        if (is.null(combined)) return(NULL)
+        tibble::tibble(
+          sim_year    = yr,
+          value       = combined$value,
+          value_lo    = combined$value_lo,
+          value_p50   = combined$value,
+          value_hi    = combined$value_hi,
+          model_lo    = combined$model_lo,
+          model_hi    = combined$model_hi,
+          draw_values = list(combined$draw_values),
+          agg_method  = method,
+          weighted    = use_w
+        )
+      }))
+      yr_rows
+    }), methods)
+  }), names(scenarios))
+}
+
+
 #' Draw Coefficient Vectors from a Fitted Model
 #'
 #' Generates \code{S} draws of the full coefficient vector for propagating
@@ -1550,4 +1723,16 @@ aggregate_sim_preds <- function(preds, so, agg_method, deviation, loss_frame,
     out     = out,
     x_label = "Simulation year"
   )
+}
+
+
+apply_deviation <- function(d, deviation, hist_ref = NA_real_) {
+  if (identical(deviation, "none") || is.null(d)) return(d)
+  if (is.na(hist_ref)) {
+    hist_ref <- if (identical(deviation, "mean"))
+      mean(d$value, na.rm = TRUE)
+    else
+      stats::median(d$value, na.rm = TRUE)
+  }
+  dplyr::mutate(d, value = value - hist_ref)
 }

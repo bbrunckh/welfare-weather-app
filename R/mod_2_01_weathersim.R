@@ -228,6 +228,8 @@ mod_2_01_weathersim_server <- function(id,
     # ---- Internal state ----------------------------------------------------
     hist_sim        <- reactiveVal(NULL)
     saved_scenarios <- reactiveVal(list())
+    hist_agg_rv    <- reactiveVal(NULL)
+    scenario_agg_rv <- reactiveVal(NULL)
 
     # ---- Baseline survey reactives ----------------------------------------
 
@@ -837,6 +839,39 @@ mod_2_01_weathersim_server <- function(id,
           hist_sim(hist_sim_result)
           saved_scenarios(new_scenarios)
 
+          # ---- Pre-aggregate all methods at simulation time -------------------------
+          use_w_sim <- !is.null(hist_sim_result$pipeline$weight)
+          S_sim     <- resolve_S(input$coef_band_width %||% "p10_p90")
+          bq_sim    <- resolve_band_q(input$coef_band_width %||% "p10_p90")
+          res_sim   <- input$residuals %||% "none"
+          pov_sim   <- as.numeric(input$pov_line_sim)
+
+          hist_agg_rv(
+            compute_hist_agg(
+              pipeline  = hist_sim_result$pipeline,
+              chol_obj  = chol_obj,
+              methods   = agg_methods_all,
+              use_w     = use_w_sim,
+              S         = S_sim,
+              band_q    = bq_sim,
+              residuals = res_sim,
+              pov_line  = pov_sim,
+              is_log    = isTRUE(so$transform == "log")
+            )
+          )
+
+          scenario_agg_rv(
+            compute_scenario_agg(
+              scenarios = new_scenarios,
+              methods   = agg_methods_all,
+              use_w     = use_w_sim,
+              S         = S_sim,
+              band_q    = bq_sim,
+              residuals = res_sim,
+              pov_line  = pov_sim
+            )
+          )
+
           shiny::setProgress(value = 1, detail = "Complete")
         }
       )
@@ -866,7 +901,9 @@ mod_2_01_weathersim_server <- function(id,
       saved_scenarios = saved_scenarios,
       selected_hist   = selected_hist,
       selected_fut    = selected_fut,
-      pov_line_sim    = reactive(input$pov_line_sim)
+      pov_line_sim    = reactive(input$pov_line_sim),
+      hist_agg_rv    = hist_agg_rv,
+      scenario_agg_rv = scenario_agg_rv
     )
   })
 }
