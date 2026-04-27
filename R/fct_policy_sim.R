@@ -298,7 +298,8 @@ policy_input_diagnostics <- function(baseline_svy, policy_svy, vars = NULL) {
 #'   element_blank element_text position_dodge
 #' @export
 plot_policy_comparison <- function(baseline_series, policy_series, hist_agg,
-                                   group_order = "scenario_x_year") {
+                                   group_order = "scenario_x_year",
+                                   y_label     = NULL) {
   summarise_vals <- .summarise_vals
 
   build_rows <- function(series_list, variant) {
@@ -347,6 +348,9 @@ plot_policy_comparison <- function(baseline_series, policy_series, hist_agg,
   df$pt_key <- factor(df$pt_key, levels = lvl_order)
   df$variant <- factor(df$variant, levels = c("Baseline", "Policy"))
 
+  # ---- Colour mapping --------------------------------------------------
+  # Uniform across scenarios: baseline grey, policy in a single accent
+  # colour. The SSP / scenario identity is communicated via the x-axis.
   pal <- c("Baseline" = "#808080", "Policy" = "#c0392b")
 
   hist_mean <- summarise_vals(hist_agg$out$value)$mean
@@ -373,7 +377,7 @@ plot_policy_comparison <- function(baseline_series, policy_series, hist_agg,
       colour = "#808080", linewidth = 0.55
     ) +
     ggplot2::scale_colour_manual(values = pal, name = NULL) +
-    ggplot2::labs(x = NULL, y = hist_agg$x_label) +
+    ggplot2::labs(x = NULL, y = y_label %||% hist_agg$x_label) +
     ggplot2::theme_minimal(base_size = 13) +
     ggplot2::theme(
       panel.grid.major.x = ggplot2::element_blank(),

@@ -315,6 +315,18 @@ mod_3_06_results_server <- function(id,
       c(setNames(list(policy_hist_agg()), "Historical"), ps)
     })
 
+    # Series for the exceedance plot: keep the Historical line tied to
+    # the Step 2 baseline (unaffected by policy adjustments) and only
+    # show policy-adjusted SSP scenarios alongside it.
+    exceedance_series <- reactive({
+      req(baseline_hist_agg())
+      ps <- policy_scen_agg()
+      ps <- ps[!vapply(ps, is.null, logical(1))]
+      sel <- selected_scenario_names()
+      ps <- ps[intersect(sel, names(ps))]
+      c(setNames(list(baseline_hist_agg()), "Historical"), ps)
+    })
+
     # ---- Results tab outputs --------------------------------------------
 
     output$results_header_ui <- renderUI({
@@ -395,7 +407,8 @@ mod_3_06_results_server <- function(id,
         baseline_series = baseline_series(),
         policy_series   = policy_series(),
         hist_agg        = baseline_hist_agg(),
-        group_order     = input$cmp_group_order %||% "scenario_x_year"
+        group_order     = input$cmp_group_order %||% "scenario_x_year",
+        y_label         = label_agg_method(input$cmp_agg_method %||% "mean")
       )
     }, height = 600)
     outputOptions(output, "comparison_plot", suspendWhenHidden = FALSE)
@@ -404,13 +417,13 @@ mod_3_06_results_server <- function(id,
 
     output$exceedance_policy <- renderPlot({
       sim_run_id()
-      req(policy_hist_agg(), policy_series())
+      req(baseline_hist_agg(), exceedance_series())
       enhance_exceedance(
-        scenarios     = policy_series(),
-        hist_agg      = policy_hist_agg(),
-        x_label       = policy_hist_agg()$x_label,
+        scenarios     = exceedance_series(),
+        hist_agg      = baseline_hist_agg(),
+        x_label       = label_agg_method(input$cmp_agg_method %||% "mean"),
         return_period = isTRUE(input$show_return_period),
-        n_sim_years   = nrow(policy_hist_agg()$out),
+        n_sim_years   = nrow(baseline_hist_agg()$out),
         logit_x       = isTRUE(input$exceedance_logit_x)
       )
     })

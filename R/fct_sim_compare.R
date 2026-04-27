@@ -798,17 +798,17 @@ enhance_exceedance <- function(scenarios,
   long_df$group <- factor(long_df$group, levels = labels)
 
   # ---- Aesthetic mappings -------------------------------------------------
-  fut_yr_labels <- sort(unique(long_df$yr[long_df$yr != "Historical"]))
-  yr_styles     <- .resolve_year_styles(fut_yr_labels)
+  # One linetype per distinct yr value — no special-casing of historical.
+  all_yr_labels <- sort(unique(long_df$yr))
+  yr_styles     <- .resolve_year_styles(all_yr_labels)
+  ltype_map_yr  <- yr_styles$linetype_map
+  present_yrs   <- names(ltype_map_yr)
 
   present_ssps   <- sort(unique(long_df$ssp_key[long_df$ssp_key != "Historical"]))
   colour_map_ssp <- c(
     "Historical" = "black",
     .ssp_colours[intersect(names(.ssp_colours), present_ssps)]
   )
-
-  present_yrs  <- names(yr_styles$linetype_map)
-  ltype_map_yr <- c("Historical" = "solid", yr_styles$linetype_map)
 
   hist_mean <- mean(hist_agg$out$value, na.rm = TRUE)
   eps       <- if (isTRUE(logit_x)) 0.005 else 0
@@ -869,8 +869,8 @@ enhance_exceedance <- function(scenarios,
     ) +
     ggplot2::scale_linetype_manual(
       values = ltype_map_yr,
-      breaks = c("Historical", present_yrs),
-      labels = c("Historical", present_yrs),
+      breaks = present_yrs,
+      labels = present_yrs,
       name   = "Period",
       guide  = ggplot2::guide_legend(order = 2,
                                      override.aes = list(linewidth = 0.9))
