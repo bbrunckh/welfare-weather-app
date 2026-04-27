@@ -363,7 +363,10 @@ resolve_agg_fn <- function(method) {
     },
 
     gini = function(welfare, weights, pov_line) {
-      # Weighted Gini via the covariance formula
+      # Weighted Gini via the covariance formula — NA guard first
+      valid   <- !is.na(welfare)
+      welfare <- welfare[valid]
+      if (!is.null(weights)) weights <- weights[valid]
       n <- length(welfare)
       if (n < 2L) return(NA_real_)
       if (!is.null(weights)) {
@@ -614,12 +617,36 @@ aggregate_draws_vectorized <- function(Y_mat, method, weights, pov_line) {
       }
     },
 
-    # --- Fallback: sort-dependent methods (median, gini) --- #
-    {
-      agg_fn <- resolve_agg_fn(method)
-      vapply(seq_len(S), function(s)
-        agg_fn(Y_mat[, s], weights, pov_line),
-        numeric(1L))
+    # --- median: vectorized via matrixStats ---------------------------- #
+    median = {
+      if (!is.null(w_norm))
+        matrixStats::colWeightedMedians(Y_mat, w = w_norm, na.rm = TRUE)
+      else
+        matrixStats::colMedians(Y_mat, na.rm = TRUE)
+    },
+
+    # --- gini: column-wise apply (sort-dependent, no full vectorization) #
+    gini = {
+      apply(Y_mat, 2L, function(col) {
+        valid <- !is.na(col)
+        y     <- col[valid]
+        w     <- if (!is.null(weights)) weights[valid] else NULL
+        n     <- length(y)
+        if (n < 2L) return(NA_real_)
+        if (!is.null(w)) {
+          ord <- order(y)
+          w   <- w[ord] / sum(w, na.rm = TRUE)
+          y   <- y[ord]
+          F_i <- cumsum(w) - w / 2
+          2 * sum(w * y * F_i, na.rm = TRUE) /
+            sum(w * y, na.rm = TRUE) - 1
+        } else {
+          ord <- order(y)
+          y   <- y[ord]
+          2 * sum((seq_len(n) / n - 0.5) * y) /
+            (n * mean(y, na.rm = TRUE))
+        }
+      })
     }
   )
 }

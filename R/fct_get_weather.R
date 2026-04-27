@@ -620,6 +620,7 @@ get_weather <- function(
 
       # -- Loop over future periods ------------------------------------------
       out <- list()
+      tmp_delta_tables <- character(0L) #DRK addition
       for (fp in future_period) {
         fp_start <- as.Date(fp[1])
         fp_end   <- as.Date(fp[2])
@@ -643,6 +644,20 @@ get_weather <- function(
           dplyr::inner_join(h3_slim, by = c("h3" = "h3_cmip6")) |>
           dplyr::group_by(model, code, year, survname, loc_id, month) |>
           .pop_weighted_mean(delta_vars)
+        
+        
+        # Materialise delta table — lets DuckDB plan a hash join in the
+        # batch query instead of replanning the full lazy delta chain.
+        tmp_delta_name <- paste0("lw_delta_",
+                                  paste0(sample(letters, 8L, replace = TRUE),
+                                         collapse = ""))
+        loc_deltas_by_model <- dplyr::compute(
+          loc_deltas_by_model,
+          name      = tmp_delta_name,
+          temporary = TRUE
+        )
+        tmp_delta_tables <- c(tmp_delta_tables, tmp_delta_name)
+
 
         # Filter incomplete models
         complete_model_tbl <- loc_deltas_by_model |>
@@ -702,6 +717,11 @@ get_weather <- function(
           paste0(ssp_i, "_", fp_label, "_", make.names(names(model_list)))
         )
         out <- c(out, period_out)
+      }
+
+      # Cleanup all materialised delta temp tables
+      for (tdn in tmp_delta_tables) {
+        try(DBI::dbRemoveTable(dbplyr::remote_con(loc_deltas_by_model), tdn), silent = TRUE)
       }
       out
     }

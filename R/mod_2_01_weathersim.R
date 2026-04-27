@@ -848,6 +848,17 @@ mod_2_01_weathersim_server <- function(id,
 
 
 
+          shiny::showNotification(
+            ui       = paste0(
+              "Aggregating results across ",
+              length(new_scenarios) + 1L,
+              " key(s) — please wait..."
+            ),
+            id       = "agg_notify",
+            duration = NULL,
+            type     = "message"
+          )
+
           hist_agg_rv(
             compute_hist_agg(
               pipeline  = hist_sim_result$pipeline,
@@ -871,6 +882,8 @@ mod_2_01_weathersim_server <- function(id,
               pov_line  = pov_sim
             )
           )
+
+          shiny::removeNotification("agg_notify")
 
           shiny::setProgress(value = 1, detail = "Complete")
         }
