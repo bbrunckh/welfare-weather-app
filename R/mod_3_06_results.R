@@ -88,7 +88,7 @@ mod_3_06_results_ui <- function(id) {
       )
     ),
 
-    # ---- Exceedance curves -----------------------------------------------
+    # ---- Exceedance curve (policy-adjusted only) -------------------------
     shiny::wellPanel(
       shiny::h4("Exceedance probability by climate scenario"),
       shiny::tags$div(
@@ -104,10 +104,6 @@ mod_3_06_results_ui <- function(id) {
           value = TRUE
         )
       ),
-      shiny::tags$p(style = "font-weight:600; margin-bottom:2px;", "Baseline"),
-      shiny::plotOutput(ns("exceedance_baseline"), height = "400px"),
-      shiny::tags$p(style = "font-weight:600; margin-bottom:2px; margin-top:12px;",
-                    "Policy-adjusted"),
       shiny::plotOutput(ns("exceedance_policy"), height = "400px"),
       shiny::uiOutput(ns("exceedance_caption"))
     ),
@@ -120,21 +116,16 @@ mod_3_06_results_ui <- function(id) {
         "Baseline and policy rows shown in sequence per scenario."
       ),
       DT::DTOutput(ns("threshold_table"))
-    )
-  )
-}
+    ),
 
-
-#' Diagnostics tab content UI (inserted into the Diagnostics tabPanel once).
-#' @noRd
-.diag3_content_ui <- function(ns) {
-  tagList(
+    # ---- Input diagnostics (moved from separate tab) --------------------
     shiny::wellPanel(
-      shiny::h4("Input diagnostics: baseline vs policy-adjusted model covariates"),
+      shiny::h4("Input diagnostics: baseline vs policy-adjusted variables"),
       shiny::tags$small(
         class = "text-muted",
-        "Summary statistics restricted to variables included in the Step 1 model. ",
-        "Any row with a non-zero \u0394 mean indicates the variable was modified."
+        "Lists every variable whose values differ between the baseline ",
+        "and policy-adjusted survey frames — covariates, interactions, ",
+        "or outcomes."
       ),
       DT::DTOutput(ns("input_diag_table"))
     )
@@ -188,6 +179,7 @@ mod_3_06_results_server <- function(id,
                                      baseline_svy,
                                      policy_svy,
                                      selected_model = reactive(NULL),
+                                     sim_run_id     = reactive(0L),
                                      tabset_id,
                                      tabset_session = NULL) {
   moduleServer(id, function(input, output, session) {
@@ -397,6 +389,7 @@ mod_3_06_results_server <- function(id,
     })
 
     output$comparison_plot <- renderPlot({
+      sim_run_id()
       req(baseline_series(), policy_series())
       plot_policy_comparison(
         baseline_series = baseline_series(),
@@ -409,20 +402,8 @@ mod_3_06_results_server <- function(id,
 
     # ---- Exceedance plots -------------------------------------------------
 
-    output$exceedance_baseline <- renderPlot({
-      req(baseline_hist_agg(), baseline_series())
-      enhance_exceedance(
-        scenarios     = baseline_series(),
-        hist_agg      = baseline_hist_agg(),
-        x_label       = baseline_hist_agg()$x_label,
-        return_period = isTRUE(input$show_return_period),
-        n_sim_years   = nrow(baseline_hist_agg()$out),
-        logit_x       = isTRUE(input$exceedance_logit_x)
-      )
-    })
-    outputOptions(output, "exceedance_baseline", suspendWhenHidden = FALSE)
-
     output$exceedance_policy <- renderPlot({
+      sim_run_id()
       req(policy_hist_agg(), policy_series())
       enhance_exceedance(
         scenarios     = policy_series(),
@@ -452,6 +433,7 @@ mod_3_06_results_server <- function(id,
     })
 
     output$threshold_table <- DT::renderDT({
+      sim_run_id()
       req(baseline_series(), policy_series())
       go   <- input$cmp_group_order %||% "scenario_x_year"
       df_b <- build_threshold_table_df(baseline_series(), group_order = go)
@@ -477,27 +459,41 @@ mod_3_06_results_server <- function(id,
 
     # ---- Diagnostics tab output -----------------------------------------
 
-    output$input_diag_table <- DT::renderDT({
-      req(baseline_svy(), policy_svy())
-      model_covs <- .extract_model_covs(selected_model())
-      if (length(model_covs) == 0)
-        return(DT::datatable(
-          data.frame(Message = "No model covariates detected."),
-          rownames = FALSE, options = list(dom = "t")
-        ))
-      # Restrict to covariates that exist in the survey frame
-      vars <- intersect(model_covs, names(baseline_svy()))
-      df <- policy_input_diagnostics(baseline_svy(), policy_svy(),
-                                     vars = vars)
-      if (is.null(df) || nrow(df) == 0)
-        return(DT::datatable(
-          data.frame(Message = "Model covariates are non-numeric or absent."),
-          rownames = FALSE, options = list(dom = "t")
-        ))
+    # Diagnostics data: depends directly on the (always-invalidating)
+    # baseline_svy / policy_svy reactives so it fires on every run.
+    diag_data <- reactive({
+      sim_run_id()  # belt-and-suspenders trigger
+      b <- baseline_svy(); p <- policy_svy()
+      if (is.null(b) || is.null(p)) return(NULL)
+      vars <- detect_manipulated_vars(b, p)
+      if (length(vars) == 0) return(list(empty = "no_change"))
+      df <- policy_input_diagnostics(b, p, vars = vars)
+      if (is.null(df) || nrow(df) == 0) return(list(empty = "no_numeric"))
       num_cols <- setdiff(names(df), "variable")
       df[num_cols] <- lapply(df[num_cols], function(x) signif(x, 4))
+      df
+    })
+
+    output$input_diag_table <- DT::renderDT({
+      d <- diag_data()
+      if (is.null(d)) {
+        return(DT::datatable(
+          data.frame(Message = "Run the policy simulation to see diagnostics."),
+          rownames = FALSE, options = list(dom = "t")
+        ))
+      }
+      if (is.list(d) && !is.data.frame(d) && !is.null(d$empty)) {
+        msg <- if (identical(d$empty, "no_change"))
+          "No variables were manipulated by the selected policy."
+        else
+          "Manipulated variables are non-numeric or absent."
+        return(DT::datatable(
+          data.frame(Message = msg),
+          rownames = FALSE, options = list(dom = "t")
+        ))
+      }
       DT::datatable(
-        df, rownames = FALSE, class = "compact stripe",
+        d, rownames = FALSE, class = "compact stripe",
         options = list(pageLength = 25, dom = "tp", ordering = TRUE)
       )
     })
@@ -523,23 +519,6 @@ mod_3_06_results_server <- function(id,
         selector = paste0("#", ns("results3_section")),
         where    = "afterBegin",
         ui       = .results3_content_ui(ns, policy_hist_sim()$so)
-      )
-
-      # Diagnostics tab
-      shiny::appendTab(
-        inputId = tabset_id,
-        shiny::tabPanel(
-          title = "Diagnostics",
-          value = "policy_diag_tab",
-          shiny::div(id = ns("diag3_section"))
-        ),
-        select  = FALSE,
-        session = tabset_session
-      )
-      shiny::insertUI(
-        selector = paste0("#", ns("diag3_section")),
-        where    = "afterBegin",
-        ui       = .diag3_content_ui(ns)
       )
     }, ignoreInit = TRUE, once = TRUE)
 

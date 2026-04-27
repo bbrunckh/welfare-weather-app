@@ -176,6 +176,7 @@ mod_3_scenario_server <- function(id,
       baseline_svy             = s5$baseline_svy,
       policy_svy               = s5$policy_svy,
       selected_model           = selected_model,
+      sim_run_id               = s5$sim_run_id,
       tabset_id                = "step3_output_tabs",
       tabset_session           = session
     )

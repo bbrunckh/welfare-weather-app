@@ -67,6 +67,7 @@ mod_3_05_policy_sim_server <- function(id,
     baseline_svy_rv        <- reactiveVal(NULL)
     policy_svy_rv          <- reactiveVal(NULL)
     sim_error              <- reactiveVal(NULL)
+    sim_run_id             <- reactiveVal(0L)
 
     # Synthetic selected_hist so mod_2_02_results can label the baseline row.
     policy_selected_hist <- reactive({
@@ -120,6 +121,12 @@ mod_3_05_policy_sim_server <- function(id,
 
       result <- tryCatch(
         {
+          # Seed the RNG so that identical sidebar inputs produce identical
+          # results across "Run simulation" clicks. Sources of randomness:
+          # (a) sample() in .apply_binary_access for binary policy flips, and
+          # (b) rnorm() residual draws inside predict_outcome().
+          set.seed(42L)
+
           svy_mod <- apply_policy_to_svy(
             svy,
             infra   = infra_scenario(),
@@ -127,10 +134,20 @@ mod_3_05_policy_sim_server <- function(id,
             digital = digital_scenario(),
             labor   = labor_scenario()
           )
+          # Tag with a unique run id so the reactiveVal always invalidates
+          # downstream consumers, even when the underlying data is
+          # value-identical to the previous run.
+          tag <- as.numeric(Sys.time()) + stats::runif(1)
+          attr(svy,     "._sim_run_tag") <- tag
+          attr(svy_mod, "._sim_run_tag") <- tag
           baseline_svy_rv(svy)
           policy_svy_rv(svy_mod)
 
-          residuals <- "normal"
+          # Reuse the exact settings Step 2 used so that the policy
+          # pipeline reduces to Step 2's baseline when no covariates are
+          # actually changed by apply_policy_to_svy().
+          residuals  <- hs$residuals  %||% "original"
+          coef_draws <- hs$coef_draws
 
           shiny::withProgress(
             message = "Running policy simulation...",
@@ -146,7 +163,8 @@ mod_3_05_policy_sim_server <- function(id,
                 model           = mf$fit3,
                 residuals       = residuals,
                 train_data      = mf$train_data,
-                engine          = mf$engine
+                engine          = mf$engine,
+                coef_draws      = coef_draws
               )
               shiny::setProgress(value = 1, detail = "Complete")
               res
@@ -167,8 +185,17 @@ mod_3_05_policy_sim_server <- function(id,
         return(invisible(NULL))
       }
 
-      policy_hist_sim(result$hist_sim)
-      policy_saved_scenarios(result$saved_scenarios)
+      # Tag results too so the policy_hist_sim / policy_saved_scenarios
+      # reactiveVals also always invalidate downstream.
+      tag <- as.numeric(Sys.time()) + stats::runif(1)
+      hs_tagged <- result$hist_sim
+      attr(hs_tagged, "._sim_run_tag") <- tag
+      saved_tagged <- result$saved_scenarios
+      attr(saved_tagged, "._sim_run_tag") <- tag
+
+      policy_hist_sim(hs_tagged)
+      policy_saved_scenarios(saved_tagged)
+      sim_run_id(isolate(sim_run_id()) + 1L)
 
       shiny::showNotification(
         paste0(
@@ -188,7 +215,8 @@ mod_3_05_policy_sim_server <- function(id,
       policy_saved_scenarios = policy_saved_scenarios,
       policy_selected_hist   = policy_selected_hist,
       baseline_svy           = baseline_svy_rv,
-      policy_svy             = policy_svy_rv
+      policy_svy             = policy_svy_rv,
+      sim_run_id             = sim_run_id
     )
   })
 }

@@ -749,7 +749,11 @@ mod_2_01_weathersim_server <- function(id,
                 pov_line    = pov_line_sim_val,
                 weather_raw = out$weather_raw,
                 train_data  = train_data,
-                has_weights = !is.null(weight_col_sim)
+                has_weights = !is.null(weight_col_sim),
+                # Settings used in this run — persisted so Step 3 can reuse
+                # them and reproduce the same predictions on policy data.
+                residuals   = residuals,
+                coef_draws  = coef_draws
               )
             } else if (!is_hist) {
               # Key is "<ssp>_<start>_<end>_<model>"

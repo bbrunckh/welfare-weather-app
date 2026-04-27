@@ -189,6 +189,49 @@ apply_policy_to_svy <- function(svy,
 }
 
 
+#' Detect columns that differ between the baseline and policy-adjusted frames
+#'
+#' Returns the names of columns whose values differ between
+#' \code{baseline_svy} and \code{policy_svy}. Used by the Step 3 diagnostics
+#' table to surface any variable a user manipulation has touched —
+#' covariates, interaction variables, or outcomes alike.
+#'
+#' Comparison rules:
+#' \itemize{
+#'   \item Numeric columns are compared with tolerance via
+#'     \code{isTRUE(all.equal(..., check.attributes = FALSE))}.
+#'   \item Other columns are compared with \code{identical()}.
+#' }
+#'
+#' Rows must match across the two frames; if \code{nrow()} differs the
+#' function returns the union of column names instead (since values can no
+#' longer be compared element-wise).
+#'
+#' @param baseline_svy Data frame before \code{apply_policy_to_svy()}.
+#' @param policy_svy   Data frame after \code{apply_policy_to_svy()}.
+#'
+#' @return Character vector of column names that changed.
+#' @export
+detect_manipulated_vars <- function(baseline_svy, policy_svy) {
+  if (is.null(baseline_svy) || is.null(policy_svy)) return(character(0))
+  shared <- intersect(names(baseline_svy), names(policy_svy))
+  if (length(shared) == 0) return(character(0))
+  if (nrow(baseline_svy) != nrow(policy_svy)) {
+    return(setdiff(union(names(baseline_svy), names(policy_svy)), character(0)))
+  }
+  changed <- vapply(shared, function(v) {
+    xb <- baseline_svy[[v]]
+    xp <- policy_svy[[v]]
+    if (is.numeric(xb) && is.numeric(xp)) {
+      !isTRUE(all.equal(xb, xp, check.attributes = FALSE))
+    } else {
+      !identical(xb, xp)
+    }
+  }, logical(1))
+  shared[changed]
+}
+
+
 #' Build a Diagnostics Summary for Policy-Adjusted Inputs
 #'
 #' Computes mean / sd / n_nonNA for each covariate in both the baseline and
@@ -214,6 +257,8 @@ policy_input_diagnostics <- function(baseline_svy, policy_svy, vars = NULL) {
     # Drop obvious non-covariate keys
     vars  <- setdiff(vars, c("loc_id", "int_year", "int_month", "sim_year"))
   }
+
+  vars <- vars[vars %in% names(baseline_svy) & vars %in% names(policy_svy)]
 
   if (length(vars) == 0) return(NULL)
 
@@ -370,7 +415,8 @@ run_policy_pipeline <- function(hist_sim,
                                 model,
                                 residuals,
                                 train_data,
-                                engine) {
+                                engine,
+                                coef_draws = NULL) {
 
   # ---- Historical ---------------------------------------------------------
   hist_result <- run_sim_pipeline(
@@ -382,6 +428,7 @@ run_policy_pipeline <- function(hist_sim,
     residuals   = residuals,
     train_data  = train_data,
     engine      = engine,
+    coef_draws  = coef_draws,
     slim        = FALSE
   )
 
@@ -420,6 +467,7 @@ run_policy_pipeline <- function(hist_sim,
             residuals   = residuals,
             train_data  = train_data,
             engine      = engine,
+            coef_draws  = coef_draws,
             slim        = TRUE
           ),
           error = function(e) {
@@ -457,6 +505,7 @@ run_policy_pipeline <- function(hist_sim,
           residuals   = residuals,
           train_data  = train_data,
           engine      = engine,
+          coef_draws  = coef_draws,
           slim        = TRUE
         ),
         error = function(e) {
