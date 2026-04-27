@@ -580,7 +580,7 @@ plot_uncertainty_decomposition <- function(scenarios, hist_agg,
 build_threshold_table_df <- function(all_series, group_order = "scenario_x_year") {
 
   rows <- lapply(names(all_series), function(nm) {
-    vals <- all_series[[nm]]$out$value
+    vals <- all_series[[nm]]$out$value %||% all_series[[nm]]$out$value_p50 #DRK Note - May be better fix in future
     vals <- vals[is.finite(vals)]
     n    <- length(vals)
 
@@ -784,7 +784,7 @@ enhance_exceedance <- function(scenarios,
   # ---- Build per-group long data frame ------------------------------------
   long_df <- dplyr::bind_rows(lapply(seq_along(scenarios), function(i) {
     nm      <- labels[i]
-    vals    <- scenarios[[nm]]$out$value
+    vals <- scenarios[[nm]]$out$value %||% scenarios[[nm]]$out$value_p50 #DRK Note - may be more efficient fix later
     ssp_key <- .normalise_ssp(nm)
     yr      <- .parse_year(nm)
     data.frame(

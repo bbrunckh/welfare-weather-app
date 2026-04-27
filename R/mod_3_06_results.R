@@ -238,7 +238,6 @@ mod_3_06_results_server <- function(id,
       use_w   <- isTRUE(input$use_weights) && !is.null(pipeline_obj$weight)
       band_q  <- resolve_band_q("p10_p90")
       S       <- resolve_S("p10_p90")
-      agg_fn  <- resolve_agg_fn(method)
 
       sim_years <- sort(unique(pipeline_obj$sim_year))
 
@@ -249,7 +248,7 @@ mod_3_06_results_server <- function(id,
             y_point   = pipeline_obj$y_point[idx],
             F_loading = if (!is.null(chol_obj) && !is.null(pipeline_obj$F_loading))
                           pipeline_obj$F_loading[idx, , drop = FALSE] else NULL,
-            agg_fn    = agg_fn,
+            method = method,
             S         = S,
             residuals = "none",
             weights   = if (use_w) pipeline_obj$weight[idx] else NULL,

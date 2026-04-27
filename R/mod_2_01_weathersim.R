@@ -840,7 +840,6 @@ mod_2_01_weathersim_server <- function(id,
           saved_scenarios(new_scenarios)
 
           # ---- Pre-aggregate all methods at simulation time -------------------------
-          use_w_sim <- !is.null(hist_sim_result$pipeline$weight)
           S_sim     <- resolve_S(input$coef_band_width %||% "p10_p90")
           bq_sim    <- resolve_band_q(input$coef_band_width %||% "p10_p90")
           res_sim   <- input$residuals %||% "none"
@@ -851,7 +850,6 @@ mod_2_01_weathersim_server <- function(id,
               pipeline  = hist_sim_result$pipeline,
               chol_obj  = chol_obj,
               methods   = agg_methods_all,
-              use_w     = use_w_sim,
               S         = S_sim,
               band_q    = bq_sim,
               residuals = res_sim,
@@ -864,7 +862,6 @@ mod_2_01_weathersim_server <- function(id,
             compute_scenario_agg(
               scenarios = new_scenarios,
               methods   = agg_methods_all,
-              use_w     = use_w_sim,
               S         = S_sim,
               band_q    = bq_sim,
               residuals = res_sim,
