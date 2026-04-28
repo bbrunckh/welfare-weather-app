@@ -363,11 +363,7 @@ mod_3_06_results_server <- function(id,
           style = "color:#555; font-size:12px;",
           paste0("Showing ", agg_label, " of ", so$label %||% so$name,
                  " expressed as ", dev_label, pov_txt, ".")
-        ),
-        p(lapply(names(exceedance_series()), function(nm) {
-            df <- exceedance_series()[[nm]]
-            cat(nm, ":", nrow(df), "rows ×", ncol(df), "columns\n")
-          }))
+        )
       )
     })
 

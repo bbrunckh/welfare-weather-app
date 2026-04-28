@@ -17,27 +17,26 @@ mod_3_01_sp_ui <- function(id) {
     uiOutput(ns("sp_type_ui")),
 
     # ---- Configure button — toggles the rest ---------------------------
-    actionButton(
-      inputId = ns("sp_config_toggle"),
-      label   = tagList(
-        tags$i(class = "fa fa-sliders me-1"),
-        "Configure SP"
-      ),
-      class = "btn btn-outline-secondary btn-sm mb-2 w-100"
-    ),
+    # actionButton(
+    #   inputId = ns("sp_config_toggle"),
+    #   label   = tagList(
+    #     tags$i(class = "fa fa-sliders me-1"),
+    #     "Configure SP"
+    #   )
+    # ),
 
     # ---- Collapsible configuration panel -------------------------------
     # conditionalPanel keyed on click count: odd = open, even = closed
-    conditionalPanel(
-      condition = "input.sp_config_toggle % 2 == 1",
-      ns        = ns,
-      uiOutput(ns("sp_trigger_ui")),
-      uiOutput(ns("sp_budget_amount_ui")),
-      uiOutput(ns("sp_targeting_ui")),
-      uiOutput(ns("sp_timing_ui")),
-      uiOutput(ns("sp_delivery_ui")),
-      uiOutput(ns("sp_revenue_ui"))
-    )
+    # conditionalPanel(
+      # condition = "input.sp_config_toggle % 2 == 1",
+      # ns        = ns,
+    uiOutput(ns("sp_trigger_ui")),
+    uiOutput(ns("sp_budget_amount_ui")),
+    uiOutput(ns("sp_targeting_ui")),
+    uiOutput(ns("sp_timing_ui")),
+    uiOutput(ns("sp_delivery_ui")),
+    uiOutput(ns("sp_revenue_ui"))
+    # )
   )
 }
 
@@ -86,10 +85,10 @@ mod_3_01_sp_server <- function(id,
           inputId  = ns("sp_type"),
           label    = NULL,
           choices  = c(
-            "Shock-responsive cash transfer" = "shock",
+            # "Shock-responsive cash transfer" = "shock",
             "Regular cash transfer"          = "regular"
           ),
-          selected = "shock"
+          selected = "regular"
         ),
         tags$hr(style = "margin: 8px 0;")
       )
@@ -97,38 +96,38 @@ mod_3_01_sp_server <- function(id,
 
     # ---- 2. Trigger (shock-responsive only) ----------------------------
 
-    output$sp_trigger_ui <- renderUI({
-      req(input$sp_type == "shock")
-      tagList(
-        tags$label(
-          class = "control-label",
-          tags$i(class = "fa fa-triangle-exclamation me-1"),
-          "Trigger type"
-        ),
-        selectInput(
-          inputId  = ns("trigger_type"),
-          label    = NULL,
-          choices  = c(
-            "Return period of event \u2265 x years"      = "return_period",
-            "Weather variable exceeds x"          = "weather_threshold",
-            "Modelled welfare loss \u2265 $x"            = "welfare_loss",
-            "Modelled increase in poverty gap \u2265 $x" = "poverty_increase"
-          ),
-          selected = "return_period"
-        ),
-        numericInput(
-          inputId = ns("trigger_value"),
-          label   = tags$span(
-            tags$i(class = "fa fa-sliders me-1"),
-            "Trigger value (x)"
-          ),
-          value = 10,
-          min   = 0,
-          step  = 1
-        ),
-        tags$hr(style = "margin: 8px 0;")
-      )
-    })
+    # output$sp_trigger_ui <- renderUI({
+    #   req(input$sp_type == "shock")
+    #   tagList(
+    #     tags$label(
+    #       class = "control-label",
+    #       tags$i(class = "fa fa-triangle-exclamation me-1"),
+    #       "Trigger type"
+    #     ),
+    #     selectInput(
+    #       inputId  = ns("trigger_type"),
+    #       label    = NULL,
+    #       choices  = c(
+    #         "Return period of event \u2265 x years"      = "return_period",
+    #         "Weather variable exceeds x"                 = "weather_threshold",
+    #         "Modelled welfare loss \u2265 $x"            = "welfare_loss",
+    #         "Modelled increase in poverty gap \u2265 $x" = "poverty_increase"
+    #       ),
+    #       selected = "return_period"
+    #     ),
+    #     numericInput(
+    #       inputId = ns("trigger_value"),
+    #       label   = tags$span(
+    #         tags$i(class = "fa fa-sliders me-1"),
+    #         "Trigger value (x)"
+    #       ),
+    #       value = 10,
+    #       min   = 0,
+    #       step  = 1
+    #     ),
+    #     tags$hr(style = "margin: 8px 0;")
+    #   )
+    # })
 
     # ---- 3. Targeting --------------------------------------------------
 
@@ -198,70 +197,70 @@ mod_3_01_sp_server <- function(id,
     output$sp_budget_amount_ui <- renderUI({
       tagList(
 
-        # -- Budget mode toggle ------------------------------------------
-        tags$label(
-          class = "control-label",
-          tags$i(class = "fa fa-link me-1"),
-          "Budget"
-        ),
-        radioButtons(
-          inputId  = ns("budget_mode"),
-          label    = NULL,
-          choices  = c(
+        # # -- Budget mode toggle ------------------------------------------
+        # tags$label(
+        #   class = "control-label",
+        #   tags$i(class = "fa fa-link me-1"),
+        #   "Budget"
+        # ),
+        # radioButtons(
+        #   inputId  = ns("budget_mode"),
+        #   label    = NULL,
+        #   choices  = c(
 
-            "Set transfer per HH \u2192 derive total budget" = "transfer_first",
-            "Set total budget \u2192 derive transfer per HH" = "budget_first"
-          ),
-          selected = "transfer_first"
-        ),
+        #     "Set transfer per HH \u2192 derive total budget" = "transfer_first",
+        #     "Set total budget \u2192 derive transfer per HH" = "budget_first"
+        #   ),
+        #   selected = "transfer_first"
+        # ),
 
-        tags$hr(style = "margin: 4px 0;"),
+        # tags$hr(style = "margin: 4px 0;"),
 
         # -- Total budget (budget_first only) ----------------------------
-        conditionalPanel(
-          condition = paste0("input['", ns("budget_mode"), "'] == 'budget_first'"),
-          tags$label(
-            class = "control-label",
-            tags$i(class = "fa fa-coins me-1"),
-            "Total budget"
-          ),
-          selectInput(
-            inputId  = ns("budget_type"),
-            label    = NULL,
-            choices  = c(
-              "Fixed amount"                                  = "fixed",
-              "Share of modelled welfare loss (at trigger)"  = "welfare_share",
-              "Proportional to modelled increase in poverty" = "poverty_prop",
-              "Based on annual expected welfare loss"        = "annual_expected"
-            ),
-            selected = "fixed"
-          ),
-          conditionalPanel(
-            condition = paste0("input['", ns("budget_type"), "'] == 'fixed'"),
-            numericInput(
-              inputId = ns("budget_fixed"),
-              label   = tags$span(
-                tags$i(class = "fa fa-dollar-sign me-1"),
-                "Fixed budget (USD)"
-              ),
-              value = 1000000, min = 0, step = 100000
-            )
-          ),
-          conditionalPanel(
-            condition = paste0(
-              "input['", ns("budget_type"), "'] == 'welfare_share' || ",
-              "input['", ns("budget_type"), "'] == 'poverty_prop'"
-            ),
-            sliderInput(
-              inputId = ns("budget_share_pct"),
-              label   = tags$span(
-                tags$i(class = "fa fa-percent me-1"),
-                "Share / proportion (%)"
-              ),
-              min = 1, max = 100, value = 50, step = 1, post = "%"
-            )
-          )
-        ),
+        # conditionalPanel(
+        #   condition = paste0("input['", ns("budget_mode"), "'] == 'budget_first'"),
+        #   tags$label(
+        #     class = "control-label",
+        #     tags$i(class = "fa fa-coins me-1"),
+        #     "Total budget"
+        #   ),
+        #   selectInput(
+        #     inputId  = ns("budget_type"),
+        #     label    = NULL,
+        #     choices  = c(
+        #       "Fixed amount"                                 = "fixed",
+        #       "Share of modelled welfare loss (at trigger)"  = "welfare_share",
+        #       "Proportional to modelled increase in poverty" = "poverty_prop",
+        #       "Based on annual expected welfare loss"        = "annual_expected"
+        #     ),
+        #     selected = "fixed"
+        #   ),
+        #   conditionalPanel(
+        #     condition = paste0("input['", ns("budget_type"), "'] == 'fixed'"),
+        #     numericInput(
+        #       inputId = ns("budget_fixed"),
+        #       label   = tags$span(
+        #         tags$i(class = "fa fa-dollar-sign me-1"),
+        #         "Fixed budget (USD)"
+        #       ),
+        #       value = 1000000, min = 0, step = 100000
+        #     )
+        #   ),
+        #   conditionalPanel(
+        #     condition = paste0(
+        #       "input['", ns("budget_type"), "'] == 'welfare_share' || ",
+        #       "input['", ns("budget_type"), "'] == 'poverty_prop'"
+        #     ),
+        #     sliderInput(
+        #       inputId = ns("budget_share_pct"),
+        #       label   = tags$span(
+        #         tags$i(class = "fa fa-percent me-1"),
+        #         "Share / proportion (%)"
+        #       ),
+        #       min = 1, max = 100, value = 50, step = 1, post = "%"
+        #     )
+        #   )
+        # ),
 
         # -- Transfer amount ---------------------------------------------
         tags$label(
@@ -280,53 +279,61 @@ mod_3_01_sp_server <- function(id,
         #   ),
         #   selected = "equal"
         # ),
-        conditionalPanel(
-          condition = paste0(
-            # "input['", ns("amount_type"), "'] == 'equal' && ",
-            "input['", ns("budget_mode"), "'] == 'transfer_first'"
-          ),
-          numericInput(
+        numericInput(
             inputId = ns("transfer_amount_usd"),
             label   = tags$span(
               tags$i(class = "fa fa-dollar-sign me-1"),
               "Transfer per household ($)"
             ),
             value = 50, min = 0, step = 10
-          )
-        ),
-        conditionalPanel(
-          condition = paste0(
-            # "input['", ns("amount_type"), "'] == 'equal' && ",
-            "input['", ns("budget_mode"), "'] == 'budget_first'"
           ),
-          tags$div(
-            class = "alert alert-light p-2 mb-2",
-            tags$small(
-              tags$i(class = "fa fa-calculator me-1"),
-              tags$strong("Derived: "),
-              "transfer per HH = (total budget \u00d7 (1 \u2212 admin%)) \u00f7 beneficiaries"
-            )
-          )
-        ),
+        # conditionalPanel(
+        #   condition = paste0(
+        #     # "input['", ns("amount_type"), "'] == 'equal' && ",
+        #     "input['", ns("budget_mode"), "'] == 'transfer_first'"
+        #   ),
+        #   numericInput(
+        #     inputId = ns("transfer_amount_usd"),
+        #     label   = tags$span(
+        #       tags$i(class = "fa fa-dollar-sign me-1"),
+        #       "Transfer per household ($)"
+        #     ),
+        #     value = 50, min = 0, step = 10
+        #   )
+        # ),
+        # conditionalPanel(
+        #   condition = paste0(
+        #     # "input['", ns("amount_type"), "'] == 'equal' && ",
+        #     "input['", ns("budget_mode"), "'] == 'budget_first'"
+        #   ),
+        #   tags$div(
+        #     class = "alert alert-light p-2 mb-2",
+        #     tags$small(
+        #       tags$i(class = "fa fa-calculator me-1"),
+        #       tags$strong("Derived: "),
+        #       "transfer per HH = (total budget \u00d7 (1 \u2212 admin%)) \u00f7 beneficiaries"
+        #     )
+        #   )
+        # ),
 
         tags$hr(style = "margin: 4px 0;"),
 
         # -- Administration costs (reduces amount available) -------------
-        sliderInput(
-          inputId = ns("admin_cost_pct"),
-          label   = tags$span(
-            tags$i(class = "fa fa-building me-1"),
-            "Administration cost (% of total budget)"
-          ),
-          min = 0, max = 40, value = 10, step = 1, post = "%"
-        ),
-        tags$small(
-          class = "text-muted d-block mb-2",
-          tags$i(class = "fa fa-circle-info me-1"),
-          "Admin cost is deducted from the total budget before computing transfer amounts."
-        ),
+        # sliderInput(
+        #   inputId = ns("admin_cost_pct"),
+        #   label   = tags$span(
+        #     tags$i(class = "fa fa-building me-1"),
+        #     "Administration cost (% of total budget)"
+        #   ),
+        #   min = 0, max = 40, value = 10, step = 1, post = "%"
+        # ),
+        # tags$small(
+        #   class = "text-muted d-block mb-2",
+        #   tags$i(class = "fa fa-circle-info me-1"),
+        #   "Admin cost is deducted from the total budget before computing transfer amounts."
+        # ),
 
-        tags$hr(style = "margin: 8px 0;")
+        # tags$hr(style = "margin: 8px 0;")
       )
     })
 
@@ -410,64 +417,64 @@ mod_3_01_sp_server <- function(id,
 
     # ---- 6. Delivery system --------------------------------------------
 
-    output$sp_delivery_ui <- renderUI({
-      tagList(
-        tags$label(
-          class = "control-label",
-          tags$i(class = "fa fa-mobile-screen me-1"),
-          "Delivery system"
-        ),
-        checkboxInput(
-          inputId = ns("delivery_mobile_money"),
-          label   = tagList(
-            tags$i(class = "fa fa-wallet me-1"),
-            "Mobile money (recipients need mobile wallet)"
-          ),
-          value = FALSE
-        ),
-        conditionalPanel(
-          condition = paste0("input['", ns("delivery_mobile_money"), "']"),
-          tags$small(
-            class = "text-muted d-block mb-2",
-            tags$i(class = "fa fa-circle-info me-1"),
-            "Coverage will be constrained by mobile phone ownership rate in the simulation."
-          )
-        ),
-        tags$hr(style = "margin: 8px 0;")
-      )
-    })
+    # output$sp_delivery_ui <- renderUI({
+    #   tagList(
+    #     tags$label(
+    #       class = "control-label",
+    #       tags$i(class = "fa fa-mobile-screen me-1"),
+    #       "Delivery system"
+    #     ),
+    #     checkboxInput(
+    #       inputId = ns("delivery_mobile_money"),
+    #       label   = tagList(
+    #         tags$i(class = "fa fa-wallet me-1"),
+    #         "Mobile money (recipients need mobile wallet)"
+    #       ),
+    #       value = FALSE
+    #     ),
+    #     conditionalPanel(
+    #       condition = paste0("input['", ns("delivery_mobile_money"), "']"),
+    #       tags$small(
+    #         class = "text-muted d-block mb-2",
+    #         tags$i(class = "fa fa-circle-info me-1"),
+    #         "Coverage will be constrained by mobile phone ownership rate in the simulation."
+    #       )
+    #     ),
+    #     tags$hr(style = "margin: 8px 0;")
+    #   )
+    # })
 
     # ---- 7. Revenue source ---------------------------------------------
 
-    output$sp_revenue_ui <- renderUI({
-      tagList(
-        tags$label(
-          class = "control-label",
-          tags$i(class = "fa fa-money-bill-trend-up me-1"),
-          "Revenue source"
-        ),
-        selectInput(
-          inputId  = ns("revenue_source"),
-          label    = NULL,
-          choices  = c(
-            "Government budget reallocation"         = "govt_reallocation",
-            "Dedicated social protection budget"     = "sp_budget",
-            "International aid / donor funding"      = "donor",
-            "Contingency fund / reserve"             = "contingency",
-            "Sovereign parametric insurance payout"  = "insurance",
-            "Catastrophe bond trigger"               = "cat_bond",
-            "Deficit spending / borrowing"           = "borrowing"
-          ),
-          selected = "govt_reallocation"
-        ),
-        tags$small(
-          class = "text-muted d-block mb-2",
-          tags$i(class = "fa fa-circle-info me-1"),
-          "Revenue source affects fiscal cost interpretation in the simulation output."
-        ),
-        tags$hr(style = "margin: 8px 0;")
-      )
-    })
+    # output$sp_revenue_ui <- renderUI({
+    #   tagList(
+    #     tags$label(
+    #       class = "control-label",
+    #       tags$i(class = "fa fa-money-bill-trend-up me-1"),
+    #       "Revenue source"
+    #     ),
+    #     selectInput(
+    #       inputId  = ns("revenue_source"),
+    #       label    = NULL,
+    #       choices  = c(
+    #         "Government budget reallocation"         = "govt_reallocation",
+    #         "Dedicated social protection budget"     = "sp_budget",
+    #         "International aid / donor funding"      = "donor",
+    #         "Contingency fund / reserve"             = "contingency",
+    #         "Sovereign parametric insurance payout"  = "insurance",
+    #         "Catastrophe bond trigger"               = "cat_bond",
+    #         "Deficit spending / borrowing"           = "borrowing"
+    #       ),
+    #       selected = "govt_reallocation"
+    #     ),
+    #     tags$small(
+    #       class = "text-muted d-block mb-2",
+    #       tags$i(class = "fa fa-circle-info me-1"),
+    #       "Revenue source affects fiscal cost interpretation in the simulation output."
+    #     ),
+    #     tags$hr(style = "margin: 8px 0;")
+    #   )
+    # })
 
     # ---- Return API ----------------------------------------------------
 
