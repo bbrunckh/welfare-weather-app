@@ -149,3 +149,66 @@
    Needs: Economic/climate science review of multi-hazard model results
      before production use with multiple hazards
    Priority: High — affects result validity for multi-hazard runs
+
+   ## 15. DuckDB rolling window approximation — methodology review needed
+   Flagged: 2026-04-28
+   
+   ## Current behaviour
+   For each climate scenario key (SSP × period × model), the batch query
+   applies the rolling window AFTER adding climate deltas to the base weather:
+     roll(base + delta)  — exact, per model, per SSP key
+   This requires a separate DuckDB rolling window computation per SSP key,
+   partitioned by (model, code, year, survname, loc_id, timestamp).
+   At 10 keys × 2 hazards this causes the dominant DuckDB stall (~192s).
+
+   ## Proposed approximation
+   Apply rolling window to the BASE series only (already materialised in
+   loc_weather_base), then add the delta after:
+     roll(base) + delta  — approximate
+   loc_weather_base is already computed and materialised before the SSP loop.
+   This would eliminate roll_exprs_climate entirely from the batch query.
+   Estimated saving: ~100-130s at 10 keys.
+
+   ## Mathematical accuracy
+   roll(base + delta) = roll(base) + roll(delta) only when delta is constant
+   over the rolling window. In practice:
+   
+   - Additive perturbations (e.g. temperature):
+     delta varies monthly across the window → approximation introduces error
+     Error = roll(delta) - mean(delta) = deviation of delta from its window mean
+     For smooth climate signals this is small (~0.1-0.5% relative error)
+   
+   - Multiplicative perturbations (e.g. precipitation):
+     roll(base * factor) ≠ roll(base) * factor in general
+     Error depends on covariance of base and factor within the window
+     Likely larger than additive case
+   
+   - Window length matters:
+     3-month window (current): moderate approximation error
+     12-month window: delta smooths out → approximation improves
+     1-month window: exact (no averaging needed)
+   
+   - Variable growing season window (future plans):
+     If window length varies by location/season, the approximation error
+     becomes location-specific and harder to bound analytically
+
+   ## What needs methodology review
+   1. Is roll(base) + delta acceptable for additive variables (temperature)?
+      Need to quantify error on real data — suggest comparing exact vs
+      approximate output for 2-3 survey countries.
+   2. Is roll(base) * factor acceptable for multiplicative (precipitation)?
+      Likely needs separate treatment — may need to keep exact computation
+      for multiplicative variables only.
+   3. How does error change with 3m vs 6m vs growing-season windows?
+   4. Could a hybrid approach work?
+      Exact for multiplicative, approximate for additive — halves the cost.
+
+   ## Implementation complexity
+   Low once methodology approved — replace roll_exprs_climate in batch query
+   with a simple join to loc_weather_base + arithmetic delta application.
+   No structural changes to get_weather() needed.
+
+   ## Priority
+   High for performance (biggest remaining DuckDB bottleneck), but requires
+   methodology sign-off before implementation. Do not implement without
+   quantitative accuracy assessment on real survey data.

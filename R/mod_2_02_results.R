@@ -222,6 +222,11 @@ mod_2_02_results_server <- function(id,
     # Debounce — wait 800ms after last change before recomputing
     # Prevents 300 recomputes per keypress when typing a poverty line value
     pov_line_val <- debounce(pov_line_raw, 800)
+    weight_key <- reactive({
+      if (isTRUE(input$use_weights) &&
+          !is.null(hist_sim()) &&
+          isTRUE(hist_sim()$has_weights)) "weighted" else "unweighted"
+    })
 
     selected_scenario_names <- reactive({
       sc   <- saved_scenarios()
@@ -245,10 +250,7 @@ mod_2_02_results_server <- function(id,
       req(hist_agg_rv())
       method    <- input$cmp_agg_method %||% "mean"
       deviation <- input$cmp_deviation  %||% "none"
-      weight_key <- if (isTRUE(input$use_weights) &&
-                  !is.null(hist_sim()) &&
-                  isTRUE(hist_sim()$has_weights)) "weighted" else "unweighted"
-      out <- hist_agg_rv()[[weight_key]][[method]]
+      out <- hist_agg_rv()[[weight_key()]][[method]]
       req(!is.null(out))
       if (!identical(deviation, "none") && nrow(out) > 0) {
         hist_ref <- if (identical(deviation, "mean"))
@@ -275,10 +277,7 @@ mod_2_02_results_server <- function(id,
       x_label <- if (identical(deviation, "none")) label_agg_method(method) else
         paste0(label_agg_method(method), " \u2014 ", label_deviation(deviation))
         result <- setNames(lapply(names(sc), function(display_key) {
-        weight_key <- if (isTRUE(input$use_weights) &&
-                  !is.null(hist_sim()) &&
-                  isTRUE(hist_sim()$has_weights)) "weighted" else "unweighted"
-        out <- scenario_agg_rv()[[display_key]][[weight_key]][[method]]
+        out <- scenario_agg_rv()[[display_key]][[weight_key()]][[method]]
         if (is.null(out) || nrow(out) == 0L) return(NULL)
         if (!identical(deviation, "none") && !is.na(hist_ref))
           out <- dplyr::mutate(out, value = value - hist_ref)

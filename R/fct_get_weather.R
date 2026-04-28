@@ -1,3 +1,28 @@
+# fct_get_weather.R
+# -----------------
+# Weather loading and processing pipeline.
+# Loads ERA5 historical weather and CMIP6 climate projections from parquet
+# files via DuckDB. Applies spatial aggregation (H3 → survey location),
+# temporal rolling windows, and climate perturbations.
+#
+# Called by:
+#   - mod_1_04_weather.R  (weather preview in Module 1)
+#   - fct_run_simulation.R / mod_2_01_weathersim.R (simulation in Module 2)
+#
+# Main exports:
+#   get_weather()          — full weather loading pipeline
+#   summarise_ensemble()   — reduce CMIP6 ensemble to representatives
+#
+# Internal helpers (not exported):
+#   .harmonise_h3()        — H3 resolution matching
+#   .apply_transformations() — anomaly/deviation computation in DuckDB
+#   .compute_breaks()      — histogram/quantile breakpoints
+#   .apply_binning()       — apply cut points to weather data frame
+
+# ---------------------------------------------------------------------------- #
+# Section 1 — H3 spatial helpers                                               #
+# ---------------------------------------------------------------------------- #
+
 #' Harmonise H3 resolution and type between microdata and weather tables.
 #' 
 #' This helper:
@@ -79,7 +104,11 @@
 }
 
 # ---------------------------------------------------------------------------- #
-
+# Section 2 — Weather transformation helpers                                   #
+# .apply_transformations() — anomaly/deviation in DuckDB SQL                   #
+# .compute_breaks()        — binning breakpoint computation                    #
+# .apply_binning()         — apply breakpoints to data frame                   #
+# ---------------------------------------------------------------------------- #
 
 #' Apply deviation-from-mean or standardised-anomaly transformations lazily.
 #'
@@ -243,6 +272,12 @@
   df
 }
 
+# ---------------------------------------------------------------------------- #
+# Section 3 — Main weather loading pipeline                                    #
+# get_weather() — loads ERA5 + CMIP6, applies rolling windows + perturbations  #
+# Note: DuckDB rolling window (0%/16% stall) occurs in loc_weather_base        #
+# materialisation and batch query. See tradeoffs for improvements              #
+# in known_issues.md #13, #15.                                                 #
 # ---------------------------------------------------------------------------- #
 
 #' Load, aggregate, and construct weather variables for survey locations.
@@ -753,7 +788,8 @@ get_weather <- function(
 }
 
 # ---------------------------------------------------------------------------- #
-# Ensemble precompute                                                           #
+# Section 4 — Ensemble summarisation                                           #
+# summarise_ensemble() — reduce CMIP6 ensemble to lo/mean/hi representatives   #
 # ---------------------------------------------------------------------------- #
 
 #' Summarise CMIP6 Ensemble to Representative Weather Series
