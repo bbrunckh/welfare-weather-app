@@ -157,7 +157,8 @@ label_deviation <- function(key) {
 #' @importFrom rlang .data
 #' @export
 plot_pointrange_climate <- function(scenarios, hist_agg,
-                                    group_order = "scenario_x_year") {
+                                    group_order = "scenario_x_year",
+                                    coef_bands_tbl = NULL) {
 
   stopifnot(is.list(hist_agg), all(c("out", "x_label") %in% names(hist_agg)))
 
@@ -172,6 +173,12 @@ plot_pointrange_climate <- function(scenarios, hist_agg,
   hist_mean <- hist_s$mean
   hist_s$pt_key     <- "Historical"
   hist_s$colour_key <- "Historical"
+  hist_bands <- if (!is.null(coef_bands_tbl))
+  dplyr::filter(coef_bands_tbl, scenario == "Historical") else NULL
+  hist_s$coef_lo <- if (!is.null(hist_bands) && nrow(hist_bands) > 0)
+    mean(hist_bands$value_lo, na.rm = TRUE) else NA_real_
+  hist_s$coef_hi <- if (!is.null(hist_bands) && nrow(hist_bands) > 0)
+    mean(hist_bands$value_hi, na.rm = TRUE) else NA_real_
 
   # ---- future scenario summaries ------------------------------------------
   # Each scenario key is "SSP2-4.5 / 2025-2035" (one entry per SSP x period,
@@ -195,6 +202,14 @@ plot_pointrange_climate <- function(scenarios, hist_agg,
         s$ssp_key     <- ssp_key
         s$ssp_short   <- ssp_short
         s$yr          <- yr
+        sc_bands <- if (!is.null(coef_bands_tbl))
+          dplyr::filter(coef_bands_tbl, scenario == nm)
+        else NULL
+        s$coef_lo <- if (!is.null(sc_bands) && nrow(sc_bands) > 0)
+          mean(sc_bands$value_lo, na.rm = TRUE) else NA_real_
+        s$coef_hi <- if (!is.null(sc_bands) && nrow(sc_bands) > 0)
+          mean(sc_bands$value_hi, na.rm = TRUE) else NA_real_
+
         s
       })
       fut_df <- dplyr::bind_rows(Filter(Negate(is.null), rows))
@@ -262,9 +277,10 @@ plot_pointrange_climate <- function(scenarios, hist_agg,
   data_levels <- setdiff(ordered_levels, spacer_ids)
 
   # ---- combine into one data frame -----------------------------------------
-  hist_row <- hist_s[, c("pt_key", "colour_key", "mean", "lo90", "hi90", "lo95", "hi95")]
+  cols     <- c("pt_key", "colour_key", "mean", "lo90", "hi90", "coef_lo", "coef_hi")
+  hist_row <- hist_s[, intersect(cols, names(hist_s))]
   fut_rows <- if (!is.null(fut_df) && nrow(fut_df) > 0)
-    fut_df[, c("pt_key", "colour_key", "mean", "lo90", "hi90", "lo95", "hi95")] else NULL
+    fut_df[, intersect(cols, names(fut_df))] else NULL
 
   plot_df <- dplyr::bind_rows(hist_row, fut_rows)
   plot_df$pt_key <- factor(plot_df$pt_key, levels = ordered_levels)
@@ -284,8 +300,8 @@ plot_pointrange_climate <- function(scenarios, hist_agg,
   ) +
     # 95% CI  thin, grey underlay
     ggplot2::geom_linerange(
-      ggplot2::aes(ymin = .data$lo95, ymax = .data$hi95),
-      linewidth = 0.5, colour = "grey70"
+      ggplot2::aes(ymin = .data$coef_lo, ymax = .data$coef_hi),
+      linewidth = 0.5, na.rm     = TRUE
     ) +
     # 90% CI — linewidth encodes percentile
     ggplot2::geom_linerange(

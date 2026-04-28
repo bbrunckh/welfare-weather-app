@@ -109,13 +109,13 @@ mod_2_02_results_ui <- function(id) {
       shiny::plotOutput(ns("summary_box_plot"), height = "600px"),
       shiny::tags$p(
         style = "font-size:11px; color:#666; margin-top:6px;",
-
-        "The central dot shows the mean annual simulated value; the thick", # TODO: update caption if percentile thresholds change from P5/P95
-        "spans the 95% interval (P2.5-P97.5).",
+        "Central dot = mean annual welfare across 30 simulation years.",
         shiny::tags$br(),
-        "Future scenarios apply climate-adjusted shifts to the same historical annual base.",
+        "Thick bar = p5\u2013p95 of annual welfare values (weather variation).",
         shiny::tags$br(),
-        "Dashed line = historical mean."
+        "Thin line = p10\u2013p90 coefficient uncertainty (updates with uncertainty band selector).",
+        shiny::tags$br(),
+        "Future scenarios apply climate perturbations to the historical weather base."
       )
     ),
 
@@ -581,7 +581,9 @@ mod_2_02_results_server <- function(id,
       plot_pointrange_climate(
         scenarios   = all_series(),
         hist_agg    = agg_hist(),
-        group_order = input$cmp_group_order %||% "scenario_x_year"
+        group_order = input$cmp_group_order %||% "scenario_x_year",
+        coef_bands_tbl   = if (isTRUE(input$show_coef_uncertainty) &&
+                           has_draws()) all_series_tbl() else NULL
       )
     }, height = 600)
 
