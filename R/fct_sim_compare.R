@@ -579,28 +579,66 @@ plot_uncertainty_decomposition <- function(scenarios, hist_agg,
 #' @export
 build_threshold_table_df <- function(all_series, group_order = "scenario_x_year") {
 
+  # Handle flat tibble format (from all_series_tbl)
+  if (inherits(all_series, "data.frame")) {
+    all_series <- split(all_series, all_series$scenario) |>
+      lapply(function(df) list(out = df))
+  }
+
   rows <- lapply(names(all_series), function(nm) {
-    vals <- all_series[[nm]]$out$value %||% all_series[[nm]]$out$value_p50 #DRK Note - May be better fix in future
-    vals <- vals[is.finite(vals)]
+    out  <- all_series[[nm]]$out
+    vals <- out$value[is.finite(out$value)]
     n    <- length(vals)
 
     keep_low  <- names(RP_LOW)[c(n >= 50, n >= 20, n >= 10, n >= 5)]
     keep_high <- names(RP_HIGH)[c(n >= 5, n >= 10, n >= 20, n >= 50)]
     if (length(keep_low) == 0 && length(keep_high) == 0) return(NULL)
 
-    low_df <- if (length(keep_low) > 0)
-      as.data.frame(t(sapply(keep_low,  function(th) round(stats::quantile(vals, RP_LOW[th]),  3))))
-    else data.frame()
-    high_df <- if (length(keep_high) > 0)
-      as.data.frame(t(sapply(keep_high, function(th) round(stats::quantile(vals, RP_HIGH[th]), 3))))
-    else data.frame()
+    # Helper — build one row from a value vector
+    build_row <- function(vals_in, nm, row_label) {
+      vals_in <- vals_in[is.finite(vals_in)]
+      if (length(vals_in) < 2L) return(NULL)
+      low_df <- if (length(keep_low) > 0)
+        as.data.frame(t(sapply(keep_low,
+          function(th) round(stats::quantile(vals_in, RP_LOW[th]), 3))))
+      else data.frame()
+      high_df <- if (length(keep_high) > 0)
+        as.data.frame(t(sapply(keep_high,
+          function(th) round(stats::quantile(vals_in, RP_HIGH[th]), 3))))
+      else data.frame()
+      names(low_df)  <- keep_low
+      names(high_df) <- keep_high
+      median_df <- data.frame(
+        "1:1" = round(stats::median(vals_in), 3),
+        check.names = FALSE
+      )
+      cbind(
+        data.frame(
+          Scenario = nm,           # original scenario name
+          Estimate = row_label,    # "Central", "Lower (p10)", "Upper (p90)"
+          Obs      = length(vals_in),
+          check.names = FALSE
+        ),
+        low_df, median_df, high_df
+      )
+    }
 
-    names(low_df)  <- keep_low
-    names(high_df) <- keep_high
-    median_df <- data.frame("1:1" = round(stats::median(vals), 3), check.names = FALSE)
+    # Central row
+    central <- build_row(vals,    nm, "Central")
+    
 
-    cbind(data.frame(Scenario = nm, Obs = n, check.names = FALSE),
-          low_df, median_df, high_df)
+    # Lower/Upper rows — from value_lo/value_hi if available
+    lo_vals <- if (!is.null(out$value_lo)) out$value_lo[is.finite(out$value_lo)] else numeric(0)
+    hi_vals <- if (!is.null(out$value_hi)) out$value_hi[is.finite(out$value_hi)] else numeric(0)
+
+
+    if (length(lo_vals) >= 2L && length(hi_vals) >= 2L) {
+      lower <- build_row(lo_vals, nm, "Lower")
+      upper <- build_row(hi_vals, nm, "Upper")
+      dplyr::bind_rows(central, lower, upper)
+    } else {
+      central
+    }
   })
 
   rows <- Filter(Negate(is.null), rows)
@@ -616,33 +654,46 @@ build_threshold_table_df <- function(all_series, group_order = "scenario_x_year"
   # Sort by group_order: Historical rows first, then SSP rows.
   # SSP rows carry a " / P{pct}" suffix — extract SSP, year, and percentile
   # for clean three-level sorting (P10 < P50 < P90 within each SSP/year group).
-  hist_rows <- df[df$Scenario == "Historical" | !grepl("^SSP", df$Scenario), , drop = FALSE]
-  ssp_rows  <- df[grepl("^SSP", df$Scenario), , drop = FALSE]
+  # Add estimate sort order — Central first, then Lower, then Upper
+  df$.est_order <- dplyr::case_when(
+    df$Estimate == "Upper"   ~ 1L,
+    df$Estimate == "Central" ~ 2L,
+    df$Estimate == "Lower"   ~ 3L,
+    TRUE                     ~ 4L
+  )
 
+  hist_rows <- df[df$Scenario == "Historical", , drop = FALSE]
+  ssp_rows  <- df[df$Scenario != "Historical", , drop = FALSE]
+
+  # Sort hist rows: Central → Lower → Upper
+  if (nrow(hist_rows) > 0)
+    hist_rows <- hist_rows[order(hist_rows$.est_order), ]
+
+  # Sort SSP rows: by SSP → year → Central/Lower/Upper
   if (nrow(ssp_rows) > 0) {
     ssp_rows$ssp_sort <- sub(" /.*", "", ssp_rows$Scenario)
-    # Use full YYYY-YYYY range for sort (lexicographic is correct for year ranges)
     yr_m <- regexpr("[0-9]{4}-[0-9]{4}", ssp_rows$Scenario)
     ssp_rows$yr_sort  <- ifelse(
       yr_m > 0,
       regmatches(ssp_rows$Scenario, yr_m),
-      regmatches(ssp_rows$Scenario, regexpr("[0-9]{4}", ssp_rows$Scenario))
-    )
-    pct_m <- regexpr("P([0-9]+)$", ssp_rows$Scenario)
-    ssp_rows$pct_sort <- ifelse(
-      pct_m > 0,
-      as.integer(regmatches(ssp_rows$Scenario, regexpr("[0-9]+$", ssp_rows$Scenario))),
-      50L
+      regmatches(ssp_rows$Scenario,
+                 regexpr("[0-9]{4}", ssp_rows$Scenario))
     )
     ssp_rows <- if (isTRUE(group_order == "year_x_scenario"))
-      ssp_rows[order(ssp_rows$yr_sort, ssp_rows$ssp_sort, ssp_rows$pct_sort), ]
+      ssp_rows[order(ssp_rows$yr_sort,
+                     ssp_rows$ssp_sort,
+                     ssp_rows$.est_order), ]
     else
-      ssp_rows[order(ssp_rows$ssp_sort, ssp_rows$yr_sort, ssp_rows$pct_sort), ]
-    ssp_rows$ssp_sort <- NULL
-    ssp_rows$yr_sort  <- NULL
-    ssp_rows$pct_sort <- NULL
+      ssp_rows[order(ssp_rows$ssp_sort,
+                     ssp_rows$yr_sort,
+                     ssp_rows$.est_order), ]
+    ssp_rows$ssp_sort  <- NULL
+    ssp_rows$yr_sort   <- NULL
   }
 
+  # Remove helper column and return
+  hist_rows$.est_order <- NULL
+  ssp_rows$.est_order  <- NULL
   rbind(hist_rows, ssp_rows)
 }
 
@@ -890,8 +941,9 @@ enhance_exceedance <- function(scenarios,
                                      override.aes = list(linewidth = 0.9))
     ) +
     ggplot2::scale_fill_manual(
-      values = colour_map_ssp,
-      guide  = "none"
+      values   = colour_map_ssp,
+      na.value = "grey70",
+      guide    = "none"
     ) +
     ggplot2::scale_linetype_manual(
       values = ltype_map_yr,
