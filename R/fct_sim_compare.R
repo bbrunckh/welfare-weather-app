@@ -776,7 +776,8 @@ enhance_exceedance <- function(scenarios,
                                x_label,
                                return_period = TRUE,
                                n_sim_years   = NULL,
-                               logit_x       = FALSE) {
+                               logit_x       = FALSE,
+                               ribbon_data   = NULL) {
 
   stopifnot(is.list(scenarios), length(scenarios) > 0)
   labels <- names(scenarios)
@@ -849,7 +850,29 @@ enhance_exceedance <- function(scenarios,
       group     = group
     )
   ) +
+
     ggplot2::geom_line(linewidth = 0.9) +
+    # ---- Coefficient uncertainty ribbon -----------------------------------
+    { if (!is.null(ribbon_data) && nrow(ribbon_data) > 0L) {
+        eps_r <- .Machine$double.eps^0.5
+        rd    <- dplyr::filter(ribbon_data,
+                              exceed_prob > eps_r &
+                              exceed_prob < (1 - eps_r))
+        ggplot2::geom_ribbon(
+          data        = rd,
+          mapping     = ggplot2::aes(
+            y   = .data$exceed_prob,
+            xmin = .data$welfare_lo,
+            xmax = .data$welfare_hi,
+            fill = .data$ssp_key,
+            group = .data$scenario
+          ),
+          alpha       = 0.15,
+          inherit.aes = FALSE
+        )
+      } else NULL
+    } +
+    
     ggplot2::geom_vline(
       xintercept = hist_mean, linetype = "dotted",
       colour = "black", linewidth = 0.5
@@ -866,6 +889,10 @@ enhance_exceedance <- function(scenarios,
       name   = "Climate scenario",
       guide  = ggplot2::guide_legend(order = 1,
                                      override.aes = list(linewidth = 0.9))
+    ) +
+    ggplot2::scale_fill_manual(
+      values = colour_map_ssp,
+      guide  = "none"
     ) +
     ggplot2::scale_linetype_manual(
       values = ltype_map_yr,

@@ -1249,3 +1249,63 @@ apply_deviation <- function(d, deviation, hist_ref = NA_real_) {
   }
   dplyr::mutate(d, value = value - hist_ref)
 }
+
+#' Compute exceedance curve ribbon from Cholesky draw values
+#'
+#' For each of S coefficient draws, computes the exceedance probability
+#' (1 - ECDF) at a grid of welfare values across all N simulation years.
+#' Returns p10/p90 envelope across S draws — the coefficient uncertainty
+#' ribbon for the exceedance plot.
+#'
+#' @param agg_tbl  Tibble. Output of compute_hist_agg() or
+#'   compute_scenario_agg() for one method. Must have columns:
+#'   value (point estimate per year) and draw_values (list column,
+#'   S draws per year).
+#' @param band_q   Named numeric(2). Quantile bounds for ribbon.
+#'   Default c(lo = 0.10, hi = 0.90).
+#'
+#' @return Tibble with columns: exceed_prob (y-axis exceedance probability),
+#'   welfare_mid (point estimate welfare), welfare_lo, welfare_hi
+#'   (p10/p90 coefficient uncertainty bounds). NULL if draw_values unavailable.
+#' @noRd
+compute_exceedance_ribbon <- function(agg_tbl,
+                                      band_q = c(lo = 0.10, hi = 0.90)) {
+  draw_list <- agg_tbl$draw_values
+  if (is.null(draw_list) || length(draw_list) == 0L) return(NULL)
+
+  S       <- length(draw_list[[1L]])
+  N_years <- nrow(agg_tbl)
+  if (S < 2L) return(NULL)
+
+  # Build N_years × S matrix — each column = one draw across all years
+  draw_mat <- matrix(
+    unlist(draw_list, use.names = FALSE),
+    nrow  = N_years,
+    ncol  = S,
+    byrow = TRUE
+  )
+
+  # Sort each column highest → lowest — S exceedance curves in x-space
+  # Each column is now one complete exceedance curve (welfare values)
+  rank_order  <- order(agg_tbl$value, decreasing = TRUE)
+  ordered_mat <- draw_mat[rank_order, ]
+
+  # Exceedance probabilities — matches R ecdf() formula exactly:
+  probs <- (seq_len(N_years) - 1L) / N_years
+
+  # Point estimate curve — sort annual values highest to lowest
+  welfare_sorted <- sort(agg_tbl$value, decreasing = TRUE)
+
+  # Ribbon = quantile envelope across S curves IN WELFARE (x) SPACE
+  # At each probability rank — what is the p10/p90 welfare value?
+  tibble::tibble(
+    exceed_prob  = probs,
+    welfare_mid  = welfare_sorted,
+    welfare_lo   = matrixStats::rowQuantiles(
+                    ordered_mat,
+                    probs = band_q[["lo"]], na.rm = TRUE),
+    welfare_hi   = matrixStats::rowQuantiles(
+                    ordered_mat,
+                    probs = band_q[["hi"]], na.rm = TRUE)
+  )
+}

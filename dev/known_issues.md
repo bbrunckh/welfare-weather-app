@@ -87,7 +87,7 @@
      All other 8 methods (mean, total, headcount_ratio, gap, fgt2,
      prosperity_gap, avg_poverty, median) are provably exact —
      fully vectorized with no approximation.
-   Priority: Medium — discuss with boss before implementing
+   Priority: Medium — discuss with leadership before implementing
 
 ## 10. Results tab 20s delay after simulation complete
    Flagged: 2026-04-27
@@ -106,7 +106,7 @@
    Flagged: 2026-04-27
    Context: compute_scenario_agg() lapply() over independent keys —
      trivially parallelizable with furrr::future_map().
-   Deferred: boss preference not default, needed before golem merge.
+   Deferred: leadership preference not default, needed before golem merge.
    Estimated gain: ~4x speedup on 4-core machine.
    Priority: High — implement before golem merge
 
@@ -212,3 +212,29 @@
    High for performance (biggest remaining DuckDB bottleneck), but requires
    methodology sign-off before implementation. Do not implement without
    quantitative accuracy assessment on real survey data.
+
+   ## 15. Ensemble uncertainty width vs coefficient uncertainty width
+   Flagged: 2026-04-28
+   
+   Observation: SSP scenario exceedance ribbon (coefficient uncertainty)
+   appears narrower than historical ribbon. Two potential causes:
+   
+   1. Random variation — Z_shared drawn independently for hist vs scenario.
+      At S=50 this causes visible width differences. Stabilises at S=150.
+   
+   2. Nonlinear welfare transformation — for poverty measures, same
+      coefficient uncertainty in welfare space maps to different outcome
+      space uncertainty depending on distance from poverty line.
+      Future scenarios with higher mean welfare sit further from poverty
+      line → smaller headcount uncertainty → narrower ribbon. 
+      This is correct and expected behaviour.
+   
+   3. Missing ensemble uncertainty — model_lo/model_hi stored in
+      scenario_agg_rv but not yet shown in ribbon. Adding this would
+      widen SSP ribbons significantly and is methodologically correct
+      (future scenarios have MORE uncertainty than historical, not less).
+   
+   Resolution needed:
+   - Verify empirically whether narrower SSP ribbon is due to #2 or #3
+   - Add ensemble uncertainty layer to exceedance ribbon (Issue #16)
+   Priority: Medium — discuss around methodology

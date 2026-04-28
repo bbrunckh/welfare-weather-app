@@ -286,6 +286,71 @@ mod_2_02_results_server <- function(id,
       Filter(function(x) !is.null(x) && !is.null(x$out) && nrow(x$out) > 0, result)
     })
 
+    exceedance_ribbon <- reactive({
+      req(hist_agg_rv())
+      method <- input$cmp_agg_method %||% "mean"
+      wk     <- weight_key()
+      bq     <- c(lo = 0.10, hi = 0.90)
+
+      # ADD deviation logic — matches agg_hist() exactly
+      deviation <- input$cmp_deviation %||% "none"
+      hist_ref  <- if (!identical(deviation, "none")) {
+        raw_vals <- hist_agg_rv()[[wk]][[method]]$value
+        if (identical(deviation, "mean"))
+          mean(raw_vals, na.rm = TRUE)
+        else
+          stats::median(raw_vals, na.rm = TRUE)
+      } else 0
+
+      # Historical ribbon — apply deviation to value AND draw_values
+      hist_tbl <- hist_agg_rv()[[wk]][[method]]
+      hist_tbl_adj <- if (!is.null(hist_tbl) && nrow(hist_tbl) > 0L) {
+        dplyr::mutate(hist_tbl,
+          value       = value - hist_ref,
+          draw_values = lapply(draw_values, function(dv) dv - hist_ref)
+        )
+      } else NULL
+
+      hist_ribbon <- if (!is.null(hist_tbl_adj)) {
+        r <- compute_exceedance_ribbon(hist_tbl_adj, band_q = bq)
+        if (!is.null(r)) dplyr::mutate(r,
+          scenario = "Historical",
+          ssp_key  = "historical"
+        ) else NULL
+      } else NULL
+
+      # Scenario ribbons — apply same hist_ref deviation
+      sc_ribbons <- if (!is.null(scenario_agg_rv())) {
+        Filter(Negate(is.null), lapply(names(scenario_agg_rv()), function(dk) {
+          tbl <- scenario_agg_rv()[[dk]][[wk]][[method]]
+          if (is.null(tbl) || nrow(tbl) == 0L) return(NULL)
+          tbl_adj <- dplyr::mutate(tbl,
+            value       = value - hist_ref,
+            draw_values = lapply(draw_values, function(dv) dv - hist_ref)
+          )
+          r <- compute_exceedance_ribbon(tbl_adj, band_q = bq)
+          if (is.null(r)) return(NULL)
+          ssp <- .normalise_ssp(dk) %||% "historical"
+          dplyr::mutate(r, scenario = dk, ssp_key = ssp)
+        }))
+      } else list()
+
+      result <-dplyr::bind_rows(c(list(hist_ribbon),
+                         Filter(Negate(is.null), sc_ribbons)))
+      if (nrow(result) == 0L) return(NULL)   
+      # ---- TEMP DEBUG — remove after diagnosis --------------------------------
+      message("[debug] exceedance_ribbon: nrow=", nrow(result),
+              " scenarios=", paste(unique(result$scenario), collapse=", "),
+              " welfare_lo range=[", round(min(result$welfare_lo, na.rm=TRUE), 3),
+              ", ", round(max(result$welfare_lo, na.rm=TRUE), 3), "]",
+              " welfare_hi range=[", round(min(result$welfare_hi, na.rm=TRUE), 3),
+              ", ", round(max(result$welfare_hi, na.rm=TRUE), 3), "]")
+      # ---- END TEMP DEBUG -----------------------------------------------------
+      result
+                         
+    })
+    
+
     all_series <- reactive({
       sc  <- agg_scenarios()
       sel <- selected_scenario_names()
@@ -439,7 +504,8 @@ mod_2_02_results_server <- function(id,
         x_label       = agg_hist()$x_label,
         return_period = isTRUE(input$show_return_period),
         n_sim_years   = nrow(agg_hist()$out),
-        logit_x       = isTRUE(input$exceedance_logit_x)
+        logit_x       = isTRUE(input$exceedance_logit_x),
+        ribbon_data   = exceedance_ribbon()
       )
     })
 
