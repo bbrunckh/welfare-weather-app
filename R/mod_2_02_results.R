@@ -85,8 +85,7 @@ mod_2_02_results_ui <- function(id) {
       shiny::plotOutput(ns("summary_box_plot"), height = "600px"),
       shiny::tags$p(
         style = "font-size:11px; color:#666; margin-top:6px;",
-        "The central dot shows the mean annual simulated value; the thick",
-        # TODO: update percentile labels below if p05/p95 thresholds change.
+
         "The central dot shows the mean annual simulated value; the thick", # TODO: update caption if percentile thresholds change from P5/P95
         "spans the 95% interval (P2.5-P97.5).",
         shiny::tags$br(),
@@ -187,14 +186,6 @@ mod_2_02_results_server <- function(id,
     })
 
 
-    # Detect weight column name once -- passed to aggregate_sim_preds().
-    # NULL when no weight column exists in preds or toggle is off.
-    weight_col <- reactive({
-      req(hist_sim())
-      if (!isTRUE(input$use_weights)) return(NULL)
-
-        if (!is.null(hist_sim()$pipeline$weight)) "weight" else NULL
-    })
 
     output$weight_status_ui <- shiny::renderUI({
       req(hist_sim())
@@ -346,16 +337,17 @@ mod_2_02_results_server <- function(id,
         shiny::tags$span(style = "color:#555; font-size:12px;", notes_txt)
       )
     })
-    outputOptions(output, "results_header_ui", suspendWhenHidden = TRUE)
 
     output$cmp_pov_line_ui <- renderUI({
       req(input$cmp_agg_method)
       if (input$cmp_agg_method %in% c("headcount_ratio", "gap", "fgt2")) {
         pov_val <- sprintf("$%.2f", pov_line_sim() %||% 3.00)
-        paste0("Poverty line: ", pov_val, "/day (reactive — update in simulation settings)")
+        shiny::tags$p(
+          style = "font-size:11px; color:#555; margin-top:4px;",
+          paste0("Poverty line: ", pov_val, "/day (fixed at simulation time)")
+        )
       }
     })
-    outputOptions(output, "cmp_pov_line_ui", suspendWhenHidden = TRUE)
 
     output$scenario_filter_ui <- renderUI({
       sc <- saved_scenarios()
@@ -391,7 +383,6 @@ mod_2_02_results_server <- function(id,
         )
       )
     })
-    outputOptions(output, "scenario_filter_ui", suspendWhenHidden = TRUE)
 
     output$summary_box_plot <- renderPlot({
       req(agg_hist())
@@ -401,7 +392,6 @@ mod_2_02_results_server <- function(id,
         group_order = input$cmp_group_order %||% "scenario_x_year"
       )
     }, height = 600)
-    outputOptions(output, "summary_box_plot", suspendWhenHidden = TRUE)
 
     output$summary_threshold_table <- DT::renderDT({
       req(agg_hist())
@@ -421,7 +411,6 @@ mod_2_02_results_server <- function(id,
         )
       )
     })
-    outputOptions(output, "summary_threshold_table", suspendWhenHidden = TRUE)
 
     output$threshold_table_header <- renderUI({
       req(agg_hist())
@@ -430,7 +419,6 @@ mod_2_02_results_server <- function(id,
         shiny::tags$small(class = "text-muted", table_subtitle())
       )
     })
-    outputOptions(output, "threshold_table_header", suspendWhenHidden = TRUE)
 
     output$threshold_table_footer <- renderUI({
       req(agg_hist())
@@ -443,7 +431,6 @@ mod_2_02_results_server <- function(id,
                       "1:1 shows the median (50th percentile) simulated value.")
       )
     })
-    outputOptions(output, "threshold_table_footer", suspendWhenHidden = TRUE)
 
     output$exceedance_plot <- renderPlot({
       req(agg_hist())
@@ -456,7 +443,6 @@ mod_2_02_results_server <- function(id,
         logit_x       = isTRUE(input$exceedance_logit_x)
       )
     })
-    outputOptions(output, "exceedance_plot", suspendWhenHidden = TRUE)
 
     output$exceedance_caption <- renderUI({
       req(agg_hist())
@@ -473,7 +459,6 @@ mod_2_02_results_server <- function(id,
                       "High odds show the value reached in all but 1-in-N years.")
       )
     })
-    outputOptions(output, "exceedance_caption", suspendWhenHidden = TRUE)
 
     # ---- observeEvent handlers ---------------------------------------------
 

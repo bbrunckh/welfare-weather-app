@@ -181,13 +181,6 @@ mod_2_03_diagnostics_server <- function(id,
       if (length(out) == 0) NULL else out
     })
 
-    # Detect weight column once -- passed to aggregate_sim_preds() when toggle is on.
-    weight_col_diag <- reactive({
-      req(hist_sim())
-      if (!isTRUE(input$use_weights_diag)) return(NULL)
-      if (!is.null(hist_sim()$pipeline$weight)) "weight" else NULL
-    })
-
     output$weight_status_diag_ui <- shiny::renderUI({
       req(hist_sim())
       # Detect weight column independently of the toggle -- this allows
@@ -385,7 +378,6 @@ mod_2_03_diagnostics_server <- function(id,
         hist_agg  = agg_hist_diag()
       )
     }, height = 750)
-    outputOptions(output, "uncertainty_decomp_plot", suspendWhenHidden = FALSE)
 
     output$diag_weather_log_ui <- shiny::renderUI({
       vars <- input$diag_weather_vars
@@ -487,6 +479,14 @@ mod_2_03_diagnostics_server <- function(id,
                                choices  = choices,
                                selected = new_sel)
     }, ignoreInit = TRUE)
+
+    # ---- Suspend outputs when Results tab is hidden ----------------------
+    outputOptions(output, "uncertainty_decomp_plot", suspendWhenHidden = TRUE)
+    outputOptions(output, "scenario_filter_panel",   suspendWhenHidden = TRUE)
+    outputOptions(output, "diag_weather_log_ui",     suspendWhenHidden = TRUE)
+    outputOptions(output, "diag_weather_density",    suspendWhenHidden = TRUE)
+    outputOptions(output, "diag_ridge_plot_ui",      suspendWhenHidden = TRUE)
+    outputOptions(output, "weight_status_diag_ui",   suspendWhenHidden = TRUE)
 
     # ---- Return API --------------------------------------------------------
     list()

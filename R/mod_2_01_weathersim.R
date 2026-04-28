@@ -146,7 +146,7 @@ mod_2_01_weathersim_ui <- function(id) {
       shiny::numericInput(
         inputId = ns("sim_n"),
         label   = "Coefficient draws (S)",
-        value   = 50, min = 10, max = 1000, step = 10
+        value   = 30, min = 10, max = 1000, step = 10
       ),
       shiny::helpText(
         "200-500 recommended for final runs; 50 for speed. Upper bound 1,000.",
@@ -849,6 +849,7 @@ mod_2_01_weathersim_server <- function(id,
 
           # ---- Pre-aggregate all methods at simulation time -------------------------
           S_sim     <- as.integer(input$sim_n %||% 150L)
+          # TODO: wire band_q to a UI input (currently fixed at p10/p90)
           #bq_sim    <- resolve_band_q(input$coef_band_width %||% "p10_p90")
           bq_sim <- c(lo = 0.10, hi = 0.90)
           res_sim   <- input$residuals %||% "none"
