@@ -217,6 +217,7 @@ mod_2_02_results_server <- function(id,
           style = "font-size:11px; color:#c62828; margin:2px 0 6px 0;",
           "🔴 No weight column found — unweighted")
     })
+    outputOptions(output, "weight_status_ui", suspendWhenHidden = TRUE)
 
     pov_line_raw <- reactive({
       if (isTRUE(input$cmp_agg_method %in%
@@ -345,6 +346,7 @@ mod_2_02_results_server <- function(id,
         shiny::tags$span(style = "color:#555; font-size:12px;", notes_txt)
       )
     })
+    outputOptions(output, "results_header_ui", suspendWhenHidden = TRUE)
 
     output$cmp_pov_line_ui <- renderUI({
       req(input$cmp_agg_method)
@@ -353,6 +355,7 @@ mod_2_02_results_server <- function(id,
         paste0("Poverty line: ", pov_val, "/day (reactive — update in simulation settings)")
       }
     })
+    outputOptions(output, "cmp_pov_line_ui", suspendWhenHidden = TRUE)
 
     output$scenario_filter_ui <- renderUI({
       sc <- saved_scenarios()
@@ -388,6 +391,7 @@ mod_2_02_results_server <- function(id,
         )
       )
     })
+    outputOptions(output, "scenario_filter_ui", suspendWhenHidden = TRUE)
 
     output$summary_box_plot <- renderPlot({
       req(agg_hist())
@@ -397,7 +401,7 @@ mod_2_02_results_server <- function(id,
         group_order = input$cmp_group_order %||% "scenario_x_year"
       )
     }, height = 600)
-    outputOptions(output, "summary_box_plot", suspendWhenHidden = FALSE)
+    outputOptions(output, "summary_box_plot", suspendWhenHidden = TRUE)
 
     output$summary_threshold_table <- DT::renderDT({
       req(agg_hist())
@@ -417,7 +421,7 @@ mod_2_02_results_server <- function(id,
         )
       )
     })
-    outputOptions(output, "summary_threshold_table", suspendWhenHidden = FALSE)
+    outputOptions(output, "summary_threshold_table", suspendWhenHidden = TRUE)
 
     output$threshold_table_header <- renderUI({
       req(agg_hist())
@@ -426,6 +430,7 @@ mod_2_02_results_server <- function(id,
         shiny::tags$small(class = "text-muted", table_subtitle())
       )
     })
+    outputOptions(output, "threshold_table_header", suspendWhenHidden = TRUE)
 
     output$threshold_table_footer <- renderUI({
       req(agg_hist())
@@ -438,6 +443,7 @@ mod_2_02_results_server <- function(id,
                       "1:1 shows the median (50th percentile) simulated value.")
       )
     })
+    outputOptions(output, "threshold_table_footer", suspendWhenHidden = TRUE)
 
     output$exceedance_plot <- renderPlot({
       req(agg_hist())
@@ -450,7 +456,7 @@ mod_2_02_results_server <- function(id,
         logit_x       = isTRUE(input$exceedance_logit_x)
       )
     })
-    outputOptions(output, "exceedance_plot", suspendWhenHidden = FALSE)
+    outputOptions(output, "exceedance_plot", suspendWhenHidden = TRUE)
 
     output$exceedance_caption <- renderUI({
       req(agg_hist())
@@ -467,6 +473,7 @@ mod_2_02_results_server <- function(id,
                       "High odds show the value reached in all but 1-in-N years.")
       )
     })
+    outputOptions(output, "exceedance_caption", suspendWhenHidden = TRUE)
 
     # ---- observeEvent handlers ---------------------------------------------
 
@@ -513,6 +520,18 @@ mod_2_02_results_server <- function(id,
                                selected = new_sel)
     }, ignoreInit = TRUE)
 
+    # ---- Suspend outputs when Results tab is hidden ----------------------
+    outputOptions(output, "summary_box_plot",        suspendWhenHidden = TRUE)
+    outputOptions(output, "summary_threshold_table", suspendWhenHidden = TRUE)
+    outputOptions(output, "exceedance_plot",         suspendWhenHidden = TRUE)
+    outputOptions(output, "results_header_ui",       suspendWhenHidden = TRUE)
+    outputOptions(output, "cmp_pov_line_ui",         suspendWhenHidden = TRUE)
+    outputOptions(output, "scenario_filter_ui",      suspendWhenHidden = TRUE)
+    outputOptions(output, "weight_status_ui",        suspendWhenHidden = TRUE)
+    outputOptions(output, "threshold_table_header",  suspendWhenHidden = TRUE)
+    outputOptions(output, "threshold_table_footer",  suspendWhenHidden = TRUE)
+    outputOptions(output, "exceedance_caption",      suspendWhenHidden = TRUE)
+    
     # ---- Return API --------------------------------------------------------
     list()
   })

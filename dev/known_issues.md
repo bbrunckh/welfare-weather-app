@@ -69,3 +69,83 @@
    Current label: 'Dev mode: 1 ensemble model only'
    Better: 'Fast mode: single model per SSP/period' vs 'Full ensemble (slow)'
    Priority: Low — UX, before merge back into golem
+
+## 9. Gini performance vs exactness tradeoff
+   Flagged: 2026-04-27
+   Symptom: Gini requires per-column sorted ranks — no exact full matrix
+     vectorization is possible. Current apply() approach is the practical
+     optimum for exact computation.
+   At S=150, 5 keys: ~90s additional simulation time from gini alone.
+   Options considered:
+     1. Current apply() — exact, ~90s at S=150 (implemented)
+     2. matrixStats::colRanks — exact for unweighted only; weighted F_i
+        still requires per-column sort, ~60s at S=150
+     3. Single sort by row means — approximate (~99.5% accuracy), ~8s at S=150
+     4. Accept cost + notify user
+   Proposed resolution:
+     Add "approximate gini" toggle in Module 2 advanced settings.
+     All other 8 methods (mean, total, headcount_ratio, gap, fgt2,
+     prosperity_gap, avg_poverty, median) are provably exact —
+     fully vectorized with no approximation.
+   Priority: Medium — discuss with boss before implementing
+
+## 10. Results tab 20s delay after simulation complete
+   Flagged: 2026-04-27
+   Symptom: After "Simulation complete" notification, results tab takes
+     ~20s to display plots. profvis shows renderFunc at 28s.
+   Root cause: Shiny reactive graph invalidation fires after
+     hist_agg_rv/scenario_agg_rv are set — all renderFunc calls
+     evaluate simultaneously.
+   Options:
+     1. Progress notification (partially implemented)
+     2. Progressive rendering as each key completes
+     3. Lower priority observer for initial plot render
+   Priority: High — visible freeze after every simulation run
+
+## 11. Parallelization of scenario aggregation — deferred
+   Flagged: 2026-04-27
+   Context: compute_scenario_agg() lapply() over independent keys —
+     trivially parallelizable with furrr::future_map().
+   Deferred: boss preference not default, needed before golem merge.
+   Estimated gain: ~4x speedup on 4-core machine.
+   Priority: High — implement before golem merge
+
+## 12. Poverty line and survey weights UI decisions pending
+   Flagged: 2026-04-27
+   Current state:
+     - Poverty line: baked in at simulation time, not reactive post-sim
+     - Weights: pre-computed both variants, toggle is instant
+     - UI still shows poverty line as editable — misleading
+   Decisions needed:
+     1. Disable/grey out poverty line after simulation?
+     2. Weights toggle label clarification
+     3. Reactive poverty line for FGT methods only?
+   Priority: Medium — UX confusion, not correctness issue
+
+## 13. DuckDB rolling window stall ~11s/key after materialisation fixes
+   Flagged: 2026-04-27
+   Current state: Two materialisation fixes applied — per-key cost
+     reduced from ~29s to ~11s (~62% improvement).
+     DuckDB no longer in top 30 profvis at 5 keys.
+   Remaining: roll_exprs_climate window function still causes 0%->16%
+     stall. At 10 keys: ~110s DuckDB wait.
+   Options not tried:
+     1. Materialise rolling windows before delta join (approximation)
+     2. Pre-cache weather data per SSP at startup
+     3. Accept current performance
+   Priority: Low at 5 keys, High at 10+ keys
+
+   ## 14. Potential contradiction in multi-hazard results
+   Flagged: 2026-04-27
+   Symptom: With multiple weather hazards + multiple SSPs, mean 
+     consumption and poverty rate can move in same direction — 
+     contradicting economic theory.
+   Observed: CIV, 2 hazards, multiple SSPs (Temp, and CMIP6, LASSO selection, hh-level)
+   Not observed: Guinea-Bissau single hazard, CIV single hazard/SSP
+   Possible causes:
+     1. Ensemble member dropout producing non-representative sample
+     2. Multi-hazard coefficient interactions producing unexpected signs
+     3. combine_ensemble_results() averaging across conflicting directions
+   Needs: Economic/climate science review of multi-hazard model results
+     before production use with multiple hazards
+   Priority: High — affects result validity for multi-hazard runs

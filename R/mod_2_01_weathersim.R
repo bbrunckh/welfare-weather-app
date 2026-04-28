@@ -188,6 +188,11 @@ mod_2_01_weathersim_ui <- function(id) {
         " Faster for testing. Coefficient uncertainty bands will not appear.",
         style = "font-size:11px; color:#555; margin-top:2px; margin-bottom:8px;"
       ),
+      shiny::checkboxInput(
+        ns("exclude_gini"),
+        label = "Exclude Gini coefficient (faster computation)",
+        value = TRUE  # default ON — gini excluded
+      )
     ),
     shiny::tags$hr(style = "margin: 10px 0;"),
 
@@ -647,7 +652,10 @@ mod_2_01_weathersim_server <- function(id,
 
           # Derive from hist_aggregate_choices() so the list stays in sync
           # with what the Results tab UI offers — single source of truth.
-          agg_methods_all <- unname(hist_aggregate_choices(so$type, so$name))
+          agg_methods_all <- {
+            m <- unname(hist_aggregate_choices(so$type, so$name))
+            if (isTRUE(input$exclude_gini)) setdiff(m, "gini") else m
+          }
           
           # Pre-aggregate immediately after each future key to avoid accumulating
           # N_households x S_draws x N_keys rows in memory.
@@ -859,29 +867,31 @@ mod_2_01_weathersim_server <- function(id,
             type     = "message"
           )
 
-          hist_agg_rv(
-            compute_hist_agg(
-              pipeline  = hist_sim_result$pipeline,
-              chol_obj  = chol_obj,
-              methods   = agg_methods_all,
-              S         = S_sim,
-              band_q    = bq_sim,
-              residuals = res_sim,
-              pov_line  = pov_sim,
-              is_log    = isTRUE(so$transform == "log")
+          shiny::isolate({ # prevent progress bar from updating inside hist_agg_rv() and scenario_agg_rv() observers
+            hist_agg_rv(
+              compute_hist_agg(
+                pipeline  = hist_sim_result$pipeline,
+                chol_obj  = chol_obj,
+                methods   = agg_methods_all,
+                S         = S_sim,
+                band_q    = bq_sim,
+                residuals = res_sim,
+                pov_line  = pov_sim,
+                is_log    = isTRUE(so$transform == "log")
+              )
             )
-          )
 
-          scenario_agg_rv(
-            compute_scenario_agg(
-              scenarios = new_scenarios,
-              methods   = agg_methods_all,
-              S         = S_sim,
-              band_q    = bq_sim,
-              residuals = res_sim,
-              pov_line  = pov_sim
+            scenario_agg_rv(
+              compute_scenario_agg(
+                scenarios = new_scenarios,
+                methods   = agg_methods_all,
+                S         = S_sim,
+                band_q    = bq_sim,
+                residuals = res_sim,
+                pov_line  = pov_sim
+              )
             )
-          )
+          })
 
           shiny::removeNotification("agg_notify")
 
