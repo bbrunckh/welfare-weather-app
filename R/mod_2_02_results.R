@@ -274,6 +274,21 @@ mod_2_02_results_server <- function(id,
           isTRUE(hist_sim()$has_weights)) "weighted" else "unweighted"
     })
 
+    # Shared deviation reference — used by all_series_tbl and exceedance_ribbon
+        hist_ref_val <- reactive({
+          req(hist_agg_rv())
+          method    <- input$cmp_agg_method %||% "mean"
+          wk        <- weight_key()
+          deviation <- input$cmp_deviation %||% "none"
+          if (identical(deviation, "none")) return(0)
+          raw_vals <- hist_agg_rv()[[wk]][[method]]$value
+          if (identical(deviation, "mean"))
+            mean(raw_vals, na.rm = TRUE)
+          else
+            stats::median(raw_vals, na.rm = TRUE)
+        })
+
+
         # ---- Coefficient draws availability -----------------------------------
     has_draws <- reactive({
       req(hist_sim())
@@ -336,10 +351,7 @@ mod_2_02_results_server <- function(id,
       if (length(sc) == 0) return(list())
       method    <- input$cmp_agg_method %||% "mean"
       deviation <- input$cmp_deviation  %||% "none"
-      hist_ref  <- if (!identical(deviation, "none") && !is.null(agg_hist())) {
-        if (identical(deviation, "mean")) mean(agg_hist()$out$value, na.rm = TRUE)
-        else stats::median(agg_hist()$out$value, na.rm = TRUE)
-      } else NA_real_
+      hist_ref <- if (!identical(deviation, "none")) hist_ref_val() else NA_real_
       x_label <- if (identical(deviation, "none")) label_agg_method(method) else
         paste0(label_agg_method(method), " \u2014 ", label_deviation(deviation))
         selected <- selected_scenario_names()
@@ -361,14 +373,7 @@ mod_2_02_results_server <- function(id,
       bq <- resolve_band_q(input$uncertainty_band %||% "p10_p90")
 
       # ADD deviation logic — matches agg_hist() exactly
-      deviation <- input$cmp_deviation %||% "none"
-      hist_ref  <- if (!identical(deviation, "none")) {
-        raw_vals <- hist_agg_rv()[[wk]][[method]]$value
-        if (identical(deviation, "mean"))
-          mean(raw_vals, na.rm = TRUE)
-        else
-          stats::median(raw_vals, na.rm = TRUE)
-      } else 0
+      hist_ref <- hist_ref_val()
 
       # Historical ribbon — apply deviation to value AND draw_values
       hist_tbl <- hist_agg_rv()[[wk]][[method]]
@@ -424,28 +429,46 @@ mod_2_02_results_server <- function(id,
   
     all_series_tbl <- reactive({
       req(agg_hist(), agg_scenarios())
-      bq <- resolve_band_q(input$uncertainty_band %||% "p10_p90")
+      bq       <- resolve_band_q(input$uncertainty_band %||% "p10_p90")
+      hist_ref <- hist_ref_val()
+      wk       <- weight_key()
+      method   <- input$cmp_agg_method %||% "mean"
 
-      recompute_bands <- function(tbl) {
-        tbl |>
+      # Helper — compute deviated lo/hi directly from RAW draw_values
+      # raw_tbl = scenario_agg_rv()[[dk]][[wk]][[method]] — undeviated
+      compute_bands_from_raw <- function(raw_tbl) {
+        raw_tbl |>
           dplyr::mutate(
             value_lo = purrr::map_dbl(draw_values,
               ~if (is.null(.x) || length(.x) == 0L) NA_real_
-              else quantile(.x, bq["lo"], na.rm = TRUE)),
+              else quantile(.x, bq["lo"], na.rm = TRUE) - hist_ref),
             value_hi = purrr::map_dbl(draw_values,
               ~if (is.null(.x) || length(.x) == 0L) NA_real_
-              else quantile(.x, bq["hi"], na.rm = TRUE))
-          )
+              else quantile(.x, bq["hi"], na.rm = TRUE) - hist_ref)
+          ) |>
+          dplyr::select(sim_year, value_lo, value_hi)
       }
 
-      hist_out <- agg_hist()$out |>
-        recompute_bands() |>
+      # Historical — join deviated value from agg_hist()$out
+      # with lo/hi computed from raw hist_agg_rv()
+      hist_raw   <- hist_agg_rv()[[wk]][[method]]
+      hist_bands <- compute_bands_from_raw(hist_raw)
+      hist_out   <- agg_hist()$out |>
+        dplyr::select(-dplyr::any_of(c("value_lo", "value_hi"))) |>
+        dplyr::left_join(hist_bands, by = "sim_year") |>
         dplyr::mutate(scenario = "Historical")
 
+      # Scenarios — join deviated value from agg_scenarios()[[dk]]$out
+      # with lo/hi computed from raw scenario_agg_rv()[[dk]]
       sc_list <- lapply(names(agg_scenarios()), function(dk) {
-        if (is.null(agg_scenarios()[[dk]]$out)) return(NULL)
-        agg_scenarios()[[dk]]$out |>
-          recompute_bands() |>
+        sc_out <- agg_scenarios()[[dk]]$out
+        if (is.null(sc_out) || nrow(sc_out) == 0L) return(NULL)
+        sc_raw   <- scenario_agg_rv()[[dk]][[wk]][[method]]
+        if (is.null(sc_raw) || nrow(sc_raw) == 0L) return(NULL)
+        sc_bands <- compute_bands_from_raw(sc_raw)
+        sc_out |>
+          dplyr::select(-dplyr::any_of(c("value_lo", "value_hi"))) |>
+          dplyr::left_join(sc_bands, by = "sim_year") |>
           dplyr::mutate(scenario = dk)
       })
 

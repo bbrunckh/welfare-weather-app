@@ -2,7 +2,7 @@
 # fct_sim_compare.R
 #
 # Pure comparison and visualisation functions for Module 2.
-# Called by mod_2_06_sim_compare_server() only.
+# Called by mod_2_02_results.R
 #
 # Functions:
 #   label_agg_method(key)     -- human-readable label for aggregation method
@@ -90,7 +90,8 @@ label_deviation <- function(key) {
 # Shared CI summary helper                                                     #
 # ---------------------------------------------------------------------------- #
 
-# Used by both plot_pointrange_climate() and plot_uncertainty_decomposition().
+# Note: lo95/hi95 used by plot_uncertainty_decomposition only.
+# plot_pointrange_climate uses coef_lo/coef_hi from draw_values instead.
 .summarise_vals <- function(vals) {
   vals <- vals[is.finite(vals)]
   if (length(vals) < 2) return(NULL)
@@ -100,6 +101,8 @@ label_deviation <- function(key) {
     hi95  = as.numeric(stats::quantile(vals, 0.975)),
     lo90  = as.numeric(stats::quantile(vals, 0.05)),
     hi90  = as.numeric(stats::quantile(vals, 0.95)),
+    lo_full = min(vals),
+    hi_full = max(vals),
     stringsAsFactors = FALSE
   )
 }
@@ -138,8 +141,8 @@ label_deviation <- function(key) {
 #'
 #' The primary Results tab chart. For each scenario shows:
 #'   - A dot at the mean of annual simulated values
-#'   - A thick coloured line for the 90% CI (P5-P95)
-#'   - A thin grey line for the 95% CI (P2.5-P97.5)
+#'   - A thick coloured bar for the calculated weather variation 
+#'   - A thin line for coefficient uncertainty (user-selected band)
 #'   - A dashed grey horizontal reference line at the Historical mean
 #'
 #' Groups are ordered Historical | spacer | SSP2 years | spacer | SSP3 years |
@@ -184,7 +187,7 @@ plot_pointrange_climate <- function(scenarios, hist_agg,
   # Each scenario key is "SSP2-4.5 / 2025-2035" (one entry per SSP x period,
   # with all ensemble model predictions already pooled in the preds data frame).
   fut_df        <- NULL
-  ssp_short_map <- c("SSP2-4.5" = "SSP2", "SSP3-7.0" = "SSP3", "SSP5-8.5" = "SSP5")
+  ssp_short_map <- SSP_SHORT_LABELS
 
   if (length(scenarios) > 0) {
     future_nms <- names(scenarios)[vapply(names(scenarios),
@@ -277,7 +280,7 @@ plot_pointrange_climate <- function(scenarios, hist_agg,
   data_levels <- setdiff(ordered_levels, spacer_ids)
 
   # ---- combine into one data frame -----------------------------------------
-  cols     <- c("pt_key", "colour_key", "mean", "lo90", "hi90", "coef_lo", "coef_hi")
+  cols     <- c("pt_key", "colour_key", "mean", "lo_full", "hi_full", "coef_lo", "coef_hi")
   hist_row <- hist_s[, intersect(cols, names(hist_s))]
   fut_rows <- if (!is.null(fut_df) && nrow(fut_df) > 0)
     fut_df[, intersect(cols, names(fut_df))] else NULL
@@ -291,26 +294,23 @@ plot_pointrange_climate <- function(scenarios, hist_agg,
       ggplot2::labs(title = "Run a future simulation to see scenario comparisons."))
 
   # ---- plot ----------------------------------------------------------------
-  # Uniform point size and linewidth (one point per SSP x year)
-  plot_df$pt_size <- 3.0
-  plot_df$pt_lw   <- 2.0
 
   ggplot2::ggplot(plot_df,
     ggplot2::aes(x = .data$pt_key, colour = .data$colour_key)
   ) +
-    # 95% CI  thin, grey underlay
+    # Coefficient uncertainty — thin line at selected band
     ggplot2::geom_linerange(
       ggplot2::aes(ymin = .data$coef_lo, ymax = .data$coef_hi),
       linewidth = 0.5, na.rm     = TRUE
     ) +
     # 90% CI — linewidth encodes percentile
     ggplot2::geom_linerange(
-      ggplot2::aes(ymin = .data$lo90, ymax = .data$hi90,
-                   linewidth = I(.data$pt_lw))
+      ggplot2::aes(ymin = .data$lo_full, ymax = .data$hi_full),
+                   linewidth = 2.0
     ) +
     # Mean dot — size encodes percentile
     ggplot2::geom_point(
-      ggplot2::aes(y = .data$mean, size = I(.data$pt_size)),
+      ggplot2::aes(y = .data$mean), size = 3.0,
       shape = 21, fill = "white", stroke = 1.4
     ) +
     # Historical mean reference line
@@ -514,8 +514,6 @@ plot_uncertainty_decomposition <- function(scenarios, hist_agg,
     return(ggplot2::ggplot() +
       ggplot2::labs(title = "Run a future simulation to see uncertainty decomposition."))
 
-  plot_df$pt_size <- 3.0
-  plot_df$pt_lw   <- 2.0
 
   # Reference line data: one row per facet, but only show for relevant sources
   hline_df <- data.frame(
@@ -526,18 +524,18 @@ plot_uncertainty_decomposition <- function(scenarios, hist_agg,
   ggplot2::ggplot(plot_df,
     ggplot2::aes(x = .data$pt_key, colour = .data$colour_key)
   ) +
-    ggplot2::geom_linerange(
-      ggplot2::aes(ymin = .data$lo95, ymax = .data$hi95),
-      linewidth = 0.5, colour = "grey70"
-    ) +
-    ggplot2::geom_linerange(
-      ggplot2::aes(ymin = .data$lo90, ymax = .data$hi90,
-                   linewidth = I(.data$pt_lw))
-    ) +
-    ggplot2::geom_point(
-      ggplot2::aes(y = .data$mean, size = I(.data$pt_size)),
-      shape = 21, fill = "white", stroke = 1.4
-    ) +
+  ggplot2::geom_linerange(
+    ggplot2::aes(ymin = .data$lo95, ymax = .data$hi95),
+    linewidth = 0.5, colour = "grey70"
+  ) +
+  ggplot2::geom_linerange(
+    ggplot2::aes(ymin = .data$lo90, ymax = .data$hi90),
+    linewidth = 2.0
+  ) +
+  ggplot2::geom_point(
+    ggplot2::aes(y = .data$mean),
+    size = 3.0, shape = 21, fill = "white", stroke = 1.4
+  ) +
     ggplot2::geom_hline(
       data      = hline_df,
       ggplot2::aes(yintercept = hist_mean),
