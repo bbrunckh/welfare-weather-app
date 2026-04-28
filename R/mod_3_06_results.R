@@ -179,6 +179,7 @@ mod_3_06_results_server <- function(id,
                                      baseline_svy,
                                      policy_svy,
                                      selected_model = reactive(NULL),
+                                     selected_hist  = reactive(NULL),
                                      sim_run_id     = reactive(0L),
                                      tabset_id,
                                      tabset_session = NULL) {
@@ -315,6 +316,18 @@ mod_3_06_results_server <- function(id,
       c(setNames(list(policy_hist_agg()), "Historical"), ps)
     })
 
+    # Label the historical entry with its actual year range so that
+    # enhance_exceedance() picks up the years via .parse_year() and the
+    # period legend shows e.g. "2010-2018" rather than "Historical".
+    # sim_year is the calendar year (set in run_sim_pipeline as
+    # as.integer(format(timestamp, "%Y"))).
+    hist_label_str <- reactive({
+      req(baseline_hist_sim())
+      yrs <- baseline_hist_sim()$yr_range
+      if (is.null(yrs) || all(is.na(yrs))) return("Historical")
+      paste0(min(yrs, na.rm = TRUE), "-", max(yrs, na.rm = TRUE))
+    })
+
     # Series for the exceedance plot: keep the Historical line tied to
     # the Step 2 baseline (unaffected by policy adjustments) and only
     # show policy-adjusted SSP scenarios alongside it.
@@ -324,7 +337,7 @@ mod_3_06_results_server <- function(id,
       ps <- ps[!vapply(ps, is.null, logical(1))]
       sel <- selected_scenario_names()
       ps <- ps[intersect(sel, names(ps))]
-      c(setNames(list(baseline_hist_agg()), "Historical"), ps)
+      c(setNames(list(baseline_hist_agg()), hist_label_str()), ps)
     })
 
     # ---- Results tab outputs --------------------------------------------
@@ -350,7 +363,11 @@ mod_3_06_results_server <- function(id,
           style = "color:#555; font-size:12px;",
           paste0("Showing ", agg_label, " of ", so$label %||% so$name,
                  " expressed as ", dev_label, pov_txt, ".")
-        )
+        ),
+        p(lapply(names(exceedance_series()), function(nm) {
+            df <- exceedance_series()[[nm]]
+            cat(nm, ":", nrow(df), "rows ×", ncol(df), "columns\n")
+          }))
       )
     })
 
@@ -417,13 +434,13 @@ mod_3_06_results_server <- function(id,
 
     output$exceedance_policy <- renderPlot({
       sim_run_id()
-      req(baseline_hist_agg(), exceedance_series())
+      req(policy_hist_agg(), policy_series())
       enhance_exceedance(
         scenarios     = exceedance_series(),
-        hist_agg      = baseline_hist_agg(),
+        hist_agg      = policy_hist_agg(),
         x_label       = label_agg_method(input$cmp_agg_method %||% "mean"),
         return_period = isTRUE(input$show_return_period),
-        n_sim_years   = nrow(baseline_hist_agg()$out),
+        n_sim_years   = nrow(policy_hist_agg()$out),
         logit_x       = isTRUE(input$exceedance_logit_x)
       )
     })

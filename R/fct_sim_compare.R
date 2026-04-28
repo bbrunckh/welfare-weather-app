@@ -798,7 +798,10 @@ enhance_exceedance <- function(scenarios,
   long_df$group <- factor(long_df$group, levels = labels)
 
   # ---- Aesthetic mappings -------------------------------------------------
-  # One linetype per distinct yr value — no special-casing of historical.
+  # One linetype per distinct yr value across all scenarios (historical
+  # included). The historical entry is named with its actual year range
+  # (e.g. "Historical / 2010-2018") upstream so it gets a normal year
+  # label in the legend rather than the word "Historical".
   all_yr_labels <- sort(unique(long_df$yr))
   yr_styles     <- .resolve_year_styles(all_yr_labels)
   ltype_map_yr  <- yr_styles$linetype_map

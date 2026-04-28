@@ -49,6 +49,7 @@ app_server <- function(input, output, session) {
     model_fit         = step1_api$model_fit,
     hist_sim          = step2_api$hist_sim,
     saved_scenarios   = step2_api$saved_scenarios,
+    selected_hist     = step2_api$selected_hist,
     variable_list     = overview_api$variable_list
   )
 }

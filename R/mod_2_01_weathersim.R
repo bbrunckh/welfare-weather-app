@@ -753,7 +753,8 @@ mod_2_01_weathersim_server <- function(id,
                 # Settings used in this run — persisted so Step 3 can reuse
                 # them and reproduce the same predictions on policy data.
                 residuals   = residuals,
-                coef_draws  = coef_draws
+                coef_draws  = coef_draws,
+                yr_range    = input$hist_years
               )
             } else if (!is_hist) {
               # Key is "<ssp>_<start>_<end>_<model>"

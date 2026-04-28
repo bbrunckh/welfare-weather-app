@@ -84,6 +84,7 @@ mod_3_scenario_server <- function(id,
                                    model_fit,
                                    hist_sim,
                                    saved_scenarios = reactive(list()),
+                                   selected_hist   = reactive(NULL),
                                    variable_list   = reactive(NULL)) {
   moduleServer(id, function(input, output, session) {
     ns <- session$ns
@@ -176,6 +177,7 @@ mod_3_scenario_server <- function(id,
       baseline_svy             = s5$baseline_svy,
       policy_svy               = s5$policy_svy,
       selected_model           = selected_model,
+      selected_hist            = selected_hist,
       sim_run_id               = s5$sim_run_id,
       tabset_id                = "step3_output_tabs",
       tabset_session           = session

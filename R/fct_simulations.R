@@ -42,18 +42,25 @@
   if (digit %in% names(lookup)) lookup[[digit]] else NA_character_
 }
 
+# .parse_year <- function(nm) {
+#   if (length(nm) == 1L) {
+#     m <- regexpr("\\d{4}-\\d{4}", nm)
+#     if (m == -1L) return(NA_character_)
+#     return(regmatches(nm, m))
+#   }
+#   # Vectorised path
+#   m <- gregexpr("\\d{4}-\\d{4}", nm)
+#   vapply(seq_along(nm), function(i) {
+#     matches <- regmatches(nm[i], m[i])[[1]]
+#     if (length(matches) == 0) NA_character_ else matches[1]
+#   }, character(1))
+# }
+
 .parse_year <- function(nm) {
-  if (length(nm) == 1L) {
-    m <- regexpr("\\d{4}-\\d{4}", nm)
-    if (m == -1L) return(NA_character_)
-    return(regmatches(nm, m))
-  }
-  # Vectorised path
-  m <- gregexpr("\\d{4}-\\d{4}", nm)
-  vapply(seq_along(nm), function(i) {
-    matches <- regmatches(nm[i], m[i])[[1]]
-    if (length(matches) == 0) NA_character_ else matches[1]
-  }, character(1))
+  m <- regexpr("\\d{4}-\\d{4}", nm)
+  out <- regmatches(nm, m)
+  out[m == -1L] <- NA_character_
+  out
 }
 
 # ---------------------------------------------------------------------------- #
