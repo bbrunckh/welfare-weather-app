@@ -181,12 +181,15 @@ resolve_S <- function(band_width) {
 #' @export
 resolve_band_q <- function(band_width) {
   switch(band_width %||% "p10_p90",
+    p25_p75   = c(lo = 0.25,  hi = 0.75),
+    p20_p80   = c(lo = 0.20,  hi = 0.80),
     p10_p90   = c(lo = 0.10,  hi = 0.90),
+    p05_p95   = c(lo = 0.05,  hi = 0.95),
     p025_p975 = c(lo = 0.025, hi = 0.975),
     p005_p995 = c(lo = 0.005, hi = 0.995),
-    minmax    = c(lo = 0.00,  hi = 1.00),
+    minmax    = c(lo = 0.001, hi = 0.999),
     none      = NULL,
-              c(lo = 0.10,  hi = 0.90)
+               c(lo = 0.10,  hi = 0.90)   # default
   )
 }
 
@@ -1291,7 +1294,7 @@ compute_exceedance_ribbon <- function(agg_tbl,
   ordered_mat <- draw_mat[rank_order, ]
 
   # Exceedance probabilities — matches R ecdf() formula exactly:
-  probs <- (seq_len(N_years) - 1L) / N_years
+  probs <- (seq_len(N_years) - 0.5) / N_years
 
   # Point estimate curve — sort annual values highest to lowest
   welfare_sorted <- sort(agg_tbl$value, decreasing = TRUE)

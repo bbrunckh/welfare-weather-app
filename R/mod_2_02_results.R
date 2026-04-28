@@ -50,6 +50,21 @@ mod_2_02_results_ui <- function(id) {
             selected = "none"
           )
         ),
+        shiny::selectInput(
+          ns("uncertainty_band"),
+          label   = "Uncertainty band",
+          choices = c(
+            "50% (p25-p75)"    = "p25_p75",
+            "60% (p20-p80)"    = "p20_p80",
+            "80% (p10-p90)"    = "p10_p90",
+            "90% (p05-p95)"    = "p05_p95",
+            "95% (p025-p975)"  = "p025_p975",
+            "99% (p005-p995)"  = "p005_p995",
+            "Max (min-max)"    = "minmax"
+          ),
+          selected = "p10_p90"
+        ),
+
         shiny::tags$div(style = "flex:1; min-width:160px;",
           shiny::uiOutput(ns("cmp_pov_line_ui"))
         )
@@ -290,7 +305,7 @@ mod_2_02_results_server <- function(id,
       req(hist_agg_rv())
       method <- input$cmp_agg_method %||% "mean"
       wk     <- weight_key()
-      bq     <- c(lo = 0.10, hi = 0.90)
+      bq <- resolve_band_q(input$uncertainty_band %||% "p10_p90")
 
       # ADD deviation logic — matches agg_hist() exactly
       deviation <- input$cmp_deviation %||% "none"
@@ -322,6 +337,7 @@ mod_2_02_results_server <- function(id,
       # Scenario ribbons — apply same hist_ref deviation
       sc_ribbons <- if (!is.null(scenario_agg_rv())) {
         Filter(Negate(is.null), lapply(names(scenario_agg_rv()), function(dk) {
+          if (!dk %in% selected_scenario_names()) return(NULL)  
           tbl <- scenario_agg_rv()[[dk]][[wk]][[method]]
           if (is.null(tbl) || nrow(tbl) == 0L) return(NULL)
           tbl_adj <- dplyr::mutate(tbl,
@@ -470,9 +486,10 @@ mod_2_02_results_server <- function(id,
       DT::datatable(
         df, rownames = FALSE, class = "compact stripe",
         options = list(
-          pageLength = 15, dom = "t", ordering = FALSE,
+          pageLength = 15, dom = "tip", ordering = list(list(2, "desc")),
           columnDefs = list(list(className = "dt-center", targets = "_all"))
-        )
+        ),
+        extensions = "Buttons"
       )
     })
 

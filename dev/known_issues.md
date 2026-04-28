@@ -213,7 +213,7 @@
    methodology sign-off before implementation. Do not implement without
    quantitative accuracy assessment on real survey data.
 
-   ## 15. Ensemble uncertainty width vs coefficient uncertainty width
+   ## 16. Ensemble uncertainty width vs coefficient uncertainty width
    Flagged: 2026-04-28
    
    Observation: SSP scenario exceedance ribbon (coefficient uncertainty)
@@ -238,3 +238,18 @@
    - Verify empirically whether narrower SSP ribbon is due to #2 or #3
    - Add ensemble uncertainty layer to exceedance ribbon (Issue #16)
    Priority: Medium — discuss around methodology
+
+   ## 17. Residual method change does not update exceedance/hero plots
+   Flagged: 2026-04-28
+   Symptom: Changing residual method (e.g. original → none) triggers
+   chart reload notification but plots appear unchanged.
+   Possible causes:
+   1. res_sim baked in at simulation time — changing post-simulation
+      has no effect since draw_values already computed
+   2. Reactive dependency on residual input not wired through to
+      exceedance_ribbon or all_series reactives
+   3. Display-only formatting issue — plots actually unchanged
+      because residuals don't affect point estimates, only draws
+   Investigation needed: confirm whether res_sim is simulation-time
+   or display-time parameter, and whether UI should disable after run.
+   Priority: Low — investigate during UX cleanup pass

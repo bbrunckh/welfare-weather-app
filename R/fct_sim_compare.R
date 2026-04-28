@@ -854,10 +854,9 @@ enhance_exceedance <- function(scenarios,
     ggplot2::geom_line(linewidth = 0.9) +
     # ---- Coefficient uncertainty ribbon -----------------------------------
     { if (!is.null(ribbon_data) && nrow(ribbon_data) > 0L) {
-        eps_r <- .Machine$double.eps^0.5
-        rd    <- dplyr::filter(ribbon_data,
-                              exceed_prob > eps_r &
-                              exceed_prob < (1 - eps_r))
+        rd <- dplyr::filter(ribbon_data,
+                    exceed_prob >= 0 &
+                    exceed_prob < (1 - eps))
         ggplot2::geom_ribbon(
           data        = rd,
           mapping     = ggplot2::aes(
