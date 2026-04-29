@@ -441,18 +441,19 @@ mod_2_01_weathersim_server <- function(id,
       do.call(rbind, do.call(c, rows))
     })
 
-    # ---- Run simulation button (hidden for RIF engine) --------------------
+    # ---- Run simulation button ---------------------------------------------
 
     output$run_sim_ui <- shiny::renderUI({
       mf <- model_fit()
-      if (!is.null(mf) && identical(mf$engine, "rif")) {
-        shiny::div(
-          class = "alert alert-warning",
-          style = "font-size: 13px; margin-top: 4px;",
-          shiny::tags$b("\u26a0 Simulations are not yet implemented for Quantile Regression (RIF)."),
-          " Please select a different model engine to run simulations."
-        )
-      } else {
+      tagList(
+        if (!is.null(mf) && identical(mf$engine, "rif")) {
+          shiny::div(
+            class = "alert alert-info",
+            style = "font-size: 12px; margin-top: 4px; margin-bottom: 4px;",
+            shiny::tags$b("\u2139 RIF (distributional) simulation:"),
+            " Uses delta method. Residual draws and coefficient uncertainty are not available."
+          )
+        },
         shiny::actionButton(
           ns("run_sim"),
           label = "Run simulation",
@@ -460,7 +461,7 @@ mod_2_01_weathersim_server <- function(id,
           icon  = shiny::icon("play"),
           style = "width: 100%; margin-top: 4px;"
         )
-      }
+      )
     })
 
     # ---- Run simulation on button click ------------------------------------
@@ -481,6 +482,18 @@ mod_2_01_weathersim_server <- function(id,
       engine     <- mf$engine
       train_data <- mf$train_data
       residuals  <- sh$residuals
+
+      # RIF-specific params
+      is_rif       <- identical(engine, "rif")
+      fit_multi    <- if (is_rif) mf$fit3 else NULL
+      rif_taus     <- if (is_rif) mf$taus else NULL
+      rif_weather  <- if (is_rif) mf$weather_terms else NULL
+
+      # Force residuals = "none" for RIF — delta method has no residual draw
+      if (is_rif) {
+        residuals <- "none"
+        model <- extract_rif_median(mf$fit3, engine)
+      }
 
       sim_dates <- build_hist_sim_dates(svy, unlist(sh$year_range))
 
@@ -549,7 +562,11 @@ mod_2_01_weathersim_server <- function(id,
           # Pre-compute S coefficient draws once before the weather-key loop.
           # Reused across all keys (historical + future).
           # Set skip_coef_draws = TRUE in UI to suppress and use point estimates only.
-          coef_draws <- if (isTRUE(input$skip_coef_draws)) {
+          # RIF: no coefficient draws — uncertainty comes from year-to-year variation only.
+          coef_draws <- if (is_rif) {
+            message("[wiseapp] RIF engine: coefficient draws not supported, using point estimates")
+            NULL
+          } else if (isTRUE(input$skip_coef_draws)) {
             message("[wiseapp] Coefficient draws skipped (point estimates only)")
             NULL
           } else {
@@ -673,16 +690,19 @@ mod_2_01_weathersim_server <- function(id,
               else " | estimating..."
             ))
             out <- run_sim_pipeline(
-              weather_raw = weather_result[[key]],
-              svy         = svy,
-              sw          = sw,
-              so          = so,
-              model       = model,
-              residuals   = residuals,
-              train_data  = train_data,
-              engine      = engine,
-              coef_draws  = coef_draws,
-              slim        = !is_hist
+              weather_raw  = weather_result[[key]],
+              svy          = svy,
+              sw           = sw,
+              so           = so,
+              model        = model,
+              residuals    = residuals,
+              train_data   = train_data,
+              engine       = engine,
+              coef_draws   = coef_draws,
+              slim         = !is_hist,
+              fit_multi    = fit_multi,
+              taus         = rif_taus,
+              weather_cols = rif_weather
             )
 
             # Free raw weather for this key immediately

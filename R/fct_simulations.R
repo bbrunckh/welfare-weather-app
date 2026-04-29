@@ -256,10 +256,41 @@ resolve_id_col <- function(a, b) {
 run_sim_pipeline <- function(weather_raw, svy, sw, so,
                              model, residuals, train_data, engine,
                              coef_draws = NULL,
-                             slim = FALSE) {
-  n_pre_join    <- nrow(svy)
+                             slim = FALSE,
+                             fit_multi = NULL, taus = NULL,
+                             weather_cols = NULL) {
+  n_pre_join <- nrow(svy)
+
+  # Tag svy with row IDs for RIF delta-method lookups
+  is_rif <- identical(engine, "rif") && !is.null(fit_multi)
+  if (is_rif) {
+    svy$.svy_row_id <- seq_len(nrow(svy))
+  }
+
   survey_wd_sim <- prepare_hist_weather(weather_raw, svy, sw, so$name)
   id_col        <- if (residuals == "original") resolve_id_col(train_data, survey_wd_sim) else NULL
+
+  # RIF dispatch: use delta-method prediction, skip residual/coef_draws paths
+
+  if (is_rif) {
+    preds <- tryCatch(
+      predict_rif(
+        fit_multi    = fit_multi,
+        newdata      = survey_wd_sim,
+        svy          = svy,
+        train_data   = train_data,
+        taus         = taus,
+        outcome      = so$name,
+        weather_cols = weather_cols,
+        so           = so
+      ),
+      error = function(e) {
+        warning("[run_sim_pipeline] predict_rif() failed: ", conditionMessage(e))
+        NULL
+      }
+    )
+    if (!is.null(preds)) preds$draw_id <- NA_integer_
+  } else {
 
   # If coef_draws supplied, loop over S draws; otherwise single point-estimate run.
   # draw_id is NA for the point-estimate path (coef_draws = NULL).
@@ -354,6 +385,7 @@ run_sim_pipeline <- function(weather_raw, svy, sw, so,
     warning("[run_sim_pipeline] predict_outcome() failed: ", conditionMessage(e))
     NULL
   })
+  } # end else (non-RIF path)
   rm(survey_wd_sim)
 
   if (is.null(preds)) return(NULL)
