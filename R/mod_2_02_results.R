@@ -397,12 +397,30 @@ mod_2_02_results_server <- function(id,
         Filter(Negate(is.null), lapply(names(scenario_agg_rv()), function(dk) {
           if (!dk %in% selected_scenario_names()) return(NULL)  
           tbl <- scenario_agg_rv()[[dk]][[wk]][[method]]
+
+          # ---- TEMP DEBUG ----
+            message("[debug] ensemble bounds for ", dk,
+          " model_lo range: ", round(min(tbl$model_lo, na.rm=TRUE), 4),
+          " to ", round(max(tbl$model_lo, na.rm=TRUE), 4),
+          " model_hi range: ", round(min(tbl$model_hi, na.rm=TRUE), 4),
+          " to ", round(max(tbl$model_hi, na.rm=TRUE), 4),
+          " value range: ", round(min(tbl$value, na.rm=TRUE), 4),
+          " to ", round(max(tbl$value, na.rm=TRUE), 4))
+          # ---- END DEBUG ----
+          
           if (is.null(tbl) || nrow(tbl) == 0L) return(NULL)
           tbl_adj <- dplyr::mutate(tbl,
             value       = value - hist_ref,
             draw_values = lapply(draw_values, function(dv) dv - hist_ref)
           )
-          r <- compute_exceedance_ribbon(tbl_adj, band_q = bq)
+          # Extract ensemble bounds — deviate by same hist_ref
+          m_lo <- if (!is.null(tbl$model_lo))
+            sort(tbl$model_lo - hist_ref, decreasing = TRUE) else NULL
+          m_hi <- if (!is.null(tbl$model_hi))
+            sort(tbl$model_hi - hist_ref, decreasing = TRUE) else NULL
+          r <- compute_exceedance_ribbon(tbl_adj, band_q = bq,
+                                          model_lo = m_lo,
+                                          model_hi = m_hi)
           if (is.null(r)) return(NULL)
           ssp <- .normalise_ssp(dk) %||% "historical"
           dplyr::mutate(r, scenario = dk, ssp_key = ssp)

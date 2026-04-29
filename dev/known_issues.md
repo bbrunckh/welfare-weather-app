@@ -253,3 +253,20 @@
    Investigation needed: confirm whether res_sim is simulation-time
    or display-time parameter, and whether UI should disable after run.
    Priority: Low — investigate during UX cleanup pass
+
+## 18. Ensemble + coefficient joint uncertainty ribbon — approximation vs exact
+   Flagged: 2026-04-28
+   
+   Current: exceedance ribbon for future scenarios uses approximate joint bound:
+     ribbon_hi = model_hi + (value_hi - value)  
+     ribbon_lo = model_lo - (value - value_lo)
+   
+   Correct approach: store draw_values for lo/hi ensemble members in
+   combine_ensemble_results(), then compute_exceedance_ribbon() uses
+   those draws directly for joint uncertainty.
+   
+   Required change: combine_ensemble_results() must store:
+     draw_values_lo = lo_member$draw_values
+     draw_values_hi = hi_member$draw_values
+   
+   Priority: Medium — implement after current visualization pass complete

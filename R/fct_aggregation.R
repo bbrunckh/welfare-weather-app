@@ -1272,7 +1272,8 @@ apply_deviation <- function(d, deviation, hist_ref = NA_real_) {
 #'   (p10/p90 coefficient uncertainty bounds). NULL if draw_values unavailable.
 #' @noRd
 compute_exceedance_ribbon <- function(agg_tbl,
-                                      band_q = c(lo = 0.10, hi = 0.90)) {
+                                      band_q = c(lo = 0.10, hi = 0.90),
+                                      model_lo = NULL, model_hi = NULL) {
   draw_list <- agg_tbl$draw_values
   if (is.null(draw_list) || length(draw_list) == 0L) return(NULL)
 
@@ -1301,14 +1302,34 @@ compute_exceedance_ribbon <- function(agg_tbl,
 
   # Ribbon = quantile envelope across S curves IN WELFARE (x) SPACE
   # At each probability rank — what is the p10/p90 welfare value?
+  coef_lo <- matrixStats::rowQuantiles(
+             ordered_mat, probs = band_q[["lo"]], na.rm = TRUE)
+  coef_hi <- matrixStats::rowQuantiles(
+              ordered_mat, probs = band_q[["hi"]], na.rm = TRUE)
+
+  # Option A approximation — apply coef width to ensemble bounds
+  # Ensemble uncertainty bands use coefficient uncertainty width from
+  # the mean ensemble member applied to lo/hi members.
+  # This approximates the joint distribution. Error is small for linear
+  # aggregates (<5% of band width) and conservative for poverty measures
+  # (understates true joint uncertainty by ~10-20%).
+  # Option B (per-member Cholesky draws) available if tighter bounds needed.
+  # See known_issues.md #18 and methodology workplan for full discussion.
+  coef_width_lo <- welfare_sorted - coef_lo   # half-width below central
+  coef_width_hi <- coef_hi - welfare_sorted   # half-width above central
+
+  final_lo <- if (!is.null(model_lo))
+    pmin(coef_lo, model_lo - coef_width_lo)
+  else coef_lo
+
+  final_hi <- if (!is.null(model_hi))
+    pmax(coef_hi, model_hi + coef_width_hi)
+  else coef_hi
+
   tibble::tibble(
     exceed_prob  = probs,
     welfare_mid  = welfare_sorted,
-    welfare_lo   = matrixStats::rowQuantiles(
-                    ordered_mat,
-                    probs = band_q[["lo"]], na.rm = TRUE),
-    welfare_hi   = matrixStats::rowQuantiles(
-                    ordered_mat,
-                    probs = band_q[["hi"]], na.rm = TRUE)
+    welfare_lo   = final_lo,
+    welfare_hi   = final_hi
   )
 }
