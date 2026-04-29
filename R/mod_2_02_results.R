@@ -464,7 +464,9 @@ mod_2_02_results_server <- function(id,
               ~if (is.null(.x) || length(.x) == 0L) NA_real_
               else quantile(.x, bq["hi"], na.rm = TRUE) - hist_ref)
           ) |>
-          dplyr::select(sim_year, value_lo, value_hi)
+          dplyr::select(sim_year, value_lo, value_hi,
+              dplyr::any_of(c("model_q10", "model_q90",
+                              "model_lo",  "model_hi")))
       }
 
       # Historical — join deviated value from agg_hist()$out
@@ -485,7 +487,9 @@ mod_2_02_results_server <- function(id,
         if (is.null(sc_raw) || nrow(sc_raw) == 0L) return(NULL)
         sc_bands <- compute_bands_from_raw(sc_raw)
         sc_out |>
-          dplyr::select(-dplyr::any_of(c("value_lo", "value_hi"))) |>
+          dplyr::select(-dplyr::any_of(c("value_lo", "value_hi",
+                                "model_q10", "model_q90",
+                                "model_lo",  "model_hi"))) |> #Edited from 'value_lo', 'value_hi'
           dplyr::left_join(sc_bands, by = "sim_year") |>
           dplyr::mutate(scenario = dk)
       })

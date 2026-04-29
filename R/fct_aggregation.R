@@ -569,29 +569,52 @@ combine_ensemble_results <- function(model_results) {
       is.list(model_results) && length(model_results) > 0
   )
 
+  #DRK Note - Depreciating - use all climate models
   # Identify the mean representative as the central estimate.
   # Falls back to first entry if no *_ensemble_mean key present.
-  mean_key <- grep("ensemble_mean", names(model_results), value = TRUE)
-  central  <- if (length(mean_key) > 0L)
-                model_results[[mean_key[[1L]]]]
-              else
-                model_results[[1L]]
+  #mean_key <- grep("ensemble_mean", names(model_results), value = TRUE)
+  #central  <- if (length(mean_key) > 0L)
+  #              model_results[[mean_key[[1L]]]]
+  #            else
+  #              model_results[[1L]]
 
   # Filter to non-NULL entries with valid value fields before extracting
   model_results <- Filter(function(x) !is.null(x) && !is.null(x$value) && !is.na(x$value), model_results)
   if (length(model_results) == 0L) return(NULL)
+  
+  values <- vapply(model_results, `[[`, numeric(1L), "value")
+  
+  #DRK - FLAG FOR USE - we may switch to median or to a particular model later. BUT I think this is defensible.
 
-  values   <- vapply(model_results, `[[`, numeric(1L), "value")
-  value_lo <- vapply(model_results, `[[`, numeric(1L), "value_lo")
-  value_hi <- vapply(model_results, `[[`, numeric(1L), "value_hi")
+  # Average draw_values across all models — used for historical permutation
+  # (thick band). Each model contributes its coefficient uncertainty draws;
+  # the mean across models gives a central draw distribution not tied to
+  # any single model.
+  draw_mat     <- do.call(rbind, lapply(model_results, `[[`, "draw_values"))
+  mean_draws   <- colMeans(draw_mat, na.rm = TRUE)
 
   list(
-    value       = central$value,
-    value_lo    = mean(value_lo, na.rm = TRUE),   # inner band — avg coef uncertainty
-    value_hi    = mean(value_hi, na.rm = TRUE),   # inner band — avg coef uncertainty
-    model_lo    = min(values,    na.rm = TRUE),   # outer band — ensemble spread
-    model_hi    = max(values,    na.rm = TRUE),   # outer band — ensemble spread
-    draw_values = central$draw_values,            # paired draws from mean representative
+    # Central estimate — mean across all ensemble models
+    # (mean -> median switch deferred, tracked in dev/issues)
+    value       = mean(values, na.rm = TRUE),
+
+    # Inner band — from averaged draw distribution across all models
+    # Permuted across 30yr historical → thick band in plot
+    value_lo    = unname(quantile(mean_draws, 0.10, na.rm = TRUE)),
+    value_hi    = unname(quantile(mean_draws, 0.90, na.rm = TRUE)),
+
+    # Outer band — democracy distribution across all ensemble models
+    # Default q10/q90, configurable in display layer
+    model_lo    = min(values,                              na.rm = TRUE),
+    model_q10   = unname(quantile(values, 0.10,           na.rm = TRUE)),
+    model_q25   = unname(quantile(values, 0.25,           na.rm = TRUE)),
+    model_med   = unname(quantile(values, 0.50,           na.rm = TRUE)),
+    model_q75   = unname(quantile(values, 0.75,           na.rm = TRUE)),
+    model_q90   = unname(quantile(values, 0.90,           na.rm = TRUE)),
+    model_hi    = max(values,                              na.rm = TRUE),
+
+    # Averaged draws — passed to Module 3 difference uncertainty
+    draw_values = mean_draws,
     n_members   = length(model_results)
   )
 }
@@ -806,18 +829,20 @@ compute_scenario_agg <- function(scenarios,
           if (length(member_results) == 0L) return(NULL)
           combined <- combine_ensemble_results(member_results)
           if (is.null(combined)) return(NULL)
-          tibble::tibble(
-            sim_year    = yr,
-            value       = combined$value,
-            value_lo    = combined$value_lo,
-            value_p50   = combined$value,
-            value_hi    = combined$value_hi,
-            model_lo    = combined$model_lo,
-            model_hi    = combined$model_hi,
-            draw_values = list(combined$draw_values),
-            agg_method  = method,
-            weighted    = use_w
-          )
+            tibble::tibble(
+              sim_year    = yr,
+              value       = combined$value,
+              value_lo    = combined$value_lo,
+              value_p50   = combined$value,
+              value_hi    = combined$value_hi,
+              model_q10   = combined$model_q10,   # was model_lo
+              model_q90   = combined$model_q90,   # was model_hi
+              model_lo    = combined$model_lo,    # full range for diagnostics
+              model_hi    = combined$model_hi,
+              draw_values = list(combined$draw_values),
+              agg_method  = method,
+              weighted    = use_w
+            )
         }))
       }))
 

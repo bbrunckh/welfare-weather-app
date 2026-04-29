@@ -127,33 +127,32 @@ fct_run_simulation <- function(sw,
 
   # ---- Ensemble summarisation --------------------------------------------- #
   n_models_before <- length(setdiff(names(weather_result), "historical"))
-  if (!isTRUE(full_ensemble) &&
-      !isTRUE(dev_mode) &&
-      !is.null(ensemble_band_q)) {
-    weather_result <- tryCatch(
-      summarise_ensemble(
-        weather_result,
-        lo_q = ensemble_band_q[["lo"]],
-        hi_q = ensemble_band_q[["hi"]]
-      ),
-      error = function(e) {
-        warning("[fct_run_simulation] summarise_ensemble() failed — ",
-                "using full ensemble: ", conditionMessage(e))
-        weather_result
-      }
-    )
-    n_models_after <- length(setdiff(names(weather_result), "historical"))
-    message(sprintf(
-      "[wiseapp] Ensemble summarised: %d models -> %d representatives per SSP/period",
-      n_models_before, n_models_after
-    ))
-  } else {
+  #if (!isTRUE(full_ensemble) &&
+  #    !isTRUE(dev_mode) &&
+  #    !is.null(ensemble_band_q)) {
+  #  weather_result <- tryCatch(
+  #    summarise_ensemble(
+  #      weather_result,
+  #      lo_q = ensemble_band_q[["lo"]],
+  #      hi_q = ensemble_band_q[["hi"]]
+  #    ),
+  #    error = function(e) {
+  #      warning("[fct_run_simulation] summarise_ensemble() failed — ",
+  #              "using full ensemble: ", conditionMessage(e))
+  #      weather_result
+  #    }
+  #  )
+  #  n_models_after <- length(setdiff(names(weather_result), "historical"))
+  #  message(sprintf(
+  #    "[wiseapp] Ensemble summarised: %d models -> %d representatives per SSP/period",
+  #    n_models_before, n_models_after
+  #  ))
+  #} else {
     message(sprintf(
       "[wiseapp] Full ensemble retained: %d future keys%s",
       n_models_before,
       if (isTRUE(dev_mode)) " (dev mode)" else ""
     ))
-  }
 
   # ---- Key loop setup ----------------------------------------------------- #
   progress_fn(0.5, "Running simulations...")
