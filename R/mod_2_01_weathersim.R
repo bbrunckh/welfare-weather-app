@@ -171,10 +171,33 @@ mod_2_01_weathersim_ui <- function(id) {
         value   = TRUE
       ),
       shiny::helpText(
-        "When checked, only the first CMIP6 ensemble member per SSP/period is used.",
-        " Speeds up testing. Disable for final runs.",
+        "When checked, only 1 CMIP6 ensemble member per SSP/period is used —",
+        " no ensemble uncertainty available. Uncheck for final runs.",
+        " Use ensemble band selector below to control ensemble spread.",
         style = "font-size:11px; color:#b45309; margin-top:2px; margin-bottom:8px;"
       ),
+
+      shiny::selectInput(
+        ns("ensemble_band_width"),
+        label = "Ensemble uncertainty band",
+        choices = c(
+          "60% (p20-p80)"   = "p20_p80",
+          "80% (p10-p90)"   = "p10_p90",
+          "90% (p05-p95)"   = "p05_p95",
+          "95% (p025-p975)" = "p025_p975",
+          "99% (p005-p995)" = "p005_p995",
+          "Max (min-max)"   = "minmax"
+        ),
+        selected = "p10_p90"
+      ),
+      shiny::helpText(
+        "Selects lo/mean/hi ensemble representatives at simulation time.",
+        " Wider bands capture more CMIP6 model disagreement.",
+        " Ignored in dev mode (1 member only).",
+        style = "font-size:11px; color:#555; margin-top:2px; margin-bottom:8px;"
+      ),
+
+
       shiny::checkboxInput(
         inputId = ns("skip_coef_draws"),
         label   = shiny::tags$span(
@@ -450,6 +473,24 @@ mod_2_01_weathersim_server <- function(id,
       do.call(rbind, do.call(c, rows))
     })
 
+    # ---- Disable ensemble band selector in dev mode ------------------------
+    observe({
+      if (isTRUE(input$dev_mode)) {
+        shiny::updateSelectInput(
+          session,
+          "ensemble_band_width",
+          label = "Ensemble uncertainty band \u26a0 disabled in dev mode"
+        )
+      } else {
+        shiny::updateSelectInput(
+          session,
+          "ensemble_band_width",
+          label = "Ensemble uncertainty band"
+        )
+      }
+    })
+
+
     # ---- Run simulation button (hidden for RIF engine) --------------------
 
     output$run_sim_ui <- shiny::renderUI({
@@ -497,8 +538,9 @@ mod_2_01_weathersim_server <- function(id,
       fp_list             <- if (has_future) lapply(fut_periods, function(yr)
                                c(paste0(yr[1], "-01-01"), paste0(yr[2], "-12-31")))
                              else list()
-      # Fixed at p10/p90 — input$ensemble_band_width not yet in UI
-      ensemble_band_q     <- c(lo = 0.10, hi = 0.90)
+
+
+      ensemble_band_q     <- resolve_band_q(input$ensemble_band_width %||% "p10_p90")
 
 
       shiny::withProgress(message = "Running simulation...", value = 0, {

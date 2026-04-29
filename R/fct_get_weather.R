@@ -635,6 +635,10 @@ get_weather <- function(
     # across periods; only the future-period projection varies.
     # Returns a named list keyed by "<ssp>_<start>_<end>_<model>".
     .process_ssp <- function(ssp_i) {
+      
+      t_ssp_start <- proc.time()[["elapsed"]]
+      message(sprintf("[wiseapp] Processing SSP: %s at %s",
+                ssp_i, format(Sys.time(), "%H:%M:%S")))
 
       ssp_fname     <- gsub("_", "", ssp_i)
       future_fnames <- paste0(
@@ -657,11 +661,13 @@ get_weather <- function(
       out <- list()
       tmp_delta_tables <- character(0L) #DRK addition
       for (fp in future_period) {
+        t_fp_start <- proc.time()[["elapsed"]]
         fp_start <- as.Date(fp[1])
         fp_end   <- as.Date(fp[2])
         fp_label <- paste0(
           format(fp_start, "%Y"), "_", format(fp_end, "%Y")
         )
+        message(sprintf("[wiseapp]   Period %s: loading...", fp_label))
 
         h3_fut <- .cmip6_h3_monthly(future_fnames, fp_start, fp_end)
 
@@ -717,6 +723,7 @@ get_weather <- function(
         }
 
         complete_models <- complete_model_tbl$model[complete_model_tbl$n_complete > 0L]
+        message(sprintf("[wiseapp]   Period %s: %d complete models", fp_label, length(complete_models)))
         if (length(complete_models) == 0L) next
 
         loc_deltas_by_model <- loc_deltas_by_model |>
@@ -749,6 +756,11 @@ get_weather <- function(
           dplyr::filter(timestamp %in% !!dates) |>
           dplyr::collect()
 
+        message(sprintf("[wiseapp]   Period %s: collected %d rows in %s",   # ← ADD HERE
+                fp_label,
+                nrow(batch),
+                format_elapsed(proc.time()[["elapsed"]] - t_fp_start)))
+
         if (nrow(batch) == 0L) next
 
         # Split into per-model data frames
@@ -768,8 +780,13 @@ get_weather <- function(
       for (tdn in tmp_delta_tables) {
         try(DBI::dbRemoveTable(dbplyr::remote_con(loc_deltas_by_model), tdn), silent = TRUE)
       }
+      message(sprintf("[wiseapp] SSP %s complete in %s — %d keys",
+                  ssp_i,
+                  format_elapsed(proc.time()[["elapsed"]] - t_ssp_start),
+                  length(out)))  
+      
       out
-    }
+      }
 
     # -- Run SSPs sequentially — DuckDB handles per-query parallelism --------
     result <- c(result, do.call(c, lapply(ssp, .process_ssp)))

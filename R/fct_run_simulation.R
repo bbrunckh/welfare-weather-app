@@ -84,6 +84,9 @@ fct_run_simulation <- function(sw,
 
   # ---- Weather loading ---------------------------------------------------- #
   progress_fn(0.15, "Loading weather data...")
+  message(sprintf("[wiseapp] Weather loading started at %s",
+                format(Sys.time(), "%H:%M:%S")))
+  t_weather_start <- proc.time()[["elapsed"]]
 
   weather_result <- get_weather(
     survey_data         = svy,
@@ -96,6 +99,10 @@ fct_run_simulation <- function(sw,
     perturbation_method = perturbation_method,
     stored_breaks       = stored_breaks
   )
+
+  message(sprintf("[wiseapp] Weather loading complete in %s at %s",
+                format_elapsed(proc.time()[["elapsed"]] - t_weather_start),
+                format(Sys.time(), "%H:%M:%S")))
 
   # ---- Cholesky VCV ------------------------------------------------------- #
   chol_obj <- if (isTRUE(skip_coef_draws)) {
@@ -126,6 +133,11 @@ fct_run_simulation <- function(sw,
   }
 
   # ---- Ensemble summarisation --------------------------------------------- #
+
+  t_ensemble_start <- proc.time()[["elapsed"]]
+  message(sprintf("[wiseapp] Ensemble summarisation started — %d keys",
+                length(setdiff(names(weather_result), "historical"))))
+  
   n_models_before <- length(setdiff(names(weather_result), "historical"))
   if (!isTRUE(full_ensemble) &&
       !isTRUE(dev_mode) &&
@@ -134,7 +146,8 @@ fct_run_simulation <- function(sw,
       summarise_ensemble(
         weather_result,
         lo_q = ensemble_band_q[["lo"]],
-        hi_q = ensemble_band_q[["hi"]]
+        hi_q = ensemble_band_q[["hi"]],
+        weather_vars = sw$name 
       ),
       error = function(e) {
         warning("[fct_run_simulation] summarise_ensemble() failed — ",
@@ -154,6 +167,13 @@ fct_run_simulation <- function(sw,
       if (isTRUE(dev_mode)) " (dev mode)" else ""
     ))
   }
+
+  message(sprintf(
+  "[wiseapp] Ensemble summarisation complete in %s — %d keys → %d keys",
+  format_elapsed(proc.time()[["elapsed"]] - t_ensemble_start),
+  n_models_before,
+  length(setdiff(names(weather_result), "historical"))
+))
 
   # ---- Key loop setup ----------------------------------------------------- #
   progress_fn(0.5, "Running simulations...")

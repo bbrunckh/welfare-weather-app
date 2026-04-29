@@ -270,3 +270,34 @@
      draw_values_hi = hi_member$draw_values
    
    Priority: Medium — implement after current visualization pass complete
+
+   ## 19. get_weather() loads all ensemble members before summarisation
+   Flagged: 2026-04-28
+
+   Current pipeline:
+     get_weather() → loads ALL N models × SSPs × periods from DuckDB
+     summarise_ensemble() → reduces to 3 representatives (lo/mean/hi)
+   
+   With 30 models × 2 SSPs × 2 periods = 120 DuckDB queries before
+   any summarisation. Observed hang: ~5-10 minutes for 2 SSPs × 2 periods.
+   
+   Root cause: summarise_ensemble() operates on already-loaded weather
+   data — it cannot pre-filter before DuckDB loading.
+
+   Correct fix (Option B — pre-selection):
+     1. Lightweight DuckDB query — get model names + mean weather value
+        per model per SSP/period
+     2. Select lo/mean/hi model names from that lightweight query
+     3. Pass selected model names as filter to get_weather()
+     4. Only load 3 × SSPs × periods = 6 DuckDB queries
+   
+   Estimated saving: ~90% reduction in loading time for non-dev mode
+   
+   Implementation requires:
+     - New function: select_ensemble_representatives(cp, ssps, 
+         fp_list, weather_vars, band_q) → named list of model names
+     - get_weather() accepts model_filter argument
+     - fct_run_simulation() calls pre-selection before get_weather()
+   
+   Priority: High — blocking for production use with full ensemble
+   Related: known_issues.md #13, #14 (DuckDB loading bottleneck)
