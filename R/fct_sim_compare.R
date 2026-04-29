@@ -147,8 +147,6 @@ label_deviation <- function(key) {
 #'
 #' Groups are ordered Historical | spacer | SSP2 years | spacer | SSP3 years |
 #' spacer | SSP5 years. Colour follows SSP family; shade follows year rank.
-#'   - Dotted line for combined coefficient + ensemble uncertainty
-#'     (future scenarios only — Historical shows coefficient only)
 #'
 #' @param scenarios Named list; each element is from aggregate_sim_preds().
 #' @param hist_agg  Full result of aggregate_sim_preds() for historical.
@@ -184,8 +182,6 @@ plot_pointrange_climate <- function(scenarios, hist_agg,
     mean(hist_bands$value_lo, na.rm = TRUE) else NA_real_
   hist_s$coef_hi <- if (!is.null(hist_bands) && nrow(hist_bands) > 0)
     mean(hist_bands$value_hi, na.rm = TRUE) else NA_real_
-  hist_s$ensemble_lo <- NA_real_
-  hist_s$ensemble_hi <- NA_real_
 
   # ---- future scenario summaries ------------------------------------------
   # Each scenario key is "SSP2-4.5 / 2025-2035" (one entry per SSP x period,
@@ -216,16 +212,6 @@ plot_pointrange_climate <- function(scenarios, hist_agg,
           mean(sc_bands$value_lo, na.rm = TRUE) else NA_real_
         s$coef_hi <- if (!is.null(sc_bands) && nrow(sc_bands) > 0)
           mean(sc_bands$value_hi, na.rm = TRUE) else NA_real_
-        
-        # Option A ensemble bounds — apply coef width to ensemble lo/hi
-        m_lo <- if (!is.null(sc_bands) && "model_lo" %in% names(sc_bands))
-          mean(sc_bands$model_lo, na.rm = TRUE) else NA_real_
-        m_hi <- if (!is.null(sc_bands) && "model_hi" %in% names(sc_bands))
-          mean(sc_bands$model_hi, na.rm = TRUE) else NA_real_
-        coef_w_lo <- s$mean - s$coef_lo
-        coef_w_hi <- s$coef_hi - s$mean
-        s$ensemble_lo <- if (!is.na(m_lo)) min(s$coef_lo, m_lo - coef_w_lo) else NA_real_
-        s$ensemble_hi <- if (!is.na(m_hi)) max(s$coef_hi, m_hi + coef_w_hi) else NA_real_
 
         s
       })
@@ -294,7 +280,7 @@ plot_pointrange_climate <- function(scenarios, hist_agg,
   data_levels <- setdiff(ordered_levels, spacer_ids)
 
   # ---- combine into one data frame -----------------------------------------
-  cols     <- c("pt_key", "colour_key", "mean", "lo_full", "hi_full", "coef_lo", "coef_hi", "ensemble_lo", "ensemble_hi")
+  cols     <- c("pt_key", "colour_key", "mean", "lo_full", "hi_full", "coef_lo", "coef_hi")
   hist_row <- hist_s[, intersect(cols, names(hist_s))]
   fut_rows <- if (!is.null(fut_df) && nrow(fut_df) > 0)
     fut_df[, intersect(cols, names(fut_df))] else NULL
@@ -317,20 +303,7 @@ plot_pointrange_climate <- function(scenarios, hist_agg,
       ggplot2::aes(ymin = .data$coef_lo, ymax = .data$coef_hi),
       linewidth = 0.5, na.rm     = TRUE
     ) +
-    # ADD after existing thin linerange:
-    ggplot2::geom_linerange(
-      data = dplyr::filter(plot_df, !is.na(.data$ensemble_hi)),
-      ggplot2::aes(
-        ymin   = .data$ensemble_lo,
-        ymax   = .data$ensemble_hi,
-        colour = .data$colour_key
-      ),
-      linewidth = 0.5,
-      linetype  = "dotted",
-      alpha     = 0.8,
-      na.rm     = TRUE
-    ) +  
-    # Full weather variation — thick bar (min to max of 30 annual values)
+    # 90% CI — linewidth encodes percentile
     ggplot2::geom_linerange(
       ggplot2::aes(ymin = .data$lo_full, ymax = .data$hi_full),
                    linewidth = 2.0

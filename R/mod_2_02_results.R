@@ -474,7 +474,7 @@ mod_2_02_results_server <- function(id,
       hist_out   <- agg_hist()$out |>
         dplyr::select(-dplyr::any_of(c("value_lo", "value_hi"))) |>
         dplyr::left_join(hist_bands, by = "sim_year") |>
-        dplyr::mutate(scenario = "Historical", model_lo = NA_real_, model_hi = NA_real_)
+        dplyr::mutate(scenario = "Historical")
 
       # Scenarios — join deviated value from agg_scenarios()[[dk]]$out
       # with lo/hi computed from raw scenario_agg_rv()[[dk]]
@@ -484,29 +484,10 @@ mod_2_02_results_server <- function(id,
         sc_raw   <- scenario_agg_rv()[[dk]][[wk]][[method]]
         if (is.null(sc_raw) || nrow(sc_raw) == 0L) return(NULL)
         sc_bands <- compute_bands_from_raw(sc_raw)
-
-        # ---- TEMP DEBUG ----
-        message("[debug] sc_bands for ", dk,
-        " value_lo: ", round(mean(sc_bands$value_lo, na.rm=TRUE), 4),
-        " value_hi: ", round(mean(sc_bands$value_hi, na.rm=TRUE), 4),
-        " sc_out value: ", round(mean(sc_out$value, na.rm=TRUE), 4))
-        # ---- END DEBUG ----
-
-        # also join model_lo/model_hi and scenario from raw scenario:
         sc_out |>
-        dplyr::select(-dplyr::any_of(c("value_lo", "value_hi",
-                                        "model_lo", "model_hi"))) |>
-        dplyr::left_join(sc_bands, by = "sim_year") |>
-        dplyr::left_join(
-          sc_raw |>
-            dplyr::select(sim_year, model_lo, model_hi) |>
-            dplyr::mutate(
-              model_lo = model_lo - hist_ref,
-              model_hi = model_hi - hist_ref
-            ),
-          by = "sim_year"
-        ) |>
-        dplyr::mutate(scenario = dk) 
+          dplyr::select(-dplyr::any_of(c("value_lo", "value_hi"))) |>
+          dplyr::left_join(sc_bands, by = "sim_year") |>
+          dplyr::mutate(scenario = dk)
       })
 
       dplyr::bind_rows(
