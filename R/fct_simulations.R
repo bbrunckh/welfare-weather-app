@@ -359,6 +359,12 @@ run_sim_pipeline <- function(weather_raw, svy, sw, so,
   if (is.null(preds)) return(NULL)
   preds <- apply_log_backtransform(preds, so)
 
+  # Apply SP direct transfer if pre-computed by apply_policy_to_svy
+  # (no-op for Step 2 baseline simulations — no ._sp_transfer column)
+  if ("._sp_transfer" %in% names(preds)) {
+    preds[[so$name]] <- preds[[so$name]] + preds[["._sp_transfer"]]
+  }
+
   if (slim) {
     # Keep only columns needed by aggregate_sim_preds():
     # sim_year, year, outcome, .fitted, .residual, draw_id (coefficient

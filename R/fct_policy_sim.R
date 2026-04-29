@@ -127,6 +127,58 @@ policy_placeholder_tag <- function(category_label, candidate_df) {
   }
 }
 
+.determine_sp_eligibility <- function(svy, sp) {
+  n         <- nrow(svy)
+  targeting <- sp$targeting %||% "exante_poor"
+
+  if (targeting == "universal") {
+    eligible <- rep(TRUE, n)
+  } else if (targeting == "exante_poor") {
+    q        <- quantile(svy$welfare,
+                        (sp$targeting_threshold %||% 20) / 100,
+                        na.rm = TRUE)
+    eligible <- !is.na(svy$welfare) & svy$welfare <= q
+  } else if (targeting == "pmt") {
+    pmt_var <- sp$pmt_variable
+    pmt_cut <- as.numeric(sp$pmt_cutoff %||% NA)
+    if (is.null(pmt_var) || is.na(pmt_var) || is.na(pmt_cut) ||
+        !(pmt_var %in% names(svy))) {
+      eligible <- rep(FALSE, n)
+    } else {
+      col      <- svy[[pmt_var]]
+      uniq     <- sort(unique(col[!is.na(col)]))
+      if (length(uniq) == 2 && all(uniq %in% c(0, 1))) {
+        # Binary: match the selected value exactly
+        eligible <- !is.na(col) & col == pmt_cut
+      } else {
+        # Continuous: include those at or below the cutoff
+        eligible <- !is.na(col) & col <= pmt_cut
+      }
+    }
+  } else {
+    eligible <- rep(FALSE, n)
+  }
+
+  # Inclusion / exclusion errors (not applied for universal)
+  if (targeting != "universal") {
+    incl_rate <- (sp$inclusion_error_pct %||% 0) / 100
+    excl_rate <- (sp$exclusion_error_pct %||% 0) / 100
+    non_elig  <- which(!eligible)
+    elig      <- which(eligible)
+    if (length(non_elig) > 0 && incl_rate > 0) {
+      n_flip <- round(length(non_elig) * incl_rate)
+      eligible[sample(non_elig, min(n_flip, length(non_elig)))] <-
+        TRUE
+    }
+    if (length(elig) > 0 && excl_rate > 0) {
+      n_flip <- round(length(elig) * excl_rate)
+      eligible[sample(elig, min(n_flip, length(elig)))] <- FALSE
+    }
+  }
+
+  eligible
+}
+
 
 #' Apply Policy Scenario Adjustments to Survey Covariates
 #'
@@ -184,7 +236,23 @@ apply_policy_to_svy <- function(svy,
     }
   }
 
-  # sp / digital / labor scenarios: infrastructure for future wiring.
+  # Social protection: add per-household transfer as ._sp_transfer column.
+  # welfare is the regression outcome (not a covariate), so we tag the
+  # transfer amount here; it is applied to predictions post-prediction
+  # in run_sim_pipeline() (fct_simulations.R).
+  if (!is.null(sp) && "welfare" %in% cols) {
+    annual_hh  <- (sp$transfer_amount_usd %||% 0) *
+                  (sp$transfer_n_payments %||% 6)
+    daily_hh   <- annual_hh / 365
+    daily_pc   <- if ("hhsize" %in% cols) {
+      daily_hh / pmax(svy$hhsize, 1)
+    } else {
+      daily_hh
+    }
+    eligible   <- .determine_sp_eligibility(svy, sp)
+    svy[["._sp_transfer"]] <- ifelse(eligible, daily_pc, 0)
+  }
+
   svy
 }
 

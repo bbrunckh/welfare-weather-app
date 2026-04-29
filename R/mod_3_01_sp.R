@@ -57,9 +57,41 @@ mod_3_01_sp_ui <- function(id) {
 #' @noRd
 mod_3_01_sp_server <- function(id,
                                 selected_outcome = reactive(NULL),
-                                survey_weather   = reactive(NULL)) {
+                                survey_weather   = reactive(NULL),
+                                variable_list    = reactive(NULL)) {
   moduleServer(id, function(input, output, session) {
     ns <- session$ns
+
+    # ---- PMT variable candidates (numeric, non-missing for welfare rows) ----
+    pmt_candidates <- reactive({
+      svy <- survey_weather()
+      vl  <- variable_list()
+      so  <- selected_outcome()
+      if (is.null(svy) || is.null(vl) || is.null(so) || nrow(vl) == 0) return(character(0))
+
+      # Filter variable_list to ind/hh/firm level only (not area-only)
+      level_mask <- vapply(seq_len(nrow(vl)), function(i) {
+        isTRUE(vl$ind[i] == 1L) || isTRUE(vl$hh[i] == 1L) || isTRUE(vl$firm[i] == 1L)
+      }, logical(1))
+      cands <- vl$name[level_mask]
+
+      # Intersect with survey columns
+      cands <- intersect(cands, names(svy))
+      if (length(cands) == 0) return(character(0))
+
+      # Keep only numeric vars with no NAs where outcome is non-missing
+      outcome_rows <- !is.na(svy[[so$name]])
+      keep <- Filter(function(v) {
+        col <- svy[[v]]
+        is.numeric(col) && !any(is.na(col[outcome_rows]))
+      }, cands)
+
+      # Return named character: display_label → variable_name
+      setNames(keep, vapply(keep, function(v) {
+        lbl <- vl$label[vl$name == v]
+        if (length(lbl) > 0 && nzchar(lbl[[1]])) lbl[[1]] else v
+      }, character(1)))
+    })
 
     # ---- Toggle config panel — update button label ---------------------
     observeEvent(input$sp_config_toggle, {
@@ -142,19 +174,16 @@ mod_3_01_sp_server <- function(id,
           inputId  = ns("targeting"),
           label    = NULL,
           choices  = c(
-            "Universal"                                       = "universal",
-            "Welfare below threshold (ex-ante poor)"         = "exante_poor",
-            "Predicted welfare below threshold (at trigger)" = "predicted_poor",
-            "Household characteristics (PMT)"                = "pmt",
-            "Geographic \u2014 worst affected regions"       = "geographic"
+            "Universal"                                  = "universal",
+            "Welfare below threshold (ex-ante poor)"    = "exante_poor",
+            "Household characteristics (PMT)"           = "pmt"
           ),
           selected = "exante_poor"
         ),
+
+        # Threshold for ex-ante poor targeting
         conditionalPanel(
-          condition = paste0(
-            "input['", ns("targeting"), "'] == 'exante_poor' || ",
-            "input['", ns("targeting"), "'] == 'predicted_poor'"
-          ),
+          condition = paste0("input['", ns("targeting"), "'] == 'exante_poor'"),
           sliderInput(
             inputId = ns("targeting_threshold_pct"),
             label   = tags$span(
@@ -164,24 +193,91 @@ mod_3_01_sp_server <- function(id,
             min = 5, max = 60, value = 20, step = 5, post = "%"
           )
         ),
-        sliderInput(
-          inputId = ns("inclusion_error_pct"),
-          label   = tags$span(
-            tags$i(class = "fa fa-user-plus me-1"),
-            "Inclusion error (%)"
-          ),
-          min = 0, max = 30, value = 10, step = 1, post = "%"
+
+        # PMT variable and cutoff (only for PMT targeting)
+        conditionalPanel(
+          condition = paste0("input['", ns("targeting"), "'] == 'pmt'"),
+          uiOutput(ns("pmt_variable_ui")),
+          uiOutput(ns("pmt_cutoff_ui"))
         ),
-        sliderInput(
-          inputId = ns("exclusion_error_pct"),
-          label   = tags$span(
-            tags$i(class = "fa fa-user-minus me-1"),
-            "Exclusion error (%)"
+
+        # Inclusion/exclusion errors (only for non-universal targeting)
+        conditionalPanel(
+          condition = paste0("input['", ns("targeting"), "'] != 'universal'"),
+          sliderInput(
+            inputId = ns("inclusion_error_pct"),
+            label   = tags$span(
+              tags$i(class = "fa fa-user-plus me-1"),
+              "Inclusion error (%)"
+            ),
+            min = 0, max = 30, value = 10, step = 1, post = "%"
           ),
-          min = 0, max = 30, value = 10, step = 1, post = "%"
+          sliderInput(
+            inputId = ns("exclusion_error_pct"),
+            label   = tags$span(
+              tags$i(class = "fa fa-user-minus me-1"),
+              "Exclusion error (%)"
+            ),
+            min = 0, max = 30, value = 10, step = 1, post = "%"
+          )
         ),
         tags$hr(style = "margin: 8px 0;")
       )
+    })
+
+    # ---- PMT variable selector ----
+    output$pmt_variable_ui <- renderUI({
+      cands <- pmt_candidates()
+      if (length(cands) == 0) {
+        return(div(
+          class = "alert alert-warning",
+          style = "font-size: 12px; padding: 8px; margin-bottom: 8px;",
+          "No suitable PMT variable found. Ensure covariates with complete ",
+          "data are included in Step 1."
+        ))
+      }
+      selectInput(
+        ns("pmt_variable"),
+        label = tags$span(
+          tags$i(class = "fa fa-list me-1"),
+          "PMT variable"
+        ),
+        choices = cands,
+        selected = cands[[1]]
+      )
+    })
+
+    # ---- PMT cutoff selector (type depends on variable) ----
+    output$pmt_cutoff_ui <- renderUI({
+      v <- input$pmt_variable
+      req(v)
+      svy <- survey_weather()
+      req(svy, v %in% names(svy))
+
+      col <- svy[[v]]
+      col <- col[!is.na(col)]
+      uniq <- sort(unique(col))
+
+      if (length(uniq) == 2 && all(uniq %in% c(0, 1))) {
+        # Binary variable: choose target value
+        radioButtons(
+          ns("pmt_cutoff"),
+          label = "Target households where variable equals",
+          choices = c("0" = 0, "1" = 1),
+          selected = 0,
+          inline = TRUE
+        )
+      } else {
+        # Continuous variable: choose threshold
+        sliderInput(
+          ns("pmt_cutoff"),
+          label = "Include households with value \u2264",
+          min   = floor(min(col)),
+          max   = ceiling(max(col)),
+          value = quantile(col, 0.2),
+          step  = if (diff(range(col)) > 10) 1 else 0.1
+        )
+      }
     })
 
     # ---- 4. Budget / transfer amount (linked) --------------------------
@@ -495,6 +591,8 @@ mod_3_01_sp_server <- function(id,
           # Targeting
           targeting             = input$targeting               %||% "exante_poor",
           targeting_threshold   = input$targeting_threshold_pct %||% 20,
+          pmt_variable          = input$pmt_variable            %||% NA_character_,
+          pmt_cutoff            = input$pmt_cutoff              %||% NA_real_,
           inclusion_error_pct   = input$inclusion_error_pct     %||% 10,
           exclusion_error_pct   = input$exclusion_error_pct     %||% 10,
           # Transfer amount
@@ -502,15 +600,23 @@ mod_3_01_sp_server <- function(id,
           transfer_amount_usd   = input$transfer_amount_usd     %||% 50,
           # Admin cost (deducted from budget before transfer calculation)
           admin_cost_pct        = input$admin_cost_pct          %||% 10,
-          # Timing — regular programs always have n payments, no timing type
-          transfer_frequency    = if (is_regular) "regular" else input$transfer_frequency %||% "oneoff",
-          transfer_n_payments   = if (is_regular) input$transfer_n_payments %||% 12L else input$transfer_n_payments %||% 1L,
-          transfer_timing       = if (is_regular) NA_character_ else input$transfer_timing %||% "expost",
-          timeliness_weeks      = if (is_regular) NA_integer_   else input$timeliness_weeks %||% 4L,
+          # Timing — regular programs always have n payments
+          transfer_frequency =
+            if (is_regular) "regular"
+            else input$transfer_frequency %||% "oneoff",
+          transfer_n_payments =
+            if (is_regular) input$transfer_n_payments %||% 12L
+            else input$transfer_n_payments %||% 1L,
+          transfer_timing =
+            if (is_regular) NA_character_
+            else input$transfer_timing %||% "expost",
+          timeliness_weeks =
+            if (is_regular) NA_integer_
+            else input$timeliness_weeks %||% 4L,
           # Delivery
           delivery_mobile_money = isTRUE(input$delivery_mobile_money),
           # Revenue source
-          revenue_source        = input$revenue_source          %||% "govt_reallocation"
+          revenue_source = input$revenue_source %||% "govt_reallocation"
         )
       }),
       selected_hist = reactive(NULL)

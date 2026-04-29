@@ -127,7 +127,12 @@ mod_3_scenario_server <- function(id,
 
     # ---- Social Protection scenario --------------------------------------
 
-    s1 <- mod_3_01_sp_server("sp")
+    s1 <- mod_3_01_sp_server(
+      "sp",
+      selected_outcome = selected_outcome,
+      survey_weather   = survey_weather,
+      variable_list    = variable_list
+    )
 
     # ---- Infrastructure scenario -----------------------------------------
 
