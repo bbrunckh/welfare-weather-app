@@ -57,13 +57,26 @@ mod_3_07_diagnostics_server <- function(id,
         p$welfare <- p$welfare + p[["._sp_transfer"]]
       }
 
-      transfer_sum <- if ("._sp_transfer" %in% names(p)) sum(p[["._sp_transfer"]], na.rm = TRUE)*365 else 0
-      transfer_perhh <- if ("._sp_transfer" %in% names(p)) {
+      # Detect survey weight column (same pattern as Step 2 / resimulate_with_svy)
+      wt_col <- grep("^weight$|^hhweight$|^wgt$|^pw$",
+                     names(p), value = TRUE,
+                     ignore.case = TRUE)[1]
+      if (is.na(wt_col %||% NA)) wt_col <- NULL
+
+      if ("._sp_transfer" %in% names(p)) {
         v <- p[["._sp_transfer"]]
-        elig <- v > 0 & !is.na(v)
-        if (any(elig)) mean(v[elig]) * 365 else 0
+        w <- if (!is.null(wt_col)) p[[wt_col]] else rep(1, length(v))
+        ok <- is.finite(v) & is.finite(w)
+        # Population-level total annual cost = sum(daily transfer * weight) * 365
+        transfer_sum <- sum(v[ok] * w[ok]) * 365
+        # Population-weighted mean over eligible households (annual)
+        elig <- ok & v > 0
+        transfer_perhh <- if (any(elig) && sum(w[elig]) > 0) {
+          sum(v[elig] * w[elig]) / sum(w[elig]) * 365
+        } else 0
       } else {
-        0
+        transfer_sum   <- 0
+        transfer_perhh <- 0
       }
 
       vars <- detect_manipulated_vars(b, p)
@@ -80,22 +93,15 @@ mod_3_07_diagnostics_server <- function(id,
 
     # ---- Transfer summary info box ------------------------------------------
 
-    output$transfer_summary_ui <- renderUI({
-    d <- diag_data()
-    if (is.null(d) || is.list(d) && !is.null(d$status)) return(NULL)
-
-    shiny::div(
-        class = "alert alert-info",
-        shiny::h5("Total SP Transfer"),
-        shiny::p(paste0(
-        "The total transfer amount across the population is approximately ",
-        scales::comma(d$transfer_sum, prefix = "$"), 
-        " (not scaled to population level yet). On average, this equates to about ",
-        scales::comma(d$transfer_perhh, prefix = "$"),
-        " per eligible household (per year)."
-        ))
-    )
-    })
+    output$transfer_summary_ui <- renderTable({
+      d <- diag_data()
+      if (is.null(d) || is.list(d) && !is.null(d$status)) return(NULL)
+      data.frame(
+        Type  = c("Total transfer $ amount (population-level)", "Per-household $ equivalent (eligible households)"),
+        Value = c(d$transfer_sum, d$transfer_perhh),
+        stringsAsFactors = FALSE
+      )
+    }, striped = TRUE, hover = TRUE, bordered = TRUE)
 
     outputOptions(output, "transfer_summary_ui", suspendWhenHidden = FALSE)
 
@@ -160,7 +166,7 @@ mod_3_07_diagnostics_server <- function(id,
       d <- diag_data()
       if (is.null(d) || is.list(d) && !is.null(d$status)) {
         return(shiny::div(
-          class = "alert alert-info",
+          # class = "alert alert-info",
           "No variables to display."
         ))
       }
@@ -168,7 +174,7 @@ mod_3_07_diagnostics_server <- function(id,
       vars <- d$manipulated_vars
       if (length(vars) == 0) {
         return(shiny::div(
-          class = "alert alert-info",
+          # class = "alert alert-info",
           "No variables to display."
         ))
       }
@@ -219,28 +225,24 @@ mod_3_07_diagnostics_server <- function(id,
           shiny::tabPanel(
             title = "Diagnostics",
             value = "diag_tab",
-            shiny::wellPanel(
-              shiny::h4("Transfer Summary"),
-              shiny::uiOutput(ns("transfer_summary_ui"))
+            shiny::h4("Total SP Transfer Amount"),
+            shiny::tags$small(style = "color: #c00;", "Needs to be scale to population level."),
+            shiny::tableOutput(ns("transfer_summary_ui")),
+            shiny::div(style = "margin: 12px 0;"),
+            shiny::h4("Summary of Manipulated Variables"),
+            shiny::tags$small(
+              class = "text-muted",
+              "Summary statistics (mean, SD) for variables changed by ",
+              "policy adjustments."
             ),
-            shiny::wellPanel(
-              shiny::h4("Summary of Manipulated Variables"),
-              shiny::tags$small(
-                class = "text-muted",
-                "Summary statistics (mean, SD) for variables changed by ",
-                "policy adjustments."
-              ),
-              DT::DTOutput(ns("diag_summary_table"))
+            DT::DTOutput(ns("diag_summary_table")),
+            shiny::h4("Before/After Distributions"),
+            shiny::tags$small(
+              class = "text-muted",
+              "Kernel density plots comparing baseline (grey) vs. ",
+              "policy-adjusted (red) distributions."
             ),
-            shiny::wellPanel(
-              shiny::h4("Before/After Distributions"),
-              shiny::tags$small(
-                class = "text-muted",
-                "Kernel density plots comparing baseline (grey) vs. ",
-                "policy-adjusted (red) distributions."
-              ),
-              shiny::uiOutput(ns("hist_plots_ui"))
-            )
+            shiny::uiOutput(ns("hist_plots_ui"))
           ),
           select = FALSE,
           session = tabset_session
