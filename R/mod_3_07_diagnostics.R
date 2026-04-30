@@ -43,12 +43,6 @@ mod_3_07_diagnostics_server <- function(id,
       tabset_session <- session$parent %||% session
     }
 
-    select_tab <- function(value) {
-      if (is.null(tabset_id) || !nzchar(tabset_id)) return(invisible(FALSE))
-      try(shiny::updateTabsetPanel(tabset_session, inputId = tabset_id, selected = value), silent = TRUE)
-      invisible(TRUE)
-    }
-
     diag_tab_added <- reactiveVal(FALSE)
 
     # ---- Diagnostics data preparation ---------------------------------------
@@ -220,115 +214,42 @@ mod_3_07_diagnostics_server <- function(id,
       req(sim_run_id() > 0)
 
       if (!diag_tab_added()) {
-        tryCatch(
-          shiny::appendTab(
-            inputId = tabset_id,
-            shiny::tabPanel(
-              title = "Diagnostics",
-              value = "diag_tab",
-              shiny::wellPanel(
-                shiny::h4("Transfer Summary"),
-                shiny::uiOutput(ns("transfer_summary_ui"))
-              ),
-              shiny::wellPanel(
-                shiny::h4("Summary of Manipulated Variables"),
-                shiny::tags$small(
-                  class = "text-muted",
-                  "Summary statistics (mean, SD) for variables changed by ",
-                  "policy adjustments."
-                ),
-                DT::DTOutput(ns("diag_summary_table"))
-              ),
-              shiny::wellPanel(
-                shiny::h4("Before/After Distributions"),
-                shiny::tags$small(
-                  class = "text-muted",
-                  "Kernel density plots comparing baseline (grey) vs. ",
-                  "policy-adjusted (red) distributions."
-                ),
-                shiny::uiOutput(ns("hist_plots_ui"))
-              )
+        shiny::appendTab(
+          inputId = tabset_id,
+          shiny::tabPanel(
+            title = "Diagnostics",
+            value = "diag_tab",
+            shiny::wellPanel(
+              shiny::h4("Transfer Summary"),
+              shiny::uiOutput(ns("transfer_summary_ui"))
             ),
-            select = TRUE,
-            session = tabset_session
-          ),
-          error = function(e) {
-            shiny::showNotification(
-              paste("Failed to add Diagnostics tab:", conditionMessage(e)),
-              type = "error"
+            shiny::wellPanel(
+              shiny::h4("Summary of Manipulated Variables"),
+              shiny::tags$small(
+                class = "text-muted",
+                "Summary statistics (mean, SD) for variables changed by ",
+                "policy adjustments."
+              ),
+              DT::DTOutput(ns("diag_summary_table"))
+            ),
+            shiny::wellPanel(
+              shiny::h4("Before/After Distributions"),
+              shiny::tags$small(
+                class = "text-muted",
+                "Kernel density plots comparing baseline (grey) vs. ",
+                "policy-adjusted (red) distributions."
+              ),
+              shiny::uiOutput(ns("hist_plots_ui"))
             )
-          }
+          ),
+          select = FALSE,
+          session = tabset_session
         )
         diag_tab_added(TRUE)
       }
 
-      if (diag_tab_added()) select_tab("diag_tab")
     }, ignoreInit = TRUE)
 
     invisible(NULL)
   })
-}
-
-
-#' Make a before/after histogram for a single variable
-#' @noRd
-.make_before_after_hist <- function(baseline_vals, policy_vals,
-                                    var_name) {
-  baseline_clean <- baseline_vals[!is.na(baseline_vals)]
-  policy_clean   <- policy_vals[!is.na(policy_vals)]
-
-  if (length(baseline_clean) == 0 && length(policy_clean) == 0) {
-    plot.new()
-    graphics::title(main = "No data available")
-    return(invisible(NULL))
-  }
-
-  all_vals <- c(baseline_clean, policy_clean)
-  x_range <- range(all_vals, na.rm = TRUE)
-  x_range <- x_range + c(-0.1, 0.1) * diff(x_range)
-
-  dens_base <- if (length(baseline_clean) > 1)
-    stats::density(baseline_clean, from = x_range[1], to = x_range[2])
-  else NULL
-
-  dens_poli <- if (length(policy_clean) > 1)
-    stats::density(policy_clean, from = x_range[1], to = x_range[2])
-  else NULL
-
-  y_max <- 0
-  if (!is.null(dens_base)) y_max <- max(y_max, max(dens_base$y))
-  if (!is.null(dens_poli)) y_max <- max(y_max, max(dens_poli$y))
-
-  plot(
-    NULL,
-    xlim = x_range,
-    ylim = c(0, y_max * 1.1),
-    xlab = var_name,
-    ylab = "Density",
-    main = paste0("Distribution: ", var_name),
-    cex.main = 0.95
-  )
-
-  if (!is.null(dens_base)) {
-    graphics::lines(dens_base, col = "#bdbdbd", lwd = 2.5, lty = 1)
-  }
-  if (!is.null(dens_poli)) {
-    graphics::lines(dens_poli, col = "#d32f2f", lwd = 2.5, lty = 1)
-  }
-
-  legend_cols <- c(
-    if (!is.null(dens_base)) "#bdbdbd" else NULL,
-    if (!is.null(dens_poli)) "#d32f2f" else NULL
-  )
-  legend_labs <- c(
-    if (!is.null(dens_base)) "Baseline" else NULL,
-    if (!is.null(dens_poli)) "Policy-adjusted" else NULL
-  )
-
-  if (length(legend_cols) > 0) {
-    graphics::legend("topright", legend = legend_labs, col = legend_cols,
-                     lwd = 2.5, cex = 0.85)
-  }
-
-  invisible(NULL)
 }

@@ -43,19 +43,25 @@ mod_3_06_results_server <- function(id,
                                      tabset_session = NULL) {
   moduleServer(id, function(input, output, session) {
     ns <- session$ns
-    if (is.null(tabset_session))
+    if (is.null(tabset_session)) {
       tabset_session <- session$parent %||% session
+    }
+    select_tab <- function(value) {
+      if (is.null(tabset_id) || !nzchar(tabset_id)) return(invisible(FALSE))
+      try(shiny::updateTabsetPanel(tabset_session, inputId = tabset_id, selected = value), silent = TRUE)
+      invisible(TRUE)
+    }
 
     tabs_added <- reactiveVal(FALSE)
 
-    .wire_results_pane(input, output, session, "base",
-                       hist_sim        = baseline_hist_sim,
-                       saved_scenarios = baseline_saved_scenarios,
-                       selected_hist   = selected_hist)
-    .wire_results_pane(input, output, session, "pol",
-                       hist_sim        = policy_hist_sim,
-                       saved_scenarios = policy_saved_scenarios,
-                       selected_hist   = selected_hist)
+    .wire_results_pane(
+      input, output, session,
+      baseline_hist_sim        = baseline_hist_sim,
+      baseline_saved_scenarios = baseline_saved_scenarios,
+      policy_hist_sim          = policy_hist_sim,
+      policy_saved_scenarios   = policy_saved_scenarios,
+      selected_hist            = selected_hist
+    )
 
     observeEvent(sim_run_id(), {
       req(sim_run_id() > 0)
@@ -63,31 +69,21 @@ mod_3_06_results_server <- function(id,
       if (!tabs_added()) {
         bs <- baseline_hist_sim()
         if (is.null(bs) || is.null(bs$so)) return()
-
         shiny::appendTab(
           inputId = tabset_id,
           shiny::tabPanel(
-            title = "Baseline",
-            value = "baseline_tab",
-            .results_pane_ui(ns, "base", bs$so)
+            title = "Results",
+            value = "results_tab",
+            .results_pane_ui(ns, bs$so)
           ),
           select  = TRUE,
-          session = tabset_session
-        )
-        shiny::appendTab(
-          inputId = tabset_id,
-          shiny::tabPanel(
-            title = "Policy",
-            value = "policy_tab",
-            .results_pane_ui(ns, "pol", bs$so)
-          ),
           session = tabset_session
         )
         tabs_added(TRUE)
       }
 
-      try(shiny::updateTabsetPanel(tabset_session, inputId = tabset_id,
-                                    selected = "baseline_tab"), silent = TRUE)
+      if (tabs_added()) select_tab("results_tab")
+
     }, ignoreInit = TRUE)
 
     invisible(NULL)

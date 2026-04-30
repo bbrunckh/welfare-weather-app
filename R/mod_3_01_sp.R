@@ -327,7 +327,7 @@ mod_3_01_sp_server <- function(id,
                 tags$i(class = "fa fa-dollar-sign me-1"),
                 "Fixed budget (USD)"
               ),
-              value = 1000000, min = 0, step = 100000
+              value = 0, min = 0, step = 100000
             ),
           # ),
           # conditionalPanel(
@@ -374,7 +374,7 @@ mod_3_01_sp_server <- function(id,
               tags$i(class = "fa fa-dollar-sign me-1"),
               "Transfer per household ($)"
             ),
-            value = 50, min = 0, step = 10
+            value = 0, min = 0, step = 10
           )
         ),
         conditionalPanel(
