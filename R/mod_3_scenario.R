@@ -173,19 +173,20 @@ mod_3_scenario_server <- function(id,
       sp_scenario       = s1$sp_scenario,
       infra_scenario    = s2$infra_scenario,
       digital_scenario  = s3$digital_scenario,
-      labor_scenario    = s4$labor_scenario
+      labor_scenario    = s4$labor_scenario,
+      model_fit         = model_fit,
+      selected_weather  = selected_weather,
+      hist_sim          = hist_sim,
+      saved_scenarios   = saved_scenarios
     )
 
-    # ---- Results tab: Step 3-specific module (baseline vs policy) --------
+    # ---- Results tabs: Baseline & Policy (both re-simulated) -------------
     mod_3_06_results_server(
       "results3",
-      baseline_hist_sim        = hist_sim,
-      baseline_saved_scenarios = saved_scenarios,
+      baseline_hist_sim        = s5$baseline_hist_sim,
+      baseline_saved_scenarios = s5$baseline_saved_scenarios,
       policy_hist_sim          = s5$policy_hist_sim,
       policy_saved_scenarios   = s5$policy_saved_scenarios,
-      baseline_svy             = s5$baseline_svy,
-      policy_svy               = s5$policy_svy,
-      selected_model           = selected_model,
       selected_hist            = selected_hist,
       sim_run_id               = s5$sim_run_id,
       tabset_id                = "step3_output_tabs",

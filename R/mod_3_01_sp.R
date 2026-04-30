@@ -180,17 +180,31 @@ mod_3_01_sp_server <- function(id,
           condition = paste0("input['", ns("targeting"), "'] != 'universal'"),
           sliderInput(
             inputId = ns("inclusion_error_pct"),
-            label   = tags$span(
-              tags$i(class = "fa fa-user-plus me-1"),
-              "Inclusion error (%)"
+            label   = tags$div(
+              tags$span(
+                tags$i(class = "fa fa-user-plus me-1"),
+                "Inclusion error (%)"
+              ),
+              tags$div(
+                class = "text-muted",
+                style = "font-size: 0.8em; font-weight: normal;",
+                "Share of non-eligible households incorrectly included."
+              )
             ),
             min = 0, max = 30, value = 10, step = 1, post = "%"
           ),
           sliderInput(
             inputId = ns("exclusion_error_pct"),
-            label   = tags$span(
-              tags$i(class = "fa fa-user-minus me-1"),
-              "Exclusion error (%)"
+            label   = tags$div(
+              tags$span(
+                tags$i(class = "fa fa-user-minus me-1"),
+                "Exclusion error (%)"
+              ),
+              tags$div(
+                class = "text-muted",
+                style = "font-size: 0.8em; font-weight: normal;",
+                "Share of eligible households incorrectly excluded."
+              )
             ),
             min = 0, max = 30, value = 10, step = 1, post = "%"
           )
@@ -373,7 +387,7 @@ mod_3_01_sp_server <- function(id,
             tags$small(
               tags$i(class = "fa fa-calculator me-1"),
               tags$strong("Derived: "),
-              "transfer per HH = (total budget \u00d7 (1 \u2212 admin%)) \u00f7 beneficiaries"
+              "transfer per HH = total budget \u00f7 # of eligible beneficiaries"
             )
           )
         ),
@@ -408,13 +422,17 @@ mod_3_01_sp_server <- function(id,
     #   - show only number of payments
 
     output$sp_timing_ui <- renderUI({
-      is_regular <- isTRUE(input$sp_type == "regular")
-      tagList(
-        tags$label(
-          class = "control-label",
-          tags$i(class = "fa fa-clock me-1"),
-          "Frequency and timing"
+      conditionalPanel(
+        condition = paste0(
+          "input['", ns("budget_mode"), "'] == 'transfer_first'"
         ),
+        # is_regular <- isTRUE(input$sp_type == "regular")
+        tagList(
+          tags$label(
+            class = "control-label",
+            tags$i(class = "fa fa-clock me-1"),
+            "Frequency and timing"
+          ),
 
         # One-off vs regular — hidden for regular programs
         # if (!is_regular) {
@@ -431,11 +449,11 @@ mod_3_01_sp_server <- function(id,
         # },
 
         # Number of payments — shown when regular (either via type or frequency)
-        conditionalPanel(
-          condition = paste0(
-            "input['", ns("sp_type"), "'] == 'regular' || ",
-            "input['", ns("transfer_frequency"), "'] == 'regular'"
-          ),
+        # conditionalPanel(
+        #   condition = paste0(
+        #     "input['", ns("sp_type"), "'] == 'regular' || ",
+        #     "input['", ns("transfer_frequency"), "'] == 'regular'"
+        #   ),
           sliderInput(
             inputId = ns("transfer_n_payments"),
             label   = tags$span(
@@ -475,7 +493,7 @@ mod_3_01_sp_server <- function(id,
 
         tags$hr(style = "margin: 8px 0;")
       )
-    })
+  })
 
     # ---- 6. Delivery system --------------------------------------------
 

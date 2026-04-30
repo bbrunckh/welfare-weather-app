@@ -505,91 +505,121 @@ apply_policy_to_svy <- function(svy,
 }
 
 
-#' Detect columns that differ between the baseline and policy-adjusted frames
+#' Re-run the Step 2 simulation pipeline against an alternative survey frame
 #'
-#' Returns the names of columns whose values differ between
-#' \code{baseline_svy} and \code{policy_svy}. Used by the Step 3 diagnostics
-#' table to surface any variable a user manipulation has touched —
-#' covariates, interaction variables, or outcomes alike.
+#' Reuses the model fit, residual draw spec, coefficient draws, and weather
+#' data captured in the Step 2 \code{hist_sim} object to re-produce a Step 2-
+#' shaped \code{hist_sim} / \code{saved_scenarios} pair using \code{svy} as
+#' the input population. For saved scenarios, only the representative weather
+#' frame stored in each entry is re-simulated (n_models = 1 in the output).
 #'
-#' Comparison rules:
-#' \itemize{
-#'   \item Numeric columns are compared with tolerance via
-#'     \code{isTRUE(all.equal(..., check.attributes = FALSE))}.
-#'   \item Other columns are compared with \code{identical()}.
-#' }
+#' @param svy   Survey-weather data frame (baseline or policy-adjusted).
+#' @param sw    Selected-weather metadata (from Step 1).
+#' @param so    Selected-outcome metadata (from Step 1).
+#' @param mf    Model-fit list (from Step 1) with \code{$fit3}, \code{$engine},
+#'   \code{$train_data}, and (for RIF) \code{$taus}, \code{$weather_terms}.
+#' @param hist_sim_baseline      Step 2 hist_sim list.
+#' @param saved_scenarios_baseline Step 2 named scenario list.
 #'
-#' Rows must match across the two frames; if \code{nrow()} differs the
-#' function returns the union of column names instead (since values can no
-#' longer be compared element-wise).
-#'
-#' @param baseline_svy Data frame before \code{apply_policy_to_svy()}.
-#' @param policy_svy   Data frame after \code{apply_policy_to_svy()}.
-#'
-#' @return Character vector of column names that changed.
+#' @return A named list with elements \code{hist_sim} and
+#'   \code{saved_scenarios} matching the Step 2 schema, or \code{NULL} on
+#'   failure.
 #' @export
-detect_manipulated_vars <- function(baseline_svy, policy_svy) {
-  if (is.null(baseline_svy) || is.null(policy_svy)) return(character(0))
-  shared <- intersect(names(baseline_svy), names(policy_svy))
-  if (length(shared) == 0) return(character(0))
-  if (nrow(baseline_svy) != nrow(policy_svy)) {
-    return(setdiff(union(names(baseline_svy), names(policy_svy)), character(0)))
-  }
-  changed <- vapply(shared, function(v) {
-    xb <- baseline_svy[[v]]
-    xp <- policy_svy[[v]]
-    if (is.numeric(xb) && is.numeric(xp)) {
-      !isTRUE(all.equal(xb, xp, check.attributes = FALSE))
-    } else {
-      !identical(xb, xp)
-    }
-  }, logical(1))
-  shared[changed]
-}
+resimulate_with_svy <- function(svy, sw, so, mf,
+                                hist_sim_baseline,
+                                saved_scenarios_baseline = list()) {
+  if (is.null(svy) || is.null(mf) || is.null(hist_sim_baseline) ||
+      is.null(so)) return(NULL)
 
+  weight_col <- grep("^weight$|^hhweight$|^wgt$|^pw$",
+                     names(svy), value = TRUE,
+                     ignore.case = TRUE)[1]
+  if (is.na(weight_col %||% NA)) weight_col <- NULL
 
-#' Build a Diagnostics Summary for Policy-Adjusted Inputs
-#'
-#' Computes mean / sd / n_nonNA for each covariate in both the baseline and
-#' policy-adjusted survey frames, so the Step 3 Results tab can display
-#' what changed.
-#'
-#' @param baseline_svy Data frame before \code{apply_policy_to_svy()}.
-#' @param policy_svy   Data frame after \code{apply_policy_to_svy()}.
-#' @param vars         Character vector of variable names to summarise. If
-#'   \code{NULL}, uses the intersection of the two frames' numeric cols.
-#'
-#' @return A tibble with columns \code{variable}, \code{mean_baseline},
-#'   \code{mean_policy}, \code{delta_mean}, \code{sd_baseline},
-#'   \code{sd_policy}, \code{n_nonNA}.
-#' @export
-policy_input_diagnostics <- function(baseline_svy, policy_svy, vars = NULL) {
-  if (is.null(baseline_svy) || is.null(policy_svy)) return(NULL)
+  pov_line   <- hist_sim_baseline$pov_line
+  residuals  <- hist_sim_baseline$residuals  %||% "none"
+  coef_draws <- hist_sim_baseline$coef_draws
 
-  if (is.null(vars)) {
-    num_b <- names(baseline_svy)[vapply(baseline_svy, is.numeric, logical(1))]
-    num_p <- names(policy_svy)[vapply(policy_svy, is.numeric, logical(1))]
-    vars  <- intersect(num_b, num_p)
-    # Drop obvious non-covariate keys
-    vars  <- setdiff(vars, c("loc_id", "int_year", "int_month", "sim_year"))
+  is_rif       <- identical(mf$engine, "rif")
+  fit_multi    <- if (is_rif) mf$fit3 else NULL
+  rif_taus     <- if (is_rif) mf$taus else NULL
+  rif_weather  <- if (is_rif) mf$weather_terms else NULL
+  model        <- if (is_rif) extract_rif_median(mf$fit3, mf$engine) else mf$fit3
+
+  agg_methods <- unname(hist_aggregate_choices(so$type, so$name))
+
+  build_agg <- function(preds) {
+    dplyr::bind_rows(lapply(agg_methods, function(meth) {
+      dplyr::bind_rows(lapply(c(TRUE, FALSE), function(use_w) {
+        wt <- if (use_w) weight_col else NULL
+        if (use_w && is.null(wt)) return(NULL)
+        tryCatch({
+          pov <- if (meth %in% c("headcount_ratio", "gap", "fgt2")) pov_line else NULL
+          res <- aggregate_sim_preds(preds, so, meth, "none", FALSE, pov, wt)
+          if (!is.null(res$out))
+            dplyr::mutate(res$out, agg_method = meth, weighted = use_w)
+          else NULL
+        }, error = function(e) NULL)
+      }))
+    }))
   }
 
-  vars <- vars[vars %in% names(baseline_svy) & vars %in% names(policy_svy)]
+  run_one <- function(weather_raw, slim) {
+    tryCatch(
+      run_sim_pipeline(
+        weather_raw  = weather_raw,
+        svy          = svy,
+        sw           = sw,
+        so           = so,
+        model        = model,
+        residuals    = residuals,
+        train_data   = mf$train_data,
+        engine       = mf$engine,
+        coef_draws   = coef_draws,
+        slim         = slim,
+        fit_multi    = fit_multi,
+        taus         = rif_taus,
+        weather_cols = rif_weather
+      ),
+      error = function(e) {
+        warning("[resimulate_with_svy] run_sim_pipeline failed: ",
+                conditionMessage(e))
+        NULL
+      }
+    )
+  }
 
-  if (length(vars) == 0) return(NULL)
+  hist_out <- run_one(hist_sim_baseline$weather_raw, slim = FALSE)
+  if (is.null(hist_out)) return(NULL)
 
-  rows <- lapply(vars, function(v) {
-    xb <- suppressWarnings(as.numeric(baseline_svy[[v]]))
-    xp <- suppressWarnings(as.numeric(policy_svy[[v]]))
-    data.frame(
-      variable       = v,
-      mean_baseline  = mean(xb, na.rm = TRUE),
-      mean_policy    = mean(xp, na.rm = TRUE),
-      delta_mean     = mean(xp, na.rm = TRUE) - mean(xb, na.rm = TRUE),
-      sd_baseline    = stats::sd(xb, na.rm = TRUE),
-      sd_policy      = stats::sd(xp, na.rm = TRUE),
-      stringsAsFactors = FALSE
+  hist_sim_new <- list(
+    preds       = hist_out$preds,
+    agg         = build_agg(hist_out$preds),
+    so          = so,
+    pov_line    = pov_line,
+    weather_raw = hist_out$weather_raw,
+    train_data  = mf$train_data,
+    has_weights = !is.null(weight_col),
+    residuals   = residuals,
+    coef_draws  = coef_draws,
+    yr_range    = hist_sim_baseline$yr_range,
+    n_pre_join  = hist_out$n_pre_join
+  )
+
+  saved_scenarios_new <- lapply(saved_scenarios_baseline, function(s) {
+    out <- run_one(s$weather_raw, slim = TRUE)
+    if (is.null(out)) return(NULL)
+    list(
+      agg         = build_agg(out$preds),
+      weather_raw = s$weather_raw,
+      so          = so,
+      year_range  = s$year_range,
+      n_models    = 1L
     )
   })
-  do.call(rbind, rows)
+  saved_scenarios_new <- saved_scenarios_new[
+    !vapply(saved_scenarios_new, is.null, logical(1))
+  ]
+
+  list(hist_sim = hist_sim_new, saved_scenarios = saved_scenarios_new)
 }
