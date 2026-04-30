@@ -16,27 +16,13 @@ mod_3_01_sp_ui <- function(id) {
     # ---- Program type — always visible -------------------------------
     uiOutput(ns("sp_type_ui")),
 
-    # ---- Configure button — toggles the rest ---------------------------
-    # actionButton(
-    #   inputId = ns("sp_config_toggle"),
-    #   label   = tagList(
-    #     tags$i(class = "fa fa-sliders me-1"),
-    #     "Configure SP"
-    #   )
-    # ),
-
     # ---- Collapsible configuration panel -------------------------------
-    # conditionalPanel keyed on click count: odd = open, even = closed
-    # conditionalPanel(
-      # condition = "input.sp_config_toggle % 2 == 1",
-      # ns        = ns,
     uiOutput(ns("sp_trigger_ui")),
     uiOutput(ns("sp_budget_amount_ui")),
     uiOutput(ns("sp_targeting_ui")),
     uiOutput(ns("sp_timing_ui")),
     uiOutput(ns("sp_delivery_ui")),
     uiOutput(ns("sp_revenue_ui"))
-    # )
   )
 }
 
@@ -51,7 +37,6 @@ mod_3_01_sp_ui <- function(id) {
 #' @return A named list of reactives:
 #'   \describe{
 #'     \item{sp_scenario}{Named list of social protection scenario parameters.}
-#'     \item{selected_hist}{Reactive character — selected historical period.}
 #'   }
 #'
 #' @noRd
@@ -69,9 +54,9 @@ mod_3_01_sp_server <- function(id,
       so  <- selected_outcome()
       if (is.null(svy) || is.null(vl) || is.null(so) || nrow(vl) == 0) return(character(0))
 
-      # Filter variable_list to ind/hh/firm level only (not area-only)
+      # Filter variable_list to ind/hh/firm/area level only
       level_mask <- vapply(seq_len(nrow(vl)), function(i) {
-        isTRUE(vl$ind[i] == 1L) || isTRUE(vl$hh[i] == 1L) || isTRUE(vl$firm[i] == 1L)
+        isTRUE(vl$ind[i] == 1L) || isTRUE(vl$hh[i] == 1L) || isTRUE(vl$firm[i] == 1L) || isTRUE(vl$area[i] == 1L)
       }, logical(1))
       cands <- vl$name[level_mask]
 
@@ -91,17 +76,6 @@ mod_3_01_sp_server <- function(id,
         lbl <- vl$label[vl$name == v]
         if (length(lbl) > 0 && nzchar(lbl[[1]])) lbl[[1]] else v
       }, character(1)))
-    })
-
-    # ---- Toggle config panel — update button label ---------------------
-    observeEvent(input$sp_config_toggle, {
-      is_open <- input$sp_config_toggle %% 2 == 1
-      label <- if (is_open) {
-        tagList(tags$i(class = "fa fa-chevron-up me-1"),  "Hide configuration")
-      } else {
-        tagList(tags$i(class = "fa fa-sliders me-1"),     "Configure program")
-      }
-      updateActionButton(session, "sp_config_toggle", label = label)
     })
 
     # ---- 1. program type ---------------------------------------------
@@ -174,11 +148,11 @@ mod_3_01_sp_server <- function(id,
           inputId  = ns("targeting"),
           label    = NULL,
           choices  = c(
-            "Universal"                                  = "universal",
+            "Universal"                                 = "universal",
             "Welfare below threshold (ex-ante poor)"    = "exante_poor",
             "Household characteristics (PMT)"           = "pmt"
           ),
-          selected = "exante_poor"
+          selected = "universal"
         ),
 
         # Threshold for ex-ante poor targeting
@@ -232,8 +206,8 @@ mod_3_01_sp_server <- function(id,
         return(div(
           class = "alert alert-warning",
           style = "font-size: 12px; padding: 8px; margin-bottom: 8px;",
-          "No suitable PMT variable found. Ensure covariates with complete ",
-          "data are included in Step 1."
+          "No suitable PMT variable found. No covariates with non-missing",
+          "values found (for selected outcome)."
         ))
       }
       selectInput(
@@ -293,70 +267,70 @@ mod_3_01_sp_server <- function(id,
     output$sp_budget_amount_ui <- renderUI({
       tagList(
 
-        # # -- Budget mode toggle ------------------------------------------
-        # tags$label(
-        #   class = "control-label",
-        #   tags$i(class = "fa fa-link me-1"),
-        #   "Budget"
-        # ),
-        # radioButtons(
-        #   inputId  = ns("budget_mode"),
-        #   label    = NULL,
-        #   choices  = c(
+        # -- Budget mode toggle ------------------------------------------
+        tags$label(
+          class = "control-label",
+          tags$i(class = "fa fa-link me-1"),
+          "Budget"
+        ),
+        radioButtons(
+          inputId  = ns("budget_mode"),
+          label    = NULL,
+          choices  = c(
 
-        #     "Set transfer per HH \u2192 derive total budget" = "transfer_first",
-        #     "Set total budget \u2192 derive transfer per HH" = "budget_first"
-        #   ),
-        #   selected = "transfer_first"
-        # ),
+            "Set transfer per HH \u2192 derive total budget" = "transfer_first",
+            "Set total budget \u2192 derive transfer per HH" = "budget_first"
+          ),
+          selected = "transfer_first"
+        ),
 
-        # tags$hr(style = "margin: 4px 0;"),
+        tags$hr(style = "margin: 4px 0;"),
 
         # -- Total budget (budget_first only) ----------------------------
-        # conditionalPanel(
-        #   condition = paste0("input['", ns("budget_mode"), "'] == 'budget_first'"),
-        #   tags$label(
-        #     class = "control-label",
-        #     tags$i(class = "fa fa-coins me-1"),
-        #     "Total budget"
-        #   ),
-        #   selectInput(
-        #     inputId  = ns("budget_type"),
-        #     label    = NULL,
-        #     choices  = c(
-        #       "Fixed amount"                                 = "fixed",
-        #       "Share of modelled welfare loss (at trigger)"  = "welfare_share",
-        #       "Proportional to modelled increase in poverty" = "poverty_prop",
-        #       "Based on annual expected welfare loss"        = "annual_expected"
-        #     ),
-        #     selected = "fixed"
-        #   ),
-        #   conditionalPanel(
-        #     condition = paste0("input['", ns("budget_type"), "'] == 'fixed'"),
-        #     numericInput(
-        #       inputId = ns("budget_fixed"),
-        #       label   = tags$span(
-        #         tags$i(class = "fa fa-dollar-sign me-1"),
-        #         "Fixed budget (USD)"
-        #       ),
-        #       value = 1000000, min = 0, step = 100000
-        #     )
-        #   ),
-        #   conditionalPanel(
-        #     condition = paste0(
-        #       "input['", ns("budget_type"), "'] == 'welfare_share' || ",
-        #       "input['", ns("budget_type"), "'] == 'poverty_prop'"
-        #     ),
-        #     sliderInput(
-        #       inputId = ns("budget_share_pct"),
-        #       label   = tags$span(
-        #         tags$i(class = "fa fa-percent me-1"),
-        #         "Share / proportion (%)"
-        #       ),
-        #       min = 1, max = 100, value = 50, step = 1, post = "%"
-        #     )
-        #   )
-        # ),
+        conditionalPanel(
+          condition = paste0("input['", ns("budget_mode"), "'] == 'budget_first'"),
+          tags$label(
+            class = "control-label",
+            tags$i(class = "fa fa-coins me-1"),
+            "Total budget"
+          ),
+          # selectInput(
+          #   inputId  = ns("budget_type"),
+          #   label    = NULL,
+          #   choices  = c(
+          #     "Fixed amount"                                 = "fixed",
+          #     "Share of modelled welfare loss (at trigger)"  = "welfare_share",
+          #     "Proportional to modelled increase in poverty" = "poverty_prop",
+          #     "Based on annual expected welfare loss"        = "annual_expected"
+          #   ),
+          #   selected = "fixed"
+          # ),
+          # conditionalPanel(
+          #   condition = paste0("input['", ns("budget_type"), "'] == 'fixed'"),
+            numericInput(
+              inputId = ns("budget_fixed"),
+              label   = tags$span(
+                tags$i(class = "fa fa-dollar-sign me-1"),
+                "Fixed budget (USD)"
+              ),
+              value = 1000000, min = 0, step = 100000
+            ),
+          # ),
+          # conditionalPanel(
+          #   condition = paste0(
+          #     "input['", ns("budget_type"), "'] == 'welfare_share' || ",
+          #     "input['", ns("budget_type"), "'] == 'poverty_prop'"
+          #   ),
+          #   sliderInput(
+          #     inputId = ns("budget_share_pct"),
+          #     label   = tags$span(
+          #       tags$i(class = "fa fa-percent me-1"),
+          #       "Share / proportion (%)"
+          #     ),
+          #     min = 1, max = 100, value = 50, step = 1, post = "%"
+          #   )
+          # )
+        ),
 
         # -- Transfer amount ---------------------------------------------
         tags$label(
@@ -375,42 +349,34 @@ mod_3_01_sp_server <- function(id,
         #   ),
         #   selected = "equal"
         # ),
-        numericInput(
+        conditionalPanel(
+          condition = paste0(
+            # "input['", ns("amount_type"), "'] == 'equal' && ",
+            "input['", ns("budget_mode"), "'] == 'transfer_first'"
+          ),
+          numericInput(
             inputId = ns("transfer_amount_usd"),
             label   = tags$span(
               tags$i(class = "fa fa-dollar-sign me-1"),
               "Transfer per household ($)"
             ),
             value = 50, min = 0, step = 10
+          )
+        ),
+        conditionalPanel(
+          condition = paste0(
+            # "input['", ns("amount_type"), "'] == 'equal' && ",
+            "input['", ns("budget_mode"), "'] == 'budget_first'"
           ),
-        # conditionalPanel(
-        #   condition = paste0(
-        #     # "input['", ns("amount_type"), "'] == 'equal' && ",
-        #     "input['", ns("budget_mode"), "'] == 'transfer_first'"
-        #   ),
-        #   numericInput(
-        #     inputId = ns("transfer_amount_usd"),
-        #     label   = tags$span(
-        #       tags$i(class = "fa fa-dollar-sign me-1"),
-        #       "Transfer per household ($)"
-        #     ),
-        #     value = 50, min = 0, step = 10
-        #   )
-        # ),
-        # conditionalPanel(
-        #   condition = paste0(
-        #     # "input['", ns("amount_type"), "'] == 'equal' && ",
-        #     "input['", ns("budget_mode"), "'] == 'budget_first'"
-        #   ),
-        #   tags$div(
-        #     class = "alert alert-light p-2 mb-2",
-        #     tags$small(
-        #       tags$i(class = "fa fa-calculator me-1"),
-        #       tags$strong("Derived: "),
-        #       "transfer per HH = (total budget \u00d7 (1 \u2212 admin%)) \u00f7 beneficiaries"
-        #     )
-        #   )
-        # ),
+          tags$div(
+            class = "alert alert-light p-2 mb-2",
+            tags$small(
+              tags$i(class = "fa fa-calculator me-1"),
+              tags$strong("Derived: "),
+              "transfer per HH = (total budget \u00d7 (1 \u2212 admin%)) \u00f7 beneficiaries"
+            )
+          )
+        ),
 
         tags$hr(style = "margin: 4px 0;"),
 
@@ -451,18 +417,18 @@ mod_3_01_sp_server <- function(id,
         ),
 
         # One-off vs regular — hidden for regular programs
-        if (!is_regular) {
-          radioButtons(
-            inputId  = ns("transfer_frequency"),
-            label    = tags$span(
-              tags$i(class = "fa fa-rotate me-1"),
-              "One-off vs regular"
-            ),
-            choices  = c("One-off" = "oneoff", "Regular" = "regular"),
-            selected = isolate(input$transfer_frequency) %||% "oneoff",
-            inline   = TRUE
-          )
-        },
+        # if (!is_regular) {
+        #   radioButtons(
+        #     inputId  = ns("transfer_frequency"),
+        #     label    = tags$span(
+        #       tags$i(class = "fa fa-rotate me-1"),
+        #       "One-off vs regular"
+        #     ),
+        #     choices  = c("One-off" = "oneoff", "Regular" = "regular"),
+        #     selected = isolate(input$transfer_frequency) %||% "oneoff",
+        #     inline   = TRUE
+        #   )
+        # },
 
         # Number of payments — shown when regular (either via type or frequency)
         conditionalPanel(
@@ -581,13 +547,13 @@ mod_3_01_sp_server <- function(id,
           # program type
           sp_type               = input$sp_type                 %||% "shock",
           # Trigger (shock only)
-          trigger_type          = input$trigger_type            %||% "return_period",
-          trigger_value         = input$trigger_value           %||% 10,
+          # trigger_type          = input$trigger_type            %||% "return_period",
+          # trigger_value         = input$trigger_value           %||% 10,
           # Budget mode
           budget_mode           = input$budget_mode             %||% "transfer_first",
-          budget_type           = input$budget_type             %||% "fixed",
+          # budget_type           = input$budget_type             %||% "fixed",
           budget_fixed          = input$budget_fixed            %||% 1000000,
-          budget_share_pct      = input$budget_share_pct        %||% 50,
+          # budget_share_pct      = input$budget_share_pct        %||% 50,
           # Targeting
           targeting             = input$targeting               %||% "exante_poor",
           targeting_threshold   = input$targeting_threshold_pct %||% 20,
@@ -596,30 +562,29 @@ mod_3_01_sp_server <- function(id,
           inclusion_error_pct   = input$inclusion_error_pct     %||% 10,
           exclusion_error_pct   = input$exclusion_error_pct     %||% 10,
           # Transfer amount
-          amount_type           = input$amount_type             %||% "equal",
-          transfer_amount_usd   = input$transfer_amount_usd     %||% 50,
+          # amount_type           = input$amount_type             %||% "equal",
+          transfer_amount_usd   = input$transfer_amount_usd     %||% 0,
           # Admin cost (deducted from budget before transfer calculation)
-          admin_cost_pct        = input$admin_cost_pct          %||% 10,
+          # admin_cost_pct        = input$admin_cost_pct          %||% 10,
           # Timing — regular programs always have n payments
           transfer_frequency =
             if (is_regular) "regular"
             else input$transfer_frequency %||% "oneoff",
           transfer_n_payments =
-            if (is_regular) input$transfer_n_payments %||% 12L
+            if (is_regular) input$transfer_n_payments %||% 6L
             else input$transfer_n_payments %||% 1L,
           transfer_timing =
             if (is_regular) NA_character_
             else input$transfer_timing %||% "expost",
           timeliness_weeks =
             if (is_regular) NA_integer_
-            else input$timeliness_weeks %||% 4L,
+            else input$timeliness_weeks %||% 4L
           # Delivery
-          delivery_mobile_money = isTRUE(input$delivery_mobile_money),
+          # delivery_mobile_money = isTRUE(input$delivery_mobile_money),
           # Revenue source
-          revenue_source = input$revenue_source %||% "govt_reallocation"
+          # revenue_source = input$revenue_source %||% "govt_reallocation"
         )
-      }),
-      selected_hist = reactive(NULL)
+      })
     )
 
   })

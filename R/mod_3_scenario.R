@@ -22,19 +22,23 @@ mod_3_scenario_ui <- function(id) {
         bs_accordion(id = ns("accordion")) |>
           bs_append(
             title   = "Social protection",
-            content = mod_3_01_sp_ui(ns("sp"))
+            content = mod_3_01_sp_ui(ns("sp")),
+            open    = FALSE
           ) |>
           bs_append(
             title   = "Infrastructure",
-            content = mod_3_02_infra_ui(ns("infra"))
+            content = mod_3_02_infra_ui(ns("infra")),
+            open    = FALSE
           ) |>
           bs_append(
             title   = "Digital inclusion",
-            content = mod_3_03_digital_ui(ns("digital"))
+            content = mod_3_03_digital_ui(ns("digital")),
+            open    = FALSE
           ) |>
           bs_append(
             title   = "Labor market",
-            content = mod_3_04_labor_ui(ns("labor"))
+            content = mod_3_04_labor_ui(ns("labor")),
+            open    = FALSE
           ),
         hr(),
         uiOutput(ns("run_policy_sim_ui"))
@@ -45,7 +49,9 @@ mod_3_scenario_ui <- function(id) {
           tabPanel(
             title = "Overview",
             value = "overview",
-            includeMarkdown(system.file("app/www/equation2.md", package = "wiseapp")),
+            includeMarkdown(
+              system.file("app/www/equation2.md", package = "wiseapp")
+            ),
             mod_3_05_policy_sim_ui(ns("policy_sim"))
           )
         )
@@ -80,7 +86,8 @@ mod_3_scenario_server <- function(id,
                                    selected_weather,
                                    selected_model,
                                    selected_policies = reactive(NULL),
-                                   survey_weather,
+                                   survey_weather = reactive(NULL),
+                                   survey_data = reactive(NULL),
                                    model_fit,
                                    hist_sim,
                                    saved_scenarios = reactive(list()),
@@ -139,6 +146,7 @@ mod_3_scenario_server <- function(id,
     s2 <- mod_3_02_infra_server(
       "infra",
       selected_model = selected_model,
+      survey_data    = survey_data,
       variable_list  = variable_list)
 
     # ---- Digital & financial inclusion scenario --------------------------
@@ -146,6 +154,7 @@ mod_3_scenario_server <- function(id,
     s3 <- mod_3_03_digital_server(
       "digital",
       selected_model = selected_model,
+      survey_data   = survey_data,
       variable_list  = variable_list)
 
     # ---- Labor market scenario -------------------------------------------
@@ -153,23 +162,18 @@ mod_3_scenario_server <- function(id,
     s4 <- mod_3_04_labor_server(
       "labor",
       selected_model = selected_model,
+      survey_data   = survey_data,
       variable_list  = variable_list)
 
-    # ---- Policy simulation module (initialised once at startup) ----------
+    # ---- Policy adjustment module ----------------------------------------
 
     s5 <- mod_3_05_policy_sim_server(
       "policy_sim",
-      connection_params  = connection_params,
-      selected_outcome   = selected_outcome,
-      selected_weather   = selected_weather,
-      survey_weather     = survey_weather,
-      model_fit          = model_fit,
-      hist_sim           = hist_sim,
-      saved_scenarios    = saved_scenarios,
-      sp_scenario        = s1$sp_scenario,
-      infra_scenario     = s2$infra_scenario,
-      digital_scenario   = s3$digital_scenario,
-      labor_scenario     = s4$labor_scenario
+      survey_weather    = survey_weather,
+      sp_scenario       = s1$sp_scenario,
+      infra_scenario    = s2$infra_scenario,
+      digital_scenario  = s3$digital_scenario,
+      labor_scenario    = s4$labor_scenario
     )
 
     # ---- Results tab: Step 3-specific module (baseline vs policy) --------
@@ -186,6 +190,16 @@ mod_3_scenario_server <- function(id,
       sim_run_id               = s5$sim_run_id,
       tabset_id                = "step3_output_tabs",
       tabset_session           = session
+    )
+
+    # ---- Diagnostics tab: before/after variable analysis ----------------
+    mod_3_07_diagnostics_server(
+      "diagnostics",
+      baseline_svy   = s5$baseline_svy,
+      policy_svy     = s5$policy_svy,
+      sim_run_id     = s5$sim_run_id,
+      tabset_id      = "step3_output_tabs",
+      tabset_session = session
     )
 
     # ---- Run policy simulation button (hidden for RIF engine) -----------

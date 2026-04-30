@@ -37,6 +37,7 @@ mod_3_03_digital_ui <- function(id) {
 #' @noRd
 mod_3_03_digital_server <- function(id,
                                     selected_model = reactive(NULL),
+                                    survey_data = reactive(NULL),
                                     variable_list  = reactive(NULL)) {
   moduleServer(id, function(input, output, session) {
     ns <- session$ns
@@ -87,13 +88,27 @@ mod_3_03_digital_server <- function(id,
     digital_patterns <- c("internet", "cellphone")
 
     any_selected <- reactive({
-      any(vapply(digital_patterns, function(p) {
-        any(grepl(p, coeffs(), ignore.case = TRUE))
-      }, logical(1)))
+      any(tolower(digital_patterns) %in% tolower(coeffs()))
+    })
+
+    # Digital variables available in the selected survey
+    digital_vars_available <- reactive({
+      svy <- survey_data()
+      if (is.null(svy)) return(character(0))
+      # Check which digital variables are actually in the selected survey
+      intersect(digital_patterns, names(svy))
     })
 
     output$placeholder_ui <- renderUI({
       if (isTRUE(any_selected())) return(NULL)
+      # Only show placeholder if there are digital variables in the survey
+      if (length(digital_vars_available()) == 0) {
+        return(div(
+          class = "alert alert-warning",
+          "No digital inclusion variables found in the selected survey (or level of analysis)."
+        ))
+      }
+      # Show candidate variables for digital inclusion if none are in the model
       cand <- policy_candidate_info(variable_list(), digital_patterns)
       policy_placeholder_tag("digital inclusion", cand)
     })
@@ -164,8 +179,7 @@ mod_3_03_digital_server <- function(id,
           mobile_access_change_pct = if (isTRUE(input$mobile_universal)) 100L
                                      else input$mobile_pct %||% 0L
         )
-      }),
-      selected_fut = reactive(NULL)
+      })
     )
   })
 }
