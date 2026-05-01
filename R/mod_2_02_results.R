@@ -465,11 +465,11 @@ mod_2_02_results_server <- function(id,
               else quantile(.x, bq["hi"], na.rm = TRUE) - hist_ref)
           ) |>
           dplyr::select(sim_year, value_lo, value_hi,
-              dplyr::any_of(c("model_q10", "model_q90",
-                              "model_lo",  "model_hi")))
+                        dplyr::any_of(c("coef_lo", "coef_hi",
+                                        "model_q10", "model_q90",
+                                        "model_lo",  "model_hi")))
       }
-
-      # Historical — join deviated value from agg_hist()$out
+            # Historical — join deviated value from agg_hist()$out
       # with lo/hi computed from raw hist_agg_rv()
       hist_raw   <- hist_agg_rv()[[wk]][[method]]
       hist_bands <- compute_bands_from_raw(hist_raw)
@@ -484,12 +484,15 @@ mod_2_02_results_server <- function(id,
         sc_out <- agg_scenarios()[[dk]]$out
         if (is.null(sc_out) || nrow(sc_out) == 0L) return(NULL)
         sc_raw   <- scenario_agg_rv()[[dk]][[wk]][[method]]
+        message(sprintf("[debug] draw_values length for future key: %d",
+                length(sc_raw$draw_values[[1]])))
         if (is.null(sc_raw) || nrow(sc_raw) == 0L) return(NULL)
         sc_bands <- compute_bands_from_raw(sc_raw)
         sc_out |>
           dplyr::select(-dplyr::any_of(c("value_lo", "value_hi",
-                                "model_q10", "model_q90",
-                                "model_lo",  "model_hi"))) |> #Edited from 'value_lo', 'value_hi'
+                                          "coef_lo",   "coef_hi",
+                                          "model_q10", "model_q90",
+                                          "model_lo",  "model_hi"))) |>
           dplyr::left_join(sc_bands, by = "sim_year") |>
           dplyr::mutate(scenario = dk)
       })
@@ -627,8 +630,11 @@ mod_2_02_results_server <- function(id,
         scenarios   = all_series(),
         hist_agg    = agg_hist(),
         group_order = input$cmp_group_order %||% "scenario_x_year",
-        coef_bands_tbl   = if (isTRUE(input$show_coef_uncertainty) &&
-                           has_draws()) all_series_tbl() else NULL
+        coef_bands_tbl   = if (isTRUE(input$show_coef_uncertainty) && has_draws()) {
+          tbl <- all_series_tbl() 
+          message("[debug] coef_bands_tbl cols: ", paste(names(tbl), collapse = ", "))
+          tbl 
+        } else NULL
       )
     }, height = 600)
 

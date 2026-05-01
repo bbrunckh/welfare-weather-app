@@ -563,61 +563,49 @@ aggregate_with_uncertainty <- function(y_point,
 #'
 #' @seealso \code{\link{aggregate_with_uncertainty}}
 #' @export
-combine_ensemble_results <- function(model_results) {
+combine_ensemble_results <- function(member_results) {
+  member_results <- Filter(Negate(is.null), member_results)
+  if (length(member_results) == 0L) return(NULL)
+
+  values <- vapply(member_results, `[[`, numeric(1L), "value")
+
+  # Thick band — pure weather + model spread (y_point only, no coef draws)
+  # value = point estimate per member (no draws applied)
+  #all_y_point <- vapply(member_results, `[[`, numeric(1L), "welfare_pt")
+
+  draw_mat     <- do.call(rbind, lapply(member_results, `[[`, "draw_values"))
+  pooled_draws <- as.vector(draw_mat)   # 22 models × 30 years × S draws
+
+  # Assertion — thin must always extend beyond thick
   stopifnot(
-    "model_results must be a non-empty named list" =
-      is.list(model_results) && length(model_results) > 0
+    quantile(pooled_draws, 0.10, na.rm = TRUE) <= quantile(values, 0.10, na.rm = TRUE),
+    quantile(pooled_draws, 0.90, na.rm = TRUE) >= quantile(values, 0.90, na.rm = TRUE)
   )
-
-  #DRK Note - Depreciating - use all climate models
-  # Identify the mean representative as the central estimate.
-  # Falls back to first entry if no *_ensemble_mean key present.
-  #mean_key <- grep("ensemble_mean", names(model_results), value = TRUE)
-  #central  <- if (length(mean_key) > 0L)
-  #              model_results[[mean_key[[1L]]]]
-  #            else
-  #              model_results[[1L]]
-
-  # Filter to non-NULL entries with valid value fields before extracting
-  model_results <- Filter(function(x) !is.null(x) && !is.null(x$value) && !is.na(x$value), model_results)
-  if (length(model_results) == 0L) return(NULL)
-  
-  values <- vapply(model_results, `[[`, numeric(1L), "value")
-  
-  #DRK - FLAG FOR USE - we may switch to median or to a particular model later. BUT I think this is defensible.
-
-  # Average draw_values across all models — used for historical permutation
-  # (thick band). Each model contributes its coefficient uncertainty draws;
-  # the mean across models gives a central draw distribution not tied to
-  # any single model.
-  draw_mat     <- do.call(rbind, lapply(model_results, `[[`, "draw_values"))
-  mean_draws   <- colMeans(draw_mat, na.rm = TRUE)
 
   list(
-    # Central estimate — mean across all ensemble models
-    # (mean -> median switch deferred, tracked in dev/issues)
-    value       = mean(values, na.rm = TRUE),
+    value     = mean(values, na.rm = TRUE),
+    value_all = values,
 
-    # Inner band — from averaged draw distribution across all models
-    # Permuted across 30yr historical → thick band in plot
-    value_lo    = unname(quantile(mean_draws, 0.10, na.rm = TRUE)),
-    value_hi    = unname(quantile(mean_draws, 0.90, na.rm = TRUE)),
+    # Thick band — point estimates only (weather + model spread)
+    value_lo  = unname(quantile(values,       0.10, na.rm = TRUE)),
+    value_hi  = unname(quantile(values,       0.90, na.rm = TRUE)),
 
-    # Outer band — democracy distribution across all ensemble models
-    # Default q10/q90, configurable in display layer
-    model_lo    = min(values,                              na.rm = TRUE),
-    model_q10   = unname(quantile(values, 0.10,           na.rm = TRUE)),
-    model_q25   = unname(quantile(values, 0.25,           na.rm = TRUE)),
-    model_med   = unname(quantile(values, 0.50,           na.rm = TRUE)),
-    model_q75   = unname(quantile(values, 0.75,           na.rm = TRUE)),
-    model_q90   = unname(quantile(values, 0.90,           na.rm = TRUE)),
-    model_hi    = max(values,                              na.rm = TRUE),
+    # Thin line — full joint distribution (adds coefficient uncertainty)
+    coef_lo   = unname(quantile(pooled_draws, 0.10, na.rm = TRUE)),
+    coef_hi   = unname(quantile(pooled_draws, 0.90, na.rm = TRUE)),
 
-    # Averaged draws — passed to Module 3 difference uncertainty
-    draw_values = mean_draws,
-    n_members   = length(model_results)
+    model_lo  = min(values,  na.rm = TRUE),
+    model_q10 = unname(quantile(values, 0.10, na.rm = TRUE)),
+    model_q25 = unname(quantile(values, 0.25, na.rm = TRUE)),
+    model_med = unname(quantile(values, 0.50, na.rm = TRUE)),
+    model_q75 = unname(quantile(values, 0.75, na.rm = TRUE)),
+    model_q90 = unname(quantile(values, 0.90, na.rm = TRUE)),
+    model_hi  = max(values,  na.rm = TRUE),
+    draw_values = pooled_draws,
+    n_members   = length(member_results)
   )
 }
+
 
 # ---------------------------------------------------------------------------- #
 # Aggregation helpers — called at simulation time, not display time            #
@@ -771,7 +759,11 @@ compute_scenario_agg <- function(scenarios,
     Z_shared <- if (K_s > 0L && S > 0L)
                   matrix(stats::rnorm(S * K_s), nrow = S, ncol = K_s)
                 else NULL
-
+    message(sprintf(
+      "[debug] Z_shared NULL: %s | K_s: %d | S: %d | ncol(Z_shared): %s",
+      is.null(Z_shared), K_s, S,
+      if (!is.null(Z_shared)) ncol(Z_shared) else "NA"
+    ))
     run_one_scen <- function(use_w) {
       weights_base <- if (use_w && has_weights_s) pipes[[1L]]$weight else NULL
 
@@ -799,7 +791,7 @@ compute_scenario_agg <- function(scenarios,
             Y_mat         <- y_pt + perturbations + resid_vec
             if (is_log) Y_mat <- exp(Y_mat)            # exp() called ONCE per member per year
           } else {
-            Y_mat <- matrix(welfare_pt, ncol = 1L)
+            Y_mat <- matrix(welfare_pt, ncol = 1L) #PERHAPS THIS IS WHERE ISSUE IS
           }
 
           list(Y_mat = Y_mat, welfare_pt = welfare_pt, w_idx = w_idx)
@@ -813,6 +805,13 @@ compute_scenario_agg <- function(scenarios,
           member_results <- lapply(member_Y_mats, function(m) {
             tryCatch({
               draw_vals  <- aggregate_draws_vectorized(m$Y_mat, method, m$w_idx, pov_line)
+              # DEBUG — remove after confirming
+              if (yr == sim_years[[1L]] && member_idx == 1L) {
+                message(sprintf(
+                  "[debug] Y_mat dim: %d x %d | draw_vals length: %d | S: %d",
+                  nrow(m$Y_mat), ncol(m$Y_mat), length(draw_vals), S
+                ))
+              }
               value_pt_m <- aggregate_draws_vectorized(
                 matrix(m$welfare_pt, ncol = 1L), method, m$w_idx, pov_line
               )[[1L]]
@@ -821,7 +820,8 @@ compute_scenario_agg <- function(scenarios,
                 value_lo    = stats::quantile(draw_vals, lo_q, na.rm = TRUE),
                 value_p50   = stats::quantile(draw_vals, 0.50, na.rm = TRUE),
                 value_hi    = stats::quantile(draw_vals, hi_q, na.rm = TRUE),
-                draw_values = draw_vals
+                draw_values = draw_vals,
+                welfare_pt  = mean(m$welfare_pt, na.rm = TRUE) 
               )
             }, error = function(e) NULL)
           })
@@ -832,12 +832,14 @@ compute_scenario_agg <- function(scenarios,
             tibble::tibble(
               sim_year    = yr,
               value       = combined$value,
-              value_lo    = combined$value_lo,
-              value_p50   = combined$value,
-              value_hi    = combined$value_hi,
-              model_q10   = combined$model_q10,   # was model_lo
-              model_q90   = combined$model_q90,   # was model_hi
-              model_lo    = combined$model_lo,    # full range for diagnostics
+              value_lo    = combined$value_lo,    # thick band lower (weather + model)
+              value_hi    = combined$value_hi,    # thick band upper
+              coef_lo     = combined$coef_lo,     # thin line lower (+ coef uncertainty)
+              coef_hi     = combined$coef_hi,     # thin line upper
+              value_all   = list(combined$value_all),
+              model_q10   = combined$model_q10,
+              model_q90   = combined$model_q90,
+              model_lo    = combined$model_lo,
               model_hi    = combined$model_hi,
               draw_values = list(combined$draw_values),
               agg_method  = method,

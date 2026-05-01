@@ -183,6 +183,7 @@ plot_pointrange_climate <- function(scenarios, hist_agg,
   hist_s$coef_hi <- if (!is.null(hist_bands) && nrow(hist_bands) > 0)
     mean(hist_bands$value_hi, na.rm = TRUE) else NA_real_
 
+
   # ---- future scenario summaries ------------------------------------------
   # Each scenario key is "SSP2-4.5 / 2025-2035" (one entry per SSP x period,
   # with all ensemble model predictions already pooled in the preds data frame).
@@ -195,24 +196,61 @@ plot_pointrange_climate <- function(scenarios, hist_agg,
 
     if (length(future_nms) > 0) {
       rows <- lapply(future_nms, function(nm) {
-        s <- summarise_vals(scenarios[[nm]]$out$value)
+        out_df <- scenarios[[nm]]$out
+        message(sprintf("[debug] out_df nrow: %d | draw_values[[1]] length: %d | total unlisted: %d",
+                        nrow(out_df),
+                        length(out_df$draw_values[[1]]),
+                        length(unlist(out_df$draw_values))))
+
+        is_future <- !is.null(out_df$value_all) &&
+                    any(vapply(out_df$value_all, length, integer(1L)) > 1L)
+
+        # Step 1 — compute s from point estimates
+        s <- if (is_future) {
+          summarise_vals(unlist(out_df$value_all))   # 660 point estimates
+        } else {
+          summarise_vals(out_df$value)               # 30 historical values
+        }
+
         if (is.null(s)) return(NULL)
-        ssp_key   <- .normalise_ssp(nm)
-        ssp_short <- ssp_short_map[ssp_key] %||% ssp_key
-        yr        <- .parse_year(nm)
+
+        # Step 2 — override coef_lo/coef_hi
+        if (is_future) {
+          if (!is.null(coef_bands_tbl)) {
+            # Coefficient uncertainty ON — pool ALL draws across ALL years
+            all_draws <- unlist(out_df$draw_values)
+            s$coef_lo <- unname(quantile(all_draws, 0.10, na.rm = TRUE))
+            s$coef_hi <- unname(quantile(all_draws, 0.90, na.rm = TRUE))
+            s$mean    <- mean(all_draws, na.rm = TRUE)
+            if (s$coef_lo > s$lo_full)
+              message(sprintf("[debug] coef_lo (%.4f) > lo_full (%.4f) — draws don't extend below point estimates",
+                              s$coef_lo, s$lo_full))
+            if (s$coef_hi < s$hi_full)
+              message(sprintf("[debug] coef_hi (%.4f) < hi_full (%.4f) — draws don't extend above point estimates",
+                              s$coef_hi, s$hi_full))
+          } else {
+            # Coefficient uncertainty OFF — collapse thin line, use point estimate mean
+            s$coef_lo <- NA_real_
+            s$coef_hi <- NA_real_
+            s$mean    <- mean(unlist(out_df$value_all), na.rm = TRUE)
+          }
+        } else {
+          sc_bands  <- if (!is.null(coef_bands_tbl))
+            dplyr::filter(coef_bands_tbl, scenario == nm) else NULL
+          s$coef_lo <- if (!is.null(sc_bands) && nrow(sc_bands) > 0)
+            mean(sc_bands$value_lo, na.rm = TRUE) else NA_real_
+          s$coef_hi <- if (!is.null(sc_bands) && nrow(sc_bands) > 0)
+            mean(sc_bands$value_hi, na.rm = TRUE) else NA_real_
+        }
+
+        ssp_key       <- .normalise_ssp(nm)
+        ssp_short     <- ssp_short_map[ssp_key] %||% ssp_key
+        yr            <- .parse_year(nm)
         s$pt_key      <- paste0(ssp_short, "\n", yr)
         s$colour_key  <- paste(ssp_key, yr, sep = "__")
         s$ssp_key     <- ssp_key
         s$ssp_short   <- ssp_short
         s$yr          <- yr
-        sc_bands <- if (!is.null(coef_bands_tbl))
-          dplyr::filter(coef_bands_tbl, scenario == nm)
-        else NULL
-        s$coef_lo <- if (!is.null(sc_bands) && nrow(sc_bands) > 0)
-          mean(sc_bands$value_lo, na.rm = TRUE) else NA_real_
-        s$coef_hi <- if (!is.null(sc_bands) && nrow(sc_bands) > 0)
-          mean(sc_bands$value_hi, na.rm = TRUE) else NA_real_
-
         s
       })
       fut_df <- dplyr::bind_rows(Filter(Negate(is.null), rows))
@@ -301,22 +339,35 @@ plot_pointrange_climate <- function(scenarios, hist_agg,
     # Coefficient uncertainty — thin line at selected band
     ggplot2::geom_linerange(
       ggplot2::aes(ymin = .data$coef_lo, ymax = .data$coef_hi),
-      linewidth = 0.5, na.rm     = TRUE
+      linewidth = 0.5, na.rm = TRUE
     ) +
     # 90% CI — linewidth encodes percentile
     ggplot2::geom_linerange(
       ggplot2::aes(ymin = .data$lo_full, ymax = .data$hi_full),
-                   linewidth = 2.0
+      linewidth = 2.0
     ) +
-    # Mean dot — size encodes percentile
+    # TO — thick band first (bottom layer), thin line on top:
+    # Thick band — weather + model uncertainty (bottom layer)
+    ggplot2::geom_linerange(
+      ggplot2::aes(ymin = .data$lo_full, ymax = .data$hi_full),
+      linewidth = 4.0, alpha = 1,  # doubled from 2.0
+      na.rm     = TRUE
+    ) +
+    # Thin line — coefficient uncertainty (top layer, always visible)
+    ggplot2::geom_linerange(
+      ggplot2::aes(ymin = .data$coef_lo, ymax = .data$coef_hi),
+      linewidth = 1.5,
+      colour = "black",   # thicker than before so visible against thick band
+      na.rm    = TRUE
+    ) +
+    #Geom Point
     ggplot2::geom_point(
-      ggplot2::aes(y = .data$mean), size = 3.0,
-      shape = 21, fill = "white", stroke = 1.4
-    ) +
-    # Historical mean reference line
-    ggplot2::geom_hline(
-      yintercept = hist_mean, linetype = "dashed",
-      colour = "#808080", linewidth = 0.55
+      ggplot2::aes(y = .data$mean),
+      size   = 3,
+      shape  = 21,
+      fill   = "white",
+      colour = "black",
+      na.rm  = TRUE
     ) +
     ggplot2::scale_colour_manual(values = colour_palette, guide = "none") +
     ggplot2::scale_x_discrete(
@@ -642,9 +693,15 @@ build_threshold_table_df <- function(all_series, group_order = "scenario_x_year"
     
 
     # Lower/Upper rows — from value_lo/value_hi if available
-    lo_vals <- if (!is.null(out$value_lo)) out$value_lo[is.finite(out$value_lo)] else numeric(0)
-    hi_vals <- if (!is.null(out$value_hi)) out$value_hi[is.finite(out$value_hi)] else numeric(0)
-
+    #lo_vals <- if (!is.null(out$value_lo)) out$value_lo[is.finite(out$value_lo)] else numeric(0)
+    #hi_vals <- if (!is.null(out$value_hi)) out$value_hi[is.finite(out$value_hi)] else numeric(0)
+    #Keeping old in case need to revert
+    lo_vals <- if (!is.null(out$coef_lo) && any(is.finite(out$coef_lo)))
+      out$coef_lo[is.finite(out$coef_lo)] else
+      if (!is.null(out$value_lo)) out$value_lo[is.finite(out$value_lo)] else numeric(0)
+    hi_vals <- if (!is.null(out$coef_hi) && any(is.finite(out$coef_hi)))
+      out$coef_hi[is.finite(out$coef_hi)] else
+      if (!is.null(out$value_hi)) out$value_hi[is.finite(out$value_hi)] else numeric(0)
 
     if (length(lo_vals) >= 2L && length(hi_vals) >= 2L) {
       lower <- build_row(lo_vals, nm, "Lower")
