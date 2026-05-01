@@ -60,6 +60,32 @@ label_deviation <- function(key) {
   )
 }
 
+# ---------------------------------------------------------------------------- #
+# Band quantile resolver                                                       #
+# ---------------------------------------------------------------------------- #
+
+#' Resolve Uncertainty Band Key to Quantile Pair
+#'
+#' Converts the UI uncertainty band selector key to a named numeric vector
+#' used by plot_pointrange_climate() and summarise_vals().
+#'
+#' @param band_key Character. One of "p25_p75", "p20_p80", "p10_p90",
+#'   "p05_p95", "p025_p975", "p005_p995", "minmax".
+#' @return Named numeric vector c(lo = ..., hi = ...).
+#' @export
+resolve_band_q <- function(band_key) {
+  switch(band_key,
+    p25_p75   = c(lo = 0.25,  hi = 0.75),
+    p20_p80   = c(lo = 0.20,  hi = 0.80),
+    p10_p90   = c(lo = 0.10,  hi = 0.90),
+    p05_p95   = c(lo = 0.05,  hi = 0.95),
+    p025_p975 = c(lo = 0.025, hi = 0.975),
+    p005_p995 = c(lo = 0.005, hi = 0.995),
+    minmax    = c(lo = 0.00,  hi = 1.00),
+    c(lo = 0.10, hi = 0.90)   # default fallback
+  )
+}
+
 # ---- Internal helpers: parse scenario key components ----------------------
 # Keys are of the form "SSP2-4.5 / 2025-2035".
 .normalise_ssp <- function(nm) {
@@ -90,20 +116,13 @@ label_deviation <- function(key) {
 # Shared CI summary helper                                                     #
 # ---------------------------------------------------------------------------- #
 
-# Note: lo95/hi95 used by plot_uncertainty_decomposition only.
 # plot_pointrange_climate uses coef_lo/coef_hi from draw_values instead.
-.summarise_vals <- function(vals) {
-  vals <- vals[is.finite(vals)]
-  if (length(vals) < 2) return(NULL)
-  data.frame(
-    mean  = mean(vals),
-    lo95  = as.numeric(stats::quantile(vals, 0.025)),
-    hi95  = as.numeric(stats::quantile(vals, 0.975)),
-    lo90  = as.numeric(stats::quantile(vals, 0.05)),
-    hi90  = as.numeric(stats::quantile(vals, 0.95)),
-    lo_full = min(vals),
-    hi_full = max(vals),
-    stringsAsFactors = FALSE
+.summarise_vals <- function(x, band_q = c(lo = 0.10, hi = 0.90)) {
+  if (length(x) == 0L || all(is.na(x))) return(NULL)
+  list(
+    mean    = mean(x, na.rm = TRUE),
+    lo_full = unname(quantile(x, band_q[["lo"]], na.rm = TRUE)),
+    hi_full = unname(quantile(x, band_q[["hi"]], na.rm = TRUE))
   )
 }
 
@@ -161,14 +180,16 @@ label_deviation <- function(key) {
 #' @export
 plot_pointrange_climate <- function(scenarios, hist_agg,
                                     group_order = "scenario_x_year",
-                                    coef_bands_tbl = NULL) {
+                                    coef_bands_tbl = NULL,
+                                    band_q = c(lo = 0.1, hi = 0.9),
+                                    ensemble_band_q = c(lo = 0.1, hi = 0.9)) {
 
   stopifnot(is.list(hist_agg), all(c("out", "x_label") %in% names(hist_agg)))
 
   summarise_vals <- .summarise_vals
 
   # ---- historical summary --------------------------------------------------
-  hist_s <- summarise_vals(hist_agg$out$value)
+  hist_s <- .summarise_vals(hist_agg$out$value, c(lo = 0, hi = 1)) #Historical Band always full range
   if (is.null(hist_s)) {
     return(ggplot2::ggplot() +
       ggplot2::labs(title = "Run a simulation to see results."))
@@ -197,19 +218,20 @@ plot_pointrange_climate <- function(scenarios, hist_agg,
     if (length(future_nms) > 0) {
       rows <- lapply(future_nms, function(nm) {
         out_df <- scenarios[[nm]]$out
-        message(sprintf("[debug] out_df nrow: %d | draw_values[[1]] length: %d | total unlisted: %d",
-                        nrow(out_df),
-                        length(out_df$draw_values[[1]]),
-                        length(unlist(out_df$draw_values))))
 
         is_future <- !is.null(out_df$value_all) &&
                     any(vapply(out_df$value_all, length, integer(1L)) > 1L)
 
         # Step 1 — compute s from point estimates
         s <- if (is_future) {
-          summarise_vals(unlist(out_df$value_all))   # 660 point estimates
+          trimmed <- unlist(lapply(out_df$value_all, function(yr_vals) {
+            lo <- quantile(yr_vals, ensemble_band_q[["lo"]], na.rm = TRUE)
+            hi <- quantile(yr_vals, ensemble_band_q[["hi"]], na.rm = TRUE)
+            yr_vals[yr_vals >= lo & yr_vals <= hi]
+          }))
+          s <- .summarise_vals(trimmed, c(lo = 0, hi = 1))  # min/max of trimmed pool   # 660 point estimates
         } else {
-          summarise_vals(out_df$value)               # 30 historical values
+          summarise_vals(out_df$value, band_q)               # 30 historical values
         }
 
         if (is.null(s)) return(NULL)
@@ -219,9 +241,9 @@ plot_pointrange_climate <- function(scenarios, hist_agg,
           if (!is.null(coef_bands_tbl)) {
             # Coefficient uncertainty ON — pool ALL draws across ALL years
             all_draws <- unlist(out_df$draw_values)
-            s$coef_lo <- unname(quantile(all_draws, 0.10, na.rm = TRUE))
-            s$coef_hi <- unname(quantile(all_draws, 0.90, na.rm = TRUE))
-            s$mean    <- mean(all_draws, na.rm = TRUE)
+            s$coef_lo <- unname(quantile(all_draws, band_q[["lo"]], na.rm = TRUE))
+            s$coef_hi <- unname(quantile(all_draws, band_q[["hi"]], na.rm = TRUE))
+            s$mean    <- mean(unlist(out_df$value_all), na.rm = TRUE)
             if (s$coef_lo > s$lo_full)
               message(sprintf("[debug] coef_lo (%.4f) > lo_full (%.4f) — draws don't extend below point estimates",
                               s$coef_lo, s$lo_full))
@@ -319,9 +341,9 @@ plot_pointrange_climate <- function(scenarios, hist_agg,
 
   # ---- combine into one data frame -----------------------------------------
   cols     <- c("pt_key", "colour_key", "mean", "lo_full", "hi_full", "coef_lo", "coef_hi")
-  hist_row <- hist_s[, intersect(cols, names(hist_s))]
+  hist_row <- as.data.frame(hist_s)[, intersect(cols, names(hist_s)), drop = FALSE]
   fut_rows <- if (!is.null(fut_df) && nrow(fut_df) > 0)
-    fut_df[, intersect(cols, names(fut_df))] else NULL
+    as.data.frame(fut_df)[, intersect(cols, names(fut_df))] else NULL
 
   plot_df <- dplyr::bind_rows(hist_row, fut_rows)
   plot_df$pt_key <- factor(plot_df$pt_key, levels = ordered_levels)
@@ -336,17 +358,6 @@ plot_pointrange_climate <- function(scenarios, hist_agg,
   ggplot2::ggplot(plot_df,
     ggplot2::aes(x = .data$pt_key, colour = .data$colour_key)
   ) +
-    # Coefficient uncertainty — thin line at selected band
-    ggplot2::geom_linerange(
-      ggplot2::aes(ymin = .data$coef_lo, ymax = .data$coef_hi),
-      linewidth = 0.5, na.rm = TRUE
-    ) +
-    # 90% CI — linewidth encodes percentile
-    ggplot2::geom_linerange(
-      ggplot2::aes(ymin = .data$lo_full, ymax = .data$hi_full),
-      linewidth = 2.0
-    ) +
-    # TO — thick band first (bottom layer), thin line on top:
     # Thick band — weather + model uncertainty (bottom layer)
     ggplot2::geom_linerange(
       ggplot2::aes(ymin = .data$lo_full, ymax = .data$hi_full),

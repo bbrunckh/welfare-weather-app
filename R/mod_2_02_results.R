@@ -65,6 +65,22 @@ mod_2_02_results_ui <- function(id) {
           selected = "p10_p90"
         ),
 
+                # ADD — ensemble variation band selector:
+        shiny::selectInput(
+          ns("ensemble_band"),
+          label    = "Ensemble variation band",
+          choices  = c(
+            "50%" = "p25_p75",
+            "60%" = "p20_p80",
+            "80%" = "p10_p90",
+            "90%" = "p05_p95",
+            "95%" = "p025_p975",
+            "99%" = "p005_p995",
+            "Full range" = "minmax"
+          ),
+          selected = "p10_p90"
+        ),
+
         shiny::tags$div(style = "flex:1; min-width:160px;",
           shiny::uiOutput(ns("cmp_pov_line_ui"))
         )
@@ -109,11 +125,11 @@ mod_2_02_results_ui <- function(id) {
       shiny::plotOutput(ns("summary_box_plot"), height = "600px"),
       shiny::tags$p(
         style = "font-size:11px; color:#666; margin-top:6px;",
-        "Central dot = mean annual welfare across 30 simulation years.",
+        "Central dot = mean annual welfare across simulation years.",
         shiny::tags$br(),
-        "Thick bar = p5\u2013p95 of annual welfare values (weather variation).",
+        "Thick bar = variation due to weather (historical and CMPI6 ensembles for future).",
         shiny::tags$br(),
-        "Thin line = p10\u2013p90 coefficient uncertainty (updates with uncertainty band selector).",
+        "Thin line =  coefficient uncertainty (cannot be disentangled from the underlying weather variation)).",
         shiny::tags$br(),
         "Future scenarios apply climate perturbations to the historical weather base."
       )
@@ -634,7 +650,9 @@ mod_2_02_results_server <- function(id,
           tbl <- all_series_tbl() 
           message("[debug] coef_bands_tbl cols: ", paste(names(tbl), collapse = ", "))
           tbl 
-        } else NULL
+        } else NULL,
+        band_q         = resolve_band_q(input$uncertainty_band %||% "p10_p90"),
+        ensemble_band_q  = resolve_band_q(input$ensemble_band     %||% "p10_p90")
       )
     }, height = 600)
 

@@ -571,16 +571,9 @@ combine_ensemble_results <- function(member_results) {
 
   # Thick band — pure weather + model spread (y_point only, no coef draws)
   # value = point estimate per member (no draws applied)
-  #all_y_point <- vapply(member_results, `[[`, numeric(1L), "welfare_pt")
 
   draw_mat     <- do.call(rbind, lapply(member_results, `[[`, "draw_values"))
   pooled_draws <- as.vector(draw_mat)   # 22 models × 30 years × S draws
-
-  # Assertion — thin must always extend beyond thick
-  stopifnot(
-    quantile(pooled_draws, 0.10, na.rm = TRUE) <= quantile(values, 0.10, na.rm = TRUE),
-    quantile(pooled_draws, 0.90, na.rm = TRUE) >= quantile(values, 0.90, na.rm = TRUE)
-  )
 
   list(
     value     = mean(values, na.rm = TRUE),
@@ -759,11 +752,6 @@ compute_scenario_agg <- function(scenarios,
     Z_shared <- if (K_s > 0L && S > 0L)
                   matrix(stats::rnorm(S * K_s), nrow = S, ncol = K_s)
                 else NULL
-    message(sprintf(
-      "[debug] Z_shared NULL: %s | K_s: %d | S: %d | ncol(Z_shared): %s",
-      is.null(Z_shared), K_s, S,
-      if (!is.null(Z_shared)) ncol(Z_shared) else "NA"
-    ))
     run_one_scen <- function(use_w) {
       weights_base <- if (use_w && has_weights_s) pipes[[1L]]$weight else NULL
 

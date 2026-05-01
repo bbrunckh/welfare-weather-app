@@ -270,3 +270,43 @@
      draw_values_hi = hi_member$draw_values
    
    Priority: Medium — implement after current visualization pass complete
+
+ ## Issue #19 — Out-of-Memory Crash on Large Ensemble Runs
+
+**Status:** Open  
+**Severity:** High — crashes R session  
+**Reproducible:** Yes — 99 keys × 30 yrs × S=30 on survey with ~4,889 households  
+
+### Symptom
+Warning: [run_sim_pipeline] predict_outcome() failed:
+fixest predict failed: cannot allocate vector of size 84.1 Mb
+R 4.5.2 exited unexpectedly: exit code 1
+
+### Root Cause
+`predict_outcome()` allocates a large intermediate matrix 
+(N households × model matrix columns) during `fixest::predict()`. 
+With 99 keys × 30 years × S draws running sequentially, peak memory 
+accumulates across keys until R exhausts available RAM and crashes.
+
+### Conditions That Trigger It
+- Large survey (N > 3,000 households)
+- Many ensemble keys (> ~60 keys = 2+ SSPs × ~30 models)
+- High S (draws ≥ 30)
+- Complex model (K_s > 20 factor loadings)
+
+### Workarounds (short-term)
+- Reduce S to 10–15 for multi-SSP runs
+- Run 1 SSP × 1 period at a time
+- Use dev_mode = TRUE for testing
+
+### Planned Fix
+1. Add `gc()` + `rm()` calls between key iterations in 
+   `fct_run_simulation.R` key loop to release memory between keys
+2. Chunk `predict_outcome()` predictions into row-blocks 
+   (~500–1,000 rows) to cap peak allocation per call
+3. Longer term: parallelise key loop with `furrr` using 
+   `future::plan(multisession, workers = 2)` with memory-aware 
+   worker count — only safe once chunking is implemented
+
+### Related Issues
+- Phase 4 speed improvements (parallelisation) deferred until this is resolved
