@@ -557,6 +557,14 @@ mod_2_01_weathersim_server <- function(id,
           id       = "agg_notify", duration = NULL, type = "message"
         )
 
+        # Generate shared Z matrix once — paired draws for historical + future
+        # Same z vectors applied to both → ribbon gap stable, common random numbers variance reduction
+        K_global     <- if (!is.null(result$hist_sim_result$pipeline$F_loading))
+                          ncol(result$hist_sim_result$pipeline$F_loading) else 0L
+        Z_global     <- if (K_global > 0L && S_sim > 0L)
+                          matrix(stats::rnorm(S_sim * K_global), nrow = S_sim, ncol = K_global)
+                        else NULL
+
         shiny::isolate({
           hist_agg_rv(
             compute_hist_agg(
@@ -567,7 +575,8 @@ mod_2_01_weathersim_server <- function(id,
               band_q    = bq_sim,
               residuals = res_sim,
               pov_line  = pov_sim,
-              is_log    = isTRUE(so$transform == "log")
+              is_log    = isTRUE(so$transform == "log"),
+              Z_global = Z_global
             )
           )
           scenario_agg_rv(
@@ -577,7 +586,8 @@ mod_2_01_weathersim_server <- function(id,
               S         = S_sim,
               band_q    = bq_sim,
               residuals = res_sim,
-              pov_line  = pov_sim
+              pov_line  = pov_sim,
+              Z_global = Z_global
             )
           )
         })

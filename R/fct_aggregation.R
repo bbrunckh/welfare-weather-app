@@ -631,15 +631,18 @@ compute_hist_agg <- function(pipeline,
                              band_q    = c(lo = 0.10, hi = 0.90),
                              residuals = "none",
                              pov_line  = NULL,
-                             is_log    = TRUE) {
+                             is_log    = TRUE,
+                             Z_global  = NULL) {
 
   has_weights <- !is.null(pipeline$weight)
   sim_years   <- sort(unique(pipeline$sim_year))
 
   K        <- if (!is.null(pipeline$F_loading)) ncol(pipeline$F_loading) else 0L
-  Z_shared <- if (K > 0L && S > 0L)
+  Z_shared <- if (!is.null(Z_global)) {
+                Z_global
+              }else if (K > 0L && S > 0L) {
                 matrix(stats::rnorm(S * K), nrow = S, ncol = K)
-              else NULL
+              }   else NULL
 
   run_one_hist <- function(use_w) {
     weights <- if (use_w) pipeline$weight else NULL
@@ -738,7 +741,8 @@ compute_scenario_agg <- function(scenarios,
                                  S         = 150L,
                                  band_q    = c(lo = 0.10, hi = 0.90),
                                  residuals = "none",
-                                 pov_line  = NULL) {
+                                 pov_line  = NULL,
+                                 Z_global  = NULL) {
 
   setNames(lapply(names(scenarios), function(display_key) {
     s             <- scenarios[[display_key]]
@@ -749,9 +753,11 @@ compute_scenario_agg <- function(scenarios,
     has_weights_s <- !is.null(pipes[[1L]]$weight)
 
     K_s      <- if (!is.null(pipes[[1L]]$F_loading)) ncol(pipes[[1L]]$F_loading) else 0L
-    Z_shared <- if (K_s > 0L && S > 0L)
+    Z_shared <- if(!is.null(Z_global)) {
+                  Z_global
+                } else if (K_s > 0L && S > 0L) {
                   matrix(stats::rnorm(S * K_s), nrow = S, ncol = K_s)
-                else NULL
+               } else NULL
     run_one_scen <- function(use_w) {
       weights_base <- if (use_w && has_weights_s) pipes[[1L]]$weight else NULL
 

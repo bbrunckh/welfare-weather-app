@@ -182,7 +182,7 @@ plot_pointrange_climate <- function(scenarios, hist_agg,
                                     group_order = "scenario_x_year",
                                     coef_bands_tbl = NULL,
                                     band_q = c(lo = 0.1, hi = 0.9),
-                                    ensemble_band_q = c(lo = 0.1, hi = 0.9)) {
+                                    ensemble_band_q = c(lo = 0, hi = 1)) {
 
   stopifnot(is.list(hist_agg), all(c("out", "x_label") %in% names(hist_agg)))
 
@@ -240,7 +240,11 @@ plot_pointrange_climate <- function(scenarios, hist_agg,
         if (is_future) {
           if (!is.null(coef_bands_tbl)) {
             # Coefficient uncertainty ON — pool ALL draws across ALL years
-            all_draws <- unlist(out_df$draw_values)
+            all_draws_raw <- unlist(out_df$draw_values)
+            all_draws     <- all_draws_raw[
+              all_draws_raw >= quantile(all_draws_raw, band_q[["lo"]], na.rm = TRUE) &
+              all_draws_raw <= quantile(all_draws_raw, band_q[["hi"]], na.rm = TRUE)
+            ]
             s$coef_lo <- unname(quantile(all_draws, band_q[["lo"]], na.rm = TRUE))
             s$coef_hi <- unname(quantile(all_draws, band_q[["hi"]], na.rm = TRUE))
             s$mean    <- mean(unlist(out_df$value_all), na.rm = TRUE)
@@ -910,93 +914,154 @@ enhance_exceedance <- function(scenarios,
                                return_period = TRUE,
                                n_sim_years   = NULL,
                                logit_x       = FALSE,
-                               ribbon_data   = NULL) {
+                               ribbon_data   = NULL,
+                               band_q          = c(lo = 0.10, hi = 0.90),
+                               ensemble_band_q = c(lo = 0, hi = 1)) {
 
   stopifnot(is.list(scenarios), length(scenarios) > 0)
   labels <- names(scenarios)
 
-  # ---- Build per-group long data frame ------------------------------------
-  long_df <- dplyr::bind_rows(lapply(seq_along(scenarios), function(i) {
-    nm      <- labels[i]
-    vals <- scenarios[[nm]]$out$value %||% scenarios[[nm]]$out$value_p50 #DRK Note - may be more efficient fix later
-    ssp_key <- .normalise_ssp(nm)
-    yr      <- .parse_year(nm)
-    data.frame(
-      value   = vals,
-      group   = nm,
-      ssp_key = if (is.na(ssp_key)) "Historical" else ssp_key,
-      yr      = if (is.na(yr))      "Historical" else yr,
-      stringsAsFactors = FALSE
+    # ---- Build central line + ribbon per scenario (Option B) ---------------
+    exceedance_df <- dplyr::bind_rows(lapply(
+      c("Historical", names(scenarios)),
+      function(nm) {
+        is_hist <- nm == "Historical"
+
+        # ---- Point estimates (central line) ----------------------------------
+        if (is_hist) {
+          pt_vals  <- hist_agg$out$value
+          dv_list  <- hist_agg$out$draw_values
+          ssp_key  <- "Historical"
+          yr_label <- "Historical"
+        } else {
+          out_df  <- scenarios[[nm]]$out
+          is_fut  <- "value_all" %in% names(out_df) &&
+                    any(vapply(out_df$value_all, length, integer(1L)) > 1L)
+          if (!is_fut) return(NULL)
+
+          # Per-year ensemble trim — controlled by ensemble_band_q
+          pt_vals <- unlist(lapply(out_df$value_all, function(yr_vals) {
+            lo <- quantile(yr_vals, ensemble_band_q[["lo"]], na.rm = TRUE)
+            hi <- quantile(yr_vals, ensemble_band_q[["hi"]], na.rm = TRUE)
+            yr_vals[yr_vals >= lo & yr_vals <= hi]
+          }))
+          dv_list  <- out_df$draw_values
+          ssp_key  <- .normalise_ssp(nm)
+          yr_label <- .parse_year(nm)
+        }
+
+        if (length(pt_vals) == 0L) return(NULL)
+
+        # Central curve — point estimate ECDF (deterministic, no MC noise)
+        n_years       <- length(pt_vals)
+        central_curve <- sort(pt_vals, decreasing = FALSE)
+        probs         <- rev((seq_len(n_years) - 0.5) / n_years)
+
+        # ---- Ribbon — S complete exceedance curves --------------------------
+        if (!is.null(band_q) && !is.null(dv_list) && length(dv_list) > 0L) {
+
+          if (is_hist) {
+            # Historical: draw_values = list of S-length vectors per year
+            # Reshape to [n_years × S] matrix
+            S_loc    <- length(dv_list[[1L]])
+            draw_mat <- do.call(rbind, lapply(dv_list, as.numeric))
+            # draw_mat[year, draw s] → for draw s sort all years
+            draw_curves <- matrix(NA_real_, nrow = S_loc, ncol = n_years)
+            for (s in seq_len(S_loc)) {
+              draw_curves[s, ] <- sort(draw_mat[, s], decreasing = FALSE)
+            }
+
+          } else {
+            # Future: draw_values[[i]] = [n_mod × S] stored column-major
+            # Filter to same ensemble subset as pt_vals per year
+            n_mod_yr <- length(out_df$value_all[[1L]])
+            S_loc    <- round(length(dv_list[[1L]]) / n_mod_yr)
+            draw_curves <- matrix(NA_real_, nrow = S_loc, ncol = n_years)
+
+            for (s in seq_len(S_loc)) {
+              yr_vals_s <- unlist(lapply(seq_along(dv_list), function(i) {
+                yr_vals  <- out_df$value_all[[i]]
+                lo       <- quantile(yr_vals, ensemble_band_q[["lo"]], na.rm = TRUE)
+                hi       <- quantile(yr_vals, ensemble_band_q[["hi"]], na.rm = TRUE)
+                keep_idx <- which(yr_vals >= lo & yr_vals <= hi)
+                if (length(keep_idx) == 0L) return(NULL)
+                dv         <- dv_list[[i]]
+                n_mod      <- length(yr_vals)
+                S_i        <- round(length(dv) / n_mod)
+                draw_mat_i <- matrix(dv, nrow = n_mod, ncol = S_i)
+                draw_mat_i[keep_idx, s, drop = TRUE]
+              }))
+              if (length(yr_vals_s) == n_years)
+                draw_curves[s, ] <- sort(yr_vals_s, decreasing = FALSE)
+            }
+          }
+
+          # Apply band_q — controlled by coefficient uncertainty selector
+          lo_q    <- band_q[["lo"]]
+          hi_q    <- band_q[["hi"]]
+          band_lo <- apply(draw_curves, 2, quantile, lo_q, na.rm = TRUE)
+          band_hi <- apply(draw_curves, 2, quantile, hi_q, na.rm = TRUE)
+
+        } else {
+          # Coefficient uncertainty OFF — no ribbon
+          band_lo <- rep(NA_real_, n_years)
+          band_hi <- rep(NA_real_, n_years)
+        }
+
+        data.frame(
+          welfare_val = central_curve,
+          exceed_prob = probs,
+          band_lo     = band_lo,
+          band_hi     = band_hi,
+          ssp_key     = if (is.na(ssp_key)) "Historical" else ssp_key,
+          yr          = if (is.na(yr_label)) "Historical" else yr_label,
+          scenario    = nm,
+          stringsAsFactors = FALSE
+        )
+      }
+    ))
+
+    # ---- Aesthetic mappings -------------------------------------------------
+    fut_yr_labels <- sort(unique(exceedance_df$yr[exceedance_df$yr != "Historical"]))
+    yr_styles     <- .resolve_year_styles(fut_yr_labels)
+    present_ssps  <- sort(unique(exceedance_df$ssp_key[exceedance_df$ssp_key != "Historical"]))
+    colour_map_ssp <- c(
+      "Historical" = "black",
+      .ssp_colours[intersect(names(.ssp_colours), present_ssps)]
     )
-  }))
-  long_df$group <- factor(long_df$group, levels = labels)
+    present_yrs  <- names(yr_styles$linetype_map)
+    ltype_map_yr <- c("Historical" = "solid", yr_styles$linetype_map)
+    hist_mean    <- mean(hist_agg$out$value, na.rm = TRUE)
 
-  # ---- Aesthetic mappings -------------------------------------------------
-  fut_yr_labels <- sort(unique(long_df$yr[long_df$yr != "Historical"]))
-  yr_styles     <- .resolve_year_styles(fut_yr_labels)
+    # ---- Early exit ---------------------------------------------------------
+    if (is.null(exceedance_df) || nrow(exceedance_df) == 0L)
+      return(ggplot2::ggplot() +
+        ggplot2::labs(title = "Run a simulation to see exceedance probabilities."))
 
-  present_ssps   <- sort(unique(long_df$ssp_key[long_df$ssp_key != "Historical"]))
-  colour_map_ssp <- c(
-    "Historical" = "black",
-    .ssp_colours[intersect(names(.ssp_colours), present_ssps)]
-  )
+    ann_y <- if (isTRUE(logit_x)) 0.97 else 0.95
 
-  present_yrs  <- names(yr_styles$linetype_map)
-  ltype_map_yr <- c("Historical" = "solid", yr_styles$linetype_map)
-
-  hist_mean <- mean(hist_agg$out$value, na.rm = TRUE)
-  eps       <- if (isTRUE(logit_x)) 0.005 else 0
-
-  # ---- Build ECDF per group -----------------------------------------------
-  ecdf_df <- dplyr::bind_rows(lapply(levels(long_df$group), function(grp) {
-    sub    <- long_df[long_df$group == grp & is.finite(long_df$value), ]
-    if (nrow(sub) == 0) return(NULL)
-    fn     <- stats::ecdf(sub$value)
-    xs     <- sort(unique(sub$value))
-    exceed <- 1 - fn(xs)
-    keep   <- exceed > eps & exceed < (1 - eps)
-    if (!any(keep)) return(NULL)
-    data.frame(
-      value   = xs[keep],
-      exceed  = exceed[keep],
-      group   = grp,
-      ssp_key = sub$ssp_key[1],
-      yr      = sub$yr[1],
-      stringsAsFactors = FALSE
-    )
-  }))
-
-  if (is.null(ecdf_df) || nrow(ecdf_df) == 0)
-    return(ggplot2::ggplot() +
-      ggplot2::labs(title = "Run a simulation to see exceedance probabilities."))
-
-  ann_y <- if (isTRUE(logit_x)) 0.97 else 0.95
-
-  # ---- Plot ---------------------------------------------------------------
+    # ---- Plot ---------------------------------------------------------------
   p <- ggplot2::ggplot(
-    ecdf_df,
+    exceedance_df,
     ggplot2::aes(
-      x         = value,
-      y         = exceed,
-      colour    = ssp_key,
-      linetype  = yr,
-      group     = group
+      x        = welfare_val,
+      y        = exceed_prob,
+      colour   = ssp_key,
+      linetype = yr,
+      group    = scenario
     )
   ) +
-
     ggplot2::geom_line(linewidth = 0.9) +
-    # ---- Coefficient uncertainty ribbon -----------------------------------
-    { if (!is.null(ribbon_data) && nrow(ribbon_data) > 0L) {
-        rd <- dplyr::filter(ribbon_data,
-                    exceed_prob >= 0 &
-                    exceed_prob < (1 - eps))
+
+    # Coefficient uncertainty ribbon — band_q controlled
+    { if (!is.null(band_q) && any(!is.na(exceedance_df$band_lo))) {
         ggplot2::geom_ribbon(
-          data        = rd,
-          mapping     = ggplot2::aes(
-            y   = .data$exceed_prob,
-            xmin = .data$welfare_lo,
-            xmax = .data$welfare_hi,
-            fill = .data$ssp_key,
+          data    = exceedance_df[!is.na(exceedance_df$band_lo), ],
+          mapping = ggplot2::aes(
+            y     = .data$exceed_prob,
+            xmin  = .data$band_lo,
+            xmax  = .data$band_hi,
+            fill  = .data$ssp_key,
             group = .data$scenario
           ),
           alpha       = 0.15,

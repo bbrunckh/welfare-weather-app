@@ -708,7 +708,11 @@ mod_2_02_results_server <- function(id,
         return_period = isTRUE(input$show_return_period),
         n_sim_years   = nrow(agg_hist()$out),
         logit_x       = isTRUE(input$exceedance_logit_x),
-        ribbon_data   = if (isTRUE(input$show_coef_uncertainty)) exceedance_ribbon() else NULL
+        ribbon_data   = if (isTRUE(input$show_coef_uncertainty)) exceedance_ribbon() else NULL,
+        band_q          = if (isTRUE(input$show_coef_uncertainty) && has_draws())
+                            resolve_band_q(input$uncertainty_band %||% "p10_p90")
+                          else NULL,
+        ensemble_band_q = resolve_band_q(input$ensemble_band     %||% "minmax")
       )
     })
 
