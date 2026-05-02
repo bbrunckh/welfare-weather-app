@@ -78,7 +78,7 @@ mod_2_02_results_ui <- function(id) {
             "99%" = "p005_p995",
             "Full range" = "minmax"
           ),
-          selected = "p10_p90"
+          selected = "minmax"
         ),
 
         shiny::tags$div(style = "flex:1; min-width:160px;",
@@ -367,7 +367,7 @@ mod_2_02_results_server <- function(id,
       if (length(sc) == 0) return(list())
       method    <- input$cmp_agg_method %||% "mean"
       deviation <- input$cmp_deviation  %||% "none"
-      hist_ref <- if (!identical(deviation, "none")) hist_ref_val() else NA_real_
+      hist_ref <- hist_ref_val() #if (!identical(deviation, "none")) hist_ref_val() else NA_real_
       x_label <- if (identical(deviation, "none")) label_agg_method(method) else
         paste0(label_agg_method(method), " \u2014 ", label_deviation(deviation))
         selected <- selected_scenario_names()
@@ -375,7 +375,8 @@ mod_2_02_results_server <- function(id,
           if (!display_key %in% selected) return(NULL)
           out <- scenario_agg_rv()[[display_key]][[weight_key()]][[method]]
           if (is.null(out) || nrow(out) == 0L) return(NULL)
-          if (!identical(deviation, "none") && !is.na(hist_ref))
+          if (!identical(deviation, "none"))
+          #if (!identical(deviation, "none") && !is.na(hist_ref))
             out <- dplyr::mutate(out, value = value - hist_ref)
           list(out = out, x_label = x_label)
         }), names(sc))
@@ -392,56 +393,46 @@ mod_2_02_results_server <- function(id,
       hist_ref <- hist_ref_val()
 
       # Historical ribbon — apply deviation to value AND draw_values
-      hist_tbl <- hist_agg_rv()[[wk]][[method]]
-      hist_tbl_adj <- if (!is.null(hist_tbl) && nrow(hist_tbl) > 0L) {
-        dplyr::mutate(hist_tbl,
-          value       = value - hist_ref,
-          draw_values = lapply(draw_values, function(dv) dv - hist_ref)
-        )
-      } else NULL
+      # Historical ribbon — pass raw draws; deviation applied to result only
+        hist_tbl <- hist_agg_rv()[[wk]][[method]]
+        hist_ribbon <- if (!is.null(hist_tbl) && nrow(hist_tbl) > 0L) {
+          r <- compute_exceedance_ribbon(hist_tbl, band_q = bq)
+          if (!is.null(r)) dplyr::mutate(r,
+            welfare_mid = welfare_mid - hist_ref,
+            welfare_lo  = welfare_lo  - hist_ref,
+            welfare_hi  = welfare_hi  - hist_ref,
+            scenario = "Historical",
+            ssp_key  = "historical"
+          ) |>
+            dplyr::rename(band_lo = welfare_lo, band_hi = welfare_hi) else NULL
+        } else NULL
 
-      hist_ribbon <- if (!is.null(hist_tbl_adj)) {
-        r <- compute_exceedance_ribbon(hist_tbl_adj, band_q = bq)
-        if (!is.null(r)) dplyr::mutate(r,
-          scenario = "Historical",
-          ssp_key  = "historical"
-        ) else NULL
-      } else NULL
-
-      # Scenario ribbons — apply same hist_ref deviation
-      sc_ribbons <- if (!is.null(scenario_agg_rv())) {
-        Filter(Negate(is.null), lapply(names(scenario_agg_rv()), function(dk) {
-          if (!dk %in% selected_scenario_names()) return(NULL)  
-          tbl <- scenario_agg_rv()[[dk]][[wk]][[method]]
-
-          # ---- TEMP DEBUG ----
-            message("[debug] ensemble bounds for ", dk,
-          " model_lo range: ", round(min(tbl$model_lo, na.rm=TRUE), 4),
-          " to ", round(max(tbl$model_lo, na.rm=TRUE), 4),
-          " model_hi range: ", round(min(tbl$model_hi, na.rm=TRUE), 4),
-          " to ", round(max(tbl$model_hi, na.rm=TRUE), 4),
-          " value range: ", round(min(tbl$value, na.rm=TRUE), 4),
-          " to ", round(max(tbl$value, na.rm=TRUE), 4))
-          # ---- END DEBUG ----
-          
-          if (is.null(tbl) || nrow(tbl) == 0L) return(NULL)
-          tbl_adj <- dplyr::mutate(tbl,
-            value       = value - hist_ref,
-            draw_values = lapply(draw_values, function(dv) dv - hist_ref)
-          )
-          # Extract ensemble bounds — deviate by same hist_ref
-          m_lo <- if (!is.null(tbl$model_lo))
-            sort(tbl$model_lo - hist_ref, decreasing = TRUE) else NULL
-          m_hi <- if (!is.null(tbl$model_hi))
-            sort(tbl$model_hi - hist_ref, decreasing = TRUE) else NULL
-          r <- compute_exceedance_ribbon(tbl_adj, band_q = bq,
-                                          model_lo = m_lo,
-                                          model_hi = m_hi)
-          if (is.null(r)) return(NULL)
-          ssp <- .normalise_ssp(dk) %||% "historical"
-          dplyr::mutate(r, scenario = dk, ssp_key = ssp)
-        }))
-      } else list()
+        # Scenario ribbons — pass raw draws; deviation applied to result only
+        sc_ribbons <- if (!is.null(scenario_agg_rv())) {
+          Filter(Negate(is.null), lapply(names(scenario_agg_rv()), function(dk) {
+            if (!dk %in% selected_scenario_names()) return(NULL)
+            tbl <- scenario_agg_rv()[[dk]][[wk]][[method]]
+            if (is.null(tbl) || nrow(tbl) == 0L) return(NULL)
+            # Pass raw model_lo/model_hi — no deviation here
+            m_lo <- if (!is.null(tbl$model_lo))
+              sort(tbl$model_lo, decreasing = TRUE) else NULL
+            m_hi <- if (!is.null(tbl$model_hi))
+              sort(tbl$model_hi, decreasing = TRUE) else NULL
+            r <- compute_exceedance_ribbon(tbl, band_q = bq,
+                                            model_lo = m_lo,
+                                            model_hi = m_hi)
+            if (is.null(r)) return(NULL)
+            ssp <- .normalise_ssp(dk) %||% "historical"
+            # Deviation applied to ribbon output only — shape unchanged
+            dplyr::mutate(r,
+              welfare_mid = welfare_mid - hist_ref,
+              welfare_lo  = welfare_lo  - hist_ref,
+              welfare_hi  = welfare_hi  - hist_ref,
+              scenario = dk,
+              ssp_key  = ssp
+            ) |> dplyr::rename(band_lo = welfare_lo, band_hi = welfare_hi)
+          }))
+        } else list()
 
       result <-dplyr::bind_rows(c(list(hist_ribbon),
                          Filter(Negate(is.null), sc_ribbons)))
@@ -652,15 +643,21 @@ mod_2_02_results_server <- function(id,
           tbl 
         } else NULL,
         band_q         = resolve_band_q(input$uncertainty_band %||% "p10_p90"),
-        ensemble_band_q  = resolve_band_q(input$ensemble_band     %||% "p10_p90")
+        ensemble_band_q  = resolve_band_q(input$ensemble_band     %||% "p10_p90"),
+        hist_ref        = hist_ref_val()
       )
     }, height = 600)
 
     output$summary_threshold_table <- DT::renderDT({
       req(agg_hist())
       df <- build_threshold_table_df(
-        all_series  = all_series_tbl(),
-        group_order = input$cmp_group_order %||% "scenario_x_year"
+        all_series  = all_series(), #all_series_tbl(),
+        group_order = input$cmp_group_order %||% "scenario_x_year",
+        band_q          = if (isTRUE(input$show_coef_uncertainty) && has_draws())
+                            resolve_band_q(input$uncertainty_band %||% "p10_p90")
+                          else NULL,
+        ensemble_band_q = resolve_band_q(input$ensemble_band %||% "minmax"),
+        hist_ref        = hist_ref_val()
       )
       if (!isTRUE(input$show_coef_uncertainty) || !has_draws()) {
         df <- dplyr::filter(df, Estimate == "Central")
@@ -695,7 +692,9 @@ mod_2_02_results_server <- function(id,
         shiny::tags$p(style = "font-size:11px; color:#666; margin-top:0; margin-bottom:2px;",
                       "High odds show the value reached in all but 1-in-N years."),
         shiny::tags$p(style = "font-size:11px; color:#666; margin-top:0;",
-                      "1:1 shows the median (50th percentile) simulated value.")
+                      "1:1 shows the median (50th percentile) simulated value."),
+        shiny::tags$p(style = "font-size:11px; color:#666; margin-top:0;",
+                      "N shows the number of observations used in calcualtion: historical central estimate only has historical years, while future scenarios have that multiplied by the number of ensembles models used in each year. Finally, if coefficient uncertainty is included, the number of underlying draws used in the calculation of the upper and lower is also factored in.")
       )
     })
 
@@ -712,7 +711,8 @@ mod_2_02_results_server <- function(id,
         band_q          = if (isTRUE(input$show_coef_uncertainty) && has_draws())
                             resolve_band_q(input$uncertainty_band %||% "p10_p90")
                           else NULL,
-        ensemble_band_q = resolve_band_q(input$ensemble_band     %||% "minmax")
+        ensemble_band_q = resolve_band_q(input$ensemble_band     %||% "minmax"),
+        hist_ref        = hist_ref_val()
       )
     })
 
@@ -721,14 +721,18 @@ mod_2_02_results_server <- function(id,
       axis_txt <- if (isTRUE(input$exceedance_logit_x))
         "Probability axis is logit-scaled, giving equal visual weight to both tails."
       else
-        "The curve shows the estimated annual exceedance probability for each outcome value."
+        "The line shows the estimated annual exceedance probability for each outcome value."
       tagList(
         shiny::tags$p(style = "font-size:11px; color:#666; margin-top:6px; margin-bottom:2px;",
                       axis_txt),
         shiny::tags$p(style = "font-size:11px; color:#666; margin-top:0; margin-bottom:2px;",
                       "Low odds show the value exceeded in only 1-in-N years."),
         shiny::tags$p(style = "font-size:11px; color:#666; margin-top:0;",
-                      "High odds show the value reached in all but 1-in-N years.")
+                      "High odds show the value reached in all but 1-in-N years."),
+        shiny::tags$p(style = "font-size:11px; color:#666; margin-top:0;",
+                      "If coefficient uncertainty is selected, the band shows the variation from coefficient regresion in addition to other factors."),
+        shiny::tags$p(style = "font-size:11px; color:#666; margin-top:0;",
+                      "Central curve may not sit at median of coefficient uncertainty band, because coefficient draws are applied to the underlying weather variation, not the final exceedance probabilities.")
       )
     })
 

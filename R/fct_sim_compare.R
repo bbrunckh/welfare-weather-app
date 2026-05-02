@@ -182,7 +182,8 @@ plot_pointrange_climate <- function(scenarios, hist_agg,
                                     group_order = "scenario_x_year",
                                     coef_bands_tbl = NULL,
                                     band_q = c(lo = 0.1, hi = 0.9),
-                                    ensemble_band_q = c(lo = 0, hi = 1)) {
+                                    ensemble_band_q = c(lo = 0, hi = 1),
+                                    hist_ref = 0) {
 
   stopifnot(is.list(hist_agg), all(c("out", "x_label") %in% names(hist_agg)))
 
@@ -229,9 +230,13 @@ plot_pointrange_climate <- function(scenarios, hist_agg,
             hi <- quantile(yr_vals, ensemble_band_q[["hi"]], na.rm = TRUE)
             yr_vals[yr_vals >= lo & yr_vals <= hi]
           }))
-          s <- .summarise_vals(trimmed, c(lo = 0, hi = 1))  # min/max of trimmed pool   # 660 point estimates
+          s <- .summarise_vals(trimmed, c(lo = 0, hi = 1))
+          # Apply deviation shift to thick bar edges — hist_ref = 0 when no deviation
+          s$lo_full <- s$lo_full - hist_ref
+          s$hi_full <- s$hi_full - hist_ref
+          s
         } else {
-          summarise_vals(out_df$value, band_q)               # 30 historical values
+          summarise_vals(out_df$value, band_q)
         }
 
         if (is.null(s)) return(NULL)
@@ -239,26 +244,18 @@ plot_pointrange_climate <- function(scenarios, hist_agg,
         # Step 2 — override coef_lo/coef_hi
         if (is_future) {
           if (!is.null(coef_bands_tbl)) {
-            # Coefficient uncertainty ON — pool ALL draws across ALL years
-            all_draws_raw <- unlist(out_df$draw_values)
-            all_draws     <- all_draws_raw[
-              all_draws_raw >= quantile(all_draws_raw, band_q[["lo"]], na.rm = TRUE) &
-              all_draws_raw <= quantile(all_draws_raw, band_q[["hi"]], na.rm = TRUE)
-            ]
-            s$coef_lo <- unname(quantile(all_draws, band_q[["lo"]], na.rm = TRUE))
-            s$coef_hi <- unname(quantile(all_draws, band_q[["hi"]], na.rm = TRUE))
-            s$mean    <- mean(unlist(out_df$value_all), na.rm = TRUE)
-            if (s$coef_lo > s$lo_full)
-              message(sprintf("[debug] coef_lo (%.4f) > lo_full (%.4f) — draws don't extend below point estimates",
-                              s$coef_lo, s$lo_full))
-            if (s$coef_hi < s$hi_full)
-              message(sprintf("[debug] coef_hi (%.4f) < hi_full (%.4f) — draws don't extend above point estimates",
-                              s$coef_hi, s$hi_full))
+            # Use coef_bands_tbl — already deviated by compute_bands_from_raw()
+            # upstream via all_series_tbl(). Mirrors Historical coef_lo/hi path.
+            sc_bands  <- dplyr::filter(coef_bands_tbl, scenario == nm)
+            s$coef_lo <- if (nrow(sc_bands) > 0)
+              mean(sc_bands$value_lo, na.rm = TRUE) else NA_real_
+            s$coef_hi <- if (nrow(sc_bands) > 0)
+              mean(sc_bands$value_hi, na.rm = TRUE) else NA_real_
+            s$mean    <- mean(unlist(out_df$value_all), na.rm = TRUE) - hist_ref
           } else {
-            # Coefficient uncertainty OFF — collapse thin line, use point estimate mean
             s$coef_lo <- NA_real_
             s$coef_hi <- NA_real_
-            s$mean    <- mean(unlist(out_df$value_all), na.rm = TRUE)
+            s$mean    <- mean(unlist(out_df$value_all), na.rm = TRUE) - hist_ref
           }
         } else {
           sc_bands  <- if (!is.null(coef_bands_tbl))
@@ -657,7 +654,10 @@ plot_uncertainty_decomposition <- function(scenarios, hist_agg,
 #'
 #' @importFrom stats quantile median
 #' @export
-build_threshold_table_df <- function(all_series, group_order = "scenario_x_year") {
+build_threshold_table_df <- function(all_series, group_order = "scenario_x_year",
+                               band_q          = c(lo = 0.10, hi = 0.90),
+                               ensemble_band_q = c(lo = 0, hi = 1),
+                               hist_ref = 0) {
 
   # Handle flat tibble format (from all_series_tbl)
   if (inherits(all_series, "data.frame")) {
@@ -666,9 +666,22 @@ build_threshold_table_df <- function(all_series, group_order = "scenario_x_year"
   }
 
   rows <- lapply(names(all_series), function(nm) {
-    out  <- all_series[[nm]]$out
-    vals <- out$value[is.finite(out$value)]
-    n    <- length(vals)
+    out     <- all_series[[nm]]$out
+    is_fut  <- "value_all" %in% names(out) &&
+               any(vapply(out$value_all, length, integer(1L)) > 1L)
+
+    # Central values — ensemble trimmed per year (matches exceedance curve)
+    vals <- if (is_fut) {
+      v <- unlist(lapply(out$value_all, function(yr_vals) {
+        lo <- quantile(yr_vals, ensemble_band_q[["lo"]], na.rm = TRUE)
+        hi <- quantile(yr_vals, ensemble_band_q[["hi"]], na.rm = TRUE)
+        yr_vals[yr_vals >= lo & yr_vals <= hi]
+      }))
+      v[is.finite(v)] - hist_ref #future value_all is raw - apply hist_ref shift here
+    } else {
+      out$value[is.finite(out$value)]   # historical — 30 values unchanged
+    }
+    n <- length(vals)
 
     keep_low  <- names(RP_LOW)[c(n >= 50, n >= 20, n >= 10, n >= 5)]
     keep_high <- names(RP_HIGH)[c(n >= 5, n >= 10, n >= 20, n >= 50)]
@@ -678,13 +691,16 @@ build_threshold_table_df <- function(all_series, group_order = "scenario_x_year"
     build_row <- function(vals_in, nm, row_label) {
       vals_in <- vals_in[is.finite(vals_in)]
       if (length(vals_in) < 2L) return(NULL)
+      # Exceedance prob p maps to sorted position (1 - p):
+      # low exceedance (e.g. 1:50 = 0.02) → high outcome value → quantile at 0.98
+      # high exceedance (e.g. 49:50 = 0.98) → low outcome value → quantile at 0.02
       low_df <- if (length(keep_low) > 0)
         as.data.frame(t(sapply(keep_low,
-          function(th) round(stats::quantile(vals_in, RP_LOW[th]), 3))))
+          function(th) round(stats::quantile(vals_in, 1 - RP_LOW[th]), 3))))
       else data.frame()
       high_df <- if (length(keep_high) > 0)
         as.data.frame(t(sapply(keep_high,
-          function(th) round(stats::quantile(vals_in, RP_HIGH[th]), 3))))
+          function(th) round(stats::quantile(vals_in, 1 - RP_HIGH[th]), 3))))
       else data.frame()
       names(low_df)  <- keep_low
       names(high_df) <- keep_high
@@ -708,29 +724,111 @@ build_threshold_table_df <- function(all_series, group_order = "scenario_x_year"
     
 
     # Lower/Upper rows — from value_lo/value_hi if available
-    #lo_vals <- if (!is.null(out$value_lo)) out$value_lo[is.finite(out$value_lo)] else numeric(0)
-    #hi_vals <- if (!is.null(out$value_hi)) out$value_hi[is.finite(out$value_hi)] else numeric(0)
-    #Keeping old in case need to revert
-    lo_vals <- if (!is.null(out$coef_lo) && any(is.finite(out$coef_lo)))
-      out$coef_lo[is.finite(out$coef_lo)] else
-      if (!is.null(out$value_lo)) out$value_lo[is.finite(out$value_lo)] else numeric(0)
-    hi_vals <- if (!is.null(out$coef_hi) && any(is.finite(out$coef_hi)))
-      out$coef_hi[is.finite(out$coef_hi)] else
-      if (!is.null(out$value_hi)) out$value_hi[is.finite(out$value_hi)] else numeric(0)
+
+    # Build draw_curves [S × n_years] — identical method to enhance_exceedance()
+    # so that lo_vals/hi_vals are derived from the same structure as the ribbon.
+    dv_list   <- out$draw_values
+    n_pt      <- length(vals)   # already ensemble-trimmed above
+
+    draw_curves_tbl <- if (!is.null(band_q) && !is.null(dv_list) &&
+                           length(dv_list) > 0L && n_pt >= 2L) {
+      if (is_fut) {
+        n_mod_yr <- length(out$value_all[[1L]])
+        S_loc    <- round(length(dv_list[[1L]]) / n_mod_yr)
+        dc <- matrix(NA_real_, nrow = S_loc, ncol = n_pt)
+        for (s in seq_len(S_loc)) {
+          yr_s <- unlist(lapply(seq_along(dv_list), function(i) {
+            yr_vals  <- out$value_all[[i]]
+            lo       <- quantile(yr_vals, ensemble_band_q[["lo"]], na.rm = TRUE)
+            hi       <- quantile(yr_vals, ensemble_band_q[["hi"]], na.rm = TRUE)
+            keep_idx <- which(yr_vals >= lo & yr_vals <= hi)
+            if (length(keep_idx) == 0L) return(NULL)
+            dv         <- dv_list[[i]]
+            n_mod      <- length(yr_vals)
+            S_i        <- round(length(dv) / n_mod)
+            draw_mat_i <- matrix(dv, nrow = n_mod, ncol = S_i)
+            draw_mat_i[keep_idx, s, drop = TRUE]
+          }))
+          if (length(yr_s) == n_pt)
+            dc[s, ] <- sort(yr_s, decreasing = FALSE)
+        }
+        dc
+      } else {
+        # Historical: dv_list[[year]][s] — reshape to [S × n_years]
+        S_loc    <- length(dv_list[[1L]])
+        draw_mat <- do.call(rbind, lapply(dv_list, as.numeric))
+        dc <- matrix(NA_real_, nrow = S_loc, ncol = n_pt)
+        for (s in seq_len(S_loc)) {
+          dc[s, ] <- sort(draw_mat[, s], decreasing = FALSE)
+        }
+        dc
+      }
+    } else NULL
+
+    # band_lo/band_hi vectors — column-wise quantile, same as ribbon
+    # lo_vals/hi_vals: sorted values at the band_q edges for build_row()
+    n_draws <- if (!is.null(draw_curves_tbl)) sum(!is.na(draw_curves_tbl)) else 0L
+    lo_vals <- if (!is.null(draw_curves_tbl)) {
+      apply(draw_curves_tbl, 2, quantile, band_q[["lo"]], na.rm = TRUE)
+    } else numeric(0)
+
+    hi_vals <- if (!is.null(draw_curves_tbl)) {
+      apply(draw_curves_tbl, 2, quantile, band_q[["hi"]], na.rm = TRUE)
+    } else numeric(0)
+
+    lo_vals <- lo_vals - hist_ref
+    hi_vals <- hi_vals - hist_ref
 
     if (length(lo_vals) >= 2L && length(hi_vals) >= 2L) {
-      lower <- build_row(lo_vals, nm, "Lower")
-      upper <- build_row(hi_vals, nm, "Upper")
-      dplyr::bind_rows(central, lower, upper)
-    } else {
-      central
+    # lo_vals/hi_vals are the ribbon band edges — sorted ascending, length = n_pt.
+    # Map each RP threshold directly to its position in the sorted vector:
+    #   exceedance prob p → position index = round(p * n_pt)
+    # This mirrors exactly how the ribbon reads band_lo/band_hi at each prob.
+    build_band_row <- function(band_vec, nm, row_label) {
+      n <- length(band_vec)
+      # band_vec is sorted ascending. Exceedance prob p maps to sorted position:
+      #   k = round(n * (1 - p)) + 1
+      # RP_LOW[th]  = low exceedance prob  (e.g. 0.02 for 1:50) → high index → high value
+      # RP_HIGH[th] = high exceedance prob (e.g. 0.98 for 49:50) → low index → low value
+      low_df <- if (length(keep_low) > 0)
+        as.data.frame(t(sapply(keep_low, function(th) {
+          idx <- min(n, round(n * (1 - RP_LOW[th])) + 1L)
+          round(band_vec[idx], 3)
+        })))
+      else data.frame()
+      high_df <- if (length(keep_high) > 0)
+        as.data.frame(t(sapply(keep_high, function(th) {
+          idx <- max(1L, round(n * (1 - RP_HIGH[th])) + 1L)
+          round(band_vec[idx], 3)
+        })))
+      else data.frame()
+      names(low_df)  <- keep_low
+      names(high_df) <- keep_high
+      median_df <- data.frame("1:1" = round(stats::median(band_vec), 3),
+                              check.names = FALSE)
+      cbind(
+        data.frame(Scenario = nm, Estimate = row_label,
+                  Obs = n_draws, check.names = FALSE),
+        low_df, median_df, high_df
+      )
     }
-  })
+    lower <- build_band_row(lo_vals, nm, "Lower")
+    upper <- build_band_row(hi_vals, nm, "Upper")
+    dplyr::bind_rows(central, lower, upper)
+  } else {
+    central
+  }
+})
 
   rows <- Filter(Negate(is.null), rows)
   if (length(rows) == 0) return(NULL)
 
-  all_cols <- unique(unlist(lapply(rows, names)))
+  all_cols <- {
+    seen <- unique(unlist(lapply(rows, names)))
+    fixed <- c("Scenario", "Estimate", "Obs",
+              names(RP_LOW), "1:1", names(RP_HIGH))
+    c(fixed[fixed %in% seen], setdiff(seen, fixed))
+  }
   rows <- lapply(rows, function(r) {
     for (m in setdiff(all_cols, names(r))) r[[m]] <- NA_real_
     r[all_cols]
@@ -781,7 +879,7 @@ build_threshold_table_df <- function(all_series, group_order = "scenario_x_year"
   hist_rows$.est_order <- NULL
   ssp_rows$.est_order  <- NULL
   rbind(hist_rows, ssp_rows)
-}
+  }
 
 
 
@@ -916,7 +1014,8 @@ enhance_exceedance <- function(scenarios,
                                logit_x       = FALSE,
                                ribbon_data   = NULL,
                                band_q          = c(lo = 0.10, hi = 0.90),
-                               ensemble_band_q = c(lo = 0, hi = 1)) {
+                               ensemble_band_q = c(lo = 0, hi = 1),
+                               hist_ref = 0) {
 
   stopifnot(is.list(scenarios), length(scenarios) > 0)
   labels <- names(scenarios)
@@ -945,6 +1044,9 @@ enhance_exceedance <- function(scenarios,
             hi <- quantile(yr_vals, ensemble_band_q[["hi"]], na.rm = TRUE)
             yr_vals[yr_vals >= lo & yr_vals <= hi]
           }))
+          # Apply deviation shift — hist_ref = 0 when no deviation selected.
+          # draw_values used for ribbon are shifted via ribbon_data (already deviated).
+          pt_vals  <- pt_vals - hist_ref
           dv_list  <- out_df$draw_values
           ssp_key  <- .normalise_ssp(nm)
           yr_label <- .parse_year(nm)
@@ -999,8 +1101,8 @@ enhance_exceedance <- function(scenarios,
           # Apply band_q — controlled by coefficient uncertainty selector
           lo_q    <- band_q[["lo"]]
           hi_q    <- band_q[["hi"]]
-          band_lo <- apply(draw_curves, 2, quantile, lo_q, na.rm = TRUE)
-          band_hi <- apply(draw_curves, 2, quantile, hi_q, na.rm = TRUE)
+          band_lo <- apply(draw_curves, 2, quantile, lo_q, na.rm = TRUE) - hist_ref
+          band_hi <- apply(draw_curves, 2, quantile, hi_q, na.rm = TRUE) - hist_ref
 
         } else {
           # Coefficient uncertainty OFF — no ribbon
