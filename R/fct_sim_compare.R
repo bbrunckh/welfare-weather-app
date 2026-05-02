@@ -223,7 +223,6 @@ plot_pointrange_climate <- function(scenarios, hist_agg,
         is_future <- !is.null(out_df$value_all) &&
                     any(vapply(out_df$value_all, length, integer(1L)) > 1L)
 
-        # Step 1 — compute s from point estimates
         s <- if (is_future) {
           trimmed <- unlist(lapply(out_df$value_all, function(yr_vals) {
             lo <- quantile(yr_vals, ensemble_band_q[["lo"]], na.rm = TRUE)
@@ -241,11 +240,8 @@ plot_pointrange_climate <- function(scenarios, hist_agg,
 
         if (is.null(s)) return(NULL)
 
-        # Step 2 — override coef_lo/coef_hi
         if (is_future) {
           if (!is.null(coef_bands_tbl)) {
-            # Use coef_bands_tbl — already deviated by compute_bands_from_raw()
-            # upstream via all_series_tbl(). Mirrors Historical coef_lo/hi path.
             sc_bands  <- dplyr::filter(coef_bands_tbl, scenario == nm)
             s$coef_lo <- if (nrow(sc_bands) > 0)
               mean(sc_bands$value_lo, na.rm = TRUE) else NA_real_

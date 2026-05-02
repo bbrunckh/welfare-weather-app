@@ -65,7 +65,6 @@ mod_2_02_results_ui <- function(id) {
           selected = "p10_p90"
         ),
 
-                # ADD — ensemble variation band selector:
         shiny::selectInput(
           ns("ensemble_band"),
           label    = "Ensemble variation band",
@@ -367,7 +366,7 @@ mod_2_02_results_server <- function(id,
       if (length(sc) == 0) return(list())
       method    <- input$cmp_agg_method %||% "mean"
       deviation <- input$cmp_deviation  %||% "none"
-      hist_ref <- hist_ref_val() #if (!identical(deviation, "none")) hist_ref_val() else NA_real_
+      hist_ref <- hist_ref_val() 
       x_label <- if (identical(deviation, "none")) label_agg_method(method) else
         paste0(label_agg_method(method), " \u2014 ", label_deviation(deviation))
         selected <- selected_scenario_names()
@@ -376,7 +375,6 @@ mod_2_02_results_server <- function(id,
           out <- scenario_agg_rv()[[display_key]][[weight_key()]][[method]]
           if (is.null(out) || nrow(out) == 0L) return(NULL)
           if (!identical(deviation, "none"))
-          #if (!identical(deviation, "none") && !is.na(hist_ref))
             out <- dplyr::mutate(out, value = value - hist_ref)
           list(out = out, x_label = x_label)
         }), names(sc))
@@ -389,10 +387,8 @@ mod_2_02_results_server <- function(id,
       wk     <- weight_key()
       bq <- resolve_band_q(input$uncertainty_band %||% "p10_p90")
 
-      # ADD deviation logic — matches agg_hist() exactly
       hist_ref <- hist_ref_val()
 
-      # Historical ribbon — apply deviation to value AND draw_values
       # Historical ribbon — pass raw draws; deviation applied to result only
         hist_tbl <- hist_agg_rv()[[wk]][[method]]
         hist_ribbon <- if (!is.null(hist_tbl) && nrow(hist_tbl) > 0L) {
@@ -476,7 +472,7 @@ mod_2_02_results_server <- function(id,
                                         "model_q10", "model_q90",
                                         "model_lo",  "model_hi")))
       }
-            # Historical — join deviated value from agg_hist()$out
+      # Historical — join deviated value from agg_hist()$out
       # with lo/hi computed from raw hist_agg_rv()
       hist_raw   <- hist_agg_rv()[[wk]][[method]]
       hist_bands <- compute_bands_from_raw(hist_raw)
@@ -491,8 +487,6 @@ mod_2_02_results_server <- function(id,
         sc_out <- agg_scenarios()[[dk]]$out
         if (is.null(sc_out) || nrow(sc_out) == 0L) return(NULL)
         sc_raw   <- scenario_agg_rv()[[dk]][[wk]][[method]]
-        message(sprintf("[debug] draw_values length for future key: %d",
-                length(sc_raw$draw_values[[1]])))
         if (is.null(sc_raw) || nrow(sc_raw) == 0L) return(NULL)
         sc_bands <- compute_bands_from_raw(sc_raw)
         sc_out |>
@@ -609,7 +603,6 @@ mod_2_02_results_server <- function(id,
       shiny::tags$table(
         id    = "scenario-filter-grid",
         style = "border-collapse:collapse; margin-top:4px;",
-        # ADD this style tag to tighten checkboxes:
         shiny::tags$style(shiny::HTML("
           #scenario-filter-grid .checkbox { margin: 0; padding: 0; }
           #scenario-filter-grid .checkbox label { 
@@ -637,13 +630,9 @@ mod_2_02_results_server <- function(id,
         scenarios   = all_series(),
         hist_agg    = agg_hist(),
         group_order = input$cmp_group_order %||% "scenario_x_year",
-        coef_bands_tbl   = if (isTRUE(input$show_coef_uncertainty) && has_draws()) {
-          tbl <- all_series_tbl() 
-          message("[debug] coef_bands_tbl cols: ", paste(names(tbl), collapse = ", "))
-          tbl 
-        } else NULL,
+        coef_bands_tbl   = if (isTRUE(input$show_coef_uncertainty) && has_draws()) all_series_tbl() else NULL,
         band_q         = resolve_band_q(input$uncertainty_band %||% "p10_p90"),
-        ensemble_band_q  = resolve_band_q(input$ensemble_band     %||% "p10_p90"),
+        ensemble_band_q  = resolve_band_q(input$ensemble_band     %||% "minmax"),
         hist_ref        = hist_ref_val()
       )
     }, height = 600)
@@ -651,7 +640,7 @@ mod_2_02_results_server <- function(id,
     output$summary_threshold_table <- DT::renderDT({
       req(agg_hist())
       df <- build_threshold_table_df(
-        all_series  = all_series(), #all_series_tbl(),
+        all_series  = all_series(), 
         group_order = input$cmp_group_order %||% "scenario_x_year",
         band_q          = if (isTRUE(input$show_coef_uncertainty) && has_draws())
                             resolve_band_q(input$uncertainty_band %||% "p10_p90")

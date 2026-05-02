@@ -310,3 +310,22 @@ accumulates across keys until R exhausts available RAM and crashes.
 
 ### Related Issues
 - Phase 4 speed improvements (parallelisation) deferred until this is resolved
+
+##  DEV ISSUE #20 — Outcome direction inconsistency across transformations
+ The exceedance curve, outcome table, and hero plot all assume that
+ "rare event" (low exceedance probability) = "bad/extreme outcome".
+ This is true for welfare (mean consumption) but REVERSED for poverty rate
+ and other negatively-scaled outcomes (higher poverty = worse).
+
+# Affected code:
+   - build_row() in fct_sim_compare.R: quantile(vals_in, 1 - RP_LOW[th])
+   - all_cols ordering in build_threshold_table_df(): fixed RP_LOW → RP_HIGH
+   - enhance_exceedance(): no scale_x_reverse() for poverty outcomes
+
+# Fix (deferred): 
+ add an `outcome_direction` parameter ("higher_is_better" /
+ "lower_is_better") to build_threshold_table_df() and enhance_exceedance().
+ When "lower_is_better": reverse column order in table and add
+ scale_x_reverse() to exceedance plot.
+
+# Source: outcome metadata in fct_outcome.R outcome registry.
