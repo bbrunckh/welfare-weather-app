@@ -249,7 +249,7 @@ mod_2_02_results_server <- function(id,
     })
     outputOptions(output, "weight_status_ui", suspendWhenHidden = TRUE)
 
-    output$coef_uncertainty_status_ui <- shiny::renderUI({
+  output$coef_uncertainty_status_ui <- shiny::renderUI({
       req(hist_sim())
       if (!has_draws()) {
         shiny::tags$p(
@@ -283,9 +283,6 @@ mod_2_02_results_server <- function(id,
     # Debounce — wait 800ms after last change before recomputing
     # Prevents 300 recomputes per keypress when typing a poverty line value
     pov_line_val <- debounce(pov_line_raw, 800)
-    
-    
-    # ---- Helpers ------------------------------------------------------------
     weight_key <- reactive({
       if (isTRUE(input$use_weights) &&
           !is.null(hist_sim()) &&
@@ -438,36 +435,27 @@ mod_2_02_results_server <- function(id,
     })
     
 
-          all_series <- reactive({
+      all_series <- reactive({
       req(agg_hist())
-      show_coef <- isTRUE(input$show_coef_uncertainty) && has_draws()
-      hist_ref  <- hist_ref_val()
-      wk        <- weight_key()
-      method    <- input$cmp_agg_method %||% "mean"
+      bq       <- resolve_band_q(input$uncertainty_band %||% "p10_p90")
+      hist_ref <- hist_ref_val()
+      wk       <- weight_key()
+      method   <- input$cmp_agg_method %||% "mean"
 
-      # Historical
+      # Historical — add deviated value_lo/hi for hero plot whiskers
+      hist_raw_tbl <- hist_agg_rv()[[wk]][[method]]
       hist_out <- agg_hist()$out |>
-        dplyr::mutate(scenario = "Historical")
-
-      if (show_coef) {
-        bq           <- resolve_band_q(input$uncertainty_band %||% "p10_p90")
-        hist_raw_tbl <- hist_agg_rv()[[wk]][[method]]
-        hist_out <- hist_out |>
-          dplyr::mutate(
-            value_lo = purrr::map_dbl(
-              hist_raw_tbl$draw_values,
-              ~if (is.null(.x) || length(.x) == 0L) NA_real_
-               else quantile(.x, bq["lo"], na.rm = TRUE) - hist_ref),
-            value_hi = purrr::map_dbl(
-              hist_raw_tbl$draw_values,
-              ~if (is.null(.x) || length(.x) == 0L) NA_real_
-               else quantile(.x, bq["hi"], na.rm = TRUE) - hist_ref)
-          )
-      } else {
-        hist_out <- hist_out |>
-          dplyr::mutate(value_lo = NA_real_, value_hi = NA_real_)
-      }
-
+        dplyr::mutate(
+          value_lo = purrr::map_dbl(
+            hist_raw_tbl$draw_values,
+            ~if (is.null(.x) || length(.x) == 0L) NA_real_
+             else quantile(.x, bq["lo"], na.rm = TRUE) - hist_ref),
+          value_hi = purrr::map_dbl(
+            hist_raw_tbl$draw_values,
+            ~if (is.null(.x) || length(.x) == 0L) NA_real_
+             else quantile(.x, bq["hi"], na.rm = TRUE) - hist_ref),
+          scenario = "Historical"
+        )
       hist_list <- list(Historical = list(out = hist_out,
                                           x_label = agg_hist()$x_label))
 
@@ -476,38 +464,26 @@ mod_2_02_results_server <- function(id,
 
       sc_list <- setNames(lapply(names(sc), function(dk) {
         sc_out <- sc[[dk]]$out
-        if (is.null(sc_out)) return(NULL)
+        sc_raw <- scenario_agg_rv()[[dk]][[wk]][[method]]
+        if (is.null(sc_out) || is.null(sc_raw)) return(NULL)
         out <- sc_out |>
-          dplyr::mutate(scenario = dk)
-
-        if (show_coef) {
-          bq     <- resolve_band_q(input$uncertainty_band %||% "p10_p90")
-          sc_raw <- scenario_agg_rv()[[dk]][[wk]][[method]]
-          if (!is.null(sc_raw)) {
-            out <- out |>
-              dplyr::mutate(
-                value_lo = purrr::map_dbl(
-                  sc_raw$draw_values,
-                  ~if (is.null(.x) || length(.x) == 0L) NA_real_
-                   else quantile(.x, bq["lo"], na.rm = TRUE) - hist_ref),
-                value_hi = purrr::map_dbl(
-                  sc_raw$draw_values,
-                  ~if (is.null(.x) || length(.x) == 0L) NA_real_
-                   else quantile(.x, bq["hi"], na.rm = TRUE) - hist_ref)
-              )
-          } else {
-            out <- out |>
-              dplyr::mutate(value_lo = NA_real_, value_hi = NA_real_)
-          }
-        } else {
-          out <- out |>
-            dplyr::mutate(value_lo = NA_real_, value_hi = NA_real_)
-        }
+          dplyr::mutate(
+            value_lo = purrr::map_dbl(
+              sc_raw$draw_values,
+              ~if (is.null(.x) || length(.x) == 0L) NA_real_
+               else quantile(.x, bq["lo"], na.rm = TRUE) - hist_ref),
+            value_hi = purrr::map_dbl(
+              sc_raw$draw_values,
+              ~if (is.null(.x) || length(.x) == 0L) NA_real_
+               else quantile(.x, bq["hi"], na.rm = TRUE) - hist_ref),
+            scenario = dk
+          )
         list(out = out, x_label = sc[[dk]]$x_label)
       }), names(sc))
 
       c(hist_list, Filter(Negate(is.null), sc_list))
     })
+
 
 
 
@@ -779,9 +755,9 @@ mod_2_02_results_server <- function(id,
     }, ignoreInit = TRUE)
 
     # ---- Suspend outputs when Results tab is hidden ----------------------
-    outputOptions(output, "summary_box_plot",        suspendWhenHidden = TRUE, priority = 3)
-    outputOptions(output, "summary_threshold_table", suspendWhenHidden = TRUE, priority = 1)
-    outputOptions(output, "exceedance_plot",         suspendWhenHidden = TRUE, priority = 2)
+    outputOptions(output, "summary_box_plot",        suspendWhenHidden = TRUE)
+    outputOptions(output, "summary_threshold_table", suspendWhenHidden = TRUE)
+    outputOptions(output, "exceedance_plot",         suspendWhenHidden = TRUE)
     outputOptions(output, "results_header_ui",       suspendWhenHidden = TRUE)
     outputOptions(output, "cmp_pov_line_ui",         suspendWhenHidden = TRUE)
     outputOptions(output, "scenario_filter_ui",      suspendWhenHidden = TRUE)
