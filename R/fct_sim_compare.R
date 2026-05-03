@@ -793,9 +793,8 @@ enhance_exceedance <- function(scenarios,
           yr_label <- "Historical"
         } else {
           out_df  <- scenarios[[nm]]$out
-          is_fut  <- "value_all" %in% names(out_df) &&
-                    any(vapply(out_df$value_all, length, integer(1L)) > 1L)
-          if (!is_fut) return(NULL)
+          
+          
 
           # Per-year ensemble trim — controlled by ensemble_band_q
           pt_vals <- unlist(lapply(out_df$value_all, function(yr_vals) {

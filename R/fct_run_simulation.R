@@ -168,7 +168,6 @@ fct_run_simulation <- function(sw,
     ))
 
   # ---- Key loop setup ----------------------------------------------------- #
-  progress_fn(0.5, "Running simulations...")
 
   weight_col_sim <- grep("^weight$|^hhweight$|^wgt$|^pw$",
                           names(svy), value = TRUE, ignore.case = TRUE)[1L]
@@ -250,29 +249,35 @@ fct_run_simulation <- function(sw,
 
   # ---- Pre-run all pipelines (parallel or sequential) --------------------- #
   progress_fn(0.50, "Running simulations...")
-  message("[wiseapp] Running simulation pipelines...")
 
   t_start <- t_start_total   # key loop elapsed = total elapsed from function entry
 
     # Increase globals size limit for parallel workers
     # svy + model + weather_result require ~3GB total — set limit accordingly #DRK Note - May need to adjust.
-    old_max <- getOption("future.globals.maxSize")
-    options(future.globals.maxSize = 4 * 1024^3)  # 4GB
-    on.exit(options(future.globals.maxSize = old_max), add = TRUE)
+    #old_max <- getOption("future.globals.maxSize")
+    #options(future.globals.maxSize = 4 * 1024^3)  # 4GB
+    #on.exit(options(future.globals.maxSize = old_max), add = TRUE)
 
-    t_start_pipeline <- proc.time()[["elapsed"]]
-    message("[wiseapp] Running simulation pipelines...")
-    progress_fn(0.35, sprintf("Running %d simulation pipelines...", n_keys))
+  t_start_pipeline <- proc.time()[["elapsed"]]
+  message("[wiseapp] Running simulation pipelines...")
+  progress_fn(0.35, sprintf("Running %d simulation pipelines...", n_keys))
 
-    pipeline_list <- if (isTRUE(use_parallel) && n_workers_safe > 1L) {
+  # Pre-split weather_result per key — each parallel worker only
+  # receives its own key's weather data (~10MB) not the full 228MB
+  weather_per_key <- setNames(
+    lapply(all_keys, function(k) weather_result[[k]]),
+    all_keys
+  )
+
+  pipeline_list <- if (isTRUE(use_parallel) && n_workers_safe > 1L) {
     # Parallel path — future_lapply across keys
-    future.apply::future_lapply(
+        future.apply::future_lapply(
       seq_along(all_keys),
       function(ki) {
         key <- all_keys[[ki]]
         tryCatch(
           run_sim_pipeline(
-            weather_raw = weather_result[[key]],
+            weather_raw = weather_per_key[[key]],
             svy         = svy,
             sw          = sw,
             so          = so,
@@ -289,8 +294,20 @@ fct_run_simulation <- function(sw,
           }
         )
       },
-      future.seed = TRUE,
-      future.packages = "wiseapp" #DRK Note - Hopefully sufficient
+      future.seed     = TRUE,
+      future.packages = "wiseapp",
+      future.globals  = list(
+        all_keys        = all_keys,
+        weather_per_key = weather_per_key,
+        svy             = svy,
+        sw              = sw,
+        so              = so,
+        model           = model,
+        residuals       = residuals,
+        train_data      = train_data,
+        engine          = engine,
+        chol_obj        = chol_obj
+      )
     )
   } else {
     # Serial path — per-key messages fire BEFORE each key runs
@@ -324,7 +341,7 @@ fct_run_simulation <- function(sw,
       )
       pl[[ki]] <- tryCatch(
         run_sim_pipeline(
-          weather_raw = weather_result[[key]],
+          weather_raw = weather_per_key[[key]],
           svy         = svy,
           sw          = sw,
           so          = so,
@@ -343,6 +360,16 @@ fct_run_simulation <- function(sw,
     }
     pl
   }
+
+  rm(weather_per_key)
+  gc(verbose = FALSE)
+  
+  t_pipeline_done <- proc.time()[["elapsed"]] - t_start_pipeline
+  message(sprintf("[wiseapp] All %d pipelines complete in %s",
+                  n_keys, format_elapsed(t_pipeline_done)))
+  progress_fn(0.80, sprintf("Pipelines complete (%s) — grouping results...",
+                             format_elapsed(t_pipeline_done)))
+
 
 
   # ---- Key loop ----------------------------------------------------------- #
