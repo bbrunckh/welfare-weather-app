@@ -52,7 +52,7 @@ mod_2_02_results_ui <- function(id) {
         ),
         shiny::selectInput(
           ns("uncertainty_band"),
-          label   = "Uncertainty band",
+          label   = "Coefficient Uncertainty",
           choices = c(
             "50% (p25-p75)"    = "p25_p75",
             "60% (p20-p80)"    = "p20_p80",
@@ -67,7 +67,7 @@ mod_2_02_results_ui <- function(id) {
 
         shiny::selectInput(
           ns("ensemble_band"),
-          label    = "Ensemble variation band",
+          label    = "Ensemble Variation",
           choices  = c(
             "50%" = "p25_p75",
             "60%" = "p20_p80",

@@ -191,7 +191,33 @@ mod_2_01_weathersim_ui <- function(id) {
       shiny::checkboxInput(
         ns("exclude_gini"),
         label = "Exclude Gini coefficient (faster computation)",
-        value = TRUE  # default ON — gini excluded
+        value = TRUE
+      ),
+      shiny::tags$hr(style = "margin: 6px 0;"),
+      shiny::tags$h6("Parallel computation",
+                     style = "font-weight:600; margin-bottom:4px;"),
+      shiny::checkboxInput(
+        ns("use_parallel"),
+        label = "Use parallel computation",
+        value = FALSE
+      ),
+      shiny::conditionalPanel(
+        condition = sprintf("input['%s'] == true", ns("use_parallel")),
+        shiny::sliderInput(
+          ns("n_workers"),
+          label = "CPU cores to use",
+          min   = 2L,
+          max   = max(2L, parallelly::availableCores(logical = FALSE) - 1L),
+          value = min(4L, parallelly::availableCores(logical = FALSE) - 1L),
+          step  = 1L
+        ),
+        shiny::helpText(
+          sprintf(
+            "%d physical cores detected. 1 reserved for app session.",
+            parallelly::availableCores(logical = FALSE)
+          ),
+          style = "font-size:11px; color:#555;"
+        )
       )
     ),
     shiny::tags$hr(style = "margin: 10px 0;"),
@@ -521,7 +547,9 @@ mod_2_01_weathersim_server <- function(id,
             perturbation_method = perturbation_method,
             stored_breaks       = stored_breaks(),
             ensemble_band_q     = ensemble_band_q,
-             full_ensemble       = FALSE,   # input$full_ensemble not yet in UI
+            full_ensemble       = FALSE,   
+            use_parallel        = isTRUE(input$use_parallel),
+            n_workers           = as.integer(input$n_workers %||% 1L),
             progress_fn         = function(value, detail)
                                     shiny::setProgress(value = value,
                                                        detail = detail)
@@ -597,14 +625,25 @@ mod_2_01_weathersim_server <- function(id,
       })
 
       # ---- Dev fixture saving (dev mode only) ------------------------------
+      #Useful for diagnostics and testing to capture the exact inputs to the aggregation functions without having to run the full simulation repeatedly. 
+      # Saved as a list with named elements for easy access in tests. Adds computational time
       if (!isTRUE(getOption("golem.app.prod"))) {
         tryCatch({
           dir.create("dev/fixtures", showWarnings = FALSE, recursive = TRUE)
           saveRDS(list(
+            # Pipeline results (already there)
             hist_sim     = result$hist_sim_result[[1L]],
             scenario_sim = result$new_scenarios[[1L]],
             chol_obj     = result$chol_obj,
-            pov_line     = as.numeric(input$pov_line_sim)
+            pov_line     = as.numeric(input$pov_line_sim),
+            # Full pipeline inputs — needed for run_sim_pipeline() benchmark
+            survey_data  = svy,
+            model        = mf$fit3,
+            engine       = mf$engine,
+            train_data   = mf$train_data,
+            sw           = sw,
+            so           = so,
+            residuals    = sh$residuals
           ), "dev/fixtures/sim_inputs.rds")
           message("[dev] Fixtures saved to dev/fixtures/sim_inputs.rds")
         }, error = function(e) {

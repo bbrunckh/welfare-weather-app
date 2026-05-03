@@ -68,6 +68,8 @@ fct_run_simulation <- function(sw,
                                 stored_breaks,
                                 ensemble_band_q,
                                 full_ensemble,
+                                use_parallel = FALSE,
+                                n_workers = 1L,
                                 notify_fn   = function(msg) message(msg),
                                 progress_fn = function(value, detail) invisible(NULL)) {
 
@@ -199,8 +201,114 @@ fct_run_simulation <- function(sw,
     total_runs
   ))
 
-  # ---- Key loop ----------------------------------------------------------- #
+    # ---- Parallel plan ------------------------------------------------------ #
+  if (isTRUE(use_parallel) && n_workers > 1L) {
+    n_workers_safe <- min(
+      as.integer(n_workers),
+      parallelly::availableCores(logical = FALSE) - 1L,
+      8L
+    )
+    # Install wiseapp so multisession workers can load it
+    # In dev mode (pkgload::load_all()) the package is not installed —
+    # workers spawn fresh R sessions that need the installed version
+    if (!isTRUE(getOption("golem.app.prod"))) {
+      pkg_version <- tryCatch(
+        utils::packageVersion("wiseapp"),
+        error = function(e) NULL
+      )
+      if (is.null(pkg_version)) {
+        message("[wiseapp] Installing package for parallel workers...")
+        suppressMessages(devtools::install(quiet = TRUE, upgrade = "never"))
+        message("[wiseapp] Package installed — starting workers.")
+      } else {
+        message(sprintf(
+          "[wiseapp] Package v%s already installed — skipping install.",
+          pkg_version
+        ))
+      }
+    }
+    message(sprintf("[wiseapp] Parallel mode: %d workers (multisession)",
+                    n_workers_safe))
+    future::plan(future::multisession, workers = n_workers_safe)
+    on.exit(future::plan(future::sequential), add = TRUE)
+  } else {
+    n_workers_safe <- 1L
+    future::plan(future::sequential)
+    on.exit(future::plan(future::sequential), add = TRUE)
+  }
+
+  # ---- Pre-run all pipelines (parallel or sequential) --------------------- #
+  progress_fn(0.50, "Running simulations...")
+  message("[wiseapp] Running simulation pipelines...")
+
   t_start          <- proc.time()[["elapsed"]]
+
+    # Increase globals size limit for parallel workers
+    # svy + model + weather_result require ~3GB total — set limit accordingly #DRK Note - May need to adjust.
+    old_max <- getOption("future.globals.maxSize")
+    options(future.globals.maxSize = 4 * 1024^3)  # 4GB
+    on.exit(options(future.globals.maxSize = old_max), add = TRUE)
+
+    pipeline_list <- if (isTRUE(use_parallel) && n_workers_safe > 1L) {
+    # Parallel path — future_lapply across keys
+    future.apply::future_lapply(
+      seq_along(all_keys),
+      function(ki) {
+        key <- all_keys[[ki]]
+        tryCatch(
+          run_sim_pipeline(
+            weather_raw = weather_result[[key]],
+            svy         = svy,
+            sw          = sw,
+            so          = so,
+            model       = model,
+            residuals   = residuals,
+            train_data  = train_data,
+            engine      = engine,
+            chol_obj    = chol_obj
+          ),
+          error = function(e) {
+            warning(sprintf("[fct_run_simulation] Key %s failed: %s",
+                            key, conditionMessage(e)))
+            NULL
+          }
+        )
+      },
+      future.seed = TRUE,
+      future.packages = "wiseapp" #DRK Note - Hopefully sufficient
+    )
+  } else {
+    # Serial path — plain for loop with per-key progress messages
+    pl <- vector("list", length(all_keys))
+    for (ki in seq_along(all_keys)) {
+      key       <- all_keys[[ki]]
+      is_hist_k <- identical(key, "historical")
+      t_el      <- proc.time()[["elapsed"]] - t_start
+      pl[[ki]] <- tryCatch(
+        run_sim_pipeline(
+          weather_raw = weather_result[[key]],
+          svy         = svy,
+          sw          = sw,
+          so          = so,
+          model       = model,
+          residuals   = residuals,
+          train_data  = train_data,
+          engine      = engine,
+          chol_obj    = chol_obj
+        ),
+        error = function(e) {
+          warning(sprintf("[fct_run_simulation] Key %s failed: %s",
+                          key, conditionMessage(e)))
+          NULL
+        }
+      )
+    }
+    pl
+  }
+
+
+  # ---- Key loop ----------------------------------------------------------- #
+  
   hist_sim_result  <- NULL
   new_scenarios    <- list()
   group_agg        <- list()
@@ -228,17 +336,7 @@ fct_run_simulation <- function(sw,
       else " | estimating..."
     ))
 
-    out <- run_sim_pipeline(
-      weather_raw = weather_result[[key]],
-      svy         = svy,
-      sw          = sw,
-      so          = so,
-      model       = model,
-      residuals   = residuals,
-      train_data  = train_data,
-      engine      = engine,
-      chol_obj    = chol_obj
-    )
+    out <- pipeline_list[[ki]]
 
     key_weather_raw        <- if (is_hist) weather_result[[key]] else NULL
     weather_result[[key]]  <- NULL
@@ -311,7 +409,7 @@ fct_run_simulation <- function(sw,
     if (ki %% 10L == 0L) gc(verbose = FALSE)
   }
 
-  rm(weather_result); gc(verbose = FALSE)
+  rm(pipeline_list, weather_result); gc(verbose = FALSE)
 
   # ---- Assemble new_scenarios --------------------------------------------- #
   for (gk in names(group_agg)) {
