@@ -187,7 +187,6 @@ plot_pointrange_climate <- function(scenarios, hist_agg,
 
   stopifnot(is.list(hist_agg), all(c("out", "x_label") %in% names(hist_agg)))
 
-  summarise_vals <- .summarise_vals
 
   # ---- historical summary --------------------------------------------------
   hist_s <- .summarise_vals(hist_agg$out$value, c(lo = 0, hi = 1)) #Historical Band always full range
@@ -210,7 +209,7 @@ plot_pointrange_climate <- function(scenarios, hist_agg,
   # Each scenario key is "SSP2-4.5 / 2025-2035" (one entry per SSP x period,
   # with all ensemble model predictions already pooled in the preds data frame).
   fut_df        <- NULL
-  ssp_short_map <- SSP_SHORT_LABELS
+
 
   if (length(scenarios) > 0) {
     future_nms <- names(scenarios)[vapply(names(scenarios),
@@ -235,7 +234,7 @@ plot_pointrange_climate <- function(scenarios, hist_agg,
           s$hi_full <- s$hi_full - hist_ref
           s
         } else {
-          summarise_vals(out_df$value, band_q)
+          .summarise_vals(out_df$value, band_q)
         }
 
         if (is.null(s)) return(NULL)
@@ -263,7 +262,7 @@ plot_pointrange_climate <- function(scenarios, hist_agg,
         }
 
         ssp_key       <- .normalise_ssp(nm)
-        ssp_short     <- ssp_short_map[ssp_key] %||% ssp_key
+        ssp_short     <- SSP_SHORT_LABELS[ssp_key] %||% ssp_key
         yr            <- .parse_year(nm)
         s$pt_key      <- paste0(ssp_short, "\n", yr)
         s$colour_key  <- paste(ssp_key, yr, sep = "__")
@@ -394,237 +393,6 @@ plot_pointrange_climate <- function(scenarios, hist_agg,
       panel.grid.minor.x = ggplot2::element_blank(),
       axis.text.x        = ggplot2::element_text(size = 10),
       legend.position    = "none"
-    )
-}
-
-# ---------------------------------------------------------------------------- #
-# Uncertainty decomposition chart                                              #
-# ---------------------------------------------------------------------------- #
-
-#' Decomposed Uncertainty Point-Range Chart
-#'
-#' Three-facet chart showing annual variability, model uncertainty, and combined
-#' uncertainty separately, using the same x-axis layout and colour palette as
-#' \code{plot_pointrange_climate()}.
-#'
-#' \describe{
-#'   \item{Annual variability}{CI from model-averaged annual means (N_years values).
-#'     Represents weather-driven year-to-year variation.}
-#'   \item{Model uncertainty}{CI from year-averaged per-model means (N_models values).
-#'     Represents disagreement across CMIP6 ensemble members.}
-#'   \item{Combined}{CI from all N_models × N_years values — same as the main
-#'     results chart above.}
-#' }
-#'
-#' Historical is shown only in the Annual variability and Combined facets (it has
-#' no model dimension).
-#'
-#' @param scenarios Named list of \code{aggregate_sim_preds()} outputs for future
-#'   scenarios, as produced by \code{agg_scenarios()}.
-#' @param hist_agg  \code{aggregate_sim_preds()} output for the historical series.
-#' @param group_order Character. \code{"scenario_x_year"} (default) or
-#'   \code{"year_x_scenario"}.
-#'
-#' @return A ggplot object.
-#' @importFrom ggplot2 ggplot aes geom_linerange geom_point geom_hline
-#'   scale_colour_manual scale_x_discrete facet_wrap labs theme_minimal theme
-#'   element_blank element_text element_rect
-#' @importFrom colorspace lighten
-#' @importFrom dplyr bind_rows
-#' @importFrom stats quantile
-#' @importFrom rlang .data
-#' @export
-plot_uncertainty_decomposition <- function(scenarios, hist_agg,
-                                           group_order = "scenario_x_year") {
-
-  stopifnot(is.list(hist_agg), all(c("out", "x_label") %in% names(hist_agg)))
-
-  ssp_short_map <- c("SSP2-4.5" = "SSP2", "SSP3-7.0" = "SSP3", "SSP5-8.5" = "SSP5")
-  sources       <- c("Annual variability", "Model uncertainty", "Coefficient uncertainty", "Combined")
-
-  hist_mean <- mean(hist_agg$out$value, na.rm = TRUE)
-
-  # ---- historical rows (Annual + Combined; no Model facet) ------------------
-  hist_decomp <- .decompose_scenario_uncertainty(hist_agg$out)
-  hist_rows   <- dplyr::bind_rows(lapply(c("Annual variability", "Coefficient uncertainty", "Combined"), function(src) {
-    vals <- switch(src,
-      "Annual variability"      = hist_decomp$annual,
-      "Coefficient uncertainty" = if (!is.null(hist_decomp$coef_lo))
-                                    c(hist_decomp$coef_lo, hist_decomp$coef_hi)
-                                  else NULL,
-      "Combined"                = hist_decomp$total
-    )
-    s <- .summarise_vals(vals)
-    if (is.null(s)) return(NULL)
-    cbind(s, data.frame(
-      pt_key     = "Historical",
-      colour_key = "Historical",
-      ssp_key    = "Historical",
-      ssp_short  = "Historical",
-      yr         = NA_character_,
-      source     = src,
-      n_vals     = length(vals),
-      stringsAsFactors = FALSE
-    ))
-  }))
-
-  # ---- future scenario rows -------------------------------------------------
-  fut_rows <- NULL
-  future_nms <- if (length(scenarios) > 0)
-    names(scenarios)[vapply(names(scenarios),
-      function(nm) !is.na(.normalise_ssp(nm)), logical(1))]
-  else character(0)
-
-  if (length(future_nms) > 0) {
-    row_list <- lapply(future_nms, function(nm) {
-      decomp    <- .decompose_scenario_uncertainty(scenarios[[nm]]$out)
-      ssp_key   <- .normalise_ssp(nm)
-      ssp_short <- ssp_short_map[ssp_key] %||% ssp_key
-      yr        <- .parse_year(nm)
-      pt_key    <- paste0(ssp_short, "\n", yr)
-      ck        <- paste(ssp_key, yr, sep = "__")
-      dplyr::bind_rows(lapply(sources, function(src) {
-        vals <- switch(src,
-          "Annual variability"      = decomp$annual,
-          "Model uncertainty"       = decomp$model,
-          "Coefficient uncertainty" = if (!is.null(decomp$coef_lo))
-                                        c(decomp$coef_lo, decomp$coef_hi)
-                                      else NULL,
-          "Combined"                = decomp$total
-        )
-        if (is.null(vals)) return(NULL)
-        s <- .summarise_vals(vals)
-        if (is.null(s)) return(NULL)
-        cbind(s, data.frame(
-          pt_key     = pt_key,
-          colour_key = ck,
-          ssp_key    = ssp_key,
-          ssp_short  = ssp_short,
-          yr         = yr,
-          source     = src,
-          n_vals     = length(vals),
-          stringsAsFactors = FALSE
-        ))
-      }))
-    })
-    fut_rows <- dplyr::bind_rows(Filter(Negate(is.null), row_list))
-  }
-
-  plot_df <- dplyr::bind_rows(hist_rows, fut_rows)
-  if (is.null(plot_df) || nrow(plot_df) == 0)
-    return(ggplot2::ggplot() +
-      ggplot2::labs(title = "Run a simulation to see uncertainty decomposition."))
-
-  # ---- colour palette (mirrors plot_pointrange_climate) --------------------
-  colour_palette <- c("Historical" = "#808080")
-  if (!is.null(fut_rows) && nrow(fut_rows) > 0) {
-    yrs_present <- sort(unique(fut_rows$yr))
-    n_yrs       <- length(yrs_present)
-    yr_lighten  <- if (n_yrs > 1) seq(0.30, 0.0, length.out = n_yrs) else 0.0
-    for (ssp in intersect(names(.ssp_colours), unique(fut_rows$ssp_key))) {
-      base_col <- .ssp_colours[ssp]
-      for (i in seq_along(yrs_present)) {
-        ck <- paste(ssp, yrs_present[i], sep = "__")
-        colour_palette[ck] <- colorspace::lighten(base_col, yr_lighten[i])
-      }
-    }
-  }
-
-  # ---- x-axis ordering (same logic as plot_pointrange_climate) -------------
-  ordered_levels <- "Historical"
-  spacer_ids     <- character(0)
-
-  if (!is.null(fut_rows) && nrow(fut_rows) > 0) {
-    fut_meta <- unique(fut_rows[, c("pt_key", "ssp_short", "yr")])
-    if (isTRUE(group_order == "year_x_scenario")) {
-      yrs_present  <- sort(unique(fut_meta$yr))
-      ssps_present <- intersect(c("SSP2", "SSP3", "SSP5"), unique(fut_meta$ssp_short))
-      spacer_n <- 0L
-      for (yr_i in yrs_present) {
-        spacer_n <- spacer_n + 1L; sid <- strrep(" ", spacer_n)
-        spacer_ids <- c(spacer_ids, sid); ordered_levels <- c(ordered_levels, sid)
-        for (ssp in ssps_present) ordered_levels <- c(ordered_levels, paste0(ssp, "\n", yr_i))
-      }
-    } else {
-      ssps_present <- intersect(c("SSP2", "SSP3", "SSP5"), unique(fut_meta$ssp_short))
-      spacer_n <- 0L
-      for (ssp in ssps_present) {
-        spacer_n <- spacer_n + 1L; sid <- strrep(" ", spacer_n)
-        spacer_ids <- c(spacer_ids, sid); ordered_levels <- c(ordered_levels, sid)
-        ssp_yrs <- sort(unique(fut_meta$yr[fut_meta$ssp_short == ssp]))
-        for (yr_i in ssp_yrs) ordered_levels <- c(ordered_levels, paste0(ssp, "\n", yr_i))
-      }
-    }
-  }
-
-  x_label_map <- setNames(
-    vapply(ordered_levels, function(lv) {
-      if (lv %in% spacer_ids) "" else lv
-    }, character(1)),
-    ordered_levels
-  )
-  data_levels <- setdiff(ordered_levels, spacer_ids)
-
-  # ---- facet factor ---------------------------------------------------------
-  plot_df$source <- factor(plot_df$source, levels = sources)
-  plot_df$pt_key <- factor(plot_df$pt_key, levels = ordered_levels)
-  plot_df <- plot_df[plot_df$pt_key %in% data_levels, ]
-  if (nrow(plot_df) == 0)
-    return(ggplot2::ggplot() +
-      ggplot2::labs(title = "Run a future simulation to see uncertainty decomposition."))
-
-
-  # Reference line data: one row per facet, but only show for relevant sources
-  hline_df <- data.frame(
-    source       = factor(c("Annual variability", "Coefficient uncertainty", "Combined"), levels = sources),
-    hist_mean    = hist_mean
-  )
-
-  ggplot2::ggplot(plot_df,
-    ggplot2::aes(x = .data$pt_key, colour = .data$colour_key)
-  ) +
-  ggplot2::geom_linerange(
-    ggplot2::aes(ymin = .data$lo95, ymax = .data$hi95),
-    linewidth = 0.5, colour = "grey70"
-  ) +
-  ggplot2::geom_linerange(
-    ggplot2::aes(ymin = .data$lo90, ymax = .data$hi90),
-    linewidth = 2.0
-  ) +
-  ggplot2::geom_point(
-    ggplot2::aes(y = .data$mean),
-    size = 3.0, shape = 21, fill = "white", stroke = 1.4
-  ) +
-    ggplot2::geom_hline(
-      data      = hline_df,
-      ggplot2::aes(yintercept = hist_mean),
-      linetype  = "dashed", colour = "#808080", linewidth = 0.55,
-      inherit.aes = FALSE
-    ) +
-    ggplot2::scale_colour_manual(values = colour_palette, guide = "none") +
-    ggplot2::scale_x_discrete(
-      limits = ordered_levels,
-      labels = x_label_map,
-      drop   = FALSE
-    ) +
-    ggplot2::facet_wrap(
-      ~ source, ncol = 1, scales = "fixed",
-      strip.position = "left"
-    ) +
-    ggplot2::labs(
-      title = NULL,
-      x     = NULL,
-      y     = hist_agg$x_label
-    ) +
-    ggplot2::theme_minimal(base_size = 13) +
-    ggplot2::theme(
-      panel.grid.major.x  = ggplot2::element_blank(),
-      panel.grid.minor.x  = ggplot2::element_blank(),
-      axis.text.x         = ggplot2::element_text(size = 10),
-      strip.text.y.left   = ggplot2::element_text(angle = 90, face = "bold", size = 11),
-      strip.placement     = "outside",
-      panel.spacing.y     = ggplot2::unit(12, "pt"),
-      legend.position     = "none"
     )
 }
 
