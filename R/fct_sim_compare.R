@@ -655,11 +655,6 @@ build_threshold_table_df <- function(all_series, group_order = "scenario_x_year"
                                ensemble_band_q = c(lo = 0, hi = 1),
                                hist_ref = 0) {
 
-  # Handle flat tibble format (from all_series_tbl)
-  if (inherits(all_series, "data.frame")) {
-    all_series <- split(all_series, all_series$scenario) |>
-      lapply(function(df) list(out = df))
-  }
 
   rows <- lapply(names(all_series), function(nm) {
     out     <- all_series[[nm]]$out

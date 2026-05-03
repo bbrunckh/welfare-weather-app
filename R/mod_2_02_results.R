@@ -346,15 +346,11 @@ mod_2_02_results_server <- function(id,
       req(hist_agg_rv())
       method    <- input$cmp_agg_method %||% "mean"
       deviation <- input$cmp_deviation  %||% "none"
-      out <- hist_agg_rv()[[weight_key()]][[method]]
+      out       <- hist_agg_rv()[[weight_key()]][[method]]
       req(!is.null(out))
-      if (!identical(deviation, "none") && nrow(out) > 0) {
-        hist_ref <- if (identical(deviation, "mean"))
-                      mean(out$value, na.rm = TRUE)
-                    else
-                      stats::median(out$value, na.rm = TRUE)
+      hist_ref  <- hist_ref_val()
+      if (!identical(deviation, "none") && nrow(out) > 0)
         out <- dplyr::mutate(out, value = value - hist_ref)
-      }
       x_label <- if (identical(deviation, "none")) label_agg_method(method) else
         paste0(label_agg_method(method), " \u2014 ", label_deviation(deviation))
       list(out = out, x_label = x_label)
@@ -439,69 +435,55 @@ mod_2_02_results_server <- function(id,
     })
     
 
-    all_series <- reactive({
+      all_series <- reactive({
       req(agg_hist())
-      hist_list <- list(Historical = agg_hist())
-      sc        <- agg_scenarios()
-      if (length(sc) == 0L) return(hist_list)
-      c(hist_list, sc)
-    })
-
-  
-    all_series_tbl <- reactive({
-      req(agg_hist(), agg_scenarios())
       bq       <- resolve_band_q(input$uncertainty_band %||% "p10_p90")
       hist_ref <- hist_ref_val()
       wk       <- weight_key()
       method   <- input$cmp_agg_method %||% "mean"
 
-      # Helper — compute deviated lo/hi directly from RAW draw_values
-      # raw_tbl = scenario_agg_rv()[[dk]][[wk]][[method]] — undeviated
-      compute_bands_from_raw <- function(raw_tbl) {
-        raw_tbl |>
+      # Historical — add deviated value_lo/hi for hero plot whiskers
+      hist_raw_tbl <- hist_agg_rv()[[wk]][[method]]
+      hist_out <- agg_hist()$out |>
+        dplyr::mutate(
+          value_lo = purrr::map_dbl(
+            hist_raw_tbl$draw_values,
+            ~if (is.null(.x) || length(.x) == 0L) NA_real_
+             else quantile(.x, bq["lo"], na.rm = TRUE) - hist_ref),
+          value_hi = purrr::map_dbl(
+            hist_raw_tbl$draw_values,
+            ~if (is.null(.x) || length(.x) == 0L) NA_real_
+             else quantile(.x, bq["hi"], na.rm = TRUE) - hist_ref),
+          scenario = "Historical"
+        )
+      hist_list <- list(Historical = list(out = hist_out,
+                                          x_label = agg_hist()$x_label))
+
+      sc <- agg_scenarios()
+      if (length(sc) == 0L) return(hist_list)
+
+      sc_list <- setNames(lapply(names(sc), function(dk) {
+        sc_out <- sc[[dk]]$out
+        sc_raw <- scenario_agg_rv()[[dk]][[wk]][[method]]
+        if (is.null(sc_out) || is.null(sc_raw)) return(NULL)
+        out <- sc_out |>
           dplyr::mutate(
-            value_lo = purrr::map_dbl(draw_values,
+            value_lo = purrr::map_dbl(
+              sc_raw$draw_values,
               ~if (is.null(.x) || length(.x) == 0L) NA_real_
-              else quantile(.x, bq["lo"], na.rm = TRUE) - hist_ref),
-            value_hi = purrr::map_dbl(draw_values,
+               else quantile(.x, bq["lo"], na.rm = TRUE) - hist_ref),
+            value_hi = purrr::map_dbl(
+              sc_raw$draw_values,
               ~if (is.null(.x) || length(.x) == 0L) NA_real_
-              else quantile(.x, bq["hi"], na.rm = TRUE) - hist_ref)
-          ) |>
-          dplyr::select(sim_year, value_lo, value_hi,
-                        dplyr::any_of(c("coef_lo", "coef_hi",
-                                        "model_q10", "model_q90",
-                                        "model_lo",  "model_hi")))
-      }
-      # Historical — join deviated value from agg_hist()$out
-      # with lo/hi computed from raw hist_agg_rv()
-      hist_raw   <- hist_agg_rv()[[wk]][[method]]
-      hist_bands <- compute_bands_from_raw(hist_raw)
-      hist_out   <- agg_hist()$out |>
-        dplyr::select(-dplyr::any_of(c("value_lo", "value_hi"))) |>
-        dplyr::left_join(hist_bands, by = "sim_year") |>
-        dplyr::mutate(scenario = "Historical")
+               else quantile(.x, bq["hi"], na.rm = TRUE) - hist_ref),
+            scenario = dk
+          )
+        list(out = out, x_label = sc[[dk]]$x_label)
+      }), names(sc))
 
-      # Scenarios — join deviated value from agg_scenarios()[[dk]]$out
-      # with lo/hi computed from raw scenario_agg_rv()[[dk]]
-      sc_list <- lapply(names(agg_scenarios()), function(dk) {
-        sc_out <- agg_scenarios()[[dk]]$out
-        if (is.null(sc_out) || nrow(sc_out) == 0L) return(NULL)
-        sc_raw   <- scenario_agg_rv()[[dk]][[wk]][[method]]
-        if (is.null(sc_raw) || nrow(sc_raw) == 0L) return(NULL)
-        sc_bands <- compute_bands_from_raw(sc_raw)
-        sc_out |>
-          dplyr::select(-dplyr::any_of(c("value_lo", "value_hi",
-                                          "coef_lo",   "coef_hi",
-                                          "model_q10", "model_q90",
-                                          "model_lo",  "model_hi"))) |>
-          dplyr::left_join(sc_bands, by = "sim_year") |>
-          dplyr::mutate(scenario = dk)
-      })
-
-      dplyr::bind_rows(
-        c(list(hist_out), Filter(Negate(is.null), sc_list))
-      )
+      c(hist_list, Filter(Negate(is.null), sc_list))
     })
+
 
 
 
@@ -630,7 +612,9 @@ mod_2_02_results_server <- function(id,
         scenarios   = all_series(),
         hist_agg    = agg_hist(),
         group_order = input$cmp_group_order %||% "scenario_x_year",
-        coef_bands_tbl   = if (isTRUE(input$show_coef_uncertainty) && has_draws()) all_series_tbl() else NULL,
+        coef_bands_tbl   = if (isTRUE(input$show_coef_uncertainty) && has_draws()) 
+          dplyr::bind_rows(lapply(all_series(), function(s) s$out))
+        else NULL,
         band_q         = resolve_band_q(input$uncertainty_band %||% "p10_p90"),
         ensemble_band_q  = resolve_band_q(input$ensemble_band     %||% "minmax"),
         hist_ref        = hist_ref_val()

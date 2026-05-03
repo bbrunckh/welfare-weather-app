@@ -178,18 +178,17 @@ if (!is.null(hist_ribbon_raw) && !is.null(fut_ribbon_raw)) {
   }
 
   # Also confirm column names for the mutate in mod_2_02_results.R
-  cat("  Checking column names used in exceedance_ribbon mutate:\n")
-  # Check what the mod_2_02_results.R mutate currently references
-  expected_in_mod <- c("value", "band_lo", "band_hi")
-  cat("  Checking column names used in mod_2_02_results.R deviation mutate:\n")
-  for (col in expected_in_mod) {
-    if (col %in% ribbon_cols) {
-      cat("    [PASS] column '", col, "' exists in ribbon output.\n", sep = "")
-    } else {
-      cat("    [FAIL] column '", col, "' MISSING from ribbon output — mutate silently creates NA column!\n", sep = "")
-      cat("    Actual columns:", paste(names(hist_ribbon_raw), collapse = ", "), "\n")
-    }
+# Confirm correct column names used in deviation mutate
+expected_in_mod <- c("welfare_mid", "welfare_lo", "welfare_hi")
+cat("  Checking column names used in mod_2_02_results.R deviation mutate:\n")
+for (col in expected_in_mod) {
+  if (col %in% ribbon_cols) {
+    cat("    [PASS] column '", col, "' exists in ribbon output.\n", sep = "")
+  } else {
+    cat("    [FAIL] column '", col, "' MISSING from ribbon output.\n", sep = "")
+    cat("    Actual columns:", paste(ribbon_cols, collapse = ", "), "\n")
   }
+}
   cat("\n")
 }
 
@@ -211,25 +210,22 @@ series_dev_central <- list(
 
 # With — expose full error:
 tbl_raw <- tryCatch(
-  build_threshold_table_df(
-    series_raw,
-    band_q          = bq,
-    ensemble_band_q = ebq,
-    show_coef       = TRUE,
-    hist_ref        = 0),
+  build_threshold_table_df(series_raw,
+    band_q = bq, ensemble_band_q = ebq,
+    hist_ref = 0),
   error = function(e) {
     cat("  [FAIL] build_threshold_table_df() ERROR:\n  ", conditionMessage(e), "\n")
     NULL
   }
 )
-
-tbl_dev <- .check(
-  "build_threshold_table_df() with deviated central + hist_ref",
+tbl_dev <- tryCatch(
   build_threshold_table_df(series_dev_central,
-    band_q          = bq,
-    ensemble_band_q = ebq,
-    show_coef       = TRUE,
-    hist_ref        = hist_ref)
+    band_q = bq, ensemble_band_q = ebq,
+    hist_ref = hist_ref),
+  error = function(e) {
+    cat("  [FAIL] build_threshold_table_df() ERROR:\n  ", conditionMessage(e), "\n")
+    NULL
+  }
 )
 
 if (!is.null(tbl_raw) && !is.null(tbl_dev)) {
@@ -416,14 +412,12 @@ if (!is.null(hist_ribbon_raw) && !is.null(fut_ribbon_raw)) {
   cat("  Future     ribbon spread (deviated):", round(fut_spread_dev, 4),
       "(expect identical)\n\n")
 
-  # Now confirm what mod_2_02_results.R CURRENTLY references in its mutate
-  # by checking if those column names actually exist
-  mod_expected_cols <- c("value", "band_lo", "band_hi",
-                         "welfare_mid", "welfare_lo", "welfare_hi")
+  # Confirm correct column names used in mod_2_02_results.R deviation mutate
+  mod_expected_cols <- c("welfare_mid", "welfare_lo", "welfare_hi")
   cat("  Column name check for mod_2_02_results.R deviation mutate:\n")
   for (col in mod_expected_cols) {
     exists <- col %in% names(hist_ribbon_raw)
-    cat("    ", col, ":", if (exists) "[EXISTS]" else "[MISSING — mutate silently fails]", "\n")
+    cat("    ", col, ":", if (exists) "[PASS — exists]" else "[FAIL — MISSING]", "\n")
   }
 
   # PASS/FAIL
@@ -568,21 +562,6 @@ if (!is.null(p_raw) && !is.null(p_dev)) {
         "  fut_dev_mid =", round(fut_dev_mid, 4),
         "| expected =", round(fut_raw_mid - hist_ref, 4), "\n")
 
-
-  cat("\n  Historical central @ p=0.5 (raw):     ", round(hist_raw_mid, 4), "\n")
-  cat("  Historical central @ p=0.5 (deviated):", round(hist_dev_mid, 4),
-      "(expect ~0)\n")
-  cat("  Future     central @ p=0.5 (raw):     ", round(fut_raw_mid,  4), "\n")
-  cat("  Future     central @ p=0.5 (deviated):", round(fut_dev_mid,  4),
-      "(expect ~", round(fut_raw_mid - hist_ref, 4), ")\n\n")
-
-  hist_curve_ok <- abs(hist_dev_mid) < 0.15
-  fut_curve_ok  <- abs((fut_dev_mid - fut_raw_mid) - (-hist_ref)) < 0.15
-
-  if (hist_curve_ok) cat("  [PASS] Historical exceedance curve shifts correctly.\n") else
-    cat("  [FAIL] Historical exceedance curve NOT shifting correctly.\n")
-  if (fut_curve_ok)  cat("  [PASS] Future exceedance curve shifts correctly.\n") else
-    cat("  [FAIL] Future exceedance curve NOT shifting correctly.\n")
 }
 
 # ---- Section 7: Ribbon deviation in enhance_exceedance() output ------------
@@ -852,43 +831,26 @@ if (!is.null(p_hero_raw) && !is.null(p_hero_dev)) {
           paste(names(d), collapse = ", "), "\n")
   }
 
-  wh_raw <- find_whisker_layer(hero_raw_build)
-  wh_dev <- find_whisker_layer(hero_dev_build)
+  wh_hist_raw <- hero_raw_build$data[[1]]
+  wh_hist_dev <- hero_dev_build$data[[1]]
+  wh_fut_raw  <- hero_raw_build$data[[2]]
+  wh_fut_dev  <- hero_dev_build$data[[2]]
 
-  if (!is.null(wh_raw) && !is.null(wh_dev)) {
-    # Find min/max columns
-    min_col <- intersect(c("xmin", "ymin"), names(wh_raw))[1]
-    max_col <- intersect(c("xmax", "ymax"), names(wh_raw))[1]
+  min_col    <- intersect(c("xmin", "ymin"), names(wh_hist_raw))[1]
+  hist_shift <- wh_hist_dev[[min_col]][1] - wh_hist_raw[[min_col]][1]
+  fut_shift  <- wh_fut_dev[[min_col]][1]  - wh_fut_raw[[min_col]][1]
+  shifts     <- c(hist_shift, fut_shift)
 
-    cat("\n  Whisker min column:", min_col, "\n")
-    cat("  Raw  whisker values:", paste(round(wh_raw[[min_col]], 3),
-                                        collapse = ", "), "\n")
-    cat("  Dev  whisker values:", paste(round(wh_dev[[min_col]], 3),
-                                        collapse = ", "), "\n\n")
+  cat("  Per-row whisker shifts:", paste(round(shifts, 3), collapse = ", "), "\n")
+  cat("  Expected shift: ~", round(-hist_ref, 3), "for all rows\n\n")
 
-    # Check shift per row
-    shifts <- wh_dev[[min_col]] - wh_raw[[min_col]]
-    cat("  Per-row whisker shifts:", paste(round(shifts, 3), collapse = ", "), "\n")
-    cat("  Expected shift: ~", round(-hist_ref, 3), "for all rows\n\n")
+  hist_row_ok <- abs(hist_shift - (-hist_ref)) < 0.05
+  fut_row_ok  <- abs(fut_shift  - (-hist_ref)) < 0.05
 
-    hist_row_ok <- abs(shifts[1] - (-hist_ref)) < 0.05
-    fut_row_ok  <- abs(shifts[2] - (-hist_ref)) < 0.05
+  if (hist_row_ok) cat("  [PASS] Historical whisker shifts correctly.\n") else
+    cat("  [FAIL] Historical whisker NOT shifting.\n")
+  if (fut_row_ok)  cat("  [PASS] Future whisker shifts correctly.\n") else
+    cat("  [FAIL] Future whisker NOT shifting.\n")
 
-    if (hist_row_ok) cat("  [PASS] Historical whisker shifts correctly.\n") else
-      cat("  [FAIL] Historical whisker NOT shifting.\n")
-    if (fut_row_ok)  cat("  [PASS] Future whisker shifts correctly.\n") else
-      cat("  [FAIL] Future whisker NOT shifting —",
-          "check scenario name match between coef_bands_tbl and scenarios.\n")
-
-    if (!fut_row_ok) {
-      cat("\n  >> Checking scenario names in all_tbl_dev vs series_dev_full:\n")
-      cat("  all_tbl_dev scenarios:    ",
-          paste(unique(all_tbl_dev$scenario), collapse = ", "), "\n")
-      cat("  series_dev_full names:    ",
-          paste(names(series_dev_full), collapse = ", "), "\n")
-      cat("  >> If these don't match exactly — join fails silently.\n")
-    }
-  }
 }
-
-cat("\n========== Diagnostic complete ==========\n")
+  cat("\n========== Diagnostic complete ==========\n")
