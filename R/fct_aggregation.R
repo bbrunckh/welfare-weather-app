@@ -645,79 +645,109 @@ compute_hist_agg <- function(pipeline,
               }   else NULL
 
   run_one_hist <- function(use_w) {
-    weights <- if (use_w) pipeline$weight else NULL
+      weights  <- if (use_w) pipeline$weight else NULL
+      n_yrs    <- length(sim_years)
+      n_meth   <- length(methods)
+      n_rows   <- n_yrs * n_meth
+      lo_q     <- band_q[["lo"]]
+      hi_q     <- band_q[["hi"]]
 
-    # Build results: loop year FIRST, then apply all methods to same Y_mat
-    all_rows <- dplyr::bind_rows(lapply(sim_years, function(yr) {
-      idx   <- pipeline$sim_year == yr
-      y_pt  <- pipeline$y_point[idx]
-      F_idx <- if (!is.null(pipeline$F_loading))
-                 pipeline$F_loading[idx, , drop = FALSE] else NULL
-      w_idx <- if (!is.null(weights)) weights[idx] else NULL
-      N_yr  <- sum(idx)
+      # Pre-allocate output vectors — one tibble at end, no intermediate allocs
+      out_year      <- rep(sim_years, each  = n_meth)
+      out_method    <- rep(methods,   times = n_yrs)
+      out_value     <- numeric(n_rows)
+      out_value_lo  <- numeric(n_rows)
+      out_value_p50 <- numeric(n_rows)
+      out_value_hi  <- numeric(n_rows)
+      out_draws     <- vector("list", n_rows)
 
-      # ---- Residuals drawn once per year ----------------------------------- #
       resid_method <- if (residuals == "original" && is.null(pipeline$id_vec)) {
         message("[compute_hist_agg] residuals = 'original' but id_vec is NULL — ",
                 "falling back to 'resample'.")
         "resample"
       } else residuals
 
-      resid_vec <- draw_residuals_vec(
-        resid_method, pipeline$train_aug, N_yr,
-        if (!is.null(pipeline$id_vec)) pipeline$id_vec[idx] else NULL,
-        pipeline$id_col
-      )
+      for (yi in seq_along(sim_years)) {
+        yr    <- sim_years[[yi]]
+        idx   <- pipeline$sim_year == yr
+        y_pt  <- pipeline$y_point[idx]
+        F_idx <- if (!is.null(pipeline$F_loading))
+                  pipeline$F_loading[idx, , drop = FALSE] else NULL
+        w_idx <- if (!is.null(weights)) weights[idx] else NULL
+        N_yr  <- sum(idx)
 
-      # ---- Point estimate welfare (no perturbation) ------------------------ #
-      y_pt_vec   <- y_pt + resid_vec
-      welfare_pt <- if (is_log) exp(y_pt_vec) else y_pt_vec
+        resid_vec <- draw_residuals_vec(
+          resid_method, pipeline$train_aug, N_yr,
+          if (!is.null(pipeline$id_vec)) pipeline$id_vec[idx] else NULL,
+          pipeline$id_col
+        )
 
-      # ---- Y_mat built ONCE per year --------------------------------------- #
-      if (!is.null(F_idx) && !is.null(Z_shared) && S > 0L) {
-        perturbations <- F_idx %*% t(Z_shared)          # N_yr × S
-        Y_mat         <- y_pt + perturbations + resid_vec
-        if (is_log) Y_mat <- exp(Y_mat)                 # exp() called ONCE
-      } else {
-        Y_mat <- matrix(welfare_pt, ncol = 1L)
+        y_pt_vec   <- y_pt + resid_vec
+        welfare_pt <- if (is_log) exp(y_pt_vec) else y_pt_vec
+
+        if (!is.null(F_idx) && !is.null(Z_shared) && S > 0L) {
+          perturbations <- F_idx %*% t(Z_shared)
+          Y_mat         <- y_pt + perturbations + resid_vec
+          if (is_log) Y_mat <- exp(Y_mat)
+        } else {
+          Y_mat <- matrix(welfare_pt, ncol = 1L)
+        }
+
+        wpt_mat <- matrix(welfare_pt, ncol = 1L)
+
+        for (mi in seq_along(methods)) {
+          row_i    <- (yi - 1L) * n_meth + mi
+          method   <- methods[[mi]]
+
+          draw_vals <- tryCatch(
+            aggregate_draws_vectorized(Y_mat, method, w_idx, pov_line),
+            error = function(e) {
+              warning("[compute_hist_agg] method=", method,
+                      " yr=", yr, ": ", conditionMessage(e))
+              NULL
+            }
+          )
+          if (is.null(draw_vals)) {
+            out_value[[row_i]]     <- NA_real_
+            out_value_lo[[row_i]]  <- NA_real_
+            out_value_p50[[row_i]] <- NA_real_
+            out_value_hi[[row_i]]  <- NA_real_
+            out_draws[[row_i]]     <- NULL
+            next
+          }
+
+          out_value[[row_i]]     <- tryCatch(
+            aggregate_draws_vectorized(wpt_mat, method, w_idx, pov_line)[[1L]],
+            error = function(e) NA_real_
+          )
+          out_value_lo[[row_i]]  <- stats::quantile(draw_vals, lo_q, na.rm = TRUE)
+          out_value_p50[[row_i]] <- stats::quantile(draw_vals, 0.50, na.rm = TRUE)
+          out_value_hi[[row_i]]  <- stats::quantile(draw_vals, hi_q, na.rm = TRUE)
+          out_draws[[row_i]]     <- draw_vals
+        }
       }
 
-      lo_q <- band_q[["lo"]]
-      hi_q <- band_q[["hi"]]
+      # Single tibble construction — replaces 270 small allocations
+      all_rows <- tibble::tibble(
+        sim_year    = out_year,
+        value       = out_value,
+        value_lo    = out_value_lo,
+        value_p50   = out_value_p50,
+        value_hi    = out_value_hi,
+        draw_values = out_draws,
+        agg_method  = out_method,
+        weighted    = use_w,
+        scenario    = "Historical"
+      )
 
-      # ---- Apply all methods to the same Y_mat ----------------------------- #
-      dplyr::bind_rows(lapply(methods, function(method) {
-        draw_vals <- tryCatch(
-          aggregate_draws_vectorized(Y_mat, method, w_idx, pov_line),
-          error = function(e) {
-            warning("[compute_hist_agg] method=", method, " yr=", yr, ": ", conditionMessage(e))
-            NULL
-          }
-        )
-        if (is.null(draw_vals)) return(NULL)
-        value_pt_m <- aggregate_draws_vectorized(
-          matrix(welfare_pt, ncol = 1L), method, w_idx, pov_line
-        )[[1L]]
-        tibble::tibble(
-          sim_year    = yr,
-          value       = value_pt_m,
-          value_lo    = stats::quantile(draw_vals, lo_q, na.rm = TRUE),
-          value_p50   = stats::quantile(draw_vals, 0.50, na.rm = TRUE),
-          value_hi    = stats::quantile(draw_vals, hi_q, na.rm = TRUE),
-          draw_values = list(draw_vals),
-          agg_method  = method,
-          weighted    = use_w,
-          scenario    = "Historical"
-        )
-      }))
-    }))
+      # Remove NA rows (failed methods)
+      all_rows <- all_rows[!is.na(all_rows$value), ]
 
-    # Split flat tibble into named list by method — matches expected structure
-    setNames(
-      lapply(methods, function(m) dplyr::filter(all_rows, agg_method == m)),
-      methods
-    )
-  }
+      setNames(
+        lapply(methods, function(m) all_rows[all_rows$agg_method == m, ]),
+        methods
+      )
+    }
 
   list(
     unweighted = run_one_hist(FALSE),
@@ -766,9 +796,30 @@ compute_scenario_agg <- function(scenarios,
                } else NULL
     run_one_scen <- function(use_w) {
       weights_base <- if (use_w && has_weights_s) pipes[[1L]]$weight else NULL
+      n_yrs    <- length(sim_years)
+      n_meth   <- length(methods)
+      n_rows   <- n_yrs * n_meth
+      lo_q     <- band_q[["lo"]]
+      hi_q     <- band_q[["hi"]]
 
-      all_rows <- dplyr::bind_rows(lapply(sim_years, function(yr) {
-        # ---- Build Y_mat per ensemble member, then combine ---------------- #
+      out_year      <- rep(sim_years, each  = n_meth)
+      out_method    <- rep(methods,   times = n_yrs)
+      out_value     <- numeric(n_rows)
+      out_value_lo  <- numeric(n_rows)
+      out_value_hi  <- numeric(n_rows)
+      out_coef_lo   <- numeric(n_rows)
+      out_coef_hi   <- numeric(n_rows)
+      out_value_all <- vector("list", n_rows)
+      out_draws     <- vector("list", n_rows)
+      out_model_q10 <- numeric(n_rows)
+      out_model_q90 <- numeric(n_rows)
+      out_model_lo  <- numeric(n_rows)
+      out_model_hi  <- numeric(n_rows)
+      out_value_p50 <- numeric(n_rows)
+
+      for (yi in seq_along(sim_years)) {
+        yr <- sim_years[[yi]]
+
         member_Y_mats <- lapply(pipes, function(pipe) {
           idx   <- pipe$sim_year == yr
           y_pt  <- pipe$y_point[idx]
@@ -778,39 +829,36 @@ compute_scenario_agg <- function(scenarios,
           w_idx <- if (!is.null(weights_base)) weights_base[idx] else NULL
 
           resid_method <- if (residuals == "original" && is.null(pipe$id_vec)) {
-            message("[compute_hist_agg] residuals = 'original' but id_vec is NULL — ",
-                    "falling back to 'resample'.")
+            message("[compute_scenario_agg] residuals = 'original' but ",
+                    "id_vec is NULL — falling back to 'resample'.")
             "resample"
           } else residuals
 
-          resid_vec <- draw_residuals_vec(
+          resid_vec  <- draw_residuals_vec(
             resid_method, pipe$train_aug, N_yr,
             if (!is.null(pipe$id_vec)) pipe$id_vec[idx] else NULL,
             pipe$id_col
           )
-
-          y_pt_vec   <- y_pt + resid_vec
-          welfare_pt <- if (is_log) exp(y_pt_vec) else y_pt_vec
+          welfare_pt <- if (is_log) exp(y_pt + resid_vec) else y_pt + resid_vec
 
           if (!is.null(F_idx) && !is.null(Z_shared) && S > 0L) {
             perturbations <- F_idx %*% t(Z_shared)
             Y_mat         <- y_pt + perturbations + resid_vec
-            if (is_log) Y_mat <- exp(Y_mat)            # exp() called ONCE per member per year
+            if (is_log) Y_mat <- exp(Y_mat)
           } else {
-            Y_mat <- matrix(welfare_pt, ncol = 1L) #PERHAPS THIS IS WHERE ISSUE IS
+            Y_mat <- matrix(welfare_pt, ncol = 1L)
           }
-
           list(Y_mat = Y_mat, welfare_pt = welfare_pt, w_idx = w_idx)
         })
 
-        lo_q <- band_q[["lo"]]
-        hi_q <- band_q[["hi"]]
+        for (mi in seq_along(methods)) {
+          row_i  <- (yi - 1L) * n_meth + mi
+          method <- methods[[mi]]
 
-        dplyr::bind_rows(lapply(methods, function(method) {
-          # Aggregate each member then combine
           member_results <- lapply(member_Y_mats, function(m) {
             tryCatch({
-              draw_vals  <- aggregate_draws_vectorized(m$Y_mat, method, m$w_idx, pov_line)
+              draw_vals  <- aggregate_draws_vectorized(
+                m$Y_mat, method, m$w_idx, pov_line)
               value_pt_m <- aggregate_draws_vectorized(
                 matrix(m$welfare_pt, ncol = 1L), method, m$w_idx, pov_line
               )[[1L]]
@@ -820,35 +868,57 @@ compute_scenario_agg <- function(scenarios,
                 value_p50   = stats::quantile(draw_vals, 0.50, na.rm = TRUE),
                 value_hi    = stats::quantile(draw_vals, hi_q, na.rm = TRUE),
                 draw_values = draw_vals,
-                welfare_pt  = mean(m$welfare_pt, na.rm = TRUE) 
+                welfare_pt  = mean(m$welfare_pt, na.rm = TRUE)
               )
             }, error = function(e) NULL)
           })
           member_results <- Filter(Negate(is.null), member_results)
-          if (length(member_results) == 0L) return(NULL)
+          if (length(member_results) == 0L) {
+            out_value[[row_i]]     <- NA_real_
+            next
+          }
           combined <- combine_ensemble_results(member_results)
-          if (is.null(combined)) return(NULL)
-            tibble::tibble(
-              sim_year    = yr,
-              value       = combined$value,
-              value_lo    = combined$value_lo,    # thick band lower (weather + model)
-              value_hi    = combined$value_hi,    # thick band upper
-              coef_lo     = combined$coef_lo,     # thin line lower (+ coef uncertainty)
-              coef_hi     = combined$coef_hi,     # thin line upper
-              value_all   = list(combined$value_all),
-              model_q10   = combined$model_q10,
-              model_q90   = combined$model_q90,
-              model_lo    = combined$model_lo,
-              model_hi    = combined$model_hi,
-              draw_values = list(combined$draw_values),
-              agg_method  = method,
-              weighted    = use_w
-            )
-        }))
-      }))
+          if (is.null(combined)) {
+            out_value[[row_i]] <- NA_real_
+            next
+          }
+          out_value[[row_i]]     <- combined$value
+          out_value_lo[[row_i]]  <- combined$value_lo
+          out_value_hi[[row_i]]  <- combined$value_hi
+          out_coef_lo[[row_i]]   <- combined$coef_lo
+          out_coef_hi[[row_i]]   <- combined$coef_hi
+          out_value_all[[row_i]] <- combined$value_all
+          out_model_q10[[row_i]] <- combined$model_q10
+          out_model_q90[[row_i]] <- combined$model_q90
+          out_model_lo[[row_i]]  <- combined$model_lo
+          out_model_hi[[row_i]]  <- combined$model_hi
+          out_draws[[row_i]]     <- combined$draw_values
+        }
+      }
+
+      # Single tibble construction
+      all_rows <- tibble::tibble(
+        sim_year    = out_year,
+        value       = out_value,
+        value_lo    = out_value_lo,
+        value_hi    = out_value_hi,
+        coef_lo     = out_coef_lo,
+        coef_hi     = out_coef_hi,
+        value_all   = out_value_all,
+        model_q10   = out_model_q10,
+        model_q90   = out_model_q90,
+        model_lo    = out_model_lo,
+        model_hi    = out_model_hi,
+        draw_values = out_draws,
+        agg_method  = out_method,
+        weighted    = use_w
+      )
+
+      # Remove failed rows
+      all_rows <- all_rows[!is.na(all_rows$value), ]
 
       setNames(
-        lapply(methods, function(m) dplyr::filter(all_rows, agg_method == m)),
+        lapply(methods, function(m) all_rows[all_rows$agg_method == m, ]),
         methods
       )
     }
