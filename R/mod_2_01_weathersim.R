@@ -592,6 +592,28 @@ mod_2_01_weathersim_server <- function(id,
           )
         })
 
+        # ---- Free pipeline memory — no longer needed after aggregation -----
+        hist_sim(modifyList(result$hist_sim_result, list(
+          pipeline = modifyList(result$hist_sim_result$pipeline, list(
+            F_loading    = NULL,
+            train_aug    = NULL,
+            weather_raw  = NULL,
+            weather_prepared = NULL
+          ))
+        )))
+        saved_scenarios(lapply(result$new_scenarios, function(sc) {
+          sc$pipelines <- lapply(sc$pipelines, function(pipe) {
+            modifyList(pipe, list(
+              F_loading        = NULL,
+              train_aug        = NULL,
+              weather_raw      = NULL,
+              weather_prepared = NULL
+            ))
+          })
+          sc
+        }))
+        gc(verbose = FALSE)
+
         shiny::removeNotification("agg_notify")
         shiny::setProgress(value = 1, detail = "Complete")
       })
@@ -616,6 +638,31 @@ mod_2_01_weathersim_server <- function(id,
         ),
         type = "message", duration = 8
       )
+
+            # ---- Dev fixture saving (dev mode only) ------------------------------
+      if (!isTRUE(getOption("golem.app.prod"))) {
+        tryCatch({
+          dir.create("dev/fixtures", showWarnings = FALSE, recursive = TRUE)
+          saveRDS(list(
+            #survey_data  = svy,
+            #model        = mf$fit3,
+            weather_data = sw,
+            pov_line     = as.numeric(input$pov_line_sim),
+            #hist_sim     = result$hist_sim_result,
+            #scenario_sim = result$new_scenarios,
+            
+            hist_sim     = result$hist_sim_result[1L],   # one key only
+            scenario_sim = result$new_scenarios[1L],  
+            #hist_agg     = isolate(hist_agg_rv()),
+            #scenario_agg = isolate(scenario_agg_rv()),
+            
+            chol_obj     = result$chol_obj
+          ), "dev/fixtures/sim_inputs.rds")
+          message("[dev] Fixtures saved to dev/fixtures/sim_inputs.rds")
+        }, error = function(e) {
+          message("[dev] Fixture save failed: ", conditionMessage(e))
+        })
+      }
     }, ignoreInit = TRUE)
 
     # ---- Return API --------------------------------------------------------

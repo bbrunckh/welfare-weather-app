@@ -134,6 +134,7 @@
      2. Pre-cache weather data per SSP at startup
      3. Accept current performance
    Priority: Low at 5 keys, High at 10+ keys
+   SOLUTION: NONE - Exactness and running with full ensembles prefered default.
 
    ## 14. Potential contradiction in multi-hazard results
    Flagged: 2026-04-27
@@ -213,33 +214,10 @@
    methodology sign-off before implementation. Do not implement without
    quantitative accuracy assessment on real survey data.
 
-   ## 16. Ensemble uncertainty width vs coefficient uncertainty width
-   Flagged: 2026-04-28
-   
-   Observation: SSP scenario exceedance ribbon (coefficient uncertainty)
-   appears narrower than historical ribbon. Two potential causes:
-   
-   1. Random variation — Z_shared drawn independently for hist vs scenario.
-      At S=50 this causes visible width differences. Stabilises at S=150.
-   
-   2. Nonlinear welfare transformation — for poverty measures, same
-      coefficient uncertainty in welfare space maps to different outcome
-      space uncertainty depending on distance from poverty line.
-      Future scenarios with higher mean welfare sit further from poverty
-      line → smaller headcount uncertainty → narrower ribbon. 
-      This is correct and expected behaviour.
-   
-   3. Missing ensemble uncertainty — model_lo/model_hi stored in
-      scenario_agg_rv but not yet shown in ribbon. Adding this would
-      widen SSP ribbons significantly and is methodologically correct
-      (future scenarios have MORE uncertainty than historical, not less).
-   
-   Resolution needed:
-   - Verify empirically whether narrower SSP ribbon is due to #2 or #3
-   - Add ensemble uncertainty layer to exceedance ribbon (Issue #16)
-   Priority: Medium — discuss around methodology
+   SOLUTION: NONE - priority to use full ensembles and correct weather data for input.
 
-   ## 17. Residual method change does not update exceedance/hero plots
+
+   ## 16. Residual method change does not update exceedance/hero plots
    Flagged: 2026-04-28
    Symptom: Changing residual method (e.g. original → none) triggers
    chart reload notification but plots appear unchanged.
@@ -254,24 +232,8 @@
    or display-time parameter, and whether UI should disable after run.
    Priority: Low — investigate during UX cleanup pass
 
-## 18. Ensemble + coefficient joint uncertainty ribbon — approximation vs exact
-   Flagged: 2026-04-28
-   
-   Current: exceedance ribbon for future scenarios uses approximate joint bound:
-     ribbon_hi = model_hi + (value_hi - value)  
-     ribbon_lo = model_lo - (value - value_lo)
-   
-   Correct approach: store draw_values for lo/hi ensemble members in
-   combine_ensemble_results(), then compute_exceedance_ribbon() uses
-   those draws directly for joint uncertainty.
-   
-   Required change: combine_ensemble_results() must store:
-     draw_values_lo = lo_member$draw_values
-     draw_values_hi = hi_member$draw_values
-   
-   Priority: Medium — implement after current visualization pass complete
 
- ## Issue #19 — Out-of-Memory Crash on Large Ensemble Runs
+ ## Issue #17 — Out-of-Memory Crash on Large Ensemble Runs
 
 **Status:** Open  
 **Severity:** High — crashes R session  
@@ -311,7 +273,7 @@ accumulates across keys until R exhausts available RAM and crashes.
 ### Related Issues
 - Phase 4 speed improvements (parallelisation) deferred until this is resolved
 
-##  DEV ISSUE #20 — Outcome direction inconsistency across transformations
+##  DEV ISSUE #18 — Outcome direction inconsistency across transformations
  The exceedance curve, outcome table, and hero plot all assume that
  "rare event" (low exceedance probability) = "bad/extreme outcome".
  This is true for welfare (mean consumption) but REVERSED for poverty rate
@@ -329,3 +291,26 @@ accumulates across keys until R exhausts available RAM and crashes.
  scale_x_reverse() to exceedance plot.
 
 # Source: outcome metadata in fct_outcome.R outcome registry.
+
+## DEV ISSUE #19— Diagnostics scenario filter does not mirror Results tab
+
+**Current behaviour:**
+The scenario filter panel in the Diagnostics tab (mod_2_03_diagnostics.R)
+shows a simplified selector — does not allow selection of individual
+climate scenario × year combinations the way the Results tab does.
+
+**Desired behaviour:**
+The Diagnostics tab scenario filter should use the same
+scenario × year selection table as the Results tab
+(mod_2_02_results.R) — allowing users to select specific
+SSP × year-range combinations for diagnostic comparison.
+
+**Affected files:**
+- mod_2_03_diagnostics.R — scenario_filter_panel() call
+- mod_2_02_results.R — reference implementation of scenario × year selector
+
+**Priority:** Medium — affects usability of diagnostics tab
+**Risk:** Low — UI change only, no simulation logic affected
+**Fix:** Pass the same scenario × year reactive used in Results tab
+into the Diagnostics module, or refactor scenario_filter_panel()
+to accept a `show_year_range` parameter.

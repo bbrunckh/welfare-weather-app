@@ -323,11 +323,13 @@ fct_run_simulation <- function(sw,
   t_elapsed_total <- proc.time()[["elapsed"]] - t_start
 
   list(
-    hist_sim_result = hist_sim_result,
-    new_scenarios   = new_scenarios,
-    chol_obj        = chol_obj,
-    n_keys          = n_keys,
-    total_runs      = total_runs,
-    t_elapsed       = t_elapsed_total
+    hist_sim_result     = hist_sim_result,
+    new_scenarios       = new_scenarios,
+    #hist_agg_result     = hist_agg_result,      # ← new
+    #scenario_agg_result = scenario_agg_result,  # ← new
+    chol_obj            = chol_obj,
+    n_keys              = n_keys,
+    total_runs          = total_runs,
+    t_elapsed           = t_elapsed_total
   )
 }
