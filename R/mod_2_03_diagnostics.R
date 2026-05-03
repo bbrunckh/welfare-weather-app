@@ -215,7 +215,7 @@ mod_2_03_diagnostics_server <- function(id,
 
     output$diag_weather_density <- renderPlot({
       req(hist_sim(), survey_weather())
-      req(!is.null(hist_sim()$pipeline$weather_prepared))
+      req(!is.null(hist_sim()$weather_raw))
       vars <- input$diag_weather_vars
       req(length(vars) > 0)
 
@@ -228,7 +228,7 @@ mod_2_03_diagnostics_server <- function(id,
 
       plot_weather_density_panel(
         survey_weather   = survey_weather(),
-        weather_raw      = hist_sim()$pipeline$weather_prepared,
+        weather_raw      = hist_sim()$weather_raw,
         weather_vars     = vars,
         weather_labels   = lbl_map,
         scenario_weather = scenario_weather_data(),

@@ -264,6 +264,10 @@ fct_run_simulation <- function(sw,
 
     if (is.null(out)) { rm(out); next }
 
+    # ---- Strip large weather objects immediately — not needed post-pipeline
+    out$weather_prepared <- NULL
+    
+
     if (is_hist && is.null(hist_sim_result)) {
       hist_sim_result <- list(
         pipeline       = out,
@@ -274,6 +278,9 @@ fct_run_simulation <- function(sw,
         train_data     = train_data,
         cluster_counts = cluster_counts
       )
+      # Strip weather_raw from pipeline after saving to hist_sim_result
+      out$weather_raw <- NULL
+
     } else if (!is_hist) {
       ssp_code <- sub("^(ssp[^_]+_[^_]+_[^_]+)_.*", "\\1", key)
       yr_parts <- regmatches(key, gregexpr("[0-9]{4}", key))[[1L]]
@@ -288,6 +295,9 @@ fct_run_simulation <- function(sw,
         group_meta[[gk]] <- list(ssp_code = ssp_code, year_range = yr_parts)
       }
 
+      # Strip weather_raw from pipeline after saving to group_weather_rep
+      out$weather_raw <- NULL
+
       member_type <- sub(".*_(ensemble_mean|ensemble_lo|ensemble_hi)$",
                           "\\1", key)
       if (!nchar(member_type) || member_type == key)
@@ -295,6 +305,7 @@ fct_run_simulation <- function(sw,
 
       group_agg[[gk]][[member_type]] <- out
       group_n[[gk]] <- group_n[[gk]] + 1L
+
     }
     rm(out)
     if (ki %% 10L == 0L) gc(verbose = FALSE)

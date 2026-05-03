@@ -596,6 +596,22 @@ mod_2_01_weathersim_server <- function(id,
         shiny::setProgress(value = 1, detail = "Complete")
       })
 
+      # ---- Dev fixture saving (dev mode only) ------------------------------
+      if (!isTRUE(getOption("golem.app.prod"))) {
+        tryCatch({
+          dir.create("dev/fixtures", showWarnings = FALSE, recursive = TRUE)
+          saveRDS(list(
+            hist_sim     = result$hist_sim_result[[1L]],
+            scenario_sim = result$new_scenarios[[1L]],
+            chol_obj     = result$chol_obj,
+            pov_line     = as.numeric(input$pov_line_sim)
+          ), "dev/fixtures/sim_inputs.rds")
+          message("[dev] Fixtures saved to dev/fixtures/sim_inputs.rds")
+        }, error = function(e) {
+          message("[dev] Fixture save failed: ", conditionMessage(e))
+        })
+      }
+
       # ---- Completion notification -----------------------------------------
       message(sprintf(
         "[wiseapp] Simulation complete in %s | %d key(s) | S=%d | ~%d total runs",

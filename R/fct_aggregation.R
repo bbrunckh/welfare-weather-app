@@ -657,8 +657,14 @@ compute_hist_agg <- function(pipeline,
       N_yr  <- sum(idx)
 
       # ---- Residuals drawn once per year ----------------------------------- #
+      resid_method <- if (residuals == "original" && is.null(pipeline$id_vec)) {
+        message("[compute_hist_agg] residuals = 'original' but id_vec is NULL — ",
+                "falling back to 'resample'.")
+        "resample"
+      } else residuals
+
       resid_vec <- draw_residuals_vec(
-        residuals, pipeline$train_aug, N_yr,
+        resid_method, pipeline$train_aug, N_yr,
         if (!is.null(pipeline$id_vec)) pipeline$id_vec[idx] else NULL,
         pipeline$id_col
       )
@@ -771,8 +777,14 @@ compute_scenario_agg <- function(scenarios,
           N_yr  <- sum(idx)
           w_idx <- if (!is.null(weights_base)) weights_base[idx] else NULL
 
+          resid_method <- if (residuals == "original" && is.null(pipe$id_vec)) {
+            message("[compute_hist_agg] residuals = 'original' but id_vec is NULL — ",
+                    "falling back to 'resample'.")
+            "resample"
+          } else residuals
+
           resid_vec <- draw_residuals_vec(
-            residuals, pipe$train_aug, N_yr,
+            resid_method, pipe$train_aug, N_yr,
             if (!is.null(pipe$id_vec)) pipe$id_vec[idx] else NULL,
             pipe$id_col
           )
@@ -799,13 +811,6 @@ compute_scenario_agg <- function(scenarios,
           member_results <- lapply(member_Y_mats, function(m) {
             tryCatch({
               draw_vals  <- aggregate_draws_vectorized(m$Y_mat, method, m$w_idx, pov_line)
-              # DEBUG — remove after confirming
-              if (yr == sim_years[[1L]] && member_idx == 1L) {
-                message(sprintf(
-                  "[debug] Y_mat dim: %d x %d | draw_vals length: %d | S: %d",
-                  nrow(m$Y_mat), ncol(m$Y_mat), length(draw_vals), S
-                ))
-              }
               value_pt_m <- aggregate_draws_vectorized(
                 matrix(m$welfare_pt, ncol = 1L), method, m$w_idx, pov_line
               )[[1L]]
