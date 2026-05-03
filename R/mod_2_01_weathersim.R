@@ -194,6 +194,20 @@ mod_2_01_weathersim_ui <- function(id) {
         value = TRUE
       ),
       shiny::tags$hr(style = "margin: 6px 0;"),
+      shiny::checkboxInput(
+        ns("save_fixtures"),
+        label = shiny::tags$span(
+          style = "font-size:11px; font-weight:600; color:#555;",
+          "Save dev fixtures after simulation"
+        ),
+        value = FALSE
+      ),
+      shiny::helpText(
+        "Saves sim_inputs.rds and sim_inputs_full.rds to dev/fixtures/.",
+        " Adds ~30s after simulation completes. Dev mode only.",
+        style = "font-size:11px; color:#555; margin-top:2px; margin-bottom:4px;"
+      ),
+      shiny::tags$hr(style = "margin: 6px 0;"),
       shiny::tags$h6("Parallel computation",
                      style = "font-weight:600; margin-bottom:4px;"),
       shiny::checkboxInput(
@@ -578,6 +592,9 @@ mod_2_01_weathersim_server <- function(id,
         res_sim <- sh$residuals %||% "none"
         pov_sim <- as.numeric(input$pov_line_sim)
 
+        t_agg_start <- proc.time()[["elapsed"]]
+        message("[wiseapp] Aggregating results...")
+
         shiny::showNotification(
           ui       = paste0("Aggregating results across ",
                             length(result$new_scenarios) + 1L,
@@ -585,15 +602,18 @@ mod_2_01_weathersim_server <- function(id,
           id       = "agg_notify", duration = NULL, type = "message"
         )
 
-        # Generate shared Z matrix once — paired draws for historical + future
-        # Same z vectors applied to both → ribbon gap stable, common random numbers variance reduction
-        K_global     <- if (!is.null(result$hist_sim_result$pipeline$F_loading))
-                          ncol(result$hist_sim_result$pipeline$F_loading) else 0L
-        Z_global     <- if (K_global > 0L && S_sim > 0L)
-                          matrix(stats::rnorm(S_sim * K_global), nrow = S_sim, ncol = K_global)
-                        else NULL
+        # Generate shared Z matrix once
+        K_global <- if (!is.null(result$hist_sim_result$pipeline$F_loading))
+                      ncol(result$hist_sim_result$pipeline$F_loading) else 0L
+        Z_global <- if (K_global > 0L && S_sim > 0L)
+                      matrix(stats::rnorm(S_sim * K_global),
+                             nrow = S_sim, ncol = K_global)
+                    else NULL
 
         shiny::isolate({
+          # Historical aggregation
+          message("[wiseapp] Aggregating historical...")
+          t_hist_start <- proc.time()[["elapsed"]]
           hist_agg_rv(
             compute_hist_agg(
               pipeline  = result$hist_sim_result$pipeline,
@@ -604,72 +624,131 @@ mod_2_01_weathersim_server <- function(id,
               residuals = res_sim,
               pov_line  = pov_sim,
               is_log    = isTRUE(so$transform == "log"),
-              Z_global = Z_global
+              Z_global  = Z_global
             )
           )
+          t_hist_agg <- proc.time()[["elapsed"]] - t_hist_start
+          message(sprintf("[wiseapp] Historical aggregation complete in %s",
+                          format_elapsed(t_hist_agg)))
+
+          # Scenario aggregation
+          message("[wiseapp] Aggregating scenarios...")
+          t_scen_start <- proc.time()[["elapsed"]]
           scenario_agg_rv(
             compute_scenario_agg(
-              scenarios = result$new_scenarios,
-              methods   = agg_methods_all,
-              S         = S_sim,
-              band_q    = bq_sim,
-              residuals = res_sim,
-              pov_line  = pov_sim,
-              Z_global = Z_global
+              scenarios   = result$new_scenarios,
+              methods     = agg_methods_all,
+              S           = S_sim,
+              band_q      = bq_sim,
+              residuals   = res_sim,
+              pov_line    = pov_sim,
+              Z_global    = Z_global,
+              progress_fn = function(i, n, label) {
+                t_sc_el  <- proc.time()[["elapsed"]] - t_scen_start
+                t_sc_rem <- if (i > 1L)
+                  (t_sc_el / (i - 1L)) * (n - i + 1L) else NA_real_
+                message(sprintf(
+                  "[wiseapp] Aggregating scenario %d/%d: %s | %s elapsed%s",
+                  i, n, label,
+                  format_elapsed(t_sc_el),
+                  if (!is.na(t_sc_rem))
+                    paste0(" | ~", format_elapsed(t_sc_rem), " remaining")
+                  else " | estimating..."
+                ))
+                shiny::showNotification(
+                  ui = sprintf(
+                    "Aggregating scenario %d/%d: %s%s",
+                    i, n, label,
+                    if (!is.na(t_sc_rem))
+                      paste0(" (~", format_elapsed(t_sc_rem), " remaining)")
+                    else ""
+                  ),
+                  id       = "agg_notify",
+                  duration = NULL,
+                  type     = "message"
+                )
+              }
             )
           )
+          t_scen_agg <- proc.time()[["elapsed"]] - t_scen_start
+          message(sprintf("[wiseapp] Scenario aggregation complete in %s",
+                          format_elapsed(t_scen_agg)))
         })
+
+        t_agg_total <- proc.time()[["elapsed"]] - t_agg_start
+        message(sprintf(
+          "[wiseapp] Aggregation complete in %s (hist: %s | scenarios: %s)",
+          format_elapsed(t_agg_total),
+          format_elapsed(t_hist_agg),
+          format_elapsed(t_scen_agg)
+        ))
 
         shiny::removeNotification("agg_notify")
         shiny::setProgress(value = 1, detail = "Complete")
       })
 
-      # ---- Dev fixture saving (dev mode only) ------------------------------
-      #Useful for diagnostics and testing to capture the exact inputs to the aggregation functions without having to run the full simulation repeatedly. 
-      # Saved as a list with named elements for easy access in tests. Adds computational time
-      if (!isTRUE(getOption("golem.app.prod"))) {
+      # ---- Dev fixture saving -----------------------------------------------
+      # ---- Dev fixture saving (optional — controlled by UI checkbox) --------
+      if (!isTRUE(getOption("golem.app.prod")) &&
+          isTRUE(input$save_fixtures)) {
         tryCatch({
           dir.create("dev/fixtures", showWarnings = FALSE, recursive = TRUE)
+
+          # Slim fixtures — for profvis
           saveRDS(list(
-            # Pipeline results (already there)
+            hist_sim     = result$hist_sim_result[[1L]],
+            scenario_sim = result$new_scenarios[[1L]],
+            chol_obj     = result$chol_obj,
+            pov_line     = as.numeric(input$pov_line_sim)
+          ), "dev/fixtures/sim_inputs.rds")
+
+          # Full fixtures — for benchmark Section 2
+          saveRDS(list(
             hist_sim     = result$hist_sim_result[[1L]],
             scenario_sim = result$new_scenarios[[1L]],
             chol_obj     = result$chol_obj,
             pov_line     = as.numeric(input$pov_line_sim),
-            # Full pipeline inputs — needed for run_sim_pipeline() benchmark
             survey_data  = svy,
             model        = mf$fit3,
             engine       = mf$engine,
             train_data   = mf$train_data,
             sw           = sw,
             so           = so,
-            residuals    = sh$residuals
-          ), "dev/fixtures/sim_inputs.rds")
-          message("[dev] Fixtures saved to dev/fixtures/sim_inputs.rds")
+            residuals    = sh$residuals,
+            weather_raw  = result$hist_sim_result[[1L]]$weather_raw
+          ), "dev/fixtures/sim_inputs_full.rds")
+
+          message("[dev] Fixtures saved (slim + full).")
         }, error = function(e) {
           message("[dev] Fixture save failed: ", conditionMessage(e))
         })
       }
 
       # ---- Completion notification -----------------------------------------
+      t_total_wall <- result$t_elapsed + t_agg_total
+
       message(sprintf(
-        "[wiseapp] Simulation complete in %s | %d key(s) | S=%d | ~%d total runs",
-        format_elapsed(result$t_elapsed),
-        result$n_keys, S_sim, result$total_runs
+        "[wiseapp] TOTAL wall time: %s | weather: %s | pipelines: %s | aggregation: %s | %d key(s) | S=%d",
+        format_elapsed(t_total_wall),
+        format_elapsed(result$t_weather %||% 0),
+        format_elapsed(result$t_elapsed - (result$t_weather %||% 0)),
+        format_elapsed(t_agg_total),
+        result$n_keys, S_sim
       ))
+
       shiny::showNotification(
         ui = tagList(
           tags$b("\u2713 Simulation complete"), tags$br(),
-          sprintf("%s | %d key(s) | ~%d runs",
-                  format_elapsed(result$t_elapsed),
+          sprintf("%s total | %d key(s) | ~%d runs",
+                  format_elapsed(t_total_wall),
                   result$n_keys, result$total_runs),
-          if (length(result$new_scenarios) > 0)
-            tagList(tags$br(),
-                    paste0(length(result$new_scenarios),
-                           " future scenario(s)"))
-          else NULL
+          tags$br(),
+          sprintf("Weather: %s | Pipelines: %s | Aggregation: %s",
+                  format_elapsed(result$t_weather %||% 0),
+                  format_elapsed(result$t_elapsed - (result$t_weather %||% 0)),
+                  format_elapsed(t_agg_total))
         ),
-        type = "message", duration = 8
+        type = "message", duration = 10
       )
     }, ignoreInit = TRUE)
 

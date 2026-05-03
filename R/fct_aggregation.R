@@ -778,10 +778,14 @@ compute_scenario_agg <- function(scenarios,
                                  band_q    = c(lo = 0.10, hi = 0.90),
                                  residuals = "none",
                                  pov_line  = NULL,
-                                 Z_global  = NULL) {
+                                 Z_global  = NULL,
+                                 progress_fn = function(i, n, label) invisible(NULL)) {
 
-  setNames(lapply(names(scenarios), function(display_key) {
-    s             <- scenarios[[display_key]]
+  n_scenarios <- length(scenarios)
+  setNames(lapply(seq_along(scenarios), function(si) {
+    display_key   <- names(scenarios)[[si]]
+    progress_fn(si, n_scenarios, display_key)
+    s             <- scenarios[[si]]
     is_log        <- isTRUE(s$so$transform == "log")
     chol_obj      <- s$chol_obj
     pipes         <- s$pipelines

@@ -84,8 +84,13 @@ fct_run_simulation <- function(sw,
     "ssp5_8_5" = "SSP5-8.5"
   )
 
+  # ---- Total elapsed timer — starts here, covers everything --------------- #
+  t_start_total <- proc.time()[["elapsed"]]
+
   # ---- Weather loading ---------------------------------------------------- #
-  progress_fn(0.15, "Loading weather data...")
+  progress_fn(0.05, "Querying weather data (this may take 1-2 minutes)...")
+  message("[wiseapp] Querying weather data (DuckDB)...")
+  t_weather_start <- proc.time()[["elapsed"]]
 
   weather_result <- get_weather(
     survey_data         = svy,
@@ -98,6 +103,12 @@ fct_run_simulation <- function(sw,
     perturbation_method = perturbation_method,
     stored_breaks       = stored_breaks
   )
+
+  t_weather <- proc.time()[["elapsed"]] - t_weather_start
+  message(sprintf("[wiseapp] Weather data loaded in %s",
+                  format_elapsed(t_weather)))
+  progress_fn(0.20, sprintf("Weather loaded (%s) — preparing simulation...",
+                             format_elapsed(t_weather)))
 
   # ---- Cholesky VCV ------------------------------------------------------- #
   chol_obj <- if (isTRUE(skip_coef_draws)) {
@@ -241,13 +252,17 @@ fct_run_simulation <- function(sw,
   progress_fn(0.50, "Running simulations...")
   message("[wiseapp] Running simulation pipelines...")
 
-  t_start          <- proc.time()[["elapsed"]]
+  t_start <- t_start_total   # key loop elapsed = total elapsed from function entry
 
     # Increase globals size limit for parallel workers
     # svy + model + weather_result require ~3GB total — set limit accordingly #DRK Note - May need to adjust.
     old_max <- getOption("future.globals.maxSize")
     options(future.globals.maxSize = 4 * 1024^3)  # 4GB
     on.exit(options(future.globals.maxSize = old_max), add = TRUE)
+
+    t_start_pipeline <- proc.time()[["elapsed"]]
+    message("[wiseapp] Running simulation pipelines...")
+    progress_fn(0.35, sprintf("Running %d simulation pipelines...", n_keys))
 
     pipeline_list <- if (isTRUE(use_parallel) && n_workers_safe > 1L) {
     # Parallel path — future_lapply across keys
@@ -278,12 +293,35 @@ fct_run_simulation <- function(sw,
       future.packages = "wiseapp" #DRK Note - Hopefully sufficient
     )
   } else {
-    # Serial path — plain for loop with per-key progress messages
+    # Serial path — per-key messages fire BEFORE each key runs
     pl <- vector("list", length(all_keys))
-    for (ki in seq_along(all_keys)) {
+        for (ki in seq_along(all_keys)) {
       key       <- all_keys[[ki]]
       is_hist_k <- identical(key, "historical")
-      t_el      <- proc.time()[["elapsed"]] - t_start
+      t_el      <- proc.time()[["elapsed"]] - t_start_pipeline
+      t_remain  <- if (ki > 1L)
+        (t_el / (ki - 1L)) * (n_keys - ki + 1L) else NA_real_
+
+      message(sprintf(
+        "[wiseapp] Key %d/%d: %s | %s elapsed%s",
+        ki, n_keys,
+        if (is_hist_k) "Historical"
+        else sub("^(ssp[^_]+_[0-9]+_[0-9]+)_.*$", "\\1", key),
+        format_elapsed(t_el),
+        if (!is.na(t_remain))
+          paste0(" | ~", format_elapsed(t_remain), " remaining")
+        else " | estimating..."
+      ))
+
+      progress_fn(
+        value  = 0.35 + 0.45 * ((ki - 1L) / n_keys),
+        detail = sprintf("Key %d/%d: %s | %s elapsed",
+                         ki, n_keys,
+                         if (is_hist_k) "Historical"
+                         else sub("^(ssp[^_]+_[0-9]+_[0-9]+)_.*$",
+                                  "\\1", key),
+                         format_elapsed(t_el))
+      )
       pl[[ki]] <- tryCatch(
         run_sim_pipeline(
           weather_raw = weather_result[[key]],
@@ -319,22 +357,6 @@ fct_run_simulation <- function(sw,
   for (ki in seq_along(all_keys)) {
     key     <- all_keys[[ki]]
     is_hist <- identical(key, "historical")
-
-    t_elapsed <- proc.time()[["elapsed"]] - t_start
-    t_remain  <- if (ki > 1L)
-      (t_elapsed / (ki - 1L)) * (n_keys - ki + 1L) else NA_real_
-
-    message(sprintf(
-      "[wiseapp] Key %d/%d: %s | %d yrs | %s elapsed%s",
-      ki, n_keys,
-      if (is_hist) "Historical"
-      else sub("^(ssp[^_]+_[0-9]+_[0-9]+)_.*$", "\\1", key),
-      n_hist_yrs,
-      format_elapsed(t_elapsed),
-      if (!is.na(t_remain))
-        paste0(" | ~", format_elapsed(t_remain), " remaining")
-      else " | estimating..."
-    ))
 
     out <- pipeline_list[[ki]]
 
@@ -429,7 +451,17 @@ fct_run_simulation <- function(sw,
   rm(group_agg, group_weather_rep, group_meta, group_n)
   gc(verbose = FALSE)
 
-  t_elapsed_total <- proc.time()[["elapsed"]] - t_start
+  t_elapsed_total    <- proc.time()[["elapsed"]] - t_start_total
+  t_pipeline_elapsed <- proc.time()[["elapsed"]] - t_start_pipeline
+
+  message(sprintf(
+    "[wiseapp] Simulation complete in %s total | weather: %s | pipelines: %s | %d key(s) | ~%d runs",
+    format_elapsed(t_elapsed_total),
+    format_elapsed(t_weather),
+    format_elapsed(t_pipeline_elapsed),
+    n_keys,
+    total_runs
+  ))
 
   list(
     hist_sim_result = hist_sim_result,
@@ -437,6 +469,7 @@ fct_run_simulation <- function(sw,
     chol_obj        = chol_obj,
     n_keys          = n_keys,
     total_runs      = total_runs,
-    t_elapsed       = t_elapsed_total
+    t_elapsed       = t_elapsed_total,
+    t_weather       = t_weather        # ← expose for UI notification
   )
 }

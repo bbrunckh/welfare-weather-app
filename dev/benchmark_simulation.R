@@ -130,6 +130,31 @@ for (S in S_values) {
               round(serial / 12, 1)))
 }
 
+# ---- Section 0: get_weather() DuckDB timing --------------------------------
+cat("=== Section 0: get_weather() DuckDB timing ===\n")
+cat("(This is the bottleneck before Key 1 starts)\n\n")
+
+# We need sw (survey weather config) and fp_list (file paths)
+# to call get_weather() directly
+if (!is.null(fx_full) && !is.null(fx_full$sw)) {
+  t_weather <- numeric(3L)
+  for (rep in seq_len(3L)) {
+    gc(verbose = FALSE)
+    cat(sprintf("  rep %d...", rep))
+    t_weather[[rep]] <- system.time(
+      get_weather(
+        sw      = fx_full$sw,
+        so      = fx_full$so,
+        fp_list = fx_full$fp_list
+      )
+    )[["elapsed"]]
+    cat(sprintf(" %.2fs\n", t_weather[[rep]]))
+  }
+  cat(sprintf("\n  Mean get_weather(): %.2fs\n\n", mean(t_weather)))
+} else {
+  cat("  [SKIP] sw/so/fp_list not in fixtures.\n\n")
+}
+
 # ---- Section 2: Full run_sim_pipeline() timing ------------------------------
 cat("\n=== Section 2: Full run_sim_pipeline() timing ===\n")
 cat("(weather join + predict_outcome + Cholesky — everything before aggregation)\n\n")
