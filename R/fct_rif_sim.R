@@ -99,12 +99,17 @@ build_rif_grid <- function(fits_multi, taus, model_id) {
 #' @param so Selected outcome metadata (list with \code{$transform}).
 #'   When \code{so$transform == "log"}, the baseline outcome is log-transformed
 #'   to match the scale used during model fitting.
+#' @param chol_list Optional list of Cholesky factor matrices (one per tau),
+#'   as returned by \code{compute_chol_vcov(fit_multi)}. When provided,
+#'   an \code{F_loading} matrix is attached as an attribute of the result for
+#'   use in \code{aggregate_with_uncertainty()}.
 #'
 #' @return \code{newdata} augmented with \code{.fitted}, \code{.residual}, and outcome.
+#'   When \code{chol_list} is non-NULL, also carries \code{attr(., "F_loading")}.
 #'
 #' @export
 predict_rif <- function(fit_multi, newdata, svy, train_data, taus, outcome,
-                        weather_cols, so = NULL) {
+                        weather_cols, so = NULL, chol_list = NULL) {
   stopifnot(
     ".svy_row_id must be present in newdata" = ".svy_row_id" %in% names(newdata),
     "taus must be non-empty" = length(taus) > 0,
@@ -118,7 +123,6 @@ predict_rif <- function(fit_multi, newdata, svy, train_data, taus, outcome,
 
   # Transform y_baseline to model scale (log if applicable)
   # train_data[[outcome]] is already in model scale (log-transformed by
-
   # prepare_outcome_df before fitting), so ecdf and predictions are in log scale.
   is_log     <- isTRUE(so$transform == "log")
   y_baseline <- if (is_log) log(y_raw) else y_raw
@@ -137,10 +141,23 @@ predict_rif <- function(fit_multi, newdata, svy, train_data, taus, outcome,
   # Store deltas in a matrix: rows = observations, cols = quantiles
   delta_mat <- matrix(NA_real_, nrow = n, ncol = K)
 
+  # For F_loading: store X_diff per quantile (X_scenario - X_baseline)
+  # We compute model.matrix once per quantile for baseline then scenario.
+  compute_loading <- !is.null(chol_list) && length(chol_list) == K
+  X_diff_list    <- if (compute_loading) vector("list", K) else NULL
+
   for (k in seq_len(K)) {
     # Baseline weather prediction
     pred_base <- as.numeric(stats::predict(fit_multi[[k]], newdata = newdata,
                                            type = "response"))
+
+    # Capture baseline design matrix for loading computation
+    if (compute_loading) {
+      X_base_k <- tryCatch(
+        stats::model.matrix(fit_multi[[k]], data = newdata, type = "rhs"),
+        error = function(e) NULL
+      )
+    }
 
     # Swap to scenario weather
     for (wc in weather_cols) newdata[[wc]] <- saved_weather[[wc]]
@@ -148,6 +165,19 @@ predict_rif <- function(fit_multi, newdata, svy, train_data, taus, outcome,
     # Scenario weather prediction
     pred_new <- as.numeric(stats::predict(fit_multi[[k]], newdata = newdata,
                                           type = "response"))
+
+    # Capture scenario design matrix and compute X_diff
+    if (compute_loading && !is.null(X_base_k)) {
+      X_new_k <- tryCatch(
+        stats::model.matrix(fit_multi[[k]], data = newdata, type = "rhs"),
+        error = function(e) NULL
+      )
+      if (!is.null(X_new_k) && nrow(X_new_k) == nrow(X_base_k)) {
+        X_diff_list[[k]] <- X_new_k - X_base_k
+      } else {
+        compute_loading <- FALSE  # abort if row counts don't match
+      }
+    }
 
     # Swap back to baseline for next iteration
     for (wc in weather_cols) newdata[[wc]] <- svy[[wc]][svy_row]
@@ -172,7 +202,69 @@ predict_rif <- function(fit_multi, newdata, svy, train_data, taus, outcome,
   newdata$.residual  <- NA_real_
   newdata[[outcome]] <- y_baseline + delta_i
 
+  # Compute F_loading by interpolating X_diff %*% t(L_k) at each tau_i
+  if (compute_loading && !any(vapply(X_diff_list, is.null, logical(1)))) {
+    F_loading <- tryCatch({
+      interpolate_F_loading(X_diff_list, chol_list, taus, tau_i)
+    }, error = function(e) {
+      warning("[predict_rif] F_loading interpolation failed: ", conditionMessage(e))
+      NULL
+    })
+    if (!is.null(F_loading)) attr(newdata, "F_loading") <- F_loading
+  }
+
   newdata
+}
+
+
+#' Interpolate factor loadings at arbitrary quantile positions
+#'
+#' For each household i, linearly interpolates between the two adjacent
+#' quantile factor-loading rows to produce a single N x P F_loading matrix.
+#'
+#' Each per-quantile loading is \eqn{F_k = X\_diff_k \%*\% t(L_k)}, where
+#' \eqn{X\_diff_k = X_{scenario} - X_{baseline}} at quantile k.
+#'
+#' @param X_diff_list List of K matrices (n x p), one per quantile.
+#' @param chol_list   List of K Cholesky factor matrices (p x p), one per quantile.
+#' @param taus        Numeric vector of length K (sorted quantile grid).
+#' @param tau_i       Numeric vector of length n (household quantile positions).
+#'
+#' @return Numeric n x p matrix of interpolated factor loadings.
+#'
+#' @keywords internal
+interpolate_F_loading <- function(X_diff_list, chol_list, taus, tau_i) {
+  n <- nrow(X_diff_list[[1]])
+  K <- length(taus)
+
+  # Find interval: taus[idx] <= tau_i < taus[idx+1]
+  idx <- findInterval(tau_i, taus, all.inside = TRUE)
+  idx_hi <- pmin(idx + 1L, K)
+
+  # Interpolation weights
+  tau_lo <- taus[idx]
+  tau_hi <- taus[idx_hi]
+  w      <- ifelse(tau_hi > tau_lo, (tau_i - tau_lo) / (tau_hi - tau_lo), 0)
+
+  # Pre-compute F_k = X_diff_k %*% t(L_k) for the unique quantile indices needed
+  needed_idx <- unique(c(idx, idx_hi))
+  F_cache <- vector("list", K)
+  for (k in needed_idx) {
+    F_cache[[k]] <- X_diff_list[[k]] %*% t(chol_list[[k]])
+  }
+
+  # Blend: F_loading[i, ] = (1 - w[i]) * F_lo[i, ] + w[i] * F_hi[i, ]
+  p <- ncol(F_cache[[needed_idx[1]]])
+  F_loading <- matrix(NA_real_, nrow = n, ncol = p)
+
+  for (i in seq_len(n)) {
+    lo <- idx[i]
+    hi <- idx_hi[i]
+    wi <- w[i]
+    F_loading[i, ] <- (1 - wi) * F_cache[[lo]][i, ] + wi * F_cache[[hi]][i, ]
+  }
+
+  F_loading
 }
 
 

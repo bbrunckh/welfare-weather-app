@@ -434,14 +434,6 @@ mod_2_01_weathersim_server <- function(id,
     output$run_sim_ui <- shiny::renderUI({
       mf <- model_fit()
       tagList(
-        if (!is.null(mf) && identical(mf$engine, "rif")) {
-          shiny::div(
-            class = "alert alert-info",
-            style = "font-size: 12px; margin-top: 4px; margin-bottom: 4px;",
-            shiny::tags$b("\u2139 RIF (distributional) simulation:"),
-            " Uses delta method. Residual draws and coefficient uncertainty are not available."
-          )
-        },
         shiny::actionButton(
           ns("run_sim"),
           label = "Run simulation",
@@ -547,15 +539,13 @@ mod_2_01_weathersim_server <- function(id,
           # Pre-compute Cholesky factor once before the weather-key loop.
           # Reused across all keys (historical + future).
           # RIF: no coefficient draws — uncertainty comes from year-to-year variation only.
-          chol_Sigma <- if (is_rif) {
-            message("[wiseapp] RIF engine: coefficient uncertainty not supported, using point estimates")
-            NULL
-          } else if (!isTRUE(input$include_coef_uncertainty)) {
+          chol_Sigma <- if (!isTRUE(input$include_coef_uncertainty)) {
             message("[wiseapp] Coefficient uncertainty disabled (point estimates only)")
             NULL
           } else {
+            fit_for_vcov <- if (is_rif) fit_multi else model
             tryCatch(
-              compute_chol_vcov(model, COEF_VCOV_SPEC),
+              compute_chol_vcov(fit_for_vcov, COEF_VCOV_SPEC),
               error = function(e) {
                 warning("[mod_2_01] compute_chol_vcov() failed, falling back to point estimates: ",
                         conditionMessage(e))

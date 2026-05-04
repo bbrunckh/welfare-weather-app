@@ -126,10 +126,18 @@ COEF_VCOV_SPEC <- ~code + year + survname + loc_id
 #' @param fit       A fitted fixest model object.
 #' @param vcov_spec Formula passed to `vcov(fit, vcov = ...)`.
 #'   Defaults to `COEF_VCOV_SPEC`.
-#' @return A K x K upper-triangular matrix (Cholesky factor).
+#' @return For `fixest`: a K x K upper-triangular matrix (Cholesky factor).
+#'   For `fixest_multi`: a list of such matrices, one per sub-model.
 #' @export
 compute_chol_vcov <- function(fit, vcov_spec = COEF_VCOV_SPEC) {
-  # Try the requested spec first, then fall back through simpler options
+  # fixest_multi: iterate over sub-models and return a list of Cholesky factors
+  if (inherits(fit, "fixest_multi")) {
+    return(lapply(seq_along(fit), function(i) {
+      compute_chol_vcov(fit[[i]], vcov_spec = vcov_spec)
+    }))
+  }
+
+  # Single fixest model: try the requested spec then fall back
   fallbacks <- list(vcov_spec, ~loc_id, "HC1", "iid")
   for (spec in fallbacks) {
     v <- tryCatch(vcov(fit, vcov = spec), error = function(e) NULL)
@@ -419,7 +427,8 @@ run_sim_pipeline <- function(weather_raw, svy, sw, so,
         taus         = taus,
         outcome      = so$name,
         weather_cols = weather_cols,
-        so           = so
+        so           = so,
+        chol_list    = if (is.list(chol_Sigma)) chol_Sigma else NULL
       ),
       error = function(e) {
         warning("[run_sim_pipeline] predict_rif() failed: ", conditionMessage(e))
@@ -427,6 +436,7 @@ run_sim_pipeline <- function(weather_raw, svy, sw, so,
       }
     )
     if (is.null(preds)) return(NULL)
+    F_loading_rif <- attr(preds, "F_loading")
     preds <- apply_log_backtransform(preds, so)
     # SP transfer
     if ("._sp_transfer" %in% names(preds)) {
@@ -438,7 +448,7 @@ run_sim_pipeline <- function(weather_raw, svy, sw, so,
     wt_col <- if (length(wt_cols) > 0) wt_cols[1] else NULL
     return(list(
       y_point     = preds$.fitted,
-      F_loading   = NULL,
+      F_loading   = F_loading_rif,
       sim_year    = preds$sim_year,
       weight      = if (!is.null(wt_col)) preds[[wt_col]] else NULL,
       id_vec      = if (!is.null(id_col)) preds[[id_col]] else NULL,
