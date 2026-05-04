@@ -801,9 +801,8 @@ enhance_exceedance <- function(scenarios,
       df$value_p05 <- out$value_p05
       df$value_p95 <- out$value_p95
     }
-    if ("model_min" %in% names(out) && !all(is.na(out$model_min))) {
-      df$model_min <- out$model_min
-      df$model_max <- out$model_max
+    if ("model_values" %in% names(out)) {
+      df$model_values <- out$model_values
     }
     df
   }))
@@ -858,14 +857,26 @@ enhance_exceedance <- function(scenarios,
     }
 
     # Model spread band ECDFs
-    if (isTRUE(show_bands) && "model_min" %in% names(sub)) {
-      sub_clean <- sub[is.finite(sub$model_min) & is.finite(sub$model_max), ]
-      if (nrow(sub_clean) > 2) {
+    # Correct approach: build per-model ECDF, then take envelope at each
+    # exceedance probability across models.
+    if (isTRUE(show_bands) && "model_values" %in% names(sub)) {
+      mv <- sub$model_values  # list column: each element = numeric vector of per-model values for that year
+      n_models <- length(mv[[1]])
+      if (n_models > 1) {
+        # Restructure: per-model vectors across all years
+        per_model_vals <- lapply(seq_len(n_models), function(m) {
+          vapply(mv, function(v) v[m], numeric(1))
+        })
         probs <- result$exceed
-        xs_lo <- stats::quantile(sub_clean$model_min, 1 - probs, na.rm = TRUE)
-        xs_hi <- stats::quantile(sub_clean$model_max, 1 - probs, na.rm = TRUE)
-        result$model_lo <- as.numeric(xs_lo)
-        result$model_hi <- as.numeric(xs_hi)
+        # Build quantile function per model and evaluate at each exceedance prob
+        quantiles_per_model <- lapply(per_model_vals, function(vals) {
+          vals <- vals[is.finite(vals)]
+          if (length(vals) < 3) return(rep(NA_real_, length(probs)))
+          as.numeric(stats::quantile(vals, 1 - probs, na.rm = TRUE))
+        })
+        qmat <- do.call(rbind, quantiles_per_model)  # n_models x length(probs)
+        result$model_lo <- apply(qmat, 2, min, na.rm = TRUE)
+        result$model_hi <- apply(qmat, 2, max, na.rm = TRUE)
       }
     }
 

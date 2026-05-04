@@ -299,15 +299,15 @@ mod_2_02_results_server <- function(id,
             aggregate_with_uncertainty(
               y_point         = mod$y_point,
               F_loading       = mod$F_loading,
-              group_vec       = s$sim_year,
+              group_vec       = mod$sim_year,
               so              = s$so,
               agg_method      = method,
-              weights         = if (use_w) s$weight else NULL,
+              weights         = if (use_w) mod$weight else NULL,
               pov_line        = if (method %in% c("headcount_ratio", "gap", "fgt2"))
                                   as.numeric(input$cmp_pov_line) else NULL,
               train_resid     = if (!is.null(h$train_data)) h$train_data$.resid else NULL,
               residual_method = h$residuals %||% "none",
-              id_vec          = s$id_vec,
+              id_vec          = mod$id_vec,
               S               = as.integer(input$sim_n %||% 200L)
             )
           })
@@ -326,9 +326,7 @@ mod_2_02_results_server <- function(id,
                 combined$value_p05 <- combined$value_p05 - ref_val
                 combined$value_p95 <- combined$value_p95 - ref_val
               }
-              if ("model_min" %in% names(combined)) {
-                combined$model_min <- combined$model_min - ref_val
-                combined$model_max <- combined$model_max - ref_val
+              if ("model_values" %in% names(combined)) {
                 combined$model_values <- lapply(combined$model_values, function(v) v - ref_val)
               }
             }

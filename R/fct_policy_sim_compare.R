@@ -393,14 +393,14 @@ policy_input_diagnostics <- function(baseline_svy, policy_svy, vars = NULL) {
           aggregate_with_uncertainty(
             y_point         = mod$y_point,
             F_loading       = mod$F_loading,
-            group_vec       = s$sim_year,
+            group_vec       = mod$sim_year,
             so              = s$so,
             agg_method      = method,
-            weights         = if (use_w) s$weight else NULL,
+            weights         = if (use_w) mod$weight else NULL,
             pov_line        = pov_line_val(),
             train_resid     = if (!is.null(hs_for_dev$train_data)) hs_for_dev$train_data$.resid else NULL,
             residual_method = hs_for_dev$residuals %||% "none",
-            id_vec          = s$id_vec,
+            id_vec          = mod$id_vec,
             S               = as.integer(hs_for_dev$S %||% 200L)
           )
         })
@@ -419,9 +419,7 @@ policy_input_diagnostics <- function(baseline_svy, policy_svy, vars = NULL) {
               combined$value_p05 <- combined$value_p05 - hist_ref
               combined$value_p95 <- combined$value_p95 - hist_ref
             }
-            if ("model_min" %in% names(combined)) {
-              combined$model_min <- combined$model_min - hist_ref
-              combined$model_max <- combined$model_max - hist_ref
+            if ("model_values" %in% names(combined)) {
               combined$model_values <- lapply(combined$model_values, function(v) v - hist_ref)
             }
           }

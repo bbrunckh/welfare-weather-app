@@ -161,20 +161,23 @@ mod_2_01_weathersim_ui <- function(id) {
         shiny::helpText(
           "200\u2013500 recommended for final runs; 50 for speed. Upper bound 1,000.",
           style = "font-size:11px; color:#555; margin-top:2px; margin-bottom:8px;"
-        ),
-        shiny::checkboxInput(
-          inputId = ns("dev_mode"),
-          label   = shiny::tags$span(
-            style = "font-size:11px; font-weight:600; color:#b45309;",
-            "\u26a0 Dev mode: 1st model from ensemble only"
-          ),
-          value   = TRUE
-        ),
-        shiny::helpText(
-          "When checked, only the first CMIP6 ensemble member per SSP/period is used.",
-          " Speeds up testing. Disable for final runs.",
-          style = "font-size:11px; color:#b45309; margin-top:2px; margin-bottom:8px;"
         )
+      ),
+
+      # Dev mode is independent of coefficient uncertainty — controls whether
+      # all GCM ensemble members are used (affects the model-spread band).
+      shiny::checkboxInput(
+        inputId = ns("dev_mode"),
+        label   = shiny::tags$span(
+          style = "font-size:11px; font-weight:600; color:#b45309;",
+          "\u26a0 Dev mode: 1st model from ensemble only"
+        ),
+        value   = FALSE
+      ),
+      shiny::helpText(
+        "When checked, only the first CMIP6 ensemble member per SSP/period is used.",
+        " Speeds up testing. Disable for final runs.",
+        style = "font-size:11px; color:#b45309; margin-top:2px; margin-bottom:8px;"
       ),
     ),
     shiny::tags$hr(style = "margin: 10px 0;"),
@@ -536,12 +539,13 @@ mod_2_01_weathersim_server <- function(id,
             cached_breaks <- attr(weather_result, "stored_breaks")
           }
 
-          # Pre-compute Cholesky factor once before the weather-key loop.
+          # Pre-compute Cholesky factor(s) once before the weather-key loop.
           # Reused across all keys (historical + future).
-          # RIF: no coefficient draws — uncertainty comes from year-to-year variation only.
+          # fixest: returns a single K x K matrix.
+          # RIF: compute_chol_vcov(fit_multi) returns a list of K matrices,
+          #      one per tau sub-model — passed as chol_list to predict_rif().
           chol_Sigma <- if (!isTRUE(input$include_coef_uncertainty)) {
-            message("[wiseapp] Coefficient uncertainty disabled (point estimates only)")
-            NULL
+            # ...existing code...
           } else {
             fit_for_vcov <- if (is_rif) fit_multi else model
             tryCatch(
@@ -677,16 +681,14 @@ mod_2_01_weathersim_server <- function(id,
               gk         <- paste0(ssp_code, "_", period_str)
 
               if (is.null(group_data[[gk]])) {
-                group_data[[gk]] <- list(
-                  models   = list(),
-                  sim_year = out$sim_year,
-                  weight   = out$weight,
-                  id_vec   = out$id_vec
-                )
+                group_data[[gk]] <- list(models = list())
               }
               group_data[[gk]]$models[[length(group_data[[gk]]$models) + 1L]] <- list(
                 y_point   = out$y_point,
                 F_loading = out$F_loading,
+                sim_year  = out$sim_year,
+                weight    = out$weight,
+                id_vec    = out$id_vec,
                 name      = model_name
               )
 
@@ -721,9 +723,6 @@ mod_2_01_weathersim_server <- function(id,
             display_key <- paste0(ssp_pretty, " / ", period_lbl)
             new_scenarios[[display_key]] <- list(
               models      = group_data[[gk]]$models,
-              sim_year    = group_data[[gk]]$sim_year,
-              weight      = group_data[[gk]]$weight,
-              id_vec      = group_data[[gk]]$id_vec,
               weather_raw = group_weather_rep[[gk]],
               so          = so,
               year_range  = meta$year_range,

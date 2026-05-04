@@ -203,25 +203,15 @@ mod_3_scenario_server <- function(id,
       tabset_session = session
     )
 
-    # ---- Run policy simulation button (hidden for RIF engine) -----------
+    # ---- Run policy simulation button ------------------------------------
 
     output$run_policy_sim_ui <- renderUI({
-      mf <- model_fit()
-      if (!is.null(mf) && identical(mf$engine, "rif")) {
-        div(
-          class = "alert alert-warning",
-          style = "font-size: 13px; margin-top: 4px;",
-          tags$b("\u26a0 Simulations are not yet implemented for Quantile Regression (RIF)."),
-          " Please select a different model engine to run simulations."
-        )
-      } else {
-        actionButton(
-          ns("run_policy_sim"),
-          "Run simulation",
-          class = "btn-primary",
-          width = "100%"
-        )
-      }
+      actionButton(
+        ns("run_policy_sim"),
+        "Run simulation",
+        class = "btn-primary",
+        width = "100%"
+      )
     })
 
     # ---- Run policy simulation on button click ---------------------------

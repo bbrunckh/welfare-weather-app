@@ -293,7 +293,7 @@ aggregate_with_uncertainty <- function(
 #' @param per_model_aggs List of M tibbles, each from
 #'   `aggregate_with_uncertainty()`.
 #' @return A tibble with columns: `sim_year`, `value`, `value_p05`,
-#'   `value_p95`, `model_min`, `model_max`, `model_values`.
+#'   `value_p95`, `model_values`.
 #' @export
 combine_ensemble_results <- function(per_model_aggs) {
   tagged <- lapply(seq_along(per_model_aggs), function(m) {
@@ -311,8 +311,6 @@ combine_ensemble_results <- function(per_model_aggs) {
       value     = stats::median(.data$value, na.rm = TRUE),
       value_p05 = if (has_bands) mean(.data$value_p05, na.rm = TRUE) else NA_real_,
       value_p95 = if (has_bands) mean(.data$value_p95, na.rm = TRUE) else NA_real_,
-      model_min = min(.data$value, na.rm = TRUE),
-      model_max = max(.data$value, na.rm = TRUE),
       model_values = list(.data$value),
       .groups   = "drop"
     )

@@ -602,6 +602,9 @@ resimulate_with_svy <- function(svy, sw, so, mf,
         list(
           y_point   = out$y_point,
           F_loading = out$F_loading,
+          sim_year  = out$sim_year,
+          weight    = out$weight,
+          id_vec    = out$id_vec,
           name      = s$models[[mi]]$name %||% paste0("model_", mi)
         )
       })
@@ -609,9 +612,6 @@ resimulate_with_svy <- function(svy, sw, so, mf,
       if (length(models_new) == 0) return(NULL)
       list(
         models      = models_new,
-        sim_year    = models_new[[1]]$sim_year %||% s$sim_year,
-        weight      = s$weight,
-        id_vec      = s$id_vec,
         weather_raw = s$weather_raw,
         so          = so,
         year_range  = s$year_range,
@@ -622,10 +622,9 @@ resimulate_with_svy <- function(svy, sw, so, mf,
       out <- run_one(s$weather_raw, slim = TRUE)
       if (is.null(out)) return(NULL)
       list(
-        models      = list(list(y_point = out$y_point, F_loading = out$F_loading, name = "single")),
-        sim_year    = out$sim_year,
-        weight      = out$weight,
-        id_vec      = out$id_vec,
+        models      = list(list(y_point = out$y_point, F_loading = out$F_loading,
+                                sim_year = out$sim_year, weight = out$weight,
+                                id_vec = out$id_vec, name = "single")),
         weather_raw = s$weather_raw,
         so          = so,
         year_range  = s$year_range,

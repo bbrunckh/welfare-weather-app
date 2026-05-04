@@ -262,14 +262,14 @@ mod_2_03_diagnostics_server <- function(id,
             aggregate_with_uncertainty(
               y_point         = mod$y_point,
               F_loading       = mod$F_loading,
-              group_vec       = s$sim_year,
+              group_vec       = mod$sim_year,
               so              = s$so,
               agg_method      = "mean",
-              weights         = s$weight,
+              weights         = mod$weight,
               pov_line        = NULL,
               train_resid     = if (!is.null(h$train_data)) h$train_data$.resid else NULL,
               residual_method = h$residuals %||% "none",
-              id_vec          = s$id_vec,
+              id_vec          = mod$id_vec,
               S               = as.integer(h$S %||% 200L)
             )
           })
