@@ -954,8 +954,8 @@ enhance_exceedance <- function(scenarios,
     ) +
     ggplot2::scale_linetype_manual(
       values = ltype_map_yr,
-      breaks = c("Historical", present_yrs),
-      labels = c("Historical", present_yrs),
+      breaks = present_yrs,
+      labels = present_yrs,
       name   = "Period",
       guide  = ggplot2::guide_legend(order = 2,
                                      override.aes = list(linewidth = 0.9))

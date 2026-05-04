@@ -28,16 +28,18 @@ mod_3_04_labor_ui <- function(id) {
 #' @param selected_model Reactive named list of the selected model's parameters
 #'   from Step 1. Used to determine which labor variables are in the model
 #'   and should be shown in the UI.
+#' @param survey_data Reactive data frame of merged survey-weather data.
+#'   Used to determine which labor variables are available in the selected survey.
 #'
 #' @return A named list of reactives:
 #'   \describe{
 #'     \item{labor_scenario}{Named list of labor market scenario parameters.}
-#'     \item{fut_sim}{Reactive — placeholder for future simulation results.}
 #'   }
 #'
 #' @noRd
 mod_3_04_labor_server <- function(id,
                                    selected_model = reactive(NULL),
+                                   survey_data = reactive(NULL),
                                    variable_list  = reactive(NULL)) {
   moduleServer(id, function(input, output, session) {
     ns <- session$ns
@@ -86,16 +88,30 @@ mod_3_04_labor_server <- function(id,
     })
 
     # ---- Candidate variables for this category --------------------------
-    labor_patterns <- c("lstatus", "empstat", "agriculture", "industry", "services")
+    labor_patterns <- c("employed", "selfemployed", "agriculture", "industry", "services")
 
     any_selected <- reactive({
-      any(vapply(labor_patterns, function(p) {
-        any(grepl(p, coeffs(), ignore.case = TRUE))
-      }, logical(1)))
+      any(tolower(labor_patterns) %in% tolower(coeffs()))
+    })
+
+    # Labor variables available in the selected survey
+    labor_vars_available <- reactive({
+      svy <- survey_data()
+      if (is.null(svy)) return(character(0))
+      # Check which labour variables are actually in the selected survey
+      intersect(labor_patterns, names(svy))
     })
 
     output$placeholder_ui <- renderUI({
       if (isTRUE(any_selected())) return(NULL)
+      # Only show placeholder if there are labour variables in the survey
+      if (length(labor_vars_available()) == 0) {
+        return(div(
+          class = "alert alert-warning",
+          "No labour market variables found in the selected survey (or level of analysis in the selected survey)."
+        ))
+      }
+      # Show candidate variables with their levels from variable_list
       cand <- policy_candidate_info(variable_list(), labor_patterns)
       policy_placeholder_tag("labor market", cand)
     })
@@ -125,23 +141,11 @@ mod_3_04_labor_server <- function(id,
       )
     }
 
-    # ---- Labor force participation change -------------------------------
-
-    show_lfp <- reactive({
-      any(grepl("lstatus", coeffs(), ignore.case = TRUE))
-    })
-
-    output$labor_lfp_ui <- renderUI({
-      req(show_lfp())
-      labor_pp_ui("labor_lfp",
-                  "Change in labor force participation (pp)",
-                  "fa-person-walking")
-    })
-
     # ---- Employment rate change -----------------------------------------
 
     show_emp <- reactive({
-      any(grepl("empstat", coeffs(), ignore.case = TRUE))
+      cv <- coeffs()
+      any(tolower(c("employed", "selfemployed", "unemployed")) %in% tolower(cv))
     })
 
     output$labor_emp_ui <- renderUI({
@@ -156,10 +160,8 @@ mod_3_04_labor_server <- function(id,
     # services are user-controlled, agriculture = 100 - mfg - services.
 
     show_sector <- reactive({
-      cv <- coeffs()
-      any(grepl("agriculture", cv, ignore.case = TRUE)) &&
-      any(grepl("industry",    cv, ignore.case = TRUE)) &&
-      any(grepl("services",    cv, ignore.case = TRUE))
+      cv <- tolower(coeffs())
+      all(c("agriculture", "industry", "services") %in% cv)
     })
 
     output$labor_sector_ui <- renderUI({
@@ -184,7 +186,7 @@ mod_3_04_labor_server <- function(id,
           label   = NULL,
           min     = 0,
           max     = 100,
-          value   = 20,
+          value   = 0,
           step    = 1,
           post    = "%"
         ),
@@ -198,7 +200,7 @@ mod_3_04_labor_server <- function(id,
           label   = NULL,
           min     = 0,
           max     = 100,
-          value   = 40,
+          value   = 0,
           step    = 1,
           post    = "%"
         ),
@@ -209,8 +211,8 @@ mod_3_04_labor_server <- function(id,
     # ---- Agriculture share derived from mfg + services -----------------
 
     sector_agri <- reactive({
-      mfg      <- input$sector_manufacturing %||% 20
-      services <- input$sector_services      %||% 40
+      mfg      <- input$sector_manufacturing %||% 0
+      services <- input$sector_services      %||% 0
       max(0L, 100L - mfg - services)
     })
 
@@ -231,18 +233,15 @@ mod_3_04_labor_server <- function(id,
     })
 
     # ---- Return API -----------------------------------------------------
-
     list(
       labor_scenario = reactive({
         list(
-          lfp_change_pp         = input$labor_lfp           %||% 0,
           employment_change_pp  = input$labor_emp           %||% 0,
-          sector_manufacturing  = input$sector_manufacturing %||% 20,
-          sector_services       = input$sector_services      %||% 40,
+          sector_manufacturing  = input$sector_manufacturing %||% 0,
+          sector_services       = input$sector_services      %||% 0,
           sector_agriculture    = sector_agri()
         )
-      }),
-      fut_sim = reactive(NULL)
+      })
     )
   })
 }

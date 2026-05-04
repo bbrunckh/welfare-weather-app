@@ -490,18 +490,19 @@ mod_2_01_weathersim_server <- function(id,
       do.call(rbind, do.call(c, rows))
     })
 
-    # ---- Run simulation button (hidden for RIF engine) --------------------
+    # ---- Run simulation button ---------------------------------------------
 
     output$run_sim_ui <- shiny::renderUI({
       mf <- model_fit()
-      if (!is.null(mf) && identical(mf$engine, "rif")) {
-        shiny::div(
-          class = "alert alert-warning",
-          style = "font-size: 13px; margin-top: 4px;",
-          shiny::tags$b("\u26a0 Simulations are not yet implemented for Quantile Regression (RIF)."),
-          " Please select a different model engine to run simulations."
-        )
-      } else {
+      tagList(
+        if (!is.null(mf) && identical(mf$engine, "rif")) {
+          shiny::div(
+            class = "alert alert-info",
+            style = "font-size: 12px; margin-top: 4px; margin-bottom: 4px;",
+            shiny::tags$b("\u2139 RIF (distributional) simulation:"),
+            " Uses delta method. Residual draws and coefficient uncertainty are not available."
+          )
+        },
         shiny::actionButton(
           ns("run_sim"),
           label = "Run simulation",
@@ -509,7 +510,7 @@ mod_2_01_weathersim_server <- function(id,
           icon  = shiny::icon("play"),
           style = "width: 100%; margin-top: 4px;"
         )
-      }
+      )
     })
 
     # ---- Run simulation on button click ------------------------------------
@@ -528,59 +529,219 @@ mod_2_01_weathersim_server <- function(id,
       mf  <- model_fit()
       cp  <- connection_params()
 
-      sim_dates           <- build_hist_sim_dates(svy, unlist(sh$year_range))
-      fut_periods         <- future_periods()
-      sf                  <- selected_fut()
-      has_future          <- !is.null(sf) && length(fut_periods) > 0
-      ssps                <- if (has_future) unique(sf$ssp) else character(0)
+      model      <- mf$fit3
+      engine     <- mf$engine
+      train_data <- mf$train_data
+      residuals  <- sh$residuals
+
+      # RIF-specific params
+      is_rif       <- identical(engine, "rif")
+      fit_multi    <- if (is_rif) mf$fit3 else NULL
+      rif_taus     <- if (is_rif) mf$taus else NULL
+      rif_weather  <- if (is_rif) mf$weather_terms else NULL
+
+      # Force residuals = "none" for RIF — delta method has no residual draw
+      if (is_rif) {
+        residuals <- "none"
+        model <- extract_rif_median(mf$fit3, engine)
+      }
+
+      sim_dates <- build_hist_sim_dates(svy, unlist(sh$year_range))
+
+      # ---- Build get_weather() arguments ------------------------------------
+      fut_periods <- future_periods()
+      sf          <- selected_fut()
+      has_future  <- !is.null(sf) && length(fut_periods) > 0
+      ssps        <- if (has_future) unique(sf$ssp) else character(0)
       perturbation_method <- if (has_future) build_perturbation_method(sw) else NULL
-      fp_list             <- if (has_future) lapply(fut_periods, function(yr)
-                               c(paste0(yr[1], "-01-01"), paste0(yr[2], "-12-31")))
-                             else list()
-      # Fixed at p10/p90 — input$ensemble_band_width not yet in UI
-      ensemble_band_q     <- c(lo = 0.10, hi = 0.90)
 
+      # Build the list of future_period vectors (or NULL for historical-only)
+      fp_list <- if (has_future) {
+        lapply(fut_periods, function(yr) {
+          c(paste0(yr[1], "-01-01"), paste0(yr[2], "-12-31"))
+        })
+      } else {
+        NULL
+      }
 
-      shiny::withProgress(message = "Running simulation...", value = 0, {
+      ssp_labels <- c(
+        "ssp2_4_5" = "SSP2-4.5",
+        "ssp3_7_0" = "SSP3-7.0",
+        "ssp5_8_5" = "SSP5-8.5"
+      )
 
-        # ---- Run simulation ------------------------------------------------
-        result <- tryCatch(
-          fct_run_simulation(
-            sw                  = sw,
-            so                  = so,
-            svy                 = svy,
-            ss                  = ss,
-            mf                  = mf,
-            cp                  = cp,
-            fp_list             = fp_list,
-            ssps                = ssps,
-            residuals           = sh$residuals,
-            dev_mode            = isTRUE(input$dev_mode),
-            skip_coef_draws     = isTRUE(input$skip_coef_draws),
-            sim_dates           = sim_dates,
-            perturbation_method = perturbation_method,
-            stored_breaks       = stored_breaks(),
-            ensemble_band_q     = ensemble_band_q,
-            full_ensemble       = FALSE,   
-            use_parallel        = isTRUE(input$use_parallel),
-            n_workers           = as.integer(input$n_workers %||% 1L),
-            progress_fn         = function(value, detail)
-                                    shiny::setProgress(value = value,
-                                                       detail = detail)
-          ),
-          error = function(e) {
-            shiny::showNotification(
-              paste0("Simulation failed: ", conditionMessage(e)),
-              type = "error", duration = 8
+      shiny::withProgress(
+        message = "Running simulation...",
+        value   = 0,
+        {
+          new_scenarios    <- list()
+          hist_sim_result  <- NULL
+          cached_breaks    <- stored_breaks()
+
+          # Single get_weather() call — handles all SSPs × all periods
+          shiny::setProgress(value = 0.15, detail = "Loading weather data...")
+
+          weather_result <- tryCatch(
+            get_weather(
+              survey_data          = svy,
+              selected_surveys     = ss,
+              selected_weather     = sw,
+              dates                = sim_dates,
+              connection_params    = cp,
+              ssp                  = if (has_future) ssps else NULL,
+              future_period        = fp_list,
+              perturbation_method  = perturbation_method,
+              stored_breaks        = cached_breaks
+            ),
+            error = function(e) {
+              shiny::showNotification(
+                paste0("Weather load failed: ", conditionMessage(e)),
+                type = "error", duration = 8
+              )
+              NULL
+            }
+          )
+          req(!is.null(weather_result))
+
+          if (is.null(cached_breaks)) {
+            cached_breaks <- attr(weather_result, "stored_breaks")
+          }
+
+          # Pre-compute coefficient draws once — reused across ALL weather keys
+          # (historical + every SSP/period/model combination). The draw matrix is
+          # a property of the fitted model, not of any climate scenario.
+          # Pre-compute S coefficient draws once before the weather-key loop.
+          # Reused across all keys (historical + future).
+          # Set skip_coef_draws = TRUE in UI to suppress and use point estimates only.
+          # RIF: no coefficient draws — uncertainty comes from year-to-year variation only.
+          coef_draws <- if (is_rif) {
+            message("[wiseapp] RIF engine: coefficient draws not supported, using point estimates")
+            NULL
+          } else if (isTRUE(input$skip_coef_draws)) {
+            message("[wiseapp] Coefficient draws skipped (point estimates only)")
+            NULL
+          } else {
+            tryCatch(
+              draw_coefs(
+                fit       = model,
+                S         = as.integer(input$sim_n %||% 50L),
+                method    = "vcov",
+                vcov_spec = COEF_VCOV_SPEC,
+                seed      = 42L
+              ),
+              error = function(e) {
+                warning("[mod_2_01] draw_coefs() failed, falling back to point estimates: ",
+                        conditionMessage(e))
+                NULL
+              }
             )
             NULL
           }
         )
         req(!is.null(result))
 
-        # ---- Store results (reactive side effects) -------------------------
-        hist_sim(result$hist_sim_result)
-        saved_scenarios(result$new_scenarios)
+          # Poverty line for FGT methods — set before simulation runs.
+          pov_line_sim_val  <- as.numeric(input$pov_line_sim)
+
+          # Aggregation methods pre-computed at simulation time.
+          # All 9 methods x weighted/unweighted x deviation combinations are
+          # computed once so the user can switch between them post-hoc in the
+          # Results tab without re-running the simulation.
+          # NOTE: poverty line (pov_line_sim_val) is baked in here — changing
+          # the poverty line requires a full re-run.
+          # --------------------------------------------------------------------
+
+          # Derive from hist_aggregate_choices() so the list stays in sync
+          # with what the Results tab UI offers — single source of truth.
+          agg_methods_all <- unname(hist_aggregate_choices(so$type, so$name))
+          
+          # Pre-aggregate immediately after each future key to avoid accumulating
+          # N_households x S_draws x N_keys rows in memory.
+          # group_agg stores ~(S_draws x 5_methods x N_years) rows per group.
+          group_agg         <- list()
+          group_weather_rep <- list()
+          group_meta        <- list()
+          group_n           <- list()
+
+          future_keys <- setdiff(names(weather_result), "historical")
+          # Dev mode: keep first model per SSP/period group.
+          # Key format: ssp{x}_{lo}_{hi}_{start}_{end}_{ModelName}.
+          # Regex extracts first 5 underscore-segments (the group prefix).
+          # {4} matches exactly 4 separators = 5 segments. Update if key
+          # naming convention changes.
+          if (isTRUE(input$dev_mode)) future_keys <- future_keys[!duplicated(stringr::str_extract(future_keys, "^(?:[^_]+_){4}[^_]+"))]
+          all_keys    <- c("historical", future_keys)
+          n_keys      <- length(all_keys)
+
+          # Wall-clock timer — updated every key to show elapsed + estimated remaining.
+          # Option E progress: benchmark 1 draw to estimate total runtime,
+          # then message() to console in real time (fires even while Shiny is blocked).
+          # setProgress() only updates between keys — message() is the only real-time feedback.
+          S_val      <- if (!is.null(coef_draws)) nrow(coef_draws) else 1L
+          n_hist_yrs <- if (!is.null(weather_result[["historical"]])) {
+            length(unique(format(weather_result[["historical"]]$timestamp, "%Y")))
+          } else 30L
+          n_future_keys <- length(future_keys)
+
+          total_runs <- S_val * n_hist_yrs * (1L + n_future_keys)
+          hist_runs   <- S_val * n_hist_yrs
+          future_runs <- S_val * n_hist_yrs * n_future_keys
+          message(sprintf(
+            "[wiseapp] Simulation starting: %d keys | S=%d draws",
+            length(all_keys), S_val
+          ))
+          message(sprintf(
+            "[wiseapp]   Historical : %d yrs x %d draws = %d runs",
+            n_hist_yrs, S_val, hist_runs
+          ))
+          if (n_future_keys > 0L) message(sprintf(
+            "[wiseapp]   Future     : %d keys x %d yrs x %d draws = %d runs",
+            n_future_keys, n_hist_yrs, S_val, future_runs
+          ))
+          message(sprintf(
+            "[wiseapp]   Total      : ~%d prediction runs across all keys",
+            total_runs
+          ))
+          # t_start defined outside withProgress so it captures the full
+          # simulation wall-clock time including progress setup overhead.
+          t_start <- proc.time()[["elapsed"]]
+
+          for (ki in seq_along(all_keys)) {
+            key     <- all_keys[[ki]]
+            is_hist <- identical(key, "historical")
+
+            t_elapsed <- proc.time()[["elapsed"]] - t_start
+            t_remain  <- if (ki > 1L) (t_elapsed / (ki - 1L)) * (n_keys - ki + 1L) else NA_real_
+
+            # message() fires to R console in real time even while Shiny UI is blocked.
+            # setProgress() only updates between blocking R calls (i.e. between keys).
+            key_runs <- S_val * n_hist_yrs
+            message(sprintf(
+              "[wiseapp] Key %d/%d: %s | %d yrs x %d draws = %d runs | %s elapsed%s",
+              ki, n_keys,
+              if (is_hist) "Historical"
+              else sub("^(ssp[^_]+_[0-9]+_[0-9]+)_.*$", "\\1", key),
+              n_hist_yrs, S_val, key_runs,
+              format_elapsed(t_elapsed),
+              if (!is.na(t_remain))
+                paste0(" | ~", format_elapsed(t_remain), " remaining")
+              else " | estimating..."
+            ))
+            out <- run_sim_pipeline(
+              weather_raw  = weather_result[[key]],
+              svy          = svy,
+              sw           = sw,
+              so           = so,
+              model        = model,
+              residuals    = residuals,
+              train_data   = train_data,
+              engine       = engine,
+              coef_draws   = coef_draws,
+              slim         = !is_hist,
+              fit_multi    = fit_multi,
+              taus         = rif_taus,
+              weather_cols = rif_weather
+            )
 
         # ---- Pre-aggregate at simulation time ------------------------------
         agg_methods_all <- {
@@ -602,12 +763,84 @@ mod_2_01_weathersim_server <- function(id,
           id       = "agg_notify", duration = NULL, type = "message"
         )
 
-        # Generate shared Z matrix once
-        K_global <- if (!is.null(result$hist_sim_result$pipeline$F_loading))
-                      ncol(result$hist_sim_result$pipeline$F_loading) else 0L
-        Z_global <- if (K_global > 0L && S_sim > 0L)
-                      matrix(stats::rnorm(S_sim * K_global),
-                             nrow = S_sim, ncol = K_global)
+            if (is.null(out)) next
+
+            if (is_hist && is.null(hist_sim_result)) {
+              # Historical: keep full preds for weather density plot, but also
+              # pre-aggregate all methods so agg_hist reactive can filter cheaply
+              # without re-processing S_draws x N_households rows per UI interaction.
+
+              # Pre-aggregate all methods x weighted/unweighted combinations.
+              # Running both at simulation time avoids re-processing S_draws x N_households
+              # rows reactively when user toggles weights in the Results tab.
+
+              # Option A deviation: historical pre-aggregation uses 'none' only.
+              # Future scenario deviation is computed relative to the historical
+              # baseline mean/median in agg_scenarios reactive (mod_2_02_results.R).
+              hist_agg <- dplyr::bind_rows(lapply(agg_methods_all, function(meth) {
+                dplyr::bind_rows(lapply(c(TRUE, FALSE), function(use_w) {
+                  wt  <- if (use_w) weight_col_sim else NULL
+                  if (use_w && is.null(wt)) return(NULL)
+                  tryCatch({
+                    pov <- if (meth %in% c("headcount_ratio", "gap", "fgt2")) pov_line_sim_val else NULL
+                    res <- aggregate_sim_preds(out$preds, so, meth, "none", FALSE, pov, wt)
+                    if (!is.null(res$out)) dplyr::mutate(res$out, agg_method = meth, weighted = use_w)
+                    else NULL
+                  }, error = function(e) NULL)
+                }))
+              }))
+              # hist_sim_result schema:
+              #   $preds       — full household x sim_year predictions (S draws x N rows)
+              #   $agg         — pre-aggregated (method x weighted x deviation x sim_year)
+              #   $so          — selected outcome metadata (single-row data frame)
+              #   $pov_line    — poverty line used at simulation time (numeric)
+              #   $n_pre_join  — row count before weather join (diagnostics)
+              #   $weather_raw — representative historical weather series
+              #   $train_data  — training data (for residual resampling)
+              #   $has_weights — logical: weight column detected in survey data
+              hist_sim_result <- list(
+                preds       = out$preds,
+                agg         = hist_agg,
+                so          = so,
+                n_pre_join  = out$n_pre_join,
+                pov_line    = pov_line_sim_val,
+                weather_raw = out$weather_raw,
+                train_data  = train_data,
+                has_weights = !is.null(weight_col_sim),
+                # Settings used in this run — persisted so Step 3 can reuse
+                # them and reproduce the same predictions on policy data.
+                residuals   = residuals,
+                coef_draws  = coef_draws,
+                yr_range    = input$hist_years
+              )
+            } else if (!is_hist) {
+              # Key is "<ssp>_<start>_<end>_<model>"
+              ssp_code   <- sub("^(ssp[0-9]_[0-9]_[0-9])_.*$", "\\1", key)
+              rest       <- sub(paste0("^", ssp_code, "_"), "", key)
+              period_str <- sub("^([0-9]{4}_[0-9]{4})_.*$", "\\1", rest)
+              model_name <- sub(paste0("^", period_str, "_"), "", rest)
+              yr_parts   <- as.integer(strsplit(period_str, "_")[[1]])
+              gk         <- paste0(ssp_code, "_", period_str)
+
+              # Tag model before aggregating so agg can group by model
+              out$preds$model <- model_name
+
+              # Aggregate immediately across all methods — free raw preds after.
+              # IMPORTANT order of operations:
+              # Stage 1: aggregate within (draw_id, model, sim_year) -> scalar per group
+              # Stage 2: percentiles across draw_id -> p05/p50/p95 bands
+              # Taking percentiles before aggregating would give quantiles of the
+              # individual welfare distribution, not the uncertainty band on the
+              # aggregate statistic — completely different quantities.
+              # Pre-aggregate all methods x weighted/unweighted combinations.
+              key_agg <- dplyr::bind_rows(lapply(agg_methods_all, function(meth) {
+                dplyr::bind_rows(lapply(c(TRUE, FALSE), function(use_w) {
+                  wt  <- if (use_w) weight_col_sim else NULL
+                  if (use_w && is.null(wt)) return(NULL)
+                  tryCatch({
+                    pov <- if (meth %in% c("headcount_ratio", "gap", "fgt2")) pov_line_sim_val else NULL
+                    res <- aggregate_sim_preds(out$preds, so, meth, "none", FALSE, pov, wt)
+                    if (!is.null(res$out)) dplyr::mutate(res$out, agg_method = meth, weighted = use_w)
                     else NULL
 
         shiny::isolate({
