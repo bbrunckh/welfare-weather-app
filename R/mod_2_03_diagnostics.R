@@ -53,20 +53,21 @@ mod_2_03_diagnostics_ui <- function(id) {
 
     # ---- 2. Uncertainty decomposition chart ----------------------------------
     shiny::wellPanel(
-      shiny::h4("Decomposed uncertainty: annual variability vs. model spread"),
-      shiny::plotOutput(ns("uncertainty_decomp_plot"), height = "750px"),
+      shiny::h4("Decomposed uncertainty: weather variability vs. model spread vs. coefficient uncertainty"),
+      shiny::plotOutput(ns("uncertainty_decomp_plot"), height = "450px"),
       shiny::tags$p(
         style = "font-size:11px; color:#666; margin-top:6px;",
-        shiny::tags$b("Annual variability:"),
-        " CI from model-averaged annual outcomes \u2014 captures weather-driven year-to-year variation.",
+        "Each bar shows \u00b11 SD of welfare outcomes attributable to each source,",
+        " centred on the scenario mean. Dashed line = historical mean.",
         shiny::tags$br(),
-        shiny::tags$b("Model uncertainty:"),
-        " CI from year-averaged per-model outcomes \u2014 captures disagreement across CMIP6 ensemble members.",
+        shiny::tags$b("Weather variability (blue):"),
+        " SD across simulation years, averaged over climate models \u2014 year-to-year weather noise.",
         shiny::tags$br(),
-        shiny::tags$b("Combined:"),
-        " both sources pooled.",
+        shiny::tags$b("Climate model spread (orange):"),
+        " SD across CMIP6 ensemble members, averaged over years \u2014 structural model disagreement.",
         shiny::tags$br(),
-        "Aggregation: mean. Dashed line = historical mean."
+        shiny::tags$b("Coefficient uncertainty (green):"),
+        " mean 1-SD equivalent of the regression coefficient 90% CI (requires coefficient uncertainty enabled)."
       )
     ),
 
@@ -353,16 +354,8 @@ mod_2_03_diagnostics_server <- function(id,
     })
 
     output$uncertainty_decomp_plot <- renderPlot({
-      req(agg_hist_diag())
-      all_series_diag <- c(
-        list(Historical = agg_hist_diag()),
-        Filter(Negate(is.null), agg_scenarios_diag())
-      )
-      plot_uncertainty_decomposition(
-        scenarios = all_series_diag,
-        hist_agg  = agg_hist_diag()
-      )
-    }, height = 750)
+      # ...existing code...
+    }, height = 450)
     outputOptions(output, "uncertainty_decomp_plot", suspendWhenHidden = FALSE)
 
     output$diag_weather_log_ui <- shiny::renderUI({

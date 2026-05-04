@@ -365,194 +365,188 @@ plot_uncertainty_decomposition <- function(scenarios, hist_agg,
   stopifnot(is.list(hist_agg), all(c("out", "x_label") %in% names(hist_agg)))
 
   ssp_short_map <- c("SSP2-4.5" = "SSP2", "SSP3-7.0" = "SSP3", "SSP5-8.5" = "SSP5")
-  sources       <- c("Annual variability", "Model uncertainty", "Coefficient uncertainty", "Combined")
+  source_levels <- c("Weather variability", "Climate model spread", "Coefficient uncertainty")
+  source_cols   <- c(
+    "Weather variability"    = "#4e9af1",
+    "Climate model spread"   = "#f4a623",
+    "Coefficient uncertainty"= "#7bc67e"
+  )
 
   hist_mean <- mean(hist_agg$out$value, na.rm = TRUE)
 
-  # ---- historical rows (Annual + Combined; no Model facet) ------------------
-  hist_decomp <- .decompose_scenario_uncertainty(hist_agg$out)
-  hist_rows   <- dplyr::bind_rows(lapply(c("Annual variability", "Coefficient uncertainty", "Combined"), function(src) {
-    vals <- switch(src,
-      "Annual variability"      = hist_decomp$annual,
-      "Coefficient uncertainty" = if (!is.null(hist_decomp$coef_lo))
-                                    c(hist_decomp$coef_lo, hist_decomp$coef_hi)
-                                  else NULL,
-      "Combined"                = hist_decomp$total
-    )
-    s <- .summarise_vals(vals)
-    if (is.null(s)) return(NULL)
-    cbind(s, data.frame(
-      pt_key     = "Historical",
-      colour_key = "Historical",
-      ssp_key    = "Historical",
-      ssp_short  = "Historical",
-      yr         = NA_character_,
-      source     = src,
-      n_vals     = length(vals),
-      stringsAsFactors = FALSE
-    ))
-  }))
+  # ---- compute SD-based uncertainty components per scenario ----------------
+  # Each source contributes a half-width (1 SD equivalent) to the bar.
+  # We use SD because it is additive and directly interpretable as spread.
+  #
+  # Weather variability : SD of model-averaged annual values    (year-to-year)
+  # Climate model spread: SD of year-averaged per-model values  (inter-model)
+  # Coef uncertainty    : mean half-width of (value_p95-value_p05)/2 * 1/1.645
+  #                       (converts 90% CI half-width to ~1 SD)
 
-  # ---- future scenario rows -------------------------------------------------
-  fut_rows <- NULL
+  .extract_components <- function(out_df, label) {
+    decomp <- .decompose_scenario_uncertainty(out_df)
+
+    weather_sd <- if (length(decomp$annual) >= 2)
+      stats::sd(decomp$annual, na.rm = TRUE) else NA_real_
+
+    model_sd <- if (!is.null(decomp$model) && length(decomp$model) >= 2)
+      stats::sd(decomp$model, na.rm = TRUE) else NA_real_
+
+    coef_sd <- if (!is.null(decomp$coef_lo) && !is.null(decomp$coef_hi)) {
+      half_widths <- (decomp$coef_hi - decomp$coef_lo) / 2
+      mean(half_widths[is.finite(half_widths)], na.rm = TRUE) / 1.645
+    } else NA_real_
+
+    centre <- mean(out_df$value, na.rm = TRUE)
+
+    data.frame(
+      label      = label,
+      centre     = centre,
+      weather_sd = weather_sd,
+      model_sd   = model_sd,
+      coef_sd    = coef_sd,
+      stringsAsFactors = FALSE
+    )
+  }
+
+  # Historical
+  hist_row <- .extract_components(hist_agg$out, "Historical")
+
+  # Future scenarios
   future_nms <- if (length(scenarios) > 0)
     names(scenarios)[vapply(names(scenarios),
       function(nm) !is.na(.normalise_ssp(nm)), logical(1))]
   else character(0)
 
+  fut_rows <- NULL
   if (length(future_nms) > 0) {
-    row_list <- lapply(future_nms, function(nm) {
-      decomp    <- .decompose_scenario_uncertainty(scenarios[[nm]]$out)
+    fut_list <- lapply(future_nms, function(nm) {
       ssp_key   <- .normalise_ssp(nm)
       ssp_short <- ssp_short_map[ssp_key] %||% ssp_key
       yr        <- .parse_year(nm)
-      pt_key    <- paste0(ssp_short, "\n", yr)
-      ck        <- paste(ssp_key, yr, sep = "__")
-      dplyr::bind_rows(lapply(sources, function(src) {
-        vals <- switch(src,
-          "Annual variability"      = decomp$annual,
-          "Model uncertainty"       = decomp$model,
-          "Coefficient uncertainty" = if (!is.null(decomp$coef_lo))
-                                        c(decomp$coef_lo, decomp$coef_hi)
-                                      else NULL,
-          "Combined"                = decomp$total
-        )
-        if (is.null(vals)) return(NULL)
-        s <- .summarise_vals(vals)
-        if (is.null(s)) return(NULL)
-        cbind(s, data.frame(
-          pt_key     = pt_key,
-          colour_key = ck,
-          ssp_key    = ssp_key,
-          ssp_short  = ssp_short,
-          yr         = yr,
-          source     = src,
-          n_vals     = length(vals),
-          stringsAsFactors = FALSE
-        ))
-      }))
+      label     <- paste0(ssp_short, " / ", yr)
+      row       <- .extract_components(scenarios[[nm]]$out, label)
+      row$ssp_key   <- ssp_key
+      row$ssp_short <- ssp_short
+      row$yr        <- yr
+      row
     })
-    fut_rows <- dplyr::bind_rows(Filter(Negate(is.null), row_list))
+    fut_rows <- dplyr::bind_rows(Filter(Negate(is.null), fut_list))
   }
 
-  plot_df <- dplyr::bind_rows(hist_rows, fut_rows)
-  if (is.null(plot_df) || nrow(plot_df) == 0)
+  all_rows <- dplyr::bind_rows(hist_row, fut_rows)
+
+  # ---- build long format for segments -------------------------------------
+  long_df <- dplyr::bind_rows(
+    data.frame(label = all_rows$label, source = "Weather variability",
+               sd_val = all_rows$weather_sd, centre = all_rows$centre,
+               stringsAsFactors = FALSE),
+    data.frame(label = all_rows$label, source = "Climate model spread",
+               sd_val = all_rows$model_sd,   centre = all_rows$centre,
+               stringsAsFactors = FALSE),
+    data.frame(label = all_rows$label, source = "Coefficient uncertainty",
+               sd_val = all_rows$coef_sd,    centre = all_rows$centre,
+               stringsAsFactors = FALSE)
+  )
+  long_df$source <- factor(long_df$source, levels = source_levels)
+
+  # ---- ordered y-axis ------------------------------------------------------
+  ordered_labels <- "Historical"
+  if (!is.null(fut_rows) && nrow(fut_rows) > 0) {
+    if (isTRUE(group_order == "year_x_scenario")) {
+      for (yr_i in sort(unique(fut_rows$yr))) {
+        ssps <- intersect(c("SSP2", "SSP3", "SSP5"),
+                          fut_rows$ssp_short[fut_rows$yr == yr_i])
+        for (ssp in ssps)
+          ordered_labels <- c(ordered_labels,
+                               paste0(ssp, " / ", yr_i))
+      }
+    } else {
+      for (ssp in intersect(c("SSP2", "SSP3", "SSP5"),
+                             unique(fut_rows$ssp_short))) {
+        for (yr_i in sort(unique(fut_rows$yr[fut_rows$ssp_short == ssp])))
+          ordered_labels <- c(ordered_labels,
+                               paste0(ssp, " / ", yr_i))
+      }
+    }
+  }
+
+  long_df$label    <- factor(long_df$label, levels = rev(ordered_labels))
+  all_rows$label_f <- factor(all_rows$label, levels = rev(ordered_labels))
+  long_df <- long_df[!is.na(long_df$sd_val) & is.finite(long_df$sd_val), ]
+
+  if (nrow(long_df) == 0)
     return(ggplot2::ggplot() +
       ggplot2::labs(title = "Run a simulation to see uncertainty decomposition."))
 
-  # ---- colour palette (mirrors plot_pointrange_climate) --------------------
-  colour_palette <- c("Historical" = "#808080")
+  # ---- SSP colour for the centre dot / reference lines --------------------
+  dot_colours <- c("Historical" = "#808080")
   if (!is.null(fut_rows) && nrow(fut_rows) > 0) {
-    yrs_present <- sort(unique(fut_rows$yr))
-    n_yrs       <- length(yrs_present)
-    yr_lighten  <- if (n_yrs > 1) seq(0.30, 0.0, length.out = n_yrs) else 0.0
-    for (ssp in intersect(names(.ssp_colours), unique(fut_rows$ssp_key))) {
-      base_col <- .ssp_colours[ssp]
-      for (i in seq_along(yrs_present)) {
-        ck <- paste(ssp, yrs_present[i], sep = "__")
-        colour_palette[ck] <- colorspace::lighten(base_col, yr_lighten[i])
-      }
+    for (i in seq_len(nrow(fut_rows))) {
+      lbl <- paste0(fut_rows$ssp_short[i], " / ", fut_rows$yr[i])
+      dot_colours[lbl] <- .ssp_colours[fut_rows$ssp_key[i]] %||% "#888888"
     }
   }
 
-  # ---- x-axis ordering (same logic as plot_pointrange_climate) -------------
-  ordered_levels <- "Historical"
-  spacer_ids     <- character(0)
-
-  if (!is.null(fut_rows) && nrow(fut_rows) > 0) {
-    fut_meta <- unique(fut_rows[, c("pt_key", "ssp_short", "yr")])
-    if (isTRUE(group_order == "year_x_scenario")) {
-      yrs_present  <- sort(unique(fut_meta$yr))
-      ssps_present <- intersect(c("SSP2", "SSP3", "SSP5"), unique(fut_meta$ssp_short))
-      spacer_n <- 0L
-      for (yr_i in yrs_present) {
-        spacer_n <- spacer_n + 1L; sid <- strrep(" ", spacer_n)
-        spacer_ids <- c(spacer_ids, sid); ordered_levels <- c(ordered_levels, sid)
-        for (ssp in ssps_present) ordered_levels <- c(ordered_levels, paste0(ssp, "\n", yr_i))
-      }
-    } else {
-      ssps_present <- intersect(c("SSP2", "SSP3", "SSP5"), unique(fut_meta$ssp_short))
-      spacer_n <- 0L
-      for (ssp in ssps_present) {
-        spacer_n <- spacer_n + 1L; sid <- strrep(" ", spacer_n)
-        spacer_ids <- c(spacer_ids, sid); ordered_levels <- c(ordered_levels, sid)
-        ssp_yrs <- sort(unique(fut_meta$yr[fut_meta$ssp_short == ssp]))
-        for (yr_i in ssp_yrs) ordered_levels <- c(ordered_levels, paste0(ssp, "\n", yr_i))
-      }
-    }
-  }
-
-  x_label_map <- setNames(
-    vapply(ordered_levels, function(lv) {
-      if (lv %in% spacer_ids) "" else lv
-    }, character(1)),
-    ordered_levels
-  )
-  data_levels <- setdiff(ordered_levels, spacer_ids)
-
-  # ---- facet factor ---------------------------------------------------------
-  plot_df$source <- factor(plot_df$source, levels = sources)
-  plot_df$pt_key <- factor(plot_df$pt_key, levels = ordered_levels)
-  plot_df <- plot_df[plot_df$pt_key %in% data_levels, ]
-  if (nrow(plot_df) == 0)
-    return(ggplot2::ggplot() +
-      ggplot2::labs(title = "Run a future simulation to see uncertainty decomposition."))
-
-  plot_df$pt_size <- 3.0
-  plot_df$pt_lw   <- 2.0
-
-  # Reference line data: one row per facet, but only show for relevant sources
-  hline_df <- data.frame(
-    source       = factor(c("Annual variability", "Coefficient uncertainty", "Combined"), levels = sources),
-    hist_mean    = hist_mean
-  )
-
-  ggplot2::ggplot(plot_df,
-    ggplot2::aes(x = .data$pt_key, colour = .data$colour_key)
-  ) +
-    ggplot2::geom_linerange(
-      ggplot2::aes(ymin = .data$lo95, ymax = .data$hi95),
-      linewidth = 0.5, colour = "grey70"
+  # ---- plot ----------------------------------------------------------------
+  p <- ggplot2::ggplot() +
+    # Horizontal segments: xmin = centre - sd, xmax = centre + sd
+    ggplot2::geom_segment(
+      data = long_df,
+      ggplot2::aes(
+        x    = .data$centre - .data$sd_val,
+        xend = .data$centre + .data$sd_val,
+        y    = .data$label,
+        yend = .data$label,
+        colour = .data$source
+      ),
+      linewidth = 4.5, alpha = 0.75, lineend = "round"
     ) +
-    ggplot2::geom_linerange(
-      ggplot2::aes(ymin = .data$lo90, ymax = .data$hi90,
-                   linewidth = I(.data$pt_lw))
-    ) +
+    # Centre dot coloured by SSP
     ggplot2::geom_point(
-      ggplot2::aes(y = .data$mean, size = I(.data$pt_size)),
-      shape = 21, fill = "white", stroke = 1.4
+      data = all_rows[!is.na(all_rows$label_f), ],
+      ggplot2::aes(x = .data$centre, y = .data$label_f,
+                   fill = .data$label),
+      shape = 21, size = 3.5, stroke = 1.2, colour = "white",
+      show.legend = FALSE
     ) +
-    ggplot2::geom_hline(
-      data      = hline_df,
-      ggplot2::aes(yintercept = hist_mean),
-      linetype  = "dashed", colour = "#808080", linewidth = 0.55,
-      inherit.aes = FALSE
+    # Historical reference line
+    ggplot2::geom_vline(
+      xintercept = hist_mean,
+      linetype = "dashed", colour = "#808080", linewidth = 0.55
     ) +
-    ggplot2::scale_colour_manual(values = colour_palette, guide = "none") +
-    ggplot2::scale_x_discrete(
-      limits = ordered_levels,
-      labels = x_label_map,
-      drop   = FALSE
+    ggplot2::scale_colour_manual(
+      values = source_cols,
+      name   = "Uncertainty source",
+      guide  = ggplot2::guide_legend(
+        override.aes = list(linewidth = 4, alpha = 0.85)
+      )
     ) +
-    ggplot2::facet_wrap(
-      ~ source, ncol = 1, scales = "fixed",
-      strip.position = "left"
-    ) +
+    ggplot2::scale_fill_manual(values = dot_colours, guide = "none") +
     ggplot2::labs(
-      title = NULL,
-      x     = NULL,
-      y     = hist_agg$x_label
+      x     = hist_agg$x_label,
+      y     = NULL,
+      title = NULL
     ) +
     ggplot2::theme_minimal(base_size = 13) +
     ggplot2::theme(
-      panel.grid.major.x  = ggplot2::element_blank(),
-      panel.grid.minor.x  = ggplot2::element_blank(),
+      panel.grid.major.y  = ggplot2::element_line(colour = "grey92", linewidth = 0.4),
+      panel.grid.minor    = ggplot2::element_blank(),
+      axis.text.y         = ggplot2::element_text(size = 11),
       axis.text.x         = ggplot2::element_text(size = 10),
-      strip.text.y.left   = ggplot2::element_text(angle = 90, face = "bold", size = 11),
-      strip.placement     = "outside",
-      panel.spacing.y     = ggplot2::unit(12, "pt"),
-      legend.position     = "none"
+      legend.position     = "top",
+      legend.title        = ggplot2::element_text(size = 11, face = "bold"),
+      legend.text         = ggplot2::element_text(size = 10),
+      legend.key.width    = ggplot2::unit(28, "pt")
     )
+
+  # Facet only if multiple SSP/period groups, to allow easy comparison
+  if (!is.null(fut_rows) && length(unique(fut_rows$yr)) > 1 &&
+        length(unique(fut_rows$ssp_short)) > 1) {
+    p <- p + ggplot2::facet_grid(. ~ ., scales = "free_x")
+  }
+
+  p
 }
 
 # ---------------------------------------------------------------------------- #
@@ -789,12 +783,11 @@ enhance_exceedance <- function(scenarios,
     vals    <- out$value
     ssp_key <- .normalise_ssp(nm)
     yr      <- .parse_year(nm)
-    df <- data.frame(
+    df <- tibble::tibble(
       value   = vals,
       group   = nm,
       ssp_key = if (is.na(ssp_key)) "Historical" else ssp_key,
-      yr      = if (is.na(yr))      "Historical" else yr,
-      stringsAsFactors = FALSE
+      yr      = if (is.na(yr))      "Historical" else yr
     )
     # Attach uncertainty columns if available
     if ("value_p05" %in% names(out) && !all(is.na(out$value_p05))) {
@@ -825,7 +818,7 @@ enhance_exceedance <- function(scenarios,
 
   # ---- Build ECDF per group (with uncertainty bands) ----------------------
   ecdf_df <- dplyr::bind_rows(lapply(levels(long_df$group), function(grp) {
-    sub    <- long_df[long_df$group == grp & is.finite(long_df$value), ]
+    sub    <- dplyr::filter(long_df, .data$group == grp, is.finite(.data$value))
     if (nrow(sub) == 0) return(NULL)
     fn     <- stats::ecdf(sub$value)
     xs     <- sort(unique(sub$value))
@@ -859,25 +852,26 @@ enhance_exceedance <- function(scenarios,
     # Model spread band ECDFs
     # Correct approach: build per-model ECDF, then take envelope at each
     # exceedance probability across models.
-    if (isTRUE(show_bands) && "model_values" %in% names(sub)) {
-      mv <- sub$model_values  # list column: each element = numeric vector of per-model values for that year
-      n_models <- length(mv[[1]])
-      if (n_models > 1) {
-        # Restructure: per-model vectors across all years
-        per_model_vals <- lapply(seq_len(n_models), function(m) {
-          vapply(mv, function(v) v[m], numeric(1))
-        })
-        probs <- result$exceed
-        # Build quantile function per model and evaluate at each exceedance prob
-        quantiles_per_model <- lapply(per_model_vals, function(vals) {
-          vals <- vals[is.finite(vals)]
-          if (length(vals) < 3) return(rep(NA_real_, length(probs)))
-          as.numeric(stats::quantile(vals, 1 - probs, na.rm = TRUE))
-        })
-        qmat <- do.call(rbind, quantiles_per_model)  # n_models x length(probs)
-        result$model_lo <- apply(qmat, 2, min, na.rm = TRUE)
-        result$model_hi <- apply(qmat, 2, max, na.rm = TRUE)
-      }
+    has_mv <- "model_values" %in% names(sub) && !is.null(sub$model_values)
+    n_mv <- if (has_mv) length(sub$model_values[[1]]) else 0L
+    message(sprintf("[enhance_exceedance] group=%s | has_model_values=%s | n_models=%d | show_bands=%s",
+                    grp, has_mv, n_mv, show_bands))
+    if (isTRUE(show_bands) && has_mv && n_mv > 1) {
+      mv       <- sub$model_values
+      n_models <- n_mv
+      per_model_vals <- lapply(seq_len(n_models), function(m) {
+        vapply(mv, function(v) v[m], numeric(1))
+      })
+      probs <- result$exceed
+      quantiles_per_model <- lapply(per_model_vals, function(vals) {
+        vals <- vals[is.finite(vals)]
+        if (length(vals) < 3) return(rep(NA_real_, length(probs)))
+        as.numeric(stats::quantile(vals, 1 - probs, na.rm = TRUE))
+      })
+      qmat <- do.call(rbind, quantiles_per_model)
+      result$value    <- apply(qmat, 2, median, na.rm = TRUE)
+      result$model_lo <- apply(qmat, 2, min,    na.rm = TRUE)
+      result$model_hi <- apply(qmat, 2, max,    na.rm = TRUE)
     }
 
     result
@@ -901,7 +895,7 @@ enhance_exceedance <- function(scenarios,
     )
   )
 
-  # Outer band: model spread (lighter, wider)
+    # Outer band: climate model spread — light fill + dashed border edges
   if ("model_lo" %in% names(ecdf_df)) {
     band_model <- ecdf_df[!is.na(ecdf_df$model_lo), ]
     if (nrow(band_model) > 0) {
@@ -909,12 +903,22 @@ enhance_exceedance <- function(scenarios,
         data = band_model,
         ggplot2::aes(xmin = model_lo, xmax = model_hi, fill = ssp_key,
                      y = exceed, group = group),
-        alpha = 0.12, colour = NA, inherit.aes = FALSE
-      )
+        alpha = 0.10, colour = NA, inherit.aes = FALSE
+      ) +
+        ggplot2::geom_line(
+          data = band_model,
+          ggplot2::aes(x = model_lo, y = exceed, colour = ssp_key, group = group),
+          linetype = "dashed", linewidth = 0.35, alpha = 0.6, inherit.aes = FALSE
+        ) +
+        ggplot2::geom_line(
+          data = band_model,
+          ggplot2::aes(x = model_hi, y = exceed, colour = ssp_key, group = group),
+          linetype = "dashed", linewidth = 0.35, alpha = 0.6, inherit.aes = FALSE
+        )
     }
   }
 
-  # Inner band: coefficient uncertainty (darker, narrower)
+  # Inner band: coefficient uncertainty — solid fill, higher alpha for contrast
   if ("coef_lo" %in% names(ecdf_df)) {
     band_coef <- ecdf_df[!is.na(ecdf_df$coef_lo), ]
     if (nrow(band_coef) > 0) {
@@ -922,7 +926,7 @@ enhance_exceedance <- function(scenarios,
         data = band_coef,
         ggplot2::aes(xmin = coef_lo, xmax = coef_hi, fill = ssp_key,
                      y = exceed, group = group),
-        alpha = 0.22, colour = NA, inherit.aes = FALSE
+        alpha = 0.30, colour = NA, inherit.aes = FALSE
       )
     }
   }

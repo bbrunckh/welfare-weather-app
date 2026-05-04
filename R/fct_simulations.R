@@ -305,15 +305,22 @@ combine_ensemble_results <- function(per_model_aggs) {
 
   has_bands <- "value_p05" %in% names(stacked)
 
-  stacked |>
+  # Capture raw per-model values BEFORE summarising — must be a separate step
+  # so list() captures the M raw values per year, not the post-median scalar.
+  model_vals_tbl <- stacked |>
+    dplyr::group_by(.data$sim_year) |>
+    dplyr::summarise(model_values = list(.data$value), .groups = "drop")
+
+  summary_tbl <- stacked |>
     dplyr::group_by(.data$sim_year) |>
     dplyr::summarise(
-      value     = stats::median(.data$value, na.rm = TRUE),
+      value     = stats::median(.data$value,     na.rm = TRUE),
       value_p05 = if (has_bands) mean(.data$value_p05, na.rm = TRUE) else NA_real_,
       value_p95 = if (has_bands) mean(.data$value_p95, na.rm = TRUE) else NA_real_,
-      model_values = list(.data$value),
       .groups   = "drop"
     )
+
+  dplyr::left_join(summary_tbl, model_vals_tbl, by = "sim_year")
 }
 
 
