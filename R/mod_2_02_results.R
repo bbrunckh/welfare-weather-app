@@ -216,11 +216,8 @@ mod_2_02_results_server <- function(id,
     })
 
     pov_line_val <- reactive({
-      # Poverty line is baked in at simulation time (input$pov_line_sim).
-      # Read it back from hist_sim()$pov_line for the historical fallback path.
-      # For future scenarios, pov_line is already embedded in s$agg.
       if (isTRUE(input$cmp_agg_method %in% c("headcount_ratio", "gap", "fgt2"))) {
-        if (!is.null(hist_sim())) hist_sim()$pov_line %||% NULL else NULL
+        as.numeric(input$cmp_pov_line) %||% 3.00
       } else {
         NULL
       }
@@ -246,40 +243,30 @@ mod_2_02_results_server <- function(id,
 
     agg_hist <- reactive({
       req(hist_sim())
+      h         <- hist_sim()
       method    <- input$cmp_agg_method %||% "mean"
       deviation <- input$cmp_deviation  %||% "none"
       use_w     <- isTRUE(input$use_weights)
 
-      req(!is.null(hist_sim()$agg))
+      agg <- aggregate_with_uncertainty(
+        y_point         = h$y_point,
+        F_loading       = h$F_loading,
+        group_vec       = h$sim_year,
+        so              = h$so,
+        agg_method      = method,
+        weights         = if (use_w) h$weight else NULL,
+        pov_line        = if (method %in% c("headcount_ratio", "gap", "fgt2"))
+                            as.numeric(input$cmp_pov_line) else NULL,
+        train_resid     = if (!is.null(h$train_data)) h$train_data$.resid else NULL,
+        residual_method = h$residuals %||% "none",
+        id_vec          = h$id_vec,
+        S               = as.integer(input$sim_n %||% 200L)
+      )
 
-      out <- dplyr::filter(hist_sim()$agg,
-                           .data$agg_method == method,
-                           .data$weighted   == use_w)
-
-      # Weighted fallback: if use_weights = TRUE but no weighted rows exist
-      # (survey has no weight column or pre-aggregation failed), fall back to
-      # unweighted to avoid returning an empty tibble that crashes charts.
-      if (nrow(out) == 0L && isTRUE(use_w)) {
-        warning("[agg_hist] No weighted rows found — falling back to unweighted")
-        out <- dplyr::filter(hist_sim()$agg,
-                             .data$agg_method == method,
-                             .data$weighted   == FALSE)
-      }
-
-      # Option A deviation: historical is its own baseline — centred on its own
-      # mean/median (which IS the reference for future scenarios). This is
-      # methodologically consistent with Option A since historical deviation
-      # from itself = zero shift, showing only within-historical variance.
-      if (!identical(deviation, "none") && nrow(out) > 0) {
-        out <- deviation_from_centre(
-          df     = out,
-          group  = "sim_year",
-          centre = deviation,
-          loss   = FALSE
-        )
-        if ("deviation" %in% names(out)) {
-          out$value <- out$deviation
-          out$deviation <- NULL
+      if (!identical(deviation, "none") && nrow(agg) > 0) {
+        agg <- deviation_from_centre(agg, "sim_year", deviation, loss = FALSE)
+        if ("deviation" %in% names(agg)) {
+          agg$value <- agg$deviation; agg$deviation <- NULL
         }
       }
 
@@ -289,12 +276,13 @@ mod_2_02_results_server <- function(id,
         paste0(label_agg_method(method), " — ", label_deviation(deviation))
       }
 
-      list(out = out, x_label = x_label)
+      list(out = agg, x_label = x_label)
     })
 
     agg_scenarios <- reactive({
       sc <- saved_scenarios()
       if (length(sc) == 0) return(list())
+      h         <- hist_sim()
       method    <- input$cmp_agg_method %||% "mean"
       deviation <- input$cmp_deviation  %||% "none"
       use_w     <- isTRUE(input$use_weights)
@@ -307,59 +295,46 @@ mod_2_02_results_server <- function(id,
 
       result <- lapply(sc, function(s) {
         tryCatch({
-          if (!is.null(s$agg)) {
-            out <- dplyr::filter(s$agg,
-                                 .data$agg_method == method,
-                                 .data$weighted   == use_w)
-            # Weighted fallback: if use_weights = TRUE but no weighted rows
-            # exist, fall back to unweighted rather than returning empty tibble.
-            if (nrow(out) == 0L && isTRUE(use_w)) {
-              out <- dplyr::filter(s$agg,
-                                   .data$agg_method == method,
-                                   .data$weighted   == FALSE)
-            }
-            # Option A deviation: centre future scenario relative to historical
-            # baseline mean/median — preserves direction of climate impact.
-            # hist_ref is the historical agg$value for this method/weighted combo,
-            # computed from hist_sim()$agg 'none' rows.
-            if (!identical(deviation, "none") && nrow(out) > 0) {
-              hist_none <- tryCatch(
-                dplyr::filter(hist_sim()$agg,
-                              .data$agg_method == method,
-                              .data$weighted   == use_w),
-                error = function(e) NULL
-              )
-              if (!is.null(hist_none) && nrow(hist_none) == 0) {
-                hist_none <- tryCatch(
-                  dplyr::filter(hist_sim()$agg,
-                                .data$agg_method == method,
-                                .data$weighted   == FALSE),
-                  error = function(e) NULL
-                )
+          per_model <- lapply(s$models, function(mod) {
+            aggregate_with_uncertainty(
+              y_point         = mod$y_point,
+              F_loading       = mod$F_loading,
+              group_vec       = s$sim_year,
+              so              = s$so,
+              agg_method      = method,
+              weights         = if (use_w) s$weight else NULL,
+              pov_line        = if (method %in% c("headcount_ratio", "gap", "fgt2"))
+                                  as.numeric(input$cmp_pov_line) else NULL,
+              train_resid     = if (!is.null(h$train_data)) h$train_data$.resid else NULL,
+              residual_method = h$residuals %||% "none",
+              id_vec          = s$id_vec,
+              S               = as.integer(input$sim_n %||% 200L)
+            )
+          })
+
+          combined <- combine_ensemble_results(per_model)
+
+          # Deviation relative to historical baseline
+          if (!identical(deviation, "none") && nrow(combined) > 0) {
+            hist_ref <- agg_hist()$out
+            ref_val  <- if (identical(deviation, "mean")) mean(hist_ref$value, na.rm = TRUE)
+                        else if (identical(deviation, "median")) median(hist_ref$value, na.rm = TRUE)
+                        else NA_real_
+            if (!is.na(ref_val)) {
+              combined$value     <- combined$value - ref_val
+              if ("value_p05" %in% names(combined)) {
+                combined$value_p05 <- combined$value_p05 - ref_val
+                combined$value_p95 <- combined$value_p95 - ref_val
               }
-              hist_ref <- if (!is.null(hist_none) && nrow(hist_none) > 0) {
-                if (identical(deviation, "mean"))   mean(hist_none$value, na.rm = TRUE)
-                else if (identical(deviation, "median")) median(hist_none$value, na.rm = TRUE)
-                else NA_real_
-              } else NA_real_
-              if (!is.na(hist_ref)) {
-                out <- dplyr::mutate(out, value = value - hist_ref)
-              } else {
-                # Fallback: no historical reference available — apply own-mean deviation
-                out <- deviation_from_centre(
-                  df = out, group = "sim_year", centre = deviation, loss = FALSE
-                )
-                if ("deviation" %in% names(out)) {
-                  out$value <- out$deviation; out$deviation <- NULL
-                }
+              if ("model_min" %in% names(combined)) {
+                combined$model_min <- combined$model_min - ref_val
+                combined$model_max <- combined$model_max - ref_val
+                combined$model_values <- lapply(combined$model_values, function(v) v - ref_val)
               }
             }
-            list(out = out, x_label = x_label)
-          } else if (!is.null(s$preds)) {
-            # Legacy fallback: raw preds still present (e.g. older saved state)
-            pov <- if (method %in% c("headcount_ratio", "gap", "fgt2")) pov_line_val() else NULL
-            aggregate_sim_preds(s$preds, s$so, method, deviation, FALSE, pov, weight_col())
-          } else NULL
+          }
+
+          list(out = combined, x_label = x_label)
         }, error = function(e) {
           message("[agg_scenarios] ERROR: ", conditionMessage(e))
           NULL
@@ -413,12 +388,12 @@ mod_2_02_results_server <- function(id,
     output$cmp_pov_line_ui <- renderUI({
       req(input$cmp_agg_method)
       if (input$cmp_agg_method %in% c("headcount_ratio", "gap", "fgt2")) {
-        # Poverty line is set at simulation time (input$pov_line_sim in mod_2_01).
-        # Post-hoc adjustment requires re-running the simulation.
-        pov_val <- if (!is.null(hist_sim()$pov_line)) sprintf("$%.2f", hist_sim()$pov_line) else "not yet set"
-        shiny::helpText(
-          style = "font-size:11px; color:#555; margin-bottom:6px;",
-          paste0("Poverty line: ", pov_val, "/day (set at simulation time). To change, update simulation settings and re-run.")
+        shiny::numericInput(
+          inputId = ns("cmp_pov_line"),
+          label   = "Poverty line ($/day)",
+          value   = 3.00,
+          min     = 0.01,
+          step    = 0.5
         )
       }
     })

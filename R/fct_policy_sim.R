@@ -538,31 +538,13 @@ resimulate_with_svy <- function(svy, sw, so, mf,
 
   pov_line   <- hist_sim_baseline$pov_line
   residuals  <- hist_sim_baseline$residuals  %||% "none"
-  coef_draws <- hist_sim_baseline$coef_draws
+  chol_Sigma <- hist_sim_baseline$chol_Sigma
 
   is_rif       <- identical(mf$engine, "rif")
   fit_multi    <- if (is_rif) mf$fit3 else NULL
   rif_taus     <- if (is_rif) mf$taus else NULL
   rif_weather  <- if (is_rif) mf$weather_terms else NULL
   model        <- if (is_rif) extract_rif_median(mf$fit3, mf$engine) else mf$fit3
-
-  agg_methods <- unname(hist_aggregate_choices(so$type, so$name))
-
-  build_agg <- function(preds) {
-    dplyr::bind_rows(lapply(agg_methods, function(meth) {
-      dplyr::bind_rows(lapply(c(TRUE, FALSE), function(use_w) {
-        wt <- if (use_w) weight_col else NULL
-        if (use_w && is.null(wt)) return(NULL)
-        tryCatch({
-          pov <- if (meth %in% c("headcount_ratio", "gap", "fgt2")) pov_line else NULL
-          res <- aggregate_sim_preds(preds, so, meth, "none", FALSE, pov, wt)
-          if (!is.null(res$out))
-            dplyr::mutate(res$out, agg_method = meth, weighted = use_w)
-          else NULL
-        }, error = function(e) NULL)
-      }))
-    }))
-  }
 
   run_one <- function(weather_raw, slim) {
     tryCatch(
@@ -575,7 +557,7 @@ resimulate_with_svy <- function(svy, sw, so, mf,
         residuals    = residuals,
         train_data   = mf$train_data,
         engine       = mf$engine,
-        coef_draws   = coef_draws,
+        chol_Sigma   = chol_Sigma,
         slim         = slim,
         fit_multi    = fit_multi,
         taus         = rif_taus,
@@ -593,29 +575,63 @@ resimulate_with_svy <- function(svy, sw, so, mf,
   if (is.null(hist_out)) return(NULL)
 
   hist_sim_new <- list(
-    preds       = hist_out$preds,
-    agg         = build_agg(hist_out$preds),
+    y_point     = hist_out$y_point,
+    F_loading   = hist_out$F_loading,
+    sim_year    = hist_out$sim_year,
+    weight      = hist_out$weight,
+    id_vec      = hist_out$id_vec,
     so          = so,
-    pov_line    = pov_line,
+    n_pre_join  = hist_out$n_pre_join,
     weather_raw = hist_out$weather_raw,
     train_data  = mf$train_data,
-    has_weights = !is.null(weight_col),
+    has_weights = !is.null(hist_out$weight),
     residuals   = residuals,
-    coef_draws  = coef_draws,
+    preds       = hist_out$preds,
     yr_range    = hist_sim_baseline$yr_range,
-    n_pre_join  = hist_out$n_pre_join
+    chol_Sigma  = chol_Sigma,
+    S           = hist_sim_baseline$S %||% 200L
   )
 
   saved_scenarios_new <- lapply(saved_scenarios_baseline, function(s) {
-    out <- run_one(s$weather_raw, slim = TRUE)
-    if (is.null(out)) return(NULL)
-    list(
-      agg         = build_agg(out$preds),
-      weather_raw = s$weather_raw,
-      so          = so,
-      year_range  = s$year_range,
-      n_models    = 1L
-    )
+    # For policy scenarios, re-simulate each model in each scenario
+    if (!is.null(s$models)) {
+      models_new <- lapply(seq_along(s$models), function(mi) {
+        # Use the representative weather for all models in this scenario
+        out <- run_one(s$weather_raw, slim = TRUE)
+        if (is.null(out)) return(NULL)
+        list(
+          y_point   = out$y_point,
+          F_loading = out$F_loading,
+          name      = s$models[[mi]]$name %||% paste0("model_", mi)
+        )
+      })
+      models_new <- models_new[!vapply(models_new, is.null, logical(1))]
+      if (length(models_new) == 0) return(NULL)
+      list(
+        models      = models_new,
+        sim_year    = models_new[[1]]$sim_year %||% s$sim_year,
+        weight      = s$weight,
+        id_vec      = s$id_vec,
+        weather_raw = s$weather_raw,
+        so          = so,
+        year_range  = s$year_range,
+        n_models    = length(models_new)
+      )
+    } else {
+      # Single-model fallback
+      out <- run_one(s$weather_raw, slim = TRUE)
+      if (is.null(out)) return(NULL)
+      list(
+        models      = list(list(y_point = out$y_point, F_loading = out$F_loading, name = "single")),
+        sim_year    = out$sim_year,
+        weight      = out$weight,
+        id_vec      = out$id_vec,
+        weather_raw = s$weather_raw,
+        so          = so,
+        year_range  = s$year_range,
+        n_models    = 1L
+      )
+    }
   })
   saved_scenarios_new <- saved_scenarios_new[
     !vapply(saved_scenarios_new, is.null, logical(1))

@@ -299,28 +299,27 @@ policy_input_diagnostics <- function(baseline_svy, policy_svy, vars = NULL) {
 
   output$weight_status_ui <- shiny::renderUI({
     req(baseline_hist_sim())
-    has_w  <- "weight" %in% names(baseline_hist_sim()$preds)
+    has_w  <- !is.null(baseline_hist_sim()$weight)
     tog_on <- isTRUE(input$use_weights)
     if (has_w && tog_on)
       shiny::tags$p(
         style = "font-size:11px; color:#2e7d32; margin:2px 0 6px 0;",
-        "✅ Survey weights found and applied (",
+        "\u2705 Survey weights found and applied (",
         shiny::tags$code("weight"), ")")
     else if (has_w && !tog_on)
       shiny::tags$p(
         style = "font-size:11px; color:#e65100; margin:2px 0 6px 0;",
-        "⚠ Survey weights available but not applied")
+        "\u26a0 Survey weights available but not applied")
     else
       shiny::tags$p(
         style = "font-size:11px; color:#c62828; margin:2px 0 6px 0;",
-        "\U0001F534 No weight column found — unweighted")
+        "\U0001F534 No weight column found \u2014 unweighted")
   })
 
   pov_line_val <- reactive({
     if (isTRUE(input$cmp_agg_method %in%
                c("headcount_ratio", "gap", "fgt2"))) {
-      if (!is.null(baseline_hist_sim())) baseline_hist_sim()$pov_line %||% NULL
-      else NULL
+      as.numeric(input$cmp_pov_line %||% NULL)
     } else NULL
   })
 
@@ -343,84 +342,91 @@ policy_input_diagnostics <- function(baseline_svy, policy_svy, vars = NULL) {
     nms[keep]
   })
 
-  # Helper: filter a hist_sim$agg reactive by the current method/weighted/dev
+  # Helper: aggregate hist_sim using the new compact schema
   make_agg_hist <- function(hs) {
-    if (is.null(hs) || is.null(hs$agg)) return(NULL)
+    if (is.null(hs) || is.null(hs$y_point)) return(NULL)
     method    <- input$cmp_agg_method %||% "mean"
     deviation <- input$cmp_deviation  %||% "none"
     use_w     <- isTRUE(input$use_weights)
 
-    out <- dplyr::filter(hs$agg,
-                         .data$agg_method == method,
-                         .data$weighted   == use_w)
-    if (nrow(out) == 0L && isTRUE(use_w)) {
-      out <- dplyr::filter(hs$agg,
-                           .data$agg_method == method,
-                           .data$weighted   == FALSE)
-    }
-    if (!identical(deviation, "none") && nrow(out) > 0) {
-      out <- deviation_from_centre(df = out, group = "sim_year",
+    agg <- aggregate_with_uncertainty(
+      y_point         = hs$y_point,
+      F_loading       = hs$F_loading,
+      group_vec       = hs$sim_year,
+      so              = hs$so,
+      agg_method      = method,
+      weights         = if (use_w) hs$weight else NULL,
+      pov_line        = pov_line_val(),
+      train_resid     = if (!is.null(hs$train_data)) hs$train_data$.resid else NULL,
+      residual_method = hs$residuals %||% "none",
+      id_vec          = hs$id_vec,
+      S               = as.integer(hs$S %||% 200L)
+    )
+
+    if (!identical(deviation, "none") && nrow(agg) > 0) {
+      agg <- deviation_from_centre(df = agg, group = "sim_year",
                                    centre = deviation, loss = FALSE)
-      if ("deviation" %in% names(out)) {
-        out$value <- out$deviation; out$deviation <- NULL
+      if ("deviation" %in% names(agg)) {
+        agg$value <- agg$deviation; agg$deviation <- NULL
       }
     }
     x_label <- if (identical(deviation, "none")) label_agg_method(method)
-               else paste0(label_agg_method(method), " — ",
+               else paste0(label_agg_method(method), " \u2014 ",
                            label_deviation(deviation))
-    list(out = out, x_label = x_label)
+    list(out = agg, x_label = x_label)
   }
 
-  # Helper: build agg per saved scenario, applying deviation against its own hist
+  # Helper: build agg per saved scenario using new compact schema
   make_agg_scenarios <- function(sc, hs_for_dev) {
     if (length(sc) == 0) return(list())
     method    <- input$cmp_agg_method %||% "mean"
     deviation <- input$cmp_deviation  %||% "none"
     use_w     <- isTRUE(input$use_weights)
     x_label   <- if (identical(deviation, "none")) label_agg_method(method)
-                 else paste0(label_agg_method(method), " — ",
+                 else paste0(label_agg_method(method), " \u2014 ",
                              label_deviation(deviation))
 
     lapply(sc, function(s) {
       tryCatch({
-        if (is.null(s$agg)) return(NULL)
-        out <- dplyr::filter(s$agg, .data$agg_method == method,
-                             .data$weighted == use_w)
-        if (nrow(out) == 0L && isTRUE(use_w)) {
-          out <- dplyr::filter(s$agg, .data$agg_method == method,
-                               .data$weighted == FALSE)
-        }
-        if (!identical(deviation, "none") && nrow(out) > 0) {
-          hist_none <- tryCatch(
-            dplyr::filter(hs_for_dev$agg, .data$agg_method == method,
-                          .data$weighted == use_w),
-            error = function(e) NULL
+        if (is.null(s$models)) return(NULL)
+        per_model <- lapply(s$models, function(mod) {
+          aggregate_with_uncertainty(
+            y_point         = mod$y_point,
+            F_loading       = mod$F_loading,
+            group_vec       = s$sim_year,
+            so              = s$so,
+            agg_method      = method,
+            weights         = if (use_w) s$weight else NULL,
+            pov_line        = pov_line_val(),
+            train_resid     = if (!is.null(hs_for_dev$train_data)) hs_for_dev$train_data$.resid else NULL,
+            residual_method = hs_for_dev$residuals %||% "none",
+            id_vec          = s$id_vec,
+            S               = as.integer(hs_for_dev$S %||% 200L)
           )
-          if (!is.null(hist_none) && nrow(hist_none) == 0) {
-            hist_none <- tryCatch(
-              dplyr::filter(hs_for_dev$agg, .data$agg_method == method,
-                            .data$weighted == FALSE),
-              error = function(e) NULL
-            )
-          }
-          hist_ref <- if (!is.null(hist_none) && nrow(hist_none) > 0) {
-            if (identical(deviation, "mean"))
-              mean(hist_none$value, na.rm = TRUE)
-            else if (identical(deviation, "median"))
-              median(hist_none$value, na.rm = TRUE)
+        })
+        combined <- combine_ensemble_results(per_model)
+
+        if (!identical(deviation, "none") && nrow(combined) > 0) {
+          hist_agg <- make_agg_hist(hs_for_dev)
+          hist_ref <- if (!is.null(hist_agg) && nrow(hist_agg$out) > 0) {
+            if (identical(deviation, "mean")) mean(hist_agg$out$value, na.rm = TRUE)
+            else if (identical(deviation, "median")) median(hist_agg$out$value, na.rm = TRUE)
             else NA_real_
           } else NA_real_
           if (!is.na(hist_ref)) {
-            out <- dplyr::mutate(out, value = .data$value - hist_ref)
-          } else {
-            out <- deviation_from_centre(df = out, group = "sim_year",
-                                         centre = deviation, loss = FALSE)
-            if ("deviation" %in% names(out)) {
-              out$value <- out$deviation; out$deviation <- NULL
+            combined$value <- combined$value - hist_ref
+            if ("value_p05" %in% names(combined)) {
+              combined$value_p05 <- combined$value_p05 - hist_ref
+              combined$value_p95 <- combined$value_p95 - hist_ref
+            }
+            if ("model_min" %in% names(combined)) {
+              combined$model_min <- combined$model_min - hist_ref
+              combined$model_max <- combined$model_max - hist_ref
+              combined$model_values <- lapply(combined$model_values, function(v) v - hist_ref)
             }
           }
         }
-        list(out = out, x_label = x_label)
+        list(out = combined, x_label = x_label)
       }, error = function(e) NULL)
     })
   }

@@ -776,7 +776,8 @@ enhance_exceedance <- function(scenarios,
                                x_label,
                                return_period = TRUE,
                                n_sim_years   = NULL,
-                               logit_x       = FALSE) {
+                               logit_x       = FALSE,
+                               show_bands    = TRUE) {
 
   stopifnot(is.list(scenarios), length(scenarios) > 0)
   labels <- names(scenarios)
@@ -784,24 +785,31 @@ enhance_exceedance <- function(scenarios,
   # ---- Build per-group long data frame ------------------------------------
   long_df <- dplyr::bind_rows(lapply(seq_along(scenarios), function(i) {
     nm      <- labels[i]
-    vals    <- scenarios[[nm]]$out$value
+    out     <- scenarios[[nm]]$out
+    vals    <- out$value
     ssp_key <- .normalise_ssp(nm)
     yr      <- .parse_year(nm)
-    data.frame(
+    df <- data.frame(
       value   = vals,
       group   = nm,
       ssp_key = if (is.na(ssp_key)) "Historical" else ssp_key,
       yr      = if (is.na(yr))      "Historical" else yr,
       stringsAsFactors = FALSE
     )
+    # Attach uncertainty columns if available
+    if ("value_p05" %in% names(out) && !all(is.na(out$value_p05))) {
+      df$value_p05 <- out$value_p05
+      df$value_p95 <- out$value_p95
+    }
+    if ("model_min" %in% names(out) && !all(is.na(out$model_min))) {
+      df$model_min <- out$model_min
+      df$model_max <- out$model_max
+    }
+    df
   }))
   long_df$group <- factor(long_df$group, levels = labels)
 
   # ---- Aesthetic mappings -------------------------------------------------
-  # One linetype per distinct yr value across all scenarios (historical
-  # included). The historical entry is named with its actual year range
-  # (e.g. "Historical / 2010-2018") upstream so it gets a normal year
-  # label in the legend rather than the word "Historical".
   all_yr_labels <- sort(unique(long_df$yr))
   yr_styles     <- .resolve_year_styles(all_yr_labels)
   ltype_map_yr  <- yr_styles$linetype_map
@@ -816,7 +824,7 @@ enhance_exceedance <- function(scenarios,
   hist_mean <- mean(hist_agg$out$value, na.rm = TRUE)
   eps       <- if (isTRUE(logit_x)) 0.005 else 0
 
-  # ---- Build ECDF per group -----------------------------------------------
+  # ---- Build ECDF per group (with uncertainty bands) ----------------------
   ecdf_df <- dplyr::bind_rows(lapply(levels(long_df$group), function(grp) {
     sub    <- long_df[long_df$group == grp & is.finite(long_df$value), ]
     if (nrow(sub) == 0) return(NULL)
@@ -825,7 +833,7 @@ enhance_exceedance <- function(scenarios,
     exceed <- 1 - fn(xs)
     keep   <- exceed > eps & exceed < (1 - eps)
     if (!any(keep)) return(NULL)
-    data.frame(
+    result <- data.frame(
       value   = xs[keep],
       exceed  = exceed[keep],
       group   = grp,
@@ -833,6 +841,35 @@ enhance_exceedance <- function(scenarios,
       yr      = sub$yr[1],
       stringsAsFactors = FALSE
     )
+
+    # Uncertainty band ECDFs (coefficient uncertainty)
+    if (isTRUE(show_bands) && "value_p05" %in% names(sub)) {
+      sub_clean <- sub[is.finite(sub$value_p05) & is.finite(sub$value_p95), ]
+      if (nrow(sub_clean) > 2) {
+        fn_lo  <- stats::ecdf(sub_clean$value_p05)
+        fn_hi  <- stats::ecdf(sub_clean$value_p95)
+        # At each exceedance probability, find the corresponding value from lo/hi ECDFs
+        probs <- result$exceed
+        xs_lo <- stats::quantile(sub_clean$value_p05, 1 - probs, na.rm = TRUE)
+        xs_hi <- stats::quantile(sub_clean$value_p95, 1 - probs, na.rm = TRUE)
+        result$coef_lo <- as.numeric(xs_lo)
+        result$coef_hi <- as.numeric(xs_hi)
+      }
+    }
+
+    # Model spread band ECDFs
+    if (isTRUE(show_bands) && "model_min" %in% names(sub)) {
+      sub_clean <- sub[is.finite(sub$model_min) & is.finite(sub$model_max), ]
+      if (nrow(sub_clean) > 2) {
+        probs <- result$exceed
+        xs_lo <- stats::quantile(sub_clean$model_min, 1 - probs, na.rm = TRUE)
+        xs_hi <- stats::quantile(sub_clean$model_max, 1 - probs, na.rm = TRUE)
+        result$model_lo <- as.numeric(xs_lo)
+        result$model_hi <- as.numeric(xs_hi)
+      }
+    }
+
+    result
   }))
 
   if (is.null(ecdf_df) || nrow(ecdf_df) == 0)
@@ -851,7 +888,35 @@ enhance_exceedance <- function(scenarios,
       linetype  = yr,
       group     = group
     )
-  ) +
+  )
+
+  # Outer band: model spread (lighter, wider)
+  if ("model_lo" %in% names(ecdf_df)) {
+    band_model <- ecdf_df[!is.na(ecdf_df$model_lo), ]
+    if (nrow(band_model) > 0) {
+      p <- p + ggplot2::geom_ribbon(
+        data = band_model,
+        ggplot2::aes(xmin = model_lo, xmax = model_hi, fill = ssp_key,
+                     y = exceed, group = group),
+        alpha = 0.12, colour = NA, inherit.aes = FALSE
+      )
+    }
+  }
+
+  # Inner band: coefficient uncertainty (darker, narrower)
+  if ("coef_lo" %in% names(ecdf_df)) {
+    band_coef <- ecdf_df[!is.na(ecdf_df$coef_lo), ]
+    if (nrow(band_coef) > 0) {
+      p <- p + ggplot2::geom_ribbon(
+        data = band_coef,
+        ggplot2::aes(xmin = coef_lo, xmax = coef_hi, fill = ssp_key,
+                     y = exceed, group = group),
+        alpha = 0.22, colour = NA, inherit.aes = FALSE
+      )
+    }
+  }
+
+  p <- p +
     ggplot2::geom_line(linewidth = 0.9) +
     ggplot2::geom_vline(
       xintercept = hist_mean, linetype = "dotted",
@@ -877,11 +942,23 @@ enhance_exceedance <- function(scenarios,
       name   = "Period",
       guide  = ggplot2::guide_legend(order = 2,
                                      override.aes = list(linewidth = 0.9))
-    ) +
+    )
+
+  # Fill scale for bands (same as colour but no legend)
+  if ("coef_lo" %in% names(ecdf_df) || "model_lo" %in% names(ecdf_df)) {
+    p <- p + ggplot2::scale_fill_manual(
+      values = colour_map_ssp, guide = "none"
+    )
+  }
+
+  p <- p +
     ggplot2::labs(
-      title = "Exceedance probability by climate scenario",
-      x     = x_label,
-      y     = "Annual exceedance probability"
+      title    = "Exceedance probability by climate scenario",
+      x        = x_label,
+      y        = "Annual exceedance probability",
+      caption  = if (isTRUE(show_bands) && ("coef_lo" %in% names(ecdf_df) || "model_lo" %in% names(ecdf_df)))
+                   "Dark band: coefficient uncertainty (90% CI) | Light band: climate model spread"
+                 else NULL
     ) +
     ggplot2::theme_minimal() +
     ggplot2::theme(
@@ -891,7 +968,7 @@ enhance_exceedance <- function(scenarios,
     ) +
     ggplot2::coord_flip()
 
-  # ---- Return period lines (both tails, symmetric) -----------------------
+  # ---- Return period lines ------------------------------------------------
   if (isTRUE(return_period)) {
     rp_all <- c(RP_LOW, RP_HIGH)
     for (nm in names(rp_all)) {
