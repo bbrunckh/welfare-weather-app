@@ -593,44 +593,39 @@ resimulate_with_svy <- function(svy, sw, so, mf,
   )
 
   saved_scenarios_new <- lapply(saved_scenarios_baseline, function(s) {
-    # For policy scenarios, re-simulate each model in each scenario
-    if (!is.null(s$models)) {
-      models_new <- lapply(seq_along(s$models), function(mi) {
-        # Use the representative weather for all models in this scenario
-        out <- run_one(s$weather_raw, slim = TRUE)
-        if (is.null(out)) return(NULL)
-        list(
-          y_point   = out$y_point,
-          F_loading = out$F_loading,
-          sim_year  = out$sim_year,
-          weight    = out$weight,
-          id_vec    = out$id_vec,
-          name      = s$models[[mi]]$name %||% paste0("model_", mi)
-        )
-      })
-      models_new <- models_new[!vapply(models_new, is.null, logical(1))]
-      if (length(models_new) == 0) return(NULL)
-      list(
-        models      = models_new,
-        weather_raw = s$weather_raw,
-        so          = so,
-        year_range  = s$year_range,
-        n_models    = length(models_new)
-      )
+    # All models in a scenario share the same weather_raw + svy,
+    # so run the pipeline ONCE and replicate for each model.
+    out <- run_one(s$weather_raw, slim = TRUE)
+    if (is.null(out)) return(NULL)
+
+    n_models <- if (!is.null(s$models)) length(s$models) else 1L
+    model_names <- if (!is.null(s$models)) {
+      vapply(seq_along(s$models), function(mi) {
+        s$models[[mi]]$name %||% paste0("model_", mi)
+      }, character(1))
     } else {
-      # Single-model fallback
-      out <- run_one(s$weather_raw, slim = TRUE)
-      if (is.null(out)) return(NULL)
-      list(
-        models      = list(list(y_point = out$y_point, F_loading = out$F_loading,
-                                sim_year = out$sim_year, weight = out$weight,
-                                id_vec = out$id_vec, name = "single")),
-        weather_raw = s$weather_raw,
-        so          = so,
-        year_range  = s$year_range,
-        n_models    = 1L
-      )
+      "single"
     }
+
+    shared_model <- list(
+      y_point   = out$y_point,
+      F_loading = out$F_loading,
+      sim_year  = out$sim_year,
+      weight    = out$weight,
+      id_vec    = out$id_vec
+    )
+
+    models_new <- lapply(model_names, function(nm) {
+      c(shared_model, list(name = nm))
+    })
+
+    list(
+      models      = models_new,
+      weather_raw = s$weather_raw,
+      so          = so,
+      year_range  = s$year_range,
+      n_models    = n_models
+    )
   })
   saved_scenarios_new <- saved_scenarios_new[
     !vapply(saved_scenarios_new, is.null, logical(1))

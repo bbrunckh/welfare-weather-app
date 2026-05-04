@@ -595,26 +595,10 @@ mod_2_01_weathersim_server <- function(id,
           ))
           t_start <- proc.time()[["elapsed"]]
 
-          for (ki in seq_along(all_keys)) {
-            key     <- all_keys[[ki]]
-            is_hist <- identical(key, "historical")
-
-            t_elapsed <- proc.time()[["elapsed"]] - t_start
-            t_remain  <- if (ki > 1L) (t_elapsed / (ki - 1L)) * (n_keys - ki + 1L) else NA_real_
-
-            message(sprintf(
-              "[wiseapp] Key %d/%d: %s | %d yrs x %d draws = %d runs | %s elapsed%s",
-              ki, n_keys,
-              if (is_hist) "Historical"
-              else sub("^(ssp[^_]+_[0-9]+_[0-9]+)_.*$", "\\1", key),
-              n_hist_yrs, S_val, n_hist_yrs * S_val,
-              format_elapsed(t_elapsed),
-              if (!is.na(t_remain))
-                paste0(" | ~", format_elapsed(t_remain), " remaining")
-              else " | estimating..."
-            ))
+          # ---- Historical key (always sequential) ---------------------------
+          if ("historical" %in% names(weather_result)) {
             out <- run_sim_pipeline(
-              weather_raw  = weather_result[[key]],
+              weather_raw  = weather_result[["historical"]],
               svy          = svy,
               sw           = sw,
               so           = so,
@@ -623,37 +607,13 @@ mod_2_01_weathersim_server <- function(id,
               train_data   = train_data,
               engine       = engine,
               chol_Sigma   = chol_Sigma,
-              slim         = !is_hist,
+              slim         = FALSE,
               fit_multi    = fit_multi,
               taus         = rif_taus,
               weather_cols = rif_weather
             )
-
-            # Free raw weather for this key immediately
-            weather_result[[key]] <- NULL
-
-            # Update progress bar
-            t_elapsed_post <- proc.time()[["elapsed"]] - t_start
-            t_remain_post  <- if (ki >= 1L) (t_elapsed_post / ki) * (n_keys - ki) else NA_real_
-            shiny::setProgress(
-              value  = 0.5 + 0.45 * (ki / n_keys),
-              detail = sprintf(
-                "%s | Key %d/%d | %s elapsed%s",
-                if (is_hist) "Historical"
-                else sub("^(ssp[^_]+_[0-9]+_[0-9]+)_.*$", "\\1", key),
-                ki, n_keys,
-                format_elapsed(t_elapsed_post),
-                if (!is.na(t_remain_post) && t_remain_post > 0)
-                  paste0(" | ~", format_elapsed(t_remain_post), " remaining")
-                else if (ki == n_keys) " | finalising..."
-                else ""
-              )
-            )
-
-            if (is.null(out)) next
-
-            if (is_hist && is.null(hist_sim_result)) {
-              # Historical: store compact result with factor loadings
+            weather_result[["historical"]] <- NULL
+            if (!is.null(out)) {
               hist_sim_result <- list(
                 y_point         = out$y_point,
                 F_loading       = out$F_loading,
@@ -671,8 +631,51 @@ mod_2_01_weathersim_server <- function(id,
                 chol_Sigma      = chol_Sigma,
                 S               = S_val
               )
-            } else if (!is_hist) {
-              # Future key: store per-model (y_point, F_loading) compactly
+            }
+            rm(out)
+          }
+
+          shiny::setProgress(value = 0.55, detail = "Running future scenarios...")
+
+          # Pre-compute training residuals once — reused across all future keys.
+          # resolve_id_col needs a joined frame; use train_data as proxy since
+          # the id column must exist there for matched draws to work at all.
+          cached_train_resid <- if (!identical(residuals, "none")) {
+            id_col_cache <- if (identical(residuals, "original")) {
+              candidates <- c("pid", "hhid", "fid")
+              candidates[candidates %in% names(train_data)][1L] %||% NULL
+            } else NULL
+            precompute_train_resid(model, train_data, engine, id = id_col_cache)
+          } else NULL
+
+          # ---- Future keys -------------------------------------------------------
+          if (length(future_keys) > 0L) {
+            # Process results into group_data structure
+            for (key in future_keys) {
+              out <- tryCatch(
+                run_sim_pipeline(
+                  weather_raw  = weather_result[[key]],
+                  svy          = svy,
+                  sw           = sw,
+                  so           = so,
+                  model        = model,
+                  residuals    = residuals,
+                  train_data   = train_data,
+                  engine       = engine,
+                  chol_Sigma   = chol_Sigma,
+                  slim         = TRUE,
+                  fit_multi    = fit_multi,
+                  taus         = rif_taus,
+                  weather_cols            = rif_weather,
+                  precomputed_train_resid = cached_train_resid
+                ),
+                error = function(e) {
+                  warning("Key '", key, "' failed: ", conditionMessage(e))
+                  NULL
+                }
+              )
+              if (is.null(out)) next
+
               ssp_code   <- sub("^(ssp[0-9]_[0-9]_[0-9])_.*$", "\\1", key)
               rest       <- sub(paste0("^", ssp_code, "_"), "", key)
               period_str <- sub("^([0-9]{4}_[0-9]{4})_.*$", "\\1", rest)
@@ -692,25 +695,17 @@ mod_2_01_weathersim_server <- function(id,
                 name      = model_name
               )
 
-              # Retain representative weather (first model only) for diagnostics
               if (is.null(group_weather_rep[[gk]])) {
                 group_weather_rep[[gk]] <- out$weather_raw
               }
-
               if (is.null(group_meta[[gk]])) {
                 group_meta[[gk]] <- list(
                   ssp_code   = ssp_code,
                   year_range = yr_parts
                 )
               }
-
-              rm(out); gc(verbose = FALSE)
-              next
             }
             rm(out)
-
-            # Periodic garbage collection
-            if (ki %% 10L == 0L) gc(verbose = FALSE)
           }
 
           rm(weather_result); gc(verbose = FALSE)

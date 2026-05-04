@@ -133,60 +133,61 @@ predict_rif <- function(fit_multi, newdata, svy, train_data, taus, outcome,
 
   # Swap weather columns: save scenario, insert baseline from svy
   saved_weather <- newdata[, weather_cols, drop = FALSE]
+
+  # Pre-build baseline and scenario data frames ONCE (avoid K×2 column copies)
+  newdata_base <- newdata
   for (wc in weather_cols) {
-    newdata[[wc]] <- svy[[wc]][svy_row]
+    newdata_base[[wc]] <- svy[[wc]][svy_row]
   }
+  newdata_scen <- newdata  # already has scenario weather
 
   # Predict at each quantile for baseline and scenario weather
   # Store deltas in a matrix: rows = observations, cols = quantiles
   delta_mat <- matrix(NA_real_, nrow = n, ncol = K)
 
   # For F_loading: store X_diff per quantile (X_scenario - X_baseline)
-  # We compute model.matrix once per quantile for baseline then scenario.
   compute_loading <- !is.null(chol_list) && length(chol_list) == K
   X_diff_list    <- if (compute_loading) vector("list", K) else NULL
 
   for (k in seq_len(K)) {
     # Baseline weather prediction
-    pred_base <- as.numeric(stats::predict(fit_multi[[k]], newdata = newdata,
+    pred_base <- as.numeric(stats::predict(fit_multi[[k]], newdata = newdata_base,
                                            type = "response"))
 
     # Capture baseline design matrix for loading computation
     if (compute_loading) {
       X_base_k <- tryCatch(
-        stats::model.matrix(fit_multi[[k]], data = newdata, type = "rhs"),
+        stats::model.matrix(fit_multi[[k]], data = newdata_base, type = "rhs"),
         error = function(e) NULL
       )
     }
 
-    # Swap to scenario weather
-    for (wc in weather_cols) newdata[[wc]] <- saved_weather[[wc]]
-
     # Scenario weather prediction
-    pred_new <- as.numeric(stats::predict(fit_multi[[k]], newdata = newdata,
+    pred_new <- as.numeric(stats::predict(fit_multi[[k]], newdata = newdata_scen,
                                           type = "response"))
 
     # Capture scenario design matrix and compute X_diff
     if (compute_loading && !is.null(X_base_k)) {
       X_new_k <- tryCatch(
-        stats::model.matrix(fit_multi[[k]], data = newdata, type = "rhs"),
+        stats::model.matrix(fit_multi[[k]], data = newdata_scen, type = "rhs"),
         error = function(e) NULL
       )
       if (!is.null(X_new_k) && nrow(X_new_k) == nrow(X_base_k)) {
         X_diff_list[[k]] <- X_new_k - X_base_k
       } else {
-        compute_loading <- FALSE  # abort if row counts don't match
+        compute_loading <- FALSE
       }
     }
-
-    # Swap back to baseline for next iteration
-    for (wc in weather_cols) newdata[[wc]] <- svy[[wc]][svy_row]
 
     delta_mat[, k] <- pred_new - pred_base
   }
 
-  # Restore scenario weather in newdata
+  # Restore scenario weather in newdata (for output)
   for (wc in weather_cols) newdata[[wc]] <- saved_weather[[wc]]
+
+  # Clean up pre-built frames
+
+  rm(newdata_base, newdata_scen, saved_weather)
 
   # Interpolate delta at each household's tau_i position
   delta_i <- interpolate_delta(delta_mat, taus, tau_i)
@@ -253,18 +254,23 @@ interpolate_F_loading <- function(X_diff_list, chol_list, taus, tau_i) {
     F_cache[[k]] <- X_diff_list[[k]] %*% t(chol_list[[k]])
   }
 
-  # Blend: F_loading[i, ] = (1 - w[i]) * F_lo[i, ] + w[i] * F_hi[i, ]
+  # Vectorised blend: extract rows from F_cache matrices using batch indexing
   p <- ncol(F_cache[[needed_idx[1]]])
-  F_loading <- matrix(NA_real_, nrow = n, ncol = p)
 
-  for (i in seq_len(n)) {
-    lo <- idx[i]
-    hi <- idx_hi[i]
-    wi <- w[i]
-    F_loading[i, ] <- (1 - wi) * F_cache[[lo]][i, ] + wi * F_cache[[hi]][i, ]
+  # Build F_lo and F_hi matrices by row-selecting from cached results
+  # Each row i of F_lo is F_cache[[idx[i]]][i, ]
+  F_lo <- matrix(NA_real_, nrow = n, ncol = p)
+  F_hi <- matrix(NA_real_, nrow = n, ncol = p)
+
+  for (k in needed_idx) {
+    rows_lo <- which(idx == k)
+    if (length(rows_lo) > 0L) F_lo[rows_lo, ] <- F_cache[[k]][rows_lo, , drop = FALSE]
+    rows_hi <- which(idx_hi == k)
+    if (length(rows_hi) > 0L) F_hi[rows_hi, ] <- F_cache[[k]][rows_hi, , drop = FALSE]
   }
 
-  F_loading
+  # Vectorised linear interpolation: (1-w) * F_lo + w * F_hi
+  (1 - w) * F_lo + w * F_hi
 }
 
 

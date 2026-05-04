@@ -154,6 +154,82 @@ compute_chol_vcov <- function(fit, vcov_spec = COEF_VCOV_SPEC) {
 }
 
 
+#' Vectorised Column-wise Aggregation for MC Draws
+#'
+#' Computes one aggregate scalar per column (draw) of an N x S matrix.
+#' Avoids per-draw data.frame construction and function dispatch overhead.
+#'
+#' @param Y_mat N x S numeric matrix of outcome values (one draw per column).
+#' @param w     Numeric N-vector of survey weights, or NULL (equal weights).
+#' @param agg   Character aggregation method.
+#' @param pov_line Numeric poverty line or NULL.
+#' @return Numeric S-vector of aggregate values.
+#' @keywords internal
+.mc_aggregate_cols <- function(Y_mat, w, agg, pov_line = NULL) {
+
+  N <- nrow(Y_mat)
+  if (is.null(w)) {
+    w_norm <- rep(1 / N, N)
+  } else {
+    w_norm <- w / sum(w)
+  }
+
+  switch(agg,
+    "mean" = as.numeric(crossprod(w_norm, Y_mat)),
+    "sum"  =, "total" = {
+      w_abs <- if (is.null(w)) rep(1, N) else w
+      as.numeric(crossprod(w_abs, Y_mat))
+    },
+    "median" = {
+      apply(Y_mat, 2L, function(col) {
+        ord  <- order(col)
+        cumw <- cumsum(w_norm[ord])
+        col[ord][which(cumw >= 0.5)[1]]
+      })
+    },
+    "headcount_ratio" = {
+      poor <- Y_mat < pov_line
+      as.numeric(crossprod(w_norm, poor + 0L))
+    },
+    "gap" = {
+      shortfall <- pmax(pov_line - Y_mat, 0) / pov_line
+      as.numeric(crossprod(w_norm, shortfall))
+    },
+    "fgt2" = {
+      shortfall <- (pmax(pov_line - Y_mat, 0) / pov_line)^2
+      as.numeric(crossprod(w_norm, shortfall))
+    },
+    "gini" = {
+      apply(Y_mat, 2L, function(col) {
+        ord    <- order(col)
+        x_s    <- col[ord]
+        w_s    <- w_norm[ord]
+        lorenz <- cumsum(w_s * x_s) / sum(w_s * x_s)
+        lorenz <- c(0, lorenz)
+        cx     <- c(0, cumsum(w_s))
+        B      <- sum(diff(cx) * (lorenz[-length(lorenz)] + lorenz[-1]) / 2)
+        1 - 2 * B
+      })
+    },
+    "prosperity_gap" = {
+      pg <- pmax(28 / Y_mat, 1)
+      as.numeric(crossprod(w_norm, pg))
+    },
+    "avg_poverty" = {
+      apply(Y_mat, 2L, function(col) {
+        ok <- is.finite(col) & col > 0
+        if (!any(ok)) return(NA_real_)
+        sum(w_norm[ok] * (1 / col[ok])) / sum(w_norm[ok])
+      })
+    },
+    # Fallback
+    apply(Y_mat, 2L, function(col) {
+      sum(col * w_norm, na.rm = TRUE)
+    })
+  )
+}
+
+
 #' Aggregate Predictions with Coefficient Uncertainty
 #'
 #' Computes an aggregate welfare statistic (mean, headcount, etc.) with
@@ -259,15 +335,19 @@ aggregate_with_uncertainty <- function(
         value_p95 = val_pt + stats::qnorm(0.95) * se
       )
     } else {
-      # Monte Carlo path
+      # Monte Carlo path — vectorised over S draws
       if (!is.null(seed)) set.seed(seed + gi)
       Z <- matrix(stats::rnorm(S * K), nrow = S, ncol = K)
-      scalars <- numeric(S)
-      for (s in seq_len(S)) {
-        y_s <- y_g + resid_g + as.numeric(F_g %*% Z[s, ])
-        if (is_log) y_s <- exp(y_s)
-        scalars[s] <- compute_agg(y_s)
-      }
+
+      # N x S matrix: each column is one draw's y-vector
+      # F_g is N x K, Z is S x K, so F_g %*% t(Z) is N x S
+      Y_mat <- F_g %*% t(Z)  # N x S perturbations
+      Y_mat <- Y_mat + (y_g + resid_g)  # add point estimate (recycled)
+      if (is_log) Y_mat <- exp(Y_mat)
+
+      # Vectorised aggregation over columns of Y_mat
+      scalars <- .mc_aggregate_cols(Y_mat, w_g, agg_method, pov_line)
+
       qs <- stats::quantile(scalars, c(0.05, 0.50, 0.95), na.rm = TRUE)
       results[[gi]] <- tibble::tibble(
         sim_year  = g,
@@ -409,7 +489,8 @@ run_sim_pipeline <- function(weather_raw, svy, sw, so,
                              chol_Sigma = NULL,
                              slim = FALSE,
                              fit_multi = NULL, taus = NULL,
-                             weather_cols = NULL) {
+                             weather_cols = NULL,
+                             precomputed_train_resid = NULL) {
   n_pre_join <- nrow(svy)
 
   # Tag svy with row IDs for RIF delta-method lookups
@@ -473,7 +554,8 @@ run_sim_pipeline <- function(weather_raw, svy, sw, so,
       outcome    = so$name,
       id         = id_col,
       train_data = train_data,
-      engine     = engine
+      engine     = engine,
+      precomputed_train_resid = precomputed_train_resid
     ),
     error = function(e) {
       warning("[run_sim_pipeline] predict_outcome() failed: ", conditionMessage(e))
