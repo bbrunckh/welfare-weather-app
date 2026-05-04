@@ -354,7 +354,13 @@ mod_2_03_diagnostics_server <- function(id,
     })
 
     output$uncertainty_decomp_plot <- renderPlot({
-      # ...existing code...
+      req(agg_hist_diag())
+      sc_agg <- agg_scenarios_diag()
+      plot_uncertainty_decomposition(
+        scenarios   = sc_agg,
+        hist_agg    = agg_hist_diag(),
+        group_order = input$diag_ridge_primary_group %||% "scenario_x_year"
+      )
     }, height = 450)
     outputOptions(output, "uncertainty_decomp_plot", suspendWhenHidden = FALSE)
 
