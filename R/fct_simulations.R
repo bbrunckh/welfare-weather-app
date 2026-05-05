@@ -490,7 +490,9 @@ run_sim_pipeline <- function(weather_raw, svy, sw, so,
                              slim = FALSE,
                              fit_multi = NULL, taus = NULL,
                              weather_cols = NULL,
-                             precomputed_train_resid = NULL) {
+                             precomputed_train_resid = NULL,
+                             svy_baseline = NULL,
+                             rif_grid = NULL) {
   n_pre_join <- nrow(svy)
 
   # Tag svy with row IDs for RIF delta-method lookups
@@ -523,6 +525,28 @@ run_sim_pipeline <- function(weather_raw, svy, sw, so,
     )
     if (is.null(preds)) return(NULL)
     F_loading_rif <- attr(preds, "F_loading")
+
+    # --- Policy correction (Option A): add main + repositioning effects ---
+    # predict_rif only captures the weather delta; policy covariate shifts
+    # (main effect) and the resulting CDF repositioning are missing.
+    if (!is.null(svy_baseline) && !is.null(rif_grid)) {
+      policy_correction <- .compute_rif_policy_correction(
+        svy_baseline = svy_baseline,
+        svy_policy   = svy,
+        preds        = preds,
+        train_data   = train_data,
+        taus         = taus,
+        rif_grid     = rif_grid,
+        weather_cols = weather_cols,
+        outcome      = so$name,
+        so           = so
+      )
+      if (!is.null(policy_correction)) {
+        preds[[so$name]] <- preds[[so$name]] + policy_correction
+        preds$.fitted    <- preds$.fitted + policy_correction
+      }
+    }
+
     preds <- apply_log_backtransform(preds, so)
     # SP transfer
     if ("._sp_transfer" %in% names(preds)) {
@@ -624,6 +648,91 @@ run_sim_pipeline <- function(weather_raw, svy, sw, so,
     weather_raw = weather_raw,
     preds       = preds_out
   )
+}
+
+# ---------------------------------------------------------------------------- #
+# RIF Policy Correction Helper (Option A)                                      #
+# Delegates to .compute_rif_channels() in fct_policy_decompose.R for          #
+# numerical consistency between simulation and decomposition display.          #
+# ---------------------------------------------------------------------------- #
+
+#' Compute the main effect + repositioning correction for RIF policy sims
+#'
+#' predict_rif() only captures weather deltas (scenario - baseline weather).
+#' When covariates differ between svy_baseline and svy_policy (e.g. binary
+#' infrastructure flips), the covariate main effects are lost.
+#' This function delegates to .compute_rif_channels() (single source of truth)
+#' and returns only the channels NOT already captured by predict_rif:
+#'   - delta_main_covar (beta_x * delta_x, excludes SP which is post-hoc)
+#'   - delta_res1 (repositioning from tau shift)
+#'
+#' Interaction (delta_res2) is NOT added because predict_rif already evaluates
+#' at policy covariates, so weather×policy interactions activate via the
+#' weather delta.
+#'
+#' @param svy_baseline Original survey data (pre-policy).
+#' @param svy_policy Policy-modified survey data (passed as svy to predict_rif).
+#' @param preds Prediction output from predict_rif (in log/model scale).
+#' @param train_data Training data for ecdf.
+#' @param taus Quantile grid.
+#' @param rif_grid RIF coefficient grid (from build_rif_grid).
+#' @param weather_cols Weather variable names.
+#' @param outcome Outcome column name.
+#' @param so Selected outcome metadata.
+#' @return Numeric vector of length nrow(preds), or NULL.
+#' @keywords internal
+.compute_rif_policy_correction <- function(svy_baseline, svy_policy, preds,
+                                           train_data, taus, rif_grid,
+                                           weather_cols, outcome, so) {
+  n <- nrow(preds)
+  is_log <- isTRUE(so$transform == "log")
+
+  # Compute covariate deltas using shared helper
+  deltas <- .compute_policy_deltas(svy_baseline, svy_policy, outcome, weather_cols)
+
+  # If no covariate changes, nothing to correct.
+  # SP transfer is handled separately in run_sim_pipeline (post-backtransform).
+  if (length(deltas) == 0) return(NULL)
+
+  # SP transfer (needed for tau shift calculation, not for direct addition)
+  sp_transfer <- if ("._sp_transfer" %in% names(svy_policy)) {
+    svy_policy[["._sp_transfer"]]
+  } else {
+    rep(0, n)
+  }
+
+  # Hazard values from baseline survey weather columns
+  hazard_values <- lapply(weather_cols, function(wv) {
+    if (wv %in% names(svy_baseline)) {
+      vals <- svy_baseline[[wv]]
+      if (is.factor(vals) || is.character(vals)) return(rep(1, n))
+      if (!is.numeric(vals)) return(rep(0, n))
+      vals
+    } else {
+      rep(0, n)
+    }
+  })
+  names(hazard_values) <- weather_cols
+
+  # Delegate to shared channel computation (single source of truth)
+  channels <- .compute_rif_channels(
+    svy_baseline  = svy_baseline,
+    deltas        = deltas,
+    sp_transfer   = sp_transfer,
+    hazard_values = hazard_values,
+    weather_vars  = weather_cols,
+    rif_grid      = rif_grid,
+    taus          = taus,
+    train_data    = train_data,
+    outcome       = outcome,
+    is_log        = is_log
+  )
+  if (is.null(channels)) return(NULL)
+
+  # Return only main_covar + repositioning.
+  # SP is applied post-backtransform in run_sim_pipeline.
+  # Interaction is already captured in predict_rif weather delta.
+  channels$delta_main_covar + channels$delta_res1
 }
 
 # ---------------------------------------------------------------------------- #

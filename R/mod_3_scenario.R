@@ -203,6 +203,36 @@ mod_3_scenario_server <- function(id,
       tabset_session = session
     )
 
+    # ---- Decomposition tab: effect channels -----------------------------
+    mod_3_08_decomposition_server(
+      "decomposition",
+      decomp_result    = s5$decomp_result,
+      decomp_scenarios = s5$decomp_scenarios,
+      model_fit     = model_fit,
+      so            = reactive({
+        hs <- hist_sim()
+        if (!is.null(hs)) hs$so else NULL
+      })
+    )
+
+    # Wire decomposition tab into tabset on first successful run
+    decomp_tab_added <- reactiveVal(FALSE)
+    observeEvent(s5$sim_run_id(), {
+      req(s5$sim_run_id() > 0, s5$decomp_result())
+      if (!decomp_tab_added()) {
+        shiny::appendTab(
+          inputId = "step3_output_tabs",
+          shiny::tabPanel(
+            title = "Decomposition",
+            value = "decomposition_tab",
+            mod_3_08_decomposition_ui(ns("decomposition"))
+          ),
+          session = session
+        )
+        decomp_tab_added(TRUE)
+      }
+    }, ignoreInit = TRUE)
+
     # ---- Run policy simulation button ------------------------------------
 
     output$run_policy_sim_ui <- renderUI({

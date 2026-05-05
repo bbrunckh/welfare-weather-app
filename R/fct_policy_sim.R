@@ -527,7 +527,8 @@ apply_policy_to_svy <- function(svy,
 #' @export
 resimulate_with_svy <- function(svy, sw, so, mf,
                                 hist_sim_baseline,
-                                saved_scenarios_baseline = list()) {
+                                saved_scenarios_baseline = list(),
+                                svy_baseline = NULL) {
   if (is.null(svy) || is.null(mf) || is.null(hist_sim_baseline) ||
       is.null(so)) return(NULL)
 
@@ -544,6 +545,7 @@ resimulate_with_svy <- function(svy, sw, so, mf,
   fit_multi    <- if (is_rif) mf$fit3 else NULL
   rif_taus     <- if (is_rif) mf$taus else NULL
   rif_weather  <- if (is_rif) mf$weather_terms else NULL
+  rif_grid     <- if (is_rif) mf$rif_grid else NULL
   model        <- if (is_rif) extract_rif_median(mf$fit3, mf$engine) else mf$fit3
 
   run_one <- function(weather_raw, slim) {
@@ -561,7 +563,9 @@ resimulate_with_svy <- function(svy, sw, so, mf,
         slim         = slim,
         fit_multi    = fit_multi,
         taus         = rif_taus,
-        weather_cols = rif_weather
+        weather_cols = rif_weather,
+        svy_baseline = svy_baseline,
+        rif_grid     = rif_grid
       ),
       error = function(e) {
         warning("[resimulate_with_svy] run_sim_pipeline failed: ",

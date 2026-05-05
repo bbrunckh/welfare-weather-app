@@ -50,10 +50,12 @@ mod_3_05_policy_sim_server <- function(id,
   moduleServer(id, function(input, output, session) {
     ns <- session$ns
 
-    baseline_svy_rv <- reactiveVal(NULL)
-    policy_svy_rv   <- reactiveVal(NULL)
-    sim_error       <- reactiveVal(NULL)
-    sim_run_id      <- reactiveVal(0L)
+    baseline_svy_rv     <- reactiveVal(NULL)
+    policy_svy_rv       <- reactiveVal(NULL)
+    sim_error           <- reactiveVal(NULL)
+    sim_run_id          <- reactiveVal(0L)
+    decomp_rv           <- reactiveVal(NULL)
+    decomp_scenarios_rv <- reactiveVal(list())
 
     baseline_hist_sim_rv        <- reactiveVal(NULL)
     baseline_saved_scenarios_rv <- reactiveVal(list())
@@ -112,11 +114,79 @@ mod_3_05_policy_sim_server <- function(id,
                 #   preds[[so$name]] <- preds[[so$name]] + preds[["._sp_transfer"]]
                 # }
               shiny::setProgress(value = 0.6, detail = "Policy...")
-              pol_out <- resimulate_with_svy(svy_mod, sw, hs$so, mf, hs, ss)
+              pol_out <- resimulate_with_svy(svy_mod, sw, hs$so, mf, hs, ss,
+                                            svy_baseline = svy)
               if (!is.null(pol_out)) {
                 policy_hist_sim_rv(pol_out$hist_sim)
                 policy_saved_scenarios_rv(pol_out$saved_scenarios)
               }
+
+              # Decompose policy effects using HISTORICAL mean weather
+              shiny::setProgress(value = 0.85, detail = "Decomposing effects...")
+              decomp <- tryCatch(
+                decompose_policy_effect(
+                  svy_baseline = svy,
+                  svy_policy   = svy_mod,
+                  model_fit    = mf,
+                  so           = hs$so,
+                  weather_raw  = hs$weather_raw
+                ),
+                error = function(e) {
+                  warning("[mod_3_05] Decomposition failed: ", conditionMessage(e))
+                  NULL
+                }
+              )
+              decomp_rv(decomp)
+
+              # Decompose per saved scenario × sim_year for year-to-year variation
+              shiny::setProgress(value = 0.90, detail = "Decomposing scenario effects...")
+              sc_list <- pol_out$saved_scenarios %||% list()
+              decomp_sc <- lapply(seq_along(sc_list), function(i) {
+                sc       <- sc_list[[i]]
+                w_raw    <- sc$weather_raw
+                if (is.null(w_raw)) return(NULL)
+                sc_label <- names(sc_list)[i] %||% paste0("Scenario ", i)
+
+                # Identify years present in this scenario's weather panel
+                if ("timestamp" %in% names(w_raw)) {
+                  sim_years <- sort(unique(as.integer(format(w_raw$timestamp, "%Y"))))
+                } else {
+                  # No year column — fall back to single decomposition (mean weather)
+                  sim_years <- NA_integer_
+                }
+
+                year_results <- lapply(sim_years, function(yr) {
+                  # Subset to this year's weather rows (or use full panel if no year info)
+                  w_yr <- if (!is.na(yr)) {
+                    w_raw[as.integer(format(w_raw$timestamp, "%Y")) == yr, ]
+                  } else {
+                    w_raw
+                  }
+                  tryCatch(
+                    decompose_policy_effect(
+                      svy_baseline = svy,
+                      svy_policy   = svy_mod,
+                      model_fit    = mf,
+                      so           = hs$so,
+                      weather_raw  = w_yr
+                    ) |> dplyr::mutate(
+                      scenario   = sc_label,
+                      sim_year   = yr,
+                      year_start = sc$year_range[[1]] %||% NA_integer_,
+                      year_end   = sc$year_range[[2]] %||% NA_integer_
+                    ),
+                    error = function(e) {
+                      warning("[mod_3_05] Year decomp failed for '", sc_label,
+                              "' yr ", yr, ": ", conditionMessage(e))
+                      NULL
+                    }
+                  )
+                })
+                dplyr::bind_rows(Filter(Negate(is.null), year_results))
+              })
+              decomp_scenarios_rv(
+                dplyr::bind_rows(Filter(Negate(is.null), decomp_sc))
+              )
 
               shiny::setProgress(value = 1, detail = "Complete")
             }
@@ -144,6 +214,8 @@ mod_3_05_policy_sim_server <- function(id,
       baseline_svy             = baseline_svy_rv,
       policy_svy               = policy_svy_rv,
       sim_run_id               = sim_run_id,
+      decomp_result            = decomp_rv,
+      decomp_scenarios         = decomp_scenarios_rv,
       baseline_hist_sim        = baseline_hist_sim_rv,
       baseline_saved_scenarios = baseline_saved_scenarios_rv,
       policy_hist_sim          = policy_hist_sim_rv,
