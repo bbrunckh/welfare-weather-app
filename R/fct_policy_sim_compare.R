@@ -319,7 +319,7 @@ policy_input_diagnostics <- function(baseline_svy, policy_svy, vars = NULL) {
   pov_line_val <- reactive({
     if (isTRUE(input$cmp_agg_method %in%
                c("headcount_ratio", "gap", "fgt2"))) {
-      as.numeric(input$cmp_pov_line %||% NULL)
+      as.numeric(input$cmp_pov_line) %||% 3.00
     } else NULL
   })
 
@@ -496,12 +496,13 @@ policy_input_diagnostics <- function(baseline_svy, policy_svy, vars = NULL) {
   output$cmp_pov_line_ui <- renderUI({
     req(input$cmp_agg_method)
     if (input$cmp_agg_method %in% c("headcount_ratio", "gap", "fgt2")) {
-      pov_val <- if (!is.null(baseline_hist_sim()$pov_line))
-        sprintf("$%.2f", baseline_hist_sim()$pov_line) else "not yet set"
-      shiny::helpText(
-        style = "font-size:11px; color:#555; margin-bottom:6px;",
-        paste0("Poverty line: ", pov_val,
-               "/day (set at simulation time).")
+      default_val <- baseline_hist_sim()$pov_line %||% 3.00
+      shiny::numericInput(
+        inputId = ns("cmp_pov_line"),
+        label   = "Poverty line ($/day)",
+        value   = default_val,
+        min     = 0.01,
+        step    = 0.5
       )
     }
   })
