@@ -22,19 +22,23 @@ mod_3_scenario_ui <- function(id) {
         bs_accordion(id = ns("accordion")) |>
           bs_append(
             title   = "Social protection",
-            content = mod_3_01_sp_ui(ns("sp"))
+            content = mod_3_01_sp_ui(ns("sp")),
+            open    = FALSE
           ) |>
           bs_append(
             title   = "Infrastructure",
-            content = mod_3_02_infra_ui(ns("infra"))
+            content = mod_3_02_infra_ui(ns("infra")),
+            open    = FALSE
           ) |>
           bs_append(
             title   = "Digital inclusion",
-            content = mod_3_03_digital_ui(ns("digital"))
+            content = mod_3_03_digital_ui(ns("digital")),
+            open    = FALSE
           ) |>
           bs_append(
             title   = "Labor market",
-            content = mod_3_04_labor_ui(ns("labor"))
+            content = mod_3_04_labor_ui(ns("labor")),
+            open    = FALSE
           ),
         hr(),
         uiOutput(ns("run_policy_sim_ui"))
@@ -45,7 +49,9 @@ mod_3_scenario_ui <- function(id) {
           tabPanel(
             title = "Overview",
             value = "overview",
-            includeMarkdown(system.file("app/www/equation2.md", package = "wiseapp")),
+            includeMarkdown(
+              system.file("app/www/equation2.md", package = "wiseapp")
+            ),
             mod_3_05_policy_sim_ui(ns("policy_sim"))
           )
         )
@@ -80,10 +86,12 @@ mod_3_scenario_server <- function(id,
                                    selected_weather,
                                    selected_model,
                                    selected_policies = reactive(NULL),
-                                   survey_weather,
+                                   survey_weather = reactive(NULL),
+                                   survey_data = reactive(NULL),
                                    model_fit,
                                    hist_sim,
                                    saved_scenarios = reactive(list()),
+                                   selected_hist   = reactive(NULL),
                                    variable_list   = reactive(NULL)) {
   moduleServer(id, function(input, output, session) {
     ns <- session$ns
@@ -126,13 +134,19 @@ mod_3_scenario_server <- function(id,
 
     # ---- Social Protection scenario --------------------------------------
 
-    s1 <- mod_3_01_sp_server("sp")
+    s1 <- mod_3_01_sp_server(
+      "sp",
+      selected_outcome = selected_outcome,
+      survey_weather   = survey_weather,
+      variable_list    = variable_list
+    )
 
     # ---- Infrastructure scenario -----------------------------------------
 
     s2 <- mod_3_02_infra_server(
       "infra",
       selected_model = selected_model,
+      survey_data    = survey_data,
       variable_list  = variable_list)
 
     # ---- Digital & financial inclusion scenario --------------------------
@@ -140,6 +154,7 @@ mod_3_scenario_server <- function(id,
     s3 <- mod_3_03_digital_server(
       "digital",
       selected_model = selected_model,
+      survey_data   = survey_data,
       variable_list  = variable_list)
 
     # ---- Labor market scenario -------------------------------------------
@@ -147,58 +162,86 @@ mod_3_scenario_server <- function(id,
     s4 <- mod_3_04_labor_server(
       "labor",
       selected_model = selected_model,
+      survey_data   = survey_data,
       variable_list  = variable_list)
 
-    # ---- Policy simulation module (initialised once at startup) ----------
+    # ---- Policy adjustment module ----------------------------------------
 
     s5 <- mod_3_05_policy_sim_server(
       "policy_sim",
-      connection_params  = connection_params,
-      selected_outcome   = selected_outcome,
-      selected_weather   = selected_weather,
-      survey_weather     = survey_weather,
-      model_fit          = model_fit,
-      hist_sim           = hist_sim,
-      saved_scenarios    = saved_scenarios,
-      sp_scenario        = s1$sp_scenario,
-      infra_scenario     = s2$infra_scenario,
-      digital_scenario   = s3$digital_scenario,
-      labor_scenario     = s4$labor_scenario
+      survey_weather    = survey_weather,
+      sp_scenario       = s1$sp_scenario,
+      infra_scenario    = s2$infra_scenario,
+      digital_scenario  = s3$digital_scenario,
+      labor_scenario    = s4$labor_scenario,
+      model_fit         = model_fit,
+      selected_weather  = selected_weather,
+      hist_sim          = hist_sim,
+      saved_scenarios   = saved_scenarios
     )
 
-    # ---- Results tab: Step 3-specific module (baseline vs policy) --------
+    # ---- Results tabs: Baseline & Policy (both re-simulated) -------------
     mod_3_06_results_server(
       "results3",
-      baseline_hist_sim        = hist_sim,
-      baseline_saved_scenarios = saved_scenarios,
+      baseline_hist_sim        = s5$baseline_hist_sim,
+      baseline_saved_scenarios = s5$baseline_saved_scenarios,
       policy_hist_sim          = s5$policy_hist_sim,
       policy_saved_scenarios   = s5$policy_saved_scenarios,
-      baseline_svy             = s5$baseline_svy,
-      policy_svy               = s5$policy_svy,
-      selected_model           = selected_model,
+      selected_hist            = selected_hist,
+      sim_run_id               = s5$sim_run_id,
       tabset_id                = "step3_output_tabs",
       tabset_session           = session
     )
 
-    # ---- Run policy simulation button (hidden for RIF engine) -----------
+    # ---- Diagnostics tab: before/after variable analysis ----------------
+    mod_3_07_diagnostics_server(
+      "diagnostics",
+      baseline_svy   = s5$baseline_svy,
+      policy_svy     = s5$policy_svy,
+      sim_run_id     = s5$sim_run_id,
+      tabset_id      = "step3_output_tabs",
+      tabset_session = session
+    )
+
+    # ---- Decomposition tab: effect channels -----------------------------
+    mod_3_08_decomposition_server(
+      "decomposition",
+      decomp_result    = s5$decomp_result,
+      decomp_scenarios = s5$decomp_scenarios,
+      model_fit     = model_fit,
+      so            = reactive({
+        hs <- hist_sim()
+        if (!is.null(hs)) hs$so else NULL
+      })
+    )
+
+    # Wire decomposition tab into tabset on first successful run
+    decomp_tab_added <- reactiveVal(FALSE)
+    observeEvent(s5$sim_run_id(), {
+      req(s5$sim_run_id() > 0, s5$decomp_result())
+      if (!decomp_tab_added()) {
+        shiny::appendTab(
+          inputId = "step3_output_tabs",
+          shiny::tabPanel(
+            title = "Decomposition",
+            value = "decomposition_tab",
+            mod_3_08_decomposition_ui(ns("decomposition"))
+          ),
+          session = session
+        )
+        decomp_tab_added(TRUE)
+      }
+    }, ignoreInit = TRUE)
+
+    # ---- Run policy simulation button ------------------------------------
 
     output$run_policy_sim_ui <- renderUI({
-      mf <- model_fit()
-      if (!is.null(mf) && identical(mf$engine, "rif")) {
-        div(
-          class = "alert alert-warning",
-          style = "font-size: 13px; margin-top: 4px;",
-          tags$b("\u26a0 Simulations are not yet implemented for Quantile Regression (RIF)."),
-          " Please select a different model engine to run simulations."
-        )
-      } else {
-        actionButton(
-          ns("run_policy_sim"),
-          "Run simulation",
-          class = "btn-primary",
-          width = "100%"
-        )
-      }
+      actionButton(
+        ns("run_policy_sim"),
+        "Run simulation",
+        class = "btn-primary",
+        width = "100%"
+      )
     })
 
     # ---- Run policy simulation on button click ---------------------------

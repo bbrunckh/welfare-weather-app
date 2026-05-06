@@ -42,18 +42,25 @@
   if (digit %in% names(lookup)) lookup[[digit]] else NA_character_
 }
 
+# .parse_year <- function(nm) {
+#   if (length(nm) == 1L) {
+#     m <- regexpr("\\d{4}-\\d{4}", nm)
+#     if (m == -1L) return(NA_character_)
+#     return(regmatches(nm, m))
+#   }
+#   # Vectorised path
+#   m <- gregexpr("\\d{4}-\\d{4}", nm)
+#   vapply(seq_along(nm), function(i) {
+#     matches <- regmatches(nm[i], m[i])[[1]]
+#     if (length(matches) == 0) NA_character_ else matches[1]
+#   }, character(1))
+# }
+
 .parse_year <- function(nm) {
-  if (length(nm) == 1L) {
-    m <- regexpr("\\d{4}-\\d{4}", nm)
-    if (m == -1L) return(NA_character_)
-    return(regmatches(nm, m))
-  }
-  # Vectorised path
-  m <- gregexpr("\\d{4}-\\d{4}", nm)
-  vapply(seq_along(nm), function(i) {
-    matches <- regmatches(nm[i], m[i])[[1]]
-    if (length(matches) == 0) NA_character_ else matches[1]
-  }, character(1))
+  m <- regexpr("\\d{4}-\\d{4}", nm)
+  out <- regmatches(nm, m)
+  out[m == -1L] <- NA_character_
+  out
 }
 
 # ---------------------------------------------------------------------------- #
@@ -108,50 +115,294 @@ format_elapsed <- function(secs) {
 #   ~loc_id            -- default used here; more conservative, common in
 #                         applied weather-econometrics literature
 #   ~region            -- most conservative; requires >30-50 clusters
-COEF_VCOV_SPEC <- ~loc_id
+COEF_VCOV_SPEC <- ~code + year + survname + loc_id
 
-#' Draw Coefficient Vectors from a Fitted Model
+#' Compute Cholesky Factor of Clustered VCV Matrix
 #'
-#' Generates \code{S} draws of the full coefficient vector for propagating
-#' parameter uncertainty into counterfactual simulations. The parametric
-#' (VCV) branch draws from the multivariate normal defined by the fitted
-#' coefficient vector and its variance-covariance matrix. Bootstrap branches
-#' are stubbed so call sites do not need to change when they are implemented.
+#' Returns the upper-triangular Cholesky factor of the variance-covariance
+#' matrix for the non-FE coefficients. Used to construct factor loadings
+#' F = X %*% t(L) for efficient uncertainty propagation.
 #'
-#' @param fit      A fitted \code{feols} model object.
-#' @param S        Integer. Number of draws. Default 500.
-#' @param method   Character. One of \code{"vcov"} (default),
-#'   \code{"bootstrap"}, \code{"wild_bootstrap"}. The latter two are
-#'   not yet implemented.
-#' @param vcov_spec Formula or character passed to \code{vcov(fit, vcov = ...)}.
-#'   Defaults to \code{COEF_VCOV_SPEC}.
-#' @param seed     Optional integer seed for reproducibility.
-#'
-#' @return An \code{S x K} numeric matrix with column names matching
-#'   \code{coef(fit)}.
-#'
+#' @param fit       A fitted fixest model object.
+#' @param vcov_spec Formula passed to `vcov(fit, vcov = ...)`.
+#'   Defaults to `COEF_VCOV_SPEC`.
+#' @return For `fixest`: a K x K upper-triangular matrix (Cholesky factor).
+#'   For `fixest_multi`: a list of such matrices, one per sub-model.
 #' @export
-draw_coefs <- function(fit,
-                       S         = 500,
-                       method    = c("vcov", "bootstrap", "wild_bootstrap"),
-                       vcov_spec = COEF_VCOV_SPEC,
-                       seed      = NULL) {
-  method <- match.arg(method)
-  if (!is.null(seed)) set.seed(seed)
-
-  if (method == "vcov") {
-    beta_hat <- coef(fit)
-    Sigma    <- vcov(fit, vcov = vcov_spec)
-    draws    <- MASS::mvrnorm(n = S, mu = beta_hat, Sigma = Sigma)
-    # Ensure matrix form even when S = 1
-    if (is.null(dim(draws))) {
-      draws <- matrix(draws, nrow = 1L, dimnames = list(NULL, names(beta_hat)))
-    }
-    return(draws)
+compute_chol_vcov <- function(fit, vcov_spec = COEF_VCOV_SPEC) {
+  # fixest_multi: iterate over sub-models and return a list of Cholesky factors
+  if (inherits(fit, "fixest_multi")) {
+    return(lapply(seq_along(fit), function(i) {
+      compute_chol_vcov(fit[[i]], vcov_spec = vcov_spec)
+    }))
   }
 
-  stop(sprintf("draw_coefs: method '%s' not yet implemented", method))
+  # Single fixest model: try the requested spec then fall back
+  fallbacks <- list(vcov_spec, ~loc_id, "HC1", "iid")
+  for (spec in fallbacks) {
+    v <- tryCatch(vcov(fit, vcov = spec), error = function(e) NULL)
+    if (is.null(v) || any(!is.finite(v))) next
+    L <- tryCatch(chol(v), error = function(e) NULL)
+    if (!is.null(L)) {
+      if (!identical(spec, vcov_spec))
+        message("[compute_chol_vcov] fell back to vcov spec: ",
+                if (is.character(spec)) spec else deparse(spec))
+      return(L)
+    }
+  }
+  stop("Could not compute a valid Cholesky factor for any vcov specification.")
 }
+
+
+#' Vectorised Column-wise Aggregation for MC Draws
+#'
+#' Computes one aggregate scalar per column (draw) of an N x S matrix.
+#' Avoids per-draw data.frame construction and function dispatch overhead.
+#'
+#' @param Y_mat N x S numeric matrix of outcome values (one draw per column).
+#' @param w     Numeric N-vector of survey weights, or NULL (equal weights).
+#' @param agg   Character aggregation method.
+#' @param pov_line Numeric poverty line or NULL.
+#' @return Numeric S-vector of aggregate values.
+#' @keywords internal
+.mc_aggregate_cols <- function(Y_mat, w, agg, pov_line = NULL) {
+
+  N <- nrow(Y_mat)
+  if (is.null(w)) {
+    w_norm <- rep(1 / N, N)
+  } else {
+    w_norm <- w / sum(w)
+  }
+
+  switch(agg,
+    "mean" = as.numeric(crossprod(w_norm, Y_mat)),
+    "sum"  =, "total" = {
+      w_abs <- if (is.null(w)) rep(1, N) else w
+      as.numeric(crossprod(w_abs, Y_mat))
+    },
+    "median" = {
+      apply(Y_mat, 2L, function(col) {
+        ord  <- order(col)
+        cumw <- cumsum(w_norm[ord])
+        col[ord][which(cumw >= 0.5)[1]]
+      })
+    },
+    "headcount_ratio" = {
+      poor <- Y_mat < pov_line
+      as.numeric(crossprod(w_norm, poor + 0L))
+    },
+    "gap" = {
+      shortfall <- pmax(pov_line - Y_mat, 0) / pov_line
+      as.numeric(crossprod(w_norm, shortfall))
+    },
+    "fgt2" = {
+      shortfall <- (pmax(pov_line - Y_mat, 0) / pov_line)^2
+      as.numeric(crossprod(w_norm, shortfall))
+    },
+    "gini" = {
+      apply(Y_mat, 2L, function(col) {
+        ord    <- order(col)
+        x_s    <- col[ord]
+        w_s    <- w_norm[ord]
+        lorenz <- cumsum(w_s * x_s) / sum(w_s * x_s)
+        lorenz <- c(0, lorenz)
+        cx     <- c(0, cumsum(w_s))
+        B      <- sum(diff(cx) * (lorenz[-length(lorenz)] + lorenz[-1]) / 2)
+        1 - 2 * B
+      })
+    },
+    "prosperity_gap" = {
+      pg <- pmax(28 / Y_mat, 1)
+      as.numeric(crossprod(w_norm, pg))
+    },
+    "avg_poverty" = {
+      apply(Y_mat, 2L, function(col) {
+        ok <- is.finite(col) & col > 0
+        if (!any(ok)) return(NA_real_)
+        sum(w_norm[ok] * (1 / col[ok])) / sum(w_norm[ok])
+      })
+    },
+    # Fallback
+    apply(Y_mat, 2L, function(col) {
+      sum(col * w_norm, na.rm = TRUE)
+    })
+  )
+}
+
+
+#' Aggregate Predictions with Coefficient Uncertainty
+#'
+#' Computes an aggregate welfare statistic (mean, headcount, etc.) with
+#' optional confidence bands from coefficient uncertainty via Cholesky
+#' factor loadings. For linear aggregates on non-log outcomes, uses an
+#' exact analytic formula. For non-linear aggregates or log-transformed
+#' outcomes, uses S draws of a K-dimensional z-vector.
+#'
+#' @param y_point   Numeric N-vector of point-estimate fitted values
+#'   (log-scale if outcome is log-transformed).
+#' @param F_loading Numeric N x K matrix of factor loadings, or NULL
+#'   (no uncertainty).
+#' @param group_vec Factor or character N-vector defining groups
+#'   (typically sim_year).
+#' @param so        Selected-outcome list with `$name`, `$type`, `$transform`.
+#' @param agg_method Character: aggregation method name (e.g., "mean",
+#'   "headcount_ratio").
+#' @param weights   Numeric N-vector of survey weights, or NULL.
+#' @param pov_line  Numeric poverty line, or NULL.
+#' @param train_resid Numeric vector of training residuals, or NULL.
+#' @param residual_method Character: "none", "original", "normal", or
+#'   "resample".
+#' @param id_vec    Character/integer N-vector of household IDs for
+#'   "original" residual matching, or NULL.
+#' @param S         Integer number of Monte Carlo draws. Default 200.
+#' @param seed      Optional integer seed for reproducibility.
+#'
+#' @return A tibble with columns: `sim_year`, `value`, and optionally
+#'   `value_p05`, `value_p50`, `value_p95`.
+#' @export
+aggregate_with_uncertainty <- function(
+    y_point, F_loading, group_vec,
+    so, agg_method, weights = NULL,
+    pov_line = NULL,
+    train_resid = NULL, residual_method = "none",
+    id_vec = NULL,
+    S = 200L, seed = NULL) {
+
+  N <- length(y_point)
+  K <- if (!is.null(F_loading)) ncol(F_loading) else 0L
+  is_log <- isTRUE(so$transform == "log")
+
+  # Determine if analytic path is possible
+  is_linear_agg <- agg_method %in% c("mean", "sum", "total")
+  use_analytic <- is_linear_agg && !is_log
+
+  groups <- unique(group_vec)
+  results <- vector("list", length(groups))
+
+  for (gi in seq_along(groups)) {
+    g <- groups[gi]
+    idx <- which(group_vec == g)
+    y_g <- y_point[idx]
+    w_g <- if (!is.null(weights)) weights[idx] else NULL
+    F_g <- if (!is.null(F_loading)) F_loading[idx, , drop = FALSE] else NULL
+
+    # Residuals (shared across z-draws)
+    resid_g <- rep(0, length(idx))
+    if (!identical(residual_method, "none") && !is.null(train_resid)) {
+      n_g <- length(idx)
+      resid_g <- switch(residual_method,
+        "original" = rep(0, n_g),
+        "normal"   = stats::rnorm(n_g, 0, stats::sd(train_resid, na.rm = TRUE)),
+        "resample" = sample(train_resid, n_g, replace = TRUE),
+        rep(0, n_g)
+      )
+    }
+
+    # Helper: compute aggregate from a y-vector
+    compute_agg <- function(y_vec) {
+      tmp_df <- data.frame(sim_year = g, outcome_col = y_vec)
+      if (!is.null(w_g)) tmp_df$wt <- w_g
+      aggregate_outcome(
+        df        = tmp_df,
+        outcome   = "outcome_col",
+        group     = "sim_year",
+        type      = if (identical(so$type, "logical")) "binary" else "continuous",
+        aggregate = agg_method,
+        pov_line  = pov_line,
+        weights   = if (!is.null(w_g)) "wt" else NULL
+      )$value
+    }
+
+    # Point estimate
+    y_pt <- y_g + resid_g
+    if (is_log) y_pt <- exp(y_pt)
+    val_pt <- compute_agg(y_pt)
+
+    if (is.null(F_g)) {
+      # No uncertainty
+      results[[gi]] <- tibble::tibble(sim_year = g, value = val_pt)
+    } else if (use_analytic) {
+      # Analytic path for linear aggregates on non-log outcomes
+      w_norm <- if (!is.null(w_g)) w_g / sum(w_g) else rep(1 / length(idx), length(idx))
+      if (agg_method %in% c("sum", "total")) w_norm <- if (!is.null(w_g)) w_g else rep(1, length(idx))
+      f_bar <- as.numeric(crossprod(w_norm, F_g))  # K-vector
+      se <- sqrt(sum(f_bar^2))
+      results[[gi]] <- tibble::tibble(
+        sim_year  = g,
+        value     = val_pt,
+        value_p05 = val_pt + stats::qnorm(0.05) * se,
+        value_p50 = val_pt,
+        value_p95 = val_pt + stats::qnorm(0.95) * se
+      )
+    } else {
+      # Monte Carlo path — vectorised over S draws
+      if (!is.null(seed)) set.seed(seed + gi)
+      Z <- matrix(stats::rnorm(S * K), nrow = S, ncol = K)
+
+      # N x S matrix: each column is one draw's y-vector
+      # F_g is N x K, Z is S x K, so F_g %*% t(Z) is N x S
+      Y_mat <- F_g %*% t(Z)  # N x S perturbations
+      Y_mat <- Y_mat + (y_g + resid_g)  # add point estimate (recycled)
+      if (is_log) Y_mat <- exp(Y_mat)
+
+      # Vectorised aggregation over columns of Y_mat
+      scalars <- .mc_aggregate_cols(Y_mat, w_g, agg_method, pov_line)
+
+      qs <- stats::quantile(scalars, c(0.05, 0.50, 0.95), na.rm = TRUE)
+      results[[gi]] <- tibble::tibble(
+        sim_year  = g,
+        value     = qs[[2]],
+        value_p05 = qs[[1]],
+        value_p50 = qs[[2]],
+        value_p95 = qs[[3]]
+      )
+    }
+  }
+
+  dplyr::bind_rows(results)
+}
+
+
+#' Combine Per-Model Aggregation Results
+#'
+#' Given M tibbles (one per GCM/ensemble model), each with per-year
+#' aggregate values and optional coefficient-uncertainty bands, produce
+#' a single tibble with multi-model median as central value and both
+#' parameter uncertainty and model spread bands.
+#'
+#' @param per_model_aggs List of M tibbles, each from
+#'   `aggregate_with_uncertainty()`.
+#' @return A tibble with columns: `sim_year`, `value`, `value_p05`,
+#'   `value_p95`, `model_values`.
+#' @export
+combine_ensemble_results <- function(per_model_aggs) {
+  tagged <- lapply(seq_along(per_model_aggs), function(m) {
+    df <- per_model_aggs[[m]]
+    df$model_idx <- m
+    df
+  })
+  stacked <- dplyr::bind_rows(tagged)
+
+  has_bands <- "value_p05" %in% names(stacked)
+
+  # Capture raw per-model values BEFORE summarising — must be a separate step
+  # so list() captures the M raw values per year, not the post-median scalar.
+  model_vals_tbl <- stacked |>
+    dplyr::group_by(.data$sim_year) |>
+    dplyr::summarise(model_values = list(.data$value), .groups = "drop")
+
+  summary_tbl <- stacked |>
+    dplyr::group_by(.data$sim_year) |>
+    dplyr::summarise(
+      value     = stats::median(.data$value,     na.rm = TRUE),
+      value_p05 = if (has_bands) mean(.data$value_p05, na.rm = TRUE) else NA_real_,
+      value_p95 = if (has_bands) mean(.data$value_p95, na.rm = TRUE) else NA_real_,
+      .groups   = "drop"
+    )
+
+  dplyr::left_join(summary_tbl, model_vals_tbl, by = "sim_year")
+}
+
 
 # ---------------------------------------------------------------------------- #
 # Shared UI helper                                                             #
@@ -209,14 +460,8 @@ resolve_id_col <- function(a, b) {
 
 #' Run the Full Simulation Pipeline for One Scenario Row
 #'
-#' Combines the three steps that are identical between historical and future
-#' simulation:
-#' \enumerate{
-#'   \item Join raw weather output back to survey covariates via
-#'     `prepare_hist_weather()`.
-#'   \item Generate outcome predictions via `predict_outcome()`.
-#'   \item Back-transform log-scale outcomes via `apply_log_backtransform()`.
-#' }
+#' Joins raw weather to survey covariates, generates point-estimate predictions,
+#' and computes factor loadings for coefficient uncertainty propagation.
 #'
 #' @param weather_raw  Data frame returned by `get_weather()$result`.
 #' @param svy          Survey-weather data frame (from `survey_weather()`).
@@ -226,156 +471,268 @@ resolve_id_col <- function(a, b) {
 #' @param residuals    Character. Residual method, e.g. `"original"`.
 #' @param train_data   Data frame used at fit time (`mf$train_data`).
 #' @param engine       Character. Model engine, e.g. `"fixest"`.
-#' @param slim         Logical. When `TRUE`, trim `preds` to only the columns
-#'   required by downstream aggregation and diagnostics (`sim_year`, outcome,
-#'   `.fitted`, `.residual`, and any `weight` column) and trim `weather_raw`
-#'   to location/time keys and weather variable columns.  Dramatically reduces
-#'   memory when processing many ensemble models.  Default `FALSE`.
+#' @param chol_Sigma   K x K upper-triangular Cholesky factor from
+#'   `compute_chol_vcov()`, or NULL for point estimates only.
+#' @param fit_multi    For RIF engine: list of quantile fits.
+#' @param taus         For RIF engine: quantile grid.
+#' @param weather_cols For RIF engine: weather column names.
 #'
-#' @return A named list with three elements:
-#'   \describe{
-#'     \item{preds}{Data frame of individual-level predictions with the outcome
-#'       column back-transformed where applicable, or \code{NULL} on failure.
-#'       When \code{slim = TRUE}, only essential columns are retained.}
-#'     \item{n_pre_join}{Integer. Number of rows in \code{svy} before the
-#'       weather join. Used by the Diagnostics tab to compute the drop rate.}
-#'     \item{weather_raw}{The raw weather data frame passed in as
-#'       \code{weather_raw}. Stored so the Diagnostics tab can construct the
-#'       full historical weather distribution without a second DB query.
-#'       When \code{slim = TRUE}, only key + weather columns are kept.}
-#'   }
+#' @return A named list with elements: `y_point` (N-vector), `F_loading`
+#'   (N x K matrix or NULL), `sim_year` (N-vector), `weight` (N-vector or
+#'   NULL), `id_vec` (N-vector or NULL), `n_pre_join` (integer),
+#'   `weather_raw` (data frame), `preds` (full prediction data frame for
+#'   historical diagnostics).
 #'
 #' @export
 run_sim_pipeline <- function(weather_raw, svy, sw, so,
                              model, residuals, train_data, engine,
-                             coef_draws = NULL,
-                             slim = FALSE) {
-  n_pre_join    <- nrow(svy)
+                             chol_Sigma = NULL,
+                             slim = FALSE,
+                             fit_multi = NULL, taus = NULL,
+                             weather_cols = NULL,
+                             precomputed_train_resid = NULL,
+                             svy_baseline = NULL,
+                             rif_grid = NULL) {
+  n_pre_join <- nrow(svy)
+
+  # Tag svy with row IDs for RIF delta-method lookups
+  is_rif <- identical(engine, "rif") && !is.null(fit_multi)
+  if (is_rif) {
+    svy$.svy_row_id <- seq_len(nrow(svy))
+  }
+
   survey_wd_sim <- prepare_hist_weather(weather_raw, svy, sw, so$name)
   id_col        <- if (residuals == "original") resolve_id_col(train_data, survey_wd_sim) else NULL
 
-  # If coef_draws supplied, loop over S draws; otherwise single point-estimate run.
-  # draw_id is NA for the point-estimate path (coef_draws = NULL).
-  run_one_draw <- function(beta_s = NULL) {
-    predict_outcome(
-      model         = model,
-      newdata       = survey_wd_sim,
-      residuals     = residuals,
-      outcome       = so$name,
-      id            = id_col,
-      train_data    = train_data,
-      engine        = engine,
-      beta_override = beta_s
+  # RIF dispatch
+  if (is_rif) {
+    preds <- tryCatch(
+      predict_rif(
+        fit_multi    = fit_multi,
+        newdata      = survey_wd_sim,
+        svy          = svy,
+        train_data   = train_data,
+        taus         = taus,
+        outcome      = so$name,
+        weather_cols = weather_cols,
+        so           = so,
+        chol_list    = if (is.list(chol_Sigma)) chol_Sigma else NULL
+      ),
+      error = function(e) {
+        warning("[run_sim_pipeline] predict_rif() failed: ", conditionMessage(e))
+        NULL
+      }
     )
-  }
+    if (is.null(preds)) return(NULL)
+    F_loading_rif <- attr(preds, "F_loading")
 
-  preds <- tryCatch({
-    if (is.null(coef_draws)) {
-      # Point-estimate path — existing behaviour, draw_id = NA
-      out <- run_one_draw(NULL)
-      if (!is.null(out)) out$draw_id <- NA_integer_
-      out
-    } else {
-      # Coefficient-draw path: iterate over S rows of coef_draws matrix.
-      # Order of operations:
-      #   1. predict_outcome() with beta_override -> fitted values for this draw
-      #   2. rbind across all S draws, tagging each with draw_id
-      # Residual noise (if requested) is applied independently inside each
-      # predict_outcome() call, preserving the existing residual logic.
-      # ------------------------------------------------------------------
-      # Vectorised path (linear fixest OLS only):
-      # Build X_nonFE and preds_base ONCE, then compute all S predictions
-      # as a single matrix multiply. 30-50x faster than sequential loop.
-      # Falls back to sequential loop for non-fixest, logistic, quantile.
-      # ------------------------------------------------------------------
-      is_vectorisable <- identical(engine, "fixest") &&
-                         !isTRUE(attr(model, "is_logistic")) &&
-                         inherits(model, "fixest")
-
-      if (is_vectorisable) {
-        message(sprintf(
-          "[wiseapp]   Vectorised: %d draws via matrix multiply (linear OLS)",
-          nrow(coef_draws)
-        ))
-        t_vec_start <- proc.time()[["elapsed"]]
-        result <- predict_outcome_vectorised(
-          model      = model,
-          newdata    = survey_wd_sim,
-          coef_draws = coef_draws,
-          residuals  = residuals,
-          outcome    = so$name,
-          id         = id_col,
-          train_data = train_data,
-          engine     = engine
-        )
-        message(sprintf(
-          "[wiseapp]   Vectorised complete in %.1fs | %d draws x %d rows",
-          proc.time()[["elapsed"]] - t_vec_start,
-          nrow(coef_draws),
-          if (!is.null(result)) nrow(result) %/% nrow(coef_draws) else 0L
-        ))
-        result
-      } else {
-        # Sequential fallback — bootstrap, quantile, logistic, non-fixest
-        S            <- nrow(coef_draws)
-        draw_list    <- vector("list", S)
-        t_loop_start <- proc.time()[["elapsed"]]
-        for (s in seq_len(S)) {
-          beta_s         <- coef_draws[s, ]
-          draw_out       <- run_one_draw(beta_s)
-          if (!is.null(draw_out)) draw_out$draw_id <- s
-          draw_list[[s]] <- draw_out
-          if (s == 1L) {
-            t_first <- proc.time()[["elapsed"]] - t_loop_start
-            message(sprintf(
-              "[wiseapp]   Draw 1/%d done in %.1fs | projecting ~%s for this key",
-              S, t_first, format_elapsed(t_first * S)
-            ))
-          }
-          if (s %% 10L == 0L || s == S) {
-            t_so_far <- proc.time()[["elapsed"]] - t_loop_start
-            message(sprintf(
-              "[wiseapp]   Draw %d/%d | %.0fs elapsed | ~%.0fs remaining",
-              s, S, t_so_far, max(0, (t_so_far / s) * (S - s))
-            ))
-          }
-        }
-        do.call(rbind, draw_list)
+    # --- Policy correction (Option A): add main + repositioning effects ---
+    # predict_rif only captures the weather delta; policy covariate shifts
+    # (main effect) and the resulting CDF repositioning are missing.
+    if (!is.null(svy_baseline) && !is.null(rif_grid)) {
+      policy_correction <- .compute_rif_policy_correction(
+        svy_baseline = svy_baseline,
+        svy_policy   = svy,
+        preds        = preds,
+        train_data   = train_data,
+        taus         = taus,
+        rif_grid     = rif_grid,
+        weather_cols = weather_cols,
+        outcome      = so$name,
+        so           = so
+      )
+      if (!is.null(policy_correction)) {
+        preds[[so$name]] <- preds[[so$name]] + policy_correction
+        preds$.fitted    <- preds$.fitted + policy_correction
       }
     }
-  }, error = function(e) {
-    warning("[run_sim_pipeline] predict_outcome() failed: ", conditionMessage(e))
-    NULL
-  })
-  rm(survey_wd_sim)
 
-  if (is.null(preds)) return(NULL)
-  preds <- apply_log_backtransform(preds, so)
-
-  if (slim) {
-    # Keep only columns needed by aggregate_sim_preds():
-    # sim_year, year, outcome, .fitted, .residual, draw_id (coefficient
-    # uncertainty bands), and any weight column for aggregation.
-    # NOTE: weight column may have any of several names depending on survey —
-    # grep all known variants rather than checking only "weight".
-    # draw_id must be retained here or the two-stage aggregation in
-    # aggregate_sim_preds() cannot separate coefficient draws.
-    keep    <- c("sim_year", "year", so$name, ".fitted", ".residual", "draw_id")
+    preds <- apply_log_backtransform(preds, so)
+    # SP transfer
+    if ("._sp_transfer" %in% names(preds)) {
+      preds[[so$name]] <- preds[[so$name]] + preds[["._sp_transfer"]]
+    }
+    # RIF returns old-style preds (no factor loading)
     wt_cols <- grep("^weight$|^hhweight$|^wgt$|^pw$", names(preds),
                     value = TRUE, ignore.case = TRUE)
-    keep    <- c(keep, wt_cols)
-    preds   <- preds[, intersect(keep, names(preds)), drop = FALSE]
-
-    # Keep only key + weather columns from weather_raw for diagnostics.
-    weather_keep <- c("code", "year", "survname", "loc_id", "timestamp", sw$name)
-    weather_raw  <- weather_raw[, intersect(weather_keep, names(weather_raw)), drop = FALSE]
+    wt_col <- if (length(wt_cols) > 0) wt_cols[1] else NULL
+    return(list(
+      y_point     = preds$.fitted,
+      F_loading   = F_loading_rif,
+      sim_year    = preds$sim_year,
+      weight      = if (!is.null(wt_col)) preds[[wt_col]] else NULL,
+      id_vec      = if (!is.null(id_col)) preds[[id_col]] else NULL,
+      n_pre_join  = n_pre_join,
+      weather_raw = weather_raw,
+      preds       = preds
+    ))
   }
 
-  list(
-    preds       = preds,
-    n_pre_join  = n_pre_join,
-    weather_raw = weather_raw
+  # Standard (fixest/ranger/glmnet) path: single point-estimate prediction
+
+  preds <- tryCatch(
+    predict_outcome(
+      model      = model,
+      newdata    = survey_wd_sim,
+      residuals  = residuals,
+      outcome    = so$name,
+      id         = id_col,
+      train_data = train_data,
+      engine     = engine,
+      precomputed_train_resid = precomputed_train_resid
+    ),
+    error = function(e) {
+      warning("[run_sim_pipeline] predict_outcome() failed: ", conditionMessage(e))
+      NULL
+    }
   )
+
+  if (is.null(preds)) { rm(survey_wd_sim); return(NULL) }
+
+  # Extract y_point BEFORE back-transforming. aggregate_with_uncertainty()
+  # receives log-scale values when so$transform == "log" and applies exp()
+  # internally (including on Monte Carlo draws). Extracting after
+  # apply_log_backtransform() would cause double-exponentiation and produce
+  # wildly inflated simulation results.
+  y_point <- preds[[so$name]]
+
+  # Back-transform log outcomes (for preds_out diagnostics only)
+  preds <- apply_log_backtransform(preds, so)
+
+  # SP direct transfer (applied on original scale, after back-transform)
+  if ("._sp_transfer" %in% names(preds)) {
+    preds[[so$name]] <- preds[[so$name]] + preds[["._sp_transfer"]]
+    # Re-synchronise y_point: keep in log scale so aggregate_with_uncertainty
+    # still receives log-scale inputs and applies exp() exactly once.
+    y_point <- if (isTRUE(so$transform == "log"))
+      log(pmax(preds[[so$name]], .Machine$double.eps))
+    else
+      preds[[so$name]]
+  }
+
+  sim_year <- preds$sim_year
+  wt_cols  <- grep("^weight$|^hhweight$|^wgt$|^pw$", names(preds),
+                   value = TRUE, ignore.case = TRUE)
+  wt_col   <- if (length(wt_cols) > 0) wt_cols[1] else NULL
+  weight   <- if (!is.null(wt_col)) preds[[wt_col]] else NULL
+  id_vec   <- if (!is.null(id_col)) preds[[id_col]] else NULL
+
+  # Compute factor loadings for uncertainty propagation
+  F_loading <- NULL
+  if (!is.null(chol_Sigma) && identical(engine, "fixest") && inherits(model, "fixest")) {
+    tryCatch({
+      X_nonFE <- stats::model.matrix(model, data = survey_wd_sim, type = "rhs")
+      # fixest may drop rows with unobserved FE levels; align to predicted rows
+      if (nrow(X_nonFE) == length(y_point)) {
+        F_loading <- X_nonFE %*% t(chol_Sigma)
+      } else {
+        warning("[run_sim_pipeline] model.matrix row mismatch, skipping F_loading")
+      }
+    }, error = function(e) {
+      warning("[run_sim_pipeline] F_loading computation failed: ", conditionMessage(e))
+    })
+  }
+
+  rm(survey_wd_sim)
+
+  # For slim mode (future keys), don't keep full preds
+  preds_out <- if (slim) NULL else preds
+
+  list(
+    y_point     = y_point,
+    F_loading   = F_loading,
+    sim_year    = sim_year,
+    weight      = weight,
+    id_vec      = id_vec,
+    n_pre_join  = n_pre_join,
+    weather_raw = weather_raw,
+    preds       = preds_out
+  )
+}
+
+# ---------------------------------------------------------------------------- #
+# RIF Policy Correction Helper (Option A)                                      #
+# Delegates to .compute_rif_channels() in fct_policy_decompose.R for          #
+# numerical consistency between simulation and decomposition display.          #
+# ---------------------------------------------------------------------------- #
+
+#' Compute the main effect + repositioning correction for RIF policy sims
+#'
+#' predict_rif() only captures weather deltas (scenario - baseline weather).
+#' When covariates differ between svy_baseline and svy_policy (e.g. binary
+#' infrastructure flips), the covariate main effects are lost.
+#' This function delegates to .compute_rif_channels() (single source of truth)
+#' and returns only the channels NOT already captured by predict_rif:
+#'   - delta_main_covar (beta_x * delta_x, excludes SP which is post-hoc)
+#'   - delta_res1 (repositioning from tau shift)
+#'
+#' Interaction (delta_res2) is NOT added because predict_rif already evaluates
+#' at policy covariates, so weather×policy interactions activate via the
+#' weather delta.
+#'
+#' @param svy_baseline Original survey data (pre-policy).
+#' @param svy_policy Policy-modified survey data (passed as svy to predict_rif).
+#' @param preds Prediction output from predict_rif (in log/model scale).
+#' @param train_data Training data for ecdf.
+#' @param taus Quantile grid.
+#' @param rif_grid RIF coefficient grid (from build_rif_grid).
+#' @param weather_cols Weather variable names.
+#' @param outcome Outcome column name.
+#' @param so Selected outcome metadata.
+#' @return Numeric vector of length nrow(preds), or NULL.
+#' @keywords internal
+.compute_rif_policy_correction <- function(svy_baseline, svy_policy, preds,
+                                           train_data, taus, rif_grid,
+                                           weather_cols, outcome, so) {
+  n <- nrow(preds)
+  is_log <- isTRUE(so$transform == "log")
+
+  # Compute covariate deltas using shared helper
+  deltas <- .compute_policy_deltas(svy_baseline, svy_policy, outcome, weather_cols)
+
+  # If no covariate changes, nothing to correct.
+  # SP transfer is handled separately in run_sim_pipeline (post-backtransform).
+  if (length(deltas) == 0) return(NULL)
+
+  # SP transfer (needed for tau shift calculation, not for direct addition)
+  sp_transfer <- if ("._sp_transfer" %in% names(svy_policy)) {
+    svy_policy[["._sp_transfer"]]
+  } else {
+    rep(0, n)
+  }
+
+  # Hazard values from baseline survey weather columns
+  hazard_values <- lapply(weather_cols, function(wv) {
+    if (wv %in% names(svy_baseline)) {
+      vals <- svy_baseline[[wv]]
+      if (is.factor(vals) || is.character(vals)) return(rep(1, n))
+      if (!is.numeric(vals)) return(rep(0, n))
+      vals
+    } else {
+      rep(0, n)
+    }
+  })
+  names(hazard_values) <- weather_cols
+
+  # Delegate to shared channel computation (single source of truth)
+  channels <- .compute_rif_channels(
+    svy_baseline  = svy_baseline,
+    deltas        = deltas,
+    sp_transfer   = sp_transfer,
+    hazard_values = hazard_values,
+    weather_vars  = weather_cols,
+    rif_grid      = rif_grid,
+    taus          = taus,
+    train_data    = train_data,
+    outcome       = outcome,
+    is_log        = is_log
+  )
+  if (is.null(channels)) return(NULL)
+
+  # Return only main_covar + repositioning.
+  # SP is applied post-backtransform in run_sim_pipeline.
+  # Interaction is already captured in predict_rif weather delta.
+  channels$delta_main_covar + channels$delta_res1
 }
 
 # ---------------------------------------------------------------------------- #

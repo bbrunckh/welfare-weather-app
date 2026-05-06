@@ -53,20 +53,21 @@ mod_2_03_diagnostics_ui <- function(id) {
 
     # ---- 2. Uncertainty decomposition chart ----------------------------------
     shiny::wellPanel(
-      shiny::h4("Decomposed uncertainty: annual variability vs. model spread"),
-      shiny::plotOutput(ns("uncertainty_decomp_plot"), height = "750px"),
+      shiny::h4("Decomposed uncertainty: weather variability vs. model spread vs. coefficient uncertainty"),
+      shiny::plotOutput(ns("uncertainty_decomp_plot"), height = "450px"),
       shiny::tags$p(
         style = "font-size:11px; color:#666; margin-top:6px;",
-        shiny::tags$b("Annual variability:"),
-        " CI from model-averaged annual outcomes \u2014 captures weather-driven year-to-year variation.",
+        "Each bar shows \u00b11 SD of welfare outcomes attributable to each source,",
+        " centred on the scenario mean. Dashed line = historical mean.",
         shiny::tags$br(),
-        shiny::tags$b("Model uncertainty:"),
-        " CI from year-averaged per-model outcomes \u2014 captures disagreement across CMIP6 ensemble members.",
+        shiny::tags$b("Weather variability (blue):"),
+        " SD across simulation years, averaged over climate models \u2014 year-to-year weather noise.",
         shiny::tags$br(),
-        shiny::tags$b("Combined:"),
-        " both sources pooled.",
+        shiny::tags$b("Climate model spread (orange):"),
+        " SD across CMIP6 ensemble members, averaged over years \u2014 structural model disagreement.",
         shiny::tags$br(),
-        "Aggregation: mean. Dashed line = historical mean."
+        shiny::tags$b("Coefficient uncertainty (green):"),
+        " mean 1-SD equivalent of the regression coefficient 90% CI (requires coefficient uncertainty enabled)."
       )
     ),
 
@@ -236,23 +237,45 @@ mod_2_03_diagnostics_server <- function(id,
     # Fixed at mean / no deviation — appropriate for a diagnostic view.
     agg_hist_diag <- reactive({
       req(hist_sim())
-      aggregate_sim_preds(hist_sim()$preds, hist_sim()$so,
-                          "mean", "none", FALSE, NULL, weight_col_diag())
+      h <- hist_sim()
+      aggregate_with_uncertainty(
+        y_point         = h$y_point,
+        F_loading       = h$F_loading,
+        group_vec       = h$sim_year,
+        so              = h$so,
+        agg_method      = "mean",
+        weights         = h$weight,
+        pov_line        = NULL,
+        train_resid     = if (!is.null(h$train_data)) h$train_data$.resid else NULL,
+        residual_method = h$residuals %||% "none",
+        id_vec          = h$id_vec,
+        S               = as.integer(h$S %||% 200L)
+      ) |> (\(agg) list(out = agg, x_label = "Mean welfare"))()
     })
 
     agg_scenarios_diag <- reactive({
       sc <- if (!is.null(saved_scenarios)) saved_scenarios() else list()
       if (length(sc) == 0) return(list())
+      h <- hist_sim()
       lapply(sc, function(s) {
         tryCatch({
-          if (!is.null(s$agg)) {
-            # New schema: filter pre-aggregated summary by method = "mean"
-            out <- dplyr::filter(s$agg, .data$agg_method == "mean")
-            list(out = out, x_label = "Mean welfare")
-          } else if (!is.null(s$preds)) {
-            # Legacy fallback
-            aggregate_sim_preds(s$preds, s$so, "mean", "none", FALSE, NULL, weight_col_diag())
-          } else NULL
+          per_model <- lapply(s$models, function(mod) {
+            aggregate_with_uncertainty(
+              y_point         = mod$y_point,
+              F_loading       = mod$F_loading,
+              group_vec       = mod$sim_year,
+              so              = s$so,
+              agg_method      = "mean",
+              weights         = mod$weight,
+              pov_line        = NULL,
+              train_resid     = if (!is.null(h$train_data)) h$train_data$.resid else NULL,
+              residual_method = h$residuals %||% "none",
+              id_vec          = mod$id_vec,
+              S               = as.integer(h$S %||% 200L)
+            )
+          })
+          combined <- combine_ensemble_results(per_model)
+          list(out = combined, x_label = "Mean welfare")
         }, error = function(e) NULL)
       })
     })
@@ -332,15 +355,13 @@ mod_2_03_diagnostics_server <- function(id,
 
     output$uncertainty_decomp_plot <- renderPlot({
       req(agg_hist_diag())
-      all_series_diag <- c(
-        list(Historical = agg_hist_diag()),
-        Filter(Negate(is.null), agg_scenarios_diag())
-      )
+      sc_agg <- agg_scenarios_diag()
       plot_uncertainty_decomposition(
-        scenarios = all_series_diag,
-        hist_agg  = agg_hist_diag()
+        scenarios   = sc_agg,
+        hist_agg    = agg_hist_diag(),
+        group_order = input$diag_ridge_primary_group %||% "scenario_x_year"
       )
-    }, height = 750)
+    }, height = 450)
     outputOptions(output, "uncertainty_decomp_plot", suspendWhenHidden = FALSE)
 
     output$diag_weather_log_ui <- shiny::renderUI({

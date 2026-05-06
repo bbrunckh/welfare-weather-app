@@ -37,6 +37,7 @@ mod_3_02_infra_ui <- function(id) {
 #' @noRd
 mod_3_02_infra_server <- function(id,
                                   selected_model = reactive(NULL),
+                                  survey_data = reactive(NULL),
                                   variable_list  = reactive(NULL)) {
   moduleServer(id, function(input, output, session) {
     ns <- session$ns
@@ -88,13 +89,26 @@ mod_3_02_infra_server <- function(id,
     infra_patterns <- c("electricity", "imp_wat_rec", "imp_san_rec", "ttime_health")
 
     any_selected <- reactive({
-      any(vapply(infra_patterns, function(p) {
-        any(grepl(p, coeffs(), ignore.case = TRUE))
-      }, logical(1)))
+      any(tolower(infra_patterns) %in% tolower(coeffs()))
+    })
+
+    # Infrastructure variables available in the selected survey
+    infra_vars_available <- reactive({
+      svy <- survey_data()
+      if (is.null(svy)) return(character(0))
+      # Check which infrastructure variables are actually in the selected survey
+      intersect(infra_patterns, names(svy))
     })
 
     output$placeholder_ui <- renderUI({
       if (isTRUE(any_selected())) return(NULL)
+      # Only show placeholder if there are infrastructure variables in the survey
+      if (length(infra_vars_available()) == 0) {
+        return(div(
+          class = "alert alert-warning",
+          "No infrastructure variables found in the selected survey (or level of analysis)."
+        ))
+      }
       cand <- policy_candidate_info(variable_list(), infra_patterns)
       policy_placeholder_tag("infrastructure", cand)
     })
@@ -222,12 +236,12 @@ mod_3_02_infra_server <- function(id,
       infra_scenario = reactive({
         list(
           # Electricity: TRUE = set all to 1, FALSE = increase by pct
-          elec_universal        = isTRUE(input$elec_universal),
-          elec_access_change_pct = if (isTRUE(input$elec_universal)) 100L
-                                   else input$elec_pct %||% 0L,
+          elec_universal          = isTRUE(input$elec_universal),
+          elec_access_change_pct  = if (isTRUE(input$elec_universal)) 100L
+                                    else input$elec_pct %||% 0L,
 
           # Water
-          water_universal        = isTRUE(input$water_universal),
+          water_universal         = isTRUE(input$water_universal),
           water_access_change_pct = if (isTRUE(input$water_universal)) 100L
                                     else input$water_pct %||% 0L,
 
@@ -241,8 +255,7 @@ mod_3_02_infra_server <- function(id,
           health_travel_pct  = input$health_travel_pct  %||% 0L,
           health_travel_max  = input$health_travel_max  %||% 60L
         )
-      }),
-      hist_sim = reactive(NULL)
+      })
     )
   })
 }
