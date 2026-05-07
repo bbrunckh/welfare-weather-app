@@ -189,6 +189,10 @@ mod_1_02_surveystats_server <- function(
         output$firm_stats    <- make_stats_dt(survey_data, variable_list, "firm")
         output$area_stats    <- make_stats_dt(survey_data, variable_list, "area")
 
+        policy_vars <- unique(unlist(lapply(POLICY_DEFINITIONS, `[[`, "vars")))
+        output$policy_stats  <- make_stats_dt(survey_data, variable_list,
+                                              vars = policy_vars)
+
         output$selected_surveys <- DT::renderDT({
           req(selected_surveys())
           selected_surveys() |> dplyr::select(-dplyr::any_of(c("fname", "fpath")))
@@ -228,6 +232,7 @@ mod_1_02_surveystats_server <- function(
                             leaflet::leafletOutput(ns("map"), height = "300px"))
               ),
               h4("Outcome stats"),              DT::DTOutput(ns("outcome_stats")),
+              h4("Policy variables"),           DT::DTOutput(ns("policy_stats")),
               h4("Individual characteristics"), DT::DTOutput(ns("ind_stats")),
               h4("Household characteristics"),  DT::DTOutput(ns("hh_stats")),
               h4("Firm characteristics"),       DT::DTOutput(ns("firm_stats")),

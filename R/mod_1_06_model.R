@@ -119,7 +119,6 @@ mod_1_06_model_server <- function(id,
 
     output$policy_ui <- renderUI({
       req(input$model_type)
-      # if (!isTRUE(policy_open())) return(NULL)
 
       vl <- valid_vl()
       choices <- get_policy_choices()
