@@ -16,6 +16,9 @@ mod_3_02_infra_ui <- function(id) {
     uiOutput(ns("elec_ui")),
     uiOutput(ns("water_ui")),
     uiOutput(ns("sanitation_ui")),
+    uiOutput(ns("piped_ui")),
+    uiOutput(ns("piped_to_prem_ui")),
+    uiOutput(ns("imp_wat_san_ui")),
     uiOutput(ns("health_ui"))
   )
 }
@@ -86,7 +89,7 @@ mod_3_02_infra_server <- function(id,
     })
 
     # ---- Candidate variables for this category --------------------------
-    infra_patterns <- c("electricity", "imp_wat_rec", "imp_san_rec", "ttime_health")
+    infra_patterns <- c("electricity", "imp_wat_rec", "imp_san_rec", "ttime_health", "piped", "piped_to_prem", "imp_wat_san_rec")
 
     any_selected <- reactive({
       any(tolower(infra_patterns) %in% tolower(coeffs()))
@@ -178,6 +181,39 @@ mod_3_02_infra_server <- function(id,
       infra_access_ui("sanitation", "Access to improved sanitation", "fa-toilet")
     })
 
+    # ---- Piped water access ---------------------------------------------
+
+    show_piped <- reactive({
+      any(grepl("piped", coeffs(), ignore.case = TRUE))
+    })
+
+    output$piped_ui <- renderUI({
+      req(show_piped())
+      infra_access_ui("piped", "Access to piped water", "fa-tint")
+    })
+
+    # ---- Piped to premesis water access ---------------------------------
+
+    show_piped_to_prem <- reactive({
+      any(grepl("piped_to_prem", coeffs(), ignore.case = TRUE))
+    })
+
+    output$piped_to_prem_ui <- renderUI({
+      req(show_piped_to_prem())
+      infra_access_ui("piped_to_prem", "Access to piped water (to premises)", "fa-tint")
+    })
+
+    # ---- Improved water and sanitation access ---------------------------
+
+    show_imp_wat_san <- reactive({
+      any(grepl("imp_wat_san_rec", coeffs(), ignore.case = TRUE))
+    })
+
+    output$imp_wat_san_ui <- renderUI({
+      req(show_imp_wat_san())
+      infra_access_ui("imp_wat_san", "Access to improved water and sanitation", "fa-tint")
+    })
+
     # ---- Health facility access -----------------------------------------
     # Two modes: reduce travel time by % OR cap at maximum minutes.
 
@@ -249,6 +285,21 @@ mod_3_02_infra_server <- function(id,
           sanitation_universal        = isTRUE(input$sanitation_universal),
           sanitation_access_change_pct = if (isTRUE(input$sanitation_universal)) 100L
                                          else input$sanitation_pct %||% 0L,
+
+          # Piped water
+          piped_universal         = isTRUE(input$piped_universal),
+          piped_access_change_pct = if (isTRUE(input$piped_universal)) 100L
+                                    else input$piped_pct %||% 0L,
+
+          # Piped to premises water
+          piped_to_prem_universal         = isTRUE(input$piped_to_prem_universal),
+          piped_to_prem_access_change_pct = if (isTRUE(input$piped_to_prem_universal)) 100L
+                                            else input$piped_to_prem_pct %||% 0L,
+
+          # Improved water and sanitation
+          imp_wat_san_universal         = isTRUE(input$imp_wat_san_universal),
+          imp_wat_san_access_change_pct = if (isTRUE(input$imp_wat_san_universal)) 100L
+                                           else input$imp_wat_san_pct %||% 0L,
 
           # Health facility travel time
           health_mode        = input$health_mode %||% "pct",

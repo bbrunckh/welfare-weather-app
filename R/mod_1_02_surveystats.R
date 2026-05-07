@@ -101,7 +101,8 @@ mod_1_02_surveystats_server <- function(
       lcu_vars <- get_lcu_vars(df, variable_list())
       df       <- df |>
         assign_data_level() |>
-        convert_lcu_to_ppp(cpi_ppp(), lcu_vars)
+        convert_lcu_to_ppp(cpi_ppp(), lcu_vars) |>
+        apply_policy_derivations()
 
       survey_data(df)
 
