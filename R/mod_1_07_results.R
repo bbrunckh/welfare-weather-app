@@ -214,8 +214,8 @@ mod_1_07_results_server <- function(id,
                       else "Marginal effect of weather on outcome"),
             bslib::layout_columns(
               col_widths = c(6, 6),
-              bslib::card(shiny::plotOutput(ns("coefplot1"), height = "500px")),
-              bslib::card(shiny::plotOutput(ns("coefplot2"), height = "500px"))
+              bslib::card(shiny::plotOutput(ns("coefplot1"), height = "600px")),
+              bslib::card(shiny::plotOutput(ns("coefplot2"), height = "600px"))
             ),
             shiny::br(),
             shiny::h4(if (is_rif) "Quantile regression results"
