@@ -205,8 +205,15 @@ apply_policy_to_svy <- function(svy,
                         (isTRUE(infra$water_universal) ||
                          (!is.null(infra$water_access_change_pct) && infra$water_access_change_pct != 0)) ||
                         (isTRUE(infra$sanitation_universal) ||
-                         (!is.null(infra$sanitation_access_change_pct) && infra$sanitation_access_change_pct != 0)) ||
-                        (!is.null(infra$health_travel_pct) && infra$health_travel_pct != 0)
+                        (!is.null(infra$sanitation_access_change_pct) && infra$sanitation_access_change_pct != 0)) ||
+                        (!is.null(infra$health_travel_pct) && infra$health_travel_pct != 0) ||
+                        (isTRUE(infra$piped_universal) ||
+                         (!is.null(infra$piped_access_change_pct) && infra$piped_access_change_pct != 0)) ||
+                        (isTRUE(infra$piped_to_prem_universal) ||
+                         (!is.null(infra$piped_to_prem_access_change_pct) && infra$piped_to_prem_access_change_pct != 0)) ||
+                        (isTRUE(infra$imp_wat_san_universal) ||
+                         (!is.null(infra$imp_wat_san_access_change_pct) && infra$imp_wat_san_access_change_pct != 0))
+
 
     if (has_infra_change) {
       if ("electricity" %in% cols) {
@@ -228,6 +235,27 @@ apply_policy_to_svy <- function(svy,
           svy$imp_san_rec,
           infra$sanitation_universal,
           infra$sanitation_access_change_pct
+        )
+      }
+      if ("piped" %in% cols) {
+        svy$piped <- .apply_binary_access(
+          svy$piped,
+          infra$piped_universal,
+          infra$piped_access_change_pct
+        )
+      }
+      if ("piped_to_prem" %in% cols) {
+        svy$piped_to_prem <- .apply_binary_access(
+          svy$piped_to_prem,
+          infra$piped_to_prem_universal,
+          infra$piped_to_prem_access_change_pct
+        )
+      }
+      if ("imp_wat_san_rec" %in% cols) {
+        svy$imp_wat_san_rec <- .apply_binary_access(
+          svy$imp_wat_san_rec,
+          infra$imp_wat_san_universal,
+          infra$imp_wat_san_access_change_pct
         )
       }
       if ("ttime_health" %in% cols) {
