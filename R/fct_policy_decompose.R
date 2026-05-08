@@ -156,9 +156,13 @@
     }
   }
 
-  # --- Interaction (res2): beta_Haz:x(tau_pre) * Haz * delta_x ---
-  # Continuous weather: beta_int(tau_pre) * haz_mean * delta_x
-  # Binned weather:     beta_int_bin_k(tau_pre) * 1 * delta_x  (only for active bin)
+  # --- Interaction (res2): beta_Haz:x(tau_post) * Haz * delta_x ---
+  # Evaluated at tau_i_post (not tau_i_pre) because the household's welfare
+
+  # level has shifted due to the main effect (SP + covariate changes), and
+  # the interaction beta should reflect the vulnerability at the new position.
+  # Continuous weather: beta_int(tau_post) * haz_mean * delta_x
+  # Binned weather:     beta_int_bin_k(tau_post) * 1 * delta_x  (only for active bin)
   delta_res2 <- rep(0, n)
   has_interactions <- FALSE
 
@@ -176,7 +180,7 @@
           has_interactions <- TRUE
           active <- !is.na(haz_int) & haz_int == lv
           if (!any(active)) next
-          beta_int <- beta_at(it_name, tau_i_pre[active])
+          beta_int <- beta_at(it_name, tau_i_post[active])
           delta_res2[active] <- delta_res2[active] + beta_int * deltas[[v]][active]
         }
       } else {
@@ -190,7 +194,7 @@
         }
         if (!is.null(int_term)) {
           has_interactions <- TRUE
-          beta_int   <- beta_at(int_term, tau_i_pre)
+          beta_int   <- beta_at(int_term, tau_i_post)
           delta_res2 <- delta_res2 + beta_int * haz_int * deltas[[v]]
         }
       }
