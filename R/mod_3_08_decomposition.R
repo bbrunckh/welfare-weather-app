@@ -47,6 +47,7 @@ mod_3_08_decomposition_server <- function(id,
                                            decomp_result     = reactive(NULL),
                                            decomp_scenarios  = reactive(list()),
                                            model_fit         = reactive(NULL),
+                                           variable_list     = reactive(NULL),
                                            so            = reactive(NULL)) {
   moduleServer(id, function(input, output, session) {
     ns <- session$ns
@@ -55,6 +56,16 @@ mod_3_08_decomposition_server <- function(id,
       mf <- model_fit()
       !is.null(mf) && identical(mf$engine, "rif")
     })
+
+    get_label <- function(var_name) {
+      vl <- if (is.function(variable_list)) variable_list() else variable_list
+      if (is.null(vl) || is.null(var_name) || length(var_name) == 0) {
+        return(if (is.null(var_name)) "" else as.character(var_name))
+      }
+      idx <- match(var_name, vl$name)
+      if (length(idx) == 0 || is.na(idx)) var_name
+      else as.character(vl$label[idx])
+    }
 
     output$decomp_header_ui <- renderUI({
       req(decomp_result())
@@ -91,14 +102,21 @@ mod_3_08_decomposition_server <- function(id,
       .plot_decomp_bars(decomp_result(), is_rif())
     })
 
-    # --- Beta curve (RIF only) ---
+    # --- Beta curve (RIF only): one panel per weather variable -------------
     output$beta_curve_ui <- renderUI({
       if (!is_rif()) return(NULL)
       mf <- model_fit()
       if (is.null(mf$rif_grid)) return(NULL)
+      n_vars <- length(mf$weather_terms %||% character(0))
+      if (n_vars == 0) return(NULL)
+
       shiny::wellPanel(
         shiny::h4("Weather Beta Curve Across Welfare Distribution"),
-        shiny::plotOutput(ns("beta_curve_plot"), height = "350px"),
+        weather_plot_layout(
+          ns, n_vars,
+          ids    = c("beta_curve_plot1", "beta_curve_plot2"),
+          height = "400px"
+        ),
         shiny::tags$p(
           style = "font-size:11px; color:#666; margin-top:6px;",
           "Shows how weather sensitivity varies by quantile.",
@@ -107,10 +125,25 @@ mod_3_08_decomposition_server <- function(id,
       )
     })
 
-    output$beta_curve_plot <- shiny::renderPlot({
-      req(is_rif(), model_fit())
-      .plot_beta_curves(model_fit())
-    })
+    .render_beta_curve <- function(idx) {
+      shiny::renderPlot({
+        req(is_rif(), model_fit())
+        mf <- model_fit()
+        req(length(mf$weather_terms) >= idx)
+        make_weather_effect_plot(
+          fit               = NULL,
+          pred_var          = mf$weather_terms[idx],
+          interaction_terms = mf$interaction_terms %||% character(0),
+          is_binned         = FALSE,
+          label_fun         = get_label,
+          engine            = "rif",
+          rif_grid          = mf$rif_grid
+        )
+      })
+    }
+
+    output$beta_curve_plot1 <- .render_beta_curve(1L)
+    output$beta_curve_plot2 <- .render_beta_curve(2L)
 
     # --- Scenario range panel ---
     output$scenario_range_ui <- renderUI({
@@ -233,8 +266,14 @@ mod_3_08_decomposition_server <- function(id,
   weather_vars <- model_fit$weather_terms
   if (is.null(rg) || is.null(weather_vars)) return(NULL)
 
-  # Filter to weather terms only (model 3)
-  plot_data <- rg[rg$model == 3L & rg$term %in% weather_vars, ]
+  # Filter to weather-related terms (model 3). Word-boundary regex catches
+  # binned forms (`tx::[0,10]`) and interactions (`tx:urban`) — `%in%` only
+  # matched exact base names and so dropped everything for binned/interacted
+  # specifications, producing a blank plot.
+  weather_esc <- gsub("([\\[\\]\\(\\)\\^\\$\\.\\*\\+\\?])", "\\\\\\1",
+                      weather_vars)
+  weather_pat <- paste0("\\b(", paste(weather_esc, collapse = "|"), ")\\b")
+  plot_data   <- rg[rg$model == 3L & grepl(weather_pat, rg$term), ]
   if (nrow(plot_data) == 0) return(NULL)
 
   ggplot2::ggplot(plot_data, ggplot2::aes(x = tau, y = estimate)) +

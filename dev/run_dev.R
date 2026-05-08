@@ -19,3 +19,6 @@ devtools::load_all()
 # Run the application
 #options(wise.debug = T)
 run_app()
+
+# Test most recent changes to dynbamic layout adjustment. 
+# Then get to weather summary table!!

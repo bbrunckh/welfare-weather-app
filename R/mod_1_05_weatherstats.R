@@ -200,24 +200,33 @@ mod_1_05_weatherstats_server <- function(
 
         # -- Append tab -------------------------------------------------------
 
+        # Reactive layouts so panels update when the user toggles between
+        # 1 and 2 weather variables without re-creating the tab.
+        output$weather_dist_layout <- shiny::renderUI({
+          weather_plot_layout(
+            ns, nrow(selected_weather() %||% data.frame()),
+            ids    = c("weather_dist1", "weather_dist2"),
+            height = "300px"
+          )
+        })
+        output$binscatter_layout <- shiny::renderUI({
+          weather_plot_layout(
+            ns, nrow(selected_weather() %||% data.frame()),
+            ids    = c("binscatter1", "binscatter2"),
+            height = "300px"
+          )
+        })
+
         shiny::appendTab(
           inputId = tabset_id,
           shiny::tabPanel(
             title = "Weather stats",
             value = "weather_desc",
             shiny::h4("Distribution of weather (household survey sample)"),
-            bslib::layout_columns(
-              col_widths = c(6, 6),
-              bslib::card(shiny::plotOutput(ns("weather_dist1"), height = "300px")),
-              bslib::card(shiny::plotOutput(ns("weather_dist2"), height = "300px"))
-            ),
+            shiny::uiOutput(ns("weather_dist_layout")),
             shiny::br(),
             shiny::h4("Outcome vs weather"),
-            bslib::layout_columns(
-              col_widths = c(6, 6),
-              bslib::card(shiny::plotOutput(ns("binscatter1"), height = "300px")),
-              bslib::card(shiny::plotOutput(ns("binscatter2"), height = "300px"))
-            ),
+            shiny::uiOutput(ns("binscatter_layout")),
             shiny::hr(),
             shiny::h4("Weather summary stats"),
             shiny::helpText(

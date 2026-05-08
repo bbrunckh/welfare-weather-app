@@ -208,7 +208,8 @@ mod_3_scenario_server <- function(id,
       "decomposition",
       decomp_result    = s5$decomp_result,
       decomp_scenarios = s5$decomp_scenarios,
-      model_fit     = model_fit,
+      model_fit        = model_fit,
+      variable_list    = variable_list,
       so            = reactive({
         hs <- hist_sim()
         if (!is.null(hs)) hs$so else NULL

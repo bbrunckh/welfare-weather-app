@@ -196,6 +196,25 @@ mod_1_07_results_server <- function(id,
 
       is_rif <- identical(mf$engine, "rif")
 
+      # Reactive layouts so panels switch between 1 and 2 columns when the
+      # model is re-fit with a different number of weather variables.
+      output$effectplot_layout <- shiny::renderUI({
+        req(model_fit_val())
+        weather_plot_layout(
+          ns, length(model_fit_val()$weather_terms %||% character(0)),
+          ids    = c("effectplot1", "effectplot2"),
+          height = "500px"
+        )
+      })
+      output$coefplot_layout <- shiny::renderUI({
+        req(model_fit_val())
+        weather_plot_layout(
+          ns, length(model_fit_val()$weather_terms %||% character(0)),
+          ids    = c("coefplot1", "coefplot2"),
+          height = "600px"
+        )
+      })
+
       if (!results_tab_added()) {
         shiny::appendTab(
           inputId = tabset_id,
@@ -204,19 +223,11 @@ mod_1_07_results_server <- function(id,
             value = "results",
             shiny::h4(if (is_rif) "Weather sensitivity across the distribution"
                       else "Predicted outcome vs weather"),
-            bslib::layout_columns(
-              col_widths = c(6, 6),
-              bslib::card(shiny::plotOutput(ns("effectplot1"), height = "500px")),
-              bslib::card(shiny::plotOutput(ns("effectplot2"), height = "500px"))
-            ),
+            shiny::uiOutput(ns("effectplot_layout")),
             shiny::br(),
             shiny::h4(if (is_rif) "UQR coefficients by model specification"
                       else "Marginal effect of weather on outcome"),
-            bslib::layout_columns(
-              col_widths = c(6, 6),
-              bslib::card(shiny::plotOutput(ns("coefplot1"), height = "600px")),
-              bslib::card(shiny::plotOutput(ns("coefplot2"), height = "600px"))
-            ),
+            shiny::uiOutput(ns("coefplot_layout")),
             shiny::br(),
             shiny::h4(if (is_rif) "Quantile regression results"
                       else "Regression results"),
