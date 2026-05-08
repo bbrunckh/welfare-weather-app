@@ -342,11 +342,12 @@ make_coefplot <- function(fit1, fit2, fit3,
         ) +
         ggplot2::theme_bw(base_size = 14) +
         ggplot2::theme(
-          legend.position = "bottom",
-          panel.border    = ggplot2::element_blank(),
-          plot.title      = ggplot2::element_text(face = "bold", hjust = 0.5, size = 11),
-          plot.caption    = ggplot2::element_text(size = 9, colour = "grey40", hjust = 0),
-          axis.text       = ggplot2::element_text(size = 9)
+          legend.position  = "bottom",
+          panel.border     = ggplot2::element_blank(),
+          strip.background = ggplot2::element_blank(),
+          plot.title       = ggplot2::element_text(face = "bold", hjust = 0.5, size = 11),
+          plot.caption     = ggplot2::element_text(size = 9, colour = "grey40", hjust = 0),
+          axis.text        = ggplot2::element_text(size = 9)
         )
     }, error = function(e) blank_plot(paste0("RIF coefficient plot error: ", conditionMessage(e)))))
   }
@@ -505,9 +506,14 @@ make_weather_effect_plot <- function(fit, pred_var, interaction_terms, is_binned
             caption = "Ribbon = 95% CI"
           ) +
           ggplot2::theme_bw(base_size = 14) +
-          ggplot2::theme(plot.title = ggplot2::element_text(face = "bold", hjust = 0.5, size = 11),
-                         axis.text = ggplot2::element_text(size = 9),
-                         plot.caption    = ggplot2::element_text(size = 9, colour = "grey40", hjust = 0))
+          ggplot2::theme(
+            legend.position  = "bottom",
+            panel.border     = ggplot2::element_blank(),
+            strip.background = ggplot2::element_blank(),
+            plot.title       = ggplot2::element_text(face = "bold", hjust = 0.5, size = 11),
+            plot.caption     = ggplot2::element_text(size = 9, colour = "grey40", hjust = 0),
+            axis.text        = ggplot2::element_text(size = 9)
+          )
       } else {
         # Multiple terms (main + interactions): faceted
         # Group each main effect with its own interactions:
@@ -546,9 +552,14 @@ make_weather_effect_plot <- function(fit, pred_var, interaction_terms, is_binned
             caption = "Ribbon = 95% CI"
           ) +
           ggplot2::theme_bw(base_size = 14) +
-          ggplot2::theme(plot.title = ggplot2::element_text(face = "bold", hjust = 0.5, size = 11),
-                         axis.text = ggplot2::element_text(size = 9),
-                         plot.caption = ggplot2::element_text(size = 9, colour = "grey40", hjust = 0))
+          ggplot2::theme(
+            legend.position  = "bottom",
+            panel.border     = ggplot2::element_blank(),
+            strip.background = ggplot2::element_blank(),
+            plot.title       = ggplot2::element_text(face = "bold", hjust = 0.5, size = 11),
+            plot.caption     = ggplot2::element_text(size = 9, colour = "grey40", hjust = 0),
+            axis.text        = ggplot2::element_text(size = 9)
+          )
       }
     }, error = function(e) blank_plot(paste0("RIF effect plot error: ", conditionMessage(e)))))
   }

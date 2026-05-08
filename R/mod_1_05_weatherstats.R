@@ -183,11 +183,51 @@ mod_1_05_weatherstats_server <- function(
         output$binscatter1 <- make_binscatter(1)
         output$binscatter2 <- make_binscatter(2)
 
-        # -- Summary stats table ----------------------------------------------
+        # -- Summary stats tables (continuous + binned) -----------------------
         output$weather_stats_table <- make_weather_stats_dt(
           survey_weather   = survey_weather,
           selected_weather = selected_weather
         )
+        output$weather_stats_table_binned <- make_weather_binned_stats_dt(
+          survey_weather   = survey_weather,
+          selected_weather = selected_weather
+        )
+
+        # Single panel that conditionally shows the continuous table, the
+        # binned table, or both — based on each selected weather variable's
+        # type in the merged survey-weather frame.
+        output$weather_stats_layout <- shiny::renderUI({
+          shiny::req(survey_weather(), selected_weather())
+          df   <- survey_weather()
+          sw   <- selected_weather()
+          vars <- intersect(sw$name, names(df))
+          if (length(vars) == 0) {
+            return(shiny::helpText("No weather variables found."))
+          }
+
+          is_num <- vapply(df[vars], is.numeric, logical(1))
+          has_continuous <- any(is_num)
+          has_binned     <- any(!is_num)
+
+          shiny::tagList(
+            if (has_continuous) shiny::tagList(
+              shiny::helpText(
+                "Continuous variables — weighted summary per country-year.",
+                style = "font-size: 12px;"
+              ),
+              DT::DTOutput(ns("weather_stats_table"))
+            ),
+            if (has_continuous && has_binned) shiny::br(),
+            if (has_binned) shiny::tagList(
+              shiny::helpText(
+                paste("Binned variables — count and share of observations",
+                      "in each bin per country-year."),
+                style = "font-size: 12px;"
+              ),
+              DT::DTOutput(ns("weather_stats_table_binned"))
+            )
+          )
+        })
 
         # -- Selected weather config table ------------------------------------
 
@@ -229,11 +269,7 @@ mod_1_05_weatherstats_server <- function(
             shiny::uiOutput(ns("binscatter_layout")),
             shiny::hr(),
             shiny::h4("Weather summary stats"),
-            shiny::helpText(
-              "Summary statistics for configured weather variables. Sample weights are used.",
-              style = "font-size: 12px;"
-            ),
-            DT::DTOutput(ns("weather_stats_table")),
+            shiny::uiOutput(ns("weather_stats_layout")),
             shiny::br(),
             shiny::h4("Selected weather variables"),
             DT::DTOutput(ns("selected_weather"))

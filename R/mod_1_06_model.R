@@ -21,7 +21,7 @@ mod_1_06_model_ui <- function(id) {
       uiOutput(ns("policy_ui"))
     ),
     wellPanel(
-      uiOutput(ns("model_specs_button_ui")),
+      # uiOutput(ns("model_specs_button_ui")),
       uiOutput(ns("model_specs_ui")),
       shiny::helpText(
         "More model types and covariate selection methods will be added in future updates.",
@@ -204,23 +204,23 @@ mod_1_06_model_server <- function(id,
 
     # ---- Model parameters toggle --------------------------------------------
 
-    model_specs_open <- reactiveVal(FALSE)
+    # model_specs_open <- reactiveVal(FALSE)
 
-    output$model_specs_button_ui <- renderUI({
-      req(input$model_type)
-      shiny::actionButton(ns("model_specs"), "Model parameters",
-                          style = "margin-bottom:10px;")
-    })
+    # output$model_specs_button_ui <- renderUI({
+    #   req(input$model_type)
+    #   shiny::actionButton(ns("model_specs"), "Model parameters",
+    #                       style = "margin-bottom:10px;")
+    # })
 
-    observeEvent(input$model_specs, {
-      model_specs_open(!isTRUE(model_specs_open()))
-    })
+    # observeEvent(input$model_specs, {
+    #   model_specs_open(!isTRUE(model_specs_open()))
+    # })
 
     # ---- Model specification panel ------------------------------------------
 
     output$model_specs_ui <- renderUI({
       req(input$model_type)
-      if (!isTRUE(model_specs_open())) return(NULL)
+      # if (!isTRUE(model_specs_open())) return(NULL)
 
       ixn <- interact_vars()
       fe  <- fe_vars()
