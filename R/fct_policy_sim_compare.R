@@ -5,61 +5,98 @@
                                     var_name) {
   baseline_clean <- baseline_vals[!is.na(baseline_vals)]
   policy_clean   <- policy_vals[!is.na(policy_vals)]
+  all_vals       <- c(baseline_clean, policy_clean)
 
-  if (length(baseline_clean) == 0 && length(policy_clean) == 0) {
-    plot.new()
-    graphics::title(main = "No data available")
-    return(invisible(NULL))
+  blank_plot <- function(msg) {
+    ggplot2::ggplot() +
+      ggplot2::annotate("text", x = 0.5, y = 0.5, label = msg,
+                        size = 4, colour = "grey40") +
+      ggplot2::theme_void()
   }
 
-  all_vals <- c(baseline_clean, policy_clean)
-  x_range <- range(all_vals, na.rm = TRUE)
-  x_range <- x_range + c(-0.1, 0.1) * diff(x_range)
+  if (length(all_vals) == 0) return(blank_plot("No data available"))
 
-  dens_base <- if (length(baseline_clean) > 1)
-    stats::density(baseline_clean, from = x_range[1], to = x_range[2])
-  else NULL
+  fill_vals <- c(Baseline = "#bdbdbd", `Policy-adjusted` = "#d32f2f")
+  uniq_vals <- unique(all_vals)
+  is_binary <- length(uniq_vals) <= 2 && all(uniq_vals %in% c(0, 1))
 
-  dens_poli <- if (length(policy_clean) > 1)
-    stats::density(policy_clean, from = x_range[1], to = x_range[2])
-  else NULL
+  # ---- Binary: grouped bar plot of proportions -----------------------------
+  if (is_binary) {
+    df <- data.frame(
+      Group = factor(rep(c("Baseline", "Policy-adjusted"), each = 2),
+                     levels = c("Baseline", "Policy-adjusted")),
+      Value = factor(rep(c("0", "1"), 2), levels = c("0", "1")),
+      Proportion = c(
+        if (length(baseline_clean)) mean(baseline_clean == 0) else NA_real_,
+        if (length(baseline_clean)) mean(baseline_clean == 1) else NA_real_,
+        if (length(policy_clean))   mean(policy_clean   == 0) else NA_real_,
+        if (length(policy_clean))   mean(policy_clean   == 1) else NA_real_
+      )
+    )
 
-  y_max <- 0
-  if (!is.null(dens_base)) y_max <- max(y_max, max(dens_base$y))
-  if (!is.null(dens_poli)) y_max <- max(y_max, max(dens_poli$y))
+    return(
+      ggplot2::ggplot(df, ggplot2::aes(x = Value, y = Proportion,
+                                       fill = Group)) +
+        ggplot2::geom_col(
+          position = ggplot2::position_dodge(width = 0.75),
+          width    = 0.65,
+          colour   = NA
+        ) +
+        ggplot2::scale_fill_manual(values = fill_vals) +
+        ggplot2::scale_y_continuous(limits = c(0, 1),
+                                    expand = ggplot2::expansion(c(0, 0.05))) +
+        ggplot2::labs(
+          title = paste0("Distribution: ", var_name),
+          x     = var_name,
+          y     = "Proportion",
+          fill  = NULL
+        ) +
+        ggplot2::theme_minimal(base_size = 12) +
+        ggplot2::theme(
+          legend.position    = "top",
+          plot.title         = ggplot2::element_text(size = 11),
+          panel.grid.major.x = ggplot2::element_blank(),
+          panel.grid.minor.x = ggplot2::element_blank()
+        )
+    )
+  }
 
-  plot(
-    NULL,
-    xlim = x_range,
-    ylim = c(0, y_max * 1.1),
-    xlab = var_name,
-    ylab = "Density",
-    main = paste0("Distribution: ", var_name),
-    cex.main = 0.95
+  # ---- Continuous: ridge density (Policy on top, Baseline on bottom) -------
+  use_log <- all(all_vals > 0)
+
+  df <- data.frame(
+    Group = factor(
+      c(rep("Baseline", length(baseline_clean)),
+        rep("Policy-adjusted", length(policy_clean))),
+      # ggridges renders the FIRST level at the bottom, last at the top —
+      # so "Baseline" first puts policy-adjusted on top.
+      levels = c("Baseline", "Policy-adjusted")
+    ),
+    Value = c(baseline_clean, policy_clean)
   )
 
-  if (!is.null(dens_base)) {
-    graphics::lines(dens_base, col = "#bdbdbd", lwd = 2.5, lty = 1)
-  }
-  if (!is.null(dens_poli)) {
-    graphics::lines(dens_poli, col = "#d32f2f", lwd = 2.5, lty = 1)
-  }
+  if (use_log) df <- df[df$Value > 0, , drop = FALSE]
+  if (!nrow(df)) return(blank_plot("No data available"))
 
-  legend_cols <- c(
-    if (!is.null(dens_base)) "#bdbdbd" else NULL,
-    if (!is.null(dens_poli)) "#d32f2f" else NULL
-  )
-  legend_labs <- c(
-    if (!is.null(dens_base)) "Baseline" else NULL,
-    if (!is.null(dens_poli)) "Policy-adjusted" else NULL
-  )
+  p <- ggplot2::ggplot(df, ggplot2::aes(x = Value, y = Group, fill = Group)) +
+    ggridges::geom_density_ridges(alpha = 0.7, scale = 1.5) +
+    ggplot2::scale_fill_manual(values = fill_vals) +
+    ggplot2::labs(
+      title = paste0("Distribution: ", var_name),
+      x     = if (use_log) paste0(var_name, " (log scale)") else var_name,
+      y     = "",
+      fill  = NULL
+    ) +
+    ggplot2::theme_minimal(base_size = 12) +
+    ggplot2::theme(
+      legend.position = "none",
+      plot.title      = ggplot2::element_text(size = 11)
+    )
 
-  if (length(legend_cols) > 0) {
-    graphics::legend("topright", legend = legend_labs, col = legend_cols,
-                     lwd = 2.5, cex = 0.85)
+  if (use_log) {
+    p <- p + ggplot2::scale_x_log10(labels = scales::comma_format())
   }
-
-  invisible(NULL)
+  p
 }
 
 

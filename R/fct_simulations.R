@@ -549,9 +549,15 @@ run_sim_pipeline <- function(weather_raw, svy, sw, so,
 
     preds <- apply_log_backtransform(preds, so)
 
-    # SP direct transfer (applied on original scale, after back-transform)
+    # SP direct transfer (applied on original scale, after back-transform).
+    # Re-sync .fitted (used downstream as y_point) so the transfer flows into
+    # aggregate_with_uncertainty(); kept in log scale when so$transform == "log".
     if ("._sp_transfer" %in% names(preds)) {
       preds[[so$name]] <- preds[[so$name]] + preds[["._sp_transfer"]]
+      preds$.fitted    <- if (isTRUE(so$transform == "log"))
+        log(pmax(preds[[so$name]], .Machine$double.eps))
+      else
+        preds[[so$name]]
     }
 
     # RIF returns old-style preds (no factor loading)

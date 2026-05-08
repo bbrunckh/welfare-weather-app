@@ -162,7 +162,6 @@ mod_3_07_diagnostics_server <- function(id,
       d <- diag_data()
       if (is.null(d) || is.list(d) && !is.null(d$status)) {
         return(shiny::div(
-          # class = "alert alert-info",
           "No variables to display."
         ))
       }
@@ -170,7 +169,6 @@ mod_3_07_diagnostics_server <- function(id,
       vars <- d$manipulated_vars
       if (length(vars) == 0) {
         return(shiny::div(
-          # class = "alert alert-info",
           "No variables to display."
         ))
       }
