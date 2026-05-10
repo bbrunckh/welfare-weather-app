@@ -43,17 +43,10 @@
 }
 
 .parse_year <- function(nm) {
-  if (length(nm) == 1L) {
-    m <- regexpr("\\d{4}-\\d{4}", nm)
-    if (m == -1L) return(NA_character_)
-    return(regmatches(nm, m))
-  }
-  # Vectorised path
-  m <- gregexpr("\\d{4}-\\d{4}", nm)
-  vapply(seq_along(nm), function(i) {
-    matches <- regmatches(nm[i], m[i])[[1]]
-    if (length(matches) == 0) NA_character_ else matches[1]
-  }, character(1))
+  m   <- regexpr("\\d{4}-\\d{4}", nm)
+  out <- regmatches(nm, m)
+  out[m == -1L] <- NA_character_
+  out
 }
 
 # ---------------------------------------------------------------------------- #
@@ -221,32 +214,42 @@ compute_cluster_counts <- function(data) {
 #'   \code{\link{aggregate_with_uncertainty}}
 #' @export
 compute_chol_vcov <- function(fit, vcov_spec = COEF_VCOV_SPEC) {
-  stopifnot(
-    "fit must be a fixest model" = inherits(fit, "fixest")
-  )
+  # fixest_multi: iterate over sub-models (needed for RIF quantile fits)
+  if (inherits(fit, "fixest_multi")) {
+    return(lapply(seq_along(fit), function(i)
+      compute_chol_vcov(fit[[i]], vcov_spec = vcov_spec)
+    ))
+  }
 
+  stopifnot("fit must be a fixest model" = inherits(fit, "fixest"))
   beta  <- coef(fit)
-  Sigma <- vcov(fit, vcov = vcov_spec)
 
-  # Cholesky decomposition — chol() returns upper triangular R such that
-  # t(R) %*% R == Sigma. We store L = t(R) (lower triangular) so that
-  # L %*% t(L) == Sigma, consistent with the factor loading formula
-  # F = X_nonFE %*% t(L).
+  # Try requested spec first — fallback chain if it fails
+  vcov_fallbacks <- list(vcov_spec, ~loc_id, "HC1", "iid")
+  Sigma <- NULL
+  for (spec in vcov_fallbacks) {
+    Sigma <- tryCatch(
+      vcov(fit, vcov = spec),
+      error = function(e) NULL
+    )
+    if (!is.null(Sigma) && all(is.finite(Sigma))) {
+      if (!identical(spec, vcov_spec))
+        message("[compute_chol_vcov] fell back to vcov spec: ", deparse(spec))
+      break
+    }
+    Sigma <- NULL
+  }
+
+  if (is.null(Sigma))
+    stop("[compute_chol_vcov] all vcov specs failed — cannot compute Sigma.")
+
   L <- tryCatch(
     t(chol(Sigma)),
-    error = function(e) stop(sprintf(
-      "[compute_chol_vcov] Cholesky decomposition failed. ",
-      "Check that VCV matrix is positive definite at spec '%s': %s",
-      deparse(vcov_spec), conditionMessage(e)
-    ))
+    error = function(e)
+      stop("[compute_chol_vcov] Cholesky decomposition failed: ",
+           conditionMessage(e))
   )
-
-  list(
-    L    = L,
-    K    = nrow(L),
-    beta = beta,
-    spec = vcov_spec
-  )
+  list(L = L, K = nrow(L), beta = beta, spec = vcov_spec)
 }
 
 
@@ -452,7 +455,15 @@ run_sim_pipeline <- function(weather_raw,
                              residuals,
                              train_data,
                              engine,
-                             chol_obj = NULL) {
+                             chol_obj = NULL,
+                            
+                             #RIF
+                             fit_multi   = NULL,
+                             taus        = NULL,
+                             weather_cols = NULL,
+                             precomputed_train_resid = NULL,
+                             svy_baseline = NULL,
+                             rif_grid     = NULL) {
 
   n_pre_join    <- nrow(svy)
   survey_wd_sim <- prepare_hist_weather(weather_raw, svy, sw, so$name)
@@ -463,10 +474,30 @@ run_sim_pipeline <- function(weather_raw,
              else
                NULL
 
-  # ---- Point estimate prediction ------------------------------------------ #
-  # predict_outcome() called ONCE — no coefficient draws here.
-  # All uncertainty propagation is deferred to aggregate_with_uncertainty().
-  pred_out <- tryCatch(
+    # ---- Prediction — dispatch on engine ------------------------------------
+  is_rif <- !is.null(fit_multi) && !is.null(taus) &&
+             !is.null(weather_cols) && engine == "rif"
+
+  out <- if (is_rif) {
+    # RIF path — quantile delta method
+    chol_list <- if (!is.null(chol_obj) && is.list(chol_obj) &&
+                     !("L" %in% names(chol_obj)))
+      chol_obj   # already a list of per-tau Cholesky matrices
+    else NULL
+    predict_rif(
+      fit_multi    = fit_multi,
+      newdata      = survey_wd_sim, #joined,
+      svy          = svy,
+      train_data   = train_data,
+      taus         = taus,
+      outcome      = so$name,
+      weather_cols = weather_cols,
+      so           = so,
+      chol_list    = chol_list
+    )
+  } else {
+    # Standard OLS path — unchanged
+    tryCatch(
     predict_outcome(
       model      = model,
       newdata    = survey_wd_sim,
@@ -480,9 +511,29 @@ run_sim_pipeline <- function(weather_raw,
       warning("[run_sim_pipeline] predict_outcome() failed: ", conditionMessage(e))
       NULL
     }
-  )
+    )
+  }
+  
+  # ---- Point estimate prediction ------------------------------------------ #
+  # predict_outcome() called ONCE — no coefficient draws here.
+  # All uncertainty propagation is deferred to aggregate_with_uncertainty().
+  #pred_out <- tryCatch(
+  #  predict_outcome(
+  #    model      = model,
+  #    newdata    = survey_wd_sim,
+  #    residuals  = "none",     # residuals drawn at display time, not here
+  #    outcome    = so$name,
+  #    id         = id_col,
+  #    train_data = train_data,
+  #    engine     = engine
+  #  ),
+  #  error = function(e) {
+  #    warning("[run_sim_pipeline] predict_outcome() failed: ", conditionMessage(e))
+  #    NULL
+  #  }
+  #)
 
-  if (is.null(pred_out)) {
+  if (is.null(out)) {
     rm(survey_wd_sim)
     return(NULL)
   }
@@ -490,17 +541,17 @@ run_sim_pipeline <- function(weather_raw,
   # y_point stays log-scale — back-transformation happens inside
   # aggregate_with_uncertainty() after coefficient perturbation.
   # NOTE: apply_log_backtransform() is NOT called here.
-  y_point  <- pred_out$.fitted
+  y_point  <- out$.fitted
 
   # ---- Simulation year and weights ---------------------------------------- #
-  sim_year <- pred_out$sim_year
+  sim_year <- out$sim_year
 
-  wt_col   <- grep("^weight$|^hhweight$|^wgt$|^pw$", names(pred_out),
+  wt_col   <- grep("^weight$|^hhweight$|^wgt$|^pw$", names(out),
                    value = TRUE, ignore.case = TRUE)
-  weight   <- if (length(wt_col) > 0L) pred_out[[wt_col[[1L]]]] else NULL
+  weight   <- if (length(wt_col) > 0L) out[[wt_col[[1L]]]] else NULL
 
-  id_vec   <- if (!is.null(id_col) && id_col %in% names(pred_out))
-                pred_out[[id_col]]
+  id_vec   <- if (!is.null(id_col) && id_col %in% names(out))
+                out[[id_col]]
               else
                 NULL
 
@@ -509,7 +560,11 @@ run_sim_pipeline <- function(weather_raw,
   # F_loading = X_nonFE %*% L  where L is the Cholesky factor of Sigma.
   # NULL when chol_obj = NULL (point estimates only).
   F_loading <- NULL
-  if (!is.null(chol_obj)) {
+  if (is_rif && !is.null(attr(out, "F_loading"))) {
+    # RIF path — F_loading computed inside predict_rif()
+    F_loading <- attr(out, "F_loading")
+  } else if (!is.null(chol_obj)) {
+    # Standard Cholesky path — keep existing guards
     X_nonFE <- tryCatch(
       model.matrix(model, data = survey_wd_sim, type = "rhs"),
       error = function(e) {
@@ -517,14 +572,18 @@ run_sim_pipeline <- function(weather_raw,
         NULL
       }
     )
-
-    if (!is.null(X_nonFE)) {
-      # Column alignment guard — surfaces misalignment bugs immediately
-      stopifnot(
-        "X_nonFE columns must match chol_obj$beta names" =
-          identical(colnames(X_nonFE), names(chol_obj$beta))
-      )
-      F_loading <- compute_factor_loading(X_nonFE, chol_obj)
+if (!is.null(X_nonFE)) {
+      if (is.list(chol_obj) && "L" %in% names(chol_obj)) {
+        # Our named list format — use compute_factor_loading()
+        stopifnot(
+          "X_nonFE columns must match chol_obj$beta names" =
+            identical(colnames(X_nonFE), names(chol_obj$beta))
+        )
+        F_loading <- compute_factor_loading(X_nonFE, chol_obj)
+      } else if (is.matrix(chol_obj)) {
+        # Golem matrix format — inline multiply
+        F_loading <- X_nonFE %*% t(chol_obj)
+      }
     }
   }
 
@@ -692,8 +751,6 @@ prepare_hist_weather <- function(weather_raw,
     ) |>
     dplyr::mutate(year = as.factor(year))
 }
-
-
 # ---------------------------------------------------------------------------- #
 # Back-transformation                                                          #
 # ---------------------------------------------------------------------------- #
@@ -718,4 +775,36 @@ apply_log_backtransform <- function(preds, so) {
 
   preds |>
     dplyr::mutate(!!rlang::sym(so$name) := exp(.data[[so$name]]))
+}
+
+# ============================================================================ #
+# Stage 2 aggregation — wraps aggregate_with_uncertainty() for use by         #
+# fct_sim_compare.R visualisation layer.                                       #
+# ============================================================================ #
+
+#' Aggregate simulation predictions across years and ensemble members
+#'
+#' @param preds       Output of \code{run_sim_pipeline()} — data frame with
+#'   \code{.fitted}, \code{sim_year}, optional \code{weight} column.
+#' @param so          Selected outcome metadata list.
+#' @param agg_method  Character; one of \code{hist_aggregate_choices()}.
+#' @param deviation   Character; \code{"none"}, \code{"mean"}, or \code{"median"}.
+#' @param loss_frame  Logical; if \code{TRUE} frame results as welfare loss.
+#' @param weight_col  Character; name of weight column or \code{NULL}.
+#' @param band_q      Named numeric(2); \code{c(lo=, hi=)} quantiles for bands.
+#'
+#' @return Named list with \code{$hist} and \code{$scenarios} entries.
+#' @export
+aggregate_sim_preds <- function(preds, so, agg_method, deviation = "none",
+                                loss_frame = FALSE, weight_col = NULL,
+                                band_q = c(lo = 0.10, hi = 0.90)) {
+  aggregate_with_uncertainty(
+    preds      = preds,
+    so         = so,
+    agg_method = agg_method,
+    deviation  = deviation,
+    loss_frame = loss_frame,
+    weight_col = weight_col,
+    band_q     = band_q
+  )
 }

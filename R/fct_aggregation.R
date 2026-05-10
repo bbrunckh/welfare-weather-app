@@ -529,39 +529,17 @@ aggregate_with_uncertainty <- function(y_point,
 }
 
 
-#' Combine Per-Model Ensemble Results into Inner and Outer Uncertainty Bands
+#' Combine Per-Model Aggregation Results
 #'
-#' Takes a named list of \code{aggregate_with_uncertainty()} outputs — one per
-#' ensemble representative key (\code{ensemble_mean}, \code{ensemble_lo},
-#' \code{ensemble_hi}) — and produces a single row with:
-#' \itemize{
-#'   \item Inner band: average coefficient uncertainty across ensemble members
-#'   \item Outer band: spread of point estimates across ensemble members
-#'   \item Paired \code{draw_values} from the mean representative for Module 3
-#' }
+#' Given M tibbles (one per GCM/ensemble model), each with per-year
+#' aggregate values and optional coefficient-uncertainty bands, produce
+#' a single tibble with multi-model median as central value and both
+#' parameter uncertainty and model spread bands.
 #'
-#' @param model_results Named list. Each entry is the return value of
-#'   \code{aggregate_with_uncertainty()} for one ensemble representative key.
-#'   Must contain at least one entry named \code{*_ensemble_mean} or the
-#'   first entry is used as the central estimate.
-#'
-#' @return Named list:
-#'   \describe{
-#'     \item{value}{Numeric. Central estimate (from mean representative).}
-#'     \item{value_lo}{Numeric. Inner band lower (avg \code{value_lo} across
-#'       members).}
-#'     \item{value_hi}{Numeric. Inner band upper (avg \code{value_hi} across
-#'       members).}
-#'     \item{model_lo}{Numeric. Outer band lower (min point estimate across
-#'       members).}
-#'     \item{model_hi}{Numeric. Outer band upper (max point estimate across
-#'       members).}
-#'     \item{draw_values}{Numeric vector. Paired draws from the mean
-#'       representative — used for Module 3 difference uncertainty.}
-#'     \item{n_members}{Integer. Number of ensemble members combined.}
-#'   }
-#'
-#' @seealso \code{\link{aggregate_with_uncertainty}}
+#' @param per_model_aggs List of M tibbles, each from
+#'   `aggregate_with_uncertainty()`.
+#' @return A tibble with columns: `sim_year`, `value`, `value_p05`,
+#'   `value_p95`, `model_values`.
 #' @export
 combine_ensemble_results <- function(member_results) {
   member_results <- Filter(Negate(is.null), member_results)
