@@ -105,17 +105,9 @@ mod_3_05_policy_sim_server <- function(id,
                 baseline_hist_sim_rv(base_out$hist_sim)
                 baseline_saved_scenarios_rv(base_out$saved_scenarios)
               }
-
-              # SP transfer is applied via below addition to run_sim_pipeline.
-              # It may need re-introduction when merging branches from revamped Step 2.
-                # Apply SP direct transfer if pre-computed by apply_policy_to_svy
-                # (no-op for Step 2 baseline simulations — no ._sp_transfer column)
-                # if ("._sp_transfer" %in% names(preds)) {
-                #   preds[[so$name]] <- preds[[so$name]] + preds[["._sp_transfer"]]
-                # }
               shiny::setProgress(value = 0.6, detail = "Policy...")
               pol_out <- resimulate_with_svy(svy_mod, sw, hs$so, mf, hs, ss,
-                                            svy_baseline = svy)
+                                             svy_baseline = svy)
               if (!is.null(pol_out)) {
                 policy_hist_sim_rv(pol_out$hist_sim)
                 policy_saved_scenarios_rv(pol_out$saved_scenarios)

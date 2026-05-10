@@ -57,26 +57,21 @@ mod_3_07_diagnostics_server <- function(id,
         p$welfare <- p$welfare + p[["._sp_transfer"]]
       }
 
-      # Detect survey weight column (same pattern as Step 2 / resimulate_with_svy)
-      wt_col <- grep("^weight$|^hhweight$|^wgt$|^pw$",
-                     names(p), value = TRUE,
-                     ignore.case = TRUE)[1]
-      if (is.na(wt_col %||% NA)) wt_col <- NULL
-
       if ("._sp_transfer" %in% names(p)) {
         v <- p[["._sp_transfer"]]
-        w <- if (!is.null(wt_col)) p[[wt_col]] else rep(1, length(v))
+        w <- p[["weight"]]
+        w_sum <- sum(w, na.rm = TRUE) # For debugging only
         ok <- is.finite(v) & is.finite(w)
         # Population-level total annual cost = sum(daily transfer * weight) * 365
         transfer_sum <- sum(v[ok] * w[ok]) * 365
-        # Population-weighted mean over eligible households (annual)
+        # Population-weighted mean over eligible individuals (annual)
         elig <- ok & v > 0
-        transfer_perhh <- if (any(elig) && sum(w[elig]) > 0) {
+        transfer_pp <- if (any(elig) && sum(w[elig]) > 0) {
           sum(v[elig] * w[elig]) / sum(w[elig]) * 365
         } else 0
       } else {
         transfer_sum   <- 0
-        transfer_perhh <- 0
+        transfer_pp <- 0
       }
 
       vars <- detect_manipulated_vars(b, p)
@@ -87,7 +82,8 @@ mod_3_07_diagnostics_server <- function(id,
         baseline_svy = b,
         policy_svy = p,
         transfer_sum = transfer_sum,
-        transfer_perhh = transfer_perhh
+        transfer_pp = transfer_pp,
+        w_sum = w_sum # For debugging only
       )
     })
 
@@ -97,8 +93,8 @@ mod_3_07_diagnostics_server <- function(id,
       d <- diag_data()
       if (is.null(d) || is.list(d) && !is.null(d$status)) return(NULL)
       data.frame(
-        Type  = c("Total transfer $ amount (population-level)", "Per-household $ equivalent (eligible households)"),
-        Value = c(d$transfer_sum, d$transfer_perhh),
+        Type  = c("Total transfer $ amount (population-level)", "Per-person $ equivalent (eligible individuals)", "Sum of weights"), # Sum of weights for debugging only
+        Value = c(d$transfer_sum, d$transfer_pp, d$w_sum), # d$w_sum for debugging only
         stringsAsFactors = FALSE
       )
     }, striped = TRUE, hover = TRUE, bordered = TRUE)
@@ -166,7 +162,6 @@ mod_3_07_diagnostics_server <- function(id,
       d <- diag_data()
       if (is.null(d) || is.list(d) && !is.null(d$status)) {
         return(shiny::div(
-          # class = "alert alert-info",
           "No variables to display."
         ))
       }
@@ -174,7 +169,6 @@ mod_3_07_diagnostics_server <- function(id,
       vars <- d$manipulated_vars
       if (length(vars) == 0) {
         return(shiny::div(
-          # class = "alert alert-info",
           "No variables to display."
         ))
       }

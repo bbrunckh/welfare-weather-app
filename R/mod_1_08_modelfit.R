@@ -178,11 +178,21 @@ mod_1_08_modelfit_server <- function(id,
 
     # ---- Add tab (once) -----------------------------------------------------
 
+    # Reactive layout: 1 panel for 1 weather var, 2 side-by-side for >= 2.
+    # Wrapping in renderUI keeps the layout in sync if the model is re-fit
+    # with a different number of weather variables.
+    output$resid_weather_layout <- shiny::renderUI({
+      req(model_fit())
+      weather_plot_layout(
+        ns, length(model_fit()$weather_terms %||% character(0)),
+        ids    = c("resid_weather1", "resid_weather2"),
+        height = "300px"
+      )
+    })
+
     observeEvent(model_fit(), {
       req(model_fit())
       if (modelfit_tab_added()) return()
-
-      has_two_weather <- length(model_fit()$weather_terms) >= 2
 
       shiny::appendTab(
         inputId = tabset_id,
@@ -200,15 +210,7 @@ mod_1_08_modelfit_server <- function(id,
           shiny::tableOutput(ns("additional_stats")),
           shiny::hr(),
           shiny::h4("Residuals vs weather"),
-          if (has_two_weather) {
-            bslib::layout_columns(
-              col_widths = c(6, 6),
-              bslib::card(shiny::plotOutput(ns("resid_weather1"), height = "300px")),
-              bslib::card(shiny::plotOutput(ns("resid_weather2"), height = "300px"))
-            )
-          } else {
-            bslib::card(shiny::plotOutput(ns("resid_weather1"), height = "300px"))
-          },
+          shiny::uiOutput(ns("resid_weather_layout")),
           shiny::hr(),
           shiny::uiOutput(ns("relaimpo_ui")),
           shiny::hr(),

@@ -260,11 +260,13 @@ make_coefplot <- function(fit1, fit2, fit3,
                            outcome_label = "outcome",
                            label_fun     = identity,
                            engine        = "fixest",
-                           rif_grid      = NULL) {
+                           rif_grid      = NULL,
+                           pred_var      = NULL) {
 
   blank_plot <- function(msg) {
     ggplot2::ggplot() +
-      ggplot2::annotate("text", x = 0.5, y = 0.5, label = msg, color = "grey40") +
+      ggplot2::annotate("text", x = 0.5, y = 0.5, label = msg,
+                        size = 3.5, color = "grey40", hjust = 0.5, vjust = 0.5) +
       ggplot2::theme_void()
   }
 
@@ -273,11 +275,18 @@ make_coefplot <- function(fit1, fit2, fit3,
     return(tryCatch({
       taus <- sort(unique(rif_grid$tau))
 
-      # Filter to weather-related terms
+      # Filter terms: by pred_var if supplied, otherwise all weather terms
+      filter_terms <- if (!is.null(pred_var)) pred_var else weather_terms
+      term_esc <- gsub("([\\[\\]\\(\\)\\^\\$\\.\\*\\+\\?])", "\\\\\\1", filter_terms)
+      weather_pattern <- paste0("\\b(", paste(term_esc, collapse = "|"), ")\\b")
+
       all_terms <- unique(rif_grid$term)
-      weather_pattern <- paste0("\\b(", paste(weather_terms, collapse = "|"), ")\\b")
       keep <- grepl(weather_pattern, all_terms)
-      if (!any(keep)) keep <- rep(TRUE, length(all_terms))  # fallback: show all
+      if (!any(keep)) {
+        if (!is.null(pred_var))
+          return(blank_plot(paste0("No RIF terms found for '", pred_var, "'.")))
+        keep <- rep(TRUE, length(all_terms))
+      }
       plot_terms <- all_terms[keep]
 
       plot_data <- rif_grid[rif_grid$term %in% plot_terms, ]
@@ -293,6 +302,21 @@ make_coefplot <- function(fit1, fit2, fit3,
         plot_data$term, function(t) coef_label(t, label_fun), character(1)
       )
 
+      # Order facets so each main is followed by its interactions, grouped
+      # by whichever chunk contains the weather variable (handles both
+      # `weather:modx` and `modx:weather` orderings).
+      protected <- gsub("::", "", plot_data$term, fixed = TRUE)
+      parts     <- strsplit(protected, ":", fixed = TRUE)
+      main_part <- vapply(parts, function(p) {
+        hit <- p[grepl(weather_pattern, p)]
+        if (length(hit) == 0) p[1] else hit[1]
+      }, character(1))
+      is_int <- lengths(parts) > 1
+      term_levels <- unique(plot_data$term_label[
+        order(match(main_part, unique(main_part)), is_int)
+      ])
+      plot_data$term_label <- factor(plot_data$term_label, levels = term_levels)
+
       ggplot2::ggplot(plot_data, ggplot2::aes(x = tau, y = estimate,
                                                colour = model_label,
                                                fill   = model_label)) +
@@ -303,7 +327,7 @@ make_coefplot <- function(fit1, fit2, fit3,
         ) +
         ggplot2::geom_line(linewidth = 0.8) +
         ggplot2::geom_point(size = 2) +
-        ggplot2::facet_wrap(~ term_label, scales = "free_y") +
+        ggplot2::facet_wrap(~ term_label, scales = "free_y", ncol = 2) +
         ggplot2::scale_x_continuous(
           breaks = taus,
           labels = scales::percent_format(1)
@@ -311,15 +335,19 @@ make_coefplot <- function(fit1, fit2, fit3,
         ggplot2::scale_colour_brewer(palette = "Set1", name = NULL) +
         ggplot2::scale_fill_brewer(palette = "Set1", name = NULL) +
         ggplot2::labs(
-          title    = "UQR coefficients across the welfare distribution",
-          subtitle = "Ribbon = 95% CI",
-          x        = "Welfare quantile",
-          y        = stringr::str_wrap(paste0("Effect on ", outcome_label), 50)
+          title   = paste("UQR coefficients for", label_fun(pred_var)),
+          x       = "Welfare quantile",
+          y       = stringr::str_wrap(paste0("Effect on ", outcome_label), 50),
+          caption = "Ribbon = 95% CI"
         ) +
         ggplot2::theme_bw(base_size = 14) +
         ggplot2::theme(
-          legend.position = "bottom",
-          panel.border = ggplot2::element_blank()
+          legend.position  = "bottom",
+          panel.border     = ggplot2::element_blank(),
+          strip.background = ggplot2::element_blank(),
+          plot.title       = ggplot2::element_text(face = "bold", hjust = 0.5, size = 11),
+          plot.caption     = ggplot2::element_text(size = 9, colour = "grey40", hjust = 0),
+          axis.text        = ggplot2::element_text(size = 9)
         )
     }, error = function(e) blank_plot(paste0("RIF coefficient plot error: ", conditionMessage(e)))))
   }
@@ -345,11 +373,11 @@ make_coefplot <- function(fit1, fit2, fit3,
       ct
     })
 
-    if (nrow(coef_data) == 0)
-      return(blank_plot("No coefficients returned by fixest."))
-
-    keep_terms <- weather_coef_names(fit3, weather_terms)
-    coef_data  <- coef_data[coef_data$term %in% keep_terms, ]
+    filter_terms    <- if (!is.null(pred_var)) pred_var else weather_terms
+    term_esc        <- gsub("([\\[\\]\\(\\)\\^\\$\\.\\*\\+\\?])", "\\\\\\1", filter_terms)
+    weather_pattern <- paste0("\\b(", paste(term_esc, collapse = "|"), ")\\b")
+    keep_terms      <- weather_coef_names(fit3, filter_terms)
+    coef_data       <- coef_data[coef_data$term %in% keep_terms, ]
 
     if (nrow(coef_data) == 0)
       return(blank_plot("No weather coefficients found to plot."))
@@ -362,11 +390,25 @@ make_coefplot <- function(fit1, fit2, fit3,
     coef_data$model     <- factor(coef_data$model,
                                   levels = c("No FE", "FE", "FE + controls"))
 
+    # Order y-axis labels: each main effect followed by its interaction(s),
+    # in model order. Reversed so the first main appears at the TOP of the plot.
+    coef_data$label_wrap <- stringr::str_wrap(coef_data$label, 25)
+    protected <- gsub("::", "", coef_data$term, fixed = TRUE)
+    parts     <- strsplit(protected, ":", fixed = TRUE)
+    main_part <- vapply(parts, function(p) {
+      hit <- p[grepl(weather_pattern, p)]
+      if (length(hit) == 0) p[1] else hit[1]
+    }, character(1))
+    is_int       <- lengths(parts) > 1
+    ord          <- order(match(main_part, unique(main_part)), is_int)
+    label_levels <- unique(coef_data$label_wrap[ord])
+    coef_data$label_wrap <- factor(coef_data$label_wrap, levels = rev(label_levels))
+
     ggplot2::ggplot(
       coef_data,
       ggplot2::aes(
         x      = Estimate,
-        y      = stringr::str_wrap(label, 25),
+        y      = label_wrap,
         colour = model,
         shape  = model
       )
@@ -460,12 +502,39 @@ make_weather_effect_plot <- function(fit, pred_var, interaction_terms, is_binned
           ggplot2::labs(
             title = paste("Effect of", pred_lab, "across the welfare distribution"),
             x     = "Welfare quantile",
-            y     = paste("UQR coefficient")
+            y     = paste("UQR coefficient"),
+            caption = "Ribbon = 95% CI"
           ) +
           ggplot2::theme_bw(base_size = 14) +
-          ggplot2::theme(plot.title = ggplot2::element_text(face = "bold", hjust = 0.5, size = 11))
+          ggplot2::theme(
+            legend.position  = "bottom",
+            panel.border     = ggplot2::element_blank(),
+            strip.background = ggplot2::element_blank(),
+            plot.title       = ggplot2::element_text(face = "bold", hjust = 0.5, size = 11),
+            plot.caption     = ggplot2::element_text(size = 9, colour = "grey40", hjust = 0),
+            axis.text        = ggplot2::element_text(size = 9)
+          )
       } else {
         # Multiple terms (main + interactions): faceted
+        # Group each main effect with its own interactions:
+        #   main_1, main_1:modx, main_2, main_2:modx, ...
+        # fixest may write interactions as either `weather:modx` or
+        # `modx:weather`, and uses `::` to separate factor levels from
+        # variable names. Protect `::`, then pick the chunk containing
+        # pred_var as the grouping key (whichever side it sits on).
+        protected   <- gsub("::", "", plot_data$term, fixed = TRUE)
+        parts       <- strsplit(protected, ":", fixed = TRUE)
+        weather_pat <- paste0("\\b", pred_esc, "\\b")
+        main_part   <- vapply(parts, function(p) {
+          hit <- p[grepl(weather_pat, p)]
+          if (length(hit) == 0) p[1] else hit[1]
+        }, character(1))
+        is_int      <- lengths(parts) > 1
+        term_levels <- unique(plot_data$term_label[
+          order(match(main_part, unique(main_part)), is_int)
+        ])
+        plot_data$term_label <- factor(plot_data$term_label, levels = term_levels)
+
         ggplot2::ggplot(plot_data, ggplot2::aes(x = tau, y = estimate)) +
           ggplot2::geom_hline(yintercept = 0, linetype = "dashed", colour = "grey60") +
           ggplot2::geom_ribbon(
@@ -474,15 +543,23 @@ make_weather_effect_plot <- function(fit, pred_var, interaction_terms, is_binned
           ) +
           ggplot2::geom_line(colour = "steelblue", linewidth = 0.9) +
           ggplot2::geom_point(colour = "steelblue", size = 2) +
-          ggplot2::facet_wrap(~ term_label, scales = "free_y") +
+          ggplot2::facet_wrap(~ term_label, scales = "free_y", ncol = 2) +
           ggplot2::scale_x_continuous(breaks = taus, labels = scales::percent_format(1)) +
           ggplot2::labs(
             title = paste("Effect of", pred_lab, "across the welfare distribution"),
             x     = "Welfare quantile",
-            y     = "UQR coefficient"
+            y     = "UQR coefficient",
+            caption = "Ribbon = 95% CI"
           ) +
           ggplot2::theme_bw(base_size = 14) +
-          ggplot2::theme(plot.title = ggplot2::element_text(face = "bold", hjust = 0.5, size = 11))
+          ggplot2::theme(
+            legend.position  = "bottom",
+            panel.border     = ggplot2::element_blank(),
+            strip.background = ggplot2::element_blank(),
+            plot.title       = ggplot2::element_text(face = "bold", hjust = 0.5, size = 11),
+            plot.caption     = ggplot2::element_text(size = 9, colour = "grey40", hjust = 0),
+            axis.text        = ggplot2::element_text(size = 9)
+          )
       }
     }, error = function(e) blank_plot(paste0("RIF effect plot error: ", conditionMessage(e)))))
   }

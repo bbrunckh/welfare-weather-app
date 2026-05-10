@@ -548,14 +548,23 @@ run_sim_pipeline <- function(weather_raw, svy, sw, so,
     }
 
     preds <- apply_log_backtransform(preds, so)
-    # SP transfer
+
+    # SP direct transfer (applied on original scale, after back-transform).
+    # Re-sync .fitted (used downstream as y_point) so the transfer flows into
+    # aggregate_with_uncertainty(); kept in log scale when so$transform == "log".
     if ("._sp_transfer" %in% names(preds)) {
       preds[[so$name]] <- preds[[so$name]] + preds[["._sp_transfer"]]
+      preds$.fitted    <- if (isTRUE(so$transform == "log"))
+        log(pmax(preds[[so$name]], .Machine$double.eps))
+      else
+        preds[[so$name]]
     }
+
     # RIF returns old-style preds (no factor loading)
     wt_cols <- grep("^weight$|^hhweight$|^wgt$|^pw$", names(preds),
                     value = TRUE, ignore.case = TRUE)
     wt_col <- if (length(wt_cols) > 0) wt_cols[1] else NULL
+    
     return(list(
       y_point     = preds$.fitted,
       F_loading   = F_loading_rif,
@@ -566,88 +575,93 @@ run_sim_pipeline <- function(weather_raw, svy, sw, so,
       weather_raw = weather_raw,
       preds       = preds
     ))
-  }
+  
+  
+  } else {
 
-  # Standard (fixest/ranger/glmnet) path: single point-estimate prediction
 
-  preds <- tryCatch(
-    predict_outcome(
-      model      = model,
-      newdata    = survey_wd_sim,
-      residuals  = residuals,
-      outcome    = so$name,
-      id         = id_col,
-      train_data = train_data,
-      engine     = engine,
-      precomputed_train_resid = precomputed_train_resid
-    ),
-    error = function(e) {
-      warning("[run_sim_pipeline] predict_outcome() failed: ", conditionMessage(e))
-      NULL
-    }
-  )
-
-  if (is.null(preds)) { rm(survey_wd_sim); return(NULL) }
-
-  # Extract y_point BEFORE back-transforming. aggregate_with_uncertainty()
-  # receives log-scale values when so$transform == "log" and applies exp()
-  # internally (including on Monte Carlo draws). Extracting after
-  # apply_log_backtransform() would cause double-exponentiation and produce
-  # wildly inflated simulation results.
-  y_point <- preds[[so$name]]
-
-  # Back-transform log outcomes (for preds_out diagnostics only)
-  preds <- apply_log_backtransform(preds, so)
-
-  # SP direct transfer (applied on original scale, after back-transform)
-  if ("._sp_transfer" %in% names(preds)) {
-    preds[[so$name]] <- preds[[so$name]] + preds[["._sp_transfer"]]
-    # Re-synchronise y_point: keep in log scale so aggregate_with_uncertainty
-    # still receives log-scale inputs and applies exp() exactly once.
-    y_point <- if (isTRUE(so$transform == "log"))
-      log(pmax(preds[[so$name]], .Machine$double.eps))
-    else
-      preds[[so$name]]
-  }
-
-  sim_year <- preds$sim_year
-  wt_cols  <- grep("^weight$|^hhweight$|^wgt$|^pw$", names(preds),
-                   value = TRUE, ignore.case = TRUE)
-  wt_col   <- if (length(wt_cols) > 0) wt_cols[1] else NULL
-  weight   <- if (!is.null(wt_col)) preds[[wt_col]] else NULL
-  id_vec   <- if (!is.null(id_col)) preds[[id_col]] else NULL
-
-  # Compute factor loadings for uncertainty propagation
-  F_loading <- NULL
-  if (!is.null(chol_Sigma) && identical(engine, "fixest") && inherits(model, "fixest")) {
-    tryCatch({
-      X_nonFE <- stats::model.matrix(model, data = survey_wd_sim, type = "rhs")
-      # fixest may drop rows with unobserved FE levels; align to predicted rows
-      if (nrow(X_nonFE) == length(y_point)) {
-        F_loading <- X_nonFE %*% t(chol_Sigma)
-      } else {
-        warning("[run_sim_pipeline] model.matrix row mismatch, skipping F_loading")
+    # Standard (fixest/ranger/glmnet) path: single point-estimate prediction
+    preds <- tryCatch(
+      predict_outcome(
+        model      = model,
+        newdata    = survey_wd_sim,
+        residuals  = residuals,
+        outcome    = so$name,
+        id         = id_col,
+        train_data = train_data,
+        engine     = engine,
+        precomputed_train_resid = precomputed_train_resid
+      ),
+      error = function(e) {
+        warning("[run_sim_pipeline] predict_outcome() failed: ", conditionMessage(e))
+        NULL
       }
-    }, error = function(e) {
-      warning("[run_sim_pipeline] F_loading computation failed: ", conditionMessage(e))
-    })
+    )
+
+    if (is.null(preds)) { rm(survey_wd_sim); return(NULL) }
+
+    # Extract y_point BEFORE back-transforming. aggregate_with_uncertainty()
+    # receives log-scale values when so$transform == "log" and applies exp()
+    # internally (including on Monte Carlo draws). Extracting after
+    # apply_log_backtransform() would cause double-exponentiation and produce
+    # wildly inflated simulation results.
+    y_point <- preds[[so$name]]
+
+    # Back-transform log outcomes (for preds_out diagnostics only)
+    preds <- apply_log_backtransform(preds, so)
+
+    # SP direct transfer (applied on original scale, after back-transform)
+    if ("._sp_transfer" %in% names(preds)) {
+      preds[[so$name]] <- preds[[so$name]] + preds[["._sp_transfer"]]
+      # Re-synchronise y_point: keep in log scale so aggregate_with_uncertainty
+      # still receives log-scale inputs and applies exp() exactly once.
+      y_point <- if (isTRUE(so$transform == "log"))
+        log(pmax(preds[[so$name]], .Machine$double.eps))
+      else
+        preds[[so$name]]
+    }
+
+    sim_year <- preds$sim_year
+    wt_cols  <- grep("^weight$|^hhweight$|^wgt$|^pw$", names(preds),
+                    value = TRUE, ignore.case = TRUE)
+    wt_col   <- if (length(wt_cols) > 0) wt_cols[1] else NULL
+    weight   <- if (!is.null(wt_col)) preds[[wt_col]] else NULL
+    id_vec   <- if (!is.null(id_col)) preds[[id_col]] else NULL
+
+    # Compute factor loadings for uncertainty propagation
+    F_loading <- NULL
+    if (!is.null(chol_Sigma) && identical(engine, "fixest") && inherits(model, "fixest")) {
+      tryCatch({
+        X_nonFE <- stats::model.matrix(model, data = survey_wd_sim, type = "rhs")
+        # fixest may drop rows with unobserved FE levels; align to predicted rows
+        if (nrow(X_nonFE) == length(y_point)) {
+          F_loading <- X_nonFE %*% t(chol_Sigma)
+        } else {
+          warning("[run_sim_pipeline] model.matrix row mismatch, skipping F_loading")
+        }
+      }, error = function(e) {
+        warning("[run_sim_pipeline] F_loading computation failed: ", conditionMessage(e))
+      })
+    }
+
+    rm(survey_wd_sim)
+
+    # For slim mode (future keys), don't keep full preds
+    preds_out <- if (slim) NULL else preds
+
+    list(
+      y_point     = y_point,
+      F_loading   = F_loading,
+      sim_year    = sim_year,
+      weight      = weight,
+      id_vec      = id_vec,
+      n_pre_join  = n_pre_join,
+      weather_raw = weather_raw,
+      preds       = preds_out
+    )
+
   }
 
-  rm(survey_wd_sim)
-
-  # For slim mode (future keys), don't keep full preds
-  preds_out <- if (slim) NULL else preds
-
-  list(
-    y_point     = y_point,
-    F_loading   = F_loading,
-    sim_year    = sim_year,
-    weight      = weight,
-    id_vec      = id_vec,
-    n_pre_join  = n_pre_join,
-    weather_raw = weather_raw,
-    preds       = preds_out
-  )
 }
 
 # ---------------------------------------------------------------------------- #

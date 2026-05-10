@@ -20,7 +20,7 @@ POLICY_DEFINITIONS <- list(
     vars  = c("electricity")
   ),
   "B" = list(
-    label = "Drinking Water access",
+    label = "Improved water access",
     vars  = c("imp_wat_rec")
   ),
   "C" = list(
@@ -38,8 +38,92 @@ POLICY_DEFINITIONS <- list(
   "F" = list(
     label = "Mobile phone access",
     vars  = c("cellphone")
+  ),
+  "G" = list(
+    label = "Piped water access",
+    vars  = c("piped")
+  ),
+  "H" = list(
+    label = "Piped water access (on premises)",
+    vars  = c("piped_to_prem")
+  ),
+  "I" = list(
+    label = "Improved water and sanitation access",
+    vars  = c("imp_wat_san_rec"),
+    # Derived: 1 iff both sources are 1, 0 if any source is 0, NA if any
+    # source is NA. Built by apply_policy_derivations() after data load.
+    derived = list(
+      imp_wat_san_rec = list(
+        label   = "Improved water and sanitation access",
+        sources = c("imp_wat_rec", "imp_san_rec"),
+        combine = "and_one",
+        role    = "hh"
+      )
+    )
   )
 )
+
+
+#' Apply derived columns from POLICY_DEFINITIONS to a survey data frame
+#'
+#' Walks every policy entry that has a `derived` spec and adds the derived
+#' columns to `df`. Currently supports `combine = "and_one"`: result is 1 iff
+#' all sources equal 1, 0 if any source is 0, and NA if any source is NA.
+#' Skips a derivation when its sources are not all present in `df`.
+#'
+#' @param df A data frame (typically the merged survey data).
+#'
+#' @return `df` with derived policy columns added.
+#' @export
+apply_policy_derivations <- function(df) {
+  for (key in names(POLICY_DEFINITIONS)) {
+    der <- POLICY_DEFINITIONS[[key]]$derived
+    if (is.null(der)) next
+    for (vname in names(der)) {
+      spec <- der[[vname]]
+      if (!all(spec$sources %in% names(df))) next
+      mat <- as.matrix(df[, spec$sources, drop = FALSE])
+      if (identical(spec$combine, "and_one")) {
+        any_na <- rowSums(is.na(mat)) > 0
+        df[[vname]] <- ifelse(
+          any_na, NA_integer_,
+          as.integer(rowSums(mat == 1) == ncol(mat))
+        )
+      }
+    }
+  }
+  df
+}
+
+
+#' Add metadata rows for derived policy variables to `variable_list`
+#'
+#' Adds a row for each derived variable defined in `POLICY_DEFINITIONS` so
+#' that the rest of the app (labels, role-based filtering) can find it.
+#' Existing rows with the same `name` are left unchanged.
+#'
+#' @param vl A data frame with at least `name` and `label` columns.
+#'
+#' @return `vl` extended with derived-variable rows.
+#' @export
+add_derived_policy_vars_to_vl <- function(vl) {
+  if (is.null(vl) || nrow(vl) == 0) return(vl)
+  for (key in names(POLICY_DEFINITIONS)) {
+    der <- POLICY_DEFINITIONS[[key]]$derived
+    if (is.null(der)) next
+    for (vname in names(der)) {
+      if (vname %in% vl$name) next
+      spec <- der[[vname]]
+      role <- spec$role %||% "hh"
+      new_row <- vl[NA_integer_, , drop = FALSE][1, , drop = FALSE]
+      new_row$name  <- vname
+      if ("label" %in% names(new_row)) new_row$label <- spec$label %||% vname
+      if (role %in% names(new_row))    new_row[[role]] <- 1L
+      vl <- rbind(vl, new_row)
+    }
+  }
+  vl
+}
 
 #' Named vector of policy choices for selectize input
 #' @return Named character vector (display label → key).

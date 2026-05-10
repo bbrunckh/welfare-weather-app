@@ -18,17 +18,18 @@ mod_1_06_model_ui <- function(id) {
       uiOutput(ns("model_selector_ui"))
     ),
     wellPanel(
-      uiOutput(ns("policy_button_ui")),
       uiOutput(ns("policy_ui"))
     ),
     wellPanel(
-      uiOutput(ns("model_specs_button_ui")),
+      # uiOutput(ns("model_specs_button_ui")),
       uiOutput(ns("model_specs_ui")),
       shiny::helpText(
         "More model types and covariate selection methods will be added in future updates.",
         style = "color: red; font-size: 12px;"
       )
-    )
+    ),
+    shiny::actionButton(ns("run_model"), "Run model",
+                        class = "btn-primary", style = "width: 100%;")
   )
 }
 
@@ -116,21 +117,8 @@ mod_1_06_model_server <- function(id,
 
     # ---- Policy scenarios toggle ----------------------------------------------
 
-    policy_open <- reactiveVal(FALSE)
-
-    output$policy_button_ui <- renderUI({
-      req(input$model_type)
-      shiny::actionButton(ns("policy_toggle"), "Policy scenarios",
-                          style = "margin-bottom:10px;")
-    })
-
-    observeEvent(input$policy_toggle, {
-      policy_open(!isTRUE(policy_open()))
-    })
-
     output$policy_ui <- renderUI({
       req(input$model_type)
-      if (!isTRUE(policy_open())) return(NULL)
 
       vl <- valid_vl()
       choices <- get_policy_choices()
@@ -216,23 +204,23 @@ mod_1_06_model_server <- function(id,
 
     # ---- Model parameters toggle --------------------------------------------
 
-    model_specs_open <- reactiveVal(FALSE)
+    # model_specs_open <- reactiveVal(FALSE)
 
-    output$model_specs_button_ui <- renderUI({
-      req(input$model_type)
-      shiny::actionButton(ns("model_specs"), "Model parameters",
-                          style = "margin-bottom:10px;")
-    })
+    # output$model_specs_button_ui <- renderUI({
+    #   req(input$model_type)
+    #   shiny::actionButton(ns("model_specs"), "Model parameters",
+    #                       style = "margin-bottom:10px;")
+    # })
 
-    observeEvent(input$model_specs, {
-      model_specs_open(!isTRUE(model_specs_open()))
-    })
+    # observeEvent(input$model_specs, {
+    #   model_specs_open(!isTRUE(model_specs_open()))
+    # })
 
     # ---- Model specification panel ------------------------------------------
 
     output$model_specs_ui <- renderUI({
       req(input$model_type)
-      if (!isTRUE(model_specs_open())) return(NULL)
+      # if (!isTRUE(model_specs_open())) return(NULL)
 
       ixn <- interact_vars()
       fe  <- fe_vars()
@@ -419,13 +407,7 @@ mod_1_06_model_server <- function(id,
             style = "margin-bottom:12px;"
           ),
 
-          uiOutput(ns("lasso_advanced_ui")),
-
-          shiny::actionButton(
-            ns("run_lasso"),
-            "Run Lasso",
-            class = "btn-primary"
-          ),
+          uiOutput(ns("lasso_advanced_ui"))
 
         )
       }
@@ -643,7 +625,8 @@ mod_1_06_model_server <- function(id,
 
     # --- LASSO MODEL ---------------------------------------------------------
 
-    lasso_result <- eventReactive(input$run_lasso, {
+    lasso_result <- eventReactive(input$run_model, {
+      req(isTRUE(input$covariates == "Lasso"))
       req(survey_weather())
       req(selected_outcome())
       req(selected_weather())
@@ -701,8 +684,10 @@ mod_1_06_model_server <- function(id,
       })
     })
 
-    # Showing notifications and updating status based on Lasso execution
-    observeEvent(input$run_lasso, {
+    # Showing notifications and updating status based on Lasso execution.
+    # Only fires when the user has chosen Lasso covariate selection.
+    observeEvent(input$run_model, {
+      req(isTRUE(input$covariates == "Lasso"))
       lasso_status("running")
       showNotification("Lasso started...",
                       type = "message",
@@ -787,7 +772,8 @@ mod_1_06_model_server <- function(id,
 
     list(
       selected_model    = selected_model,
-      selected_policies = selected_policies_rv
+      selected_policies = selected_policies_rv,
+      run_model         = reactive(input$run_model)
     )
   })
 }

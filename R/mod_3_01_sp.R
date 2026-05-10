@@ -292,8 +292,8 @@ mod_3_01_sp_server <- function(id,
           label    = NULL,
           choices  = c(
 
-            "Set transfer per HH \u2192 derive total budget" = "transfer_first",
-            "Set total budget \u2192 derive transfer per HH" = "budget_first"
+            "Set transfer per person \u2192 derive total budget" = "transfer_first",
+            "Set total budget \u2192 derive transfer per person" = "budget_first"
           ),
           selected = "transfer_first"
         ),
@@ -372,7 +372,7 @@ mod_3_01_sp_server <- function(id,
             inputId = ns("transfer_amount_usd"),
             label   = tags$span(
               tags$i(class = "fa fa-dollar-sign me-1"),
-              "Transfer per household ($)"
+              "Transfer per person ($)"
             ),
             value = 0, min = 0, step = 10
           )
@@ -387,7 +387,7 @@ mod_3_01_sp_server <- function(id,
             tags$small(
               tags$i(class = "fa fa-calculator me-1"),
               tags$strong("Derived: "),
-              "transfer per HH = total budget \u00f7 # of eligible beneficiaries"
+              "transfer per person = total budget \u00f7 # of eligible beneficiaries"
             )
           )
         ),
