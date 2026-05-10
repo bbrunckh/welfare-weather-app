@@ -207,32 +207,6 @@ mod_2_01_weathersim_ui <- function(id) {
         " Adds ~30s after simulation completes. Dev mode only.",
         style = "font-size:11px; color:#555; margin-top:2px; margin-bottom:4px;"
       ),
-      shiny::tags$hr(style = "margin: 6px 0;"),
-      shiny::tags$h6("Parallel computation",
-                     style = "font-weight:600; margin-bottom:4px;"),
-      shiny::checkboxInput(
-        ns("use_parallel"),
-        label = "Use parallel computation",
-        value = FALSE
-      ),
-      shiny::conditionalPanel(
-        condition = sprintf("input['%s'] == true", ns("use_parallel")),
-        shiny::sliderInput(
-          ns("n_workers"),
-          label = "CPU cores to use",
-          min   = 2L,
-          max   = max(2L, parallelly::availableCores(logical = FALSE) - 1L),
-          value = min(4L, parallelly::availableCores(logical = FALSE) - 1L),
-          step  = 1L
-        ),
-        shiny::helpText(
-          sprintf(
-            "%d physical cores detected. 1 reserved for app session.",
-            parallelly::availableCores(logical = FALSE)
-          ),
-          style = "font-size:11px; color:#555;"
-        )
-      )
     ),
     shiny::tags$hr(style = "margin: 10px 0;"),
 
@@ -562,8 +536,6 @@ mod_2_01_weathersim_server <- function(id,
             stored_breaks       = stored_breaks(),
             ensemble_band_q     = ensemble_band_q,
             full_ensemble       = FALSE,   
-            use_parallel        = isTRUE(input$use_parallel),
-            n_workers           = as.integer(input$n_workers %||% 1L),
             progress_fn         = function(value, detail)
                                     shiny::setProgress(value = value,
                                                        detail = detail)

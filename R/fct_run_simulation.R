@@ -68,8 +68,6 @@ fct_run_simulation <- function(sw,
                                 stored_breaks,
                                 ensemble_band_q,
                                 full_ensemble,
-                                use_parallel = FALSE,
-                                n_workers = 1L,
                                 notify_fn   = function(msg) message(msg),
                                 progress_fn = function(value, detail) invisible(NULL)) {
 
@@ -211,108 +209,29 @@ fct_run_simulation <- function(sw,
     total_runs
   ))
 
-    # ---- Parallel plan ------------------------------------------------------ #
-  if (isTRUE(use_parallel) && n_workers > 1L) {
-    n_workers_safe <- min(
-      as.integer(n_workers),
-      parallelly::availableCores(logical = FALSE) - 1L,
-      8L
-    )
-    # Install wiseapp so multisession workers can load it
-    # In dev mode (pkgload::load_all()) the package is not installed —
-    # workers spawn fresh R sessions that need the installed version
-    if (!isTRUE(getOption("golem.app.prod"))) {
-      pkg_version <- tryCatch(
-        utils::packageVersion("wiseapp"),
-        error = function(e) NULL
-      )
-      if (is.null(pkg_version)) {
-        message("[wiseapp] Installing package for parallel workers...")
-        suppressMessages(devtools::install(quiet = TRUE, upgrade = "never"))
-        message("[wiseapp] Package installed — starting workers.")
-      } else {
-        message(sprintf(
-          "[wiseapp] Package v%s already installed — skipping install.",
-          pkg_version
-        ))
-      }
-    }
-    message(sprintf("[wiseapp] Parallel mode: %d workers (multisession)",
-                    n_workers_safe))
-    future::plan(future::multisession, workers = n_workers_safe)
-    on.exit(future::plan(future::sequential), add = TRUE)
-  } else {
-    n_workers_safe <- 1L
-    future::plan(future::sequential)
-    on.exit(future::plan(future::sequential), add = TRUE)
-  }
+  # Serial execution only — parallelisation removed
+  n_workers_safe <- 1L
 
-  # ---- Pre-run all pipelines (parallel or sequential) --------------------- #
+  # ---- Pre-run all pipelines  --------------------- #
   progress_fn(0.50, "Running simulations...")
 
   t_start <- t_start_total   # key loop elapsed = total elapsed from function entry
 
-    # Increase globals size limit for parallel workers
-    # svy + model + weather_result require ~3GB total — set limit accordingly #DRK Note - May need to adjust.
-    #old_max <- getOption("future.globals.maxSize")
-    #options(future.globals.maxSize = 4 * 1024^3)  # 4GB
-    #on.exit(options(future.globals.maxSize = old_max), add = TRUE)
 
   t_start_pipeline <- proc.time()[["elapsed"]]
   message("[wiseapp] Running simulation pipelines...")
   progress_fn(0.35, sprintf("Running %d simulation pipelines...", n_keys))
 
-  # Pre-split weather_result per key — each parallel worker only
+  # Pre-split weather_result per key — each (potential) parallel worker only
   # receives its own key's weather data (~10MB) not the full 228MB
   weather_per_key <- setNames(
     lapply(all_keys, function(k) weather_result[[k]]),
     all_keys
   )
 
-  pipeline_list <- if (isTRUE(use_parallel) && n_workers_safe > 1L) {
-    # Parallel path — future_lapply across keys
-        future.apply::future_lapply(
-      seq_along(all_keys),
-      function(ki) {
-        key <- all_keys[[ki]]
-        tryCatch(
-          run_sim_pipeline(
-            weather_raw = weather_per_key[[key]],
-            svy         = svy,
-            sw          = sw,
-            so          = so,
-            model       = model,
-            residuals   = residuals,
-            train_data  = train_data,
-            engine      = engine,
-            chol_obj    = chol_obj
-          ),
-          error = function(e) {
-            warning(sprintf("[fct_run_simulation] Key %s failed: %s",
-                            key, conditionMessage(e)))
-            NULL
-          }
-        )
-      },
-      future.seed     = TRUE,
-      future.packages = "wiseapp",
-      future.globals  = list(
-        all_keys        = all_keys,
-        weather_per_key = weather_per_key,
-        svy             = svy,
-        sw              = sw,
-        so              = so,
-        model           = model,
-        residuals       = residuals,
-        train_data      = train_data,
-        engine          = engine,
-        chol_obj        = chol_obj
-      )
-    )
-  } else {
     # Serial path — per-key messages fire BEFORE each key runs
-    pl <- vector("list", length(all_keys))
-        for (ki in seq_along(all_keys)) {
+    pipeline_list <- vector("list", length(all_keys))
+      for (ki in seq_along(all_keys)) {
       key       <- all_keys[[ki]]
       is_hist_k <- identical(key, "historical")
       t_el      <- proc.time()[["elapsed"]] - t_start_pipeline
@@ -339,7 +258,7 @@ fct_run_simulation <- function(sw,
                                   "\\1", key),
                          format_elapsed(t_el))
       )
-      pl[[ki]] <- tryCatch(
+      pipeline_list[[ki]] <- tryCatch(
         run_sim_pipeline(
           weather_raw = weather_per_key[[key]],
           svy         = svy,
@@ -358,8 +277,6 @@ fct_run_simulation <- function(sw,
         }
       )
     }
-    pl
-  }
 
   rm(weather_per_key)
   gc(verbose = FALSE)

@@ -49,11 +49,6 @@ Imports:
     tools,
     ranger,
     matrixStats,
-    pkgload,
-    furrr (>= 0.3.0),
-    future (>= 1.33.0),
-    future.apply (>= 1.11.0),
-    parallelly (>= 1.36.0),
-    devtools
+    pkgload
 URL: https://github.com/worldbank/welfare-weather-app
 BugReports: https://github.com/worldbank/welfare-weather-app/issues
