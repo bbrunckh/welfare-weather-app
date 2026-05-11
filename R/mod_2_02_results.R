@@ -50,6 +50,36 @@ mod_2_02_results_ui <- function(id) {
             selected = "none"
           )
         ),
+        shiny::selectInput(
+          ns("uncertainty_band"),
+          label   = "Coefficient Uncertainty",
+          choices = c(
+            "50% (p25-p75)"    = "p25_p75",
+            "60% (p20-p80)"    = "p20_p80",
+            "80% (p10-p90)"    = "p10_p90",
+            "90% (p05-p95)"    = "p05_p95",
+            "95% (p025-p975)"  = "p025_p975",
+            "99% (p005-p995)"  = "p005_p995",
+            "Max (min-max)"    = "minmax"
+          ),
+          selected = "p10_p90"
+        ),
+
+        shiny::selectInput(
+          ns("ensemble_band"),
+          label    = "Ensemble Variation",
+          choices  = c(
+            "50%" = "p25_p75",
+            "60%" = "p20_p80",
+            "80%" = "p10_p90",
+            "90%" = "p05_p95",
+            "95%" = "p025_p975",
+            "99%" = "p005_p995",
+            "Full range" = "minmax"
+          ),
+          selected = "minmax"
+        ),
+
         shiny::tags$div(style = "flex:1; min-width:160px;",
           shiny::uiOutput(ns("cmp_pov_line_ui"))
         )
@@ -67,6 +97,15 @@ mod_2_02_results_ui <- function(id) {
         value = TRUE
       ),
       shiny::uiOutput(ns("weight_status_ui")),
+      shiny::checkboxInput(
+        ns("show_coef_uncertainty"),
+        label = "Include coefficient uncertainty",
+        value = TRUE
+      ),
+      shiny::uiOutput(ns("coef_uncertainty_status_ui")), 
+      
+
+
       shiny::radioButtons(
         ns("cmp_group_order"),
         label    = "Group charts and tables by",
@@ -85,14 +124,13 @@ mod_2_02_results_ui <- function(id) {
       shiny::plotOutput(ns("summary_box_plot"), height = "600px"),
       shiny::tags$p(
         style = "font-size:11px; color:#666; margin-top:6px;",
-        "The central dot shows the mean annual simulated value; the thick",
-        # TODO: update percentile labels below if p05/p95 thresholds change.
-        "The central dot shows the mean annual simulated value; the thick", # TODO: update caption if percentile thresholds change from P5/P95
-        "spans the 95% interval (P2.5-P97.5).",
+        "Central dot = mean annual welfare across simulation years.",
         shiny::tags$br(),
-        "Future scenarios apply climate-adjusted shifts to the same historical annual base.",
+        "Thick bar = variation due to weather (historical and CMPI6 ensembles for future).",
         shiny::tags$br(),
-        "Dashed line = historical mean."
+        "Thin line =  coefficient uncertainty (cannot be disentangled from the underlying weather variation)).",
+        shiny::tags$br(),
+        "Future scenarios apply climate perturbations to the historical weather base."
       )
     ),
 
@@ -110,7 +148,7 @@ mod_2_02_results_ui <- function(id) {
           ns("show_return_period"),
           "Show return period lines",
           value = TRUE
-        )
+        ),
       ),
       shiny::plotOutput(ns("exceedance_plot"), height = "400px"),
       shiny::uiOutput(ns("exceedance_caption"))
@@ -149,7 +187,10 @@ mod_2_02_results_server <- function(id,
                                      saved_scenarios,
                                      selected_hist,
                                      tabset_id,
-                                     tabset_session = NULL) {
+                                     tabset_session = NULL,
+                                     pov_line_sim   = reactive(3.00),
+                                     hist_agg_rv     = reactive(NULL),
+                                     scenario_agg_rv = reactive(NULL)) {
   moduleServer(id, function(input, output, session) {
     ns <- session$ns
 
@@ -184,20 +225,12 @@ mod_2_02_results_server <- function(id,
     })
 
 
-    # Detect weight column name once -- passed to aggregate_sim_preds().
-    # NULL when no weight column exists in preds or toggle is off.
-    weight_col <- reactive({
-      req(hist_sim())
-      if (!isTRUE(input$use_weights)) return(NULL)
-
-      if ("weight" %in% names(hist_sim()$preds)) "weight" else NULL
-    })
 
     output$weight_status_ui <- shiny::renderUI({
       req(hist_sim())
       # Detect weight column independently of the toggle -- this allows
       # the amber state when the column exists but the toggle is OFF.
-      has_w  <- "weight" %in% names(hist_sim()$preds)
+      has_w  <- !is.null(hist_sim()$pipeline$weight)
 
       tog_on <- isTRUE(input$use_weights)
       if (has_w && tog_on)
@@ -214,137 +247,245 @@ mod_2_02_results_server <- function(id,
           style = "font-size:11px; color:#c62828; margin:2px 0 6px 0;",
           "🔴 No weight column found — unweighted")
     })
+    outputOptions(output, "weight_status_ui", suspendWhenHidden = TRUE)
 
-    pov_line_val <- reactive({
-      if (isTRUE(input$cmp_agg_method %in% c("headcount_ratio", "gap", "fgt2"))) {
-        as.numeric(input$cmp_pov_line) %||% 3.00
+  output$coef_uncertainty_status_ui <- shiny::renderUI({
+      req(hist_sim())
+      if (!has_draws()) {
+        shiny::tags$p(
+          style = "font-size:11px; color:#c62828; margin:2px 0 6px 0;",
+          "\U0001f534 Coefficient draws skipped at simulation time"
+        )
+      } else if (!isTRUE(input$show_coef_uncertainty)) {
+        shiny::tags$p(
+          style = "font-size:11px; color:#e65100; margin:2px 0 6px 0;",
+          "\u26a0 Coefficient uncertainty available but not shown"
+        )
+      } else {
+        shiny::tags$p(
+          style = "font-size:11px; color:#2e7d32; margin:2px 0 6px 0;",
+          "\u2705 Coefficient uncertainty shown"
+        )
+      }
+    })
+    outputOptions(output, "coef_uncertainty_status_ui",
+                  suspendWhenHidden = TRUE)
+
+    pov_line_raw <- reactive({
+      if (isTRUE(input$cmp_agg_method %in%
+                 c("headcount_ratio", "gap", "fgt2",
+                   "prosperity_gap", "avg_poverty"))) {
+        as.numeric(pov_line_sim() %||% 3.00)
       } else {
         NULL
       }
     })
+    # Debounce — wait 800ms after last change before recomputing
+    # Prevents 300 recomputes per keypress when typing a poverty line value
+    pov_line_val <- debounce(pov_line_raw, 800)
+    weight_key <- reactive({
+      if (isTRUE(input$use_weights) &&
+          !is.null(hist_sim()) &&
+          isTRUE(hist_sim()$has_weights)) "weighted" else "unweighted"
+    })
+
+    # Shared deviation reference — used by all_series_tbl and exceedance_ribbon
+        hist_ref_val <- reactive({
+          req(hist_agg_rv())
+          method    <- input$cmp_agg_method %||% "mean"
+          wk        <- weight_key()
+          deviation <- input$cmp_deviation %||% "none"
+          if (identical(deviation, "none")) return(0)
+          raw_vals <- hist_agg_rv()[[wk]][[method]]$value
+          if (identical(deviation, "mean"))
+            mean(raw_vals, na.rm = TRUE)
+          else
+            stats::median(raw_vals, na.rm = TRUE)
+        })
+
+
+        # ---- Coefficient draws availability -----------------------------------
+    has_draws <- reactive({
+      req(hist_sim())
+      !is.null(hist_sim()$chol_obj)
+    })
+
+    # Auto-uncheck coefficient uncertainty when no draws available
+    observeEvent(hist_sim(), {
+      req(hist_sim())
+      if (!has_draws()) {
+        shiny::updateCheckboxInput(
+          session,
+          "show_coef_uncertainty",
+          value = FALSE
+        )
+      }
+    }, ignoreInit = TRUE)
+
+
+
+
 
     selected_scenario_names <- reactive({
       sc   <- saved_scenarios()
-      if (length(sc) == 0) return(character(0))
-      nms  <- names(sc)
-      ssps <- if (length(input$filter_ssp)  == 0) all_ssps()                          else input$filter_ssp
-      # Decode safe values back to "YYYY-YYYY" ranges for grepl matching
-      yr_vals <- if (length(input$filter_year) == 0) names(all_anchor_years())        else sub("_", "-", input$filter_year)
-      keep <- vapply(nms, function(nm) {
-        is_ssp <- grepl("^SSP", nm)
-        if (!is_ssp) return(TRUE)
-        ssp_match <- any(vapply(ssps, function(s) startsWith(nm, s), logical(1)))
-        yr_match  <- length(yr_vals) == 0 ||
-          any(vapply(yr_vals, function(y) grepl(y, nm, fixed = TRUE), logical(1)))
-        ssp_match && yr_match
-      }, logical(1))
-      nms[keep]
+      if (length(sc) == 0L) return(character(0))
+      keys <- names(sc)
+
+      # Read each grid checkbox
+      selected <- Filter(Negate(is.null), lapply(keys, function(key) {
+        cb_id <- paste0("sc_", gsub("[^a-zA-Z0-9]", "_", key))
+        val   <- input[[cb_id]]
+        if (isTRUE(val)) key else NULL
+      }))
+
+      # Enforce minimum 1 selected
+      if (length(selected) == 0L) keys[1L] else unlist(selected)
     })
 
     agg_hist <- reactive({
-      req(hist_sim())
-      h         <- hist_sim()
+      req(hist_agg_rv())
       method    <- input$cmp_agg_method %||% "mean"
       deviation <- input$cmp_deviation  %||% "none"
-      use_w     <- isTRUE(input$use_weights)
-
-      agg <- aggregate_with_uncertainty(
-        y_point         = h$y_point,
-        F_loading       = h$F_loading,
-        group_vec       = h$sim_year,
-        so              = h$so,
-        agg_method      = method,
-        weights         = if (use_w) h$weight else NULL,
-        pov_line        = if (method %in% c("headcount_ratio", "gap", "fgt2"))
-                            as.numeric(input$cmp_pov_line) else NULL,
-        train_resid     = if (!is.null(h$train_data)) h$train_data$.resid else NULL,
-        residual_method = h$residuals %||% "none",
-        id_vec          = h$id_vec,
-        S               = as.integer(input$sim_n %||% 200L)
-      )
-
-      if (!identical(deviation, "none") && nrow(agg) > 0) {
-        agg <- deviation_from_centre(agg, "sim_year", deviation, loss = FALSE)
-        if ("deviation" %in% names(agg)) {
-          agg$value <- agg$deviation; agg$deviation <- NULL
-        }
-      }
-
-      x_label <- if (identical(deviation, "none")) {
-        label_agg_method(method)
-      } else {
-        paste0(label_agg_method(method), " — ", label_deviation(deviation))
-      }
-
-      list(out = agg, x_label = x_label)
+      out       <- hist_agg_rv()[[weight_key()]][[method]]
+      req(!is.null(out))
+      hist_ref  <- hist_ref_val()
+      if (!identical(deviation, "none") && nrow(out) > 0)
+        out <- dplyr::mutate(out, value = value - hist_ref)
+      x_label <- if (identical(deviation, "none")) label_agg_method(method) else
+        paste0(label_agg_method(method), " \u2014 ", label_deviation(deviation))
+      list(out = out, x_label = x_label)
     })
 
     agg_scenarios <- reactive({
+      req(scenario_agg_rv())
       sc <- saved_scenarios()
       if (length(sc) == 0) return(list())
-      h         <- hist_sim()
       method    <- input$cmp_agg_method %||% "mean"
       deviation <- input$cmp_deviation  %||% "none"
-      use_w     <- isTRUE(input$use_weights)
+      hist_ref <- hist_ref_val() 
+      x_label <- if (identical(deviation, "none")) label_agg_method(method) else
+        paste0(label_agg_method(method), " \u2014 ", label_deviation(deviation))
+        selected <- selected_scenario_names()
+        result <- setNames(lapply(names(sc), function(display_key) {
+          if (!display_key %in% selected) return(NULL)
+          out <- scenario_agg_rv()[[display_key]][[weight_key()]][[method]]
+          if (is.null(out) || nrow(out) == 0L) return(NULL)
+          if (!identical(deviation, "none"))
+            out <- dplyr::mutate(out, value = value - hist_ref)
+          list(out = out, x_label = x_label)
+        }), names(sc))
+      Filter(function(x) !is.null(x) && !is.null(x$out) && nrow(x$out) > 0, result)
+    })
 
-      x_label <- if (identical(deviation, "none")) {
-        label_agg_method(method)
-      } else {
-        paste0(label_agg_method(method), " — ", label_deviation(deviation))
-      }
+    exceedance_ribbon <- reactive({
+      req(hist_agg_rv())
+      method <- input$cmp_agg_method %||% "mean"
+      wk     <- weight_key()
+      bq <- resolve_band_q(input$uncertainty_band %||% "p10_p90")
 
-      result <- lapply(sc, function(s) {
-        tryCatch({
-          per_model <- lapply(s$models, function(mod) {
-            aggregate_with_uncertainty(
-              y_point         = mod$y_point,
-              F_loading       = mod$F_loading,
-              group_vec       = mod$sim_year,
-              so              = s$so,
-              agg_method      = method,
-              weights         = if (use_w) mod$weight else NULL,
-              pov_line        = if (method %in% c("headcount_ratio", "gap", "fgt2"))
-                                  as.numeric(input$cmp_pov_line) else NULL,
-              train_resid     = if (!is.null(h$train_data)) h$train_data$.resid else NULL,
-              residual_method = h$residuals %||% "none",
-              id_vec          = mod$id_vec,
-              S               = as.integer(input$sim_n %||% 200L)
-            )
-          })
+      hist_ref <- hist_ref_val()
 
-          combined <- combine_ensemble_results(per_model)
+      # Historical ribbon — pass raw draws; deviation applied to result only
+        hist_tbl <- hist_agg_rv()[[wk]][[method]]
+        hist_ribbon <- if (!is.null(hist_tbl) && nrow(hist_tbl) > 0L) {
+          r <- compute_exceedance_ribbon(hist_tbl, band_q = bq)
+          if (!is.null(r)) dplyr::mutate(r,
+            welfare_mid = welfare_mid - hist_ref,
+            welfare_lo  = welfare_lo  - hist_ref,
+            welfare_hi  = welfare_hi  - hist_ref,
+            scenario = "Historical",
+            ssp_key  = "historical"
+          ) |>
+            dplyr::rename(band_lo = welfare_lo, band_hi = welfare_hi) else NULL
+        } else NULL
 
-          # Deviation relative to historical baseline
-          if (!identical(deviation, "none") && nrow(combined) > 0) {
-            hist_ref <- agg_hist()$out
-            ref_val  <- if (identical(deviation, "mean")) mean(hist_ref$value, na.rm = TRUE)
-                        else if (identical(deviation, "median")) median(hist_ref$value, na.rm = TRUE)
-                        else NA_real_
-            if (!is.na(ref_val)) {
-              combined$value     <- combined$value - ref_val
-              if ("value_p05" %in% names(combined)) {
-                combined$value_p05 <- combined$value_p05 - ref_val
-                combined$value_p95 <- combined$value_p95 - ref_val
-              }
-              if ("model_values" %in% names(combined)) {
-                combined$model_values <- lapply(combined$model_values, function(v) v - ref_val)
-              }
-            }
-          }
+        # Scenario ribbons — pass raw draws; deviation applied to result only
+        sc_ribbons <- if (!is.null(scenario_agg_rv())) {
+          Filter(Negate(is.null), lapply(names(scenario_agg_rv()), function(dk) {
+            if (!dk %in% selected_scenario_names()) return(NULL)
+            tbl <- scenario_agg_rv()[[dk]][[wk]][[method]]
+            if (is.null(tbl) || nrow(tbl) == 0L) return(NULL)
+            # Pass raw model_lo/model_hi — no deviation here
+            m_lo <- if (!is.null(tbl$model_lo))
+              sort(tbl$model_lo, decreasing = TRUE) else NULL
+            m_hi <- if (!is.null(tbl$model_hi))
+              sort(tbl$model_hi, decreasing = TRUE) else NULL
+            r <- compute_exceedance_ribbon(tbl, band_q = bq,
+                                            model_lo = m_lo,
+                                            model_hi = m_hi)
+            if (is.null(r)) return(NULL)
+            ssp <- .normalise_ssp(dk) %||% "historical"
+            # Deviation applied to ribbon output only — shape unchanged
+            dplyr::mutate(r,
+              welfare_mid = welfare_mid - hist_ref,
+              welfare_lo  = welfare_lo  - hist_ref,
+              welfare_hi  = welfare_hi  - hist_ref,
+              scenario = dk,
+              ssp_key  = ssp
+            ) |> dplyr::rename(band_lo = welfare_lo, band_hi = welfare_hi)
+          }))
+        } else list()
 
-          list(out = combined, x_label = x_label)
-        }, error = function(e) {
-          message("[agg_scenarios] ERROR: ", conditionMessage(e))
-          NULL
-        })
-      })
+      result <-dplyr::bind_rows(c(list(hist_ribbon),
+                         Filter(Negate(is.null), sc_ribbons)))
+      if (nrow(result) == 0L) return(NULL)   
+
       result
+                         
     })
-    all_series <- reactive({
-      sc  <- agg_scenarios()
-      sel <- selected_scenario_names()
-      c(setNames(list(agg_hist()), hist_label()), sc[intersect(sel, names(sc))])
+    
+
+      all_series <- reactive({
+      req(agg_hist())
+      bq       <- resolve_band_q(input$uncertainty_band %||% "p10_p90")
+      hist_ref <- hist_ref_val()
+      wk       <- weight_key()
+      method   <- input$cmp_agg_method %||% "mean"
+
+      # Historical — add deviated value_lo/hi for hero plot whiskers
+      hist_raw_tbl <- hist_agg_rv()[[wk]][[method]]
+      hist_out <- agg_hist()$out |>
+        dplyr::mutate(
+          value_lo = purrr::map_dbl(
+            hist_raw_tbl$draw_values,
+            ~if (is.null(.x) || length(.x) == 0L) NA_real_
+             else quantile(.x, bq["lo"], na.rm = TRUE) - hist_ref),
+          value_hi = purrr::map_dbl(
+            hist_raw_tbl$draw_values,
+            ~if (is.null(.x) || length(.x) == 0L) NA_real_
+             else quantile(.x, bq["hi"], na.rm = TRUE) - hist_ref),
+          scenario = "Historical"
+        )
+      hist_list <- list(Historical = list(out = hist_out,
+                                          x_label = agg_hist()$x_label))
+
+      sc <- agg_scenarios()
+      if (length(sc) == 0L) return(hist_list)
+
+      sc_list <- setNames(lapply(names(sc), function(dk) {
+        sc_out <- sc[[dk]]$out
+        sc_raw <- scenario_agg_rv()[[dk]][[wk]][[method]]
+        if (is.null(sc_out) || is.null(sc_raw)) return(NULL)
+        out <- sc_out |>
+          dplyr::mutate(
+            value_lo = purrr::map_dbl(
+              sc_raw$draw_values,
+              ~if (is.null(.x) || length(.x) == 0L) NA_real_
+               else quantile(.x, bq["lo"], na.rm = TRUE) - hist_ref),
+            value_hi = purrr::map_dbl(
+              sc_raw$draw_values,
+              ~if (is.null(.x) || length(.x) == 0L) NA_real_
+               else quantile(.x, bq["hi"], na.rm = TRUE) - hist_ref),
+            scenario = dk
+          )
+        list(out = out, x_label = sc[[dk]]$x_label)
+      }), names(sc))
+
+      c(hist_list, Filter(Negate(is.null), sc_list))
     })
+
+
+
 
     table_subtitle <- reactive({
       req(agg_hist(), input$cmp_agg_method, input$cmp_deviation)
@@ -386,48 +527,82 @@ mod_2_02_results_server <- function(id,
     output$cmp_pov_line_ui <- renderUI({
       req(input$cmp_agg_method)
       if (input$cmp_agg_method %in% c("headcount_ratio", "gap", "fgt2")) {
-        shiny::numericInput(
-          inputId = ns("cmp_pov_line"),
-          label   = "Poverty line ($/day)",
-          value   = 3.00,
-          min     = 0.01,
-          step    = 0.5
+        pov_val <- sprintf("$%.2f", pov_line_sim() %||% 3.00)
+        shiny::tags$p(
+          style = "font-size:11px; color:#555; margin-top:4px;",
+          paste0("Poverty line: ", pov_val, "/day (fixed at simulation time)")
         )
       }
     })
 
     output$scenario_filter_ui <- renderUI({
       sc <- saved_scenarios()
-      if (length(sc) == 0)
+      if (length(sc) == 0L)
         return(shiny::helpText("Run a simulation."))
-      ssps <- all_ssps()
-      yrs  <- all_anchor_years()
-      mi   <- all_models_info()
-      tagList(
-        shiny::fluidRow(
-          shiny::column(4,
-            if (length(yrs) > 0)
-              shiny::checkboxGroupInput(
-                ns("filter_year"), label = "Projection periods",
-                choices = yrs, selected = yrs, inline = TRUE
-              )
-          ),
-          shiny::column(4,
-            if (length(ssps) > 0)
-              shiny::checkboxGroupInput(
-                ns("filter_ssp"), label = "SSPs",
-                choices = ssps, selected = ssps, inline = TRUE
-              )
-          ),
-          shiny::column(4,
-            if (any(mi > 1L))
-              shiny::helpText(
-                style = "font-size:11px; color:#555; margin-top:24px;",
-                paste0("Each SSP aggregates results from ",
-                       max(mi), " ensemble model(s).")
-              )
-          )
+
+      # Parse scenario keys into SSP × period grid
+      keys  <- names(sc)
+      ssps  <- sort(unique(sub(" / .*$", "", keys)))
+      yrs   <- sort(unique(sub("^.* / ", "", keys)))
+
+      # Build header row
+      header <- shiny::tags$tr(
+        shiny::tags$th(""),
+        lapply(ssps, function(s)
+          shiny::tags$th(s,
+            style = "text-align:center; font-size:11px;
+                    font-weight:600; padding:2px 8px;"))
+      )
+
+      # Build one row per period
+      period_rows <- lapply(yrs, function(yr) {
+        shiny::tags$tr(
+          shiny::tags$td(yr,
+            style = "font-size:11px; font-weight:600;
+                    padding:2px 8px; white-space:nowrap;"),
+          lapply(ssps, function(s) {
+            key     <- paste0(s, " / ", yr)
+            exists  <- key %in% keys
+            cb_id   <- ns(paste0("sc_", gsub("[^a-zA-Z0-9]", "_", key)))
+            shiny::tags$td(
+              style = "text-align:center; padding:2px 4px;",
+              if (exists)
+                shiny::checkboxInput(
+                  cb_id,
+                  label = NULL,
+                  value = TRUE
+                )
+              else
+                shiny::tags$span(
+                  style = "color:#ccc; font-size:11px;",
+                  "—"
+                )
+            )
+          })
         )
+      })
+
+      shiny::tags$table(
+        id    = "scenario-filter-grid",
+        style = "border-collapse:collapse; margin-top:4px;",
+        shiny::tags$style(shiny::HTML("
+          #scenario-filter-grid .checkbox { margin: 0; padding: 0; }
+          #scenario-filter-grid .checkbox label { 
+            padding-left: 0; 
+            min-height: 0;
+          }
+          #scenario-filter-grid .checkbox label span { display: none; }
+          #scenario-filter-grid input[type='checkbox'] { 
+            width: 16px; height: 16px; 
+            margin: 0 auto; 
+            display: block;
+            position: static;
+          }
+          #scenario-filter-grid td { padding: 4px 12px; }
+          #scenario-filter-grid th { padding: 4px 12px; font-size: 11px; }
+        ")),
+        shiny::tags$thead(header),
+        shiny::tags$tbody(period_rows)
       )
     })
 
@@ -436,17 +611,30 @@ mod_2_02_results_server <- function(id,
       plot_pointrange_climate(
         scenarios   = all_series(),
         hist_agg    = agg_hist(),
-        group_order = input$cmp_group_order %||% "scenario_x_year"
+        group_order = input$cmp_group_order %||% "scenario_x_year",
+        coef_bands_tbl   = if (isTRUE(input$show_coef_uncertainty) && has_draws()) 
+          dplyr::bind_rows(lapply(all_series(), function(s) s$out))
+        else NULL,
+        band_q         = resolve_band_q(input$uncertainty_band %||% "p10_p90"),
+        ensemble_band_q  = resolve_band_q(input$ensemble_band     %||% "minmax"),
+        hist_ref        = hist_ref_val()
       )
     }, height = 600)
-    outputOptions(output, "summary_box_plot", suspendWhenHidden = FALSE)
 
     output$summary_threshold_table <- DT::renderDT({
       req(agg_hist())
       df <- build_threshold_table_df(
-        all_series  = all_series(),
-        group_order = input$cmp_group_order %||% "scenario_x_year"
+        all_series  = all_series(), 
+        group_order = input$cmp_group_order %||% "scenario_x_year",
+        band_q          = if (isTRUE(input$show_coef_uncertainty) && has_draws())
+                            resolve_band_q(input$uncertainty_band %||% "p10_p90")
+                          else NULL,
+        ensemble_band_q = resolve_band_q(input$ensemble_band %||% "minmax"),
+        hist_ref        = hist_ref_val()
       )
+      if (!isTRUE(input$show_coef_uncertainty) || !has_draws()) {
+        df <- dplyr::filter(df, Estimate == "Central")
+      }
       if (is.null(df))
         return(DT::datatable(data.frame(Message = "Insufficient data"),
                              rownames = FALSE, class = "compact stripe",
@@ -454,12 +642,12 @@ mod_2_02_results_server <- function(id,
       DT::datatable(
         df, rownames = FALSE, class = "compact stripe",
         options = list(
-          pageLength = 15, dom = "t", ordering = FALSE,
+          pageLength = 15, dom = "tip", ordering = list(list(2, "desc")),
           columnDefs = list(list(className = "dt-center", targets = "_all"))
-        )
+        ),
+        extensions = "Buttons"
       )
     })
-    outputOptions(output, "summary_threshold_table", suspendWhenHidden = FALSE)
 
     output$threshold_table_header <- renderUI({
       req(agg_hist())
@@ -477,7 +665,9 @@ mod_2_02_results_server <- function(id,
         shiny::tags$p(style = "font-size:11px; color:#666; margin-top:0; margin-bottom:2px;",
                       "High odds show the value reached in all but 1-in-N years."),
         shiny::tags$p(style = "font-size:11px; color:#666; margin-top:0;",
-                      "1:1 shows the median (50th percentile) simulated value.")
+                      "1:1 shows the median (50th percentile) simulated value."),
+        shiny::tags$p(style = "font-size:11px; color:#666; margin-top:0;",
+                      "N shows the number of observations used in calcualtion: historical central estimate only has historical years, while future scenarios have that multiplied by the number of ensembles models used in each year. Finally, if coefficient uncertainty is included, the number of underlying draws used in the calculation of the upper and lower is also factored in.")
       )
     })
 
@@ -489,24 +679,33 @@ mod_2_02_results_server <- function(id,
         x_label       = agg_hist()$x_label,
         return_period = isTRUE(input$show_return_period),
         n_sim_years   = nrow(agg_hist()$out),
-        logit_x       = isTRUE(input$exceedance_logit_x)
+        logit_x       = isTRUE(input$exceedance_logit_x),
+        ribbon_data   = if (isTRUE(input$show_coef_uncertainty)) exceedance_ribbon() else NULL,
+        band_q          = if (isTRUE(input$show_coef_uncertainty) && has_draws())
+                            resolve_band_q(input$uncertainty_band %||% "p10_p90")
+                          else NULL,
+        ensemble_band_q = resolve_band_q(input$ensemble_band     %||% "minmax"),
+        hist_ref        = hist_ref_val()
       )
     })
-    outputOptions(output, "exceedance_plot", suspendWhenHidden = FALSE)
 
     output$exceedance_caption <- renderUI({
       req(agg_hist())
       axis_txt <- if (isTRUE(input$exceedance_logit_x))
         "Probability axis is logit-scaled, giving equal visual weight to both tails."
       else
-        "The curve shows the estimated annual exceedance probability for each outcome value."
+        "The line shows the estimated annual exceedance probability for each outcome value."
       tagList(
         shiny::tags$p(style = "font-size:11px; color:#666; margin-top:6px; margin-bottom:2px;",
                       axis_txt),
         shiny::tags$p(style = "font-size:11px; color:#666; margin-top:0; margin-bottom:2px;",
                       "Low odds show the value exceeded in only 1-in-N years."),
         shiny::tags$p(style = "font-size:11px; color:#666; margin-top:0;",
-                      "High odds show the value reached in all but 1-in-N years.")
+                      "High odds show the value reached in all but 1-in-N years."),
+        shiny::tags$p(style = "font-size:11px; color:#666; margin-top:0;",
+                      "If coefficient uncertainty is selected, the band shows the variation from coefficient regresion in addition to other factors."),
+        shiny::tags$p(style = "font-size:11px; color:#666; margin-top:0;",
+                      "Central curve may not sit at median of coefficient uncertainty band, because coefficient draws are applied to the underlying weather variation, not the final exceedance probabilities.")
       )
     })
 
@@ -555,6 +754,18 @@ mod_2_02_results_server <- function(id,
                                selected = new_sel)
     }, ignoreInit = TRUE)
 
+    # ---- Suspend outputs when Results tab is hidden ----------------------
+    outputOptions(output, "summary_box_plot",        suspendWhenHidden = TRUE)
+    outputOptions(output, "summary_threshold_table", suspendWhenHidden = TRUE)
+    outputOptions(output, "exceedance_plot",         suspendWhenHidden = TRUE)
+    outputOptions(output, "results_header_ui",       suspendWhenHidden = TRUE)
+    outputOptions(output, "cmp_pov_line_ui",         suspendWhenHidden = TRUE)
+    outputOptions(output, "scenario_filter_ui",      suspendWhenHidden = TRUE)
+    outputOptions(output, "weight_status_ui",        suspendWhenHidden = TRUE)
+    outputOptions(output, "threshold_table_header",  suspendWhenHidden = TRUE)
+    outputOptions(output, "threshold_table_footer",  suspendWhenHidden = TRUE)
+    outputOptions(output, "exceedance_caption",      suspendWhenHidden = TRUE)
+    
     # ---- Return API --------------------------------------------------------
     list()
   })

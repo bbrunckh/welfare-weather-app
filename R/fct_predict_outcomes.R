@@ -2,64 +2,6 @@
 # Predict outcomes                                                               #
 # ---------------------------------------------------------------------------- #
 
-#' Pre-compute Training Residuals for Caching Across Multiple Prediction Calls
-#'
-#' Extracts residuals (and optionally the id column) from a fitted model +
-#' training data once, so callers iterating over many scenarios can pass the
-#' result to `predict_outcome()` via `precomputed_train_resid` instead of
-#' recomputing it every call.
-#'
-#' @param model      Fitted model (parsnip, fixest, or bare lm/glm).
-#' @param train_data Data frame used at fit time.
-#' @param engine     Character engine identifier (`"fixest"`, `"lm_glm"`, etc.).
-#' @param id         Optional character column name to retain for id-matched
-#'                   residual draws (`residuals = "original"`).
-#'
-#' @return A data frame with a `.resid` column and (if `id` is supplied and
-#'   present in `train_data`) the id column. Returns `NULL` on failure.
-#' @export
-precompute_train_resid <- function(model, train_data, engine = NULL, id = NULL) {
-  is_fixest <- inherits(model, "fixest") ||
-    (!is.null(engine) && identical(engine, "fixest"))
-  is_fixest_logistic <- is_fixest && inherits(model, "feglm")
-  is_parsnip <- !is_fixest && inherits(model, "model_fit")
-
-  resid_vec <- tryCatch({
-    if (is_fixest) {
-      resid_type <- if (is_fixest_logistic) "deviance" else "response"
-      as.numeric(stats::residuals(model, type = resid_type))
-    } else if (is_parsnip) {
-      aug <- broom::augment(model, new_data = train_data)
-      if (".resid" %in% names(aug) && length(stats::na.omit(aug$.resid)) > 0) {
-        as.numeric(aug$.resid)
-      } else {
-        fitted_col <- grep("^\\.pred", names(aug), value = TRUE)
-        if (length(fitted_col) == 0L) return(NULL)
-        fitted_vals <- as.numeric(aug[[fitted_col[1L]]])
-        fitted_vals - mean(fitted_vals, na.rm = TRUE)
-      }
-    } else {
-      aug <- broom::augment(model, data = train_data)
-      if (".resid" %in% names(aug)) as.numeric(aug$.resid) else NULL
-    }
-  }, error = function(e) {
-    warning("[precompute_train_resid] failed: ", conditionMessage(e))
-    NULL
-  })
-
-  if (is.null(resid_vec)) return(NULL)
-
-  # Return a data frame so the id column travels with residuals for matched draws
-  out <- data.frame(.resid = resid_vec)
-  if (!is.null(id) && id %in% names(train_data)) {
-    out[[id]] <- train_data[[id]]
-  }
-  out
-}
-
-#' Predict outcomes                                                               #
-# ---------------------------------------------------------------------------- #
-
 #' Predict an Outcome from a Fitted Model with Optional Residual Simulation
 #'
 #' Generates predictions from a model fit produced by \code{fit_model()}, with
@@ -131,7 +73,6 @@ precompute_train_resid <- function(model, train_data, engine = NULL, id = NULL) 
 #'   If \code{model} was produced by \code{fit_model()}, pass
 #'   \code{model_result$engine}. Auto-detected from the model class if
 #'   \code{NULL} (default).
-#'   \code{NULL} (default) uses the standard prediction path unchanged.
 #'
 #' @return The \code{newdata} data frame (tibble) with additional columns:
 #'   \describe{
@@ -175,8 +116,7 @@ predict_outcome <- function(model,
                             id         = NULL,
                             outcome    = "predicted",
                             train_data = NULL,
-                            engine     = NULL,
-                            precomputed_train_resid = NULL) {
+                            engine     = NULL) {
 
   if (length(residuals) == 0) stop("`residuals` must be a single string; got length 0.")
   if (length(residuals) > 1)  residuals <- residuals[[1]]
@@ -210,6 +150,7 @@ predict_outcome <- function(model,
     # Use predict.fixest directly:
     #   feols  → numeric fitted values
     #   feglm  → P(Y=1) when type = "response" (the default)
+    # Point-estimate prediction (used as base and as-is when beta_override is NULL)
     preds_vec <- tryCatch(
       stats::predict(model, newdata = newdata, type = "response"),
       error = function(e) stop(sprintf("fixest predict failed: %s", conditionMessage(e)))
@@ -219,7 +160,13 @@ predict_outcome <- function(model,
     # so that preds, X_nonFE (from model.matrix), and resid_draw are all
     # sized consistently downstream.
     predicted_rows <- attr(preds_vec, "rowids") %||% seq_along(preds_vec)
-    preds <- dplyr::mutate(newdata[predicted_rows, ], .fitted = preds_vec)
+    preds <- dplyr::mutate(newdata[predicted_rows, ], .fitted = as.numeric(preds_vec))
+    #
+    # ASSUMPTION: additive fixed effects only. If the model ever uses varying
+    # slopes (e.g. loc_id[Haz_jt] in fixest notation), FE estimates would
+    # depend on beta and this delta approach would be incorrect. Revisit if
+    # location-specific hazard slopes are added.
+
 
   } else if (is_parsnip) {
 
@@ -260,15 +207,10 @@ predict_outcome <- function(model,
 
   if (residuals != "none") {
 
-    # Fast path: caller pre-computed residuals — use directly as train_aug
-    if (!is.null(precomputed_train_resid)) {
-      train_aug <- precomputed_train_resid  # already a data frame with .resid (+id)
-    } else {
+    if (is.null(train_data))
+      stop("`train_data` must be supplied when `residuals != 'none'`.")
 
-      if (is.null(train_data))
-        stop("`train_data` must be supplied when `residuals != 'none'`.")
-
-      if (is_fixest) {
+    if (is_fixest) {
 
       # fixest stores residuals internally; extract them and bind to train_data.
       # For feols:  residuals() returns OLS residuals (observed - fitted).
@@ -359,7 +301,6 @@ predict_outcome <- function(model,
       if (!".fitted" %in% names(train_aug)) {
         train_aug <- dplyr::mutate(train_aug, .fitted = 0)
       }
-      }
     }
   }
 
@@ -426,5 +367,3 @@ predict_outcome <- function(model,
       !!rlang::sym(outcome) := .data$.fitted + resid_draw
     )
 }
-
-# ----------------------------------------------------------------------------

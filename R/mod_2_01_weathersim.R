@@ -7,14 +7,13 @@
 #'
 #' @section Simulation inputs (configured in server via input$):
 #'   \describe{
-    # \item{\code{include_coef_uncertainty}}{Logical. If TRUE, enables VCV
-    #   draws for coefficient uncertainty bands. Default FALSE (point estimates
-    #   only). When FALSE, \code{sim_n} and \code{dev_mode} inputs are hidden.}
-    # \item{\code{sim_n}}{Integer. Number of VCV coefficient draws (S).
-    #   Only active when \code{include_coef_uncertainty} is TRUE.}
-    # \item{\code{dev_mode}}{Logical. If TRUE, limits to 1st ensemble model
-    #   per SSP/period for fast testing. Only active when
-    #   \code{include_coef_uncertainty} is TRUE.}
+#'     \item{\code{sim_n}}{Integer. Number of VCV coefficient draws (S).}
+#'     \item{\code{pov_line_sim}}{Numeric. Poverty line in daily 2021 PPP USD.
+#'       Fixed at simulation time.}
+#'     \item{\code{skip_coef_draws}}{Logical. If TRUE, bypasses VCV draws
+#'       and uses point estimates only. Default TRUE.}
+#'     \item{\code{dev_mode}}{Logical. If TRUE, limits to 1 ensemble model
+#'       per SSP/period for fast testing.}
 #'   }
 #'
 #' @noRd
@@ -141,43 +140,72 @@ mod_2_01_weathersim_ui <- function(id) {
 
       shiny::tags$hr(style = "margin: 6px 0;"),
 
-      # -- Coefficient uncertainty --------------------------------------------
-      shiny::checkboxInput(
-        inputId = ns("include_coef_uncertainty"),
-        label   = "Include coefficient uncertainty",
-        value   = FALSE
+      # -- Simulation parameters -------------------------------------------
+      shiny::tags$h6("Simulation parameters",
+                     style = "font-weight:600; margin-bottom:4px;"),
+      shiny::numericInput(
+        inputId = ns("sim_n"),
+        label   = "Coefficient draws (S)",
+        value   = 30, min = 10, max = 1000, step = 10
       ),
       shiny::helpText(
-        "\u26a0\ufe0f Enabling this will significantly slow down simulations.",
-        style = "font-size:11px; color:#b45309; margin-top:2px; margin-bottom:8px;"
+        "200-500 recommended for final runs; 50 for speed. Upper bound 1,000.",
+        style = "font-size:11px; color:#555; margin-top:2px; margin-bottom:8px;"
       ),
-      shiny::conditionalPanel(
-        condition = paste0("input['", ns("include_coef_uncertainty"), "'] === true"),
-        shiny::numericInput(
-          inputId = ns("sim_n"),
-          label   = "Coefficient draws (S)",
-          value   = 50, min = 10, max = 1000, step = 10
-        ),
-        shiny::helpText(
-          "200\u2013500 recommended for final runs; 50 for speed. Upper bound 1,000.",
-          style = "font-size:11px; color:#555; margin-top:2px; margin-bottom:8px;"
-        )
+      shiny::numericInput(
+        inputId = ns("pov_line_sim"),
+        label   = "Poverty line (daily, 2021 PPP USD)",
+        value   = 3.00, min = 0, step = 0.5
       ),
-
-      # Dev mode is independent of coefficient uncertainty — controls whether
-      # all GCM ensemble members are used (affects the model-spread band).
+      shiny::helpText(
+        "Used for headcount / FGT calculations. Poverty line is fixed at simulation time.",
+        style = "font-size:11px; color:#555; margin-top:2px; margin-bottom:8px;"
+      ),
+      shiny::tags$hr(style = "margin: 6px 0;"),
       shiny::checkboxInput(
         inputId = ns("dev_mode"),
         label   = shiny::tags$span(
           style = "font-size:11px; font-weight:600; color:#b45309;",
-          "\u26a0 Dev mode: 1st model from ensemble only"
+          "⚠ Dev mode: 1 ensemble model only"
         ),
-        value   = FALSE
+        value   = TRUE
       ),
       shiny::helpText(
         "When checked, only the first CMIP6 ensemble member per SSP/period is used.",
         " Speeds up testing. Disable for final runs.",
         style = "font-size:11px; color:#b45309; margin-top:2px; margin-bottom:8px;"
+      ),
+      shiny::checkboxInput(
+        inputId = ns("skip_coef_draws"),
+        label   = shiny::tags$span(
+          style = "font-size:11px; font-weight:600; color:#555;",
+          "Skip coefficient draws (point estimates only)"
+        ),
+        value   = TRUE
+      ),
+      shiny::helpText(
+        "When checked, S draws are skipped and point estimates are used.",
+        " Faster for testing. Coefficient uncertainty bands will not appear.",
+        style = "font-size:11px; color:#555; margin-top:2px; margin-bottom:8px;"
+      ),
+      shiny::checkboxInput(
+        ns("exclude_gini"),
+        label = "Exclude Gini coefficient (faster computation)",
+        value = TRUE
+      ),
+      shiny::tags$hr(style = "margin: 6px 0;"),
+      shiny::checkboxInput(
+        ns("save_fixtures"),
+        label = shiny::tags$span(
+          style = "font-size:11px; font-weight:600; color:#555;",
+          "Save dev fixtures after simulation"
+        ),
+        value = FALSE
+      ),
+      shiny::helpText(
+        "Saves sim_inputs.rds and sim_inputs_full.rds to dev/fixtures/.",
+        " Adds ~30s after simulation completes. Dev mode only.",
+        style = "font-size:11px; color:#555; margin-top:2px; margin-bottom:4px;"
       ),
     ),
     shiny::tags$hr(style = "margin: 10px 0;"),
@@ -219,6 +247,8 @@ mod_2_01_weathersim_server <- function(id,
     # ---- Internal state ----------------------------------------------------
     hist_sim        <- reactiveVal(NULL)
     saved_scenarios <- reactiveVal(list())
+    hist_agg_rv    <- reactiveVal(NULL)
+    scenario_agg_rv <- reactiveVal(NULL)
 
     # ---- Baseline survey reactives ----------------------------------------
 
@@ -231,10 +261,12 @@ mod_2_01_weathersim_server <- function(id,
       if (!all(c('code', 'survname', 'year') %in% names(svy))) return(character(0))
       combos <- unique(svy[, c('code', 'survname', 'year')])
       combos <- combos[order(combos$code, combos$year), ]
+
       # Join economy (country) name from selected_surveys via code column.
       # NOTE: code (e.g. TGO, GNB) is unique per country; survname (e.g. EHCVM)
       # is shared across countries in the same survey programme and must NOT
       # be used as the join key -- this was the bug causing Togo to disappear.
+      
       ss <- tryCatch(selected_surveys(), error = function(e) NULL)
       if (!is.null(ss) && all(c('code', 'economy') %in% names(ss))) {
         lbl_map <- unique(ss[, c('code', 'economy')])
@@ -432,11 +464,25 @@ mod_2_01_weathersim_server <- function(id,
       do.call(rbind, do.call(c, rows))
     })
 
-    # ---- Run simulation button ---------------------------------------------
+    # ---- Run simulation button (hidden for non-linear or RIF engine) --------------------
 
     output$run_sim_ui <- shiny::renderUI({
-      mf <- model_fit()
-      tagList(
+      mf     <- model_fit()
+      engine <- if (!is.null(mf)) mf$engine %||% "fixest" else "fixest"
+
+      # Block only unsupported engines — linear (fixest) and RIF both supported
+      unsupported <- !is.null(mf) &&
+                     !engine %in% c("fixest", "rif")
+
+      if (unsupported) {
+        shiny::div(
+          class = "alert alert-warning",
+          style = "font-size: 13px; margin-top: 4px;",
+          shiny::tags$b("\u26a0 Simulations are not yet implemented for ",
+                        engine, " models."),
+          " Please select a linear or RIF model engine to run simulations."
+        )
+      } else {
         shiny::actionButton(
           ns("run_sim"),
           label = "Run simulation",
@@ -444,7 +490,7 @@ mod_2_01_weathersim_server <- function(id,
           icon  = shiny::icon("play"),
           style = "width: 100%; margin-top: 4px;"
         )
-      )
+      }
     })
 
     # ---- Run simulation on button click ------------------------------------
@@ -453,304 +499,248 @@ mod_2_01_weathersim_server <- function(id,
       req(selected_weather(), selected_outcome(),
           survey_weather(), selected_hist(), model_fit())
 
+      # ---- Gather inputs ---------------------------------------------------
       sw  <- selected_weather()
       so  <- selected_outcome()
       sh  <- selected_hist()
-      svy <- survey_weather()
+      svy <- baseline_svy()
       ss  <- selected_surveys()
+      req(ss)
       mf  <- model_fit()
       cp  <- connection_params()
 
-      model      <- mf$fit3
-      engine     <- mf$engine
-      train_data <- mf$train_data
-      residuals  <- sh$residuals
-
-      # RIF-specific params
-      is_rif       <- identical(engine, "rif")
-      fit_multi    <- if (is_rif) mf$fit3 else NULL
-      rif_taus     <- if (is_rif) mf$taus else NULL
-      rif_weather  <- if (is_rif) mf$weather_terms else NULL
-
-      # Force residuals = "none" for RIF — delta method has no residual draw
-      if (is_rif) {
-        residuals <- "none"
-        model <- extract_rif_median(mf$fit3, engine)
-      }
-
-      sim_dates <- build_hist_sim_dates(svy, unlist(sh$year_range))
-
-      # ---- Build get_weather() arguments ------------------------------------
-      fut_periods <- future_periods()
-      sf          <- selected_fut()
-      has_future  <- !is.null(sf) && length(fut_periods) > 0
-      ssps        <- if (has_future) unique(sf$ssp) else character(0)
+      sim_dates           <- build_hist_sim_dates(svy, unlist(sh$year_range))
+      fut_periods         <- future_periods()
+      sf                  <- selected_fut()
+      has_future          <- !is.null(sf) && length(fut_periods) > 0
+      ssps                <- if (has_future) unique(sf$ssp) else character(0)
       perturbation_method <- if (has_future) build_perturbation_method(sw) else NULL
+      fp_list             <- if (has_future) lapply(fut_periods, function(yr)
+                               c(paste0(yr[1], "-01-01"), paste0(yr[2], "-12-31")))
+                             else list()
+      # Fixed at p10/p90 — input$ensemble_band_width not yet in UI
+      ensemble_band_q     <- c(lo = 0.10, hi = 0.90)
 
-      # Build the list of future_period vectors (or NULL for historical-only)
-      fp_list <- if (has_future) {
-        lapply(fut_periods, function(yr) {
-          c(paste0(yr[1], "-01-01"), paste0(yr[2], "-12-31"))
-        })
-      } else {
-        NULL
-      }
+      # ---- RIF-specific params -------------------------------------------
+      engine      <- mf$engine %||% "fixest"
+      is_rif      <- identical(engine, "rif")
+      fit_multi   <- if (is_rif) mf$fit3          else NULL
+      rif_taus    <- if (is_rif) mf$taus           else NULL
+      rif_weather <- if (is_rif) mf$weather_terms  else NULL
 
-      ssp_labels <- c(
-        "ssp2_4_5" = "SSP2-4.5",
-        "ssp3_7_0" = "SSP3-7.0",
-        "ssp5_8_5" = "SSP5-8.5"
-      )
+      # Force residuals = "none" for RIF (delta method, no residual draw)
+      sh_residuals <- if (is_rif) "none" else sh$residuals
 
-      shiny::withProgress(
-        message = "Running simulation...",
-        value   = 0,
-        {
-          new_scenarios    <- list()
-          hist_sim_result  <- NULL
-          cached_breaks    <- stored_breaks()
 
-          # Single get_weather() call — handles all SSPs × all periods
-          shiny::setProgress(value = 0.15, detail = "Loading weather data...")
+      shiny::withProgress(message = "Running simulation...", value = 0, {
 
-          weather_result <- tryCatch(
-            get_weather(
-              survey_data          = svy,
-              selected_surveys     = ss,
-              selected_weather     = sw,
-              dates                = sim_dates,
-              connection_params    = cp,
-              ssp                  = if (has_future) ssps else NULL,
-              future_period        = fp_list,
-              perturbation_method  = perturbation_method,
-              stored_breaks        = cached_breaks
-            ),
-            error = function(e) {
-              shiny::showNotification(
-                paste0("Weather load failed: ", conditionMessage(e)),
-                type = "error", duration = 8
-              )
-              NULL
-            }
+        # ---- Run simulation ------------------------------------------------
+        result <- tryCatch(
+          fct_run_simulation(
+            sw                  = sw,
+            so                  = so,
+            svy                 = svy,
+            ss                  = ss,
+            mf                  = mf,
+            cp                  = cp,
+            fp_list             = fp_list,
+            ssps                = ssps,
+            residuals           = sh_residuals, #sh$residuals,
+            dev_mode            = isTRUE(input$dev_mode),
+            skip_coef_draws     = isTRUE(input$skip_coef_draws),
+            sim_dates           = sim_dates,
+            perturbation_method = perturbation_method,
+            stored_breaks       = stored_breaks(),
+            ensemble_band_q     = ensemble_band_q,
+            full_ensemble       = FALSE,
+            fit_multi           = fit_multi,
+            taus                = rif_taus,
+            weather_cols        = rif_weather,   
+            progress_fn         = function(value, detail)
+                                    shiny::setProgress(value = value,
+                                                       detail = detail)
+          ),
+          error = function(e) {
+            shiny::showNotification(
+              paste0("Simulation failed: ", conditionMessage(e)),
+              type = "error", duration = 8
+            )
+            NULL
+          }
+        )
+        req(!is.null(result))
+
+        # ---- Store results (reactive side effects) -------------------------
+        hist_sim(result$hist_sim_result)
+        saved_scenarios(result$new_scenarios)
+
+        # ---- Pre-aggregate at simulation time ------------------------------
+        agg_methods_all <- {
+          m <- unname(hist_aggregate_choices(so$type, so$name))
+          if (isTRUE(input$exclude_gini)) setdiff(m, "gini") else m
+        }
+        S_sim   <- as.integer(input$sim_n %||% 150L)
+        bq_sim  <- c(lo = 0.10, hi = 0.90)
+        res_sim <- if (identical(mf$engine, "rif")) "none" else sh$residuals
+        pov_sim <- as.numeric(input$pov_line_sim)
+
+        t_agg_start <- proc.time()[["elapsed"]]
+        message("[wiseapp] Aggregating results...")
+
+        shiny::showNotification(
+          ui       = paste0("Aggregating results across ",
+                            length(result$new_scenarios) + 1L,
+                            " key(s) — please wait..."),
+          id       = "agg_notify", duration = NULL, type = "message"
+        )
+
+        # Generate shared Z matrix once
+        K_global <- if (!is.null(result$hist_sim_result$pipeline$F_loading))
+                      ncol(result$hist_sim_result$pipeline$F_loading) else 0L
+        Z_global <- if (K_global > 0L && S_sim > 0L)
+                      matrix(stats::rnorm(S_sim * K_global),
+                             nrow = S_sim, ncol = K_global)
+                    else NULL
+
+        shiny::isolate({
+          # Historical aggregation
+          message("[wiseapp] Aggregating historical...")
+          t_hist_start <- proc.time()[["elapsed"]]
+          hist_agg_rv(
+            compute_hist_agg(
+              pipeline  = result$hist_sim_result$pipeline,
+              chol_obj  = result$chol_obj,
+              methods   = agg_methods_all,
+              S         = S_sim,
+              band_q    = bq_sim,
+              residuals = res_sim,
+              pov_line  = pov_sim,
+              is_log    = isTRUE(so$transform == "log"),
+              Z_global  = Z_global
+            )
           )
-          req(!is.null(weather_result))
+          t_hist_agg <- proc.time()[["elapsed"]] - t_hist_start
+          message(sprintf("[wiseapp] Historical aggregation complete in %s",
+                          format_elapsed(t_hist_agg)))
 
-          if (is.null(cached_breaks)) {
-            cached_breaks <- attr(weather_result, "stored_breaks")
-          }
-
-          # Pre-compute Cholesky factor(s) once before the weather-key loop.
-          # Reused across all keys (historical + future).
-          # fixest: returns a single K x K matrix.
-          # RIF: compute_chol_vcov(fit_multi) returns a list of K matrices,
-          #      one per tau sub-model — passed as chol_list to predict_rif().
-          chol_Sigma <- if (!isTRUE(input$include_coef_uncertainty)) {
-            # ...existing code...
-          } else {
-            fit_for_vcov <- if (is_rif) fit_multi else model
-            tryCatch(
-              compute_chol_vcov(fit_for_vcov, COEF_VCOV_SPEC),
-              error = function(e) {
-                warning("[mod_2_01] compute_chol_vcov() failed, falling back to point estimates: ",
-                        conditionMessage(e))
-                NULL
-              }
-            )
-          }
-          shiny::setProgress(value = 0.5, detail = "Running simulations...")
-
-          # Structures for accumulating future model results
-          group_data        <- list()
-          group_weather_rep <- list()
-          group_meta        <- list()
-
-          future_keys <- setdiff(names(weather_result), "historical")
-          # Dev mode: keep first model per SSP/period group.
-          if (isTRUE(input$dev_mode)) future_keys <- future_keys[!duplicated(stringr::str_extract(future_keys, "^(?:[^_]+_){4}[^_]+"))]
-          all_keys    <- c("historical", future_keys)
-          n_keys      <- length(all_keys)
-
-          # Progress messaging
-          S_val      <- if (!is.null(chol_Sigma)) as.integer(input$sim_n %||% 200L) else 1L
-          n_hist_yrs <- if (!is.null(weather_result[["historical"]])) {
-            length(unique(format(weather_result[["historical"]]$timestamp, "%Y")))
-          } else 30L
-          n_future_keys <- length(future_keys)
-
-          message(sprintf(
-            "[wiseapp] Simulation starting: %d keys | S=%d draws",
-            length(all_keys), S_val
-          ))
-          message(sprintf(
-            "[wiseapp]   Historical : %d yrs x %d draws = %d runs",
-            n_hist_yrs, S_val, n_hist_yrs * S_val
-          ))
-          if (n_future_keys > 0L) message(sprintf(
-            "[wiseapp]   Future     : %d keys x %d yrs x %d draws = %d runs",
-            n_future_keys, n_hist_yrs, S_val, n_future_keys * n_hist_yrs * S_val
-          ))
-          message(sprintf(
-            "[wiseapp]   Total      : ~%d prediction runs across all keys",
-            (1L + n_future_keys) * n_hist_yrs * S_val
-          ))
-          t_start <- proc.time()[["elapsed"]]
-
-          # ---- Historical key (always sequential) ---------------------------
-          if ("historical" %in% names(weather_result)) {
-            out <- run_sim_pipeline(
-              weather_raw  = weather_result[["historical"]],
-              svy          = svy,
-              sw           = sw,
-              so           = so,
-              model        = model,
-              residuals    = residuals,
-              train_data   = train_data,
-              engine       = engine,
-              chol_Sigma   = chol_Sigma,
-              slim         = FALSE,
-              fit_multi    = fit_multi,
-              taus         = rif_taus,
-              weather_cols = rif_weather
-            )
-            weather_result[["historical"]] <- NULL
-            if (!is.null(out)) {
-              hist_sim_result <- list(
-                y_point         = out$y_point,
-                F_loading       = out$F_loading,
-                sim_year        = out$sim_year,
-                weight          = out$weight,
-                id_vec          = out$id_vec,
-                so              = so,
-                n_pre_join      = out$n_pre_join,
-                weather_raw     = out$weather_raw,
-                train_data      = train_data,
-                has_weights     = !is.null(out$weight),
-                residuals       = residuals,
-                preds           = out$preds,
-                yr_range        = input$hist_years,
-                chol_Sigma      = chol_Sigma,
-                S               = S_val
-              )
-            }
-            rm(out)
-          }
-
-          shiny::setProgress(value = 0.55, detail = "Running future scenarios...")
-
-          # Pre-compute training residuals once — reused across all future keys.
-          # resolve_id_col needs a joined frame; use train_data as proxy since
-          # the id column must exist there for matched draws to work at all.
-          cached_train_resid <- if (!identical(residuals, "none")) {
-            id_col_cache <- if (identical(residuals, "original")) {
-              candidates <- c("pid", "hhid", "fid")
-              candidates[candidates %in% names(train_data)][1L] %||% NULL
-            } else NULL
-            precompute_train_resid(model, train_data, engine, id = id_col_cache)
-          } else NULL
-
-          # ---- Future keys -------------------------------------------------------
-          if (length(future_keys) > 0L) {
-            # Process results into group_data structure
-            for (key in future_keys) {
-              out <- tryCatch(
-                run_sim_pipeline(
-                  weather_raw  = weather_result[[key]],
-                  svy          = svy,
-                  sw           = sw,
-                  so           = so,
-                  model        = model,
-                  residuals    = residuals,
-                  train_data   = train_data,
-                  engine       = engine,
-                  chol_Sigma   = chol_Sigma,
-                  slim         = TRUE,
-                  fit_multi    = fit_multi,
-                  taus         = rif_taus,
-                  weather_cols            = rif_weather,
-                  precomputed_train_resid = cached_train_resid
-                ),
-                error = function(e) {
-                  warning("Key '", key, "' failed: ", conditionMessage(e))
-                  NULL
-                }
-              )
-              if (is.null(out)) next
-
-              ssp_code   <- sub("^(ssp[0-9]_[0-9]_[0-9])_.*$", "\\1", key)
-              rest       <- sub(paste0("^", ssp_code, "_"), "", key)
-              period_str <- sub("^([0-9]{4}_[0-9]{4})_.*$", "\\1", rest)
-              model_name <- sub(paste0("^", period_str, "_"), "", rest)
-              yr_parts   <- as.integer(strsplit(period_str, "_")[[1]])
-              gk         <- paste0(ssp_code, "_", period_str)
-
-              if (is.null(group_data[[gk]])) {
-                group_data[[gk]] <- list(models = list())
-              }
-              group_data[[gk]]$models[[length(group_data[[gk]]$models) + 1L]] <- list(
-                y_point   = out$y_point,
-                F_loading = out$F_loading,
-                sim_year  = out$sim_year,
-                weight    = out$weight,
-                id_vec    = out$id_vec,
-                name      = model_name
-              )
-
-              if (is.null(group_weather_rep[[gk]])) {
-                group_weather_rep[[gk]] <- out$weather_raw
-              }
-              if (is.null(group_meta[[gk]])) {
-                group_meta[[gk]] <- list(
-                  ssp_code   = ssp_code,
-                  year_range = yr_parts
+          # Scenario aggregation
+          message("[wiseapp] Aggregating scenarios...")
+          t_scen_start <- proc.time()[["elapsed"]]
+          scenario_agg_rv(
+            compute_scenario_agg(
+              scenarios   = result$new_scenarios,
+              methods     = agg_methods_all,
+              S           = S_sim,
+              band_q      = bq_sim,
+              residuals   = res_sim,
+              pov_line    = pov_sim,
+              Z_global    = Z_global,
+              progress_fn = function(i, n, label) {
+                t_sc_el  <- proc.time()[["elapsed"]] - t_scen_start
+                t_sc_rem <- if (i > 1L)
+                  (t_sc_el / (i - 1L)) * (n - i + 1L) else NA_real_
+                message(sprintf(
+                  "[wiseapp] Aggregating scenario %d/%d: %s | %s elapsed%s",
+                  i, n, label,
+                  format_elapsed(t_sc_el),
+                  if (!is.na(t_sc_rem))
+                    paste0(" | ~", format_elapsed(t_sc_rem), " remaining")
+                  else " | estimating..."
+                ))
+                shiny::showNotification(
+                  ui = sprintf(
+                    "Aggregating scenario %d/%d: %s%s",
+                    i, n, label,
+                    if (!is.na(t_sc_rem))
+                      paste0(" (~", format_elapsed(t_sc_rem), " remaining)")
+                    else ""
+                  ),
+                  id       = "agg_notify",
+                  duration = NULL,
+                  type     = "message"
                 )
               }
-            }
-            rm(out)
-          }
-
-          rm(weather_result); gc(verbose = FALSE)
-
-          # Build display entries: one per SSP + period.
-          for (gk in names(group_data)) {
-            meta        <- group_meta[[gk]]
-            ssp_pretty  <- ssp_labels[meta$ssp_code] %||% meta$ssp_code
-            period_lbl  <- paste0(meta$year_range[1], "-", meta$year_range[2])
-            display_key <- paste0(ssp_pretty, " / ", period_lbl)
-            new_scenarios[[display_key]] <- list(
-              models      = group_data[[gk]]$models,
-              weather_raw = group_weather_rep[[gk]],
-              so          = so,
-              year_range  = meta$year_range,
-              n_models    = length(group_data[[gk]]$models)
             )
-          }
-          rm(group_data, group_weather_rep, group_meta)
-          gc(verbose = FALSE)
+          )
+          t_scen_agg <- proc.time()[["elapsed"]] - t_scen_start
+          message(sprintf("[wiseapp] Scenario aggregation complete in %s",
+                          format_elapsed(t_scen_agg)))
+        })
 
-          # Push results into reactiveVals
-          hist_sim(hist_sim_result)
-          saved_scenarios(new_scenarios)
+        t_agg_total <- proc.time()[["elapsed"]] - t_agg_start
+        message(sprintf(
+          "[wiseapp] Aggregation complete in %s (hist: %s | scenarios: %s)",
+          format_elapsed(t_agg_total),
+          format_elapsed(t_hist_agg),
+          format_elapsed(t_scen_agg)
+        ))
 
-          shiny::setProgress(value = 1, detail = "Complete")
-        }
-      )
+        shiny::removeNotification("agg_notify")
+        shiny::setProgress(value = 1, detail = "Complete")
+      })
 
-      t_total <- proc.time()[["elapsed"]] - t_start
-      n_scen  <- length(saved_scenarios())
+      # ---- Dev fixture saving -----------------------------------------------
+      # ---- Dev fixture saving (optional — controlled by UI checkbox) --------
+      if (!isTRUE(getOption("golem.app.prod")) &&
+          isTRUE(input$save_fixtures)) {
+        tryCatch({
+          dir.create("dev/fixtures", showWarnings = FALSE, recursive = TRUE)
+
+          # Slim fixtures — for profvis
+          saveRDS(list(
+            hist_sim     = result$hist_sim_result[[1L]],
+            scenario_sim = result$new_scenarios[[1L]],
+            chol_obj     = result$chol_obj,
+            pov_line     = as.numeric(input$pov_line_sim)
+          ), "dev/fixtures/sim_inputs.rds")
+
+          # Full fixtures — for benchmark Section 2
+          saveRDS(list(
+            hist_sim     = result$hist_sim_result[[1L]],
+            scenario_sim = result$new_scenarios[[1L]],
+            chol_obj     = result$chol_obj,
+            pov_line     = as.numeric(input$pov_line_sim),
+            survey_data  = svy,
+            model        = mf$fit3,
+            engine       = mf$engine,
+            train_data   = mf$train_data,
+            sw           = sw,
+            so           = so,
+            residuals    = sh$residuals,
+            weather_raw  = result$hist_sim_result[[1L]]$weather_raw
+          ), "dev/fixtures/sim_inputs_full.rds")
+
+          message("[dev] Fixtures saved (slim + full).")
+        }, error = function(e) {
+          message("[dev] Fixture save failed: ", conditionMessage(e))
+        })
+      }
+
+      # ---- Completion notification -----------------------------------------
+      t_total_wall <- result$t_elapsed + t_agg_total
+
       message(sprintf(
-        "[wiseapp] Simulation complete in %s | %d key(s) | S=%d draws | ~%d total runs",
-        format_elapsed(t_total), n_keys, S_val, (1L + n_future_keys) * n_hist_yrs * S_val
+        "[wiseapp] TOTAL wall time: %s | weather: %s | pipelines: %s | aggregation: %s | %d key(s) | S=%d",
+        format_elapsed(t_total_wall),
+        format_elapsed(result$t_weather %||% 0),
+        format_elapsed(result$t_elapsed - (result$t_weather %||% 0)),
+        format_elapsed(t_agg_total),
+        result$n_keys, S_sim
       ))
+
       shiny::showNotification(
         ui = tagList(
-          tags$b("\u2713 Simulation complete"),
+          tags$b("\u2713 Simulation complete"), tags$br(),
+          sprintf("%s total | %d key(s) | ~%d runs",
+                  format_elapsed(t_total_wall),
+                  result$n_keys, result$total_runs),
           tags$br(),
-          sprintf("%s | %d key(s) | S=%d draws | ~%d runs",
-                  format_elapsed(t_total), n_keys, S_val,
-                  (1L + n_future_keys) * n_hist_yrs * S_val),
-          if (n_scen > 0) tagList(tags$br(), paste0(n_scen, " future scenario(s)")) else NULL
+          sprintf("Weather: %s | Pipelines: %s | Aggregation: %s",
+                  format_elapsed(result$t_weather %||% 0),
+                  format_elapsed(result$t_elapsed - (result$t_weather %||% 0)),
+                  format_elapsed(t_agg_total))
         ),
-        type = "message", duration = 8
+        type = "message", duration = 10
       )
     }, ignoreInit = TRUE)
 
@@ -760,7 +750,10 @@ mod_2_01_weathersim_server <- function(id,
       hist_sim        = hist_sim,
       saved_scenarios = saved_scenarios,
       selected_hist   = selected_hist,
-      selected_fut    = selected_fut
+      selected_fut    = selected_fut,
+      pov_line_sim    = reactive(input$pov_line_sim),
+      hist_agg_rv    = hist_agg_rv,
+      scenario_agg_rv = scenario_agg_rv
     )
   })
 }

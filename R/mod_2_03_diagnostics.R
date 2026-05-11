@@ -49,79 +49,6 @@ mod_2_03_diagnostics_ui <- function(id) {
         shiny::tags$b("Coloured lines = Future scenarios:"),
         " solid = earliest simulation year, dashed = middle, dotted = latest."
       )
-    ),
-
-    # ---- 2. Uncertainty decomposition chart ----------------------------------
-    shiny::wellPanel(
-      shiny::h4("Decomposed uncertainty: weather variability vs. model spread vs. coefficient uncertainty"),
-      shiny::plotOutput(ns("uncertainty_decomp_plot"), height = "450px"),
-      shiny::tags$p(
-        style = "font-size:11px; color:#666; margin-top:6px;",
-        "Each bar shows \u00b11 SD of welfare outcomes attributable to each source,",
-        " centred on the scenario mean. Dashed line = historical mean.",
-        shiny::tags$br(),
-        shiny::tags$b("Weather variability (blue):"),
-        " SD across simulation years, averaged over climate models \u2014 year-to-year weather noise.",
-        shiny::tags$br(),
-        shiny::tags$b("Climate model spread (orange):"),
-        " SD across CMIP6 ensemble members, averaged over years \u2014 structural model disagreement.",
-        shiny::tags$br(),
-        shiny::tags$b("Coefficient uncertainty (green):"),
-        " mean 1-SD equivalent of the regression coefficient 90% CI (requires coefficient uncertainty enabled)."
-      )
-    ),
-
-    # ---- 3. Welfare distributions panel ------------------------------------
-    shiny::wellPanel(
-      shiny::h4("Welfare output distributions"),
-      shiny::radioButtons(
-        ns("diag_ridge_primary_group"),
-        label    = "Primary grouping",
-        choices  = c(
-          "Historical year"                 = "hist_year",
-          "Scenario \u00d7 Simulation year" = "scenario",
-          "Simulation year \u00d7 Scenario" = "forecast_yr"
-        ),
-        selected = "scenario",
-        inline   = TRUE
-      ),
-      shiny::tags$div(
-        style = "display:flex; gap:24px; flex-wrap:wrap; margin-bottom:4px; align-items:center;",
-        shiny::tags$div(
-          shiny::checkboxInput(ns("diag_ridge_log"), label = "Log\u2081\u2080 x-axis", value = FALSE)
-        )
-      ),
-      shiny::tags$div(
-        style = "max-width:380px; margin-bottom:2px;",
-        shiny::sliderInput(ns("diag_ridge_scale"), label = "Ridge height",
-                           min = 0.3, max = 3.0, value = 1.5, step = 0.1)
-      ),
-      shiny::tags$div(
-        style = "max-width:380px; margin-bottom:8px;",
-        shiny::sliderInput(ns("diag_ridge_spacing"), label = "Row spacing",
-                           min = 0.2, max = 3.0, value = 1.0, step = 0.1)
-      ),
-      shiny::tags$p(
-        style = "font-size:11px; color:#666; margin-bottom:8px;",
-        shiny::tags$b("Historical year mode:"),
-        " one grey filled ridge per simulation year; coloured lines = scenario perturbations.",
-        shiny::tags$br(),
-        shiny::tags$b("Scenario / Simulation year mode:"),
-        " one row per scenario or simulation year; grey-scale lines = individual historical years",
-        " (darkest = most recent).",
-        shiny::tags$br(),
-        shiny::tags$b("Include regression output:"),
-        " overlays predicted (dashed) and actual (dotted) outcome densities from training data.",
-        shiny::tags$br(),
-        "All ridges share a common global bandwidth. X-axis clipped to P1\u2013P99."
-      ),
-      shiny::actionButton(
-        ns("diag_update_ridge"),
-        "Update ridge plot",
-        class = "btn-sm btn-default",
-        style = "margin-bottom:8px;"
-      ),
-      shiny::uiOutput(ns("diag_ridge_plot_ui"))
     )
   )
 }
@@ -182,18 +109,11 @@ mod_2_03_diagnostics_server <- function(id,
       if (length(out) == 0) NULL else out
     })
 
-    # Detect weight column once -- passed to aggregate_sim_preds() when toggle is on.
-    weight_col_diag <- reactive({
-      req(hist_sim())
-      if (!isTRUE(input$use_weights_diag)) return(NULL)
-      if ("weight" %in% names(hist_sim()$preds)) "weight" else NULL
-    })
-
     output$weight_status_diag_ui <- shiny::renderUI({
       req(hist_sim())
       # Detect weight column independently of the toggle -- this allows
       # the amber state when the column exists but the toggle is OFF.
-      has_w  <- "weight" %in% names(hist_sim()$preds)
+      has_w  <- !is.null(hist_sim()$pipeline$weight)
       tog_on <- isTRUE(input$use_weights_diag)
       if (has_w && tog_on)
         shiny::tags$p(
@@ -210,87 +130,7 @@ mod_2_03_diagnostics_server <- function(id,
           "🔴 No weight column found — unweighted")
     })
 
-    # TODO: pending decision on household-level draw storage — unlinked.
-    # Future scenarios no longer store raw preds (replaced by pre-aggregated $agg).
-    # ridge_kde_data now only uses hist preds; scenario ridges are unavailable.
-    ridge_kde_data <- reactive({
-      req(hist_sim())
-      build_ridge_kde_data(
-        hist_preds    = hist_sim()$preds,
-        scenario_list = list(),  # scenario preds not retained — see architecture note
-        outcome_name  = hist_sim()$so$name,
-        actual_vals   = {
-          td <- hist_sim()$train_data
-          so <- hist_sim()$so
-          nm <- so$name
-          if (!is.null(td) && nm %in% names(td)) {
-            v <- as.numeric(td[[nm]])
-            v <- v[is.finite(v)]
-            if (isTRUE(so$transform == "log")) v <- exp(v)
-            v
-          } else numeric(0)
-        }
-      )
-    })
 
-    # Aggregated series for the uncertainty decomposition chart.
-    # Fixed at mean / no deviation — appropriate for a diagnostic view.
-    agg_hist_diag <- reactive({
-      req(hist_sim())
-      h <- hist_sim()
-      aggregate_with_uncertainty(
-        y_point         = h$y_point,
-        F_loading       = h$F_loading,
-        group_vec       = h$sim_year,
-        so              = h$so,
-        agg_method      = "mean",
-        weights         = h$weight,
-        pov_line        = NULL,
-        train_resid     = if (!is.null(h$train_data)) h$train_data$.resid else NULL,
-        residual_method = h$residuals %||% "none",
-        id_vec          = h$id_vec,
-        S               = as.integer(h$S %||% 200L)
-      ) |> (\(agg) list(out = agg, x_label = "Mean welfare"))()
-    })
-
-    agg_scenarios_diag <- reactive({
-      sc <- if (!is.null(saved_scenarios)) saved_scenarios() else list()
-      if (length(sc) == 0) return(list())
-      h <- hist_sim()
-      lapply(sc, function(s) {
-        tryCatch({
-          per_model <- lapply(s$models, function(mod) {
-            aggregate_with_uncertainty(
-              y_point         = mod$y_point,
-              F_loading       = mod$F_loading,
-              group_vec       = mod$sim_year,
-              so              = s$so,
-              agg_method      = "mean",
-              weights         = mod$weight,
-              pov_line        = NULL,
-              train_resid     = if (!is.null(h$train_data)) h$train_data$.resid else NULL,
-              residual_method = h$residuals %||% "none",
-              id_vec          = mod$id_vec,
-              S               = as.integer(h$S %||% 200L)
-            )
-          })
-          combined <- combine_ensemble_results(per_model)
-          list(out = combined, x_label = "Mean welfare")
-        }, error = function(e) NULL)
-      })
-    })
-    debounced_ridge_inputs <- shiny::debounce(
-      reactive({
-        list(
-          log_scale       = isTRUE(input$diag_ridge_log),
-          ridge_scale     = input$diag_ridge_scale   %||% 1.5,
-          row_gap         = input$diag_ridge_spacing %||% 1.0,
-          primary_group   = input$diag_ridge_primary_group %||% "scenario",
-          show_regression = input$show_regression_input %||% TRUE
-        )
-      }),
-      350
-    )
 
     # ---- renderUI / render* outputs ----------------------------------------
 
@@ -353,17 +193,6 @@ mod_2_03_diagnostics_server <- function(id,
       )
     })
 
-    output$uncertainty_decomp_plot <- renderPlot({
-      req(agg_hist_diag())
-      sc_agg <- agg_scenarios_diag()
-      plot_uncertainty_decomposition(
-        scenarios   = sc_agg,
-        hist_agg    = agg_hist_diag(),
-        group_order = input$diag_ridge_primary_group %||% "scenario_x_year"
-      )
-    }, height = 450)
-    outputOptions(output, "uncertainty_decomp_plot", suspendWhenHidden = FALSE)
-
     output$diag_weather_log_ui <- shiny::renderUI({
       vars <- input$diag_weather_vars
       req(length(vars) > 0)
@@ -410,21 +239,7 @@ mod_2_03_diagnostics_server <- function(id,
     }) |> shiny::bindEvent(input$diag_update_weather, hist_sim(),
                            ignoreNULL = TRUE, ignoreInit = FALSE)
 
-    # DEPRECATED — welfare ridge plot unlinked pending architectural review.
-    # Future scenario preds are no longer stored household-level (replaced by $agg).
-    # Historical ridge (hist only) still works but is hidden from UI.
-    # TODO: revisit if household-level draw storage is reintroduced.
-    output$diag_ridge_plot_ui <- shiny::renderUI({
-      shiny::tags$p(
-        style = "color:#888; font-size:12px; padding:8px;",
-        "Welfare ridge plot temporarily unavailable.",
-        "Scenario-level household predictions are not retained in the current",
-        "memory-efficient architecture. Historical ridge remains available below."
-      )
-    })
 
-    # output$diag_ridge is unlinked — kept for reference
-    # output$diag_ridge <- renderPlot({ ... })
 
     # ---- Insert Diagnostics tab once (first hist_sim only) -----------------
 
@@ -464,6 +279,12 @@ mod_2_03_diagnostics_server <- function(id,
                                choices  = choices,
                                selected = new_sel)
     }, ignoreInit = TRUE)
+
+    # ---- Suspend outputs when Results tab is hidden ----------------------
+    outputOptions(output, "scenario_filter_panel",   suspendWhenHidden = TRUE)
+    outputOptions(output, "diag_weather_log_ui",     suspendWhenHidden = TRUE)
+    outputOptions(output, "diag_weather_density",    suspendWhenHidden = TRUE)
+    outputOptions(output, "weight_status_diag_ui",   suspendWhenHidden = TRUE)
 
     # ---- Return API --------------------------------------------------------
     list()
