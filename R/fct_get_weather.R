@@ -163,13 +163,15 @@
 #'
 #' @param ref_df           Collected data frame containing the weather columns.
 #' @param selected_weather Data frame with columns `name`, `cont_binned`,
-#'   `num_bins`, `binning_method`.
+#'   `num_bins`, `binning_method`, and (optionally) `custom_breaks` (list
+#'   column of numeric vectors used when `binning_method == "Custom"`).
 #'
 #' @return A named list of break vectors (one per binned variable).
 #'   Variables that are not binned or fail to produce valid breaks are omitted.
 #' @noRd
 .compute_breaks <- function(ref_df, selected_weather) {
   stored_breaks <- list()
+  has_custom_col <- "custom_breaks" %in% names(selected_weather)
 
   for (i in seq_len(nrow(selected_weather))) {
     v              <- selected_weather$name[i]
@@ -180,7 +182,7 @@
     if (is.na(cont_binned) || cont_binned != "Binned") next
 
     haz_vals <- ref_df[[v]][is.finite(ref_df[[v]])]
-    
+
     # sort for consistent quantile breaks and k-means results
     haz_vals <- sort(haz_vals)
 
@@ -210,6 +212,26 @@
           message("K-means failed for ", v, ": ", e$message)
           NULL
         })
+      },
+      "Custom" = {
+        user_cuts <- if (has_custom_col) selected_weather$custom_breaks[[i]] else NULL
+        if (is.null(user_cuts) || length(user_cuts) == 0) {
+          message("Custom binning for ", v, " requires cut values but none were provided. Keeping continuous.")
+          NULL
+        } else {
+          user_cuts <- sort(unique(as.numeric(user_cuts[is.finite(user_cuts)])))
+          expected  <- as.integer(num_bins) - 1L
+          if (length(user_cuts) != expected) {
+            message(
+              "Custom binning for ", v, " expected ", expected,
+              " cut values (num_bins - 1) but got ", length(user_cuts),
+              ". Using the supplied values as-is."
+            )
+          }
+          # Mirror the structure used by the other branches: a vector whose
+          # first/last entries are dropped by the breaks_ext step below.
+          c(min(haz_vals, na.rm = TRUE), user_cuts, max(haz_vals, na.rm = TRUE))
+        }
       },
       NULL
     )

@@ -114,7 +114,26 @@ mod_1_04_weather_server <- function(id, variable_list, selected_surveys, survey_
                   shiny::radioButtons(
                     ns(paste0(prefix, "binningMethod")),
                     "Binning method:",
-                    choices = c("Equal frequency", "Equal width", "K-means")
+                    choices = c("Equal frequency", "Equal width", "K-means", "Custom")
+                  ),
+                  shiny::conditionalPanel(
+                    condition = paste0("input['", ns(paste0(prefix, "binningMethod")), "'] == 'Custom'"),
+                    tagList(
+                      shiny::textInput(
+                        ns(paste0(prefix, "customBreaks")),
+                        label = "Breaks (comma-separated)",
+                        value = "",
+                        placeholder = "e.g. 20, 25, 30, 35"
+                      ),
+                      shiny::helpText(
+                        paste0(
+                          "Provide N-1 numeric values for N bins, in the variable's units. ",
+                          "Values bound the interior bin edges; the outermost bins are open-ended ",
+                          "(-Inf and +Inf) so out-of-range values still map to the extreme bins."
+                        ),
+                        style = "font-size: 12px;"
+                      )
+                    )
                   ),
                   shiny::helpText(
                     "Binning keeps only unique bins, duplicates are dropped. This can lead to fewer bins than specified.",
@@ -152,7 +171,8 @@ mod_1_04_weather_server <- function(id, variable_list, selected_surveys, survey_
       # the Weather stats tab to continuously reload.
       spec_keys <- c(
         "relativePeriod", "temporalAgg", "varConstruction",
-        "contOrBinned", "numBins", "binningMethod", "polynomial"
+        "contOrBinned", "numBins", "binningMethod", "customBreaks",
+        "polynomial"
       )
       spec_input_names <- unlist(lapply(vars, function(v) paste0(v, "_", spec_keys)))
 

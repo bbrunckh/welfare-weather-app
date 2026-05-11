@@ -21,8 +21,9 @@ sw_continuous <- function(name = "tx", ref_start = 1, ref_end = 3,
 }
 
 sw_binned <- function(name = "tx", method = "Equal frequency",
-                       n_bins = 3, ref_start = 1, ref_end = 3) {
-  data.frame(
+                       n_bins = 3, ref_start = 1, ref_end = 3,
+                       custom_breaks = NULL) {
+  df <- data.frame(
     name           = name,
     ref_start      = ref_start,
     ref_end        = ref_end,
@@ -33,54 +34,116 @@ sw_binned <- function(name = "tx", method = "Equal frequency",
     transformation = "None",
     stringsAsFactors = FALSE
   )
+  if (!is.null(custom_breaks)) {
+    df$custom_breaks <- list(as.numeric(custom_breaks))
+  }
+  df
 }
 
-# Write synthetic weather + h3 parquet files to a temp directory and return
-# connection_params + survey_data + dates for use in integration tests.
+# Open a fresh DuckDB connection with H3 loaded and bigint = integer64 so H3
+# cell IDs (which exceed 2^53) round-trip without precision loss.
+make_h3_con <- function() {
+  con <- DBI::dbConnect(duckdb::duckdb(), bigint = "integer64")
+  tryCatch(DBI::dbExecute(con, "INSTALL h3 FROM community"), error = function(e) NULL)
+  DBI::dbExecute(con, "LOAD h3")
+  con
+}
+
+# Write synthetic weather + h3 parquet files using real H3 indices at a single
+# resolution, laid out at the paths `get_weather()` expects:
+#   <dir>/hazard/weather/historical/<code>/<code>_<weather_source>.parquet
+#   <dir>/microdata/h3/<code>/<code>_<year>_<survname>_<source>_h3.parquet
+# Returns connection_params + survey_data + selected_surveys + dates.
 make_test_fixtures <- function(
     dir,
-    code     = "TST",
-    year     = 2018,
-    survname = "SRV",
-    n_h3     = 4,
-    n_months = 36    # 3 years of monthly data (allows rolling windows)
+    code           = "TST",
+    year           = 2018,
+    survname       = "SRV",
+    source         = "lsms",
+    weather_source = "era5land",
+    seed_cell      = "85283473fffffff",   # valid res-5 cell
+    n_months       = 36
 ) {
   skip_if_not_installed("arrow")
+  skip_if_not_installed("duckdb")
+  skip_if_not_installed("bit64")
 
-  # H3 -> loc_id lookup
-  h3_ids  <- paste0("h3_", seq_len(n_h3))
-  loc_ids <- paste0("loc_", c(1, 1, 2, 2)[seq_len(n_h3)])
+  con <- make_h3_con()
+  on.exit(DBI::dbDisconnect(con, shutdown = TRUE), add = TRUE)
+
+  # Derive a small set of real H3 cells: take 4 children-of-parent (siblings)
+  # of the seed cell at the seed's own resolution. Note that the H3 DuckDB
+  # extension only accepts UBIGINT for h3_cell_to_parent / h3_cell_to_children
+  # — strings must be converted via h3_string_to_h3 first.
+  parent_cell <- DBI::dbGetQuery(
+    con,
+    sprintf(
+      "SELECT h3_h3_to_string(h3_cell_to_parent(h3_string_to_h3('%s'), 4)) AS h3",
+      seed_cell
+    )
+  )$h3[[1L]]
+  h3_strings <- head(DBI::dbGetQuery(
+    con,
+    sprintf(
+      "SELECT h3_h3_to_string(unnest(h3_cell_to_children(h3_string_to_h3('%s'), 5))) AS h3",
+      parent_cell
+    )
+  )$h3, 4L)
+
+  # Same-resolution: weather uses bigint form of the same cells
+  h3_ints <- DBI::dbGetQuery(
+    con,
+    sprintf(
+      "SELECT h3_string_to_h3(h3) AS h3 FROM (VALUES %s) t(h3)",
+      paste0("('", h3_strings, "')", collapse = ", ")
+    )
+  )$h3
+  stopifnot(bit64::is.integer64(h3_ints))
+
+  loc_ids <- paste0("loc_", c(1, 1, 2, 2))
 
   h3_df <- data.frame(
-    h3       = h3_ids,
+    h3       = h3_strings,
     code     = code,
     year     = year,
     survname = survname,
     loc_id   = loc_ids,
-    pop_2020 = c(100, 200, 150, 50)[seq_len(n_h3)],
+    pop_2020 = c(100L, 200L, 150L, 50L),
     stringsAsFactors = FALSE
   )
 
-  # Monthly weather: 3 years, all H3 cells
+  # Monthly weather across all 4 cells
   start_date <- as.Date("2016-01-01")
   timestamps <- seq(start_date, by = "1 month", length.out = n_months)
 
   weather_df <- expand.grid(
-    h3        = h3_ids,
+    cell_idx  = seq_along(h3_strings),
     timestamp = timestamps,
     stringsAsFactors = FALSE
   )
+  weather_df$h3 <- h3_ints[weather_df$cell_idx]
+  weather_df$cell_idx <- NULL
   set.seed(42)
   weather_df$tx <- rnorm(nrow(weather_df), mean = 28, sd = 4)
   weather_df$t  <- rnorm(nrow(weather_df), mean = 22, sd = 3)
 
-  # Write parquet files
-  h3_path      <- file.path(dir, paste0(code, "_", year, "_", survname, "_h3.parquet"))
-  weather_path <- file.path(dir, paste0(code, "_weather.parquet"))
+  # File layout expected by get_weather()
+  h3_dir      <- file.path(dir, "microdata", "h3", code)
+  weather_dir <- file.path(dir, "hazard", "weather", "historical", code)
+  dir.create(h3_dir,      recursive = TRUE, showWarnings = FALSE)
+  dir.create(weather_dir, recursive = TRUE, showWarnings = FALSE)
+
+  h3_path <- file.path(
+    h3_dir,
+    paste0(code, "_", year, "_", survname, "_", source, "_h3.parquet")
+  )
+  weather_path <- file.path(
+    weather_dir, paste0(code, "_", weather_source, ".parquet")
+  )
   arrow::write_parquet(h3_df,      h3_path)
   arrow::write_parquet(weather_df, weather_path)
 
-  # Survey data: last 12 months of the weather data
+  # Survey microdata: last 12 months of the weather data
   survey_timestamps <- tail(timestamps, 12)
   survey_data <- expand.grid(
     timestamp = survey_timestamps,
@@ -88,16 +151,25 @@ make_test_fixtures <- function(
     stringsAsFactors = FALSE
   ) |>
     dplyr::mutate(
-      code     = code,
-      year     = year,
-      survname = survname,
+      code      = code,
+      year      = year,
+      survname  = survname,
       int_month = as.integer(format(.data$timestamp, "%m")),
       int_year  = as.integer(format(.data$timestamp, "%Y"))
     )
 
+  selected_surveys <- data.frame(
+    code     = code,
+    year     = year,
+    survname = survname,
+    source   = source,
+    stringsAsFactors = FALSE
+  )
+
   list(
     connection_params = list(type = "local", path = dir),
     survey_data       = survey_data,
+    selected_surveys  = selected_surveys,
     dates             = sort(unique(survey_timestamps))
   )
 }
@@ -120,32 +192,31 @@ make_test_fixtures <- function(
 # ---------------------------------------------------------------------------
 make_test_fixtures_cross_res <- function(
     dir,
-    seed_cell   = "85283473fffffff",   # valid res-5 cell (San Francisco area)
-    micro_res   = 5L,
-    weather_res = 4L,
-    code        = "TST",
-    year        = 2018L,
-    survname    = "SRV",
-    n_months    = 12L
+    seed_cell      = "85283473fffffff",   # valid res-5 cell (San Francisco area)
+    micro_res      = 5L,
+    weather_res    = 4L,
+    code           = "TST",
+    year           = 2018L,
+    survname       = "SRV",
+    source         = "lsms",
+    weather_source = "era5land",
+    n_months       = 12L
 ) {
   skip_if_not_installed("arrow")
   skip_if_not_installed("duckdb")
   skip_if_not_installed("bit64")
 
-  con <- DBI::dbConnect(duckdb::duckdb())
+  con <- make_h3_con()
   on.exit(DBI::dbDisconnect(con, shutdown = TRUE), add = TRUE)
 
-  # Install / load H3 extension
-  tryCatch(DBI::dbExecute(con, "INSTALL h3 FROM community"), error = function(e) NULL)
-  DBI::dbExecute(con, "LOAD h3")
-
-  # Derive micro-res cell strings from the seed.
-  # seed_cell is assumed to already be at micro_res; use it and a few
-  # siblings (children of its parent) so we have multiple h3 values.
+  # Derive micro-res cell strings from the seed. seed_cell is at micro_res;
+  # use the seed and its siblings (children of its parent at micro_res - 1).
+  # The H3 DuckDB extension only accepts UBIGINT for cell_to_parent /
+  # cell_to_children, so strings must be converted via h3_string_to_h3.
   parent_cell <- DBI::dbGetQuery(
     con,
     sprintf(
-      "SELECT h3_h3_to_string(h3_cell_to_parent('%s'::VARCHAR, %d)) AS h3",
+      "SELECT h3_h3_to_string(h3_cell_to_parent(h3_string_to_h3('%s'), %d)) AS h3",
       seed_cell, micro_res - 1L
     )
   )$h3[[1L]]
@@ -153,22 +224,31 @@ make_test_fixtures_cross_res <- function(
   micro_strings <- DBI::dbGetQuery(
     con,
     sprintf(
-      "SELECT h3_h3_to_string(unnest(h3_cell_to_children('%s'::VARCHAR, %d))) AS h3",
+      "SELECT h3_h3_to_string(unnest(h3_cell_to_children(h3_string_to_h3('%s'), %d))) AS h3",
       parent_cell, micro_res
     )
   )$h3
   micro_strings <- head(micro_strings, 4L)
 
-  # Derive weather bigint cells at weather_res (parents of micro cells)
-  weather_ints <- DBI::dbGetQuery(
-    con,
+  # Derive weather bigint cells at weather_res. When weather is coarser
+  # (weather_res < micro_res) take parents; when finer (weather_res > micro_res)
+  # take the first child of each micro cell.
+  weather_sql <- if (weather_res <= micro_res) {
     sprintf(
       "SELECT DISTINCT h3_cell_to_parent(h3_string_to_h3(h3), %d) AS h3
        FROM (VALUES %s) t(h3)",
       weather_res,
       paste0("('", micro_strings, "')", collapse = ", ")
     )
-  )$h3
+  } else {
+    sprintf(
+      "SELECT DISTINCT (h3_cell_to_children(h3_string_to_h3(h3), %d))[1] AS h3
+       FROM (VALUES %s) t(h3)",
+      weather_res,
+      paste0("('", micro_strings, "')", collapse = ", ")
+    )
+  }
+  weather_ints <- DBI::dbGetQuery(con, weather_sql)$h3
 
   # Build h3 lookup (microdata strings -> loc_id)
   h3_df <- data.frame(
@@ -191,12 +271,22 @@ make_test_fixtures_cross_res <- function(
   set.seed(99)
   weather_df$tx <- rnorm(nrow(weather_df), mean = 25, sd = 3)
 
-  # weather$h3 must be stored as integer64 / bigint
-  weather_df$h3 <- bit64::as.integer64(weather_df$h3)
+  # weather$h3 is already integer64 because the connection uses bigint = "integer64"
+  stopifnot(bit64::is.integer64(weather_df$h3))
 
-  # Write parquet files
-  h3_path      <- file.path(dir, paste0(code, "_", year, "_", survname, "_h3.parquet"))
-  weather_path <- file.path(dir, paste0(code, "_weather.parquet"))
+  # File layout expected by get_weather()
+  h3_dir      <- file.path(dir, "microdata", "h3", code)
+  weather_dir <- file.path(dir, "hazard", "weather", "historical", code)
+  dir.create(h3_dir,      recursive = TRUE, showWarnings = FALSE)
+  dir.create(weather_dir, recursive = TRUE, showWarnings = FALSE)
+
+  h3_path <- file.path(
+    h3_dir,
+    paste0(code, "_", year, "_", survname, "_", source, "_h3.parquet")
+  )
+  weather_path <- file.path(
+    weather_dir, paste0(code, "_", weather_source, ".parquet")
+  )
   arrow::write_parquet(h3_df,      h3_path)
   arrow::write_parquet(weather_df, weather_path)
 
@@ -214,9 +304,18 @@ make_test_fixtures_cross_res <- function(
       int_year  = as.integer(format(.data$timestamp, "%Y"))
     )
 
+  selected_surveys <- data.frame(
+    code     = code,
+    year     = year,
+    survname = survname,
+    source   = source,
+    stringsAsFactors = FALSE
+  )
+
   list(
     connection_params = list(type = "local", path = dir),
     survey_data       = survey_data,
+    selected_surveys  = selected_surveys,
     dates             = sort(unique(survey_timestamps)),
     micro_res         = micro_res,
     weather_res       = weather_res,
@@ -235,6 +334,8 @@ test_that("get_weather errors when ssp supplied but future_period missing", {
     get_weather(
       survey_data       = data.frame(code = "X", year = 2020, survname = "S",
                                      loc_id = "L", timestamp = Sys.Date()),
+      selected_surveys  = data.frame(code = "X", year = 2020, survname = "S",
+                                     source = "lsms"),
       selected_weather  = sw_continuous(),
       dates             = Sys.Date(),
       connection_params = list(type = "local", path = "."),
@@ -251,6 +352,8 @@ test_that("get_weather errors when ssp supplied but perturbation_method missing"
     get_weather(
       survey_data       = data.frame(code = "X", year = 2020, survname = "S",
                                      loc_id = "L", timestamp = Sys.Date()),
+      selected_surveys  = data.frame(code = "X", year = 2020, survname = "S",
+                                     source = "lsms"),
       selected_weather  = sw_continuous(),
       dates             = Sys.Date(),
       connection_params = list(type = "local", path = "."),
@@ -268,6 +371,8 @@ test_that("get_weather errors when perturbation_method missing a variable", {
     get_weather(
       survey_data       = data.frame(code = "X", year = 2020, survname = "S",
                                      loc_id = "L", timestamp = Sys.Date()),
+      selected_surveys  = data.frame(code = "X", year = 2020, survname = "S",
+                                     source = "lsms"),
       selected_weather  = sw,
       dates             = Sys.Date(),
       connection_params = list(type = "local", path = "."),
@@ -285,6 +390,8 @@ test_that("get_weather errors on invalid perturbation_method value", {
     get_weather(
       survey_data       = data.frame(code = "X", year = 2020, survname = "S",
                                      loc_id = "L", timestamp = Sys.Date()),
+      selected_surveys  = data.frame(code = "X", year = 2020, survname = "S",
+                                     source = "lsms"),
       selected_weather  = sw,
       dates             = Sys.Date(),
       connection_params = list(type = "local", path = "."),
@@ -360,11 +467,54 @@ test_that("K-means binning produces correct number of centers", {
   n_bins  <- 3
   km      <- kmeans(vals, centers = n_bins)
   centers <- sort(as.numeric(km$centers))
+  # 2 endpoints + (n_bins - 1) interior midpoints = n_bins + 1 cutoffs
   cutoffs <- unique(c(min(vals), (centers[-length(centers)] + centers[-1]) / 2, max(vals)))
-  expect_equal(length(cutoffs), n_bins)  # n_bins - 1 interior + 2 endpoints = n_bins + 1 but unique may collapse
+  expect_equal(length(cutoffs), n_bins + 1)
   breaks  <- c(-Inf, cutoffs[-c(1, length(cutoffs))], Inf)
   bins    <- cut(vals, breaks = breaks, include.lowest = TRUE)
   expect_equal(length(levels(bins)), n_bins)
+})
+
+test_that(".compute_breaks: Custom binning uses user-supplied cut values", {
+  set.seed(1)
+  ref_df <- data.frame(tx = runif(1000, 10, 40))
+  sw <- sw_binned("tx", method = "Custom", n_bins = 5L,
+                  custom_breaks = c(20, 25, 30, 35))
+  brks <- wiseapp:::.compute_breaks(ref_df, sw)
+  expect_named(brks, "tx")
+  expect_equal(brks$tx[c(1, length(brks$tx))], c(-Inf, Inf))
+  expect_equal(brks$tx[-c(1, length(brks$tx))], c(20, 25, 30, 35))
+})
+
+test_that(".compute_breaks: Custom binning sorts/dedups user cuts", {
+  ref_df <- data.frame(tx = seq(0, 100, by = 1))
+  sw <- sw_binned("tx", method = "Custom", n_bins = 5L,
+                  custom_breaks = c(35, 20, 30, 25, 25))
+  brks <- wiseapp:::.compute_breaks(ref_df, sw)
+  expect_equal(brks$tx[-c(1, length(brks$tx))], c(20, 25, 30, 35))
+})
+
+test_that(".compute_breaks: Custom binning with empty cuts keeps variable continuous", {
+  ref_df <- data.frame(tx = seq(0, 100, by = 1))
+  sw <- sw_binned("tx", method = "Custom", n_bins = 5L,
+                  custom_breaks = numeric(0))
+  brks <- expect_message(
+    wiseapp:::.compute_breaks(ref_df, sw),
+    "Custom binning for tx requires cut values"
+  )
+  expect_length(brks, 0L)
+})
+
+test_that(".compute_breaks: Custom binning warns when cut count doesn't match num_bins - 1", {
+  ref_df <- data.frame(tx = seq(0, 100, by = 1))
+  sw <- sw_binned("tx", method = "Custom", n_bins = 5L,
+                  custom_breaks = c(20, 25))  # only 2 cuts, expected 4
+  brks <- expect_message(
+    wiseapp:::.compute_breaks(ref_df, sw),
+    "expected 4 cut values"
+  )
+  # Still produces breaks from the supplied values
+  expect_equal(brks$tx[-c(1, length(brks$tx))], c(20, 25))
 })
 
 
@@ -382,17 +532,21 @@ test_that("get_weather returns data frame with expected columns (continuous)", {
 
   result <- get_weather(
     survey_data       = fx$survey_data,
+    selected_surveys  = fx$selected_surveys,
     selected_weather  = sw_continuous("tx"),
     dates             = fx$dates,
     connection_params = fx$connection_params
   )
 
-  expect_s3_class(result, "data.frame")
-  expect_true("tx" %in% names(result))
-  expect_true("loc_id" %in% names(result))
-  expect_true("timestamp" %in% names(result))
-  expect_true(is.numeric(result$tx))
-  expect_false(is.factor(result$tx))
+  expect_type(result, "list")
+  expect_true("historical" %in% names(result))
+  hist <- result$historical
+  expect_s3_class(hist, "data.frame")
+  expect_true("tx" %in% names(hist))
+  expect_true("loc_id" %in% names(hist))
+  expect_true("timestamp" %in% names(hist))
+  expect_true(is.numeric(hist$tx))
+  expect_false(is.factor(hist$tx))
 })
 
 test_that("get_weather returns only rows matching requested dates", {
@@ -405,12 +559,13 @@ test_that("get_weather returns only rows matching requested dates", {
 
   result <- get_weather(
     survey_data       = fx$survey_data,
+    selected_surveys  = fx$selected_surveys,
     selected_weather  = sw_continuous("tx"),
     dates             = fx$dates,
     connection_params = fx$connection_params
   )
 
-  expect_true(all(result$timestamp %in% fx$dates))
+  expect_true(all(result$historical$timestamp %in% fx$dates))
 })
 
 test_that("get_weather: binned (equal frequency) returns factor with correct levels", {
@@ -423,13 +578,14 @@ test_that("get_weather: binned (equal frequency) returns factor with correct lev
 
   result <- get_weather(
     survey_data       = fx$survey_data,
+    selected_surveys  = fx$selected_surveys,
     selected_weather  = sw_binned("tx", method = "Equal frequency", n_bins = 3),
     dates             = fx$dates,
     connection_params = fx$connection_params
   )
 
-  expect_true(is.factor(result$tx))
-  expect_equal(length(levels(result$tx)), 3L)
+  expect_true(is.factor(result$historical$tx))
+  expect_equal(length(levels(result$historical$tx)), 3L)
 })
 
 test_that("get_weather: binned (equal width) returns factor with correct levels", {
@@ -442,13 +598,14 @@ test_that("get_weather: binned (equal width) returns factor with correct levels"
 
   result <- get_weather(
     survey_data       = fx$survey_data,
+    selected_surveys  = fx$selected_surveys,
     selected_weather  = sw_binned("tx", method = "Equal width", n_bins = 4),
     dates             = fx$dates,
     connection_params = fx$connection_params
   )
 
-  expect_true(is.factor(result$tx))
-  expect_equal(length(levels(result$tx)), 4L)
+  expect_true(is.factor(result$historical$tx))
+  expect_equal(length(levels(result$historical$tx)), 4L)
 })
 
 test_that("get_weather: binned (K-means) returns factor", {
@@ -461,12 +618,41 @@ test_that("get_weather: binned (K-means) returns factor", {
 
   result <- get_weather(
     survey_data       = fx$survey_data,
+    selected_surveys  = fx$selected_surveys,
     selected_weather  = sw_binned("tx", method = "K-means", n_bins = 3),
     dates             = fx$dates,
     connection_params = fx$connection_params
   )
 
-  expect_true(is.factor(result$tx))
+  expect_true(is.factor(result$historical$tx))
+})
+
+test_that("get_weather: binned (Custom) produces factor whose interior breaks are the supplied cuts", {
+  skip_if_not_installed("arrow")
+  skip_if_not_installed("duckdb")
+  skip_if_not_installed("duckdbfs")
+
+  tmp <- withr::local_tempdir()
+  fx  <- make_test_fixtures(tmp)
+
+  # Use cuts that bracket the synthetic tx range (mean ~28, sd ~4)
+  user_cuts <- c(22, 26, 30, 34)
+  result <- get_weather(
+    survey_data       = fx$survey_data,
+    selected_surveys  = fx$selected_surveys,
+    selected_weather  = sw_binned("tx", method = "Custom", n_bins = 5L,
+                                  custom_breaks = user_cuts),
+    dates             = fx$dates,
+    connection_params = fx$connection_params
+  )
+
+  expect_true(is.factor(result$historical$tx))
+  expect_equal(length(levels(result$historical$tx)), 5L)
+
+  brks <- attr(result, "stored_breaks")
+  expect_named(brks, "tx")
+  expect_equal(brks$tx[c(1, length(brks$tx))], c(-Inf, Inf))
+  expect_equal(brks$tx[-c(1, length(brks$tx))], user_cuts)
 })
 
 test_that("get_weather: outer bins contain no NAs (values outside survey range)", {
@@ -487,12 +673,14 @@ test_that("get_weather: outer bins contain no NAs (values outside survey range)"
 
   result <- get_weather(
     survey_data       = fx$survey_data,
+    selected_surveys  = fx$selected_surveys,
     selected_weather  = sw_binned("tx", method = "Equal frequency", n_bins = 3),
     dates             = sim_dates[sim_dates %in% fx$dates],
     connection_params = fx$connection_params
   )
 
-  expect_false(any(is.na(result$tx)), info = "Outer bins should catch all values")
+  expect_false(any(is.na(result$historical$tx)),
+               info = "Outer bins should catch all values")
 })
 
 test_that("get_weather: two variables, mixed continuous and binned", {
@@ -510,14 +698,16 @@ test_that("get_weather: two variables, mixed continuous and binned", {
 
   result <- get_weather(
     survey_data       = fx$survey_data,
+    selected_surveys  = fx$selected_surveys,
     selected_weather  = sw_mixed,
     dates             = fx$dates,
     connection_params = fx$connection_params
   )
 
-  expect_true(is.numeric(result$tx))
-  expect_true(is.factor(result$t))
-  expect_equal(length(levels(result$t)), 3L)
+  hist <- result$historical
+  expect_true(is.numeric(hist$tx))
+  expect_true(is.factor(hist$t))
+  expect_equal(length(levels(hist$t)), 3L)
 })
 
 test_that("get_weather: bin cutoffs use only survey timestamps (not all dates)", {
@@ -532,6 +722,7 @@ test_that("get_weather: bin cutoffs use only survey timestamps (not all dates)",
   # but ensure survey_data$timestamp is a strict subset
   result <- get_weather(
     survey_data       = fx$survey_data,
+    selected_surveys  = fx$selected_surveys,
     selected_weather  = sw_binned("tx", method = "Equal frequency", n_bins = 3),
     dates             = fx$dates,
     connection_params = fx$connection_params
@@ -539,21 +730,13 @@ test_that("get_weather: bin cutoffs use only survey timestamps (not all dates)",
 
   # Cutoffs are derived from survey timestamps only so all result rows should
   # have a non-NA bin assignment (outer bins catch extremes)
-  expect_false(any(is.na(result$tx)))
+  expect_false(any(is.na(result$historical$tx)))
 })
 
 
 # ============================================================================ #
 # 5. H3 resolution + type harmonisation                                        #
 # ============================================================================ #
-
-# Helper: open a fresh in-process DuckDB connection with H3 loaded
-make_h3_con <- function() {
-  con <- DBI::dbConnect(duckdb::duckdb())
-  tryCatch(DBI::dbExecute(con, "INSTALL h3 FROM community"), error = function(e) NULL)
-  DBI::dbExecute(con, "LOAD h3")
-  con
-}
 
 test_that(".harmonise_h3: same-resolution adds h3_weather string->bigint cast", {
   skip_if_not_installed("duckdb")
@@ -562,7 +745,9 @@ test_that(".harmonise_h3: same-resolution adds h3_weather string->bigint cast", 
   con <- make_h3_con()
   on.exit(DBI::dbDisconnect(con, shutdown = TRUE), add = TRUE)
 
-  # Both tables at res 5 — no parent lookup needed, only type cast
+  # Both tables at res 5 — no parent lookup needed, only type cast.
+  # cell_int is an integer64 because make_h3_con() uses bigint = "integer64";
+  # format() yields the exact integer literal for SQL embedding.
   cell_str <- "85283473fffffff"
   cell_int <- DBI::dbGetQuery(
     con, sprintf("SELECT h3_string_to_h3('%s') AS h3", cell_str)
@@ -572,7 +757,7 @@ test_that(".harmonise_h3: same-resolution adds h3_weather string->bigint cast", 
     sprintf("SELECT '%s'::VARCHAR AS h3, 'L1' AS loc_id, 100 AS pop_2020", cell_str)
   ))
   weather <- dplyr::tbl(con, dplyr::sql(
-    sprintf("SELECT %s::UBIGINT AS h3, 25.0 AS tx", cell_int)
+    sprintf("SELECT %s::UBIGINT AS h3, 25.0 AS tx", format(cell_int))
   ))
 
   result <- wiseapp:::.harmonise_h3(h3_slim, weather, con)
@@ -606,7 +791,7 @@ test_that(".harmonise_h3: microdata finer than weather maps micro up to weather 
     sprintf("SELECT '%s'::VARCHAR AS h3, 'L1' AS loc_id, 100 AS pop_2020", micro_cell)
   ))
   weather <- dplyr::tbl(con, dplyr::sql(
-    sprintf("SELECT %s::UBIGINT AS h3, 25.0 AS tx", weather_int)
+    sprintf("SELECT %s::UBIGINT AS h3, 25.0 AS tx", format(weather_int))
   ))
 
   result <- wiseapp:::.harmonise_h3(h3_slim, weather, con)
@@ -630,12 +815,14 @@ test_that(".harmonise_h3: weather finer than microdata maps weather up to micro 
   con <- make_h3_con()
   on.exit(DBI::dbDisconnect(con, shutdown = TRUE), add = TRUE)
 
-  # micro at res 4, weather at res 5 (unusual corner case)
-  micro_cell      <- "84283473fffffff"
+  # micro at res 4, weather at res 5 (unusual corner case).
+  # 8428347ffffffff is the valid res-4 parent of 85283473fffffff;
+  # 84283473fffffff was used previously but is not a valid H3 index.
+  micro_cell      <- "8428347ffffffff"
   weather_child   <- DBI::dbGetQuery(
     con,
     sprintf(
-      "SELECT h3_h3_to_string((h3_cell_to_children('%s'::VARCHAR, 5))[1]) AS h3",
+      "SELECT h3_h3_to_string((h3_cell_to_children(h3_string_to_h3('%s'), 5))[1]) AS h3",
       micro_cell
     )
   )$h3[[1L]]
@@ -648,7 +835,7 @@ test_that(".harmonise_h3: weather finer than microdata maps weather up to micro 
     sprintf("SELECT '%s'::VARCHAR AS h3, 'L1' AS loc_id, 100 AS pop_2020", micro_cell)
   ))
   weather <- dplyr::tbl(con, dplyr::sql(
-    sprintf("SELECT %s::UBIGINT AS h3, 25.0 AS tx", weather_int)
+    sprintf("SELECT %s::UBIGINT AS h3, 25.0 AS tx", format(weather_int))
   ))
 
   result <- wiseapp:::.harmonise_h3(h3_slim, weather, con)
@@ -684,16 +871,18 @@ test_that("get_weather joins correctly when weather is coarser than microdata", 
 
   result <- get_weather(
     survey_data       = fx$survey_data,
+    selected_surveys  = fx$selected_surveys,
     selected_weather  = sw_continuous("tx"),
     dates             = fx$dates,
     connection_params = fx$connection_params
   )
 
-  expect_s3_class(result, "data.frame")
-  expect_true("tx" %in% names(result))
-  expect_false(anyNA(result$tx))
-  expect_true(all(result$timestamp %in% fx$dates))
-  expect_setequal(unique(result$loc_id), c("loc_1", "loc_2"))
+  hist <- result$historical
+  expect_s3_class(hist, "data.frame")
+  expect_true("tx" %in% names(hist))
+  expect_false(anyNA(hist$tx))
+  expect_true(all(hist$timestamp %in% fx$dates))
+  expect_setequal(unique(hist$loc_id), c("loc_1", "loc_2"))
 })
 
 test_that("get_weather joins correctly when weather is finer than microdata", {
@@ -704,23 +893,26 @@ test_that("get_weather joins correctly when weather is finer than microdata", {
 
   tmp <- withr::local_tempdir()
 
-  # micro res 4, weather res 5  (unusual but must be handled)
+  # micro res 4, weather res 5  (unusual but must be handled).
+  # 8428347ffffffff is a valid res-4 cell (parent of 85283473fffffff).
   fx <- make_test_fixtures_cross_res(
     tmp,
-    seed_cell   = "84283473fffffff",
+    seed_cell   = "8428347ffffffff",
     micro_res   = 4L,
     weather_res = 5L
   )
 
   result <- get_weather(
     survey_data       = fx$survey_data,
+    selected_surveys  = fx$selected_surveys,
     selected_weather  = sw_continuous("tx"),
     dates             = fx$dates,
     connection_params = fx$connection_params
   )
 
-  expect_s3_class(result, "data.frame")
-  expect_true("tx" %in% names(result))
-  expect_false(anyNA(result$tx))
-  expect_true(all(result$timestamp %in% fx$dates))
+  hist <- result$historical
+  expect_s3_class(hist, "data.frame")
+  expect_true("tx" %in% names(hist))
+  expect_false(anyNA(hist$tx))
+  expect_true(all(hist$timestamp %in% fx$dates))
 })
