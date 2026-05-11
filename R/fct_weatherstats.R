@@ -246,6 +246,11 @@ make_weather_stats_dt <- function(survey_weather, selected_weather) {
     if (length(vars) == 0) return(data.frame(Note = "No weather variables found"))
 
     tab <- weighted_summary_long(df, vars = vars)
+    if (!is.data.frame(tab) || nrow(tab) == 0) {
+      return(data.frame(
+        Note = "No continuous weather variables to summarise (binned variables are shown below)."
+      ))
+    }
 
     # Add wave-specific missingness (% Missing) by countryyear and variable
     if ("countryyear" %in% names(tab) && "variable" %in% names(tab)) {
@@ -292,6 +297,115 @@ make_weather_stats_dt <- function(survey_weather, selected_weather) {
     num_cols <- names(tab)[vapply(tab, is.numeric, logical(1))]
     num_cols <- setdiff(num_cols, "N")
     if (length(num_cols) > 0) dt <- DT::formatRound(dt, columns = num_cols, digits = 2)
+
+    dt
+  })
+}
+
+
+#' Weather binned-variable level-distribution DT renderer
+#'
+#' Builds a DT for binned (factor / character) weather variables, showing
+#' count and share of observations in each bin per `countryyear`. Numeric
+#' weather variables are skipped (handled by `make_weather_stats_dt`).
+#'
+#' @param survey_weather   Reactive returning merged survey-weather data.
+#' @param selected_weather Reactive returning selected weather rows
+#'   (needs `name` and `label`).
+#'
+#' @return A DT render function.
+#' @export
+make_weather_binned_stats_dt <- function(survey_weather, selected_weather) {
+  DT::renderDT({
+    shiny::req(survey_weather(), selected_weather())
+
+    df <- survey_weather() |>
+      dplyr::mutate(countryyear = paste0(.data$economy, ", ", .data$year))
+
+    sw <- selected_weather()
+    vars <- intersect(sw$name, names(df))
+    if (length(vars) == 0) {
+      return(data.frame(Note = "No weather variables found"))
+    }
+
+    binned_vars <- vars[vapply(df[vars],
+                               function(x) !is.numeric(x), logical(1))]
+    if (length(binned_vars) == 0) {
+      return(data.frame(
+        Note = "No binned weather variables to summarise."
+      ))
+    }
+
+    rows_list <- lapply(binned_vars, function(v) {
+      counts <- df |>
+        dplyr::filter(!is.na(.data[[v]])) |>
+        dplyr::group_by(.data$countryyear, .data[[v]]) |>
+        dplyr::summarise(N = dplyr::n(), .groups = "drop") |>
+        dplyr::group_by(.data$countryyear) |>
+        dplyr::mutate(share = 100 * .data$N / sum(.data$N)) |>
+        dplyr::ungroup() |>
+        dplyr::mutate(
+          variable = v,
+          level    = as.character(.data[[v]])
+        ) |>
+        dplyr::select(.data$variable, .data$countryyear, .data$level,
+                      .data$N, .data$share)
+
+      miss_df <- df |>
+        dplyr::group_by(.data$countryyear) |>
+        dplyr::summarise(`% Missing` = 100 * mean(is.na(.data[[v]])),
+                         .groups = "drop")
+
+      counts |> dplyr::left_join(miss_df, by = "countryyear")
+    })
+
+    tab <- dplyr::bind_rows(rows_list)
+    if (nrow(tab) == 0) {
+      return(data.frame(Note = "No binned weather observations found."))
+    }
+
+    if ("variable" %in% names(tab) &&
+        all(c("name", "label") %in% names(sw))) {
+      lab_map <- sw |>
+        dplyr::select(.data$name, .data$label) |>
+        dplyr::distinct()
+      tab <- tab |>
+        dplyr::left_join(lab_map, by = c("variable" = "name")) |>
+        dplyr::mutate(
+          variable_label = dplyr::coalesce(.data$label, .data$variable)
+        ) |>
+        dplyr::select(.data$variable, .data$variable_label,
+                      .data$countryyear, .data$level, .data$N,
+                      .data$share, .data$`% Missing`)
+    }
+
+    # Sort: by variable, country-year, then by level (factor order if available)
+    tab <- tab |>
+      dplyr::arrange(.data$variable, .data$countryyear, .data$level)
+
+    if ("variable" %in% names(tab))
+      names(tab)[names(tab) == "variable"] <- "Variable"
+    if ("variable_label" %in% names(tab))
+      names(tab)[names(tab) == "variable_label"] <- "Variable Label"
+    if ("countryyear" %in% names(tab))
+      names(tab)[names(tab) == "countryyear"] <- "Country, Year"
+    if ("level" %in% names(tab))
+      names(tab)[names(tab) == "level"] <- "Level"
+    if ("share" %in% names(tab))
+      names(tab)[names(tab) == "share"] <- "Share (%)"
+
+    dt <- DT::datatable(
+      tab,
+      rownames = FALSE,
+      options  = list(dom = "t", paging = FALSE,
+                      searching = FALSE, info = FALSE),
+      class    = "compact"
+    )
+
+    num_cols <- intersect(c("Share (%)", "% Missing"), names(tab))
+    if (length(num_cols) > 0) {
+      dt <- DT::formatRound(dt, columns = num_cols, digits = 2)
+    }
 
     dt
   })

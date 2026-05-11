@@ -8,11 +8,7 @@
 #'
 #' @importFrom shiny NS tagList
 mod_1_07_results_ui <- function(id) {
-  ns <- NS(id)
-  tagList(
-    shiny::actionButton(ns("run_model"), "Run model",
-                        class = "btn-primary", style = "width: 100%;")
-  )
+  tagList()
 }
 
 #' 1_07_results Server Functions
@@ -36,6 +32,7 @@ mod_1_07_results_server <- function(id,
                                      survey_weather,
                                      selected_model,
                                      model_type,
+                                     run_model,
                                      tabset_id,
                                      tabset_session = NULL) {
   moduleServer(id, function(input, output, session) {
@@ -60,8 +57,10 @@ mod_1_07_results_server <- function(id,
     native_fit <- function(fit) extract_native_fit(fit, model_fit_val()$engine)
 
     # ---- Run model -----------------------------------------------------------
+    # The "Run model" button lives in mod_1_06_model; the reactive `run_model`
+    # parameter wraps that button's input counter and fires here on click.
 
-    observeEvent(input$run_model, {
+    observeEvent(run_model(), {
       req(selected_outcome(), selected_weather(), selected_model(), survey_weather())
 
       nid <- shiny::showNotification("Fitting models — please wait...",
@@ -105,9 +104,9 @@ mod_1_07_results_server <- function(id,
       mf      <- model_fit_val()
       out_lab <- get_label(mf$y_var)
 
-      # Coefficient plot
-      output$coefplot <- renderPlot({
-        req(model_fit_val())
+      # RIF coefficient plots: one per weather variable
+      output$coefplot1 <- renderPlot({
+        req(model_fit_val(), length(model_fit_val()$weather_terms) >= 1)
         mf <- model_fit_val()
         make_coefplot(
           fit1              = extract_native_fit(mf$fit1, mf$engine),
@@ -118,7 +117,25 @@ mod_1_07_results_server <- function(id,
           outcome_label     = selected_outcome()$label,
           label_fun         = get_label,
           engine            = mf$engine,
-          rif_grid          = mf$rif_grid
+          rif_grid          = mf$rif_grid,
+          pred_var          = mf$weather_terms[1]
+        )
+      })
+
+      output$coefplot2 <- renderPlot({
+        req(model_fit_val(), length(model_fit_val()$weather_terms) >= 2)
+        mf <- model_fit_val()
+        make_coefplot(
+          fit1              = extract_native_fit(mf$fit1, mf$engine),
+          fit2              = extract_native_fit(mf$fit2, mf$engine),
+          fit3              = extract_native_fit(mf$fit3, mf$engine),
+          weather_terms     = mf$weather_terms,
+          interaction_terms = mf$interaction_terms,
+          outcome_label     = selected_outcome()$label,
+          label_fun         = get_label,
+          engine            = mf$engine,
+          rif_grid          = mf$rif_grid,
+          pred_var          = mf$weather_terms[2]
         )
       })
 
@@ -179,6 +196,25 @@ mod_1_07_results_server <- function(id,
 
       is_rif <- identical(mf$engine, "rif")
 
+      # Reactive layouts so panels switch between 1 and 2 columns when the
+      # model is re-fit with a different number of weather variables.
+      output$effectplot_layout <- shiny::renderUI({
+        req(model_fit_val())
+        weather_plot_layout(
+          ns, length(model_fit_val()$weather_terms %||% character(0)),
+          ids    = c("effectplot1", "effectplot2"),
+          height = "500px"
+        )
+      })
+      output$coefplot_layout <- shiny::renderUI({
+        req(model_fit_val())
+        weather_plot_layout(
+          ns, length(model_fit_val()$weather_terms %||% character(0)),
+          ids    = c("coefplot1", "coefplot2"),
+          height = "600px"
+        )
+      })
+
       if (!results_tab_added()) {
         shiny::appendTab(
           inputId = tabset_id,
@@ -187,15 +223,11 @@ mod_1_07_results_server <- function(id,
             value = "results",
             shiny::h4(if (is_rif) "Weather sensitivity across the distribution"
                       else "Predicted outcome vs weather"),
-            bslib::layout_columns(
-              col_widths = c(6, 6),
-              bslib::card(shiny::plotOutput(ns("effectplot1"), height = "300px")),
-              bslib::card(shiny::plotOutput(ns("effectplot2"), height = "300px"))
-            ),
+            shiny::uiOutput(ns("effectplot_layout")),
             shiny::br(),
             shiny::h4(if (is_rif) "UQR coefficients by model specification"
                       else "Marginal effect of weather on outcome"),
-            bslib::card(shiny::plotOutput(ns("coefplot"))),
+            shiny::uiOutput(ns("coefplot_layout")),
             shiny::br(),
             shiny::h4(if (is_rif) "Quantile regression results"
                       else "Regression results"),

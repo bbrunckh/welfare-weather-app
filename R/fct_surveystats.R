@@ -363,19 +363,24 @@ plot_survey_map <- function(loc) {
 #'   columns `name`, `label`, and the grouping flag column given in `flag_col`.
 #' @param flag_col Character scalar naming the grouping flag column in
 #'   `variable_list` (e.g., `"outcome"`, `"ind"`, `"hh"`, `"firm"`, `"area"`).
+#'   Ignored if `vars` is supplied.
+#' @param vars Optional character vector of variable names to summarise. When
+#'   supplied, takes precedence over `flag_col`.
 #'
 #' @return A `shiny.render.function` (from `DT::renderDT`) that renders the
 #'   formatted summary statistics table.
 #' @export
-make_stats_dt <- function(survey_data, variable_list, flag_col) {
+make_stats_dt <- function(survey_data, variable_list, flag_col = NULL, vars = NULL) {
   DT::renderDT({
     shiny::req(survey_data())
     df <- survey_data()
     vl <- if (is.function(variable_list)) variable_list() else variable_list
 
-    vars <- intersect(vl$name[vl[[flag_col]] == 1], names(df))
+    target <- if (!is.null(vars)) vars else vl$name[vl[[flag_col]] == 1]
+    vars   <- intersect(target, names(df))
     if (length(vars) == 0) {
-      return(data.frame(Note = paste("No", flag_col, "variables found")))
+      tag <- flag_col %||% "specified"
+      return(data.frame(Note = paste("No", tag, "variables found")))
     }
 
     tab <- weighted_summary_long(df, vars = vars)

@@ -447,6 +447,7 @@ resolve_id_col <- function(a, b) {
 #' @seealso \code{\link{aggregate_with_uncertainty}},
 #'   \code{\link{compute_chol_vcov}}, \code{\link{compute_factor_loading}}
 #' @export
+#DRK NOTE - chol_Sigma and slim are empty right now.
 run_sim_pipeline <- function(weather_raw,
                              svy,
                              sw,
@@ -456,6 +457,9 @@ run_sim_pipeline <- function(weather_raw,
                              train_data,
                              engine,
                              chol_obj = NULL,
+
+                            chol_Sigma  = NULL,   # golem compat alias
+                            slim        = FALSE,  # accepted, ignored
                             
                              #RIF
                              fit_multi   = NULL,
@@ -465,7 +469,18 @@ run_sim_pipeline <- function(weather_raw,
                              svy_baseline = NULL,
                              rif_grid     = NULL) {
 
-  n_pre_join    <- nrow(svy)
+  n_pre_join <- nrow(svy)
+
+  # Define is_rif once — all conditions in one place
+  is_rif <- identical(engine, "rif") &&
+            !is.null(fit_multi)      &&
+            !is.null(taus)           &&
+            !is.null(weather_cols)
+
+  # Tag svy with row IDs for RIF delta-method lookups
+  # Must be added before prepare_hist_weather() so it survives the join
+  if (is_rif) svy$.svy_row_id <- seq_len(nrow(svy))
+
   survey_wd_sim <- prepare_hist_weather(weather_raw, svy, sw, so$name)
 
   # Resolve ID column for "original" residual matching
@@ -474,15 +489,15 @@ run_sim_pipeline <- function(weather_raw,
              else
                NULL
 
-    # ---- Prediction — dispatch on engine ------------------------------------
-  is_rif <- !is.null(fit_multi) && !is.null(taus) &&
-             !is.null(weather_cols) && engine == "rif"
+  # ---- Prediction — dispatch on engine ------------------------------------
 
   out <- if (is_rif) {
     # RIF path — quantile delta method
-    chol_list <- if (!is.null(chol_obj) && is.list(chol_obj) &&
-                     !("L" %in% names(chol_obj)))
-      chol_obj   # already a list of per-tau Cholesky matrices
+    # Use chol_obj (our format) or chol_Sigma (golem format) for RIF
+    chol_src  <- if (!is.null(chol_obj)) chol_obj else chol_Sigma
+    chol_list <- if (!is.null(chol_src) && is.list(chol_src) &&
+                     !("L" %in% names(chol_src)))
+      chol_src
     else NULL
     predict_rif(
       fit_multi    = fit_multi,
@@ -590,7 +605,8 @@ if (!is.null(X_nonFE)) {
   # ---- Training augmentation for residual drawing ------------------------- #
   # train_aug carries .resid for "original" and "resample" residual paths
   # inside aggregate_with_uncertainty(). Computed once per pipeline call.
-  train_aug <- tryCatch({
+  # train_aug only needed for residual drawing — skip for RIF (uses "none")
+  train_aug <- if (is_rif) NULL else tryCatch({
     fitted_train <- as.numeric(stats::predict(model, newdata = train_data))
     train_data |>
       dplyr::mutate(
@@ -598,7 +614,8 @@ if (!is.null(X_nonFE)) {
         .resid  = !!rlang::sym(so$name) - fitted_train
       )
   }, error = function(e) {
-    warning("[run_sim_pipeline] train_aug computation failed: ", conditionMessage(e))
+    warning("[run_sim_pipeline] train_aug computation failed: ",
+            conditionMessage(e))
     NULL
   })
   

@@ -68,6 +68,9 @@ fct_run_simulation <- function(sw,
                                 stored_breaks,
                                 ensemble_band_q,
                                 full_ensemble,
+                                fit_multi    = NULL,
+                                taus         = NULL,
+                                weather_cols = NULL,
                                 notify_fn   = function(msg) message(msg),
                                 progress_fn = function(value, detail) invisible(NULL)) {
 
@@ -268,7 +271,10 @@ fct_run_simulation <- function(sw,
           residuals   = residuals,
           train_data  = train_data,
           engine      = engine,
-          chol_obj    = chol_obj
+          chol_obj    = chol_obj,
+          fit_multi    = fit_multi,   
+          taus         = taus,        
+          weather_cols = weather_cols
         ),
         error = function(e) {
           warning(sprintf("[fct_run_simulation] Key %s failed: %s",

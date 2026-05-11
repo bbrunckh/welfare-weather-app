@@ -464,16 +464,23 @@ mod_2_01_weathersim_server <- function(id,
       do.call(rbind, do.call(c, rows))
     })
 
-    # ---- Run simulation button (hidden for RIF engine) --------------------
+    # ---- Run simulation button (hidden for non-linear or RIF engine) --------------------
 
     output$run_sim_ui <- shiny::renderUI({
-      mf <- model_fit()
-      if (!is.null(mf) && identical(mf$engine, "rif")) {
+      mf     <- model_fit()
+      engine <- if (!is.null(mf)) mf$engine %||% "fixest" else "fixest"
+
+      # Block only unsupported engines — linear (fixest) and RIF both supported
+      unsupported <- !is.null(mf) &&
+                     !engine %in% c("fixest", "rif")
+
+      if (unsupported) {
         shiny::div(
           class = "alert alert-warning",
           style = "font-size: 13px; margin-top: 4px;",
-          shiny::tags$b("\u26a0 Simulations are not yet implemented for Quantile Regression (RIF)."),
-          " Please select a different model engine to run simulations."
+          shiny::tags$b("\u26a0 Simulations are not yet implemented for ",
+                        engine, " models."),
+          " Please select a linear or RIF model engine to run simulations."
         )
       } else {
         shiny::actionButton(
@@ -514,6 +521,16 @@ mod_2_01_weathersim_server <- function(id,
       # Fixed at p10/p90 — input$ensemble_band_width not yet in UI
       ensemble_band_q     <- c(lo = 0.10, hi = 0.90)
 
+      # ---- RIF-specific params -------------------------------------------
+      engine      <- mf$engine %||% "fixest"
+      is_rif      <- identical(engine, "rif")
+      fit_multi   <- if (is_rif) mf$fit3          else NULL
+      rif_taus    <- if (is_rif) mf$taus           else NULL
+      rif_weather <- if (is_rif) mf$weather_terms  else NULL
+
+      # Force residuals = "none" for RIF (delta method, no residual draw)
+      sh_residuals <- if (is_rif) "none" else sh$residuals
+
 
       shiny::withProgress(message = "Running simulation...", value = 0, {
 
@@ -528,14 +545,17 @@ mod_2_01_weathersim_server <- function(id,
             cp                  = cp,
             fp_list             = fp_list,
             ssps                = ssps,
-            residuals           = sh$residuals,
+            residuals           = sh_residuals, #sh$residuals,
             dev_mode            = isTRUE(input$dev_mode),
             skip_coef_draws     = isTRUE(input$skip_coef_draws),
             sim_dates           = sim_dates,
             perturbation_method = perturbation_method,
             stored_breaks       = stored_breaks(),
             ensemble_band_q     = ensemble_band_q,
-            full_ensemble       = FALSE,   
+            full_ensemble       = FALSE,
+            fit_multi           = fit_multi,
+            taus                = rif_taus,
+            weather_cols        = rif_weather,   
             progress_fn         = function(value, detail)
                                     shiny::setProgress(value = value,
                                                        detail = detail)
@@ -561,7 +581,7 @@ mod_2_01_weathersim_server <- function(id,
         }
         S_sim   <- as.integer(input$sim_n %||% 150L)
         bq_sim  <- c(lo = 0.10, hi = 0.90)
-        res_sim <- sh$residuals %||% "none"
+        res_sim <- if (identical(mf$engine, "rif")) "none" else sh$residuals
         pov_sim <- as.numeric(input$pov_line_sim)
 
         t_agg_start <- proc.time()[["elapsed"]]

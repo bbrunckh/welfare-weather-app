@@ -18,17 +18,18 @@ mod_1_06_model_ui <- function(id) {
       uiOutput(ns("model_selector_ui"))
     ),
     wellPanel(
-      uiOutput(ns("policy_button_ui")),
       uiOutput(ns("policy_ui"))
     ),
     wellPanel(
-      uiOutput(ns("model_specs_button_ui")),
+      # uiOutput(ns("model_specs_button_ui")),
       uiOutput(ns("model_specs_ui")),
       shiny::helpText(
         "More model types and covariate selection methods will be added in future updates.",
         style = "color: red; font-size: 12px;"
       )
-    )
+    ),
+    shiny::actionButton(ns("run_model"), "Run model",
+                        class = "btn-primary", style = "width: 100%;")
   )
 }
 
@@ -116,21 +117,8 @@ mod_1_06_model_server <- function(id,
 
     # ---- Policy scenarios toggle ----------------------------------------------
 
-    policy_open <- reactiveVal(FALSE)
-
-    output$policy_button_ui <- renderUI({
-      req(input$model_type)
-      shiny::actionButton(ns("policy_toggle"), "Policy scenarios",
-                          style = "margin-bottom:10px;")
-    })
-
-    observeEvent(input$policy_toggle, {
-      policy_open(!isTRUE(policy_open()))
-    })
-
     output$policy_ui <- renderUI({
       req(input$model_type)
-      if (!isTRUE(policy_open())) return(NULL)
 
       vl <- valid_vl()
       choices <- get_policy_choices()
@@ -216,23 +204,23 @@ mod_1_06_model_server <- function(id,
 
     # ---- Model parameters toggle --------------------------------------------
 
-    model_specs_open <- reactiveVal(FALSE)
+    # model_specs_open <- reactiveVal(FALSE)
 
-    output$model_specs_button_ui <- renderUI({
-      req(input$model_type)
-      shiny::actionButton(ns("model_specs"), "Model parameters",
-                          style = "margin-bottom:10px;")
-    })
+    # output$model_specs_button_ui <- renderUI({
+    #   req(input$model_type)
+    #   shiny::actionButton(ns("model_specs"), "Model parameters",
+    #                       style = "margin-bottom:10px;")
+    # })
 
-    observeEvent(input$model_specs, {
-      model_specs_open(!isTRUE(model_specs_open()))
-    })
+    # observeEvent(input$model_specs, {
+    #   model_specs_open(!isTRUE(model_specs_open()))
+    # })
 
     # ---- Model specification panel ------------------------------------------
 
     output$model_specs_ui <- renderUI({
       req(input$model_type)
-      if (!isTRUE(model_specs_open())) return(NULL)
+      # if (!isTRUE(model_specs_open())) return(NULL)
 
       ixn <- interact_vars()
       fe  <- fe_vars()
@@ -398,6 +386,18 @@ mod_1_06_model_server <- function(id,
           ),
 
           # ------------------------------
+          # Toggle for forced inclusion / exclusion
+          # ------------------------------
+
+          shiny::actionButton(
+            ns("show_lasso_force"),
+            "Show forced inclusion / exclusion",
+            style = "margin-bottom:12px;"
+          ),
+
+          uiOutput(ns("lasso_force_ui")),
+
+          # ------------------------------
           # Toggle for advanced settings
           # ------------------------------
 
@@ -407,13 +407,7 @@ mod_1_06_model_server <- function(id,
             style = "margin-bottom:12px;"
           ),
 
-          uiOutput(ns("lasso_advanced_ui")),
-
-          shiny::actionButton(
-            ns("run_lasso"),
-            "Run Lasso",
-            class = "btn-primary"
-          ),
+          uiOutput(ns("lasso_advanced_ui"))
 
         )
       }
@@ -422,6 +416,134 @@ mod_1_06_model_server <- function(id,
     lasso_advanced_open <- reactiveVal(FALSE)
     observeEvent(input$show_lasso_advanced, {
       lasso_advanced_open(!lasso_advanced_open())
+    })
+
+    lasso_force_open <- reactiveVal(FALSE)
+    observeEvent(input$show_lasso_force, {
+      lasso_force_open(!lasso_force_open())
+    })
+
+    # Helper: vars at a given level (ind/hh/firm/area) from valid_vl
+    .vars_at_level <- function(role) {
+      vl <- valid_vl()
+      if (is.null(vl) || !role %in% names(vl)) return(vl[0L, , drop = FALSE])
+      vl[!is.na(vl[[role]]) & vl[[role]] == 1L, , drop = FALSE]
+    }
+
+    # Helper: per-level named choices vector (label -> name), excluding
+    # outcome and weather variables.
+    .level_choices <- function(role) {
+      vl_role <- .vars_at_level(role)
+      if (nrow(vl_role) == 0) return(stats::setNames(character(0), character(0)))
+      out_y <- if (!is.null(selected_outcome())) selected_outcome()$name else character(0)
+      out_w <- if (!is.null(selected_weather())) selected_weather()$name else character(0)
+      keep <- !vl_role$name %in% c(out_y, out_w)
+      stats::setNames(vl_role$name[keep], vl_role$label[keep])
+    }
+
+    output$lasso_force_ui <- renderUI({
+      req(input$covariates == "Lasso")
+      if (!lasso_force_open()) return(NULL)
+
+      already_in <- unique(c(input$interactions, input$fixedeffects))
+
+      level_block <- function(role, role_label) {
+        choices <- .level_choices(role)
+        if (length(choices) == 0) return(NULL)
+
+        default_in <- intersect(already_in, choices)
+
+        tagList(
+          tags$strong(role_label),
+          shiny::selectizeInput(
+            ns(paste0("force_in_", role)),
+            label    = "Force include:",
+            choices  = choices,
+            selected = if (length(default_in) > 0) default_in else NULL,
+            multiple = TRUE,
+            options  = list(placeholder = "Select covariates to force in")
+          ),
+          shiny::selectizeInput(
+            ns(paste0("force_out_", role)),
+            label    = "Force exclude:",
+            choices  = choices,
+            selected = NULL,
+            multiple = TRUE,
+            options  = list(placeholder = "Select covariates to force out")
+          ),
+          tags$hr(style = "margin: 8px 0;")
+        )
+      }
+
+      tagList(
+        tags$small(
+          class = "text-muted",
+          style = "display:block;margin-bottom:6px;",
+          paste0(
+            "Forced-included covariates always enter the model. ",
+            "Forced-excluded covariates are removed from Lasso candidates ",
+            "and the final regression."
+          )
+        ),
+        level_block("ind",  "Individual covariates"),
+        level_block("hh",   "Household covariates"),
+        level_block("firm", "Firm covariates"),
+        level_block("area", "Area covariates")
+      )
+    })
+
+    # ---- Mutual exclusion between force-include and force-exclude --------
+    # When a var is selected as force-include, remove it from force-exclude
+    # choices, and vice versa. Updates run per level.
+    lapply(c("ind", "hh", "firm", "area"), function(role) {
+      in_id  <- paste0("force_in_",  role)
+      out_id <- paste0("force_out_", role)
+
+      observe({
+        chosen_in <- input[[in_id]]
+        choices   <- .level_choices(role)
+        if (length(choices) == 0) return()
+        out_choices <- choices[!choices %in% chosen_in]
+        shiny::updateSelectizeInput(
+          session, out_id,
+          choices  = out_choices,
+          selected = intersect(input[[out_id]], out_choices)
+        )
+      })
+
+      observe({
+        chosen_out <- input[[out_id]]
+        choices    <- .level_choices(role)
+        if (length(choices) == 0) return()
+        in_choices <- choices[!choices %in% chosen_out]
+        shiny::updateSelectizeInput(
+          session, in_id,
+          choices  = in_choices,
+          selected = intersect(input[[in_id]], in_choices)
+        )
+      })
+    })
+
+    # Reactive: collected forced-in / forced-out by level
+    lasso_forced <- reactive({
+      list(
+        ind  = list(
+          inc = input$force_in_ind  %||% character(0),
+          exc = input$force_out_ind %||% character(0)
+        ),
+        hh   = list(
+          inc = input$force_in_hh   %||% character(0),
+          exc = input$force_out_hh  %||% character(0)
+        ),
+        firm = list(
+          inc = input$force_in_firm  %||% character(0),
+          exc = input$force_out_firm %||% character(0)
+        ),
+        area = list(
+          inc = input$force_in_area  %||% character(0),
+          exc = input$force_out_area %||% character(0)
+        )
+      )
     })
 
     output$lasso_advanced_ui <- renderUI({
@@ -503,7 +625,8 @@ mod_1_06_model_server <- function(id,
 
     # --- LASSO MODEL ---------------------------------------------------------
 
-    lasso_result <- eventReactive(input$run_lasso, {
+    lasso_result <- eventReactive(input$run_model, {
+      req(isTRUE(input$covariates == "Lasso"))
       req(survey_weather())
       req(selected_outcome())
       req(selected_weather())
@@ -530,13 +653,25 @@ mod_1_06_model_server <- function(id,
 
         incProgress(0.15, detail = "Running MI + LASSO")
 
+        # Forced exclusion: drop from candidate pool before Lasso
+        forced <- lasso_forced()
+        force_exc <- unique(c(
+          forced$ind$exc, forced$hh$exc, forced$firm$exc, forced$area$exc
+        ))
+        vl_for_lasso <- valid_vl()
+        if (length(force_exc) > 0 && !is.null(vl_for_lasso)) {
+          vl_for_lasso <- vl_for_lasso[
+            !vl_for_lasso$name %in% force_exc, , drop = FALSE
+          ]
+        }
+
         run_lasso_selection(
           df = df,
           selected_outcome = selected_outcome(),
           weather_vars = weather_vars,
           fe_vars = fe_vars,
           int_vars = int_vars,
-          valid_vl = valid_vl(),
+          valid_vl = vl_for_lasso,
           model_type = input$model_type,
           alpha = alpha_val,
           lambda_choice = lambda_choice,
@@ -549,8 +684,10 @@ mod_1_06_model_server <- function(id,
       })
     })
 
-    # Showing notifications and updating status based on Lasso execution
-    observeEvent(input$run_lasso, {
+    # Showing notifications and updating status based on Lasso execution.
+    # Only fires when the user has chosen Lasso covariate selection.
+    observeEvent(input$run_model, {
+      req(isTRUE(input$covariates == "Lasso"))
       lasso_status("running")
       showNotification("Lasso started...",
                       type = "message",
@@ -586,11 +723,16 @@ mod_1_06_model_server <- function(id,
       covs <- if (input$covariates == "Lasso") {
         selected <- lasso_result()$selected_covariates
         vl       <- valid_vl()
+        forced   <- lasso_forced()
+        resolve <- function(role) {
+          base <- vl$name[vl[[role]] == 1 & vl$name %in% selected]
+          setdiff(unique(c(base, forced[[role]]$inc)), forced[[role]]$exc)
+        }
         list(
-          hh   = vl$name[vl$hh   == 1 & vl$name %in% selected],
-          area = vl$name[vl$area  == 1 & vl$name %in% selected],
-          ind  = vl$name[vl$ind   == 1 & vl$name %in% selected],
-          firm = vl$name[vl$firm  == 1 & vl$name %in% selected]
+          hh   = resolve("hh"),
+          area = resolve("area"),
+          ind  = resolve("ind"),
+          firm = resolve("firm")
         )
       } else {
         list(hh   = input$hhcov   %||% character(0),
@@ -630,7 +772,8 @@ mod_1_06_model_server <- function(id,
 
     list(
       selected_model    = selected_model,
-      selected_policies = selected_policies_rv
+      selected_policies = selected_policies_rv,
+      run_model         = reactive(input$run_model)
     )
   })
 }

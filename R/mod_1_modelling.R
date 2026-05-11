@@ -51,7 +51,6 @@ mod_1_modelling_ui <- function(id) {
           tabPanel(
             title = "Overview",
             value = "overview",
-            p("Outputs will appear here after you load data and make selections in the sidebar."),
             includeMarkdown(system.file("app/www/equation.md", package = "wiseapp"))
           )
         )
@@ -158,6 +157,7 @@ mod_1_modelling_server <- function(id,
       selected_weather = s4$selected_weather,
       survey_weather   = s5$survey_weather,
       selected_model   = s6$selected_model,
+      run_model        = s6$run_model,
       tabset_id        = "step1_output_tabs",
       tabset_session   = session
     )
