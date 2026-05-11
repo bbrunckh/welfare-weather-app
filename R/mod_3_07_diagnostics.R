@@ -70,8 +70,9 @@ mod_3_07_diagnostics_server <- function(id,
           sum(v[elig] * w[elig]) / sum(w[elig]) * 365
         } else 0
       } else {
-        transfer_sum   <- 0
-        transfer_pp <- 0
+        transfer_sum <- 0
+        transfer_pp  <- 0
+        w_sum        <- 0 # For debugging only
       }
 
       vars <- detect_manipulated_vars(b, p)
