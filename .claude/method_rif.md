@@ -35,15 +35,17 @@ This is the effect of a marginal increase in the population mean of X on the τ-
 
 ## 2. Implementation in WISE-APP
 
+> **Companion document.** The linear (`fixest`) engine — the alternative model choice in WISE-APP — is documented in [`method_lin.md`](method_lin.md). Where the two engines share machinery (outcome preparation, log back-transform, SP cash handling, FE absorption), this document refers across rather than duplicating.
+
 ### 2.1 Outcome Transformation (`fct_rif_sim.R`)
 
-`compute_rif(y, tau, bw = NULL)` transforms the raw outcome into its RIF at quantile τ:
+**Generic outcome prep is shared with the linear engine.** Log transformation, LCU back-conversion, and binary-poor indicator construction all happen in `prepare_outcome_df()` (`fct_results.R`) *before* the engine is invoked — they are application-wide, not RIF-specific. The engine receives an outcome column that is already on the model scale.
+
+The engine's own `prepare_outcome()` then layers the RIF transformation on top, adding 9 columns (`rif_10`, `rif_20`, ..., `rif_90`) for τ ∈ {0.1, 0.2, …, 0.9}. For each τ, `compute_rif(y, tau, bw = NULL)` in `fct_rif_sim.R`:
 
 1. Estimates q_τ via `stats::quantile()`
 2. Estimates f_Y(q_τ) via `stats::density()` with Sheather-Jones bandwidth (`bw.SJ`)
 3. Applies the RIF formula element-wise
-
-The engine's `prepare_outcome()` creates 9 RIF columns (`rif_10`, `rif_20`, ..., `rif_90`) for τ ∈ {0.1, 0.2, …, 0.9}.
 
 ### 2.2 Model Fitting (`fct_fit_model.R`)
 
@@ -88,7 +90,7 @@ For weather-only scenarios (no policy), `predict_rif()` is called with the origi
 
 When a policy modifies covariates (e.g., flipping an infrastructure binary, adding a cash transfer), the simulation has two stages:
 
-**Stage A — Weather delta with policy covariates:** `predict_rif()` is called with `svy = svy_policy` (the policy-modified survey). Because the scenario predictions use the policy covariates, any weather×covariate interaction terms activate through the weather delta automatically. For example, if the model includes `drought × irrigation`, and the policy turns on irrigation, the weather delta already reflects the moderated drought effect.
+**Stage A — Weather delta with policy covariates:** `predict_rif()` is called with `svy = svy_policy` (the policy-modified survey). Because the scenario predictions use the policy covariates, any weather×covariate interaction terms activate through the weather delta automatically. For example, if the model includes `drought × irrigation`, and the policy turns on irrigation, the weather delta already reflects the moderated drought effect. *(This is the same `predict()`-on-policy-survey mechanism that the linear engine uses for its entire policy simulation — see [`method_lin.md`](method_lin.md) §2.5. The difference is that RIF's `predict_rif()` only returns the weather delta, so the covariate main effect still has to be added in Stage B.)*
 
 **Stage B — Policy correction via `.compute_rif_policy_correction()`:** This adds the channels that `predict_rif()` misses — effects of covariate changes that operate *outside* the weather delta. The correction delegates to `.compute_rif_channels()` (in `fct_policy_decompose.R`), which is the single source of truth for all channel calculations — both the simulation correction and the decomposition display call the same function.
 
@@ -140,9 +142,9 @@ Like repositioning, δ_res2 is evaluated at τ_i^**post** — the household's qu
 
 ##### What the correction returns
 
-The correction returns `δ_main_covar + δ_res1` only:
-- δ_sp is excluded because the SP cash transfer is added post-backtransform in levels (to avoid log-scale distortion of direct transfers)
-- δ_res2 is excluded because it is already captured inside Stage A's weather delta (which evaluates predictions at policy covariates, activating interaction terms)
+The correction adds `δ_main_covar + δ_res1` to predictions. The other channels are handled elsewhere or already present:
+- **δ_sp is not added by the correction**, but it is *computed* inside `.compute_rif_channels()` and folded into `δ_main`, which then drives `τ_i^post`. So even though δ_sp itself is added later in levels (post-backtransform, to avoid log-scale distortion of direct transfers), the cash transfer still influences δ_res1 and δ_res2 indirectly through the τ shift. The exclusion is *additive*, not informational.
+- **δ_res2 is not added by the correction** because it is already captured inside Stage A's weather delta (which evaluates predictions at policy covariates, activating interaction terms).
 
 **Full prediction assembly (in `run_sim_pipeline()`):**
 ```
@@ -155,6 +157,8 @@ The decomposition table (in `decompose_policy_effect()`) reports *all* channels 
 - `delta_main` = δ_sp + δ_main_covar (total main effect)
 - `delta_res` = δ_res1 + δ_res2 (total resilience effect)
 - `delta_total` = δ_main + δ_res (all channels combined)
+
+**Decomposition–simulation reconciliation.** Both routes call the same helper `.compute_rif_channels()` (in `fct_policy_decompose.R`) as their single source of truth. The simulation correction returns `δ_main_covar + δ_res1` from this helper; the decomposition table reports the full set. By construction, the channel totals in the decomposition reconcile exactly with the simulation prediction up to the SP-in-levels handling (δ_sp added post-backtransform) and the location of δ_res2 (computed inside `predict_rif()`'s Stage A rather than in the correction). This is a structural advantage over the linear engine, where the β·Δx decomposition and the `fixest::predict()` simulation can diverge under FE absorption (see [`method_lin.md`](method_lin.md) §2.7c).
 
 ### 2.6 Conceptual Issues with the Policy Simulation
 
@@ -209,6 +213,8 @@ With only 9 grid points (τ = 0.1, …, 0.9), linear interpolation can miss curv
 5. **Diagnostics are limited**: Using only the median (τ = 0.5) fit for residual diagnostics may miss misspecification at other quantiles.
 
 6. **Computational cost**: Fitting 9 separate OLS regressions (× 3 specifications) is manageable, but the simulation step requires per-household interpolation which scales linearly in sample size.
+
+7. **Silent row-dropping under fixed effects**: Each per-quantile fit is a `fixest::feols()` call, and `predict_rif()` invokes `fixest::predict()` internally. When the policy-modified or counterfactual survey contains FE levels (locations, years, survey waves) absent from training, fixest silently drops those rows. This is the same issue as in the linear engine (see [`method_lin.md`](method_lin.md) §4) — affected households disappear from the simulation without a user-visible flag. The risk is highest when simulating on a survey drawn from a population that differs structurally from the estimation sample.
 
 ---
 
