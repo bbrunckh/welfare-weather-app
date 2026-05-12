@@ -92,7 +92,8 @@ mod_3_scenario_server <- function(id,
                                    hist_sim,
                                    saved_scenarios = reactive(list()),
                                    selected_hist   = reactive(NULL),
-                                   variable_list   = reactive(NULL)) {
+                                   variable_list   = reactive(NULL),
+                                   skip_coef_draws = reactive(FALSE)) {
   moduleServer(id, function(input, output, session) {
     ns <- session$ns
 
@@ -177,11 +178,12 @@ mod_3_scenario_server <- function(id,
       model_fit         = model_fit,
       selected_weather  = selected_weather,
       hist_sim          = hist_sim,
-      saved_scenarios   = saved_scenarios
+      saved_scenarios   = saved_scenarios,
+      skip_coef_draws   = skip_coef_draws
     )
 
     # ---- Results tabs: Baseline & Policy (both re-simulated) -------------
-    mod_3_06_results_server(
+    s6 <- mod_3_06_results_server(
       "results3",
       baseline_hist_sim        = s5$baseline_hist_sim,
       baseline_saved_scenarios = s5$baseline_saved_scenarios,
@@ -213,7 +215,8 @@ mod_3_scenario_server <- function(id,
       so            = reactive({
         hs <- hist_sim()
         if (!is.null(hs)) hs$so else NULL
-      })
+      }),
+      show_coef_uncertainty = s6$show_coef_uncertainty
     )
 
     # Wire decomposition tab into tabset on first successful run

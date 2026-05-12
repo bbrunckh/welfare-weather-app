@@ -48,7 +48,8 @@ mod_3_08_decomposition_server <- function(id,
                                            decomp_scenarios  = reactive(list()),
                                            model_fit         = reactive(NULL),
                                            variable_list     = reactive(NULL),
-                                           so            = reactive(NULL)) {
+                                           so                = reactive(NULL),
+                                           show_coef_uncertainty = reactive(TRUE)) {
   moduleServer(id, function(input, output, session) {
     ns <- session$ns
 
@@ -99,7 +100,8 @@ mod_3_08_decomposition_server <- function(id,
     # --- Stacked bar chart by decile ---
     output$decomp_bar_plot <- shiny::renderPlot({
       req(decomp_result())
-      .plot_decomp_bars(decomp_result(), is_rif())
+      .plot_decomp_bars(decomp_result(), is_rif(),
+                        show_coef = isTRUE(show_coef_uncertainty()))
     })
 
     # --- Beta curve (RIF only): one panel per weather variable -------------
@@ -202,11 +204,12 @@ mod_3_08_decomposition_server <- function(id,
 # ---------------------------------------------------------------------------- #
 
 #' @noRd
-.plot_decomp_bars <- function(decomp_df, is_rif) {
+.plot_decomp_bars <- function(decomp_df, is_rif, show_coef = TRUE) {
   if (!requireNamespace("ggplot2", quietly = TRUE)) return(NULL)
   if (is.null(decomp_df) || nrow(decomp_df) == 0) return(NULL)
 
-  # Aggregate by decile (weighted mean)
+  # Aggregate by decile (weighted mean) — point estimates only. Per-channel
+  # uncertainty is read off the summary table's ± SE columns.
   agg <- do.call(rbind, lapply(sort(unique(decomp_df$decile)), function(d) {
     idx <- decomp_df$decile == d
     w <- decomp_df$weight[idx]
@@ -218,23 +221,22 @@ mod_3_08_decomposition_server <- function(id,
       pct_res2 = stats::weighted.mean(decomp_df$pct_res2[idx], w, na.rm = TRUE)
     )
   }))
-
   if (is.null(agg) || nrow(agg) == 0) return(NULL)
 
-  # Reshape to long
   if (is_rif) {
     long <- data.frame(
-      decile = rep(agg$decile, 3),
-      channel = rep(c("Main effect", "Repositioning", "Interaction"), each = nrow(agg)),
-      value = c(agg$pct_main, agg$pct_res1, agg$pct_res2)
+      decile  = rep(agg$decile, 3),
+      channel = rep(c("Main effect", "Repositioning", "Interaction"),
+                    each = nrow(agg)),
+      value   = c(agg$pct_main, agg$pct_res1, agg$pct_res2)
     )
     long$channel <- factor(long$channel,
                            levels = c("Interaction", "Repositioning", "Main effect"))
   } else {
     long <- data.frame(
-      decile = rep(agg$decile, 2),
+      decile  = rep(agg$decile, 2),
       channel = rep(c("Main effect", "Interaction"), each = nrow(agg)),
-      value = c(agg$pct_main, agg$pct_res2)
+      value   = c(agg$pct_main, agg$pct_res2)
     )
     long$channel <- factor(long$channel,
                            levels = c("Interaction", "Main effect"))
@@ -414,31 +416,46 @@ mod_3_08_decomposition_server <- function(id,
 #' @noRd
 .build_decomp_table <- function(decomp_df, is_rif) {
   w <- decomp_df$weight
+  w_norm <- w / sum(w, na.rm = TRUE)
+  has_sd <- all(c("sd_main", "sd_res1", "sd_res2", "sd_total") %in% names(decomp_df))
 
-  summary_row <- function(label, vals) {
+  # Aggregated SE on a log-scale delta given a per-household SD column.
+  # Var(Σ w·δ_i) ≈ Σ w_i² · Var(δ_i) under household independence.
+  agg_se <- function(sd_col) {
+    if (!has_sd || is.null(decomp_df[[sd_col]])) return(NA_real_)
+    sqrt(sum((w_norm^2) * (decomp_df[[sd_col]])^2, na.rm = TRUE))
+  }
+
+  summary_row <- function(label, vals, sd_col = NULL) {
+    mean_log <- stats::weighted.mean(vals, w, na.rm = TRUE)
+    mean_pct <- (exp(mean_log) - 1) * 100
+    se_log   <- if (is.null(sd_col)) NA_real_ else agg_se(sd_col)
+    se_pct   <- if (is.na(se_log)) NA_real_ else abs(exp(mean_log)) * se_log * 100
     data.frame(
-      Channel = label,
-      `Mean (log-pts)` = round(stats::weighted.mean(vals, w), 4),
-      `Mean (%)` = round(stats::weighted.mean((exp(vals) - 1) * 100, w), 2),
-      `Median (%)` = round(median((exp(vals) - 1) * 100), 2),
+      Channel           = label,
+      `Mean (log-pts)`  = round(mean_log, 4),
+      `± SE (log-pts)`  = if (is.na(se_log)) NA_real_ else round(se_log, 4),
+      `Mean (%)`        = round(mean_pct, 2),
+      `± SE (%)`        = if (is.na(se_pct)) NA_real_ else round(se_pct, 2),
+      `Median (%)`      = round(median((exp(vals) - 1) * 100), 2),
       check.names = FALSE
     )
   }
 
   rows <- list(
-    summary_row("Total effect", decomp_df$delta_total),
-    summary_row("  Main effect", decomp_df$delta_main),
+    summary_row("Total effect", decomp_df$delta_total, sd_col = "sd_total"),
+    summary_row("  Main effect", decomp_df$delta_main, sd_col = "sd_main"),
     summary_row("    of which: SP transfer", decomp_df$delta_sp)
   )
 
   if (is_rif) {
     rows <- c(rows, list(
-      summary_row("  Resilience: Repositioning", decomp_df$delta_res1),
-      summary_row("  Resilience: Interaction", decomp_df$delta_res2)
+      summary_row("  Resilience: Repositioning", decomp_df$delta_res1, sd_col = "sd_res1"),
+      summary_row("  Resilience: Interaction",   decomp_df$delta_res2, sd_col = "sd_res2")
     ))
   } else {
     rows <- c(rows, list(
-      summary_row("  Resilience: Interaction", decomp_df$delta_res2)
+      summary_row("  Resilience: Interaction",   decomp_df$delta_res2, sd_col = "sd_res2")
     ))
   }
 
@@ -447,6 +464,6 @@ mod_3_08_decomposition_server <- function(id,
   DT::datatable(
     df, rownames = FALSE, class = "compact stripe",
     options = list(dom = "t", ordering = FALSE,
-                   columnDefs = list(list(className = "dt-right", targets = 1:3)))
+                   columnDefs = list(list(className = "dt-right", targets = 1:5)))
   )
 }

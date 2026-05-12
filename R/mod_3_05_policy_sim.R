@@ -46,7 +46,8 @@ mod_3_05_policy_sim_server <- function(id,
                                         model_fit          = reactive(NULL),
                                         selected_weather   = reactive(NULL),
                                         hist_sim           = reactive(NULL),
-                                        saved_scenarios    = reactive(list())) {
+                                        saved_scenarios    = reactive(list()),
+                                        skip_coef_draws    = reactive(FALSE)) {
   moduleServer(id, function(input, output, session) {
     ns <- session$ns
 
@@ -99,12 +100,55 @@ mod_3_05_policy_sim_server <- function(id,
             message = "Re-running simulations for baseline and policy...",
             value   = 0.1,
             {
-              shiny::setProgress(value = 0.2, detail = "Baseline...")
-              base_out <- resimulate_with_svy(svy, sw, hs$so, mf, hs, ss)
-              if (!is.null(base_out)) {
-                baseline_hist_sim_rv(base_out$hist_sim)
-                baseline_saved_scenarios_rv(base_out$saved_scenarios)
-              }
+              shiny::setProgress(value = 0.2, detail = "Baseline (reusing Step 2)...")
+              # Baseline = Step 2 output verbatim — the survey is unchanged,
+              # so re-simulating would just reproduce identical results.
+              # Translate the saved-scenarios schema from Step 2's `pipelines`
+              # naming into Module 3's `models` naming expected downstream.
+              baseline_ss <- lapply(ss, function(s) {
+                pipes <- s$pipelines
+                if (is.null(pipes) || length(pipes) == 0L) return(NULL)
+                model_names <- names(pipes) %||% paste0("model_", seq_along(pipes))
+                models_new <- lapply(seq_along(pipes), function(i) {
+                  p <- pipes[[i]]
+                  list(
+                    y_point   = p$y_point,
+                    F_loading = p$F_loading,
+                    sim_year  = p$sim_year,
+                    weight    = p$weight,
+                    id_vec    = p$id_vec,
+                    name      = model_names[[i]]
+                  )
+                })
+                list(
+                  models      = models_new,
+                  weather_raw = s$weather_raw,
+                  so          = s$so %||% hs$so,
+                  year_range  = s$year_range,
+                  n_models    = length(models_new)
+                )
+              })
+              baseline_ss <- baseline_ss[!vapply(baseline_ss, is.null, logical(1))]
+              # Flatten Step 2's nested hist_sim ($pipeline$...) into the flat
+              # schema Mod 3's make_agg_hist expects ($y_point, $F_loading, ...).
+              p_hs <- hs$pipeline %||% list()
+              baseline_hs <- list(
+                y_point     = p_hs$y_point,
+                F_loading   = p_hs$F_loading,
+                sim_year    = p_hs$sim_year,
+                weight      = p_hs$weight,
+                id_vec      = p_hs$id_vec,
+                id_col      = p_hs$id_col,
+                so          = hs$so,
+                weather_raw = hs$weather_raw,
+                train_data  = hs$train_data,
+                has_weights = isTRUE(hs$has_weights),
+                residuals   = p_hs$residuals %||% "none",
+                pov_line    = hs$pov_line,
+                yr_range    = hs$yr_range
+              )
+              baseline_hist_sim_rv(baseline_hs)
+              baseline_saved_scenarios_rv(baseline_ss)
               shiny::setProgress(value = 0.6, detail = "Policy...")
               pol_out <- resimulate_with_svy(svy_mod, sw, hs$so, mf, hs, ss,
                                              svy_baseline = svy)
@@ -115,13 +159,15 @@ mod_3_05_policy_sim_server <- function(id,
 
               # Decompose policy effects using HISTORICAL mean weather
               shiny::setProgress(value = 0.85, detail = "Decomposing effects...")
+              skip_coef_val <- isTRUE(skip_coef_draws())
               decomp <- tryCatch(
                 decompose_policy_effect(
                   svy_baseline = svy,
                   svy_policy   = svy_mod,
                   model_fit    = mf,
                   so           = hs$so,
-                  weather_raw  = hs$weather_raw
+                  weather_raw  = hs$weather_raw,
+                  skip_coef    = skip_coef_val
                 ),
                 error = function(e) {
                   warning("[mod_3_05] Decomposition failed: ", conditionMessage(e))
@@ -160,7 +206,8 @@ mod_3_05_policy_sim_server <- function(id,
                       svy_policy   = svy_mod,
                       model_fit    = mf,
                       so           = hs$so,
-                      weather_raw  = w_yr
+                      weather_raw  = w_yr,
+                      skip_coef    = skip_coef_val
                     ) |> dplyr::mutate(
                       scenario   = sc_label,
                       sim_year   = yr,

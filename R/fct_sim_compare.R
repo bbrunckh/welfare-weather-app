@@ -189,6 +189,13 @@ plot_pointrange_climate <- function(bands_tbl,
   }
 
   df <- bands_tbl
+  has_source <- "source" %in% names(df)
+  if (has_source) {
+    df$source <- factor(df$source, levels = c("Baseline", "Policy"))
+    # Historical from the policy source is identical to baseline historical —
+    # drop it so the chart shows one historical dot (under Baseline).
+    df <- df[!(df$is_historical & df$source == "Policy"), , drop = FALSE]
+  }
   df$ssp_key  <- ifelse(df$is_historical, "Historical",
                         vapply(df$scenario, .normalise_ssp, character(1L)))
   df$yr_lbl   <- ifelse(df$is_historical, "Historical",
@@ -260,49 +267,71 @@ plot_pointrange_climate <- function(bands_tbl,
            ggplot2::labs(title = "Run a future simulation to see scenario comparisons."))
 
   # ---- plot: nested bands + dot --------------------------------------------
-  p <- ggplot2::ggplot(df,
+  # When a `source` column is present we dodge Baseline vs Policy side-by-side
+  # within each scenario. Otherwise (Mod 2) the chart is single-source and
+  # the dodge collapses to no-op via a single-level factor.
+  pos <- if (has_source) ggplot2::position_dodge(width = 0.55)
+         else ggplot2::position_identity()
+  aes_base <- if (has_source)
+    ggplot2::aes(x = .data$pt_key, colour = .data$colour_key,
+                 group = .data$source)
+  else
     ggplot2::aes(x = .data$pt_key, colour = .data$colour_key)
-  )
+  p <- ggplot2::ggplot(df, aes_base)
 
   # Outermost (when present): "total" whisker combining all three sources
   # assuming independence: SE = sqrt(var_coef + var_within + var_across).
   if (all(c("total_lo", "total_hi") %in% names(df))) {
     p <- p + ggplot2::geom_linerange(
       ggplot2::aes(ymin = .data$total_lo, ymax = .data$total_hi),
-      linewidth = 0.6, colour = "grey40", alpha = 0.8, na.rm = TRUE
+      linewidth = 0.6, colour = "grey40", alpha = 0.8, na.rm = TRUE,
+      position = pos
     ) +
-      # Thin caps at the ends of the total whisker
       ggplot2::geom_errorbar(
         ggplot2::aes(ymin = .data$total_lo, ymax = .data$total_hi),
         width = 0.25, linewidth = 0.4, colour = "grey40", na.rm = TRUE,
-        inherit.aes = TRUE
+        position = pos, inherit.aes = TRUE
       )
   }
 
   p <- p +
-    # Inter-model spread (future only — NA suppressed for historical)
     ggplot2::geom_linerange(
       ggplot2::aes(ymin = .data$intermod_lo, ymax = .data$intermod_hi),
-      linewidth = 6.0, alpha = 0.6, na.rm = TRUE
+      linewidth = 6.0, alpha = 0.6, na.rm = TRUE, position = pos
     ) +
-    # Middle: inter-annual variability
     ggplot2::geom_linerange(
       ggplot2::aes(ymin = .data$interann_lo, ymax = .data$interann_hi),
-      linewidth = 3.5, alpha = 1.0, na.rm = TRUE
+      linewidth = 3.5, alpha = 1.0, na.rm = TRUE, position = pos
     )
 
   if (isTRUE(show_coef)) {
     p <- p + ggplot2::geom_linerange(
       ggplot2::aes(ymin = .data$coef_lo, ymax = .data$coef_hi),
-      linewidth = 1.2, colour = "black", na.rm = TRUE
+      linewidth = 1.2, colour = "black", na.rm = TRUE, position = pos
+    )
+  }
+
+  if (has_source) {
+    p <- p + ggplot2::geom_point(
+      ggplot2::aes(y = .data$value, shape = .data$source,
+                   fill  = .data$source),
+      size = 3, stroke = 1.2, colour = "black", na.rm = TRUE, position = pos
+    ) +
+      ggplot2::scale_shape_manual(
+        values = c(Baseline = 21, Policy = 23), name = NULL, drop = FALSE
+      ) +
+      ggplot2::scale_fill_manual(
+        values = c(Baseline = "white", Policy = "#d32f2f"),
+        name   = NULL, drop = FALSE
+      )
+  } else {
+    p <- p + ggplot2::geom_point(
+      ggplot2::aes(y = .data$value),
+      size = 3, shape = 21, fill = "white", colour = "black", na.rm = TRUE
     )
   }
 
   p +
-    ggplot2::geom_point(
-      ggplot2::aes(y = .data$value),
-      size = 3, shape = 21, fill = "white", colour = "black", na.rm = TRUE
-    ) +
     ggplot2::scale_colour_manual(values = colour_palette, guide = "none") +
     ggplot2::scale_x_discrete(limits = ordered_levels,
                               labels = x_label_map, drop = FALSE) +
@@ -312,7 +341,7 @@ plot_pointrange_climate <- function(bands_tbl,
       panel.grid.major.x = ggplot2::element_blank(),
       panel.grid.minor.x = ggplot2::element_blank(),
       axis.text.x        = ggplot2::element_text(size = 10),
-      legend.position    = "none"
+      legend.position    = if (has_source) "top" else "none"
     )
 }
 
@@ -344,6 +373,13 @@ build_threshold_table_df <- function(threshold_tbl,
 
   if (is.null(threshold_tbl) || nrow(threshold_tbl) == 0L) return(NULL)
   df <- threshold_tbl
+  has_source <- "source" %in% names(df)
+  if (has_source) {
+    # Historical row from the Policy source is identical to Baseline by
+    # construction (policy doesn't apply to historical) — drop it.
+    df <- df[!(grepl("^Historical", df$scenario) & df$source == "Policy"),
+             , drop = FALSE]
+  }
 
   # Optionally hide the coefficient-band rows (any "Coef Pxx" label).
   if (!isTRUE(show_coef)) {
@@ -355,20 +391,27 @@ build_threshold_table_df <- function(threshold_tbl,
   rp_levels <- unique(df$rp_label)
   df$value_round <- round(df$value, 3)
 
+  pivot_cols <- if (has_source)
+    c("scenario", "source", "Estimate", "rp_label", "n_obs", "value_round")
+  else
+    c("scenario", "Estimate", "rp_label", "n_obs", "value_round")
   wide <- tidyr::pivot_wider(
-    df[, c("scenario", "Estimate", "rp_label", "n_obs", "value_round")],
+    df[, pivot_cols],
     names_from  = "rp_label",
     values_from = "value_round"
   )
   wide <- as.data.frame(wide)
   wide <- dplyr::rename(wide, Scenario = scenario, Obs = n_obs)
+  if (has_source) wide <- dplyr::rename(wide, Source = source)
 
   # Reorder columns to canonical sequential order: 1:50, 1:20, ..., 1:1, ...,
   # 19:20, 49:50. RPs that didn't survive the n-year reliability filter are
   # simply absent from `names(wide)` and are skipped.
   canonical <- c(names(RP_LOW), "1:1", names(RP_HIGH))
   rp_present <- intersect(canonical, names(wide))
-  wide <- wide[, c("Scenario", "Estimate", "Obs", rp_present), drop = FALSE]
+  lead_cols  <- if (has_source) c("Scenario", "Source", "Estimate", "Obs")
+                else c("Scenario", "Estimate", "Obs")
+  wide <- wide[, c(lead_cols, rp_present), drop = FALSE]
 
   # Sort rows: Historical first, then SSPs. Within each scenario the
   # Estimate rows are arranged concentrically around the Central P50:
@@ -404,14 +447,18 @@ build_threshold_table_df <- function(threshold_tbl,
       regmatches(ssp_rows$Scenario, yr_m),
       regmatches(ssp_rows$Scenario, regexpr("[0-9]{4}", ssp_rows$Scenario))
     )
+    src_sort <- if (has_source)
+      match(ssp_rows$Source, c("Baseline", "Policy")) else 1L
+    ssp_rows$.src_sort <- src_sort
     ssp_rows <- if (isTRUE(group_order == "year_x_scenario"))
       ssp_rows[order(ssp_rows$.yr_sort, ssp_rows$.ssp_sort,
-                     ssp_rows$.est_order), , drop = FALSE]
+                     ssp_rows$.src_sort, ssp_rows$.est_order), , drop = FALSE]
     else
       ssp_rows[order(ssp_rows$.ssp_sort, ssp_rows$.yr_sort,
-                     ssp_rows$.est_order), , drop = FALSE]
+                     ssp_rows$.src_sort, ssp_rows$.est_order), , drop = FALSE]
     ssp_rows$.ssp_sort <- NULL
     ssp_rows$.yr_sort  <- NULL
+    ssp_rows$.src_sort <- NULL
   }
 
   hist_rows$.est_order <- NULL
@@ -452,6 +499,11 @@ plot_timeseries_spaghetti <- function(ts_tbl,
            ggplot2::labs(title = "Run a simulation to see model trajectories."))
 
   df <- ts_tbl
+  has_source <- "source" %in% names(df)
+  if (has_source) {
+    df <- df[!(df$is_historical & df$source == "Policy"), , drop = FALSE]
+    df$source <- factor(df$source, levels = c("Baseline", "Policy"))
+  }
   df$ssp_key <- ifelse(df$is_historical, "Historical",
                        vapply(df$scenario, .normalise_ssp, character(1L)))
   df$yr_lbl  <- ifelse(df$is_historical, "Historical",
@@ -479,9 +531,11 @@ plot_timeseries_spaghetti <- function(ts_tbl,
   }, character(1L))
   df$scenario_f <- factor(df$scenario, levels = scen_levels)
 
-  # Per-(scenario, sim_year) envelope across models
+  # Per-(scenario [, source], sim_year) envelope across models
+  env_grp <- if (has_source) c("scenario", "source", "sim_year")
+             else c("scenario", "sim_year")
   env_df <- df |>
-    dplyr::group_by(.data$scenario, .data$sim_year) |>
+    dplyr::group_by(dplyr::across(dplyr::all_of(env_grp))) |>
     dplyr::summarise(
       central       = stats::median(.data$value, na.rm = TRUE),
       lo            = unname(stats::quantile(.data$value,
@@ -503,35 +557,54 @@ plot_timeseries_spaghetti <- function(ts_tbl,
 
   # Inter-model ribbon (futures only, when >1 model)
   if (nrow(fut_env) > 0L) {
+    ribbon_aes <- if (has_source)
+      ggplot2::aes(x = .data$sim_year, ymin = .data$lo, ymax = .data$hi,
+                   fill = .data$scenario_f,
+                   group = interaction(.data$scenario_f, .data$source))
+    else
+      ggplot2::aes(x = .data$sim_year, ymin = .data$lo, ymax = .data$hi,
+                   fill = .data$scenario_f, group = .data$scenario_f)
     p <- p + ggplot2::geom_ribbon(
-      data    = fut_env,
-      mapping = ggplot2::aes(x = .data$sim_year, ymin = .data$lo,
-                             ymax = .data$hi, fill = .data$scenario_f,
-                             group = .data$scenario_f),
-      alpha       = 0.15,
+      data        = fut_env,
+      mapping     = ribbon_aes,
+      alpha       = if (has_source) 0.10 else 0.15,
       show.legend = FALSE
     )
   }
 
-  # Spaghetti: thin translucent line per (scenario, model)
+  # Spaghetti: thin translucent line per (scenario [, source], model)
+  spaghetti_aes <- if (has_source)
+    ggplot2::aes(x = .data$sim_year, y = .data$value,
+                 colour   = .data$scenario_f,
+                 linetype = .data$scenario_f,
+                 alpha    = .data$source,
+                 group = interaction(.data$scenario_f, .data$source,
+                                     .data$model_id))
+  else
+    ggplot2::aes(x = .data$sim_year, y = .data$value,
+                 colour = .data$scenario_f, linetype = .data$scenario_f,
+                 group  = interaction(.data$scenario_f, .data$model_id))
   p <- p + ggplot2::geom_line(
-    data    = df,
-    mapping = ggplot2::aes(x = .data$sim_year, y = .data$value,
-                           colour   = .data$scenario_f,
-                           linetype = .data$scenario_f,
-                           group  = interaction(.data$scenario_f,
-                                                .data$model_id)),
-    linewidth = 0.3, alpha = 0.35, na.rm = TRUE,
+    data        = df,
+    mapping     = spaghetti_aes,
+    linewidth   = 0.3,
+    alpha       = if (has_source) NULL else 0.35,
+    na.rm       = TRUE,
     show.legend = FALSE
   )
 
-  # Bold median curve per scenario (this is what populates the legend)
+  # Bold median curve per (scenario [, source])
+  median_aes <- if (has_source)
+    ggplot2::aes(x = .data$sim_year, y = .data$central,
+                 colour = .data$scenario_f, linetype = .data$scenario_f,
+                 alpha  = .data$source,
+                 group  = interaction(.data$scenario_f, .data$source))
+  else
+    ggplot2::aes(x = .data$sim_year, y = .data$central,
+                 colour = .data$scenario_f, linetype = .data$scenario_f,
+                 group  = .data$scenario_f)
   p <- p + ggplot2::geom_line(
-    data    = env_df,
-    mapping = ggplot2::aes(x = .data$sim_year, y = .data$central,
-                           colour   = .data$scenario_f,
-                           linetype = .data$scenario_f,
-                           group  = .data$scenario_f),
+    data = env_df, mapping = median_aes,
     linewidth = 1.1, na.rm = TRUE
   )
 
@@ -547,7 +620,16 @@ plot_timeseries_spaghetti <- function(ts_tbl,
     ggplot2::scale_linetype_manual(
       values = scen_ltype_map, breaks = scen_levels,
       name   = "Scenario"
-    ) +
+    )
+  if (has_source) {
+    p <- p + ggplot2::scale_alpha_manual(
+      values = c(Baseline = 0.35, Policy = 1.0),
+      breaks = c("Baseline", "Policy"),
+      name   = "Source",
+      guide  = ggplot2::guide_legend(override.aes = list(linewidth = 0.9))
+    )
+  }
+  p +
     ggplot2::labs(x = "Simulation year", y = x_label) +
     ggplot2::theme_minimal(base_size = 12) +
     ggplot2::theme(legend.position = "bottom")
@@ -674,8 +756,17 @@ enhance_exceedance <- function(curves_tbl,
   z_lo <- if (!is.null(band_q)) stats::qnorm(band_q[["lo"]]) else NA_real_
   z_hi <- if (!is.null(band_q)) stats::qnorm(band_q[["hi"]]) else NA_real_
 
+  has_source <- "source" %in% names(curves_tbl)
+  if (has_source) {
+    curves_tbl <- curves_tbl[!(curves_tbl$is_historical &
+                               curves_tbl$source == "Policy"), , drop = FALSE]
+    grp_cols <- c("scenario", "source", "rank")
+  } else {
+    grp_cols <- c("scenario", "rank")
+  }
+
   agg_df <- curves_tbl |>
-    dplyr::group_by(.data$scenario, .data$rank) |>
+    dplyr::group_by(dplyr::across(dplyr::all_of(grp_cols))) |>
     dplyr::summarise(
       exceed_prob   = dplyr::first(.data$exceed_prob),
       central       = stats::median(.data$welfare_val, na.rm = TRUE),
@@ -693,19 +784,27 @@ enhance_exceedance <- function(curves_tbl,
   # self-crossing dashed lines because the per-rank SD wiggles. A single
   # typical SE per scenario gives clean parallels.
   if (!is.null(band_q)) {
+    sd_grp <- if (has_source) c("scenario", "source") else "scenario"
     coef_sd_scn <- curves_tbl |>
-      dplyr::group_by(.data$scenario) |>
+      dplyr::group_by(dplyr::across(dplyr::all_of(sd_grp))) |>
       dplyr::summarise(coef_sd_typ = stats::median(.data$coef_sd, na.rm = TRUE),
                        .groups = "drop")
-    agg_df <- dplyr::left_join(agg_df, coef_sd_scn, by = "scenario")
+    agg_df <- dplyr::left_join(agg_df, coef_sd_scn, by = sd_grp)
     agg_df$coef_lo <- agg_df$central + z_lo * agg_df$coef_sd_typ
     agg_df$coef_hi <- agg_df$central + z_hi * agg_df$coef_sd_typ
   } else {
     agg_df$coef_lo <- NA_real_
     agg_df$coef_hi <- NA_real_
   }
-  # Ensure rows are ordered along the path that geom_line will trace.
-  agg_df <- agg_df[order(agg_df$scenario, agg_df$rank), , drop = FALSE]
+  if (has_source) {
+    agg_df$source <- factor(agg_df$source, levels = c("Baseline", "Policy"))
+    agg_df <- agg_df[order(agg_df$scenario, agg_df$source, agg_df$rank), ,
+                     drop = FALSE]
+    agg_df$line_id <- paste(agg_df$scenario, agg_df$source, sep = " | ")
+  } else {
+    agg_df <- agg_df[order(agg_df$scenario, agg_df$rank), , drop = FALSE]
+    agg_df$line_id <- as.character(agg_df$scenario)
+  }
 
   # Aesthetic mappings
   fut_df  <- agg_df[!agg_df$is_historical, , drop = FALSE]
@@ -745,7 +844,17 @@ enhance_exceedance <- function(curves_tbl,
   # ribbon (optional) -> median curve.
   fut_mod_df <- agg_df[!agg_df$is_historical, , drop = FALSE]
 
-  p <- ggplot2::ggplot(
+  p <- if (has_source) ggplot2::ggplot(
+    agg_df,
+    ggplot2::aes(
+      x        = .data$central,
+      y        = .data$exceed_prob,
+      colour   = .data$scenario,
+      linetype = .data$scenario,
+      alpha    = .data$source,
+      group    = .data$line_id
+    )
+  ) else ggplot2::ggplot(
     agg_df,
     ggplot2::aes(
       x        = .data$central,
@@ -756,18 +865,21 @@ enhance_exceedance <- function(curves_tbl,
     )
   )
 
-  # Inter-model ribbon (futures only)
+  # Inter-model ribbon (futures only). When source is present we draw a
+  # ribbon per source — both faded so the baseline ribbon stays readable.
   if (nrow(fut_mod_df) > 0L) {
+    ribbon_aes <- if (has_source)
+      ggplot2::aes(y = .data$exceed_prob, xmin = .data$intermod_lo,
+                   xmax = .data$intermod_hi, fill = .data$scenario,
+                   group = .data$line_id)
+    else
+      ggplot2::aes(y = .data$exceed_prob, xmin = .data$intermod_lo,
+                   xmax = .data$intermod_hi, fill = .data$scenario,
+                   group = .data$scenario)
     p <- p + ggplot2::geom_ribbon(
       data    = fut_mod_df,
-      mapping = ggplot2::aes(
-        y     = .data$exceed_prob,
-        xmin  = .data$intermod_lo,
-        xmax  = .data$intermod_hi,
-        fill  = .data$scenario,
-        group = .data$scenario
-      ),
-      alpha       = 0.18,
+      mapping = ribbon_aes,
+      alpha       = if (has_source) 0.10 else 0.18,
       inherit.aes = FALSE
     )
   }
@@ -777,33 +889,27 @@ enhance_exceedance <- function(curves_tbl,
   # of whether it falls inside or outside the inter-model ribbon.
   if (!is.null(band_q) && any(!is.na(agg_df$coef_lo))) {
     coef_df <- agg_df[!is.na(agg_df$coef_lo), , drop = FALSE]
+    coef_aes_lo <- if (has_source)
+      ggplot2::aes(x = .data$coef_lo, y = .data$exceed_prob,
+                   colour = .data$scenario, alpha = .data$source,
+                   group  = .data$line_id)
+    else
+      ggplot2::aes(x = .data$coef_lo, y = .data$exceed_prob,
+                   colour = .data$scenario, group = .data$scenario)
+    coef_aes_hi <- if (has_source)
+      ggplot2::aes(x = .data$coef_hi, y = .data$exceed_prob,
+                   colour = .data$scenario, alpha = .data$source,
+                   group  = .data$line_id)
+    else
+      ggplot2::aes(x = .data$coef_hi, y = .data$exceed_prob,
+                   colour = .data$scenario, group = .data$scenario)
     p <- p +
-      ggplot2::geom_line(
-        data    = coef_df,
-        mapping = ggplot2::aes(
-          x      = .data$coef_lo,
-          y      = .data$exceed_prob,
-          colour = .data$scenario,
-          group  = .data$scenario
-        ),
-        linetype    = "dashed",
-        linewidth   = 0.5,
-        inherit.aes = FALSE,
-        show.legend = FALSE
-      ) +
-      ggplot2::geom_line(
-        data    = coef_df,
-        mapping = ggplot2::aes(
-          x      = .data$coef_hi,
-          y      = .data$exceed_prob,
-          colour = .data$scenario,
-          group  = .data$scenario
-        ),
-        linetype    = "dashed",
-        linewidth   = 0.5,
-        inherit.aes = FALSE,
-        show.legend = FALSE
-      )
+      ggplot2::geom_line(data = coef_df, mapping = coef_aes_lo,
+                         linetype = "dashed", linewidth = 0.5,
+                         inherit.aes = FALSE, show.legend = FALSE) +
+      ggplot2::geom_line(data = coef_df, mapping = coef_aes_hi,
+                         linetype = "dashed", linewidth = 0.5,
+                         inherit.aes = FALSE, show.legend = FALSE)
   }
 
   p <- p +
@@ -837,7 +943,17 @@ enhance_exceedance <- function(curves_tbl,
       breaks = scen_levels,
       name   = "Scenario",
       guide  = ggplot2::guide_legend(override.aes = list(linewidth = 0.9))
-    ) +
+    )
+  if (has_source) {
+    p <- p + ggplot2::scale_alpha_manual(
+      values = c(Baseline = 0.35, Policy = 1.0),
+      breaks = c("Baseline", "Policy"),
+      name   = "Source",
+      guide  = ggplot2::guide_legend(order = 3,
+                                     override.aes = list(linewidth = 0.9))
+    )
+  }
+  p <- p +
     ggplot2::labs(
       title = "Exceedance probability by climate scenario",
       x     = x_label,

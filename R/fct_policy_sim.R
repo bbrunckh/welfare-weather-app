@@ -566,8 +566,11 @@ resimulate_with_svy <- function(svy, sw, so, mf,
   if (is.na(weight_col %||% NA)) weight_col <- NULL
 
   pov_line   <- hist_sim_baseline$pov_line
-  residuals  <- hist_sim_baseline$residuals  %||% "none"
-  chol_Sigma <- hist_sim_baseline$chol_Sigma
+  residuals  <- hist_sim_baseline$residuals %||%
+                hist_sim_baseline$pipeline$residuals %||% "none"
+  # Step 2's hist_sim stores the Cholesky factor under $chol_obj; the older
+  # Mod 3 schema (post-resim) carries it as $chol_Sigma. Accept either.
+  chol_Sigma <- hist_sim_baseline$chol_Sigma %||% hist_sim_baseline$chol_obj
 
   is_rif       <- identical(mf$engine, "rif")
   fit_multi    <- if (is_rif) mf$fit3 else NULL
@@ -587,6 +590,9 @@ resimulate_with_svy <- function(svy, sw, so, mf,
         residuals    = residuals,
         train_data   = mf$train_data,
         engine       = mf$engine,
+        # Pass under both names: the OLS branch of run_sim_pipeline keys
+        # off `chol_obj`, while the RIF branch falls back to `chol_Sigma`.
+        chol_obj     = chol_Sigma,
         chol_Sigma   = chol_Sigma,
         slim         = slim,
         fit_multi    = fit_multi,
@@ -625,38 +631,50 @@ resimulate_with_svy <- function(svy, sw, so, mf,
   )
 
   saved_scenarios_new <- lapply(saved_scenarios_baseline, function(s) {
-    # All models in a scenario share the same weather_raw + svy,
-    # so run the pipeline ONCE and replicate for each model.
-    out <- run_one(s$weather_raw, slim = TRUE)
-    if (is.null(out)) return(NULL)
-
-    n_models <- if (!is.null(s$models)) length(s$models) else 1L
-    model_names <- if (!is.null(s$models)) {
-      vapply(seq_along(s$models), function(mi) {
-        s$models[[mi]]$name %||% paste0("model_", mi)
-      }, character(1))
+    # Re-simulate once per CMIP6 ensemble member using that member's own
+    # `weather_raw`. Each pipeline in `s$pipelines` was produced by
+    # run_sim_pipeline() in fct_run_simulation.R and carries its own
+    # `weather_raw`; iterating here is what gives Module 3 a genuine
+    # inter-model spread to display downstream.
+    pipes <- s$pipelines
+    if (is.null(pipes) || length(pipes) == 0L) {
+      # Fallback to the representative weather (older saved-scenario schema).
+      out <- run_one(s$weather_raw, slim = TRUE)
+      if (is.null(out)) return(NULL)
+      pipes <- list(single = list(weather_raw = s$weather_raw))
+      shared <- list(
+        y_point   = out$y_point,
+        F_loading = out$F_loading,
+        sim_year  = out$sim_year,
+        weight    = out$weight,
+        id_vec    = out$id_vec
+      )
+      models_new <- list(c(shared, list(name = "single")))
     } else {
-      "single"
+      model_names <- names(pipes) %||% paste0("model_", seq_along(pipes))
+      models_new <- lapply(seq_along(pipes), function(i) {
+        wr <- pipes[[i]]$weather_raw %||% s$weather_raw
+        out <- run_one(wr, slim = TRUE)
+        if (is.null(out)) return(NULL)
+        list(
+          y_point   = out$y_point,
+          F_loading = out$F_loading,
+          sim_year  = out$sim_year,
+          weight    = out$weight,
+          id_vec    = out$id_vec,
+          name      = model_names[[i]]
+        )
+      })
+      models_new <- Filter(Negate(is.null), models_new)
+      if (length(models_new) == 0L) return(NULL)
     }
-
-    shared_model <- list(
-      y_point   = out$y_point,
-      F_loading = out$F_loading,
-      sim_year  = out$sim_year,
-      weight    = out$weight,
-      id_vec    = out$id_vec
-    )
-
-    models_new <- lapply(model_names, function(nm) {
-      c(shared_model, list(name = nm))
-    })
 
     list(
       models      = models_new,
       weather_raw = s$weather_raw,
       so          = so,
       year_range  = s$year_range,
-      n_models    = n_models
+      n_models    = length(models_new)
     )
   })
   saved_scenarios_new <- saved_scenarios_new[

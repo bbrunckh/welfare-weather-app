@@ -86,6 +86,12 @@ mod_3_06_results_server <- function(id,
 
     }, ignoreInit = TRUE)
 
-    invisible(NULL)
+    # Expose UI toggles so sibling tabs (Decomposition) can subscribe to
+    # the same "Show coefficient uncertainty" / "Show inter-model spread"
+    # state the user picked here.
+    list(
+      show_coef_uncertainty = reactive(isTRUE(input$show_coef_uncertainty)),
+      show_model_spread     = reactive(isTRUE(input$show_model_spread))
+    )
   })
 }

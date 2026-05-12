@@ -118,7 +118,8 @@ mod_2_simulation_server <- function(id,
       selected_hist   = s1$selected_hist,
       selected_fut    = s1$selected_fut,
       hist_sim        = s1$hist_sim,
-      saved_scenarios = s1$saved_scenarios
+      saved_scenarios = s1$saved_scenarios,
+      skip_coef_draws = s1$skip_coef_draws
     )
   })
 }

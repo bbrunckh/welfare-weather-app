@@ -365,8 +365,11 @@ fct_run_simulation <- function(sw,
         group_meta[[gk]] <- list(ssp_code = ssp_code, year_range = yr_parts)
       }
 
-      # Strip weather_raw from pipeline after saving to group_weather_rep
-      out$weather_raw <- NULL
+      # NB: per-member `weather_raw` is intentionally retained on each
+      # pipeline so Module 3's resimulate_with_svy() can re-predict per
+      # CMIP6 member using that member's own weather. Stripping it here
+      # collapses every member to the representative weather and silently
+      # erases inter-model spread on policy results.
 
       member_type <- sub(".*_(ensemble_mean|ensemble_lo|ensemble_hi)$",
                           "\\1", key)

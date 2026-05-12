@@ -305,8 +305,16 @@ mod_2_02_results_server <- function(id,
 
     .one_member_delta <- function(pipe, idx, method, weighted, pov_line,
                                   band_q, is_log) {
-      F_idx <- if (!is.null(pipe$F_loading) && !isTRUE(skip_coef_draws()))
-                 pipe$F_loading[idx, , drop = FALSE] else NULL
+      # Some upstream paths can hand us F_loading as a length-K numeric
+      # vector instead of a 1×K matrix (single-row residual / dropped dim).
+      # Promote to matrix before any row-subset so the indexing below never
+      # triggers "incorrect number of dimensions".
+      F_full <- pipe$F_loading
+      if (!is.null(F_full) && is.null(dim(F_full))) {
+        F_full <- matrix(F_full, nrow = 1L)
+      }
+      F_idx <- if (!is.null(F_full) && !isTRUE(skip_coef_draws()))
+                 F_full[idx, , drop = FALSE] else NULL
       w_idx <- if (weighted && !is.null(pipe$weight)) pipe$weight[idx] else NULL
       id_idx <- if (!is.null(pipe$id_vec)) pipe$id_vec[idx] else NULL
       # RIF pipelines set train_aug = NULL by construction (fct_simulations.R).
@@ -567,16 +575,19 @@ mod_2_02_results_server <- function(id,
       !is.null(hist_sim()$chol_obj)
     })
 
-    # Auto-uncheck coefficient uncertainty when no draws available
+    # Sync the "Show coefficient uncertainty" toggle to the current sim:
+    #   - When the new sim has no chol_obj (skip_coef_draws was TRUE), force
+    #     the box off so the user sees the toggle reflect reality.
+    #   - When the new sim does have chol_obj (uncertainty was included),
+    #     re-enable the box. Without this re-set, a prior simulation that
+    #     ran without draws would leave the box stuck OFF even after the
+    #     user enables coefficient uncertainty and re-runs.
     observeEvent(hist_sim(), {
       req(hist_sim())
-      if (!has_draws()) {
-        shiny::updateCheckboxInput(
-          session,
-          "show_coef_uncertainty",
-          value = FALSE
-        )
-      }
+      shiny::updateCheckboxInput(
+        session, "show_coef_uncertainty",
+        value = isTRUE(has_draws())
+      )
     }, ignoreInit = TRUE)
 
 
@@ -779,51 +790,12 @@ mod_2_02_results_server <- function(id,
     #   - inter-annual (within-model spread of value_all across years)
     #   - inter-model  (across-model spread of model means; future only)
 
-    # Helper: take a long tibble (one row per sim_year) with list-cols
-    # value_all/value_all_sd/model_id and return a nested matrix-like
-    # structure: model_ids × n_years matrix of values, parallel SDs.
-    .by_model_matrix <- function(tbl) {
-      if (is.null(tbl) || nrow(tbl) == 0L) return(NULL)
-      all_ids <- unique(unlist(tbl$model_id, use.names = FALSE))
-      n_yrs   <- nrow(tbl)
-      vals_mat <- matrix(NA_real_, nrow = length(all_ids), ncol = n_yrs,
-                         dimnames = list(all_ids, tbl$sim_year))
-      sds_mat  <- matrix(NA_real_, nrow = length(all_ids), ncol = n_yrs,
-                         dimnames = list(all_ids, tbl$sim_year))
-      for (k in seq_len(n_yrs)) {
-        ids  <- as.character(tbl$model_id[[k]])
-        vals <- tbl$value_all[[k]]
-        sds  <- tbl$value_all_sd[[k]]
-        # Recycle a scalar SD across all members (1-member historical)
-        if (length(sds) == 1L && length(vals) > 1L) sds <- rep(sds, length(vals))
-        vals_mat[ids, k] <- vals
-        sds_mat[ids,  k] <- sds
-      }
-      list(vals = vals_mat, sds = sds_mat, model_ids = all_ids,
-           sim_years = tbl$sim_year)
-    }
-
-    # Format a quantile probability as "P05", "P50", "P95", "min", "max" for
-    # use in threshold-table row labels.
-    .pct_label <- function(q, use_minmax = FALSE) {
-      if (isTRUE(use_minmax) && q <= 0.001) return("min")
-      if (isTRUE(use_minmax) && q >= 0.999) return("max")
-      paste0("P", formatC(round(q * 100), width = 2, flag = "0"))
-    }
-
-    # Rank-position interpolation used by both the exceedance plot and the
-    # threshold table so the table cells always match the curve.
-    .rank_interp <- function(sorted_vals, p) {
-      n  <- length(sorted_vals)
-      if (n == 0L) return(NA_real_)
-      k  <- n * (1 - p) + 0.5
-      # No clamping: if the requested RP falls outside the observed empirical
-      # range (k < 1 or k > n), return NA rather than extrapolate.
-      if (k < 1 || k > n) return(NA_real_)
-      lo <- floor(k); hi <- ceiling(k)
-      if (lo == hi) sorted_vals[lo]
-      else sorted_vals[lo] + (k - lo) * (sorted_vals[hi] - sorted_vals[lo])
-    }
+    # Helpers are now defined in R/fct_uncertainty_helpers.R as package-internal
+    # functions so Module 3 can call the same code path. Aliases keep the
+    # existing inline call sites below readable.
+    .by_model_matrix <- by_model_matrix
+    .pct_label       <- pct_label
+    .rank_interp     <- rank_interp
 
     # ---- pointrange_bands_rv: one row per scenario, three nested bands -----
     pointrange_bands_rv <- reactive({
