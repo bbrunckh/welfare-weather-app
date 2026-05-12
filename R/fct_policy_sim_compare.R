@@ -78,8 +78,14 @@
   if (use_log) df <- df[df$Value > 0, , drop = FALSE]
   if (!nrow(df)) return(blank_plot("No data available"))
 
+  # Pre-compute the bandwidth ggridges would otherwise pick (and announce
+  # via `message()`). Passing it explicitly silences the chatty
+  # "Picking joint bandwidth of ..." note without changing the visual.
+  bw <- tryCatch(stats::bw.nrd0(df$Value), error = function(e) NULL)
+  if (is.null(bw) || !is.finite(bw) || bw <= 0) bw <- NULL
+
   p <- ggplot2::ggplot(df, ggplot2::aes(x = Value, y = Group, fill = Group)) +
-    ggridges::geom_density_ridges(alpha = 0.7, scale = 1.5) +
+    ggridges::geom_density_ridges(alpha = 0.7, scale = 1.5, bandwidth = bw) +
     ggplot2::scale_fill_manual(values = fill_vals) +
     ggplot2::labs(
       title = paste0("Distribution: ", var_name),

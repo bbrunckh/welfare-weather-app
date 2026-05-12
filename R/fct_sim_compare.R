@@ -584,14 +584,12 @@ plot_timeseries_spaghetti <- function(ts_tbl,
     ggplot2::aes(x = .data$sim_year, y = .data$value,
                  colour = .data$scenario_f, linetype = .data$scenario_f,
                  group  = interaction(.data$scenario_f, .data$model_id))
-  p <- p + ggplot2::geom_line(
-    data        = df,
-    mapping     = spaghetti_aes,
-    linewidth   = 0.3,
-    alpha       = if (has_source) NULL else 0.35,
-    na.rm       = TRUE,
-    show.legend = FALSE
-  )
+  p <- p + if (has_source)
+    ggplot2::geom_line(data = df, mapping = spaghetti_aes,
+                       linewidth = 0.3, na.rm = TRUE, show.legend = FALSE)
+  else
+    ggplot2::geom_line(data = df, mapping = spaghetti_aes,
+                       linewidth = 0.3, alpha = 0.35, na.rm = TRUE, show.legend = FALSE)
 
   # Bold median curve per (scenario [, source])
   median_aes <- if (has_source)
@@ -925,7 +923,9 @@ enhance_exceedance <- function(curves_tbl,
     ) +
     # Merged legend: a single entry per scenario showing its colour (SSP)
     # and linetype (period). Both scales share the same `name` and `breaks`
-    # so ggplot collapses them into one combined legend.
+    # so ggplot collapses them into one combined legend. Only the colour
+    # scale carries `override.aes`; specifying it on the linetype scale too
+    # triggers a "Duplicated override.aes is ignored" warning at draw time.
     ggplot2::scale_color_manual(
       values = scen_colour_map,
       breaks = scen_levels,
@@ -941,8 +941,7 @@ enhance_exceedance <- function(curves_tbl,
     ggplot2::scale_linetype_manual(
       values = scen_ltype_map,
       breaks = scen_levels,
-      name   = "Scenario",
-      guide  = ggplot2::guide_legend(override.aes = list(linewidth = 0.9))
+      name   = "Scenario"
     )
   if (has_source) {
     p <- p + ggplot2::scale_alpha_manual(

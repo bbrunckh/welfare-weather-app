@@ -433,11 +433,21 @@ run_sim_pipeline <- function(weather_raw,
             !is.null(taus)           &&
             !is.null(weather_cols)
 
+  # RIF policy mode: caller supplied an svy_baseline so we can separate the
+  # baseline (no-policy) RIF prediction from the policy net level effect.
+  # We predict against svy_baseline and then add the decomposition's
+  # delta_total — matching the Decomposition pane's totals exactly. The
+  # OLS path doesn't need this because predict_outcome() naturally picks up
+  # the policy level shift from the policy-modified design matrix.
+  is_rif_policy <- is_rif && !is.null(svy_baseline) &&
+                   !is.null(rif_grid) && !is.null(train_data)
+  svy_for_predict <- if (is_rif_policy) svy_baseline else svy
+
   # Tag svy with row IDs for RIF delta-method lookups
   # Must be added before prepare_hist_weather() so it survives the join
-  if (is_rif) svy$.svy_row_id <- seq_len(nrow(svy))
+  if (is_rif) svy_for_predict$.svy_row_id <- seq_len(nrow(svy_for_predict))
 
-  survey_wd_sim <- prepare_hist_weather(weather_raw, svy, sw, so$name)
+  survey_wd_sim <- prepare_hist_weather(weather_raw, svy_for_predict, sw, so$name)
 
   # Resolve ID column for "original" residual matching
   id_col <- if (residuals == "original")
@@ -466,7 +476,7 @@ run_sim_pipeline <- function(weather_raw,
     predict_rif(
       fit_multi    = fit_multi,
       newdata      = survey_wd_sim, #joined,
-      svy          = svy,
+      svy          = svy_for_predict,
       train_data   = train_data,
       taus         = taus,
       outcome      = so$name,
@@ -502,6 +512,40 @@ run_sim_pipeline <- function(weather_raw,
   # aggregate_with_uncertainty_delta() after coefficient perturbation.
   y_point  <- out$.fitted
 
+  # ---- RIF policy correction --------------------------------------------- #
+  # In RIF policy mode the prediction above was made against svy_baseline,
+  # so y_point currently holds the *baseline-x* level (matching what Mod 2's
+  # Step 2 hist_sim shows). Add the decomposition's delta_total — which
+  # includes delta_main (SP + Beta_x.Delta_x), delta_res1 (repositioning),
+  # and delta_res2 (Beta_int.haz.Delta_x) — so the Results pane reflects the
+  # net policy effect on the welfare level. This skips the level-scale SP
+  # block below because delta_sp is already inside delta_total.
+  if (is_rif_policy) {
+    corr <- .compute_rif_policy_correction(
+      svy_baseline = svy_baseline,
+      svy_policy   = svy,
+      weather_raw  = weather_raw,
+      weather_cols = weather_cols,
+      rif_grid     = rif_grid,
+      taus         = taus,
+      train_data   = train_data,
+      outcome      = so$name,
+      is_log       = isTRUE(so$transform == "log")
+    )
+    # corr is one entry per household (nrow(svy_baseline)); broadcast it to
+    # each expanded survey×weather row via .svy_row_id (set by predict_rif()
+    # on `out`). Without this, hist_sim has y_point per (HH × month/year)
+    # but corr is per HH, so the lengths mismatch and the correction would
+    # be silently dropped.
+    if (!is.null(corr) && ".svy_row_id" %in% names(out) &&
+        length(corr) == nrow(svy_baseline)) {
+      y_point <- y_point + corr[out$.svy_row_id]
+    } else {
+      warning("[run_sim_pipeline] RIF policy correction unavailable; ",
+              "policy y_point will reflect weather-sensitivity changes only.")
+    }
+  }
+
   # ---- SP cash transfer (post-prediction, level scale) -------------------- #
   # SP_TRANSFER_COL is set on svy by apply_policy_to_svy() in fct_policy_sim.R.
   # The transfer is a direct welfare boost, not a regression covariate, so it
@@ -509,7 +553,13 @@ run_sim_pipeline <- function(weather_raw,
   # (.decompose_ols / .compute_rif_channels in fct_policy_decompose.R, which
   # define δ_sp = log(exp(y) + sp) − y), the boost is applied on the level
   # scale and re-logged when so$transform == "log".
-  sp_vec <- if (SP_TRANSFER_COL %in% names(out)) out[[SP_TRANSFER_COL]] else NULL
+  #
+  # Skipped in RIF policy mode because delta_sp is already inside the
+  # correction added above. (svy_for_predict = svy_baseline carries no
+  # SP_TRANSFER_COL, so `out` wouldn't have it anyway — the guard is
+  # defensive.)
+  sp_vec <- if (!is_rif_policy && SP_TRANSFER_COL %in% names(out))
+              out[[SP_TRANSFER_COL]] else NULL
   if (!is.null(sp_vec) && any(sp_vec > 0, na.rm = TRUE)) {
     is_log <- isTRUE(so$transform == "log")
     if (is_log) {

@@ -199,12 +199,6 @@ predict_rif <- function(fit_multi, newdata, svy, train_data, taus, outcome,
   # Interpolate delta at each household's tau_i position
   delta_i <- interpolate_delta(delta_mat, taus, tau_i)
 
-  # Diagnostic: log mean absolute delta for first call
-  message(sprintf(
-    "[predict_rif] n=%d | mean|delta|=%.4f | mean(y_base)=%.4f",
-    n, mean(abs(delta_i), na.rm = TRUE), mean(y_baseline, na.rm = TRUE)
-  ))
-
   # Assemble output
   newdata$.fitted    <- y_baseline + delta_i
   newdata$.residual  <- NA_real_
