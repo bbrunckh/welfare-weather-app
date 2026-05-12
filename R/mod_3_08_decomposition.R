@@ -29,7 +29,25 @@ mod_3_08_decomposition_ui <- function(id) {
     shiny::wellPanel(
       shiny::h4("Decomposition Summary"),
       DT::DTOutput(ns("decomp_summary_table")),
-      shiny::uiOutput(ns("interaction_warning_ui"))
+      shiny::uiOutput(ns("interaction_warning_ui")),
+      shiny::tags$p(
+        style = "font-size:11px; color:#666; margin-top:6px;",
+        shiny::tags$b("± SE columns"),
+        " report the standard error of each channel's mean policy effect, ",
+        "propagated from the regression coefficient covariance via the ",
+        "delta method (",
+        shiny::tags$code("SE = sqrt(Σ w² · ||F_loading_i||²)"),
+        " where F_loading_i is each household's per-coefficient gradient ",
+        "of that channel's contribution). Because this is a paired ",
+        "counterfactual on the same population, the residual and survey-",
+        "sampling components cancel; only coefficient uncertainty remains.",
+        shiny::tags$br(),
+        "The Total row's SE is computed directly from the row-summed ",
+        "F_loading (F_main + F_res1 + F_res2), which preserves the ",
+        "covariance across channels. It is ",
+        shiny::tags$em("not"),
+        " the sum of the per-channel SEs."
+      )
     )
   )
 }

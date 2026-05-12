@@ -190,6 +190,7 @@ mod_2_02_results_ui <- function(id) {
         " (shown when coefficient uncertainty is enabled)",
         shiny::tags$br(),
         " Analytic per-outcome SE from the regression fit. This is precision of a point estimate, not a spread of outcomes — conceptually distinct from the two coloured bands.",
+        shiny::tags$br(),
         shiny::tags$br(), shiny::tags$br(),
         "Historical = single “model” so no inter-model band is shown."
       )
@@ -373,12 +374,14 @@ mod_2_02_results_server <- function(id,
           idx <- pl$sim_year == yr
           m   <- .one_member_delta(pl, idx, method, weighted, pl_v, bq, is_log)
           sd_yr <- sqrt((m$var_coef %||% 0) + (m$var_resid %||% 0))
+          F_yr  <- m$F_agg
           tibble::tibble(
             sim_year     = yr,
             value        = m$value,
             model_id     = list("Historical"),
             value_all    = list(m$value),
             value_all_sd = list(sd_yr),
+            F_agg_all    = list(if (is.null(F_yr)) NULL else matrix(F_yr, nrow = 1L)),
             var_within   = sd_yr^2,
             var_across   = 0,
             agg_method   = method,
@@ -429,12 +432,19 @@ mod_2_02_results_server <- function(id,
                                        numeric(1L)), 0))
             ids_m  <- vapply(per_member_named,
                              function(x) x$id, character(1L))
+            F_list <- lapply(per_member_named, function(x) x$m$F_agg)
+            F_mat  <- if (all(vapply(F_list, is.null, logical(1L)))) NULL
+                      else do.call(rbind, lapply(F_list, function(v) {
+                        if (is.null(v)) rep(NA_real_, length(F_list[[which(!vapply(F_list, is.null, logical(1L)))[1]]]))
+                        else as.numeric(v)
+                      }))
             tibble::tibble(
               sim_year     = yr,
               value        = mean(vals_m, na.rm = TRUE),
               model_id     = list(ids_m),
               value_all    = list(vals_m),
               value_all_sd = list(sd_m),
+              F_agg_all    = list(F_mat),
               var_within   = comb$var_within %||% mean(sd_m^2, na.rm = TRUE),
               var_across   = comb$var_across %||%
                                (if (length(vals_m) > 1L)
@@ -567,6 +577,58 @@ mod_2_02_results_server <- function(id,
           else
             stats::median(raw_vals, na.rm = TRUE)
         })
+
+    # Per-coefficient gradient of the historical reference being subtracted.
+    # When deviation = mean: average of per-year F_agg across historical years.
+    # When deviation = median: F_agg at the historical year closest to the median.
+    # Used by .apply_contrast_sd() below to switch coefficient SE from
+    # level-CI (||F_s||) to contrast-CI (||F_s - F_ref||), the correct SE for
+    # paired counterfactual analysis on the same population.
+    hist_F_agg_ref <- reactive({
+      req(hist_agg_rv())
+      method    <- input$cmp_agg_method %||% "mean"
+      wk        <- weight_key()
+      deviation <- input$cmp_deviation %||% "none"
+      if (identical(deviation, "none")) return(NULL)
+      ht <- hist_agg_rv()[[wk]][[method]]
+      if (is.null(ht) || nrow(ht) == 0L || !"F_agg_all" %in% names(ht))
+        return(NULL)
+      # Historical has one "model" so each F_agg_all row is a 1 x K matrix.
+      F_list <- lapply(ht$F_agg_all, function(m) {
+        if (is.null(m) || !is.matrix(m) || nrow(m) == 0L) NULL
+        else as.numeric(m[1L, ])
+      })
+      F_list <- Filter(Negate(is.null), F_list)
+      if (length(F_list) == 0L) return(NULL)
+      if (identical(deviation, "mean")) {
+        Reduce(`+`, F_list) / length(F_list)
+      } else {
+        vals    <- ht$value
+        med_v   <- stats::median(vals, na.rm = TRUE)
+        med_idx <- which.min(abs(vals - med_v))
+        if (length(med_idx) == 0L) Reduce(`+`, F_list) / length(F_list)
+        else F_list[[med_idx]]
+      }
+    })
+
+    # Replace per-(model, year) coefficient SDs with paired-contrast SDs
+    # when a deviation reference is active. By overwriting `value_all_sd`
+    # here, every downstream consumer (pointrange_bands_rv,
+    # threshold_table_rv, exceedance_curves_rv) automatically uses the
+    # tightened contrast variance.
+    .apply_contrast_sd <- function(tbl, F_ref) {
+      if (is.null(F_ref) || is.null(tbl) || nrow(tbl) == 0L) return(tbl)
+      if (!"F_agg_all" %in% names(tbl) || !"value_all_sd" %in% names(tbl))
+        return(tbl)
+      for (k in seq_len(nrow(tbl))) {
+        F_mat <- tbl$F_agg_all[[k]]
+        if (is.null(F_mat) || !is.matrix(F_mat) || ncol(F_mat) != length(F_ref))
+          next
+        F_diff <- sweep(F_mat, 2L, F_ref, "-")
+        tbl$value_all_sd[[k]] <- sqrt(rowSums(F_diff * F_diff))
+      }
+      tbl
+    }
 
 
         # ---- Coefficient draws availability -----------------------------------
@@ -848,12 +910,29 @@ mod_2_02_results_server <- function(id,
                       hi = ens_mean + z_coef_hi * sd_mean)
 
         # "Total" band: combine all three sources assuming independence.
-        # var_coef = mean per-outcome variance from regression fit.
-        # var_within = mean within-model annual variance (from tbl$var_within).
-        # var_across = mean across-model snapshot variance (from tbl$var_across).
+        # var_coef     = mean per-outcome regression-fit variance (uses
+        #                paired-contrast SEs when deviation is selected,
+        #                via .apply_contrast_sd above).
+        # var_within   = year-to-year value variance within a model,
+        #                averaged across models. Computed from the values
+        #                matrix so the metric matches what the inter-annual
+        #                band visualises and so deviation-mode (which is a
+        #                scalar shift) doesn't change it.
+        # var_across   = variance across model means; matches the inter-
+        #                model band's underlying statistic.
+        # NB: tbl$var_within / tbl$var_across stored at sim time conflate
+        # parametric SE with value spread and would double-count var_coef
+        # if used here, so we recompute from the matrix.
         var_coef_total <- mean(as.numeric(sds)^2, na.rm = TRUE)
-        var_within     <- mean(tbl$var_within, na.rm = TRUE)
-        var_across     <- if (is_hist) 0 else mean(tbl$var_across, na.rm = TRUE)
+        var_within <- if (ncol(vals) > 1L) {
+          per_mod_var <- apply(vals, 1L, stats::var, na.rm = TRUE)
+          mean(per_mod_var, na.rm = TRUE)
+        } else 0
+        if (!is.finite(var_within)) var_within <- 0
+        var_across <- if (!is_hist && nrow(vals) > 1L) {
+          v <- stats::var(rowMeans(vals, na.rm = TRUE), na.rm = TRUE)
+          if (is.finite(v)) v else 0
+        } else 0
         sd_total <- sqrt(max(var_coef_total + var_within + var_across, 0,
                              na.rm = TRUE))
         total <- c(lo = ens_mean + z_coef_lo * sd_total,
@@ -875,12 +954,12 @@ mod_2_02_results_server <- function(id,
         )
       }
 
-      rows <- list(one_scenario(hist_agg_rv()[[wk]][[method]],
+      rows <- list(one_scenario(.apply_contrast_sd(hist_agg_rv()[[wk]][[method]], hist_F_agg_ref()),
                                 "Historical", TRUE))
       sa <- scenario_agg_rv()
       if (!is.null(sa) && length(sa) > 0L) {
         for (dk in names(sa)) {
-          rows[[length(rows) + 1L]] <- one_scenario(sa[[dk]][[wk]][[method]],
+          rows[[length(rows) + 1L]] <- one_scenario(.apply_contrast_sd(sa[[dk]][[wk]][[method]], hist_F_agg_ref()),
                                                     dk, FALSE)
         }
       }
@@ -911,13 +990,13 @@ mod_2_02_results_server <- function(id,
         dplyr::bind_rows(rows)
       }
 
-      rows <- list(one_scenario(hist_agg_rv()[[wk]][[method]],
+      rows <- list(one_scenario(.apply_contrast_sd(hist_agg_rv()[[wk]][[method]], hist_F_agg_ref()),
                                 "Historical", TRUE))
       sa <- scenario_agg_rv()
       if (!is.null(sa) && length(sa) > 0L) {
         for (dk in names(sa)) {
           if (!dk %in% selected_scenario_names()) next
-          rows[[length(rows) + 1L]] <- one_scenario(sa[[dk]][[wk]][[method]],
+          rows[[length(rows) + 1L]] <- one_scenario(.apply_contrast_sd(sa[[dk]][[wk]][[method]], hist_F_agg_ref()),
                                                     dk, FALSE)
         }
       }
@@ -937,22 +1016,34 @@ mod_2_02_results_server <- function(id,
         sds_flat <- as.numeric(unlist(tbl$value_all_sd))
         var_coef <- if (length(sds_flat))
           mean(sds_flat^2, na.rm = TRUE) else 0
+        # Use value-matrix–derived var_within / var_across so this matches
+        # the pointrange total band and avoids double-counting var_coef.
+        mm <- by_model_matrix(tbl)
+        vals <- if (is.null(mm)) NULL else mm$vals
+        var_within <- if (!is.null(vals) && ncol(vals) > 1L) {
+          v <- mean(apply(vals, 1L, stats::var, na.rm = TRUE), na.rm = TRUE)
+          if (is.finite(v)) v else 0
+        } else 0
+        var_across <- if (!is_hist && !is.null(vals) && nrow(vals) > 1L) {
+          v <- stats::var(rowMeans(vals, na.rm = TRUE), na.rm = TRUE)
+          if (is.finite(v)) v else 0
+        } else 0
         tibble::tibble(
           scenario      = scenario_label,
           var_coef      = var_coef,
-          var_within    = mean(tbl$var_within, na.rm = TRUE),
-          var_across    = if (is_hist) 0 else mean(tbl$var_across, na.rm = TRUE),
+          var_within    = var_within,
+          var_across    = var_across,
           is_historical = is_hist
         )
       }
 
-      rows <- list(one_scenario(hist_agg_rv()[[wk]][[method]],
+      rows <- list(one_scenario(.apply_contrast_sd(hist_agg_rv()[[wk]][[method]], hist_F_agg_ref()),
                                 "Historical", TRUE))
       sa <- scenario_agg_rv()
       if (!is.null(sa) && length(sa) > 0L) {
         for (dk in names(sa)) {
           if (!dk %in% selected_scenario_names()) next
-          rows[[length(rows) + 1L]] <- one_scenario(sa[[dk]][[wk]][[method]],
+          rows[[length(rows) + 1L]] <- one_scenario(.apply_contrast_sd(sa[[dk]][[wk]][[method]], hist_F_agg_ref()),
                                                     dk, FALSE)
         }
       }
@@ -996,13 +1087,13 @@ mod_2_02_results_server <- function(id,
         }))
       }
 
-      rows <- list(one_scenario(hist_agg_rv()[[wk]][[method]],
+      rows <- list(one_scenario(.apply_contrast_sd(hist_agg_rv()[[wk]][[method]], hist_F_agg_ref()),
                                 "Historical", TRUE))
       sa <- scenario_agg_rv()
       if (!is.null(sa) && length(sa) > 0L) {
         for (dk in names(sa)) {
           if (!dk %in% selected_scenario_names()) next
-          rows[[length(rows) + 1L]] <- one_scenario(sa[[dk]][[wk]][[method]],
+          rows[[length(rows) + 1L]] <- one_scenario(.apply_contrast_sd(sa[[dk]][[wk]][[method]], hist_F_agg_ref()),
                                                     dk, FALSE)
         }
       }
@@ -1130,13 +1221,13 @@ mod_2_02_results_server <- function(id,
         dplyr::bind_rows(rows)
       }
 
-      rows <- list(one_scenario(hist_agg_rv()[[wk]][[method]],
+      rows <- list(one_scenario(.apply_contrast_sd(hist_agg_rv()[[wk]][[method]], hist_F_agg_ref()),
                                 "Historical", TRUE))
       sa <- scenario_agg_rv()
       if (!is.null(sa) && length(sa) > 0L) {
         for (dk in names(sa)) {
           if (!dk %in% selected_scenario_names()) next
-          rows[[length(rows) + 1L]] <- one_scenario(sa[[dk]][[wk]][[method]],
+          rows[[length(rows) + 1L]] <- one_scenario(.apply_contrast_sd(sa[[dk]][[wk]][[method]], hist_F_agg_ref()),
                                                     dk, FALSE)
         }
       }

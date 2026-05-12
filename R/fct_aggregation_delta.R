@@ -80,10 +80,14 @@ aggregate_with_uncertainty_delta <- function(y_point,
                            F_loading    = F_loading)
 
   # Coefficient variance: ||F' h||^2
-  var_coef <- if (!is.null(F_loading) && !any(!is.finite(h))) {
-    v <- crossprod(F_loading, h)
-    sum(v * v)
-  } else 0
+  # F_agg is the per-coefficient gradient of the aggregated scalar with
+  # respect to beta; ||F_agg||^2 = var_coef. Exposing F_agg lets callers
+  # build contrast variances such as ||F_agg_scn - F_agg_hist||^2, which
+  # is the right SE for paired counterfactuals on the same population.
+  F_agg <- if (!is.null(F_loading) && !any(!is.finite(h))) {
+    as.numeric(crossprod(F_loading, h))
+  } else NULL
+  var_coef <- if (!is.null(F_agg)) sum(F_agg * F_agg) else 0
 
   # Residual variance (only for stochastic residual draws)
   var_resid <- if (residuals %in% c("normal", "resample") &&
@@ -107,6 +111,7 @@ aggregate_with_uncertainty_delta <- function(y_point,
     value_hi    = band$hi,
     var_coef    = var_coef,
     var_resid   = var_resid,
+    F_agg       = F_agg,
     draw_values = NULL
   )
 }
@@ -197,10 +202,18 @@ gradient_for_method <- function(method, mu, weights, pov_line, value_pt,
     },
 
     gini = {
-      # Monti (1991) influence function for weighted Gini.
-      # IF_i = (2/mu_bar) * [mu_i * (2 F(mu_i) - 1) - (G+1)(mu_i - mu_bar)
-      #                     - 2 * GL(F(mu_i))]
-      # where GL is the generalised Lorenz ordinate at F(mu_i).
+      # Partial-derivative gradient of the weighted Gini wrt y_i, used in
+      # the delta-method propagation of regression coefficient uncertainty
+      # through y_i = exp(X_i beta). Distinct from Monti's (1991) IF (which
+      # is correct for sample-variance estimation but inflates the SE when
+      # mis-used in the chain rule through beta — it violates Gini's scale
+      # invariance under intercept shifts).
+      #
+      # Derivation (ordering held locally fixed):
+      #   G = (1/mu_bar) * sum_i w_tilde_i * y_i * (2 F_i - 1)
+      #   dG/dy_i = (w_tilde_i / mu_bar) * (2 F_i - 1 - G)
+      #   h_i = (dG/dy_i) * y_i = w_tilde_i * y_i * (2 F_i - 1 - G) / mu_bar
+      # Scale invariance check: sum h_i = (G*mu_bar - G*mu_bar)/mu_bar = 0.
       valid <- !is.na(mu)
       if (sum(valid) < 2L) return(rep(0, N))
       ord    <- order(mu)
@@ -211,14 +224,10 @@ gradient_for_method <- function(method, mu, weights, pov_line, value_pt,
       mu_bar <- sum(w_n * mu_o, na.rm = TRUE)
       if (!is.finite(mu_bar) || mu_bar <= 0) return(rep(0, N))
       G_pt   <- value_pt
-      GL     <- cumsum(w_n * mu_o) - w_n * mu_o / 2  # generalised Lorenz at F_vec
-      IF_o   <- (2 / mu_bar) * (mu_o * (2 * F_vec - 1)
-                                 - (G_pt + 1) * (mu_o - mu_bar)
-                                 - 2 * GL)
-      # Re-order back to original
-      IF <- numeric(N)
-      IF[ord] <- IF_o
-      w_tilde * IF * mu
+      h_o    <- w_n * mu_o * (2 * F_vec - 1 - G_pt) / mu_bar
+      h      <- numeric(N)
+      h[ord] <- h_o
+      h
     },
 
     stop(sprintf("[gradient_for_method] unsupported method: '%s'", method))

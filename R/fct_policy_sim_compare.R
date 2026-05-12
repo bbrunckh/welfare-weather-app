@@ -638,9 +638,20 @@ policy_input_diagnostics <- function(baseline_svy, policy_svy, vars = NULL) {
       ens_mean <- mean(as.numeric(vals), na.rm = TRUE)
       sd_mean  <- mean(as.numeric(sds),  na.rm = TRUE)
       coef <- c(lo = ens_mean + z_lo * sd_mean, hi = ens_mean + z_hi * sd_mean)
+      # See mod_2_02_results.R for the rationale on recomputing var_within /
+      # var_across from the value matrix rather than the stored parametric
+      # tbl$var_within (which would double-count var_coef and not respond
+      # to deviation mode).
       var_coef_total <- mean(as.numeric(sds)^2, na.rm = TRUE)
-      var_within     <- mean(tbl$var_within, na.rm = TRUE)
-      var_across     <- if (is_hist) 0 else mean(tbl$var_across, na.rm = TRUE)
+      var_within <- if (ncol(vals) > 1L) {
+        per_mod_var <- apply(vals, 1L, stats::var, na.rm = TRUE)
+        mean(per_mod_var, na.rm = TRUE)
+      } else 0
+      if (!is.finite(var_within)) var_within <- 0
+      var_across <- if (!is_hist && nrow(vals) > 1L) {
+        v <- stats::var(rowMeans(vals, na.rm = TRUE), na.rm = TRUE)
+        if (is.finite(v)) v else 0
+      } else 0
       sd_total <- sqrt(max(var_coef_total + var_within + var_across, 0, na.rm = TRUE))
       total <- c(lo = ens_mean + z_lo * sd_total, hi = ens_mean + z_hi * sd_total)
       tibble::tibble(

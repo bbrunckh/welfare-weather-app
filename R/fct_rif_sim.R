@@ -145,38 +145,45 @@ predict_rif <- function(fit_multi, newdata, svy, train_data, taus, outcome,
   # Store deltas in a matrix: rows = observations, cols = quantiles
   delta_mat <- matrix(NA_real_, nrow = n, ncol = K)
 
-  # For F_loading: store X_diff per quantile (X_scenario - X_baseline)
+  # For F_loading: store X_scenario (full design matrix under scenario
+  # weather) per quantile.
+  #
+  # F_loading_k = X_scenario %*% t(L_k) gives the delta-method gradient of
+  # the *predicted welfare level* under the RIF regression at quantile k,
+  # consistent with the OLS path's F_loading construction. Downstream:
+  #   - Level mode: ||F_loading||^2 = level-CI of the predicted welfare
+  #     under the RIF model at this household's quantile position tau_i.
+  #     Comparable in width to OLS level bands.
+  #   - Deviation/contrast mode: the aggregation layer subtracts the
+  #     historical reference F_agg, so F_agg_s - F_agg_h reduces (per
+  #     household i) to (X_scenario_i - X_hist_i) %*% t(L_tau_i) — the
+  #     paired-contrast variance, matching the X_diff construction we
+  #     previously used. Deviation bands stay tight.
+  #
+  # The displayed point estimate remains y_observed + delta_i; the level
+  # SE refers to the predicted level under the regression, not to that
+  # observed-anchored displayed value (analogous to how OLS's level SE
+  # refers to its predicted, not "true," welfare).
   compute_loading <- !is.null(chol_list) && length(chol_list) == K
-  X_diff_list    <- if (compute_loading) vector("list", K) else NULL
+  X_scen_list    <- if (compute_loading) vector("list", K) else NULL
 
   for (k in seq_len(K)) {
-    # Baseline weather prediction
+    # Baseline weather prediction (needed for the climate-delta point
+    # estimate; not used for F_loading any more).
     pred_base <- as.numeric(stats::predict(fit_multi[[k]], newdata = newdata_base,
                                            type = "response"))
-
-    # Capture baseline design matrix for loading computation
-    if (compute_loading) {
-      X_base_k <- tryCatch(
-        stats::model.matrix(fit_multi[[k]], data = newdata_base, type = "rhs"),
-        error = function(e) NULL
-      )
-    }
 
     # Scenario weather prediction
     pred_new <- as.numeric(stats::predict(fit_multi[[k]], newdata = newdata_scen,
                                           type = "response"))
 
-    # Capture scenario design matrix and compute X_diff
-    if (compute_loading && !is.null(X_base_k)) {
-      X_new_k <- tryCatch(
+    # Capture scenario design matrix for level-mode F_loading
+    if (compute_loading) {
+      X_scen_list[[k]] <- tryCatch(
         stats::model.matrix(fit_multi[[k]], data = newdata_scen, type = "rhs"),
         error = function(e) NULL
       )
-      if (!is.null(X_new_k) && nrow(X_new_k) == nrow(X_base_k)) {
-        X_diff_list[[k]] <- X_new_k - X_base_k
-      } else {
-        compute_loading <- FALSE
-      }
+      if (is.null(X_scen_list[[k]])) compute_loading <- FALSE
     }
 
     delta_mat[, k] <- pred_new - pred_base
@@ -203,10 +210,10 @@ predict_rif <- function(fit_multi, newdata, svy, train_data, taus, outcome,
   newdata$.residual  <- NA_real_
   newdata[[outcome]] <- y_baseline + delta_i
 
-  # Compute F_loading by interpolating X_diff %*% t(L_k) at each tau_i
-  if (compute_loading && !any(vapply(X_diff_list, is.null, logical(1)))) {
+  # Compute F_loading by interpolating X_scenario %*% t(L_k) at each tau_i
+  if (compute_loading && !any(vapply(X_scen_list, is.null, logical(1)))) {
     F_loading <- tryCatch({
-      interpolate_F_loading(X_diff_list, chol_list, taus, tau_i)
+      interpolate_F_loading(X_scen_list, chol_list, taus, tau_i)
     }, error = function(e) {
       warning("[predict_rif] F_loading interpolation failed: ", conditionMessage(e))
       NULL
