@@ -55,11 +55,11 @@ The `"rif"` engine is registered in `ENGINE_REGISTRY`. It exploits **fixest's mu
 c(rif_10, rif_20, ..., rif_90) ~ weather + covariates | fixed_effects
 ```
 
-This returns a `fixest_multi` object (a list of 9 `fixest` fits), one per quantile. The same 3-model progressive specification used for linear regression applies:
+This returns a `fixest_multi` object (a list of 9 `fixest` fits), one per quantile. The same 3-model progressive specification used for linear regression applies — identical formula structure to the `fixest` engine:
 
-- **Model 1**: Weather only
-- **Model 2**: Weather + covariates
-- **Model 3**: Weather + covariates + interactions
+- **Model 1**: Weather only (no FE): `c(rif_10,...,rif_90) ~ hazard`
+- **Model 2**: Weather + interactions + FE: `c(...) ~ hazard + interactions_main | fe`
+- **Model 3**: Weather + interactions + covariates + FE: `c(...) ~ hazard + interactions_main + covariates | fe`
 
 Results are collected into a `rif_grid` data frame with columns `(tau, term, estimate, std.error, conf.low, conf.high, model)` via `build_rif_grid()`.
 
@@ -158,9 +158,31 @@ The decomposition table (in `decompose_policy_effect()`) reports *all* channels 
 - `delta_res` = δ_res1 + δ_res2 (total resilience effect)
 - `delta_total` = δ_main + δ_res (all channels combined)
 
-**Decomposition–simulation reconciliation.** Both routes call the same helper `.compute_rif_channels()` (in `fct_policy_decompose.R`) as their single source of truth. The simulation correction returns `δ_main_covar + δ_res1` from this helper; the decomposition table reports the full set. By construction, the channel totals in the decomposition reconcile exactly with the simulation prediction up to the SP-in-levels handling (δ_sp added post-backtransform) and the location of δ_res2 (computed inside `predict_rif()`'s Stage A rather than in the correction). This is a structural advantage over the linear engine, where the β·Δx decomposition and the `fixest::predict()` simulation can diverge under FE absorption (see [`method_lin.md`](method_lin.md) §2.7c).
+**Decomposition–simulation reconciliation.** Both routes call the same helper `.compute_rif_channels()` (in `fct_policy_decompose.R`) as their single source of truth. The simulation correction returns `δ_main_covar + δ_res1` from this helper; the decomposition table reports the full set. By construction, the channel totals in the decomposition reconcile exactly with the simulation prediction up to the SP-in-levels handling (δ_sp added post-backtransform) and the location of δ_res2 (computed inside `predict_rif()`'s Stage A rather than in the correction). This is a structural advantage over the linear engine, where the β·Δx decomposition and the `fixest::predict()` simulation can diverge under FE absorption (see [`method_lin.md`](method_lin.md) §2.8c).
 
-### 2.6 Conceptual Issues with the Policy Simulation
+### 2.6 Uncertainty Propagation (`fct_aggregation_delta.R`, `fct_rif_sim.R`)
+
+**The RIF engine uses the same closed-form delta-method aggregator as the linear engine.** See [`method_lin.md`](method_lin.md) §2.6 for the variance formula, band transforms, and ensemble pooling. This section covers only the RIF-specific construction of `F_loading`.
+
+**Per-tau Cholesky factors.** `compute_chol_vcov(fit_multi)` dispatches on the `fixest_multi` object and returns a *list* of K Cholesky factors `L_k` (one per quantile fit), rather than the single L produced for a scalar `feols` fit.
+
+**Quantile-interpolated F_loading** (`interpolate_F_loading()` in `fct_rif_sim.R`). For each scenario the K per-quantile design-matrix differences `X_diff_k = X_scenario_k − X_baseline_k` are pre-cached, multiplied to give `F_k = X_diff_k %*% t(L_k)`, then linearly blended at each household's `τ_i`:
+
+```
+idx_lo, idx_hi = bracketing grid points of τ_i  (clamped to [0.1, 0.9])
+w_i            = (τ_i − τ_idx_lo) / (τ_idx_hi − τ_idx_lo)
+F_loading_i    = (1 − w_i) · F_idx_lo[i, ] + w_i · F_idx_hi[i, ]
+```
+
+The interpolated `F_loading` (N × K_coef) is attached as `attr(out, "F_loading")` on the prediction frame and consumed by `aggregate_with_uncertainty_delta()` exactly as in the linear path. Because both `X_diff_k` (the *difference* between scenario and baseline design) and `L_k` are interpolated, the resulting variance reflects coefficient uncertainty in the *weather delta* — consistent with `predict_rif()` returning a weather delta rather than an absolute level.
+
+**Caveats specific to the RIF uncertainty path:**
+
+- **No cross-tau covariance.** Each `L_k` encodes only the variance of the τ-th regression; the K RIF fits are treated as independent in the interpolation. Cross-quantile correlation in the underlying RIF coefficients is ignored, which can understate uncertainty when adjacent quantile fits share most of their sample.
+- **Residual variance is zero for RIF.** `train_aug` is set to `NULL` in `run_sim_pipeline()` for the RIF branch (`is_rif` short-circuit), so the residual options (`"original"`, `"normal"`, `"resample"`) cannot be used; the aggregator's `var_resid` term is always zero for RIF. This is intentional — the RIF prediction is `y_baseline + δ_i` rather than a model prediction in welfare units, so an additive residual draw on top of the household's *observed* baseline welfare is not meaningful.
+- **Clamping at the tail.** Households below τ = 0.1 or above τ = 0.9 receive the F_loading of the boundary quantile, so their uncertainty bands collapse to the boundary's coefficient covariance with no extrapolation penalty.
+
+### 2.7 Conceptual Issues with the Policy Simulation
 
 #### a) Potential interaction term double-counting
 

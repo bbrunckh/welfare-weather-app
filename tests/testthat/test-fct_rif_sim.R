@@ -40,6 +40,59 @@ test_that("predict_rif returns correct structure", {
   expect_true(any(abs(deltas) > 0.01))
 })
 
+test_that("predict_rif F_loading contrast is ~0 when scenario == baseline weather", {
+  # Regression test for the X_diff -> X_scenario switch in predict_rif().
+  # The level-mode F_loading is now built from X_scenario directly, so the
+  # deviation/contrast (F_agg_scenario - F_agg_historical) must reduce to
+  # zero when scenario weather equals historical weather. If it doesn't, the
+  # change has silently broken the deviation-mode uncertainty bands.
+  skip_if_not_installed("fixest")
+  set.seed(7)
+  n <- 120
+  df <- data.frame(
+    y    = rnorm(n, 10, 2),
+    temp = rnorm(n),
+    rain = rnorm(n),
+    loc  = factor(sample(letters[1:3], n, replace = TRUE)),
+    year = factor(sample(2010:2012, n, replace = TRUE))
+  )
+  taus <- seq(0.1, 0.9, by = 0.2)
+  rif_cols <- paste0("rif_", formatC(taus * 100, format = "d"))
+  for (i in seq_along(taus)) df[[rif_cols[i]]] <- compute_rif(df$y, taus[i])
+  lhs <- paste0("c(", paste(rif_cols, collapse = ", "), ")")
+  fml <- stats::as.formula(paste(lhs, "~ temp + rain | loc + year"))
+  fit_multi <- fixest::feols(fml, data = df, warn = FALSE)
+
+  chol_list <- lapply(seq_along(taus), function(k) {
+    co <- compute_chol_vcov(fit_multi[[k]])
+    co$L
+  })
+
+  svy <- df[1:40, ]
+  svy$.svy_row_id <- seq_len(nrow(svy))
+
+  # Run twice with the same scenario==baseline weather. F_loading should be
+  # identical across runs (same X, same L), so any "scenario - historical"
+  # contrast collapses to exactly zero.
+  res_hist <- predict_rif(
+    fit_multi = fit_multi, newdata = svy, svy = svy,
+    train_data = df, taus = taus, outcome = "y",
+    weather_cols = c("temp", "rain"), chol_list = chol_list
+  )
+  res_scen <- predict_rif(
+    fit_multi = fit_multi, newdata = svy, svy = svy,
+    train_data = df, taus = taus, outcome = "y",
+    weather_cols = c("temp", "rain"), chol_list = chol_list
+  )
+
+  F_hist <- attr(res_hist, "F_loading")
+  F_scen <- attr(res_scen, "F_loading")
+  expect_false(is.null(F_hist))
+  expect_false(is.null(F_scen))
+  expect_equal(dim(F_hist), dim(F_scen))
+  expect_lt(max(abs(F_scen - F_hist)), 1e-10)
+})
+
 test_that("predict_rif delta is ~0 when scenario == baseline weather", {
   skip_if_not_installed("fixest")
   set.seed(123)

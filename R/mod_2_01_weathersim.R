@@ -492,8 +492,6 @@ mod_2_01_weathersim_server <- function(id,
       fp_list             <- if (has_future) lapply(fut_periods, function(yr)
                                c(paste0(yr[1], "-01-01"), paste0(yr[2], "-12-31")))
                              else list()
-      # Fixed at p10/p90 — input$ensemble_band_width not yet in UI
-      ensemble_band_q     <- c(lo = 0.10, hi = 0.90)
 
       # ---- RIF-specific params -------------------------------------------
       engine      <- mf$engine %||% "fixest"
@@ -525,8 +523,6 @@ mod_2_01_weathersim_server <- function(id,
             sim_dates           = sim_dates,
             perturbation_method = perturbation_method,
             stored_breaks       = stored_breaks(),
-            ensemble_band_q     = ensemble_band_q,
-            full_ensemble       = FALSE,
             fit_multi           = fit_multi,
             taus                = rif_taus,
             weather_cols        = rif_weather,   

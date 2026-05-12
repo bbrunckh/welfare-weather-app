@@ -30,7 +30,7 @@
 #' @return Named list of numeric delta vectors for changed covariates.
 #' @keywords internal
 .compute_policy_deltas <- function(svy_baseline, svy_policy, outcome, weather_vars) {
-  exclude_cols <- c(outcome, "._sp_transfer", ".svy_row_id", weather_vars,
+  exclude_cols <- c(outcome, SP_TRANSFER_COL, ".svy_row_id", weather_vars,
                     "year", "sim_year", "int_month", "code", "survname", "loc_id",
                     grep("^weight$|^hhweight$|^wgt$|^pw$", names(svy_baseline),
                          value = TRUE, ignore.case = TRUE))
@@ -370,8 +370,8 @@ decompose_policy_effect <- function(svy_baseline,
   deltas <- .compute_policy_deltas(svy_baseline, svy_policy, outcome, weather_vars)
 
   # SP transfer component
-  sp_transfer <- if ("._sp_transfer" %in% names(svy_policy)) {
-    svy_policy[["._sp_transfer"]]
+  sp_transfer <- if (SP_TRANSFER_COL %in% names(svy_policy)) {
+    svy_policy[[SP_TRANSFER_COL]]
   } else {
     rep(0, n)
   }

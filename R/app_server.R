@@ -52,6 +52,7 @@ app_server <- function(input, output, session) {
     saved_scenarios   = step2_api$saved_scenarios,
     selected_hist     = step2_api$selected_hist,
     variable_list     = overview_api$variable_list,
-    skip_coef_draws   = step2_api$skip_coef_draws
+    skip_coef_draws   = step2_api$skip_coef_draws,
+    residuals         = step2_api$residuals
   )
 }

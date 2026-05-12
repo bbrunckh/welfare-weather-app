@@ -47,7 +47,8 @@ mod_3_05_policy_sim_server <- function(id,
                                         selected_weather   = reactive(NULL),
                                         hist_sim           = reactive(NULL),
                                         saved_scenarios    = reactive(list()),
-                                        skip_coef_draws    = reactive(FALSE)) {
+                                        skip_coef_draws    = reactive(FALSE),
+                                        residuals          = reactive("original")) {
   moduleServer(id, function(input, output, session) {
     ns <- session$ns
 
@@ -101,56 +102,30 @@ mod_3_05_policy_sim_server <- function(id,
             value   = 0.1,
             {
               shiny::setProgress(value = 0.2, detail = "Baseline (reusing Step 2)...")
-              # Baseline = Step 2 output verbatim — the survey is unchanged,
-              # so re-simulating would just reproduce identical results.
-              # Translate the saved-scenarios schema from Step 2's `pipelines`
-              # naming into Module 3's `models` naming expected downstream.
-              baseline_ss <- lapply(ss, function(s) {
-                pipes <- s$pipelines
-                if (is.null(pipes) || length(pipes) == 0L) return(NULL)
-                model_names <- names(pipes) %||% paste0("model_", seq_along(pipes))
-                models_new <- lapply(seq_along(pipes), function(i) {
-                  p <- pipes[[i]]
-                  list(
-                    y_point   = p$y_point,
-                    F_loading = p$F_loading,
-                    sim_year  = p$sim_year,
-                    weight    = p$weight,
-                    id_vec    = p$id_vec,
-                    name      = model_names[[i]]
-                  )
-                })
-                list(
-                  models      = models_new,
-                  weather_raw = s$weather_raw,
-                  so          = s$so %||% hs$so,
-                  year_range  = s$year_range,
-                  n_models    = length(models_new)
-                )
-              })
-              baseline_ss <- baseline_ss[!vapply(baseline_ss, is.null, logical(1))]
-              # Flatten Step 2's nested hist_sim ($pipeline$...) into the flat
-              # schema Mod 3's make_agg_hist expects ($y_point, $F_loading, ...).
-              p_hs <- hs$pipeline %||% list()
-              baseline_hs <- list(
-                y_point     = p_hs$y_point,
-                F_loading   = p_hs$F_loading,
-                sim_year    = p_hs$sim_year,
-                weight      = p_hs$weight,
-                id_vec      = p_hs$id_vec,
-                id_col      = p_hs$id_col,
-                so          = hs$so,
-                weather_raw = hs$weather_raw,
-                train_data  = hs$train_data,
-                has_weights = isTRUE(hs$has_weights),
-                residuals   = p_hs$residuals %||% "none",
-                pov_line    = hs$pov_line,
-                yr_range    = hs$yr_range
-              )
-              baseline_hist_sim_rv(baseline_hs)
-              baseline_saved_scenarios_rv(baseline_ss)
+              # Baseline = Step 2 output verbatim. The survey is unchanged in
+              # the baseline arm, so re-simulating would just reproduce the
+              # Step 2 results. Pass Step 2's hist_sim and saved_scenarios
+              # straight through so the Results pane reads exactly the same
+              # values Mod 2 shows. The Results pane and policy resimulation
+              # both consume the Mod 2 schema ($pipeline for hist_sim,
+              # $pipelines for each saved scenario), so no translation is
+              # required here.
+              res_choice <- residuals() %||% "original"
+              # Stamp the live residuals choice onto hist_sim so the Results
+              # pane's aggregator picks up the same residual treatment Mod 2
+              # is rendering with.
+              hs_for_baseline <- hs
+              hs_for_baseline$residuals <- res_choice
+              baseline_hist_sim_rv(hs_for_baseline)
+              baseline_saved_scenarios_rv(ss %||% list())
+
               shiny::setProgress(value = 0.6, detail = "Policy...")
-              pol_out <- resimulate_with_svy(svy_mod, sw, hs$so, mf, hs, ss,
+              # Inject the residuals choice into hist_sim_baseline so the policy
+              # resimulation (resimulate_with_svy) reads it instead of falling
+              # back to "none".
+              hs_for_resim <- hs
+              hs_for_resim$residuals <- res_choice
+              pol_out <- resimulate_with_svy(svy_mod, sw, hs$so, mf, hs_for_resim, ss,
                                              svy_baseline = svy)
               if (!is.null(pol_out)) {
                 policy_hist_sim_rv(pol_out$hist_sim)

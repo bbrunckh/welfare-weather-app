@@ -22,8 +22,8 @@ make_ols_fixture <- function(N = 300, seed = 1L) {
     svy_base    = df,
     svy_policy  = (function() {
       p <- df
-      p$transfer       <- 1L
-      p$._sp_transfer  <- 5
+      p$transfer <- 1L
+      p[[wiseapp::SP_TRANSFER_COL]] <- 5
       p
     })()
   )

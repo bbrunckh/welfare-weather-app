@@ -82,10 +82,10 @@ Engine selection is handled in `R/fct_model_select.R` (`infer_engine()` and `mod
 
 1. **Weather joining** (`prepare_hist_weather()`): inner-join raw weather to survey covariates on `(code, year, survname, loc_id, int_month)`.
 2. **Prediction**: a single call to `predict_outcome()` which wraps `stats::predict(model, newdata = survey_wd_sim, type = "response")`. Rows with FE levels unseen in training are silently dropped by fixest; `predict_outcome()` retains the `rowids` attribute and trims `newdata` to match.
-3. **`y_point` extraction**: captured *before* back-transformation. When `so$transform == "log"`, `y_point` stays in log scale so that `aggregate_with_uncertainty()` can apply `exp()` exactly once (including on Monte Carlo draws).
+3. **`y_point` extraction**: captured *before* back-transformation. When `so$transform == "log"`, `y_point` stays in log scale so that `aggregate_with_uncertainty_delta()` can apply `exp()` exactly once at aggregation time (with `is_log = TRUE`).
 4. **Back-transform** (`apply_log_backtransform()`): exponentiate the outcome column for the diagnostic `preds` frame.
 5. **SP cash transfer**: if a `._sp_transfer` column is present, add it to `preds[[outcome]]` *on the original (level) scale, after back-transform*. Then re-log `y_point` to maintain log-scale consistency for downstream uncertainty propagation.
-6. **Factor loadings for uncertainty**: when `chol_Sigma` is supplied, compute `F_loading = X_nonFE %*% t(chol_Sigma)` where `X_nonFE` is the non-FE design matrix from `stats::model.matrix(model, ..., type = "rhs")`. This propagates coefficient uncertainty into Monte Carlo prediction draws.
+6. **Factor loadings for uncertainty**: when `chol_obj` (or the legacy `chol_Sigma` alias) is supplied, compute `F_loading = X_nonFE %*% t(L)` via `compute_factor_loading()`, where `L` is the Cholesky factor of the coefficient vcov and `X_nonFE` is the non-FE design matrix from `stats::model.matrix(model, ..., type = "rhs")`. `F_loading` (N × K) carries coefficient uncertainty forward into the closed-form delta-method aggregator (see §2.6).
 
 #### Weather-only simulation
 
@@ -104,7 +104,41 @@ The linear engine relies on **`fixest::predict()` evaluated on the policy-modifi
 
 **No `.compute_ols_policy_correction()` exists** — the prediction-space approach already captures every channel the model can represent. The policy correction helper (`.compute_rif_policy_correction()`) is RIF-specific because RIF's `predict_rif()` only computes a weather delta and needs covariate effects added back in.
 
-### 2.6 Policy Decomposition (`fct_policy_decompose.R`)
+### 2.6 Uncertainty Propagation (`fct_aggregation_delta.R`)
+
+**The app uses a closed-form delta-method aggregator.** All callsites (`mod_2_02_results.R`, `fct_policy_sim_compare.R`) use `aggregate_with_uncertainty_delta()`. Monte Carlo aggregation has been removed.
+
+Given the point-estimate log-welfare vector `y_point`, the factor loading `F_loading` (N × K), and an aggregate statistic `T = g(welfare)`, the delta method computes:
+
+```
+welfare_i = exp(y_point_i + resid_i)        # back-transform (is_log = TRUE)
+h_i       = (∂T/∂welfare_i) · welfare_i      # welfare-scale gradient, lifted to log scale
+F_agg     = F_loading' h                     # K-vector: per-coefficient gradient of T
+var_coef  = ||F_agg||²                       # coefficient-variance contribution
+var_resid = σ_e² · Σ h_i²                    # residual-variance (only for "normal" / "resample")
+SE        = sqrt(var_coef + var_resid)
+```
+
+Bands are reported via `apply_band_transform()`, which applies a method-appropriate link before adding `z_q · SE`:
+- **logit** scale for bounded ratios (`headcount_ratio`, `gap`, `fgt2`) to keep bands within [0, 1]
+- **log** scale for strictly positive aggregates (`median`)
+- **identity** for unbounded aggregates (`mean`, `total`, `gini`, `prosperity_gap`, `avg_poverty`)
+
+Per-method gradient closures `gradient_for_method()` cover `mean`, `total`, `gap`, `prosperity_gap`, `fgt2`, `headcount_ratio`, `avg_poverty`, `median`, and `gini`. The headcount ratio uses a kernel-smoothed indicator `Φ((z − w)/b)` with bandwidth auto-tuned to the larger of `bandwidth_p0 · z_p` and the median per-obs welfare SE — undersmoothing under-counts threshold crossings as F_loading shrinks.
+
+**Ensemble pooling** (`combine_ensemble_results()` in `fct_aggregation.R`) combines per-CMIP6-member outputs via the law of total variance:
+
+```
+var_within = mean(var_coef + var_resid)     # parametric uncertainty averaged across members
+var_across = var(member point estimates)    # inter-model spread
+var_pool   = var_within + var_across
+```
+
+The thin "coef" band reflects `var_pool` (analytic Gaussian); the thick "model spread" band reflects empirical percentiles of the member point estimates. Output keys include `value`, `value_lo`/`value_hi` (model-spread band), `coef_lo`/`coef_hi` (analytic pooled), `model_q10`/`model_q25`/`model_med`/`model_q75`/`model_q90`, and `value_all` (per-member point values).
+
+**For paired counterfactuals** (e.g., scenario − historical on the same population), `aggregate_with_uncertainty_delta()` returns `F_agg` so callers can build contrast variance as `||F_agg_scn − F_agg_hist||²` rather than summing variances independently — this captures the correlation between the two predictions sharing the same coefficient draw.
+
+### 2.7 Policy Decomposition (`fct_policy_decompose.R`)
 
 The decomposition output is a *display/reporting* artifact, not a correction applied to predictions. `decompose_policy_effect()` dispatches on engine: linear calls `.decompose_ols()`, RIF calls `.decompose_rif()` (which delegates to `.compute_rif_channels()`). The linear decomposition reports the following channels:
 
@@ -141,7 +175,7 @@ The decomposition data frame includes `delta_main`, `delta_sp`, `delta_main_cova
 
 **Crucial consistency note:** The simulation prediction (via `fixest::predict()` on `svy_policy`) and the decomposition (via `β · Δx` in `.decompose_ols()`) should yield identical total effects for simple OLS without fixed effects. With FE absorbed, they agree on the within-group change in expectations but differ in level (FE contributions appear in `predict()` but not in the β·Δx decomposition). The decomposition is therefore best read as *the marginal effect of the policy holding FE fixed*, not as an exact reconciliation with predicted welfare levels.
 
-### 2.7 Conceptual Issues with the Policy Simulation
+### 2.8 Conceptual Issues with the Policy Simulation
 
 #### a) No distributional heterogeneity in weather response
 

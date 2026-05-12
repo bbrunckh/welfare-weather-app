@@ -4,6 +4,17 @@
 # ============================================================================ #
 
 
+#' Internal column name holding the per-household SP cash-transfer amount
+#'
+#' Set by \code{apply_policy_to_svy()}, read by \code{run_sim_pipeline()} (which
+#' adds it to predicted welfare on the level scale), the diagnostics module,
+#' and the decomposition. The leading-dot prefix marks it as an internal column
+#' and the suffix makes it unlikely to collide with a user-supplied variable.
+#' Treat this constant as the single source of truth across the codebase.
+#' @export
+SP_TRANSFER_COL <- ".wiseapp_sp_transfer"
+
+
 # ---------------------------------------------------------------------------- #
 # Policy scenario: candidate variable discovery & placeholder UI               #
 # ---------------------------------------------------------------------------- #
@@ -311,6 +322,11 @@ apply_policy_to_svy <- function(svy,
       employed_idx <- which(svy$employed == 1L & !is.na(svy$employed))
       selfemp_idx <- which(svy$selfemployed == 1L & !is.na(svy$selfemployed))
 
+      # emp_change is the target shift in employment rate (as a fraction of
+      # total N), so multiply by nrow(svy) to get the number of workers to
+      # flip — giving a true percentage-point change in employment rate.
+      n_total <- nrow(svy)
+
       if (emp_change > 0 && length(unemp_idx) > 0) {
         # Calculate ratio of employed vs selfemployed among currently employed
         n_employed <- length(employed_idx)
@@ -319,10 +335,9 @@ apply_policy_to_svy <- function(svy,
         ratio_employed <- if (total_employed > 0) n_employed / total_employed
                           else 0.5
 
-        # Number of unemployed to flip to employed/selfemployed
-        n_flip <- round(length(unemp_idx) * emp_change)
+        n_flip <- min(round(n_total * emp_change), length(unemp_idx))
         if (n_flip > 0) {
-          flip_idx <- sample(unemp_idx, min(n_flip, length(unemp_idx)))
+          flip_idx <- sample(unemp_idx, n_flip)
           n_to_employed <- round(length(flip_idx) * ratio_employed)
           n_to_selfemp <- length(flip_idx) - n_to_employed
 
@@ -340,9 +355,9 @@ apply_policy_to_svy <- function(svy,
       } else if (emp_change < 0 && length(c(employed_idx, selfemp_idx)) > 0) {
         # Decrease employment: flip some employed/selfemployed to unemployed
         employed_all <- c(employed_idx, selfemp_idx)
-        n_flip <- round(length(employed_all) * abs(emp_change))
+        n_flip <- min(round(n_total * abs(emp_change)), length(employed_all))
         if (n_flip > 0) {
-          flip_idx <- sample(employed_all, min(n_flip, length(employed_all)))
+          flip_idx <- sample(employed_all, n_flip)
           svy$employed[flip_idx] <- 0L
           svy$selfemployed[flip_idx] <- 0L
           svy$unemployed[flip_idx] <- 1L
@@ -361,9 +376,11 @@ apply_policy_to_svy <- function(svy,
         n_working <- length(working_idx)
 
         # Target percentages: manufacturing and services chosen by user,
-        # agriculture is the residual
-        target_ind <- (labor$sector_manufacturing %||% 0) / 100
-        target_serv <- (labor$sector_services %||% 0) / 100
+        # agriculture is the residual. Clamp so targets cannot exceed 100%
+        # combined (which would make target_agri negative and corrupt the
+        # reallocation logic).
+        target_ind  <- min((labor$sector_manufacturing %||% 0) / 100, 1)
+        target_serv <- min((labor$sector_services %||% 0) / 100, 1 - target_ind)
         target_agri <- 1.0 - target_ind - target_serv
 
         # Convert targets to row counts
@@ -470,19 +487,18 @@ apply_policy_to_svy <- function(svy,
           }
         }
 
-        # Execute reallocations: each worker moves from one sector to exactly one sector
-        for (i in seq_len(nrow(reallocations))) {
-          worker <- reallocations$worker[i]
-          to_sec <- reallocations$to_sector[i]
-
-          # Remove from all sectors
-          svy$agriculture[worker] <- 0L
-          svy$industry[worker] <- 0L
-          svy$services[worker] <- 0L
-
-          # Assign to target sector
-          if (to_sec %in% names(svy)) {
-            svy[[to_sec]][worker] <- 1L
+        # Execute reallocations: clear all sector flags for movers then assign
+        # target sector. Vectorised over sector to avoid a row-by-row loop.
+        if (nrow(reallocations) > 0) {
+          movers <- reallocations$worker
+          svy$agriculture[movers] <- 0L
+          svy$industry[movers]    <- 0L
+          svy$services[movers]    <- 0L
+          for (sec in c("agriculture", "industry", "services")) {
+            targets <- reallocations$worker[reallocations$to_sector == sec]
+            if (length(targets) > 0 && sec %in% names(svy)) {
+              svy[[sec]][targets] <- 1L
+            }
           }
         }
       }
@@ -490,10 +506,12 @@ apply_policy_to_svy <- function(svy,
     }
   }
 
-  # Social protection: add per-household transfer as ._sp_transfer column.
+  # Social protection: add per-household transfer as SP_TRANSFER_COL column.
   # welfare is the regression outcome (not a covariate), so we tag the
-  # transfer amount here; it is applied to predictions post-prediction
-  # in run_sim_pipeline() (fct_simulations.R).
+  # transfer amount here; run_sim_pipeline() (fct_simulations.R) reads the
+  # column post-prediction and adds it to y_point on the level scale
+  # (re-logged when so$transform == "log") so the boost flows into
+  # aggregate_with_uncertainty_delta() and matches the decomposition's δ_sp.
   if (!is.null(sp) && "welfare" %in% cols) {
     if (sp$budget_mode == "transfer_first" && isTRUE(sp$transfer_amount_usd != 0)) {
       # If transfer-first budget mode is selected, apply the transfer to the
@@ -507,24 +525,32 @@ apply_policy_to_svy <- function(svy,
       daily_hh  <- annual_hh / 365
       eligible  <- .determine_sp_eligibility(svy, sp)
       if (length(eligible) == nrow(svy)) {
-        svy[["._sp_transfer"]] <- ifelse(eligible, daily_hh, 0)
+        svy[[SP_TRANSFER_COL]] <- ifelse(eligible, daily_hh, 0)
       }
     }
     else if (sp$budget_mode == "budget_first" && isTRUE(sp$budget_fixed > 0)) {
-      # If budget-first mode is selected, we cannot apply a fixed transfer amount
-      # upfront since the actual transfer per household will depend on how many
-      # are eligible under the targeting and thus how many payments can be made
-      # within the fixed budget. Instead, we calculate the transfer amount that
-      # would be applied if the entire fixed budget were distributed evenly among
-      # all eligible households, and tag that as ._sp_transfer for diagnostics
-      # purposes. The actual transfer applied post-prediction will be adjusted
-      # pro-rata based on the number of eligible households in each simulation.
+      # Distribute the fixed budget across eligible households. Eligibility is
+      # determined once here using the baseline survey; SP_TRANSFER_COL holds
+      # the resulting daily per-household amount.
+      #
+      # When survey weights are present, divide the budget by the weighted
+      # count of eligible households so that the population-level total
+      # sum(transfer * weight) equals budget_fixed. Without weight adjustment
+      # the realised budget would scale with mean(weight) on eligible HHs.
       eligible <- .determine_sp_eligibility(svy, sp)
       n_eligible <- sum(eligible)
       if (n_eligible > 0) {
-        annual_hh <- sp$budget_fixed / n_eligible
+        weight_col <- grep("^weight$|^hhweight$|^wgt$|^pw$",
+                           names(svy), value = TRUE,
+                           ignore.case = TRUE)[1]
+        w_elig <- if (!is.na(weight_col)) {
+          w <- svy[[weight_col]][eligible]
+          sum(w[is.finite(w) & w > 0], na.rm = TRUE)
+        } else 0
+        divisor <- if (w_elig > 0) w_elig else n_eligible
+        annual_hh <- sp$budget_fixed / divisor
         daily_hh  <- annual_hh / 365
-        svy[["._sp_transfer"]] <- ifelse(eligible, daily_hh, 0)
+        svy[[SP_TRANSFER_COL]] <- ifelse(eligible, daily_hh, 0)
       }
     }
   }
@@ -568,9 +594,11 @@ resimulate_with_svy <- function(svy, sw, so, mf,
   pov_line   <- hist_sim_baseline$pov_line
   residuals  <- hist_sim_baseline$residuals %||%
                 hist_sim_baseline$pipeline$residuals %||% "none"
-  # Step 2's hist_sim stores the Cholesky factor under $chol_obj; the older
-  # Mod 3 schema (post-resim) carries it as $chol_Sigma. Accept either.
-  chol_Sigma <- hist_sim_baseline$chol_Sigma %||% hist_sim_baseline$chol_obj
+  # Canonical Cholesky-factor key is $chol_obj (matches Step 2 hist_sim and
+  # the primary run_sim_pipeline parameter). Older Mod 3 outputs stored it
+  # under $chol_Sigma; read that as a fallback so existing in-memory state
+  # keeps working, but emit only $chol_obj on output.
+  chol_obj <- hist_sim_baseline$chol_obj %||% hist_sim_baseline$chol_Sigma
 
   is_rif       <- identical(mf$engine, "rif")
   fit_multi    <- if (is_rif) mf$fit3 else NULL
@@ -590,10 +618,7 @@ resimulate_with_svy <- function(svy, sw, so, mf,
         residuals    = residuals,
         train_data   = mf$train_data,
         engine       = mf$engine,
-        # Pass under both names: the OLS branch of run_sim_pipeline keys
-        # off `chol_obj`, while the RIF branch falls back to `chol_Sigma`.
-        chol_obj     = chol_Sigma,
-        chol_Sigma   = chol_Sigma,
+        chol_obj     = chol_obj,
         slim         = slim,
         fit_multi    = fit_multi,
         taus         = rif_taus,
@@ -612,25 +637,26 @@ resimulate_with_svy <- function(svy, sw, so, mf,
   hist_out <- run_one(hist_sim_baseline$weather_raw, slim = FALSE)
   if (is.null(hist_out)) return(NULL)
 
+  # Emit the same schema Mod 2's run_full_simulation() produces, so the Mod 3
+  # Results pane (and any downstream consumer) can read baseline and policy
+  # objects through one code path. hist_sim nests its single run under
+  # $pipeline; each saved scenario carries a named $pipelines list, one entry
+  # per CMIP6 ensemble member.
   hist_sim_new <- list(
-    y_point     = hist_out$y_point,
-    F_loading   = hist_out$F_loading,
-    sim_year    = hist_out$sim_year,
-    weight      = hist_out$weight,
-    id_vec      = hist_out$id_vec,
-    so          = so,
-    n_pre_join  = hist_out$n_pre_join,
-    weather_raw = hist_out$weather_raw,
-    train_data  = mf$train_data,
-    has_weights = !is.null(hist_out$weight),
-    residuals   = residuals,
-    preds       = hist_out$preds,
-    yr_range    = hist_sim_baseline$yr_range,
-    chol_Sigma  = chol_Sigma,
-    S           = hist_sim_baseline$S %||% 200L
+    pipeline       = hist_out,
+    chol_obj       = chol_obj,
+    so             = so,
+    has_weights    = !is.null(hist_out$weight),
+    weather_raw    = hist_out$weather_raw,
+    train_data     = mf$train_data,
+    residuals      = residuals,
+    pov_line       = hist_sim_baseline$pov_line,
+    yr_range       = hist_sim_baseline$yr_range,
+    S              = hist_sim_baseline$S %||% 200L
   )
 
-  saved_scenarios_new <- lapply(saved_scenarios_baseline, function(s) {
+  saved_scenarios_new <- lapply(seq_along(saved_scenarios_baseline), function(i) {
+    s <- saved_scenarios_baseline[[i]]
     # Re-simulate once per CMIP6 ensemble member using that member's own
     # `weather_raw`. Each pipeline in `s$pipelines` was produced by
     # run_sim_pipeline() in fct_run_simulation.R and carries its own
@@ -639,44 +665,36 @@ resimulate_with_svy <- function(svy, sw, so, mf,
     pipes <- s$pipelines
     if (is.null(pipes) || length(pipes) == 0L) {
       # Fallback to the representative weather (older saved-scenario schema).
+      # Log so mixed-version deployments aren't silently downgraded to a
+      # single-member spread without the user noticing.
+      sc_label <- names(saved_scenarios_baseline)[[i]] %||% paste0("scenario_", i)
+      message("[resimulate_with_svy] Scenario '", sc_label,
+              "' has no $pipelines; falling back to representative weather ",
+              "(single model — inter-model spread will not be available).")
       out <- run_one(s$weather_raw, slim = TRUE)
       if (is.null(out)) return(NULL)
-      pipes <- list(single = list(weather_raw = s$weather_raw))
-      shared <- list(
-        y_point   = out$y_point,
-        F_loading = out$F_loading,
-        sim_year  = out$sim_year,
-        weight    = out$weight,
-        id_vec    = out$id_vec
-      )
-      models_new <- list(c(shared, list(name = "single")))
+      pipes_new <- list(single = out)
     } else {
-      model_names <- names(pipes) %||% paste0("model_", seq_along(pipes))
-      models_new <- lapply(seq_along(pipes), function(i) {
+      member_names <- names(pipes) %||% paste0("model_", seq_along(pipes))
+      pipes_new <- lapply(seq_along(pipes), function(i) {
         wr <- pipes[[i]]$weather_raw %||% s$weather_raw
-        out <- run_one(wr, slim = TRUE)
-        if (is.null(out)) return(NULL)
-        list(
-          y_point   = out$y_point,
-          F_loading = out$F_loading,
-          sim_year  = out$sim_year,
-          weight    = out$weight,
-          id_vec    = out$id_vec,
-          name      = model_names[[i]]
-        )
+        run_one(wr, slim = TRUE)
       })
-      models_new <- Filter(Negate(is.null), models_new)
-      if (length(models_new) == 0L) return(NULL)
+      names(pipes_new) <- member_names
+      pipes_new <- Filter(Negate(is.null), pipes_new)
+      if (length(pipes_new) == 0L) return(NULL)
     }
 
     list(
-      models      = models_new,
+      pipelines   = pipes_new,
       weather_raw = s$weather_raw,
+      chol_obj    = chol_obj,
       so          = so,
       year_range  = s$year_range,
-      n_models    = length(models_new)
+      n_models    = length(pipes_new)
     )
   })
+  names(saved_scenarios_new) <- names(saved_scenarios_baseline)
   saved_scenarios_new <- saved_scenarios_new[
     !vapply(saved_scenarios_new, is.null, logical(1))
   ]

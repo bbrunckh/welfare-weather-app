@@ -267,50 +267,6 @@ outcome_missing_summary <- function(df, outcome) {
 
 
 # # ---------------------------------------------------------------------------- #
-# # Outcome histogram / density                                                   #
-# # ---------------------------------------------------------------------------- #
-
-# #' Plot a histogram of the selected outcome variable
-# #'
-# #' For numeric outcomes, draws a histogram with an optional log-x scale. For
-# #' binary/logical outcomes, draws a bar chart of 0/1 counts.
-# #'
-# #' @param df      Survey data frame.
-# #' @param outcome Single character string — the outcome variable name.
-# #' @param label   Human-readable label for the x axis.
-# #' @param type    Outcome type: \code{"numeric"} or \code{"logical"}.
-# #'
-# #' @return A \code{ggplot} object, or \code{NULL} invisibly.
-# #' @export
-# plot_outcome_histogram <- function(df, outcome, label = outcome,
-#                                    type = "numeric") {
-#   if (is.null(df) || !outcome %in% names(df)) return(invisible(NULL))
-#   vals <- df[[outcome]]
-#   vals <- vals[!is.na(vals)]
-#   if (length(vals) == 0) return(invisible(NULL))
-
-#   if (identical(type, "logical") || all(vals %in% c(0L, 1L, TRUE, FALSE))) {
-#     plot_df <- data.frame(value = factor(as.integer(vals),
-#                                          levels = c(0L, 1L),
-#                                          labels = c("0 (No)", "1 (Yes)")))
-#     ggplot2::ggplot(plot_df, ggplot2::aes(x = .data$value)) +
-#       ggplot2::geom_bar(fill = "#3498db", width = 0.5) +
-#       ggplot2::labs(x = label, y = "Count") +
-#       ggplot2::theme_minimal(base_size = 13)
-#   } else {
-#     plot_df <- data.frame(value = as.numeric(vals))
-#     p <- ggplot2::ggplot(plot_df, ggplot2::aes(x = .data$value)) +
-#       ggplot2::geom_histogram(bins = 50, fill = "#3498db", colour = "white",
-#                               linewidth = 0.2) +
-#       ggplot2::labs(x = label, y = "Count") +
-#       ggplot2::theme_minimal(base_size = 13)
-#     if (all(plot_df$value > 0, na.rm = TRUE)) {
-#       p <- p + ggplot2::scale_x_log10()
-#     }
-#     p
-#   }
-# }
-
 # ---------------------------------------------------------------------------- #
 # Outcome distribution ridge plot (by survey wave)                              #
 # ---------------------------------------------------------------------------- #

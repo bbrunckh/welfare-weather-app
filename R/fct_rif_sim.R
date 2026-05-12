@@ -102,7 +102,7 @@ build_rif_grid <- function(fits_multi, taus, model_id) {
 #' @param chol_list Optional list of Cholesky factor matrices (one per tau),
 #'   as returned by \code{compute_chol_vcov(fit_multi)}. When provided,
 #'   an \code{F_loading} matrix is attached as an attribute of the result for
-#'   use in \code{aggregate_with_uncertainty()}.
+#'   use in \code{aggregate_with_uncertainty_delta()}.
 #'
 #' @return \code{newdata} augmented with \code{.fitted}, \code{.residual}, and outcome.
 #'   When \code{chol_list} is non-NULL, also carries \code{attr(., "F_loading")}.

@@ -11,7 +11,6 @@
 #
 # Main exports:
 #   get_weather()          — full weather loading pipeline
-#   summarise_ensemble()   — reduce CMIP6 ensemble to representatives
 #
 # Internal helpers (not exported):
 #   .harmonise_h3()        — H3 resolution matching

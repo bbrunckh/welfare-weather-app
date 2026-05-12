@@ -322,7 +322,7 @@ mod_2_02_results_server <- function(id,
       # If the residuals selector still says "original" or "resample", honour
       # the pipeline by falling back to "none" so draw_residuals_vec doesn't
       # blow up on a missing .resid column.
-      res_mode <- residuals() %||% "none"
+      res_mode <- residuals() %||% "original"
       if (is.null(pipe$train_aug) && !identical(res_mode, "none"))
         res_mode <- "none"
       aggregate_with_uncertainty_delta(
@@ -357,7 +357,7 @@ mod_2_02_results_server <- function(id,
         bq       = band_q_active(),
         pl_v     = pov_line_val(),
         bw       = bandwidth_p0(),
-        res      = residuals() %||% "none",
+        res      = residuals() %||% "original",
         skip     = isTRUE(skip_coef_draws()),
         cache    = new.env(parent = emptyenv())
       )

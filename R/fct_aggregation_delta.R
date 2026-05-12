@@ -2,8 +2,8 @@
 # -----------------------
 # Closed-form delta-method uncertainty aggregation.
 #
-# Replaces the Monte Carlo path in aggregate_with_uncertainty() for the common
-# case where we just want (value, var) tuples that feed into combine_ensemble_results.
+# Closed-form variance for (value, var) tuples that feed into
+# combine_ensemble_results().
 #
 # For aggregate T = g(welfare), with welfare_i = exp(y_point_i + resid_i + F_loading[i,] %*% z),
 # the first-order Taylor expansion gives:
@@ -56,7 +56,7 @@ aggregate_with_uncertainty_delta <- function(y_point,
                                               method,
                                               weights      = NULL,
                                               pov_line     = NULL,
-                                              residuals    = "none",
+                                              residuals    = "original",
                                               train_aug    = NULL,
                                               id_vec       = NULL,
                                               id_col       = NULL,
@@ -66,6 +66,14 @@ aggregate_with_uncertainty_delta <- function(y_point,
 
   N <- length(y_point)
   stopifnot(is.numeric(y_point) && N > 0)
+
+  # Demote to "none" when train_aug is unavailable (e.g. RIF pipelines set
+  # train_aug = NULL by construction). Avoids forcing every caller to repeat
+  # the safety check now that "original" is the default.
+  if (!identical(residuals, "none") &&
+      (is.null(train_aug) || !".resid" %in% names(train_aug))) {
+    residuals <- "none"
+  }
 
   resid_vec <- draw_residuals_vec(residuals, train_aug, N, id_vec, id_col)
   mu        <- if (is_log) exp(y_point + resid_vec) else y_point + resid_vec
@@ -266,4 +274,83 @@ apply_band_transform <- function(method, value_pt, se, z_lo, z_hi) {
   }
 
   list(lo = unname(lo), hi = unname(hi))
+}
+
+
+# ---------------------------------------------------------------------------- #
+# Shared per-year pipeline aggregator                                          #
+# ---------------------------------------------------------------------------- #
+
+#' Aggregate a single pipeline-like list across simulation years
+#'
+#' Thin wrapper around \code{aggregate_with_uncertainty_delta()} that captures
+#' the repeated "subset by sim_year, build F_loading slice, call aggregator,
+#' summarise" pattern used by both Step 2's results module and Step 3's
+#' baseline/policy comparator. Keeping the logic in one place is what stops
+#' the two callers from drifting apart when the aggregator interface evolves.
+#'
+#' @param pipe A pipeline-like named list with elements \code{y_point},
+#'   \code{F_loading}, \code{sim_year}, optional \code{weight}, \code{id_vec},
+#'   \code{id_col}, \code{train_aug}.
+#' @param method Aggregation method (see \code{aggregate_with_uncertainty_delta}).
+#' @param weighted Logical. Use \code{pipe$weight} when present.
+#' @param pov_line Numeric. Poverty line.
+#' @param residuals Character. Residual draw mode.
+#' @param is_log Logical. Whether y_point is on log scale.
+#' @param band_q Named numeric \code{c(lo=, hi=)}.
+#' @param skip_coef Logical. When TRUE, drop \code{F_loading} (no coefficient
+#'   uncertainty).
+#' @param bandwidth_p0 Numeric. Kernel bandwidth for headcount methods.
+#'
+#' @return List with one entry per unique \code{sim_year}, each a result list
+#'   from \code{aggregate_with_uncertainty_delta()} augmented with a
+#'   \code{sim_year} scalar.
+#' @export
+aggregate_pipeline_per_year <- function(pipe,
+                                        method,
+                                        weighted    = TRUE,
+                                        pov_line    = NULL,
+                                        residuals   = "original",
+                                        is_log      = TRUE,
+                                        band_q      = c(lo = 0.10, hi = 0.90),
+                                        skip_coef   = FALSE,
+                                        bandwidth_p0 = 0.05) {
+  if (is.null(pipe) || is.null(pipe$y_point)) return(list())
+
+  yrs <- sort(unique(pipe$sim_year))
+  F_full <- pipe$F_loading
+  # Promote a length-K numeric to a 1xK matrix so row-subsetting below never
+  # fails with "incorrect number of dimensions".
+  if (!is.null(F_full) && is.null(dim(F_full))) {
+    F_full <- matrix(F_full, nrow = 1L)
+  }
+  # train_aug carries .resid for "original"/"resample" residual paths. RIF
+  # pipelines set train_aug = NULL by construction; honour that.
+  res_mode <- residuals %||% "original"
+  if (is.null(pipe$train_aug) && !identical(res_mode, "none"))
+    res_mode <- "none"
+
+  lapply(yrs, function(yr) {
+    idx <- pipe$sim_year == yr
+    F_idx <- if (!is.null(F_full) && !isTRUE(skip_coef))
+               F_full[idx, , drop = FALSE] else NULL
+    w_idx <- if (isTRUE(weighted) && !is.null(pipe$weight)) pipe$weight[idx] else NULL
+    id_idx <- if (!is.null(pipe$id_vec)) pipe$id_vec[idx] else NULL
+    m <- aggregate_with_uncertainty_delta(
+      y_point      = pipe$y_point[idx],
+      F_loading    = F_idx,
+      method       = method,
+      weights      = w_idx,
+      pov_line     = pov_line,
+      residuals    = res_mode,
+      train_aug    = pipe$train_aug,
+      id_vec       = id_idx,
+      id_col       = pipe$id_col,
+      is_log       = is_log,
+      band_q       = band_q,
+      bandwidth_p0 = bandwidth_p0
+    )
+    m$sim_year <- yr
+    m
+  })
 }

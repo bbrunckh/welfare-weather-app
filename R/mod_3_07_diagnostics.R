@@ -53,12 +53,12 @@ mod_3_07_diagnostics_server <- function(id,
       p <- policy_svy()
       if (is.null(b) || is.null(p)) return(NULL)
 
-      if ("._sp_transfer" %in% names(p)) {
-        p$welfare <- p$welfare + p[["._sp_transfer"]]
+      if (SP_TRANSFER_COL %in% names(p)) {
+        p$welfare <- p$welfare + p[[SP_TRANSFER_COL]]
       }
 
-      if ("._sp_transfer" %in% names(p)) {
-        v <- p[["._sp_transfer"]]
+      if (SP_TRANSFER_COL %in% names(p)) {
+        v <- p[[SP_TRANSFER_COL]]
         w <- p[["weight"]]
         w_sum <- sum(w, na.rm = TRUE) # For debugging only
         ok <- is.finite(v) & is.finite(w)

@@ -8,7 +8,7 @@
 #
 # Depends on:
 #   - fct_simulations.R  (run_sim_pipeline, compute_chol_vcov, format_elapsed)
-#   - fct_get_weather.R  (get_weather, summarise_ensemble)
+#   - fct_get_weather.R  (get_weather)
 #   - fct_aggregation.R  (compute_hist_agg, compute_scenario_agg)
 
 
@@ -35,8 +35,6 @@
 #' @param sim_dates        Character vector. Historical simulation dates.
 #' @param perturbation_method List or NULL. Built by build_perturbation_method().
 #' @param stored_breaks    Named list or NULL. Pre-computed histogram breaks.
-#' @param ensemble_band_q  Named numeric. Quantile bounds for ensemble summary.
-#' @param full_ensemble    Logical. If TRUE retain all ensemble members.
 #' @param notify_fn        Function(msg). Called for user-facing notifications.
 #'   Default is message() to console only.
 #' @param progress_fn      Function(value, detail). Called to update progress.
@@ -66,8 +64,6 @@ fct_run_simulation <- function(sw,
                                 sim_dates,
                                 perturbation_method,
                                 stored_breaks,
-                                ensemble_band_q,
-                                full_ensemble,
                                 fit_multi    = NULL,
                                 taus         = NULL,
                                 weather_cols = NULL,
@@ -139,34 +135,12 @@ fct_run_simulation <- function(sw,
     ))
   }
 
-  # ---- Ensemble summarisation --------------------------------------------- #
   n_models_before <- length(setdiff(names(weather_result), "historical"))
-  #if (!isTRUE(full_ensemble) &&
-  #    !isTRUE(dev_mode) &&
-  #    !is.null(ensemble_band_q)) {
-  #  weather_result <- tryCatch(
-  #    summarise_ensemble(
-  #      weather_result,
-  #      lo_q = ensemble_band_q[["lo"]],
-  #      hi_q = ensemble_band_q[["hi"]]
-  #    ),
-  #    error = function(e) {
-  #      warning("[fct_run_simulation] summarise_ensemble() failed — ",
-  #              "using full ensemble: ", conditionMessage(e))
-  #      weather_result
-  #    }
-  #  )
-  #  n_models_after <- length(setdiff(names(weather_result), "historical"))
-  #  message(sprintf(
-  #    "[wiseapp] Ensemble summarised: %d models -> %d representatives per SSP/period",
-  #    n_models_before, n_models_after
-  #  ))
-  #} else {
-    message(sprintf(
-      "[wiseapp] Full ensemble retained: %d future keys%s",
-      n_models_before,
-      if (isTRUE(dev_mode)) " (dev mode)" else ""
-    ))
+  message(sprintf(
+    "[wiseapp] Full ensemble retained: %d future keys%s",
+    n_models_before,
+    if (isTRUE(dev_mode)) " (dev mode)" else ""
+  ))
 
   # ---- Key loop setup ----------------------------------------------------- #
 

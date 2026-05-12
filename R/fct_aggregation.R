@@ -5,12 +5,11 @@
 #
 # Called by:
 #   - mod_2_01_weathersim.R (via fct_run_simulation)
-#   - mod_2_02_results.R    (hist_aggregate_choices)
-#   - mod_3_06_results.R    (aggregate_with_uncertainty, apply_deviation)
+#   - mod_2_02_results.R    (hist_aggregate_choices, combine_ensemble_results)
+#   - mod_3_06_results.R    (apply_deviation)
 #
 # Exports:
-#   resolve_agg_fn, resolve_S, resolve_band_q
-#   aggregate_draws_vectorized, aggregate_with_uncertainty
+#   resolve_agg_fn, resolve_band_q
 #   combine_ensemble_results
 #   hist_aggregate_choices
 #   aggregate_outcome, deviation_from_centre
@@ -18,12 +17,15 @@
 #
 # Internal:
 #   draw_residuals_vec
+#
+# The closed-form delta-method aggregator (aggregate_with_uncertainty_delta)
+# lives in fct_aggregation_delta.R.
 
 #' Resolve Aggregation Function from Method String
 #'
 #' Maps an aggregation method string to a function of the form
 #' \code{function(welfare, weights, pov_line) -> scalar}. Used by
-#' \code{aggregate_with_uncertainty()} to compute the headline statistic
+#' \code{aggregate_with_uncertainty_delta()} to compute the headline statistic
 #' for each Monte Carlo draw.
 #'
 #' @param method Character. One of \code{"mean"}, \code{"median"},
@@ -136,36 +138,6 @@ resolve_agg_fn <- function(method) {
 }
 
 
-#' Resolve Number of Monte Carlo Draws from Band Width Selection
-#'
-#' Maps the user-facing band width UI selection to the number of K-dimensional
-#' Monte Carlo draws \code{S} for \code{aggregate_with_uncertainty()}.
-#'
-#' After the Cholesky rewrite, S draws are K-dimensional (K ~ 5-20
-#' coefficients) rather than N-dimensional (N ~ 10,000 households).
-#' S is no longer a performance constraint — targets are set by the
-#' precision required for the selected percentile band.
-#'
-#' @param band_width Character. One of \code{"p10_p90"} (default),
-#'   \code{"p025_p975"}, \code{"p005_p995"}, \code{"minmax"},
-#'   \code{"none"}.
-#'
-#' @return Integer. Number of Monte Carlo draws. \code{0L} when
-#'   \code{band_width = "none"} (point estimate only).
-#'
-#' @export
-resolve_S <- function(band_width) {
-  switch(band_width %||% "p10_p90",
-    p10_p90   = 150L,
-    p025_p975 = 250L,
-    p005_p995 = 350L,
-    minmax    = 150L,
-    none      = 0L,
-              150L    # default fallback
-  )
-}
-
-
 #' Resolve Band Quantiles from Band Width Selection
 #'
 #' Maps the user-facing band width UI selection to a named numeric vector
@@ -199,9 +171,8 @@ resolve_band_q <- function(band_width) {
 #' Draw a Residual Vector for Welfare Simulation
 #'
 #' Draws a length-N residual vector for addition to log-scale welfare
-#' predictions. Called once per \code{aggregate_with_uncertainty()} invocation
-#' and broadcast across all S Monte Carlo draws (Option A: residuals are
-#' independent of coefficient perturbations).
+#' predictions. Called once per \code{aggregate_with_uncertainty_delta()}
+#' invocation. Residuals are independent of coefficient uncertainty (Option A).
 #'
 #' @param residuals Character. One of \code{"none"}, \code{"original"},
 #'   \code{"normal"}, \code{"resample"}.
@@ -263,271 +234,6 @@ draw_residuals_vec <- function(residuals,
   )
 }
 
-#' Vectorized draw aggregation — replaces vapply loop inside
-#' aggregate_with_uncertainty(). Handles 7 of 9 methods natively.
-#' Falls back to vapply for median and gini (sort-dependent, rarely used).
-#'
-#' @param Y_mat   N × S numeric matrix. Each column is one welfare draw.
-#' @param method  Character. Aggregation method name.
-#' @param weights Numeric vector length N or NULL.
-#' @param pov_line Numeric or NULL.
-#' @return Numeric vector length S — one aggregate per draw.
-#' @noRd
-aggregate_draws_vectorized <- function(Y_mat, method, weights, pov_line) {
-
-  N <- nrow(Y_mat)
-  S <- ncol(Y_mat)
-
-  # Normalise weights once — reused across all S columns
-  w_norm <- if (!is.null(weights)) weights / sum(weights, na.rm = TRUE) else NULL
-
-  switch(method,
-
-    mean = {
-      if (!is.null(w_norm))
-        as.numeric(colSums(w_norm * Y_mat, na.rm = TRUE))          # element-wise N×S broadcast, then colSums → S-vector
-      else
-        colMeans(Y_mat, na.rm = TRUE)
-    },
-
-    total = {
-      if (!is.null(w_norm))
-        as.numeric(colSums(weights * Y_mat, na.rm = TRUE))         # unnormalised weights for total
-      else
-        colSums(Y_mat, na.rm = TRUE)
-    },
-
-    headcount_ratio = {
-      stopifnot(!is.null(pov_line))
-      poor_mat <- Y_mat < pov_line            # N×S logical matrix
-      if (!is.null(w_norm))
-        as.numeric(colSums(w_norm * poor_mat, na.rm = TRUE))
-      else
-        colMeans(poor_mat, na.rm = TRUE)
-    },
-
-    gap = {
-      stopifnot(!is.null(pov_line))
-      gap_mat <- pmax(pov_line - Y_mat, 0) / pov_line   # N×S
-      if (!is.null(w_norm))
-        as.numeric(colSums(w_norm * gap_mat, na.rm = TRUE))
-      else
-        colMeans(gap_mat, na.rm = TRUE)
-    },
-
-    fgt2 = {
-      stopifnot(!is.null(pov_line))
-      sq_mat <- (pmax(pov_line - Y_mat, 0) / pov_line)^2   # N×S
-      if (!is.null(w_norm))
-        as.numeric(colSums(w_norm * sq_mat, na.rm = TRUE))
-      else
-        colMeans(sq_mat, na.rm = TRUE)
-    },
-
-    prosperity_gap = {
-      stopifnot(!is.null(pov_line))
-      gap_mat <- pmax(pov_line - Y_mat, 0)   # N×S
-      if (!is.null(w_norm))
-        as.numeric(colSums(w_norm * gap_mat, na.rm = TRUE))
-      else
-        colMeans(gap_mat, na.rm = TRUE)
-    },
-
-    avg_poverty = {
-      stopifnot(!is.null(pov_line))
-      poor_mat  <- Y_mat < pov_line                    # N×S logical
-      Y_poor    <- Y_mat * poor_mat                    # zero out non-poor
-      if (!is.null(w_norm)) {
-        poor_w    <- w_norm * poor_mat                 # N×S weighted poor indicator
-        col_poor_w <- colSums(poor_w, na.rm = TRUE)    # S — weighted poor count
-        col_poor_w[col_poor_w == 0] <- NA_real_
-        as.numeric(colSums(w_norm * Y_poor, na.rm = TRUE)) / col_poor_w
-      } else {
-        col_poor_n <- colSums(poor_mat, na.rm = TRUE)  # S — poor count
-        col_poor_n[col_poor_n == 0] <- NA_real_
-        colSums(Y_poor, na.rm = TRUE) / col_poor_n
-      }
-    },
-
-    # --- median: vectorized via matrixStats ---------------------------- #
-    median = {
-      if (!is.null(w_norm))
-        matrixStats::colWeightedMedians(Y_mat, w = w_norm, na.rm = TRUE)
-      else
-        matrixStats::colMedians(Y_mat, na.rm = TRUE)
-    },
-
-    # --- gini: column-wise apply (sort-dependent — full matrix vectorization
-    #     not possible due to per-column ranking requirement; apply() over
-    #     S columns uses C-level dispatch, reducing overhead vs vapply by
-    #     ~40-60% and eliminating per-iteration GC pressure) -------------- #
-    gini = {
-      apply(Y_mat, 2L, function(col) {
-        valid <- !is.na(col)
-        y     <- col[valid]
-        w     <- if (!is.null(weights)) weights[valid] else NULL
-        n     <- length(y)
-        if (n < 2L) return(NA_real_)
-        if (!is.null(w)) {
-          ord <- order(y)
-          w   <- w[ord] / sum(w, na.rm = TRUE)
-          y   <- y[ord]
-          F_i <- cumsum(w) - w / 2
-          2 * sum(w * y * F_i, na.rm = TRUE) /
-            sum(w * y, na.rm = TRUE) - 1
-        } else {
-          ord <- order(y)
-          y   <- y[ord]
-          2 * sum((seq_len(n) / n - 0.5) * y) /
-            (n * mean(y, na.rm = TRUE))
-        }
-      })
-    }
-  )
-}
-
-# ---------------------------------------------------------------------------- #
-# Core uncertainty aggregation                                                  #
-# ---------------------------------------------------------------------------- #
-
-#' Aggregate Welfare Predictions with Coefficient Uncertainty
-#'
-#' The core function of the Cholesky uncertainty propagation architecture.
-#' Given point-estimate log-welfare predictions and a factor loading matrix,
-#' draws S K-dimensional perturbations, back-transforms to welfare levels,
-#' applies residuals, and computes any aggregate statistic with full
-#' coefficient uncertainty bands.
-#'
-#' Residuals are drawn once and broadcast to all S draws (Option A), so
-#' residual noise is independent of coefficient perturbations. This is
-#' methodologically correct for isolating coefficient uncertainty.
-#'
-#' @param y_point Numeric vector of length N. Log-scale point-estimate welfare
-#'   predictions from \code{run_sim_pipeline()$y_point}.
-#' @param F_loading Numeric matrix N \eqn{\times} K. Factor loading matrix
-#'   from \code{compute_factor_loading()}. Pass \code{NULL} to skip
-#'   coefficient uncertainty (point estimate only).
-#' @param method Character. Aggregation method name — one of "mean", "total",
-#'   "headcount_ratio", "gap", "fgt2", "prosperity_gap", "avg_poverty",
-#'   "median", "gini". Passed to aggregate_draws_vectorized().
-#' @param S Integer. Number of K-dimensional Monte Carlo draws. Use
-#'   \code{resolve_S()} to set from UI band width selection. \code{0L}
-#'   returns point estimate only.
-#' @param residuals Character. Residual treatment. One of \code{"none"},
-#'   \code{"original"}, \code{"normal"}, \code{"resample"}.
-#'   See \code{draw_residuals_vec()} for details.
-#' @param train_aug Data frame or \code{NULL}. Augmented training data with
-#'   \code{.resid} column. Required for all residual options except
-#'   \code{"none"}.
-#' @param weights Numeric vector of length N or \code{NULL}. Survey weights.
-#' @param pov_line Numeric scalar or \code{NULL}. Poverty line in welfare
-#'   units (post back-transformation). Required for FGT/headcount methods.
-#' @param id_vec Vector of length N or \code{NULL}. Household IDs for
-#'   \code{residuals = "original"} matching.
-#' @param id_col Character or \code{NULL}. ID column name in
-#'   \code{train_aug}.
-#' @param is_log Logical. If \code{TRUE} (default), back-transforms via
-#'   \code{exp()} before aggregation. Set \code{FALSE} for non-log outcomes.
-#' @param band_q Named numeric vector \code{c(lo = ..., hi = ...)} from
-#'   \code{resolve_band_q()}. Determines the percentile band reported.
-#'   Defaults to 80\% band (10th/90th).
-#' @param seed Integer or \code{NULL}. Random seed for reproducibility.
-#'
-#' @return Named list:
-#'   \describe{
-#'     \item{value}{Numeric scalar. Point estimate of the aggregate statistic.}
-#'     \item{value_lo}{Numeric scalar. Lower percentile across S draws.}
-#'     \item{value_p50}{Numeric scalar. Median across S draws.}
-#'     \item{value_hi}{Numeric scalar. Upper percentile across S draws.}
-#'     \item{draw_values}{Numeric vector length S. Per-draw scalar aggregates
-#'       for paired difference uncertainty in Module 3.}
-#'   }
-#'
-#' @seealso \code{\link{compute_chol_vcov}}, \code{\link{compute_factor_loading}},
-#'   \code{\link{resolve_agg_fn}}, \code{\link{combine_ensemble_results}}
-#' @export
-aggregate_with_uncertainty <- function(y_point,
-                                       F_loading,
-                                       method,
-                                       S          = 150L,
-                                       residuals  = "none",
-                                       train_aug  = NULL,
-                                       weights    = NULL,
-                                       pov_line   = NULL,
-                                       id_vec     = NULL,
-                                       id_col     = NULL,
-                                       is_log     = TRUE,
-                                       band_q     = c(lo = 0.10, hi = 0.90),
-                                       seed       = NULL,
-                                       Z_fixed    = NULL) {
-
-  N <- length(y_point)
-  stopifnot(
-    "y_point must be a numeric vector"    = is.numeric(y_point) && length(y_point) > 0,
-    "S must be a non-negative integer"    = is.numeric(S) && S >= 0,
-    "band_q must have names lo and hi"    = is.null(band_q) ||
-                                            (all(c("lo", "hi") %in% names(band_q)))
-  )
-
-  if (!is.null(seed)) set.seed(seed)
-
-  # ---- Point estimate ------------------------------------------------------- #
-  # Residuals drawn once — broadcast across all S draws (Option A).
-  resid_vec  <- draw_residuals_vec(residuals, train_aug, N, id_vec, id_col)
-  y_pt_vec   <- y_point + resid_vec
-  welfare_pt <- if (is_log) exp(y_pt_vec) else y_pt_vec
-  value_pt   <- aggregate_draws_vectorized(
-                matrix(welfare_pt, ncol = 1L), method, weights, pov_line
-              )[[1L]]
-
-  # ---- No uncertainty path -------------------------------------------------- #
-  if (is.null(F_loading) || S == 0L) {
-    return(list(
-      value       = value_pt,
-      value_lo    = value_pt,
-      value_p50   = value_pt,
-      value_hi    = value_pt,
-      draw_values = value_pt
-    ))
-  }
-
-  stopifnot(
-    "F_loading must be a numeric matrix"  = is.matrix(F_loading) && is.numeric(F_loading),
-    "F_loading rows must match y_point"   = nrow(F_loading) == N
-  )
-
-  K <- ncol(F_loading)
-
-  # ---- K-dimensional Monte Carlo draws -------------------------------------- #
-  # Draw S × K standard normal matrix — each row z_s ~ N(0, I_K).
-  # Perturbation for household i under draw s:
-  #   delta_i_s = F_loading[i, ] %*% z_s
-  # Full perturbed log-welfare:
-  #   y_i_s = y_point_i + delta_i_s + resid_vec_i
-  Z <- if (!is.null(Z_fixed)) Z_fixed else matrix(stats::rnorm(S * K), nrow = S, ncol = K)
-
-  # F_loading %*% t(Z) gives N × S perturbation matrix — each column is
-  # one draw's perturbation across all N households.
-  perturbations <- F_loading %*% t(Z)   # N × S
-
-  Y_mat     <- y_point + perturbations + resid_vec   # N×S broadcast
-  if (is_log) Y_mat <- exp(Y_mat)
-  draw_vals <- aggregate_draws_vectorized(Y_mat, method, weights, pov_line)
-
-  # ---- Percentile bands ----------------------------------------------------- #
-  lo_q <- if (!is.null(band_q)) band_q[["lo"]] else 0.10
-  hi_q <- if (!is.null(band_q)) band_q[["hi"]] else 0.90
-
-  list(
-    value       = value_pt,
-    value_lo    = stats::quantile(draw_vals, lo_q, na.rm = TRUE),
-    value_p50   = stats::quantile(draw_vals, 0.50, na.rm = TRUE),
-    value_hi    = stats::quantile(draw_vals, hi_q, na.rm = TRUE),
-    draw_values = draw_vals
-  )
-}
-
-
 #' Combine Per-Model Aggregation Results
 #'
 #' Given M tibbles (one per GCM/ensemble model), each with per-year
@@ -535,8 +241,8 @@ aggregate_with_uncertainty <- function(y_point,
 #' a single tibble with multi-model median as central value and both
 #' parameter uncertainty and model spread bands.
 #'
-#' @param per_model_aggs List of M tibbles, each from
-#'   `aggregate_with_uncertainty()`.
+#' @param member_results List of M lists, each from
+#'   `aggregate_with_uncertainty_delta()` (one per CMIP6 ensemble member).
 #' @return A tibble with columns: `sim_year`, `value`, `value_p05`,
 #'   `value_p95`, `model_values`.
 #' @export

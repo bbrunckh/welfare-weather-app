@@ -370,8 +370,16 @@ policy_input_diagnostics <- function(baseline_svy, policy_svy, vars = NULL) {
                                baseline_saved_scenarios,
                                policy_hist_sim,
                                policy_saved_scenarios,
-                               selected_hist) {
+                               selected_hist,
+                               residuals = reactive("original")) {
   ns <- session$ns
+
+  # Resolve the active residuals choice for the aggregator. Prefer the live
+  # reactive (mirrors Mod 2's UI); fall back to whatever was stored on the
+  # hist_sim list at simulation time so policy and baseline stay aligned.
+  active_residuals <- function(hs) {
+    residuals() %||% hs$residuals %||% "original"
+  }
 
   hist_label <- reactive({
     nm <- if (!is.null(selected_hist)) selected_hist()$scenario_name else NULL
@@ -433,40 +441,33 @@ policy_input_diagnostics <- function(baseline_svy, policy_svy, vars = NULL) {
   # (one row per sim_year, list-cols value_all / value_all_sd / model_id,
   # plus scalar var_within / var_across). This lets us reuse Mod 2's
   # by_model_matrix() + downstream plot helpers verbatim.
+  #
+  # Both baseline (Mod 2 hist_sim, passed verbatim) and policy (re-simulated
+  # by resimulate_with_svy) wrap their single historical run under $pipeline
+  # — read it once here so the downstream code paths are identical.
   make_agg_hist <- function(hs) {
-    if (is.null(hs) || is.null(hs$y_point)) return(NULL)
+    if (is.null(hs)) return(NULL)
+    pl <- hs$pipeline
+    if (is.null(pl) || is.null(pl$y_point)) return(NULL)
     method    <- input$cmp_agg_method %||% "mean"
     deviation <- input$cmp_deviation  %||% "none"
-    use_w     <- TRUE
 
-    yrs    <- sort(unique(hs$sim_year))
     is_log <- isTRUE(hs$so$transform == "log")
     bq     <- c(lo = 0.10, hi = 0.90)
-    train_aug_df <- if (!is.null(hs$train_data) && ".resid" %in% names(hs$train_data))
-                      hs$train_data else NULL
 
-    rows <- lapply(yrs, function(yr) {
-      idx <- hs$sim_year == yr
-      F_full <- hs$F_loading
-      if (!is.null(F_full) && is.null(dim(F_full)))
-        F_full <- matrix(F_full, nrow = 1L)
-      F_idx <- if (!is.null(F_full)) F_full[idx, , drop = FALSE] else NULL
-      m <- aggregate_with_uncertainty_delta(
-        y_point   = hs$y_point[idx],
-        F_loading = F_idx,
-        method    = method,
-        weights   = if (use_w && !is.null(hs$weight)) hs$weight[idx] else NULL,
-        pov_line  = pov_line_val(),
-        residuals = hs$residuals %||% "none",
-        train_aug = train_aug_df,
-        id_vec    = if (!is.null(hs$id_vec)) hs$id_vec[idx] else NULL,
-        id_col    = hs$id_col,
-        is_log    = is_log,
-        band_q    = bq
-      )
+    per_yr <- aggregate_pipeline_per_year(
+      pipe      = pl,
+      method    = method,
+      weighted  = TRUE,
+      pov_line  = pov_line_val(),
+      residuals = active_residuals(hs),
+      is_log    = is_log,
+      band_q    = bq
+    )
+    rows <- lapply(per_yr, function(m) {
       sd_yr <- sqrt((m$var_coef %||% 0) + (m$var_resid %||% 0))
       tibble::tibble(
-        sim_year     = yr,
+        sim_year     = m$sim_year,
         value        = m$value,
         model_id     = list("Historical"),
         value_all    = list(m$value),
@@ -483,8 +484,10 @@ policy_input_diagnostics <- function(baseline_svy, policy_svy, vars = NULL) {
     list(out = agg, x_label = x_label)
   }
 
-  # Helper: build agg per saved scenario in Mod 2 schema. Each `s$models`
+  # Helper: build agg per saved scenario in Mod 2 schema. Each `s$pipelines`
   # entry is one CMIP6 ensemble member with its own y_point / F_loading.
+  # Mod 2's run_full_simulation() and Mod 3's resimulate_with_svy() both
+  # populate $pipelines, so this reader works for baseline and policy alike.
   make_agg_scenarios <- function(sc, hs_for_dev) {
     if (length(sc) == 0) return(list())
     method    <- input$cmp_agg_method %||% "mean"
@@ -496,37 +499,33 @@ policy_input_diagnostics <- function(baseline_svy, policy_svy, vars = NULL) {
 
     lapply(sc, function(s) {
       tryCatch({
-        if (is.null(s$models)) return(NULL)
+        pipes <- s$pipelines
+        if (is.null(pipes) || length(pipes) == 0L) return(NULL)
         is_log <- isTRUE(s$so$transform == "log")
         bq     <- c(lo = 0.10, hi = 0.90)
-        train_aug_df <- if (!is.null(hs_for_dev$train_data) &&
-                            ".resid" %in% names(hs_for_dev$train_data))
-                          hs_for_dev$train_data else NULL
-        yrs    <- sort(unique(s$models[[1L]]$sim_year))
-        model_ids_all <- vapply(seq_along(s$models), function(i) {
-          s$models[[i]]$name %||% paste0("model_", i)
-        }, character(1L))
+        yrs    <- sort(unique(pipes[[1L]]$sim_year))
+        model_ids_all <- names(pipes) %||% paste0("model_", seq_along(pipes))
+
+        # Aggregate each ensemble member across years once via the shared
+        # helper, then pivot to a per-year x per-member structure for the
+        # ensemble combination step below.
+        res_mode <- active_residuals(hs_for_dev)
+        per_member_per_yr <- lapply(pipes, function(pipe) {
+          aggregate_pipeline_per_year(
+            pipe      = pipe,
+            method    = method,
+            weighted  = use_w,
+            pov_line  = pov_line_val(),
+            residuals = res_mode,
+            is_log    = is_log,
+            band_q    = bq
+          )
+        })
 
         per_year_rows <- lapply(yrs, function(yr) {
-          per_member <- lapply(s$models, function(mod) {
-            idx <- mod$sim_year == yr
-            F_full <- mod$F_loading
-            if (!is.null(F_full) && is.null(dim(F_full)))
-              F_full <- matrix(F_full, nrow = 1L)
-            F_idx <- if (!is.null(F_full)) F_full[idx, , drop = FALSE] else NULL
-            aggregate_with_uncertainty_delta(
-              y_point   = mod$y_point[idx],
-              F_loading = F_idx,
-              method    = method,
-              weights   = if (use_w && !is.null(mod$weight)) mod$weight[idx] else NULL,
-              pov_line  = pov_line_val(),
-              residuals = hs_for_dev$residuals %||% "none",
-              train_aug = train_aug_df,
-              id_vec    = if (!is.null(mod$id_vec)) mod$id_vec[idx] else NULL,
-              id_col    = mod$id_col,
-              is_log    = is_log,
-              band_q    = bq
-            )
+          per_member <- lapply(per_member_per_yr, function(yr_list) {
+            for (m in yr_list) if (identical(m$sim_year, yr)) return(m)
+            NULL
           })
           keep <- !vapply(per_member, is.null, logical(1L))
           per_member <- per_member[keep]
@@ -601,7 +600,12 @@ policy_input_diagnostics <- function(baseline_svy, policy_svy, vars = NULL) {
   has_draws <- reactive({
     bh <- baseline_hist_sim()
     ph <- policy_hist_sim()
-    isTRUE(!is.null(bh$F_loading) || !is.null(ph$F_loading))
+    # Mod 2 schema: F_loading lives on $pipeline; check there first and fall
+    # back to top-level for any caller still on the older flat shape.
+    isTRUE(
+      !is.null(bh$pipeline$F_loading) || !is.null(bh$F_loading) ||
+      !is.null(ph$pipeline$F_loading) || !is.null(ph$F_loading)
+    )
   })
 
   # ---- Per-source helpers that mirror Mod 2's reactive trio --------------

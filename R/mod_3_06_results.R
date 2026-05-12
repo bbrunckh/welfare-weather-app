@@ -40,7 +40,8 @@ mod_3_06_results_server <- function(id,
                                      selected_hist  = reactive(NULL),
                                      sim_run_id     = reactive(0L),
                                      tabset_id,
-                                     tabset_session = NULL) {
+                                     tabset_session = NULL,
+                                     residuals      = reactive("original")) {
   moduleServer(id, function(input, output, session) {
     ns <- session$ns
     if (is.null(tabset_session)) {
@@ -60,11 +61,17 @@ mod_3_06_results_server <- function(id,
       baseline_saved_scenarios = baseline_saved_scenarios,
       policy_hist_sim          = policy_hist_sim,
       policy_saved_scenarios   = policy_saved_scenarios,
-      selected_hist            = selected_hist
+      selected_hist            = selected_hist,
+      residuals                = residuals
     )
 
     observeEvent(sim_run_id(), {
       req(sim_run_id() > 0)
+      # sim_run_id is incremented inside the policy_sim run() after the
+      # reactiveVals are set, but if a downstream step (e.g. decomposition)
+      # silently fails the increment can still fire with NULL hist_sim values.
+      # Guard explicitly so we never try to read $so on NULL.
+      req(baseline_hist_sim(), policy_hist_sim())
 
       if (!tabs_added()) {
         bs <- baseline_hist_sim()

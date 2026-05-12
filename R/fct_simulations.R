@@ -211,7 +211,7 @@ compute_cluster_counts <- function(data) {
 #'   }
 #'
 #' @seealso \code{\link{compute_factor_loading}},
-#'   \code{\link{aggregate_with_uncertainty}}
+#'   \code{\link{aggregate_with_uncertainty_delta}}
 #' @export
 compute_chol_vcov <- function(fit, vcov_spec = COEF_VCOV_SPEC) {
   # fixest_multi: iterate over sub-models (needed for RIF quantile fits)
@@ -279,7 +279,7 @@ compute_chol_vcov <- function(fit, vcov_spec = COEF_VCOV_SPEC) {
 #'   is the factor loading vector for household \eqn{i}.
 #'
 #' @seealso \code{\link{compute_chol_vcov}},
-#'   \code{\link{aggregate_with_uncertainty}}
+#'   \code{\link{aggregate_with_uncertainty_delta}}
 #' @export
 compute_factor_loading <- function(X_nonFE, chol_obj) {
   stopifnot(
@@ -296,49 +296,6 @@ compute_factor_loading <- function(X_nonFE, chol_obj) {
 }
 
 
-
-#' Draw Coefficient Vectors from a Fitted Model
-#'
-#' Generates \code{S} draws of the full coefficient vector for propagating
-#' parameter uncertainty into counterfactual simulations. The parametric
-#' (VCV) branch draws from the multivariate normal defined by the fitted
-#' coefficient vector and its variance-covariance matrix. Bootstrap branches
-#' are stubbed so call sites do not need to change when they are implemented.
-#'
-#' @param fit      A fitted \code{feols} model object.
-#' @param S        Integer. Number of draws. Default 500.
-#' @param method   Character. One of \code{"vcov"} (default),
-#'   \code{"bootstrap"}, \code{"wild_bootstrap"}. The latter two are
-#'   not yet implemented.
-#' @param vcov_spec Formula or character passed to \code{vcov(fit, vcov = ...)}.
-#'   Defaults to \code{COEF_VCOV_SPEC}.
-#' @param seed     Optional integer seed for reproducibility.
-#'
-#' @return An \code{S x K} numeric matrix with column names matching
-#'   \code{coef(fit)}.
-#'
-#' @export
-draw_coefs <- function(fit,
-                       S         = 500,
-                       method    = c("vcov", "bootstrap", "wild_bootstrap"),
-                       vcov_spec = COEF_VCOV_SPEC,
-                       seed      = NULL) {
-  method <- match.arg(method)
-  if (!is.null(seed)) set.seed(seed)
-
-  if (method == "vcov") {
-    beta_hat <- coef(fit)
-    Sigma    <- vcov(fit, vcov = vcov_spec)
-    draws    <- MASS::mvrnorm(n = S, mu = beta_hat, Sigma = Sigma)
-    # Ensure matrix form even when S = 1
-    if (is.null(dim(draws))) {
-      draws <- matrix(draws, nrow = 1L, dimnames = list(NULL, names(beta_hat)))
-    }
-    return(draws)
-  }
-
-  stop(sprintf("draw_coefs: method '%s' not yet implemented", method))
-}
 
 # ---------------------------------------------------------------------------- #
 # Shared UI helper                                                             #
@@ -399,22 +356,22 @@ resolve_id_col <- function(a, b) {
 #' Prepares counterfactual survey data for one weather key, computes point-
 #' estimate log-welfare predictions, and returns the factor loading matrix for
 #' downstream coefficient uncertainty propagation via
-#' \code{aggregate_with_uncertainty()}.
+#' \code{aggregate_with_uncertainty_delta()}.
 #'
 #' This function is called once per weather key (historical + future
 #' representatives). It does NOT draw coefficient perturbations — all
 #' uncertainty propagation is deferred to display time via
-#' \code{aggregate_with_uncertainty()}, making poverty line, weights, and
+#' \code{aggregate_with_uncertainty_delta()}, making poverty line, weights, and
 #' aggregation method fully reactive without re-simulation.
 #'
 #' @param weather_raw Data frame. One weather key's prepared data from
-#'   \code{get_weather()} or \code{summarise_ensemble()}.
+#'   \code{get_weather()}.
 #' @param svy Data frame. Survey microdata joined to weather reference data.
 #' @param sw One-row data frame of selected weather variable metadata.
 #' @param so One-row data frame of selected outcome variable metadata.
 #' @param model Fitted \code{fixest} model object.
 #' @param residuals Character. Residual treatment passed through to
-#'   \code{aggregate_with_uncertainty()}. One of \code{"none"},
+#'   \code{aggregate_with_uncertainty_delta()}. One of \code{"none"},
 #'   \code{"original"}, \code{"normal"}, \code{"resample"}.
 #' @param train_data Data frame. Training data used to fit \code{model}.
 #'   Used to compute training residuals for \code{train_aug}.
@@ -427,7 +384,7 @@ resolve_id_col <- function(a, b) {
 #'   \describe{
 #'     \item{y_point}{Numeric vector length N. Log-scale point-estimate welfare
 #'       predictions. Back-transformation via \code{exp()} happens inside
-#'       \code{aggregate_with_uncertainty()}, not here.}
+#'       \code{aggregate_with_uncertainty_delta()}, not here.}
 #'     \item{F_loading}{N \eqn{\times} K numeric matrix from
 #'       \code{compute_factor_loading()}, or \code{NULL} when
 #'       \code{chol_obj = NULL}.}
@@ -441,13 +398,12 @@ resolve_id_col <- function(a, b) {
 #'       diagnostics).}
 #'     \item{train_aug}{Data frame. Training data augmented with \code{.fitted}
 #'       and \code{.resid} columns for residual drawing in
-#'       \code{aggregate_with_uncertainty()}.}
+#'       \code{aggregate_with_uncertainty_delta()}.}
 #'   }
 #'
-#' @seealso \code{\link{aggregate_with_uncertainty}},
+#' @seealso \code{\link{aggregate_with_uncertainty_delta}},
 #'   \code{\link{compute_chol_vcov}}, \code{\link{compute_factor_loading}}
 #' @export
-#DRK NOTE - chol_Sigma and slim are empty right now.
 run_sim_pipeline <- function(weather_raw,
                              svy,
                              sw,
@@ -537,34 +493,32 @@ run_sim_pipeline <- function(weather_raw,
     )
   }
   
-  # ---- Point estimate prediction ------------------------------------------ #
-  # predict_outcome() called ONCE — no coefficient draws here.
-  # All uncertainty propagation is deferred to aggregate_with_uncertainty().
-  #pred_out <- tryCatch(
-  #  predict_outcome(
-  #    model      = model,
-  #    newdata    = survey_wd_sim,
-  #    residuals  = "none",     # residuals drawn at display time, not here
-  #    outcome    = so$name,
-  #    id         = id_col,
-  #    train_data = train_data,
-  #    engine     = engine
-  #  ),
-  #  error = function(e) {
-  #    warning("[run_sim_pipeline] predict_outcome() failed: ", conditionMessage(e))
-  #    NULL
-  #  }
-  #)
-
   if (is.null(out)) {
     rm(survey_wd_sim)
     return(NULL)
   }
 
   # y_point stays log-scale — back-transformation happens inside
-  # aggregate_with_uncertainty() after coefficient perturbation.
-  # NOTE: apply_log_backtransform() is NOT called here.
+  # aggregate_with_uncertainty_delta() after coefficient perturbation.
   y_point  <- out$.fitted
+
+  # ---- SP cash transfer (post-prediction, level scale) -------------------- #
+  # SP_TRANSFER_COL is set on svy by apply_policy_to_svy() in fct_policy_sim.R.
+  # The transfer is a direct welfare boost, not a regression covariate, so it
+  # is added after prediction. To stay consistent with the decomposition
+  # (.decompose_ols / .compute_rif_channels in fct_policy_decompose.R, which
+  # define δ_sp = log(exp(y) + sp) − y), the boost is applied on the level
+  # scale and re-logged when so$transform == "log".
+  sp_vec <- if (SP_TRANSFER_COL %in% names(out)) out[[SP_TRANSFER_COL]] else NULL
+  if (!is.null(sp_vec) && any(sp_vec > 0, na.rm = TRUE)) {
+    is_log <- isTRUE(so$transform == "log")
+    if (is_log) {
+      welfare_lvl <- exp(y_point) + sp_vec
+      y_point     <- log(pmax(welfare_lvl, .Machine$double.eps))
+    } else {
+      y_point <- y_point + sp_vec
+    }
+  }
 
   # ---- Simulation year and weights ---------------------------------------- #
   sim_year <- out$sim_year
@@ -612,7 +566,7 @@ if (!is.null(X_nonFE)) {
 
   # ---- Training augmentation for residual drawing ------------------------- #
   # train_aug carries .resid for "original" and "resample" residual paths
-  # inside aggregate_with_uncertainty(). Computed once per pipeline call.
+  # inside aggregate_with_uncertainty_delta(). Computed once per pipeline call.
   # train_aug only needed for residual drawing — skip for RIF (uses "none")
   train_aug <- if (is_rif) NULL else tryCatch({
     fitted_train <- as.numeric(stats::predict(model, newdata = train_data))
@@ -802,6 +756,5 @@ apply_log_backtransform <- function(preds, so) {
     dplyr::mutate(!!rlang::sym(so$name) := exp(.data[[so$name]]))
 }
 
-# Stage 2 aggregation lives in fct_aggregation.R (aggregate_sim_preds).
-# The wrapper that previously lived here pointed at a stale
-# aggregate_with_uncertainty() signature and was unreachable.
+# Stage 2 aggregation lives in fct_aggregation_delta.R
+# (aggregate_with_uncertainty_delta).

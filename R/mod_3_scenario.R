@@ -93,7 +93,8 @@ mod_3_scenario_server <- function(id,
                                    saved_scenarios = reactive(list()),
                                    selected_hist   = reactive(NULL),
                                    variable_list   = reactive(NULL),
-                                   skip_coef_draws = reactive(FALSE)) {
+                                   skip_coef_draws = reactive(FALSE),
+                                   residuals       = reactive("original")) {
   moduleServer(id, function(input, output, session) {
     ns <- session$ns
 
@@ -179,7 +180,8 @@ mod_3_scenario_server <- function(id,
       selected_weather  = selected_weather,
       hist_sim          = hist_sim,
       saved_scenarios   = saved_scenarios,
-      skip_coef_draws   = skip_coef_draws
+      skip_coef_draws   = skip_coef_draws,
+      residuals         = residuals
     )
 
     # ---- Results tabs: Baseline & Policy (both re-simulated) -------------
@@ -192,7 +194,8 @@ mod_3_scenario_server <- function(id,
       selected_hist            = selected_hist,
       sim_run_id               = s5$sim_run_id,
       tabset_id                = "step3_output_tabs",
-      tabset_session           = session
+      tabset_session           = session,
+      residuals                = residuals
     )
 
     # ---- Diagnostics tab: before/after variable analysis ----------------
