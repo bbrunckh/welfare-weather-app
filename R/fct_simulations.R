@@ -802,34 +802,6 @@ apply_log_backtransform <- function(preds, so) {
     dplyr::mutate(!!rlang::sym(so$name) := exp(.data[[so$name]]))
 }
 
-# ============================================================================ #
-# Stage 2 aggregation — wraps aggregate_with_uncertainty() for use by         #
-# fct_sim_compare.R visualisation layer.                                       #
-# ============================================================================ #
-
-#' Aggregate simulation predictions across years and ensemble members
-#'
-#' @param preds       Output of \code{run_sim_pipeline()} — data frame with
-#'   \code{.fitted}, \code{sim_year}, optional \code{weight} column.
-#' @param so          Selected outcome metadata list.
-#' @param agg_method  Character; one of \code{hist_aggregate_choices()}.
-#' @param deviation   Character; \code{"none"}, \code{"mean"}, or \code{"median"}.
-#' @param loss_frame  Logical; if \code{TRUE} frame results as welfare loss.
-#' @param weight_col  Character; name of weight column or \code{NULL}.
-#' @param band_q      Named numeric(2); \code{c(lo=, hi=)} quantiles for bands.
-#'
-#' @return Named list with \code{$hist} and \code{$scenarios} entries.
-#' @export
-aggregate_sim_preds <- function(preds, so, agg_method, deviation = "none",
-                                loss_frame = FALSE, weight_col = NULL,
-                                band_q = c(lo = 0.10, hi = 0.90)) {
-  aggregate_with_uncertainty(
-    preds      = preds,
-    so         = so,
-    agg_method = agg_method,
-    deviation  = deviation,
-    loss_frame = loss_frame,
-    weight_col = weight_col,
-    band_q     = band_q
-  )
-}
+# Stage 2 aggregation lives in fct_aggregation.R (aggregate_sim_preds).
+# The wrapper that previously lived here pointed at a stale
+# aggregate_with_uncertainty() signature and was unreachable.

@@ -8,9 +8,9 @@
 #   label_agg_method(key)     -- human-readable label for aggregation method
 #   label_deviation(key)      -- human-readable label for deviation choice
 #   .resolve_year_styles()    -- internal; dynamic linetype map by sorted year
+#   plot_pointrange_climate() -- hero chart with three nested uncertainty bands
 #   build_threshold_table_df()  -- return-period threshold data frame for DT
-#   plot_threshold_points()     -- point plot of return-period thresholds (free y-axis)
-#   enhance_exceedance()        -- exceedance curve with symmetric return-period lines
+#   enhance_exceedance()        -- per-model exceedance curves + inter-model ribbon
 #
 # NOTE: plot_bar_climate() has been archived to
 #   dev/archived_fct/plot_bar_climate_archived.R (no active call sites).
@@ -116,7 +116,7 @@ resolve_band_q <- function(band_key) {
 # Shared CI summary helper                                                     #
 # ---------------------------------------------------------------------------- #
 
-# plot_pointrange_climate uses coef_lo/coef_hi from draw_values instead.
+# plot_pointrange_climate uses coef_lo/coef_hi from the analytic envelope tbl.
 .summarise_vals <- function(x, band_q = c(lo = 0.10, hi = 0.90)) {
   if (length(x) == 0L || all(is.na(x))) return(NULL)
   list(
@@ -178,109 +178,36 @@ resolve_band_q <- function(band_key) {
 #' @importFrom stats quantile
 #' @importFrom rlang .data
 #' @export
-plot_pointrange_climate <- function(scenarios, hist_agg,
+plot_pointrange_climate <- function(bands_tbl,
+                                    x_label     = "",
                                     group_order = "scenario_x_year",
-                                    coef_bands_tbl = NULL,
-                                    band_q = c(lo = 0.1, hi = 0.9),
-                                    ensemble_band_q = c(lo = 0, hi = 1),
-                                    hist_ref = 0) {
+                                    show_coef   = TRUE) {
 
-  stopifnot(is.list(hist_agg), all(c("out", "x_label") %in% names(hist_agg)))
-
-
-  # ---- historical summary --------------------------------------------------
-  hist_s <- .summarise_vals(hist_agg$out$value, c(lo = 0, hi = 1)) #Historical Band always full range
-  if (is.null(hist_s)) {
+  if (is.null(bands_tbl) || nrow(bands_tbl) == 0L) {
     return(ggplot2::ggplot() +
-      ggplot2::labs(title = "Run a simulation to see results."))
+           ggplot2::labs(title = "Run a simulation to see results."))
   }
-  hist_mean <- hist_s$mean
-  hist_s$pt_key     <- "Historical"
-  hist_s$colour_key <- "Historical"
-  hist_bands <- if (!is.null(coef_bands_tbl))
-  dplyr::filter(coef_bands_tbl, scenario == "Historical") else NULL
-  hist_s$coef_lo <- if (!is.null(hist_bands) && nrow(hist_bands) > 0)
-    mean(hist_bands$value_lo, na.rm = TRUE) else NA_real_
-  hist_s$coef_hi <- if (!is.null(hist_bands) && nrow(hist_bands) > 0)
-    mean(hist_bands$value_hi, na.rm = TRUE) else NA_real_
 
+  df <- bands_tbl
+  df$ssp_key  <- ifelse(df$is_historical, "Historical",
+                        vapply(df$scenario, .normalise_ssp, character(1L)))
+  df$yr_lbl   <- ifelse(df$is_historical, "Historical",
+                        vapply(df$scenario, .parse_year, character(1L)))
+  df$ssp_short <- ifelse(df$is_historical, "Historical",
+                         SSP_SHORT_LABELS[df$ssp_key] %||% df$ssp_key)
+  df$pt_key   <- ifelse(df$is_historical, "Historical",
+                        paste0(df$ssp_short, "\n", df$yr_lbl))
+  df$colour_key <- ifelse(df$is_historical, "Historical",
+                          paste(df$ssp_key, df$yr_lbl, sep = "__"))
 
-  # ---- future scenario summaries ------------------------------------------
-  # Each scenario key is "SSP2-4.5 / 2025-2035" (one entry per SSP x period,
-  # with all ensemble model predictions already pooled in the preds data frame).
-  fut_df        <- NULL
-
-
-  if (length(scenarios) > 0) {
-    future_nms <- names(scenarios)[vapply(names(scenarios),
-      function(nm) !is.na(.normalise_ssp(nm)), logical(1))]
-
-    if (length(future_nms) > 0) {
-      rows <- lapply(future_nms, function(nm) {
-        out_df <- scenarios[[nm]]$out
-
-        is_future <- !is.null(out_df$value_all) &&
-                    any(vapply(out_df$value_all, length, integer(1L)) > 1L)
-
-        s <- if (is_future) {
-          trimmed <- unlist(lapply(out_df$value_all, function(yr_vals) {
-            lo <- quantile(yr_vals, ensemble_band_q[["lo"]], na.rm = TRUE)
-            hi <- quantile(yr_vals, ensemble_band_q[["hi"]], na.rm = TRUE)
-            yr_vals[yr_vals >= lo & yr_vals <= hi]
-          }))
-          s <- .summarise_vals(trimmed, c(lo = 0, hi = 1))
-          # Apply deviation shift to thick bar edges — hist_ref = 0 when no deviation
-          s$lo_full <- s$lo_full - hist_ref
-          s$hi_full <- s$hi_full - hist_ref
-          s
-        } else {
-          .summarise_vals(out_df$value, band_q)
-        }
-
-        if (is.null(s)) return(NULL)
-
-        if (is_future) {
-          if (!is.null(coef_bands_tbl)) {
-            sc_bands  <- dplyr::filter(coef_bands_tbl, scenario == nm)
-            s$coef_lo <- if (nrow(sc_bands) > 0)
-              mean(sc_bands$value_lo, na.rm = TRUE) else NA_real_
-            s$coef_hi <- if (nrow(sc_bands) > 0)
-              mean(sc_bands$value_hi, na.rm = TRUE) else NA_real_
-            s$mean    <- mean(unlist(out_df$value_all), na.rm = TRUE) - hist_ref
-          } else {
-            s$coef_lo <- NA_real_
-            s$coef_hi <- NA_real_
-            s$mean    <- mean(unlist(out_df$value_all), na.rm = TRUE) - hist_ref
-          }
-        } else {
-          sc_bands  <- if (!is.null(coef_bands_tbl))
-            dplyr::filter(coef_bands_tbl, scenario == nm) else NULL
-          s$coef_lo <- if (!is.null(sc_bands) && nrow(sc_bands) > 0)
-            mean(sc_bands$value_lo, na.rm = TRUE) else NA_real_
-          s$coef_hi <- if (!is.null(sc_bands) && nrow(sc_bands) > 0)
-            mean(sc_bands$value_hi, na.rm = TRUE) else NA_real_
-        }
-
-        ssp_key       <- .normalise_ssp(nm)
-        ssp_short     <- SSP_SHORT_LABELS[ssp_key] %||% ssp_key
-        yr            <- .parse_year(nm)
-        s$pt_key      <- paste0(ssp_short, "\n", yr)
-        s$colour_key  <- paste(ssp_key, yr, sep = "__")
-        s$ssp_key     <- ssp_key
-        s$ssp_short   <- ssp_short
-        s$yr          <- yr
-        s
-      })
-      fut_df <- dplyr::bind_rows(Filter(Negate(is.null), rows))
-    }
-  }
+  fut_df <- df[!df$is_historical, , drop = FALSE]
 
   # ---- colour palette: Historical = grey; one colour per SSP x year --------
   colour_palette <- c("Historical" = "#808080")
-  if (!is.null(fut_df) && nrow(fut_df) > 0) {
-    yrs_present <- sort(unique(fut_df$yr))
+  if (nrow(fut_df) > 0L) {
+    yrs_present <- sort(unique(fut_df$yr_lbl))
     n_yrs       <- length(yrs_present)
-    yr_lighten  <- if (n_yrs > 1) seq(0.30, 0.0, length.out = n_yrs) else 0.0
+    yr_lighten  <- if (n_yrs > 1L) seq(0.30, 0.0, length.out = n_yrs) else 0.0
     for (ssp in intersect(names(.ssp_colours), unique(fut_df$ssp_key))) {
       base_col <- .ssp_colours[ssp]
       for (i in seq_along(yrs_present)) {
@@ -293,100 +220,93 @@ plot_pointrange_climate <- function(scenarios, hist_agg,
   # ---- x-axis factor levels with spacers -----------------------------------
   ordered_levels <- "Historical"
   spacer_ids     <- character(0)
-
-  if (!is.null(fut_df) && nrow(fut_df) > 0) {
-
+  if (nrow(fut_df) > 0L) {
+    ssps_present <- intersect(c("SSP2", "SSP3", "SSP5"), unique(fut_df$ssp_short))
+    spacer_n <- 0L
     if (isTRUE(group_order == "year_x_scenario")) {
-      yrs_present  <- sort(unique(fut_df$yr))
-      ssps_present <- intersect(c("SSP2", "SSP3", "SSP5"), unique(fut_df$ssp_short))
-      spacer_n <- 0L
+      yrs_present <- sort(unique(fut_df$yr_lbl))
       for (yr_i in yrs_present) {
-        spacer_n       <- spacer_n + 1L
-        sid            <- strrep(" ", spacer_n)
-        spacer_ids     <- c(spacer_ids, sid)
+        spacer_n <- spacer_n + 1L
+        sid <- strrep(" ", spacer_n)
+        spacer_ids <- c(spacer_ids, sid)
         ordered_levels <- c(ordered_levels, sid)
-        for (ssp in ssps_present) {
+        for (ssp in ssps_present)
           ordered_levels <- c(ordered_levels, paste0(ssp, "\n", yr_i))
-        }
       }
     } else {
-      ssps_present <- intersect(c("SSP2", "SSP3", "SSP5"), unique(fut_df$ssp_short))
-      spacer_n <- 0L
       for (ssp in ssps_present) {
-        spacer_n       <- spacer_n + 1L
-        sid            <- strrep(" ", spacer_n)
-        spacer_ids     <- c(spacer_ids, sid)
+        spacer_n <- spacer_n + 1L
+        sid <- strrep(" ", spacer_n)
+        spacer_ids <- c(spacer_ids, sid)
         ordered_levels <- c(ordered_levels, sid)
-        ssp_yrs <- sort(unique(fut_df$yr[fut_df$ssp_short == ssp]))
-        for (yr_i in ssp_yrs) {
+        ssp_yrs <- sort(unique(fut_df$yr_lbl[fut_df$ssp_short == ssp]))
+        for (yr_i in ssp_yrs)
           ordered_levels <- c(ordered_levels, paste0(ssp, "\n", yr_i))
-        }
       }
     }
   }
-
   x_label_map <- setNames(
     vapply(ordered_levels, function(lv) {
-      if (lv %in% spacer_ids) return("")
-      if (lv == "Historical")  return(lv)
-      lv  # SSP\nyear label shown as-is
-    }, character(1)),
+      if (lv %in% spacer_ids) "" else lv
+    }, character(1L)),
     ordered_levels
   )
   data_levels <- setdiff(ordered_levels, spacer_ids)
+  df$pt_key <- factor(df$pt_key, levels = ordered_levels)
+  df <- df[df$pt_key %in% data_levels, , drop = FALSE]
 
-  # ---- combine into one data frame -----------------------------------------
-  cols     <- c("pt_key", "colour_key", "mean", "lo_full", "hi_full", "coef_lo", "coef_hi")
-  hist_row <- as.data.frame(hist_s)[, intersect(cols, names(hist_s)), drop = FALSE]
-  fut_rows <- if (!is.null(fut_df) && nrow(fut_df) > 0)
-    as.data.frame(fut_df)[, intersect(cols, names(fut_df))] else NULL
-
-  plot_df <- dplyr::bind_rows(hist_row, fut_rows)
-  plot_df$pt_key <- factor(plot_df$pt_key, levels = ordered_levels)
-  plot_df <- plot_df[plot_df$pt_key %in% data_levels, ]
-
-  if (nrow(plot_df) == 0)
+  if (nrow(df) == 0L)
     return(ggplot2::ggplot() +
-      ggplot2::labs(title = "Run a future simulation to see scenario comparisons."))
+           ggplot2::labs(title = "Run a future simulation to see scenario comparisons."))
 
-  # ---- plot ----------------------------------------------------------------
-
-  ggplot2::ggplot(plot_df,
+  # ---- plot: nested bands + dot --------------------------------------------
+  p <- ggplot2::ggplot(df,
     ggplot2::aes(x = .data$pt_key, colour = .data$colour_key)
-  ) +
-    # Thick band — weather + model uncertainty (bottom layer)
-    ggplot2::geom_linerange(
-      ggplot2::aes(ymin = .data$lo_full, ymax = .data$hi_full),
-      linewidth = 4.0, alpha = 1,  # doubled from 2.0
-      na.rm     = TRUE
+  )
+
+  # Outermost (when present): "total" whisker combining all three sources
+  # assuming independence: SE = sqrt(var_coef + var_within + var_across).
+  if (all(c("total_lo", "total_hi") %in% names(df))) {
+    p <- p + ggplot2::geom_linerange(
+      ggplot2::aes(ymin = .data$total_lo, ymax = .data$total_hi),
+      linewidth = 0.6, colour = "grey40", alpha = 0.8, na.rm = TRUE
     ) +
-    # Thin line — coefficient uncertainty (top layer, always visible)
+      # Thin caps at the ends of the total whisker
+      ggplot2::geom_errorbar(
+        ggplot2::aes(ymin = .data$total_lo, ymax = .data$total_hi),
+        width = 0.25, linewidth = 0.4, colour = "grey40", na.rm = TRUE,
+        inherit.aes = TRUE
+      )
+  }
+
+  p <- p +
+    # Inter-model spread (future only — NA suppressed for historical)
     ggplot2::geom_linerange(
+      ggplot2::aes(ymin = .data$intermod_lo, ymax = .data$intermod_hi),
+      linewidth = 6.0, alpha = 0.6, na.rm = TRUE
+    ) +
+    # Middle: inter-annual variability
+    ggplot2::geom_linerange(
+      ggplot2::aes(ymin = .data$interann_lo, ymax = .data$interann_hi),
+      linewidth = 3.5, alpha = 1.0, na.rm = TRUE
+    )
+
+  if (isTRUE(show_coef)) {
+    p <- p + ggplot2::geom_linerange(
       ggplot2::aes(ymin = .data$coef_lo, ymax = .data$coef_hi),
-      linewidth = 1.5,
-      colour = "black",   # thicker than before so visible against thick band
-      na.rm    = TRUE
-    ) +
-    #Geom Point
+      linewidth = 1.2, colour = "black", na.rm = TRUE
+    )
+  }
+
+  p +
     ggplot2::geom_point(
-      ggplot2::aes(y = .data$mean),
-      size   = 3,
-      shape  = 21,
-      fill   = "white",
-      colour = "black",
-      na.rm  = TRUE
+      ggplot2::aes(y = .data$value),
+      size = 3, shape = 21, fill = "white", colour = "black", na.rm = TRUE
     ) +
     ggplot2::scale_colour_manual(values = colour_palette, guide = "none") +
-    ggplot2::scale_x_discrete(
-      limits = ordered_levels,
-      labels = x_label_map,
-      drop   = FALSE
-    ) +
-    ggplot2::labs(
-      title = NULL,
-      x     = NULL,
-      y     = hist_agg$x_label
-    ) +
+    ggplot2::scale_x_discrete(limits = ordered_levels,
+                              labels = x_label_map, drop = FALSE) +
+    ggplot2::labs(title = NULL, x = NULL, y = x_label) +
     ggplot2::theme_minimal(base_size = 13) +
     ggplot2::theme(
       panel.grid.major.x = ggplot2::element_blank(),
@@ -418,322 +338,291 @@ plot_pointrange_climate <- function(scenarios, hist_agg,
 #'
 #' @importFrom stats quantile median
 #' @export
-build_threshold_table_df <- function(all_series, group_order = "scenario_x_year",
-                               band_q          = c(lo = 0.10, hi = 0.90),
-                               ensemble_band_q = c(lo = 0, hi = 1),
-                               hist_ref = 0) {
+build_threshold_table_df <- function(threshold_tbl,
+                                     group_order = "scenario_x_year",
+                                     show_coef   = TRUE) {
 
+  if (is.null(threshold_tbl) || nrow(threshold_tbl) == 0L) return(NULL)
+  df <- threshold_tbl
 
-  rows <- lapply(names(all_series), function(nm) {
-    out     <- all_series[[nm]]$out
-    is_fut  <- "value_all" %in% names(out) &&
-               any(vapply(out$value_all, length, integer(1L)) > 1L)
-
-    # Central values — ensemble trimmed per year (matches exceedance curve)
-    vals <- if (is_fut) {
-      v <- unlist(lapply(out$value_all, function(yr_vals) {
-        lo <- quantile(yr_vals, ensemble_band_q[["lo"]], na.rm = TRUE)
-        hi <- quantile(yr_vals, ensemble_band_q[["hi"]], na.rm = TRUE)
-        yr_vals[yr_vals >= lo & yr_vals <= hi]
-      }))
-      v[is.finite(v)] - hist_ref #future value_all is raw - apply hist_ref shift here
-    } else {
-      out$value[is.finite(out$value)]   # historical — 30 values unchanged
-    }
-    n <- length(vals)
-
-    keep_low  <- names(RP_LOW)[c(n >= 50, n >= 20, n >= 10, n >= 5)]
-    keep_high <- names(RP_HIGH)[c(n >= 5, n >= 10, n >= 20, n >= 50)]
-    if (length(keep_low) == 0 && length(keep_high) == 0) return(NULL)
-
-    # Helper — build one row from a value vector
-    build_row <- function(vals_in, nm, row_label) {
-      vals_in <- vals_in[is.finite(vals_in)]
-      if (length(vals_in) < 2L) return(NULL)
-      # Exceedance prob p maps to sorted position (1 - p):
-      # low exceedance (e.g. 1:50 = 0.02) → high outcome value → quantile at 0.98
-      # high exceedance (e.g. 49:50 = 0.98) → low outcome value → quantile at 0.02
-      low_df <- if (length(keep_low) > 0)
-        as.data.frame(t(sapply(keep_low,
-          function(th) round(stats::quantile(vals_in, 1 - RP_LOW[th]), 3))))
-      else data.frame()
-      high_df <- if (length(keep_high) > 0)
-        as.data.frame(t(sapply(keep_high,
-          function(th) round(stats::quantile(vals_in, 1 - RP_HIGH[th]), 3))))
-      else data.frame()
-      names(low_df)  <- keep_low
-      names(high_df) <- keep_high
-      median_df <- data.frame(
-        "1:1" = round(stats::median(vals_in), 3),
-        check.names = FALSE
-      )
-      cbind(
-        data.frame(
-          Scenario = nm,           # original scenario name
-          Estimate = row_label,    # "Central", "Lower (p10)", "Upper (p90)"
-          Obs      = length(vals_in),
-          check.names = FALSE
-        ),
-        low_df, median_df, high_df
-      )
-    }
-
-    # Central row
-    central <- build_row(vals,    nm, "Central")
-    
-
-    # Lower/Upper rows — from value_lo/value_hi if available
-
-    # Build draw_curves [S × n_years] — identical method to enhance_exceedance()
-    # so that lo_vals/hi_vals are derived from the same structure as the ribbon.
-    dv_list   <- out$draw_values
-    n_pt      <- length(vals)   # already ensemble-trimmed above
-
-    draw_curves_tbl <- if (!is.null(band_q) && !is.null(dv_list) &&
-                           length(dv_list) > 0L && n_pt >= 2L) {
-      if (is_fut) {
-        n_mod_yr <- length(out$value_all[[1L]])
-        S_loc    <- round(length(dv_list[[1L]]) / n_mod_yr)
-        dc <- matrix(NA_real_, nrow = S_loc, ncol = n_pt)
-        for (s in seq_len(S_loc)) {
-          yr_s <- unlist(lapply(seq_along(dv_list), function(i) {
-            yr_vals  <- out$value_all[[i]]
-            lo       <- quantile(yr_vals, ensemble_band_q[["lo"]], na.rm = TRUE)
-            hi       <- quantile(yr_vals, ensemble_band_q[["hi"]], na.rm = TRUE)
-            keep_idx <- which(yr_vals >= lo & yr_vals <= hi)
-            if (length(keep_idx) == 0L) return(NULL)
-            dv         <- dv_list[[i]]
-            n_mod      <- length(yr_vals)
-            S_i        <- round(length(dv) / n_mod)
-            draw_mat_i <- matrix(dv, nrow = n_mod, ncol = S_i)
-            draw_mat_i[keep_idx, s, drop = TRUE]
-          }))
-          if (length(yr_s) == n_pt)
-            dc[s, ] <- sort(yr_s, decreasing = FALSE)
-        }
-        dc
-      } else {
-        # Historical: dv_list[[year]][s] — reshape to [S × n_years]
-        S_loc    <- length(dv_list[[1L]])
-        draw_mat <- do.call(rbind, lapply(dv_list, as.numeric))
-        dc <- matrix(NA_real_, nrow = S_loc, ncol = n_pt)
-        for (s in seq_len(S_loc)) {
-          dc[s, ] <- sort(draw_mat[, s], decreasing = FALSE)
-        }
-        dc
-      }
-    } else NULL
-
-    # band_lo/band_hi vectors — column-wise quantile, same as ribbon
-    # lo_vals/hi_vals: sorted values at the band_q edges for build_row()
-    n_draws <- if (!is.null(draw_curves_tbl)) sum(!is.na(draw_curves_tbl)) else 0L
-    lo_vals <- if (!is.null(draw_curves_tbl)) {
-      apply(draw_curves_tbl, 2, quantile, band_q[["lo"]], na.rm = TRUE)
-    } else numeric(0)
-
-    hi_vals <- if (!is.null(draw_curves_tbl)) {
-      apply(draw_curves_tbl, 2, quantile, band_q[["hi"]], na.rm = TRUE)
-    } else numeric(0)
-
-    lo_vals <- lo_vals - hist_ref
-    hi_vals <- hi_vals - hist_ref
-
-    if (length(lo_vals) >= 2L && length(hi_vals) >= 2L) {
-    # lo_vals/hi_vals are the ribbon band edges — sorted ascending, length = n_pt.
-    # Map each RP threshold directly to its position in the sorted vector:
-    #   exceedance prob p → position index = round(p * n_pt)
-    # This mirrors exactly how the ribbon reads band_lo/band_hi at each prob.
-    build_band_row <- function(band_vec, nm, row_label) {
-      n <- length(band_vec)
-      # band_vec is sorted ascending. Exceedance prob p maps to sorted position:
-      #   k = round(n * (1 - p)) + 1
-      # RP_LOW[th]  = low exceedance prob  (e.g. 0.02 for 1:50) → high index → high value
-      # RP_HIGH[th] = high exceedance prob (e.g. 0.98 for 49:50) → low index → low value
-      low_df <- if (length(keep_low) > 0)
-        as.data.frame(t(sapply(keep_low, function(th) {
-          idx <- min(n, round(n * (1 - RP_LOW[th])) + 1L)
-          round(band_vec[idx], 3)
-        })))
-      else data.frame()
-      high_df <- if (length(keep_high) > 0)
-        as.data.frame(t(sapply(keep_high, function(th) {
-          idx <- max(1L, round(n * (1 - RP_HIGH[th])) + 1L)
-          round(band_vec[idx], 3)
-        })))
-      else data.frame()
-      names(low_df)  <- keep_low
-      names(high_df) <- keep_high
-      median_df <- data.frame("1:1" = round(stats::median(band_vec), 3),
-                              check.names = FALSE)
-      cbind(
-        data.frame(Scenario = nm, Estimate = row_label,
-                  Obs = n_draws, check.names = FALSE),
-        low_df, median_df, high_df
-      )
-    }
-    lower <- build_band_row(lo_vals, nm, "Lower")
-    upper <- build_band_row(hi_vals, nm, "Upper")
-    dplyr::bind_rows(central, lower, upper)
-  } else {
-    central
+  # Optionally hide the coefficient-band rows (any "Coef Pxx" label).
+  if (!isTRUE(show_coef)) {
+    df <- df[!grepl("^Coef ", df$Estimate), , drop = FALSE]
   }
-})
+  if (nrow(df) == 0L) return(NULL)
 
-  rows <- Filter(Negate(is.null), rows)
-  if (length(rows) == 0) return(NULL)
+  # Pivot: one column per RP threshold, value rounded.
+  rp_levels <- unique(df$rp_label)
+  df$value_round <- round(df$value, 3)
 
-  all_cols <- {
-    seen <- unique(unlist(lapply(rows, names)))
-    fixed <- c("Scenario", "Estimate", "Obs",
-              names(RP_LOW), "1:1", names(RP_HIGH))
-    c(fixed[fixed %in% seen], setdiff(seen, fixed))
-  }
-  rows <- lapply(rows, function(r) {
-    for (m in setdiff(all_cols, names(r))) r[[m]] <- NA_real_
-    r[all_cols]
-  })
-  df <- do.call(rbind, rows)
-
-  # Sort by group_order: Historical rows first, then SSP rows.
-  # SSP rows carry a " / P{pct}" suffix — extract SSP, year, and percentile
-  # for clean three-level sorting (P10 < P50 < P90 within each SSP/year group).
-  # Add estimate sort order — Central first, then Lower, then Upper
-  df$.est_order <- dplyr::case_when(
-    df$Estimate == "Upper"   ~ 1L,
-    df$Estimate == "Central" ~ 2L,
-    df$Estimate == "Lower"   ~ 3L,
-    TRUE                     ~ 4L
+  wide <- tidyr::pivot_wider(
+    df[, c("scenario", "Estimate", "rp_label", "n_obs", "value_round")],
+    names_from  = "rp_label",
+    values_from = "value_round"
   )
+  wide <- as.data.frame(wide)
+  wide <- dplyr::rename(wide, Scenario = scenario, Obs = n_obs)
 
-  hist_rows <- df[df$Scenario == "Historical", , drop = FALSE]
-  ssp_rows  <- df[df$Scenario != "Historical", , drop = FALSE]
+  # Reorder columns to canonical sequential order: 1:50, 1:20, ..., 1:1, ...,
+  # 19:20, 49:50. RPs that didn't survive the n-year reliability filter are
+  # simply absent from `names(wide)` and are skipped.
+  canonical <- c(names(RP_LOW), "1:1", names(RP_HIGH))
+  rp_present <- intersect(canonical, names(wide))
+  wide <- wide[, c("Scenario", "Estimate", "Obs", rp_present), drop = FALSE]
 
-  # Sort hist rows: Central → Lower → Upper
+  # Sort rows: Historical first, then SSPs. Within each scenario the
+  # Estimate rows are arranged concentrically around the Central P50:
+  #   Total low -> Coef low -> Ensemble low -> Central -> Ensemble high
+  #   -> Coef high -> Total high
+  # Lower vs upper side is read from the percentile (< 50 or > 50, or the
+  # special "min"/"max" tokens). Family distance from the central row is
+  # Total = 3 (outermost), Coef = 2, Ensemble = 1.
+  .est_rank <- function(est) {
+    fam_dist <- ifelse(grepl("^Total ",    est), 3L,
+                ifelse(grepl("^Coef ",     est), 2L,
+                ifelse(grepl("^Ensemble ", est), 1L, 0L)))
+    pct <- suppressWarnings(as.integer(sub(".*P", "", est)))
+    pct <- ifelse(grepl(" min$", est),  0L,
+           ifelse(grepl(" max$", est), 100L, pct))
+    pct[is.na(pct)] <- 50L
+    side <- ifelse(pct < 50, -1L, ifelse(pct > 50, 1L, 0L))
+    side * fam_dist
+  }
+  wide$.est_order <- .est_rank(wide$Estimate)
+
+  hist_rows <- wide[wide$Scenario == "Historical", , drop = FALSE]
+  ssp_rows  <- wide[wide$Scenario != "Historical", , drop = FALSE]
+
   if (nrow(hist_rows) > 0)
-    hist_rows <- hist_rows[order(hist_rows$.est_order), ]
+    hist_rows <- hist_rows[order(hist_rows$.est_order), , drop = FALSE]
 
-  # Sort SSP rows: by SSP → year → Central/Lower/Upper
   if (nrow(ssp_rows) > 0) {
-    ssp_rows$ssp_sort <- sub(" /.*", "", ssp_rows$Scenario)
+    ssp_rows$.ssp_sort <- sub(" /.*", "", ssp_rows$Scenario)
     yr_m <- regexpr("[0-9]{4}-[0-9]{4}", ssp_rows$Scenario)
-    ssp_rows$yr_sort  <- ifelse(
+    ssp_rows$.yr_sort  <- ifelse(
       yr_m > 0,
       regmatches(ssp_rows$Scenario, yr_m),
-      regmatches(ssp_rows$Scenario,
-                 regexpr("[0-9]{4}", ssp_rows$Scenario))
+      regmatches(ssp_rows$Scenario, regexpr("[0-9]{4}", ssp_rows$Scenario))
     )
     ssp_rows <- if (isTRUE(group_order == "year_x_scenario"))
-      ssp_rows[order(ssp_rows$yr_sort,
-                     ssp_rows$ssp_sort,
-                     ssp_rows$.est_order), ]
+      ssp_rows[order(ssp_rows$.yr_sort, ssp_rows$.ssp_sort,
+                     ssp_rows$.est_order), , drop = FALSE]
     else
-      ssp_rows[order(ssp_rows$ssp_sort,
-                     ssp_rows$yr_sort,
-                     ssp_rows$.est_order), ]
-    ssp_rows$ssp_sort  <- NULL
-    ssp_rows$yr_sort   <- NULL
+      ssp_rows[order(ssp_rows$.ssp_sort, ssp_rows$.yr_sort,
+                     ssp_rows$.est_order), , drop = FALSE]
+    ssp_rows$.ssp_sort <- NULL
+    ssp_rows$.yr_sort  <- NULL
   }
 
-  # Remove helper column and return
   hist_rows$.est_order <- NULL
   ssp_rows$.est_order  <- NULL
   rbind(hist_rows, ssp_rows)
+}
+
+
+
+# ---------------------------------------------------------------------------- #
+# Time-series spaghetti + envelope plot                                        #
+# ---------------------------------------------------------------------------- #
+
+#' Per-Model Time-Series Spaghetti With Ensemble Envelope
+#'
+#' Draws one thin translucent line per (scenario, model) over sim_year, with
+#' a bold across-model median curve and a translucent inter-model ribbon
+#' on top. Historical scenarios are drawn as a single bold line (no ribbon
+#' — only one "model"). The aim is to show model disagreement directly
+#' alongside year-to-year variation.
+#'
+#' @param ts_tbl Tibble with columns: scenario, model_id, sim_year, value,
+#'   is_historical.
+#' @param x_label Y-axis label.
+#' @param ensemble_band_q Named numeric `c(lo, hi)` quantile pair for the
+#'   inter-model ribbon.
+#' @return A ggplot object.
+#' @importFrom ggplot2 ggplot aes geom_line geom_ribbon scale_color_manual
+#'   scale_fill_manual labs theme_minimal theme
+#' @importFrom dplyr group_by summarise first n
+#' @importFrom rlang .data
+#' @export
+plot_timeseries_spaghetti <- function(ts_tbl,
+                                       x_label         = "",
+                                       ensemble_band_q = c(lo = 0, hi = 1)) {
+  if (is.null(ts_tbl) || nrow(ts_tbl) == 0L)
+    return(ggplot2::ggplot() +
+           ggplot2::labs(title = "Run a simulation to see model trajectories."))
+
+  df <- ts_tbl
+  df$ssp_key <- ifelse(df$is_historical, "Historical",
+                       vapply(df$scenario, .normalise_ssp, character(1L)))
+  df$yr_lbl  <- ifelse(df$is_historical, "Historical",
+                       vapply(df$scenario, .parse_year, character(1L)))
+
+  fut_yr_labels  <- sort(unique(df$yr_lbl[df$yr_lbl != "Historical"]))
+  yr_styles      <- .resolve_year_styles(fut_yr_labels)
+  present_ssps   <- sort(unique(df$ssp_key[df$ssp_key != "Historical"]))
+  colour_map_ssp <- c("Historical" = "black",
+                      .ssp_colours[intersect(names(.ssp_colours),
+                                             present_ssps)])
+  ltype_map_yr   <- c("Historical" = "solid", yr_styles$linetype_map)
+
+  # Combined legend: per-scenario colour (SSP) and linetype (period).
+  scen_levels <- c("Historical",
+                   sort(unique(df$scenario[!df$is_historical])))
+  scen_colour_map <- vapply(scen_levels, function(s) {
+    if (s == "Historical") return(unname(colour_map_ssp[["Historical"]]))
+    unname(colour_map_ssp[[.normalise_ssp(s)]] %||% "grey50")
+  }, character(1L))
+  scen_ltype_map <- vapply(scen_levels, function(s) {
+    if (s == "Historical") return(unname(ltype_map_yr[["Historical"]]))
+    yr <- .parse_year(s)
+    unname(ltype_map_yr[[yr]] %||% "solid")
+  }, character(1L))
+  df$scenario_f <- factor(df$scenario, levels = scen_levels)
+
+  # Per-(scenario, sim_year) envelope across models
+  env_df <- df |>
+    dplyr::group_by(.data$scenario, .data$sim_year) |>
+    dplyr::summarise(
+      central       = stats::median(.data$value, na.rm = TRUE),
+      lo            = unname(stats::quantile(.data$value,
+                                              ensemble_band_q[["lo"]],
+                                              na.rm = TRUE)),
+      hi            = unname(stats::quantile(.data$value,
+                                              ensemble_band_q[["hi"]],
+                                              na.rm = TRUE)),
+      n_models      = dplyr::n(),
+      is_historical = any(.data$is_historical),
+      .groups       = "drop"
+    )
+  env_df$scenario_f <- factor(env_df$scenario, levels = scen_levels)
+
+  fut_env <- env_df[!env_df$is_historical & env_df$n_models > 1L, ,
+                    drop = FALSE]
+
+  p <- ggplot2::ggplot()
+
+  # Inter-model ribbon (futures only, when >1 model)
+  if (nrow(fut_env) > 0L) {
+    p <- p + ggplot2::geom_ribbon(
+      data    = fut_env,
+      mapping = ggplot2::aes(x = .data$sim_year, ymin = .data$lo,
+                             ymax = .data$hi, fill = .data$scenario_f,
+                             group = .data$scenario_f),
+      alpha       = 0.15,
+      show.legend = FALSE
+    )
   }
 
+  # Spaghetti: thin translucent line per (scenario, model)
+  p <- p + ggplot2::geom_line(
+    data    = df,
+    mapping = ggplot2::aes(x = .data$sim_year, y = .data$value,
+                           colour   = .data$scenario_f,
+                           linetype = .data$scenario_f,
+                           group  = interaction(.data$scenario_f,
+                                                .data$model_id)),
+    linewidth = 0.3, alpha = 0.35, na.rm = TRUE,
+    show.legend = FALSE
+  )
 
+  # Bold median curve per scenario (this is what populates the legend)
+  p <- p + ggplot2::geom_line(
+    data    = env_df,
+    mapping = ggplot2::aes(x = .data$sim_year, y = .data$central,
+                           colour   = .data$scenario_f,
+                           linetype = .data$scenario_f,
+                           group  = .data$scenario_f),
+    linewidth = 1.1, na.rm = TRUE
+  )
+
+  p +
+    ggplot2::scale_color_manual(
+      values = scen_colour_map, breaks = scen_levels,
+      name   = "Scenario",
+      guide  = ggplot2::guide_legend(override.aes = list(linewidth = 0.9))
+    ) +
+    ggplot2::scale_fill_manual(
+      values = scen_colour_map, breaks = scen_levels, guide = "none"
+    ) +
+    ggplot2::scale_linetype_manual(
+      values = scen_ltype_map, breaks = scen_levels,
+      name   = "Scenario"
+    ) +
+    ggplot2::labs(x = "Simulation year", y = x_label) +
+    ggplot2::theme_minimal(base_size = 12) +
+    ggplot2::theme(legend.position = "bottom")
+}
 
 # ---------------------------------------------------------------------------- #
-# Threshold point chart                                                        #
+# Variance-contribution stacked bar                                            #
 # ---------------------------------------------------------------------------- #
 
-#' Threshold Point Chart Across Scenarios
+#' Stacked Variance-Contribution Bar by Scenario
 #'
-#' Scatter plot showing the simulated outcome value at each return-period
-#' threshold for every scenario. Points are dodged per threshold; the y-axis
-#' is free-scaled so small differences between scenarios are visible.
-#' The median (1:1) threshold is highlighted with a larger filled point.
-#' Colour follows the SSP palette; Historical is grey.
+#' For each scenario, plots a 100% stacked horizontal bar showing the share
+#' of total predictive variance contributed by:
+#'   - Coefficient uncertainty (regression-fit per-outcome SE)
+#'   - Inter-annual variability (within-model year-to-year)
+#'   - Inter-model spread (across-model disagreement; future only)
 #'
-#' @param all_series  Named list. Each element must have \code{$out$alue}.
-#'   Same input as \code{build_threshold_table_df()}.
-#' @param group_order Character. \code{"scenario_x_year"} (default) or
-#'   \code{"year_x_scenario"}. Controls scenario order in the legend.
+#' Assumes the three sources are independent so total var = sum of components.
 #'
-#' @return A ggplot object, or a blank placeholder when data are insufficient.
-#'
-#' @importFrom ggplot2 ggplot aes geom_point scale_colour_manual
-#'   scale_size_manual scale_shape_manual labs theme_minimal theme
-#'   element_text element_blank element_line
+#' @param var_tbl Tibble with columns: scenario, var_coef, var_within,
+#'   var_across, is_historical.
+#' @return A ggplot object.
+#' @importFrom ggplot2 ggplot aes geom_col scale_fill_manual scale_x_continuous
+#'   labs theme_minimal theme coord_flip
 #' @importFrom tidyr pivot_longer
 #' @importFrom rlang .data
 #' @export
-plot_threshold_points <- function(all_series, group_order = "scenario_x_year") {
-
-  df <- build_threshold_table_df(all_series, group_order)
-  if (is.null(df) || nrow(df) == 0)
+plot_variance_contribution <- function(var_tbl) {
+  if (is.null(var_tbl) || nrow(var_tbl) == 0L)
     return(ggplot2::ggplot() +
-      ggplot2::labs(title = "Insufficient data for threshold chart."))
+           ggplot2::labs(title = "Run a simulation to see variance contributions."))
 
-  thresh_cols <- setdiff(names(df), c("Scenario", "Obs"))
-  if (length(thresh_cols) == 0)
-    return(ggplot2::ggplot() +
-      ggplot2::labs(title = "No threshold columns found."))
+  df <- var_tbl
+  df$var_total <- df$var_coef + df$var_within + df$var_across
+  # Guard against div-by-zero
+  df$var_total <- ifelse(df$var_total > 0, df$var_total, 1)
+  df$share_coef    <- df$var_coef    / df$var_total
+  df$share_within  <- df$var_within  / df$var_total
+  df$share_across  <- df$var_across  / df$var_total
 
-  # Pivot to long: one row per Scenario x threshold.
   long <- tidyr::pivot_longer(
-    df,
-    cols      = tidyr::all_of(thresh_cols),
-    names_to  = "threshold",
-    values_to = "value"
+    df[, c("scenario", "share_coef", "share_within", "share_across")],
+    cols      = c("share_coef", "share_within", "share_across"),
+    names_to  = "source",
+    values_to = "share"
   )
-  long$threshold <- factor(long$threshold, levels = thresh_cols)
-  long$Scenario  <- factor(long$Scenario,  levels = unique(df$Scenario))
+  long$source <- factor(long$source,
+                        levels = c("share_across", "share_within", "share_coef"),
+                        labels = c("Inter-model spread",
+                                   "Inter-annual variability",
+                                   "Coefficient uncertainty"))
+  # Preserve scenario order from input
+  long$scenario <- factor(long$scenario, levels = rev(unique(df$scenario)))
 
-  # Median column: large filled circle; all others: smaller open circle.
-  long$is_median <- long$threshold == "1:1"
+  fill_map <- c(
+    "Coefficient uncertainty"  = "#4a90d9",
+    "Inter-annual variability" = "#f4a261",
+    "Inter-model spread"       = "#7a5195"
+  )
 
-  # ---- Colour palette: mirrors plot_pointrange_climate() -----------------
-  scenarios_present <- levels(long$Scenario)
-  colour_map <- vapply(scenarios_present, function(nm) {
-    ssp <- .normalise_ssp(nm)
-    if (!is.na(ssp) && ssp %in% names(.ssp_colours)) .ssp_colours[ssp] else "#808080"
-  }, character(1))
-
-  # ---- Plot --------------------------------------------------------------
   ggplot2::ggplot(long,
-    ggplot2::aes(
-      x      = .data$threshold,
-      y      = .data$value,
-      colour = .data$Scenario,
-      size   = .data$is_median,
-      shape  = .data$is_median,
-      group  = .data$Scenario
-    )
+    ggplot2::aes(x = .data$scenario, y = .data$share, fill = .data$source)
   ) +
-    ggplot2::geom_line(linewidth = 0.4, alpha = 0.5, na.rm = TRUE) +
-    ggplot2::geom_point(na.rm = TRUE) +
-    ggplot2::scale_colour_manual(values = colour_map, name = "Scenario") +
-    # Median: large filled circle (16); others: smaller open circle (1)
-    ggplot2::scale_size_manual(
-      values = c("TRUE" = 3.5, "FALSE" = 2.0),
-      guide  = "none"
-    ) +
-    ggplot2::scale_shape_manual(
-      values = c("TRUE" = 16L, "FALSE" = 1L),
-      guide  = "none"
-    ) +
-    ggplot2::labs(
-      title = "Outcome value at return-period thresholds",
-      x     = "Return period threshold",
-      y     = NULL
-    ) +
+    ggplot2::geom_col(width = 0.7) +
+    ggplot2::scale_fill_manual(values = fill_map, name = NULL) +
+    ggplot2::scale_y_continuous(labels = scales::percent_format(accuracy = 1),
+                                expand = c(0, 0)) +
+    ggplot2::labs(x = NULL, y = "Share of total predictive variance") +
     ggplot2::theme_minimal(base_size = 12) +
     ggplot2::theme(
-      panel.grid.major.x = ggplot2::element_blank(),
-      panel.grid.minor   = ggplot2::element_blank(),
-      axis.text.x        = ggplot2::element_text(size = 10),
-      legend.position    = "bottom"
-    )
+      legend.position    = "bottom",
+      panel.grid.major.y = ggplot2::element_blank(),
+      panel.grid.minor   = ggplot2::element_blank()
+    ) +
+    ggplot2::coord_flip()
 }
 
 # ---------------------------------------------------------------------------- #
@@ -765,171 +654,160 @@ plot_threshold_points <- function(all_series, group_order = "scenario_x_year") {
 #' @importFrom dplyr bind_rows
 #' @importFrom rlang .data
 #' @export
-enhance_exceedance <- function(scenarios,
-                               hist_agg,
+enhance_exceedance <- function(curves_tbl,
                                x_label,
                                return_period = TRUE,
                                n_sim_years   = NULL,
                                logit_x       = FALSE,
-                               ribbon_data   = NULL,
                                band_q          = c(lo = 0.10, hi = 0.90),
-                               ensemble_band_q = c(lo = 0, hi = 1),
-                               hist_ref = 0) {
+                               ensemble_band_q = c(lo = 0, hi = 1)) {
 
-  stopifnot(is.list(scenarios), length(scenarios) > 0)
-  labels <- names(scenarios)
+  if (is.null(curves_tbl) || nrow(curves_tbl) == 0L)
+    return(ggplot2::ggplot() +
+           ggplot2::labs(title = "Run a simulation to see exceedance probabilities."))
 
-    # ---- Build central line + ribbon per scenario (Option B) ---------------
-    exceedance_df <- dplyr::bind_rows(lapply(
-      c("Historical", names(scenarios)),
-      function(nm) {
-        is_hist <- nm == "Historical"
+  # ---- Per-scenario summary at each rank ---------------------------------
+  # For each (scenario, rank) collapse across models:
+  #   central_at_rank    = median of welfare_val across models
+  #   intermod_lo/hi     = quantile across models at ensemble_band_q
+  #   coef_lo/hi_at_rank = median(welfare_val ± z * coef_sd) across models
+  z_lo <- if (!is.null(band_q)) stats::qnorm(band_q[["lo"]]) else NA_real_
+  z_hi <- if (!is.null(band_q)) stats::qnorm(band_q[["hi"]]) else NA_real_
 
-        # ---- Point estimates (central line) ----------------------------------
-        if (is_hist) {
-          pt_vals  <- hist_agg$out$value
-          dv_list  <- hist_agg$out$draw_values
-          ssp_key  <- "Historical"
-          yr_label <- "Historical"
-        } else {
-          out_df  <- scenarios[[nm]]$out
-          
-          
-
-          # Per-year ensemble trim — controlled by ensemble_band_q
-          pt_vals <- unlist(lapply(out_df$value_all, function(yr_vals) {
-            lo <- quantile(yr_vals, ensemble_band_q[["lo"]], na.rm = TRUE)
-            hi <- quantile(yr_vals, ensemble_band_q[["hi"]], na.rm = TRUE)
-            yr_vals[yr_vals >= lo & yr_vals <= hi]
-          }))
-          # Apply deviation shift — hist_ref = 0 when no deviation selected.
-          # draw_values used for ribbon are shifted via ribbon_data (already deviated).
-          pt_vals  <- pt_vals - hist_ref
-          dv_list  <- out_df$draw_values
-          ssp_key  <- .normalise_ssp(nm)
-          yr_label <- .parse_year(nm)
-        }
-
-        if (length(pt_vals) == 0L) return(NULL)
-
-        # Central curve — point estimate ECDF (deterministic, no MC noise)
-        n_years       <- length(pt_vals)
-        central_curve <- sort(pt_vals, decreasing = FALSE)
-        probs         <- rev((seq_len(n_years) - 0.5) / n_years)
-
-        # ---- Ribbon — S complete exceedance curves --------------------------
-        if (!is.null(band_q) && !is.null(dv_list) && length(dv_list) > 0L) {
-
-          if (is_hist) {
-            # Historical: draw_values = list of S-length vectors per year
-            # Reshape to [n_years × S] matrix
-            S_loc    <- length(dv_list[[1L]])
-            draw_mat <- do.call(rbind, lapply(dv_list, as.numeric))
-            # draw_mat[year, draw s] → for draw s sort all years
-            draw_curves <- matrix(NA_real_, nrow = S_loc, ncol = n_years)
-            for (s in seq_len(S_loc)) {
-              draw_curves[s, ] <- sort(draw_mat[, s], decreasing = FALSE)
-            }
-
-          } else {
-            # Future: draw_values[[i]] = [n_mod × S] stored column-major
-            # Filter to same ensemble subset as pt_vals per year
-            n_mod_yr <- length(out_df$value_all[[1L]])
-            S_loc    <- round(length(dv_list[[1L]]) / n_mod_yr)
-            draw_curves <- matrix(NA_real_, nrow = S_loc, ncol = n_years)
-
-            for (s in seq_len(S_loc)) {
-              yr_vals_s <- unlist(lapply(seq_along(dv_list), function(i) {
-                yr_vals  <- out_df$value_all[[i]]
-                lo       <- quantile(yr_vals, ensemble_band_q[["lo"]], na.rm = TRUE)
-                hi       <- quantile(yr_vals, ensemble_band_q[["hi"]], na.rm = TRUE)
-                keep_idx <- which(yr_vals >= lo & yr_vals <= hi)
-                if (length(keep_idx) == 0L) return(NULL)
-                dv         <- dv_list[[i]]
-                n_mod      <- length(yr_vals)
-                S_i        <- round(length(dv) / n_mod)
-                draw_mat_i <- matrix(dv, nrow = n_mod, ncol = S_i)
-                draw_mat_i[keep_idx, s, drop = TRUE]
-              }))
-              if (length(yr_vals_s) == n_years)
-                draw_curves[s, ] <- sort(yr_vals_s, decreasing = FALSE)
-            }
-          }
-
-          # Apply band_q — controlled by coefficient uncertainty selector
-          lo_q    <- band_q[["lo"]]
-          hi_q    <- band_q[["hi"]]
-          band_lo <- apply(draw_curves, 2, quantile, lo_q, na.rm = TRUE) - hist_ref
-          band_hi <- apply(draw_curves, 2, quantile, hi_q, na.rm = TRUE) - hist_ref
-
-        } else {
-          # Coefficient uncertainty OFF — no ribbon
-          band_lo <- rep(NA_real_, n_years)
-          band_hi <- rep(NA_real_, n_years)
-        }
-
-        data.frame(
-          welfare_val = central_curve,
-          exceed_prob = probs,
-          band_lo     = band_lo,
-          band_hi     = band_hi,
-          ssp_key     = if (is.na(ssp_key)) "Historical" else ssp_key,
-          yr          = if (is.na(yr_label)) "Historical" else yr_label,
-          scenario    = nm,
-          stringsAsFactors = FALSE
-        )
-      }
-    ))
-
-    # ---- Aesthetic mappings -------------------------------------------------
-    fut_yr_labels <- sort(unique(exceedance_df$yr[exceedance_df$yr != "Historical"]))
-    yr_styles     <- .resolve_year_styles(fut_yr_labels)
-    present_ssps  <- sort(unique(exceedance_df$ssp_key[exceedance_df$ssp_key != "Historical"]))
-    colour_map_ssp <- c(
-      "Historical" = "black",
-      .ssp_colours[intersect(names(.ssp_colours), present_ssps)]
+  agg_df <- curves_tbl |>
+    dplyr::group_by(.data$scenario, .data$rank) |>
+    dplyr::summarise(
+      exceed_prob   = dplyr::first(.data$exceed_prob),
+      central       = stats::median(.data$welfare_val, na.rm = TRUE),
+      intermod_lo   = unname(stats::quantile(.data$welfare_val,
+                                              ensemble_band_q[["lo"]], na.rm = TRUE)),
+      intermod_hi   = unname(stats::quantile(.data$welfare_val,
+                                              ensemble_band_q[["hi"]], na.rm = TRUE)),
+      n_models      = dplyr::n(),
+      is_historical = any(.data$is_historical),
+      .groups       = "drop"
     )
-    present_yrs  <- names(yr_styles$linetype_map)
-    ltype_map_yr <- c("Historical" = "solid", yr_styles$linetype_map)
-    hist_mean    <- mean(hist_agg$out$value, na.rm = TRUE)
 
-    # ---- Early exit ---------------------------------------------------------
-    if (is.null(exceedance_df) || nrow(exceedance_df) == 0L)
-      return(ggplot2::ggplot() +
-        ggplot2::labs(title = "Run a simulation to see exceedance probabilities."))
+  # Coefficient band: apply a scenario-level typical SE as a constant offset
+  # from the central curve. Using the per-rank coef_sd directly produces noisy,
+  # self-crossing dashed lines because the per-rank SD wiggles. A single
+  # typical SE per scenario gives clean parallels.
+  if (!is.null(band_q)) {
+    coef_sd_scn <- curves_tbl |>
+      dplyr::group_by(.data$scenario) |>
+      dplyr::summarise(coef_sd_typ = stats::median(.data$coef_sd, na.rm = TRUE),
+                       .groups = "drop")
+    agg_df <- dplyr::left_join(agg_df, coef_sd_scn, by = "scenario")
+    agg_df$coef_lo <- agg_df$central + z_lo * agg_df$coef_sd_typ
+    agg_df$coef_hi <- agg_df$central + z_hi * agg_df$coef_sd_typ
+  } else {
+    agg_df$coef_lo <- NA_real_
+    agg_df$coef_hi <- NA_real_
+  }
+  # Ensure rows are ordered along the path that geom_line will trace.
+  agg_df <- agg_df[order(agg_df$scenario, agg_df$rank), , drop = FALSE]
 
-    ann_y <- if (isTRUE(logit_x)) 0.97 else 0.95
+  # Aesthetic mappings
+  fut_df  <- agg_df[!agg_df$is_historical, , drop = FALSE]
+  hist_df <- agg_df[ agg_df$is_historical, , drop = FALSE]
+
+  agg_df$ssp_key <- ifelse(agg_df$is_historical, "Historical",
+                           vapply(agg_df$scenario, .normalise_ssp, character(1L)))
+  agg_df$yr_lbl  <- ifelse(agg_df$is_historical, "Historical",
+                           vapply(agg_df$scenario, .parse_year, character(1L)))
+
+  fut_yr_labels  <- sort(unique(agg_df$yr_lbl[agg_df$yr_lbl != "Historical"]))
+  yr_styles      <- .resolve_year_styles(fut_yr_labels)
+  present_ssps   <- sort(unique(agg_df$ssp_key[agg_df$ssp_key != "Historical"]))
+  colour_map_ssp <- c("Historical" = "black",
+                      .ssp_colours[intersect(names(.ssp_colours), present_ssps)])
+  ltype_map_yr   <- c("Historical" = "solid", yr_styles$linetype_map)
+  hist_mean      <- if (nrow(hist_df) > 0L) mean(hist_df$central, na.rm = TRUE) else NA_real_
+  ann_y          <- if (isTRUE(logit_x)) 0.97 else 0.95
+
+  # Combined legend: each scenario gets one entry with its colour (SSP) and
+  # linetype (period). Build parallel maps keyed by the scenario string.
+  scen_levels <- c("Historical",
+                    sort(unique(agg_df$scenario[!agg_df$is_historical])))
+  scen_colour_map <- vapply(scen_levels, function(s) {
+    if (s == "Historical") return(unname(colour_map_ssp[["Historical"]]))
+    unname(colour_map_ssp[[.normalise_ssp(s)]] %||% "grey50")
+  }, character(1L))
+  scen_ltype_map <- vapply(scen_levels, function(s) {
+    if (s == "Historical") return(unname(ltype_map_yr[["Historical"]]))
+    yr <- .parse_year(s)
+    unname(ltype_map_yr[[yr]] %||% "solid")
+  }, character(1L))
+  agg_df$scenario <- factor(agg_df$scenario, levels = scen_levels)
 
     # ---- Plot ---------------------------------------------------------------
-  p <- ggplot2::ggplot(
-    exceedance_df,
-    ggplot2::aes(
-      x        = welfare_val,
-      y        = exceed_prob,
-      colour   = ssp_key,
-      linetype = yr,
-      group    = scenario
-    )
-  ) +
-    ggplot2::geom_line(linewidth = 0.9) +
+  # Layer order (back to front): inter-model ribbon (future) -> coefficient
+  # ribbon (optional) -> median curve.
+  fut_mod_df <- agg_df[!agg_df$is_historical, , drop = FALSE]
 
-    # Coefficient uncertainty ribbon — band_q controlled
-    { if (!is.null(band_q) && any(!is.na(exceedance_df$band_lo))) {
-        ggplot2::geom_ribbon(
-          data    = exceedance_df[!is.na(exceedance_df$band_lo), ],
-          mapping = ggplot2::aes(
-            y     = .data$exceed_prob,
-            xmin  = .data$band_lo,
-            xmax  = .data$band_hi,
-            fill  = .data$ssp_key,
-            group = .data$scenario
-          ),
-          alpha       = 0.15,
-          inherit.aes = FALSE
-        )
-      } else NULL
-    } +
-    
+  p <- ggplot2::ggplot(
+    agg_df,
+    ggplot2::aes(
+      x        = .data$central,
+      y        = .data$exceed_prob,
+      colour   = .data$scenario,
+      linetype = .data$scenario,
+      group    = .data$scenario
+    )
+  )
+
+  # Inter-model ribbon (futures only)
+  if (nrow(fut_mod_df) > 0L) {
+    p <- p + ggplot2::geom_ribbon(
+      data    = fut_mod_df,
+      mapping = ggplot2::aes(
+        y     = .data$exceed_prob,
+        xmin  = .data$intermod_lo,
+        xmax  = .data$intermod_hi,
+        fill  = .data$scenario,
+        group = .data$scenario
+      ),
+      alpha       = 0.18,
+      inherit.aes = FALSE
+    )
+  }
+
+  # Coefficient uncertainty band: drawn as a pair of dashed outline curves
+  # (lo and hi) instead of a filled ribbon, so it remains visible regardless
+  # of whether it falls inside or outside the inter-model ribbon.
+  if (!is.null(band_q) && any(!is.na(agg_df$coef_lo))) {
+    coef_df <- agg_df[!is.na(agg_df$coef_lo), , drop = FALSE]
+    p <- p +
+      ggplot2::geom_line(
+        data    = coef_df,
+        mapping = ggplot2::aes(
+          x      = .data$coef_lo,
+          y      = .data$exceed_prob,
+          colour = .data$scenario,
+          group  = .data$scenario
+        ),
+        linetype    = "dashed",
+        linewidth   = 0.5,
+        inherit.aes = FALSE,
+        show.legend = FALSE
+      ) +
+      ggplot2::geom_line(
+        data    = coef_df,
+        mapping = ggplot2::aes(
+          x      = .data$coef_hi,
+          y      = .data$exceed_prob,
+          colour = .data$scenario,
+          group  = .data$scenario
+        ),
+        linetype    = "dashed",
+        linewidth   = 0.5,
+        inherit.aes = FALSE,
+        show.legend = FALSE
+      )
+  }
+
+  p <- p +
+    ggplot2::geom_line(linewidth = 0.9) +
     ggplot2::geom_vline(
       xintercept = hist_mean, linetype = "dotted",
       colour = "black", linewidth = 0.5
@@ -939,26 +817,26 @@ enhance_exceedance <- function(scenarios,
       label = "Hist. mean", hjust = 1.05, vjust = -0.4,
       size = 2.8, colour = "grey30"
     ) +
+    # Merged legend: a single entry per scenario showing its colour (SSP)
+    # and linetype (period). Both scales share the same `name` and `breaks`
+    # so ggplot collapses them into one combined legend.
     ggplot2::scale_color_manual(
-      values = colour_map_ssp,
-      breaks = c("Historical", present_ssps),
-      labels = c("Historical", present_ssps),
-      name   = "Climate scenario",
-      guide  = ggplot2::guide_legend(order = 1,
-                                     override.aes = list(linewidth = 0.9))
+      values = scen_colour_map,
+      breaks = scen_levels,
+      name   = "Scenario",
+      guide  = ggplot2::guide_legend(override.aes = list(linewidth = 0.9))
     ) +
     ggplot2::scale_fill_manual(
-      values   = colour_map_ssp,
+      values   = scen_colour_map,
+      breaks   = scen_levels,
       na.value = "grey70",
       guide    = "none"
     ) +
     ggplot2::scale_linetype_manual(
-      values = ltype_map_yr,
-      breaks = c("Historical", present_yrs),
-      labels = c("Historical", present_yrs),
-      name   = "Period",
-      guide  = ggplot2::guide_legend(order = 2,
-                                     override.aes = list(linewidth = 0.9))
+      values = scen_ltype_map,
+      breaks = scen_levels,
+      name   = "Scenario",
+      guide  = ggplot2::guide_legend(override.aes = list(linewidth = 0.9))
     ) +
     ggplot2::labs(
       title = "Exceedance probability by climate scenario",

@@ -56,7 +56,7 @@ mod_2_01_weathersim_ui <- function(id) {
       shiny::uiOutput(ns("hist_years_warning")),
       shiny::helpText(
         tags$b("Note:"), " Historical weather informs the underlying variability,",
-        " which is then perturbed with climate scenario forecasts.",
+        " which is then perturbed with climate scenario projections.",
         tags$b(" 30 years is the recommended default."),
         style = "font-size: 11px; color: #555; margin-top: 2px; margin-bottom: 8px;"
       ),
@@ -143,69 +143,45 @@ mod_2_01_weathersim_ui <- function(id) {
       # -- Simulation parameters -------------------------------------------
       shiny::tags$h6("Simulation parameters",
                      style = "font-weight:600; margin-bottom:4px;"),
-      shiny::numericInput(
-        inputId = ns("sim_n"),
-        label   = "Coefficient draws (S)",
-        value   = 30, min = 10, max = 1000, step = 10
-      ),
-      shiny::helpText(
-        "200-500 recommended for final runs; 50 for speed. Upper bound 1,000.",
-        style = "font-size:11px; color:#555; margin-top:2px; margin-bottom:8px;"
-      ),
-      shiny::numericInput(
-        inputId = ns("pov_line_sim"),
-        label   = "Poverty line (daily, 2021 PPP USD)",
-        value   = 3.00, min = 0, step = 0.5
-      ),
-      shiny::helpText(
-        "Used for headcount / FGT calculations. Poverty line is fixed at simulation time.",
-        style = "font-size:11px; color:#555; margin-top:2px; margin-bottom:8px;"
-      ),
-      shiny::tags$hr(style = "margin: 6px 0;"),
       shiny::checkboxInput(
-        inputId = ns("dev_mode"),
-        label   = shiny::tags$span(
-          style = "font-size:11px; font-weight:600; color:#b45309;",
-          "⚠ Dev mode: 1 ensemble model only"
-        ),
+        inputId = ns("include_coef_uncertainty"),
+        label   = "Include coefficient uncertainty",
         value   = TRUE
       ),
       shiny::helpText(
-        "When checked, only the first CMIP6 ensemble member per SSP/period is used.",
-        " Speeds up testing. Disable for final runs.",
-        style = "font-size:11px; color:#b45309; margin-top:2px; margin-bottom:8px;"
-      ),
-      shiny::checkboxInput(
-        inputId = ns("skip_coef_draws"),
-        label   = shiny::tags$span(
-          style = "font-size:11px; font-weight:600; color:#555;",
-          "Skip coefficient draws (point estimates only)"
-        ),
-        value   = TRUE
-      ),
-      shiny::helpText(
-        "When checked, S draws are skipped and point estimates are used.",
-        " Faster for testing. Coefficient uncertainty bands will not appear.",
+        "Propagates the regression-fit covariance via the analytic delta method.",
+        " Disable to use point estimates only.",
         style = "font-size:11px; color:#555; margin-top:2px; margin-bottom:8px;"
       ),
-      shiny::checkboxInput(
-        ns("exclude_gini"),
-        label = "Exclude Gini coefficient (faster computation)",
-        value = TRUE
-      ),
-      shiny::tags$hr(style = "margin: 6px 0;"),
-      shiny::checkboxInput(
-        ns("save_fixtures"),
-        label = shiny::tags$span(
-          style = "font-size:11px; font-weight:600; color:#555;",
-          "Save dev fixtures after simulation"
+
+      # -- Advanced ---------------------------------------------------------
+      shiny::tags$details(
+        shiny::tags$summary(
+          style = "cursor:pointer; font-size:11px; color:#555; font-weight:600; margin-top:4px;",
+          "Advanced ▼"
         ),
-        value = FALSE
-      ),
-      shiny::helpText(
-        "Saves sim_inputs.rds and sim_inputs_full.rds to dev/fixtures/.",
-        " Adds ~30s after simulation completes. Dev mode only.",
-        style = "font-size:11px; color:#555; margin-top:2px; margin-bottom:4px;"
+        shiny::checkboxInput(
+          inputId = ns("dev_mode"),
+          label   = shiny::tags$span(
+            style = "font-size:11px; font-weight:600; color:#b45309;",
+            "⚠ Dev mode: 1 ensemble model only"
+          ),
+          value   = FALSE
+        ),
+        shiny::numericInput(
+          inputId = ns("sim_n"),
+          label   = "Monte Carlo draws (S, fallback only)",
+          value   = 150, min = 10, max = 1000, step = 10
+        ),
+        shiny::helpText(
+          "Coefficient uncertainty is propagated analytically via the delta method",
+          " for all standard aggregates (mean, total, headcount, poverty gap, FGT2,",
+          " Gini). The Monte Carlo path is used only as a fallback for aggregates",
+          " where the delta-method gradient is unavailable or unstable (currently",
+          " ‘avg_poverty’ with few poor households). S sets the number of",
+          " coefficient draws in that fallback.",
+          style = "font-size:11px; color:#555; margin-top:2px; margin-bottom:4px;"
+        )
       ),
     ),
     shiny::tags$hr(style = "margin: 10px 0;"),
@@ -247,8 +223,6 @@ mod_2_01_weathersim_server <- function(id,
     # ---- Internal state ----------------------------------------------------
     hist_sim        <- reactiveVal(NULL)
     saved_scenarios <- reactiveVal(list())
-    hist_agg_rv    <- reactiveVal(NULL)
-    scenario_agg_rv <- reactiveVal(NULL)
 
     # ---- Baseline survey reactives ----------------------------------------
 
@@ -547,7 +521,7 @@ mod_2_01_weathersim_server <- function(id,
             ssps                = ssps,
             residuals           = sh_residuals, #sh$residuals,
             dev_mode            = isTRUE(input$dev_mode),
-            skip_coef_draws     = isTRUE(input$skip_coef_draws),
+            skip_coef_draws     = !isTRUE(input$include_coef_uncertainty),
             sim_dates           = sim_dates,
             perturbation_method = perturbation_method,
             stored_breaks       = stored_breaks(),
@@ -571,174 +545,33 @@ mod_2_01_weathersim_server <- function(id,
         req(!is.null(result))
 
         # ---- Store results (reactive side effects) -------------------------
+        # Aggregation now happens lazily in mod_2_02_results.R via the analytic
+        # delta method — no pre-aggregation step here.
         hist_sim(result$hist_sim_result)
         saved_scenarios(result$new_scenarios)
 
-        # ---- Pre-aggregate at simulation time ------------------------------
-        agg_methods_all <- {
-          m <- unname(hist_aggregate_choices(so$type, so$name))
-          if (isTRUE(input$exclude_gini)) setdiff(m, "gini") else m
-        }
-        S_sim   <- as.integer(input$sim_n %||% 150L)
-        bq_sim  <- c(lo = 0.10, hi = 0.90)
-        res_sim <- if (identical(mf$engine, "rif")) "none" else sh$residuals
-        pov_sim <- as.numeric(input$pov_line_sim)
-
-        t_agg_start <- proc.time()[["elapsed"]]
-        message("[wiseapp] Aggregating results...")
-
-        shiny::showNotification(
-          ui       = paste0("Aggregating results across ",
-                            length(result$new_scenarios) + 1L,
-                            " key(s) — please wait..."),
-          id       = "agg_notify", duration = NULL, type = "message"
-        )
-
-        # Generate shared Z matrix once
-        K_global <- if (!is.null(result$hist_sim_result$pipeline$F_loading))
-                      ncol(result$hist_sim_result$pipeline$F_loading) else 0L
-        Z_global <- if (K_global > 0L && S_sim > 0L)
-                      matrix(stats::rnorm(S_sim * K_global),
-                             nrow = S_sim, ncol = K_global)
-                    else NULL
-
-        shiny::isolate({
-          # Historical aggregation
-          message("[wiseapp] Aggregating historical...")
-          t_hist_start <- proc.time()[["elapsed"]]
-          hist_agg_rv(
-            compute_hist_agg(
-              pipeline  = result$hist_sim_result$pipeline,
-              chol_obj  = result$chol_obj,
-              methods   = agg_methods_all,
-              S         = S_sim,
-              band_q    = bq_sim,
-              residuals = res_sim,
-              pov_line  = pov_sim,
-              is_log    = isTRUE(so$transform == "log"),
-              Z_global  = Z_global
-            )
-          )
-          t_hist_agg <- proc.time()[["elapsed"]] - t_hist_start
-          message(sprintf("[wiseapp] Historical aggregation complete in %s",
-                          format_elapsed(t_hist_agg)))
-
-          # Scenario aggregation
-          message("[wiseapp] Aggregating scenarios...")
-          t_scen_start <- proc.time()[["elapsed"]]
-          scenario_agg_rv(
-            compute_scenario_agg(
-              scenarios   = result$new_scenarios,
-              methods     = agg_methods_all,
-              S           = S_sim,
-              band_q      = bq_sim,
-              residuals   = res_sim,
-              pov_line    = pov_sim,
-              Z_global    = Z_global,
-              progress_fn = function(i, n, label) {
-                t_sc_el  <- proc.time()[["elapsed"]] - t_scen_start
-                t_sc_rem <- if (i > 1L)
-                  (t_sc_el / (i - 1L)) * (n - i + 1L) else NA_real_
-                message(sprintf(
-                  "[wiseapp] Aggregating scenario %d/%d: %s | %s elapsed%s",
-                  i, n, label,
-                  format_elapsed(t_sc_el),
-                  if (!is.na(t_sc_rem))
-                    paste0(" | ~", format_elapsed(t_sc_rem), " remaining")
-                  else " | estimating..."
-                ))
-                shiny::showNotification(
-                  ui = sprintf(
-                    "Aggregating scenario %d/%d: %s%s",
-                    i, n, label,
-                    if (!is.na(t_sc_rem))
-                      paste0(" (~", format_elapsed(t_sc_rem), " remaining)")
-                    else ""
-                  ),
-                  id       = "agg_notify",
-                  duration = NULL,
-                  type     = "message"
-                )
-              }
-            )
-          )
-          t_scen_agg <- proc.time()[["elapsed"]] - t_scen_start
-          message(sprintf("[wiseapp] Scenario aggregation complete in %s",
-                          format_elapsed(t_scen_agg)))
-        })
-
-        t_agg_total <- proc.time()[["elapsed"]] - t_agg_start
-        message(sprintf(
-          "[wiseapp] Aggregation complete in %s (hist: %s | scenarios: %s)",
-          format_elapsed(t_agg_total),
-          format_elapsed(t_hist_agg),
-          format_elapsed(t_scen_agg)
-        ))
-
-        shiny::removeNotification("agg_notify")
         shiny::setProgress(value = 1, detail = "Complete")
       })
 
-      # ---- Dev fixture saving -----------------------------------------------
-      # ---- Dev fixture saving (optional — controlled by UI checkbox) --------
-      if (!isTRUE(getOption("golem.app.prod")) &&
-          isTRUE(input$save_fixtures)) {
-        tryCatch({
-          dir.create("dev/fixtures", showWarnings = FALSE, recursive = TRUE)
-
-          # Slim fixtures — for profvis
-          saveRDS(list(
-            hist_sim     = result$hist_sim_result[[1L]],
-            scenario_sim = result$new_scenarios[[1L]],
-            chol_obj     = result$chol_obj,
-            pov_line     = as.numeric(input$pov_line_sim)
-          ), "dev/fixtures/sim_inputs.rds")
-
-          # Full fixtures — for benchmark Section 2
-          saveRDS(list(
-            hist_sim     = result$hist_sim_result[[1L]],
-            scenario_sim = result$new_scenarios[[1L]],
-            chol_obj     = result$chol_obj,
-            pov_line     = as.numeric(input$pov_line_sim),
-            survey_data  = svy,
-            model        = mf$fit3,
-            engine       = mf$engine,
-            train_data   = mf$train_data,
-            sw           = sw,
-            so           = so,
-            residuals    = sh$residuals,
-            weather_raw  = result$hist_sim_result[[1L]]$weather_raw
-          ), "dev/fixtures/sim_inputs_full.rds")
-
-          message("[dev] Fixtures saved (slim + full).")
-        }, error = function(e) {
-          message("[dev] Fixture save failed: ", conditionMessage(e))
-        })
-      }
-
       # ---- Completion notification -----------------------------------------
-      t_total_wall <- result$t_elapsed + t_agg_total
-
       message(sprintf(
-        "[wiseapp] TOTAL wall time: %s | weather: %s | pipelines: %s | aggregation: %s | %d key(s) | S=%d",
-        format_elapsed(t_total_wall),
+        "[wiseapp] TOTAL wall time: %s | weather: %s | pipelines: %s | %d key(s)",
+        format_elapsed(result$t_elapsed),
         format_elapsed(result$t_weather %||% 0),
         format_elapsed(result$t_elapsed - (result$t_weather %||% 0)),
-        format_elapsed(t_agg_total),
-        result$n_keys, S_sim
+        result$n_keys
       ))
 
       shiny::showNotification(
         ui = tagList(
           tags$b("\u2713 Simulation complete"), tags$br(),
           sprintf("%s total | %d key(s) | ~%d runs",
-                  format_elapsed(t_total_wall),
+                  format_elapsed(result$t_elapsed),
                   result$n_keys, result$total_runs),
           tags$br(),
-          sprintf("Weather: %s | Pipelines: %s | Aggregation: %s",
+          sprintf("Weather: %s | Pipelines: %s | Aggregation: lazy (delta method)",
                   format_elapsed(result$t_weather %||% 0),
-                  format_elapsed(result$t_elapsed - (result$t_weather %||% 0)),
-                  format_elapsed(t_agg_total))
+                  format_elapsed(result$t_elapsed - (result$t_weather %||% 0)))
         ),
         type = "message", duration = 10
       )
@@ -751,9 +584,9 @@ mod_2_01_weathersim_server <- function(id,
       saved_scenarios = saved_scenarios,
       selected_hist   = selected_hist,
       selected_fut    = selected_fut,
-      pov_line_sim    = reactive(input$pov_line_sim),
-      hist_agg_rv    = hist_agg_rv,
-      scenario_agg_rv = scenario_agg_rv
+      sim_n           = reactive(input$sim_n),
+      residuals       = reactive(input$residuals %||% "none"),
+      skip_coef_draws = reactive(!isTRUE(input$include_coef_uncertainty))
     )
   })
 }

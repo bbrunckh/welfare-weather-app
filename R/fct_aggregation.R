@@ -12,7 +12,6 @@
 #   resolve_agg_fn, resolve_S, resolve_band_q
 #   aggregate_draws_vectorized, aggregate_with_uncertainty
 #   combine_ensemble_results
-#   compute_hist_agg, compute_scenario_agg
 #   hist_aggregate_choices
 #   aggregate_outcome, deviation_from_centre
 #   aggregate_sim_preds, apply_deviation
@@ -541,375 +540,61 @@ aggregate_with_uncertainty <- function(y_point,
 #' @return A tibble with columns: `sim_year`, `value`, `value_p05`,
 #'   `value_p95`, `model_values`.
 #' @export
-combine_ensemble_results <- function(member_results) {
+combine_ensemble_results <- function(member_results,
+                                     band_q = c(lo = 0.10, hi = 0.90)) {
   member_results <- Filter(Negate(is.null), member_results)
   if (length(member_results) == 0L) return(NULL)
 
   values <- vapply(member_results, `[[`, numeric(1L), "value")
+  value  <- mean(values, na.rm = TRUE)
 
-  # Thick band — pure weather + model spread (y_point only, no coef draws)
-  # value = point estimate per member (no draws applied)
+  # Analytic pooling via law of total variance:
+  #   Var(T) = E[Var(T|m)] + Var(E[T|m])
+  #          = mean(var_coef + var_resid) + var(values across members)
+  var_coef_vec <- vapply(member_results,
+                         function(x) x$var_coef  %||% NA_real_, numeric(1L))
+  var_res_vec  <- vapply(member_results,
+                         function(x) x$var_resid %||% NA_real_, numeric(1L))
+  var_within <- mean(var_coef_vec + var_res_vec, na.rm = TRUE)
+  if (!is.finite(var_within)) var_within <- 0
+  var_across <- if (length(values) > 1L) stats::var(values, na.rm = TRUE) else 0
+  if (!is.finite(var_across)) var_across <- 0
+  var_pool   <- var_within + var_across
+  se_pool    <- sqrt(max(var_pool, 0))
 
-  draw_mat     <- do.call(rbind, lapply(member_results, `[[`, "draw_values"))
-  pooled_draws <- as.vector(draw_mat)   # 22 models × 30 years × S draws
+  # Per-member SDs propagated separately so callers can build per-outcome
+  # bands without recovering var_coef/var_resid from the member list.
+  per_member_sd <- sqrt(pmax(var_coef_vec + var_res_vec, 0, na.rm = FALSE))
+
+  z_lo <- stats::qnorm(band_q[["lo"]])
+  z_hi <- stats::qnorm(band_q[["hi"]])
 
   list(
-    value     = mean(values, na.rm = TRUE),
+    value     = value,
     value_all = values,
 
     # Thick band — point estimates only (weather + model spread)
-    value_lo  = unname(quantile(values,       0.10, na.rm = TRUE)),
-    value_hi  = unname(quantile(values,       0.90, na.rm = TRUE)),
+    value_lo  = unname(stats::quantile(values, band_q[["lo"]], na.rm = TRUE)),
+    value_hi  = unname(stats::quantile(values, band_q[["hi"]], na.rm = TRUE)),
 
-    # Thin line — full joint distribution (adds coefficient uncertainty)
-    coef_lo   = unname(quantile(pooled_draws, 0.10, na.rm = TRUE)),
-    coef_hi   = unname(quantile(pooled_draws, 0.90, na.rm = TRUE)),
+    # Thin line — analytic pooled SE (coefficient + residual + model spread)
+    coef_lo   = value + z_lo * se_pool,
+    coef_hi   = value + z_hi * se_pool,
 
     model_lo  = min(values,  na.rm = TRUE),
-    model_q10 = unname(quantile(values, 0.10, na.rm = TRUE)),
-    model_q25 = unname(quantile(values, 0.25, na.rm = TRUE)),
-    model_med = unname(quantile(values, 0.50, na.rm = TRUE)),
-    model_q75 = unname(quantile(values, 0.75, na.rm = TRUE)),
-    model_q90 = unname(quantile(values, 0.90, na.rm = TRUE)),
+    model_q10 = unname(stats::quantile(values, 0.10, na.rm = TRUE)),
+    model_q25 = unname(stats::quantile(values, 0.25, na.rm = TRUE)),
+    model_med = unname(stats::quantile(values, 0.50, na.rm = TRUE)),
+    model_q75 = unname(stats::quantile(values, 0.75, na.rm = TRUE)),
+    model_q90 = unname(stats::quantile(values, 0.90, na.rm = TRUE)),
     model_hi  = max(values,  na.rm = TRUE),
-    draw_values = pooled_draws,
+    draw_values = NULL,
+    var_pool    = var_pool,
+    var_within  = var_within,
+    var_across  = var_across,
+    per_member_sd = per_member_sd,
     n_members   = length(member_results)
   )
-}
-
-
-# ---------------------------------------------------------------------------- #
-# Aggregation helpers — called at simulation time, not display time            #
-# ---------------------------------------------------------------------------- #
-
-#' Aggregate historical simulation pipeline across all methods
-#'
-#' Pure function. Called once at simulation time inside observeEvent(input$run_sim).
-#' Returns a named list — one tibble per aggregation method — so the Results tab
-#' can switch methods instantly without recomputation.
-#'
-#' @param pipeline   List. Output of run_sim_pipeline() for the historical key.
-#' @param chol_obj   List or NULL. Cholesky VCV object from compute_chol_vcov().
-#' @param methods    Character vector. Aggregation method names (e.g. "mean", "fgt0").
-#' @param use_w      Logical. Whether to apply survey weights.
-#' @param S          Integer. Number of coefficient draws.
-#' @param band_q     Named numeric. Quantile bounds c(lo=, hi=).
-#' @param residuals  Character. Residual method — "none", "original", etc.
-#' @param pov_line   Numeric. Poverty line value (baked in at simulation time).
-#' @param is_log     Logical. Whether outcome is on log scale.
-#'
-#' @return Named list keyed by method name. Each entry is a tibble with columns
-#'   sim_year, value, value_lo, value_p50, value_hi, draw_values, agg_method,
-#'   weighted, scenario.
-#' @noRd
-compute_hist_agg <- function(pipeline,
-                             chol_obj,
-                             methods,
-                             S         = 150L,
-                             band_q    = c(lo = 0.10, hi = 0.90),
-                             residuals = "none",
-                             pov_line  = NULL,
-                             is_log    = TRUE,
-                             Z_global  = NULL) {
-
-  has_weights <- !is.null(pipeline$weight)
-  sim_years   <- sort(unique(pipeline$sim_year))
-
-  K        <- if (!is.null(pipeline$F_loading)) ncol(pipeline$F_loading) else 0L
-  Z_shared <- if (!is.null(Z_global)) {
-                Z_global
-              }else if (K > 0L && S > 0L) {
-                matrix(stats::rnorm(S * K), nrow = S, ncol = K)
-              }   else NULL
-
-  run_one_hist <- function(use_w) {
-      weights  <- if (use_w) pipeline$weight else NULL
-      n_yrs    <- length(sim_years)
-      n_meth   <- length(methods)
-      n_rows   <- n_yrs * n_meth
-      lo_q     <- band_q[["lo"]]
-      hi_q     <- band_q[["hi"]]
-
-      # Pre-allocate output vectors — one tibble at end, no intermediate allocs
-      out_year      <- rep(sim_years, each  = n_meth)
-      out_method    <- rep(methods,   times = n_yrs)
-      out_value     <- numeric(n_rows)
-      out_value_lo  <- numeric(n_rows)
-      out_value_p50 <- numeric(n_rows)
-      out_value_hi  <- numeric(n_rows)
-      out_draws     <- vector("list", n_rows)
-
-      resid_method <- if (residuals == "original" && is.null(pipeline$id_vec)) {
-        message("[compute_hist_agg] residuals = 'original' but id_vec is NULL — ",
-                "falling back to 'resample'.")
-        "resample"
-      } else residuals
-
-      for (yi in seq_along(sim_years)) {
-        yr    <- sim_years[[yi]]
-        idx   <- pipeline$sim_year == yr
-        y_pt  <- pipeline$y_point[idx]
-        F_idx <- if (!is.null(pipeline$F_loading))
-                  pipeline$F_loading[idx, , drop = FALSE] else NULL
-        w_idx <- if (!is.null(weights)) weights[idx] else NULL
-        N_yr  <- sum(idx)
-
-        resid_vec <- draw_residuals_vec(
-          resid_method, pipeline$train_aug, N_yr,
-          if (!is.null(pipeline$id_vec)) pipeline$id_vec[idx] else NULL,
-          pipeline$id_col
-        )
-
-        y_pt_vec   <- y_pt + resid_vec
-        welfare_pt <- if (is_log) exp(y_pt_vec) else y_pt_vec
-
-        if (!is.null(F_idx) && !is.null(Z_shared) && S > 0L) {
-          perturbations <- F_idx %*% t(Z_shared)
-          Y_mat         <- y_pt + perturbations + resid_vec
-          if (is_log) Y_mat <- exp(Y_mat)
-        } else {
-          Y_mat <- matrix(welfare_pt, ncol = 1L)
-        }
-
-        wpt_mat <- matrix(welfare_pt, ncol = 1L)
-
-        for (mi in seq_along(methods)) {
-          row_i    <- (yi - 1L) * n_meth + mi
-          method   <- methods[[mi]]
-
-          draw_vals <- tryCatch(
-            aggregate_draws_vectorized(Y_mat, method, w_idx, pov_line),
-            error = function(e) {
-              warning("[compute_hist_agg] method=", method,
-                      " yr=", yr, ": ", conditionMessage(e))
-              NULL
-            }
-          )
-          if (is.null(draw_vals)) {
-            out_value[[row_i]]     <- NA_real_
-            out_value_lo[[row_i]]  <- NA_real_
-            out_value_p50[[row_i]] <- NA_real_
-            out_value_hi[[row_i]]  <- NA_real_
-            out_draws[[row_i]]     <- NULL
-            next
-          }
-
-          out_value[[row_i]]     <- tryCatch(
-            aggregate_draws_vectorized(wpt_mat, method, w_idx, pov_line)[[1L]],
-            error = function(e) NA_real_
-          )
-          out_value_lo[[row_i]]  <- stats::quantile(draw_vals, lo_q, na.rm = TRUE)
-          out_value_p50[[row_i]] <- stats::quantile(draw_vals, 0.50, na.rm = TRUE)
-          out_value_hi[[row_i]]  <- stats::quantile(draw_vals, hi_q, na.rm = TRUE)
-          out_draws[[row_i]]     <- draw_vals
-        }
-      }
-
-      # Single tibble construction — replaces 270 small allocations
-      all_rows <- tibble::tibble(
-        sim_year    = out_year,
-        value       = out_value,
-        value_lo    = out_value_lo,
-        value_p50   = out_value_p50,
-        value_hi    = out_value_hi,
-        draw_values = out_draws,
-        agg_method  = out_method,
-        weighted    = use_w,
-        scenario    = "Historical"
-      )
-
-      # Remove NA rows (failed methods)
-      all_rows <- all_rows[!is.na(all_rows$value), ]
-
-      setNames(
-        lapply(methods, function(m) all_rows[all_rows$agg_method == m, ]),
-        methods
-      )
-    }
-
-  list(
-    unweighted = run_one_hist(FALSE),
-    weighted   = if (has_weights) run_one_hist(TRUE) else run_one_hist(FALSE)
-  )
-}
-
-#' Aggregate scenario simulation pipelines across all methods
-#'
-#' Pure function. Called once at simulation time inside observeEvent(input$run_sim).
-#' Returns a named list keyed by display_key, then method name.
-#'
-#' @param scenarios  Named list. Each entry is a saved_scenarios() entry with
-#'   $pipelines (named list of run_sim_pipeline() outputs), $chol_obj, $so.
-#' @param methods    Character vector. Aggregation method names.
-#' @param use_w      Logical. Whether to apply survey weights.
-#' @param S          Integer. Number of coefficient draws.
-#' @param band_q     Named numeric. Quantile bounds c(lo=, hi=).
-#' @param residuals  Character. Residual method.
-#' @param pov_line   Numeric. Poverty line value.
-#'
-#' @return Named list keyed by display_key. Each entry is a named list keyed
-#'   by method, containing a tibble with the same columns as compute_hist_agg().
-#' @noRd
-compute_scenario_agg <- function(scenarios,
-                                 methods,
-                                 S         = 150L,
-                                 band_q    = c(lo = 0.10, hi = 0.90),
-                                 residuals = "none",
-                                 pov_line  = NULL,
-                                 Z_global  = NULL,
-                                 progress_fn = function(i, n, label) invisible(NULL)) {
-
-  n_scenarios <- length(scenarios)
-  setNames(lapply(seq_along(scenarios), function(si) {
-    display_key   <- names(scenarios)[[si]]
-    progress_fn(si, n_scenarios, display_key)
-    s             <- scenarios[[si]]
-    is_log        <- isTRUE(s$so$transform == "log")
-    chol_obj      <- s$chol_obj
-    pipes         <- s$pipelines
-    sim_years     <- sort(unique(pipes[[1L]]$sim_year))
-    has_weights_s <- !is.null(pipes[[1L]]$weight)
-
-    K_s      <- if (!is.null(pipes[[1L]]$F_loading)) ncol(pipes[[1L]]$F_loading) else 0L
-    Z_shared <- if(!is.null(Z_global)) {
-                  Z_global
-                } else if (K_s > 0L && S > 0L) {
-                  matrix(stats::rnorm(S * K_s), nrow = S, ncol = K_s)
-               } else NULL
-    run_one_scen <- function(use_w) {
-      weights_base <- if (use_w && has_weights_s) pipes[[1L]]$weight else NULL
-      n_yrs    <- length(sim_years)
-      n_meth   <- length(methods)
-      n_rows   <- n_yrs * n_meth
-      lo_q     <- band_q[["lo"]]
-      hi_q     <- band_q[["hi"]]
-
-      out_year      <- rep(sim_years, each  = n_meth)
-      out_method    <- rep(methods,   times = n_yrs)
-      out_value     <- numeric(n_rows)
-      out_value_lo  <- numeric(n_rows)
-      out_value_hi  <- numeric(n_rows)
-      out_coef_lo   <- numeric(n_rows)
-      out_coef_hi   <- numeric(n_rows)
-      out_value_all <- vector("list", n_rows)
-      out_draws     <- vector("list", n_rows)
-      out_model_q10 <- numeric(n_rows)
-      out_model_q90 <- numeric(n_rows)
-      out_model_lo  <- numeric(n_rows)
-      out_model_hi  <- numeric(n_rows)
-      out_value_p50 <- numeric(n_rows)
-
-      for (yi in seq_along(sim_years)) {
-        yr <- sim_years[[yi]]
-
-        member_Y_mats <- lapply(pipes, function(pipe) {
-          idx   <- pipe$sim_year == yr
-          y_pt  <- pipe$y_point[idx]
-          F_idx <- if (!is.null(pipe$F_loading))
-                     pipe$F_loading[idx, , drop = FALSE] else NULL
-          N_yr  <- sum(idx)
-          w_idx <- if (!is.null(weights_base)) weights_base[idx] else NULL
-
-          resid_method <- if (residuals == "original" && is.null(pipe$id_vec)) {
-            message("[compute_scenario_agg] residuals = 'original' but ",
-                    "id_vec is NULL — falling back to 'resample'.")
-            "resample"
-          } else residuals
-
-          resid_vec  <- draw_residuals_vec(
-            resid_method, pipe$train_aug, N_yr,
-            if (!is.null(pipe$id_vec)) pipe$id_vec[idx] else NULL,
-            pipe$id_col
-          )
-          welfare_pt <- if (is_log) exp(y_pt + resid_vec) else y_pt + resid_vec
-
-          if (!is.null(F_idx) && !is.null(Z_shared) && S > 0L) {
-            perturbations <- F_idx %*% t(Z_shared)
-            Y_mat         <- y_pt + perturbations + resid_vec
-            if (is_log) Y_mat <- exp(Y_mat)
-          } else {
-            Y_mat <- matrix(welfare_pt, ncol = 1L)
-          }
-          list(Y_mat = Y_mat, welfare_pt = welfare_pt, w_idx = w_idx)
-        })
-
-        for (mi in seq_along(methods)) {
-          row_i  <- (yi - 1L) * n_meth + mi
-          method <- methods[[mi]]
-
-          member_results <- lapply(member_Y_mats, function(m) {
-            tryCatch({
-              draw_vals  <- aggregate_draws_vectorized(
-                m$Y_mat, method, m$w_idx, pov_line)
-              value_pt_m <- aggregate_draws_vectorized(
-                matrix(m$welfare_pt, ncol = 1L), method, m$w_idx, pov_line
-              )[[1L]]
-              list(
-                value       = value_pt_m,
-                value_lo    = stats::quantile(draw_vals, lo_q, na.rm = TRUE),
-                value_p50   = stats::quantile(draw_vals, 0.50, na.rm = TRUE),
-                value_hi    = stats::quantile(draw_vals, hi_q, na.rm = TRUE),
-                draw_values = draw_vals,
-                welfare_pt  = mean(m$welfare_pt, na.rm = TRUE)
-              )
-            }, error = function(e) NULL)
-          })
-          member_results <- Filter(Negate(is.null), member_results)
-          if (length(member_results) == 0L) {
-            out_value[[row_i]]     <- NA_real_
-            next
-          }
-          combined <- combine_ensemble_results(member_results)
-          if (is.null(combined)) {
-            out_value[[row_i]] <- NA_real_
-            next
-          }
-          out_value[[row_i]]     <- combined$value
-          out_value_lo[[row_i]]  <- combined$value_lo
-          out_value_hi[[row_i]]  <- combined$value_hi
-          out_coef_lo[[row_i]]   <- combined$coef_lo
-          out_coef_hi[[row_i]]   <- combined$coef_hi
-          out_value_all[[row_i]] <- combined$value_all
-          out_model_q10[[row_i]] <- combined$model_q10
-          out_model_q90[[row_i]] <- combined$model_q90
-          out_model_lo[[row_i]]  <- combined$model_lo
-          out_model_hi[[row_i]]  <- combined$model_hi
-          out_draws[[row_i]]     <- combined$draw_values
-        }
-      }
-
-      # Single tibble construction
-      all_rows <- tibble::tibble(
-        sim_year    = out_year,
-        value       = out_value,
-        value_lo    = out_value_lo,
-        value_hi    = out_value_hi,
-        coef_lo     = out_coef_lo,
-        coef_hi     = out_coef_hi,
-        value_all   = out_value_all,
-        model_q10   = out_model_q10,
-        model_q90   = out_model_q90,
-        model_lo    = out_model_lo,
-        model_hi    = out_model_hi,
-        draw_values = out_draws,
-        agg_method  = out_method,
-        weighted    = use_w
-      )
-
-      # Remove failed rows
-      all_rows <- all_rows[!is.na(all_rows$value), ]
-
-      setNames(
-        lapply(methods, function(m) all_rows[all_rows$agg_method == m, ]),
-        methods
-      )
-    }
-
-    list(
-      unweighted = run_one_scen(FALSE),
-      weighted   = if (has_weights_s) run_one_scen(TRUE) else run_one_scen(FALSE)
-    )
-  }), names(scenarios))
 }
 
 # ---------------------------------------------------------------------------- #
@@ -1352,38 +1037,39 @@ apply_deviation <- function(d, deviation, hist_ref = NA_real_) {
 compute_exceedance_ribbon <- function(agg_tbl,
                                       band_q = c(lo = 0.10, hi = 0.90),
                                       model_lo = NULL, model_hi = NULL) {
-  draw_list <- agg_tbl$draw_values
-  if (is.null(draw_list) || length(draw_list) == 0L) return(NULL)
-
-  S       <- length(draw_list[[1L]])
   N_years <- nrow(agg_tbl)
-  if (S < 2L) return(NULL)
+  if (N_years == 0L) return(NULL)
 
-  # Build N_years × S matrix — each column = one draw across all years
-  draw_mat <- matrix(
-    unlist(draw_list, use.names = FALSE),
-    nrow  = N_years,
-    ncol  = S,
-    byrow = TRUE
-  )
-
-  # Sort each column highest → lowest — S exceedance curves in x-space
-  # Each column is now one complete exceedance curve (welfare values)
-  rank_order  <- order(agg_tbl$value, decreasing = TRUE)
-  ordered_mat <- draw_mat[rank_order, ]
-
-  # Exceedance probabilities — matches R ecdf() formula exactly:
-  probs <- (seq_len(N_years) - 0.5) / N_years
-
-  # Point estimate curve — sort annual values highest to lowest
+  rank_order     <- order(agg_tbl$value, decreasing = TRUE)
+  probs          <- (seq_len(N_years) - 0.5) / N_years
   welfare_sorted <- sort(agg_tbl$value, decreasing = TRUE)
 
-  # Ribbon = quantile envelope across S curves IN WELFARE (x) SPACE
-  # At each probability rank — what is the p10/p90 welfare value?
-  coef_lo <- matrixStats::rowQuantiles(
-             ordered_mat, probs = band_q[["lo"]], na.rm = TRUE)
-  coef_hi <- matrixStats::rowQuantiles(
-              ordered_mat, probs = band_q[["hi"]], na.rm = TRUE)
+  draw_list <- agg_tbl$draw_values
+  has_draws <- !is.null(draw_list) && length(draw_list) > 0L &&
+               !is.null(draw_list[[1L]]) && length(draw_list[[1L]]) >= 2L
+
+  if (has_draws) {
+    S <- length(draw_list[[1L]])
+    # Build N_years × S matrix — each column = one draw across all years
+    draw_mat <- matrix(
+      unlist(draw_list, use.names = FALSE),
+      nrow  = N_years,
+      ncol  = S,
+      byrow = TRUE
+    )
+    ordered_mat <- draw_mat[rank_order, ]
+    coef_lo <- matrixStats::rowQuantiles(
+               ordered_mat, probs = band_q[["lo"]], na.rm = TRUE)
+    coef_hi <- matrixStats::rowQuantiles(
+                ordered_mat, probs = band_q[["hi"]], na.rm = TRUE)
+  } else if (all(c("coef_lo", "coef_hi") %in% names(agg_tbl))) {
+    # Delta-method path — use analytic band columns directly.
+    # Re-order to match the descending welfare ranking.
+    coef_lo <- agg_tbl$coef_lo[rank_order]
+    coef_hi <- agg_tbl$coef_hi[rank_order]
+  } else {
+    return(NULL)
+  }
 
   # Option A approximation — apply coef width to ensemble bounds
   # Ensemble uncertainty bands use coefficient uncertainty width from

@@ -49,6 +49,27 @@ mod_2_03_diagnostics_ui <- function(id) {
         shiny::tags$b("Coloured lines = Future scenarios:"),
         " solid = earliest simulation year, dashed = middle, dotted = latest."
       )
+    ),
+
+    # ---- 2. Variance contribution panel ------------------------------------
+    shiny::wellPanel(
+      shiny::h4("Variance contribution by uncertainty source"),
+      shiny::plotOutput(ns("variance_contribution_plot"), height = "320px"),
+      shiny::tags$p(
+        style = "font-size:11px; color:#666; margin-top:6px;",
+        "100% stacked bar showing the share of total predictive variance ",
+        "contributed by each source, assuming the three sources are ",
+        "independent (so total variance = sum of components).",
+        shiny::tags$br(),
+        shiny::tags$b("Coefficient uncertainty"),
+        " = mean per-outcome variance from the regression fit.",
+        shiny::tags$br(),
+        shiny::tags$b("Inter-annual variability"),
+        " = mean within-model year-to-year variance of the aggregate.",
+        shiny::tags$br(),
+        shiny::tags$b("Inter-model spread"),
+        " (future scenarios only) = across-model variance of annual aggregates."
+      )
     )
   )
 }
@@ -74,6 +95,7 @@ mod_2_03_diagnostics_server <- function(id,
                                          saved_scenarios,
                                          survey_weather,
                                          selected_weather,
+                                         variance_breakdown = NULL,
                                          tabset_id,
                                          tabset_session = NULL) {
   moduleServer(id, function(input, output, session) {
@@ -239,6 +261,20 @@ mod_2_03_diagnostics_server <- function(id,
     }) |> shiny::bindEvent(input$diag_update_weather, hist_sim(),
                            ignoreNULL = TRUE, ignoreInit = FALSE)
 
+    output$variance_contribution_plot <- renderPlot({
+      req(variance_breakdown)
+      vb <- variance_breakdown()
+      req(!is.null(vb) && nrow(vb) > 0L)
+      # Filter to currently active scenarios when filters are set; otherwise
+      # show all available rows (Historical + all scenarios in vb).
+      active <- active_scenarios_data()
+      if (length(active) > 0L) {
+        keep <- vb$is_historical | vb$scenario %in% active
+        vb <- vb[keep, , drop = FALSE]
+      }
+      plot_variance_contribution(vb)
+    })
+
 
 
     # ---- Insert Diagnostics tab once (first hist_sim only) -----------------
@@ -284,6 +320,7 @@ mod_2_03_diagnostics_server <- function(id,
     outputOptions(output, "scenario_filter_panel",   suspendWhenHidden = TRUE)
     outputOptions(output, "diag_weather_log_ui",     suspendWhenHidden = TRUE)
     outputOptions(output, "diag_weather_density",    suspendWhenHidden = TRUE)
+    outputOptions(output, "variance_contribution_plot", suspendWhenHidden = TRUE)
     outputOptions(output, "weight_status_diag_ui",   suspendWhenHidden = TRUE)
 
     # ---- Return API --------------------------------------------------------

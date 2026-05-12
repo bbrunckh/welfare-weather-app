@@ -386,19 +386,33 @@ policy_input_diagnostics <- function(baseline_svy, policy_svy, vars = NULL) {
     deviation <- input$cmp_deviation  %||% "none"
     use_w     <- isTRUE(input$use_weights)
 
-    agg <- aggregate_with_uncertainty(
-      y_point         = hs$y_point,
-      F_loading       = hs$F_loading,
-      group_vec       = hs$sim_year,
-      so              = hs$so,
-      agg_method      = method,
-      weights         = if (use_w) hs$weight else NULL,
-      pov_line        = pov_line_val(),
-      train_resid     = if (!is.null(hs$train_data)) hs$train_data$.resid else NULL,
-      residual_method = hs$residuals %||% "none",
-      id_vec          = hs$id_vec,
-      S               = as.integer(hs$S %||% 200L)
-    )
+    yrs    <- sort(unique(hs$sim_year))
+    is_log <- isTRUE(hs$so$transform == "log")
+    bq     <- c(lo = 0.10, hi = 0.90)
+    train_aug_df <- if (!is.null(hs$train_data) && ".resid" %in% names(hs$train_data))
+                      hs$train_data else NULL
+
+    rows <- lapply(yrs, function(yr) {
+      idx <- hs$sim_year == yr
+      m <- aggregate_with_uncertainty_delta(
+        y_point   = hs$y_point[idx],
+        F_loading = if (!is.null(hs$F_loading)) hs$F_loading[idx, , drop = FALSE] else NULL,
+        method    = method,
+        weights   = if (use_w && !is.null(hs$weight)) hs$weight[idx] else NULL,
+        pov_line  = pov_line_val(),
+        residuals = hs$residuals %||% "none",
+        train_aug = train_aug_df,
+        id_vec    = if (!is.null(hs$id_vec)) hs$id_vec[idx] else NULL,
+        id_col    = hs$id_col,
+        is_log    = is_log,
+        band_q    = bq
+      )
+      tibble::tibble(sim_year = yr,
+                     value    = m$value,
+                     value_lo = m$value_lo,
+                     value_hi = m$value_hi)
+    })
+    agg <- dplyr::bind_rows(rows)
 
     if (!identical(deviation, "none") && nrow(agg) > 0) {
       agg <- deviation_from_centre(df = agg, group = "sim_year",
@@ -426,22 +440,40 @@ policy_input_diagnostics <- function(baseline_svy, policy_svy, vars = NULL) {
     lapply(sc, function(s) {
       tryCatch({
         if (is.null(s$models)) return(NULL)
-        per_model <- lapply(s$models, function(mod) {
-          aggregate_with_uncertainty(
-            y_point         = mod$y_point,
-            F_loading       = mod$F_loading,
-            group_vec       = mod$sim_year,
-            so              = s$so,
-            agg_method      = method,
-            weights         = if (use_w) mod$weight else NULL,
-            pov_line        = pov_line_val(),
-            train_resid     = if (!is.null(hs_for_dev$train_data)) hs_for_dev$train_data$.resid else NULL,
-            residual_method = hs_for_dev$residuals %||% "none",
-            id_vec          = mod$id_vec,
-            S               = as.integer(hs_for_dev$S %||% 200L)
-          )
+        is_log <- isTRUE(s$so$transform == "log")
+        bq     <- c(lo = 0.10, hi = 0.90)
+        train_aug_df <- if (!is.null(hs_for_dev$train_data) &&
+                            ".resid" %in% names(hs_for_dev$train_data))
+                          hs_for_dev$train_data else NULL
+        yrs    <- sort(unique(s$models[[1L]]$sim_year))
+
+        per_year_rows <- lapply(yrs, function(yr) {
+          per_member <- lapply(s$models, function(mod) {
+            idx <- mod$sim_year == yr
+            aggregate_with_uncertainty_delta(
+              y_point   = mod$y_point[idx],
+              F_loading = if (!is.null(mod$F_loading)) mod$F_loading[idx, , drop = FALSE] else NULL,
+              method    = method,
+              weights   = if (use_w && !is.null(mod$weight)) mod$weight[idx] else NULL,
+              pov_line  = pov_line_val(),
+              residuals = hs_for_dev$residuals %||% "none",
+              train_aug = train_aug_df,
+              id_vec    = if (!is.null(mod$id_vec)) mod$id_vec[idx] else NULL,
+              id_col    = mod$id_col,
+              is_log    = is_log,
+              band_q    = bq
+            )
+          })
+          comb <- combine_ensemble_results(per_member, band_q = bq)
+          tibble::tibble(sim_year     = yr,
+                         value        = comb$value,
+                         value_lo     = comb$value_lo,
+                         value_hi     = comb$value_hi,
+                         value_p05    = comb$coef_lo,
+                         value_p95    = comb$coef_hi,
+                         model_values = list(comb$value_all))
         })
-        combined <- combine_ensemble_results(per_model)
+        combined <- dplyr::bind_rows(per_year_rows)
 
         if (!identical(deviation, "none") && nrow(combined) > 0) {
           hist_agg <- make_agg_hist(hs_for_dev)

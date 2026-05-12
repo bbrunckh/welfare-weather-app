@@ -79,27 +79,28 @@ mod_2_simulation_server <- function(id,
     )
 
     # ---- 2. Results tab ----------------------------------------------------
-    mod_2_02_results_server(
+    s2 <- mod_2_02_results_server(
       "results",
       hist_sim        = s1$hist_sim,
       saved_scenarios = s1$saved_scenarios,
       selected_hist   = s1$selected_hist,
       tabset_id       = "step2_output_tabs",
       tabset_session  = session,
-      pov_line_sim    = reactive(s1$pov_line_sim()),
-      hist_agg_rv     = s1$hist_agg_rv,
-      scenario_agg_rv = s1$scenario_agg_rv
+      sim_n           = s1$sim_n,
+      residuals       = s1$residuals,
+      skip_coef_draws = s1$skip_coef_draws
     )
 
     # ---- 3. Diagnostics tab ------------------------------------------------
     mod_2_03_diagnostics_server(
       "diagnostics",
-      hist_sim         = s1$hist_sim,
-      saved_scenarios  = s1$saved_scenarios,
-      survey_weather   = survey_weather,
-      selected_weather = selected_weather,
-      tabset_id        = "step2_output_tabs",
-      tabset_session   = session
+      hist_sim           = s1$hist_sim,
+      saved_scenarios    = s1$saved_scenarios,
+      survey_weather     = survey_weather,
+      selected_weather   = selected_weather,
+      variance_breakdown = s2$variance_breakdown,
+      tabset_id          = "step2_output_tabs",
+      tabset_session     = session
     )
 
     # ---- Clear scenarios button --------------------------------------------
