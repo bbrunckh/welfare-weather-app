@@ -450,11 +450,19 @@ run_sim_pipeline <- function(weather_raw,
   out <- if (is_rif) {
     # RIF path — quantile delta method
     # Use chol_obj (our format) or chol_Sigma (golem format) for RIF
-    chol_src  <- if (!is.null(chol_obj)) chol_obj else chol_Sigma
+    chol_src <- if (!is.null(chol_obj)) chol_obj else chol_Sigma
+
+    # For RIF: chol_src is list of list(L, K, beta, spec) — one per tau
+    # interpolate_F_loading() needs list of L matrices only
     chol_list <- if (!is.null(chol_src) && is.list(chol_src) &&
-                     !("L" %in% names(chol_src)))
-      chol_src
-    else NULL
+                     !("L" %in% names(chol_src))) {
+      # Extract L matrix from each per-tau Cholesky list
+      lapply(chol_src, function(x) {
+        if (is.list(x) && "L" %in% names(x)) x$L
+        else if (is.matrix(x)) x
+        else NULL
+      })
+    } else NULL
     predict_rif(
       fit_multi    = fit_multi,
       newdata      = survey_wd_sim, #joined,
@@ -530,10 +538,10 @@ run_sim_pipeline <- function(weather_raw,
   # NULL when chol_obj = NULL (point estimates only).
   F_loading <- NULL
   if (is_rif && !is.null(attr(out, "F_loading"))) {
-    # RIF path — F_loading computed inside predict_rif()
+    # RIF path — F_loading computed inside predict_rif() via interpolate_F_loading()
     F_loading <- attr(out, "F_loading")
-  } else if (!is.null(chol_obj)) {
-    # Standard Cholesky path — keep existing guards
+  } else if (!is_rif && !is.null(chol_obj)) {
+      # Standard OLS path only — skip for RIF (model is fixest_multi)
     X_nonFE <- tryCatch(
       model.matrix(model, data = survey_wd_sim, type = "rhs"),
       error = function(e) {
