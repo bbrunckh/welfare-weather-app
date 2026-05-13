@@ -112,6 +112,53 @@ test_that("delta-method headcount with smoothing returns finite SE", {
   expect_lt(abs(se_delta - se_mc) / se_mc, 0.5)
 })
 
+test_that("avg_poverty SE matches MC and has correct gradient sign", {
+  # avg_poverty uses the partial-derivative gradient (not the empirical
+  # influence function — see method_uncertainty.md §3.7). Key qualitative
+  # property: h_j >= 0 for every poor household — lifting any poor
+  # household's welfare raises the conditional poverty mean. The previous
+  # implementation used h_j = (w̃_j / B) * 1{poor} * (μ_j − T) * μ_j, which
+  # flipped sign for households with μ_j < T (the very poorest) and
+  # overstated the SE.
+  pipe <- make_pipeline()
+  pov_line <- 3.00
+
+  # Gradient sign check: extract h directly from gradient_for_method().
+  mu <- exp(pipe$y_point)
+  w_tilde <- pipe$weights / sum(pipe$weights)
+  value_pt <- wiseapp:::resolve_agg_fn("avg_poverty")(mu, pipe$weights, pov_line)
+  h <- wiseapp:::gradient_for_method(
+    method   = "avg_poverty",
+    mu       = mu,
+    weights  = pipe$weights,
+    pov_line = pov_line,
+    value_pt = value_pt
+  )
+  poor <- mu < pov_line
+  expect_true(all(h[poor]  >= 0))   # every poor household lifts T
+  expect_true(all(h[!poor] == 0))   # non-poor never contribute
+  # Some poor are above T (mean), some below T — under the buggy formula
+  # the below-T set would have h < 0. Verify both sets exist in this
+  # fixture so the test is non-trivial.
+  expect_true(any(mu[poor] < value_pt))
+  expect_true(any(mu[poor] > value_pt))
+
+  # SE accuracy vs. MC
+  res <- wiseapp:::aggregate_with_uncertainty_delta(
+    y_point   = pipe$y_point,
+    F_loading = pipe$F_loading,
+    method    = "avg_poverty",
+    weights   = pipe$weights,
+    pov_line  = pov_line
+  )
+  se_delta <- sqrt(res$var_coef)
+  se_mc    <- mc_se(pipe, "avg_poverty", weights = pipe$weights,
+                    pov_line = pov_line)
+  expect_true(is.finite(se_delta) && se_delta > 0)
+  expect_lt(abs(se_delta - se_mc) / se_mc, 0.10)
+})
+
+
 test_that("F_loading = NULL gives zero coefficient variance", {
   pipe <- make_pipeline()
   res <- wiseapp:::aggregate_with_uncertainty_delta(

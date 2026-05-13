@@ -185,7 +185,7 @@ mod_2_02_results_ui <- function(id) {
         shiny::tags$b("Innermost line — “How precisely is each (model, year) aggregate estimated?”"),
         " (shown when coefficient uncertainty is enabled)",
         shiny::tags$br(),
-        " Analytic per-outcome SE from the regression fit. This is precision of a point estimate, not a spread of outcomes — conceptually distinct from the two coloured bands.",
+        " Analytic per-outcome SE from the regression fit. By default, under 'original' residuals, restricted to coefficients on weather variables and their interactions (additive-decomposition SE — see Step 2 settings to widen to all coefficients). This is precision of a point estimate, not a spread of outcomes — conceptually distinct from the two coloured bands.",
         shiny::tags$br(),
         shiny::tags$br(),
         "Historical = single “model” so no inter-model band is shown. A pooled summary SE combining coefficient and inter-model uncertainty is available in the return-period table on the Diagnostics tab."

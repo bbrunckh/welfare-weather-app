@@ -120,7 +120,8 @@ mod_2_simulation_server <- function(id,
       hist_sim        = s1$hist_sim,
       saved_scenarios = s1$saved_scenarios,
       skip_coef_draws = s1$skip_coef_draws,
-      residuals       = s1$residuals
+      residuals       = s1$residuals,
+      propagate_all_covariate_uncertainty = s1$propagate_all_covariate_uncertainty
     )
   })
 }

@@ -183,13 +183,24 @@ gradient_for_method <- function(method, mu, weights, pov_line, value_pt,
     avg_poverty = {
       stopifnot(!is.null(pov_line))
       # T = sum_p w_i mu_i / sum_p w_i over poor (mu_i < pov_line)
-      # h_i = w_tilde_i / B * 1{poor} * (mu_i - T) * mu_i
+      # Partial derivative holding the poverty indicator fixed:
+      #   dT/dmu_j = w_tilde_j * 1{poor_j} / B
+      # (Numerator depends on mu_j only through w_j*1{poor}*mu_j; B does not
+      # depend on mu_j because the indicator is held fixed.) Chain-lift to
+      # log scale by multiplying by mu_j:
+      #   h_j = w_tilde_j * 1{poor_j} * mu_j / B
+      # The (mu_j - T) factor that appears in the empirical influence
+      # function is *not* used here — same convention as Gini (see §3.9 in
+      # method_uncertainty.md). IF is the right object for sample-variance
+      # estimation of T; for delta-method propagation of parametric
+      # beta-uncertainty through mu_i(beta), the partial derivative is the
+      # correct functional gradient.
       poor <- as.numeric(mu < pov_line)
       B    <- sum(w_tilde * poor, na.rm = TRUE)
       if (!is.finite(B) || B <= 0) {
         rep(0, N)
       } else {
-        (w_tilde / B) * poor * (mu - value_pt) * mu
+        (w_tilde / B) * poor * mu
       }
     },
 

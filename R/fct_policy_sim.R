@@ -600,6 +600,29 @@ resimulate_with_svy <- function(svy, sw, so, mf,
   # keeps working, but emit only $chol_obj on output.
   chol_obj <- hist_sim_baseline$chol_obj %||% hist_sim_baseline$chol_Sigma
 
+  # Rebuild the additive-decomposition active mask for the policy arm. Step 2
+  # attached a weather-only mask; the policy survey adds modified columns
+  # (e.g. electricity, internet, employed) that must also stay active.
+  # Diff svy (post-policy) against svy_baseline (the pre-policy survey) so
+  # the detected modifications are exactly what apply_policy_to_svy()
+  # flipped — robust to baseline/training mismatch.
+  if (!is.null(chol_obj)) {
+    is_rif_shape <- is.list(chol_obj) && !("L" %in% names(chol_obj))
+    if (is_rif_shape) attr(chol_obj, "active_mask") <- NULL
+    else              chol_obj$active_mask         <- NULL
+    chol_obj <- attach_active_mask(
+      chol_obj                            = chol_obj,
+      svy_modified                        = svy,
+      svy_reference                       = svy_baseline,
+      train_data                          = mf$train_data,
+      weather_terms                       = mf$weather_terms,
+      outcome_col                         = so$name,
+      residuals                           = residuals,
+      propagate_all_covariate_uncertainty =
+        isTRUE(hist_sim_baseline$propagate_all_covariate_uncertainty)
+    )
+  }
+
   is_rif       <- identical(mf$engine, "rif")
   fit_multi    <- if (is_rif) mf$fit3 else NULL
   rif_taus     <- if (is_rif) mf$taus else NULL

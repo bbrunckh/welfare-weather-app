@@ -313,7 +313,9 @@ This is mathematically equivalent to `δ_sp = log(exp(y) + SP_cash) − y`, whic
 
 ### 8.3 Uncertainty propagation
 
-Policy modifications affect the design matrix `X_policy`, which feeds the factor loading `F_loading = X_policy %*% t(L)` (linear) or the interpolated per-τ blend (RIF). Coefficient uncertainty therefore propagates through the policy survey exactly as it does through the baseline survey — see [`method_uncertainty.md`](method_uncertainty.md) §1.1 and §5 (paired contrasts).
+Policy modifications affect the design matrix `X_policy`, which feeds the factor loading `F_loading = X_policy %*% L` (linear) or the interpolated per-τ blend (RIF). Coefficient uncertainty therefore propagates through the policy survey exactly as it does through the baseline survey — see [`method_uncertainty.md`](method_uncertainty.md) §1.1 and §5 (paired contrasts).
+
+**Additive-decomposition active mask.** Under the default coefficient-uncertainty mode (§1.1.1 of `method_uncertainty.md`), `resimulate_with_svy()` rebuilds the active mask after `apply_policy_to_svy()` runs: `active_terms = weather_terms ∪ detect_modified_cols(svy_policy, train_data)`. The detected columns are exactly those the policy flipped (e.g. `electricity`, `internet`, `employed`, `imp_wat_rec`), so the policy arm's `F_loading` keeps coefficients on (weather + policy-modified + their interactions) and drops everything else. The mask is stripped first to avoid inheriting Module 2's weather-only mask. The legacy full-β propagation is restored when the Step-2 "Include uncertainty on all covariates" toggle is set, which `mod_3_05_policy_sim.R` stamps onto `hist_sim_baseline$propagate_all_covariate_uncertainty` for `resimulate_with_svy()` to read.
 
 The SP transfer itself is treated as deterministic (no SE) — `apply_policy_to_svy()` writes a fixed daily amount per household.
 

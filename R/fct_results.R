@@ -65,12 +65,271 @@ prepare_outcome_df <- function(df, so) {
 #' @export
 weather_coef_names <- function(fit, weather_terms) {
   all_coefs <- names(stats::coef(fit))
-  
+
   # Build safe word-boundary pattern
   pattern <- paste0("\\b(", paste(weather_terms, collapse = "|"), ")\\b")
-  
+
   # Return matching coefficient names
   all_coefs[grepl(pattern, all_coefs)]
+}
+
+
+#' Detect survey columns modified between training data and a counterfactual
+#'
+#' Compares two household-level data frames column-by-column. Returns the names
+#' of columns whose values differ for at least one household. Used to identify
+#' policy-modified variables in Module 3 simulations (`apply_policy_to_svy()`
+#' flips e.g. `electricity`, `internet`, `employed`) so the coefficient-
+#' uncertainty mask can be extended beyond weather terms.
+#'
+#' Both inputs are expected at the household grain (one row per household).
+#' Joins on `id_col` if present in both; otherwise falls back to a row-order
+#' comparison clipped to the shorter frame.
+#'
+#' @param svy_modified Data frame. Survey after counterfactual modification.
+#' @param svy_train Data frame. Reference training data.
+#' @param id_col Character or NULL. Optional household ID column for joining.
+#' @param exclude_cols Character vector. Columns to skip (outcome, weights, FE,
+#'   metadata, SP transfer column).
+#'
+#' @return Character vector of modified column names (possibly empty).
+#'
+#' @export
+detect_modified_cols <- function(svy_modified, svy_train,
+                                  id_col = NULL,
+                                  exclude_cols = character()) {
+  if (is.null(svy_modified) || is.null(svy_train)) return(character())
+
+  common <- intersect(names(svy_modified), names(svy_train))
+  candidates <- setdiff(common, c(id_col, exclude_cols))
+  if (length(candidates) == 0L) return(character())
+
+  if (!is.null(id_col) && id_col %in% names(svy_modified) &&
+      id_col %in% names(svy_train)) {
+    keep <- intersect(svy_modified[[id_col]], svy_train[[id_col]])
+    if (length(keep) == 0L) return(character())
+    m <- svy_modified[match(keep, svy_modified[[id_col]]), candidates,
+                       drop = FALSE]
+    t <- svy_train[match(keep, svy_train[[id_col]]), candidates, drop = FALSE]
+  } else {
+    n <- min(nrow(svy_modified), nrow(svy_train))
+    if (n == 0L) return(character())
+    m <- svy_modified[seq_len(n), candidates, drop = FALSE]
+    t <- svy_train[seq_len(n), candidates, drop = FALSE]
+  }
+
+  changed <- vapply(candidates, function(col) {
+    a <- m[[col]]; b <- t[[col]]
+    if (length(a) != length(b)) return(TRUE)
+    any((a != b) | (is.na(a) != is.na(b)), na.rm = TRUE)
+  }, logical(1))
+
+  candidates[changed]
+}
+
+
+#' Attach an active-coefficient mask to a Cholesky vcov object
+#'
+#' Wrapper that builds the additive-decomposition active mask
+#' (\code{\link{build_active_coef_mask}}) and attaches it to `chol_obj` for
+#' downstream consumption by \code{\link{compute_factor_loading}} (linear
+#' engine) and \code{interpolate_F_loading()} (RIF engine).
+#'
+#' Active terms = `weather_terms` plus any columns whose values differ
+#' between `svy_modified` and `train_data` (excluding weather, outcome,
+#' weights, FE columns, and `SP_TRANSFER_COL`).
+#'
+#' The mask is only built when `residuals == "original"` and
+#' `propagate_all_covariate_uncertainty == FALSE`. Otherwise the function
+#' returns `chol_obj` unchanged (legacy full propagation).
+#'
+#' Handles both linear shape (`chol_obj` is a list with `$L`, `$beta`, ...)
+#' and RIF shape (`chol_obj` is a list of per-tau lists). For RIF, the mask
+#' is attached via `attr(chol_obj, "active_mask")`; per-tau attachment is
+#' not needed because all tau fits share coefficient ordering.
+#'
+#' @param chol_obj Output of `compute_chol_vcov()` or NULL.
+#' @param svy_modified Household-level survey (possibly policy-modified).
+#'   Compared against `svy_reference` to detect which covariates changed
+#'   between baseline and counterfactual.
+#' @param svy_reference Household-level survey to diff against. For Module 2
+#'   this is the (unmodified) baseline survey, so the diff is empty and
+#'   `active_terms = weather_terms`. For Module 3 this is the pre-policy
+#'   baseline `svy_baseline`, so the diff returns exactly the policy-modified
+#'   columns. If NULL, falls back to `train_data` (legacy comparison).
+#' @param train_data Training-data data frame. Used as the reference when
+#'   `svy_reference` is NULL.
+#' @param weather_terms Character vector of weather variable names.
+#' @param outcome_col Character or NULL. Outcome column name to exclude from
+#'   the diff (e.g. `"welfare"`). The outcome is log-transformed in
+#'   `train_data` but not in `svy`, so it would otherwise be flagged as
+#'   "modified" — defensively excluded even though no coefficient is named
+#'   after it.
+#' @param residuals Character. Residual mode (`"original"`, `"resample"`, …).
+#' @param propagate_all_covariate_uncertainty Logical. TRUE disables the
+#'   mask (legacy behaviour).
+#'
+#' @return `chol_obj` with `$active_mask` (or `attr(., "active_mask")` for
+#'   RIF) set when appropriate; otherwise unchanged.
+#'
+#' @export
+attach_active_mask <- function(chol_obj,
+                                svy_modified,
+                                train_data,
+                                weather_terms,
+                                residuals,
+                                svy_reference = NULL,
+                                outcome_col   = NULL,
+                                propagate_all_covariate_uncertainty = FALSE) {
+  if (is.null(chol_obj)) return(chol_obj)
+  if (isTRUE(propagate_all_covariate_uncertainty)) return(chol_obj)
+
+  # Determine coefficient names from either shape. RIF chol_obj is a list of
+  # per-tau lists (each with $L, $beta); linear chol_obj is a single list with
+  # $L and $beta at the top level.
+  is_rif_shape <- is.list(chol_obj) && !("L" %in% names(chol_obj)) &&
+                   length(chol_obj) > 0L &&
+                   is.list(chol_obj[[1]]) && "beta" %in% names(chol_obj[[1]])
+
+  # Gating: the cancellation argument applies under (a) "original" residuals
+  # for the linear engine — the per-household residual is held fixed across β
+  # draws and absorbs uncertainty on unchanged coefficients — or (b) any
+  # residuals mode for the RIF engine, because the RIF prediction is
+  # y_baseline + δ_i and the level y_baseline plays the same role as the
+  # fixed residual on the linear path. Under "resample"/"normal" with the
+  # linear engine, residuals are drawn independently of β and the
+  # cancellation does not hold.
+  if (!is_rif_shape && !identical(residuals, "original")) return(chol_obj)
+  coef_names <- if (is_rif_shape) names(chol_obj[[1]]$beta)
+                 else if (is.list(chol_obj) && "beta" %in% names(chol_obj))
+                   names(chol_obj$beta)
+                 else NULL
+  if (is.null(coef_names)) return(chol_obj)
+
+  # Prefer comparing against the pre-counterfactual baseline survey
+  # (svy_reference) — that is *exactly* what we want to diff against.
+  # Fall back to train_data when the baseline is not available; in that
+  # case the comparison is correct iff the user simulates on the same
+  # underlying survey they trained on (common case).
+  reference <- svy_reference %||% train_data
+
+  id_col <- intersect(c("pid", "hhid", "fid"),
+                      intersect(names(svy_modified), names(reference)))
+  id_col <- if (length(id_col) > 0L) id_col[[1L]] else NULL
+
+  weight_cols <- grep("^weight$|^hhweight$|^wgt$|^pw$",
+                       union(names(svy_modified), names(reference)),
+                       value = TRUE, ignore.case = TRUE)
+  exclude_cols <- c(SP_TRANSFER_COL, ".svy_row_id",
+                     "year", "sim_year", "int_month",
+                     "code", "survname", "loc_id",
+                     weather_terms, weight_cols, outcome_col)
+
+  modified <- detect_modified_cols(svy_modified, reference,
+                                    id_col = id_col,
+                                    exclude_cols = exclude_cols)
+  active_terms <- unique(c(weather_terms, modified))
+  if (length(active_terms) == 0L) return(chol_obj)
+
+  mask <- tryCatch(
+    build_active_coef_mask(coef_names, active_terms),
+    error = function(e) {
+      warning("[attach_active_mask] mask construction failed: ",
+              conditionMessage(e))
+      NULL
+    }
+  )
+  if (is.null(mask)) return(chol_obj)
+
+  # Build L_active: Cholesky factor of the active block of Sigma. Naive
+  # "subset columns of F = X %*% L" is INCORRECT when Sigma has non-zero
+  # off-diagonal terms between active and inactive coefficients, because
+  # column j of L still picks up contributions from inactive rows of X.
+  # The mathematically correct additive-decomposition variance is
+  #   var_coef_active = h' X_active Σ_active,active X_active' h
+  # which requires re-decomposing Sigma_active. Compute once here so
+  # compute_factor_loading() / interpolate_F_loading() can use it.
+  cholesky_active_block <- function(L_full) {
+    Sigma_full <- L_full %*% t(L_full)
+    Sigma_w    <- Sigma_full[mask, mask, drop = FALSE]
+    tryCatch(t(chol(Sigma_w)),
+             error = function(e) {
+               warning("[attach_active_mask] Cholesky of active block failed: ",
+                       conditionMessage(e),
+                       " — falling back to no masking.")
+               NULL
+             })
+  }
+
+  if (is_rif_shape) {
+    L_active_list <- lapply(chol_obj, function(x) cholesky_active_block(x$L))
+    if (any(vapply(L_active_list, is.null, logical(1)))) return(chol_obj)
+    for (k in seq_along(chol_obj)) {
+      chol_obj[[k]]$L_active <- L_active_list[[k]]
+    }
+    attr(chol_obj, "active_mask") <- mask
+  } else {
+    L_active <- cholesky_active_block(chol_obj$L)
+    if (is.null(L_active)) return(chol_obj)
+    chol_obj$L_active    <- L_active
+    chol_obj$active_mask <- mask
+  }
+
+  # Diagnostic so users can verify the additive-decomposition SE is in
+  # effect. Printed once per simulation run.
+  kept <- names(mask)[mask]
+  message(sprintf(
+    "[active_mask] additive-decomposition SE active: keeping %d/%d coefficients (%s engine). Active: %s",
+    sum(mask), length(mask),
+    if (is_rif_shape) "RIF" else "linear",
+    paste(kept, collapse = ", ")
+  ))
+  chol_obj
+}
+
+
+#' Build a logical mask over coefficient names for the active variable set
+#'
+#' Returns a length-K logical vector flagging coefficients whose names involve
+#' any term in `active_terms` (via word-boundary regex). Used by the additive-
+#' decomposition SE: when residuals are held fixed per household ("original"),
+#' uncertainty on coefficients for variables that do not change between
+#' baseline and counterfactual cancels through the residual term, so only the
+#' active subset contributes to `var_coef`.
+#'
+#' The intercept (if present) is forced to FALSE.
+#'
+#' @param coef_names Character vector. Names from `coef(fit)` /
+#'   `names(chol_obj$beta)`, in the same order as the design-matrix columns.
+#' @param active_terms Character vector. Raw variable names whose coefficients
+#'   (and any interactions involving them) should remain active.
+#'
+#' @return Named logical vector of length `length(coef_names)`, or NULL if
+#'   `active_terms` is empty.
+#'
+#' @export
+build_active_coef_mask <- function(coef_names, active_terms) {
+  active_terms <- active_terms[nzchar(active_terms)]
+  if (length(active_terms) == 0L) {
+    warning("[build_active_coef_mask] no active terms supplied; ",
+            "returning NULL (caller will fall back to full propagation).")
+    return(NULL)
+  }
+
+  # Escape regex metacharacters in term names (e.g. dots in column names).
+  esc <- gsub("([][{}().+*^$|?\\\\])", "\\\\\\1", active_terms)
+
+  # Word-boundary match plus a fallback for fixest factor expansions that use
+  # "::" between variable and level (e.g. "tx::level1:urban").
+  pattern <- paste0("(\\b(", paste(esc, collapse = "|"), ")\\b)",
+                     "|((^|[^A-Za-z0-9_])(", paste(esc, collapse = "|"),
+                     ")(::|$))")
+
+  mask <- grepl(pattern, coef_names)
+  names(mask) <- coef_names
+
+  if ("(Intercept)" %in% coef_names) mask[["(Intercept)"]] <- FALSE
+  mask
 }
 
 

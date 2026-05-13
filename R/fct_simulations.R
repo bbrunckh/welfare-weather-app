@@ -273,13 +273,19 @@ compute_chol_vcov <- function(fit, vcov_spec = COEF_VCOV_SPEC) {
 #' @param X_nonFE Numeric matrix. N \eqn{\times} K non-FE design matrix from
 #'   \code{model.matrix(model, data = newdata, type = "rhs")}. Column names
 #'   must match \code{names(chol_obj$beta)} exactly.
-#' @param chol_obj Named list returned by \code{compute_chol_vcov()}.
+#' @param chol_obj Named list returned by \code{compute_chol_vcov()}. May
+#'   include an optional `active_mask` logical vector of length K; when
+#'   present, columns where `active_mask == FALSE` are dropped from the
+#'   returned matrix (additive-decomposition SE; see
+#'   \code{build_active_coef_mask()}).
 #'
-#' @return Numeric matrix of dimensions N \eqn{\times} K. Each row \eqn{i}
-#'   is the factor loading vector for household \eqn{i}.
+#' @return Numeric matrix of dimensions N \eqn{\times} K (or N \eqn{\times}
+#'   K_active if `active_mask` is set). Each row \eqn{i} is the factor
+#'   loading vector for household \eqn{i}.
 #'
 #' @seealso \code{\link{compute_chol_vcov}},
-#'   \code{\link{aggregate_with_uncertainty_delta}}
+#'   \code{\link{aggregate_with_uncertainty_delta}},
+#'   \code{\link{build_active_coef_mask}}
 #' @export
 compute_factor_loading <- function(X_nonFE, chol_obj) {
   stopifnot(
@@ -289,10 +295,19 @@ compute_factor_loading <- function(X_nonFE, chol_obj) {
       identical(colnames(X_nonFE), names(chol_obj$beta))
   )
 
-  # F = X_nonFE %*% t(L)   →   N × K loading matrix
-  # Each row i: F_i = x_i' L'  such that  F_i F_i' = x_i' Σ x_i
-    X_nonFE %*% chol_obj$L  # N×K — uses L (lower triangular Cholesky factor).
-                            # Note: earlier versions incorrectly used t(chol_obj$L)
+  # Additive-decomposition SE: when an active mask is set, build F_loading
+  # from the *active block of Sigma* — i.e. F = X_active %*% L_active where
+  # L_active = chol(Sigma[mask, mask]). This is mathematically distinct
+  # from (and smaller than) F[, mask] subset, which can pick up
+  # off-diagonal Sigma contributions from inactive coefficients.
+  active_mask <- chol_obj$active_mask
+  if (!is.null(active_mask) && !is.null(chol_obj$L_active) &&
+      length(active_mask) == ncol(X_nonFE)) {
+    return(X_nonFE[, active_mask, drop = FALSE] %*% chol_obj$L_active)
+  }
+
+  # Legacy: F = X %*% L (N × K).
+  X_nonFE %*% chol_obj$L
 }
 
 
@@ -462,16 +477,29 @@ run_sim_pipeline <- function(weather_raw,
     # Use chol_obj (our format) or chol_Sigma (golem format) for RIF
     chol_src <- if (!is.null(chol_obj)) chol_obj else chol_Sigma
 
-    # For RIF: chol_src is list of list(L, K, beta, spec) — one per tau
-    # interpolate_F_loading() needs list of L matrices only
+    # For RIF: chol_src is list of list(L, K, beta, spec [, L_active]) per tau.
+    # interpolate_F_loading() needs list of L matrices only.
+    # When an active mask is set, we extract L_active (Cholesky of the
+    # weather/policy block of Sigma) instead of the full L, so that
+    # F_loading = X[, active] %*% L_active produces the correct
+    # additive-decomposition variance (h' X_w Σ_ww X_w' h). Subsetting
+    # columns of F = X %*% L_full would be incorrect when Σ has
+    # off-diagonal terms between active and inactive coefficients.
     chol_list <- if (!is.null(chol_src) && is.list(chol_src) &&
                      !("L" %in% names(chol_src))) {
-      # Extract L matrix from each per-tau Cholesky list
-      lapply(chol_src, function(x) {
-        if (is.list(x) && "L" %in% names(x)) x$L
+      active_mask <- attr(chol_src, "active_mask")
+      use_active  <- !is.null(active_mask) &&
+                      all(vapply(chol_src,
+                                 function(x) "L_active" %in% names(x),
+                                 logical(1)))
+      tmp <- lapply(chol_src, function(x) {
+        if (use_active && is.matrix(x$L_active)) x$L_active
+        else if (is.list(x) && "L" %in% names(x)) x$L
         else if (is.matrix(x)) x
         else NULL
       })
+      if (use_active) attr(tmp, "active_mask") <- active_mask
+      tmp
     } else NULL
     predict_rif(
       fit_multi    = fit_multi,

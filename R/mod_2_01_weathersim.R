@@ -155,6 +155,27 @@ mod_2_01_weathersim_ui <- function(id) {
         " Disable to use point estimates only.",
         style = "font-size:11px; color:#555; margin-top:2px; margin-bottom:8px;"
       ),
+      shiny::conditionalPanel(
+        condition = sprintf("input['%s'] == true", ns("include_coef_uncertainty")),
+        shiny::checkboxInput(
+          inputId = ns("propagate_all_covariate_uncertainty"),
+          label   = "Include uncertainty on all covariates",
+          value   = FALSE
+        ),
+        shiny::helpText(
+          "By default (unchecked), only coefficients on variables that change",
+          " between baseline and counterfactual contribute to the reported SE:",
+          " weather variables and their interactions in Step 2; weather plus",
+          " the policy-modified variables and their interactions in Step 3.",
+          " Under 'original' residuals, uncertainty on the unchanged covariates",
+          " cancels through the held-fixed residual term (additive-decomposition",
+          " SE). Check to propagate uncertainty from all covariates —",
+          " more conservative, but inconsistent with the model's own additive-",
+          "separability assumption. Has no effect when residuals are not",
+          " 'original'.",
+          style = "font-size:11px; color:#555; margin-top:2px; margin-bottom:8px;"
+        )
+      ),
       shiny::checkboxInput(
         inputId = ns("dev_mode"),
         label   = shiny::tags$span(
@@ -514,6 +535,8 @@ mod_2_01_weathersim_server <- function(id,
             residuals           = sh_residuals, #sh$residuals,
             dev_mode            = isTRUE(input$dev_mode),
             skip_coef_draws     = !isTRUE(input$include_coef_uncertainty),
+            propagate_all_covariate_uncertainty =
+              isTRUE(input$propagate_all_covariate_uncertainty),
             sim_dates           = sim_dates,
             perturbation_method = perturbation_method,
             stored_breaks       = stored_breaks(),
@@ -576,7 +599,9 @@ mod_2_01_weathersim_server <- function(id,
       selected_fut    = selected_fut,
       sim_n           = reactive(input$sim_n),
       residuals       = reactive(input$residuals %||% "none"),
-      skip_coef_draws = reactive(!isTRUE(input$include_coef_uncertainty))
+      skip_coef_draws = reactive(!isTRUE(input$include_coef_uncertainty)),
+      propagate_all_covariate_uncertainty =
+        reactive(isTRUE(input$propagate_all_covariate_uncertainty))
     )
   })
 }

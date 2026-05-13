@@ -185,7 +185,7 @@ The decomposition table (in `decompose_policy_effect()`) reports the same `.comp
 
 **Per-tau Cholesky factors.** `compute_chol_vcov(fit_multi)` dispatches on the `fixest_multi` object and returns a *list* of K Cholesky factors `L_k` (one per quantile fit), rather than the single L produced for a scalar `feols` fit.
 
-**Quantile-interpolated F_loading** (`interpolate_F_loading()` in `fct_rif_sim.R`). For each scenario the K per-quantile design-matrix differences `X_diff_k = X_scenario_k − X_baseline_k` are pre-cached, multiplied to give `F_k = X_diff_k %*% t(L_k)`, then linearly blended at each household's `τ_i`:
+**Quantile-interpolated F_loading** (`interpolate_F_loading()` in `fct_rif_sim.R`). For each scenario the K per-quantile design matrices `X_k = X_scenario_k` are pre-cached, multiplied to give `F_k = X_k %*% L_k` (lower-triangular `L_k` with `L_k L_k' = Σ_k`, so `F_k F_k' = X_k Σ_k X_k'`), then linearly blended at each household's `τ_i`:
 
 ```
 idx_lo, idx_hi = bracketing grid points of τ_i  (clamped to [0.1, 0.9])
@@ -194,6 +194,12 @@ F_loading_i    = (1 − w_i) · F_idx_lo[i, ] + w_i · F_idx_hi[i, ]
 ```
 
 The interpolated `F_loading` (N × K_coef) is attached as `attr(out, "F_loading")` on the prediction frame and consumed by `aggregate_with_uncertainty_delta()` exactly as in the linear path. Because both `X_diff_k` (the *difference* between scenario and baseline design) and `L_k` are interpolated, the resulting variance reflects coefficient uncertainty in the *weather delta* — consistent with `predict_rif()` returning a weather delta rather than an absolute level.
+
+**Active-coefficient mask (additive-decomposition SE, default).** As in the linear path, when the mask is active the per-tau loading is built from the *active block* of Σ_k. Specifically `attach_active_mask()` (in `fct_results.R`) pre-computes `L_active_k = chol(Σ_k[active, active])'` for each τ and stores it on `chol_obj[[k]]$L_active`. `run_sim_pipeline()` extracts these into the `chol_list` passed to `interpolate_F_loading()`, which then computes `F_k = X_k[, active] %*% L_active_k` per τ before the blend. The returned matrix is N × K_active.
+
+The active set is `weather_terms ∪ detect_modified_cols(svy_cf, train_data)` — weather and weather-interactions for Module 2, plus policy-modified variables for Module 3. Block-Cholesky (not column-subset of `F = X %*% L`) is required because Σ has non-zero off-diagonal terms between weather and non-weather coefficients in any non-trivial regression.
+
+The cancellation argument that justifies masking on the linear path requires fixed-per-household residuals (`residuals = "original"`); on the RIF path the same logic holds **regardless** of the residuals UI setting because `predict_rif()` returns `y_baseline + δ_i`, where the observed `y_baseline` plays the role of the held-fixed residual. So `attach_active_mask()` gates on `(is_rif_shape) || (residuals == "original")`. The Step-2 "Include uncertainty on all covariates" toggle still applies — checking it drops the mask and restores legacy full-β propagation.
 
 **Caveats specific to the RIF uncertainty path:**
 
