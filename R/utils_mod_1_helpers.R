@@ -124,11 +124,17 @@ ridge_distribution_plot <- function(
         label <- paste0(label, " (log scale)")
     }
 
+    # Pre-compute the bandwidth ggridges would otherwise pick (and announce
+    # via `message()`). Passing it explicitly silences the chatty
+    # "Picking joint bandwidth of ..." note without changing the visual.
+    bw <- tryCatch(stats::bw.nrd0(df_plot[[x_var]]), error = function(e) NULL)
+    if (is.null(bw) || !is.finite(bw) || bw <= 0) bw <- NULL
+
     p <- ggplot2::ggplot(
         df_plot,
         ggplot2::aes(x = .data[[x_var]], y = .data[[group_var]], fill = .data[[fill_var]])
     ) +
-        ggridges::geom_density_ridges(alpha = 0.7, scale = 2) +
+        ggridges::geom_density_ridges(alpha = 0.7, scale = 2, bandwidth = bw) +
         ggplot2::theme_minimal() +
         ggplot2::labs(
             title = "",

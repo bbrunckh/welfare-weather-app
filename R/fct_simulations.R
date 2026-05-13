@@ -273,13 +273,19 @@ compute_chol_vcov <- function(fit, vcov_spec = COEF_VCOV_SPEC) {
 #' @param X_nonFE Numeric matrix. N \eqn{\times} K non-FE design matrix from
 #'   \code{model.matrix(model, data = newdata, type = "rhs")}. Column names
 #'   must match \code{names(chol_obj$beta)} exactly.
-#' @param chol_obj Named list returned by \code{compute_chol_vcov()}.
+#' @param chol_obj Named list returned by \code{compute_chol_vcov()}. May
+#'   include an optional `active_mask` logical vector of length K; when
+#'   present, columns where `active_mask == FALSE` are dropped from the
+#'   returned matrix (additive-decomposition SE; see
+#'   \code{build_active_coef_mask()}).
 #'
-#' @return Numeric matrix of dimensions N \eqn{\times} K. Each row \eqn{i}
-#'   is the factor loading vector for household \eqn{i}.
+#' @return Numeric matrix of dimensions N \eqn{\times} K (or N \eqn{\times}
+#'   K_active if `active_mask` is set). Each row \eqn{i} is the factor
+#'   loading vector for household \eqn{i}.
 #'
 #' @seealso \code{\link{compute_chol_vcov}},
-#'   \code{\link{aggregate_with_uncertainty_delta}}
+#'   \code{\link{aggregate_with_uncertainty_delta}},
+#'   \code{\link{build_active_coef_mask}}
 #' @export
 compute_factor_loading <- function(X_nonFE, chol_obj) {
   stopifnot(
@@ -289,10 +295,19 @@ compute_factor_loading <- function(X_nonFE, chol_obj) {
       identical(colnames(X_nonFE), names(chol_obj$beta))
   )
 
-  # F = X_nonFE %*% t(L)   →   N × K loading matrix
-  # Each row i: F_i = x_i' L'  such that  F_i F_i' = x_i' Σ x_i
-    X_nonFE %*% chol_obj$L  # N×K — uses L (lower triangular Cholesky factor).
-                            # Note: earlier versions incorrectly used t(chol_obj$L)
+  # Additive-decomposition SE: when an active mask is set, build F_loading
+  # from the *active block of Sigma* — i.e. F = X_active %*% L_active where
+  # L_active = chol(Sigma[mask, mask]). This is mathematically distinct
+  # from (and smaller than) F[, mask] subset, which can pick up
+  # off-diagonal Sigma contributions from inactive coefficients.
+  active_mask <- chol_obj$active_mask
+  if (!is.null(active_mask) && !is.null(chol_obj$L_active) &&
+      length(active_mask) == ncol(X_nonFE)) {
+    return(X_nonFE[, active_mask, drop = FALSE] %*% chol_obj$L_active)
+  }
+
+  # Legacy: F = X %*% L (N × K).
+  X_nonFE %*% chol_obj$L
 }
 
 
@@ -433,11 +448,21 @@ run_sim_pipeline <- function(weather_raw,
             !is.null(taus)           &&
             !is.null(weather_cols)
 
+  # RIF policy mode: caller supplied an svy_baseline so we can separate the
+  # baseline (no-policy) RIF prediction from the policy net level effect.
+  # We predict against svy_baseline and then add the decomposition's
+  # delta_total — matching the Decomposition pane's totals exactly. The
+  # OLS path doesn't need this because predict_outcome() naturally picks up
+  # the policy level shift from the policy-modified design matrix.
+  is_rif_policy <- is_rif && !is.null(svy_baseline) &&
+                   !is.null(rif_grid) && !is.null(train_data)
+  svy_for_predict <- if (is_rif_policy) svy_baseline else svy
+
   # Tag svy with row IDs for RIF delta-method lookups
   # Must be added before prepare_hist_weather() so it survives the join
-  if (is_rif) svy$.svy_row_id <- seq_len(nrow(svy))
+  if (is_rif) svy_for_predict$.svy_row_id <- seq_len(nrow(svy_for_predict))
 
-  survey_wd_sim <- prepare_hist_weather(weather_raw, svy, sw, so$name)
+  survey_wd_sim <- prepare_hist_weather(weather_raw, svy_for_predict, sw, so$name)
 
   # Resolve ID column for "original" residual matching
   id_col <- if (residuals == "original")
@@ -452,21 +477,34 @@ run_sim_pipeline <- function(weather_raw,
     # Use chol_obj (our format) or chol_Sigma (golem format) for RIF
     chol_src <- if (!is.null(chol_obj)) chol_obj else chol_Sigma
 
-    # For RIF: chol_src is list of list(L, K, beta, spec) — one per tau
-    # interpolate_F_loading() needs list of L matrices only
+    # For RIF: chol_src is list of list(L, K, beta, spec [, L_active]) per tau.
+    # interpolate_F_loading() needs list of L matrices only.
+    # When an active mask is set, we extract L_active (Cholesky of the
+    # weather/policy block of Sigma) instead of the full L, so that
+    # F_loading = X[, active] %*% L_active produces the correct
+    # additive-decomposition variance (h' X_w Σ_ww X_w' h). Subsetting
+    # columns of F = X %*% L_full would be incorrect when Σ has
+    # off-diagonal terms between active and inactive coefficients.
     chol_list <- if (!is.null(chol_src) && is.list(chol_src) &&
                      !("L" %in% names(chol_src))) {
-      # Extract L matrix from each per-tau Cholesky list
-      lapply(chol_src, function(x) {
-        if (is.list(x) && "L" %in% names(x)) x$L
+      active_mask <- attr(chol_src, "active_mask")
+      use_active  <- !is.null(active_mask) &&
+                      all(vapply(chol_src,
+                                 function(x) "L_active" %in% names(x),
+                                 logical(1)))
+      tmp <- lapply(chol_src, function(x) {
+        if (use_active && is.matrix(x$L_active)) x$L_active
+        else if (is.list(x) && "L" %in% names(x)) x$L
         else if (is.matrix(x)) x
         else NULL
       })
+      if (use_active) attr(tmp, "active_mask") <- active_mask
+      tmp
     } else NULL
     predict_rif(
       fit_multi    = fit_multi,
       newdata      = survey_wd_sim, #joined,
-      svy          = svy,
+      svy          = svy_for_predict,
       train_data   = train_data,
       taus         = taus,
       outcome      = so$name,
@@ -502,6 +540,40 @@ run_sim_pipeline <- function(weather_raw,
   # aggregate_with_uncertainty_delta() after coefficient perturbation.
   y_point  <- out$.fitted
 
+  # ---- RIF policy correction --------------------------------------------- #
+  # In RIF policy mode the prediction above was made against svy_baseline,
+  # so y_point currently holds the *baseline-x* level (matching what Mod 2's
+  # Step 2 hist_sim shows). Add the decomposition's delta_total — which
+  # includes delta_main (SP + Beta_x.Delta_x), delta_res1 (repositioning),
+  # and delta_res2 (Beta_int.haz.Delta_x) — so the Results pane reflects the
+  # net policy effect on the welfare level. This skips the level-scale SP
+  # block below because delta_sp is already inside delta_total.
+  if (is_rif_policy) {
+    corr <- .compute_rif_policy_correction(
+      svy_baseline = svy_baseline,
+      svy_policy   = svy,
+      weather_raw  = weather_raw,
+      weather_cols = weather_cols,
+      rif_grid     = rif_grid,
+      taus         = taus,
+      train_data   = train_data,
+      outcome      = so$name,
+      is_log       = isTRUE(so$transform == "log")
+    )
+    # corr is one entry per household (nrow(svy_baseline)); broadcast it to
+    # each expanded survey×weather row via .svy_row_id (set by predict_rif()
+    # on `out`). Without this, hist_sim has y_point per (HH × month/year)
+    # but corr is per HH, so the lengths mismatch and the correction would
+    # be silently dropped.
+    if (!is.null(corr) && ".svy_row_id" %in% names(out) &&
+        length(corr) == nrow(svy_baseline)) {
+      y_point <- y_point + corr[out$.svy_row_id]
+    } else {
+      warning("[run_sim_pipeline] RIF policy correction unavailable; ",
+              "policy y_point will reflect weather-sensitivity changes only.")
+    }
+  }
+
   # ---- SP cash transfer (post-prediction, level scale) -------------------- #
   # SP_TRANSFER_COL is set on svy by apply_policy_to_svy() in fct_policy_sim.R.
   # The transfer is a direct welfare boost, not a regression covariate, so it
@@ -509,7 +581,13 @@ run_sim_pipeline <- function(weather_raw,
   # (.decompose_ols / .compute_rif_channels in fct_policy_decompose.R, which
   # define δ_sp = log(exp(y) + sp) − y), the boost is applied on the level
   # scale and re-logged when so$transform == "log".
-  sp_vec <- if (SP_TRANSFER_COL %in% names(out)) out[[SP_TRANSFER_COL]] else NULL
+  #
+  # Skipped in RIF policy mode because delta_sp is already inside the
+  # correction added above. (svy_for_predict = svy_baseline carries no
+  # SP_TRANSFER_COL, so `out` wouldn't have it anyway — the guard is
+  # defensive.)
+  sp_vec <- if (!is_rif_policy && SP_TRANSFER_COL %in% names(out))
+              out[[SP_TRANSFER_COL]] else NULL
   if (!is.null(sp_vec) && any(sp_vec > 0, na.rm = TRUE)) {
     is_log <- isTRUE(so$transform == "log")
     if (is_log) {

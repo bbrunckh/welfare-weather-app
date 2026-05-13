@@ -32,6 +32,32 @@ which is exactly the usual delta-method variance of a linear predictor. WISE-APP
 
 **RIF engines.** For RIF (`fixest_multi`), `compute_chol_vcov` returns a list of K Cholesky factors `{L_k}`, one per quantile fit. `interpolate_F_loading()` linearly blends `X_diff_k · L_k` across the quantile grid at each household's interpolated `τ_i`. See [`method_rif.md`](method_rif.md) §2.6.
 
+#### 1.1.1 Additive-decomposition SE (default under `residuals = "original"`)
+
+Under `"original"` residuals (the application default), each household carries a fixed-per-draw residual `ε̂_i`. If perturbations to `β̂` were paired with a self-consistent recomputation of the residual,
+
+```
+log ŷ_i^cf*  =  x_i'β̂*  +  w_i^cf'γ̂*  +  ε̂_i*(β̂*, γ̂*)
+           =  log y_i  +  (w_i^cf − w_i)' γ̂*
+```
+
+so β-uncertainty on covariates `x_j` that are **identical between baseline and counterfactual** cancels exactly through the residual term, leaving only the coefficients on the variables the scenario actually moves. WISE-APP exploits this by **subsetting `F_loading` to its active columns** before `crossprod(F_loading, h)`:
+
+- **Module 2** (weather simulation): active columns = coefficients on weather variables and their interactions.
+- **Module 3** (policy simulation): active columns = the union of (weather) and (variables modified by `apply_policy_to_svy()`) plus all interactions involving either set.
+
+The active set is detected automatically at simulation time by comparing the counterfactual survey to the training data (`detect_modified_cols()`) and unioning with `mf$weather_terms`. The mask is attached to `chol_obj` via `attach_active_mask()`, which **also pre-computes the Cholesky factor of the active block of Σ**: `L_active = chol(Σ[active, active])'`. Inside `compute_factor_loading()` (linear) and `interpolate_F_loading()` (RIF), the masked loading is `F_loading = X[:, active] %*% L_active` — an N × K_active matrix.
+
+**Why block-Cholesky, not column-subset.** A naive `F[:, active]` subset of `F = X %*% L` gives the wrong quadratic form when Σ has non-zero off-diagonals between active and inactive coefficients: column j of L mixes the inactive rows of X via the lower-triangular structure, so the resulting variance is neither `h' X Σ X' h` (full) nor `h' X_a Σ_aa X_a' h` (correct additive-decomposition). Re-decomposing the active block of Σ explicitly is the only way to get `var_coef = h' X_a Σ_aa X_a' h` exactly.
+
+**Sign of the active SE relative to the full SE.** The masked variance is NOT guaranteed to be smaller than the full variance. The full level variance decomposes as `h' X Σ X' h = h' X_a Σ_aa X_a' h + h' X_b Σ_bb X_b' h + 2 h' X_a Σ_ab X_b' h`, where the cross-term `Σ_ab` can be negative. Empirically the masked SE is typically smaller, but reporting users a slightly wider band after masking is mathematically correct in regimes where the cross-term is destabilizing the level SE. The two answer different questions: full = "Var(prediction | all coefs perturbed)"; masked = "Var(prediction | only active coefs perturbed, inactive held at point estimate)".
+
+**Toggle.** The Step-2 sidebar exposes `Include uncertainty on all covariates` (default FALSE). When TRUE the mask is dropped — full β covariance propagates as in legacy behaviour. The toggle has no effect when residuals are not `"original"`, because the cancellation argument requires fixed-per-household residuals (under `"resample"`/`"normal"` β and ε are drawn independently and uncertainty on inactive coefficients does not cancel).
+
+**Validity.** The cancellation is exact under (i) additive separability of active and inactive variables in the linear predictor (no `W × X_inactive` interactions where `X_inactive` is held fixed), and (ii) a back-transform that does not couple the two blocks. WISE-APP's `log → exp` transform satisfies (ii) because `μ_i^cf = y_i · exp((w_i^cf − w_i)'γ̂*)` and the inactive-`β` part appears only inside `y_i`, which is held to its observed value. For non-linear engines (RIF) the cancellation is approximate but tight under WISE-APP's typical coefficient SEs; see [`method_rif.md`](method_rif.md) §2.6.
+
+**Performance.** Subsetting (not zeroing) the inactive columns of `F_loading` reduces the dominant `crossprod` from O(N · K) to O(N · K_active). Typical speedup is K / K_active ≈ 2–5×.
+
 ### 1.2 Residual / idiosyncratic uncertainty
 
 Training residuals `ε̂_i = y_i − x_i' β̂` capture variation in welfare not explained by the model. The application default is **`"original"`** — each simulation household is matched to its own training residual by ID. The UI exposes this on the Step 2 sidebar (`mod_2_01_weathersim.R`), and the function-signature default for `aggregate_with_uncertainty_delta()` is also `"original"`.
@@ -219,18 +245,20 @@ Same form as `gap` but unnormalised — reports the average dollar shortfall bel
 ### 3.7 Average welfare among poor (`"avg_poverty"`)
 
 ```
-T = Σ_{i: μ_i < z_p} w_i μ_i  /  Σ_{i: μ_i < z_p} w_i
+T = Σ_{i: μ_i < z_p} w̃_i μ_i  /  Σ_{i: μ_i < z_p} w̃_i  =  N(μ) / B
 ```
 
-Quotient functional. Let `B = Σ w̃_i 1{μ_i < z_p}`. Implicit differentiation gives
+Quotient functional. Let `N(μ) = Σ w̃_i 1{μ_i < z_p} μ_i` and `B = Σ w̃_i 1{μ_i < z_p}`. Holding the poverty indicator fixed under infinitesimal β-perturbation (a measure-zero discontinuity for non-pathological μ), `B` has no dependence on `μ_j` and
 
 ```
-∂T/∂μ_i = (w̃_i / B) · 1{μ_i < z_p} · (μ_i − T) / μ_i      (chain factor μ_i cancels with the log-scale lift)
-h_i = (w̃_i / B) · 1{μ_i < z_p} · (μ_i − T) · μ_i
-SE  = || F_loading' h ||,  identity scale
+∂T/∂μ_j = (w̃_j · 1{μ_j < z_p}) / B
+h_j     = (w̃_j · 1{μ_j < z_p}) · μ_j / B
+SE      = || F_loading' h ||,  identity scale
 ```
 
-Falls back to `h = 0` when no households are poor (`B = 0`). Sign of `h_i` is positive for relatively wealthier poor households and negative for the very poorest, reflecting the leverage each poor household exerts on the conditional mean.
+Falls back to `h = 0` when no households are poor (`B = 0`). For every poor household `h_j ≥ 0`: lifting any poor household's welfare raises the conditional mean, which is the correct direction.
+
+**Why this is *not* the influence-function form.** A previous version of this document used `h_j = (w̃_j / B) · 1{μ_j < z_p} · (μ_j − T) · μ_j`. The `(μ_j − T)` factor is part of the *empirical influence function* of T (the leave-one-out / sample-variance object). It is the right tool for estimating the sample variance of `T` from the data themselves, but the wrong object for the delta method, which propagates parametric β-uncertainty through `μ_i(β)`. Including the `(μ_j − T)` factor flips the sign of `h_j` for the very poorest households (where `μ_j < T`), which would mean that lifting *their* welfare *lowers* the conditional mean of the poor — a clearly incorrect direction. The same partial-vs-IF distinction appears for Gini (§3.9, *"the Monti IF is the right object for sample-variance estimation of the Gini, but applying it in the chain rule through μ_i = exp(x_i' β) overstates the variance"*); `avg_poverty` now follows the same convention.
 
 ### 3.8 Median (`"median"`)
 
@@ -291,12 +319,13 @@ When `M = 1` (historical or single member), `var_across = 0` and the thin band r
 
 Auxiliary outputs (`model_lo`, `model_q10`, `model_q25`, `model_med`, `model_q75`, `model_q90`, `model_hi`) report unconditional percentiles of `{value_m}` for the inter-model summary panel.
 
+> **Note on display vs. function output.** The "Pooled" outer whisker shown in the Module 2/3 point-range plots (§6 below) is **not** the `coef_lo`/`coef_hi` returned here. The UI helpers in `fct_sim_compare.R::plot_pointrange_climate` and `fct_policy_sim_compare.R::pol_plot_pointrange_climate` recompute their own pooled SE from the raw per-(model, sim_year) coefficient SDs in `value_all_sd` (see `by_model_matrix()` in `fct_uncertainty_helpers.R`), excluding `var_within` (inter-annual). `combine_ensemble_results()`'s `coef_lo/hi` is used in the exceedance-curve / threshold-table code paths (see `fct_sim_compare.R` ~lines 314, 894–907) where pooling all parametric variance into a single ribbon is the intended display.
+
 ### 4.3 Assumptions of the pooled SE
 
-1. **Independence of within- and across-member variance.** The law of total variance gives `Var(T) = E[Var(T|m)] + Var(E[T|m])` exactly when these are computed against the joint distribution. WISE-APP estimates the inner expectation by the sample mean across members; this is an unbiased plug-in.
+1. **Independence of within- and across-member variance.** The law of total variance gives `Var(T) = E[Var(T|m)] + Var(E[T|m])` exactly when these are computed against the joint distribution. WISE-APP estimates the inner expectation by the sample mean across members; this is an unbiased plug-in. The formula holds whether or not the β-draw is shared across members — if `var_coef_m` is approximately equal across members (same fit, similar design), `mean_m(var_coef_m)` is just that common value (it is *not* multiplied by `M`).
 2. **Members are exchangeable.** Treating each CMIP6 realisation as equally informative ignores weighting schemes used in IPCC assessments (e.g., model democracy vs. performance-based weighting). Future work could expose weights.
 3. **Gaussian approximation for the thin band.** `coef_lo`, `coef_hi` use `qnorm(band_q)`. For small `M`, a `t`-distribution with `M−1` df would be more appropriate; for `M ≥ 10` the difference is negligible.
-4. **No correlation across members.** Coefficient uncertainty is identical across members (same regression fit), so `var_within`'s coefficient part is not actually independent across `m`. The pooled formula treats it as if it were, which slightly overstates `var_pool` (the shared coefficient component should appear once, not `M` times averaged). This is a conservative approximation.
 
 ---
 
@@ -318,17 +347,22 @@ Var(T_scn − T_base) = || F_agg_scn − F_agg_base ||²
 
 **Assumption:** Both aggregates are evaluated at the same `(F_loading, weights)` up to the policy-modified design matrix. This holds for paired weather and policy scenarios in WISE-APP; it does not hold for comparisons across surveys or sample re-weighting.
 
+**Interaction with the additive-decomposition mask (§1.1.1).** When the active mask is applied, both arms run through the same `F_loading` subset (`baseline` and `policy` share `chol_obj$active_mask` rebuilt from the policy-modified survey). So `F_agg_scn − F_agg_base` is a length-`K_active` contrast, and the inactive-coefficient block contributes zero to the contrast variance by construction — matching the analytic cancellation result. This sharpens both the level SE *and* the contrast SE by the same masking.
+
 ---
 
 ## 6. Layered Display in the UI
 
-The Module 3 comparison panel (see `fct_policy_sim_compare.R`) reports up to three concentric uncertainty bands:
+The Module 2 and Module 3 point-range comparison panels (see `fct_sim_compare.R::plot_pointrange_climate` and `fct_policy_sim_compare.R`) report up to four nested whiskers around the central year- and model-averaged estimate:
 
-1. **Innermost (coefficient uncertainty only).** From `var_coef` of `aggregate_with_uncertainty_delta()`. Shown when the user enables "Show coefficient uncertainty".
-2. **Middle (inter-annual variability).** Empirical percentiles of per-`sim_year` point estimates within each member.
-3. **Outermost (inter-model spread).** Empirical percentiles of member point estimates from `combine_ensemble_results()`.
+1. **Innermost (coefficient uncertainty only).** From `var_coef` of `aggregate_with_uncertainty_delta()`. Shown when the user enables "Show coefficient uncertainty". **Default scope (§1.1.1):** under `"original"` residuals, restricted to coefficients on the *active* variables — weather (and their interactions) in Module 2, weather plus policy-modified variables (and their interactions) in Module 3. The Step-2 toggle "Include uncertainty on all covariates" widens this to the full `β` vector (legacy behaviour). Mode is automatic when residuals are not `"original"` — the mask is dropped because the cancellation argument requires fixed-per-household residuals.
+2. **Middle (inter-annual variability).** Empirical percentiles of per-`sim_year` point estimates within each member, averaged across members.
+3. **Thick coloured band (inter-model spread).** Empirical percentiles of member-mean point estimates from `combine_ensemble_results()`.
+4. **Outer "Pooled" whisker (pooled SE).** Analytic Gaussian band `value ± z · sqrt(var_coef + var_across)` — pools coefficient uncertainty and inter-model spread, *not* inter-annual variability. The exclusion is deliberate and matches the convention used in the return-period threshold table (`fct_sim_compare.R::build_threshold_table_df`), where the corresponding rows are labelled `Pooled Pxx`: inter-annual variability characterises the spread of the simulated outcome distribution at each return-period quantile, not uncertainty about the central tendency. Folding it into the pooled SE would double-display the year-to-year spread (already shown as the middle band) and conflate two distinct quantities. **Suppressed (drawn as NA) when `var_across == 0`** — i.e. historical scenarios and single-member future ensembles. In those cases the pooled SE degenerates to the coefficient SE and the whisker would simply duplicate the innermost band; omitting it also signals the absence of an inter-model component visually.
 
-The user-facing band-width selector (`"p10_p90"`, `"p025_p975"`, etc.) is resolved by `resolve_band_q()` and applied uniformly across all three layers, so wider bands widen every layer simultaneously.
+The user-facing band-width selector (`"p10_p90"`, `"p025_p975"`, etc.) is resolved by `resolve_band_q()` and applied uniformly across all layers, so wider bands widen every layer simultaneously.
+
+Note that the diagnostics-tab SD-contribution stacked bar (`plot_variance_contribution()` in `fct_sim_compare.R`) is a *side-by-side decomposition* of all three sources (sqrt of var_coef, var_within, var_across) on the outcome scale — its purpose is to show where uncertainty comes from, including year-to-year spread, and it is not a pooled SE for the central estimate. Because variances (not SDs) add under independence, the stacked bar total is an upper bound on the true combined SD; per-segment labels report each source's share of the bar's total length. Inter-annual variability is included even though it characterises the spread of simulated years rather than uncertainty about the central tendency.
 
 ---
 
@@ -337,6 +371,7 @@ The user-facing band-width selector (`"p10_p90"`, `"p025_p975"`, etc.) is resolv
 | Source | Method | Key assumption |
 |---|---|---|
 | Coefficient | Delta method (`F_loading' h`) | Local linearity of `T` in `μ`; correct vcov spec (`~loc_id` default) |
+| Coefficient (default mask, §1.1.1) | Subset `F_loading` to active columns | Additive separability of active and inactive variables in the linear predictor; `residuals == "original"`; inactive variables held identical between baseline and counterfactual |
 | Residual (default `"original"`) | Matched per-household training residual | Idiosyncratic component invariant to the counterfactual; contributes to mean, not to `var_resid` |
 | Residual (`"normal"`/`"resample"`) | Plug-in `σ̂_ε² · Σ h²` | Homoskedastic residuals; residuals independent of coefficients (Option A) |
 | Inter-annual | Empirical percentiles across `sim_year` | Years are exchangeable within the climate window |

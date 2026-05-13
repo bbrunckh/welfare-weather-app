@@ -32,6 +32,17 @@
 #' @param residuals        Character. Residual method.
 #' @param dev_mode         Logical. If TRUE limit to 1 ensemble member per key.
 #' @param skip_coef_draws  Logical. If TRUE bypass Cholesky draws.
+#' @param propagate_all_covariate_uncertainty Logical. When FALSE (default)
+#'   and `residuals == "original"`, the additive-decomposition SE is applied:
+#'   only coefficients on variables that change between baseline and
+#'   counterfactual (weather, plus policy-modified variables in Module 3)
+#'   contribute to `var_coef`. Coefficients on unchanged covariates cancel
+#'   through the held-fixed residual term, so masking them is exact under
+#'   additive separability. Set TRUE to recover the legacy full-coefficient
+#'   propagation (more conservative but inconsistent with the model's own
+#'   additive-separability assumption). Ignored when residuals are not
+#'   `"original"` — the cancellation argument requires fixed-per-household
+#'   residuals.
 #' @param sim_dates        Character vector. Historical simulation dates.
 #' @param perturbation_method List or NULL. Built by build_perturbation_method().
 #' @param stored_breaks    Named list or NULL. Pre-computed histogram breaks.
@@ -64,6 +75,7 @@ fct_run_simulation <- function(sw,
                                 sim_dates,
                                 perturbation_method,
                                 stored_breaks,
+                                propagate_all_covariate_uncertainty = FALSE,
                                 fit_multi    = NULL,
                                 taus         = NULL,
                                 weather_cols = NULL,
@@ -73,6 +85,7 @@ fct_run_simulation <- function(sw,
   model      <- mf$fit3
   engine     <- mf$engine
   train_data <- mf$train_data
+  weather_terms <- mf$weather_terms
   has_future <- length(fp_list) > 0 && length(ssps) > 0
 
   ssp_labels <- c(
@@ -86,7 +99,6 @@ fct_run_simulation <- function(sw,
 
   # ---- Weather loading ---------------------------------------------------- #
   progress_fn(0.05, "Querying weather data (this may take 1-2 minutes)...")
-  message("[wiseapp] Querying weather data (DuckDB)...")
   t_weather_start <- proc.time()[["elapsed"]]
 
   weather_result <- get_weather(
@@ -102,8 +114,6 @@ fct_run_simulation <- function(sw,
   )
 
   t_weather <- proc.time()[["elapsed"]] - t_weather_start
-  message(sprintf("[wiseapp] Weather data loaded in %s",
-                  format_elapsed(t_weather)))
   progress_fn(0.20, sprintf("Weather loaded (%s) — preparing simulation...",
                              format_elapsed(t_weather)))
 
@@ -122,25 +132,36 @@ fct_run_simulation <- function(sw,
     )
   }
 
+  # ---- Active-coefficient mask (additive-decomposition SE) ---------------- #
+  # Under residuals = "original" the residual is held fixed per household, so
+  # uncertainty on coefficients for variables that do not change between
+  # baseline and counterfactual cancels through the residual. In Module 2
+  # only weather variables change, so active = weather_terms. (Module 3
+  # re-builds the mask in resimulate_with_svy() with policy-modified vars
+  # added.) Skipped when the user has requested full propagation or when
+  # residuals are not "original".
+  #
+  # svy_reference = svy here: in Module 2 the baseline survey is the
+  # reference because weather substitution happens *inside* the pipeline
+  # (prepare_hist_weather), not on `svy` itself, so diffing svy against
+  # itself yields empty modifications and active_terms = weather_terms.
+  chol_obj <- attach_active_mask(
+    chol_obj                            = chol_obj,
+    svy_modified                        = svy,
+    svy_reference                       = svy,
+    train_data                          = train_data,
+    weather_terms                       = weather_terms,
+    outcome_col                         = so$name,
+    residuals                           = residuals,
+    propagate_all_covariate_uncertainty = propagate_all_covariate_uncertainty
+  )
+
   # ---- Cluster counts ----------------------------------------------------- #
   cluster_counts <- tryCatch(
     compute_cluster_counts(train_data),
     error = function(e) NULL
   )
-  if (!is.null(cluster_counts)) {
-    message(sprintf(
-      "[wiseapp] Cluster counts — loc_id: %d | loc_id:int_month: %d",
-      cluster_counts$loc_id %||% NA_integer_,
-      cluster_counts$loc_id_int_month %||% NA_integer_
-    ))
-  }
-
   n_models_before <- length(setdiff(names(weather_result), "historical"))
-  message(sprintf(
-    "[wiseapp] Full ensemble retained: %d future keys%s",
-    n_models_before,
-    if (isTRUE(dev_mode)) " (dev mode)" else ""
-  ))
 
   # ---- Key loop setup ----------------------------------------------------- #
 
@@ -172,20 +193,6 @@ fct_run_simulation <- function(sw,
   n_future_keys <- length(future_keys)
   total_runs    <- n_hist_yrs * (1L + n_future_keys)
 
-  message(sprintf(
-    "[wiseapp] Simulation starting: %d keys | Cholesky uncertainty deferred to aggregation",
-    n_keys
-  ))
-  message(sprintf("[wiseapp]   Historical : %d yrs", n_hist_yrs))
-  if (n_future_keys > 0L) message(sprintf(
-    "[wiseapp]   Future     : %d keys x %d yrs = %d runs",
-    n_future_keys, n_hist_yrs, n_future_keys * n_hist_yrs
-  ))
-  message(sprintf(
-    "[wiseapp]   Total      : ~%d prediction runs across all keys",
-    total_runs
-  ))
-
   # Serial execution only — parallelisation removed
   n_workers_safe <- 1L
 
@@ -214,17 +221,6 @@ fct_run_simulation <- function(sw,
       t_el      <- proc.time()[["elapsed"]] - t_start_pipeline
       t_remain  <- if (ki > 1L)
         (t_el / (ki - 1L)) * (n_keys - ki + 1L) else NA_real_
-
-      message(sprintf(
-        "[wiseapp] Key %d/%d: %s | %s elapsed%s",
-        ki, n_keys,
-        if (is_hist_k) "Historical"
-        else sub("^(ssp[^_]+_[0-9]+_[0-9]+)_.*$", "\\1", key),
-        format_elapsed(t_el),
-        if (!is.na(t_remain))
-          paste0(" | ~", format_elapsed(t_remain), " remaining")
-        else " | estimating..."
-      ))
 
       progress_fn(
         value  = 0.35 + 0.45 * ((ki - 1L) / n_keys),
@@ -262,8 +258,6 @@ fct_run_simulation <- function(sw,
   gc(verbose = FALSE)
   
   t_pipeline_done <- proc.time()[["elapsed"]] - t_start_pipeline
-  message(sprintf("[wiseapp] All %d pipelines complete in %s",
-                  n_keys, format_elapsed(t_pipeline_done)))
   progress_fn(0.80, sprintf("Pipelines complete (%s) — grouping results...",
                              format_elapsed(t_pipeline_done)))
 

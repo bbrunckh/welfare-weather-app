@@ -199,12 +199,6 @@ predict_rif <- function(fit_multi, newdata, svy, train_data, taus, outcome,
   # Interpolate delta at each household's tau_i position
   delta_i <- interpolate_delta(delta_mat, taus, tau_i)
 
-  # Diagnostic: log mean absolute delta for first call
-  message(sprintf(
-    "[predict_rif] n=%d | mean|delta|=%.4f | mean(y_base)=%.4f",
-    n, mean(abs(delta_i), na.rm = TRUE), mean(y_baseline, na.rm = TRUE)
-  ))
-
   # Assemble output
   newdata$.fitted    <- y_baseline + delta_i
   newdata$.residual  <- NA_real_
@@ -212,13 +206,25 @@ predict_rif <- function(fit_multi, newdata, svy, train_data, taus, outcome,
 
   # Compute F_loading by interpolating X_scenario %*% t(L_k) at each tau_i
   if (compute_loading && !any(vapply(X_scen_list, is.null, logical(1)))) {
+    active_mask <- attr(chol_list, "active_mask")
     F_loading <- tryCatch({
-      interpolate_F_loading(X_scen_list, chol_list, taus, tau_i)
+      interpolate_F_loading(X_scen_list, chol_list, taus, tau_i,
+                             active_mask = active_mask)
     }, error = function(e) {
       warning("[predict_rif] F_loading interpolation failed: ", conditionMessage(e))
       NULL
     })
-    if (!is.null(F_loading)) attr(newdata, "F_loading") <- F_loading
+    if (!is.null(F_loading)) {
+      attr(newdata, "F_loading") <- F_loading
+      # Diagnostic: confirm the additive-decomposition mask reached predict_rif.
+      # Compare ncol(F_loading) against the per-tau design width — if the mask
+      # is active, ncol should be < length(active_mask).
+      if (!is.null(active_mask) && ncol(F_loading) < length(active_mask)) {
+        message(sprintf(
+          "[predict_rif] additive-decomposition mask applied: F_loading is %d x %d (out of %d coefficients).",
+          nrow(F_loading), ncol(F_loading), length(active_mask)))
+      }
+    }
   }
 
   newdata
@@ -237,11 +243,16 @@ predict_rif <- function(fit_multi, newdata, svy, train_data, taus, outcome,
 #' @param chol_list   List of K Cholesky factor matrices (p x p), one per quantile.
 #' @param taus        Numeric vector of length K (sorted quantile grid).
 #' @param tau_i       Numeric vector of length n (household quantile positions).
+#' @param active_mask Optional logical vector of length p. When supplied,
+#'   each per-quantile loading is subset to the active columns before the
+#'   interpolation blend (additive-decomposition SE). NULL = no masking.
 #'
-#' @return Numeric n x p matrix of interpolated factor loadings.
+#' @return Numeric n x p matrix of interpolated factor loadings (or
+#'   n x sum(active_mask) when masking is applied).
 #'
 #' @keywords internal
-interpolate_F_loading <- function(X_diff_list, chol_list, taus, tau_i) {
+interpolate_F_loading <- function(X_diff_list, chol_list, taus, tau_i,
+                                   active_mask = NULL) {
   n <- nrow(X_diff_list[[1]])
   K <- length(taus)
 
@@ -254,11 +265,27 @@ interpolate_F_loading <- function(X_diff_list, chol_list, taus, tau_i) {
   tau_hi <- taus[idx_hi]
   w      <- ifelse(tau_hi > tau_lo, (tau_i - tau_lo) / (tau_hi - tau_lo), 0)
 
-  # Pre-compute F_k = X_diff_k %*% t(L_k) for the unique quantile indices needed
+  # Pre-compute F_k for the unique quantile indices needed.
+  # F = X %*% L (lower triangular L with LL' = Sigma) so that
+  # F F' = X L L' X' = X Sigma X' — the correct level variance.
+  # Earlier versions used t(L) here, which gives X L' L X' (not Sigma)
+  # and inflated SEs by ~25% on realistic Sigma. The linear path
+  # (compute_factor_loading) was fixed for this; this matches.
+  #
+  # When active_mask is set, `chol_list[[k]]` is expected to be the
+  # K_active x K_active Cholesky of the active block of Sigma (built by
+  # attach_active_mask), and X_diff_list[[k]] is the full N x K design.
+  # We subset X to active columns before multiplying.
   needed_idx <- unique(c(idx, idx_hi))
   F_cache <- vector("list", K)
   for (k in needed_idx) {
-    F_cache[[k]] <- X_diff_list[[k]] %*% t(chol_list[[k]])
+    X_k <- if (!is.null(active_mask) &&
+               length(active_mask) == ncol(X_diff_list[[k]])) {
+             X_diff_list[[k]][, active_mask, drop = FALSE]
+           } else {
+             X_diff_list[[k]]
+           }
+    F_cache[[k]] <- X_k %*% chol_list[[k]]
   }
 
   # Vectorised blend: extract rows from F_cache matrices using batch indexing

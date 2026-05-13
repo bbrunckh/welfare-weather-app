@@ -85,7 +85,7 @@ Engine selection is handled in `R/fct_model_select.R` (`infer_engine()` and `mod
 3. **`y_point` extraction**: captured *before* back-transformation. When `so$transform == "log"`, `y_point` stays in log scale so that `aggregate_with_uncertainty_delta()` can apply `exp()` exactly once at aggregation time (with `is_log = TRUE`).
 4. **Back-transform** (`apply_log_backtransform()`): exponentiate the outcome column for the diagnostic `preds` frame.
 5. **SP cash transfer**: if a `._sp_transfer` column is present, add it to `preds[[outcome]]` *on the original (level) scale, after back-transform*. Then re-log `y_point` to maintain log-scale consistency for downstream uncertainty propagation.
-6. **Factor loadings for uncertainty**: when `chol_obj` (or the legacy `chol_Sigma` alias) is supplied, compute `F_loading = X_nonFE %*% t(L)` via `compute_factor_loading()`, where `L` is the Cholesky factor of the coefficient vcov and `X_nonFE` is the non-FE design matrix from `stats::model.matrix(model, ..., type = "rhs")`. `F_loading` (N × K) carries coefficient uncertainty forward into the closed-form delta-method aggregator (see §2.6).
+6. **Factor loadings for uncertainty**: when `chol_obj` (or the legacy `chol_Sigma` alias) is supplied, compute `F_loading = X_nonFE %*% L` via `compute_factor_loading()`, where `L` is the Cholesky factor of the coefficient vcov and `X_nonFE` is the non-FE design matrix from `stats::model.matrix(model, ..., type = "rhs")`. `F_loading` (N × K) carries coefficient uncertainty forward into the closed-form delta-method aggregator (see §2.6). **Default scope:** under `residuals = "original"` the formula switches to `F_loading = X_nonFE[, active] %*% L_active` where `L_active = chol(Σ[active, active])'` is the lower-triangular Cholesky factor of the active block of Σ (pre-computed by `attach_active_mask()` in `fct_results.R`). This gives an N × K_active matrix whose Gramian is `X_a Σ_aa X_a'` — the correct additive-decomposition variance. *Note:* a naive `F[:, active]` subset of `F = X %*% L` would NOT give the same quantity when Σ has off-diagonals between active and inactive coefficients. Active columns are coefficients on variables that change between baseline and counterfactual — weather and weather-interactions in Module 2, plus policy-modified variables and their interactions in Module 3. The "Include uncertainty on all covariates" toggle in `mod_2_01_weathersim.R` reverts to the full N × K shape (legacy behaviour). See [`method_uncertainty.md`](method_uncertainty.md) §1.1.1 for the cancellation derivation.
 
 #### Weather-only simulation
 
@@ -108,16 +108,18 @@ The linear engine relies on **`fixest::predict()` evaluated on the policy-modifi
 
 **The app uses a closed-form delta-method aggregator.** All callsites (`mod_2_02_results.R`, `fct_policy_sim_compare.R`) use `aggregate_with_uncertainty_delta()`. Monte Carlo aggregation has been removed.
 
-Given the point-estimate log-welfare vector `y_point`, the factor loading `F_loading` (N × K), and an aggregate statistic `T = g(welfare)`, the delta method computes:
+Given the point-estimate log-welfare vector `y_point`, the factor loading `F_loading` (N × K, or N × K_active when the additive-decomposition mask is on — see §2.5 step 6), and an aggregate statistic `T = g(welfare)`, the delta method computes:
 
 ```
 welfare_i = exp(y_point_i + resid_i)        # back-transform (is_log = TRUE)
 h_i       = (∂T/∂welfare_i) · welfare_i      # welfare-scale gradient, lifted to log scale
-F_agg     = F_loading' h                     # K-vector: per-coefficient gradient of T
+F_agg     = F_loading' h                     # K(_active)-vector: per-coefficient gradient of T
 var_coef  = ||F_agg||²                       # coefficient-variance contribution
 var_resid = σ_e² · Σ h_i²                    # residual-variance (only for "normal" / "resample")
 SE        = sqrt(var_coef + var_resid)
 ```
+
+The aggregator is agnostic to whether `F_loading` has been subset — the masking happens upstream in `compute_factor_loading()`, and paired contrasts inherit it automatically because both arms share the same `chol_obj$active_mask`.
 
 Bands are reported via `apply_band_transform()`, which applies a method-appropriate link before adding `z_q · SE`:
 - **logit** scale for bounded ratios (`headcount_ratio`, `gap`, `fgt2`) to keep bands within [0, 1]

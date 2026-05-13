@@ -53,22 +53,33 @@ mod_2_03_diagnostics_ui <- function(id) {
 
     # ---- 2. Variance contribution panel ------------------------------------
     shiny::wellPanel(
-      shiny::h4("Variance contribution by uncertainty source"),
+      shiny::h4("SD contribution by source of uncertainty"),
       shiny::plotOutput(ns("variance_contribution_plot"), height = "320px"),
       shiny::tags$p(
         style = "font-size:11px; color:#666; margin-top:6px;",
-        "100% stacked bar showing the share of total predictive variance ",
-        "contributed by each source, assuming the three sources are ",
-        "independent (so total variance = sum of components).",
+        shiny::tags$b("Each segment"),
+        " is one source's standard deviation (square root of its variance ",
+        "contribution), in outcome units. Labels show each source's share ",
+        "of the bar's total length.",
+        shiny::tags$br(),
+        shiny::tags$b("Note:"),
+        " variances (not SDs) add under independence, so the stacked total ",
+        "is an upper bound on the true combined SD — read the bar as a ",
+        "side-by-side decomposition of where uncertainty comes from, not ",
+        "as a literal additive total.",
         shiny::tags$br(),
         shiny::tags$b("Coefficient uncertainty"),
-        " = mean per-outcome variance from the regression fit.",
+        " = SD of the regression-fit per-outcome variance, averaged.",
         shiny::tags$br(),
         shiny::tags$b("Inter-annual variability"),
-        " = mean within-model year-to-year variance of the aggregate.",
+        " = SD of within-model year-to-year spread of the aggregate. This ",
+        "characterises the spread of simulated years, not uncertainty ",
+        "about the central tendency.",
         shiny::tags$br(),
         shiny::tags$b("Inter-model spread"),
-        " (future scenarios only) = across-model variance of annual aggregates."
+        " (future scenarios only) = SD of across-model disagreement in ",
+        "the per-model mean aggregate — uncertainty about the central ",
+        "tendency arising from model choice."
       )
     )
   )

@@ -177,7 +177,10 @@ mod_1_02_surveystats_server <- function(
           p
         })
 
-        # Leaflet map of interview locations
+        # Leaflet map of interview locations. The jsonlite
+        # `keep_vec_names` warning that addGeoJSON would otherwise emit
+        # is muted via the custom htmlwidgets JSON encoder installed in
+        # .onLoad (R/zzz.R).
         output$map <- leaflet::renderLeaflet({
           m <- plot_survey_map(map_data())
           req(!is.null(m))

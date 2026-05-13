@@ -162,20 +162,16 @@ mod_2_02_results_ui <- function(id) {
 
     # ---- 3. Hero point-range chart -----------------------------------------
     shiny::wellPanel(
-      shiny::h4("Distribution of outcomes across climate scenarios and timeframes"),
+      shiny::h4("Distribution of outcome across weather conditions, by climate scenario"),
       shiny::plotOutput(ns("summary_box_plot"), height = "600px"),
       shiny::tags$p(
         style = "font-size:11px; color:#666; margin-top:6px;",
         "All bands are drawn ",
         shiny::tags$b("relative to the central dot"),
-        " (the ensemble mean) and answer different questions about uncertainty. They are not meant to be added together — see the variance-contribution bar on the Diagnostics tab for how the sources combine.",
+        " and answer different questions about uncertainty. They are not meant to be added together — see the variance-contribution bar on the Diagnostics tab for how the sources combine.",
         shiny::tags$br(), shiny::tags$br(),
         shiny::tags$b("Central dot"),
         " = mean of the annual aggregate across all simulated (model, year) outcomes.",
-        shiny::tags$br(),
-        shiny::tags$b("Outer grey whisker with caps — “How wide is the full predictive band?”"),
-        shiny::tags$br(),
-        " Combined “total” uncertainty assuming the three sources are independent: SE = sqrt(var_coef + var_within + var_across). Use this for an at-a-glance overall spread.",
         shiny::tags$br(),
         shiny::tags$b("Thick coloured band — “How much do climate models disagree?”"),
         " (future scenarios only)",
@@ -189,10 +185,10 @@ mod_2_02_results_ui <- function(id) {
         shiny::tags$b("Innermost line — “How precisely is each (model, year) aggregate estimated?”"),
         " (shown when coefficient uncertainty is enabled)",
         shiny::tags$br(),
-        " Analytic per-outcome SE from the regression fit. This is precision of a point estimate, not a spread of outcomes — conceptually distinct from the two coloured bands.",
+        " Analytic per-outcome SE from the regression fit. By default, under 'original' residuals, restricted to coefficients on weather variables and their interactions (additive-decomposition SE — see Step 2 settings to widen to all coefficients). This is precision of a point estimate, not a spread of outcomes — conceptually distinct from the two coloured bands.",
         shiny::tags$br(),
-        shiny::tags$br(), shiny::tags$br(),
-        "Historical = single “model” so no inter-model band is shown."
+        shiny::tags$br(),
+        "Historical = single “model” so no inter-model band is shown. A pooled summary SE combining coefficient and inter-model uncertainty is available in the return-period table on the Diagnostics tab."
       )
     ),
 
@@ -909,34 +905,34 @@ mod_2_02_results_server <- function(id,
         coef     <- c(lo = ens_mean + z_coef_lo * sd_mean,
                       hi = ens_mean + z_coef_hi * sd_mean)
 
-        # "Total" band: combine all three sources assuming independence.
+        # "Pooled" band: pooled SE on the central (year- and model-
+        # averaged) estimate. Mirrors the return-period table's "Pooled"
+        # convention (see fct_sim_compare.R::build_threshold_table_df) —
+        # inter-annual variability is a property of the simulated
+        # distribution, not uncertainty about the central tendency, and
+        # is shown separately as the middle band.
         # var_coef     = mean per-outcome regression-fit variance (uses
         #                paired-contrast SEs when deviation is selected,
         #                via .apply_contrast_sd above).
-        # var_within   = year-to-year value variance within a model,
-        #                averaged across models. Computed from the values
-        #                matrix so the metric matches what the inter-annual
-        #                band visualises and so deviation-mode (which is a
-        #                scalar shift) doesn't change it.
         # var_across   = variance across model means; matches the inter-
         #                model band's underlying statistic.
-        # NB: tbl$var_within / tbl$var_across stored at sim time conflate
-        # parametric SE with value spread and would double-count var_coef
-        # if used here, so we recompute from the matrix.
+        # When var_across is zero (historical or single-member future),
+        # the pooled SE degenerates to the coef SE; we suppress the
+        # outer whisker (NA) to avoid drawing a duplicate of the coef
+        # band.
         var_coef_total <- mean(as.numeric(sds)^2, na.rm = TRUE)
-        var_within <- if (ncol(vals) > 1L) {
-          per_mod_var <- apply(vals, 1L, stats::var, na.rm = TRUE)
-          mean(per_mod_var, na.rm = TRUE)
-        } else 0
-        if (!is.finite(var_within)) var_within <- 0
         var_across <- if (!is_hist && nrow(vals) > 1L) {
           v <- stats::var(rowMeans(vals, na.rm = TRUE), na.rm = TRUE)
           if (is.finite(v)) v else 0
         } else 0
-        sd_total <- sqrt(max(var_coef_total + var_within + var_across, 0,
-                             na.rm = TRUE))
-        total <- c(lo = ens_mean + z_coef_lo * sd_total,
-                   hi = ens_mean + z_coef_hi * sd_total)
+        if (var_across > 0) {
+          sd_total <- sqrt(max(var_coef_total + var_across, 0,
+                               na.rm = TRUE))
+          total <- c(lo = ens_mean + z_coef_lo * sd_total,
+                     hi = ens_mean + z_coef_hi * sd_total)
+        } else {
+          total <- c(lo = NA_real_, hi = NA_real_)
+        }
 
         tibble::tibble(
           scenario     = scenario_label,
@@ -1016,8 +1012,12 @@ mod_2_02_results_server <- function(id,
         sds_flat <- as.numeric(unlist(tbl$value_all_sd))
         var_coef <- if (length(sds_flat))
           mean(sds_flat^2, na.rm = TRUE) else 0
-        # Use value-matrix–derived var_within / var_across so this matches
-        # the pointrange total band and avoids double-counting var_coef.
+        # Use value-matrix–derived var_within / var_across so the metric
+        # matches what the inter-annual / inter-model bands visualise and
+        # avoids double-counting var_coef. (Unlike the pointrange total
+        # band, this decomposition panel intentionally includes
+        # var_within — its purpose is to show the share of every source,
+        # including year-to-year spread.)
         mm <- by_model_matrix(tbl)
         vals <- if (is.null(mm)) NULL else mm$vals
         var_within <- if (!is.null(vals) && ncol(vals) > 1L) {
@@ -1104,9 +1104,11 @@ mod_2_02_results_server <- function(id,
     # One row per (scenario, Estimate, RP). Estimate names are derived from
     # the user's band quantile selection: e.g., with coef=p10_p90 and
     # ensemble=minmax the rows are "Central (P50)", "Coef P10", "Coef P90",
-    # "Ensemble min", "Ensemble max", "Total P10", "Total P90". Total rows
-    # combine the coefficient and inter-model components assuming
-    # independence: SE_total = sqrt(coef_sd² + var_across_at_rp).
+    # "Ensemble min", "Ensemble max", "Pooled P10", "Pooled P90". Pooled
+    # rows combine the coefficient and inter-model components assuming
+    # independence: SE_pooled = sqrt(coef_sd² + var_across_at_rp).
+    # Historical (no inter-model component) does not emit Pooled rows —
+    # they would duplicate the Coef rows.
     threshold_table_rv <- reactive({
       req(hist_agg_rv())
       bq_coef <- resolve_band_q(input$uncertainty_band %||% "p10_p90")
@@ -1196,8 +1198,8 @@ mod_2_02_results_server <- function(id,
                                                        use_minmax = TRUE))
         ens_hi_lbl  <- paste0("Ensemble ", .pct_label(bq_ens[["hi"]],
                                                        use_minmax = TRUE))
-        total_lo_lbl <- paste0("Total ", .pct_label(bq_coef[["lo"]]))
-        total_hi_lbl <- paste0("Total ", .pct_label(bq_coef[["hi"]]))
+        pooled_lo_lbl <- paste0("Pooled ", .pct_label(bq_coef[["lo"]]))
+        pooled_hi_lbl <- paste0("Pooled ", .pct_label(bq_coef[["hi"]]))
 
         rows <- list(
           make_row("Central (P50)", central_vec),
@@ -1206,16 +1208,10 @@ mod_2_02_results_server <- function(id,
         )
         if (!is_hist) {
           rows <- c(rows, list(
-            make_row(ens_lo_lbl,   intermod_lo_vec),
-            make_row(ens_hi_lbl,   intermod_hi_vec),
-            make_row(total_lo_lbl, total_lo_vec),
-            make_row(total_hi_lbl, total_hi_vec)
-          ))
-        } else {
-          # Historical: Total == Coef (no inter-model component)
-          rows <- c(rows, list(
-            make_row(total_lo_lbl, coef_lo_vec),
-            make_row(total_hi_lbl, coef_hi_vec)
+            make_row(ens_lo_lbl,    intermod_lo_vec),
+            make_row(ens_hi_lbl,    intermod_hi_vec),
+            make_row(pooled_lo_lbl, total_lo_vec),
+            make_row(pooled_hi_lbl, total_hi_vec)
           ))
         }
         dplyr::bind_rows(rows)
@@ -1267,7 +1263,7 @@ mod_2_02_results_server <- function(id,
       req(threshold_table_rv())
       tbl <- threshold_table_rv()
       if (!isTRUE(input$show_model_spread)) {
-        tbl <- tbl[!grepl("^Ensemble |^Total ", tbl$Estimate), , drop = FALSE]
+        tbl <- tbl[!grepl("^Ensemble |^Pooled ", tbl$Estimate), , drop = FALSE]
       }
       df <- build_threshold_table_df(
         threshold_tbl = tbl,
@@ -1309,8 +1305,8 @@ mod_2_02_results_server <- function(id,
                       shiny::tags$b("Ensemble Pxx / min / max"),
                       " (future only) = quantile of per-model return-period values across CMIP6 ensemble members. Percentiles follow the “Weather + model spread band” selector."),
         shiny::tags$p(style = "font-size:11px; color:#666; margin-top:0; margin-bottom:2px;",
-                      shiny::tags$b("Total Pxx"),
-                      " = combined band assuming independence: SE_total = sqrt(coef_SE² + var_across_models). Historical: Total ≡ Coef (no inter-model component)."),
+                      shiny::tags$b("Pooled Pxx"),
+                      " = combined band assuming independence: SE_pooled = sqrt(coef_SE² + var_across_models). Future scenarios only — for historical (no inter-model component) Pooled would equal Coef and is not reported."),
         shiny::tags$p(style = "font-size:11px; color:#666; margin-top:0; margin-bottom:2px;",
                       "Low odds show the value exceeded in only 1-in-N years; high odds = value reached in all but 1-in-N years; 1:1 is the median year."),
         shiny::tags$p(style = "font-size:11px; color:#666; margin-top:0;",

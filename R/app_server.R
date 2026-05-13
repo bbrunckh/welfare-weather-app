@@ -53,6 +53,8 @@ app_server <- function(input, output, session) {
     selected_hist     = step2_api$selected_hist,
     variable_list     = overview_api$variable_list,
     skip_coef_draws   = step2_api$skip_coef_draws,
-    residuals         = step2_api$residuals
+    residuals         = step2_api$residuals,
+    propagate_all_covariate_uncertainty =
+      step2_api$propagate_all_covariate_uncertainty
   )
 }

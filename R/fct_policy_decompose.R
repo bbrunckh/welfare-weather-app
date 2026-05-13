@@ -9,11 +9,12 @@
 #
 # The shared helper .compute_rif_channels() is the single source of truth
 # for all RIF channel calculations. Both the decomposition display AND the
-# simulation correction (.compute_rif_policy_correction in fct_simulations.R)
-# call it, guaranteeing numerical consistency.
+# RIF simulation pipeline (.compute_rif_policy_correction below, invoked
+# from run_sim_pipeline in fct_simulations.R) call it, so the Results pane
+# and the Decomposition pane always agree numerically.
 #
 # Used by: mod_3_05_policy_sim.R (decomposition display)
-#          fct_simulations.R (.compute_rif_policy_correction)
+#          fct_simulations.R     (run_sim_pipeline RIF policy correction)
 # ============================================================================ #
 
 
@@ -264,6 +265,133 @@
 }
 
 
+#' Compute per-household hazard values for each weather variable
+#'
+#' Continuous weather: per-location mean across `weather_raw` rows, joined to
+#' each household via `loc_id`. Binned (factor) weather: per-location modal
+#' bin. Both fall back to the household's own survey value when `weather_raw`
+#' or `loc_id` is unavailable, so the function is safe to call from any
+#' year-slice context (historical run, single-year scenario slice, etc.).
+#'
+#' @param svy_baseline Baseline survey data frame (provides loc_id and the
+#'   fallback weather columns).
+#' @param weather_raw Data frame of weather values for the period being
+#'   evaluated. May be NULL.
+#' @param weather_vars Character vector of weather variable names.
+#' @return Named list (length `length(weather_vars)`) of hazard vectors, each
+#'   of length `nrow(svy_baseline)`.
+#' @keywords internal
+.compute_hazard_values <- function(svy_baseline, weather_raw, weather_vars) {
+  n <- nrow(svy_baseline)
+  hazard_values <- lapply(weather_vars, function(wv) {
+    if (!is.null(weather_raw) && wv %in% names(weather_raw)) {
+      vals    <- weather_raw[[wv]]
+      has_loc <- "loc_id" %in% names(weather_raw) &&
+                 "loc_id" %in% names(svy_baseline)
+
+      if (is.factor(vals) || is.character(vals)) {
+        if (has_loc) {
+          chr_vals  <- as.character(vals)
+          modal_bin <- tapply(chr_vals, weather_raw[["loc_id"]], function(x) {
+            tbl <- table(x[!is.na(x)])
+            if (length(tbl) == 0) return(NA_character_)
+            names(tbl)[which.max(tbl)]
+          })
+          hh_bin      <- modal_bin[as.character(svy_baseline[["loc_id"]])]
+          orig_levels <- levels(svy_baseline[[wv]])
+          return(factor(hh_bin, levels = orig_levels))
+        }
+        return(svy_baseline[[wv]])
+      }
+
+      if (!is.numeric(vals)) return(rep(0, n))
+
+      if (has_loc) {
+        loc_means  <- tapply(vals, weather_raw[["loc_id"]], mean, na.rm = TRUE)
+        hh_vals    <- loc_means[as.character(svy_baseline[["loc_id"]])]
+        grand_mean <- mean(vals, na.rm = TRUE)
+        hh_vals[is.na(hh_vals)] <- grand_mean
+        return(as.numeric(hh_vals))
+      }
+      return(rep(mean(vals, na.rm = TRUE), n))
+
+    } else if (wv %in% names(svy_baseline)) {
+      vals <- svy_baseline[[wv]]
+      if (is.factor(vals) || is.character(vals)) return(vals)
+      if (!is.numeric(vals)) return(rep(0, n))
+      return(vals)
+    }
+    rep(0, n)
+  })
+  names(hazard_values) <- weather_vars
+  hazard_values
+}
+
+
+#' Compute the net policy effect on welfare level for RIF, in model scale
+#'
+#' Single source of truth for the RIF policy adjustment used by the
+#' simulation pipeline. Sums all decomposition channels:
+#'   delta_total = delta_main (SP + covariate level) + delta_res1
+#'                 (repositioning) + delta_res2 (weather x policy interaction).
+#'
+#' `run_sim_pipeline()` calls this in policy mode and adds the returned
+#' vector to the baseline-x RIF prediction so that the Results pane's
+#' policy y_point reflects the same net effect the Decomposition pane
+#' reports.
+#'
+#' @param svy_baseline Baseline survey data frame.
+#' @param svy_policy   Policy-adjusted survey data frame.
+#' @param weather_raw  Period weather data frame (passed to hazard helper).
+#' @param weather_cols Character vector of weather variable names from the
+#'   fitted RIF model (`model_fit$weather_terms`).
+#' @param rif_grid     RIF coefficient grid (`model_fit$rif_grid`).
+#' @param taus         Numeric vector of quantile grid points
+#'   (`model_fit$taus`).
+#' @param train_data   Training data used for the ecdf
+#'   (`model_fit$train_data`).
+#' @param outcome      Character outcome variable name.
+#' @param is_log       Logical; whether the outcome is log-transformed.
+#' @return Numeric vector of length `nrow(svy_baseline)` giving delta_total
+#'   in model scale, or NULL if any required input is missing.
+#' @keywords internal
+.compute_rif_policy_correction <- function(svy_baseline, svy_policy,
+                                           weather_raw, weather_cols,
+                                           rif_grid, taus, train_data,
+                                           outcome, is_log) {
+  if (is.null(svy_baseline) || is.null(svy_policy) ||
+      is.null(rif_grid) || is.null(taus) || is.null(train_data) ||
+      length(weather_cols) == 0L) return(NULL)
+
+  n <- nrow(svy_baseline)
+  deltas      <- .compute_policy_deltas(svy_baseline, svy_policy,
+                                        outcome, weather_cols)
+  sp_transfer <- if (SP_TRANSFER_COL %in% names(svy_policy)) {
+    svy_policy[[SP_TRANSFER_COL]]
+  } else rep(0, n)
+  hazard_values <- .compute_hazard_values(svy_baseline, weather_raw,
+                                          weather_cols)
+
+  channels <- .compute_rif_channels(
+    svy_baseline  = svy_baseline,
+    deltas        = deltas,
+    sp_transfer   = sp_transfer,
+    hazard_values = hazard_values,
+    weather_vars  = weather_cols,
+    rif_grid      = rif_grid,
+    taus          = taus,
+    train_data    = train_data,
+    outcome       = outcome,
+    is_log        = is_log,
+    # SEs are not propagated into y_point; the sim pipeline expresses
+    # uncertainty through coefficient draws / F_loading, not channel SDs.
+    skip_coef     = TRUE
+  )
+  if (is.null(channels)) return(NULL)
+  channels$delta_total
+}
+
+
 # ---------------------------------------------------------------------------- #
 # Public API                                                                   #
 # ---------------------------------------------------------------------------- #
@@ -310,61 +438,7 @@ decompose_policy_effect <- function(svy_baseline,
   weather_vars <- model_fit$weather_terms
   if (is.null(weather_vars) || length(weather_vars) == 0) return(NULL)
 
-  # Compute hazard values per household:
-  #   - Continuous weather: mean weather for this period *per location*, joined
-  #     to each HH via loc_id. This gives an HH-length vector that varies
-  #     both across households (different locations) and across years (different
-  #     weather realisations in each year-slice passed from mod_3_05).
-  #     Falls back to grand mean only when loc_id is unavailable.
-  #   - Binned (factor) weather: modal bin per location for this year-slice,
-  #     joined by loc_id. Varies across years as temperatures shift bins.
-  #     Falls back to svy_baseline bin when loc_id is unavailable.
-  hazard_values <- lapply(weather_vars, function(wv) {
-    if (!is.null(weather_raw) && wv %in% names(weather_raw)) {
-      vals    <- weather_raw[[wv]]
-      has_loc <- "loc_id" %in% names(weather_raw) && "loc_id" %in% names(svy_baseline)
-
-      if (is.factor(vals) || is.character(vals)) {
-        # Binned weather: modal bin per location for this year-slice
-        if (has_loc) {
-          chr_vals  <- as.character(vals)
-          modal_bin <- tapply(chr_vals, weather_raw[["loc_id"]], function(x) {
-            tbl <- table(x[!is.na(x)])
-            if (length(tbl) == 0) return(NA_character_)
-            names(tbl)[which.max(tbl)]
-          })
-          hh_bin <- modal_bin[as.character(svy_baseline[["loc_id"]])]
-          orig_levels <- levels(svy_baseline[[wv]])
-          return(factor(hh_bin, levels = orig_levels))
-        }
-        return(svy_baseline[[wv]])
-      }
-
-      if (!is.numeric(vals)) return(rep(0, n))
-
-      # Continuous weather: per-location mean, joined to each HH by loc_id
-      if (has_loc) {
-        loc_means <- tapply(vals, weather_raw[["loc_id"]], mean, na.rm = TRUE)
-        hh_vals   <- loc_means[as.character(svy_baseline[["loc_id"]])]
-        # Fill any unmatched HHs with the grand mean
-        grand_mean           <- mean(vals, na.rm = TRUE)
-        hh_vals[is.na(hh_vals)] <- grand_mean
-        return(as.numeric(hh_vals))
-      }
-      # No loc_id — fall back to grand mean (scalar broadcast)
-      rep(mean(vals, na.rm = TRUE), n)
-
-    } else if (wv %in% names(svy_baseline)) {
-      # No weather_raw supplied — use each HH's own survey weather value
-      vals <- svy_baseline[[wv]]
-      if (is.factor(vals) || is.character(vals)) return(vals)
-      if (!is.numeric(vals)) return(rep(0, n))
-      vals
-    } else {
-      rep(0, n)
-    }
-  })
-  names(hazard_values) <- weather_vars
+  hazard_values <- .compute_hazard_values(svy_baseline, weather_raw, weather_vars)
 
   # Compute covariate deltas using shared helper
   deltas <- .compute_policy_deltas(svy_baseline, svy_policy, outcome, weather_vars)

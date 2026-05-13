@@ -94,7 +94,9 @@ mod_3_scenario_server <- function(id,
                                    selected_hist   = reactive(NULL),
                                    variable_list   = reactive(NULL),
                                    skip_coef_draws = reactive(FALSE),
-                                   residuals       = reactive("original")) {
+                                   residuals       = reactive("original"),
+                                   propagate_all_covariate_uncertainty =
+                                     reactive(FALSE)) {
   moduleServer(id, function(input, output, session) {
     ns <- session$ns
 
@@ -181,7 +183,8 @@ mod_3_scenario_server <- function(id,
       hist_sim          = hist_sim,
       saved_scenarios   = saved_scenarios,
       skip_coef_draws   = skip_coef_draws,
-      residuals         = residuals
+      residuals         = residuals,
+      propagate_all_covariate_uncertainty = propagate_all_covariate_uncertainty
     )
 
     # ---- Results tabs: Baseline & Policy (both re-simulated) -------------

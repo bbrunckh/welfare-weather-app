@@ -48,7 +48,9 @@ mod_3_05_policy_sim_server <- function(id,
                                         hist_sim           = reactive(NULL),
                                         saved_scenarios    = reactive(list()),
                                         skip_coef_draws    = reactive(FALSE),
-                                        residuals          = reactive("original")) {
+                                        residuals          = reactive("original"),
+                                        propagate_all_covariate_uncertainty =
+                                          reactive(FALSE)) {
   moduleServer(id, function(input, output, session) {
     ns <- session$ns
 
@@ -125,6 +127,11 @@ mod_3_05_policy_sim_server <- function(id,
               # back to "none".
               hs_for_resim <- hs
               hs_for_resim$residuals <- res_choice
+              # Forward the Step-2 additive-decomposition toggle so the policy
+              # arm rebuilds its mask consistently (weather + policy-modified
+              # vars vs. legacy full coefficient propagation).
+              hs_for_resim$propagate_all_covariate_uncertainty <-
+                isTRUE(propagate_all_covariate_uncertainty())
               pol_out <- resimulate_with_svy(svy_mod, sw, hs$so, mf, hs_for_resim, ss,
                                              svy_baseline = svy)
               if (!is.null(pol_out)) {
