@@ -279,21 +279,6 @@ plot_pointrange_climate <- function(bands_tbl,
     ggplot2::aes(x = .data$pt_key, colour = .data$colour_key)
   p <- ggplot2::ggplot(df, aes_base)
 
-  # Outermost (when present): "total" whisker combining all three sources
-  # assuming independence: SE = sqrt(var_coef + var_within + var_across).
-  if (all(c("total_lo", "total_hi") %in% names(df))) {
-    p <- p + ggplot2::geom_linerange(
-      ggplot2::aes(ymin = .data$total_lo, ymax = .data$total_hi),
-      linewidth = 0.6, colour = "grey40", alpha = 0.8, na.rm = TRUE,
-      position = pos
-    ) +
-      ggplot2::geom_errorbar(
-        ggplot2::aes(ymin = .data$total_lo, ymax = .data$total_hi),
-        width = 0.25, linewidth = 0.4, colour = "grey40", na.rm = TRUE,
-        position = pos, inherit.aes = TRUE
-      )
-  }
-
   p <- p +
     ggplot2::geom_linerange(
       ggplot2::aes(ymin = .data$intermod_lo, ymax = .data$intermod_hi),
@@ -415,13 +400,13 @@ build_threshold_table_df <- function(threshold_tbl,
 
   # Sort rows: Historical first, then SSPs. Within each scenario the
   # Estimate rows are arranged concentrically around the Central P50:
-  #   Total low -> Coef low -> Ensemble low -> Central -> Ensemble high
-  #   -> Coef high -> Total high
+  #   Pooled low -> Coef low -> Ensemble low -> Central -> Ensemble high
+  #   -> Coef high -> Pooled high
   # Lower vs upper side is read from the percentile (< 50 or > 50, or the
   # special "min"/"max" tokens). Family distance from the central row is
-  # Total = 3 (outermost), Coef = 2, Ensemble = 1.
+  # Pooled = 3 (outermost), Coef = 2, Ensemble = 1.
   .est_rank <- function(est) {
-    fam_dist <- ifelse(grepl("^Total ",    est), 3L,
+    fam_dist <- ifelse(grepl("^Pooled ",   est), 3L,
                 ifelse(grepl("^Coef ",     est), 2L,
                 ifelse(grepl("^Ensemble ", est), 1L, 0L)))
     pct <- suppressWarnings(as.integer(sub(".*P", "", est)))
@@ -637,49 +622,55 @@ plot_timeseries_spaghetti <- function(ts_tbl,
 # Variance-contribution stacked bar                                            #
 # ---------------------------------------------------------------------------- #
 
-#' Stacked Variance-Contribution Bar by Scenario
+#' Stacked SD-Contribution Bar by Scenario
 #'
-#' For each scenario, plots a 100% stacked horizontal bar showing the share
-#' of total predictive variance contributed by:
+#' For each scenario, plots a horizontal bar stacking each uncertainty
+#' source's standard deviation contribution (sqrt of its variance):
 #'   - Coefficient uncertainty (regression-fit per-outcome SE)
 #'   - Inter-annual variability (within-model year-to-year)
 #'   - Inter-model spread (across-model disagreement; future only)
 #'
-#' Assumes the three sources are independent so total var = sum of components.
+#' Each segment's length is the source's SD on the outcome scale. Segment
+#' labels show each source's share of the bar's total length (sum of the
+#' three source SDs). Because variances (not SDs) add under independence,
+#' the stacked total is an **upper bound** on the true combined SD;
+#' segments are placed side by side as a visual decomposition of where
+#' uncertainty comes from, not as a literal additive total.
 #'
 #' @param var_tbl Tibble with columns: scenario, var_coef, var_within,
 #'   var_across, is_historical.
 #' @return A ggplot object.
-#' @importFrom ggplot2 ggplot aes geom_col scale_fill_manual scale_x_continuous
-#'   labs theme_minimal theme coord_flip
+#' @importFrom ggplot2 ggplot aes geom_col geom_text scale_fill_manual
+#'   scale_y_continuous labs theme_minimal theme coord_flip position_stack
 #' @importFrom tidyr pivot_longer
 #' @importFrom rlang .data
 #' @export
 plot_variance_contribution <- function(var_tbl) {
   if (is.null(var_tbl) || nrow(var_tbl) == 0L)
     return(ggplot2::ggplot() +
-           ggplot2::labs(title = "Run a simulation to see variance contributions."))
+           ggplot2::labs(title = "Run a simulation to see SD contributions."))
 
   df <- var_tbl
-  df$var_total <- df$var_coef + df$var_within + df$var_across
-  # Guard against div-by-zero
-  df$var_total <- ifelse(df$var_total > 0, df$var_total, 1)
-  df$share_coef    <- df$var_coef    / df$var_total
-  df$share_within  <- df$var_within  / df$var_total
-  df$share_across  <- df$var_across  / df$var_total
+  df$sd_coef   <- sqrt(pmax(df$var_coef,   0))
+  df$sd_within <- sqrt(pmax(df$var_within, 0))
+  df$sd_across <- sqrt(pmax(df$var_across, 0))
+  df$sd_sum    <- df$sd_coef + df$sd_within + df$sd_across
 
   long <- tidyr::pivot_longer(
-    df[, c("scenario", "share_coef", "share_within", "share_across")],
-    cols      = c("share_coef", "share_within", "share_across"),
+    df[, c("scenario", "sd_coef", "sd_within", "sd_across", "sd_sum")],
+    cols      = c("sd_coef", "sd_within", "sd_across"),
     names_to  = "source",
-    values_to = "share"
+    values_to = "sd"
   )
+  long$share <- ifelse(long$sd_sum > 0, long$sd / long$sd_sum, NA_real_)
+  long$share_lbl <- ifelse(is.finite(long$share),
+                           paste0(round(100 * long$share), "%"), "")
+
   long$source <- factor(long$source,
-                        levels = c("share_across", "share_within", "share_coef"),
+                        levels = c("sd_across", "sd_within", "sd_coef"),
                         labels = c("Inter-model spread",
                                    "Inter-annual variability",
                                    "Coefficient uncertainty"))
-  # Preserve scenario order from input
   long$scenario <- factor(long$scenario, levels = rev(unique(df$scenario)))
 
   fill_map <- c(
@@ -689,13 +680,20 @@ plot_variance_contribution <- function(var_tbl) {
   )
 
   ggplot2::ggplot(long,
-    ggplot2::aes(x = .data$scenario, y = .data$share, fill = .data$source)
+    ggplot2::aes(x = .data$scenario, y = .data$sd, fill = .data$source)
   ) +
     ggplot2::geom_col(width = 0.7) +
+    ggplot2::geom_text(
+      ggplot2::aes(label = .data$share_lbl),
+      position = ggplot2::position_stack(vjust = 0.5),
+      size = 3, colour = "white"
+    ) +
     ggplot2::scale_fill_manual(values = fill_map, name = NULL) +
-    ggplot2::scale_y_continuous(labels = scales::percent_format(accuracy = 1),
-                                expand = c(0, 0)) +
-    ggplot2::labs(x = NULL, y = "Share of total predictive variance") +
+    ggplot2::scale_y_continuous(expand = c(0, 0)) +
+    ggplot2::labs(
+      x = NULL,
+      y = "Standard deviation (outcome units)"
+    ) +
     ggplot2::theme_minimal(base_size = 12) +
     ggplot2::theme(
       legend.position    = "bottom",

@@ -291,6 +291,8 @@ When `M = 1` (historical or single member), `var_across = 0` and the thin band r
 
 Auxiliary outputs (`model_lo`, `model_q10`, `model_q25`, `model_med`, `model_q75`, `model_q90`, `model_hi`) report unconditional percentiles of `{value_m}` for the inter-model summary panel.
 
+> **Note on display vs. function output.** The "Pooled" outer whisker shown in the Module 2/3 point-range plots (§6 below) is **not** the `coef_lo`/`coef_hi` returned here. The UI helpers in `fct_sim_compare.R::plot_pointrange_climate` and `fct_policy_sim_compare.R::pol_plot_pointrange_climate` recompute their own pooled SE from the raw per-(model, sim_year) coefficient SDs in `value_all_sd` (see `by_model_matrix()` in `fct_uncertainty_helpers.R`), excluding `var_within` (inter-annual). `combine_ensemble_results()`'s `coef_lo/hi` is used in the exceedance-curve / threshold-table code paths (see `fct_sim_compare.R` ~lines 314, 894–907) where pooling all parametric variance into a single ribbon is the intended display.
+
 ### 4.3 Assumptions of the pooled SE
 
 1. **Independence of within- and across-member variance.** The law of total variance gives `Var(T) = E[Var(T|m)] + Var(E[T|m])` exactly when these are computed against the joint distribution. WISE-APP estimates the inner expectation by the sample mean across members; this is an unbiased plug-in.
@@ -322,13 +324,16 @@ Var(T_scn − T_base) = || F_agg_scn − F_agg_base ||²
 
 ## 6. Layered Display in the UI
 
-The Module 3 comparison panel (see `fct_policy_sim_compare.R`) reports up to three concentric uncertainty bands:
+The Module 2 and Module 3 point-range comparison panels (see `fct_sim_compare.R::plot_pointrange_climate` and `fct_policy_sim_compare.R`) report up to four nested whiskers around the central year- and model-averaged estimate:
 
 1. **Innermost (coefficient uncertainty only).** From `var_coef` of `aggregate_with_uncertainty_delta()`. Shown when the user enables "Show coefficient uncertainty".
-2. **Middle (inter-annual variability).** Empirical percentiles of per-`sim_year` point estimates within each member.
-3. **Outermost (inter-model spread).** Empirical percentiles of member point estimates from `combine_ensemble_results()`.
+2. **Middle (inter-annual variability).** Empirical percentiles of per-`sim_year` point estimates within each member, averaged across members.
+3. **Thick coloured band (inter-model spread).** Empirical percentiles of member-mean point estimates from `combine_ensemble_results()`.
+4. **Outer "Pooled" whisker (pooled SE).** Analytic Gaussian band `value ± z · sqrt(var_coef + var_across)` — pools coefficient uncertainty and inter-model spread, *not* inter-annual variability. The exclusion is deliberate and matches the convention used in the return-period threshold table (`fct_sim_compare.R::build_threshold_table_df`), where the corresponding rows are labelled `Pooled Pxx`: inter-annual variability characterises the spread of the simulated outcome distribution at each return-period quantile, not uncertainty about the central tendency. Folding it into the pooled SE would double-display the year-to-year spread (already shown as the middle band) and conflate two distinct quantities. **Suppressed (drawn as NA) when `var_across == 0`** — i.e. historical scenarios and single-member future ensembles. In those cases the pooled SE degenerates to the coefficient SE and the whisker would simply duplicate the innermost band; omitting it also signals the absence of an inter-model component visually.
 
-The user-facing band-width selector (`"p10_p90"`, `"p025_p975"`, etc.) is resolved by `resolve_band_q()` and applied uniformly across all three layers, so wider bands widen every layer simultaneously.
+The user-facing band-width selector (`"p10_p90"`, `"p025_p975"`, etc.) is resolved by `resolve_band_q()` and applied uniformly across all layers, so wider bands widen every layer simultaneously.
+
+Note that the diagnostics-tab SD-contribution stacked bar (`plot_variance_contribution()` in `fct_sim_compare.R`) is a *side-by-side decomposition* of all three sources (sqrt of var_coef, var_within, var_across) on the outcome scale — its purpose is to show where uncertainty comes from, including year-to-year spread, and it is not a pooled SE for the central estimate. Because variances (not SDs) add under independence, the stacked bar total is an upper bound on the true combined SD; per-segment labels report each source's share of the bar's total length. Inter-annual variability is included even though it characterises the spread of simulated years rather than uncertainty about the central tendency.
 
 ---
 

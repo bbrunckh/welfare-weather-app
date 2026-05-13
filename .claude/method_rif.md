@@ -88,11 +88,19 @@ For weather-only scenarios (no policy), `predict_rif()` is called with the origi
 
 #### Policy scenario simulation
 
-When a policy modifies covariates (e.g., flipping an infrastructure binary, adding a cash transfer), the simulation has two stages:
+When a policy modifies covariates (e.g., flipping an infrastructure binary, adding a cash transfer), `run_sim_pipeline()` runs two stages. The architecture is **predict-at-baseline + channel decomposition**: rather than letting `fixest::predict()` blend covariate effects into the weather delta, the pipeline predicts at baseline covariates and then explicitly adds every policy channel from the decomposition helper.
 
-**Stage A — Weather delta with policy covariates:** `predict_rif()` is called with `svy = svy_policy` (the policy-modified survey). Because the scenario predictions use the policy covariates, any weather×covariate interaction terms activate through the weather delta automatically. For example, if the model includes `drought × irrigation`, and the policy turns on irrigation, the weather delta already reflects the moderated drought effect. *(This is the same `predict()`-on-policy-survey mechanism that the linear engine uses for its entire policy simulation — see [`method_lin.md`](method_lin.md) §2.5. The difference is that RIF's `predict_rif()` only returns the weather delta, so the covariate main effect still has to be added in Stage B.)*
+**Stage A — Baseline weather delta:** in policy mode, `svy_for_predict = svy_baseline` (not the policy-modified survey; see `fct_simulations.R` ~line 444). `predict_rif()` is therefore evaluated at *baseline* covariates and returns `y_baseline + δ_weather` computed with the unchanged policy levers. This isolates the pure weather effect at status-quo covariates and leaves *all* policy channels — including weather×covariate interactions — to be added explicitly in Stage B.
 
-**Stage B — Policy correction via `.compute_rif_policy_correction()`:** This adds the channels that `predict_rif()` misses — effects of covariate changes that operate *outside* the weather delta. The correction delegates to `.compute_rif_channels()` (in `fct_policy_decompose.R`), which is the single source of truth for all channel calculations — both the simulation correction and the decomposition display call the same function.
+**Stage B — Full policy correction via `.compute_rif_policy_correction()`:** the correction returns `channels$delta_total` from `.compute_rif_channels()` (in `fct_policy_decompose.R`) — the same helper the decomposition display calls. `delta_total = δ_sp + δ_main_covar + δ_res1 + δ_res2` is added to `y_point` on the model (log) scale:
+
+```r
+y_point <- y_point + corr[out$.svy_row_id]   # fct_simulations.R ~line 542
+```
+
+Because `δ_sp` is already inside `delta_total`, the level-scale SP block later in `run_sim_pipeline()` is **skipped in RIF policy mode** (`if (!is_rif_policy && SP_TRANSFER_COL %in% names(out)) …`). The cash transfer therefore enters in log scale via `δ_sp = log(exp(y_baseline) + SP_cash) − y_baseline`, not in levels post-backtransform.
+
+This is the single most important consistency property of the current RIF policy pipeline: **the simulation y_point and the decomposition display are produced by the same function with the same inputs, so the channel totals reconcile exactly with the simulated welfare level** (up to the back-transform, which is monotone).
 
 ##### Channel 1: Main effect (δ_main)
 
@@ -142,23 +150,34 @@ Like repositioning, δ_res2 is evaluated at τ_i^**post** — the household's qu
 
 ##### What the correction returns
 
-The correction adds `δ_main_covar + δ_res1` to predictions. The other channels are handled elsewhere or already present:
-- **δ_sp is not added by the correction**, but it is *computed* inside `.compute_rif_channels()` and folded into `δ_main`, which then drives `τ_i^post`. So even though δ_sp itself is added later in levels (post-backtransform, to avoid log-scale distortion of direct transfers), the cash transfer still influences δ_res1 and δ_res2 indirectly through the τ shift. The exclusion is *additive*, not informational.
-- **δ_res2 is not added by the correction** because it is already captured inside Stage A's weather delta (which evaluates predictions at policy covariates, activating interaction terms).
+The correction returns `channels$delta_total = δ_sp + δ_main_covar + δ_res1 + δ_res2` from `.compute_rif_channels()`. **All four channels are added to `y_point` in log scale.** Notes on each:
+
+- **δ_sp** enters in log scale (`log(exp(y_baseline) + SP_cash) − y_baseline`) and drives `τ_i^post` via `delta_main`. The level-scale SP block in `run_sim_pipeline()` is gated on `!is_rif_policy` and is therefore inactive in this mode — cash is *not* added a second time post-backtransform.
+- **δ_main_covar** uses `β_v(τ_i^pre) · Δv` summed over changed covariates.
+- **δ_res1** is the repositioning channel: `[β_w(τ_i^post) − β_w(τ_i^pre)] · w_baseline` for continuous weather, summed over weather variables (with an analogous binned-weather branch).
+- **δ_res2** is the policy × weather interaction channel: `β_{w×v}(τ_i^post) · w_hh · Δv`, evaluated at `τ_i^post`.
+
+`τ_i^pre = F̂(y_baseline)` uses the training-outcome `ecdf()`; `τ_i^post = baseline_cdf(y_baseline + δ_main)` uses the baseline-sample `ecdf()`. Both are clamped to `[min(taus), max(taus)] = [0.1, 0.9]`.
 
 **Full prediction assembly (in `run_sim_pipeline()`):**
 ```
-ŷ_policy = backtransform(y_baseline + δ_weather(policy covars) + δ_main_covar + δ_res1) + SP_cash
+ŷ_policy = backtransform( y_baseline
+                          + δ_weather(baseline covariates)   # Stage A: predict_rif at svy_baseline
+                          + δ_sp + δ_main_covar              # Stage B: delta_main
+                          + δ_res1                           # Stage B: repositioning
+                          + δ_res2 )                         # Stage B: interaction
 ```
+
+There is no post-backtransform SP addition in RIF policy mode.
 
 ##### Decomposition display (separate from simulation)
 
-The decomposition table (in `decompose_policy_effect()`) reports *all* channels for transparency, including δ_sp and δ_res2, even though the simulation pipeline handles them differently. The decomposition output includes:
+The decomposition table (in `decompose_policy_effect()`) reports the same `.compute_rif_channels()` output broken into named columns:
 - `delta_main` = δ_sp + δ_main_covar (total main effect)
 - `delta_res` = δ_res1 + δ_res2 (total resilience effect)
 - `delta_total` = δ_main + δ_res (all channels combined)
 
-**Decomposition–simulation reconciliation.** Both routes call the same helper `.compute_rif_channels()` (in `fct_policy_decompose.R`) as their single source of truth. The simulation correction returns `δ_main_covar + δ_res1` from this helper; the decomposition table reports the full set. By construction, the channel totals in the decomposition reconcile exactly with the simulation prediction up to the SP-in-levels handling (δ_sp added post-backtransform) and the location of δ_res2 (computed inside `predict_rif()`'s Stage A rather than in the correction). This is a structural advantage over the linear engine, where the β·Δx decomposition and the `fixest::predict()` simulation can diverge under FE absorption (see [`method_lin.md`](method_lin.md) §2.8c).
+**Decomposition–simulation reconciliation.** Both routes call `.compute_rif_channels()` with the same `(svy_baseline, svy_policy, weather_raw, rif_grid, taus, train_data)`, and the simulation correction is *exactly* `channels$delta_total` from that call. The reconciliation is therefore exact in model scale: per-household `δ_total` in the decomposition table equals the policy-minus-baseline change in pre-backtransform `y_point`. This is a structural advantage over the linear engine, where the `β·Δx` decomposition and the `fixest::predict()` simulation can diverge under FE absorption (see [`method_lin.md`](method_lin.md) §2.8c).
 
 ### 2.6 Uncertainty Propagation (`fct_aggregation_delta.R`, `fct_rif_sim.R`)
 
@@ -184,21 +203,23 @@ The interpolated `F_loading` (N × K_coef) is attached as `attr(out, "F_loading"
 
 ### 2.7 Conceptual Issues with the Policy Simulation
 
-#### a) Potential interaction term double-counting
+#### a) Single Σ approximation in the resilience channel variance
 
-The exclusion of δ_res2 from the simulation correction rests on the claim that `predict_rif()` already captures weather×covariate interactions because it evaluates at policy covariates. This is approximately but not exactly correct. `predict_rif()` computes δ_weather as the difference in full model predictions between scenario and baseline weather, both evaluated at policy covariates. For the interaction term β_{w×x} × w × x, the prediction difference captures β_{w×x} × Δw × x_policy. Meanwhile δ_res2 = β_{w×x}(τ_i^post) × w_base × Δx. These are complementary terms in a full decomposition, but whether they overlap depends on the exact prediction path. For small Δw and Δx the approximation is good; for large joint changes there may be a missing cross-term Δw × Δx.
+`.compute_rif_channels()` accumulates per-channel variance under a **diagonal-Σ approximation**: `var_res1 += haz² · (SE_pre² + SE_post²)`, treating the τ_pre and τ_post coefficient draws as independent. Because both are interpolated from the same per-τ fits, they are in fact correlated; the diagonal approximation therefore *overstates* the variance of δ_res1 (and similarly δ_res2). This is the channel-level analogue of the cross-tau independence issue in `interpolate_F_loading()` (§2.6).
+
+Note that the channel variances are returned in `sd_main`/`sd_res1`/`sd_res2`/`sd_total` for the decomposition display only — the simulation correction is called with `skip_coef = TRUE` (see `.compute_rif_policy_correction()`), so SE propagation in the Results pane flows entirely through `F_loading`, not through these channel SDs.
 
 #### b) Prediction-space vs. coefficient-space inconsistency
 
-`predict_rif()` works in **prediction space** (full model predictions at each τ, including fixed effects). The policy correction works in **coefficient space** (extracting betas and multiplying by Δx). These agree for simple OLS but can diverge when fixed effects are absorbed — predictions include FE contributions that the beta extraction doesn't see. In practice, the delta approach (differencing two predictions) cancels fixed effects in Stage A, so the inconsistency mainly affects the main-effect correction in Stage B.
+The Stage A weather delta works in **prediction space** (full model predictions at each τ, including fixed effects). The Stage B correction works in **coefficient space** (extracting betas and multiplying by Δx). These agree for simple OLS but can diverge when fixed effects are absorbed — predictions include FE contributions that the beta extraction doesn't see. In practice, the delta approach (differencing two predictions) cancels fixed effects in Stage A, so the inconsistency mainly affects whether Stage B's channel sum exactly reproduces what a hypothetical `predict()`-at-policy-covariates would have returned. Because the current pipeline never compares the two routes (Stage A is evaluated at baseline only), this is a conceptual rather than a numerical concern.
 
 #### c) Structural assumption in repositioning and interaction
 
 The repositioning and interaction channels assume that weather vulnerability is a function of *welfare level*, not of unobserved household characteristics correlated with welfare. A household moved from $100 to $200 by a cash transfer is assumed to have the same weather vulnerability (both main weather betas and interaction betas) as a household that was *originally* at $200. In reality, originally-poor households may differ in unobserved ways (e.g., asset quality, social networks, geographic exposure) that make them more vulnerable than originally-rich households at the same welfare level. The RIF betas at high τ were estimated from originally-rich households; applying them to formerly-poor households is a "rank invariance"-style assumption. This applies to both δ_res1 (weather betas) and δ_res2 (interaction betas) since both are now evaluated at τ_i^post. This is inherent to the method and difficult to test without panel data or instrumental variation.
 
-#### d) SP transfer scale mismatch
+#### d) SP transfer enters in log scale (RIF policy mode)
 
-The SP direct effect is added post-backtransform in levels, while its influence on repositioning (through δ_res1) is computed in log/model scale. This is deliberate — the repositioning captures the *indirect* resilience effect while the direct transfer is a cash addition — but the two operate on different scales. The decomposition table reports δ_sp in model scale (log), while the simulation adds SP_cash in levels. Users comparing the decomposition percentages to simulation outputs need to be aware of this distinction.
+Unlike the linear engine — which adds `SP_cash` to predicted welfare *in levels* after back-transform — the RIF policy path adds `δ_sp = log(exp(y_baseline) + SP_cash) − y_baseline` in log scale inside `delta_total`, and the level-scale SP block in `run_sim_pipeline()` is skipped. The two are algebraically equivalent (`exp(y + δ_sp) = exp(y) + SP_cash`), but the path matters for uncertainty propagation: the log-scale addition enters before the band transform and shows up as a level shift in the centred Gaussian band; the level-scale addition would instead shift the band uniformly after the transform. Currently δ_sp is treated as deterministic (no SE), so this distinction is numerical-precision only.
 
 #### e) Sparse quantile grid and linear interpolation
 

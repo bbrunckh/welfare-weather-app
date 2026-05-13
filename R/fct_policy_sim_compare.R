@@ -308,25 +308,31 @@ policy_input_diagnostics <- function(baseline_svy, policy_svy, vars = NULL) {
       shiny::uiOutput(ns("scenario_filter_ui"))
     ),
     shiny::wellPanel(
-      shiny::h4("Distribution of outcomes across climate scenarios and timeframes"),
+      shiny::h4("Distribution of outcome across weather conditions, by climate scenario"),
       shiny::plotOutput(ns("summary_box_plot"), height = "600px"),
       shiny::tags$p(
         style = "font-size:11px; color:#666; margin-top:6px;",
-        "Each scenario shows two dots: baseline (grey) and policy-adjusted (red), all bands centred on the dot (the ensemble-mean annual aggregate).",
+        "Each scenario shows two dots: ",
+        shiny::tags$b("baseline (grey)"),
+        " and ",
+        shiny::tags$b("policy-adjusted (red)"),
+        ". All bands are drawn relative to the dot (the ensemble-mean annual aggregate) and answer different questions about uncertainty. They are not meant to be added together — see the Diagnostics tab for how the sources combine.",
+        shiny::tags$br(), shiny::tags$br(),
+        shiny::tags$b("Thick coloured band — “How much do climate models disagree?”"),
+        " (future scenarios only)",
         shiny::tags$br(),
-        shiny::tags$b("Outer grey whisker with caps"),
-        " = combined total uncertainty assuming independence: SE = sqrt(var_coef + var_within + var_across).",
+        " Inter-model spread: quantile across CMIP6 ensemble members of each model's time-mean. This band can be asymmetric around the dot when models lean one way.",
         shiny::tags$br(),
-        shiny::tags$b("Thick band"),
-        " (future scenarios) = inter-model spread across CMIP6 ensemble members of each model's time-mean.",
+        shiny::tags$b("Middle band — “How much does weather vary year-to-year within a typical model?”"),
         shiny::tags$br(),
-        shiny::tags$b("Middle band"),
-        " = inter-annual weather variability (quantile across simulation years).",
+        " Inter-annual variability: per-model quantile across simulation years, then averaged across models. Reflects the natural range of outcomes a single climate trajectory produces.",
         shiny::tags$br(),
-        shiny::tags$b("Innermost line"),
-        " (when coefficient uncertainty is enabled) = analytic per-outcome SE from the regression fit.",
+        shiny::tags$b("Innermost line — “How precisely is each (model, year) aggregate estimated?”"),
+        " (shown when coefficient uncertainty is enabled)",
         shiny::tags$br(),
-        "Historical = single 'model' so no inter-model band is shown. Dashed line = historical mean."
+        " Analytic per-outcome SE from the regression fit. This is precision of a point estimate, not a spread of outcomes — conceptually distinct from the two coloured bands.",
+        shiny::tags$br(), shiny::tags$br(),
+        "Historical = single 'model' so no inter-model band is shown. Dashed line = historical mean. A pooled summary SE combining coefficient and inter-model uncertainty is available in the return-period table on the Diagnostics tab."
       )
     ),
     shiny::wellPanel(
@@ -648,22 +654,27 @@ policy_input_diagnostics <- function(baseline_svy, policy_svy, vars = NULL) {
       ens_mean <- mean(as.numeric(vals), na.rm = TRUE)
       sd_mean  <- mean(as.numeric(sds),  na.rm = TRUE)
       coef <- c(lo = ens_mean + z_lo * sd_mean, hi = ens_mean + z_hi * sd_mean)
-      # See mod_2_02_results.R for the rationale on recomputing var_within /
-      # var_across from the value matrix rather than the stored parametric
-      # tbl$var_within (which would double-count var_coef and not respond
-      # to deviation mode).
+      # Pooled SE on the central (year- and model-averaged) estimate,
+      # mirroring the return-period table's "Pooled" convention. Inter-
+      # annual variability is shown separately as its own band rather
+      # than pooled in: it describes the spread of the simulated outcome
+      # distribution, not uncertainty about the central tendency. When
+      # var_across is zero (historical or single-member future), the
+      # pooled SE degenerates to the coef SE; we suppress the outer
+      # whisker (NA) to avoid drawing a duplicate of the coef band. See
+      # mod_2_02_results.R for the parallel implementation.
       var_coef_total <- mean(as.numeric(sds)^2, na.rm = TRUE)
-      var_within <- if (ncol(vals) > 1L) {
-        per_mod_var <- apply(vals, 1L, stats::var, na.rm = TRUE)
-        mean(per_mod_var, na.rm = TRUE)
-      } else 0
-      if (!is.finite(var_within)) var_within <- 0
       var_across <- if (!is_hist && nrow(vals) > 1L) {
         v <- stats::var(rowMeans(vals, na.rm = TRUE), na.rm = TRUE)
         if (is.finite(v)) v else 0
       } else 0
-      sd_total <- sqrt(max(var_coef_total + var_within + var_across, 0, na.rm = TRUE))
-      total <- c(lo = ens_mean + z_lo * sd_total, hi = ens_mean + z_hi * sd_total)
+      if (var_across > 0) {
+        sd_total <- sqrt(max(var_coef_total + var_across, 0, na.rm = TRUE))
+        total <- c(lo = ens_mean + z_lo * sd_total,
+                   hi = ens_mean + z_hi * sd_total)
+      } else {
+        total <- c(lo = NA_real_, hi = NA_real_)
+      }
       tibble::tibble(
         scenario      = scenario_label,
         source        = source_label,
@@ -807,12 +818,12 @@ policy_input_diagnostics <- function(baseline_svy, policy_svy, vars = NULL) {
           is_historical = is_hist
         )
       }
-      coef_lo_lbl  <- paste0("Coef ",     pct_label(bq_coef[["lo"]]))
-      coef_hi_lbl  <- paste0("Coef ",     pct_label(bq_coef[["hi"]]))
-      ens_lo_lbl   <- paste0("Ensemble ", pct_label(bq_ens[["lo"]], use_minmax = TRUE))
-      ens_hi_lbl   <- paste0("Ensemble ", pct_label(bq_ens[["hi"]], use_minmax = TRUE))
-      total_lo_lbl <- paste0("Total ",    pct_label(bq_coef[["lo"]]))
-      total_hi_lbl <- paste0("Total ",    pct_label(bq_coef[["hi"]]))
+      coef_lo_lbl   <- paste0("Coef ",     pct_label(bq_coef[["lo"]]))
+      coef_hi_lbl   <- paste0("Coef ",     pct_label(bq_coef[["hi"]]))
+      ens_lo_lbl    <- paste0("Ensemble ", pct_label(bq_ens[["lo"]], use_minmax = TRUE))
+      ens_hi_lbl    <- paste0("Ensemble ", pct_label(bq_ens[["hi"]], use_minmax = TRUE))
+      pooled_lo_lbl <- paste0("Pooled ",   pct_label(bq_coef[["lo"]]))
+      pooled_hi_lbl <- paste0("Pooled ",   pct_label(bq_coef[["hi"]]))
       rows <- list(
         make_row("Central (P50)", central_vec),
         make_row(coef_lo_lbl,     coef_lo_vec),
@@ -820,15 +831,10 @@ policy_input_diagnostics <- function(baseline_svy, policy_svy, vars = NULL) {
       )
       if (!is_hist) {
         rows <- c(rows, list(
-          make_row(ens_lo_lbl,   intermod_lo_vec),
-          make_row(ens_hi_lbl,   intermod_hi_vec),
-          make_row(total_lo_lbl, total_lo_vec),
-          make_row(total_hi_lbl, total_hi_vec)
-        ))
-      } else {
-        rows <- c(rows, list(
-          make_row(total_lo_lbl, coef_lo_vec),
-          make_row(total_hi_lbl, coef_hi_vec)
+          make_row(ens_lo_lbl,    intermod_lo_vec),
+          make_row(ens_hi_lbl,    intermod_hi_vec),
+          make_row(pooled_lo_lbl, total_lo_vec),
+          make_row(pooled_hi_lbl, total_hi_vec)
         ))
       }
       dplyr::bind_rows(rows)
@@ -993,7 +999,7 @@ policy_input_diagnostics <- function(baseline_svy, policy_svy, vars = NULL) {
     req(threshold_table_rv())
     tbl <- threshold_table_rv()
     if (!isTRUE(input$show_model_spread))
-      tbl <- tbl[!grepl("^Ensemble |^Total ", tbl$Estimate), , drop = FALSE]
+      tbl <- tbl[!grepl("^Ensemble |^Pooled ", tbl$Estimate), , drop = FALSE]
     df <- build_threshold_table_df(
       threshold_tbl = tbl,
       group_order   = input$cmp_group_order %||% "scenario_x_year",
@@ -1183,12 +1189,14 @@ pol_plot_pointrange_climate <- function(baseline_scenarios,
       coef <- c(lo = ens_mean, hi = ens_mean)
     }
 
-    # Total band assuming the three sources are independent:
-    #   var_total = var_coef + var_within + var_across
+    # Pooled SE on the central estimate: var_coef + var_across.
+    # Inter-annual variability is shown as its own band rather than
+    # pooled in; see fct_sim_compare.R::plot_pointrange_climate for the
+    # rationale. When var_across is zero (historical or single-member
+    # future), the pooled SE degenerates to coef and the outer whisker
+    # is suppressed.
     var_coef   <- ((coef[["hi"]] - coef[["lo"]]) /
                      (z_coef_hi - z_coef_lo))^2
-    var_within <- stats::var(vals, na.rm = TRUE)
-    if (is.na(var_within)) var_within <- 0
     var_across <- 0
     if (!is_hist && "model_values" %in% names(out) && exists("mv_mat")) {
       mm <- tryCatch(rowMeans(mv_mat, na.rm = TRUE), error = function(e) NULL)
@@ -1197,9 +1205,13 @@ pol_plot_pointrange_climate <- function(baseline_scenarios,
         if (!is.na(v)) var_across <- v
       }
     }
-    sd_total <- sqrt(max(var_coef + var_within + var_across, 0))
-    total <- c(lo = ens_mean + z_coef_lo * sd_total,
-               hi = ens_mean + z_coef_hi * sd_total)
+    if (var_across > 0) {
+      sd_total <- sqrt(max(var_coef + var_across, 0))
+      total <- c(lo = ens_mean + z_coef_lo * sd_total,
+                 hi = ens_mean + z_coef_hi * sd_total)
+    } else {
+      total <- c(lo = NA_real_, hi = NA_real_)
+    }
 
     list(value = ens_mean,
          coef_lo = unname(coef[["lo"]]),  coef_hi = unname(coef[["hi"]]),
@@ -1309,17 +1321,6 @@ pol_plot_pointrange_climate <- function(baseline_scenarios,
   p <- ggplot2::ggplot(plot_df,
          ggplot2::aes(x = .data$pt_key, y = .data$value,
                       colour = .data$source, group = .data$source))
-
-  # Outermost: combined "total" whisker (all sources, independence).
-  p <- p +
-    ggplot2::geom_linerange(
-      ggplot2::aes(ymin = .data$total_lo, ymax = .data$total_hi),
-      linewidth = 0.6, alpha = 0.8, na.rm = TRUE, position = pos
-    ) +
-    ggplot2::geom_errorbar(
-      ggplot2::aes(ymin = .data$total_lo, ymax = .data$total_hi),
-      width = 0.22, linewidth = 0.4, na.rm = TRUE, position = pos
-    )
 
   # Inter-model spread (future only — historical collapses to the dot).
   if (isTRUE(show_intermod)) {
