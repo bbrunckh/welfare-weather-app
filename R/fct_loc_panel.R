@@ -20,7 +20,7 @@
 #' @return A tibble with one row per location and columns:
 #'   \describe{
 #'     \item{\code{loc_id}}{Original location identifier (same type as input).}
-#'     \item{\code{panel_loc_id}}{Integer group ID. Isolated locations each
+#'     \item{\code{loc_id_panel}}{Integer group ID. Isolated locations each
 #'       receive a unique ID.}
 #'   }
 #'
@@ -133,39 +133,11 @@ loc_panel <- function(data,
   # --- 7. Return group mapping — restore original loc_id type ---------------
   tibble::tibble(
     loc_id_chr   = names(comp$membership),
-    panel_loc_id = unname(comp$membership)
+    loc_id_panel = unname(comp$membership)
   ) |>
     dplyr::left_join(
       dplyr::mutate(ids_df, loc_id_chr = as.character(loc_id)),
       by = "loc_id_chr"
     ) |>
-    dplyr::select(loc_id, panel_loc_id)
-}
-
-
-#' Per-weather-variable plot layout (full panel for 1 var, two for >= 2)
-#'
-#' Returns a `bslib::card` for a single weather variable, or a two-column
-#' `bslib::layout_columns` for two. Used to keep panel layouts consistent
-#' across the app (Step 1 weather stats, Step 1 results, Step 3
-#' decomposition).
-#'
-#' @param ns       The module's `NS` function (from `session$ns`).
-#' @param n_vars   Integer. Number of selected weather variables.
-#' @param ids      Character vector of length 2 — output IDs for plot 1
-#'                 and plot 2. Only `ids[1]` is used when `n_vars < 2`.
-#' @param height   CSS height passed to `shiny::plotOutput`.
-#'
-#' @return A Shiny tag.
-#' @noRd
-weather_plot_layout <- function(ns, n_vars, ids, height = "500px") {
-  if (isTRUE(n_vars >= 2)) {
-    bslib::layout_columns(
-      col_widths = c(6, 6),
-      bslib::card(shiny::plotOutput(ns(ids[1]), height = height)),
-      bslib::card(shiny::plotOutput(ns(ids[2]), height = height))
-    )
-  } else {
-    bslib::card(shiny::plotOutput(ns(ids[1]), height = height))
-  }
+    dplyr::select(loc_id, loc_id_panel)
 }
