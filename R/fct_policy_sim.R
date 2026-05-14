@@ -724,3 +724,150 @@ resimulate_with_svy <- function(svy, sw, so, mf,
 
   list(hist_sim = hist_sim_new, saved_scenarios = saved_scenarios_new)
 }
+
+
+# ---------------------------------------------------------------------------- #
+# Policy-by-delta: derive policy pipelines from baseline + analytic per-HH delta
+# ---------------------------------------------------------------------------- #
+
+#' Apply a per-household policy delta to the baseline Step 2 pipelines
+#'
+#' Module 3 historically built its policy arm by calling
+#' \code{resimulate_with_svy()} — a full re-prediction against the policy-
+#' adjusted survey. That works, but it (a) duplicates compute for every
+#' CMIP6 member, and (b) causes the Results pane to disagree with the
+#' Decomposition pane whenever residual drawing has any stochastic component
+#' (e.g. \code{residuals = "original"} with any unmatched households): the
+#' baseline and policy arms call \code{aggregate_pipeline_per_year()}
+#' independently and get independent residual draws, so a no-op policy can
+#' produce a non-zero visual gap.
+#'
+#' This helper takes the closed-form per-household delta the Decomposition
+#' pane already produces (\code{decompose_policy_effect()$delta_total}) and
+#' applies it directly to the cached baseline pipelines:
+#'   \itemize{
+#'     \item \code{y_point_policy = y_point_baseline + delta[svy_row_id]}
+#'     \item All other pipeline slots (\code{F_loading}, \code{train_aug},
+#'           \code{id_vec}, \code{weather_raw}, \code{sim_year},
+#'           \code{weight}) are passed through unchanged. Because
+#'           \code{aggregate_pipeline_per_year()} sees the same \code{id_vec}
+#'           and \code{train_aug} for both arms, residual draws line up
+#'           household-for-household, so a zero delta produces a zero visual
+#'           effect by construction.
+#'   }
+#'
+#' Limitations of this v1:
+#'   \itemize{
+#'     \item \code{F_loading} is not updated to reflect the policy-modified
+#'           design matrix. SE bands therefore reflect baseline-X coefficient
+#'           uncertainty, not policy-X. For the central value this is exact;
+#'           for SE bands it's a small approximation that is exact when no
+#'           covariate moves and acceptable for typical policy modifications.
+#'           Recomputing \code{F_loading} per pipeline is a follow-up.
+#'     \item The delta is computed once per pipeline using that pipeline's
+#'           full \code{weather_raw} (period-mean hazard), matching the
+#'           Decomposition Summary table. Per-\code{sim_year} delta variation
+#'           inside a scenario is not yet modelled — also a follow-up.
+#'   }
+#'
+#' @param svy_baseline           Baseline survey-weather data frame.
+#' @param svy_policy             Policy-adjusted survey-weather data frame.
+#' @param model_fit              Step 1 model-fit list.
+#' @param so                     Selected-outcome metadata.
+#' @param hist_sim_baseline      Step 2 \code{hist_sim} list (verbatim).
+#' @param saved_scenarios_baseline Step 2 named \code{saved_scenarios} list.
+#' @param skip_coef              Logical. Forwarded to
+#'   \code{decompose_policy_effect()} — when TRUE, per-channel SEs are zeroed
+#'   but \code{delta_total} is still computed.
+#'
+#' @return Named list with \code{hist_sim} and \code{saved_scenarios} on the
+#'   Step 2 schema, or \code{NULL} on failure.
+#' @export
+apply_policy_delta_to_baseline <- function(svy_baseline,
+                                            svy_policy,
+                                            model_fit,
+                                            so,
+                                            hist_sim_baseline,
+                                            saved_scenarios_baseline = list(),
+                                            skip_coef = FALSE) {
+  if (is.null(svy_baseline) || is.null(svy_policy) ||
+      is.null(model_fit) || is.null(so) ||
+      is.null(hist_sim_baseline)) return(NULL)
+
+  # Per-HH delta_total for a given weather panel. Returns NULL when the
+  # decomposition is unavailable (engine outside {rif, fixest}, missing
+  # model bits, etc.) so the caller can fall back to resimulate_with_svy().
+  delta_for <- function(weather_raw) {
+    decomp <- tryCatch(
+      decompose_policy_effect(
+        svy_baseline = svy_baseline,
+        svy_policy   = svy_policy,
+        model_fit    = model_fit,
+        so           = so,
+        weather_raw  = weather_raw,
+        skip_coef    = skip_coef
+      ),
+      error = function(e) {
+        warning("[apply_policy_delta_to_baseline] decompose_policy_effect() ",
+                "failed: ", conditionMessage(e))
+        NULL
+      }
+    )
+    if (is.null(decomp) || !"delta_total" %in% names(decomp)) return(NULL)
+    decomp$delta_total
+  }
+
+  apply_to_pipeline <- function(pipe, weather_raw_for_delta) {
+    if (is.null(pipe) || is.null(pipe$y_point)) return(pipe)
+    delta_hh <- delta_for(weather_raw_for_delta)
+    if (is.null(delta_hh)) return(pipe)
+
+    # Broadcast delta_hh (length nrow(svy_baseline)) onto the expanded
+    # (HH x year) pipeline rows via svy_row_id. When svy_row_id is missing
+    # (older pipeline format pre-`.svy_row_id` tagging), fall back to
+    # broadcasting by id_vec if a matching id column is on the baseline
+    # survey, else skip the policy correction with a warning.
+    sri <- pipe$svy_row_id
+    if (is.null(sri) || length(sri) != length(pipe$y_point)) {
+      id_col <- pipe$id_col
+      if (!is.null(id_col) && !is.null(pipe$id_vec) &&
+          id_col %in% names(svy_baseline)) {
+        lookup <- match(pipe$id_vec, svy_baseline[[id_col]])
+        delta_per_row <- delta_hh[lookup]
+        delta_per_row[is.na(delta_per_row)] <- 0
+      } else {
+        warning("[apply_policy_delta_to_baseline] pipeline lacks svy_row_id ",
+                "and no usable id_col fallback; policy arm will equal ",
+                "baseline for this pipeline.")
+        return(pipe)
+      }
+    } else {
+      delta_per_row <- delta_hh[sri]
+      delta_per_row[is.na(delta_per_row)] <- 0
+    }
+
+    pipe$y_point <- pipe$y_point + delta_per_row
+    pipe
+  }
+
+  hist_pipeline_new <- apply_to_pipeline(
+    hist_sim_baseline$pipeline,
+    hist_sim_baseline$weather_raw %||% hist_sim_baseline$pipeline$weather_raw
+  )
+
+  hist_sim_new <- hist_sim_baseline
+  hist_sim_new$pipeline <- hist_pipeline_new
+
+  saved_scenarios_new <- lapply(saved_scenarios_baseline, function(s) {
+    if (is.null(s) || is.null(s$pipelines)) return(s)
+    pipes_new <- lapply(s$pipelines, function(pipe) {
+      apply_to_pipeline(pipe, pipe$weather_raw %||% s$weather_raw)
+    })
+    names(pipes_new) <- names(s$pipelines)
+    s$pipelines <- pipes_new
+    s
+  })
+  names(saved_scenarios_new) <- names(saved_scenarios_baseline)
+
+  list(hist_sim = hist_sim_new, saved_scenarios = saved_scenarios_new)
+}

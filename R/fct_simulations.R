@@ -457,9 +457,10 @@ run_sim_pipeline <- function(weather_raw,
                    !is.null(rif_grid) && !is.null(train_data)
   svy_for_predict <- if (is_rif_policy) svy_baseline else svy
 
-  # Tag svy with row IDs for RIF delta-method lookups
-  # Must be added before prepare_hist_weather() so it survives the join
-  if (is_rif) svy_for_predict$.svy_row_id <- seq_len(nrow(svy_for_predict))
+  # Tag svy with row IDs so downstream consumers can broadcast per-household
+  # quantities (RIF delta correction; Module 3 policy-delta application) back
+  # to the (HH x year) rows produced by prepare_hist_weather().
+  svy_for_predict$.svy_row_id <- seq_len(nrow(svy_for_predict))
 
   survey_wd_sim <- prepare_hist_weather(weather_raw, svy_for_predict, sw, so$name)
 
@@ -609,6 +610,11 @@ run_sim_pipeline <- function(weather_raw,
               else
                 NULL
 
+  # Pipeline row -> baseline household lookup. Used by Module 3 to broadcast
+  # per-household policy deltas (decompose_policy_effect output, indexed by
+  # baseline survey row) onto the expanded (HH x year) prediction rows.
+  svy_row_id <- if (".svy_row_id" %in% names(out)) out$.svy_row_id else NULL
+
   # ---- Factor loading matrix ---------------------------------------------- #
   # Computed once per key — not per draw.
   # F_loading = X_nonFE %*% L  where L is the Cholesky factor of Sigma.
@@ -670,6 +676,7 @@ if (!is.null(X_nonFE)) {
     weight      = weight,
     id_vec      = id_vec,
     id_col      = id_col,
+    svy_row_id  = svy_row_id,
     n_pre_join  = n_pre_join,
     weather_raw = weather_raw,
     weather_prepared = weather_prepared,

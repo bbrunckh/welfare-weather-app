@@ -93,6 +93,7 @@ mod_3_scenario_server <- function(id,
                                    saved_scenarios = reactive(list()),
                                    selected_hist   = reactive(NULL),
                                    variable_list   = reactive(NULL),
+                                   analysis_unit   = reactive("hh"),
                                    skip_coef_draws = reactive(FALSE),
                                    residuals       = reactive("original"),
                                    propagate_all_covariate_uncertainty =
@@ -142,7 +143,8 @@ mod_3_scenario_server <- function(id,
       "sp",
       selected_outcome = selected_outcome,
       survey_weather   = survey_weather,
-      variable_list    = variable_list
+      variable_list    = variable_list,
+      analysis_unit    = analysis_unit
     )
 
     # ---- Infrastructure scenario -----------------------------------------

@@ -69,11 +69,17 @@ mod_3_05_policy_sim_server <- function(id,
     run <- function() {
       sim_error(NULL)
 
-      svy <- survey_weather()
       mf  <- model_fit()
       sw  <- selected_weather()
       hs  <- hist_sim()
       ss  <- saved_scenarios()
+      # Use the exact survey that Step 2 used as the baseline. Step 2 may have
+      # filtered survey_weather() to a single survey round (baseline_svy). The
+      # Step 2 weather_raw was fetched against that filtered survey, so it
+      # contains rows for all survey years in selected_surveys — joining the
+      # FULL survey_weather() would pull in extra households from non-baseline
+      # rounds and produce a systematically different aggregate.
+      svy <- hs$svy %||% survey_weather()
 
       if (is.null(svy)) {
         sim_error(simpleError("Survey data not available."))
@@ -122,18 +128,26 @@ mod_3_05_policy_sim_server <- function(id,
               baseline_saved_scenarios_rv(ss %||% list())
 
               shiny::setProgress(value = 0.6, detail = "Policy...")
-              # Inject the residuals choice into hist_sim_baseline so the policy
-              # resimulation (resimulate_with_svy) reads it instead of falling
-              # back to "none".
-              hs_for_resim <- hs
-              hs_for_resim$residuals <- res_choice
-              # Forward the Step-2 additive-decomposition toggle so the policy
-              # arm rebuilds its mask consistently (weather + policy-modified
-              # vars vs. legacy full coefficient propagation).
-              hs_for_resim$propagate_all_covariate_uncertainty <-
-                isTRUE(propagate_all_covariate_uncertainty())
-              pol_out <- resimulate_with_svy(svy_mod, sw, hs$so, mf, hs_for_resim, ss,
-                                             svy_baseline = svy)
+              # Derive the policy arm from the baseline pipelines by adding
+              # the analytic per-household delta_total (the same number the
+              # Decomposition pane reports). This (a) eliminates the
+              # baseline/policy disagreement when residual draws have any
+              # stochastic component — both arms now share identical
+              # train_aug / id_vec / svy_row_id, so residuals line up
+              # household-for-household and a no-op policy yields a no-op
+              # visual effect; and (b) removes the per-CMIP6-member re-
+              # simulation, which was the dominant cost of every policy
+              # adjustment.
+              skip_coef_val <- isTRUE(skip_coef_draws())
+              pol_out <- apply_policy_delta_to_baseline(
+                svy_baseline             = svy,
+                svy_policy               = svy_mod,
+                model_fit                = mf,
+                so                       = hs$so,
+                hist_sim_baseline        = hs_for_baseline,
+                saved_scenarios_baseline = ss %||% list(),
+                skip_coef                = skip_coef_val
+              )
               if (!is.null(pol_out)) {
                 policy_hist_sim_rv(pol_out$hist_sim)
                 policy_saved_scenarios_rv(pol_out$saved_scenarios)
@@ -141,7 +155,6 @@ mod_3_05_policy_sim_server <- function(id,
 
               # Decompose policy effects using HISTORICAL mean weather
               shiny::setProgress(value = 0.85, detail = "Decomposing effects...")
-              skip_coef_val <- isTRUE(skip_coef_draws())
               decomp <- tryCatch(
                 decompose_policy_effect(
                   svy_baseline = svy,
