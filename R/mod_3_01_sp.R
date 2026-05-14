@@ -596,7 +596,10 @@ mod_3_01_sp_server <- function(id,
           # Budget mode
           budget_mode           = input$budget_mode             %||% "transfer_first",
           # budget_type           = input$budget_type             %||% "fixed",
-          budget_fixed          = input$budget_fixed            %||% 1000000,
+          # Default to 0 (not 1,000,000) so an un-touched budget can never
+          # accidentally apply a million-USD transfer if budget-first mode is
+          # selected before a budget is entered.
+          budget_fixed          = input$budget_fixed            %||% 0,
           # budget_share_pct      = input$budget_share_pct        %||% 50,
           # Targeting
           targeting             = input$targeting               %||% "exante_poor",

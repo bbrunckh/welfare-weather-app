@@ -47,6 +47,7 @@ mod_3_05_policy_sim_server <- function(id,
                                         selected_weather   = reactive(NULL),
                                         hist_sim           = reactive(NULL),
                                         saved_scenarios    = reactive(list()),
+                                        analysis_unit      = reactive("hh"),
                                         skip_coef_draws    = reactive(FALSE),
                                         residuals          = reactive("original"),
                                         propagate_all_covariate_uncertainty =
@@ -98,10 +99,11 @@ mod_3_05_policy_sim_server <- function(id,
 
           svy_mod <- apply_policy_to_svy(
             svy,
-            infra   = infra_scenario(),
-            sp      = sp_scenario(),
-            digital = digital_scenario(),
-            labor   = labor_scenario()
+            infra         = infra_scenario(),
+            sp            = sp_scenario(),
+            digital       = digital_scenario(),
+            labor         = labor_scenario(),
+            analysis_unit = analysis_unit()
           )
           policy_svy_rv(svy_mod)
 
@@ -158,7 +160,7 @@ mod_3_05_policy_sim_server <- function(id,
               decomp <- tryCatch(
                 decompose_policy_effect(
                   svy_baseline = svy,
-                  svy_policy   = svy_mod,
+                  svy_policy   = policy_svy_rv(),
                   model_fit    = mf,
                   so           = hs$so,
                   weather_raw  = hs$weather_raw,
@@ -198,7 +200,7 @@ mod_3_05_policy_sim_server <- function(id,
                   tryCatch(
                     decompose_policy_effect(
                       svy_baseline = svy,
-                      svy_policy   = svy_mod,
+                      svy_policy   = policy_svy_rv(),
                       model_fit    = mf,
                       so           = hs$so,
                       weather_raw  = w_yr,

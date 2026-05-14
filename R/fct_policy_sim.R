@@ -187,9 +187,7 @@ policy_placeholder_tag <- function(category_label, candidate_df) {
 #' Apply Policy Scenario Adjustments to Survey Covariates
 #'
 #' Modifies selected covariates in the survey-weather frame to reflect the
-#' user-defined policy scenarios from the Step 3 sidebar. Only the
-#' infrastructure scenario is currently wired; social-protection, digital, and
-#' labor scenarios are accepted for future extension.
+#' user-defined policy scenarios from the Step 3 sidebar.
 #'
 #' @param svy     A data frame of merged survey-weather data (from
 #'                \code{mod_1_modelling_server()$survey_weather()}).
@@ -204,7 +202,8 @@ apply_policy_to_svy <- function(svy,
                                 infra   = NULL,
                                 sp      = NULL,
                                 digital = NULL,
-                                labor   = NULL) {
+                                labor   = NULL,
+                                analysis_unit = "hh") {
   if (is.null(svy)) return(svy)
   cols <- names(svy)
 
@@ -506,29 +505,44 @@ apply_policy_to_svy <- function(svy,
     }
   }
 
-  # Social protection: add per-household transfer as SP_TRANSFER_COL column.
+  # Social protection: add per-recipient transfer as SP_TRANSFER_COL column.
   # welfare is the regression outcome (not a covariate), so we tag the
   # transfer amount here; run_sim_pipeline() (fct_simulations.R) reads the
   # column post-prediction and adds it to y_point on the level scale
   # (re-logged when so$transform == "log") so the boost flows into
   # aggregate_with_uncertainty_delta() and matches the decomposition's δ_sp.
+  #
+  # When analysis_unit == "hh" each row is a household and the SP "recipient"
+  # is the household, but welfare is per-capita — so the per-household
+  # transfer must be divided by hhsize to match scale. When analysis_unit ==
+  # "ind" the SP transfer is already per-individual and applies to every
+  # eligible (individual) row as-is. `hhsize_scale` performs that scaling.
   if (!is.null(sp) && "welfare" %in% cols) {
-    if (sp$budget_mode == "transfer_first" && isTRUE(sp$transfer_amount_usd != 0)) {
+
+    hhsize_scale <- if (identical(analysis_unit, "hh") && "hhsize" %in% cols) {
+      hs <- suppressWarnings(as.numeric(svy$hhsize))
+      hs[!is.finite(hs) | hs <= 0] <- 1   # guard against NA / zero / negative
+      hs
+    } else {
+      rep_len(1, nrow(svy))
+    }
+
+    if (sp$budget_mode == "transfer_first") {
       # If transfer-first budget mode is selected, apply the transfer to the
       # survey immediately so it is included in the predictions and thus the
       # targeting can be based on post-transfer welfare. The transfer amount is
       # annualized and converted to a daily amount for this purpose, since the
       # model is based on daily welfare.
-      n_pay     <- sp$transfer_n_payments %||% 6
-      if (!is.finite(n_pay)) n_pay <- 6
-      annual_hh <- sp$transfer_amount_usd * n_pay
-      daily_hh  <- annual_hh / 365
+      n_pay     <- sp$transfer_n_payments
+      annual_transfer <- sp$transfer_amount_usd * n_pay
+      daily_transfer  <- annual_transfer / 365
       eligible  <- .determine_sp_eligibility(svy, sp)
       if (length(eligible) == nrow(svy)) {
-        svy[[SP_TRANSFER_COL]] <- ifelse(eligible, daily_hh, 0)
+        svy[[SP_TRANSFER_COL]] <- ifelse(eligible,
+                                         daily_transfer / hhsize_scale, 0)
       }
     }
-    else if (sp$budget_mode == "budget_first" && isTRUE(sp$budget_fixed > 0)) {
+    else if (sp$budget_mode == "budget_first") {
       # Distribute the fixed budget across eligible households. Eligibility is
       # determined once here using the baseline survey; SP_TRANSFER_COL holds
       # the resulting daily per-household amount.
@@ -540,17 +554,15 @@ apply_policy_to_svy <- function(svy,
       eligible <- .determine_sp_eligibility(svy, sp)
       n_eligible <- sum(eligible)
       if (n_eligible > 0) {
-        weight_col <- grep("^weight$|^hhweight$|^wgt$|^pw$",
-                           names(svy), value = TRUE,
-                           ignore.case = TRUE)[1]
-        w_elig <- if (!is.na(weight_col)) {
-          w <- svy[[weight_col]][eligible]
+        w_elig <- if ("weight" %in% names(svy)) {
+          w <- svy$weight[eligible]
           sum(w[is.finite(w) & w > 0], na.rm = TRUE)
         } else 0
         divisor <- if (w_elig > 0) w_elig else n_eligible
-        annual_hh <- sp$budget_fixed / divisor
-        daily_hh  <- annual_hh / 365
-        svy[[SP_TRANSFER_COL]] <- ifelse(eligible, daily_hh, 0)
+        annual_transfer <- sp$budget_fixed / divisor
+        daily_transfer  <- annual_transfer / 365
+        svy[[SP_TRANSFER_COL]] <- ifelse(eligible,
+                                         daily_transfer / hhsize_scale, 0)
       }
     }
   }
@@ -585,11 +597,6 @@ resimulate_with_svy <- function(svy, sw, so, mf,
                                 svy_baseline = NULL) {
   if (is.null(svy) || is.null(mf) || is.null(hist_sim_baseline) ||
       is.null(so)) return(NULL)
-
-  weight_col <- grep("^weight$|^hhweight$|^wgt$|^pw$",
-                     names(svy), value = TRUE,
-                     ignore.case = TRUE)[1]
-  if (is.na(weight_col %||% NA)) weight_col <- NULL
 
   pov_line   <- hist_sim_baseline$pov_line
   residuals  <- hist_sim_baseline$residuals %||%

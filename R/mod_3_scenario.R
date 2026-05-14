@@ -184,6 +184,7 @@ mod_3_scenario_server <- function(id,
       selected_weather  = selected_weather,
       hist_sim          = hist_sim,
       saved_scenarios   = saved_scenarios,
+      analysis_unit     = analysis_unit,
       skip_coef_draws   = skip_coef_draws,
       residuals         = residuals,
       propagate_all_covariate_uncertainty = propagate_all_covariate_uncertainty
@@ -210,7 +211,8 @@ mod_3_scenario_server <- function(id,
       policy_svy     = s5$policy_svy,
       sim_run_id     = s5$sim_run_id,
       tabset_id      = "step3_output_tabs",
-      tabset_session = session
+      tabset_session = session,
+      analysis_unit  = analysis_unit
     )
 
     # ---- Decomposition tab: effect channels -----------------------------

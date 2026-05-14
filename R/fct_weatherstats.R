@@ -36,7 +36,7 @@ extract_survey_dates <- function(survey_data) {
 #'
 #' Performs an `inner_join` on `code`, `year`, `survname`, `loc_id`, and
 #' `timestamp`, converts `year` to a factor for plotting, and normalises
-#' `weight` to sum to 1 within each `code` / `year` / `survname` group.
+#' OUTDATED: `weight` to sum to 1 within each `code` / `year` / `survname` group.
 #'
 #' @param survey_data  A data frame of survey observations with at minimum
 #'   columns `code`, `year`, `survname`, `loc_id`, `timestamp`, and `weight`.
@@ -59,7 +59,7 @@ merge_survey_weather <- function(survey_data, weather_data) {
     ) |>
     dplyr::mutate(year = as.factor(.data$year)) |>
     dplyr::group_by(.data$code, .data$year, .data$survname) |>
-    dplyr::mutate(weight = .data$weight / sum(.data$weight, na.rm = TRUE)) |>
+    # dplyr::mutate(weight = .data$weight / sum(.data$weight, na.rm = TRUE)) |>
     dplyr::ungroup()
 
   if (nrow(joined) == 0) return(NULL)

@@ -601,9 +601,7 @@ run_sim_pipeline <- function(weather_raw,
   # ---- Simulation year and weights ---------------------------------------- #
   sim_year <- out$sim_year
 
-  wt_col   <- grep("^weight$|^hhweight$|^wgt$|^pw$", names(out),
-                   value = TRUE, ignore.case = TRUE)
-  weight   <- if (length(wt_col) > 0L) out[[wt_col[[1L]]]] else NULL
+  weight <- if ("weight" %in% names(out)) out$weight else NULL
 
   id_vec   <- if (!is.null(id_col) && id_col %in% names(out))
                 out[[id_col]]
