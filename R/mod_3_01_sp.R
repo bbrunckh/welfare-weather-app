@@ -43,9 +43,27 @@ mod_3_01_sp_ui <- function(id) {
 mod_3_01_sp_server <- function(id,
                                 selected_outcome = reactive(NULL),
                                 survey_weather   = reactive(NULL),
-                                variable_list    = reactive(NULL)) {
+                                variable_list    = reactive(NULL),
+                                analysis_unit    = reactive("hh")) {
   moduleServer(id, function(input, output, session) {
     ns <- session$ns
+
+    # Helper: human-readable unit word ("individual" / "individuals" /
+    # "Household" / "Households" / "Firm" / "Firms") driven by the user's
+    # selection in mod_1_01_sample (`input$unit`).
+    unit_word <- function(plural = TRUE, capitalize = FALSE) {
+      au <- tryCatch(analysis_unit(), error = function(e) "hh")
+      au <- if (is.null(au) || !nzchar(au)) "hh" else au
+      word <- switch(au,
+        ind  = if (plural) "individuals" else "individual",
+        hh   = if (plural) "households"  else "household",
+        firm = if (plural) "firms"       else "firm",
+        if (plural) "households" else "household"
+      )
+      if (capitalize) {
+        paste0(toupper(substr(word, 1, 1)), substr(word, 2, nchar(word)))
+      } else word
+    }
 
     # ---- PMT variable candidates (numeric, non-missing for welfare rows) ----
     pmt_candidates <- reactive({
@@ -147,10 +165,14 @@ mod_3_01_sp_server <- function(id,
         selectInput(
           inputId  = ns("targeting"),
           label    = NULL,
-          choices  = c(
-            "Universal"                                 = "universal",
-            "Welfare below threshold (ex-ante poor)"    = "exante_poor",
-            "Household characteristics (PMT)"           = "pmt"
+          choices  = stats::setNames(
+            c("universal", "exante_poor", "pmt"),
+            c(
+              "Universal",
+              "Welfare below threshold (ex-ante poor)",
+              paste(unit_word(plural = FALSE, capitalize = TRUE),
+                    "characteristics (PMT)")
+            )
           ),
           selected = "universal"
         ),
@@ -188,7 +210,8 @@ mod_3_01_sp_server <- function(id,
               tags$div(
                 class = "text-muted",
                 style = "font-size: 0.8em; font-weight: normal;",
-                "Share of non-eligible households incorrectly included."
+                paste0("Share of non-eligible ", unit_word(plural = TRUE),
+                       " incorrectly included.")
               )
             ),
             min = 0, max = 30, value = 10, step = 1, post = "%"
@@ -203,7 +226,8 @@ mod_3_01_sp_server <- function(id,
               tags$div(
                 class = "text-muted",
                 style = "font-size: 0.8em; font-weight: normal;",
-                "Share of eligible households incorrectly excluded."
+                paste0("Share of eligible ", unit_word(plural = TRUE),
+                       " incorrectly excluded.")
               )
             ),
             min = 0, max = 30, value = 10, step = 1, post = "%"
@@ -250,7 +274,8 @@ mod_3_01_sp_server <- function(id,
         # Binary variable: choose target value
         radioButtons(
           ns("pmt_cutoff"),
-          label = "Target households where variable equals",
+          label = paste("Target", unit_word(plural = TRUE),
+                        "where variable equals"),
           choices = c("0" = 0, "1" = 1),
           selected = 0,
           inline = TRUE
@@ -259,7 +284,8 @@ mod_3_01_sp_server <- function(id,
         # Continuous variable: choose threshold
         sliderInput(
           ns("pmt_cutoff"),
-          label = "Include households with value \u2264",
+          label = paste("Include", unit_word(plural = TRUE),
+                        "with value \u2264"),
           min   = floor(min(col)),
           max   = ceiling(max(col)),
           value = quantile(col, 0.2),
@@ -290,10 +316,12 @@ mod_3_01_sp_server <- function(id,
         radioButtons(
           inputId  = ns("budget_mode"),
           label    = NULL,
-          choices  = c(
-
-            "Set transfer per person \u2192 derive total budget" = "transfer_first",
-            "Set total budget \u2192 derive transfer per person" = "budget_first"
+          choices  = stats::setNames(
+            c("transfer_first", "budget_first"),
+            c(
+              paste("Set transfer per", unit_word(plural = FALSE, capitalize = TRUE), "\u2192 derive total budget"),
+              paste("Set total budget \u2192 derive transfer per", unit_word(plural = TRUE))
+            )
           ),
           selected = "transfer_first"
         ),
@@ -365,21 +393,19 @@ mod_3_01_sp_server <- function(id,
         # ),
         conditionalPanel(
           condition = paste0(
-            # "input['", ns("amount_type"), "'] == 'equal' && ",
             "input['", ns("budget_mode"), "'] == 'transfer_first'"
           ),
           numericInput(
             inputId = ns("transfer_amount_usd"),
             label   = tags$span(
               tags$i(class = "fa fa-dollar-sign me-1"),
-              "Transfer per person ($)"
+              paste("Transfer per", unit_word(plural = FALSE, capitalize = TRUE), "($)")
             ),
             value = 0, min = 0, step = 10
           )
         ),
         conditionalPanel(
           condition = paste0(
-            # "input['", ns("amount_type"), "'] == 'equal' && ",
             "input['", ns("budget_mode"), "'] == 'budget_first'"
           ),
           tags$div(
@@ -387,7 +413,7 @@ mod_3_01_sp_server <- function(id,
             tags$small(
               tags$i(class = "fa fa-calculator me-1"),
               tags$strong("Derived: "),
-              "transfer per person = total budget \u00f7 # of eligible beneficiaries"
+              paste("Transfer per", unit_word(plural = FALSE), "= total budget \u00f7 # of eligible beneficiaries")
             )
           )
         ),

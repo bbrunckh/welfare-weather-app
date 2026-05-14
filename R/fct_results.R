@@ -766,59 +766,181 @@ make_weather_effect_plot <- function(fit, pred_var, interaction_terms, is_binned
           ) +
           ggplot2::theme_bw(base_size = 14) +
           ggplot2::theme(
-            legend.position  = "bottom",
-            panel.border     = ggplot2::element_blank(),
-            strip.background = ggplot2::element_blank(),
-            plot.title       = ggplot2::element_text(face = "bold", hjust = 0.5, size = 11),
-            plot.caption     = ggplot2::element_text(size = 9, colour = "grey40", hjust = 0),
-            axis.text        = ggplot2::element_text(size = 9)
+            legend.position    = "bottom",
+            panel.border       = ggplot2::element_blank(),
+            strip.background   = ggplot2::element_blank(),
+            plot.title         = ggplot2::element_text(face = "bold", hjust = 0.5, size = 11),
+            plot.caption       = ggplot2::element_text(size = 9, colour = "grey40", hjust = 0),
+            panel.grid.minor   = ggplot2::element_blank(),
+            axis.text          = ggplot2::element_text(size = 9),
+            axis.line.x.bottom = ggplot2::element_blank(),
+            axis.line.y.left   = ggplot2::element_blank()
           )
       } else {
-        # Multiple terms (main + interactions): faceted
-        # Group each main effect with its own interactions:
-        #   main_1, main_1:modx, main_2, main_2:modx, ...
-        # fixest may write interactions as either `weather:modx` or
-        # `modx:weather`, and uses `::` to separate factor levels from
-        # variable names. Protect `::`, then pick the chunk containing
-        # pred_var as the grouping key (whichever side it sits on).
+        # Multiple terms (main + interactions): evaluate the combined effect
+        # at each moderator level so the plot has one line per modx value in
+        # a single panel (or per-bin facet for binned predictors), matching
+        # the style of the linear-regression moderated effect plot.
+
         protected   <- gsub("::", "", plot_data$term, fixed = TRUE)
         parts       <- strsplit(protected, ":", fixed = TRUE)
         weather_pat <- paste0("\\b", pred_esc, "\\b")
+        is_int_row  <- lengths(parts) > 1
         main_part   <- vapply(parts, function(p) {
           hit <- p[grepl(weather_pat, p)]
           if (length(hit) == 0) p[1] else hit[1]
         }, character(1))
-        is_int      <- lengths(parts) > 1
-        term_levels <- unique(plot_data$term_label[
-          order(match(main_part, unique(main_part)), is_int)
-        ])
-        plot_data$term_label <- factor(plot_data$term_label, levels = term_levels)
 
-        ggplot2::ggplot(plot_data, ggplot2::aes(x = tau, y = estimate)) +
-          ggplot2::geom_hline(yintercept = 0, linetype = "dashed", colour = "grey60") +
+        # Identify moderator variable from interaction_terms. Use a word-
+        # boundary regex (not fixed substring) so short pred_var names like
+        # "r" don't accidentally match terms like "tx:urban" via the "r" in
+        # "urban", which would pick the wrong moderator.
+        modx_var <- NULL
+        modx_lab <- NULL
+        if (length(interaction_terms) > 0) {
+          pv_pat <- paste0("\\b", pred_esc, "\\b")
+          mt <- interaction_terms[grepl(pv_pat, interaction_terms)]
+          if (length(mt) > 0) {
+            mp <- strsplit(mt[1], ":", fixed = TRUE)[[1]]
+            modx_var <- mp[mp != pred_var][1]
+            if (!is.na(modx_var) && nzchar(modx_var))
+              modx_lab <- label_fun(modx_var)
+          }
+        }
+
+        # Moderator evaluation points: binary 0/1, small set of unique
+        # numeric values, or mean ± sd for continuous.
+        modx_vals <- c(0, 1)
+        if (!is.null(weather_df) && !is.null(modx_var) &&
+            modx_var %in% names(weather_df)) {
+          mx <- weather_df[[modx_var]]
+          mx <- mx[!is.na(mx)]
+          if (length(mx) > 0) {
+            if (is.numeric(mx)) {
+              u <- sort(unique(mx))
+              if (length(u) <= 5) {
+                modx_vals <- u
+              } else {
+                m <- mean(mx); s <- stats::sd(mx)
+                modx_vals <- c(m - s, m, m + s)
+              }
+            } else {
+              lvls <- if (is.factor(mx)) levels(droplevels(mx))
+                      else sort(unique(as.character(mx)))
+              num_try <- suppressWarnings(as.numeric(lvls))
+              modx_vals <- if (all(!is.na(num_try))) num_try
+                           else seq_along(lvls) - 1L
+            }
+          }
+        }
+
+        # Pair main rows with their matching interaction rows by bin id + tau.
+        plot_data$.bin_id <- main_part
+        main_rows <- plot_data[!is_int_row, , drop = FALSE]
+        int_rows  <- plot_data[ is_int_row, , drop = FALSE]
+
+        combined <- do.call(rbind, lapply(modx_vals, function(v) {
+          do.call(rbind, lapply(seq_len(nrow(main_rows)), function(j) {
+            mr <- main_rows[j, , drop = FALSE]
+            ir <- int_rows[int_rows$.bin_id == mr$.bin_id &
+                             int_rows$tau == mr$tau, , drop = FALSE]
+            ie  <- if (nrow(ir) > 0) ir$estimate[1]  else 0
+            ise <- if (nrow(ir) > 0) ir$std.error[1] else 0
+            effect <- mr$estimate + v * ie
+            se     <- sqrt(mr$std.error^2 + v^2 * ise^2)
+            data.frame(
+              tau       = mr$tau,
+              bin_id    = mr$.bin_id,
+              bin_label = coef_label(mr$.bin_id, label_fun),
+              modx_val  = v,
+              estimate  = effect,
+              std.error = se,
+              conf.low  = effect - 1.96 * se,
+              conf.high = effect + 1.96 * se,
+              stringsAsFactors = FALSE
+            )
+          }))
+        }))
+
+        modx_lab_print <- modx_lab %||% (modx_var %||% "moderator")
+        is_binary <- length(modx_vals) == 2 && all(modx_vals %in% c(0, 1))
+        combined$modx_label <- if (is_binary)
+          paste0(modx_lab_print, " = ", combined$modx_val)
+        else
+          paste0(modx_lab_print, " = ", round(combined$modx_val, 2))
+        combined$modx_label <- factor(
+          combined$modx_label,
+          levels = unique(combined$modx_label[order(combined$modx_val)])
+        )
+
+        # coef_label() is scalar — vectorise over each unique bin id so that
+        # multi-bin (binned) predictors produce one facet per bin. Sort by
+        # parsed numeric lower bound so negative ranges aren't ordered
+        # lexicographically (e.g. -1.2 must come before -0.4).
+        bin_ids_raw <- unique(main_rows$.bin_id)
+        .bin_lower <- function(b) {
+          s <- sub(paste0("^", pred_esc, "[\\[\\(]"), "", b)
+          suppressWarnings(as.numeric(sub("^([^,]+),.*", "\\1", s)))
+        }
+        ord <- order(.bin_lower(bin_ids_raw))
+        # NA lowers (non-binned / unparseable terms) keep their first-seen
+        # order at the front.
+        bin_ids_ordered <- bin_ids_raw[ord]
+        bin_levels <- vapply(
+          bin_ids_ordered,
+          function(b) coef_label(b, label_fun),
+          character(1)
+        )
+        combined$bin_label <- factor(combined$bin_label, levels = bin_levels)
+        n_bins <- length(bin_levels)
+
+        p <- ggplot2::ggplot(
+          combined,
+          ggplot2::aes(x = tau, y = estimate,
+                       colour = modx_label, fill = modx_label)
+        ) +
+          ggplot2::geom_hline(yintercept = 0, linetype = "dashed",
+                              colour = "grey60") +
           ggplot2::geom_ribbon(
             ggplot2::aes(ymin = conf.low, ymax = conf.high),
-            alpha = 0.15, fill = "steelblue"
+            alpha = 0.15, colour = NA
           ) +
-          ggplot2::geom_line(colour = "steelblue", linewidth = 0.9) +
-          ggplot2::geom_point(colour = "steelblue", size = 2) +
-          ggplot2::facet_wrap(~ term_label, scales = "free_y", ncol = 2) +
-          ggplot2::scale_x_continuous(breaks = taus, labels = scales::percent_format(1)) +
+          ggplot2::geom_line(linewidth = 0.9) +
+          ggplot2::geom_point(size = 2) +
+          ggplot2::scale_x_continuous(breaks = taus,
+                                      labels = scales::percent_format(1)) +
+          ggplot2::scale_colour_brewer(palette = "Set1",
+                                       name = modx_lab_print) +
+          ggplot2::scale_fill_brewer(palette = "Set1",
+                                     name = modx_lab_print) +
           ggplot2::labs(
-            title = paste("Effect of", pred_lab, "across the welfare distribution"),
-            x     = "Welfare quantile",
-            y     = "UQR coefficient",
-            caption = "Ribbon = 95% CI"
+            title   = paste("Effect of", pred_lab,
+                            "across the welfare distribution"),
+            x       = "Welfare quantile",
+            y       = "UQR coefficient",
+            caption = "Ribbon = 95% CI (cov(main, interaction) omitted)"
           ) +
           ggplot2::theme_bw(base_size = 14) +
           ggplot2::theme(
-            legend.position  = "bottom",
-            panel.border     = ggplot2::element_blank(),
-            strip.background = ggplot2::element_blank(),
-            plot.title       = ggplot2::element_text(face = "bold", hjust = 0.5, size = 11),
-            plot.caption     = ggplot2::element_text(size = 9, colour = "grey40", hjust = 0),
-            axis.text        = ggplot2::element_text(size = 9)
+            legend.position    = "bottom",
+            panel.border       = ggplot2::element_blank(),
+            strip.background   = ggplot2::element_blank(),
+            plot.title         = ggplot2::element_text(face = "bold",
+                                                       hjust = 0.5, size = 11),
+            plot.caption       = ggplot2::element_text(size = 9,
+                                                       colour = "grey40",
+                                                       hjust = 0),
+            panel.grid.minor   = ggplot2::element_blank(),
+            axis.text          = ggplot2::element_text(size = 9),
+            axis.line.x.bottom = ggplot2::element_blank(),
+            axis.line.y.left   = ggplot2::element_blank()
           )
+
+        if (n_bins > 1) {
+          p <- p + ggplot2::facet_wrap(~ bin_label, scales = "free_y",
+                                       ncol = 2)
+        }
+        p
       }
     }, error = function(e) blank_plot(paste0("RIF effect plot error: ", conditionMessage(e)))))
   }
@@ -850,7 +972,7 @@ make_weather_effect_plot <- function(fit, pred_var, interaction_terms, is_binned
   }
 
   if (!length(pred_cols))
-    return(blank_plot(paste0("'", pred_cols, "' not found in model frame.")))
+    return(blank_plot(paste0("'", pred_var, "' not found in model frame.")))
 
   # ========================================================================= #
   # BINNED PATH                                                               #
@@ -874,7 +996,16 @@ make_weather_effect_plot <- function(fit, pred_var, interaction_terms, is_binned
         drop = FALSE
       ]
 
-      bins_df <- data.frame(term = sort(bin_cols), stringsAsFactors = FALSE)
+      # Sort bin columns by parsed numeric lower bound. Alphabetical sort
+      # breaks for negative ranges (e.g. "(-0.4," < "(-0.6," < "(-1.2,"
+      # lexicographically but the desired numeric order is the reverse).
+      .bin_lower <- function(b) {
+        s <- sub(paste0("^", pred_esc, "[\\[\\(]"), "", b)
+        suppressWarnings(as.numeric(sub("^([^,]+),.*", "\\1", s)))
+      }
+      bin_cols <- bin_cols[order(.bin_lower(bin_cols))]
+
+      bins_df <- data.frame(term = bin_cols, stringsAsFactors = FALSE)
       bins_df <- dplyr::left_join(bins_df, ct_main, by = "term")
       bins_df$Estimate[is.na(bins_df$Estimate)] <- 0
       bins_df$`Std. Error`[is.na(bins_df$`Std. Error`)] <- 0
@@ -891,18 +1022,21 @@ make_weather_effect_plot <- function(fit, pred_var, interaction_terms, is_binned
       }
 
       # Rebuild full table with all bins; missing coefficient => omitted reference (0 effect)
-      bins_df <- data.frame(term = sort(bin_cols), stringsAsFactors = FALSE)
+      bins_df <- data.frame(term = bin_cols, stringsAsFactors = FALSE)
       bins_df <- dplyr::left_join(bins_df, ct_main, by = "term")
       bins_df$Estimate[is.na(bins_df$Estimate)] <- 0
       bins_df$`Std. Error`[is.na(bins_df$`Std. Error`)] <- 0
       bins_df$bin_index <- seq_len(nrow(bins_df))
       bins_df$bin_label <- bins_df$term
 
-      # Detect moderator (if any)
+      # Detect moderator (if any). Use word-boundary regex so short pred_var
+      # names (e.g. "r") aren't matched as substrings inside other variable
+      # names like "urban" — which would pick the wrong moderator.
       modx_var <- NULL
       modx_lab <- NULL
       if (length(interaction_terms) > 0) {
-        mt <- interaction_terms[grepl(pred_var, interaction_terms, fixed = TRUE)]
+        pv_pat <- paste0("\\b", pred_esc, "\\b")
+        mt <- interaction_terms[grepl(pv_pat, interaction_terms)]
         if (length(mt) > 0) {
           parts <- strsplit(mt[1], ":")[[1]]
           modx_var <- parts[parts != pred_var][1]
@@ -1094,8 +1228,12 @@ make_weather_effect_plot <- function(fit, pred_var, interaction_terms, is_binned
         new_data[[pred_var]] <- grid$.pred
         new_data[[modx_var]] <- grid$.modx
 
+        # Recompute every interaction column from its parts. new_data already
+        # carries each interaction column at its sample mean (from
+        # other_means), so the previous `!nm %in% names(new_data)` guard
+        # left them stale and the predicted slope for pred_var was wrong.
         for (nm in colnames(mm)) {
-          if (grepl(":", nm, fixed = TRUE) && !nm %in% names(new_data)) {
+          if (grepl(":", nm, fixed = TRUE)) {
             parts <- strsplit(nm, ":")[[1]]
             if (all(parts %in% names(new_data)))
               new_data[[nm]] <- Reduce(`*`, new_data[parts])
@@ -1142,6 +1280,16 @@ make_weather_effect_plot <- function(fit, pred_var, interaction_terms, is_binned
       } else {
         new_data             <- as.data.frame(lapply(other_means, rep, times = length(x_seq)))
         new_data[[pred_var]] <- x_seq
+
+        # Recompute interaction columns from their parts so the slope of
+        # pred_var properly reflects β_main + β_int * mean(modx).
+        for (nm in colnames(mm)) {
+          if (grepl(":", nm, fixed = TRUE)) {
+            parts <- strsplit(nm, ":")[[1]]
+            if (all(parts %in% names(new_data)))
+              new_data[[nm]] <- Reduce(`*`, new_data[parts])
+          }
+        }
         if ("(Intercept)" %in% colnames(mm)) new_data[["(Intercept)"]] <- 1
 
         preds        <- fixest_predict_manual(new_data)
