@@ -152,10 +152,15 @@
   # dependence — so it adds 0 to var_main.
 
   # --- Repositioning (res1): tau shift from main effect changes weather beta ---
-  # Post-main-effect position on baseline CDF (SP + covariate shifts move tau)
-  baseline_cdf <- stats::ecdf(y_baseline)
+  # Post-main-effect position on the SAME CDF used for tau_i_pre — i.e. the
+  # training-outcome ecdf the RIF coefficient grid was estimated against.
+  # Using a different CDF here (e.g. ecdf(svy_baseline)) would make
+  # tau_i_post != tau_i_pre even when delta_main == 0, producing a spurious
+  # repositioning channel when no policy is selected. Indexing both against
+  # F_hat keeps the link to the beta curve intact and makes delta_res1
+  # identically zero whenever delta_main is zero.
   y_post_main <- y_baseline + delta_main
-  tau_i_post <- pmin(pmax(baseline_cdf(y_post_main), min(taus)), max(taus))
+  tau_i_post <- pmin(pmax(F_hat(y_post_main), min(taus)), max(taus))
 
   delta_res1 <- rep(0, n)
   var_res1   <- rep(0, n)
