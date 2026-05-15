@@ -63,6 +63,26 @@ prepare_outcome_df <- function(df, so) {
 #' @return Character vector of coefficient names matching `weather_terms`.
 #'
 #' @export
+.fixest_vcov <- function(fit) {
+  for (spec in list(COEF_VCOV_SPEC, ~loc_id, "HC1", "iid")) {
+    v <- tryCatch(fixest::vcov(fit, vcov = spec), error = function(e) NULL)
+    if (!is.null(v)) return(v)
+  }
+  stats::vcov(fit)
+}
+
+.fixest_coeftable <- function(fit) {
+  for (spec in list(COEF_VCOV_SPEC, ~loc_id, "HC1", "iid")) {
+    ct <- tryCatch(
+      as.data.frame(fixest::coeftable(fit, vcov = spec)),
+      error = function(e) NULL
+    )
+    if (!is.null(ct)) return(ct)
+  }
+  as.data.frame(fixest::coeftable(fit))
+}
+
+
 weather_coef_names <- function(fit, weather_terms) {
   all_coefs <- names(stats::coef(fit))
 
@@ -623,7 +643,7 @@ make_coefplot <- function(fit1, fit2, fit3,
   p <- tryCatch({
     coef_data <- purrr::imap_dfr(model_list, function(fit, model_name) {
       ct <- tryCatch(
-        as.data.frame(fixest::coeftable(fit, se = "hetero")),
+        .fixest_coeftable(fit),
         error = function(e) NULL
       )
       if (is.null(ct)) return(NULL)
@@ -983,7 +1003,7 @@ make_weather_effect_plot <- function(fit, pred_var, interaction_terms, is_binned
         return(blank_plot("Package 'fixest' is required."))
 
       mm <- as.data.frame(stats::model.matrix(fit))
-      ct <- as.data.frame(fixest::coeftable(fit, se = "hetero"))
+      ct <- .fixest_coeftable(fit)
       ct$term <- rownames(ct)
 
       bin_cols <- grep(paste0("^", pred_esc, "[\\[\\(]"), names(mm), value = TRUE)
@@ -1185,7 +1205,7 @@ make_weather_effect_plot <- function(fit, pred_var, interaction_terms, is_binned
     p <- tryCatch({
       mm     <- as.data.frame(stats::model.matrix(fit))
       betas  <- stats::coef(fit)
-      vcov_m <- stats::vcov(fit)
+      vcov_m <- .fixest_vcov(fit)
       n_grid <- 50L
 
       # Manual prediction: X_new %*% beta, SE via delta method sqrt(diag(X V X'))
@@ -1449,7 +1469,7 @@ make_regtable <- function(fit1, fit2, fit3,
 
   # --- Extract coefficients and SEs -----------------------------------------
   extract_coefs <- function(fit) {
-    ct  <- summary(fit)$coeftable
+    ct  <- .fixest_coeftable(fit)
     nms <- rownames(ct)
     cf  <- ct[, 1]
     se  <- ct[, 2]

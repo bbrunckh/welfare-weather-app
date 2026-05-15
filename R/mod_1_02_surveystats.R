@@ -63,7 +63,7 @@ mod_1_02_surveystats_server <- function(
     # ---- Button (shown once selected_surveys is populated) ------------------
 
     output$survey_stats_button_ui <- renderUI({
-      req(length(selected_surveys()) > 0)
+      req(nrow(selected_surveys()) > 0)
       actionButton(ns("survey_stats"), "Survey stats", class = "btn-primary", style = "width: 100%;")
     })
 
@@ -79,7 +79,7 @@ mod_1_02_surveystats_server <- function(
     # ---- Load and prepare data on button click ------------------------------
 
     observeEvent(input$survey_stats, {
-      req(length(selected_surveys()) > 0)
+      req(nrow(selected_surveys()) > 0)
 
       busy_id <- showNotification("Loading survey data…", duration = NULL, type = "message")
       on.exit(removeNotification(busy_id), add = TRUE)

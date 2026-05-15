@@ -159,7 +159,7 @@ mod_1_05_weatherstats_server <- function(
             sw  <- isolate(selected_weather())
             
             # fix so$label for plotting if it has been transformed
-            if (!"transform" %in% colnames(so) && so$transform == "log") {
+            if ("transform" %in% colnames(so) && isTRUE(so$transform == "log")) {
               so$label <- paste0("Log ", so$label)
             }
 
