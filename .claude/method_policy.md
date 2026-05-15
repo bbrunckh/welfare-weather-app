@@ -23,7 +23,7 @@ USER INPUTS (Step 3 sidebar tabs)
     ├─ apply_policy_to_svy(svy, infra, sp, digital, labor)         (fct_policy_sim.R)
     │     → svy_mod  (policy-modified survey-weather frame)
     │
-    ├─ resimulate_with_svy(svy_mod, …, svy_baseline = svy)          (fct_policy_sim.R)
+    ├─ apply_policy_delta_to_baseline(svy, svy_mod, mf, so, hs, ss) (fct_policy_sim.R)
     │     → policy_hist_sim, policy_saved_scenarios
     │
     └─ decompose_policy_effect(svy_baseline = svy,
@@ -51,8 +51,8 @@ Step 1's `survey_weather()` returns a household × weather data frame `svy` (one
 | Labor | `employed`, `selfemployed`, `unemployed` | mutually exclusive 0/1 | mod_3_04 |
 | Labor | `agriculture`, `industry`, `services` | mutually exclusive 0/1 (employed workers only) | mod_3_04 |
 | Social protection | `welfare` (read only — for targeting) | numeric | mod_3_01 |
-| Social protection | `._sp_transfer` (= `SP_TRANSFER_COL`) | numeric (daily $/hh), added | mod_3_01 |
-| Targeting / budget | weight column matched by regex `^weight$\|^hhweight$\|^wgt$\|^pw$` (case-insensitive) | numeric | implicit |
+| Social protection | `.wiseapp_sp_transfer` (= `SP_TRANSFER_COL`) | numeric (daily $/hh), added | mod_3_01 |
+| Targeting / budget | `weight` (checked via literal column name match) | numeric | implicit |
 
 The constant `SP_TRANSFER_COL <- ".wiseapp_sp_transfer"` is defined at the top of `fct_policy_sim.R` (line 15). Many UI inputs in mod_3_02 / mod_3_03 are gated on the corresponding covariate appearing in the **selected Model 3 coefficients** — if a covariate isn't in the model, its slider is hidden because changing it would have no effect on predictions.
 
@@ -74,7 +74,7 @@ The constant `SP_TRANSFER_COL <- ".wiseapp_sp_transfer"` is defined at the top o
 | `budget_mode` | `"transfer_first"` / `"budget_first"` | Sizing mode |
 | `transfer_amount_usd` | USD per payment (transfer_first) | Per-payment amount |
 | `transfer_n_payments` | 2–24 (default 6) | Payments per year |
-| `budget_fixed` | USD (budget_first, default 1,000,000) | Total annual budget |
+| `budget_fixed` | USD (budget_first, default 0) | Total annual budget |
 
 ### 3.2 Reactive output
 
@@ -117,6 +117,8 @@ svy[[SP_TRANSFER_COL]] <- ifelse(eligible, daily_hh, 0)
 ```
 
 The weighted-divisor logic ensures the *population-level* annual spend `sum(transfer · weight) · 365` equals `budget_fixed`. Without it, the realised total would scale with the mean eligible weight.
+
+**Household-size scaling.** When `analysis_unit == "hh"` and a `hhsize` column is present, the daily transfer is divided by household size (`daily_hh / hhsize`) so the per-capita welfare boost matches the model's per-capita outcome scale. When `analysis_unit == "ind"`, the transfer applies per-individual row as-is. Guards handle NA, zero, and negative `hhsize` by falling back to 1.
 
 ### 3.5 How the transfer enters predictions
 
@@ -252,7 +254,7 @@ The "Run simulation" button (`mod_3_scenario.R` ~line 246) calls `s5$run()` in `
 2. Captures the live residuals choice from Module 2 (`residuals() %||% "original"`) and stamps it onto `hist_sim$residuals` so that downstream display layers use the same residual treatment Module 2 is rendering with.
 3. Stores `svy` in `baseline_svy_rv` and computes `svy_mod = apply_policy_to_svy(svy, infra, sp, digital, labor)` into `policy_svy_rv`.
 4. **Baseline arm** — passes Step 2's `hist_sim` and `saved_scenarios` through verbatim. The baseline survey is unchanged, so re-running the pipeline would reproduce Step 2 exactly; passing through avoids the cost.
-5. **Policy arm** — `resimulate_with_svy(svy_mod, sw, so, mf, hist_sim_baseline = hs_for_resim, saved_scenarios_baseline = ss, svy_baseline = svy)`. The `svy_baseline = svy` argument is what enables RIF policy mode in `run_sim_pipeline()` (it triggers `is_rif_policy` and the Stage B correction — see [`method_rif.md`](method_rif.md) §2.5).
+5. **Policy arm** — `apply_policy_delta_to_baseline(svy, svy_mod, mf, so, hs, ss)`. Instead of re-running the full simulation pipeline with the modified survey, this function derives the policy arm from the cached baseline pipelines by adding the analytic per-household `delta_total` — the same number the Decomposition pane reports. This approach: (a) eliminates baseline/policy disagreement when residual draws have any stochastic component — both arms share identical `train_aug`/`id_vec`/`svy_row_id`, so residuals line up household-for-household and a no-op policy yields a no-op visual effect; and (b) removes per-CMIP6-member re-simulation, which was the dominant cost of every policy adjustment.
 6. Decomposes effects via `decompose_policy_effect()` against *historical mean weather* (`hs$weather_raw`), and again per `(saved scenario, sim_year)` for the time-resolved diagnostics in the Decomposition tab.
 7. Increments `sim_run_id` so downstream tabs re-render.
 
@@ -263,31 +265,24 @@ The "Run simulation" button (`mod_3_scenario.R` ~line 246) calls `s5$run()` in `
 | `baseline_svy` | unmodified `svy` |
 | `policy_svy` | `svy_mod` from `apply_policy_to_svy()` |
 | `baseline_hist_sim`, `baseline_saved_scenarios` | Step 2 outputs, stamped with current residuals choice |
-| `policy_hist_sim`, `policy_saved_scenarios` | Outputs of `resimulate_with_svy()` against `svy_mod` |
+| `policy_hist_sim`, `policy_saved_scenarios` | Outputs of `apply_policy_delta_to_baseline()` against `svy_mod` |
 | `decomp_result` | `decompose_policy_effect()` against historical mean weather |
 | `decomp_scenarios` | Same, expanded over `(scenario, sim_year)` |
 | `sim_run_id` | Integer counter; triggers downstream tab inserts |
 
-### 7.3 Re-simulation — `resimulate_with_svy()` (`fct_policy_sim.R` ~line 582)
+### 7.3 Delta-based policy overlay — `apply_policy_delta_to_baseline()` (`fct_policy_sim.R`)
 
-Reuses the Step 2 fit and coefficient draws, threading the policy survey through `run_sim_pipeline()`:
+Rather than re-running `run_sim_pipeline()` with the modified survey, the policy arm is constructed by overlaying an analytic delta onto the cached Step 2 baseline outputs:
 
-```r
-run_sim_pipeline(
-  weather_raw  = <hist or scenario weather>,
-  svy          = svy_mod,
-  model        = mf$fit3   (or extract_rif_median for RIF),
-  fit_multi    = mf$fit3   (RIF only — multi-LHS fixest object),
-  chol_obj     = hist_sim_baseline$chol_obj,
-  taus         = mf$taus,
-  weather_cols = mf$weather_terms,
-  rif_grid     = mf$rif_grid,
-  svy_baseline = svy_baseline,    # ← enables RIF policy mode
-  …
-)
-```
+1. Computes `delta_total` per household via `decompose_policy_effect()` (or `.compute_rif_channels()` for RIF). This is the same `δ_sp + δ_main_covar + δ_res1 + δ_res2` that the Decomposition tab reports.
+2. Adds `delta_total` to each baseline pipeline's `y_point` (in model / log scale).
+3. Back-transforms and re-aggregates using the baseline's `F_loading`, `train_aug`, and weights.
 
 The output schema matches Step 2's `run_full_simulation()`: `hist_sim` nests its single run under `$pipeline`, each saved scenario carries a named `$pipelines` list — one entry per CMIP6 ensemble member. This is what gives Module 3 the same inter-model spread display Module 2 produces.
+
+**Key consistency property:** The simulation `y_point` and the decomposition display are produced by the same delta computation, so the channel totals reconcile exactly with the simulated welfare level (up to the back-transform, which is monotone).
+
+**Note:** The earlier `resimulate_with_svy()` function still exists in `fct_policy_sim.R` but is no longer called from the Module 3 orchestrator.
 
 ---
 
@@ -302,7 +297,7 @@ For any survey column the model uses as a regressor, `apply_policy_to_svy()`'s f
 
 ### 8.2 SP cash channel
 
-The `._sp_transfer` column is **not a regressor** — the model was not fit with cash transfers as a covariate. `run_sim_pipeline()` therefore reads the column post-prediction and adds it as a level-scale welfare boost:
+The `.wiseapp_sp_transfer` column is **not a regressor** — the model was not fit with cash transfers as a covariate. `run_sim_pipeline()` therefore reads the column post-prediction and adds it as a level-scale welfare boost:
 
 ```r
 welfare_lvl <- exp(y_point) + sp_vec
@@ -315,7 +310,7 @@ This is mathematically equivalent to `δ_sp = log(exp(y) + SP_cash) − y`, whic
 
 Policy modifications affect the design matrix `X_policy`, which feeds the factor loading `F_loading = X_policy %*% L` (linear) or the interpolated per-τ blend (RIF). Coefficient uncertainty therefore propagates through the policy survey exactly as it does through the baseline survey — see [`method_uncertainty.md`](method_uncertainty.md) §1.1 and §5 (paired contrasts).
 
-**Additive-decomposition active mask.** Under the default coefficient-uncertainty mode (§1.1.1 of `method_uncertainty.md`), `resimulate_with_svy()` rebuilds the active mask after `apply_policy_to_svy()` runs: `active_terms = weather_terms ∪ detect_modified_cols(svy_policy, train_data)`. The detected columns are exactly those the policy flipped (e.g. `electricity`, `internet`, `employed`, `imp_wat_rec`), so the policy arm's `F_loading` keeps coefficients on (weather + policy-modified + their interactions) and drops everything else. The mask is stripped first to avoid inheriting Module 2's weather-only mask. The legacy full-β propagation is restored when the Step-2 "Include uncertainty on all covariates" toggle is set, which `mod_3_05_policy_sim.R` stamps onto `hist_sim_baseline$propagate_all_covariate_uncertainty` for `resimulate_with_svy()` to read.
+**Additive-decomposition active mask.** Under the default coefficient-uncertainty mode (§1.1.1 of `method_uncertainty.md`), `apply_policy_delta_to_baseline()` rebuilds the active mask after `apply_policy_to_svy()` runs: `active_terms = weather_terms ∪ detect_modified_cols(svy_policy, train_data)`. The detected columns are exactly those the policy flipped (e.g. `electricity`, `internet`, `employed`, `imp_wat_rec`), so the policy arm's `F_loading` keeps coefficients on (weather + policy-modified + their interactions) and drops everything else. The mask is stripped first to avoid inheriting Module 2's weather-only mask. The legacy full-β propagation is restored when the Step-2 "Include uncertainty on all covariates" toggle is set.
 
 The SP transfer itself is treated as deterministic (no SE) — `apply_policy_to_svy()` writes a fixed daily amount per household.
 
@@ -352,7 +347,7 @@ This last point is the most common source of confusion: a user can flip a covari
 
 | User input | Module | `apply_policy_to_svy()` effect on `svy` | Enters prediction via |
 |---|---|---|---|
-| SP transfer amount, eligibility, errors | mod_3_01 | Adds `._sp_transfer` (daily $/hh) on eligible rows | Post-prediction level-scale boost (linear) or `δ_sp` inside `delta_total` (RIF) |
+| SP transfer amount, eligibility, errors | mod_3_01 | Adds `.wiseapp_sp_transfer` (daily $/hh) on eligible rows | Post-prediction level-scale boost (linear) or `δ_sp` inside `delta_total` (RIF) |
 | Infrastructure access toggles | mod_3_02 | Flips 0/1 in `electricity`, `imp_wat_rec`, `imp_san_rec`, `piped`, `piped_to_prem`, `imp_wat_san_rec` | β·Δx through the design matrix |
 | Health travel time | mod_3_02 | Scales / caps `ttime_health` | β·Δx through the design matrix |
 | Internet / mobile access | mod_3_03 | Flips 0/1 in `internet`, `cellphone` | β·Δx through the design matrix |
