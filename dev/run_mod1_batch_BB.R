@@ -27,7 +27,7 @@ OUT_DIR         <- "dev/outputs"
 UNIT <- "hh"   # "hh", "ind", or "firm"
 
 # ---- Sample mode ------------------------------------------------------------
-POOL_COUNTRIES <- TRUE    # TRUE = one pooled model; FALSE = per-country
+POOL_COUNTRIES <- FALSE    # TRUE = one pooled model; FALSE = per-country
 
 # ---- Country / survey sample (mod_1_01) [GRID when !POOL_COUNTRIES] --------
 # NULL = all available; c(...) = subset
