@@ -370,13 +370,13 @@ for (si in SAMPLE_LABELS) {
       dplyr::pull(fname)
     h3_df     <- load_data(h3_fnames, connection_params)
     panel_map <- loc_panel(h3_df, id_col = loc_id, h3_col = h3,
-                           weight_col = pop_2020)
+                           weight_col = pop_2020, group_cols = c("code", "year", "survname"))
     loc_keys  <- h3_df |>
       dplyr::distinct(code, year, survname, loc_id) |>
       dplyr::collect()
     svy_base <- svy_base |>
       dplyr::left_join(
-        dplyr::left_join(loc_keys, panel_map, by = "loc_id"),
+        dplyr::left_join(loc_keys, panel_map, by = c("code", "year", "survname", "loc_id")),
         by = c("code", "year", "survname", "loc_id")
       )
     cat(sprintf("  loc_id_panel: %d groups, %d locations\n",
@@ -642,8 +642,8 @@ for (si in SAMPLE_LABELS) {
         next
       }
 
-      # Filter covariates to >=90% non-missing per survey group (matches app)
-      valid_vl <- filter_valid_vars(survey_prep, var_info, min_complete = 0.9,
+      # Filter covariates to >=90% non-missing per survey group (matches app).
+      valid_vl <- filter_valid_vars(svy_wx, var_info, min_complete = 0.9,
                                     group_cols = c("code", "year", "survname"),
                                     outcome = OUTCOME_NAME)
       valid_vl <- valid_vl[!valid_vl$name %in% exclude_cols, , drop = FALSE]

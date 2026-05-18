@@ -173,7 +173,7 @@ mod_1_08_modelfit_server <- function(id,
       if (identical(model_fit()$engine, "rif")) {
         cat("Quantile regression (RIF) - Median quantile (tau = 0.5):\n\n")
       }
-      vcov_spec <- tryCatch(.fixest_vcov(m), error = function(e) NULL)
+      vcov_spec <- tryCatch(.fixest_vcov_spec(m), error = function(e) NULL)
       if (is.null(vcov_spec)) {
         summary(m)
       } else {

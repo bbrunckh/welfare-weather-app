@@ -162,7 +162,8 @@ mod_1_02_surveystats_server <- function(
         })
 
         tryCatch({
-          panel_map <- loc_panel(h3_df, id_col = loc_id, h3_col = h3, weight_col = pop_2020)
+          panel_map <- loc_panel(h3_df, id_col = loc_id, h3_col = h3, weight_col = pop_2020,
+                                    group_cols = c("code", "year", "survname"))
 
           loc_keys <- h3_df |>
             dplyr::distinct(code, year, survname, loc_id) |>
@@ -170,7 +171,7 @@ mod_1_02_surveystats_server <- function(
 
           df <- df |>
             dplyr::left_join(
-              dplyr::left_join(loc_keys, panel_map, by = "loc_id"),
+              dplyr::left_join(loc_keys, panel_map, by = c("code", "year", "survname", "loc_id")),
               by = c("code", "year", "survname", "loc_id")
             )
           survey_data(df)

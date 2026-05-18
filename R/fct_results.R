@@ -71,6 +71,14 @@ prepare_outcome_df <- function(df, so) {
   stats::vcov(fit)
 }
 
+.fixest_vcov_spec <- function(fit) {
+  for (spec in list(COEF_VCOV_SPEC, ~loc_id, "HC1", "iid")) {
+    ok <- tryCatch({ summary(fit, vcov = spec); TRUE }, error = function(e) FALSE)
+    if (ok) return(spec)
+  }
+  "iid"
+}
+
 .fixest_coeftable <- function(fit) {
   for (spec in list(COEF_VCOV_SPEC, ~loc_id, "HC1", "iid")) {
     ct <- tryCatch(

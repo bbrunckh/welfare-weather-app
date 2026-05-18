@@ -364,6 +364,14 @@ get_weather <- function(
   stored_breaks        = NULL
 ) {
 
+  # -- Pin DuckDB to single thread for floating-point determinism ------------
+  # Multi-threaded aggregation sums floats in non-deterministic order,
+  # causing last-bit differences (~1e-14) across identical calls.
+  con_det <- .duck_con()
+  prev_threads <- DBI::dbGetQuery(con_det, "SELECT current_setting('threads') AS t")$t
+  DBI::dbExecute(con_det, "SET threads TO 1")
+  on.exit(DBI::dbExecute(con_det, paste("SET threads TO", prev_threads)), add = TRUE)
+
   # -- Validate ---------------------------------------------------------------
   climate_scenario <- !is.null(ssp)
 
@@ -497,10 +505,10 @@ get_weather <- function(
   # -- Assemble result -------------------------------------------------------
   result <- list()
 
-  # Historical: transform base → filter to dates → collect
   result[["historical"]] <- loc_weather_base |>
     .apply_transformations(selected_weather, loc_weather_base) |>
     dplyr::filter(timestamp %in% !!dates) |>
+    dplyr::arrange(code, year, survname, loc_id, timestamp) |>
     dplyr::collect()
 
   # -- Binning setup ----------------------------------------------------------
@@ -512,9 +520,15 @@ get_weather <- function(
 
   if (has_binning) {
     if (is.null(stored_breaks) || length(stored_breaks) == 0) {
-      # First call (regression): compute breaks from survey-period historical data
+      # Compute breaks from the full survey-period loc_id x timestamp distribution.
+      # Sort by full location identity + timestamp for a deterministic
+      # order regardless of DuckDB's non-guaranteed collect() row order.
       survey_timestamps <- unique(survey_data$timestamp[!is.na(survey_data$timestamp)])
-      hist_ref <- result[["historical"]][result[["historical"]]$timestamp %in% survey_timestamps, ]
+      wx_cols   <- selected_weather$name[selected_weather$cont_binned == "Binned" & !is.na(selected_weather$cont_binned)]
+      sort_cols <- intersect(c("code", "year", "survname", "loc_id", "timestamp"), names(result[["historical"]]))
+      keep      <- unique(c(sort_cols, wx_cols))
+      hist_ref  <- result[["historical"]][result[["historical"]]$timestamp %in% survey_timestamps, keep, drop = FALSE]
+      hist_ref  <- hist_ref[do.call(order, hist_ref[sort_cols]), ]
 
       stored_breaks <- .compute_breaks(hist_ref, selected_weather)
     }
@@ -768,6 +782,7 @@ get_weather <- function(
           dplyr::mutate(!!!roll_exprs_climate) |>
           .apply_transformations(selected_weather, loc_weather_base) |>
           dplyr::filter(timestamp %in% !!dates) |>
+          dplyr::arrange(model, code, year, survname, loc_id, timestamp) |>
           dplyr::collect()
 
         if (nrow(batch) == 0L) next
