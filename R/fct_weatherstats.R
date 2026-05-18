@@ -36,7 +36,7 @@ extract_survey_dates <- function(survey_data) {
 #'
 #' Performs an `inner_join` on `code`, `year`, `survname`, `loc_id`, and
 #' `timestamp`, converts `year` to a factor for plotting, and normalises
-#' `weight` to sum to 1 within each `code` / `year` / `survname` group.
+#' OUTDATED: `weight` to sum to 1 within each `code` / `year` / `survname` group.
 #'
 #' @param survey_data  A data frame of survey observations with at minimum
 #'   columns `code`, `year`, `survname`, `loc_id`, `timestamp`, and `weight`.
@@ -59,7 +59,7 @@ merge_survey_weather <- function(survey_data, weather_data) {
     ) |>
     dplyr::mutate(year = as.factor(.data$year)) |>
     dplyr::group_by(.data$code, .data$year, .data$survname) |>
-    dplyr::mutate(weight = .data$weight / sum(.data$weight, na.rm = TRUE)) |>
+    # dplyr::mutate(weight = .data$weight / sum(.data$weight, na.rm = TRUE)) |>
     dplyr::ungroup()
 
   if (nrow(joined) == 0) return(NULL)
@@ -409,4 +409,31 @@ make_weather_binned_stats_dt <- function(survey_weather, selected_weather) {
 
     dt
   })
+}
+
+#' Per-weather-variable plot layout (full panel for 1 var, two for >= 2)
+#'
+#' Returns a `bslib::card` for a single weather variable, or a two-column
+#' `bslib::layout_columns` for two. Used to keep panel layouts consistent
+#' across the app (Step 1 weather stats, Step 1 results, Step 3
+#' decomposition).
+#'
+#' @param ns       The module's `NS` function (from `session$ns`).
+#' @param n_vars   Integer. Number of selected weather variables.
+#' @param ids      Character vector of length 2 — output IDs for plot 1
+#'                 and plot 2. Only `ids[1]` is used when `n_vars < 2`.
+#' @param height   CSS height passed to `shiny::plotOutput`.
+#'
+#' @return A Shiny tag.
+#' @noRd
+weather_plot_layout <- function(ns, n_vars, ids, height = "500px") {
+  if (isTRUE(n_vars >= 2)) {
+    bslib::layout_columns(
+      col_widths = c(6, 6),
+      bslib::card(shiny::plotOutput(ns(ids[1]), height = height)),
+      bslib::card(shiny::plotOutput(ns(ids[2]), height = height))
+    )
+  } else {
+    bslib::card(shiny::plotOutput(ns(ids[1]), height = height))
+  }
 }

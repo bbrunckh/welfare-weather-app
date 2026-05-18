@@ -236,7 +236,7 @@ mod_0_overview_server <- function(id) {
         survey_list(load_data("metadata/survey_list.csv", params, collect = TRUE))
         variable_list(add_derived_policy_vars_to_vl(
           load_data("metadata/variable_list.csv", params, collect = TRUE)
-        ))
+        ) |> dplyr::mutate(name = dplyr::if_else(name == "loc_id", "loc_id_panel", name)))
         cpi_ppp(load_data("metadata/cpi_ppp.csv", params, collect = TRUE))
         pov_lines(default_poverty_lines())
 
@@ -288,7 +288,7 @@ mod_0_overview_server <- function(id) {
       tryCatch({
         variable_list(add_derived_policy_vars_to_vl(
           load_data("metadata/variable_list.csv", params, collect = TRUE)
-        ))
+        ) |> dplyr::mutate(name = dplyr::if_else(name == "loc_id", "loc_id_panel", name)))
         showNotification(paste0("Variable list loaded (", nrow(variable_list()), " rows)"), type = "message", duration = 2)
       }, error = function(e) {
         showNotification("Failed to load metadata/variable_list.csv", type = "error", duration = 5)

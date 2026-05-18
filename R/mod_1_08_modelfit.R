@@ -3,7 +3,7 @@
 #' @description A shiny Module.
 #'
 #' @param id,input,output,session Internal parameters for {shiny}.
-#'
+#' 
 #' @noRd
 #'
 #' @importFrom shiny NS tagList
@@ -173,7 +173,12 @@ mod_1_08_modelfit_server <- function(id,
       if (identical(model_fit()$engine, "rif")) {
         cat("Quantile regression (RIF) - Median quantile (tau = 0.5):\n\n")
       }
-      summary(m)
+      vcov_spec <- tryCatch(.fixest_vcov(m), error = function(e) NULL)
+      if (is.null(vcov_spec)) {
+        summary(m)
+      } else {
+        summary(m, vcov = vcov_spec)
+      }
     })
 
     # ---- Add tab (once) -----------------------------------------------------

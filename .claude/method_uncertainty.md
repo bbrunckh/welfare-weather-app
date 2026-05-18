@@ -14,7 +14,7 @@ WISE-APP recognises four orthogonal sources of uncertainty, propagated separatel
 
 The regression coefficients `β̂` are random variables with covariance matrix `Σ = Var(β̂)`. Their uncertainty propagates into household-level predictions through the design matrix.
 
-**Mechanism.** `compute_chol_vcov(fit)` extracts `Σ` from the fitted model via `fixest::vcov(fit, vcov = COEF_VCOV_SPEC)`. The default spec is `~loc_id` (cluster-robust at location), with a fallback chain `~loc_id → "HC1" → "iid"` if the requested spec fails. Two alternative constants are also defined: `COEF_VCOV_SPEC_MOULTON = ~loc_id:int_month` and `COEF_VCOV_SPEC_CONSERVATIVE = ~code + year + survname + loc_id`. The Cholesky factor `L` such that `L L' = Σ` is returned as part of `chol_obj`.
+**Mechanism.** `compute_chol_vcov(fit)` extracts `Σ` from the fitted model via `fixest::vcov(fit, vcov = COEF_VCOV_SPEC)`. The default spec is `COEF_VCOV_SPEC = ~loc_id_panel` (cluster-robust at the panel-harmonised location), with a fallback chain `~loc_id_panel → ~loc_id → "HC1" → "iid"` if the requested spec fails. An alternative constant `COEF_VCOV_SPEC_MOULTON = ~loc_id_panel:int_month` is also defined for Moulton-corrected SEs. The Cholesky factor `L` such that `L L' = Σ` is returned as part of `chol_obj`.
 
 **Factor loading.** For each household `i` in the counterfactual survey, the non-FE design vector `x_i` is multiplied by `L`:
 
@@ -30,7 +30,7 @@ y_i^(s) = y_i^point + F_loading[i, ] · z_s,    with    Var(F_loading[i, ] · z)
 
 which is exactly the usual delta-method variance of a linear predictor. WISE-APP never draws `z` at runtime — the Cholesky factor is the only object needed for the closed-form variance below.
 
-**RIF engines.** For RIF (`fixest_multi`), `compute_chol_vcov` returns a list of K Cholesky factors `{L_k}`, one per quantile fit. `interpolate_F_loading()` linearly blends `X_diff_k · L_k` across the quantile grid at each household's interpolated `τ_i`. See [`method_rif.md`](method_rif.md) §2.6.
+**RIF engines.** For RIF (`fixest_multi`), `compute_chol_vcov` returns a list of K Cholesky factors `{L_k}`, one per quantile fit. `interpolate_F_loading()` linearly blends `X_scenario_k · L_k` across the quantile grid at each household's interpolated `τ_i`. See [`method_rif.md`](method_rif.md) §2.6.
 
 #### 1.1.1 Additive-decomposition SE (default under `residuals = "original"`)
 
@@ -268,7 +268,7 @@ The median is a Hampel-style M-functional. Its influence function is
 IF_i = (½ − 1{μ_i ≤ m}) / f(m)
 ```
 
-where `f(m)` is the density of welfare at the median. WISE-APP estimates `f̂(m)` via `stats::density()` (Sheather-Jones bandwidth by default).
+where `f(m)` is the density of welfare at the median. WISE-APP estimates `f̂(m)` via `stats::density()` (default `nrd0` / Silverman bandwidth).
 
 ```
 h_i = w̃_i · (½ − 1{μ_i ≤ m̂}) / f̂(m̂)
@@ -353,12 +353,13 @@ Var(T_scn − T_base) = || F_agg_scn − F_agg_base ||²
 
 ## 6. Layered Display in the UI
 
-The Module 2 and Module 3 point-range comparison panels (see `fct_sim_compare.R::plot_pointrange_climate` and `fct_policy_sim_compare.R`) report up to four nested whiskers around the central year- and model-averaged estimate:
+The Module 2 and Module 3 point-range comparison panels (see `fct_sim_compare.R::plot_pointrange_climate` and `fct_policy_sim_compare.R::pol_plot_pointrange_climate`) report up to three nested whiskers around the central year- and model-averaged estimate:
 
-1. **Innermost (coefficient uncertainty only).** From `var_coef` of `aggregate_with_uncertainty_delta()`. Shown when the user enables "Show coefficient uncertainty". **Default scope (§1.1.1):** under `"original"` residuals, restricted to coefficients on the *active* variables — weather (and their interactions) in Module 2, weather plus policy-modified variables (and their interactions) in Module 3. The Step-2 toggle "Include uncertainty on all covariates" widens this to the full `β` vector (legacy behaviour). Mode is automatic when residuals are not `"original"` — the mask is dropped because the cancellation argument requires fixed-per-household residuals.
-2. **Middle (inter-annual variability).** Empirical percentiles of per-`sim_year` point estimates within each member, averaged across members.
-3. **Thick coloured band (inter-model spread).** Empirical percentiles of member-mean point estimates from `combine_ensemble_results()`.
-4. **Outer "Pooled" whisker (pooled SE).** Analytic Gaussian band `value ± z · sqrt(var_coef + var_across)` — pools coefficient uncertainty and inter-model spread, *not* inter-annual variability. The exclusion is deliberate and matches the convention used in the return-period threshold table (`fct_sim_compare.R::build_threshold_table_df`), where the corresponding rows are labelled `Pooled Pxx`: inter-annual variability characterises the spread of the simulated outcome distribution at each return-period quantile, not uncertainty about the central tendency. Folding it into the pooled SE would double-display the year-to-year spread (already shown as the middle band) and conflate two distinct quantities. **Suppressed (drawn as NA) when `var_across == 0`** — i.e. historical scenarios and single-member future ensembles. In those cases the pooled SE degenerates to the coefficient SE and the whisker would simply duplicate the innermost band; omitting it also signals the absence of an inter-model component visually.
+1. **Thick coloured band (inter-model spread).** Empirical percentiles of member-mean point estimates from `combine_ensemble_results()`. Linewidth 6.0, alpha 0.6.
+2. **Middle (inter-annual variability).** Empirical percentiles of per-`sim_year` point estimates within each member, averaged across members. Linewidth 3.5, alpha 1.0.
+3. **Innermost (coefficient uncertainty only).** From `var_coef` of `aggregate_with_uncertainty_delta()`. Shown when the user enables "Show coefficient uncertainty". Linewidth 1.2, black. **Default scope (§1.1.1):** under `"original"` residuals, restricted to coefficients on the *active* variables — weather (and their interactions) in Module 2, weather plus policy-modified variables (and their interactions) in Module 3. The Step-2 toggle "Include uncertainty on all covariates" widens this to the full `β` vector (legacy behaviour). Mode is automatic when residuals are not `"original"` — the mask is dropped because the cancellation argument requires fixed-per-household residuals.
+
+**Pooled SE in tables (not in plots).** A pooled analytic SE `sqrt(var_coef + var_across)` — combining coefficient uncertainty and inter-model spread but *not* inter-annual variability — appears in the return-period threshold table (`fct_sim_compare.R::build_threshold_table_df`), where the corresponding rows are labelled `Pooled Pxx`. This is not drawn as a whisker layer in the point-range chart. The exclusion of inter-annual variability from the pooled SE is deliberate: inter-annual variability characterises the spread of the simulated outcome distribution at each return-period quantile, not uncertainty about the central tendency. Folding it into the pooled SE would double-display the year-to-year spread (already shown as the middle band) and conflate two distinct quantities.
 
 The user-facing band-width selector (`"p10_p90"`, `"p025_p975"`, etc.) is resolved by `resolve_band_q()` and applied uniformly across all layers, so wider bands widen every layer simultaneously.
 
@@ -370,7 +371,7 @@ Note that the diagnostics-tab SD-contribution stacked bar (`plot_variance_contri
 
 | Source | Method | Key assumption |
 |---|---|---|
-| Coefficient | Delta method (`F_loading' h`) | Local linearity of `T` in `μ`; correct vcov spec (`~loc_id` default) |
+| Coefficient | Delta method (`F_loading' h`) | Local linearity of `T` in `μ`; correct vcov spec (`COEF_VCOV_SPEC = ~loc_id_panel` default) |
 | Coefficient (default mask, §1.1.1) | Subset `F_loading` to active columns | Additive separability of active and inactive variables in the linear predictor; `residuals == "original"`; inactive variables held identical between baseline and counterfactual |
 | Residual (default `"original"`) | Matched per-household training residual | Idiosyncratic component invariant to the counterfactual; contributes to mean, not to `var_resid` |
 | Residual (`"normal"`/`"resample"`) | Plug-in `σ̂_ε² · Σ h²` | Homoskedastic residuals; residuals independent of coefficients (Option A) |

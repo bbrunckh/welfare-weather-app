@@ -58,7 +58,7 @@ The same progressive 3-model specification used for RIF applies:
 
 Each formula is fit by `fixest::feols()` (or `feglm()` for logistic). When the user has specified cluster variables, they are passed via the `cluster = ~v1 + v2` argument so standard errors are clustered. Unlike RIF, there is **no stacked multi-LHS call** — a single fixest model is returned per specification.
 
-Interactions are configured via `interaction_mode` (default `"saturated"`), which uses R's `*` operator so that all lower-order terms expand automatically (e.g., `temperature * urban` expands to `temperature + urban + temperature:urban`).
+Interactions are configured via `interaction_mode` (default `"pairwise"` per `fct_model_select.R`). In `"pairwise"` mode, explicit `hazard:covariate` pairs are created. In `"saturated"` mode, R's `*` operator expands all lower-order terms automatically (e.g., `temperature * urban` expands to `temperature + urban + temperature:urban`).
 
 ### 2.3 Availability
 
@@ -71,10 +71,10 @@ Engine selection is handled in `R/fct_model_select.R` (`infer_engine()` and `mod
 
 ### 2.4 Results Display (`fct_results.R`)
 
-- **Coefficient plot** (`make_coefplot()`): standard point-range plot of β̂ ± 1.96·SE, faceted by covariate, with one panel per model specification (Model 1/2/3). Heteroskedasticity-robust SEs are extracted via `fixest::coeftable(fit, se = "hetero")`.
+- **Coefficient plot** (`make_coefplot()`): standard point-range plot of β̂ ± 1.96·SE, faceted by covariate, with one panel per model specification (Model 1/2/3). SEs are extracted via `.fixest_coeftable(fit)`, which uses clustered `~loc_id_panel` SEs with a fallback chain (`~loc_id_panel → ~loc_id → "HC1" → "iid"`), consistent with the simulation pipeline's `COEF_VCOV_SPEC`.
 - **Weather effect plot** (`make_weather_effect_plot()`): for continuous weather, predicts the response over a 50-point grid of the weather variable with delta-method confidence ribbons (`sqrt(diag(X V X′))`); for binned weather, plots bin-level coefficients with the omitted reference category labelled in the caption. Interactions with moderators are overlaid as multiple lines (at mean / ±SD of the moderator).
 - **Regression table** (`make_regtable()`): AER-style HTML table with one column per model specification, coefficients on top and SEs in parentheses below, plus N, R², within-R², and FE indicators.
-- **Diagnostics** (`plot_diagnostics()` in `mod_1_08_modelfit.R`): residual-vs-fitted scatter with LOESS smooth, Q-Q plot, and predicted-vs-actual plot — all computed directly from the native `feols` fit via `extract_native_fit()`.
+- **Diagnostics** (`plot_diagnostics()` in `fct_results.R`): residual-vs-fitted scatter with horizontal zero line and LOESS smooth, computed directly from the native fit via `extract_native_fit()`.
 
 ### 2.5 Simulation Pipeline (`fct_simulations.R`)
 
@@ -84,7 +84,7 @@ Engine selection is handled in `R/fct_model_select.R` (`infer_engine()` and `mod
 2. **Prediction**: a single call to `predict_outcome()` which wraps `stats::predict(model, newdata = survey_wd_sim, type = "response")`. Rows with FE levels unseen in training are silently dropped by fixest; `predict_outcome()` retains the `rowids` attribute and trims `newdata` to match.
 3. **`y_point` extraction**: captured *before* back-transformation. When `so$transform == "log"`, `y_point` stays in log scale so that `aggregate_with_uncertainty_delta()` can apply `exp()` exactly once at aggregation time (with `is_log = TRUE`).
 4. **Back-transform** (`apply_log_backtransform()`): exponentiate the outcome column for the diagnostic `preds` frame.
-5. **SP cash transfer**: if a `._sp_transfer` column is present, add it to `preds[[outcome]]` *on the original (level) scale, after back-transform*. Then re-log `y_point` to maintain log-scale consistency for downstream uncertainty propagation.
+5. **SP cash transfer**: if a `.wiseapp_sp_transfer` column is present, add it to `preds[[outcome]]` *on the original (level) scale, after back-transform*. Then re-log `y_point` to maintain log-scale consistency for downstream uncertainty propagation.
 6. **Factor loadings for uncertainty**: when `chol_obj` (or the legacy `chol_Sigma` alias) is supplied, compute `F_loading = X_nonFE %*% L` via `compute_factor_loading()`, where `L` is the Cholesky factor of the coefficient vcov and `X_nonFE` is the non-FE design matrix from `stats::model.matrix(model, ..., type = "rhs")`. `F_loading` (N × K) carries coefficient uncertainty forward into the closed-form delta-method aggregator (see §2.6). **Default scope:** under `residuals = "original"` the formula switches to `F_loading = X_nonFE[, active] %*% L_active` where `L_active = chol(Σ[active, active])'` is the lower-triangular Cholesky factor of the active block of Σ (pre-computed by `attach_active_mask()` in `fct_results.R`). This gives an N × K_active matrix whose Gramian is `X_a Σ_aa X_a'` — the correct additive-decomposition variance. *Note:* a naive `F[:, active]` subset of `F = X %*% L` would NOT give the same quantity when Σ has off-diagonals between active and inactive coefficients. Active columns are coefficients on variables that change between baseline and counterfactual — weather and weather-interactions in Module 2, plus policy-modified variables and their interactions in Module 3. The "Include uncertainty on all covariates" toggle in `mod_2_01_weathersim.R` reverts to the full N × K shape (legacy behaviour). See [`method_uncertainty.md`](method_uncertainty.md) §1.1.1 for the cancellation derivation.
 
 #### Weather-only simulation
@@ -95,7 +95,7 @@ Straightforward: counterfactual weather is joined to the baseline survey, fed th
 
 The linear engine relies on **`fixest::predict()` evaluated on the policy-modified survey** to capture *all* policy channels simultaneously. There is no separate Stage A / Stage B correction as in RIF:
 
-1. `apply_policy_to_survey()` (in `fct_policy_sim.R`) constructs `svy_policy` by flipping the policy covariates (e.g., turning on irrigation, electrification, formal employment) and tags eligible households with `._sp_transfer`.
+1. `apply_policy_to_survey()` (in `fct_policy_sim.R`) constructs `svy_policy` by flipping the policy covariates (e.g., turning on irrigation, electrification, formal employment) and tags eligible households with `.wiseapp_sp_transfer`.
 2. `run_sim_pipeline()` is called with `svy = svy_policy` and `model = fit3` (the fully-specified model).
 3. `fixest::predict()` evaluates the full linear predictor `x_policy′β̂ + FE`, so:
    - **Main effects** of changed covariates enter through `β_v · x_policy_v`.
@@ -193,7 +193,7 @@ Because there is no repositioning channel, SP cash transfers can only build resi
 
 #### d) SP transfer scale mismatch
 
-As with RIF, SP cash is added post-backtransform in levels (`preds[[outcome]] + ._sp_transfer`), while the decomposition reports δ_sp on the model scale (log). Users comparing decomposition percentages to simulation outputs should be aware of this distinction; the percentage `(exp(δ_sp) − 1) · 100` reflects the proportional welfare lift, not the absolute dollar transfer.
+As with RIF, SP cash is added post-backtransform in levels (`preds[[outcome]] + .wiseapp_sp_transfer`), while the decomposition reports δ_sp on the model scale (log). Users comparing decomposition percentages to simulation outputs should be aware of this distinction; the percentage `(exp(δ_sp) − 1) · 100` reflects the proportional welfare lift, not the absolute dollar transfer.
 
 #### e) Sensitivity to outliers and tail behaviour
 
@@ -241,7 +241,7 @@ If the user does not include weather × covariate interactions in Model 3, `δ_r
 
 ## 5. Suggestions for Improvement
 
-1. **Heteroskedasticity-robust SEs by default**: Currently `make_coefplot()` extracts robust SEs (`se = "hetero"`), but the regression table uses default fixest SEs. Harmonising these would prevent reader confusion when comparing the plot to the table.
+1. ~~**Heteroskedasticity-robust SEs by default**~~ **[IMPLEMENTED]**: All display functions (`make_coefplot()`, `make_weather_effect_plot()`, `make_regtable()`) now use `.fixest_coeftable()` / `.fixest_vcov()` with clustered `~loc_id_panel` SEs and a fallback chain (`~loc_id_panel → ~loc_id → "HC1" → "iid"`), matching the simulation pipeline's `COEF_VCOV_SPEC`. The helpers are defined in `fct_results.R`.
 
 2. **Duan smearing for log-transformed predictions**: When `so$transform == "log"`, apply the Duan smearing correction `exp(x′β̂) · mean(exp(ε̂))` to obtain unbiased estimates of E[welfare|X]. The current `exp(.)` back-transform underestimates the mean.
 

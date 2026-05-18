@@ -95,22 +95,21 @@ format_elapsed <- function(secs) {
   sprintf("%dm %02ds", secs %/% 60L, secs %% 60L)
 }
 
-# SE clustering specification — confirmed default: ~loc_id
+# SE clustering specification — confirmed default: ~loc_id_panel
 # Methodological justification: more conservative than ~loc_id:int_month
 # (Moulton minimum). Absorbs within-location serial correlation across
 # months and years. Weather data has real within-location temporal
 # correlation that ~loc_id:int_month does not correct.
 #
 # Cluster count decision tree:
-#   G >= 50 at ~loc_id : use ~loc_id (default)
-#   40 <= G < 50        : use ~loc_id, flag in methodology note
-#   G < 40              : warn user, wild cluster bootstrap recommended
+#   G >= 50 at ~loc_id_panel : use ~loc_id_panel (default)
+#   40 <= G < 50             : use ~loc_id_panel, flag in methodology note
+#   G < 40                   : warn user, wild cluster bootstrap recommended
 #
 # Named alternatives — available as constants, not default.
 # Use compute_cluster_counts() to check G before switching.
-COEF_VCOV_SPEC              <- ~loc_id
-COEF_VCOV_SPEC_MOULTON      <- ~loc_id:int_month
-COEF_VCOV_SPEC_CONSERVATIVE <- ~code + year + survname + loc_id
+COEF_VCOV_SPEC              <- ~loc_id_panel
+COEF_VCOV_SPEC_MOULTON      <- ~loc_id_panel:int_month
 
 #' Compute Cluster Counts for SE Specification Diagnostics
 #'
@@ -118,16 +117,16 @@ COEF_VCOV_SPEC_CONSERVATIVE <- ~code + year + survname + loc_id
 #' fitted model data. Used to validate the SE specification and warn when
 #' cluster counts are too small for reliable asymptotic inference.
 #'
-#' @param data Data frame used at model fit time. Must contain \code{loc_id}
+#' @param data Data frame used at model fit time. Must contain \code{loc_id_panel}
 #'   and \code{int_month} columns. Optionally \code{code}, \code{year},
 #'   \code{survname} for the conservative multi-way spec.
 #'
 #' @return Named list with integer cluster counts:
 #'   \describe{
-#'     \item{loc_id}{Number of distinct location clusters (primary spec).}
-#'     \item{loc_id_int_month}{Number of distinct location × month clusters
+#'     \item{loc_id_panel}{Number of distinct panel location clusters (primary spec).}
+#'     \item{loc_id_panel_int_month}{Number of distinct panel location × month clusters
 #'       (Moulton minimum).}
-#'     \item{conservative}{Number of distinct code × year × survname × loc_id
+#'     \item{conservative}{Number of distinct code × year × survname × loc_id_panel
 #'       clusters (conservative multi-way spec). \code{NA} if any column
 #'       is absent.}
 #'   }
@@ -143,34 +142,34 @@ COEF_VCOV_SPEC_CONSERVATIVE <- ~code + year + survname + loc_id
 compute_cluster_counts <- function(data) {
   has_cols <- function(...) all(c(...) %in% names(data))
 
-  g_loc        <- if (has_cols("loc_id"))
-                    dplyr::n_distinct(data[["loc_id"]])
+  g_loc        <- if (has_cols("loc_id_panel"))
+                    dplyr::n_distinct(data[["loc_id_panel"]])
                   else NA_integer_
 
-  g_loc_month  <- if (has_cols("loc_id", "int_month"))
-                    dplyr::n_distinct(paste(data[["loc_id"]], data[["int_month"]]))
+  g_loc_month  <- if (has_cols("loc_id_panel", "int_month"))
+                    dplyr::n_distinct(paste(data[["loc_id_panel"]], data[["int_month"]]))
                   else NA_integer_
 
-  g_conserv    <- if (has_cols("code", "year", "survname", "loc_id"))
+  g_conserv    <- if (has_cols("code", "year", "survname", "loc_id_panel"))
                     dplyr::n_distinct(paste(data[["code"]], data[["year"]],
-                                           data[["survname"]], data[["loc_id"]]))
+                                           data[["survname"]], data[["loc_id_panel"]]))
                   else NA_integer_
 
   counts <- list(
-    loc_id           = g_loc,
-    loc_id_int_month = g_loc_month,
-    conservative     = g_conserv
+    loc_id_panel           = g_loc,
+    loc_id_panel_int_month = g_loc_month,
+    conservative           = g_conserv
   )
 
   # Runtime warnings — surface immediately at model fit time
   if (!is.na(g_loc) && g_loc < 40L) {
     warning(sprintf(
-      "[SE] Only %d clusters at ~loc_id. VCV SEs may be unreliable. Wild cluster bootstrap recommended (not yet implemented).",
+      "[SE] Only %d clusters at ~loc_id_panel. VCV SEs may be unreliable. Wild cluster bootstrap recommended (not yet implemented).",
       g_loc
     ))
   } else if (!is.na(g_loc) && g_loc < 50L) {
     message(sprintf(
-      "[SE] %d clusters at ~loc_id — borderline. Flag in methodology note.",
+      "[SE] %d clusters at ~loc_id_panel — borderline. Flag in methodology note.",
       g_loc
     ))
   }
@@ -458,9 +457,10 @@ run_sim_pipeline <- function(weather_raw,
                    !is.null(rif_grid) && !is.null(train_data)
   svy_for_predict <- if (is_rif_policy) svy_baseline else svy
 
-  # Tag svy with row IDs for RIF delta-method lookups
-  # Must be added before prepare_hist_weather() so it survives the join
-  if (is_rif) svy_for_predict$.svy_row_id <- seq_len(nrow(svy_for_predict))
+  # Tag svy with row IDs so downstream consumers can broadcast per-household
+  # quantities (RIF delta correction; Module 3 policy-delta application) back
+  # to the (HH x year) rows produced by prepare_hist_weather().
+  svy_for_predict$.svy_row_id <- seq_len(nrow(svy_for_predict))
 
   survey_wd_sim <- prepare_hist_weather(weather_raw, svy_for_predict, sw, so$name)
 
@@ -601,14 +601,17 @@ run_sim_pipeline <- function(weather_raw,
   # ---- Simulation year and weights ---------------------------------------- #
   sim_year <- out$sim_year
 
-  wt_col   <- grep("^weight$|^hhweight$|^wgt$|^pw$", names(out),
-                   value = TRUE, ignore.case = TRUE)
-  weight   <- if (length(wt_col) > 0L) out[[wt_col[[1L]]]] else NULL
+  weight <- if ("weight" %in% names(out)) out$weight else NULL
 
   id_vec   <- if (!is.null(id_col) && id_col %in% names(out))
                 out[[id_col]]
               else
                 NULL
+
+  # Pipeline row -> baseline household lookup. Used by Module 3 to broadcast
+  # per-household policy deltas (decompose_policy_effect output, indexed by
+  # baseline survey row) onto the expanded (HH x year) prediction rows.
+  svy_row_id <- if (".svy_row_id" %in% names(out)) out$.svy_row_id else NULL
 
   # ---- Factor loading matrix ---------------------------------------------- #
   # Computed once per key — not per draw.
@@ -671,6 +674,7 @@ if (!is.null(X_nonFE)) {
     weight      = weight,
     id_vec      = id_vec,
     id_col      = id_col,
+    svy_row_id  = svy_row_id,
     n_pre_join  = n_pre_join,
     weather_raw = weather_raw,
     weather_prepared = weather_prepared,

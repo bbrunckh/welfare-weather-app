@@ -314,7 +314,8 @@ fct_run_simulation <- function(sw,
         has_weights    = !is.null(out$weight),
         weather_raw    = key_weather_raw,
         train_data     = train_data,
-        cluster_counts = cluster_counts
+        cluster_counts = cluster_counts,
+        svy            = svy
       )
       # Strip weather_raw from pipeline after saving to hist_sim_result
       out$weather_raw <- NULL

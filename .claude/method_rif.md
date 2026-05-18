@@ -61,7 +61,7 @@ This returns a `fixest_multi` object (a list of 9 `fixest` fits), one per quanti
 - **Model 2**: Weather + interactions + FE: `c(...) ~ hazard + interactions_main | fe`
 - **Model 3**: Weather + interactions + covariates + FE: `c(...) ~ hazard + interactions_main + covariates | fe`
 
-Results are collected into a `rif_grid` data frame with columns `(tau, term, estimate, std.error, conf.low, conf.high, model)` via `build_rif_grid()`.
+Results are collected into a `rif_grid` data frame with columns `(tau, term, estimate, std.error, conf.low, conf.high, model)` via `build_rif_grid()`, which extracts SEs using clustered `~loc_id_panel` vcov with a fallback chain (`~loc_id_panel → ~loc_id → "HC1" → "iid"`), matching the simulation pipeline's `COEF_VCOV_SPEC`.
 
 ### 2.3 Availability
 
@@ -70,8 +70,8 @@ RIF is offered only for **numeric** (continuous) outcomes. Binary/logical outcom
 ### 2.4 Results Display (`fct_results.R`)
 
 - **Coefficient plot**: Beta-curve plots showing β̂_τ vs. τ, faceted by covariate, with confidence ribbons, overlaying all 3 model specifications.
-- **Regression table**: HTML table with quantile columns (τ = 0.1 through 0.9), showing coefficients + standard errors per term, plus per-quantile N and within-R².
-- **Diagnostics**: Uses the τ = 0.5 (median) fit as a representative model for residual plots and Q-Q plots. Predicted-vs-actual plots are skipped (the RIF outcome is not directly interpretable as welfare).
+- **Regression table**: HTML table with quantile columns (τ = 0.1 through 0.9), showing coefficients + standard errors per term (using the same clustered `~loc_id_panel` vcov as the beta-curve plots), plus per-quantile N and within-R².
+- **Diagnostics**: Uses the τ = 0.5 (median) fit as a representative model for residual-vs-fitted scatter with LOESS smooth. Predicted-vs-actual plots are skipped (the RIF outcome is not directly interpretable as welfare).
 
 ### 2.5 Simulation Pipeline (`fct_simulations.R`, `fct_rif_sim.R`)
 
@@ -127,7 +127,7 @@ The resilience channel captures how the policy changes the household's *sensitiv
 
 ```
 y_post_main = y_baseline + δ_main          # welfare after main effect (SP + covariates)
-τ_i^post = F̂_baseline(y_post_main)         # new position on the baseline welfare-to-τ mapping
+τ_i^post = F̂_train(y_post_main)             # new position on the training welfare-to-τ mapping
 
 For each weather variable w:
   δ_res1 += [β_w(τ_i^post) − β_w(τ_i^pre)] × w_baseline
@@ -135,7 +135,7 @@ For each weather variable w:
 
 **Crucially, SP contributes to repositioning.** Because δ_sp is included in δ_main, a cash transfer shifts the household's welfare level upward *before* the new quantile position is computed. This means SP not only provides direct income support but also indirectly reduces weather vulnerability by moving the household to a less vulnerable part of the welfare distribution.
 
-**Why the baseline CDF is appropriate here:** The baseline CDF is used as a *mapping function* from welfare levels to positions on the empirically-estimated beta curve, not as a claim about the household's rank in the post-policy distribution. The beta curve β_w(τ) captures how weather vulnerability varies with welfare — it was estimated from the cross-section of households at different welfare levels. A household whose welfare rises from $100 to $200 should face the weather vulnerability observed for $200-level households in the baseline data, regardless of whether other households also became richer. The baseline CDF simply translates dollar amounts into the τ-index needed to read off the beta curve.
+**Why the training CDF is appropriate here:** The training-outcome CDF (`ecdf(train_data[[outcome]])`) is used as a *mapping function* from welfare levels to positions on the empirically-estimated beta curve, not as a claim about the household's rank in the post-policy distribution. The beta curve β_w(τ) captures how weather vulnerability varies with welfare — it was estimated from the cross-section of households at different welfare levels. A household whose welfare rises from $100 to $200 should face the weather vulnerability observed for $200-level households in the training data, regardless of whether other households also became richer. The training CDF simply translates dollar amounts into the τ-index needed to read off the beta curve. Using the same CDF for both `τ_i^pre` and `τ_i^post` (rather than, e.g., `ecdf(svy_baseline)`) ensures that a zero-delta policy produces zero repositioning — the CDF stays linked to the beta-curve grid the RIF coefficients were estimated against.
 
 **Interpretation:** If weather vulnerability is higher at lower quantiles (β_w more negative at low τ), then a policy that raises welfare — whether through direct transfers, infrastructure, or other channels — reduces weather vulnerability. This is the key value-add of the distributional approach: it captures how poverty-reducing interventions build climate resilience as a second-order effect.
 
@@ -157,7 +157,7 @@ The correction returns `channels$delta_total = δ_sp + δ_main_covar + δ_res1 +
 - **δ_res1** is the repositioning channel: `[β_w(τ_i^post) − β_w(τ_i^pre)] · w_baseline` for continuous weather, summed over weather variables (with an analogous binned-weather branch).
 - **δ_res2** is the policy × weather interaction channel: `β_{w×v}(τ_i^post) · w_hh · Δv`, evaluated at `τ_i^post`.
 
-`τ_i^pre = F̂(y_baseline)` uses the training-outcome `ecdf()`; `τ_i^post = baseline_cdf(y_baseline + δ_main)` uses the baseline-sample `ecdf()`. Both are clamped to `[min(taus), max(taus)] = [0.1, 0.9]`.
+`τ_i^pre = F̂(y_baseline)` and `τ_i^post = F̂(y_baseline + δ_main)` both use the same training-outcome `ecdf()`. Using the same CDF for both ensures `δ_res1 = 0` when `δ_main = 0` (no spurious repositioning from CDF mismatch). Both are clamped to `[min(taus), max(taus)] = [0.1, 0.9]`.
 
 **Full prediction assembly (in `run_sim_pipeline()`):**
 ```
@@ -193,7 +193,7 @@ w_i            = (τ_i − τ_idx_lo) / (τ_idx_hi − τ_idx_lo)
 F_loading_i    = (1 − w_i) · F_idx_lo[i, ] + w_i · F_idx_hi[i, ]
 ```
 
-The interpolated `F_loading` (N × K_coef) is attached as `attr(out, "F_loading")` on the prediction frame and consumed by `aggregate_with_uncertainty_delta()` exactly as in the linear path. Because both `X_diff_k` (the *difference* between scenario and baseline design) and `L_k` are interpolated, the resulting variance reflects coefficient uncertainty in the *weather delta* — consistent with `predict_rif()` returning a weather delta rather than an absolute level.
+The interpolated `F_loading` (N × K_coef) is attached as `attr(out, "F_loading")` on the prediction frame and consumed by `aggregate_with_uncertainty_delta()` exactly as in the linear path. The `X_scenario_k` matrices are full scenario design matrices (not baseline–scenario differences); the differencing is handled by the delta approach in `predict_rif()` which computes `δ_k = ŷ_k^scen − ŷ_k^base`. The F_loading therefore reflects coefficient uncertainty in the *predicted level under scenario weather* at each household's quantile position.
 
 **Active-coefficient mask (additive-decomposition SE, default).** As in the linear path, when the mask is active the per-tau loading is built from the *active block* of Σ_k. Specifically `attach_active_mask()` (in `fct_results.R`) pre-computes `L_active_k = chol(Σ_k[active, active])'` for each τ and stores it on `chol_obj[[k]]$L_active`. `run_sim_pipeline()` extracts these into the `chol_list` passed to `interpolate_F_loading()`, which then computes `F_k = X_k[, active] %*% L_active_k` per τ before the blend. The returned matrix is N × K_active.
 

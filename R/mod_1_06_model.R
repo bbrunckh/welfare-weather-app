@@ -725,7 +725,7 @@ mod_1_06_model_server <- function(id,
         vl       <- valid_vl()
         forced   <- lasso_forced()
         resolve <- function(role) {
-          base <- vl$name[vl[[role]] == 1 & vl$name %in% selected]
+          base <- vl$name[vl[[role]] %in% 1 & vl$name %in% selected]
           setdiff(unique(c(base, forced[[role]]$inc)), forced[[role]]$exc)
         }
         list(

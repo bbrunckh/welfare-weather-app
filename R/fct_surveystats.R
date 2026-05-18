@@ -291,14 +291,22 @@ plot_survey_map <- function(loc) {
   m <- leaflet::leaflet() |>
     leaflet::addProviderTiles(leaflet::providers$CartoDB.Positron)
 
-  # One addGeoJSON call per code so each gets a static colour
+  # One addGeoJSON call per code so each gets a static colour.
+  # Geometry is embedded as a raw JSON string to avoid a jsonlite named-vector
+  # warning that fires when R matrices (fromJSON default) are re-serialised.
   for (cd in u_codes) {
     features_for_code <- loc$features[codes == cd]
-    sub_geojson <- list(type = "FeatureCollection", features = features_for_code)
+    features_json <- vapply(features_for_code, function(f) {
+      sprintf('{"type":"Feature","geometry":%s,"properties":%s}',
+              f$geom_json,
+              jsonlite::toJSON(f$properties, auto_unbox = TRUE))
+    }, character(1L))
+    sub_geojson_str <- sprintf('{"type":"FeatureCollection","features":[%s]}',
+                               paste(features_json, collapse = ","))
 
     m <- m |>
       leaflet::addGeoJSON(
-        geojson     = sub_geojson,
+        geojson     = sub_geojson_str,
         color       = code_color[[cd]],
         opacity     = 0.5,
         fillOpacity = 0,

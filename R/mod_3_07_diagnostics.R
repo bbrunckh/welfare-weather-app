@@ -35,7 +35,8 @@ mod_3_07_diagnostics_server <- function(id,
                                          policy_svy,
                                          sim_run_id = reactive(0L),
                                          tabset_id,
-                                         tabset_session = NULL) {
+                                         tabset_session = NULL,
+                                         analysis_unit = reactive("hh")) {
   moduleServer(id, function(input, output, session) {
     ns <- session$ns
 
@@ -44,6 +45,24 @@ mod_3_07_diagnostics_server <- function(id,
     }
 
     diag_tab_added <- reactiveVal(FALSE)
+
+    # Helper: human-readable unit word ("individual" / "individuals" /
+    # "Household" / "Households" / "Firm" / "Firms") driven by analysis_unit().
+    unit_word <- function(plural = TRUE, capitalize = FALSE) {
+      au <- tryCatch(analysis_unit(), error = function(e) "hh")
+      au <- if (is.null(au) || !nzchar(au)) "hh" else au
+      word <- switch(au,
+        ind  = if (plural) "individuals" else "individual",
+        hh   = if (plural) "households"  else "household",
+        firm = if (plural) "firms"       else "firm",
+        if (plural) "households" else "household"
+      )
+      if (capitalize) {
+        paste0(toupper(substr(word, 1, 1)), substr(word, 2, nchar(word)))
+      } else {
+        word
+      }
+    }
 
     # ---- Diagnostics data preparation ---------------------------------------
 
@@ -58,21 +77,29 @@ mod_3_07_diagnostics_server <- function(id,
       }
 
       if (SP_TRANSFER_COL %in% names(p)) {
-        v <- p[[SP_TRANSFER_COL]]
-        w <- p[["weight"]]
-        w_sum <- sum(w, na.rm = TRUE) # For debugging only
-        ok <- is.finite(v) & is.finite(w)
+        v   <- p[[SP_TRANSFER_COL]]
+        w_p <- p$weight
+        # When analysis_unit == "hh" each row is a household and `v` is the
+        # per-household transfer divided by hhsize (so it's per-capita).
+        # Multiplying back by hhsize reconstitutes the per-household amount.
+        # When analysis_unit == "ind" each row is already an individual and
+        # `v` is the per-individual amount, so the multiplier is 1.
+        hh <- if (identical(analysis_unit(), "hh")) {
+          p$hhsize
+        } else {
+          rep(1L, nrow(p))
+        }
+        ok <- is.finite(v) & is.finite(w_p)
         # Population-level total annual cost = sum(daily transfer * weight) * 365
-        transfer_sum <- sum(v[ok] * w[ok]) * 365
-        # Population-weighted mean over eligible individuals (annual)
+        transfer_sum <- sum(v[ok] * w_p[ok] * hh[ok]) * 365
+        # Population-weighted mean transfer per recipient unit (annual)
         elig <- ok & v > 0
-        transfer_pp <- if (any(elig) && sum(w[elig]) > 0) {
-          sum(v[elig] * w[elig]) / sum(w[elig]) * 365
+        transfer_unit <- if (any(elig) && sum(w_p[elig]) > 0) {
+          (sum(v[elig] * w_p[elig] * hh[elig]) / sum(w_p[elig])) * 365
         } else 0
       } else {
-        transfer_sum <- 0
-        transfer_pp  <- 0
-        w_sum        <- 0 # For debugging only
+        transfer_sum  <- 0
+        transfer_unit <- 0
       }
 
       vars <- detect_manipulated_vars(b, p)
@@ -83,8 +110,7 @@ mod_3_07_diagnostics_server <- function(id,
         baseline_svy = b,
         policy_svy = p,
         transfer_sum = transfer_sum,
-        transfer_pp = transfer_pp,
-        w_sum = w_sum # For debugging only
+        transfer_pp = transfer_unit
       )
     })
 
@@ -94,8 +120,12 @@ mod_3_07_diagnostics_server <- function(id,
       d <- diag_data()
       if (is.null(d) || is.list(d) && !is.null(d$status)) return(NULL)
       data.frame(
-        Type  = c("Total transfer $ amount (population-level)", "Per-person $ equivalent (eligible individuals)", "Sum of weights"), # Sum of weights for debugging only
-        Value = c(d$transfer_sum, d$transfer_pp, d$w_sum), # d$w_sum for debugging only
+        Type  = c(
+          "Total transfer $ amount (population-level)",
+          paste0("Per-", unit_word(plural = FALSE),
+                 " $ equivalent (eligible ", unit_word(plural = TRUE), ")")
+        ),
+        Value = c(d$transfer_sum, d$transfer_pp),
         stringsAsFactors = FALSE
       )
     }, striped = TRUE, hover = TRUE, bordered = TRUE)

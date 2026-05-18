@@ -187,9 +187,7 @@ policy_placeholder_tag <- function(category_label, candidate_df) {
 #' Apply Policy Scenario Adjustments to Survey Covariates
 #'
 #' Modifies selected covariates in the survey-weather frame to reflect the
-#' user-defined policy scenarios from the Step 3 sidebar. Only the
-#' infrastructure scenario is currently wired; social-protection, digital, and
-#' labor scenarios are accepted for future extension.
+#' user-defined policy scenarios from the Step 3 sidebar.
 #'
 #' @param svy     A data frame of merged survey-weather data (from
 #'                \code{mod_1_modelling_server()$survey_weather()}).
@@ -204,7 +202,8 @@ apply_policy_to_svy <- function(svy,
                                 infra   = NULL,
                                 sp      = NULL,
                                 digital = NULL,
-                                labor   = NULL) {
+                                labor   = NULL,
+                                analysis_unit = "hh") {
   if (is.null(svy)) return(svy)
   cols <- names(svy)
 
@@ -506,29 +505,44 @@ apply_policy_to_svy <- function(svy,
     }
   }
 
-  # Social protection: add per-household transfer as SP_TRANSFER_COL column.
+  # Social protection: add per-recipient transfer as SP_TRANSFER_COL column.
   # welfare is the regression outcome (not a covariate), so we tag the
   # transfer amount here; run_sim_pipeline() (fct_simulations.R) reads the
   # column post-prediction and adds it to y_point on the level scale
   # (re-logged when so$transform == "log") so the boost flows into
   # aggregate_with_uncertainty_delta() and matches the decomposition's δ_sp.
+  #
+  # When analysis_unit == "hh" each row is a household and the SP "recipient"
+  # is the household, but welfare is per-capita — so the per-household
+  # transfer must be divided by hhsize to match scale. When analysis_unit ==
+  # "ind" the SP transfer is already per-individual and applies to every
+  # eligible (individual) row as-is. `hhsize_scale` performs that scaling.
   if (!is.null(sp) && "welfare" %in% cols) {
-    if (sp$budget_mode == "transfer_first" && isTRUE(sp$transfer_amount_usd != 0)) {
+
+    hhsize_scale <- if (identical(analysis_unit, "hh") && "hhsize" %in% cols) {
+      hs <- suppressWarnings(as.numeric(svy$hhsize))
+      hs[!is.finite(hs) | hs <= 0] <- 1   # guard against NA / zero / negative
+      hs
+    } else {
+      rep_len(1, nrow(svy))
+    }
+
+    if (sp$budget_mode == "transfer_first") {
       # If transfer-first budget mode is selected, apply the transfer to the
       # survey immediately so it is included in the predictions and thus the
       # targeting can be based on post-transfer welfare. The transfer amount is
       # annualized and converted to a daily amount for this purpose, since the
       # model is based on daily welfare.
-      n_pay     <- sp$transfer_n_payments %||% 6
-      if (!is.finite(n_pay)) n_pay <- 6
-      annual_hh <- sp$transfer_amount_usd * n_pay
-      daily_hh  <- annual_hh / 365
+      n_pay     <- sp$transfer_n_payments
+      annual_transfer <- sp$transfer_amount_usd * n_pay
+      daily_transfer  <- annual_transfer / 365
       eligible  <- .determine_sp_eligibility(svy, sp)
       if (length(eligible) == nrow(svy)) {
-        svy[[SP_TRANSFER_COL]] <- ifelse(eligible, daily_hh, 0)
+        svy[[SP_TRANSFER_COL]] <- ifelse(eligible,
+                                         daily_transfer / hhsize_scale, 0)
       }
     }
-    else if (sp$budget_mode == "budget_first" && isTRUE(sp$budget_fixed > 0)) {
+    else if (sp$budget_mode == "budget_first") {
       # Distribute the fixed budget across eligible households. Eligibility is
       # determined once here using the baseline survey; SP_TRANSFER_COL holds
       # the resulting daily per-household amount.
@@ -540,17 +554,15 @@ apply_policy_to_svy <- function(svy,
       eligible <- .determine_sp_eligibility(svy, sp)
       n_eligible <- sum(eligible)
       if (n_eligible > 0) {
-        weight_col <- grep("^weight$|^hhweight$|^wgt$|^pw$",
-                           names(svy), value = TRUE,
-                           ignore.case = TRUE)[1]
-        w_elig <- if (!is.na(weight_col)) {
-          w <- svy[[weight_col]][eligible]
+        w_elig <- if ("weight" %in% names(svy)) {
+          w <- svy$weight[eligible]
           sum(w[is.finite(w) & w > 0], na.rm = TRUE)
         } else 0
         divisor <- if (w_elig > 0) w_elig else n_eligible
-        annual_hh <- sp$budget_fixed / divisor
-        daily_hh  <- annual_hh / 365
-        svy[[SP_TRANSFER_COL]] <- ifelse(eligible, daily_hh, 0)
+        annual_transfer <- sp$budget_fixed / divisor
+        daily_transfer  <- annual_transfer / 365
+        svy[[SP_TRANSFER_COL]] <- ifelse(eligible,
+                                         daily_transfer / hhsize_scale, 0)
       }
     }
   }
@@ -585,11 +597,6 @@ resimulate_with_svy <- function(svy, sw, so, mf,
                                 svy_baseline = NULL) {
   if (is.null(svy) || is.null(mf) || is.null(hist_sim_baseline) ||
       is.null(so)) return(NULL)
-
-  weight_col <- grep("^weight$|^hhweight$|^wgt$|^pw$",
-                     names(svy), value = TRUE,
-                     ignore.case = TRUE)[1]
-  if (is.na(weight_col %||% NA)) weight_col <- NULL
 
   pov_line   <- hist_sim_baseline$pov_line
   residuals  <- hist_sim_baseline$residuals %||%
@@ -721,6 +728,153 @@ resimulate_with_svy <- function(svy, sw, so, mf,
   saved_scenarios_new <- saved_scenarios_new[
     !vapply(saved_scenarios_new, is.null, logical(1))
   ]
+
+  list(hist_sim = hist_sim_new, saved_scenarios = saved_scenarios_new)
+}
+
+
+# ---------------------------------------------------------------------------- #
+# Policy-by-delta: derive policy pipelines from baseline + analytic per-HH delta
+# ---------------------------------------------------------------------------- #
+
+#' Apply a per-household policy delta to the baseline Step 2 pipelines
+#'
+#' Module 3 historically built its policy arm by calling
+#' \code{resimulate_with_svy()} — a full re-prediction against the policy-
+#' adjusted survey. That works, but it (a) duplicates compute for every
+#' CMIP6 member, and (b) causes the Results pane to disagree with the
+#' Decomposition pane whenever residual drawing has any stochastic component
+#' (e.g. \code{residuals = "original"} with any unmatched households): the
+#' baseline and policy arms call \code{aggregate_pipeline_per_year()}
+#' independently and get independent residual draws, so a no-op policy can
+#' produce a non-zero visual gap.
+#'
+#' This helper takes the closed-form per-household delta the Decomposition
+#' pane already produces (\code{decompose_policy_effect()$delta_total}) and
+#' applies it directly to the cached baseline pipelines:
+#'   \itemize{
+#'     \item \code{y_point_policy = y_point_baseline + delta[svy_row_id]}
+#'     \item All other pipeline slots (\code{F_loading}, \code{train_aug},
+#'           \code{id_vec}, \code{weather_raw}, \code{sim_year},
+#'           \code{weight}) are passed through unchanged. Because
+#'           \code{aggregate_pipeline_per_year()} sees the same \code{id_vec}
+#'           and \code{train_aug} for both arms, residual draws line up
+#'           household-for-household, so a zero delta produces a zero visual
+#'           effect by construction.
+#'   }
+#'
+#' Limitations of this v1:
+#'   \itemize{
+#'     \item \code{F_loading} is not updated to reflect the policy-modified
+#'           design matrix. SE bands therefore reflect baseline-X coefficient
+#'           uncertainty, not policy-X. For the central value this is exact;
+#'           for SE bands it's a small approximation that is exact when no
+#'           covariate moves and acceptable for typical policy modifications.
+#'           Recomputing \code{F_loading} per pipeline is a follow-up.
+#'     \item The delta is computed once per pipeline using that pipeline's
+#'           full \code{weather_raw} (period-mean hazard), matching the
+#'           Decomposition Summary table. Per-\code{sim_year} delta variation
+#'           inside a scenario is not yet modelled — also a follow-up.
+#'   }
+#'
+#' @param svy_baseline           Baseline survey-weather data frame.
+#' @param svy_policy             Policy-adjusted survey-weather data frame.
+#' @param model_fit              Step 1 model-fit list.
+#' @param so                     Selected-outcome metadata.
+#' @param hist_sim_baseline      Step 2 \code{hist_sim} list (verbatim).
+#' @param saved_scenarios_baseline Step 2 named \code{saved_scenarios} list.
+#' @param skip_coef              Logical. Forwarded to
+#'   \code{decompose_policy_effect()} — when TRUE, per-channel SEs are zeroed
+#'   but \code{delta_total} is still computed.
+#'
+#' @return Named list with \code{hist_sim} and \code{saved_scenarios} on the
+#'   Step 2 schema, or \code{NULL} on failure.
+#' @export
+apply_policy_delta_to_baseline <- function(svy_baseline,
+                                            svy_policy,
+                                            model_fit,
+                                            so,
+                                            hist_sim_baseline,
+                                            saved_scenarios_baseline = list(),
+                                            skip_coef = FALSE) {
+  if (is.null(svy_baseline) || is.null(svy_policy) ||
+      is.null(model_fit) || is.null(so) ||
+      is.null(hist_sim_baseline)) return(NULL)
+
+  # Per-HH delta_total for a given weather panel. Returns NULL when the
+  # decomposition is unavailable (engine outside {rif, fixest}, missing
+  # model bits, etc.) so the caller can fall back to resimulate_with_svy().
+  delta_for <- function(weather_raw) {
+    decomp <- tryCatch(
+      decompose_policy_effect(
+        svy_baseline = svy_baseline,
+        svy_policy   = svy_policy,
+        model_fit    = model_fit,
+        so           = so,
+        weather_raw  = weather_raw,
+        skip_coef    = skip_coef
+      ),
+      error = function(e) {
+        warning("[apply_policy_delta_to_baseline] decompose_policy_effect() ",
+                "failed: ", conditionMessage(e))
+        NULL
+      }
+    )
+    if (is.null(decomp) || !"delta_total" %in% names(decomp)) return(NULL)
+    decomp$delta_total
+  }
+
+  apply_to_pipeline <- function(pipe, weather_raw_for_delta) {
+    if (is.null(pipe) || is.null(pipe$y_point)) return(pipe)
+    delta_hh <- delta_for(weather_raw_for_delta)
+    if (is.null(delta_hh)) return(pipe)
+
+    # Broadcast delta_hh (length nrow(svy_baseline)) onto the expanded
+    # (HH x year) pipeline rows via svy_row_id. When svy_row_id is missing
+    # (older pipeline format pre-`.svy_row_id` tagging), fall back to
+    # broadcasting by id_vec if a matching id column is on the baseline
+    # survey, else skip the policy correction with a warning.
+    sri <- pipe$svy_row_id
+    if (is.null(sri) || length(sri) != length(pipe$y_point)) {
+      id_col <- pipe$id_col
+      if (!is.null(id_col) && !is.null(pipe$id_vec) &&
+          id_col %in% names(svy_baseline)) {
+        lookup <- match(pipe$id_vec, svy_baseline[[id_col]])
+        delta_per_row <- delta_hh[lookup]
+        delta_per_row[is.na(delta_per_row)] <- 0
+      } else {
+        warning("[apply_policy_delta_to_baseline] pipeline lacks svy_row_id ",
+                "and no usable id_col fallback; policy arm will equal ",
+                "baseline for this pipeline.")
+        return(pipe)
+      }
+    } else {
+      delta_per_row <- delta_hh[sri]
+      delta_per_row[is.na(delta_per_row)] <- 0
+    }
+
+    pipe$y_point <- pipe$y_point + delta_per_row
+    pipe
+  }
+
+  hist_pipeline_new <- apply_to_pipeline(
+    hist_sim_baseline$pipeline,
+    hist_sim_baseline$weather_raw %||% hist_sim_baseline$pipeline$weather_raw
+  )
+
+  hist_sim_new <- hist_sim_baseline
+  hist_sim_new$pipeline <- hist_pipeline_new
+
+  saved_scenarios_new <- lapply(saved_scenarios_baseline, function(s) {
+    if (is.null(s) || is.null(s$pipelines)) return(s)
+    pipes_new <- lapply(s$pipelines, function(pipe) {
+      apply_to_pipeline(pipe, pipe$weather_raw %||% s$weather_raw)
+    })
+    names(pipes_new) <- names(s$pipelines)
+    s$pipelines <- pipes_new
+    s
+  })
+  names(saved_scenarios_new) <- names(saved_scenarios_baseline)
 
   list(hist_sim = hist_sim_new, saved_scenarios = saved_scenarios_new)
 }

@@ -63,7 +63,7 @@ mod_1_02_surveystats_server <- function(
     # ---- Button (shown once selected_surveys is populated) ------------------
 
     output$survey_stats_button_ui <- renderUI({
-      req(length(selected_surveys()) > 0)
+      req(nrow(selected_surveys()) > 0)
       actionButton(ns("survey_stats"), "Survey stats", class = "btn-primary", style = "width: 100%;")
     })
 
@@ -79,7 +79,7 @@ mod_1_02_surveystats_server <- function(
     # ---- Load and prepare data on button click ------------------------------
 
     observeEvent(input$survey_stats, {
-      req(length(selected_surveys()) > 0)
+      req(nrow(selected_surveys()) > 0)
 
       busy_id <- showNotification("Loading survey data…", duration = NULL, type = "message")
       on.exit(removeNotification(busy_id), add = TRUE)
@@ -142,8 +142,9 @@ mod_1_02_surveystats_server <- function(
           features <- lapply(seq_len(nrow(loc_df)), function(i) {
             row <- loc_df[i, ]
             list(
-              type     = "Feature",
-              geometry = jsonlite::fromJSON(row$geom),       # parse the geometry JSON string
+              type      = "Feature",
+              geometry  = jsonlite::fromJSON(row$geom), # parsed for .geojson_bounds only
+              geom_json = row$geom,                     # raw string for addGeoJSON
               properties = list(
                 code     = row$code,
                 year     = row$year,
@@ -158,6 +159,23 @@ mod_1_02_surveystats_server <- function(
 
         }, error = function(e) {
           notify(paste("Failed to build map data:", conditionMessage(e)), type = "warning", duration = 5)
+        })
+
+        tryCatch({
+          panel_map <- loc_panel(h3_df, id_col = loc_id, h3_col = h3, weight_col = pop_2020)
+
+          loc_keys <- h3_df |>
+            dplyr::distinct(code, year, survname, loc_id) |>
+            dplyr::collect()
+
+          df <- df |>
+            dplyr::left_join(
+              dplyr::left_join(loc_keys, panel_map, by = "loc_id"),
+              by = c("code", "year", "survname", "loc_id")
+            )
+          survey_data(df)
+        }, error = function(e) {
+          notify(paste("Failed to compute loc_id_panel:", conditionMessage(e)), type = "warning", duration = 5)
         })
       }
 
