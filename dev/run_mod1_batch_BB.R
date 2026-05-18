@@ -136,6 +136,27 @@ clean_names <- function(df) {
   df
 }
 
+# Replicates the UI's .fixest_coeftable() fallback chain and returns a
+# broom-compatible data frame (term, estimate, std.error, statistic, p.value).
+tidy_clustered <- function(fit) {
+  ct <- tryCatch(
+    .fixest_coeftable(fit),  # ~loc_id_panel -> ~loc_id -> HC1 -> iid
+    error = function(e) NULL
+  )
+  if (is.null(ct)) {
+    return(broom::tidy(fit))
+  }
+  data.frame(
+    term      = rownames(ct),
+    estimate  = ct[["Estimate"]],
+    std.error = ct[["Std. Error"]],
+    statistic = ct[["t value"]],
+    p.value   = ct[["Pr(>|t|)"]],
+    stringsAsFactors = FALSE,
+    row.names = NULL
+  )
+}
+
 extract_one_fit <- function(fit, model_label, code, wx_label, wx_vars,
                             interaction_var, survey_df, engine,
                             fe_label = NA_character_, fe_vec = NULL,
@@ -162,7 +183,7 @@ extract_one_fit <- function(fit, model_label, code, wx_label, wx_vars,
   if (is_rif) {
     coefs <- tryCatch({
       cf <- dplyr::bind_rows(lapply(seq_along(taus), function(i) {
-        cf_i <- tryCatch(broom::tidy(fit[[i]]), error = function(e) NULL)
+        cf_i <- tryCatch(tidy_clustered(fit[[i]]), error = function(e) NULL)
         if (is.null(cf_i)) return(NULL)
         cf_i$tau      <- taus[i]
         cf_i$estimand <- sprintf("UQR p%d", round(taus[i] * 100))
@@ -194,7 +215,7 @@ extract_one_fit <- function(fit, model_label, code, wx_label, wx_vars,
 
   } else {
     coefs <- tryCatch({
-      cf <- broom::tidy(fit)
+      cf <- tidy_clustered(fit)
       cf$tau <- NA_real_; cf$estimand <- "Mean"
       append_meta(cf)
     }, error = function(e) NULL)
