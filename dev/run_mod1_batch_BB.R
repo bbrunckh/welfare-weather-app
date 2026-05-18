@@ -17,10 +17,10 @@ pkgload::load_all(quiet = TRUE)
 # =============================================================================
 
 # ---- Data source (mod_0) ---------------------------------------------------
-# "local"      -> read from DATA_DIR on disk
+# "local"      -> e.g., set WISEAPP_DATA_PATH in .Renviron
 # "databricks" -> credentials from .Renviron (DATABRICKS_HOST, etc.)
 CONNECTION_TYPE <- "local"
-DATA_DIR        <- "~/Library/CloudStorage/OneDrive-WBG/wiseapp - Documents"
+DATA_DIR        <- Sys.getenv("WISEAPP_DATA_PATH")
 OUT_DIR         <- "dev/outputs"
 
 # ---- Unit of analysis -------------------------------------------------------
