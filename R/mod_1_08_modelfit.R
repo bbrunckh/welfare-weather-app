@@ -1,5 +1,9 @@
 #' 1_08_modelfit UI Function
 #'
+#' @description A shiny Module.
+#'
+#' @param id,input,output,session Internal parameters for {shiny}.
+#' 
 #' @noRd
 #'
 #' @importFrom shiny NS tagList
