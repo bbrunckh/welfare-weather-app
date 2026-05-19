@@ -21,17 +21,17 @@ pkgload::load_all(quiet = TRUE)
 # "databricks" -> credentials from .Renviron (DATABRICKS_HOST, etc.)
 CONNECTION_TYPE <- "local"
 DATA_DIR        <- Sys.getenv("WISEAPP_DATA_PATH")
-OUT_DIR         <- "dev/outputs"
+OUT_DIR         <- "dev/outputs/pooled"
 
 # ---- Unit of analysis -------------------------------------------------------
 UNIT <- "hh"   # "hh", "ind", or "firm"
 
 # ---- Sample mode ------------------------------------------------------------
-POOL_COUNTRIES <- FALSE    # TRUE = one pooled model; FALSE = per-country
+POOL_COUNTRIES <- TRUE    # TRUE = one pooled model; FALSE = per-country
 
 # ---- Country / survey sample (mod_1_01) [GRID when !POOL_COUNTRIES] --------
 # NULL = all available; c(...) = subset
-COUNTRY_FILTER <- c("GNB")
+COUNTRY_FILTER <- NULL
 
 # ---- Outcome variable (mod_1_03) -------------------------------------------
 OUTCOME_NAME <- "welfare"
@@ -80,12 +80,13 @@ MODEL_TYPE <- c("Linear regression", "Quantile regression (RIF)")
 
 # ---- Interactions (mod_1_06) [GRID] ----------------------------------------
 # character(0) = no interaction; each entry interacts that variable with weather
-INTERACTIONS <- c("urban", "electricity")
+INTERACTIONS <- c("urban", "electricity", "imp_wat_rec")
 
 # ---- Fixed effects (mod_1_06) [GRID] ---------------------------------------
 # Named list of FE profiles. Values are character vectors passed to fixest.
 FIXED_EFFECTS <- list(
-  default = c("year", "gaul1_code")
+  year_admin1 = c("year", "gaul1_code"),
+  year_loc = c("year", "loc_id_panel")
   # year_only = c("year")
 )
 
@@ -93,12 +94,12 @@ FIXED_EFFECTS <- list(
 # Named list of covariate profiles. Each must have `method` ("User-defined" or
 # "Lasso"). User-defined profiles supply covariates by role.
 COVARIATE_SPECS <- list(
-  hhsize = list(
+  hhsize_urban = list(
     method = "User-defined",
-    ind = character(0), hh = "hhsize",
+    ind = character(0), hh = c("hhsize", "urban"),
     firm = character(0), area = character(0)
-  )
-  # lasso = list(method = "Lasso")
+  ),
+  lasso = list(method = "Lasso")
 )
 
 # ---- Lasso settings --------------------------------------------------------
