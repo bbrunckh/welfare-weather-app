@@ -19,7 +19,7 @@ pkgload::load_all(quiet = TRUE)
 # ---- Data source (mod_0) ---------------------------------------------------
 # "local"      -> e.g., set WISEAPP_DATA_PATH in .Renviron
 # "databricks" -> credentials from .Renviron (DATABRICKS_HOST, etc.)
-CONNECTION_TYPE <- "local"
+CONNECTION_TYPE <- "databricks" #"local"
 DATA_DIR        <- Sys.getenv("WISEAPP_DATA_PATH")
 OUT_DIR         <- "dev/outputs"
 
@@ -31,7 +31,7 @@ POOL_COUNTRIES <- FALSE    # TRUE = one pooled model; FALSE = per-country
 
 # ---- Country / survey sample (mod_1_01) [GRID when !POOL_COUNTRIES] --------
 # NULL = all available; c(...) = subset
-COUNTRY_FILTER <- c("GNB")
+COUNTRY_FILTER <- c("BEN", "BFA", "TCD", "GMB", "GTM", "MWI",  "TGO", "VNM") #Limited Missing lat/long, not HUGE surveys
 
 # ---- Outcome variable (mod_1_03) -------------------------------------------
 OUTCOME_NAME <- "welfare"
@@ -97,8 +97,8 @@ COVARIATE_SPECS <- list(
     method = "User-defined",
     ind = character(0), hh = "hhsize",
     firm = character(0), area = character(0)
-  )
-  # lasso = list(method = "Lasso")
+  ),
+  lasso = list(method = "Lasso")
 )
 
 # ---- Lasso settings --------------------------------------------------------
