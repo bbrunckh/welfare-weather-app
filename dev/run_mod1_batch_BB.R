@@ -281,7 +281,11 @@ weather_agg_for <- function(var) {
 }
 
 if (POOL_COUNTRIES) {
-  SAMPLE_LABELS <- paste(COUNTRIES, collapse = "_")
+  if (is.null(COUNTRY_FILTER) || length(COUNTRY_FILTER) == length(COUNTRIES)) {
+    SAMPLE_LABELS <- "All countries"
+  } else {
+    SAMPLE_LABELS <- paste(COUNTRIES, collapse = "_")
+  }
   SAMPLE_CODES  <- setNames(list(COUNTRIES), SAMPLE_LABELS)
 } else {
   SAMPLE_LABELS <- COUNTRIES

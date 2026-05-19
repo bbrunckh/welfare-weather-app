@@ -30,19 +30,33 @@
 #'
 #' @export
 compute_rif <- function(y, tau, bw = NULL) {
-  y_obs <- y[!is.na(y)]
-  q_tau <- stats::quantile(y_obs, probs = tau, names = FALSE)
+  na_mask <- !is.finite(y)
+  y_obs   <- y[!na_mask]
+  q_tau   <- stats::quantile(y_obs, probs = tau, names = FALSE)
 
-  bw_use <- if (is.null(bw)) stats::bw.SJ(y_obs) else bw
-  dens   <- stats::density(y_obs, bw = bw_use, n = 512)
-  f_q    <- stats::approx(dens$x, dens$y, xout = q_tau)$y
+  # Robust bandwidth: SJ can fail on large/multimodal data
 
-  if (is.na(f_q) || f_q <= 0) {
-    warning(sprintf("Density near zero at quantile %.2f; RIF may be unstable.", tau))
-    f_q <- max(f_q, 1e-6)
+  bw_use <- bw
+  if (is.null(bw_use)) {
+    bw_use <- tryCatch(stats::bw.SJ(y_obs), error = function(e) stats::bw.nrd0(y_obs))
   }
 
-  q_tau + (tau - as.numeric(y <= q_tau)) / f_q
+  # Standard KDE with interpolation at the quantile
+
+  dens <- stats::density(y_obs, bw = bw_use, n = 1024)
+  f_q  <- stats::approx(dens$x, dens$y, xout = q_tau)$y
+
+  # Scale-aware floor: fraction of peak density
+
+  if (is.na(f_q) || f_q <= 0) {
+    f_q <- max(dens$y) * 0.01
+    warning(sprintf("Density near zero at quantile %.2f; using floor.", tau))
+  }
+  f_q <- max(f_q, max(dens$y) * 0.001)
+
+  rif <- rep(NA_real_, length(y))
+  rif[!na_mask] <- q_tau + (tau - as.numeric(y_obs <= q_tau)) / f_q
+  rif
 }
 
 
