@@ -1,6 +1,3 @@
-library(tidyverse)
-library(patchwork)
-
 #' Plot a Specification Curve from Model Coefficient Summary Data
 #'
 #' @description
@@ -143,14 +140,14 @@ plot_spec_curve <- function(
 
     # --- spec grid -----------------------------------------------------------
     spec_vars = c(
-      "wx_var", "wx_ref_period", "wx_binned",
+      "wx_var", "wx_ref_period", "wx_binned", "wx_transformation",
       "engine", "fe_profile", "cov_profile",
       "cov_method", "interaction", "model"
     ),
     drop_constant = TRUE,
 
     # --- CI ------------------------------------------------------------------
-    ci_level  = 1.96,
+    ci_level  = 95,
 
     # --- display -------------------------------------------------------------
     colour_by  = "auto",
@@ -231,7 +228,7 @@ plot_spec_curve <- function(
 
   data <- data |>
     dplyr::mutate(
-      .wx           = stringr::str_match(weather, "^(.+?)_(\\d+)m_(cont|binn)$"),
+      .wx           = stringr::str_match(weather, "^(.+?)_(\\d+)m_(cont|binn)(?:_(.+))?$"),
       wx_var        = .wx[, 2],
       wx_ref_period = dplyr::if_else(
         !is.na(.wx[, 3]),
@@ -242,6 +239,12 @@ plot_spec_curve <- function(
         .wx[, 4] == "binn" ~ "Yes",
         .wx[, 4] == "cont" ~ "No",
         TRUE ~ NA_character_
+      ),
+      wx_transformation = dplyr::case_when(
+        is.na(.wx[, 5]) | .wx[, 5] == "None" ~ "None",
+        .wx[, 5] == "Devi"                   ~ "Deviation from mean",
+        .wx[, 5] == "Stan"                   ~ "Standardized anomaly",
+        TRUE                                 ~ .wx[, 5]
       )
     ) |>
     dplyr::select(-.wx)
@@ -341,7 +344,7 @@ plot_spec_curve <- function(
   # ---------------------------------------------------------------------------
 
   spec_key_cols <- c(
-    "code", "wx_var", "wx_ref_period", "wx_binned",
+    "code", "wx_var", "wx_ref_period", "wx_binned", "wx_transformation",
     "fe_profile", "cov_profile", "cov_method",
     "interaction", "model"
   )
@@ -365,10 +368,13 @@ plot_spec_curve <- function(
   # 7. Compute CIs
   # ---------------------------------------------------------------------------
 
+  z_mult <- stats::qnorm(1 - (1 - ci_level / 100) / 2)
+
   data <- data |>
     dplyr::mutate(
-      conf_low  = estimate - ci_level * std_error,
-      conf_high = estimate + ci_level * std_error
+      conf_low  = estimate - z_mult * std_error,
+      conf_high = estimate + z_mult * std_error,
+      sig       = (conf_low > 0) | (conf_high < 0)
     )
 
   # ---------------------------------------------------------------------------
@@ -409,8 +415,9 @@ plot_spec_curve <- function(
   rank_caption <- paste(
     paste0(
       "Ranked by ", effective_rank_by,
-      if (bins_present) paste0(" (Bin ", rank_by_bin, ")") else "",
-      ". Error bars \u00b1", ci_level, " SE."
+      if (bins_present) paste0(" (Bin ", rank_by_bin + 1, ")") else "",
+      ". Error bars: ", ci_level, "% CI.",
+      " Opaque = significant at ", 100 - ci_level, "% level; faded = not significant."
     ),
     if (bins_present) paste(
       "Bin coefficients are relative to the omitted lowest bin category.",
@@ -437,10 +444,11 @@ plot_spec_curve <- function(
     stop("No spec_vars remaining after drop_constant. Check spec_vars argument.")
 
   var_labels <- c(
-    wx_var        = "Weather var",
-    wx_ref_period = "Reference period",
-    wx_binned     = "Binned",
-    engine        = "Engine",
+    wx_var            = "Weather var",
+    wx_ref_period     = "Reference period",
+    wx_binned         = "Binned",
+    wx_transformation = "Transformation",
+    engine            = "Engine",
     fe_profile    = "Fixed effects",
     cov_profile   = "Covariate set",
     cov_method    = "Cov. selection",
@@ -483,7 +491,8 @@ plot_spec_curve <- function(
       y      = estimate,
       ymin   = conf_low,
       ymax   = conf_high,
-      colour = .data[[colour_var]]
+      colour = .data[[colour_var]],
+      alpha  = sig
     )
   ) +
     ggplot2::geom_hline(
@@ -492,8 +501,11 @@ plot_spec_curve <- function(
     ggplot2::geom_pointrange(
       linewidth = line_size,
       size      = point_size * 0.2,
-      alpha     = 0.85,
       position  = ggplot2::position_dodge(width = 0.6)
+    ) +
+    ggplot2::scale_alpha_manual(
+      values = c("TRUE" = 1, "FALSE" = 0.25),
+      guide  = "none"
     ) +
     colour_scale +
     ggplot2::scale_x_continuous(expand = ggplot2::expansion(add = 0.5)) +
@@ -577,48 +589,3 @@ plot_spec_curve <- function(
 
   invisible(combined)
 }
-
-
-# =============================================================================
-# Usage examples
-# =============================================================================
-
-d <- readr::read_csv(
-  "dev/outputs/pooled/_summary_coefficients.csv",
-  show_col_types = FALSE
-)
-
-# --- Continuous: temperature main effect ------------------------------------
-p_cont <- plot_spec_curve(
-  data         = d,
-  term         = "t",
-  model_filter = "fit3",
-  estimands    = c("Mean", "UQR p10", "UQR p50", "UQR p90"),
-  spec_vars    = c(
-    "wx_var", "wx_ref_period", "wx_binned",
-    "fe_profile", "cov_profile", "cov_method", "interaction"
-  ),
-  rank_by  = "Mean",
-  title    = "Specification curve: temperature coefficient (continuous)",
-  subtitle = "Outcome: electricity | Model: fit3"
-)
-print(p_cont)
-
-# --- Binned: temperature bins, electricity interaction ----------------------
-# term_regex matches e.g. "t(17.6,22.2]:electricity", "t(22.2,25.3]:electricity"
-p_bin <- plot_spec_curve(
-  data         = d,
-  term_regex   = "^t\\(.*\\]:electricity$",
-  model_filter = "fit3",
-  estimands    = "Mean",   # single estimand keeps the plot clean when colouring by bin
-  spec_vars    = c(
-    "wx_ref_period", "wx_binned",
-    "fe_profile", "cov_profile", "cov_method"
-  ),
-  rank_by      = "Mean",
-  rank_by_bin  = 1L,       # rank specs by coldest bin
-  colour_by    = "wx_bin",
-  title    = "Specification curve: temperature bins × electricity",
-  subtitle = "Outcome: electricity | Model: fit3 | Estimand: Mean"
-)
-print(p_bin)

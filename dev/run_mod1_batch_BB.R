@@ -44,20 +44,34 @@ POVERTY_LINE <- 3
 # includes them all in one model.
 #
 # expand_weather_specs() generates single-variable cross-products. DO NOT EDIT
-expand_weather_specs <- function(vars, ref_periods, transformations) {
+expand_weather_specs <- function(vars, ref_periods, transformations, var_constructions = "None") {
   specs <- list()
-  for (v in vars) { for (rp in ref_periods) { for (tr in transformations) {
-    nm <- sprintf("%s_%dm_%s", v, rp, substr(tr, 1, 4))
-    specs[[nm]] <- setNames(list(list(ref_period = rp, transformation = tr)), v)
-  }}}
+  for (v in vars) { 
+    for (rp in ref_periods) { 
+      for (tr in transformations) { 
+        for (vc in var_constructions) {
+    nm <- sprintf("%s_%dm_%s_%s", v, rp, substr(tr, 1, 4), substr(vc, 1, 4))
+    specs[[nm]] <- setNames(list(list(
+      ref_period = rp,
+      transformation = tr,
+      weather_transformation = vc
+    )), v)
+        }
+      }
+    }
+  }
   specs
 }
-# For multi-variable profiles, define manually:
+# For multi-variable profiles, define configuration manually:
 #   list(t_r_12m = list(t = list(ref_period = 12L, transformation = "continuous"),
 #                       r = list(ref_period = 12L, transformation = "continuous")))
 
 WEATHER_SPECS <- c(
-  expand_weather_specs("t", c(1L, 3L, 6L, 12L), c("continuous", "binned"))
+  expand_weather_specs(
+  "t", c(1L, 3L, 6L, 12L),
+  c("continuous", "binned"),
+  c("None", "Deviation from mean")
+  )
   # list(
   #   t_r_12m_cont = list(
   #     t = list(ref_period = 12L, transformation = "continuous"),
@@ -80,7 +94,7 @@ MODEL_TYPE <- c("Linear regression", "Quantile regression (RIF)")
 
 # ---- Interactions (mod_1_06) [GRID] ----------------------------------------
 # character(0) = no interaction; each entry interacts that variable with weather
-INTERACTIONS <- c("urban", "electricity", "imp_wat_rec")
+INTERACTIONS <- list(character(0), "urban", "electricity", "imp_wat_rec", "imp_san_rec", "ttime_health")
 
 # ---- Fixed effects (mod_1_06) [GRID] ---------------------------------------
 # Named list of FE profiles. Values are character vectors passed to fixest.
@@ -94,12 +108,12 @@ FIXED_EFFECTS <- list(
 # Named list of covariate profiles. Each must have `method` ("User-defined" or
 # "Lasso"). User-defined profiles supply covariates by role.
 COVARIATE_SPECS <- list(
-  hhsize_urban = list(
+  hhsize_urban_area = list(
     method = "User-defined",
     ind = character(0), hh = c("hhsize", "urban"),
-    firm = character(0), area = character(0)
-  ),
-  lasso = list(method = "Lasso")
+    firm = character(0), area = c("area_h3_7")
+  )
+  #, lasso = list(method = "Lasso")
 )
 
 # ---- Lasso settings --------------------------------------------------------
@@ -395,10 +409,13 @@ for (si in SAMPLE_LABELS) {
   # Survey summary stats (once per sample)
   if (SAVE_SUMMARY_STATS) {
     tryCatch({
-      svy_stat_vars <- intersect(
-        var_info$name[var_info$ind == 1 | var_info$hh == 1 |
-                      var_info$firm == 1 | var_info$area == 1],
-        names(svy_base)
+      svy_stat_vars <- union(
+        intersect(
+          var_info$name[var_info$ind == 1 | var_info$hh == 1 |
+                        var_info$firm == 1 | var_info$area == 1],
+          names(svy_base)
+        ),
+        intersect(c("imp_wat_san_rec"), names(svy_base))
       )
       svy_stats <- weighted_summary_long(svy_base, vars = svy_stat_vars)
       if (nrow(svy_stats) > 0) {
@@ -578,7 +595,7 @@ for (si in SAMPLE_LABELS) {
 
     for (mi in seq_len(nrow(model_combos))) {
       cur_model_type  <- model_combos$model_type[mi]
-      interaction_var <- model_combos$interaction[mi]
+      interaction_var <- model_combos$interaction[[mi]]
       fe_label        <- model_combos$fe[mi]
       cov_label       <- model_combos$covariates[mi]
       fe_vec          <- FIXED_EFFECTS[[fe_label]]
@@ -606,7 +623,7 @@ for (si in SAMPLE_LABELS) {
         cat(sprintf(" SKIP — '%s' not in survey\n", interaction_var))
         skip_log[[spec_label]] <- list(
           reason = sprintf("interaction_%s_not_available", interaction_var),
-          sample = si, interaction = interaction_var
+          sample = si, interaction = paste(interaction_var, collapse = "|")
         )
         next
       }

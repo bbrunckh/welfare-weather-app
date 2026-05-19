@@ -5,12 +5,16 @@
 #
 # Usage: source("dev/summarize_mod1_batch.R")
 # =============================================================================
+library(tidyverse)
+library(patchwork)
+
 
 rm(list = ls())
 pkgload::load_all(quiet = TRUE)
+
 source("dev/spec_curve.R") # For the spec curve plotting code
 
-OUT_DIR         <- "dev/outputs/pooled"
+OUT_DIR         <- "dev/outputs"
 
 # coefficient summary
 coefs <- read.csv(file.path(OUT_DIR, "_summary_coefficients.csv"))
@@ -23,7 +27,7 @@ fit_stats <- read.csv(file.path(OUT_DIR, "_summary_fit_stats.csv"))
 # =============================================================================
 
 spec_vars_all <- c(
-  "wx_var", "wx_ref_period", "wx_binned", "engine",
+  "wx_var", "wx_ref_period", "wx_binned", "wx_transformation", "engine",
   "fe_profile", "cov_profile",
   "interaction", "code"
 )
@@ -32,24 +36,31 @@ spec_configs <- list(
   # --- Continuous -------------------------------------------------------------
   list(
     term = "t", term_regex = NULL,
-    estimands = c("Mean", "UQR p10", "UQR p50", "UQR p90"),
+    estimands = c("Mean"),
     colour_by = "estimand",
     title     = "Specification curve: temperature (continuous)",
-    filename  = "spec_curve_t.png"
+    filename  = "spec_curve_t_ols.png"
   ),
   list(
-    term = "t:urban", term_regex = NULL,
-    estimands = c("Mean", "UQR p10", "UQR p50", "UQR p90"),
+    term = "t", term_regex = NULL,
+    estimands = c("UQR p10", "UQR p50", "UQR p90"),
     colour_by = "estimand",
-    title     = "Specification curve: temperature × urban (continuous)",
-    filename  = "spec_curve_t_urban.png"
+    title     = "Specification curve: temperature (continuous)",
+    filename  = "spec_curve_t_uqr.png"
   ),
   list(
     term = "t:electricity", term_regex = NULL,
-    estimands = c("Mean", "UQR p10", "UQR p50", "UQR p90"),
+    estimands = c("Mean"),
     colour_by = "estimand",
     title     = "Specification curve: temperature × electricity (continuous)",
-    filename  = "spec_curve_t_electricity.png"
+    filename  = "spec_curve_t_electricity_ols.png"
+  ),
+  list(
+    term = "t:electricity", term_regex = NULL,
+    estimands = c("UQR p10", "UQR p50", "UQR p90"),
+    colour_by = "estimand",
+    title     = "Specification curve: temperature × electricity (continuous)",
+    filename  = "spec_curve_t_electricity_uqr.png"
   ),
   # --- Binned -----------------------------------------------------------------
   list(
@@ -84,7 +95,8 @@ for (cfg in spec_configs) {
     estimands    = cfg$estimands,
     model_filter = NULL,
     spec_vars    = spec_vars_all,
-    rank_by      = cfg$estimands[[1]],
+    rank_by      = if ("Mean" %in% cfg$estimands) "Mean" else if ("UQR p50" %in% cfg$estimands) "UQR p50" else cfg$estimands[[1]],
+    rank_by_bin = 4,
     colour_by    = cfg$colour_by,
     title        = cfg$title,
     subtitle     = "Outcome: Log welfare",
