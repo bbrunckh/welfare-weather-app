@@ -70,6 +70,9 @@ ENGINE_REGISTRY <- list(
         args$family <- stats::binomial("logit")
         do.call(fixest::feglm, args)
       } else {
+        if (!is.null(opts$fixest) && length(opts$fixest) > 0) {
+          args <- c(args, opts$fixest)
+        }
         do.call(fixest::feols, args)
       }
     },

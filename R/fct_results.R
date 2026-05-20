@@ -11,10 +11,11 @@
 
 #' Prepare the outcome column in survey_weather before model fitting
 #'
-#' Applies three sequential transformations in order:
-#' 1. **LCU back-conversion** — multiply by `ppp2021` when `units == "LCU"`.
-#' 2. **Log transform** — `log()` when `transform == "log"`.
-#' 3. **Binary poor indicator** — `welfare < povline` when `name == "poor"`
+#' Applies four sequential transformations in order:
+#' 1. **Welfare floor** - replace welfare < $0.28 (2021 PPP) with $0.28 to avoid log(0) and extreme outliers.
+#' 2. **LCU back-conversion** — multiply by `ppp2021` when `units == "LCU"`.
+#' 3. **Log transform** — `log()` when `transform == "log"`.
+#' 4. **Binary poor indicator** — `welfare < povline` when `name == "poor"`
 #'    and `povline` is non-NA.
 #'
 #' @param df A data frame containing the outcome column and optionally
@@ -31,6 +32,9 @@ prepare_outcome_df <- function(df, so) {
   trans   <- as.character(so$transform[1])
   povline <- so$povline[1]
 
+  if (isTRUE(name == "welfare")) {
+      df <- df |> dplyr::mutate(!!name := pmax(.data[[name]], 0.28))
+  }
   if (isTRUE(units == "LCU") && "ppp2021" %in% names(df)) {
     df <- df |> dplyr::mutate(!!name := .data[[name]] * .data$ppp2021)
   }
