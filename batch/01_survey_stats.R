@@ -2,17 +2,15 @@
 # batch/01_survey_stats.R
 #
 # Survey summary statistics for all countries.
+#
 # Outputs:
 #   OUT_DIR/survey_stats/survey_stats.csv
 #   OUT_DIR/survey_stats/interview_dates/{CODE}_interview_dates.png
 #   OUT_DIR/survey_stats/location_maps/{CODE}_location_map.png
 #   OUT_DIR/survey_stats/welfare_distributions/{CODE}_welfare_dist.png
 #
-# Can be run standalone or sourced from 04_run_all.R (config vars pre-set).
-# All user inputs are in SECTION 1. Config vars are guarded so 04_run_all.R
-# can pre-set them before sourcing this script.
+# All user inputs are in SECTION 1. 
 #
-# Usage: source("batch/01_survey_stats.R")
 # =============================================================================
 
 # =============================================================================
@@ -20,19 +18,19 @@
 # =============================================================================
 
 # ---- Data source ------------------------------------------------------------
-if (!exists("CONNECTION_TYPE")) CONNECTION_TYPE <- "local"
-if (!exists("DATA_DIR"))        DATA_DIR        <- Sys.getenv("WISEAPP_DATA_PATH")
-if (!exists("OUT_DIR"))         OUT_DIR         <- "dev/outputs"
+CONNECTION_TYPE <- "local"
+DATA_DIR        <- Sys.getenv("WISEAPP_DATA_PATH")
+OUT_DIR         <- Sys.getenv("WISEAPP_RESULTS_PATH")
 
 # ---- Unit of analysis -------------------------------------------------------
-if (!exists("UNIT")) UNIT <- "hh"   # "hh", "ind", or "firm"
+UNIT <- "hh"   # "hh", "ind", or "firm"
 
 # ---- Country filter ---------------------------------------------------------
 # NULL = all available countries; character vector of country codes = subset
-if (!exists("COUNTRY_FILTER")) COUNTRY_FILTER <- NULL
+COUNTRY_FILTER <- NULL
 
 # ---- Output options ---------------------------------------------------------
-if (!exists("OVERWRITE_EXISTING")) OVERWRITE_EXISTING <- TRUE
+OVERWRITE_EXISTING <- TRUE
 
 # =============================================================================
 # SECTION 2 — SETUP
@@ -121,18 +119,23 @@ for (code in COUNTRIES_01) {
   }, error = function(e) message("  interview dates failed: ", conditionMessage(e)))
 
   # ------ Location map (static ggplot/sf) ------------------------------------
-  out_path <- file.path(OUT_MAPS, paste0(code, "_location_map.png"))
-  if (OVERWRITE_EXISTING || !file.exists(out_path)) {
-    geojson <- build_h3_geojson(ss, connection_params_01)
-    if (is.null(geojson)) {
-      message("  location map skipped — build_h3_geojson returned NULL")
-    } else {
-      p_map <- tryCatch(
-        plot_survey_map_static(geojson),
-        error = function(e) { message("  plot_survey_map_static failed: ", conditionMessage(e)); NULL }
-      )
-      if (!is.null(p_map))
-        save_gg(p_map, out_path, width = 8, height = 6, dpi = 96)
+  #skip for FJI
+  if (code == "FJI") {
+    cat("  SKIP — no location data for FJI\n")
+  } else {
+    out_path <- file.path(OUT_MAPS, paste0(code, "_location_map.png"))
+    if (OVERWRITE_EXISTING || !file.exists(out_path)) {
+      geojson <- build_h3_geojson(ss, connection_params_01)
+      if (is.null(geojson)) {
+        message("  location map skipped — build_h3_geojson returned NULL")
+      } else {
+        p_map <- tryCatch(
+          plot_survey_map_static(geojson),
+          error = function(e) { message("  plot_survey_map_static failed: ", conditionMessage(e)); NULL }
+        )
+        if (!is.null(p_map))
+          save_gg(p_map, out_path, width = 8, height = 6, dpi = 96)
+      }
     }
   }
 
@@ -162,7 +165,7 @@ for (code in COUNTRIES_01) {
       cat(sprintf("  Survey stats: %d variables\n", length(unique(svy_stats$variable))))
     }
   }, error = function(e) message("  survey stats failed: ", conditionMessage(e)))
-}
+  }
 
 # =============================================================================
 # SECTION 4 — SAVE OUTPUTS

@@ -355,13 +355,6 @@ weighted_survey_stats <- function(df, vars, weight = "weight", var_info = NULL) 
       tot     <- total_n
     }
 
-    if (within_demean && "loc_id" %in% names(df)) {
-      loc_src   <- if (!is.null(mask)) df[["loc_id"]][mask] else df[["loc_id"]]
-      loc_grp   <- collapse::GRP(data.frame(loc_id = loc_src), by = "loc_id")
-      loc_means <- collapse::fmean(x, g = loc_grp, w = w_vec, na.rm = TRUE)
-      x <- x - loc_means[loc_grp$group.id]
-    }
-
     n_obs  <- collapse::fnobs(x, g = sub_grp)          # fnobs does not accept na.rm
     n_dist <- collapse::fndistinct(x, g = sub_grp, na.rm = TRUE)
 
@@ -449,4 +442,360 @@ weighted_survey_stats <- function(df, vars, weight = "weight", var_info = NULL) 
   out[num_cols] <- lapply(out[num_cols], round, digits = 3)
 
   out
+}
+
+# weighted_weather_stats(): collapse-based weighted summary stats for weather
+# variables in long format. Continuous variables only.
+#
+# Arguments:
+#   df             — merged survey+weather data frame (one row per respondent)
+#   vars           — character vector of weather variable names (continuous only)
+#   selected_weather — selected_weather metadata table (from build_selected_weather)
+#                      must contain: name, ref_start, ref_end, temporalAgg, transformation
+#   weight         — name of weight column (default "weight")
+#   n_rows_base    — total rows BEFORE the weather inner-join (for pct_missing)
+#   df_ref         — climate reference period weather (output of get_weather()$historical
+#                    loaded over CLIMATE_REF_YEARS). Unweighted. One row per
+#                    loc_id x date. Produces one extra row per variable with
+#                    year = "ref_YYYY-YYYY" and unweighted stats only.
+#   ref_years      — length-2 integer vector, e.g. c(1991L, 2020L). Used to
+#                    label the reference rows.
+#
+# Columns returned (per code-year-variable):
+#   code, economy, survname, year, variable, ref_period, temporal_agg, transformation
+#   mean, sd, min, max, n_unique, n, pct_missing, p10, p20, ..., p90   <- full sample
+#   within_loc_mean, within_loc_sd                                      <- demeaned within loc_id
+#   n_unique_per_loc                                                     <- mean unique vals per loc
+#
+# All stats are sample-weighted (except reference rows which are unweighted).
+# pct_missing is out of n_rows_base (pre-join total); NA for reference rows.
+# -----------------------------------------------------------------------------
+
+weighted_weather_stats <- function(df, vars, selected_weather,
+                                   weight = "weight", n_rows_base = NULL,
+                                   df_ref = NULL, ref_years = c(1991L, 2020L)) {
+  vars <- intersect(vars, names(df))
+  vars <- vars[vapply(df[vars], is.numeric, logical(1L))]
+  if (!length(vars)) return(data.frame())
+
+  w   <- df[[weight]]
+  grp <- collapse::GRP(df, by = c("code", "year"))
+
+  # n for pct_missing: use supplied base count if available, else nrow(df)
+  if (!is.null(n_rows_base)) {
+    # n_rows_base is a named vector: names = paste(code, year), values = n
+    base_n <- n_rows_base[paste(df$code[!duplicated(grp$group.id)],
+                                df$year[!duplicated(grp$group.id)])]
+  } else {
+    base_n <- tabulate(grp$group.id, nbins = grp$N.groups)
+  }
+
+  # Metadata: one row per code-year
+  meta <- collapse::fsubset(
+    df[, c("code", "year", "economy", "survname")],
+    !duplicated(grp$group.id)
+  )
+
+  # with_loc mask
+  has_loc <- !is.na(df[["loc_id"]]) & !is.na(df[["area_h3_7"]])
+
+  # Percentile probs
+  pctile_probs <- seq(0.1, 0.9, by = 0.1)
+  pctile_names <- paste0("p", as.integer(pctile_probs * 100))
+
+  # Helper: full weighted stats (mean, sd, min, max, n_unique, n, pct_missing, p10-p90)
+  wx_stats <- function(x, w_vec, grp_obj, tot, mask = NULL) {
+    if (!is.null(mask)) {
+      if (!any(mask)) {
+        empty <- rep(NA_real_, grp_obj$N.groups)
+        empti <- as.integer(empty)
+        pct_empty <- setNames(as.list(rep(NA_real_, length(pctile_names))), pctile_names)
+        return(c(list(mean = empty, sd = empty, min = empty, max = empty,
+                      n_unique = empti, n = empti, pct_missing = empty),
+                 pct_empty))
+      }
+      x       <- x[mask]
+      w_vec   <- w_vec[mask]
+      sub_grp <- collapse::GRP(df[mask, ], by = c("code", "year"))
+      tot_sub <- tabulate(sub_grp$group.id, nbins = sub_grp$N.groups)
+    } else {
+      sub_grp <- grp_obj
+      tot_sub <- tot
+    }
+
+    n_obs  <- collapse::fnobs(x, g = sub_grp)
+    n_dist <- collapse::fndistinct(x, g = sub_grp, na.rm = TRUE)
+
+    sub_key    <- sub_grp$groups
+    master_key <- grp_obj$groups
+    idx <- match(paste(sub_key$code, sub_key$year),
+                 paste(master_key$code, master_key$year))
+
+    expand <- function(v) {
+      out <- rep(NA_real_, grp_obj$N.groups); out[idx] <- v; out
+    }
+    expand_int <- function(v) {
+      out <- rep(NA_integer_, grp_obj$N.groups); out[idx] <- as.integer(v); out
+    }
+
+    # Weighted percentiles per group (fquantile does not support g=)
+    pctiles <- lapply(pctile_probs, function(p) {
+      expand(vapply(seq_len(sub_grp$N.groups), function(i) {
+        idx_i <- sub_grp$group.id == i
+        xi <- x[idx_i]; wi <- w_vec[idx_i]
+        ok <- is.finite(xi) & is.finite(wi) & wi > 0
+        if (!any(ok)) return(NA_real_)
+        collapse::fquantile(xi[ok], probs = p, w = wi[ok])
+      }, numeric(1L)))
+    })
+    names(pctiles) <- pctile_names
+
+    c(list(
+      mean        = expand(collapse::fmean(x, g = sub_grp, w = w_vec, na.rm = TRUE)),
+      sd          = expand(collapse::fsd(x,   g = sub_grp, w = w_vec, na.rm = TRUE)),
+      min         = expand(collapse::fmin(x,  g = sub_grp,             na.rm = TRUE)),
+      max         = expand(collapse::fmax(x,  g = sub_grp,             na.rm = TRUE)),
+      n_unique    = expand_int(n_dist),
+      n           = expand_int(n_obs),
+      pct_missing = expand(ifelse(tot_sub > 0, 1 - n_obs / tot_sub, NA_real_))
+    ), pctiles)
+  }
+
+  # Helper: within-loc demeaned mean and sd only (with_loc subset)
+  wx_within_stats <- function(x, w_vec, grp_obj, mask) {
+    empty <- rep(NA_real_, grp_obj$N.groups)
+    if (!any(mask)) return(list(within_loc_mean = empty, within_loc_sd = empty))
+
+    x_sub   <- x[mask]
+    w_sub   <- w_vec[mask]
+    sub_grp <- collapse::GRP(df[mask, ], by = c("code", "year"))
+
+    if ("loc_id" %in% names(df)) {
+      loc_src   <- df[["loc_id"]][mask]
+      loc_grp   <- collapse::GRP(data.frame(loc_id = loc_src), by = "loc_id")
+      loc_means <- collapse::fmean(x_sub, g = loc_grp, w = w_sub, na.rm = TRUE)
+      x_sub <- x_sub - loc_means[loc_grp$group.id]
+    }
+
+    sub_key    <- sub_grp$groups
+    master_key <- grp_obj$groups
+    idx <- match(paste(sub_key$code, sub_key$year),
+                 paste(master_key$code, master_key$year))
+
+    expand <- function(v) {
+      out <- rep(NA_real_, grp_obj$N.groups); out[idx] <- v; out
+    }
+
+    list(
+      within_loc_mean = expand(collapse::fmean(x_sub, g = sub_grp, w = w_sub, na.rm = TRUE)),
+      within_loc_sd   = expand(collapse::fsd(x_sub,   g = sub_grp, w = w_sub, na.rm = TRUE))
+    )
+  }
+
+  # Helper: mean number of unique values per loc_id (with_loc subset, per code-year)
+  n_unique_per_loc_fn <- function(x, grp_obj, mask) {
+    vapply(seq_len(grp_obj$N.groups), function(i) {
+      mask_i <- grp_obj$group.id == i & mask
+      if (!any(mask_i)) return(NA_real_)
+      loc  <- df[["loc_id"]][mask_i]
+      xv   <- x[mask_i]
+      locs <- unique(loc[!is.na(loc)])
+      if (!length(locs)) return(NA_real_)
+      mean(vapply(locs, function(l) {
+        vals <- xv[loc == l & !is.na(loc)]
+        length(unique(vals[!is.na(vals)]))
+      }, numeric(1L)), na.rm = TRUE)
+    }, numeric(1L))
+  }
+
+  rows <- lapply(vars, function(v) {
+    sw_row <- selected_weather[selected_weather$name == v, ][1L, ]
+    ref_period    <- if (nrow(sw_row) > 0) paste0(sw_row$ref_start, "to", sw_row$ref_end, "m") else NA_character_
+    temporal_agg  <- if (nrow(sw_row) > 0) sw_row$temporalAgg    else NA_character_
+    transformation <- if (nrow(sw_row) > 0) sw_row$transformation else NA_character_
+
+    x <- df[[v]]
+
+    full    <- wx_stats(x, w, grp, base_n)
+    within  <- wx_within_stats(x, w, grp, mask = has_loc)
+    nupl    <- n_unique_per_loc_fn(x, grp, mask = has_loc)
+
+    cbind(
+      grp$groups,
+      data.frame(variable = v, ref_period = ref_period,
+                 temporal_agg = temporal_agg, transformation = transformation,
+                 stringsAsFactors = FALSE),
+      as.data.frame(full),
+      as.data.frame(within),
+      data.frame(n_unique_per_loc = nupl),
+      row.names = NULL
+    )
+  })
+
+  out <- do.call(rbind, rows)
+  out <- merge(meta, out, by = c("code", "year"))
+  out <- out[order(out$code, out$variable, out$ref_period, out$year), ]
+  rownames(out) <- NULL
+
+
+  # ---- Climate reference rows (one per code x variable) --------------------
+  # df_ref has loc_id so within_loc stats are computed (unweighted).
+  # year = NA; pct_missing = NA (no survey merge denominator).
+  if (!is.null(df_ref) && nrow(df_ref) > 0) {
+    ref_survname <- paste0("Climate reference ", ref_years[1], "-", ref_years[2])
+    ref_grp      <- collapse::GRP(df_ref, by = "code")
+    ref_has_loc  <- !is.na(df_ref[["loc_id"]])
+
+    # economy lookup from the survey rows already assembled in out
+    code_economy <- unique(out[, c("code", "economy"), drop = FALSE])
+
+    ref_rows <- lapply(intersect(vars, names(df_ref)), function(v) {
+      x      <- df_ref[[v]]
+      n_obs  <- collapse::fnobs(x, g = ref_grp)
+      n_dist <- collapse::fndistinct(x, g = ref_grp, na.rm = TRUE)
+
+      pctiles <- lapply(pctile_probs, function(p) {
+        vapply(seq_len(ref_grp$N.groups), function(i) {
+          xi <- x[ref_grp$group.id == i]; xi <- xi[is.finite(xi)]
+          if (!length(xi)) return(NA_real_)
+          collapse::fquantile(xi, probs = p)
+        }, numeric(1L))
+      })
+      names(pctiles) <- pctile_names
+
+      # within_loc: demean within loc_id (unweighted)
+      within_mean <- within_sd <- rep(NA_real_, ref_grp$N.groups)
+      if (any(ref_has_loc)) {
+        x_sub    <- x[ref_has_loc]
+        sub_grp  <- collapse::GRP(df_ref[ref_has_loc, ], by = "code")
+        loc_grp  <- collapse::GRP(data.frame(loc_id = df_ref[["loc_id"]][ref_has_loc]),
+                                  by = "loc_id")
+        loc_means <- collapse::fmean(x_sub, g = loc_grp, na.rm = TRUE)
+        x_dem     <- x_sub - loc_means[loc_grp$group.id]
+        idx_m     <- match(sub_grp$groups$code, ref_grp$groups$code)
+        within_mean[idx_m] <- collapse::fmean(x_dem, g = sub_grp, na.rm = TRUE)
+        within_sd[idx_m]   <- collapse::fsd(x_dem,   g = sub_grp, na.rm = TRUE)
+      }
+
+      # n_unique_per_loc (unweighted)
+      nupl <- vapply(seq_len(ref_grp$N.groups), function(i) {
+        mask_i <- ref_grp$group.id == i & ref_has_loc
+        if (!any(mask_i)) return(NA_real_)
+        loc  <- df_ref[["loc_id"]][mask_i]
+        xv   <- x[mask_i]
+        locs <- unique(loc[!is.na(loc)])
+        if (!length(locs)) return(NA_real_)
+        mean(vapply(locs, function(l) {
+          vals <- xv[loc == l & !is.na(loc)]
+          length(unique(vals[!is.na(vals)]))
+        }, numeric(1L)), na.rm = TRUE)
+      }, numeric(1L))
+
+      sw_row         <- selected_weather[selected_weather$name == v, ][1L, ]
+      ref_period_v   <- if (nrow(sw_row) > 0) paste0(sw_row$ref_start, "to", sw_row$ref_end, "m") else NA_character_
+      temporal_agg_v <- if (nrow(sw_row) > 0) sw_row$temporalAgg    else NA_character_
+      transform_v    <- if (nrow(sw_row) > 0) sw_row$transformation else NA_character_
+
+      cbind(
+        ref_grp$groups,
+        data.frame(
+          year           = NA_character_,
+          survname       = ref_survname,
+          variable       = v,
+          ref_period     = ref_period_v,
+          temporal_agg   = temporal_agg_v,
+          transformation = transform_v,
+          mean           = collapse::fmean(x, g = ref_grp, na.rm = TRUE),
+          sd             = collapse::fsd(x,   g = ref_grp, na.rm = TRUE),
+          min            = collapse::fmin(x,  g = ref_grp, na.rm = TRUE),
+          max            = collapse::fmax(x,  g = ref_grp, na.rm = TRUE),
+          n_unique       = as.integer(n_dist),
+          n              = as.integer(n_obs),
+          pct_missing    = NA_real_,
+          stringsAsFactors = FALSE
+        ),
+        as.data.frame(pctiles),
+        data.frame(within_loc_mean  = within_mean,
+                   within_loc_sd    = within_sd,
+                   n_unique_per_loc = nupl,
+                   row.names = NULL),
+        row.names = NULL
+      )
+    })
+
+    ref_out <- do.call(rbind, ref_rows)
+    ref_out <- merge(ref_out, code_economy, by = "code", all.x = TRUE)
+    out <- rbind(out, ref_out[, names(out)])
+  }
+  # Final column order
+  base_cols  <- c("code", "economy", "survname", "year",
+                  "variable", "ref_period", "temporal_agg", "transformation")
+  stat_sfx   <- c("mean", "sd", "min", "max", "n_unique", "n", "pct_missing", pctile_names)
+  extra_cols <- c(stat_sfx, "within_loc_mean", "within_loc_sd", "n_unique_per_loc")
+  out <- out[, c(base_cols, extra_cols)]
+
+  # pct_missing as percentages (0-100)
+  pm_cols <- grep("pct_missing", names(out), value = TRUE)
+  out[pm_cols] <- lapply(out[pm_cols], function(x) x * 100)
+
+  # Round all double columns to 3 decimal places
+  num_cols <- names(out)[vapply(out, is.double, logical(1L))]
+  out[num_cols] <- lapply(out[num_cols], round, digits = 3)
+
+  out
+}
+
+# -----------------------------------------------------------------------------
+# plot_weather_dist_with_ref(): ridge density plot overlaying survey-period
+# weather (coloured by countryyear) with a climate reference distribution
+# (grey, labelled separately).
+#
+# Falls back to plain plot_weather_dist() if df_ref is NULL.
+# -----------------------------------------------------------------------------
+
+plot_weather_dist_with_ref <- function(df, df_ref = NULL, hv, label,
+                                       cont_binned, ref_label = "Climate ref.") {
+  if (is.null(df_ref) || !(hv %in% names(df_ref))) {
+    return(plot_weather_dist(df, hv = hv, label = label, cont_binned = cont_binned))
+  }
+
+  x_label <- stringr::str_wrap(paste0(label, "\n(as configured)"), 40)
+
+  if (!is.na(cont_binned) && cont_binned == "Binned") {
+    return(plot_weather_dist(df, hv = hv, label = label, cont_binned = cont_binned))
+  }
+
+  # Survey-period rows: keep countryyear groups
+  df_survey <- df[is.finite(df[[hv]]), c(hv, "countryyear"), drop = FALSE]
+  df_survey$source <- df_survey$countryyear
+
+  # Reference rows: collapse to a single group
+  df_ref_plot <- df_ref[is.finite(df_ref[[hv]]), hv, drop = FALSE]
+  df_ref_plot$countryyear <- ref_label
+  df_ref_plot$source      <- ref_label
+
+  # Combine; reference rows use a fixed grey fill
+  df_all <- rbind(df_survey, df_ref_plot)
+
+  # Factor so reference plots at the bottom of the ridgeplot
+  survey_levels <- sort(unique(df_survey$source))
+  df_all$source <- factor(df_all$source, levels = c(ref_label, survey_levels))
+
+  bw <- tryCatch(stats::bw.nrd0(df_all[[hv]]), error = function(e) NULL)
+  if (is.null(bw) || !is.finite(bw) || bw <= 0) bw <- NULL
+
+  n_survey <- length(survey_levels)
+  survey_colours <- scales::hue_pal()(n_survey)
+  names(survey_colours) <- survey_levels
+  all_colours <- c(setNames("#AAAAAA", ref_label), survey_colours)
+
+  ggplot2::ggplot(
+    df_all,
+    ggplot2::aes(x = .data[[hv]], y = .data$source, fill = .data$source)
+  ) +
+    ggridges::geom_density_ridges(alpha = 0.7, scale = 2, bandwidth = bw) +
+    ggplot2::scale_fill_manual(values = all_colours) +
+    ggplot2::theme_minimal() +
+    ggplot2::labs(x = x_label, y = "", fill = "") +
+    ggplot2::theme(legend.position = "none")
 }
