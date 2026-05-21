@@ -326,7 +326,11 @@ exclude_selected_vars <- function(candidate_vl,
     fixedeffects  %||% character(0)
   ))
 
-  candidate_vl[!candidate_vl$name %in% exclude, , drop = FALSE]
+  candidate_vl <- candidate_vl[!candidate_vl$name %in% exclude, , drop = FALSE]
+  if ("outcome" %in% names(candidate_vl)) {
+    candidate_vl <- candidate_vl[is.na(candidate_vl$outcome) | candidate_vl$outcome != 1L, , drop = FALSE]
+  }
+  candidate_vl
 }
 
 

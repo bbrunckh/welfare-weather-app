@@ -38,6 +38,7 @@ mod_1_06_model_ui <- function(id) {
 #' @param id               Module id.
 #' @param variable_list    Reactive data frame of variable metadata.
 #' @param selected_surveys Reactive data frame of selected surveys.
+#' @param analysis_unit   Reactive scalar with level of analysis (ind/hh/firm).
 #' @param selected_outcome Reactive data frame row for the selected outcome.
 #' @param selected_weather Reactive data frame of selected weather specs.
 #' @param survey_weather   Reactive data frame of merged survey + weather data.
@@ -46,11 +47,19 @@ mod_1_06_model_ui <- function(id) {
 mod_1_06_model_server <- function(id,
                                    variable_list,
                                    selected_surveys,
+                                   analysis_unit,
                                    selected_outcome,
                                    selected_weather,
                                    survey_weather) {
   moduleServer(id, function(input, output, session) {
     ns <- session$ns
+
+    show_level <- function(role) {
+      if (identical(role, "area")) return(TRUE)
+      unit <- if (is.null(analysis_unit)) NULL else analysis_unit()
+      if (is.null(unit) || length(unit) == 0) return(TRUE)
+      identical(unit, role)
+    }
 
     # ---- Valid variable list (present + >= 90 % non-missing) ----------------
 
@@ -314,6 +323,16 @@ mod_1_06_model_server <- function(id,
     output$covariate_inputs <- renderUI({
       req(input$covariates)
 
+      make_choice_labels <- function(df) {
+        if (is.null(df) || nrow(df) == 0) return(stats::setNames(character(0), character(0)))
+        nm <- df$name
+        if (is.null(nm)) return(stats::setNames(character(0), character(0)))
+        lbl <- if ("label" %in% names(df)) df$label else nm
+        lbl <- ifelse(is.na(lbl) | !nzchar(lbl), nm, lbl)
+        keep <- !is.na(nm) & nzchar(nm)
+        stats::setNames(nm[keep], lbl[keep])
+      }
+
       # --- USER-DEFINED COVARIATES ---------------------------------------------------------
       if (input$covariates == "User-defined") {
 
@@ -326,11 +345,11 @@ mod_1_06_model_server <- function(id,
           tagList(
 
             # Individual-level covariates
-            if (nrow(ind) > 0) {
+            if (show_level("ind") && nrow(ind) > 0) {
               shiny::selectizeInput(
                 ns("indcov"),
                 label    = "Individual characteristics \\(X_{ijt}\\):",
-                choices  = setNames(ind$name, ind$label),
+                choices  = make_choice_labels(ind),
                 selected = NULL,
                 multiple = TRUE,
                 options  = list(placeholder = "Select individual covariates")
@@ -338,11 +357,11 @@ mod_1_06_model_server <- function(id,
             },
 
             # Household-level covariates
-            if (nrow(hh) > 0) {
+            if (show_level("hh") && nrow(hh) > 0) {
               shiny::selectizeInput(
                 ns("hhcov"),
                 label    = "Household characteristics \\(X_{ijt}\\):",
-                choices  = setNames(hh$name, hh$label),
+                choices  = make_choice_labels(hh),
                 selected = NULL,
                 multiple = TRUE,
                 options  = list(placeholder = "Select household covariates")
@@ -350,11 +369,11 @@ mod_1_06_model_server <- function(id,
             },
 
             # Firm-level covariates
-            if (nrow(firm) > 0) {
+            if (show_level("firm") && nrow(firm) > 0) {
               shiny::selectizeInput(
                 ns("firmcov"),
                 label    = "Firm characteristics:",
-                choices  = setNames(firm$name, firm$label),
+                choices  = make_choice_labels(firm),
                 selected = NULL,
                 multiple = TRUE,
                 options  = list(placeholder = "Select firm covariates")
@@ -362,11 +381,11 @@ mod_1_06_model_server <- function(id,
             },
 
             # Area-level covariates
-            if (nrow(area) > 0) {
+            if (show_level("area") && nrow(area) > 0) {
               shiny::selectizeInput(
                 ns("areacov"),
                 label    = "Area characteristics \\(E_{jt}\\):",
-                choices  = setNames(area$name, area$label),
+                choices  = make_choice_labels(area),
                 selected = NULL,
                 multiple = TRUE,
                 options  = list(placeholder = "Select area covariates")
@@ -438,6 +457,9 @@ mod_1_06_model_server <- function(id,
       out_y <- if (!is.null(selected_outcome())) selected_outcome()$name else character(0)
       out_w <- if (!is.null(selected_weather())) selected_weather()$name else character(0)
       keep <- !vl_role$name %in% c(out_y, out_w)
+      if ("outcome" %in% names(vl_role)) {
+        keep <- keep & (is.na(vl_role$outcome) | vl_role$outcome != 1L)
+      }
       stats::setNames(vl_role$name[keep], vl_role$label[keep])
     }
 
@@ -448,6 +470,7 @@ mod_1_06_model_server <- function(id,
       already_in <- unique(c(input$interactions, input$fixedeffects))
 
       level_block <- function(role, role_label) {
+        if (!show_level(role)) return(NULL)
         choices <- .level_choices(role)
         if (length(choices) == 0) return(NULL)
 
@@ -500,6 +523,7 @@ mod_1_06_model_server <- function(id,
       out_id <- paste0("force_out_", role)
 
       observe({
+        if (!show_level(role)) return()
         chosen_in <- input[[in_id]]
         choices   <- .level_choices(role)
         if (length(choices) == 0) return()
@@ -512,6 +536,7 @@ mod_1_06_model_server <- function(id,
       })
 
       observe({
+        if (!show_level(role)) return()
         chosen_out <- input[[out_id]]
         choices    <- .level_choices(role)
         if (length(choices) == 0) return()
