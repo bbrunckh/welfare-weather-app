@@ -313,8 +313,8 @@ for (code in COUNTRIES_02) {
         ggridges::geom_density_ridges(alpha = 0.7, scale = 1.5) +
         ggplot2::scale_fill_manual(values = all_cols) +
         ggplot2::facet_grid(
-          rows = ggplot2::vars(transf),
-          cols = ggplot2::vars(ref_period),
+          rows = ggplot2::vars(ref_period),
+          cols = ggplot2::vars(transf),
           scales = "free_x"
         ) +
         ggplot2::theme_minimal(base_size = 10) +
@@ -326,8 +326,8 @@ for (code in COUNTRIES_02) {
                        strip.text = ggplot2::element_text(size = 8))
 
       save_gg(p, out_path,
-              width  = 3 * n_col + 2,
-              height = 2.5 * n_row + 1.5)
+              width  = 3 * n_row + 2,
+              height = 2.5 * n_col + 1.5)
       cat(sprintf("  Plot saved: %s\n", basename(out_path)))
     }, error = function(e) message("  dist plot failed [", base_var, "]: ", conditionMessage(e)))
   }
