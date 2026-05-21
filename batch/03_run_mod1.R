@@ -281,11 +281,6 @@ cat(sprintf("Countries: %d (%s)\n\n", length(COUNTRIES),
 # SECTION 4 — COMBINATION GRID
 # =============================================================================
 
-DEFAULT_AGG <- c(t = "Mean", r = "Sum")
-weather_agg_for <- function(var) {
-  WEATHER_AGG_OVERRIDE[[var]] %||% DEFAULT_AGG[[var]] %||% "Mean"
-}
-
 if (POOL_COUNTRIES) {
   if (is.null(COUNTRY_FILTER) || length(COUNTRY_FILTER) == length(COUNTRIES)) {
     SAMPLE_LABELS <- "All countries"
@@ -448,7 +443,7 @@ for (si in SAMPLE_LABELS) {
       vs <- wx_prof[[v]]
       p  <- paste0(v, "_")
       spec_inputs[[paste0(p, "relativePeriod")]]  <- c(vs$ref_start %||% 1L, vs$ref_end)
-      spec_inputs[[paste0(p, "temporalAgg")]]     <- vs$temporal_agg %||% weather_agg_for(v)
+      spec_inputs[[paste0(p, "temporalAgg")]]     <- vs$temporal_agg %||% weather_agg_for(v, get_weather_vars(var_info), WEATHER_AGG_OVERRIDE)
       spec_inputs[[paste0(p, "varConstruction")]]  <- vs$weather_transformation %||% WEATHER_TRANSFORMATION
       spec_inputs[[paste0(p, "contOrBinned")]]     <- if (vs$transformation == "binned") "Binned" else "Continuous"
       spec_inputs[[paste0(p, "numBins")]]          <- vs$n_bins %||% N_BINS

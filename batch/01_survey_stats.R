@@ -22,14 +22,14 @@
 # ---- Data source ------------------------------------------------------------
 if (!exists("CONNECTION_TYPE")) CONNECTION_TYPE <- "local"
 if (!exists("DATA_DIR"))        DATA_DIR        <- Sys.getenv("WISEAPP_DATA_PATH")
-if (!exists("OUT_DIR"))         OUT_DIR         <- "dev/outputs/"
+if (!exists("OUT_DIR"))         OUT_DIR         <- "dev/outputs"
 
 # ---- Unit of analysis -------------------------------------------------------
 if (!exists("UNIT")) UNIT <- "hh"   # "hh", "ind", or "firm"
 
 # ---- Country filter ---------------------------------------------------------
-# NULL = all available countries; character vector = subset
-if (!exists("COUNTRY_FILTER")) COUNTRY_FILTER <- "GNB"
+# NULL = all available countries; character vector of country codes = subset
+if (!exists("COUNTRY_FILTER")) COUNTRY_FILTER <- NULL
 
 # ---- Output options ---------------------------------------------------------
 if (!exists("OVERWRITE_EXISTING")) OVERWRITE_EXISTING <- TRUE
@@ -38,11 +38,9 @@ if (!exists("OVERWRITE_EXISTING")) OVERWRITE_EXISTING <- TRUE
 # SECTION 2 — SETUP
 # =============================================================================
 
-if (!exists(".batch_loaded") || !isTRUE(.batch_loaded)) {
-  pkgload::load_all(quiet = TRUE)
-  invisible(lapply(list.files("batch/R", pattern = "\\.R$", full.names = TRUE), source))
-  .batch_loaded <- TRUE
-}
+# Load helpers and build connection params based on config vars above. Then
+pkgload::load_all(quiet = TRUE)
+invisible(lapply(list.files("batch/R", pattern = "\\.R$", full.names = TRUE), source))
 
 # Output directories
 OUT_SURVEY   <- file.path(OUT_DIR, "survey_stats")
@@ -123,16 +121,20 @@ for (code in COUNTRIES_01) {
   }, error = function(e) message("  interview dates failed: ", conditionMessage(e)))
 
   # ------ Location map (static ggplot/sf) ------------------------------------
-  tryCatch({
-    out_path <- file.path(OUT_MAPS, paste0(code, "_location_map.png"))
-    if (OVERWRITE_EXISTING || !file.exists(out_path)) {
-      geojson <- build_h3_geojson(ss, connection_params_01)
-      if (!is.null(geojson)) {
-        p_map <- plot_survey_map_static(geojson)
-        save_gg(p_map, out_path, width = 8, height = 6)
-      }
+  out_path <- file.path(OUT_MAPS, paste0(code, "_location_map.png"))
+  if (OVERWRITE_EXISTING || !file.exists(out_path)) {
+    geojson <- build_h3_geojson(ss, connection_params_01)
+    if (is.null(geojson)) {
+      message("  location map skipped — build_h3_geojson returned NULL")
+    } else {
+      p_map <- tryCatch(
+        plot_survey_map_static(geojson),
+        error = function(e) { message("  plot_survey_map_static failed: ", conditionMessage(e)); NULL }
+      )
+      if (!is.null(p_map))
+        save_gg(p_map, out_path, width = 8, height = 6, dpi = 96)
     }
-  }, error = function(e) message("  location map failed: ", conditionMessage(e)))
+  }
 
   # ------ Welfare distribution ridge plot ------------------------------------
   tryCatch({
@@ -154,23 +156,10 @@ for (code in COUNTRIES_01) {
       ),
       intersect(c("imp_wat_san_rec"), names(svy))
     )
-    svy_stats <- weighted_summary_long(svy, vars = svy_stat_vars)
+    svy_stats <- weighted_survey_stats(svy, vars = svy_stat_vars, var_info = var_info_01)
     if (nrow(svy_stats) > 0) {
-      numeric_vars <- svy_stat_vars[vapply(svy[svy_stat_vars], is.numeric, logical(1))]
-      miss_list <- lapply(numeric_vars, function(v) {
-        svy |>
-          dplyr::group_by(countryyear) |>
-          dplyr::summarise(pct_missing = 100 * mean(is.na(.data[[v]])),
-                           .groups = "drop") |>
-          dplyr::mutate(variable = v)
-      })
-      if (length(miss_list) > 0) {
-        svy_stats <- dplyr::left_join(svy_stats, dplyr::bind_rows(miss_list),
-                                      by = c("countryyear", "variable"))
-      }
-      svy_stats$code <- code
       all_svy_stats_01[[code]] <- svy_stats
-      cat(sprintf("  Survey stats: %d variables\n", length(numeric_vars)))
+      cat(sprintf("  Survey stats: %d variables\n", length(unique(svy_stats$variable))))
     }
   }, error = function(e) message("  survey stats failed: ", conditionMessage(e)))
 }
@@ -183,6 +172,10 @@ cat("\n=== Saving survey stats outputs ===\n")
 
 if (length(all_svy_stats_01) > 0) {
   out_df  <- dplyr::bind_rows(all_svy_stats_01)
+  grp_order <- c("outcome", "policy", "hh", "ind", "area", "firm", "other")
+  out_df$var_group <- factor(out_df$var_group, levels = grp_order)
+  out_df  <- out_df[order(out_df$code, out_df$var_group, out_df$variable, out_df$year), ]
+  out_df$var_group <- as.character(out_df$var_group)
   out_csv <- file.path(OUT_SURVEY, "survey_stats.csv")
   readr::write_csv(out_df, out_csv)
   cat(sprintf("Saved: %s (%d rows)\n", out_csv, nrow(out_df)))
