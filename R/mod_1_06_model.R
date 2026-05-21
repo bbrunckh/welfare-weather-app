@@ -704,10 +704,13 @@ mod_1_06_model_server <- function(id,
           standardize = standardize_val,
           mi_m = m_val,
           mi_maxit = maxit_val,
+          mi_method = "norm",
           stability_threshold = threshold_val,
           use_parallel = TRUE,
           n_workers = max(parallel::detectCores() - 1, 1L),
-          parallel_seed = 123L
+          parallel_seed = 123L,
+          cv_selection = "random",
+          glmnet_tol = 1e-4
         )
       })
     })
