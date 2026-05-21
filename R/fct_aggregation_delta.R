@@ -342,13 +342,14 @@ aggregate_pipeline_per_year <- function(pipe,
     res_mode <- "none"
 
   lapply(yrs, function(yr) {
-    idx <- pipe$sim_year == yr
+    idx   <- pipe$sim_year == yr
+    valid <- idx & !is.na(pipe$y_point)
     F_idx <- if (!is.null(F_full) && !isTRUE(skip_coef))
-               F_full[idx, , drop = FALSE] else NULL
-    w_idx <- if (isTRUE(weighted) && !is.null(pipe$weight)) pipe$weight[idx] else NULL
-    id_idx <- if (!is.null(pipe$id_vec)) pipe$id_vec[idx] else NULL
+               F_full[valid, , drop = FALSE] else NULL
+    w_idx <- if (isTRUE(weighted) && !is.null(pipe$weight)) pipe$weight[valid] else NULL
+    id_idx <- if (!is.null(pipe$id_vec)) pipe$id_vec[valid] else NULL
     m <- aggregate_with_uncertainty_delta(
-      y_point      = pipe$y_point[idx],
+      y_point      = pipe$y_point[valid],
       F_loading    = F_idx,
       method       = method,
       weights      = w_idx,
