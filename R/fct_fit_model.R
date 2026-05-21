@@ -271,6 +271,10 @@ ENGINE_REGISTRY <- list(
 #' @param stability_threshold numeric in (0,1)
 #' @param use_parallel logical; use future.apply / futuremice for parallel runs
 #' @param n_workers integer; number of workers for parallel plan (capped at mi_m)
+#' @param parallel_min_n integer; auto-disable parallelism when the analytic
+#'   sample size (post NA-drop) is below this threshold. Default 20000, which
+#'   is the empirical break-even point on a 16-core Mac for `mi_m = 5`; below
+#'   it, multisession fork + globals-export overhead dominates the work.
 #' @param parallel_seed integer; seed for parallel-safe reproducibility
 #' @param globals_max_size numeric; override for future.globals.maxSize (bytes)
 #' @param cv_selection character; fold assignment mode for CV ("default" or "random")
@@ -296,6 +300,7 @@ run_lasso_selection <- function(
   stability_threshold = 0.5,
   use_parallel = FALSE,
   n_workers = NULL,
+  parallel_min_n = 20000L,
   parallel_seed = NULL,
   globals_max_size = NULL,
   cv_selection = c("default", "random"),
@@ -398,10 +403,23 @@ run_lasso_selection <- function(
 
   # ---------------------------------------------------------------------------
   # 5. Parallel plan (workers capped at mi_m — extra workers idle)
+  #
+  # Auto-disable parallelism on small samples: below `parallel_min_n` rows the
+  # multisession fork + globals-export overhead exceeds the actual work. The
+  # 20k default reflects the break-even point on a 16-core Mac with mi_m = 5
+  # (see dev/bench_lasso.R).
   # ---------------------------------------------------------------------------
   m <- max(1L, as.integer(mi_m))
   family_type <- if (is_logit) "binomial" else "gaussian"
   cv_selection <- match.arg(cv_selection)
+
+  if (isTRUE(use_parallel) && nrow(df) < as.integer(parallel_min_n)) {
+    message(sprintf(
+      "run_lasso_selection: n = %d below parallel_min_n = %d; running sequentially.",
+      nrow(df), as.integer(parallel_min_n)
+    ))
+    use_parallel <- FALSE
+  }
 
   if (isTRUE(use_parallel)) {
     if (!requireNamespace("future", quietly = TRUE) ||
