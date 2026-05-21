@@ -266,6 +266,10 @@ ENGINE_REGISTRY <- list(
 #' @param mi_m integer number of imputations
 #' @param mi_maxit integer mice iterations
 #' @param stability_threshold numeric in (0,1)
+#' @param use_parallel logical; use future.apply for parallel runs
+#' @param n_workers integer; number of workers for parallel plan (default auto)
+#' @param parallel_seed integer; seed for parallel-safe reproducibility
+#' @param globals_max_size numeric; override for future.globals.maxSize (bytes)
 #'
 #' @return list(model, per_imputation_models, selected_covariates, selection_frequency)
 #' @export
@@ -283,7 +287,11 @@ run_lasso_selection <- function(
   standardize = TRUE,
   mi_m = 5,
   mi_maxit = 5,
-  stability_threshold = 0.5
+  stability_threshold = 0.5,
+  use_parallel = FALSE,
+  n_workers = NULL,
+  parallel_seed = NULL,
+  globals_max_size = NULL
 ) {
   df <- as.data.frame(df)
 
@@ -357,6 +365,7 @@ run_lasso_selection <- function(
   if (length(candidate_vars) == 0) stop("No candidate variables with observed values remain for imputation/LASSO.")
 
   m <- max(1, as.integer(mi_m))
+  if (!is.null(parallel_seed)) set.seed(parallel_seed)
   imp <- mice::mice(
     df[, candidate_vars, drop = FALSE],
     m = m,
@@ -369,7 +378,30 @@ run_lasso_selection <- function(
   final_models  <- vector("list", m)
   family_type <- if (is_logit) "binomial" else "gaussian"
 
-  for (i in seq_len(m)) {
+  map_fun <- lapply
+  if (isTRUE(use_parallel)) {
+    if (!requireNamespace("future", quietly = TRUE) || !requireNamespace("future.apply", quietly = TRUE)) {
+      stop("Parallel LASSO requires packages 'future' and 'future.apply'.")
+    }
+    old_plan <- future::plan()
+    on.exit(future::plan(old_plan), add = TRUE)
+    old_max_size <- getOption("future.globals.maxSize")
+    on.exit(options(future.globals.maxSize = old_max_size), add = TRUE)
+    if (is.null(globals_max_size)) {
+      globals_max_size <- max(2 * 1024^3, old_max_size %||% 0)
+    }
+    options(future.globals.maxSize = globals_max_size)
+    workers <- if (is.null(n_workers)) future::availableCores() else as.integer(n_workers)
+    future::plan(future::multisession, workers = workers)
+    map_fun <- function(x, fun) {
+      future.apply::future_lapply(x, fun,
+        future.seed = if (is.null(parallel_seed)) TRUE else parallel_seed
+      )
+    }
+  }
+
+  selection_results <- map_fun(seq_len(m), function(i) {
+    if (!is.null(parallel_seed)) set.seed(parallel_seed + i)
     df_imp <- df
     df_imp[, candidate_vars] <- mice::complete(imp, action = i)
 
@@ -390,8 +422,7 @@ run_lasso_selection <- function(
     X_lasso <- X_lasso[, keep_cols, drop = FALSE]
 
     if (ncol(X_lasso) == 0) {
-      selected_list[[i]] <- character(0)
-      next
+      return(list(selected = character(0)))
     }
 
     X_full <- if (ncol(X_core) > 0) cbind(X_core, X_lasso) else X_lasso
@@ -411,8 +442,10 @@ run_lasso_selection <- function(
     sel <- rownames(coefs)[as.numeric(coefs) != 0]
     sel <- setdiff(sel, "(Intercept)")
     sel <- intersect(sel, colnames(X_lasso))
-    selected_list[[i]] <- sel
-  }
+    list(selected = sel)
+  })
+
+  selected_list <- lapply(selection_results, `[[`, "selected")
 
   all_selected <- unique(unlist(selected_list))
   if (length(all_selected) == 0) stop("No covariates selected across imputations.")
@@ -421,7 +454,8 @@ run_lasso_selection <- function(
   final_selected <- names(selection_freq)[selection_freq >= stability_threshold]
   if (length(final_selected) == 0) stop("No covariates stable across imputations.")
 
-  for (i in seq_len(m)) {
+  final_models <- map_fun(seq_len(m), function(i) {
+    if (!is.null(parallel_seed)) set.seed(parallel_seed + 1000L + i)
     df_imp <- df
     df_imp[, candidate_vars] <- mice::complete(imp, action = i)
 
@@ -432,12 +466,12 @@ run_lasso_selection <- function(
     rhs_i <- rhs_i[rhs_i %in% names(df_imp)]
     final_formula_i <- stats::as.formula(paste(y_var, "~", paste(rhs_i, collapse = " + ")))
 
-    final_models[[i]] <- if (family_type == "gaussian") {
+    if (family_type == "gaussian") {
       stats::lm(final_formula_i, data = df_imp)
     } else {
       stats::glm(final_formula_i, data = df_imp, family = stats::binomial())
     }
-  }
+  })
 
   final_models <- final_models[!vapply(final_models, is.null, logical(1))]
   if (length(final_models) == 0) stop("All post-LASSO refits failed.")

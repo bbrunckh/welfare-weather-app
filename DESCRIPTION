@@ -49,6 +49,8 @@ Imports:
     tools,
     ranger,
     pkgload,
-    igraph
+    igraph,
+    future,
+    future.apply
 URL: https://github.com/worldbank/welfare-weather-app
 BugReports: https://github.com/worldbank/welfare-weather-app/issues
