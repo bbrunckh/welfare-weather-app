@@ -9,9 +9,11 @@
 # Usage: source("dev/run_mod1_batch_BB.R")
 # =============================================================================
 
-rm(list = ls())
-pkgload::load_all(quiet = TRUE)
-source("dev/expand_weather_specs.R") 
+if (!exists(".batch_loaded") || !isTRUE(.batch_loaded)) {
+  pkgload::load_all(quiet = TRUE)
+  invisible(lapply(list.files("batch/R", pattern = "\\.R$", full.names = TRUE), source))
+  .batch_loaded <- TRUE
+}
 
 # =============================================================================
 # SECTION 1 — CONFIGURATION
@@ -20,24 +22,24 @@ source("dev/expand_weather_specs.R")
 # ---- Data source (mod_0) ---------------------------------------------------
 # "local"      -> e.g., set WISEAPP_DATA_PATH in .Renviron
 # "databricks" -> credentials from .Renviron (DATABRICKS_HOST, etc.)
-CONNECTION_TYPE <- "databricks" #"local"
-DATA_DIR        <- Sys.getenv("WISEAPP_DATA_PATH")
-OUT_DIR         <- "dev/outputs/"
+if (!exists("CONNECTION_TYPE")) CONNECTION_TYPE <- "local"
+if (!exists("DATA_DIR"))        DATA_DIR        <- Sys.getenv("WISEAPP_DATA_PATH")
+if (!exists("OUT_DIR"))         OUT_DIR         <- "dev/outputs/"
 
 # ---- Unit of analysis -------------------------------------------------------
-UNIT <- "hh"   # "hh", "ind", or "firm"
+if (!exists("UNIT")) UNIT <- "hh"   # "hh", "ind", or "firm"
 
 # ---- Sample mode ------------------------------------------------------------
-POOL_COUNTRIES <- FALSE    # TRUE = one pooled model; FALSE = per-country
+if (!exists("POOL_COUNTRIES")) POOL_COUNTRIES <- FALSE   # TRUE = one pooled model; FALSE = per-country
 
 # ---- Country / survey sample (mod_1_01) [GRID when !POOL_COUNTRIES] --------
 # NULL = all available; c(...) = subset
-COUNTRY_FILTER <- "GNB"
+if (!exists("COUNTRY_FILTER")) COUNTRY_FILTER <- "GNB"
 
 # ---- Outcome variable (mod_1_03) -------------------------------------------
-OUTCOME_NAME <- "welfare"
-CURRENCY     <- "PPP"
-POVERTY_LINE <- 3
+if (!exists("OUTCOME_NAME")) OUTCOME_NAME <- "welfare"
+if (!exists("CURRENCY"))     CURRENCY     <- "PPP"
+if (!exists("POVERTY_LINE")) POVERTY_LINE <- 3
 
 # ---- Weather specs (mod_1_04) [GRID] ---------------------------------------
 # Named list of weather profiles. Each profile maps weather variables to their
@@ -48,73 +50,83 @@ POVERTY_LINE <- 3
 #   list(t_r_12m = list(t = list(ref_start = 1L, ref_end = 12L, transformation = "continuous"),
 #                       r = list(ref_start = 1L, ref_end = 12L, transformation = "continuous")))
 
-WEATHER_SPECS <- c(
-  expand_weather_specs(
-    "t", c(12L),
-    c("binned"),
-    c("None", "Deviation from mean"),
-    ref_starts = 1L        # start month (months before interview); 1 = most recent
+if (!exists("WEATHER_SPECS")) {
+  WEATHER_SPECS <- c(
+    expand_weather_specs(
+      "t", c(12L),
+      c("binned"),
+      c("None", "Deviation from mean"),
+      ref_starts = 1L        # start month (months before interview); 1 = most recent
+    )
   )
-)
+}
 
 # ---- Weather defaults (used when a profile omits a setting) -----------------
-WEATHER_TRANSFORMATION <- "None"
-N_BINS               <- 5L
-BINNING_METHOD       <- "Equal frequency"
-CUSTOM_BREAKS        <- NULL
-POLYNOMIAL           <- character(0)
-WEATHER_AGG_OVERRIDE <- NULL
+if (!exists("WEATHER_TRANSFORMATION")) WEATHER_TRANSFORMATION <- "None"
+if (!exists("N_BINS"))               N_BINS               <- 5L
+if (!exists("BINNING_METHOD"))       BINNING_METHOD       <- "Equal frequency"
+if (!exists("CUSTOM_BREAKS"))        CUSTOM_BREAKS        <- NULL
+if (!exists("POLYNOMIAL"))           POLYNOMIAL           <- character(0)
+if (!exists("WEATHER_AGG_OVERRIDE")) WEATHER_AGG_OVERRIDE <- NULL
 
 # ---- Model type (mod_1_06) [GRID] ------------------------------------------
 # "Linear regression", "Quantile regression (RIF)", "Logistic regression"
-MODEL_TYPE <- c("Linear regression", "Quantile regression (RIF)")
+if (!exists("MODEL_TYPE")) MODEL_TYPE <- c("Linear regression", "Quantile regression (RIF)")
 
 # ---- Interactions (mod_1_06) [GRID] ----------------------------------------
 # character(0) = no interaction; each entry interacts that variable with weather
-INTERACTIONS <- list(character(0), "urban", "electricity", "imp_wat_rec", "imp_san_rec", "ttime_health")
+if (!exists("INTERACTIONS")) INTERACTIONS <- list(character(0), "urban", "electricity", "imp_wat_rec", "imp_san_rec", "ttime_health")
 
 # ---- Fixed effects (mod_1_06) [GRID] ---------------------------------------
 # Named list of FE profiles. Values are character vectors passed to fixest.
-FIXED_EFFECTS <- list(
-  year_admin1 = c("year", "gaul1_code"),
-  year_loc = c("year", "loc_id_panel")
-  # year_only = c("year")
-)
+if (!exists("FIXED_EFFECTS")) {
+  FIXED_EFFECTS <- list(
+    year_admin1 = c("year", "gaul1_code"),
+    year_loc    = c("year", "loc_id_panel")
+    # year_only = c("year")
+  )
+}
 
 # ---- Covariate specs [GRID] ------------------------------------------------
 # Named list of covariate profiles. Each must have `method` ("User-defined" or
 # "Lasso"). User-defined profiles supply covariates by role.
-COVARIATE_SPECS <- list(
-  hhsize_urban_area = list(
-    method = "User-defined",
-    ind = character(0), hh = c("hhsize", "urban"),
-    firm = character(0), area = c("area_h3_7")
+if (!exists("COVARIATE_SPECS")) {
+  COVARIATE_SPECS <- list(
+    hhsize_urban_area = list(
+      method = "User-defined",
+      ind = character(0), hh = c("hhsize", "urban"),
+      firm = character(0), area = c("area_h3_7")
+    )
+    #, lasso = list(method = "Lasso")
   )
-  , lasso = list(method = "Lasso")
-)
+}
 
 # ---- Lasso settings --------------------------------------------------------
-LASSO_ALPHA       <- 1
-LASSO_LAMBDA      <- "lambda.1se"
-LASSO_NFOLDS      <- 10L
-LASSO_STANDARDIZE <- TRUE
-MI_M              <- 5L
-MI_MAXIT          <- 5L
-STABILITY_THRESHOLD <- 0.5
+if (!exists("LASSO_ALPHA"))         LASSO_ALPHA         <- 1
+if (!exists("LASSO_LAMBDA"))        LASSO_LAMBDA        <- "lambda.1se"
+if (!exists("LASSO_NFOLDS"))        LASSO_NFOLDS        <- 10L
+if (!exists("LASSO_STANDARDIZE"))   LASSO_STANDARDIZE   <- TRUE
+if (!exists("MI_M"))                MI_M                <- 5L
+if (!exists("MI_MAXIT"))            MI_MAXIT            <- 5L
+if (!exists("STABILITY_THRESHOLD")) STABILITY_THRESHOLD <- 0.5
 
-LASSO_FORCE_IN <- list(
-  ind = character(0), hh = character(0),
-  firm = character(0), area = character(0)
-)
-LASSO_FORCE_OUT <- list(
-  ind = character(0), hh = character(0),
-  firm = character(0), area = character(0)
-)
+if (!exists("LASSO_FORCE_IN")) {
+  LASSO_FORCE_IN <- list(
+    ind = character(0), hh = character(0),
+    firm = character(0), area = character(0)
+  )
+}
+if (!exists("LASSO_FORCE_OUT")) {
+  LASSO_FORCE_OUT <- list(
+    ind = character(0), hh = character(0),
+    firm = character(0), area = character(0)
+  )
+}
 
 # ---- Output -----------------------------------------------------------------
-OVERWRITE_EXISTING <- TRUE
-SAVE_PLOTS         <- TRUE
-SAVE_SUMMARY_STATS <- FALSE
+if (!exists("OVERWRITE_EXISTING")) OVERWRITE_EXISTING <- TRUE
+if (!exists("SAVE_PLOTS"))         SAVE_PLOTS         <- TRUE
+if (!exists("SAVE_SUMMARY_STATS")) SAVE_SUMMARY_STATS <- FALSE
 
 # =============================================================================
 # SECTION 2 — HELPERS
@@ -237,6 +249,8 @@ extract_one_fit <- function(fit, model_label, code, wx_label, wx_vars,
 # =============================================================================
 
 dir.create(OUT_DIR, showWarnings = FALSE, recursive = TRUE)
+dir.create(file.path(OUT_DIR, "model"), showWarnings = FALSE, recursive = TRUE)
+OUT_MODEL <- file.path(OUT_DIR, "model")
 
 connection_params <- if (identical(CONNECTION_TYPE, "databricks")) {
   build_connection_params("databricks")
@@ -589,7 +603,7 @@ for (si in SAMPLE_LABELS) {
       cat(sprintf("  [%d/%d] %s...", run_idx, nrow(grid), spec_label))
 
       if (!OVERWRITE_EXISTING &&
-          file.exists(file.path(OUT_DIR, si,
+          file.exists(file.path(OUT_MODEL, si,
                                 paste0("coefplot_", spec_label, ".png")))) {
         cat(" SKIP (exists)\n")
         next
@@ -762,7 +776,7 @@ for (si in SAMPLE_LABELS) {
 
       # Plots
       if (SAVE_PLOTS) {
-        sample_dir <- file.path(OUT_DIR, si)
+        sample_dir <- file.path(OUT_MODEL, si)
         dir.create(sample_dir, showWarnings = FALSE, recursive = TRUE)
 
         tryCatch({
@@ -810,12 +824,12 @@ for (si in SAMPLE_LABELS) {
         tryCatch({
           readr::write_csv(
             clean_names(dplyr::bind_rows(all_coefs)),
-            file.path(OUT_DIR, "_checkpoint_coefficients.csv")
+            file.path(OUT_MODEL, "_checkpoint_coefficients.csv")
           )
           if (length(all_fit_stats) > 0)
             readr::write_csv(
               clean_names(dplyr::bind_rows(all_fit_stats)),
-              file.path(OUT_DIR, "_checkpoint_fit_stats.csv")
+              file.path(OUT_MODEL, "_checkpoint_fit_stats.csv")
             )
           cat(sprintf("  [checkpoint @ %d]\n", run_idx))
         }, error = function(e) message("  checkpoint failed: ", conditionMessage(e)))
@@ -836,7 +850,7 @@ cat("\n=== Saving combined outputs ===\n")
 
 if (length(all_coefs) > 0) {
   summary_coefs <- clean_names(dplyr::bind_rows(all_coefs))
-  readr::write_csv(summary_coefs, file.path(OUT_DIR, "_summary_coefficients.csv"))
+  readr::write_csv(summary_coefs, file.path(OUT_MODEL, "model_coefficients.csv"))
   n_specs <- nrow(
     dplyr::filter(summary_coefs, model == "fit3") |>
       dplyr::distinct(code, weather, engine, fe_profile, cov_profile, interaction)
@@ -847,20 +861,20 @@ if (length(all_coefs) > 0) {
 
 if (length(all_fit_stats) > 0) {
   summary_stats <- clean_names(dplyr::bind_rows(all_fit_stats))
-  readr::write_csv(summary_stats, file.path(OUT_DIR, "_summary_fit_stats.csv"))
+  readr::write_csv(summary_stats, file.path(OUT_MODEL, "model_fit_stats.csv"))
   cat(sprintf("Fit stats: %d rows\n", nrow(summary_stats)))
 }
 
 if (length(all_wx_stats) > 0) {
   summary_wx <- clean_names(dplyr::bind_rows(all_wx_stats))
-  readr::write_csv(summary_wx, file.path(OUT_DIR, "_summary_weather_stats.csv"))
+  readr::write_csv(summary_wx, file.path(OUT_MODEL, "_summary_weather_stats.csv"))
   cat(sprintf("Weather stats: %d rows (%d specs)\n",
               nrow(summary_wx), nrow(dplyr::distinct(summary_wx, sample, weather))))
 }
 
 if (length(all_svy_stats) > 0) {
   summary_svy <- clean_names(dplyr::bind_rows(all_svy_stats))
-  readr::write_csv(summary_svy, file.path(OUT_DIR, "_summary_survey_stats.csv"))
+  readr::write_csv(summary_svy, file.path(OUT_MODEL, "_summary_survey_stats.csv"))
   cat(sprintf("Survey stats: %d rows, %d sample(s)\n",
               nrow(summary_svy), length(unique(summary_svy$sample))))
 }
@@ -868,7 +882,7 @@ if (length(all_svy_stats) > 0) {
 if (length(fail_log) > 0) {
   fail_df <- data.frame(spec_or_sample = names(fail_log),
                          reason = unlist(fail_log), stringsAsFactors = FALSE)
-  readr::write_csv(fail_df, file.path(OUT_DIR, "_failures.csv"))
+  readr::write_csv(fail_df, file.path(OUT_MODEL, "_failures.csv"))
   cat(sprintf("Failures: %d\n", nrow(fail_df)))
 }
 
@@ -880,13 +894,13 @@ if (length(skip_log) > 0) {
     interaction = vapply(skip_log, `[[`, character(1), "interaction"),
     stringsAsFactors = FALSE
   )
-  readr::write_csv(skip_df, file.path(OUT_DIR, "_interactions_not_available.csv"))
+  readr::write_csv(skip_df, file.path(OUT_MODEL, "_interactions_not_available.csv"))
   cat(sprintf("Interactions not available: %d skipped\n", nrow(skip_df)))
 }
 
 # Clean up checkpoint files now that final outputs are saved
 for (cp in c("_checkpoint_coefficients.csv", "_checkpoint_fit_stats.csv")) {
-  cp_path <- file.path(OUT_DIR, cp)
+  cp_path <- file.path(OUT_MODEL, cp)
   if (file.exists(cp_path)) {
     file.remove(cp_path)
     cat(sprintf("Removed checkpoint: %s\n", cp))

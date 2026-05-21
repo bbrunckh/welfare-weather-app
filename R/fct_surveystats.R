@@ -115,6 +115,31 @@ convert_lcu_to_ppp <- function(df, cpi_ppp_data, lcu_vars) {
 }
 
 # ---------------------------------------------------------------------------- #
+# Bottom code welfare (2021 PPP)                                          #
+# ---------------------------------------------------------------------------- #
+
+#' Bottom code welfare (2021 PPP)
+#'
+#' Replaces any welfare values below `floor_value` $/person/day (2021 PPP) with `floor_value`.
+#'
+#' @param df A data frame with column `welfare`
+#' @param floor_value A numeric value representing the minimum welfare value in $/person/day at 2021 PPP. 
+#'
+#' @return `df` with the 
+#'
+#' @export
+bottom_code_welfare <- function(df, floor_value = 0.28) {
+  if ("welfare" %in% colnames(df)) {
+    df |>
+      dplyr::mutate(
+        welfare = ifelse(welfare < floor_value, floor_value, welfare)
+      )
+  } else {
+    return(df)
+  }
+}
+
+# ---------------------------------------------------------------------------- #
 # Interview date summary                                                        #
 # ---------------------------------------------------------------------------- #
 

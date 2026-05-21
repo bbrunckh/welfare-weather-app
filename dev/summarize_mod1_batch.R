@@ -8,16 +8,16 @@
 library(tidyverse)
 library(patchwork)
 
-
 rm(list = ls())
 pkgload::load_all(quiet = TRUE)
 
 source("dev/spec_curve.R") # For the spec curve plotting code
 
-OUT_DIR         <- "dev/outputs"
+OUT_DIR         <- "dev/outputs/t/pooled"
 
 # coefficient summary
-coefs <- read.csv(file.path(OUT_DIR, "_summary_coefficients.csv"))
+coefs <- read.csv(file.path(OUT_DIR, "_summary_coefficients.csv")) |>
+  filter(is.na(interaction))
 
 # model fit summary
 fit_stats <- read.csv(file.path(OUT_DIR, "_summary_fit_stats.csv"))
@@ -86,28 +86,78 @@ spec_configs <- list(
   )
 )
 
-for (cfg in spec_configs) {
-  message("Generating: ", cfg$filename)
-  p <- plot_spec_curve(
-    data         = coefs,
-    term         = cfg$term,
-    term_regex   = cfg$term_regex,
-    estimands    = cfg$estimands,
-    model_filter = NULL,
-    spec_vars    = spec_vars_all,
-    rank_by      = if ("Mean" %in% cfg$estimands) "Mean" else if ("UQR p50" %in% cfg$estimands) "UQR p50" else cfg$estimands[[1]],
-    rank_by_bin = 4,
-    colour_by    = cfg$colour_by,
-    title        = cfg$title,
-    subtitle     = "Outcome: Log welfare",
-    y_label      = "Coefficient estimate (log welfare)"
-  )
-  ggplot2::ggsave(
-    file.path(OUT_DIR, cfg$filename),
-    plot = p, width = 14, height = 10, dpi = 300
-  )
-}
+# for (cfg in spec_configs) {
+#   message("Generating: ", cfg$filename)
+#   p <- plot_spec_curve(
+#     data         = coefs,
+#     term         = cfg$term,
+#     term_regex   = cfg$term_regex,
+#     estimands    = cfg$estimands,
+#     model_filter = "fit3",
+#     spec_vars    = spec_vars_all,
+#     rank_by      = if ("Mean" %in% cfg$estimands) "Mean" else if ("UQR p50" %in% cfg$estimands) "UQR p50" else cfg$estimands[[1]],
+#     rank_by_bin = 4,
+#     colour_by    = cfg$colour_by,
+#     title        = cfg$title,
+#     subtitle     = "Outcome: Log welfare",
+#     y_label      = "Coefficient estimate (log welfare)"
+#   )
+#   ggplot2::ggsave(
+#     file.path(OUT_DIR, cfg$filename),
+#     plot = p, width = 14, height = 10, dpi = 300
+#   )
+# }
 
 # =============================================================================
-# HEATPLOTS
+# By weather transformation
 # =============================================================================
+# Parse wx_transformation from the weather column (e.g. t_1m_cont_None -> "None")
+# Uses the same regex as spec_curve.R
+coefs <- coefs |>
+  dplyr::mutate(
+    .wx_suffix = stringr::str_match(weather, "^.+?_\\d+m_(?:cont|binn)_?(.*)$")[, 2],
+    wx_transformation = dplyr::case_when(
+      is.na(.wx_suffix) | .wx_suffix == "" | .wx_suffix == "None" ~ "None",
+      .wx_suffix == "Devi" ~ "Deviation from mean",
+      .wx_suffix == "Stan" ~ "Standardized anomaly",
+      TRUE ~ .wx_suffix
+    )
+  ) |>
+  dplyr::select(-.wx_suffix)
+
+wx_transforms <- sort(unique(coefs$wx_transformation))
+
+for (wx_tr in wx_transforms) {
+  coefs_tr <- dplyr::filter(coefs, wx_transformation == wx_tr)
+
+  # Safe file-name suffix: replace spaces/special chars with underscores
+  wx_tr_slug <- stringr::str_replace_all(wx_tr, "[^A-Za-z0-9]+", "_")
+
+  for (cfg in spec_configs) {
+    fname <- sub("(\\.png)$", paste0("_", wx_tr_slug, "\\1"), cfg$filename)
+    message("Generating: ", fname, "  [wx_transformation = ", wx_tr, "]")
+
+    tryCatch({
+      p <- plot_spec_curve(
+        data         = coefs_tr,
+        term         = cfg$term,
+        term_regex   = cfg$term_regex,
+        estimands    = cfg$estimands,
+        model_filter = "fit3",
+        spec_vars    = spec_vars_all,
+        rank_by      = if ("Mean" %in% cfg$estimands) "Mean" else if ("UQR p50" %in% cfg$estimands) "UQR p50" else cfg$estimands[[1]],
+        rank_by_bin  = 4,
+        colour_by    = cfg$colour_by,
+        title        = paste0(cfg$title, " [", wx_tr, "]"),
+        subtitle     = "Outcome: Log welfare",
+        y_label      = "Coefficient estimate (log welfare)"
+      )
+      ggplot2::ggsave(
+        file.path(OUT_DIR, fname),
+        plot = p, width = 14, height = 10, dpi = 300
+      )
+    }, error = function(e) {
+      message("Error generating plot for wx_transformation = ", wx_tr, ": ", e$message)
+    })
+  }
+}

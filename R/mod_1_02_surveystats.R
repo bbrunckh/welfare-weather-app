@@ -102,6 +102,7 @@ mod_1_02_surveystats_server <- function(
       df       <- df |>
         assign_data_level() |>
         convert_lcu_to_ppp(cpi_ppp(), lcu_vars) |>
+        bottom_code_welfare(0.28) |>
         apply_policy_derivations()
 
       survey_data(df)
