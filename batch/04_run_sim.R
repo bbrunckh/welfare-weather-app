@@ -1,12 +1,24 @@
 # =============================================================================
-# batch/04_run_all.R
+# batch/04_run_sim.R
 #
-# Orchestrator: runs the full WISE-APP batch pipeline in sequence.
-# Sets all config once here, then sources 01 → 02 → 03 in order.
-# Sub-scripts use if(!exists(...)) guards so they inherit these values.
+# Batch model fitting + simulations across countries and specifications.
+# 
+# Outputs:
+#   OUT_DIR/model_fit/model_coefficients.csv
+#   OUT_DIR/model_fit/model_fit_stats.csv
+#   OUT_DIR/model_fit/_failures.csv (error logging)
+#   OUT_DIR/simulations/outcomes.csv
+#   OUT_DIR/simulations/sim_stats.csv
+#   OUT_DIR/simulations/_failures.csv (error logging)
 #
-# Usage: source("batch/04_run_all.R")
+# All user inputs are set in SECTION 1. Vector-valued settings (marked [GRID])
+# expand into separate runs via expand.grid(); scalar settings apply uniformly.
+#
 # =============================================================================
+
+# Load helpers
+pkgload::load_all(quiet = TRUE)
+invisible(lapply(list.files("batch/R", pattern = "\\.R$", full.names = TRUE), source))
 
 # =============================================================================
 # SECTION 1 — UNIFIED CONFIGURATION
@@ -77,22 +89,9 @@ LASSO_FORCE_OUT <- list(ind = character(0), hh = character(0),
 SAVE_PLOTS         <- TRUE
 SAVE_SUMMARY_STATS <- FALSE
 
-# =============================================================================
-# SECTION 2 — LOAD PACKAGES AND HELPERS
-# =============================================================================
-
-pkgload::load_all(quiet = TRUE)
-invisible(lapply(list.files("batch/R", pattern = "\\.R$", full.names = TRUE), source))
-.batch_loaded <- TRUE
-
-# ---- Weather specs (defined after helpers are loaded) ----------------------
-WEATHER_SPECS <- c(
-  expand_weather_specs("t", c(1L, 3L, 6L, 12L), c("continuous"), c("None"), ref_starts = 1L),
-  expand_weather_specs("r", c(1L, 3L, 6L, 12L), c("continuous"), c("None"), ref_starts = 1L)
-)
 
 # =============================================================================
-# SECTION 3 — RUN PIPELINE
+# SECTION 2 — RUN PIPELINE
 # =============================================================================
 
 cat("================================================================\n")
@@ -103,18 +102,8 @@ cat(sprintf("Filter:   %s\n", if (is.null(COUNTRY_FILTER)) "all countries"
             else paste(COUNTRY_FILTER, collapse = ", ")))
 cat("================================================================\n\n")
 
-cat("=== Step 1: Survey stats ===\n")
-source("batch/01_survey_stats.R", local = FALSE)
+cat("\n=== Step 1: Model fitting ===\n")
 
-cat("\n=== Step 2: Weather stats ===\n")
-source("batch/02_weather_stats.R", local = FALSE)
+cat("\n=== Step 2: Climate simulations ===\n")
 
-cat("\n=== Step 3: Model fitting ===\n")
-source("batch/03_run_mod1.R", local = FALSE)
-
-# Step 4 (simulations) — to be implemented in batch/04b_simulations.R
-
-cat("\n================================================================\n")
-cat("Pipeline complete.\n")
-cat(sprintf("Outputs written to: %s\n", normalizePath(OUT_DIR, mustWork = FALSE)))
-cat("================================================================\n")
+cat("\n=== Step 3: Policy simulations ===\n")

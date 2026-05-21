@@ -11,6 +11,10 @@
 #
 # =============================================================================
 
+# Load helpers
+pkgload::load_all(quiet = TRUE)
+invisible(lapply(list.files("batch/R", pattern = "\\.R$", full.names = TRUE), source))
+
 # =============================================================================
 # SECTION 1 — CONFIGURATION
 # =============================================================================
@@ -53,10 +57,6 @@ OVERWRITE_EXISTING <- TRUE
 # =============================================================================
 # SECTION 2 — SETUP
 # =============================================================================
-
-# Load helpers and build connection params based on config vars above
-pkgload::load_all(quiet = TRUE)
-invisible(lapply(list.files("batch/R", pattern = "\\.R$", full.names = TRUE), source))
 
 # Output directories
 OUT_WEATHER  <- file.path(OUT_DIR, "weather_stats")
