@@ -310,10 +310,15 @@ mod_2_02_results_server <- function(id,
       if (!is.null(F_full) && is.null(dim(F_full))) {
         F_full <- matrix(F_full, nrow = 1L)
       }
+
+      # Filter to non-NA y_point rows only (NA rows cause non-finite h,
+      # which silently zeros out F_agg and var_coef)
+      valid  <- idx & !is.na(pipe$y_point)
+
       F_idx <- if (!is.null(F_full) && !isTRUE(skip_coef_draws()))
-                 F_full[idx, , drop = FALSE] else NULL
-      w_idx <- if (weighted && !is.null(pipe$weight)) pipe$weight[idx] else NULL
-      id_idx <- if (!is.null(pipe$id_vec)) pipe$id_vec[idx] else NULL
+                 F_full[valid, , drop = FALSE] else NULL
+      w_idx <- if (weighted && !is.null(pipe$weight)) pipe$weight[valid] else NULL
+      id_idx <- if (!is.null(pipe$id_vec)) pipe$id_vec[valid] else NULL
       # RIF pipelines set train_aug = NULL by construction (fct_simulations.R).
       # If the residuals selector still says "original" or "resample", honour
       # the pipeline by falling back to "none" so draw_residuals_vec doesn't
@@ -322,7 +327,7 @@ mod_2_02_results_server <- function(id,
       if (is.null(pipe$train_aug) && !identical(res_mode, "none"))
         res_mode <- "none"
       aggregate_with_uncertainty_delta(
-        y_point      = pipe$y_point[idx],
+        y_point      = pipe$y_point[valid],
         F_loading    = F_idx,
         method       = method,
         weights      = w_idx,
