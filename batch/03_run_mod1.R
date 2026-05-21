@@ -11,7 +11,6 @@
 # All user inputs are set in SECTION 1. Vector-valued settings (marked [GRID])
 # expand into separate runs via expand.grid(); scalar settings apply uniformly.
 #
-# Usage: source("batch/03_run_mod1.R")
 # =============================================================================
 
 pkgload::load_all(quiet = TRUE)
@@ -55,8 +54,8 @@ POVERTY_LINE <- 3
 WEATHER_SPECS <- c(
   expand_weather_specs(
     "t", c(12L),
-    transformations = "binned",
-    var_constructions = c("None", "Deviation from mean"),
+    transformations = "continuous",
+    var_constructions = c("None"),
     ref_starts = 1L        # start month (months before interview); 1 = most recent
   )
 )
@@ -75,7 +74,7 @@ MODEL_TYPE <- c("Linear regression", "Quantile regression (RIF)")
 
 # ---- Interactions (mod_1_06) [GRID] ----------------------------------------
 # character(0) = no interaction; each entry interacts that variable with weather
-INTERACTIONS <- list(character(0), "urban", "electricity", "imp_wat_rec", "imp_san_rec", "ttime_health")
+INTERACTIONS <- list(character(0))
 
 # ---- Fixed effects (mod_1_06) [GRID] ---------------------------------------
 # Named list of FE profiles. Values are character vectors passed to fixest.
@@ -93,8 +92,8 @@ COVARIATE_SPECS <- list(
     method = "User-defined",
     ind = character(0), hh = c("hhsize", "urban"),
     firm = character(0), area = c("area_h3_7")
-  )
-  #, lasso = list(method = "Lasso")
+  ), 
+  lasso = list(method = "Lasso")
 )
 
 # ---- Lasso settings --------------------------------------------------------
@@ -105,6 +104,10 @@ LASSO_STANDARDIZE   <- TRUE
 MI_M                <- 5L
 MI_MAXIT            <- 5L
 STABILITY_THRESHOLD <- 0.5
+LASSO_USE_PARALLEL  <- TRUE
+LASSO_N_WORKERS     <- NULL
+LASSO_PARALLEL_SEED <- NULL
+LASSO_GLOBALS_MAX   <- NULL
 
 LASSO_FORCE_IN <- list(
   ind = character(0), hh = character(0),
@@ -123,7 +126,11 @@ OVERWRITE_EXISTING <- TRUE
 # =============================================================================
 
 clean_names <- function(df) {
-# ...existing code...
+  nms <- tolower(names(df))
+  nms <- gsub("[. ]+", "_", nms)
+  nms <- gsub("_+$", "", nms)
+  names(df) <- nms
+  df
 }
 
 # Replicates the UI's .fixest_coeftable() fallback chain and returns a
@@ -235,8 +242,8 @@ extract_one_fit <- function(fit, model_label, code, wx_label, wx_vars,
 # =============================================================================
 
 dir.create(OUT_DIR, showWarnings = FALSE, recursive = TRUE)
-dir.create(file.path(OUT_DIR, "model"), showWarnings = FALSE, recursive = TRUE)
-OUT_MODEL <- file.path(OUT_DIR, "model")
+dir.create(file.path(OUT_DIR, "model_fit"), showWarnings = FALSE, recursive = TRUE)
+OUT_MODEL <- file.path(OUT_DIR, "model_fit")
 
 connection_params <- if (identical(CONNECTION_TYPE, "databricks")) {
   build_connection_params("databricks")
@@ -302,9 +309,9 @@ cat(sprintf(
 
 all_coefs     <- list()
 all_fit_stats <- list()
-all_wx_stats  <- list()
-all_fit_stats <- list()
-run_idxg      <- list()
+run_idx       <- 0L
+fail_log      <- list()
+skip_log      <- list()
 seen_fit1     <- character(0)
 seen_fit2     <- character(0)
 
@@ -514,6 +521,8 @@ for (si in SAMPLE_LABELS) {
                                     group_cols = c("code", "year", "survname"),
                                     outcome = OUTCOME_NAME)
       valid_vl <- valid_vl[!valid_vl$name %in% exclude_cols, , drop = FALSE]
+      # Exclude post-treatment variables (outcome == 1) — matches app behaviour
+      valid_vl <- exclude_selected_vars(valid_vl)
 
       lasso_selected_vars <- NA_character_
 
@@ -531,7 +540,10 @@ for (si in SAMPLE_LABELS) {
             model_type = cur_model_type, alpha = LASSO_ALPHA,
             lambda_choice = LASSO_LAMBDA, nfolds = LASSO_NFOLDS,
             standardize = LASSO_STANDARDIZE, mi_m = MI_M,
-            mi_maxit = MI_MAXIT, stability_threshold = STABILITY_THRESHOLD
+            mi_maxit = MI_MAXIT, stability_threshold = STABILITY_THRESHOLD,
+            use_parallel = LASSO_USE_PARALLEL, n_workers = LASSO_N_WORKERS,
+            parallel_seed = LASSO_PARALLEL_SEED,
+            globals_max_size = LASSO_GLOBALS_MAX
           ),
           error = function(e) { message(" LASSO: ", conditionMessage(e)); NULL }
         )
