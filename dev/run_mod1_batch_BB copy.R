@@ -1,21 +1,17 @@
 # =============================================================================
-# batch/03_run_mod1.R
+# dev/run_mod1_batch_BB.R
 #
 # Batch Module 1 model fitting across countries and specifications.
-# 
-# Outputs:
-#   OUT_DIR/model_fit/model_coefficients.csv
-#   OUT_DIR/model_fit/model_fit_stats.csv
-#   OUT_DIR/model_fit/_failures.csv (error logging)
 #
 # All user inputs are set in SECTION 1. Vector-valued settings (marked [GRID])
 # expand into separate runs via expand.grid(); scalar settings apply uniformly.
 #
-# Usage: source("batch/03_run_mod1.R")
+# Usage: source("dev/run_mod1_batch_BB.R")
 # =============================================================================
 
+rm(list = ls())
 pkgload::load_all(quiet = TRUE)
-invisible(lapply(list.files("batch/R", pattern = "\\.R$", full.names = TRUE), source))
+source("dev/expand_weather_specs.R") 
 
 # =============================================================================
 # SECTION 1 — CONFIGURATION
@@ -32,7 +28,7 @@ OUT_DIR         <- "dev/outputs/"
 UNIT <- "hh"   # "hh", "ind", or "firm"
 
 # ---- Sample mode ------------------------------------------------------------
-POOL_COUNTRIES <- FALSE   # TRUE = one pooled model; FALSE = per-country
+POOL_COUNTRIES <- FALSE    # TRUE = one pooled model; FALSE = per-country
 
 # ---- Country / survey sample (mod_1_01) [GRID when !POOL_COUNTRIES] --------
 # NULL = all available; c(...) = subset
@@ -55,19 +51,19 @@ POVERTY_LINE <- 3
 WEATHER_SPECS <- c(
   expand_weather_specs(
     "t", c(12L),
-    transformations = "binned",
-    var_constructions = c("None", "Deviation from mean"),
+    c("binned"),
+    c("None", "Deviation from mean"),
     ref_starts = 1L        # start month (months before interview); 1 = most recent
   )
 )
 
 # ---- Weather defaults (used when a profile omits a setting) -----------------
 WEATHER_TRANSFORMATION <- "None"
-N_BINS                 <- 5L
-BINNING_METHOD         <- "Equal frequency"
-CUSTOM_BREAKS          <- NULL
-POLYNOMIAL             <- character(0)
-WEATHER_AGG_OVERRIDE   <- NULL
+N_BINS               <- 5L
+BINNING_METHOD       <- "Equal frequency"
+CUSTOM_BREAKS        <- NULL
+POLYNOMIAL           <- character(0)
+WEATHER_AGG_OVERRIDE <- NULL
 
 # ---- Model type (mod_1_06) [GRID] ------------------------------------------
 # "Linear regression", "Quantile regression (RIF)", "Logistic regression"
@@ -81,7 +77,7 @@ INTERACTIONS <- list(character(0), "urban", "electricity", "imp_wat_rec", "imp_s
 # Named list of FE profiles. Values are character vectors passed to fixest.
 FIXED_EFFECTS <- list(
   year_admin1 = c("year", "gaul1_code"),
-  year_loc    = c("year", "loc_id_panel")
+  year_loc = c("year", "loc_id_panel")
   # year_only = c("year")
 )
 
@@ -98,12 +94,12 @@ COVARIATE_SPECS <- list(
 )
 
 # ---- Lasso settings --------------------------------------------------------
-LASSO_ALPHA         <- 1
-LASSO_LAMBDA        <- "lambda.1se"
-LASSO_NFOLDS        <- 10L
-LASSO_STANDARDIZE   <- TRUE
-MI_M                <- 5L
-MI_MAXIT            <- 5L
+LASSO_ALPHA       <- 1
+LASSO_LAMBDA      <- "lambda.1se"
+LASSO_NFOLDS      <- 10L
+LASSO_STANDARDIZE <- TRUE
+MI_M              <- 5L
+MI_MAXIT          <- 5L
 STABILITY_THRESHOLD <- 0.5
 
 LASSO_FORCE_IN <- list(
@@ -117,13 +113,19 @@ LASSO_FORCE_OUT <- list(
 
 # ---- Output -----------------------------------------------------------------
 OVERWRITE_EXISTING <- TRUE
+SAVE_PLOTS         <- TRUE
+SAVE_SUMMARY_STATS <- FALSE
 
 # =============================================================================
 # SECTION 2 — HELPERS
 # =============================================================================
 
 clean_names <- function(df) {
-# ...existing code...
+  nms <- tolower(names(df))
+  nms <- gsub("[. ]+", "_", nms)
+  nms <- gsub("_+$", "", nms)
+  names(df) <- nms
+  df
 }
 
 # Replicates the UI's .fixest_coeftable() fallback chain and returns a
@@ -235,8 +237,6 @@ extract_one_fit <- function(fit, model_label, code, wx_label, wx_vars,
 # =============================================================================
 
 dir.create(OUT_DIR, showWarnings = FALSE, recursive = TRUE)
-dir.create(file.path(OUT_DIR, "model"), showWarnings = FALSE, recursive = TRUE)
-OUT_MODEL <- file.path(OUT_DIR, "model")
 
 connection_params <- if (identical(CONNECTION_TYPE, "databricks")) {
   build_connection_params("databricks")
@@ -266,6 +266,11 @@ cat(sprintf("Countries: %d (%s)\n\n", length(COUNTRIES),
 # =============================================================================
 # SECTION 4 — COMBINATION GRID
 # =============================================================================
+
+DEFAULT_AGG <- c(t = "Mean", r = "Sum")
+weather_agg_for <- function(var) {
+  WEATHER_AGG_OVERRIDE[[var]] %||% DEFAULT_AGG[[var]] %||% "Mean"
+}
 
 if (POOL_COUNTRIES) {
   if (is.null(COUNTRY_FILTER) || length(COUNTRY_FILTER) == length(COUNTRIES)) {
@@ -303,8 +308,10 @@ cat(sprintf(
 all_coefs     <- list()
 all_fit_stats <- list()
 all_wx_stats  <- list()
-all_fit_stats <- list()
-run_idxg      <- list()
+all_svy_stats <- list()
+run_idx       <- 0L
+fail_log      <- list()
+skip_log      <- list()
 seen_fit1     <- character(0)
 seen_fit2     <- character(0)
 
@@ -338,7 +345,6 @@ for (si in SAMPLE_LABELS) {
     df |>
       assign_data_level() |>
       convert_lcu_to_ppp(cpi_ppp, lcu_vars) |>
-      bottom_code_welfare(0.28) |>
       apply_policy_derivations()
   }, error = function(e) { message("  load failed: ", conditionMessage(e)); NULL })
 
@@ -377,6 +383,44 @@ for (si in SAMPLE_LABELS) {
             conditionMessage(e))
   })
 
+  # Survey summary stats (once per sample)
+  if (SAVE_SUMMARY_STATS) {
+    tryCatch({
+      svy_stat_vars <- union(
+        intersect(
+          var_info$name[var_info$ind == 1 | var_info$hh == 1 |
+                        var_info$firm == 1 | var_info$area == 1],
+          names(svy_base)
+        ),
+        intersect(c("imp_wat_san_rec"), names(svy_base))
+      )
+      svy_stats <- weighted_summary_long(svy_base, vars = svy_stat_vars)
+      if (nrow(svy_stats) > 0) {
+        numeric_vars <- svy_stat_vars[vapply(svy_base[svy_stat_vars],
+                                             is.numeric, logical(1))]
+        miss_list <- lapply(numeric_vars, function(v) {
+          svy_base |>
+            dplyr::group_by(countryyear) |>
+            dplyr::summarise(pct_missing = 100 * mean(is.na(.data[[v]])),
+                             .groups = "drop") |>
+            dplyr::mutate(variable = v)
+        })
+        if (length(miss_list) > 0) {
+          svy_stats <- dplyr::left_join(svy_stats, dplyr::bind_rows(miss_list),
+                                        by = c("countryyear", "variable"))
+        }
+        svy_stats$sample <- si
+        all_svy_stats[[length(all_svy_stats) + 1L]] <- svy_stats
+        cat(sprintf("  Survey stats: %d variables\n", length(numeric_vars)))
+      }
+    }, error = function(e) message("  survey stats failed: ", conditionMessage(e)))
+  }
+
+  # Denominator for weather pct_missing (original survey, not merged)
+  base_n_by_cy <- svy_base |>
+    dplyr::mutate(countryyear = paste0(.data$economy, ", ", .data$year)) |>
+    dplyr::count(countryyear, name = "n_total")
+
   wx_profiles <- unique(grid$weather[grid$sample == si])
 
   # Step 2 — Loop over weather profiles
@@ -389,7 +433,7 @@ for (si in SAMPLE_LABELS) {
       vs <- wx_prof[[v]]
       p  <- paste0(v, "_")
       spec_inputs[[paste0(p, "relativePeriod")]]  <- c(vs$ref_start %||% 1L, vs$ref_end)
-      spec_inputs[[paste0(p, "temporalAgg")]]     <- vs$temporal_agg %||% weather_agg_for(v, get_weather_vars(var_info), WEATHER_AGG_OVERRIDE)
+      spec_inputs[[paste0(p, "temporalAgg")]]     <- vs$temporal_agg %||% weather_agg_for(v)
       spec_inputs[[paste0(p, "varConstruction")]]  <- vs$weather_transformation %||% WEATHER_TRANSFORMATION
       spec_inputs[[paste0(p, "contOrBinned")]]     <- if (vs$transformation == "binned") "Binned" else "Continuous"
       spec_inputs[[paste0(p, "numBins")]]          <- vs$n_bins %||% N_BINS
@@ -436,6 +480,93 @@ for (si in SAMPLE_LABELS) {
 
     wx_col_names <- intersect(selected_weather$name, names(svy_wx))
 
+    # Weather summary stats (once per sample x weather profile)
+    if (SAVE_SUMMARY_STATS) {
+      tryCatch({
+        df_wx <- svy_wx |>
+          dplyr::mutate(countryyear = paste0(.data$economy, ", ", .data$year))
+        vars <- intersect(selected_weather$name, names(df_wx))
+
+        if (length(vars) > 0) {
+          is_num  <- vapply(df_wx[vars], is.numeric, logical(1))
+          spec_id <- data.frame(sample = si, weather = wx_name,
+                                stringsAsFactors = FALSE)
+
+          # Continuous variables
+          cont_vars <- vars[is_num]
+          if (length(cont_vars) > 0) {
+            wx_tab <- weighted_summary_long(df_wx, vars = cont_vars)
+            if (nrow(wx_tab) > 0) {
+              miss_df <- dplyr::bind_rows(lapply(cont_vars, function(v) {
+                n_present <- df_wx |>
+                  dplyr::filter(!is.na(.data[[v]])) |>
+                  dplyr::count(countryyear, name = "n_present")
+                base_n_by_cy |>
+                  dplyr::left_join(n_present, by = "countryyear") |>
+                  dplyr::mutate(
+                    n_present   = ifelse(is.na(n_present), 0L, n_present),
+                    pct_missing = round(100 * (1 - n_present / n_total), 2),
+                    variable    = v
+                  ) |>
+                  dplyr::select(countryyear, pct_missing, variable)
+              }))
+              wx_tab <- dplyr::left_join(wx_tab, miss_df,
+                                         by = c("countryyear", "variable"))
+              wx_tab$type      <- "continuous"
+              wx_tab$level     <- NA_character_
+              wx_tab$n_bin     <- NA_integer_
+              wx_tab$share_pct <- NA_real_
+              wx_tab <- cbind(spec_id[rep(1L, nrow(wx_tab)), , drop = FALSE],
+                              wx_tab)
+              all_wx_stats[[length(all_wx_stats) + 1L]] <- wx_tab
+            }
+          }
+
+          # Binned variables
+          for (v in vars[!is_num]) {
+            counts <- df_wx |>
+              dplyr::filter(!is.na(.data[[v]])) |>
+              dplyr::group_by(.data$countryyear, .data[[v]]) |>
+              dplyr::summarise(n_bin = dplyr::n(), .groups = "drop") |>
+              dplyr::group_by(.data$countryyear) |>
+              dplyr::mutate(share_pct = round(100 * n_bin / sum(n_bin), 2)) |>
+              dplyr::ungroup() |>
+              dplyr::rename(level = dplyr::all_of(v))
+            counts$level <- as.character(counts$level)
+
+            n_present <- df_wx |>
+              dplyr::filter(!is.na(.data[[v]])) |>
+              dplyr::count(countryyear, name = "n_present")
+            miss_df <- base_n_by_cy |>
+              dplyr::left_join(n_present, by = "countryyear") |>
+              dplyr::mutate(
+                n_present   = ifelse(is.na(n_present), 0L, n_present),
+                pct_missing = round(100 * (1 - n_present / n_total), 2)
+              ) |>
+              dplyr::select(countryyear, pct_missing)
+
+            wx_tab <- counts |>
+              dplyr::left_join(miss_df, by = "countryyear") |>
+              dplyr::mutate(
+                variable    = v,
+                type        = "binned",
+                N           = NA_integer_,
+                unweighted_mean = NA_real_,
+                Mean        = NA_real_,
+                Std..Dev.   = NA_real_,
+                Min         = NA_real_,
+                Max         = NA_real_
+              )
+            if (nrow(wx_tab) > 0) {
+              wx_tab <- cbind(spec_id[rep(1L, nrow(wx_tab)), , drop = FALSE],
+                              wx_tab)
+              all_wx_stats[[length(all_wx_stats) + 1L]] <- wx_tab
+            }
+          }
+        }
+      }, error = function(e) message("  weather stats failed: ", conditionMessage(e)))
+    }
+
     # Step 3 — Loop over model specs (model_type x interaction x FE x covariates)
     model_combos <- grid[grid$sample == si & grid$weather == wx_name, , drop = FALSE]
 
@@ -457,7 +588,7 @@ for (si in SAMPLE_LABELS) {
       cat(sprintf("  [%d/%d] %s...", run_idx, nrow(grid), spec_label))
 
       if (!OVERWRITE_EXISTING &&
-          file.exists(file.path(OUT_MODEL, si,
+          file.exists(file.path(OUT_DIR, si,
                                 paste0("coefplot_", spec_label, ".png")))) {
         cat(" SKIP (exists)\n")
         next
@@ -476,6 +607,7 @@ for (si in SAMPLE_LABELS) {
 
       interaction_mode <- if (length(interaction_var) > 0) "pairwise" else "none"
 
+      survey_cols  <- names(svy_wx)
       exclude_cols <- unique(c(
         wx_col_names, OUTCOME_NAME, fe_vec,
         "hhid", "loc_id", "gaul1_code", "weight", "timestamp", "int_month",
@@ -627,6 +759,45 @@ for (si in SAMPLE_LABELS) {
       if (!is.null(r3$coefs))     all_coefs[[length(all_coefs) + 1L]]         <- r3$coefs
       if (!is.null(r3$fit_stats)) all_fit_stats[[length(all_fit_stats) + 1L]] <- r3$fit_stats
 
+      # Plots
+      if (SAVE_PLOTS) {
+        sample_dir <- file.path(OUT_DIR, si)
+        dir.create(sample_dir, showWarnings = FALSE, recursive = TRUE)
+
+        tryCatch({
+          p_coef <- make_coefplot(
+            fit1 = mf$fit1, fit2 = mf$fit2, fit3 = mf$fit3,
+            weather_terms = mf$weather_terms,
+            interaction_terms = mf$interaction_terms,
+            outcome_label = "Welfare (log)", label_fun = identity,
+            engine = engine_used, rif_grid = mf$rif_grid
+          )
+          ggplot2::ggsave(
+            file.path(sample_dir, paste0("coefplot_", spec_label, ".png")),
+            p_coef, width = 10, height = 7, dpi = 150
+          )
+        }, error = function(e) message("  coefplot failed: ", conditionMessage(e)))
+
+        for (wi in seq_along(mf$weather_terms)) {
+          tryCatch({
+            wterm <- mf$weather_terms[wi]
+            p_wx <- make_weather_effect_plot(
+              fit = mf$fit3, pred_var = wterm,
+              interaction_terms = mf$interaction_terms,
+              is_binned = identical(selected_weather$cont_binned[wi], "Binned"),
+              label_fun = identity, engine = engine_used,
+              selected_weather = selected_weather,
+              weather_df = svy_wx, rif_grid = mf$rif_grid
+            )
+            fx_suffix <- if (length(mf$weather_terms) > 1) paste0("_", wterm) else ""
+            ggplot2::ggsave(
+              file.path(sample_dir, paste0("effect_", spec_label, fx_suffix, ".png")),
+              p_wx, width = 8, height = 6, dpi = 150
+            )
+          }, error = function(e) message("  effect plot failed: ", conditionMessage(e)))
+        }
+      }
+
       cat(sprintf(" %.1fs DONE\n", round(proc.time()[["elapsed"]] - t0, 1)))
 
       # -- memory: release large objects immediately after extracting results
@@ -638,12 +809,12 @@ for (si in SAMPLE_LABELS) {
         tryCatch({
           readr::write_csv(
             clean_names(dplyr::bind_rows(all_coefs)),
-            file.path(OUT_MODEL, "_checkpoint_coefficients.csv")
+            file.path(OUT_DIR, "_checkpoint_coefficients.csv")
           )
           if (length(all_fit_stats) > 0)
             readr::write_csv(
               clean_names(dplyr::bind_rows(all_fit_stats)),
-              file.path(OUT_MODEL, "_checkpoint_fit_stats.csv")
+              file.path(OUT_DIR, "_checkpoint_fit_stats.csv")
             )
           cat(sprintf("  [checkpoint @ %d]\n", run_idx))
         }, error = function(e) message("  checkpoint failed: ", conditionMessage(e)))
@@ -664,7 +835,7 @@ cat("\n=== Saving combined outputs ===\n")
 
 if (length(all_coefs) > 0) {
   summary_coefs <- clean_names(dplyr::bind_rows(all_coefs))
-  readr::write_csv(summary_coefs, file.path(OUT_MODEL, "model_coefficients.csv"))
+  readr::write_csv(summary_coefs, file.path(OUT_DIR, "_summary_coefficients.csv"))
   n_specs <- nrow(
     dplyr::filter(summary_coefs, model == "fit3") |>
       dplyr::distinct(code, weather, engine, fe_profile, cov_profile, interaction)
@@ -675,14 +846,28 @@ if (length(all_coefs) > 0) {
 
 if (length(all_fit_stats) > 0) {
   summary_stats <- clean_names(dplyr::bind_rows(all_fit_stats))
-  readr::write_csv(summary_stats, file.path(OUT_MODEL, "model_fit_stats.csv"))
+  readr::write_csv(summary_stats, file.path(OUT_DIR, "_summary_fit_stats.csv"))
   cat(sprintf("Fit stats: %d rows\n", nrow(summary_stats)))
+}
+
+if (length(all_wx_stats) > 0) {
+  summary_wx <- clean_names(dplyr::bind_rows(all_wx_stats))
+  readr::write_csv(summary_wx, file.path(OUT_DIR, "_summary_weather_stats.csv"))
+  cat(sprintf("Weather stats: %d rows (%d specs)\n",
+              nrow(summary_wx), nrow(dplyr::distinct(summary_wx, sample, weather))))
+}
+
+if (length(all_svy_stats) > 0) {
+  summary_svy <- clean_names(dplyr::bind_rows(all_svy_stats))
+  readr::write_csv(summary_svy, file.path(OUT_DIR, "_summary_survey_stats.csv"))
+  cat(sprintf("Survey stats: %d rows, %d sample(s)\n",
+              nrow(summary_svy), length(unique(summary_svy$sample))))
 }
 
 if (length(fail_log) > 0) {
   fail_df <- data.frame(spec_or_sample = names(fail_log),
                          reason = unlist(fail_log), stringsAsFactors = FALSE)
-  readr::write_csv(fail_df, file.path(OUT_MODEL, "_failures.csv"))
+  readr::write_csv(fail_df, file.path(OUT_DIR, "_failures.csv"))
   cat(sprintf("Failures: %d\n", nrow(fail_df)))
 }
 
@@ -694,13 +879,13 @@ if (length(skip_log) > 0) {
     interaction = vapply(skip_log, `[[`, character(1), "interaction"),
     stringsAsFactors = FALSE
   )
-  readr::write_csv(skip_df, file.path(OUT_MODEL, "_interactions_not_available.csv"))
+  readr::write_csv(skip_df, file.path(OUT_DIR, "_interactions_not_available.csv"))
   cat(sprintf("Interactions not available: %d skipped\n", nrow(skip_df)))
 }
 
 # Clean up checkpoint files now that final outputs are saved
 for (cp in c("_checkpoint_coefficients.csv", "_checkpoint_fit_stats.csv")) {
-  cp_path <- file.path(OUT_MODEL, cp)
+  cp_path <- file.path(OUT_DIR, cp)
   if (file.exists(cp_path)) {
     file.remove(cp_path)
     cat(sprintf("Removed checkpoint: %s\n", cp))
