@@ -31,6 +31,7 @@ COUNTRY_FILTER <- NULL
 
 # ---- Output options ---------------------------------------------------------
 OVERWRITE_EXISTING <- TRUE
+SKIP_PLOTS <- TRUE # Set to TRUE to skip generating plots (for faster iteration when only stats CSV is needed)
 
 # =============================================================================
 # SECTION 2 — SETUP
@@ -113,43 +114,49 @@ for (code in COUNTRIES_01) {
   cat(sprintf("  Loaded: %d rows\n", nrow(svy)))
 
   # ------ Interview dates plot -----------------------------------------------
-  tryCatch({
-    p_dates  <- plot_interview_dates(summarise_interview_dates(svy))
-    out_path <- file.path(OUT_DATES, paste0(code, "_interview_dates.png"))
-    if (OVERWRITE_EXISTING || !file.exists(out_path))
-      save_gg(p_dates, out_path, width = 9, height = 4)
-  }, error = function(e) message("  interview dates failed: ", conditionMessage(e)))
+  if (!SKIP_PLOTS) {
+    tryCatch({
+      p_dates  <- plot_interview_dates(summarise_interview_dates(svy))
+      out_path <- file.path(OUT_DATES, paste0(code, "_interview_dates.png"))
+      if (OVERWRITE_EXISTING || !file.exists(out_path))
+        save_gg(p_dates, out_path, width = 9, height = 4)
+    }, error = function(e) message("  interview dates failed: ", conditionMessage(e)))
+  }
 
   # ------ Location map (static ggplot/sf) ------------------------------------
-  #skip for FJI
-  if (code == "FJI") {
-    cat("  SKIP — no location data for FJI\n")
-  } else {
-    out_path <- file.path(OUT_MAPS, paste0(code, "_location_map.png"))
-    if (OVERWRITE_EXISTING || !file.exists(out_path)) {
-      geojson <- build_h3_geojson(ss, connection_params_01)
-      if (is.null(geojson)) {
-        message("  location map skipped — build_h3_geojson returned NULL")
-      } else {
-        p_map <- tryCatch(
-          plot_survey_map_static(geojson),
-          error = function(e) { message("  plot_survey_map_static failed: ", conditionMessage(e)); NULL }
-        )
-        if (!is.null(p_map))
-          save_gg(p_map, out_path, width = 8, height = 6, dpi = 96)
+  if (!SKIP_PLOTS) {
+    #skip for FJI
+    if (code == "FJI") {
+      cat("  SKIP — no location data for FJI\n")
+    } else {
+      out_path <- file.path(OUT_MAPS, paste0(code, "_location_map.png"))
+      if (OVERWRITE_EXISTING || !file.exists(out_path)) {
+        geojson <- build_h3_geojson(ss, connection_params_01)
+        if (is.null(geojson)) {
+          message("  location map skipped — build_h3_geojson returned NULL")
+        } else {
+          p_map <- tryCatch(
+            plot_survey_map_static(geojson),
+            error = function(e) { message("  plot_survey_map_static failed: ", conditionMessage(e)); NULL }
+          )
+          if (!is.null(p_map))
+            save_gg(p_map, out_path, width = 8, height = 6, dpi = 96)
+        }
       }
     }
   }
 
   # ------ Welfare distribution ridge plot ------------------------------------
-  tryCatch({
-    out_path <- file.path(OUT_WELDIST, paste0(code, "_welfare_dist.png"))
-    if (OVERWRITE_EXISTING || !file.exists(out_path)) {
-      p_welf <- plot_welfare_dist(svy, outcome = "welfare",
-                                  poverty_lines = welfare_poverty_lines())
-      save_gg(p_welf, out_path, width = 8, height = 5)
-    }
-  }, error = function(e) message("  welfare dist failed: ", conditionMessage(e)))
+  if (!SKIP_PLOTS) {
+    tryCatch({
+      out_path <- file.path(OUT_WELDIST, paste0(code, "_welfare_dist.png"))
+      if (OVERWRITE_EXISTING || !file.exists(out_path)) {
+        p_welf <- plot_welfare_dist(svy, outcome = "welfare",
+                                    poverty_lines = welfare_poverty_lines())
+        save_gg(p_welf, out_path, width = 8, height = 5)
+      }
+    }, error = function(e) message("  welfare dist failed: ", conditionMessage(e)))
+  }
 
   # ------ Weighted summary stats --------------------------------------------
   tryCatch({
@@ -187,6 +194,9 @@ for (code in COUNTRIES_01) {
 
         row <- sub[1L, grp_keys, drop = FALSE]
         row[grp_keys] <- lapply(grp_keys, function(k) sub[[k]][1L])
+
+        row[["n"]]       <- nrow(sub)
+        row[["svy_pop"]] <- if (!is.null(wts)) sum(wts, na.rm = TRUE) else NA_real_
 
         for (m in plain_methods) {
           fn <- resolve_agg_fn(m)
@@ -275,6 +285,10 @@ if (length(all_welf_agg_01) > 0) {
   welf_df <- dplyr::distinct(welf_df, dplyr::across(dplyr::any_of(welf_dedup_keys)),
                               .keep_all = TRUE)
   welf_df <- welf_df[order(welf_df$code, welf_df$year), ]
+  welf_df <- dplyr::mutate(welf_df,
+    dplyr::across(dplyr::any_of(c("svy_pop", "welfare_total")), \(x) round(x, 0)),
+    dplyr::across(where(is.numeric) & !dplyr::any_of(c("svy_pop", "welfare_total")), \(x) round(x, 2))
+  )
 
   readr::write_csv(welf_df, welf_csv)
   cat(sprintf("Saved: %s (%d rows, %d columns)\n", welf_csv, nrow(welf_df), ncol(welf_df)))
