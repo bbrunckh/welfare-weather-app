@@ -102,6 +102,7 @@ for (code in COUNTRIES_01) {
     df |>
       assign_data_level() |>
       convert_lcu_to_ppp(cpi_ppp_01, lcu_vars) |>
+      bottom_code_welfare(0.28) |>
       apply_policy_derivations()
   }, error = function(e) {
     message("  load failed: ", conditionMessage(e))
@@ -165,7 +166,11 @@ for (code in COUNTRIES_01) {
       cat(sprintf("  Survey stats: %d variables\n", length(unique(svy_stats$variable))))
     }
   }, error = function(e) message("  survey stats failed: ", conditionMessage(e)))
-  }
+
+  # -- Clear country-level objects from memory --------------------------------
+  rm(svy, years_by_code, ss)
+  gc(verbose = FALSE)
+}
 
 # =============================================================================
 # SECTION 4 — SAVE OUTPUTS

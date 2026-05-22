@@ -28,14 +28,22 @@ OUT_DIR         <- Sys.getenv("WISEAPP_RESULTS_PATH")
 UNIT <- "hh"   # "hh", "ind", or "firm"
 
 # ---- Country filter ---------------------------------------------------------
-COUNTRY_FILTER <- "GNB"
+COUNTRY_FILTER <- c("TJK", "TLS", "VNM", "ZMB")
 
 # ---- Weather specs ----------------------------------------------------------
 # Named list of weather profiles (same format as 03_run_mod1.R WEATHER_SPECS).
 # Each profile defines one set of weather variables to load and summarise.
 WEATHER_SPECS <- c(
   expand_weather_specs("t", c(1L, 3L, 6L, 12L), transformations = "continuous", var_constructions = c("None", "Deviation from mean"), ref_starts = 1L),
-  expand_weather_specs("r", c(1L, 3L, 6L, 12L), transformations = "continuous", var_constructions = c("None", "Deviation from mean"), ref_starts = 1L)
+  expand_weather_specs("tn", c(1L, 3L, 6L, 12L), transformations = "continuous", var_constructions = c("None", "Deviation from mean"), ref_starts = 1L),
+  expand_weather_specs("tx", c(1L, 3L, 6L, 12L), transformations = "continuous", var_constructions = c("None", "Deviation from mean"), ref_starts = 1L),
+  expand_weather_specs("tx35", c(1L, 3L, 6L, 12L), transformations = "continuous", var_constructions = c("None", "Deviation from mean"), ref_starts = 1L),
+  expand_weather_specs("tr", c(1L, 3L, 6L, 12L), transformations = "continuous", var_constructions = c("None", "Deviation from mean"), ref_starts = 1L),
+  expand_weather_specs("r", c(1L, 3L, 6L, 12L), transformations = "continuous", var_constructions = c("None", "Deviation from mean"), ref_starts = 1L),
+  expand_weather_specs("rx5day", c(1L, 3L, 6L, 12L), transformations = "continuous", var_constructions = c("None", "Deviation from mean"), ref_starts = 1L),
+  expand_weather_specs("r20", c(1L, 3L, 6L, 12L), transformations = "continuous", var_constructions = c("None", "Deviation from mean"), ref_starts = 1L),
+  expand_weather_specs("mrsos", c(1L, 3L, 6L, 12L), transformations = "continuous", var_constructions = c("None", "Deviation from mean"), ref_starts = 1L)
+  #expand_weather_specs("spei6", c(1L, 3L, 6L, 12L), transformations = "continuous", var_constructions = c("None"), ref_starts = 1L)
 )
 
 # ---- Weather defaults -------------------------------------------------------
@@ -52,7 +60,7 @@ WEATHER_AGG_OVERRIDE   <- NULL
 CLIMATE_REF_YEARS <- c(1991L, 2020L)
 
 # ---- Output options ---------------------------------------------------------
-OVERWRITE_EXISTING <- TRUE
+OVERWRITE_EXISTING <- FALSE
 
 # =============================================================================
 # SECTION 2 — SETUP
@@ -120,6 +128,7 @@ for (code in COUNTRIES_02) {
     df |>
       assign_data_level() |>
       convert_lcu_to_ppp(cpi_ppp_02, lcu_vars) |>
+      bottom_code_welfare(0.28) |>
       apply_policy_derivations()
   }, error = function(e) { message("  load failed: ", conditionMessage(e)); NULL })
   if (is.null(svy_base)) next
@@ -331,6 +340,10 @@ for (code in COUNTRIES_02) {
       cat(sprintf("  Plot saved: %s\n", basename(out_path)))
     }, error = function(e) message("  dist plot failed [", base_var, "]: ", conditionMessage(e)))
   }
+
+  # -- Clear country-level objects from memory --------------------------------
+  rm(svy_base, dates, plot_data_by_var, ss, years_by_code)
+  gc(verbose = FALSE)
 }
 
 # =============================================================================
@@ -341,7 +354,20 @@ cat("\n=== Saving weather stats outputs ===\n")
 
 if (length(all_wx_stats_02) > 0) {
   out_df <- dplyr::bind_rows(all_wx_stats_02)
-  out_df <- out_df[order(out_df$code, out_df$variable, out_df$ref_period, out_df$year), ]
+
+  # If not overwriting and file exists, append to existing rows
+  if (!OVERWRITE_EXISTING && file.exists(out_csv)) {
+    existing <- readr::read_csv(out_csv, show_col_types = FALSE)
+    out_df   <- dplyr::bind_rows(existing, out_df)
+    cat(sprintf("  Appending to existing file (%d existing rows)\n", nrow(existing)))
+  }
+
+  # Deduplicate on identifying columns
+  dedup_keys <- c("code", "economy", "survname", "year", "wx_spec",
+                  "variable", "ref_period", "temporal_agg", "transformation")
+  out_df <- dplyr::distinct(out_df, dplyr::across(dplyr::any_of(dedup_keys)), .keep_all = TRUE)
+
+  out_df <- out_df[order(out_df$code, out_df$wx_spec, out_df$year), ]
   col_order <- c("code", "economy", "survname", "year", "wx_spec",
                  "variable", "ref_period", "temporal_agg", "transformation",
                  setdiff(names(out_df),

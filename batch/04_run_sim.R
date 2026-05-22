@@ -6,9 +6,8 @@
 # Outputs:
 #   OUT_DIR/simulations/outcomes.csv
 #   OUT_DIR/simulations/sim_stats.csv
+#   OUT_DIR/simulations/policy_stats.csv
 #   OUT_DIR/simulations/_failures.csv (error logging)
-#   OUT_DIR/policy/policy_outcomes.csv
-#   OUT_DIR/policy/_failures.csv (error logging)
 #
 # All user inputs are set in SECTION 1. Vector-valued settings (marked [GRID])
 # expand into separate runs via expand.grid(); scalar settings apply uniformly.
@@ -242,7 +241,6 @@ LABOR_SCENARIO <- list(
 # =============================================================================
 
 dir.create(file.path(OUT_DIR, "simulations"), showWarnings = FALSE, recursive = TRUE)
-dir.create(file.path(OUT_DIR, "policy"),      showWarnings = FALSE, recursive = TRUE)
 
 connection_params <- if (identical(CONNECTION_TYPE, "databricks")) {
   build_connection_params("databricks")
