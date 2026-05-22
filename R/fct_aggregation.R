@@ -115,22 +115,26 @@ resolve_agg_fn <- function(method) {
     },
 
     prosperity_gap = function(welfare, weights, pov_line) {
-      stopifnot("pov_line required for prosperity_gap" = !is.null(pov_line))
-      gaps <- pmax(pov_line - welfare, 0)
+      # Average factor by which incomes must be multiplied to reach $28/day.
+      # pov_line ignored — threshold is always hardcoded to $28/day.
+      pg <- pmax(28 / welfare, 1)
       if (!is.null(weights))
-        stats::weighted.mean(gaps, weights, na.rm = TRUE)
+        stats::weighted.mean(pg, weights, na.rm = TRUE)
       else
-        mean(gaps, na.rm = TRUE)
+        mean(pg, na.rm = TRUE)
     },
 
     avg_poverty = function(welfare, weights, pov_line) {
-      stopifnot("pov_line required for avg_poverty" = !is.null(pov_line))
-      poor <- welfare < pov_line
-      if (sum(poor, na.rm = TRUE) == 0L) return(NA_real_)
-      if (!is.null(weights))
-        stats::weighted.mean(welfare[poor], weights[poor], na.rm = TRUE)
+      # Average poverty = mean(1 / welfare): days needed to earn $1.
+      # pov_line ignored.
+      ok  <- is.finite(welfare) & welfare > 0
+      wp  <- welfare[ok]
+      wts <- if (!is.null(weights)) weights[ok] else NULL
+      if (length(wp) == 0L) return(NA_real_)
+      if (!is.null(wts))
+        stats::weighted.mean(1 / wp, wts, na.rm = TRUE)
       else
-        mean(welfare[poor], na.rm = TRUE)
+        mean(1 / wp, na.rm = TRUE)
     },
 
     stop(sprintf("[resolve_agg_fn] Unknown method: '%s'", method))

@@ -354,6 +354,7 @@ cat("\n=== Saving weather stats outputs ===\n")
 
 if (length(all_wx_stats_02) > 0) {
   out_df <- dplyr::bind_rows(all_wx_stats_02)
+  out_csv <- file.path(OUT_WEATHER, "weather_stats.csv")
 
   # If not overwriting and file exists, append to existing rows
   if (!OVERWRITE_EXISTING && file.exists(out_csv)) {
@@ -374,7 +375,6 @@ if (length(all_wx_stats_02) > 0) {
                          c("code", "economy", "survname", "year", "wx_spec",
                            "variable", "ref_period", "temporal_agg", "transformation")))
   out_df  <- out_df[, col_order]
-  out_csv <- file.path(OUT_WEATHER, "weather_stats.csv")
   readr::write_csv(out_df, out_csv)
   cat(sprintf("Saved: %s (%d rows, %d cols)\n", out_csv, nrow(out_df), ncol(out_df)))
 } else {

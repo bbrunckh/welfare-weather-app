@@ -153,8 +153,16 @@ gradient_for_method <- function(method, mu, weights, pov_line, value_pt,
     },
 
     prosperity_gap = {
-      stopifnot(!is.null(pov_line))
-      -w_tilde * mu * as.numeric(mu < pov_line)
+      # Point estimate: mean(pmax(28/mu, 1)).
+      # d/d(log mu_i) pmax(28/mu_i, 1) = -28/mu_i * 1{mu_i < 28} * mu_i = -28 * 1{mu_i < 28}
+      # pov_line is ignored — threshold hardcoded to $28/day.
+      below28 <- as.numeric(is.finite(mu) & mu < 28)
+      if (is.null(weights)) {
+        -w_tilde * 28 * below28 / N
+      } else {
+        W <- sum(weights, na.rm = TRUE)
+        if (W > 0) -(weights / W) * 28 * below28 else rep(0, N)
+      }
     },
 
     fgt2 = {
@@ -181,27 +189,20 @@ gradient_for_method <- function(method, mu, weights, pov_line, value_pt,
     },
 
     avg_poverty = {
-      stopifnot(!is.null(pov_line))
-      # T = sum_p w_i mu_i / sum_p w_i over poor (mu_i < pov_line)
-      # Partial derivative holding the poverty indicator fixed:
-      #   dT/dmu_j = w_tilde_j * 1{poor_j} / B
-      # (Numerator depends on mu_j only through w_j*1{poor}*mu_j; B does not
-      # depend on mu_j because the indicator is held fixed.) Chain-lift to
-      # log scale by multiplying by mu_j:
-      #   h_j = w_tilde_j * 1{poor_j} * mu_j / B
-      # The (mu_j - T) factor that appears in the empirical influence
-      # function is *not* used here — same convention as Gini (see §3.9 in
-      # method_uncertainty.md). IF is the right object for sample-variance
-      # estimation of T; for delta-method propagation of parametric
-      # beta-uncertainty through mu_i(beta), the partial derivative is the
-      # correct functional gradient.
-      poor <- as.numeric(mu < pov_line)
-      B    <- sum(w_tilde * poor, na.rm = TRUE)
-      if (!is.finite(B) || B <= 0) {
-        rep(0, N)
+      # Point estimate: mean(1 / mu), mu > 0.
+      # d/d(log mu_i) (1/mu_i) = -1/mu_i * mu_i = -1.
+      # Gradient: h_i = w_tilde_i * (-1) / sum(w), only for finite mu > 0.
+      # pov_line ignored.
+      ok <- is.finite(mu) & mu > 0
+      h  <- rep(0, N)
+      if (is.null(weights)) {
+        n_ok <- sum(ok)
+        if (n_ok > 0) h[ok] <- -w_tilde[ok] / n_ok
       } else {
-        (w_tilde / B) * poor * mu
+        W <- sum(weights[ok], na.rm = TRUE)
+        if (W > 0) h[ok] <- -(weights[ok] / W)
       }
+      h
     },
 
     median = {

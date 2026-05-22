@@ -78,7 +78,8 @@ cat(sprintf("Countries (survey stats): %d (%s)\n\n",
 # SECTION 3 — MAIN LOOP
 # =============================================================================
 
-all_svy_stats_01 <- list()
+all_svy_stats_01  <- list()
+all_welf_agg_01   <- list()
 
 for (code in COUNTRIES_01) {
   cat(sprintf("\n=== %s ===\n", code))
@@ -167,6 +168,51 @@ for (code in COUNTRIES_01) {
     }
   }, error = function(e) message("  survey stats failed: ", conditionMessage(e)))
 
+  # ------ Welfare aggregates (mod-2-matching aggregate methods) -------------
+  tryCatch({
+    if ("welfare" %in% names(svy)) {
+      pov_lines <- c(`300` = 3.00, `420` = 4.20, `830` = 8.30)
+
+      # Methods that do NOT need a poverty line
+      plain_methods <- c("mean", "median", "total", "gini", "prosperity_gap", "avg_poverty")
+      # Methods that DO need a poverty line
+      pov_methods   <- c("headcount_ratio", "gap", "fgt2")
+
+      grp_keys <- c("code", "economy", "survname", "year")
+      split_df <- split(svy, lapply(grp_keys, function(k) svy[[k]]), drop = TRUE)
+
+      welf_rows <- lapply(split_df, function(sub) {
+        welf <- sub[["welfare"]]
+        wts  <- if ("weight" %in% names(sub)) sub[["weight"]] else NULL
+
+        row <- sub[1L, grp_keys, drop = FALSE]
+        row[grp_keys] <- lapply(grp_keys, function(k) sub[[k]][1L])
+
+        for (m in plain_methods) {
+          fn <- resolve_agg_fn(m)
+          row[[paste0("welfare_", m)]] <- tryCatch(
+            fn(welf, wts, NULL), error = function(e) NA_real_
+          )
+        }
+        for (m in pov_methods) {
+          fn <- resolve_agg_fn(m)
+          for (sfx in names(pov_lines)) {
+            row[[paste0(m, "_", sfx)]] <- tryCatch(
+              fn(welf, wts, pov_lines[[sfx]]), error = function(e) NA_real_
+            )
+          }
+        }
+        row
+      })
+
+      welf_agg <- dplyr::bind_rows(welf_rows)
+      if (nrow(welf_agg) > 0) {
+        all_welf_agg_01[[code]] <- welf_agg
+        cat(sprintf("  Welfare aggregates: %d survey waves\n", nrow(welf_agg)))
+      }
+    }
+  }, error = function(e) message("  welfare aggregates failed: ", conditionMessage(e)))
+
   # -- Clear country-level objects from memory --------------------------------
   rm(svy, years_by_code, ss)
   gc(verbose = FALSE)
@@ -180,15 +226,60 @@ cat("\n=== Saving survey stats outputs ===\n")
 
 if (length(all_svy_stats_01) > 0) {
   out_df  <- dplyr::bind_rows(all_svy_stats_01)
+  out_csv <- file.path(OUT_SURVEY, "survey_stats.csv")
+
+  # If not overwriting and file exists, append to existing rows
+  if (!OVERWRITE_EXISTING && file.exists(out_csv)) {
+    existing <- readr::read_csv(out_csv, show_col_types = FALSE)
+
+    # Align date column types to avoid bind_rows type mismatch
+    date_cols <- c("min_date", "max_date")
+    for (col in date_cols) {
+      if (col %in% names(out_df) && inherits(existing[[col]], "Date")) {
+        out_df[[col]] <- as.Date(out_df[[col]])
+      }
+    }
+    
+    out_df   <- dplyr::bind_rows(existing, out_df)
+    cat(sprintf("  Appending to existing file (%d existing rows)\n", nrow(existing)))
+  }
+
+  # Deduplicate on identifying columns
+  dedup_keys <- c("code", "economy", "survname", "year", "variable")
+  out_df <- dplyr::distinct(out_df, dplyr::across(dplyr::any_of(dedup_keys)), .keep_all = TRUE)
+
   grp_order <- c("outcome", "policy", "hh", "ind", "area", "firm", "other")
   out_df$var_group <- factor(out_df$var_group, levels = grp_order)
   out_df  <- out_df[order(out_df$code, out_df$var_group, out_df$variable, out_df$year), ]
   out_df$var_group <- as.character(out_df$var_group)
-  out_csv <- file.path(OUT_SURVEY, "survey_stats.csv")
   readr::write_csv(out_df, out_csv)
   cat(sprintf("Saved: %s (%d rows)\n", out_csv, nrow(out_df)))
 } else {
   cat("No survey stats accumulated.\n")
+}
+
+# ---- Welfare aggregates CSV ------------------------------------------------
+welf_csv <- file.path(OUT_SURVEY, "welfare_aggregates.csv")
+
+if (length(all_welf_agg_01) > 0) {
+  welf_df <- dplyr::bind_rows(all_welf_agg_01)
+
+  if (!OVERWRITE_EXISTING && file.exists(welf_csv)) {
+    existing_welf <- readr::read_csv(welf_csv, show_col_types = FALSE)
+    welf_df       <- dplyr::bind_rows(existing_welf, welf_df)
+    cat(sprintf("  Appending welfare aggregates to existing file (%d existing rows)\n",
+                nrow(existing_welf)))
+  }
+
+  welf_dedup_keys <- c("code", "economy", "survname", "year")
+  welf_df <- dplyr::distinct(welf_df, dplyr::across(dplyr::any_of(welf_dedup_keys)),
+                              .keep_all = TRUE)
+  welf_df <- welf_df[order(welf_df$code, welf_df$year), ]
+
+  readr::write_csv(welf_df, welf_csv)
+  cat(sprintf("Saved: %s (%d rows, %d columns)\n", welf_csv, nrow(welf_df), ncol(welf_df)))
+} else {
+  cat("No welfare aggregates accumulated.\n")
 }
 
 cat("========== Survey stats complete ==========\n")

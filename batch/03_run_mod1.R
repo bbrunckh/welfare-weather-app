@@ -119,7 +119,7 @@ LASSO_FORCE_OUT <- list(
 )
 
 # ---- Output -----------------------------------------------------------------
-OVERWRITE_EXISTING <- TRUE
+OVERWRITE_EXISTING <- FALSE
 
 # =============================================================================
 # SECTION 2 — HELPERS
@@ -674,9 +674,30 @@ for (si in SAMPLE_LABELS) {
 
 cat("\n=== Saving combined outputs ===\n")
 
+coef_csv  <- file.path(OUT_MODEL, "model_coefficients.csv")
+stats_csv <- file.path(OUT_MODEL, "model_fit_stats.csv")
+
+# Dedup keys: uniquely identify a coefficient row
+coef_dedup_keys  <- c("code", "weather", "engine", "fe_profile", "cov_profile",
+                      "interaction", "model", "term", "tau")
+# Dedup keys: uniquely identify a fit-stats row
+stats_dedup_keys <- c("code", "weather", "engine", "fe_profile", "cov_profile",
+                      "interaction", "model", "tau")
+
 if (length(all_coefs) > 0) {
   summary_coefs <- clean_names(dplyr::bind_rows(all_coefs))
-  readr::write_csv(summary_coefs, file.path(OUT_MODEL, "model_coefficients.csv"))
+
+  if (!OVERWRITE_EXISTING && file.exists(coef_csv)) {
+    existing_coefs <- readr::read_csv(coef_csv, show_col_types = FALSE)
+    summary_coefs  <- dplyr::bind_rows(existing_coefs, summary_coefs)
+    cat(sprintf("  Appending coefficients to existing file (%d existing rows)\n",
+                nrow(existing_coefs)))
+  }
+  summary_coefs <- dplyr::distinct(summary_coefs,
+                                   dplyr::across(dplyr::any_of(coef_dedup_keys)),
+                                   .keep_all = TRUE)
+
+  readr::write_csv(summary_coefs, coef_csv)
   n_specs <- nrow(
     dplyr::filter(summary_coefs, model == "fit3") |>
       dplyr::distinct(code, weather, engine, fe_profile, cov_profile, interaction)
@@ -687,7 +708,18 @@ if (length(all_coefs) > 0) {
 
 if (length(all_fit_stats) > 0) {
   summary_stats <- clean_names(dplyr::bind_rows(all_fit_stats))
-  readr::write_csv(summary_stats, file.path(OUT_MODEL, "model_fit_stats.csv"))
+
+  if (!OVERWRITE_EXISTING && file.exists(stats_csv)) {
+    existing_stats <- readr::read_csv(stats_csv, show_col_types = FALSE)
+    summary_stats  <- dplyr::bind_rows(existing_stats, summary_stats)
+    cat(sprintf("  Appending fit stats to existing file (%d existing rows)\n",
+                nrow(existing_stats)))
+  }
+  summary_stats <- dplyr::distinct(summary_stats,
+                                   dplyr::across(dplyr::any_of(stats_dedup_keys)),
+                                   .keep_all = TRUE)
+
+  readr::write_csv(summary_stats, stats_csv)
   cat(sprintf("Fit stats: %d rows\n", nrow(summary_stats)))
 }
 
