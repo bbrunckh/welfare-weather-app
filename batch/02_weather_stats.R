@@ -34,15 +34,15 @@ COUNTRY_FILTER <- c("TJK", "TLS", "VNM", "ZMB")
 # Named list of weather profiles (same format as 03_run_mod1.R WEATHER_SPECS).
 # Each profile defines one set of weather variables to load and summarise.
 WEATHER_SPECS <- c(
-  expand_weather_specs("t", c(1L, 3L, 6L, 12L), transformations = "continuous", var_constructions = c("None", "Deviation from mean"), ref_starts = 1L),
-  expand_weather_specs("tn", c(1L, 3L, 6L, 12L), transformations = "continuous", var_constructions = c("None", "Deviation from mean"), ref_starts = 1L),
-  expand_weather_specs("tx", c(1L, 3L, 6L, 12L), transformations = "continuous", var_constructions = c("None", "Deviation from mean"), ref_starts = 1L),
-  expand_weather_specs("tx35", c(1L, 3L, 6L, 12L), transformations = "continuous", var_constructions = c("None", "Deviation from mean"), ref_starts = 1L),
-  expand_weather_specs("tr", c(1L, 3L, 6L, 12L), transformations = "continuous", var_constructions = c("None", "Deviation from mean"), ref_starts = 1L),
-  expand_weather_specs("r", c(1L, 3L, 6L, 12L), transformations = "continuous", var_constructions = c("None", "Deviation from mean"), ref_starts = 1L),
-  expand_weather_specs("rx5day", c(1L, 3L, 6L, 12L), transformations = "continuous", var_constructions = c("None", "Deviation from mean"), ref_starts = 1L),
-  expand_weather_specs("r20", c(1L, 3L, 6L, 12L), transformations = "continuous", var_constructions = c("None", "Deviation from mean"), ref_starts = 1L),
-  expand_weather_specs("mrsos", c(1L, 3L, 6L, 12L), transformations = "continuous", var_constructions = c("None", "Deviation from mean"), ref_starts = 1L)
+  expand_weather_specs("t", c(1L, 3L, 6L, 12L), transformations = "continuous", var_constructions = c("None", "Deviation from mean"), ref_starts = 1L)
+  # expand_weather_specs("tn", c(1L, 3L, 6L, 12L), transformations = "continuous", var_constructions = c("None", "Deviation from mean"), ref_starts = 1L),
+  # expand_weather_specs("tx", c(1L, 3L, 6L, 12L), transformations = "continuous", var_constructions = c("None", "Deviation from mean"), ref_starts = 1L),
+  # expand_weather_specs("tx35", c(1L, 3L, 6L, 12L), transformations = "continuous", var_constructions = c("None", "Deviation from mean"), ref_starts = 1L),
+  # expand_weather_specs("tr", c(1L, 3L, 6L, 12L), transformations = "continuous", var_constructions = c("None", "Deviation from mean"), ref_starts = 1L),
+  # expand_weather_specs("r", c(1L, 3L, 6L, 12L), transformations = "continuous", var_constructions = c("None", "Deviation from mean"), ref_starts = 1L),
+  # expand_weather_specs("rx5day", c(1L, 3L, 6L, 12L), transformations = "continuous", var_constructions = c("None", "Deviation from mean"), ref_starts = 1L),
+  # expand_weather_specs("r20", c(1L, 3L, 6L, 12L), transformations = "continuous", var_constructions = c("None", "Deviation from mean"), ref_starts = 1L),
+  # expand_weather_specs("mrsos", c(1L, 3L, 6L, 12L), transformations = "continuous", var_constructions = c("None", "Deviation from mean"), ref_starts = 1L),
   #expand_weather_specs("spei6", c(1L, 3L, 6L, 12L), transformations = "continuous", var_constructions = c("None"), ref_starts = 1L)
 )
 
@@ -359,6 +359,7 @@ if (length(all_wx_stats_02) > 0) {
   # If not overwriting and file exists, append to existing rows
   if (!OVERWRITE_EXISTING && file.exists(out_csv)) {
     existing <- readr::read_csv(out_csv, show_col_types = FALSE)
+    out_df   <- dplyr::mutate(out_df, year = as.numeric(as.character(year)))
     out_df   <- dplyr::bind_rows(existing, out_df)
     cat(sprintf("  Appending to existing file (%d existing rows)\n", nrow(existing)))
   }

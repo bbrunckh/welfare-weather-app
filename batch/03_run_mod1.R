@@ -199,13 +199,10 @@ extract_one_fit <- function(fit, model_label, code, wx_label, wx_vars,
           r2_adj    = NA_real_,
           r2_within = tryCatch(fixest::r2(m, "wr2"), error = function(e) NA),
           aic       = NA_real_,
-          n_obs_fit = tryCatch(stats::nobs(m),       error = function(e) NA),
+          n         = tryCatch(stats::nobs(m),       error = function(e) NA),
           stringsAsFactors = FALSE
         )
       }))
-      fs$n_hh_total     <- nrow(survey_df)
-      fs$n_hh_weather   <- wx_present
-      fs$pct_weather    <- round(wx_present / nrow(survey_df) * 100, 1)
       fs$lasso_selected <- lasso_selected_vars
       append_meta(fs)
     }, error = function(e) NULL)
@@ -224,9 +221,7 @@ extract_one_fit <- function(fit, model_label, code, wx_label, wx_vars,
         r2_adj     = tryCatch(fixest::r2(fit, "ar2"), error = function(e) NA),
         r2_within  = tryCatch(fixest::r2(fit, "wr2"), error = function(e) NA),
         aic        = tryCatch(stats::AIC(fit),        error = function(e) NA),
-        n_obs_fit  = tryCatch(stats::nobs(fit),       error = function(e) NA),
-        n_hh_total = nrow(survey_df), n_hh_weather = wx_present,
-        pct_weather = round(wx_present / nrow(survey_df) * 100, 1),
+        n          = tryCatch(stats::nobs(fit),       error = function(e) NA),
         lasso_selected = lasso_selected_vars,
         stringsAsFactors = FALSE
       )
