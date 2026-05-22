@@ -648,7 +648,10 @@ run_lasso_selection <- function(
   pooled_model <- NULL
   mira_obj <- tryCatch(mice::as.mira(final_models), error = function(e) NULL)
   if (!is.null(mira_obj)) {
-    pooled_model <- tryCatch(mice::pool(mira_obj), error = function(e) NULL)
+    pooled_model <- tryCatch(
+      suppressWarnings(mice::pool(mira_obj)),
+      error = function(e) NULL
+    )
   }
 
   list(

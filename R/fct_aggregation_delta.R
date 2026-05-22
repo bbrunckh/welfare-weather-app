@@ -211,8 +211,8 @@ gradient_for_method <- function(method, mu, weights, pov_line, value_pt,
       # cancelling because median is in welfare units.
       f_hat <- tryCatch({
         d <- if (!is.null(weights))
-               stats::density(mu, weights = weights / sum(weights, na.rm = TRUE),
-                              na.rm = TRUE)
+               suppressWarnings(stats::density(mu, weights = weights / sum(weights, na.rm = TRUE),
+                              na.rm = TRUE))
              else stats::density(mu, na.rm = TRUE)
         approx_y <- stats::approx(d$x, d$y, xout = value_pt)$y
         if (is.finite(approx_y) && approx_y > 1e-12) approx_y else NA_real_
