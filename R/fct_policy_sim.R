@@ -217,6 +217,7 @@ apply_policy_to_svy <- function(svy,
                         (isTRUE(infra$sanitation_universal) ||
                         (!is.null(infra$sanitation_access_change_pct) && infra$sanitation_access_change_pct != 0)) ||
                         (!is.null(infra$health_travel_pct) && infra$health_travel_pct != 0) ||
+                        identical(infra$health_mode, "max") ||
                         (isTRUE(infra$piped_universal) ||
                          (!is.null(infra$piped_access_change_pct) && infra$piped_access_change_pct != 0)) ||
                         (isTRUE(infra$piped_to_prem_universal) ||

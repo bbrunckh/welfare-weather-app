@@ -32,7 +32,7 @@ invisible(lapply(list.files("batch/R", pattern = "\\.R$", full.names = TRUE), so
 # "databricks" -> credentials from .Renviron (DATABRICKS_HOST, etc.)
 CONNECTION_TYPE <- "local"
 DATA_DIR        <- Sys.getenv("WISEAPP_DATA_PATH")
-OUT_DIR         <- "dev/outputs"
+OUT_DIR         <- Sys.getenv("WISEAPP_RESULTS_PATH")
 
 # ---- Unit of analysis -------------------------------------------------------
 UNIT <- "hh"   # "hh", "ind", or "firm"
@@ -42,7 +42,10 @@ POOL_COUNTRIES <- FALSE   # TRUE = one pooled model; FALSE = per-country
 
 # ---- Country / survey sample (mod_1_01) [GRID when !POOL_COUNTRIES] --------
 # NULL = all available; c(...) = subset
-COUNTRY_FILTER <- "GNB"
+COUNTRY_FILTER <- c(
+  "BEN", "BFA", "BRA", "CIV", "COL", "GMB", "GNB", "GTM", "IND", "IRN", "LKA",
+  "MLI", "MRT", "MWI", "NER", "SEN", "TCD", "TGO", "TJK", "VNM", "ZMB"
+)
 
 # ---- Outcome variable (mod_1_03) --------------------------------------------
 OUTCOME_NAME <- "welfare"
@@ -60,8 +63,8 @@ POVERTY_LINE <- 3
 
 WEATHER_SPECS <- c(
   expand_weather_specs(
-    "t", c(1L),
-    transformations    = c("continuous"),
+    c("t", "tx35"), c(12L),
+    transformations    = c("continuous", "binned"),
     var_constructions  = c("None"),
     ref_starts         = 1L        # start month (months before interview); 1 = most recent
   )
@@ -134,7 +137,7 @@ AGG_METHODS <- c(
 )
 
 # ---- Output -----------------------------------------------------------------
-OVERWRITE_EXISTING <- TRUE   # FALSE = append+dedup existing CSVs; TRUE = overwrite
+OVERWRITE_EXISTING <- FALSE   # FALSE = append+dedup existing CSVs; TRUE = overwrite
 SKIP_PLOTS         <- FALSE  # TRUE = skip all PNG generation (faster reruns)
 
 # =============================================================================
@@ -267,6 +270,38 @@ POLICY_SCENARIOS <- list(
     policy_keys = "A",              # triggers refit: weather x electricity
     sp      = .sp_off,
     infra   = modifyList(.infra_off, list(elec_universal = TRUE)),
+    digital = .digital_off,
+    labor   = .labor_off
+  ),
+
+  imp_wat_universal = list(
+    policy_keys = "B",              # triggers refit: weather x improved water
+    sp      = .sp_off,
+    infra   = modifyList(.infra_off, list(water_universal = TRUE)),
+    digital = .digital_off,
+    labor   = .labor_off
+  ),
+
+  imp_san_universal = list(
+    policy_keys = "C",              # triggers refit: weather x improved sanitation
+    sp      = .sp_off,
+    infra   = modifyList(.infra_off, list(sanitation_universal = TRUE)),
+    digital = .digital_off,
+    labor   = .labor_off
+  ),
+
+  imp_wat_san_universal = list(
+    policy_keys = "I",              # triggers refit: weather x improved water and sanitation
+    sp      = .sp_off,
+    infra   = modifyList(.infra_off, list(imp_wat_san_universal = TRUE)),
+    digital = .digital_off,
+    labor   = .labor_off
+  ),
+
+    health30min = list(
+    policy_keys = "D",              # triggers refit: weather x travel time to health facility
+    sp      = .sp_off,
+    infra   = modifyList(.infra_off, list(health_mode = "max", health_travel_max = 30)),
     digital = .digital_off,
     labor   = .labor_off
   ),
