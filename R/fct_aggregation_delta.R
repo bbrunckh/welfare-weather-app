@@ -268,7 +268,7 @@ apply_band_transform <- function(method, value_pt, se, z_lo, z_hi) {
   }
 
   use_logit <- method %in% c("headcount_ratio", "gap", "fgt2")
-  use_log   <- method %in% c("median")
+  use_log   <- method %in% c("median", "avg_poverty")
 
   if (use_logit && value_pt > 0 && value_pt < 1) {
     # SE on logit scale via delta: d logit / d p = 1 / (p(1-p))

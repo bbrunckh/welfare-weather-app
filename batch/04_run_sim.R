@@ -4,11 +4,11 @@
 # Batch model fitting + simulations across countries and specifications.
 #
 # Outputs (all under OUT_DIR/simulations/):
-#   outcomes.csv                         welfare aggregates — base + policy rows
+#   outcomes.parquet                      welfare aggregates — base + policy rows
 #   weather_quantiles.csv                p10-p90 per weather variable per scenario
 #   sim_metadata.csv                     CMIP6 ensemble info per future scenario
 #   return_periods.csv                   RP thresholds with uncertainty bands
-#   decile_decomposition_by_year.csv     policy effect channels by decile and year
+#   decile_decomposition_by_year.parquet  policy effect channels by decile and year
 #   policy_config.csv                    one row per (spec, policy) run
 #   weather_distributions/*.png          overlaid KDE/bar plots per (code, wx_spec)
 #   _failures.csv                        combined error log (Sections 3–5)
@@ -33,6 +33,7 @@ invisible(lapply(list.files("batch/R", pattern = "\\.R$", full.names = TRUE), so
 CONNECTION_TYPE <- "local"
 DATA_DIR        <- Sys.getenv("WISEAPP_DATA_PATH")
 OUT_DIR         <- Sys.getenv("WISEAPP_RESULTS_PATH")
+# OUT_DIR         <- "dev/outputs"
 
 # ---- Unit of analysis -------------------------------------------------------
 UNIT <- "hh"   # "hh", "ind", or "firm"
@@ -42,10 +43,12 @@ POOL_COUNTRIES <- FALSE   # TRUE = one pooled model; FALSE = per-country
 
 # ---- Country / survey sample (mod_1_01) [GRID when !POOL_COUNTRIES] --------
 # NULL = all available; c(...) = subset
-COUNTRY_FILTER <- c(
-  "BEN", "BFA", "BRA", "CIV", "COL", "GMB", "GNB", "GTM", "IND", "IRN", "LKA",
-  "MLI", "MRT", "MWI", "NER", "SEN", "TCD", "TGO", "TJK", "VNM", "ZMB"
-)
+
+# WAEMU
+COUNTRY_FILTER <- c("BEN", "BFA", "CIV", "GNB", "MLI", "NER", "SEN", "TGO")
+
+# Other wise-app candidates with >= 2 surveys
+# COUNTRY_FILTER <- c( "BRA", "COL", "GMB", "GTM", "IND", "IRN", "LKA", "MRT", "MWI", "TCD", "TJK", "VNM", "ZMB")
 
 # ---- Outcome variable (mod_1_03) --------------------------------------------
 OUTCOME_NAME <- "welfare"
@@ -64,7 +67,7 @@ POVERTY_LINE <- 3
 WEATHER_SPECS <- c(
   expand_weather_specs(
     c("t", "tx35"), c(12L),
-    transformations    = c("continuous", "binned"),
+    transformations    = c("binned"),
     var_constructions  = c("None"),
     ref_starts         = 1L        # start month (months before interview); 1 = most recent
   )
@@ -97,11 +100,11 @@ FIXED_EFFECTS <- list(
 # Named list of covariate profiles. Each must have `method` ("User-defined" or
 # "Lasso"). User-defined profiles supply covariates by role.
 COVARIATE_SPECS <- list(
-  hhsize_urban = list(
-    method = "User-defined",
-    ind = character(0), hh = c("hhsize", "urban"),
-    firm = character(0), area = character(0)
-  ), 
+  # hhsize_urban = list(
+  #   method = "User-defined",
+  #   ind = character(0), hh = c("hhsize", "urban"),
+  #   firm = character(0), area = character(0)
+  # ), 
   lasso = list(method = "Lasso")
 )
 
@@ -191,9 +194,9 @@ DEV_MODE <- FALSE   # TRUE = 1 ensemble member only; fast debug runs
 #   policy_keys  — character vector of POLICY_DEFINITIONS keys ("A"–"I"):
 #                  A=electricity, B=imp_water, C=sanitation, D=health,
 #                  E=internet, F=mobile, G=piped_water, H=piped_on_prem, I=imp_wat_san
-#                  Non-SP keys trigger a model refit adding weather × policy interaction
-#                  (Section 3B), mirroring mod_1 behaviour. Skipped if those vars are
-#                  already interactions in the base spec.
+#                  Auto-adds the corresponding variable as a weather interaction to
+#                  INTERACTIONS, so the base model includes it (matching app's mod_1 flow).
+#                  Each policy is applied only to specs with its matching interaction.
 #   sp      — social protection module config
 #   infra   — infrastructure access config
 #   digital — digital inclusion config
@@ -267,7 +270,7 @@ POLICY_SCENARIOS <- list(
   # ),
 
   elec_universal = list(
-    policy_keys = "A",              # triggers refit: weather x electricity
+    policy_keys = "A",              # adds weather x electricity interaction to base model
     sp      = .sp_off,
     infra   = modifyList(.infra_off, list(elec_universal = TRUE)),
     digital = .digital_off,
@@ -275,7 +278,7 @@ POLICY_SCENARIOS <- list(
   ),
 
   imp_wat_universal = list(
-    policy_keys = "B",              # triggers refit: weather x improved water
+    policy_keys = "B",              # adds weather x imp_wat_rec interaction
     sp      = .sp_off,
     infra   = modifyList(.infra_off, list(water_universal = TRUE)),
     digital = .digital_off,
@@ -283,7 +286,7 @@ POLICY_SCENARIOS <- list(
   ),
 
   imp_san_universal = list(
-    policy_keys = "C",              # triggers refit: weather x improved sanitation
+    policy_keys = "C",              # adds weather x imp_san_rec interaction
     sp      = .sp_off,
     infra   = modifyList(.infra_off, list(sanitation_universal = TRUE)),
     digital = .digital_off,
@@ -291,7 +294,7 @@ POLICY_SCENARIOS <- list(
   ),
 
   imp_wat_san_universal = list(
-    policy_keys = "I",              # triggers refit: weather x improved water and sanitation
+    policy_keys = "I",              # adds weather x imp_wat_san_rec interaction
     sp      = .sp_off,
     infra   = modifyList(.infra_off, list(imp_wat_san_universal = TRUE)),
     digital = .digital_off,
@@ -299,7 +302,7 @@ POLICY_SCENARIOS <- list(
   ),
 
     health30min = list(
-    policy_keys = "D",              # triggers refit: weather x travel time to health facility
+    policy_keys = "D",              # adds weather x ttime_health interaction
     sp      = .sp_off,
     infra   = modifyList(.infra_off, list(health_mode = "max", health_travel_max = 30)),
     digital = .digital_off,
@@ -321,6 +324,29 @@ POLICY_SCENARIOS <- list(
     labor   = .labor_off
   )
 )
+
+# Auto-derive interaction variables required by each policy scenario.
+# Each policy with policy_keys needs the corresponding variable as an
+# interaction in the base model (matching the app's mod_1 → mod_3 flow).
+# SP-only policies (no policy_keys) are applied to noInter specs.
+POLICY_INTERACTION_MAP <- list()   # pol_name → interaction var (or "noInter")
+for (.pn in names(POLICY_SCENARIOS)) {
+  .pk <- POLICY_SCENARIOS[[.pn]]$policy_keys %||% character(0)
+  if (length(.pk) == 0L) {
+    POLICY_INTERACTION_MAP[[.pn]] <- "noInter"
+  } else {
+    .vars <- unique(unlist(lapply(.pk, function(k) POLICY_DEFINITIONS[[k]]$vars)))
+    if (length(.vars) == 1L) {
+      POLICY_INTERACTION_MAP[[.pn]] <- .vars
+      if (!list(.vars) %in% INTERACTIONS)
+        INTERACTIONS <- c(INTERACTIONS, list(.vars))
+    } else if (length(.vars) > 1L) {
+      POLICY_INTERACTION_MAP[[.pn]] <- paste(.vars, collapse = "_")
+      if (!list(.vars) %in% INTERACTIONS)
+        INTERACTIONS <- c(INTERACTIONS, list(.vars))
+    }
+  }
+}
 
 # =============================================================================
 # SECTION 2 — SETUP
@@ -398,19 +424,35 @@ cat(sprintf(
 cat("=== Step 1: Model fitting ===\n")
 
 # When not overwriting, identify specs whose results already exist on disk.
-# A spec is considered done if outcomes.csv has rows for "no_policy" AND all
-# active policy scenarios. Specs in .done_specs are skipped entirely (fit,
-# simulate, policy); their existing output is preserved by .save_csv dedup.
+# A spec is done if outcomes.parquet has "no_policy" + all policies mapped to
+# its interaction label via POLICY_INTERACTION_MAP.
+# Build expected policies per interaction label.
+.pols_by_inter <- list()
+for (.pn in names(POLICY_INTERACTION_MAP)) {
+  .il <- POLICY_INTERACTION_MAP[[.pn]]
+  .pols_by_inter[[.il]] <- c(.pols_by_inter[[.il]], .pn)
+}
+
 .done_specs <- character(0)
 if (!OVERWRITE_EXISTING) {
-  .chk_path <- file.path(OUT_DIR, "simulations", "outcomes.csv")
+  .chk_path <- file.path(OUT_DIR, "simulations", "outcomes.parquet")
   if (file.exists(.chk_path)) {
-    .chk <- readr::read_csv(.chk_path, show_col_types = FALSE,
-                             col_select = c("spec_label", "policy_label"))
-    .expected_pols <- c("no_policy", setdiff(names(POLICY_SCENARIOS), "no_policy"))
+    .chk <- arrow::read_parquet(.chk_path, col_select = c("spec_label", "policy_label"))
     .by_spec <- split(.chk$policy_label, .chk$spec_label)
-    .done_specs <- names(which(vapply(.by_spec, function(pols)
-      all(.expected_pols %in% pols), logical(1))))
+    # All possible inter_labels: "noInter" + policy-derived ones
+    .all_inters <- unique(unlist(POLICY_INTERACTION_MAP))
+    .spec_complete <- vapply(names(.by_spec), function(sl) {
+      pols <- .by_spec[[sl]]
+      if (!"no_policy" %in% pols) return(FALSE)
+      for (il in .all_inters) {
+        if (endsWith(sl, paste0("_", il))) {
+          expected <- .pols_by_inter[[il]] %||% character(0)
+          return(all(expected %in% pols))
+        }
+      }
+      FALSE
+    }, logical(1))
+    .done_specs <- names(which(.spec_complete))
     rm(.chk, .by_spec)
     if (length(.done_specs) > 0L)
       cat(sprintf("  %d spec(s) already complete — will skip\n", length(.done_specs)))
@@ -560,7 +602,7 @@ for (si in SAMPLE_LABELS) {
       cov_method      <- cov_spec$method
 
       run_idx     <- run_idx + 1L
-      inter_label <- if (length(interaction_var) == 0) "noInter" else interaction_var
+      inter_label <- if (length(interaction_var) == 0) "noInter" else paste(interaction_var, collapse = "_")
       mt_label    <- if (grepl("RIF", cur_model_type)) "rif" else "ols"
       spec_label  <- sprintf("%s_%s_%s_%s_%s_%s", si, wx_name, mt_label,
                              fe_label, cov_label, inter_label)
@@ -714,89 +756,6 @@ for (si in SAMPLE_LABELS) {
         cov_label     = cov_label,
         inter_label   = inter_label
       )
-
-      # --- Section 3B: inline policy model refits ----------------------------
-      # Non-SP policy scenarios (infra/digital/labor) add weather × policy
-      # variable interactions. Runs here while survey_prep/svy_wx are in memory.
-      for (.pol_name in names(POLICY_SCENARIOS)) {
-        .pol      <- POLICY_SCENARIOS[[.pol_name]]
-        .pol_keys <- .pol$policy_keys %||% character(0)
-        if (length(.pol_keys) == 0L) next  # SP-only or no_policy — skip
-        .pol_vars <- unique(unlist(get_policy_locked_vars(.pol_keys, var_info)))
-        if (length(.pol_vars) == 0L) next
-        if (all(.pol_vars %in% interaction_var)) next  # already in base model
-        .missing <- setdiff(.pol_vars, names(svy_wx))
-        if (length(.missing) > 0L) {
-          cat(sprintf("    SKIP 3B [%s] — not in survey: %s\n",
-                      .pol_name, paste(.missing, collapse = ", ")))
-          next
-        }
-        .aug_inter       <- unique(c(interaction_var, .pol_vars))
-        .aug_inter_label <- paste(.aug_inter, collapse = "_")
-        .pol_spec_label  <- paste(spec_label, .pol_name, sep = ":")
-        cat(sprintf("    [3B] %s...", .pol_spec_label))
-        .t0_3b <- proc.time()[["elapsed"]]
-
-        .sm_pol <- tryCatch(
-          build_selected_model(
-            model_type          = cur_model_type,
-            interactions        = .aug_inter,
-            interaction_mode    = "pairwise",
-            fixedeffects        = fe_vec,
-            covariate_selection = cov_method,
-            ind_covariates      = ind_covs,
-            hh_covariates       = hh_covs,
-            firm_covariates     = firm_covs,
-            area_covariates     = area_covs,
-            lasso_alpha         = LASSO_ALPHA,
-            lasso_lambda        = LASSO_LAMBDA,
-            lasso_nfolds        = LASSO_NFOLDS,
-            lasso_standardize   = LASSO_STANDARDIZE,
-            mi_m                = MI_M,
-            mi_maxit            = MI_MAXIT,
-            stability_threshold = STABILITY_THRESHOLD
-          ),
-          error = function(e) { message(" ", conditionMessage(e)); NULL }
-        )
-        if (is.null(.sm_pol)) {
-          cat(" FAIL (model build)\n")
-          fail_log[[.pol_spec_label]] <- "policy_refit_model_build_failed"; next
-        }
-
-        .mf_pol <- tryCatch(
-          suppressWarnings(fit_model(
-            df               = survey_prep,
-            selected_outcome = selected_outcome,
-            selected_weather = selected_weather,
-            selected_model   = .sm_pol
-          )),
-          error = function(e) { message(" ", conditionMessage(e)); NULL }
-        )
-        if (is.null(.mf_pol) || is.null(.mf_pol$fit3)) {
-          cat(" FAIL (fit)\n")
-          fail_log[[.pol_spec_label]] <- "policy_refit_fit_failed"; next
-        }
-        cat(sprintf(" %.1fs DONE\n", round(proc.time()[["elapsed"]] - .t0_3b, 1)))
-
-        fit_store[[.pol_spec_label]] <- list(
-          mf            = .mf_pol,
-          svy_baseline  = svy_baseline,
-          svy_wx        = svy_wx,
-          ss            = ss,
-          sw            = selected_weather,
-          so            = selected_outcome,
-          stored_breaks = stored_breaks,
-          wx_col_names  = wx_col_names,
-          code          = si,
-          wx_name       = wx_name,
-          mt_label      = mt_label,
-          fe_label      = fe_label,
-          cov_label     = cov_label,
-          inter_label   = .aug_inter_label
-        )
-        rm(.mf_pol, .sm_pol)
-        gc(verbose = FALSE)
-      }
 
       rm(mf, survey_prep, selected_model, selected_outcome)
       gc(verbose = FALSE)
@@ -1089,6 +1048,21 @@ cat("\n=== Step 2: Climate simulations ===\n")
   invisible(path)
 }
 
+.save_parquet <- function(new_df, path, dedup_keys) {
+  if (is.null(new_df) || nrow(new_df) == 0L) return(invisible(NULL))
+  out_df <- new_df
+  if (!OVERWRITE_EXISTING && file.exists(path)) {
+    existing <- arrow::read_parquet(path)
+    out_df   <- dplyr::bind_rows(existing, new_df)
+    out_df   <- dplyr::distinct(out_df, dplyr::across(dplyr::any_of(dedup_keys)),
+                                .keep_all = TRUE)
+    cat(sprintf("  [merge] %s (%d existing + %d new)\n",
+                basename(path), nrow(existing), nrow(new_df)))
+  }
+  arrow::write_parquet(out_df, path)
+  cat(sprintf("  Saved: %s (%d rows)\n", basename(path), nrow(out_df)))
+  invisible(path)
+}
 
 # Year-by-year decile-level decomposition of policy effects.
 # Calls decompose_policy_effect once per sim_year (derived from timestamp),
@@ -1249,13 +1223,13 @@ cat("\n=== Step 2: Climate simulations ===\n")
 
 # ---- Output file paths ------------------------------------------------------
 
-out_outcomes  <- file.path(OUT_DIR, "simulations", "outcomes.csv")
+out_outcomes  <- file.path(OUT_DIR, "simulations", "outcomes.parquet")
 out_wx_quant  <- file.path(OUT_DIR, "simulations", "weather_quantiles.csv")
 out_sim_meta  <- file.path(OUT_DIR, "simulations", "sim_metadata.csv")
 out_failures  <- file.path(OUT_DIR, "simulations", "_failures.csv")
 out_pol_cfg   <- file.path(OUT_DIR, "simulations", "policy_config.csv")
 out_ret_per     <- file.path(OUT_DIR, "simulations", "return_periods.csv")
-out_yr_decile   <- file.path(OUT_DIR, "simulations", "decile_decomposition_by_year.csv")
+out_yr_decile   <- file.path(OUT_DIR, "simulations", "decile_decomposition_by_year.parquet")
 
 # ---- In-memory accumulators -------------------------------------------------
 
@@ -1288,14 +1262,11 @@ fp_list     <- lapply(.fp_raw, function(yr)
 
 sim_store   <- list()
 sim_run_idx <- 0L
-.n_base     <- sum(!grepl(":", names(fit_store), fixed = TRUE))
 
 for (spec_label in names(fit_store)) {
-  if (grepl(":", spec_label, fixed = TRUE)) next  # skip policy-augmented fits
-
   fs          <- fit_store[[spec_label]]
   sim_run_idx <- sim_run_idx + 1L
-  cat(sprintf("\n[%d/%d] %s\n", sim_run_idx, .n_base, spec_label))
+  cat(sprintf("\n[%d/%d] %s\n", sim_run_idx, length(fit_store), spec_label))
 
   is_log    <- identical(fs$so$transform, "log")
   spec_meta <- list(spec_label = spec_label, code = fs$code, wx_name = fs$wx_name,
@@ -1352,15 +1323,8 @@ for (spec_label in names(fit_store)) {
   sim_store[[spec_label]] <- result
 
   # Survey data no longer needed — sim_store captures everything for Section 5.
-  # Section 5 only uses fit_store[[k]]$mf via .lookup_fit().
   fit_store[[spec_label]]$svy_wx       <- NULL
   fit_store[[spec_label]]$svy_baseline <- NULL
-  for (.pk in paste(spec_label, names(POLICY_SCENARIOS), sep = ":")) {
-    if (!is.null(fit_store[[.pk]])) {
-      fit_store[[.pk]]$svy_wx       <- NULL
-      fit_store[[.pk]]$svy_baseline <- NULL
-    }
-  }
 
   # -- Historical aggregation -------------------------------------------------
   .hist_meta <- list(scenario_id = "historical", scenario_type = "historical",
@@ -1442,18 +1406,13 @@ gc(verbose = FALSE)
 # Checkpoint: write base (no_policy) outcomes so they survive a Section 5 crash
 .outcomes_keys  <- c("spec_label", "policy_label", "scenario_id",
                      "ensemble_member", "sim_year", "agg_method")
-.save_csv(dplyr::bind_rows(sim_outcomes_rows), out_outcomes, .outcomes_keys)
+.save_parquet(dplyr::bind_rows(sim_outcomes_rows), out_outcomes, .outcomes_keys)
 
 # =============================================================================
 # SECTION 5 — STEP 3: POLICY SIMULATIONS
 # =============================================================================
 
 cat("\n=== Step 3: Policy simulations ===\n")
-
-.lookup_fit <- function(spec_label, pol_name) {
-  key <- paste(spec_label, pol_name, sep = ":")
-  fit_store[[key]] %||% fit_store[[spec_label]]
-}
 
 .pol_active <- setdiff(names(POLICY_SCENARIOS), "no_policy")
 cat(sprintf("Policy scenarios: %d (%s)\n\n",
@@ -1464,15 +1423,21 @@ cat(sprintf("Policy scenarios: %d (%s)\n\n",
 pol_run_idx <- 0L
 
 for (spec_label in names(sim_store)) {
-  base_fs   <- fit_store[[spec_label]]
+  fs        <- fit_store[[spec_label]]
   sim_res   <- sim_store[[spec_label]]
-  is_log    <- identical(base_fs$so$transform, "log")
-  spec_meta <- list(spec_label = spec_label, code = base_fs$code,
-                    wx_name    = base_fs$wx_name, mt_label  = base_fs$mt_label,
-                    fe_label   = base_fs$fe_label, cov_label = base_fs$cov_label,
-                    inter_label = base_fs$inter_label)
+  is_log    <- identical(fs$so$transform, "log")
+  spec_meta <- list(spec_label = spec_label, code = fs$code,
+                    wx_name    = fs$wx_name, mt_label  = fs$mt_label,
+                    fe_label   = fs$fe_label, cov_label = fs$cov_label,
+                    inter_label = fs$inter_label)
 
-  for (pol_name in .pol_active) {
+  # Only run policies whose required interaction matches this spec
+  .spec_inter <- fs$inter_label
+  .pols_here  <- Filter(function(pn)
+    identical(POLICY_INTERACTION_MAP[[pn]], .spec_inter), .pol_active)
+  if (length(.pols_here) == 0L) next
+
+  for (pol_name in .pols_here) {
     pol         <- POLICY_SCENARIOS[[pol_name]]
     pol_run_idx <- pol_run_idx + 1L
     .run_key    <- paste(spec_label, pol_name, sep = ":")
@@ -1500,8 +1465,6 @@ for (spec_label in names(sim_store)) {
       run_status              = "started",
       stringsAsFactors = FALSE
     )
-
-    fs <- .lookup_fit(spec_label, pol_name)
 
     # Resolve relative transfer amount (transfer_pctile → transfer_amount_usd)
     .pol_sp <- .resolve_transfer_amount(pol$sp, sim_res$hist_sim_result$svy)
@@ -1627,11 +1590,8 @@ for (spec_label in names(sim_store)) {
     gc(verbose = FALSE)
   }
 
-  # Free this spec's fit + simulation data — no longer needed after policy runs
   sim_store[[spec_label]] <- NULL
   fit_store[[spec_label]] <- NULL
-  for (.pk in paste(spec_label, .pol_active, sep = ":"))
-    fit_store[[.pk]] <- NULL
   gc(verbose = FALSE)
 }
 
@@ -1651,7 +1611,7 @@ cat("\n=== Saving outputs ===\n")
 .pol_cfg_keys   <- c("spec_label", "policy_label")
 
 .outcomes_df <- dplyr::bind_rows(sim_outcomes_rows)
-.save_csv(.outcomes_df,                          out_outcomes, .outcomes_keys)
+.save_parquet(.outcomes_df,                       out_outcomes, .outcomes_keys)
 .save_csv(dplyr::bind_rows(sim_wx_quant_rows),  out_wx_quant, .wx_quant_keys)
 .save_csv(dplyr::bind_rows(sim_meta_rows_all),  out_sim_meta, .sim_meta_keys)
 
@@ -1663,7 +1623,7 @@ cat("\n=== Saving outputs ===\n")
 
 # Year-by-decile decomposition
 .yr_decile_keys <- c("spec_label", "policy_label", "scenario_id", "ensemble_member", "sim_year", "decile")
-.save_csv(dplyr::bind_rows(all_yr_decile_rows), out_yr_decile, .yr_decile_keys)
+.save_parquet(dplyr::bind_rows(all_yr_decile_rows), out_yr_decile, .yr_decile_keys)
 
 .save_csv(dplyr::bind_rows(all_fail_rows),       out_failures, .fail_keys)
 

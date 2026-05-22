@@ -5,14 +5,15 @@
 # Named aaa_load.R so it sorts first and runs before other batch/R/ files.
 # Sourced automatically via the list.files("batch/R", ...) call at the top of
 # each batch script. Install with:
-#   install.packages(c("sf", "rnaturalearth", "rnaturalearthdata", "collapse"))
+#   install.packages(c("sf", "rnaturalearth", "rnaturalearthdata", "collapse", "arrow"))
 # =============================================================================
 
 .batch_pkgs <- c(
   sf                 = "sf",
   rnaturalearth      = "rnaturalearth",
   rnaturalearthdata  = "rnaturalearthdata",
-  collapse           = "collapse"
+  collapse           = "collapse",
+  arrow              = "arrow"
 )
 
 .missing <- names(Filter(Negate(requireNamespace), .batch_pkgs))
@@ -29,6 +30,7 @@ library(sf,                warn.conflicts = FALSE)
 library(rnaturalearth,     warn.conflicts = FALSE)
 library(rnaturalearthdata, warn.conflicts = FALSE)
 library(collapse,         warn.conflicts = FALSE) 
+library(arrow,            warn.conflicts = FALSE)
 
 # s2 spherical geometry causes spurious topology errors on natural earth data
 sf::sf_use_s2(FALSE)
