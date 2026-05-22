@@ -25,7 +25,7 @@ invisible(lapply(list.files("batch/R", pattern = "\\.R$", full.names = TRUE), so
 # "databricks" -> credentials from .Renviron (DATABRICKS_HOST, etc.)
 CONNECTION_TYPE <- "local"
 DATA_DIR        <- Sys.getenv("WISEAPP_DATA_PATH")
-OUT_DIR         <- "dev/outputs/"
+OUT_DIR         <- Sys.getenv("WISEAPP_RESULTS_PATH")
 
 # ---- Unit of analysis -------------------------------------------------------
 UNIT <- "hh"   # "hh", "ind", or "firm"
@@ -35,7 +35,10 @@ POOL_COUNTRIES <- FALSE   # TRUE = one pooled model; FALSE = per-country
 
 # ---- Country / survey sample (mod_1_01) [GRID when !POOL_COUNTRIES] --------
 # NULL = all available; c(...) = subset
-COUNTRY_FILTER <- "GNB"
+COUNTRY_FILTER <- c(
+  "BEN", "BFA", "BRA", "CIV", "COL", "GMB", "GNB", "GTM", "IND", "IRN", "LKA",
+  "MLI", "MRT", "MWI", "NER", "SEN", "TCD", "TGO", "TJK", "VNM", "ZMB"
+)
 
 # ---- Outcome variable (mod_1_03) -------------------------------------------
 OUTCOME_NAME <- "welfare"
@@ -53,8 +56,8 @@ POVERTY_LINE <- 3
 
 WEATHER_SPECS <- c(
   expand_weather_specs(
-    "t", c(12L),
-    transformations = "continuous",
+    "t", c(1L, 3L, 6L, 12L),
+    transformations = c("continuous", "binned"),
     var_constructions = c("None"),
     ref_starts = 1L        # start month (months before interview); 1 = most recent
   )
@@ -74,7 +77,7 @@ MODEL_TYPE <- c("Linear regression", "Quantile regression (RIF)")
 
 # ---- Interactions (mod_1_06) [GRID] ----------------------------------------
 # character(0) = no interaction; each entry interacts that variable with weather
-INTERACTIONS <- list(character(0))
+INTERACTIONS <- list(character(0), "urban", "electricity", "imp_wat_rec", "imp_san_rec", "ttime_health")
 
 # ---- Fixed effects (mod_1_06) [GRID] ---------------------------------------
 # Named list of FE profiles. Values are character vectors passed to fixest.
@@ -88,10 +91,10 @@ FIXED_EFFECTS <- list(
 # Named list of covariate profiles. Each must have `method` ("User-defined" or
 # "Lasso"). User-defined profiles supply covariates by role.
 COVARIATE_SPECS <- list(
-  hhsize_urban_area = list(
+  hhsize_urban = list(
     method = "User-defined",
     ind = character(0), hh = c("hhsize", "urban"),
-    firm = character(0), area = c("area_h3_7")
+    firm = character(0), area = character(0)
   ), 
   lasso = list(method = "Lasso")
 )
@@ -119,7 +122,7 @@ LASSO_FORCE_OUT <- list(
 )
 
 # ---- Output -----------------------------------------------------------------
-OVERWRITE_EXISTING <- FALSE
+OVERWRITE_EXISTING <- TRUE
 
 # =============================================================================
 # SECTION 2 — HELPERS
