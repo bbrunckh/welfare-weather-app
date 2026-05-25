@@ -40,7 +40,7 @@ make_data <- function(n, p_total = 50, seed = 1L) {
   list(dat = as.data.frame(dat), vl = vl)
 }
 
-run_one <- function(dat, vl, use_parallel, workers) {
+run_one <- function(dat, vl, use_parallel, workers, use_mice = FALSE) {
   t0 <- Sys.time()
   res <- run_lasso_selection(
     df = dat,
@@ -50,6 +50,7 @@ run_one <- function(dat, vl, use_parallel, workers) {
     int_vars     = "int1",
     valid_vl     = vl,
     mi_m = 5, mi_maxit = 2, mi_method = "norm",
+    use_mice = use_mice,
     stability_threshold = 0.5,
     use_parallel = use_parallel,
     n_workers    = workers,
@@ -64,15 +65,19 @@ run_one <- function(dat, vl, use_parallel, workers) {
 # Warm-up so package JIT / future plan setup doesn't pollute the first cell
 invisible({
   d <- make_data(2000, p_total = 20, seed = 99)
-  run_one(d$dat, d$vl, FALSE, NULL)
-  run_one(d$dat, d$vl, TRUE,  2L)
+  run_one(d$dat, d$vl, FALSE, NULL, use_mice = FALSE)
+  run_one(d$dat, d$vl, FALSE, NULL, use_mice = TRUE)
+  run_one(d$dat, d$vl, TRUE,  2L,   use_mice = TRUE)
 })
 
 ns      <- c(10000L, 50000L, 100000L)
 configs <- list(
-  list(label = "sequential",    use_par = FALSE, workers = NULL),
-  list(label = "parallel x2",   use_par = TRUE,  workers = 2L),
-  list(label = "parallel x15",  use_par = TRUE,  workers = 15L)
+  list(label = "cc sequential",      use_par = FALSE, workers = NULL, mice = FALSE),
+  list(label = "cc parallel x2",     use_par = TRUE,  workers = 2L,  mice = FALSE),
+  list(label = "cc parallel x5",     use_par = TRUE,  workers = 5L,  mice = FALSE),
+  list(label = "mice sequential",    use_par = FALSE, workers = NULL, mice = TRUE),
+  list(label = "mice parallel x2",   use_par = TRUE,  workers = 2L,  mice = TRUE),
+  list(label = "mice parallel x15",  use_par = TRUE,  workers = 15L, mice = TRUE)
 )
 
 results <- data.frame(n = integer(), config = character(),
@@ -82,8 +87,8 @@ for (n in ns) {
   cat(sprintf("\n--- n = %s ---\n", format(n, big.mark=",")))
   d <- make_data(n, p_total = 50, seed = 17L)
   for (cfg in configs) {
-    r <- run_one(d$dat, d$vl, cfg$use_par, cfg$workers)
-    cat(sprintf("  %-14s  %6.1f s   (selected %d)\n",
+    r <- run_one(d$dat, d$vl, cfg$use_par, cfg$workers, use_mice = cfg$mice)
+    cat(sprintf("  %-22s  %6.1f s   (selected %d)\n",
                 cfg$label, r$elapsed, r$n_sel))
     results <- rbind(results,
       data.frame(n = n, config = cfg$label,
@@ -98,7 +103,22 @@ wide <- reshape(results[, c("n","config","elapsed_s")],
 names(wide) <- sub("^elapsed_s\\.", "", names(wide))
 print(wide, row.names = FALSE)
 
-cat("\nSpeed-ups vs sequential:\n")
-wide$x2_speedup  <- round(wide$sequential / wide$`parallel x2`,  2)
-wide$x15_speedup <- round(wide$sequential / wide$`parallel x15`, 2)
-print(wide[, c("n","x2_speedup","x15_speedup")], row.names = FALSE)
+cat("\nSpeed-ups vs cc sequential:\n")
+if ("cc sequential" %in% names(wide)) {
+  base_cc <- wide$`cc sequential`
+  for (cfg_name in setdiff(names(wide), c("n", "cc sequential"))) {
+    wide[[paste0(cfg_name, " vs cc")]] <- round(base_cc / wide[[cfg_name]], 2)
+  }
+  vs_cc_cols <- grep("vs cc$", names(wide), value = TRUE)
+  print(wide[, c("n", vs_cc_cols)], row.names = FALSE)
+}
+
+cat("\nSpeed-ups vs mice sequential:\n")
+if ("mice sequential" %in% names(wide)) {
+  base_mice <- wide$`mice sequential`
+  for (cfg_name in setdiff(names(wide), c("n", "mice sequential"))) {
+    wide[[paste0(cfg_name, " vs mice")]] <- round(base_mice / wide[[cfg_name]], 2)
+  }
+  vs_mice_cols <- grep("vs mice$", names(wide), value = TRUE)
+  print(wide[, c("n", vs_mice_cols)], row.names = FALSE)
+}

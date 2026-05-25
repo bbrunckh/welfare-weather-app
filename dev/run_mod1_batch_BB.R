@@ -664,7 +664,8 @@ for (si in SAMPLE_LABELS) {
             model_type = cur_model_type, alpha = LASSO_ALPHA,
             lambda_choice = LASSO_LAMBDA, nfolds = LASSO_NFOLDS,
             standardize = LASSO_STANDARDIZE, mi_m = MI_M,
-            mi_maxit = MI_MAXIT, stability_threshold = STABILITY_THRESHOLD
+            mi_maxit = MI_MAXIT, use_mice = FALSE,
+            stability_threshold = STABILITY_THRESHOLD
           ),
           error = function(e) { message(" LASSO: ", conditionMessage(e)); NULL }
         )

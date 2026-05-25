@@ -45,7 +45,7 @@ POOL_COUNTRIES <- FALSE   # TRUE = one pooled model; FALSE = per-country
 # NULL = all available; c(...) = subset
 
 # WAEMU
-COUNTRY_FILTER <- c("BEN", "BFA") # , "CIV", "GNB", "MLI", "NER", "SEN", "TGO")
+COUNTRY_FILTER <- c("BEN", "BFA", "CIV", "GNB", "MLI", "NER", "SEN", "TGO")
 
 # Other wise-app candidates with >= 2 surveys
 # COUNTRY_FILTER <- c( "BRA", "COL", "GMB", "GTM", "IND", "IRN", "LKA", "MRT", "MWI", "TCD", "TJK", "VNM", "ZMB")
@@ -116,7 +116,8 @@ LASSO_STANDARDIZE   <- TRUE
 MI_M                <- 5L
 MI_MAXIT            <- 5L
 STABILITY_THRESHOLD <- 0.5
-LASSO_USE_PARALLEL  <- TRUE  # use parallel if > 50,000 observations; evaluated dynamically at call site
+LASSO_USE_MICE      <- FALSE  # FALSE = complete-case (fast); TRUE = MICE imputation
+LASSO_USE_PARALLEL  <- FALSE   # use parallel for MICE if > 50,000 observations; evaluated dynamically at call site
 LASSO_N_WORKERS     <- NULL   # NULL = auto-detect all cores
 LASSO_PARALLEL_SEED <- NULL   # NULL = auto-managed parallel-safe seeds
 LASSO_GLOBALS_MAX   <- NULL   # NULL = max(2 GB, current setting)
@@ -1171,7 +1172,8 @@ for (si in SAMPLE_LABELS) {
             model_type = cur_model_type, alpha = LASSO_ALPHA,
             lambda_choice = LASSO_LAMBDA, nfolds = LASSO_NFOLDS,
             standardize = LASSO_STANDARDIZE, mi_m = MI_M,
-            mi_maxit = MI_MAXIT, stability_threshold = STABILITY_THRESHOLD,
+            mi_maxit = MI_MAXIT, use_mice = LASSO_USE_MICE,
+            stability_threshold = STABILITY_THRESHOLD,
             use_parallel = LASSO_USE_PARALLEL && nrow(survey_prep) > 50000, n_workers = LASSO_N_WORKERS,
             parallel_seed = LASSO_PARALLEL_SEED,
             globals_max_size = LASSO_GLOBALS_MAX

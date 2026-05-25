@@ -616,6 +616,12 @@ mod_1_06_model_server <- function(id,
           selected = "Standardize"
         ),
 
+        shiny::checkboxInput(
+          ns("use_mice"),
+          "Use MICE imputation for missing covariates",
+          value = FALSE
+        ),
+
         sliderInput(
           ns("mi_m"),
           "Number of imputations (m)",
@@ -672,6 +678,7 @@ mod_1_06_model_server <- function(id,
         standardize_val <- if (is.null(input$lasso_standardize)) TRUE else {
           if (is.logical(input$lasso_standardize)) input$lasso_standardize else input$lasso_standardize == "Standardize"
         }
+        use_mice_val <- if (is.null(input$use_mice)) FALSE else input$use_mice
         m_val <- if (is.null(input$mi_m)) 5 else input$mi_m
         maxit_val <- if (is.null(input$mi_maxit)) 5 else input$mi_maxit
         threshold_val <- if (is.null(input$stability_threshold)) 0.5 else input$stability_threshold
@@ -705,6 +712,7 @@ mod_1_06_model_server <- function(id,
           mi_m = m_val,
           mi_maxit = maxit_val,
           mi_method = "norm",
+          use_mice = use_mice_val,
           stability_threshold = threshold_val,
           use_parallel = nrow(df) > 50000L,
           n_workers = min(parallel::detectCores() - 1, 5L),

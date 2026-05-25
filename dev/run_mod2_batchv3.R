@@ -537,7 +537,8 @@ for (ri in seq_len(nrow(grid))) {
       standardize         = LASSO_STANDARDIZE,
       mi_m                = MI_M,
       mi_maxit            = MI_MAXIT,
-      stability_threshold = STABILITY_THRESHOLD
+      stability_threshold = STABILITY_THRESHOLD,
+      use_mice = FALSE
     ),
     error = function(e) { message("  LASSO: ", conditionMessage(e)); NULL }
   )

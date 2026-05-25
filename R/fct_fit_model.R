@@ -250,12 +250,12 @@ ENGINE_REGISTRY <- list(
 # run_lasso()                                                                  #
 # ---------------------------------------------------------------------------- #
 
-#' Run MI + stability LASSO and post-LASSO refits
+#' Run stability LASSO variable selection
 #'
 #' @param df data.frame with analysis variables
 #' @param selected_outcome named list with `$name` (column) and `$type`
 #' @param weather_vars character vector weather vars (unpenalized)
-#' @param fe_vars character vector fixed-effect vars (unpenalized; absorbed in refit)
+#' @param fe_vars character vector fixed-effect vars (unpenalized)
 #' @param int_vars character vector interaction moderators (unpenalized;
 #'   weather × int_vars interactions are also forced into the unpenalized core)
 #' @param valid_vl data.frame variable list with columns name, ind, hh, area, firm
@@ -280,7 +280,7 @@ ENGINE_REGISTRY <- list(
 #' @param cv_selection character; fold assignment mode for CV ("default" or "random")
 #' @param glmnet_tol numeric; convergence tolerance passed to glmnet (thresh)
 #'
-#' @return list(model, per_imputation_models, selected_covariates, selection_frequency)
+#' @return list(selected_covariates, selection_frequency)
 #' @export
 run_lasso_selection <- function(
   df,
@@ -297,6 +297,7 @@ run_lasso_selection <- function(
   mi_m = 5,
   mi_maxit = 5,
   mi_method = "pmm",
+  use_mice = FALSE,
   stability_threshold = 0.5,
   use_parallel = FALSE,
   n_workers = NULL,
@@ -402,6 +403,29 @@ run_lasso_selection <- function(
   }
 
   # ---------------------------------------------------------------------------
+  # 4b. Complete-case filtering (default; use_mice = TRUE restores MI path)
+  #
+  # For variable *selection*, complete-case analysis is sufficient when
+
+  # missingness is low (filter_valid_vars enforces >= 90% complete upstream).
+  # Dropping NA rows avoids the mice bottleneck at large n. Final model
+  # fitting in fit_model() uses the full dataset independently.
+  # ---------------------------------------------------------------------------
+  if (!isTRUE(use_mice)) {
+    cc_mask <- complete.cases(df[, candidate_vars, drop = FALSE])
+    n_dropped <- sum(!cc_mask)
+    if (n_dropped > 0L) {
+      message(sprintf(
+        "run_lasso_selection: dropping %d/%d rows with NA in candidates (complete-case mode).",
+        n_dropped, nrow(df)
+      ))
+      df <- df[cc_mask, , drop = FALSE]
+      if (nrow(df) < 100L)
+        stop("Too few complete cases for LASSO selection (<100 rows remain).")
+    }
+  }
+
+  # ---------------------------------------------------------------------------
   # 5. Parallel plan (workers capped at mi_m — extra workers idle)
   #
   # Auto-disable parallelism on small samples: below `parallel_min_n` rows the
@@ -448,39 +472,98 @@ run_lasso_selection <- function(
   }
 
   # ---------------------------------------------------------------------------
-  # 6. Multiple imputation
-  #
-  # mice frame includes outcome + core columns as predictors (now NA-free, so
-  # they inform imputation but aren't themselves imputed). futuremice runs
-  # imputations in parallel when available; skip mice entirely if no NAs.
-  # `completed_cands_list` is precomputed once and reused for both the LASSO
-  # selection loop and the post-LASSO refit loop.
+  # 6. Build design matrices (X_core + X_lasso)
   # ---------------------------------------------------------------------------
-  mi_cols  <- unique(c(y_var, core_main_terms, candidate_vars))
-  mi_frame <- df[, mi_cols, drop = FALSE]
+  core_formula <- if (length(core_main_terms) == 0 && length(interaction_terms) == 0) {
+    stats::as.formula("~ 1")
+  } else {
+    stats::as.formula(paste(
+      "~", paste(c(core_main_terms, interaction_terms), collapse = " + ")
+    ))
+  }
+  mm_core <- stats::model.matrix(core_formula, data = df)
+  X_core  <- if (ncol(mm_core) > 1) {
+    mm_core[, -1, drop = FALSE]
+  } else {
+    matrix(0, nrow = nrow(df), ncol = 0)
+  }
+  rm(mm_core)
 
-  # Coerce non-numeric predictors (character / factor / logical) to integer
-  # codes. mice methods like "norm.predict" build a numeric design matrix
-  # internally and fail (`x %*% p$c` non-numeric) if any predictor column is
-  # character; futuremice is stricter than mice() here. Treating categoricals
-  # as ordinal codes for *prediction-of-candidates* purposes is a deliberate
-  # trade-off: it preserves usable signal without exploding high-cardinality
-  # FE columns into thousands of dummies.
-  non_num_idx <- vapply(mi_frame, function(x) !is.numeric(x), logical(1))
-  if (any(non_num_idx)) {
-    mi_frame[non_num_idx] <- lapply(mi_frame[non_num_idx], function(x) {
-      if (is.logical(x)) as.integer(x)
-      else if (is.factor(x)) as.integer(x)
-      else as.integer(as.factor(x))
-    })
+  y_vec <- df[[y_var]]
+
+  has_matrixStats <- requireNamespace("matrixStats", quietly = TRUE)
+  drop_constant <- function(X) {
+    if (ncol(X) == 0) return(X)
+    keep <- if (has_matrixStats) {
+      matrixStats::colMaxs(X) > matrixStats::colMins(X)
+    } else {
+      vapply(seq_len(ncol(X)), function(j) {
+        v <- X[, j]; length(v) > 0L && (max(v) > min(v))
+      }, logical(1))
+    }
+    X[, keep, drop = FALSE]
   }
 
-  has_na <- anyNA(mi_frame[, candidate_vars, drop = FALSE])
+  has_na <- anyNA(df[, candidate_vars, drop = FALSE])
+  nfolds_i <- max(2L, as.integer(nfolds))
 
+  # ---------------------------------------------------------------------------
+  # 7. Fast path: no NAs in candidates (always true after complete-case filter)
+  #
+  # X_full and penalty are identical across iterations — build once.  The loop
+  # only varies the random CV fold assignment for stability selection.
+  # Sequential lapply: globals-export overhead of multisession exceeds the
+  # cv.glmnet compute time (confirmed via dev/bench_lasso.R).
+  # ---------------------------------------------------------------------------
   if (!has_na) {
-    completed_cands_list <- replicate(m, df[, candidate_vars, drop = FALSE],
-                                      simplify = FALSE)
+    X_lasso <- drop_constant(as.matrix(df[, candidate_vars, drop = FALSE]))
+    if (ncol(X_lasso) == 0) stop("All candidate variables are constant.")
+    lasso_names <- colnames(X_lasso)
+
+    X_full  <- if (ncol(X_core) > 0) cbind(X_core, X_lasso) else X_lasso
+    penalty <- c(rep(0, ncol(X_core)), rep(1, ncol(X_lasso)))
+    rm(X_core, X_lasso)
+
+    cv_args_base <- list(
+      x = X_full,
+      y = y_vec,
+      alpha = alpha,
+      nfolds = nfolds_i,
+      family = family_type,
+      standardize = isTRUE(standardize),
+      penalty.factor = penalty
+    )
+    if (!is.null(glmnet_tol)) cv_args_base$thresh <- glmnet_tol
+
+    selection_results <- lapply(seq_len(m), function(i) {
+      if (!is.null(parallel_seed)) set.seed(parallel_seed + i)
+      cv_args <- cv_args_base
+      if (identical(cv_selection, "random")) {
+        cv_args$foldid <- sample(rep(seq_len(nfolds_i), length.out = nrow(X_full)))
+      }
+      cvfit <- do.call(glmnet::cv.glmnet, cv_args)
+      coefs <- stats::coef(cvfit, s = lambda_choice)
+      sel   <- rownames(coefs)[as.numeric(coefs) != 0]
+      sel   <- setdiff(sel, "(Intercept)")
+      intersect(sel, lasso_names)
+    })
+
   } else {
+    # -------------------------------------------------------------------------
+    # 8. MI path: impute candidates, rebuild X_lasso per imputation
+    # -------------------------------------------------------------------------
+    mi_cols  <- unique(c(y_var, core_main_terms, candidate_vars))
+    mi_frame <- df[, mi_cols, drop = FALSE]
+
+    non_num_idx <- vapply(mi_frame, function(x) !is.numeric(x), logical(1))
+    if (any(non_num_idx)) {
+      mi_frame[non_num_idx] <- lapply(mi_frame[non_num_idx], function(x) {
+        if (is.logical(x)) as.integer(x)
+        else if (is.factor(x)) as.integer(x)
+        else as.integer(as.factor(x))
+      })
+    }
+
     use_futuremice <- isTRUE(use_parallel) &&
       utils::packageVersion("mice") >= "3.16.0"
     if (use_futuremice) {
@@ -506,92 +589,49 @@ run_lasso_selection <- function(
       seq_len(m),
       function(i) mice::complete(imp, action = i)[, candidate_vars, drop = FALSE]
     )
+    rm(mi_frame, imp)
+
+    selection_results <- map_fun(seq_len(m), function(i) {
+      if (!is.null(parallel_seed)) set.seed(parallel_seed + i)
+
+      X_lasso <- drop_constant(as.matrix(completed_cands_list[[i]]))
+      if (ncol(X_lasso) == 0) return(character(0))
+
+      X_full  <- if (ncol(X_core) > 0) cbind(X_core, X_lasso) else X_lasso
+      penalty <- c(rep(0, ncol(X_core)), rep(1, ncol(X_lasso)))
+
+      foldid <- NULL
+      if (identical(cv_selection, "random")) {
+        foldid <- sample(rep(seq_len(nfolds_i), length.out = nrow(X_full)))
+      }
+
+      cv_args <- list(
+        x = X_full,
+        y = y_vec,
+        alpha = alpha,
+        nfolds = nfolds_i,
+        family = family_type,
+        standardize = isTRUE(standardize),
+        penalty.factor = penalty
+      )
+      if (!is.null(foldid))     cv_args$foldid <- foldid
+      if (!is.null(glmnet_tol)) cv_args$thresh <- glmnet_tol
+
+      cvfit <- do.call(glmnet::cv.glmnet, cv_args)
+
+      coefs <- stats::coef(cvfit, s = lambda_choice)
+      sel   <- rownames(coefs)[as.numeric(coefs) != 0]
+      sel   <- setdiff(sel, "(Intercept)")
+      intersect(sel, colnames(X_lasso))
+    })
   }
-
-  # ---------------------------------------------------------------------------
-  # 7. Hoist X_core out of the imputation loop
-  #
-  # Core columns are NA-free (step 3) and untouched by mice, so X_core is
-  # identical across imputations — compute it once.
-  # ---------------------------------------------------------------------------
-  core_formula <- if (length(core_main_terms) == 0 && length(interaction_terms) == 0) {
-    stats::as.formula("~ 1")
-  } else {
-    stats::as.formula(paste(
-      "~", paste(c(core_main_terms, interaction_terms), collapse = " + ")
-    ))
-  }
-  mm_core <- stats::model.matrix(core_formula, data = df)
-  X_core  <- if (ncol(mm_core) > 1) {
-    mm_core[, -1, drop = FALSE]
-  } else {
-    matrix(0, nrow = nrow(df), ncol = 0)
-  }
-  rm(mm_core)
-
-  y_vec <- df[[y_var]]
-
-  # ---------------------------------------------------------------------------
-  # 8. Fast constant-column detection via matrixStats (fallback to base)
-  # ---------------------------------------------------------------------------
-  has_matrixStats <- requireNamespace("matrixStats", quietly = TRUE)
-  drop_constant <- function(X) {
-    if (ncol(X) == 0) return(X)
-    keep <- if (has_matrixStats) {
-      matrixStats::colMaxs(X) > matrixStats::colMins(X)
-    } else {
-      vapply(seq_len(ncol(X)), function(j) {
-        v <- X[, j]; length(v) > 0L && (max(v) > min(v))
-      }, logical(1))
-    }
-    X[, keep, drop = FALSE]
-  }
-
-  # ---------------------------------------------------------------------------
-  # 9. LASSO selection loop
-  # ---------------------------------------------------------------------------
-  nfolds_i <- max(2L, as.integer(nfolds))
-
-  selection_results <- map_fun(seq_len(m), function(i) {
-    if (!is.null(parallel_seed)) set.seed(parallel_seed + i)
-
-    X_lasso <- drop_constant(as.matrix(completed_cands_list[[i]]))
-    if (ncol(X_lasso) == 0) return(character(0))
-
-    X_full  <- if (ncol(X_core) > 0) cbind(X_core, X_lasso) else X_lasso
-    penalty <- c(rep(0, ncol(X_core)), rep(1, ncol(X_lasso)))
-
-    foldid <- NULL
-    if (identical(cv_selection, "random")) {
-      foldid <- sample(rep(seq_len(nfolds_i), length.out = nrow(X_full)))
-    }
-
-    cv_args <- list(
-      x = X_full,
-      y = y_vec,
-      alpha = alpha,
-      nfolds = nfolds_i,
-      family = family_type,
-      standardize = isTRUE(standardize),
-      penalty.factor = penalty
-    )
-    if (!is.null(foldid))     cv_args$foldid <- foldid
-    if (!is.null(glmnet_tol)) cv_args$thresh <- glmnet_tol
-
-    cvfit <- do.call(glmnet::cv.glmnet, cv_args)
-
-    coefs <- stats::coef(cvfit, s = lambda_choice)
-    sel   <- rownames(coefs)[as.numeric(coefs) != 0]
-    sel   <- setdiff(sel, "(Intercept)")
-    intersect(sel, colnames(X_lasso))
-  })
 
   selected_list <- selection_results
   all_selected  <- unique(unlist(selected_list))
   if (length(all_selected) == 0) stop("No covariates selected across imputations.")
 
   # ---------------------------------------------------------------------------
-  # 10. Selection frequency via tabulate
+  # 9. Selection frequency via tabulate
   # ---------------------------------------------------------------------------
   freq_tbl <- table(unlist(selected_list))
   selection_freq <- setNames(as.numeric(freq_tbl) / m, names(freq_tbl))
@@ -599,66 +639,9 @@ run_lasso_selection <- function(
   final_selected <- names(selection_freq)[selection_freq >= stability_threshold]
   if (length(final_selected) == 0) stop("No covariates stable across imputations.")
 
-  # ---------------------------------------------------------------------------
-  # 11. Post-LASSO refit via fixest (FE-absorbing; ~10–100× lm/glm)
-  # ---------------------------------------------------------------------------
-  use_fixest    <- requireNamespace("fixest", quietly = TRUE)
-  rhs_main_base <- unique(c(weather_vars, int_vars, final_selected))
-  rhs_main_base <- rhs_main_base[rhs_main_base %in% names(df)]
-  rhs_all       <- c(rhs_main_base, interaction_terms)
-  rhs_str       <- paste(rhs_all, collapse = " + ")
-
-  final_models <- map_fun(seq_len(m), function(i) {
-    if (!is.null(parallel_seed)) set.seed(parallel_seed + 1000L + i)
-    df_imp <- df
-    df_imp[, candidate_vars] <- completed_cands_list[[i]]
-
-    if (use_fixest) {
-      fml <- if (length(fe_vars) > 0) {
-        stats::as.formula(paste(y_var, "~", rhs_str, "|",
-                                paste(fe_vars, collapse = " + ")))
-      } else {
-        stats::as.formula(paste(y_var, "~", rhs_str))
-      }
-      tryCatch(
-        if (family_type == "binomial") {
-          fixest::feglm(fml, data = df_imp, family = stats::binomial(), warn = FALSE)
-        } else {
-          fixest::feols(fml, data = df_imp, warn = FALSE)
-        },
-        error = function(e) NULL
-      )
-    } else {
-      rhs_lm <- paste(c(rhs_all, fe_vars), collapse = " + ")
-      fml <- stats::as.formula(paste(y_var, "~", rhs_lm))
-      tryCatch(
-        if (family_type == "gaussian") {
-          stats::lm(fml, data = df_imp)
-        } else {
-          stats::glm(fml, data = df_imp, family = stats::binomial())
-        },
-        error = function(e) NULL
-      )
-    }
-  })
-
-  final_models <- final_models[!vapply(final_models, is.null, logical(1))]
-  if (length(final_models) == 0) stop("All post-LASSO refits failed.")
-
-  pooled_model <- NULL
-  mira_obj <- tryCatch(mice::as.mira(final_models), error = function(e) NULL)
-  if (!is.null(mira_obj)) {
-    pooled_model <- tryCatch(
-      suppressWarnings(mice::pool(mira_obj)),
-      error = function(e) NULL
-    )
-  }
-
   list(
-    model = if (!is.null(pooled_model)) pooled_model else final_models,
-    per_imputation_models = final_models,
-    selected_covariates   = final_selected,
-    selection_frequency   = selection_freq
+    selected_covariates = final_selected,
+    selection_frequency = selection_freq
   )
 }
 
