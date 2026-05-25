@@ -301,6 +301,35 @@ cat(sprintf(
   length(INTERACTIONS), length(FIXED_EFFECTS), length(COVARIATE_SPECS)
 ))
 
+# ---- Output file paths -------------------------------------------------------
+coef_csv  <- file.path(OUT_MODEL, "model_coefficients.csv")
+stats_csv <- file.path(OUT_MODEL, "model_fit_stats.csv")
+
+# ---- OVERWRITE_EXISTING cleanup + skip detection -----------------------------
+.done_specs <- character(0)
+if (OVERWRITE_EXISTING) {
+  cat("  OVERWRITE mode: deleting existing outputs...\n")
+  for (.f in c(coef_csv, stats_csv,
+               file.path(OUT_MODEL, "_failures.csv"),
+               file.path(OUT_MODEL, "_interactions_not_available.csv"),
+               file.path(OUT_MODEL, "_checkpoint_coefficients.csv"),
+               file.path(OUT_MODEL, "_checkpoint_fit_stats.csv"))) {
+    if (file.exists(.f)) file.remove(.f)
+  }
+  OVERWRITE_EXISTING <- FALSE
+} else if (file.exists(stats_csv)) {
+  .chk <- readr::read_csv(stats_csv, show_col_types = FALSE)
+  .chk <- .chk[.chk$model == "fit3", , drop = FALSE]
+  if (nrow(.chk) > 0L) {
+    .inter <- ifelse(is.na(.chk$interaction), "noInter", .chk$interaction)
+    .done_specs <- unique(paste(.chk$code, .chk$weather, .chk$engine,
+                                .chk$fe_profile, .chk$cov_profile, .inter,
+                                sep = "_"))
+    cat(sprintf("  %d spec(s) already complete — will skip\n", length(.done_specs)))
+  }
+  rm(.chk)
+}
+
 # =============================================================================
 # SECTION 5 — MAIN LOOP
 # =============================================================================
@@ -461,10 +490,8 @@ for (si in SAMPLE_LABELS) {
 
       cat(sprintf("  [%d/%d] %s...", run_idx, nrow(grid), spec_label))
 
-      if (!OVERWRITE_EXISTING &&
-          file.exists(file.path(OUT_MODEL, si,
-                                paste0("coefplot_", spec_label, ".png")))) {
-        cat(" SKIP (exists)\n")
+      if (spec_label %in% .done_specs) {
+        cat(" SKIP (results exist)\n")
         next
       }
 
@@ -671,9 +698,6 @@ for (si in SAMPLE_LABELS) {
 # =============================================================================
 
 cat("\n=== Saving combined outputs ===\n")
-
-coef_csv  <- file.path(OUT_MODEL, "model_coefficients.csv")
-stats_csv <- file.path(OUT_MODEL, "model_fit_stats.csv")
 
 # Dedup keys: uniquely identify a coefficient row
 coef_dedup_keys  <- c("code", "weather", "engine", "fe_profile", "cov_profile",
