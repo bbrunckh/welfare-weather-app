@@ -305,6 +305,27 @@ cat(sprintf(
 coef_csv  <- file.path(OUT_MODEL, "model_coefficients.csv")
 stats_csv <- file.path(OUT_MODEL, "model_fit_stats.csv")
 
+# ---- Dedup keys ---------------------------------------------------------------
+coef_dedup_keys  <- c("code", "weather", "engine", "fe_profile", "cov_profile",
+                      "interaction", "model", "term", "tau")
+stats_dedup_keys <- c("code", "weather", "engine", "fe_profile", "cov_profile",
+                      "interaction", "model", "tau")
+
+.save_csv <- function(new_df, path, dedup_keys) {
+  if (is.null(new_df) || nrow(new_df) == 0L) return(invisible(NULL))
+  out_df <- new_df
+  if (file.exists(path)) {
+    existing <- readr::read_csv(path, show_col_types = FALSE)
+    out_df   <- dplyr::bind_rows(existing, new_df)
+    out_df   <- dplyr::distinct(out_df, dplyr::across(dplyr::any_of(dedup_keys)),
+                                .keep_all = TRUE)
+    cat(sprintf("  [merge] %s (%d existing + %d new)\n",
+                basename(path), nrow(existing), nrow(new_df)))
+  }
+  readr::write_csv(out_df, path)
+  cat(sprintf("  Saved: %s (%d rows)\n", basename(path), nrow(out_df)))
+}
+
 # ---- OVERWRITE_EXISTING cleanup + skip detection -----------------------------
 .done_specs <- character(0)
 if (OVERWRITE_EXISTING) {
@@ -334,9 +355,8 @@ if (OVERWRITE_EXISTING) {
 # SECTION 5 — MAIN LOOP
 # =============================================================================
 
-all_coefs     <- list()
-all_fit_stats <- list()
 run_idx       <- 0L
+total_fitted  <- 0L
 fail_log      <- list()
 skip_log      <- list()
 seen_fit1     <- character(0)
@@ -345,6 +365,9 @@ seen_fit2     <- character(0)
 for (si in SAMPLE_LABELS) {
   sample_codes <- SAMPLE_CODES[[si]]
   cat(sprintf("\n=== %s ===\n", si))
+
+  country_coefs     <- list()
+  country_fit_stats <- list()
 
   # Step 1 — Load and preprocess survey data (mod_1_01 + mod_1_02)
   years_by_code <- setNames(
@@ -637,8 +660,8 @@ for (si in SAMPLE_LABELS) {
         r1 <- do.call(extract_one_fit,
                       c(list(fit = mf$fit1, model_label = "fit1", code = si),
                         fit_args))
-        if (!is.null(r1$coefs))     all_coefs[[length(all_coefs) + 1L]]         <- r1$coefs
-        if (!is.null(r1$fit_stats)) all_fit_stats[[length(all_fit_stats) + 1L]] <- r1$fit_stats
+        if (!is.null(r1$coefs))     country_coefs[[length(country_coefs) + 1L]]         <- r1$coefs
+        if (!is.null(r1$fit_stats)) country_fit_stats[[length(country_fit_stats) + 1L]] <- r1$fit_stats
         seen_fit1 <- c(seen_fit1, fit1_key)
       }
 
@@ -649,8 +672,8 @@ for (si in SAMPLE_LABELS) {
                       c(list(fit = mf$fit2, model_label = "fit2", code = si,
                              fe_label = fe_label, fe_vec = fe_vec),
                         fit_args))
-        if (!is.null(r2$coefs))     all_coefs[[length(all_coefs) + 1L]]         <- r2$coefs
-        if (!is.null(r2$fit_stats)) all_fit_stats[[length(all_fit_stats) + 1L]] <- r2$fit_stats
+        if (!is.null(r2$coefs))     country_coefs[[length(country_coefs) + 1L]]         <- r2$coefs
+        if (!is.null(r2$fit_stats)) country_fit_stats[[length(country_fit_stats) + 1L]] <- r2$fit_stats
         seen_fit2 <- c(seen_fit2, fit2_key)
       }
 
@@ -661,90 +684,39 @@ for (si in SAMPLE_LABELS) {
                            cov_label = cov_label, cov_method = cov_method,
                            lasso_selected_vars = lasso_selected_vars),
                       fit_args))
-      if (!is.null(r3$coefs))     all_coefs[[length(all_coefs) + 1L]]         <- r3$coefs
-      if (!is.null(r3$fit_stats)) all_fit_stats[[length(all_fit_stats) + 1L]] <- r3$fit_stats
+      if (!is.null(r3$coefs))     country_coefs[[length(country_coefs) + 1L]]         <- r3$coefs
+      if (!is.null(r3$fit_stats)) country_fit_stats[[length(country_fit_stats) + 1L]] <- r3$fit_stats
 
       cat(sprintf(" %.1fs DONE\n", round(proc.time()[["elapsed"]] - t0, 1)))
+      total_fitted <- total_fitted + 1L
 
-      # -- memory: release large objects immediately after extracting results
       rm(mf, survey_prep, selected_model, selected_outcome)
       gc(verbose = FALSE)
-
-      # -- checkpoint: flush accumulated results to disk every 20 specs
-      if (run_idx %% 20L == 0L && length(all_coefs) > 0) {
-        tryCatch({
-          readr::write_csv(
-            clean_names(dplyr::bind_rows(all_coefs)),
-            file.path(OUT_MODEL, "_checkpoint_coefficients.csv")
-          )
-          if (length(all_fit_stats) > 0)
-            readr::write_csv(
-              clean_names(dplyr::bind_rows(all_fit_stats)),
-              file.path(OUT_MODEL, "_checkpoint_fit_stats.csv")
-            )
-          cat(sprintf("  [checkpoint @ %d]\n", run_idx))
-        }, error = function(e) message("  checkpoint failed: ", conditionMessage(e)))
-      }
     }
 
     # -- memory: release weather-merged data before loading next profile
     rm(svy_wx, weather_data)
     gc(verbose = FALSE)
   }
+
+  # -- Flush per-country results to disk ------------------------------------
+  if (length(country_coefs) > 0L)
+    .save_csv(clean_names(dplyr::bind_rows(country_coefs)), coef_csv, coef_dedup_keys)
+  if (length(country_fit_stats) > 0L)
+    .save_csv(clean_names(dplyr::bind_rows(country_fit_stats)), stats_csv, stats_dedup_keys)
+
+  rm(svy_base, country_coefs, country_fit_stats)
+  gc(verbose = FALSE)
+  cat(sprintf("  %s complete — memory freed\n", si))
 }
 
 # =============================================================================
-# SECTION 6 — SAVE SUMMARY
+# SECTION 6 — SUMMARY
 # =============================================================================
 
-cat("\n=== Saving combined outputs ===\n")
+cat("\n=== Summary ===\n")
 
-# Dedup keys: uniquely identify a coefficient row
-coef_dedup_keys  <- c("code", "weather", "engine", "fe_profile", "cov_profile",
-                      "interaction", "model", "term", "tau")
-# Dedup keys: uniquely identify a fit-stats row
-stats_dedup_keys <- c("code", "weather", "engine", "fe_profile", "cov_profile",
-                      "interaction", "model", "tau")
-
-if (length(all_coefs) > 0) {
-  summary_coefs <- clean_names(dplyr::bind_rows(all_coefs))
-
-  if (!OVERWRITE_EXISTING && file.exists(coef_csv)) {
-    existing_coefs <- readr::read_csv(coef_csv, show_col_types = FALSE)
-    summary_coefs  <- dplyr::bind_rows(existing_coefs, summary_coefs)
-    cat(sprintf("  Appending coefficients to existing file (%d existing rows)\n",
-                nrow(existing_coefs)))
-  }
-  summary_coefs <- dplyr::distinct(summary_coefs,
-                                   dplyr::across(dplyr::any_of(coef_dedup_keys)),
-                                   .keep_all = TRUE)
-
-  readr::write_csv(summary_coefs, coef_csv)
-  n_specs <- nrow(
-    dplyr::filter(summary_coefs, model == "fit3") |>
-      dplyr::distinct(code, weather, engine, fe_profile, cov_profile, interaction)
-  )
-  cat(sprintf("Coefficients: %d rows (%d fit3 specs), %d samples\n",
-              nrow(summary_coefs), n_specs, length(unique(summary_coefs$code))))
-}
-
-if (length(all_fit_stats) > 0) {
-  summary_stats <- clean_names(dplyr::bind_rows(all_fit_stats))
-
-  if (!OVERWRITE_EXISTING && file.exists(stats_csv)) {
-    existing_stats <- readr::read_csv(stats_csv, show_col_types = FALSE)
-    summary_stats  <- dplyr::bind_rows(existing_stats, summary_stats)
-    cat(sprintf("  Appending fit stats to existing file (%d existing rows)\n",
-                nrow(existing_stats)))
-  }
-  summary_stats <- dplyr::distinct(summary_stats,
-                                   dplyr::across(dplyr::any_of(stats_dedup_keys)),
-                                   .keep_all = TRUE)
-
-  readr::write_csv(summary_stats, stats_csv)
-  cat(sprintf("Fit stats: %d rows\n", nrow(summary_stats)))
-}
-
+# Save failures and skips (accumulated globally)
 if (length(fail_log) > 0) {
   fail_df <- data.frame(spec_or_sample = names(fail_log),
                          reason = unlist(fail_log), stringsAsFactors = FALSE)
@@ -764,22 +736,28 @@ if (length(skip_log) > 0) {
   cat(sprintf("Interactions not available: %d skipped\n", nrow(skip_df)))
 }
 
-# Clean up checkpoint files now that final outputs are saved
-for (cp in c("_checkpoint_coefficients.csv", "_checkpoint_fit_stats.csv")) {
-  cp_path <- file.path(OUT_MODEL, cp)
-  if (file.exists(cp_path)) {
-    file.remove(cp_path)
-    cat(sprintf("Removed checkpoint: %s\n", cp))
-  }
+# Read final outputs from disk for summary
+summary_coefs <- if (file.exists(coef_csv)) readr::read_csv(coef_csv, show_col_types = FALSE) else NULL
+summary_stats <- if (file.exists(stats_csv)) readr::read_csv(stats_csv, show_col_types = FALSE) else NULL
+
+if (!is.null(summary_coefs)) {
+  n_specs <- nrow(
+    dplyr::filter(summary_coefs, model == "fit3") |>
+      dplyr::distinct(code, weather, engine, fe_profile, cov_profile, interaction)
+  )
+  cat(sprintf("Coefficients: %d rows (%d fit3 specs), %d samples\n",
+              nrow(summary_coefs), n_specs, length(unique(summary_coefs$code))))
 }
+if (!is.null(summary_stats))
+  cat(sprintf("Fit stats: %d rows\n", nrow(summary_stats)))
 
 # Per-sample summary
 cat("\n--- Results by sample ---\n")
-if (length(all_coefs) > 0 || length(skip_log) > 0 || length(fail_log) > 0) {
+if (!is.null(summary_stats) || length(skip_log) > 0 || length(fail_log) > 0) {
   grid_count <- as.data.frame(table(grid$sample), stringsAsFactors = FALSE)
   names(grid_count) <- c("sample", "attempted")
 
-  succeeded_count <- if (length(all_fit_stats) > 0) {
+  succeeded_count <- if (!is.null(summary_stats)) {
     summary_stats |>
       dplyr::filter(model == "fit3") |>
       dplyr::distinct(code, weather, engine, fe_profile, cov_profile, interaction) |>
@@ -821,13 +799,9 @@ if (length(all_coefs) > 0 || length(skip_log) > 0 || length(fail_log) > 0) {
   print(sample_summary, row.names = FALSE)
 }
 
-n_succeeded <- if (length(all_fit_stats) > 0) {
-  sum(vapply(all_fit_stats, function(x) "fit3" %in% x$model, logical(1)))
-} else 0L
-
 cat(sprintf("\nTotal combinations: %d\n", nrow(grid)))
 cat(sprintf("Attempted:          %d\n", run_idx))
-cat(sprintf("Succeeded:          %d\n", n_succeeded))
+cat(sprintf("Succeeded:          %d\n", total_fitted))
 cat(sprintf("Skipped:            %d\n", length(skip_log)))
-cat(sprintf("Failed:             %d\n", run_idx - n_succeeded - length(skip_log)))
+cat(sprintf("Failed:             %d\n", run_idx - total_fitted - length(skip_log)))
 cat("========== Batch complete ==========\n")

@@ -45,7 +45,7 @@ POOL_COUNTRIES <- FALSE   # TRUE = one pooled model; FALSE = per-country
 # NULL = all available; c(...) = subset
 
 # WAEMU
-COUNTRY_FILTER <- c("BEN", "BFA", "CIV", "GNB", "MLI", "NER", "SEN", "TGO")
+COUNTRY_FILTER <- c("BEN", "BFA") # , "CIV", "GNB", "MLI", "NER", "SEN", "TGO")
 
 # Other wise-app candidates with >= 2 surveys
 # COUNTRY_FILTER <- c( "BRA", "COL", "GMB", "GTM", "IND", "IRN", "LKA", "MRT", "MWI", "TCD", "TJK", "VNM", "ZMB")
@@ -1286,16 +1286,19 @@ for (si in SAMPLE_LABELS) {
   }
 
   # ==========================================================================
-  # Step 2: Climate simulations
+  # Steps 2–3: Simulate + policy (per-spec, memory-safe)
   # ==========================================================================
 
-  cat("  Step 2: Climate simulations\n")
+  cat(sprintf("  Steps 2-3: Simulate + policy (%d active policies)\n", length(.pol_active)))
 
-  sim_store          <- list()
-  sim_outcomes_rows  <- list()
-  sim_wx_quant_rows  <- list()
-  sim_meta_rows_all  <- list()
-  country_sim_idx    <- 0L
+  sim_outcomes_rows      <- list()
+  sim_wx_quant_rows      <- list()
+  sim_meta_rows_all      <- list()
+  country_pol_cfg_rows   <- list()
+  country_yr_decile_rows <- list()
+  country_sim_idx        <- 0L
+  country_pol_idx        <- 0L
+  n_simulated            <- 0L
 
   for (spec_label in names(fit_store)) {
     fs              <- fit_store[[spec_label]]
@@ -1355,10 +1358,7 @@ for (si in SAMPLE_LABELS) {
     }
     cat(sprintf(" %.1fs\n", round(proc.time()[["elapsed"]] - t0_s, 1)))
 
-    sim_store[[spec_label]] <- result
-
-    fit_store[[spec_label]]$svy_wx       <- NULL
-    fit_store[[spec_label]]$svy_baseline <- NULL
+    n_simulated <- n_simulated + 1L
 
     # -- Historical aggregation ------------------------------------------------
     .hist_meta <- list(scenario_id = "historical", scenario_type = "historical",
@@ -1424,40 +1424,11 @@ for (si in SAMPLE_LABELS) {
 
     cat(sprintf("  rows accumulated: historical + %d future scenario(s)\n",
                 length(result$new_scenarios)))
-  }
 
-  cat(sprintf("  Step 2: %d simulated\n", length(sim_store)))
-
-  # Strip fit_store -- Step 3 only needs mf, so, and identifiers
-  for (.k in names(fit_store)) {
-    fit_store[[.k]] <- fit_store[[.k]][c("mf", "so", "code", "wx_name", "mt_label",
-                                          "fe_label", "cov_label", "inter_label")]
-  }
-  gc(verbose = FALSE)
-
-  # ==========================================================================
-  # Step 3: Policy simulations
-  # ==========================================================================
-
-  cat(sprintf("  Step 3: Policy simulations (%d active)\n", length(.pol_active)))
-
-  country_pol_cfg_rows   <- list()
-  country_yr_decile_rows <- list()
-  country_pol_idx        <- 0L
-
-  for (spec_label in names(sim_store)) {
-    fs        <- fit_store[[spec_label]]
-    sim_res   <- sim_store[[spec_label]]
-    is_log    <- identical(fs$so$transform, "log")
-    spec_meta <- list(spec_label = spec_label, code = fs$code,
-                      wx_name    = fs$wx_name, mt_label  = fs$mt_label,
-                      fe_label   = fs$fe_label, cov_label = fs$cov_label,
-                      inter_label = fs$inter_label)
-
+    # -- Policy simulations for this spec --------------------------------------
     .spec_inter <- fs$inter_label
     .pols_here  <- Filter(function(pn)
       identical(POLICY_INTERACTION_MAP[[pn]], .spec_inter), .pol_active)
-    if (length(.pols_here) == 0L) next
 
     for (pol_name in .pols_here) {
       pol             <- POLICY_SCENARIOS[[pol_name]]
@@ -1488,12 +1459,12 @@ for (si in SAMPLE_LABELS) {
         stringsAsFactors = FALSE
       )
 
-      .pol_sp <- .resolve_transfer_amount(pol$sp, sim_res$hist_sim_result$svy)
+      .pol_sp <- .resolve_transfer_amount(pol$sp, result$hist_sim_result$svy)
       country_pol_cfg_rows[[.run_key]]$transfer_amount_usd <- .pol_sp$transfer_amount_usd %||% 0
 
       svy_policy <- tryCatch(
         apply_policy_to_svy(
-          svy           = sim_res$hist_sim_result$svy,
+          svy           = result$hist_sim_result$svy,
           sp            = .pol_sp,
           infra         = pol$infra,
           digital       = pol$digital,
@@ -1513,12 +1484,12 @@ for (si in SAMPLE_LABELS) {
 
       policy_sim <- tryCatch(
         apply_policy_delta_to_baseline(
-          svy_baseline             = sim_res$hist_sim_result$svy,
+          svy_baseline             = result$hist_sim_result$svy,
           svy_policy               = svy_policy,
           model_fit                = fs$mf,
-          so                       = sim_res$hist_sim_result$so,
-          hist_sim_baseline        = sim_res$hist_sim_result,
-          saved_scenarios_baseline = sim_res$new_scenarios,
+          so                       = result$hist_sim_result$so,
+          hist_sim_baseline        = result$hist_sim_result,
+          saved_scenarios_baseline = result$new_scenarios,
           skip_coef                = !INCLUDE_COEF_UNCERTAINTY
         ),
         error = function(e) { message(" FAIL (apply_policy_delta): ", conditionMessage(e)); NULL }
@@ -1560,11 +1531,11 @@ for (si in SAMPLE_LABELS) {
       # Year-by-decile decomposition -- historical
       .yd_hist <- tryCatch(
         .yr_decile_decomp(
-          svy_baseline    = sim_res$hist_sim_result$svy,
+          svy_baseline    = result$hist_sim_result$svy,
           svy_policy      = svy_policy,
           mf              = fs$mf,
-          so              = sim_res$hist_sim_result$so,
-          weather_raw     = sim_res$hist_sim_result$weather_raw,
+          so              = result$hist_sim_result$so,
+          weather_raw     = result$hist_sim_result$weather_raw,
           scenario_id     = "historical",
           ensemble_member = 1L,
           spec_label      = spec_label,
@@ -1577,18 +1548,18 @@ for (si in SAMPLE_LABELS) {
       rm(.yd_hist)
 
       # Year-by-decile decomposition -- future scenarios
-      for (sc_name in names(sim_res$new_scenarios)) {
-        sc    <- sim_res$new_scenarios[[sc_name]]
+      for (sc_name in names(result$new_scenarios)) {
+        sc    <- result$new_scenarios[[sc_name]]
         sc_id <- gsub("[^A-Za-z0-9]+", "_", sc_name)
         for (mem_name in names(sc$pipelines)) {
           mem_wx <- sc$pipelines[[mem_name]]$weather_raw
           if (is.null(mem_wx)) next
           .yd_sc <- tryCatch(
             .yr_decile_decomp(
-              svy_baseline    = sim_res$hist_sim_result$svy,
+              svy_baseline    = result$hist_sim_result$svy,
               svy_policy      = svy_policy,
               mf              = fs$mf,
-              so              = sim_res$hist_sim_result$so,
+              so              = result$hist_sim_result$so,
               weather_raw     = mem_wx,
               scenario_id     = sc_name,
               ensemble_member = mem_name,
@@ -1609,9 +1580,13 @@ for (si in SAMPLE_LABELS) {
       rm(svy_policy, policy_sim)
       gc(verbose = FALSE)
     }
+
+    fit_store[[spec_label]] <- NULL
+    rm(result)
+    gc(verbose = FALSE)
   }
 
-  cat(sprintf("  Step 3: %d policy runs\n", country_pol_idx))
+  cat(sprintf("  Steps 2-3: %d simulated, %d policy runs\n", n_simulated, country_pol_idx))
 
   # ==========================================================================
   # Flush per-country results to disk
@@ -1648,7 +1623,7 @@ for (si in SAMPLE_LABELS) {
   # Free memory before next country
   # ==========================================================================
 
-  rm(fit_store, sim_store, fail_log, skip_log,
+  rm(fit_store, fail_log, skip_log,
      sim_outcomes_rows, sim_wx_quant_rows, sim_meta_rows_all,
      country_fail_rows, country_pol_cfg_rows, country_yr_decile_rows,
      .outcomes_df, .ret_per_df)
