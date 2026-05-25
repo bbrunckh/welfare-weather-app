@@ -196,6 +196,32 @@ fct_run_simulation <- function(sw,
   # Serial execution only — parallelisation removed
   n_workers_safe <- 1L
 
+  # ---- Precompute objects shared across all keys ----------------------------- #
+
+  is_rif <- identical(engine, "rif")
+
+  # train_aug: identical for every key (same model, same train_data). Compute
+  # once here instead of repeating predict(model, train_data) per key.
+  precomputed_train_aug <- if (is_rif) NULL else tryCatch({
+    fitted_train <- as.numeric(stats::predict(model, newdata = train_data))
+    train_data |>
+      dplyr::mutate(
+        .fitted = fitted_train,
+        .resid  = !!rlang::sym(so$name) - fitted_train
+      )
+  }, error = function(e) {
+    warning("[fct_run_simulation] train_aug precomputation failed: ",
+            conditionMessage(e))
+    NULL
+  })
+
+  # Survey-side join prep: drop weather/outcome columns and convert year once.
+  # Passed to run_sim_pipeline() so prepare_hist_weather() skips this per key.
+  drop_cols <- c(sw$name, so$name)
+  svy_prepared <- svy |>
+    dplyr::mutate(year = as.character(year)) |>
+    dplyr::select(-dplyr::any_of(drop_cols))
+
   # ---- Pre-run all pipelines  --------------------- #
   progress_fn(0.50, "Running simulations...")
 
@@ -233,18 +259,20 @@ fct_run_simulation <- function(sw,
       )
       pipeline_list[[ki]] <- tryCatch(
         run_sim_pipeline(
-          weather_raw = weather_per_key[[key]],
-          svy         = svy,
-          sw          = sw,
-          so          = so,
-          model       = model,
-          residuals   = residuals,
-          train_data  = train_data,
-          engine      = engine,
-          chol_obj    = chol_obj,
-          fit_multi    = fit_multi,   
-          taus         = taus,        
-          weather_cols = weather_cols
+          weather_raw  = weather_per_key[[key]],
+          svy          = svy,
+          sw           = sw,
+          so           = so,
+          model        = model,
+          residuals    = residuals,
+          train_data   = train_data,
+          engine       = engine,
+          chol_obj     = chol_obj,
+          fit_multi    = fit_multi,
+          taus         = taus,
+          weather_cols = weather_cols,
+          precomputed_train_aug = precomputed_train_aug,
+          svy_prepared = svy_prepared
         ),
         error = function(e) {
           warning(sprintf("[fct_run_simulation] Key %s failed: %s",
@@ -254,9 +282,9 @@ fct_run_simulation <- function(sw,
       )
     }
 
-  rm(weather_per_key)
+  rm(weather_per_key, precomputed_train_aug, svy_prepared)
   gc(verbose = FALSE)
-  
+
   t_pipeline_done <- proc.time()[["elapsed"]] - t_start_pipeline
   progress_fn(0.80, sprintf("Pipelines complete (%s) — grouping results...",
                              format_elapsed(t_pipeline_done)))
@@ -301,10 +329,6 @@ fct_run_simulation <- function(sw,
     )
 
     if (is.null(out)) { rm(out); next }
-
-    # ---- Strip large weather objects immediately — not needed post-pipeline
-    out$weather_prepared <- NULL
-    
 
     if (is_hist && is.null(hist_sim_result)) {
       hist_sim_result <- list(

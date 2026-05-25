@@ -108,7 +108,7 @@ MI_M                <- 5L
 MI_MAXIT            <- 5L
 STABILITY_THRESHOLD <- 0.5
 LASSO_USE_MICE      <- FALSE  # FALSE = complete-case (fast); TRUE = MICE imputation
-LASSO_USE_PARALLEL  <- TRUE   # use parallel if > 50,000 observations; evaluated dynamically at call site
+LASSO_USE_PARALLEL  <- FALSE  # parallel only helps with MICE path; complete-case fast path forces sequential
 LASSO_N_WORKERS     <- NULL
 LASSO_PARALLEL_SEED <- NULL
 LASSO_GLOBALS_MAX   <- NULL
@@ -123,7 +123,7 @@ LASSO_FORCE_OUT <- list(
 )
 
 # ---- Output -----------------------------------------------------------------
-OVERWRITE_EXISTING <- TRUE
+OVERWRITE_EXISTING <- FALSE # If TRUE, deletes existing outputs before running; if FALSE, appends and deduplicates
 
 # =============================================================================
 # SECTION 2 — HELPERS
@@ -508,7 +508,7 @@ for (si in SAMPLE_LABELS) {
 
       run_idx     <- run_idx + 1L
       inter_label <- if (length(interaction_var) == 0) "noInter" else interaction_var
-      mt_label    <- if (grepl("RIF", cur_model_type)) "rif" else "ols"
+      mt_label    <- if (grepl("RIF", cur_model_type)) "rif" else "fixest"
       spec_label  <- sprintf("%s_%s_%s_%s_%s_%s", si, wx_name, mt_label,
                              fe_label, cov_label, inter_label)
 

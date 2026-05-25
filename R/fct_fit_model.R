@@ -445,31 +445,11 @@ run_lasso_selection <- function(
     use_parallel <- FALSE
   }
 
-  if (isTRUE(use_parallel)) {
-    if (!requireNamespace("future", quietly = TRUE) ||
-        !requireNamespace("future.apply", quietly = TRUE)) {
-      stop("Parallel LASSO requires packages 'future' and 'future.apply'.")
-    }
-    old_plan <- future::plan()
-    on.exit(future::plan(old_plan), add = TRUE)
-    old_max_size <- getOption("future.globals.maxSize")
-    on.exit(options(future.globals.maxSize = old_max_size), add = TRUE)
-    if (is.null(globals_max_size)) {
-      globals_max_size <- max(2 * 1024^3, old_max_size %||% 0)
-    }
-    options(future.globals.maxSize = globals_max_size)
-    workers <- if (is.null(n_workers)) future::availableCores() else as.integer(n_workers)
-    workers <- max(1L, min(workers, m))
-    future::plan(future::multisession, workers = workers)
-    map_fun <- function(x, fun) {
-      future.apply::future_lapply(
-        x, fun,
-        future.seed = if (is.null(parallel_seed)) TRUE else parallel_seed
-      )
-    }
-  } else {
-    map_fun <- lapply
-  }
+  # Parallel plan setup is deferred to the MI path (step 8) where map_fun is
+
+  # actually used. The fast path (step 7, no NAs) forces sequential lapply —
+  # spawning multisession workers here would waste startup time.
+  map_fun <- lapply
 
   # ---------------------------------------------------------------------------
   # 6. Build design matrices (X_core + X_lasso)
@@ -552,6 +532,33 @@ run_lasso_selection <- function(
     # -------------------------------------------------------------------------
     # 8. MI path: impute candidates, rebuild X_lasso per imputation
     # -------------------------------------------------------------------------
+
+    # Set up parallel plan here (not earlier) so the fast path never pays the
+    # multisession worker-spawn cost.
+    if (isTRUE(use_parallel)) {
+      if (!requireNamespace("future", quietly = TRUE) ||
+          !requireNamespace("future.apply", quietly = TRUE)) {
+        stop("Parallel LASSO requires packages 'future' and 'future.apply'.")
+      }
+      old_plan <- future::plan()
+      on.exit(future::plan(old_plan), add = TRUE)
+      old_max_size <- getOption("future.globals.maxSize")
+      on.exit(options(future.globals.maxSize = old_max_size), add = TRUE)
+      if (is.null(globals_max_size)) {
+        globals_max_size <- max(2 * 1024^3, old_max_size %||% 0)
+      }
+      options(future.globals.maxSize = globals_max_size)
+      workers <- if (is.null(n_workers)) future::availableCores() else as.integer(n_workers)
+      workers <- max(1L, min(workers, m))
+      future::plan(future::multisession, workers = workers)
+      map_fun <- function(x, fun) {
+        future.apply::future_lapply(
+          x, fun,
+          future.seed = if (is.null(parallel_seed)) TRUE else parallel_seed
+        )
+      }
+    }
+
     mi_cols  <- unique(c(y_var, core_main_terms, candidate_vars))
     mi_frame <- df[, mi_cols, drop = FALSE]
 

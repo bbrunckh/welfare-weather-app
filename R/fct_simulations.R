@@ -393,6 +393,13 @@ resolve_id_col <- function(a, b) {
 #' @param chol_obj Named list from \code{compute_chol_vcov()} or \code{NULL}.
 #'   When \code{NULL}, \code{F_loading} in the return value is \code{NULL}
 #'   (point estimates only — no coefficient uncertainty).
+#' @param precomputed_train_aug Data frame or \code{NULL}. When supplied,
+#'   used directly as \code{train_aug} in the return value instead of
+#'   recomputing \code{predict(model, train_data)} per call. Passed by
+#'   \code{fct_run_simulation()} to avoid redundant work across keys.
+#' @param svy_prepared Data frame or \code{NULL}. Pre-prepared survey data
+#'   with weather/outcome columns dropped and year converted to character.
+#'   Skips redundant per-key column manipulation in the weather join.
 #'
 #' @return Named list or \code{NULL} on prediction failure:
 #'   \describe{
@@ -430,12 +437,13 @@ run_sim_pipeline <- function(weather_raw,
 
                             chol_Sigma  = NULL,   # golem compat alias
                             slim        = FALSE,  # accepted, ignored
-                            
+
                              #RIF
                              fit_multi   = NULL,
                              taus        = NULL,
                              weather_cols = NULL,
-                             precomputed_train_resid = NULL,
+                             precomputed_train_aug = NULL,
+                             svy_prepared = NULL,
                              svy_baseline = NULL,
                              rif_grid     = NULL) {
 
@@ -462,7 +470,29 @@ run_sim_pipeline <- function(weather_raw,
   # to the (HH x year) rows produced by prepare_hist_weather().
   svy_for_predict$.svy_row_id <- seq_len(nrow(svy_for_predict))
 
-  survey_wd_sim <- prepare_hist_weather(weather_raw, svy_for_predict, sw, so$name)
+  # Use pre-prepared survey (columns already dropped, year converted) when
+  # available. RIF policy mode and Module 3 callers prepare svy differently,
+  # so fall back to full prepare_hist_weather() when svy_prepared is NULL.
+  if (!is.null(svy_prepared) && !is_rif_policy) {
+    svy_join <- svy_prepared
+    svy_join$.svy_row_id <- svy_for_predict$.svy_row_id
+  } else {
+    drop_cols <- c(sw$name, so$name)
+    svy_join <- svy_for_predict |>
+      dplyr::mutate(year = as.character(year)) |>
+      dplyr::select(-dplyr::any_of(drop_cols))
+  }
+
+  survey_wd_sim <- weather_raw |>
+    dplyr::mutate(
+      year      = as.character(year),
+      int_month = as.integer(format(timestamp, "%m")),
+      sim_year  = as.integer(format(timestamp, "%Y"))
+    ) |>
+    dplyr::select(-timestamp) |>
+    dplyr::inner_join(svy_join, by = c("code", "year", "survname", "loc_id", "int_month")) |>
+    dplyr::mutate(year = as.factor(year))
+  rm(svy_join)
 
   # Resolve ID column for "original" residual matching
   id_col <- if (residuals == "original")
@@ -647,24 +677,28 @@ if (!is.null(X_nonFE)) {
 
   # ---- Training augmentation for residual drawing ------------------------- #
   # train_aug carries .resid for "original" and "resample" residual paths
-  # inside aggregate_with_uncertainty_delta(). Computed once per pipeline call.
-  # train_aug only needed for residual drawing — skip for RIF (uses "none")
-  train_aug <- if (is_rif) NULL else tryCatch({
-    fitted_train <- as.numeric(stats::predict(model, newdata = train_data))
-    train_data |>
-      dplyr::mutate(
-        .fitted = fitted_train,
-        .resid  = !!rlang::sym(so$name) - fitted_train
-      )
-  }, error = function(e) {
-    warning("[run_sim_pipeline] train_aug computation failed: ",
-            conditionMessage(e))
+  # inside aggregate_with_uncertainty_delta(). Identical across keys — prefer
+  # the precomputed version when available; fall back to per-call computation
+  # for backward compat (Module 3 callers that don't precompute).
+  train_aug <- if (is_rif) {
     NULL
-  })
-  
-  # Store prepared weather data for diagnostics plots — has loc_id, int_month
-  # joined from svy. Used by plot_weather_density_panel() in mod_2_03.
-  weather_prepared <- survey_wd_sim
+  } else if (!is.null(precomputed_train_aug)) {
+    precomputed_train_aug
+  } else {
+    tryCatch({
+      fitted_train <- as.numeric(stats::predict(model, newdata = train_data))
+      train_data |>
+        dplyr::mutate(
+          .fitted = fitted_train,
+          .resid  = !!rlang::sym(so$name) - fitted_train
+        )
+    }, error = function(e) {
+      warning("[run_sim_pipeline] train_aug computation failed: ",
+              conditionMessage(e))
+      NULL
+    })
+  }
+
   rm(survey_wd_sim)
 
   list(
@@ -677,7 +711,6 @@ if (!is.null(X_nonFE)) {
     svy_row_id  = svy_row_id,
     n_pre_join  = n_pre_join,
     weather_raw = weather_raw,
-    weather_prepared = weather_prepared,
     train_aug   = train_aug
   )
 }
