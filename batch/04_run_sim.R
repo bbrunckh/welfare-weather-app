@@ -1,7 +1,6 @@
 # =============================================================================
-# batch/04_run_sim.R
-#
-# Batch model fitting + simulations across countries and specifications.
+# WISE-APP Batch Pipeline -- runs the full fit -> simulate -> policy chain acr
+# oss countries and specifications.
 #
 # Outputs (all under OUT_DIR/simulations/):
 #   outcomes.parquet                      welfare aggregates — base + policy rows
@@ -711,6 +710,8 @@ if (!OVERWRITE_EXISTING) {
                                 .keep_all = TRUE)
     cat(sprintf("  [merge] %s (%d existing + %d new)\n",
                 basename(path), nrow(existing), nrow(new_df)))
+    rm(existing)
+    gc(verbose = FALSE)
   }
   readr::write_csv(out_df, path)
   cat(sprintf("  Saved: %s (%d rows)\n", basename(path), nrow(out_df)))
@@ -727,8 +728,14 @@ if (!OVERWRITE_EXISTING) {
                                 .keep_all = TRUE)
     cat(sprintf("  [merge] %s (%d existing + %d new)\n",
                 basename(path), nrow(existing), nrow(new_df)))
+    rm(existing)
+    gc(verbose = FALSE)
   }
-  arrow::write_parquet(out_df, path)
+  # Write to a temp file then rename to avoid Windows memory-mapped file locks
+  # (error 1224) that prevent overwriting a previously read parquet file.
+  tmp_path <- paste0(path, ".tmp")
+  arrow::write_parquet(out_df, tmp_path)
+  file.rename(tmp_path, path)
   cat(sprintf("  Saved: %s (%d rows)\n", basename(path), nrow(out_df)))
   invisible(path)
 }
