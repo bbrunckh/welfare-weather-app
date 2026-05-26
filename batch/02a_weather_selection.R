@@ -29,6 +29,14 @@ dir.create(OUT_SAMPLE, showWarnings = FALSE, recursive = TRUE)
 
 wx <- read_csv(WX_CSV, show_col_types = FALSE)
 
+# Restrict to countries with >= 2 survey waves (consistent with 01a_sample_selection.R)
+welfare_agg     <- read_csv(file.path(OUT_DIR, "survey_stats", "welfare_aggregates.csv"), show_col_types = FALSE)
+multi_wave_codes <- welfare_agg |>
+  dplyr::count(code) |>
+  dplyr::filter(n >= 2) |>
+  dplyr::pull(code)
+cat(sprintf("Restricting to %d countries with 2+ survey waves\n\n", length(multi_wave_codes)))
+
 # Flag survey vs climate reference rows
 wx <- wx |>
   mutate(
@@ -37,7 +45,7 @@ wx <- wx |>
   )
 
 # Split
-wx_svy  <- wx |> filter(!is_climate, !is.na(year))
+wx_svy  <- wx |> filter(!is_climate, !is.na(year), code %in% multi_wave_codes)
 wx_clim <- wx |> filter(is_climate)
 
 # Base weather variables (from the variable column, not wx_spec)
@@ -452,6 +460,11 @@ md_line("")
 md_line("Builds on the sample selection analysis (see `sample_selection_summary.md`).")
 md_line("")
 md_line("Generated: ", Sys.Date())
+md_line("")
+md_line("> **Note:** Restricted to **", length(multi_wave_codes), "** countries with ≥ 2 survey ",
+        "waves (from `01a_sample_selection.R`): ",
+        paste0("`", sort(multi_wave_codes), "`", collapse = ", "), ". ",
+        "Single-wave countries are excluded to ensure temporal variation in weather-welfare estimation.")
 md_line("")
 
 # --- Data summary ---
