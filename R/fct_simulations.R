@@ -742,6 +742,7 @@ if (!is.null(X_nonFE)) {
 #' @export
 build_hist_sim_dates <- function(survey_weather, year_range) {
   months <- unique(survey_weather$int_month)
+  months <- months[!is.na(months)]
   years  <- seq(year_range[1], year_range[2])
 
   with(

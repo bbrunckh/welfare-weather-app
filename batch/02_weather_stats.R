@@ -28,22 +28,22 @@ OUT_DIR         <- Sys.getenv("WISEAPP_RESULTS_PATH")
 UNIT <- "hh"   # "hh", "ind", or "firm"
 
 # ---- Country filter ---------------------------------------------------------
-COUNTRY_FILTER <- c("TJK", "TLS", "VNM", "ZMB")
+COUNTRY_FILTER <- NULL
 
 # ---- Weather specs ----------------------------------------------------------
 # Named list of weather profiles (same format as 03_run_mod1.R WEATHER_SPECS).
 # Each profile defines one set of weather variables to load and summarise.
 WEATHER_SPECS <- c(
-  expand_weather_specs("t", c(1L, 3L, 6L, 12L), transformations = "continuous", var_constructions = c("None", "Deviation from mean"), ref_starts = 1L)
-  # expand_weather_specs("tn", c(1L, 3L, 6L, 12L), transformations = "continuous", var_constructions = c("None", "Deviation from mean"), ref_starts = 1L),
-  # expand_weather_specs("tx", c(1L, 3L, 6L, 12L), transformations = "continuous", var_constructions = c("None", "Deviation from mean"), ref_starts = 1L),
-  # expand_weather_specs("tx35", c(1L, 3L, 6L, 12L), transformations = "continuous", var_constructions = c("None", "Deviation from mean"), ref_starts = 1L),
-  # expand_weather_specs("tr", c(1L, 3L, 6L, 12L), transformations = "continuous", var_constructions = c("None", "Deviation from mean"), ref_starts = 1L),
-  # expand_weather_specs("r", c(1L, 3L, 6L, 12L), transformations = "continuous", var_constructions = c("None", "Deviation from mean"), ref_starts = 1L),
-  # expand_weather_specs("rx5day", c(1L, 3L, 6L, 12L), transformations = "continuous", var_constructions = c("None", "Deviation from mean"), ref_starts = 1L),
-  # expand_weather_specs("r20", c(1L, 3L, 6L, 12L), transformations = "continuous", var_constructions = c("None", "Deviation from mean"), ref_starts = 1L),
-  # expand_weather_specs("mrsos", c(1L, 3L, 6L, 12L), transformations = "continuous", var_constructions = c("None", "Deviation from mean"), ref_starts = 1L),
-  #expand_weather_specs("spei6", c(1L, 3L, 6L, 12L), transformations = "continuous", var_constructions = c("None"), ref_starts = 1L)
+  expand_weather_specs("t", c(1L, 3L, 6L, 12L), transformations = "continuous", var_constructions = c("None", "Deviation from mean"), ref_starts = 1L),
+  expand_weather_specs("tn", c(1L, 3L, 6L, 12L), transformations = "continuous", var_constructions = c("None", "Deviation from mean"), ref_starts = 1L),
+  expand_weather_specs("tx", c(1L, 3L, 6L, 12L), transformations = "continuous", var_constructions = c("None", "Deviation from mean"), ref_starts = 1L),
+  expand_weather_specs("tx35", c(1L, 3L, 6L, 12L), transformations = "continuous", var_constructions = c("None", "Deviation from mean"), ref_starts = 1L),
+  expand_weather_specs("tr", c(1L, 3L, 6L, 12L), transformations = "continuous", var_constructions = c("None", "Deviation from mean"), ref_starts = 1L),
+  expand_weather_specs("r", c(1L, 3L, 6L, 12L), transformations = "continuous", var_constructions = c("None", "Deviation from mean"), ref_starts = 1L),
+  expand_weather_specs("rx5day", c(1L, 3L, 6L, 12L), transformations = "continuous", var_constructions = c("None", "Deviation from mean"), ref_starts = 1L),
+  expand_weather_specs("r20", c(1L, 3L, 6L, 12L), transformations = "continuous", var_constructions = c("None", "Deviation from mean"), ref_starts = 1L),
+  expand_weather_specs("mrsos", c(1L, 3L, 6L, 12L), transformations = "continuous", var_constructions = c("None", "Deviation from mean"), ref_starts = 1L),
+  expand_weather_specs("spei6", c(1L, 3L, 6L, 12L), transformations = "continuous", var_constructions = c("None"), ref_starts = 1L)
 )
 
 # ---- Weather defaults -------------------------------------------------------
@@ -100,14 +100,69 @@ cat(sprintf("Countries (weather stats): %d (%s)\n", length(COUNTRIES_02),
 cat(sprintf("Weather specs: %d (%s)\n\n", length(WEATHER_SPECS),
             paste(names(WEATHER_SPECS), collapse = ", ")))
 
+# ---- Output file path + helpers ---------------------------------------------
+out_csv <- file.path(OUT_WEATHER, "weather_stats.csv")
+
+dedup_keys_02 <- c("code", "economy", "survname", "year", "wx_spec",
+                    "variable", "ref_period", "temporal_agg", "transformation")
+
+.save_csv_02 <- function(new_df, path) {
+  if (is.null(new_df) || nrow(new_df) == 0L) return(invisible(NULL))
+  out_df <- new_df
+  if (file.exists(path)) {
+    existing <- readr::read_csv(path, show_col_types = FALSE)
+    out_df   <- dplyr::bind_rows(existing, new_df)
+    out_df   <- dplyr::distinct(out_df, dplyr::across(dplyr::any_of(dedup_keys_02)),
+                                .keep_all = TRUE)
+  }
+  col_order <- c(dedup_keys_02, setdiff(names(out_df), dedup_keys_02))
+  out_df    <- out_df[order(out_df$code, out_df$wx_spec, out_df$year), col_order]
+  readr::write_csv(out_df, path)
+  cat(sprintf("  Saved: %s (%d rows)\n", basename(path), nrow(out_df)))
+}
+
+# ---- Skip detection ---------------------------------------------------------
+# A code×spec pair is "done" only if it has survey rows AND climate ref rows
+# (when CLIMATE_REF_YEARS is set). This ensures re-runs backfill climate data.
+.done_specs_02 <- character(0)
+if (OVERWRITE_EXISTING) {
+  for (.f in out_csv) if (file.exists(.f)) file.remove(.f)
+  OVERWRITE_EXISTING <- FALSE
+} else if (file.exists(out_csv)) {
+  .chk <- readr::read_csv(out_csv, show_col_types = FALSE)
+  if (nrow(.chk) > 0L) {
+    .has_survey <- unique(paste(.chk$code[!is.na(.chk$year)],
+                                .chk$wx_spec[!is.na(.chk$year)], sep = "_"))
+    if (!is.null(CLIMATE_REF_YEARS)) {
+      .has_climate <- unique(paste(.chk$code[is.na(.chk$year)],
+                                   .chk$wx_spec[is.na(.chk$year)], sep = "_"))
+      .done_specs_02 <- intersect(.has_survey, .has_climate)
+    } else {
+      .done_specs_02 <- .has_survey
+    }
+  }
+  cat(sprintf("  %d code×spec pair(s) already complete — will skip\n",
+              length(.done_specs_02)))
+  rm(.chk)
+}
+
 # =============================================================================
 # SECTION 3 — MAIN LOOP
 # =============================================================================
 
-all_wx_stats_02 <- list()
-
 for (code in COUNTRIES_02) {
   cat(sprintf("\n=== %s ===\n", code))
+
+  # Skip entire country if all specs already done (avoids expensive data load)
+  country_spec_keys <- paste(code, names(WEATHER_SPECS), sep = "_")
+  n_done <- sum(country_spec_keys %in% .done_specs_02)
+  if (n_done == length(WEATHER_SPECS)) {
+    cat(sprintf("  SKIP — all %d spec(s) already complete\n", n_done))
+    next
+  } else if (n_done > 0L) {
+    cat(sprintf("  %d/%d spec(s) already complete — will skip those\n",
+                n_done, length(WEATHER_SPECS)))
+  }
 
   # Build survey file list for this country
   years_by_code <- setNames(
@@ -137,12 +192,17 @@ for (code in COUNTRIES_02) {
   dates <- extract_survey_dates(svy_base)
 
   # Accumulate plot data across specs: named list keyed by base_var
-  # Each entry: list(survey = list of data frames, ref = list of data frames,
-  #                  meta = list with label, ref_period, transformation per spec)
   plot_data_by_var <- list()
+  country_wx_stats <- list()
 
   # -- Loop over weather profiles ---------------------------------------------
   for (wx_name in names(WEATHER_SPECS)) {
+    spec_key <- paste(code, wx_name, sep = "_")
+    if (spec_key %in% .done_specs_02) {
+      cat(sprintf("  [%s] SKIP (results exist)\n", wx_name))
+      next
+    }
+
     wx_prof <- WEATHER_SPECS[[wx_name]]
     wx_vars <- names(wx_prof)
 
@@ -248,7 +308,7 @@ for (code in COUNTRIES_02) {
         )
         if (nrow(wx_stats) > 0) {
           wx_stats$wx_spec <- wx_name
-          all_wx_stats_02[[length(all_wx_stats_02) + 1L]] <- wx_stats
+          country_wx_stats[[length(country_wx_stats) + 1L]] <- wx_stats
           cat(sprintf("  Stats: %d rows (%d vars)\n", nrow(wx_stats), length(vars_wx)))
         }
       }
@@ -341,45 +401,28 @@ for (code in COUNTRIES_02) {
     }, error = function(e) message("  dist plot failed [", base_var, "]: ", conditionMessage(e)))
   }
 
+  # -- Flush per-country stats to disk -----------------------------------------
+  if (length(country_wx_stats) > 0L) {
+    country_df <- dplyr::bind_rows(country_wx_stats)
+    country_df <- dplyr::mutate(country_df, year = as.numeric(as.character(year)))
+    .save_csv_02(country_df, out_csv)
+  }
+
   # -- Clear country-level objects from memory --------------------------------
-  rm(svy_base, dates, plot_data_by_var, ss, years_by_code)
+  rm(svy_base, dates, plot_data_by_var, country_wx_stats, ss, years_by_code)
   gc(verbose = FALSE)
 }
 
 # =============================================================================
-# SECTION 4 — SAVE OUTPUTS
+# SECTION 4 — SUMMARY
 # =============================================================================
 
-cat("\n=== Saving weather stats outputs ===\n")
-
-if (length(all_wx_stats_02) > 0) {
-  out_df <- dplyr::bind_rows(all_wx_stats_02)
-  out_csv <- file.path(OUT_WEATHER, "weather_stats.csv")
-
-  # If not overwriting and file exists, append to existing rows
-  if (!OVERWRITE_EXISTING && file.exists(out_csv)) {
-    existing <- readr::read_csv(out_csv, show_col_types = FALSE)
-    out_df   <- dplyr::mutate(out_df, year = as.numeric(as.character(year)))
-    out_df   <- dplyr::bind_rows(existing, out_df)
-    cat(sprintf("  Appending to existing file (%d existing rows)\n", nrow(existing)))
-  }
-
-  # Deduplicate on identifying columns
-  dedup_keys <- c("code", "economy", "survname", "year", "wx_spec",
-                  "variable", "ref_period", "temporal_agg", "transformation")
-  out_df <- dplyr::distinct(out_df, dplyr::across(dplyr::any_of(dedup_keys)), .keep_all = TRUE)
-
-  out_df <- out_df[order(out_df$code, out_df$wx_spec, out_df$year), ]
-  col_order <- c("code", "economy", "survname", "year", "wx_spec",
-                 "variable", "ref_period", "temporal_agg", "transformation",
-                 setdiff(names(out_df),
-                         c("code", "economy", "survname", "year", "wx_spec",
-                           "variable", "ref_period", "temporal_agg", "transformation")))
-  out_df  <- out_df[, col_order]
-  readr::write_csv(out_df, out_csv)
-  cat(sprintf("Saved: %s (%d rows, %d cols)\n", out_csv, nrow(out_df), ncol(out_df)))
+if (file.exists(out_csv)) {
+  final <- readr::read_csv(out_csv, show_col_types = FALSE)
+  cat(sprintf("\nFinal: %s (%d rows, %d cols)\n", out_csv, nrow(final), ncol(final)))
+  rm(final)
 } else {
-  cat("No weather stats accumulated.\n")
+  cat("\nNo weather stats accumulated.\n")
 }
 
 cat("========== Weather stats complete ==========\n")
