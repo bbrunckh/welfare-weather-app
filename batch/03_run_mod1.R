@@ -345,25 +345,37 @@ stats_dedup_keys <- c("code", "weather", "engine", "fe_profile", "cov_profile",
 .done_specs <- character(0)
 done_specs_skipped <- 0L
 done_specs_skipped_by_sample <- integer(0)
+.int_na_csv <- file.path(OUT_MODEL, "_interactions_not_available.csv")
 if (OVERWRITE_EXISTING) {
   cat("  OVERWRITE mode: deleting existing outputs...\n")
   for (.f in c(coef_csv, stats_csv,
                file.path(OUT_MODEL, "_failures.csv"),
-               file.path(OUT_MODEL, "_interactions_not_available.csv"))) {
+               .int_na_csv)) {
     if (file.exists(.f)) file.remove(.f)
   }
   OVERWRITE_EXISTING <- FALSE
-} else if (file.exists(stats_csv)) {
-  .chk <- readr::read_csv(stats_csv, show_col_types = FALSE)
-  .chk <- .chk[.chk$model == "fit3", , drop = FALSE]
-  if (nrow(.chk) > 0L) {
-    .inter <- ifelse(is.na(.chk$interaction), "noInter", .chk$interaction)
-    .done_specs <- unique(paste(.chk$code, .chk$weather, .chk$engine,
-                                .chk$fe_profile, .chk$cov_profile, .inter,
-                                sep = "_"))
-    cat(sprintf("  %d spec(s) already complete — will skip\n", length(.done_specs)))
+} else {
+  if (file.exists(stats_csv)) {
+    .chk <- readr::read_csv(stats_csv, show_col_types = FALSE)
+    .chk <- .chk[.chk$model == "fit3", , drop = FALSE]
+    if (nrow(.chk) > 0L) {
+      .inter <- ifelse(is.na(.chk$interaction), "noInter", .chk$interaction)
+      .done_specs <- unique(paste(.chk$code, .chk$weather, .chk$engine,
+                                  .chk$fe_profile, .chk$cov_profile, .inter,
+                                  sep = "_"))
+      cat(sprintf("  %d spec(s) already complete — will skip\n", length(.done_specs)))
+    }
+    rm(.chk)
   }
-  rm(.chk)
+  if (file.exists(.int_na_csv)) {
+    .prev_skip <- readr::read_csv(.int_na_csv, show_col_types = FALSE)
+    if (nrow(.prev_skip) > 0L) {
+      .done_specs <- unique(c(.done_specs, .prev_skip$spec_label))
+      cat(sprintf("  %d spec(s) previously skipped (interaction N/A) — will skip\n",
+                  nrow(.prev_skip)))
+    }
+    rm(.prev_skip)
+  }
 }
 
 # =============================================================================
@@ -767,16 +779,25 @@ if (length(fail_log) > 0) {
   cat(sprintf("Failures: %d\n", nrow(fail_df)))
 }
 
-if (length(skip_log) > 0) {
-  skip_df <- data.frame(
-    spec_label  = names(skip_log),
-    reason      = vapply(skip_log, `[[`, character(1), "reason"),
-    sample      = vapply(skip_log, `[[`, character(1), "sample"),
-    interaction = vapply(skip_log, `[[`, character(1), "interaction"),
-    stringsAsFactors = FALSE
-  )
-  readr::write_csv(skip_df, file.path(OUT_MODEL, "_interactions_not_available.csv"))
-  cat(sprintf("Interactions not available: %d skipped\n", nrow(skip_df)))
+if (length(skip_log) > 0 || file.exists(.int_na_csv)) {
+  new_skip <- if (length(skip_log) > 0) {
+    data.frame(
+      spec_label  = names(skip_log),
+      reason      = vapply(skip_log, `[[`, character(1), "reason"),
+      sample      = vapply(skip_log, `[[`, character(1), "sample"),
+      interaction = vapply(skip_log, `[[`, character(1), "interaction"),
+      stringsAsFactors = FALSE
+    )
+  } else NULL
+  skip_df <- if (file.exists(.int_na_csv)) {
+    existing <- readr::read_csv(.int_na_csv, show_col_types = FALSE)
+    dplyr::distinct(dplyr::bind_rows(existing, new_skip), spec_label, .keep_all = TRUE)
+  } else new_skip
+  if (!is.null(skip_df) && nrow(skip_df) > 0L) {
+    readr::write_csv(skip_df, .int_na_csv)
+    cat(sprintf("Interactions not available: %d total (%d new this run)\n",
+                nrow(skip_df), length(skip_log)))
+  }
 }
 
 # Read final outputs from disk for summary
