@@ -48,8 +48,8 @@ POVERTY_LINE <- 3
 
 # ---- Custom break points (4 interior cuts = 5 bins) ------------------------
 
-CUSTOM_T_BREAKS    <- c(24, 26, 27, 28)   # temperature (°C)
-CUSTOM_SPEI_BREAKS <- c(-1.5, -0.5,  0.5,  1.5)   # SPEI
+CUSTOM_T_BREAKS    <- c(25, 26, 27, 28)   # temperature (°C)
+CUSTOM_SPEI_BREAKS <- c(-1, -0.5, 0, 0.5)   # SPEI
 
 # ---- Weather specs (mod_1_04) [GRID] ---------------------------------------
 # Continuous and equal-frequency binned generated via expand_weather_specs().
