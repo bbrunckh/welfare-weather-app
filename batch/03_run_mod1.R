@@ -6,6 +6,7 @@
 # Outputs:
 #   OUT_DIR/model_fit/model_coefficients.csv
 #   OUT_DIR/model_fit/model_fit_stats.csv
+#   OUT_DIR/model_fit/_interactions_not_available.csv 
 #   OUT_DIR/model_fit/_failures.csv (error logging)
 #
 # All user inputs are set in SECTION 1. Vector-valued settings (marked [GRID])
@@ -329,13 +330,13 @@ stats_dedup_keys <- c("code", "weather", "engine", "fe_profile", "cov_profile",
 
 # ---- OVERWRITE_EXISTING cleanup + skip detection -----------------------------
 .done_specs <- character(0)
+done_specs_skipped <- 0L
+done_specs_skipped_by_sample <- integer(0)
 if (OVERWRITE_EXISTING) {
   cat("  OVERWRITE mode: deleting existing outputs...\n")
   for (.f in c(coef_csv, stats_csv,
                file.path(OUT_MODEL, "_failures.csv"),
-               file.path(OUT_MODEL, "_interactions_not_available.csv"),
-               file.path(OUT_MODEL, "_checkpoint_coefficients.csv"),
-               file.path(OUT_MODEL, "_checkpoint_fit_stats.csv"))) {
+               file.path(OUT_MODEL, "_interactions_not_available.csv"))) {
     if (file.exists(.f)) file.remove(.f)
   }
   OVERWRITE_EXISTING <- FALSE
@@ -516,6 +517,9 @@ for (si in SAMPLE_LABELS) {
 
       if (spec_label %in% .done_specs) {
         cat(" SKIP (results exist)\n")
+        done_specs_skipped <- done_specs_skipped + 1L
+        prev <- done_specs_skipped_by_sample[si]
+        done_specs_skipped_by_sample[si] <- (if (is.na(prev)) 0L else prev) + 1L
         next
       }
 
@@ -771,6 +775,14 @@ if (!is.null(summary_stats) || length(skip_log) > 0 || length(fail_log) > 0) {
     skip_df |> dplyr::count(sample, name = "skipped")
   } else data.frame(sample = character(0), skipped = integer(0))
 
+  done_skipped_count <- if (length(done_specs_skipped_by_sample) > 0) {
+    data.frame(
+      sample       = names(done_specs_skipped_by_sample),
+      done_skipped = as.integer(done_specs_skipped_by_sample),
+      stringsAsFactors = FALSE
+    )
+  } else data.frame(sample = character(0), done_skipped = integer(0))
+
   failed_count <- if (length(fail_log) > 0) {
     sample_level <- c("no_surveys", "load_failed")
     fail_df$sample <- vapply(seq_len(nrow(fail_df)), function(i) {
@@ -786,16 +798,18 @@ if (!is.null(summary_stats) || length(skip_log) > 0 || length(fail_log) > 0) {
 
   sample_summary <- grid_count |>
     dplyr::left_join(succeeded_count, by = "sample") |>
-    dplyr::left_join(skipped_count,   by = "sample") |>
-    dplyr::left_join(failed_count,    by = "sample") |>
+    dplyr::left_join(skipped_count,    by = "sample") |>
+    dplyr::left_join(done_skipped_count, by = "sample") |>
+    dplyr::left_join(failed_count,     by = "sample") |>
     dplyr::mutate(
-      succeeded   = ifelse(is.na(succeeded), 0L, succeeded),
-      skipped     = ifelse(is.na(skipped),   0L, skipped),
-      failed      = ifelse(is.na(failed),    0L, failed),
-      eligible    = attempted - skipped,
-      pct_success = ifelse(eligible > 0, round(succeeded / eligible * 100, 1), NA_real_)
+      succeeded    = ifelse(is.na(succeeded),    0L, succeeded),
+      skipped      = ifelse(is.na(skipped),      0L, skipped),
+      done_skipped = ifelse(is.na(done_skipped), 0L, done_skipped),
+      failed       = ifelse(is.na(failed),       0L, failed),
+      eligible     = attempted - skipped - done_skipped,
+      pct_success  = ifelse(eligible > 0, round(succeeded / eligible * 100, 1), NA_real_)
     ) |>
-    dplyr::select(sample, attempted, skipped, eligible,
+    dplyr::select(sample, attempted, done_skipped, skipped, eligible,
                   succeeded, failed, pct_success) |>
     dplyr::arrange(dplyr::desc(failed), dplyr::desc(skipped))
   print(sample_summary, row.names = FALSE)
@@ -804,6 +818,7 @@ if (!is.null(summary_stats) || length(skip_log) > 0 || length(fail_log) > 0) {
 cat(sprintf("\nTotal combinations: %d\n", nrow(grid)))
 cat(sprintf("Attempted:          %d\n", run_idx))
 cat(sprintf("Succeeded:          %d\n", total_fitted))
-cat(sprintf("Skipped:            %d\n", length(skip_log)))
-cat(sprintf("Failed:             %d\n", run_idx - total_fitted - length(skip_log)))
+cat(sprintf("Skipped (done):     %d\n", done_specs_skipped))
+cat(sprintf("Skipped (no var):   %d\n", length(skip_log)))
+cat(sprintf("Failed:             %d\n", run_idx - total_fitted - length(skip_log) - done_specs_skipped))
 cat("========== Batch complete ==========\n")
