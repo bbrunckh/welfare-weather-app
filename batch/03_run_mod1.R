@@ -46,22 +46,32 @@ OUTCOME_NAME <- "welfare"
 CURRENCY     <- "PPP"
 POVERTY_LINE <- 3
 
+# ---- Custom break points (4 interior cuts = 5 bins) ------------------------
+
+CUSTOM_T_BREAKS    <- c(24, 26, 27, 28)   # temperature (°C)
+CUSTOM_SPEI_BREAKS <- c(-1.5, -0.5,  0.5,  1.5)   # SPEI
+
 # ---- Weather specs (mod_1_04) [GRID] ---------------------------------------
-# Named list of weather profiles. Each profile maps weather variables to their
-# settings (ref_start, ref_end, transformation). A profile with multiple
-# variables includes them all in one model.
-# Can use expand_weather_specs() to generate single-variable profiles systematically.
-# For multi-variable profiles, define configuration manually:
-#   list(t_r_12m = list(t = list(ref_start = 1L, ref_end = 12L, transformation = "continuous"),
-#                       r = list(ref_start = 1L, ref_end = 12L, transformation = "continuous")))
+# Continuous and equal-frequency binned generated via expand_weather_specs().
+# Custom-break binned specs appended explicitly; names end in _binn_cust.
+# Equal-frequency binned specs use N_BINS / BINNING_METHOD defaults below.
+.mk_cust_spec <- function(v, re, brks)
+  setNames(list(setNames(list(list(
+    ref_start = 1L, ref_end = re, transformation = "binned",
+    weather_transformation = "None", binning_method = "Custom", custom_breaks = brks
+  )), v)), sprintf("%s_1to%dm_binn_cust", v, re))
 
 WEATHER_SPECS <- c(
-  expand_weather_specs(
-    "t", c(1L, 3L, 6L, 12L),
-    transformations = c("continuous", "binned"),
-    var_constructions = c("None"),
-    ref_starts = 1L        # start month (months before interview); 1 = most recent
-  )
+  expand_weather_specs("t",     c(1L, 3L, 6L, 12L), c("continuous", "binned"), "None", 1L),
+  expand_weather_specs("spei6", c(1L, 3L, 6L, 12L), c("continuous", "binned"), "None", 1L),
+  .mk_cust_spec("t",      1L, CUSTOM_T_BREAKS),
+  .mk_cust_spec("t",      3L, CUSTOM_T_BREAKS),
+  .mk_cust_spec("t",      6L, CUSTOM_T_BREAKS),
+  .mk_cust_spec("t",     12L, CUSTOM_T_BREAKS),
+  .mk_cust_spec("spei6",  1L, CUSTOM_SPEI_BREAKS),
+  .mk_cust_spec("spei6",  3L, CUSTOM_SPEI_BREAKS),
+  .mk_cust_spec("spei6",  6L, CUSTOM_SPEI_BREAKS),
+  .mk_cust_spec("spei6", 12L, CUSTOM_SPEI_BREAKS)
 )
 
 # ---- Weather defaults (used when a profile omits a setting) -----------------
@@ -78,12 +88,12 @@ MODEL_TYPE <- c("Linear regression", "Quantile regression (RIF)")
 
 # ---- Interactions (mod_1_06) [GRID] ----------------------------------------
 # character(0) = no interaction; each entry interacts that variable with weather
-INTERACTIONS <- list(character(0), "urban", "electricity", "imp_wat_rec", "imp_san_rec", "ttime_health")
+INTERACTIONS <- list(character(0), "urban", "electricity", "imp_wat_rec", "imp_san_rec", "imp_wat_san_rec", "ttime_health")
 
 # ---- Fixed effects (mod_1_06) [GRID] ---------------------------------------
 # Named list of FE profiles. Values are character vectors passed to fixest.
 FIXED_EFFECTS <- list(
-  year_admin1 = c("year", "gaul1_code"),
+  # year_admin1 = c("year", "gaul1_code"),
   year_loc    = c("year", "loc_id_panel")
   # year_only = c("year")
 )
@@ -92,11 +102,11 @@ FIXED_EFFECTS <- list(
 # Named list of covariate profiles. Each must have `method` ("User-defined" or
 # "Lasso"). User-defined profiles supply covariates by role.
 COVARIATE_SPECS <- list(
-  hhsize_urban = list(
-    method = "User-defined",
-    ind = character(0), hh = c("hhsize", "urban"),
-    firm = character(0), area = character(0)
-  ), 
+  # hhsize_urban = list(
+  #   method = "User-defined",
+  #   ind = character(0), hh = c("hhsize", "urban"),
+  #   firm = character(0), area = character(0)
+  # ), 
   lasso = list(method = "Lasso")
 )
 
@@ -124,7 +134,7 @@ LASSO_FORCE_OUT <- list(
 )
 
 # ---- Output -----------------------------------------------------------------
-OVERWRITE_EXISTING <- FALSE # If TRUE, deletes existing outputs before running; if FALSE, appends and deduplicates
+OVERWRITE_EXISTING <- TRUE # If TRUE, deletes existing outputs before running; if FALSE, appends and deduplicates
 
 # =============================================================================
 # SECTION 2 — HELPERS
