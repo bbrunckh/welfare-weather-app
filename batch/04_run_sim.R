@@ -42,34 +42,36 @@ POOL_COUNTRIES <- FALSE   # TRUE = one pooled model; FALSE = per-country
 
 # ---- Country / survey sample (mod_1_01) [GRID when !POOL_COUNTRIES] --------
 # NULL = all available; c(...) = subset
-
-# WAEMU
-COUNTRY_FILTER <- c("BEN", "BFA", "CIV", "GNB", "MLI", "NER", "SEN", "TGO")
-
-# Other wise-app candidates with >= 2 surveys
-# COUNTRY_FILTER <- c( "BRA", "COL", "GMB", "GTM", "IND", "IRN", "LKA", "MRT", "MWI", "TCD", "TJK", "VNM", "ZMB")
+COUNTRY_FILTER <- c(
+  "BEN", "BFA", "BRA", "CIV", "COL", "GMB", "GNB", "GTM", "IND", "IRN", "LKA",
+  "MLI", "MRT", "MWI", "NER", "SEN", "TCD", "TGO", "TJK", "VNM", "ZMB"
+)
 
 # ---- Outcome variable (mod_1_03) --------------------------------------------
 OUTCOME_NAME <- "welfare"
 CURRENCY     <- "PPP"
 POVERTY_LINE <- 3
 
-# ---- Weather specs (mod_1_04) [GRID] ----------------------------------------
-# Named list of weather profiles. Each profile maps weather variables to their
-# settings (ref_start, ref_end, transformation). A profile with multiple
-# variables includes them all in one model.
-# Can use expand_weather_specs() to generate single-variable profiles systematically.
-# For multi-variable profiles, define configuration manually:
-#   list(t_r_12m = list(t = list(ref_start = 1L, ref_end = 12L, transformation = "continuous"),
-#                       r = list(ref_start = 1L, ref_end = 12L, transformation = "continuous")))
+# ---- Custom break points (4 interior cuts = 5 bins) ------------------------
+
+CUSTOM_T_BREAKS    <- c(25, 26, 27, 28)   # temperature (°C)
+CUSTOM_SPEI_BREAKS <- c(-1, -0.5, 0, 0.5)   # SPEI
+
+# ---- Weather specs (mod_1_04) [GRID] ---------------------------------------
+# Continuous and equal-frequency binned generated via expand_weather_specs().
+# Custom-break binned specs appended explicitly; names end in _binn_cust.
+# Equal-frequency binned specs use N_BINS / BINNING_METHOD defaults below.
+.mk_cust_spec <- function(v, re, brks)
+  setNames(list(setNames(list(list(
+    ref_start = 1L, ref_end = re, transformation = "binned",
+    weather_transformation = "None", binning_method = "Custom", custom_breaks = brks
+  )), v)), sprintf("%s_1to%dm_binn_cust", v, re))
 
 WEATHER_SPECS <- c(
-  expand_weather_specs(
-    c("t", "tx35"), c(12L),
-    transformations    = c("binned"),
-    var_constructions  = c("None"),
-    ref_starts         = 1L        # start month (months before interview); 1 = most recent
-  )
+  expand_weather_specs("t",     c(3L), c("binned"), "None", 1L),
+  expand_weather_specs("spei6", c(3L), c("binned"), "None", 1L)
+  # .mk_cust_spec("t",      3L, CUSTOM_T_BREAKS),
+  # .mk_cust_spec("spei6",  3L, CUSTOM_SPEI_BREAKS)
 )
 
 # ---- Weather defaults (used when a profile omits a setting) -----------------
@@ -80,9 +82,9 @@ CUSTOM_BREAKS          <- NULL
 POLYNOMIAL             <- character(0)
 WEATHER_AGG_OVERRIDE   <- NULL
 
-# ---- Model type (mod_1_06) [GRID] -------------------------------------------
+# ---- Model type (mod_1_06) [GRID] ------------------------------------------
 # "Linear regression", "Quantile regression (RIF)", "Logistic regression"
-MODEL_TYPE <- c("Linear regression", "Quantile regression (RIF)")
+MODEL_TYPE <- c("Quantile regression (RIF)")
 
 # ---- Interactions (mod_1_06) [GRID] -----------------------------------------
 # character(0) = no interaction; each entry interacts that variable with weather
@@ -133,15 +135,13 @@ LASSO_FORCE_OUT <- list(
 # ---- Aggregation methods (used in Sections 4-5) -----------------------------
 # Poverty-line suffix (_300 / _420 / _830) maps to pov_line 3.00 / 4.20 / 8.30.
 AGG_METHODS <- c(
-  "mean", "median", "gini", "avg_poverty", "prosperity_gap",
-  "headcount_ratio_300", "gap_300", "fgt2_300",
-  "headcount_ratio_420", "gap_420", "fgt2_420",
-  "headcount_ratio_830", "gap_830", "fgt2_830"
+  "mean", "median", "gini", "headcount_ratio_300", "headcount_ratio_420", 
+  "headcount_ratio_830"
 )
 
 # ---- Output -----------------------------------------------------------------
 OVERWRITE_EXISTING <- FALSE   # FALSE = append+dedup existing CSVs; TRUE = overwrite
-SKIP_PLOTS         <- FALSE  # TRUE = skip all PNG generation (faster reruns)
+SKIP_PLOTS         <- TRUE  # TRUE = skip all PNG generation (faster reruns)
 
 # =============================================================================
 # SECTION 1B — SIMULATION SETTINGS (mod_2)
@@ -258,16 +258,8 @@ DEV_MODE <- FALSE   # TRUE = 1 ensemble member only; fast debug runs
 )
 
 # Edit POLICY_SCENARIOS to add/remove scenarios.
-# "no_policy" must always be present — it is the base simulation (no resimulation pass).
+# "no_policy" is always be present — it is the base simulation (no resimulation pass).
 POLICY_SCENARIOS <- list(
-
-  # no_policy = list(
-  #   policy_keys = character(0),
-  #   sp      = .sp_off,
-  #   infra   = .infra_off,
-  #   digital = .digital_off,
-  #   labor   = .labor_off
-  # ),
 
   elec_universal = list(
     policy_keys = "A",              # adds weather x electricity interaction to base model
@@ -277,21 +269,21 @@ POLICY_SCENARIOS <- list(
     labor   = .labor_off
   ),
 
-  imp_wat_universal = list(
-    policy_keys = "B",              # adds weather x imp_wat_rec interaction
-    sp      = .sp_off,
-    infra   = modifyList(.infra_off, list(water_universal = TRUE)),
-    digital = .digital_off,
-    labor   = .labor_off
-  ),
+  # imp_wat_universal = list(
+  #   policy_keys = "B",              # adds weather x imp_wat_rec interaction
+  #   sp      = .sp_off,
+  #   infra   = modifyList(.infra_off, list(water_universal = TRUE)),
+  #   digital = .digital_off,
+  #   labor   = .labor_off
+  # ),
 
-  imp_san_universal = list(
-    policy_keys = "C",              # adds weather x imp_san_rec interaction
-    sp      = .sp_off,
-    infra   = modifyList(.infra_off, list(sanitation_universal = TRUE)),
-    digital = .digital_off,
-    labor   = .labor_off
-  ),
+  # imp_san_universal = list(
+  #   policy_keys = "C",              # adds weather x imp_san_rec interaction
+  #   sp      = .sp_off,
+  #   infra   = modifyList(.infra_off, list(sanitation_universal = TRUE)),
+  #   digital = .digital_off,
+  #   labor   = .labor_off
+  # ),
 
   imp_wat_san_universal = list(
     policy_keys = "I",              # adds weather x imp_wat_san_rec interaction
@@ -301,18 +293,18 @@ POLICY_SCENARIOS <- list(
     labor   = .labor_off
   ),
 
-    health30min = list(
+    health15min = list(
     policy_keys = "D",              # adds weather x ttime_health interaction
     sp      = .sp_off,
-    infra   = modifyList(.infra_off, list(health_mode = "max", health_travel_max = 30)),
+    infra   = modifyList(.infra_off, list(health_mode = "max", health_travel_max = 15)),
     digital = .digital_off,
     labor   = .labor_off
   ),
 
-  sp_p20_bottom40 = list(
+  sp_p10_bottom40 = list(
     policy_keys = character(0),     # SP only — no model refit needed
     sp      = modifyList(.sp_off, list(
-      transfer_pctile     = 20,     # resolve transfer_amount_usd from welfare P20
+      transfer_pctile     = 10,     # resolve transfer_amount_usd from welfare P10
       transfer_n_payments = 12L,
       targeting            = "exante_poor",
       targeting_threshold  = 40,

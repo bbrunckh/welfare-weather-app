@@ -142,5 +142,6 @@ rsconnect/
 inst/duckdb_extensions/
 .claude/settings.local.json
 .posit/
-dev/outputs/*.png
-dev/outputs/*.csv
+
+dev/outputs/
+dev/output/

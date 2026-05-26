@@ -26,7 +26,8 @@ invisible(lapply(list.files("batch/R", pattern = "\\.R$", full.names = TRUE), so
 # "databricks" -> credentials from .Renviron (DATABRICKS_HOST, etc.)
 CONNECTION_TYPE <- "local"
 DATA_DIR        <- Sys.getenv("WISEAPP_DATA_PATH")
-OUT_DIR         <- Sys.getenv("WISEAPP_RESULTS_PATH")
+# OUT_DIR         <- Sys.getenv("WISEAPP_RESULTS_PATH")
+OUT_DIR         <- "dev/mod1_test"  # override for testing; comment out to use env var
 
 # ---- Unit of analysis -------------------------------------------------------
 UNIT <- "hh"   # "hh", "ind", or "firm"
@@ -37,8 +38,10 @@ POOL_COUNTRIES <- FALSE   # TRUE = one pooled model; FALSE = per-country
 # ---- Country / survey sample (mod_1_01) [GRID when !POOL_COUNTRIES] --------
 # NULL = all available; c(...) = subset
 COUNTRY_FILTER <- c(
-  "BEN", "BFA", "BRA", "CIV", "COL", "GMB", "GNB", "GTM", "IND", "IRN", "LKA",
-  "MLI", "MRT", "MWI", "NER", "SEN", "TCD", "TGO", "TJK", "VNM", "ZMB"
+  #"BEN", "BFA", "BRA", "CIV", "COL", "GMB", 
+  "GNB", "GTM", "IND", "IRN", "LKA",
+  "MLI", "MRT", "MWI", "NER", "SEN", "TCD", "TGO", "TJK"
+  # , "VNM", "ZMB"
 )
 
 # ---- Outcome variable (mod_1_03) -------------------------------------------
@@ -134,7 +137,7 @@ LASSO_FORCE_OUT <- list(
 )
 
 # ---- Output -----------------------------------------------------------------
-OVERWRITE_EXISTING <- TRUE # If TRUE, deletes existing outputs before running; if FALSE, appends and deduplicates
+OVERWRITE_EXISTING <- FALSE # If TRUE, deletes existing outputs before running; if FALSE, appends and deduplicates
 
 # =============================================================================
 # SECTION 2 — HELPERS
@@ -450,6 +453,30 @@ for (si in SAMPLE_LABELS) {
 
   # Step 2 — Loop over weather profiles
   for (wx_name in wx_profiles) {
+
+    # Early-out: skip weather load if ALL specs for this profile are done
+    model_combos <- grid[grid$sample == si & grid$weather == wx_name, , drop = FALSE]
+    .pending_specs <- vapply(seq_len(nrow(model_combos)), function(mi) {
+      .mt <- if (grepl("RIF", model_combos$model_type[mi])) "rif" else "fixest"
+      .iv <- model_combos$interaction[[mi]]
+      .il <- if (length(.iv) == 0) "noInter" else .iv
+      sprintf("%s_%s_%s_%s_%s_%s", si, wx_name, .mt,
+              model_combos$fe[mi], model_combos$covariates[mi], .il)
+    }, character(1))
+    .n_already_done <- sum(.pending_specs %in% .done_specs)
+    if (.n_already_done == length(.pending_specs)) {
+      cat(sprintf("  [%s] all %d spec(s) done — skipping weather load\n",
+                  wx_name, .n_already_done))
+      done_specs_skipped <- done_specs_skipped + .n_already_done
+      prev <- done_specs_skipped_by_sample[si]
+      done_specs_skipped_by_sample[si] <- (if (is.na(prev)) 0L else prev) + as.integer(.n_already_done)
+      run_idx <- run_idx + .n_already_done
+      next
+    }
+    if (.n_already_done > 0L)
+      cat(sprintf("  [%s] %d/%d spec(s) done — loading weather for remaining\n",
+                  wx_name, .n_already_done, length(.pending_specs)))
+
     wx_prof <- WEATHER_SPECS[[wx_name]]
     wx_vars <- names(wx_prof)
 
@@ -506,7 +533,7 @@ for (si in SAMPLE_LABELS) {
     wx_col_names <- intersect(selected_weather$name, names(svy_wx))
 
     # Step 3 — Loop over model specs (model_type x interaction x FE x covariates)
-    model_combos <- grid[grid$sample == si & grid$weather == wx_name, , drop = FALSE]
+    # (model_combos already computed above for the early-out check)
 
     for (mi in seq_len(nrow(model_combos))) {
       cur_model_type  <- model_combos$model_type[mi]
