@@ -1,4 +1,3 @@
-# =============================================================================
 # batch/03a_model_selection.R
 #
 # Analysis of model_coefficients.csv and model_fit_stats.csv from
@@ -79,15 +78,61 @@ CONSTR_LABELS <- c("Continuous", "Binned (equal freq)", "Binned (custom)")
 FOCUS_REF    <- "1to3m"
 FOCUS_CONSTR <- "binned_equal"
 FOCUS_CONSTR_LABEL <- "Binned (equal freq)"
-POLICY_VARS <- c("electricity", "imp_wat_rec", "imp_san_rec",
-                 "imp_wat_san_rec", "ttime_health")
+POLICY_VARS <- c("electricity", "imp_wat_san_rec", "ttime_health", "urban")
 
-# For SPEI the bottom bin (drought) is the omitted reference category, so all
-# SPEI bin coefficients measure "welfare relative to drought."  To present
-# both variables on the same scale — negative = the extreme hurts welfare,
-# positive interaction = protective — we negate SPEI binned coefficients.
-# Temperature top bin (heat) needs no adjustment.
+# For SPEI the driest (bottom) bin is the omitted reference category, so all
+# SPEI bin coefficients measure "welfare relative to drought."
+# Rather than negating the wet (top) bin, we compare drought to NORMAL
+# conditions by extracting the central bin (typical SPEI) and negating it:
+#   -coef(central bin) = welfare lost moving from normal to drought.
+# This is more interpretable than wet-vs-drought and avoids confounding with
+# flood effects.  Temperature top bin (heat vs baseline) is unchanged.
 SPEI_VARS <- grep("^spei", unique(coef$wx_var), value = TRUE)
+
+# Pre-compute the central (middle) bin term for each
+# SPEI × code × ref_period × construction combination.
+spei_central_bin <- coef |>
+  filter(wx_var %in% SPEI_VARS, construction != "continuous",
+         grepl("\\]$", term), !grepl("-Inf|Inf\\]$", term), !grepl(":", term)) |>
+  mutate(lower_bound = as.numeric(str_extract(term, "(?<=\\()[-0-9.]+"))) |>
+  group_by(code, wx_var, ref_period, construction) |>
+  arrange(lower_bound, .by_group = TRUE) |>
+  summarise(central_term = term[ceiling(n() / 2)], .groups = "drop")
+
+# Helper: return extreme-bin rows with consistent sign convention
+#   (negative = extreme hurts welfare).
+#   Temperature → top bin (Inf]), unmodified.
+#   SPEI        → central (normal) bin, negated  =  drought vs normal.
+get_extreme_rows <- function(df,
+                             jv = c("code", "wx_var", "ref_period", "construction")) {
+  temp_rows <- df |>
+    filter(!wx_var %in% SPEI_VARS, grepl("Inf\\]$", term), !grepl(":", term))
+
+  spei_rows <- df |>
+    filter(wx_var %in% SPEI_VARS, !grepl(":", term)) |>
+    inner_join(spei_central_bin |> select(all_of(jv), central_term), by = jv) |>
+    filter(term == central_term) |>
+    mutate(estimate = -estimate, statistic = -statistic) |>
+    select(-central_term)
+
+  bind_rows(temp_rows, spei_rows)
+}
+
+# Same for interaction terms (format "bin:policy_var").
+get_extreme_int_rows <- function(df,
+                                 jv = c("code", "wx_var", "ref_period", "construction")) {
+  temp_rows <- df |>
+    filter(!wx_var %in% SPEI_VARS, grepl("Inf\\]:", term))
+
+  spei_rows <- df |>
+    filter(wx_var %in% SPEI_VARS, grepl(":", term)) |>
+    inner_join(spei_central_bin |> select(all_of(jv), central_term), by = jv) |>
+    filter(str_extract(term, "^[^:]+") == central_term) |>
+    mutate(estimate = -estimate, statistic = -statistic) |>
+    select(-central_term)
+
+  bind_rows(temp_rows, spei_rows)
+}
 
 countries   <- sort(unique(coef$code))
 n_countries <- length(countries)
@@ -118,25 +163,103 @@ cont_main <- coef |>
     sig = case_when(p_value < 0.001 ~ "***", p_value < 0.01  ~ "**",
                     p_value < 0.05  ~ "*",   p_value < 0.10  ~ "†",
                     TRUE ~ ""),
-    ref_period = factor(ref_period, levels = REF_LEVELS)
+    ref_period   = factor(ref_period, levels = REF_LEVELS),
+    signed_logp  = sign(estimate) * -log10(pmax(p_value, 1e-20))
   )
 
-p_ref <- cont_main |>
-  ggplot(aes(x = ref_period, y = code, fill = -log10(p_value))) +
-  geom_tile(color = "white", linewidth = 0.4) +
-  geom_text(aes(label = paste0(sprintf("%.1f", statistic), sig)),
-            size = 2.2, color = "grey15") +
-  facet_wrap(~wx_var, scales = "free") +
-  scale_fill_viridis_c(option = "magma", direction = -1, name = "-log10(p)") +
-  labs(title = "Continuous weather effect: significance by reference period",
-       subtitle = "fixest OLS, fit3, LASSO, year_loc FE, no interaction. t-stat shown.",
-       x = "Reference period", y = NULL) +
-  theme_minimal(base_size = 11) +
-  theme(panel.grid = element_blank())
+logp_lim_ref <- max(abs(cont_main$signed_logp), na.rm = TRUE)
+if (!is.finite(logp_lim_ref)) logp_lim_ref <- 3
+
+ref_plots <- lapply(wx_vars, function(wv) {
+  wv_data <- cont_main |> filter(wx_var == wv)
+  code_order <- wv_data |>
+    filter(ref_period == FOCUS_REF) |>
+    arrange(estimate) |>
+    pull(code)
+  wv_data |>
+    mutate(code = factor(code, levels = code_order)) |>
+    ggplot(aes(x = ref_period, y = code, fill = signed_logp)) +
+    geom_tile(color = "white", linewidth = 0.4) +
+    geom_text(aes(label = paste0(sprintf("%.1f", statistic), sig)),
+              size = 2.2, color = "grey15") +
+    scale_fill_gradient2(low = "#b2182b", mid = "grey95", high = "#2166ac",
+                         midpoint = 0, limits = c(-logp_lim_ref, logp_lim_ref),
+                         name = "signed\n-log10(p)") +
+    labs(title = wv, x = NULL, y = NULL) +
+    theme_minimal(base_size = 11) +
+    theme(panel.grid = element_blank(),
+          plot.title = element_text(face = "bold", size = 11))
+})
+
+p_ref <- wrap_plots(ref_plots, nrow = 1) +
+  plot_annotation(
+    title = "Continuous weather effect: significance by reference period",
+    subtitle = "fixest OLS, fit3, LASSO, year_loc FE. t-stat shown. Blue = positive, Red = negative. Sorted by 1to3m estimate per wx_var."
+  )
 
 ggsave(file.path(MOD_DIR, "03a_1_ref_period_significance.png"), p_ref,
        width = max(10, length(wx_vars) * 5.5),
-       height = max(4, n_countries * 0.45 + 1.5), dpi = 150, bg = "white")
+       height = max(3, n_countries * 0.4 + 1.5), dpi = 150, bg = "white")
+
+# --- Binned spec heatmaps: same format, using extreme-bin coefficient ---
+for (constr in c("binned_equal", "binned_custom")) {
+  constr_label <- CONSTR_LABELS[match(constr, CONSTR_LEVELS)]
+  suffix       <- c("binned_equal" = "binn_equal", "binned_custom" = "binn_custom")[constr]
+
+  bin_main <- coef |>
+    filter(construction == constr, engine == "fixest", model == "fit3",
+           estimand == "Mean", is.na(interaction)) |>
+    get_extreme_rows() |>
+    mutate(
+      sig = case_when(p_value < 0.001 ~ "***", p_value < 0.01  ~ "**",
+                      p_value < 0.05  ~ "*",   p_value < 0.10  ~ "†",
+                      TRUE ~ ""),
+      ref_period  = factor(ref_period, levels = REF_LEVELS),
+      signed_logp = sign(estimate) * -log10(pmax(p_value, 1e-20)),
+      wx_label = ifelse(wx_var %in% SPEI_VARS,
+                        paste0(wx_var, " (drought vs normal)"),
+                        paste0(wx_var, " (heat)"))
+    )
+
+  if (nrow(bin_main) == 0) next
+
+  logp_lim_bin <- max(abs(bin_main$signed_logp), na.rm = TRUE)
+  if (!is.finite(logp_lim_bin)) logp_lim_bin <- 3
+
+  bin_plots <- lapply(sort(unique(bin_main$wx_label)), function(wl) {
+    wv_data <- bin_main |> filter(wx_label == wl)
+    code_order <- wv_data |>
+      filter(ref_period == FOCUS_REF) |>
+      arrange(estimate) |>
+      pull(code)
+    wv_data |>
+      mutate(code = factor(code, levels = code_order)) |>
+      ggplot(aes(x = ref_period, y = code, fill = signed_logp)) +
+      geom_tile(color = "white", linewidth = 0.4) +
+      geom_text(aes(label = paste0(sprintf("%.1f", statistic), sig)),
+                size = 2.2, color = "grey15") +
+      scale_fill_gradient2(low = "#b2182b", mid = "grey95", high = "#2166ac",
+                           midpoint = 0, limits = c(-logp_lim_bin, logp_lim_bin),
+                           name = "signed\n-log10(p)") +
+      labs(title = wl, x = NULL, y = NULL) +
+      theme_minimal(base_size = 11) +
+      theme(panel.grid = element_blank(),
+            plot.title = element_text(face = "bold", size = 11))
+  })
+
+  p_bin <- wrap_plots(bin_plots, nrow = 1) +
+    plot_annotation(
+      title = paste0("Extreme-bin weather effect: significance by reference period (", constr_label, ")"),
+      subtitle = paste0("fixest OLS, fit3, LASSO, year_loc FE. t-stat shown. ",
+                        "Blue = positive, Red = negative. SPEI: drought vs normal (central bin negated). Sorted by 1to3m estimate per wx_var.")
+    )
+
+  ggsave(file.path(MOD_DIR, paste0("03a_1_ref_period_significance_", suffix, ".png")),
+         p_bin,
+         width  = max(10, length(wx_vars) * 5.5),
+         height = max(3, n_countries * 0.4 + 1.5),
+         dpi = 150, bg = "white")
+}
 
 ref_sig_summary <- cont_main |>
   group_by(wx_var, ref_period) |>
@@ -168,8 +291,8 @@ for (constr in CONSTR_LEVELS) {
       ref_wv <- coef |>
         filter(construction == constr, engine == "fixest", model == "fit3",
                estimand == "Mean", is.na(interaction), wx_var == wv,
-               grepl("Inf\\]$", term), !grepl(":", term)) |>
-        mutate(estimate = if (wv %in% SPEI_VARS) -estimate else estimate)
+               ) |>
+        get_extreme_rows()
     }
 
     if (nrow(ref_wv) == 0) next
@@ -187,13 +310,13 @@ for (constr in CONSTR_LEVELS) {
       mutate(code = fct_reorder(code, -sort_est))
 
     wv_label <- if (constr != "continuous" && wv %in% SPEI_VARS) {
-      paste0(wv, " (drought)")
+      paste0(wv, " (drought vs normal)")
     } else if (constr != "continuous") {
       paste0(wv, " (heat)")
     } else {
       wv
     }
-    spei_note <- if (constr != "continuous" && wv %in% SPEI_VARS) " SPEI negated (drought focus)." else ""
+    spei_note <- if (constr != "continuous" && wv %in% SPEI_VARS) " SPEI: central bin negated = drought vs normal." else ""
 
     p_ref_rank <- ref_wv |>
       ggplot(aes(x = estimate, y = code, color = sig)) +
@@ -210,10 +333,13 @@ for (constr in CONSTR_LEVELS) {
            subtitle = paste0("Point estimate +/- 95% CI. fixest OLS, fit3, LASSO, year_loc, no interaction. ",
                              "Sorted by ", FOCUS_REF, " coefficient.", spei_note),
            x = paste0("Coefficient on ", wv_label), y = NULL) +
-      theme_minimal(base_size = 10) +
+      theme_minimal(base_size = 13) +
       theme(legend.position = "bottom",
             panel.grid.major.y = element_blank(),
-            strip.text = element_text(face = "bold"))
+            strip.text = element_text(face = "bold"),
+            axis.text.y = element_text(size = 11),
+            plot.title = element_text(size = 13),
+            plot.subtitle = element_text(size = 10))
 
     suffix <- c("continuous" = "cont", "binned_equal" = "binn_equal",
                 "binned_custom" = "binn_custom")[constr]
@@ -221,7 +347,7 @@ for (constr in CONSTR_LEVELS) {
     ggsave(file.path(MOD_DIR, paste0("03a_1b_ref_coefs_", suffix, "_", wv, ".png")),
            p_ref_rank,
            width = max(10, length(REF_LEVELS) * 3),
-           height = max(4, n_countries * 0.45 + 1.5),
+           height = max(3, n_countries * 0.28 + 0.9),
            dpi = 150, bg = "white")
   }
 }
@@ -297,21 +423,19 @@ cat("\n")
 # SECTION 4 -- TOP BIN COEFFICIENTS (1to3m)
 # =============================================================================
 
-# For temperature: extract top bin (Inf]) = extreme heat effect.
-# For SPEI: extract top bin (Inf]) = extreme wet vs drought (reference).
-#   Negate SPEI so the coefficient reads as "drought effect on welfare"
-#   (negative = drought hurts, consistent with temperature where negative = heat hurts).
+# For temperature: top bin (Inf]) = extreme heat effect.
+# For SPEI: use central (normal) bin, negated = drought vs normal conditions.
+#   A negative value means drought reduces welfare relative to normal.
 top_bin_main <- coef |>
   filter(ref_period == FOCUS_REF, engine == "fixest", model == "fit3",
          estimand == "Mean", is.na(interaction),
-         grepl("Inf\\]$", term), !grepl(":", term),
          construction == FOCUS_CONSTR) |>
+  get_extreme_rows() |>
   mutate(
     raw_estimate = estimate,
-    estimate = ifelse(wx_var %in% SPEI_VARS, -estimate, estimate),
     sig = p_value < 0.05,
     extreme_label = ifelse(wx_var %in% SPEI_VARS,
-                           paste0(wx_var, " (drought effect)"),
+                           paste0(wx_var, " (drought vs normal)"),
                            paste0(wx_var, " (heat effect)"))
   )
 
@@ -331,7 +455,7 @@ if (nrow(top_bin_main) > 0) {
                        name = NULL) +
     labs(title = paste0("Extreme weather effects: heat & drought (", FOCUS_REF, ", ", FOCUS_CONSTR_LABEL, ")"),
          subtitle = paste0("fixest OLS, fit3, LASSO, year_loc, no interaction. ",
-                           "SPEI negated: drought (bottom bin) is reference; shown as drought penalty. ",
+                           "SPEI: central bin negated = drought vs normal conditions. ",
                            "Negative = extreme hurts welfare."),
          x = "Coefficient (negative = extreme hurts welfare)", y = NULL) +
     theme_minimal(base_size = 11) +
@@ -348,19 +472,15 @@ if (nrow(top_bin_main) > 0) {
 
 rif_coefs <- coef |>
   filter(ref_period == FOCUS_REF, construction == FOCUS_CONSTR,
-         engine == "rif", model == "fit3", is.na(interaction),
-         grepl("Inf\\]$", term), !grepl(":", term)) |>
-  mutate(
-    quantile = tau,
-    estimate = ifelse(wx_var %in% SPEI_VARS, -estimate, estimate)
-  )
+         engine == "rif", model == "fit3", is.na(interaction)) |>
+  get_extreme_rows() |>
+  mutate(quantile = tau)
 
 ols_mean <- coef |>
   filter(ref_period == FOCUS_REF, construction == FOCUS_CONSTR,
          engine == "fixest", model == "fit3", estimand == "Mean",
-         is.na(interaction),
-         grepl("Inf\\]$", term), !grepl(":", term)) |>
-  mutate(estimate = ifelse(wx_var %in% SPEI_VARS, -estimate, estimate))
+         is.na(interaction)) |>
+  get_extreme_rows()
 
 if (nrow(rif_coefs) > 0) {
   # Build per-wx_var plots and combine
@@ -396,11 +516,13 @@ if (nrow(rif_coefs) > 0) {
   }
 
   if (length(rif_plots) > 0) {
-    p_rif <- wrap_plots(rif_plots, ncol = 1)
-    ggsave(file.path(MOD_DIR, "03a_4_rif_distributional.png"), p_rif,
-           width = max(10, min(5, n_countries) * 2.8),
-           height = max(4, ceiling(n_countries / 5) * 2.5) * length(wx_vars),
-           dpi = 150, bg = "white")
+    for (wv in names(rif_plots)) {
+      ggsave(file.path(MOD_DIR, paste0("03a_4_rif_distributional_", wv, ".png")),
+             rif_plots[[wv]],
+             width  = max(10, min(5, n_countries) * 2.8),
+             height = max(4, ceiling(n_countries / 5) * 2.5),
+             dpi = 150, bg = "white")
+    }
   }
 }
 
@@ -436,17 +558,14 @@ cat("\n")
 # =============================================================================
 
 # Negate SPEI interaction coefficients so positive = protective against the
-# extreme of interest (heat for t, drought for SPEI) across both variables.
+# extreme of interest (heat for t, drought vs normal for SPEI).
+# get_extreme_int_rows() handles: temperature top bin, SPEI central bin negated.
 top_bin_int <- coef |>
   filter(ref_period == FOCUS_REF, engine == "fixest", model == "fit3",
          estimand == "Mean", interaction %in% POLICY_VARS,
-         grepl("Inf\\]:", term),
          construction == FOCUS_CONSTR) |>
-  mutate(
-    raw_estimate = estimate,
-    estimate  = ifelse(wx_var %in% SPEI_VARS, -estimate, estimate),
-    statistic = ifelse(wx_var %in% SPEI_VARS, -statistic, statistic)
-  )
+  get_extreme_int_rows() |>
+  mutate(raw_estimate = estimate)
 
 int_summary <- top_bin_int |>
   group_by(code, wx_var, interaction) |>
@@ -463,32 +582,77 @@ int_summary <- top_bin_int |>
                            paste0(wx_var, "\n(heat)"))
   )
 
-if (nrow(int_summary) > 0) {
-  logp_lim <- max(abs(int_summary$signed_logp), na.rm = TRUE)
-  if (!is.finite(logp_lim)) logp_lim <- 3
+if (nrow(top_bin_int) > 0) {
+  pol_labels <- c(
+    "urban"           = "Urban",
+    "electricity"     = "Access to electricity",
+    "imp_wat_san_rec" = "Access to improved water & sanitation",
+    "ttime_health"    = "Travel time to health facility"
+  )
 
-  p_int <- int_summary |>
-    ggplot(aes(x = code, y = interaction, fill = signed_logp)) +
-    geom_tile(color = "white", linewidth = 0.4) +
-    geom_text(aes(label = ifelse(sig_flag != "",
-                    paste0(sprintf("%.3f", best_est), sig_flag), "")),
-              size = 2, color = "grey15") +
-    facet_wrap(~extreme_label, ncol = 1) +
-    scale_fill_gradient2(low = "#b2182b", mid = "grey95", high = "#2166ac",
-                         midpoint = 0, limits = c(-logp_lim, logp_lim),
-                         name = "signed\n-log10(p)") +
-    labs(title = paste0("Policy x extreme weather interactions (", FOCUS_REF, ", ", FOCUS_CONSTR_LABEL, ")"),
-         subtitle = paste0("Blue = protective, Red = amplifying. SPEI negated (drought focus). ",
-                           "*** p<0.001 ** p<0.01 * p<0.05"),
-         x = NULL, y = NULL) +
-    theme_minimal(base_size = 11) +
-    theme(panel.grid = element_blank(),
-          axis.text.x = element_text(angle = 45, hjust = 1))
+  for (wv in wx_vars) {
+    wv_int <- top_bin_int |> filter(wx_var == wv)
+    if (nrow(wv_int) == 0) next
 
-  ggsave(file.path(MOD_DIR, "03a_5_policy_interactions.png"), p_int,
-         width = max(8, n_countries * 1.2 + 4),
-         height = max(5, length(POLICY_VARS) * length(wx_vars) * 0.35 + 3),
-         dpi = 150, bg = "white")
+    wv_int <- wv_int |>
+      mutate(
+        sig       = p_value < 0.05,
+        pol_label = factor(
+          dplyr::recode(interaction, !!!pol_labels),
+          levels = unname(pol_labels[names(pol_labels) %in% unique(interaction)])
+        )
+      )
+
+    # Sort countries by urban coefficient; fall back to mean for any missing
+    code_order <- wv_int |>
+      filter(interaction == "urban") |>
+      arrange(estimate) |>
+      pull(code)
+    missing <- setdiff(unique(wv_int$code), code_order)
+    if (length(missing) > 0) {
+      fallback <- wv_int |>
+        filter(code %in% missing) |>
+        group_by(code) |>
+        summarise(mean_est = mean(estimate, na.rm = TRUE), .groups = "drop") |>
+        arrange(mean_est) |>
+        pull(code)
+      code_order <- c(fallback, code_order)
+    }
+
+    extreme_lbl <- if (wv %in% SPEI_VARS) paste0(wv, " (drought)") else paste0(wv, " (heat)")
+
+    p_int <- wv_int |>
+      mutate(code = factor(code, levels = code_order)) |>
+      ggplot(aes(x = estimate, y = code, color = sig)) +
+      geom_vline(xintercept = 0, linetype = "dashed", color = "grey50") +
+      geom_errorbar(aes(xmin = estimate - 1.96 * std_error,
+                        xmax = estimate + 1.96 * std_error),
+                    width = 0, linewidth = 0.3) +
+      geom_point(size = 1.8) +
+      scale_color_manual(values = c("TRUE" = "steelblue", "FALSE" = "grey60"),
+                         labels = c("TRUE" = "p < 0.05", "FALSE" = "n.s."),
+                         name = NULL) +
+      facet_wrap(~pol_label, nrow = 1, scales = "free_x") +
+      labs(title = paste0("Policy x ", extreme_lbl, " interaction coefficients (",
+                          FOCUS_REF, ", ", FOCUS_CONSTR_LABEL, ")"),
+           subtitle = paste0("Point estimate +/- 95% CI. fixest OLS, fit3, LASSO, year_loc. ",
+                             "SPEI negated (drought focus). Blue = p < 0.05. Sorted by mean estimate."),
+           x = "Interaction coefficient", y = NULL) +
+      theme_minimal(base_size = 13) +
+      theme(legend.position  = "bottom",
+            panel.grid.major.y = element_blank(),
+            strip.text       = element_text(face = "bold", size = 10),
+            axis.text.y      = element_text(size = 11),
+            plot.title       = element_text(size = 13),
+            plot.subtitle    = element_text(size = 10))
+
+    suffix_wv <- gsub("[^a-z0-9]", "_", wv)
+    ggsave(file.path(MOD_DIR, paste0("03a_5_policy_interactions_", suffix_wv, ".png")),
+           p_int,
+           width  = max(8, length(unique(wv_int$interaction)) * 3.2),
+           height = max(3, n_countries * 0.28 + 1.0),
+           dpi = 150, bg = "white")
+  }
 }
 
 sig_interactions <- int_summary |> filter(best_p < 0.05) |>
@@ -517,12 +681,9 @@ cat("\n")
 rif_topbin_int <- coef |>
   filter(ref_period == FOCUS_REF, engine == "rif", model == "fit3",
          interaction %in% POLICY_VARS,
-         grepl("Inf\\]:", term),
          construction == FOCUS_CONSTR) |>
-  mutate(
-    quantile = tau,
-    estimate = ifelse(wx_var %in% SPEI_VARS, -estimate, estimate)
-  )
+  get_extreme_int_rows() |>
+  mutate(quantile = tau)
 
 if (nrow(rif_topbin_int) > 0) {
   # Per country x wx_var x policy x bin_type: count sig quantiles & gradient
@@ -626,38 +787,53 @@ if (nrow(rif_topbin_int) > 0) {
     )
 
   for (pol_var in sort(unique(all_profile_data$interaction))) {
-    pol_data <- all_profile_data |> filter(interaction == pol_var)
-    if (nrow(pol_data) == 0) next
-    n_ctry_pol <- n_distinct(pol_data$code)
-    n_wx_pol   <- n_distinct(pol_data$wx_var)
+    for (wv in sort(unique(all_profile_data$wx_var))) {
+      pol_data <- all_profile_data |> filter(interaction == pol_var, wx_var == wv)
+      if (nrow(pol_data) == 0) next
+      n_ctry_pol <- n_distinct(pol_data$code)
 
-    p_pol <- pol_data |>
-      ggplot(aes(x = quantile, y = estimate)) +
-      geom_hline(yintercept = 0, linetype = "dashed", color = "grey50",
-                 linewidth = 0.3) +
-      geom_hline(aes(yintercept = ols_est), linetype = "dotted",
-                 color = "orange", linewidth = 0.5) +
-      geom_ribbon(aes(ymin = estimate - 1.96 * std_error,
-                       ymax = estimate + 1.96 * std_error),
-                  fill = "steelblue", alpha = 0.2) +
-      geom_line(color = "steelblue", linewidth = 0.6) +
-      geom_point(aes(shape = ifelse(p_value < 0.05, "sig", "ns")),
-                 color = "steelblue", size = 1.5) +
-      scale_shape_manual(values = c("sig" = 16, "ns" = 1), guide = "none") +
-      facet_grid(code ~ extreme_label, scales = "free_y") +
-      scale_x_continuous(breaks = seq(0.1, 0.9, 0.2),
-                         labels = paste0("p", seq(10, 90, 20))) +
-      labs(title = paste0("RIF: ", pol_var, " x extreme weather (", FOCUS_REF, ", ", FOCUS_CONSTR_LABEL, ")"),
-           subtitle = "Blue = UQR interaction +/- 95% CI. Orange dotted = OLS mean. SPEI negated.",
-           x = "Quantile", y = "Interaction coefficient") +
-      theme_minimal(base_size = 10) +
-      theme(strip.text = element_text(face = "bold", size = 9))
+      ncols  <- ceiling(sqrt(n_ctry_pol))
+      nrows  <- ceiling(n_ctry_pol / ncols)
 
-    ggsave(file.path(MOD_DIR, paste0("03a_7_rif_profiles_", pol_var, ".png")),
-           p_pol,
-           width = max(6, n_wx_pol * 3.5),
-           height = max(4, n_ctry_pol * 2.2 + 1.5),
-           dpi = 150, bg = "white")
+      extreme_lbl <- unique(pol_data$extreme_label)
+
+      p_pol <- pol_data |>
+        ggplot(aes(x = quantile, y = estimate)) +
+        geom_hline(yintercept = 0, linetype = "dashed", color = "grey50",
+                   linewidth = 0.3) +
+        geom_hline(aes(yintercept = ols_est), linetype = "dotted",
+                   color = "orange", linewidth = 0.5) +
+        geom_ribbon(aes(ymin = estimate - 1.96 * std_error,
+                         ymax = estimate + 1.96 * std_error),
+                    fill = "steelblue", alpha = 0.2) +
+        geom_line(color = "steelblue", linewidth = 0.6) +
+        geom_point(aes(shape = ifelse(p_value < 0.05, "sig", "ns")),
+                   color = "steelblue", size = 1.5) +
+        scale_shape_manual(values = c("sig" = 16, "ns" = 1), guide = "none") +
+        facet_wrap(~code, ncol = ncols, scales = "free_y") +
+        scale_x_continuous(breaks = seq(0.1, 0.9, 0.2),
+                           labels = paste0("p", seq(10, 90, 20))) +
+        labs(title = paste0("RIF: ", pol_var, " x ", extreme_lbl,
+                            " (", FOCUS_REF, ", ", FOCUS_CONSTR_LABEL, ")"),
+             subtitle = "Blue = UQR interaction +/- 95% CI. Orange dotted = OLS mean. SPEI negated.",
+             x = "Quantile", y = "Interaction coefficient") +
+        theme_minimal(base_size = 12) +
+        theme(
+          strip.text       = element_text(face = "bold", size = 10),
+          axis.text        = element_text(size = 9),
+          axis.title       = element_text(size = 10),
+          plot.title       = element_text(size = 12),
+          plot.subtitle    = element_text(size = 9),
+          panel.spacing    = unit(0.4, "lines"),
+          panel.grid.minor = element_blank()
+        )
+
+      ggsave(file.path(MOD_DIR, paste0("03a_7_rif_profiles_", pol_var, "_", wv, ".png")),
+             p_pol,
+             width  = ncols * 2.8 + 0.5,
+             height = nrows * 2.2 + 1.2,
+             dpi = 150, bg = "white")
+    }
   }
 }
 
@@ -813,6 +989,10 @@ L("**Decision**: Focus on **`", FOCUS_REF, "`** for all downstream analysis.")
 L("")
 L("![Reference period significance](03a_1_ref_period_significance.png)")
 L("")
+L("![Reference period significance (binned equal freq)](03a_1_ref_period_significance_binn_equal.png)")
+L("")
+L("![Reference period significance (binned custom)](03a_1_ref_period_significance_binn_custom.png)")
+L("")
 L("### Coefficient ranking by reference period")
 L("")
 L("Countries sorted by ", FOCUS_REF, " coefficient. ",
@@ -959,7 +1139,10 @@ if (nrow(rif_gradient) > 0) {
   }
 }
 
-L("![RIF distributional](03a_4_rif_distributional.png)")
+for (wv in wx_vars) {
+  L("![RIF distributional: ", wv, "](03a_4_rif_distributional_", wv, ".png)")
+  L("")
+}
 L("")
 
 # --- 6: Policy interactions ---

@@ -43,8 +43,9 @@ POOL_COUNTRIES <- FALSE   # TRUE = one pooled model; FALSE = per-country
 # ---- Country / survey sample (mod_1_01) [GRID when !POOL_COUNTRIES] --------
 # NULL = all available; c(...) = subset
 COUNTRY_FILTER <- c(
-  "BEN", "BFA", "BRA", "CIV", "COL", "GMB", "GNB", "GTM", "IND", "IRN", "LKA",
-  "MLI", "MRT", "MWI", "NER", "SEN", "TCD", "TGO", "TJK", "VNM", "ZMB"
+  # "BEN", "BFA", "BRA", "CIV", "COL", "GMB", "GNB", "GTM", "IND", "IRN", "LKA",
+  # "MLI", "MRT", "MWI", "NER", "SEN", "TCD", "TGO", 
+  "TJK", "VNM", "ZMB"
 )
 
 # ---- Outcome variable (mod_1_03) --------------------------------------------
@@ -321,6 +322,12 @@ POLICY_SCENARIOS <- list(
 # Each policy with policy_keys needs the corresponding variable as an
 # interaction in the base model (matching the app's mod_1 → mod_3 flow).
 # SP-only policies (no policy_keys) are applied to noInter specs.
+# Skip a policy when its binary interaction variable already exceeds this
+# share in the baseline survey (e.g., 0.95 = skip "universal electricity" if
+# electricity access is already >= 95%). Set to NULL to disable.
+POLICY_BASELINE_THRESHOLD <- 0.95
+POLICY_COVERAGE_THRESHOLD <- 0.9
+
 POLICY_INTERACTION_MAP <- list()   # pol_name → interaction var (or "noInter")
 for (.pn in names(POLICY_SCENARIOS)) {
   .pk <- POLICY_SCENARIOS[[.pn]]$policy_keys %||% character(0)
@@ -425,20 +432,62 @@ for (.pn in names(POLICY_INTERACTION_MAP)) {
   .pols_by_inter[[.il]] <- c(.pols_by_inter[[.il]], .pn)
 }
 
+# Pre-compute which policies would be threshold/coverage-skipped per country
+# from survey_stats.csv, so the done check can treat them as complete without
+# reloading survey data.
+.skip_pols_by_code <- list()
+.stats_path <- file.path(OUT_DIR, "survey_stats", "survey_stats.csv")
+if (!is.null(POLICY_BASELINE_THRESHOLD) && file.exists(.stats_path)) {
+  .ss <- readr::read_csv(.stats_path, show_col_types = FALSE)
+  .pol_vars <- unique(unlist(lapply(names(POLICY_DEFINITIONS),
+    function(k) POLICY_DEFINITIONS[[k]]$vars)))
+  .ss <- .ss[.ss$variable %in% .pol_vars, , drop = FALSE]
+  .ss$year_int <- as.integer(as.character(.ss$year))
+  .max_yrs <- tapply(.ss$year_int, .ss$code, max, na.rm = TRUE)
+  .ss <- .ss[.ss$year_int == .max_yrs[.ss$code], , drop = FALSE]
+
+  .pol_active_pre <- setdiff(names(POLICY_SCENARIOS), "no_policy")
+  for (.ci in unique(.ss$code)) {
+    .skipped <- character(0)
+    for (.pn in .pol_active_pre) {
+      .pk <- POLICY_SCENARIOS[[.pn]]$policy_keys %||% character(0)
+      if (length(.pk) == 0L) next
+      .pvars <- unique(unlist(lapply(.pk, function(k) POLICY_DEFINITIONS[[k]]$vars)))
+      .above <- FALSE
+      for (.pv in .pvars) {
+        .row <- .ss[.ss$code == .ci & .ss$variable == .pv, , drop = FALSE]
+        if (nrow(.row) == 0L) next
+        .row <- .row[1L, ]
+        if (!isTRUE(.row$n_unique <= 2 & .row$min >= 0 & .row$max <= 1)) next
+        .cov <- 1 - (.row$pct_missing %||% 100) / 100
+        if (is.na(.cov) || .cov < POLICY_COVERAGE_THRESHOLD) next
+        if (isTRUE(.row$mean >= POLICY_BASELINE_THRESHOLD)) { .above <- TRUE; break }
+      }
+      if (.above) .skipped <- c(.skipped, .pn)
+    }
+    if (length(.skipped) > 0L) .skip_pols_by_code[[.ci]] <- .skipped
+  }
+  rm(.ss, .pol_vars, .max_yrs, .pol_active_pre)
+  if (length(.skip_pols_by_code) > 0L)
+    cat(sprintf("  survey_stats: %d country(ies) have pre-skippable policies\n",
+                length(.skip_pols_by_code)))
+}
+
 .done_specs <- character(0)
 if (!OVERWRITE_EXISTING) {
   .chk_path <- file.path(OUT_DIR, "simulations", "outcomes.parquet")
   if (file.exists(.chk_path)) {
     .chk <- arrow::read_parquet(.chk_path, col_select = c("spec_label", "policy_label"))
     .by_spec <- split(.chk$policy_label, .chk$spec_label)
-    # All possible inter_labels: "noInter" + policy-derived ones
     .all_inters <- unique(unlist(POLICY_INTERACTION_MAP))
     .spec_complete <- vapply(names(.by_spec), function(sl) {
       pols <- .by_spec[[sl]]
       if (!"no_policy" %in% pols) return(FALSE)
+      .code <- sub("^([A-Z]{3})_.+$", "\\1", sl)
+      .code_skips <- .skip_pols_by_code[[.code]] %||% character(0)
       for (il in .all_inters) {
         if (endsWith(sl, paste0("_", il))) {
-          expected <- .pols_by_inter[[il]] %||% character(0)
+          expected <- setdiff(.pols_by_inter[[il]] %||% character(0), .code_skips)
           return(all(expected %in% pols))
         }
       }
@@ -1023,7 +1072,63 @@ for (si in SAMPLE_LABELS) {
 
   wx_profiles <- unique(grid$weather[grid$sample == si])
 
+  # Pre-compute interactions whose policies would ALL be threshold-skipped.
+  .skippable_inters <- character(0)
+  if (!is.null(POLICY_BASELINE_THRESHOLD)) {
+    .svy_latest <- svy_base |>
+      dplyr::group_by(code) |>
+      dplyr::filter(as.integer(as.character(year)) ==
+                      max(as.integer(as.character(year)), na.rm = TRUE)) |>
+      dplyr::ungroup()
+    .wt_all <- if ("weight" %in% names(.svy_latest)) .svy_latest[["weight"]] else NULL
+    .all_pol_inters <- setdiff(unique(unlist(POLICY_INTERACTION_MAP)), "noInter")
+    for (.il in .all_pol_inters) {
+      .pols_for_il <- names(Filter(function(x) identical(x, .il), POLICY_INTERACTION_MAP))
+      .pols_for_il <- intersect(.pols_for_il, .pol_active)
+      if (length(.pols_for_il) == 0L) next
+      .all_skip <- TRUE
+      for (.pn in .pols_for_il) {
+        .pk <- POLICY_SCENARIOS[[.pn]]$policy_keys %||% character(0)
+        if (length(.pk) == 0L) { .all_skip <- FALSE; break }
+        .pvars <- unique(unlist(lapply(.pk, function(k) POLICY_DEFINITIONS[[k]]$vars)))
+        .above <- FALSE
+        for (.pv in .pvars) {
+          if (!.pv %in% names(.svy_latest)) next
+          .vals <- .svy_latest[[.pv]][!is.na(.svy_latest[[.pv]])]
+          if (length(.vals) == 0L || !all(.vals %in% c(0, 1))) next
+          if (length(.vals) / nrow(.svy_latest) < POLICY_COVERAGE_THRESHOLD) next
+          .wt_ok <- if (!is.null(.wt_all)) .wt_all[!is.na(.svy_latest[[.pv]])] else NULL
+          .bm <- if (!is.null(.wt_ok)) stats::weighted.mean(.vals, .wt_ok, na.rm = TRUE) else mean(.vals)
+          if (.bm >= POLICY_BASELINE_THRESHOLD) { .above <- TRUE; break }
+        }
+        if (!.above) { .all_skip <- FALSE; break }
+      }
+      if (.all_skip) .skippable_inters <- c(.skippable_inters, .il)
+    }
+    rm(.svy_latest)
+    if (length(.skippable_inters) > 0L)
+      cat(sprintf("  Skippable interactions (>= %.0f%%): %s\n",
+                  POLICY_BASELINE_THRESHOLD * 100, paste(.skippable_inters, collapse = ", ")))
+  }
+
   for (wx_name in wx_profiles) {
+
+    # Early-out: skip weather load if ALL specs are done or threshold-skipped
+    .wx_combos <- grid[grid$sample == si & grid$weather == wx_name, , drop = FALSE]
+    .wx_all_skip <- all(vapply(seq_len(nrow(.wx_combos)), function(mi) {
+      .mt <- if (grepl("RIF", .wx_combos$model_type[mi])) "rif" else "ols"
+      .iv <- .wx_combos$interaction[[mi]]
+      .il <- if (length(.iv) == 0) "noInter" else paste(.iv, collapse = "_")
+      .sl <- sprintf("%s_%s_%s_%s_%s_%s", si, wx_name, .mt,
+                     .wx_combos$fe[mi], .wx_combos$covariates[mi], .il)
+      .sl %in% .done_specs || .il %in% .skippable_inters
+    }, logical(1)))
+    if (.wx_all_skip) {
+      cat(sprintf("  [%s] all specs done or skippable — skipping weather load\n", wx_name))
+      run_idx <- run_idx + nrow(.wx_combos)
+      next
+    }
+
     wx_prof <- WEATHER_SPECS[[wx_name]]
     wx_vars <- names(wx_prof)
 
@@ -1102,6 +1207,11 @@ for (si in SAMPLE_LABELS) {
 
       if (spec_label %in% .done_specs) {
         cat(sprintf("  [%d/%d] %s... SKIP (results exist)\n", run_idx, nrow(grid), spec_label))
+        next
+      }
+
+      if (inter_label %in% .skippable_inters) {
+        cat(sprintf("  [%d/%d] %s... SKIP (policy var above threshold)\n", run_idx, nrow(grid), spec_label))
         next
       }
 
@@ -1433,6 +1543,30 @@ for (si in SAMPLE_LABELS) {
 
     for (pol_name in .pols_here) {
       pol             <- POLICY_SCENARIOS[[pol_name]]
+
+      # Skip policy if its binary variable is already near-universal
+      if (!is.null(POLICY_BASELINE_THRESHOLD) && length(pol$policy_keys) > 0) {
+        .pol_vars <- unique(unlist(lapply(pol$policy_keys, function(k)
+          POLICY_DEFINITIONS[[k]]$vars)))
+        .svy_chk  <- result$hist_sim_result$svy
+        .skip_pol <- FALSE
+        for (.pv in .pol_vars) {
+          if (!.pv %in% names(.svy_chk)) next
+          .vals <- .svy_chk[[.pv]][!is.na(.svy_chk[[.pv]])]
+          if (length(.vals) == 0L || !all(.vals %in% c(0, 1))) next
+          if (length(.vals) / nrow(.svy_chk) < POLICY_COVERAGE_THRESHOLD) next
+          .wt <- if ("weight" %in% names(.svy_chk)) .svy_chk[["weight"]][!is.na(.svy_chk[[.pv]])] else NULL
+          .base_mean <- if (!is.null(.wt)) stats::weighted.mean(.vals, .wt, na.rm = TRUE) else mean(.vals)
+          if (.base_mean >= POLICY_BASELINE_THRESHOLD) {
+            cat(sprintf("    SKIP %s — %s already %.1f%% (threshold: %.0f%%)\n",
+                        pol_name, .pv, .base_mean * 100, POLICY_BASELINE_THRESHOLD * 100))
+            .skip_pol <- TRUE
+            break
+          }
+        }
+        if (.skip_pol) next
+      }
+
       country_pol_idx <- country_pol_idx + 1L
       pol_run_idx     <- pol_run_idx + 1L
       .run_key        <- paste(spec_label, pol_name, sep = ":")
@@ -1629,6 +1763,7 @@ for (si in SAMPLE_LABELS) {
      country_fail_rows, country_pol_cfg_rows, country_yr_decile_rows,
      .outcomes_df, .ret_per_df)
   gc(verbose = FALSE)
+  unlink(".tmp", recursive = TRUE)
 
   cat(sprintf("  %s complete -- memory freed\n", si))
 }

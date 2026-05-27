@@ -214,6 +214,11 @@ POLICY_SCENARIOS <- list(
   )
 )
 
+# Skip a policy when its binary interaction variable already exceeds this
+# share in the baseline survey (e.g., 0.95 = skip "universal electricity" if
+# electricity access is already >= 95%). Set to NULL to disable.
+POLICY_BASELINE_THRESHOLD <- 0.95
+
 POLICY_INTERACTION_MAP <- list()
 for (.pn in names(POLICY_SCENARIOS)) {
   .pk <- POLICY_SCENARIOS[[.pn]]$policy_keys %||% character(0)
@@ -453,6 +458,7 @@ cfg <- list(
   .done_specs         = .done_specs,
   POLICY_SCENARIOS    = POLICY_SCENARIOS,
   POLICY_INTERACTION_MAP = POLICY_INTERACTION_MAP,
+  POLICY_BASELINE_THRESHOLD = POLICY_BASELINE_THRESHOLD,
   # Output path (for PNG plots, written per-worker to unique filenames)
   OUT_DIR             = OUT_DIR,
   # Weather
@@ -544,6 +550,7 @@ run_one_country <- function(si, cfg) {
     .done_specs             <- cfg$.done_specs
     POLICY_SCENARIOS        <- cfg$POLICY_SCENARIOS
     POLICY_INTERACTION_MAP  <- cfg$POLICY_INTERACTION_MAP
+    POLICY_BASELINE_THRESHOLD <- cfg$POLICY_BASELINE_THRESHOLD
     OUT_DIR                 <- cfg$OUT_DIR
     WEATHER_SPECS           <- cfg$WEATHER_SPECS
     WEATHER_TRANSFORMATION  <- cfg$WEATHER_TRANSFORMATION
@@ -1008,7 +1015,63 @@ run_one_country <- function(si, cfg) {
     n_country_specs  <- nrow(country_specs)
     run_idx          <- 0L
 
+    # Pre-compute interactions whose policies would ALL be threshold-skipped.
+    # Specs for these interactions can be skipped entirely (no fit, no sim).
+    .skippable_inters <- character(0)
+    if (!is.null(POLICY_BASELINE_THRESHOLD)) {
+      .svy_latest <- svy_base |>
+        dplyr::group_by(code) |>
+        dplyr::filter(as.integer(as.character(year)) ==
+                        max(as.integer(as.character(year)), na.rm = TRUE)) |>
+        dplyr::ungroup()
+      .wt_all <- if ("weight" %in% names(.svy_latest)) .svy_latest[["weight"]] else NULL
+      .all_pol_inters <- setdiff(unique(unlist(POLICY_INTERACTION_MAP)), "noInter")
+      for (.il in .all_pol_inters) {
+        .pols_for_il <- names(Filter(function(x) identical(x, .il), POLICY_INTERACTION_MAP))
+        .pols_for_il <- intersect(.pols_for_il, .pol_active)
+        if (length(.pols_for_il) == 0L) next
+        .all_skip <- TRUE
+        for (.pn in .pols_for_il) {
+          .pk <- POLICY_SCENARIOS[[.pn]]$policy_keys %||% character(0)
+          if (length(.pk) == 0L) { .all_skip <- FALSE; break }
+          .pvars <- unique(unlist(lapply(.pk, function(k) POLICY_DEFINITIONS[[k]]$vars)))
+          .above <- FALSE
+          for (.pv in .pvars) {
+            if (!.pv %in% names(.svy_latest)) next
+            .vals <- .svy_latest[[.pv]][!is.na(.svy_latest[[.pv]])]
+            if (length(.vals) == 0L || !all(.vals %in% c(0, 1))) next
+            .wt_ok <- if (!is.null(.wt_all)) .wt_all[!is.na(.svy_latest[[.pv]])] else NULL
+            .bm <- if (!is.null(.wt_ok)) stats::weighted.mean(.vals, .wt_ok, na.rm = TRUE) else mean(.vals)
+            if (.bm >= POLICY_BASELINE_THRESHOLD) { .above <- TRUE; break }
+          }
+          if (!.above) { .all_skip <- FALSE; break }
+        }
+        if (.all_skip) .skippable_inters <- c(.skippable_inters, .il)
+      }
+      rm(.svy_latest)
+      if (length(.skippable_inters) > 0L)
+        .log("  Skippable interactions (>= %.0f%%): %s",
+             POLICY_BASELINE_THRESHOLD * 100, paste(.skippable_inters, collapse = ", "))
+    }
+
     for (wx_name in wx_profiles) {
+
+      # Early-out: skip weather load if ALL specs are done or threshold-skipped
+      .wx_combos <- grid[grid$sample == si & grid$weather == wx_name, , drop = FALSE]
+      .wx_all_skip <- all(vapply(seq_len(nrow(.wx_combos)), function(mi) {
+        .mt <- if (grepl("RIF", .wx_combos$model_type[mi])) "rif" else "ols"
+        .iv <- .wx_combos$interaction[[mi]]
+        .il <- if (length(.iv) == 0) "noInter" else paste(.iv, collapse = "_")
+        .sl <- sprintf("%s_%s_%s_%s_%s_%s", si, wx_name, .mt,
+                       .wx_combos$fe[mi], .wx_combos$covariates[mi], .il)
+        .sl %in% .done_specs || .il %in% .skippable_inters
+      }, logical(1)))
+      if (.wx_all_skip) {
+        .log("  [%s] all specs done or skippable — skipping weather load", wx_name)
+        run_idx <- run_idx + nrow(.wx_combos)
+        next
+      }
+
       wx_prof <- WEATHER_SPECS[[wx_name]]
       wx_vars <- names(wx_prof)
 
@@ -1085,6 +1148,11 @@ run_one_country <- function(si, cfg) {
 
         if (spec_label %in% .done_specs) {
           .log("  [%d/%d] %s... SKIP (results exist)", run_idx, n_country_specs, spec_label)
+          next
+        }
+
+        if (inter_label %in% .skippable_inters) {
+          .log("  [%d/%d] %s... SKIP (policy var above threshold)", run_idx, n_country_specs, spec_label)
           next
         }
 
@@ -1400,6 +1468,29 @@ run_one_country <- function(si, cfg) {
 
       for (pol_name in .pols_here) {
         pol             <- POLICY_SCENARIOS[[pol_name]]
+
+        # Skip policy if its binary variable is already near-universal
+        if (!is.null(POLICY_BASELINE_THRESHOLD) && length(pol$policy_keys) > 0) {
+          .pol_vars <- unique(unlist(lapply(pol$policy_keys, function(k)
+            POLICY_DEFINITIONS[[k]]$vars)))
+          .svy_chk  <- result$hist_sim_result$svy
+          .skip_pol <- FALSE
+          for (.pv in .pol_vars) {
+            if (!.pv %in% names(.svy_chk)) next
+            .vals <- .svy_chk[[.pv]][!is.na(.svy_chk[[.pv]])]
+            if (length(.vals) == 0L || !all(.vals %in% c(0, 1))) next
+            .wt <- if ("weight" %in% names(.svy_chk)) .svy_chk[["weight"]][!is.na(.svy_chk[[.pv]])] else NULL
+            .base_mean <- if (!is.null(.wt)) stats::weighted.mean(.vals, .wt, na.rm = TRUE) else mean(.vals)
+            if (.base_mean >= POLICY_BASELINE_THRESHOLD) {
+              .log("    SKIP %s — %s already %.1f%% (threshold: %.0f%%)",
+                   pol_name, .pv, .base_mean * 100, POLICY_BASELINE_THRESHOLD * 100)
+              .skip_pol <- TRUE
+              break
+            }
+          }
+          if (.skip_pol) next
+        }
+
         country_pol_idx <- country_pol_idx + 1L
         .run_key        <- paste(spec_label, pol_name, sep = ":")
         .log("  [%d] %s : %s...", country_pol_idx, spec_label, pol_name)
@@ -1607,7 +1698,7 @@ futures <- setNames(
   lapply(SAMPLE_LABELS, function(si) {
     future::future(
       run_one_country(si, cfg),
-      globals = list(cfg = cfg, run_one_country = run_one_country),
+      globals = list(si = si, cfg = cfg, run_one_country = run_one_country),
       packages = NULL,
       seed    = TRUE,
       stdout  = TRUE,
