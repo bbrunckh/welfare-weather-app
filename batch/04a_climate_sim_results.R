@@ -5,7 +5,6 @@ library(patchwork)
 library(tidytext)
 
 OUT_DIR <- Sys.getenv("WISEAPP_RESULTS_PATH")
-OUT_DIR <- "dev/outputs"
 SIM_DIR <- file.path(OUT_DIR, "simulations")
 
 FOCUS_REF   <- "1to3m"
@@ -147,7 +146,7 @@ iwalk(agg_labels, \(label, key) {
 # Compare no_policy vs each other policy under SSP3
 
 policy_labels <- c(
-  "sp_p5_bottom40"      = "Cash transfer (bottom 40%, P5)",
+  "sp_p10_bottom40"      = "Cash transfer (bottom 40%, P10)",
   "elec_universal"       = "Universal electricity access",
   "health15min"          = "Health facility within 15 min",
   "imp_wat_san_universal" = "Universal water & sanitation"
@@ -188,47 +187,85 @@ order_no_policy <- rp_policy_diff |>
   filter(return_period == "1:1", policy_label == "no_policy", scenario_id == FOCUS_SCENARIOS[[1]]) |>
   select(country, agg_method, order_val = central)
 
+# ── Country exclusions per policy (baseline mean > 95%) ──────────────────────
+survey_stats <- read_csv(file.path(OUT_DIR, "survey_stats/survey_stats.csv"))
+
+elec_exclude <- survey_stats |>
+  filter(variable == "electricity") |>
+  slice_max(year, by = code) |>
+  filter(mean > 0.95) |>
+  pull(code)
+
+wat_san_exclude <- survey_stats |>
+  filter(variable == "imp_wat_san_rec") |>
+  slice_max(year, by = code) |>
+  filter(mean > 0.95) |>
+  pull(code)
+
+policy_exclude <- list(
+  elec_universal         = elec_exclude,
+  imp_wat_san_universal  = wat_san_exclude
+)
+
 plot_metric_policy <- function(metric_key, policy_key) {
   metric_label     <- agg_labels[[metric_key]]
   policy_label_str <- policy_labels[[policy_key]]
   rps_use          <- metric_rps[[metric_key]]
+  exclude_codes    <- policy_exclude[[policy_key]] %||% character(0)
+
+  # Countries that actually have the policy scenario
+  countries_with_policy <- rp_policy_diff |>
+    filter(agg_method == metric_key, policy_label == policy_key) |>
+    distinct(country) |>
+    pull(country)
 
   plot_data <- rp_policy_diff |>
     filter(
       agg_method   == metric_key,
       policy_label %in% c("no_policy", policy_key),
-      return_period %in% rps_use
+      return_period %in% rps_use,
+      !country %in% exclude_codes,
+      country %in% countries_with_policy
     ) |>
     left_join(order_no_policy |> filter(agg_method == metric_key), by = c("country", "agg_method")) |>
     mutate(
       country_f     = reorder_within(country, order_val, agg_method),
       return_period = factor(rp_labels[as.character(return_period)], levels = unique(rp_labels[rps_use])),
       policy_lab    = if_else(policy_label == "no_policy", "No policy", policy_label_str),
-      grp_label     = paste0(SCENARIO_LABELS[scenario_id], " - ", policy_lab)
+      # colour encodes policy type; linetype encodes scenario
+      col_grp = if_else(policy_label == "no_policy", "No policy", policy_label_str),
+      lty_grp = SCENARIO_LABELS[scenario_id],
+      grp_label = paste0(col_grp, " — ", lty_grp)
     )
 
-  grp_levels  <- unique(plot_data$grp_label)
-  grp_colours <- setNames(
-    active_scenario_colours[
-      plot_data |> distinct(grp_label, scenario_id) |>
-        arrange(match(grp_label, grp_levels)) |> pull(scenario_id)
-    ],
-    grp_levels
-  )
-  grp_shapes <- setNames(ifelse(grepl("No policy", grp_levels), 16L, 17L), grp_levels)
+  dodge <- position_dodge(width = 0.7)
 
-  ggplot(plot_data, aes(y = country_f, x = central, colour = grp_label, shape = grp_label)) +
+  scenario_ltys <- setNames(
+    c("solid", "dashed", "dotdash", "dotted")[seq_along(FOCUS_SCENARIOS)],
+    unname(active_scenario_labels)
+  )
+
+  lty_values <- plot_data |>
+    distinct(grp_label, lty_grp) |>
+    with(setNames(scenario_ltys[lty_grp], grp_label))
+
+  col_values <- plot_data |>
+    distinct(grp_label, col_grp) |>
+    mutate(colour = if_else(col_grp == "No policy", "#1d2f73", "#d12816")) |>
+    with(setNames(colour, grp_label))
+
+  ggplot(plot_data, aes(y = country_f, x = central, colour = grp_label, linetype = grp_label, group = grp_label)) +
     geom_vline(xintercept = 0, linewidth = 0.4, linetype = "dashed", colour = "grey50") +
     geom_errorbarh(
       aes(xmin = ensemble_lo, xmax = ensemble_hi),
-      height = 0, linewidth = 0.4, alpha = 0.5,
-      position = position_dodge2(width = 0.8)
+      height = 0, linewidth = 0.4, alpha = 0.6,
+      position = dodge
     ) +
-    geom_point(size = 2, position = position_dodge2(width = 0.8)) +
+    geom_point(shape = 16, size = 2, position = dodge) +
     facet_wrap(~return_period, nrow = 1, scales = "free_x") +
     scale_y_reordered() +
-    scale_colour_manual(values = grp_colours, name = "") +
-    scale_shape_manual(values = grp_shapes, name = "") +
+    scale_colour_manual(values = col_values, name = "") +
+    scale_linetype_manual(values = lty_values, name = "") +
     labs(
       title    = metric_label,
       subtitle = paste0(policy_label_str, " vs No policy"),
@@ -249,10 +286,6 @@ plot_metric_policy <- function(metric_key, policy_key) {
 
 library(arrow)
 
-OUT_DIR <- "dev/outputs"
-SIM_DIR <- file.path(OUT_DIR, "simulations")
-
-
 EXCEED_DIR <- file.path(SIM_DIR, "exceedance_plots")
 dir.create(EXCEED_DIR, showWarnings = FALSE, recursive = TRUE)
 
@@ -260,7 +293,7 @@ all_policy_labels <- c("no_policy", names(policy_labels)[names(policy_labels) !=
 
 outcomes_ep <- read_parquet(file.path(SIM_DIR, "outcomes.parquet")) |>
   filter(
-    wx_name      == "t_r_1to3m_binn",
+    wx_name      == "t_1to3m_binn_None",
     policy_label %in% all_policy_labels,
     agg_method   == "headcount_ratio_300",
     scenario_id  %in% c("historical", FOCUS_SCENARIOS)
@@ -289,6 +322,7 @@ fut_per_member <- outcomes_ep |>
 
 fut_interp <- fut_per_member |>
   group_by(code, scenario_id, policy_label, ensemble_member) |>
+  filter(n() >= 2) |>
   group_modify(\(df, .key) {
     tibble(
       exceed_prob = common_probs,
@@ -303,19 +337,23 @@ fut_curve <- fut_interp |>
     value_lo     = min(value),
     value_hi     = max(value),
     .by          = c(code, scenario_id, policy_label, exceed_prob)
+  ) |>
+  filter(
+    !(policy_label == "elec_universal"        & code %in% elec_exclude),
+    !(policy_label == "imp_wat_san_universal"  & code %in% wat_san_exclude)
   )
 
 # ── Colours per policy (red tones for interventions, grey for no_policy) ─────
 exceed_policy_colours <- c(
   "no_policy"             = "#1d2f73",
-  "sp_p5_bottom40"        = "#8e1a0e",
-  "elec_universal"        = "#8e1a0e",
-  "imp_wat_san_universal" = "#8e1a0e"
+  "sp_p10_bottom40"        = "#c42716",
+  "elec_universal"        = "#c42716",
+  "imp_wat_san_universal" = "#c42716"
 )
 
 exceed_policy_names <- c(
   "no_policy"             = "No policy",
-  "sp_p5_bottom40"        = "Cash transfer",
+  "sp_p10_bottom40"        = "Cash transfer",
   "elec_universal"        = "Universal electricity",
   "imp_wat_san_universal" = "Water & sanitation"
 )
