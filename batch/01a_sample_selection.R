@@ -45,6 +45,7 @@ survey_counts <- welfare_agg |>
   arrange(desc(n_surveys), code)
 
 multi_survey <- filter(survey_counts, n_surveys >= 2)
+multi_codes  <- multi_survey$code
 
 cat("=== Countries with 2+ surveys ===\n")
 print(multi_survey, n = Inf)
@@ -127,20 +128,27 @@ spatial <- survey_stats |>
 spatiotemporal <- inner_join(temporal, spatial, by = c("code", "economy", "survname", "year")) |>
   mutate(label = paste0(code, " ", year)) |>
   left_join(survey_counts |> select(code, n_surveys), by = "code") |>
-  mutate(multi = n_surveys >= 2)
+  mutate(multi = n_surveys >= 2) |>
+  left_join(geocoding |> select(code, year, pct_geocoded), by = c("code", "year"))
 
-p_scatter <- ggplot(spatiotemporal, aes(x = n_locations, y = n_dates)) +
-  geom_point(aes(size = n_locations, color = multi), alpha = 0.6) +
-  ggrepel::geom_text_repel(aes(label = label), size = 2.5, max.overlaps = 20,
+p_scatter <- spatiotemporal |>
+  filter(multi) |>
+  ggplot(aes(x = n_locations, y = n_dates)) +
+  geom_point(aes(colour = pct_geocoded), size = 3, alpha = 0.85) +
+  ggrepel::geom_text_repel(aes(label = label), size = 3, max.overlaps = 20,
                             color = "grey30", segment.color = "grey70") +
-  scale_color_manual(values = c("TRUE" = "steelblue", "FALSE" = "grey60"),
-                     labels = c("TRUE" = "2+ waves", "FALSE" = "1 wave"),
-                     name = NULL) +
+  scale_colour_gradient(
+    low = "#a8c8e8", high = "#0a2a4a",
+    name = "% observations geocoded",
+    labels = scales::label_number(suffix = "%"),
+    guide = guide_colourbar(barwidth = 30, barheight = 0.6,
+                             title.position = "top", title.hjust = 0.5)
+  ) +
   scale_x_log10() +
-  labs(title = "Spatial vs temporal variation across surveys",
-       subtitle = "Higher = more interview months; further right = more H3-7 locations",
-       x = "Number of H3-7 locations (log scale)", y = "Number of interview months") +
-  theme_minimal(base_size = 11) +
+  labs(title = NULL,
+       subtitle = NULL,
+       x = "Number of geocoded locations (log scale)", y = "Number of interview months") +
+  theme_minimal(base_size = 14) +
   theme(legend.position = "bottom")
 
 ggsave(file.path(OUT_SAMPLE, "01a_3_spatiotemporal_variation.png"), p_scatter,
@@ -178,59 +186,76 @@ ggsave(file.path(OUT_SAMPLE, "01a_4_spatial_unit_size.png"), p_h3,
 # =============================================================================
 
 metric_levels <- c(
-  "Mean welfare (PPP/day)", "Median welfare (PPP/day)", "Gini",
-  "Poverty $3.00", "Poverty $4.20", "Poverty $8.30",
-  "Poverty gap $3.00", "Prosperity gap"
-)
-metric_colors <- c(
-  "Mean welfare (PPP/day)" = "#2166ac", "Median welfare (PPP/day)" = "#67a9cf",
-  "Gini" = "#b2182b",
-  "Poverty $3.00" = "#d6604d", "Poverty $4.20" = "#f4a582", "Poverty $8.30" = "#fddbc7",
-  "Poverty gap $3.00" = "#e08214", "Prosperity gap" = "#8073ac"
+  "Mean welfare\n(PPP/day)", "Median welfare\n(PPP/day)", "Gini",
+  "Poverty $3.00", "Poverty $8.30"
 )
 
-welfare_long <- welfare_agg |>
-  select(code, economy, year, label,
-         `Mean welfare (PPP/day)` = welfare_mean,
-         `Median welfare (PPP/day)` = welfare_median,
-         `Gini` = welfare_gini,
-         `Poverty $3.00` = headcount_ratio_300,
-         `Poverty $4.20` = headcount_ratio_420,
-         `Poverty $8.30` = headcount_ratio_830,
-         `Poverty gap $3.00` = gap_300,
-         `Prosperity gap` = welfare_prosperity_gap) |>
-  pivot_longer(-c(code, economy, year, label), names_to = "metric", values_to = "value") |>
-  mutate(metric = factor(metric, levels = metric_levels))
+# Wide form for sorting, long form for plotting
+welfare_wide <- welfare_agg |>
+  filter(code %in% multi_survey$code) |>
+  select(code, economy, year,
+         `Mean welfare\n(PPP/day)`   = welfare_mean,
+         `Median welfare\n(PPP/day)` = welfare_median,
+         `Gini`                      = welfare_gini,
+         `Poverty $3.00`             = headcount_ratio_300,
+         `Poverty $8.30`             = headcount_ratio_830)
 
-multi_codes <- multi_survey$code
+# Country order: mean welfare in the LATEST available survey wave per country
+country_order <- welfare_wide |>
+  summarise(latest_year = max(year), .by = economy) |>
+  left_join(
+    welfare_wide |> select(economy, year, latest_mean = `Mean welfare\n(PPP/day)`),
+    by = c("economy", "latest_year" = "year")
+  ) |>
+  arrange(latest_mean) |>
+  pull(economy)
 
-welfare_multi <- welfare_long |>
-  filter(code %in% multi_codes)
-
-p_welfare <- ggplot(welfare_multi, aes(x = factor(year), y = value, fill = metric)) +
-  geom_col(width = 0.6, alpha = 0.85) +
-  facet_grid(metric ~ economy, scales = "free", switch = "y") +
-  scale_fill_manual(values = metric_colors, guide = "none") +
-  labs(title = "Welfare metrics across surveys — countries with 2+ waves",
-       x = NULL, y = NULL) +
-  theme_minimal(base_size = 10) +
-  theme(
-    strip.text.y.left = element_text(angle = 0, hjust = 1, size = 8),
-    strip.text.x = element_text(size = 8),
-    axis.text.x = element_text(angle = 45, hjust = 1, size = 7),
-    panel.grid.major.x = element_blank()
+welfare_long <- welfare_wide |>
+  pivot_longer(-c(code, economy, year), names_to = "metric", values_to = "value") |>
+  mutate(
+    metric  = factor(metric, levels = metric_levels),
+    economy = factor(economy, levels = country_order)
   )
 
+# Build a light-to-dark navy gradient across survey years
+all_years <- sort(unique(welfare_long$year))
+
+p_welfare <- ggplot(welfare_long, aes(x = value, y = economy)) +
+  geom_line(aes(group = economy), colour = "grey70", linewidth = 0.4) +
+  geom_point(aes(colour = year), size = 3, alpha = 0.9) +
+  facet_wrap(~ metric, nrow = 1, scales = "free_x") +
+  scale_colour_gradient(
+    low = "#a8c8e8", high = "#0a2a4a",
+    name = "Survey year",
+    breaks = all_years,
+    labels = all_years,
+    guide = guide_colourbar(barwidth = 70, barheight = 0.7, title.position = "top",
+                             title.hjust = 0.5)
+  ) +
+  labs(title = NULL, x = NULL, y = NULL) +
+  theme_minimal(base_size = 18) +
+  theme(
+    strip.text         = element_text(size = 16, face = "bold"),
+    axis.text.y        = element_text(size = 16),
+    axis.text.x        = element_text(size = 16, angle = 30, hjust = 1),
+    panel.grid.major.y = element_line(colour = "grey92"),
+    panel.grid.major.x = element_line(colour = "grey88"),
+    panel.grid.minor   = element_blank(),
+    legend.position    = "bottom",
+    panel.spacing.x    = unit(1.2, "lines")
+  )
+
+n_countries <- length(country_order)
+
 ggsave(file.path(OUT_SAMPLE, "01a_5_welfare_comparison.png"), p_welfare,
-       width = min(20, 2.5 * length(multi_codes)), height = 12, dpi = 150,
+       width = 22, height = max(6, n_countries * 0.28 + 2), dpi = 150,
        bg = "white", limitsize = FALSE)
 
 # =============================================================================
 # SECTION 6 — POLICY VARIABLE COVERAGE
 # =============================================================================
 
-policy_vars <- c("electricity", "imp_wat_rec", "imp_san_rec", "imp_wat_san_rec",
-                 "ttime_health", "internet", "cellphone", "piped", "piped_to_prem")
+policy_vars <- c("electricity", "imp_wat_san_rec", "ttime_health")
 
 policy_coverage <- survey_stats |>
   filter(variable %in% policy_vars) |>
@@ -239,45 +264,372 @@ policy_coverage <- survey_stats |>
   mutate(
     loc_coverage = ifelse(with_loc_n > 0, 1 - with_loc_pct_missing / 100, 0),
     available = loc_coverage >= 0.90,
+    low_coverage = pct_missing > 10,
     label = paste0(code, " ", year)
   )
 
-# Color = mean normalized per variable; text = mean value; × = <90% coverage among located obs
-policy_plot_df <- policy_coverage |>
-  mutate(value = ifelse(available, mean, NA_real_)) |>
-  group_by(variable) |>
-  mutate(
-    var_min = min(value, na.rm = TRUE),
-    var_max = max(value, na.rm = TRUE),
-    value_norm = ifelse(is.na(value), NA_real_,
-                        (value - var_min) / pmax(var_max - var_min, 1e-9))
-  ) |>
-  ungroup() |>
-  mutate(text_label = case_when(
-    !available  ~ "×",
-    mean <= 1   ~ sprintf("%.0f%%", mean * 100),
-    TRUE        ~ sprintf("%.0f", round(mean))
-  ))
+# Dot plot — multi-survey countries only, one facet per policy variable
+policy_var_labels <- c(
+  electricity    = "Electricity access",
+  imp_wat_san_rec = "Improved water & sanitation",
+  ttime_health   = "Travel time to health (min)"
+)
 
-p_policy <- ggplot(policy_plot_df, aes(x = variable, y = fct_rev(label), fill = value_norm)) +
-  geom_tile(color = "white", linewidth = 0.3) +
-  geom_text(aes(label = text_label), size = 2.3, color = "grey20") +
-  scale_fill_viridis_c(option = "viridis", na.value = "grey90",
-                        name = "Mean\n(per-variable\nscale)",
-                        labels = scales::percent_format(accuracy = 1)) +
-  labs(title = "Policy variables",
-       subtitle = "× = <90% coverage among geocoded obs",
-       x = NULL, y = NULL) +
-  theme_minimal(base_size = 10) +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1),
-        panel.grid = element_blank())
+# Country order: mean electricity (first variable) in latest survey wave
+policy_country_order <- policy_coverage |>
+  filter(code %in% multi_codes, variable == "electricity") |>
+  summarise(latest_year = max(year), .by = economy) |>
+  left_join(
+    policy_coverage |> filter(variable == "electricity") |>
+      select(economy, year, latest_mean = mean),
+    by = c("economy", "latest_year" = "year")
+  ) |>
+  arrange(latest_mean) |>
+  pull(economy)
+
+# Fallback: countries present in multi_codes but missing electricity data
+all_multi_economies <- welfare_agg |>
+  filter(code %in% multi_codes) |>
+  distinct(economy) |>
+  pull(economy)
+
+policy_country_order <- c(
+  setdiff(all_multi_economies, policy_country_order),
+  policy_country_order
+)
+
+policy_plot_df <- policy_coverage |>
+  filter(code %in% multi_codes) |>
+  mutate(
+    variable = factor(variable, levels = names(policy_var_labels),
+                      labels = policy_var_labels),
+    economy  = factor(economy, levels = policy_country_order)
+  )
+
+all_policy_years <- sort(unique(policy_plot_df$year))
+
+p_policy <- ggplot(policy_plot_df, aes(x = mean, y = economy)) +
+  geom_line(aes(group = economy), colour = "grey70", linewidth = 0.4) +
+  # all dots filled by year gradient
+  geom_point(aes(fill = year), colour = "transparent", size = 3.5, alpha = 0.9, shape = 21) +
+  # red outline only for low-coverage points
+  geom_point(
+    data = filter(policy_plot_df, low_coverage),
+    colour = "red", fill = NA, size = 3.5, shape = 21, stroke = 1
+  ) +
+  facet_wrap(~ variable, nrow = 1, scales = "free_x") +
+  scale_fill_gradient(
+    low = "#a8c8e8", high = "#0a2a4a",
+    name = "Survey year",
+    breaks = all_policy_years,
+    labels = all_policy_years,
+    guide = guide_colourbar(barwidth = 50, barheight = 0.7,
+                             title.position = "top", title.hjust = 0.5)
+  ) +
+  labs(
+    title = NULL, x = NULL, y = NULL,
+    caption = "Red outline = >10% observations missing values"
+  ) +
+  theme_minimal(base_size = 16) +
+  theme(
+    strip.text          = element_text(size = 14, face = "bold"),
+    axis.text.y         = element_text(size = 14),
+    axis.text.x         = element_text(size = 14, angle = 30, hjust = 1),
+    panel.grid.major.y  = element_line(colour = "grey92"),
+    panel.grid.major.x  = element_line(colour = "grey88"),
+    panel.grid.minor    = element_blank(),
+    legend.position     = "bottom",
+    panel.spacing.x     = unit(1.2, "lines"),
+    plot.caption        = element_text(size = 10, colour = "grey40", hjust = 0)
+  )
+
+n_policy_countries <- length(policy_country_order)
 
 ggsave(file.path(OUT_SAMPLE, "01a_6_policy_coverage.png"), p_policy,
-       width = 10, height = max(6, nrow(welfare_agg) * 0.2 + 2), dpi = 150,
-       bg = "white")
+       width = 16, height = max(6, n_policy_countries * 0.28 + 2), dpi = 150,
+       bg = "white", limitsize = FALSE)
 
 # =============================================================================
-# SECTION 7 — POLICY SCENARIOS SUMMARY TABLE
+# SECTION 7 — WEATHER VARIABLES COMPARISON
+# =============================================================================
+
+wx_stats <- read_csv(file.path(OUT_DIR, "weather_stats/weather_stats.csv"), show_col_types = FALSE)
+
+wx_var_groups <- list(
+  temp = c(
+    t     = "Temperature mean (°C)",
+    tr    = "Tropical nights (Tmin >20°C)",
+    tx35  = "Days max >35°C"
+  ),
+  wet = c(
+    r      = "Precipitation (mm)",
+    rx5day = "Max 5-day precip (mm)",
+    spei6  = "SPEI-6 (drought index)"
+  )
+)
+
+wx_period_labels <- c(
+  "1to12m" = "12 month reference period",
+  "1to3m"  = "3 month reference period"
+)
+
+# Helper: build and save one weather dot plot
+make_wx_plot <- function(group_name, ref_per, var_labels) {
+
+  wx_survey <- wx_stats |>
+    filter(
+      ref_period     == ref_per,
+      temporal_agg   == "Mean",
+      transformation == "None",
+      !is.na(year),
+      code           %in% multi_codes,
+      variable       %in% names(var_labels)
+    ) |>
+    select(code, economy, year, variable, mean)
+
+  wx_ref <- wx_stats |>
+    filter(
+      ref_period     == ref_per,
+      temporal_agg   == "Mean",
+      transformation == "None",
+      is.na(year),
+      code           %in% multi_codes,
+      variable       %in% names(var_labels)
+    ) |>
+    select(code, economy, variable, ref_mean = mean)
+
+  # Country order: first variable in the group, latest wave
+  order_var <- names(var_labels)[1]
+
+  wx_country_order <- wx_survey |>
+    filter(variable == order_var) |>
+    summarise(latest_year = max(year), .by = economy) |>
+    left_join(
+      wx_survey |> filter(variable == order_var) |> select(economy, year, latest_mean = mean),
+      by = c("economy", "latest_year" = "year")
+    ) |>
+    arrange(latest_mean) |>
+    pull(economy)
+
+  # Fallback countries missing the anchor variable
+  wx_country_order <- c(
+    setdiff(
+      welfare_agg |> filter(code %in% multi_codes) |> distinct(economy) |> pull(economy),
+      wx_country_order
+    ),
+    wx_country_order
+  )
+
+  all_wx_years <- sort(unique(wx_survey$year))
+
+  wx_plot_df <- wx_survey |>
+    mutate(
+      variable = factor(variable, levels = names(var_labels), labels = var_labels),
+      economy  = factor(economy, levels = wx_country_order)
+    )
+
+  wx_ref_df <- wx_ref |>
+    mutate(
+      variable = factor(variable, levels = names(var_labels), labels = var_labels),
+      economy  = factor(economy, levels = wx_country_order)
+    )
+
+  n_countries <- length(wx_country_order)
+
+  p <- ggplot(wx_plot_df, aes(x = mean, y = economy)) +
+    geom_line(aes(group = economy), colour = "grey70", linewidth = 0.4) +
+    geom_point(aes(fill = year), colour = "transparent", size = 3.5, alpha = 0.9, shape = 21) +
+    geom_point(
+      data = wx_ref_df,
+      aes(x = ref_mean), shape = "|", size = 6, colour = "grey30", alpha = 0.8
+    ) +
+    facet_wrap(~ variable, nrow = 1, scales = "free_x") +
+    scale_fill_gradient(
+      low = "#a8c8e8", high = "#0a2a4a",
+      name = "Survey year",
+      breaks = all_wx_years,
+      labels = all_wx_years,
+      guide = guide_colourbar(barwidth = 50, barheight = 0.7,
+                               title.position = "top", title.hjust = 0.5)
+    ) +
+    labs(
+      title    = paste0(wx_period_labels[ref_per]),
+      x = NULL, y = NULL,
+      caption  = "Filled circles = survey wave mean  |  Grey tick ( | ) = climate reference period mean (1991–2020)"
+    ) +
+    theme_minimal(base_size = 16) +
+    theme(
+      strip.text         = element_text(size = 16, face = "bold"),
+      axis.text.y        = element_text(size = 16),
+      axis.text.x        = element_text(size = 16, angle = 30, hjust = 1),
+      panel.grid.major.y = element_line(colour = "grey92"),
+      panel.grid.major.x = element_line(colour = "grey88"),
+      panel.grid.minor   = element_blank(),
+      legend.position    = "bottom",
+      panel.spacing.x    = unit(1.0, "lines"),
+      plot.caption       = element_text(size = 16, colour = "grey40", hjust = 0),
+      plot.title         = element_text(size = 16, face = "bold")
+    )
+
+  fname <- sprintf("01a_7_weather_%s_%s.png", group_name,
+                   if (ref_per == "1to12m") "annual" else "seasonal")
+
+  ggsave(file.path(OUT_SAMPLE, fname), p,
+         width  = 3.5 * length(var_labels) + 10,
+         height = max(6, n_countries * 0.28 + 2),
+         dpi    = 150, bg = "white", limitsize = FALSE)
+}
+
+# Generate all 4 plots
+for (grp in names(wx_var_groups)) {
+  for (per in names(wx_period_labels)) {
+    make_wx_plot(grp, per, wx_var_groups[[grp]])
+  }
+}
+
+# =============================================================================
+# SECTION 8 — WEATHER DISTRIBUTION: SURVEY vs REFERENCE PERIOD
+# =============================================================================
+
+# Variables to show (same selections as Section 7)
+wx_dist_groups <- list(
+  temp = c(
+    t     = "Temperature mean (°C)",
+    tr    = "Tropical nights (Tmin >20°C)",
+    tx35  = "Days max >35°C"
+  ),
+  wet = c(
+    r      = "Precipitation (mm)",
+    rx5day = "Max 5-day precip (mm)",
+    spei6  = "SPEI-6 (drought index)"
+  )
+)
+
+pct_cols <- c("p10", "p20", "p30", "p40", "p50", "p60", "p70", "p80", "p90")
+
+make_wx_dist_plot <- function(group_name, ref_per, var_labels) {
+
+  # Reference period rows (year is NA)
+  dist_ref <- wx_stats |>
+    filter(
+      ref_period     == ref_per,
+      temporal_agg   == "Mean",
+      transformation == "None",
+      is.na(year),
+      code           %in% multi_codes,
+      variable       %in% names(var_labels)
+    ) |>
+    select(code, economy, variable, all_of(pct_cols)) |>
+    mutate(source = "Reference period (1991–2020)")
+
+  # Survey rows: pool across waves per country by averaging percentiles
+  dist_survey <- wx_stats |>
+    filter(
+      ref_period     == ref_per,
+      temporal_agg   == "Mean",
+      transformation == "None",
+      !is.na(year),
+      code           %in% multi_codes,
+      variable       %in% names(var_labels)
+    ) |>
+    summarise(
+      across(all_of(pct_cols), \(x) mean(x, na.rm = TRUE)),
+      .by = c(code, economy, variable)
+    ) |>
+    mutate(source = "Survey (pooled waves)")
+
+  dist_all <- bind_rows(dist_ref, dist_survey)
+
+  # Country order: survey p50 of first variable, ascending
+  order_var <- names(var_labels)[1]
+  country_order <- dist_survey |>
+    filter(variable == order_var) |>
+    arrange(p50) |>
+    pull(economy)
+
+  country_order <- c(
+    setdiff(
+      welfare_agg |> filter(code %in% multi_codes) |> distinct(economy) |> pull(economy),
+      country_order
+    ),
+    country_order
+  )
+
+  dist_plot <- dist_all |>
+    mutate(
+      variable = factor(variable, levels = names(var_labels), labels = var_labels),
+      economy  = factor(economy, levels = country_order),
+      # small y-offset so reference and survey don't sit exactly on top
+      y_offset = if_else(source == "Reference period (1991–2020)", -0.18, 0.18)
+    )
+
+  n_countries <- length(country_order)
+
+  p <- ggplot(dist_plot, aes(y = as.numeric(economy) + y_offset, colour = source)) +
+    # thin line: p10–p90
+    geom_segment(
+      aes(x = p10, xend = p90,
+          yend = as.numeric(economy) + y_offset),
+      linewidth = 0.6, alpha = 0.6
+    ) +
+    # thick line: p30–p70
+    geom_segment(
+      aes(x = p30, xend = p70,
+          yend = as.numeric(economy) + y_offset),
+      linewidth = 2.2, alpha = 0.75
+    ) +
+    # median dot
+    geom_point(aes(x = p50), size = 2.2, alpha = 0.95) +
+    facet_wrap(~ variable, nrow = 1, scales = "free_x") +
+    scale_y_continuous(
+      breaks = seq_along(country_order),
+      labels = country_order,
+      expand = expansion(add = 0.8)
+    ) +
+    scale_colour_manual(
+      values = c(
+        "Survey (pooled waves)"        = "#0a2a4a",
+        "Reference period (1991–2020)" = "#b0b0b0"
+      ),
+      name = NULL
+    ) +
+    labs(
+      title   = wx_period_labels[ref_per],
+      x = NULL, y = NULL,
+      caption = "Dot = median (p50)  |  Thick bar = p30–p70  |  Thin line = p10–p90  |  Navy = survey (pooled)  |  Grey = reference period"
+    ) +
+    theme_minimal(base_size = 16) +
+    theme(
+      strip.text         = element_text(size = 16, face = "bold"),
+      axis.text.y        = element_text(size = 16),
+      axis.text.x        = element_text(size = 16, angle = 30, hjust = 1),
+      panel.grid.major.y = element_line(colour = "grey92"),
+      panel.grid.major.x = element_line(colour = "grey88"),
+      panel.grid.minor   = element_blank(),
+      legend.position    = "bottom",
+      legend.text        = element_text(size = 16),
+      panel.spacing.x    = unit(1.0, "lines"),
+      plot.caption       = element_text(size = 16, colour = "grey40", hjust = 0),
+      plot.title         = element_text(size = 16, face = "bold")
+    )
+
+  fname <- sprintf("01a_8_wx_dist_%s_%s.png", group_name,
+                   if (ref_per == "1to12m") "annual" else "seasonal")
+
+  ggsave(file.path(OUT_SAMPLE, fname), p,
+         width  = 3.5 * length(var_labels) + 10,
+         height = max(6, n_countries * 0.35 + 2),
+         dpi    = 150, bg = "white", limitsize = FALSE)
+}
+
+for (grp in names(wx_dist_groups)) {
+  for (per in names(wx_period_labels)) {
+    make_wx_dist_plot(grp, per, wx_dist_groups[[grp]])
+  }
+}
+
+# =============================================================================
+# SECTION 9 — POLICY SCENARIOS SUMMARY TABLE
 # =============================================================================
 
 policy_scenario_table <- tribble(
@@ -313,7 +665,7 @@ cat("\n=== Policy scenario feasibility by country ===\n")
 print(feasibility_wide, n = Inf)
 
 # =============================================================================
-# SECTION 8 — GENERATE MARKDOWN SUMMARY
+# SECTION 9 — GENERATE MARKDOWN SUMMARY
 # =============================================================================
 
 # Collect summary stats for the markdown

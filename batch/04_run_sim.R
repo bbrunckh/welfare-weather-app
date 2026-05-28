@@ -31,8 +31,8 @@ invisible(lapply(list.files("batch/R", pattern = "\\.R$", full.names = TRUE), so
 # "databricks" -> credentials from .Renviron (DATABRICKS_HOST, etc.)
 CONNECTION_TYPE <- "local"
 DATA_DIR        <- Sys.getenv("WISEAPP_DATA_PATH")
-OUT_DIR         <- Sys.getenv("WISEAPP_RESULTS_PATH")
-# OUT_DIR         <- "dev/outputs"
+# OUT_DIR         <- Sys.getenv("WISEAPP_RESULTS_PATH")
+OUT_DIR         <- "dev/outputs"
 
 # ---- Unit of analysis -------------------------------------------------------
 UNIT <- "hh"   # "hh", "ind", or "firm"
@@ -42,10 +42,10 @@ POOL_COUNTRIES <- FALSE   # TRUE = one pooled model; FALSE = per-country
 
 # ---- Country / survey sample (mod_1_01) [GRID when !POOL_COUNTRIES] --------
 # NULL = all available; c(...) = subset
-COUNTRY_FILTER <- c(
+COUNTRY_FILTER <- c("SEN"
   # "BEN", "BFA", "BRA", "CIV", "COL", "GMB", "GNB", "GTM", "IND", "IRN", "LKA",
   # "MLI", "MRT", "MWI", "NER", "SEN", "TCD", "TGO", 
-  "TJK", "VNM", "ZMB"
+  # "TJK", "VNM", "ZMB"
 )
 
 # ---- Outcome variable (mod_1_03) --------------------------------------------
@@ -68,9 +68,14 @@ CUSTOM_SPEI_BREAKS <- c(-1, -0.5, 0, 0.5)   # SPEI
     weather_transformation = "None", binning_method = "Custom", custom_breaks = brks
   )), v)), sprintf("%s_1to%dm_binn_cust", v, re))
 
-WEATHER_SPECS <- c(
-  expand_weather_specs("t",     c(3L), c("binned"), "None", 1L),
-  expand_weather_specs("spei6", c(3L), c("binned"), "None", 1L)
+WEATHER_SPECS <- list(
+    t_r_1to3m_binn = list(
+      t = list(ref_start = 1L, ref_end = 3L, transformation = "binned", weather_transformation = "None", binning_method = "Equal frequency", n_bins = 10),
+      r = list(ref_start = 1L, ref_end = 3L, transformation = "binned", weather_transformation = "None", binning_method = "Equal frequency", n_bins = 10)
+    )
+  # expand_weather_specs("t", c(3L), c("binned"), "None", 1L)
+  # expand_weather_specs("rx5day", c(3L), c("binned"), "None", 1L)
+  # expand_weather_specs("spei6", c(3L), c("binned"), "None", 1L)
   # .mk_cust_spec("t",      3L, CUSTOM_T_BREAKS),
   # .mk_cust_spec("spei6",  3L, CUSTOM_SPEI_BREAKS)
 )
@@ -155,7 +160,7 @@ HIST_YEARS <- c(1991L, 2020L)
 # ---- Future projection periods (up to 3) ------------------------------------
 # Each is a 2-integer vector c(start_year, end_year), or NULL to skip.
 FUT_PERIOD_1 <- c(2025L, 2035L)
-FUT_PERIOD_2 <- NULL   # e.g. c(2045L, 2055L)
+FUT_PERIOD_2 <- c(2040L, 2060L)  # e.g. c(2045L, 2055L)
 FUT_PERIOD_3 <- NULL   # e.g. c(2070L, 2080L)
 
 # ---- Climate scenarios -------------------------------------------------------
@@ -268,7 +273,7 @@ POLICY_SCENARIOS <- list(
     infra   = modifyList(.infra_off, list(elec_universal = TRUE)),
     digital = .digital_off,
     labor   = .labor_off
-  ),
+  )
 
   # imp_wat_universal = list(
   #   policy_keys = "B",              # adds weather x imp_wat_rec interaction
@@ -286,36 +291,36 @@ POLICY_SCENARIOS <- list(
   #   labor   = .labor_off
   # ),
 
-  imp_wat_san_universal = list(
-    policy_keys = "I",              # adds weather x imp_wat_san_rec interaction
-    sp      = .sp_off,
-    infra   = modifyList(.infra_off, list(imp_wat_san_universal = TRUE)),
-    digital = .digital_off,
-    labor   = .labor_off
-  ),
+  # imp_wat_san_universal = list(
+  #   policy_keys = "I",              # adds weather x imp_wat_san_rec interaction
+  #   sp      = .sp_off,
+  #   infra   = modifyList(.infra_off, list(imp_wat_san_universal = TRUE)),
+  #   digital = .digital_off,
+  #   labor   = .labor_off
+  # )
 
-    health15min = list(
-    policy_keys = "D",              # adds weather x ttime_health interaction
-    sp      = .sp_off,
-    infra   = modifyList(.infra_off, list(health_mode = "max", health_travel_max = 15)),
-    digital = .digital_off,
-    labor   = .labor_off
-  ),
+  #   health15min = list(
+  #   policy_keys = "D",              # adds weather x ttime_health interaction
+  #   sp      = .sp_off,
+  #   infra   = modifyList(.infra_off, list(health_mode = "max", health_travel_max = 15)),
+  #   digital = .digital_off,
+  #   labor   = .labor_off
+  # ),
 
-  sp_p10_bottom40 = list(
-    policy_keys = character(0),     # SP only — no model refit needed
-    sp      = modifyList(.sp_off, list(
-      transfer_pctile     = 10,     # resolve transfer_amount_usd from welfare P10
-      transfer_n_payments = 12L,
-      targeting            = "exante_poor",
-      targeting_threshold  = 40,
-      inclusion_error_pct  = 30,
-      exclusion_error_pct  = 30
-    )),
-    infra   = .infra_off,
-    digital = .digital_off,
-    labor   = .labor_off
-  )
+  # sp_p5_bottom40 = list(
+  #   policy_keys = character(0),     # SP only — no model refit needed
+  #   sp      = modifyList(.sp_off, list(
+  #     transfer_pctile     = 5,     # resolve transfer_amount_usd from welfare P5
+  #     transfer_n_payments = 12L,
+  #     targeting            = "exante_poor",
+  #     targeting_threshold  = 40,
+  #     inclusion_error_pct  = 30,
+  #     exclusion_error_pct  = 30
+  #   )),
+  #   infra   = .infra_off,
+  #   digital = .digital_off,
+  #   labor   = .labor_off
+  # )
 )
 
 # Auto-derive interaction variables required by each policy scenario.
@@ -326,7 +331,7 @@ POLICY_SCENARIOS <- list(
 # share in the baseline survey (e.g., 0.95 = skip "universal electricity" if
 # electricity access is already >= 95%). Set to NULL to disable.
 POLICY_BASELINE_THRESHOLD <- 0.95
-POLICY_COVERAGE_THRESHOLD <- 0.9
+POLICY_COVERAGE_THRESHOLD <- 0
 
 POLICY_INTERACTION_MAP <- list()   # pol_name → interaction var (or "noInter")
 for (.pn in names(POLICY_SCENARIOS)) {
