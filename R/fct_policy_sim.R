@@ -195,17 +195,38 @@ policy_placeholder_tag <- function(category_label, candidate_df) {
 #' @param sp      Named list returned by \code{mod_3_01_sp_server()}.
 #' @param digital Named list returned by \code{mod_3_03_digital_server()}.
 #' @param labor   Named list returned by \code{mod_3_04_labor_server()}.
+#' @param education Named list returned by \code{mod_3_05_education_server()}.
+#' @param model_vars Character vector of variable / term names in the current
+#'   Step 1 model (covariates and interactions). When supplied, covariate
+#'   levers only mutate columns that appear in the model — a variable dropped
+#'   from Step 1 leaves the survey untouched. When \code{NULL} (the default)
+#'   no gating is applied (legacy behaviour).
 #'
 #' @return The modified survey data frame.
 #' @export
 apply_policy_to_svy <- function(svy,
-                                infra   = NULL,
-                                sp      = NULL,
-                                digital = NULL,
-                                labor   = NULL,
+                                infra     = NULL,
+                                sp        = NULL,
+                                digital   = NULL,
+                                labor     = NULL,
+                                education = NULL,
+                                model_vars = NULL,
                                 analysis_unit = "hh") {
   if (is.null(svy)) return(svy)
   cols <- names(svy)
+
+  # Columns eligible for covariate-lever manipulation. A lever whose variable
+  # has been removed from the Step 1 model (its UI control is hidden) must not
+  # mutate the survey, otherwise the diagnostics tab would surface phantom
+  # "manipulated" variables that the model — and hence the Results and
+  # Decomposition tabs — ignore. Matching mirrors the lever modules' show_*
+  # logic (substring match against model term names). SP transfers act on
+  # `welfare` (the outcome, not a covariate) and are intentionally not gated.
+  lever_cols <- if (is.null(model_vars)) {
+    cols
+  } else {
+    Filter(function(v) any(grepl(v, model_vars, ignore.case = TRUE)), cols)
+  }
 
   # Infrastructure: only apply if user has specified non-zero changes
   if (!is.null(infra)) {
@@ -227,49 +248,49 @@ apply_policy_to_svy <- function(svy,
 
 
     if (has_infra_change) {
-      if ("electricity" %in% cols) {
+      if ("electricity" %in% lever_cols) {
         svy$electricity <- .apply_binary_access(
           svy$electricity,
           infra$elec_universal,
           infra$elec_access_change_pct
         )
       }
-      if ("imp_wat_rec" %in% cols) {
+      if ("imp_wat_rec" %in% lever_cols) {
         svy$imp_wat_rec <- .apply_binary_access(
           svy$imp_wat_rec,
           infra$water_universal,
           infra$water_access_change_pct
         )
       }
-      if ("imp_san_rec" %in% cols) {
+      if ("imp_san_rec" %in% lever_cols) {
         svy$imp_san_rec <- .apply_binary_access(
           svy$imp_san_rec,
           infra$sanitation_universal,
           infra$sanitation_access_change_pct
         )
       }
-      if ("piped" %in% cols) {
+      if ("piped" %in% lever_cols) {
         svy$piped <- .apply_binary_access(
           svy$piped,
           infra$piped_universal,
           infra$piped_access_change_pct
         )
       }
-      if ("piped_to_prem" %in% cols) {
+      if ("piped_to_prem" %in% lever_cols) {
         svy$piped_to_prem <- .apply_binary_access(
           svy$piped_to_prem,
           infra$piped_to_prem_universal,
           infra$piped_to_prem_access_change_pct
         )
       }
-      if ("imp_wat_san_rec" %in% cols) {
+      if ("imp_wat_san_rec" %in% lever_cols) {
         svy$imp_wat_san_rec <- .apply_binary_access(
           svy$imp_wat_san_rec,
           infra$imp_wat_san_universal,
           infra$imp_wat_san_access_change_pct
         )
       }
-      if ("ttime_health" %in% cols) {
+      if ("ttime_health" %in% lever_cols) {
         svy$ttime_health <- .apply_health_travel(
           svy$ttime_health,
           infra$health_mode,
@@ -288,18 +309,52 @@ apply_policy_to_svy <- function(svy,
                            (!is.null(digital$mobile_access_change_pct) && digital$mobile_access_change_pct != 0))
 
     if (has_digital_change) {
-      if ("internet" %in% cols) {
+      if ("internet" %in% lever_cols) {
         svy$internet <- .apply_binary_access(
           svy$internet,
           digital$internet_universal,
           digital$internet_access_change_pct
         )
       }
-      if ("cellphone" %in% cols) {
+      if ("cellphone" %in% lever_cols) {
         svy$cellphone <- .apply_binary_access(
           svy$cellphone,
           digital$mobile_universal,
           digital$mobile_access_change_pct
+        )
+      }
+    }
+  }
+
+  # Education: only apply if user has specified non-zero changes
+  if (!is.null(education)) {
+    has_education_change <- (isTRUE(education$primary_universal) ||
+                             (!is.null(education$primary_access_change_pct) && education$primary_access_change_pct != 0)) ||
+                            (isTRUE(education$secondary_universal) ||
+                             (!is.null(education$secondary_access_change_pct) && education$secondary_access_change_pct != 0)) ||
+                            (isTRUE(education$postsec_universal) ||
+                             (!is.null(education$postsec_access_change_pct) && education$postsec_access_change_pct != 0))
+
+    if (has_education_change) {
+      if ("educ_com1_hh" %in% lever_cols) {
+        svy$educ_com1_hh <- .apply_binary_access(
+          svy$educ_com1_hh,
+          education$primary_universal,
+          education$primary_access_change_pct
+        )
+      }
+      if ("educ_com2_hh" %in% lever_cols) {
+        svy$educ_com2_hh <- .apply_binary_access(
+          svy$educ_com2_hh,
+          education$secondary_universal,
+          education$secondary_access_change_pct
+        )
+      }
+      if ("educ_com3_hh" %in% lever_cols) {
+        svy$educ_com3_hh <- .apply_binary_access(
+          svy$educ_com3_hh,
+          education$postsec_universal,
+          education$postsec_access_change_pct
         )
       }
     }
@@ -316,7 +371,7 @@ apply_policy_to_svy <- function(svy,
       # Requires all three employment status columns to be present
       emp_change <- (labor$employment_change_pp %||% 0) / 100
       if (emp_change != 0 && all(c("employed", "selfemployed", "unemployed") %in%
-          cols)) {
+          lever_cols)) {
       # Find unemployed individuals and current ratio of employed/selfemployed
       unemp_idx <- which(svy$unemployed == 1L & !is.na(svy$unemployed))
       employed_idx <- which(svy$employed == 1L & !is.na(svy$employed))
@@ -367,7 +422,7 @@ apply_policy_to_svy <- function(svy,
 
     # Sectoral composition: minimize reallocation to achieve target percentages
     # Only move workers from sectors exceeding their target
-    if (all(c("employed", "selfemployed", "agriculture", "industry", "services") %in% cols)) {
+    if (all(c("employed", "selfemployed", "agriculture", "industry", "services") %in% lever_cols)) {
       working <- (svy$employed == 1L | svy$selfemployed == 1L) &
                  !is.na(svy$employed) & !is.na(svy$selfemployed)
 

@@ -6,7 +6,7 @@
 # Called by:
 #   - mod_2_01_weathersim.R (via fct_run_simulation)
 #   - mod_2_02_results.R    (hist_aggregate_choices, combine_ensemble_results)
-#   - mod_3_06_results.R    (apply_deviation)
+#   - mod_3_07_results.R    (apply_deviation)
 #
 # Exports:
 #   resolve_agg_fn, resolve_band_q

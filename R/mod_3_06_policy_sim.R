@@ -1,4 +1,4 @@
-#' 3_05_policy_sim UI Function
+#' 3_06_policy_sim UI Function
 #'
 #' @description A shiny Module. Renders status banner for policy adjustments.
 #'
@@ -7,17 +7,46 @@
 #' @noRd
 #'
 #' @importFrom shiny NS tagList
-mod_3_05_policy_sim_ui <- function(id) {
+mod_3_06_policy_sim_ui <- function(id) {
   ns <- NS(id)
   tagList(
     uiOutput(ns("sim_status_ui"))
   )
 }
 
-#' 3_05_policy_sim Server Functions
+#' Collect the variable / term names referenced by a selected model
+#'
+#' Mirrors the `coeffs()` logic used by the policy lever modules: the union of
+#' all covariate roles plus interactions. Used to gate which covariate levers
+#' may mutate the survey in \code{apply_policy_to_svy()}.
+#'
+#' @param sm Selected-model list (or NULL).
+#' @return Character vector of term names, or NULL when `sm` is NULL.
+#' @noRd
+.model_term_names <- function(sm) {
+  if (is.null(sm)) return(NULL)
+  get_names <- function(x) {
+    if (is.null(x)) return(character(0))
+    nms <- names(x)
+    if (!is.null(nms) && any(nzchar(nms))) {
+      unique(nms[nzchar(nms)])
+    } else {
+      unique(as.character(unlist(x, use.names = FALSE)))
+    }
+  }
+  unique(c(
+    get_names(sm$individual_covariates),
+    get_names(sm$hh_covariates),
+    get_names(sm$firm_covariates),
+    get_names(sm$area_covariates),
+    get_names(sm$interactions)
+  ))
+}
+
+#' 3_06_policy_sim Server Functions
 #'
 #' Applies user-defined policy adjustments to survey covariates from the
-#' policy scenario modules (mod_3_01 through mod_3_04), then re-runs the
+#' policy scenario modules (mod_3_01 through mod_3_05), then re-runs the
 #' Step 2 simulation pipeline against both the baseline and policy-adjusted
 #' survey frames using the cached Step 2 weather, model fit and draws.
 #'
@@ -27,6 +56,10 @@ mod_3_05_policy_sim_ui <- function(id) {
 #' @param infra_scenario    Reactive named list from mod_3_02_infra_server().
 #' @param digital_scenario  Reactive named list from mod_3_03_digital_server().
 #' @param labor_scenario    Reactive named list from mod_3_04_labor_server().
+#' @param education_scenario Reactive list from mod_3_05_education_server().
+#' @param selected_model    Reactive list of the selected Step 1 model's
+#'   parameters. Used to restrict covariate levers to variables still in the
+#'   model, so dropped variables do not appear as manipulated in diagnostics.
 #' @param model_fit         Reactive list from mod_1 model fit.
 #' @param selected_weather  Reactive selected-weather metadata.
 #' @param hist_sim          Reactive Step 2 hist_sim list.
@@ -37,12 +70,14 @@ mod_3_05_policy_sim_ui <- function(id) {
 #'   policy_hist_sim/policy_saved_scenarios.
 #'
 #' @noRd
-mod_3_05_policy_sim_server <- function(id,
+mod_3_06_policy_sim_server <- function(id,
                                         survey_weather,
                                         sp_scenario        = reactive(NULL),
                                         infra_scenario     = reactive(NULL),
                                         digital_scenario   = reactive(NULL),
                                         labor_scenario     = reactive(NULL),
+                                        education_scenario = reactive(NULL),
+                                        selected_model     = reactive(NULL),
                                         model_fit          = reactive(NULL),
                                         selected_weather   = reactive(NULL),
                                         hist_sim           = reactive(NULL),
@@ -103,6 +138,8 @@ mod_3_05_policy_sim_server <- function(id,
             sp            = sp_scenario(),
             digital       = digital_scenario(),
             labor         = labor_scenario(),
+            education     = education_scenario(),
+            model_vars    = .model_term_names(selected_model()),
             analysis_unit = analysis_unit()
           )
           policy_svy_rv(svy_mod)

@@ -1,4 +1,4 @@
-#' 3_08_decomposition UI Function
+#' 3_09_decomposition UI Function
 #'
 #' @description A shiny Module. Renders the policy effect decomposition
 #'   visualizations: stacked bar chart by decile, beta curve (RIF only),
@@ -9,7 +9,7 @@
 #' @noRd
 #'
 #' @importFrom shiny NS tagList
-mod_3_08_decomposition_ui <- function(id) {
+mod_3_09_decomposition_ui <- function(id) {
   ns <- NS(id)
   tagList(
     shiny::uiOutput(ns("decomp_header_ui")),
@@ -52,7 +52,7 @@ mod_3_08_decomposition_ui <- function(id) {
   )
 }
 
-#' 3_08_decomposition Server Functions
+#' 3_09_decomposition Server Functions
 #'
 #' @param id Module id.
 #' @param decomp_result Reactive data frame from decompose_policy_effect().
@@ -61,7 +61,7 @@ mod_3_08_decomposition_ui <- function(id) {
 #' @param so Reactive selected outcome metadata.
 #'
 #' @noRd
-mod_3_08_decomposition_server <- function(id,
+mod_3_09_decomposition_server <- function(id,
                                            decomp_result     = reactive(NULL),
                                            decomp_scenarios  = reactive(list()),
                                            model_fit         = reactive(NULL),

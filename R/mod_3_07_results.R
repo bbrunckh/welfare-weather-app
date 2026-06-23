@@ -1,4 +1,4 @@
-#' 3_06_results UI Function
+#' 3_07_results UI Function
 #'
 #' @description A shiny Module. The Baseline and Policy results tabs are
 #'   inserted into the parent tabset on the first successful policy
@@ -9,11 +9,11 @@
 #' @noRd
 #'
 #' @importFrom shiny NS tagList
-mod_3_06_results_ui <- function(id) {
+mod_3_07_results_ui <- function(id) {
   tagList()
 }
 
-#' 3_06_results Server Functions
+#' 3_07_results Server Functions
 #'
 #' Renders Baseline and Policy results tabs in the Step 3 tabset, each a
 #' faithful copy of Step 2's Results UI bound to its own re-simulated
@@ -32,7 +32,7 @@ mod_3_06_results_ui <- function(id) {
 #' @param tabset_session           Shiny session for the parent tabset.
 #'
 #' @noRd
-mod_3_06_results_server <- function(id,
+mod_3_07_results_server <- function(id,
                                      baseline_hist_sim,
                                      baseline_saved_scenarios,
                                      policy_hist_sim,

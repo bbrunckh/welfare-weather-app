@@ -39,6 +39,11 @@ mod_3_scenario_ui <- function(id) {
             title   = "Labor market",
             content = mod_3_04_labor_ui(ns("labor")),
             open    = FALSE
+          ) |>
+          bs_append(
+            title   = "Education",
+            content = mod_3_05_education_ui(ns("education")),
+            open    = FALSE
           ),
         hr(),
         uiOutput(ns("run_policy_sim_ui"))
@@ -52,7 +57,7 @@ mod_3_scenario_ui <- function(id) {
             includeMarkdown(
               system.file("app/www/equation2.md", package = "wiseapp")
             ),
-            mod_3_05_policy_sim_ui(ns("policy_sim"))
+            mod_3_06_policy_sim_ui(ns("policy_sim"))
           )
         )
       )
@@ -62,7 +67,7 @@ mod_3_scenario_ui <- function(id) {
 
 #' 3_scenario Server Functions
 #'
-#' Orchestrates sub-modules 01-05.
+#' Orchestrates sub-modules 01-06.
 #'
 #' @param id               Module id.
 #' @param connection_params Reactive named list from `mod_0_overview_server()`.
@@ -171,15 +176,25 @@ mod_3_scenario_server <- function(id,
       survey_data   = survey_data,
       variable_list  = variable_list)
 
+    # ---- Education scenario ----------------------------------------------
+
+    s5 <- mod_3_05_education_server(
+      "education",
+      selected_model = selected_model,
+      survey_data   = survey_data,
+      variable_list  = variable_list)
+
     # ---- Policy adjustment module ----------------------------------------
 
-    s5 <- mod_3_05_policy_sim_server(
+    s6 <- mod_3_06_policy_sim_server(
       "policy_sim",
       survey_weather    = survey_weather,
       sp_scenario       = s1$sp_scenario,
       infra_scenario    = s2$infra_scenario,
       digital_scenario  = s3$digital_scenario,
       labor_scenario    = s4$labor_scenario,
+      education_scenario = s5$education_scenario,
+      selected_model    = selected_model,
       model_fit         = model_fit,
       selected_weather  = selected_weather,
       hist_sim          = hist_sim,
@@ -191,55 +206,55 @@ mod_3_scenario_server <- function(id,
     )
 
     # ---- Results tabs: Baseline & Policy (both re-simulated) -------------
-    s6 <- mod_3_06_results_server(
+    s7 <- mod_3_07_results_server(
       "results3",
-      baseline_hist_sim        = s5$baseline_hist_sim,
-      baseline_saved_scenarios = s5$baseline_saved_scenarios,
-      policy_hist_sim          = s5$policy_hist_sim,
-      policy_saved_scenarios   = s5$policy_saved_scenarios,
+      baseline_hist_sim        = s6$baseline_hist_sim,
+      baseline_saved_scenarios = s6$baseline_saved_scenarios,
+      policy_hist_sim          = s6$policy_hist_sim,
+      policy_saved_scenarios   = s6$policy_saved_scenarios,
       selected_hist            = selected_hist,
-      sim_run_id               = s5$sim_run_id,
+      sim_run_id               = s6$sim_run_id,
       tabset_id                = "step3_output_tabs",
       tabset_session           = session,
       residuals                = residuals
     )
 
     # ---- Diagnostics tab: before/after variable analysis ----------------
-    mod_3_07_diagnostics_server(
+    mod_3_08_diagnostics_server(
       "diagnostics",
-      baseline_svy   = s5$baseline_svy,
-      policy_svy     = s5$policy_svy,
-      sim_run_id     = s5$sim_run_id,
+      baseline_svy   = s6$baseline_svy,
+      policy_svy     = s6$policy_svy,
+      sim_run_id     = s6$sim_run_id,
       tabset_id      = "step3_output_tabs",
       tabset_session = session,
       analysis_unit  = analysis_unit
     )
 
     # ---- Decomposition tab: effect channels -----------------------------
-    mod_3_08_decomposition_server(
+    mod_3_09_decomposition_server(
       "decomposition",
-      decomp_result    = s5$decomp_result,
-      decomp_scenarios = s5$decomp_scenarios,
+      decomp_result    = s6$decomp_result,
+      decomp_scenarios = s6$decomp_scenarios,
       model_fit        = model_fit,
       variable_list    = variable_list,
       so            = reactive({
         hs <- hist_sim()
         if (!is.null(hs)) hs$so else NULL
       }),
-      show_coef_uncertainty = s6$show_coef_uncertainty
+      show_coef_uncertainty = s7$show_coef_uncertainty
     )
 
     # Wire decomposition tab into tabset on first successful run
     decomp_tab_added <- reactiveVal(FALSE)
-    observeEvent(s5$sim_run_id(), {
-      req(s5$sim_run_id() > 0, s5$decomp_result())
+    observeEvent(s6$sim_run_id(), {
+      req(s6$sim_run_id() > 0, s6$decomp_result())
       if (!decomp_tab_added()) {
         shiny::appendTab(
           inputId = "step3_output_tabs",
           shiny::tabPanel(
             title = "Decomposition",
             value = "decomposition_tab",
-            mod_3_08_decomposition_ui(ns("decomposition"))
+            mod_3_09_decomposition_ui(ns("decomposition"))
           ),
           session = session
         )
@@ -261,14 +276,14 @@ mod_3_scenario_server <- function(id,
     # ---- Run policy simulation on button click ---------------------------
 
     observeEvent(input$run_policy_sim, {
-      s5$run()
+      s6$run()
     })
 
     # ---- Return API ------------------------------------------------------
 
     list(
-      policy_hist_sim        = s5$policy_hist_sim,
-      policy_saved_scenarios = s5$policy_saved_scenarios
+      policy_hist_sim        = s6$policy_hist_sim,
+      policy_saved_scenarios = s6$policy_saved_scenarios
     )
   })
 }

@@ -60,6 +60,18 @@ POLICY_DEFINITIONS <- list(
         role    = "hh"
       )
     )
+  ),
+  "K" = list(
+    label = "Educational attainment (primary)",
+    vars  = c("educ_com1_hh")
+  ),
+  "L" = list(
+    label = "Educational attainment (secondary)",
+    vars  = c("educ_com2_hh")
+  ),
+  "M" = list(
+    label = "Educational attainment (post-secondary)",
+    vars  = c("educ_com3_hh")
   )
 )
 

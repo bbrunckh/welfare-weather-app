@@ -13,7 +13,7 @@
 # from run_sim_pipeline in fct_simulations.R) call it, so the Results pane
 # and the Decomposition pane always agree numerically.
 #
-# Used by: mod_3_05_policy_sim.R (decomposition display)
+# Used by: mod_3_06_policy_sim.R (decomposition display)
 #          fct_simulations.R     (run_sim_pipeline RIF policy correction)
 # ============================================================================ #
 

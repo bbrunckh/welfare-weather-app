@@ -1,4 +1,4 @@
-#' 3_07_diagnostics UI Function
+#' 3_08_diagnostics UI Function
 #'
 #' @description A shiny Module. The Diagnostics tab is inserted into the
 #'   parent tabset on the first successful policy simulation run, so this
@@ -9,14 +9,17 @@
 #' @noRd
 #'
 #' @importFrom shiny NS tagList
-mod_3_07_diagnostics_ui <- function(id) {
+mod_3_08_diagnostics_ui <- function(id) {
   tagList()
 }
 
-#' 3_07_diagnostics Server Functions
+#' 3_08_diagnostics Server Functions
 #'
 #' Displays before/after summary tables and histograms for all variables
-#' manipulated by the policy scenarios (mod_3_01 through mod_3_04). Inserts
+#' manipulated by the policy scenarios (mod_3_01 through mod_3_05). Only
+#' variables still present in the Step 1 model are manipulated upstream by
+#' \code{apply_policy_to_svy()}, so a variable dropped from Step 1 no longer
+#' appears here. Inserts
 #' a Diagnostics tab into the parent tabset on the first successful run
 #' and selects it.
 #'
@@ -30,7 +33,7 @@ mod_3_07_diagnostics_ui <- function(id) {
 #'   to the parent session.
 #'
 #' @noRd
-mod_3_07_diagnostics_server <- function(id,
+mod_3_08_diagnostics_server <- function(id,
                                          baseline_svy,
                                          policy_svy,
                                          sim_run_id = reactive(0L),
@@ -251,7 +254,6 @@ mod_3_07_diagnostics_server <- function(id,
             title = "Diagnostics",
             value = "diag_tab",
             shiny::h4("Total SP Transfer Amount"),
-            shiny::tags$small(style = "color: #c00;", "Needs to be scale to population level."),
             shiny::tableOutput(ns("transfer_summary_ui")),
             shiny::div(style = "margin: 12px 0;"),
             shiny::h4("Summary of Manipulated Variables"),
