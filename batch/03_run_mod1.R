@@ -4,8 +4,8 @@
 # Batch Module 1 model fitting across countries and specifications.
 # 
 # Outputs:
-#   OUT_DIR/model_fit/model_coefficients.csv
-#   OUT_DIR/model_fit/model_fit_stats.csv
+#   OUT_DIR/model_fit/model_coefficients.parquet
+#   OUT_DIR/model_fit/model_fit_stats.parquet
 #   OUT_DIR/model_fit/_interactions_not_available.csv 
 #   OUT_DIR/model_fit/_failures.csv (error logging)
 #
@@ -38,10 +38,9 @@ POOL_COUNTRIES <- FALSE   # TRUE = one pooled model; FALSE = per-country
 # ---- Country / survey sample (mod_1_01) [GRID when !POOL_COUNTRIES] --------
 # NULL = all available; c(...) = subset
 COUNTRY_FILTER <- c(
-  #"BEN", "BFA", "BRA", "CIV", "COL", "GMB", 
+  "BEN", "BFA", "BRA", "CIV", "COL", "GMB", 
   "GNB", "GTM", "IND", "IRN", "LKA",
-  "MLI", "MRT", "MWI", "NER", "SEN", "TCD", "TGO", "TJK"
-  # , "VNM", "ZMB"
+  "MLI", "MRT", "MWI", "NER", "SEN", "TCD", "TGO", "TJK", "VNM", "ZMB"
 )
 
 # ---- Outcome variable (mod_1_03) -------------------------------------------
@@ -65,16 +64,19 @@ CUSTOM_SPEI_BREAKS <- c(-1, -0.5, 0, 0.5)   # SPEI
   )), v)), sprintf("%s_1to%dm_binn_cust", v, re))
 
 WEATHER_SPECS <- c(
-  expand_weather_specs("t",     c(1L, 3L, 6L, 12L), c("continuous", "binned"), "None", 1L),
-  expand_weather_specs("spei6", c(1L, 3L, 6L, 12L), c("continuous", "binned"), "None", 1L),
-  .mk_cust_spec("t",      1L, CUSTOM_T_BREAKS),
-  .mk_cust_spec("t",      3L, CUSTOM_T_BREAKS),
-  .mk_cust_spec("t",      6L, CUSTOM_T_BREAKS),
-  .mk_cust_spec("t",     12L, CUSTOM_T_BREAKS),
-  .mk_cust_spec("spei6",  1L, CUSTOM_SPEI_BREAKS),
-  .mk_cust_spec("spei6",  3L, CUSTOM_SPEI_BREAKS),
-  .mk_cust_spec("spei6",  6L, CUSTOM_SPEI_BREAKS),
-  .mk_cust_spec("spei6", 12L, CUSTOM_SPEI_BREAKS)
+  expand_weather_specs("rx5day", c(1L, 3L, 6L, 12L), c("continuous", "binned"), "None", 1L),
+  expand_weather_specs("mrsos", c(1L, 3L, 6L, 12L), c("continuous", "binned"), "None", 1L)
+
+  # expand_weather_specs("t",     c(1L, 3L, 6L, 12L), c("continuous", "binned"), "None", 1L),
+  # expand_weather_specs("spei6", c(1L, 3L, 6L, 12L), c("continuous", "binned"), "None", 1L),
+  # .mk_cust_spec("t",      1L, CUSTOM_T_BREAKS),
+  # .mk_cust_spec("t",      3L, CUSTOM_T_BREAKS),
+  # .mk_cust_spec("t",      6L, CUSTOM_T_BREAKS),
+  # .mk_cust_spec("t",     12L, CUSTOM_T_BREAKS),
+  # .mk_cust_spec("spei6",  1L, CUSTOM_SPEI_BREAKS),
+  # .mk_cust_spec("spei6",  3L, CUSTOM_SPEI_BREAKS),
+  # .mk_cust_spec("spei6",  6L, CUSTOM_SPEI_BREAKS),
+  # .mk_cust_spec("spei6", 12L, CUSTOM_SPEI_BREAKS)
 )
 
 # ---- Weather defaults (used when a profile omits a setting) -----------------
@@ -91,7 +93,7 @@ MODEL_TYPE <- c("Linear regression", "Quantile regression (RIF)")
 
 # ---- Interactions (mod_1_06) [GRID] ----------------------------------------
 # character(0) = no interaction; each entry interacts that variable with weather
-INTERACTIONS <- list(character(0), "urban", "electricity", "imp_wat_rec", "imp_san_rec", "imp_wat_san_rec", "ttime_health")
+INTERACTIONS <- list(character(0), "urban", "electricity", "imp_wat_san_rec", "educ_com_2")
 
 # ---- Fixed effects (mod_1_06) [GRID] ---------------------------------------
 # Named list of FE profiles. Values are character vectors passed to fixest.
@@ -317,8 +319,8 @@ cat(sprintf(
 ))
 
 # ---- Output file paths -------------------------------------------------------
-coef_csv  <- file.path(OUT_MODEL, "model_coefficients.csv")
-stats_csv <- file.path(OUT_MODEL, "model_fit_stats.csv")
+coef_pq  <- file.path(OUT_MODEL, "model_coefficients.parquet")
+stats_pq <- file.path(OUT_MODEL, "model_fit_stats.parquet")
 
 # ---- Dedup keys ---------------------------------------------------------------
 coef_dedup_keys  <- c("code", "weather", "engine", "fe_profile", "cov_profile",
@@ -326,19 +328,25 @@ coef_dedup_keys  <- c("code", "weather", "engine", "fe_profile", "cov_profile",
 stats_dedup_keys <- c("code", "weather", "engine", "fe_profile", "cov_profile",
                       "interaction", "model", "tau")
 
-.save_csv <- function(new_df, path, dedup_keys) {
+.save_parquet <- function(new_df, path, dedup_keys) {
   if (is.null(new_df) || nrow(new_df) == 0L) return(invisible(NULL))
   out_df <- new_df
   if (file.exists(path)) {
-    existing <- readr::read_csv(path, show_col_types = FALSE)
+    existing <- arrow::read_parquet(path)
     out_df   <- dplyr::bind_rows(existing, new_df)
     out_df   <- dplyr::distinct(out_df, dplyr::across(dplyr::any_of(dedup_keys)),
                                 .keep_all = TRUE)
     cat(sprintf("  [merge] %s (%d existing + %d new)\n",
                 basename(path), nrow(existing), nrow(new_df)))
+    rm(existing)
+    gc(verbose = FALSE)
   }
-  readr::write_csv(out_df, path)
+  # Write to a temp file then rename to avoid partial-write corruption
+  tmp_path <- paste0(path, ".tmp")
+  arrow::write_parquet(out_df, tmp_path)
+  file.rename(tmp_path, path)
   cat(sprintf("  Saved: %s (%d rows)\n", basename(path), nrow(out_df)))
+  invisible(path)
 }
 
 # ---- OVERWRITE_EXISTING cleanup + skip detection -----------------------------
@@ -348,15 +356,17 @@ done_specs_skipped_by_sample <- integer(0)
 .int_na_csv <- file.path(OUT_MODEL, "_interactions_not_available.csv")
 if (OVERWRITE_EXISTING) {
   cat("  OVERWRITE mode: deleting existing outputs...\n")
-  for (.f in c(coef_csv, stats_csv,
+  for (.f in c(coef_pq, stats_pq,
                file.path(OUT_MODEL, "_failures.csv"),
                .int_na_csv)) {
     if (file.exists(.f)) file.remove(.f)
   }
   OVERWRITE_EXISTING <- FALSE
 } else {
-  if (file.exists(stats_csv)) {
-    .chk <- readr::read_csv(stats_csv, show_col_types = FALSE)
+  if (file.exists(stats_pq)) {
+    .chk <- arrow::read_parquet(stats_pq,
+              col_select = c("code", "weather", "engine", "fe_profile",
+                             "cov_profile", "interaction", "model"))
     .chk <- .chk[.chk$model == "fit3", , drop = FALSE]
     if (nrow(.chk) > 0L) {
       .inter <- ifelse(is.na(.chk$interaction), "noInter", .chk$interaction)
@@ -756,9 +766,9 @@ for (si in SAMPLE_LABELS) {
 
   # -- Flush per-country results to disk ------------------------------------
   if (length(country_coefs) > 0L)
-    .save_csv(clean_names(dplyr::bind_rows(country_coefs)), coef_csv, coef_dedup_keys)
+    .save_parquet(clean_names(dplyr::bind_rows(country_coefs)), coef_pq, coef_dedup_keys)
   if (length(country_fit_stats) > 0L)
-    .save_csv(clean_names(dplyr::bind_rows(country_fit_stats)), stats_csv, stats_dedup_keys)
+    .save_parquet(clean_names(dplyr::bind_rows(country_fit_stats)), stats_pq, stats_dedup_keys)
 
   rm(svy_base, country_coefs, country_fit_stats)
   gc(verbose = FALSE)
@@ -801,8 +811,8 @@ if (length(skip_log) > 0 || file.exists(.int_na_csv)) {
 }
 
 # Read final outputs from disk for summary
-summary_coefs <- if (file.exists(coef_csv)) readr::read_csv(coef_csv, show_col_types = FALSE) else NULL
-summary_stats <- if (file.exists(stats_csv)) readr::read_csv(stats_csv, show_col_types = FALSE) else NULL
+summary_coefs <- if (file.exists(coef_pq)) arrow::read_parquet(coef_pq) else NULL
+summary_stats <- if (file.exists(stats_pq)) arrow::read_parquet(stats_pq) else NULL
 
 if (!is.null(summary_coefs)) {
   n_specs <- nrow(

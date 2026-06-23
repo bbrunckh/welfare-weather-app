@@ -46,8 +46,8 @@ OUT_DIR <- Sys.getenv("WISEAPP_RESULTS_PATH")
 if (!nzchar(OUT_DIR)) OUT_DIR <- "dev/output"
 MOD_DIR <- file.path(OUT_DIR, "model_fit")
 
-coef  <- read_csv(file.path(MOD_DIR, "model_coefficients.csv"), show_col_types = FALSE)
-stats <- read_csv(file.path(MOD_DIR, "model_fit_stats.csv"),    show_col_types = FALSE)
+coef  <- arrow::read_parquet(file.path(MOD_DIR, "model_coefficients.parquet"))
+stats <- arrow::read_parquet(file.path(MOD_DIR, "model_fit_stats.parquet"))
 
 int_na <- tryCatch(
   read_csv(file.path(MOD_DIR, "_interactions_not_available.csv"), show_col_types = FALSE),
