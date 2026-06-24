@@ -18,7 +18,7 @@
 #   5. What simulations to prioritise per country?
 #
 # Policy variables considered:
-#   electricity, imp_wat_rec, imp_san_rec, imp_wat_san_rec, ttime_health
+#   educ_com2_hh, electricity, imp_wat_rec, imp_san_rec, imp_wat_san_rec, ttime_health
 #
 # Outputs (all under OUT_DIR/model_fit/):
 #   03a_1_ref_period_significance.png      significance by reference period
@@ -78,7 +78,7 @@ CONSTR_LABELS <- c("Continuous", "Binned (equal freq)", "Binned (custom)")
 FOCUS_REF    <- "1to3m"
 FOCUS_CONSTR <- "binned_equal"
 FOCUS_CONSTR_LABEL <- "Binned (equal freq)"
-POLICY_VARS <- c("electricity", "imp_wat_san_rec", "ttime_health", "urban")
+POLICY_VARS <- c("educ_com2_hh","electricity", "imp_wat_san_rec", "ttime_health", "urban")
 
 # For SPEI the driest (bottom) bin is the omitted reference category, so all
 # SPEI bin coefficients measure "welfare relative to drought."

@@ -8,7 +8,11 @@ OUT_DIR <- Sys.getenv("WISEAPP_RESULTS_PATH")
 SIM_DIR <- file.path(OUT_DIR, "simulations")
 
 FOCUS_REF   <- "1to3m"
-POLICY_VARS <- c("electricity", "imp_wat_san_rec", "ttime_health", "urban")
+POLICY_VARS <- c("educ_com2_hh", "electricity", "imp_wat_san_rec", "ttime_health", "urban")
+
+afw_codes <- c("BEN", "BFA", "CPV", "CMR", "CAF", "TCD", "COG", "CIV",
+               "GNQ", "GAB", "GMB", "GHA", "GIN", "GNB", "LBR", "MLI",
+               "MRT", "NER", "NGA", "SEN", "SLE", "TGO")
 
 # -- Scenarios to display (excluding "historical" which is always the baseline) --
 # Edit this vector to control which scenario_ids appear as separate lines
@@ -62,6 +66,7 @@ rp_labels <- c(
 
 rp_base <- rps |>
   mutate(country = str_extract(spec_label, "^[A-Z]+")) |>
+  filter(country %in% afw_codes) |>
   pivot_longer(cols = `1:50`:`49:50`, names_to = "return_period", values_to = "value") |>
   filter(!is.na(value), return_period %in% focus_rps, agg_method %in% focus_agg) |>
   summarise(value = mean(value), .by = c(country, agg_method, scenario_id, return_period, estimate))
@@ -143,13 +148,14 @@ iwalk(agg_labels, \(label, key) {
 })
 
 # ── Policy comparison figures ─────────────────────────────────────────────────
-# Compare no_policy vs each other policy under SSP3
+# Compare no_policy vs each other policy under SSP3, 2030
 
 policy_labels <- c(
   "sp_p10_bottom40"      = "Cash transfer (bottom 40%, P10)",
   "elec_universal"       = "Universal electricity access",
   "health15min"          = "Health facility within 15 min",
-  "imp_wat_san_universal" = "Universal water & sanitation"
+  "imp_wat_san_universal" = "Universal water & sanitation",
+  "secondary_universal" = "Universal secondary education"
 )
 
 rps_policy <- read_csv(file.path(SIM_DIR, "return_periods.csv")) |>
@@ -161,6 +167,7 @@ rps_policy <- read_csv(file.path(SIM_DIR, "return_periods.csv")) |>
 
 rp_policy_base <- rps_policy |>
   mutate(country = str_extract(spec_label, "^[A-Z]+")) |>
+  filter(country %in% afw_codes) |>
   pivot_longer(cols = `1:50`:`49:50`, names_to = "return_period", values_to = "value") |>
   filter(!is.na(value), return_period %in% focus_rps, agg_method %in% focus_agg) |>
   summarise(value = mean(value), .by = c(country, agg_method, scenario_id, return_period, estimate, policy_label))
@@ -202,9 +209,16 @@ wat_san_exclude <- survey_stats |>
   filter(mean > 0.95) |>
   pull(code)
 
+secondary_ed_exclude <- survey_stats |>
+  filter(variable == "educ_com2_hh") |>
+  slice_max(year, by = code) |>
+  filter(mean > 0.95) |>
+  pull(code)
+
 policy_exclude <- list(
   elec_universal         = elec_exclude,
-  imp_wat_san_universal  = wat_san_exclude
+  imp_wat_san_universal  = wat_san_exclude,
+  secondary_universal     = secondary_ed_exclude
 )
 
 plot_metric_policy <- function(metric_key, policy_key) {
@@ -224,6 +238,7 @@ plot_metric_policy <- function(metric_key, policy_key) {
       agg_method   == metric_key,
       policy_label %in% c("no_policy", policy_key),
       return_period %in% rps_use,
+      scenario_id  == FOCUS_SCENARIOS[[1]],
       !country %in% exclude_codes,
       country %in% countries_with_policy
     ) |>
@@ -231,44 +246,24 @@ plot_metric_policy <- function(metric_key, policy_key) {
     mutate(
       country_f     = reorder_within(country, order_val, agg_method),
       return_period = factor(rp_labels[as.character(return_period)], levels = unique(rp_labels[rps_use])),
-      policy_lab    = if_else(policy_label == "no_policy", "No policy", policy_label_str),
-      # colour encodes policy type; linetype encodes scenario
-      col_grp = if_else(policy_label == "no_policy", "No policy", policy_label_str),
-      lty_grp = SCENARIO_LABELS[scenario_id],
-      grp_label = paste0(col_grp, " — ", lty_grp)
+      col_grp       = if_else(policy_label == "no_policy", "No policy", policy_label_str)
     )
 
-  dodge <- position_dodge(width = 0.7)
+  col_values <- c("No policy" = "#1d2f73", setNames("#d12816", policy_label_str))
 
-  scenario_ltys <- setNames(
-    c("solid", "dashed", "dotdash", "dotted")[seq_along(FOCUS_SCENARIOS)],
-    unname(active_scenario_labels)
-  )
-
-  lty_values <- plot_data |>
-    distinct(grp_label, lty_grp) |>
-    with(setNames(scenario_ltys[lty_grp], grp_label))
-
-  col_values <- plot_data |>
-    distinct(grp_label, col_grp) |>
-    mutate(colour = if_else(col_grp == "No policy", "#1d2f73", "#d12816")) |>
-    with(setNames(colour, grp_label))
-
-  ggplot(plot_data, aes(y = country_f, x = central, colour = grp_label, linetype = grp_label, group = grp_label)) +
+  ggplot(plot_data, aes(y = country_f, x = central, colour = col_grp)) +
     geom_vline(xintercept = 0, linewidth = 0.4, linetype = "dashed", colour = "grey50") +
     geom_errorbarh(
       aes(xmin = ensemble_lo, xmax = ensemble_hi),
-      height = 0, linewidth = 0.4, alpha = 0.6,
-      position = dodge
+      height = 0, linewidth = 0.4, alpha = 0.6
     ) +
-    geom_point(shape = 16, size = 2, position = dodge) +
+    geom_point(shape = 16, size = 2) +
     facet_wrap(~return_period, nrow = 1, scales = "free_x") +
     scale_y_reordered() +
     scale_colour_manual(values = col_values, name = "") +
-    scale_linetype_manual(values = lty_values, name = "") +
     labs(
       title    = metric_label,
-      subtitle = paste0(policy_label_str, " vs No policy"),
+      subtitle = paste0(policy_label_str, " vs No policy — SSP3 2030"),
       x        = "Relative difference from historical (%)",
       y        = NULL
     ) +
@@ -296,7 +291,8 @@ outcomes_ep <- read_parquet(file.path(SIM_DIR, "outcomes.parquet")) |>
     wx_name      == "t_1to3m_binn_None",
     policy_label %in% all_policy_labels,
     agg_method   == "headcount_ratio_300",
-    scenario_id  %in% c("historical", FOCUS_SCENARIOS)
+    scenario_id  %in% c("historical", FOCUS_SCENARIOS),
+    code         %in% afw_codes
   )
 
 # Helper: empirical exceedance probabilities (Weibull plotting position)
@@ -348,14 +344,16 @@ exceed_policy_colours <- c(
   "no_policy"             = "#1d2f73",
   "sp_p10_bottom40"        = "#c42716",
   "elec_universal"        = "#c42716",
-  "imp_wat_san_universal" = "#c42716"
+  "imp_wat_san_universal" = "#c42716",
+  "secondary_universal"     = "#c42716"
 )
 
 exceed_policy_names <- c(
   "no_policy"             = "No policy",
   "sp_p10_bottom40"        = "Cash transfer",
   "elec_universal"        = "Universal electricity",
-  "imp_wat_san_universal" = "Water & sanitation"
+  "imp_wat_san_universal" = "Water & sanitation",
+  "secondary_universal"     = "Universal secondary education"
 )
 
 # ── Linetypes per scenario ────────────────────────────────────────────────────

@@ -31,8 +31,8 @@ invisible(lapply(list.files("batch/R", pattern = "\\.R$", full.names = TRUE), so
 # "databricks" -> credentials from .Renviron (DATABRICKS_HOST, etc.)
 CONNECTION_TYPE <- "local"
 DATA_DIR        <- Sys.getenv("WISEAPP_DATA_PATH")
-# OUT_DIR         <- Sys.getenv("WISEAPP_RESULTS_PATH")
-OUT_DIR         <- "dev/outputs"
+OUT_DIR         <- Sys.getenv("WISEAPP_RESULTS_PATH")
+# OUT_DIR         <- "dev/outputs"
 
 # ---- Unit of analysis -------------------------------------------------------
 UNIT <- "hh"   # "hh", "ind", or "firm"
@@ -42,10 +42,10 @@ POOL_COUNTRIES <- FALSE   # TRUE = one pooled model; FALSE = per-country
 
 # ---- Country / survey sample (mod_1_01) [GRID when !POOL_COUNTRIES] --------
 # NULL = all available; c(...) = subset
-COUNTRY_FILTER <- c("SEN"
-  # "BEN", "BFA", "BRA", "CIV", "COL", "GMB", "GNB", "GTM", "IND", "IRN", "LKA",
-  # "MLI", "MRT", "MWI", "NER", "SEN", "TCD", "TGO", 
-  # "TJK", "VNM", "ZMB"
+COUNTRY_FILTER <- c(
+  "BEN", "BFA", "BRA", "CIV", "COL", "GMB", "GNB", "GTM", "IND", "IRN", "LKA",
+  "MLI", "MRT", "MWI", "NER", "SEN", "TCD", "TGO", 
+  "TJK", "VNM", "ZMB"
 )
 
 # ---- Outcome variable (mod_1_03) --------------------------------------------
@@ -68,14 +68,14 @@ CUSTOM_SPEI_BREAKS <- c(-1, -0.5, 0, 0.5)   # SPEI
     weather_transformation = "None", binning_method = "Custom", custom_breaks = brks
   )), v)), sprintf("%s_1to%dm_binn_cust", v, re))
 
-WEATHER_SPECS <- list(
-    t_r_1to3m_binn = list(
-      t = list(ref_start = 1L, ref_end = 3L, transformation = "binned", weather_transformation = "None", binning_method = "Equal frequency", n_bins = 10),
-      r = list(ref_start = 1L, ref_end = 3L, transformation = "binned", weather_transformation = "None", binning_method = "Equal frequency", n_bins = 10)
-    )
-  # expand_weather_specs("t", c(3L), c("binned"), "None", 1L)
-  # expand_weather_specs("rx5day", c(3L), c("binned"), "None", 1L)
-  # expand_weather_specs("spei6", c(3L), c("binned"), "None", 1L)
+WEATHER_SPECS <- c(
+    # t_r_1to3m_binn = list(
+    #   t = list(ref_start = 1L, ref_end = 3L, transformation = "binned", weather_transformation = "None", binning_method = "Equal frequency", n_bins = 10),
+    #   r = list(ref_start = 1L, ref_end = 3L, transformation = "binned", weather_transformation = "None", binning_method = "Equal frequency", n_bins = 10)
+    # ),
+  expand_weather_specs("t", c(3L), c("binned"), "None", 1L)
+  # expand_weather_specs("rx5day", c(3L), c("binned"), "None", 1L),
+  # expand_weather_specs("spei6", c(3L), c("binned"), "None", 1L),
   # .mk_cust_spec("t",      3L, CUSTOM_T_BREAKS),
   # .mk_cust_spec("spei6",  3L, CUSTOM_SPEI_BREAKS)
 )
@@ -94,7 +94,7 @@ MODEL_TYPE <- c("Quantile regression (RIF)")
 
 # ---- Interactions (mod_1_06) [GRID] -----------------------------------------
 # character(0) = no interaction; each entry interacts that variable with weather
-INTERACTIONS <- list(character(0))  # e.g. "urban", "electricity"...
+INTERACTIONS <- list()  # e.g. "urban", "electricity"...
 
 # ---- Fixed effects (mod_1_06) [GRID] ----------------------------------------
 # Named list of FE profiles. Values are character vectors passed to fixest.
@@ -197,16 +197,19 @@ DEV_MODE <- FALSE   # TRUE = 1 ensemble member only; fast debug runs
 # =============================================================================
 # POLICY_SCENARIOS is a named list; one entry per scenario to run.
 # Each entry has:
-#   policy_keys  — character vector of POLICY_DEFINITIONS keys ("A"–"I"):
+#   policy_keys  — character vector of POLICY_DEFINITIONS keys ("A"–"M"):
 #                  A=electricity, B=imp_water, C=sanitation, D=health,
-#                  E=internet, F=mobile, G=piped_water, H=piped_on_prem, I=imp_wat_san
+#                  E=internet, F=mobile, G=piped_water, H=piped_on_prem, I=imp_wat_san,
+#                  K=educ_com1_hh (primary), L=educ_com2_hh (secondary),
+#                  M=educ_com3_hh (post-secondary)
 #                  Auto-adds the corresponding variable as a weather interaction to
 #                  INTERACTIONS, so the base model includes it (matching app's mod_1 flow).
 #                  Each policy is applied only to specs with its matching interaction.
-#   sp      — social protection module config
-#   infra   — infrastructure access config
-#   digital — digital inclusion config
-#   labor   — labor market config
+#   sp        — social protection module config
+#   infra     — infrastructure access config
+#   digital   — digital inclusion config
+#   labor     — labor market config
+#   education — education attainment config
 #
 # SP config supports relative transfer sizing via transfer_pctile:
 #   transfer_pctile     — integer percentile (e.g. 20); when set, transfer_amount_usd
@@ -262,49 +265,62 @@ DEV_MODE <- FALSE   # TRUE = 1 ensemble member only; fast debug runs
   sector_services      = 0,
   sector_agriculture   = 100
 )
+.education_off <- list(
+  primary_universal           = FALSE,
+  primary_access_change_pct   = 0L,
+  secondary_universal         = FALSE,
+  secondary_access_change_pct = 0L,
+  postsec_universal           = FALSE,
+  postsec_access_change_pct   = 0L
+)
 
 # Edit POLICY_SCENARIOS to add/remove scenarios.
 # "no_policy" is always be present — it is the base simulation (no resimulation pass).
 POLICY_SCENARIOS <- list(
 
-  elec_universal = list(
-    policy_keys = "A",              # adds weather x electricity interaction to base model
-    sp      = .sp_off,
-    infra   = modifyList(.infra_off, list(elec_universal = TRUE)),
-    digital = .digital_off,
-    labor   = .labor_off
-  )
+  # elec_universal = list(
+  #   policy_keys = "A",              # adds weather x electricity interaction to base model
+  #   sp        = .sp_off,
+  #   infra     = modifyList(.infra_off, list(elec_universal = TRUE)),
+  #   digital   = .digital_off,
+  #   labor     = .labor_off,
+  #   education = .education_off
+  # )
 
   # imp_wat_universal = list(
   #   policy_keys = "B",              # adds weather x imp_wat_rec interaction
-  #   sp      = .sp_off,
-  #   infra   = modifyList(.infra_off, list(water_universal = TRUE)),
-  #   digital = .digital_off,
-  #   labor   = .labor_off
+  #   sp        = .sp_off,
+  #   infra     = modifyList(.infra_off, list(water_universal = TRUE)),
+  #   digital   = .digital_off,
+  #   labor     = .labor_off,
+  #   education = .education_off
   # ),
 
   # imp_san_universal = list(
   #   policy_keys = "C",              # adds weather x imp_san_rec interaction
-  #   sp      = .sp_off,
-  #   infra   = modifyList(.infra_off, list(sanitation_universal = TRUE)),
-  #   digital = .digital_off,
-  #   labor   = .labor_off
+  #   sp        = .sp_off,
+  #   infra     = modifyList(.infra_off, list(sanitation_universal = TRUE)),
+  #   digital   = .digital_off,
+  #   labor     = .labor_off,
+  #   education = .education_off
   # ),
 
   # imp_wat_san_universal = list(
   #   policy_keys = "I",              # adds weather x imp_wat_san_rec interaction
-  #   sp      = .sp_off,
-  #   infra   = modifyList(.infra_off, list(imp_wat_san_universal = TRUE)),
-  #   digital = .digital_off,
-  #   labor   = .labor_off
+  #   sp        = .sp_off,
+  #   infra     = modifyList(.infra_off, list(imp_wat_san_universal = TRUE)),
+  #   digital   = .digital_off,
+  #   labor     = .labor_off,
+  #   education = .education_off
   # )
 
   #   health15min = list(
   #   policy_keys = "D",              # adds weather x ttime_health interaction
-  #   sp      = .sp_off,
-  #   infra   = modifyList(.infra_off, list(health_mode = "max", health_travel_max = 15)),
-  #   digital = .digital_off,
-  #   labor   = .labor_off
+  #   sp        = .sp_off,
+  #   infra     = modifyList(.infra_off, list(health_mode = "max", health_travel_max = 15)),
+  #   digital   = .digital_off,
+  #   labor     = .labor_off,
+  #   education = .education_off
   # ),
 
   # sp_p5_bottom40 = list(
@@ -317,10 +333,30 @@ POLICY_SCENARIOS <- list(
   #     inclusion_error_pct  = 30,
   #     exclusion_error_pct  = 30
   #   )),
-  #   infra   = .infra_off,
-  #   digital = .digital_off,
-  #   labor   = .labor_off
+  #   infra     = .infra_off,
+  #   digital   = .digital_off,
+  #   labor     = .labor_off,
+  #   education = .education_off
   # )
+
+  # primary_universal = list(
+  #   policy_keys = "K",              # adds weather x educ_com1_hh interaction
+  #   sp        = .sp_off,
+  #   infra     = .infra_off,
+  #   digital   = .digital_off,
+  #   labor     = .labor_off,
+  #   education = modifyList(.education_off, list(primary_universal = TRUE))
+  # ),
+
+  secondary_universal = list(
+    policy_keys = "L",              # adds weather x educ_com2_hh interaction
+    sp        = .sp_off,
+    infra     = .infra_off,
+    digital   = .digital_off,
+    labor     = .labor_off,
+    education = modifyList(.education_off, list(secondary_universal = TRUE))
+  )
+
 )
 
 # Auto-derive interaction variables required by each policy scenario.
@@ -524,10 +560,11 @@ if (!OVERWRITE_EXISTING) {
 .pipe_to_rows <- function(pipe, spec_meta, pol_label, scen_meta, ensemble_member, is_log) {
   pol      <- POLICY_SCENARIOS[[pol_label]]
   pol_keys <- pol$policy_keys %||% character(0)
-  has_sp      <- isTRUE((pol$sp$transfer_amount_usd %||% 0) > 0)
-  has_infra   <- any(pol_keys %in% c("A", "B", "C", "D", "G", "H", "I"))
-  has_digital <- any(pol_keys %in% c("E", "F"))
-  has_labor   <- isTRUE((pol$labor$employment_change_pp %||% 0) != 0)
+  has_sp        <- isTRUE((pol$sp$transfer_amount_usd %||% 0) > 0)
+  has_infra     <- any(pol_keys %in% c("A", "B", "C", "D", "G", "H", "I"))
+  has_digital   <- any(pol_keys %in% c("E", "F"))
+  has_labor     <- isTRUE((pol$labor$employment_change_pp %||% 0) != 0)
+  has_education <- any(pol_keys %in% c("K", "L", "M"))
 
   all_rows <- list()
   for (am in AGG_METHODS) {
@@ -561,6 +598,7 @@ if (!OVERWRITE_EXISTING) {
         has_infra       = has_infra,
         has_digital     = has_digital,
         has_labor       = has_labor,
+        has_education   = has_education,
         scenario_id     = scen_meta$scenario_id,
         scenario_type   = scen_meta$scenario_type,
         ssp             = scen_meta$ssp,
@@ -1595,6 +1633,12 @@ for (si in SAMPLE_LABELS) {
         internet_access_change_pct = pol$digital$internet_access_change_pct %||% 0L,
         mobile_universal        = isTRUE(pol$digital$mobile_universal),
         employment_change_pp    = pol$labor$employment_change_pp %||% 0,
+        primary_universal       = isTRUE(pol$education$primary_universal),
+        primary_access_change_pct   = pol$education$primary_access_change_pct   %||% 0L,
+        secondary_universal     = isTRUE(pol$education$secondary_universal),
+        secondary_access_change_pct = pol$education$secondary_access_change_pct %||% 0L,
+        postsec_universal       = isTRUE(pol$education$postsec_universal),
+        postsec_access_change_pct   = pol$education$postsec_access_change_pct   %||% 0L,
         run_status              = "started",
         stringsAsFactors = FALSE
       )
@@ -1609,6 +1653,7 @@ for (si in SAMPLE_LABELS) {
           infra         = pol$infra,
           digital       = pol$digital,
           labor         = pol$labor,
+          education     = pol$education,
           analysis_unit = UNIT
         ),
         error = function(e) { message(" FAIL (apply_policy): ", conditionMessage(e)); NULL }

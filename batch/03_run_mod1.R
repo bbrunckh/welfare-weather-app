@@ -64,11 +64,10 @@ CUSTOM_SPEI_BREAKS <- c(-1, -0.5, 0, 0.5)   # SPEI
   )), v)), sprintf("%s_1to%dm_binn_cust", v, re))
 
 WEATHER_SPECS <- c(
-  expand_weather_specs("rx5day", c(1L, 3L, 6L, 12L), c("continuous", "binned"), "None", 1L),
-  expand_weather_specs("mrsos", c(1L, 3L, 6L, 12L), c("continuous", "binned"), "None", 1L)
-
-  # expand_weather_specs("t",     c(1L, 3L, 6L, 12L), c("continuous", "binned"), "None", 1L),
-  # expand_weather_specs("spei6", c(1L, 3L, 6L, 12L), c("continuous", "binned"), "None", 1L),
+  # expand_weather_specs("rx5day", c(1L, 3L, 6L, 12L), c("continuous", "binned"), "None", 1L),
+  # expand_weather_specs("mrsos", c(1L, 3L, 6L, 12L), c("continuous", "binned"), "None", 1L)
+  expand_weather_specs("t",     c(1L, 3L, 6L, 12L), c("continuous"), "None", 1L),
+  expand_weather_specs("spei6", c(1L, 3L, 6L, 12L), c("continuous"), "None", 1L)
   # .mk_cust_spec("t",      1L, CUSTOM_T_BREAKS),
   # .mk_cust_spec("t",      3L, CUSTOM_T_BREAKS),
   # .mk_cust_spec("t",      6L, CUSTOM_T_BREAKS),
@@ -93,7 +92,8 @@ MODEL_TYPE <- c("Linear regression", "Quantile regression (RIF)")
 
 # ---- Interactions (mod_1_06) [GRID] ----------------------------------------
 # character(0) = no interaction; each entry interacts that variable with weather
-INTERACTIONS <- list(character(0), "urban", "electricity", "imp_wat_san_rec", "educ_com_2")
+INTERACTIONS <- list( #character(0), "urban", "electricity", "imp_wat_san_rec", 
+  "educ_com2_hh")
 
 # ---- Fixed effects (mod_1_06) [GRID] ---------------------------------------
 # Named list of FE profiles. Values are character vectors passed to fixest.
