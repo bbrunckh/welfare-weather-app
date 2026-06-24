@@ -85,13 +85,16 @@ compute_rif <- function(y, tau, bw = NULL) {
 build_rif_grid <- function(fits_multi, taus, model_id) {
   purrr::map_dfr(seq_along(taus), function(i) {
     fit_i <- fits_multi[[i]]
-    tbl <- NULL
-    for (spec in list(COEF_VCOV_SPEC, ~loc_id, "HC1", "iid")) {
-      tbl <- tryCatch(
-        broom::tidy(fit_i, conf.int = TRUE, vcov = spec),
-        error = function(e) NULL
-      )
-      if (!is.null(tbl)) break
+    # Try fit-time VCV first (respects cluster= passed at estimation)
+    tbl <- tryCatch(broom::tidy(fit_i, conf.int = TRUE), error = function(e) NULL)
+    if (is.null(tbl)) {
+      for (spec in list(COEF_VCOV_SPEC, ~loc_id, "HC1", "iid")) {
+        tbl <- tryCatch(
+          broom::tidy(fit_i, conf.int = TRUE, vcov = spec),
+          error = function(e) NULL
+        )
+        if (!is.null(tbl)) break
+      }
     }
     if (is.null(tbl)) tbl <- broom::tidy(fit_i, conf.int = TRUE)
     tbl$tau   <- taus[i]

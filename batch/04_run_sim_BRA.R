@@ -34,10 +34,10 @@ invisible(lapply(list.files("batch/R", pattern = "\\.R$", full.names = TRUE), so
 # ---- Data source (mod_0) ----------------------------------------------------
 # "local"      -> set WISEAPP_DATA_PATH in .Renviron
 # "databricks" -> credentials from .Renviron (DATABRICKS_HOST, etc.)
-CONNECTION_TYPE <- "local"
+CONNECTION_TYPE <- "local" # change to "databricks" if running on Databricks
 DATA_DIR        <- Sys.getenv("WISEAPP_DATA_PATH")
-OUT_DIR         <- Sys.getenv("WISEAPP_RESULTS_PATH")
-# OUT_DIR         <- "dev/outputs"
+# OUT_DIR         <- Sys.getenv("WISEAPP_RESULTS_PATH")
+OUT_DIR         <- "dev/outputs/case_studies" # for testing
 
 # ---- Unit of analysis -------------------------------------------------------
 UNIT <- "hh"   # "hh", "ind", or "firm"
@@ -47,11 +47,11 @@ POOL_COUNTRIES <- FALSE   # TRUE = one pooled model; FALSE = per-country
 
 # ---- Country / survey sample (mod_1_01) [GRID when !POOL_COUNTRIES] --------
 # NULL = all available; c(...) = subset
-COUNTRY_FILTER <- c(
-  "BEN", "BFA", "BRA", "CIV", "COL", "GMB", "GNB", "GTM", "IND", "IRN", "LKA",
-  "MLI", "MRT", "MWI", "NER", "SEN", "TCD", "TGO", 
-  "TJK", "VNM", "ZMB"
-)
+COUNTRY_FILTER <- c("BRA")
+#   "BEN", "BFA", "BRA", "CIV", "COL", "GMB", "GNB", "GTM", "IND", "IRN", "LKA",
+#   "MLI", "MRT", "MWI", "NER", "SEN", "TCD", "TGO", 
+#   "TJK", "VNM", "ZMB"
+# )
 
 # ---- Outcome variable (mod_1_03) --------------------------------------------
 OUTCOME_NAME <- "welfare"
@@ -74,10 +74,6 @@ CUSTOM_SPEI_BREAKS <- c(-1, -0.5, 0, 0.5)   # SPEI
   )), v)), sprintf("%s_1to%dm_binn_cust", v, re))
 
 WEATHER_SPECS <- c(
-    # t_r_1to3m_binn = list(
-    #   t = list(ref_start = 1L, ref_end = 3L, transformation = "binned", weather_transformation = "None", binning_method = "Equal frequency", n_bins = 10),
-    #   r = list(ref_start = 1L, ref_end = 3L, transformation = "binned", weather_transformation = "None", binning_method = "Equal frequency", n_bins = 10)
-    # ),
   expand_weather_specs("t", c(3L), c("binned"), "None", 1L)
   # expand_weather_specs("rx5day", c(3L), c("binned"), "None", 1L),
   # expand_weather_specs("spei6", c(3L), c("binned"), "None", 1L),
@@ -99,7 +95,7 @@ MODEL_TYPE <- c("Quantile regression (RIF)")
 
 # ---- Interactions (mod_1_06) [GRID] -----------------------------------------
 # character(0) = no interaction; each entry interacts that variable with weather
-INTERACTIONS <- list()  # e.g. "urban", "electricity"...
+INTERACTIONS <- list(character(0))  # e.g. "urban", "electricity"...
 
 # ---- Fixed effects (mod_1_06) [GRID] ----------------------------------------
 # Named list of FE profiles. Values are character vectors passed to fixest.
@@ -152,7 +148,7 @@ AGG_METHODS <- c(
 
 # ---- Output -----------------------------------------------------------------
 OVERWRITE_EXISTING <- FALSE   # FALSE = append+dedup existing CSVs; TRUE = overwrite
-SKIP_PLOTS         <- TRUE  # TRUE = skip all PNG generation (faster reruns)
+SKIP_PLOTS         <- FALSE  # TRUE = skip all PNG generation (faster reruns)
 SAVE_MODEL_FIT     <- TRUE  # TRUE = also save model_coefficients + fit_stats (like 03_run_mod1.R)
 
 # =============================================================================
@@ -329,21 +325,21 @@ POLICY_SCENARIOS <- list(
   #   education = .education_off
   # ),
 
-  # sp_p5_bottom40 = list(
-  #   policy_keys = character(0),     # SP only — no model refit needed
-  #   sp      = modifyList(.sp_off, list(
-  #     transfer_pctile     = 5,     # resolve transfer_amount_usd from welfare P5
-  #     transfer_n_payments = 12L,
-  #     targeting            = "exante_poor",
-  #     targeting_threshold  = 40,
-  #     inclusion_error_pct  = 30,
-  #     exclusion_error_pct  = 30
-  #   )),
-  #   infra     = .infra_off,
-  #   digital   = .digital_off,
-  #   labor     = .labor_off,
-  #   education = .education_off
-  # )
+  sp_p5_bottom40 = list(
+    policy_keys = character(0),     # SP only — no model refit needed
+    sp      = modifyList(.sp_off, list(
+      transfer_pctile     = 5,     # resolve transfer_amount_usd from welfare P5
+      transfer_n_payments = 12L,
+      targeting            = "exante_poor",
+      targeting_threshold  = 40,
+      inclusion_error_pct  = 30,
+      exclusion_error_pct  = 30
+    )),
+    infra     = .infra_off,
+    digital   = .digital_off,
+    labor     = .labor_off,
+    education = .education_off
+  )
 
   # primary_universal = list(
   #   policy_keys = "K",              # adds weather x educ_com1_hh interaction
@@ -354,14 +350,14 @@ POLICY_SCENARIOS <- list(
   #   education = modifyList(.education_off, list(primary_universal = TRUE))
   # ),
 
-  secondary_universal = list(
-    policy_keys = "L",              # adds weather x educ_com2_hh interaction
-    sp        = .sp_off,
-    infra     = .infra_off,
-    digital   = .digital_off,
-    labor     = .labor_off,
-    education = modifyList(.education_off, list(secondary_universal = TRUE))
-  )
+  # secondary_universal = list(
+  #   policy_keys = "L",              # adds weather x educ_com2_hh interaction
+  #   sp        = .sp_off,
+  #   infra     = .infra_off,
+  #   digital   = .digital_off,
+  #   labor     = .labor_off,
+  #   education = modifyList(.education_off, list(secondary_universal = TRUE))
+  # )
 
 )
 

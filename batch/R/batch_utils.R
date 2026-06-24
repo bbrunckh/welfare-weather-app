@@ -799,3 +799,127 @@ plot_weather_dist_with_ref <- function(df, df_ref = NULL, hv, label,
     ggplot2::labs(x = x_label, y = "", fill = "") +
     ggplot2::theme(legend.position = "none")
 }
+
+
+# -----------------------------------------------------------------------------
+# clean_names(): normalise data-frame column names (lowercase, underscores)
+# -----------------------------------------------------------------------------
+
+clean_names <- function(df) {
+  nms <- tolower(names(df))
+  nms <- gsub("[. ]+", "_", nms)
+  nms <- gsub("_+$", "", nms)
+  names(df) <- nms
+  df
+}
+
+
+# -----------------------------------------------------------------------------
+# tidy_clustered(): extract clustered coefficient table from a fixest fit
+# Replicates the UI's .fixest_coeftable() fallback chain and returns a
+# broom-compatible data frame (term, estimate, std.error, statistic, p.value).
+# -----------------------------------------------------------------------------
+
+tidy_clustered <- function(fit) {
+  ct <- tryCatch(
+    .fixest_coeftable(fit),  # ~loc_id_panel -> ~loc_id -> HC1 -> iid
+    error = function(e) NULL
+  )
+
+  if (is.null(ct)) {
+    return(broom::tidy(fit))
+  }
+  data.frame(
+    term      = rownames(ct),
+    estimate  = ct[["Estimate"]],
+    std.error = ct[["Std. Error"]],
+    statistic = ct[["t value"]],
+    p.value   = ct[["Pr(>|t|)"]],
+    stringsAsFactors = FALSE,
+    row.names = NULL
+  )
+}
+
+
+# -----------------------------------------------------------------------------
+# extract_one_fit(): extract coefficients + fit stats from one model object
+# Returns list(coefs = <df>, fit_stats = <df>).
+# -----------------------------------------------------------------------------
+
+extract_one_fit <- function(fit, model_label, code, wx_label, wx_vars,
+                            interaction_var, survey_df, engine,
+                            fe_label = NA_character_, fe_vec = NULL,
+                            cov_label = NA_character_,
+                            cov_method = NA_character_,
+                            lasso_selected_vars = NA_character_,
+                            taus = NULL) {
+  if (is.null(fit)) return(NULL)
+
+  fe_str     <- if (!is.null(fe_vec)) paste(fe_vec, collapse = ",") else NA_character_
+  inter_str  <- if (length(interaction_var) > 0) interaction_var else NA_character_
+  wx_present <- sum(stats::complete.cases(survey_df[, wx_vars, drop = FALSE]))
+  is_rif     <- identical(engine, "rif") && !is.null(taus)
+
+  meta <- data.frame(
+    code = code, weather = wx_label, engine = engine,
+    fe_profile = fe_label, cov_profile = cov_label, cov_method = cov_method,
+    interaction = inter_str, fixedeffects = fe_str, model = model_label,
+    stringsAsFactors = FALSE
+  )
+
+  append_meta <- function(df) cbind(meta[rep(1L, nrow(df)), , drop = FALSE], df)
+
+  if (is_rif) {
+    coefs <- tryCatch({
+      cf <- dplyr::bind_rows(lapply(seq_along(taus), function(i) {
+        cf_i <- tryCatch(tidy_clustered(fit[[i]]), error = function(e) NULL)
+        if (is.null(cf_i)) return(NULL)
+        cf_i$tau      <- taus[i]
+        cf_i$estimand <- sprintf("UQR p%d", round(taus[i] * 100))
+        cf_i
+      }))
+      append_meta(cf)
+    }, error = function(e) NULL)
+
+    fit_stats <- tryCatch({
+      fs <- dplyr::bind_rows(lapply(seq_along(taus), function(i) {
+        m <- fit[[i]]
+        data.frame(
+          tau       = taus[i],
+          estimand  = sprintf("UQR p%d", round(taus[i] * 100)),
+          r2        = tryCatch(fixest::r2(m, "r2"),  error = function(e) NA),
+          r2_adj    = NA_real_,
+          r2_within = tryCatch(fixest::r2(m, "wr2"), error = function(e) NA),
+          aic       = NA_real_,
+          n         = tryCatch(stats::nobs(m),       error = function(e) NA),
+          stringsAsFactors = FALSE
+        )
+      }))
+      fs$lasso_selected <- lasso_selected_vars
+      append_meta(fs)
+    }, error = function(e) NULL)
+
+  } else {
+    coefs <- tryCatch({
+      cf <- tidy_clustered(fit)
+      cf$tau <- NA_real_; cf$estimand <- "Mean"
+      append_meta(cf)
+    }, error = function(e) NULL)
+
+    fit_stats <- tryCatch({
+      fs <- data.frame(
+        tau        = NA_real_, estimand = "Mean",
+        r2         = tryCatch(fixest::r2(fit, "r2"),  error = function(e) NA),
+        r2_adj     = tryCatch(fixest::r2(fit, "ar2"), error = function(e) NA),
+        r2_within  = tryCatch(fixest::r2(fit, "wr2"), error = function(e) NA),
+        aic        = tryCatch(stats::AIC(fit),        error = function(e) NA),
+        n          = tryCatch(stats::nobs(fit),       error = function(e) NA),
+        lasso_selected = lasso_selected_vars,
+        stringsAsFactors = FALSE
+      )
+      append_meta(fs)
+    }, error = function(e) NULL)
+  }
+
+  list(coefs = coefs, fit_stats = fit_stats)
+}

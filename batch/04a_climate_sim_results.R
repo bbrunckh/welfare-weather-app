@@ -92,10 +92,11 @@ rp_diff <- rp_base |>
     ensemble_hi = `Ensemble max`
   ) |>
   mutate(
-    scenario_label = factor(SCENARIO_LABELS[scenario_id], levels = active_scenario_labels)
+    scenario_label = factor(SCENARIO_LABELS[scenario_id], levels = active_scenario_labels),
+    worse = if_else(agg_method == "median", central < 0, central > 0)
   )
 
-# Order countries by the first FOCUS_SCENARIO central estimate at 1:1
+# Order countries by SSP3 2030 central estimate at 1:1
 order_1_1 <- rp_diff |>
   filter(return_period == "1:1", scenario_id == FOCUS_SCENARIOS[[1]]) |>
   select(country, agg_method, order_val = central)
@@ -105,35 +106,34 @@ plot_metric <- function(metric_key) {
   rps_use <- metric_rps[[metric_key]]
 
   rp_diff |>
-    filter(agg_method == metric_key, return_period %in% rps_use) |>
+    filter(agg_method == metric_key, return_period %in% rps_use, scenario_id == FOCUS_SCENARIOS[[1]]) |>
     left_join(order_1_1 |> filter(agg_method == metric_key), by = c("country", "agg_method")) |>
     mutate(
       country_f     = reorder_within(country, order_val, agg_method),
       return_period = factor(rp_labels[as.character(return_period)], levels = unique(rp_labels[rps_use]))
     ) |>
-    ggplot(aes(y = country_f, colour = scenario_label, shape = scenario_label)) +
+    ggplot(aes(y = country_f, colour = worse)) +
     geom_vline(xintercept = 0, linewidth = 0.4, linetype = "dashed", colour = "grey50") +
     geom_errorbarh(
       aes(xmin = ensemble_lo, xmax = ensemble_hi),
-      height = 0, linewidth = 0.4, alpha = 0.5,
-      position = position_dodge2(width = 0.6)
+      height = 0, linewidth = 0.4, alpha = 0.5
     ) +
-    geom_point(aes(x = central), size = 2, position = position_dodge2(width = 0.6)) +
+    geom_point(aes(x = central), size = 2) +
     facet_wrap(~return_period, nrow = 1, scales = "free_x") +
     scale_y_reordered() +
-    scale_colour_manual(values = active_scenario_colours, labels = active_scenario_labels, name = "") +
-    scale_shape_manual(
-      values = setNames(c(16, 17, 15, 18)[seq_along(FOCUS_SCENARIOS)], active_scenario_labels),
+    scale_colour_manual(
+      values = c("TRUE" = "#d6604d", "FALSE" = "#2166ac"),
+      labels = c("TRUE" = "Worse", "FALSE" = "Better"),
       name   = ""
     ) +
     labs(
       title = label,
-      x     = "Relative difference from historical (%)",
-      y        = NULL
+      x     = "Relative difference in SSP3 2030 climate scenario (%)",
+      y     = NULL
     ) +
     theme_minimal(base_size = 10) +
     theme(
-      legend.position  = "right",
+      legend.position  = "bottom",
       panel.grid.minor = element_blank(),
       strip.text       = element_text(size = 9)
     )

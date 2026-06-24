@@ -64,6 +64,9 @@ prepare_outcome_df <- function(df, so) {
 #'
 #' @export
 .fixest_vcov <- function(fit) {
+  # Try the fit-time VCV first (respects cluster= arg passed at estimation)
+  v <- tryCatch(fixest::vcov(fit), error = function(e) NULL)
+  if (!is.null(v)) return(v)
   for (spec in list(COEF_VCOV_SPEC, ~loc_id, "HC1", "iid")) {
     v <- tryCatch(fixest::vcov(fit, vcov = spec), error = function(e) NULL)
     if (!is.null(v)) return(v)
@@ -72,6 +75,9 @@ prepare_outcome_df <- function(df, so) {
 }
 
 .fixest_vcov_spec <- function(fit) {
+  # Try the fit-time VCV first (respects cluster= arg passed at estimation)
+  ok <- tryCatch({ summary(fit); TRUE }, error = function(e) FALSE)
+  if (ok) return(NULL)  # NULL signals "use default"
   for (spec in list(COEF_VCOV_SPEC, ~loc_id, "HC1", "iid")) {
     ok <- tryCatch({ summary(fit, vcov = spec); TRUE }, error = function(e) FALSE)
     if (ok) return(spec)
@@ -80,6 +86,9 @@ prepare_outcome_df <- function(df, so) {
 }
 
 .fixest_coeftable <- function(fit) {
+  # Try the fit-time VCV first (respects cluster= arg passed at estimation)
+  ct <- tryCatch(as.data.frame(fixest::coeftable(fit)), error = function(e) NULL)
+  if (!is.null(ct)) return(ct)
   for (spec in list(COEF_VCOV_SPEC, ~loc_id, "HC1", "iid")) {
     ct <- tryCatch(
       as.data.frame(fixest::coeftable(fit, vcov = spec)),

@@ -34,10 +34,10 @@ invisible(lapply(list.files("batch/R", pattern = "\\.R$", full.names = TRUE), so
 # ---- Data source (mod_0) ----------------------------------------------------
 # "local"      -> set WISEAPP_DATA_PATH in .Renviron
 # "databricks" -> credentials from .Renviron (DATABRICKS_HOST, etc.)
-CONNECTION_TYPE <- "local"
+CONNECTION_TYPE <- "local" # change to "databricks" if running on Databricks
 DATA_DIR        <- Sys.getenv("WISEAPP_DATA_PATH")
-OUT_DIR         <- Sys.getenv("WISEAPP_RESULTS_PATH")
-# OUT_DIR         <- "dev/outputs"
+# OUT_DIR         <- Sys.getenv("WISEAPP_RESULTS_PATH")
+OUT_DIR         <- "dev/outputs/case_studies" # for testing
 
 # ---- Unit of analysis -------------------------------------------------------
 UNIT <- "hh"   # "hh", "ind", or "firm"
@@ -47,11 +47,11 @@ POOL_COUNTRIES <- FALSE   # TRUE = one pooled model; FALSE = per-country
 
 # ---- Country / survey sample (mod_1_01) [GRID when !POOL_COUNTRIES] --------
 # NULL = all available; c(...) = subset
-COUNTRY_FILTER <- c(
-  "BEN", "BFA", "BRA", "CIV", "COL", "GMB", "GNB", "GTM", "IND", "IRN", "LKA",
-  "MLI", "MRT", "MWI", "NER", "SEN", "TCD", "TGO", 
-  "TJK", "VNM", "ZMB"
-)
+COUNTRY_FILTER <- c("SEN")
+#   "BEN", "BFA", "BRA", "CIV", "COL", "GMB", "GNB", "GTM", "IND", "IRN", "LKA",
+#   "MLI", "MRT", "MWI", "NER", "SEN", "TCD", "TGO", 
+#   "TJK", "VNM", "ZMB"
+# )
 
 # ---- Outcome variable (mod_1_03) --------------------------------------------
 OUTCOME_NAME <- "welfare"
@@ -73,12 +73,12 @@ CUSTOM_SPEI_BREAKS <- c(-1, -0.5, 0, 0.5)   # SPEI
     weather_transformation = "None", binning_method = "Custom", custom_breaks = brks
   )), v)), sprintf("%s_1to%dm_binn_cust", v, re))
 
-WEATHER_SPECS <- c(
-    # t_r_1to3m_binn = list(
-    #   t = list(ref_start = 1L, ref_end = 3L, transformation = "binned", weather_transformation = "None", binning_method = "Equal frequency", n_bins = 10),
-    #   r = list(ref_start = 1L, ref_end = 3L, transformation = "binned", weather_transformation = "None", binning_method = "Equal frequency", n_bins = 10)
-    # ),
-  expand_weather_specs("t", c(3L), c("binned"), "None", 1L)
+WEATHER_SPECS <- list(
+    t_r_1to3m_binn = list(
+      t = list(ref_start = 1L, ref_end = 3L, transformation = "binned", weather_transformation = "None", binning_method = "Equal frequency", n_bins = 10),
+      r = list(ref_start = 1L, ref_end = 3L, transformation = "binned", weather_transformation = "None", binning_method = "Equal frequency", n_bins = 10)
+    )
+  # expand_weather_specs("t", c(3L), c("binned"), "None", 1L)
   # expand_weather_specs("rx5day", c(3L), c("binned"), "None", 1L),
   # expand_weather_specs("spei6", c(3L), c("binned"), "None", 1L),
   # .mk_cust_spec("t",      3L, CUSTOM_T_BREAKS),
@@ -151,8 +151,8 @@ AGG_METHODS <- c(
 )
 
 # ---- Output -----------------------------------------------------------------
-OVERWRITE_EXISTING <- FALSE   # FALSE = append+dedup existing CSVs; TRUE = overwrite
-SKIP_PLOTS         <- TRUE  # TRUE = skip all PNG generation (faster reruns)
+OVERWRITE_EXISTING <- TRUE   # FALSE = append+dedup existing CSVs; TRUE = overwrite
+SKIP_PLOTS         <- FALSE  # TRUE = skip all PNG generation (faster reruns)
 SAVE_MODEL_FIT     <- TRUE  # TRUE = also save model_coefficients + fit_stats (like 03_run_mod1.R)
 
 # =============================================================================
@@ -284,14 +284,14 @@ DEV_MODE <- FALSE   # TRUE = 1 ensemble member only; fast debug runs
 # "no_policy" is always be present — it is the base simulation (no resimulation pass).
 POLICY_SCENARIOS <- list(
 
-  # elec_universal = list(
-  #   policy_keys = "A",              # adds weather x electricity interaction to base model
-  #   sp        = .sp_off,
-  #   infra     = modifyList(.infra_off, list(elec_universal = TRUE)),
-  #   digital   = .digital_off,
-  #   labor     = .labor_off,
-  #   education = .education_off
-  # )
+  elec_universal = list(
+    policy_keys = "A",              # adds weather x electricity interaction to base model
+    sp        = .sp_off,
+    infra     = modifyList(.infra_off, list(elec_universal = TRUE)),
+    digital   = .digital_off,
+    labor     = .labor_off,
+    education = .education_off
+  )
 
   # imp_wat_universal = list(
   #   policy_keys = "B",              # adds weather x imp_wat_rec interaction
@@ -354,14 +354,14 @@ POLICY_SCENARIOS <- list(
   #   education = modifyList(.education_off, list(primary_universal = TRUE))
   # ),
 
-  secondary_universal = list(
-    policy_keys = "L",              # adds weather x educ_com2_hh interaction
-    sp        = .sp_off,
-    infra     = .infra_off,
-    digital   = .digital_off,
-    labor     = .labor_off,
-    education = modifyList(.education_off, list(secondary_universal = TRUE))
-  )
+  # secondary_universal = list(
+  #   policy_keys = "L",              # adds weather x educ_com2_hh interaction
+  #   sp        = .sp_off,
+  #   infra     = .infra_off,
+  #   digital   = .digital_off,
+  #   labor     = .labor_off,
+  #   education = modifyList(.education_off, list(secondary_universal = TRUE))
+  # )
 
 )
 

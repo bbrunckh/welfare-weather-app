@@ -78,7 +78,7 @@ CONSTR_LABELS <- c("Continuous", "Binned (equal freq)", "Binned (custom)")
 FOCUS_REF    <- "1to3m"
 FOCUS_CONSTR <- "binned_equal"
 FOCUS_CONSTR_LABEL <- "Binned (equal freq)"
-POLICY_VARS <- c("educ_com2_hh","electricity", "imp_wat_san_rec", "ttime_health", "urban")
+POLICY_VARS <- c("educ_com2_hh", "electricity", "imp_wat_san_rec", "urban")
 
 # For SPEI the driest (bottom) bin is the omitted reference category, so all
 # SPEI bin coefficients measure "welfare relative to drought."
@@ -587,7 +587,8 @@ if (nrow(top_bin_int) > 0) {
     "urban"           = "Urban",
     "electricity"     = "Access to electricity",
     "imp_wat_san_rec" = "Access to improved water & sanitation",
-    "ttime_health"    = "Travel time to health facility"
+    "ttime_health"    = "Travel time to health facility",
+    "educ_com2_hh"    = "Completed secondary education"
   )
 
   for (wv in wx_vars) {

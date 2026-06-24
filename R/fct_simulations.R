@@ -223,20 +223,23 @@ compute_chol_vcov <- function(fit, vcov_spec = COEF_VCOV_SPEC) {
   stopifnot("fit must be a fixest model" = inherits(fit, "fixest"))
   beta  <- coef(fit)
 
-  # Try requested spec first — fallback chain if it fails
+  # Try fit-time VCV first (respects cluster= passed at estimation), then
+  # requested spec, then fallback chain
   vcov_fallbacks <- list(vcov_spec, ~loc_id, "HC1", "iid")
-  Sigma <- NULL
-  for (spec in vcov_fallbacks) {
-    Sigma <- tryCatch(
-      vcov(fit, vcov = spec),
-      error = function(e) NULL
-    )
-    if (!is.null(Sigma) && all(is.finite(Sigma))) {
-      if (!identical(spec, vcov_spec))
-        message("[compute_chol_vcov] fell back to vcov spec: ", deparse(spec))
-      break
-    }
+  Sigma <- tryCatch(vcov(fit), error = function(e) NULL)
+  if (is.null(Sigma) || !all(is.finite(Sigma))) {
     Sigma <- NULL
+    for (spec in vcov_fallbacks) {
+      Sigma <- tryCatch(
+        vcov(fit, vcov = spec),
+        error = function(e) NULL
+      )
+      if (!is.null(Sigma) && all(is.finite(Sigma))) {
+        message("[compute_chol_vcov] fell back to vcov spec: ", deparse(spec))
+        break
+      }
+      Sigma <- NULL
+    }
   }
 
   if (is.null(Sigma))

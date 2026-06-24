@@ -952,6 +952,38 @@ fit_model <- function(df, selected_outcome, selected_weather, selected_model) {
   fit3 <- fit_one(formulas$formula3, "weather + FE + controls")
 
   # ---------------------------------------------------------------------------
+  # 8b. Slim fit objects to reduce memory
+  # ---------------------------------------------------------------------------
+  # do.call(feols, args) captures the full evaluated `data` argument inside
+
+  # the call slot — for large surveys this adds hundreds of MB per fit element
+  # (×27 for RIF with 9 taus × 3 fits). Strip the embedded data from $call
+  # and remove $scores (only needed to re-compute robust VCV, which is already
+
+  # stored in $coeftable). predict(), vcov(), model.matrix(), r2(), fixef()
+  # all continue to work after this.
+
+  .slim_fit <- function(fit) {
+    if (inherits(fit, "fixest")) {
+      if (length(fit$call) >= 3L) fit$call[[3]] <- quote(.data_removed)
+      fit$scores <- NULL
+    } else if (is.list(fit)) {
+      # fixest_multi: list of fixest objects (one per tau)
+      for (i in seq_along(fit)) {
+        if (inherits(fit[[i]], "fixest")) {
+          if (length(fit[[i]]$call) >= 3L) fit[[i]]$call[[3]] <- quote(.data_removed)
+          fit[[i]]$scores <- NULL
+        }
+      }
+    }
+    fit
+  }
+
+  fit1 <- .slim_fit(fit1)
+  fit2 <- .slim_fit(fit2)
+  fit3 <- .slim_fit(fit3)
+
+  # ---------------------------------------------------------------------------
   # 9. Build RIF grid (beta curves) from all three model specifications
   # ---------------------------------------------------------------------------
 
