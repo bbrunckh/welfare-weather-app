@@ -171,12 +171,10 @@ predict_rif <- function(fit_multi, newdata, svy, train_data, taus, outcome,
   # Store deltas in a matrix: rows = observations, cols = quantiles
   delta_mat <- matrix(NA_real_, nrow = n, ncol = K)
 
-  # For F_loading: store X_scenario (full design matrix under scenario
-  # weather) per quantile.
-  #
-  # F_loading_k = X_scenario %*% t(L_k) gives the delta-method gradient of
-  # the *predicted welfare level* under the RIF regression at quantile k,
-  # consistent with the OLS path's F_loading construction. Downstream:
+  # For F_loading: the scenario design matrix X_scenario %*% L_k gives the
+  # delta-method gradient of the *predicted welfare level* under the RIF
+  # regression at quantile k, consistent with the OLS path's F_loading
+  # construction. Downstream:
   #   - Level mode: ||F_loading||^2 = level-CI of the predicted welfare
   #     under the RIF model at this household's quantile position tau_i.
   #     Comparable in width to OLS level bands.
@@ -190,8 +188,15 @@ predict_rif <- function(fit_multi, newdata, svy, train_data, taus, outcome,
   # SE refers to the predicted level under the regression, not to that
   # observed-anchored displayed value (analogous to how OLS's level SE
   # refers to its predicted, not "true," welfare).
+  #
+  # Memory: rather than materialising all K full N×P scenario design matrices
+  # up front (≈ K × N × p × 8 bytes — ~8 GB for a large-N country with K=9),
+  # interpolate_F_loading() builds each quantile's design matrix on demand for
+  # only the rows that need it (it processes rows grouped by their (lo, hi)
+  # quantile pair). We hand it a lazy accessor that calls model.matrix() on a
+  # row subset of newdata_scen. Bit-identical to the all-at-once form because
+  # matrix multiply distributes over row subsetting.
   compute_loading <- !is.null(chol_list) && length(chol_list) == K
-  X_scen_list    <- if (compute_loading) vector("list", K) else NULL
 
   for (k in seq_len(K)) {
     # Baseline weather prediction (needed for the climate-delta point
@@ -203,24 +208,15 @@ predict_rif <- function(fit_multi, newdata, svy, train_data, taus, outcome,
     pred_new <- as.numeric(stats::predict(fit_multi[[k]], newdata = newdata_scen,
                                           type = "response"))
 
-    # Capture scenario design matrix for level-mode F_loading
-    if (compute_loading) {
-      X_scen_list[[k]] <- tryCatch(
-        stats::model.matrix(fit_multi[[k]], data = newdata_scen, type = "rhs"),
-        error = function(e) NULL
-      )
-      if (is.null(X_scen_list[[k]])) compute_loading <- FALSE
-    }
-
     delta_mat[, k] <- pred_new - pred_base
   }
 
   # Restore scenario weather in newdata (for output)
   for (wc in weather_cols) newdata[[wc]] <- saved_weather[[wc]]
 
-  # Clean up pre-built frames
-
-  rm(newdata_base, newdata_scen, saved_weather)
+  # Clean up pre-built frames. newdata_scen is retained until after F_loading
+  # is built below, since the lazy design-matrix accessor reads from it.
+  rm(newdata_base, saved_weather)
 
   # Interpolate delta at each household's tau_i position
   delta_i <- interpolate_delta(delta_mat, taus, tau_i)
@@ -230,11 +226,17 @@ predict_rif <- function(fit_multi, newdata, svy, train_data, taus, outcome,
   newdata$.residual  <- NA_real_
   newdata[[outcome]] <- y_baseline + delta_i
 
-  # Compute F_loading by interpolating X_scenario %*% t(L_k) at each tau_i
-  if (compute_loading && !any(vapply(X_scen_list, is.null, logical(1)))) {
+  # Compute F_loading by interpolating X_scenario %*% L_k at each tau_i.
+  # X_scen_fn(k, rows) builds the quantile-k scenario design matrix for the
+  # given rows only — model.matrix() on a row subset of newdata_scen.
+  if (compute_loading) {
     active_mask <- attr(chol_list, "active_mask")
+    X_scen_fn <- function(k, rows) {
+      stats::model.matrix(fit_multi[[k]], data = newdata_scen[rows, , drop = FALSE],
+                          type = "rhs")
+    }
     F_loading <- tryCatch({
-      interpolate_F_loading(X_scen_list, chol_list, taus, tau_i,
+      interpolate_F_loading(X_scen_fn, chol_list, taus, tau_i,
                              active_mask = active_mask)
     }, error = function(e) {
       warning("[predict_rif] F_loading interpolation failed: ", conditionMessage(e))
@@ -253,6 +255,8 @@ predict_rif <- function(fit_multi, newdata, svy, train_data, taus, outcome,
     }
   }
 
+  rm(newdata_scen)
+
   newdata
 }
 
@@ -265,10 +269,14 @@ predict_rif <- function(fit_multi, newdata, svy, train_data, taus, outcome,
 #' Each per-quantile loading is \eqn{F_k = X\_diff_k \%*\% t(L_k)}, where
 #' \eqn{X\_diff_k = X_{scenario} - X_{baseline}} at quantile k.
 #'
-#' @param X_diff_list List of K matrices (n x p), one per quantile.
-#' @param chol_list   List of K Cholesky factor matrices (p x p), one per quantile.
-#' @param taus        Numeric vector of length K (sorted quantile grid).
-#' @param tau_i       Numeric vector of length n (household quantile positions).
+#' @param X_diff_fn  Function \code{(k, rows)} returning the quantile-k design
+#'   matrix (\code{length(rows) x p}) for the requested rows only — built on
+#'   demand so all K full N×p matrices never coexist in memory. (For backward
+#'   compatibility, a list of K full \code{n x p} matrices is also accepted and
+#'   wrapped automatically.)
+#' @param chol_list  List of K Cholesky factor matrices (p x p), one per quantile.
+#' @param taus       Numeric vector of length K (sorted quantile grid).
+#' @param tau_i      Numeric vector of length n (household quantile positions).
 #' @param active_mask Optional logical vector of length p. When supplied,
 #'   each per-quantile loading is subset to the active columns before the
 #'   interpolation blend (additive-decomposition SE). NULL = no masking.
@@ -277,10 +285,19 @@ predict_rif <- function(fit_multi, newdata, svy, train_data, taus, outcome,
 #'   n x sum(active_mask) when masking is applied).
 #'
 #' @keywords internal
-interpolate_F_loading <- function(X_diff_list, chol_list, taus, tau_i,
+interpolate_F_loading <- function(X_diff_fn, chol_list, taus, tau_i,
                                    active_mask = NULL) {
-  n <- nrow(X_diff_list[[1]])
   K <- length(taus)
+
+  # Accept a prebuilt list of K matrices (legacy callers / tests) by wrapping
+  # it in the same (k, rows) accessor the streaming path expects.
+  if (is.list(X_diff_fn) && !is.function(X_diff_fn)) {
+    X_diff_list <- X_diff_fn
+    n <- nrow(X_diff_list[[1]])
+    X_diff_fn <- function(k, rows) X_diff_list[[k]][rows, , drop = FALSE]
+  } else {
+    n <- length(tau_i)
+  }
 
   # Find interval: taus[idx] <= tau_i < taus[idx+1]
   idx <- findInterval(tau_i, taus, all.inside = TRUE)
@@ -299,25 +316,25 @@ interpolate_F_loading <- function(X_diff_list, chol_list, taus, tau_i,
   #
   # When active_mask is set, `chol_list[[k]]` is expected to be the
   # K_active x K_active Cholesky of the active block of Sigma (built by
-  # attach_active_mask), and X_diff_list[[k]] is the full N x K design.
+  # attach_active_mask), and the design matrix is the full N x K design.
   # We subset X to active columns before multiplying.
   #
   # Memory: each output row i reads from exactly two quantile loadings,
-  # F_cache[[idx[i]]] and F_cache[[idx_hi[i]]]. Rather than materialising
-  # all K full N×P loadings (plus separate F_lo/F_hi and blend temporaries),
-  # we process rows grouped by their (lo, hi) quantile pair and compute only
-  # that group's loading rows. Matrix multiply distributes over row subsetting
-  # exactly — (X[rows, ] %*% C) is row-for-row identical to (X %*% C)[rows, ] —
-  # so the result is bit-equivalent to the all-at-once form, at a fraction of
-  # the peak allocation (one N×P result + small per-group scratch).
+  # at idx[i] and idx_hi[i]. Rather than materialising all K full N×P design
+  # matrices (≈ K × N × p × 8 bytes), we process rows grouped by their
+  # (lo, hi) quantile pair and build (via X_diff_fn) only that group's rows of
+  # the at-most-two quantiles it needs. Matrix multiply distributes over row
+  # subsetting exactly — (X[rows, ] %*% C) is row-for-row identical to
+  # (X %*% C)[rows, ] — so the result is bit-equivalent to the all-at-once
+  # form, at a fraction of the peak allocation (one N×P result + small
+  # per-group scratch).
 
-  # Determine output column count from the (possibly masked) design width.
-  apply_mask <- function(k) {
-    if (!is.null(active_mask) &&
-        length(active_mask) == ncol(X_diff_list[[k]])) {
-      X_diff_list[[k]][, active_mask, drop = FALSE]
+  # Subset a group's design matrix to active columns when masking is on.
+  apply_mask <- function(Xk) {
+    if (!is.null(active_mask) && length(active_mask) == ncol(Xk)) {
+      Xk[, active_mask, drop = FALSE]
     } else {
-      X_diff_list[[k]]
+      Xk
     }
   }
   p <- ncol(chol_list[[idx[1]]])
@@ -333,8 +350,8 @@ interpolate_F_loading <- function(X_diff_list, chol_list, taus, tau_i,
     b <- idx_hi[rows[1]]
     w_g <- w[rows]
 
-    F_a <- apply_mask(a)[rows, , drop = FALSE] %*% chol_list[[a]]
-    F_b <- if (b == a) F_a else apply_mask(b)[rows, , drop = FALSE] %*% chol_list[[b]]
+    F_a <- apply_mask(X_diff_fn(a, rows)) %*% chol_list[[a]]
+    F_b <- if (b == a) F_a else apply_mask(X_diff_fn(b, rows)) %*% chol_list[[b]]
 
     F[rows, ] <- (1 - w_g) * F_a + w_g * F_b
   }

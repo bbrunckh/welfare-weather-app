@@ -222,7 +222,7 @@ fct_run_simulation <- function(sw,
     dplyr::mutate(year = as.character(year)) |>
     dplyr::select(-dplyr::any_of(drop_cols))
 
-  # ---- Pre-run all pipelines  --------------------- #
+  # ---- Run pipelines (one key at a time) ---------------------------------- #
   progress_fn(0.50, "Running simulations...")
 
   t_start <- t_start_total   # key loop elapsed = total elapsed from function entry
@@ -239,60 +239,15 @@ fct_run_simulation <- function(sw,
     all_keys
   )
 
-    # Serial path — per-key messages fire BEFORE each key runs
-    pipeline_list <- vector("list", length(all_keys))
-      for (ki in seq_along(all_keys)) {
-      key       <- all_keys[[ki]]
-      is_hist_k <- identical(key, "historical")
-      t_el      <- proc.time()[["elapsed"]] - t_start_pipeline
-      t_remain  <- if (ki > 1L)
-        (t_el / (ki - 1L)) * (n_keys - ki + 1L) else NA_real_
-
-      progress_fn(
-        value  = 0.35 + 0.45 * ((ki - 1L) / n_keys),
-        detail = sprintf("Key %d/%d: %s | %s elapsed",
-                         ki, n_keys,
-                         if (is_hist_k) "Historical"
-                         else sub("^(ssp[^_]+_[0-9]+_[0-9]+)_.*$",
-                                  "\\1", key),
-                         format_elapsed(t_el))
-      )
-      pipeline_list[[ki]] <- tryCatch(
-        run_sim_pipeline(
-          weather_raw  = weather_per_key[[key]],
-          svy          = svy,
-          sw           = sw,
-          so           = so,
-          model        = model,
-          residuals    = residuals,
-          train_data   = train_data,
-          engine       = engine,
-          chol_obj     = chol_obj,
-          fit_multi    = fit_multi,
-          taus         = taus,
-          weather_cols = weather_cols,
-          precomputed_train_aug = precomputed_train_aug,
-          svy_prepared = svy_prepared
-        ),
-        error = function(e) {
-          warning(sprintf("[fct_run_simulation] Key %s failed: %s",
-                          key, conditionMessage(e)))
-          NULL
-        }
-      )
-    }
-
-  rm(weather_per_key, precomputed_train_aug, svy_prepared)
-  gc(verbose = FALSE)
-
-  t_pipeline_done <- proc.time()[["elapsed"]] - t_start_pipeline
-  progress_fn(0.80, sprintf("Pipelines complete (%s) — grouping results...",
-                             format_elapsed(t_pipeline_done)))
-
-
-
   # ---- Key loop ----------------------------------------------------------- #
-  
+  # Run each key's pipeline and assemble its result immediately, then free the
+  # pipeline before the next key. This bounds resident memory to a single key's
+  # pipeline (each carries its full weather_raw and an N×P F_loading matrix)
+  # rather than holding all keys at once — the previous two-pass design (build
+  # every pipeline into pipeline_list, then consume) stacked one key's transient
+  # peak on top of every prior key's retained pipeline, which tips large-N
+  # countries over the vector-memory limit.
+
   hist_sim_result  <- NULL
   new_scenarios    <- list()
   group_agg        <- list()
@@ -301,10 +256,49 @@ fct_run_simulation <- function(sw,
   group_n          <- list()
 
   for (ki in seq_along(all_keys)) {
-    key     <- all_keys[[ki]]
-    is_hist <- identical(key, "historical")
+    key       <- all_keys[[ki]]
+    is_hist   <- identical(key, "historical")
+    is_hist_k <- is_hist
 
-    out <- pipeline_list[[ki]]
+    # Per-key progress (fires before the key runs) — mirrors the old pre-run
+    # loop's message.
+    t_el <- proc.time()[["elapsed"]] - t_start_pipeline
+    progress_fn(
+      value  = 0.35 + 0.45 * ((ki - 1L) / n_keys),
+      detail = sprintf("Key %d/%d: %s | %s elapsed",
+                       ki, n_keys,
+                       if (is_hist_k) "Historical"
+                       else sub("^(ssp[^_]+_[0-9]+_[0-9]+)_.*$",
+                                "\\1", key),
+                       format_elapsed(t_el))
+    )
+
+    out <- tryCatch(
+      run_sim_pipeline(
+        weather_raw  = weather_per_key[[key]],
+        svy          = svy,
+        sw           = sw,
+        so           = so,
+        model        = model,
+        residuals    = residuals,
+        train_data   = train_data,
+        engine       = engine,
+        chol_obj     = chol_obj,
+        fit_multi    = fit_multi,
+        taus         = taus,
+        weather_cols = weather_cols,
+        precomputed_train_aug = precomputed_train_aug,
+        svy_prepared = svy_prepared
+      ),
+      error = function(e) {
+        warning(sprintf("[fct_run_simulation] Key %s failed: %s",
+                        key, conditionMessage(e)))
+        NULL
+      }
+    )
+
+    # Free this key's weather slice as soon as the pipeline has run.
+    weather_per_key[[key]] <- NULL
 
     key_weather_raw        <- if (is_hist) weather_result[[key]] else NULL
     weather_result[[key]]  <- NULL
@@ -377,7 +371,12 @@ fct_run_simulation <- function(sw,
     if (ki %% 10L == 0L) gc(verbose = FALSE)
   }
 
-  rm(pipeline_list, weather_result); gc(verbose = FALSE)
+  rm(weather_per_key, weather_result, precomputed_train_aug, svy_prepared)
+  gc(verbose = FALSE)
+
+  t_pipeline_done <- proc.time()[["elapsed"]] - t_start_pipeline
+  progress_fn(0.80, sprintf("Pipelines complete (%s) — grouping results...",
+                             format_elapsed(t_pipeline_done)))
 
   # ---- Assemble new_scenarios --------------------------------------------- #
   for (gk in names(group_agg)) {

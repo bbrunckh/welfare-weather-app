@@ -26,6 +26,8 @@
 
 pkgload::load_all(quiet = TRUE)
 invisible(lapply(list.files("batch/R", pattern = "\\.R$", full.names = TRUE), source))
+# Increase memory limit to 32 GB 
+mem.maxVSize(32 * 1024)
 
 # =============================================================================
 # SECTION 1 — CONFIGURATION
