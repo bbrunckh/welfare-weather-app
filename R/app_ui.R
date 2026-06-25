@@ -12,10 +12,8 @@ app_ui <- function(request) {
       tags$small(golem::get_golem_version(), style = "color: #777; font-size: 0.5em;")
     ),
 
-    # MathJax once
-    header = tags$head(
-      tags$script(src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.7/MathJax.js?config=TeX-MML-AM_CHTML")
-    ),
+    # MathJax via Shiny's bundled copy (no CDN needed on Connect)
+    header = withMathJax(),
 
 	# Page modules
     tabPanel("Overview", mod_0_overview_ui("overview")), # welcome message

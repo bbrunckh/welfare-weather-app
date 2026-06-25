@@ -54,9 +54,9 @@ mod_3_scenario_ui <- function(id) {
           tabPanel(
             title = "Overview",
             value = "overview",
-            includeMarkdown(
+            withMathJax(includeMarkdown(
               system.file("app/www/equation2.md", package = "wiseapp")
-            ),
+            )),
             mod_3_06_policy_sim_ui(ns("policy_sim"))
           )
         )

@@ -51,7 +51,7 @@ mod_1_modelling_ui <- function(id) {
           tabPanel(
             title = "Overview",
             value = "overview",
-            includeMarkdown(system.file("app/www/equation.md", package = "wiseapp"))
+            withMathJax(includeMarkdown(system.file("app/www/equation.md", package = "wiseapp")))
           )
         )
       )

@@ -151,7 +151,7 @@ AGG_METHODS <- c(
 )
 
 # ---- Output -----------------------------------------------------------------
-OVERWRITE_EXISTING <- TRUE   # FALSE = append+dedup existing CSVs; TRUE = overwrite
+OVERWRITE_EXISTING <- FALSE   # FALSE = append+dedup existing CSVs; TRUE = overwrite
 SKIP_PLOTS         <- FALSE  # TRUE = skip all PNG generation (faster reruns)
 SAVE_MODEL_FIT     <- TRUE  # TRUE = also save model_coefficients + fit_stats (like 03_run_mod1.R)
 

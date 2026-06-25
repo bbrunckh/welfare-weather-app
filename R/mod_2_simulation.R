@@ -34,7 +34,7 @@ mod_2_simulation_ui <- function(id) {
             title = "Overview",
             value = "overview",
             p("Outputs will appear here after you configure settings and click 'Run simulation'."),
-            includeMarkdown(system.file("app/www/equation2.md", package = "wiseapp"))
+            withMathJax(includeMarkdown(system.file("app/www/equation2.md", package = "wiseapp")))
           )
         )
       )
