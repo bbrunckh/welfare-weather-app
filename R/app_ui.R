@@ -6,14 +6,24 @@
 #' @noRd
 
 app_ui <- function(request) {
+  # Serve bundled MathJax from its own resource path (outside www/
+  # to avoid bundle_resources() trying to include all 100+ JS files)
+  shiny::addResourcePath("mathjax", system.file("mathjax", package = "wiseapp"))
+  options(
+    shiny.mathjax.url    = "mathjax/MathJax.js",
+    shiny.mathjax.config = "config=TeX-AMS-MML_HTMLorMML"
+  )
+
   navbarPage(
     title = tagList(
       "WISE-APP",
       tags$small(golem::get_golem_version(), style = "color: #777; font-size: 0.5em;")
     ),
 
-    # MathJax via Shiny's bundled copy (no CDN needed on Connect)
-    header = withMathJax(),
+    header = tagList(
+      golem_add_external_resources(),
+      withMathJax()
+    ),
 
 	# Page modules
     tabPanel("Overview", mod_0_overview_ui("overview")), # welcome message
