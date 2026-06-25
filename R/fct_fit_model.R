@@ -960,8 +960,15 @@ fit_model <- function(df, selected_outcome, selected_weather, selected_model) {
   # (×27 for RIF with 9 taus × 3 fits). Strip the embedded data from $call
   # and remove $scores (only needed to re-compute robust VCV, which is already
 
-  # stored in $coeftable). predict(), vcov(), model.matrix(), r2(), fixef()
-  # all continue to work after this.
+  # stored in $coeftable). vcov(), r2() and fixef() continue to work after this.
+  #
+  # NOTE: stats::model.matrix(fit) does NOT survive slimming — fixest
+  # re-evaluates the `data` argument from $call to rebuild the design matrix,
+  # so once $call[[3]] is gone it errors. The marginal-effect plot
+  # (make_weather_effect_plot) needs that matrix for the linear path, so for
+  # fit3 (the fit it plots) we cache the design matrix in attr "wise_mm"
+  # *before* slimming. RIF plots from a precomputed beta grid and never calls
+  # model.matrix(), which is why it was unaffected.
 
   .slim_fit <- function(fit) {
     if (inherits(fit, "fixest")) {
@@ -978,6 +985,37 @@ fit_model <- function(df, selected_outcome, selected_weather, selected_model) {
     }
     fit
   }
+
+  # Cache fit3's design matrix before slimming so the downstream model-fit and
+  # effect plots can rebuild predictions / importance without re-evaluating the
+  # (now removed) embedded data. fit3 is the only fit plotted. For RIF, all
+  # quantile sub-fits share one design matrix, so we cache a single copy on the
+  # median sub-fit (the one extract_rif_median() returns) — not all 9 — keeping
+  # this to at most one stored matrix either way.
+  .cache_mm <- function(fit) {
+    if (inherits(fit, "fixest")) {
+      mm <- tryCatch(as.data.frame(stats::model.matrix(fit)),
+                     error = function(e) NULL)
+      if (!is.null(mm)) attr(fit, "wise_mm") <- mm
+    } else if (is.list(fit) && length(fit) > 0) {
+      # fixest_multi: cache on the median sub-fit (index matches extract_rif_median).
+      # Pull the sub-fit out, attach the attr, and write it back — assigning to
+      # attr(fit[[idx]], ...) directly would mutate a throwaway copy.
+      idx <- min(5L, length(fit))
+      sub <- fit[[idx]]
+      if (inherits(sub, "fixest")) {
+        mm <- tryCatch(as.data.frame(stats::model.matrix(sub)),
+                       error = function(e) NULL)
+        if (!is.null(mm)) {
+          attr(sub, "wise_mm") <- mm
+          fit[[idx]] <- sub
+        }
+      }
+    }
+    fit
+  }
+
+  fit3 <- .cache_mm(fit3)
 
   fit1 <- .slim_fit(fit1)
   fit2 <- .slim_fit(fit2)

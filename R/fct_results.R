@@ -429,6 +429,30 @@ extract_native_fit <- function(fit, engine = "fixest") {
 }
 
 
+#' Resolve a fitted model's design matrix, preferring the cached copy
+#'
+#' `fit_model()` strips the embedded data from each fixest fit's `$call` to
+#' save memory, after which `stats::model.matrix(fit)` errors (fixest tries to
+#' re-fetch the now-removed data). Before slimming, `fit_model()` caches fit3's
+#' design matrix in `attr(fit, "wise_mm")`. This helper returns that cached
+#' matrix when present and otherwise recomputes (for unslimmed fits, or
+#' non-fit3 fits that were never cached).
+#'
+#' @param model A fitted model object (typically `fixest`).
+#'
+#' @return A data frame design matrix, or `NULL` if it cannot be resolved.
+#'
+#' @export
+resolve_model_matrix <- function(model) {
+  cached <- attr(model, "wise_mm")
+  if (!is.null(cached)) return(as.data.frame(cached))
+  tryCatch(
+    as.data.frame(stats::model.matrix(model)),
+    error = function(e) NULL
+  )
+}
+
+
 #' Extract the median quantile model from a RIF fixest_multi
 #'
 #' For diagnostic functions that require a single fixest model, this extracts
@@ -766,6 +790,15 @@ make_weather_effect_plot <- function(fit, pred_var, interaction_terms, is_binned
       ggplot2::theme_void()
   }
 
+  # Design matrix for the linear (non-RIF) effect plot. Prefers the cached
+  # copy stashed by fit_model() before slimming (see resolve_model_matrix);
+  # falls back to model.frame() only if neither cache nor model.matrix() works.
+  mm_of <- function(fit) {
+    mm <- resolve_model_matrix(fit)
+    if (!is.null(mm)) return(mm)
+    tryCatch(stats::model.frame(fit), error = function(e) NULL)
+  }
+
   # --- RIF branch: weather beta curve across quantiles -----------------------
   if (identical(engine, "rif") && !is.null(rif_grid)) {
     return(tryCatch({
@@ -990,10 +1023,7 @@ make_weather_effect_plot <- function(fit, pred_var, interaction_terms, is_binned
   )
   y_lab <- label_fun(y_var_name)
 
-  mf <- tryCatch(
-    as.data.frame(stats::model.matrix(fit)),
-    error = function(e) tryCatch(stats::model.frame(fit), error = function(e2) NULL)
-  )
+  mf <- mm_of(fit)
 
   # --- Resolve pred columns (exact or binned prefix match) ------------------
   pred_esc <- gsub("([\\[\\]\\(\\)\\^\\$\\.\\*\\+\\?])", "\\\\\\1", pred_var)
@@ -1019,7 +1049,8 @@ make_weather_effect_plot <- function(fit, pred_var, interaction_terms, is_binned
       if (!requireNamespace("fixest", quietly = TRUE))
         return(blank_plot("Package 'fixest' is required."))
 
-      mm <- as.data.frame(stats::model.matrix(fit))
+      mm <- mm_of(fit)
+      if (is.null(mm)) return(blank_plot("Model matrix unavailable."))
       ct <- .fixest_coeftable(fit)
       ct$term <- rownames(ct)
 
@@ -1220,7 +1251,8 @@ make_weather_effect_plot <- function(fit, pred_var, interaction_terms, is_binned
     }
 
     p <- tryCatch({
-      mm     <- as.data.frame(stats::model.matrix(fit))
+      mm     <- mm_of(fit)
+      if (is.null(mm)) return(blank_plot("Model matrix unavailable."))
       betas  <- stats::coef(fit)
       vcov_m <- .fixest_vcov(fit)
       n_grid <- 50L
@@ -1644,7 +1676,7 @@ plot_resid_weather <- function(model, haz_var, weather_df, x_label = haz_var) {
   df <- tryCatch(stats::model.frame(model), error = function(e) NULL)
 
   if (is.null(df) || !haz_var %in% names(df)) {
-    mm <- tryCatch(as.data.frame(stats::model.matrix(model)), error = function(e) NULL)
+    mm <- resolve_model_matrix(model)
     if (is.null(mm)) return(invisible(NULL))
 
     if (haz_var %in% names(mm)) {
@@ -1858,12 +1890,24 @@ calc_fit_stats <- function(model, is_logistic, engine = "fixest") {
 #'
 #' @export
 plot_relaimpo <- function(model, var_info = NULL) {
-  mm    <- stats::model.matrix(model)
+  mm    <- resolve_model_matrix(model)
+  if (is.null(mm)) {
+    return(
+      ggplot2::ggplot() +
+        ggplot2::annotate("text", x = 0.5, y = 0.5,
+                          label = "Model matrix unavailable for importance plot.",
+                          size = 3.5, color = "grey40", hjust = 0.5) +
+        ggplot2::theme_void()
+    )
+  }
   coefs <- stats::coef(model)
 
   keep <- names(coefs) != "(Intercept)"
   beta <- coefs[keep]
 
+  # resolve_model_matrix() returns a data frame; subset by the coef names
+  # present (a slimmed/cached matrix carries the same columns as model.matrix).
+  beta <- beta[names(beta) %in% names(mm)]
   X <- mm[, names(beta), drop = FALSE]
   sd_x <- apply(X, 2, stats::sd, na.rm = TRUE)
   sd_x[is.na(sd_x)] <- 0

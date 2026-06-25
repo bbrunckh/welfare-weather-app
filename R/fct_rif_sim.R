@@ -291,7 +291,6 @@ interpolate_F_loading <- function(X_diff_list, chol_list, taus, tau_i,
   tau_hi <- taus[idx_hi]
   w      <- ifelse(tau_hi > tau_lo, (tau_i - tau_lo) / (tau_hi - tau_lo), 0)
 
-  # Pre-compute F_k for the unique quantile indices needed.
   # F = X %*% L (lower triangular L with LL' = Sigma) so that
   # F F' = X L L' X' = X Sigma X' — the correct level variance.
   # Earlier versions used t(L) here, which gives X L' L X' (not Sigma)
@@ -302,35 +301,45 @@ interpolate_F_loading <- function(X_diff_list, chol_list, taus, tau_i,
   # K_active x K_active Cholesky of the active block of Sigma (built by
   # attach_active_mask), and X_diff_list[[k]] is the full N x K design.
   # We subset X to active columns before multiplying.
-  needed_idx <- unique(c(idx, idx_hi))
-  F_cache <- vector("list", K)
-  for (k in needed_idx) {
-    X_k <- if (!is.null(active_mask) &&
-               length(active_mask) == ncol(X_diff_list[[k]])) {
-             X_diff_list[[k]][, active_mask, drop = FALSE]
-           } else {
-             X_diff_list[[k]]
-           }
-    F_cache[[k]] <- X_k %*% chol_list[[k]]
+  #
+  # Memory: each output row i reads from exactly two quantile loadings,
+  # F_cache[[idx[i]]] and F_cache[[idx_hi[i]]]. Rather than materialising
+  # all K full N×P loadings (plus separate F_lo/F_hi and blend temporaries),
+  # we process rows grouped by their (lo, hi) quantile pair and compute only
+  # that group's loading rows. Matrix multiply distributes over row subsetting
+  # exactly — (X[rows, ] %*% C) is row-for-row identical to (X %*% C)[rows, ] —
+  # so the result is bit-equivalent to the all-at-once form, at a fraction of
+  # the peak allocation (one N×P result + small per-group scratch).
+
+  # Determine output column count from the (possibly masked) design width.
+  apply_mask <- function(k) {
+    if (!is.null(active_mask) &&
+        length(active_mask) == ncol(X_diff_list[[k]])) {
+      X_diff_list[[k]][, active_mask, drop = FALSE]
+    } else {
+      X_diff_list[[k]]
+    }
+  }
+  p <- ncol(chol_list[[idx[1]]])
+
+  F <- matrix(NA_real_, nrow = n, ncol = p)
+
+  # Group rows by their (lo, hi) quantile-index pair. Each group needs at
+  # most two per-quantile matmuls, restricted to the group's rows.
+  pair_key <- idx + idx_hi * (K + 1L)  # unique per (lo, hi) combination
+  for (key in unique(pair_key)) {
+    rows <- which(pair_key == key)
+    a <- idx[rows[1]]
+    b <- idx_hi[rows[1]]
+    w_g <- w[rows]
+
+    F_a <- apply_mask(a)[rows, , drop = FALSE] %*% chol_list[[a]]
+    F_b <- if (b == a) F_a else apply_mask(b)[rows, , drop = FALSE] %*% chol_list[[b]]
+
+    F[rows, ] <- (1 - w_g) * F_a + w_g * F_b
   }
 
-  # Vectorised blend: extract rows from F_cache matrices using batch indexing
-  p <- ncol(F_cache[[needed_idx[1]]])
-
-  # Build F_lo and F_hi matrices by row-selecting from cached results
-  # Each row i of F_lo is F_cache[[idx[i]]][i, ]
-  F_lo <- matrix(NA_real_, nrow = n, ncol = p)
-  F_hi <- matrix(NA_real_, nrow = n, ncol = p)
-
-  for (k in needed_idx) {
-    rows_lo <- which(idx == k)
-    if (length(rows_lo) > 0L) F_lo[rows_lo, ] <- F_cache[[k]][rows_lo, , drop = FALSE]
-    rows_hi <- which(idx_hi == k)
-    if (length(rows_hi) > 0L) F_hi[rows_hi, ] <- F_cache[[k]][rows_hi, , drop = FALSE]
-  }
-
-  # Vectorised linear interpolation: (1-w) * F_lo + w * F_hi
-  (1 - w) * F_lo + w * F_hi
+  F
 }
 
 

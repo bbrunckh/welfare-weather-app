@@ -21,7 +21,7 @@
 library(tidyverse)
 library(arrow)
 
-OUT_DIR      <- "dev/outputs"
+OUT_DIR      <- "dev/outputs/case_studies"
 SIM_DIR      <- file.path(OUT_DIR, "simulations")
 OUT_PLOT_DIR <- file.path(SIM_DIR, "decile_decomp_1in20")
 dir.create(OUT_PLOT_DIR, showWarnings = FALSE, recursive = TRUE)
@@ -37,7 +37,8 @@ scenario_labels <- c(
 policy_names <- c(
   "sp_p5_bottom40"        = "Cash transfer (5% GDP, bottom 40%)",
   "elec_universal"        = "Universal electricity access",
-  "imp_wat_san_universal" = "Water & sanitation (universal)"
+  "imp_wat_san_universal" = "Water & sanitation (universal)",
+  "secondary_universal"     = "Universal secondary education"
 )
 
 channel_labels <- c(
