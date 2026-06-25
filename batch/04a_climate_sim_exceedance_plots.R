@@ -36,8 +36,8 @@ all_policy_labels <- c("no_policy", names(exceed_policy_labels))
 
 # Log x-axis: return period = 1/exceed_prob
 # Breaks at exceedance probs corresponding to 1-in-N year events
-rp_breaks      <- c(1/20, 1/10, 1/5, 1/2, 1/1)
-rp_break_labels <- c("1-in-20", "1-in-10", "1-in-5", "1-in-2", "1-in-1")
+rp_breaks       <- c(1/20, 1/10, 1/5, 1/2)
+rp_break_labels <- c("1-in-20", "1-in-10", "1-in-5", "1-in-2")
 
 # Load all countries; use each country's own wx_name
 outcomes_all <- read_parquet(file.path(SIM_DIR, "outcomes.parquet")) |>
@@ -94,8 +94,8 @@ make_curves <- function(poverty_agg) {
 }
 
 plot_exceedance <- function(country_code, hist_curve, fut_curve, poverty_label, poverty_y_label) {
-  h      <- hist_curve |> filter(code == country_code)
-  s      <- fut_curve  |> filter(code == country_code)
+  h      <- hist_curve |> filter(code == country_code, exceed_prob <= 0.5)
+  s      <- fut_curve  |> filter(code == country_code, exceed_prob <= 0.5)
   combos <- s |> distinct(scenario_id, policy_label)
 
   line_layers <- pmap(combos, \(scenario_id, policy_label) {
@@ -122,7 +122,7 @@ plot_exceedance <- function(country_code, hist_curve, fut_curve, poverty_label, 
     setNames(exceed_scenario_lty[combos$scenario_id], combo_labels)
   )
 
-  right_edge_prob <- max(common_probs)
+  right_edge_prob <- max(s$exceed_prob)
 
   fut_labels <- s |>
     filter(exceed_prob == right_edge_prob) |>
@@ -136,7 +136,7 @@ plot_exceedance <- function(country_code, hist_curve, fut_curve, poverty_label, 
     select(exceed_prob, y = value_median, lbl, colour)
 
   hist_label <- h |>
-    filter(exceed_prob == right_edge_prob) |>
+    filter(exceed_prob == max(exceed_prob)) |>
     mutate(lbl = "Historical (no policy)", colour = "#000000") |>
     select(exceed_prob, y = value, lbl, colour)
 
@@ -169,7 +169,7 @@ plot_exceedance <- function(country_code, hist_curve, fut_curve, poverty_label, 
       show.legend        = FALSE
     ) +
     scale_x_log10(
-      name   = "Return period (years)",
+      name   = "Event frequency (years)",
       breaks = rp_breaks,
       labels = rp_break_labels,
       expand = expansion(mult = c(0.01, 0.15))
