@@ -21,7 +21,7 @@
 library(tidyverse)
 library(arrow)
 
-OUT_DIR    <- "dev/outputs"
+OUT_DIR    <- "dev/outputs/case_studies"
 SIM_DIR    <- file.path(OUT_DIR, "simulations")
 DECILE_DIR <- file.path(SIM_DIR, "decile_decomp")
 dir.create(DECILE_DIR, showWarnings = FALSE, recursive = TRUE)

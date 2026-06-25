@@ -63,7 +63,7 @@ if (!exists("dd_raw")) {
 
 # Restrict to temperature 1-3 month binned spec only (exclude rx5day etc.)
 dd <- dd_raw |>
-  filter(grepl("_t_1to3m_binn_None", spec_label)) |>
+  filter(grepl("_1to3m_binn", spec_label)) |>
   mutate(country = str_extract(spec_label, "^[A-Z]+")) |>
   filter(scenario_id %in% FOCUS_SCENARIOS)
 
