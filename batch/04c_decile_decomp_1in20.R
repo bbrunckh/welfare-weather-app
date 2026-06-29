@@ -57,13 +57,11 @@ channel_colours <- c(
 
 # ── Load ──────────────────────────────────────────────────────────────────────
 # Re-use dd_raw if already in environment, otherwise load from parquet
-if (!exists("dd_raw")) {
-  dd_raw <- read_parquet(file.path(SIM_DIR, "decile_decomposition_by_year.parquet"))
-}
+dd_raw <- read_parquet(file.path(SIM_DIR, "decile_decomposition_by_year.parquet"))
 
 # Restrict to temperature 1-3 month binned spec only (exclude rx5day etc.)
 dd <- dd_raw |>
-  filter(grepl("_1to3m_binn", spec_label)) |>
+  filter(grepl("t_1to3m_binn_None", spec_label)) |>
   mutate(country = str_extract(spec_label, "^[A-Z]+")) |>
   filter(scenario_id %in% FOCUS_SCENARIOS)
 

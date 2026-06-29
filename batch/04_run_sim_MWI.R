@@ -26,6 +26,8 @@
 
 pkgload::load_all(quiet = TRUE)
 invisible(lapply(list.files("batch/R", pattern = "\\.R$", full.names = TRUE), source))
+# Increase memory limit to 32 GB 
+mem.maxVSize(32 * 1024)
 
 # =============================================================================
 # SECTION 1 — CONFIGURATION
@@ -47,7 +49,7 @@ POOL_COUNTRIES <- FALSE   # TRUE = one pooled model; FALSE = per-country
 
 # ---- Country / survey sample (mod_1_01) [GRID when !POOL_COUNTRIES] --------
 # NULL = all available; c(...) = subset
-COUNTRY_FILTER <- c("SEN")
+COUNTRY_FILTER <- c("MWI")
 #   "BEN", "BFA", "BRA", "CIV", "COL", "GMB", "GNB", "GTM", "IND", "IRN", "LKA",
 #   "MLI", "MRT", "MWI", "NER", "SEN", "TCD", "TGO", 
 #   "TJK", "VNM", "ZMB"
@@ -74,10 +76,6 @@ CUSTOM_SPEI_BREAKS <- c(-1, -0.5, 0, 0.5)   # SPEI
   )), v)), sprintf("%s_1to%dm_binn_cust", v, re))
 
 WEATHER_SPECS <- c(
-    # t_r_1to3m_binn = list(
-    #   t = list(ref_start = 1L, ref_end = 3L, transformation = "binned", weather_transformation = "None", binning_method = "Equal frequency", n_bins = 10),
-    #   r = list(ref_start = 1L, ref_end = 3L, transformation = "binned", weather_transformation = "None", binning_method = "Equal frequency", n_bins = 10)
-    # )
   expand_weather_specs("t", c(3L), c("binned"), "None", 1L)
   # expand_weather_specs("rx5day", c(3L), c("binned"), "None", 1L),
   # expand_weather_specs("spei6", c(3L), c("binned"), "None", 1L),
@@ -284,14 +282,14 @@ DEV_MODE <- FALSE   # TRUE = 1 ensemble member only; fast debug runs
 # "no_policy" is always be present — it is the base simulation (no resimulation pass).
 POLICY_SCENARIOS <- list(
 
-  elec_universal = list(
-    policy_keys = "A",              # adds weather x electricity interaction to base model
-    sp        = .sp_off,
-    infra     = modifyList(.infra_off, list(elec_universal = TRUE)),
-    digital   = .digital_off,
-    labor     = .labor_off,
-    education = .education_off
-  )
+  # elec_universal = list(
+  #   policy_keys = "A",              # adds weather x electricity interaction to base model
+  #   sp        = .sp_off,
+  #   infra     = modifyList(.infra_off, list(elec_universal = TRUE)),
+  #   digital   = .digital_off,
+  #   labor     = .labor_off,
+  #   education = .education_off
+  # )
 
   # imp_wat_universal = list(
   #   policy_keys = "B",              # adds weather x imp_wat_rec interaction
@@ -352,16 +350,16 @@ POLICY_SCENARIOS <- list(
   #   digital   = .digital_off,
   #   labor     = .labor_off,
   #   education = modifyList(.education_off, list(primary_universal = TRUE))
-  # ),
-
-  # secondary_universal = list(
-  #   policy_keys = "L",              # adds weather x educ_com2_hh interaction
-  #   sp        = .sp_off,
-  #   infra     = .infra_off,
-  #   digital   = .digital_off,
-  #   labor     = .labor_off,
-  #   education = modifyList(.education_off, list(secondary_universal = TRUE))
   # )
+
+  secondary_universal = list(
+    policy_keys = "L",              # adds weather x educ_com2_hh interaction
+    sp        = .sp_off,
+    infra     = .infra_off,
+    digital   = .digital_off,
+    labor     = .labor_off,
+    education = modifyList(.education_off, list(secondary_universal = TRUE))
+  )
 
 )
 

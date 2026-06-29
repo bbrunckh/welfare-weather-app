@@ -95,7 +95,7 @@ MODEL_TYPE <- c("Quantile regression (RIF)")
 
 # ---- Interactions (mod_1_06) [GRID] -----------------------------------------
 # character(0) = no interaction; each entry interacts that variable with weather
-INTERACTIONS <- list(character(0))  # e.g. "urban", "electricity"...
+INTERACTIONS <- list("urban")  # e.g. "urban", "electricity"...
 
 # ---- Fixed effects (mod_1_06) [GRID] ----------------------------------------
 # Named list of FE profiles. Values are character vectors passed to fixest.

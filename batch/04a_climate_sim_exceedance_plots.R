@@ -42,6 +42,7 @@ rp_break_labels <- c("1-in-20", "1-in-10", "1-in-5", "1-in-2")
 # Load all countries; use each country's own wx_name
 outcomes_all <- read_parquet(file.path(SIM_DIR, "outcomes.parquet")) |>
   filter(
+    grepl("t_1to3m_binn_None", spec_label),
     policy_label %in% all_policy_labels,
     scenario_id  %in% c("historical", FOCUS_SCENARIOS)
   )

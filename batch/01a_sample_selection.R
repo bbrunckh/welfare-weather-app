@@ -255,7 +255,7 @@ ggsave(file.path(OUT_SAMPLE, "01a_5_welfare_comparison.png"), p_welfare,
 # SECTION 6 — POLICY VARIABLE COVERAGE
 # =============================================================================
 
-policy_vars <- c("electricity", "imp_wat_san_rec", "ttime_health")
+policy_vars <- c("electricity", "imp_wat_san_rec", "educ_com2_hh")
 
 policy_coverage <- survey_stats |>
   filter(variable %in% policy_vars) |>
@@ -272,7 +272,7 @@ policy_coverage <- survey_stats |>
 policy_var_labels <- c(
   electricity    = "Electricity access",
   imp_wat_san_rec = "Improved water & sanitation",
-  ttime_health   = "Travel time to health (min)"
+  educ_com2_hh   = "Secondary education"
 )
 
 # Country order: mean electricity (first variable) in latest survey wave
@@ -639,6 +639,7 @@ policy_scenario_table <- tribble(
   "imp_san_universal",      "C",         "Universal improved sanitation access",           "imp_san_rec",
   "imp_wat_san_universal",  "I",         "Universal improved water + sanitation",          "imp_wat_san_rec",
   "health30min",            "D",         "Max 30-min travel to health facility",           "ttime_health",
+  "educ_sec_universal",     "E",         "Universal secondary education completion",        "educ_com2_hh",
   "sp_p20_bottom40",        "—",         "Social protection: P20 transfer, bottom 40%",   "(none — SP only)"
 )
 
