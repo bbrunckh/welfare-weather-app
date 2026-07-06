@@ -14,9 +14,8 @@ RoxygenNote: 7.3.3
 Imports:
     shiny,
     golem,
-    waiter,
-    bsplus,
     bslib,
+    brand.yml,
     ggplot2,
     ggridges,
     scales,

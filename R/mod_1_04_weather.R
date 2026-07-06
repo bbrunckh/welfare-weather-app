@@ -75,9 +75,29 @@ mod_1_04_weather_server <- function(id, variable_list, selected_surveys, survey_
           tags$p(tags$strong(paste0(var_info$label, ":")),
                  style = "font-size: 15px;"),
           shiny::actionButton(ns(paste0(prefix, "toggle")), "Configure",
+                 icon  = shiny::icon("sliders"),
+                 class = "btn-outline-primary btn-sm",
                  style = "margin-bottom: 10px;"),
+          # Options render in a floating panel beside the sidebar
+          # (.config-flyout in custom.css) so they are visible without
+          # scrolling. Content stays in the DOM at all times, so input
+          # defaults register immediately.
           shiny::conditionalPanel(
             condition = paste0("input['", ns(paste0(prefix, "toggle")), "'] % 2 == 1"),
+            class     = "config-flyout",
+            div(
+              class = "config-flyout-header",
+              tags$h6(paste0(var_info$label, " settings")),
+              tags$button(
+                type    = "button",
+                class   = "btn-close",
+                `aria-label` = "Close",
+                onclick = sprintf(
+                  "document.getElementById('%s').click();",
+                  ns(paste0(prefix, "toggle"))
+                )
+              )
+            ),
             tagList(
 
               shiny::sliderInput(

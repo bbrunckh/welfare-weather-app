@@ -1,0 +1,318 @@
+/* ==========================================================================
+   WISE-APP custom styles (Bootstrap 5 / bslib)
+   Complements inst/app/_brand.yml. Loaded via golem::bundle_resources().
+   ========================================================================== */
+
+/* ---- Navbar ------------------------------------------------------------ */
+
+.navbar .navbar-brand {
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.navbar .navbar-brand .app-version {
+  font-size: 0.55em;
+  font-weight: 400;
+  opacity: 0.6;
+  margin-left: 0.35rem;
+}
+
+.navbar .nav-link {
+  font-weight: 600;
+}
+
+/* ---- Step pages ---------------------------------------------------------- */
+
+.step-question {
+  font-size: 1.15rem;
+  font-weight: 600;
+  color: var(--bs-dark);
+  margin: 0.25rem 0 1rem 0;
+}
+
+/* Sidebar polish */
+.bslib-sidebar-layout > .sidebar {
+  background-color: var(--bs-light);
+}
+
+.bslib-sidebar-layout > .sidebar .accordion {
+  --bs-accordion-bg: #ffffff;
+}
+
+.sidebar .accordion-button {
+  font-weight: 600;
+  color: var(--bs-dark);
+  padding: 0.7rem 0.9rem;
+}
+
+.sidebar .accordion-button:not(.collapsed) {
+  background-color: rgba(0, 113, 188, 0.07);
+  color: var(--bs-primary);
+  box-shadow: none;
+}
+
+.sidebar .accordion-body {
+  padding: 0.9rem;
+}
+
+/* Numbered step badge used in accordion panel titles */
+.step-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: 50%;
+  background-color: var(--bs-primary);
+  color: #fff;
+  font-size: 0.8rem;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+/* ---- Legacy wellPanel (.well has no styling in Bootstrap 5) ------------- */
+
+.well {
+  background-color: #ffffff;
+  border: 1px solid var(--bs-border-color);
+  border-radius: var(--bs-border-radius);
+  padding: 0.9rem;
+  margin-bottom: 0.9rem;
+}
+
+.well .well {
+  background-color: var(--bs-light);
+}
+
+/* ---- Output tabsets: underline style ------------------------------------ */
+
+.tab-content {
+  padding-top: 1.1rem;
+}
+
+.nav-tabs {
+  gap: 0.25rem;
+  border-bottom: 1px solid var(--bs-border-color);
+}
+
+.nav-tabs .nav-link {
+  border: none;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  color: var(--bs-secondary);
+  font-weight: 600;
+  padding: 0.5rem 1rem;
+}
+
+.nav-tabs .nav-link:hover {
+  border-bottom-color: var(--bs-border-color);
+  color: var(--bs-dark);
+}
+
+.nav-tabs .nav-link.active {
+  background: transparent;
+  border-bottom: 2px solid var(--bs-primary);
+  color: var(--bs-primary);
+}
+
+/* ---- Hide intermediate (non-validation) output errors ------------------- */
+
+.shiny-output-error {
+  visibility: hidden;
+}
+
+.shiny-output-error-validation {
+  visibility: visible;
+  color: var(--bs-secondary);
+  font-style: italic;
+  padding: 0.75rem 0;
+}
+
+/* ---- Empty state (Overview tabs before outputs exist) ------------------- */
+
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: 2.5rem 1.5rem;
+  border: 1px dashed var(--bs-border-color);
+  border-radius: var(--bs-border-radius-lg);
+  background-color: var(--bs-light);
+  color: var(--bs-secondary);
+  margin-bottom: 1.25rem;
+}
+
+.empty-state .fa,
+.empty-state .fas,
+.empty-state .far {
+  font-size: 1.9rem;
+  color: var(--bs-primary);
+  opacity: 0.55;
+  margin-bottom: 0.75rem;
+}
+
+.empty-state h5 {
+  color: var(--bs-dark);
+  margin-bottom: 0.35rem;
+}
+
+.empty-state p {
+  max-width: 46rem;
+  margin-bottom: 0;
+}
+
+/* ---- Configure flyout (weather variable settings) ------------------------
+   Content stays in the DOM (conditionalPanel), but is presented as a
+   floating panel beside the sidebar so options are visible without
+   scrolling. Falls back to inline flow on narrow screens.               */
+
+.config-flyout {
+  position: fixed;
+  left: 400px;
+  top: 90px;
+  z-index: 1046;
+  width: 340px;
+  max-height: calc(100vh - 120px);
+  overflow-y: auto;
+  background: #ffffff;
+  border: 1px solid var(--bs-border-color);
+  border-radius: var(--bs-border-radius-lg);
+  box-shadow: 0 10px 30px rgba(0, 34, 68, 0.18);
+  padding: 1rem 1.1rem;
+}
+
+.config-flyout .config-flyout-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.75rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid var(--bs-border-color);
+}
+
+.config-flyout .config-flyout-header h6 {
+  margin: 0;
+  font-weight: 700;
+}
+
+@media (max-width: 1199px) {
+  .config-flyout {
+    position: static;
+    width: auto;
+    max-height: none;
+    box-shadow: none;
+    background-color: var(--bs-light);
+    margin-top: 0.5rem;
+  }
+}
+
+/* ---- Native <details> blocks (Step 2 advanced settings) ----------------- */
+
+details {
+  border: 1px solid var(--bs-border-color);
+  border-radius: var(--bs-border-radius);
+  padding: 0.5rem 0.75rem;
+  margin-bottom: 0.75rem;
+  background-color: #ffffff;
+}
+
+details summary {
+  font-weight: 600;
+  color: var(--bs-dark);
+  cursor: pointer;
+}
+
+details[open] summary {
+  margin-bottom: 0.6rem;
+  color: var(--bs-primary);
+}
+
+/* ---- Overview landing page ---------------------------------------------- */
+
+.hero-panel {
+  background: linear-gradient(135deg, #002244 0%, #0a3a6b 60%, #0071bc 100%);
+  color: #fff;
+  border-radius: var(--bs-border-radius-lg);
+  padding: 2.25rem 2rem;
+  margin-bottom: 1.5rem;
+}
+
+.hero-panel h1 {
+  color: #fff;
+  font-weight: 700;
+  font-size: 2rem;
+  margin-bottom: 0.4rem;
+}
+
+.hero-panel .hero-subtitle {
+  font-weight: 600;
+  opacity: 0.85;
+  margin-bottom: 0.75rem;
+}
+
+.hero-panel p {
+  max-width: 52rem;
+  opacity: 0.9;
+  margin-bottom: 0.25rem;
+}
+
+.hero-panel a {
+  color: #9adcff;
+  font-weight: 600;
+}
+
+.step-card {
+  height: 100%;
+}
+
+.step-card .card-body {
+  padding: 1.1rem 1.2rem;
+}
+
+.step-card .step-badge {
+  width: 1.9rem;
+  height: 1.9rem;
+  font-size: 0.95rem;
+  margin-bottom: 0.6rem;
+}
+
+.step-card h5 {
+  margin-bottom: 0.35rem;
+}
+
+.step-card p {
+  color: var(--bs-secondary);
+  font-size: 0.9rem;
+  margin-bottom: 0;
+}
+
+/* Data connection card */
+.connect-card {
+  max-width: 760px;
+}
+
+/* ---- Misc ---------------------------------------------------------------- */
+
+/* Slightly denser controls in sidebars */
+.sidebar .form-group,
+.sidebar .shiny-input-container {
+  margin-bottom: 0.8rem;
+}
+
+.sidebar .form-label,
+.sidebar label.control-label {
+  font-weight: 600;
+  font-size: 0.86rem;
+  margin-bottom: 0.25rem;
+}
+
+.sidebar .help-block,
+.sidebar .form-text {
+  font-size: 0.78rem;
+}
+
+/* DT tables: lighter chrome */
+table.dataTable {
+  font-size: 0.88rem;
+}

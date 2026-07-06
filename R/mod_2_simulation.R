@@ -9,34 +9,39 @@
 #' @noRd
 #'
 #' @importFrom shiny NS tagList
-#' @importFrom waiter autoWaiter spin_2 transparent
 mod_2_simulation_ui <- function(id) {
   ns <- NS(id)
-  fluidPage(
-    autoWaiter(html = spin_2(), color = transparent(.5)),
-    h4("What welfare is expected given historical weather conditions? In future climate scenarios?"),
-    sidebarLayout(
-      sidebarPanel(
-        mod_2_01_weathersim_ui(ns("weathersim")),
-        shiny::hr(),
-        shiny::actionButton(
-          ns("clear_scenarios"),
-          label = "Clear all scenarios",
-          icon  = shiny::icon("trash"),
-          width = "100%",
-          style = "margin-top: 8px; color: #fff; background-color: #c0392b; border-color: #a93226;"
-        )
-      ),
-      mainPanel(
-        tabsetPanel(
-          id = ns("step2_output_tabs"),
-          tabPanel(
-            title = "Overview",
-            value = "overview",
-            p("Outputs will appear here after you configure settings and click 'Run simulation'."),
-            withMathJax(includeMarkdown(system.file("app/www/equation2.md", package = "wiseapp")))
-          )
-        )
+  bslib::layout_sidebar(
+    sidebar = bslib::sidebar(
+      width = 360,
+      mod_2_01_weathersim_ui(ns("weathersim")),
+      shiny::hr(),
+      shiny::actionButton(
+        ns("clear_scenarios"),
+        label = "Clear all scenarios",
+        icon  = shiny::icon("trash"),
+        width = "100%",
+        class = "btn-outline-danger"
+      )
+    ),
+    h4("What welfare is expected given historical weather conditions? In future climate scenarios?",
+       class = "step-question"),
+    tabsetPanel(
+      id = ns("step2_output_tabs"),
+      tabPanel(
+        title = "Overview",
+        value = "overview",
+        div(
+          class = "empty-state",
+          icon("cloud-sun-rain"),
+          h5("No simulations yet"),
+          p(paste(
+            "Configure historical and future weather scenarios in the sidebar,",
+            "then click 'Run simulation'.",
+            "Results and diagnostics will appear here as new tabs."
+          ))
+        ),
+        withMathJax(includeMarkdown(system.file("app/www/equation2.md", package = "wiseapp")))
       )
     )
   )
