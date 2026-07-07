@@ -17,16 +17,16 @@ mod_0_overview_ui <- function(id) {
     div(
       class = "hero-panel-inner",
       tags$img(
-        src = "www/favicon.png",
+        src = "www/logo.png",
         class = "hero-logo",
         alt = "WISE-APP logo"
       ),
       div(
-        h1("Welcome to the WISE-APP"),
+        h1("Welcome to WISE-APP"),
         p(class = "hero-subtitle",
           "Weather Impact Simulation and Evaluation for Adaptation Policy and Planning"),
         p("This tool helps you understand the relationship between welfare and weather."),
-        p("Connect to data below, then follow the steps to run simulations and explore policy scenarios."),
+        p("Connect to data below, then follow the steps to run microsimulations and explore policy scenarios."),
 
         p(tags$a(
           icon("book-open"), "WISE-APP Documentation",
@@ -98,29 +98,36 @@ mod_0_overview_ui <- function(id) {
       class = "connect-card",
       bslib::card_header(icon("database"), " Data"),
       bslib::card_body(
-        selectInput(
-          inputId  = ns("connection_type"),
-          label    = "Source",
-          choices  = c(
-            "Local folder"         = "local",
-            "Amazon S3"            = "s3",
-            "Google Cloud Storage" = "gcs",
-            "Azure Blob Storage"   = "azure",
-            "Hugging Face"         = "hf",
-            "Databricks"           = "databricks"
+        bslib::layout_columns(
+          col_widths = c(4, 8),
+          div(
+            selectInput(
+              inputId  = ns("connection_type"),
+              label    = "Source",
+              choices  = c(
+                "Local folder"         = "local",
+                "Amazon S3"            = "s3",
+                "Google Cloud Storage" = "gcs",
+                "Azure Blob Storage"   = "azure",
+                "Hugging Face"         = "hf",
+                "Databricks"           = "databricks"
+              ),
+              selected = "local"
+            ),
+            uiOutput(ns("connection_status_ui")),
+            actionButton(
+              ns("apply_connection"),
+              "Connect to data",
+              icon  = icon("plug"),
+              class = "btn-primary",
+              style = "width: 100%;"
+            )
           ),
-          selected = "local"
-        ),
-        uiOutput(ns("connection_options_ui")),
-        uiOutput(ns("connection_status_ui")),
-        actionButton(
-          ns("apply_connection"),
-          "Connect to data",
-          icon  = icon("plug"),
-          class = "btn-primary",
-          style = "width: 100%;"
-        ),
-        verbatimTextOutput(ns("folder_path_echo"))
+          div(
+            uiOutput(ns("connection_options_ui")),
+            verbatimTextOutput(ns("folder_path_echo"))
+          )
+        )
       )
     )
   )

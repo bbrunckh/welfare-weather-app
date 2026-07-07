@@ -234,8 +234,8 @@ details[open] summary {
   background: linear-gradient(135deg, #002244 0%, #0a3a6b 60%, #0071bc 100%);
   color: #fff;
   border-radius: var(--bs-border-radius-lg);
-  padding: 2.25rem 2rem;
-  margin-bottom: 1.5rem;
+  padding: 2rem;
+  margin-bottom: 1rem;
 }
 
 .hero-panel-inner {
@@ -245,12 +245,10 @@ details[open] summary {
 }
 
 .hero-logo {
-  width: 84px;
-  height: 84px;
+  width: 108px;
+  height: auto;
   flex-shrink: 0;
-  border-radius: var(--bs-border-radius);
-  background: #fff;
-  padding: 8px;
+  filter: drop-shadow(0 6px 16px rgba(0, 0, 0, 0.35));
 }
 
 .hero-panel h1 {
@@ -290,13 +288,14 @@ details[open] summary {
 
 .step-card .card-body {
   padding: 0.85rem 1.1rem;
+  gap: 0.35rem; /* override bslib's ~1rem flex gap between title and text */
 }
 
 .step-card-title {
   display: flex;
   align-items: center;
   gap: 0.55rem;
-  margin-bottom: 0.35rem;
+  margin-bottom: 0;
 }
 
 .step-card-title h5 {
@@ -316,13 +315,16 @@ details[open] summary {
   margin-bottom: 0;
 }
 
-/* Data connection card */
-.connect-card {
-  max-width: 760px;
-}
-
+/* Data connection card: full width, natural height, no internal scroll */
 .connect-card .card-body {
   padding: 0.9rem 1.1rem;
+  overflow: visible;
+  flex: none;
+}
+
+.connect-card {
+  overflow: visible;
+  flex: 0 0 auto; /* don't stretch to fill the page's remaining height */
 }
 
 .connect-card .form-group,
