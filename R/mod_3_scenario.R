@@ -8,58 +8,72 @@
 #' @noRd
 #'
 #' @importFrom shiny NS tagList
-#' @importFrom bsplus bs_accordion bs_append
-#' @importFrom waiter autoWaiter spin_2 transparent
 mod_3_scenario_ui <- function(id) {
   ns <- NS(id)
 
-  fluidPage(
-    autoWaiter(html = spin_2(), color = transparent(.5)),
-    h4("How could policy and structural adjustments mitigate the welfare impacts of weather?"),
-    sidebarLayout(
-      sidebarPanel(
-        uiOutput(ns("policy_info_ui")),
-        bs_accordion(id = ns("accordion")) |>
-          bs_append(
-            title   = "Social protection",
-            content = mod_3_01_sp_ui(ns("sp")),
-            open    = FALSE
-          ) |>
-          bs_append(
-            title   = "Infrastructure",
-            content = mod_3_02_infra_ui(ns("infra")),
-            open    = FALSE
-          ) |>
-          bs_append(
-            title   = "Digital inclusion",
-            content = mod_3_03_digital_ui(ns("digital")),
-            open    = FALSE
-          ) |>
-          bs_append(
-            title   = "Labor market",
-            content = mod_3_04_labor_ui(ns("labor")),
-            open    = FALSE
-          ) |>
-          bs_append(
-            title   = "Education",
-            content = mod_3_05_education_ui(ns("education")),
-            open    = FALSE
-          ),
-        hr(),
-        uiOutput(ns("run_policy_sim_ui"))
-      ),
-      mainPanel(
-        tabsetPanel(
-          id = ns("step3_output_tabs"),
-          tabPanel(
-            title = "Overview",
-            value = "overview",
-            withMathJax(includeMarkdown(
-              system.file("app/www/equation2.md", package = "wiseapp")
-            )),
-            mod_3_06_policy_sim_ui(ns("policy_sim"))
-          )
+  bslib::layout_sidebar(
+    sidebar = bslib::sidebar(
+      width = 360,
+      uiOutput(ns("policy_info_ui")),
+      bslib::accordion(
+        id       = ns("accordion"),
+        multiple = FALSE,
+        open     = FALSE,
+        bslib::accordion_panel(
+          title = "Social protection",
+          value = "Social protection",
+          icon  = icon("hand-holding-dollar"),
+          mod_3_01_sp_ui(ns("sp"))
+        ),
+        bslib::accordion_panel(
+          title = "Infrastructure",
+          value = "Infrastructure",
+          icon  = icon("road"),
+          mod_3_02_infra_ui(ns("infra"))
+        ),
+        bslib::accordion_panel(
+          title = "Digital inclusion",
+          value = "Digital inclusion",
+          icon  = icon("wifi"),
+          mod_3_03_digital_ui(ns("digital"))
+        ),
+        bslib::accordion_panel(
+          title = "Labor market",
+          value = "Labor market",
+          icon  = icon("briefcase"),
+          mod_3_04_labor_ui(ns("labor"))
+        ),
+        bslib::accordion_panel(
+          title = "Education",
+          value = "Education",
+          icon  = icon("graduation-cap"),
+          mod_3_05_education_ui(ns("education"))
         )
+      ),
+      hr(),
+      uiOutput(ns("run_policy_sim_ui"))
+    ),
+    h4("How could policy and structural adjustments mitigate the welfare impacts of weather?",
+       class = "step-question"),
+    tabsetPanel(
+      id = ns("step3_output_tabs"),
+      tabPanel(
+        title = "Overview",
+        value = "overview",
+        div(
+          class = "empty-state",
+          icon("scale-balanced"),
+          h5("No policy simulations yet"),
+          p(paste(
+            "Configure one or more policy levers in the sidebar, then click",
+            "'Run simulation' to compare baseline and policy outcomes.",
+            "Results, diagnostics and decomposition will appear here as new tabs."
+          ))
+        ),
+        withMathJax(includeMarkdown(
+          system.file("app/www/equation2.md", package = "wiseapp")
+        )),
+        mod_3_06_policy_sim_ui(ns("policy_sim"))
       )
     )
   )

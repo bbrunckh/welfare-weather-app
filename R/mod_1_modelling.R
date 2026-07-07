@@ -8,52 +8,63 @@
 #' @noRd
 #'
 #' @importFrom shiny NS tagList
-#' @importFrom bsplus bs_accordion bs_append
-#' @importFrom waiter autoWaiter spin_2 transparent
 mod_1_modelling_ui <- function(id) {
   ns <- NS(id)
 
-  fluidPage(
-    autoWaiter(html = spin_2(), color = transparent(.5)),
-    h4("How much does weather affect welfare? Who is most affected?"),
-    sidebarLayout(
-      sidebarPanel(
-        bs_accordion(id = ns("accordion")) |>
-          bs_append(
-            title   = "1 Sample",
-            content = tagList(
-              mod_1_01_sample_ui(ns("sample")),
-              mod_1_02_surveystats_ui(ns("surveystats"))
-            )
-          ) |>
-          bs_append(
-            title   = "2 Outcome",
-            content = mod_1_03_outcome_ui(ns("outcome"))
-          ) |>
-          bs_append(
-            title   = "3 Weather",
-            content = tagList(
-              mod_1_04_weather_ui(ns("weather")),
-              mod_1_05_weatherstats_ui(ns("weatherstats"))
-            )
-          ) |>
-          bs_append(
-            title   = "4 Model",
-            content = tagList(
-              mod_1_06_model_ui(ns("model")),
-              mod_1_07_results_ui(ns("results"))
-            )
-          )
-      ),
-      mainPanel(
-        tabsetPanel(
-          id = ns("step1_output_tabs"),
-          tabPanel(
-            title = "Overview",
-            value = "overview",
-            withMathJax(includeMarkdown(system.file("app/www/equation.md", package = "wiseapp")))
-          )
+  bslib::layout_sidebar(
+    sidebar = bslib::sidebar(
+      width = 360,
+      bslib::accordion(
+        id       = ns("accordion"),
+        multiple = FALSE,
+        open     = "Sample",
+        bslib::accordion_panel(
+          title = "Sample",
+          value = "Sample",
+          icon  = tags$span("1", class = "step-badge"),
+          mod_1_01_sample_ui(ns("sample")),
+          mod_1_02_surveystats_ui(ns("surveystats"))
+        ),
+        bslib::accordion_panel(
+          title = "Outcome",
+          value = "Outcome",
+          icon  = tags$span("2", class = "step-badge"),
+          mod_1_03_outcome_ui(ns("outcome"))
+        ),
+        bslib::accordion_panel(
+          title = "Weather",
+          value = "Weather",
+          icon  = tags$span("3", class = "step-badge"),
+          mod_1_04_weather_ui(ns("weather")),
+          mod_1_05_weatherstats_ui(ns("weatherstats"))
+        ),
+        bslib::accordion_panel(
+          title = "Model",
+          value = "Model",
+          icon  = tags$span("4", class = "step-badge"),
+          mod_1_06_model_ui(ns("model")),
+          mod_1_07_results_ui(ns("results"))
         )
+      )
+    ),
+    h4("How much does weather affect welfare? Who is most affected?",
+       class = "step-question"),
+    tabsetPanel(
+      id = ns("step1_output_tabs"),
+      tabPanel(
+        title = "Overview",
+        value = "overview",
+        div(
+          class = "empty-state",
+          icon("chart-line"),
+          h5("No results yet"),
+          p(paste(
+            "Work through the sidebar: choose your sample, define the outcome,",
+            "configure weather variables, then run the model.",
+            "Outputs will appear here as new tabs."
+          ))
+        ),
+        withMathJax(includeMarkdown(system.file("app/www/equation.md", package = "wiseapp")))
       )
     )
   )

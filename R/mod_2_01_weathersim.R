@@ -34,12 +34,27 @@ mod_2_01_weathersim_ui <- function(id) {
         value   = TRUE
       ),
 
-    # ---- Collapsible simulation settings -----------------------------------
-    shiny::tags$details(
-      id = ns("settings_details"),
-      shiny::tags$summary(
-        style = "cursor:pointer; font-weight:600; font-size:13px; margin-bottom:8px;",
-        "Simulation settings \u25bc"
+    # ---- Simulation settings flyout (same pattern as Step 1 'Configure') ---
+    shiny::actionButton(
+      ns("settings_toggle"), "Simulation settings",
+      icon  = shiny::icon("sliders"),
+      class = "btn-outline-primary btn-sm",
+      style = "margin-bottom: 10px;"
+    ),
+    shiny::conditionalPanel(
+      condition = paste0("input['", ns("settings_toggle"), "'] % 2 == 1"),
+      class     = "config-flyout",
+      shiny::tags$div(
+        class = "config-flyout-header",
+        shiny::tags$h6("Simulation settings"),
+        shiny::tags$button(
+          type = "button",
+          class = "btn-close",
+          `aria-label` = "Close",
+          onclick = sprintf(
+            "document.getElementById('%s').click();", ns("settings_toggle")
+          )
+        )
       ),
 
       # -- Baseline survey ------------------------------------------------

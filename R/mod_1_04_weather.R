@@ -10,6 +10,7 @@
 mod_1_04_weather_ui <- function(id) {
   ns <- NS(id)
   tagList(
+    uiOutput(ns("weather_summary_ui")),
     wellPanel(
       uiOutput(ns("weather_selector_ui")),
       uiOutput(ns("weather_construction_ui"))
@@ -75,9 +76,29 @@ mod_1_04_weather_server <- function(id, variable_list, selected_surveys, survey_
           tags$p(tags$strong(paste0(var_info$label, ":")),
                  style = "font-size: 15px;"),
           shiny::actionButton(ns(paste0(prefix, "toggle")), "Configure",
+                 icon  = shiny::icon("sliders"),
+                 class = "btn-outline-primary btn-sm",
                  style = "margin-bottom: 10px;"),
+          # Options render in a floating panel beside the sidebar
+          # (.config-flyout in custom.css) so they are visible without
+          # scrolling. Content stays in the DOM at all times, so input
+          # defaults register immediately.
           shiny::conditionalPanel(
             condition = paste0("input['", ns(paste0(prefix, "toggle")), "'] % 2 == 1"),
+            class     = "config-flyout",
+            div(
+              class = "config-flyout-header",
+              tags$h6(paste0(var_info$label, " settings")),
+              tags$button(
+                type    = "button",
+                class   = "btn-close",
+                `aria-label` = "Close",
+                onclick = sprintf(
+                  "document.getElementById('%s').click();",
+                  ns(paste0(prefix, "toggle"))
+                )
+              )
+            ),
             tagList(
 
               shiny::sliderInput(
@@ -187,6 +208,47 @@ mod_1_04_weather_server <- function(id, variable_list, selected_surveys, survey_
         var_info      = wl,
         spec_inputs   = spec_inputs
       )
+    })
+
+    # ---- Settings summary banner --------------------------------------------
+
+    output$weather_summary_ui <- renderUI({
+      sw <- tryCatch(selected_weather(), error = function(e) NULL)
+      if (is.null(sw) || nrow(sw) == 0) return(NULL)
+
+      rows <- lapply(seq_len(nrow(sw)), function(i) {
+        r <- sw[i, ]
+
+        ref_txt <- if (identical(r$ref_start, r$ref_end)) {
+          paste0(r$ref_start, if (r$ref_start == 1) " month" else " months",
+                 " before interview")
+        } else {
+          paste0(r$ref_start, "–", r$ref_end, " months before interview")
+        }
+
+        form_txt <- if (identical(r$cont_binned, "Binned")) {
+          paste0("binned × ", r$num_bins, " (", tolower(r$binning_method), ")")
+        } else {
+          poly <- unlist(r$polynomial)
+          if (length(poly) > 0) {
+            paste0("continuous, polynomial ", paste(poly, collapse = "+"))
+          } else "continuous"
+        }
+
+        parts <- c(
+          paste0(r$temporalAgg, " over ", ref_txt),
+          if (!identical(r$transformation, "None")) tolower(r$transformation),
+          form_txt
+        )
+
+        tagList(
+          tags$b(paste0(r$label, ":")),
+          paste0(" ", paste(parts, collapse = " · ")),
+          tags$br()
+        )
+      })
+
+      div(class = "settings-summary", rows)
     })
 
     # ---- Module return API --------------------------------------------------

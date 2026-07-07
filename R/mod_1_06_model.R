@@ -12,16 +12,34 @@
 mod_1_06_model_ui <- function(id) {
   ns <- NS(id)
   tagList(
-    uiOutput(ns("selected_outcome")),
-    uiOutput(ns("selected_weather")),
+    uiOutput(ns("model_summary_ui")),
     wellPanel(
       uiOutput(ns("model_selector_ui"))
     ),
     wellPanel(
       uiOutput(ns("policy_ui"))
     ),
-    wellPanel(
-      # uiOutput(ns("model_specs_button_ui")),
+    shiny::actionButton(
+      ns("model_settings_toggle"), "Model settings",
+      icon  = shiny::icon("sliders"),
+      class = "btn-outline-primary btn-sm",
+      style = "margin-bottom: 10px;"
+    ),
+    shiny::conditionalPanel(
+      condition = paste0("input['", ns("model_settings_toggle"), "'] % 2 == 1"),
+      class     = "config-flyout",
+      shiny::tags$div(
+        class = "config-flyout-header",
+        shiny::tags$h6("Model settings"),
+        shiny::tags$button(
+          type = "button",
+          class = "btn-close",
+          `aria-label` = "Close",
+          onclick = sprintf(
+            "document.getElementById('%s').click();", ns("model_settings_toggle")
+          )
+        )
+      ),
       uiOutput(ns("model_specs_ui")),
       shiny::helpText(
         "More model types and covariate selection methods will be added in future updates.",
@@ -84,19 +102,48 @@ mod_1_06_model_server <- function(id,
       filter_vars_by_role(valid_vl(), "interact", extra_filter = list(type = "numeric"))
     )
 
-    # ---- Summary display ----------------------------------------------------
+    # ---- Settings summary banner --------------------------------------------
 
-    output$selected_outcome <- renderUI({
-      req(selected_outcome())
-      shiny::p(paste0("Selected outcome: ", selected_outcome()$label))
-    })
+    output$model_summary_ui <- renderUI({
+      so <- tryCatch(selected_outcome(), error = function(e) NULL)
+      sw <- tryCatch(selected_weather(), error = function(e) NULL)
+      if (is.null(so) || is.null(sw) || nrow(sw) == 0) return(NULL)
 
-    output$selected_weather <- renderUI({
-      req(selected_weather())
-      shiny::p(paste0(
-        "Selected weather: ",
-        paste(selected_weather()$label, collapse = ", ")
-      ))
+      # Map variable names to labels via the full variable list
+      vl <- tryCatch(variable_list(), error = function(e) NULL)
+      to_labels <- function(nms) {
+        if (is.null(nms) || length(nms) == 0) return(NULL)
+        vapply(nms, function(v) {
+          l <- if (!is.null(vl)) vl$label[vl$name == v] else character(0)
+          if (length(l) > 0 && !is.na(l[1]) && nzchar(l[1])) l[1] else v
+        }, character(1))
+      }
+
+      # Fall back to the rendered inputs' defaults before they register
+      model_txt <- input$model_type %||%
+        model_type_choices(so$type)$choices[1]
+      ixn_txt <- paste(to_labels(input$interactions) %||% "Urban",
+                       collapse = ", ")
+      fe_txt <- paste(
+        to_labels(input$fixedeffects) %||%
+          to_labels(c("year", "gaul1_code")),
+        collapse = ", "
+      )
+      cov_txt <- input$covariates %||% "User-defined"
+
+      shiny::div(
+        class = "settings-summary",
+        tags$b("Outcome:"), so$label,
+        tags$br(),
+        tags$b("Weather:"), paste(sw$label, collapse = ", "),
+        tags$br(),
+        tags$b("Model:"), model_txt,
+        tags$b(" · Covariates:"), cov_txt,
+        tags$br(),
+        tags$b("Interaction:"), ixn_txt,
+        tags$br(),
+        tags$b("Fixed effects:"), fe_txt
+      )
     })
 
 

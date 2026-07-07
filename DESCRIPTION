@@ -1,6 +1,6 @@
 Package: wiseapp
 Title: Weather Impact Simulation and Evaluation for Adaptation Policy and Planning
-Version: 0.0.1
+Version: 0.1.0
 Authors@R: c(
     person("Ben", "Brunckhorst", , "bbrunckhorst@worldbank.org", role = c("aut", "cre")),
     person("Mads", "Hoefer", role = "aut"),
@@ -14,9 +14,8 @@ RoxygenNote: 7.3.3
 Imports:
     shiny,
     golem,
-    waiter,
-    bsplus,
     bslib,
+    brand.yml,
     ggplot2,
     ggridges,
     scales,

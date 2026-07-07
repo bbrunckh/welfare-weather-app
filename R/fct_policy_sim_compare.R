@@ -206,12 +206,12 @@ policy_input_diagnostics <- function(baseline_svy, policy_svy, vars = NULL) {
   tagList(
     shiny::uiOutput(ns("results_header_ui")),
     shiny::wellPanel(
+      class = "results-controls",
       style = "padding: 10px 14px 6px 14px;",
-      shiny::tags$p("Outcome of interest:",
-                    style = "font-weight:600; margin-bottom:4px;"),
+      # Single compact row: outcome + uncertainty controls wrap as needed
       shiny::tags$div(
         style = "display:flex; align-items:flex-end; gap:12px; flex-wrap:wrap;",
-        shiny::tags$div(style = "flex:1; min-width:160px;",
+        shiny::tags$div(style = "flex:0 1 180px;",
           shiny::selectInput(
             ns("cmp_agg_method"),
             label    = "Aggregation method",
@@ -219,7 +219,10 @@ policy_input_diagnostics <- function(baseline_svy, policy_svy, vars = NULL) {
             selected = "mean"
           )
         ),
-        shiny::tags$div(style = "flex:1; min-width:160px;",
+        shiny::tags$div(style = "flex:0 1 170px;",
+          shiny::uiOutput(ns("cmp_pov_line_ui"))
+        ),
+        shiny::tags$div(style = "flex:0 1 200px;",
           shiny::selectInput(
             ns("cmp_deviation"),
             label    = "Deviation from historical baseline",
@@ -231,16 +234,7 @@ policy_input_diagnostics <- function(baseline_svy, policy_svy, vars = NULL) {
             selected = "none"
           )
         ),
-        shiny::tags$div(style = "flex:1; min-width:160px;",
-          shiny::uiOutput(ns("cmp_pov_line_ui"))
-        )
-      ),
-      # Row 2: Uncertainty controls (mirrors Step 2 results layout)
-      shiny::tags$p("Uncertainty",
-                    style = "font-weight:600; margin: 6px 0 4px 0; font-size:12px;"),
-      shiny::tags$div(
-        style = "display:flex; align-items:flex-end; gap:10px; flex-wrap:wrap; margin-bottom:4px;",
-        shiny::tags$div(style = "flex:1; min-width:160px;",
+        shiny::tags$div(style = "flex:0 1 170px;",
           shiny::selectInput(
             ns("uncertainty_band"),
             label   = "Coefficient band",
@@ -256,7 +250,7 @@ policy_input_diagnostics <- function(baseline_svy, policy_svy, vars = NULL) {
             selected = "p10_p90"
           )
         ),
-        shiny::tags$div(style = "flex:1; min-width:160px;",
+        shiny::tags$div(style = "flex:0 1 180px;",
           shiny::selectInput(
             ns("ensemble_band"),
             label    = "Inter-model band",
@@ -273,7 +267,7 @@ policy_input_diagnostics <- function(baseline_svy, policy_svy, vars = NULL) {
           )
         ),
         shiny::tags$div(
-          style = "flex:1; min-width:160px; padding-bottom:6px;",
+          style = "flex:0 0 auto; padding-bottom:2px;",
           shiny::checkboxInput(
             ns("show_coef_uncertainty"),
             label = "Show coefficient uncertainty",
