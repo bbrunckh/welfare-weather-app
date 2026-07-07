@@ -183,6 +183,14 @@
    floating panel beside the sidebar so options are visible without
    scrolling. Falls back to inline flow on narrow screens.               */
 
+/* bslib sets `display: contents` on conditionalPanels inside gap-spacing
+   containers, which destroys the flyout box entirely — restore it. Same
+   specificity as bslib's rule (two classes) but later in the cascade;
+   deliberately no !important so Shiny's inline display:none still hides it. */
+.shiny-panel-conditional.config-flyout {
+  display: block;
+}
+
 .config-flyout {
   position: fixed;
   left: 400px;
@@ -212,7 +220,7 @@
   font-weight: 700;
 }
 
-@media (max-width: 1199px) {
+@media (max-width: 991px) {
   .config-flyout {
     position: static;
     width: auto;
@@ -221,6 +229,48 @@
     background-color: var(--bs-light);
     margin-top: 0.5rem;
   }
+}
+
+/* Dense form controls inside the flyout — these panels are long */
+.config-flyout .form-group,
+.config-flyout .shiny-input-container {
+  margin-bottom: 0.4rem;
+}
+
+.config-flyout label {
+  font-size: 0.8rem;
+  font-weight: 600;
+  margin-bottom: 0.15rem;
+}
+
+.config-flyout .form-check,
+.config-flyout .radio,
+.config-flyout .checkbox {
+  margin-bottom: 0.1rem;
+  min-height: 0;
+}
+
+.config-flyout .form-check-label,
+.config-flyout .radio label,
+.config-flyout .checkbox label {
+  font-size: 0.82rem;
+  font-weight: 400;
+}
+
+.config-flyout h6 {
+  font-size: 0.8rem;
+  margin: 0.35rem 0 0.15rem;
+}
+
+.config-flyout hr {
+  margin: 0.4rem 0;
+}
+
+.config-flyout .help-block,
+.config-flyout .form-text {
+  line-height: 1.35;
+  margin-top: 0.1rem;
+  margin-bottom: 0.3rem;
 }
 
 /* ---- Native <details> blocks (Step 2 advanced settings) ----------------- */
@@ -369,10 +419,25 @@ details[open] summary {
 
 /* ---- Misc ---------------------------------------------------------------- */
 
-/* Slightly denser controls in sidebars */
+/* Denser controls in sidebars */
+.bslib-sidebar-layout > .sidebar > .sidebar-content {
+  gap: 0.5rem; /* bslib default ~1rem between every sidebar child */
+}
+
+.sidebar hr {
+  margin: 0.4rem 0;
+}
+
+.sidebar .form-check,
+.sidebar .radio,
+.sidebar .checkbox {
+  margin-bottom: 0.15rem;
+  min-height: 0;
+}
+
 .sidebar .form-group,
 .sidebar .shiny-input-container {
-  margin-bottom: 0.8rem;
+  margin-bottom: 0.6rem;
 }
 
 .sidebar .form-label,
@@ -390,4 +455,52 @@ details[open] summary {
 /* DT tables: lighter chrome */
 table.dataTable {
   font-size: 0.88rem;
+}
+
+/* ---- Compact results controls (Steps 2/3 Results tab) -------------------- */
+
+.results-controls .form-group,
+.results-controls .shiny-input-container {
+  margin-bottom: 0.25rem;
+}
+
+.results-controls label {
+  font-size: 0.78rem;
+  font-weight: 600;
+  margin-bottom: 0.1rem;
+}
+
+.results-controls .form-select,
+.results-controls .form-control {
+  padding-top: 0.2rem;
+  padding-bottom: 0.2rem;
+  font-size: 0.85rem;
+}
+
+.results-controls .form-check,
+.results-controls .radio,
+.results-controls .checkbox {
+  margin-bottom: 0.1rem;
+  min-height: 0;
+}
+
+.results-controls .form-check-label,
+.results-controls .checkbox label {
+  font-size: 0.82rem;
+  font-weight: 400;
+}
+
+.results-controls details {
+  border: none;
+  background: transparent;
+  padding: 0;
+  margin: 0.15rem 0 0;
+}
+
+.results-controls details[open] summary {
+  margin-bottom: 0.25rem;
+}
+
+.results-controls hr {
+  margin: 0.4rem 0;
 }

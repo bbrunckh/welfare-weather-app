@@ -26,7 +26,7 @@ mod_0_overview_ui <- function(id) {
         p(class = "hero-subtitle",
           "Weather Impact Simulation and Evaluation for Adaptation Policy and Planning"),
         p("This tool helps you understand the relationship between welfare and weather."),
-        p("Connect to data below, then follow the steps to run microsimulations and explore policy scenarios."),
+        p("Follow the steps to run simulations and explore policy scenarios."),
 
         p(tags$a(
           icon("book-open"), "WISE-APP Documentation",
