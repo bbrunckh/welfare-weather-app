@@ -118,7 +118,6 @@ mod_0_overview_ui <- function(id) {
             actionButton(
               ns("apply_connection"),
               "Connect to data",
-              icon  = icon("plug"),
               class = "btn-primary",
               style = "width: 100%;"
             )

@@ -162,6 +162,22 @@
   margin-bottom: 0;
 }
 
+/* ---- Settings summary banner (Step 1 weather/model, matches Step 2) ------ */
+
+.settings-summary {
+  border-left: 3px solid #2166ac;
+  background: #f4f8fd;
+  padding: 8px 12px;
+  margin-bottom: 10px;
+  border-radius: 3px;
+  font-size: 12px;
+  color: #444;
+}
+
+.settings-summary b {
+  color: #333;
+}
+
 /* ---- Configure flyout (weather variable settings) ------------------------
    Content stays in the DOM (conditionalPanel), but is presented as a
    floating panel beside the sidebar so options are visible without

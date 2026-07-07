@@ -10,6 +10,7 @@
 mod_1_04_weather_ui <- function(id) {
   ns <- NS(id)
   tagList(
+    uiOutput(ns("weather_summary_ui")),
     wellPanel(
       uiOutput(ns("weather_selector_ui")),
       uiOutput(ns("weather_construction_ui"))
@@ -207,6 +208,47 @@ mod_1_04_weather_server <- function(id, variable_list, selected_surveys, survey_
         var_info      = wl,
         spec_inputs   = spec_inputs
       )
+    })
+
+    # ---- Settings summary banner --------------------------------------------
+
+    output$weather_summary_ui <- renderUI({
+      sw <- tryCatch(selected_weather(), error = function(e) NULL)
+      if (is.null(sw) || nrow(sw) == 0) return(NULL)
+
+      rows <- lapply(seq_len(nrow(sw)), function(i) {
+        r <- sw[i, ]
+
+        ref_txt <- if (identical(r$ref_start, r$ref_end)) {
+          paste0(r$ref_start, if (r$ref_start == 1) " month" else " months",
+                 " before interview")
+        } else {
+          paste0(r$ref_start, "–", r$ref_end, " months before interview")
+        }
+
+        form_txt <- if (identical(r$cont_binned, "Binned")) {
+          paste0("binned × ", r$num_bins, " (", tolower(r$binning_method), ")")
+        } else {
+          poly <- unlist(r$polynomial)
+          if (length(poly) > 0) {
+            paste0("continuous, polynomial ", paste(poly, collapse = "+"))
+          } else "continuous"
+        }
+
+        parts <- c(
+          paste0(r$temporalAgg, " over ", ref_txt),
+          if (!identical(r$transformation, "None")) tolower(r$transformation),
+          form_txt
+        )
+
+        tagList(
+          tags$b(paste0(r$label, ":")),
+          paste0(" ", paste(parts, collapse = " · ")),
+          tags$br()
+        )
+      })
+
+      div(class = "settings-summary", rows)
     })
 
     # ---- Module return API --------------------------------------------------
