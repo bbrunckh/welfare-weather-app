@@ -64,6 +64,14 @@ app_ui <- function(request) {
         href = "https://datanalytics-int.worldbank.org/content/a24b499b-46b7-420e-9e77-5475b45cc7c5",
         target = "_blank"
       )
+    ),
+    bslib::nav_item(
+      tags$a(
+        icon("github"),
+        href = "https://github.com/worldbank/welfare-weather-app",
+        target = "_blank",
+        title = "View source on GitHub"
+      )
     )
   )
 }

@@ -14,27 +14,38 @@ mod_0_overview_ui <- function(id) {
 
   hero <- div(
     class = "hero-panel",
-    h1("Welcome to the WISE-APP"),
-    p(class = "hero-subtitle",
-      "Weather Impact Simulation and Evaluation for Adaptation Policy and Planning"),
-    p(paste(
-      "This tool helps you understand the relationship between welfare and",
-      "weather. Connect to data below, then follow the steps to perform",
-      "simulations and explore policy scenarios."
-    )),
-    p(tags$a(
-      icon("book-open"), "WISE-APP Documentation",
-      href = "https://datanalytics-int.worldbank.org/content/a24b499b-46b7-420e-9e77-5475b45cc7c5",
-      target = "_blank"
-    ))
+    div(
+      class = "hero-panel-inner",
+      tags$img(
+        src = "www/favicon.png",
+        class = "hero-logo",
+        alt = "WISE-APP logo"
+      ),
+      div(
+        h1("Welcome to the WISE-APP"),
+        p(class = "hero-subtitle",
+          "Weather Impact Simulation and Evaluation for Adaptation Policy and Planning"),
+        p("This tool helps you understand the relationship between welfare and weather."),
+        p("Connect to data below, then follow the steps to run simulations and explore policy scenarios."),
+
+        p(tags$a(
+          icon("book-open"), "WISE-APP Documentation",
+          href = "https://datanalytics-int.worldbank.org/content/a24b499b-46b7-420e-9e77-5475b45cc7c5",
+          target = "_blank"
+        ))
+      )
+    )
   )
 
   step_card <- function(n, title, text) {
     bslib::card(
       class = "step-card",
       bslib::card_body(
-        tags$span(n, class = "step-badge"),
-        h5(title),
+        div(
+          class = "step-card-title",
+          tags$span(n, class = "step-badge"),
+          h5(title)
+        ),
         p(text)
       )
     )
@@ -46,7 +57,7 @@ mod_0_overview_ui <- function(id) {
       "1", "Model welfare",
       paste(
         "Derive the statistical relationship between weather and outcomes",
-        "of interest. The fitted model is the foundation for all",
+        "of interest from microdata. The fitted model is the foundation for all",
         "subsequent steps."
       )
     ),

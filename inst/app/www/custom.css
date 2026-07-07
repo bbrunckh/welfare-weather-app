@@ -238,6 +238,21 @@ details[open] summary {
   margin-bottom: 1.5rem;
 }
 
+.hero-panel-inner {
+  display: flex;
+  align-items: center;
+  gap: 1.75rem;
+}
+
+.hero-logo {
+  width: 84px;
+  height: 84px;
+  flex-shrink: 0;
+  border-radius: var(--bs-border-radius);
+  background: #fff;
+  padding: 8px;
+}
+
 .hero-panel h1 {
   color: #fff;
   font-weight: 700;
@@ -262,34 +277,76 @@ details[open] summary {
   font-weight: 600;
 }
 
+@media (max-width: 700px) {
+  .hero-panel-inner {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
+
 .step-card {
   height: 100%;
 }
 
 .step-card .card-body {
-  padding: 1.1rem 1.2rem;
+  padding: 0.85rem 1.1rem;
+}
+
+.step-card-title {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  margin-bottom: 0.35rem;
+}
+
+.step-card-title h5 {
+  margin-bottom: 0;
 }
 
 .step-card .step-badge {
-  width: 1.9rem;
-  height: 1.9rem;
-  font-size: 0.95rem;
-  margin-bottom: 0.6rem;
-}
-
-.step-card h5 {
-  margin-bottom: 0.35rem;
+  width: 1.6rem;
+  height: 1.6rem;
+  font-size: 0.85rem;
+  flex-shrink: 0;
 }
 
 .step-card p {
   color: var(--bs-secondary);
-  font-size: 0.9rem;
+  font-size: 0.87rem;
   margin-bottom: 0;
 }
 
 /* Data connection card */
 .connect-card {
   max-width: 760px;
+}
+
+.connect-card .card-body {
+  padding: 0.9rem 1.1rem;
+}
+
+.connect-card .form-group,
+.connect-card .shiny-input-container {
+  margin-bottom: 0.5rem;
+}
+
+.connect-card .help-block,
+.connect-card .form-text {
+  margin-top: -0.35rem;
+  margin-bottom: 0.4rem;
+  line-height: 1.3;
+}
+
+.connect-card .btn {
+  margin-top: 0.3rem;
+}
+
+.connect-card pre {
+  margin: 0.6rem 0 0 0;
+  padding: 0.4rem 0.6rem;
+  max-height: 3.5rem;
+  font-size: 0.78rem;
+  overflow-y: auto;
 }
 
 /* ---- Misc ---------------------------------------------------------------- */
