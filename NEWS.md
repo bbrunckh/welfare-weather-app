@@ -1,2 +1,2 @@
-# wiseapp (development version)
+# wiseapp 0.1.0
 
