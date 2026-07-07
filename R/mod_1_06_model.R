@@ -19,8 +19,27 @@ mod_1_06_model_ui <- function(id) {
     wellPanel(
       uiOutput(ns("policy_ui"))
     ),
-    wellPanel(
-      # uiOutput(ns("model_specs_button_ui")),
+    shiny::actionButton(
+      ns("model_settings_toggle"), "Model settings",
+      icon  = shiny::icon("sliders"),
+      class = "btn-outline-primary btn-sm",
+      style = "margin-bottom: 10px;"
+    ),
+    shiny::conditionalPanel(
+      condition = paste0("input['", ns("model_settings_toggle"), "'] % 2 == 1"),
+      class     = "config-flyout",
+      shiny::tags$div(
+        class = "config-flyout-header",
+        shiny::tags$h6("Model settings"),
+        shiny::tags$button(
+          type = "button",
+          class = "btn-close",
+          `aria-label` = "Close",
+          onclick = sprintf(
+            "document.getElementById('%s').click();", ns("model_settings_toggle")
+          )
+        )
+      ),
       uiOutput(ns("model_specs_ui")),
       shiny::helpText(
         "More model types and covariate selection methods will be added in future updates.",
