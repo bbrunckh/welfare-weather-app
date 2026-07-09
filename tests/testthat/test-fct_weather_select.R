@@ -98,10 +98,11 @@ test_that("weather_spec_defaults returns correct structure", {
   expect_equal(d$ref_end,        1L)
   expect_equal(d$temporal_agg,   "Mean")
   expect_equal(d$transformation, "None")
-  expect_equal(d$cont_binned,    "Continuous")
-  expect_true(is.na(d$num_bins))
-  expect_true(is.na(d$binning_method))
-  expect_equal(d$polynomial, character(0))
+  expect_equal(d$cont_binned,    "Binned")
+  expect_equal(d$num_bins,       5L)
+  expect_equal(d$binning_method, "Equal frequency")
+  expect_equal(d$custom_breaks,  numeric(0))
+  expect_equal(d$polynomial,     character(0))
 })
 
 test_that("weather_spec_defaults uses Sum default for mm", {
@@ -119,7 +120,7 @@ test_that("build_weather_spec returns one-row tibble with correct columns", {
   expect_equal(nrow(s), 1L)
   expect_true(all(c("name", "ref_start", "ref_end", "temporalAgg",
                      "transformation", "cont_binned", "num_bins",
-                     "binning_method", "polynomial") %in% names(s)))
+                     "binning_method", "custom_breaks", "polynomial") %in% names(s)))
 })
 
 test_that("build_weather_spec applies defaults when inputs are NULL", {
@@ -128,9 +129,11 @@ test_that("build_weather_spec applies defaults when inputs are NULL", {
   expect_equal(s$ref_end,        1L)
   expect_equal(s$temporalAgg,    "Mean")
   expect_equal(s$transformation, "None")
-  expect_equal(s$cont_binned,    "Continuous")
-  expect_true(is.na(s$num_bins))
-  expect_true(is.na(s$binning_method))
+  expect_equal(s$cont_binned,    "Binned")
+  expect_equal(s$num_bins,       5L)
+  expect_equal(s$binning_method, "Equal frequency")
+  expect_type(s$custom_breaks,   "list")
+  expect_equal(s$custom_breaks[[1]], numeric(0))
 })
 
 test_that("build_weather_spec respects supplied ref_period", {
@@ -211,4 +214,101 @@ test_that("build_selected_weather uses Sum default for mm variable", {
 test_that("build_selected_weather uses Standardized anomaly for dimensionless", {
   out <- build_selected_weather("spi6", make_var_info())
   expect_equal(out$transformation, "Standardized anomaly")
+})
+
+# ============================================================================ #
+# parse_custom_breaks                                                          #
+# ============================================================================ #
+
+test_that("parse_custom_breaks returns numeric() for NULL or empty input", {
+  expect_equal(parse_custom_breaks(NULL),    numeric(0))
+  expect_equal(parse_custom_breaks(""),      numeric(0))
+  expect_equal(parse_custom_breaks("   "),   numeric(0))
+  expect_equal(parse_custom_breaks(character(0)), numeric(0))
+})
+
+test_that("parse_custom_breaks parses comma-separated values", {
+  expect_equal(parse_custom_breaks("20, 25, 30, 35"), c(20, 25, 30, 35))
+})
+
+test_that("parse_custom_breaks accepts spaces, semicolons, and newlines as separators", {
+  expect_equal(parse_custom_breaks("20 25\n30;35"), c(20, 25, 30, 35))
+})
+
+test_that("parse_custom_breaks sorts and de-duplicates", {
+  expect_equal(parse_custom_breaks(c(35, 20, 30, 25, 25)), c(20, 25, 30, 35))
+  expect_equal(parse_custom_breaks("35,20,30,25,25"),      c(20, 25, 30, 35))
+})
+
+test_that("parse_custom_breaks drops non-numeric tokens", {
+  expect_equal(parse_custom_breaks("abc, 20, bad, 25"), c(20, 25))
+})
+
+test_that("parse_custom_breaks drops non-finite values", {
+  expect_equal(parse_custom_breaks(c(20, NA, Inf, 25, -Inf, NaN)), c(20, 25))
+})
+
+test_that("parse_custom_breaks handles negative numbers and decimals", {
+  expect_equal(parse_custom_breaks("-1.5, 0, 2.25"), c(-1.5, 0, 2.25))
+})
+
+test_that("parse_custom_breaks returns numeric() for unsupported types", {
+  expect_equal(parse_custom_breaks(list(1, 2, 3)), numeric(0))
+})
+
+# ============================================================================ #
+# build_weather_spec — Custom binning                                          #
+# ============================================================================ #
+
+test_that("build_weather_spec stores custom_breaks as a numeric list column", {
+  s <- build_weather_spec("tx", "°C",
+                          cont_binned    = "Binned",
+                          num_bins       = 5L,
+                          binning_method = "Custom",
+                          custom_breaks  = "20, 25, 30, 35")
+  expect_equal(s$binning_method, "Custom")
+  expect_type(s$custom_breaks, "list")
+  expect_equal(s$custom_breaks[[1]], c(20, 25, 30, 35))
+})
+
+test_that("build_weather_spec accepts numeric custom_breaks directly", {
+  s <- build_weather_spec("tx", "°C",
+                          cont_binned    = "Binned",
+                          num_bins       = 5L,
+                          binning_method = "Custom",
+                          custom_breaks  = c(35, 20, 30, 25))
+  expect_equal(s$custom_breaks[[1]], c(20, 25, 30, 35))
+})
+
+test_that("build_weather_spec ignores custom_breaks when method is not Custom", {
+  s <- build_weather_spec("tx", "°C",
+                          cont_binned    = "Binned",
+                          num_bins       = 5L,
+                          binning_method = "Equal frequency",
+                          custom_breaks  = "20, 25, 30, 35")
+  expect_equal(s$custom_breaks[[1]], numeric(0))
+})
+
+test_that("build_weather_spec clears custom_breaks when Continuous", {
+  s <- build_weather_spec("tx", "°C",
+                          cont_binned    = "Continuous",
+                          binning_method = "Custom",
+                          custom_breaks  = "20, 25, 30, 35")
+  expect_equal(s$custom_breaks[[1]], numeric(0))
+})
+
+# ============================================================================ #
+# build_selected_weather — Custom binning                                      #
+# ============================================================================ #
+
+test_that("build_selected_weather forwards customBreaks input to spec", {
+  inputs <- list(
+    tx_contOrBinned  = "Binned",
+    tx_numBins       = 5L,
+    tx_binningMethod = "Custom",
+    tx_customBreaks  = "20, 25, 30, 35"
+  )
+  out <- build_selected_weather("tx", make_var_info(), spec_inputs = inputs)
+  expect_equal(out$binning_method, "Custom")
+  expect_equal(out$custom_breaks[[1]], c(20, 25, 30, 35))
 })

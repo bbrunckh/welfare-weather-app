@@ -43,17 +43,10 @@
 }
 
 .parse_year <- function(nm) {
-  if (length(nm) == 1L) {
-    m <- regexpr("\\d{4}-\\d{4}", nm)
-    if (m == -1L) return(NA_character_)
-    return(regmatches(nm, m))
-  }
-  # Vectorised path
-  m <- gregexpr("\\d{4}-\\d{4}", nm)
-  vapply(seq_along(nm), function(i) {
-    matches <- regmatches(nm[i], m[i])[[1]]
-    if (length(matches) == 0) NA_character_ else matches[1]
-  }, character(1))
+  m   <- regexpr("\\d{4}-\\d{4}", nm)
+  out <- regmatches(nm, m)
+  out[m == -1L] <- NA_character_
+  out
 }
 
 # ---------------------------------------------------------------------------- #
@@ -90,6 +83,238 @@ SSP_SHORT_LABELS <- c(
 )
 
 # ---------------------------------------------------------------------------- #
+# Coefficient-draw constants and helpers                                       #
+# ---------------------------------------------------------------------------- #
+
+#' Format elapsed seconds into a human-readable string (e.g. "2m 14s")
+#' Used by the simulation progress bar.
+#' @noRd
+format_elapsed <- function(secs) {
+  secs <- round(secs)
+  if (secs < 60L) return(sprintf("%ds", secs))
+  sprintf("%dm %02ds", secs %/% 60L, secs %% 60L)
+}
+
+# SE clustering specification — confirmed default: ~loc_id_panel
+# Methodological justification: more conservative than ~loc_id:int_month
+# (Moulton minimum). Absorbs within-location serial correlation across
+# months and years. Weather data has real within-location temporal
+# correlation that ~loc_id:int_month does not correct.
+#
+# Cluster count decision tree:
+#   G >= 50 at ~loc_id_panel : use ~loc_id_panel (default)
+#   40 <= G < 50             : use ~loc_id_panel, flag in methodology note
+#   G < 40                   : warn user, wild cluster bootstrap recommended
+#
+# Named alternatives — available as constants, not default.
+# Use compute_cluster_counts() to check G before switching.
+COEF_VCOV_SPEC              <- ~loc_id_panel
+COEF_VCOV_SPEC_MOULTON      <- ~loc_id_panel:int_month
+
+#' Compute Cluster Counts for SE Specification Diagnostics
+#'
+#' Computes the number of clusters at each relevant clustering level for the
+#' fitted model data. Used to validate the SE specification and warn when
+#' cluster counts are too small for reliable asymptotic inference.
+#'
+#' @param data Data frame used at model fit time. Must contain \code{loc_id_panel}
+#'   and \code{int_month} columns. Optionally \code{code}, \code{year},
+#'   \code{survname} for the conservative multi-way spec.
+#'
+#' @return Named list with integer cluster counts:
+#'   \describe{
+#'     \item{loc_id_panel}{Number of distinct panel location clusters (primary spec).}
+#'     \item{loc_id_panel_int_month}{Number of distinct panel location × month clusters
+#'       (Moulton minimum).}
+#'     \item{conservative}{Number of distinct code × year × survname × loc_id_panel
+#'       clusters (conservative multi-way spec). \code{NA} if any column
+#'       is absent.}
+#'   }
+#'
+#' @section Cluster count thresholds:
+#' \itemize{
+#'   \item G >= 50: reliable asymptotic inference, use \code{COEF_VCOV_SPEC}
+#'   \item 40 <= G < 50: flag in methodology note
+#'   \item G < 40: wild cluster bootstrap recommended (not yet implemented)
+#' }
+#'
+#' @export
+compute_cluster_counts <- function(data) {
+  has_cols <- function(...) all(c(...) %in% names(data))
+
+  g_loc        <- if (has_cols("loc_id_panel"))
+                    dplyr::n_distinct(data[["loc_id_panel"]])
+                  else NA_integer_
+
+  g_loc_month  <- if (has_cols("loc_id_panel", "int_month"))
+                    dplyr::n_distinct(paste(data[["loc_id_panel"]], data[["int_month"]]))
+                  else NA_integer_
+
+  g_conserv    <- if (has_cols("code", "year", "survname", "loc_id_panel"))
+                    dplyr::n_distinct(paste(data[["code"]], data[["year"]],
+                                           data[["survname"]], data[["loc_id_panel"]]))
+                  else NA_integer_
+
+  counts <- list(
+    loc_id_panel           = g_loc,
+    loc_id_panel_int_month = g_loc_month,
+    conservative           = g_conserv
+  )
+
+  # Runtime warnings — surface immediately at model fit time
+  if (!is.na(g_loc) && g_loc < 40L) {
+    warning(sprintf(
+      "[SE] Only %d clusters at ~loc_id_panel. VCV SEs may be unreliable. Wild cluster bootstrap recommended (not yet implemented).",
+      g_loc
+    ))
+  } else if (!is.na(g_loc) && g_loc < 50L) {
+    message(sprintf(
+      "[SE] %d clusters at ~loc_id_panel — borderline. Flag in methodology note.",
+      g_loc
+    ))
+  }
+
+  counts
+}
+
+# ---------------------------------------------------------------------------- #
+# Cholesky uncertainty propagation                                              #
+# ---------------------------------------------------------------------------- #
+
+#' Compute Cholesky Factor of Model VCV Matrix
+#'
+#' Computes the lower-triangular Cholesky factor of the coefficient covariance
+#' matrix for the non-fixed-effect coefficients of a fitted \code{fixest}
+#' model. Used once per fitted model — not per weather key.
+#'
+#' The Cholesky decomposition \eqn{L L' = \Sigma} allows efficient K-dimensional
+#' Monte Carlo draws: instead of drawing full N-dimensional prediction vectors,
+#' draw \eqn{z_s \sim N(0, I_K)} and compute the perturbation as
+#' \eqn{F_i \cdot z_s} where \eqn{F = X_{nonFE} L'} is the factor loading
+#' matrix computed once per key in \code{compute_factor_loading()}.
+#'
+#' @param fit A fitted \code{fixest} model object (from \code{fixest::feols()}).
+#' @param vcov_spec A one-sided formula specifying the clustering structure for
+#'   the VCV matrix. Defaults to \code{COEF_VCOV_SPEC} (\code{~loc_id}).
+#'   See \code{COEF_VCOV_SPEC_MOULTON} and \code{COEF_VCOV_SPEC_CONSERVATIVE}
+#'   for alternatives.
+#'
+#' @return A named list:
+#'   \describe{
+#'     \item{L}{K \eqn{\times} K lower-triangular Cholesky factor of
+#'       \eqn{\Sigma}.}
+#'     \item{K}{Integer. Number of non-FE coefficients.}
+#'     \item{beta}{Named numeric vector of point-estimate non-FE
+#'       coefficients.}
+#'     \item{spec}{The VCV formula used.}
+#'   }
+#'
+#' @seealso \code{\link{compute_factor_loading}},
+#'   \code{\link{aggregate_with_uncertainty_delta}}
+#' @export
+compute_chol_vcov <- function(fit, vcov_spec = COEF_VCOV_SPEC) {
+  # fixest_multi: iterate over sub-models (needed for RIF quantile fits)
+  if (inherits(fit, "fixest_multi")) {
+    return(lapply(seq_along(fit), function(i)
+      compute_chol_vcov(fit[[i]], vcov_spec = vcov_spec)
+    ))
+  }
+
+  stopifnot("fit must be a fixest model" = inherits(fit, "fixest"))
+  beta  <- coef(fit)
+
+  # Try fit-time VCV first (respects cluster= passed at estimation), then
+  # requested spec, then fallback chain
+  vcov_fallbacks <- list(vcov_spec, ~loc_id, "HC1", "iid")
+  Sigma <- tryCatch(vcov(fit), error = function(e) NULL)
+  if (is.null(Sigma) || !all(is.finite(Sigma))) {
+    Sigma <- NULL
+    for (spec in vcov_fallbacks) {
+      Sigma <- tryCatch(
+        vcov(fit, vcov = spec),
+        error = function(e) NULL
+      )
+      if (!is.null(Sigma) && all(is.finite(Sigma))) {
+        message("[compute_chol_vcov] fell back to vcov spec: ", deparse(spec))
+        break
+      }
+      Sigma <- NULL
+    }
+  }
+
+  if (is.null(Sigma))
+    stop("[compute_chol_vcov] all vcov specs failed — cannot compute Sigma.")
+
+  L <- tryCatch(
+    t(chol(Sigma)),
+    error = function(e)
+      stop("[compute_chol_vcov] Cholesky decomposition failed: ",
+           conditionMessage(e))
+  )
+  list(L = L, K = nrow(L), beta = beta, spec = vcov_spec)
+}
+
+
+#' Compute Factor Loading Matrix for Coefficient Uncertainty
+#'
+#' Computes the N \eqn{\times} K factor loading matrix
+#' \eqn{F = X_{nonFE} L'} where \eqn{L} is the Cholesky factor from
+#' \code{compute_chol_vcov()} and \eqn{X_{nonFE}} is the non-fixed-effect
+#' design matrix for the counterfactual data.
+#'
+#' The factor loading encodes how coefficient uncertainty propagates to
+#' prediction uncertainty for each household. Given a K-dimensional standard
+#' normal draw \eqn{z_s \sim N(0, I_K)}, the perturbed log-welfare prediction
+#' for household \eqn{i} under draw \eqn{s} is:
+#' \deqn{y_i^{(s)} = y_i^{point} + F_i \cdot z_s}
+#'
+#' This is mathematically identical to the previous N \eqn{\times} S matrix
+#' approach but requires only K-dimensional draws (K ~ 5-20) instead of
+#' N-dimensional draws (N ~ 10,000), giving ~200x speedup.
+#'
+#' @param X_nonFE Numeric matrix. N \eqn{\times} K non-FE design matrix from
+#'   \code{model.matrix(model, data = newdata, type = "rhs")}. Column names
+#'   must match \code{names(chol_obj$beta)} exactly.
+#' @param chol_obj Named list returned by \code{compute_chol_vcov()}. May
+#'   include an optional `active_mask` logical vector of length K; when
+#'   present, columns where `active_mask == FALSE` are dropped from the
+#'   returned matrix (additive-decomposition SE; see
+#'   \code{build_active_coef_mask()}).
+#'
+#' @return Numeric matrix of dimensions N \eqn{\times} K (or N \eqn{\times}
+#'   K_active if `active_mask` is set). Each row \eqn{i} is the factor
+#'   loading vector for household \eqn{i}.
+#'
+#' @seealso \code{\link{compute_chol_vcov}},
+#'   \code{\link{aggregate_with_uncertainty_delta}},
+#'   \code{\link{build_active_coef_mask}}
+#' @export
+compute_factor_loading <- function(X_nonFE, chol_obj) {
+  stopifnot(
+    "X_nonFE must be a numeric matrix"        = is.matrix(X_nonFE) && is.numeric(X_nonFE),
+    "chol_obj must contain L and beta"        = all(c("L", "beta") %in% names(chol_obj)),
+    "X_nonFE columns must match chol_obj$beta names" =
+      identical(colnames(X_nonFE), names(chol_obj$beta))
+  )
+
+  # Additive-decomposition SE: when an active mask is set, build F_loading
+  # from the *active block of Sigma* — i.e. F = X_active %*% L_active where
+  # L_active = chol(Sigma[mask, mask]). This is mathematically distinct
+  # from (and smaller than) F[, mask] subset, which can pick up
+  # off-diagonal Sigma contributions from inactive coefficients.
+  active_mask <- chol_obj$active_mask
+  if (!is.null(active_mask) && !is.null(chol_obj$L_active) &&
+      length(active_mask) == ncol(X_nonFE)) {
+    return(X_nonFE[, active_mask, drop = FALSE] %*% chol_obj$L_active)
+  }
+
+  # Legacy: F = X %*% L (N × K).
+  X_nonFE %*% chol_obj$L
+}
+
+
+
+# ---------------------------------------------------------------------------- #
 # Shared UI helper                                                             #
 # ---------------------------------------------------------------------------- #
 
@@ -119,7 +344,7 @@ residual_method_ui <- function(ns, input_id) {
       shiny::tags$br(),
       shiny::tags$b("empirical:"), " resample residuals from the training",
       " distribution (non-parametric bootstrap).", shiny::tags$br(),
-      shiny::tags$b("normal:"), " draw residuals from N(0, \u03c3) where \u03c3",
+      shiny::tags$b("normal:"), " draw residuals from N(0, \u03c6) where \u03c6",
       " is the training residual SD.",
       style = "font-size:11px;"
     )
@@ -130,58 +355,205 @@ residual_method_ui <- function(ns, input_id) {
 # Simulation pipeline helper                                                   #
 # ---------------------------------------------------------------------------- #
 
-#' Run the Full Simulation Pipeline for One Scenario Row
+#' Resolve the ID Column for Residual Matching
 #'
-#' Combines the three steps that are identical between historical and future
-#' simulation:
-#' \enumerate{
-#'   \item Join raw weather output back to survey covariates via
-#'     `prepare_hist_weather()`.
-#'   \item Generate outcome predictions via `predict_outcome()`.
-#'   \item Back-transform log-scale outcomes via `apply_log_backtransform()`.
-#' }
+#' Returns the first of `c("pid", "hhid", "fid")` that exists in both data
+#' frames, or `NULL` if none match.  Used by `run_sim_pipeline()` to enable
+#' ID-based residual matching when `residuals = "original"`.
+#' @noRd
+resolve_id_col <- function(a, b) {
+  candidates <- c("pid", "hhid", "fid")
+  shared     <- intersect(names(a), names(b))
+  match      <- candidates[candidates %in% shared]
+  if (length(match) == 0L) NULL else match[[1L]]
+}
+
+#' Run Simulation Pipeline for One Weather Key
 #'
-#' @param weather_raw  Data frame returned by `get_weather()$result`.
-#' @param svy          Survey-weather data frame (from `survey_weather()`).
-#' @param sw           Selected weather metadata (from `selected_weather()`).
-#' @param so           Selected outcome metadata (from `selected_outcome()`).
-#' @param model        Fitted model object (`mf$fit3`).
-#' @param residuals    Character. Residual method, e.g. `"original"`.
-#' @param train_data   Data frame used at fit time (`mf$train_data`).
-#' @param engine       Character. Model engine, e.g. `"fixest"`.
-#' @param slim         Logical. When `TRUE`, trim `preds` to only the columns
-#'   required by downstream aggregation and diagnostics (`sim_year`, outcome,
-#'   `.fitted`, `.residual`, and any `weight` column) and trim `weather_raw`
-#'   to location/time keys and weather variable columns.  Dramatically reduces
-#'   memory when processing many ensemble models.  Default `FALSE`.
+#' Prepares counterfactual survey data for one weather key, computes point-
+#' estimate log-welfare predictions, and returns the factor loading matrix for
+#' downstream coefficient uncertainty propagation via
+#' \code{aggregate_with_uncertainty_delta()}.
 #'
-#' @return A named list with three elements:
+#' This function is called once per weather key (historical + future
+#' representatives). It does NOT draw coefficient perturbations — all
+#' uncertainty propagation is deferred to display time via
+#' \code{aggregate_with_uncertainty_delta()}, making poverty line, weights, and
+#' aggregation method fully reactive without re-simulation.
+#'
+#' @param weather_raw Data frame. One weather key's prepared data from
+#'   \code{get_weather()}.
+#' @param svy Data frame. Survey microdata joined to weather reference data.
+#' @param sw One-row data frame of selected weather variable metadata.
+#' @param so One-row data frame of selected outcome variable metadata.
+#' @param model Fitted \code{fixest} model object.
+#' @param residuals Character. Residual treatment passed through to
+#'   \code{aggregate_with_uncertainty_delta()}. One of \code{"none"},
+#'   \code{"original"}, \code{"normal"}, \code{"resample"}.
+#' @param train_data Data frame. Training data used to fit \code{model}.
+#'   Used to compute training residuals for \code{train_aug}.
+#' @param engine Character. Model engine identifier (e.g. \code{"fixest"}).
+#' @param chol_obj Named list from \code{compute_chol_vcov()} or \code{NULL}.
+#'   When \code{NULL}, \code{F_loading} in the return value is \code{NULL}
+#'   (point estimates only — no coefficient uncertainty).
+#' @param precomputed_train_aug Data frame or \code{NULL}. When supplied,
+#'   used directly as \code{train_aug} in the return value instead of
+#'   recomputing \code{predict(model, train_data)} per call. Passed by
+#'   \code{fct_run_simulation()} to avoid redundant work across keys.
+#' @param svy_prepared Data frame or \code{NULL}. Pre-prepared survey data
+#'   with weather/outcome columns dropped and year converted to character.
+#'   Skips redundant per-key column manipulation in the weather join.
+#'
+#' @return Named list or \code{NULL} on prediction failure:
 #'   \describe{
-#'     \item{preds}{Data frame of individual-level predictions with the outcome
-#'       column back-transformed where applicable, or \code{NULL} on failure.
-#'       When \code{slim = TRUE}, only essential columns are retained.}
-#'     \item{n_pre_join}{Integer. Number of rows in \code{svy} before the
-#'       weather join. Used by the Diagnostics tab to compute the drop rate.}
-#'     \item{weather_raw}{The raw weather data frame passed in as
-#'       \code{weather_raw}. Stored so the Diagnostics tab can construct the
-#'       full historical weather distribution without a second DB query.
-#'       When \code{slim = TRUE}, only key + weather columns are kept.}
+#'     \item{y_point}{Numeric vector length N. Log-scale point-estimate welfare
+#'       predictions. Back-transformation via \code{exp()} happens inside
+#'       \code{aggregate_with_uncertainty_delta()}, not here.}
+#'     \item{F_loading}{N \eqn{\times} K numeric matrix from
+#'       \code{compute_factor_loading()}, or \code{NULL} when
+#'       \code{chol_obj = NULL}.}
+#'     \item{sim_year}{Integer vector length N. Simulation year per row.}
+#'     \item{weight}{Numeric vector length N or \code{NULL}. Survey weights.}
+#'     \item{id_vec}{Vector length N or \code{NULL}. Household IDs for
+#'       \code{residuals = "original"} matching.}
+#'     \item{id_col}{Character or \code{NULL}. Name of the ID column.}
+#'     \item{n_pre_join}{Integer. Number of survey rows before weather join.}
+#'     \item{weather_raw}{Data frame. The input weather key data (for
+#'       diagnostics).}
+#'     \item{train_aug}{Data frame. Training data augmented with \code{.fitted}
+#'       and \code{.resid} columns for residual drawing in
+#'       \code{aggregate_with_uncertainty_delta()}.}
 #'   }
 #'
+#' @seealso \code{\link{aggregate_with_uncertainty_delta}},
+#'   \code{\link{compute_chol_vcov}}, \code{\link{compute_factor_loading}}
 #' @export
-run_sim_pipeline <- function(weather_raw, svy, sw, so,
-                             model, residuals, train_data, engine,
-                             slim = FALSE) {
-  n_pre_join    <- nrow(svy)
-  survey_wd_sim <- prepare_hist_weather(weather_raw, svy, sw, so$name)
+run_sim_pipeline <- function(weather_raw,
+                             svy,
+                             sw,
+                             so,
+                             model,
+                             residuals,
+                             train_data,
+                             engine,
+                             chol_obj = NULL,
 
-  preds <- tryCatch(
+                            chol_Sigma  = NULL,   # golem compat alias
+                            slim        = FALSE,  # accepted, ignored
+
+                             #RIF
+                             fit_multi   = NULL,
+                             taus        = NULL,
+                             weather_cols = NULL,
+                             precomputed_train_aug = NULL,
+                             svy_prepared = NULL,
+                             svy_baseline = NULL,
+                             rif_grid     = NULL) {
+
+  n_pre_join <- nrow(svy)
+
+  # Define is_rif once — all conditions in one place
+  is_rif <- identical(engine, "rif") &&
+            !is.null(fit_multi)      &&
+            !is.null(taus)           &&
+            !is.null(weather_cols)
+
+  # RIF policy mode: caller supplied an svy_baseline so we can separate the
+  # baseline (no-policy) RIF prediction from the policy net level effect.
+  # We predict against svy_baseline and then add the decomposition's
+  # delta_total — matching the Decomposition pane's totals exactly. The
+  # OLS path doesn't need this because predict_outcome() naturally picks up
+  # the policy level shift from the policy-modified design matrix.
+  is_rif_policy <- is_rif && !is.null(svy_baseline) &&
+                   !is.null(rif_grid) && !is.null(train_data)
+  svy_for_predict <- if (is_rif_policy) svy_baseline else svy
+
+  # Tag svy with row IDs so downstream consumers can broadcast per-household
+  # quantities (RIF delta correction; Module 3 policy-delta application) back
+  # to the (HH x year) rows produced by prepare_hist_weather().
+  svy_for_predict$.svy_row_id <- seq_len(nrow(svy_for_predict))
+
+  # Use pre-prepared survey (columns already dropped, year converted) when
+  # available. RIF policy mode and Module 3 callers prepare svy differently,
+  # so fall back to full prepare_hist_weather() when svy_prepared is NULL.
+  if (!is.null(svy_prepared) && !is_rif_policy) {
+    svy_join <- svy_prepared
+    svy_join$.svy_row_id <- svy_for_predict$.svy_row_id
+  } else {
+    drop_cols <- c(sw$name, so$name)
+    svy_join <- svy_for_predict |>
+      dplyr::mutate(year = as.character(year)) |>
+      dplyr::select(-dplyr::any_of(drop_cols))
+  }
+
+  survey_wd_sim <- weather_raw |>
+    dplyr::mutate(
+      year      = as.character(year),
+      int_month = as.integer(format(timestamp, "%m")),
+      sim_year  = as.integer(format(timestamp, "%Y"))
+    ) |>
+    dplyr::select(-timestamp) |>
+    dplyr::inner_join(svy_join, by = c("code", "year", "survname", "loc_id", "int_month")) |>
+    dplyr::mutate(year = as.factor(year))
+  rm(svy_join)
+
+  # Resolve ID column for "original" residual matching
+  id_col <- if (residuals == "original")
+               resolve_id_col(train_data, survey_wd_sim)
+             else
+               NULL
+
+  # ---- Prediction — dispatch on engine ------------------------------------
+
+  out <- if (is_rif) {
+    # RIF path — quantile delta method
+    # Use chol_obj (our format) or chol_Sigma (golem format) for RIF
+    chol_src <- if (!is.null(chol_obj)) chol_obj else chol_Sigma
+
+    # For RIF: chol_src is list of list(L, K, beta, spec [, L_active]) per tau.
+    # interpolate_F_loading() needs list of L matrices only.
+    # When an active mask is set, we extract L_active (Cholesky of the
+    # weather/policy block of Sigma) instead of the full L, so that
+    # F_loading = X[, active] %*% L_active produces the correct
+    # additive-decomposition variance (h' X_w Σ_ww X_w' h). Subsetting
+    # columns of F = X %*% L_full would be incorrect when Σ has
+    # off-diagonal terms between active and inactive coefficients.
+    chol_list <- if (!is.null(chol_src) && is.list(chol_src) &&
+                     !("L" %in% names(chol_src))) {
+      active_mask <- attr(chol_src, "active_mask")
+      use_active  <- !is.null(active_mask) &&
+                      all(vapply(chol_src,
+                                 function(x) "L_active" %in% names(x),
+                                 logical(1)))
+      tmp <- lapply(chol_src, function(x) {
+        if (use_active && is.matrix(x$L_active)) x$L_active
+        else if (is.list(x) && "L" %in% names(x)) x$L
+        else if (is.matrix(x)) x
+        else NULL
+      })
+      if (use_active) attr(tmp, "active_mask") <- active_mask
+      tmp
+    } else NULL
+    predict_rif(
+      fit_multi    = fit_multi,
+      newdata      = survey_wd_sim, #joined,
+      svy          = svy_for_predict,
+      train_data   = train_data,
+      taus         = taus,
+      outcome      = so$name,
+      weather_cols = weather_cols,
+      so           = so,
+      chol_list    = chol_list
+    )
+  } else {
+    # Standard OLS path — unchanged
+    tryCatch(
     predict_outcome(
       model      = model,
       newdata    = survey_wd_sim,
-      residuals  = residuals,
+      residuals  = "none",     # residuals drawn at display time, not here
       outcome    = so$name,
-      id         = NULL,
+      id         = id_col,
       train_data = train_data,
       engine     = engine
     ),
@@ -189,29 +561,160 @@ run_sim_pipeline <- function(weather_raw, svy, sw, so,
       warning("[run_sim_pipeline] predict_outcome() failed: ", conditionMessage(e))
       NULL
     }
-  )
-  rm(survey_wd_sim)
-
-  if (is.null(preds)) return(NULL)
-  preds <- apply_log_backtransform(preds, so)
-
-  if (slim) {
-    # Keep only columns needed by aggregate_sim_preds() and
-    # build_ridge_kde_data(): sim_year, year, the outcome column,
-    # .fitted, .residual, and any weight column for aggregation.
-    keep <- c("sim_year", "year", so$name, ".fitted", ".residual")
-    if ("weight" %in% names(preds)) keep <- c(keep, "weight")
-    preds <- preds[, intersect(keep, names(preds)), drop = FALSE]
-
-    # Keep only key + weather columns from weather_raw for diagnostics.
-    weather_keep <- c("code", "year", "survname", "loc_id", "timestamp", sw$name)
-    weather_raw  <- weather_raw[, intersect(weather_keep, names(weather_raw)), drop = FALSE]
+    )
+  }
+  
+  if (is.null(out)) {
+    rm(survey_wd_sim)
+    return(NULL)
   }
 
+  # y_point stays log-scale — back-transformation happens inside
+  # aggregate_with_uncertainty_delta() after coefficient perturbation.
+  y_point  <- out$.fitted
+
+  # ---- RIF policy correction --------------------------------------------- #
+  # In RIF policy mode the prediction above was made against svy_baseline,
+  # so y_point currently holds the *baseline-x* level (matching what Mod 2's
+  # Step 2 hist_sim shows). Add the decomposition's delta_total — which
+  # includes delta_main (SP + Beta_x.Delta_x), delta_res1 (repositioning),
+  # and delta_res2 (Beta_int.haz.Delta_x) — so the Results pane reflects the
+  # net policy effect on the welfare level. This skips the level-scale SP
+  # block below because delta_sp is already inside delta_total.
+  if (is_rif_policy) {
+    corr <- .compute_rif_policy_correction(
+      svy_baseline = svy_baseline,
+      svy_policy   = svy,
+      weather_raw  = weather_raw,
+      weather_cols = weather_cols,
+      rif_grid     = rif_grid,
+      taus         = taus,
+      train_data   = train_data,
+      outcome      = so$name,
+      is_log       = isTRUE(so$transform == "log")
+    )
+    # corr is one entry per household (nrow(svy_baseline)); broadcast it to
+    # each expanded survey×weather row via .svy_row_id (set by predict_rif()
+    # on `out`). Without this, hist_sim has y_point per (HH × month/year)
+    # but corr is per HH, so the lengths mismatch and the correction would
+    # be silently dropped.
+    if (!is.null(corr) && ".svy_row_id" %in% names(out) &&
+        length(corr) == nrow(svy_baseline)) {
+      y_point <- y_point + corr[out$.svy_row_id]
+    } else {
+      warning("[run_sim_pipeline] RIF policy correction unavailable; ",
+              "policy y_point will reflect weather-sensitivity changes only.")
+    }
+  }
+
+  # ---- SP cash transfer (post-prediction, level scale) -------------------- #
+  # SP_TRANSFER_COL is set on svy by apply_policy_to_svy() in fct_policy_sim.R.
+  # The transfer is a direct welfare boost, not a regression covariate, so it
+  # is added after prediction. To stay consistent with the decomposition
+  # (.decompose_ols / .compute_rif_channels in fct_policy_decompose.R, which
+  # define δ_sp = log(exp(y) + sp) − y), the boost is applied on the level
+  # scale and re-logged when so$transform == "log".
+  #
+  # Skipped in RIF policy mode because delta_sp is already inside the
+  # correction added above. (svy_for_predict = svy_baseline carries no
+  # SP_TRANSFER_COL, so `out` wouldn't have it anyway — the guard is
+  # defensive.)
+  sp_vec <- if (!is_rif_policy && SP_TRANSFER_COL %in% names(out))
+              out[[SP_TRANSFER_COL]] else NULL
+  if (!is.null(sp_vec) && any(sp_vec > 0, na.rm = TRUE)) {
+    is_log <- isTRUE(so$transform == "log")
+    if (is_log) {
+      welfare_lvl <- exp(y_point) + sp_vec
+      y_point     <- log(pmax(welfare_lvl, .Machine$double.eps))
+    } else {
+      y_point <- y_point + sp_vec
+    }
+  }
+
+  # ---- Simulation year and weights ---------------------------------------- #
+  sim_year <- out$sim_year
+
+  weight <- if ("weight" %in% names(out)) out$weight else NULL
+
+  id_vec   <- if (!is.null(id_col) && id_col %in% names(out))
+                out[[id_col]]
+              else
+                NULL
+
+  # Pipeline row -> baseline household lookup. Used by Module 3 to broadcast
+  # per-household policy deltas (decompose_policy_effect output, indexed by
+  # baseline survey row) onto the expanded (HH x year) prediction rows.
+  svy_row_id <- if (".svy_row_id" %in% names(out)) out$.svy_row_id else NULL
+
+  # ---- Factor loading matrix ---------------------------------------------- #
+  # Computed once per key — not per draw.
+  # F_loading = X_nonFE %*% L  where L is the Cholesky factor of Sigma.
+  # NULL when chol_obj = NULL (point estimates only).
+  F_loading <- NULL
+  if (is_rif && !is.null(attr(out, "F_loading"))) {
+    # RIF path — F_loading computed inside predict_rif() via interpolate_F_loading()
+    F_loading <- attr(out, "F_loading")
+  } else if (!is_rif && !is.null(chol_obj)) {
+      # Standard OLS path only — skip for RIF (model is fixest_multi)
+    X_nonFE <- tryCatch(
+      model.matrix(model, data = survey_wd_sim, type = "rhs"),
+      error = function(e) {
+        warning("[run_sim_pipeline] model.matrix() failed: ", conditionMessage(e))
+        NULL
+      }
+    )
+if (!is.null(X_nonFE)) {
+      if (is.list(chol_obj) && "L" %in% names(chol_obj)) {
+        # Our named list format — use compute_factor_loading()
+        stopifnot(
+          "X_nonFE columns must match chol_obj$beta names" =
+            identical(colnames(X_nonFE), names(chol_obj$beta))
+        )
+        F_loading <- compute_factor_loading(X_nonFE, chol_obj)
+      } else if (is.matrix(chol_obj)) {
+        # Golem matrix format — inline multiply
+        F_loading <- X_nonFE %*% t(chol_obj)
+      }
+    }
+  }
+
+  # ---- Training augmentation for residual drawing ------------------------- #
+  # train_aug carries .resid for "original" and "resample" residual paths
+  # inside aggregate_with_uncertainty_delta(). Identical across keys — prefer
+  # the precomputed version when available; fall back to per-call computation
+  # for backward compat (Module 3 callers that don't precompute).
+  train_aug <- if (is_rif) {
+    NULL
+  } else if (!is.null(precomputed_train_aug)) {
+    precomputed_train_aug
+  } else {
+    tryCatch({
+      fitted_train <- as.numeric(stats::predict(model, newdata = train_data))
+      train_data |>
+        dplyr::mutate(
+          .fitted = fitted_train,
+          .resid  = !!rlang::sym(so$name) - fitted_train
+        )
+    }, error = function(e) {
+      warning("[run_sim_pipeline] train_aug computation failed: ",
+              conditionMessage(e))
+      NULL
+    })
+  }
+
+  rm(survey_wd_sim)
+
   list(
-    preds       = preds,
+    y_point     = y_point,
+    F_loading   = F_loading,
+    sim_year    = sim_year,
+    weight      = weight,
+    id_vec      = id_vec,
+    id_col      = id_col,
+    svy_row_id  = svy_row_id,
     n_pre_join  = n_pre_join,
-    weather_raw = weather_raw
+    weather_raw = weather_raw,
+    train_aug   = train_aug
   )
 }
 
@@ -242,6 +745,7 @@ run_sim_pipeline <- function(weather_raw, svy, sw, so,
 #' @export
 build_hist_sim_dates <- function(survey_weather, year_range) {
   months <- unique(survey_weather$int_month)
+  months <- months[!is.na(months)]
   years  <- seq(year_range[1], year_range[2])
 
   with(
@@ -260,10 +764,10 @@ build_hist_sim_dates <- function(survey_weather, year_range) {
 #' @export
 residual_choices <- function() {
   c(
-    "None (fitted values only)"         = "none",
-    "Original (match by individual ID)" = "original",
-    "Resample from training residuals"  = "empirical",
-    "Draw from normal distribution"     = "normal"
+    "Original" = "original",
+    "Resample"  = "resample",
+    "Normal"     = "normal",
+    "None"      = "none"
   )
 }
 
@@ -330,20 +834,21 @@ prepare_hist_weather <- function(weather_raw,
                                  outcome_name) {
   drop_cols <- c(selected_weather$name, outcome_name)
 
-  weather_raw |>
+    weather_raw |>
     dplyr::mutate(
-      year      = as.factor(year),
+      year      = as.character(year),
       int_month = as.integer(format(timestamp, "%m")),
       sim_year  = as.integer(format(timestamp, "%Y"))
     ) |>
     dplyr::select(-timestamp) |>
     dplyr::inner_join(
-      survey_weather |> dplyr::select(-dplyr::any_of(drop_cols)),
+      survey_weather |>
+        dplyr::mutate(year = as.character(year)) |>
+        dplyr::select(-dplyr::any_of(drop_cols)),
       by = c("code", "year", "survname", "loc_id", "int_month")
-    )
+    ) |>
+    dplyr::mutate(year = as.factor(year))
 }
-
-
 # ---------------------------------------------------------------------------- #
 # Back-transformation                                                          #
 # ---------------------------------------------------------------------------- #
@@ -370,375 +875,5 @@ apply_log_backtransform <- function(preds, so) {
     dplyr::mutate(!!rlang::sym(so$name) := exp(.data[[so$name]]))
 }
 
-
-# ---------------------------------------------------------------------------- #
-# Aggregation choices                                                          #
-# ---------------------------------------------------------------------------- #
-
-#' Aggregation Method Choices for Historical Simulation
-#'
-#' Returns the named character vector of aggregation method choices used to
-#' populate the `selectInput` in the simulation results tab. Binary outcomes
-#' are restricted to rate (mean) only.
-#'
-#' @param outcome_type A character string; `"logical"` for binary outcomes,
-#'   any other value for continuous outcomes.
-#'
-#' @return A named character vector suitable for use in `shiny::selectInput()`.
-#'
-#' @export
-hist_aggregate_choices <- function(outcome_type, outcome_name = NULL) {
-  if (identical(outcome_type, "logical")) {
-    # Binary outcomes: Mean
-    c("Mean" = "mean")
-  } else if (identical(outcome_type, "numeric") &&
-             identical(outcome_name, "welfare")) {
-    # Welfare outcomes: full suite including FGT, Gini, prosperity gap, and average poverty
-    c(
-      "Mean"                     = "mean",
-      "Median"                   = "median",
-      "Total"                    = "total",
-      "Poverty rate"             = "headcount_ratio",
-      "Poverty Gap"              = "gap",
-      "Poverty Severity"         = "fgt2",
-      "Gini"                     = "gini",
-      "Prosperity gap"           = "prosperity_gap",
-      "Average poverty (days/$)" = "avg_poverty"
-    )
-  } else {
-    # All other numeric outcomes (wage, hours, employment, etc.)
-    c(
-      "Mean"                    = "mean",
-      "Median"                  = "median",
-      "Total"                   = "total",
-      "Outcome headcount ratio" = "headcount_ratio",
-      "Outcome gap"             = "gap",
-      "Outcome severity"        = "fgt2",
-      "Gini"                    = "gini"
-    )
-  }
-}
-
-
-
-# ---------------------------------------------------------------------------- #
-# Aggregate predictions for plotting
-# ---------------------------------------------------------------------------- #
-
-#' Aggregate a Predicted Outcome Across Observations Within Groups
-#'
-#' Aggregates a predicted individual-level outcome across observations within
-#' each group (e.g. simulation year), producing a single summary statistic per
-#' group. This is typically used to collapse individual-level predictions from
-#' a simulation into group-level indicators before plotting.
-#'
-#' For binary outcomes the aggregate is always the population share with a value
-#' of 1 (i.e. the mean). For continuous outcomes a range of aggregates are
-#' available, including poverty and inequality measures.
-#'
-#' @param df A data frame containing individual-level predictions.
-#' @param outcome A character string giving the name of the outcome column in
-#'   `df`
-#' @param group A character string giving the name of the grouping column.
-#'   Defaults to `sim_year`.
-#' @param type Either `continuous` (default) or `binary`. For
-#'   binary outcomes the aggregate is always the population share with outcome
-#'   equal to 1, and the `aggregate` and `pov_line` arguments are
-#'   ignored.
-#' @param aggregate The summary statistic to compute when `type =
-#'   "continuous`. One of `mean` (default), `sum`,
-#'   `median`, `headcount_ratio` (population share with outcome
-#'   below `pov_line`), `gap` (average normalised shortfall below
-#'   `pov_line` across the whole population, i.e. the Foster-Greer-Thorbecke
-#'   P1 index), or `gini` (Gini coefficient). Ignored when
-#'   `type = "binary`.
-#' @param pov_line A numeric poverty line required when `aggregate` is
-#'   `headcount_ratio` or `gap`. Ignored otherwise.
-#' @param weights An optional character string giving the name of a survey
-#'   weight column in `df`. If `NULL` (default) all observations are
-#'   weighted equally.
-#'
-#' @return A tibble with one row per group containing the grouping column
-#'   and a column named `value` holding the computed aggregate.
-#'
-#' @examples
-#' library(dplyr)
-#'
-#' # Simulate 50 simulation years, 1000 individuals each
-#' set.seed(42)
-#' sim_data <- data.frame(
-#'   sim_year = rep(1:50, each = 1000),
-#'   welfare  = exp(rnorm(50000, mean = log(3.50), sd = 0.8))
-#' )
-#'
-#' # Headcount poverty rate at $3.00/day
-#' pov_by_year <- aggregate_outcome(
-#'   df        = sim_data,
-#'   outcome   = "welfare",
-#'   type      = "continuous",
-#'   aggregate = "headcount_ratio",
-#'   pov_line  = 3.00
-#' )
-#'
-#' head(pov_by_year)
-#'
-#' @importFrom dplyr group_by summarise
-#' @importFrom rlang sym
-#' @export
-aggregate_outcome <- function(df,
-                              outcome,
-                              group     = "sim_year",
-                              type      = c("continuous", "binary"),
-                              aggregate = c("mean", "sum", "total", "median",
-                                            "headcount_ratio", "gap", "fgt2", "gini",
-                                            "prosperity_gap", "avg_poverty"),
-                              pov_line  = NULL,
-                              weights   = NULL) {
-
-  type      <- match.arg(type)
-  # For binary outcomes the aggregate argument is ignored (always population
-  # share). Skip match.arg so UI values like "binary" don't cause an error.
-  if (type != "binary") {
-    aggregate <- match.arg(aggregate)
-    # 'total' is a user-facing alias for 'sum'
-    if (aggregate == "total") aggregate <- "sum"
-  }
-
-  gini_coef <- function(x, w) {
-    # Remove NA / non-finite values (present in future sim predictions)
-    ok <- is.finite(x)
-    if (!is.null(w)) ok <- ok & is.finite(w)
-    x  <- x[ok]
-    w  <- if (!is.null(w)) w[ok] else NULL
-
-    if (length(x) < 2) return(NA_real_)
-
-    ord    <- order(x)
-    x      <- x[ord]
-    w      <- if (is.null(w)) rep(1, length(x)) else w[ord]
-    w      <- w / sum(w)
-    lorenz <- cumsum(w * x) / sum(w * x)
-    lorenz <- c(0, lorenz)
-    cx     <- c(0, cumsum(w))
-    B      <- sum(diff(cx) * (lorenz[-length(lorenz)] + lorenz[-1]) / 2)
-    1 - 2 * B
-  }
-
-  compute <- function(x, w) {
-    if (type == "binary") {
-      # multiply by 100 to express as percentage points
-      if (is.null(w)) 100*mean(as.numeric(x), na.rm = TRUE)
-      else 100*sum(as.numeric(x) * w, na.rm = TRUE) / sum(w, na.rm = TRUE)
-    } else {
-      switch(aggregate,
-        mean            = if (is.null(w)) mean(x, na.rm = TRUE)
-                          else sum(x * w, na.rm = TRUE) / sum(w, na.rm = TRUE),
-        sum             = if (is.null(w)) sum(x, na.rm = TRUE)
-                          else sum(x * w, na.rm = TRUE),
-        median          = if (is.null(w)) median(x, na.rm = TRUE) else {
-                            ord  <- order(x); x <- x[ord]; w <- w[ord]
-                            cumw <- cumsum(w) / sum(w)
-                            x[which(cumw >= 0.5)[1]]
-                          },
-        headcount_ratio = {
-          if (is.null(pov_line)) stop("`pov_line` must be supplied for headcount_ratio")
-          poor <- as.numeric(x < pov_line)
-          if (is.null(w)) mean(poor, na.rm = TRUE)
-          else sum(poor * w, na.rm = TRUE) / sum(w, na.rm = TRUE)
-        },
-        gap             = {
-          if (is.null(pov_line)) stop("`pov_line` must be supplied for gap")
-          shortfall <- pmax(pov_line - x, 0) / pov_line
-          if (is.null(w)) mean(shortfall, na.rm = TRUE)
-          else sum(shortfall * w, na.rm = TRUE) / sum(w, na.rm = TRUE)
-        },
-        fgt2 = {
-          if (is.null(pov_line)) stop("`pov_line` must be supplied for fgt2")
-          shortfall <- pmax(pov_line - x, 0) / pov_line
-          if (is.null(w)) mean(shortfall^2, na.rm = TRUE)
-          else sum((shortfall^2) * w, na.rm = TRUE) / sum(w, na.rm = TRUE)
-        },
-        gini            = gini_coef(x, w),
-        prosperity_gap  = {
-          # Average factor by which incomes must be multiplied to reach $28/day.
-          # For incomes already >= 28 the gap factor is 1 (no gap).
-          pg <- pmax(28 / x, 1)
-          if (is.null(w)) mean(pg, na.rm = TRUE)
-          else sum(pg * w, na.rm = TRUE) / sum(w, na.rm = TRUE)
-        },
-        avg_poverty     = {
-          # Average poverty = mean(1 / x): days needed to earn $1.
-          # Non-positive incomes are excluded to avoid Inf / NaN.
-          ok <- is.finite(x) & x > 0
-          xp <- x[ok]
-          wp <- if (!is.null(w)) w[ok] else NULL
-          if (length(xp) == 0) return(NA_real_)
-          if (is.null(wp)) mean(1 / xp, na.rm = TRUE)
-          else sum((1 / xp) * wp, na.rm = TRUE) / sum(wp, na.rm = TRUE)
-        }
-      )
-    }
-  }
-
-  df |>
-    dplyr::group_by(dplyr::across(dplyr::all_of(group))) |>
-    summarise(
-      value = compute(
-        x = .data[[outcome]],
-        w = if (!is.null(weights)) .data[[weights]] else NULL
-      ),
-      .groups = "drop"
-    )
-}
-
-#---------------------------------------------------------------------------- #
-# Convert to deviation from centre for plotting
-#---------------------------------------------------------------------------- #
-
-#' Express Aggregate Values as Deviation from a Central Tendency
-#'
-#' Takes the output of `aggregate_outcome()` and expresses each group's
-#' value as a deviation from either the mean or median across all groups.
-#' Optionally flips the sign of the result for loss-framed outcomes, where a
-#' positive deviation is undesirable (e.g. poverty rates, deficits).
-#'
-#' @param df A data frame with at least a grouping column and a `value`
-#'   column, as returned by `aggregate_outcome()`.
-#' @param group A character string giving the name of the grouping column.
-#'   Defaults to `"sim_year"`.
-#' @param centre A character string, either `"mean"` (default) or
-#'   `"median"`, specifying the central tendency to deviate from.
-#' @param loss Logical. If `TRUE`, the sign of the deviation is flipped so
-#'   that positive values represent outcomes worse than the centre (e.g. higher
-#'   poverty than expected). Defaults to `FALSE`.
-#'
-#' @return A tibble with the same columns as `df` and `value`
-#'   replaced by the deviation from the chosen centre, optionally sign-flipped.
-#'
-#' @examples
-#' library(dplyr)
-#'
-#' set.seed(42)
-#' sim_data <- data.frame(
-#'   sim_year = rep(1:50, each = 1000),
-#'   welfare  = exp(rnorm(50000, mean = log(3.50), sd = 0.8))
-#' )
-#'
-#' pov_by_year <- aggregate_outcome(
-#'   df        = sim_data,
-#'   outcome   = "welfare",
-#'   type      = "continuous",
-#'   aggregate = "headcount_ratio",
-#'   pov_line  = 3.00
-#' )
-#'
-#' # Deviation from mean, welfare framing (higher welfare = good)
-#' deviation_from_centre(pov_by_year)
-#'
-#' # Deviation from median, loss framing (higher poverty = bad)
-#' deviation_from_centre(pov_by_year, centre = "median", loss = TRUE)
-#'
-#' @importFrom dplyr mutate
-#' @export
-deviation_from_centre <- function(df,
-                                  group  = "sim_year",
-                                  centre = c("mean", "median"),
-                                  loss   = FALSE) {
-
-  centre <- match.arg(centre)
-
-  ref <- switch(centre,
-    mean   = mean(df$value,   na.rm = TRUE),
-    median = median(df$value, na.rm = TRUE)
-  )
-
-  sign <- if (loss) -1 else 1
-
-  df |>
-    mutate(value = sign * (value - ref))
-}
-
-# NOTE: plot_exceedance() and plot_hist_sim() have been archived to
-# dev/archived_fct/plot_exceedance_archived.R. They are superseded by
-# enhance_exceedance() in fct_sim_compare.R and have no active call sites.
-
-# ---------------------------------------------------------------------------- #
-# Shared aggregation helper                                                    #
-# ---------------------------------------------------------------------------- #
-
-#' Aggregate Simulation Predictions for Exceedance Plotting
-#'
-#' Aggregates individual-level predictions by sim_year, optionally applies
-#' deviation_from_centre(), and returns the aggregated data frame with x_label.
-#' @param preds      Data frame of individual-level predictions with a
-#'   `sim_year` column and the outcome column named by `so$name`.
-#' @param so         One-row outcome metadata data frame (columns `name`,
-#'   `label`, `type`).
-#' @param agg_method Character. One of `"mean"`, `"median"`,
-#'   `"headcount_ratio"`, `"gap"`, `"gini"`.
-#' @param deviation  Character. One of `"none"`, `"mean"`, `"median"`.
-#' @param loss_frame Logical. Passed to `deviation_from_centre()` as `loss`.
-#' @param pov_line   Numeric or `NULL`. Required for `"headcount_ratio"` /
-#'   `"gap"`.
-#'
-#' @return A list with elements `out` (aggregated data frame with `sim_year`
-#'   and `value` columns) and `x_label` (character).
-#'
-#' @importFrom rlang abort
-#' @export
-aggregate_sim_preds <- function(preds, so, agg_method, deviation, loss_frame,
-                                pov_line = NULL) {
-
-  if (agg_method %in% c("headcount_ratio", "gap", "fgt2") && is.null(pov_line)) {
-    rlang::abort(
-      "`pov_line` must be supplied when `agg_method` is 'headcount_ratio','gap', or 'fgt2'."
-    )
-  }
-
-  # Group by (model, sim_year) when a model column is present (future scenarios
-  # with all ensemble members pooled), so the CI reflects model × year variation.
-  grp_cols <- if ("model" %in% names(preds)) c("model", "sim_year") else "sim_year"
-
-  out <- aggregate_outcome(
-    df        = preds,
-    outcome   = so$name,
-    group     = grp_cols,
-    type      = if (identical(so$type, "logical")) "binary" else "continuous",
-    aggregate = agg_method,
-    pov_line  = pov_line
-  )
-
-  if (!identical(deviation, "none")) {
-    out <- deviation_from_centre(
-      out,
-      centre = deviation,
-      loss   = isTRUE(loss_frame)
-    )
-    if (!identical(so$type, "logical")) {
-      x_label <- paste0(
-        "Change in ", so$label,
-        " relative to typical year (", deviation, ")"
-      )
-    } else {
-      x_label <- paste0(
-        "Change in ", so$label,
-        " relative to typical year (pp.)"
-      )
-    }
-  } else {
-    if (!identical(so$type, "logical")) {
-      x_label <- paste0(
-        "Simulated ", so$label,
-        " [", agg_method, "]"
-      )
-    } else {
-      x_label <- paste0(
-        "Simulated ", so$label,
-        " rate (pp.)"
-      )
-    }
-  }
-
-  list(out = out, x_label = x_label)
-}
-
+# Stage 2 aggregation lives in fct_aggregation_delta.R
+# (aggregate_with_uncertainty_delta).

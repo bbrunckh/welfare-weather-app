@@ -36,7 +36,7 @@ extract_survey_dates <- function(survey_data) {
 #'
 #' Performs an `inner_join` on `code`, `year`, `survname`, `loc_id`, and
 #' `timestamp`, converts `year` to a factor for plotting, and normalises
-#' `weight` to sum to 1 within each `code` / `year` / `survname` group.
+#' OUTDATED: `weight` to sum to 1 within each `code` / `year` / `survname` group.
 #'
 #' @param survey_data  A data frame of survey observations with at minimum
 #'   columns `code`, `year`, `survname`, `loc_id`, `timestamp`, and `weight`.
@@ -59,7 +59,7 @@ merge_survey_weather <- function(survey_data, weather_data) {
     ) |>
     dplyr::mutate(year = as.factor(.data$year)) |>
     dplyr::group_by(.data$code, .data$year, .data$survname) |>
-    dplyr::mutate(weight = .data$weight / sum(.data$weight, na.rm = TRUE)) |>
+    # dplyr::mutate(weight = .data$weight / sum(.data$weight, na.rm = TRUE)) |>
     dplyr::ungroup()
 
   if (nrow(joined) == 0) return(NULL)
@@ -105,8 +105,8 @@ plot_weather_dist <- function(df, hv, label, cont_binned) {
         alpha    = 0.85
       ) +
       ggplot2::scale_fill_brewer(palette = "Set2", name = NULL) +
-      ggplot2::theme_minimal() +
-      ggplot2::labs(title = "Distribution of bins", x = x_label, y = "Count") +
+      theme_wise() +
+      ggplot2::labs(x = x_label, y = "Count") +
       ggplot2::theme(
         axis.text.x     = ggplot2::element_text(angle = 45, hjust = 1),
         legend.position = "top",
@@ -178,7 +178,7 @@ plot_binscatter <- function(df, hv, hv_label = hv, y_var, y_label = y_var) {
     d$x <- as.factor(d$x)
 
     p <- ggplot2::ggplot(d, ggplot2::aes(x = .data$x, y = .data$y)) +
-      ggplot2::theme_minimal(base_size = 14) +
+      theme_wise() +
       ggplot2::theme(
         axis.text.x = ggplot2::element_text(angle = 90, hjust = 1, vjust = 0.5)
       ) +
@@ -209,7 +209,7 @@ plot_binscatter <- function(df, hv, hv_label = hv, y_var, y_label = y_var) {
   p <- ggplot2::ggplot(d, ggplot2::aes(x = .data$x, y = .data$y)) +
     ggplot2::geom_point(alpha = 0.10) +
     ggplot2::stat_summary_bin(fun = mean, bins = 20, color = "orange", size = 2, geom = "point") +
-    ggplot2::theme_minimal(base_size = 14) +
+    theme_wise() +
     ggplot2::labs(
       x = stringr::str_wrap(hv_label, 40),
       y = stringr::str_wrap(y_label, 40)
@@ -246,6 +246,11 @@ make_weather_stats_dt <- function(survey_weather, selected_weather) {
     if (length(vars) == 0) return(data.frame(Note = "No weather variables found"))
 
     tab <- weighted_summary_long(df, vars = vars)
+    if (!is.data.frame(tab) || nrow(tab) == 0) {
+      return(data.frame(
+        Note = "No continuous weather variables to summarise (binned variables are shown below)."
+      ))
+    }
 
     # Add wave-specific missingness (% Missing) by countryyear and variable
     if ("countryyear" %in% names(tab) && "variable" %in% names(tab)) {
@@ -295,4 +300,140 @@ make_weather_stats_dt <- function(survey_weather, selected_weather) {
 
     dt
   })
+}
+
+
+#' Weather binned-variable level-distribution DT renderer
+#'
+#' Builds a DT for binned (factor / character) weather variables, showing
+#' count and share of observations in each bin per `countryyear`. Numeric
+#' weather variables are skipped (handled by `make_weather_stats_dt`).
+#'
+#' @param survey_weather   Reactive returning merged survey-weather data.
+#' @param selected_weather Reactive returning selected weather rows
+#'   (needs `name` and `label`).
+#'
+#' @return A DT render function.
+#' @export
+make_weather_binned_stats_dt <- function(survey_weather, selected_weather) {
+  DT::renderDT({
+    shiny::req(survey_weather(), selected_weather())
+
+    df <- survey_weather() |>
+      dplyr::mutate(countryyear = paste0(.data$economy, ", ", .data$year))
+
+    sw <- selected_weather()
+    vars <- intersect(sw$name, names(df))
+    if (length(vars) == 0) {
+      return(data.frame(Note = "No weather variables found"))
+    }
+
+    binned_vars <- vars[vapply(df[vars],
+                               function(x) !is.numeric(x), logical(1))]
+    if (length(binned_vars) == 0) {
+      return(data.frame(
+        Note = "No binned weather variables to summarise."
+      ))
+    }
+
+    rows_list <- lapply(binned_vars, function(v) {
+      counts <- df |>
+        dplyr::filter(!is.na(.data[[v]])) |>
+        dplyr::group_by(.data$countryyear, .data[[v]]) |>
+        dplyr::summarise(N = dplyr::n(), .groups = "drop") |>
+        dplyr::group_by(.data$countryyear) |>
+        dplyr::mutate(share = 100 * .data$N / sum(.data$N)) |>
+        dplyr::ungroup() |>
+        dplyr::mutate(
+          variable = v,
+          level    = as.character(.data[[v]])
+        ) |>
+        dplyr::select(.data$variable, .data$countryyear, .data$level,
+                      .data$N, .data$share)
+
+      miss_df <- df |>
+        dplyr::group_by(.data$countryyear) |>
+        dplyr::summarise(`% Missing` = 100 * mean(is.na(.data[[v]])),
+                         .groups = "drop")
+
+      counts |> dplyr::left_join(miss_df, by = "countryyear")
+    })
+
+    tab <- dplyr::bind_rows(rows_list)
+    if (nrow(tab) == 0) {
+      return(data.frame(Note = "No binned weather observations found."))
+    }
+
+    if ("variable" %in% names(tab) &&
+        all(c("name", "label") %in% names(sw))) {
+      lab_map <- sw |>
+        dplyr::select(.data$name, .data$label) |>
+        dplyr::distinct()
+      tab <- tab |>
+        dplyr::left_join(lab_map, by = c("variable" = "name")) |>
+        dplyr::mutate(
+          variable_label = dplyr::coalesce(.data$label, .data$variable)
+        ) |>
+        dplyr::select(.data$variable, .data$variable_label,
+                      .data$countryyear, .data$level, .data$N,
+                      .data$share, .data$`% Missing`)
+    }
+
+    # Sort: by variable, country-year, then by level (factor order if available)
+    tab <- tab |>
+      dplyr::arrange(.data$variable, .data$countryyear, .data$level)
+
+    if ("variable" %in% names(tab))
+      names(tab)[names(tab) == "variable"] <- "Variable"
+    if ("variable_label" %in% names(tab))
+      names(tab)[names(tab) == "variable_label"] <- "Variable Label"
+    if ("countryyear" %in% names(tab))
+      names(tab)[names(tab) == "countryyear"] <- "Country, Year"
+    if ("level" %in% names(tab))
+      names(tab)[names(tab) == "level"] <- "Level"
+    if ("share" %in% names(tab))
+      names(tab)[names(tab) == "share"] <- "Share (%)"
+
+    dt <- DT::datatable(
+      tab,
+      rownames = FALSE,
+      options  = list(dom = "t", paging = FALSE,
+                      searching = FALSE, info = FALSE),
+      class    = "compact"
+    )
+
+    num_cols <- intersect(c("Share (%)", "% Missing"), names(tab))
+    if (length(num_cols) > 0) {
+      dt <- DT::formatRound(dt, columns = num_cols, digits = 2)
+    }
+
+    dt
+  })
+}
+
+#' Per-weather-variable plot layout (full panel for 1 var, two for >= 2)
+#'
+#' Returns a `bslib::card` for a single weather variable, or a two-column
+#' `bslib::layout_columns` for two. Used to keep panel layouts consistent
+#' across the app (Step 1 weather stats, Step 1 results, Step 3
+#' decomposition).
+#'
+#' @param ns       The module's `NS` function (from `session$ns`).
+#' @param n_vars   Integer. Number of selected weather variables.
+#' @param ids      Character vector of length 2 — output IDs for plot 1
+#'                 and plot 2. Only `ids[1]` is used when `n_vars < 2`.
+#' @param height   CSS height passed to `shiny::plotOutput`.
+#'
+#' @return A Shiny tag.
+#' @noRd
+weather_plot_layout <- function(ns, n_vars, ids, height = "500px") {
+  if (isTRUE(n_vars >= 2)) {
+    bslib::layout_columns(
+      col_widths = c(6, 6),
+      bslib::card(shiny::plotOutput(ns(ids[1]), height = height)),
+      bslib::card(shiny::plotOutput(ns(ids[2]), height = height))
+    )
+  } else {
+    bslib::card(shiny::plotOutput(ns(ids[1]), height = height))
+  }
 }

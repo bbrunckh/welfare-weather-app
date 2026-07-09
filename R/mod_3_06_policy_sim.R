@@ -1,0 +1,298 @@
+#' 3_06_policy_sim UI Function
+#'
+#' @description A shiny Module. Renders status banner for policy adjustments.
+#'
+#' @param id Internal parameter for {shiny}.
+#'
+#' @noRd
+#'
+#' @importFrom shiny NS tagList
+mod_3_06_policy_sim_ui <- function(id) {
+  ns <- NS(id)
+  tagList(
+    uiOutput(ns("sim_status_ui"))
+  )
+}
+
+#' Collect the variable / term names referenced by a selected model
+#'
+#' Mirrors the `coeffs()` logic used by the policy lever modules: the union of
+#' all covariate roles plus interactions. Used to gate which covariate levers
+#' may mutate the survey in \code{apply_policy_to_svy()}.
+#'
+#' @param sm Selected-model list (or NULL).
+#' @return Character vector of term names, or NULL when `sm` is NULL.
+#' @noRd
+.model_term_names <- function(sm) {
+  if (is.null(sm)) return(NULL)
+  get_names <- function(x) {
+    if (is.null(x)) return(character(0))
+    nms <- names(x)
+    if (!is.null(nms) && any(nzchar(nms))) {
+      unique(nms[nzchar(nms)])
+    } else {
+      unique(as.character(unlist(x, use.names = FALSE)))
+    }
+  }
+  unique(c(
+    get_names(sm$individual_covariates),
+    get_names(sm$hh_covariates),
+    get_names(sm$firm_covariates),
+    get_names(sm$area_covariates),
+    get_names(sm$interactions)
+  ))
+}
+
+#' 3_06_policy_sim Server Functions
+#'
+#' Applies user-defined policy adjustments to survey covariates from the
+#' policy scenario modules (mod_3_01 through mod_3_05), then re-runs the
+#' Step 2 simulation pipeline against both the baseline and policy-adjusted
+#' survey frames using the cached Step 2 weather, model fit and draws.
+#'
+#' @param id                Module id.
+#' @param survey_weather    Reactive survey-weather df to be adjusted.
+#' @param sp_scenario       Reactive named list from mod_3_01_sp_server().
+#' @param infra_scenario    Reactive named list from mod_3_02_infra_server().
+#' @param digital_scenario  Reactive named list from mod_3_03_digital_server().
+#' @param labor_scenario    Reactive named list from mod_3_04_labor_server().
+#' @param education_scenario Reactive list from mod_3_05_education_server().
+#' @param selected_model    Reactive list of the selected Step 1 model's
+#'   parameters. Used to restrict covariate levers to variables still in the
+#'   model, so dropped variables do not appear as manipulated in diagnostics.
+#' @param model_fit         Reactive list from mod_1 model fit.
+#' @param selected_weather  Reactive selected-weather metadata.
+#' @param hist_sim          Reactive Step 2 hist_sim list.
+#' @param saved_scenarios   Reactive Step 2 named scenario list.
+#'
+#' @return Named list with baseline_svy, policy_svy, sim_run_id, plus
+#'   re-simulated baseline_hist_sim/baseline_saved_scenarios and
+#'   policy_hist_sim/policy_saved_scenarios.
+#'
+#' @noRd
+mod_3_06_policy_sim_server <- function(id,
+                                        survey_weather,
+                                        sp_scenario        = reactive(NULL),
+                                        infra_scenario     = reactive(NULL),
+                                        digital_scenario   = reactive(NULL),
+                                        labor_scenario     = reactive(NULL),
+                                        education_scenario = reactive(NULL),
+                                        selected_model     = reactive(NULL),
+                                        model_fit          = reactive(NULL),
+                                        selected_weather   = reactive(NULL),
+                                        hist_sim           = reactive(NULL),
+                                        saved_scenarios    = reactive(list()),
+                                        analysis_unit      = reactive("hh"),
+                                        skip_coef_draws    = reactive(FALSE),
+                                        residuals          = reactive("original"),
+                                        propagate_all_covariate_uncertainty =
+                                          reactive(FALSE)) {
+  moduleServer(id, function(input, output, session) {
+    ns <- session$ns
+
+    baseline_svy_rv     <- reactiveVal(NULL)
+    policy_svy_rv       <- reactiveVal(NULL)
+    sim_error           <- reactiveVal(NULL)
+    sim_run_id          <- reactiveVal(0L)
+    decomp_rv           <- reactiveVal(NULL)
+    decomp_scenarios_rv <- reactiveVal(list())
+
+    baseline_hist_sim_rv        <- reactiveVal(NULL)
+    baseline_saved_scenarios_rv <- reactiveVal(list())
+    policy_hist_sim_rv          <- reactiveVal(NULL)
+    policy_saved_scenarios_rv   <- reactiveVal(list())
+
+    run <- function() {
+      sim_error(NULL)
+
+      mf  <- model_fit()
+      sw  <- selected_weather()
+      hs  <- hist_sim()
+      ss  <- saved_scenarios()
+      # Use the exact survey that Step 2 used as the baseline. Step 2 may have
+      # filtered survey_weather() to a single survey round (baseline_svy). The
+      # Step 2 weather_raw was fetched against that filtered survey, so it
+      # contains rows for all survey years in selected_surveys — joining the
+      # FULL survey_weather() would pull in extra households from non-baseline
+      # rounds and produce a systematically different aggregate.
+      svy <- hs$svy %||% survey_weather()
+
+      if (is.null(svy)) {
+        sim_error(simpleError("Survey data not available."))
+        return(invisible(NULL))
+      }
+      if (is.null(mf) || is.null(hs)) {
+        sim_error(simpleError(
+          "Step 2 simulation must be run before policy simulation."
+        ))
+        return(invisible(NULL))
+      }
+
+      tryCatch(
+        {
+          baseline_svy_rv(svy)
+
+          svy_mod <- apply_policy_to_svy(
+            svy,
+            infra         = infra_scenario(),
+            sp            = sp_scenario(),
+            digital       = digital_scenario(),
+            labor         = labor_scenario(),
+            education     = education_scenario(),
+            model_vars    = .model_term_names(selected_model()),
+            analysis_unit = analysis_unit()
+          )
+          policy_svy_rv(svy_mod)
+
+          shiny::withProgress(
+            message = "Re-running simulations for baseline and policy...",
+            value   = 0.1,
+            {
+              shiny::setProgress(value = 0.2, detail = "Baseline (reusing Step 2)...")
+              # Baseline = Step 2 output verbatim. The survey is unchanged in
+              # the baseline arm, so re-simulating would just reproduce the
+              # Step 2 results. Pass Step 2's hist_sim and saved_scenarios
+              # straight through so the Results pane reads exactly the same
+              # values Mod 2 shows. The Results pane and policy resimulation
+              # both consume the Mod 2 schema ($pipeline for hist_sim,
+              # $pipelines for each saved scenario), so no translation is
+              # required here.
+              res_choice <- residuals() %||% "original"
+              # Stamp the live residuals choice onto hist_sim so the Results
+              # pane's aggregator picks up the same residual treatment Mod 2
+              # is rendering with.
+              hs_for_baseline <- hs
+              hs_for_baseline$residuals <- res_choice
+              baseline_hist_sim_rv(hs_for_baseline)
+              baseline_saved_scenarios_rv(ss %||% list())
+
+              shiny::setProgress(value = 0.6, detail = "Policy...")
+              # Derive the policy arm from the baseline pipelines by adding
+              # the analytic per-household delta_total (the same number the
+              # Decomposition pane reports). This (a) eliminates the
+              # baseline/policy disagreement when residual draws have any
+              # stochastic component — both arms now share identical
+              # train_aug / id_vec / svy_row_id, so residuals line up
+              # household-for-household and a no-op policy yields a no-op
+              # visual effect; and (b) removes the per-CMIP6-member re-
+              # simulation, which was the dominant cost of every policy
+              # adjustment.
+              skip_coef_val <- isTRUE(skip_coef_draws())
+              pol_out <- apply_policy_delta_to_baseline(
+                svy_baseline             = svy,
+                svy_policy               = svy_mod,
+                model_fit                = mf,
+                so                       = hs$so,
+                hist_sim_baseline        = hs_for_baseline,
+                saved_scenarios_baseline = ss %||% list(),
+                skip_coef                = skip_coef_val
+              )
+              if (!is.null(pol_out)) {
+                policy_hist_sim_rv(pol_out$hist_sim)
+                policy_saved_scenarios_rv(pol_out$saved_scenarios)
+              }
+
+              # Decompose policy effects using HISTORICAL mean weather
+              shiny::setProgress(value = 0.85, detail = "Decomposing effects...")
+              decomp <- tryCatch(
+                decompose_policy_effect(
+                  svy_baseline = svy,
+                  svy_policy   = policy_svy_rv(),
+                  model_fit    = mf,
+                  so           = hs$so,
+                  weather_raw  = hs$weather_raw,
+                  skip_coef    = skip_coef_val
+                ),
+                error = function(e) {
+                  warning("[mod_3_05] Decomposition failed: ", conditionMessage(e))
+                  NULL
+                }
+              )
+              decomp_rv(decomp)
+
+              # Decompose per saved scenario × sim_year for year-to-year variation
+              shiny::setProgress(value = 0.90, detail = "Decomposing scenario effects...")
+              sc_list <- pol_out$saved_scenarios %||% list()
+              decomp_sc <- lapply(seq_along(sc_list), function(i) {
+                sc       <- sc_list[[i]]
+                w_raw    <- sc$weather_raw
+                if (is.null(w_raw)) return(NULL)
+                sc_label <- names(sc_list)[i] %||% paste0("Scenario ", i)
+
+                # Identify years present in this scenario's weather panel
+                if ("timestamp" %in% names(w_raw)) {
+                  sim_years <- sort(unique(as.integer(format(w_raw$timestamp, "%Y"))))
+                } else {
+                  # No year column — fall back to single decomposition (mean weather)
+                  sim_years <- NA_integer_
+                }
+
+                year_results <- lapply(sim_years, function(yr) {
+                  # Subset to this year's weather rows (or use full panel if no year info)
+                  w_yr <- if (!is.na(yr)) {
+                    w_raw[as.integer(format(w_raw$timestamp, "%Y")) == yr, ]
+                  } else {
+                    w_raw
+                  }
+                  tryCatch(
+                    decompose_policy_effect(
+                      svy_baseline = svy,
+                      svy_policy   = policy_svy_rv(),
+                      model_fit    = mf,
+                      so           = hs$so,
+                      weather_raw  = w_yr,
+                      skip_coef    = skip_coef_val
+                    ) |> dplyr::mutate(
+                      scenario   = sc_label,
+                      sim_year   = yr,
+                      year_start = sc$year_range[[1]] %||% NA_integer_,
+                      year_end   = sc$year_range[[2]] %||% NA_integer_
+                    ),
+                    error = function(e) {
+                      warning("[mod_3_05] Year decomp failed for '", sc_label,
+                              "' yr ", yr, ": ", conditionMessage(e))
+                      NULL
+                    }
+                  )
+                })
+                dplyr::bind_rows(Filter(Negate(is.null), year_results))
+              })
+              decomp_scenarios_rv(
+                dplyr::bind_rows(Filter(Negate(is.null), decomp_sc))
+              )
+
+              shiny::setProgress(value = 1, detail = "Complete")
+            }
+          )
+
+          sim_run_id(isolate(sim_run_id()) + 1L)
+          shiny::showNotification(
+            "Policy adjustments applied and simulation re-run.",
+            type = "message", duration = 3
+          )
+        },
+        error = function(e) {
+          sim_error(e)
+          shiny::showNotification(
+            paste0("Policy simulation failed: ", conditionMessage(e)),
+            type = "error", duration = 8
+          )
+        }
+      )
+      invisible(NULL)
+    }
+
+    list(
+      run                      = run,
+      baseline_svy             = baseline_svy_rv,
+      policy_svy               = policy_svy_rv,
+      sim_run_id               = sim_run_id,
+      decomp_result            = decomp_rv,
+      decomp_scenarios         = decomp_scenarios_rv,
+      baseline_hist_sim        = baseline_hist_sim_rv,
+      baseline_saved_scenarios = baseline_saved_scenarios_rv,
+      policy_hist_sim          = policy_hist_sim_rv,
+      policy_saved_scenarios   = policy_saved_scenarios_rv
+    )
+  })
+}

@@ -4,24 +4,66 @@
 #'     DO NOT REMOVE.
 #' @import shiny
 #' @noRd
-
 app_ui <- function(request) {
-  navbarPage(
+  bslib::page_navbar(
     title = tagList(
       "WISE-APP",
-      tags$small(golem::get_golem_version(), style = "color: #777; font-size: 0.5em;")
+      tags$span(class = "app-version", golem::get_golem_version())
+    ),
+    window_title = "WISE-APP",
+    theme = bslib::bs_theme(
+      version = 5,
+      brand   = app_sys("app/_brand.yml")
+    ),
+    navbar_options = bslib::navbar_options(theme = "dark", bg = "#002244"),
+
+    header = tagList(
+      golem_add_external_resources(),
+      shiny::useBusyIndicators(),
+      shiny::busyIndicatorOptions(
+        spinner_type  = "bars3",
+        spinner_color = "#0071BC",
+        spinner_size  = "36px"
+      )
     ),
 
-    # MathJax once
-    header = tags$head(
-      tags$script(src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.7/MathJax.js?config=TeX-MML-AM_CHTML")
+    # Page modules
+    bslib::nav_panel(
+      "Overview",
+      icon = icon("house"),
+      mod_0_overview_ui("overview")
     ),
-
-	# Page modules
-    tabPanel("Overview", mod_0_overview_ui("overview")), # welcome message
-    tabPanel("Step 1 - Model welfare", mod_1_modelling_ui("step1")), # step 1 module
-		tabPanel("Step 2 - Simulate welfare", mod_2_simulation_ui("step2")), #step 2 module
-		tabPanel("Step 3 - Policy scenarios", mod_3_scenario_ui("step3")) #step 3 module
+    bslib::nav_panel(
+      "Step 1 - Model welfare",
+      icon = icon("chart-line"),
+      mod_1_modelling_ui("step1")
+    ),
+    bslib::nav_panel(
+      "Step 2 - Simulate welfare",
+      icon = icon("cloud-sun-rain"),
+      mod_2_simulation_ui("step2")
+    ),
+    bslib::nav_panel(
+      "Step 3 - Policy scenarios",
+      icon = icon("scale-balanced"),
+      mod_3_scenario_ui("step3")
+    ),
+    bslib::nav_spacer(),
+    bslib::nav_item(
+      tags$a(
+        icon("book-open"), "Docs",
+        href = "https://datanalytics-int.worldbank.org/content/a24b499b-46b7-420e-9e77-5475b45cc7c5",
+        target = "_blank"
+      )
+    ),
+    bslib::nav_item(
+      tags$a(
+        icon("github"),
+        href = "https://github.com/worldbank/welfare-weather-app",
+        target = "_blank",
+        title = "View source on GitHub"
+      )
+    )
   )
 }
 

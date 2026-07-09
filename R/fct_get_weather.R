@@ -1,5 +1,29 @@
+# fct_get_weather.R
+# -----------------
+# Weather loading and processing pipeline.
+# Loads ERA5 historical weather and CMIP6 climate projections from parquet
+# files via DuckDB. Applies spatial aggregation (H3 → survey location),
+# temporal rolling windows, and climate perturbations.
+#
+# Called by:
+#   - mod_1_04_weather.R  (weather preview in Module 1)
+#   - fct_run_simulation.R / mod_2_01_weathersim.R (simulation in Module 2)
+#
+# Main exports:
+#   get_weather()          — full weather loading pipeline
+#
+# Internal helpers (not exported):
+#   .harmonise_h3()        — H3 resolution matching
+#   .apply_transformations() — anomaly/deviation computation in DuckDB
+#   .compute_breaks()      — histogram/quantile breakpoints
+#   .apply_binning()       — apply cut points to weather data frame
+
+# ---------------------------------------------------------------------------- #
+# Section 1 — H3 spatial helpers                                               #
+# ---------------------------------------------------------------------------- #
+
 #' Harmonise H3 resolution and type between microdata and weather tables.
-#' 
+#'
 #' This helper:
 #' 1. Detects the H3 resolution of each table by sampling one row.
 #' 2. Chooses the **coarser** (lower numeric) resolution as the join key.
@@ -79,7 +103,11 @@
 }
 
 # ---------------------------------------------------------------------------- #
-
+# Section 2 — Weather transformation helpers                                   #
+# .apply_transformations() — anomaly/deviation in DuckDB SQL                   #
+# .compute_breaks()        — binning breakpoint computation                    #
+# .apply_binning()         — apply breakpoints to data frame                   #
+# ---------------------------------------------------------------------------- #
 
 #' Apply deviation-from-mean or standardised-anomaly transformations lazily.
 #'
@@ -163,13 +191,15 @@
 #'
 #' @param ref_df           Collected data frame containing the weather columns.
 #' @param selected_weather Data frame with columns `name`, `cont_binned`,
-#'   `num_bins`, `binning_method`.
+#'   `num_bins`, `binning_method`, and (optionally) `custom_breaks` (list
+#'   column of numeric vectors used when `binning_method == "Custom"`).
 #'
 #' @return A named list of break vectors (one per binned variable).
 #'   Variables that are not binned or fail to produce valid breaks are omitted.
 #' @noRd
 .compute_breaks <- function(ref_df, selected_weather) {
   stored_breaks <- list()
+  has_custom_col <- "custom_breaks" %in% names(selected_weather)
 
   for (i in seq_len(nrow(selected_weather))) {
     v              <- selected_weather$name[i]
@@ -180,38 +210,58 @@
     if (is.na(cont_binned) || cont_binned != "Binned") next
 
     haz_vals <- ref_df[[v]][is.finite(ref_df[[v]])]
-    
+
     # sort for consistent quantile breaks and k-means results
     haz_vals <- sort(haz_vals)
 
     cutoffs <- switch(binning_method,
-      "Equal frequency" = {
-        unique(quantile(haz_vals, probs = seq(0, 1, length.out = num_bins + 1), na.rm = TRUE))
-      },
-      "Equal width" = {
-        unique(seq(min(haz_vals, na.rm = TRUE), max(haz_vals, na.rm = TRUE), length.out = num_bins + 1))
-      },
-      "K-means" = {
-        tryCatch({
-          if (length(unique(haz_vals)) >= num_bins) {
-            set.seed(123)
-            km      <- kmeans(haz_vals, centers = num_bins)
-            centers <- sort(as.numeric(km$centers))
-            unique(c(
-              min(haz_vals, na.rm = TRUE),
-              (centers[-length(centers)] + centers[-1]) / 2,
-              max(haz_vals, na.rm = TRUE)
-            ))
-          } else {
-            message("Not enough unique values for K-means in ", v, ". Keeping continuous.")
-            NULL
-          }
-        }, error = function(e) {
-          message("K-means failed for ", v, ": ", e$message)
-          NULL
-        })
-      },
-      NULL
+                      "Equal frequency" = {
+                        unique(quantile(haz_vals, probs = seq(0, 1, length.out = num_bins + 1), na.rm = TRUE))
+                      },
+                      "Equal width" = {
+                        unique(seq(min(haz_vals, na.rm = TRUE), max(haz_vals, na.rm = TRUE), length.out = num_bins + 1))
+                      },
+                      "K-means" = {
+                        tryCatch({
+                          if (length(unique(haz_vals)) >= num_bins) {
+                            set.seed(123)
+                            km      <- kmeans(haz_vals, centers = num_bins)
+                            centers <- sort(as.numeric(km$centers))
+                            unique(c(
+                              min(haz_vals, na.rm = TRUE),
+                              (centers[-length(centers)] + centers[-1]) / 2,
+                              max(haz_vals, na.rm = TRUE)
+                            ))
+                          } else {
+                            message("Not enough unique values for K-means in ", v, ". Keeping continuous.")
+                            NULL
+                          }
+                        }, error = function(e) {
+                          message("K-means failed for ", v, ": ", e$message)
+                          NULL
+                        })
+                      },
+                      "Custom" = {
+                        user_cuts <- if (has_custom_col) selected_weather$custom_breaks[[i]] else NULL
+                        if (is.null(user_cuts) || length(user_cuts) == 0) {
+                          message("Custom binning for ", v, " requires cut values but none were provided. Keeping continuous.")
+                          NULL
+                        } else {
+                          user_cuts <- sort(unique(as.numeric(user_cuts[is.finite(user_cuts)])))
+                          expected  <- as.integer(num_bins) - 1L
+                          if (length(user_cuts) != expected) {
+                            message(
+                              "Custom binning for ", v, " expected ", expected,
+                              " cut values (num_bins - 1) but got ", length(user_cuts),
+                              ". Using the supplied values as-is."
+                            )
+                          }
+                          # Mirror the structure used by the other branches: a vector whose
+                          # first/last entries are dropped by the breaks_ext step below.
+                          c(min(haz_vals, na.rm = TRUE), user_cuts, max(haz_vals, na.rm = TRUE))
+                        }
+                      },
+                      NULL
     )
 
     if (!is.null(cutoffs) && length(cutoffs) > 1) {
@@ -243,6 +293,12 @@
   df
 }
 
+# ---------------------------------------------------------------------------- #
+# Section 3 — Main weather loading pipeline                                    #
+# get_weather() — loads ERA5 + CMIP6, applies rolling windows + perturbations  #
+# Note: DuckDB rolling window (0%/16% stall) occurs in loc_weather_base        #
+# materialisation and batch query. See tradeoffs for improvements              #
+# in known_issues.md #13, #15.                                                 #
 # ---------------------------------------------------------------------------- #
 
 #' Load, aggregate, and construct weather variables for survey locations.
@@ -307,6 +363,14 @@ get_weather <- function(
   proj_source          = "cmip6",
   stored_breaks        = NULL
 ) {
+
+  # -- Pin DuckDB to single thread for floating-point determinism ------------
+  # Multi-threaded aggregation sums floats in non-deterministic order,
+  # causing last-bit differences (~1e-14) across identical calls.
+  con_det <- .duck_con()
+  prev_threads <- DBI::dbGetQuery(con_det, "SELECT current_setting('threads') AS t")$t
+  DBI::dbExecute(con_det, "SET threads TO 1")
+  on.exit(DBI::dbExecute(con_det, paste("SET threads TO", prev_threads)), add = TRUE)
 
   # -- Validate ---------------------------------------------------------------
   climate_scenario <- !is.null(ssp)
@@ -441,10 +505,10 @@ get_weather <- function(
   # -- Assemble result -------------------------------------------------------
   result <- list()
 
-  # Historical: transform base → filter to dates → collect
   result[["historical"]] <- loc_weather_base |>
     .apply_transformations(selected_weather, loc_weather_base) |>
     dplyr::filter(timestamp %in% !!dates) |>
+    dplyr::arrange(code, year, survname, loc_id, timestamp) |>
     dplyr::collect()
 
   # -- Binning setup ----------------------------------------------------------
@@ -456,9 +520,15 @@ get_weather <- function(
 
   if (has_binning) {
     if (is.null(stored_breaks) || length(stored_breaks) == 0) {
-      # First call (regression): compute breaks from survey-period historical data
+      # Compute breaks from the full survey-period loc_id x timestamp distribution.
+      # Sort by full location identity + timestamp for a deterministic
+      # order regardless of DuckDB's non-guaranteed collect() row order.
       survey_timestamps <- unique(survey_data$timestamp[!is.na(survey_data$timestamp)])
-      hist_ref <- result[["historical"]][result[["historical"]]$timestamp %in% survey_timestamps, ]
+      wx_cols   <- selected_weather$name[selected_weather$cont_binned == "Binned" & !is.na(selected_weather$cont_binned)]
+      sort_cols <- intersect(c("code", "year", "survname", "loc_id", "timestamp"), names(result[["historical"]]))
+      keep      <- unique(c(sort_cols, wx_cols))
+      hist_ref  <- result[["historical"]][result[["historical"]]$timestamp %in% survey_timestamps, keep, drop = FALSE]
+      hist_ref  <- hist_ref[do.call(order, hist_ref[sort_cols]), ]
 
       stored_breaks <- .compute_breaks(hist_ref, selected_weather)
     }
@@ -620,6 +690,7 @@ get_weather <- function(
 
       # -- Loop over future periods ------------------------------------------
       out <- list()
+      tmp_delta_tables <- character(0L) #DRK addition
       for (fp in future_period) {
         fp_start <- as.Date(fp[1])
         fp_end   <- as.Date(fp[2])
@@ -643,6 +714,20 @@ get_weather <- function(
           dplyr::inner_join(h3_slim, by = c("h3" = "h3_cmip6")) |>
           dplyr::group_by(model, code, year, survname, loc_id, month) |>
           .pop_weighted_mean(delta_vars)
+
+
+        # Materialise delta table — lets DuckDB plan a hash join in the
+        # batch query instead of replanning the full lazy delta chain.
+        tmp_delta_name <- paste0("lw_delta_",
+                                  paste0(sample(letters, 8L, replace = TRUE),
+                                         collapse = ""))
+        loc_deltas_by_model <- dplyr::compute(
+          loc_deltas_by_model,
+          name      = tmp_delta_name,
+          temporary = TRUE
+        )
+        tmp_delta_tables <- c(tmp_delta_tables, tmp_delta_name)
+
 
         # Filter incomplete models
         complete_model_tbl <- loc_deltas_by_model |>
@@ -672,8 +757,14 @@ get_weather <- function(
         loc_deltas_by_model <- loc_deltas_by_model |>
           dplyr::filter(model %in% complete_models)
 
-        # -- Batch query: all models in one DuckDB execution -----------------
-        batch <- loc_monthly |>
+        # -- Batch query: split into two steps to help DuckDB plan ----------
+        # Step 1: join + perturb + select → materialise before rolling window
+        tmp_perturb_name <- paste0("lw_perturb_",
+                                    paste0(sample(letters, 8L, replace = TRUE),
+                                           collapse = ""))
+        tmp_delta_tables <- c(tmp_delta_tables, tmp_perturb_name)
+
+        perturbed <- loc_monthly |>
           dplyr::mutate(month = dbplyr::sql("MONTH(timestamp)")) |>
           dplyr::inner_join(
             loc_deltas_by_model,
@@ -684,9 +775,14 @@ get_weather <- function(
             model, code, year, survname, loc_id, timestamp,
             dplyr::all_of(weather_vars)
           ) |>
+          dplyr::compute(name = tmp_perturb_name, temporary = TRUE)
+
+        # Step 2: rolling window + transformations + filter → collect
+        batch <- perturbed |>
           dplyr::mutate(!!!roll_exprs_climate) |>
           .apply_transformations(selected_weather, loc_weather_base) |>
           dplyr::filter(timestamp %in% !!dates) |>
+          dplyr::arrange(model, code, year, survname, loc_id, timestamp) |>
           dplyr::collect()
 
         if (nrow(batch) == 0L) next
@@ -702,6 +798,11 @@ get_weather <- function(
           paste0(ssp_i, "_", fp_label, "_", make.names(names(model_list)))
         )
         out <- c(out, period_out)
+      }
+
+      # Cleanup all materialised delta temp tables
+      for (tdn in tmp_delta_tables) {
+        try(DBI::dbRemoveTable(dbplyr::remote_con(loc_deltas_by_model), tdn), silent = TRUE)
       }
       out
     }

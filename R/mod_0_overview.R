@@ -12,49 +12,132 @@
 mod_0_overview_ui <- function(id) {
   ns <- NS(id)
 
+  hero <- div(
+    class = "hero-panel",
+    div(
+      class = "hero-panel-inner",
+      tags$img(
+        src = "www/logo.png",
+        class = "hero-logo",
+        alt = "WISE-APP logo"
+      ),
+      div(
+        h1("Welcome to WISE-APP"),
+        p(class = "hero-subtitle",
+          "Weather Impact Simulation and Evaluation for Adaptation Policy and Planning"),
+        p(paste(
+          "WISE-APP estimates how weather affects household welfare from",
+          "survey microdata, simulates welfare outcomes under historical",
+          "weather and future climate scenarios, and evaluates how policy",
+          "and adaptation measures change those outcomes."
+        )),
+        p("Work through the three steps below — each step builds on the previous one."),
+
+        p(tags$a(
+          icon("book-open"), "WISE-APP Documentation",
+          href = "https://datanalytics-int.worldbank.org/content/a24b499b-46b7-420e-9e77-5475b45cc7c5",
+          target = "_blank"
+        ))
+      )
+    )
+  )
+
+  step_card <- function(n, title, text) {
+    bslib::card(
+      class = "step-card",
+      bslib::card_body(
+        div(
+          class = "step-card-title",
+          tags$span(n, class = "step-badge"),
+          h5(title)
+        ),
+        p(text)
+      )
+    )
+  }
+
+  steps <- bslib::layout_column_wrap(
+    width = 1 / 3, fill = FALSE,
+    step_card(
+      "1", "Model welfare",
+      paste(
+        "Estimate the statistical relationship between weather and an",
+        "outcome of interest — such as household consumption, income, or",
+        "poverty status — from survey microdata. The fitted model is the",
+        "foundation for all subsequent steps."
+      )
+    ),
+    step_card(
+      "2", "Simulate welfare",
+      paste(
+        "Apply the fitted model from Step 1 to historical weather and",
+        "future climate projections (CMIP6 scenarios) to produce",
+        "distributions of weather-driven welfare outcomes."
+      )
+    ),
+    step_card(
+      "3", "Policy scenarios",
+      paste(
+        "Re-simulate welfare under counterfactual policies — social",
+        "protection, infrastructure, digital inclusion, labor market and",
+        "education measures — to quantify welfare gains and changes in",
+        "climate resilience against the Step 2 baseline."
+      )
+    )
+  )
+
   # On Posit Connect with Databricks env vars: skip the connection form
   # entirely and just show the status badge — server auto-connects on startup.
   if (.auto_connect()) {
     return(tagList(
-      includeMarkdown(
-        system.file("app/www/welcome_message.md", package = "wiseapp")
-      ),
-      hr(),
-      h4("Data"),
-      uiOutput(ns("connection_status_ui"))
+      hero,
+      steps,
+      bslib::card(
+        class = "connect-card",
+        bslib::card_header(icon("database"), " Data"),
+        bslib::card_body(uiOutput(ns("connection_status_ui")))
+      )
     ))
   }
 
   tagList(
-    includeMarkdown(
-      system.file("app/www/welcome_message.md", package = "wiseapp")
-    ),
-    hr(),
-    h4("Data"),
-    selectInput(
-      inputId  = ns("connection_type"),
-      label    = "Source",
-      choices  = c(
-        "Local folder"         = "local",
-        "Amazon S3"            = "s3",
-        "Google Cloud Storage" = "gcs",
-        "Azure Blob Storage"   = "azure",
-        "Hugging Face"         = "hf",
-        "Databricks"           = "databricks"
-      ),
-      selected = "local"
-    ),
-    uiOutput(ns("connection_options_ui")),
-    uiOutput(ns("connection_status_ui")),
-    br(),
-    actionButton(
-      ns("apply_connection"),
-      "Connect to data",
-      class = "btn-primary",
-      style = "width: 100%;"
-    ),
-    br(), br(),
-    verbatimTextOutput(ns("folder_path_echo"))
+    hero,
+    steps,
+    bslib::card(
+      class = "connect-card",
+      bslib::card_header(icon("database"), " Data"),
+      bslib::card_body(
+        bslib::layout_columns(
+          col_widths = c(4, 8),
+          div(
+            selectInput(
+              inputId  = ns("connection_type"),
+              label    = "Source",
+              choices  = c(
+                "Local folder"         = "local",
+                "Amazon S3"            = "s3",
+                "Google Cloud Storage" = "gcs",
+                "Azure Blob Storage"   = "azure",
+                "Hugging Face"         = "hf",
+                "Databricks"           = "databricks"
+              ),
+              selected = "local"
+            ),
+            uiOutput(ns("connection_status_ui")),
+            actionButton(
+              ns("apply_connection"),
+              "Connect to data",
+              class = "btn-primary",
+              style = "width: 100%;"
+            )
+          ),
+          div(
+            uiOutput(ns("connection_options_ui")),
+            verbatimTextOutput(ns("folder_path_echo"))
+          )
+        )
+      )
+    )
   )
 }
 
@@ -234,7 +317,9 @@ mod_0_overview_server <- function(id) {
         applied_connection(params)
 
         survey_list(load_data("metadata/survey_list.csv", params, collect = TRUE))
-        variable_list(load_data("metadata/variable_list.csv", params, collect = TRUE))
+        variable_list(add_derived_policy_vars_to_vl(
+          load_data("metadata/variable_list.csv", params, collect = TRUE)
+        ) |> dplyr::mutate(name = dplyr::if_else(name == "loc_id", "loc_id_panel", name)))
         cpi_ppp(load_data("metadata/cpi_ppp.csv", params, collect = TRUE))
         pov_lines(default_poverty_lines())
 
@@ -284,7 +369,9 @@ mod_0_overview_server <- function(id) {
       })
 
       tryCatch({
-        variable_list(load_data("metadata/variable_list.csv", params, collect = TRUE))
+        variable_list(add_derived_policy_vars_to_vl(
+          load_data("metadata/variable_list.csv", params, collect = TRUE)
+        ) |> dplyr::mutate(name = dplyr::if_else(name == "loc_id", "loc_id_panel", name)))
         showNotification(paste0("Variable list loaded (", nrow(variable_list()), " rows)"), type = "message", duration = 2)
       }, error = function(e) {
         showNotification("Failed to load metadata/variable_list.csv", type = "error", duration = 5)

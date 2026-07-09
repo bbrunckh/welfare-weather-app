@@ -8,53 +8,64 @@
 #' @noRd
 #'
 #' @importFrom shiny NS tagList
-#' @importFrom bsplus bs_accordion bs_append
-#' @importFrom waiter autoWaiter spin_2 transparent
 mod_1_modelling_ui <- function(id) {
   ns <- NS(id)
 
-  fluidPage(
-    autoWaiter(html = spin_2(), color = transparent(.5)),
-    h4("How much does weather affect welfare? Who is most affected?"),
-    sidebarLayout(
-      sidebarPanel(
-        bs_accordion(id = ns("accordion")) |>
-          bs_append(
-            title   = "1 Sample",
-            content = tagList(
-              mod_1_01_sample_ui(ns("sample")),
-              mod_1_02_surveystats_ui(ns("surveystats"))
-            )
-          ) |>
-          bs_append(
-            title   = "2 Outcome",
-            content = mod_1_03_outcome_ui(ns("outcome"))
-          ) |>
-          bs_append(
-            title   = "3 Weather",
-            content = tagList(
-              mod_1_04_weather_ui(ns("weather")),
-              mod_1_05_weatherstats_ui(ns("weatherstats"))
-            )
-          ) |>
-          bs_append(
-            title   = "4 Model",
-            content = tagList(
-              mod_1_06_model_ui(ns("model")),
-              mod_1_07_results_ui(ns("results"))
-            )
-          )
-      ),
-      mainPanel(
-        tabsetPanel(
-          id = ns("step1_output_tabs"),
-          tabPanel(
-            title = "Overview",
-            value = "overview",
-            p("Outputs will appear here after you load data and make selections in the sidebar."),
-            includeMarkdown(system.file("app/www/equation.md", package = "wiseapp"))
-          )
+  bslib::layout_sidebar(
+    sidebar = bslib::sidebar(
+      width = 360,
+      bslib::accordion(
+        id       = ns("accordion"),
+        multiple = FALSE,
+        open     = "Sample",
+        bslib::accordion_panel(
+          title = "Sample",
+          value = "Sample",
+          icon  = tags$span("1", class = "step-badge"),
+          mod_1_01_sample_ui(ns("sample")),
+          mod_1_02_surveystats_ui(ns("surveystats"))
+        ),
+        bslib::accordion_panel(
+          title = "Outcome",
+          value = "Outcome",
+          icon  = tags$span("2", class = "step-badge"),
+          mod_1_03_outcome_ui(ns("outcome"))
+        ),
+        bslib::accordion_panel(
+          title = "Weather",
+          value = "Weather",
+          icon  = tags$span("3", class = "step-badge"),
+          mod_1_04_weather_ui(ns("weather")),
+          mod_1_05_weatherstats_ui(ns("weatherstats"))
+        ),
+        bslib::accordion_panel(
+          title = "Model",
+          value = "Model",
+          icon  = tags$span("4", class = "step-badge"),
+          mod_1_06_model_ui(ns("model")),
+          mod_1_07_results_ui(ns("results"))
         )
+      )
+    ),
+    h4("How much does weather affect welfare? Who is most affected?",
+       class = "step-question"),
+    tabsetPanel(
+      id = ns("step1_output_tabs"),
+      tabPanel(
+        title = "Overview",
+        value = "overview",
+        div(
+          class = "empty-state",
+          icon("chart-line"),
+          h5("No results yet"),
+          p(paste(
+            "Work through the sidebar: choose your sample, define the outcome,",
+            "configure weather variables, then run the model.",
+            "Outputs: regression results with coefficient plots, weather-sensitivity",
+            "curves, and model-fit diagnostics will appear here as new tabs."
+          ))
+        ),
+        welfare_equation_ui()
       )
     )
   )
@@ -100,15 +111,19 @@ mod_1_modelling_server <- function(id,
       selected_surveys  = s1$selected_surveys,
       selected_outcome  = NULL,
       tabset_id         = "step1_output_tabs",
-      tabset_session    = session
+      tabset_session    = session,
+      analysis_unit     = s1$analysis_unit
     )
 
     # ---- 3. Outcome ---------------------------------------------------------
 
     s3 <- mod_1_03_outcome_server(
       "outcome",
-      variable_list = variable_list,
-      survey_data   = s2$survey_data
+      variable_list  = variable_list,
+      survey_data    = s2$survey_data,
+      map_data       = s2$map_data,
+      tabset_id      = "step1_output_tabs",
+      tabset_session = session
     )
 
     # ---- 4. Weather ---------------------------------------------------------
@@ -140,6 +155,7 @@ mod_1_modelling_server <- function(id,
       "model",
       variable_list    = variable_list,
       selected_surveys = s1$selected_surveys,
+      analysis_unit    = s1$analysis_unit,
       selected_outcome = s3$selected_outcome,
       selected_weather = s4$selected_weather,
       survey_weather   = s5$survey_weather
@@ -155,6 +171,7 @@ mod_1_modelling_server <- function(id,
       selected_weather = s4$selected_weather,
       survey_weather   = s5$survey_weather,
       selected_model   = s6$selected_model,
+      run_model        = s6$run_model,
       tabset_id        = "step1_output_tabs",
       tabset_session   = session
     )
@@ -175,10 +192,12 @@ mod_1_modelling_server <- function(id,
 
     list(
       # Selections
-      selected_surveys = s1$selected_surveys,
-      selected_outcome = s3$selected_outcome,
-      selected_weather = s4$selected_weather,
-      selected_model   = s6$selected_model,
+      selected_surveys  = s1$selected_surveys,
+      analysis_unit     = s1$analysis_unit,
+      selected_outcome  = s3$selected_outcome,
+      selected_weather  = s4$selected_weather,
+      selected_model    = s6$selected_model,
+      selected_policies = s6$selected_policies,
 
       # Data
       survey_data    = s2$survey_data,

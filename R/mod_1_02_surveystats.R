@@ -41,7 +41,8 @@ mod_1_02_surveystats_server <- function(
     selected_outcome = NULL,
     cpi_ppp,
     tabset_id,
-    tabset_session = NULL
+    tabset_session = NULL,
+    analysis_unit  = NULL
 ) {
   moduleServer(id, function(input, output, session) {
     ns <- session$ns
@@ -63,7 +64,7 @@ mod_1_02_surveystats_server <- function(
     # ---- Button (shown once selected_surveys is populated) ------------------
 
     output$survey_stats_button_ui <- renderUI({
-      req(length(selected_surveys()) > 0)
+      req(nrow(selected_surveys()) > 0)
       actionButton(ns("survey_stats"), "Survey stats", class = "btn-primary", style = "width: 100%;")
     })
 
@@ -79,7 +80,7 @@ mod_1_02_surveystats_server <- function(
     # ---- Load and prepare data on button click ------------------------------
 
     observeEvent(input$survey_stats, {
-      req(length(selected_surveys()) > 0)
+      req(nrow(selected_surveys()) > 0)
 
       busy_id <- showNotification("Loading survey data…", duration = NULL, type = "message")
       on.exit(removeNotification(busy_id), add = TRUE)
@@ -101,7 +102,9 @@ mod_1_02_surveystats_server <- function(
       lcu_vars <- get_lcu_vars(df, variable_list())
       df       <- df |>
         assign_data_level() |>
-        convert_lcu_to_ppp(cpi_ppp(), lcu_vars)
+        convert_lcu_to_ppp(cpi_ppp(), lcu_vars) |>
+        bottom_code_welfare(0.28) |>
+        apply_policy_derivations()
 
       survey_data(df)
 
@@ -141,8 +144,9 @@ mod_1_02_surveystats_server <- function(
           features <- lapply(seq_len(nrow(loc_df)), function(i) {
             row <- loc_df[i, ]
             list(
-              type     = "Feature",
-              geometry = jsonlite::fromJSON(row$geom),       # parse the geometry JSON string
+              type      = "Feature",
+              geometry  = jsonlite::fromJSON(row$geom), # parsed for .geojson_bounds only
+              geom_json = row$geom,                     # raw string for addGeoJSON
               properties = list(
                 code     = row$code,
                 year     = row$year,
@@ -157,6 +161,24 @@ mod_1_02_surveystats_server <- function(
 
         }, error = function(e) {
           notify(paste("Failed to build map data:", conditionMessage(e)), type = "warning", duration = 5)
+        })
+
+        tryCatch({
+          panel_map <- loc_panel(h3_df, id_col = loc_id, h3_col = h3, weight_col = pop_2020,
+                                    group_cols = c("code", "year", "survname"))
+
+          loc_keys <- h3_df |>
+            dplyr::distinct(code, year, survname, loc_id) |>
+            dplyr::collect()
+
+          df <- df |>
+            dplyr::left_join(
+              dplyr::left_join(loc_keys, panel_map, by = c("code", "year", "survname", "loc_id")),
+              by = c("code", "year", "survname", "loc_id")
+            )
+          survey_data(df)
+        }, error = function(e) {
+          notify(paste("Failed to compute loc_id_panel:", conditionMessage(e)), type = "warning", duration = 5)
         })
       }
 
@@ -176,20 +198,14 @@ mod_1_02_surveystats_server <- function(
           p
         })
 
-        # Leaflet map of interview locations
+        # Leaflet map of interview locations. The jsonlite
+        # `keep_vec_names` warning that addGeoJSON would otherwise emit
+        # is muted via the custom htmlwidgets JSON encoder installed in
+        # .onLoad (R/zzz.R).
         output$map <- leaflet::renderLeaflet({
           m <- plot_survey_map(map_data())
           req(!is.null(m))
           m
-        })
-
-        # Welfare distribution ridge plot with standard poverty line annotations
-        output$welfare_dist <- renderPlot({
-          p <- plot_welfare_dist(survey_data())
-          if (is.null(p)) {
-            plot.new(); title(main = "Welfare distribution unavailable"); return(invisible(NULL))
-          }
-          p
         })
 
         output$outcome_stats <- make_stats_dt(survey_data, variable_list, "outcome")
@@ -197,6 +213,41 @@ mod_1_02_surveystats_server <- function(
         output$hh_stats      <- make_stats_dt(survey_data, variable_list, "hh")
         output$firm_stats    <- make_stats_dt(survey_data, variable_list, "firm")
         output$area_stats    <- make_stats_dt(survey_data, variable_list, "area")
+
+        # Only show characteristic tables relevant to the selected level of
+        # analysis: individual level implies household + area also apply;
+        # household level implies area also applies; firm level is separate.
+        output$characteristic_tables_ui <- renderUI({
+          unit <- if (is.function(analysis_unit)) analysis_unit() else NULL
+          show_ind  <- is.null(unit) || unit == "ind"
+          show_hh   <- is.null(unit) || unit %in% c("ind", "hh")
+          show_firm <- is.null(unit) || unit == "firm"
+
+          tagList(
+            if (show_ind) tagList(
+              h4("Individual characteristics"),
+              p(class = "text-muted small", "Summary statistics for individual-level variables"),
+              DT::DTOutput(ns("ind_stats"))
+            ),
+            if (show_hh) tagList(
+              h4("Household characteristics"),
+              p(class = "text-muted small", "Summary statistics for household-level variables"),
+              DT::DTOutput(ns("hh_stats"))
+            ),
+            if (show_firm) tagList(
+              h4("Firm characteristics"),
+              p(class = "text-muted small", "Summary statistics for firm-level variables"),
+              DT::DTOutput(ns("firm_stats"))
+            ),
+            h4("Area characteristics"),
+            p(class = "text-muted small", "Summary statistics for area-level variables"),
+            DT::DTOutput(ns("area_stats"))
+          )
+        })
+
+        policy_vars <- unique(unlist(lapply(POLICY_DEFINITIONS, `[[`, "vars")))
+        output$policy_stats  <- make_stats_dt(survey_data, variable_list,
+                                              vars = policy_vars)
 
         output$selected_surveys <- DT::renderDT({
           req(selected_surveys())
@@ -231,19 +282,35 @@ mod_1_02_surveystats_server <- function(
               value = "desc_stats",
               bslib::layout_columns(
                 col_widths = c(6, 6),
-                bslib::card(h4("Timing of interviews"),
-                            plotOutput(ns("interview_date"), height = "300px")),
-                bslib::card(h4("Location of interviews"),
-                            leaflet::leafletOutput(ns("map"), height = "300px"))
+                bslib::card(
+                  h4("Timing of interviews"),
+                  p(class = "text-muted small", "Monthly breakdown of interview waves"),
+                  plotOutput(ns("interview_date"), height = "300px")
+                ),
+                bslib::card(
+                  h4("Location of interviews"),
+                  p(class = "text-muted small", "Geographic distribution of sampled interviews"),
+                  leaflet::leafletOutput(ns("map"), height = "300px")
+                )
               ),
-              br(),
-              bslib::card(h4("Welfare distribution"),
-                          plotOutput(ns("welfare_dist"), height = "300px")),
-              h4("Outcome stats"),              DT::DTOutput(ns("outcome_stats")),
-              h4("Individual characteristics"), DT::DTOutput(ns("ind_stats")),
-              h4("Household characteristics"),  DT::DTOutput(ns("hh_stats")),
-              h4("Firm characteristics"),       DT::DTOutput(ns("firm_stats")),
-              h4("Area characteristics"),       DT::DTOutput(ns("area_stats")),
+              h4(
+                "Outcome stats",
+                info_popover(
+                  title = "Outcome stats",
+                  p(paste(
+                    "Candidate outcome variables available for welfare",
+                    "analysis in Step 1. Check the missingness column",
+                    "before selecting an outcome — high missingness can",
+                    "limit sample size after listwise deletion."
+                  ))
+                )
+              ),
+              p(class = "text-muted small", "Candidate outcome variables for welfare analysis"),
+              DT::DTOutput(ns("outcome_stats")),
+              h4("Policy variables"),
+              p(class = "text-muted small", "Variables that can be adjusted in Step 3 policy scenarios"),
+              DT::DTOutput(ns("policy_stats")),
+              uiOutput(ns("characteristic_tables_ui")),
               br(),
               h4("Selected surveys"),           DT::DTOutput(ns("selected_surveys")),
               br(),
@@ -268,7 +335,8 @@ mod_1_02_surveystats_server <- function(
     # ---- Return API ---------------------------------------------------------
 
     list(
-      survey_data = survey_data
+      survey_data = survey_data,
+      map_data    = map_data
     )
   })
 }

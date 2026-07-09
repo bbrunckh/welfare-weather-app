@@ -12,15 +12,42 @@
 mod_1_06_model_ui <- function(id) {
   ns <- NS(id)
   tagList(
-    uiOutput(ns("selected_outcome")),
-    uiOutput(ns("selected_weather")),
-    uiOutput(ns("model_selector_ui")),
-    uiOutput(ns("model_specs_button_ui")),
-    uiOutput(ns("model_specs_ui")),
-    shiny::helpText(
-      "More model types and covariate selection methods will be added in future updates.",
-      style = "color: red; font-size: 12px;"
-    )
+    uiOutput(ns("model_summary_ui")),
+    wellPanel(
+      uiOutput(ns("model_selector_ui"))
+    ),
+    wellPanel(
+      uiOutput(ns("policy_ui"))
+    ),
+    shiny::actionButton(
+      ns("model_settings_toggle"), "Model settings",
+      icon  = shiny::icon("sliders"),
+      class = "btn-outline-primary btn-sm",
+      style = "margin-bottom: 10px;"
+    ),
+    shiny::conditionalPanel(
+      condition = paste0("input['", ns("model_settings_toggle"), "'] % 2 == 1"),
+      class     = "config-flyout",
+      shiny::tags$div(
+        class = "config-flyout-header",
+        shiny::tags$h6("Model settings"),
+        shiny::tags$button(
+          type = "button",
+          class = "btn-close",
+          `aria-label` = "Close",
+          onclick = sprintf(
+            "document.getElementById('%s').click();", ns("model_settings_toggle")
+          )
+        )
+      ),
+      uiOutput(ns("model_specs_ui")),
+      shiny::helpText(
+        "More model types and covariate selection methods will be added in future updates.",
+        style = "color: red; font-size: 12px;"
+      )
+    ),
+    shiny::actionButton(ns("run_model"), "Run model",
+                        class = "btn-primary", style = "width: 100%;")
   )
 }
 
@@ -29,6 +56,7 @@ mod_1_06_model_ui <- function(id) {
 #' @param id               Module id.
 #' @param variable_list    Reactive data frame of variable metadata.
 #' @param selected_surveys Reactive data frame of selected surveys.
+#' @param analysis_unit   Reactive scalar with level of analysis (ind/hh/firm).
 #' @param selected_outcome Reactive data frame row for the selected outcome.
 #' @param selected_weather Reactive data frame of selected weather specs.
 #' @param survey_weather   Reactive data frame of merged survey + weather data.
@@ -37,17 +65,27 @@ mod_1_06_model_ui <- function(id) {
 mod_1_06_model_server <- function(id,
                                    variable_list,
                                    selected_surveys,
+                                   analysis_unit,
                                    selected_outcome,
                                    selected_weather,
                                    survey_weather) {
   moduleServer(id, function(input, output, session) {
     ns <- session$ns
 
-    # ---- Valid variable list (present + >= 50 % non-missing) ----------------
+    show_level <- function(role) {
+      if (identical(role, "area")) return(TRUE)
+      unit <- if (is.null(analysis_unit)) NULL else analysis_unit()
+      if (is.null(unit) || length(unit) == 0) return(TRUE)
+      identical(unit, role)
+    }
+
+    # ---- Valid variable list (present + >= 90 % non-missing) ----------------
 
     valid_vl <- reactive({
       req(survey_weather(), variable_list())
-      filter_valid_vars(survey_weather(), variable_list())
+      filter_valid_vars(survey_weather(), variable_list(), min_complete = 0.9,
+                        group_cols = c("code", "year", "survname"),
+                        outcome = selected_outcome()$name)
     })
 
     # ---- Role-filtered variable lists ---------------------------------------
@@ -64,20 +102,50 @@ mod_1_06_model_server <- function(id,
       filter_vars_by_role(valid_vl(), "interact", extra_filter = list(type = "numeric"))
     )
 
-    # ---- Summary display ----------------------------------------------------
+    # ---- Settings summary banner --------------------------------------------
 
-    output$selected_outcome <- renderUI({
-      req(selected_outcome())
-      shiny::p(paste0("Selected outcome: ", selected_outcome()$label))
+    output$model_summary_ui <- renderUI({
+      so <- tryCatch(selected_outcome(), error = function(e) NULL)
+      sw <- tryCatch(selected_weather(), error = function(e) NULL)
+      if (is.null(so) || is.null(sw) || nrow(sw) == 0) return(NULL)
+
+      # Map variable names to labels via the full variable list
+      vl <- tryCatch(variable_list(), error = function(e) NULL)
+      to_labels <- function(nms) {
+        if (is.null(nms) || length(nms) == 0) return(NULL)
+        vapply(nms, function(v) {
+          l <- if (!is.null(vl)) vl$label[vl$name == v] else character(0)
+          if (length(l) > 0 && !is.na(l[1]) && nzchar(l[1])) l[1] else v
+        }, character(1))
+      }
+
+      # Fall back to the rendered inputs' defaults before they register
+      model_txt <- input$model_type %||%
+        model_type_choices(so$type)$choices[1]
+      ixn_txt <- paste(to_labels(input$interactions) %||% "Urban",
+                       collapse = ", ")
+      fe_txt <- paste(
+        to_labels(input$fixedeffects) %||%
+          to_labels(c("year", "gaul1_code")),
+        collapse = ", "
+      )
+      cov_txt <- input$covariates %||% "User-defined"
+
+      shiny::div(
+        class = "settings-summary",
+        tags$b("Outcome:"), so$label,
+        tags$br(),
+        tags$b("Weather:"), paste(sw$label, collapse = ", "),
+        tags$br(),
+        tags$b("Model:"), model_txt,
+        tags$b(" · Covariates:"), cov_txt,
+        tags$br(),
+        tags$b("Interaction:"), ixn_txt,
+        tags$br(),
+        tags$b("Fixed effects:"), fe_txt
+      )
     })
 
-    output$selected_weather <- renderUI({
-      req(selected_weather())
-      shiny::p(paste0(
-        "Selected weather: ",
-        paste(selected_weather()$label, collapse = ", ")
-      ))
-    })
 
     # ---- Model type selector ------------------------------------------------
 
@@ -103,44 +171,170 @@ mod_1_06_model_server <- function(id,
       )
     })
 
+    # ---- Policy scenarios toggle ----------------------------------------------
+
+    output$policy_ui <- renderUI({
+      req(input$model_type)
+
+      vl <- valid_vl()
+      choices <- get_policy_choices()
+      avail <- if (!is.null(vl) && nrow(vl) > 0) {
+        all_policy_vars <- unique(unlist(lapply(POLICY_DEFINITIONS, `[[`, "vars")))
+        present <- intersect(all_policy_vars, vl$name)
+        choices[vapply(choices, function(k) {
+          any(POLICY_DEFINITIONS[[k]]$vars %in% present)
+        }, logical(1))]
+      } else {
+        character(0)
+      }
+
+      if (length(avail) == 0) {
+        return(shiny::helpText(
+          "No policy-relevant variables are available in the current data.",
+          style = "color: grey; font-size: 12px;"
+        ))
+      }
+
+      tagList(
+        shiny::selectizeInput(
+          ns("selected_policies"),
+          label    = "Select policy scenarios:",
+          choices  = avail,
+          selected = NULL,
+          multiple = TRUE,
+          options  = list(maxItems = 1, placeholder = "Select policy scenario")
+        ),
+        uiOutput(ns("policy_locked_info"))
+      )
+    })
+
+    output$policy_locked_info <- renderUI({
+      locked <- policy_locked()
+      all_locked <- unique(c(locked$ind, locked$hh, locked$firm, locked$area))
+      if (length(all_locked) == 0) return(NULL)
+
+      vl <- valid_vl()
+      items <- lapply(all_locked, function(v) {
+        lbl <- if (!is.null(vl) && v %in% vl$name) {
+          vl$label[vl$name == v][1]
+        } else v
+        lvl <- ""
+        for (role in c("ind", "hh", "firm", "area")) {
+          if (v %in% locked[[role]]) {
+            lvl <- switch(role, ind = "Individual", hh = "Household",
+                          firm = "Firm", area = "Area")
+            break
+          }
+        }
+        tags$li(paste0(lbl, " (", lvl, ")"))
+      })
+
+      tagList(
+        tags$small(
+          class = "text-muted",
+          "The following variables are locked as interaction terms with the weather hazard:"
+        ),
+        do.call(tags$ul, c(items, list(style = "font-size: 12px;")))
+      )
+    })
+
+    # Reactive: locked vars by level from selected policies
+    policy_locked <- reactive({
+      get_policy_locked_vars(input$selected_policies, valid_vl())
+    })
+
+    # Enforce locked vars in the interactions selectize
+    observe({
+      locked <- policy_locked()
+      all_locked <- unique(c(locked$ind, locked$hh, locked$firm, locked$area))
+      if (length(all_locked) > 0) {
+        current <- input$interactions
+        if (!all(all_locked %in% current)) {
+          shiny::updateSelectizeInput(
+            session, "interactions",
+            selected = unique(c(current, all_locked))
+          )
+        }
+      }
+    })
+
     # ---- Model parameters toggle --------------------------------------------
 
-    model_specs_open <- reactiveVal(FALSE)
+    # model_specs_open <- reactiveVal(FALSE)
 
-    output$model_specs_button_ui <- renderUI({
-      req(input$model_type)
-      shiny::actionButton(ns("model_specs"), "Model parameters",
-                          style = "margin-bottom:12px;")
-    })
+    # output$model_specs_button_ui <- renderUI({
+    #   req(input$model_type)
+    #   shiny::actionButton(ns("model_specs"), "Model parameters",
+    #                       style = "margin-bottom:10px;")
+    # })
 
-    observeEvent(input$model_specs, {
-      model_specs_open(!isTRUE(model_specs_open()))
-    })
+    # observeEvent(input$model_specs, {
+    #   model_specs_open(!isTRUE(model_specs_open()))
+    # })
 
     # ---- Model specification panel ------------------------------------------
 
     output$model_specs_ui <- renderUI({
       req(input$model_type)
-      if (!isTRUE(model_specs_open())) return(NULL)
+      # if (!isTRUE(model_specs_open())) return(NULL)
 
       ixn <- interact_vars()
       fe  <- fe_vars()
 
-      shiny::withMathJax(tagList(
+      tagList(
 
         # Interaction with weather hazard
-        if (nrow(ixn) > 0) {
-          shiny::selectizeInput(
-            ns("interactions"),
-            label    = "Interactions with \\(Haz_{kt}\\):",
-            choices  = setNames(ixn$name, ixn$label),
-            selected = if ("urban" %in% ixn$name) "urban" else NULL,
-            multiple = TRUE,
-            options  = list(maxItems = 1, placeholder = "Select interaction variable")
-          )
-        } else {
-          shiny::helpText("No interaction variables available.",
-                          style = "color: grey; font-size: 12px;")
+        {
+          locked <- policy_locked()
+          all_locked <- unique(c(locked$ind, locked$hh, locked$firm, locked$area))
+          has_policy <- length(all_locked) > 0
+
+          if (has_policy) {
+            vl_all <- valid_vl()
+            choices_locked <- stats::setNames(all_locked, vapply(
+              all_locked, function(v) {
+                l <- if (!is.null(vl_all)) vl_all$label[vl_all$name == v]
+                if (length(l) > 0) l[1] else v
+              }, character(1)
+            ))
+            tagList(
+              shiny::selectizeInput(
+                ns("interactions"),
+                label    = shiny::tagList("Interaction with ", wise_math("Haz_{kt}"), ":"),
+                choices  = choices_locked,
+                selected = all_locked,
+                multiple = TRUE,
+                options  = list(
+                  maxItems = length(all_locked),
+                  plugins  = list("remove_button")
+                )
+              ),
+              tags$script(shiny::HTML(sprintf(
+                "setTimeout(function(){var el=$('#%s');if(el.length&&el[0].selectize)el[0].selectize.lock();},200);",
+                ns("interactions")
+              ))),
+              tags$small(
+                class = "text-muted",
+                style = "display:block;margin-top:-10px;margin-bottom:8px;",
+                "Set by the selected policy scenario."
+              )
+            )
+          } else if (nrow(ixn) > 0) {
+            shiny::selectizeInput(
+              ns("interactions"),
+              label    = shiny::tagList("Interactions with ", wise_math("Haz_{kt}"), ":"),
+              choices  = setNames(ixn$name, ixn$label),
+              selected = if ("urban" %in% ixn$name) "urban" else NULL,
+              multiple = TRUE,
+              options  = list(
+                maxItems = 1,
+                placeholder = "Select interaction variable"
+              )
+            )
+          } else {
+            shiny::helpText("No interaction variables available.",
+                            style = "color: grey; font-size: 12px;")
+          }
         },
 
         # Fixed effects
@@ -158,6 +352,8 @@ mod_1_06_model_server <- function(id,
                           style = "color: grey; font-size: 12px;")
         },
 
+        hr(),
+
         # Covariate selection method
         shiny::radioButtons(
           ns("covariates"),
@@ -165,15 +361,24 @@ mod_1_06_model_server <- function(id,
           choices  = c("User-defined", "Lasso"),
           selected = "User-defined"
         ),
-        hr(),
         uiOutput(ns("covariate_inputs"))
-      ))
+      )
     })
 
     # ---- Covariate inputs ---------------------------------------------------
 
     output$covariate_inputs <- renderUI({
       req(input$covariates)
+
+      make_choice_labels <- function(df) {
+        if (is.null(df) || nrow(df) == 0) return(stats::setNames(character(0), character(0)))
+        nm <- df$name
+        if (is.null(nm)) return(stats::setNames(character(0), character(0)))
+        lbl <- if ("label" %in% names(df)) df$label else nm
+        lbl <- ifelse(is.na(lbl) | !nzchar(lbl), nm, lbl)
+        keep <- !is.na(nm) & nzchar(nm)
+        stats::setNames(nm[keep], lbl[keep])
+      }
 
       # --- USER-DEFINED COVARIATES ---------------------------------------------------------
       if (input$covariates == "User-defined") {
@@ -183,15 +388,14 @@ mod_1_06_model_server <- function(id,
         firm <- exclude_selected_vars(firm_vars(),  outcome_name = selected_outcome()$name, weather_names = selected_weather()$name, interactions = input$interactions, fixedeffects = input$fixedeffects)
         area <- exclude_selected_vars(area_vars(),  outcome_name = selected_outcome()$name, weather_names = selected_weather()$name, interactions = input$interactions, fixedeffects = input$fixedeffects)
 
-        shiny::withMathJax(
-          tagList(
+        tagList(
 
             # Individual-level covariates
-            if (nrow(ind) > 0) {
+            if (show_level("ind") && nrow(ind) > 0) {
               shiny::selectizeInput(
                 ns("indcov"),
-                label    = "Individual characteristics \\(X_{ijt}\\):",
-                choices  = setNames(ind$name, ind$label),
+                label    = shiny::tagList("Individual characteristics ", wise_math("X_{ijt}"), ":"),
+                choices  = make_choice_labels(ind),
                 selected = NULL,
                 multiple = TRUE,
                 options  = list(placeholder = "Select individual covariates")
@@ -199,11 +403,11 @@ mod_1_06_model_server <- function(id,
             },
 
             # Household-level covariates
-            if (nrow(hh) > 0) {
+            if (show_level("hh") && nrow(hh) > 0) {
               shiny::selectizeInput(
                 ns("hhcov"),
-                label    = "Household characteristics \\(X_{ijt}\\):",
-                choices  = setNames(hh$name, hh$label),
+                label    = shiny::tagList("Household characteristics ", wise_math("X_{ijt}"), ":"),
+                choices  = make_choice_labels(hh),
                 selected = NULL,
                 multiple = TRUE,
                 options  = list(placeholder = "Select household covariates")
@@ -211,11 +415,11 @@ mod_1_06_model_server <- function(id,
             },
 
             # Firm-level covariates
-            if (nrow(firm) > 0) {
+            if (show_level("firm") && nrow(firm) > 0) {
               shiny::selectizeInput(
                 ns("firmcov"),
                 label    = "Firm characteristics:",
-                choices  = setNames(firm$name, firm$label),
+                choices  = make_choice_labels(firm),
                 selected = NULL,
                 multiple = TRUE,
                 options  = list(placeholder = "Select firm covariates")
@@ -223,21 +427,18 @@ mod_1_06_model_server <- function(id,
             },
 
             # Area-level covariates
-            if (nrow(area) > 0) {
+            if (show_level("area") && nrow(area) > 0) {
               shiny::selectizeInput(
                 ns("areacov"),
-                label    = "Area characteristics \\(E_{jt}\\):",
-                choices  = setNames(area$name, area$label),
+                label    = shiny::tagList("Area characteristics ", wise_math("E_{jt}"), ":"),
+                choices  = make_choice_labels(area),
                 selected = NULL,
                 multiple = TRUE,
                 options  = list(placeholder = "Select area covariates")
               )
-            },
-
-            hr()
+            }
 
           )
-        )
 
       } else if (input$covariates == "Lasso") {
 
@@ -249,6 +450,18 @@ mod_1_06_model_server <- function(id,
           ),
 
           # ------------------------------
+          # Toggle for forced inclusion / exclusion
+          # ------------------------------
+
+          shiny::actionButton(
+            ns("show_lasso_force"),
+            "Show forced inclusion / exclusion",
+            style = "margin-bottom:12px;"
+          ),
+
+          uiOutput(ns("lasso_force_ui")),
+
+          # ------------------------------
           # Toggle for advanced settings
           # ------------------------------
 
@@ -258,15 +471,7 @@ mod_1_06_model_server <- function(id,
             style = "margin-bottom:12px;"
           ),
 
-          uiOutput(ns("lasso_advanced_ui")),
-
-          shiny::actionButton(
-            ns("run_lasso"),
-            "Run Lasso",
-            class = "btn-primary"
-          ),
-
-          hr()
+          uiOutput(ns("lasso_advanced_ui"))
 
         )
       }
@@ -275,6 +480,140 @@ mod_1_06_model_server <- function(id,
     lasso_advanced_open <- reactiveVal(FALSE)
     observeEvent(input$show_lasso_advanced, {
       lasso_advanced_open(!lasso_advanced_open())
+    })
+
+    lasso_force_open <- reactiveVal(FALSE)
+    observeEvent(input$show_lasso_force, {
+      lasso_force_open(!lasso_force_open())
+    })
+
+    # Helper: vars at a given level (ind/hh/firm/area) from valid_vl
+    .vars_at_level <- function(role) {
+      vl <- valid_vl()
+      if (is.null(vl) || !role %in% names(vl)) return(vl[0L, , drop = FALSE])
+      vl[!is.na(vl[[role]]) & vl[[role]] == 1L, , drop = FALSE]
+    }
+
+    # Helper: per-level named choices vector (label -> name), excluding
+    # outcome and weather variables.
+    .level_choices <- function(role) {
+      vl_role <- .vars_at_level(role)
+      if (nrow(vl_role) == 0) return(stats::setNames(character(0), character(0)))
+      out_y <- if (!is.null(selected_outcome())) selected_outcome()$name else character(0)
+      out_w <- if (!is.null(selected_weather())) selected_weather()$name else character(0)
+      keep <- !vl_role$name %in% c(out_y, out_w)
+      if ("outcome" %in% names(vl_role)) {
+        keep <- keep & (is.na(vl_role$outcome) | vl_role$outcome != 1L)
+      }
+      stats::setNames(vl_role$name[keep], vl_role$label[keep])
+    }
+
+    output$lasso_force_ui <- renderUI({
+      req(input$covariates == "Lasso")
+      if (!lasso_force_open()) return(NULL)
+
+      already_in <- unique(c(input$interactions, input$fixedeffects))
+
+      level_block <- function(role, role_label) {
+        if (!show_level(role)) return(NULL)
+        choices <- .level_choices(role)
+        if (length(choices) == 0) return(NULL)
+
+        default_in <- intersect(already_in, choices)
+
+        tagList(
+          tags$strong(role_label),
+          shiny::selectizeInput(
+            ns(paste0("force_in_", role)),
+            label    = "Force include:",
+            choices  = choices,
+            selected = if (length(default_in) > 0) default_in else NULL,
+            multiple = TRUE,
+            options  = list(placeholder = "Select covariates to force in")
+          ),
+          shiny::selectizeInput(
+            ns(paste0("force_out_", role)),
+            label    = "Force exclude:",
+            choices  = choices,
+            selected = NULL,
+            multiple = TRUE,
+            options  = list(placeholder = "Select covariates to force out")
+          ),
+          tags$hr(style = "margin: 8px 0;")
+        )
+      }
+
+      tagList(
+        tags$small(
+          class = "text-muted",
+          style = "display:block;margin-bottom:6px;",
+          paste0(
+            "Forced-included covariates always enter the model. ",
+            "Forced-excluded covariates are removed from Lasso candidates ",
+            "and the final regression."
+          )
+        ),
+        level_block("ind",  "Individual covariates"),
+        level_block("hh",   "Household covariates"),
+        level_block("firm", "Firm covariates"),
+        level_block("area", "Area covariates")
+      )
+    })
+
+    # ---- Mutual exclusion between force-include and force-exclude --------
+    # When a var is selected as force-include, remove it from force-exclude
+    # choices, and vice versa. Updates run per level.
+    lapply(c("ind", "hh", "firm", "area"), function(role) {
+      in_id  <- paste0("force_in_",  role)
+      out_id <- paste0("force_out_", role)
+
+      observe({
+        if (!show_level(role)) return()
+        chosen_in <- input[[in_id]]
+        choices   <- .level_choices(role)
+        if (length(choices) == 0) return()
+        out_choices <- choices[!choices %in% chosen_in]
+        shiny::updateSelectizeInput(
+          session, out_id,
+          choices  = out_choices,
+          selected = intersect(input[[out_id]], out_choices)
+        )
+      })
+
+      observe({
+        if (!show_level(role)) return()
+        chosen_out <- input[[out_id]]
+        choices    <- .level_choices(role)
+        if (length(choices) == 0) return()
+        in_choices <- choices[!choices %in% chosen_out]
+        shiny::updateSelectizeInput(
+          session, in_id,
+          choices  = in_choices,
+          selected = intersect(input[[in_id]], in_choices)
+        )
+      })
+    })
+
+    # Reactive: collected forced-in / forced-out by level
+    lasso_forced <- reactive({
+      list(
+        ind  = list(
+          inc = input$force_in_ind  %||% character(0),
+          exc = input$force_out_ind %||% character(0)
+        ),
+        hh   = list(
+          inc = input$force_in_hh   %||% character(0),
+          exc = input$force_out_hh  %||% character(0)
+        ),
+        firm = list(
+          inc = input$force_in_firm  %||% character(0),
+          exc = input$force_out_firm %||% character(0)
+        ),
+        area = list(
+          inc = input$force_in_area  %||% character(0),
+          exc = input$force_out_area %||% character(0)
+        )
+      )
     })
 
     output$lasso_advanced_ui <- renderUI({
@@ -322,6 +661,12 @@ mod_1_06_model_server <- function(id,
           selected = "Standardize"
         ),
 
+        shiny::checkboxInput(
+          ns("use_mice"),
+          "Use MICE imputation for missing covariates",
+          value = FALSE
+        ),
+
         sliderInput(
           ns("mi_m"),
           "Number of imputations (m)",
@@ -356,7 +701,8 @@ mod_1_06_model_server <- function(id,
 
     # --- LASSO MODEL ---------------------------------------------------------
 
-    lasso_result <- eventReactive(input$run_lasso, {
+    lasso_result <- eventReactive(input$run_model, {
+      req(isTRUE(input$covariates == "Lasso"))
       req(survey_weather())
       req(selected_outcome())
       req(selected_weather())
@@ -377,11 +723,24 @@ mod_1_06_model_server <- function(id,
         standardize_val <- if (is.null(input$lasso_standardize)) TRUE else {
           if (is.logical(input$lasso_standardize)) input$lasso_standardize else input$lasso_standardize == "Standardize"
         }
+        use_mice_val <- if (is.null(input$use_mice)) FALSE else input$use_mice
         m_val <- if (is.null(input$mi_m)) 5 else input$mi_m
         maxit_val <- if (is.null(input$mi_maxit)) 5 else input$mi_maxit
         threshold_val <- if (is.null(input$stability_threshold)) 0.5 else input$stability_threshold
 
         incProgress(0.15, detail = "Running MI + LASSO")
+
+        # Forced exclusion: drop from candidate pool before Lasso
+        forced <- lasso_forced()
+        force_exc <- unique(c(
+          forced$ind$exc, forced$hh$exc, forced$firm$exc, forced$area$exc
+        ))
+        vl_for_lasso <- valid_vl()
+        if (length(force_exc) > 0 && !is.null(vl_for_lasso)) {
+          vl_for_lasso <- vl_for_lasso[
+            !vl_for_lasso$name %in% force_exc, , drop = FALSE
+          ]
+        }
 
         run_lasso_selection(
           df = df,
@@ -389,7 +748,7 @@ mod_1_06_model_server <- function(id,
           weather_vars = weather_vars,
           fe_vars = fe_vars,
           int_vars = int_vars,
-          valid_vl = valid_vl(),
+          valid_vl = vl_for_lasso,
           model_type = input$model_type,
           alpha = alpha_val,
           lambda_choice = lambda_choice,
@@ -397,13 +756,23 @@ mod_1_06_model_server <- function(id,
           standardize = standardize_val,
           mi_m = m_val,
           mi_maxit = maxit_val,
-          stability_threshold = threshold_val
+          mi_method = "norm",
+          use_mice = use_mice_val,
+          stability_threshold = threshold_val,
+          use_parallel = nrow(df) > 50000L,
+          n_workers = min(parallel::detectCores() - 1, 5L),
+          parallel_min_n = 20000L,
+          parallel_seed = 123L,
+          cv_selection = "random",
+          glmnet_tol = 1e-4
         )
       })
     })
 
-    # Showing notifications and updating status based on Lasso execution
-    observeEvent(input$run_lasso, {
+    # Showing notifications and updating status based on Lasso execution.
+    # Only fires when the user has chosen Lasso covariate selection.
+    observeEvent(input$run_model, {
+      req(isTRUE(input$covariates == "Lasso"))
       lasso_status("running")
       showNotification("Lasso started...",
                       type = "message",
@@ -435,24 +804,36 @@ mod_1_06_model_server <- function(id,
 
       req(input$model_type, input$covariates)
 
-      # Resolve covariates by role — differs only for Lasso
+      # Resolve covariates by role
       covs <- if (input$covariates == "Lasso") {
         selected <- lasso_result()$selected_covariates
         vl       <- valid_vl()
+        forced   <- lasso_forced()
+        resolve <- function(role) {
+          base <- vl$name[vl[[role]] %in% 1 & vl$name %in% selected]
+          setdiff(unique(c(base, forced[[role]]$inc)), forced[[role]]$exc)
+        }
         list(
-          hh   = vl$name[vl$hh   == 1 & vl$name %in% selected],
-          area = vl$name[vl$area  == 1 & vl$name %in% selected],
-          ind  = vl$name[vl$ind   == 1 & vl$name %in% selected],
-          firm = vl$name[vl$firm  == 1 & vl$name %in% selected]
+          hh   = resolve("hh"),
+          area = resolve("area"),
+          ind  = resolve("ind"),
+          firm = resolve("firm")
         )
       } else {
-        list(hh = input$hhcov, area = input$areacov,
-             ind = input$indcov, firm = input$firmcov)
+        list(hh   = input$hhcov   %||% character(0),
+             area = input$areacov %||% character(0),
+             ind  = input$indcov  %||% character(0),
+             firm = input$firmcov %||% character(0))
       }
+
+      # Policy-locked vars are enforced as interactions
+      locked <- policy_locked()
+      all_locked <- unique(c(locked$ind, locked$hh, locked$firm, locked$area))
+      interactions <- unique(c(input$interactions, all_locked))
 
       build_selected_model(
         model_type          = input$model_type,
-        interactions        = input$interactions,
+        interactions        = interactions,
         fixedeffects        = input$fixedeffects,
         covariate_selection = input$covariates,
         hh_covariates       = covs$hh,
@@ -470,6 +851,14 @@ mod_1_06_model_server <- function(id,
 
     })
 
-    list(selected_model = selected_model)
+    selected_policies_rv <- reactive({
+      input$selected_policies
+    })
+
+    list(
+      selected_model    = selected_model,
+      selected_policies = selected_policies_rv,
+      run_model         = reactive(input$run_model)
+    )
   })
 }

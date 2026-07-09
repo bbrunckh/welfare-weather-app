@@ -17,7 +17,19 @@ mod_2_03_diagnostics_ui <- function(id) {
 
     # ---- 1. Weather inputs panel -------------------------------------------
     shiny::wellPanel(
-      shiny::h4("Weather input distributions"),
+      shiny::h4(
+        "Weather input distributions",
+        info_popover(
+          title = "Weather input distributions",
+          shiny::p(shiny::tags$b("Grey fill = Full historical:"),
+            " all years at survey locations and months."),
+          shiny::p(shiny::tags$b("Black dashed = Regression input"),
+            " (shown when 'Include regression output' is selected above)."),
+          shiny::p(shiny::tags$b("Coloured lines = Future scenarios:"),
+            " solid = earliest simulation year, dashed = middle, dotted = latest."),
+          docs = TRUE
+        )
+      ),
       shiny::tags$div(
         style = "display:flex; align-items:flex-end; gap:12px; flex-wrap:wrap; margin-bottom:8px;",
         shiny::tags$div(style = "flex:3; min-width:200px;",
@@ -40,87 +52,44 @@ mod_2_03_diagnostics_ui <- function(id) {
       shiny::uiOutput(ns("diag_weather_log_ui")),
       shiny::tags$p(
         style = "font-size:11px; color:#666; margin-top:4px;",
-        shiny::tags$b("Grey fill = Full historical:"),
-        " all years at survey locations and months.",
-        shiny::tags$br(),
-        shiny::tags$b("Black dashed = Regression input"),
-        " (shown when 'Include regression output' is selected above).",
-        shiny::tags$br(),
-        shiny::tags$b("Coloured lines = Future scenarios:"),
-        " solid = earliest simulation year, dashed = middle, dotted = latest."
+        "Grey fill = historical; black dashed = regression input; coloured lines = future scenarios."
       )
     ),
 
-    # ---- 2. Uncertainty decomposition chart ----------------------------------
+    # ---- 2. Variance contribution panel ------------------------------------
     shiny::wellPanel(
-      shiny::h4("Decomposed uncertainty: annual variability vs. model spread"),
-      shiny::plotOutput(ns("uncertainty_decomp_plot"), height = "750px"),
-      shiny::tags$p(
-        style = "font-size:11px; color:#666; margin-top:6px;",
-        shiny::tags$b("Annual variability:"),
-        " CI from model-averaged annual outcomes \u2014 captures weather-driven year-to-year variation.",
-        shiny::tags$br(),
-        shiny::tags$b("Model uncertainty:"),
-        " CI from year-averaged per-model outcomes \u2014 captures disagreement across CMIP6 ensemble members.",
-        shiny::tags$br(),
-        shiny::tags$b("Combined:"),
-        " both sources pooled.",
-        shiny::tags$br(),
-        "Aggregation: mean. Dashed line = historical mean."
-      )
-    ),
-
-    # ---- 3. Welfare distributions panel ------------------------------------
-    shiny::wellPanel(
-      shiny::h4("Welfare output distributions"),
-      shiny::radioButtons(
-        ns("diag_ridge_primary_group"),
-        label    = "Primary grouping",
-        choices  = c(
-          "Historical year"                 = "hist_year",
-          "Scenario \u00d7 Simulation year" = "scenario",
-          "Simulation year \u00d7 Scenario" = "forecast_yr"
-        ),
-        selected = "scenario",
-        inline   = TRUE
-      ),
-      shiny::tags$div(
-        style = "display:flex; gap:24px; flex-wrap:wrap; margin-bottom:4px; align-items:center;",
-        shiny::tags$div(
-          shiny::checkboxInput(ns("diag_ridge_log"), label = "Log\u2081\u2080 x-axis", value = FALSE)
+      shiny::h4(
+        "SD contribution by source of uncertainty",
+        info_popover(
+          title = "SD contribution by source of uncertainty",
+          shiny::p(shiny::tags$b("Each segment"),
+            " is one source's standard deviation (square root of its variance",
+            " contribution), in outcome units. Labels show each source's share",
+            " of the bar's total length."),
+          shiny::p(shiny::tags$b("Note:"),
+            " variances (not SDs) add under independence, so the stacked total",
+            " is an upper bound on the true combined SD — read the bar as a",
+            " side-by-side decomposition of where uncertainty comes from, not",
+            " as a literal additive total."),
+          shiny::p(shiny::tags$b("Coefficient uncertainty"),
+            " = SD of the regression-fit per-outcome variance, averaged."),
+          shiny::p(shiny::tags$b("Inter-annual variability"),
+            " = SD of within-model year-to-year spread of the aggregate. This",
+            " characterises the spread of simulated years, not uncertainty",
+            " about the central tendency."),
+          shiny::p(shiny::tags$b("Inter-model spread"),
+            " (future scenarios only) = SD of across-model disagreement in",
+            " the per-model mean aggregate — uncertainty about the central",
+            " tendency arising from model choice."),
+          docs = TRUE
         )
       ),
-      shiny::tags$div(
-        style = "max-width:380px; margin-bottom:2px;",
-        shiny::sliderInput(ns("diag_ridge_scale"), label = "Ridge height",
-                           min = 0.3, max = 3.0, value = 1.5, step = 0.1)
-      ),
-      shiny::tags$div(
-        style = "max-width:380px; margin-bottom:8px;",
-        shiny::sliderInput(ns("diag_ridge_spacing"), label = "Row spacing",
-                           min = 0.2, max = 3.0, value = 1.0, step = 0.1)
-      ),
+      shiny::plotOutput(ns("variance_contribution_plot"), height = "320px"),
       shiny::tags$p(
-        style = "font-size:11px; color:#666; margin-bottom:8px;",
-        shiny::tags$b("Historical year mode:"),
-        " one grey filled ridge per simulation year; coloured lines = scenario perturbations.",
-        shiny::tags$br(),
-        shiny::tags$b("Scenario / Simulation year mode:"),
-        " one row per scenario or simulation year; grey-scale lines = individual historical years",
-        " (darkest = most recent).",
-        shiny::tags$br(),
-        shiny::tags$b("Include regression output:"),
-        " overlays predicted (dashed) and actual (dotted) outcome densities from training data.",
-        shiny::tags$br(),
-        "All ridges share a common global bandwidth. X-axis clipped to P1\u2013P99."
-      ),
-      shiny::actionButton(
-        ns("diag_update_ridge"),
-        "Update ridge plot",
-        class = "btn-sm btn-default",
-        style = "margin-bottom:8px;"
-      ),
-      shiny::uiOutput(ns("diag_ridge_plot_ui"))
+        style = "font-size:11px; color:#666; margin-top:6px;",
+        "Each segment = one source's SD contribution (not strictly additive) — click ",
+        shiny::icon("circle-info"), " above for details."
+      )
     )
   )
 }
@@ -146,6 +115,7 @@ mod_2_03_diagnostics_server <- function(id,
                                          saved_scenarios,
                                          survey_weather,
                                          selected_weather,
+                                         variance_breakdown = NULL,
                                          tabset_id,
                                          tabset_session = NULL) {
   moduleServer(id, function(input, output, session) {
@@ -181,61 +151,25 @@ mod_2_03_diagnostics_server <- function(id,
       if (length(out) == 0) NULL else out
     })
 
-    ridge_kde_data <- reactive({
+    output$weight_status_diag_ui <- shiny::renderUI({
       req(hist_sim())
-
-      sc_raw    <- if (!is.null(saved_scenarios)) saved_scenarios() else list()
-      scen_list <- lapply(sc_raw, function(e) list(preds = e$preds, so = e$so))
-
-      build_ridge_kde_data(
-        hist_preds    = hist_sim()$preds,
-        scenario_list = scen_list,
-        outcome_name  = hist_sim()$so$name,
-        actual_vals   = {
-          td <- hist_sim()$train_data
-          so <- hist_sim()$so
-          nm <- so$name
-          if (!is.null(td) && nm %in% names(td)) {
-            v <- as.numeric(td[[nm]])
-            v <- v[is.finite(v)]
-            if (isTRUE(so$transform == "log")) v <- exp(v)
-            v
-          } else numeric(0)
-        }
-      )
+      # Detect weight column independently of the toggle -- this allows
+      # the amber state when the column exists but the toggle is OFF.
+      has_w  <- !is.null(hist_sim()$pipeline$weight)
+      tog_on <- isTRUE(input$use_weights_diag)
+      if (has_w && tog_on)
+        NULL
+      else if (has_w && !tog_on)
+        shiny::tags$p(
+          style = "font-size:11px; color:#e65100; margin:2px 0 6px 0;",
+          "⚠ Survey weights available but not applied")
+      else
+        shiny::tags$p(
+          style = "font-size:11px; color:#c62828; margin:2px 0 6px 0;",
+          "🔴 No weight column found — unweighted")
     })
 
-    # Aggregated series for the uncertainty decomposition chart.
-    # Fixed at mean / no deviation — appropriate for a diagnostic view.
-    agg_hist_diag <- reactive({
-      req(hist_sim())
-      aggregate_sim_preds(hist_sim()$preds, hist_sim()$so,
-                          "mean", "none", FALSE, NULL)
-    })
 
-    agg_scenarios_diag <- reactive({
-      sc <- if (!is.null(saved_scenarios)) saved_scenarios() else list()
-      if (length(sc) == 0) return(list())
-      lapply(sc, function(s) {
-        tryCatch(
-          aggregate_sim_preds(s$preds, s$so, "mean", "none", FALSE, NULL),
-          error = function(e) NULL
-        )
-      })
-    })
-
-    debounced_ridge_inputs <- shiny::debounce(
-      reactive({
-        list(
-          log_scale       = isTRUE(input$diag_ridge_log),
-          ridge_scale     = input$diag_ridge_scale   %||% 1.5,
-          row_gap         = input$diag_ridge_spacing %||% 1.0,
-          primary_group   = input$diag_ridge_primary_group %||% "scenario",
-          show_regression = input$show_regression_input %||% TRUE
-        )
-      }),
-      350
-    )
 
     # ---- renderUI / render* outputs ----------------------------------------
 
@@ -287,23 +221,16 @@ mod_2_03_diagnostics_server <- function(id,
             ns("show_regression_input"),
             label = "Include regression output",
             value = TRUE
-          )
+          ),
+          shiny::checkboxInput(
+            ns("use_weights_diag"),
+            label = "Use survey weights (if available)",
+            value = TRUE
+          ),
+          shiny::uiOutput(ns("weight_status_diag_ui"))
         )
       )
     })
-
-    output$uncertainty_decomp_plot <- renderPlot({
-      req(agg_hist_diag())
-      all_series_diag <- c(
-        list(Historical = agg_hist_diag()),
-        Filter(Negate(is.null), agg_scenarios_diag())
-      )
-      plot_uncertainty_decomposition(
-        scenarios = all_series_diag,
-        hist_agg  = agg_hist_diag()
-      )
-    }, height = 750)
-    outputOptions(output, "uncertainty_decomp_plot", suspendWhenHidden = FALSE)
 
     output$diag_weather_log_ui <- shiny::renderUI({
       vars <- input$diag_weather_vars
@@ -351,38 +278,21 @@ mod_2_03_diagnostics_server <- function(id,
     }) |> shiny::bindEvent(input$diag_update_weather, hist_sim(),
                            ignoreNULL = TRUE, ignoreInit = FALSE)
 
-    output$diag_ridge_plot_ui <- shiny::renderUI({
-      req(hist_sim())
-      ri      <- debounced_ridge_inputs()
-      hp      <- hist_sim()$preds
-      yr_col  <- intersect(c("sim_year", "year"), names(hp))[1]
-      n_yrs   <- if (!is.na(yr_col)) length(unique(hp[[yr_col]])) else 20L
-      n_scen  <- length(active_scenarios_data())
-      n_rows  <- if (ri$primary_group %in% c("scenario", "forecast_yr"))
-        max(1L, n_scen) else n_yrs
-      plot_ht <- min(4000L, max(500L, as.integer(n_rows * 80L * ri$row_gap + 160L)))
-      shiny::plotOutput(ns("diag_ridge"), height = paste0(plot_ht, "px"))
-    }) |> shiny::bindEvent(input$diag_update_ridge, hist_sim(),
-                           ignoreNULL = TRUE, ignoreInit = FALSE)
+    output$variance_contribution_plot <- renderPlot({
+      req(variance_breakdown)
+      vb <- variance_breakdown()
+      req(!is.null(vb) && nrow(vb) > 0L)
+      # Filter to currently active scenarios when filters are set; otherwise
+      # show all available rows (Historical + all scenarios in vb).
+      active <- active_scenarios_data()
+      if (length(active) > 0L) {
+        keep <- vb$is_historical | vb$scenario %in% active
+        vb <- vb[keep, , drop = FALSE]
+      }
+      plot_variance_contribution(vb)
+    })
 
-    output$diag_ridge <- renderPlot({
-      req(hist_sim())
-      kd <- ridge_kde_data()
-      req(!is.null(kd))
-      ri <- debounced_ridge_inputs()
 
-      plot_year_anchored_ridge(
-        kde_data        = kd,
-        x_label         = hist_sim()$so$label %||% hist_sim()$so$name,
-        primary_group   = ri$primary_group,
-        log_scale       = ri$log_scale,
-        ridge_scale     = ri$ridge_scale,
-        row_gap         = ri$row_gap,
-        show_regression = ri$show_regression,
-        scenario_names  = active_scenarios_data()
-      )
-    }) |> shiny::bindEvent(input$diag_update_ridge, hist_sim(),
-                           ignoreNULL = TRUE, ignoreInit = FALSE)
 
     # ---- Insert Diagnostics tab once (first hist_sim only) -----------------
 
@@ -422,6 +332,13 @@ mod_2_03_diagnostics_server <- function(id,
                                choices  = choices,
                                selected = new_sel)
     }, ignoreInit = TRUE)
+
+    # ---- Suspend outputs when Results tab is hidden ----------------------
+    outputOptions(output, "scenario_filter_panel",   suspendWhenHidden = TRUE)
+    outputOptions(output, "diag_weather_log_ui",     suspendWhenHidden = TRUE)
+    outputOptions(output, "diag_weather_density",    suspendWhenHidden = TRUE)
+    outputOptions(output, "variance_contribution_plot", suspendWhenHidden = TRUE)
+    outputOptions(output, "weight_status_diag_ui",   suspendWhenHidden = TRUE)
 
     # ---- Return API --------------------------------------------------------
     list()

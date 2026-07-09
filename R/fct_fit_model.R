@@ -70,6 +70,9 @@ ENGINE_REGISTRY <- list(
         args$family <- stats::binomial("logit")
         do.call(fixest::feglm, args)
       } else {
+        if (!is.null(opts$fixest) && length(opts$fixest) > 0) {
+          args <- c(args, opts$fixest)
+        }
         do.call(fixest::feols, args)
       }
     },
@@ -174,33 +177,87 @@ ENGINE_REGISTRY <- list(
       if (use_logit) df[[y_var]] <- factor(df[[y_var]], levels = c(0, 1))
       df
     }
-  )
+  ),
 
   # -------------------------------------------------------------------------- #
-  # Template for a new engine — copy and fill in
+  # RIF — Unconditional Quantile Regression (Firpo, Fortin & Lemieux 2009)     #
   # -------------------------------------------------------------------------- #
-  # my_engine = list(
-  #   requires    = c("parsnip", "my_pkg"),
-  #   model_types = c("Linear regression"),
-  #
-  #   build_formulas = function(y_var, terms, fe_vars) { ... },
-  #   fit_one        = function(formula, data, model_type, model_spec, opts) { ... },
-  #   make_spec      = function(model_type, use_logit) { ... },
-  #   prepare_outcome = function(df, y_var, use_logit) df
-  # )
+  # Estimates distributional impacts by transforming the outcome into its
+  # Recentered Influence Function at each quantile, then fitting standard OLS
+  # (via fixest::feols) on the transformed outcome. The stacked multi-LHS
+  # syntax fits all quantiles simultaneously. Returns a fixest_multi object.
+  # -------------------------------------------------------------------------- #
+  rif = list(
+
+    requires    = c("fixest", "broom"),
+    model_types = c("Quantile regression (RIF)"),
+
+    # Same FE-absorbing formula structure as fixest; fit_one replaces the LHS
+    # with stacked RIF columns.
+    build_formulas = function(y_var, terms, fe_vars) {
+      build <- function(rhs_main, rhs_fe = character(0)) {
+        rhs_main <- unique(rhs_main[nzchar(rhs_main) & !is.na(rhs_main)])
+        if (length(rhs_main) == 0) rhs_main <- "1"
+        rhs_fe <- rhs_fe[nzchar(rhs_fe) & !is.na(rhs_fe)]
+        rhs <- if (length(rhs_fe) > 0) {
+          paste(paste(rhs_main, collapse = " + "), "|",
+                paste(rhs_fe,   collapse = " + "))
+        } else {
+          paste(rhs_main, collapse = " + ")
+        }
+        # Store as character — fit_one will prepend the stacked RIF LHS
+        rhs
+      }
+      list(
+        formula1 = build(terms$hazard),
+        formula2 = build(c(terms$hazard, terms$interactions_main), fe_vars),
+        formula3 = build(c(terms$hazard, terms$interactions_main,
+                           terms$covariates),                        fe_vars)
+      )
+    },
+
+    fit_one = function(formula, data, model_type, model_spec, opts) {
+      # formula is actually the RHS string from build_formulas above
+      rhs_str  <- formula
+      rif_cols <- opts$rif$rif_cols
+      lhs      <- paste0("c(", paste(rif_cols, collapse = ", "), ")")
+      stacked_fml <- stats::as.formula(paste(lhs, "~", rhs_str))
+      args <- list(fml = stacked_fml, data = data, warn = FALSE)
+      if (!is.null(opts$fixest) && length(opts$fixest) > 0) {
+        args <- c(args, opts$fixest)
+      }
+      do.call(fixest::feols, args)
+    },
+
+    make_spec = function(model_type, use_logit) NULL,
+
+    prepare_outcome = function(df, y_var, use_logit) {
+      taus     <- seq(0.1, 0.9, by = 0.1)
+      rif_cols <- paste0("rif_", formatC(taus * 100, format = "d"))
+      y        <- df[[y_var]]
+      for (i in seq_along(taus)) {
+        df[[rif_cols[i]]] <- compute_rif(y, tau = taus[i])
+      }
+      attr(df, "rif_taus") <- taus
+      attr(df, "rif_cols") <- rif_cols
+      df
+    }
+  )
+
 )
 
 # ---------------------------------------------------------------------------- #
 # run_lasso()                                                                  #
 # ---------------------------------------------------------------------------- #
 
-#' Run MI + stability LASSO and post-LASSO refits
+#' Run stability LASSO variable selection
 #'
 #' @param df data.frame with analysis variables
-#' @param outcome_var character scalar outcome name
-#' @param weather_vars character vector weather vars
-#' @param fe_vars character vector fixed-effect vars (kept unpenalized)
-#' @param int_vars character vector interaction moderators
+#' @param selected_outcome named list with `$name` (column) and `$type`
+#' @param weather_vars character vector weather vars (unpenalized)
+#' @param fe_vars character vector fixed-effect vars (unpenalized)
+#' @param int_vars character vector interaction moderators (unpenalized;
+#'   weather × int_vars interactions are also forced into the unpenalized core)
 #' @param valid_vl data.frame variable list with columns name, ind, hh, area, firm
 #' @param model_type character scalar ("Linear regression" / "Logistic regression")
 #' @param alpha numeric glmnet alpha
@@ -209,9 +266,21 @@ ENGINE_REGISTRY <- list(
 #' @param standardize logical
 #' @param mi_m integer number of imputations
 #' @param mi_maxit integer mice iterations
+#' @param mi_method character; mice imputation method (default "pmm";
+#'   "norm.predict" / "norm" are much faster for numeric-heavy candidate pools)
 #' @param stability_threshold numeric in (0,1)
+#' @param use_parallel logical; use future.apply / futuremice for parallel runs
+#' @param n_workers integer; number of workers for parallel plan (capped at mi_m)
+#' @param parallel_min_n integer; auto-disable parallelism when the analytic
+#'   sample size (post NA-drop) is below this threshold. Default 20000, which
+#'   is the empirical break-even point on a 16-core Mac for `mi_m = 5`; below
+#'   it, multisession fork + globals-export overhead dominates the work.
+#' @param parallel_seed integer; seed for parallel-safe reproducibility
+#' @param globals_max_size numeric; override for future.globals.maxSize (bytes)
+#' @param cv_selection character; fold assignment mode for CV ("default" or "random")
+#' @param glmnet_tol numeric; convergence tolerance passed to glmnet (thresh)
 #'
-#' @return list(model, per_imputation_models, selected_covariates, selection_frequency)
+#' @return list(selected_covariates, selection_frequency)
 #' @export
 run_lasso_selection <- function(
   df,
@@ -227,11 +296,22 @@ run_lasso_selection <- function(
   standardize = TRUE,
   mi_m = 5,
   mi_maxit = 5,
-  stability_threshold = 0.5
+  mi_method = "pmm",
+  use_mice = FALSE,
+  stability_threshold = 0.5,
+  use_parallel = FALSE,
+  n_workers = NULL,
+  parallel_min_n = 20000L,
+  parallel_seed = NULL,
+  globals_max_size = NULL,
+  cv_selection = c("default", "random"),
+  glmnet_tol = NULL
 ) {
   df <- as.data.frame(df)
 
-  # Same outcome handling pattern as fit_model()
+  # ---------------------------------------------------------------------------
+  # 1. Outcome validation / coercion (same pattern as fit_model())
+  # ---------------------------------------------------------------------------
   y_var        <- selected_outcome$name
   outcome_type <- selected_outcome$type
 
@@ -240,7 +320,6 @@ run_lasso_selection <- function(
   }
 
   is_logit <- identical(model_type, "Logistic regression")
-
   if (is_logit) {
     if (!identical(outcome_type, "logical")) {
       warning("Logistic regression requested but outcome type is not 'logical' — falling back to linear.")
@@ -253,41 +332,61 @@ run_lasso_selection <- function(
       }
     }
   }
-
-  if (is_logit) {
-    df[[y_var]] <- as.integer(as.logical(df[[y_var]]))
-  }
+  if (is_logit) df[[y_var]] <- as.integer(as.logical(df[[y_var]]))
 
   df <- df[!is.na(df[[y_var]]), , drop = FALSE]
   if (nrow(df) < 30) stop("Too few observations after removing missing outcome.")
+
+  # ---------------------------------------------------------------------------
+  # 2. Core term construction (correctness fix)
+  #
+  # Real column names that must be unpenalized go in `core_main_terms`.
+  # Formula-syntax interaction strings ("int:weather") go in `interaction_terms`
+  # and are appended directly to the formula — model.matrix expands them.
+  # `int_vars` themselves are unpenalized main effects.
+  # ---------------------------------------------------------------------------
+  weather_vars <- weather_vars[weather_vars %in% names(df)]
+  fe_vars      <- fe_vars[fe_vars %in% names(df)]
+  int_vars     <- int_vars[int_vars %in% names(df)]
+
+  # Drop FE terms with <2 observed levels (prevents contrasts errors)
+  if (length(fe_vars) > 0) {
+    fe_keep <- vapply(fe_vars, function(v) {
+      length(unique(stats::na.omit(df[[v]]))) >= 2
+    }, logical(1))
+    fe_vars <- fe_vars[fe_keep]
+  }
 
   interaction_terms <- character(0)
   if (length(int_vars) > 0 && length(weather_vars) > 0) {
     interaction_terms <- as.vector(outer(int_vars, weather_vars, paste, sep = ":"))
   }
 
-  core_terms <- unique(c(weather_vars, fe_vars, interaction_terms))
-  core_terms <- core_terms[core_terms %in% names(df)]
+  core_main_terms <- unique(c(weather_vars, int_vars, fe_vars))
 
-  # Drop FE terms with <2 observed levels (prevents contrasts errors)
-  if (length(fe_vars) > 0) {
-    fe_keep <- vapply(fe_vars, function(v) {
-      if (!v %in% names(df)) return(FALSE)
-      xv <- df[[v]]
-      length(unique(stats::na.omit(xv))) >= 2
-    }, logical(1))
-    fe_vars <- fe_vars[fe_keep]
-    core_terms <- unique(c(weather_vars, fe_vars, interaction_terms))
-    core_terms <- core_terms[core_terms %in% names(df)]
+  # ---------------------------------------------------------------------------
+  # 3. Drop NA rows on outcome + core columns (correctness fix)
+  #
+  # Without this, mice (which is fed only candidate_vars) leaves NAs in core
+  # columns; model.matrix then drops those rows from X_core but not X_lasso,
+  # producing a silent row mismatch when cbind()-ing.
+  # ---------------------------------------------------------------------------
+  if (length(core_main_terms) > 0) {
+    df <- df[stats::complete.cases(df[, core_main_terms, drop = FALSE]), , drop = FALSE]
+  }
+  if (nrow(df) < 30) {
+    stop("Too few observations after removing NAs in outcome / core terms.")
   }
 
+  # ---------------------------------------------------------------------------
+  # 4. Candidate pool (now correctly excludes int_vars)
+  # ---------------------------------------------------------------------------
   if (is.null(valid_vl) || nrow(valid_vl) == 0) stop("Variable list not available or empty.")
-  # allowed <- valid_vl$name[valid_vl$ind == 1 | valid_vl$hh == 1 | valid_vl$area == 1 | valid_vl$firm == 1]
   allowed <- valid_vl$name[
     (valid_vl$ind == 1 | valid_vl$hh == 1 | valid_vl$area == 1 | valid_vl$firm == 1) &
       (is.na(valid_vl$outcome) | valid_vl$outcome == 0)
   ]
-  exclude <- unique(c(y_var, core_terms))
+  exclude <- unique(c(y_var, core_main_terms))
   candidate_vars <- intersect(setdiff(names(df), exclude), allowed)
 
   if (length(candidate_vars) > 0) {
@@ -296,105 +395,258 @@ run_lasso_selection <- function(
   }
   if (length(candidate_vars) == 0) stop("No valid numeric candidate covariates available for LASSO.")
 
-  non_all_na <- vapply(df[, candidate_vars, drop = FALSE], function(x) any(!is.na(x)), logical(1))
+  non_all_na <- vapply(df[, candidate_vars, drop = FALSE],
+                       function(x) any(!is.na(x)), logical(1))
   candidate_vars <- candidate_vars[non_all_na]
-  if (length(candidate_vars) == 0) stop("No candidate variables with observed values remain for imputation/LASSO.")
+  if (length(candidate_vars) == 0) {
+    stop("No candidate variables with observed values remain for imputation/LASSO.")
+  }
 
-  m <- max(1, as.integer(mi_m))
-  imp <- mice::mice(
-    df[, candidate_vars, drop = FALSE],
-    m = m,
-    maxit = max(1, as.integer(mi_maxit)),
-    method = "pmm",
-    print = FALSE
-  )
+  # ---------------------------------------------------------------------------
+  # 4b. Complete-case filtering (default; use_mice = TRUE restores MI path)
+  #
+  # For variable *selection*, complete-case analysis is sufficient when
 
-  selected_list <- vector("list", m)
-  final_models  <- vector("list", m)
-  family_type <- if (is_logit) "binomial" else "gaussian"
-
-  for (i in seq_len(m)) {
-    df_imp <- df
-    df_imp[, candidate_vars] <- mice::complete(imp, action = i)
-
-    # Re-drop FE terms that collapse to one level in this imputation
-    fe_vars_i <- fe_vars[vapply(fe_vars, function(v) {
-      length(unique(stats::na.omit(df_imp[[v]]))) >= 2
-    }, logical(1))]
-    core_terms_i <- unique(c(weather_vars, fe_vars_i, interaction_terms))
-    core_terms_i <- core_terms_i[core_terms_i %in% names(df_imp)]
-    core_formula_i <- if (length(core_terms_i) == 0) stats::as.formula("~ 1")
-    else stats::as.formula(paste("~", paste(core_terms_i, collapse = " + ")))
-
-    mm_core <- stats::model.matrix(core_formula_i, data = df_imp)
-    X_core <- if (ncol(mm_core) > 1) mm_core[, -1, drop = FALSE] else matrix(nrow = nrow(df_imp), ncol = 0)
-
-    X_lasso <- as.matrix(df_imp[, candidate_vars, drop = FALSE])
-    keep_cols <- apply(X_lasso, 2, function(x) length(unique(stats::na.omit(x))) > 1)
-    X_lasso <- X_lasso[, keep_cols, drop = FALSE]
-
-    if (ncol(X_lasso) == 0) {
-      selected_list[[i]] <- character(0)
-      next
+  # missingness is low (filter_valid_vars enforces >= 90% complete upstream).
+  # Dropping NA rows avoids the mice bottleneck at large n. Final model
+  # fitting in fit_model() uses the full dataset independently.
+  # ---------------------------------------------------------------------------
+  if (!isTRUE(use_mice)) {
+    cc_mask <- complete.cases(df[, candidate_vars, drop = FALSE])
+    n_dropped <- sum(!cc_mask)
+    if (n_dropped > 0L) {
+      message(sprintf(
+        "run_lasso_selection: dropping %d/%d rows with NA in candidates (complete-case mode).",
+        n_dropped, nrow(df)
+      ))
+      df <- df[cc_mask, , drop = FALSE]
+      if (nrow(df) < 100L)
+        stop("Too few complete cases for LASSO selection (<100 rows remain).")
     }
+  }
 
-    X_full <- if (ncol(X_core) > 0) cbind(X_core, X_lasso) else X_lasso
+  # ---------------------------------------------------------------------------
+  # 5. Parallel plan (workers capped at mi_m — extra workers idle)
+  #
+  # Auto-disable parallelism on small samples: below `parallel_min_n` rows the
+  # multisession fork + globals-export overhead exceeds the actual work. The
+  # 20k default reflects the break-even point on a 16-core Mac with mi_m = 5
+  # (see dev/bench_lasso.R).
+  # ---------------------------------------------------------------------------
+  m <- max(1L, as.integer(mi_m))
+  family_type <- if (is_logit) "binomial" else "gaussian"
+  cv_selection <- match.arg(cv_selection)
+
+  if (isTRUE(use_parallel) && nrow(df) < as.integer(parallel_min_n)) {
+    message(sprintf(
+      "run_lasso_selection: n = %d below parallel_min_n = %d; running sequentially.",
+      nrow(df), as.integer(parallel_min_n)
+    ))
+    use_parallel <- FALSE
+  }
+
+  # Parallel plan setup is deferred to the MI path (step 8) where map_fun is
+
+  # actually used. The fast path (step 7, no NAs) forces sequential lapply —
+  # spawning multisession workers here would waste startup time.
+  map_fun <- lapply
+
+  # ---------------------------------------------------------------------------
+  # 6. Build design matrices (X_core + X_lasso)
+  # ---------------------------------------------------------------------------
+  core_formula <- if (length(core_main_terms) == 0 && length(interaction_terms) == 0) {
+    stats::as.formula("~ 1")
+  } else {
+    stats::as.formula(paste(
+      "~", paste(c(core_main_terms, interaction_terms), collapse = " + ")
+    ))
+  }
+  mm_core <- stats::model.matrix(core_formula, data = df)
+  X_core  <- if (ncol(mm_core) > 1) {
+    mm_core[, -1, drop = FALSE]
+  } else {
+    matrix(0, nrow = nrow(df), ncol = 0)
+  }
+  rm(mm_core)
+
+  y_vec <- df[[y_var]]
+
+  has_matrixStats <- requireNamespace("matrixStats", quietly = TRUE)
+  drop_constant <- function(X) {
+    if (ncol(X) == 0) return(X)
+    keep <- if (has_matrixStats) {
+      matrixStats::colMaxs(X) > matrixStats::colMins(X)
+    } else {
+      vapply(seq_len(ncol(X)), function(j) {
+        v <- X[, j]; length(v) > 0L && (max(v) > min(v))
+      }, logical(1))
+    }
+    X[, keep, drop = FALSE]
+  }
+
+  has_na <- anyNA(df[, candidate_vars, drop = FALSE])
+  nfolds_i <- max(2L, as.integer(nfolds))
+
+  # ---------------------------------------------------------------------------
+  # 7. Fast path: no NAs in candidates (always true after complete-case filter)
+  #
+  # X_full and penalty are identical across iterations — build once.  The loop
+  # only varies the random CV fold assignment for stability selection.
+  # Sequential lapply: globals-export overhead of multisession exceeds the
+  # cv.glmnet compute time (confirmed via dev/bench_lasso.R).
+  # ---------------------------------------------------------------------------
+  if (!has_na) {
+    X_lasso <- drop_constant(as.matrix(df[, candidate_vars, drop = FALSE]))
+    if (ncol(X_lasso) == 0) stop("All candidate variables are constant.")
+    lasso_names <- colnames(X_lasso)
+
+    X_full  <- if (ncol(X_core) > 0) cbind(X_core, X_lasso) else X_lasso
     penalty <- c(rep(0, ncol(X_core)), rep(1, ncol(X_lasso)))
+    rm(X_core, X_lasso)
 
-    cvfit <- glmnet::cv.glmnet(
+    cv_args_base <- list(
       x = X_full,
-      y = df_imp[[y_var]],
+      y = y_vec,
       alpha = alpha,
-      nfolds = max(2, as.integer(nfolds)),
+      nfolds = nfolds_i,
       family = family_type,
       standardize = isTRUE(standardize),
       penalty.factor = penalty
     )
+    if (!is.null(glmnet_tol)) cv_args_base$thresh <- glmnet_tol
 
-    coefs <- stats::coef(cvfit, s = lambda_choice)
-    sel <- rownames(coefs)[as.numeric(coefs) != 0]
-    sel <- setdiff(sel, "(Intercept)")
-    sel <- intersect(sel, colnames(X_lasso))
-    selected_list[[i]] <- sel
+    selection_results <- lapply(seq_len(m), function(i) {
+      if (!is.null(parallel_seed)) set.seed(parallel_seed + i)
+      cv_args <- cv_args_base
+      if (identical(cv_selection, "random")) {
+        cv_args$foldid <- sample(rep(seq_len(nfolds_i), length.out = nrow(X_full)))
+      }
+      cvfit <- do.call(glmnet::cv.glmnet, cv_args)
+      coefs <- stats::coef(cvfit, s = lambda_choice)
+      sel   <- rownames(coefs)[as.numeric(coefs) != 0]
+      sel   <- setdiff(sel, "(Intercept)")
+      intersect(sel, lasso_names)
+    })
+
+  } else {
+    # -------------------------------------------------------------------------
+    # 8. MI path: impute candidates, rebuild X_lasso per imputation
+    # -------------------------------------------------------------------------
+
+    # Set up parallel plan here (not earlier) so the fast path never pays the
+    # multisession worker-spawn cost.
+    if (isTRUE(use_parallel)) {
+      if (!requireNamespace("future", quietly = TRUE) ||
+          !requireNamespace("future.apply", quietly = TRUE)) {
+        stop("Parallel LASSO requires packages 'future' and 'future.apply'.")
+      }
+      old_plan <- future::plan()
+      on.exit(future::plan(old_plan), add = TRUE)
+      old_max_size <- getOption("future.globals.maxSize")
+      on.exit(options(future.globals.maxSize = old_max_size), add = TRUE)
+      if (is.null(globals_max_size)) {
+        globals_max_size <- max(2 * 1024^3, old_max_size %||% 0)
+      }
+      options(future.globals.maxSize = globals_max_size)
+      workers <- if (is.null(n_workers)) future::availableCores() else as.integer(n_workers)
+      workers <- max(1L, min(workers, m))
+      future::plan(future::multisession, workers = workers)
+      map_fun <- function(x, fun) {
+        future.apply::future_lapply(
+          x, fun,
+          future.seed = if (is.null(parallel_seed)) TRUE else parallel_seed
+        )
+      }
+    }
+
+    mi_cols  <- unique(c(y_var, core_main_terms, candidate_vars))
+    mi_frame <- df[, mi_cols, drop = FALSE]
+
+    non_num_idx <- vapply(mi_frame, function(x) !is.numeric(x), logical(1))
+    if (any(non_num_idx)) {
+      mi_frame[non_num_idx] <- lapply(mi_frame[non_num_idx], function(x) {
+        if (is.logical(x)) as.integer(x)
+        else if (is.factor(x)) as.integer(x)
+        else as.integer(as.factor(x))
+      })
+    }
+
+    use_futuremice <- isTRUE(use_parallel) &&
+      utils::packageVersion("mice") >= "3.16.0"
+    if (use_futuremice) {
+      imp <- mice::futuremice(
+        mi_frame,
+        m = m,
+        maxit = max(1L, as.integer(mi_maxit)),
+        method = mi_method,
+        parallelseed = parallel_seed,
+        print = FALSE
+      )
+    } else {
+      if (!is.null(parallel_seed)) set.seed(parallel_seed)
+      imp <- mice::mice(
+        mi_frame,
+        m = m,
+        maxit = max(1L, as.integer(mi_maxit)),
+        method = mi_method,
+        print = FALSE
+      )
+    }
+    completed_cands_list <- lapply(
+      seq_len(m),
+      function(i) mice::complete(imp, action = i)[, candidate_vars, drop = FALSE]
+    )
+    rm(mi_frame, imp)
+
+    selection_results <- map_fun(seq_len(m), function(i) {
+      if (!is.null(parallel_seed)) set.seed(parallel_seed + i)
+
+      X_lasso <- drop_constant(as.matrix(completed_cands_list[[i]]))
+      if (ncol(X_lasso) == 0) return(character(0))
+
+      X_full  <- if (ncol(X_core) > 0) cbind(X_core, X_lasso) else X_lasso
+      penalty <- c(rep(0, ncol(X_core)), rep(1, ncol(X_lasso)))
+
+      foldid <- NULL
+      if (identical(cv_selection, "random")) {
+        foldid <- sample(rep(seq_len(nfolds_i), length.out = nrow(X_full)))
+      }
+
+      cv_args <- list(
+        x = X_full,
+        y = y_vec,
+        alpha = alpha,
+        nfolds = nfolds_i,
+        family = family_type,
+        standardize = isTRUE(standardize),
+        penalty.factor = penalty
+      )
+      if (!is.null(foldid))     cv_args$foldid <- foldid
+      if (!is.null(glmnet_tol)) cv_args$thresh <- glmnet_tol
+
+      cvfit <- do.call(glmnet::cv.glmnet, cv_args)
+
+      coefs <- stats::coef(cvfit, s = lambda_choice)
+      sel   <- rownames(coefs)[as.numeric(coefs) != 0]
+      sel   <- setdiff(sel, "(Intercept)")
+      intersect(sel, colnames(X_lasso))
+    })
   }
 
-  all_selected <- unique(unlist(selected_list))
+  selected_list <- selection_results
+  all_selected  <- unique(unlist(selected_list))
   if (length(all_selected) == 0) stop("No covariates selected across imputations.")
 
-  selection_freq <- sapply(all_selected, function(v) mean(vapply(selected_list, function(x) v %in% x, logical(1))))
+  # ---------------------------------------------------------------------------
+  # 9. Selection frequency via tabulate
+  # ---------------------------------------------------------------------------
+  freq_tbl <- table(unlist(selected_list))
+  selection_freq <- setNames(as.numeric(freq_tbl) / m, names(freq_tbl))
+
   final_selected <- names(selection_freq)[selection_freq >= stability_threshold]
   if (length(final_selected) == 0) stop("No covariates stable across imputations.")
 
-  for (i in seq_len(m)) {
-    df_imp <- df
-    df_imp[, candidate_vars] <- mice::complete(imp, action = i)
-
-    fe_vars_i <- fe_vars[vapply(fe_vars, function(v) {
-      length(unique(stats::na.omit(df_imp[[v]]))) >= 2
-    }, logical(1))]
-    rhs_i <- unique(c(weather_vars, fe_vars_i, interaction_terms, final_selected))
-    rhs_i <- rhs_i[rhs_i %in% names(df_imp)]
-    final_formula_i <- stats::as.formula(paste(y_var, "~", paste(rhs_i, collapse = " + ")))
-
-    final_models[[i]] <- if (family_type == "gaussian") {
-      stats::lm(final_formula_i, data = df_imp)
-    } else {
-      stats::glm(final_formula_i, data = df_imp, family = stats::binomial())
-    }
-  }
-
-  final_models <- final_models[!vapply(final_models, is.null, logical(1))]
-  if (length(final_models) == 0) stop("All post-LASSO refits failed.")
-
-  pooled_model <- NULL
-  mira_obj <- tryCatch(mice::as.mira(final_models), error = function(e) NULL)
-  if (!is.null(mira_obj)) {
-    pooled_model <- tryCatch(mice::pool(mira_obj), error = function(e) NULL)
-  }
-
   list(
-    model = if (!is.null(pooled_model)) pooled_model else final_models,
-    per_imputation_models = final_models,
     selected_covariates = final_selected,
     selection_frequency = selection_freq
   )
@@ -544,6 +796,11 @@ fit_model <- function(df, selected_outcome, selected_weather, selected_model) {
   # Outcome coercion delegated to backend (factor, integer, or unchanged)
   df <- backend$prepare_outcome(df, y_var, use_logit)
 
+  # Extract RIF metadata (set by the rif engine's prepare_outcome)
+  rif_taus <- attr(df, "rif_taus")
+  rif_cols <- attr(df, "rif_cols")
+  is_rif   <- !is.null(rif_taus)
+
   # ---------------------------------------------------------------------------
   # 4. Build formula terms
   # ---------------------------------------------------------------------------
@@ -674,6 +931,11 @@ fit_model <- function(df, selected_outcome, selected_weather, selected_model) {
     }
   )
 
+  # Pass RIF column names and quantile vector to fit_one via engine_opts
+  if (is_rif) {
+    engine_opts$rif <- list(taus = rif_taus, rif_cols = rif_cols)
+  }
+
   # ---------------------------------------------------------------------------
   # 8. Fit the three models
   # ---------------------------------------------------------------------------
@@ -690,7 +952,90 @@ fit_model <- function(df, selected_outcome, selected_weather, selected_model) {
   fit3 <- fit_one(formulas$formula3, "weather + FE + controls")
 
   # ---------------------------------------------------------------------------
-  # 9. Return
+  # 8b. Slim fit objects to reduce memory
+  # ---------------------------------------------------------------------------
+  # do.call(feols, args) captures the full evaluated `data` argument inside
+
+  # the call slot — for large surveys this adds hundreds of MB per fit element
+  # (×27 for RIF with 9 taus × 3 fits). Strip the embedded data from $call
+  # and remove $scores (only needed to re-compute robust VCV, which is already
+
+  # stored in $coeftable). vcov(), r2() and fixef() continue to work after this.
+  #
+  # NOTE: stats::model.matrix(fit) does NOT survive slimming — fixest
+  # re-evaluates the `data` argument from $call to rebuild the design matrix,
+  # so once $call[[3]] is gone it errors. The marginal-effect plot
+  # (make_weather_effect_plot) needs that matrix for the linear path, so for
+  # fit3 (the fit it plots) we cache the design matrix in attr "wise_mm"
+  # *before* slimming. RIF plots from a precomputed beta grid and never calls
+  # model.matrix(), which is why it was unaffected.
+
+  .slim_fit <- function(fit) {
+    if (inherits(fit, "fixest")) {
+      if (length(fit$call) >= 3L) fit$call[[3]] <- quote(.data_removed)
+      fit$scores <- NULL
+    } else if (is.list(fit)) {
+      # fixest_multi: list of fixest objects (one per tau)
+      for (i in seq_along(fit)) {
+        if (inherits(fit[[i]], "fixest")) {
+          if (length(fit[[i]]$call) >= 3L) fit[[i]]$call[[3]] <- quote(.data_removed)
+          fit[[i]]$scores <- NULL
+        }
+      }
+    }
+    fit
+  }
+
+  # Cache fit3's design matrix before slimming so the downstream model-fit and
+  # effect plots can rebuild predictions / importance without re-evaluating the
+  # (now removed) embedded data. fit3 is the only fit plotted. For RIF, all
+  # quantile sub-fits share one design matrix, so we cache a single copy on the
+  # median sub-fit (the one extract_rif_median() returns) — not all 9 — keeping
+  # this to at most one stored matrix either way.
+  .cache_mm <- function(fit) {
+    if (inherits(fit, "fixest")) {
+      mm <- tryCatch(as.data.frame(stats::model.matrix(fit)),
+                     error = function(e) NULL)
+      if (!is.null(mm)) attr(fit, "wise_mm") <- mm
+    } else if (is.list(fit) && length(fit) > 0) {
+      # fixest_multi: cache on the median sub-fit (index matches extract_rif_median).
+      # Pull the sub-fit out, attach the attr, and write it back — assigning to
+      # attr(fit[[idx]], ...) directly would mutate a throwaway copy.
+      idx <- min(5L, length(fit))
+      sub <- fit[[idx]]
+      if (inherits(sub, "fixest")) {
+        mm <- tryCatch(as.data.frame(stats::model.matrix(sub)),
+                       error = function(e) NULL)
+        if (!is.null(mm)) {
+          attr(sub, "wise_mm") <- mm
+          fit[[idx]] <- sub
+        }
+      }
+    }
+    fit
+  }
+
+  fit3 <- .cache_mm(fit3)
+
+  fit1 <- .slim_fit(fit1)
+  fit2 <- .slim_fit(fit2)
+  fit3 <- .slim_fit(fit3)
+
+  # ---------------------------------------------------------------------------
+  # 9. Build RIF grid (beta curves) from all three model specifications
+  # ---------------------------------------------------------------------------
+
+  rif_grid <- NULL
+  if (is_rif) {
+    rif_grid <- rbind(
+      build_rif_grid(fit1, rif_taus, model_id = 1L),
+      build_rif_grid(fit2, rif_taus, model_id = 2L),
+      build_rif_grid(fit3, rif_taus, model_id = 3L)
+    )
+  }
+
+  # ---------------------------------------------------------------------------
+  # 10. Return
   # ---------------------------------------------------------------------------
 
   list(
@@ -704,6 +1049,8 @@ fit_model <- function(df, selected_outcome, selected_weather, selected_model) {
     model_type        = model_type,
     engine            = engine_key,
     train_data        = df,
-    formulas          = formulas
+    formulas          = formulas,
+    rif_grid          = rif_grid,
+    taus              = rif_taus
   )
 }

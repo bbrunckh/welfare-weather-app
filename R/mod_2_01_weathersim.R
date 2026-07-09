@@ -5,6 +5,17 @@
 #'
 #' @param id Internal parameter for {shiny}.
 #'
+#' @section Simulation inputs (configured in server via input$):
+#'   \describe{
+#'     \item{\code{sim_n}}{Integer. Number of VCV coefficient draws (S).}
+#'     \item{\code{pov_line_sim}}{Numeric. Poverty line in daily 2021 PPP USD.
+#'       Fixed at simulation time.}
+#'     \item{\code{skip_coef_draws}}{Logical. If TRUE, bypasses VCV draws
+#'       and uses point estimates only. Default TRUE.}
+#'     \item{\code{dev_mode}}{Logical. If TRUE, limits to 1 ensemble model
+#'       per SSP/period for fast testing.}
+#'   }
+#'
 #' @noRd
 #'
 #' @importFrom shiny NS tagList
@@ -16,13 +27,42 @@ mod_2_01_weathersim_ui <- function(id) {
     # ---- Settings summary banner (always visible) --------------------------
     shiny::htmlOutput(ns("settings_summary")),
 
-    # ---- Collapsible simulation settings -----------------------------------
-    shiny::tags$details(
-      id = ns("settings_details"),
-      shiny::tags$summary(
-        style = "cursor:pointer; font-weight:600; font-size:13px; margin-bottom:8px;",
-        "Simulation settings \u25bc"
+    # ---- Include coefficient uncertainty -------------------------------------------
+    shiny::checkboxInput(
+        inputId = ns("include_coef_uncertainty"),
+        label   = "Include coefficient uncertainty",
+        value   = TRUE
       ),
+
+    # ---- Simulation settings flyout (same pattern as Step 1 'Configure') ---
+    shiny::actionButton(
+      ns("settings_toggle"), "Simulation settings",
+      icon  = shiny::icon("sliders"),
+      class = "btn-outline-primary btn-sm",
+      style = "margin-bottom: 10px;"
+    ),
+    shiny::conditionalPanel(
+      condition = paste0("input['", ns("settings_toggle"), "'] % 2 == 1"),
+      class     = "config-flyout",
+      shiny::tags$div(
+        class = "config-flyout-header",
+        shiny::tags$h6("Simulation settings"),
+        shiny::tags$button(
+          type = "button",
+          class = "btn-close",
+          `aria-label` = "Close",
+          onclick = sprintf(
+            "document.getElementById('%s').click();", ns("settings_toggle")
+          )
+        )
+      ),
+
+      # -- Baseline survey ------------------------------------------------
+      shiny::tags$h6("Baseline survey",
+                     style = "font-weight:600; margin-top:8px; margin-bottom:4px;"),
+      shiny::uiOutput(ns("baseline_survey_ui")),
+      shiny::uiOutput(ns("baseline_warning_ui")),
+      shiny::tags$hr(style = "margin: 6px 0;"),
 
       # -- Historical period --------------------------------------------------
       shiny::tags$h6("Historical weather distribution period",
@@ -38,7 +78,7 @@ mod_2_01_weathersim_ui <- function(id) {
       shiny::uiOutput(ns("hist_years_warning")),
       shiny::helpText(
         tags$b("Note:"), " Historical weather informs the underlying variability,",
-        " which is then perturbed with climate scenario forecasts.",
+        " which is then perturbed with climate scenario projections.",
         tags$b(" 30 years is the recommended default."),
         style = "font-size: 11px; color: #555; margin-top: 2px; margin-bottom: 8px;"
       ),
@@ -99,35 +139,99 @@ mod_2_01_weathersim_ui <- function(id) {
       shiny::tags$hr(style = "margin: 6px 0;"),
 
       # -- Residual method ----------------------------------------------------
-      shiny::tags$h6("Simulation residuals",
-                     style = "font-weight:600; margin-bottom:4px;"),
+      shiny::tags$h6(
+        "Simulation residuals",
+        info_popover(
+          title = "Simulation residuals",
+          shiny::p(shiny::tags$b("original:"), " Recommended default: match each observation's own residual — assumes no changes due to changing hazards."),
+          shiny::p(shiny::tags$b("resample:"), " Secondary recommendation: randomly resample residuals from the model."),
+          shiny::p(shiny::tags$b("normal:"), " Caution: draw residuals from N(0, σ), which assumes normal tails and no heteroskedasticity."),
+          shiny::p(shiny::tags$b("none:"), " Diagnostic only: returns fitted values only. Not including residuals understates variance and, for any log-transformed variable, understates the mean."),
+          docs = TRUE
+        ),
+        style = "font-weight:600; margin-bottom:4px;"
+      ),
       shiny::radioButtons(
         inputId  = ns("residuals"),
         label    = NULL,
         choices  = residual_choices(),
-        selected = "normal"
+        selected = "original"
       ),
       shiny::helpText(
-        shiny::tags$b("none:"), " return fitted values only.", shiny::tags$br(),
-        shiny::tags$b("original:"), " match each observation\u2019s own training residual.",
-        shiny::tags$br(),
-        shiny::tags$b("empirical:"), " resample residuals from the training distribution.",
-        shiny::tags$br(),
-        shiny::tags$b("normal:"), " draw residuals from N(0, \u03c3).",
+        "How simulated outcomes incorporate unexplained variation.",
+        " 'Original' is recommended.",
         style = "font-size:11px;"
+      ),
+
+
+      shiny::tags$hr(style = "margin: 6px 0;"),
+
+      # -- Coefficient uncertainty -------------------------------------------
+      shiny::tags$h6(
+        "Model coefficient uncertainty",
+        info_popover(
+          title = "Model coefficient uncertainty",
+          shiny::p(
+            "Checking this box incorporates uncertainty around the model",
+            "definition process itself, via the analytic delta method.",
+            "Disable to use point estimates only."
+          ),
+          shiny::p(
+            "By default, only coefficients on variables that change between",
+            "baseline and counterfactual contribute to the reported SE:",
+            "weather variables and their interactions in Step 2; weather plus",
+            "the policy-modified variables and their interactions in Step 3.",
+            "Under 'original' residuals, uncertainty on the unchanged covariates",
+            "cancels through the held-fixed residual term (additive-decomposition",
+            "SE). 'Include uncertainty on all covariates' propagates uncertainty",
+            "from all covariates instead — more conservative, but inconsistent",
+            "with the model's own additive-separability assumption. Has no",
+            "effect when residuals are not 'original'."
+          ),
+          shiny::p(
+            "Monte Carlo draws: coefficient uncertainty is propagated",
+            "analytically via the delta method for all standard aggregates",
+            "(mean, total, headcount, poverty gap, FGT2, Gini). The Monte Carlo",
+            "path is used only as a fallback for aggregates where the",
+            "delta-method gradient is unavailable or unstable (currently",
+            "'avg_poverty' with few poor households); the draws setting",
+            "controls how many coefficient draws that fallback uses."
+          ),
+          docs = TRUE
+        ),
+        style = "font-weight:600; margin-bottom:4px;"
+      ),
+      shiny::helpText(
+        "Incorporates uncertainty from the model estimation itself via the",
+        " analytic delta method.",
+        style = "font-size:11px; color:#555; margin-top:2px; margin-bottom:8px;"
+      ),
+      shiny::conditionalPanel(
+        condition = sprintf("input['%s'] == true", ns("include_coef_uncertainty")),
+        shiny::checkboxInput(
+          inputId = ns("propagate_all_covariate_uncertainty"),
+          label   = "Include uncertainty on all covariates",
+          value   = FALSE
+        )
+      ),
+      shiny::checkboxInput(
+        inputId = ns("dev_mode"),
+        label   = shiny::tags$span(
+          style = "font-size:11px; font-weight:600; color:#b45309;",
+          "⚠ Dev mode: 1 ensemble model only"
+        ),
+        value   = FALSE
+      ),
+      shiny::numericInput(
+        inputId = ns("sim_n"),
+        label   = "Monte Carlo draws (S, fallback only)",
+        value   = 150, min = 10, max = 1000, step = 10
       )
     ),
-
     shiny::tags$hr(style = "margin: 10px 0;"),
 
-    # ---- Run simulation button (always visible) ----------------------------
-    shiny::actionButton(
-      ns("run_sim"),
-      label = "Run simulation",
-      class = "btn-primary",
-      icon  = shiny::icon("play"),
-      style = "width: 100%; margin-top: 4px;"
-    )
+    # ---- Run simulation button (hidden for RIF engine) ---------------------
+    shiny::uiOutput(ns("run_sim_ui"))
   )
 }
 
@@ -144,6 +248,9 @@ mod_2_01_weathersim_ui <- function(id) {
 #' @param selected_surveys Reactive data frame from the survey list.
 #' @param survey_weather   Reactive data frame of merged survey-weather data.
 #' @param model_fit        Reactive list with fit3, engine, train_data.
+#' @param stored_breaks Reactive returning a named list of pre-computed
+#'   histogram break points for the weather density plot. Defaults to
+#'   \code{reactive(NULL)} — breaks computed on demand when not supplied.
 #'
 #' @noRd
 mod_2_01_weathersim_server <- function(id,
@@ -161,7 +268,84 @@ mod_2_01_weathersim_server <- function(id,
     hist_sim        <- reactiveVal(NULL)
     saved_scenarios <- reactiveVal(list())
 
+    # ---- Baseline survey reactives ----------------------------------------
+
+    # Derive available survey x year choices from survey_weather.
+    # Returns a named character vector: label -> "survname|year" value.
+
+    baseline_survey_choices <- reactive({
+      req(survey_weather())
+      svy  <- survey_weather()
+      if (!all(c('code', 'survname', 'year') %in% names(svy))) return(character(0))
+      combos <- unique(svy[, c('code', 'survname', 'year')])
+      combos <- combos[order(combos$code, combos$year), ]
+
+      # Join economy (country) name from selected_surveys via code column.
+      # NOTE: code (e.g. TGO, GNB) is unique per country; survname (e.g. EHCVM)
+      # is shared across countries in the same survey programme and must NOT
+      # be used as the join key -- this was the bug causing Togo to disappear.
+      
+      ss <- tryCatch(selected_surveys(), error = function(e) NULL)
+      if (!is.null(ss) && all(c('code', 'economy') %in% names(ss))) {
+        lbl_map <- unique(ss[, c('code', 'economy')])
+        combos  <- merge(combos, lbl_map, by = 'code', all.x = TRUE)
+        combos$economy[is.na(combos$economy)] <- combos$code[is.na(combos$economy)]
+      } else {
+        combos$economy <- combos$code
+      }
+      vals <- paste0(combos$code, '|', combos$year)
+      lbls <- paste0(combos$economy, ' ', combos$year)
+      setNames(vals, lbls)
+    })
+
+    # Default selection: latest year per unique economy (code), not survname.
+    baseline_default <- reactive({
+      ch <- baseline_survey_choices()
+      if (length(ch) == 0) return(character(0))
+      df <- data.frame(
+        val      = ch,
+        code = sub("^(.*?)\\|.*$", "\\1", ch),
+        year = as.integer(sub("^.*\\|", "", ch)),
+        stringsAsFactors = FALSE
+      )
+
+      latest <- tapply(df$year, df$code, max)
+      keep   <- mapply(function(c, y) latest[c] == y, df$code, df$year)
+      unname(ch[keep])
+    })
+
+
     # ---- Settings summary banner -------------------------------------------
+
+    output$baseline_survey_ui <- shiny::renderUI({
+      ch  <- baseline_survey_choices()
+      def <- baseline_default()
+      if (length(ch) == 0)
+        return(shiny::helpText("No survey data loaded.", style = "font-size:11px;"))
+      shiny::selectInput(
+        ns("baseline_survey"),
+        label    = NULL,
+        choices  = ch,
+        selected = def,
+        multiple = TRUE,
+        selectize = TRUE
+      )
+    })
+
+    output$baseline_warning_ui <- shiny::renderUI({
+      sel <- input$baseline_survey %||% baseline_default()
+      if (length(sel) <= 1) return(NULL)
+      # Multiple economies or years selected -- show warning
+      n_economies <- length(unique(sub("\\|.*$", "", sel)))
+      n_years     <- length(unique(sub("^.*\\|", "", sel)))
+      if (n_economies > 1 || n_years > 1) {
+        shiny::helpText(
+          shiny::tags$b("\u26a0 Warning:"),
+           "Using multiple survey years or economies is not recommended. Requires normalizing weights based on sample design, which is not currently implemented — verify before interpreting results.",
+          style = "color: #c0392b; font-size: 11px; margin-top: 2px;"
+        )
+      }
+    })
 
     output$settings_summary <- shiny::renderUI({
       hist_yr <- input$hist_years %||% c(1991, 2020)
@@ -189,9 +373,9 @@ mod_2_01_weathersim_server <- function(id,
       ens_txt <- "All models"
 
       res_labels <- c(
-        "none"      = "None",
         "original"  = "Original",
-        "empirical" = "Empirical resample",
+        "resample" = "Resample",
+        "none"      = "None",
         "normal"    = "Normal distribution"
       )
       res_txt <- res_labels[input$residuals %||% "normal"] %||% input$residuals
@@ -209,7 +393,14 @@ mod_2_01_weathersim_server <- function(id,
         shiny::tags$b(" \u00b7 SSPs:", style = "color:#333;"), ssp_txt,
         shiny::tags$b(" \u00b7 Ensemble result:", style = "color:#333;"), ens_txt,
         shiny::tags$br(),
-        shiny::tags$b("Simulation residuals:", style = "color:#333;"), res_txt
+        shiny::tags$b("Simulation residuals:", style = "color:#333;"), res_txt,
+        shiny::tags$br(),
+        shiny::tags$b("Baseline survey:", style = "color:#333;"), {
+          sel  <- input$baseline_survey %||% baseline_default()
+          ch   <- baseline_survey_choices()
+          nms  <- names(ch)[ch %in% sel]
+          if (length(nms) == 0) "None" else paste(nms, collapse = ", ")
+        }
       )
     })
 
@@ -226,6 +417,16 @@ mod_2_01_weathersim_server <- function(id,
     })
 
     # ---- Derived config reactives ------------------------------------------
+
+    # survey_weather filtered to the selected baseline rows.
+    # Used in place of survey_weather() inside observeEvent(run_sim).
+    baseline_svy <- reactive({
+      sel <- input$baseline_survey %||% baseline_default()
+      if (length(sel) == 0) return(survey_weather())
+      svy <- survey_weather()
+      vals <- paste0(svy$code, "|", as.character(svy$year))
+      svy[vals %in% sel, , drop = FALSE]
+    })
 
     selected_hist <- reactive({
       req(input$hist_years)
@@ -281,206 +482,140 @@ mod_2_01_weathersim_server <- function(id,
       do.call(rbind, do.call(c, rows))
     })
 
+    # ---- Run simulation button (hidden for non-linear or RIF engine) --------------------
+
+    output$run_sim_ui <- shiny::renderUI({
+      mf     <- model_fit()
+      engine <- if (!is.null(mf)) mf$engine %||% "fixest" else "fixest"
+
+      # Block only unsupported engines — linear (fixest) and RIF both supported
+      unsupported <- !is.null(mf) &&
+                     !engine %in% c("fixest", "rif")
+
+      if (unsupported) {
+        shiny::div(
+          class = "alert alert-warning",
+          style = "font-size: 13px; margin-top: 4px;",
+          shiny::tags$b("\u26a0 Simulations are not yet implemented for ",
+                        engine, " models."),
+          " Please select a linear or RIF model engine to run simulations."
+        )
+      } else {
+        shiny::actionButton(
+          ns("run_sim"),
+          label = "Run simulation",
+          class = "btn-primary",
+          icon  = shiny::icon("play"),
+          style = "width: 100%; margin-top: 4px;"
+        )
+      }
+    })
+
     # ---- Run simulation on button click ------------------------------------
 
     observeEvent(input$run_sim, {
       req(selected_weather(), selected_outcome(),
           survey_weather(), selected_hist(), model_fit())
 
+      # ---- Gather inputs ---------------------------------------------------
       sw  <- selected_weather()
       so  <- selected_outcome()
       sh  <- selected_hist()
-      svy <- survey_weather()
+      svy <- baseline_svy()
       ss  <- selected_surveys()
+      req(ss)
       mf  <- model_fit()
       cp  <- connection_params()
 
-      model      <- mf$fit3
-      engine     <- mf$engine
-      train_data <- mf$train_data
-      residuals  <- sh$residuals
-
-      sim_dates <- build_hist_sim_dates(svy, unlist(sh$year_range))
-
-      # ---- Build get_weather() arguments ------------------------------------
-      fut_periods <- future_periods()
-      sf          <- selected_fut()
-      has_future  <- !is.null(sf) && length(fut_periods) > 0
-      ssps        <- if (has_future) unique(sf$ssp) else character(0)
+      sim_dates           <- build_hist_sim_dates(svy, unlist(sh$year_range))
+      fut_periods         <- future_periods()
+      sf                  <- selected_fut()
+      has_future          <- !is.null(sf) && length(fut_periods) > 0
+      ssps                <- if (has_future) unique(sf$ssp) else character(0)
       perturbation_method <- if (has_future) build_perturbation_method(sw) else NULL
+      fp_list             <- if (has_future) lapply(fut_periods, function(yr)
+                               c(paste0(yr[1], "-01-01"), paste0(yr[2], "-12-31")))
+                             else list()
 
-      # Build the list of future_period vectors (or NULL for historical-only)
-      fp_list <- if (has_future) {
-        lapply(fut_periods, function(yr) {
-          c(paste0(yr[1], "-01-01"), paste0(yr[2], "-12-31"))
-        })
-      } else {
-        NULL
-      }
+      # ---- RIF-specific params -------------------------------------------
+      engine      <- mf$engine %||% "fixest"
+      is_rif      <- identical(engine, "rif")
+      fit_multi   <- if (is_rif) mf$fit3          else NULL
+      rif_taus    <- if (is_rif) mf$taus           else NULL
+      rif_weather <- if (is_rif) mf$weather_terms  else NULL
 
-      ssp_labels <- c(
-        "ssp2_4_5" = "SSP2-4.5",
-        "ssp3_7_0" = "SSP3-7.0",
-        "ssp5_8_5" = "SSP5-8.5"
-      )
+      # Force residuals = "none" for RIF (delta method, no residual draw)
+      sh_residuals <- if (is_rif) "none" else sh$residuals
 
-      shiny::withProgress(
-        message = "Running simulation...",
-        value   = 0,
-        {
-          new_scenarios    <- list()
-          hist_sim_result  <- NULL
-          cached_breaks    <- stored_breaks()
 
-          # Single get_weather() call — handles all SSPs × all periods
-          shiny::setProgress(value = 0.15, detail = "Loading weather data...")
+      shiny::withProgress(message = "Running simulation...", value = 0, {
 
-          weather_result <- tryCatch(
-            get_weather(
-              survey_data          = svy,
-              selected_surveys     = ss,
-              selected_weather     = sw,
-              dates                = sim_dates,
-              connection_params    = cp,
-              ssp                  = if (has_future) ssps else NULL,
-              future_period        = fp_list,
-              perturbation_method  = perturbation_method,
-              stored_breaks        = cached_breaks
-            ),
-            error = function(e) {
-              shiny::showNotification(
-                paste0("Weather load failed: ", conditionMessage(e)),
-                type = "error", duration = 8
-              )
-              NULL
-            }
-          )
-          req(!is.null(weather_result))
-
-          if (is.null(cached_breaks)) {
-            cached_breaks <- attr(weather_result, "stored_breaks")
-          }
-
-          shiny::setProgress(value = 0.5, detail = "Running simulations...")
-
-          # Run sim pipeline on every key returned by get_weather().
-          # Keys are "historical" or "<ssp>_<start>_<end>_<model>".
-          # Future results are grouped by SSP + period.  To limit peak memory,
-          # predictions are trimmed (slim = TRUE) and incrementally bound into
-          # a running data frame per group instead of accumulating a list.
-
-          # group_key -> running combined data frames
-          group_preds   <- list()
-          group_weather <- list()
-          group_meta    <- list()
-          group_n       <- list()
-
-          future_keys <- setdiff(names(weather_result), "historical")
-          all_keys    <- c("historical", future_keys)
-          n_keys      <- length(all_keys)
-
-          for (ki in seq_along(all_keys)) {
-            key <- all_keys[[ki]]
-            is_hist <- identical(key, "historical")
-
-            if (ki %% 5L == 0L || is_hist) {
-              shiny::setProgress(
-                value  = 0.5 + 0.45 * (ki / n_keys),
-                detail = if (is_hist) "Historical simulation..."
-                         else sprintf("Model %d / %d", ki - 1L, length(future_keys))
-              )
-            }
-
-            # Process historical with full output; future with slim output
-            out <- run_sim_pipeline(
-              weather_raw = weather_result[[key]],
-              svy         = svy,
-              sw          = sw,
-              so          = so,
-              model       = model,
-              residuals   = residuals,
-              train_data  = train_data,
-              engine      = engine,
-              slim        = !is_hist
+        # ---- Run simulation ------------------------------------------------
+        result <- tryCatch(
+          fct_run_simulation(
+            sw                  = sw,
+            so                  = so,
+            svy                 = svy,
+            ss                  = ss,
+            mf                  = mf,
+            cp                  = cp,
+            fp_list             = fp_list,
+            ssps                = ssps,
+            residuals           = sh_residuals, #sh$residuals,
+            dev_mode            = isTRUE(input$dev_mode),
+            skip_coef_draws     = !isTRUE(input$include_coef_uncertainty),
+            propagate_all_covariate_uncertainty =
+              isTRUE(input$propagate_all_covariate_uncertainty),
+            sim_dates           = sim_dates,
+            perturbation_method = perturbation_method,
+            stored_breaks       = stored_breaks(),
+            fit_multi           = fit_multi,
+            taus                = rif_taus,
+            weather_cols        = rif_weather,   
+            progress_fn         = function(value, detail)
+                                    shiny::setProgress(value = value,
+                                                       detail = detail)
+          ),
+          error = function(e) {
+            shiny::showNotification(
+              paste0("Simulation failed: ", conditionMessage(e)),
+              type = "error", duration = 8
             )
-
-            # Free the raw weather for this model immediately
-            weather_result[[key]] <- NULL
-
-            if (is.null(out)) next
-
-            if (is_hist && is.null(hist_sim_result)) {
-              hist_sim_result <- list(
-                preds       = out$preds,
-                so          = so,
-                n_pre_join  = out$n_pre_join,
-                weather_raw = out$weather_raw,
-                train_data  = train_data
-              )
-            } else if (!is_hist) {
-              # Key is "<ssp>_<start>_<end>_<model>"
-              ssp_code   <- sub("^(ssp[0-9]_[0-9]_[0-9])_.*$", "\\1", key)
-              rest       <- sub(paste0("^", ssp_code, "_"), "", key)
-              period_str <- sub("^([0-9]{4}_[0-9]{4})_.*$", "\\1", rest)
-              model_name <- sub(paste0("^", period_str, "_"), "", rest)
-              yr_parts   <- as.integer(strsplit(period_str, "_")[[1]])
-              gk         <- paste0(ssp_code, "_", period_str)
-
-              # Tag each model's predictions so aggregation can group by
-              # (model, sim_year) — producing N_models × N_years values
-              # for the CI in the point-range chart.
-              out$preds$model <- model_name
-
-              # Incrementally bind instead of accumulating a list of dfs.
-              # Peak memory = existing combined df + one new model df.
-              group_preds[[gk]]   <- dplyr::bind_rows(group_preds[[gk]],   out$preds)
-              group_weather[[gk]] <- dplyr::bind_rows(group_weather[[gk]], out$weather_raw)
-              group_n[[gk]]       <- (group_n[[gk]] %||% 0L) + 1L
-
-              if (is.null(group_meta[[gk]])) {
-                group_meta[[gk]] <- list(
-                  ssp_code   = ssp_code,
-                  year_range = yr_parts
-                )
-              }
-            }
-            rm(out)
-
-            # Periodic garbage collection to release freed model weather
-            if (ki %% 10L == 0L) gc(verbose = FALSE)
+            NULL
           }
+        )
+        req(!is.null(result))
 
-          rm(weather_result); gc(verbose = FALSE)
+        # ---- Store results (reactive side effects) -------------------------
+        # Aggregation now happens lazily in mod_2_02_results.R via the analytic
+        # delta method — no pre-aggregation step here.
+        hist_sim(result$hist_sim_result)
+        saved_scenarios(result$new_scenarios)
 
-          # Build display entries: one per SSP + period
-          for (gk in names(group_preds)) {
-            meta        <- group_meta[[gk]]
-            ssp_pretty  <- ssp_labels[meta$ssp_code] %||% meta$ssp_code
-            period_lbl  <- paste0(meta$year_range[1], "-", meta$year_range[2])
-            display_key <- paste0(ssp_pretty, " / ", period_lbl)
-            new_scenarios[[display_key]] <- list(
-              preds       = group_preds[[gk]],
-              weather_raw = group_weather[[gk]],
-              so          = so,
-              year_range  = meta$year_range,
-              n_models    = group_n[[gk]]
-            )
-          }
-          rm(group_preds, group_weather, group_meta, group_n)
-          gc(verbose = FALSE)
+        shiny::setProgress(value = 1, detail = "Complete")
+      })
 
-          req(!is.null(hist_sim_result))
-          hist_sim(hist_sim_result)
-          saved_scenarios(new_scenarios)
-          shiny::setProgress(value = 1, detail = "Complete")
-        }
-      )
+      # ---- Completion notification -----------------------------------------
+      message(sprintf(
+        "[wiseapp] TOTAL wall time: %s | weather: %s | pipelines: %s | %d key(s)",
+        format_elapsed(result$t_elapsed),
+        format_elapsed(result$t_weather %||% 0),
+        format_elapsed(result$t_elapsed - (result$t_weather %||% 0)),
+        result$n_keys
+      ))
 
-      n_scen <- length(saved_scenarios())
       shiny::showNotification(
-        paste0("\u2713 Simulation complete.",
-               if (n_scen > 0) paste0(" ", n_scen, " future scenario(s).") else ""),
-        type = "message", duration = 5
+        ui = tagList(
+          tags$b("\u2713 Simulation complete"), tags$br(),
+          sprintf("%s total | %d key(s) | ~%d runs",
+                  format_elapsed(result$t_elapsed),
+                  result$n_keys, result$total_runs),
+          tags$br(),
+          sprintf("Weather: %s | Pipelines: %s | Aggregation: lazy (delta method)",
+                  format_elapsed(result$t_weather %||% 0),
+                  format_elapsed(result$t_elapsed - (result$t_weather %||% 0)))
+        ),
+        type = "message", duration = 10
       )
     }, ignoreInit = TRUE)
 
@@ -490,7 +625,12 @@ mod_2_01_weathersim_server <- function(id,
       hist_sim        = hist_sim,
       saved_scenarios = saved_scenarios,
       selected_hist   = selected_hist,
-      selected_fut    = selected_fut
+      selected_fut    = selected_fut,
+      sim_n           = reactive(input$sim_n),
+      residuals       = reactive(input$residuals %||% "none"),
+      skip_coef_draws = reactive(!isTRUE(input$include_coef_uncertainty)),
+      propagate_all_covariate_uncertainty =
+        reactive(isTRUE(input$propagate_all_covariate_uncertainty))
     )
   })
 }

@@ -43,8 +43,19 @@ app_server <- function(input, output, session) {
     connection_params = overview_api$connection_params,
     selected_outcome  = step1_api$selected_outcome,
     selected_weather  = step1_api$selected_weather,
+    selected_model    = step1_api$selected_model,
+    selected_policies = step1_api$selected_policies,
     survey_weather    = step1_api$survey_weather,
+    survey_data       = step1_api$survey_data,
     model_fit         = step1_api$model_fit,
-    hist_sim          = step2_api$hist_sim
+    hist_sim          = step2_api$hist_sim,
+    saved_scenarios   = step2_api$saved_scenarios,
+    selected_hist     = step2_api$selected_hist,
+    variable_list     = overview_api$variable_list,
+    analysis_unit     = step1_api$analysis_unit,
+    skip_coef_draws   = step2_api$skip_coef_draws,
+    residuals         = step2_api$residuals,
+    propagate_all_covariate_uncertainty =
+      step2_api$propagate_all_covariate_uncertainty
   )
 }

@@ -142,7 +142,8 @@ mod_1_01_sample_server <- function(id, connection_params, survey_list, variable_
     # ---- Return API ---------------------------------------------------------
 
     list(
-      selected_surveys = selected_surveys
+      selected_surveys = selected_surveys,
+      analysis_unit    = reactive(input$unit)
     )
   })
 }

@@ -24,6 +24,9 @@
 !DESCRIPTION
 !NAMESPACE
 
+# Keep renv lockfile for reproducible installs/deploys
+!renv.lock
+
 # Git placeholder file (to commit empty folders)
 !/**/*.gitkeep
 
@@ -137,6 +140,11 @@ tokens.*
 token/
 tokens/
 rsconnect/
+
+# Other
 inst/duckdb_extensions/
 .claude/settings.local.json
 .posit/
+
+dev/outputs/
+dev/output/

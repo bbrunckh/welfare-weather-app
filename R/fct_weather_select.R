@@ -103,8 +103,8 @@ transformation_default <- function(units) {
 #' @param units Scalar character string of the variable's units.
 #'
 #' @return A named list with elements `ref_start`, `ref_end`, `temporal_agg`,
-#'   `transformation`, `cont_binned`, `num_bins`, `binning_method`, and
-#'   `polynomial`.
+#'   `transformation`, `cont_binned`, `num_bins`, `binning_method`,
+#'   `custom_breaks`, and `polynomial`.
 #'
 #' @export
 weather_spec_defaults <- function(units) {
@@ -116,8 +116,40 @@ weather_spec_defaults <- function(units) {
     cont_binned    = "Binned",
     num_bins       = 5L,
     binning_method = "Equal frequency",
+    custom_breaks  = numeric(0),
     polynomial     = character(0)
   )
+}
+
+
+#' Parse a free-text list of custom bin cut values
+#'
+#' Accepts either a numeric vector (passed through after coercion) or a
+#' scalar character with cuts separated by commas, spaces, semicolons, or
+#' newlines. Non-numeric tokens are dropped with a warning. Returns a
+#' sorted numeric vector of finite values.
+#'
+#' @param x A numeric vector, character scalar, or `NULL`.
+#'
+#' @return Numeric vector (possibly empty).
+#'
+#' @export
+parse_custom_breaks <- function(x) {
+  if (is.null(x)) return(numeric(0))
+  if (is.numeric(x)) {
+    v <- x[is.finite(x)]
+    return(sort(unique(v)))
+  }
+  if (is.character(x)) {
+    if (length(x) == 0 || all(!nzchar(x))) return(numeric(0))
+    tokens <- unlist(strsplit(paste(x, collapse = ","), "[,;[:space:]]+"))
+    tokens <- tokens[nzchar(tokens)]
+    if (length(tokens) == 0) return(numeric(0))
+    v <- suppressWarnings(as.numeric(tokens))
+    v <- v[is.finite(v)]
+    return(sort(unique(v)))
+  }
+  numeric(0)
 }
 
 
@@ -140,12 +172,16 @@ weather_spec_defaults <- function(units) {
 #' @param cont_binned   One of `"Continuous"` or `"Binned"`.
 #' @param num_bins      Integer. Number of bins when `cont_binned == "Binned"`.
 #' @param binning_method Scalar character. Binning method name.
+#' @param custom_breaks Numeric vector or character scalar of comma-separated
+#'   cut values. Used only when `binning_method == "Custom"`. Parsed via
+#'   `parse_custom_breaks()`.
 #' @param polynomial    Character vector of polynomial degrees (e.g.
 #'   `c("2", "3")`).
 #'
 #' @return A one-row `tibble` with columns `name`, `ref_start`, `ref_end`,
 #'   `temporalAgg`, `transformation`, `cont_binned`, `num_bins`,
-#'   `binning_method`, and `polynomial` (list column).
+#'   `binning_method`, `custom_breaks` (list column), and `polynomial`
+#'   (list column).
 #'
 #' @export
 build_weather_spec <- function(name,
@@ -156,6 +192,7 @@ build_weather_spec <- function(name,
                                 cont_binned    = NULL,
                                 num_bins       = NULL,
                                 binning_method = NULL,
+                                custom_breaks  = NULL,
                                 polynomial     = NULL) {
   defs           <- weather_spec_defaults(units)
   ref_period     <- ref_period     %||% c(defs$ref_start, defs$ref_end)
@@ -168,6 +205,9 @@ build_weather_spec <- function(name,
   num_bins       <- if (is_binned) as.integer(num_bins %||% 5L) else NA_integer_
   binning_method <- if (is_binned) (binning_method %||% "Equal frequency") else NA_character_
 
+  is_custom      <- is_binned && identical(binning_method, "Custom")
+  custom_breaks  <- if (is_custom) parse_custom_breaks(custom_breaks) else numeric(0)
+
   tibble::tibble(
     name           = name,
     ref_start      = as.integer(ref_period[1]),
@@ -177,6 +217,7 @@ build_weather_spec <- function(name,
     cont_binned    = cont_binned,
     num_bins       = num_bins,
     binning_method = binning_method,
+    custom_breaks  = list(custom_breaks),
     polynomial     = list(polynomial)
   )
 }
@@ -203,7 +244,7 @@ build_weather_spec <- function(name,
 #' @return A `tibble` with one row per selected variable and columns `name`,
 #'   `label`, `units`, `ref_start`, `ref_end`, `temporalAgg`,
 #'   `transformation`, `cont_binned`, `num_bins`, `binning_method`,
-#'   `polynomial`.
+#'   `custom_breaks`, `polynomial`.
 #'
 #' @export
 build_selected_weather <- function(selected_vars, var_info, spec_inputs = list()) {
@@ -213,6 +254,7 @@ build_selected_weather <- function(selected_vars, var_info, spec_inputs = list()
       ref_start = integer(), ref_end = integer(), temporalAgg = character(),
       transformation = character(), cont_binned = character(),
       num_bins = integer(), binning_method = character(),
+      custom_breaks = list(),
       polynomial = list()
     ))
   }
@@ -231,6 +273,7 @@ build_selected_weather <- function(selected_vars, var_info, spec_inputs = list()
       cont_binned    = spec_inputs[[paste0(prefix, "contOrBinned")]],
       num_bins       = spec_inputs[[paste0(prefix, "numBins")]],
       binning_method = spec_inputs[[paste0(prefix, "binningMethod")]],
+      custom_breaks  = spec_inputs[[paste0(prefix, "customBreaks")]],
       polynomial     = spec_inputs[[paste0(prefix, "polynomial")]]
     )
   })

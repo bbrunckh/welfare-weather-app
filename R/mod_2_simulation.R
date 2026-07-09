@@ -9,34 +9,59 @@
 #' @noRd
 #'
 #' @importFrom shiny NS tagList
-#' @importFrom waiter autoWaiter spin_2 transparent
 mod_2_simulation_ui <- function(id) {
   ns <- NS(id)
-  fluidPage(
-    autoWaiter(html = spin_2(), color = transparent(.5)),
-    h4("What welfare is expected given historical weather conditions? In future climate scenarios?"),
-    sidebarLayout(
-      sidebarPanel(
-        mod_2_01_weathersim_ui(ns("weathersim")),
-        shiny::hr(),
+  bslib::layout_sidebar(
+    sidebar = bslib::sidebar(
+      width = 360,
+      mod_2_01_weathersim_ui(ns("weathersim")),
+      shiny::hr(),
+      shiny::div(
+        style = "display:flex; align-items:center; gap:0.4rem;",
         shiny::actionButton(
           ns("clear_scenarios"),
-          label = "Clear all scenarios",
+          label = "Clear simulation results",
           icon  = shiny::icon("trash"),
           width = "100%",
-          style = "margin-top: 8px; color: #fff; background-color: #c0392b; border-color: #a93226;"
+          class = "btn-outline-danger"
+        ),
+        info_popover(
+          title = "Clear simulation results",
+          shiny::p(paste(
+            "Removes all saved future-scenario runs and the historical",
+            "baseline from this session. Your settings are kept —",
+            "re-run the simulation to regenerate results."
+          ))
         )
-      ),
-      mainPanel(
-        tabsetPanel(
-          id = ns("step2_output_tabs"),
-          tabPanel(
-            title = "Overview",
-            value = "overview",
-            p("Outputs will appear here after you configure settings and click 'Run simulation'."),
-            includeMarkdown(system.file("app/www/equation2.md", package = "wiseapp"))
+      )
+    ),
+    h4("What welfare is expected given historical weather conditions? In future climate scenarios?",
+       class = "step-question"),
+    tabsetPanel(
+      id = ns("step2_output_tabs"),
+      tabPanel(
+        title = "Overview",
+        value = "overview",
+        div(
+          class = "empty-state",
+          icon("cloud-sun-rain"),
+          h5("No simulations yet"),
+          p(paste(
+            "Configure historical and future weather scenarios in the sidebar,",
+            "then click 'Run simulation'.",
+            "Outputs: outcome distributions by climate scenario, exceedance",
+            "probabilities, and simulation diagnostics will appear here as new tabs."
+          )),
+          p(
+            class = "text-muted small mb-0",
+            paste(
+              "Simulations for large surveys (tens of thousands of households)",
+              "can take several minutes to run; charts take a few seconds to",
+              "update after changing filters."
+            )
           )
-        )
+        ),
+        welfare_equation_ui(predicted = TRUE)
       )
     )
   )
@@ -79,24 +104,28 @@ mod_2_simulation_server <- function(id,
     )
 
     # ---- 2. Results tab ----------------------------------------------------
-    mod_2_02_results_server(
+    s2 <- mod_2_02_results_server(
       "results",
       hist_sim        = s1$hist_sim,
       saved_scenarios = s1$saved_scenarios,
       selected_hist   = s1$selected_hist,
       tabset_id       = "step2_output_tabs",
-      tabset_session  = session
+      tabset_session  = session,
+      sim_n           = s1$sim_n,
+      residuals       = s1$residuals,
+      skip_coef_draws = s1$skip_coef_draws
     )
 
     # ---- 3. Diagnostics tab ------------------------------------------------
     mod_2_03_diagnostics_server(
       "diagnostics",
-      hist_sim         = s1$hist_sim,
-      saved_scenarios  = s1$saved_scenarios,
-      survey_weather   = survey_weather,
-      selected_weather = selected_weather,
-      tabset_id        = "step2_output_tabs",
-      tabset_session   = session
+      hist_sim           = s1$hist_sim,
+      saved_scenarios    = s1$saved_scenarios,
+      survey_weather     = survey_weather,
+      selected_weather   = selected_weather,
+      variance_breakdown = s2$variance_breakdown,
+      tabset_id          = "step2_output_tabs",
+      tabset_session     = session
     )
 
     # ---- Clear scenarios button --------------------------------------------
@@ -114,7 +143,10 @@ mod_2_simulation_server <- function(id,
       selected_hist   = s1$selected_hist,
       selected_fut    = s1$selected_fut,
       hist_sim        = s1$hist_sim,
-      saved_scenarios = s1$saved_scenarios
+      saved_scenarios = s1$saved_scenarios,
+      skip_coef_draws = s1$skip_coef_draws,
+      residuals       = s1$residuals,
+      propagate_all_covariate_uncertainty = s1$propagate_all_covariate_uncertainty
     )
   })
 }

@@ -63,14 +63,310 @@ prepare_outcome_df <- function(df, so) {
 #' @return Character vector of coefficient names matching `weather_terms`.
 #'
 #' @export
+.fixest_vcov <- function(fit) {
+  # Try the fit-time VCV first (respects cluster= arg passed at estimation)
+  v <- tryCatch(fixest::vcov(fit), error = function(e) NULL)
+  if (!is.null(v)) return(v)
+  for (spec in list(COEF_VCOV_SPEC, ~loc_id, "HC1", "iid")) {
+    v <- tryCatch(fixest::vcov(fit, vcov = spec), error = function(e) NULL)
+    if (!is.null(v)) return(v)
+  }
+  stats::vcov(fit)
+}
+
+.fixest_vcov_spec <- function(fit) {
+  # Try the fit-time VCV first (respects cluster= arg passed at estimation)
+  ok <- tryCatch({ summary(fit); TRUE }, error = function(e) FALSE)
+  if (ok) return(NULL)  # NULL signals "use default"
+  for (spec in list(COEF_VCOV_SPEC, ~loc_id, "HC1", "iid")) {
+    ok <- tryCatch({ summary(fit, vcov = spec); TRUE }, error = function(e) FALSE)
+    if (ok) return(spec)
+  }
+  "iid"
+}
+
+.fixest_coeftable <- function(fit) {
+  # Try the fit-time VCV first (respects cluster= arg passed at estimation)
+  ct <- tryCatch(as.data.frame(fixest::coeftable(fit)), error = function(e) NULL)
+  if (!is.null(ct)) return(ct)
+  for (spec in list(COEF_VCOV_SPEC, ~loc_id, "HC1", "iid")) {
+    ct <- tryCatch(
+      as.data.frame(fixest::coeftable(fit, vcov = spec)),
+      error = function(e) NULL
+    )
+    if (!is.null(ct)) return(ct)
+  }
+  as.data.frame(fixest::coeftable(fit))
+}
+
+
 weather_coef_names <- function(fit, weather_terms) {
   all_coefs <- names(stats::coef(fit))
-  
+
   # Build safe word-boundary pattern
   pattern <- paste0("\\b(", paste(weather_terms, collapse = "|"), ")\\b")
-  
+
   # Return matching coefficient names
   all_coefs[grepl(pattern, all_coefs)]
+}
+
+
+#' Detect survey columns modified between training data and a counterfactual
+#'
+#' Compares two household-level data frames column-by-column. Returns the names
+#' of columns whose values differ for at least one household. Used to identify
+#' policy-modified variables in Module 3 simulations (`apply_policy_to_svy()`
+#' flips e.g. `electricity`, `internet`, `employed`) so the coefficient-
+#' uncertainty mask can be extended beyond weather terms.
+#'
+#' Both inputs are expected at the household grain (one row per household).
+#' Joins on `id_col` if present in both; otherwise falls back to a row-order
+#' comparison clipped to the shorter frame.
+#'
+#' @param svy_modified Data frame. Survey after counterfactual modification.
+#' @param svy_train Data frame. Reference training data.
+#' @param id_col Character or NULL. Optional household ID column for joining.
+#' @param exclude_cols Character vector. Columns to skip (outcome, weights, FE,
+#'   metadata, SP transfer column).
+#'
+#' @return Character vector of modified column names (possibly empty).
+#'
+#' @export
+detect_modified_cols <- function(svy_modified, svy_train,
+                                  id_col = NULL,
+                                  exclude_cols = character()) {
+  if (is.null(svy_modified) || is.null(svy_train)) return(character())
+
+  common <- intersect(names(svy_modified), names(svy_train))
+  candidates <- setdiff(common, c(id_col, exclude_cols))
+  if (length(candidates) == 0L) return(character())
+
+  if (!is.null(id_col) && id_col %in% names(svy_modified) &&
+      id_col %in% names(svy_train)) {
+    keep <- intersect(svy_modified[[id_col]], svy_train[[id_col]])
+    if (length(keep) == 0L) return(character())
+    m <- svy_modified[match(keep, svy_modified[[id_col]]), candidates,
+                       drop = FALSE]
+    t <- svy_train[match(keep, svy_train[[id_col]]), candidates, drop = FALSE]
+  } else {
+    n <- min(nrow(svy_modified), nrow(svy_train))
+    if (n == 0L) return(character())
+    m <- svy_modified[seq_len(n), candidates, drop = FALSE]
+    t <- svy_train[seq_len(n), candidates, drop = FALSE]
+  }
+
+  changed <- vapply(candidates, function(col) {
+    a <- m[[col]]; b <- t[[col]]
+    if (length(a) != length(b)) return(TRUE)
+    any((a != b) | (is.na(a) != is.na(b)), na.rm = TRUE)
+  }, logical(1))
+
+  candidates[changed]
+}
+
+
+#' Attach an active-coefficient mask to a Cholesky vcov object
+#'
+#' Wrapper that builds the additive-decomposition active mask
+#' (\code{\link{build_active_coef_mask}}) and attaches it to `chol_obj` for
+#' downstream consumption by \code{\link{compute_factor_loading}} (linear
+#' engine) and \code{interpolate_F_loading()} (RIF engine).
+#'
+#' Active terms = `weather_terms` plus any columns whose values differ
+#' between `svy_modified` and `train_data` (excluding weather, outcome,
+#' weights, FE columns, and `SP_TRANSFER_COL`).
+#'
+#' The mask is only built when `residuals == "original"` and
+#' `propagate_all_covariate_uncertainty == FALSE`. Otherwise the function
+#' returns `chol_obj` unchanged (legacy full propagation).
+#'
+#' Handles both linear shape (`chol_obj` is a list with `$L`, `$beta`, ...)
+#' and RIF shape (`chol_obj` is a list of per-tau lists). For RIF, the mask
+#' is attached via `attr(chol_obj, "active_mask")`; per-tau attachment is
+#' not needed because all tau fits share coefficient ordering.
+#'
+#' @param chol_obj Output of `compute_chol_vcov()` or NULL.
+#' @param svy_modified Household-level survey (possibly policy-modified).
+#'   Compared against `svy_reference` to detect which covariates changed
+#'   between baseline and counterfactual.
+#' @param svy_reference Household-level survey to diff against. For Module 2
+#'   this is the (unmodified) baseline survey, so the diff is empty and
+#'   `active_terms = weather_terms`. For Module 3 this is the pre-policy
+#'   baseline `svy_baseline`, so the diff returns exactly the policy-modified
+#'   columns. If NULL, falls back to `train_data` (legacy comparison).
+#' @param train_data Training-data data frame. Used as the reference when
+#'   `svy_reference` is NULL.
+#' @param weather_terms Character vector of weather variable names.
+#' @param outcome_col Character or NULL. Outcome column name to exclude from
+#'   the diff (e.g. `"welfare"`). The outcome is log-transformed in
+#'   `train_data` but not in `svy`, so it would otherwise be flagged as
+#'   "modified" — defensively excluded even though no coefficient is named
+#'   after it.
+#' @param residuals Character. Residual mode (`"original"`, `"resample"`, …).
+#' @param propagate_all_covariate_uncertainty Logical. TRUE disables the
+#'   mask (legacy behaviour).
+#'
+#' @return `chol_obj` with `$active_mask` (or `attr(., "active_mask")` for
+#'   RIF) set when appropriate; otherwise unchanged.
+#'
+#' @export
+attach_active_mask <- function(chol_obj,
+                                svy_modified,
+                                train_data,
+                                weather_terms,
+                                residuals,
+                                svy_reference = NULL,
+                                outcome_col   = NULL,
+                                propagate_all_covariate_uncertainty = FALSE) {
+  if (is.null(chol_obj)) return(chol_obj)
+  if (isTRUE(propagate_all_covariate_uncertainty)) return(chol_obj)
+
+  # Determine coefficient names from either shape. RIF chol_obj is a list of
+  # per-tau lists (each with $L, $beta); linear chol_obj is a single list with
+  # $L and $beta at the top level.
+  is_rif_shape <- is.list(chol_obj) && !("L" %in% names(chol_obj)) &&
+                   length(chol_obj) > 0L &&
+                   is.list(chol_obj[[1]]) && "beta" %in% names(chol_obj[[1]])
+
+  # Gating: the cancellation argument applies under (a) "original" residuals
+  # for the linear engine — the per-household residual is held fixed across β
+  # draws and absorbs uncertainty on unchanged coefficients — or (b) any
+  # residuals mode for the RIF engine, because the RIF prediction is
+  # y_baseline + δ_i and the level y_baseline plays the same role as the
+  # fixed residual on the linear path. Under "resample"/"normal" with the
+  # linear engine, residuals are drawn independently of β and the
+  # cancellation does not hold.
+  if (!is_rif_shape && !identical(residuals, "original")) return(chol_obj)
+  coef_names <- if (is_rif_shape) names(chol_obj[[1]]$beta)
+                 else if (is.list(chol_obj) && "beta" %in% names(chol_obj))
+                   names(chol_obj$beta)
+                 else NULL
+  if (is.null(coef_names)) return(chol_obj)
+
+  # Prefer comparing against the pre-counterfactual baseline survey
+  # (svy_reference) — that is *exactly* what we want to diff against.
+  # Fall back to train_data when the baseline is not available; in that
+  # case the comparison is correct iff the user simulates on the same
+  # underlying survey they trained on (common case).
+  reference <- svy_reference %||% train_data
+
+  id_col <- intersect(c("pid", "hhid", "fid"),
+                      intersect(names(svy_modified), names(reference)))
+  id_col <- if (length(id_col) > 0L) id_col[[1L]] else NULL
+
+  weight_cols <- grep("^weight$|^hhweight$|^wgt$|^pw$",
+                       union(names(svy_modified), names(reference)),
+                       value = TRUE, ignore.case = TRUE)
+  exclude_cols <- c(SP_TRANSFER_COL, ".svy_row_id",
+                     "year", "sim_year", "int_month",
+                     "code", "survname", "loc_id",
+                     weather_terms, weight_cols, outcome_col)
+
+  modified <- detect_modified_cols(svy_modified, reference,
+                                    id_col = id_col,
+                                    exclude_cols = exclude_cols)
+  active_terms <- unique(c(weather_terms, modified))
+  if (length(active_terms) == 0L) return(chol_obj)
+
+  mask <- tryCatch(
+    build_active_coef_mask(coef_names, active_terms),
+    error = function(e) {
+      warning("[attach_active_mask] mask construction failed: ",
+              conditionMessage(e))
+      NULL
+    }
+  )
+  if (is.null(mask)) return(chol_obj)
+
+  # Build L_active: Cholesky factor of the active block of Sigma. Naive
+  # "subset columns of F = X %*% L" is INCORRECT when Sigma has non-zero
+  # off-diagonal terms between active and inactive coefficients, because
+  # column j of L still picks up contributions from inactive rows of X.
+  # The mathematically correct additive-decomposition variance is
+  #   var_coef_active = h' X_active Σ_active,active X_active' h
+  # which requires re-decomposing Sigma_active. Compute once here so
+  # compute_factor_loading() / interpolate_F_loading() can use it.
+  cholesky_active_block <- function(L_full) {
+    Sigma_full <- L_full %*% t(L_full)
+    Sigma_w    <- Sigma_full[mask, mask, drop = FALSE]
+    tryCatch(t(chol(Sigma_w)),
+             error = function(e) {
+               warning("[attach_active_mask] Cholesky of active block failed: ",
+                       conditionMessage(e),
+                       " — falling back to no masking.")
+               NULL
+             })
+  }
+
+  if (is_rif_shape) {
+    L_active_list <- lapply(chol_obj, function(x) cholesky_active_block(x$L))
+    if (any(vapply(L_active_list, is.null, logical(1)))) return(chol_obj)
+    for (k in seq_along(chol_obj)) {
+      chol_obj[[k]]$L_active <- L_active_list[[k]]
+    }
+    attr(chol_obj, "active_mask") <- mask
+  } else {
+    L_active <- cholesky_active_block(chol_obj$L)
+    if (is.null(L_active)) return(chol_obj)
+    chol_obj$L_active    <- L_active
+    chol_obj$active_mask <- mask
+  }
+
+  # Diagnostic so users can verify the additive-decomposition SE is in
+  # effect. Printed once per simulation run.
+  kept <- names(mask)[mask]
+  message(sprintf(
+    "[active_mask] additive-decomposition SE active: keeping %d/%d coefficients (%s engine). Active: %s",
+    sum(mask), length(mask),
+    if (is_rif_shape) "RIF" else "linear",
+    paste(kept, collapse = ", ")
+  ))
+  chol_obj
+}
+
+
+#' Build a logical mask over coefficient names for the active variable set
+#'
+#' Returns a length-K logical vector flagging coefficients whose names involve
+#' any term in `active_terms` (via word-boundary regex). Used by the additive-
+#' decomposition SE: when residuals are held fixed per household ("original"),
+#' uncertainty on coefficients for variables that do not change between
+#' baseline and counterfactual cancels through the residual term, so only the
+#' active subset contributes to `var_coef`.
+#'
+#' The intercept (if present) is forced to FALSE.
+#'
+#' @param coef_names Character vector. Names from `coef(fit)` /
+#'   `names(chol_obj$beta)`, in the same order as the design-matrix columns.
+#' @param active_terms Character vector. Raw variable names whose coefficients
+#'   (and any interactions involving them) should remain active.
+#'
+#' @return Named logical vector of length `length(coef_names)`, or NULL if
+#'   `active_terms` is empty.
+#'
+#' @export
+build_active_coef_mask <- function(coef_names, active_terms) {
+  active_terms <- active_terms[nzchar(active_terms)]
+  if (length(active_terms) == 0L) {
+    warning("[build_active_coef_mask] no active terms supplied; ",
+            "returning NULL (caller will fall back to full propagation).")
+    return(NULL)
+  }
+
+  # Escape regex metacharacters in term names (e.g. dots in column names).
+  esc <- gsub("([][{}().+*^$|?\\\\])", "\\\\\\1", active_terms)
+
+  # Word-boundary match plus a fallback for fixest factor expansions that use
+  # "::" between variable and level (e.g. "tx::level1:urban").
+  pattern <- paste0("(\\b(", paste(esc, collapse = "|"), ")\\b)",
+                     "|((^|[^A-Za-z0-9_])(", paste(esc, collapse = "|"),
+                     ")(::|$))")
+
+  mask <- grepl(pattern, coef_names)
+  names(mask) <- coef_names
+
+  if ("(Intercept)" %in% coef_names) mask[["(Intercept)"]] <- FALSE
+  mask
 }
 
 
@@ -118,16 +414,65 @@ make_coef_map <- function(coef_names, label_fun = identity) {
 #'
 #' For `"fixest"`, `"ranger"`, and `"xgboost"` engines the object stored by
 #' `fit_model()` is already a native R model object — no unwrapping needed.
+#' For the `"rif"` engine, each fit is a `fixest_multi` (list of 9 models).
+#' This function returns the object as-is; use `extract_rif_median()` to
+#' get a single representative model for diagnostics.
 #'
 #' @param fit    A model object as stored in `fit_model()$fit1` etc.
-#' @param engine Scalar character engine key (e.g. `"fixest"`). Kept for
-#'   backward compatibility but currently unused.
+#' @param engine Scalar character engine key (e.g. `"fixest"`).
 #'
 #' @return The native model object.
 #'
 #' @export
 extract_native_fit <- function(fit, engine = "fixest") {
   fit
+}
+
+
+#' Resolve a fitted model's design matrix, preferring the cached copy
+#'
+#' `fit_model()` strips the embedded data from each fixest fit's `$call` to
+#' save memory, after which `stats::model.matrix(fit)` errors (fixest tries to
+#' re-fetch the now-removed data). Before slimming, `fit_model()` caches fit3's
+#' design matrix in `attr(fit, "wise_mm")`. This helper returns that cached
+#' matrix when present and otherwise recomputes (for unslimmed fits, or
+#' non-fit3 fits that were never cached).
+#'
+#' @param model A fitted model object (typically `fixest`).
+#'
+#' @return A data frame design matrix, or `NULL` if it cannot be resolved.
+#'
+#' @export
+resolve_model_matrix <- function(model) {
+  cached <- attr(model, "wise_mm")
+  if (!is.null(cached)) return(as.data.frame(cached))
+  tryCatch(
+    as.data.frame(stats::model.matrix(model)),
+    error = function(e) NULL
+  )
+}
+
+
+#' Extract the median quantile model from a RIF fixest_multi
+#'
+#' For diagnostic functions that require a single fixest model, this extracts
+#' the median quantile (tau = 0.5, index 5) from the 9-quantile stack.
+#' Returns the input unchanged for non-RIF engines.
+#'
+#' @param fit    A model object (fixest_multi for RIF, or single model).
+#' @param engine Scalar character engine key.
+#'
+#' @return A single fixest model object.
+#'
+#' @export
+extract_rif_median <- function(fit, engine = "fixest") {
+  if (identical(engine, "rif") && (inherits(fit, "fixest_multi") || is.list(fit))) {
+    # Index 5 = tau = 0.5 (median)
+    idx <- min(5L, length(fit))
+    fit[[idx]]
+  } else {
+    fit
+  }
 }
 
 
@@ -177,8 +522,8 @@ plot_diagnostics <- function(model, engine = "fixest") {
       ggplot2::geom_hline(yintercept = 0, color = "red", linetype = "dashed") +
       ggplot2::geom_smooth(method = "loess", se = FALSE, color = "steelblue",
                            linewidth = 0.8, formula = y ~ x) +
-      ggplot2::theme_minimal() +
-      ggplot2::labs(title = "Residuals vs Fitted",
+      theme_wise() +
+      ggplot2::labs(subtitle = "Residuals vs Fitted",
                     x = "Fitted values", y = "Residuals")
   }, error = function(e) blank_plot(paste("Diagnostic plot error:", conditionMessage(e))))
 }
@@ -214,14 +559,17 @@ get_first_bin_label <- function(df, hv) {
 #' Build a coefficient plot across three progressive model fits
 #'
 #' Uses `fixest` HC-robust SEs and plots all three models side-by-side,
-#' replicating the `jtools::plot_summs()` style.
+#' replicating the `jtools::plot_summs()` style. For RIF engines, produces
+#' beta-curve plots (coefficient vs quantile, faceted by term).
 #'
-#' @param fit1,fit2,fit3    Native fixest model objects.
+#' @param fit1,fit2,fit3    Native fixest model objects (or fixest_multi for RIF).
 #' @param weather_terms     Character vector of base weather variable names.
 #' @param interaction_terms Character vector of interaction term strings.
 #' @param outcome_label     Scalar character label for the x-axis.
 #' @param label_fun         Function mapping variable names to readable labels.
-#' @param engine            Scalar character engine key (kept for compat).
+#' @param engine            Scalar character engine key.
+#' @param rif_grid          Optional tidy data frame of RIF beta curves (from
+#'   \code{fit_model()$rif_grid}). Used only when \code{engine = "rif"}.
 #'
 #' @return A `ggplot` object.
 #'
@@ -231,12 +579,97 @@ make_coefplot <- function(fit1, fit2, fit3,
                            interaction_terms,
                            outcome_label = "outcome",
                            label_fun     = identity,
-                           engine        = "fixest") {
+                           engine        = "fixest",
+                           rif_grid      = NULL,
+                           pred_var      = NULL) {
 
   blank_plot <- function(msg) {
     ggplot2::ggplot() +
-      ggplot2::annotate("text", x = 0.5, y = 0.5, label = msg, color = "grey40") +
+      ggplot2::annotate("text", x = 0.5, y = 0.5, label = msg,
+                        size = 3.5, color = "grey40", hjust = 0.5, vjust = 0.5) +
       ggplot2::theme_void()
+  }
+
+  # --- RIF branch: beta curve plot -------------------------------------------
+  if (identical(engine, "rif") && !is.null(rif_grid)) {
+    return(tryCatch({
+      taus <- sort(unique(rif_grid$tau))
+
+      # Filter terms: by pred_var if supplied, otherwise all weather terms
+      filter_terms <- if (!is.null(pred_var)) pred_var else weather_terms
+      term_esc <- gsub("([\\[\\]\\(\\)\\^\\$\\.\\*\\+\\?])", "\\\\\\1", filter_terms)
+      weather_pattern <- paste0("\\b(", paste(term_esc, collapse = "|"), ")\\b")
+
+      all_terms <- unique(rif_grid$term)
+      keep <- grepl(weather_pattern, all_terms)
+      if (!any(keep)) {
+        if (!is.null(pred_var))
+          return(blank_plot(paste0("No RIF terms found for '", pred_var, "'.")))
+        keep <- rep(TRUE, length(all_terms))
+      }
+      plot_terms <- all_terms[keep]
+
+      plot_data <- rif_grid[rif_grid$term %in% plot_terms, ]
+      plot_data$model_label <- factor(
+        dplyr::case_when(
+          plot_data$model == 1L ~ "No FE",
+          plot_data$model == 2L ~ "FE",
+          TRUE                  ~ "FE + controls"
+        ),
+        levels = c("No FE", "FE", "FE + controls")
+      )
+      plot_data$term_label <- vapply(
+        plot_data$term, function(t) coef_label(t, label_fun), character(1)
+      )
+
+      # Order facets so each main is followed by its interactions, grouped
+      # by whichever chunk contains the weather variable (handles both
+      # `weather:modx` and `modx:weather` orderings).
+      protected <- gsub("::", "", plot_data$term, fixed = TRUE)
+      parts     <- strsplit(protected, ":", fixed = TRUE)
+      main_part <- vapply(parts, function(p) {
+        hit <- p[grepl(weather_pattern, p)]
+        if (length(hit) == 0) p[1] else hit[1]
+      }, character(1))
+      is_int <- lengths(parts) > 1
+      term_levels <- unique(plot_data$term_label[
+        order(match(main_part, unique(main_part)), is_int)
+      ])
+      plot_data$term_label <- factor(plot_data$term_label, levels = term_levels)
+
+      ggplot2::ggplot(plot_data, ggplot2::aes(x = tau, y = estimate,
+                                               colour = model_label,
+                                               fill   = model_label)) +
+        ggplot2::geom_hline(yintercept = 0, linetype = "dashed", colour = "grey60") +
+        ggplot2::geom_ribbon(
+          ggplot2::aes(ymin = conf.low, ymax = conf.high),
+          alpha = 0.10, colour = NA
+        ) +
+        ggplot2::geom_line(linewidth = 0.8) +
+        ggplot2::geom_point(size = 2) +
+        ggplot2::facet_wrap(~ term_label, scales = "free_y", ncol = 2) +
+        ggplot2::scale_x_continuous(
+          breaks = taus,
+          labels = scales::percent_format(1)
+        ) +
+        ggplot2::scale_colour_brewer(palette = "Set1", name = NULL) +
+        ggplot2::scale_fill_brewer(palette = "Set1", name = NULL) +
+        ggplot2::labs(
+          subtitle = paste("UQR coefficients for", label_fun(pred_var)),
+          x        = "Welfare quantile",
+          y        = stringr::str_wrap(paste0("Effect on ", outcome_label), 50),
+          caption  = "Ribbon = 95% CI"
+        ) +
+        theme_wise() +
+        ggplot2::theme(
+          legend.position  = "bottom",
+          panel.border     = ggplot2::element_blank(),
+          strip.background = ggplot2::element_blank(),
+          plot.subtitle    = ggplot2::element_text(face = "bold", hjust = 0.5, size = 11),
+          plot.caption     = ggplot2::element_text(size = 9, colour = "grey40", hjust = 0),
+          axis.text        = ggplot2::element_text(size = 9)
+        )
+    }, error = function(e) blank_plot(paste0("RIF coefficient plot error: ", conditionMessage(e)))))
   }
 
   if (!requireNamespace("fixest", quietly = TRUE))
@@ -251,7 +684,7 @@ make_coefplot <- function(fit1, fit2, fit3,
   p <- tryCatch({
     coef_data <- purrr::imap_dfr(model_list, function(fit, model_name) {
       ct <- tryCatch(
-        as.data.frame(fixest::coeftable(fit, se = "hetero")),
+        .fixest_coeftable(fit),
         error = function(e) NULL
       )
       if (is.null(ct)) return(NULL)
@@ -260,11 +693,11 @@ make_coefplot <- function(fit1, fit2, fit3,
       ct
     })
 
-    if (nrow(coef_data) == 0)
-      return(blank_plot("No coefficients returned by fixest."))
-
-    keep_terms <- weather_coef_names(fit3, weather_terms)
-    coef_data  <- coef_data[coef_data$term %in% keep_terms, ]
+    filter_terms    <- if (!is.null(pred_var)) pred_var else weather_terms
+    term_esc        <- gsub("([\\[\\]\\(\\)\\^\\$\\.\\*\\+\\?])", "\\\\\\1", filter_terms)
+    weather_pattern <- paste0("\\b(", paste(term_esc, collapse = "|"), ")\\b")
+    keep_terms      <- weather_coef_names(fit3, filter_terms)
+    coef_data       <- coef_data[coef_data$term %in% keep_terms, ]
 
     if (nrow(coef_data) == 0)
       return(blank_plot("No weather coefficients found to plot."))
@@ -277,11 +710,25 @@ make_coefplot <- function(fit1, fit2, fit3,
     coef_data$model     <- factor(coef_data$model,
                                   levels = c("No FE", "FE", "FE + controls"))
 
+    # Order y-axis labels: each main effect followed by its interaction(s),
+    # in model order. Reversed so the first main appears at the TOP of the plot.
+    coef_data$label_wrap <- stringr::str_wrap(coef_data$label, 25)
+    protected <- gsub("::", "", coef_data$term, fixed = TRUE)
+    parts     <- strsplit(protected, ":", fixed = TRUE)
+    main_part <- vapply(parts, function(p) {
+      hit <- p[grepl(weather_pattern, p)]
+      if (length(hit) == 0) p[1] else hit[1]
+    }, character(1))
+    is_int       <- lengths(parts) > 1
+    ord          <- order(match(main_part, unique(main_part)), is_int)
+    label_levels <- unique(coef_data$label_wrap[ord])
+    coef_data$label_wrap <- factor(coef_data$label_wrap, levels = rev(label_levels))
+
     ggplot2::ggplot(
       coef_data,
       ggplot2::aes(
         x      = Estimate,
-        y      = stringr::str_wrap(label, 25),
+        y      = label_wrap,
         colour = model,
         shape  = model
       )
@@ -297,7 +744,7 @@ make_coefplot <- function(fit1, fit2, fit3,
         x = stringr::str_wrap(paste0("Effect on ", outcome_label), 50),
         y = NULL
       ) +
-      ggplot2::theme_bw(base_size = 14) +
+      theme_wise() +
       ggplot2::theme(
         legend.position = "bottom",
         panel.border = ggplot2::element_blank()
@@ -334,7 +781,239 @@ make_coefplot <- function(fit1, fit2, fit3,
 #' @export
 make_weather_effect_plot <- function(fit, pred_var, interaction_terms, is_binned,
                                      label_fun, engine, selected_weather = NULL,
-                                     weather_df = NULL) {
+                                     weather_df = NULL, rif_grid = NULL) {
+
+  blank_plot <- function(msg) {
+    ggplot2::ggplot() +
+      ggplot2::annotate("text", x = 0.5, y = 0.5, label = msg,
+                        size = 3.5, color = "grey40", hjust = 0.5, vjust = 0.5) +
+      ggplot2::theme_void()
+  }
+
+  # Design matrix for the linear (non-RIF) effect plot. Prefers the cached
+  # copy stashed by fit_model() before slimming (see resolve_model_matrix);
+  # falls back to model.frame() only if neither cache nor model.matrix() works.
+  mm_of <- function(fit) {
+    mm <- resolve_model_matrix(fit)
+    if (!is.null(mm)) return(mm)
+    tryCatch(stats::model.frame(fit), error = function(e) NULL)
+  }
+
+  # --- RIF branch: weather beta curve across quantiles -----------------------
+  if (identical(engine, "rif") && !is.null(rif_grid)) {
+    return(tryCatch({
+      pred_lab <- label_fun(pred_var)
+
+      # Filter rif_grid to model 3, terms containing pred_var
+      grid3 <- rif_grid[rif_grid$model == 3L, ]
+      pred_esc <- gsub("([\\[\\]\\(\\)\\^\\$\\.\\*\\+\\?])", "\\\\\\1", pred_var)
+      mask <- grepl(paste0("\\b", pred_esc, "\\b"), grid3$term)
+      if (!any(mask)) return(blank_plot(paste0("No RIF terms found for '", pred_var, "'.")))
+      plot_data <- grid3[mask, ]
+
+      taus <- sort(unique(plot_data$tau))
+      plot_data$term_label <- vapply(
+        plot_data$term, function(t) coef_label(t, label_fun), character(1)
+      )
+
+      n_terms <- length(unique(plot_data$term))
+      if (n_terms == 1) {
+        # Single term: simple beta curve
+        ggplot2::ggplot(plot_data, ggplot2::aes(x = tau, y = estimate)) +
+          ggplot2::geom_hline(yintercept = 0, linetype = "dashed", colour = "grey60") +
+          ggplot2::geom_ribbon(
+            ggplot2::aes(ymin = conf.low, ymax = conf.high),
+            alpha = 0.15, fill = "steelblue"
+          ) +
+          ggplot2::geom_line(colour = "steelblue", linewidth = 0.9) +
+          ggplot2::geom_point(colour = "steelblue", size = 2.5) +
+          ggplot2::scale_x_continuous(breaks = taus, labels = scales::percent_format(1)) +
+          ggplot2::labs(
+            subtitle = paste("Effect of", pred_lab, "across the welfare distribution"),
+            x     = "Welfare quantile",
+            y     = paste("UQR coefficient"),
+            caption = "Ribbon = 95% CI"
+          ) +
+          theme_wise() +
+          ggplot2::theme(
+            legend.position    = "bottom",
+            panel.border       = ggplot2::element_blank(),
+            strip.background   = ggplot2::element_blank(),
+            plot.subtitle         = ggplot2::element_text(face = "bold", hjust = 0.5, size = 11),
+            plot.caption       = ggplot2::element_text(size = 9, colour = "grey40", hjust = 0),
+            panel.grid.minor   = ggplot2::element_blank(),
+            axis.text          = ggplot2::element_text(size = 9),
+            axis.line.x.bottom = ggplot2::element_blank(),
+            axis.line.y.left   = ggplot2::element_blank()
+          )
+      } else {
+        # Multiple terms (main + interactions): evaluate the combined effect
+        # at each moderator level so the plot has one line per modx value in
+        # a single panel (or per-bin facet for binned predictors), matching
+        # the style of the linear-regression moderated effect plot.
+
+        protected   <- gsub("::", "", plot_data$term, fixed = TRUE)
+        parts       <- strsplit(protected, ":", fixed = TRUE)
+        weather_pat <- paste0("\\b", pred_esc, "\\b")
+        is_int_row  <- lengths(parts) > 1
+        main_part   <- vapply(parts, function(p) {
+          hit <- p[grepl(weather_pat, p)]
+          if (length(hit) == 0) p[1] else hit[1]
+        }, character(1))
+
+        # Identify moderator variable from interaction_terms. Use a word-
+        # boundary regex (not fixed substring) so short pred_var names like
+        # "r" don't accidentally match terms like "tx:urban" via the "r" in
+        # "urban", which would pick the wrong moderator.
+        modx_var <- NULL
+        modx_lab <- NULL
+        if (length(interaction_terms) > 0) {
+          pv_pat <- paste0("\\b", pred_esc, "\\b")
+          mt <- interaction_terms[grepl(pv_pat, interaction_terms)]
+          if (length(mt) > 0) {
+            mp <- strsplit(mt[1], ":", fixed = TRUE)[[1]]
+            modx_var <- mp[mp != pred_var][1]
+            if (!is.na(modx_var) && nzchar(modx_var))
+              modx_lab <- label_fun(modx_var)
+          }
+        }
+
+        # Moderator evaluation points: binary 0/1, small set of unique
+        # numeric values, or mean ± sd for continuous.
+        modx_vals <- c(0, 1)
+        if (!is.null(weather_df) && !is.null(modx_var) &&
+            modx_var %in% names(weather_df)) {
+          mx <- weather_df[[modx_var]]
+          mx <- mx[!is.na(mx)]
+          if (length(mx) > 0) {
+            if (is.numeric(mx)) {
+              u <- sort(unique(mx))
+              if (length(u) <= 5) {
+                modx_vals <- u
+              } else {
+                m <- mean(mx); s <- stats::sd(mx)
+                modx_vals <- c(m - s, m, m + s)
+              }
+            } else {
+              lvls <- if (is.factor(mx)) levels(droplevels(mx))
+                      else sort(unique(as.character(mx)))
+              num_try <- suppressWarnings(as.numeric(lvls))
+              modx_vals <- if (all(!is.na(num_try))) num_try
+                           else seq_along(lvls) - 1L
+            }
+          }
+        }
+
+        # Pair main rows with their matching interaction rows by bin id + tau.
+        plot_data$.bin_id <- main_part
+        main_rows <- plot_data[!is_int_row, , drop = FALSE]
+        int_rows  <- plot_data[ is_int_row, , drop = FALSE]
+
+        combined <- do.call(rbind, lapply(modx_vals, function(v) {
+          do.call(rbind, lapply(seq_len(nrow(main_rows)), function(j) {
+            mr <- main_rows[j, , drop = FALSE]
+            ir <- int_rows[int_rows$.bin_id == mr$.bin_id &
+                             int_rows$tau == mr$tau, , drop = FALSE]
+            ie  <- if (nrow(ir) > 0) ir$estimate[1]  else 0
+            ise <- if (nrow(ir) > 0) ir$std.error[1] else 0
+            effect <- mr$estimate + v * ie
+            se     <- sqrt(mr$std.error^2 + v^2 * ise^2)
+            data.frame(
+              tau       = mr$tau,
+              bin_id    = mr$.bin_id,
+              bin_label = coef_label(mr$.bin_id, label_fun),
+              modx_val  = v,
+              estimate  = effect,
+              std.error = se,
+              conf.low  = effect - 1.96 * se,
+              conf.high = effect + 1.96 * se,
+              stringsAsFactors = FALSE
+            )
+          }))
+        }))
+
+        modx_lab_print <- modx_lab %||% (modx_var %||% "moderator")
+        is_binary <- length(modx_vals) == 2 && all(modx_vals %in% c(0, 1))
+        combined$modx_label <- if (is_binary)
+          paste0(modx_lab_print, " = ", combined$modx_val)
+        else
+          paste0(modx_lab_print, " = ", round(combined$modx_val, 2))
+        combined$modx_label <- factor(
+          combined$modx_label,
+          levels = unique(combined$modx_label[order(combined$modx_val)])
+        )
+
+        # coef_label() is scalar — vectorise over each unique bin id so that
+        # multi-bin (binned) predictors produce one facet per bin. Sort by
+        # parsed numeric lower bound so negative ranges aren't ordered
+        # lexicographically (e.g. -1.2 must come before -0.4).
+        bin_ids_raw <- unique(main_rows$.bin_id)
+        .bin_lower <- function(b) {
+          s <- sub(paste0("^", pred_esc, "[\\[\\(]"), "", b)
+          suppressWarnings(as.numeric(sub("^([^,]+),.*", "\\1", s)))
+        }
+        ord <- order(.bin_lower(bin_ids_raw))
+        # NA lowers (non-binned / unparseable terms) keep their first-seen
+        # order at the front.
+        bin_ids_ordered <- bin_ids_raw[ord]
+        bin_levels <- vapply(
+          bin_ids_ordered,
+          function(b) coef_label(b, label_fun),
+          character(1)
+        )
+        combined$bin_label <- factor(combined$bin_label, levels = bin_levels)
+        n_bins <- length(bin_levels)
+
+        p <- ggplot2::ggplot(
+          combined,
+          ggplot2::aes(x = tau, y = estimate,
+                       colour = modx_label, fill = modx_label)
+        ) +
+          ggplot2::geom_hline(yintercept = 0, linetype = "dashed",
+                              colour = "grey60") +
+          ggplot2::geom_ribbon(
+            ggplot2::aes(ymin = conf.low, ymax = conf.high),
+            alpha = 0.15, colour = NA
+          ) +
+          ggplot2::geom_line(linewidth = 0.9) +
+          ggplot2::geom_point(size = 2) +
+          ggplot2::scale_x_continuous(breaks = taus,
+                                      labels = scales::percent_format(1)) +
+          ggplot2::scale_colour_brewer(palette = "Set1",
+                                       name = modx_lab_print) +
+          ggplot2::scale_fill_brewer(palette = "Set1",
+                                     name = modx_lab_print) +
+          ggplot2::labs(
+            subtitle = paste("Effect of", pred_lab,
+                            "across the welfare distribution"),
+            x       = "Welfare quantile",
+            y       = "UQR coefficient",
+            caption = "Ribbon = 95% CI (cov(main, interaction) omitted)"
+          ) +
+          theme_wise() +
+          ggplot2::theme(
+            legend.position    = "bottom",
+            panel.border       = ggplot2::element_blank(),
+            strip.background   = ggplot2::element_blank(),
+            plot.subtitle      = ggplot2::element_text(face = "bold",
+                                                       hjust = 0.5, size = 11),
+            plot.caption       = ggplot2::element_text(size = 9,
+                                                       colour = "grey40",
+                                                       hjust = 0),
+            panel.grid.minor   = ggplot2::element_blank(),
+            axis.text          = ggplot2::element_text(size = 9),
+            axis.line.x.bottom = ggplot2::element_blank(),
+            axis.line.y.left   = ggplot2::element_blank()
+          )
+
+        if (n_bins > 1) {
+          p <- p + ggplot2::facet_wrap(~ bin_label, scales = "free_y",
+                                       ncol = 2)
+        }
+        p
+      }
+    }, error = function(e) blank_plot(paste0("RIF effect plot error: ", conditionMessage(e)))))
+  }
 
   pred_lab <- label_fun(pred_var)
   pred_x_lab <- paste0(pred_var, " (", pred_lab, ")")
@@ -344,17 +1023,7 @@ make_weather_effect_plot <- function(fit, pred_var, interaction_terms, is_binned
   )
   y_lab <- label_fun(y_var_name)
 
-  mf <- tryCatch(
-    as.data.frame(stats::model.matrix(fit)),
-    error = function(e) tryCatch(stats::model.frame(fit), error = function(e2) NULL)
-  )
-
-  blank_plot <- function(msg) {
-    ggplot2::ggplot() +
-      ggplot2::annotate("text", x = 0.5, y = 0.5, label = msg,
-                        size = 3.5, color = "grey40", hjust = 0.5, vjust = 0.5) +
-      ggplot2::theme_void()
-  }
+  mf <- mm_of(fit)
 
   # --- Resolve pred columns (exact or binned prefix match) ------------------
   pred_esc <- gsub("([\\[\\]\\(\\)\\^\\$\\.\\*\\+\\?])", "\\\\\\1", pred_var)
@@ -370,7 +1039,7 @@ make_weather_effect_plot <- function(fit, pred_var, interaction_terms, is_binned
   }
 
   if (!length(pred_cols))
-    return(blank_plot(paste0("'", pred_cols, "' not found in model frame.")))
+    return(blank_plot(paste0("'", pred_var, "' not found in model frame.")))
 
   # ========================================================================= #
   # BINNED PATH                                                               #
@@ -380,8 +1049,9 @@ make_weather_effect_plot <- function(fit, pred_var, interaction_terms, is_binned
       if (!requireNamespace("fixest", quietly = TRUE))
         return(blank_plot("Package 'fixest' is required."))
 
-      mm <- as.data.frame(stats::model.matrix(fit))
-      ct <- as.data.frame(fixest::coeftable(fit, se = "hetero"))
+      mm <- mm_of(fit)
+      if (is.null(mm)) return(blank_plot("Model matrix unavailable."))
+      ct <- .fixest_coeftable(fit)
       ct$term <- rownames(ct)
 
       bin_cols <- grep(paste0("^", pred_esc, "[\\[\\(]"), names(mm), value = TRUE)
@@ -394,7 +1064,16 @@ make_weather_effect_plot <- function(fit, pred_var, interaction_terms, is_binned
         drop = FALSE
       ]
 
-      bins_df <- data.frame(term = sort(bin_cols), stringsAsFactors = FALSE)
+      # Sort bin columns by parsed numeric lower bound. Alphabetical sort
+      # breaks for negative ranges (e.g. "(-0.4," < "(-0.6," < "(-1.2,"
+      # lexicographically but the desired numeric order is the reverse).
+      .bin_lower <- function(b) {
+        s <- sub(paste0("^", pred_esc, "[\\[\\(]"), "", b)
+        suppressWarnings(as.numeric(sub("^([^,]+),.*", "\\1", s)))
+      }
+      bin_cols <- bin_cols[order(.bin_lower(bin_cols))]
+
+      bins_df <- data.frame(term = bin_cols, stringsAsFactors = FALSE)
       bins_df <- dplyr::left_join(bins_df, ct_main, by = "term")
       bins_df$Estimate[is.na(bins_df$Estimate)] <- 0
       bins_df$`Std. Error`[is.na(bins_df$`Std. Error`)] <- 0
@@ -411,18 +1090,21 @@ make_weather_effect_plot <- function(fit, pred_var, interaction_terms, is_binned
       }
 
       # Rebuild full table with all bins; missing coefficient => omitted reference (0 effect)
-      bins_df <- data.frame(term = sort(bin_cols), stringsAsFactors = FALSE)
+      bins_df <- data.frame(term = bin_cols, stringsAsFactors = FALSE)
       bins_df <- dplyr::left_join(bins_df, ct_main, by = "term")
       bins_df$Estimate[is.na(bins_df$Estimate)] <- 0
       bins_df$`Std. Error`[is.na(bins_df$`Std. Error`)] <- 0
       bins_df$bin_index <- seq_len(nrow(bins_df))
       bins_df$bin_label <- bins_df$term
 
-      # Detect moderator (if any)
+      # Detect moderator (if any). Use word-boundary regex so short pred_var
+      # names (e.g. "r") aren't matched as substrings inside other variable
+      # names like "urban" — which would pick the wrong moderator.
       modx_var <- NULL
       modx_lab <- NULL
       if (length(interaction_terms) > 0) {
-        mt <- interaction_terms[grepl(pred_var, interaction_terms, fixed = TRUE)]
+        pv_pat <- paste0("\\b", pred_esc, "\\b")
+        mt <- interaction_terms[grepl(pv_pat, interaction_terms)]
         if (length(mt) > 0) {
           parts <- strsplit(mt[1], ":")[[1]]
           modx_var <- parts[parts != pred_var][1]
@@ -445,14 +1127,14 @@ make_weather_effect_plot <- function(fit, pred_var, interaction_terms, is_binned
             ggplot2::geom_line(ggplot2::aes(group = 1), colour = "steelblue", linewidth = 0.6) +
             ggplot2::scale_x_continuous(breaks = bins_df$bin_index, labels = bins_df$bin_label) +
             ggplot2::labs(
-              title = paste("Effect of", pred_lab, "bins on", y_lab),
+              subtitle = paste("Effect of", pred_lab, "bins on", y_lab),
               x = pred_x_lab,
               y = paste("Effect on", y_lab),
               caption = omitted_note
             ) +
-            ggplot2::theme_minimal(base_size = 14) +
+            theme_wise() +
             ggplot2::theme(
-              plot.title = ggplot2::element_text(face = "bold", hjust = 0.5, size = 11),
+              plot.subtitle = ggplot2::element_text(face = "bold", hjust = 0.5, size = 11),
               plot.caption = ggplot2::element_text(hjust = 0, size = 9, colour = "grey40"),
               axis.text.x = ggplot2::element_text(angle = 90, hjust = 1, vjust = 0.5)
             )
@@ -527,14 +1209,14 @@ make_weather_effect_plot <- function(fit, pred_var, interaction_terms, is_binned
         ggplot2::scale_colour_brewer(palette = "Set1", name = modx_lab) +
         ggplot2::scale_x_continuous(breaks = bins_df$bin_index, labels = bins_df$bin_label) +
         ggplot2::labs(
-          title = paste("Effect of", pred_lab, "bins by", modx_lab),
+          subtitle = paste("Effect of", pred_lab, "bins by", modx_lab),
           x = pred_x_lab,
           y = paste("Effect on", y_lab),
           caption = omitted_note
         ) +
-        ggplot2::theme_minimal(base_size = 14) +
+        theme_wise() +
         ggplot2::theme(
-          plot.title = ggplot2::element_text(face = "bold", hjust = 0.5, size = 11),
+          plot.subtitle = ggplot2::element_text(face = "bold", hjust = 0.5, size = 11),
           plot.caption = ggplot2::element_text(hjust = 0, size = 9, colour = "grey40"),
           legend.position = "bottom",
           axis.text.x = ggplot2::element_text(angle = 90, hjust = 1, vjust = 0.5)
@@ -569,9 +1251,10 @@ make_weather_effect_plot <- function(fit, pred_var, interaction_terms, is_binned
     }
 
     p <- tryCatch({
-      mm     <- as.data.frame(stats::model.matrix(fit))
+      mm     <- mm_of(fit)
+      if (is.null(mm)) return(blank_plot("Model matrix unavailable."))
       betas  <- stats::coef(fit)
-      vcov_m <- stats::vcov(fit)
+      vcov_m <- .fixest_vcov(fit)
       n_grid <- 50L
 
       # Manual prediction: X_new %*% beta, SE via delta method sqrt(diag(X V X'))
@@ -614,8 +1297,12 @@ make_weather_effect_plot <- function(fit, pred_var, interaction_terms, is_binned
         new_data[[pred_var]] <- grid$.pred
         new_data[[modx_var]] <- grid$.modx
 
+        # Recompute every interaction column from its parts. new_data already
+        # carries each interaction column at its sample mean (from
+        # other_means), so the previous `!nm %in% names(new_data)` guard
+        # left them stale and the predicted slope for pred_var was wrong.
         for (nm in colnames(mm)) {
-          if (grepl(":", nm, fixed = TRUE) && !nm %in% names(new_data)) {
+          if (grepl(":", nm, fixed = TRUE)) {
             parts <- strsplit(nm, ":")[[1]]
             if (all(parts %in% names(new_data)))
               new_data[[nm]] <- Reduce(`*`, new_data[parts])
@@ -649,19 +1336,29 @@ make_weather_effect_plot <- function(fit, pred_var, interaction_terms, is_binned
           ggplot2::scale_colour_brewer(palette = "Set1", name = modx_lab) +
           ggplot2::scale_fill_brewer(palette = "Set1", name = modx_lab) +
           ggplot2::labs(
-            title = paste("Impact of", pred_lab, "by", modx_lab),
+            subtitle = paste("Impact of", pred_lab, "by", modx_lab),
             x     = pred_x_lab,
             y     = paste("Predicted", y_lab)
           ) +
-          ggplot2::theme_minimal(base_size = 14) +
+          theme_wise() +
           ggplot2::theme(
-            plot.title      = ggplot2::element_text(face = "bold", hjust = 0.5, size = 11),
+            plot.subtitle      = ggplot2::element_text(face = "bold", hjust = 0.5, size = 11),
             legend.position = "bottom"
           )
 
       } else {
         new_data             <- as.data.frame(lapply(other_means, rep, times = length(x_seq)))
         new_data[[pred_var]] <- x_seq
+
+        # Recompute interaction columns from their parts so the slope of
+        # pred_var properly reflects β_main + β_int * mean(modx).
+        for (nm in colnames(mm)) {
+          if (grepl(":", nm, fixed = TRUE)) {
+            parts <- strsplit(nm, ":")[[1]]
+            if (all(parts %in% names(new_data)))
+              new_data[[nm]] <- Reduce(`*`, new_data[parts])
+          }
+        }
         if ("(Intercept)" %in% colnames(mm)) new_data[["(Intercept)"]] <- 1
 
         preds        <- fixest_predict_manual(new_data)
@@ -675,13 +1372,13 @@ make_weather_effect_plot <- function(fit, pred_var, interaction_terms, is_binned
           ) +
           ggplot2::geom_line(colour = "steelblue", linewidth = 0.9) +
           ggplot2::labs(
-            title = paste("Predicted", y_lab, "vs", pred_lab),
+            subtitle = paste("Predicted", y_lab, "vs", pred_lab),
             x     = pred_x_lab,
             y     = paste("Predicted", y_lab)
           ) +
-          ggplot2::theme_minimal(base_size = 14) +
+          theme_wise() +
           ggplot2::theme(
-            plot.title = ggplot2::element_text(face = "bold", hjust = 0.5, size = 11)
+            plot.subtitle = ggplot2::element_text(face = "bold", hjust = 0.5, size = 11)
           )
       }
     },
@@ -707,7 +1404,113 @@ make_regtable <- function(fit1, fit2, fit3,
                           interaction_terms = character(0),
                           label_fun         = identity,
                           engine            = "fixest",
-                          is_logistic       = FALSE) {
+                          is_logistic       = FALSE,
+                          rif_grid          = NULL) {
+
+  # --- RIF branch: quantile coefficient table --------------------------------
+  if (identical(engine, "rif") && !is.null(rif_grid)) {
+    return(tryCatch({
+      grid3 <- rif_grid[rif_grid$model == 3L, ]
+      taus  <- sort(unique(grid3$tau))
+      terms <- unique(grid3$term)
+
+      # Build pivot: rows = terms, columns = quantiles
+      pv_fn <- function(grid_row) {
+        est <- formatC(grid_row$estimate, format = "f", digits = 3)
+        pv  <- grid_row$p.value
+        stars <- ifelse(pv < 0.001, "***",
+                 ifelse(pv < 0.01,  "**",
+                 ifelse(pv < 0.05,  "*",
+                 ifelse(pv < 0.1,   "\u2020", ""))))
+        se <- formatC(grid_row$std.error, format = "f", digits = 3)
+        list(est = paste0(est, stars), se = paste0("(", se, ")"))
+      }
+
+      # CSS
+      css <- "
+        .rif-table { border-collapse:collapse; font-family:'Times New Roman',Times,serif; font-size:13px; margin:20px 0; width:100%; max-width:900px; }
+        .rif-table th, .rif-table td { padding:2px 10px; text-align:center; }
+        .rif-table th { font-weight:normal; border-bottom:1px solid #000; }
+        .rif-table .topline { border-top:2px solid #000; }
+        .rif-table .var-name { text-align:left; font-style:italic; }
+        .rif-table .se-row td { color:#555; }
+        .rif-table .stat-label { text-align:left; }
+      "
+
+      tau_labels <- paste0("\u03C4=", formatC(taus, format = "f", digits = 1))
+      header <- paste0(
+        "<tr class='topline'>",
+        "<th style='text-align:left; border-top:2px solid #000; border-bottom:1px solid #000;'></th>",
+        paste(sprintf("<th style='border-top:2px solid #000; border-bottom:1px solid #000;'>%s</th>", tau_labels), collapse = ""),
+        "</tr>"
+      )
+
+      body_rows <- ""
+      for (v in terms) {
+        est_cells <- ""
+        se_cells  <- ""
+        for (tau in taus) {
+          row <- grid3[grid3$term == v & grid3$tau == tau, ]
+          if (nrow(row) == 1) {
+            pv <- pv_fn(row)
+            est_cells <- paste0(est_cells, "<td>", pv$est, "</td>")
+            se_cells  <- paste0(se_cells,  "<td>", pv$se,  "</td>")
+          } else {
+            est_cells <- paste0(est_cells, "<td></td>")
+            se_cells  <- paste0(se_cells,  "<td></td>")
+          }
+        }
+        body_rows <- paste0(body_rows,
+          "<tr><td class='var-name'>", htmltools::htmlEscape(v), "</td>", est_cells, "</tr>",
+          "<tr class='se-row'><td></td>", se_cells, "</tr>"
+        )
+      }
+
+      # Per-quantile fit stats from model 3 (fit3 is fixest_multi)
+      stats_rows <- ""
+      if (inherits(fit3, "fixest_multi") || is.list(fit3)) {
+        nobs_vals <- vapply(seq_along(taus), function(i) {
+          tryCatch(formatC(stats::nobs(fit3[[i]]), format = "d", big.mark = ","),
+                   error = function(e) "")
+        }, character(1))
+        r2_vals <- vapply(seq_along(taus), function(i) {
+          tryCatch(formatC(fixest::r2(fit3[[i]], "wr2"), format = "f", digits = 3),
+                   error = function(e) tryCatch(formatC(fixest::r2(fit3[[i]], "r2"), format = "f", digits = 3),
+                                                error = function(e2) ""))
+        }, character(1))
+
+        stats_rows <- paste0(
+          "<tr><td style='border-top:1px solid #000;'></td>",
+          paste(rep("<td style='border-top:1px solid #000;'></td>", length(taus)), collapse = ""),
+          "</tr>",
+          "<tr><td class='stat-label'>Observations</td>",
+          paste(sprintf("<td>%s</td>", nobs_vals), collapse = ""),
+          "</tr>",
+          "<tr><td class='stat-label'>Within R\u00B2</td>",
+          paste(sprintf("<td>%s</td>", r2_vals), collapse = ""),
+          "</tr>",
+          "<tr><td style='border-bottom:2px solid #000;'></td>",
+          paste(rep("<td style='border-bottom:2px solid #000;'></td>", length(taus)), collapse = ""),
+          "</tr>"
+        )
+      }
+
+      note <- paste0("<tr><td colspan='", length(taus) + 1,
+                     "' style='text-align:left; font-size:11px; padding-top:6px; color:#555;'>",
+                     "Full specification (FE + controls). ",
+                     "\u2020 p&lt;0.1, * p&lt;0.05, ** p&lt;0.01, *** p&lt;0.001</td></tr>")
+
+      html <- paste0(
+        "<style>", css, "</style>",
+        "<table class='rif-table'>",
+        "<thead>", header, "</thead>",
+        "<tbody>", body_rows, stats_rows, note, "</tbody>",
+        "</table>"
+      )
+
+      htmltools::HTML(html)
+    }, error = function(e) htmltools::tags$p(paste("RIF table error:", conditionMessage(e)))))
+  }
 
   if (!inherits(fit1, "fixest") || !inherits(fit2, "fixest") || !inherits(fit3, "fixest")) {
     return(htmltools::tags$p("All models must be fixest objects."))
@@ -715,7 +1518,7 @@ make_regtable <- function(fit1, fit2, fit3,
 
   # --- Extract coefficients and SEs -----------------------------------------
   extract_coefs <- function(fit) {
-    ct  <- summary(fit)$coeftable
+    ct  <- .fixest_coeftable(fit)
     nms <- rownames(ct)
     cf  <- ct[, 1]
     se  <- ct[, 2]
@@ -744,7 +1547,7 @@ make_regtable <- function(fit1, fit2, fit3,
   }
 
   css <- "
-    .aer-table { border-collapse:collapse; font-family:'Times New Roman',Times,serif; font-size:14px; margin:20px 0; }
+    .aer-table { border-collapse:collapse; font-family:'Times New Roman',Times,serif; font-size:14px; margin:20px 0; width:100%; max-width:900px; }
     .aer-table th, .aer-table td { padding:2px 14px; text-align:center; }
     .aer-table th { font-weight:normal; border-bottom:1px solid #000; }
     .aer-table .topline { border-top:2px solid #000; }
@@ -873,7 +1676,7 @@ plot_resid_weather <- function(model, haz_var, weather_df, x_label = haz_var) {
   df <- tryCatch(stats::model.frame(model), error = function(e) NULL)
 
   if (is.null(df) || !haz_var %in% names(df)) {
-    mm <- tryCatch(as.data.frame(stats::model.matrix(model)), error = function(e) NULL)
+    mm <- resolve_model_matrix(model)
     if (is.null(mm)) return(invisible(NULL))
 
     if (haz_var %in% names(mm)) {
@@ -918,7 +1721,7 @@ plot_resid_weather <- function(model, haz_var, weather_df, x_label = haz_var) {
       ggplot2::geom_hline(yintercept = 0, color = "red", linetype = "dotted") +
       ggplot2::geom_jitter(width = 0.15, alpha = 0.12) +
       ggplot2::stat_summary(fun = mean, geom = "point", color = "orange", size = 2.5) +
-      ggplot2::theme_minimal(base_size = 14) +
+      theme_wise() +
       ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 90, hjust = 1, vjust = 0.5)) +
       ggplot2::labs(x = stringr::str_wrap(x_label, 40), y = "Residuals")
   } else {
@@ -928,7 +1731,7 @@ plot_resid_weather <- function(model, haz_var, weather_df, x_label = haz_var) {
       ggplot2::geom_point(alpha = 0.1) +
       ggplot2::geom_hline(yintercept = 0, color = "red", linetype = "dotted") +
       ggplot2::stat_summary_bin(fun = mean, bins = 20, color = "orange", size = 2, geom = "point") +
-      ggplot2::theme_minimal(base_size = 14) +
+      theme_wise() +
       ggplot2::labs(x = stringr::str_wrap(x_label, 40), y = "Residuals")
   }
 }
@@ -983,7 +1786,7 @@ plot_pred_vs_actual <- function(model, is_logistic, outcome_label = "outcome") {
       ggplot2::scale_fill_manual(values = c("Survey" = "steelblue", "Predicted" = "orange")) +
       ggplot2::labs(x = stringr::str_wrap(outcome_label, 40),
                     y = "Share of households (%)") +
-      ggplot2::theme_minimal()
+      theme_wise()
 
   } else {
     predicted  <- tryCatch(
@@ -1005,8 +1808,8 @@ plot_pred_vs_actual <- function(model, is_logistic, outcome_label = "outcome") {
       ggplot2::geom_text(ggplot2::aes(label = sprintf("%.1f%%", .data$Percent)),
                          vjust = 1) +
       ggplot2::scale_fill_gradient(low = "lightblue", high = "steelblue") +
-      ggplot2::labs(title = "Confusion Matrix", x = "Actual", y = "Predicted") +
-      ggplot2::theme_minimal() +
+      ggplot2::labs(x = "Actual", y = "Predicted") +
+      theme_wise() +
       ggplot2::theme(legend.position = "none")
   }
 }
@@ -1030,6 +1833,23 @@ calc_fit_stats <- function(model, is_logistic, engine = "fixest") {
     x <- suppressWarnings(as.numeric(x))
     if (is.na(x)) return(NA_character_)
     as.character(round(x, digits))
+  }
+
+  # RIF: per-quantile R² table
+  if (identical(engine, "rif") && (inherits(model, "fixest_multi") || is.list(model))) {
+    taus <- seq(0.1, 0.9, by = 0.1)
+    n <- min(length(model), length(taus))
+    rows <- lapply(seq_len(n), function(i) {
+      m <- model[[i]]
+      data.frame(
+        Statistic = paste0("\u03C4 = ", formatC(taus[i], format = "f", digits = 1)),
+        Nobs = tryCatch(format(stats::nobs(m), big.mark = ","), error = function(e) ""),
+        R2 = tryCatch(fmt_num(fixest::r2(m, "r2")), error = function(e) ""),
+        `Within R2` = tryCatch(fmt_num(fixest::r2(m, "wr2")), error = function(e) ""),
+        stringsAsFactors = FALSE, check.names = FALSE
+      )
+    })
+    return(do.call(rbind, rows))
   }
 
   nobs_val <- tryCatch(format(stats::nobs(model), big.mark = ","),
@@ -1070,12 +1890,24 @@ calc_fit_stats <- function(model, is_logistic, engine = "fixest") {
 #'
 #' @export
 plot_relaimpo <- function(model, var_info = NULL) {
-  mm    <- stats::model.matrix(model)
+  mm    <- resolve_model_matrix(model)
+  if (is.null(mm)) {
+    return(
+      ggplot2::ggplot() +
+        ggplot2::annotate("text", x = 0.5, y = 0.5,
+                          label = "Model matrix unavailable for importance plot.",
+                          size = 3.5, color = "grey40", hjust = 0.5) +
+        ggplot2::theme_void()
+    )
+  }
   coefs <- stats::coef(model)
 
   keep <- names(coefs) != "(Intercept)"
   beta <- coefs[keep]
 
+  # resolve_model_matrix() returns a data frame; subset by the coef names
+  # present (a slimmed/cached matrix carries the same columns as model.matrix).
+  beta <- beta[names(beta) %in% names(mm)]
   X <- mm[, names(beta), drop = FALSE]
   sd_x <- apply(X, 2, stats::sd, na.rm = TRUE)
   sd_x[is.na(sd_x)] <- 0
@@ -1102,5 +1934,5 @@ plot_relaimpo <- function(model, var_info = NULL) {
       x = "",
       y = "Standardized coefficient importance"
     ) +
-    ggplot2::theme_minimal(base_size = 14)
+    theme_wise()
 }
