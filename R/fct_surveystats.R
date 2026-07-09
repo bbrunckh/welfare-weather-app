@@ -230,7 +230,7 @@ plot_interview_dates <- function(plot_data) {
   ) +
     ggplot2::geom_col(width = 0.7) +
     ggplot2::scale_x_discrete(drop = FALSE) +
-    ggplot2::theme_minimal(base_size = 12) +
+    theme_wise() +
     ggplot2::labs(
       x = NULL, y = "Households", fill = "Survey wave"
     ) +

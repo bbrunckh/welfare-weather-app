@@ -321,7 +321,7 @@ plot_pointrange_climate <- function(bands_tbl,
     ggplot2::scale_x_discrete(limits = ordered_levels,
                               labels = x_label_map, drop = FALSE) +
     ggplot2::labs(title = NULL, x = NULL, y = x_label) +
-    ggplot2::theme_minimal(base_size = 13) +
+    theme_wise() +
     ggplot2::theme(
       panel.grid.major.x = ggplot2::element_blank(),
       panel.grid.minor.x = ggplot2::element_blank(),
@@ -614,7 +614,7 @@ plot_timeseries_spaghetti <- function(ts_tbl,
   }
   p +
     ggplot2::labs(x = "Simulation year", y = x_label) +
-    ggplot2::theme_minimal(base_size = 12) +
+    theme_wise() +
     ggplot2::theme(legend.position = "bottom")
 }
 
@@ -694,7 +694,7 @@ plot_variance_contribution <- function(var_tbl) {
       x = NULL,
       y = "Standard deviation (outcome units)"
     ) +
-    ggplot2::theme_minimal(base_size = 12) +
+    theme_wise() +
     ggplot2::theme(
       legend.position    = "bottom",
       panel.grid.major.y = ggplot2::element_blank(),
@@ -908,8 +908,35 @@ enhance_exceedance <- function(curves_tbl,
                          inherit.aes = FALSE, show.legend = FALSE)
   }
 
+  # Policy accent: overlay red diamond markers (matching the pointrange
+  # chart's policy indicator) at evenly spaced points along each Policy
+  # line, so the policy-vs-baseline distinction reads consistently across
+  # both Step 3 Results charts.
+  policy_marker_df <- NULL
+  if (has_source) {
+    policy_df <- agg_df[agg_df$source == "Policy", , drop = FALSE]
+    if (nrow(policy_df) > 0L) {
+      policy_marker_df <- policy_df |>
+        dplyr::group_by(.data$line_id) |>
+        dplyr::filter(dplyr::row_number() %% max(1L, floor(dplyr::n() / 6)) == 0) |>
+        dplyr::ungroup()
+    }
+  }
+
   p <- p +
-    ggplot2::geom_line(linewidth = 0.9) +
+    ggplot2::geom_line(linewidth = 0.9)
+
+  if (!is.null(policy_marker_df) && nrow(policy_marker_df) > 0L) {
+    p <- p + ggplot2::geom_point(
+      data    = policy_marker_df,
+      mapping = ggplot2::aes(x = .data$central, y = .data$exceed_prob,
+                             group = .data$line_id),
+      shape       = 23, fill = "#d32f2f", colour = "black", size = 2,
+      stroke      = 0.8, inherit.aes = FALSE, show.legend = FALSE
+    )
+  }
+
+  p <- p +
     ggplot2::geom_vline(
       xintercept = hist_mean, linetype = "dotted",
       colour = "black", linewidth = 0.5
@@ -952,14 +979,11 @@ enhance_exceedance <- function(curves_tbl,
   }
   p <- p +
     ggplot2::labs(
-      title = "Exceedance probability by climate scenario",
-      x     = x_label,
-      y     = "Annual exceedance probability"
+      x = x_label,
+      y = "Annual exceedance probability"
     ) +
-    ggplot2::theme_minimal() +
+    theme_wise() +
     ggplot2::theme(
-      plot.title      = ggplot2::element_text(face = "bold", size = 12,
-                                              hjust = 0.5),
       legend.position = "bottom"
     ) +
     ggplot2::coord_flip()

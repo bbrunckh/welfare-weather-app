@@ -16,12 +16,23 @@ mod_2_simulation_ui <- function(id) {
       width = 360,
       mod_2_01_weathersim_ui(ns("weathersim")),
       shiny::hr(),
-      shiny::actionButton(
-        ns("clear_scenarios"),
-        label = "Clear all scenarios",
-        icon  = shiny::icon("trash"),
-        width = "100%",
-        class = "btn-outline-danger"
+      shiny::div(
+        style = "display:flex; align-items:center; gap:0.4rem;",
+        shiny::actionButton(
+          ns("clear_scenarios"),
+          label = "Clear simulation results",
+          icon  = shiny::icon("trash"),
+          width = "100%",
+          class = "btn-outline-danger"
+        ),
+        info_popover(
+          title = "Clear simulation results",
+          shiny::p(paste(
+            "Removes all saved future-scenario runs and the historical",
+            "baseline from this session. Your settings are kept —",
+            "re-run the simulation to regenerate results."
+          ))
+        )
       )
     ),
     h4("What welfare is expected given historical weather conditions? In future climate scenarios?",
@@ -38,10 +49,19 @@ mod_2_simulation_ui <- function(id) {
           p(paste(
             "Configure historical and future weather scenarios in the sidebar,",
             "then click 'Run simulation'.",
-            "Results and diagnostics will appear here as new tabs."
-          ))
+            "Outputs: outcome distributions by climate scenario, exceedance",
+            "probabilities, and simulation diagnostics will appear here as new tabs."
+          )),
+          p(
+            class = "text-muted small mb-0",
+            paste(
+              "Simulations for large surveys (tens of thousands of households)",
+              "can take several minutes to run; charts take a few seconds to",
+              "update after changing filters."
+            )
+          )
         ),
-        withMathJax(includeMarkdown(system.file("app/www/equation2.md", package = "wiseapp")))
+        welfare_equation_ui(predicted = TRUE)
       )
     )
   )

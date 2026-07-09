@@ -105,8 +105,8 @@ plot_weather_dist <- function(df, hv, label, cont_binned) {
         alpha    = 0.85
       ) +
       ggplot2::scale_fill_brewer(palette = "Set2", name = NULL) +
-      ggplot2::theme_minimal() +
-      ggplot2::labs(title = "Distribution of bins", x = x_label, y = "Count") +
+      theme_wise() +
+      ggplot2::labs(x = x_label, y = "Count") +
       ggplot2::theme(
         axis.text.x     = ggplot2::element_text(angle = 45, hjust = 1),
         legend.position = "top",
@@ -178,7 +178,7 @@ plot_binscatter <- function(df, hv, hv_label = hv, y_var, y_label = y_var) {
     d$x <- as.factor(d$x)
 
     p <- ggplot2::ggplot(d, ggplot2::aes(x = .data$x, y = .data$y)) +
-      ggplot2::theme_minimal(base_size = 14) +
+      theme_wise() +
       ggplot2::theme(
         axis.text.x = ggplot2::element_text(angle = 90, hjust = 1, vjust = 0.5)
       ) +
@@ -209,7 +209,7 @@ plot_binscatter <- function(df, hv, hv_label = hv, y_var, y_label = y_var) {
   p <- ggplot2::ggplot(d, ggplot2::aes(x = .data$x, y = .data$y)) +
     ggplot2::geom_point(alpha = 0.10) +
     ggplot2::stat_summary_bin(fun = mean, bins = 20, color = "orange", size = 2, geom = "point") +
-    ggplot2::theme_minimal(base_size = 14) +
+    theme_wise() +
     ggplot2::labs(
       x = stringr::str_wrap(hv_label, 40),
       y = stringr::str_wrap(y_label, 40)

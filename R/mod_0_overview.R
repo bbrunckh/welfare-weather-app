@@ -25,8 +25,13 @@ mod_0_overview_ui <- function(id) {
         h1("Welcome to WISE-APP"),
         p(class = "hero-subtitle",
           "Weather Impact Simulation and Evaluation for Adaptation Policy and Planning"),
-        p("This tool helps you understand the relationship between welfare and weather."),
-        p("Follow the steps to run simulations and explore policy scenarios."),
+        p(paste(
+          "WISE-APP estimates how weather affects household welfare from",
+          "survey microdata, simulates welfare outcomes under historical",
+          "weather and future climate scenarios, and evaluates how policy",
+          "and adaptation measures change those outcomes."
+        )),
+        p("Work through the three steps below — each step builds on the previous one."),
 
         p(tags$a(
           icon("book-open"), "WISE-APP Documentation",
@@ -56,23 +61,27 @@ mod_0_overview_ui <- function(id) {
     step_card(
       "1", "Model welfare",
       paste(
-        "Derive the statistical relationship between weather and outcomes",
-        "of interest from microdata. The fitted model is the foundation for all",
-        "subsequent steps."
+        "Estimate the statistical relationship between weather and an",
+        "outcome of interest — such as household consumption, income, or",
+        "poverty status — from survey microdata. The fitted model is the",
+        "foundation for all subsequent steps."
       )
     ),
     step_card(
       "2", "Simulate welfare",
       paste(
-        "Apply the fitted model to historical and future climate scenarios",
-        "to produce a distribution of weather-driven outcomes."
+        "Apply the fitted model from Step 1 to historical weather and",
+        "future climate projections (CMIP6 scenarios) to produce",
+        "distributions of weather-driven welfare outcomes."
       )
     ),
     step_card(
       "3", "Policy scenarios",
       paste(
-        "Re-simulate outcomes under counterfactual policy settings to",
-        "quantify direct welfare gains and changes in climate resilience."
+        "Re-simulate welfare under counterfactual policies — social",
+        "protection, infrastructure, digital inclusion, labor market and",
+        "education measures — to quantify welfare gains and changes in",
+        "climate resilience against the Step 2 baseline."
       )
     )
   )

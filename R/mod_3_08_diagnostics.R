@@ -119,10 +119,15 @@ mod_3_08_diagnostics_server <- function(id,
 
     # ---- Transfer summary info box ------------------------------------------
 
-    output$transfer_summary_ui <- renderTable({
+    output$transfer_summary_ui <- DT::renderDT({
       d <- diag_data()
-      if (is.null(d) || is.list(d) && !is.null(d$status)) return(NULL)
-      data.frame(
+      if (is.null(d) || is.list(d) && !is.null(d$status)) {
+        return(DT::datatable(
+          data.frame(Message = "No transfer data available."),
+          rownames = FALSE, options = list(dom = "t")
+        ))
+      }
+      df <- data.frame(
         Type  = c(
           "Total transfer $ amount (population-level)",
           paste0("Per-", unit_word(plural = FALSE),
@@ -131,7 +136,11 @@ mod_3_08_diagnostics_server <- function(id,
         Value = c(d$transfer_sum, d$transfer_pp),
         stringsAsFactors = FALSE
       )
-    }, striped = TRUE, hover = TRUE, bordered = TRUE)
+      DT::datatable(
+        df, rownames = FALSE, class = "compact stripe",
+        options = list(dom = "t", ordering = FALSE)
+      )
+    })
 
     outputOptions(output, "transfer_summary_ui", suspendWhenHidden = FALSE)
 
@@ -210,7 +219,10 @@ mod_3_08_diagnostics_server <- function(id,
       tags <- lapply(vars, function(var) {
         shiny::div(
           style = "margin-bottom: 30px;",
-          shiny::h6(var, style = "margin-bottom: 8px; font-weight: 600;"),
+          shiny::h6(
+            paste0(toupper(substr(var, 1, 1)), substr(var, 2, nchar(var))),
+            style = "margin-bottom: 8px; font-weight: 600;"
+          ),
           shiny::plotOutput(ns(paste0("hist_", var)), height = "300px")
         )
       })
@@ -253,17 +265,17 @@ mod_3_08_diagnostics_server <- function(id,
           shiny::tabPanel(
             title = "Diagnostics",
             value = "diag_tab",
-            shiny::h4("Total SP Transfer Amount"),
-            shiny::tableOutput(ns("transfer_summary_ui")),
+            shiny::h4("Total social protection transfer amount"),
+            DT::DTOutput(ns("transfer_summary_ui")),
             shiny::div(style = "margin: 12px 0;"),
-            shiny::h4("Summary of Manipulated Variables"),
+            shiny::h4("Summary of manipulated variables"),
             shiny::tags$small(
               class = "text-muted",
               "Summary statistics (mean, SD) for variables changed by ",
               "policy adjustments."
             ),
             DT::DTOutput(ns("diag_summary_table")),
-            shiny::h4("Before/After Distributions"),
+            shiny::h4("Before/after distributions"),
             shiny::tags$small(
               class = "text-muted",
               "Kernel density plots comparing baseline (grey) vs. ",

@@ -139,8 +139,18 @@ mod_2_01_weathersim_ui <- function(id) {
       shiny::tags$hr(style = "margin: 6px 0;"),
 
       # -- Residual method ----------------------------------------------------
-      shiny::tags$h6("Simulation residuals",
-                     style = "font-weight:600; margin-bottom:4px;"),
+      shiny::tags$h6(
+        "Simulation residuals",
+        info_popover(
+          title = "Simulation residuals",
+          shiny::p(shiny::tags$b("original:"), " Recommended default: match each observation's own residual — assumes no changes due to changing hazards."),
+          shiny::p(shiny::tags$b("resample:"), " Secondary recommendation: randomly resample residuals from the model."),
+          shiny::p(shiny::tags$b("normal:"), " Caution: draw residuals from N(0, σ), which assumes normal tails and no heteroskedasticity."),
+          shiny::p(shiny::tags$b("none:"), " Diagnostic only: returns fitted values only. Not including residuals understates variance and, for any log-transformed variable, understates the mean."),
+          docs = TRUE
+        ),
+        style = "font-weight:600; margin-bottom:4px;"
+      ),
       shiny::radioButtons(
         inputId  = ns("residuals"),
         label    = NULL,
@@ -148,14 +158,8 @@ mod_2_01_weathersim_ui <- function(id) {
         selected = "original"
       ),
       shiny::helpText(
-        shiny::tags$b("original:"), " Recommended Default: match each observation\u2019s own residual -  assumes no changes due to changing hazards ",
-        shiny::tags$br(),
-        shiny::tags$b("resample:"), " Secondary Recommendation: randomly resample residuals from the model.",
-        shiny::tags$br(),
-        shiny::tags$b("normal:"), " Caution: draw residuals from N(0, \u03c3) which assumes normal tails and no heteroskedasticity",
-        shiny::tags$br(),
-        shiny::tags$b("none:"), " DIAGNOSTIC: return fitted values only. not including residuals understates variance and for any log-transformed variable will understate mean",
-        shiny::tags$br(),
+        "How simulated outcomes incorporate unexplained variation.",
+        " 'Original' is recommended.",
         style = "font-size:11px;"
       ),
 
@@ -163,11 +167,43 @@ mod_2_01_weathersim_ui <- function(id) {
       shiny::tags$hr(style = "margin: 6px 0;"),
 
       # -- Coefficient uncertainty -------------------------------------------
-      shiny::tags$h6("Model coefficient uncertainty",
-                     style = "font-weight:600; margin-bottom:4px;"),
+      shiny::tags$h6(
+        "Model coefficient uncertainty",
+        info_popover(
+          title = "Model coefficient uncertainty",
+          shiny::p(
+            "Checking this box incorporates uncertainty around the model",
+            "definition process itself, via the analytic delta method.",
+            "Disable to use point estimates only."
+          ),
+          shiny::p(
+            "By default, only coefficients on variables that change between",
+            "baseline and counterfactual contribute to the reported SE:",
+            "weather variables and their interactions in Step 2; weather plus",
+            "the policy-modified variables and their interactions in Step 3.",
+            "Under 'original' residuals, uncertainty on the unchanged covariates",
+            "cancels through the held-fixed residual term (additive-decomposition",
+            "SE). 'Include uncertainty on all covariates' propagates uncertainty",
+            "from all covariates instead — more conservative, but inconsistent",
+            "with the model's own additive-separability assumption. Has no",
+            "effect when residuals are not 'original'."
+          ),
+          shiny::p(
+            "Monte Carlo draws: coefficient uncertainty is propagated",
+            "analytically via the delta method for all standard aggregates",
+            "(mean, total, headcount, poverty gap, FGT2, Gini). The Monte Carlo",
+            "path is used only as a fallback for aggregates where the",
+            "delta-method gradient is unavailable or unstable (currently",
+            "'avg_poverty' with few poor households); the draws setting",
+            "controls how many coefficient draws that fallback uses."
+          ),
+          docs = TRUE
+        ),
+        style = "font-weight:600; margin-bottom:4px;"
+      ),
       shiny::helpText(
-        "Propagates the regression-fit covariance via the analytic delta method.",
-        " Disable to use point estimates only.",
+        "Incorporates uncertainty from the model estimation itself via the",
+        " analytic delta method.",
         style = "font-size:11px; color:#555; margin-top:2px; margin-bottom:8px;"
       ),
       shiny::conditionalPanel(
@@ -176,19 +212,6 @@ mod_2_01_weathersim_ui <- function(id) {
           inputId = ns("propagate_all_covariate_uncertainty"),
           label   = "Include uncertainty on all covariates",
           value   = FALSE
-        ),
-        shiny::helpText(
-          "By default (unchecked), only coefficients on variables that change",
-          " between baseline and counterfactual contribute to the reported SE:",
-          " weather variables and their interactions in Step 2; weather plus",
-          " the policy-modified variables and their interactions in Step 3.",
-          " Under 'original' residuals, uncertainty on the unchanged covariates",
-          " cancels through the held-fixed residual term (additive-decomposition",
-          " SE). Check to propagate uncertainty from all covariates —",
-          " more conservative, but inconsistent with the model's own additive-",
-          "separability assumption. Has no effect when residuals are not",
-          " 'original'.",
-          style = "font-size:11px; color:#555; margin-top:2px; margin-bottom:8px;"
         )
       ),
       shiny::checkboxInput(
@@ -203,15 +226,6 @@ mod_2_01_weathersim_ui <- function(id) {
         inputId = ns("sim_n"),
         label   = "Monte Carlo draws (S, fallback only)",
         value   = 150, min = 10, max = 1000, step = 10
-      ),
-      shiny::helpText(
-        "Coefficient uncertainty is propagated analytically via the delta method",
-        " for all standard aggregates (mean, total, headcount, poverty gap, FGT2,",
-        " Gini). The Monte Carlo path is used only as a fallback for aggregates",
-        " where the delta-method gradient is unavailable or unstable (currently",
-        " ‘avg_poverty’ with few poor households). S sets the number of",
-        " coefficient draws in that fallback.",
-        style = "font-size:11px; color:#555; margin-top:2px; margin-bottom:4px;"
       )
     ),
     shiny::tags$hr(style = "margin: 10px 0;"),

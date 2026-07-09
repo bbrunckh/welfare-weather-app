@@ -17,7 +17,19 @@ mod_2_03_diagnostics_ui <- function(id) {
 
     # ---- 1. Weather inputs panel -------------------------------------------
     shiny::wellPanel(
-      shiny::h4("Weather input distributions"),
+      shiny::h4(
+        "Weather input distributions",
+        info_popover(
+          title = "Weather input distributions",
+          shiny::p(shiny::tags$b("Grey fill = Full historical:"),
+            " all years at survey locations and months."),
+          shiny::p(shiny::tags$b("Black dashed = Regression input"),
+            " (shown when 'Include regression output' is selected above)."),
+          shiny::p(shiny::tags$b("Coloured lines = Future scenarios:"),
+            " solid = earliest simulation year, dashed = middle, dotted = latest."),
+          docs = TRUE
+        )
+      ),
       shiny::tags$div(
         style = "display:flex; align-items:flex-end; gap:12px; flex-wrap:wrap; margin-bottom:8px;",
         shiny::tags$div(style = "flex:3; min-width:200px;",
@@ -40,46 +52,43 @@ mod_2_03_diagnostics_ui <- function(id) {
       shiny::uiOutput(ns("diag_weather_log_ui")),
       shiny::tags$p(
         style = "font-size:11px; color:#666; margin-top:4px;",
-        shiny::tags$b("Grey fill = Full historical:"),
-        " all years at survey locations and months.",
-        shiny::tags$br(),
-        shiny::tags$b("Black dashed = Regression input"),
-        " (shown when 'Include regression output' is selected above).",
-        shiny::tags$br(),
-        shiny::tags$b("Coloured lines = Future scenarios:"),
-        " solid = earliest simulation year, dashed = middle, dotted = latest."
+        "Grey fill = historical; black dashed = regression input; coloured lines = future scenarios."
       )
     ),
 
     # ---- 2. Variance contribution panel ------------------------------------
     shiny::wellPanel(
-      shiny::h4("SD contribution by source of uncertainty"),
+      shiny::h4(
+        "SD contribution by source of uncertainty",
+        info_popover(
+          title = "SD contribution by source of uncertainty",
+          shiny::p(shiny::tags$b("Each segment"),
+            " is one source's standard deviation (square root of its variance",
+            " contribution), in outcome units. Labels show each source's share",
+            " of the bar's total length."),
+          shiny::p(shiny::tags$b("Note:"),
+            " variances (not SDs) add under independence, so the stacked total",
+            " is an upper bound on the true combined SD — read the bar as a",
+            " side-by-side decomposition of where uncertainty comes from, not",
+            " as a literal additive total."),
+          shiny::p(shiny::tags$b("Coefficient uncertainty"),
+            " = SD of the regression-fit per-outcome variance, averaged."),
+          shiny::p(shiny::tags$b("Inter-annual variability"),
+            " = SD of within-model year-to-year spread of the aggregate. This",
+            " characterises the spread of simulated years, not uncertainty",
+            " about the central tendency."),
+          shiny::p(shiny::tags$b("Inter-model spread"),
+            " (future scenarios only) = SD of across-model disagreement in",
+            " the per-model mean aggregate — uncertainty about the central",
+            " tendency arising from model choice."),
+          docs = TRUE
+        )
+      ),
       shiny::plotOutput(ns("variance_contribution_plot"), height = "320px"),
       shiny::tags$p(
         style = "font-size:11px; color:#666; margin-top:6px;",
-        shiny::tags$b("Each segment"),
-        " is one source's standard deviation (square root of its variance ",
-        "contribution), in outcome units. Labels show each source's share ",
-        "of the bar's total length.",
-        shiny::tags$br(),
-        shiny::tags$b("Note:"),
-        " variances (not SDs) add under independence, so the stacked total ",
-        "is an upper bound on the true combined SD — read the bar as a ",
-        "side-by-side decomposition of where uncertainty comes from, not ",
-        "as a literal additive total.",
-        shiny::tags$br(),
-        shiny::tags$b("Coefficient uncertainty"),
-        " = SD of the regression-fit per-outcome variance, averaged.",
-        shiny::tags$br(),
-        shiny::tags$b("Inter-annual variability"),
-        " = SD of within-model year-to-year spread of the aggregate. This ",
-        "characterises the spread of simulated years, not uncertainty ",
-        "about the central tendency.",
-        shiny::tags$br(),
-        shiny::tags$b("Inter-model spread"),
-        " (future scenarios only) = SD of across-model disagreement in ",
-        "the per-model mean aggregate — uncertainty about the central ",
-        "tendency arising from model choice."
+        "Each segment = one source's SD contribution (not strictly additive) — click ",
+        shiny::icon("circle-info"), " above for details."
       )
     )
   )
@@ -149,10 +158,7 @@ mod_2_03_diagnostics_server <- function(id,
       has_w  <- !is.null(hist_sim()$pipeline$weight)
       tog_on <- isTRUE(input$use_weights_diag)
       if (has_w && tog_on)
-        shiny::tags$p(
-          style = "font-size:11px; color:#2e7d32; margin:2px 0 6px 0;",
-          "✅ Survey weights found and applied (",
-          shiny::tags$code("weight"), ")")
+        NULL
       else if (has_w && !tog_on)
         shiny::tags$p(
           style = "font-size:11px; color:#e65100; margin:2px 0 6px 0;",

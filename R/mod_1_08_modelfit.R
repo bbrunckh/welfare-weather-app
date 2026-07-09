@@ -110,11 +110,11 @@ mod_1_08_modelfit_server <- function(id,
                              ggplot2::aes(x = value, y = Inf, label = tau),
                              vjust = 1.5, hjust = -0.1, size = 3, colour = "orange") +
           ggplot2::labs(
-            title = "Welfare distribution with estimated quantiles",
+            subtitle = "Welfare distribution with estimated quantiles",
             x = stringr::str_wrap(get_label(selected_outcome()$name), 40),
             y = "Share of households (%)"
           ) +
-          ggplot2::theme_minimal(base_size = 14)
+          theme_wise()
       } else {
         m <- rif_single_model()
         plot_pred_vs_actual(
@@ -150,14 +150,18 @@ mod_1_08_modelfit_server <- function(id,
       req(model_fit())
 
       tagList(
-        shiny::h4("Relative importance of predictors"),
-        shiny::plotOutput(ns("relaimpo")),
-        shiny::helpText(
-          "Importance is computed as |β| × sd(X), i.e. the absolute standardized coefficient.
-          This fast method works for both linear and logistic models and handles
-          interactions and many predictors robustly.",
-          style = "font-size: 12px;"
-        )
+        shiny::h4(
+          "Relative importance of predictors",
+          info_popover(
+            p(paste(
+              "Importance is computed as |β| × sd(X), i.e. the absolute",
+              "standardized coefficient. This fast method works for both",
+              "linear and logistic models and handles interactions and many",
+              "predictors robustly."
+            ))
+          )
+        ),
+        shiny::plotOutput(ns("relaimpo"))
       )
     })
 
@@ -204,7 +208,16 @@ mod_1_08_modelfit_server <- function(id,
         shiny::tabPanel(
           title = "Model fit",
           value = "model_fit",
-          shiny::h4("Fit statistics"),
+          shiny::h4(
+            "Fit statistics",
+            info_popover(
+              p(paste(
+                "Standard goodness-of-fit measures for the fitted model \u2014",
+                "R-squared, within R-squared, and related statistics \u2014",
+                "computed on the full model including fixed effects and controls."
+              ))
+            )
+          ),
           shiny::p(
             if (identical(model_fit()$engine, "rif"))
               "Full model (FE + controls) \u2014 per quantile"
@@ -225,8 +238,10 @@ mod_1_08_modelfit_server <- function(id,
           shiny::h4("Diagnostic plots"),
           bslib::card(shiny::plotOutput(ns("diagnostic_plots"))),
           shiny::hr(),
-          shiny::h4("Model summary"),
-          shiny::verbatimTextOutput(ns("model_summary"))
+          shiny::tags$details(
+            shiny::tags$summary("Raw model summary (advanced)"),
+            shiny::verbatimTextOutput(ns("model_summary"))
+          )
         ),
         select  = FALSE,
         session = tabset_session

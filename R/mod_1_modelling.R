@@ -61,10 +61,11 @@ mod_1_modelling_ui <- function(id) {
           p(paste(
             "Work through the sidebar: choose your sample, define the outcome,",
             "configure weather variables, then run the model.",
-            "Outputs will appear here as new tabs."
+            "Outputs: regression results with coefficient plots, weather-sensitivity",
+            "curves, and model-fit diagnostics will appear here as new tabs."
           ))
         ),
-        withMathJax(includeMarkdown(system.file("app/www/equation.md", package = "wiseapp")))
+        welfare_equation_ui()
       )
     )
   )
@@ -110,7 +111,8 @@ mod_1_modelling_server <- function(id,
       selected_surveys  = s1$selected_surveys,
       selected_outcome  = NULL,
       tabset_id         = "step1_output_tabs",
-      tabset_session    = session
+      tabset_session    = session,
+      analysis_unit     = s1$analysis_unit
     )
 
     # ---- 3. Outcome ---------------------------------------------------------
