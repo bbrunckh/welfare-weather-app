@@ -27,6 +27,10 @@
 # Keep renv lockfile for reproducible installs/deploys
 !renv.lock
 
+# Keep Posit Connect deploy manifest and its exclude list
+!.rscignore
+!manifest.json
+
 # Git placeholder file (to commit empty folders)
 !/**/*.gitkeep
 
