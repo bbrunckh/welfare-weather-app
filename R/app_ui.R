@@ -5,14 +5,6 @@
 #' @import shiny
 #' @noRd
 app_ui <- function(request) {
-  # Serve bundled MathJax from its own resource path (outside www/
-  # to avoid bundle_resources() trying to include all 100+ JS files)
-  shiny::addResourcePath("mathjax", system.file("mathjax", package = "wiseapp"))
-  options(
-    shiny.mathjax.url    = "mathjax/MathJax.js",
-    shiny.mathjax.config = "config=TeX-AMS-MML_HTMLorMML"
-  )
-
   bslib::page_navbar(
     title = tagList(
       "WISE-APP",
@@ -27,7 +19,6 @@ app_ui <- function(request) {
 
     header = tagList(
       golem_add_external_resources(),
-      withMathJax(),
       shiny::useBusyIndicators(),
       shiny::busyIndicatorOptions(
         spinner_type  = "bars3",

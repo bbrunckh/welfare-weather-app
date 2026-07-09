@@ -14,39 +14,54 @@ mod_3_09_decomposition_ui <- function(id) {
   tagList(
     shiny::uiOutput(ns("decomp_header_ui")),
     shiny::wellPanel(
-      shiny::h4("Policy Effect Decomposition by Welfare Decile"),
+      shiny::h4(
+        "Policy effect decomposition by welfare decile",
+        info_popover(
+          p(paste(
+            "Bars show the average effect in each channel by baseline",
+            "welfare decile. Decile 1 = poorest. Effects in percentage",
+            "change. Weather hazard: mean of historical baseline."
+          ))
+        )
+      ),
       shiny::plotOutput(ns("decomp_bar_plot"), height = "450px"),
       shiny::tags$p(
         style = "font-size:11px; color:#666; margin-top:6px;",
-        "Bars show the average effect in each channel by baseline welfare decile.",
-        "Decile 1 = poorest. Effects in percentage change.",
-        shiny::tags$em(style = "color:#888;",
-          " Weather hazard: mean of historical baseline.")
+        "Bars = average effect by channel and welfare decile (decile 1 = poorest)."
       )
     ),
     shiny::uiOutput(ns("beta_curve_ui")),
     shiny::uiOutput(ns("scenario_range_ui")),
     shiny::wellPanel(
-      shiny::h4("Decomposition Summary"),
+      shiny::h4(
+        "Decomposition summary",
+        info_popover(
+          title = "± SE columns",
+          shiny::p(
+            "Report the standard error of each channel's mean policy effect,",
+            "propagated from the regression coefficient covariance via the",
+            "delta method (", shiny::tags$code("SE = sqrt(Σ w² · ||F_loading_i||²)"),
+            "where F_loading_i is each household's per-coefficient gradient",
+            "of that channel's contribution). Because this is a paired",
+            "counterfactual on the same population, the residual and",
+            "survey-sampling components cancel; only coefficient uncertainty",
+            "remains."
+          ),
+          shiny::p(
+            "The Total row's SE is computed directly from the row-summed",
+            "F_loading (F_main + F_res1 + F_res2), which preserves the",
+            "covariance across channels. It is ", shiny::tags$em("not"),
+            "the sum of the per-channel SEs."
+          ),
+          docs = TRUE
+        )
+      ),
       DT::DTOutput(ns("decomp_summary_table")),
       shiny::uiOutput(ns("interaction_warning_ui")),
       shiny::tags$p(
         style = "font-size:11px; color:#666; margin-top:6px;",
-        shiny::tags$b("± SE columns"),
-        " report the standard error of each channel's mean policy effect, ",
-        "propagated from the regression coefficient covariance via the ",
-        "delta method (",
-        shiny::tags$code("SE = sqrt(Σ w² · ||F_loading_i||²)"),
-        " where F_loading_i is each household's per-coefficient gradient ",
-        "of that channel's contribution). Because this is a paired ",
-        "counterfactual on the same population, the residual and survey-",
-        "sampling components cancel; only coefficient uncertainty remains.",
-        shiny::tags$br(),
-        "The Total row's SE is computed directly from the row-summed ",
-        "F_loading (F_main + F_res1 + F_res2), which preserves the ",
-        "covariance across channels. It is ",
-        shiny::tags$em("not"),
-        " the sum of the per-channel SEs."
+        "± SE = standard error of each channel's mean effect — click ",
+        shiny::icon("circle-info"), " above for the formula."
       )
     )
   )
@@ -131,7 +146,7 @@ mod_3_09_decomposition_server <- function(id,
       if (n_vars == 0) return(NULL)
 
       shiny::wellPanel(
-        shiny::h4("Weather Beta Curve Across Welfare Distribution"),
+        shiny::h4("Weather beta curve across welfare distribution"),
         weather_plot_layout(
           ns, n_vars,
           ids    = c("beta_curve_plot1", "beta_curve_plot2"),
@@ -171,7 +186,7 @@ mod_3_09_decomposition_server <- function(id,
       if (is.null(sc) || (is.data.frame(sc) && nrow(sc) == 0) ||
           (!is.data.frame(sc) && length(sc) == 0)) return(NULL)
       shiny::wellPanel(
-        shiny::h4("Policy Effect Decomposition Across Climate Scenarios"),
+        shiny::h4("Policy effect decomposition across climate scenarios"),
         shiny::tags$p(
           style = "font-size:12px; color:#555; margin-bottom:8px;",
           "Each point/line is one SSP scenario \u00d7 period combination.",
@@ -273,7 +288,7 @@ mod_3_09_decomposition_server <- function(id,
       y = "Effect (% change in welfare)",
       fill = "Channel"
     ) +
-    ggplot2::theme_minimal(base_size = 13) +
+    theme_wise() +
     ggplot2::theme(legend.position = "bottom")
 }
 
@@ -310,10 +325,9 @@ mod_3_09_decomposition_server <- function(id,
     ggplot2::labs(
       x = "Welfare quantile",
       y = "UQR coefficient (weather sensitivity)",
-      title = "Weather beta curve across welfare distribution",
       subtitle = "Steeper slope = larger repositioning effect"
     ) +
-    ggplot2::theme_minimal(base_size = 12)
+    theme_wise()
 }
 
 
@@ -415,13 +429,12 @@ mod_3_09_decomposition_server <- function(id,
     ggplot2::labs(
       x        = "Projection period",
       y        = "Effect (% change in welfare)",
-      title    = "Policy effect decomposition across climate scenarios",
       subtitle = paste0(
         "Main effect is constant across weather years; ",
         "boxes show within-period year-to-year variation for weather-sensitive channels"
       )
     ) +
-    ggplot2::theme_minimal(base_size = 12) +
+    theme_wise() +
     ggplot2::theme(
       legend.position  = "bottom",
       axis.text.x      = ggplot2::element_text(angle = 30, hjust = 1),

@@ -522,8 +522,8 @@ plot_diagnostics <- function(model, engine = "fixest") {
       ggplot2::geom_hline(yintercept = 0, color = "red", linetype = "dashed") +
       ggplot2::geom_smooth(method = "loess", se = FALSE, color = "steelblue",
                            linewidth = 0.8, formula = y ~ x) +
-      ggplot2::theme_minimal() +
-      ggplot2::labs(title = "Residuals vs Fitted",
+      theme_wise() +
+      ggplot2::labs(subtitle = "Residuals vs Fitted",
                     x = "Fitted values", y = "Residuals")
   }, error = function(e) blank_plot(paste("Diagnostic plot error:", conditionMessage(e))))
 }
@@ -655,17 +655,17 @@ make_coefplot <- function(fit1, fit2, fit3,
         ggplot2::scale_colour_brewer(palette = "Set1", name = NULL) +
         ggplot2::scale_fill_brewer(palette = "Set1", name = NULL) +
         ggplot2::labs(
-          title   = paste("UQR coefficients for", label_fun(pred_var)),
-          x       = "Welfare quantile",
-          y       = stringr::str_wrap(paste0("Effect on ", outcome_label), 50),
-          caption = "Ribbon = 95% CI"
+          subtitle = paste("UQR coefficients for", label_fun(pred_var)),
+          x        = "Welfare quantile",
+          y        = stringr::str_wrap(paste0("Effect on ", outcome_label), 50),
+          caption  = "Ribbon = 95% CI"
         ) +
-        ggplot2::theme_bw(base_size = 14) +
+        theme_wise() +
         ggplot2::theme(
           legend.position  = "bottom",
           panel.border     = ggplot2::element_blank(),
           strip.background = ggplot2::element_blank(),
-          plot.title       = ggplot2::element_text(face = "bold", hjust = 0.5, size = 11),
+          plot.subtitle    = ggplot2::element_text(face = "bold", hjust = 0.5, size = 11),
           plot.caption     = ggplot2::element_text(size = 9, colour = "grey40", hjust = 0),
           axis.text        = ggplot2::element_text(size = 9)
         )
@@ -744,7 +744,7 @@ make_coefplot <- function(fit1, fit2, fit3,
         x = stringr::str_wrap(paste0("Effect on ", outcome_label), 50),
         y = NULL
       ) +
-      ggplot2::theme_bw(base_size = 14) +
+      theme_wise() +
       ggplot2::theme(
         legend.position = "bottom",
         panel.border = ggplot2::element_blank()
@@ -829,17 +829,17 @@ make_weather_effect_plot <- function(fit, pred_var, interaction_terms, is_binned
           ggplot2::geom_point(colour = "steelblue", size = 2.5) +
           ggplot2::scale_x_continuous(breaks = taus, labels = scales::percent_format(1)) +
           ggplot2::labs(
-            title = paste("Effect of", pred_lab, "across the welfare distribution"),
+            subtitle = paste("Effect of", pred_lab, "across the welfare distribution"),
             x     = "Welfare quantile",
             y     = paste("UQR coefficient"),
             caption = "Ribbon = 95% CI"
           ) +
-          ggplot2::theme_bw(base_size = 14) +
+          theme_wise() +
           ggplot2::theme(
             legend.position    = "bottom",
             panel.border       = ggplot2::element_blank(),
             strip.background   = ggplot2::element_blank(),
-            plot.title         = ggplot2::element_text(face = "bold", hjust = 0.5, size = 11),
+            plot.subtitle         = ggplot2::element_text(face = "bold", hjust = 0.5, size = 11),
             plot.caption       = ggplot2::element_text(size = 9, colour = "grey40", hjust = 0),
             panel.grid.minor   = ggplot2::element_blank(),
             axis.text          = ggplot2::element_text(size = 9),
@@ -984,18 +984,18 @@ make_weather_effect_plot <- function(fit, pred_var, interaction_terms, is_binned
           ggplot2::scale_fill_brewer(palette = "Set1",
                                      name = modx_lab_print) +
           ggplot2::labs(
-            title   = paste("Effect of", pred_lab,
+            subtitle = paste("Effect of", pred_lab,
                             "across the welfare distribution"),
             x       = "Welfare quantile",
             y       = "UQR coefficient",
             caption = "Ribbon = 95% CI (cov(main, interaction) omitted)"
           ) +
-          ggplot2::theme_bw(base_size = 14) +
+          theme_wise() +
           ggplot2::theme(
             legend.position    = "bottom",
             panel.border       = ggplot2::element_blank(),
             strip.background   = ggplot2::element_blank(),
-            plot.title         = ggplot2::element_text(face = "bold",
+            plot.subtitle      = ggplot2::element_text(face = "bold",
                                                        hjust = 0.5, size = 11),
             plot.caption       = ggplot2::element_text(size = 9,
                                                        colour = "grey40",
@@ -1127,14 +1127,14 @@ make_weather_effect_plot <- function(fit, pred_var, interaction_terms, is_binned
             ggplot2::geom_line(ggplot2::aes(group = 1), colour = "steelblue", linewidth = 0.6) +
             ggplot2::scale_x_continuous(breaks = bins_df$bin_index, labels = bins_df$bin_label) +
             ggplot2::labs(
-              title = paste("Effect of", pred_lab, "bins on", y_lab),
+              subtitle = paste("Effect of", pred_lab, "bins on", y_lab),
               x = pred_x_lab,
               y = paste("Effect on", y_lab),
               caption = omitted_note
             ) +
-            ggplot2::theme_minimal(base_size = 14) +
+            theme_wise() +
             ggplot2::theme(
-              plot.title = ggplot2::element_text(face = "bold", hjust = 0.5, size = 11),
+              plot.subtitle = ggplot2::element_text(face = "bold", hjust = 0.5, size = 11),
               plot.caption = ggplot2::element_text(hjust = 0, size = 9, colour = "grey40"),
               axis.text.x = ggplot2::element_text(angle = 90, hjust = 1, vjust = 0.5)
             )
@@ -1209,14 +1209,14 @@ make_weather_effect_plot <- function(fit, pred_var, interaction_terms, is_binned
         ggplot2::scale_colour_brewer(palette = "Set1", name = modx_lab) +
         ggplot2::scale_x_continuous(breaks = bins_df$bin_index, labels = bins_df$bin_label) +
         ggplot2::labs(
-          title = paste("Effect of", pred_lab, "bins by", modx_lab),
+          subtitle = paste("Effect of", pred_lab, "bins by", modx_lab),
           x = pred_x_lab,
           y = paste("Effect on", y_lab),
           caption = omitted_note
         ) +
-        ggplot2::theme_minimal(base_size = 14) +
+        theme_wise() +
         ggplot2::theme(
-          plot.title = ggplot2::element_text(face = "bold", hjust = 0.5, size = 11),
+          plot.subtitle = ggplot2::element_text(face = "bold", hjust = 0.5, size = 11),
           plot.caption = ggplot2::element_text(hjust = 0, size = 9, colour = "grey40"),
           legend.position = "bottom",
           axis.text.x = ggplot2::element_text(angle = 90, hjust = 1, vjust = 0.5)
@@ -1336,13 +1336,13 @@ make_weather_effect_plot <- function(fit, pred_var, interaction_terms, is_binned
           ggplot2::scale_colour_brewer(palette = "Set1", name = modx_lab) +
           ggplot2::scale_fill_brewer(palette = "Set1", name = modx_lab) +
           ggplot2::labs(
-            title = paste("Impact of", pred_lab, "by", modx_lab),
+            subtitle = paste("Impact of", pred_lab, "by", modx_lab),
             x     = pred_x_lab,
             y     = paste("Predicted", y_lab)
           ) +
-          ggplot2::theme_minimal(base_size = 14) +
+          theme_wise() +
           ggplot2::theme(
-            plot.title      = ggplot2::element_text(face = "bold", hjust = 0.5, size = 11),
+            plot.subtitle      = ggplot2::element_text(face = "bold", hjust = 0.5, size = 11),
             legend.position = "bottom"
           )
 
@@ -1372,13 +1372,13 @@ make_weather_effect_plot <- function(fit, pred_var, interaction_terms, is_binned
           ) +
           ggplot2::geom_line(colour = "steelblue", linewidth = 0.9) +
           ggplot2::labs(
-            title = paste("Predicted", y_lab, "vs", pred_lab),
+            subtitle = paste("Predicted", y_lab, "vs", pred_lab),
             x     = pred_x_lab,
             y     = paste("Predicted", y_lab)
           ) +
-          ggplot2::theme_minimal(base_size = 14) +
+          theme_wise() +
           ggplot2::theme(
-            plot.title = ggplot2::element_text(face = "bold", hjust = 0.5, size = 11)
+            plot.subtitle = ggplot2::element_text(face = "bold", hjust = 0.5, size = 11)
           )
       }
     },
@@ -1428,7 +1428,7 @@ make_regtable <- function(fit1, fit2, fit3,
 
       # CSS
       css <- "
-        .rif-table { border-collapse:collapse; font-family:'Times New Roman',Times,serif; font-size:13px; margin:20px 0; }
+        .rif-table { border-collapse:collapse; font-family:'Times New Roman',Times,serif; font-size:13px; margin:20px 0; width:100%; max-width:900px; }
         .rif-table th, .rif-table td { padding:2px 10px; text-align:center; }
         .rif-table th { font-weight:normal; border-bottom:1px solid #000; }
         .rif-table .topline { border-top:2px solid #000; }
@@ -1547,7 +1547,7 @@ make_regtable <- function(fit1, fit2, fit3,
   }
 
   css <- "
-    .aer-table { border-collapse:collapse; font-family:'Times New Roman',Times,serif; font-size:14px; margin:20px 0; }
+    .aer-table { border-collapse:collapse; font-family:'Times New Roman',Times,serif; font-size:14px; margin:20px 0; width:100%; max-width:900px; }
     .aer-table th, .aer-table td { padding:2px 14px; text-align:center; }
     .aer-table th { font-weight:normal; border-bottom:1px solid #000; }
     .aer-table .topline { border-top:2px solid #000; }
@@ -1721,7 +1721,7 @@ plot_resid_weather <- function(model, haz_var, weather_df, x_label = haz_var) {
       ggplot2::geom_hline(yintercept = 0, color = "red", linetype = "dotted") +
       ggplot2::geom_jitter(width = 0.15, alpha = 0.12) +
       ggplot2::stat_summary(fun = mean, geom = "point", color = "orange", size = 2.5) +
-      ggplot2::theme_minimal(base_size = 14) +
+      theme_wise() +
       ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 90, hjust = 1, vjust = 0.5)) +
       ggplot2::labs(x = stringr::str_wrap(x_label, 40), y = "Residuals")
   } else {
@@ -1731,7 +1731,7 @@ plot_resid_weather <- function(model, haz_var, weather_df, x_label = haz_var) {
       ggplot2::geom_point(alpha = 0.1) +
       ggplot2::geom_hline(yintercept = 0, color = "red", linetype = "dotted") +
       ggplot2::stat_summary_bin(fun = mean, bins = 20, color = "orange", size = 2, geom = "point") +
-      ggplot2::theme_minimal(base_size = 14) +
+      theme_wise() +
       ggplot2::labs(x = stringr::str_wrap(x_label, 40), y = "Residuals")
   }
 }
@@ -1786,7 +1786,7 @@ plot_pred_vs_actual <- function(model, is_logistic, outcome_label = "outcome") {
       ggplot2::scale_fill_manual(values = c("Survey" = "steelblue", "Predicted" = "orange")) +
       ggplot2::labs(x = stringr::str_wrap(outcome_label, 40),
                     y = "Share of households (%)") +
-      ggplot2::theme_minimal()
+      theme_wise()
 
   } else {
     predicted  <- tryCatch(
@@ -1808,8 +1808,8 @@ plot_pred_vs_actual <- function(model, is_logistic, outcome_label = "outcome") {
       ggplot2::geom_text(ggplot2::aes(label = sprintf("%.1f%%", .data$Percent)),
                          vjust = 1) +
       ggplot2::scale_fill_gradient(low = "lightblue", high = "steelblue") +
-      ggplot2::labs(title = "Confusion Matrix", x = "Actual", y = "Predicted") +
-      ggplot2::theme_minimal() +
+      ggplot2::labs(x = "Actual", y = "Predicted") +
+      theme_wise() +
       ggplot2::theme(legend.position = "none")
   }
 }
@@ -1934,5 +1934,5 @@ plot_relaimpo <- function(model, var_info = NULL) {
       x = "",
       y = "Standardized coefficient importance"
     ) +
-    ggplot2::theme_minimal(base_size = 14)
+    theme_wise()
 }

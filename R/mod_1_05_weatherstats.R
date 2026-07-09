@@ -262,13 +262,38 @@ mod_1_05_weatherstats_server <- function(
           shiny::tabPanel(
             title = "Weather stats",
             value = "weather_desc",
-            shiny::h4("Distribution of weather (household survey sample)"),
+            shiny::h4(
+              "Distribution of weather (household survey sample)",
+              info_popover(
+                p(paste(
+                  "Distribution of each selected weather variable across the",
+                  "survey sample, weighted by survey weights where available."
+                ))
+              )
+            ),
             shiny::uiOutput(ns("weather_dist_layout")),
             shiny::br(),
-            shiny::h4("Outcome vs weather"),
+            shiny::h4(
+              "Outcome vs weather",
+              info_popover(
+                p(paste(
+                  "Binned scatter of the outcome variable against each",
+                  "selected weather variable, useful for spotting non-linear",
+                  "relationships before modelling."
+                ))
+              )
+            ),
             shiny::uiOutput(ns("binscatter_layout")),
             shiny::hr(),
-            shiny::h4("Weather summary stats"),
+            shiny::h4(
+              "Weather summary stats",
+              info_popover(
+                p(paste(
+                  "Weighted summary statistics for each weather variable,",
+                  "aggregated per country-year."
+                ))
+              )
+            ),
             shiny::uiOutput(ns("weather_stats_layout")),
             shiny::br(),
             shiny::h4("Selected weather variables"),

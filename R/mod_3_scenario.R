@@ -67,12 +67,20 @@ mod_3_scenario_ui <- function(id) {
           p(paste(
             "Configure one or more policy levers in the sidebar, then click",
             "'Run simulation' to compare baseline and policy outcomes.",
-            "Results, diagnostics and decomposition will appear here as new tabs."
-          ))
+            "Outputs: baseline-vs-policy outcome comparisons, exceedance",
+            "probabilities, diagnostics, and a decomposition of policy effects",
+            "will appear here as new tabs."
+          )),
+          p(
+            class = "text-muted small mb-0",
+            paste(
+              "Simulations for large surveys (tens of thousands of households)",
+              "can take several minutes to run; charts take a few seconds to",
+              "update after changing filters."
+            )
+          )
         ),
-        withMathJax(includeMarkdown(
-          system.file("app/www/equation2.md", package = "wiseapp")
-        )),
+        welfare_equation_ui(predicted = TRUE),
         mod_3_06_policy_sim_ui(ns("policy_sim"))
       )
     )
@@ -151,8 +159,15 @@ mod_3_scenario_server <- function(id,
       div(
         class = "alert alert-info",
         style = "padding: 8px; margin-bottom: 10px; font-size: 13px;",
-        tags$strong("Selected policy scenario:"),
-        do.call(tags$ul, Filter(Negate(is.null), items))
+        tags$strong("Active policy levers:"),
+        do.call(tags$ul, Filter(Negate(is.null), items)),
+        tags$small(
+          class = "text-muted",
+          paste(
+            "Adjust these inputs (and any others) in the sections below —",
+            "results update when you re-run the simulation."
+          )
+        )
       )
     })
 

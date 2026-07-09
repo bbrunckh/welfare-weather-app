@@ -135,7 +135,7 @@ ridge_distribution_plot <- function(
         ggplot2::aes(x = .data[[x_var]], y = .data[[group_var]], fill = .data[[fill_var]])
     ) +
         ggridges::geom_density_ridges(alpha = 0.7, scale = 2, bandwidth = bw) +
-        ggplot2::theme_minimal() +
+        theme_wise() +
         ggplot2::labs(
             title = "",
             x = label %||% x_var,

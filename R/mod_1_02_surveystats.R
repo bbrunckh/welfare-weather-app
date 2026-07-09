@@ -41,7 +41,8 @@ mod_1_02_surveystats_server <- function(
     selected_outcome = NULL,
     cpi_ppp,
     tabset_id,
-    tabset_session = NULL
+    tabset_session = NULL,
+    analysis_unit  = NULL
 ) {
   moduleServer(id, function(input, output, session) {
     ns <- session$ns
@@ -213,6 +214,37 @@ mod_1_02_surveystats_server <- function(
         output$firm_stats    <- make_stats_dt(survey_data, variable_list, "firm")
         output$area_stats    <- make_stats_dt(survey_data, variable_list, "area")
 
+        # Only show characteristic tables relevant to the selected level of
+        # analysis: individual level implies household + area also apply;
+        # household level implies area also applies; firm level is separate.
+        output$characteristic_tables_ui <- renderUI({
+          unit <- if (is.function(analysis_unit)) analysis_unit() else NULL
+          show_ind  <- is.null(unit) || unit == "ind"
+          show_hh   <- is.null(unit) || unit %in% c("ind", "hh")
+          show_firm <- is.null(unit) || unit == "firm"
+
+          tagList(
+            if (show_ind) tagList(
+              h4("Individual characteristics"),
+              p(class = "text-muted small", "Summary statistics for individual-level variables"),
+              DT::DTOutput(ns("ind_stats"))
+            ),
+            if (show_hh) tagList(
+              h4("Household characteristics"),
+              p(class = "text-muted small", "Summary statistics for household-level variables"),
+              DT::DTOutput(ns("hh_stats"))
+            ),
+            if (show_firm) tagList(
+              h4("Firm characteristics"),
+              p(class = "text-muted small", "Summary statistics for firm-level variables"),
+              DT::DTOutput(ns("firm_stats"))
+            ),
+            h4("Area characteristics"),
+            p(class = "text-muted small", "Summary statistics for area-level variables"),
+            DT::DTOutput(ns("area_stats"))
+          )
+        })
+
         policy_vars <- unique(unlist(lapply(POLICY_DEFINITIONS, `[[`, "vars")))
         output$policy_stats  <- make_stats_dt(survey_data, variable_list,
                                               vars = policy_vars)
@@ -250,17 +282,35 @@ mod_1_02_surveystats_server <- function(
               value = "desc_stats",
               bslib::layout_columns(
                 col_widths = c(6, 6),
-                bslib::card(h4("Timing of interviews"),
-                            plotOutput(ns("interview_date"), height = "300px")),
-                bslib::card(h4("Location of interviews"),
-                            leaflet::leafletOutput(ns("map"), height = "300px"))
+                bslib::card(
+                  h4("Timing of interviews"),
+                  p(class = "text-muted small", "Monthly breakdown of interview waves"),
+                  plotOutput(ns("interview_date"), height = "300px")
+                ),
+                bslib::card(
+                  h4("Location of interviews"),
+                  p(class = "text-muted small", "Geographic distribution of sampled interviews"),
+                  leaflet::leafletOutput(ns("map"), height = "300px")
+                )
               ),
-              h4("Outcome stats"),              DT::DTOutput(ns("outcome_stats")),
-              h4("Policy variables"),           DT::DTOutput(ns("policy_stats")),
-              h4("Individual characteristics"), DT::DTOutput(ns("ind_stats")),
-              h4("Household characteristics"),  DT::DTOutput(ns("hh_stats")),
-              h4("Firm characteristics"),       DT::DTOutput(ns("firm_stats")),
-              h4("Area characteristics"),       DT::DTOutput(ns("area_stats")),
+              h4(
+                "Outcome stats",
+                info_popover(
+                  title = "Outcome stats",
+                  p(paste(
+                    "Candidate outcome variables available for welfare",
+                    "analysis in Step 1. Check the missingness column",
+                    "before selecting an outcome — high missingness can",
+                    "limit sample size after listwise deletion."
+                  ))
+                )
+              ),
+              p(class = "text-muted small", "Candidate outcome variables for welfare analysis"),
+              DT::DTOutput(ns("outcome_stats")),
+              h4("Policy variables"),
+              p(class = "text-muted small", "Variables that can be adjusted in Step 3 policy scenarios"),
+              DT::DTOutput(ns("policy_stats")),
+              uiOutput(ns("characteristic_tables_ui")),
               br(),
               h4("Selected surveys"),           DT::DTOutput(ns("selected_surveys")),
               br(),

@@ -233,7 +233,10 @@ mod_1_07_results_server <- function(id,
                       else "Regression results"),
             shiny::div(
               style = "display:flex; justify-content:center;",
-              shiny::uiOutput(ns("regtable"))
+              shiny::div(
+                style = "overflow-x: auto; max-width: 100%;",
+                shiny::uiOutput(ns("regtable"))
+              )
             )
           ),
           select  = TRUE,

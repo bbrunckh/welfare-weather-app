@@ -50,6 +50,7 @@ Imports:
     pkgload,
     igraph,
     future,
-    future.apply
+    future.apply,
+    katex
 URL: https://github.com/worldbank/welfare-weather-app
 BugReports: https://github.com/worldbank/welfare-weather-app/issues

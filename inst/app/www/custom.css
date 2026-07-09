@@ -287,6 +287,25 @@ details summary {
   font-weight: 600;
   color: var(--bs-dark);
   cursor: pointer;
+  list-style: none;
+}
+
+details summary::-webkit-details-marker {
+  display: none;
+}
+
+details summary::after {
+  content: "\f078";
+  font-family: "Font Awesome 6 Free";
+  font-weight: 900;
+  font-size: 0.7em;
+  margin-left: 0.35rem;
+  display: inline-block;
+  transition: transform 0.15s;
+}
+
+details[open] summary::after {
+  transform: rotate(180deg);
 }
 
 details[open] summary {
@@ -457,6 +476,40 @@ table.dataTable {
   font-size: 0.88rem;
 }
 
+/* ---- Info popovers (info_popover() in R/utils_ui.R) ---------------------- */
+
+.wise-info-icon {
+  font-size: 0.65em;
+  color: var(--bs-secondary-color, #6c757d);
+  margin-left: 0.4rem;
+  vertical-align: middle;
+  cursor: pointer;
+  opacity: 0.75;
+  line-height: 1;
+}
+
+.wise-info-icon:hover,
+.wise-info-icon:focus {
+  opacity: 1;
+  color: var(--bs-primary);
+  outline: none;
+}
+
+.popover {
+  --bs-popover-max-width: 420px;
+}
+
+.popover .popover-body p:last-child {
+  margin-bottom: 0;
+}
+
+/* ---- Server-rendered equations (wise_math() in R/utils_math.R) ---------- */
+
+.wise-equation {
+  font-size: 1.35rem;
+  margin: 0.5rem 0 0.75rem;
+}
+
 /* ---- Compact results controls (Steps 2/3 Results tab) -------------------- */
 
 .results-controls .form-group,
@@ -468,6 +521,10 @@ table.dataTable {
   font-size: 0.78rem;
   font-weight: 600;
   margin-bottom: 0.1rem;
+}
+
+.results-controls details summary {
+  font-size: 0.85rem;
 }
 
 .results-controls .form-select,

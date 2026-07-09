@@ -281,7 +281,7 @@ mod_1_06_model_server <- function(id,
       ixn <- interact_vars()
       fe  <- fe_vars()
 
-      shiny::withMathJax(tagList(
+      tagList(
 
         # Interaction with weather hazard
         {
@@ -300,7 +300,7 @@ mod_1_06_model_server <- function(id,
             tagList(
               shiny::selectizeInput(
                 ns("interactions"),
-                label    = "Interaction with \\(Haz_{kt}\\):",
+                label    = shiny::tagList("Interaction with ", wise_math("Haz_{kt}"), ":"),
                 choices  = choices_locked,
                 selected = all_locked,
                 multiple = TRUE,
@@ -322,7 +322,7 @@ mod_1_06_model_server <- function(id,
           } else if (nrow(ixn) > 0) {
             shiny::selectizeInput(
               ns("interactions"),
-              label    = "Interactions with \\(Haz_{kt}\\):",
+              label    = shiny::tagList("Interactions with ", wise_math("Haz_{kt}"), ":"),
               choices  = setNames(ixn$name, ixn$label),
               selected = if ("urban" %in% ixn$name) "urban" else NULL,
               multiple = TRUE,
@@ -362,7 +362,7 @@ mod_1_06_model_server <- function(id,
           selected = "User-defined"
         ),
         uiOutput(ns("covariate_inputs"))
-      ))
+      )
     })
 
     # ---- Covariate inputs ---------------------------------------------------
@@ -388,14 +388,13 @@ mod_1_06_model_server <- function(id,
         firm <- exclude_selected_vars(firm_vars(),  outcome_name = selected_outcome()$name, weather_names = selected_weather()$name, interactions = input$interactions, fixedeffects = input$fixedeffects)
         area <- exclude_selected_vars(area_vars(),  outcome_name = selected_outcome()$name, weather_names = selected_weather()$name, interactions = input$interactions, fixedeffects = input$fixedeffects)
 
-        shiny::withMathJax(
-          tagList(
+        tagList(
 
             # Individual-level covariates
             if (show_level("ind") && nrow(ind) > 0) {
               shiny::selectizeInput(
                 ns("indcov"),
-                label    = "Individual characteristics \\(X_{ijt}\\):",
+                label    = shiny::tagList("Individual characteristics ", wise_math("X_{ijt}"), ":"),
                 choices  = make_choice_labels(ind),
                 selected = NULL,
                 multiple = TRUE,
@@ -407,7 +406,7 @@ mod_1_06_model_server <- function(id,
             if (show_level("hh") && nrow(hh) > 0) {
               shiny::selectizeInput(
                 ns("hhcov"),
-                label    = "Household characteristics \\(X_{ijt}\\):",
+                label    = shiny::tagList("Household characteristics ", wise_math("X_{ijt}"), ":"),
                 choices  = make_choice_labels(hh),
                 selected = NULL,
                 multiple = TRUE,
@@ -431,16 +430,15 @@ mod_1_06_model_server <- function(id,
             if (show_level("area") && nrow(area) > 0) {
               shiny::selectizeInput(
                 ns("areacov"),
-                label    = "Area characteristics \\(E_{jt}\\):",
+                label    = shiny::tagList("Area characteristics ", wise_math("E_{jt}"), ":"),
                 choices  = make_choice_labels(area),
                 selected = NULL,
                 multiple = TRUE,
                 options  = list(placeholder = "Select area covariates")
               )
-            },
+            }
 
           )
-        )
 
       } else if (input$covariates == "Lasso") {
 

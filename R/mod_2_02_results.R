@@ -153,39 +153,79 @@ mod_2_02_results_ui <- function(id) {
 
     # ---- 3. Hero point-range chart -----------------------------------------
     shiny::wellPanel(
-      shiny::h4("Distribution of outcome across weather conditions, by climate scenario"),
+      shiny::h4(
+        "Distribution of outcome across weather conditions, by climate scenario",
+        info_popover(
+          title = "Reading this chart",
+          shiny::p(
+            "All bands are drawn relative to the central dot and answer",
+            "different questions about uncertainty. They are not meant to be",
+            "added together — see the variance-contribution bar on the",
+            "Diagnostics tab for how the sources combine."
+          ),
+          shiny::p(shiny::tags$b("Central dot"),
+            " = mean of the annual aggregate across all simulated (model, year) outcomes."),
+          shiny::p(shiny::tags$b("Thick coloured band"),
+            " (future scenarios only) — how much do climate models disagree?",
+            " Inter-model spread: quantile across CMIP6 ensemble members of",
+            " each model's time-mean. Can be asymmetric around the dot when",
+            " models lean one way."),
+          shiny::p(shiny::tags$b("Middle band"),
+            " — how much does weather vary year-to-year within a typical model?",
+            " Inter-annual variability: per-model quantile across simulation",
+            " years, then averaged across models. Reflects the natural range",
+            " of outcomes a single climate trajectory produces."),
+          shiny::p(shiny::tags$b("Innermost line"),
+            " (shown when coefficient uncertainty is enabled) — how precisely",
+            " is each (model, year) aggregate estimated? Analytic per-outcome",
+            " SE from the regression fit. By default, under 'original'",
+            " residuals, restricted to coefficients on weather variables and",
+            " their interactions (additive-decomposition SE — see Step 2",
+            " settings to widen to all coefficients). This is precision of a",
+            " point estimate, not a spread of outcomes — conceptually",
+            " distinct from the two coloured bands."),
+          shiny::p(
+            "Historical = single 'model', so no inter-model band is shown.",
+            "A pooled summary SE combining coefficient and inter-model",
+            "uncertainty is available in the return-period table on the",
+            "Diagnostics tab."
+          ),
+          docs = TRUE
+        )
+      ),
       shiny::plotOutput(ns("summary_box_plot"), height = "600px"),
       shiny::tags$p(
         style = "font-size:11px; color:#666; margin-top:6px;",
-        "All bands are drawn ",
-        shiny::tags$b("relative to the central dot"),
-        " and answer different questions about uncertainty. They are not meant to be added together — see the variance-contribution bar on the Diagnostics tab for how the sources combine.",
-        shiny::tags$br(), shiny::tags$br(),
-        shiny::tags$b("Central dot"),
-        " = mean of the annual aggregate across all simulated (model, year) outcomes.",
-        shiny::tags$br(),
-        shiny::tags$b("Thick coloured band — “How much do climate models disagree?”"),
-        " (future scenarios only)",
-        shiny::tags$br(),
-        " Inter-model spread: quantile across CMIP6 ensemble members of each model’s time-mean. This band can be asymmetric around the dot when models lean one way.",
-        shiny::tags$br(),
-        shiny::tags$b("Middle band — “How much does weather vary year-to-year within a typical model?”"),
-        shiny::tags$br(),
-        " Inter-annual variability: per-model quantile across simulation years, then averaged across models. Reflects the natural range of outcomes a single climate trajectory produces.",
-        shiny::tags$br(),
-        shiny::tags$b("Innermost line — “How precisely is each (model, year) aggregate estimated?”"),
-        " (shown when coefficient uncertainty is enabled)",
-        shiny::tags$br(),
-        " Analytic per-outcome SE from the regression fit. By default, under 'original' residuals, restricted to coefficients on weather variables and their interactions (additive-decomposition SE — see Step 2 settings to widen to all coefficients). This is precision of a point estimate, not a spread of outcomes — conceptually distinct from the two coloured bands.",
-        shiny::tags$br(),
-        shiny::tags$br(),
-        "Historical = single “model” so no inter-model band is shown. A pooled summary SE combining coefficient and inter-model uncertainty is available in the return-period table on the Diagnostics tab."
+        "Dot = mean outcome; bands = uncertainty ranges (not additive) — click ",
+        shiny::icon("circle-info"), " above for details."
       )
     ),
 
     # ---- 4. Exceedance curve -----------------------------------------------
     shiny::wellPanel(
-      shiny::h4("Exceedance probability by climate scenario"),
+      shiny::h4(
+        "Exceedance probability by climate scenario",
+        info_popover(
+          title = "Exceedance probability",
+          shiny::p(
+            "Shows the probability that the outcome exceeds a given",
+            "threshold, by scenario. The logit axis emphasises both tails;",
+            "return period lines mark standard thresholds (e.g. 1-in-20-year",
+            "events)."
+          ),
+          shiny::p(shiny::tags$b("Central curve"),
+            " = across-model median of each model's empirical exceedance curve."),
+          shiny::p(shiny::tags$b("Filled ribbon"),
+            " (future scenarios only) = inter-model spread; quantile across ensemble members at each return period."),
+          shiny::p(shiny::tags$b("Dashed outlines"),
+            " (when coefficient uncertainty enabled) = analytic per-outcome SE band around the central curve. May fall inside or outside the inter-model ribbon depending on which source dominates."),
+          shiny::p(
+            "Low odds = value exceeded in only 1-in-N years; high odds =",
+            "value reached in all but 1-in-N years."
+          ),
+          docs = TRUE
+        )
+      ),
       shiny::tags$div(
         style = "display:flex; gap:20px; flex-wrap:wrap; margin-bottom:6px;",
         shiny::checkboxInput(
@@ -212,21 +252,27 @@ mod_2_02_results_ui <- function(id) {
 
     # ---- 6. Time-series spaghetti ------------------------------------------
     shiny::wellPanel(
-      shiny::h4("Per-model trajectories across simulation years"),
+      shiny::h4(
+        "Per-model trajectories across simulation years",
+        info_popover(
+          title = "Reading this chart",
+          shiny::p(shiny::tags$b("Thin coloured lines"),
+            " = one CMIP6 ensemble member each (a 'spaghetti' trace of model trajectories)."),
+          shiny::p(shiny::tags$b("Bold line"),
+            " = across-model median curve for each scenario."),
+          shiny::p(shiny::tags$b("Translucent ribbon"),
+            " (future scenarios only) = inter-model spread at the selected band quantiles."),
+          shiny::p(
+            "Each scenario × projection period gets its own colour (SSP",
+            "family) and linetype (period), shown as one entry in the legend."
+          ),
+          docs = TRUE
+        )
+      ),
       shiny::plotOutput(ns("timeseries_plot"), height = "380px"),
       shiny::tags$p(
         style = "font-size:11px; color:#666; margin-top:6px;",
-        shiny::tags$b("Thin coloured lines"),
-        " = one CMIP6 ensemble member each (a “spaghetti” trace of model trajectories).",
-        shiny::tags$br(),
-        shiny::tags$b("Bold line"),
-        " = across-model median curve for each scenario.",
-        shiny::tags$br(),
-        shiny::tags$b("Translucent ribbon"),
-        " (future scenarios only) = inter-model spread at the selected band quantiles.",
-        shiny::tags$br(),
-        "Each scenario × projection period gets its own colour (SSP family) and ",
-        "linetype (period), shown as one entry in the legend."
+        "Thin lines = ensemble members; bold = median; ribbon = inter-model spread."
       )
     )
   )
@@ -540,10 +586,7 @@ mod_2_02_results_server <- function(id,
           "\u26a0 Coefficient uncertainty available but not shown"
         )
       } else {
-        shiny::tags$p(
-          style = "font-size:11px; color:#2e7d32; margin:2px 0 6px 0;",
-          "\u2705 Coefficient uncertainty shown"
-        )
+        NULL
       }
     })
     outputOptions(output, "coef_uncertainty_status_ui",
@@ -1273,8 +1316,9 @@ mod_2_02_results_server <- function(id,
       DT::datatable(
         df, rownames = FALSE, class = "compact stripe",
         options = list(
-          pageLength = 15, dom = "tip", ordering = list(list(2, "desc")),
-          columnDefs = list(list(className = "dt-center", targets = "_all"))
+          pageLength = 15, dom = "Btip", ordering = list(list(2, "desc")),
+          columnDefs = list(list(className = "dt-center", targets = "_all")),
+          buttons = list(list(extend = "csv", filename = "outcome_thresholds"))
         ),
         extensions = "Buttons"
       )
@@ -1283,30 +1327,41 @@ mod_2_02_results_server <- function(id,
     output$threshold_table_header <- renderUI({
       req(agg_hist())
       tagList(
-        shiny::h4("Outcome value at return-period thresholds (both tails)"),
+        shiny::h4(
+          "Outcome value at return-period thresholds (both tails)",
+          info_popover(
+            title = "Return-period thresholds",
+            shiny::p(shiny::tags$b("Central (P50)"),
+              " = across-model median of each model's return-period value (or the single historical curve)."),
+            shiny::p(shiny::tags$b("Coef Pxx"),
+              " = analytic per-outcome SE band around the central value (coefficient + residual uncertainty). Percentiles follow the 'Coefficient uncertainty band' selector."),
+            shiny::p(shiny::tags$b("Ensemble Pxx / min / max"),
+              " (future only) = quantile of per-model return-period values across CMIP6 ensemble members. Percentiles follow the 'Weather + model spread band' selector."),
+            shiny::p(shiny::tags$b("Pooled Pxx"),
+              " = combined band assuming independence: SE_pooled = sqrt(coef_SE² + var_across_models). Future scenarios only — for historical (no inter-model component) Pooled would equal Coef and is not reported."),
+            shiny::p(
+              "Low odds show the value exceeded in only 1-in-N years; high odds",
+              "= value reached in all but 1-in-N years; 1:1 is the median year."
+            ),
+            shiny::p(
+              "Obs = number of simulated years feeding each per-model exceedance",
+              "curve. Return periods that fall outside the empirical range",
+              "supported by Obs (probability < 0.5/Obs or > 1 − 0.5/Obs) are not",
+              "reported rather than extrapolated."
+            ),
+            docs = TRUE
+          )
+        ),
         shiny::tags$small(class = "text-muted", table_subtitle())
       )
     })
 
     output$threshold_table_footer <- renderUI({
       req(agg_hist())
-      tagList(
-        shiny::tags$p(style = "font-size:11px; color:#666; margin-top:6px; margin-bottom:2px;",
-                      shiny::tags$b("Central (P50)"),
-                      " = across-model median of each model's return-period value (or the single historical curve)."),
-        shiny::tags$p(style = "font-size:11px; color:#666; margin-top:0; margin-bottom:2px;",
-                      shiny::tags$b("Coef Pxx"),
-                      " = analytic per-outcome SE band around the central value (coefficient + residual uncertainty). Percentiles follow the “Coefficient uncertainty band” selector."),
-        shiny::tags$p(style = "font-size:11px; color:#666; margin-top:0; margin-bottom:2px;",
-                      shiny::tags$b("Ensemble Pxx / min / max"),
-                      " (future only) = quantile of per-model return-period values across CMIP6 ensemble members. Percentiles follow the “Weather + model spread band” selector."),
-        shiny::tags$p(style = "font-size:11px; color:#666; margin-top:0; margin-bottom:2px;",
-                      shiny::tags$b("Pooled Pxx"),
-                      " = combined band assuming independence: SE_pooled = sqrt(coef_SE² + var_across_models). Future scenarios only — for historical (no inter-model component) Pooled would equal Coef and is not reported."),
-        shiny::tags$p(style = "font-size:11px; color:#666; margin-top:0; margin-bottom:2px;",
-                      "Low odds show the value exceeded in only 1-in-N years; high odds = value reached in all but 1-in-N years; 1:1 is the median year."),
-        shiny::tags$p(style = "font-size:11px; color:#666; margin-top:0;",
-                      "Obs = number of simulated years feeding each per-model exceedance curve. Return periods that fall outside the empirical range supported by Obs (probability < 0.5/Obs or > 1 − 0.5/Obs) are not reported rather than extrapolated.")
+      shiny::tags$p(
+        style = "font-size:11px; color:#666; margin-top:6px;",
+        "Central = median estimate; Coef/Ensemble/Pooled = uncertainty bands — click ",
+        shiny::icon("circle-info"), " above for definitions."
       )
     })
 
@@ -1334,22 +1389,12 @@ mod_2_02_results_server <- function(id,
         "Probability axis is logit-scaled, giving equal visual weight to both tails."
       else
         "Annual exceedance probability — each curve is computed over the simulation years."
-      tagList(
-        shiny::tags$p(style = "font-size:11px; color:#666; margin-top:6px; margin-bottom:2px;",
-                      axis_txt),
-        shiny::tags$p(style = "font-size:11px; color:#666; margin-top:0; margin-bottom:2px;",
-                      shiny::tags$b("Central curve"),
-                      " = across-model median of each model's empirical exceedance curve."),
-        shiny::tags$p(style = "font-size:11px; color:#666; margin-top:0; margin-bottom:2px;",
-                      shiny::tags$b("Filled ribbon"),
-                      " (future scenarios only) = inter-model spread; quantile across ensemble members at each return period."),
-        shiny::tags$p(style = "font-size:11px; color:#666; margin-top:0; margin-bottom:2px;",
-                      shiny::tags$b("Dashed outlines"),
-                      " (when coefficient uncertainty enabled) = analytic per-outcome SE band around the central curve. The dashed outlines may fall inside or outside the inter-model ribbon depending on which source dominates."),
-        shiny::tags$p(style = "font-size:11px; color:#666; margin-top:0;",
-                      "Low odds = value exceeded in only 1-in-N years; high odds = value reached in all but 1-in-N years.")
+      shiny::tags$p(
+        style = "font-size:11px; color:#666; margin-top:6px;",
+        axis_txt
       )
     })
+
 
     # ---- observeEvent handlers ---------------------------------------------
 

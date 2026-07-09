@@ -17,12 +17,9 @@ mod_3_01_sp_ui <- function(id) {
     uiOutput(ns("sp_type_ui")),
 
     # ---- Collapsible configuration panel -------------------------------
-    uiOutput(ns("sp_trigger_ui")),
     uiOutput(ns("sp_budget_amount_ui")),
     uiOutput(ns("sp_targeting_ui")),
-    uiOutput(ns("sp_timing_ui")),
-    uiOutput(ns("sp_delivery_ui")),
-    uiOutput(ns("sp_revenue_ui"))
+    uiOutput(ns("sp_timing_ui"))
   )
 }
 
@@ -488,7 +485,7 @@ mod_3_01_sp_server <- function(id,
             ),
             min = 2, max = 24, value = 6, step = 1
           )
-        ),
+        )
 
         # Anticipatory vs ex-post — hidden for regular programs
         # if (!is_regular) {
@@ -515,9 +512,7 @@ mod_3_01_sp_server <- function(id,
         #       min = 0, max = 26, value = 4, step = 1, post = " wks"
         #     )
         #   )
-        # },
-
-        tags$hr(style = "margin: 8px 0;")
+        # }
       )
   })
 

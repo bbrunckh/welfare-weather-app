@@ -46,15 +46,13 @@
         ggplot2::scale_y_continuous(limits = c(0, 1),
                                     expand = ggplot2::expansion(c(0, 0.05))) +
         ggplot2::labs(
-          title = paste0("Distribution: ", var_name),
           x     = var_name,
           y     = "Proportion",
           fill  = NULL
         ) +
-        ggplot2::theme_minimal(base_size = 12) +
+        theme_wise(base_size = 12) +
         ggplot2::theme(
           legend.position    = "top",
-          plot.title         = ggplot2::element_text(size = 11),
           panel.grid.major.x = ggplot2::element_blank(),
           panel.grid.minor.x = ggplot2::element_blank()
         )
@@ -88,15 +86,13 @@
     ggridges::geom_density_ridges(alpha = 0.7, scale = 1.5, bandwidth = bw) +
     ggplot2::scale_fill_manual(values = fill_vals) +
     ggplot2::labs(
-      title = paste0("Distribution: ", var_name),
       x     = if (use_log) paste0(var_name, " (log scale)") else var_name,
       y     = "",
       fill  = NULL
     ) +
-    ggplot2::theme_minimal(base_size = 12) +
+    theme_wise(base_size = 12) +
     ggplot2::theme(
-      legend.position = "none",
-      plot.title      = ggplot2::element_text(size = 11)
+      legend.position = "none"
     )
 
   if (use_log) {
@@ -302,35 +298,68 @@ policy_input_diagnostics <- function(baseline_svy, policy_svy, vars = NULL) {
       shiny::uiOutput(ns("scenario_filter_ui"))
     ),
     shiny::wellPanel(
-      shiny::h4("Distribution of outcome across weather conditions, by climate scenario"),
+      shiny::h4(
+        "Distribution of outcome across weather conditions, by climate scenario",
+        info_popover(
+          title = "Reading this chart",
+          shiny::p(
+            "Each scenario shows two dots: ", shiny::tags$b("baseline (grey)"),
+            " and ", shiny::tags$b("policy-adjusted (red)"),
+            ". All bands are drawn relative to the dot (the ensemble-mean",
+            " annual aggregate) and answer different questions about",
+            " uncertainty. They are not meant to be added together — see",
+            " the Diagnostics tab for how the sources combine."
+          ),
+          shiny::p(shiny::tags$b("Thick coloured band"),
+            " (future scenarios only) — how much do climate models disagree?",
+            " Inter-model spread: quantile across CMIP6 ensemble members of",
+            " each model's time-mean. Can be asymmetric around the dot when",
+            " models lean one way."),
+          shiny::p(shiny::tags$b("Middle band"),
+            " — how much does weather vary year-to-year within a typical",
+            " model? Inter-annual variability: per-model quantile across",
+            " simulation years, then averaged across models. Reflects the",
+            " natural range of outcomes a single climate trajectory produces."),
+          shiny::p(shiny::tags$b("Innermost line"),
+            " (shown when coefficient uncertainty is enabled) — how precisely",
+            " is each (model, year) aggregate estimated? Analytic per-outcome",
+            " SE from the regression fit. By default, under 'original'",
+            " residuals, restricted to coefficients on weather and the",
+            " policy-modified variables, and their interactions",
+            " (additive-decomposition SE — see Step 2 settings to widen to",
+            " all coefficients). This is precision of a point estimate, not",
+            " a spread of outcomes — conceptually distinct from the two",
+            " coloured bands."),
+          shiny::p(
+            "Historical = single 'model', so no inter-model band is shown.",
+            "Dashed line = historical mean. A pooled summary SE combining",
+            "coefficient and inter-model uncertainty is available in the",
+            "return-period table on the Diagnostics tab."
+          ),
+          docs = TRUE
+        )
+      ),
       shiny::plotOutput(ns("summary_box_plot"), height = "600px"),
       shiny::tags$p(
         style = "font-size:11px; color:#666; margin-top:6px;",
-        "Each scenario shows two dots: ",
-        shiny::tags$b("baseline (grey)"),
-        " and ",
-        shiny::tags$b("policy-adjusted (red)"),
-        ". All bands are drawn relative to the dot (the ensemble-mean annual aggregate) and answer different questions about uncertainty. They are not meant to be added together — see the Diagnostics tab for how the sources combine.",
-        shiny::tags$br(), shiny::tags$br(),
-        shiny::tags$b("Thick coloured band — “How much do climate models disagree?”"),
-        " (future scenarios only)",
-        shiny::tags$br(),
-        " Inter-model spread: quantile across CMIP6 ensemble members of each model's time-mean. This band can be asymmetric around the dot when models lean one way.",
-        shiny::tags$br(),
-        shiny::tags$b("Middle band — “How much does weather vary year-to-year within a typical model?”"),
-        shiny::tags$br(),
-        " Inter-annual variability: per-model quantile across simulation years, then averaged across models. Reflects the natural range of outcomes a single climate trajectory produces.",
-        shiny::tags$br(),
-        shiny::tags$b("Innermost line — “How precisely is each (model, year) aggregate estimated?”"),
-        " (shown when coefficient uncertainty is enabled)",
-        shiny::tags$br(),
-        " Analytic per-outcome SE from the regression fit. By default, under 'original' residuals, restricted to coefficients on weather and the policy-modified variables, and their interactions (additive-decomposition SE — see Step 2 settings to widen to all coefficients). This is precision of a point estimate, not a spread of outcomes — conceptually distinct from the two coloured bands.",
-        shiny::tags$br(), shiny::tags$br(),
-        "Historical = single 'model' so no inter-model band is shown. Dashed line = historical mean. A pooled summary SE combining coefficient and inter-model uncertainty is available in the return-period table on the Diagnostics tab."
+        "Grey dot = baseline; red dot = policy-adjusted; bands = uncertainty ranges (not additive) — click ",
+        shiny::icon("circle-info"), " above for details."
       )
     ),
     shiny::wellPanel(
-      shiny::h4("Exceedance probability by climate scenario"),
+      shiny::h4(
+        "Exceedance probability by climate scenario",
+        info_popover(
+          title = "Exceedance probability",
+          shiny::p(
+            "Shows the probability that the outcome exceeds a given",
+            "threshold, by scenario. The logit axis emphasises both tails;",
+            "return period lines mark standard thresholds (e.g. 1-in-20-year",
+            "events)."
+          ),
+          docs = TRUE
+        )
+      ),
       shiny::tags$div(
         style = "display:flex; gap:20px; flex-wrap:wrap; margin-bottom:6px;",
         shiny::checkboxInput(
@@ -353,13 +382,22 @@ policy_input_diagnostics <- function(baseline_svy, policy_svy, vars = NULL) {
       shiny::uiOutput(ns("threshold_table_footer"))
     ),
     shiny::wellPanel(
-      shiny::h4("Per-model trajectories over simulation years"),
+      shiny::h4(
+        "Per-model trajectories over simulation years",
+        info_popover(
+          title = "Reading this chart",
+          shiny::p(
+            "Thin lines = one CMIP6 member's annual trajectory; bold line =",
+            "across-model median per simulation year. Baseline is rendered",
+            "faded; policy-adjusted is fully opaque."
+          ),
+          docs = TRUE
+        )
+      ),
       shiny::plotOutput(ns("timeseries_plot"), height = "420px"),
       shiny::tags$p(
         style = "font-size:11px; color:#666; margin-top:6px;",
-        "Thin lines = one CMIP6 member's annual trajectory; bold line = ",
-        "across-model median per simulation year. Baseline is rendered ",
-        "faded; policy-adjusted is fully opaque."
+        "Faded = baseline; opaque = policy-adjusted; bold = median trajectory."
       )
     )
   )
@@ -1006,9 +1044,11 @@ policy_input_diagnostics <- function(baseline_svy, policy_svy, vars = NULL) {
     DT::datatable(
       df, rownames = FALSE, class = "compact stripe",
       options = list(
-        pageLength = 30, dom = "t", ordering = FALSE,
-        columnDefs = list(list(className = "dt-center", targets = "_all"))
-      )
+        pageLength = 30, dom = "Bt", ordering = list(list(2, "desc")),
+        columnDefs = list(list(className = "dt-center", targets = "_all")),
+        buttons = list(list(extend = "csv", filename = "outcome_thresholds"))
+      ),
+      extensions = "Buttons"
     )
   })
   outputOptions(output, "summary_threshold_table", suspendWhenHidden = FALSE)
@@ -1016,23 +1056,26 @@ policy_input_diagnostics <- function(baseline_svy, policy_svy, vars = NULL) {
   output$threshold_table_header <- renderUI({
     req(baseline_agg_hist())
     tagList(
-      shiny::h4("Outcome value at return-period thresholds (both tails)"),
+      shiny::h4(
+        "Outcome value at return-period thresholds (both tails)",
+        info_popover(
+          title = "Return-period thresholds",
+          shiny::p("Low odds show the value exceeded in only 1-in-N years."),
+          shiny::p("High odds show the value reached in all but 1-in-N years."),
+          shiny::p("1:1 shows the median (50th percentile) simulated value."),
+          docs = TRUE
+        )
+      ),
       shiny::tags$small(class = "text-muted", table_subtitle())
     )
   })
 
   output$threshold_table_footer <- renderUI({
     req(baseline_agg_hist())
-    tagList(
-      shiny::tags$p(
-        style = "font-size:11px; color:#666; margin-top:6px; margin-bottom:2px;",
-        "Low odds show the value exceeded in only 1-in-N years."),
-      shiny::tags$p(
-        style = "font-size:11px; color:#666; margin-top:0; margin-bottom:2px;",
-        "High odds show the value reached in all but 1-in-N years."),
-      shiny::tags$p(
-        style = "font-size:11px; color:#666; margin-top:0;",
-        "1:1 shows the median (50th percentile) simulated value.")
+    shiny::tags$p(
+      style = "font-size:11px; color:#666; margin-top:6px;",
+      "Odds relative to a 1-in-N-year event — click ",
+      shiny::icon("circle-info"), " above for definitions."
     )
   })
 
@@ -1074,16 +1117,9 @@ policy_input_diagnostics <- function(baseline_svy, policy_svy, vars = NULL) {
       "Probability axis is logit-scaled, giving equal visual weight to both tails."
     else
       "The curve shows the estimated annual exceedance probability for each outcome value."
-    tagList(
-      shiny::tags$p(
-        style = "font-size:11px; color:#666; margin-top:6px; margin-bottom:2px;",
-        axis_txt),
-      shiny::tags$p(
-        style = "font-size:11px; color:#666; margin-top:0; margin-bottom:2px;",
-        "Low odds show the value exceeded in only 1-in-N years."),
-      shiny::tags$p(
-        style = "font-size:11px; color:#666; margin-top:0;",
-        "High odds show the value reached in all but 1-in-N years.")
+    shiny::tags$p(
+      style = "font-size:11px; color:#666; margin-top:6px;",
+      axis_txt
     )
   })
 
@@ -1357,7 +1393,7 @@ pol_plot_pointrange_climate <- function(baseline_scenarios,
       drop   = FALSE
     ) +
     ggplot2::labs(title = NULL, x = NULL, y = hist_agg$x_label) +
-    ggplot2::theme_minimal(base_size = 13) +
+    theme_wise() +
     ggplot2::theme(
       panel.grid.major.x = ggplot2::element_blank(),
       panel.grid.minor.x = ggplot2::element_blank(),
@@ -1653,7 +1689,7 @@ pol_enhance_exceedance <- function(baseline_scenarios,
       x     = x_label,
       y     = "Annual exceedance probability"
     ) +
-    ggplot2::theme_minimal() +
+    theme_wise() +
     ggplot2::theme(
       plot.title      = ggplot2::element_text(face = "bold", size = 12,
                                               hjust = 0.5),
