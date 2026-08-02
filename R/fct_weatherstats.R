@@ -223,6 +223,234 @@ plot_binscatter <- function(df, hv, hv_label = hv, y_var, y_label = y_var) {
 }
 
 # ---------------------------------------------------------------------------- #
+# Historical vs sample weather comparison                                       #
+# ---------------------------------------------------------------------------- #
+
+#' Default year range for the historical weather comparison
+#'
+#' The range ends at the latest calendar year covered by the survey
+#' timestamps and spans `n_years` calendar years (inclusive).
+#'
+#' @param survey_dates Date vector of survey timestamps.
+#' @param n_years      Integer. Length of the range. Default 20.
+#'
+#' @return A named integer vector `c(from = , to = )`, or `NULL` when
+#'   `survey_dates` is empty.
+#'
+#' @export
+default_hist_year_range <- function(survey_dates, n_years = 20L) {
+  survey_dates <- as.Date(survey_dates)
+  survey_dates <- survey_dates[!is.na(survey_dates)]
+  if (length(survey_dates) == 0) return(NULL)
+
+  to <- as.integer(format(max(survey_dates), "%Y"))
+  c(from = to - as.integer(n_years) + 1L, to = to)
+}
+
+
+#' Expand survey timestamps across a range of calendar years
+#'
+#' Repeats each survey month-day across every year in `[year_from, year_to]`
+#' so the historical series covers exactly the same part of the calendar as
+#' the survey waves (e.g. August-October only, if that is when the survey was
+#' fielded). The original survey timestamps are always retained so the sample
+#' can be plotted alongside the historical distribution even when the survey
+#' year falls outside the requested range.
+#'
+#' Any preceding months pulled in by a variable's temporal aggregation window
+#' are handled by `get_weather()` itself — the rolling window is applied
+#' relative to each returned timestamp.
+#'
+#' @param survey_dates Date vector of survey timestamps.
+#' @param year_from,year_to Integer calendar years (inclusive).
+#'
+#' @return A sorted Date vector of unique timestamps.
+#'
+#' @export
+expand_hist_dates <- function(survey_dates, year_from, year_to) {
+  survey_dates <- as.Date(survey_dates)
+  survey_dates <- survey_dates[!is.na(survey_dates)]
+  if (length(survey_dates) == 0) return(as.Date(character(0)))
+
+  year_from <- as.integer(year_from)
+  year_to   <- as.integer(year_to)
+  if (is.na(year_from) || is.na(year_to)) return(sort(unique(survey_dates)))
+  if (year_from > year_to) {
+    tmp <- year_from; year_from <- year_to; year_to <- tmp
+  }
+
+  month_day <- unique(format(survey_dates, "%m-%d"))
+  grid      <- expand.grid(
+    year = seq.int(year_from, year_to), md = month_day,
+    stringsAsFactors = FALSE
+  )
+  expanded <- as.Date(paste0(grid$year, "-", grid$md), format = "%Y-%m-%d")
+
+  sort(unique(c(survey_dates, expanded[!is.na(expanded)])))
+}
+
+
+#' Restrict historical weather to the survey's location-month cells
+#'
+#' Joins a historical weather frame (loc x timestamp, as returned by
+#' `get_weather()$historical`) onto the `loc_id` x calendar-month cells that
+#' the survey sample actually occupies, and attaches the number of sampled
+#' households per cell. This does three things at once:
+#'
+#' * drops locations that are not in the sample,
+#' * keeps only the calendar months the wave was fielded in — per wave, so
+#'   two waves fielded in different seasons stay separate,
+#' * gives each cell the weight of the households behind it, so the
+#'   historical and sample distributions are composed the same way.
+#'
+#' Rows falling on a wave's own survey timestamps are flagged `is_sample`.
+#'
+#' @param hist_df        Data frame with `code`, `year`, `survname`, `loc_id`,
+#'   `timestamp` and one column per weather variable.
+#' @param survey_weather Merged survey-weather frame (household level).
+#'
+#' @return `hist_df` with added columns `int_month`, `cal_year`, `n_hh`,
+#'   `is_sample`, `economy` and `countryyear`; `NULL` when the inputs cannot
+#'   be joined or nothing survives the join.
+#'
+#' @export
+join_hist_sample_cells <- function(hist_df, survey_weather) {
+  keys <- c("code", "year", "survname", "loc_id", "timestamp")
+  if (is.null(hist_df) || is.null(survey_weather)) return(NULL)
+  if (!all(keys %in% names(hist_df)) || !all(keys %in% names(survey_weather))) {
+    return(NULL)
+  }
+
+  sw <- survey_weather
+  sw$year      <- as.character(sw$year)
+  sw$timestamp <- as.Date(sw$timestamp)
+  sw$int_month <- as.integer(format(sw$timestamp, "%m"))
+  if (!"economy" %in% names(sw)) sw$economy <- sw$code
+
+  # One row per wave x location x calendar month, weighted by the households
+  # sampled there.
+  cells <- sw |>
+    dplyr::count(
+      .data$code, .data$year, .data$survname, .data$loc_id, .data$int_month,
+      name = "n_hh"
+    )
+
+  waves <- sw |>
+    dplyr::distinct(.data$code, .data$year, .data$survname, .data$economy)
+
+  wave_dates <- sw |>
+    dplyr::distinct(.data$code, .data$year, .data$survname, .data$timestamp) |>
+    dplyr::mutate(is_sample = TRUE)
+
+  h <- hist_df
+  h$year      <- as.character(h$year)
+  h$timestamp <- as.Date(h$timestamp)
+  h$int_month <- as.integer(format(h$timestamp, "%m"))
+  h$cal_year  <- as.integer(format(h$timestamp, "%Y"))
+
+  h <- h |>
+    dplyr::inner_join(
+      cells, by = c("code", "year", "survname", "loc_id", "int_month")
+    ) |>
+    dplyr::left_join(waves, by = c("code", "year", "survname")) |>
+    dplyr::left_join(
+      wave_dates, by = c("code", "year", "survname", "timestamp")
+    )
+
+  if (nrow(h) == 0) return(NULL)
+
+  h$is_sample   <- !is.na(h$is_sample)
+  h$countryyear <- paste0(h$economy, ", ", h$year)
+  h
+}
+
+
+#' Overlay the historical weather distribution with the survey sample
+#'
+#' Draws a household-weighted histogram of the chosen historical years and
+#' overlays the survey wave's own weather as a density curve on the same
+#' density scale, so the two remain comparable despite very different numbers
+#' of observations (the sample covers a handful of location-months, the
+#' historical series covers the same cells across many years). One facet per
+#' survey wave.
+#'
+#' @param cells_df  Data frame from `join_hist_sample_cells()`.
+#' @param hv        Scalar character. Name of the weather variable column.
+#' @param label     Scalar character. Human-readable variable label.
+#' @param year_from,year_to Integer calendar years bounding the historical
+#'   series (inclusive).
+#' @param bins      Integer. Number of histogram bins. Default 30.
+#'
+#' @return A `ggplot` object, or `NULL` when there is nothing to plot.
+#'
+#' @export
+plot_hist_vs_sample <- function(cells_df, hv, label, year_from, year_to,
+                                bins = 30) {
+  if (is.null(cells_df) || is.na(hv) || !(hv %in% names(cells_df))) return(NULL)
+
+  vals <- suppressWarnings(as.numeric(cells_df[[hv]]))
+  d    <- cells_df[is.finite(vals), , drop = FALSE]
+  if (nrow(d) == 0) return(NULL)
+  d$value <- vals[is.finite(vals)]
+
+  hist_lab <- paste0("Historical ", year_from, "–", year_to)
+  samp_lab <- "Survey sample"
+
+  hist_part <- d[d$cal_year >= as.integer(year_from) &
+                   d$cal_year <= as.integer(year_to), , drop = FALSE]
+  samp_part <- d[d$is_sample, , drop = FALSE]
+  if (nrow(hist_part) == 0) return(NULL)
+
+  hist_part$source <- hist_lab
+  samp_part$source <- samp_lab
+
+  p <- ggplot2::ggplot() +
+    ggplot2::geom_histogram(
+      data    = hist_part,
+      mapping = ggplot2::aes(
+        x      = .data$value,
+        y      = ggplot2::after_stat(density),
+        weight = .data$n_hh,
+        fill   = .data$source
+      ),
+      colour = NA, alpha = 0.7, bins = bins
+    )
+
+  if (nrow(samp_part) > 0) {
+    p <- p + ggplot2::geom_density(
+      data    = samp_part,
+      mapping = ggplot2::aes(
+        x      = .data$value,
+        y      = ggplot2::after_stat(density),
+        weight = .data$n_hh,
+        colour = .data$source
+      ),
+      fill = NA, linewidth = 0.9, key_glyph = ggplot2::draw_key_path
+    )
+  }
+
+  p +
+    ggplot2::facet_wrap(ggplot2::vars(.data$countryyear), scales = "free_y") +
+    ggplot2::scale_fill_manual(
+      values = stats::setNames("#808080", hist_lab), name = NULL
+    ) +
+    ggplot2::scale_colour_manual(
+      values = stats::setNames("#1f78b4", samp_lab), name = NULL
+    ) +
+    theme_wise() +
+    ggplot2::labs(
+      x       = stringr::str_wrap(paste0(label, "\n(as configured)"), 40),
+      y       = "Density",
+      caption = paste(
+        "Same locations and calendar months as the survey wave, weighted by",
+        "the number of sampled households per location-month."
+      )
+    ) +
+    ggplot2::theme(legend.position = "top")
+}
+
+
+# ---------------------------------------------------------------------------- #
 # Summary stats table                                                          #
 # ---------------------------------------------------------------------------- #
 

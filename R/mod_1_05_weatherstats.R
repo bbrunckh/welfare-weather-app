@@ -51,6 +51,10 @@ mod_1_05_weatherstats_server <- function(
     # Slim survey x weather frame holding the pre-binning (continuous) values
     # of binned weather variables. Plot-only; never leaves this module.
     survey_weather_cont <- reactiveVal(NULL)
+    # Historical weather over a user-chosen year range, restricted to the
+    # sample's location x calendar-month cells. Plot-only.
+    hist_cells        <- reactiveVal(NULL)
+    hist_cells_years  <- reactiveVal(NULL)
 
     # ---- Weather stats button -----------------------------------------------
 
@@ -142,6 +146,12 @@ mod_1_05_weatherstats_server <- function(
       }
       survey_weather_cont(survey_cont)
 
+      # Any historical comparison on screen belongs to the previous weather
+      # configuration. Drop the stale cells now, remember the year range, and
+      # rebuild it under the new configuration at the end of this observer.
+      hist_reload_years <- hist_cells_years()
+      hist_cells(NULL)
+
       showNotification("Weather data ready.", duration = 3, type = "message")
 
       # ---- Define outputs once then add tab ---------------------------------
@@ -197,6 +207,84 @@ mod_1_05_weatherstats_server <- function(
 
         output$weather_dist_cont1 <- make_weather_dist_cont(1)
         output$weather_dist_cont2 <- make_weather_dist_cont(2)
+
+        # -- Historical vs sample weather -------------------------------------
+        # Year-range menu lives in the panel itself; defaults to the 20 years
+        # ending at the latest year covered by the selected survey waves.
+
+        output$hist_year_ui <- shiny::renderUI({
+          shiny::req(survey_data())
+          rng <- default_hist_year_range(extract_survey_dates(survey_data()))
+          shiny::req(rng)
+          this_year <- as.integer(format(Sys.Date(), "%Y"))
+
+          bslib::layout_columns(
+            col_widths = c(3, 3, 6),
+            shiny::numericInput(
+              ns("hist_year_from"), "From year",
+              value = rng[["from"]], min = 1950, max = this_year, step = 1
+            ),
+            shiny::numericInput(
+              ns("hist_year_to"), "To year",
+              value = rng[["to"]], min = 1950, max = this_year, step = 1
+            ),
+            shiny::div(
+              style = "display: flex; align-items: flex-end; height: 100%;",
+              shiny::actionButton(
+                ns("hist_load"), "Load historical weather", class = "btn-primary"
+              )
+            )
+          )
+        })
+
+        make_hist_vs_sample <- function(idx) {
+          renderPlot({
+            req(hist_cells(), hist_cells_years())
+            sw  <- isolate(selected_weather())
+            yrs <- hist_cells_years()
+
+            p <- plot_hist_vs_sample(
+              cells_df  = hist_cells(),
+              hv        = sw$name[idx],
+              label     = sw$label[idx],
+              year_from = yrs[["from"]],
+              year_to   = yrs[["to"]]
+            )
+            if (is.null(p)) {
+              plot.new(); title(main = "No historical weather to plot")
+              return(invisible(NULL))
+            }
+            p
+          })
+        }
+
+        output$hist_vs_sample1 <- make_hist_vs_sample(1)
+        output$hist_vs_sample2 <- make_hist_vs_sample(2)
+
+        output$hist_vs_sample_layout <- shiny::renderUI({
+          cells <- hist_cells()
+          if (is.null(cells)) {
+            return(shiny::tagList(
+              shiny::helpText(
+                paste("Pick a year range above and click 'Load historical",
+                      "weather' to compare the survey wave against its own",
+                      "climate history."),
+                style = "font-size: 12px; margin-bottom: 0;"
+              ),
+              shiny::div(style = "height: 24px;")
+            ))
+          }
+
+          # Give the facets (one per survey wave) room to breathe.
+          n_waves <- length(unique(cells$countryyear))
+          n_rows  <- ceiling(n_waves / max(1L, ceiling(sqrt(n_waves))))
+
+          weather_plot_layout(
+            ns, nrow(selected_weather() %||% data.frame()),
+            ids    = c("hist_vs_sample1", "hist_vs_sample2"),
+            height = paste0(max(320, 240 * n_rows), "px")
+          )
+        })
 
         # -- Binscatter plots (one per variable) ------------------------------
 
@@ -354,11 +442,34 @@ mod_1_05_weatherstats_server <- function(
               info_popover(
                 p(paste(
                   "Distribution of each selected weather variable across the",
-                  "survey sample, weighted by survey weights where available."
+                  "survey sample, weighted by survey weights where available.",
+                  "Note that they need not be of the same time of year or location, ",
+                  "so the distributions need not match each other.",
+                  "Use below Distribution of Weather (historical versus sample) to ",
+                  "compare the sample against its own climate history."
                 ))
               )
             ),
             shiny::uiOutput(ns("weather_dist_layout")),
+            shiny::br(),
+            shiny::h4(
+              "Distribution of weather (historical versus sample)",
+              info_popover(
+                p(paste(
+                  "Weather over a longer run of years for the same locations",
+                  "and the same calendar months the survey was fielded in,",
+                  "overlaid with the weather the sample actually experienced.",
+                  "Each variable is shown on its configured scale (raw,",
+                  "deviation from mean, standardised anomaly) and always as a",
+                  "continuous distribution, even when the variable is binned",
+                  "for modelling. Cells are weighted by the number of sampled",
+                  "households behind them, so both distributions are composed",
+                  "the same way."
+                ))
+              )
+            ),
+            shiny::uiOutput(ns("hist_year_ui")),
+            shiny::uiOutput(ns("hist_vs_sample_layout")),
             shiny::br(),
             shiny::h4(
               "Outcome vs weather",
@@ -401,6 +512,106 @@ mod_1_05_weatherstats_server <- function(
           silent = TRUE
         )
       }
+
+      # Rebuild the historical comparison for the year range already in use,
+      # so a re-configuration refreshes every panel on the tab rather than
+      # sending the user back to the "Load historical weather" button.
+      if (!is.null(hist_reload_years)) {
+        load_hist_weather(hist_reload_years[["from"]],
+                          hist_reload_years[["to"]])
+      }
+
+    }, ignoreInit = TRUE, ignoreNULL = TRUE)
+
+    # ---- Historical weather over a user-chosen year range --------------------
+
+    # Loads historical weather for [yf, yt] and rebuilds the comparison cells.
+    # Shared by the "Load historical weather" button and by the automatic
+    # refresh that follows a change of weather configuration.
+    #
+    # This is a second, full `get_weather()` pass: the survey-period load only
+    # covers the wave's own months, so the extra years have to be aggregated,
+    # rolled and transformed here regardless of what was loaded before.
+    load_hist_weather <- function(yf, yt) {
+      svy <- survey_data()
+      ss  <- selected_surveys()
+      sw  <- selected_weather()
+      swd <- survey_weather()
+      if (is.null(svy) || is.null(ss) || is.null(sw) || is.null(swd)) {
+        return(invisible(FALSE))
+      }
+
+      # Same months and locations as the survey, more years. The temporal
+      # aggregation window configured for each variable is applied by
+      # get_weather() relative to each of these timestamps.
+      dates <- expand_hist_dates(extract_survey_dates(svy), yf, yt)
+      if (length(dates) == 0) return(invisible(FALSE))
+
+      # Always continuous here — binning is a modelling choice, this section
+      # compares distributions. Everything else (temporal aggregation,
+      # deviation from mean, standardised anomaly) is left as configured.
+      sw_cont <- sw
+      if ("cont_binned" %in% names(sw_cont)) sw_cont$cont_binned <- "Continuous"
+
+      notif <- showNotification(
+        sprintf("Loading historical weather %d-%d...", yf, yt),
+        duration = NULL, type = "message"
+      )
+
+      hist_res <- tryCatch({
+        get_weather(
+          survey_data       = svy,
+          selected_surveys  = ss,
+          selected_weather  = sw_cont,
+          dates             = dates,
+          connection_params = connection_params()
+        )
+      }, error = function(e) {
+        shiny::showNotification(
+          paste("Failed to load historical weather:", conditionMessage(e)),
+          type = "error", duration = 8
+        )
+        NULL
+      })
+
+      removeNotification(notif)
+      if (is.null(hist_res$historical)) return(invisible(FALSE))
+
+      cells <- join_hist_sample_cells(hist_res$historical, swd)
+      if (is.null(cells) || nrow(cells) == 0) {
+        showNotification(
+          paste("No historical weather matched the survey's locations and",
+                "months for the selected years."),
+          type = "warning", duration = 8
+        )
+        return(invisible(FALSE))
+      }
+
+      hist_cells(cells)
+      hist_cells_years(c(from = yf, to = yt))
+      showNotification("Historical weather ready.", duration = 3,
+                       type = "message")
+      invisible(TRUE)
+    }
+
+    observeEvent(input$hist_load, {
+      req(selected_weather(), selected_surveys(), survey_data(),
+          survey_weather())
+
+      yf <- suppressWarnings(as.integer(input$hist_year_from))
+      yt <- suppressWarnings(as.integer(input$hist_year_to))
+      if (is.na(yf) || is.na(yt)) {
+        showNotification("Enter both a start and an end year.",
+                         type = "warning", duration = 5)
+        return()
+      }
+      if (yf > yt) {
+        tmp <- yf
+        yf  <- yt
+        yt  <- tmp
+      }
+
+      load_hist_weather(yf, yt)
 
     }, ignoreInit = TRUE, ignoreNULL = TRUE)
 
