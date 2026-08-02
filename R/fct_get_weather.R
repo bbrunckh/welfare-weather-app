@@ -348,6 +348,12 @@
 #'     `make.names()`).  All models with a complete set of weather variable
 #'     deltas are returned.
 #'
+#'   When any variable is binned, the list also carries a
+#'   `"continuous_weather"` attribute: the key columns plus the binned
+#'   variables' pre-`cut()` (but post-transformation) values for the
+#'   historical slice. Descriptive use only — the modelling pipeline uses the
+#'   binned columns in `"historical"`.
+#'
 #' @export
 get_weather <- function(
   survey_data,
@@ -518,6 +524,11 @@ get_weather <- function(
   has_binning <- "cont_binned" %in% names(selected_weather) &&
     any(!is.na(selected_weather$cont_binned) & selected_weather$cont_binned == "Binned")
 
+  # Pre-binning copy of the binned columns, kept for descriptive plots only
+  # (attached as an attribute below so the returned list keeps exactly one
+  # element per scenario).
+  continuous_hist <- NULL
+
   if (has_binning) {
     if (is.null(stored_breaks) || length(stored_breaks) == 0) {
       # Compute breaks from the full survey-period loc_id x timestamp distribution.
@@ -531,6 +542,21 @@ get_weather <- function(
       hist_ref  <- hist_ref[do.call(order, hist_ref[sort_cols]), ]
 
       stored_breaks <- .compute_breaks(hist_ref, selected_weather)
+    }
+
+    # Keep the untouched (already transformed) values of the binned columns
+    # before `cut()` overwrites them, so the UI can show the underlying
+    # continuous distribution alongside the bins.
+    binned_vars <- intersect(names(stored_breaks), names(result[["historical"]]))
+    if (length(binned_vars) > 0) {
+      keep_cols <- unique(c(
+        intersect(
+          c("code", "year", "survname", "loc_id", "timestamp"),
+          names(result[["historical"]])
+        ),
+        binned_vars
+      ))
+      continuous_hist <- result[["historical"]][, keep_cols, drop = FALSE]
     }
 
     # Apply to historical slice immediately
@@ -818,6 +844,11 @@ get_weather <- function(
   # Attach computed breaks so the caller can reuse them in subsequent calls
   if (has_binning && !is.null(stored_breaks)) {
     attr(result, "stored_breaks") <- stored_breaks
+  }
+
+  # Attach the pre-binning values of the binned columns (descriptive use only)
+  if (!is.null(continuous_hist)) {
+    attr(result, "continuous_weather") <- continuous_hist
   }
 
   result

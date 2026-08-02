@@ -48,6 +48,9 @@ mod_1_05_weatherstats_server <- function(
     weather_tab_added <- reactiveVal(FALSE)
     survey_weather    <- reactiveVal(NULL)
     stored_breaks     <- reactiveVal(NULL)
+    # Slim survey x weather frame holding the pre-binning (continuous) values
+    # of binned weather variables. Plot-only; never leaves this module.
+    survey_weather_cont <- reactiveVal(NULL)
 
     # ---- Weather stats button -----------------------------------------------
 
@@ -119,6 +122,26 @@ mod_1_05_weatherstats_server <- function(
       req(!is.null(survey_wd))
 
       survey_weather(survey_wd)
+
+      # Companion frame with the continuous values behind the bins. Merged
+      # from a slim slice of the survey data so it stays cheap and leaves
+      # `survey_weather()` (used downstream) untouched.
+      cont_wd  <- attr(weather_full, "continuous_weather")
+      survey_cont <- NULL
+      if (!is.null(cont_wd)) {
+        survey_cont <- tryCatch(
+          merge_survey_weather(
+            svy |> dplyr::select(dplyr::any_of(c(
+              "code", "year", "survname", "loc_id", "timestamp",
+              "economy", "weight"
+            ))),
+            cont_wd
+          ),
+          error = function(e) NULL
+        )
+      }
+      survey_weather_cont(survey_cont)
+
       showNotification("Weather data ready.", duration = 3, type = "message")
 
       # ---- Define outputs once then add tab ---------------------------------
@@ -148,6 +171,32 @@ mod_1_05_weatherstats_server <- function(
 
         output$weather_dist1 <- make_weather_dist(1)
         output$weather_dist2 <- make_weather_dist(2)
+
+        # -- Continuous distribution behind a binned variable -----------------
+        # Only rendered for binned variables (see `weather_dist_layout`); the
+        # values are the same transformed series the bins were cut from, so a
+        # deviation-from-mean / anomaly configuration carries through.
+
+        make_weather_dist_cont <- function(idx) {
+          renderPlot({
+            req(survey_weather_cont())
+            df    <- survey_weather_cont() |>
+              dplyr::mutate(countryyear = paste0(economy, ", ", year))
+            sw    <- isolate(selected_weather())
+            hv    <- sw$name[idx]
+            label <- sw$label[idx]
+
+            p <- plot_weather_dist(df, hv, label, "Continuous")
+            if (is.null(p)) {
+              plot.new(); title(main = "Continuous distribution unavailable")
+              return(invisible(NULL))
+            }
+            p
+          })
+        }
+
+        output$weather_dist_cont1 <- make_weather_dist_cont(1)
+        output$weather_dist_cont2 <- make_weather_dist_cont(2)
 
         # -- Binscatter plots (one per variable) ------------------------------
 
@@ -243,11 +292,49 @@ mod_1_05_weatherstats_server <- function(
         # Reactive layouts so panels update when the user toggles between
         # 1 and 2 weather variables without re-creating the tab.
         output$weather_dist_layout <- shiny::renderUI({
-          weather_plot_layout(
-            ns, nrow(selected_weather() %||% data.frame()),
-            ids    = c("weather_dist1", "weather_dist2"),
-            height = "300px"
-          )
+          sw     <- selected_weather() %||% data.frame()
+          n_vars <- nrow(sw)
+          dist_ids <- c("weather_dist1", "weather_dist2")
+          cont_ids <- c("weather_dist_cont1", "weather_dist_cont2")
+          cont_df  <- survey_weather_cont()
+
+          # A binned variable gets its bar chart supplemented with the
+          # continuous distribution underneath; continuous variables are
+          # already shown as such and need no supplement.
+          is_binned <- function(i) {
+            isTRUE(sw$cont_binned[i] == "Binned") &&
+              !is.null(cont_df) &&
+              isTRUE(sw$name[i] %in% names(cont_df)) &&
+              is.numeric(cont_df[[sw$name[i]]])
+          }
+
+          if (!any(vapply(seq_len(n_vars), is_binned, logical(1)))) {
+            return(weather_plot_layout(
+              ns, n_vars, ids = dist_ids, height = "300px"
+            ))
+          }
+
+          var_panel <- function(i) {
+            items <- list(shiny::plotOutput(ns(dist_ids[i]), height = "300px"))
+            if (is_binned(i)) {
+              items <- c(items, list(
+                shiny::helpText(
+                  "Above: Binned weather distribution as configured. Below: Continuous distribution the bins were derived from.",
+                  style = "font-size: 12px;"
+                ),
+                shiny::plotOutput(ns(cont_ids[i]), height = "300px")
+              ))
+            }
+            do.call(bslib::card, items)
+          }
+
+          if (n_vars >= 2) {
+            bslib::layout_columns(
+              col_widths = c(6, 6), var_panel(1), var_panel(2)
+            )
+          } else {
+            var_panel(1)
+          }
         })
         output$binscatter_layout <- shiny::renderUI({
           weather_plot_layout(
