@@ -74,8 +74,27 @@ mod_1_02_surveystats_server <- function(
 
     # ---- Data storage -------------------------------------------------------
 
-    survey_data <- reactiveVal(NULL)
-    map_data    <- reactiveVal(NULL)
+    survey_data  <- reactiveVal(NULL)
+    map_data     <- reactiveVal(NULL)
+    # Per-H3-cell counts behind the "Sample density" view of the same map,
+    # recomputed for whichever wave the picker is on. Cheap: it is a regrouping
+    # of data already in memory, no round trip to the store.
+    density_cells <- function(wave = "all") {
+      cd <- cell_data()
+      df <- survey_data()
+      if (is.null(cd) || is.null(df)) return(NULL)
+
+      alloc <- allocate_units_to_cells(
+        filter_by_wave(cd$map, wave), filter_by_wave(df, wave)
+      )
+      if (is.null(alloc)) return(NULL)
+
+      dplyr::inner_join(cd$geom, alloc, by = "h3") |>
+        dplyr::filter(!is.na(geom), nchar(geom) > 2)
+    }
+    # Cell geometry plus the location-to-cell mapping, shared with the outcome
+    # and weather maps so they can merge overlapping locations onto cells.
+    cell_data    <- reactiveVal(NULL)
 
     # ---- Load and prepare data on button click ------------------------------
 
@@ -163,6 +182,28 @@ mod_1_02_surveystats_server <- function(
           notify(paste("Failed to build map data:", conditionMessage(e)), type = "warning", duration = 5)
         })
 
+        # -- Sample density heatmap -------------------------------------------
+        # One hexagon per H3 cell rather than one polygon per location: cells
+        # tile without overlapping, so the sample's density reads directly off
+        # the colour instead of a pile of outlines.
+        tryCatch({
+          cell_geo <- h3_df |>
+            dplyr::distinct(h3) |>
+            dplyr::mutate(
+              geom = st_asgeojson(st_geomfromtext(h3_cell_to_boundary_wkt(h3)))
+            ) |>
+            dplyr::collect()
+
+          cell_map <- h3_df |>
+            dplyr::select(code, year, survname, loc_id, h3, pop_2020) |>
+            dplyr::collect()
+
+          cell_data(list(geom = cell_geo, map = cell_map))
+        }, error = function(e) {
+          notify(paste("Failed to build sample density map:", conditionMessage(e)),
+                 type = "warning", duration = 5)
+        })
+
         tryCatch({
           panel_map <- loc_panel(h3_df, id_col = loc_id, h3_col = h3, weight_col = pop_2020,
                                     group_cols = c("code", "year", "survname"))
@@ -202,10 +243,57 @@ mod_1_02_surveystats_server <- function(
         # `keep_vec_names` warning that addGeoJSON would otherwise emit
         # is muted via the custom htmlwidgets JSON encoder installed in
         # .onLoad (R/zzz.R).
+        # Keep the view across a switch between Locations and Sample density,
+        # and across a reload — rebuilding the widget would otherwise snap
+        # back to the full extent.
+        map_view_mem <- map_view_memory(input, session, "map")
+        map_view_mem$remember()
+
         output$map <- leaflet::renderLeaflet({
-          m <- plot_survey_map(map_data())
+          wave <- input$map_wave %||% "all"
+
+          m <- if (identical(input$map_view, "density")) {
+            unit <- if (is.function(analysis_unit)) analysis_unit() else NULL
+            plot_sample_density_map(
+              density_cells(wave),
+              unit_label = switch(unit %||% "hh",
+                                  ind = "individuals", firm = "firms",
+                                  "households")
+            )
+          } else {
+            plot_survey_map(filter_features_by_wave(map_data(), wave))
+          }
           req(!is.null(m))
-          m
+          map_view_mem$restore(m)
+        })
+
+        # Wave picker, shown only when there is more than one wave to pick.
+        output$map_wave_ui <- shiny::renderUI({
+          w <- survey_wave_list(survey_data())
+          if (is.null(w) || nrow(w) < 2) return(NULL)
+          shiny::selectInput(
+            ns("map_wave"), NULL,
+            choices  = c(stats::setNames("all", "All waves"),
+                         stats::setNames(w$key, w$label)),
+            selected = shiny::isolate(input$map_wave) %||% "all",
+            width    = "160px"
+          ) |>
+            htmltools::tagAppendAttributes(
+              style = "margin-bottom: 0;", class = "small"
+            )
+        })
+
+        # Toggle between outlined locations and the per-cell heatmap.
+        output$map_view_ui <- shiny::renderUI({
+          shiny::radioButtons(
+            ns("map_view"), NULL, inline = TRUE,
+            selected = shiny::isolate(input$map_view) %||% "locations",
+            choiceNames  = list("Locations", "Sample density"),
+            choiceValues = list("locations", "density")
+          ) |>
+            htmltools::tagAppendAttributes(
+              style = "margin-bottom: 0;", class = "small"
+            )
         })
 
         output$outcome_stats <- make_stats_dt(survey_data, variable_list, "outcome")
@@ -283,14 +371,46 @@ mod_1_02_surveystats_server <- function(
               bslib::layout_columns(
                 col_widths = c(6, 6),
                 bslib::card(
-                  h4("Timing of interviews"),
-                  p(class = "text-muted small", "Monthly breakdown of interview waves"),
+                  h4(
+                    "Timing of interviews", class = "mb-2",
+                    info_popover(
+                      title = "Timing of interviews",
+                      p("Monthly breakdown of interview waves.")
+                    )
+                  ),
                   plotOutput(ns("interview_date"), height = "300px")
                 ),
+                # Pairing a definite card height with a 100%-height map is what
+                # lets the map fill the card in both the normal and the
+                # expanded state; a fixed pixel height would stay small when
+                # the card fans out.
+                # Title and view toggle share one row so the map keeps as much
+                # of the card as possible, expanded or not.
                 bslib::card(
-                  h4("Location of interviews"),
-                  p(class = "text-muted small", "Geographic distribution of sampled interviews"),
-                  leaflet::leafletOutput(ns("map"), height = "300px")
+                  full_screen = TRUE,
+                  height      = "400px",
+                  shiny::div(
+                    class = paste("d-flex align-items-center",
+                                  "justify-content-between flex-wrap gap-2 mb-2"),
+                    h4(
+                      "Location of interviews", class = "mb-0",
+                      info_popover(
+                        title = "Location of interviews",
+                        p(paste(
+                          "Geographic distribution of sampled interviews.",
+                          "'Locations' outlines each survey location;",
+                          "'Sample density' shades H3 cells by how many",
+                          "sampled units fall in them."
+                        ))
+                      )
+                    ),
+                    shiny::div(
+                      class = "d-flex align-items-center gap-2 flex-wrap",
+                      shiny::uiOutput(ns("map_wave_ui"), inline = TRUE),
+                      shiny::uiOutput(ns("map_view_ui"), inline = TRUE)
+                    )
+                  ),
+                  leaflet::leafletOutput(ns("map"), height = "100%")
                 )
               ),
               h4(
@@ -336,7 +456,8 @@ mod_1_02_surveystats_server <- function(
 
     list(
       survey_data = survey_data,
-      map_data    = map_data
+      map_data    = map_data,
+      cell_data   = cell_data
     )
   })
 }

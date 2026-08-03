@@ -24,6 +24,13 @@ mod_1_05_weatherstats_ui <- function(id) {
 #' @param selected_outcome Reactive data frame row of the selected outcome.
 #' @param selected_weather Reactive data frame of selected weather spec.
 #' @param survey_data      Reactive data frame of loaded survey observations.
+#' @param map_data         Reactive GeoJSON FeatureCollection of survey
+#'   locations from `mod_1_02_surveystats_server()`. Optional — the
+#'   weather-by-location maps are skipped when it is `NULL`.
+#' @param cell_data        Reactive list of `geom` (H3 cell geometry) and
+#'   `map` (location-to-cell mapping) from `mod_1_02_surveystats_server()`.
+#'   When present, values are merged onto H3 cells so overlapping survey
+#'   locations no longer stack translucent fills on top of each other.
 #' @param tabset_id        Character. `inputId` of the parent tabset panel.
 #' @param tabset_session   Shiny session for the parent tabset. Defaults to
 #'   `session$parent`.
@@ -37,6 +44,8 @@ mod_1_05_weatherstats_server <- function(
     selected_outcome,
     selected_weather,
     survey_data,
+    map_data = NULL,
+    cell_data = NULL,
     tabset_id,
     tabset_session = NULL
 ) {
@@ -286,6 +295,7 @@ mod_1_05_weatherstats_server <- function(
           )
         })
 
+
         # -- Binscatter plots (one per variable) ------------------------------
 
         make_binscatter <- function(idx) {
@@ -472,6 +482,73 @@ mod_1_05_weatherstats_server <- function(
             shiny::uiOutput(ns("hist_vs_sample_layout")),
             shiny::br(),
             shiny::h4(
+              "Weather by location",
+              info_popover(
+                shiny::tagList(
+                  p(paste(
+                    "Survey locations shaded by the weather the sample",
+                    "experienced there — the bin for binned variables, the",
+                    "configured value (raw, deviation from mean, standardised",
+                    "anomaly) for continuous ones. One map per survey wave,",
+                    "sharing a colour scale per variable so waves can be",
+                    "compared."
+                  )),
+                  p(paste(
+                    "The shaded value is the same quantity that enters the",
+                    "model as a regressor: each household is assigned the",
+                    "weather of its own location in its own interview month,",
+                    "already aggregated over the configured window (e.g. the",
+                    "mean of the months preceding the interview) and already",
+                    "transformed. Where a location was surveyed in a single",
+                    "interview month, every household there shares one value",
+                    "and the colour is exactly that regressor."
+                  )),
+                  p(paste(
+                    "Locations surveyed across several interview months hold",
+                    "several different values, so their colour is the",
+                    "household-weighted mean (continuous) or the most common",
+                    "bin (binned) across that location's own household-month",
+                    "observations. They are drawn with a dotted outline: the",
+                    "colour there summarises the households rather than",
+                    "reproducing any one household's regressor. Click a",
+                    "location for its value, household count and number of",
+                    "interview months."
+                  )),
+                  p(shiny::tags$b("Views.")),
+                  shiny::tags$ul(
+                    shiny::tags$li(paste(
+                      "Wave value — cross-sectional: what the sample",
+                      "experienced, so locations are compared with each other.",
+                      "This is the regressor itself."
+                    )),
+                    shiny::tags$li(paste(
+                      "Difference from own historical mean — within-location:",
+                      "the wave's value minus what the same location normally",
+                      "gets in the same calendar months over the loaded",
+                      "historical years, in the variable's units. Blue is",
+                      "below that location's own normal, red above."
+                    )),
+                    shiny::tags$li(paste(
+                      "Percentile in own history — within-location: where the",
+                      "wave's value falls in that location's own historical",
+                      "distribution, 0-100, with 50 a typical year. This is",
+                      "the map equivalent of where the sample curve sits",
+                      "inside the historical histogram above."
+                    ))
+                  ),
+                  p(paste(
+                    "Both within-location views need the historical years",
+                    "loaded above, and both use the continuous series even",
+                    "when the variable is binned for modelling — a difference",
+                    "between bins would not be meaningful."
+                  ))
+                )
+              )
+            ),
+            shiny::uiOutput(ns("wxmap_view_ui")),
+            shiny::uiOutput(ns("weather_map_layout")),
+            shiny::br(),
+            shiny::h4(
               "Outcome vs weather",
               info_popover(
                 p(paste(
@@ -522,6 +599,320 @@ mod_1_05_weatherstats_server <- function(
       }
 
     }, ignoreInit = TRUE, ignoreNULL = TRUE)
+
+    # ---- Weather by location maps -------------------------------------------
+
+  # -- Weather by location, one map per wave ----------------------------
+  # The merged frame holds one value per location *and interview month*,
+  # so `summarise_weather_by_loc()` collapses to one value per location
+  # (mean, or modal bin) before mapping. The palette is built once per
+  # variable across all waves so the maps stay comparable.
+
+  # The view chosen above the maps. "value" is cross-sectional — how the
+  # locations compare with each other in this wave. "anomaly" and "pctile" are
+  # within-location — how each location's wave compares with its own history,
+  # so they need the historical years loaded in the section above.
+  # The view chosen by the single picker above the maps.
+  wxmap_view_val <- reactiveVal("value")
+
+  wxmap_view <- reactive(wxmap_view_val())
+
+  wxmap_view_picker <- function(id) {
+    has_hist <- !is.null(hist_cells()) && !is.null(hist_cells_years())
+    yrs      <- hist_cells_years()
+    span     <- if (is.null(yrs)) "" else
+      paste0(" (", yrs[["from"]], "-", yrs[["to"]], ")")
+
+    selected <- wxmap_view_val()
+    if (!has_hist) selected <- "value"
+
+    radios <- shiny::radioButtons(
+      ns(id), NULL, inline = TRUE,
+      selected    = selected,
+      choiceNames = list(
+        "Wave value",
+        paste0("Difference from own historical mean", span),
+        paste0("Percentile in own history", span)
+      ),
+      choiceValues = list("value", "anomaly", "pctile")
+    )
+
+    if (!has_hist) {
+      radios <- htmltools::tagQuery(radios)$
+        find("input")$
+        filter(function(x, i) i %in% c(2L, 3L))$
+        addAttrs(
+          disabled = NA,
+          title    = paste("Load historical weather above to compare each",
+                           "location with its own history")
+        )$
+        parent()$
+        addAttrs(style = "opacity: 0.45; cursor: not-allowed;")$
+        allTags()
+    }
+
+    htmltools::tagAppendAttributes(radios, style = "margin-bottom: 0;")
+  }
+
+  # Whether the current view can actually be drawn.
+  wxmap_view_ready <- reactive({
+    wxmap_view() == "value" ||
+      (!is.null(hist_cells()) && !is.null(hist_cells_years()))
+  })
+
+  # Cell geometry to draw on, when Survey stats has supplied it. Values are
+  # merged onto these cells so overlapping survey locations stop stacking
+  # translucent fills — which invented colours that were in neither the data
+  # nor the legend.
+  wxmap_cells <- reactive({
+    cd <- if (is.null(cell_data)) NULL else cell_data()
+    if (is.null(cd) || is.null(cd$geom) || is.null(cd$map)) return(NULL)
+    cd
+  })
+
+  wxmap_features <- reactive({
+    cd <- wxmap_cells()
+    if (is.null(cd)) return(if (is.null(map_data)) NULL else map_data())
+    build_cell_features(cd$geom, cd$map) %||%
+      (if (is.null(map_data)) NULL else map_data())
+  })
+
+  # Per-location values, merged onto cells when cell geometry is in use.
+  to_cells <- function(lv) {
+    cd <- wxmap_cells()
+    if (is.null(cd) || is.null(lv)) return(lv)
+    merge_loc_values_to_cells(cd$map, lv) %||% lv
+  }
+
+  weather_loc_vals <- reactive({
+    req(survey_weather(), selected_weather())
+    sw   <- selected_weather()
+    view <- wxmap_view()
+
+    if (view == "value") {
+      return(lapply(seq_len(nrow(sw)), function(i) {
+        to_cells(summarise_weather_by_loc(survey_weather(), sw$name[i]))
+      }))
+    }
+
+    cells <- hist_cells()
+    yrs   <- hist_cells_years()
+    if (is.null(cells) || is.null(yrs)) return(NULL)
+    lapply(seq_len(nrow(sw)), function(i) {
+      to_cells(summarise_weather_anomaly_by_loc(
+        cells_df  = cells,
+        hv        = sw$name[i],
+        year_from = yrs[["from"]],
+        year_to   = yrs[["to"]],
+        measure   = if (view == "pctile") "percentile" else "anomaly"
+      ))
+    })
+  })
+
+  # Legend title and colour scale both follow the view. The maps are small, so
+  # the legend carries a short heading and the full sentence goes into the
+  # info marker's hover text (and the popups).
+  wxmap_label <- function(base_label) {
+    yrs  <- hist_cells_years()
+    span <- if (is.null(yrs)) "the historical years" else
+      paste0(yrs[["from"]], "-", yrs[["to"]])
+    switch(
+      wxmap_view(),
+      anomaly = paste0(base_label, " — difference from the location's own ",
+                       span, " mean, in the variable's units. Negative means",
+                       " the wave was below that location's normal."),
+      pctile  = paste0(base_label, " — where the wave falls in the location's",
+                       " own ", span, " distribution (0-100; 50 is a typical",
+                       " year)."),
+      paste0(base_label, " — the value the sample experienced, as configured.",
+             " This is the variable that enters the model.")
+    )
+  }
+
+  wxmap_short <- function(base_label) {
+    short <- if (nchar(base_label) > 20) {
+      paste0(substr(base_label, 1, 19), "…")
+    } else {
+      base_label
+    }
+    switch(
+      wxmap_view(),
+      anomaly = paste0(short, " Δ"),
+      pctile  = paste0(short, " %ile"),
+      short
+    )
+  }
+
+  wave_list <- reactive({
+    lv <- weather_loc_vals()
+    if (is.null(lv)) return(NULL)
+    lv <- Filter(Negate(is.null), lv)
+    if (length(lv) == 0) return(NULL)
+    w <- unique(lv[[1]][, c("code", "year", "survname", "economy")])
+    w$label <- paste0(w$economy, ", ", w$year)
+    w[order(w$label), , drop = FALSE]
+  })
+
+  wxmap_id <- function(i, w) paste0("wxmap_", i, "_", w)
+
+  # Every picker copy (the one above the maps plus one per card) writes to the
+  # shared value; a change in any of them updates the rest.
+  observeEvent(input$wxmap_view, {
+    v <- input$wxmap_view
+    if (!is.null(v)) wxmap_view_val(v)
+  }, ignoreInit = TRUE, ignoreNULL = TRUE)
+
+  # The within-location views need historical weather; drop back to the wave
+  # value if it goes away (a re-configuration clears it before reloading).
+  observeEvent(hist_cells(), {
+    if (is.null(hist_cells()) && !identical(wxmap_view_val(), "value")) {
+      wxmap_view_val("value")
+      shiny::updateRadioButtons(session, "wxmap_view", selected = "value")
+    }
+  }, ignoreNULL = FALSE)
+
+  # Per-map view memory, so switching view keeps the pan and zoom.
+  wxmap_view_mem <- new.env(parent = emptyenv())
+
+  # Outputs are created for whatever variable x wave combinations exist;
+  # re-running simply reassigns them.
+  observe({
+    gj <- wxmap_features()
+    req(gj)
+    lv_list <- weather_loc_vals()
+    req(lv_list)
+    waves <- wave_list()
+    req(waves)
+    sw   <- isolate(selected_weather())
+    view <- wxmap_view()
+
+    for (i in seq_along(lv_list)) {
+      lv <- lv_list[[i]]
+      if (is.null(lv)) next
+
+      tf <- if ("transformation" %in% names(sw)) sw$transformation[i] else "None"
+
+      # A difference is diverging around zero whatever the variable's own
+      # configuration; a percentile is a fixed 0-100 scale.
+      pal <- switch(
+        view,
+        anomaly = .weather_map_palette(lv$value, FALSE, NULL, tf,
+                                       force = "diverging"),
+        pctile  = .weather_map_palette(lv$value, FALSE, NULL, tf,
+                                       force = "sequential",
+                                       domain = c(0, 100)),
+        .weather_map_palette(lv$value, isTRUE(attr(lv, "binned")),
+                             attr(lv, "levels"), tf)
+      )
+
+      for (w in seq_len(nrow(waves))) {
+        local({
+          .lv    <- lv
+          .pal   <- pal
+          .tf    <- tf
+          .label <- sw$label[i]
+          .info  <- wxmap_label(sw$label[i])
+          .short <- wxmap_short(sw$label[i])
+          .wave  <- waves[w, ]
+          .id    <- wxmap_id(i, w)
+
+          sub <- .lv[.lv$code == .wave$code &
+                       .lv$year == .wave$year &
+                       .lv$survname == .wave$survname, , drop = FALSE]
+          attr(sub, "binned") <- attr(.lv, "binned")
+          attr(sub, "levels") <- attr(.lv, "levels")
+
+          if (is.null(wxmap_view_mem[[.id]])) {
+            wxmap_view_mem[[.id]] <- map_view_memory(input, session, .id)
+            wxmap_view_mem[[.id]]$remember()
+          }
+          .mem <- wxmap_view_mem[[.id]]
+
+          output[[.id]] <- leaflet::renderLeaflet({
+            m <- plot_weather_loc_map(
+              geojson        = gj,
+              loc_vals       = sub,
+              label          = .label,
+              transformation = .tf,
+              pal_info       = .pal,
+              legend_title   = .short,
+              legend_info    = .info
+            )
+            req(!is.null(m))
+            .mem$restore(m)
+          })
+        })
+      }
+    }
+  })
+
+  # View picker. Sits above the maps; the within-location views are only
+  # offered once the historical years have been loaded above.
+  output$wxmap_view_ui <- shiny::renderUI({
+    # Without historical weather there is nothing to compare a location with,
+    # so the two within-location views are greyed out and unselectable rather
+    # than silently showing something else (see the observer above for the
+    # matching reset of the shared value).
+    has_hist <- !is.null(hist_cells()) && !is.null(hist_cells_years())
+
+    shiny::tagList(
+      wxmap_view_picker("wxmap_view"),
+      if (!has_hist) shiny::helpText(
+        paste("The two within-location views compare each location with its",
+              "own history — load historical weather above to enable them."),
+        style = "font-size: 12px; margin-top: -6px;"
+      )
+    )
+  })
+
+  output$weather_map_layout <- shiny::renderUI({
+    if (is.null(wxmap_features())) {
+      return(shiny::helpText(
+        "Location map data is not available for this sample.",
+        style = "font-size: 12px;"
+      ))
+    }
+    if (!wxmap_view_ready()) {
+      return(shiny::helpText(
+        paste("This view compares each location with its own history.",
+              "Load historical weather above to see it."),
+        style = "font-size: 12px;"
+      ))
+    }
+
+    waves   <- wave_list()
+    lv_list <- weather_loc_vals()
+    sw      <- selected_weather()
+    if (is.null(waves) || is.null(lv_list) || is.null(sw)) {
+      return(shiny::helpText("No locations to map.",
+                             style = "font-size: 12px;"))
+    }
+
+    n_col <- if (nrow(waves) == 1) 1L else 2L
+    panels <- lapply(seq_len(nrow(sw)), function(i) {
+      if (is.null(lv_list[[i]])) return(NULL)
+      cards <- lapply(seq_len(nrow(waves)), function(w) {
+        # full_screen adds bslib's expand control: the card fans out over the
+        # results area, with a close button and Esc to come back. There is one
+        # map per wave already, so these cards carry no controls of their own.
+        bslib::card(
+          full_screen = TRUE,
+          height      = "430px",
+          bslib::card_header(waves$label[w]),
+          leaflet::leafletOutput(ns(wxmap_id(i, w)), height = "100%")
+        )
+      })
+      shiny::tagList(
+        do.call(
+          bslib::layout_columns,
+          c(list(col_widths = rep(12L / n_col, n_col)), cards)
+        ),
+        shiny::br()
+      )
+    })
+
+    shiny::tagList(panels)
+  })
 
     # ---- Historical weather over a user-chosen year range --------------------
 

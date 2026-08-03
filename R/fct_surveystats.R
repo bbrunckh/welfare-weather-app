@@ -270,10 +270,17 @@ plot_interview_dates <- function(plot_data) {
       # A single [lng, lat] pair
       all_lng <<- c(all_lng, coords[1])
       all_lat <<- c(all_lat, coords[2])
-    } else if (is.matrix(coords)) {
-      # A ring already coerced to a matrix by jsonlite
-      all_lng <<- c(all_lng, coords[, 1])
-      all_lat <<- c(all_lat, coords[, 2])
+    } else if (is.array(coords) && length(dim(coords)) >= 2L &&
+               utils::tail(dim(coords), 1L) == 2L) {
+      # jsonlite collapses coordinate nesting into an array whenever the rings
+      # are regular: n x 2 (matrix) for a Polygon with one ring, 1 x n x 2 for
+      # the same geometry read straight from GeoJSON, and deeper for
+      # MultiPolygons. The lng/lat pair is always the last dimension, and R
+      # stores it column-major, so the first half of the values are lng and
+      # the second half lat regardless of the leading dimensions.
+      flat <- matrix(as.numeric(coords), ncol = 2L)
+      all_lng <<- c(all_lng, flat[, 1L])
+      all_lat <<- c(all_lat, flat[, 2L])
     } else if (is.list(coords)) {
       lapply(coords, extract_coords)
     }
@@ -289,6 +296,297 @@ plot_interview_dates <- function(plot_data) {
   )
 }
 
+
+
+
+
+#' Survey waves present in a data frame, for a wave picker
+#'
+#' @param df Any frame carrying `code`, `year` and `survname` (and ideally
+#'   `economy` for the label).
+#'
+#' @return A data frame with `code`, `year`, `survname`, `key`
+#'   (`"code|year|survname"`) and `label`, ordered by label. `NULL` when the
+#'   keys are absent.
+#'
+#' @export
+survey_wave_list <- function(df) {
+  keys <- c("code", "year", "survname")
+  if (is.null(df) || !all(keys %in% names(df))) return(NULL)
+
+  d <- df
+  d$year <- as.character(d$year)
+  if (!"economy" %in% names(d)) d$economy <- d$code
+
+  w <- unique(d[, c(keys, "economy")])
+  if (nrow(w) == 0) return(NULL)
+
+  w$key   <- paste(w$code, w$year, w$survname, sep = "|")
+  w$label <- paste0(w$economy, ", ", w$year)
+  w <- w[order(w$label), , drop = FALSE]
+  rownames(w) <- NULL
+  w
+}
+
+
+#' Keep only the features belonging to one survey wave
+#'
+#' @param geojson A FeatureCollection whose features carry `code`, `year` and
+#'   `survname` properties.
+#' @param key A `"code|year|survname"` string, or `"all"` to keep everything.
+#'
+#' @return The filtered FeatureCollection.
+#'
+#' @export
+filter_features_by_wave <- function(geojson, key = "all") {
+  if (is.null(geojson) || is.null(key) || identical(key, "all")) return(geojson)
+  if (length(geojson$features) == 0) return(geojson)
+
+  keep <- vapply(geojson$features, function(f) {
+    p <- f$properties
+    identical(paste(as.character(p$code), as.character(p$year),
+                    as.character(p$survname), sep = "|"), key)
+  }, logical(1))
+
+  geojson$features <- geojson$features[keep]
+  geojson
+}
+
+
+#' Restrict a data frame to one survey wave
+#'
+#' @param df  A frame with `code`, `year`, `survname`.
+#' @param key A `"code|year|survname"` string, or `"all"`.
+#'
+#' @return The filtered frame.
+#'
+#' @export
+filter_by_wave <- function(df, key = "all") {
+  keys <- c("code", "year", "survname")
+  if (is.null(df) || identical(key, "all") || is.null(key)) return(df)
+  if (!all(keys %in% names(df))) return(df)
+  k <- paste(df$code, as.character(df$year), df$survname, sep = "|")
+  df[k == key, , drop = FALSE]
+}
+
+
+#' Approximate centre of a GeoJSON feature
+#'
+#' Mean of the feature's coordinates. Exact enough for placing a marker inside
+#' an H3 hexagon, and it needs no spatial library.
+#'
+#' @param f A feature list with a parsed `geometry$coordinates`.
+#'
+#' @return A length-2 numeric `c(lng, lat)`, or `c(NA, NA)`.
+#' @noRd
+.feature_centroid <- function(f) {
+  coords <- f$geometry$coordinates
+  if (is.null(coords)) return(c(NA_real_, NA_real_))
+
+  flat <- if (is.array(coords) && length(dim(coords)) >= 2L &&
+              utils::tail(dim(coords), 1L) == 2L) {
+    matrix(as.numeric(coords), ncol = 2L)
+  } else {
+    lng <- numeric(); lat <- numeric()
+    walk <- function(x) {
+      if (is.numeric(x) && length(x) == 2L) {
+        lng <<- c(lng, x[1]); lat <<- c(lat, x[2])
+      } else if (is.matrix(x)) {
+        lng <<- c(lng, x[, 1]); lat <<- c(lat, x[, 2])
+      } else if (is.list(x)) {
+        lapply(x, walk)
+      }
+    }
+    walk(coords)
+    cbind(lng, lat)
+  }
+
+  if (nrow(flat) == 0) return(c(NA_real_, NA_real_))
+  c(mean(flat[, 1], na.rm = TRUE), mean(flat[, 2], na.rm = TRUE))
+}
+
+
+#' Reset-view control
+#'
+#' A third button under Leaflet's zoom controls that returns the map to the
+#' extent it opened at, so panning and zooming is always recoverable.
+#'
+#' @param m      A `leaflet` widget.
+#' @param bounds List with `lng1`, `lat1`, `lng2`, `lat2`.
+#'
+#' @return `m` with the button added (unchanged if `bounds` is not finite).
+#' @noRd
+.add_reset_button <- function(m, bounds) {
+  if (!all(vapply(bounds, is.finite, logical(1)))) return(m)
+
+  js <- sprintf(
+    "function(btn, map) { map.fitBounds([[%s, %s], [%s, %s]]); }",
+    format(bounds$lat1, digits = 10), format(bounds$lng1, digits = 10),
+    format(bounds$lat2, digits = 10), format(bounds$lng2, digits = 10)
+  )
+
+  m |>
+    leaflet::addEasyButton(
+      leaflet::easyButton(
+        position = "topleft",
+        icon     = htmltools::HTML(
+          '<span style="font-size: 15px; line-height: 26px;">&#9678;</span>'
+        ),
+        title   = "Reset view",
+        onClick = htmlwidgets::JS(js)
+      )
+    )
+}
+
+
+#' Remember and restore a leaflet map's view across re-renders
+#'
+#' Switching a map's view (or reloading its data) rebuilds the widget, which
+#' would otherwise snap back to the data bounds and lose wherever the user had
+#' panned and zoomed to. This records the view Leaflet reports through Shiny
+#' and reapplies it to the next build of the same output.
+#'
+#' @param input,session Shiny `input` and `session` objects.
+#' @param output_id Character. The `outputId` of the leaflet output, without
+#'   the module namespace.
+#'
+#' @return A list with `remember()` — call once to start tracking — and
+#'   `restore(m)`, which applies the stored view to a widget.
+#'
+#' @noRd
+map_view_memory <- function(input, session, output_id) {
+  stored <- shiny::reactiveVal(NULL)
+
+  list(
+    remember = function() {
+      shiny::observeEvent(
+        list(input[[paste0(output_id, "_center")]],
+             input[[paste0(output_id, "_zoom")]]),
+        {
+          ctr <- input[[paste0(output_id, "_center")]]
+          zm  <- input[[paste0(output_id, "_zoom")]]
+          if (!is.null(ctr) && !is.null(zm) &&
+              is.finite(ctr$lng) && is.finite(ctr$lat)) {
+            stored(list(lng = ctr$lng, lat = ctr$lat, zoom = zm))
+          }
+        },
+        ignoreInit = TRUE, ignoreNULL = TRUE
+      )
+    },
+    restore = function(m) {
+      v <- shiny::isolate(stored())
+      if (is.null(m) || is.null(v)) return(m)
+      m$x$fitOnResize <- FALSE
+      leaflet::setView(m, lng = v$lng, lat = v$lat, zoom = v$zoom)
+    },
+    get = stored
+  )
+}
+
+#' JS hook keeping a map correct when its container resizes
+#'
+#' Leaflet caches its container size, so a map whose card is expanded to full
+#' screen keeps drawing at the old size (grey gutters, controls in the wrong
+#' place) until something nudges it. This watches the container and
+#' re-measures.
+#'
+#' Re-measuring alone keeps the old zoom, which leaves the locations marooned
+#' in the middle of a much bigger map, so the data bounds are re-fitted too —
+#' expanding then magnifies the sample rather than its surroundings. Reading
+#' the pre-resize bounds instead would not work: Leaflet has usually
+#' re-measured by the time the callback runs, so they already describe the new
+#' size. Once the user has panned or zoomed, their view is left alone.
+#'
+#' With `dashes = TRUE` the stroke width of dashed sub-layers is also tapered
+#' as the map zooms out — stroke width is in screen pixels, so an outline that
+#' reads well when zoomed in swamps the shapes once they shrink.
+#'
+#' @param bounds List with `lng1`, `lat1`, `lng2`, `lat2`, from
+#'   `.geojson_bounds()`.
+#' @param dashes Logical. Also scale dashed stroke widths with zoom.
+#'
+#' @return An `htmlwidgets::JS()` string for `htmlwidgets::onRender()`.
+#' @noRd
+.map_autofit_js <- function(bounds, dashes = FALSE) {
+  fit_ok <- all(vapply(bounds, is.finite, logical(1)))
+
+  # `dashes` is retained for callers that once drew per-area markers; there
+  # are none now, so the hook is a no-op.
+  dash_fn <- "
+        var scaleDashes = function() {};
+  "
+
+  htmlwidgets::JS(sprintf("
+      function(el, x) {
+        var map = this;
+        // The caller can suppress the fit when it has restored a remembered
+        // view — refitting would throw that view away on the first resize.
+        var fit = %s && (x.fitOnResize !== false);
+        var b   = [[%s, %s], [%s, %s]];
+        var userMoved = false;
+        var ro;
+        ['mousedown', 'wheel', 'dblclick', 'touchstart'].forEach(function(ev) {
+          el.addEventListener(ev, function() { userMoved = true; },
+                              { passive: true });
+        });
+        // Expanding a card usually changes width far more than height, so a
+        // whole zoom level rarely fits and integer snapping would leave the
+        // sample as small as before. Quarter steps let the re-fit actually
+        // use the new space; the +/- buttons still step by whole levels.
+        map.options.zoomSnap = 0.25;
+        %s
+        // Re-rendering the output (switching view, reloading data) destroys
+        // this map while the observer on its container is still live, so bail
+        // out once the map is gone rather than reaching into dead panes.
+        var alive = function() {
+          // el.isConnected catches the window between Shiny detaching the old
+          // output node and Leaflet firing 'unload'; touching the map in that
+          // window schedules a redraw against a canvas that no longer exists.
+          return el.isConnected !== false && map._loaded &&
+                 map._container && map._container.parentNode;
+        };
+        var refit = function() {
+          if (!alive()) { if (ro) ro.disconnect(); return; }
+          window.requestAnimationFrame(function() {
+            if (!el.offsetWidth || !el.offsetHeight || !alive()) return;
+            try {
+              map.invalidateSize();
+              if (fit && !userMoved) map.fitBounds(b, { animate: false });
+              scaleDashes();
+            } catch (err) { /* map torn down mid-resize */ }
+          });
+        };
+        if (window.ResizeObserver) {
+          ro = new ResizeObserver(refit);
+          ro.observe(el);
+        } else {
+          window.addEventListener('resize', refit);
+        }
+        map.on('unload', function() {
+          if (ro) ro.disconnect();
+          // Leaflet leaves a queued canvas redraw behind when a map is
+          // replaced (switching view rebuilds the widget). It then runs
+          // against a destroyed 2d context and throws. Cancel it.
+          try {
+            var rs = map._renderer ? [map._renderer] : [];
+            map.eachLayer(function(l) {
+              if (l._renderer && rs.indexOf(l._renderer) < 0) rs.push(l._renderer);
+            });
+            rs.forEach(function(r) {
+              if (r._redrawRequest && window.cancelAnimationFrame) {
+                window.cancelAnimationFrame(r._redrawRequest);
+                r._redrawRequest = null;
+              }
+            });
+          } catch (err) { /* nothing queued */ }
+        });
+      }",
+    if (fit_ok) "true" else "false",
+    format(bounds$lat1, digits = 10), format(bounds$lng1, digits = 10),
+    format(bounds$lat2, digits = 10), format(bounds$lng2, digits = 10),
+    dash_fn
+  ))
+}
 
 
 #' Build a leaflet map of survey interview locations
@@ -339,23 +637,36 @@ plot_survey_map <- function(loc) {
       )
   }
 
-  # Hover highlight via vanilla Leaflet JS
+  # Hover highlight via vanilla Leaflet JS.
+  #
+  # The un-highlight uses Leaflet's own `resetStyle()` rather than style values
+  # captured in JS variables at render time. Captured values are wrong (or
+  # undefined) for any sub-layer Leaflet builds as a group instead of a single
+  # path, and writing an undefined colour/weight back makes the stroke invalid.
+  # These polygons are drawn with `fillOpacity = 0`, so a broken stroke means
+  # the shape vanishes completely and stays gone — every later mouseout writes
+  # the same invalid style again.
+  #
+  # Handlers are bound on the GeoJSON layer itself, not on each sub-layer:
+  # L.GeoJSON is a FeatureGroup, so child events propagate up, and the binding
+  # then also covers sub-layers regardless of the geometry type they came from.
   hover_js <- htmlwidgets::JS("
     function(el, x) {
       this.eachLayer(function(layer) {
-        if (layer.eachLayer) {         // it's a GeoJSON layer group
-          layer.eachLayer(function(sublayer) {
-            var origColor  = sublayer.options.color;
-            var origWeight = sublayer.options.weight;
-            sublayer.on('mouseover', function(e) {
-              e.target.setStyle({ weight: 2, color: '#FF0000' });
-              e.target.bringToFront();
-            });
-            sublayer.on('mouseout', function(e) {
-              e.target.setStyle({ weight: origWeight, color: origColor });
-            });
-          });
-        }
+        if (typeof layer.resetStyle !== 'function') return;  // not GeoJSON
+
+        layer.on('mouseover', function(e) {
+          var target = e.propagatedFrom || e.layer;
+          if (target && target.setStyle) {
+            target.setStyle({ weight: 2, color: '#FF0000' });
+            if (target.bringToFront) target.bringToFront();
+          }
+        });
+
+        layer.on('mouseout', function(e) {
+          var target = e.propagatedFrom || e.layer;
+          if (target) layer.resetStyle(target);
+        });
       });
     }
   ")
@@ -365,7 +676,368 @@ plot_survey_map <- function(loc) {
       lng1 = bounds$lng1, lat1 = bounds$lat1,
       lng2 = bounds$lng2, lat2 = bounds$lat2
     ) |>
-    htmlwidgets::onRender(hover_js)
+    .add_reset_button(bounds) |>
+    htmlwidgets::onRender(hover_js) |>
+    htmlwidgets::onRender(.map_autofit_js(bounds))
+}
+
+
+# ---------------------------------------------------------------------------- #
+# Sample density heatmap                                                        #
+# ---------------------------------------------------------------------------- #
+
+#' Spread each location's sampled units across the H3 cells it covers
+#'
+#' Survey locations overlap — in a capital, dozens of `loc_id`s can cover the
+#' same ground — so a map of outlined location polygons says little about how
+#' many households sit where. H3 cells, by contrast, tile the plane without
+#' gaps or overlaps, which makes them the natural unit for a heatmap.
+#'
+#' A location's units are divided evenly over the cells it covers, and cells
+#' are then summed across locations, so a cell reached by several overlapping
+#' locations accumulates a share from each. The result is smooth and the
+#' totals reconcile with the sample exactly. Values are therefore fractional:
+#' a location of a dozen households spread over two dozen cells contributes
+#' half a household to each, and only the accumulation across overlapping
+#' locations builds that back up.
+#'
+#' @param cell_map    Data frame with one row per location-cell pair: `code`,
+#'   `year`, `survname`, `loc_id`, `h3`.
+#' @param survey_data Loaded survey observations, one row per sampled unit,
+#'   with `code`, `year`, `survname` and `loc_id`.
+#'
+#' @return A data frame with one row per `h3` cell holding a positive share:
+#'   `h3` and `n_units`. `NULL` when the inputs cannot be combined.
+#'
+#' @export
+allocate_units_to_cells <- function(cell_map, survey_data) {
+  keys <- c("code", "year", "survname", "loc_id")
+  if (is.null(cell_map) || is.null(survey_data)) return(NULL)
+  if (!all(c(keys, "h3") %in% names(cell_map))) return(NULL)
+  if (!all(keys %in% names(survey_data))) return(NULL)
+
+  cm <- cell_map
+  cm$year <- as.character(cm$year)
+
+  sd <- survey_data
+  sd$year <- as.character(sd$year)
+
+  # Sampled units per location.
+  n_loc <- sd |>
+    dplyr::count(.data$code, .data$year, .data$survname, .data$loc_id,
+                 name = "n_units")
+
+  cm <- cm |>
+    dplyr::inner_join(n_loc, by = keys)
+  if (nrow(cm) == 0) return(NULL)
+
+  cm |>
+    dplyr::group_by(.data$code, .data$year, .data$survname, .data$loc_id) |>
+    dplyr::mutate(.alloc = .data$n_units / dplyr::n()) |>
+    dplyr::ungroup() |>
+    dplyr::group_by(.data$h3) |>
+    dplyr::summarise(n_units = sum(.data$.alloc, na.rm = TRUE),
+                     .groups = "drop") |>
+    dplyr::filter(.data$n_units > 0) |>
+    as.data.frame()
+}
+
+
+#' Merge per-location values onto the H3 cells they cover
+#'
+#' Survey locations overlap: several `loc_id`s can cover the same ground, so
+#' drawing one semi-transparent polygon per location stacks fills on top of
+#' each other and invents colours that are in neither the data nor the legend.
+#' Aggregating onto H3 cells — which tile without overlapping — gives one
+#' unambiguous value per patch of ground.
+#'
+#' Each contributing location is weighted by how many of its sampled units sit
+#' in that cell (its unit count times the cell's share of the location's
+#' `pop_2020`). Continuous values are averaged with those weights; categorical
+#' values (weather bins) take the highest-weight category.
+#'
+#' @param cell_map Data frame with one row per location-cell pair: `code`,
+#'   `year`, `survname`, `loc_id`, `h3`, `pop_2020`.
+#' @param loc_vals Data frame with one row per location: `code`, `year`,
+#'   `survname`, `loc_id`, `value` and `n_hh`, optionally `n_months`. A
+#'   `binned` attribute marks `value` as categorical.
+#'
+#' @param by_wave Keep waves separate (the default), giving one row per wave
+#'   and cell. Set `FALSE` to pool every selected wave into a single value per
+#'   cell — needed wherever all waves are drawn on one map, since a cell
+#'   sampled by two waves would otherwise be painted twice.
+#'
+#' @return A data frame with one row per wave-cell: `code`, `year`,
+#'   `survname`, `loc_id` (the H3 index, so the result drops straight into the
+#'   location-map plotters), `value`, `n_hh`, `n_months` and `n_locs`. Carries
+#'   the `binned` and `levels` attributes of `loc_vals`. `NULL` when the
+#'   inputs cannot be combined.
+#'
+#' @export
+merge_loc_values_to_cells <- function(cell_map, loc_vals, by_wave = TRUE) {
+  keys <- c("code", "year", "survname", "loc_id")
+  if (is.null(cell_map) || is.null(loc_vals) || nrow(loc_vals) == 0) return(NULL)
+  if (!all(c(keys, "h3") %in% names(cell_map))) return(NULL)
+  if (!all(c(keys, "value") %in% names(loc_vals))) return(NULL)
+
+  binned <- isTRUE(attr(loc_vals, "binned"))
+  lvls   <- attr(loc_vals, "levels")
+
+  cm <- cell_map
+  cm$year <- as.character(cm$year)
+  if (!"pop_2020" %in% names(cm)) cm$pop_2020 <- 1
+  cm$pop_2020[!is.finite(cm$pop_2020) | cm$pop_2020 < 0] <- 0
+
+  lv <- loc_vals
+  lv$year <- as.character(lv$year)
+  if (!"n_hh" %in% names(lv))     lv$n_hh <- 1
+  if (!"n_months" %in% names(lv)) lv$n_months <- 1L
+
+  carry <- intersect(c("economy"), names(lv))
+  j <- cm |>
+    dplyr::inner_join(
+      lv[, c(keys, "value", "n_hh", "n_months", carry)], by = keys
+    )
+  if (nrow(j) == 0) return(NULL)
+
+  # Units of this location that sit in this cell.
+  j <- j |>
+    dplyr::group_by(.data$code, .data$year, .data$survname, .data$loc_id) |>
+    dplyr::mutate(
+      .tot = sum(.data$pop_2020, na.rm = TRUE),
+      .w   = .data$n_hh * dplyr::if_else(.data$.tot > 0,
+                                         .data$pop_2020 / .data$.tot,
+                                         1 / dplyr::n())
+    ) |>
+    dplyr::ungroup()
+
+  grp <- if (by_wave) {
+    interaction(j$code, j$year, j$survname, j$h3, drop = TRUE, sep = "\r")
+  } else {
+    factor(j$h3)
+  }
+
+  parts <- lapply(split(seq_len(nrow(j)), grp), function(idx) {
+    w <- j$.w[idx]
+    v <- j$value[idx]
+
+    value <- if (binned) {
+      tot <- tapply(w, as.character(v), sum, na.rm = TRUE)
+      if (length(tot) == 0) NA_character_ else names(tot)[which.max(tot)]
+    } else {
+      vn <- suppressWarnings(as.numeric(v))
+      ok <- is.finite(vn) & is.finite(w) & w > 0
+      if (!any(ok)) NA_real_ else sum(vn[ok] * w[ok]) / sum(w[ok])
+    }
+
+    row <- data.frame(
+      code     = j$code[idx[1]],
+      year     = j$year[idx[1]],
+      survname = j$survname[idx[1]],
+      loc_id   = j$h3[idx[1]],
+      value    = value,
+      n_hh     = sum(w, na.rm = TRUE),
+      # The colour summarises more than one number when several locations
+      # meet here, or when a contributing location spans several months.
+      n_months = max(j$n_months[idx], na.rm = TRUE),
+      n_locs   = length(unique(j$loc_id[idx])),
+      stringsAsFactors = FALSE
+    )
+    if ("economy" %in% names(j)) row$economy <- j$economy[idx[1]]
+    row
+  })
+
+  out <- do.call(rbind, parts)
+  rownames(out) <- NULL
+  attr(out, "binned") <- binned
+  attr(out, "levels") <- lvls
+  out
+}
+
+
+#' GeoJSON features for H3 cells, tagged with their survey wave
+#'
+#' Produces features whose `loc_id` property is the H3 index, so cell-level
+#' values from `merge_loc_values_to_cells()` can be drawn by the same plotters
+#' that draw location polygons.
+#'
+#' @param cell_geo Data frame with `h3` and `geom` (a GeoJSON geometry
+#'   string).
+#' @param cell_map Data frame with `code`, `year`, `survname` and `h3`.
+#' @param by_wave Tag features with their wave (the default), so per-wave maps
+#'   can filter to their own. Set `FALSE` to emit each cell exactly once —
+#'   maps that draw all waves together must not paint a shared cell twice.
+#'
+#' @return A GeoJSON FeatureCollection list, or `NULL`.
+#'
+#' @export
+build_cell_features <- function(cell_geo, cell_map, by_wave = TRUE) {
+  if (is.null(cell_geo) || is.null(cell_map)) return(NULL)
+  if (!all(c("h3", "geom") %in% names(cell_geo))) return(NULL)
+  if (!all(c("code", "year", "survname", "h3") %in% names(cell_map))) return(NULL)
+
+  waves <- if (by_wave) {
+    cell_map |>
+      dplyr::distinct(.data$code, .data$year, .data$survname, .data$h3)
+  } else {
+    cell_map |>
+      dplyr::distinct(.data$h3) |>
+      dplyr::mutate(code = NA_character_, year = NA_character_,
+                    survname = NA_character_)
+  }
+  waves$year <- as.character(waves$year)
+
+  d <- waves |>
+    dplyr::inner_join(cell_geo, by = "h3") |>
+    dplyr::filter(!is.na(.data$geom), nchar(.data$geom) > 2)
+  if (nrow(d) == 0) return(NULL)
+
+  features <- lapply(seq_len(nrow(d)), function(i) {
+    list(
+      type      = "Feature",
+      geometry  = jsonlite::fromJSON(d$geom[i]),
+      geom_json = d$geom[i],
+      properties = list(
+        code     = d$code[i],
+        year     = d$year[i],
+        survname = d$survname[i],
+        loc_id   = d$h3[i]
+      )
+    )
+  })
+
+  list(type = "FeatureCollection", features = features)
+}
+
+
+#' Heatmap of sampled units per H3 cell
+#'
+#' Draws one filled hexagon per cell, shaded by the number of sampled units
+#' allocated to it by `allocate_units_to_cells()`. Cells tile the plane, so
+#' unlike the location-outline map nothing overlaps and dense areas read
+#' directly off the colour.
+#'
+#' @param cells     Data frame with `h3`, `geom` (a GeoJSON geometry string)
+#'   and `n_units`.
+#' @param unit_label Plural noun for what a row of the survey is, e.g.
+#'   `"households"`.
+#'
+#' @return A `leaflet` widget, or `NULL` invisibly when there is nothing to
+#'   draw.
+#'
+#' @export
+plot_sample_density_map <- function(cells, unit_label = "households") {
+  if (is.null(cells) || nrow(cells) == 0) return(invisible(NULL))
+  if (!all(c("geom", "n_units") %in% names(cells))) return(invisible(NULL))
+
+  cells <- cells[!is.na(cells$geom) & nchar(cells$geom) > 2 &
+                   is.finite(cells$n_units), , drop = FALSE]
+  if (nrow(cells) == 0) return(invisible(NULL))
+
+  # Counts are heavily skewed — a handful of urban cells dwarf everything — so
+  # the colour scale runs on log, over the range actually present. Shares are
+  # fractional where a location's units are split across its cells, so the
+  # bottom of the ramp can sit below one.
+  pos <- cells$n_units[cells$n_units > 0]
+  rng <- range(pos, na.rm = TRUE)
+  if (!all(is.finite(rng)) || rng[1] <= 0) rng <- c(0.5, 1)
+  if (diff(rng) <= 0) rng <- c(rng[1], rng[1] * 2)
+  # Mako (viridis family: perceptually uniform, colour-blind safe, and still
+  # readable in greyscale) running light to dark, with the palest stops
+  # trimmed off — near-white yellows and creams disappear against the light
+  # basemap, which is what made the old Inferno ramp hard to read at the
+  # bottom end.
+  ramp <- rev(grDevices::hcl.colors(12, "Mako"))[3:11]
+  pal  <- leaflet::colorNumeric(ramp, domain = log(rng), na.color = "#cccccc")
+  col_of <- function(v) pal(log(pmin(pmax(v, rng[1]), rng[2])))
+
+  feats <- lapply(seq_len(nrow(cells)), function(i) {
+    list(
+      geom_json = cells$geom[i],
+      geometry  = jsonlite::fromJSON(cells$geom[i]),
+      props     = list(
+        h3    = cells$h3[i] %||% "",
+        popup = paste0(
+          "<b>", format(round(cells$n_units[i], 1), big.mark = ","), " ",
+          unit_label, "</b><br/><small>area ", cells$h3[i] %||% "", "</small>"
+        )
+      )
+    )
+  })
+
+  bounds <- .geojson_bounds(list(features = feats))
+  cols   <- col_of(cells$n_units)
+
+  # One addGeoJSON call carrying a per-feature style, rather than one call per
+  # distinct colour. With a continuous ramp almost every cell has its own
+  # colour, so grouping by colour would create a thousand separate Leaflet
+  # layers — enough event and pane bookkeeping to make dragging stutter.
+  fj <- vapply(seq_along(feats), function(i) {
+    props <- feats[[i]]$props
+    props$style <- list(fillColor = cols[i], fillOpacity = 0.75,
+                        stroke = FALSE, weight = 0)
+    sprintf('{"type":"Feature","geometry":%s,"properties":%s}',
+            feats[[i]]$geom_json, jsonlite::toJSON(props, auto_unbox = TRUE))
+  }, character(1L))
+
+  # Canvas rather than SVG: a thousand-plus filled hexagons as individual SVG
+  # paths makes dragging stutter, because the browser re-rasterises every one.
+  # Canvas draws them in a single pass and pans smoothly; popups still work.
+  m <- leaflet::leaflet(options = leaflet::leafletOptions(preferCanvas = TRUE)) |>
+    leaflet::addProviderTiles(leaflet::providers$CartoDB.Positron) |>
+    leaflet::addGeoJSON(
+      geojson     = sprintf('{"type":"FeatureCollection","features":[%s]}',
+                            paste(fj, collapse = ",")),
+      stroke      = FALSE,
+      weight      = 0,
+      fillOpacity = 0.75
+    )
+
+  # The legend ramp samples this palette across the domain, so both are given
+  # on the count scale; `col_of()` applies the log internally. `mid` is the
+  # count that actually lands halfway along the ramp.
+  pal_info <- list(
+    pal    = function(v) col_of(v),
+    domain = rng,
+    mid    = exp(mean(log(rng))),
+    # Evenly spaced along the log ramp, so the legend bar shows the same
+    # colour progression the cells do.
+    stops  = exp(seq(log(rng[1]), log(rng[2]), length.out = 9))
+  )
+
+  m |>
+    leaflet::fitBounds(
+      lng1 = bounds$lng1, lat1 = bounds$lat1,
+      lng2 = bounds$lng2, lat2 = bounds$lat2
+    ) |>
+    .add_reset_button(bounds) |>
+    htmlwidgets::onRender(.map_autofit_js(bounds)) |>
+    leaflet::addControl(
+      position = "bottomright",
+      html = .compact_legend_html(
+        pal_info = pal_info,
+        binned   = FALSE,
+        title    = paste0(.capitalise(unit_label), " per area"),
+        info     = paste0(
+          "Number of sampled ", unit_label, " in each hexagon. Every ",
+          sub("s$", "", unit_label), " is placed in exactly one hexagon: a",
+          " location's ", unit_label, " are assigned across the cells it",
+          " covers in proportion to their 2020 population, then rolled up to",
+          " this display grid — so an area covered by many overlapping survey",
+          " locations accumulates all of them, and the totals match the",
+          " sample exactly. Colour runs on a log scale because a handful of",
+          " urban areas would otherwise flatten everything else."
+        )
+      )
+    )
+}
+
+
+# Upper-case the first letter only; `toupper()` on the whole word would shout.
+#' @noRd
+.capitalise <- function(x) {
+  if (!nzchar(x %||% "")) return(x)
+  paste0(toupper(substr(x, 1, 1)), substr(x, 2, nchar(x)))
 }
 
 

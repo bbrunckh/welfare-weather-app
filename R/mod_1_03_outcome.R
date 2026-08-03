@@ -29,12 +29,16 @@ mod_1_03_outcome_ui <- function(id) {
 #'   `mod_1_02_surveystats`.
 #' @param map_data Reactive GeoJSON FeatureCollection from
 #'   `mod_1_02_surveystats` (H3 map data). Used for outcome coverage map.
+#' @param cell_data Reactive list of `geom` (H3 cell geometry) and `map`
+#'   (location-to-cell mapping) from `mod_1_02_surveystats`. When present,
+#'   coverage is merged onto non-overlapping cells.
 #' @param tabset_id Character id of the parent tabset panel.
 #' @param tabset_session Shiny session for the parent tabset.
 #'
 #' @noRd
 mod_1_03_outcome_server <- function(id, variable_list, survey_data,
                                     map_data       = reactive(NULL),
+                                    cell_data      = reactive(NULL),
                                     tabset_id      = NULL,
                                     tabset_session = NULL) {
   moduleServer(id, function(input, output, session) {
@@ -194,15 +198,49 @@ mod_1_03_outcome_server <- function(id, variable_list, survey_data,
         # The jsonlite `keep_vec_names` warning that addGeoJSON would
         # otherwise emit is muted via the custom htmlwidgets JSON
         # encoder installed in .onLoad (R/zzz.R).
+        cov_view_mem <- map_view_memory(input, session, "outcome_coverage_map")
+        cov_view_mem$remember()
+
         output$outcome_coverage_map <- leaflet::renderLeaflet({
           req(outcome_data(), selected_outcome_info(), map_data())
           inf <- selected_outcome_info()
+
+          # Prefer H3 cells when Survey stats has supplied them: locations
+          # overlap, and stacking translucent fills shows shades that mean
+          # nothing on the legend.
+          wave  <- input$cov_wave %||% "all"
+          cd    <- if (is.function(cell_data)) cell_data() else NULL
+          # by_wave = FALSE: a wave selection is applied by filtering the
+          # inputs, so whatever is drawn must still paint each cell once.
+          cmap  <- if (!is.null(cd)) filter_by_wave(cd$map, wave) else NULL
+          feats <- if (!is.null(cmap) && nrow(cmap) > 0) {
+            build_cell_features(cd$geom, cmap, by_wave = FALSE)
+          } else NULL
+
           m <- plot_outcome_coverage_map(
-            map_data(), outcome_data(),
-            outcome = as.character(inf$name[1])
+            geojson  = feats %||% filter_features_by_wave(map_data(), wave),
+            df       = filter_by_wave(outcome_data(), wave),
+            outcome  = as.character(inf$name[1]),
+            cell_map = if (!is.null(feats)) cmap else NULL
           )
           req(!is.null(m))
-          m
+          cov_view_mem$restore(m)
+        })
+
+        # Wave picker, shown only when there is more than one wave to pick.
+        output$cov_wave_ui <- shiny::renderUI({
+          w <- survey_wave_list(survey_data())
+          if (is.null(w) || nrow(w) < 2) return(NULL)
+          shiny::selectInput(
+            ns("cov_wave"), NULL,
+            choices  = c(stats::setNames("all", "All waves"),
+                         stats::setNames(w$key, w$label)),
+            selected = shiny::isolate(input$cov_wave) %||% "all",
+            width    = "160px"
+          ) |>
+            htmltools::tagAppendAttributes(
+              style = "margin-bottom: 0;", class = "small"
+            )
         })
 
         output$outcome_summary_stats <- renderTable({
@@ -276,9 +314,20 @@ mod_1_03_outcome_server <- function(id, variable_list, survey_data,
                   shiny::h4("Summary statistics"),
                   shiny::tableOutput(ns("outcome_summary_stats"))
                 ),
+                # full_screen gives the card bslib's expand control; the map
+                # fills the card body in both states (see the height pairing
+                # below) and re-fits itself on resize.
                 bslib::card(
-                  shiny::h4("Spatial coverage"),
-                  leaflet::leafletOutput(ns("outcome_coverage_map"))
+                  full_screen = TRUE,
+                  height      = "470px",   # h4 + the map's original 400px
+                  shiny::div(
+                    class = paste("d-flex align-items-center",
+                                  "justify-content-between flex-wrap gap-2 mb-2"),
+                    shiny::h4("Spatial coverage", class = "mb-0"),
+                    shiny::uiOutput(ns("cov_wave_ui"), inline = TRUE)
+                  ),
+                  leaflet::leafletOutput(ns("outcome_coverage_map"),
+                                         height = "100%")
                 )
               ),
               shiny::br(),

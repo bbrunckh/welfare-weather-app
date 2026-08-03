@@ -348,55 +348,117 @@ plot_welfare_dist <- function(df,
 #' map but overlays availability shading.
 #'
 #' @param geojson  GeoJSON FeatureCollection (from Survey Stats H3 pipeline).
+#'   Pass cell features from \code{build_cell_features()} together with
+#'   \code{cell_map} to draw non-overlapping H3 cells.
 #' @param df       Survey data frame with \code{loc_id} and the outcome column.
 #' @param outcome  Single character string — the outcome variable name.
+#' @param cell_map Optional location-to-cell mapping. When supplied, coverage
+#'   is merged onto H3 cells instead of drawn per overlapping location.
 #'
 #' @return A \code{leaflet} widget, or \code{NULL}.
 #' @export
-plot_outcome_coverage_map <- function(geojson, df, outcome) {
+plot_outcome_coverage_map <- function(geojson, df, outcome, cell_map = NULL) {
   if (is.null(geojson) || length(geojson$features) == 0) return(invisible(NULL))
   if (is.null(df) || !outcome %in% names(df) || !"loc_id" %in% names(df))
     return(invisible(NULL))
 
+  keys <- c("code", "year", "survname", "loc_id")
+
   loc_avail <- df |>
     dplyr::mutate(.has = !is.na(.data[[outcome]])) |>
-    dplyr::summarise(pct = mean(.data$.has) * 100, .by = "loc_id")
+    dplyr::summarise(
+      pct  = mean(.data$.has) * 100,
+      n_hh = dplyr::n(),
+      .by  = dplyr::any_of(c(keys))
+    )
+
+  # Survey locations overlap, so drawing one translucent polygon per location
+  # stacks fills and shows shades that are in neither the data nor the legend.
+  # When the H3 cell mapping is available, merge coverage onto cells — which
+  # tile without overlapping — weighting each contributing location by the
+  # units it has in that cell.
+  if (!is.null(cell_map) && all(keys %in% names(loc_avail))) {
+    lv <- loc_avail
+    names(lv)[names(lv) == "pct"] <- "value"
+    merged <- merge_loc_values_to_cells(cell_map, lv, by_wave = FALSE)
+    if (!is.null(merged)) loc_avail <- data.frame(
+      loc_id = merged$loc_id, pct = merged$value, stringsAsFactors = FALSE
+    )
+  }
+
+  # Weighted merging can leave a hair outside [0, 100] in floating point, and
+  # colorNumeric turns anything outside its domain into NA.
+  loc_avail$pct <- pmin(pmax(loc_avail$pct, 0), 100)
 
   avail_map <- stats::setNames(loc_avail$pct, as.character(loc_avail$loc_id))
 
+  # Scale to the coverage actually present rather than a fixed 0-100: when
+  # every area sits at 95-100% a full-range ramp paints them all the same
+  # green and hides the variation that matters. A uniform map still needs a
+  # legend with width, so give it a token span ending at its own value.
+  rng <- range(loc_avail$pct, na.rm = TRUE)
+  if (!all(is.finite(rng))) rng <- c(0, 100)
+  if (diff(rng) < 1) {
+    rng <- c(max(0, rng[2] - 1), rng[2])
+    if (diff(rng) == 0) rng <- c(max(0, rng[2] - 1), rng[2] + 1e-9)
+  }
+
   pal <- leaflet::colorNumeric(
     palette = c("#e74c3c", "#f1c40f", "#2ecc71"),
-    domain  = c(0, 100)
+    domain  = rng
   )
 
   bounds <- .geojson_bounds(geojson)
 
-  m <- leaflet::leaflet() |>
+  on_cells <- !is.null(cell_map)
+
+  m <- leaflet::leaflet(
+    options = leaflet::leafletOptions(preferCanvas = on_cells)
+  ) |>
     leaflet::addProviderTiles(leaflet::providers$CartoDB.Positron)
 
-  for (f in geojson$features) {
-    lid <- as.character(f$properties$loc_id)
-    pct <- avail_map[lid]
-    if (is.na(pct)) pct <- 0
-    col <- pal(pct)
-    sub_gc <- list(type = "FeatureCollection", features = list(f))
+  # Group features by colour: one addGeoJSON call per distinct shade rather
+  # than one per location, which for a country-sized sample is hundreds of
+  # calls and as many layers on the map.
+  cols <- vapply(geojson$features, function(f) {
+    pct <- avail_map[as.character(f$properties$loc_id)]
+    pal(if (is.na(pct)) rng[1] else min(max(pct, rng[1]), rng[2]))
+  }, character(1))
+
+  for (col in unique(cols)) {
+    sub_gc <- list(type     = "FeatureCollection",
+                   features = geojson$features[cols == col])
     m <- m |>
       leaflet::addGeoJSON(
         geojson     = sub_gc,
         color       = col,
         fillColor   = col,
-        fillOpacity = 0.5,
-        weight      = 1
+        # Cells tile edge to edge, so per-cell outlines only add noise.
+        stroke      = !on_cells,
+        fillOpacity = if (on_cells) 0.75 else 0.5,
+        weight      = if (on_cells) 0 else 1
       )
   }
 
-  m <- m |>
+  m |>
     leaflet::fitBounds(bounds$lng1, bounds$lat1, bounds$lng2, bounds$lat2) |>
-    leaflet::addLegend(
-      position = "bottomright", pal = pal,
-      values = c(0, 100), title = "% available"
-    )
-  m
+    leaflet::addControl(
+      position = "bottomright",
+      html = .compact_legend_html(
+        pal_info = list(pal = pal, domain = rng),
+        binned   = FALSE,
+        title    = "% available",
+        info     = paste0(
+          "Share of sampled units at each location with a non-missing value",
+          " for this outcome. The scale runs over the coverage present in",
+          " this sample (", format(signif(rng[1], 3)), "% to ",
+          format(signif(rng[2], 3)), "%), not a fixed 0-100, so small",
+          " differences stay visible."
+        )
+      )
+    ) |>
+    .add_reset_button(bounds) |>
+    htmlwidgets::onRender(.map_autofit_js(bounds))
 }
 
 
