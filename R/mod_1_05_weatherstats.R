@@ -23,6 +23,9 @@ mod_1_05_weatherstats_ui <- function(id) {
 #' @param selected_surveys Reactive data frame of selected surveys.
 #' @param selected_outcome Reactive data frame row of the selected outcome.
 #' @param selected_weather Reactive data frame of selected weather spec.
+#' @param hist_years       Reactive named integer vector `c(from = , to = )`
+#'   from `mod_1_04_weather_server()`, bounding the historical comparison.
+#'   Defaults to 1991-2020 when not supplied.
 #' @param survey_data      Reactive data frame of loaded survey observations.
 #' @param map_data         Reactive GeoJSON FeatureCollection of survey
 #'   locations from `mod_1_02_surveystats_server()`. Optional — the
@@ -43,6 +46,7 @@ mod_1_05_weatherstats_server <- function(
     selected_surveys,
     selected_outcome,
     selected_weather,
+    hist_years = NULL,
     survey_data,
     map_data = NULL,
     cell_data = NULL,
@@ -53,6 +57,9 @@ mod_1_05_weatherstats_server <- function(
     ns <- session$ns
 
     if (is.null(tabset_session)) tabset_session <- session$parent %||% session
+    if (is.null(hist_years)) {
+      hist_years <- shiny::reactive(c(from = 1991L, to = 2020L))
+    }
 
     weather_tab_added <- reactiveVal(FALSE)
     survey_weather    <- reactiveVal(NULL)
@@ -156,9 +163,8 @@ mod_1_05_weatherstats_server <- function(
       survey_weather_cont(survey_cont)
 
       # Any historical comparison on screen belongs to the previous weather
-      # configuration. Drop the stale cells now, remember the year range, and
-      # rebuild it under the new configuration at the end of this observer.
-      hist_reload_years <- hist_cells_years()
+      # configuration. Drop the stale cells now; they are rebuilt under the new
+      # configuration at the end of this observer.
       hist_cells(NULL)
 
       showNotification("Weather data ready.", duration = 3, type = "message")
@@ -168,6 +174,11 @@ mod_1_05_weatherstats_server <- function(
       if (!weather_tab_added()) {
 
         # -- Weather distribution plots (one per variable) -------------------
+        # Each plot carries the sample and, once the historical years have
+        # loaded, the same locations' own climate history alongside it. The
+        # historical series is loaded continuous, so the bar chart cuts it with
+        # the breaks the sample was binned on (`stored_breaks`) to land in the
+        # same bins.
 
         make_weather_dist <- function(idx) {
           renderPlot({
@@ -178,8 +189,16 @@ mod_1_05_weatherstats_server <- function(
             hv          <- sw$name[idx]
             label       <- sw$label[idx]
             cont_binned <- sw$cont_binned[idx]
+            yrs         <- hist_cells_years()
+            brks        <- stored_breaks()
 
-            p <- plot_weather_dist(df, hv, label, cont_binned)
+            p <- plot_weather_dist(
+              df, hv, label, cont_binned,
+              hist_df   = hist_cells(),
+              breaks    = if (is.null(brks)) NULL else brks[[hv]],
+              year_from = if (is.null(yrs)) NULL else yrs[["from"]],
+              year_to   = if (is.null(yrs)) NULL else yrs[["to"]]
+            )
             if (is.null(p)) {
               plot.new(); title(main = "Weather variable not configured")
               return(invisible(NULL))
@@ -204,8 +223,14 @@ mod_1_05_weatherstats_server <- function(
             sw    <- isolate(selected_weather())
             hv    <- sw$name[idx]
             label <- sw$label[idx]
+            yrs   <- hist_cells_years()
 
-            p <- plot_weather_dist(df, hv, label, "Continuous")
+            p <- plot_weather_ridges_compare(
+              df, hv, label,
+              hist_df   = hist_cells(),
+              year_from = if (is.null(yrs)) NULL else yrs[["from"]],
+              year_to   = if (is.null(yrs)) NULL else yrs[["to"]]
+            )
             if (is.null(p)) {
               plot.new(); title(main = "Continuous distribution unavailable")
               return(invisible(NULL))
@@ -216,84 +241,6 @@ mod_1_05_weatherstats_server <- function(
 
         output$weather_dist_cont1 <- make_weather_dist_cont(1)
         output$weather_dist_cont2 <- make_weather_dist_cont(2)
-
-        # -- Historical vs sample weather -------------------------------------
-        # Year-range menu lives in the panel itself; defaults to the 20 years
-        # ending at the latest year covered by the selected survey waves.
-
-        output$hist_year_ui <- shiny::renderUI({
-          shiny::req(survey_data())
-          rng <- default_hist_year_range(extract_survey_dates(survey_data()))
-          shiny::req(rng)
-          this_year <- as.integer(format(Sys.Date(), "%Y"))
-
-          bslib::layout_columns(
-            col_widths = c(3, 3, 6),
-            shiny::numericInput(
-              ns("hist_year_from"), "From year",
-              value = rng[["from"]], min = 1950, max = this_year, step = 1
-            ),
-            shiny::numericInput(
-              ns("hist_year_to"), "To year",
-              value = rng[["to"]], min = 1950, max = this_year, step = 1
-            ),
-            shiny::div(
-              style = "display: flex; align-items: flex-end; height: 100%;",
-              shiny::actionButton(
-                ns("hist_load"), "Load historical weather", class = "btn-primary"
-              )
-            )
-          )
-        })
-
-        make_hist_vs_sample <- function(idx) {
-          renderPlot({
-            req(hist_cells(), hist_cells_years())
-            sw  <- isolate(selected_weather())
-            yrs <- hist_cells_years()
-
-            p <- plot_hist_vs_sample(
-              cells_df  = hist_cells(),
-              hv        = sw$name[idx],
-              label     = sw$label[idx],
-              year_from = yrs[["from"]],
-              year_to   = yrs[["to"]]
-            )
-            if (is.null(p)) {
-              plot.new(); title(main = "No historical weather to plot")
-              return(invisible(NULL))
-            }
-            p
-          })
-        }
-
-        output$hist_vs_sample1 <- make_hist_vs_sample(1)
-        output$hist_vs_sample2 <- make_hist_vs_sample(2)
-
-        output$hist_vs_sample_layout <- shiny::renderUI({
-          cells <- hist_cells()
-          if (is.null(cells)) {
-            return(shiny::tagList(
-              shiny::helpText(
-                paste("Pick a year range above and click 'Load historical",
-                      "weather' to compare the survey wave against its own",
-                      "climate history."),
-                style = "font-size: 12px; margin-bottom: 0;"
-              ),
-              shiny::div(style = "height: 24px;")
-            ))
-          }
-
-          # Give the facets (one per survey wave) room to breathe.
-          n_waves <- length(unique(cells$countryyear))
-          n_rows  <- ceiling(n_waves / max(1L, ceiling(sqrt(n_waves))))
-
-          weather_plot_layout(
-            ns, nrow(selected_weather() %||% data.frame()),
-            ids    = c("hist_vs_sample1", "hist_vs_sample2"),
-            height = paste0(max(320, 240 * n_rows), "px")
-          )
-        })
 
 
         # -- Binscatter plots (one per variable) ------------------------------
@@ -417,7 +364,9 @@ mod_1_05_weatherstats_server <- function(
             if (is_binned(i)) {
               items <- c(items, list(
                 shiny::helpText(
-                  "Above: Binned weather distribution as configured. Below: Continuous distribution the bins were derived from.",
+                  paste("Above: binned weather distribution as configured.",
+                        "Below: the continuous distribution the bins were",
+                        "derived from."),
                   style = "font-size: 12px;"
                 ),
                 shiny::plotOutput(ns(cont_ids[i]), height = "300px")
@@ -448,38 +397,39 @@ mod_1_05_weatherstats_server <- function(
             title = "Weather stats",
             value = "weather_desc",
             shiny::h4(
-              "Distribution of weather (household survey sample)",
+              "Distribution of weather (sample and its own history)",
               info_popover(
-                p(paste(
-                  "Distribution of each selected weather variable across the",
-                  "survey sample, weighted by survey weights where available.",
-                  "Note that they need not be of the same time of year or location, ",
-                  "so the distributions need not match each other.",
-                  "Use below Distribution of Weather (historical versus sample) to ",
-                  "compare the sample against its own climate history."
-                ))
+                shiny::tagList(
+                  p(paste(
+                    "Distribution of each selected weather variable across the",
+                    "survey sample, with each wave drawn in its own colour.",
+                    "Waves need not cover the same time of year or the same",
+                    "locations, so their distributions need not match each",
+                    "other."
+                  )),
+                  p(paste(
+                    "Alongside each wave sits that wave's own climate history:",
+                    "weather over the configured year range for the same",
+                    "locations and the same calendar months the wave was",
+                    "fielded in, weighted by the number of sampled households",
+                    "behind each location-month, so both series are composed",
+                    "the same way. The year range is set under 'Historical",
+                    "comparison' in the weather sidebar."
+                  )),
+                  p(paste(
+                    "For binned variables the bars show the share of",
+                    "observations in each bin — not counts, since the",
+                    "historical series spans decades and would otherwise dwarf",
+                    "the single wave behind it. The historical values are cut",
+                    "with the same bin breaks as the sample. The continuous",
+                    "panel below the bars shows the series the bins were",
+                    "derived from, on its configured scale (raw, deviation",
+                    "from mean, standardised anomaly)."
+                  ))
+                )
               )
             ),
             shiny::uiOutput(ns("weather_dist_layout")),
-            shiny::br(),
-            shiny::h4(
-              "Distribution of weather (historical versus sample)",
-              info_popover(
-                p(paste(
-                  "Weather over a longer run of years for the same locations",
-                  "and the same calendar months the survey was fielded in,",
-                  "overlaid with the weather the sample actually experienced.",
-                  "Each variable is shown on its configured scale (raw,",
-                  "deviation from mean, standardised anomaly) and always as a",
-                  "continuous distribution, even when the variable is binned",
-                  "for modelling. Cells are weighted by the number of sampled",
-                  "households behind them, so both distributions are composed",
-                  "the same way."
-                ))
-              )
-            ),
-            shiny::uiOutput(ns("hist_year_ui")),
-            shiny::uiOutput(ns("hist_vs_sample_layout")),
             shiny::br(),
             shiny::h4(
               "Weather by location",
@@ -489,9 +439,11 @@ mod_1_05_weatherstats_server <- function(
                     "Survey locations shaded by the weather the sample",
                     "experienced there — the bin for binned variables, the",
                     "configured value (raw, deviation from mean, standardised",
-                    "anomaly) for continuous ones. One map per survey wave,",
-                    "sharing a colour scale per variable so waves can be",
-                    "compared."
+                    "anomaly) for continuous ones. One map per weather",
+                    "variable; pick the survey wave above. The colour scale is",
+                    "built across all waves and does not move when the wave",
+                    "changes, so switching between them compares like with",
+                    "like."
                   )),
                   p(paste(
                     "The shaded value is the same quantity that enters the",
@@ -533,14 +485,16 @@ mod_1_05_weatherstats_server <- function(
                       "wave's value falls in that location's own historical",
                       "distribution, 0-100, with 50 a typical year. This is",
                       "the map equivalent of where the sample curve sits",
-                      "inside the historical histogram above."
+                      "inside the historical distribution above."
                     ))
                   ),
                   p(paste(
-                    "Both within-location views need the historical years",
-                    "loaded above, and both use the continuous series even",
-                    "when the variable is binned for modelling — a difference",
-                    "between bins would not be meaningful."
+                    "Both within-location views need the historical years,",
+                    "loaded with the weather data over the range set under",
+                    "'Historical comparison' in the weather sidebar, and both",
+                    "use the continuous series even when the variable is",
+                    "binned for modelling — a difference between bins would",
+                    "not be meaningful."
                   ))
                 )
               )
@@ -590,13 +544,11 @@ mod_1_05_weatherstats_server <- function(
         )
       }
 
-      # Rebuild the historical comparison for the year range already in use,
-      # so a re-configuration refreshes every panel on the tab rather than
-      # sending the user back to the "Load historical weather" button.
-      if (!is.null(hist_reload_years)) {
-        load_hist_weather(hist_reload_years[["from"]],
-                          hist_reload_years[["to"]])
-      }
+      # Every panel on this tab compares a wave with its own climate history,
+      # so the historical years are loaded as part of the weather load rather
+      # than behind a separate button.
+      hy <- hist_years()
+      load_hist_weather(hy[["from"]], hy[["to"]])
 
     }, ignoreInit = TRUE, ignoreNULL = TRUE)
 
@@ -643,8 +595,9 @@ mod_1_05_weatherstats_server <- function(
         filter(function(x, i) i %in% c(2L, 3L))$
         addAttrs(
           disabled = NA,
-          title    = paste("Load historical weather above to compare each",
-                           "location with its own history")
+          title    = paste("Historical weather is not available for this",
+                           "sample, so a location cannot be compared with",
+                           "its own history")
         )$
         parent()$
         addAttrs(style = "opacity: 0.45; cursor: not-allowed;")$
@@ -749,11 +702,48 @@ mod_1_05_weatherstats_server <- function(
     lv <- Filter(Negate(is.null), lv)
     if (length(lv) == 0) return(NULL)
     w <- unique(lv[[1]][, c("code", "year", "survname", "economy")])
+    w$key   <- paste(w$code, as.character(w$year), w$survname, sep = "|")
     w$label <- paste0(w$economy, ", ", w$year)
     w[order(w$label), , drop = FALSE]
   })
 
-  wxmap_id <- function(i, w) paste0("wxmap_", i, "_", w)
+  # One map per weather variable, not per variable x wave. A wave is picked
+  # above the maps instead: a country with several waves and two variables
+  # would otherwise stand up a leaflet widget for every combination, and they
+  # all render whether or not anyone looks at them. This is the same
+  # arrangement the survey-stats and outcome-coverage maps already use.
+  wxmap_id <- function(i) paste0("wxmap_", i)
+
+  # Which wave the maps are showing. Unlike the other tabs' maps there is no
+  # "All waves" option: a location carries a different weather value in each
+  # wave, so drawing them together would just hide one behind the other.
+  wxmap_wave_val <- reactiveVal(NULL)
+
+  wxmap_wave <- reactive({
+    w <- wave_list()
+    if (is.null(w) || nrow(w) == 0) return(NULL)
+    sel <- wxmap_wave_val()
+    if (is.null(sel) || !(sel %in% w$key)) w$key[1] else sel
+  })
+
+  observeEvent(input$wxmap_wave, {
+    v <- input$wxmap_wave
+    if (!is.null(v)) wxmap_wave_val(v)
+  }, ignoreInit = TRUE, ignoreNULL = TRUE)
+
+  output$wxmap_wave_ui <- shiny::renderUI({
+    w <- wave_list()
+    if (is.null(w) || nrow(w) < 2) return(NULL)
+    shiny::selectInput(
+      ns("wxmap_wave"), NULL,
+      choices  = stats::setNames(w$key, w$label),
+      selected = wxmap_wave(),
+      width    = "180px"
+    ) |>
+      htmltools::tagAppendAttributes(
+        style = "margin-bottom: 0;", class = "small"
+      )
+  })
 
   # Every picker copy (the one above the maps plus one per card) writes to the
   # shared value; a change in any of them updates the rest.
@@ -774,15 +764,12 @@ mod_1_05_weatherstats_server <- function(
   # Per-map view memory, so switching view keeps the pan and zoom.
   wxmap_view_mem <- new.env(parent = emptyenv())
 
-  # Outputs are created for whatever variable x wave combinations exist;
-  # re-running simply reassigns them.
+  # One output per weather variable. The palette is still built across *all*
+  # waves, so the colour scale does not shift under the user when they change
+  # wave — the whole point of the picker is to compare them.
   observe({
-    gj <- wxmap_features()
-    req(gj)
     lv_list <- weather_loc_vals()
     req(lv_list)
-    waves <- wave_list()
-    req(waves)
     sw   <- isolate(selected_weather())
     view <- wxmap_view()
 
@@ -805,49 +792,53 @@ mod_1_05_weatherstats_server <- function(
                              attr(lv, "levels"), tf)
       )
 
-      for (w in seq_len(nrow(waves))) {
-        local({
-          .lv    <- lv
-          .pal   <- pal
-          .tf    <- tf
-          .label <- sw$label[i]
-          .info  <- wxmap_label(sw$label[i])
-          .short <- wxmap_short(sw$label[i])
-          .wave  <- waves[w, ]
-          .id    <- wxmap_id(i, w)
+      local({
+        .lv    <- lv
+        .pal   <- pal
+        .tf    <- tf
+        .label <- sw$label[i]
+        .info  <- wxmap_label(sw$label[i])
+        .short <- wxmap_short(sw$label[i])
+        .id    <- wxmap_id(i)
 
-          sub <- .lv[.lv$code == .wave$code &
-                       .lv$year == .wave$year &
-                       .lv$survname == .wave$survname, , drop = FALSE]
+        if (is.null(wxmap_view_mem[[.id]])) {
+          wxmap_view_mem[[.id]] <- map_view_memory(input, session, .id)
+          wxmap_view_mem[[.id]]$remember()
+        }
+        .mem <- wxmap_view_mem[[.id]]
+
+        output[[.id]] <- leaflet::renderLeaflet({
+          gj <- wxmap_features()
+          req(gj)
+          key <- wxmap_wave()
+          req(key)
+
+          sub <- .lv[paste(.lv$code, as.character(.lv$year), .lv$survname,
+                           sep = "|") == key, , drop = FALSE]
+          req(nrow(sub) > 0)
           attr(sub, "binned") <- attr(.lv, "binned")
           attr(sub, "levels") <- attr(.lv, "levels")
 
-          if (is.null(wxmap_view_mem[[.id]])) {
-            wxmap_view_mem[[.id]] <- map_view_memory(input, session, .id)
-            wxmap_view_mem[[.id]]$remember()
-          }
-          .mem <- wxmap_view_mem[[.id]]
-
-          output[[.id]] <- leaflet::renderLeaflet({
-            m <- plot_weather_loc_map(
-              geojson        = gj,
-              loc_vals       = sub,
-              label          = .label,
-              transformation = .tf,
-              pal_info       = .pal,
-              legend_title   = .short,
-              legend_info    = .info
-            )
-            req(!is.null(m))
-            .mem$restore(m)
-          })
+          m <- plot_weather_loc_map(
+            geojson        = gj,
+            loc_vals       = sub,
+            label          = .label,
+            transformation = .tf,
+            pal_info       = .pal,
+            legend_title   = .short,
+            legend_info    = .info
+          )
+          req(!is.null(m))
+          .mem$restore(m)
         })
-      }
+      })
     }
   })
 
-  # View picker. Sits above the maps; the within-location views are only
-  # offered once the historical years have been loaded above.
+  # Wave and view pickers. Both sit above the maps and apply to all of them, so
+  # the two weather variables are always shown for the same wave on the same
+  # scale. The within-location views need the historical years, which load with
+  # the weather data.
   output$wxmap_view_ui <- shiny::renderUI({
     # Without historical weather there is nothing to compare a location with,
     # so the two within-location views are greyed out and unselectable rather
@@ -856,10 +847,15 @@ mod_1_05_weatherstats_server <- function(
     has_hist <- !is.null(hist_cells()) && !is.null(hist_cells_years())
 
     shiny::tagList(
-      wxmap_view_picker("wxmap_view"),
+      shiny::div(
+        class = "d-flex align-items-center gap-3 flex-wrap",
+        shiny::uiOutput(ns("wxmap_wave_ui"), inline = TRUE),
+        wxmap_view_picker("wxmap_view")
+      ),
       if (!has_hist) shiny::helpText(
         paste("The two within-location views compare each location with its",
-              "own history — load historical weather above to enable them."),
+              "own history, which is still loading or unavailable for this",
+              "sample."),
         style = "font-size: 12px; margin-top: -6px;"
       )
     )
@@ -874,8 +870,8 @@ mod_1_05_weatherstats_server <- function(
     }
     if (!wxmap_view_ready()) {
       return(shiny::helpText(
-        paste("This view compares each location with its own history.",
-              "Load historical weather above to see it."),
+        paste("This view compares each location with its own history, which",
+              "is still loading or unavailable for this sample."),
         style = "font-size: 12px;"
       ))
     }
@@ -888,37 +884,42 @@ mod_1_05_weatherstats_server <- function(
                              style = "font-size: 12px;"))
     }
 
-    n_col <- if (nrow(waves) == 1) 1L else 2L
-    panels <- lapply(seq_len(nrow(sw)), function(i) {
-      if (is.null(lv_list[[i]])) return(NULL)
-      cards <- lapply(seq_len(nrow(waves)), function(w) {
-        # full_screen adds bslib's expand control: the card fans out over the
-        # results area, with a close button and Esc to come back. There is one
-        # map per wave already, so these cards carry no controls of their own.
-        bslib::card(
-          full_screen = TRUE,
-          height      = "430px",
-          bslib::card_header(waves$label[w]),
-          leaflet::leafletOutput(ns(wxmap_id(i, w)), height = "100%")
-        )
-      })
-      shiny::tagList(
-        do.call(
-          bslib::layout_columns,
-          c(list(col_widths = rep(12L / n_col, n_col)), cards)
+    # One card per weather variable, side by side when there are two. The wave
+    # is named in the card header as well as in the picker, so a screenshot of
+    # a single card still says which wave it is.
+    wave_label <- waves$label[match(wxmap_wave(), waves$key)]
+    idx   <- Filter(function(i) !is.null(lv_list[[i]]), seq_len(nrow(sw)))
+    if (length(idx) == 0) {
+      return(shiny::helpText("No locations to map.",
+                             style = "font-size: 12px;"))
+    }
+
+    cards <- lapply(idx, function(i) {
+      # full_screen adds bslib's expand control: the card fans out over the
+      # results area, with a close button and Esc to come back.
+      bslib::card(
+        full_screen = TRUE,
+        height      = "430px",
+        bslib::card_header(
+          if (is.na(wave_label)) sw$label[i] else
+            paste0(sw$label[i], " — ", wave_label)
         ),
-        shiny::br()
+        leaflet::leafletOutput(ns(wxmap_id(i)), height = "100%")
       )
     })
 
-    shiny::tagList(panels)
+    n_col <- if (length(cards) == 1) 1L else 2L
+    do.call(
+      bslib::layout_columns,
+      c(list(col_widths = rep(12L / n_col, n_col)), cards)
+    )
   })
 
-    # ---- Historical weather over a user-chosen year range --------------------
+    # ---- Historical weather over the configured year range -------------------
 
     # Loads historical weather for [yf, yt] and rebuilds the comparison cells.
-    # Shared by the "Load historical weather" button and by the automatic
-    # refresh that follows a change of weather configuration.
+    # Called once per weather load, and again whenever the year range under
+    # "Historical comparison" in the weather sidebar changes.
     #
     # This is a second, full `get_weather()` pass: the survey-period load only
     # covers the wave's own months, so the extra years have to be aggregated,
@@ -985,24 +986,21 @@ mod_1_05_weatherstats_server <- function(
       invisible(TRUE)
     }
 
-    observeEvent(input$hist_load, {
+    # Changing the year range in the sidebar reloads the comparison in place,
+    # but only once weather is on screen — before that the initial load will
+    # pick the range up anyway. Debounced so typing "2015" into a year box does
+    # not fire a load per keystroke.
+    hist_years_d <- shiny::debounce(hist_years, 1500)
+
+    observeEvent(hist_years_d(), {
       req(selected_weather(), selected_surveys(), survey_data(),
           survey_weather())
 
-      yf <- suppressWarnings(as.integer(input$hist_year_from))
-      yt <- suppressWarnings(as.integer(input$hist_year_to))
-      if (is.na(yf) || is.na(yt)) {
-        showNotification("Enter both a start and an end year.",
-                         type = "warning", duration = 5)
-        return()
-      }
-      if (yf > yt) {
-        tmp <- yf
-        yf  <- yt
-        yt  <- tmp
-      }
+      hy  <- hist_years_d()
+      cur <- hist_cells_years()
+      if (!is.null(cur) && identical(as.integer(cur), as.integer(hy))) return()
 
-      load_hist_weather(yf, yt)
+      load_hist_weather(hy[["from"]], hy[["to"]])
 
     }, ignoreInit = TRUE, ignoreNULL = TRUE)
 

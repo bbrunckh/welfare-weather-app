@@ -13,7 +13,8 @@ mod_1_04_weather_ui <- function(id) {
     uiOutput(ns("weather_summary_ui")),
     wellPanel(
       uiOutput(ns("weather_selector_ui")),
-      uiOutput(ns("weather_construction_ui"))
+      uiOutput(ns("weather_construction_ui")),
+      uiOutput(ns("hist_config_ui"))
     )
   )
 }
@@ -178,6 +179,82 @@ mod_1_04_weather_server <- function(id, variable_list, selected_surveys, survey_
       tagList(do.call(tagList, ui_list))
     })
 
+    # ---- Historical comparison config ---------------------------------------
+    # The weather stats tab always draws each wave against its own climate
+    # history, so the year range is a setting of the weather configuration
+    # rather than a control on the results panel. 1991-2020 is the same
+    # reference period the deviation / anomaly transformations use.
+
+    output$hist_config_ui <- renderUI({
+      req(input$weather_variable_selector)
+      this_year <- as.integer(format(Sys.Date(), "%Y"))
+
+      # Same shape as a weather variable's block above: heading, "Configure"
+      # button, flyout with the settings — so the sidebar reads as one list of
+      # configurable sections rather than a list plus an odd one out.
+      tagList(
+        hr(),
+        tags$p(tags$strong("Historical comparison:"),
+               style = "font-size: 15px;"),
+        shiny::actionButton(ns("hist_toggle"), "Configure",
+               icon  = shiny::icon("sliders"),
+               class = "btn-outline-primary btn-sm",
+               style = "margin-bottom: 10px;"),
+        shiny::conditionalPanel(
+          condition = paste0("input['", ns("hist_toggle"), "'] % 2 == 1"),
+          class     = "config-flyout",
+          div(
+            class = "config-flyout-header",
+            tags$h6("Historical comparison settings"),
+            tags$button(
+              type    = "button",
+              class   = "btn-close",
+              `aria-label` = "Close",
+              onclick = sprintf(
+                "document.getElementById('%s').click();", ns("hist_toggle")
+              )
+            )
+          ),
+          tagList(
+            shiny::numericInput(
+              ns("hist_year_from"), "From year",
+              value = 1991L, min = 1950, max = this_year, step = 1
+            ),
+            shiny::numericInput(
+              ns("hist_year_to"), "To year",
+              value = 2020L, min = 1950, max = this_year, step = 1
+            ),
+            shiny::helpText(
+              paste(
+                "Weather over these years for the same locations and the same",
+                "calendar months each wave was fielded in. It is drawn",
+                "alongside the sample in the weather distribution plots and",
+                "backs the within-location map views. Widening the range",
+                "means loading more years, which takes longer."
+              ),
+              style = "font-size: 12px;"
+            )
+          )
+        )
+      )
+    })
+    shiny::outputOptions(output, "hist_config_ui", suspendWhenHidden = FALSE)
+
+    # Falls back to 1991-2020 before the inputs have registered, and orders
+    # the two years so a reversed range still loads.
+    hist_years <- reactive({
+      as_year <- function(x, default) {
+        y <- suppressWarnings(as.integer(x))
+        if (length(y) != 1L || is.na(y)) default else y
+      }
+      yf <- as_year(input$hist_year_from, 1991L)
+      yt <- as_year(input$hist_year_to,   2020L)
+      if (yf > yt) {
+        tmp <- yf; yf <- yt; yt <- tmp
+      }
+      c(from = yf, to = yt)
+    })
+
     # ---- Selected weather spec ----------------------------------------------
 
     selected_weather <- reactive({
@@ -248,13 +325,23 @@ mod_1_04_weather_server <- function(id, variable_list, selected_surveys, survey_
         )
       })
 
-      div(class = "settings-summary", rows)
+      hy <- hist_years()
+
+      div(
+        class = "settings-summary",
+        rows,
+        tagList(
+          tags$b("Historical comparison:"),
+          paste0(" ", hy[["from"]], "–", hy[["to"]])
+        )
+      )
     })
 
     # ---- Module return API --------------------------------------------------
 
     list(
-      selected_weather = selected_weather
+      selected_weather = selected_weather,
+      hist_years       = hist_years
     )
   })
 }

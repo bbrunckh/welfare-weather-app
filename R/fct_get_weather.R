@@ -447,13 +447,27 @@ get_weather <- function(
 
   h3_slim <- h3_slim |>
     dplyr::filter(!is.na(h3), !is.na(pop_2020), pop_2020 > 0) |>
-    dplyr::select(h3, code, year, survname, loc_id, pop_2020) |>
-    dplyr::distinct()
+    dplyr::select(h3, code, year, survname, loc_id, pop_2020)
 
   # -- H3 resolution + type harmonisation ------------------------------------
   h3_harmonised <- .harmonise_h3(h3_slim, weather, con)
   h3_slim       <- h3_harmonised$h3_slim
   weather       <- h3_harmonised$weather
+
+  # -- One population weight per location x weather cell ---------------------
+  # The mapping file is finer-grained than the weather grid: it carries one row
+  # per populated sub-cell of the cell the weather is measured on, so a cell's
+  # weight in a location is the *sum* of the sub-cells of it that fall there.
+  #
+  # These rows must not be de-duplicated on `pop_2020`. Sub-cell populations
+  # are small integers (they run from 1 upwards) and two sub-cells of the same
+  # cell frequently carry the same count, so a `distinct()` here silently
+  # deletes real population: about 1% of rows in the EHCVM files, which shifts
+  # the relative weight of cells inside a location by up to a fifth in the
+  # worst case. Aggregating explicitly also makes the join below one-to-one.
+  h3_slim <- h3_slim |>
+    dplyr::group_by(code, year, survname, loc_id, h3_weather) |>
+    dplyr::summarise(pop_2020 = sum(pop_2020, na.rm = TRUE), .groups = "drop")
 
   # -- Spatial aggregation: h3 -> loc_id (population-weighted mean) ----------
   .pop_weighted_mean <- function(tbl, vars) {

@@ -68,52 +68,407 @@ merge_survey_weather <- function(survey_data, weather_data) {
 
 
 # ---------------------------------------------------------------------------- #
-# Weather distribution plot                                                     #
+# Weather distribution plots                                                    #
 # ---------------------------------------------------------------------------- #
+# Both the binned bar chart and the continuous ridge plot draw the survey wave
+# and that wave's own climate history in the same panel, so the comparison the
+# user cares about ("was this wave unusual?") is a within-panel one. Historical
+# weather is loaded for the same locations and calendar months as each wave and
+# weighted by the households behind them, so the two series are composed the
+# same way — see `join_hist_sample_cells()`.
+
+# Label used for the sample series across both plots.
+#' @noRd
+.wx_sample_lab <- "Survey sample"
+
+# Label used for the historical series across both plots.
+#' @noRd
+.wx_hist_lab <- function(year_from, year_to) {
+  paste0("Historical ", year_from, "–", year_to)
+}
+
+
+#' One colour per survey wave
+#'
+#' Shared by the binned bar chart and the continuous ridge plot so a wave keeps
+#' its colour across both panels.
+#'
+#' @param waves Character vector of wave labels (`countryyear`).
+#'
+#' @return A named character vector of colours.
+#' @noRd
+.wave_palette <- function(waves) {
+  n <- length(waves)
+  if (n == 0) return(character(0))
+  base <- scales::brewer_pal(palette = "Set2")(max(3L, min(n, 8L)))
+  if (n > length(base)) base <- grDevices::colorRampPalette(base)(n)
+  stats::setNames(base[seq_len(n)], waves)
+}
+
+
+#' Blend colours towards another colour
+#'
+#' Used to derive the historical series' colours from the wave's own colour:
+#' a lighter fill for the bars, a darker outline for the ridges.
+#'
+#' @param col     Character vector of colours.
+#' @param towards Colour to blend towards.
+#' @param amount  Numeric in `[0, 1]`. How far to move.
+#'
+#' @return A character vector of hex colours.
+#' @noRd
+.blend_colour <- function(col, towards = "white", amount = 0.55) {
+  from <- grDevices::col2rgb(col) / 255
+  to   <- as.numeric(grDevices::col2rgb(towards)) / 255
+  out  <- from * (1 - amount) + to * amount
+  grDevices::rgb(out[1, ], out[2, ], out[3, ])
+}
+
+
+#' Bin historical weather with the survey's own bin breaks
+#'
+#' The historical series is always loaded continuous (binning is a modelling
+#' choice, not a property of the weather), so it has to be cut here with the
+#' breaks the survey sample was binned on. Both sides then share one set of bin
+#' labels and the bars line up.
+#'
+#' @param hist_df   Data frame from `join_hist_sample_cells()`.
+#' @param hv        Scalar character. Name of the weather variable column.
+#' @param breaks    Numeric break vector for `hv`, from `stored_breaks`.
+#' @param year_from,year_to Integer calendar years bounding the historical
+#'   series (inclusive). `NULL` keeps every year present.
+#'
+#' @return A data frame of `countryyear`, `bin` and `w` (household weight), or
+#'   `NULL` when the historical series cannot be binned.
+#' @noRd
+.hist_bin_counts <- function(hist_df, hv, breaks, year_from = NULL,
+                             year_to = NULL) {
+  if (is.null(hist_df) || is.null(breaks) || length(breaks) < 2) return(NULL)
+  if (is.na(hv) || !(hv %in% names(hist_df))) return(NULL)
+  if (!all(c("n_hh", "countryyear") %in% names(hist_df))) return(NULL)
+
+  v    <- suppressWarnings(as.numeric(hist_df[[hv]]))
+  keep <- is.finite(v)
+  if (!is.null(year_from) && !is.null(year_to) &&
+      "cal_year" %in% names(hist_df)) {
+    keep <- keep &
+      hist_df$cal_year >= as.integer(year_from) &
+      hist_df$cal_year <= as.integer(year_to)
+  }
+  if (!any(keep)) return(NULL)
+
+  data.frame(
+    countryyear = as.character(hist_df$countryyear[keep]),
+    bin         = as.character(cut(v[keep], breaks = breaks,
+                                   include.lowest = TRUE)),
+    w           = as.numeric(hist_df$n_hh[keep]),
+    stringsAsFactors = FALSE
+  ) |>
+    dplyr::group_by(.data$countryyear, .data$bin) |>
+    dplyr::summarise(w = sum(.data$w, na.rm = TRUE), .groups = "drop") |>
+    as.data.frame()
+}
+
+
+#' Bar chart of a binned weather variable, sample against its own history
+#'
+#' One group of bars per bin. Within a group each survey wave contributes two
+#' bars — what the sample actually experienced and what the same locations and
+#' calendar months looked like over the historical years — drawn in the wave's
+#' colour, the historical bar in a lighter shade of it.
+#'
+#' Bars show the share of observations in each bin *within* a wave-source
+#' series, not raw counts: the historical series spans decades and would
+#' otherwise dwarf the single wave behind it.
+#'
+#' @param df        Merged survey-weather frame with `countryyear` and a binned
+#'   `hv` column.
+#' @param hv        Scalar character. Name of the weather variable column.
+#' @param label     Scalar character. Human-readable label for the x-axis.
+#' @param hist_df   Optional data frame from `join_hist_sample_cells()`. When
+#'   `NULL` (or when `breaks` is missing) only the sample bars are drawn.
+#' @param breaks    Numeric break vector for `hv`, from `stored_breaks`.
+#' @param year_from,year_to Integer calendar years bounding the historical
+#'   series (inclusive).
+#'
+#' @return A `ggplot` object, or `NULL` invisibly when there is nothing to plot.
+#'
+#' @export
+plot_weather_bins_compare <- function(df, hv, label, hist_df = NULL,
+                                      breaks = NULL, year_from = NULL,
+                                      year_to = NULL) {
+  if (is.null(df) || is.na(hv) || !(hv %in% names(df))) return(invisible(NULL))
+  if (!("countryyear" %in% names(df))) return(invisible(NULL))
+
+  keep <- !is.na(df[[hv]])
+  if (!any(keep)) return(invisible(NULL))
+
+  lvls <- if (is.factor(df[[hv]])) {
+    levels(df[[hv]])
+  } else {
+    sort(unique(as.character(df[[hv]][keep])))
+  }
+
+  samp <- data.frame(
+    countryyear = as.character(df$countryyear[keep]),
+    bin         = as.character(df[[hv]][keep]),
+    w           = 1,
+    stringsAsFactors = FALSE
+  ) |>
+    dplyr::group_by(.data$countryyear, .data$bin) |>
+    dplyr::summarise(w = sum(.data$w), .groups = "drop") |>
+    as.data.frame()
+  samp$source <- .wx_sample_lab
+
+  hist_lab   <- .wx_hist_lab(year_from, year_to)
+  hist_bins  <- .hist_bin_counts(hist_df, hv, breaks, year_from, year_to)
+  has_hist   <- !is.null(hist_bins) && nrow(hist_bins) > 0
+  if (has_hist) hist_bins$source <- hist_lab
+
+  d <- if (has_hist) rbind(samp, hist_bins) else samp
+
+  # Share within each wave x series, so a wave's sample bars and its
+  # historical bars each sum to 100 and can be read against each other.
+  d <- d |>
+    dplyr::group_by(.data$countryyear, .data$source) |>
+    dplyr::mutate(share = 100 * .data$w / sum(.data$w, na.rm = TRUE)) |>
+    dplyr::ungroup() |>
+    as.data.frame()
+
+  waves <- sort(unique(d$countryyear))
+  pal   <- .wave_palette(waves)
+
+  # Wave-major key order, so each wave's pair of bars sits side by side inside
+  # a bin rather than all samples first and all histories after. The historical
+  # bar is a lighter shade of the wave's own colour.
+  sources <- if (has_hist) c(.wx_sample_lab, hist_lab) else .wx_sample_lab
+  series  <- .wx_series_grid(waves, sources)
+  key_cols <- stats::setNames(
+    ifelse(series$source == .wx_sample_lab,
+           pal[series$wave],
+           .blend_colour(pal[series$wave], "white", 0.6)),
+    series$key
+  )
+
+  d$key <- factor(.wx_series_key(d$countryyear, d$source),
+                  levels = series$key)
+  d$bin <- factor(d$bin, levels = lvls)
+
+  ggplot2::ggplot(
+    d, ggplot2::aes(x = .data$bin, y = .data$share, fill = .data$key)
+  ) +
+    ggplot2::geom_col(
+      position = ggplot2::position_dodge(preserve = "single"),
+      colour   = "grey45", linewidth = 0.25, alpha = 0.9
+    ) +
+    ggplot2::scale_fill_manual(values = key_cols, name = NULL,
+                               drop = FALSE) +
+    theme_wise() +
+    ggplot2::labs(
+      x = stringr::str_wrap(paste0(label, "\n(as configured)"), 40),
+      y = "Share of observations (%)"
+    ) +
+    ggplot2::theme(
+      axis.text.x     = ggplot2::element_text(angle = 45, hjust = 1),
+      legend.position = "top",
+      legend.text     = ggplot2::element_text(size = 9)
+    ) +
+    ggplot2::guides(fill = ggplot2::guide_legend(nrow = length(sources)))
+}
+
+
+# Series key shared by the bar chart and the ridge plot: one entry per survey
+# wave x series (sample / historical).
+#' @noRd
+.wx_series_key <- function(wave, source) paste0(wave, " — ", source)
+
+# Wave-major grid of every wave x series combination, in plotting order, so
+# colour lookups are built alongside the keys rather than parsed back out of
+# them.
+#' @noRd
+.wx_series_grid <- function(waves, sources) {
+  g <- expand.grid(source = sources, wave = waves,
+                   KEEP.OUT.ATTRS = FALSE, stringsAsFactors = FALSE)
+  g$key <- .wx_series_key(g$wave, g$source)
+  g[, c("wave", "source", "key")]
+}
+
+
+#' Ridge plot of a continuous weather variable, sample against its own history
+#'
+#' One row per survey wave: the wave's own weather as a filled density in the
+#' wave's colour, with the same locations' historical distribution drawn over
+#' it as a dashed outline. Both are on one shared height scale, so the two
+#' curves in a row are directly comparable.
+#'
+#' The historical density is weighted by the number of sampled households
+#' behind each location-month cell, so it is composed like the sample rather
+#' than like the raw weather grid.
+#'
+#' @param df        Data frame with `countryyear` and a numeric `hv` column
+#'   (the continuous series, even when the variable is binned for modelling).
+#' @param hv        Scalar character. Name of the weather variable column.
+#' @param label     Scalar character. Human-readable label for the x-axis.
+#' @param hist_df   Optional data frame from `join_hist_sample_cells()`. When
+#'   `NULL` only the sample ridges are drawn.
+#' @param year_from,year_to Integer calendar years bounding the historical
+#'   series (inclusive).
+#'
+#' @return A `ggplot` object, or `NULL` invisibly when there is nothing to plot.
+#'
+#' @export
+plot_weather_ridges_compare <- function(df, hv, label, hist_df = NULL,
+                                        year_from = NULL, year_to = NULL) {
+  if (is.null(df) || is.na(hv) || !(hv %in% names(df))) return(invisible(NULL))
+  if (!("countryyear" %in% names(df))) return(invisible(NULL))
+
+  sv   <- suppressWarnings(as.numeric(df[[hv]]))
+  keep <- is.finite(sv)
+  if (!any(keep)) return(invisible(NULL))
+
+  samp <- data.frame(
+    countryyear = as.character(df$countryyear[keep]),
+    x           = sv[keep],
+    w           = 1,
+    source      = .wx_sample_lab,
+    stringsAsFactors = FALSE
+  )
+
+  hist_lab <- .wx_hist_lab(year_from, year_to)
+  hist_use <- NULL
+  if (!is.null(hist_df) && !is.na(hv) && hv %in% names(hist_df) &&
+      all(c("n_hh", "countryyear") %in% names(hist_df))) {
+    hv_vals <- suppressWarnings(as.numeric(hist_df[[hv]]))
+    hkeep   <- is.finite(hv_vals)
+    if (!is.null(year_from) && !is.null(year_to) &&
+        "cal_year" %in% names(hist_df)) {
+      hkeep <- hkeep &
+        hist_df$cal_year >= as.integer(year_from) &
+        hist_df$cal_year <= as.integer(year_to)
+    }
+    # A density needs something to smooth over; a couple of cells would draw a
+    # spike that says more about the bandwidth than about the climate.
+    if (sum(hkeep) >= 10) {
+      hist_use <- data.frame(
+        countryyear = as.character(hist_df$countryyear[hkeep]),
+        x           = hv_vals[hkeep],
+        w           = as.numeric(hist_df$n_hh[hkeep]),
+        source      = hist_lab,
+        stringsAsFactors = FALSE
+      )
+      # Only keep waves the sample also has, so no row appears with a
+      # historical curve and no sample curve.
+      hist_use <- hist_use[hist_use$countryyear %in% samp$countryyear, ,
+                           drop = FALSE]
+      if (nrow(hist_use) == 0) hist_use <- NULL
+    }
+  }
+
+  d <- if (is.null(hist_use)) samp else rbind(samp, hist_use)
+
+  waves   <- sort(unique(samp$countryyear))
+  pal     <- .wave_palette(waves)
+  sources <- if (is.null(hist_use)) .wx_sample_lab else
+    c(.wx_sample_lab, hist_lab)
+
+  # The sample is a filled ridge in the wave's colour; the history is drawn
+  # over it as an unfilled dashed outline in a darker shade of the same colour,
+  # so the pair reads as one wave rather than two unrelated series.
+  series <- .wx_series_grid(waves, sources)
+  fills  <- stats::setNames(
+    ifelse(series$source == .wx_sample_lab, pal[series$wave], NA_character_),
+    series$key
+  )
+  lines <- stats::setNames(
+    ifelse(series$source == .wx_sample_lab, "grey30",
+           .blend_colour(pal[series$wave], "black", 0.35)),
+    series$key
+  )
+
+  d$countryyear <- factor(d$countryyear, levels = waves)
+  d$source      <- factor(d$source, levels = sources)
+  d$key         <- factor(.wx_series_key(as.character(d$countryyear),
+                                         as.character(d$source)),
+                          levels = series$key)
+
+  # Pre-computing the bandwidth silences ggridges' "Picking joint bandwidth"
+  # message without changing the visual.
+  bw <- tryCatch(stats::bw.nrd0(d$x), error = function(e) NULL)
+  if (is.null(bw) || !is.finite(bw) || bw <= 0) bw <- NULL
+
+  p <- ggplot2::ggplot(
+    d,
+    ggplot2::aes(
+      x        = .data$x,
+      y        = .data$countryyear,
+      weight   = .data$w,
+      group    = .data$key,
+      fill     = .data$key,
+      colour   = .data$key,
+      linetype = .data$source
+    )
+  ) +
+    ggridges::geom_density_ridges(
+      alpha = 0.7, scale = 2, bandwidth = bw, linewidth = 0.5
+    ) +
+    ggplot2::scale_fill_manual(values = fills, na.value = NA, guide = "none") +
+    ggplot2::scale_colour_manual(values = lines, guide = "none") +
+    ggplot2::scale_linetype_manual(
+      values = stats::setNames(
+        c("solid", "22")[seq_along(sources)], sources
+      ),
+      name = NULL
+    ) +
+    theme_wise() +
+    ggplot2::labs(
+      x = stringr::str_wrap(paste0(label, "\n(as configured)"), 40),
+      y = ""
+    ) +
+    ggplot2::theme(
+      legend.position = if (length(sources) > 1) "top" else "none",
+      legend.text     = ggplot2::element_text(size = 9)
+    )
+
+  p
+}
+
 
 #' Plot the distribution of a weather variable
 #'
-#' For binned variables renders a dodged bar chart of bin counts by
-#' `countryyear`. For continuous variables renders a ridge density plot.
+#' For binned variables renders a dodged bar chart of bin shares by
+#' `countryyear`. For continuous variables renders a ridge density plot. Both
+#' can carry the wave's own climate history alongside the sample — pass
+#' `hist_df` (and, for the bar chart, the `breaks` the sample was binned on).
 #'
 #' @param df          A data frame with a `countryyear` column and a column
 #'   named `hv`.
 #' @param hv          Scalar character. Name of the weather variable column.
 #' @param label       Scalar character. Human-readable label for the x-axis.
 #' @param cont_binned One of `"Binned"` or `"Continuous"` (or `NA`).
+#' @param hist_df     Optional data frame from `join_hist_sample_cells()`.
+#' @param breaks      Numeric break vector for `hv`, from `stored_breaks`.
+#'   Only used for binned variables.
+#' @param year_from,year_to Integer calendar years bounding the historical
+#'   series (inclusive).
 #'
 #' @return A `ggplot` object, or `NULL` invisibly when `hv` is absent or `NA`.
 #'
 #' @export
-plot_weather_dist <- function(df, hv, label, cont_binned) {
+plot_weather_dist <- function(df, hv, label, cont_binned, hist_df = NULL,
+                              breaks = NULL, year_from = NULL,
+                              year_to = NULL) {
   if (is.null(df) || is.na(hv) || !(hv %in% names(df))) return(invisible(NULL))
 
-  x_label <- stringr::str_wrap(paste0(label, "\n(as configured)"), 40)
-
   if (!is.na(cont_binned) && cont_binned == "Binned") {
-    df_summary <- df |>
-      dplyr::filter(!is.na(.data[[hv]])) |>
-      dplyr::group_by(.data$countryyear, .data[[hv]]) |>
-      dplyr::summarise(n = dplyr::n(), .groups = "drop")
-
-    ggplot2::ggplot(
-      df_summary,
-      ggplot2::aes(x = .data[[hv]], y = n, fill = .data$countryyear)
-    ) +
-      ggplot2::geom_col(
-        position = ggplot2::position_dodge(preserve = "single"),
-        alpha    = 0.85
-      ) +
-      ggplot2::scale_fill_brewer(palette = "Set2", name = NULL) +
-      theme_wise() +
-      ggplot2::labs(x = x_label, y = "Count") +
-      ggplot2::theme(
-        axis.text.x     = ggplot2::element_text(angle = 45, hjust = 1),
-        legend.position = "top",
-        legend.text     = ggplot2::element_text(size = 9)
-      )
+    plot_weather_bins_compare(
+      df = df, hv = hv, label = label, hist_df = hist_df, breaks = breaks,
+      year_from = year_from, year_to = year_to
+    )
   } else {
-    ridge_distribution_plot(df, x_var = hv, x_label = x_label, wrap_width = 40)
+    plot_weather_ridges_compare(
+      df = df, hv = hv, label = label, hist_df = hist_df,
+      year_from = year_from, year_to = year_to
+    )
   }
 }
 
@@ -225,28 +580,6 @@ plot_binscatter <- function(df, hv, hv_label = hv, y_var, y_label = y_var) {
 # ---------------------------------------------------------------------------- #
 # Historical vs sample weather comparison                                       #
 # ---------------------------------------------------------------------------- #
-
-#' Default year range for the historical weather comparison
-#'
-#' The range ends at the latest calendar year covered by the survey
-#' timestamps and spans `n_years` calendar years (inclusive).
-#'
-#' @param survey_dates Date vector of survey timestamps.
-#' @param n_years      Integer. Length of the range. Default 20.
-#'
-#' @return A named integer vector `c(from = , to = )`, or `NULL` when
-#'   `survey_dates` is empty.
-#'
-#' @export
-default_hist_year_range <- function(survey_dates, n_years = 20L) {
-  survey_dates <- as.Date(survey_dates)
-  survey_dates <- survey_dates[!is.na(survey_dates)]
-  if (length(survey_dates) == 0) return(NULL)
-
-  to <- as.integer(format(max(survey_dates), "%Y"))
-  c(from = to - as.integer(n_years) + 1L, to = to)
-}
-
 
 #' Expand survey timestamps across a range of calendar years
 #'
@@ -362,91 +695,6 @@ join_hist_sample_cells <- function(hist_df, survey_weather) {
   h$is_sample   <- !is.na(h$is_sample)
   h$countryyear <- paste0(h$economy, ", ", h$year)
   h
-}
-
-
-#' Overlay the historical weather distribution with the survey sample
-#'
-#' Draws a household-weighted histogram of the chosen historical years and
-#' overlays the survey wave's own weather as a density curve on the same
-#' density scale, so the two remain comparable despite very different numbers
-#' of observations (the sample covers a handful of location-months, the
-#' historical series covers the same cells across many years). One facet per
-#' survey wave.
-#'
-#' @param cells_df  Data frame from `join_hist_sample_cells()`.
-#' @param hv        Scalar character. Name of the weather variable column.
-#' @param label     Scalar character. Human-readable variable label.
-#' @param year_from,year_to Integer calendar years bounding the historical
-#'   series (inclusive).
-#' @param bins      Integer. Number of histogram bins. Default 30.
-#'
-#' @return A `ggplot` object, or `NULL` when there is nothing to plot.
-#'
-#' @export
-plot_hist_vs_sample <- function(cells_df, hv, label, year_from, year_to,
-                                bins = 30) {
-  if (is.null(cells_df) || is.na(hv) || !(hv %in% names(cells_df))) return(NULL)
-
-  vals <- suppressWarnings(as.numeric(cells_df[[hv]]))
-  d    <- cells_df[is.finite(vals), , drop = FALSE]
-  if (nrow(d) == 0) return(NULL)
-  d$value <- vals[is.finite(vals)]
-
-  hist_lab <- paste0("Historical ", year_from, "–", year_to)
-  samp_lab <- "Survey sample"
-
-  hist_part <- d[d$cal_year >= as.integer(year_from) &
-                   d$cal_year <= as.integer(year_to), , drop = FALSE]
-  samp_part <- d[d$is_sample, , drop = FALSE]
-  if (nrow(hist_part) == 0) return(NULL)
-
-  hist_part$source <- hist_lab
-  samp_part$source <- samp_lab
-
-  p <- ggplot2::ggplot() +
-    ggplot2::geom_histogram(
-      data    = hist_part,
-      mapping = ggplot2::aes(
-        x      = .data$value,
-        y      = ggplot2::after_stat(density),
-        weight = .data$n_hh,
-        fill   = .data$source
-      ),
-      colour = NA, alpha = 0.7, bins = bins
-    )
-
-  if (nrow(samp_part) > 0) {
-    p <- p + ggplot2::geom_density(
-      data    = samp_part,
-      mapping = ggplot2::aes(
-        x      = .data$value,
-        y      = ggplot2::after_stat(density),
-        weight = .data$n_hh,
-        colour = .data$source
-      ),
-      fill = NA, linewidth = 0.9, key_glyph = ggplot2::draw_key_path
-    )
-  }
-
-  p +
-    ggplot2::facet_wrap(ggplot2::vars(.data$countryyear), scales = "free_y") +
-    ggplot2::scale_fill_manual(
-      values = stats::setNames("#808080", hist_lab), name = NULL
-    ) +
-    ggplot2::scale_colour_manual(
-      values = stats::setNames("#1f78b4", samp_lab), name = NULL
-    ) +
-    theme_wise() +
-    ggplot2::labs(
-      x       = stringr::str_wrap(paste0(label, "\n(as configured)"), 40),
-      y       = "Density",
-      caption = paste(
-        "Same locations and calendar months as the survey wave, weighted by",
-        "the number of sampled households per location-month."
-      )
-    ) +
-    ggplot2::theme(legend.position = "top")
 }
 
 
