@@ -53,14 +53,16 @@ app_ui <- function(request) {
       tags$a(
         icon("book-open"), "Docs",
         href = "https://datanalytics-int.worldbank.org/content/a24b499b-46b7-420e-9e77-5475b45cc7c5",
-        target = "_blank"
+        target = "_blank",
+        title = "User guide and documentation"
       )
     ),
     bslib::nav_item(
       tags$a(
         icon("database"), "Data",
         href = "https://github.com/bbrunckh/welfare-weather-app-data",
-        target = "_blank"
+        target = "_blank",
+        title = "View data prep repository on GitHub"
       )
     ),
     bslib::nav_item(
