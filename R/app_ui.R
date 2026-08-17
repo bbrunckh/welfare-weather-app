@@ -58,6 +58,13 @@ app_ui <- function(request) {
     ),
     bslib::nav_item(
       tags$a(
+        icon("database"), "Data",
+        href = "https://github.com/bbrunckh/welfare-weather-app-data",
+        target = "_blank"
+      )
+    ),
+    bslib::nav_item(
+      tags$a(
         icon("github"),
         href = "https://github.com/worldbank/welfare-weather-app",
         target = "_blank",
