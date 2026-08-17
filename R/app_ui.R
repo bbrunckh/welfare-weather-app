@@ -39,7 +39,7 @@ app_ui <- function(request) {
       mod_1_modelling_ui("step1")
     ),
     bslib::nav_panel(
-      "Step 2 - Simulate welfare",
+      "Step 2 - Climate scenarios",
       icon = icon("cloud-sun-rain"),
       mod_2_simulation_ui("step2")
     ),

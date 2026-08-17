@@ -68,11 +68,11 @@ mod_0_overview_ui <- function(id) {
       )
     ),
     step_card(
-      "2", "Simulate welfare",
+      "2", "Climate scenarios",
       paste(
-        "Apply the fitted model from Step 1 to historical weather and",
-        "future climate projections (CMIP6 scenarios) to produce",
-        "distributions of weather-driven welfare outcomes."
+        "Apply the model from Step 1 to simulate the distribution of",
+        "weather-driven welfare outcomes under historical conditions",
+        "and for future climate projections (CMIP6 scenarios)."
       )
     ),
     step_card(
