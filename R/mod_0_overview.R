@@ -330,24 +330,55 @@ mod_0_overview_server <- function(id) {
     pov_lines          <- reactiveVal(NULL)
 
     # On Posit Connect with env vars set: auto-connect once on startup,
-    # no button click or UI input required.
+    # no button click or UI input required. Any failure (auth, network,
+    # missing volume/metadata) rolls back and surfaces a visible error.
     if (.auto_connect()) {
       observe({
-        params <- build_connection_params("databricks")
-        message("[overview] auto-connecting to Databricks (Posit Connect)")
-        applied_connection(params)
+        auto_connect_fail <- function(e) {
+          msg <- conditionMessage(e)
+          message("[overview] auto-connect to Databricks failed: ", msg)
+          # Roll back so downstream modules do not run against a broken connection
+          applied_connection(NULL)
+          showNotification(
+            paste("Auto-connect to Databricks failed:", msg),
+            type = "error", duration = 15
+          )
+          output$connection_status_ui <- renderUI({
+            div(
+              p(icon("circle-exclamation"), " Failed to connect to Databricks.",
+                style = "color: #c62828; font-weight: 600; font-size: 12px; margin-top: 4px;"
+              ),
+              p(msg, style = "color: #c62828; font-size: 12px;"),
+              p(paste(
+                "Check the DATABRICKS_HOST, DATABRICKS_CLIENT_ID,",
+                "DATABRICKS_CLIENT_SECRET and DATABRICKS_VOLUME_PATH environment",
+                "variables configured for this app on Posit Connect, then reload the app."
+              ),
+              style = "font-size: 12px;"
+              )
+            )
+          })
+        }
 
-        survey_list(load_data("metadata/survey_list.csv", params, collect = TRUE))
-        variable_list(add_derived_policy_vars_to_vl(
-          load_data("metadata/variable_list.csv", params, collect = TRUE)
-        ) |> dplyr::mutate(name = dplyr::if_else(name == "loc_id", "loc_id_panel", name)))
-        cpi_ppp(load_data("metadata/cpi_ppp.csv", params, collect = TRUE))
-        pov_lines(default_poverty_lines())
+        tryCatch({
+          params <- build_connection_params("databricks")
+          message("[overview] auto-connecting to Databricks (Posit Connect)")
 
-        output$connection_status_ui <- renderUI({
-          p(icon("circle-check"), " Connected to Databricks.",
-            style = "color: #2e7d32; font-size: 12px; margin-top: 4px;")
-        })
+          survey_list(load_data("metadata/survey_list.csv", params, collect = TRUE))
+          variable_list(add_derived_policy_vars_to_vl(
+            load_data("metadata/variable_list.csv", params, collect = TRUE)
+          ) |> dplyr::mutate(name = dplyr::if_else(name == "loc_id", "loc_id_panel", name)))
+          cpi_ppp(load_data("metadata/cpi_ppp.csv", params, collect = TRUE))
+          pov_lines(default_poverty_lines())
+
+          # Only expose the connection once all metadata has loaded successfully
+          applied_connection(params)
+
+          output$connection_status_ui <- renderUI({
+            p(icon("circle-check"), " Connected to Databricks.",
+              style = "color: #2e7d32; font-size: 12px; margin-top: 4px;")
+          })
+        }, error = function(e) auto_connect_fail(e))
       }) |> bindEvent(TRUE, once = TRUE)
     }
 
