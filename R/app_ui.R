@@ -52,7 +52,7 @@ app_ui <- function(request) {
     bslib::nav_item(
       tags$a(
         icon("book-open"), "Docs",
-        href = "https://datanalytics-int.worldbank.org/content/a24b499b-46b7-420e-9e77-5475b45cc7c5",
+        href = "https://datanalytics-int.worldbank.org/wise-app-docs/",
         target = "_blank",
         title = "User guide and documentation"
       )
