@@ -26,16 +26,15 @@ mod_0_overview_ui <- function(id) {
         p(class = "hero-subtitle",
           "Weather Impact Simulation and Evaluation for Adaptation Policy and Planning"),
         p(paste(
-          "WISE-APP estimates how weather affects household welfare from",
-          "survey microdata, simulates welfare outcomes under historical",
-          "weather and future climate scenarios, and evaluates how policy",
-          "and adaptation measures change those outcomes."
+          "WISE-APP is an analytical tool designed to stress-test household",
+          "welfare under historical and projected climate scenarios,",
+          "and to evaluate resilience-building policy interventions."
         )),
         p("Work through the three steps below — each step builds on the previous one."),
 
         p(tags$a(
-          icon("book-open"), "WISE-APP Documentation",
-          href = "https://datanalytics-int.worldbank.org/content/a24b499b-46b7-420e-9e77-5475b45cc7c5",
+          icon("book-open"), "WISE-APP Use Guide",
+          href = "https://datanalytics.worldbank.org/wise-app-docs",
           target = "_blank"
         ))
       )
@@ -61,8 +60,8 @@ mod_0_overview_ui <- function(id) {
     step_card(
       "1", "Model welfare",
       paste(
-        "Estimate the statistical relationship between weather and an",
-        "outcome of interest — such as household consumption, income, or",
+        "Estimate the empirical relationship between local weather and an",
+        "outcome of interest — such as household consumption or",
         "poverty status — from survey microdata. The fitted model is the",
         "foundation for all subsequent steps."
       )
@@ -70,18 +69,38 @@ mod_0_overview_ui <- function(id) {
     step_card(
       "2", "Climate scenarios",
       paste(
-        "Apply the model from Step 1 to simulate the distribution of",
-        "weather-driven welfare outcomes under historical conditions",
-        "and for future climate projections (CMIP6 scenarios)."
+        "Simulate the distribution of weather-driven welfare outcomes",
+        "under historical conditions and for future climate projections",
+        "(CMIP6 scenarios), by applying the model from Step 1."
       )
     ),
     step_card(
       "3", "Policy scenarios",
       paste(
-        "Re-simulate welfare under counterfactual policies — social",
-        "protection, infrastructure, digital inclusion, labor market and",
-        "education measures — to quantify welfare gains and changes in",
+        "Re-simulate welfare under counterfactual policy scenarios",
+        "(social protection, infrastructure, labor, education...)",
+        "to quantify welfare gains and evaluate changes in",
         "climate resilience against the Step 2 baseline."
+      )
+    )
+  )
+
+  limitations_card <- bslib::card(
+    class = "limitation-card",
+    bslib::card_header(icon("triangle-exclamation"), " Limitations"),
+    bslib::card_body(
+      p(paste(
+        "WISE-APP is an illustrative stress-testing tool — not a forecast or a",
+        "causal impact evaluation framework. Its estimates capture conditional",
+        "statistical associations between local weather variability and household",
+        "welfare. The User Guide includes important"
+      ),
+      tags$a(
+        "caveats",
+        href = "https://datanalytics.worldbank.org/wise-app-docs/#limitations",
+        target = "_blank"
+      ),
+      "."
       )
     )
   )
@@ -92,6 +111,7 @@ mod_0_overview_ui <- function(id) {
     return(tagList(
       hero,
       steps,
+      limitations_card,
       bslib::card(
         class = "connect-card",
         bslib::card_header(icon("database"), " Data"),
@@ -103,6 +123,7 @@ mod_0_overview_ui <- function(id) {
   tagList(
     hero,
     steps,
+    limitations_card,
     bslib::card(
       class = "connect-card",
       bslib::card_header(icon("database"), " Data"),

@@ -436,6 +436,20 @@ details[open] summary {
   overflow-y: auto;
 }
 
+/* Limitations card: full width, natural height, no internal scroll */
+.limitation-card {
+  overflow: visible;
+  flex: 0 0 auto;
+}
+
+.limitation-card .card-body {
+  padding: 0.9rem 1.1rem;
+}
+
+.limitation-card .card-body > p:first-child {
+  margin-bottom: 0;
+}
+
 /* ---- Misc ---------------------------------------------------------------- */
 
 /* Denser controls in sidebars */
