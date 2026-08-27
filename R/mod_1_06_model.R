@@ -831,6 +831,16 @@ mod_1_06_model_server <- function(id,
       all_locked <- unique(c(locked$ind, locked$hh, locked$firm, locked$area))
       interactions <- unique(c(input$interactions, all_locked))
 
+      # Cluster-robust VCV at the survey-location panel level. Matches
+      # COEF_VCOV_SPEC (~loc_id_panel) in fct_simulations.R so that the SEs
+      # displayed in Step 1 and the coefficient uncertainty propagated in
+      # Step 2 come from one sampling distribution. loc_id_panel is only
+      # joined when the H3 files loaded successfully in Survey stats —
+      # otherwise fall back to fixest's default VCV.
+      sw_cols    <- tryCatch(colnames(survey_weather()),
+                             error = function(e) character(0))
+      cluster_var <- if ("loc_id_panel" %in% sw_cols) "loc_id_panel" else NULL
+
       build_selected_model(
         model_type          = input$model_type,
         interactions        = interactions,
@@ -846,7 +856,8 @@ mod_1_06_model_server <- function(id,
         lasso_standardize   = isTRUE(input$lasso_standardize == "Standardize"),
         mi_m                = input$mi_m,
         mi_maxit            = input$mi_maxit,
-        stability_threshold = input$stability_threshold
+        stability_threshold = input$stability_threshold,
+        cluster             = cluster_var
       )
 
     })

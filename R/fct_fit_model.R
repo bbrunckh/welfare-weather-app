@@ -65,14 +65,14 @@ ENGINE_REGISTRY <- list(
     },
 
     fit_one = function(formula, data, model_type, model_spec, opts) {
+      # opts$fixest (e.g. cluster) is merged exactly once: `cluster` is a
+      # formal argument of both feols and feglm, so appending it a second
+      # time aborts with "matched by multiple actual arguments".
       args <- c(list(fml = formula, data = data), opts$fixest)
       if (model_type == "logistic") {
         args$family <- stats::binomial("logit")
         do.call(fixest::feglm, args)
       } else {
-        if (!is.null(opts$fixest) && length(opts$fixest) > 0) {
-          args <- c(args, opts$fixest)
-        }
         do.call(fixest::feols, args)
       }
     },
@@ -689,7 +689,11 @@ run_lasso_selection <- function(
 #'     \item{\code{$interactions}}{Character vector of moderator variable names.}
 #'     \item{\code{$hh_covariates}, \code{$area_covariates},
 #'       \code{$ind_covariates}, \code{$firm_covariates}}{Control variables.}
-#'     \item{\code{$cluster}}{Variable name(s) for clustered SEs (fixest only).}
+#'     \item{\code{$cluster}}{Variable name(s) for clustered SEs (fixest
+#'       only). Step 1 defaults to \code{"loc_id_panel"} — the survey-location
+#'       panel level at which the weather hazard is assigned — matching
+#'       \code{COEF_VCOV_SPEC} in fct_simulations.R. Variables absent from
+#'       the data trigger a warning and an unclustered fit.}
 #'   }
 #'
 #' @return Named list with \code{fit1}, \code{fit2}, \code{fit3},
@@ -905,8 +909,25 @@ fit_model <- function(df, selected_outcome, selected_weather, selected_model) {
   # 6. Drop incomplete cases on all variables used by the fullest model
   # ---------------------------------------------------------------------------
 
+  # Cluster variables (e.g. loc_id_panel) are validated against the data first:
+  # loc_id_panel is only joined when the H3 files loaded successfully in
+  # Survey stats, and a missing or NA-containing cluster key must not silently
+  # change the estimation sample inside fixest. Missing keys fall back to
+  # fixest's default VCV with a warning; present keys are included in the
+  # complete-case filter so no NA clusters reach the estimator.
+  cluster_vars <- selected_model$cluster %||% character(0)
+  cluster_vars <- cluster_vars[nzchar(cluster_vars) & !is.na(cluster_vars)]
+  cluster_missing <- setdiff(cluster_vars, names(df))
+  if (length(cluster_missing) > 0) {
+    warning(sprintf(
+      "Cluster variable(s) not found in data — fitting without clustered SEs: %s",
+      paste(cluster_missing, collapse = ", ")
+    ))
+    cluster_vars <- intersect(cluster_vars, names(df))
+  }
+
   vars_used <- unique(c(y_var, weather_formula_terms, interaction_vars,
-                        fe_vars, covariate_vars))
+                        fe_vars, covariate_vars, cluster_vars))
   vars_used <- vars_used[vars_used %in% names(df)]
   df        <- df[stats::complete.cases(df[, vars_used, drop = FALSE]), ]
 
@@ -918,9 +939,11 @@ fit_model <- function(df, selected_outcome, selected_weather, selected_model) {
 
   model_spec <- backend$make_spec(model_type, use_logit)
 
-  cluster_vars <- selected_model$cluster %||% character(0)
-  cluster_vars <- cluster_vars[nzchar(cluster_vars) & !is.na(cluster_vars)]
-
+  # Cluster-robust VCV at the location level (~loc_id_panel in Step 1's
+  # default specification). fixest caches this fit-time VCV, so Step 1's
+  # displayed standard errors and Step 2's coefficient-uncertainty draws
+  # (compute_chol_vcov() tries the fit-time VCV first) share one sampling
+  # distribution — matching COEF_VCOV_SPEC in fct_simulations.R.
   engine_opts <- list(
     fixest = if (length(cluster_vars) > 0) {
       list(cluster = stats::as.formula(

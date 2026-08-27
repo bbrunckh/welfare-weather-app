@@ -1391,7 +1391,11 @@ for (si in SAMPLE_LABELS) {
           lasso_alpha = LASSO_ALPHA, lasso_lambda = LASSO_LAMBDA,
           lasso_nfolds = LASSO_NFOLDS, lasso_standardize = LASSO_STANDARDIZE,
           mi_m = MI_M, mi_maxit = MI_MAXIT,
-          stability_threshold = STABILITY_THRESHOLD
+          stability_threshold = STABILITY_THRESHOLD,
+          # Align with the app (mod_1_06): cluster-robust VCV at the
+          # survey-location panel level (~loc_id_panel), matching Step 2's
+          # COEF_VCOV_SPEC. Falls back to fixest defaults when absent.
+          cluster = if ("loc_id_panel" %in% names(survey_prep)) "loc_id_panel" else NULL
         ),
         error = function(e) { message(" model build: ", conditionMessage(e)); NULL }
       )
