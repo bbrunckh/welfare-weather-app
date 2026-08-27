@@ -668,11 +668,15 @@ get_weather <- function(
       h3_slim <- h3_slim |>
         dplyr::mutate(h3_cmip6 = h3_weather)
     } else {
-      # CMIP6 coarser than target — map micro cells up to CMIP6 resolution
+      # CMIP6 coarser than target — map micro cells up to CMIP6 resolution.
+      # Coarsen the `h3_weather` bigint column: the original `h3` string
+      # column was dropped by the population summarise above, and referencing
+      # it here made DuckDB silently bind `h3` to the sibling CMIP6 `h3`
+      # join column (a bigint), failing with `h3_string_to_h3(BIGINT)`.
       h3_slim <- h3_slim |>
         dplyr::mutate(
           h3_cmip6 = dbplyr::sql(
-            sprintf("h3_cell_to_parent(h3_string_to_h3(h3), %d)", cmip6_join_res)
+            sprintf("h3_cell_to_parent(h3_weather, %d)", cmip6_join_res)
           )
         )
     }

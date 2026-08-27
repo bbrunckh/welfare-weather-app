@@ -916,3 +916,121 @@ test_that("get_weather joins correctly when weather is finer than microdata", {
   expect_false(anyNA(hist$tx))
   expect_true(all(hist$timestamp %in% fx$dates))
 })
+
+
+# --------------------------------------------------------------------------- #
+# make_test_fixtures_cmip6_coarser
+#
+# Adds CMIP6 projection parquets on top of a make_test_fixtures_cross_res()
+# fixture, at an H3 resolution *coarser* than the micro/weather resolution.
+# This forces the "CMIP6 coarser than target" branch of the h3_cmip6 mapping.
+#
+# Baseline tx = 20, future tx = 25 → additive delta = +5 everywhere.
+# ---------------------------------------------------------------------------
+make_test_fixtures_cmip6_coarser <- function(
+    dir,
+    fx,
+    cmip6_res   = 3L,
+    proj_source = "cmip6",
+    ssp         = "ssp245",
+    model       = "TESTMOD",
+    tx_base     = 20,
+    tx_future   = 25
+) {
+  con <- make_h3_con()
+  on.exit(DBI::dbDisconnect(con, shutdown = TRUE), add = TRUE)
+
+  # Parent cells of the res-4 weather cells at the (coarser) CMIP6 resolution.
+  # Unlike the microdata files, projections store h3 as bigint — matching
+  # production data.
+  cmip6_ints <- DBI::dbGetQuery(
+    con,
+    sprintf(
+      "SELECT DISTINCT h3_cell_to_parent(h3, %d) AS h3 FROM (VALUES %s) t(h3)",
+      cmip6_res,
+      paste0("(", fx$weather_ints, ")", collapse = ", ")
+    )
+  )$h3
+
+  base_months <- sort(unique(fx$dates))
+  fut_months  <- seq(as.Date("2025-01-01"), as.Date("2025-12-01"), by = "1 month")
+
+  .cmip6_df <- function(months, tx) {
+    df <- expand.grid(h3 = cmip6_ints, timestamp = months)
+    df$model <- model
+    df$tx    <- tx
+    df[, c("h3", "model", "timestamp", "tx")]
+  }
+
+  code     <- fx$selected_surveys$code
+  proj_dir <- file.path(dir, "hazard", "weather", "projections", code)
+  dir.create(proj_dir, recursive = TRUE, showWarnings = FALSE)
+
+  arrow::write_parquet(
+    .cmip6_df(base_months, tx_base),
+    file.path(proj_dir, paste0(code, "_", proj_source, "_historical.parquet"))
+  )
+  arrow::write_parquet(
+    rbind(.cmip6_df(base_months, tx_base), .cmip6_df(fut_months, tx_future)),
+    file.path(proj_dir, paste0(code, "_", proj_source, "_", ssp, ".parquet"))
+  )
+
+  invisible(list(base_months = base_months, fut_months = fut_months))
+}
+
+test_that("get_weather climate scenario works when CMIP6 is coarser than microdata", {
+  skip_if_not_installed("arrow")
+  skip_if_not_installed("duckdb")
+  skip_if_not_installed("duckdbfs")
+  skip_if_not_installed("bit64")
+
+  tmp <- withr::local_tempdir()
+
+  # micro res 5, weather res 4 → target res 4; CMIP6 at res 3 is coarser,
+  # forcing the h3_cmip6 parent-mapping branch. Regression: this branch used
+  # to reference the dropped `h3` string column, which made DuckDB bind it to
+  # the CMIP6 join column (bigint) and fail with `h3_string_to_h3(BIGINT)`.
+  fx <- make_test_fixtures_cross_res(
+    tmp,
+    seed_cell   = "85283473fffffff",
+    micro_res   = 5L,
+    weather_res = 4L
+  )
+  make_test_fixtures_cmip6_coarser(tmp, fx, cmip6_res = 3L)
+
+  result <- get_weather(
+    survey_data         = fx$survey_data,
+    selected_surveys    = fx$selected_surveys,
+    selected_weather    = sw_continuous("tx"),
+    dates               = fx$dates,
+    connection_params   = fx$connection_params,
+    ssp                 = "ssp2_4_5",
+    future_period       = c("2025-01-01", "2025-12-31"),
+    perturbation_method = c(tx = "additive")
+  )
+
+  expect_true("historical" %in% names(result))
+  scen_name <- grep("ssp2_4_5", names(result), value = TRUE)[1L]
+  expect_true(!is.na(scen_name) && nzchar(scen_name))
+
+  scen <- result[[scen_name]]
+  hist <- result$historical
+
+  # The additive delta (+5) must surface in the perturbed scenario values.
+  cmp <- merge(
+    scen[, c("loc_id", "timestamp", "tx")],
+    hist[, c("loc_id", "timestamp", "tx")],
+    by     = c("loc_id", "timestamp"),
+    suffixes = c("_fut", "_hist")
+  )
+  cmp <- cmp[stats::complete.cases(cmp[, c("tx_fut", "tx_hist")]), ]
+
+  # The scenario's rolling window only spans months that carry deltas, so its
+  # early months roll over truncated windows and are not comparable to the
+  # historical series. Compare the fully aligned tail (last ref_end months),
+  # where both series roll over identical months.
+  tail_start <- seq(max(fx$dates), length.out = 2L, by = "-2 months")[2L]
+  cmp <- cmp[cmp$timestamp >= tail_start, , drop = FALSE]
+  expect_true(nrow(cmp) > 0L)
+  expect_equal(cmp$tx_fut - cmp$tx_hist, rep(5, nrow(cmp)), tolerance = 1e-6)
+})
