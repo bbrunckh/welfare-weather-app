@@ -63,7 +63,7 @@ CUSTOM_BREAKS          <- NULL
 POLYNOMIAL             <- character(0)
 WEATHER_AGG_OVERRIDE   <- NULL
 
-MODEL_TYPE <- c("Quantile regression (RIF)")
+MODEL_TYPE <- c("Unconditional quantile regression (RIF)")
 
 INTERACTIONS <- list(character(0))
 

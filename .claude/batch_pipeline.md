@@ -90,7 +90,7 @@ One row per `(code, year, variable)` for each weather spec in `WEATHER_SPECS`. A
 
 **Grid dimensions** (all `[GRID]` settings expand via `expand.grid()`):
 - `WEATHER_SPECS` — named list of weather profiles (use `expand_weather_specs()` or define manually)
-- `MODEL_TYPE` — `"Linear regression"`, `"Quantile regression (RIF)"`
+- `MODEL_TYPE` — `"Linear regression"`, `"Unconditional quantile regression (RIF)"`
 - `INTERACTIONS` — list of interaction variable vectors; `character(0)` = none
 - `FIXED_EFFECTS` — named list of FE vectors (e.g. `year_admin1 = c("year","gaul1_code")`)
 - `COVARIATE_SPECS` — named list; each entry is `method = "User-defined"` (supply vars by role) or `method = "Lasso"`

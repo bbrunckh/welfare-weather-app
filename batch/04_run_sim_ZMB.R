@@ -92,8 +92,8 @@ POLYNOMIAL             <- character(0)
 WEATHER_AGG_OVERRIDE   <- NULL
 
 # ---- Model type (mod_1_06) [GRID] ------------------------------------------
-# "Linear regression", "Quantile regression (RIF)", "Logistic regression"
-MODEL_TYPE <- c("Quantile regression (RIF)")
+# "Linear regression", "Unconditional quantile regression (RIF)", "Logistic regression"
+MODEL_TYPE <- c("Unconditional quantile regression (RIF)")
 
 # ---- Interactions (mod_1_06) [GRID] -----------------------------------------
 # character(0) = no interaction; each entry interacts that variable with weather

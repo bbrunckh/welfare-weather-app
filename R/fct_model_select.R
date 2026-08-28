@@ -299,7 +299,7 @@ model_type_choices <- function(outcome_type) {
     )
   } else {
     list(
-      choices = c("Linear regression", "Quantile regression (RIF)"),
+      choices = c("Linear regression", "Unconditional quantile regression (RIF)"),
       label   = "Regression model:"
     )
   }
@@ -368,7 +368,7 @@ infer_engine <- function(model_type) {
     "Logistic regression"     = "fixest",
     "Random forest"           = "ranger",
     "XGBoost"                 = "xgboost",
-    "Quantile regression (RIF)" = "rif",
+    "Unconditional quantile regression (RIF)" = "rif",
     "fixest"  # safe default
   )
 }

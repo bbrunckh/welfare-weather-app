@@ -229,7 +229,7 @@ mod_1_07_results_server <- function(id,
                       else "Marginal effect of weather on outcome"),
             shiny::uiOutput(ns("coefplot_layout")),
             shiny::br(),
-            shiny::h4(if (is_rif) "Quantile regression results"
+            shiny::h4(if (is_rif) "Unconditional quantile regression results"
                       else "Regression results"),
             shiny::div(
               style = "display:flex; justify-content:center;",
