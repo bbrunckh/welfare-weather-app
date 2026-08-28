@@ -36,7 +36,11 @@ mod_0_overview_ui <- function(id) {
           icon("book-open"), "WISE-APP Use Guide",
           href = "https://datanalytics.worldbank.org/wise-app-docs",
           target = "_blank"
-        ))
+        )),
+
+        p(class = "hero-team",
+          "Distributional Impact of Policies | World Bank Group"
+        )
       )
     )
   )
