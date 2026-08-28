@@ -803,7 +803,6 @@ enhance_exceedance <- function(curves_tbl,
   }
 
   # Aesthetic mappings
-  fut_df  <- agg_df[!agg_df$is_historical, , drop = FALSE]
   hist_df <- agg_df[ agg_df$is_historical, , drop = FALSE]
 
   agg_df$ssp_key <- ifelse(agg_df$is_historical, "Historical",
@@ -908,33 +907,11 @@ enhance_exceedance <- function(curves_tbl,
                          inherit.aes = FALSE, show.legend = FALSE)
   }
 
-  # Policy accent: overlay red diamond markers (matching the pointrange
-  # chart's policy indicator) at evenly spaced points along each Policy
-  # line, so the policy-vs-baseline distinction reads consistently across
-  # both Step 3 Results charts.
-  policy_marker_df <- NULL
-  if (has_source) {
-    policy_df <- agg_df[agg_df$source == "Policy", , drop = FALSE]
-    if (nrow(policy_df) > 0L) {
-      policy_marker_df <- policy_df |>
-        dplyr::group_by(.data$line_id) |>
-        dplyr::filter(dplyr::row_number() %% max(1L, floor(dplyr::n() / 6)) == 0) |>
-        dplyr::ungroup()
-    }
-  }
-
+  # Central median line: historical baseline only. For future scenarios the
+  # inter-model ribbon carries the full distribution — overlaying the median
+  # curve overly emphasises centrality.
   p <- p +
-    ggplot2::geom_line(linewidth = 0.9)
-
-  if (!is.null(policy_marker_df) && nrow(policy_marker_df) > 0L) {
-    p <- p + ggplot2::geom_point(
-      data    = policy_marker_df,
-      mapping = ggplot2::aes(x = .data$central, y = .data$exceed_prob,
-                             group = .data$line_id),
-      shape       = 23, fill = "#d32f2f", colour = "black", size = 2,
-      stroke      = 0.8, inherit.aes = FALSE, show.legend = FALSE
-    )
-  }
+    ggplot2::geom_line(data = hist_df, linewidth = 0.9)
 
   p <- p +
     ggplot2::geom_vline(

@@ -90,6 +90,32 @@ mod_2_03_diagnostics_ui <- function(id) {
         "Each segment = one source's SD contribution (not strictly additive) — click ",
         shiny::icon("circle-info"), " above for details."
       )
+    ),
+
+    # ---- 3. Per-model trajectories (moved from Simulation Results) ----------
+    shiny::wellPanel(
+      shiny::h4(
+        "Per-model trajectories across simulation years",
+        info_popover(
+          title = "Reading this chart",
+          shiny::p(shiny::tags$b("Thin coloured lines"),
+            " = one CMIP6 ensemble member each (a 'spaghetti' trace of model trajectories)."),
+          shiny::p(shiny::tags$b("Bold line"),
+            " = across-model median curve for each scenario."),
+          shiny::p(shiny::tags$b("Translucent ribbon"),
+            " (future scenarios only) = inter-model spread at the selected band quantiles."),
+          shiny::p(
+            "Each scenario × projection period gets its own colour (SSP",
+            "family) and linetype (period), shown as one entry in the legend."
+          ),
+          docs = TRUE
+        )
+      ),
+      shiny::plotOutput(ns("timeseries_plot"), height = "380px"),
+      shiny::tags$p(
+        style = "font-size:11px; color:#666; margin-top:6px;",
+        "Thin lines = ensemble members; bold = median; ribbon = inter-model spread."
+      )
     )
   )
 }
@@ -116,6 +142,7 @@ mod_2_03_diagnostics_server <- function(id,
                                          survey_weather,
                                          selected_weather,
                                          variance_breakdown = NULL,
+                                         timeseries_curves = NULL,
                                          tabset_id,
                                          tabset_session = NULL) {
   moduleServer(id, function(input, output, session) {
@@ -292,6 +319,24 @@ mod_2_03_diagnostics_server <- function(id,
       plot_variance_contribution(vb)
     })
 
+    output$timeseries_plot <- renderPlot({
+      req(timeseries_curves)
+      tc <- timeseries_curves()
+      req(!is.null(tc$tbl) && nrow(tc$tbl) > 0L)
+      ts_tbl <- tc$tbl
+      # Honour the Diagnostics scenario filters (historical always shown).
+      active <- active_scenarios_data()
+      if (length(active) > 0L) {
+        keep <- ts_tbl$is_historical | ts_tbl$scenario %in% active
+        ts_tbl <- ts_tbl[keep, , drop = FALSE]
+      }
+      plot_timeseries_spaghetti(
+        ts_tbl          = ts_tbl,
+        x_label         = tc$x_label,
+        ensemble_band_q = tc$ens_q
+      )
+    })
+
 
 
     # ---- Insert Diagnostics tab once (first hist_sim only) -----------------
@@ -338,6 +383,7 @@ mod_2_03_diagnostics_server <- function(id,
     outputOptions(output, "diag_weather_log_ui",     suspendWhenHidden = TRUE)
     outputOptions(output, "diag_weather_density",    suspendWhenHidden = TRUE)
     outputOptions(output, "variance_contribution_plot", suspendWhenHidden = TRUE)
+    outputOptions(output, "timeseries_plot",         suspendWhenHidden = TRUE)
     outputOptions(output, "weight_status_diag_ui",   suspendWhenHidden = TRUE)
 
     # ---- Return API --------------------------------------------------------

@@ -213,12 +213,12 @@ mod_2_02_results_ui <- function(id) {
             "return period lines mark standard thresholds (e.g. 1-in-20-year",
             "events)."
           ),
-          shiny::p(shiny::tags$b("Central curve"),
-            " = across-model median of each model's empirical exceedance curve."),
+          shiny::p(shiny::tags$b("Solid curve"),
+            " (historical) = empirical exceedance curve of the historical baseline."),
           shiny::p(shiny::tags$b("Filled ribbon"),
-            " (future scenarios only) = inter-model spread; quantile across ensemble members at each return period."),
+            " (future scenarios only) = inter-model spread; quantile across ensemble members at each return period. No central curve is drawn for future scenarios so the full spread stays visible."),
           shiny::p(shiny::tags$b("Dashed outlines"),
-            " (when coefficient uncertainty enabled) = analytic per-outcome SE band around the central curve. May fall inside or outside the inter-model ribbon depending on which source dominates."),
+            " (when coefficient uncertainty enabled) = analytic per-outcome SE band around the median. May fall inside or outside the inter-model ribbon depending on which source dominates."),
           shiny::p(
             "Low odds = value exceeded in only 1-in-N years; high odds =",
             "value reached in all but 1-in-N years."
@@ -248,32 +248,6 @@ mod_2_02_results_ui <- function(id) {
       shiny::uiOutput(ns("threshold_table_header")),
       DT::DTOutput(ns("summary_threshold_table")),
       shiny::uiOutput(ns("threshold_table_footer"))
-    ),
-
-    # ---- 6. Time-series spaghetti ------------------------------------------
-    shiny::wellPanel(
-      shiny::h4(
-        "Per-model trajectories across simulation years",
-        info_popover(
-          title = "Reading this chart",
-          shiny::p(shiny::tags$b("Thin coloured lines"),
-            " = one CMIP6 ensemble member each (a 'spaghetti' trace of model trajectories)."),
-          shiny::p(shiny::tags$b("Bold line"),
-            " = across-model median curve for each scenario."),
-          shiny::p(shiny::tags$b("Translucent ribbon"),
-            " (future scenarios only) = inter-model spread at the selected band quantiles."),
-          shiny::p(
-            "Each scenario × projection period gets its own colour (SSP",
-            "family) and linetype (period), shown as one entry in the legend."
-          ),
-          docs = TRUE
-        )
-      ),
-      shiny::plotOutput(ns("timeseries_plot"), height = "380px"),
-      shiny::tags$p(
-        style = "font-size:11px; color:#666; margin-top:6px;",
-        "Thin lines = ensemble members; bold = median; ribbon = inter-model spread."
-      )
     )
   )
 }
@@ -1284,20 +1258,6 @@ mod_2_02_results_server <- function(id,
       )
     }, height = 600)
 
-    output$timeseries_plot <- renderPlot({
-      req(timeseries_curves_rv())
-      # When inter-model spread is toggled off, collapse the ribbon by passing
-      # a degenerate band (lo = hi = 0.5).
-      ens_q <- if (isTRUE(input$show_model_spread))
-        resolve_band_q(input$ensemble_band %||% "minmax")
-      else c(lo = 0.5, hi = 0.5)
-      plot_timeseries_spaghetti(
-        ts_tbl          = timeseries_curves_rv(),
-        x_label         = agg_hist()$x_label,
-        ensemble_band_q = ens_q
-      )
-    })
-
     output$summary_threshold_table <- DT::renderDT({
       req(threshold_table_rv())
       tbl <- threshold_table_rv()
@@ -1443,7 +1403,6 @@ mod_2_02_results_server <- function(id,
 
     # ---- Suspend outputs when Results tab is hidden ----------------------
     outputOptions(output, "summary_box_plot",        suspendWhenHidden = TRUE)
-    outputOptions(output, "timeseries_plot",         suspendWhenHidden = TRUE)
     outputOptions(output, "summary_threshold_table", suspendWhenHidden = TRUE)
     outputOptions(output, "exceedance_plot",         suspendWhenHidden = TRUE)
     outputOptions(output, "results_header_ui",       suspendWhenHidden = TRUE)
@@ -1453,8 +1412,23 @@ mod_2_02_results_server <- function(id,
     outputOptions(output, "exceedance_caption",      suspendWhenHidden = TRUE)
     
     # ---- Return API --------------------------------------------------------
+    # timeseries_curves bundles everything the Diagnostics tab needs to render
+    # the per-model trajectories plot (the plot lives there now): the
+    # per-(scenario, model, sim_year) table, the x-axis label, and the
+    # inter-model band quantiles resolved from the Results-tab controls.
     list(
-      variance_breakdown = variance_breakdown_rv
+      variance_breakdown = variance_breakdown_rv,
+      timeseries_curves  = reactive({
+        req(timeseries_curves_rv())
+        ens_q <- if (isTRUE(input$show_model_spread))
+          resolve_band_q(input$ensemble_band %||% "minmax")
+        else c(lo = 0.5, hi = 0.5)
+        list(
+          tbl     = timeseries_curves_rv(),
+          x_label = agg_hist()$x_label,
+          ens_q   = ens_q
+        )
+      })
     )
   })
 }

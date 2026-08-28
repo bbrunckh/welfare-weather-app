@@ -338,14 +338,11 @@ residual_method_ui <- function(ns, input_id) {
       selected = "original"
     ),
     shiny::helpText(
-      shiny::tags$b("none:"), " return fitted values only.", shiny::tags$br(),
       shiny::tags$b("original:"), " match each observation's own training residual",
       " by ID, preserving individual-level heterogeneity across simulation years.",
       shiny::tags$br(),
-      shiny::tags$b("empirical:"), " resample residuals from the training",
-      " distribution (non-parametric bootstrap).", shiny::tags$br(),
-      shiny::tags$b("normal:"), " draw residuals from N(0, \u03c6) where \u03c6",
-      " is the training residual SD.",
+      shiny::tags$b("resample:"), " resample residuals from the training",
+      " distribution (non-parametric bootstrap).",
       style = "font-size:11px;"
     )
   )
@@ -760,14 +757,18 @@ build_hist_sim_dates <- function(survey_weather, year_range) {
 
 #' Available residual handling choices
 #'
+#' 'Normal' is deliberately not offered: drawing residuals from N(0, sigma)
+#' assumes normal tails and homoskedasticity, which the other options avoid.
+#' 'None' is likewise not offered: it is a diagnostic mode (fitted values
+#' only) and understates variance — it remains available internally for the
+#' RIF engine, which needs no residual draw.
+#'
 #' @return A named character vector suitable for use in `radioButtons()`.
 #' @export
 residual_choices <- function() {
   c(
     "Original" = "original",
-    "Resample"  = "resample",
-    "Normal"     = "normal",
-    "None"      = "none"
+    "Resample"  = "resample"
   )
 }
 

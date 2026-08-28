@@ -124,6 +124,7 @@ mod_2_simulation_server <- function(id,
       survey_weather     = survey_weather,
       selected_weather   = selected_weather,
       variance_breakdown = s2$variance_breakdown,
+      timeseries_curves  = s2$timeseries_curves,
       tabset_id          = "step2_output_tabs",
       tabset_session     = session
     )

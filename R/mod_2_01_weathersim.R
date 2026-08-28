@@ -7,7 +7,6 @@
 #'
 #' @section Simulation inputs (configured in server via input$):
 #'   \describe{
-#'     \item{\code{sim_n}}{Integer. Number of VCV coefficient draws (S).}
 #'     \item{\code{pov_line_sim}}{Numeric. Poverty line in daily 2021 PPP USD.
 #'       Fixed at simulation time.}
 #'     \item{\code{skip_coef_draws}}{Logical. If TRUE, bypasses VCV draws
@@ -145,8 +144,6 @@ mod_2_01_weathersim_ui <- function(id) {
           title = "Simulation residuals",
           shiny::p(shiny::tags$b("original:"), " Recommended default: match each observation's own residual — assumes no changes due to changing hazards."),
           shiny::p(shiny::tags$b("resample:"), " Secondary recommendation: randomly resample residuals from the model."),
-          shiny::p(shiny::tags$b("normal:"), " Caution: draw residuals from N(0, σ), which assumes normal tails and no heteroskedasticity."),
-          shiny::p(shiny::tags$b("none:"), " Diagnostic only: returns fitted values only. Not including residuals understates variance and, for any log-transformed variable, understates the mean."),
           docs = TRUE
         ),
         style = "font-weight:600; margin-bottom:4px;"
@@ -194,8 +191,8 @@ mod_2_01_weathersim_ui <- function(id) {
             "(mean, total, headcount, poverty gap, FGT2, Gini). The Monte Carlo",
             "path is used only as a fallback for aggregates where the",
             "delta-method gradient is unavailable or unstable (currently",
-            "'avg_poverty' with few poor households); the draws setting",
-            "controls how many coefficient draws that fallback uses."
+            "'avg_poverty' with few poor households); that fallback uses a",
+            "fixed number of coefficient draws and is not user-configurable."
           ),
           docs = TRUE
         ),
@@ -221,11 +218,6 @@ mod_2_01_weathersim_ui <- function(id) {
           "⚠ Dev mode: 1 ensemble model only"
         ),
         value   = FALSE
-      ),
-      shiny::numericInput(
-        inputId = ns("sim_n"),
-        label   = "Monte Carlo draws (S, fallback only)",
-        value   = 150, min = 10, max = 1000, step = 10
       )
     ),
     shiny::tags$hr(style = "margin: 10px 0;"),
@@ -374,11 +366,9 @@ mod_2_01_weathersim_server <- function(id,
 
       res_labels <- c(
         "original"  = "Original",
-        "resample" = "Resample",
-        "none"      = "None",
-        "normal"    = "Normal distribution"
+        "resample" = "Resample"
       )
-      res_txt <- res_labels[input$residuals %||% "normal"] %||% input$residuals
+      res_txt <- res_labels[input$residuals %||% "original"] %||% input$residuals
 
       shiny::tags$div(
         style = paste0(
@@ -433,7 +423,7 @@ mod_2_01_weathersim_server <- function(id,
       data.frame(
         type          = "historical",
         year_range    = I(list(input$hist_years)),
-        residuals     = input$residuals %||% "normal",
+        residuals     = input$residuals %||% "original",
         scenario_name = paste0("Historical / ",
                                input$hist_years[1], "-", input$hist_years[2]),
         stringsAsFactors = FALSE
@@ -472,7 +462,7 @@ mod_2_01_weathersim_server <- function(id,
             year_range    = I(list(yr)),
             ssp           = ssp,
             method        = "delta",
-            residuals     = input$residuals %||% "normal",
+            residuals     = input$residuals %||% "original",
             scenario_name = scene_name,
             stringsAsFactors = FALSE
           )
@@ -626,8 +616,8 @@ mod_2_01_weathersim_server <- function(id,
       saved_scenarios = saved_scenarios,
       selected_hist   = selected_hist,
       selected_fut    = selected_fut,
-      sim_n           = reactive(input$sim_n),
-      residuals       = reactive(input$residuals %||% "none"),
+      sim_n           = reactive(150L),
+      residuals       = reactive(input$residuals %||% "original"),
       skip_coef_draws = reactive(!isTRUE(input$include_coef_uncertainty)),
       propagate_all_covariate_uncertainty =
         reactive(isTRUE(input$propagate_all_covariate_uncertainty))
