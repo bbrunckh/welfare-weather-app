@@ -164,7 +164,12 @@ mod_1_03_outcome_server <- function(id, variable_list, survey_data,
         so <- selected_outcome()
         pl <- if (!is.null(so) && !is.na(so$povline)) so$povline else 3.00
         if ("welfare" %in% names(df)) {
-          df$poor <- as.integer(df$welfare < pl)
+          line <- .povline_to_ppp(
+            pl, df,
+            !is.null(so) && !is.na(so$povline) &&
+              identical(as.character(so$units[1]), "LCU")
+          )
+          df$poor <- as.integer(df$welfare < line)
         }
       }
       df

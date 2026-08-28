@@ -38,9 +38,9 @@ The same `fixest` engine handles **logistic regression** for binary outcomes via
 
 Outcome transformations are applied **before** model fitting via `prepare_outcome_df()` in `fct_results.R` (called from `mod_1_06_model.R`). The pipeline is engine-agnostic:
 
-1. **LCU back-conversion**: multiply by `ppp2021` when `units == "LCU"`.
+1. **LCU back-conversion**: multiply by `ppp2021` when `units == "LCU"` — continuous (log-transformed) monetary outcomes only; constructed indicators such as `poor` are never back-converted.
 2. **Log transformation**: apply `log()` when `transform == "log"`.
-3. **Binary poor indicator**: create `welfare < povline` when `name == "poor"`.
+3. **Binary poor indicator**: create `welfare < povline` when `name == "poor"`. The stored `welfare` column is in 2021 PPP, so an LCU poverty line is first divided by the per-observation `ppp2021` factor; a PPP line is compared directly.
 
 The engine's own `prepare_outcome()` does nothing for linear regression; for logistic regression it coerces to integer 0/1 (`as.integer(as.logical(df[[y_var]]))`).
 

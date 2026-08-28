@@ -13,9 +13,15 @@
 #'
 #' Applies three sequential transformations in order:
 #' 1. **LCU back-conversion** — multiply by `ppp2021` when `units == "LCU"`.
+#'    Applies only to an existing continuous (log-transformed) monetary
+#'    outcome column, e.g. `welfare`. Constructed indicators such as `poor`
+#'    are unitless and are never back-converted.
 #' 2. **Log transform** — `log()` when `transform == "log"`.
 #' 3. **Binary poor indicator** — `welfare < povline` when `name == "poor"`
-#'    and `povline` is non-NA.
+#'    and `povline` is non-NA. The stored `welfare` column is in 2021 PPP,
+#'    so a poverty line expressed in LCU (`units == "LCU"`) is first divided
+#'    by the per-observation `ppp2021` factor to place the comparison on a
+#'    common scale.
 #'
 #' @param df A data frame containing the outcome column and optionally
 #'   `welfare` and `ppp2021`.
@@ -31,18 +37,29 @@ prepare_outcome_df <- function(df, so) {
   trans   <- as.character(so$transform[1])
   povline <- so$povline[1]
 
-  if (isTRUE(units == "LCU") && "ppp2021" %in% names(df)) {
+  if (isTRUE(units == "LCU") && isTRUE(trans == "log") &&
+      "ppp2021" %in% names(df) && name %in% names(df)) {
     df <- df |> dplyr::mutate(!!name := .data[[name]] * .data$ppp2021)
   }
   if (isTRUE(trans == "log")) {
     df <- df |> dplyr::mutate(!!name := log(.data[[name]]))
   }
   if (isTRUE(name == "poor") && !is.na(povline) && "welfare" %in% names(df)) {
+    line <- .povline_to_ppp(povline, df, units == "LCU")
     df <- df |>
-      dplyr::mutate(!!name := as.numeric(.data[["welfare"]] < povline))
+      dplyr::mutate(!!name := as.numeric(.data[["welfare"]] < line))
   }
 
   df
+}
+
+
+# Scale a user-specified poverty line to match the stored welfare column
+# (2021 PPP). LCU lines are divided by the per-observation ppp2021 factor;
+# PPP lines — and data loaded without deflators, where no load-time
+# conversion took place — are compared directly.
+.povline_to_ppp <- function(pl, df, is_lcu) {
+  if (isTRUE(is_lcu) && "ppp2021" %in% names(df)) pl / df$ppp2021 else pl
 }
 
 
