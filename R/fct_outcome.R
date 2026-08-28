@@ -311,6 +311,18 @@ plot_welfare_dist <- function(df,
 
   if (is.null(p)) return(invisible(NULL))
 
+  # Binary outcomes: pin the x-axis to [0, 1] in 0.2 steps so that both the
+  # 0 and 1 values are clearly displayed.
+  vals   <- df[[outcome]][!is.na(df[[outcome]])]
+  type_l <- tolower(type %||% "")
+  is_binary <- type_l %in% c("logical", "binary", "boolean") ||
+    (length(vals) > 0 && is.numeric(vals) && all(vals %in% c(0, 1)))
+  if (is_binary) {
+    p <- p +
+      ggplot2::scale_x_continuous(breaks = seq(0, 1, by = 0.2)) +
+      ggplot2::coord_cartesian(xlim = c(0, 1), expand = FALSE)
+  }
+
   if (identical(outcome, "welfare") && !is.null(poverty_lines)) {
     for (i in seq_len(nrow(poverty_lines))) {
       p <- p +

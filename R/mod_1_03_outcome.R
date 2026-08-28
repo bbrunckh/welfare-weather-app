@@ -317,6 +317,15 @@ mod_1_03_outcome_server <- function(id, variable_list, survey_data,
                 col_widths = c(6, 6),
                 bslib::card(
                   shiny::h4("Summary statistics"),
+                  shiny::p(
+                    class = "text-muted small",
+                    paste(
+                      "Statistics are computed on the pooled sample across",
+                      "the selected countries and survey waves. See the",
+                      "Survey stats tab for disaggregated statistics by",
+                      "country and wave."
+                    )
+                  ),
                   shiny::tableOutput(ns("outcome_summary_stats"))
                 ),
                 # full_screen gives the card bslib's expand control; the map
