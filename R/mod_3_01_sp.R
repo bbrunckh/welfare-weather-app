@@ -23,6 +23,25 @@ mod_3_01_sp_ui <- function(id) {
   )
 }
 
+# Patch an ionRangeSlider grid so major tick labels land exactly on the
+# slider's step values. shiny's auto-grid (grid_num = n_steps /
+# ceiling(n_steps / 10)) produces a fractional grid count for > 10 steps,
+# which renders tick labels at irregular, off-step positions (e.g. a
+# 5-60% slider showing a label at 54.5%). An explicit grid_num of the
+# intended interval count keeps them evenly spaced and meaningful.
+with_grid_num <- function(slider_tag, n) {
+  for (i in seq_along(slider_tag$children)) {
+    ch <- slider_tag$children[[i]]
+    if (is.list(ch) && !is.null(ch$attribs) &&
+        "data-grid-num" %in% names(ch$attribs)) {
+      ch$attribs[["data-grid-num"]] <- n
+      slider_tag$children[[i]] <- ch
+      break
+    }
+  }
+  slider_tag
+}
+
 #' 3_01_sp Server Functions
 #'
 #' @param id Module id.
@@ -184,7 +203,9 @@ mod_3_01_sp_server <- function(id,
               "Poorest (bottom x%)"
             ),
             min = 5, max = 60, value = 20, step = 5, post = "%"
-          )
+          ) |>
+            # 11 intervals -> majors at 5, 10, ..., 60
+            with_grid_num(11)
         ),
 
         # PMT variable and cutoff (only for PMT targeting)
@@ -211,7 +232,7 @@ mod_3_01_sp_server <- function(id,
                        " incorrectly included.")
               )
             ),
-            min = 0, max = 30, value = 10, step = 1, post = "%"
+            min = 0, max = 30, value = 10, step = 5, post = "%"
           ),
           sliderInput(
             inputId = ns("exclusion_error_pct"),
@@ -227,7 +248,7 @@ mod_3_01_sp_server <- function(id,
                        " incorrectly excluded.")
               )
             ),
-            min = 0, max = 30, value = 10, step = 1, post = "%"
+            min = 0, max = 30, value = 10, step = 5, post = "%"
           )
         ),
         tags$hr(style = "margin: 8px 0;")
@@ -484,6 +505,20 @@ mod_3_01_sp_server <- function(id,
               "Number of payments per year"
             ),
             min = 2, max = 24, value = 6, step = 1
+          ) |>
+            # 11 intervals -> majors at 2, 4, ..., 24 (whole numbers);
+            # step = 1 keeps every whole number selectable.
+            with_grid_num(11),
+          tags$small(
+            class = "text-muted d-block mb-2",
+            tags$i(class = "fa fa-circle-info me-1"),
+            paste(
+              "The transfer amount above is per payment. Annual support =",
+              "payment amount \u00d7 payments per year, which the simulation",
+              "converts to a daily equivalent added to daily welfare \u2014 more",
+              "payments per year means a larger annual transfer for the same",
+              "per-payment amount."
+            )
           )
         )
 
