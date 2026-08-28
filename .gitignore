@@ -149,6 +149,7 @@ rsconnect/
 inst/duckdb_extensions/
 .claude/settings.local.json
 .posit/
+.kilo/
 
 dev/outputs/
 dev/output/

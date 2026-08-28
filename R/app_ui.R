@@ -52,7 +52,7 @@ app_ui <- function(request) {
     bslib::nav_item(
       tags$a(
         icon("book-open"), "Docs",
-        href = "https://datanalytics-int.worldbank.org/wise-app-docs/",
+        href = "https://datanalytics.worldbank.org/wise-app-docs/",
         target = "_blank",
         title = "User guide and documentation"
       )
@@ -60,7 +60,7 @@ app_ui <- function(request) {
     bslib::nav_item(
       tags$a(
         icon("database"), "Data",
-        href = "https://github.com/bbrunckh/welfare-weather-app-data",
+        href = "https://github.com/bbrunckh/wise-app-data",
         target = "_blank",
         title = "View data prep repository on GitHub"
       )
@@ -68,7 +68,7 @@ app_ui <- function(request) {
     bslib::nav_item(
       tags$a(
         icon("github"),
-        href = "https://github.com/worldbank/welfare-weather-app",
+        href = "https://github.com/worldbank/wise-app",
         target = "_blank",
         title = "View source on GitHub"
       )
