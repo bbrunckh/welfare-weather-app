@@ -93,6 +93,25 @@
 }
 
 # -----------------------------------------------------------------------------
+# SQL literal quoting (SEC-01)
+# -----------------------------------------------------------------------------
+
+#' Escape and quote a character scalar as a safe DuckDB string literal.
+#'
+#' Doubles any embedded single quotes so a crafted value (e.g. a credential
+#' containing an apostrophe or an injected `'; ...` tail) can never terminate
+#' the literal, then wraps the result in single quotes. Values without quotes
+#' pass through unchanged, so generated SQL is identical to naive
+#' interpolation for ordinary inputs.
+#'
+#' @param x Character scalar to embed in SQL.
+#' @return Character scalar — a single-quoted DuckDB string literal.
+#' @noRd
+.sql_literal <- function(x) {
+  paste0("'", gsub("'", "''", as.character(x), fixed = TRUE), "'")
+}
+
+# -----------------------------------------------------------------------------
 # Credential helpers
 # -----------------------------------------------------------------------------
 
@@ -151,8 +170,8 @@
   secret_name <- paste0("db_http_", params_hash)
   if (!identical(.duck$db_secrets[[params_hash]], db_token)) {
     DBI::dbExecute(con, sprintf(
-      "CREATE OR REPLACE SECRET %s (TYPE http, BEARER_TOKEN '%s');",
-      secret_name, db_token
+      "CREATE OR REPLACE SECRET %s (TYPE http, BEARER_TOKEN %s);",
+      secret_name, .sql_literal(db_token)
     ))
     .duck$db_secrets[[params_hash]] <- db_token
   }
@@ -346,13 +365,13 @@ load_data <- function(
     DBI::dbExecute(con, sprintf(
       "CREATE OR REPLACE SECRET s3_secret (
          TYPE   S3,
-         KEY_ID '%s',
-         SECRET '%s',
-         REGION '%s'
+         KEY_ID %s,
+         SECRET %s,
+         REGION %s
        );",
-      connection_params$key_id %||% Sys.getenv("AWS_ACCESS_KEY_ID"),
-      connection_params$secret %||% Sys.getenv("AWS_SECRET_ACCESS_KEY"),
-      connection_params$region  %||% "us-east-1"
+      .sql_literal(connection_params$key_id  %||% Sys.getenv("AWS_ACCESS_KEY_ID")),
+      .sql_literal(connection_params$secret  %||% Sys.getenv("AWS_SECRET_ACCESS_KEY")),
+      .sql_literal(connection_params$region  %||% "us-east-1")
     ))
 
   } else if (type == "gcs") {
@@ -361,11 +380,11 @@ load_data <- function(
     DBI::dbExecute(con, sprintf(
       "CREATE OR REPLACE SECRET gcs_secret (
          TYPE   GCS,
-         KEY_ID '%s',
-         SECRET '%s'
+         KEY_ID %s,
+         SECRET %s
        );",
-      connection_params$key_id %||% Sys.getenv("GCS_ACCESS_KEY_ID"),
-      connection_params$secret  %||% Sys.getenv("GCS_SECRET_ACCESS_KEY")
+      .sql_literal(connection_params$key_id %||% Sys.getenv("GCS_ACCESS_KEY_ID")),
+      .sql_literal(connection_params$secret %||% Sys.getenv("GCS_SECRET_ACCESS_KEY"))
     ))
 
   } else if (type == "azure") {
@@ -382,20 +401,23 @@ load_data <- function(
       DBI::dbExecute(con, sprintf(
         "CREATE OR REPLACE SECRET azure_secret (
            TYPE              AZURE,
-           CONNECTION_STRING 'AccountName=%s;AccountKey=%s'
+           CONNECTION_STRING %s
          );",
-        connection_params$account %||% "", key
+        .sql_literal(paste0(
+          "AccountName=", connection_params$account %||% "",
+          ";AccountKey=", key
+        ))
       ))
     } else if (nzchar(client_id) && nzchar(client_secret) && nzchar(tenant_id)) {
       DBI::dbExecute(con, sprintf(
         "CREATE OR REPLACE SECRET azure_secret (
            TYPE          AZURE,
            PROVIDER      SERVICE_PRINCIPAL,
-           TENANT_ID     '%s',
-           CLIENT_ID     '%s',
-           CLIENT_SECRET '%s'
+           TENANT_ID     %s,
+           CLIENT_ID     %s,
+           CLIENT_SECRET %s
          );",
-        tenant_id, client_id, client_secret
+        .sql_literal(tenant_id), .sql_literal(client_id), .sql_literal(client_secret)
       ))
     } else {
       tryCatch(

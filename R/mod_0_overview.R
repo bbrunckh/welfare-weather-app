@@ -399,12 +399,14 @@ mod_0_overview_server <- function(id) {
       params <- connection_params()
 
       if (identical(params$type, "local")) {
-        tryCatch({
+        path_ok <- tryCatch({
           params$path <- normalise_local_path(params$path)
+          TRUE
         }, error = function(e) {
           showNotification("Please enter a valid folder path.", type = "warning", duration = 4)
-          return()
+          FALSE
         })
+        if (!path_ok) return()
         message("[overview] applied local folder: ", params$path)
       } else {
         message("[overview] applied connection: ", params$type)

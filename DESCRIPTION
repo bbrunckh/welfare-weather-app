@@ -48,9 +48,11 @@ Imports:
     igraph,
     future,
     future.apply,
-    katex
+    katex,
+    withr
 Suggests:
     testthat (>= 3.0.0),
     spelling
+Config/testthat/edition: 3
 URL: https://github.com/worldbank/wise-app
 BugReports: https://github.com/worldbank/wise-app/issues

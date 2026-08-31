@@ -498,8 +498,9 @@ test_that(".compute_breaks: Custom binning with empty cuts keeps variable contin
   ref_df <- data.frame(tx = seq(0, 100, by = 1))
   sw <- sw_binned("tx", method = "Custom", n_bins = 5L,
                   custom_breaks = numeric(0))
-  brks <- expect_message(
-    wiseapp:::.compute_breaks(ref_df, sw),
+  brks <- NULL
+  expect_message(
+    brks <- wiseapp:::.compute_breaks(ref_df, sw),
     "Custom binning for tx requires cut values"
   )
   expect_length(brks, 0L)
@@ -509,12 +510,63 @@ test_that(".compute_breaks: Custom binning warns when cut count doesn't match nu
   ref_df <- data.frame(tx = seq(0, 100, by = 1))
   sw <- sw_binned("tx", method = "Custom", n_bins = 5L,
                   custom_breaks = c(20, 25))  # only 2 cuts, expected 4
-  brks <- expect_message(
-    wiseapp:::.compute_breaks(ref_df, sw),
+  brks <- NULL
+  expect_message(
+    brks <- wiseapp:::.compute_breaks(ref_df, sw),
     "expected 4 cut values"
   )
   # Still produces breaks from the supplied values
   expect_equal(brks$tx[-c(1, length(brks$tx))], c(20, 25))
+})
+
+test_that(".compute_breaks: K-means breaks deterministic, caller .Random.seed preserved (DET-03)", {
+  set.seed(1234)
+  vals   <- c(rnorm(50, 5), rnorm(50, 15), rnorm(50, 25))
+  ref_df <- data.frame(tx = vals)
+  sw     <- sw_binned("tx", method = "K-means", n_bins = 3)
+
+  old_seed <- get(".Random.seed", envir = .GlobalEnv)
+  brks1 <- wiseapp:::.compute_breaks(ref_df, sw)
+  expect_identical(get(".Random.seed", envir = .GlobalEnv), old_seed)
+
+  # A different pre-call RNG state must not change the breaks
+  invisible(runif(1))
+  expect_false(identical(get(".Random.seed", envir = .GlobalEnv), old_seed))
+  seed_before_2 <- get(".Random.seed", envir = .GlobalEnv)
+  brks2 <- wiseapp:::.compute_breaks(ref_df, sw)
+  expect_identical(brks2, brks1)
+  expect_identical(get(".Random.seed", envir = .GlobalEnv), seed_before_2)
+
+  # Breaks match a K-means seeded with 123 (pins the internal seed)
+  km      <- withr::with_seed(123, stats::kmeans(sort(vals), centers = 3L))
+  centers <- sort(as.numeric(km$centers))
+  expect_equal(
+    brks1$tx[-c(1, length(brks1$tx))],
+    (centers[-length(centers)] + centers[-1]) / 2
+  )
+})
+
+test_that(".compute_breaks: K-means works when caller has no .Random.seed (DET-03)", {
+  vals   <- c(rnorm(50, 5), rnorm(50, 15), rnorm(50, 25))
+  ref_df <- data.frame(tx = vals)
+  sw     <- sw_binned("tx", method = "K-means", n_bins = 3)
+
+  old_seed <- if (exists(".Random.seed", envir = .GlobalEnv)) {
+    get(".Random.seed", envir = .GlobalEnv)
+  } else {
+    NULL
+  }
+  if (!is.null(old_seed)) rm(list = ".Random.seed", envir = .GlobalEnv)
+  on.exit(
+    if (!is.null(old_seed)) assign(".Random.seed", old_seed, envir = .GlobalEnv),
+    add = TRUE
+  )
+
+  expect_false(exists(".Random.seed", envir = .GlobalEnv))
+  brks <- wiseapp:::.compute_breaks(ref_df, sw)
+  expect_named(brks, "tx")
+  # with_seed() must not leave a seed behind when none existed before
+  expect_false(exists(".Random.seed", envir = .GlobalEnv))
 })
 
 
@@ -665,9 +717,11 @@ test_that("get_weather: outer bins contain no NAs (values outside survey range)"
 
   # Use simulation dates (wider range than survey dates) to produce
   # out-of-survey-range values that must be caught by outer bins.
+  # lubridate::months() is not exported by lubridate >= 1.9; period(months = )
+  # is the namespaced replacement and keeps Date arithmetic calendar-aware.
   sim_dates <- seq(
-    min(fx$dates) - months(24),
-    max(fx$dates) + months(12),
+    min(fx$dates) - lubridate::period(months = 24),
+    max(fx$dates) + lubridate::period(months = 12),
     by = "1 month"
   )
 

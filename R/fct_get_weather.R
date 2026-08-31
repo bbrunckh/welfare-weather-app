@@ -224,8 +224,10 @@
                       "K-means" = {
                         tryCatch({
                           if (length(unique(haz_vals)) >= num_bins) {
-                            set.seed(123)
-                            km      <- kmeans(haz_vals, centers = num_bins)
+                            km <- withr::with_seed(
+                              123,
+                              stats::kmeans(haz_vals, centers = num_bins)
+                            )
                             centers <- sort(as.numeric(km$centers))
                             unique(c(
                               min(haz_vals, na.rm = TRUE),

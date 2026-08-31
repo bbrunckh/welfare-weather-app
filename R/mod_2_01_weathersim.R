@@ -118,6 +118,7 @@ mod_2_01_weathersim_ui <- function(id) {
         shiny::numericInput(ns("fut_end_3"), label = NULL, value = NA,
                             min = 2015, max = 2100, step = 1, width = "90px")
       ),
+      shiny::uiOutput(ns("fut_years_warning")),
 
       shiny::tags$hr(style = "margin: 6px 0;"),
 
@@ -401,6 +402,29 @@ mod_2_01_weathersim_server <- function(id,
           style = "color: #c0392b; font-size: 12px;"
         )
       }
+    })
+
+    # Display-only check for fully supplied future periods with end <= start.
+    # Mirrors future_periods() below, which silently excludes such periods;
+    # Run is not disabled.
+    output$fut_years_warning <- shiny::renderUI({
+      issues <- character(0)
+      for (i in 1:3) {
+        s <- input[[paste0("fut_start_", i)]]
+        e <- input[[paste0("fut_end_", i)]]
+        if (!is.null(s) && !is.na(s) && !is.null(e) && !is.na(e) && e <= s) {
+          issues <- c(issues, paste0(
+            "Period ", i, " (", s, "-", e, "): end year is not after start year."
+          ))
+        }
+      }
+      if (length(issues) == 0) return(NULL)
+      shiny::helpText(
+        shiny::tags$b("Warning:"),
+        " invalid projection period(s) will be excluded from the simulation: ",
+        paste(issues, collapse = " "),
+        style = "color: #c0392b; font-size: 11px; margin-top: 2px;"
+      )
     })
 
     # ---- Derived config reactives ------------------------------------------

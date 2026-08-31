@@ -102,6 +102,18 @@ mod_3_06_policy_sim_server <- function(id,
     policy_hist_sim_rv          <- reactiveVal(NULL)
     policy_saved_scenarios_rv   <- reactiveVal(list())
 
+    output$sim_status_ui <- shiny::renderUI({
+      err <- sim_error()
+      if (is.null(err)) return(NULL)
+      shiny::div(
+        class = "alert alert-danger",
+        role  = "alert",
+        style = "margin-bottom: 10px;",
+        shiny::tags$b("Policy simulation failed:"),
+        shiny::span(conditionMessage(err))
+      )
+    })
+
     run <- function() {
       sim_error(NULL)
 

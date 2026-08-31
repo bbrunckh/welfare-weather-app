@@ -87,18 +87,8 @@ resolve_band_q <- function(band_key) {
 }
 
 # ---- Internal helpers: parse scenario key components ----------------------
-# Keys are of the form "SSP2-4.5 / 2025-2035".
-.normalise_ssp <- function(nm) {
-  m <- regexpr("SSP[0-9]-[0-9.]+", nm)
-  if (m == -1L) return(NA_character_)
-  raw <- regmatches(nm, m)
-  switch(raw,
-    "SSP2-4.5" = "SSP2-4.5",
-    "SSP3-7.0" = "SSP3-7.0",
-    "SSP5-8.5" = "SSP5-8.5",
-    raw
-  )
-}
+# .normalise_ssp() and .parse_year() live in fct_simulations.R (single robust
+# implementation — do not re-define them here).
 
 # ---- Internal: dynamic year linetype helper --------------------------------
 .resolve_year_styles <- function(year_labels) {

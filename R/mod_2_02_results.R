@@ -967,6 +967,7 @@ mod_2_02_results_server <- function(id,
       sa <- scenario_agg_rv()
       if (!is.null(sa) && length(sa) > 0L) {
         for (dk in names(sa)) {
+          if (!dk %in% selected_scenario_names()) next
           rows[[length(rows) + 1L]] <- one_scenario(.apply_contrast_sd(sa[[dk]][[wk]][[method]], hist_F_agg_ref()),
                                                     dk, FALSE)
         }

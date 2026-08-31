@@ -700,6 +700,38 @@ resimulate_with_svy <- function(svy, sw, so, mf,
     stats::ecdf(mf$train_data[[so$name]])
   }, error = function(e) NULL) else NULL
 
+  # train_aug: identical for every run_one() call below (same model, same
+  # train_data). Compute once here instead of repeating
+  # predict(model, train_data) per scenario/ensemble member (see PERF-19),
+  # mirroring fct_run_simulation(). RIF engines never use train_aug —
+  # run_sim_pipeline() returns NULL for it on the RIF path — so leave it NULL
+  # there. On failure, NULL restores run_sim_pipeline()'s per-call fallback,
+  # which keeps the existing warning/fallback behaviour.
+  precomputed_train_aug <- if (is_rif) NULL else tryCatch({
+    fitted_train <- as.numeric(stats::predict(model, newdata = mf$train_data))
+    mf$train_data |>
+      dplyr::mutate(
+        .fitted = fitted_train,
+        .resid  = !!rlang::sym(so$name) - fitted_train
+      )
+  }, error = function(e) {
+    warning("[resimulate_with_svy] train_aug precomputation failed: ",
+            conditionMessage(e))
+    NULL
+  })
+
+  # Survey-side join prep: drop weather/outcome columns and convert year once,
+  # so run_sim_pipeline() skips that manipulation per member (see PERF-19).
+  # Leave it NULL in RIF policy mode, which predicts against svy_baseline and
+  # prepares that frame itself. On failure here, NULL makes
+  # run_sim_pipeline() fall back to the identical per-call preparation, so
+  # run_one()'s existing error handling is preserved.
+  svy_prepared <- if (is_rif) NULL else tryCatch({
+    svy |>
+      dplyr::mutate(year = as.character(year)) |>
+      dplyr::select(-dplyr::any_of(c(sw$name, so$name)))
+  }, error = function(e) NULL)
+
   run_one <- function(weather_raw, slim) {
     tryCatch(
       run_sim_pipeline(
@@ -718,6 +750,8 @@ resimulate_with_svy <- function(svy, sw, so, mf,
         weather_cols = rif_weather,
         svy_baseline = svy_baseline,
         rif_grid     = rif_grid,
+        precomputed_train_aug = precomputed_train_aug,
+        svy_prepared = svy_prepared,
         precomputed_ecdf_train = precomputed_ecdf_train
       ),
       error = function(e) {

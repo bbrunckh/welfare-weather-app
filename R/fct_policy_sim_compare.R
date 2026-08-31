@@ -455,12 +455,15 @@ policy_input_diagnostics <- function(baseline_svy, policy_svy, vars = NULL) {
   # Survey weights are always applied when available (toggle removed).
   output$weight_status_ui <- shiny::renderUI(NULL)
 
-  pov_line_val <- reactive({
+  # Debounced (400 ms) so rapid spinner/typing edits don't retrigger the
+  # aggregation pipeline on every keystroke. Non-poverty methods keep the
+  # NULL behaviour so downstream consumers skip the poverty line.
+  pov_line_val <- shiny::debounce(reactive({
     if (isTRUE(input$cmp_agg_method %in%
                c("headcount_ratio", "gap", "fgt2"))) {
       as.numeric(input$cmp_pov_line) %||% 3.00
     } else NULL
-  })
+  }), 400)
 
   selected_scenario_names <- reactive({
     sc <- baseline_saved_scenarios()
