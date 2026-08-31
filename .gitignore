@@ -24,6 +24,11 @@
 !DESCRIPTION
 !NAMESPACE
 
+# Keep R CMD build/check ignore rules (not matched by !/**/*.R since it
+# has no .R extension; without this line the file exists on disk but is
+# never tracked by git)
+!.Rbuildignore
+
 # Keep renv lockfile for reproducible installs/deploys
 !renv.lock
 
