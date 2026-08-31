@@ -11,7 +11,7 @@
 
 rm(list = ls())
 pkgload::load_all(quiet = TRUE)
-source("dev/expand_weather_specs.R") 
+source("batch/R/expand_weather_specs.R") 
 
 # =============================================================================
 # SECTION 1 — CONFIGURATION

@@ -239,10 +239,7 @@ mod_1_02_surveystats_server <- function(
           p
         })
 
-        # Leaflet map of interview locations. The jsonlite
-        # `keep_vec_names` warning that addGeoJSON would otherwise emit
-        # is muted via the custom htmlwidgets JSON encoder installed in
-        # .onLoad (R/zzz.R).
+        # Leaflet map of interview locations.
         # Keep the view across a switch between Locations and Sample density,
         # and across a reload — rebuilding the widget would otherwise snap
         # back to the full extent.

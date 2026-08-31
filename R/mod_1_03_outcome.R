@@ -200,9 +200,6 @@ mod_1_03_outcome_server <- function(id, variable_list, survey_data,
           p
         })
 
-        # The jsonlite `keep_vec_names` warning that addGeoJSON would
-        # otherwise emit is muted via the custom htmlwidgets JSON
-        # encoder installed in .onLoad (R/zzz.R).
         cov_view_mem <- map_view_memory(input, session, "outcome_coverage_map")
         cov_view_mem$remember()
 

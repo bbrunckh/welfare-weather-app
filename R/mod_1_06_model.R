@@ -697,8 +697,6 @@ mod_1_06_model_server <- function(id,
       )
     })
 
-    lasso_status <- reactiveVal("idle")
-
     # --- LASSO MODEL ---------------------------------------------------------
 
     lasso_result <- eventReactive(input$run_model, {
@@ -769,18 +767,16 @@ mod_1_06_model_server <- function(id,
       })
     })
 
-    # Showing notifications and updating status based on Lasso execution.
+    # Showing notifications based on Lasso execution.
     # Only fires when the user has chosen Lasso covariate selection.
     observeEvent(input$run_model, {
       req(isTRUE(input$covariates == "Lasso"))
-      lasso_status("running")
       showNotification("Lasso started...",
                       type = "message",
                       duration = 2)
       result <- tryCatch({
         lasso_result()
       }, error = function(e) {
-        lasso_status("error")
         showNotification(
           paste("Lasso failed:", e$message),
           type = "error",
@@ -789,7 +785,6 @@ mod_1_06_model_server <- function(id,
         return(NULL)
       })
       if (!is.null(result)) {
-        lasso_status("done")
         showNotification(
           "Lasso completed successfully.",
           type = "message",

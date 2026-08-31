@@ -38,11 +38,8 @@ Imports:
     fixest,
     glmnet,
     mice,
-    vip,
-    relaimpo,
     rlang,
     lubridate,
-    markdown,
     patchwork,
     stats,
     tools,
@@ -52,5 +49,8 @@ Imports:
     future,
     future.apply,
     katex
-URL: https://github.com/worldbank/welfare-weather-app
-BugReports: https://github.com/worldbank/welfare-weather-app/issues
+Suggests:
+    testthat (>= 3.0.0),
+    spelling
+URL: https://github.com/worldbank/wise-app
+BugReports: https://github.com/worldbank/wise-app/issues

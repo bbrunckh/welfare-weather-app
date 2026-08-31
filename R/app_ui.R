@@ -54,7 +54,9 @@ app_ui <- function(request) {
         icon("book-open"), "Docs",
         href = "https://datanalytics.worldbank.org/wise-app-docs/",
         target = "_blank",
-        title = "User guide and documentation"
+        rel = "noopener noreferrer",
+        title = "User guide and documentation",
+        `aria-label` = "Docs: user guide and documentation (opens in a new tab)"
       )
     ),
     bslib::nav_item(
@@ -62,7 +64,9 @@ app_ui <- function(request) {
         icon("database"), "Data",
         href = "https://github.com/bbrunckh/wise-app-data",
         target = "_blank",
-        title = "View data prep repository on GitHub"
+        rel = "noopener noreferrer",
+        title = "View data prep repository on GitHub",
+        `aria-label` = "Data: view data prep repository on GitHub (opens in a new tab)"
       )
     ),
     bslib::nav_item(
@@ -70,7 +74,9 @@ app_ui <- function(request) {
         icon("github"),
         href = "https://github.com/worldbank/wise-app",
         target = "_blank",
-        title = "View source on GitHub"
+        rel = "noopener noreferrer",
+        title = "View source on GitHub",
+        `aria-label` = "View source on GitHub (opens in a new tab)"
       )
     )
   )

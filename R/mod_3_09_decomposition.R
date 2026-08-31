@@ -294,44 +294,6 @@ mod_3_09_decomposition_server <- function(id,
 
 
 #' @noRd
-.plot_beta_curves <- function(model_fit) {
-  if (!requireNamespace("ggplot2", quietly = TRUE)) return(NULL)
-
-  rg <- model_fit$rif_grid
-  weather_vars <- model_fit$weather_terms
-  if (is.null(rg) || is.null(weather_vars)) return(NULL)
-
-  # Filter to weather-related terms (model 3). Word-boundary regex catches
-  # binned forms (`tx::[0,10]`) and interactions (`tx:urban`) — `%in%` only
-  # matched exact base names and so dropped everything for binned/interacted
-  # specifications, producing a blank plot.
-  weather_esc <- gsub("([\\[\\]\\(\\)\\^\\$\\.\\*\\+\\?])", "\\\\\\1",
-                      weather_vars)
-  weather_pat <- paste0("\\b(", paste(weather_esc, collapse = "|"), ")\\b")
-  plot_data   <- rg[rg$model == 3L & grepl(weather_pat, rg$term), ]
-  if (nrow(plot_data) == 0) return(NULL)
-
-  ggplot2::ggplot(plot_data, ggplot2::aes(x = tau, y = estimate)) +
-    ggplot2::geom_hline(yintercept = 0, linetype = "dashed", colour = "grey60") +
-    ggplot2::geom_ribbon(ggplot2::aes(ymin = conf.low, ymax = conf.high),
-                         alpha = 0.15, fill = "#b2182b") +
-    ggplot2::geom_line(linewidth = 0.8, colour = "#b2182b") +
-    ggplot2::geom_point(size = 2, colour = "#b2182b") +
-    ggplot2::facet_wrap(~term, scales = "free_y") +
-    ggplot2::scale_x_continuous(
-      breaks = model_fit$taus,
-      labels = scales::percent_format(1)
-    ) +
-    ggplot2::labs(
-      x = "Welfare quantile",
-      y = "UQR coefficient (weather sensitivity)",
-      subtitle = "Steeper slope = larger repositioning effect"
-    ) +
-    theme_wise()
-}
-
-
-#' @noRd
 .plot_decomp_scenario_range <- function(sc_df, is_rif = TRUE) {
   if (!requireNamespace("ggplot2", quietly = TRUE)) return(NULL)
   if (is.null(sc_df) || nrow(sc_df) == 0) return(NULL)

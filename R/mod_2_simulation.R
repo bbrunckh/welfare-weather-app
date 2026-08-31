@@ -111,7 +111,6 @@ mod_2_simulation_server <- function(id,
       selected_hist   = s1$selected_hist,
       tabset_id       = "step2_output_tabs",
       tabset_session  = session,
-      sim_n           = s1$sim_n,
       residuals       = s1$residuals,
       skip_coef_draws = s1$skip_coef_draws
     )

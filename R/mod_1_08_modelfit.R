@@ -7,7 +7,6 @@
 #' @noRd
 #'
 #' @importFrom shiny NS tagList
-#' @importFrom vip vi_permute
 mod_1_08_modelfit_ui <- function(id) {
   tagList()
 }

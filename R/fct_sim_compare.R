@@ -12,8 +12,8 @@
 #   build_threshold_table_df()  -- return-period threshold data frame for DT
 #   enhance_exceedance()        -- per-model exceedance curves + inter-model ribbon
 #
-# NOTE: plot_bar_climate() has been archived to
-#   dev/archived_fct/plot_bar_climate_archived.R (no active call sites).
+# NOTE: plot_bar_climate() had no active call sites and was removed
+#   (formerly archived under dev/archived_fct/plot_bar_climate_archived.R).
 # ============================================================================ #
 
 # ---------------------------------------------------------------------------- #

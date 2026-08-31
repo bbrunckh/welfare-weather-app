@@ -11,7 +11,7 @@ library(patchwork)
 rm(list = ls())
 pkgload::load_all(quiet = TRUE)
 
-source("dev/spec_curve.R") # For the spec curve plotting code
+source("batch/R/spec_curve.R") # For the spec curve plotting code
 
 OUT_DIR         <- "dev/outputs/t/pooled"
 

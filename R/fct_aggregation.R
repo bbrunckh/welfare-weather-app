@@ -597,9 +597,10 @@ deviation_from_centre <- function(df,
     mutate(value = sign * (value - ref))
 }
 
-# NOTE: plot_exceedance() and plot_hist_sim() have been archived to
-# dev/archived_fct/plot_exceedance_archived.R. They are superseded by
-# enhance_exceedance() in fct_sim_compare.R and have no active call sites.
+# NOTE: plot_exceedance() and plot_hist_sim() had no active call sites and
+# were removed (formerly archived under
+# dev/archived_fct/plot_exceedance_archived.R). They are superseded by
+# enhance_exceedance() in fct_sim_compare.R.
 
 # ---------------------------------------------------------------------------- #
 # Shared aggregation helper                                                    #

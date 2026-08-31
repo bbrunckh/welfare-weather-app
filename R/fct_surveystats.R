@@ -370,42 +370,6 @@ filter_by_wave <- function(df, key = "all") {
 }
 
 
-#' Approximate centre of a GeoJSON feature
-#'
-#' Mean of the feature's coordinates. Exact enough for placing a marker inside
-#' an H3 hexagon, and it needs no spatial library.
-#'
-#' @param f A feature list with a parsed `geometry$coordinates`.
-#'
-#' @return A length-2 numeric `c(lng, lat)`, or `c(NA, NA)`.
-#' @noRd
-.feature_centroid <- function(f) {
-  coords <- f$geometry$coordinates
-  if (is.null(coords)) return(c(NA_real_, NA_real_))
-
-  flat <- if (is.array(coords) && length(dim(coords)) >= 2L &&
-              utils::tail(dim(coords), 1L) == 2L) {
-    matrix(as.numeric(coords), ncol = 2L)
-  } else {
-    lng <- numeric(); lat <- numeric()
-    walk <- function(x) {
-      if (is.numeric(x) && length(x) == 2L) {
-        lng <<- c(lng, x[1]); lat <<- c(lat, x[2])
-      } else if (is.matrix(x)) {
-        lng <<- c(lng, x[, 1]); lat <<- c(lat, x[, 2])
-      } else if (is.list(x)) {
-        lapply(x, walk)
-      }
-    }
-    walk(coords)
-    cbind(lng, lat)
-  }
-
-  if (nrow(flat) == 0) return(c(NA_real_, NA_real_))
-  c(mean(flat[, 1], na.rm = TRUE), mean(flat[, 2], na.rm = TRUE))
-}
-
-
 #' Reset-view control
 #'
 #' A third button under Leaflet's zoom controls that returns the map to the
@@ -847,7 +811,7 @@ merge_loc_values_to_cells <- function(cell_map, loc_vals, by_wave = TRUE) {
     row
   })
 
-  out <- do.call(rbind, parts)
+  out <- dplyr::bind_rows(parts)
   rownames(out) <- NULL
   attr(out, "binned") <- binned
   attr(out, "levels") <- lvls

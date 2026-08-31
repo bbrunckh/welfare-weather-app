@@ -186,13 +186,10 @@ mod_2_01_weathersim_ui <- function(id) {
             "effect when residuals are not 'original'."
           ),
           shiny::p(
-            "Monte Carlo draws: coefficient uncertainty is propagated",
-            "analytically via the delta method for all standard aggregates",
-            "(mean, total, headcount, poverty gap, FGT2, Gini). The Monte Carlo",
-            "path is used only as a fallback for aggregates where the",
-            "delta-method gradient is unavailable or unstable (currently",
-            "'avg_poverty' with few poor households); that fallback uses a",
-            "fixed number of coefficient draws and is not user-configurable."
+            "Coefficient uncertainty is propagated analytically via the",
+            "delta method for all aggregates (mean, total, headcount,",
+            "poverty gap, FGT2, Gini, 'avg_poverty'). There is no Monte Carlo",
+            "draw fallback in the current implementation."
           ),
           docs = TRUE
         ),
@@ -616,7 +613,6 @@ mod_2_01_weathersim_server <- function(id,
       saved_scenarios = saved_scenarios,
       selected_hist   = selected_hist,
       selected_fut    = selected_fut,
-      sim_n           = reactive(150L),
       residuals       = reactive(input$residuals %||% "original"),
       skip_coef_draws = reactive(!isTRUE(input$include_coef_uncertainty)),
       propagate_all_covariate_uncertainty =

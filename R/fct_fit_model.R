@@ -748,7 +748,9 @@ fit_model <- function(df, selected_outcome, selected_weather, selected_model) {
   backend <- ENGINE_REGISTRY[[engine_key]]
 
   # Check required packages are installed
-  missing_pkgs <- setdiff(backend$requires, rownames(utils::installed.packages()))
+  missing_pkgs <- backend$requires[
+    !vapply(backend$requires, requireNamespace, logical(1), quietly = TRUE)
+  ]
   if (length(missing_pkgs) > 0) {
     stop(sprintf(
       "Engine '%s' requires package(s) not installed: %s",

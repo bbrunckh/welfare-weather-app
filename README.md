@@ -13,7 +13,7 @@ You can install the development version of `{wiseapp}` like so:
 
 ``` r
 install.packages("pak")
-pak::pak("github::bbrunckh/welfare-weather-app")
+pak::pak("github::bbrunckh/wise-app")
 ```
 
 ## Run

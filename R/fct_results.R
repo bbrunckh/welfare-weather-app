@@ -1090,13 +1090,6 @@ make_weather_effect_plot <- function(fit, pred_var, interaction_terms, is_binned
       }
       bin_cols <- bin_cols[order(.bin_lower(bin_cols))]
 
-      bins_df <- data.frame(term = bin_cols, stringsAsFactors = FALSE)
-      bins_df <- dplyr::left_join(bins_df, ct_main, by = "term")
-      bins_df$Estimate[is.na(bins_df$Estimate)] <- 0
-      bins_df$`Std. Error`[is.na(bins_df$`Std. Error`)] <- 0
-      bins_df$bin_index <- seq_len(nrow(bins_df))
-      bins_df$bin_label <- bins_df$term
-
       # Omitted note from first bin label in configured weather data
       omitted_note <- NULL
       if (!is.null(weather_df)) {
@@ -1106,7 +1099,7 @@ make_weather_effect_plot <- function(fit, pred_var, interaction_terms, is_binned
         }
       }
 
-      # Rebuild full table with all bins; missing coefficient => omitted reference (0 effect)
+      # Build full table with all bins; missing coefficient => omitted reference (0 effect)
       bins_df <- data.frame(term = bin_cols, stringsAsFactors = FALSE)
       bins_df <- dplyr::left_join(bins_df, ct_main, by = "term")
       bins_df$Estimate[is.na(bins_df$Estimate)] <- 0

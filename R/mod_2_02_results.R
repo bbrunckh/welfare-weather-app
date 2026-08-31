@@ -277,7 +277,6 @@ mod_2_02_results_server <- function(id,
                                      selected_hist,
                                      tabset_id,
                                      tabset_session  = NULL,
-                                     sim_n           = reactive(150L),
                                      residuals       = reactive("none"),
                                      skip_coef_draws = reactive(FALSE)) {
   moduleServer(id, function(input, output, session) {

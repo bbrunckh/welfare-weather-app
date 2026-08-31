@@ -768,7 +768,7 @@ summarise_weather_by_loc <- function(survey_weather, hv) {
     )
   })
 
-  out <- do.call(rbind, parts)
+  out <- dplyr::bind_rows(parts)
   rownames(out) <- NULL
   attr(out, "binned") <- binned
   attr(out, "levels") <- lvls
@@ -868,7 +868,7 @@ summarise_weather_anomaly_by_loc <- function(cells_df, hv, year_from, year_to,
   parts <- Filter(Negate(is.null), parts)
   if (length(parts) == 0) return(NULL)
 
-  out <- do.call(rbind, parts)
+  out <- dplyr::bind_rows(parts)
   rownames(out) <- NULL
   attr(out, "binned") <- FALSE
   attr(out, "levels") <- NULL

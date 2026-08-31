@@ -57,8 +57,8 @@ R/
 ├── app_ui.R / app_server.R    # Top-level app wiring
 ├── app_config.R               # Environment detection (dev/Posit Connect/Databricks)
 ├── run_app.R                  # Entry point
-├── mod_*.R                    # ~20 Shiny modules (each has a UI and server function)
-└── fct_*.R                    # ~15 business logic files (no Shiny dependencies)
+├── mod_*.R                    # 24 Shiny modules (each has a UI and server function)
+└── fct_*.R                    # 25 business logic files (no Shiny dependencies)
 ```
 
 **`fct_` files are the core engine:**
@@ -142,12 +142,12 @@ Key environment variables for production:
 
 ## Git Remotes
 
-- `origin`: user fork (`bbrunckh/welfare-weather-app`)
-- `upstream`: official World Bank repo (`worldbank/welfare-weather-app`)
+- `origin`: user fork (`bbrunckh/wise-app`)
+- `upstream`: official World Bank repo (`worldbank/wise-app`)
 
 ## Testing
 
-Tests are in `tests/testthat/`. Key test files:
+Tests are in `tests/testthat/` (11 files) plus `tests/spelling.R`. Key test files:
 
 | Test File | Coverage |
 |-----------|----------|
@@ -155,8 +155,10 @@ Tests are in `tests/testthat/`. Key test files:
 | `test-fct_aggregation_delta.R` | Survey-level aggregation with uncertainty |
 | `test-fct_connection.R` | Connection parameter building |
 | `test-fct_get_weather.R` | Weather data retrieval (S3/Databricks) |
+| `test-fct_results.R` | LCU/PPP outcome conversion and logging |
 | `test-fct_rif_sim.R` | RIF quantile regression helpers |
 | `test-fct_weather_select.R` | Weather variable selection |
 | `test-fct_weatherstats.R` | Weather statistics computation |
+| `test-mod_1_05_weatherstats.R` | Per-variable/per-wave weather map rendering |
 | `test-policy-decomposition-uncertainty.R` | Policy effect decomposition uncertainty |
 | `test-uncertainty-decomposition.R` | Variance decomposition helpers |
