@@ -156,7 +156,7 @@ mod_1_02_surveystats_server <- function(
               geom = st_asgeojson(st_union_agg(st_geomfromtext(h3_cell_to_boundary_wkt(h3)))),
               .by  = c(code, year, survname, loc_id)
             ) |>
-            dplyr::collect() |>
+            collect_deterministic(c("code", "year", "survname", "loc_id")) |>
             dplyr::filter(!is.na(geom), nchar(geom) > 2)   # drop NULLs and empty "{}"
 
           # Assemble a GeoJSON FeatureCollection
@@ -192,11 +192,11 @@ mod_1_02_surveystats_server <- function(
             dplyr::mutate(
               geom = st_asgeojson(st_geomfromtext(h3_cell_to_boundary_wkt(h3)))
             ) |>
-            dplyr::collect()
+            collect_deterministic("h3")
 
           cell_map <- h3_df |>
             dplyr::select(code, year, survname, loc_id, h3, pop_2020) |>
-            dplyr::collect()
+            collect_deterministic(c("code", "year", "survname", "loc_id", "h3"))
 
           cell_data(list(geom = cell_geo, map = cell_map))
         }, error = function(e) {
@@ -210,7 +210,7 @@ mod_1_02_surveystats_server <- function(
 
           loc_keys <- h3_df |>
             dplyr::distinct(code, year, survname, loc_id) |>
-            dplyr::collect()
+            collect_deterministic(c("code", "year", "survname", "loc_id"))
 
           df <- df |>
             dplyr::left_join(

@@ -85,7 +85,7 @@ STABILITY_THRESHOLD <- 0.5
 LASSO_USE_MICE      <- FALSE
 LASSO_USE_PARALLEL  <- FALSE   # forced FALSE — workers are already parallel
 LASSO_N_WORKERS     <- NULL
-LASSO_PARALLEL_SEED <- NULL
+LASSO_PARALLEL_SEED <- 123L
 LASSO_GLOBALS_MAX   <- NULL
 
 LASSO_FORCE_IN <- list(
@@ -998,7 +998,7 @@ run_one_country <- function(si, cfg) {
                              weight_col = pop_2020, group_cols = c("code", "year", "survname"))
       loc_keys  <- h3_df |>
         dplyr::distinct(code, year, survname, loc_id) |>
-        dplyr::collect()
+        collect_deterministic(c("code", "year", "survname", "loc_id"))
       svy_base <- svy_base |>
         dplyr::left_join(
           dplyr::left_join(loc_keys, panel_map,
@@ -1528,7 +1528,8 @@ run_one_country <- function(si, cfg) {
           apply_policy_to_svy(
             svy = result$hist_sim_result$svy, sp = .pol_sp,
             infra = pol$infra, digital = pol$digital, labor = pol$labor,
-            analysis_unit = UNIT
+            education = pol$education, analysis_unit = UNIT,
+            seed = WISEAPP_DEFAULT_SEED
           ),
           error = function(e) { message(" FAIL (apply_policy): ", conditionMessage(e)); NULL }
         )

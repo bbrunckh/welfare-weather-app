@@ -41,6 +41,7 @@
 #' @param band_q Named numeric \code{c(lo=, hi=)}.
 #' @param bandwidth_p0 Numeric scalar. Kernel smoothing bandwidth for
 #'   \code{headcount_ratio}. Default 0.05 (log-welfare scale).
+#' @param seed Integer seed for stochastic residual modes.
 #'
 #' @return Named list:
 #'   \describe{
@@ -62,7 +63,8 @@ aggregate_with_uncertainty_delta <- function(y_point,
                                               id_col       = NULL,
                                               is_log       = TRUE,
                                               band_q       = c(lo = 0.10, hi = 0.90),
-                                              bandwidth_p0 = 0.05) {
+                                              bandwidth_p0 = 0.05,
+                                              seed          = WISEAPP_DEFAULT_SEED) {
 
   N <- length(y_point)
   stopifnot(is.numeric(y_point) && N > 0)
@@ -75,7 +77,9 @@ aggregate_with_uncertainty_delta <- function(y_point,
     residuals <- "none"
   }
 
-  resid_vec <- draw_residuals_vec(residuals, train_aug, N, id_vec, id_col)
+  resid_vec <- draw_residuals_vec(
+    residuals, train_aug, N, id_vec, id_col, seed = seed
+  )
   mu        <- if (is_log) exp(y_point + resid_vec) else y_point + resid_vec
 
   # Point estimate via existing resolver
@@ -313,6 +317,8 @@ apply_band_transform <- function(method, value_pt, se, z_lo, z_hi) {
 #' @param skip_coef Logical. When TRUE, drop \code{F_loading} (no coefficient
 #'   uncertainty).
 #' @param bandwidth_p0 Numeric. Kernel bandwidth for headcount methods.
+#' @param seed Integer seed for stochastic residual modes. A stable substream
+#'   is derived for each simulation year.
 #'
 #' @return List with one entry per unique \code{sim_year}, each a result list
 #'   from \code{aggregate_with_uncertainty_delta()} augmented with a
@@ -321,12 +327,13 @@ apply_band_transform <- function(method, value_pt, se, z_lo, z_hi) {
 aggregate_pipeline_per_year <- function(pipe,
                                         method,
                                         weighted    = TRUE,
-                                        pov_line    = NULL,
-                                        residuals   = "original",
-                                        is_log      = TRUE,
-                                        band_q      = c(lo = 0.10, hi = 0.90),
-                                        skip_coef   = FALSE,
-                                        bandwidth_p0 = 0.05) {
+                                        pov_line     = NULL,
+                                        residuals    = "original",
+                                        is_log       = TRUE,
+                                        band_q       = c(lo = 0.10, hi = 0.90),
+                                        skip_coef    = FALSE,
+                                        bandwidth_p0 = 0.05,
+                                        seed          = WISEAPP_DEFAULT_SEED) {
   if (is.null(pipe) || is.null(pipe$y_point)) return(list())
 
   yrs <- sort(unique(pipe$sim_year))
@@ -361,7 +368,8 @@ aggregate_pipeline_per_year <- function(pipe,
       id_col       = pipe$id_col,
       is_log       = is_log,
       band_q       = band_q,
-      bandwidth_p0 = bandwidth_p0
+      bandwidth_p0 = bandwidth_p0,
+      seed          = wise_seed(seed, "residual", yr)
     )
     m$sim_year <- yr
     m

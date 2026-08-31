@@ -122,7 +122,12 @@ ENGINE_REGISTRY <- list(
 
     make_spec = function(model_type, use_logit) {
       parsnip::rand_forest(trees = 500, min_n = 5) |>
-        parsnip::set_engine("ranger", importance = "impurity") |>
+        parsnip::set_engine(
+          "ranger",
+          importance = "impurity",
+          seed = WISEAPP_DEFAULT_SEED,
+          num.threads = 1L
+        ) |>
         parsnip::set_mode("regression")
     },
 
@@ -168,7 +173,11 @@ ENGINE_REGISTRY <- list(
         loss_reduction = 0,
         min_n          = 5
       ) |>
-        parsnip::set_engine("xgboost") |>
+        parsnip::set_engine(
+          "xgboost",
+          seed = WISEAPP_DEFAULT_SEED,
+          nthread = 1L
+        ) |>
         parsnip::set_mode(mode)
     },
 
@@ -308,12 +317,15 @@ run_lasso_selection <- function(
   use_parallel = FALSE,
   n_workers = NULL,
   parallel_min_n = 20000L,
-  parallel_seed = NULL,
+  parallel_seed = WISEAPP_DEFAULT_SEED,
   globals_max_size = NULL,
-  cv_selection = c("default", "random"),
-  glmnet_tol = NULL
+  cv_selection = c("random", "default"),
+  glmnet_tol = 1e-4
 ) {
   df <- as.data.frame(df)
+  parallel_seed <- as.integer(parallel_seed %||% WISEAPP_DEFAULT_SEED)[1L]
+  if (is.na(parallel_seed)) parallel_seed <- WISEAPP_DEFAULT_SEED
+  withr::local_seed(wise_seed(parallel_seed, "lasso-call"))
 
   # ---------------------------------------------------------------------------
   # 1. Outcome validation / coercion (same pattern as fit_model())
@@ -522,16 +534,17 @@ run_lasso_selection <- function(
     if (!is.null(glmnet_tol)) cv_args_base$thresh <- glmnet_tol
 
     selection_results <- lapply(seq_len(m), function(i) {
-      if (!is.null(parallel_seed)) set.seed(parallel_seed + i)
-      cv_args <- cv_args_base
-      if (identical(cv_selection, "random")) {
-        cv_args$foldid <- sample(rep(seq_len(nfolds_i), length.out = nrow(X_full)))
-      }
-      cvfit <- do.call(glmnet::cv.glmnet, cv_args)
-      coefs <- stats::coef(cvfit, s = lambda_choice)
-      sel   <- rownames(coefs)[as.numeric(coefs) != 0]
-      sel   <- setdiff(sel, "(Intercept)")
-      intersect(sel, lasso_names)
+      withr::with_seed(wise_seed(parallel_seed, "lasso", "complete", i), {
+        cv_args <- cv_args_base
+        if (identical(cv_selection, "random")) {
+          cv_args$foldid <- sample(rep(seq_len(nfolds_i), length.out = nrow(X_full)))
+        }
+        cvfit <- do.call(glmnet::cv.glmnet, cv_args)
+        coefs <- stats::coef(cvfit, s = lambda_choice)
+        sel   <- rownames(coefs)[as.numeric(coefs) != 0]
+        sel   <- setdiff(sel, "(Intercept)")
+        intersect(sel, lasso_names)
+      })
     })
 
   } else {
@@ -560,7 +573,7 @@ run_lasso_selection <- function(
       map_fun <- function(x, fun) {
         future.apply::future_lapply(
           x, fun,
-          future.seed = if (is.null(parallel_seed)) TRUE else parallel_seed
+          future.seed = wise_seed(parallel_seed, "lasso", "future-workers")
         )
       }
     }
@@ -580,22 +593,27 @@ run_lasso_selection <- function(
     use_futuremice <- isTRUE(use_parallel) &&
       utils::packageVersion("mice") >= "3.16.0"
     if (use_futuremice) {
-      imp <- mice::futuremice(
-        mi_frame,
-        m = m,
-        maxit = max(1L, as.integer(mi_maxit)),
-        method = mi_method,
-        parallelseed = parallel_seed,
-        print = FALSE
+      imp <- withr::with_seed(
+        wise_seed(parallel_seed, "lasso", "futuremice"),
+        mice::futuremice(
+          mi_frame,
+          m = m,
+          maxit = max(1L, as.integer(mi_maxit)),
+          method = mi_method,
+          n.core = workers,
+          parallelseed = wise_seed(parallel_seed, "lasso", "futuremice-parallel"),
+          print = FALSE
+        )
       )
     } else {
-      if (!is.null(parallel_seed)) set.seed(parallel_seed)
-      imp <- mice::mice(
-        mi_frame,
-        m = m,
-        maxit = max(1L, as.integer(mi_maxit)),
-        method = mi_method,
-        print = FALSE
+      imp <- withr::with_seed(wise_seed(parallel_seed, "lasso", "mice"),
+        mice::mice(
+          mi_frame,
+          m = m,
+          maxit = max(1L, as.integer(mi_maxit)),
+          method = mi_method,
+          print = FALSE
+        )
       )
     }
     completed_cands_list <- lapply(
@@ -605,37 +623,37 @@ run_lasso_selection <- function(
     rm(mi_frame, imp)
 
     selection_results <- map_fun(seq_len(m), function(i) {
-      if (!is.null(parallel_seed)) set.seed(parallel_seed + i)
+      withr::with_seed(wise_seed(parallel_seed, "lasso", "imputation", i), {
+        X_lasso <- drop_constant(as.matrix(completed_cands_list[[i]]))
+        if (ncol(X_lasso) == 0) return(character(0))
 
-      X_lasso <- drop_constant(as.matrix(completed_cands_list[[i]]))
-      if (ncol(X_lasso) == 0) return(character(0))
+        X_full  <- if (ncol(X_core) > 0) cbind(X_core, X_lasso) else X_lasso
+        penalty <- c(rep(0, ncol(X_core)), rep(1, ncol(X_lasso)))
 
-      X_full  <- if (ncol(X_core) > 0) cbind(X_core, X_lasso) else X_lasso
-      penalty <- c(rep(0, ncol(X_core)), rep(1, ncol(X_lasso)))
+        foldid <- NULL
+        if (identical(cv_selection, "random")) {
+          foldid <- sample(rep(seq_len(nfolds_i), length.out = nrow(X_full)))
+        }
 
-      foldid <- NULL
-      if (identical(cv_selection, "random")) {
-        foldid <- sample(rep(seq_len(nfolds_i), length.out = nrow(X_full)))
-      }
+        cv_args <- list(
+          x = X_full,
+          y = y_vec,
+          alpha = alpha,
+          nfolds = nfolds_i,
+          family = family_type,
+          standardize = isTRUE(standardize),
+          penalty.factor = penalty
+        )
+        if (!is.null(foldid))     cv_args$foldid <- foldid
+        if (!is.null(glmnet_tol)) cv_args$thresh <- glmnet_tol
 
-      cv_args <- list(
-        x = X_full,
-        y = y_vec,
-        alpha = alpha,
-        nfolds = nfolds_i,
-        family = family_type,
-        standardize = isTRUE(standardize),
-        penalty.factor = penalty
-      )
-      if (!is.null(foldid))     cv_args$foldid <- foldid
-      if (!is.null(glmnet_tol)) cv_args$thresh <- glmnet_tol
+        cvfit <- do.call(glmnet::cv.glmnet, cv_args)
 
-      cvfit <- do.call(glmnet::cv.glmnet, cv_args)
-
-      coefs <- stats::coef(cvfit, s = lambda_choice)
-      sel   <- rownames(coefs)[as.numeric(coefs) != 0]
-      sel   <- setdiff(sel, "(Intercept)")
-      intersect(sel, colnames(X_lasso))
+        coefs <- stats::coef(cvfit, s = lambda_choice)
+        sel   <- rownames(coefs)[as.numeric(coefs) != 0]
+        sel   <- setdiff(sel, "(Intercept)")
+        intersect(sel, colnames(X_lasso))
+      })
     })
   }
 

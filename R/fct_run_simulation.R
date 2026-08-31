@@ -346,7 +346,8 @@ fct_run_simulation <- function(sw,
         weather_raw    = key_weather_raw,
         train_data     = train_data,
         cluster_counts = cluster_counts,
-        svy            = svy
+        svy            = svy,
+        residuals      = residuals
       )
       # Strip weather_raw from pipeline after saving to hist_sim_result
       out$weather_raw <- NULL
@@ -403,7 +404,8 @@ fct_run_simulation <- function(sw,
       chol_obj    = chol_obj,
       so          = so,
       year_range  = meta$year_range,
-      n_models    = group_n[[gk]]
+      n_models    = group_n[[gk]],
+      residuals   = residuals
     )
   }
   rm(group_agg, group_weather_rep, group_meta, group_n)

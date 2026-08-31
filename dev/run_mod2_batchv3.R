@@ -422,7 +422,7 @@ for (ri in seq_len(nrow(grid))) {
                            group_cols = c("code", "year", "survname"))
     loc_keys  <- h3_df |>
       dplyr::distinct(code, year, survname, loc_id) |>
-      dplyr::collect()
+      collect_deterministic(c("code", "year", "survname", "loc_id"))
     svy_base |>
       dplyr::left_join(
         dplyr::left_join(loc_keys, panel_map,

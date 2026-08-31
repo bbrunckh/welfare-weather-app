@@ -152,7 +152,8 @@ mod_3_06_policy_sim_server <- function(id,
             labor         = labor_scenario(),
             education     = education_scenario(),
             model_vars    = .model_term_names(selected_model()),
-            analysis_unit = analysis_unit()
+            analysis_unit = analysis_unit(),
+            seed          = WISEAPP_DEFAULT_SEED
           )
           policy_svy_rv(svy_mod)
 
@@ -169,10 +170,8 @@ mod_3_06_policy_sim_server <- function(id,
               # both consume the Mod 2 schema ($pipeline for hist_sim,
               # $pipelines for each saved scenario), so no translation is
               # required here.
-              res_choice <- residuals() %||% "original"
-              # Stamp the live residuals choice onto hist_sim so the Results
-              # pane's aggregator picks up the same residual treatment Mod 2
-              # is rendering with.
+              res_choice <- hs$residuals %||% residuals() %||% "original"
+              # Preserve the residual treatment captured by the Step 2 run.
               hs_for_baseline <- hs
               hs_for_baseline$residuals <- res_choice
               baseline_hist_sim_rv(hs_for_baseline)

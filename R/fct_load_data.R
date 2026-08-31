@@ -25,6 +25,42 @@
 # .duck$db_secrets   — named list: params_hash -> token currently written as secret
 
 
+# Canonical identity columns used before the all-column tie-break. The fallback
+# is required because not every supported survey level has a unique ID column.
+.DETERMINISTIC_ORDER_KEYS <- c(
+  "code", "year", "survname", "source", "loc_id",
+  "hhid", "fid", "pid", "timestamp", "int_year", "int_month", "h3"
+)
+
+#' Collect a table using a stable, backend-independent row order
+#'
+#' DuckDB does not guarantee scan order, and the Databricks single-CSV path
+#' bypasses DuckDB entirely. Collect first, then sort canonical identity fields
+#' followed by every remaining scalar column so both paths have one ordering
+#' contract. Completely identical rows may remain tied without affecting any
+#' downstream result.
+#'
+#' @param data A data frame or lazy dplyr table.
+#' @param keys Optional preferred ordering columns.
+#'
+#' @return A data frame with deterministic row order.
+#' @noRd
+collect_deterministic <- function(data, keys = NULL) {
+  out <- if (inherits(data, "data.frame")) data else dplyr::collect(data)
+  if (nrow(out) < 2L || ncol(out) == 0L) return(out)
+
+  preferred <- unique(c(keys %||% character(0), .DETERMINISTIC_ORDER_KEYS))
+  fallback <- sort(setdiff(names(out), preferred), method = "radix")
+  order_cols <- c(intersect(preferred, names(out)), fallback)
+  order_cols <- order_cols[vapply(out[order_cols], function(x) {
+    is.atomic(x) && is.null(dim(x))
+  }, logical(1))]
+
+  if (length(order_cols) == 0L) return(out)
+  dplyr::arrange(out, !!!rlang::syms(order_cols), .locale = "C")
+}
+
+
 #' Return (and if necessary initialise) the module-level DuckDB connection.
 #'
 #' Safe to call multiple times — returns the existing connection if it is still
@@ -264,8 +300,11 @@
 #' @param unify_schemas Logical. Unify columns across files with differing
 #'   schemas (\code{union_by_name}). Default \code{FALSE}.
 #'
-#' @param collect Logical. Collect into a \code{tibble} immediately.
-#'   Default \code{FALSE}.
+#' @param collect Logical. Collect into a \code{tibble} immediately using a
+#'   deterministic row order. Default \code{FALSE}.
+#' @param order_by Optional character vector of preferred ordering columns when
+#'   \code{collect = TRUE}. Canonical identity fields and remaining scalar
+#'   columns are used as deterministic tie-breakers.
 #'
 #' @return A lazy \code{dplyr::tbl()} or a \code{tibble} when
 #'   \code{collect = TRUE}.
@@ -293,7 +332,8 @@ load_data <- function(
     connection_params = list(type = "local", path = "/data"),
     format            = NULL,
     unify_schemas     = FALSE,
-    collect           = FALSE
+    collect           = FALSE,
+    order_by          = NULL
 ) {
 
   if (length(paths) == 0) return(tibble::tibble())
@@ -452,7 +492,8 @@ load_data <- function(
 
     # Fast path: single CSV — bypass DuckDB entirely
     if (format == "csv" && length(paths) == 1L) {
-      return(.fetch_db_csv_direct(paths, db_token))
+      out <- .fetch_db_csv_direct(paths, db_token)
+      return(if (collect) collect_deterministic(out, order_by) else out)
     }
 
     # Build the extensions base URL — points to the folder you uploaded binaries to
@@ -499,5 +540,5 @@ load_data <- function(
   # 6. Collect or return lazy
   # ---------------------------------------------------------------------------
 
-  if (collect) dplyr::collect(tbl) else tbl
+  if (collect) collect_deterministic(tbl, order_by) else tbl
 }

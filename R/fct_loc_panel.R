@@ -97,7 +97,7 @@ loc_panel <- function(data,
       dplyr::select(dplyr::all_of(group_cols), loc_id_orig = {{ id_col }}) |>
       dplyr::distinct() |>
       dplyr::mutate(loc_id_composite = paste(!!!grp_syms, loc_id_orig, sep = "__")) |>
-      dplyr::collect()
+      collect_deterministic(c(group_cols, "loc_id_orig", "loc_id_composite"))
 
     data   <- data |>
       dplyr::mutate(.loc_id_composite = paste(!!!grp_syms, {{ id_col }}, sep = "__"))
@@ -152,10 +152,10 @@ loc_panel <- function(data,
     dplyr::select(from = loc_id_x, to = loc_id_y)
 
   # --- 5. Collect — single trip to DuckDB for both edges and all IDs ---------
-  edges_df <- dplyr::collect(edges)
+  edges_df <- collect_deterministic(edges, c("from", "to"))
   ids_df   <- totals |>
     dplyr::select(loc_id) |>
-    dplyr::collect()
+    collect_deterministic("loc_id")
 
   all_ids_chr <- as.character(ids_df$loc_id)
 
@@ -168,10 +168,23 @@ loc_panel <- function(data,
 
   comp <- igraph::components(g)
 
+  # igraph labels components in vertex traversal order. Normalize those labels
+  # by each component's first sorted member so equivalent graphs always expose
+  # the same loc_id_panel values regardless of edge scan order.
+  component_first <- tapply(
+    seq_along(comp$membership),
+    comp$membership,
+    min
+  )
+  component_order <- order(component_first)
+  component_map <- stats::setNames(seq_along(component_order),
+                                   names(component_first)[component_order])
+  stable_membership <- unname(component_map[as.character(comp$membership)])
+
   # --- 7. Map components back to (composite) loc_id -------------------------
   panel_map <- tibble::tibble(
     loc_id_composite = names(comp$membership),
-    loc_id_panel     = unname(comp$membership)
+    loc_id_panel     = stable_membership
   )
 
   # --- 8. Restore original loc_id (and group cols if supplied) ---------------

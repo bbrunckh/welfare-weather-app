@@ -177,7 +177,7 @@ build_h3_geojson <- function(ss, connection_params) {
         geom = st_asgeojson(st_union_agg(st_geomfromtext(h3_cell_to_boundary_wkt(h3)))),
         .by  = c(code, year, survname, loc_id)
       ) |>
-      dplyr::collect() |>
+      collect_deterministic(c("code", "year", "survname", "loc_id")) |>
       dplyr::filter(!is.na(geom), nchar(geom) > 2)
 
     features <- lapply(seq_len(nrow(loc_df)), function(i) {

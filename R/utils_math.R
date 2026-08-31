@@ -6,6 +6,55 @@
 
 .katex_cache <- new.env(parent = emptyenv())
 
+# One internal reproducibility contract for stochastic analysis paths. The seed
+# is intentionally not user-facing yet; configuration/provenance support is a
+# separate release-readiness concern.
+WISEAPP_DEFAULT_SEED <- 123L
+
+#' Derive a stable integer seed for an analysis substream
+#'
+#' @param seed Base integer seed.
+#' @param ... Values identifying the stochastic operation.
+#'
+#' @return A positive integer suitable for \code{set.seed()}.
+#' @noRd
+wise_seed <- function(seed = WISEAPP_DEFAULT_SEED, ...) {
+  seed <- as.integer(seed %||% WISEAPP_DEFAULT_SEED)[1L]
+  if (is.na(seed)) seed <- WISEAPP_DEFAULT_SEED
+  context <- paste(vapply(list(...), function(x) {
+    paste(as.character(x), collapse = "\r")
+  }, character(1)), collapse = "\n")
+  hash <- digest::digest(
+    paste(seed, context, sep = "\n"),
+    algo = "xxhash32",
+    serialize = FALSE
+  )
+  derived <- strtoi(substr(hash, 1L, 7L), base = 16L)
+  as.integer((as.double(derived) + abs(as.double(seed))) %%
+               (.Machine$integer.max - 1L) + 1L)
+}
+
+#' Select deterministic fallback values from a reference vector
+#'
+#' @param values Reference values to select from.
+#' @param keys Stable identifiers for the requested values.
+#' @param seed Base seed used to namespace the lookup.
+#'
+#' @return A vector of length \code{keys} drawn deterministically from
+#'   \code{values}.
+#' @noRd
+deterministic_values_by_key <- function(values, keys,
+                                        seed = WISEAPP_DEFAULT_SEED) {
+  if (length(values) == 0L) return(values)
+  keys <- as.character(keys)
+  keys[is.na(keys)] <- paste0("<NA>", which(is.na(keys)))
+  unique_keys <- unique(keys)
+  index_by_key <- vapply(unique_keys, function(key) {
+    wise_seed(seed, "keyed-value", key) %% length(values) + 1L
+  }, integer(1))
+  values[index_by_key[match(keys, unique_keys)]]
+}
+
 #' Render LaTeX to static HTML (no client-side JS)
 #' @param tex LaTeX string (no $ delimiters).
 #' @param display Use display (block) mode. Default FALSE = inline.

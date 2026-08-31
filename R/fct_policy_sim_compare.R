@@ -418,11 +418,10 @@ policy_input_diagnostics <- function(baseline_svy, policy_svy, vars = NULL) {
                                residuals = reactive("original")) {
   ns <- session$ns
 
-  # Resolve the active residuals choice for the aggregator. Prefer the live
-  # reactive (mirrors Mod 2's UI); fall back to whatever was stored on the
-  # hist_sim list at simulation time so policy and baseline stay aligned.
+  # Resolve the residuals choice captured by the Step 2 run. The live control
+  # is only a fallback for older in-memory result objects.
   active_residuals <- function(hs) {
-    residuals() %||% hs$residuals %||% "original"
+    hs$residuals %||% residuals() %||% "original"
   }
 
   hist_label <- reactive({
@@ -1128,4 +1127,3 @@ policy_input_diagnostics <- function(baseline_svy, policy_svy, vars = NULL) {
 
   invisible(NULL)
 }
-

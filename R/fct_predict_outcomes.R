@@ -73,6 +73,7 @@
 #'   If \code{model} was produced by \code{fit_model()}, pass
 #'   \code{model_result$engine}. Auto-detected from the model class if
 #'   \code{NULL} (default).
+#' @param seed Integer seed for stochastic residual modes.
 #'
 #' @return The \code{newdata} data frame (tibble) with additional columns:
 #'   \describe{
@@ -116,7 +117,8 @@ predict_outcome <- function(model,
                             id         = NULL,
                             outcome    = "predicted",
                             train_data = NULL,
-                            engine     = NULL) {
+                            engine     = NULL,
+                            seed       = WISEAPP_DEFAULT_SEED) {
 
   if (length(residuals) == 0) stop("`residuals` must be a single string; got length 0.")
   if (length(residuals) > 1)  residuals <- residuals[[1]]
@@ -326,8 +328,12 @@ predict_outcome <- function(model,
         resid_vec <- joined$.resid[seq_len(nrow(preds))]
         missing   <- is.na(resid_vec)
         if (any(missing)) {
-          warning("Some IDs in `newdata` not in training data; filling by resampling.")
-          resid_vec[missing] <- sample(train_resid, size = sum(missing), replace = TRUE)
+          warning("Some IDs in `newdata` not in training data; filling deterministically.")
+          resid_vec[missing] <- deterministic_values_by_key(
+            train_resid,
+            joined[[id]][missing],
+            seed = wise_seed(seed, "original-unmatched")
+          )
         }
         resid_vec
       } else {
@@ -345,7 +351,11 @@ predict_outcome <- function(model,
       # Use nrow(preds) not nrow(newdata): fixest::predict() silently drops rows
       # with FE levels absent from training data, so preds may have fewer rows
       # than newdata. Sizing resid_draw to nrow(newdata) causes a mutate() error.
-      stats::rnorm(nrow(preds), mean = 0, sd = stats::sd(train_resid, na.rm = TRUE))
+      withr::with_seed(
+        wise_seed(seed, "predict-outcome", "normal", outcome),
+        stats::rnorm(nrow(preds), mean = 0,
+                     sd = stats::sd(train_resid, na.rm = TRUE))
+      )
     },
 
     resample = {
@@ -353,7 +363,10 @@ predict_outcome <- function(model,
       if (length(train_resid) == 0)
         stop("No training residuals available for `residuals = 'resample'`.")
       # Same reason as normal above — use nrow(preds).
-      sample(train_resid, size = nrow(preds), replace = TRUE)
+      withr::with_seed(
+        wise_seed(seed, "predict-outcome", "resample", outcome),
+        sample(train_resid, size = nrow(preds), replace = TRUE)
+      )
     }
   )
 

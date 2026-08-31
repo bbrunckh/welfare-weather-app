@@ -188,6 +188,7 @@ resolve_band_q <- function(band_width) {
 #' @param id_vec Optional character/integer vector of length N. Household IDs
 #'   in simulation newdata for \code{residuals = "original"} matching.
 #' @param id_col Optional character. Name of the ID column in \code{train_aug}.
+#' @param seed Integer seed for stochastic residual modes.
 #'
 #' @return Numeric vector of length N. Zero vector when
 #'   \code{residuals = "none"}.
@@ -197,7 +198,8 @@ draw_residuals_vec <- function(residuals,
                                train_aug = NULL,
                                N,
                                id_vec  = NULL,
-                               id_col  = NULL) {
+                               id_col  = NULL,
+                               seed    = WISEAPP_DEFAULT_SEED) {
   switch(residuals,
 
     none = rep(0, N),
@@ -211,13 +213,18 @@ draw_residuals_vec <- function(residuals,
         stop(sprintf("[draw_residuals_vec] id_col '%s' not found in train_aug.", id_col))
 
       # Match simulation households to their training residuals by ID.
-      # Unmatched households fall back to resampled residual.
+      # Unmatched households use a stable hash-indexed lookup so the fallback
+      # neither depends on caller RNG state nor consumes the global stream.
       resid_lookup <- stats::setNames(train_aug$.resid, train_aug[[id_col]])
       matched      <- as.character(id_vec) %in% names(resid_lookup)
 
       out <- numeric(N)
       out[matched]  <- resid_lookup[as.character(id_vec[matched])]
-      out[!matched] <- sample(train_aug$.resid, sum(!matched), replace = TRUE)
+      out[!matched] <- deterministic_values_by_key(
+        train_aug$.resid,
+        id_vec[!matched],
+        seed = wise_seed(seed, "original-unmatched")
+      )
       out
     },
 
@@ -225,13 +232,13 @@ draw_residuals_vec <- function(residuals,
       if (is.null(train_aug) || !".resid" %in% names(train_aug))
         stop("[draw_residuals_vec] train_aug with .resid required for residuals = 'normal'.")
       sigma_hat <- stats::sd(train_aug$.resid, na.rm = TRUE)
-      stats::rnorm(N, mean = 0, sd = sigma_hat)
+      withr::with_seed(seed, stats::rnorm(N, mean = 0, sd = sigma_hat))
     },
 
     resample = {
       if (is.null(train_aug) || !".resid" %in% names(train_aug))
         stop("[draw_residuals_vec] train_aug with .resid required for residuals = 'resample'.")
-      sample(train_aug$.resid, N, replace = TRUE)
+      withr::with_seed(seed, sample(train_aug$.resid, N, replace = TRUE))
     },
 
     stop(sprintf("[draw_residuals_vec] Unknown residuals option: '%s'", residuals))

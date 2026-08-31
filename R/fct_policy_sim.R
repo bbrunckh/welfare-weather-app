@@ -201,6 +201,7 @@ policy_placeholder_tag <- function(category_label, candidate_df) {
 #'   levers only mutate columns that appear in the model — a variable dropped
 #'   from Step 1 leaves the survey untouched. When \code{NULL} (the default)
 #'   no gating is applied (legacy behaviour).
+#' @param seed Integer seed for stochastic policy assignment.
 #'
 #' @return The modified survey data frame.
 #' @export
@@ -211,9 +212,11 @@ apply_policy_to_svy <- function(svy,
                                 labor     = NULL,
                                 education = NULL,
                                 model_vars = NULL,
-                                analysis_unit = "hh") {
+                                analysis_unit = "hh",
+                                seed = WISEAPP_DEFAULT_SEED) {
   if (is.null(svy)) return(svy)
-  cols <- names(svy)
+  withr::with_seed(wise_seed(seed, "policy"), {
+    cols <- names(svy)
 
   # Columns eligible for covariate-lever manipulation. A lever whose variable
   # has been removed from the Step 1 model (its UI control is hidden) must not
@@ -623,7 +626,8 @@ apply_policy_to_svy <- function(svy,
     }
   }
 
-  svy
+    svy
+  })
 }
 
 
@@ -840,12 +844,11 @@ resimulate_with_svy <- function(svy, sw, so, mf,
 #' Module 3 historically built its policy arm by calling
 #' \code{resimulate_with_svy()} — a full re-prediction against the policy-
 #' adjusted survey. That works, but it (a) duplicates compute for every
-#' CMIP6 member, and (b) causes the Results pane to disagree with the
-#' Decomposition pane whenever residual drawing has any stochastic component
-#' (e.g. \code{residuals = "original"} with any unmatched households): the
-#' baseline and policy arms call \code{aggregate_pipeline_per_year()}
-#' independently and get independent residual draws, so a no-op policy can
-#' produce a non-zero visual gap.
+#' CMIP6 member, and (b) historically caused the Results pane to disagree with
+#' the Decomposition pane when baseline and policy aggregation used independent
+#' residual draws. Residual streams are now deterministic, but deriving the
+#' policy arm from the baseline still guarantees paired household-level values
+#' and avoids that duplicate prediction work.
 #'
 #' This helper takes the closed-form per-household delta the Decomposition
 #' pane already produces (\code{decompose_policy_effect()$delta_total}) and

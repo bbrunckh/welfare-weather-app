@@ -129,7 +129,7 @@ STABILITY_THRESHOLD <- 0.5
 LASSO_USE_MICE      <- FALSE  # FALSE = complete-case (fast); TRUE = MICE imputation
 LASSO_USE_PARALLEL  <- FALSE   # use parallel for MICE if > 50,000 observations; evaluated dynamically at call site
 LASSO_N_WORKERS     <- NULL   # NULL = auto-detect all cores
-LASSO_PARALLEL_SEED <- NULL   # NULL = auto-managed parallel-safe seeds
+LASSO_PARALLEL_SEED <- 123L   # fixed across app and batch
 LASSO_GLOBALS_MAX   <- NULL   # NULL = max(2 GB, current setting)
 
 LASSO_FORCE_IN <- list(
@@ -1127,7 +1127,7 @@ for (si in SAMPLE_LABELS) {
                            weight_col = pop_2020, group_cols = c("code", "year", "survname"))
     loc_keys  <- h3_df |>
       dplyr::distinct(code, year, survname, loc_id) |>
-      dplyr::collect()
+      collect_deterministic(c("code", "year", "survname", "loc_id"))
     svy_base <- svy_base |>
       dplyr::left_join(
         dplyr::left_join(loc_keys, panel_map,
@@ -1727,7 +1727,8 @@ for (si in SAMPLE_LABELS) {
           digital       = pol$digital,
           labor         = pol$labor,
           education     = pol$education,
-          analysis_unit = UNIT
+          analysis_unit = UNIT,
+          seed          = WISEAPP_DEFAULT_SEED
         ),
         error = function(e) { message(" FAIL (apply_policy): ", conditionMessage(e)); NULL }
       )

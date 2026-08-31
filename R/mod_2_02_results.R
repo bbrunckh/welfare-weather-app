@@ -311,7 +311,7 @@ mod_2_02_results_server <- function(id,
     })
 
     .one_member_delta <- function(pipe, idx, method, weighted, pov_line,
-                                  band_q, is_log) {
+                                  band_q, is_log, seed, res_mode) {
       # Some upstream paths can hand us F_loading as a length-K numeric
       # vector instead of a 1×K matrix (single-row residual / dropped dim).
       # Promote to matrix before any row-subset so the indexing below never
@@ -333,7 +333,6 @@ mod_2_02_results_server <- function(id,
       # If the residuals selector still says "original" or "resample", honour
       # the pipeline by falling back to "none" so draw_residuals_vec doesn't
       # blow up on a missing .resid column.
-      res_mode <- residuals() %||% "original"
       if (is.null(pipe$train_aug) && !identical(res_mode, "none"))
         res_mode <- "none"
       aggregate_with_uncertainty_delta(
@@ -348,7 +347,8 @@ mod_2_02_results_server <- function(id,
         id_col       = pipe$id_col,
         is_log       = is_log,
         band_q       = band_q,
-        bandwidth_p0 = bandwidth_p0()
+        bandwidth_p0 = bandwidth_p0(),
+        seed          = seed
       )
     }
 
@@ -368,7 +368,7 @@ mod_2_02_results_server <- function(id,
         bq       = band_q_active(),
         pl_v     = pov_line_val(),
         bw       = bandwidth_p0(),
-        res      = residuals() %||% "original",
+        res      = hist_sim()$residuals %||% residuals() %||% "original",
         skip     = isTRUE(skip_coef_draws()),
         cache    = new.env(parent = emptyenv())
       )
@@ -383,7 +383,11 @@ mod_2_02_results_server <- function(id,
       build_for <- function(weighted) {
         rows <- lapply(yrs, function(yr) {
           idx <- pl$sim_year == yr
-          m   <- .one_member_delta(pl, idx, method, weighted, pl_v, bq, is_log)
+          m   <- .one_member_delta(
+            pl, idx, method, weighted, pl_v, bq, is_log,
+            seed = wise_seed(WISEAPP_DEFAULT_SEED, "residual", yr),
+            res_mode = ws$res
+          )
           sd_yr <- sqrt((m$var_coef %||% 0) + (m$var_resid %||% 0))
           F_yr  <- m$F_agg
           tibble::tibble(
@@ -425,8 +429,11 @@ mod_2_02_results_server <- function(id,
             mod_ids <- names(pipes) %||% paste0("m", seq_along(pipes))
             per_member_named <- lapply(seq_along(pipes), function(i) {
               idx <- pipes[[i]]$sim_year == yr
-              m   <- .one_member_delta(pipes[[i]], idx, method, weighted,
-                                       pl_v, bq, is_log)
+              m   <- .one_member_delta(
+                pipes[[i]], idx, method, weighted, pl_v, bq, is_log,
+                seed = wise_seed(WISEAPP_DEFAULT_SEED, "residual", yr),
+                res_mode = ws$res
+              )
               if (is.null(m)) return(NULL)
               list(id = mod_ids[[i]], m = m)
             })

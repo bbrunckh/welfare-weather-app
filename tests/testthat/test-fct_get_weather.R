@@ -1088,3 +1088,71 @@ test_that("get_weather climate scenario works when CMIP6 is coarser than microda
   expect_true(nrow(cmp) > 0L)
   expect_equal(cmp$tx_fut - cmp$tx_hist, rep(5, nrow(cmp)), tolerance = 1e-6)
 })
+
+test_that("get_weather is identical across repeated end-to-end calls", {
+  skip_if_not_installed("arrow")
+  skip_if_not_installed("duckdb")
+  skip_if_not_installed("bit64")
+
+  tmp <- withr::local_tempdir()
+  fx <- make_test_fixtures(tmp, n_months = 18L)
+  selected <- sw_binned("tx", method = "K-means", n_bins = 3L)
+
+  run <- function() {
+    get_weather(
+      survey_data = fx$survey_data,
+      selected_surveys = fx$selected_surveys,
+      selected_weather = selected,
+      dates = fx$dates,
+      connection_params = fx$connection_params
+    )
+  }
+
+  set.seed(771)
+  before <- .Random.seed
+  a <- run()
+  expect_identical(.Random.seed, before)
+  stats::runif(10)
+  b <- run()
+
+  expect_identical(a, b)
+})
+
+test_that("SSP perturbation with equal-frequency bins is deterministic", {
+  skip_if_not_installed("arrow")
+  skip_if_not_installed("duckdb")
+  skip_if_not_installed("duckdbfs")
+  skip_if_not_installed("bit64")
+
+  tmp <- withr::local_tempdir()
+  fx <- make_test_fixtures_cross_res(
+    tmp,
+    seed_cell = "85283473fffffff",
+    micro_res = 5L,
+    weather_res = 4L
+  )
+  make_test_fixtures_cmip6_coarser(tmp, fx, cmip6_res = 3L)
+  selected <- sw_binned("tx", method = "Equal frequency", n_bins = 3L)
+
+  run <- function() {
+    get_weather(
+      survey_data = fx$survey_data,
+      selected_surveys = fx$selected_surveys,
+      selected_weather = selected,
+      dates = fx$dates,
+      connection_params = fx$connection_params,
+      ssp = "ssp2_4_5",
+      future_period = c("2025-01-01", "2025-12-31"),
+      perturbation_method = c(tx = "additive")
+    )
+  }
+
+  set.seed(772)
+  before <- .Random.seed
+  a <- run()
+  expect_identical(.Random.seed, before)
+  stats::runif(10)
+  b <- run()
+
+  expect_identical(a, b)
+})
