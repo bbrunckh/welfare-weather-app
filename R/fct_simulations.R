@@ -397,6 +397,12 @@ resolve_id_col <- function(a, b) {
 #'   used directly as \code{train_aug} in the return value instead of
 #'   recomputing \code{predict(model, train_data)} per call. Passed by
 #'   \code{fct_run_simulation()} to avoid redundant work across keys.
+#' @param precomputed_ecdf_train Optional pre-built \code{stats::ecdf()} of
+#'   the training outcome, used only on the RIF path. \code{train_data} is
+#'   identical across simulation keys for a given model fit, so
+#'   \code{fct_run_simulation()} builds this once and passes it through to
+#'   \code{predict_rif()} instead of rebuilding the same ecdf per key
+#'   (see PERF-27). When \code{NULL}, \code{predict_rif()} builds it itself.
 #' @param svy_prepared Data frame or \code{NULL}. Pre-prepared survey data
 #'   with weather/outcome columns dropped and year converted to character.
 #'   Skips redundant per-key column manipulation in the weather join.
@@ -445,7 +451,8 @@ run_sim_pipeline <- function(weather_raw,
                              precomputed_train_aug = NULL,
                              svy_prepared = NULL,
                              svy_baseline = NULL,
-                             rif_grid     = NULL) {
+                             rif_grid     = NULL,
+                             precomputed_ecdf_train = NULL) {
 
   n_pre_join <- nrow(svy)
 
@@ -540,7 +547,8 @@ run_sim_pipeline <- function(weather_raw,
       outcome      = so$name,
       weather_cols = weather_cols,
       so           = so,
-      chol_list    = chol_list
+      chol_list    = chol_list,
+      ecdf_train   = precomputed_ecdf_train
     )
   } else {
     # Standard OLS path — unchanged

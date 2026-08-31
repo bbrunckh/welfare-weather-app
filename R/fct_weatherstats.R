@@ -1190,9 +1190,9 @@ plot_weather_loc_map <- function(geojson, loc_vals, label,
         nm    <- lookup(mon_by_loc, lid) %||% 1L
         props <- f$properties
         props$popup <- paste0(
-          "<b>", label, "</b><br/>",
-          if (is.null(v) || all(is.na(v))) "no value" else fmt(v),
-          "<br/><small>loc ", lid, " &middot; ",
+          "<b>", htmltools::htmlEscape(label), "</b><br/>",
+          if (is.null(v) || all(is.na(v))) "no value" else htmltools::htmlEscape(fmt(v)),
+          "<br/><small>loc ", htmltools::htmlEscape(lid), " &middot; ",
           lookup(n_by_loc, lid) %||% 0, " households",
           if (isTRUE(nm > 1L)) {
             paste0("<br/>surveyed over ", nm, " interview months — shown value",

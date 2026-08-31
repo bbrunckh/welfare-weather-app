@@ -516,7 +516,9 @@ get_weather <- function(
 
   # -- Materialise unperturbed rolled base (loc_weather_base) ----------------
   # All transformations and the historical result are derived from this table.
-  tmp_base_name <- paste0("lw_base_", paste0(sample(letters, 8L, replace = TRUE), collapse = ""))
+  # Name generated via tempfile() rather than sample() so this does not
+  # consume/advance the caller's RNG stream (see DET-04).
+  tmp_base_name <- basename(tempfile(pattern = "lw_base_"))
 
   loc_weather_base <- loc_monthly |>
     dplyr::mutate(!!!roll_exprs) |>
@@ -762,9 +764,9 @@ get_weather <- function(
 
         # Materialise delta table — lets DuckDB plan a hash join in the
         # batch query instead of replanning the full lazy delta chain.
-        tmp_delta_name <- paste0("lw_delta_",
-                                  paste0(sample(letters, 8L, replace = TRUE),
-                                         collapse = ""))
+        # Name generated via tempfile() rather than sample() so this does not
+        # consume/advance the caller's RNG stream (see DET-04).
+        tmp_delta_name <- basename(tempfile(pattern = "lw_delta_"))
         loc_deltas_by_model <- dplyr::compute(
           loc_deltas_by_model,
           name      = tmp_delta_name,
@@ -803,9 +805,9 @@ get_weather <- function(
 
         # -- Batch query: split into two steps to help DuckDB plan ----------
         # Step 1: join + perturb + select → materialise before rolling window
-        tmp_perturb_name <- paste0("lw_perturb_",
-                                    paste0(sample(letters, 8L, replace = TRUE),
-                                           collapse = ""))
+        # Name generated via tempfile() rather than sample() so this does not
+        # consume/advance the caller's RNG stream (see DET-04).
+        tmp_perturb_name <- basename(tempfile(pattern = "lw_perturb_"))
         tmp_delta_tables <- c(tmp_delta_tables, tmp_perturb_name)
 
         perturbed <- loc_monthly |>

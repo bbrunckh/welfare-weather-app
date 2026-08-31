@@ -62,6 +62,17 @@
 #' @param log_x          Logical. Log10 x-axis. Default FALSE.
 #' @param show_legend    Logical. Show legend. Default TRUE.
 #' @param show_regression Logical. Overlay regression input curve. Default FALSE.
+#' @param hist_filt Optional pre-computed \code{.filter_hist_weather(weather_raw,
+#'   survey_weather)}. Depends only on \code{weather_raw}/\code{survey_weather},
+#'   not on \code{weather_var}, so callers that plot several variables against
+#'   the same pair (e.g. \code{plot_weather_density_panel()}) can build this
+#'   once and pass it in to avoid re-filtering per variable (see PERF-24).
+#'   When \code{NULL} (default), it is built from \code{weather_raw}/
+#'   \code{survey_weather} as before.
+#' @param reg_filt Optional pre-computed regression-input subset of
+#'   \code{hist_filt} (rows whose \code{cal_year} is present in
+#'   \code{survey_weather}). Same rationale as \code{hist_filt}; ignored
+#'   unless \code{hist_filt} is also supplied.
 #' @noRd
 .plot_density_one <- function(survey_weather,
                               weather_raw,
@@ -71,7 +82,9 @@
                               active_scenarios = NULL,
                               log_x            = FALSE,
                               show_legend      = TRUE,
-                              show_regression  = FALSE) {
+                              show_regression  = FALSE,
+                              hist_filt        = NULL,
+                              reg_filt         = NULL) {
 
   disp_label <- weather_label %||% weather_var
 
@@ -79,14 +92,16 @@
     return(ggplot2::ggplot() +
       ggplot2::labs(title = paste0("'", disp_label, "' not found.")))
 
-  hist_filt <- .filter_hist_weather(weather_raw, survey_weather)
+  if (is.null(hist_filt)) {
+    hist_filt <- .filter_hist_weather(weather_raw, survey_weather)
 
-  if (!"int_month" %in% names(survey_weather) && "timestamp" %in% names(survey_weather))
-    survey_weather$int_month <- as.integer(format(as.Date(survey_weather$timestamp), "%m"))
-  if ("timestamp" %in% names(survey_weather))
-    survey_weather$cal_year <- as.integer(format(as.Date(survey_weather$timestamp), "%Y"))
-  sw_years <- unique(survey_weather$cal_year)
-  reg_filt <- hist_filt[hist_filt$cal_year %in% sw_years, ]
+    if (!"int_month" %in% names(survey_weather) && "timestamp" %in% names(survey_weather))
+      survey_weather$int_month <- as.integer(format(as.Date(survey_weather$timestamp), "%m"))
+    if ("timestamp" %in% names(survey_weather))
+      survey_weather$cal_year <- as.integer(format(as.Date(survey_weather$timestamp), "%Y"))
+    sw_years <- unique(survey_weather$cal_year)
+    reg_filt <- hist_filt[hist_filt$cal_year %in% sw_years, ]
+  }
 
   # ---- Detect variable type -------------------------------------------
   raw_col   <- weather_raw[[weather_var]]
@@ -155,37 +170,6 @@
     all_df$value <- factor(all_df$value,
                            levels = if (!is.null(raw_levels)) raw_levels
                                     else sort(unique(as.character(all_df$value))))
-
-    # Regression input overlay
-    if (isTRUE(show_regression)) {
-      reg_vals_chr <- as.character(reg_filt[[weather_var]])
-      reg_vals_chr <- reg_vals_chr[!is.na(reg_vals_chr)]
-      if (length(reg_vals_chr) > 0)
-        all_df <- rbind(all_df, data.frame(
-          value  = reg_vals_chr,
-          source = "Regression input",
-          stringsAsFactors = FALSE
-        ))
-    }
-
-    # SSP scenario overlays
-    if (!is.null(scenario_weather) && length(scenario_weather) > 0) {
-      visible_nms <- names(scenario_weather)
-      if (!is.null(active_scenarios))
-        visible_nms <- intersect(visible_nms, active_scenarios)
-      for (scen_nm in visible_nms) {
-        sw_df <- scenario_weather[[scen_nm]]
-        if (is.null(sw_df) || !weather_var %in% names(sw_df)) next
-        vals <- as.character(sw_df[[weather_var]])
-        vals <- vals[!is.na(vals)]
-        if (length(vals) == 0) next
-        all_df <- rbind(all_df, data.frame(
-          value  = vals,
-          source = scen_nm,
-          stringsAsFactors = FALSE
-        ))
-      }
-    }
 
     all_df$source <- factor(all_df$source,
                             levels = c("Full historical", "Regression input",
@@ -440,6 +424,18 @@ plot_weather_density_panel <- function(survey_weather,
   # Vectorise log_x to one value per variable
   if (length(log_x) == 1L) log_x <- rep(log_x, length(weather_vars))
 
+  # Both filters depend only on weather_raw/survey_weather, not on the
+  # individual weather_var, so build them once here and pass down instead of
+  # recomputing per variable inside .plot_density_one() (see PERF-24).
+  hist_filt <- .filter_hist_weather(weather_raw, survey_weather)
+  sw_for_years <- survey_weather
+  if (!"int_month" %in% names(sw_for_years) && "timestamp" %in% names(sw_for_years))
+    sw_for_years$int_month <- as.integer(format(as.Date(sw_for_years$timestamp), "%m"))
+  if ("timestamp" %in% names(sw_for_years))
+    sw_for_years$cal_year <- as.integer(format(as.Date(sw_for_years$timestamp), "%Y"))
+  sw_years <- unique(sw_for_years$cal_year)
+  reg_filt <- hist_filt[hist_filt$cal_year %in% sw_years, ]
+
   panels <- lapply(seq_along(weather_vars), function(i) {
     wv  <- weather_vars[[i]]
     lbl <- if (!is.null(weather_labels) && wv %in% names(weather_labels))
@@ -453,7 +449,9 @@ plot_weather_density_panel <- function(survey_weather,
       active_scenarios = active_scenarios,
       log_x            = isTRUE(log_x[[i]]),
       show_legend      = TRUE,
-      show_regression  = isTRUE(show_regression)
+      show_regression  = isTRUE(show_regression),
+      hist_filt        = hist_filt,
+      reg_filt         = reg_filt
     )
   })
 

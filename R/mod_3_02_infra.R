@@ -136,12 +136,18 @@ mod_3_02_infra_server <- function(id,
           condition = paste0("!input['", ns(paste0(input_id, "_universal")), "']"),
           sliderInput(
             inputId = ns(paste0(input_id, "_pct")),
-            label   = "Change access by (%)",
+            label   = "Share of unserved gaining access (%)",
             min     = -20,
             max     = 100,
             value   = 0,
             step    = 5,
             post    = "%"
+          ),
+          tags$small(
+            class = "text-muted d-block",
+            "Percentage of currently unserved households to give access ",
+            "(negative values remove access from currently-served households); ",
+            "not a percentage-point change in overall coverage."
           )
         ),
         tags$hr(style = "margin: 8px 0;")

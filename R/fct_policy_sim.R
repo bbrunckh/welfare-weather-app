@@ -693,6 +693,13 @@ resimulate_with_svy <- function(svy, sw, so, mf,
   rif_grid     <- if (is_rif) mf$rif_grid else NULL
   model        <- if (is_rif) extract_rif_median(mf$fit3, mf$engine) else mf$fit3
 
+  # ecdf_train: RIF-only. mf$train_data is identical across every scenario/
+  # ensemble-member call to run_one() below, so build the ecdf once here
+  # instead of rebuilding it inside predict_rif() on each call (see PERF-27).
+  precomputed_ecdf_train <- if (is_rif) tryCatch({
+    stats::ecdf(mf$train_data[[so$name]])
+  }, error = function(e) NULL) else NULL
+
   run_one <- function(weather_raw, slim) {
     tryCatch(
       run_sim_pipeline(
@@ -710,7 +717,8 @@ resimulate_with_svy <- function(svy, sw, so, mf,
         taus         = rif_taus,
         weather_cols = rif_weather,
         svy_baseline = svy_baseline,
-        rif_grid     = rif_grid
+        rif_grid     = rif_grid,
+        precomputed_ecdf_train = precomputed_ecdf_train
       ),
       error = function(e) {
         warning("[resimulate_with_svy] run_sim_pipeline failed: ",

@@ -923,7 +923,8 @@ plot_sample_density_map <- function(cells, unit_label = "households") {
         h3    = cells$h3[i] %||% "",
         popup = paste0(
           "<b>", format(round(cells$n_units[i], 1), big.mark = ","), " ",
-          unit_label, "</b><br/><small>area ", cells$h3[i] %||% "", "</small>"
+          htmltools::htmlEscape(unit_label), "</b><br/><small>area ",
+          htmltools::htmlEscape(cells$h3[i] %||% ""), "</small>"
         )
       )
     )
@@ -1107,7 +1108,12 @@ make_stats_dt <- function(survey_data, variable_list, flag_col = NULL, vars = NU
         x_chr <- as.character(x)
         vapply(x_chr, function(s) {
           if (is.na(s)) return(NA_character_)
-          paste(strwrap(s, width = wrap_width), collapse = "<br>")
+          # HTML-escape each wrapped line before joining with the literal
+          # <br> markup below (the table is rendered with escape = FALSE,
+          # so any unescaped data-derived text would render as raw HTML;
+          # see SEC-05).
+          lines <- strwrap(s, width = wrap_width)
+          paste(htmltools::htmlEscape(lines), collapse = "<br>")
         }, character(1))
       })
     }

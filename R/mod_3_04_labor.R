@@ -216,6 +216,13 @@ mod_3_04_labor_server <- function(id,
       max(0L, 100L - mfg - services)
     })
 
+    # Raw (unclamped) sum, so the display can distinguish an intentional 0%
+    # agriculture share from one that was silently clamped because the two
+    # editable sliders were pushed above a combined 100% (see UI-34).
+    sector_sum_raw <- reactive({
+      (input$sector_manufacturing %||% 0) + (input$sector_services %||% 0)
+    })
+
     output$sector_agri_display <- renderUI({
       tagList(
         tags$label(
@@ -228,6 +235,15 @@ mod_3_04_labor_server <- function(id,
           style = "padding: 6px; background: #f5f5f5; border-radius: 4px;",
           tags$strong(paste0(sector_agri(), "%"))
         ),
+        if (sector_sum_raw() > 100L) {
+          tags$small(
+            class = "text-danger d-block mb-2",
+            sprintf(
+              "Manufacturing + services = %d%%, above 100%%; agriculture has been clamped to 0%%.",
+              sector_sum_raw()
+            )
+          )
+        },
         tags$hr(style = "margin: 8px 0;")
       )
     })

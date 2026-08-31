@@ -24,26 +24,36 @@
 #' @param y   Numeric vector (the outcome).
 #' @param tau Scalar in (0, 1) specifying the quantile.
 #' @param bw  Optional bandwidth for kernel density estimation. When
-#'   \code{NULL} (default), uses \code{stats::bw.SJ()}.
+#'   \code{NULL} (default), uses \code{stats::bw.SJ()}. Ignored when
+#'   \code{dens} is supplied.
+#' @param dens Optional pre-built \code{stats::density()} object for
+#'   \code{y[is.finite(y)]}. Bandwidth selection and the KDE depend only on
+#'   \code{y}, not on \code{tau}, so callers that evaluate several taus for
+#'   the same \code{y} (e.g. \code{prepare_outcome()}'s 9-tau RIF grid) can
+#'   build this once and pass it in to avoid repeating \code{bw.SJ()}/
+#'   \code{density()} per tau (see PERF-03). When \code{NULL} (default), it
+#'   is built from \code{y}/\code{bw} exactly as before.
 #'
 #' @return Numeric vector of RIF values, same length as \code{y}.
 #'
 #' @export
-compute_rif <- function(y, tau, bw = NULL) {
+compute_rif <- function(y, tau, bw = NULL, dens = NULL) {
   na_mask <- !is.finite(y)
   y_obs   <- y[!na_mask]
   q_tau   <- stats::quantile(y_obs, probs = tau, names = FALSE)
 
   # Robust bandwidth: SJ can fail on large/multimodal data
 
-  bw_use <- bw
-  if (is.null(bw_use)) {
-    bw_use <- tryCatch(stats::bw.SJ(y_obs), error = function(e) stats::bw.nrd0(y_obs))
+  if (is.null(dens)) {
+    bw_use <- bw
+    if (is.null(bw_use)) {
+      bw_use <- tryCatch(stats::bw.SJ(y_obs), error = function(e) stats::bw.nrd0(y_obs))
+    }
+
+    # Standard KDE with interpolation at the quantile
+
+    dens <- stats::density(y_obs, bw = bw_use, n = 1024)
   }
-
-  # Standard KDE with interpolation at the quantile
-
-  dens <- stats::density(y_obs, bw = bw_use, n = 1024)
   f_q  <- stats::approx(dens$x, dens$y, xout = q_tau)$y
 
   # Scale-aware floor: fraction of peak density
@@ -129,13 +139,21 @@ build_rif_grid <- function(fits_multi, taus, model_id) {
 #'   as returned by \code{compute_chol_vcov(fit_multi)}. When provided,
 #'   an \code{F_loading} matrix is attached as an attribute of the result for
 #'   use in \code{aggregate_with_uncertainty_delta()}.
+#' @param ecdf_train Optional pre-built \code{stats::ecdf()} of
+#'   \code{train_data[[outcome]]}. \code{train_data} is identical across
+#'   simulation keys for a given model fit, so callers that invoke
+#'   \code{predict_rif()} in a per-key loop (e.g. \code{run_sim_pipeline()})
+#'   can build this once and pass it in to avoid rebuilding the same
+#'   empirical CDF on every key. When \code{NULL} (default), it is built
+#'   from \code{train_data} as before.
 #'
 #' @return \code{newdata} augmented with \code{.fitted}, \code{.residual}, and outcome.
 #'   When \code{chol_list} is non-NULL, also carries \code{attr(., "F_loading")}.
 #'
 #' @export
 predict_rif <- function(fit_multi, newdata, svy, train_data, taus, outcome,
-                        weather_cols, so = NULL, chol_list = NULL) {
+                        weather_cols, so = NULL, chol_list = NULL,
+                        ecdf_train = NULL) {
   stopifnot(
     ".svy_row_id must be present in newdata" = ".svy_row_id" %in% names(newdata),
     "taus must be non-empty" = length(taus) > 0,
@@ -153,8 +171,10 @@ predict_rif <- function(fit_multi, newdata, svy, train_data, taus, outcome,
   is_log     <- isTRUE(so$transform == "log")
   y_baseline <- if (is_log) log(y_raw) else y_raw
 
-  # Assign quantile position via ecdf of training data (in model scale)
-  F_hat <- stats::ecdf(train_data[[outcome]])
+  # Assign quantile position via ecdf of training data (in model scale).
+  # Reuse a caller-supplied ecdf when available (see PERF-27); otherwise
+  # build it here as before.
+  F_hat <- if (!is.null(ecdf_train)) ecdf_train else stats::ecdf(train_data[[outcome]])
   tau_i <- pmin(pmax(F_hat(y_baseline), min(taus)), max(taus))
 
   # Swap weather columns: save scenario, insert baseline from svy

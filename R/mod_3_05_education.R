@@ -135,12 +135,18 @@ mod_3_05_education_server <- function(id,
           condition = paste0("!input['", ns(paste0(input_id, "_universal")), "']"),
           sliderInput(
             inputId = ns(paste0(input_id, "_pct")),
-            label   = "Change attainment by (%)",
+            label   = "Share of unserved gaining attainment (%)",
             min     = -20,
             max     = 100,
             value   = 0,
             step    = 5,
             post    = "%"
+          ),
+          tags$small(
+            class = "text-muted d-block",
+            "Percentage of currently non-attaining households to give attainment ",
+            "(negative values remove attainment from currently-attaining households); ",
+            "not a percentage-point change in overall attainment."
           )
         ),
         tags$hr(style = "margin: 8px 0;")

@@ -215,6 +215,18 @@ fct_run_simulation <- function(sw,
     NULL
   })
 
+  # ecdf_train: RIF-only analogue of the above — train_data[[outcome]] is
+  # identical for every key, so the ecdf used to assign each household's
+  # quantile position is built once here rather than per key inside
+  # predict_rif() (see PERF-27).
+  precomputed_ecdf_train <- if (is_rif) tryCatch({
+    stats::ecdf(train_data[[so$name]])
+  }, error = function(e) {
+    warning("[fct_run_simulation] ecdf_train precomputation failed: ",
+            conditionMessage(e))
+    NULL
+  }) else NULL
+
   # Survey-side join prep: drop weather/outcome columns and convert year once.
   # Passed to run_sim_pipeline() so prepare_hist_weather() skips this per key.
   drop_cols <- c(sw$name, so$name)
@@ -288,7 +300,8 @@ fct_run_simulation <- function(sw,
         taus         = taus,
         weather_cols = weather_cols,
         precomputed_train_aug = precomputed_train_aug,
-        svy_prepared = svy_prepared
+        svy_prepared = svy_prepared,
+        precomputed_ecdf_train = precomputed_ecdf_train
       ),
       error = function(e) {
         warning(sprintf("[fct_run_simulation] Key %s failed: %s",

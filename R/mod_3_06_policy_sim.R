@@ -220,17 +220,21 @@ mod_3_06_policy_sim_server <- function(id,
                 sc_label <- names(sc_list)[i] %||% paste0("Scenario ", i)
 
                 # Identify years present in this scenario's weather panel
+                # (computed once and reused for subsetting below, rather than
+                # re-parsing timestamps for every year in the loop)
                 if ("timestamp" %in% names(w_raw)) {
-                  sim_years <- sort(unique(as.integer(format(w_raw$timestamp, "%Y"))))
+                  w_years   <- as.integer(format(w_raw$timestamp, "%Y"))
+                  sim_years <- sort(unique(w_years))
                 } else {
                   # No year column — fall back to single decomposition (mean weather)
+                  w_years   <- NULL
                   sim_years <- NA_integer_
                 }
 
                 year_results <- lapply(sim_years, function(yr) {
                   # Subset to this year's weather rows (or use full panel if no year info)
                   w_yr <- if (!is.na(yr)) {
-                    w_raw[as.integer(format(w_raw$timestamp, "%Y")) == yr, ]
+                    w_raw[w_years == yr, ]
                   } else {
                     w_raw
                   }

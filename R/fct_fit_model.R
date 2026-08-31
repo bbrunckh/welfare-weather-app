@@ -235,8 +235,14 @@ ENGINE_REGISTRY <- list(
       taus     <- seq(0.1, 0.9, by = 0.1)
       rif_cols <- paste0("rif_", formatC(taus * 100, format = "d"))
       y        <- df[[y_var]]
+      # Bandwidth selection and the KDE depend only on `y`, not on `tau`, so
+      # compute them once here and reuse across all 9 quantiles instead of
+      # letting compute_rif() repeat bw.SJ()/density() on every call (PERF-03).
+      y_obs  <- y[is.finite(y)]
+      bw_use <- tryCatch(stats::bw.SJ(y_obs), error = function(e) stats::bw.nrd0(y_obs))
+      dens   <- stats::density(y_obs, bw = bw_use, n = 1024)
       for (i in seq_along(taus)) {
-        df[[rif_cols[i]]] <- compute_rif(y, tau = taus[i])
+        df[[rif_cols[i]]] <- compute_rif(y, tau = taus[i], dens = dens)
       }
       attr(df, "rif_taus") <- taus
       attr(df, "rif_cols") <- rif_cols
