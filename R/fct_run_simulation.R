@@ -16,6 +16,19 @@
 # Run full simulation pipeline - called once per button click                  #
 # ---------------------------------------------------------------------------- #
 
+# REACT-12: parse a future simulation key into its (SSP x period) group.
+# Key format: "ssp2_4_5_2030_2040_ensemble_mean" ->
+#   ssp_code "ssp2_4_5", yr_parts c(2030, 2040), gk "ssp2_4_5_2030_2040".
+.key_group <- function(key) {
+  ssp_code <- sub("^(ssp[^_]+_[^_]+_[^_]+)_.*", "\\1", key)
+  yr_parts <- regmatches(key, gregexpr("[0-9]{4}", key))[[1L]]
+  period   <- if (length(yr_parts) >= 2L)
+    paste0(yr_parts[[1L]], "_", yr_parts[[2L]]) else "unknown"
+  list(ssp_code = ssp_code,
+       yr_parts = yr_parts,
+       gk       = paste0(ssp_code, "_", period))
+}
+
 #' Run the full welfare-weather simulation pipeline
 #'
 #' Pure function - no reactives. Extracts all business logic from
@@ -46,20 +59,36 @@
 #' @param sim_dates        Character vector. Historical simulation dates.
 #' @param perturbation_method List or NULL. Built by build_perturbation_method().
 #' @param stored_breaks    Named list or NULL. Pre-computed histogram breaks.
-#' @param notify_fn        Function(msg). Called for user-facing notifications.
+#' @param notify_fn   Function(msg). Called for user-facing notifications.
 #'   Default is message() to console only.
 #' @param progress_fn      Function(value, detail). Called to update progress.
 #'   Default is a no-op - Shiny passes shiny::setProgress here.
+#' @param weather_fn       Function. Weather loader, injectable for tests.
+#'   Default [get_weather].
+#' @param pipeline_fn      Function. Per-key simulation pipeline, injectable
+#'   for tests. Default [run_sim_pipeline].
 #'
 #' @return Named list with elements:
 #'   \describe{
 #'     \item{hist_sim_result}{List. Historical simulation output.}
-#'     \item{new_scenarios}{Named list. Future scenario outputs.}
+#'     \item{new_scenarios}{Named list. Future scenario outputs; each entry
+#'       carries `n_models` (succeeded) and `n_models_requested` (REACT-12
+#'       provenance).}
 #'     \item{chol_obj}{List or NULL. Cholesky VCV object.}
 #'     \item{n_keys}{Integer. Total number of simulation keys.}
 #'     \item{total_runs}{Integer. Total prediction runs.}
 #'     \item{t_elapsed}{Numeric. Wall-clock seconds elapsed.}
+#'     \item{failures}{List. REACT-12 failure ledger - one entry per failed
+#'       key with `key`, `gk`, `is_hist`, `error`. Empty when all keys ran.}
 #'   }
+#'
+#' @details
+#' REACT-12: per-key pipeline failures are collected in a ledger instead of
+#' vanishing. The run fails (throws) when the historical key fails or when
+#' *all* ensemble members of a requested (SSP x period) group fail - in that
+#' case no partial results are published and the caller keeps its previous
+#' state. Partial member failures publish results with the failure ledger
+#' attached for the caller to surface.
 #' @noRd
 fct_run_simulation <- function(sw,
                                 so,
@@ -80,7 +109,9 @@ fct_run_simulation <- function(sw,
                                 taus         = NULL,
                                 weather_cols = NULL,
                                 notify_fn   = function(msg) message(msg),
-                                progress_fn = function(value, detail) invisible(NULL)) {
+                                progress_fn = function(value, detail) invisible(NULL),
+                                weather_fn  = get_weather,
+                                pipeline_fn = run_sim_pipeline) {
 
   model      <- mf$fit3
   engine     <- mf$engine
@@ -101,7 +132,7 @@ fct_run_simulation <- function(sw,
   progress_fn(0.05, "Querying weather data (this may take 1-2 minutes)...")
   t_weather_start <- proc.time()[["elapsed"]]
 
-  weather_result <- get_weather(
+  weather_result <- weather_fn(
     survey_data         = svy,
     selected_surveys    = ss,
     selected_weather    = sw,
@@ -266,11 +297,27 @@ fct_run_simulation <- function(sw,
   group_weather_rep <- list()
   group_meta       <- list()
   group_n          <- list()
+  # REACT-12: per-group requested-member counts and the failure ledger.
+  group_requested  <- list()
+  failures         <- list()
 
   for (ki in seq_along(all_keys)) {
     key       <- all_keys[[ki]]
     is_hist   <- identical(key, "historical")
     is_hist_k <- is_hist
+    key_group <- if (is_hist) NULL else .key_group(key)
+
+    # Register the group as requested before the key runs (REACT-12) so a
+    # group whose members all fail is distinguishable from a never-requested
+    # group when the run is classified below.
+    if (!is.null(key_group)) {
+      gk0 <- key_group$gk
+      group_requested[[gk0]] <- (group_requested[[gk0]] %||% 0L) + 1L
+      if (is.null(group_meta[[gk0]])) {
+        group_meta[[gk0]] <- list(ssp_code = key_group$ssp_code,
+                                  year_range = key_group$yr_parts)
+      }
+    }
 
     # Per-key progress (fires before the key runs) - mirrors the old pre-run
     # loop's message.
@@ -285,8 +332,9 @@ fct_run_simulation <- function(sw,
                        format_elapsed(t_el))
     )
 
+    key_err <- NULL
     out <- tryCatch(
-      run_sim_pipeline(
+      pipeline_fn(
         weather_raw  = weather_per_key[[key]],
         svy          = svy,
         sw           = sw,
@@ -304,8 +352,9 @@ fct_run_simulation <- function(sw,
         precomputed_ecdf_train = precomputed_ecdf_train
       ),
       error = function(e) {
+        key_err <<- conditionMessage(e)
         warning(sprintf("[fct_run_simulation] Key %s failed: %s",
-                        key, conditionMessage(e)))
+                        key, key_err))
         NULL
       }
     )
@@ -335,7 +384,16 @@ fct_run_simulation <- function(sw,
       )
     )
 
-    if (is.null(out)) { rm(out); next }
+    if (is.null(out)) {
+      # REACT-12: record the failure instead of silently dropping the key.
+      failures[[length(failures) + 1L]] <- list(
+        key     = key,
+        gk      = if (is.null(key_group)) NA_character_ else key_group$gk,
+        is_hist = is_hist,
+        error   = key_err
+      )
+      rm(out); next
+    }
 
     if (is_hist && is.null(hist_sim_result)) {
       hist_sim_result <- list(
@@ -353,18 +411,11 @@ fct_run_simulation <- function(sw,
       out$weather_raw <- NULL
 
     } else if (!is_hist) {
-      ssp_code <- sub("^(ssp[^_]+_[^_]+_[^_]+)_.*", "\\1", key)
-      yr_parts <- regmatches(key, gregexpr("[0-9]{4}", key))[[1L]]
-      period   <- if (length(yr_parts) >= 2L)
-        paste0(yr_parts[[1L]], "_", yr_parts[[2L]]) else "unknown"
-      gk       <- paste0(ssp_code, "_", period)
+      gk       <- key_group$gk
 
       if (is.null(group_agg[[gk]]))         group_agg[[gk]]         <- list()
       if (is.null(group_weather_rep[[gk]])) group_weather_rep[[gk]] <- out$weather_raw
       if (is.null(group_n[[gk]]))           group_n[[gk]]           <- 0L
-      if (is.null(group_meta[[gk]])) {
-        group_meta[[gk]] <- list(ssp_code = ssp_code, year_range = yr_parts)
-      }
 
       # NB: per-member `weather_raw` is intentionally retained on each
       # pipeline so Module 3's resimulate_with_svy() can re-predict per
@@ -390,7 +441,40 @@ fct_run_simulation <- function(sw,
 
   t_pipeline_done <- proc.time()[["elapsed"]] - t_start_pipeline
   progress_fn(0.80, sprintf("Pipelines complete (%s) - grouping results...",
-                             format_elapsed(t_pipeline_done)))
+                              format_elapsed(t_pipeline_done)))
+
+  # ---- REACT-12: classify failures - fail fast or publish with ledger ----- #
+  # The run is unusable when the historical key failed (no baseline to show)
+  # or when every requested member of a group failed (that scenario would
+  # silently vanish from the results charts). In those cases throw so the
+  # caller keeps its previous results and shows an error. Partial member
+  # failures continue: the ledger travels with the result for the caller to
+  # surface as a prominent warning.
+  if (length(failures) > 0L) {
+    fail_lines <- vapply(failures, function(f)
+      sprintf("  - %s: %s", f$key, f$error), character(1))
+
+    if (any(vapply(failures, `[[`, logical(1), "is_hist"))) {
+      stop("Historical simulation failed - no results published.\n",
+           paste(fail_lines, collapse = "\n"), call. = FALSE)
+    }
+
+    dead_gks <- setdiff(names(group_requested), names(group_agg))
+    if (length(dead_gks) > 0L) {
+      dead_lbl <- vapply(dead_gks, function(gk) {
+        meta <- group_meta[[gk]]
+        if (is.null(meta)) return(gk)
+        pretty <- ssp_labels[meta$ssp_code] %||% meta$ssp_code
+        yr     <- meta$year_range
+        paste0(pretty, " / ",
+               if (length(yr) >= 2L) paste0(yr[1], "-", yr[2]) else "unknown")
+      }, character(1))
+      stop("All ensemble members failed for: ",
+           paste(dead_lbl, collapse = ", "),
+           " - no results published.\n",
+           paste(fail_lines, collapse = "\n"), call. = FALSE)
+    }
+  }
 
   # ---- Assemble new_scenarios --------------------------------------------- #
   for (gk in names(group_agg)) {
@@ -405,6 +489,8 @@ fct_run_simulation <- function(sw,
       so          = so,
       year_range  = meta$year_range,
       n_models    = group_n[[gk]],
+      # REACT-12 provenance: how many members were requested vs succeeded.
+      n_models_requested = group_requested[[gk]] %||% group_n[[gk]],
       residuals   = residuals
     )
   }
@@ -414,13 +500,15 @@ fct_run_simulation <- function(sw,
   t_elapsed_total    <- proc.time()[["elapsed"]] - t_start_total
   t_pipeline_elapsed <- proc.time()[["elapsed"]] - t_start_pipeline
 
+  n_failed <- length(failures)
   message(sprintf(
-    "[wiseapp] Simulation complete in %s total | weather: %s | pipelines: %s | %d key(s) | ~%d runs",
+    "[wiseapp] Simulation complete in %s total | weather: %s | pipelines: %s | %d key(s) | ~%d runs%s",
     format_elapsed(t_elapsed_total),
     format_elapsed(t_weather),
     format_elapsed(t_pipeline_elapsed),
     n_keys,
-    total_runs
+    total_runs,
+    if (n_failed > 0L) sprintf(" | %d key(s) FAILED", n_failed) else ""
   ))
 
   list(
@@ -430,6 +518,8 @@ fct_run_simulation <- function(sw,
     n_keys          = n_keys,
     total_runs      = total_runs,
     t_elapsed       = t_elapsed_total,
-    t_weather       = t_weather        # <- expose for UI notification
+    t_weather       = t_weather,       # <- expose for UI notification
+    failures        = failures,        # <- REACT-12 failure ledger
+    n_keys_ok       = n_keys - n_failed
   )
 }

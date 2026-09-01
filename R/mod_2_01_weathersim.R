@@ -606,27 +606,53 @@ mod_2_01_weathersim_server <- function(id,
         shiny::setProgress(value = 1, detail = "Complete")
       })
 
+      # ---- REACT-12: partial failures get a prominent persistent warning ----
+      # (Historical or whole-group failures throw inside fct_run_simulation,
+      # so reaching this point means results are publishable.)
+      sim_failures <- result$failures %||% list()
+      if (length(sim_failures) > 0L) {
+        fail_txt <- paste(vapply(sim_failures, function(f)
+          sprintf("%s: %s", f$key, f$error), character(1)), collapse = "\n")
+        shiny::showNotification(
+          ui = tagList(
+            tags$b(sprintf(paste0("\u26a0 Simulation finished with partial results ",
+                                  "(%d of %d simulation keys failed)"),
+                           length(sim_failures), result$n_keys)),
+            tags$br(),
+            tags$div(style = "font-size: 12px; white-space: pre-wrap;",
+                     fail_txt)
+          ),
+          type = "warning", duration = NULL
+        )
+      }
+
       # ---- Completion notification -----------------------------------------
       message(sprintf(
-        "[wiseapp] TOTAL wall time: %s | weather: %s | pipelines: %s | %d key(s)",
+        "[wiseapp] TOTAL wall time: %s | weather: %s | pipelines: %s | %d/%d key(s)",
         format_elapsed(result$t_elapsed),
         format_elapsed(result$t_weather %||% 0),
         format_elapsed(result$t_elapsed - (result$t_weather %||% 0)),
-        result$n_keys
+        result$n_keys_ok %||% result$n_keys, result$n_keys
       ))
 
       shiny::showNotification(
         ui = tagList(
-          tags$b("\u2713 Simulation complete"), tags$br(),
-          sprintf("%s total | %d key(s) | ~%d runs",
+          tags$b(if (length(sim_failures) > 0L)
+            sprintf("\u2713 Simulation complete (partial: %d of %d keys succeeded)",
+                    result$n_keys_ok %||% result$n_keys, result$n_keys)
+            else "\u2713 Simulation complete"),
+          tags$br(),
+          sprintf("%s total | %d/%d key(s) | ~%d runs",
                   format_elapsed(result$t_elapsed),
+                  result$n_keys_ok %||% result$n_keys,
                   result$n_keys, result$total_runs),
           tags$br(),
           sprintf("Weather: %s | Pipelines: %s | Aggregation: lazy (delta method)",
                   format_elapsed(result$t_weather %||% 0),
                   format_elapsed(result$t_elapsed - (result$t_weather %||% 0)))
         ),
-        type = "message", duration = 10
+        type = if (length(sim_failures) > 0L) "warning" else "message",
+        duration = 10
       )
     }, ignoreInit = TRUE)
 
