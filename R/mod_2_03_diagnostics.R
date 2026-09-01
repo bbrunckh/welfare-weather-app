@@ -12,6 +12,9 @@
 mod_2_03_diagnostics_ui <- function(id) {
   ns <- NS(id)
   tagList(
+    # ---- 0. Stale banner (INT-08) -------------------------------------------
+    shiny::uiOutput(ns("stale_banner")),
+
     # ---- 0. Scenario filters -----------------------------------------------
     shiny::uiOutput(ns("scenario_filter_panel")),
 
@@ -144,9 +147,15 @@ mod_2_03_diagnostics_server <- function(id,
                                          variance_breakdown = NULL,
                                          timeseries_curves = NULL,
                                          tabset_id,
-                                         tabset_session = NULL) {
+                                         tabset_session = NULL,
+                                         stale = reactive(FALSE)) {
   moduleServer(id, function(input, output, session) {
     ns <- session$ns
+
+    # INT-08: stale banner above the diagnostics pane.
+    output$stale_banner <- shiny::renderUI({
+      if (isTRUE(stale())) .stale_banner("Step 2 diagnostics") else NULL
+    })
 
     if (is.null(tabset_session)) tabset_session <- session$parent %||% session
 

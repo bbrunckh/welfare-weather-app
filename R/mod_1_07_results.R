@@ -35,6 +35,7 @@ mod_1_07_results_server <- function(id,
                                      model_type,
                                      run_model,
                                      fit_guard = NULL,
+                                     survey_version = reactive(0L),
                                      tabset_id,
                                      tabset_session = NULL) {
   moduleServer(id, function(input, output, session) {
@@ -46,6 +47,50 @@ mod_1_07_results_server <- function(id,
 
     model_fit_val     <- reactiveVal(NULL)
     results_tab_added <- reactiveVal(FALSE)
+    # INT-08: TRUE while the stored fit's run signature no longer matches the
+    # current upstream inputs.
+    stale             <- reactiveVal(FALSE)
+
+    # ---- Run signature (INT-08) ----------------------------------------------
+    # Immutable snapshot of everything the fit depends on; recomputed from
+    # live inputs and compared with the stored fit's signature.
+
+    .fit_sig_from_live <- function() {
+      sw <- survey_weather()
+      list(
+        step           = "fit",
+        survey_version = survey_version(),
+        survey_shape   = if (is.null(sw)) NULL else c(nrow(sw), ncol(sw)),
+        outcome        = .sig_plain(selected_outcome()),
+        weather        = .sig_plain(selected_weather()),
+        model          = .sig_plain(selected_model())
+      )
+    }
+
+    observeEvent(survey_weather(), {
+      mf <- model_fit_val()
+      if (!is.null(mf) && !identical(.fit_sig_from_live(), mf$.sig)) stale(TRUE)
+    }, ignoreInit = TRUE)
+    observeEvent(selected_outcome(), {
+      mf <- model_fit_val()
+      if (!is.null(mf) && !identical(.fit_sig_from_live(), mf$.sig)) stale(TRUE)
+    }, ignoreInit = TRUE)
+    observeEvent(selected_weather(), {
+      mf <- model_fit_val()
+      if (!is.null(mf) && !identical(.fit_sig_from_live(), mf$.sig)) stale(TRUE)
+    }, ignoreInit = TRUE)
+    observeEvent(selected_model(), {
+      mf <- model_fit_val()
+      if (!is.null(mf) && !identical(.fit_sig_from_live(), mf$.sig)) stale(TRUE)
+    }, ignoreInit = TRUE)
+    observeEvent(survey_version(), {
+      mf <- model_fit_val()
+      if (!is.null(mf) && !identical(.fit_sig_from_live(), mf$.sig)) stale(TRUE)
+    }, ignoreInit = TRUE)
+
+    output$stale_banner <- renderUI({
+      if (isTRUE(stale())) .stale_banner("Step 1 model results") else NULL
+    })
 
     native_fit <- function(fit) extract_native_fit(fit, model_fit_val()$engine)
 
@@ -92,6 +137,10 @@ mod_1_07_results_server <- function(id,
           survey_weather = survey_weather(),
           variable_list  = if (is.function(variable_list)) variable_list() else variable_list
         )
+        # INT-08: the run signature is stored with the result and compared
+        # against live inputs; a mismatch marks the results stale.
+        fit_list$.sig <- .fit_sig_from_live()
+        stale(FALSE)
         model_fit_val(fit_list)
         shiny::showNotification("Models fitted successfully.",
                                 type = "message", duration = 3)
@@ -251,6 +300,7 @@ mod_1_07_results_server <- function(id,
           shiny::tabPanel(
             title = "Results",
             value = "results",
+            shiny::uiOutput(ns("stale_banner")),
             shiny::uiOutput(ns("heading_effect")),
             shiny::uiOutput(ns("effectplot_layout")),
             shiny::br(),
@@ -280,6 +330,6 @@ mod_1_07_results_server <- function(id,
 
     # ---- Return --------------------------------------------------------------
 
-    list(model_fit = model_fit_val)
+    list(model_fit = model_fit_val, stale = stale)
   })
 }

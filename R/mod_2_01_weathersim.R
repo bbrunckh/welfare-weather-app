@@ -240,13 +240,17 @@ mod_2_01_weathersim_server <- function(id,
                                         selected_surveys,
                                         survey_weather,
                                         model_fit,
-                                        stored_breaks = reactive(NULL)) {
+                                        stored_breaks = reactive(NULL),
+                                        survey_version = reactive(0L)) {
   moduleServer(id, function(input, output, session) {
     ns <- session$ns
 
     # ---- Internal state ----------------------------------------------------
     hist_sim        <- reactiveVal(NULL)
     saved_scenarios <- reactiveVal(list())
+    # INT-08: TRUE while the stored simulation's run signature no longer
+    # matches the current fit/climate inputs.
+    sim_stale       <- reactiveVal(FALSE)
 
     # ---- Baseline survey reactives ----------------------------------------
 
@@ -522,6 +526,70 @@ mod_2_01_weathersim_server <- function(id,
     # button is disabled for the duration of the run.
     sim_guard <- .busy_guard(session, run_sim)
 
+    # ---- Run signature (INT-08) ----------------------------------------------
+    # Everything the simulation depends on, captured at run time into the
+    # result and recomputed from live inputs for the staleness comparison.
+
+    .sim_sig_from_live <- function(fit_sig) {
+      list(
+        step           = "sim",
+        fit_sig        = fit_sig,
+        survey_version = survey_version(),
+        hist_years     = input$hist_years,
+        climate        = input$climate,
+        future_periods = future_periods(),
+        fut_sel        = .sig_plain(selected_fut()),
+        baseline_survey = input$baseline_survey,
+        residuals      = input$residuals,
+        skip_coef_draws = isTRUE(input$include_coef_uncertainty),
+        propagate_all_covariate_uncertainty =
+          isTRUE(input$propagate_all_covariate_uncertainty)
+      )
+    }
+
+    observeEvent(model_fit(), {
+      hs <- hist_sim()
+      if (!is.null(hs) && !identical(.sim_sig_from_live(hs$.sig$fit_sig %||% NULL), hs$.sig))
+        sim_stale(TRUE)
+    }, ignoreInit = TRUE)
+    observeEvent(input$hist_years, {
+      hs <- hist_sim()
+      if (!is.null(hs) && !identical(.sim_sig_from_live(hs$.sig$fit_sig %||% NULL), hs$.sig))
+        sim_stale(TRUE)
+    }, ignoreInit = TRUE)
+    observeEvent(input$climate, {
+      hs <- hist_sim()
+      if (!is.null(hs) && !identical(.sim_sig_from_live(hs$.sig$fit_sig %||% NULL), hs$.sig))
+        sim_stale(TRUE)
+    }, ignoreInit = TRUE)
+    observeEvent(input$baseline_survey, {
+      hs <- hist_sim()
+      if (!is.null(hs) && !identical(.sim_sig_from_live(hs$.sig$fit_sig %||% NULL), hs$.sig))
+        sim_stale(TRUE)
+    }, ignoreInit = TRUE)
+    observeEvent(input$residuals, {
+      hs <- hist_sim()
+      if (!is.null(hs) && !identical(.sim_sig_from_live(hs$.sig$fit_sig %||% NULL), hs$.sig))
+        sim_stale(TRUE)
+    }, ignoreInit = TRUE)
+    observeEvent(input$include_coef_uncertainty, {
+      hs <- hist_sim()
+      if (!is.null(hs) && !identical(.sim_sig_from_live(hs$.sig$fit_sig %||% NULL), hs$.sig))
+        sim_stale(TRUE)
+    }, ignoreInit = TRUE)
+    observeEvent(input$propagate_all_covariate_uncertainty, {
+      hs <- hist_sim()
+      if (!is.null(hs) && !identical(.sim_sig_from_live(hs$.sig$fit_sig %||% NULL), hs$.sig))
+        sim_stale(TRUE)
+    }, ignoreInit = TRUE)
+    observeEvent(future_periods(), {
+      hs <- hist_sim()
+      if (!is.null(hs) && !identical(.sim_sig_from_live(hs$.sig$fit_sig %||% NULL), hs$.sig))
+        sim_stale(TRUE)
+    }, ignoreInit = TRUE)
+
+    observeEvent(hist_sim(), sim_stale(FALSE))
+
     observeEvent(input$run_sim, {
       req(selected_weather(), selected_outcome(),
           survey_weather(), selected_hist(), model_fit())
@@ -602,6 +670,10 @@ mod_2_01_weathersim_server <- function(id,
         # INT-05: bind the historical scenario label into the result so the
         # Step 3 pane describes the simulated run, not the live selection.
         result$hist_sim_result$hist_label <- sh$scenario_name
+        # INT-08: the immutable run signature travels with the result so
+        # Step 3 can detect that it is consuming a superseded simulation.
+        result$hist_sim_result$.sig <- .sim_sig_from_live(mf$.sig %||% NULL)
+        sim_stale(FALSE)
         hist_sim(result$hist_sim_result)
         saved_scenarios(result$new_scenarios)
 
@@ -668,7 +740,8 @@ mod_2_01_weathersim_server <- function(id,
       residuals       = reactive(input$residuals %||% "original"),
       skip_coef_draws = reactive(!isTRUE(input$include_coef_uncertainty)),
       propagate_all_covariate_uncertainty =
-        reactive(isTRUE(input$propagate_all_covariate_uncertainty))
+        reactive(isTRUE(input$propagate_all_covariate_uncertainty)),
+      stale           = sim_stale
     )
   })
 }

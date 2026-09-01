@@ -93,18 +93,28 @@ test_that("fit snapshot captures fit-time labels; headings follow re-fit engine"
                    fixed = TRUE)
 
       # Change the live selections WITHOUT refitting: the snapshot must not
-      # move - old results keep their original labels (INT-05).
+      # move - old results keep their original labels (INT-05) - and the
+      # results become stale (INT-08).
       sel_outcome(make_outcome(label = "Outcome B", name = "welf2"))
       sel_weather(make_weather_sel(name = "pr"))
       settle()
       snap <- model_fit_val()$.snap
       expect_identical(snap$outcome$label, "Outcome A")
       expect_identical(snap$weather$name, "tx")
+      expect_true(stale())
 
-      # Refit with a different engine: snapshot and headings follow the run.
+      # The stale banner renders the warning (INT-08)
+      html <- html_of("stale_banner")
+      expect_match(html, "Results are out of date", fixed = TRUE)
+
+      # Refit with a different engine: snapshot and headings follow the run,
+      # and staleness clears (INT-08).
       sel_model(list(engine = "rif"))
       session$elapse(500); session$flushReact()
       run_model(3L); settle()
+      expect_false(stale())
+      html <- html_of("stale_banner")
+      expect_identical(nchar(html), 0L)
 
       snap <- model_fit_val()$.snap
       expect_identical(snap$outcome$label, "Outcome B")
@@ -113,6 +123,7 @@ test_that("fit snapshot captures fit-time labels; headings follow re-fit engine"
                    "Weather sensitivity across the distribution", fixed = TRUE)
       expect_match(html_of("heading_coef"),
                    "UQR coefficients by model specification", fixed = TRUE)
+      expect_true(model_fit_val()$.snap$outcome$label == "Outcome B")
     }
   )
 })

@@ -86,7 +86,9 @@ mod_3_06_policy_sim_server <- function(id,
                                         skip_coef_draws    = reactive(FALSE),
                                         residuals          = reactive("original"),
                                         propagate_all_covariate_uncertainty =
-                                          reactive(FALSE)) {
+                                          reactive(FALSE),
+                                        survey_version     = reactive(0L),
+                                        sim_stale          = reactive(FALSE)) {
   moduleServer(id, function(input, output, session) {
     ns <- session$ns
 
@@ -98,6 +100,9 @@ mod_3_06_policy_sim_server <- function(id,
     sim_running         <- reactiveVal(FALSE)
     decomp_rv           <- reactiveVal(NULL)
     decomp_scenarios_rv <- reactiveVal(list())
+    # INT-08: TRUE while the stored policy results' run signature no longer
+    # matches the current Step 2 output / scenario inputs.
+    policy_stale        <- reactiveVal(FALSE)
 
     baseline_hist_sim_rv        <- reactiveVal(NULL)
     baseline_saved_scenarios_rv <- reactiveVal(list())
@@ -115,6 +120,47 @@ mod_3_06_policy_sim_server <- function(id,
         shiny::span(conditionMessage(err))
       )
     })
+
+    # ---- Run signature (INT-08) ----------------------------------------------
+    # The policy run inherits Step 2's signature and adds the scenario
+    # configuration; a mismatch (or a stale Step 2) marks the results stale.
+
+    .policy_sig_from_live <- function(hs = hist_sim()) {
+      list(
+        step           = "policy",
+        sim_sig        = if (!is.null(hs)) hs$.sig %||% NULL else NULL,
+        survey_version = survey_version(),
+        scenarios      = .sig_plain(list(
+          sp        = sp_scenario(),
+          infra     = infra_scenario(),
+          digital   = digital_scenario(),
+          labor     = labor_scenario(),
+          education = education_scenario()
+        ))
+      )
+    }
+
+    .mark_stale_on_change <- function(observe_what) {
+      shiny::observeEvent(observe_what, {
+        bh <- baseline_hist_sim_rv()
+        if (!is.null(bh) && !identical(.policy_sig_from_live(), bh$.sig))
+          policy_stale(TRUE)
+      }, ignoreInit = TRUE)
+    }
+    .mark_stale_on_change(hist_sim())
+    .mark_stale_on_change(sp_scenario())
+    .mark_stale_on_change(infra_scenario())
+    .mark_stale_on_change(digital_scenario())
+    .mark_stale_on_change(labor_scenario())
+    .mark_stale_on_change(education_scenario())
+    .mark_stale_on_change(survey_version())
+    # Cascade: when Step 2 is stale (inputs changed, not yet re-run) the
+    # policy results built on it are stale too.
+    shiny::observeEvent(sim_stale(), {
+      if (isTRUE(sim_stale()) && !is.null(baseline_hist_sim_rv()))
+        policy_stale(TRUE)
+    }, ignoreInit = TRUE)
+    shiny::observeEvent(baseline_hist_sim_rv(), policy_stale(FALSE))
 
     run <- function() {
       # REACT-02: one policy simulation at a time. The guard is owned by the
@@ -151,6 +197,11 @@ mod_3_06_policy_sim_server <- function(id,
 
       tryCatch(
         {
+          # INT-08: the signature is captured up front from the exact inputs
+          # this run consumes (scenario reactives are read again below); a
+          # signature built at publish time could record mid-run edits.
+          policy_sig <- .policy_sig_from_live(hs)
+
           svy_mod <- apply_policy_to_svy(
             svy,
             infra         = infra_scenario(),
@@ -319,6 +370,9 @@ mod_3_06_policy_sim_server <- function(id,
           # Every reactive value is written only now that the complete run
           # (simulation + decomposition) succeeded, so a failure anywhere
           # above leaves the previous results, diagnostics, and run ID intact.
+          # INT-08: the policy run signature is stored with both result arms.
+          baseline_out$.sig <- policy_sig
+          if (!is.null(pol_out$hist_sim)) pol_out$hist_sim$.sig <- policy_sig
           baseline_svy_rv(svy)
           policy_svy_rv(svy_mod)
           baseline_hist_sim_rv(baseline_out)
@@ -327,6 +381,7 @@ mod_3_06_policy_sim_server <- function(id,
           policy_saved_scenarios_rv(pol_out$saved_scenarios)
           decomp_rv(decomp)
           decomp_scenarios_rv(decomp_sc)
+          policy_stale(FALSE)
 
           sim_run_id(isolate(sim_run_id()) + 1L)
           if (length(decomp_sc_errors) > 0L) {
@@ -367,7 +422,8 @@ mod_3_06_policy_sim_server <- function(id,
       baseline_hist_sim        = baseline_hist_sim_rv,
       baseline_saved_scenarios = baseline_saved_scenarios_rv,
       policy_hist_sim          = policy_hist_sim_rv,
-      policy_saved_scenarios   = policy_saved_scenarios_rv
+      policy_saved_scenarios   = policy_saved_scenarios_rv,
+      stale                    = policy_stale
     )
   })
 }

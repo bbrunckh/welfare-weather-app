@@ -20,6 +20,9 @@ mod_2_02_results_ui <- function(id) {
 #' @noRd
 .results_content_ui <- function(ns, so) {
   tagList(
+    # ---- 0. Stale banner (INT-08) -------------------------------------------
+    shiny::uiOutput(ns("stale_banner")),
+
     # ---- 1. Results header -------------------------------------------------
     shiny::uiOutput(ns("results_header_ui")),
 
@@ -276,13 +279,19 @@ mod_2_02_results_server <- function(id,
                                      saved_scenarios,
                                      selected_hist,
                                      tabset_id,
-                                     tabset_session  = NULL,
-                                     residuals       = reactive("none"),
-                                     skip_coef_draws = reactive(FALSE)) {
+                                     tabset_session = NULL,
+                                     residuals = reactive("original"),
+                                     skip_coef_draws = reactive(FALSE),
+                                     stale = reactive(FALSE)) {
   moduleServer(id, function(input, output, session) {
     ns <- session$ns
 
     if (is.null(tabset_session)) tabset_session <- session$parent %||% session
+
+    # INT-08: stale banner above the results pane.
+    output$stale_banner <- renderUI({
+      if (isTRUE(stale())) .stale_banner("Step 2 simulation results") else NULL
+    })
 
     # ---- Lazy delta-method aggregation -------------------------------------
     # Replaces the eager compute_hist_agg / compute_scenario_agg path. Returns
@@ -1352,12 +1361,16 @@ mod_2_02_results_server <- function(id,
         return(DT::datatable(data.frame(Message = "Insufficient data"),
                              rownames = FALSE, class = "compact stripe",
                              options  = list(dom = "t")))
+      # INT-08: export is disabled while the results are stale - the table
+      # stays visible, the CSV button does not.
+      dt_buttons <- if (isTRUE(stale())) NULL else
+        list(list(extend = "csv", filename = "outcome_thresholds"))
       DT::datatable(
         df, rownames = FALSE, class = "compact stripe",
         options = list(
           pageLength = 15, dom = "Btip", ordering = list(list(2, "desc")),
           columnDefs = list(list(className = "dt-center", targets = "_all")),
-          buttons = list(list(extend = "csv", filename = "outcome_thresholds"))
+          buttons = dt_buttons
         ),
         extensions = "Buttons"
       )

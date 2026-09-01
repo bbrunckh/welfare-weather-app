@@ -59,6 +59,27 @@ test_that("label_lookup binds labels to a fixed variable frame", {
   expect_identical(.label_lookup(NULL)("tx"), "tx")
 })
 
+# ---- INT-08: run-signature canonicalisation ----------------------------------
+
+test_that("sig_plain makes independently-built values identical", {
+  df1 <- data.frame(name = c("a", "b"), flag = c(1L, 0L))
+  df2 <- data.frame(name = c("a", "b"), flag = c(1L, 0L))
+  expect_true(identical(.sig_plain(df1), .sig_plain(df2)))
+
+  lst1 <- list(x = 1, df = df1, sub = list("s", 2.5))
+  lst2 <- list(x = 1, df = df2, sub = list("s", 2.5))
+  expect_true(identical(.sig_plain(lst1), .sig_plain(lst2)))
+
+  # Differing content must differ
+  df3 <- df2
+  df3$flag <- c(1L, 1L)
+  expect_false(identical(.sig_plain(df1), .sig_plain(df3)))
+
+  # Atoms and NULL pass through
+  expect_identical(.sig_plain("ssp3_7_0"), "ssp3_7_0")
+  expect_null(.sig_plain(NULL))
+})
+
 
 test_that("busy guard admits one concurrent entry and refuses re-entry", {
   shiny::testServer(

@@ -30,6 +30,41 @@ info_popover <- function(..., title = NULL, docs = FALSE, placement = "right") {
   )
 }
 
+# ---- Run signatures & stale-state marking (INT-08) ---------------------------
+
+#' Canonicalise a value for identity comparison in a run signature.
+#'
+#' Data frames become lists of columns and nested lists recurse, so two
+#' independently-built signature components holding equal data compare
+#' `identical()` even when captured at different times.
+#' @noRd
+.sig_plain <- function(x) {
+  if (is.null(x) || is.atomic(x)) return(x)
+  if (is.data.frame(x)) return(lapply(x, .sig_plain))
+  if (is.list(x)) return(lapply(x, .sig_plain))
+  as.character(x)
+}
+
+#' Stale-results banner (INT-08).
+#'
+#' Rendered above a result surface while its run signature no longer matches
+#' the current upstream inputs. Results stay visible (they are expensive) but
+#' are explicitly labelled as describing an earlier configuration.
+#' @noRd
+.stale_banner <- function(step = NULL) {
+  step_txt <- if (!is.null(step)) paste0(" (", step, ")") else NULL
+  shiny::div(
+    class = "alert alert-warning",
+    role  = "alert",
+    style = "margin-bottom: 10px;",
+    shiny::tags$b("\u26a0 Results are out of date", step_txt, "."),
+    "Upstream inputs changed after this run, so the results below were",
+    "produced by an earlier configuration and no longer describe the",
+    "current selections. Re-run to refresh them; interpretation and",
+    "exports are disabled until then."
+  )
+}
+
 # ---- Dynamic-input selection restore (INT-01) -------------------------------
 
 #' Build a label-lookup function bound to a fixed variable-metadata frame

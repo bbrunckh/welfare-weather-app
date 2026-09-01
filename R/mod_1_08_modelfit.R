@@ -28,11 +28,17 @@ mod_1_08_modelfit_server <- function(id,
                                       model_fit,
                                       tabset_id,
                                       survey_weather,
+                                      fit_stale = reactive(FALSE),
                                       tabset_session = NULL) {
   moduleServer(id, function(input, output, session) {
     ns <- session$ns
 
     if (is.null(tabset_session)) tabset_session <- session$parent %||% session
+
+    # INT-08: stale banner bound to the fit's staleness flag.
+    output$fit_stale_banner <- shiny::renderUI({
+      if (isTRUE(fit_stale())) .stale_banner("Step 1 model diagnostics") else NULL
+    })
 
     # ---- Internal state -----------------------------------------------------
 
@@ -226,6 +232,7 @@ mod_1_08_modelfit_server <- function(id,
         shiny::tabPanel(
           title = "Model fit",
           value = "model_fit",
+          shiny::uiOutput(ns("fit_stale_banner")),
           shiny::h4(
             "Fit statistics",
             info_popover(

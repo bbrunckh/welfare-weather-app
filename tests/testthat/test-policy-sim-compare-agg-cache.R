@@ -173,6 +173,45 @@ test_that("Step 3 historical label comes from the run snapshot, not live selecti
   )
 })
 
+# ---- INT-08: stale banner on the Step 3 results pane -------------------------
+
+test_that("Step 3 results pane shows the stale banner while stale", {
+  skip_if_not_installed("shiny")
+
+  bh  <- shiny::reactiveVal(make_step3_hist_fixture())
+  ph  <- shiny::reactiveVal(make_step3_hist_fixture())
+  bsc <- shiny::reactiveVal(make_step3_scenarios_fixture())
+  psc <- shiny::reactiveVal(make_step3_scenarios_fixture())
+  stale_flag <- shiny::reactiveVal(FALSE)
+
+  shiny::testServer(
+    function(input, output, session) {
+      internals <<- .wire_results_pane(
+        input, output, session,
+        baseline_hist_sim        = bh,
+        baseline_saved_scenarios = bsc,
+        policy_hist_sim          = ph,
+        policy_saved_scenarios   = psc,
+        selected_hist            = shiny::reactiveVal(NULL),
+        residuals                = shiny::reactiveVal("none"),
+        stale                    = stale_flag
+      )
+      NULL
+    },
+    {
+      session$flushReact()
+      stale_flag(TRUE); session$flushReact()
+      html <- paste(as.character(session$output$stale_banner_ui), collapse = " ")
+      expect_match(html, "Results are out of date", fixed = TRUE)
+      expect_match(html, "Step 3 policy results", fixed = TRUE)
+
+      stale_flag(FALSE); session$flushReact()
+      html <- paste(as.character(session$output$stale_banner_ui), collapse = " ")
+      expect_identical(nchar(html), 0L)
+    }
+  )
+})
+
 test_that("Step 3 agg cache: deviation changes reuse cache; method/pov-line key entries", {
   skip_if_not_installed("shiny")
 

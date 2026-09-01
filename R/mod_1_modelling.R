@@ -177,6 +177,7 @@ mod_1_modelling_server <- function(id,
       selected_model   = s6$selected_model,
       run_model        = s6$run_model,
       fit_guard        = s6$fit_guard,
+      survey_version   = s2$survey_version,
       tabset_id        = "step1_output_tabs",
       tabset_session   = session
     )
@@ -190,6 +191,7 @@ mod_1_modelling_server <- function(id,
       model_fit        = s7$model_fit,
       tabset_id        = "step1_output_tabs",
       survey_weather   = s5$survey_weather,
+      fit_stale        = s7$stale,
       tabset_session   = session
     )
 
@@ -208,7 +210,11 @@ mod_1_modelling_server <- function(id,
       survey_data    = s2$survey_data,
       survey_weather = s5$survey_weather,
       model_fit      = s7$model_fit,
-      stored_breaks  = s5$stored_breaks
+      stored_breaks  = s5$stored_breaks,
+
+      # Provenance (INT-08)
+      survey_version = s2$survey_version,
+      fit_stale      = s7$stale
     )
   })
 }

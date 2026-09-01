@@ -200,9 +200,10 @@ policy_input_diagnostics <- function(baseline_svy, policy_svy, vars = NULL) {
 #' @noRd
 .results_pane_ui <- function(ns, so) {
   tagList(
-    shiny::uiOutput(ns("results_header_ui")),
-    shiny::wellPanel(
-      class = "results-controls",
+      shiny::uiOutput(ns("stale_banner_ui")),
+      shiny::uiOutput(ns("results_header_ui")),
+      shiny::wellPanel(
+        class = "results-controls",
       style = "padding: 10px 14px 6px 14px;",
       # Single compact row: outcome + uncertainty controls wrap as needed
       shiny::tags$div(
@@ -415,8 +416,14 @@ policy_input_diagnostics <- function(baseline_svy, policy_svy, vars = NULL) {
                                policy_hist_sim,
                                policy_saved_scenarios,
                                selected_hist,
-                               residuals = reactive("original")) {
+                               residuals = reactive("original"),
+                               stale = reactive(FALSE)) {
   ns <- session$ns
+
+  # INT-08: stale banner above the results pane.
+  output$stale_banner_ui <- shiny::renderUI({
+    if (isTRUE(stale())) .stale_banner("Step 3 policy results") else NULL
+  })
 
   # Resolve the residuals choice captured by the Step 2 run. The live control
   # is only a fallback for older in-memory result objects.
@@ -1133,7 +1140,9 @@ policy_input_diagnostics <- function(baseline_svy, policy_svy, vars = NULL) {
       options = list(
         pageLength = 30, dom = "Bt", ordering = list(list(2, "desc")),
         columnDefs = list(list(className = "dt-center", targets = "_all")),
-        buttons = list(list(extend = "csv", filename = "outcome_thresholds"))
+        # INT-08: export is disabled while the results are stale.
+        buttons = if (isTRUE(stale())) NULL else
+          list(list(extend = "csv", filename = "outcome_thresholds"))
       ),
       extensions = "Buttons"
     )

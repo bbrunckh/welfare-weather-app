@@ -41,7 +41,8 @@ mod_3_07_results_server <- function(id,
                                      sim_run_id     = reactive(0L),
                                      tabset_id,
                                      tabset_session = NULL,
-                                     residuals      = reactive("original")) {
+                                     residuals      = reactive("original"),
+                                     stale          = reactive(FALSE)) {
   moduleServer(id, function(input, output, session) {
     ns <- session$ns
     if (is.null(tabset_session)) {
@@ -62,7 +63,8 @@ mod_3_07_results_server <- function(id,
       policy_hist_sim          = policy_hist_sim,
       policy_saved_scenarios   = policy_saved_scenarios,
       selected_hist            = selected_hist,
-      residuals                = residuals
+      residuals                = residuals,
+      stale                    = stale
     )
 
     observeEvent(sim_run_id(), {

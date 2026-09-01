@@ -124,7 +124,9 @@ mod_3_scenario_server <- function(id,
                                    skip_coef_draws = reactive(FALSE),
                                    residuals       = reactive("original"),
                                    propagate_all_covariate_uncertainty =
-                                     reactive(FALSE)) {
+                                     reactive(FALSE),
+                                   survey_version  = reactive(0L),
+                                   sim_stale       = reactive(FALSE)) {
   moduleServer(id, function(input, output, session) {
     ns <- session$ns
 
@@ -231,7 +233,9 @@ mod_3_scenario_server <- function(id,
       analysis_unit     = analysis_unit,
       skip_coef_draws   = skip_coef_draws,
       residuals         = residuals,
-      propagate_all_covariate_uncertainty = propagate_all_covariate_uncertainty
+      propagate_all_covariate_uncertainty = propagate_all_covariate_uncertainty,
+      survey_version    = survey_version,
+      sim_stale         = sim_stale
     )
 
     # ---- Results tabs: Baseline & Policy (both re-simulated) -------------
@@ -245,7 +249,8 @@ mod_3_scenario_server <- function(id,
       sim_run_id               = s6$sim_run_id,
       tabset_id                = "step3_output_tabs",
       tabset_session           = session,
-      residuals                = residuals
+      residuals                = residuals,
+      stale                    = s6$stale
     )
 
     # ---- Diagnostics tab: before/after variable analysis ----------------

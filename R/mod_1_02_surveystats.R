@@ -79,6 +79,10 @@ mod_1_02_surveystats_server <- function(
     # ---- Data storage -------------------------------------------------------
 
     survey_data  <- reactiveVal(NULL)
+    # INT-08: bumped on every successful survey load; downstream run
+    # signatures include it so a reload invalidates fit/sim/policy results
+    # even when the selection string is unchanged.
+    survey_version <- shiny::reactiveVal(0L)
     map_data     <- reactiveVal(NULL)
     # Per-H3-cell counts behind the "Sample density" view of the same map,
     # recomputed for whichever wave the picker is on. Cheap: it is a regrouping
@@ -250,7 +254,8 @@ mod_1_02_surveystats_server <- function(
               dplyr::left_join(loc_keys, panel_map, by = c("code", "year", "survname", "loc_id")),
               by = c("code", "year", "survname", "loc_id")
             )
-          survey_data(df)
+      survey_data(df)
+      survey_version(survey_version() + 1L)
         }, error = function(e) {
           # INT-06: loc_id_panel is not a cosmetic join - downstream VCV
           # estimation falls back when it is missing, which changes inference.
@@ -492,9 +497,10 @@ mod_1_02_surveystats_server <- function(
     # ---- Return API ---------------------------------------------------------
 
     list(
-      survey_data = survey_data,
-      map_data    = map_data,
-      cell_data   = cell_data
+      survey_data    = survey_data,
+      map_data       = map_data,
+      cell_data      = cell_data,
+      survey_version = survey_version
     )
   })
 }

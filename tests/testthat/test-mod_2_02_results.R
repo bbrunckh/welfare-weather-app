@@ -116,6 +116,39 @@ test_that("agg cache: display-only controls do not invalidate unaffected methods
   )
 })
 
+# ---- INT-08: stale banner on the Step 2 results pane ------------------------
+
+test_that("Step 2 results pane shows the stale banner while stale", {
+  skip_if_not_installed("shiny")
+
+  hist_sim <- shiny::reactiveVal(make_hist_sim_fixture())
+  stale    <- shiny::reactiveVal(FALSE)
+
+  shiny::testServer(
+    mod_2_02_results_server,
+    args = list(
+      id              = "results",
+      hist_sim        = hist_sim,
+      saved_scenarios = shiny::reactiveVal(list()),
+      selected_hist   = shiny::reactiveVal(NULL),
+      tabset_id       = "step2_output_tabs",
+      stale           = stale
+    ),
+    {
+      settle <- function() { session$elapse(500); session$flushReact() }
+
+      stale(TRUE); settle()
+      html <- paste(as.character(session$output$stale_banner), collapse = " ")
+      expect_match(html, "Results are out of date", fixed = TRUE)
+      expect_match(html, "Step 2 simulation results", fixed = TRUE)
+
+      stale(FALSE); settle()
+      html <- paste(as.character(session$output$stale_banner), collapse = " ")
+      expect_identical(nchar(html), 0L)
+    }
+  )
+})
+
 # ---- INT-07: results tab follows the hist_sim lifecycle ---------------------
 
 test_that("results tab is appended, removed on clear, re-appended on rerun", {
