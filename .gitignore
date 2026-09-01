@@ -133,6 +133,10 @@
 !/**/images/**/*.svg
 !/**/inst/app/www/**/*.png
 !/**/inst/app/www/**/*.ico
+# DuckDB extension binaries: loaded at runtime on Posit Connect via
+# system.file() (R/fct_load_data.R); must be committed for the git-backed
+# deployment to work
+!/**/*.duckdb_extension
 
 #######################
 # Include all the files with passwords or tokens here. All files named
@@ -151,7 +155,6 @@ tokens/
 rsconnect/
 
 # Other
-inst/duckdb_extensions/
 .claude/settings.local.json
 .posit/
 .kilo/
