@@ -42,6 +42,10 @@
 #' @param bandwidth_p0 Numeric scalar. Kernel smoothing bandwidth for
 #'   \code{headcount_ratio}. Default 0.05 (log-welfare scale).
 #' @param seed Integer seed for stochastic residual modes.
+#' @param resid_lookup Optional pre-built ID-to-residual lookup from
+#'   \code{.residual_lookup()} (PERF-34). Built per call when NULL.
+#' @param resid_sigma2 Optional pre-built residual variance from
+#'   \code{.residual_sigma2()} (PERF-34). Computed per call when NULL.
 #'
 #' @return Named list:
 #'   \describe{
@@ -64,7 +68,9 @@ aggregate_with_uncertainty_delta <- function(y_point,
                                               is_log       = TRUE,
                                               band_q       = c(lo = 0.10, hi = 0.90),
                                               bandwidth_p0 = 0.05,
-                                              seed          = WISEAPP_DEFAULT_SEED) {
+                                              seed          = WISEAPP_DEFAULT_SEED,
+                                              resid_lookup  = NULL,
+                                              resid_sigma2  = NULL) {
 
   N <- length(y_point)
   stopifnot(is.numeric(y_point) && N > 0)
@@ -78,7 +84,8 @@ aggregate_with_uncertainty_delta <- function(y_point,
   }
 
   resid_vec <- draw_residuals_vec(
-    residuals, train_aug, N, id_vec, id_col, seed = seed
+    residuals, train_aug, N, id_vec, id_col, seed = seed,
+    resid_lookup = resid_lookup, resid_sigma2 = resid_sigma2
   )
   mu        <- if (is_log) exp(y_point + resid_vec) else y_point + resid_vec
 
@@ -102,9 +109,12 @@ aggregate_with_uncertainty_delta <- function(y_point,
   var_coef <- if (!is.null(F_agg)) sum(F_agg * F_agg) else 0
 
   # Residual variance (only for stochastic residual draws)
+  # PERF-34: reuse a caller-supplied variance; identical value to the
+  # per-call stats::var() this replaces.
   var_resid <- if (residuals %in% c("normal", "resample") &&
                    !is.null(train_aug) && ".resid" %in% names(train_aug)) {
-    sigma_e2 <- stats::var(train_aug$.resid, na.rm = TRUE)
+    sigma_e2 <- resid_sigma2 %||%
+      stats::var(train_aug$.resid, na.rm = TRUE)
     if (is.finite(sigma_e2)) sigma_e2 * sum(h * h, na.rm = TRUE) else 0
   } else 0
 
@@ -331,15 +341,15 @@ apply_band_transform <- function(method, value_pt, se, z_lo, z_hi) {
 #'   \code{sim_year} scalar.
 #' @export
 aggregate_pipeline_per_year <- function(pipe,
-                                        method,
-                                        weighted    = TRUE,
-                                        pov_line     = NULL,
-                                        residuals    = "original",
-                                        is_log       = TRUE,
-                                        band_q       = c(lo = 0.10, hi = 0.90),
-                                        skip_coef    = FALSE,
-                                        bandwidth_p0 = 0.05,
-                                        seed          = WISEAPP_DEFAULT_SEED) {
+                                         method,
+                                         weighted    = TRUE,
+                                         pov_line     = NULL,
+                                         residuals    = "original",
+                                         is_log       = TRUE,
+                                         band_q       = c(lo = 0.10, hi = 0.90),
+                                         skip_coef    = FALSE,
+                                         bandwidth_p0 = 0.05,
+                                         seed          = WISEAPP_DEFAULT_SEED) {
   if (is.null(pipe) || is.null(pipe$y_point)) return(list())
 
   yrs <- sort(unique(pipe$sim_year))
@@ -354,6 +364,11 @@ aggregate_pipeline_per_year <- function(pipe,
   res_mode <- residuals %||% "original"
   if (is.null(pipe$train_aug) && !identical(res_mode, "none"))
     res_mode <- "none"
+
+  # PERF-34: the ID-to-residual lookup and the residual variance are the
+  # same for every year of this pipeline - build them once, not per year.
+  lk  <- .residual_lookup(pipe$train_aug, pipe$id_col)
+  sg2 <- .residual_sigma2(pipe$train_aug)
 
   lapply(yrs, function(yr) {
     idx   <- pipe$sim_year == yr
@@ -375,7 +390,9 @@ aggregate_pipeline_per_year <- function(pipe,
       is_log       = is_log,
       band_q       = band_q,
       bandwidth_p0 = bandwidth_p0,
-      seed          = wise_seed(seed, "residual", yr)
+      seed          = wise_seed(seed, "residual", yr),
+      resid_lookup  = lk,
+      resid_sigma2  = sg2
     )
     m$sim_year <- yr
     m

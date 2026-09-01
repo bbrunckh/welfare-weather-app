@@ -187,6 +187,20 @@ mod_3_06_policy_sim_server <- function(id,
               # simulation, which was the dominant cost of every policy
               # adjustment.
               skip_coef_val <- isTRUE(skip_coef_draws())
+
+              # PERF-22: covariate deltas and the training-outcome ecdf are
+              # weather- and scenario-independent - every decompose_policy_
+              # effect() call below (historical + per scenario-year) would
+              # otherwise rebuild both. Compute once, pass through.
+              deltas_pre <- .compute_policy_deltas(
+                svy, svy_mod, hs$so$name, mf$weather_terms
+              )
+              F_hat_pre <- if (identical(mf$engine, "rif") &&
+                               !is.null(mf$train_data) &&
+                               hs$so$name %in% names(mf$train_data)) {
+                stats::ecdf(mf$train_data[[hs$so$name]])
+              } else NULL
+
               pol_out <- apply_policy_delta_to_baseline(
                 svy_baseline             = svy,
                 svy_policy               = svy_mod,
@@ -194,7 +208,9 @@ mod_3_06_policy_sim_server <- function(id,
                 so                       = hs$so,
                 hist_sim_baseline        = baseline_out,
                 saved_scenarios_baseline = baseline_scenarios_out,
-                skip_coef                = skip_coef_val
+                skip_coef                = skip_coef_val,
+                deltas                   = deltas_pre,
+                F_hat                    = F_hat_pre
               )
               if (is.null(pol_out)) {
                 stop("Policy simulation produced no results.", call. = FALSE)
@@ -210,7 +226,9 @@ mod_3_06_policy_sim_server <- function(id,
                 model_fit    = mf,
                 so           = hs$so,
                 weather_raw  = hs$weather_raw,
-                skip_coef    = skip_coef_val
+                skip_coef    = skip_coef_val,
+                deltas       = deltas_pre,
+                F_hat        = F_hat_pre
               )
               if (is.null(decomp)) {
                 stop("Effect decomposition produced no results.", call. = FALSE)
@@ -255,7 +273,9 @@ mod_3_06_policy_sim_server <- function(id,
                       model_fit    = mf,
                       so           = hs$so,
                       weather_raw  = w_yr,
-                      skip_coef    = skip_coef_val
+                      skip_coef    = skip_coef_val,
+                      deltas       = deltas_pre,
+                      F_hat        = F_hat_pre
                     ) |> dplyr::mutate(
                       scenario   = sc_label,
                       sim_year   = yr,

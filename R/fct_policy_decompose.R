@@ -82,6 +82,11 @@
 #' @param outcome Character, outcome variable name.
 #' @param is_log Logical, whether outcome is log-transformed.
 #' @param skip_coef Logical. When TRUE, all per-channel SEs are returned as 0.
+#' @param F_hat Optional pre-built empirical CDF of the training outcome
+#'   (\code{stats::ecdf(train_data[[outcome]])}). The ecdf is weather- and
+#'   policy-independent, so per-year/per-scenario callers can build it once
+#'   and pass it in instead of rebuilding it on every call (PERF-22). When
+#'   NULL it is computed here (backward compatible).
 #' @return Named list with delta_* and sd_* vectors of length n, plus
 #'   tau_i_pre / tau_i_post / has_interactions. NULL if inputs invalid.
 #' @keywords internal
@@ -89,7 +94,8 @@
                                   hazard_values, weather_vars,
                                   rif_grid, taus, train_data,
                                   outcome, is_log,
-                                  skip_coef = FALSE) {
+                                  skip_coef = FALSE,
+                                  F_hat     = NULL) {
   n <- nrow(svy_baseline)
 
   # Only use model 3 coefficients
@@ -116,7 +122,9 @@
   y_baseline <- if (is_log) log(pmax(y_raw, 1e-10)) else y_raw
 
   # Baseline quantile position via ecdf of training outcome
-  F_hat <- stats::ecdf(train_data[[outcome]])
+  # PERF-22: reuse a caller-supplied ecdf when available - it depends only
+  # on train_data and the outcome, never on weather or policy scenario.
+  F_hat <- F_hat %||% stats::ecdf(train_data[[outcome]])
   tau_i_pre <- pmin(pmax(F_hat(y_baseline), min(taus)), max(taus))
 
   # --- Main effect: SP cash (log-scale) ---
@@ -357,20 +365,27 @@
 #'   (`model_fit$train_data`).
 #' @param outcome      Character outcome variable name.
 #' @param is_log       Logical; whether the outcome is log-transformed.
+#' @param deltas       Optional pre-computed covariate deltas from
+#'   `.compute_policy_deltas()`. The deltas are weather- and period-
+#'   independent, so per-year/per-scenario callers can compute them once and
+#'   pass them in (PERF-22). When NULL they are computed here.
+#' @param F_hat        Optional pre-built ecdf of the training outcome (see
+#'   `.compute_rif_channels()`). When NULL it is computed here.
 #' @return Numeric vector of length `nrow(svy_baseline)` giving delta_total
 #'   in model scale, or NULL if any required input is missing.
 #' @keywords internal
 .compute_rif_policy_correction <- function(svy_baseline, svy_policy,
                                            weather_raw, weather_cols,
                                            rif_grid, taus, train_data,
-                                           outcome, is_log) {
+                                           outcome, is_log,
+                                           deltas = NULL, F_hat = NULL) {
   if (is.null(svy_baseline) || is.null(svy_policy) ||
       is.null(rif_grid) || is.null(taus) || is.null(train_data) ||
       length(weather_cols) == 0L) return(NULL)
 
   n <- nrow(svy_baseline)
-  deltas      <- .compute_policy_deltas(svy_baseline, svy_policy,
-                                        outcome, weather_cols)
+  deltas      <- deltas %||% .compute_policy_deltas(svy_baseline, svy_policy,
+                                                    outcome, weather_cols)
   sp_transfer <- if (SP_TRANSFER_COL %in% names(svy_policy)) {
     svy_policy[[SP_TRANSFER_COL]]
   } else rep(0, n)
@@ -390,7 +405,8 @@
     is_log        = is_log,
     # SEs are not propagated into y_point; the sim pipeline expresses
     # uncertainty through coefficient draws / F_loading, not channel SDs.
-    skip_coef     = TRUE
+    skip_coef     = TRUE,
+    F_hat         = F_hat
   )
   if (is.null(channels)) return(NULL)
   channels$delta_total
@@ -418,6 +434,14 @@
 #' @param skip_coef Logical. When TRUE, per-channel analytic standard errors
 #'   are forced to 0 (use this when the user has turned coefficient
 #'   uncertainty off in Step 2). Default FALSE.
+#' @param deltas Optional pre-computed covariate deltas from
+#'   `.compute_policy_deltas()`. The deltas depend only on the baseline and
+#'   policy surveys - never on the weather panel - so per-year/per-scenario
+#'   callers can compute them once and pass them in (PERF-22). When NULL
+#'   they are computed here (backward compatible).
+#' @param F_hat Optional pre-built empirical CDF of the training outcome
+#'   (RIF path only; see `.compute_rif_channels()`). When NULL it is
+#'   computed here.
 #'
 #' @return A data frame with one row per household and decomposition columns,
 #'   or NULL if decomposition is not possible.
@@ -427,7 +451,9 @@ decompose_policy_effect <- function(svy_baseline,
                                     model_fit,
                                     so,
                                     weather_raw = NULL,
-                                    skip_coef = FALSE) {
+                                    skip_coef = FALSE,
+                                    deltas    = NULL,
+                                    F_hat     = NULL) {
   if (is.null(svy_baseline) || is.null(svy_policy) || is.null(model_fit)) {
     return(NULL)
   }
@@ -446,7 +472,9 @@ decompose_policy_effect <- function(svy_baseline,
   hazard_values <- .compute_hazard_values(svy_baseline, weather_raw, weather_vars)
 
   # Compute covariate deltas using shared helper
-  deltas <- .compute_policy_deltas(svy_baseline, svy_policy, outcome, weather_vars)
+  # PERF-22: accept a caller-supplied, weather-independent delta list.
+  deltas <- deltas %||% .compute_policy_deltas(svy_baseline, svy_policy,
+                                               outcome, weather_vars)
 
   # SP transfer component
   sp_transfer <- if (SP_TRANSFER_COL %in% names(svy_policy)) {
@@ -457,7 +485,8 @@ decompose_policy_effect <- function(svy_baseline,
 
   if (engine == "rif") {
     .decompose_rif(svy_baseline, model_fit, so, deltas, sp_transfer,
-                   hazard_values, weather_vars, n, skip_coef = skip_coef)
+                   hazard_values, weather_vars, n, skip_coef = skip_coef,
+                   F_hat = F_hat)
   } else {
     .decompose_ols(svy_baseline, model_fit, so, deltas, sp_transfer,
                    hazard_values, weather_vars, n, skip_coef = skip_coef)
@@ -471,7 +500,7 @@ decompose_policy_effect <- function(svy_baseline,
 
 .decompose_rif <- function(svy_baseline, model_fit, so, deltas, sp_transfer,
                            hazard_values, weather_vars, n,
-                           skip_coef = FALSE) {
+                           skip_coef = FALSE, F_hat = NULL) {
   outcome    <- so$name
   is_log     <- isTRUE(so$transform == "log")
   rif_grid   <- model_fit$rif_grid
@@ -492,7 +521,8 @@ decompose_policy_effect <- function(svy_baseline,
     train_data    = train_data,
     outcome       = outcome,
     is_log        = is_log,
-    skip_coef     = skip_coef
+    skip_coef     = skip_coef,
+    F_hat         = F_hat
   )
   if (is.null(channels)) return(NULL)
 

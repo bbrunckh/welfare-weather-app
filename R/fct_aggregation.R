@@ -149,6 +149,44 @@ resolve_agg_fn <- function(method) {
 # Residual drawing helper                                                       #
 # ---------------------------------------------------------------------------- #
 
+#' Build the ID-to-residual named lookup for the "original" residual mode
+#'
+#' PERF-34: the lookup is identical for every year/method/weighting
+#' combination over the same pipeline, so callers can build it once per
+#' pipeline and pass it through instead of rebuilding the named vector and
+#' character keys on every `draw_residuals_vec()` call. Returns NULL when
+#' the inputs cannot support it (callers then compute internally).
+#'
+#' @param train_aug Data frame with `.resid` column.
+#' @param id_col    Character name of the ID column.
+#' @return Named numeric vector, or NULL.
+#' @noRd
+.residual_lookup <- function(train_aug, id_col) {
+  if (is.null(train_aug) || !".resid" %in% names(train_aug) ||
+      is.null(id_col) || !id_col %in% names(train_aug)) {
+    NULL
+  } else {
+    stats::setNames(train_aug$.resid, train_aug[[id_col]])
+  }
+}
+
+#' Residual variance of the training augmentation
+#'
+#' PERF-34 companion: `var(train_aug$.resid)` is rebuilt by every aggregate
+#' call; build it once per pipeline alongside `.residual_lookup()`. NULL
+#' when unavailable.
+#'
+#' @param train_aug Data frame with `.resid` column.
+#' @return Numeric scalar, or NULL.
+#' @noRd
+.residual_sigma2 <- function(train_aug) {
+  if (is.null(train_aug) || !".resid" %in% names(train_aug)) {
+    NULL
+  } else {
+    stats::var(train_aug$.resid, na.rm = TRUE)
+  }
+}
+
 #' Draw a Residual Vector for Welfare Simulation
 #'
 #' Draws a length-N residual vector for addition to log-scale welfare
@@ -166,6 +204,10 @@ resolve_agg_fn <- function(method) {
 #'   in simulation newdata for \code{residuals = "original"} matching.
 #' @param id_col Optional character. Name of the ID column in \code{train_aug}.
 #' @param seed Integer seed for stochastic residual modes.
+#' @param resid_lookup Optional pre-built named residual vector from
+#'   \code{.residual_lookup()} (PERF-34). When NULL it is built here.
+#' @param resid_sigma2 Optional pre-built residual variance from
+#'   \code{.residual_sigma2()} (PERF-34). When NULL it is computed here.
 #'
 #' @return Numeric vector of length N. Zero vector when
 #'   \code{residuals = "none"}.
@@ -176,7 +218,9 @@ draw_residuals_vec <- function(residuals,
                                N,
                                id_vec  = NULL,
                                id_col  = NULL,
-                               seed    = WISEAPP_DEFAULT_SEED) {
+                               seed    = WISEAPP_DEFAULT_SEED,
+                               resid_lookup = NULL,
+                               resid_sigma2 = NULL) {
   switch(residuals,
 
     none = rep(0, N),
@@ -192,7 +236,8 @@ draw_residuals_vec <- function(residuals,
       # Match simulation households to their training residuals by ID.
       # Unmatched households use a stable hash-indexed lookup so the fallback
       # neither depends on caller RNG state nor consumes the global stream.
-      resid_lookup <- stats::setNames(train_aug$.resid, train_aug[[id_col]])
+      # PERF-34: the lookup may be supplied pre-built by the pipeline owner.
+      resid_lookup <- resid_lookup %||% .residual_lookup(train_aug, id_col)
       matched      <- as.character(id_vec) %in% names(resid_lookup)
 
       out <- numeric(N)
@@ -208,7 +253,10 @@ draw_residuals_vec <- function(residuals,
     normal = {
       if (is.null(train_aug) || !".resid" %in% names(train_aug))
         stop("[draw_residuals_vec] train_aug with .resid required for residuals = 'normal'.")
-      sigma_hat <- stats::sd(train_aug$.resid, na.rm = TRUE)
+      # sd(x) is sqrt(var(x)) in R, so sqrt of a cached var() is bit-identical
+      # to the per-call stats::sd() this replaces (PERF-34).
+      sigma_hat <- if (!is.null(resid_sigma2)) sqrt(resid_sigma2)
+                   else stats::sd(train_aug$.resid, na.rm = TRUE)
       withr::with_seed(seed, stats::rnorm(N, mean = 0, sd = sigma_hat))
     },
 

@@ -318,7 +318,8 @@ mod_2_02_results_server <- function(id,
     .BANDWIDTH_METHODS  <- "headcount_ratio"
 
     .one_member_delta <- function(pipe, idx, method, weighted, pov_line,
-                                  band_q, is_log, seed, res_mode) {
+                                  band_q, is_log, seed, res_mode,
+                                  resid_lookup = NULL, resid_sigma2 = NULL) {
       # Some upstream paths can hand us F_loading as a length-K numeric
       # vector instead of a 1*K matrix (single-row residual / dropped dim).
       # Promote to matrix before any row-subset so the indexing below never
@@ -355,7 +356,9 @@ mod_2_02_results_server <- function(id,
         is_log       = is_log,
         band_q       = band_q,
         bandwidth_p0 = bandwidth_p0(),
-        seed          = seed
+        seed          = seed,
+        resid_lookup  = resid_lookup,
+        resid_sigma2  = resid_sigma2
       )
     }
 
@@ -400,13 +403,16 @@ mod_2_02_results_server <- function(id,
       yrs  <- sort(unique(pl$sim_year))
       bq   <- AGG_BAND_Q
       is_log <- isTRUE(ws$hs$so$transform == "log")
+      # PERF-34: residual lookup/variance are per-pipeline constants.
+      lk   <- .residual_lookup(pl$train_aug, pl$id_col)
+      sg2  <- .residual_sigma2(pl$train_aug)
       build_for <- function(weighted) {
         rows <- lapply(yrs, function(yr) {
           idx <- pl$sim_year == yr
           m   <- .one_member_delta(
             pl, idx, method, weighted, pl_v, bq, is_log,
             seed = wise_seed(WISEAPP_DEFAULT_SEED, "residual", yr),
-            res_mode = ws$res
+            res_mode = ws$res, resid_lookup = lk, resid_sigma2 = sg2
           )
           sd_yr <- sqrt((m$var_coef %||% 0) + (m$var_resid %||% 0))
           F_yr  <- m$F_agg
@@ -443,6 +449,9 @@ mod_2_02_results_server <- function(id,
         is_log <- isTRUE(s$so$transform == "log")
         yrs    <- sort(unique(pipes[[1L]]$sim_year))
         has_w  <- !is.null(pipes[[1L]]$weight)
+        # PERF-34: per-member lookup/variance, built once per member.
+        lk_s   <- lapply(pipes, function(pp) .residual_lookup(pp$train_aug, pp$id_col))
+        sg2_s  <- lapply(pipes, function(pp) .residual_sigma2(pp$train_aug))
         build_for <- function(weighted) {
           rows <- lapply(yrs, function(yr) {
             mod_ids <- names(pipes) %||% paste0("m", seq_along(pipes))
@@ -451,7 +460,8 @@ mod_2_02_results_server <- function(id,
               m   <- .one_member_delta(
                 pipes[[i]], idx, method, weighted, pl_v, bq, is_log,
                 seed = wise_seed(WISEAPP_DEFAULT_SEED, "residual", yr),
-                res_mode = ws$res
+                res_mode = ws$res, resid_lookup = lk_s[[i]],
+                resid_sigma2 = sg2_s[[i]]
               )
               if (is.null(m)) return(NULL)
               list(id = mod_ids[[i]], m = m)

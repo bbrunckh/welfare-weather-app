@@ -265,6 +265,7 @@ plot_interview_dates <- function(plot_data) {
 #'   `jsonlite::fromJSON` or assembled manually.
 #' @return A named list with `lng1`, `lat1`, `lng2`, `lat2`.
 #'
+#' @noRd
 .geojson_bounds <- function(geojson) {
   all_lng <- numeric()
   all_lat <- numeric()

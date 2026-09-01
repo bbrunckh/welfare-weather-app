@@ -895,6 +895,13 @@ resimulate_with_svy <- function(svy, sw, so, mf,
 #' @param skip_coef              Logical. Forwarded to
 #'   \code{decompose_policy_effect()} - when TRUE, per-channel SEs are zeroed
 #'   but \code{delta_total} is still computed.
+#' @param deltas                 Optional pre-computed covariate deltas from
+#'   \code{.compute_policy_deltas()} - weather-independent, so computed once
+#'   here and reused for every pipeline/scenario instead of per call
+#'   (PERF-22). Computed internally when NULL.
+#' @param F_hat                  Optional pre-built ecdf of the training
+#'   outcome (RIF path; see \code{.compute_rif_channels()}). Computed
+#'   internally when NULL.
 #'
 #' @return Named list with \code{hist_sim} and \code{saved_scenarios} on the
 #'   Step 2 schema, or \code{NULL} on failure.
@@ -905,10 +912,23 @@ apply_policy_delta_to_baseline <- function(svy_baseline,
                                             so,
                                             hist_sim_baseline,
                                             saved_scenarios_baseline = list(),
-                                            skip_coef = FALSE) {
+                                            skip_coef = FALSE,
+                                            deltas    = NULL,
+                                            F_hat     = NULL) {
   if (is.null(svy_baseline) || is.null(svy_policy) ||
       is.null(model_fit) || is.null(so) ||
       is.null(hist_sim_baseline)) return(NULL)
+
+  # PERF-22: both pieces are identical for every pipeline and scenario, so
+  # build them once instead of inside delta_for() per call.
+  deltas <- deltas %||% .compute_policy_deltas(
+    svy_baseline, svy_policy, so$name, model_fit$weather_terms
+  )
+  F_hat <- F_hat %||% (if (identical(model_fit$engine, "rif") &&
+                           !is.null(model_fit$train_data) &&
+                           so$name %in% names(model_fit$train_data)) {
+    stats::ecdf(model_fit$train_data[[so$name]])
+  } else NULL)
 
   # Per-HH delta_total for a given weather panel. Returns NULL when the
   # decomposition is unavailable (engine outside {rif, fixest}, missing
@@ -921,7 +941,9 @@ apply_policy_delta_to_baseline <- function(svy_baseline,
         model_fit    = model_fit,
         so           = so,
         weather_raw  = weather_raw,
-        skip_coef    = skip_coef
+        skip_coef    = skip_coef,
+        deltas       = deltas,
+        F_hat        = F_hat
       ),
       error = function(e) {
         warning("[apply_policy_delta_to_baseline] decompose_policy_effect() ",
