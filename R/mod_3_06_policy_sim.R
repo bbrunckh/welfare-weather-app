@@ -142,8 +142,6 @@ mod_3_06_policy_sim_server <- function(id,
 
       tryCatch(
         {
-          baseline_svy_rv(svy)
-
           svy_mod <- apply_policy_to_svy(
             svy,
             infra         = infra_scenario(),
@@ -155,7 +153,6 @@ mod_3_06_policy_sim_server <- function(id,
             analysis_unit = analysis_unit(),
             seed          = WISEAPP_DEFAULT_SEED
           )
-          policy_svy_rv(svy_mod)
 
           shiny::withProgress(
             message = "Re-running simulations for baseline and policy...",
@@ -169,13 +166,14 @@ mod_3_06_policy_sim_server <- function(id,
               # values Mod 2 shows. The Results pane and policy resimulation
               # both consume the Mod 2 schema ($pipeline for hist_sim,
               # $pipelines for each saved scenario), so no translation is
-              # required here.
+              # required here. (Held in locals — INT-09 publishes all state
+              # atomically at the end of a fully successful run.)
               res_choice <- hs$residuals %||% residuals() %||% "original"
               # Preserve the residual treatment captured by the Step 2 run.
               hs_for_baseline <- hs
               hs_for_baseline$residuals <- res_choice
-              baseline_hist_sim_rv(hs_for_baseline)
-              baseline_saved_scenarios_rv(ss %||% list())
+              baseline_out         <- hs_for_baseline
+              baseline_scenarios_out <- ss %||% list()
 
               shiny::setProgress(value = 0.6, detail = "Policy...")
               # Derive the policy arm from the baseline pipelines by adding
@@ -194,36 +192,37 @@ mod_3_06_policy_sim_server <- function(id,
                 svy_policy               = svy_mod,
                 model_fit                = mf,
                 so                       = hs$so,
-                hist_sim_baseline        = hs_for_baseline,
-                saved_scenarios_baseline = ss %||% list(),
+                hist_sim_baseline        = baseline_out,
+                saved_scenarios_baseline = baseline_scenarios_out,
                 skip_coef                = skip_coef_val
               )
-              if (!is.null(pol_out)) {
-                policy_hist_sim_rv(pol_out$hist_sim)
-                policy_saved_scenarios_rv(pol_out$saved_scenarios)
+              if (is.null(pol_out)) {
+                stop("Policy simulation produced no results.", call. = FALSE)
               }
 
-              # Decompose policy effects using HISTORICAL mean weather
+              # Decompose policy effects using HISTORICAL mean weather.
+              # REACT-05: a decomposition failure now fails the whole run
+              # instead of silently presenting the previous run as new.
               shiny::setProgress(value = 0.85, detail = "Decomposing effects...")
-              decomp <- tryCatch(
-                decompose_policy_effect(
-                  svy_baseline = svy,
-                  svy_policy   = policy_svy_rv(),
-                  model_fit    = mf,
-                  so           = hs$so,
-                  weather_raw  = hs$weather_raw,
-                  skip_coef    = skip_coef_val
-                ),
-                error = function(e) {
-                  warning("[mod_3_05] Decomposition failed: ", conditionMessage(e))
-                  NULL
-                }
+              decomp <- decompose_policy_effect(
+                svy_baseline = svy,
+                svy_policy   = svy_mod,
+                model_fit    = mf,
+                so           = hs$so,
+                weather_raw  = hs$weather_raw,
+                skip_coef    = skip_coef_val
               )
-              decomp_rv(decomp)
+              if (is.null(decomp)) {
+                stop("Effect decomposition produced no results.", call. = FALSE)
+              }
 
-              # Decompose per saved scenario × sim_year for year-to-year variation
+              # Decompose per saved scenario × sim_year for year-to-year
+              # variation. Per-year failures are collected: if every attempt
+              # fails the run fails; otherwise partial results are published
+              # with a warning naming the count of dropped pieces (INT-04).
               shiny::setProgress(value = 0.90, detail = "Decomposing scenario effects...")
               sc_list <- pol_out$saved_scenarios %||% list()
+              decomp_sc_errors <- character(0)
               decomp_sc <- lapply(seq_along(sc_list), function(i) {
                 sc       <- sc_list[[i]]
                 w_raw    <- sc$weather_raw
@@ -252,7 +251,7 @@ mod_3_06_policy_sim_server <- function(id,
                   tryCatch(
                     decompose_policy_effect(
                       svy_baseline = svy,
-                      svy_policy   = policy_svy_rv(),
+                      svy_policy   = svy_mod,
                       model_fit    = mf,
                       so           = hs$so,
                       weather_raw  = w_yr,
@@ -264,27 +263,58 @@ mod_3_06_policy_sim_server <- function(id,
                       year_end   = sc$year_range[[2]] %||% NA_integer_
                     ),
                     error = function(e) {
-                      warning("[mod_3_05] Year decomp failed for '", sc_label,
-                              "' yr ", yr, ": ", conditionMessage(e))
+                      decomp_sc_errors <<- c(decomp_sc_errors, paste0(
+                        sc_label, if (!is.na(yr)) paste0(" (", yr, ")"), ": ",
+                        conditionMessage(e)
+                      ))
                       NULL
                     }
                   )
                 })
                 dplyr::bind_rows(Filter(Negate(is.null), year_results))
               })
-              decomp_scenarios_rv(
-                dplyr::bind_rows(Filter(Negate(is.null), decomp_sc))
-              )
+              decomp_sc <- dplyr::bind_rows(Filter(Negate(is.null), decomp_sc))
+              if (length(decomp_sc_errors) > 0L && nrow(decomp_sc) == 0L) {
+                stop(
+                  "All scenario decompositions failed. First error: ",
+                  decomp_sc_errors[[1]],
+                  call. = FALSE
+                )
+              }
 
               shiny::setProgress(value = 1, detail = "Complete")
             }
           )
 
+          # -- Atomic publish (INT-09) -----------------------------------------
+          # Every reactive value is written only now that the complete run
+          # (simulation + decomposition) succeeded, so a failure anywhere
+          # above leaves the previous results, diagnostics, and run ID intact.
+          baseline_svy_rv(svy)
+          policy_svy_rv(svy_mod)
+          baseline_hist_sim_rv(baseline_out)
+          baseline_saved_scenarios_rv(baseline_scenarios_out)
+          policy_hist_sim_rv(pol_out$hist_sim)
+          policy_saved_scenarios_rv(pol_out$saved_scenarios)
+          decomp_rv(decomp)
+          decomp_scenarios_rv(decomp_sc)
+
           sim_run_id(isolate(sim_run_id()) + 1L)
-          shiny::showNotification(
-            "Policy adjustments applied and simulation re-run.",
-            type = "message", duration = 3
-          )
+          if (length(decomp_sc_errors) > 0L) {
+            shiny::showNotification(
+              paste0(
+                "Policy simulation succeeded, but ", length(decomp_sc_errors),
+                " scenario decomposition(s) failed and are omitted (first: ",
+                decomp_sc_errors[[1]], ")."
+              ),
+              type = "warning", duration = 10
+            )
+          } else {
+            shiny::showNotification(
+              "Policy adjustments applied and simulation re-run.",
+              type = "message", duration = 3
+            )
+          }
         },
         error = function(e) {
           sim_error(e)

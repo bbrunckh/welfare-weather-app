@@ -157,16 +157,22 @@ gradient_for_method <- function(method, mu, weights, pov_line, value_pt,
     },
 
     prosperity_gap = {
-      # Point estimate: mean(pmax(28/mu, 1)).
-      # d/d(log mu_i) pmax(28/mu_i, 1) = -28/mu_i * 1{mu_i < 28} * mu_i = -28 * 1{mu_i < 28}
-      # pov_line is ignored — threshold hardcoded to $28/day.
-      below28 <- as.numeric(is.finite(mu) & mu < 28)
+      # Point estimate: mean(pmax(28/mu, 1)); pov_line ignored — $28/day
+      # threshold hardcoded. With h = (dT/dwelfare) * welfare:
+      #   dT/dw_i = t_i * (-28/w_i^2) * 1{0 < w < 28},  t_i = 1/N or w_i/W,
+      # so h_i = -t_i * 28 / w_i below the threshold:
+      #   unweighted -28/(N * mu_i); weighted -(w_i/W) * 28/mu_i.
+      # Non-positive mu contributes zero (pmax(28/mu, 1) is flat there).
+      below28 <- is.finite(mu) & mu > 0 & mu < 28
       if (is.null(weights)) {
-        -w_tilde * 28 * below28 / N
+        h <- rep(0, N)
+        h[below28] <- -28 / (N * mu[below28])
       } else {
         W <- sum(weights, na.rm = TRUE)
-        if (W > 0) -(weights / W) * 28 * below28 else rep(0, N)
+        h <- rep(0, N)
+        if (W > 0) h[below28] <- -(weights[below28] / W) * 28 / mu[below28]
       }
+      h
     },
 
     fgt2 = {
@@ -193,18 +199,18 @@ gradient_for_method <- function(method, mu, weights, pov_line, value_pt,
     },
 
     avg_poverty = {
-      # Point estimate: mean(1 / mu), mu > 0.
-      # d/d(log mu_i) (1/mu_i) = -1/mu_i * mu_i = -1.
-      # Gradient: h_i = w_tilde_i * (-1) / sum(w), only for finite mu > 0.
-      # pov_line ignored.
+      # Point estimate: mean(1 / mu) over valid rows ("days needed to earn $1").
+      # With h = (dT/dwelfare) * welfare: dT/dw_i = -t_i / w_i^2 for w_i > 0,
+      # so h_i = -t_i / w_i, i.e. unweighted -1/(n_ok * mu_i) and weighted
+      # -w_i / (W_ok * mu_i). pov_line ignored.
       ok <- is.finite(mu) & mu > 0
       h  <- rep(0, N)
       if (is.null(weights)) {
         n_ok <- sum(ok)
-        if (n_ok > 0) h[ok] <- -w_tilde[ok] / n_ok
+        if (n_ok > 0) h[ok] <- -1 / (n_ok * mu[ok])
       } else {
-        W <- sum(weights[ok], na.rm = TRUE)
-        if (W > 0) h[ok] <- -(weights[ok] / W)
+        W_ok <- sum(weights[ok], na.rm = TRUE)
+        if (W_ok > 0) h[ok] <- -weights[ok] / (W_ok * mu[ok])
       }
       h
     },

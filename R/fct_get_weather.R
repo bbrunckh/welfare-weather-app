@@ -436,6 +436,20 @@ get_weather <- function(
   .duck_load_ext("h3")
   con <- .duck_con()
 
+  # -- Temp-table cleanup ledger (SEC-02) --------------------------------------
+  # DuckDB connections are process-wide, so materialised temp tables survive
+  # errors until the worker exits. Every table created below is registered here
+  # the moment it is created and dropped best-effort on function exit (happy
+  # path or error). Tables released early are removed from the ledger first;
+  # on.exit only runs after every relation has been collected, so no live lazy
+  # query can reference a dropped table when results are returned.
+  tmp_tables <- character(0)
+  on.exit({
+    for (tn in tmp_tables) {
+      try(DBI::dbRemoveTable(con, tn), silent = TRUE)
+    }
+  }, add = TRUE)
+
   weather <- load_data(weather_fnames, connection_params, collect = FALSE) |>
     dplyr::select(h3, timestamp, dplyr::all_of(weather_vars)) |>
     dplyr::filter(dplyr::if_all(dplyr::all_of(weather_vars), ~ !is.na(.x))) |>
@@ -521,6 +535,7 @@ get_weather <- function(
   # Name generated via tempfile() rather than sample() so this does not
   # consume/advance the caller's RNG stream (see DET-04).
   tmp_base_name <- basename(tempfile(pattern = "lw_base_"))
+  tmp_tables <- c(tmp_tables, tmp_base_name)
 
   loc_weather_base <- loc_monthly |>
     dplyr::mutate(!!!roll_exprs) |>
@@ -769,6 +784,7 @@ get_weather <- function(
         # Name generated via tempfile() rather than sample() so this does not
         # consume/advance the caller's RNG stream (see DET-04).
         tmp_delta_name <- basename(tempfile(pattern = "lw_delta_"))
+        tmp_tables <<- c(tmp_tables, tmp_delta_name)
         loc_deltas_by_model <- dplyr::compute(
           loc_deltas_by_model,
           name      = tmp_delta_name,
@@ -810,6 +826,7 @@ get_weather <- function(
         # Name generated via tempfile() rather than sample() so this does not
         # consume/advance the caller's RNG stream (see DET-04).
         tmp_perturb_name <- basename(tempfile(pattern = "lw_perturb_"))
+        tmp_tables <<- c(tmp_tables, tmp_perturb_name)
         tmp_delta_tables <- c(tmp_delta_tables, tmp_perturb_name)
 
         perturbed <- loc_monthly |>
@@ -848,10 +865,12 @@ get_weather <- function(
         out <- c(out, period_out)
       }
 
-      # Cleanup all materialised delta temp tables
+      # Cleanup all materialised delta temp tables (best-effort, early release;
+      # the on.exit ledger still covers any that fail to drop here)
       for (tdn in tmp_delta_tables) {
         try(DBI::dbRemoveTable(dbplyr::remote_con(loc_deltas_by_model), tdn), silent = TRUE)
       }
+      tmp_tables <<- setdiff(tmp_tables, tmp_delta_tables)
       out
     }
 
@@ -859,9 +878,12 @@ get_weather <- function(
     result <- c(result, do.call(c, lapply(ssp, .process_ssp)))
   }
 
-  # -- Cleanup base temp table -----------------------------------------------
-  con_cleanup <- dbplyr::remote_con(loc_weather_base)
-  DBI::dbRemoveTable(con_cleanup, tmp_base_name)
+  # -- Cleanup base temp table (best-effort; on.exit ledger is the backstop) --
+  try(
+    DBI::dbRemoveTable(dbplyr::remote_con(loc_weather_base), tmp_base_name),
+    silent = TRUE
+  )
+  tmp_tables <- setdiff(tmp_tables, tmp_base_name)
 
   # Attach computed breaks so the caller can reuse them in subsequent calls
   if (has_binning && !is.null(stored_breaks)) {

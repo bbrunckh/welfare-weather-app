@@ -80,9 +80,12 @@ collect_deterministic <- function(data, keys = NULL) {
 
 #' Install and load a DuckDB extension exactly once per process.
 #'
-#' On Posit Connect, fetches the binary from Databricks Files API to bypass
-#' the unavailable extensions.duckdb.org endpoint. Locally, uses the standard
-#' DuckDB INSTALL mechanism.
+#' On Posit Connect, uses a binary bundled with the package (the public
+#' extensions.duckdb.org endpoint is unreachable there) and fails fast when the
+#' required bundle is absent. Locally, uses the standard DuckDB INSTALL
+#' mechanism. The extension is recorded as loaded only after a successful
+#' LOAD, so a failed load is retried on the next call instead of being
+#' permanently cached.
 #'
 #' @param ext        Extension name e.g. "httpfs", "spatial", "h3".
 #' @param db_token   Bearer token — only required on Posit Connect.
@@ -110,10 +113,17 @@ collect_deterministic <- function(data, keys = NULL) {
       )
     }
 
-    if (nzchar(bundled)) {
-      DBI::dbExecute(con, sprintf("INSTALL '%s';", bundled))
-      DBI::dbExecute(con, sprintf("LOAD '%s';",    ext))
-    } 
+    if (!nzchar(bundled)) stop(
+      "DuckDB extension '", ext, "' is not bundled with this deployment ",
+      "(expected inst/duckdb_extensions/", ext, ".duckdb_extension.gz). ",
+      "Posit Connect cannot reach the public extension repository, so every ",
+      "required extension binary must ship with the package (see the ",
+      "git-backed deployment notes in dev/03_deploy.R).",
+      call. = FALSE
+    )
+
+    DBI::dbExecute(con, sprintf("INSTALL '%s';", bundled))
+    DBI::dbExecute(con, sprintf("LOAD '%s';",    ext))
 
   } else {
     # Local: load from cache, otherwise install from network if missing

@@ -235,30 +235,26 @@ FGT(2) penalises the depth of poverty quadratically. The squared term yields a c
 ### 3.6 Prosperity gap (`"prosperity_gap"`)
 
 ```
-T = Σ w̃_i · max(z_p − μ_i, 0)
-h_i = − w̃_i · μ_i · 1{μ_i < z_p}
+T = Σ w̃_i · max(28 / μ_i, 1)
+∂T/∂μ_i = −w̃_i · 28 / μ_i² · 1{0 < μ_i < 28}
+h_i     = − w̃_i · 28 / μ_i · 1{0 < μ_i < 28}
 SE  = || F_loading' h ||,  identity scale
 ```
 
-Same form as `gap` but unnormalised — reports the average dollar shortfall below the prosperity line. Identity-scale band because the support is `[0, z_p · Σ w]`, not `[0, 1]`.
+Average factor by which incomes must be multiplied to reach $28/day (threshold hardcoded — `pov_line` is ignored). Above the threshold the functional is flat (`h_i = 0`), as it is for non-positive `μ_i`. Identity-scale band because the support is `[1, ∞)`, not `[0, 1]`.
 
-### 3.7 Average welfare among poor (`"avg_poverty"`)
-
-```
-T = Σ_{i: μ_i < z_p} w̃_i μ_i  /  Σ_{i: μ_i < z_p} w̃_i  =  N(μ) / B
-```
-
-Quotient functional. Let `N(μ) = Σ w̃_i 1{μ_i < z_p} μ_i` and `B = Σ w̃_i 1{μ_i < z_p}`. Holding the poverty indicator fixed under infinitesimal β-perturbation (a measure-zero discontinuity for non-pathological μ), `B` has no dependence on `μ_j` and
+### 3.7 Average poverty — days needed to earn $1 (`"avg_poverty"`)
 
 ```
-∂T/∂μ_j = (w̃_j · 1{μ_j < z_p}) / B
-h_j     = (w̃_j · 1{μ_j < z_p}) · μ_j / B
-SE      = || F_loading' h ||,  identity scale
+T = Σ w̃_i / μ_i      (over valid rows: μ_i finite and > 0)
+∂T/∂μ_i = −w̃_i / μ_i²
+h_i     = − w̃_i / μ_i
+SE  = || F_loading' h ||,  identity scale
 ```
 
-Falls back to `h = 0` when no households are poor (`B = 0`). For every poor household `h_j ≥ 0`: lifting any poor household's welfare raises the conditional mean, which is the correct direction.
+With equal weights this is `h_i = −1/(n_ok · μ_i)`; with weights, `h_i = −w_i / (W_ok · μ_i)` where `W_ok = Σ_{valid} w_i`. Valid rows are those with finite positive welfare; invalid rows get `h = 0`, and the fallback is `h = 0` when no rows are valid. For every valid household `h_i < 0`: raising welfare lowers the days needed to earn $1, which is the correct direction.
 
-**Why this is *not* the influence-function form.** A previous version of this document used `h_j = (w̃_j / B) · 1{μ_j < z_p} · (μ_j − T) · μ_j`. The `(μ_j − T)` factor is part of the *empirical influence function* of T (the leave-one-out / sample-variance object). It is the right tool for estimating the sample variance of `T` from the data themselves, but the wrong object for the delta method, which propagates parametric β-uncertainty through `μ_i(β)`. Including the `(μ_j − T)` factor flips the sign of `h_j` for the very poorest households (where `μ_j < T`), which would mean that lifting *their* welfare *lowers* the conditional mean of the poor — a clearly incorrect direction. The same partial-vs-IF distinction appears for Gini (§3.9, *"the Monti IF is the right object for sample-variance estimation of the Gini, but applying it in the chain rule through μ_i = exp(x_i' β) overstates the variance"*); `avg_poverty` now follows the same convention.
+**Why this is *not* the influence-function form.** The `(μ_i − T)` factor of the *empirical influence function* is the right tool for estimating the sample variance of `T` from the data themselves, but the wrong object for the delta method, which propagates parametric β-uncertainty through `μ_i(β)`. The same partial-vs-IF distinction appears for Gini (§3.9, *"the Monti IF is the right object for sample-variance estimation of the Gini, but applying it in the chain rule through μ_i = exp(x_i' β) overstates the variance"*); `avg_poverty` follows the same convention. (Earlier revisions of this section described a conditional "mean welfare among the poor" functional; the shipped metric has been `mean(1 / welfare)` since the LCU-poverty-line rework, and an intermediate gradient that dropped the `1/μ_i` chain-rule factor was corrected in 2026-09.)
 
 ### 3.8 Median (`"median"`)
 
