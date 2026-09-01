@@ -39,9 +39,6 @@ golem::add_shinyserver_file()
 
 ## Deploy to Posit Connect or ShinyApps.io ----
 
-## Add/update manifest file (optional; for Git backed deployment on Posit )
-rsconnect::writeManifest()
-
 ## In command line.
 rsconnect::deployApp(
 	appName = desc::desc_get_field("Package"),
@@ -59,3 +56,28 @@ rsconnect::deployApp(
 	lint = FALSE,
 	forceUpdate = TRUE
 )
+
+## Posit Connect, git-backed ----
+## Connect pulls straight from this GitHub repo (poll or "Update Now") rather
+## than a push-button rsconnect::deployApp() bundle. That path requires a
+## manifest.json committed at the repo root (app.R runs via pkgload::load_all(),
+## not library(), since wiseapp is never installed into Connect's library).
+## Re-run this and commit the diff whenever dependencies or the shipped file
+## set change:
+rsconnect::writeManifest(
+  appDir = ".",
+  appFiles = c("app.R", "R", "inst", "man", "DESCRIPTION", "NAMESPACE"),
+  appPrimaryDoc = "app.R"
+)
+
+## IMPORTANT: the line above WILL re-add "sf" to manifest.json. {leaflet}
+## hard-Imports sf (>= 0.9-6) on CRAN -- a real transitive dependency, not
+## something .rscignore can hide -- and the Connect host cannot build sf. The
+## app itself never touches {sf} at runtime (only batch/, which is excluded
+## from appFiles, uses it), so sf is never actually loaded; Connect's install
+## step just needs to not attempt it. After every writeManifest() run,
+## re-strip it:
+m <- jsonlite::fromJSON("manifest.json", simplifyVector = FALSE)
+m$packages[["sf"]] <- NULL
+jsonlite::write_json(m, "manifest.json", auto_unbox = TRUE, pretty = TRUE, null = "null")
+## Verify before committing: grep -c '"sf":' manifest.json  ->  should be 0
