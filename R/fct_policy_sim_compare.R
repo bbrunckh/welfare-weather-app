@@ -483,6 +483,34 @@ policy_input_diagnostics <- function(baseline_svy, policy_svy, vars = NULL) {
     nms[keep]
   })
 
+  # ---- PERF-31: per-method aggregation cache -------------------------------
+  # Aggregating baseline/policy hist + every scenario member is expensive and
+  # depends only on (source, aggregation method, poverty line). `cmp_deviation`
+  # is applied downstream (hist_ref subtraction in the row builders + axis
+  # labels), so it must NOT be part of the key - moving the deviation control
+  # used to destroy the entire cache and re-aggregate everything.
+  #
+  # Invalidation: a fresh cache environment is created whenever any underlying
+  # simulation object changes (publishes are atomic - INT-09/REACT-12), so
+  # stale entries can never be served. Residual mode is part of the source
+  # identity (it is snapshotted per run on the sim objects themselves).
+  agg_cache_ws <- reactive({
+    baseline_hist_sim(); policy_hist_sim()
+    baseline_saved_scenarios(); policy_saved_scenarios()
+    new.env(parent = emptyenv())
+  })
+  .agg_cache_key <- function(tag, method, pov_line) {
+    paste(tag, method, format(pov_line), sep = "\r")
+  }
+
+  agg_axis_label <- reactive({
+    method    <- input$cmp_agg_method %||% "mean"
+    deviation <- input$cmp_deviation  %||% "none"
+    if (identical(deviation, "none")) label_agg_method(method)
+    else paste0(label_agg_method(method), " \u2014 ",
+                label_deviation(deviation))
+  })
+
   # Helper: aggregate hist_sim into Mod 2's rich list-col schema
   # (one row per sim_year, list-cols value_all / value_all_sd / model_id,
   # plus scalar var_within / var_across). This lets us reuse Mod 2's
@@ -491,12 +519,15 @@ policy_input_diagnostics <- function(baseline_svy, policy_svy, vars = NULL) {
   # Both baseline (Mod 2 hist_sim, passed verbatim) and policy (re-simulated
   # by resimulate_with_svy) wrap their single historical run under $pipeline
   # - read it once here so the downstream code paths are identical.
-  make_agg_hist <- function(hs) {
+  make_agg_hist <- function(hs, tag) {
     if (is.null(hs)) return(NULL)
     pl <- hs$pipeline
     if (is.null(pl) || is.null(pl$y_point)) return(NULL)
     method    <- input$cmp_agg_method %||% "mean"
-    deviation <- input$cmp_deviation  %||% "none"
+
+    ws <- agg_cache_ws()
+    hit <- get0(.agg_cache_key(tag, method, pov_line_val()), envir = ws)
+    if (!is.null(hit)) return(hit)
 
     is_log <- isTRUE(hs$so$transform == "log")
     bq     <- c(lo = 0.10, hi = 0.90)
@@ -524,10 +555,9 @@ policy_input_diagnostics <- function(baseline_svy, policy_svy, vars = NULL) {
       )
     })
     agg <- dplyr::bind_rows(rows)
-    x_label <- if (identical(deviation, "none")) label_agg_method(method)
-               else paste0(label_agg_method(method), " \u2014 ",
-                           label_deviation(deviation))
-    list(out = agg, x_label = x_label)
+    res <- list(out = agg)
+    assign(.agg_cache_key(tag, method, pov_line_val()), res, envir = ws)
+    res
   }
 
   # Helper: build agg per saved scenario in Mod 2 schema. Each `s$pipelines`
@@ -561,14 +591,14 @@ policy_input_diagnostics <- function(baseline_svy, policy_svy, vars = NULL) {
     )
   }
 
-  make_agg_scenarios <- function(sc, hs_for_dev) {
+  make_agg_scenarios <- function(sc, hs_for_dev, tag) {
     if (length(sc) == 0) return(list())
     method    <- input$cmp_agg_method %||% "mean"
-    deviation <- input$cmp_deviation  %||% "none"
     use_w     <- TRUE
-    x_label   <- if (identical(deviation, "none")) label_agg_method(method)
-                 else paste0(label_agg_method(method), " \u2014 ",
-                             label_deviation(deviation))
+
+    ws <- agg_cache_ws()
+    hit <- get0(.agg_cache_key(tag, method, pov_line_val()), envir = ws)
+    if (!is.null(hit)) return(hit)
 
     failed <- character(0)
     res <- lapply(seq_along(sc), function(i) {
@@ -626,7 +656,7 @@ policy_input_diagnostics <- function(baseline_svy, policy_svy, vars = NULL) {
         })
         combined <- dplyr::bind_rows(Filter(Negate(is.null), per_year_rows))
         if (nrow(combined) == 0L) return(NULL)
-        list(out = combined, x_label = x_label)
+        list(out = combined)
       }, error = function(e) {
         nm <- s$scenario_name %||% names(sc)[i]
         if (is.null(nm) || is.na(nm)) nm <- paste0("scenario_", i)
@@ -635,25 +665,28 @@ policy_input_diagnostics <- function(baseline_svy, policy_svy, vars = NULL) {
       })
     })
     .notify_agg_failures(failed, length(sc))
+    assign(.agg_cache_key(tag, method, pov_line_val()), res, envir = ws)
     res
   }
 
   baseline_agg_hist <- reactive({
     req(baseline_hist_sim())
-    make_agg_hist(baseline_hist_sim())
+    make_agg_hist(baseline_hist_sim(), "baseline_hist")
   })
   policy_agg_hist <- reactive({
     req(policy_hist_sim())
-    make_agg_hist(policy_hist_sim())
+    make_agg_hist(policy_hist_sim(), "policy_hist")
   })
 
   baseline_agg_scenarios <- reactive({
     req(baseline_hist_sim())
-    make_agg_scenarios(baseline_saved_scenarios(), baseline_hist_sim())
+    make_agg_scenarios(baseline_saved_scenarios(), baseline_hist_sim(),
+                       "baseline_scn")
   })
   policy_agg_scenarios <- reactive({
     req(policy_hist_sim())
-    make_agg_scenarios(policy_saved_scenarios(), policy_hist_sim())
+    make_agg_scenarios(policy_saved_scenarios(), policy_hist_sim(),
+                       "policy_scn")
   })
 
   baseline_all_series <- reactive({
@@ -970,7 +1003,7 @@ policy_input_diagnostics <- function(baseline_svy, policy_svy, vars = NULL) {
   table_subtitle <- reactive({
     req(baseline_agg_hist(), input$cmp_agg_method, input$cmp_deviation)
     paste0(
-      baseline_agg_hist()$x_label, " - ",
+      agg_axis_label(), " - ",
       label_agg_method(input$cmp_agg_method), " | ",
       label_deviation(input$cmp_deviation)
     )
@@ -1058,7 +1091,7 @@ policy_input_diagnostics <- function(baseline_svy, policy_svy, vars = NULL) {
     }
     plot_pointrange_climate(
       bands_tbl   = bands,
-      x_label     = baseline_agg_hist()$x_label,
+      x_label     = agg_axis_label(),
       group_order = input$cmp_group_order %||% "scenario_x_year",
       show_coef   = isTRUE(input$show_coef_uncertainty) && has_draws()
     )
@@ -1124,7 +1157,7 @@ policy_input_diagnostics <- function(baseline_svy, policy_svy, vars = NULL) {
     else c(lo = 0.5, hi = 0.5)
     enhance_exceedance(
       curves_tbl      = exceedance_curves_rv(),
-      x_label         = baseline_agg_hist()$x_label,
+      x_label         = agg_axis_label(),
       return_period   = isTRUE(input$show_return_period),
       n_sim_years     = nrow(baseline_agg_hist()$out),
       logit_x         = isTRUE(input$exceedance_logit_x),
@@ -1143,7 +1176,7 @@ policy_input_diagnostics <- function(baseline_svy, policy_svy, vars = NULL) {
     else c(lo = 0.5, hi = 0.5)
     plot_timeseries_spaghetti(
       ts_tbl          = timeseries_curves_rv(),
-      x_label         = baseline_agg_hist()$x_label,
+      x_label         = agg_axis_label(),
       ensemble_band_q = ens_q
     )
   })
@@ -1161,5 +1194,11 @@ policy_input_diagnostics <- function(baseline_svy, policy_svy, vars = NULL) {
     )
   })
 
-  invisible(NULL)
+  # Invisibly expose the aggregation internals for regression tests
+  # (test-policy-sim-compare-agg-cache.R).
+  invisible(list(
+    baseline_agg_hist      = baseline_agg_hist,
+    baseline_agg_scenarios = baseline_agg_scenarios,
+    agg_cache_ws           = agg_cache_ws
+  ))
 }
