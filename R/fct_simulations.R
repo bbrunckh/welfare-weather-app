@@ -670,33 +670,47 @@ run_sim_pipeline <- function(weather_raw,
   # Computed once per key - not per draw.
   # F_loading = X_nonFE %*% L  where L is the Cholesky factor of Sigma.
   # NULL when chol_obj = NULL (point estimates only).
+  #
+  # PERF-32: `out` duplicates the joined prediction frame column-for-column
+  # (plus .fitted). Every vector the return value needs is extracted above,
+  # and the RIF F_loading attribute is captured first, so `out` is released
+  # before the N x K design/factor matrices are allocated - the peak-memory
+  # moment of this function. X_nonFE is dropped as soon as F_loading exists,
+  # and survey_wd_sim right after the block (train_aug does not read it).
   F_loading <- NULL
-  if (is_rif && !is.null(attr(out, "F_loading"))) {
+  if (is_rif) {
     # RIF path - F_loading computed inside predict_rif() via interpolate_F_loading()
     F_loading <- attr(out, "F_loading")
-  } else if (!is_rif && !is.null(chol_obj)) {
+    rm(out)
+  } else {
+    rm(out)
+    if (!is.null(chol_obj)) {
       # Standard OLS path only - skip for RIF (model is fixest_multi)
-    X_nonFE <- tryCatch(
-      model.matrix(model, data = survey_wd_sim, type = "rhs"),
-      error = function(e) {
-        warning("[run_sim_pipeline] model.matrix() failed: ", conditionMessage(e))
-        NULL
+      X_nonFE <- tryCatch(
+        model.matrix(model, data = survey_wd_sim, type = "rhs"),
+        error = function(e) {
+          warning("[run_sim_pipeline] model.matrix() failed: ", conditionMessage(e))
+          NULL
+        }
+      )
+      if (!is.null(X_nonFE)) {
+        if (is.list(chol_obj) && "L" %in% names(chol_obj)) {
+          # Our named list format - use compute_factor_loading()
+          stopifnot(
+            "X_nonFE columns must match chol_obj$beta names" =
+              identical(colnames(X_nonFE), names(chol_obj$beta))
+          )
+          F_loading <- compute_factor_loading(X_nonFE, chol_obj)
+        } else if (is.matrix(chol_obj)) {
+          # Golem matrix format - inline multiply
+          F_loading <- X_nonFE %*% t(chol_obj)
+        }
       }
-    )
-if (!is.null(X_nonFE)) {
-      if (is.list(chol_obj) && "L" %in% names(chol_obj)) {
-        # Our named list format - use compute_factor_loading()
-        stopifnot(
-          "X_nonFE columns must match chol_obj$beta names" =
-            identical(colnames(X_nonFE), names(chol_obj$beta))
-        )
-        F_loading <- compute_factor_loading(X_nonFE, chol_obj)
-      } else if (is.matrix(chol_obj)) {
-        # Golem matrix format - inline multiply
-        F_loading <- X_nonFE %*% t(chol_obj)
-      }
+      rm(X_nonFE)
     }
   }
+
+  rm(survey_wd_sim)
 
   # ---- Training augmentation for residual drawing ------------------------- #
   # train_aug carries .resid for "original" and "resample" residual paths
@@ -721,8 +735,6 @@ if (!is.null(X_nonFE)) {
       NULL
     })
   }
-
-  rm(survey_wd_sim)
 
   list(
     y_point     = y_point,
