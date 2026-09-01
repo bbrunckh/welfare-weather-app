@@ -32,6 +32,23 @@ info_popover <- function(..., title = NULL, docs = FALSE, placement = "right") {
 
 # ---- Dynamic-input selection restore (INT-01) -------------------------------
 
+#' Build a label-lookup function bound to a fixed variable-metadata frame
+#' (INT-05). Result renderers pass this instead of looking labels up in the
+#' live `variable_list`, so re-labelling a variable cannot rewrite the
+#' description of an already-fitted result.
+#'
+#' @param vl Data frame (or NULL) with `name` and `label` columns.
+#' @return `function(var_name) -> label`.
+#' @noRd
+.label_lookup <- function(vl) {
+  force(vl)
+  function(var_name) {
+    if (is.null(vl)) return(var_name)
+    idx <- match(var_name, vl$name)
+    if (is.na(idx)) var_name else as.character(vl$label[idx])
+  }
+}
+
 #' Compute `selected` for a re-rendered dynamic input.
 #'
 #' renderUI-hosted inputs are rebuilt from scratch whenever their choice set

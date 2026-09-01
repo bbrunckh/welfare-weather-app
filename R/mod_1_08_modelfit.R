@@ -40,12 +40,15 @@ mod_1_08_modelfit_server <- function(id,
 
     # ---- Helpers ------------------------------------------------------------
 
-    get_label <- function(var_name) {
-      vl <- if (is.function(variable_list)) variable_list() else variable_list
-      if (is.null(vl)) return(var_name)
-      idx <- match(var_name, vl$name)
-      if (is.na(idx)) var_name else as.character(vl$label[idx])
-    }
+    # INT-05: bind diagnostic renderers to the fit-time snapshot so new
+    # selections cannot relabel or re-frame an already-fitted model.
+    fit_snap <- reactive({
+      req(model_fit())
+      model_fit()$.snap
+    })
+    snap_label_fun <- reactive({
+      .label_lookup(fit_snap()$variable_list)
+    })
 
     full_model <- reactive({
       req(model_fit())
@@ -71,24 +74,28 @@ mod_1_08_modelfit_server <- function(id,
     # ---- Outputs ------------------------------------------------------------
 
     output$resid_weather1 <- renderPlot({
-      req(full_model(), model_fit())
+      req(full_model(), model_fit(), fit_snap())
       h <- model_fit()$weather_terms[1]
       req(!is.na(h))
       m <- rif_single_model()
-      plot_resid_weather(m, h, weather_df = survey_weather(), x_label = get_label(h))
+      plot_resid_weather(m, h, weather_df = fit_snap()$survey_weather,
+                         x_label = snap_label_fun()(h))
     })
 
     output$resid_weather2 <- renderPlot({
-      req(full_model(), model_fit(), length(model_fit()$weather_terms) >= 2)
+      req(full_model(), model_fit(), length(model_fit()$weather_terms) >= 2, fit_snap())
       h <- model_fit()$weather_terms[2]
       req(!is.na(h))
       m <- rif_single_model()
-      plot_resid_weather(m, h, weather_df = survey_weather(), x_label = get_label(h))
+      plot_resid_weather(m, h, weather_df = fit_snap()$survey_weather,
+                         x_label = snap_label_fun()(h))
     })
 
     output$pred_welf_dist <- renderPlot({
-      req(full_model(), selected_outcome())
+      req(full_model(), fit_snap())
       mf <- model_fit()
+      snap <- fit_snap()
+      slf  <- snap_label_fun()
       if (identical(mf$engine, "rif")) {
         # RIF models predict the RIF-transformed outcome (effectively binary
         # per quantile), so the standard predicted-vs-actual histogram is not
@@ -97,7 +104,7 @@ mod_1_08_modelfit_server <- function(id,
         y <- mf$train_data[[mf$y_var]]
         taus <- mf$taus
         q_vals <- stats::quantile(y, probs = taus, names = FALSE)
-        q_df <- data.frame(tau = paste0("\u03C4=", taus), value = q_vals)
+        q_df <- data.frame(tau = paste0("\u03c4=", taus), value = q_vals)
         ggplot2::ggplot(data.frame(y = y), ggplot2::aes(x = y)) +
           ggplot2::geom_histogram(
             ggplot2::aes(y = 100 * ggplot2::after_stat(count) / sum(ggplot2::after_stat(count))),
@@ -110,7 +117,7 @@ mod_1_08_modelfit_server <- function(id,
                              vjust = 1.5, hjust = -0.1, size = 3, colour = "orange") +
           ggplot2::labs(
             subtitle = "Welfare distribution with estimated quantiles",
-            x = stringr::str_wrap(get_label(selected_outcome()$name), 40),
+            x = stringr::str_wrap(slf(snap$outcome$name), 40),
             y = "Share of households (%)"
           ) +
           theme_wise()
@@ -119,7 +126,7 @@ mod_1_08_modelfit_server <- function(id,
         plot_pred_vs_actual(
           model         = m,
           is_logistic   = is_logistic(),
-          outcome_label = get_label(selected_outcome()$name)
+          outcome_label = slf(snap$outcome$name)
         )
       }
     })
@@ -135,13 +142,12 @@ mod_1_08_modelfit_server <- function(id,
 
     # Relative importance plot (standardized coefficients)
     output$relaimpo <- renderPlot({
-      req(full_model())
+      req(full_model(), fit_snap())
 
-      vl <- if (is.function(variable_list)) variable_list() else variable_list
       m <- rif_single_model()
       plot_relaimpo(
         model = m,
-        var_info = vl
+        var_info = fit_snap()$variable_list
       )
     })
 
@@ -198,6 +204,19 @@ mod_1_08_modelfit_server <- function(id,
       )
     })
 
+    # INT-05: engine-conditional caption bound to the current fit, so a
+    # re-fit with a different engine updates the wording.
+    output$full_model_caption <- shiny::renderUI({
+      req(model_fit())
+      shiny::p(
+        if (identical(model_fit()$engine, "rif"))
+          "Full model (FE + controls) \u2014 per quantile"
+        else
+          "Full model (FE + controls)",
+        style = "color: grey; font-size: 12px;"
+      )
+    })
+
     observeEvent(model_fit(), {
       req(model_fit())
       if (modelfit_tab_added()) return()
@@ -217,13 +236,7 @@ mod_1_08_modelfit_server <- function(id,
               ))
             )
           ),
-          shiny::p(
-            if (identical(model_fit()$engine, "rif"))
-              "Full model (FE + controls) \u2014 per quantile"
-            else
-              "Full model (FE + controls)",
-            style = "color: grey; font-size: 12px;"
-          ),
+          shiny::uiOutput(ns("full_model_caption")),
           shiny::tableOutput(ns("additional_stats")),
           shiny::hr(),
           shiny::h4("Residuals vs weather"),

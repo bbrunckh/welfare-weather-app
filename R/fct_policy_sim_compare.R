@@ -424,8 +424,12 @@ policy_input_diagnostics <- function(baseline_svy, policy_svy, vars = NULL) {
     hs$residuals %||% residuals() %||% "original"
   }
 
+  # INT-05: prefer the historical label captured by the Step 2 run; the live
+  # selection is only a fallback for older in-memory result objects.
   hist_label <- reactive({
-    nm <- if (!is.null(selected_hist)) selected_hist()$scenario_name else NULL
+    hs  <- baseline_hist_sim()
+    nm  <- hs$hist_label %||%
+      (if (!is.null(selected_hist)) selected_hist()$scenario_name else NULL)
     if (!is.null(nm) && nzchar(nm)) nm else "Historical"
   })
 
@@ -1211,6 +1215,7 @@ policy_input_diagnostics <- function(baseline_svy, policy_svy, vars = NULL) {
   invisible(list(
     baseline_agg_hist      = baseline_agg_hist,
     baseline_agg_scenarios = baseline_agg_scenarios,
-    agg_cache_ws           = agg_cache_ws
+    agg_cache_ws           = agg_cache_ws,
+    hist_label             = hist_label
   ))
 }

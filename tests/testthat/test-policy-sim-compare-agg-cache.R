@@ -125,6 +125,54 @@ test_that("Step 3 scenario filters and poverty line survive rebuilds (INT-01)", 
   )
 })
 
+# ---- INT-05: the historical label is bound to the simulated run --------------
+
+test_that("Step 3 historical label comes from the run snapshot, not live selection", {
+  skip_if_not_installed("shiny")
+
+  bh <- shiny::reactiveVal({
+    hs <- make_step3_hist_fixture()
+    hs$hist_label <- "Hist run 1991-2020"
+    hs
+  })
+  ph  <- shiny::reactiveVal(make_step3_hist_fixture())
+  bsc <- shiny::reactiveVal(make_step3_scenarios_fixture())
+  psc <- shiny::reactiveVal(make_step3_scenarios_fixture())
+  sel_hist <- shiny::reactiveVal(data.frame(scenario_name = "Live selection"))
+
+  shiny::testServer(
+    function(input, output, session) {
+      internals <<- .wire_results_pane(
+        input, output, session,
+        baseline_hist_sim        = bh,
+        baseline_saved_scenarios = bsc,
+        policy_hist_sim          = ph,
+        policy_saved_scenarios   = psc,
+        selected_hist            = sel_hist,
+        residuals                = shiny::reactiveVal("none")
+      )
+      NULL
+    },
+    {
+      session$flushReact()
+      # Snapshot label wins over the live selection (INT-05)
+      expect_identical(internals$hist_label(), "Hist run 1991-2020")
+      sel_hist(data.frame(scenario_name = "Live selection changed"))
+      session$flushReact()
+      expect_identical(internals$hist_label(), "Hist run 1991-2020")
+
+      # Older in-memory result without the field falls back to the live
+      # selection, and to "Historical" when there is none at all.
+      bh(make_step3_hist_fixture())
+      session$flushReact()
+      expect_identical(internals$hist_label(), "Live selection changed")
+      sel_hist(NULL)
+      session$flushReact()
+      expect_identical(internals$hist_label(), "Historical")
+    }
+  )
+})
+
 test_that("Step 3 agg cache: deviation changes reuse cache; method/pov-line key entries", {
   skip_if_not_installed("shiny")
 

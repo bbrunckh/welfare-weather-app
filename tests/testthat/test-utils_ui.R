@@ -48,6 +48,17 @@ test_that("restore_numeric keeps in-range values and falls back otherwise", {
   expect_identical(.restore_numeric(20, 5, 20, fallback = 10), 20)
 })
 
+# ---- INT-05: fit-time label snapshot -----------------------------------------
+
+test_that("label_lookup binds labels to a fixed variable frame", {
+  vl <- data.frame(name  = c("tx", "welfare"),
+                   label = c("Max temp", "Welfare"))
+  lab <- .label_lookup(vl)
+  expect_identical(lab("tx"), "Max temp")
+  expect_identical(lab("unknown"), "unknown")
+  expect_identical(.label_lookup(NULL)("tx"), "tx")
+})
+
 
 test_that("busy guard admits one concurrent entry and refuses re-entry", {
   shiny::testServer(

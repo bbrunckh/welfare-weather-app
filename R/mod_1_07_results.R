@@ -47,15 +47,6 @@ mod_1_07_results_server <- function(id,
     model_fit_val     <- reactiveVal(NULL)
     results_tab_added <- reactiveVal(FALSE)
 
-    # ---- Helpers -------------------------------------------------------------
-
-    get_label <- function(var_name) {
-      vl  <- if (is.function(variable_list)) variable_list() else variable_list
-      if (is.null(vl)) return(var_name)
-      idx <- match(var_name, vl$name)
-      if (is.na(idx)) var_name else as.character(vl$label[idx])
-    }
-
     native_fit <- function(fit) extract_native_fit(fit, model_fit_val()$engine)
 
     # ---- Run model -----------------------------------------------------------
@@ -92,6 +83,15 @@ mod_1_07_results_server <- function(id,
       )
 
       if (!is.null(fit_list)) {
+        # INT-05: snapshot every label/setting the renderers need at fit time.
+        # Result renderers must describe the fitted run, not whatever is
+        # selected when they re-render.
+        fit_list$.snap <- list(
+          outcome        = selected_outcome(),
+          weather        = selected_weather(),
+          survey_weather = survey_weather(),
+          variable_list  = if (is.function(variable_list)) variable_list() else variable_list
+        )
         model_fit_val(fit_list)
         shiny::showNotification("Models fitted successfully.",
                                 type = "message", duration = 3)
@@ -109,7 +109,12 @@ mod_1_07_results_server <- function(id,
       on.exit(shiny::removeNotification(nid), add = TRUE)
 
       mf      <- model_fit_val()
-      out_lab <- get_label(mf$y_var)
+      snap    <- mf$.snap
+      # INT-05: every renderer below binds to the fit-time snapshot; changing
+      # the outcome/weather selections afterwards cannot relabel old results.
+      label_fun <- .label_lookup(snap$variable_list)
+      sw_snap    <- snap$weather
+      outcome_snap <- snap$outcome
 
       # RIF coefficient plots: one per weather variable
       output$coefplot1 <- renderPlot({
@@ -121,8 +126,8 @@ mod_1_07_results_server <- function(id,
           fit3              = extract_native_fit(mf$fit3, mf$engine),
           weather_terms     = mf$weather_terms,
           interaction_terms = mf$interaction_terms,
-          outcome_label     = selected_outcome()$label,
-          label_fun         = get_label,
+          outcome_label     = outcome_snap$label,
+          label_fun         = label_fun,
           engine            = mf$engine,
           rif_grid          = mf$rif_grid,
           pred_var          = mf$weather_terms[1]
@@ -138,8 +143,8 @@ mod_1_07_results_server <- function(id,
           fit3              = extract_native_fit(mf$fit3, mf$engine),
           weather_terms     = mf$weather_terms,
           interaction_terms = mf$interaction_terms,
-          outcome_label     = selected_outcome()$label,
-          label_fun         = get_label,
+          outcome_label     = outcome_snap$label,
+          label_fun         = label_fun,
           engine            = mf$engine,
           rif_grid          = mf$rif_grid,
           pred_var          = mf$weather_terms[2]
@@ -156,7 +161,7 @@ mod_1_07_results_server <- function(id,
           fit3 = extract_native_fit(mf$fit3, mf$engine),
           weather_terms     = mf$weather_terms,
           interaction_terms = mf$interaction_terms,
-          label_fun         = get_label,
+          label_fun         = label_fun,
           engine            = mf$engine,
           is_logistic       = is_logistic_fit(mf),
           rif_grid          = mf$rif_grid
@@ -168,16 +173,15 @@ mod_1_07_results_server <- function(id,
       output$effectplot1 <- renderPlot({
         req(model_fit_val(), length(model_fit_val()$weather_terms) >= 1)
         mf <- model_fit_val()
-        sw <- selected_weather()
         make_weather_effect_plot(
           fit               = native_fit(mf$fit3),
           pred_var          = mf$weather_terms[1],
           interaction_terms = mf$interaction_terms,
-          is_binned         = identical(sw$cont_binned[1], "Binned"),
-          label_fun         = get_label,
+          is_binned         = identical(sw_snap$cont_binned[1], "Binned"),
+          label_fun         = label_fun,
           engine            = mf$engine,
-          selected_weather  = sw,
-          weather_df        = survey_weather(),
+          selected_weather  = sw_snap,
+          weather_df        = snap$survey_weather,
           rif_grid          = mf$rif_grid
         )
       })
@@ -185,23 +189,42 @@ mod_1_07_results_server <- function(id,
       output$effectplot2 <- renderPlot({
         req(model_fit_val(), length(model_fit_val()$weather_terms) >= 2)
         mf <- model_fit_val()
-        sw <- selected_weather()
         make_weather_effect_plot(
           fit               = native_fit(mf$fit3),
           pred_var          = mf$weather_terms[2],
           interaction_terms = mf$interaction_terms,
-          is_binned         = identical(sw$cont_binned[2], "Binned"),
-          label_fun         = get_label,
+          is_binned         = identical(sw_snap$cont_binned[2], "Binned"),
+          label_fun         = label_fun,
           engine            = mf$engine,
-          selected_weather  = sw,
-          weather_df        = survey_weather(),
+          selected_weather  = sw_snap,
+          weather_df        = snap$survey_weather,
           rif_grid          = mf$rif_grid
         )
       })
 
       # ---- Add / switch Results tab -----------------------------------------
 
-      is_rif <- identical(mf$engine, "rif")
+      # INT-05: engine-conditional headings are reactive outputs bound to the
+      # current fit, so a re-fit with a different engine updates them instead
+      # of describing the first engine forever.
+      output$heading_effect <- renderUI({
+        req(model_fit_val())
+        shiny::h4(if (identical(model_fit_val()$engine, "rif"))
+          "Weather sensitivity across the distribution"
+          else "Predicted outcome vs weather")
+      })
+      output$heading_coef <- renderUI({
+        req(model_fit_val())
+        shiny::h4(if (identical(model_fit_val()$engine, "rif"))
+          "UQR coefficients by model specification"
+          else "Marginal effect of weather on outcome")
+      })
+      output$heading_table <- renderUI({
+        req(model_fit_val())
+        shiny::h4(if (identical(model_fit_val()$engine, "rif"))
+          "Unconditional quantile regression results"
+          else "Regression results")
+      })
 
       # Reactive layouts so panels switch between 1 and 2 columns when the
       # model is re-fit with a different number of weather variables.
@@ -228,16 +251,13 @@ mod_1_07_results_server <- function(id,
           shiny::tabPanel(
             title = "Results",
             value = "results",
-            shiny::h4(if (is_rif) "Weather sensitivity across the distribution"
-                      else "Predicted outcome vs weather"),
+            shiny::uiOutput(ns("heading_effect")),
             shiny::uiOutput(ns("effectplot_layout")),
             shiny::br(),
-            shiny::h4(if (is_rif) "UQR coefficients by model specification"
-                      else "Marginal effect of weather on outcome"),
+            shiny::uiOutput(ns("heading_coef")),
             shiny::uiOutput(ns("coefplot_layout")),
             shiny::br(),
-            shiny::h4(if (is_rif) "Unconditional quantile regression results"
-                      else "Regression results"),
+            shiny::uiOutput(ns("heading_table")),
             shiny::div(
               style = "display:flex; justify-content:center;",
               shiny::div(

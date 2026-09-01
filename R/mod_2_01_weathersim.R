@@ -599,6 +599,9 @@ mod_2_01_weathersim_server <- function(id,
         # ---- Store results (reactive side effects) -------------------------
         # Aggregation now happens lazily in mod_2_02_results.R via the analytic
         # delta method - no pre-aggregation step here.
+        # INT-05: bind the historical scenario label into the result so the
+        # Step 3 pane describes the simulated run, not the live selection.
+        result$hist_sim_result$hist_label <- sh$scenario_name
         hist_sim(result$hist_sim_result)
         saved_scenarios(result$new_scenarios)
 
