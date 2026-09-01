@@ -110,6 +110,14 @@ mod_1_02_surveystats_server <- function(
       busy_id <- showNotification("Loading survey data...", duration = NULL, type = "message")
       on.exit(removeNotification(busy_id), add = TRUE)
 
+      # INT-06: drop the previous survey's map/cell state as soon as a reload
+      # starts, and on every inner failure below. The map output re-renders
+      # reactively, so the previous survey's geography can never outlive its
+      # microdata - a failure now leaves a blank map instead of a misleading
+      # one.
+      map_data(NULL)
+      cell_data(NULL)
+
       ss <- selected_surveys()
 
       df <- tryCatch(
@@ -244,7 +252,14 @@ mod_1_02_surveystats_server <- function(
             )
           survey_data(df)
         }, error = function(e) {
-          notify(paste("Failed to compute loc_id_panel:", conditionMessage(e)), type = "warning", duration = 5)
+          # INT-06: loc_id_panel is not a cosmetic join - downstream VCV
+          # estimation falls back when it is missing, which changes inference.
+          notify(paste0(
+            "Failed to compute loc_id_panel: ", conditionMessage(e), "\n",
+            "Location-level panels are unavailable, so variance estimation ",
+            "will fall back to survey-design defaults. Treat inference ",
+            "accordingly."
+          ), type = "warning", duration = 8)
         })
       }
 
