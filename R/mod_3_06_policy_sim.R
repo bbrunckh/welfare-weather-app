@@ -94,6 +94,8 @@ mod_3_06_policy_sim_server <- function(id,
     policy_svy_rv       <- reactiveVal(NULL)
     sim_error           <- reactiveVal(NULL)
     sim_run_id          <- reactiveVal(0L)
+    # REACT-02: TRUE while a policy simulation is executing.
+    sim_running         <- reactiveVal(FALSE)
     decomp_rv           <- reactiveVal(NULL)
     decomp_scenarios_rv <- reactiveVal(list())
 
@@ -115,6 +117,13 @@ mod_3_06_policy_sim_server <- function(id,
     })
 
     run <- function() {
+      # REACT-02: one policy simulation at a time. The guard is owned by the
+      # module doing the work; the triggering button (mod_3_scenario) is
+      # disabled via the exposed reactive.
+      if (isTRUE(sim_running())) return(invisible(NULL))
+      sim_running(TRUE)
+      on.exit(sim_running(FALSE), add = TRUE)
+
       sim_error(NULL)
 
       mf  <- model_fit()
@@ -349,6 +358,7 @@ mod_3_06_policy_sim_server <- function(id,
 
     list(
       run                      = run,
+      running                  = sim_running,
       baseline_svy             = baseline_svy_rv,
       policy_svy               = policy_svy_rv,
       sim_run_id               = sim_run_id,

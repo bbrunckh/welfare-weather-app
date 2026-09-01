@@ -524,9 +524,15 @@ mod_2_01_weathersim_server <- function(id,
 
     # ---- Run simulation on button click ------------------------------------
 
+    # REACT-02: one simulation at a time - double-clicks are ignored and the
+    # button is disabled for the duration of the run.
+    sim_guard <- .busy_guard(session, run_sim)
+
     observeEvent(input$run_sim, {
       req(selected_weather(), selected_outcome(),
           survey_weather(), selected_hist(), model_fit())
+      if (!sim_guard$begin()) return(invisible(NULL))
+      on.exit(sim_guard$end(), add = TRUE)
 
       # ---- Gather inputs ---------------------------------------------------
       sw  <- selected_weather()

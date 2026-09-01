@@ -115,17 +115,44 @@
   color: var(--bs-primary);
 }
 
-/* ---- Hide intermediate (non-validation) output errors ------------------- */
+/* ---- Output error states (UI-01) -----------------------------------------
+   Errors are VISIBLE. By the time a render expression errors, every
+   long-running renderer is guarded by validate(need(...)), so what reaches
+   .shiny-output-error is a genuine bug - show it as a warning card instead
+   of silently blanking the pane. Validation messages keep their muted
+   italic style via .shiny-output-error-validation.                       */
 
 .shiny-output-error {
-  visibility: hidden;
+  visibility: visible;
+  border: 1px solid var(--bs-border-color);
+  border-left: 3px solid var(--bs-warning, #b8860b);
+  border-radius: var(--bs-border-radius);
+  background: #fff8e6;
+  color: var(--bs-secondary);
+  font-size: 13px;
+  padding: 0.75rem 1rem;
+  margin: 0.5rem 0;
+  white-space: pre-wrap;
+}
+
+.shiny-output-error:before {
+  content: "\f071  ";  /* fa-exclamation-triangle */
+  font-family: "Font Awesome 6 Free";
+  font-weight: 900;
+  color: var(--bs-warning, #b8860b);
 }
 
 .shiny-output-error-validation {
-  visibility: visible;
-  color: var(--bs-secondary);
+  border: none;
+  border-left: none;
+  background: transparent;
+  padding: 0.25rem 0;
   font-style: italic;
-  padding: 0.75rem 0;
+  color: var(--bs-secondary);
+}
+
+.shiny-output-error-validation:before {
+  content: "";
 }
 
 /* ---- Empty state (Overview tabs before outputs exist) ------------------- */

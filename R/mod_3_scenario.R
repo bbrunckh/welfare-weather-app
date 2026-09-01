@@ -302,6 +302,17 @@ mod_3_scenario_server <- function(id,
       )
     })
 
+    # REACT-02: keep the button disabled while the policy simulation runs.
+    observeEvent(s6$running(), {
+      tryCatch(
+        shiny::updateActionButton(
+          session, inputId = "run_policy_sim",
+          disabled = isTRUE(s6$running())
+        ),
+        error = function(e) NULL
+      )
+    }, ignoreInit = TRUE)
+
     # ---- Run policy simulation on button click ---------------------------
 
     observeEvent(input$run_policy_sim, {

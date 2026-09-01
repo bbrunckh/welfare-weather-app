@@ -20,6 +20,7 @@ mod_1_07_results_ui <- function(id) {
 #' @param selected_weather Reactive data frame from mod_1_04_weather.
 #' @param survey_weather  Reactive data frame from mod_1_05_weatherstats.
 #' @param selected_model  Reactive list from mod_1_06_model.
+#' @param fit_guard       Busy guard shared with mod_1_06 (REACT-02); optional.
 #' @param tabset_id       Character id of the parent tabset panel.
 #' @param tabset_session  Shiny session for the tabset (defaults to parent).
 #'
@@ -33,6 +34,7 @@ mod_1_07_results_server <- function(id,
                                      selected_model,
                                      model_type,
                                      run_model,
+                                     fit_guard = NULL,
                                      tabset_id,
                                      tabset_session = NULL) {
   moduleServer(id, function(input, output, session) {
@@ -62,6 +64,11 @@ mod_1_07_results_server <- function(id,
 
     observeEvent(run_model(), {
       req(selected_outcome(), selected_weather(), selected_model(), survey_weather())
+      # REACT-02: honour the shared mod_1_06 guard; one fit at a time.
+      if (!is.null(fit_guard)) {
+        if (!fit_guard$begin()) return(invisible(NULL))
+        on.exit(fit_guard$end(), add = TRUE)
+      }
 
       nid <- shiny::showNotification("Fitting models - please wait...",
                                      type = "message", duration = NULL,

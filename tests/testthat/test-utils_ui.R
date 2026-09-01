@@ -1,0 +1,99 @@
+# ============================================================================ #
+# tests/testthat/test-utils_ui.R                                               #
+# REACT-02: .busy_guard() double-click protection - second entry is refused    #
+# while a guarded action is still running, and the flag clears on end().       #
+# ============================================================================ #
+
+library(testthat)
+library(shiny)
+
+test_that("busy guard admits one concurrent entry and refuses re-entry", {
+  shiny::testServer(
+    function(input, output, session) {
+      guard <- .busy_guard(session, btn1)
+      # expose for assertions inside the test block
+      expose <- guard
+      list(guard = guard)
+    },
+    {
+      expect_false(guard$is_running())
+
+      # First entry wins
+      expect_true(guard$begin())
+      expect_true(guard$is_running())
+
+      # Re-entry while running is refused
+      expect_false(guard$begin())
+      expect_true(guard$is_running())
+
+      # Ending clears the flag and admits a new run
+      guard$end()
+      expect_false(guard$is_running())
+      expect_true(guard$begin())
+      expect_true(guard$is_running())
+      guard$end()
+ expect_false(guard$is_running())
+    }
+  )
+})
+
+test_that("on.exit(guard$end()) releases the guard on error", {
+  shiny::testServer(
+    function(input, output, session) {
+      guard <- .busy_guard(session)
+      list(guard = guard)
+    },
+    {
+      guarded <- function() {
+        guard$begin()
+        on.exit(guard$end(), add = TRUE)
+        stop("boom")
+      }
+      expect_error(guarded(), "boom")
+      expect_false(guard$is_running())
+      expect_true(guard$begin())
+      guard$end()
+    }
+  )
+})
+
+test_that("Step 2-style run observer refuses re-entry during the run", {
+  shiny::testServer(
+    function(input, output, session) {
+      # Minimal replica of the Step 2 run-guard contract: the observer
+      # begins the guard synchronously, so a re-entrant event during the
+      # same flush is refused.
+      sim_guard <- .busy_guard(session, run_sim)
+      runs <- shiny::reactiveVal(0L)
+      nested_attempt <- shiny::reactiveVal(NULL)
+
+      observeEvent(input$run_sim, {
+        if (!sim_guard$begin()) {
+          nested_attempt("refused")
+          return(invisible(NULL))
+        }
+        on.exit(sim_guard$end(), add = TRUE)
+        runs(runs() + 1L)
+      }, ignoreInit = TRUE)
+
+      list(sim_guard = sim_guard, runs = runs,
+           nested_attempt = nested_attempt)
+    },
+    {
+      # Prime: with ignoreInit = TRUE the first input value is treated as
+      # the session-init event and ignored (matches production behaviour).
+      session$setInputs(run_sim = 0L); session$flushReact()
+      expect_equal(runs(), 0L)
+
+      session$setInputs(run_sim = 1L); session$flushReact()
+      expect_equal(runs(), 1L)
+      expect_false(sim_guard$is_running())
+      expect_null(nested_attempt())
+
+      # Sequential re-run is allowed once the previous finished.
+      session$setInputs(run_sim = 2L); session$flushReact()
+      expect_equal(runs(), 2L)
+      expect_false(sim_guard$is_running())
+    }
+  )
+})

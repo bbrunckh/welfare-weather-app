@@ -704,6 +704,8 @@ mod_1_06_model_server <- function(id,
       req(survey_weather())
       req(selected_outcome())
       req(selected_weather())
+      # REACT-02: skip if a fit is already running (stale eventReactive replay)
+      req(fit_guard$is_running() == FALSE)
 
       withProgress(message = "Running Lasso...", value = 0, {
         incProgress(0.05, detail = "Preparing inputs")
@@ -771,6 +773,9 @@ mod_1_06_model_server <- function(id,
     # Only fires when the user has chosen Lasso covariate selection.
     observeEvent(input$run_model, {
       req(isTRUE(input$covariates == "Lasso"))
+      # REACT-02: one fit at a time
+      if (!fit_guard$begin()) return(invisible(NULL))
+      on.exit(fit_guard$end(), add = TRUE)
       showNotification("Lasso started...",
                       type = "message",
                       duration = 2)
@@ -861,10 +866,15 @@ mod_1_06_model_server <- function(id,
       input$selected_policies
     })
 
+    # REACT-02: shared busy guard for model fitting (Lasso + fit both key off
+    # input$run_model). Exposed so mod_1_07's fit observer honours it too.
+    fit_guard <- .busy_guard(session, run_model)
+
     list(
       selected_model    = selected_model,
       selected_policies = selected_policies_rv,
-      run_model         = reactive(input$run_model)
+      run_model         = reactive(input$run_model),
+      fit_guard         = fit_guard
     )
   })
 }

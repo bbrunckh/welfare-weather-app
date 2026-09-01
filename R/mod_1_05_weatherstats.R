@@ -83,10 +83,15 @@ mod_1_05_weatherstats_server <- function(
     })
     shiny::outputOptions(output, "weather_stats_button_ui", suspendWhenHidden = FALSE)
 
+    # REACT-02: double-click guard - one weather load at a time.
+    load_guard <- .busy_guard(session, weather_stats)
+
     # ---- Load and merge weather on button click ------------------------------
 
     observeEvent(input$weather_stats, {
       req(selected_weather(), selected_surveys(), survey_data())
+      if (!load_guard$begin()) return(invisible(NULL))
+      on.exit(load_guard$end(), add = TRUE)
 
       sw  <- selected_weather()
       svy <- survey_data()

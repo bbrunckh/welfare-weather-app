@@ -176,6 +176,7 @@ mod_1_modelling_server <- function(id,
       survey_weather   = s5$survey_weather,
       selected_model   = s6$selected_model,
       run_model        = s6$run_model,
+      fit_guard        = s6$fit_guard,
       tabset_id        = "step1_output_tabs",
       tabset_session   = session
     )

@@ -70,6 +70,10 @@ mod_1_02_surveystats_server <- function(
 
     shiny::outputOptions(output, "survey_stats_button_ui", suspendWhenHidden = FALSE)
 
+    # REACT-02: double-click guard - one load at a time, button disabled
+    # while running.
+    load_guard <- .busy_guard(session, survey_stats)
+
     survey_tab_added <- reactiveVal(FALSE)
 
     # ---- Data storage -------------------------------------------------------
@@ -100,6 +104,8 @@ mod_1_02_surveystats_server <- function(
 
     observeEvent(input$survey_stats, {
       req(nrow(selected_surveys()) > 0)
+      if (!load_guard$begin()) return(invisible(NULL))
+      on.exit(load_guard$end(), add = TRUE)
 
       busy_id <- showNotification("Loading survey data...", duration = NULL, type = "message")
       on.exit(removeNotification(busy_id), add = TRUE)
