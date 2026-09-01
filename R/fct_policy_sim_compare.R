@@ -612,7 +612,11 @@ policy_input_diagnostics <- function(baseline_svy, policy_svy, vars = NULL) {
     if (!is.null(hit)) return(hit)
 
     failed <- character(0)
-    res <- lapply(seq_along(sc), function(i) {
+    # NB: iterate by index (the error handler needs `names(sc)[i]`) but
+    # re-attach the scenario names - every consumer below (all_series,
+    # pointrange/timeseries/exceedance/threshold row builders) selects
+    # scenarios by name, and lapply(seq_along(...)) drops them.
+    res <- stats::setNames(lapply(seq_along(sc), function(i) {
       s <- sc[[i]]
       tryCatch({
         pipes <- s$pipelines
@@ -674,7 +678,7 @@ policy_input_diagnostics <- function(baseline_svy, policy_svy, vars = NULL) {
         failed[[length(failed) + 1L]] <<- nm
         NULL
       })
-    })
+    }), names(sc))
     .notify_agg_failures(failed, length(sc))
     assign(.agg_cache_key(tag, method, pov_line_val()), res, envir = ws)
     res
@@ -1224,6 +1228,8 @@ policy_input_diagnostics <- function(baseline_svy, policy_svy, vars = NULL) {
   invisible(list(
     baseline_agg_hist      = baseline_agg_hist,
     baseline_agg_scenarios = baseline_agg_scenarios,
+    policy_agg_hist        = policy_agg_hist,
+    policy_agg_scenarios   = policy_agg_scenarios,
     agg_cache_ws           = agg_cache_ws,
     hist_label             = hist_label
   ))

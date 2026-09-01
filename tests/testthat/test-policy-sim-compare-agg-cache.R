@@ -354,7 +354,12 @@ test_that("cached scenario aggregation is identical to uncached recomputation", 
       session$elapse(500); session$flushReact()
 
       cached_hist <- internals$baseline_agg_hist()$out
-      cached_scn  <- internals$baseline_agg_scenarios()[["SSP2-4.5 / 2030-2040"]]$out
+      agg_scn     <- internals$baseline_agg_scenarios()
+      # NB: the aggregation must keep the scenario names - every renderer
+      # below selects scenarios by name.
+      expect_identical(names(agg_scn), names(sc))
+      cached_scn  <- agg_scn[["SSP2-4.5 / 2030-2040"]]$out
+      expect_false(is.null(cached_scn))
       n_after_first <- length(ls(envir = internals$agg_cache_ws()))
       expect_true(n_after_first >= 4L)
 
@@ -363,12 +368,58 @@ test_that("cached scenario aggregation is identical to uncached recomputation", 
       bsc(make_step3_scenarios_fixture())
       session$elapse(500); session$flushReact()
 
-      fresh_hist <- internals$baseline_agg_hist()$out
-      fresh_scn  <- internals$baseline_agg_scenarios()[["SSP2-4.5 / 2030-2040"]]$out
+      fresh_hist  <- internals$baseline_agg_hist()$out
+      fresh_scn   <- internals$baseline_agg_scenarios()[["SSP2-4.5 / 2030-2040"]]$out
 
       expect_identical(cached_hist, fresh_hist)
       expect_identical(cached_scn,  fresh_scn)
       expect_length(ls(envir = internals$agg_cache_ws()), n_after_first)
+    }
+  )
+})
+
+test_that("scenario aggregation preserves scenario names across both arms", {
+  skip_if_not_installed("shiny")
+
+  # Regression: make_agg_scenarios() iterates with seq_along(sc) so the
+  # failure ledger can name the dropped scenario; lapply over the indices
+  # silently dropped the list names, so every Step 3 renderer (which selects
+  # scenarios by name) showed only the historical series.
+  hist <- make_step3_hist_fixture()
+  sc   <- make_step3_scenarios_fixture_multi()
+
+  bh  <- shiny::reactiveVal(hist)
+  ph  <- shiny::reactiveVal(hist)
+  bsc <- shiny::reactiveVal(sc)
+  psc <- shiny::reactiveVal(sc)
+
+  internals <- NULL
+  shiny::testServer(
+    function(input, output, session) {
+      internals <<- .wire_results_pane(
+        input, output, session,
+        baseline_hist_sim        = bh,
+        baseline_saved_scenarios = bsc,
+        policy_hist_sim          = ph,
+        policy_saved_scenarios   = psc,
+        selected_hist            = shiny::reactiveVal(NULL),
+        residuals                = shiny::reactiveVal("none")
+      )
+      NULL
+    },
+    {
+      session$setInputs(cmp_agg_method = "mean", cmp_deviation = "none")
+      session$elapse(500); session$flushReact()
+
+      agg_b <- internals$baseline_agg_scenarios()
+      agg_p <- internals$policy_agg_scenarios()
+      expect_identical(names(agg_b), names(sc))
+      expect_identical(names(agg_p), names(sc))
+      for (nm in names(sc)) {
+        expect_false(is.null(agg_b[[nm]]$out), info = nm)
+        expect_false(is.null(agg_p[[nm]]$out), info = nm)
+        expect_true(nrow(agg_b[[nm]]$out) > 0L, info = nm)
+      }
     }
   )
 })
