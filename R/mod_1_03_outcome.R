@@ -153,15 +153,22 @@ mod_1_03_outcome_server <- function(id, variable_list, survey_data,
 
     outcome_tab_added <- reactiveVal(FALSE)
 
+    # ---- Button-time selection snapshot (INT-05 pattern) ----------------------
+    # The Outcome stats tab must describe the run the button captured, not the
+    # live selector: outputs render from `outcome_spec()` and stay stable
+    # until the button is pressed again.
+    outcome_spec <- reactiveVal(NULL)
+
     # ---- Survey data augmented with synthetic "poor" column -------------------
 
     outcome_data <- reactive({
-      req(survey_data(), selected_outcome_info())
+      spec <- outcome_spec()
+      req(survey_data(), spec)
+      inf <- spec$info
       df <- survey_data()
-      inf <- selected_outcome_info()
       oname <- as.character(inf$name[1])
       if (identical(oname, "poor") && !"poor" %in% names(df)) {
-        so <- selected_outcome()
+        so <- spec$so
         pl <- if (!is.null(so) && !is.na(so$povline)) so$povline else 3.00
         if ("welfare" %in% names(df)) {
           line <- .povline_to_ppp(
@@ -180,12 +187,18 @@ mod_1_03_outcome_server <- function(id, variable_list, survey_data,
     observeEvent(input$outcome_stats_btn, {
       req(input$outcome, survey_data(), selected_outcome_info())
 
+      # Snapshot the current selection; outputs below bind to it so selector
+      # changes do not re-render the tab until the button is pressed again.
+      outcome_spec(list(info = selected_outcome_info(),
+                        so   = selected_outcome()))
+
       # Define outputs (once)
       if (!outcome_tab_added()) {
 
         output$outcome_dist <- renderPlot({
-          req(outcome_data(), selected_outcome_info())
-          inf <- selected_outcome_info()
+          spec <- outcome_spec()
+          req(outcome_data(), spec)
+          inf <- spec$info
           p <- plot_welfare_dist(
             outcome_data(),
             outcome = as.character(inf$name[1]),
@@ -204,8 +217,9 @@ mod_1_03_outcome_server <- function(id, variable_list, survey_data,
         cov_view_mem$remember()
 
         output$outcome_coverage_map <- leaflet::renderLeaflet({
-          req(outcome_data(), selected_outcome_info(), map_data())
-          inf <- selected_outcome_info()
+          spec <- outcome_spec()
+          req(outcome_data(), spec, map_data())
+          inf <- spec$info
 
           # Prefer H3 cells when Survey stats has supplied them: locations
           # overlap, and stacking translucent fills shows shades that mean
@@ -246,8 +260,9 @@ mod_1_03_outcome_server <- function(id, variable_list, survey_data,
         })
 
         output$outcome_summary_stats <- renderTable({
-          req(outcome_data(), selected_outcome_info())
-          inf <- selected_outcome_info()
+          spec <- outcome_spec()
+          req(outcome_data(), spec)
+          inf <- spec$info
           oname_local <- as.character(inf$name[1])
           otype_local <- as.character(inf$type[1])
           vals <- outcome_data()[[oname_local]]

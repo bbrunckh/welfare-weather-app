@@ -86,6 +86,14 @@ mod_1_05_weatherstats_server <- function(
     # REACT-02: double-click guard - one weather load at a time.
     load_guard <- .busy_guard(session, weather_stats)
 
+    # ---- Button-time selection snapshot (INT-05 pattern) ----------------------
+    # Every panel on the Weather stats tab renders from `wx_spec()`, captured
+    # when the button is pressed: changing the weather-variable or outcome
+    # selectors afterwards re-renders nothing until the button is used again.
+    wx_spec     <- reactiveVal(NULL)
+    wx_spec_sw  <- shiny::reactive({ req(wx_spec()); wx_spec()$sw })
+    wx_spec_so  <- shiny::reactive({ req(wx_spec()); wx_spec()$so })
+
     # ---- Load and merge weather on button click ------------------------------
 
     observeEvent(input$weather_stats, {
@@ -172,6 +180,11 @@ mod_1_05_weatherstats_server <- function(
       # configuration at the end of this observer.
       hist_cells(NULL)
 
+      # INT-05 pattern: snapshot the selection this load was built from. All
+      # tab outputs bind to this spec, so selector changes stay inert until
+      # the button is pressed again.
+      wx_spec(list(sw = sw, so = selected_outcome()))
+
       showNotification("Weather data ready.", duration = 3, type = "message")
 
       # ---- Define outputs once then add tab ---------------------------------
@@ -187,10 +200,10 @@ mod_1_05_weatherstats_server <- function(
 
         make_weather_dist <- function(idx) {
           renderPlot({
-            req(survey_weather())
+            req(survey_weather(), wx_spec())
             df          <- survey_weather() |>
               dplyr::mutate(countryyear = paste0(economy, ", ", year))
-            sw          <- isolate(selected_weather())
+            sw          <- wx_spec()$sw
             hv          <- sw$name[idx]
             label       <- sw$label[idx]
             cont_binned <- sw$cont_binned[idx]
@@ -222,10 +235,10 @@ mod_1_05_weatherstats_server <- function(
 
         make_weather_dist_cont <- function(idx) {
           renderPlot({
-            req(survey_weather_cont())
+            req(survey_weather_cont(), wx_spec())
             df    <- survey_weather_cont() |>
               dplyr::mutate(countryyear = paste0(economy, ", ", year))
-            sw    <- isolate(selected_weather())
+            sw    <- wx_spec()$sw
             hv    <- sw$name[idx]
             label <- sw$label[idx]
             yrs   <- hist_cells_years()
@@ -252,10 +265,10 @@ mod_1_05_weatherstats_server <- function(
 
         make_binscatter <- function(idx) {
           renderPlot({
-            req(survey_weather(), selected_outcome())
-            so  <- selected_outcome()
+            so  <- wx_spec_so()
+            req(survey_weather(), so)
             df <- survey_weather() |> prepare_outcome_df(so)
-            sw  <- isolate(selected_weather())
+            sw  <- wx_spec_sw()
             
             # fix so$label for plotting if it has been transformed
             if ("transform" %in% colnames(so) && isTRUE(so$transform == "log")) {
@@ -285,20 +298,20 @@ mod_1_05_weatherstats_server <- function(
         # -- Summary stats tables (continuous + binned) -----------------------
         output$weather_stats_table <- make_weather_stats_dt(
           survey_weather   = survey_weather,
-          selected_weather = selected_weather
+          selected_weather = wx_spec_sw
         )
         output$weather_stats_table_binned <- make_weather_binned_stats_dt(
           survey_weather   = survey_weather,
-          selected_weather = selected_weather
+          selected_weather = wx_spec_sw
         )
 
         # Single panel that conditionally shows the continuous table, the
         # binned table, or both - based on each selected weather variable's
         # type in the merged survey-weather frame.
         output$weather_stats_layout <- shiny::renderUI({
-          shiny::req(survey_weather(), selected_weather())
+          shiny::req(survey_weather(), wx_spec_sw())
           df   <- survey_weather()
-          sw   <- selected_weather()
+          sw   <- wx_spec_sw()
           vars <- intersect(sw$name, names(df))
           if (length(vars) == 0) {
             return(shiny::helpText("No weather variables found."))
@@ -331,7 +344,7 @@ mod_1_05_weatherstats_server <- function(
         # -- Selected weather config table ------------------------------------
 
         output$selected_weather <- DT::renderDT({
-          selected_weather()
+          wx_spec_sw()
         },
         rownames = FALSE,
         options  = list(dom = "t", paging = FALSE, searching = FALSE, info = FALSE),
@@ -342,7 +355,7 @@ mod_1_05_weatherstats_server <- function(
         # Reactive layouts so panels update when the user toggles between
         # 1 and 2 weather variables without re-creating the tab.
         output$weather_dist_layout <- shiny::renderUI({
-          sw     <- selected_weather() %||% data.frame()
+          sw     <- wx_spec_sw() %||% data.frame()
           n_vars <- nrow(sw)
           dist_ids <- c("weather_dist1", "weather_dist2")
           cont_ids <- c("weather_dist_cont1", "weather_dist_cont2")
@@ -390,7 +403,7 @@ mod_1_05_weatherstats_server <- function(
         })
         output$binscatter_layout <- shiny::renderUI({
           weather_plot_layout(
-            ns, nrow(selected_weather() %||% data.frame()),
+            ns, nrow(wx_spec_sw() %||% data.frame()),
             ids    = c("binscatter1", "binscatter2"),
             height = "300px"
           )
@@ -643,8 +656,8 @@ mod_1_05_weatherstats_server <- function(
   }
 
   weather_loc_vals <- reactive({
-    req(survey_weather(), selected_weather())
-    sw   <- selected_weather()
+    req(survey_weather(), wx_spec_sw())
+    sw   <- wx_spec_sw()
     view <- wxmap_view()
 
     if (view == "value") {
@@ -777,7 +790,7 @@ mod_1_05_weatherstats_server <- function(
   observe({
     lv_list <- weather_loc_vals()
     req(lv_list)
-    sw   <- isolate(selected_weather())
+    sw   <- wx_spec_sw()
     view <- wxmap_view()
 
     for (i in seq_along(lv_list)) {
@@ -885,7 +898,7 @@ mod_1_05_weatherstats_server <- function(
 
     waves   <- wave_list()
     lv_list <- weather_loc_vals()
-    sw      <- selected_weather()
+    sw      <- wx_spec_sw()
     if (is.null(waves) || is.null(lv_list) || is.null(sw)) {
       return(shiny::helpText("No locations to map.",
                              style = "font-size: 12px;"))
@@ -934,7 +947,9 @@ mod_1_05_weatherstats_server <- function(
     load_hist_weather <- function(yf, yt) {
       svy <- survey_data()
       ss  <- selected_surveys()
-      sw  <- selected_weather()
+      # The historical comparison backs what is on screen, so it loads the
+      # button-time snapshot, not the live selector (INT-05 pattern).
+      sw  <- wx_spec_sw()
       swd <- survey_weather()
       if (is.null(svy) || is.null(ss) || is.null(sw) || is.null(swd)) {
         return(invisible(FALSE))
@@ -1000,7 +1015,7 @@ mod_1_05_weatherstats_server <- function(
     hist_years_d <- shiny::debounce(hist_years, 1500)
 
     observeEvent(hist_years_d(), {
-      req(selected_weather(), selected_surveys(), survey_data(),
+      req(wx_spec_sw(), selected_surveys(), survey_data(),
           survey_weather())
 
       hy  <- hist_years_d()

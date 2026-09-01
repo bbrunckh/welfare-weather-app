@@ -94,6 +94,7 @@ test_that("one map output is created per weather variable, not per wave", {
     args = weatherstats_args(sw, swd, make_map_data()),
     {
       survey_weather(swd)
+      wx_spec(list(sw = sw, so = NULL))
       session$flushReact()
 
       expect_equal(nrow(wave_list()), 2L)
@@ -122,6 +123,7 @@ test_that("the wave picker selects which wave the maps draw", {
     args = weatherstats_args(sw, swd, make_map_data()),
     {
       survey_weather(swd)
+      wx_spec(list(sw = sw, so = NULL))
       session$flushReact()
 
       # Defaults to the first wave rather than to nothing.
@@ -161,6 +163,7 @@ test_that("the wave picker is hidden when there is only one wave", {
     args = weatherstats_args(sw, swd, make_map_data(waves = 2018)),
     {
       survey_weather(swd)
+      wx_spec(list(sw = sw, so = NULL))
       session$flushReact()
 
       expect_equal(nrow(wave_list()), 1L)
@@ -183,6 +186,7 @@ test_that("the map colour scale spans every wave, not just the one shown", {
     args = weatherstats_args(sw, swd, make_map_data()),
     {
       survey_weather(swd)
+      wx_spec(list(sw = sw, so = NULL))
       session$flushReact()
 
       lv  <- weather_loc_vals()[[1]]
