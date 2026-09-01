@@ -43,7 +43,6 @@
 #' @param fp_list          List of character(2) vectors. Future period date ranges.
 #' @param ssps             Character vector. Climate SSP codes.
 #' @param residuals        Character. Residual method.
-#' @param dev_mode         Logical. If TRUE limit to 1 ensemble member per key.
 #' @param skip_coef_draws  Logical. If TRUE bypass Cholesky draws.
 #' @param propagate_all_covariate_uncertainty Logical. When FALSE (default)
 #'   and `residuals == "original"`, the additive-decomposition SE is applied:
@@ -99,7 +98,6 @@ fct_run_simulation <- function(sw,
                                 fp_list,
                                 ssps,
                                 residuals,
-                                dev_mode,
                                 skip_coef_draws,
                                 sim_dates,
                                 perturbation_method,
@@ -209,14 +207,8 @@ fct_run_simulation <- function(sw,
   }
 
   future_keys <- setdiff(names(weather_result), "historical")
-  if (isTRUE(dev_mode)) {
-    future_keys <- future_keys[
-      !duplicated(stringr::str_extract(future_keys,
-                                        "^(?:[^_]+_){4}[^_]+"))
-    ]
-  }
-  all_keys   <- c("historical", future_keys)
-  n_keys     <- length(all_keys)
+  all_keys    <- c("historical", future_keys)
+  n_keys      <- length(all_keys)
 
   n_hist_yrs    <- if (!is.null(weather_result[["historical"]]))
     length(unique(format(weather_result[["historical"]]$timestamp, "%Y")))

@@ -11,8 +11,6 @@
 #'       Fixed at simulation time.}
 #'     \item{\code{skip_coef_draws}}{Logical. If TRUE, bypasses VCV draws
 #'       and uses point estimates only. Default TRUE.}
-#'     \item{\code{dev_mode}}{Logical. If TRUE, limits to 1 ensemble model
-#'       per SSP/period for fast testing.}
 #'   }
 #'
 #' @noRd
@@ -208,14 +206,6 @@ mod_2_01_weathersim_ui <- function(id) {
           label   = "Include uncertainty on all covariates",
           value   = FALSE
         )
-      ),
-      shiny::checkboxInput(
-        inputId = ns("dev_mode"),
-        label   = shiny::tags$span(
-          style = "font-size:11px; font-weight:600; color:#b45309;",
-          "\u26A0 Dev mode: 1 ensemble model only"
-        ),
-        value   = FALSE
       )
     ),
     shiny::tags$hr(style = "margin: 10px 0;"),
@@ -579,7 +569,6 @@ mod_2_01_weathersim_server <- function(id,
             fp_list             = fp_list,
             ssps                = ssps,
             residuals           = sh_residuals, #sh$residuals,
-            dev_mode            = isTRUE(input$dev_mode),
             skip_coef_draws     = !isTRUE(input$include_coef_uncertainty),
             propagate_all_covariate_uncertainty =
               isTRUE(input$propagate_all_covariate_uncertainty),

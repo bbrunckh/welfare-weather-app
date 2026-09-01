@@ -68,7 +68,6 @@ run_ledger_sim <- function(weather_result, ...) {
     fp_list             = list(c("2030-01-01", "2040-12-31")),
     ssps                = c("ssp2_4_5", "ssp5_8_5"),
     residuals           = "none",
-    dev_mode            = FALSE,
     skip_coef_draws     = TRUE,
     sim_dates           = c("2020-01-01", "2020-12-31"),
     perturbation_method = NULL,
