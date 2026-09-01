@@ -43,6 +43,88 @@ make_step3_scenarios_fixture <- function() {
   ))
 }
 
+make_step3_scenarios_fixture_multi <- function() {
+  pipe  <- make_step3_pipe_fixture()
+  so    = list(type = "numeric", name = "welfare", transform = "log")
+  list(
+    "SSP2-4.5 / 2030-2040" = list(
+      scenario_name = "SSP2-4.5 / 2030-2040", so = so,
+      pipelines = list(ensemble_mean = pipe, ensemble_hi = pipe)
+    ),
+    "SSP5-8.5 / 2030-2040" = list(
+      scenario_name = "SSP5-8.5 / 2030-2040", so = so,
+      pipelines = list(ensemble_mean = pipe, ensemble_hi = pipe)
+    )
+  )
+}
+
+# ---- INT-01: Step 3 filters and poverty line survive pane rebuilds ----------
+
+test_that("Step 3 scenario filters and poverty line survive rebuilds (INT-01)", {
+  skip_if_not_installed("shiny")
+
+  bh  <- shiny::reactiveVal(make_step3_hist_fixture())
+  ph  <- shiny::reactiveVal(make_step3_hist_fixture())
+  bsc <- shiny::reactiveVal(make_step3_scenarios_fixture_multi())
+  psc <- shiny::reactiveVal(make_step3_scenarios_fixture_multi())
+
+  shiny::testServer(
+    function(input, output, session) {
+      internals <<- .wire_results_pane(
+        input, output, session,
+        baseline_hist_sim        = bh,
+        baseline_saved_scenarios = bsc,
+        policy_hist_sim          = ph,
+        policy_saved_scenarios   = psc,
+        selected_hist            = shiny::reactiveVal(NULL),
+        residuals                = shiny::reactiveVal("none")
+      )
+      NULL
+    },
+    {
+      session$flushReact()
+      html_text <- function(html) paste(as.character(html), collapse = "\n")
+      checked <- function(html) {
+        txt <- html_text(html)
+        regmatches(txt, gregexpr('value="[^"]*"\\s+checked', txt))[[1]]
+      }
+
+      # First render: all filters checked (historical default)
+      html <- session$output$scenario_filter_ui
+      expect_length(checked(html), 3L)  # 1 period + 2 SSPs
+
+      # User narrows the SSP filter, then the scenario set is republished
+      # (Step 2 re-run): the surviving filter is kept, not reset to all.
+      session$setInputs(filter_ssp = "SSP2-4.5")
+      bsc(make_step3_scenarios_fixture())
+      session$flushReact()
+      html <- session$output$scenario_filter_ui
+      expect_true(grepl('value="SSP2-4.5"\\s+checked', html_text(html)))
+      expect_false(grepl('value="SSP5-8.5"\\s+checked', html_text(html)))
+
+      # Fully-empty filter falls back to all (old-defaults decision)
+      session$setInputs(filter_ssp = character(0))
+      bsc(make_step3_scenarios_fixture_multi())
+      session$flushReact()
+      html <- session$output$scenario_filter_ui
+      expect_true(grepl('value="SSP2-4.5"\\s+checked', html_text(html)))
+      expect_true(grepl('value="SSP5-8.5"\\s+checked', html_text(html)))
+
+      # Poverty line: user value survives an aggregation-method round trip
+      session$setInputs(cmp_agg_method = "gap")
+      session$flushReact()
+      html <- session$output$cmp_pov_line_ui
+      expect_true(grepl('value="3"', html_text(html)))
+      session$setInputs(cmp_pov_line = 5.5)
+      session$setInputs(cmp_agg_method = "mean")   # input removed
+      session$setInputs(cmp_agg_method = "gap")    # input re-rendered
+      session$flushReact()
+      html <- session$output$cmp_pov_line_ui
+      expect_true(grepl('value="5.5"', html_text(html)))
+    }
+  )
+})
+
 test_that("Step 3 agg cache: deviation changes reuse cache; method/pov-line key entries", {
   skip_if_not_installed("shiny")
 

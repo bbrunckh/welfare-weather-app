@@ -302,11 +302,15 @@ mod_2_01_weathersim_server <- function(id,
       def <- baseline_default()
       if (length(ch) == 0)
         return(shiny::helpText("No survey data loaded.", style = "font-size:11px;"))
+      # INT-01: keep the user's baseline selection across rebuilds (e.g. the
+      # survey list changing after a Step 1 reload); only invalid values are
+      # dropped, and the default applies only when nothing survives.
+      prev_bs <- shiny::isolate(input$baseline_survey)
       shiny::selectInput(
         ns("baseline_survey"),
         label    = NULL,
         choices  = ch,
-        selected = def,
+        selected = .restore_selection(prev_bs, ch, fallback = def),
         multiple = TRUE,
         selectize = TRUE
       )

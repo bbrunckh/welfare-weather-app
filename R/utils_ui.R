@@ -30,6 +30,40 @@ info_popover <- function(..., title = NULL, docs = FALSE, placement = "right") {
   )
 }
 
+# ---- Dynamic-input selection restore (INT-01) -------------------------------
+
+#' Compute `selected` for a re-rendered dynamic input.
+#'
+#' renderUI-hosted inputs are rebuilt from scratch whenever their choice set
+#' changes, which resets them to hardcoded defaults and silently wipes user
+#' selections (INT-01). Call this inside the renderUI, passing the previous
+#' selection read with `shiny::isolate(input$...)`; values that still exist
+#' in the new choice set are restored, invalid values are dropped, and an
+#' empty result falls back to the historical default.
+#'
+#' @param prev     Previous selection (character or NULL on first render).
+#' @param choices  Valid choice values (coerced to character).
+#' @param fallback Default used when no previous value survives. May be NULL.
+#' @return Character vector (unnamed) or `fallback`.
+#' @noRd
+.restore_selection <- function(prev, choices, fallback) {
+  choices <- as.character(choices)
+  if (is.null(prev) || length(prev) == 0) return(fallback)
+  keep <- unname(as.character(prev)[as.character(prev) %in% choices])
+  if (length(keep) == 0) fallback else keep
+}
+
+#' Restore a numeric input's previous value across re-renders (INT-01).
+#'
+#' Numeric companion to `.restore_selection()`: returns `prev` when it is a
+#' single finite value inside `[min - tol, max + tol]`, else `fallback`.
+#' @noRd
+.restore_numeric <- function(prev, min, max, fallback, tol = 1e-8) {
+  if (is.null(prev) || length(prev) != 1L || !is.finite(prev)) return(fallback)
+  if (prev < (min - tol) || prev > (max + tol)) return(fallback)
+  prev
+}
+
 # ---- Busy guards (REACT-02) -------------------------------------------------
 # Long actions (data loads, model fits, simulations) use a module-local
 # `running` reactiveVal so double-clicks cannot re-enter the observer while

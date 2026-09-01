@@ -1037,10 +1037,13 @@ policy_input_diagnostics <- function(baseline_svy, policy_svy, vars = NULL) {
     req(input$cmp_agg_method)
     if (input$cmp_agg_method %in% c("headcount_ratio", "gap", "fgt2")) {
       default_val <- baseline_hist_sim()$pov_line %||% 3.00
+      # INT-01: keep the user's poverty line when this input is rebuilt
+      # (aggregation-method toggle); the run's value is only the fallback.
+      prev_pl <- shiny::isolate(input$cmp_pov_line)
       shiny::numericInput(
         inputId = ns("cmp_pov_line"),
         label   = "Poverty line ($/day)",
-        value   = default_val,
+        value   = .restore_numeric(prev_pl, 0.01, Inf, fallback = default_val),
         min     = 0.01,
         step    = 0.5
       )
@@ -1054,20 +1057,29 @@ policy_input_diagnostics <- function(baseline_svy, policy_svy, vars = NULL) {
     ssps <- all_ssps()
     yrs  <- all_anchor_years()
     mi   <- all_models_info()
+    # INT-01: keep the user's filter selection across re-runs that change the
+    # scenario set; only filters that no longer exist are dropped, and an
+    # empty result falls back to "all selected".
+    prev_fy  <- shiny::isolate(input$filter_year)
+    prev_fs  <- shiny::isolate(input$filter_ssp)
     tagList(
       shiny::fluidRow(
         shiny::column(4,
           if (length(yrs) > 0)
             shiny::checkboxGroupInput(
               ns("filter_year"), label = "Projection periods",
-              choices = yrs, selected = yrs, inline = TRUE
+              choices = yrs,
+              selected = .restore_selection(prev_fy, yrs, fallback = yrs),
+              inline = TRUE
             )
         ),
         shiny::column(4,
           if (length(ssps) > 0)
             shiny::checkboxGroupInput(
               ns("filter_ssp"), label = "SSPs",
-              choices = ssps, selected = ssps, inline = TRUE
+              choices = ssps,
+              selected = .restore_selection(prev_fs, ssps, fallback = ssps),
+              inline = TRUE
             )
         ),
         shiny::column(4,

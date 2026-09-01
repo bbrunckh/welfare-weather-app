@@ -2,10 +2,52 @@
 # tests/testthat/test-utils_ui.R                                               #
 # REACT-02: .busy_guard() double-click protection - second entry is refused    #
 # while a guarded action is still running, and the flag clears on end().       #
+# INT-01: .restore_selection() / .restore_numeric() dynamic-input restores.    #
 # ============================================================================ #
 
 library(testthat)
 library(shiny)
+
+# ---- INT-01: selection restore helpers ---------------------------------------
+
+test_that("restore_selection clips invalid values and falls back on empty", {
+  # First render: no previous selection -> fallback
+  expect_identical(.restore_selection(NULL, c("a", "b"), fallback = "a"), "a")
+  expect_identical(.restore_selection(character(0), c("a", "b"), fallback = NULL), NULL)
+
+  # Full survival: previous selection kept, order preserved
+  expect_identical(.restore_selection(c("b", "a"), c("a", "b", "c"), "x"),
+                   c("b", "a"))
+
+  # Partial clip: only values still present survive
+  expect_identical(.restore_selection(c("a", "zzz"), c("a", "b"), fallback = "b"),
+                   "a")
+
+  # Nothing survives -> historical default
+  expect_identical(.restore_selection(c("zz"), c("a", "b"), fallback = c("a", "b")),
+                   c("a", "b"))
+
+  # Named inputs/choices are matched on values, names stripped
+  expect_identical(
+    .restore_selection(c(k = "a"), stats::setNames(c("a", "b"), c("A", "B")), "a"),
+    "a"
+  )
+})
+
+test_that("restore_numeric keeps in-range values and falls back otherwise", {
+  expect_identical(.restore_numeric(5.5, 0.01, Inf, fallback = 3), 5.5)
+  expect_identical(.restore_numeric(7, 5, 20, fallback = 10), 7)
+  expect_identical(.restore_numeric(NULL, 5, 20, fallback = 10), 10)
+  expect_identical(.restore_numeric(NA_real_, 5, 20, fallback = 10), 10)
+  expect_identical(.restore_numeric(numeric(0), 5, 20, fallback = 10), 10)
+  # Out of range -> fallback
+  expect_identical(.restore_numeric(25, 5, 20, fallback = 10), 10)
+  expect_identical(.restore_numeric(0, 0.1, 1, fallback = 0.5), 0.5)
+  # Boundary values are kept
+  expect_identical(.restore_numeric(5, 5, 20, fallback = 10), 5)
+  expect_identical(.restore_numeric(20, 5, 20, fallback = 10), 20)
+})
+
 
 test_that("busy guard admits one concurrent entry and refuses re-entry", {
   shiny::testServer(

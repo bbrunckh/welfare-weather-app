@@ -46,11 +46,14 @@ mod_1_04_weather_server <- function(id, variable_list, selected_surveys, survey_
       choice_labels <- paste0(wl$label, " (", wl$name, ")")
       choice_map <- stats::setNames(wl$name, choice_labels)
 
+      # INT-01: keep the user's variable selection when the choice set is
+      # rebuilt; fall back to the first variable only when nothing survives.
+      prev_sel <- shiny::isolate(input$weather_variable_selector)
       shiny::selectizeInput(
         inputId  = ns("weather_variable_selector"),
         label    = "Weather variables",
         choices  = choice_map,
-        selected = wl$name[1],
+        selected = .restore_selection(prev_sel, wl$name, fallback = wl$name[1]),
         multiple = TRUE,
         options  = list(
           placeholder = "Select up to 2 weather variables",

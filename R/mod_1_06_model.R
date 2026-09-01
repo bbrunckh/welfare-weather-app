@@ -320,11 +320,14 @@ mod_1_06_model_server <- function(id,
               )
             )
           } else if (nrow(ixn) > 0) {
+            # INT-01: keep the user's interaction selection across rebuilds.
+            prev_ixn <- shiny::isolate(input$interactions)
             shiny::selectizeInput(
               ns("interactions"),
               label    = shiny::tagList("Interactions with ", wise_math("Haz_{kt}"), ":"),
               choices  = setNames(ixn$name, ixn$label),
-              selected = if ("urban" %in% ixn$name) "urban" else NULL,
+              selected = .restore_selection(prev_ixn, ixn$name,
+                                            fallback = if ("urban" %in% ixn$name) "urban" else NULL),
               multiple = TRUE,
               options  = list(
                 maxItems = 1,
@@ -339,11 +342,14 @@ mod_1_06_model_server <- function(id,
 
         # Fixed effects
         if (nrow(fe) > 0) {
+          # INT-01: keep the user's fixed-effect selection across rebuilds.
+          prev_fe <- shiny::isolate(input$fixedeffects)
           shiny::selectizeInput(
             ns("fixedeffects"),
             label    = "Fixed effects:",
             choices  = setNames(fe$name, fe$label),
-            selected = intersect(c("year", "gaul1_code"), fe$name),
+            selected = .restore_selection(prev_fe, fe$name,
+                                          fallback = intersect(c("year", "gaul1_code"), fe$name)),
             multiple = TRUE,
             options  = list(placeholder = "Select (several) fixed effects")
           )
@@ -388,6 +394,14 @@ mod_1_06_model_server <- function(id,
         firm <- exclude_selected_vars(firm_vars(),  outcome_name = selected_outcome()$name, weather_names = selected_weather()$name, interactions = input$interactions, fixedeffects = input$fixedeffects)
         area <- exclude_selected_vars(area_vars(),  outcome_name = selected_outcome()$name, weather_names = selected_weather()$name, interactions = input$interactions, fixedeffects = input$fixedeffects)
 
+        # The covariate panel re-renders whenever outcome/weather/interaction/
+        # fixed-effect choices change; restore each level's previous selection
+        # so those rebuilds stop wiping the user's picks (INT-01).
+        prev_ind  <- shiny::isolate(input$indcov)
+        prev_hh   <- shiny::isolate(input$hhcov)
+        prev_firm <- shiny::isolate(input$firmcov)
+        prev_area <- shiny::isolate(input$areacov)
+
         tagList(
 
             # Individual-level covariates
@@ -396,7 +410,7 @@ mod_1_06_model_server <- function(id,
                 ns("indcov"),
                 label    = shiny::tagList("Individual characteristics ", wise_math("X_{ijt}"), ":"),
                 choices  = make_choice_labels(ind),
-                selected = NULL,
+                selected = .restore_selection(prev_ind, ind$name, fallback = NULL),
                 multiple = TRUE,
                 options  = list(placeholder = "Select individual covariates")
               )
@@ -408,7 +422,7 @@ mod_1_06_model_server <- function(id,
                 ns("hhcov"),
                 label    = shiny::tagList("Household characteristics ", wise_math("X_{ijt}"), ":"),
                 choices  = make_choice_labels(hh),
-                selected = NULL,
+                selected = .restore_selection(prev_hh, hh$name, fallback = NULL),
                 multiple = TRUE,
                 options  = list(placeholder = "Select household covariates")
               )
@@ -420,7 +434,7 @@ mod_1_06_model_server <- function(id,
                 ns("firmcov"),
                 label    = "Firm characteristics:",
                 choices  = make_choice_labels(firm),
-                selected = NULL,
+                selected = .restore_selection(prev_firm, firm$name, fallback = NULL),
                 multiple = TRUE,
                 options  = list(placeholder = "Select firm covariates")
               )
@@ -432,7 +446,7 @@ mod_1_06_model_server <- function(id,
                 ns("areacov"),
                 label    = shiny::tagList("Area characteristics ", wise_math("E_{jt}"), ":"),
                 choices  = make_choice_labels(area),
-                selected = NULL,
+                selected = .restore_selection(prev_area, area$name, fallback = NULL),
                 multiple = TRUE,
                 options  = list(placeholder = "Select area covariates")
               )
@@ -520,6 +534,9 @@ mod_1_06_model_server <- function(id,
         if (length(choices) == 0) return(NULL)
 
         default_in <- intersect(already_in, choices)
+        # INT-01: restore prior force selections when the panel re-renders.
+        prev_in  <- shiny::isolate(input[[paste0("force_in_",  role)]])
+        prev_out <- shiny::isolate(input[[paste0("force_out_", role)]])
 
         tagList(
           tags$strong(role_label),
@@ -527,7 +544,8 @@ mod_1_06_model_server <- function(id,
             ns(paste0("force_in_", role)),
             label    = "Force include:",
             choices  = choices,
-            selected = if (length(default_in) > 0) default_in else NULL,
+            selected = .restore_selection(prev_in, choices,
+                                          fallback = if (length(default_in) > 0) default_in else NULL),
             multiple = TRUE,
             options  = list(placeholder = "Select covariates to force in")
           ),
@@ -535,7 +553,7 @@ mod_1_06_model_server <- function(id,
             ns(paste0("force_out_", role)),
             label    = "Force exclude:",
             choices  = choices,
-            selected = NULL,
+            selected = .restore_selection(prev_out, choices, fallback = NULL),
             multiple = TRUE,
             options  = list(placeholder = "Select covariates to force out")
           ),
@@ -622,6 +640,10 @@ mod_1_06_model_server <- function(id,
 
       if (!lasso_advanced_open()) return(NULL)
 
+      # INT-01: the panel is destroyed/recreated on every toggle; restore the
+      # previous settings so closing and reopening does not reset them.
+      prev <- function(id) shiny::isolate(input[[id]])
+
       tagList(
 
         sliderInput(
@@ -629,7 +651,7 @@ mod_1_06_model_server <- function(id,
           "Elastic Net Mixing (alpha):",
           min = 0,
           max = 1,
-          value = 1,
+          value = .restore_numeric(prev("lasso_alpha"), 0, 1, fallback = 1),
           step = 0.1
         ),
 
@@ -637,7 +659,8 @@ mod_1_06_model_server <- function(id,
           ns("lasso_interactions"),
           label    = "Lambda choice:",
           choices  = c("lambda.1se", "lambda.min"),
-          selected = "lambda.1se",
+          selected = .restore_selection(prev("lasso_interactions"),
+                                        c("lambda.1se", "lambda.min"), fallback = "lambda.1se"),
           multiple = FALSE,
           options  = list(
             maxItems    = 1,
@@ -650,7 +673,7 @@ mod_1_06_model_server <- function(id,
           "Cross-validation folds:",
           min = 5,
           max = 20,
-          value = 10,
+          value = .restore_numeric(prev("lasso_nfolds"), 5, 20, fallback = 10),
           step = 1
         ),
 
@@ -658,13 +681,15 @@ mod_1_06_model_server <- function(id,
           ns("lasso_standardize"),
           "Standardize predictors:",
           choices  = c("Standardize", "Do not standardize"),
-          selected = "Standardize"
+          selected = .restore_selection(prev("lasso_standardize"),
+                                        c("Standardize", "Do not standardize"),
+                                        fallback = "Standardize")
         ),
 
         shiny::checkboxInput(
           ns("use_mice"),
           "Use MICE imputation for missing covariates",
-          value = FALSE
+          value = isTRUE(prev("use_mice"))
         ),
 
         sliderInput(
@@ -672,7 +697,7 @@ mod_1_06_model_server <- function(id,
           "Number of imputations (m)",
           min = 1,
           max = 20,
-          value = 5,
+          value = .restore_numeric(prev("mi_m"), 1, 20, fallback = 5),
           step = 1
         ),
 
@@ -681,7 +706,7 @@ mod_1_06_model_server <- function(id,
           "Imputation iterations",
           min = 1,
           max = 20,
-          value = 5,
+          value = .restore_numeric(prev("mi_maxit"), 1, 20, fallback = 5),
           step = 1
         ),
 
@@ -690,7 +715,7 @@ mod_1_06_model_server <- function(id,
           "Selection frequency threshold",
           min = 0.1,
           max = 1,
-          value = 0.5,
+          value = .restore_numeric(prev("stability_threshold"), 0.1, 1, fallback = 0.5),
           step = 0.05
         )
 

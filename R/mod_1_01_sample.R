@@ -106,11 +106,14 @@ mod_1_01_sample_server <- function(id, connection_params, survey_list, variable_
           dplyr::filter(.data$code == !!code) |>
           dplyr::pull(.data$economy) |>
           head(1)
+        # INT-01: keep the user's year selection when the input is rebuilt
+        # (economy toggled); reset only years no longer available.
+        prev_yrs <- shiny::isolate(input[[paste0("year_", code)]])
         selectizeInput(
           inputId  = ns(paste0("year_", code)),
           label    = paste("Survey years -", economy_name),
           choices  = yrs,
-          selected = yrs,
+          selected = .restore_selection(prev_yrs, yrs, fallback = yrs),
           multiple = TRUE,
           options  = list(placeholder = paste("Select years for", economy_name))
         )
