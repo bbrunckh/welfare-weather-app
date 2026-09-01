@@ -19,6 +19,142 @@
 #   .apply_binning()       - apply cut points to weather data frame
 
 # ---------------------------------------------------------------------------- #
+# Section 0 - Remote weather disk cache (PERF-13)                              #
+#                                                                              #
+# get_weather() re-reads identical ERA5/CMIP6 parquet files from the remote    #
+# store on every run. For remote backends (s3/gcs/azure/databricks) each read  #
+# is a network fetch; a bounded local parquet cache removes the repeat cost    #
+# across runs while leaving the data flow byte-identical: the cache stores     #
+# exactly the rows (and, where applied, the column/date slice) the lazy remote #
+# scan would have produced, in the same scan order (DuckDB is pinned to one    #
+# thread for the duration of get_weather, so order is deterministic).          #
+#                                                                              #
+# Keying: digest of (cache version, resolved file paths, variable columns,     #
+# date bounds). The version constant must be bumped whenever the upstream      #
+# file layout changes. Kill switch: WISEAPP_WEATHER_CACHE_DISABLE=1. Size cap: #
+# WISEAPP_WEATHER_CACHE_MAX_MB (default 2048), LRU-evicted by mtime.           #
+# ---------------------------------------------------------------------------- #
+
+WISEAPP_WX_CACHE_VERSION <- "v1"
+
+.weather_cache_dir <- function() {
+  base <- Sys.getenv("WISEAPP_WEATHER_CACHE_DIR")
+  if (!nzchar(base)) {
+    base <- tools::R_user_dir("wiseapp", "cache")
+  }
+  file.path(base, "weather", WISEAPP_WX_CACHE_VERSION)
+}
+
+.weather_cache_evict <- function(dir, max_mb = NULL) {
+  if (is.null(max_mb)) {
+    max_mb <- suppressWarnings(as.numeric(Sys.getenv("WISEAPP_WEATHER_CACHE_MAX_MB")))
+    if (is.na(max_mb) || max_mb < 0) max_mb <- 2048
+  }
+  files <- list.files(dir, pattern = "\\.parquet$", full.names = TRUE,
+                      recursive = TRUE)
+  if (length(files) == 0) return(invisible(NULL))
+  info <- file.info(files)
+  total_mb <- sum(info$size, na.rm = TRUE) / 1024^2
+  if (total_mb <= max_mb) return(invisible(NULL))
+  # LRU: delete oldest-accessed files first until under budget
+  ord <- order(info$mtime)
+  for (f in files[ord]) {
+    if (total_mb <= max_mb) break
+    sz <- info[f, "size"]
+    if (unlink(f) == 0 && is.finite(sz)) total_mb <- total_mb - sz / 1024^2
+  }
+  invisible(NULL)
+}
+
+#' Load a remote weather/h3 parquet set through the bounded disk cache.
+#'
+#' Returns a lazy DuckDB relation whose contents are identical to applying
+#' `cols` / `tmin` / `tmax` directly to `load_data(fnames, ...)`. On local
+#' connections the cache is bypassed (local parquet reads are already fast)
+#' and the plain lazy relation is returned.
+#'
+#' @param fnames           Character vector of store-relative parquet paths.
+#' @param connection_params Passed to load_data().
+#' @param cols             Character column subset to keep, or NULL for all
+#'   columns. The slice copied to the cache holds exactly these columns.
+#' @param tmin,tmax        Optional date bounds on `tcol` (applied in the
+#'   cached COPY and re-applied downstream - idempotent).
+#' @param cache_version    Bump to invalidate every cached slice.
+#' @noRd
+.wx_cache_load <- function(fnames, connection_params,
+                           cols = NULL, tcol = "timestamp",
+                           tmin = NULL, tmax = NULL,
+                           cache_version = WISEAPP_WX_CACHE_VERSION) {
+  apply_slice <- function(lazy) {
+    if (!is.null(cols)) lazy <- dplyr::select(lazy, dplyr::all_of(cols))
+    if (!is.null(tcol) && !is.null(tmin)) {
+      lazy <- dplyr::filter(lazy,
+        !!rlang::sym(tcol) >= !!tmin, !!rlang::sym(tcol) <= !!tmax)
+    }
+    lazy
+  }
+
+  force_cache <- isTRUE(Sys.getenv("WISEAPP_WEATHER_CACHE_FORCE") %in%
+                          c("1", "true", "TRUE"))
+  type <- connection_params$type %||% "local"
+  use_cache <- (!identical(type, "local") || force_cache) &&
+    !isTRUE(Sys.getenv("WISEAPP_WEATHER_CACHE_DISABLE") %in% c("1", "true", "TRUE"))
+
+  key <- digest::digest(list(cache_version, sort(fnames), cols, tcol, tmin, tmax))
+  dir <- .weather_cache_dir()
+  path <- file.path(dir, paste0(key, ".parquet"))
+
+  # Cache hit: load the local slice WITHOUT opening the remote store, so a
+  # cached fetch still works when the source is temporarily unreachable.
+  if (use_cache && file.exists(path)) {
+    local <- tryCatch(
+      load_data(path, list(type = "local", path = dirname(path)), collect = FALSE),
+      error = function(e) NULL
+    )
+    if (!is.null(local)) return(apply_slice(local))
+  }
+
+  lazy <- load_data(fnames, connection_params, collect = FALSE)
+
+  if (!use_cache) return(apply_slice(lazy))
+
+  if (!file.exists(path)) {
+    ok_create <- dir.create(dir, showWarnings = FALSE, recursive = TRUE)
+    filtered <- apply_slice(lazy)
+    con <- .duck_con()
+    tmp_path <- paste0(path, ".tmp")
+    ok <- tryCatch({
+      DBI::dbExecute(con, sprintf(
+        "COPY (%s) TO '%s' (FORMAT PARQUET, COMPRESSION ZSTD);",
+        dbplyr::sql_render(filtered), tmp_path
+      ))
+      TRUE
+    }, error = function(e) {
+      warning("[wiseapp] weather disk cache write failed; continuing remote: ",
+              conditionMessage(e), call. = FALSE)
+      FALSE
+    })
+    if (!ok) return(filtered)
+    if (!file.rename(tmp_path, path)) {
+      # Concurrent write race: another session won; use its file
+      try(unlink(tmp_path), silent = TRUE)
+      if (!file.exists(path)) return(filtered)
+    }
+    .weather_cache_evict(dir)
+  }
+
+  # Load the cached slice locally. Contents are identical to the remote scan
+  # (same rows, same order - single-threaded COPY preserves scan order), and
+  # the slice filter is re-applied downstream as a no-op.
+  local <- tryCatch(
+    load_data(path, list(type = "local", path = dirname(path)), collect = FALSE),
+    error = function(e) NULL
+  )
+  if (is.null(local)) return(apply_slice(lazy))
+  apply_slice(local)
+}
+
+# ---------------------------------------------------------------------------- #
 # Section 1 - H3 spatial helpers                                               #
 # ---------------------------------------------------------------------------- #
 
@@ -453,12 +589,19 @@ get_weather <- function(
     }
   }, add = TRUE)
 
-  weather <- load_data(weather_fnames, connection_params, collect = FALSE) |>
+  # PERF-13: remote parquet loads go through the bounded disk cache. The
+  # cached slice holds exactly the columns/rows the lazy scan would produce,
+  # so the pipelines below are unchanged and results stay bit-identical.
+  weather <- .wx_cache_load(
+    weather_fnames, connection_params,
+    cols = c("h3", "timestamp", weather_vars),
+    tmin = date_min, tmax = date_max
+  ) |>
     dplyr::select(h3, timestamp, dplyr::all_of(weather_vars)) |>
     dplyr::filter(dplyr::if_all(dplyr::all_of(weather_vars), ~ !is.na(.x))) |>
     dplyr::filter(timestamp >= date_min, timestamp <= date_max)
 
-  h3_slim <- load_data(h3_fnames, connection_params, collect = FALSE)
+  h3_slim <- .wx_cache_load(h3_fnames, connection_params, cols = NULL, tcol = NULL)
 
   if (!"pop_2020" %in% colnames(h3_slim)) {
     h3_slim <- h3_slim |> dplyr::mutate(pop_2020 = 1L)
@@ -659,15 +802,23 @@ get_weather <- function(
       weather_vars
     )
 
-    # Detect CMIP6 H3 resolution once using the first SSP's historical file
+    # Detect CMIP6 H3 resolution once using the first SSP's historical file.
+    # PERF-13: the raw historical slice is loaded once through the disk cache
+    # and reused both for the resolution probe (no second remote open) and
+    # for the monthly historical baseline below.
     hist_fnames_probe <- paste0(
       "hazard/weather/projections/", survey_codes, "/",
       survey_codes, "_", proj_source, "_historical.parquet"
     )
 
+    cmip6_cols <- c("model", "h3", "timestamp", weather_vars)
+    cmip6_hist_raw_lazy <- .wx_cache_load(
+      hist_fnames_probe, connection_params, cols = cmip6_cols, tcol = NULL
+    )
+
     cmip6_res <- tryCatch({
       probe_sql <- dbplyr::sql_render(
-        load_data(hist_fnames_probe, connection_params, collect = FALSE) |>
+        cmip6_hist_raw_lazy |>
           dplyr::filter(!is.na(h3)) |>
           dplyr::select(h3) |>
           head(1)
@@ -703,10 +854,12 @@ get_weather <- function(
         )
     }
 
-    # Helper: load CMIP6 parquets -> lazy (model, h3, month, vars)
-    .cmip6_h3_monthly <- function(fnames, ts_start, ts_end) {
-      tbl <- load_data(fnames, connection_params, collect = FALSE) |>
-        dplyr::select(model, h3, timestamp, dplyr::all_of(weather_vars)) |>
+    # Helper: aggregate a pre-loaded raw CMIP6 lazy tbl -> (model, h3, month, vars).
+    # PERF-13: callers pass a disk-cache-backed lazy relation instead of
+    # re-opening the remote parquet for every (SSP, period) combination.
+    .cmip6_h3_monthly <- function(raw_tbl, ts_start, ts_end) {
+      tbl <- raw_tbl |>
+        dplyr::select(dplyr::all_of(cmip6_cols)) |>
         dplyr::filter(timestamp >= ts_start, timestamp <= ts_end) |>
         dplyr::mutate(month = dbplyr::sql("MONTH(timestamp)")) |>
         dplyr::group_by(model, h3, month) |>
@@ -728,7 +881,7 @@ get_weather <- function(
     }
 
     # CMIP6 historical baseline - shared across all SSPs (same files)
-    h3_hist_raw <- .cmip6_h3_monthly(hist_fnames_probe, baseline_start, baseline_end)
+    h3_hist_raw <- .cmip6_h3_monthly(cmip6_hist_raw_lazy, baseline_start, baseline_end)
 
     # -- Per-SSP worker -------------------------------------------------------
     # Processes all models * all future periods.  The CMIP6 historical
@@ -743,8 +896,15 @@ get_weather <- function(
         survey_codes, "_", proj_source, "_", ssp_fname, ".parquet"
       )
 
+      # PERF-13: the future file is fetched through the disk cache once per
+      # SSP and reused for the baseline overlap *and* every future period
+      # (previously one remote read per period).
+      ssp_raw_lazy <- .wx_cache_load(
+        future_fnames, connection_params, cols = cmip6_cols, tcol = NULL
+      )
+
       # SSP baseline overlap - shared across all future periods
-      h3_ssp_raw <- .cmip6_h3_monthly(future_fnames, baseline_start, baseline_end)
+      h3_ssp_raw <- .cmip6_h3_monthly(ssp_raw_lazy, baseline_start, baseline_end)
 
       # Combined CMIP6 historical baseline (hist + ssp overlap period)
       h3_hist <- dplyr::union_all(h3_hist_raw, h3_ssp_raw) |>
@@ -764,7 +924,7 @@ get_weather <- function(
           format(fp_start, "%Y"), "_", format(fp_end, "%Y")
         )
 
-        h3_fut <- .cmip6_h3_monthly(future_fnames, fp_start, fp_end)
+        h3_fut <- .cmip6_h3_monthly(ssp_raw_lazy, fp_start, fp_end)
 
         # Lazy per-model H3-level delta table
         h3_deltas <- dplyr::inner_join(

@@ -1156,3 +1156,106 @@ test_that("SSP perturbation with equal-frequency bins is deterministic", {
 
   expect_identical(a, b)
 })
+
+# ============================================================================ #
+# 6. PERF-13: forced disk-cache mode produces bit-identical results            #
+#                                                                              #
+# WISEAPP_WEATHER_CACHE_FORCE routes local loads through the disk cache so     #
+# the cache path is exercised without network credentials. The cached slice    #
+# holds exactly the rows/columns the remote scan would produce, so the full    #
+# get_weather result (historical + climate scenario) must be identical.        #
+# ============================================================================ #
+
+test_that("forced weather disk cache is bit-identical, cold and warm (PERF-13)", {
+  skip_if_not_installed("arrow")
+  skip_if_not_installed("duckdb")
+  skip_if_not_installed("duckdbfs")
+  skip_if_not_installed("bit64")
+
+  tmp <- withr::local_tempdir()
+  fx  <- make_test_fixtures_cross_res(
+    tmp,
+    seed_cell   = "85283473fffffff",
+    micro_res   = 5L,
+    weather_res = 4L
+  )
+  make_test_fixtures_cmip6_coarser(tmp, fx, cmip6_res = 3L)
+
+  run <- function() {
+    get_weather(
+      survey_data         = fx$survey_data,
+      selected_surveys    = fx$selected_surveys,
+      selected_weather    = sw_continuous("tx"),
+      dates               = fx$dates,
+      connection_params   = fx$connection_params,
+      ssp                 = "ssp2_4_5",
+      future_period       = c("2025-01-01", "2025-12-31"),
+      perturbation_method = c(tx = "additive")
+    )
+  }
+
+  # Reference: cache bypassed (local type, no FORCE)
+  withr::local_envvar(WISEAPP_WEATHER_CACHE_DISABLE = "1")
+  ref <- run()
+
+  # Cold run with the cache forced on (writes slices), then warm run (hits)
+  withr::local_envvar(
+    WISEAPP_WEATHER_CACHE_DISABLE = NULL,
+    WISEAPP_WEATHER_CACHE_FORCE   = "1"
+  )
+  cold <- run()
+  warm <- run()
+
+  expect_identical(ref$historical, cold$historical)
+  expect_identical(ref$historical, warm$historical)
+  for (nm in setdiff(names(cold), "historical")) {
+    expect_identical(ref[[nm]], cold[[nm]])
+    expect_identical(ref[[nm]], warm[[nm]])
+  }
+  # The warm run actually served from cache (slices were written on cold)
+  expect_true(
+    length(list.files(.weather_cache_dir(), pattern = "\\.parquet$",
+                      recursive = TRUE)) >= 3L
+  )
+})
+
+# ============================================================================ #
+# 7. PERF-23: temp-table materialisation is transparent to loc_panel           #
+# ============================================================================ #
+
+test_that("loc_panel is identical on the lazy view and its local temp table", {
+  skip_if_not_installed("arrow")
+  skip_if_not_installed("duckdb")
+
+  tmp <- withr::local_tempdir()
+  h3_dir <- file.path(tmp, "microdata", "h3", "TST")
+  dir.create(h3_dir, recursive = TRUE, showWarnings = FALSE)
+  h3_df <- data.frame(
+    code = "TST", year = 2020L, survname = "SRV",
+    loc_id = c("a", "a", "b", "b", "c"),
+    h3 = c("x", "y", "y", "z", "z"),
+    pop_2020 = c(100L, 200L, 150L, 50L, 300L),
+    stringsAsFactors = FALSE
+  )
+  arrow::write_parquet(h3_df, file.path(h3_dir, "TST_2020_lsms_h3.parquet"))
+
+  cp   <- list(type = "local", path = tmp)
+  lazy <- load_data(
+    "microdata/h3/TST/TST_2020_lsms_h3.parquet", cp, collect = FALSE
+  )
+
+  direct <- suppressWarnings(loc_panel(lazy, id_col = loc_id, h3_col = h3,
+                      weight_col = pop_2020,
+                      group_cols = c("code", "year", "survname")))
+
+  nm <- basename(tempfile(pattern = "ss_h3_"))
+  local_tbl <- dplyr::compute(lazy, name = nm, temporary = TRUE)
+  on.exit(try(DBI::dbRemoveTable(
+    dbplyr::remote_con(local_tbl), nm), silent = TRUE), add = TRUE)
+
+  from_temp <- suppressWarnings(loc_panel(local_tbl, id_col = loc_id, h3_col = h3,
+                         weight_col = pop_2020,
+                         group_cols = c("code", "year", "survname")))
+
+  expect_identical(direct, from_temp)
+})

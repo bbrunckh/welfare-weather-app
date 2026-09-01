@@ -151,12 +151,32 @@ mod_1_02_surveystats_server <- function(
       )
 
       if (!is.null(h3_df)) {
+        # PERF-23: the h3 lazy relation is a view over remote parquet files.
+        # Every downstream scan (map GeoJSON, cell geometry, cell map,
+        # loc_panel's multiple passes, loc keys) would otherwise re-read the
+        # files over the network. Materialise once into a local temp table;
+        # all consumers in this block then read locally. The table is dropped
+        # when the block ends (everything downstream collects eagerly).
+        h3_local <- tryCatch({
+          nm <- basename(tempfile(pattern = "ss_h3_"))
+          local_h3 <- dplyr::compute(h3_df, name = nm, temporary = TRUE)
+          on.exit(
+            try(DBI::dbRemoveTable(dbplyr::remote_con(local_h3), nm), silent = TRUE),
+            add = TRUE
+          )
+          local_h3
+        }, error = function(e) {
+          notify(paste("Could not cache H3 data locally; continuing remote:",
+                       conditionMessage(e)), type = "warning", duration = 5)
+          h3_df
+        })
+
         tryCatch({
-          con <- dbplyr::remote_con(h3_df)
+          con <- dbplyr::remote_con(h3_local)
             .duck_load_ext("spatial")
             .duck_load_ext("h3")
 
-          loc_df <- h3_df |>
+          loc_df <- h3_local |>
             dplyr::summarise(
               # Emit GeoJSON string directly from DuckDB - no WKB or sf needed
               geom = st_asgeojson(st_union_agg(st_geomfromtext(h3_cell_to_boundary_wkt(h3)))),
@@ -192,14 +212,14 @@ mod_1_02_surveystats_server <- function(
         # tile without overlapping, so the sample's density reads directly off
         # the colour instead of a pile of outlines.
         tryCatch({
-          cell_geo <- h3_df |>
+          cell_geo <- h3_local |>
             dplyr::distinct(h3) |>
             dplyr::mutate(
               geom = st_asgeojson(st_geomfromtext(h3_cell_to_boundary_wkt(h3)))
             ) |>
             collect_deterministic("h3")
 
-          cell_map <- h3_df |>
+          cell_map <- h3_local |>
             dplyr::select(code, year, survname, loc_id, h3, pop_2020) |>
             collect_deterministic(c("code", "year", "survname", "loc_id", "h3"))
 
@@ -210,10 +230,10 @@ mod_1_02_surveystats_server <- function(
         })
 
         tryCatch({
-          panel_map <- loc_panel(h3_df, id_col = loc_id, h3_col = h3, weight_col = pop_2020,
+          panel_map <- loc_panel(h3_local, id_col = loc_id, h3_col = h3, weight_col = pop_2020,
                                     group_cols = c("code", "year", "survname"))
 
-          loc_keys <- h3_df |>
+          loc_keys <- h3_local |>
             dplyr::distinct(code, year, survname, loc_id) |>
             collect_deterministic(c("code", "year", "survname", "loc_id"))
 
