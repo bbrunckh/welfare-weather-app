@@ -50,6 +50,7 @@ mod_1_05_weatherstats_server <- function(
     survey_data,
     map_data = NULL,
     cell_data = NULL,
+    survey_version = reactive(0L),
     tabset_id,
     tabset_session = NULL
 ) {
@@ -93,6 +94,19 @@ mod_1_05_weatherstats_server <- function(
     wx_spec     <- reactiveVal(NULL)
     wx_spec_sw  <- shiny::reactive({ req(wx_spec()); wx_spec()$sw })
     wx_spec_so  <- shiny::reactive({ req(wx_spec()); wx_spec()$so })
+
+    # INT-08: banner when the survey data behind the weather load was
+    # reloaded after the button was last pressed.
+    output$wx_stale_banner <- shiny::renderUI({
+      spec <- wx_spec()
+      if (!is.null(spec) &&
+          !identical(survey_version(), spec$survey_version)) {
+        .stale_banner(
+          "Weather stats",
+          note = "Survey data was reloaded after these statistics were produced."
+        )
+      } else NULL
+    })
 
     # ---- Load and merge weather on button click ------------------------------
 
@@ -183,7 +197,8 @@ mod_1_05_weatherstats_server <- function(
       # INT-05 pattern: snapshot the selection this load was built from. All
       # tab outputs bind to this spec, so selector changes stay inert until
       # the button is pressed again.
-      wx_spec(list(sw = sw, so = selected_outcome()))
+      wx_spec(list(sw = sw, so = selected_outcome(),
+                   survey_version = survey_version()))
 
       showNotification("Weather data ready.", duration = 3, type = "message")
 
@@ -414,6 +429,7 @@ mod_1_05_weatherstats_server <- function(
           shiny::tabPanel(
             title = "Weather stats",
             value = "weather_desc",
+            shiny::uiOutput(ns("wx_stale_banner")),
             shiny::h4(
               "Distribution of weather (sample and its own history)",
               info_popover(

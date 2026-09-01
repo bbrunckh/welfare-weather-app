@@ -123,6 +123,7 @@ mod_1_modelling_server <- function(id,
       survey_data    = s2$survey_data,
       map_data       = s2$map_data,
       cell_data      = s2$cell_data,
+      survey_version = s2$survey_version,
       tabset_id      = "step1_output_tabs",
       tabset_session = session
     )
@@ -149,6 +150,7 @@ mod_1_modelling_server <- function(id,
       survey_data       = s2$survey_data,
       map_data          = s2$map_data,
       cell_data         = s2$cell_data,
+      survey_version    = s2$survey_version,
       tabset_id         = "step1_output_tabs",
       tabset_session    = session
     )

@@ -39,6 +39,7 @@ mod_1_03_outcome_ui <- function(id) {
 mod_1_03_outcome_server <- function(id, variable_list, survey_data,
                                     map_data       = reactive(NULL),
                                     cell_data      = reactive(NULL),
+                                    survey_version = reactive(0L),
                                     tabset_id      = NULL,
                                     tabset_session = NULL) {
   moduleServer(id, function(input, output, session) {
@@ -47,6 +48,19 @@ mod_1_03_outcome_server <- function(id, variable_list, survey_data,
     if (is.null(tabset_session)) {
       tabset_session <- session$parent %||% session
     }
+
+    # INT-08: banner when the survey data behind these statistics was
+    # reloaded after the button was last pressed.
+    output$outcome_stale_banner <- renderUI({
+      spec <- outcome_spec()
+      if (!is.null(spec) &&
+          !identical(survey_version(), spec$survey_version)) {
+        .stale_banner(
+          "Outcome stats",
+          note = "Survey data was reloaded after these statistics were produced."
+        )
+      } else NULL
+    })
 
     # ---- Available outcome variables present in the survey data -------------
 
@@ -189,8 +203,9 @@ mod_1_03_outcome_server <- function(id, variable_list, survey_data,
 
       # Snapshot the current selection; outputs below bind to it so selector
       # changes do not re-render the tab until the button is pressed again.
-      outcome_spec(list(info = selected_outcome_info(),
-                        so   = selected_outcome()))
+      outcome_spec(list(info            = selected_outcome_info(),
+                        so              = selected_outcome(),
+                        survey_version  = survey_version()))
 
       # Define outputs (once)
       if (!outcome_tab_added()) {
@@ -325,6 +340,7 @@ mod_1_03_outcome_server <- function(id, variable_list, survey_data,
             shiny::tabPanel(
               title = "Outcome stats",
               value = "outcome_stats_tab",
+              shiny::uiOutput(ns("outcome_stale_banner")),
               bslib::layout_columns(
                 col_widths = c(6, 6),
                 bslib::card(

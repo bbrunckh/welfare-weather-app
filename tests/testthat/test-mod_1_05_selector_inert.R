@@ -73,6 +73,7 @@ test_that("weather stats tab is inert to selector changes until re-pressed", {
     name = "welfare", label = "Welfare", type = "numeric",
     transform = "none", stringsAsFactors = FALSE
   ))
+  survey_version_rv <- shiny::reactiveVal(0L)
 
   shiny::testServer(
     mod_1_05_weatherstats_server,
@@ -85,6 +86,7 @@ test_that("weather stats tab is inert to selector changes until re-pressed", {
       selected_outcome  = sel_outcome_rv,
       selected_weather  = sel_weather_rv,
       survey_data       = shiny::reactiveVal(make_wx_survey()),
+      survey_version    = survey_version_rv,
       tabset_id         = "step1_tabs"
     ),
     {
@@ -118,6 +120,16 @@ test_that("weather stats tab is inert to selector changes until re-pressed", {
       press(2L); settle()
       expect_equal(loc_calls, 2L)
       expect_equal(wx_spec()$sw$label, "Max temp reconfigured")
+
+      # Survey reload after the run: the stale banner appears (INT-08) and
+      # clears again once the button is re-pressed.
+      survey_version_rv(1L); settle()
+      html <- paste(as.character(session$output$wx_stale_banner), collapse = " ")
+      expect_match(html, "Results are out of date", fixed = TRUE)
+      expect_match(html, "Survey data was reloaded", fixed = TRUE)
+      press(3L); settle()
+      html <- paste(as.character(session$output$wx_stale_banner), collapse = " ")
+      expect_identical(nchar(html), 0L)
     }
   )
 })

@@ -288,9 +288,13 @@ mod_2_02_results_server <- function(id,
 
     if (is.null(tabset_session)) tabset_session <- session$parent %||% session
 
-    # INT-08: stale banner above the results pane.
+    # INT-08: stale banner above the results pane. This surface gates its
+    # CSV export while stale.
     output$stale_banner <- renderUI({
-      if (isTRUE(stale())) .stale_banner("Step 2 simulation results") else NULL
+      if (isTRUE(stale())) .stale_banner(
+        "Step 2 simulation results",
+        note = "Interpretation and exports are disabled until then."
+      ) else NULL
     })
 
     # ---- Lazy delta-method aggregation -------------------------------------

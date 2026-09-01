@@ -420,9 +420,13 @@ policy_input_diagnostics <- function(baseline_svy, policy_svy, vars = NULL) {
                                stale = reactive(FALSE)) {
   ns <- session$ns
 
-  # INT-08: stale banner above the results pane.
+  # INT-08: stale banner above the results pane. This surface gates its
+  # CSV export while stale.
   output$stale_banner_ui <- shiny::renderUI({
-    if (isTRUE(stale())) .stale_banner("Step 3 policy results") else NULL
+    if (isTRUE(stale())) .stale_banner(
+      "Step 3 policy results",
+      note = "Interpretation and exports are disabled until then."
+    ) else NULL
   })
 
   # Resolve the residuals choice captured by the Step 2 run. The live control

@@ -50,9 +50,14 @@ info_popover <- function(..., title = NULL, docs = FALSE, placement = "right") {
 #' Rendered above a result surface while its run signature no longer matches
 #' the current upstream inputs. Results stay visible (they are expensive) but
 #' are explicitly labelled as describing an earlier configuration.
+#'
+#' @param step        Optional label for the affected surface.
+#' @param note        Optional extra sentence; the export-gating surfaces pass
+#'   "Interpretation and exports are disabled until then."
 #' @noRd
-.stale_banner <- function(step = NULL) {
+.stale_banner <- function(step = NULL, note = NULL) {
   step_txt <- if (!is.null(step)) paste0(" (", step, ")") else NULL
+  note_txt <- if (!is.null(note)) paste0(" ", note) else NULL
   shiny::div(
     class = "alert alert-warning",
     role  = "alert",
@@ -60,8 +65,7 @@ info_popover <- function(..., title = NULL, docs = FALSE, placement = "right") {
     shiny::tags$b("\u26a0 Results are out of date", step_txt, "."),
     "Upstream inputs changed after this run, so the results below were",
     "produced by an earlier configuration and no longer describe the",
-    "current selections. Re-run to refresh them; interpretation and",
-    "exports are disabled until then."
+    "current selections. Re-run to refresh them.", note_txt
   )
 }
 

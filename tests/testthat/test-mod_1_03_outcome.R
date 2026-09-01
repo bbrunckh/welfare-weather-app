@@ -43,13 +43,17 @@ test_that("outcome stats tab re-renders only on button press", {
   shiny::testServer(
     mod_1_03_outcome_server,
     args = list(
-      id            = "outcome",
-      variable_list = shiny::reactiveVal(make_vl_outcome()),
-      survey_data   = shiny::reactiveVal(make_survey_df()),
-      tabset_id     = "step1_tabs"
+      id             = "outcome",
+      variable_list  = shiny::reactiveVal(make_vl_outcome()),
+      survey_data    = shiny::reactiveVal(make_survey_df()),
+      survey_version = shiny::reactiveVal(0L),
+      tabset_id      = "step1_tabs"
     ),
     {
       settle <- function() { session$elapse(500); session$flushReact() }
+      banner <- function() {
+        paste(as.character(session$output$outcome_stale_banner), collapse = " ")
+      }
 
       session$setInputs(outcome = "welfare")
 
@@ -70,6 +74,14 @@ test_that("outcome stats tab re-renders only on button press", {
       # The rendered plot now describes the new outcome.
       spec <- outcome_spec()
       expect_equal(spec$info$name, "welf2")
+
+      # Survey reload after the run: the stale banner appears (INT-08) and
+      # clears again once the button is re-pressed.
+      survey_version(1L); settle()
+      expect_match(banner(), "Results are out of date", fixed = TRUE)
+      expect_match(banner(), "Survey data was reloaded", fixed = TRUE)
+      session$setInputs(outcome_stats_btn = 3L); settle()
+      expect_identical(nchar(banner()), 0L)
     }
   )
 })
