@@ -62,8 +62,8 @@ filter_outcome_vars <- function(variable_list, survey_colnames) {
 #' Returns `TRUE` when `name` is `"welfare"` or `"poor"`, or when `units` is
 #' `"LCU"`. All comparisons are scalar-safe.
 #'
-#' @param name  A single character string — the outcome variable name.
-#' @param units A single character string — the outcome units (may be `NA`).
+#' @param name  A single character string - the outcome variable name.
+#' @param units A single character string - the outcome units (may be `NA`).
 #'
 #' @return A single logical value.
 #'
@@ -139,7 +139,7 @@ poverty_line_label <- function(currency) {
 #' Returns `"log"` for numeric/continuous outcomes and `NA_character_` for all
 #' others (binary, logical, etc.).
 #'
-#' @param type A single character string — the outcome type as stored in the
+#' @param type A single character string - the outcome type as stored in the
 #'   variable list (e.g. `"numeric"`, `"logical"`, `"binary"`).
 #'
 #' @return `"log"` or `NA_character_`.
@@ -207,7 +207,7 @@ build_selected_outcome <- function(info, currency = NULL, poverty_line = NULL) {
 #' Returns a `shiny::tagList` with styled divs describing the selected outcome
 #' type. Returns an empty `tagList` for unrecognised types.
 #'
-#' @param type A single character string — the outcome type (e.g. `"numeric"`,
+#' @param type A single character string - the outcome type (e.g. `"numeric"`,
 #'   `"logical"`).
 #'
 #' @return A `shiny.tag.list`.
@@ -242,7 +242,7 @@ outcome_info_message <- function(type) {
 #' Compute missingness summary for the selected outcome variable
 #'
 #' @param df      Survey data frame.
-#' @param outcome Single character string — the outcome variable name.
+#' @param outcome Single character string - the outcome variable name.
 #'
 #' @return A one-row data frame with columns \code{variable}, \code{n_total},
 #'   \code{n_available}, \code{n_missing}, \code{pct_available}.
@@ -278,7 +278,7 @@ outcome_missing_summary <- function(df, outcome) {
 #' log scale when all values are positive.
 #'
 #' @param df A data frame with a `countryyear` column for ridge grouping.
-#' @param outcome Single character string — outcome variable name. Defaults to
+#' @param outcome Single character string - outcome variable name. Defaults to
 #'   `"welfare"`.
 #' @param label Human-readable label for the x axis.
 #' @param type Outcome type: `"numeric"` or `"logical"`.
@@ -363,7 +363,7 @@ plot_welfare_dist <- function(df,
 #'   Pass cell features from \code{build_cell_features()} together with
 #'   \code{cell_map} to draw non-overlapping H3 cells.
 #' @param df       Survey data frame with \code{loc_id} and the outcome column.
-#' @param outcome  Single character string — the outcome variable name.
+#' @param outcome  Single character string - the outcome variable name.
 #' @param cell_map Optional location-to-cell mapping. When supplied, coverage
 #'   is merged onto H3 cells instead of drawn per overlapping location.
 #'
@@ -386,8 +386,8 @@ plot_outcome_coverage_map <- function(geojson, df, outcome, cell_map = NULL) {
 
   # Survey locations overlap, so drawing one translucent polygon per location
   # stacks fills and shows shades that are in neither the data nor the legend.
-  # When the H3 cell mapping is available, merge coverage onto cells — which
-  # tile without overlapping — weighting each contributing location by the
+  # When the H3 cell mapping is available, merge coverage onto cells - which
+  # tile without overlapping - weighting each contributing location by the
   # units it has in that cell.
   if (!is.null(cell_map) && all(keys %in% names(loc_avail))) {
     lv <- loc_avail
@@ -484,8 +484,8 @@ plot_outcome_coverage_map <- function(geojson, df, outcome, cell_map = NULL) {
 #' simulated value represents a worse outcome. Returns `"higher_is_better"` for
 #' all other outcomes (welfare, employment, hours worked, etc.).
 #'
-#' @param name A single character string — the outcome variable name.
-#' @param type A single character string — the outcome type.
+#' @param name A single character string - the outcome variable name.
+#' @param type A single character string - the outcome type.
 #'
 #' @return `"lower_is_better"` or `"higher_is_better"`.
 #'

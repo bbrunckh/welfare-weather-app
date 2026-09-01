@@ -23,7 +23,7 @@
 
 #' Aggregate welfare predictions with delta-method coefficient uncertainty
 #'
-#' Pure closed-form variance — no Monte Carlo. Returns the point estimate and
+#' Pure closed-form variance - no Monte Carlo. Returns the point estimate and
 #' analytic band endpoints in O(N*K) time.
 #'
 #' @param y_point Numeric vector length N. Log-scale point predictions.
@@ -132,7 +132,7 @@ aggregate_with_uncertainty_delta <- function(y_point,
 # ---------------------------------------------------------------------------- #
 # Per-method gradient functions                                                #
 # ---------------------------------------------------------------------------- #
-# Each returns h = (dT/dwelfare) * mu, length N. Sign matters — preserves the
+# Each returns h = (dT/dwelfare) * mu, length N. Sign matters - preserves the
 # direction of perturbation so var = ||F' h||^2 reflects the true Taylor
 # expansion. For aggregates where the sign cancels in the variance (everything
 # here), we still keep it explicit for clarity.
@@ -157,7 +157,7 @@ gradient_for_method <- function(method, mu, weights, pov_line, value_pt,
     },
 
     prosperity_gap = {
-      # Point estimate: mean(pmax(28/mu, 1)); pov_line ignored — $28/day
+      # Point estimate: mean(pmax(28/mu, 1)); pov_line ignored - $28/day
       # threshold hardcoded. With h = (dT/dwelfare) * welfare:
       #   dT/dw_i = t_i * (-28/w_i^2) * 1{0 < w < 28},  t_i = 1/N or w_i/W,
       # so h_i = -t_i * 28 / w_i below the threshold:
@@ -236,7 +236,7 @@ gradient_for_method <- function(method, mu, weights, pov_line, value_pt,
       # the delta-method propagation of regression coefficient uncertainty
       # through y_i = exp(X_i beta). Distinct from Monti's (1991) IF (which
       # is correct for sample-variance estimation but inflates the SE when
-      # mis-used in the chain rule through beta — it violates Gini's scale
+      # mis-used in the chain rule through beta - it violates Gini's scale
       # invariance under intercept shifts).
       #
       # Derivation (ordering held locally fixed):

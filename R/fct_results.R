@@ -12,12 +12,12 @@
 #' Prepare the outcome column in survey_weather before model fitting
 #'
 #' Applies three sequential transformations in order:
-#' 1. **LCU back-conversion** — multiply by `ppp2021` when `units == "LCU"`.
+#' 1. **LCU back-conversion** - multiply by `ppp2021` when `units == "LCU"`.
 #'    Applies only to an existing continuous (log-transformed) monetary
 #'    outcome column, e.g. `welfare`. Constructed indicators such as `poor`
 #'    are unitless and are never back-converted.
-#' 2. **Log transform** — `log()` when `transform == "log"`.
-#' 3. **Binary poor indicator** — `welfare < povline` when `name == "poor"`
+#' 2. **Log transform** - `log()` when `transform == "log"`.
+#' 3. **Binary poor indicator** - `welfare < povline` when `name == "poor"`
 #'    and `povline` is non-NA. The stored `welfare` column is in 2021 PPP,
 #'    so a poverty line expressed in LCU (`units == "LCU"`) is first divided
 #'    by the per-observation `ppp2021` factor to place the comparison on a
@@ -56,8 +56,8 @@ prepare_outcome_df <- function(df, so) {
 
 # Scale a user-specified poverty line to match the stored welfare column
 # (2021 PPP). LCU lines are divided by the per-observation ppp2021 factor;
-# PPP lines — and data loaded without deflators, where no load-time
-# conversion took place — are compared directly.
+# PPP lines - and data loaded without deflators, where no load-time
+# conversion took place - are compared directly.
 .povline_to_ppp <- function(pl, df, is_lcu) {
   if (isTRUE(is_lcu) && "ppp2021" %in% names(df)) pl / df$ppp2021 else pl
 }
@@ -67,25 +67,24 @@ prepare_outcome_df <- function(df, so) {
 # Coefficient helpers                                                          #
 # ---------------------------------------------------------------------------- #
 
-#' Extract coefficient names associated with selected weather predictors
+#' Extract the Variance-Covariance Matrix from a fixest Fit
 #'
-#' Returns coefficient names from `fit` that contain any entry in
-#' `weather_terms` (using a word-boundary regex match). This typically captures
-#' main weather effects as well as transformed/factor-expanded terms and
-#' interactions that include those weather variable names.
+#' Tries the fit-time VCV first (respecting the cluster/VCV specification
+#' passed at estimation), then progressively simpler alternatives
+#' (`COEF_VCOV_SPEC`, one-way `~loc_id` clusters, `"HC1"`, `"iid"`), and
+#' finally plain `stats::vcov()`.
 #'
-#' @param fit A native fitted model object (e.g. `fixest`, `lm`, `glm`).
-#' @param weather_terms Character vector of weather variable names to match.
+#' @param fit A native `fixest` model object.
 #'
-#' @return Character vector of coefficient names matching `weather_terms`.
+#' @return A variance-covariance matrix, or `NULL` when extraction fails.
 #'
 #' @export
 .fixest_vcov <- function(fit) {
   # Try the fit-time VCV first (respects cluster= arg passed at estimation)
-  v <- tryCatch(fixest::vcov(fit), error = function(e) NULL)
+  v <- tryCatch(stats::vcov(fit), error = function(e) NULL)
   if (!is.null(v)) return(v)
   for (spec in list(COEF_VCOV_SPEC, ~loc_id, "HC1", "iid")) {
-    v <- tryCatch(fixest::vcov(fit, vcov = spec), error = function(e) NULL)
+    v <- tryCatch(stats::vcov(fit, vcov = spec), error = function(e) NULL)
     if (!is.null(v)) return(v)
   }
   stats::vcov(fit)
@@ -217,9 +216,9 @@ detect_modified_cols <- function(svy_modified, svy_train,
 #' @param outcome_col Character or NULL. Outcome column name to exclude from
 #'   the diff (e.g. `"welfare"`). The outcome is log-transformed in
 #'   `train_data` but not in `svy`, so it would otherwise be flagged as
-#'   "modified" — defensively excluded even though no coefficient is named
+#'   "modified" - defensively excluded even though no coefficient is named
 #'   after it.
-#' @param residuals Character. Residual mode (`"original"`, `"resample"`, …).
+#' @param residuals Character. Residual mode (`"original"`, `"resample"`, ...).
 #' @param propagate_all_covariate_uncertainty Logical. TRUE disables the
 #'   mask (legacy behaviour).
 #'
@@ -246,12 +245,12 @@ attach_active_mask <- function(chol_obj,
                    is.list(chol_obj[[1]]) && "beta" %in% names(chol_obj[[1]])
 
   # Gating: the cancellation argument applies under (a) "original" residuals
-  # for the linear engine — the per-household residual is held fixed across β
-  # draws and absorbs uncertainty on unchanged coefficients — or (b) any
+  # for the linear engine - the per-household residual is held fixed across beta
+  # draws and absorbs uncertainty on unchanged coefficients - or (b) any
   # residuals mode for the RIF engine, because the RIF prediction is
-  # y_baseline + δ_i and the level y_baseline plays the same role as the
+  # y_baseline + delta_i and the level y_baseline plays the same role as the
   # fixed residual on the linear path. Under "resample"/"normal" with the
-  # linear engine, residuals are drawn independently of β and the
+  # linear engine, residuals are drawn independently of beta and the
   # cancellation does not hold.
   if (!is_rif_shape && !identical(residuals, "original")) return(chol_obj)
   coef_names <- if (is_rif_shape) names(chol_obj[[1]]$beta)
@@ -261,7 +260,7 @@ attach_active_mask <- function(chol_obj,
   if (is.null(coef_names)) return(chol_obj)
 
   # Prefer comparing against the pre-counterfactual baseline survey
-  # (svy_reference) — that is *exactly* what we want to diff against.
+  # (svy_reference) - that is *exactly* what we want to diff against.
   # Fall back to train_data when the baseline is not available; in that
   # case the comparison is correct iff the user simulates on the same
   # underlying survey they trained on (common case).
@@ -300,7 +299,7 @@ attach_active_mask <- function(chol_obj,
   # off-diagonal terms between active and inactive coefficients, because
   # column j of L still picks up contributions from inactive rows of X.
   # The mathematically correct additive-decomposition variance is
-  #   var_coef_active = h' X_active Σ_active,active X_active' h
+  #   var_coef_active = h' X_active Sigma_active,active X_active' h
   # which requires re-decomposing Sigma_active. Compute once here so
   # compute_factor_loading() / interpolate_F_loading() can use it.
   cholesky_active_block <- function(L_full) {
@@ -310,7 +309,7 @@ attach_active_mask <- function(chol_obj,
              error = function(e) {
                warning("[attach_active_mask] Cholesky of active block failed: ",
                        conditionMessage(e),
-                       " — falling back to no masking.")
+                       " - falling back to no masking.")
                NULL
              })
   }
@@ -390,7 +389,7 @@ build_active_coef_mask <- function(coef_names, active_terms) {
 #' Build a human-readable label for a coefficient name
 #'
 #' Splits on `":"` and applies `label_fun` to each component, joining
-#' with `" × "`.
+#' with `" * "`.
 #'
 #' @param coef_name Scalar character coefficient name, e.g. `"tx:urban"`.
 #' @param label_fun Function mapping a variable name to a readable label.
@@ -430,7 +429,7 @@ make_coef_map <- function(coef_names, label_fun = identity) {
 #' Extract the native model object from a fit_model result
 #'
 #' For `"fixest"`, `"ranger"`, and `"xgboost"` engines the object stored by
-#' `fit_model()` is already a native R model object — no unwrapping needed.
+#' `fit_model()` is already a native R model object - no unwrapping needed.
 #' For the `"rif"` engine, each fit is a `fixest_multi` (list of 9 models).
 #' This function returns the object as-is; use `extract_rif_median()` to
 #' get a single representative model for diagnostics.
@@ -587,6 +586,8 @@ get_first_bin_label <- function(df, hv) {
 #' @param engine            Scalar character engine key.
 #' @param rif_grid          Optional tidy data frame of RIF beta curves (from
 #'   \code{fit_model()$rif_grid}). Used only when \code{engine = "rif"}.
+#' @param pred_var          Optional scalar character. Weather predictor used
+#'   to filter RIF curves; when `NULL`, all weather terms are shown.
 #'
 #' @return A `ggplot` object.
 #'
@@ -792,6 +793,9 @@ make_coefplot <- function(fit1, fit2, fit3,
 #'   Kept for compatibility.
 #' @param weather_df Optional data frame used to recover configured bin labels
 #'   (via `get_first_bin_label()`), for omitted-reference caption text.
+#' @param rif_grid Optional tidy data frame of RIF beta curves (from
+#'   \code{fit_model()$rif_grid}). Used only on the RIF branch
+#'   (\code{engine = "rif"}).
 #'
 #' @return A `ggplot` object. Returns an informative blank plot on error.
 #'
@@ -896,7 +900,7 @@ make_weather_effect_plot <- function(fit, pred_var, interaction_terms, is_binned
         }
 
         # Moderator evaluation points: binary 0/1, small set of unique
-        # numeric values, or mean ± sd for continuous.
+        # numeric values, or mean +/- sd for continuous.
         modx_vals <- c(0, 1)
         if (!is.null(weather_df) && !is.null(modx_var) &&
             modx_var %in% names(weather_df)) {
@@ -960,7 +964,7 @@ make_weather_effect_plot <- function(fit, pred_var, interaction_terms, is_binned
           levels = unique(combined$modx_label[order(combined$modx_val)])
         )
 
-        # coef_label() is scalar — vectorise over each unique bin id so that
+        # coef_label() is scalar - vectorise over each unique bin id so that
         # multi-bin (binned) predictors produce one facet per bin. Sort by
         # parsed numeric lower bound so negative ranges aren't ordered
         # lexicographically (e.g. -1.2 must come before -0.4).
@@ -1109,7 +1113,7 @@ make_weather_effect_plot <- function(fit, pred_var, interaction_terms, is_binned
 
       # Detect moderator (if any). Use word-boundary regex so short pred_var
       # names (e.g. "r") aren't matched as substrings inside other variable
-      # names like "urban" — which would pick the wrong moderator.
+      # names like "urban" - which would pick the wrong moderator.
       modx_var <- NULL
       modx_lab <- NULL
       if (length(interaction_terms) > 0) {
@@ -1244,7 +1248,7 @@ make_weather_effect_plot <- function(fit, pred_var, interaction_terms, is_binned
     pred_vals <- mf[[pred_var]]
 
     if (!any(is.finite(pred_vals)))
-      return(blank_plot(paste0("No finite values for '", pred_var, "' — cannot build effect plot.")))
+      return(blank_plot(paste0("No finite values for '", pred_var, "' - cannot build effect plot.")))
 
     if (!requireNamespace("fixest", quietly = TRUE))
       return(blank_plot("Package 'fixest' is required."))
@@ -1361,7 +1365,7 @@ make_weather_effect_plot <- function(fit, pred_var, interaction_terms, is_binned
         new_data[[pred_var]] <- x_seq
 
         # Recompute interaction columns from their parts so the slope of
-        # pred_var properly reflects β_main + β_int * mean(modx).
+        # pred_var properly reflects beta_main + beta_int * mean(modx).
         for (nm in colnames(mm)) {
           if (grepl(":", nm, fixed = TRUE)) {
             parts <- strsplit(nm, ":")[[1]]
@@ -1677,6 +1681,9 @@ make_regtable <- function(fit1, fit2, fit3,
 #'
 #' @param model   A native `lm`/`glm`/`fixest` object.
 #' @param haz_var Scalar character name of the weather predictor.
+#' @param weather_df Optional survey-weather data frame. Used for the binned
+#'   predictor fallback path (local binned-column matching) and the omitted-bin
+#'   caption when the model frame does not contain `haz_var`.
 #' @param x_label Scalar character x-axis label.
 #'
 #' @return A `ggplot` object, or `NULL` invisibly.
@@ -1845,7 +1852,7 @@ calc_fit_stats <- function(model, is_logistic, engine = "fixest") {
     as.character(round(x, digits))
   }
 
-  # RIF: per-quantile R² table
+  # RIF: per-quantile R^2 table
   if (identical(engine, "rif") && (inherits(model, "fixest_multi") || is.list(model))) {
     taus <- seq(0.1, 0.9, by = 0.1)
     n <- min(length(model), length(taus))

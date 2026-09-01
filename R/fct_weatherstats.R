@@ -32,11 +32,14 @@ extract_survey_dates <- function(survey_data) {
 # Survey-weather merge                                                          #
 # ---------------------------------------------------------------------------- #
 
-#' Merge survey data with weather data and normalise within-survey weights
+#' Merge survey data with weather data
 #'
 #' Performs an `inner_join` on `code`, `year`, `survname`, `loc_id`, and
-#' `timestamp`, converts `year` to a factor for plotting, and normalises
-#' OUTDATED: `weight` to sum to 1 within each `code` / `year` / `survname` group.
+#' `timestamp`, and converts `year` to a factor for plotting.
+#'
+#' Weights are carried through unmodified: raw household survey weights are the
+#' statistical contract for all downstream weather statistics, so no per-wave
+#' normalisation is applied even when multiple survey waves are combined.
 #'
 #' @param survey_data  A data frame of survey observations with at minimum
 #'   columns `code`, `year`, `survname`, `loc_id`, `timestamp`, and `weight`.
@@ -44,8 +47,8 @@ extract_survey_dates <- function(survey_data) {
 #'   level with at minimum columns `code`, `year`, `survname`, `loc_id`, and
 #'   `timestamp`.
 #'
-#' @return A merged data frame with `year` as factor and `weight` normalised
-#'   within group. Returns `NULL` when either input is `NULL` or the join
+#' @return A merged data frame with `year` as factor and raw `weight` values
+#'   preserved. Returns `NULL` when either input is `NULL` or the join
 #'   produces zero rows.
 #'
 #' @export
@@ -59,7 +62,6 @@ merge_survey_weather <- function(survey_data, weather_data) {
     ) |>
     dplyr::mutate(year = as.factor(.data$year)) |>
     dplyr::group_by(.data$code, .data$year, .data$survname) |>
-    # dplyr::mutate(weight = .data$weight / sum(.data$weight, na.rm = TRUE)) |>
     dplyr::ungroup()
 
   if (nrow(joined) == 0) return(NULL)
@@ -75,7 +77,7 @@ merge_survey_weather <- function(survey_data, weather_data) {
 # user cares about ("was this wave unusual?") is a within-panel one. Historical
 # weather is loaded for the same locations and calendar months as each wave and
 # weighted by the households behind them, so the two series are composed the
-# same way — see `join_hist_sample_cells()`.
+# same way - see `join_hist_sample_cells()`.
 
 # Label used for the sample series across both plots.
 #' @noRd
@@ -84,7 +86,7 @@ merge_survey_weather <- function(survey_data, weather_data) {
 # Label used for the historical series across both plots.
 #' @noRd
 .wx_hist_lab <- function(year_from, year_to) {
-  paste0("Historical ", year_from, "–", year_to)
+  paste0("Historical ", year_from, "-", year_to)
 }
 
 
@@ -173,8 +175,8 @@ merge_survey_weather <- function(survey_data, weather_data) {
 #' Bar chart of a binned weather variable, sample against its own history
 #'
 #' One group of bars per bin. Within a group each survey wave contributes two
-#' bars — what the sample actually experienced and what the same locations and
-#' calendar months looked like over the historical years — drawn in the wave's
+#' bars - what the sample actually experienced and what the same locations and
+#' calendar months looked like over the historical years - drawn in the wave's
 #' colour, the historical bar in a lighter shade of it.
 #'
 #' Bars show the share of observations in each bin *within* a wave-source
@@ -280,7 +282,7 @@ plot_weather_bins_compare <- function(df, hv, label, hist_df = NULL,
 # Series key shared by the bar chart and the ridge plot: one entry per survey
 # wave x series (sample / historical).
 #' @noRd
-.wx_series_key <- function(wave, source) paste0(wave, " — ", source)
+.wx_series_key <- function(wave, source) paste0(wave, " - ", source)
 
 # Wave-major grid of every wave x series combination, in plotting order, so
 # colour lookups are built alongside the keys rather than parsed back out of
@@ -437,7 +439,7 @@ plot_weather_ridges_compare <- function(df, hv, label, hist_df = NULL,
 #'
 #' For binned variables renders a dodged bar chart of bin shares by
 #' `countryyear`. For continuous variables renders a ridge density plot. Both
-#' can carry the wave's own climate history alongside the sample — pass
+#' can carry the wave's own climate history alongside the sample - pass
 #' `hist_df` (and, for the bar chart, the `breaks` the sample was binned on).
 #'
 #' @param df          A data frame with a `countryyear` column and a column
@@ -591,7 +593,7 @@ plot_binscatter <- function(df, hv, hv_label = hv, y_var, y_label = y_var) {
 #' year falls outside the requested range.
 #'
 #' Any preceding months pulled in by a variable's temporal aggregation window
-#' are handled by `get_weather()` itself — the rolling window is applied
+#' are handled by `get_weather()` itself - the rolling window is applied
 #' relative to each returned timestamp.
 #'
 #' @param survey_dates Date vector of survey timestamps.
@@ -631,7 +633,7 @@ expand_hist_dates <- function(survey_dates, year_from, year_to) {
 #' households per cell. This does three things at once:
 #'
 #' * drops locations that are not in the sample,
-#' * keeps only the calendar months the wave was fielded in — per wave, so
+#' * keeps only the calendar months the wave was fielded in - per wave, so
 #'   two waves fielded in different seasons stay separate,
 #' * gives each cell the weight of the households behind it, so the
 #'   historical and sample distributions are composed the same way.
@@ -702,43 +704,25 @@ join_hist_sample_cells <- function(hist_df, survey_weather) {
 # Weather-by-location map                                                       #
 # ---------------------------------------------------------------------------- #
 
-#' Collapse a weather variable to one value per survey location
+#' Prepare the shared grouping behind `summarise_weather_by_loc()`
 #'
-#' The merged survey-weather frame holds one weather value per location *and
-#' interview month*, so a location visited across several months carries
-#' several values. Mapping needs a single value per location: continuous
-#' variables are averaged and binned variables take their modal bin — the same
-#' convention `.compute_hazard_values()` uses elsewhere in the app.
+#' The location grouping (year coercion, economy default, interview months,
+#' interaction groups, split indices) is identical for every weather variable,
+#' so the Step 1 weather map computes it once per survey frame and passes it
+#' back in via `summarise_weather_by_loc(prep = )` instead of rebuilding it
+#' once per variable (PERF-25).
 #'
 #' @param survey_weather Merged survey-weather frame (household level).
-#' @param hv Scalar character. Name of the weather variable column.
 #'
-#' @return A data frame with one row per wave x location: `code`, `year`,
-#'   `survname`, `economy`, `loc_id`, `value`, `n_hh`, `n_months`, plus a
-#'   `binned` attribute (logical) and, for binned variables, a `levels`
-#'   attribute holding the bin order. `NULL` when `hv` is absent.
-#'
-#' @export
-summarise_weather_by_loc <- function(survey_weather, hv) {
-  keys <- c("code", "year", "survname", "loc_id")
-  if (is.null(survey_weather) || is.na(hv) ||
-      !(hv %in% names(survey_weather)) ||
-      !all(keys %in% names(survey_weather))) {
-    return(NULL)
-  }
+#' @return A list with `df` (the normalised frame), `months`, and `idx` (the
+#'   per-location row-index split). `NULL` when the input is `NULL`.
+#' @noRd
+.summarise_loc_prep <- function(survey_weather) {
+  if (is.null(survey_weather)) return(NULL)
 
   df <- survey_weather
   df$year <- as.character(df$year)
   if (!"economy" %in% names(df)) df$economy <- df$code
-  vals <- df[[hv]]
-
-  binned <- is.factor(vals) || is.character(vals)
-  lvls   <- if (!binned) NULL
-            else if (is.factor(vals)) levels(vals)
-            else sort(unique(as.character(vals)))
-
-  grp <- interaction(df$code, df$year, df$survname, df$loc_id,
-                     drop = TRUE, sep = "\r")
 
   months <- if ("timestamp" %in% names(df)) {
     as.integer(format(as.Date(df$timestamp), "%m"))
@@ -746,7 +730,52 @@ summarise_weather_by_loc <- function(survey_weather, hv) {
     rep(1L, nrow(df))
   }
 
-  parts <- lapply(split(seq_len(nrow(df)), grp), function(idx) {
+  grp <- interaction(df$code, df$year, df$survname, df$loc_id,
+                     drop = TRUE, sep = "\r")
+
+  list(df = df, months = months, idx = split(seq_len(nrow(df)), grp))
+}
+
+
+#' Collapse a weather variable to one value per survey location
+#'
+#' The merged survey-weather frame holds one weather value per location *and
+#' interview month*, so a location visited across several months carries
+#' several values. Mapping needs a single value per location: continuous
+#' variables are averaged and binned variables take their modal bin - the same
+#' convention `.compute_hazard_values()` uses elsewhere in the app.
+#'
+#' @param survey_weather Merged survey-weather frame (household level).
+#' @param hv Scalar character. Name of the weather variable column.
+#' @param prep Optional result of `.summarise_loc_prep()` on the same frame.
+#'   Pass it when collapsing several variables over the same frame so the
+#'   grouping is built once (PERF-25).
+#'
+#' @return A data frame with one row per wave x location: `code`, `year`,
+#'   `survname`, `economy`, `loc_id`, `value`, `n_hh`, `n_months`, plus a
+#'   `binned` attribute (logical) and, for binned variables, a `levels`
+#'   attribute holding the bin order. `NULL` when `hv` is absent.
+#'
+#' @export
+summarise_weather_by_loc <- function(survey_weather, hv, prep = NULL) {
+  keys <- c("code", "year", "survname", "loc_id")
+  if (is.null(survey_weather) || is.na(hv) ||
+      !(hv %in% names(survey_weather)) ||
+      !all(keys %in% names(survey_weather))) {
+    return(NULL)
+  }
+
+  if (is.null(prep)) prep <- .summarise_loc_prep(survey_weather)
+  df     <- prep$df
+  months <- prep$months
+  vals   <- df[[hv]]
+
+  binned <- is.factor(vals) || is.character(vals)
+  lvls   <- if (!binned) NULL
+            else if (is.factor(vals)) levels(vals)
+            else sort(unique(as.character(vals)))
+
+  parts <- lapply(prep$idx, function(idx) {
     v <- vals[idx]
     value <- if (binned) {
       tbl <- table(as.character(v)[!is.na(v)])
@@ -779,13 +808,13 @@ summarise_weather_by_loc <- function(survey_weather, hv) {
 #' Compare each location's wave weather with its own history
 #'
 #' Where `summarise_weather_by_loc()` gives the value the sample experienced
-#' (a cross-sectional view — how locations compare with each other), this puts
+#' (a cross-sectional view - how locations compare with each other), this puts
 #' each location against *itself*: how far the wave's weather sat from what
 #' that same location normally gets in the same calendar months.
 #'
-#' * `measure = "anomaly"` — the wave value minus the location's mean over the
+#' * `measure = "anomaly"` - the wave value minus the location's mean over the
 #'   historical years, in the variable's own units.
-#' * `measure = "percentile"` — where the wave value falls within the
+#' * `measure = "percentile"` - where the wave value falls within the
 #'   location's own historical distribution, 0-100 (50 = a typical year).
 #'
 #' Both the wave value and the historical reference are household-weighted by
@@ -799,8 +828,8 @@ summarise_weather_by_loc <- function(survey_weather, hv) {
 #'   reference (inclusive).
 #' @param measure   `"anomaly"` or `"percentile"`.
 #'
-#' @return A data frame shaped like `summarise_weather_by_loc()` — `code`,
-#'   `year`, `survname`, `economy`, `loc_id`, `value`, `n_hh`, `n_months` —
+#' @return A data frame shaped like `summarise_weather_by_loc()` - `code`,
+#'   `year`, `survname`, `economy`, `loc_id`, `value`, `n_hh`, `n_months` -
 #'   with a `binned` attribute of `FALSE`. `NULL` when nothing can be
 #'   computed.
 #'
@@ -951,7 +980,7 @@ isTRUE_vec <- function(x) !is.na(x) & x
 # a question-mark cursor on the element, which reads as a broken control. This
 # uses a CSS tooltip instead: it shows on hover (and on keyboard focus) with no
 # delay, and the marker itself is always visible.
-#' @param side Which map corner the marker sits in — the tooltip opens away
+#' @param side Which map corner the marker sits in - the tooltip opens away
 #'   from that edge so it is not clipped.
 #' @noRd
 .wx_info_marker <- function(info, side = c("right", "left")) {
@@ -1008,7 +1037,7 @@ isTRUE_vec <- function(x) !is.na(x) & x
 #' @param levels         Character vector of bin levels, in order.
 #' @param transformation The variable's configured transformation.
 #' @param force          `"diverging"` or `"sequential"` to override what the
-#'   transformation implies — used by the anomaly and percentile map views,
+#'   transformation implies - used by the anomaly and percentile map views,
 #'   whose scale type follows the view rather than the variable.
 #' @param domain         Optional length-2 numeric to fix the colour domain
 #'   (e.g. `c(0, 100)` for percentiles) instead of deriving it from `values`.
@@ -1076,7 +1105,7 @@ isTRUE_vec <- function(x) !is.na(x) & x
 #' Map survey locations shaded by a weather variable
 #'
 #' Draws one survey wave's locations, filled by the weather value the sample
-#' experienced there — the bin for binned variables, the value on its
+#' experienced there - the bin for binned variables, the value on its
 #' configured scale (raw, deviation from mean, standardised anomaly) for
 #' continuous ones.
 #'
@@ -1084,8 +1113,8 @@ isTRUE_vec <- function(x) !is.na(x) & x
 #' `fit_model()` puts the weather column on the right-hand side unchanged, so
 #' a household's regressor is the value for its location in its own interview
 #' month, with the configured temporal aggregation and transformation already
-#' applied. For a location surveyed in a single interview month — the majority
-#' — every household there shares that one value and the colour *is* the
+#' applied. For a location surveyed in a single interview month - the majority
+#' - every household there shares that one value and the colour *is* the
 #' regressor. A location surveyed across several interview months holds
 #' several values, so its colour is the household-weighted mean (or modal
 #' bin); those locations are drawn with a dotted outline to mark the colour as
@@ -1099,7 +1128,7 @@ isTRUE_vec <- function(x) !is.na(x) & x
 #' @param transformation The variable's configured transformation.
 #' @param pal_info Optional palette from `.weather_map_palette()`. Pass a
 #'   shared one to keep the colour scale comparable across waves.
-#' @param legend_title Short legend heading — a couple of words, since the
+#' @param legend_title Short legend heading - a couple of words, since the
 #'   per-wave maps are small. Defaults to `label`.
 #' @param legend_info Longer explanation shown when hovering the legend's info
 #'   marker. Defaults to `label`.
@@ -1117,7 +1146,7 @@ plot_weather_loc_map <- function(geojson, loc_vals, label,
   binned <- isTRUE(attr(loc_vals, "binned"))
   lvls   <- attr(loc_vals, "levels")
 
-  # Keep this wave's features — all of them, not just the ones carrying a
+  # Keep this wave's features - all of them, not just the ones carrying a
   # value. Filtering on the individual area id used to drop any area without
   # a weather value, punching holes in a footprint that the outcome map draws
   # whole; areas with no value are shown in neutral grey instead.
@@ -1143,7 +1172,7 @@ plot_weather_loc_map <- function(geojson, loc_vals, label,
   pal <- pal_info$pal
 
   # Areas without a value are drawn too (see above), so every lookup has to
-  # tolerate a missing key — `[[` errors on one, unlike `[`.
+  # tolerate a missing key - `[[` errors on one, unlike `[`.
   lookup <- function(v, key) {
     i <- match(key, names(v))
     if (is.na(i)) NULL else v[[i]]
@@ -1195,7 +1224,7 @@ plot_weather_loc_map <- function(geojson, loc_vals, label,
           "<br/><small>loc ", htmltools::htmlEscape(lid), " &middot; ",
           lookup(n_by_loc, lid) %||% 0, " households",
           if (isTRUE(nm > 1L)) {
-            paste0("<br/>surveyed over ", nm, " interview months — shown value",
+            paste0("<br/>surveyed over ", nm, " interview months - shown value",
                    " is the household-weighted ",
                    if (binned) "modal bin" else "mean",
                    " across them")
@@ -1232,7 +1261,7 @@ plot_weather_loc_map <- function(geojson, loc_vals, label,
   n_missing <- sum(cols == "#cccccc")
 
   # Areas whose value averages several interview months are no longer marked
-  # on the map itself — per-area marks turned out to be more distracting than
+  # on the map itself - per-area marks turned out to be more distracting than
   # informative. Instead, state how many there are.
   if (any(averaged) || n_missing > 0) {
     n_avg <- sum(averaged)
@@ -1246,7 +1275,7 @@ plot_weather_loc_map <- function(geojson, loc_vals, label,
         .wx_info_marker(
           paste0(
             n_missing, " of the ", length(feats), " areas shown have no",
-            " weather value for this variable — the survey reached them, but",
+            " weather value for this variable - the survey reached them, but",
             " the weather series did not, so they drop out of the merge that",
             " feeds the model. They are shaded grey rather than left off the",
             " map so the gap is visible."
@@ -1509,7 +1538,7 @@ make_weather_binned_stats_dt <- function(survey_weather, selected_weather) {
 #'
 #' @param ns       The module's `NS` function (from `session$ns`).
 #' @param n_vars   Integer. Number of selected weather variables.
-#' @param ids      Character vector of length 2 — output IDs for plot 1
+#' @param ids      Character vector of length 2 - output IDs for plot 1
 #'                 and plot 2. Only `ids[1]` is used when `n_vars < 2`.
 #' @param height   CSS height passed to `shiny::plotOutput`.
 #'

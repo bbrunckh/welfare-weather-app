@@ -66,7 +66,7 @@
     Group = factor(
       c(rep("Baseline", length(baseline_clean)),
         rep("Policy-adjusted", length(policy_clean))),
-      # ggridges renders the FIRST level at the bottom, last at the top —
+      # ggridges renders the FIRST level at the bottom, last at the top -
       # so "Baseline" first puts policy-adjusted on top.
       levels = c("Baseline", "Policy-adjusted")
     ),
@@ -106,7 +106,7 @@
 #'
 #' Returns the names of columns whose values differ between
 #' \code{baseline_svy} and \code{policy_svy}. Used by the Step 3 diagnostics
-#' table to surface any variable a user manipulation has touched —
+#' table to surface any variable a user manipulation has touched -
 #' covariates, interaction variables, or outcomes alike.
 #'
 #' Comparison rules:
@@ -235,13 +235,13 @@ policy_input_diagnostics <- function(baseline_svy, policy_svy, vars = NULL) {
             ns("uncertainty_band"),
             label   = "Coefficient band",
             choices = c(
-              "50% (p25–p75)"   = "p25_p75",
-              "60% (p20–p80)"   = "p20_p80",
-              "80% (p10–p90)"   = "p10_p90",
-              "90% (p05–p95)"   = "p05_p95",
-              "95% (p025–p975)" = "p025_p975",
-              "99% (p005–p995)" = "p005_p995",
-              "Max (min–max)"   = "minmax"
+              "50% (p25-p75)"   = "p25_p75",
+              "60% (p20-p80)"   = "p20_p80",
+              "80% (p10-p90)"   = "p10_p90",
+              "90% (p05-p95)"   = "p05_p95",
+              "95% (p025-p975)" = "p025_p975",
+              "99% (p005-p995)" = "p005_p995",
+              "Max (min-max)"   = "minmax"
             ),
             selected = "p10_p90"
           )
@@ -251,13 +251,13 @@ policy_input_diagnostics <- function(baseline_svy, policy_svy, vars = NULL) {
             ns("ensemble_band"),
             label    = "Inter-model band",
             choices  = c(
-              "50% (p25–p75)"   = "p25_p75",
-              "60% (p20–p80)"   = "p20_p80",
-              "80% (p10–p90)"   = "p10_p90",
-              "90% (p05–p95)"   = "p05_p95",
-              "95% (p025–p975)" = "p025_p975",
-              "99% (p005–p995)" = "p005_p995",
-              "Full range (min–max)" = "minmax"
+              "50% (p25-p75)"   = "p25_p75",
+              "60% (p20-p80)"   = "p20_p80",
+              "80% (p10-p90)"   = "p10_p90",
+              "90% (p05-p95)"   = "p05_p95",
+              "95% (p025-p975)" = "p025_p975",
+              "99% (p005-p995)" = "p005_p995",
+              "Full range (min-max)" = "minmax"
             ),
             selected = "minmax"
           )
@@ -279,14 +279,14 @@ policy_input_diagnostics <- function(baseline_svy, policy_svy, vars = NULL) {
       shiny::tags$details(
         shiny::tags$summary(
           style = "cursor:pointer; font-size:11px; color:#555; font-weight:600;",
-          "Advanced ▼"
+          "Advanced \u25BC"
         ),
         shiny::radioButtons(
           ns("cmp_group_order"),
           label    = "Group charts and tables by",
           choices  = c(
-            "Scenario × Year" = "scenario_x_year",
-            "Year × Scenario" = "year_x_scenario"
+            "Scenario \u00D7 Year" = "scenario_x_year",
+            "Year \u00D7 Scenario" = "year_x_scenario"
           ),
           selected = "scenario_x_year",
           inline   = TRUE
@@ -307,28 +307,28 @@ policy_input_diagnostics <- function(baseline_svy, policy_svy, vars = NULL) {
             " and ", shiny::tags$b("policy-adjusted (red)"),
             ". All bands are drawn relative to the dot (the ensemble-mean",
             " annual aggregate) and answer different questions about",
-            " uncertainty. They are not meant to be added together — see",
+            " uncertainty. They are not meant to be added together - see",
             " the Diagnostics tab for how the sources combine."
           ),
           shiny::p(shiny::tags$b("Thick coloured band"),
-            " (future scenarios only) — how much do climate models disagree?",
+            " (future scenarios only) - how much do climate models disagree?",
             " Inter-model spread: quantile across CMIP6 ensemble members of",
             " each model's time-mean. Can be asymmetric around the dot when",
             " models lean one way."),
           shiny::p(shiny::tags$b("Middle band"),
-            " — how much does weather vary year-to-year within a typical",
+            " - how much does weather vary year-to-year within a typical",
             " model? Inter-annual variability: per-model quantile across",
             " simulation years, then averaged across models. Reflects the",
             " natural range of outcomes a single climate trajectory produces."),
           shiny::p(shiny::tags$b("Innermost line"),
-            " (shown when coefficient uncertainty is enabled) — how precisely",
+            " (shown when coefficient uncertainty is enabled) - how precisely",
             " is each (model, year) aggregate estimated? Analytic per-outcome",
             " SE from the regression fit. By default, under 'original'",
             " residuals, restricted to coefficients on weather and the",
             " policy-modified variables, and their interactions",
-            " (additive-decomposition SE — see Step 2 settings to widen to",
+            " (additive-decomposition SE - see Step 2 settings to widen to",
             " all coefficients). This is precision of a point estimate, not",
-            " a spread of outcomes — conceptually distinct from the two",
+            " a spread of outcomes - conceptually distinct from the two",
             " coloured bands."),
           shiny::p(
             "Historical = single 'model', so no inter-model band is shown.",
@@ -342,7 +342,7 @@ policy_input_diagnostics <- function(baseline_svy, policy_svy, vars = NULL) {
       shiny::plotOutput(ns("summary_box_plot"), height = "600px"),
       shiny::tags$p(
         style = "font-size:11px; color:#666; margin-top:6px;",
-        "Grey dot = baseline; red dot = policy-adjusted; bands = uncertainty ranges (not additive) — click ",
+        "Grey dot = baseline; red dot = policy-adjusted; bands = uncertainty ranges (not additive) - click ",
         shiny::icon("circle-info"), " above for details."
       )
     ),
@@ -490,7 +490,7 @@ policy_input_diagnostics <- function(baseline_svy, policy_svy, vars = NULL) {
   #
   # Both baseline (Mod 2 hist_sim, passed verbatim) and policy (re-simulated
   # by resimulate_with_svy) wrap their single historical run under $pipeline
-  # — read it once here so the downstream code paths are identical.
+  # - read it once here so the downstream code paths are identical.
   make_agg_hist <- function(hs) {
     if (is.null(hs)) return(NULL)
     pl <- hs$pipeline
@@ -934,7 +934,7 @@ policy_input_diagnostics <- function(baseline_svy, policy_svy, vars = NULL) {
   table_subtitle <- reactive({
     req(baseline_agg_hist(), input$cmp_agg_method, input$cmp_deviation)
     paste0(
-      baseline_agg_hist()$x_label, " — ",
+      baseline_agg_hist()$x_label, " - ",
       label_agg_method(input$cmp_agg_method), " | ",
       label_deviation(input$cmp_deviation)
     )
@@ -1076,7 +1076,7 @@ policy_input_diagnostics <- function(baseline_svy, policy_svy, vars = NULL) {
     req(baseline_agg_hist())
     shiny::tags$p(
       style = "font-size:11px; color:#666; margin-top:6px;",
-      "Odds relative to a 1-in-N-year event — click ",
+      "Odds relative to a 1-in-N-year event - click ",
       shiny::icon("circle-info"), " above for definitions."
     )
   })

@@ -13,7 +13,7 @@
 mod_3_01_sp_ui <- function(id) {
   ns <- NS(id)
   tagList(
-    # ---- Program type — always visible -------------------------------
+    # ---- Program type - always visible -------------------------------
     uiOutput(ns("sp_type_ui")),
 
     # ---- Collapsible configuration panel -------------------------------
@@ -105,7 +105,7 @@ mod_3_01_sp_server <- function(id,
         is.numeric(col) && !any(is.na(col[outcome_rows]))
       }, cands)
 
-      # Return named character: display_label → variable_name
+      # Return named character: display_label -> variable_name
       setNames(keep, vapply(keep, function(v) {
         lbl <- vl$label[vl$name == v]
         if (length(lbl) > 0 && nzchar(lbl[[1]])) lbl[[1]] else v
@@ -315,10 +315,10 @@ mod_3_01_sp_server <- function(id,
     # ---- 4. Budget / transfer amount (linked) --------------------------
     #
     # Two budget modes:
-    #   "budget_first"   — user sets total budget (net of admin cost)
-    #                      → transfer per HH = (budget * (1 - admin%)) / n_beneficiaries
-    #   "transfer_first" — user sets transfer per HH
-    #                      → total budget = (amount * n_beneficiaries) / (1 - admin%)
+    #   "budget_first"   - user sets total budget (net of admin cost)
+    #                      -> transfer per HH = (budget * (1 - admin%)) / n_beneficiaries
+    #   "transfer_first" - user sets transfer per HH
+    #                      -> total budget = (amount * n_beneficiaries) / (1 - admin%)
     #
     # Admin cost reduces the amount available for direct transfers in both modes.
 
@@ -478,7 +478,7 @@ mod_3_01_sp_server <- function(id,
             "Frequency and timing"
           ),
 
-        # One-off vs regular — hidden for regular programs
+        # One-off vs regular - hidden for regular programs
         # if (!is_regular) {
         #   radioButtons(
         #     inputId  = ns("transfer_frequency"),
@@ -492,7 +492,7 @@ mod_3_01_sp_server <- function(id,
         #   )
         # },
 
-        # Number of payments — shown when regular (either via type or frequency)
+        # Number of payments - shown when regular (either via type or frequency)
         # conditionalPanel(
         #   condition = paste0(
         #     "input['", ns("sp_type"), "'] == 'regular' || ",
@@ -522,7 +522,7 @@ mod_3_01_sp_server <- function(id,
           )
         )
 
-        # Anticipatory vs ex-post — hidden for regular programs
+        # Anticipatory vs ex-post - hidden for regular programs
         # if (!is_regular) {
         #   tagList(
         #     radioButtons(
@@ -643,7 +643,7 @@ mod_3_01_sp_server <- function(id,
           transfer_amount_usd   = input$transfer_amount_usd     %||% 0,
           # Admin cost (deducted from budget before transfer calculation)
           # admin_cost_pct        = input$admin_cost_pct          %||% 10,
-          # Timing — regular programs always have n payments
+          # Timing - regular programs always have n payments
           transfer_frequency =
             if (is_regular) "regular"
             else input$transfer_frequency %||% "oneoff",

@@ -185,7 +185,7 @@
         .ssp_colours[ssp_key] else "#cccccc"
     }, character(1))
     fill_map           <- colour_map
-    fill_map["Regression input"] <- NA  # no fill for regression — outline only
+    fill_map["Regression input"] <- NA  # no fill for regression - outline only
 
     n_scen_shown <- length(unique(all_df$source)) -
                     sum(c("Full historical", "Regression input") %in% all_df$source)
@@ -494,6 +494,8 @@ plot_weather_density_panel <- function(survey_weather,
 #'   \code{list(preds = <df>, so = <list>)}. Pass \code{list()} for
 #'   historical-only.
 #' @param outcome_name  Character scalar. Column to plot.
+#' @param actual_vals   Optional numeric vector of observed outcome values
+#'   (from the training data) included as an "Actual" comparison group.
 #' @param log_scale     Logical. Compute BW and clip in log10-space. Default
 #'   \code{FALSE}.
 #'
@@ -812,10 +814,10 @@ plot_year_anchored_ridge <- function(kde_data,
     y_breaks <- as.numeric(row_rank)
     y_labels  <- paste0("  ", names(row_rank))
     subtitle  <- paste0(
-      "Primary: scenario × forecast year.  ",
+      "Primary: scenario * forecast year.  ",
       "Fill = pooled scenario distribution.  ",
       "Grey lines = individual historical years (darkest = most recent).  ",
-      "X clipped P1–P99."
+      "X clipped P1-P99."
     )
 
   } else {
@@ -866,10 +868,10 @@ plot_year_anchored_ridge <- function(kde_data,
     y_breaks <- as.numeric(row_rank)
     y_labels  <- paste0("  ", names(row_rank))
     subtitle  <- paste0(
-      "Primary: forecast year × scenario.  ",
+      "Primary: forecast year * scenario.  ",
       "Fill = pooled scenario distribution.  ",
       "Grey lines = individual historical years (darkest = most recent).  ",
-      "X clipped P1–P99."
+      "X clipped P1-P99."
     )
 
   }

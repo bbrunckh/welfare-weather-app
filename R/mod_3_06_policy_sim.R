@@ -124,7 +124,7 @@ mod_3_06_policy_sim_server <- function(id,
       # Use the exact survey that Step 2 used as the baseline. Step 2 may have
       # filtered survey_weather() to a single survey round (baseline_svy). The
       # Step 2 weather_raw was fetched against that filtered survey, so it
-      # contains rows for all survey years in selected_surveys — joining the
+      # contains rows for all survey years in selected_surveys - joining the
       # FULL survey_weather() would pull in extra households from non-baseline
       # rounds and produce a systematically different aggregate.
       svy <- hs$svy %||% survey_weather()
@@ -166,7 +166,7 @@ mod_3_06_policy_sim_server <- function(id,
               # values Mod 2 shows. The Results pane and policy resimulation
               # both consume the Mod 2 schema ($pipeline for hist_sim,
               # $pipelines for each saved scenario), so no translation is
-              # required here. (Held in locals — INT-09 publishes all state
+              # required here. (Held in locals - INT-09 publishes all state
               # atomically at the end of a fully successful run.)
               res_choice <- hs$residuals %||% residuals() %||% "original"
               # Preserve the residual treatment captured by the Step 2 run.
@@ -180,7 +180,7 @@ mod_3_06_policy_sim_server <- function(id,
               # the analytic per-household delta_total (the same number the
               # Decomposition pane reports). This (a) eliminates the
               # baseline/policy disagreement when residual draws have any
-              # stochastic component — both arms now share identical
+              # stochastic component - both arms now share identical
               # train_aug / id_vec / svy_row_id, so residuals line up
               # household-for-household and a no-op policy yields a no-op
               # visual effect; and (b) removes the per-CMIP6-member re-
@@ -216,7 +216,7 @@ mod_3_06_policy_sim_server <- function(id,
                 stop("Effect decomposition produced no results.", call. = FALSE)
               }
 
-              # Decompose per saved scenario × sim_year for year-to-year
+              # Decompose per saved scenario * sim_year for year-to-year
               # variation. Per-year failures are collected: if every attempt
               # fails the run fails; otherwise partial results are published
               # with a warning naming the count of dropped pieces (INT-04).
@@ -236,7 +236,7 @@ mod_3_06_policy_sim_server <- function(id,
                   w_years   <- as.integer(format(w_raw$timestamp, "%Y"))
                   sim_years <- sort(unique(w_years))
                 } else {
-                  # No year column — fall back to single decomposition (mean weather)
+                  # No year column - fall back to single decomposition (mean weather)
                   w_years   <- NULL
                   sim_years <- NA_integer_
                 }

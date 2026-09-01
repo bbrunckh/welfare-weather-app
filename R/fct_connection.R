@@ -2,13 +2,13 @@
 #'
 #' One supported auth contract per source (DEP-02):
 #' \itemize{
-#'   \item local — filesystem path.
-#'   \item s3 — HMAC keys: UI fields or AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY.
-#'   \item gcs — HMAC (interop) keys: UI fields or GCS_ACCESS_KEY_ID / GCS_SECRET_ACCESS_KEY.
-#'   \item azure — storage Account Key, or service principal via
+#'   \item local - filesystem path.
+#'   \item s3 - HMAC keys: UI fields or AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY.
+#'   \item gcs - HMAC (interop) keys: UI fields or GCS_ACCESS_KEY_ID / GCS_SECRET_ACCESS_KEY.
+#'   \item azure - storage Account Key, or service principal via
 #'     AZURE_CLIENT_ID / AZURE_CLIENT_SECRET / AZURE_TENANT_ID.
-#'   \item hf — public repositories only (httpfs reads `hf://` directly).
-#'   \item databricks — M2M service principal via environment variables.
+#'   \item hf - public repositories only (httpfs reads `hf://` directly).
+#'   \item databricks - M2M service principal via environment variables.
 #' }
 #' Blank UI inputs never shadow environment credentials (`%|||%`).
 #'
@@ -18,7 +18,7 @@
 #' @export
 build_connection_params <- function(type, ...) {
   args <- list(...)
-  # Like %||% but also treats empty strings as missing — needed so blank UI
+  # Like %||% but also treats empty strings as missing - needed so blank UI
   # inputs don't shadow .Renviron values
   `%|||%` <- function(a, b) if (!is.null(a) && nzchar(a %||% "")) a else b
 

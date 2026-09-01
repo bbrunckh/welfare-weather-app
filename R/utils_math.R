@@ -1,6 +1,6 @@
 # Server-side LaTeX rendering via {katex}. All math in the app is static, so
 # rendered HTML is cached per R process. KaTeX CSS + fonts are bundled at
-# inst/app/www/katex/ and auto-linked by golem::bundle_resources() — no
+# inst/app/www/katex/ and auto-linked by golem::bundle_resources() - no
 # htmlDependency wiring needed. This replaces client-side MathJax, which
 # failed to render on some Windows setups.
 

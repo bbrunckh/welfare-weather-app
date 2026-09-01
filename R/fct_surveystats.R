@@ -256,10 +256,15 @@ plot_interview_dates <- function(plot_data) {
 #' Iterates over all Polygon and MultiPolygon coordinate arrays to find the
 #' overall lng/lat extent. No spatial libraries required.
 #'
+#' Features may carry either a parsed `geometry` or a raw `geom_json` (or
+#' `geom`) geometry string. The raw string is parsed on demand here and
+#' immediately discarded, so feature builders no longer need to retain a
+#' parsed copy alongside the string (PERF-10).
+#'
 #' @param geojson A GeoJSON FeatureCollection list, as produced by
 #'   `jsonlite::fromJSON` or assembled manually.
 #' @return A named list with `lng1`, `lat1`, `lng2`, `lat2`.
-#' 
+#'
 .geojson_bounds <- function(geojson) {
   all_lng <- numeric()
   all_lat <- numeric()
@@ -287,7 +292,17 @@ plot_interview_dates <- function(plot_data) {
   }
 
   for (f in geojson$features) {
-    extract_coords(f$geometry$coordinates)
+    coords <- f$geometry$coordinates
+    if (is.null(coords)) {
+      geom_str <- f$geom_json %||% f$geom
+      if (is.null(geom_str)) next
+      coords <- tryCatch(
+        jsonlite::fromJSON(geom_str)$coordinates,
+        error = function(e) NULL
+      )
+      if (is.null(coords)) next
+    }
+    extract_coords(coords)
   }
 
   list(
@@ -414,7 +429,7 @@ filter_by_wave <- function(df, key = "all") {
 #' @param output_id Character. The `outputId` of the leaflet output, without
 #'   the module namespace.
 #'
-#' @return A list with `remember()` — call once to start tracking — and
+#' @return A list with `remember()` - call once to start tracking - and
 #'   `restore(m)`, which applies the stored view to a widget.
 #'
 #' @noRd
@@ -455,14 +470,14 @@ map_view_memory <- function(input, session, output_id) {
 #' re-measures.
 #'
 #' Re-measuring alone keeps the old zoom, which leaves the locations marooned
-#' in the middle of a much bigger map, so the data bounds are re-fitted too —
+#' in the middle of a much bigger map, so the data bounds are re-fitted too -
 #' expanding then magnifies the sample rather than its surroundings. Reading
 #' the pre-resize bounds instead would not work: Leaflet has usually
 #' re-measured by the time the callback runs, so they already describe the new
 #' size. Once the user has panned or zoomed, their view is left alone.
 #'
 #' With `dashes = TRUE` the stroke width of dashed sub-layers is also tapered
-#' as the map zooms out — stroke width is in screen pixels, so an outline that
+#' as the map zooms out - stroke width is in screen pixels, so an outline that
 #' reads well when zoomed in swamps the shapes once they shrink.
 #'
 #' @param bounds List with `lng1`, `lat1`, `lng2`, `lat2`, from
@@ -484,7 +499,7 @@ map_view_memory <- function(input, session, output_id) {
       function(el, x) {
         var map = this;
         // The caller can suppress the fit when it has restored a remembered
-        // view — refitting would throw that view away on the first resize.
+        // view - refitting would throw that view away on the first resize.
         var fit = %s && (x.fitOnResize !== false);
         var b   = [[%s, %s], [%s, %s]];
         var userMoved = false;
@@ -608,7 +623,7 @@ plot_survey_map <- function(loc) {
   # undefined) for any sub-layer Leaflet builds as a group instead of a single
   # path, and writing an undefined colour/weight back makes the stroke invalid.
   # These polygons are drawn with `fillOpacity = 0`, so a broken stroke means
-  # the shape vanishes completely and stays gone — every later mouseout writes
+  # the shape vanishes completely and stays gone - every later mouseout writes
   # the same invalid style again.
   #
   # Handlers are bound on the GeoJSON layer itself, not on each sub-layer:
@@ -652,8 +667,8 @@ plot_survey_map <- function(loc) {
 
 #' Spread each location's sampled units across the H3 cells it covers
 #'
-#' Survey locations overlap — in a capital, dozens of `loc_id`s can cover the
-#' same ground — so a map of outlined location polygons says little about how
+#' Survey locations overlap - in a capital, dozens of `loc_id`s can cover the
+#' same ground - so a map of outlined location polygons says little about how
 #' many households sit where. H3 cells, by contrast, tile the plane without
 #' gaps or overlaps, which makes them the natural unit for a heatmap.
 #'
@@ -712,7 +727,7 @@ allocate_units_to_cells <- function(cell_map, survey_data) {
 #' Survey locations overlap: several `loc_id`s can cover the same ground, so
 #' drawing one semi-transparent polygon per location stacks fills on top of
 #' each other and invents colours that are in neither the data nor the legend.
-#' Aggregating onto H3 cells — which tile without overlapping — gives one
+#' Aggregating onto H3 cells - which tile without overlapping - gives one
 #' unambiguous value per patch of ground.
 #'
 #' Each contributing location is weighted by how many of its sampled units sit
@@ -728,7 +743,7 @@ allocate_units_to_cells <- function(cell_map, survey_data) {
 #'
 #' @param by_wave Keep waves separate (the default), giving one row per wave
 #'   and cell. Set `FALSE` to pool every selected wave into a single value per
-#'   cell — needed wherever all waves are drawn on one map, since a cell
+#'   cell - needed wherever all waves are drawn on one map, since a cell
 #'   sampled by two waves would otherwise be painted twice.
 #'
 #' @return A data frame with one row per wave-cell: `code`, `year`,
@@ -829,7 +844,7 @@ merge_loc_values_to_cells <- function(cell_map, loc_vals, by_wave = TRUE) {
 #'   string).
 #' @param cell_map Data frame with `code`, `year`, `survname` and `h3`.
 #' @param by_wave Tag features with their wave (the default), so per-wave maps
-#'   can filter to their own. Set `FALSE` to emit each cell exactly once —
+#'   can filter to their own. Set `FALSE` to emit each cell exactly once -
 #'   maps that draw all waves together must not paint a shared cell twice.
 #'
 #' @return A GeoJSON FeatureCollection list, or `NULL`.
@@ -859,7 +874,6 @@ build_cell_features <- function(cell_geo, cell_map, by_wave = TRUE) {
   features <- lapply(seq_len(nrow(d)), function(i) {
     list(
       type      = "Feature",
-      geometry  = jsonlite::fromJSON(d$geom[i]),
       geom_json = d$geom[i],
       properties = list(
         code     = d$code[i],
@@ -898,7 +912,7 @@ plot_sample_density_map <- function(cells, unit_label = "households") {
                    is.finite(cells$n_units), , drop = FALSE]
   if (nrow(cells) == 0) return(invisible(NULL))
 
-  # Counts are heavily skewed — a handful of urban cells dwarf everything — so
+  # Counts are heavily skewed - a handful of urban cells dwarf everything - so
   # the colour scale runs on log, over the range actually present. Shares are
   # fractional where a location's units are split across its cells, so the
   # bottom of the ramp can sit below one.
@@ -908,7 +922,7 @@ plot_sample_density_map <- function(cells, unit_label = "households") {
   if (diff(rng) <= 0) rng <- c(rng[1], rng[1] * 2)
   # Mako (viridis family: perceptually uniform, colour-blind safe, and still
   # readable in greyscale) running light to dark, with the palest stops
-  # trimmed off — near-white yellows and creams disappear against the light
+  # trimmed off - near-white yellows and creams disappear against the light
   # basemap, which is what made the old Inferno ramp hard to read at the
   # bottom end.
   ramp <- rev(grDevices::hcl.colors(12, "Mako"))[3:11]
@@ -918,7 +932,6 @@ plot_sample_density_map <- function(cells, unit_label = "households") {
   feats <- lapply(seq_len(nrow(cells)), function(i) {
     list(
       geom_json = cells$geom[i],
-      geometry  = jsonlite::fromJSON(cells$geom[i]),
       props     = list(
         h3    = cells$h3[i] %||% "",
         popup = paste0(
@@ -936,7 +949,7 @@ plot_sample_density_map <- function(cells, unit_label = "households") {
   # One addGeoJSON call carrying a per-feature style, rather than one call per
   # distinct colour. With a continuous ramp almost every cell has its own
   # colour, so grouping by colour would create a thousand separate Leaflet
-  # layers — enough event and pane bookkeeping to make dragging stutter.
+  # layers - enough event and pane bookkeeping to make dragging stutter.
   fj <- vapply(seq_along(feats), function(i) {
     props <- feats[[i]]$props
     props$style <- list(fillColor = cols[i], fillOpacity = 0.75,
@@ -988,7 +1001,7 @@ plot_sample_density_map <- function(cells, unit_label = "households") {
           sub("s$", "", unit_label), " is placed in exactly one hexagon: a",
           " location's ", unit_label, " are assigned across the cells it",
           " covers in proportion to their 2020 population, then rolled up to",
-          " this display grid — so an area covered by many overlapping survey",
+          " this display grid - so an area covered by many overlapping survey",
           " locations accumulates all of them, and the totals match the",
           " sample exactly. Colour runs on a log scale because a handful of",
           " urban areas would otherwise flatten everything else."

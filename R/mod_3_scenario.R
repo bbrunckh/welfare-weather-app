@@ -164,7 +164,7 @@ mod_3_scenario_server <- function(id,
         tags$small(
           class = "text-muted",
           paste(
-            "Adjust these inputs (and any others) in the sections below —",
+            "Adjust these inputs (and any others) in the sections below -",
             "results update when you re-run the simulation."
           )
         )

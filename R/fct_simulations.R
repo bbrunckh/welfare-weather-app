@@ -95,7 +95,7 @@ format_elapsed <- function(secs) {
   sprintf("%dm %02ds", secs %/% 60L, secs %% 60L)
 }
 
-# SE clustering specification — confirmed default: ~loc_id_panel
+# SE clustering specification - confirmed default: ~loc_id_panel
 # Methodological justification: more conservative than ~loc_id:int_month
 # (Moulton minimum). Absorbs within-location serial correlation across
 # months and years. Weather data has real within-location temporal
@@ -106,7 +106,7 @@ format_elapsed <- function(secs) {
 #   40 <= G < 50             : use ~loc_id_panel, flag in methodology note
 #   G < 40                   : warn user, wild cluster bootstrap recommended
 #
-# Named alternatives — available as constants, not default.
+# Named alternatives - available as constants, not default.
 # Use compute_cluster_counts() to check G before switching.
 COEF_VCOV_SPEC              <- ~loc_id_panel
 COEF_VCOV_SPEC_MOULTON      <- ~loc_id_panel:int_month
@@ -124,9 +124,9 @@ COEF_VCOV_SPEC_MOULTON      <- ~loc_id_panel:int_month
 #' @return Named list with integer cluster counts:
 #'   \describe{
 #'     \item{loc_id_panel}{Number of distinct panel location clusters (primary spec).}
-#'     \item{loc_id_panel_int_month}{Number of distinct panel location × month clusters
+#'     \item{loc_id_panel_int_month}{Number of distinct panel location * month clusters
 #'       (Moulton minimum).}
-#'     \item{conservative}{Number of distinct code × year × survname × loc_id_panel
+#'     \item{conservative}{Number of distinct code * year * survname * loc_id_panel
 #'       clusters (conservative multi-way spec). \code{NA} if any column
 #'       is absent.}
 #'   }
@@ -161,7 +161,7 @@ compute_cluster_counts <- function(data) {
     conservative           = g_conserv
   )
 
-  # Runtime warnings — surface immediately at model fit time
+  # Runtime warnings - surface immediately at model fit time
   if (!is.na(g_loc) && g_loc < 40L) {
     warning(sprintf(
       "[SE] Only %d clusters at ~loc_id_panel. VCV SEs may be unreliable. Wild cluster bootstrap recommended (not yet implemented).",
@@ -169,7 +169,7 @@ compute_cluster_counts <- function(data) {
     ))
   } else if (!is.na(g_loc) && g_loc < 50L) {
     message(sprintf(
-      "[SE] %d clusters at ~loc_id_panel — borderline. Flag in methodology note.",
+      "[SE] %d clusters at ~loc_id_panel - borderline. Flag in methodology note.",
       g_loc
     ))
   }
@@ -185,7 +185,7 @@ compute_cluster_counts <- function(data) {
 #'
 #' Computes the lower-triangular Cholesky factor of the coefficient covariance
 #' matrix for the non-fixed-effect coefficients of a fitted \code{fixest}
-#' model. Used once per fitted model — not per weather key.
+#' model. Used once per fitted model - not per weather key.
 #'
 #' The Cholesky decomposition \eqn{L L' = \Sigma} allows efficient K-dimensional
 #' Monte Carlo draws: instead of drawing full N-dimensional prediction vectors,
@@ -243,7 +243,7 @@ compute_chol_vcov <- function(fit, vcov_spec = COEF_VCOV_SPEC) {
   }
 
   if (is.null(Sigma))
-    stop("[compute_chol_vcov] all vcov specs failed — cannot compute Sigma.")
+    stop("[compute_chol_vcov] all vcov specs failed - cannot compute Sigma.")
 
   L <- tryCatch(
     t(chol(Sigma)),
@@ -298,7 +298,7 @@ compute_factor_loading <- function(X_nonFE, chol_obj) {
   )
 
   # Additive-decomposition SE: when an active mask is set, build F_loading
-  # from the *active block of Sigma* — i.e. F = X_active %*% L_active where
+  # from the *active block of Sigma* - i.e. F = X_active %*% L_active where
   # L_active = chol(Sigma[mask, mask]). This is mathematically distinct
   # from (and smaller than) F[, mask] subset, which can pick up
   # off-diagonal Sigma contributions from inactive coefficients.
@@ -308,7 +308,7 @@ compute_factor_loading <- function(X_nonFE, chol_obj) {
     return(X_nonFE[, active_mask, drop = FALSE] %*% chol_obj$L_active)
   }
 
-  # Legacy: F = X %*% L (N × K).
+  # Legacy: F = X %*% L (N * K).
   X_nonFE %*% chol_obj$L
 }
 
@@ -373,7 +373,7 @@ resolve_id_col <- function(a, b) {
 #' \code{aggregate_with_uncertainty_delta()}.
 #'
 #' This function is called once per weather key (historical + future
-#' representatives). It does NOT draw coefficient perturbations — all
+#' representatives). It does NOT draw coefficient perturbations - all
 #' uncertainty propagation is deferred to display time via
 #' \code{aggregate_with_uncertainty_delta()}, making poverty line, weights, and
 #' aggregation method fully reactive without re-simulation.
@@ -392,7 +392,7 @@ resolve_id_col <- function(a, b) {
 #' @param engine Character. Model engine identifier (e.g. \code{"fixest"}).
 #' @param chol_obj Named list from \code{compute_chol_vcov()} or \code{NULL}.
 #'   When \code{NULL}, \code{F_loading} in the return value is \code{NULL}
-#'   (point estimates only — no coefficient uncertainty).
+#'   (point estimates only - no coefficient uncertainty).
 #' @param precomputed_train_aug Data frame or \code{NULL}. When supplied,
 #'   used directly as \code{train_aug} in the return value instead of
 #'   recomputing \code{predict(model, train_data)} per call. Passed by
@@ -406,6 +406,21 @@ resolve_id_col <- function(a, b) {
 #' @param svy_prepared Data frame or \code{NULL}. Pre-prepared survey data
 #'   with weather/outcome columns dropped and year converted to character.
 #'   Skips redundant per-key column manipulation in the weather join.
+#' @param chol_Sigma Deprecated alias of \code{chol_obj} (older Step 2
+#'   outputs stored the Cholesky factor under this name). Accepted for
+#'   compatibility; \code{chol_obj} takes precedence.
+#' @param slim Accepted for backwards compatibility; ignored.
+#' @param fit_multi Optional \code{fixest_multi} object of per-quantile RIF
+#'   fits. Activates the RIF path together with \code{taus} and
+#'   \code{weather_cols}.
+#' @param taus Numeric vector. Quantile levels used on the RIF path.
+#' @param weather_cols Character vector. Weather column names used to build
+#'   the RIF design matrix.
+#' @param svy_baseline Data frame or \code{NULL}. Baseline (pre-policy)
+#'   survey-weather frame; on the RIF policy path, coefficient deltas are
+#'   computed against this frame.
+#' @param rif_grid Optional tidy data frame of RIF beta curves (from
+#'   \code{fit_model()}), attached to the pipeline output for diagnostics.
 #'
 #' @return Named list or \code{NULL} on prediction failure:
 #'   \describe{
@@ -456,7 +471,7 @@ run_sim_pipeline <- function(weather_raw,
 
   n_pre_join <- nrow(svy)
 
-  # Define is_rif once — all conditions in one place
+  # Define is_rif once - all conditions in one place
   is_rif <- identical(engine, "rif") &&
             !is.null(fit_multi)      &&
             !is.null(taus)           &&
@@ -465,7 +480,7 @@ run_sim_pipeline <- function(weather_raw,
   # RIF policy mode: caller supplied an svy_baseline so we can separate the
   # baseline (no-policy) RIF prediction from the policy net level effect.
   # We predict against svy_baseline and then add the decomposition's
-  # delta_total — matching the Decomposition pane's totals exactly. The
+  # delta_total - matching the Decomposition pane's totals exactly. The
   # OLS path doesn't need this because predict_outcome() naturally picks up
   # the policy level shift from the policy-modified design matrix.
   is_rif_policy <- is_rif && !is.null(svy_baseline) &&
@@ -507,10 +522,10 @@ run_sim_pipeline <- function(weather_raw,
              else
                NULL
 
-  # ---- Prediction — dispatch on engine ------------------------------------
+  # ---- Prediction - dispatch on engine ------------------------------------
 
   out <- if (is_rif) {
-    # RIF path — quantile delta method
+    # RIF path - quantile delta method
     # Use chol_obj (our format) or chol_Sigma (golem format) for RIF
     chol_src <- if (!is.null(chol_obj)) chol_obj else chol_Sigma
 
@@ -519,8 +534,8 @@ run_sim_pipeline <- function(weather_raw,
     # When an active mask is set, we extract L_active (Cholesky of the
     # weather/policy block of Sigma) instead of the full L, so that
     # F_loading = X[, active] %*% L_active produces the correct
-    # additive-decomposition variance (h' X_w Σ_ww X_w' h). Subsetting
-    # columns of F = X %*% L_full would be incorrect when Σ has
+    # additive-decomposition variance (h' X_w Sigma_ww X_w' h). Subsetting
+    # columns of F = X %*% L_full would be incorrect when Sigma has
     # off-diagonal terms between active and inactive coefficients.
     chol_list <- if (!is.null(chol_src) && is.list(chol_src) &&
                      !("L" %in% names(chol_src))) {
@@ -551,7 +566,7 @@ run_sim_pipeline <- function(weather_raw,
       ecdf_train   = precomputed_ecdf_train
     )
   } else {
-    # Standard OLS path — unchanged
+    # Standard OLS path - unchanged
     tryCatch(
     predict_outcome(
       model      = model,
@@ -574,16 +589,16 @@ run_sim_pipeline <- function(weather_raw,
     return(NULL)
   }
 
-  # y_point stays log-scale — back-transformation happens inside
+  # y_point stays log-scale - back-transformation happens inside
   # aggregate_with_uncertainty_delta() after coefficient perturbation.
   y_point  <- out$.fitted
 
   # ---- RIF policy correction --------------------------------------------- #
   # In RIF policy mode the prediction above was made against svy_baseline,
   # so y_point currently holds the *baseline-x* level (matching what Mod 2's
-  # Step 2 hist_sim shows). Add the decomposition's delta_total — which
+  # Step 2 hist_sim shows). Add the decomposition's delta_total - which
   # includes delta_main (SP + Beta_x.Delta_x), delta_res1 (repositioning),
-  # and delta_res2 (Beta_int.haz.Delta_x) — so the Results pane reflects the
+  # and delta_res2 (Beta_int.haz.Delta_x) - so the Results pane reflects the
   # net policy effect on the welfare level. This skips the level-scale SP
   # block below because delta_sp is already inside delta_total.
   if (is_rif_policy) {
@@ -599,8 +614,8 @@ run_sim_pipeline <- function(weather_raw,
       is_log       = isTRUE(so$transform == "log")
     )
     # corr is one entry per household (nrow(svy_baseline)); broadcast it to
-    # each expanded survey×weather row via .svy_row_id (set by predict_rif()
-    # on `out`). Without this, hist_sim has y_point per (HH × month/year)
+    # each expanded survey*weather row via .svy_row_id (set by predict_rif()
+    # on `out`). Without this, hist_sim has y_point per (HH * month/year)
     # but corr is per HH, so the lengths mismatch and the correction would
     # be silently dropped.
     if (!is.null(corr) && ".svy_row_id" %in% names(out) &&
@@ -617,12 +632,12 @@ run_sim_pipeline <- function(weather_raw,
   # The transfer is a direct welfare boost, not a regression covariate, so it
   # is added after prediction. To stay consistent with the decomposition
   # (.decompose_ols / .compute_rif_channels in fct_policy_decompose.R, which
-  # define δ_sp = log(exp(y) + sp) − y), the boost is applied on the level
+  # define delta_sp = log(exp(y) + sp) - y), the boost is applied on the level
   # scale and re-logged when so$transform == "log".
   #
   # Skipped in RIF policy mode because delta_sp is already inside the
   # correction added above. (svy_for_predict = svy_baseline carries no
-  # SP_TRANSFER_COL, so `out` wouldn't have it anyway — the guard is
+  # SP_TRANSFER_COL, so `out` wouldn't have it anyway - the guard is
   # defensive.)
   sp_vec <- if (!is_rif_policy && SP_TRANSFER_COL %in% names(out))
               out[[SP_TRANSFER_COL]] else NULL
@@ -652,15 +667,15 @@ run_sim_pipeline <- function(weather_raw,
   svy_row_id <- if (".svy_row_id" %in% names(out)) out$.svy_row_id else NULL
 
   # ---- Factor loading matrix ---------------------------------------------- #
-  # Computed once per key — not per draw.
+  # Computed once per key - not per draw.
   # F_loading = X_nonFE %*% L  where L is the Cholesky factor of Sigma.
   # NULL when chol_obj = NULL (point estimates only).
   F_loading <- NULL
   if (is_rif && !is.null(attr(out, "F_loading"))) {
-    # RIF path — F_loading computed inside predict_rif() via interpolate_F_loading()
+    # RIF path - F_loading computed inside predict_rif() via interpolate_F_loading()
     F_loading <- attr(out, "F_loading")
   } else if (!is_rif && !is.null(chol_obj)) {
-      # Standard OLS path only — skip for RIF (model is fixest_multi)
+      # Standard OLS path only - skip for RIF (model is fixest_multi)
     X_nonFE <- tryCatch(
       model.matrix(model, data = survey_wd_sim, type = "rhs"),
       error = function(e) {
@@ -670,14 +685,14 @@ run_sim_pipeline <- function(weather_raw,
     )
 if (!is.null(X_nonFE)) {
       if (is.list(chol_obj) && "L" %in% names(chol_obj)) {
-        # Our named list format — use compute_factor_loading()
+        # Our named list format - use compute_factor_loading()
         stopifnot(
           "X_nonFE columns must match chol_obj$beta names" =
             identical(colnames(X_nonFE), names(chol_obj$beta))
         )
         F_loading <- compute_factor_loading(X_nonFE, chol_obj)
       } else if (is.matrix(chol_obj)) {
-        # Golem matrix format — inline multiply
+        # Golem matrix format - inline multiply
         F_loading <- X_nonFE %*% t(chol_obj)
       }
     }
@@ -685,7 +700,7 @@ if (!is.null(X_nonFE)) {
 
   # ---- Training augmentation for residual drawing ------------------------- #
   # train_aug carries .resid for "original" and "resample" residual paths
-  # inside aggregate_with_uncertainty_delta(). Identical across keys — prefer
+  # inside aggregate_with_uncertainty_delta(). Identical across keys - prefer
   # the precomputed version when available; fall back to per-call computation
   # for backward compat (Module 3 callers that don't precompute).
   train_aug <- if (is_rif) {
@@ -768,7 +783,7 @@ build_hist_sim_dates <- function(survey_weather, year_range) {
 #' 'Normal' is deliberately not offered: drawing residuals from N(0, sigma)
 #' assumes normal tails and homoskedasticity, which the other options avoid.
 #' 'None' is likewise not offered: it is a diagnostic mode (fitted values
-#' only) and understates variance — it remains available internally for the
+#' only) and understates variance - it remains available internally for the
 #' RIF engine, which needs no residual draw.
 #'
 #' @return A named character vector suitable for use in `radioButtons()`.
@@ -790,7 +805,7 @@ residual_choices <- function() {
 #' Derives the named `perturbation_method` vector required by `get_weather()`
 #' when an SSP scenario is active. Precipitation and similar accumulation
 #' variables (units `"mm"` or `"days"`) use `"multiplicative"` scaling;
-#' all other variables (e.g. temperature in `"°C"`) use `"additive"` delta.
+#' all other variables (e.g. temperature in `"degC"`) use `"additive"` delta.
 #'
 #' @param selected_weather A data frame with columns `name` and `units`, as
 #'   returned by `build_selected_weather()`.

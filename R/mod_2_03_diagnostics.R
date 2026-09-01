@@ -68,7 +68,7 @@ mod_2_03_diagnostics_ui <- function(id) {
             " of the bar's total length."),
           shiny::p(shiny::tags$b("Note:"),
             " variances (not SDs) add under independence, so the stacked total",
-            " is an upper bound on the true combined SD — read the bar as a",
+            " is an upper bound on the true combined SD - read the bar as a",
             " side-by-side decomposition of where uncertainty comes from, not",
             " as a literal additive total."),
           shiny::p(shiny::tags$b("Coefficient uncertainty"),
@@ -79,7 +79,7 @@ mod_2_03_diagnostics_ui <- function(id) {
             " about the central tendency."),
           shiny::p(shiny::tags$b("Inter-model spread"),
             " (future scenarios only) = SD of across-model disagreement in",
-            " the per-model mean aggregate — uncertainty about the central",
+            " the per-model mean aggregate - uncertainty about the central",
             " tendency arising from model choice."),
           docs = TRUE
         )
@@ -87,7 +87,7 @@ mod_2_03_diagnostics_ui <- function(id) {
       shiny::plotOutput(ns("variance_contribution_plot"), height = "320px"),
       shiny::tags$p(
         style = "font-size:11px; color:#666; margin-top:6px;",
-        "Each segment = one source's SD contribution (not strictly additive) — click ",
+        "Each segment = one source's SD contribution (not strictly additive) - click ",
         shiny::icon("circle-info"), " above for details."
       )
     ),
@@ -105,7 +105,7 @@ mod_2_03_diagnostics_ui <- function(id) {
           shiny::p(shiny::tags$b("Translucent ribbon"),
             " (future scenarios only) = inter-model spread at the selected band quantiles."),
           shiny::p(
-            "Each scenario × projection period gets its own colour (SSP",
+            "Each scenario \u00D7 projection period gets its own colour (SSP",
             "family) and linetype (period), shown as one entry in the legend."
           ),
           docs = TRUE
@@ -189,11 +189,11 @@ mod_2_03_diagnostics_server <- function(id,
       else if (has_w && !tog_on)
         shiny::tags$p(
           style = "font-size:11px; color:#e65100; margin:2px 0 6px 0;",
-          "⚠ Survey weights available but not applied")
+          "\u26A0 Survey weights available but not applied")
       else
         shiny::tags$p(
           style = "font-size:11px; color:#c62828; margin:2px 0 6px 0;",
-          "🔴 No weight column found — unweighted")
+          "\U0001F534 No weight column found - unweighted")
     })
 
 

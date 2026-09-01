@@ -1,7 +1,7 @@
 # fct_run_simulation.R
 # --------------------
 # Orchestration function for the full simulation pipeline.
-# Pure function — no reactives. Called from mod_2_01_weathersim.R.
+# Pure function - no reactives. Called from mod_2_01_weathersim.R.
 #
 # Called by:
 #   - mod_2_01_weathersim.R (observeEvent(input$run_sim))
@@ -13,12 +13,12 @@
 
 
 # ---------------------------------------------------------------------------- #
-# Run full simulation pipeline — called once per button click                  #
+# Run full simulation pipeline - called once per button click                  #
 # ---------------------------------------------------------------------------- #
 
 #' Run the full welfare-weather simulation pipeline
 #'
-#' Pure function — no reactives. Extracts all business logic from
+#' Pure function - no reactives. Extracts all business logic from
 #' observeEvent(input\$run_sim) in mod_2_01_weathersim.R.
 #'
 #' @param sw               Data frame. Selected weather variables.
@@ -41,7 +41,7 @@
 #'   additive separability. Set TRUE to recover the legacy full-coefficient
 #'   propagation (more conservative but inconsistent with the model's own
 #'   additive-separability assumption). Ignored when residuals are not
-#'   `"original"` — the cancellation argument requires fixed-per-household
+#'   `"original"` - the cancellation argument requires fixed-per-household
 #'   residuals.
 #' @param sim_dates        Character vector. Historical simulation dates.
 #' @param perturbation_method List or NULL. Built by build_perturbation_method().
@@ -49,7 +49,7 @@
 #' @param notify_fn        Function(msg). Called for user-facing notifications.
 #'   Default is message() to console only.
 #' @param progress_fn      Function(value, detail). Called to update progress.
-#'   Default is a no-op — Shiny passes shiny::setProgress here.
+#'   Default is a no-op - Shiny passes shiny::setProgress here.
 #'
 #' @return Named list with elements:
 #'   \describe{
@@ -94,7 +94,7 @@ fct_run_simulation <- function(sw,
     "ssp5_8_5" = "SSP5-8.5"
   )
 
-  # ---- Total elapsed timer — starts here, covers everything --------------- #
+  # ---- Total elapsed timer - starts here, covers everything --------------- #
   t_start_total <- proc.time()[["elapsed"]]
 
   # ---- Weather loading ---------------------------------------------------- #
@@ -114,7 +114,7 @@ fct_run_simulation <- function(sw,
   )
 
   t_weather <- proc.time()[["elapsed"]] - t_weather_start
-  progress_fn(0.20, sprintf("Weather loaded (%s) — preparing simulation...",
+  progress_fn(0.20, sprintf("Weather loaded (%s) - preparing simulation...",
                              format_elapsed(t_weather)))
 
   # ---- Cholesky VCV ------------------------------------------------------- #
@@ -125,7 +125,7 @@ fct_run_simulation <- function(sw,
     tryCatch(
       compute_chol_vcov(fit = model, vcov_spec = COEF_VCOV_SPEC),
       error = function(e) {
-        warning("[fct_run_simulation] compute_chol_vcov() failed — ",
+        warning("[fct_run_simulation] compute_chol_vcov() failed - ",
                 "falling back to point estimates: ", conditionMessage(e))
         NULL
       }
@@ -193,7 +193,7 @@ fct_run_simulation <- function(sw,
   n_future_keys <- length(future_keys)
   total_runs    <- n_hist_yrs * (1L + n_future_keys)
 
-  # Serial execution only — parallelisation removed
+  # Serial execution only - parallelisation removed
   n_workers_safe <- 1L
 
   # ---- Precompute objects shared across all keys ----------------------------- #
@@ -215,7 +215,7 @@ fct_run_simulation <- function(sw,
     NULL
   })
 
-  # ecdf_train: RIF-only analogue of the above — train_data[[outcome]] is
+  # ecdf_train: RIF-only analogue of the above - train_data[[outcome]] is
   # identical for every key, so the ecdf used to assign each household's
   # quantile position is built once here rather than per key inside
   # predict_rif() (see PERF-27).
@@ -244,7 +244,7 @@ fct_run_simulation <- function(sw,
   message("[wiseapp] Running simulation pipelines...")
   progress_fn(0.35, sprintf("Running %d simulation pipelines...", n_keys))
 
-  # Pre-split weather_result per key — each (potential) parallel worker only
+  # Pre-split weather_result per key - each (potential) parallel worker only
   # receives its own key's weather data (~10MB) not the full 228MB
   weather_per_key <- setNames(
     lapply(all_keys, function(k) weather_result[[k]]),
@@ -254,8 +254,8 @@ fct_run_simulation <- function(sw,
   # ---- Key loop ----------------------------------------------------------- #
   # Run each key's pipeline and assemble its result immediately, then free the
   # pipeline before the next key. This bounds resident memory to a single key's
-  # pipeline (each carries its full weather_raw and an N×P F_loading matrix)
-  # rather than holding all keys at once — the previous two-pass design (build
+  # pipeline (each carries its full weather_raw and an N*P F_loading matrix)
+  # rather than holding all keys at once - the previous two-pass design (build
   # every pipeline into pipeline_list, then consume) stacked one key's transient
   # peak on top of every prior key's retained pipeline, which tips large-N
   # countries over the vector-memory limit.
@@ -272,7 +272,7 @@ fct_run_simulation <- function(sw,
     is_hist   <- identical(key, "historical")
     is_hist_k <- is_hist
 
-    # Per-key progress (fires before the key runs) — mirrors the old pre-run
+    # Per-key progress (fires before the key runs) - mirrors the old pre-run
     # loop's message.
     t_el <- proc.time()[["elapsed"]] - t_start_pipeline
     progress_fn(
@@ -389,7 +389,7 @@ fct_run_simulation <- function(sw,
   gc(verbose = FALSE)
 
   t_pipeline_done <- proc.time()[["elapsed"]] - t_start_pipeline
-  progress_fn(0.80, sprintf("Pipelines complete (%s) — grouping results...",
+  progress_fn(0.80, sprintf("Pipelines complete (%s) - grouping results...",
                              format_elapsed(t_pipeline_done)))
 
   # ---- Assemble new_scenarios --------------------------------------------- #
@@ -430,6 +430,6 @@ fct_run_simulation <- function(sw,
     n_keys          = n_keys,
     total_runs      = total_runs,
     t_elapsed       = t_elapsed_total,
-    t_weather       = t_weather        # ← expose for UI notification
+    t_weather       = t_weather        # <- expose for UI notification
   )
 }

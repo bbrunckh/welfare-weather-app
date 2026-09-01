@@ -88,7 +88,7 @@ resolve_band_q <- function(band_key) {
 
 # ---- Internal helpers: parse scenario key components ----------------------
 # .normalise_ssp() and .parse_year() live in fct_simulations.R (single robust
-# implementation — do not re-define them here).
+# implementation - do not re-define them here).
 
 # ---- Internal: dynamic year linetype helper --------------------------------
 .resolve_year_styles <- function(year_labels) {
@@ -118,9 +118,9 @@ resolve_band_q <- function(band_key) {
 
 # Decompose a scenario's aggregated $out tibble into three uncertainty sources.
 # Returns a named list:
-#   $total  — all N_models × N_years values (combined)
-#   $annual — model-averaged annual means   (N_years values)
-#   $model  — year-averaged model means     (N_models values; NULL for historical)
+#   $total  - all N_models * N_years values (combined)
+#   $annual - model-averaged annual means   (N_years values)
+#   $model  - year-averaged model means     (N_models values; NULL for historical)
 .decompose_scenario_uncertainty <- function(out_df) {
   has_model <- "model" %in% names(out_df)
   # Coefficient uncertainty: when draw_id is present, use draw-level value_p50
@@ -157,8 +157,13 @@ resolve_band_q <- function(band_key) {
 #' Groups are ordered Historical | spacer | SSP2 years | spacer | SSP3 years |
 #' spacer | SSP5 years. Colour follows SSP family; shade follows year rank.
 #'
-#' @param scenarios Named list; each element is from aggregate_sim_preds().
-#' @param hist_agg  Full result of aggregate_sim_preds() for historical.
+#' @param bands_tbl  Data frame of per-scenario/per-year aggregates with a
+#'   central value and band columns (from the Step 2 band assembly).
+#' @param x_label   Scalar character y-axis label (outcome units).
+#' @param group_order Character. \code{"scenario_x_year"} (default) or
+#'   \code{"year_x_scenario"} x-axis ordering.
+#' @param show_coef Logical. Show the thin coefficient-uncertainty line.
+#'   Default TRUE.
 #' @return A ggplot object.
 #' @importFrom ggplot2 ggplot aes geom_linerange geom_point geom_hline
 #'   scale_colour_manual scale_x_discrete labs theme_minimal theme
@@ -182,7 +187,7 @@ plot_pointrange_climate <- function(bands_tbl,
   has_source <- "source" %in% names(df)
   if (has_source) {
     df$source <- factor(df$source, levels = c("Baseline", "Policy"))
-    # Historical from the policy source is identical to baseline historical —
+    # Historical from the policy source is identical to baseline historical -
     # drop it so the chart shows one historical dot (under Baseline).
     df <- df[!(df$is_historical & df$source == "Policy"), , drop = FALSE]
   }
@@ -331,8 +336,12 @@ plot_pointrange_climate <- function(bands_tbl,
 #' \code{DT::datatable()}. Replaces the inline wrangling that previously
 #' lived inside \code{renderDT} in mod_2_06_sim_compare_server().
 #'
-#' @param all_series  Named list. Each element must have \code{$out$value}.
-#'   Typically \code{c(list(Historical = agg_hist), agg_scenarios)}.
+#' @param threshold_tbl Data frame. Band-assembled threshold frame with
+#'   columns `scenario`, `source`, `rp_label`, `Estimate`, and `value`.
+#' @param group_order Character. \code{"scenario_x_year"} (default) or
+#'   \code{"year_x_scenario"}.
+#' @param show_coef Logical. When `FALSE`, coefficient-band rows (labels
+#'   starting with `"Coef "`) are dropped.
 #' @param group_order Character. \code{"scenario_x_year"} (default) or
 #'   \code{"year_x_scenario"}.
 #'
@@ -351,7 +360,7 @@ build_threshold_table_df <- function(threshold_tbl,
   has_source <- "source" %in% names(df)
   if (has_source) {
     # Historical row from the Policy source is identical to Baseline by
-    # construction (policy doesn't apply to historical) — drop it.
+    # construction (policy doesn't apply to historical) - drop it.
     df <- df[!(grepl("^Historical", df$scenario) & df$source == "Policy"),
              , drop = FALSE]
   }
@@ -452,7 +461,7 @@ build_threshold_table_df <- function(threshold_tbl,
 #' Draws one thin translucent line per (scenario, model) over sim_year, with
 #' a bold across-model median curve and a translucent inter-model ribbon
 #' on top. Historical scenarios are drawn as a single bold line (no ribbon
-#' — only one "model"). The aim is to show model disagreement directly
+#' - only one "model"). The aim is to show model disagreement directly
 #' alongside year-to-year variation.
 #'
 #' @param ts_tbl Tibble with columns: scenario, model_id, sim_year, value,
@@ -707,13 +716,17 @@ plot_variance_contribution <- function(var_tbl) {
 #' giving a full visual separation of the three ensemble spread lines per
 #' scenario/period combination.
 #'
-#' @param scenarios     Named list from `aggregate_sim_preds()`.
-#' @param hist_agg      Historical aggregate from `aggregate_sim_preds()`.
+#' @param curves_tbl    Data frame. Tidy exceedance curves with one row per
+#'   (scenario, period, model, rank) welfare value.
 #' @param x_label       Axis label for the welfare outcome.
 #' @param return_period Logical. Show return period lines. Default TRUE.
 #' @param n_sim_years   Integer. Triggers reliability annotation.
 #' @param logit_x       Logical. Use logit scale on the probability axis to
 #'   emphasise both tails symmetrically. Default FALSE.
+#' @param band_q          Named numeric vector \code{c(lo =, hi =)} quantiles
+#'   for the coefficient band. Default \code{c(0.10, 0.90)}.
+#' @param ensemble_band_q Named numeric vector quantiles for the inter-model
+#'   ensemble band. Default \code{c(0, 1)} (full range).
 #' @return A ggplot object.
 #' @importFrom ggplot2 ggplot aes geom_line geom_vline annotate
 #'   labs theme_minimal theme scale_color_manual scale_linetype_manual
@@ -738,7 +751,7 @@ enhance_exceedance <- function(curves_tbl,
   # For each (scenario, rank) collapse across models:
   #   central_at_rank    = median of welfare_val across models
   #   intermod_lo/hi     = quantile across models at ensemble_band_q
-  #   coef_lo/hi_at_rank = median(welfare_val ± z * coef_sd) across models
+  #   coef_lo/hi_at_rank = median(welfare_val +/- z * coef_sd) across models
   z_lo <- if (!is.null(band_q)) stats::qnorm(band_q[["lo"]]) else NA_real_
   z_hi <- if (!is.null(band_q)) stats::qnorm(band_q[["hi"]]) else NA_real_
 
@@ -851,7 +864,7 @@ enhance_exceedance <- function(curves_tbl,
   )
 
   # Inter-model ribbon (futures only). When source is present we draw a
-  # ribbon per source — both faded so the baseline ribbon stays readable.
+  # ribbon per source - both faded so the baseline ribbon stays readable.
   if (nrow(fut_mod_df) > 0L) {
     ribbon_aes <- if (has_source)
       ggplot2::aes(y = .data$exceed_prob, xmin = .data$intermod_lo,
@@ -898,7 +911,7 @@ enhance_exceedance <- function(curves_tbl,
   }
 
   # Central median line: historical baseline only. For future scenarios the
-  # inter-model ribbon carries the full distribution — overlaying the median
+  # inter-model ribbon carries the full distribution - overlaying the median
   # curve overly emphasises centrality.
   p <- p +
     ggplot2::geom_line(data = hist_df, linewidth = 0.9)

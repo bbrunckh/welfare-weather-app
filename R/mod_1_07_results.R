@@ -63,7 +63,7 @@ mod_1_07_results_server <- function(id,
     observeEvent(run_model(), {
       req(selected_outcome(), selected_weather(), selected_model(), survey_weather())
 
-      nid <- shiny::showNotification("Fitting models — please wait...",
+      nid <- shiny::showNotification("Fitting models - please wait...",
                                      type = "message", duration = NULL,
                                      closeButton = FALSE)
       on.exit(shiny::removeNotification(nid), add = TRUE)

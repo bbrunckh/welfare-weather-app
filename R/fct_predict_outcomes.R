@@ -9,9 +9,9 @@
 #' values. Handles three families of model objects transparently:
 #' \itemize{
 #'   \item \pkg{parsnip} \code{model_fit} objects backed by \code{lm} (linear)
-#'     or \code{glm} (logistic) — produced when \code{engine == "lm_glm"}.
+#'     or \code{glm} (logistic) - produced when \code{engine == "lm_glm"}.
 #'   \item \code{fixest} objects from \code{feols()} (linear) or
-#'     \code{feglm()} (logistic) — produced when \code{engine == "fixest"}.
+#'     \code{feglm()} (logistic) - produced when \code{engine == "fixest"}.
 #'   \item Bare \code{lm} / \code{glm} objects (for ad-hoc use outside
 #'     \code{fit_model()}).
 #' }
@@ -143,15 +143,15 @@ predict_outcome <- function(model,
     inherits(model, "feglm")
 
   # ---------------------------------------------------------------------------
-  # 2. Compute fitted values on newdata  → stored in .fitted
+  # 2. Compute fitted values on newdata  -> stored in .fitted
   # ---------------------------------------------------------------------------
 
   if (is_fixest) {
 
     # fixest does not have a broom::augment method that accepts new data cleanly.
     # Use predict.fixest directly:
-    #   feols  → numeric fitted values
-    #   feglm  → P(Y=1) when type = "response" (the default)
+    #   feols  -> numeric fitted values
+    #   feglm  -> P(Y=1) when type = "response" (the default)
     # Point-estimate prediction (used as base and as-is when beta_override is NULL)
     preds_vec <- tryCatch(
       stats::predict(model, newdata = newdata, type = "response"),
@@ -362,7 +362,7 @@ predict_outcome <- function(model,
       train_resid <- train_aug$.resid
       if (length(train_resid) == 0)
         stop("No training residuals available for `residuals = 'resample'`.")
-      # Same reason as normal above — use nrow(preds).
+      # Same reason as normal above - use nrow(preds).
       withr::with_seed(
         wise_seed(seed, "predict-outcome", "resample", outcome),
         sample(train_resid, size = nrow(preds), replace = TRUE)

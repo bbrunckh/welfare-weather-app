@@ -101,7 +101,7 @@ mod_1_02_surveystats_server <- function(
     observeEvent(input$survey_stats, {
       req(nrow(selected_surveys()) > 0)
 
-      busy_id <- showNotification("Loading survey data…", duration = NULL, type = "message")
+      busy_id <- showNotification("Loading survey data...", duration = NULL, type = "message")
       on.exit(removeNotification(busy_id), add = TRUE)
 
       ss <- selected_surveys()
@@ -152,7 +152,7 @@ mod_1_02_surveystats_server <- function(
 
           loc_df <- h3_df |>
             dplyr::summarise(
-              # Emit GeoJSON string directly from DuckDB — no WKB or sf needed
+              # Emit GeoJSON string directly from DuckDB - no WKB or sf needed
               geom = st_asgeojson(st_union_agg(st_geomfromtext(h3_cell_to_boundary_wkt(h3)))),
               .by  = c(code, year, survname, loc_id)
             ) |>
@@ -164,7 +164,6 @@ mod_1_02_surveystats_server <- function(
             row <- loc_df[i, ]
             list(
               type      = "Feature",
-              geometry  = jsonlite::fromJSON(row$geom), # parsed for .geojson_bounds only
               geom_json = row$geom,                     # raw string for addGeoJSON
               properties = list(
                 code     = row$code,
@@ -224,7 +223,7 @@ mod_1_02_surveystats_server <- function(
       }
 
       notify(
-        paste0("Loaded ", nrow(ss), " survey file(s) — ", nrow(df), " rows."),
+        paste0("Loaded ", nrow(ss), " survey file(s) - ", nrow(df), " rows."),
         type = "message", duration = 3
       )
 
@@ -241,7 +240,7 @@ mod_1_02_surveystats_server <- function(
 
         # Leaflet map of interview locations.
         # Keep the view across a switch between Locations and Sample density,
-        # and across a reload — rebuilding the widget would otherwise snap
+        # and across a reload - rebuilding the widget would otherwise snap
         # back to the full extent.
         map_view_mem <- map_view_memory(input, session, "map")
         map_view_mem$remember()
@@ -417,7 +416,7 @@ mod_1_02_surveystats_server <- function(
                   p(paste(
                     "Candidate outcome variables available for welfare",
                     "analysis in Step 1. Check the missingness column",
-                    "before selecting an outcome — high missingness can",
+                    "before selecting an outcome - high missingness can",
                     "limit sample size after listwise deletion."
                   ))
                 )

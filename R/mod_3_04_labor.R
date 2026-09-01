@@ -1,6 +1,6 @@
 #' 3_04_labor UI Function
 #'
-#' @description A shiny Module. Labor market scenario configuration —
+#' @description A shiny Module. Labor market scenario configuration -
 #'   allows the user to simulate changes in labor force participation,
 #'   employment rate, and sectoral composition.
 #'
@@ -156,7 +156,7 @@ mod_3_04_labor_server <- function(id,
     })
 
     # ---- Sectoral composition ------------------------------------------
-    # Three sliders sum to 100pp — agriculture anchors, manufacturing and
+    # Three sliders sum to 100pp - agriculture anchors, manufacturing and
     # services are user-controlled, agriculture = 100 - mfg - services.
 
     show_sector <- reactive({
@@ -228,7 +228,7 @@ mod_3_04_labor_server <- function(id,
         tags$label(
           class = "control-label",
           tags$i(class = "fa fa-wheat-awn me-1"),
-          "Agriculture (%) — derived"
+          "Agriculture (%) - derived"
         ),
         tags$div(
           class = "well well-sm text-center",

@@ -153,7 +153,7 @@ mod_1_08_modelfit_server <- function(id,
           "Relative importance of predictors",
           info_popover(
             p(paste(
-              "Importance is computed as |β| × sd(X), i.e. the absolute",
+              "Importance is computed as |\u03B2| \u00D7 sd(X), i.e. the absolute",
               "standardized coefficient. This fast method works for both",
               "linear and logistic models and handles interactions and many",
               "predictors robustly."

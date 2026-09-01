@@ -63,13 +63,13 @@
 #' the numbers are identical.
 #'
 #' **Uncertainty assumption (v1):** per-channel SEs are computed under a
-#' diagonal coefficient covariance — each `(τ, term)` β draws from
+#' diagonal coefficient covariance - each `(tau, term)` beta draws from
 #' `rif_grid$std.error` with zero off-diagonal covariance. Under that
 #' assumption channels are independent, so
-#' `Var(Δ_total) = Var(Δ_main) + Var(Δ_res1) + Var(Δ_res2)` exactly. This
-#' is conservative for channels using *different* τ slots (Δ_main at τ_pre,
-#' Δ_res2 at τ_post) and slightly understates total variance for channels
-#' sharing τ (Δ_main / Δ_res1 at τ_pre, Δ_res1 / Δ_res2 at τ_post).
+#' `Var(Delta_total) = Var(Delta_main) + Var(Delta_res1) + Var(Delta_res2)` exactly. This
+#' is conservative for channels using *different* tau slots (Delta_main at tau_pre,
+#' Delta_res2 at tau_post) and slightly understates total variance for channels
+#' sharing tau (Delta_main / Delta_res1 at tau_pre, Delta_res1 / Delta_res2 at tau_post).
 #'
 #' @param svy_baseline Baseline survey data frame.
 #' @param deltas Named list of covariate delta vectors (from .compute_policy_deltas).
@@ -127,8 +127,8 @@
   }
 
   # --- Main effect: covariate shifts beta_x(tau_pre) * delta_x ---
-  # Accumulate per-channel variance in parallel under the diagonal-Σ
-  # approximation:  Var = Σ_term (Δx · SE_term(τ))²
+  # Accumulate per-channel variance in parallel under the diagonal-Sigma
+  # approximation:  Var = Sigma_term (Deltax * SE_term(tau))^2
   delta_main_covar <- rep(0, n)
   var_main <- rep(0, n)
   for (v in names(deltas)) {
@@ -148,11 +148,11 @@
   }
 
   delta_main <- delta_sp + delta_main_covar
-  # delta_sp is a function of policy and observed welfare only — no β
-  # dependence — so it adds 0 to var_main.
+  # delta_sp is a function of policy and observed welfare only - no beta
+  # dependence - so it adds 0 to var_main.
 
   # --- Repositioning (res1): tau shift from main effect changes weather beta ---
-  # Post-main-effect position on the SAME CDF used for tau_i_pre — i.e. the
+  # Post-main-effect position on the SAME CDF used for tau_i_pre - i.e. the
   # training-outcome ecdf the RIF coefficient grid was estimated against.
   # Using a different CDF here (e.g. ecdf(svy_baseline)) would make
   # tau_i_post != tau_i_pre even when delta_main == 0, producing a spurious
@@ -173,16 +173,16 @@
       se_pre    <- se_at(wv, tau_i_pre)
       se_post   <- se_at(wv, tau_i_post)
       delta_res1 <- delta_res1 + (beta_post - beta_pre) * haz
-      # Independent-τ assumption: Var((β_post - β_pre) · haz) = haz² (SE_pre² + SE_post²)
+      # Independent-tau assumption: Var((beta_post - beta_pre) * haz) = haz^2 (SE_pre^2 + SE_post^2)
       var_res1 <- var_res1 + (haz^2) * (se_pre^2 + se_post^2)
     } else if (wv %in% names(svy_baseline) && is.factor(svy_baseline[[wv]])) {
       # Binned (factor) weather: use year-specific bin from hazard_values[[wv]],
-      # derived from that year's weather_raw via loc_id join — this varies by year.
+      # derived from that year's weather_raw via loc_id join - this varies by year.
       # Falls back to svy_baseline[[wv]] when weather_raw is NULL (historical run).
       fac_col <- if (is.factor(hazard_values[[wv]])) hazard_values[[wv]] else svy_baseline[[wv]]
       for (lv in levels(fac_col)) {
         term_name <- paste0(wv, lv)
-        if (!term_name %in% all_terms) next   # reference level — contribution is 0
+        if (!term_name %in% all_terms) next   # reference level - contribution is 0
         active <- !is.na(fac_col) & fac_col == lv
         if (!any(active)) next
         beta_pre_b  <- beta_at(term_name, tau_i_pre[active])
@@ -248,7 +248,7 @@
   delta_total <- delta_main + delta_res1 + delta_res2
 
   # Total variance under the channel-independence approximation. Holds exactly
-  # when channels use disjoint (τ, term) sets (the common case once SP/cov
+  # when channels use disjoint (tau, term) sets (the common case once SP/cov
   # vs. weather effects are separated); approximate otherwise.
   var_total <- var_main + var_res1 + var_res2
 
@@ -552,7 +552,7 @@ decompose_policy_effect <- function(svy_baseline,
   coefs <- tryCatch(stats::coef(fit), error = function(e) NULL)
   if (is.null(coefs)) return(NULL)
 
-  # Per-coefficient SE under diagonal-Σ approximation.
+  # Per-coefficient SE under diagonal-Sigma approximation.
   se_vec <- if (isTRUE(skip_coef)) {
     setNames(rep(0, length(coefs)), names(coefs))
   } else {

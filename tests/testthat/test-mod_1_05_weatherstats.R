@@ -104,8 +104,8 @@ test_that("one map output is created per weather variable, not per wave", {
 
       # Both cards are laid out, each headed by its variable and the wave.
       html <- as.character(output$weather_map_layout$html)
-      expect_true(grepl("Max temp — Testland, 2018", html, fixed = TRUE))
-      expect_true(grepl("Precipitation — Testland, 2018", html, fixed = TRUE))
+      expect_true(grepl("Max temp - Testland, 2018", html, fixed = TRUE))
+      expect_true(grepl("Precipitation - Testland, 2018", html, fixed = TRUE))
       expect_equal(lengths(regmatches(html, gregexpr("wxmap_", html))), 2L)
     }
   )
@@ -139,7 +139,7 @@ test_that("the wave picker selects which wave the maps draw", {
       expect_false(grepl("25.00", map_2021, fixed = TRUE))
 
       # The card header follows the picker.
-      expect_true(grepl("Max temp — Testland, 2021",
+      expect_true(grepl("Max temp - Testland, 2021",
                         as.character(output$weather_map_layout$html),
                         fixed = TRUE))
 

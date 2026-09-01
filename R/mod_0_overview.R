@@ -30,7 +30,7 @@ mod_0_overview_ui <- function(id) {
           "welfare under historical and projected climate scenarios,",
           "and to evaluate resilience-building policy interventions."
         )),
-        p("Work through the three steps below — each step builds on the previous one."),
+        p("Work through the three steps below - each step builds on the previous one."),
 
         p(tags$a(
           icon("book-open"), "WISE-APP Use Guide",
@@ -65,8 +65,8 @@ mod_0_overview_ui <- function(id) {
       "1", "Model welfare",
       paste(
         "Estimate the empirical relationship between local weather and an",
-        "outcome of interest — such as household consumption or",
-        "poverty status — from survey microdata. The fitted model is the",
+        "outcome of interest - such as household consumption or",
+        "poverty status - from survey microdata. The fitted model is the",
         "foundation for all subsequent steps."
       )
     ),
@@ -94,7 +94,7 @@ mod_0_overview_ui <- function(id) {
     bslib::card_header(icon("triangle-exclamation"), " Limitations"),
     bslib::card_body(
       p(paste(
-        "WISE-APP is an illustrative stress-testing tool — not a forecast or a",
+        "WISE-APP is an illustrative stress-testing tool - not a forecast or a",
         "causal impact evaluation framework. Its estimates capture conditional",
         "statistical associations between local weather variability and household",
         "welfare. The User Guide includes important"
@@ -110,7 +110,7 @@ mod_0_overview_ui <- function(id) {
   )
 
   # On Posit Connect with Databricks env vars: skip the connection form
-  # entirely and just show the status badge — server auto-connects on startup.
+  # entirely and just show the status badge - server auto-connects on startup.
   if (.auto_connect()) {
     return(tagList(
       hero,
@@ -421,7 +421,7 @@ mod_0_overview_server <- function(id) {
       params <- connection_params()
 
       if (identical(params$type, "local")) {
-        # DEP-03: configuration completeness is not reachability — the folder
+        # DEP-03: configuration completeness is not reachability - the folder
         # must exist (and be readable) before anything is published.
         path_ok <- tryCatch({
           params$path <- normalise_local_path(params$path)
@@ -497,7 +497,7 @@ mod_0_overview_server <- function(id) {
         showNotification(
           paste0(
             "Connection failed: metadata could not be loaded from the ",
-            params$type, " source. ", length(errors), " file(s) failed — ",
+            params$type, " source. ", length(errors), " file(s) failed - ",
             "see the status panel for details."
           ),
           type = "error", duration = 10
@@ -526,7 +526,7 @@ mod_0_overview_server <- function(id) {
     output$folder_path_echo <- renderText({
       p <- applied_connection()
       if (is.null(p)) return("No connection applied yet.")
-      if (identical(p$type, "local")) paste0("Connected: local folder — ", p$path)
+      if (identical(p$type, "local")) paste0("Connected: local folder - ", p$path)
       else paste0("Connected: ", p$type)
     })
 

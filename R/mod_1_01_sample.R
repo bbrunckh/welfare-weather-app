@@ -108,7 +108,7 @@ mod_1_01_sample_server <- function(id, connection_params, survey_list, variable_
           head(1)
         selectizeInput(
           inputId  = ns(paste0("year_", code)),
-          label    = paste("Survey years —", economy_name),
+          label    = paste("Survey years -", economy_name),
           choices  = yrs,
           selected = yrs,
           multiple = TRUE,

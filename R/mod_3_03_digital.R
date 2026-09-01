@@ -1,6 +1,6 @@
 #' 3_03_digital UI Function
 #'
-#' @description A shiny Module. Digital inclusion scenario configuration —
+#' @description A shiny Module. Digital inclusion scenario configuration -
 #'   allows the user to define changes in internet access and mobile phone
 #'   ownership to be applied in the policy simulation.
 #'
@@ -31,7 +31,7 @@ mod_3_03_digital_ui <- function(id) {
 #' @return A named list of reactives:
 #'   \describe{
 #'     \item{digital_scenario}{Named list of digital inclusion scenario parameters.}
-#'     \item{selected_fut}{Reactive — placeholder for selected future period.}
+#'     \item{selected_fut}{Reactive - placeholder for selected future period.}
 #'   }
 #'
 #' @noRd

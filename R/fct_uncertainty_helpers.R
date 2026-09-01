@@ -7,11 +7,11 @@
 # (not exported) and take plain R data; they have no Shiny dependencies.
 # ============================================================================ #
 
-#' Reshape a per-sim_year tibble with list-cols into a (model × year) matrix.
+#' Reshape a per-sim_year tibble with list-cols into a (model * year) matrix.
 #'
 #' Input `tbl` carries list-columns `model_id`, `value_all`, `value_all_sd`,
 #' one row per simulation year. Output reshapes them into parallel matrices
-#' keyed by model_id (rows) × sim_year (cols), recycling a scalar SD across
+#' keyed by model_id (rows) * sim_year (cols), recycling a scalar SD across
 #' members when only one (historical) is present.
 #'
 #' @param tbl A data frame with `sim_year`, `model_id`, `value_all`,

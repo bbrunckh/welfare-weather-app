@@ -1,7 +1,7 @@
 #' 3_02_infra UI Function
 #'
 #' @description A shiny Module. Access to infrastructure scenario
-#'   configuration — allows the user to define changes in infrastructure
+#'   configuration - allows the user to define changes in infrastructure
 #'   access rates and travel times to be applied in the policy simulation.
 #'
 #' @param id,input,output,session Internal parameters for {shiny}.
@@ -34,7 +34,7 @@ mod_3_02_infra_ui <- function(id) {
 #' @return A named list of reactives:
 #'   \describe{
 #'     \item{infra_scenario}{Named list of infrastructure scenario parameters.}
-#'     \item{hist_sim}{Reactive — placeholder for historical simulation results.}
+#'     \item{hist_sim}{Reactive - placeholder for historical simulation results.}
 #'   }
 #'
 #' @noRd

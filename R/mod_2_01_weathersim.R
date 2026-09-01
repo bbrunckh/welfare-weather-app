@@ -143,7 +143,7 @@ mod_2_01_weathersim_ui <- function(id) {
         "Simulation residuals",
         info_popover(
           title = "Simulation residuals",
-          shiny::p(shiny::tags$b("original:"), " Recommended default: match each observation's own residual — assumes no changes due to changing hazards."),
+          shiny::p(shiny::tags$b("original:"), " Recommended default: match each observation's own residual - assumes no changes due to changing hazards."),
           shiny::p(shiny::tags$b("resample:"), " Secondary recommendation: randomly resample residuals from the model."),
           docs = TRUE
         ),
@@ -182,7 +182,7 @@ mod_2_01_weathersim_ui <- function(id) {
             "Under 'original' residuals, uncertainty on the unchanged covariates",
             "cancels through the held-fixed residual term (additive-decomposition",
             "SE). 'Include uncertainty on all covariates' propagates uncertainty",
-            "from all covariates instead — more conservative, but inconsistent",
+            "from all covariates instead - more conservative, but inconsistent",
             "with the model's own additive-separability assumption. Has no",
             "effect when residuals are not 'original'."
           ),
@@ -213,7 +213,7 @@ mod_2_01_weathersim_ui <- function(id) {
         inputId = ns("dev_mode"),
         label   = shiny::tags$span(
           style = "font-size:11px; font-weight:600; color:#b45309;",
-          "⚠ Dev mode: 1 ensemble model only"
+          "\u26A0 Dev mode: 1 ensemble model only"
         ),
         value   = FALSE
       )
@@ -240,7 +240,7 @@ mod_2_01_weathersim_ui <- function(id) {
 #' @param model_fit        Reactive list with fit3, engine, train_data.
 #' @param stored_breaks Reactive returning a named list of pre-computed
 #'   histogram break points for the weather density plot. Defaults to
-#'   \code{reactive(NULL)} — breaks computed on demand when not supplied.
+#'   \code{reactive(NULL)} - breaks computed on demand when not supplied.
 #'
 #' @noRd
 mod_2_01_weathersim_server <- function(id,
@@ -331,7 +331,7 @@ mod_2_01_weathersim_server <- function(id,
       if (n_economies > 1 || n_years > 1) {
         shiny::helpText(
           shiny::tags$b("\u26a0 Warning:"),
-           "Using multiple survey years or economies is not recommended. Requires normalizing weights based on sample design, which is not currently implemented — verify before interpreting results.",
+           "Using multiple survey years or economies is not recommended. Requires normalizing weights based on sample design, which is not currently implemented - verify before interpreting results.",
           style = "color: #c0392b; font-size: 11px; margin-top: 2px;"
         )
       }
@@ -499,7 +499,7 @@ mod_2_01_weathersim_server <- function(id,
       mf     <- model_fit()
       engine <- if (!is.null(mf)) mf$engine %||% "fixest" else "fixest"
 
-      # Block only unsupported engines — linear (fixest) and RIF both supported
+      # Block only unsupported engines - linear (fixest) and RIF both supported
       unsupported <- !is.null(mf) &&
                      !engine %in% c("fixest", "rif")
 
@@ -599,7 +599,7 @@ mod_2_01_weathersim_server <- function(id,
 
         # ---- Store results (reactive side effects) -------------------------
         # Aggregation now happens lazily in mod_2_02_results.R via the analytic
-        # delta method — no pre-aggregation step here.
+        # delta method - no pre-aggregation step here.
         hist_sim(result$hist_sim_result)
         saved_scenarios(result$new_scenarios)
 

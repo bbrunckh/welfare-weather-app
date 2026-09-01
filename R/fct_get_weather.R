@@ -2,7 +2,7 @@
 # -----------------
 # Weather loading and processing pipeline.
 # Loads ERA5 historical weather and CMIP6 climate projections from parquet
-# files via DuckDB. Applies spatial aggregation (H3 → survey location),
+# files via DuckDB. Applies spatial aggregation (H3 -> survey location),
 # temporal rolling windows, and climate perturbations.
 #
 # Called by:
@@ -10,16 +10,16 @@
 #   - fct_run_simulation.R / mod_2_01_weathersim.R (simulation in Module 2)
 #
 # Main exports:
-#   get_weather()          — full weather loading pipeline
+#   get_weather()          - full weather loading pipeline
 #
 # Internal helpers (not exported):
-#   .harmonise_h3()        — H3 resolution matching
-#   .apply_transformations() — anomaly/deviation computation in DuckDB
-#   .compute_breaks()      — histogram/quantile breakpoints
-#   .apply_binning()       — apply cut points to weather data frame
+#   .harmonise_h3()        - H3 resolution matching
+#   .apply_transformations() - anomaly/deviation computation in DuckDB
+#   .compute_breaks()      - histogram/quantile breakpoints
+#   .apply_binning()       - apply cut points to weather data frame
 
 # ---------------------------------------------------------------------------- #
-# Section 1 — H3 spatial helpers                                               #
+# Section 1 - H3 spatial helpers                                               #
 # ---------------------------------------------------------------------------- #
 
 #' Harmonise H3 resolution and type between microdata and weather tables.
@@ -28,9 +28,9 @@
 #' 1. Detects the H3 resolution of each table by sampling one row.
 #' 2. Chooses the **coarser** (lower numeric) resolution as the join key.
 #'    This handles all three cases:
-#'    * weather coarser than microdata  → map microdata up to weather res
-#'    * microdata coarser than weather  → map weather up to microdata res
-#'    * same resolution                 → type-cast only, no parent lookup
+#'    * weather coarser than microdata  -> map microdata up to weather res
+#'    * microdata coarser than weather  -> map weather up to microdata res
+#'    * same resolution                 -> type-cast only, no parent lookup
 #' 3. Adds an `h3_weather` column (bigint) to `h3_slim` so the caller can
 #'    join on `h3_slim$h3_weather == weather$h3` without further casting.
 #'
@@ -39,15 +39,15 @@
 #'
 #' @param h3_slim  Lazy `dplyr::tbl` with an `h3` column (string).
 #' @param weather  Lazy `dplyr::tbl` with an `h3` column (bigint / int64).
-#' @param con      DBI connection — used for the resolution-detection query.
+#' @param con      DBI connection - used for the resolution-detection query.
 #'
 #' @return A list with:
-#'   * `h3_slim`      — original `h3_slim` augmented with an `h3_weather`
+#'   * `h3_slim`      - original `h3_slim` augmented with an `h3_weather`
 #'                      bigint column at the chosen target resolution.
-#'   * `weather`      — `weather` tbl, possibly with `h3` mapped to the
+#'   * `weather`      - `weather` tbl, possibly with `h3` mapped to the
 #'                      target resolution (when weather is *finer* than micro).
-#'   * `target_res`   — integer, the target (coarser) H3 resolution.
-#'   * `same_res`     — logical, TRUE when no parent lookup was needed.
+#'   * `target_res`   - integer, the target (coarser) H3 resolution.
+#'   * `same_res`     - logical, TRUE when no parent lookup was needed.
 #' @noRd
 .harmonise_h3 <- function(h3_slim, weather, con) {
 
@@ -103,10 +103,10 @@
 }
 
 # ---------------------------------------------------------------------------- #
-# Section 2 — Weather transformation helpers                                   #
-# .apply_transformations() — anomaly/deviation in DuckDB SQL                   #
-# .compute_breaks()        — binning breakpoint computation                    #
-# .apply_binning()         — apply breakpoints to data frame                   #
+# Section 2 - Weather transformation helpers                                   #
+# .apply_transformations() - anomaly/deviation in DuckDB SQL                   #
+# .compute_breaks()        - binning breakpoint computation                    #
+# .apply_binning()         - apply breakpoints to data frame                   #
 # ---------------------------------------------------------------------------- #
 
 #' Apply deviation-from-mean or standardised-anomaly transformations lazily.
@@ -117,7 +117,7 @@
 #' `transformation == "None"` or `NA` are left untouched.
 #'
 #' Reference statistics (monthly mean and SD) are always derived from
-#' `loc_weather_base` over the 1991–2020 climate normal period.
+#' `loc_weather_base` over the 1991-2020 climate normal period.
 #'
 #' @param tbl              Lazy `dplyr::tbl` containing rolled weather columns.
 #' @param selected_weather Data frame with columns `name` and `transformation`.
@@ -296,8 +296,8 @@
 }
 
 # ---------------------------------------------------------------------------- #
-# Section 3 — Main weather loading pipeline                                    #
-# get_weather() — loads ERA5 + CMIP6, applies rolling windows + perturbations  #
+# Section 3 - Main weather loading pipeline                                    #
+# get_weather() - loads ERA5 + CMIP6, applies rolling windows + perturbations  #
 # Note: DuckDB rolling window (0%/16% stall) occurs in loc_weather_base        #
 # materialisation and batch query. See tradeoffs for improvements              #
 # in known_issues.md #13, #15.                                                 #
@@ -311,11 +311,11 @@
 #'    weather series as a temp table (`loc_weather_base`).
 #' 4. If `ssp` is supplied: loads CMIP6 files for each scenario.
 #'    For each SSP, computes population-weighted loc-level raw deltas,
-#'    then processes all models in a single batched DuckDB query —
-#'    perturb raw monthly values → roll → transform → collect.
+#'    then processes all models in a single batched DuckDB query -
+#'    perturb raw monthly values -> roll -> transform -> collect.
 #'    All models with a complete set of weather variable deltas are returned.
 #' 5. Transformations (deviation-from-mean, standardised anomaly) are applied
-#'    using the 1991–2020 climate reference, always derived from
+#'    using the 1991-2020 climate reference, always derived from
 #'    `loc_weather_base`.
 #' 6. Returns a flat named list of collected data frames.
 #'
@@ -342,10 +342,13 @@
 #'   Default `"era5land"`.
 #' @param proj_source       Source identifier for climate projection files.
 #'   Default `"cmip6"`.
+#' @param stored_breaks     Optional named list of pre-computed bin breaks
+#'   keyed by weather variable name. When non-empty, these breaks are used
+#'   for the matching binned variables instead of re-deriving them.
 #' @return A named list of collected data frames with columns
 #'   `code, year, survname, loc_id, timestamp, <weather_vars>`:
-#'   * `"historical"` — unperturbed result filtered to `dates`.
-#'   * `"<ssp>_<start>_<end>_<model>"` — e.g.
+#'   * `"historical"` - unperturbed result filtered to `dates`.
+#'   * `"<ssp>_<start>_<end>_<model>"` - e.g.
 #'     `"ssp2_4_5_2045_2055_MPI.ESM1.2.HR"` (model name sanitised via
 #'     `make.names()`).  All models with a complete set of weather variable
 #'     deltas are returned.
@@ -353,7 +356,7 @@
 #'   When any variable is binned, the list also carries a
 #'   `"continuous_weather"` attribute: the key columns plus the binned
 #'   variables' pre-`cut()` (but post-transformation) values for the
-#'   historical slice. Descriptive use only — the modelling pipeline uses the
+#'   historical slice. Descriptive use only - the modelling pipeline uses the
 #'   binned columns in `"historical"`.
 #'
 #' @export
@@ -395,7 +398,7 @@ get_weather <- function(
         all(perturbation_method[selected_weather$name] %in% c("additive", "multiplicative"))
     )
 
-    # Normalise future_period: a bare length-2 vector → single-element list
+    # Normalise future_period: a bare length-2 vector -> single-element list
     if (is.character(future_period) || inherits(future_period, "Date")) {
       future_period <- list(future_period)
     }
@@ -683,11 +686,11 @@ get_weather <- function(
     # When CMIP6 is coarser than the observed-weather target resolution,
     # micro H3 cells must be mapped further up to match CMIP6.
     if (cmip6_join_res == h3_harmonised$target_res) {
-      # CMIP6 same or finer than target — reuse existing h3_weather column
+      # CMIP6 same or finer than target - reuse existing h3_weather column
       h3_slim <- h3_slim |>
         dplyr::mutate(h3_cmip6 = h3_weather)
     } else {
-      # CMIP6 coarser than target — map micro cells up to CMIP6 resolution.
+      # CMIP6 coarser than target - map micro cells up to CMIP6 resolution.
       # Coarsen the `h3_weather` bigint column: the original `h3` string
       # column was dropped by the population summarise above, and referencing
       # it here made DuckDB silently bind `h3` to the sibling CMIP6 `h3`
@@ -700,7 +703,7 @@ get_weather <- function(
         )
     }
 
-    # Helper: load CMIP6 parquets → lazy (model, h3, month, vars)
+    # Helper: load CMIP6 parquets -> lazy (model, h3, month, vars)
     .cmip6_h3_monthly <- function(fnames, ts_start, ts_end) {
       tbl <- load_data(fnames, connection_params, collect = FALSE) |>
         dplyr::select(model, h3, timestamp, dplyr::all_of(weather_vars)) |>
@@ -724,11 +727,11 @@ get_weather <- function(
       tbl
     }
 
-    # CMIP6 historical baseline — shared across all SSPs (same files)
+    # CMIP6 historical baseline - shared across all SSPs (same files)
     h3_hist_raw <- .cmip6_h3_monthly(hist_fnames_probe, baseline_start, baseline_end)
 
     # -- Per-SSP worker -------------------------------------------------------
-    # Processes all models × all future periods.  The CMIP6 historical
+    # Processes all models * all future periods.  The CMIP6 historical
     # baseline and SSP baseline-period data are loaded once and shared
     # across periods; only the future-period projection varies.
     # Returns a named list keyed by "<ssp>_<start>_<end>_<model>".
@@ -740,7 +743,7 @@ get_weather <- function(
         survey_codes, "_", proj_source, "_", ssp_fname, ".parquet"
       )
 
-      # SSP baseline overlap — shared across all future periods
+      # SSP baseline overlap - shared across all future periods
       h3_ssp_raw <- .cmip6_h3_monthly(future_fnames, baseline_start, baseline_end)
 
       # Combined CMIP6 historical baseline (hist + ssp overlap period)
@@ -779,7 +782,7 @@ get_weather <- function(
           .pop_weighted_mean(delta_vars)
 
 
-        # Materialise delta table — lets DuckDB plan a hash join in the
+        # Materialise delta table - lets DuckDB plan a hash join in the
         # batch query instead of replanning the full lazy delta chain.
         # Name generated via tempfile() rather than sample() so this does not
         # consume/advance the caller's RNG stream (see DET-04).
@@ -822,7 +825,7 @@ get_weather <- function(
           dplyr::filter(model %in% complete_models)
 
         # -- Batch query: split into two steps to help DuckDB plan ----------
-        # Step 1: join + perturb + select → materialise before rolling window
+        # Step 1: join + perturb + select -> materialise before rolling window
         # Name generated via tempfile() rather than sample() so this does not
         # consume/advance the caller's RNG stream (see DET-04).
         tmp_perturb_name <- basename(tempfile(pattern = "lw_perturb_"))
@@ -842,7 +845,7 @@ get_weather <- function(
           ) |>
           dplyr::compute(name = tmp_perturb_name, temporary = TRUE)
 
-        # Step 2: rolling window + transformations + filter → collect
+        # Step 2: rolling window + transformations + filter -> collect
         batch <- perturbed |>
           dplyr::mutate(!!!roll_exprs_climate) |>
           .apply_transformations(selected_weather, loc_weather_base) |>
@@ -874,7 +877,7 @@ get_weather <- function(
       out
     }
 
-    # -- Run SSPs sequentially — DuckDB handles per-query parallelism --------
+    # -- Run SSPs sequentially - DuckDB handles per-query parallelism --------
     result <- c(result, do.call(c, lapply(ssp, .process_ssp)))
   }
 

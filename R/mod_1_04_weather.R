@@ -190,7 +190,7 @@ mod_1_04_weather_server <- function(id, variable_list, selected_surveys, survey_
       this_year <- as.integer(format(Sys.Date(), "%Y"))
 
       # Same shape as a weather variable's block above: heading, "Configure"
-      # button, flyout with the settings — so the sidebar reads as one list of
+      # button, flyout with the settings - so the sidebar reads as one list of
       # configurable sections rather than a list plus an odd one out.
       tagList(
         hr(),
@@ -300,11 +300,11 @@ mod_1_04_weather_server <- function(id, variable_list, selected_surveys, survey_
           paste0(r$ref_start, if (r$ref_start == 1) " month" else " months",
                  " before interview")
         } else {
-          paste0(r$ref_start, "–", r$ref_end, " months before interview")
+          paste0(r$ref_start, "-", r$ref_end, " months before interview")
         }
 
         form_txt <- if (identical(r$cont_binned, "Binned")) {
-          paste0("binned × ", r$num_bins, " (", tolower(r$binning_method), ")")
+          paste0("binned * ", r$num_bins, " (", tolower(r$binning_method), ")")
         } else {
           poly <- unlist(r$polynomial)
           if (length(poly) > 0) {
@@ -320,7 +320,7 @@ mod_1_04_weather_server <- function(id, variable_list, selected_surveys, survey_
 
         tagList(
           tags$b(paste0(r$label, ":")),
-          paste0(" ", paste(parts, collapse = " · ")),
+          paste0(" ", paste(parts, collapse = " \u00B7 ")),
           tags$br()
         )
       })
@@ -332,7 +332,7 @@ mod_1_04_weather_server <- function(id, variable_list, selected_surveys, survey_
         rows,
         tagList(
           tags$b("Historical comparison:"),
-          paste0(" ", hy[["from"]], "–", hy[["to"]])
+          paste0(" ", hy[["from"]], "-", hy[["to"]])
         )
       )
     })

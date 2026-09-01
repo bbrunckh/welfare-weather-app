@@ -29,7 +29,7 @@ mod_2_simulation_ui <- function(id) {
           title = "Clear simulation results",
           shiny::p(paste(
             "Removes all saved future-scenario runs and the historical",
-            "baseline from this session. Your settings are kept —",
+            "baseline from this session. Your settings are kept -",
             "re-run the simulation to regenerate results."
           ))
         )

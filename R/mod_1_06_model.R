@@ -97,7 +97,7 @@ mod_1_06_model_server <- function(id,
     firm_vars    <- reactive(filter_vars_by_role(valid_vl(), "firm"))
 
     # Interaction vars: flagged for interaction AND not numeric (avoids
-    # overfitting — numeric vars should be binned first)
+    # overfitting - numeric vars should be binned first)
     interact_vars <- reactive(
       filter_vars_by_role(valid_vl(), "interact", extra_filter = list(type = "numeric"))
     )
@@ -138,7 +138,7 @@ mod_1_06_model_server <- function(id,
         tags$b("Weather:"), paste(sw$label, collapse = ", "),
         tags$br(),
         tags$b("Model:"), model_txt,
-        tags$b(" · Covariates:"), cov_txt,
+        tags$b(" \u00B7 Covariates:"), cov_txt,
         tags$br(),
         tags$b("Interaction:"), ixn_txt,
         tags$br(),
@@ -830,7 +830,7 @@ mod_1_06_model_server <- function(id,
       # COEF_VCOV_SPEC (~loc_id_panel) in fct_simulations.R so that the SEs
       # displayed in Step 1 and the coefficient uncertainty propagated in
       # Step 2 come from one sampling distribution. loc_id_panel is only
-      # joined when the H3 files loaded successfully in Survey stats —
+      # joined when the H3 files loaded successfully in Survey stats -
       # otherwise fall back to fixest's default VCV.
       sw_cols    <- tryCatch(colnames(survey_weather()),
                              error = function(e) character(0))

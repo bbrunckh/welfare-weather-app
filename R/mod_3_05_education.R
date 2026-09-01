@@ -1,6 +1,6 @@
 #' 3_05_education UI Function
 #'
-#' @description A shiny Module. Education scenario configuration — allows the
+#' @description A shiny Module. Education scenario configuration - allows the
 #'   user to define changes in educational attainment (primary, secondary and
 #'   post-secondary completion) to be applied in the policy simulation.
 #'

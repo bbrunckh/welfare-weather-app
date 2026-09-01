@@ -1,7 +1,7 @@
 #' Info icon that opens a click-triggered popover
 #'
 #' Place inside a heading: `h4("My header", info_popover(p("Explanation...")))`.
-#' Works in static UI, renderUI output, and insertUI/appendTab content —
+#' Works in static UI, renderUI output, and insertUI/appendTab content -
 #' bslib popovers render as `<bslib-popover>` web components that
 #' self-initialize when inserted into the DOM.
 #'

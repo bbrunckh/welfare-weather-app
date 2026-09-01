@@ -28,7 +28,7 @@ mod_1_05_weatherstats_ui <- function(id) {
 #'   Defaults to 1991-2020 when not supplied.
 #' @param survey_data      Reactive data frame of loaded survey observations.
 #' @param map_data         Reactive GeoJSON FeatureCollection of survey
-#'   locations from `mod_1_02_surveystats_server()`. Optional — the
+#'   locations from `mod_1_02_surveystats_server()`. Optional - the
 #'   weather-by-location maps are skipped when it is `NULL`.
 #' @param cell_data        Reactive list of `geom` (H3 cell geometry) and
 #'   `map` (location-to-cell mapping) from `mod_1_02_surveystats_server()`.
@@ -288,7 +288,7 @@ mod_1_05_weatherstats_server <- function(
         )
 
         # Single panel that conditionally shows the continuous table, the
-        # binned table, or both — based on each selected weather variable's
+        # binned table, or both - based on each selected weather variable's
         # type in the merged survey-weather frame.
         output$weather_stats_layout <- shiny::renderUI({
           shiny::req(survey_weather(), selected_weather())
@@ -306,7 +306,7 @@ mod_1_05_weatherstats_server <- function(
           shiny::tagList(
             if (has_continuous) shiny::tagList(
               shiny::helpText(
-                "Continuous variables — weighted summary per country-year.",
+                "Continuous variables - weighted summary per country-year.",
                 style = "font-size: 12px;"
               ),
               DT::DTOutput(ns("weather_stats_table"))
@@ -314,7 +314,7 @@ mod_1_05_weatherstats_server <- function(
             if (has_continuous && has_binned) shiny::br(),
             if (has_binned) shiny::tagList(
               shiny::helpText(
-                paste("Binned variables — count and share of observations",
+                paste("Binned variables - count and share of observations",
                       "in each bin per country-year."),
                 style = "font-size: 12px;"
               ),
@@ -418,7 +418,7 @@ mod_1_05_weatherstats_server <- function(
                   )),
                   p(paste(
                     "For binned variables the bars show the share of",
-                    "observations in each bin — not counts, since the",
+                    "observations in each bin - not counts, since the",
                     "historical series spans decades and would otherwise dwarf",
                     "the single wave behind it. The historical values are cut",
                     "with the same bin breaks as the sample. The continuous",
@@ -437,7 +437,7 @@ mod_1_05_weatherstats_server <- function(
                 shiny::tagList(
                   p(paste(
                     "Survey locations shaded by the weather the sample",
-                    "experienced there — the bin for binned variables, the",
+                    "experienced there - the bin for binned variables, the",
                     "configured value (raw, deviation from mean, standardised",
                     "anomaly) for continuous ones. One map per weather",
                     "variable; pick the survey wave above. The colour scale is",
@@ -469,19 +469,19 @@ mod_1_05_weatherstats_server <- function(
                   p(shiny::tags$b("Views.")),
                   shiny::tags$ul(
                     shiny::tags$li(paste(
-                      "Wave value — cross-sectional: what the sample",
+                      "Wave value - cross-sectional: what the sample",
                       "experienced, so locations are compared with each other.",
                       "This is the regressor itself."
                     )),
                     shiny::tags$li(paste(
-                      "Difference from own historical mean — within-location:",
+                      "Difference from own historical mean - within-location:",
                       "the wave's value minus what the same location normally",
                       "gets in the same calendar months over the loaded",
                       "historical years, in the variable's units. Blue is",
                       "below that location's own normal, red above."
                     )),
                     shiny::tags$li(paste(
-                      "Percentile in own history — within-location: where the",
+                      "Percentile in own history - within-location: where the",
                       "wave's value falls in that location's own historical",
                       "distribution, 0-100, with 50 a typical year. This is",
                       "the map equivalent of where the sample curve sits",
@@ -493,7 +493,7 @@ mod_1_05_weatherstats_server <- function(
                     "loaded with the weather data over the range set under",
                     "'Historical comparison' in the weather sidebar, and both",
                     "use the continuous series even when the variable is",
-                    "binned for modelling — a difference between bins would",
+                    "binned for modelling - a difference between bins would",
                     "not be meaningful."
                   ))
                 )
@@ -560,9 +560,9 @@ mod_1_05_weatherstats_server <- function(
   # (mean, or modal bin) before mapping. The palette is built once per
   # variable across all waves so the maps stay comparable.
 
-  # The view chosen above the maps. "value" is cross-sectional — how the
+  # The view chosen above the maps. "value" is cross-sectional - how the
   # locations compare with each other in this wave. "anomaly" and "pctile" are
-  # within-location — how each location's wave compares with its own history,
+  # within-location - how each location's wave compares with its own history,
   # so they need the historical years loaded in the section above.
   # The view chosen by the single picker above the maps.
   wxmap_view_val <- reactiveVal("value")
@@ -615,7 +615,7 @@ mod_1_05_weatherstats_server <- function(
 
   # Cell geometry to draw on, when Survey stats has supplied it. Values are
   # merged onto these cells so overlapping survey locations stop stacking
-  # translucent fills — which invented colours that were in neither the data
+  # translucent fills - which invented colours that were in neither the data
   # nor the legend.
   wxmap_cells <- reactive({
     cd <- if (is.null(cell_data)) NULL else cell_data()
@@ -643,8 +643,10 @@ mod_1_05_weatherstats_server <- function(
     view <- wxmap_view()
 
     if (view == "value") {
+      # Grouping is identical for every variable - build it once (PERF-25).
+      prep <- .summarise_loc_prep(survey_weather())
       return(lapply(seq_len(nrow(sw)), function(i) {
-        to_cells(summarise_weather_by_loc(survey_weather(), sw$name[i]))
+        to_cells(summarise_weather_by_loc(prep$df, sw$name[i], prep = prep))
       }))
     }
 
@@ -671,26 +673,26 @@ mod_1_05_weatherstats_server <- function(
       paste0(yrs[["from"]], "-", yrs[["to"]])
     switch(
       wxmap_view(),
-      anomaly = paste0(base_label, " — difference from the location's own ",
+      anomaly = paste0(base_label, " - difference from the location's own ",
                        span, " mean, in the variable's units. Negative means",
                        " the wave was below that location's normal."),
-      pctile  = paste0(base_label, " — where the wave falls in the location's",
+      pctile  = paste0(base_label, " - where the wave falls in the location's",
                        " own ", span, " distribution (0-100; 50 is a typical",
                        " year)."),
-      paste0(base_label, " — the value the sample experienced, as configured.",
+      paste0(base_label, " - the value the sample experienced, as configured.",
              " This is the variable that enters the model.")
     )
   }
 
   wxmap_short <- function(base_label) {
     short <- if (nchar(base_label) > 20) {
-      paste0(substr(base_label, 1, 19), "…")
+      paste0(substr(base_label, 1, 19), "...")
     } else {
       base_label
     }
     switch(
       wxmap_view(),
-      anomaly = paste0(short, " Δ"),
+      anomaly = paste0(short, " \u0394"),
       pctile  = paste0(short, " %ile"),
       short
     )
@@ -766,7 +768,7 @@ mod_1_05_weatherstats_server <- function(
 
   # One output per weather variable. The palette is still built across *all*
   # waves, so the colour scale does not shift under the user when they change
-  # wave — the whole point of the picker is to compare them.
+  # wave - the whole point of the picker is to compare them.
   observe({
     lv_list <- weather_loc_vals()
     req(lv_list)
@@ -902,7 +904,7 @@ mod_1_05_weatherstats_server <- function(
         height      = "430px",
         bslib::card_header(
           if (is.na(wave_label)) sw$label[i] else
-            paste0(sw$label[i], " — ", wave_label)
+            paste0(sw$label[i], " - ", wave_label)
         ),
         leaflet::leafletOutput(ns(wxmap_id(i)), height = "100%")
       )
@@ -939,7 +941,7 @@ mod_1_05_weatherstats_server <- function(
       dates <- expand_hist_dates(extract_survey_dates(svy), yf, yt)
       if (length(dates) == 0) return(invisible(FALSE))
 
-      # Always continuous here — binning is a modelling choice, this section
+      # Always continuous here - binning is a modelling choice, this section
       # compares distributions. Everything else (temporal aggregation,
       # deviation from mean, standardised anomaly) is left as configured.
       sw_cont <- sw
@@ -987,7 +989,7 @@ mod_1_05_weatherstats_server <- function(
     }
 
     # Changing the year range in the sidebar reloads the comparison in place,
-    # but only once weather is on screen — before that the initial load will
+    # but only once weather is on screen - before that the initial load will
     # pick the range up anyway. Debounced so typing "2015" into a year box does
     # not fire a load per keystroke.
     hist_years_d <- shiny::debounce(hist_years, 1500)

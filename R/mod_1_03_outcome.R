@@ -23,9 +23,9 @@ mod_1_03_outcome_ui <- function(id) {
 #' 1_03_outcome Server Functions
 #'
 #' @param id Module id.
-#' @param variable_list Reactive data frame — variable metadata from
+#' @param variable_list Reactive data frame - variable metadata from
 #'   `mod_0_overview`.
-#' @param survey_data Reactive data frame — loaded survey data from
+#' @param survey_data Reactive data frame - loaded survey data from
 #'   `mod_1_02_surveystats`.
 #' @param map_data Reactive GeoJSON FeatureCollection from
 #'   `mod_1_02_surveystats` (H3 map data). Used for outcome coverage map.
