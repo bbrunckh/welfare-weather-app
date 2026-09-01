@@ -9,7 +9,7 @@
 #   - mod_3_07_results.R    (apply_deviation)
 #
 # Exports:
-#   resolve_agg_fn, resolve_band_q
+#   resolve_agg_fn
 #   combine_ensemble_results
 #   hist_aggregate_choices
 #   aggregate_outcome, deviation_from_centre
@@ -17,6 +17,9 @@
 #
 # Internal:
 #   draw_residuals_vec
+#
+# resolve_band_q() is defined once, in fct_sim_compare.R (a duplicate here
+# with divergent "minmax" semantics was removed - DUP-01).
 #
 # The closed-form delta-method aggregator (aggregate_with_uncertainty_delta)
 # lives in fct_aggregation_delta.R.
@@ -141,32 +144,6 @@ resolve_agg_fn <- function(method) {
   )
 }
 
-
-#' Resolve Band Quantiles from Band Width Selection
-#'
-#' Maps the user-facing band width UI selection to a named numeric vector
-#' of lower and upper quantile values for percentile band computation.
-#'
-#' @param band_width Character. One of \code{"p10_p90"}, \code{"p025_p975"},
-#'   \code{"p005_p995"}, \code{"minmax"}, \code{"none"}.
-#'
-#' @return Named numeric vector \code{c(lo = ..., hi = ...)} or \code{NULL}
-#'   when \code{band_width = "none"}.
-#'
-#' @noRd
-resolve_band_q <- function(band_width) {
-  switch(band_width %||% "p10_p90",
-    p25_p75   = c(lo = 0.25,  hi = 0.75),
-    p20_p80   = c(lo = 0.20,  hi = 0.80),
-    p10_p90   = c(lo = 0.10,  hi = 0.90),
-    p05_p95   = c(lo = 0.05,  hi = 0.95),
-    p025_p975 = c(lo = 0.025, hi = 0.975),
-    p005_p995 = c(lo = 0.005, hi = 0.995),
-    minmax    = c(lo = 0.001, hi = 0.999),
-    none      = NULL,
-               c(lo = 0.10,  hi = 0.90)   # default
-  )
-}
 
 # ---------------------------------------------------------------------------- #
 # Residual drawing helper                                                       #

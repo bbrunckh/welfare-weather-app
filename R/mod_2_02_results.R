@@ -306,9 +306,16 @@ mod_2_02_results_server <- function(id,
       as.numeric(input$bandwidth_p0 %||% 0.05)
     })
 
-    band_q_active <- reactive({
-      resolve_band_q(input$uncertainty_band %||% "p10_p90")
-    })
+    # ---- Value-affecting aggregation inputs ---------------------------------
+    # The aggregation cache is keyed by the inputs each method actually
+    # consumes (PERF-30), so moving the coefficient-band or poverty-line
+    # control only invalidates the methods that read it. band_q is display-
+    # only: aggregate_with_uncertainty_delta() applies it to value_lo/hi,
+    # which no builder below consumes - the band is re-derived from the
+    # cached SDs at render time. Display uses a fixed neutral pair.
+    AGG_BAND_Q <- c(lo = 0.10, hi = 0.90)
+    .POV_LINE_METHODS   <- c("headcount_ratio", "gap", "fgt2")
+    .BANDWIDTH_METHODS  <- "headcount_ratio"
 
     .one_member_delta <- function(pipe, idx, method, weighted, pov_line,
                                   band_q, is_log, seed, res_mode) {
@@ -353,32 +360,45 @@ mod_2_02_results_server <- function(id,
     }
 
     # ---- Aggregation workspace + per-method cache --------------------------
-    # Captures heavy dependencies (band, poverty line, bandwidth, residuals,
-    # skip_coef_draws) into a workspace that's recreated whenever any of them
-    # changes. The workspace carries a mutable cache so we only compute each
-    # aggregation method once per workspace version. The Results tab reads
-    # only the currently selected method, and an eager observer pre-computes
-    # the default ("mean") as soon as hist_sim() arrives - so the first render
-    # is fast even before the user clicks anything.
+    # Captures the heavy dependencies that invalidate every cached method
+    # (hist_sim, saved scenarios, residuals, coef-draw skipping) into a
+    # workspace that's recreated whenever any of them changes. The workspace
+    # carries a mutable cache so we only compute each aggregation method once
+    # per workspace version. The Results tab reads only the currently selected
+    # method, and an eager observer pre-computes the default ("mean") as soon
+    # as hist_sim() arrives - so the first render is fast even before the
+    # user clicks anything.
+    #
+    # Display-only controls (coefficient band, poverty line, headcount
+    # bandwidth) are deliberately NOT workspace dependencies: changing them
+    # used to destroy the whole cache. Instead they are read at cache-lookup
+    # time and folded into the per-method cache key for exactly the methods
+    # that consume them (see .pl_bw_key).
     agg_workspace <- reactive({
       req(hist_sim())
       list(
         hs       = hist_sim(),
         sc       = saved_scenarios(),
-        bq       = band_q_active(),
-        pl_v     = pov_line_val(),
-        bw       = bandwidth_p0(),
         res      = hist_sim()$residuals %||% residuals() %||% "original",
         skip     = isTRUE(skip_coef_draws()),
         cache    = new.env(parent = emptyenv())
       )
     })
 
-    .build_hist_for_method <- function(ws, method) {
+    # Cache-key suffix for the poverty line / bandwidth values a method reads.
+    # Methods that ignore them get a constant key so moving the poverty-line
+    # slider does not force their recomputation.
+    .pl_bw_key <- function(method, pl_v, bw) {
+      parts <- character(0)
+      if (method %in% .POV_LINE_METHODS)  parts <- c(parts, format(pl_v))
+      if (method %in% .BANDWIDTH_METHODS) parts <- c(parts, format(bw))
+      if (length(parts) == 0L) "" else paste0("_", paste(parts, collapse = "_"))
+    }
+
+    .build_hist_for_method <- function(ws, method, pl_v) {
       pl   <- ws$hs$pipeline
       yrs  <- sort(unique(pl$sim_year))
-      bq   <- ws$bq
-      pl_v <- ws$pl_v
+      bq   <- AGG_BAND_Q
       is_log <- isTRUE(ws$hs$so$transform == "log")
       build_for <- function(weighted) {
         rows <- lapply(yrs, function(yr) {
@@ -414,11 +434,10 @@ mod_2_02_results_server <- function(id,
       )
     }
 
-    .build_scn_for_method <- function(ws, method) {
+    .build_scn_for_method <- function(ws, method, pl_v) {
       sc <- ws$sc
       if (length(sc) == 0L) return(NULL)
-      bq   <- ws$bq
-      pl_v <- ws$pl_v
+      bq   <- AGG_BAND_Q
       setNames(lapply(sc, function(s) {
         pipes  <- s$pipelines
         is_log <- isTRUE(s$so$transform == "log")
@@ -482,19 +501,23 @@ mod_2_02_results_server <- function(id,
     }
 
     .get_hist_agg <- function(method) {
-      ws <- agg_workspace()
-      key <- paste0("h_", method)
+      ws   <- agg_workspace()
+      pl_v <- pov_line_val()
+      bw   <- bandwidth_p0()
+      key <- paste0("h_", method, .pl_bw_key(method, pl_v, bw))
       if (!exists(key, envir = ws$cache, inherits = FALSE)) {
-        assign(key, .build_hist_for_method(ws, method), envir = ws$cache)
+        assign(key, .build_hist_for_method(ws, method, pl_v), envir = ws$cache)
       }
       get(key, envir = ws$cache, inherits = FALSE)
     }
 
     .get_scn_agg <- function(method) {
-      ws <- agg_workspace()
-      key <- paste0("s_", method)
+      ws   <- agg_workspace()
+      pl_v <- pov_line_val()
+      bw   <- bandwidth_p0()
+      key <- paste0("s_", method, .pl_bw_key(method, pl_v, bw))
       if (!exists(key, envir = ws$cache, inherits = FALSE)) {
-        assign(key, .build_scn_for_method(ws, method), envir = ws$cache)
+        assign(key, .build_scn_for_method(ws, method, pl_v), envir = ws$cache)
       }
       get(key, envir = ws$cache, inherits = FALSE)
     }

@@ -69,8 +69,15 @@ label_deviation <- function(key) {
 #' Converts the UI uncertainty band selector key to a named numeric vector
 #' used by plot_pointrange_climate() and summarise_vals().
 #'
+#' Single authoritative definition (DUP-01): the former duplicate in
+#' fct_aggregation.R - whose "minmax" winsorised to 0.001/0.999 instead of the
+#' full 0/1 range used here - has been deleted. This variant matches the
+#' behaviour every caller has seen at runtime (fct_sim_compare.R is sourced
+#' after fct_aggregation.R and previously overwrote it).
+#'
 #' @param band_key Character. One of "p25_p75", "p20_p80", "p10_p90",
-#'   "p05_p95", "p025_p975", "p005_p995", "minmax".
+#'   "p05_p95", "p025_p975", "p005_p995", "minmax". Unknown keys fall back to
+#'   the p10_p90 pair.
 #' @return Named numeric vector c(lo = ..., hi = ...).
 #' @export
 resolve_band_q <- function(band_key) {
