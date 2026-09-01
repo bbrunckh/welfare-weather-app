@@ -212,6 +212,49 @@ test_that("Step 3 results pane shows the stale banner while stale", {
   )
 })
 
+# ---- Regression: threshold rows stay unique with one admissible RP ----------
+
+test_that("threshold table has unique keys with two years and two members", {
+  skip_if_not_installed("shiny")
+
+  bh  <- shiny::reactiveVal(make_step3_hist_fixture())
+  ph  <- shiny::reactiveVal(make_step3_hist_fixture())
+  bsc <- shiny::reactiveVal(make_step3_scenarios_fixture())
+  psc <- shiny::reactiveVal(make_step3_scenarios_fixture())
+
+  shiny::testServer(
+    function(input, output, session) {
+      internals <<- .wire_results_pane(
+        input, output, session,
+        baseline_hist_sim        = bh,
+        baseline_saved_scenarios = bsc,
+        policy_hist_sim          = ph,
+        policy_saved_scenarios   = psc,
+        selected_hist            = shiny::reactiveVal(NULL),
+        residuals                = shiny::reactiveVal("none")
+      )
+      NULL
+    },
+    {
+      session$flushReact()
+      tbl <- internals$threshold_table()
+      key <- c("scenario", "source", "Estimate", "n_obs", "rp_label")
+      hit <- duplicated(tbl[key]) | duplicated(tbl[key], fromLast = TRUE)
+      expect_false(any(hit))
+
+      # The scenario block carries the full band set: Central, Coef lo/hi,
+      # Ensemble lo/hi, Pooled lo/hi - one row each, twice (Baseline + Policy)
+      # plus the historical triple per arm.
+      expect_equal(nrow(tbl), 20L)
+      expect_setequal(
+        tbl$Estimate[tbl$scenario != "Historical"],
+        c("Central (P50)", "Coef P10", "Coef P90",
+          "Ensemble min", "Ensemble max", "Pooled P10", "Pooled P90")
+      )
+    }
+  )
+})
+
 test_that("Step 3 agg cache: deviation changes reuse cache; method/pov-line key entries", {
   skip_if_not_installed("shiny")
 

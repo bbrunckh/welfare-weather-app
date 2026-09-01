@@ -895,19 +895,11 @@ policy_input_diagnostics <- function(baseline_svy, policy_svy, vars = NULL) {
       rp_ok    <- RPs >= (1 / n_yrs) & RPs <= (1 - 1 / n_yrs)
       RPs_keep <- RPs[rp_ok]
       if (length(RPs_keep) == 0L) return(NULL)
-      per_model_rp <- t(apply(vals, 1L, function(v) {
-        v <- v[is.finite(v)]
-        if (length(v) < 2L) return(rep(NA_real_, length(RPs_keep)))
-        sv <- sort(v)
-        vapply(RPs_keep, function(p) rank_interp(sv, p), numeric(1L))
-      }))
-      per_model_sd_at_rp <- t(vapply(seq_len(nrow(vals)), function(i) {
-        v <- vals[i, ]; s <- sds[i, ]
-        ok <- is.finite(v)
-        if (sum(ok) < 2L) return(rep(NA_real_, length(RPs_keep)))
-        ord <- order(v[ok]); s_sorted <- s[ok][ord]
-        vapply(RPs_keep, function(p) rank_interp(s_sorted, p), numeric(1L))
-      }, numeric(length(RPs_keep))))
+      # Per-model rank-interp at each kept RP (matrix: model * RP) - shape
+      # guaranteed by the helper (see by_model_rp_matrix()).
+      mm        <- by_model_rp_matrix(vals, sds, RPs_keep)
+      per_model_rp    <- mm$rp
+      per_model_sd_at_rp <- mm$sd
       central_vec <- if (is_hist) per_model_rp[1L, ] else
         apply(per_model_rp, 2L, stats::median, na.rm = TRUE)
       coef_sd_vec <- if (is_hist) per_model_sd_at_rp[1L, ] else
@@ -1231,6 +1223,7 @@ policy_input_diagnostics <- function(baseline_svy, policy_svy, vars = NULL) {
     policy_agg_hist        = policy_agg_hist,
     policy_agg_scenarios   = policy_agg_scenarios,
     agg_cache_ws           = agg_cache_ws,
-    hist_label             = hist_label
+    hist_label             = hist_label,
+    threshold_table        = threshold_table_rv
   ))
 }
