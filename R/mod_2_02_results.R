@@ -704,6 +704,37 @@ mod_2_02_results_server <- function(id,
 
 
 
+    # UI-38: hold the most recent non-empty grid selection so unchecking the
+    # final scenario never silently re-displays the first one.
+    last_selected_scenarios <- reactiveVal(NULL)
+
+    observe({
+      sc   <- saved_scenarios()
+      if (length(sc) == 0L) return(invisible(NULL))
+      keys <- names(sc)
+
+      selected <- Filter(Negate(is.null), lapply(keys, function(key) {
+        cb_id <- paste0("sc_", gsub("[^a-zA-Z0-9]", "_", key))
+        if (isTRUE(input[[cb_id]])) key else NULL
+      }))
+
+      if (length(selected) > 0L) {
+        last_selected_scenarios(unlist(selected))
+      } else {
+        # Re-check the held boxes so the grid never sits fully unchecked.
+        held <- last_selected_scenarios()
+        held <- held[held %in% keys]
+        if (length(held) == 0L) held <- keys[1L]
+        for (key in held) {
+          shiny::updateCheckboxInput(
+            session,
+            inputId = paste0("sc_", gsub("[^a-zA-Z0-9]", "_", key)),
+            value   = TRUE
+          )
+        }
+      }
+    })
+
     selected_scenario_names <- reactive({
       sc   <- saved_scenarios()
       if (length(sc) == 0L) return(character(0))
@@ -716,8 +747,16 @@ mod_2_02_results_server <- function(id,
         if (isTRUE(val)) key else NULL
       }))
 
-      # Enforce minimum 1 selected
-      if (length(selected) == 0L) keys[1L] else unlist(selected)
+      # Enforce minimum 1 selected: hold the last real selection (UI-38)
+      # rather than silently re-adding the first scenario.
+      if (length(selected) == 0L) {
+        held <- last_selected_scenarios()
+        held <- held[held %in% keys]
+        if (length(held) == 0L) held <- keys[1L]
+        held
+      } else {
+        unlist(selected)
+      }
     })
 
     agg_hist <- reactive({
@@ -1398,9 +1437,23 @@ mod_2_02_results_server <- function(id,
 
     # ---- observeEvent handlers ---------------------------------------------
 
-    # Insert Results tab + content once (on first hist_sim).
+    # Insert Results tab + content on first hist_sim; remove it again when
+    # hist_sim is cleared (INT-07) so the empty state returns and a later
+    # run re-inserts a fresh tab instead of writing into a stale one.
+    results_tab_added <- reactiveVal(FALSE)
+
     observeEvent(hist_sim(), {
-      req(hist_sim())
+      if (is.null(hist_sim())) {
+        if (results_tab_added()) {
+          shiny::removeTab(
+            inputId = tabset_id,
+            target  = "sim_tab",
+            session = tabset_session
+          )
+          results_tab_added(FALSE)
+        }
+        return()
+      }
 
       shiny::appendTab(
         inputId = tabset_id,
@@ -1418,15 +1471,18 @@ mod_2_02_results_server <- function(id,
         where    = "afterBegin",
         ui       = .results_content_ui(ns, hist_sim()$so)
       )
-    }, ignoreInit = TRUE, once = TRUE)
+      results_tab_added(TRUE)
+    }, ignoreInit = TRUE, ignoreNULL = FALSE)
 
     # On subsequent runs, just re-select the tab.
     observeEvent(hist_sim(), {
-      shiny::updateTabsetPanel(
-        session  = tabset_session,
-        inputId  = tabset_id,
-        selected = "sim_tab"
-      )
+      if (!is.null(hist_sim())) {
+        shiny::updateTabsetPanel(
+          session  = tabset_session,
+          inputId  = tabset_id,
+          selected = "sim_tab"
+        )
+      }
     }, ignoreInit = TRUE)
 
     # Keep agg method choices in sync with outcome.
@@ -1458,6 +1514,7 @@ mod_2_02_results_server <- function(id,
     # inter-model band quantiles resolved from the Results-tab controls.
     list(
       variance_breakdown = variance_breakdown_rv,
+      results_tab_added  = results_tab_added,
       timeseries_curves  = reactive({
         req(timeseries_curves_rv())
         ens_q <- if (isTRUE(input$show_model_spread))

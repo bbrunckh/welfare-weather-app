@@ -115,3 +115,81 @@ test_that("agg cache: display-only controls do not invalidate unaffected methods
     }
   )
 })
+
+# ---- INT-07: results tab follows the hist_sim lifecycle ---------------------
+
+test_that("results tab is appended, removed on clear, re-appended on rerun", {
+  skip_if_not_installed("shiny")
+
+  hist_sim <- shiny::reactiveVal(NULL)
+
+  shiny::testServer(
+    mod_2_02_results_server,
+    args = list(
+      id              = "results",
+      hist_sim        = hist_sim,
+      saved_scenarios = shiny::reactiveVal(list()),
+      selected_hist   = shiny::reactiveVal(NULL),
+      tabset_id       = "step2_output_tabs"
+    ),
+    {
+      settle <- function() { session$elapse(500); session$flushReact() }
+
+      session$flushReact()
+      expect_false(results_tab_added())
+
+      hist_sim(make_hist_sim_fixture()); settle()
+      expect_true(results_tab_added())
+
+      # Clearing the run removes the tab so the empty state returns (INT-07)
+      hist_sim(NULL); settle()
+      expect_false(results_tab_added())
+
+      # ...and a later run re-inserts it (never fired again under once = TRUE)
+      hist_sim(make_hist_sim_fixture()); settle()
+      expect_true(results_tab_added())
+    }
+  )
+})
+
+# ---- UI-38: scenario grid can never drop its last selection -----------------
+
+test_that("unchecking the final scenario re-selects the held scenarios", {
+  skip_if_not_installed("shiny")
+
+  hist_sim <- shiny::reactiveVal(make_hist_sim_fixture())
+  saved    <- shiny::reactiveVal(list(
+    "SSP2-4.5 / 2030" = list(scenario_name = "SSP2-4.5 / 2030"),
+    "SSP5-8.5 / 2030" = list(scenario_name = "SSP5-8.5 / 2030")
+  ))
+
+  shiny::testServer(
+    mod_2_02_results_server,
+    args = list(
+      id              = "results",
+      hist_sim        = hist_sim,
+      saved_scenarios = saved,
+      selected_hist   = shiny::reactiveVal(NULL),
+      tabset_id       = "step2_output_tabs"
+    ),
+    {
+      settle <- function() { session$elapse(500); session$flushReact() }
+      k1 <- "SSP2-4.5 / 2030"
+      k2 <- "SSP5-8.5 / 2030"
+
+      settle()
+      session$setInputs(sc_SSP2_4_5___2030 = TRUE, sc_SSP5_8_5___2030 = TRUE)
+      settle()
+      expect_setequal(selected_scenario_names(), c(k1, k2))
+
+      # Uncheck the first: the second remains
+      session$setInputs(sc_SSP2_4_5___2030 = FALSE); settle()
+      expect_setequal(selected_scenario_names(), k2)
+
+      # Uncheck the final box: the held selection (k2) is restored, not the
+      # first scenario (old behaviour silently re-added keys[1]).
+      session$setInputs(sc_SSP5_8_5___2030 = FALSE); settle()
+      expect_setequal(selected_scenario_names(), k2)
+    }
+  )
+})

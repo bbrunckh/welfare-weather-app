@@ -670,8 +670,8 @@ make_coefplot <- function(fit1, fit2, fit3,
           breaks = taus,
           labels = scales::percent_format(1)
         ) +
-        ggplot2::scale_colour_brewer(palette = "Set1", name = NULL) +
-        ggplot2::scale_fill_brewer(palette = "Set1", name = NULL) +
+        wise_scale_colour_okabe_ito(name = NULL) +
+        wise_scale_fill_okabe_ito(name = NULL) +
         ggplot2::labs(
           subtitle = paste("UQR coefficients for", label_fun(pred_var)),
           x        = "Welfare quantile",
@@ -756,7 +756,7 @@ make_coefplot <- function(fit1, fit2, fit3,
         ggplot2::aes(xmin = conf.low, xmax = conf.high),
         position = ggplot2::position_dodge(width = 0.5)
       ) +
-      ggplot2::scale_colour_brewer(palette = "Set1", name = NULL) +
+      wise_scale_colour_okabe_ito(name = NULL) +
       ggplot2::scale_shape_discrete(name = NULL) +
       ggplot2::labs(
         x = stringr::str_wrap(paste0("Effect on ", outcome_label), 50),
@@ -1000,10 +1000,8 @@ make_weather_effect_plot <- function(fit, pred_var, interaction_terms, is_binned
           ggplot2::geom_point(size = 2) +
           ggplot2::scale_x_continuous(breaks = taus,
                                       labels = scales::percent_format(1)) +
-          ggplot2::scale_colour_brewer(palette = "Set1",
-                                       name = modx_lab_print) +
-          ggplot2::scale_fill_brewer(palette = "Set1",
-                                     name = modx_lab_print) +
+          wise_scale_colour_okabe_ito(name = modx_lab_print) +
+          wise_scale_fill_okabe_ito(name = modx_lab_print) +
           ggplot2::labs(
             subtitle = paste("Effect of", pred_lab,
                             "across the welfare distribution"),
@@ -1220,7 +1218,7 @@ make_weather_effect_plot <- function(fit, pred_var, interaction_terms, is_binned
         ggplot2::geom_hline(yintercept = 0, linetype = "dashed", colour = "grey50") +
         ggplot2::geom_pointrange(position = ggplot2::position_dodge(width = 0.2), size = 0.5) +
         ggplot2::geom_line(position = ggplot2::position_dodge(width = 0.2), linewidth = 0.6) +
-        ggplot2::scale_colour_brewer(palette = "Set1", name = modx_lab) +
+        wise_scale_colour_okabe_ito(name = modx_lab) +
         ggplot2::scale_x_continuous(breaks = bins_df$bin_index, labels = bins_df$bin_label) +
         ggplot2::labs(
           subtitle = paste("Effect of", pred_lab, "bins by", modx_lab),
@@ -1347,8 +1345,8 @@ make_weather_effect_plot <- function(fit, pred_var, interaction_terms, is_binned
             alpha = 0.15, colour = NA
           ) +
           ggplot2::geom_line(linewidth = 0.9) +
-          ggplot2::scale_colour_brewer(palette = "Set1", name = modx_lab) +
-          ggplot2::scale_fill_brewer(palette = "Set1", name = modx_lab) +
+          wise_scale_colour_okabe_ito(name = modx_lab) +
+          wise_scale_fill_okabe_ito(name = modx_lab) +
           ggplot2::labs(
             subtitle = paste("Impact of", pred_lab, "by", modx_lab),
             x     = pred_x_lab,

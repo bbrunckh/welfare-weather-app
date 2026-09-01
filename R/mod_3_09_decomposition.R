@@ -386,8 +386,8 @@ mod_3_09_decomposition_server <- function(id,
       ~channel, scales = "free_y",
       ncol = if (is_rif) 2L else 3L
     ) +
-    ggplot2::scale_colour_brewer(palette = "Set1", name = "SSP scenario") +
-    ggplot2::scale_fill_brewer(palette = "Set1", name = "SSP scenario") +
+    wise_scale_colour_okabe_ito(name = "SSP scenario") +
+    wise_scale_fill_okabe_ito(name = "SSP scenario") +
     ggplot2::labs(
       x        = "Projection period",
       y        = "Effect (% change in welfare)",

@@ -339,10 +339,22 @@ mod_2_03_diagnostics_server <- function(id,
 
 
 
-    # ---- Insert Diagnostics tab once (first hist_sim only) -----------------
+    # ---- Insert Diagnostics tab on first hist_sim; remove when cleared -----
+
+    diag_tab_added <- reactiveVal(FALSE)
 
     observeEvent(hist_sim(), {
-      req(hist_sim())
+      if (is.null(hist_sim())) {
+        if (diag_tab_added()) {
+          shiny::removeTab(
+            inputId = tabset_id,
+            target  = "diag_tab",
+            session = tabset_session
+          )
+          diag_tab_added(FALSE)
+        }
+        return()
+      }
 
       sw      <- if (!is.null(selected_weather)) selected_weather() else NULL
       choices <- if (!is.null(sw) && "name" %in% names(sw)) {
@@ -363,7 +375,8 @@ mod_2_03_diagnostics_server <- function(id,
       shiny::updateSelectInput(session, "diag_weather_vars",
                                choices  = choices,
                                selected = choices[seq_len(min(2, length(choices)))])
-    }, ignoreInit = TRUE, once = TRUE)
+      diag_tab_added(TRUE)
+    }, ignoreInit = TRUE, ignoreNULL = FALSE)
 
     observeEvent(selected_weather(), {
       sw      <- if (!is.null(selected_weather)) selected_weather() else NULL
@@ -387,6 +400,6 @@ mod_2_03_diagnostics_server <- function(id,
     outputOptions(output, "weight_status_diag_ui",   suspendWhenHidden = TRUE)
 
     # ---- Return API --------------------------------------------------------
-    list()
+    list(diag_tab_added = diag_tab_added)
   })
 }

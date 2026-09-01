@@ -416,7 +416,9 @@ plot_outcome_coverage_map <- function(geojson, df, outcome, cell_map = NULL) {
   }
 
   pal <- leaflet::colorNumeric(
-    palette = c("#e74c3c", "#f1c40f", "#2ecc71"),
+    # UI-04: colorblind-safe bad/mid/good ramp (vermillion / orange /
+    # bluish green) replacing the red-yellow-green ramp.
+    palette = c("#D55E00", "#E69F00", "#009E73"),
     domain  = rng
   )
 

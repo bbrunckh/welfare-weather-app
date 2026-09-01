@@ -534,6 +534,33 @@ policy_input_diagnostics <- function(baseline_svy, policy_svy, vars = NULL) {
   # entry is one CMIP6 ensemble member with its own y_point / F_loading.
   # Mod 2's run_full_simulation() and Mod 3's resimulate_with_svy() both
   # populate $pipelines, so this reader works for baseline and policy alike.
+  #
+  # INT-04: scenario failures are collected (not silently dropped) and
+  # surfaced once per distinct failure set via a persistent warning toast.
+  .agg_failure_state <- new.env(parent = emptyenv())
+  .agg_failure_state$last_key <- NULL
+
+  .notify_agg_failures <- function(failed_names, n_total) {
+    if (length(failed_names) == 0L) {
+      .agg_failure_state$last_key <- NULL
+      return(invisible(NULL))
+    }
+    key <- paste(sort(failed_names), collapse = "\r")
+    if (identical(key, .agg_failure_state$last_key)) return(invisible(NULL))
+    .agg_failure_state$last_key <- key
+    shiny::showNotification(
+      ui = shiny::tagList(
+        shiny::strong(sprintf(
+          "%d of %d scenario%s could not be aggregated:",
+          length(failed_names), n_total, if (length(failed_names) == 1L) "" else "s"
+        )),
+        shiny::br(),
+        paste(failed_names, collapse = ", ")
+      ),
+      type = "warning", duration = NULL, session = session
+    )
+  }
+
   make_agg_scenarios <- function(sc, hs_for_dev) {
     if (length(sc) == 0) return(list())
     method    <- input$cmp_agg_method %||% "mean"
@@ -543,7 +570,9 @@ policy_input_diagnostics <- function(baseline_svy, policy_svy, vars = NULL) {
                  else paste0(label_agg_method(method), " \u2014 ",
                              label_deviation(deviation))
 
-    lapply(sc, function(s) {
+    failed <- character(0)
+    res <- lapply(seq_along(sc), function(i) {
+      s <- sc[[i]]
       tryCatch({
         pipes <- s$pipelines
         if (is.null(pipes) || length(pipes) == 0L) return(NULL)
@@ -598,8 +627,15 @@ policy_input_diagnostics <- function(baseline_svy, policy_svy, vars = NULL) {
         combined <- dplyr::bind_rows(Filter(Negate(is.null), per_year_rows))
         if (nrow(combined) == 0L) return(NULL)
         list(out = combined, x_label = x_label)
-      }, error = function(e) NULL)
+      }, error = function(e) {
+        nm <- s$scenario_name %||% names(sc)[i]
+        if (is.null(nm) || is.na(nm)) nm <- paste0("scenario_", i)
+        failed[[length(failed) + 1L]] <<- nm
+        NULL
+      })
     })
+    .notify_agg_failures(failed, length(sc))
+    res
   }
 
   baseline_agg_hist <- reactive({
