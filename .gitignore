@@ -20,6 +20,22 @@
 
 !.reproducibility_report_RR_2024_WLD_175-v02.pdf
 
+# Keep description and namespace
+!DESCRIPTION
+!NAMESPACE
+
+# Keep R CMD build/check ignore rules (not matched by !/**/*.R since it
+# has no .R extension; without this line the file exists on disk but is
+# never tracked by git)
+!.Rbuildignore
+
+# Keep renv lockfile for reproducible installs/deploys
+!renv.lock
+
+# Keep Posit Connect deploy manifest and its exclude list
+!.rscignore
+!manifest.json
+
 # Git placeholder file (to commit empty folders)
 !/**/*.gitkeep
 
@@ -43,6 +59,9 @@
 # The following file types are code that should always be
 # included no matter where in the repository folder they are
 # located unless you explicitly ignore that folder
+
+# Data
+!/**/data/pins/**/*.csv
 
 # Stata
 !/**/*.do
@@ -71,7 +90,7 @@
 !/**/requirements.txt
 !/**/Pipfile
 !/**/Pipfile.lock
-!/**/*.toml
+# !/**/*.toml
 # Still ignore .ipynb files in checkpoint folders
 .ipynb_checkpoints
 
@@ -112,8 +131,8 @@
 !/**/Output/**/*.xml
 !/**/images/**/*.eps
 !/**/images/**/*.svg
-!/**/images/**/*.png
-!/**/images/**/*.ico
+!/**/inst/app/www/**/*.png
+!/**/inst/app/www/**/*.ico
 
 #######################
 # Include all the files with passwords or tokens here. All files named
@@ -130,3 +149,12 @@ tokens.*
 token/
 tokens/
 rsconnect/
+
+# Other
+inst/duckdb_extensions/
+.claude/settings.local.json
+.posit/
+.kilo/
+
+dev/outputs/
+dev/output/

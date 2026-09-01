@@ -1,0 +1,61 @@
+Package: wiseapp
+Title: Weather Impact Simulation and Evaluation for Adaptation Policy and Planning
+Version: 0.1.0
+Authors@R: c(
+    person("Ben", "Brunckhorst", , "bbrunckhorst@worldbank.org", role = c("aut", "cre")),
+    person("Mads", "Hoefer", role = "aut"),
+    person("Daniel", "Kryger", role = "aut")
+  )
+Description: A tool to estimate the relationship between weather and household welfare, simulate welfare in different weather conditions and climates, and simulate adaptation policy scenarios.
+License: MIT + file LICENSE
+Encoding: UTF-8
+Roxygen: list(markdown = TRUE)
+RoxygenNote: 7.3.3
+Imports:
+    shiny,
+    golem,
+    bslib,
+    brand.yml,
+    ggplot2,
+    ggridges,
+    scales,
+    DT,
+    dplyr,
+    tidyr,
+    purrr,
+    tibble,
+    stringr,
+    readr,
+    arrow,
+    duckdb,
+    httr2,
+    DBI,
+    dbplyr,
+    digest,
+    leaflet,
+    colorspace,
+    htmltools,
+    broom,
+    fixest,
+    glmnet,
+    mice,
+    rlang,
+    lubridate,
+    patchwork,
+    stats,
+    tools,
+    pkgload,
+    igraph,
+    future,
+    future.apply,
+    katex,
+    withr
+Suggests:
+    parsnip,
+    ranger,
+    testthat (>= 3.0.0),
+    spelling,
+    xgboost
+Config/testthat/edition: 3
+URL: https://github.com/worldbank/wise-app
+BugReports: https://github.com/worldbank/wise-app/issues

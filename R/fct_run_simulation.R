@@ -1,0 +1,435 @@
+# fct_run_simulation.R
+# --------------------
+# Orchestration function for the full simulation pipeline.
+# Pure function — no reactives. Called from mod_2_01_weathersim.R.
+#
+# Called by:
+#   - mod_2_01_weathersim.R (observeEvent(input$run_sim))
+#
+# Depends on:
+#   - fct_simulations.R  (run_sim_pipeline, compute_chol_vcov, format_elapsed)
+#   - fct_get_weather.R  (get_weather)
+#   - fct_aggregation.R  (compute_hist_agg, compute_scenario_agg)
+
+
+# ---------------------------------------------------------------------------- #
+# Run full simulation pipeline — called once per button click                  #
+# ---------------------------------------------------------------------------- #
+
+#' Run the full welfare-weather simulation pipeline
+#'
+#' Pure function — no reactives. Extracts all business logic from
+#' observeEvent(input\$run_sim) in mod_2_01_weathersim.R.
+#'
+#' @param sw               Data frame. Selected weather variables.
+#' @param so               Data frame. Selected outcome (one row).
+#' @param svy              Data frame. Baseline survey data.
+#' @param ss               Data frame. Selected surveys.
+#' @param mf               List. Model fit (fit3, engine, train_data).
+#' @param cp               List. Connection parameters.
+#' @param fp_list          List of character(2) vectors. Future period date ranges.
+#' @param ssps             Character vector. Climate SSP codes.
+#' @param residuals        Character. Residual method.
+#' @param dev_mode         Logical. If TRUE limit to 1 ensemble member per key.
+#' @param skip_coef_draws  Logical. If TRUE bypass Cholesky draws.
+#' @param propagate_all_covariate_uncertainty Logical. When FALSE (default)
+#'   and `residuals == "original"`, the additive-decomposition SE is applied:
+#'   only coefficients on variables that change between baseline and
+#'   counterfactual (weather, plus policy-modified variables in Module 3)
+#'   contribute to `var_coef`. Coefficients on unchanged covariates cancel
+#'   through the held-fixed residual term, so masking them is exact under
+#'   additive separability. Set TRUE to recover the legacy full-coefficient
+#'   propagation (more conservative but inconsistent with the model's own
+#'   additive-separability assumption). Ignored when residuals are not
+#'   `"original"` — the cancellation argument requires fixed-per-household
+#'   residuals.
+#' @param sim_dates        Character vector. Historical simulation dates.
+#' @param perturbation_method List or NULL. Built by build_perturbation_method().
+#' @param stored_breaks    Named list or NULL. Pre-computed histogram breaks.
+#' @param notify_fn        Function(msg). Called for user-facing notifications.
+#'   Default is message() to console only.
+#' @param progress_fn      Function(value, detail). Called to update progress.
+#'   Default is a no-op — Shiny passes shiny::setProgress here.
+#'
+#' @return Named list with elements:
+#'   \describe{
+#'     \item{hist_sim_result}{List. Historical simulation output.}
+#'     \item{new_scenarios}{Named list. Future scenario outputs.}
+#'     \item{chol_obj}{List or NULL. Cholesky VCV object.}
+#'     \item{n_keys}{Integer. Total number of simulation keys.}
+#'     \item{total_runs}{Integer. Total prediction runs.}
+#'     \item{t_elapsed}{Numeric. Wall-clock seconds elapsed.}
+#'   }
+#' @noRd
+fct_run_simulation <- function(sw,
+                                so,
+                                svy,
+                                ss,
+                                mf,
+                                cp,
+                                fp_list,
+                                ssps,
+                                residuals,
+                                dev_mode,
+                                skip_coef_draws,
+                                sim_dates,
+                                perturbation_method,
+                                stored_breaks,
+                                propagate_all_covariate_uncertainty = FALSE,
+                                fit_multi    = NULL,
+                                taus         = NULL,
+                                weather_cols = NULL,
+                                notify_fn   = function(msg) message(msg),
+                                progress_fn = function(value, detail) invisible(NULL)) {
+
+  model      <- mf$fit3
+  engine     <- mf$engine
+  train_data <- mf$train_data
+  weather_terms <- mf$weather_terms
+  has_future <- length(fp_list) > 0 && length(ssps) > 0
+
+  ssp_labels <- c(
+    "ssp2_4_5" = "SSP2-4.5",
+    "ssp3_7_0" = "SSP3-7.0",
+    "ssp5_8_5" = "SSP5-8.5"
+  )
+
+  # ---- Total elapsed timer — starts here, covers everything --------------- #
+  t_start_total <- proc.time()[["elapsed"]]
+
+  # ---- Weather loading ---------------------------------------------------- #
+  progress_fn(0.05, "Querying weather data (this may take 1-2 minutes)...")
+  t_weather_start <- proc.time()[["elapsed"]]
+
+  weather_result <- get_weather(
+    survey_data         = svy,
+    selected_surveys    = ss,
+    selected_weather    = sw,
+    dates               = sim_dates,
+    connection_params   = cp,
+    ssp                 = if (has_future) ssps else NULL,
+    future_period       = if (has_future) fp_list else NULL,
+    perturbation_method = perturbation_method,
+    stored_breaks       = stored_breaks
+  )
+
+  t_weather <- proc.time()[["elapsed"]] - t_weather_start
+  progress_fn(0.20, sprintf("Weather loaded (%s) — preparing simulation...",
+                             format_elapsed(t_weather)))
+
+  # ---- Cholesky VCV ------------------------------------------------------- #
+  chol_obj <- if (isTRUE(skip_coef_draws)) {
+    message("[wiseapp] Coefficient draws skipped (point estimates only)")
+    NULL
+  } else {
+    tryCatch(
+      compute_chol_vcov(fit = model, vcov_spec = COEF_VCOV_SPEC),
+      error = function(e) {
+        warning("[fct_run_simulation] compute_chol_vcov() failed — ",
+                "falling back to point estimates: ", conditionMessage(e))
+        NULL
+      }
+    )
+  }
+
+  # ---- Active-coefficient mask (additive-decomposition SE) ---------------- #
+  # Under residuals = "original" the residual is held fixed per household, so
+  # uncertainty on coefficients for variables that do not change between
+  # baseline and counterfactual cancels through the residual. In Module 2
+  # only weather variables change, so active = weather_terms. (Module 3
+  # re-builds the mask in resimulate_with_svy() with policy-modified vars
+  # added.) Skipped when the user has requested full propagation or when
+  # residuals are not "original".
+  #
+  # svy_reference = svy here: in Module 2 the baseline survey is the
+  # reference because weather substitution happens *inside* the pipeline
+  # (prepare_hist_weather), not on `svy` itself, so diffing svy against
+  # itself yields empty modifications and active_terms = weather_terms.
+  chol_obj <- attach_active_mask(
+    chol_obj                            = chol_obj,
+    svy_modified                        = svy,
+    svy_reference                       = svy,
+    train_data                          = train_data,
+    weather_terms                       = weather_terms,
+    outcome_col                         = so$name,
+    residuals                           = residuals,
+    propagate_all_covariate_uncertainty = propagate_all_covariate_uncertainty
+  )
+
+  # ---- Cluster counts ----------------------------------------------------- #
+  cluster_counts <- tryCatch(
+    compute_cluster_counts(train_data),
+    error = function(e) NULL
+  )
+  n_models_before <- length(setdiff(names(weather_result), "historical"))
+
+  # ---- Key loop setup ----------------------------------------------------- #
+
+  weight_col_sim <- grep("^weight$|^hhweight$|^wgt$|^pw$",
+                          names(svy), value = TRUE, ignore.case = TRUE)[1L]
+  if (is.na(weight_col_sim %||% NA)) weight_col_sim <- NULL
+  wt_detected <- grep("^weight$|^hhweight$|^wgt$|^pw$",
+                       names(svy), value = TRUE, ignore.case = TRUE)
+  if (length(wt_detected) > 1L) {
+    warning(sprintf(
+      "[wiseapp] Multiple weight columns detected: %s. Using '%s'.",
+      paste(wt_detected, collapse = ", "), weight_col_sim
+    ))
+  }
+
+  future_keys <- setdiff(names(weather_result), "historical")
+  if (isTRUE(dev_mode)) {
+    future_keys <- future_keys[
+      !duplicated(stringr::str_extract(future_keys,
+                                        "^(?:[^_]+_){4}[^_]+"))
+    ]
+  }
+  all_keys   <- c("historical", future_keys)
+  n_keys     <- length(all_keys)
+
+  n_hist_yrs    <- if (!is.null(weather_result[["historical"]]))
+    length(unique(format(weather_result[["historical"]]$timestamp, "%Y")))
+  else 30L
+  n_future_keys <- length(future_keys)
+  total_runs    <- n_hist_yrs * (1L + n_future_keys)
+
+  # Serial execution only — parallelisation removed
+  n_workers_safe <- 1L
+
+  # ---- Precompute objects shared across all keys ----------------------------- #
+
+  is_rif <- identical(engine, "rif")
+
+  # train_aug: identical for every key (same model, same train_data). Compute
+  # once here instead of repeating predict(model, train_data) per key.
+  precomputed_train_aug <- if (is_rif) NULL else tryCatch({
+    fitted_train <- as.numeric(stats::predict(model, newdata = train_data))
+    train_data |>
+      dplyr::mutate(
+        .fitted = fitted_train,
+        .resid  = !!rlang::sym(so$name) - fitted_train
+      )
+  }, error = function(e) {
+    warning("[fct_run_simulation] train_aug precomputation failed: ",
+            conditionMessage(e))
+    NULL
+  })
+
+  # ecdf_train: RIF-only analogue of the above — train_data[[outcome]] is
+  # identical for every key, so the ecdf used to assign each household's
+  # quantile position is built once here rather than per key inside
+  # predict_rif() (see PERF-27).
+  precomputed_ecdf_train <- if (is_rif) tryCatch({
+    stats::ecdf(train_data[[so$name]])
+  }, error = function(e) {
+    warning("[fct_run_simulation] ecdf_train precomputation failed: ",
+            conditionMessage(e))
+    NULL
+  }) else NULL
+
+  # Survey-side join prep: drop weather/outcome columns and convert year once.
+  # Passed to run_sim_pipeline() so prepare_hist_weather() skips this per key.
+  drop_cols <- c(sw$name, so$name)
+  svy_prepared <- svy |>
+    dplyr::mutate(year = as.character(year)) |>
+    dplyr::select(-dplyr::any_of(drop_cols))
+
+  # ---- Run pipelines (one key at a time) ---------------------------------- #
+  progress_fn(0.50, "Running simulations...")
+
+  t_start <- t_start_total   # key loop elapsed = total elapsed from function entry
+
+
+  t_start_pipeline <- proc.time()[["elapsed"]]
+  message("[wiseapp] Running simulation pipelines...")
+  progress_fn(0.35, sprintf("Running %d simulation pipelines...", n_keys))
+
+  # Pre-split weather_result per key — each (potential) parallel worker only
+  # receives its own key's weather data (~10MB) not the full 228MB
+  weather_per_key <- setNames(
+    lapply(all_keys, function(k) weather_result[[k]]),
+    all_keys
+  )
+
+  # ---- Key loop ----------------------------------------------------------- #
+  # Run each key's pipeline and assemble its result immediately, then free the
+  # pipeline before the next key. This bounds resident memory to a single key's
+  # pipeline (each carries its full weather_raw and an N×P F_loading matrix)
+  # rather than holding all keys at once — the previous two-pass design (build
+  # every pipeline into pipeline_list, then consume) stacked one key's transient
+  # peak on top of every prior key's retained pipeline, which tips large-N
+  # countries over the vector-memory limit.
+
+  hist_sim_result  <- NULL
+  new_scenarios    <- list()
+  group_agg        <- list()
+  group_weather_rep <- list()
+  group_meta       <- list()
+  group_n          <- list()
+
+  for (ki in seq_along(all_keys)) {
+    key       <- all_keys[[ki]]
+    is_hist   <- identical(key, "historical")
+    is_hist_k <- is_hist
+
+    # Per-key progress (fires before the key runs) — mirrors the old pre-run
+    # loop's message.
+    t_el <- proc.time()[["elapsed"]] - t_start_pipeline
+    progress_fn(
+      value  = 0.35 + 0.45 * ((ki - 1L) / n_keys),
+      detail = sprintf("Key %d/%d: %s | %s elapsed",
+                       ki, n_keys,
+                       if (is_hist_k) "Historical"
+                       else sub("^(ssp[^_]+_[0-9]+_[0-9]+)_.*$",
+                                "\\1", key),
+                       format_elapsed(t_el))
+    )
+
+    out <- tryCatch(
+      run_sim_pipeline(
+        weather_raw  = weather_per_key[[key]],
+        svy          = svy,
+        sw           = sw,
+        so           = so,
+        model        = model,
+        residuals    = residuals,
+        train_data   = train_data,
+        engine       = engine,
+        chol_obj     = chol_obj,
+        fit_multi    = fit_multi,
+        taus         = taus,
+        weather_cols = weather_cols,
+        precomputed_train_aug = precomputed_train_aug,
+        svy_prepared = svy_prepared,
+        precomputed_ecdf_train = precomputed_ecdf_train
+      ),
+      error = function(e) {
+        warning(sprintf("[fct_run_simulation] Key %s failed: %s",
+                        key, conditionMessage(e)))
+        NULL
+      }
+    )
+
+    # Free this key's weather slice as soon as the pipeline has run.
+    weather_per_key[[key]] <- NULL
+
+    key_weather_raw        <- if (is_hist) weather_result[[key]] else NULL
+    weather_result[[key]]  <- NULL
+
+    t_elapsed_post <- proc.time()[["elapsed"]] - t_start
+    t_remain_post  <- if (ki >= 1L)
+      (t_elapsed_post / ki) * (n_keys - ki) else NA_real_
+
+    progress_fn(
+      value  = 0.5 + 0.45 * (ki / n_keys),
+      detail = sprintf(
+        "%s | Key %d/%d | %s elapsed%s",
+        if (is_hist) "Historical"
+        else sub("^(ssp[^_]+_[0-9]+_[0-9]+)_.*$", "\\1", key),
+        ki, n_keys,
+        format_elapsed(t_elapsed_post),
+        if (!is.na(t_remain_post) && t_remain_post > 0)
+          paste0(" | ~", format_elapsed(t_remain_post), " remaining")
+        else if (ki == n_keys) " | finalising..."
+        else ""
+      )
+    )
+
+    if (is.null(out)) { rm(out); next }
+
+    if (is_hist && is.null(hist_sim_result)) {
+      hist_sim_result <- list(
+        pipeline       = out,
+        chol_obj       = chol_obj,
+        so             = so,
+        has_weights    = !is.null(out$weight),
+        weather_raw    = key_weather_raw,
+        train_data     = train_data,
+        cluster_counts = cluster_counts,
+        svy            = svy,
+        residuals      = residuals
+      )
+      # Strip weather_raw from pipeline after saving to hist_sim_result
+      out$weather_raw <- NULL
+
+    } else if (!is_hist) {
+      ssp_code <- sub("^(ssp[^_]+_[^_]+_[^_]+)_.*", "\\1", key)
+      yr_parts <- regmatches(key, gregexpr("[0-9]{4}", key))[[1L]]
+      period   <- if (length(yr_parts) >= 2L)
+        paste0(yr_parts[[1L]], "_", yr_parts[[2L]]) else "unknown"
+      gk       <- paste0(ssp_code, "_", period)
+
+      if (is.null(group_agg[[gk]]))         group_agg[[gk]]         <- list()
+      if (is.null(group_weather_rep[[gk]])) group_weather_rep[[gk]] <- out$weather_raw
+      if (is.null(group_n[[gk]]))           group_n[[gk]]           <- 0L
+      if (is.null(group_meta[[gk]])) {
+        group_meta[[gk]] <- list(ssp_code = ssp_code, year_range = yr_parts)
+      }
+
+      # NB: per-member `weather_raw` is intentionally retained on each
+      # pipeline so Module 3's resimulate_with_svy() can re-predict per
+      # CMIP6 member using that member's own weather. Stripping it here
+      # collapses every member to the representative weather and silently
+      # erases inter-model spread on policy results.
+
+      member_type <- sub(".*_(ensemble_mean|ensemble_lo|ensemble_hi)$",
+                          "\\1", key)
+      if (!nchar(member_type) || member_type == key)
+        member_type <- paste0("model_", group_n[[gk]] + 1L)
+
+      group_agg[[gk]][[member_type]] <- out
+      group_n[[gk]] <- group_n[[gk]] + 1L
+
+    }
+    rm(out)
+    if (ki %% 10L == 0L) gc(verbose = FALSE)
+  }
+
+  rm(weather_per_key, weather_result, precomputed_train_aug, svy_prepared)
+  gc(verbose = FALSE)
+
+  t_pipeline_done <- proc.time()[["elapsed"]] - t_start_pipeline
+  progress_fn(0.80, sprintf("Pipelines complete (%s) — grouping results...",
+                             format_elapsed(t_pipeline_done)))
+
+  # ---- Assemble new_scenarios --------------------------------------------- #
+  for (gk in names(group_agg)) {
+    meta        <- group_meta[[gk]]
+    ssp_pretty  <- ssp_labels[meta$ssp_code] %||% meta$ssp_code
+    period_lbl  <- paste0(meta$year_range[1], "-", meta$year_range[2])
+    display_key <- paste0(ssp_pretty, " / ", period_lbl)
+    new_scenarios[[display_key]] <- list(
+      pipelines   = group_agg[[gk]],
+      weather_raw = group_weather_rep[[gk]],
+      chol_obj    = chol_obj,
+      so          = so,
+      year_range  = meta$year_range,
+      n_models    = group_n[[gk]],
+      residuals   = residuals
+    )
+  }
+  rm(group_agg, group_weather_rep, group_meta, group_n)
+  gc(verbose = FALSE)
+
+  t_elapsed_total    <- proc.time()[["elapsed"]] - t_start_total
+  t_pipeline_elapsed <- proc.time()[["elapsed"]] - t_start_pipeline
+
+  message(sprintf(
+    "[wiseapp] Simulation complete in %s total | weather: %s | pipelines: %s | %d key(s) | ~%d runs",
+    format_elapsed(t_elapsed_total),
+    format_elapsed(t_weather),
+    format_elapsed(t_pipeline_elapsed),
+    n_keys,
+    total_runs
+  ))
+
+  list(
+    hist_sim_result = hist_sim_result,
+    new_scenarios   = new_scenarios,
+    chol_obj        = chol_obj,
+    n_keys          = n_keys,
+    total_runs      = total_runs,
+    t_elapsed       = t_elapsed_total,
+    t_weather       = t_weather        # ← expose for UI notification
+  )
+}

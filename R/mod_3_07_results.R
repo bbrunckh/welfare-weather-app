@@ -1,0 +1,104 @@
+#' 3_07_results UI Function
+#'
+#' @description A shiny Module. The Baseline and Policy results tabs are
+#'   inserted into the parent tabset on the first successful policy
+#'   simulation run, so this UI returns nothing.
+#'
+#' @param id Internal parameter for {shiny}.
+#'
+#' @noRd
+#'
+#' @importFrom shiny NS tagList
+mod_3_07_results_ui <- function(id) {
+  tagList()
+}
+
+#' 3_07_results Server Functions
+#'
+#' Renders Baseline and Policy results tabs in the Step 3 tabset, each a
+#' faithful copy of Step 2's Results UI bound to its own re-simulated
+#' \code{hist_sim} / \code{saved_scenarios} reactives. Tabs are appended on
+#' the first successful policy simulation run.
+#'
+#' @param id                       Module id.
+#' @param baseline_hist_sim        Reactive (Step 2 schema) for baseline.
+#' @param baseline_saved_scenarios Reactive named scenario list (baseline).
+#' @param policy_hist_sim          Reactive (Step 2 schema) for policy.
+#' @param policy_saved_scenarios   Reactive named scenario list (policy).
+#' @param selected_hist            Reactive one-row historical metadata.
+#' @param sim_run_id               Reactive trigger; tabs appended once
+#'   this is > 0.
+#' @param tabset_id                Char id of the parent tabset.
+#' @param tabset_session           Shiny session for the parent tabset.
+#'
+#' @noRd
+mod_3_07_results_server <- function(id,
+                                     baseline_hist_sim,
+                                     baseline_saved_scenarios,
+                                     policy_hist_sim,
+                                     policy_saved_scenarios,
+                                     selected_hist  = reactive(NULL),
+                                     sim_run_id     = reactive(0L),
+                                     tabset_id,
+                                     tabset_session = NULL,
+                                     residuals      = reactive("original")) {
+  moduleServer(id, function(input, output, session) {
+    ns <- session$ns
+    if (is.null(tabset_session)) {
+      tabset_session <- session$parent %||% session
+    }
+    select_tab <- function(value) {
+      if (is.null(tabset_id) || !nzchar(tabset_id)) return(invisible(FALSE))
+      try(shiny::updateTabsetPanel(tabset_session, inputId = tabset_id, selected = value), silent = TRUE)
+      invisible(TRUE)
+    }
+
+    tabs_added <- reactiveVal(FALSE)
+
+    .wire_results_pane(
+      input, output, session,
+      baseline_hist_sim        = baseline_hist_sim,
+      baseline_saved_scenarios = baseline_saved_scenarios,
+      policy_hist_sim          = policy_hist_sim,
+      policy_saved_scenarios   = policy_saved_scenarios,
+      selected_hist            = selected_hist,
+      residuals                = residuals
+    )
+
+    observeEvent(sim_run_id(), {
+      req(sim_run_id() > 0)
+      # sim_run_id is incremented inside the policy_sim run() after the
+      # reactiveVals are set, but if a downstream step (e.g. decomposition)
+      # silently fails the increment can still fire with NULL hist_sim values.
+      # Guard explicitly so we never try to read $so on NULL.
+      req(baseline_hist_sim(), policy_hist_sim())
+
+      if (!tabs_added()) {
+        bs <- baseline_hist_sim()
+        if (is.null(bs) || is.null(bs$so)) return()
+        shiny::appendTab(
+          inputId = tabset_id,
+          shiny::tabPanel(
+            title = "Results",
+            value = "results_tab",
+            .results_pane_ui(ns, bs$so)
+          ),
+          select  = TRUE,
+          session = tabset_session
+        )
+        tabs_added(TRUE)
+      }
+
+      if (tabs_added()) select_tab("results_tab")
+
+    }, ignoreInit = TRUE)
+
+    # Expose UI toggles so sibling tabs (Decomposition) can subscribe to
+    # the same "Show coefficient uncertainty" / "Show inter-model spread"
+    # state the user picked here.
+    list(
+      show_coef_uncertainty = reactive(isTRUE(input$show_coef_uncertainty)),
+      show_model_spread     = reactive(isTRUE(input$show_model_spread))
+    )
+  })
+}
