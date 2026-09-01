@@ -5501,14 +5501,14 @@
     "inst/app/www/welcome_message.md": {
       "checksum": "ecc050886da8c1610b82c624079c6ff4"
     },
-    "inst/duckdb_extensions/h3.duckdb_extension": {
-      "checksum": "3109fecbfcde005a8b75aa225bb96ad9"
+    "inst/duckdb_extensions/h3.duckdb_extension.gz": {
+      "checksum": "ae89b1f7610c04008c1b0311d76a2aca"
     },
-    "inst/duckdb_extensions/httpfs.duckdb_extension": {
-      "checksum": "29756371b032bd7363e1d4a99eb3177e"
+    "inst/duckdb_extensions/httpfs.duckdb_extension.gz": {
+      "checksum": "6d61dae1b933bfad063b4c84fcf22023"
     },
-    "inst/duckdb_extensions/spatial.duckdb_extension": {
-      "checksum": "fcced26741cc197a947cb8d893f929d5"
+    "inst/duckdb_extensions/spatial.duckdb_extension.gz": {
+      "checksum": "7888a09539c41ab143f5642ed8edb603"
     },
     "inst/golem-config.yml": {
       "checksum": "2b6da43c212da816624fb778abef27af"
@@ -5991,7 +5991,7 @@
       "checksum": "f24874190aaba73ac6e9669a6fdc565b"
     },
     "R/fct_load_data.R": {
-      "checksum": "8f53391743d77889145cd0556f400be4"
+      "checksum": "042136fc9ca4330927c6802fc4478f91"
     },
     "R/fct_loc_panel.R": {
       "checksum": "e0506a1b56eac2254937d321e56025a6"

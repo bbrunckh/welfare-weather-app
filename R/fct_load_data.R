@@ -96,11 +96,19 @@ collect_deterministic <- function(data, keys = NULL) {
   # auto_connect() is a proxy for "running on Posit Connect" 
   # if it exists and returns TRUE, otherwise assume local environment
   if (exists(".auto_connect") && .auto_connect()) {
-    # Check for a bundled binary first (avoids any network call)
+    # Check for a bundled binary first (avoids any network call).
+    # Prefer .gz (DuckDB INSTALL decompresses it automatically); fall back
+    # to an uncompressed binary if present.
     bundled <- system.file(
-      paste0("duckdb_extensions/", ext, ".duckdb_extension"),
+      paste0("duckdb_extensions/", ext, ".duckdb_extension.gz"),
       package = "wiseapp"
     )
+    if (!nzchar(bundled)) {
+      bundled <- system.file(
+        paste0("duckdb_extensions/", ext, ".duckdb_extension"),
+        package = "wiseapp"
+      )
+    }
 
     if (nzchar(bundled)) {
       DBI::dbExecute(con, sprintf("INSTALL '%s';", bundled))
