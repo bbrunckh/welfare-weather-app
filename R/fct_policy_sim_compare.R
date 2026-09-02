@@ -378,6 +378,16 @@ policy_input_diagnostics <- function(baseline_svy, policy_svy, vars = NULL) {
             "return period lines mark standard thresholds (e.g. 1-in-20-year",
             "events)."
           ),
+          shiny::p(shiny::tags$b("Central line"),
+            " = median across climate-model ensemble members at each",
+            " exceedance probability. Baseline retains the scenario colour;",
+            " policy is the red overlay."
+          ),
+          shiny::p(shiny::tags$b("Filled ribbon"),
+            " = inter-model spread. Baseline and policy ribbons use the",
+            " same SSP colour, with transparency keeping the central lines",
+            " visible."
+          ),
           docs = TRUE
         )
       ),
@@ -1313,7 +1323,8 @@ policy_input_diagnostics <- function(baseline_svy, policy_svy, vars = NULL) {
       "The curve shows the estimated annual exceedance probability for each outcome value."
     shiny::tags$p(
       style = "font-size:11px; color:#666; margin-top:6px;",
-      axis_txt
+      axis_txt,
+      " Grey line = baseline; red line = policy-adjusted ensemble median."
     )
   })
 

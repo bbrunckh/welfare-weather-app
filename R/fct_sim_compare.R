@@ -715,13 +715,15 @@ plot_variance_contribution <- function(var_tbl) {
 
 #' Enhanced Exceedance Probability Curve with Return Period Axis
 #'
-#' Colour = climate scenario (SSP family). Line type = future period (year
-#' range). Line width = ensemble percentile (P50 thick, P10/P90 thin).
-#' Historical = black/solid/medium. Optional logit probability axis.
+#' Colour and line type identify the combined climate scenario and period
+#' (for example, `SSP3-7.0 / 2025-2035`). When baseline and policy series are
+#' present, line width distinguishes them. Historical = black/solid/medium.
+#' Optional logit probability axis.
 #'
-#' Each SSP x period x percentile combination is rendered as its own curve,
-#' giving a full visual separation of the three ensemble spread lines per
-#' scenario/period combination.
+#' Each SSP x period combination has an inter-model ribbon and a central
+#' across-model median curve. When source-tagged data are supplied (as in the
+#' policy comparison), baseline and policy remain distinguishable even when
+#' their ribbons overlap.
 #'
 #' @param curves_tbl    Data frame. Tidy exceedance curves with one row per
 #'   (scenario, period, model, rank) welfare value.
@@ -812,9 +814,11 @@ enhance_exceedance <- function(curves_tbl,
     agg_df$line_id <- as.character(agg_df$scenario)
   }
 
-  # Aesthetic mappings
-  hist_df <- agg_df[ agg_df$is_historical, , drop = FALSE]
-
+  # Aesthetic mappings. Keep each legend tied to one meaningful dimension:
+  # SSP family (colour), period (linetype), and, for policy comparisons, source
+  # (linewidth). Mapping `scenario` to both colour and linetype created a
+  # duplicated scenario legend and hid the source distinction in overlapping
+  # ribbons.
   agg_df$ssp_key <- ifelse(agg_df$is_historical, "Historical",
                            vapply(agg_df$scenario, .normalise_ssp, character(1L)))
   agg_df$yr_lbl  <- ifelse(agg_df$is_historical, "Historical",
@@ -826,37 +830,60 @@ enhance_exceedance <- function(curves_tbl,
   colour_map_ssp <- c("Historical" = "black",
                       .ssp_colours[intersect(names(.ssp_colours), present_ssps)])
   ltype_map_yr   <- c("Historical" = "solid", yr_styles$linetype_map)
-  hist_mean      <- if (nrow(hist_df) > 0L) mean(hist_df$central, na.rm = TRUE) else NA_real_
-  ann_y          <- if (isTRUE(logit_x)) 0.97 else 0.95
 
-  # Combined legend: each scenario gets one entry with its colour (SSP) and
-  # linetype (period). Build parallel maps keyed by the scenario string.
-  scen_levels <- c("Historical",
-                    sort(unique(agg_df$scenario[!agg_df$is_historical])))
-  scen_colour_map <- vapply(scen_levels, function(s) {
-    if (s == "Historical") return(unname(colour_map_ssp[["Historical"]]))
+  scenario_levels <- c(
+    "Historical",
+    sort(unique(as.character(agg_df$scenario[!agg_df$is_historical])))
+  )
+  scenario_colour_map <- stats::setNames(vapply(scenario_levels, function(s) {
+    if (identical(s, "Historical")) return("black")
     unname(colour_map_ssp[[.normalise_ssp(s)]] %||% "grey50")
-  }, character(1L))
-  scen_ltype_map <- vapply(scen_levels, function(s) {
-    if (s == "Historical") return(unname(ltype_map_yr[["Historical"]]))
-    yr <- .parse_year(s)
-    unname(ltype_map_yr[[yr]] %||% "solid")
-  }, character(1L))
-  agg_df$scenario <- factor(agg_df$scenario, levels = scen_levels)
-
-    # ---- Plot ---------------------------------------------------------------
-  # Layer order (back to front): inter-model ribbon (future) -> coefficient
-  # ribbon (optional) -> median curve.
+  }, character(1L)), scenario_levels)
+  scenario_linetype_map <- stats::setNames(vapply(scenario_levels, function(s) {
+    if (identical(s, "Historical")) return("solid")
+    unname(ltype_map_yr[[.parse_year(s)]] %||% "solid")
+  }, character(1L)), scenario_levels)
+  agg_df$scenario_key <- factor(
+    ifelse(agg_df$is_historical, "Historical", as.character(agg_df$scenario)),
+    levels = scenario_levels
+  )
+  agg_df$ssp_key <- factor(agg_df$ssp_key, levels = c("Historical", present_ssps))
+  agg_df$yr_lbl  <- factor(agg_df$yr_lbl, levels = c("Historical", fut_yr_labels))
+  if (has_source) {
+    agg_df$source <- factor(agg_df$source, levels = c("Baseline", "Policy"))
+    # Baseline keeps Mod 2's scenario-colour ribbon. The policy ribbon uses
+    # the same colour with a lower alpha, so the added series stays readable
+    # without changing the underlying scenario encoding.
+    ribbon_palette <- scenario_colour_map
+    agg_df$ribbon_key <- as.character(agg_df$scenario_key)
+    agg_df$line_key <- as.character(agg_df$scenario_key)
+  } else {
+    ribbon_palette <- scenario_colour_map
+    agg_df$ribbon_key <- as.character(agg_df$scenario_key)
+    agg_df$line_key <- as.character(agg_df$scenario_key)
+  }
+  hist_df    <- agg_df[ agg_df$is_historical, , drop = FALSE]
   fut_mod_df <- agg_df[!agg_df$is_historical, , drop = FALSE]
+  fut_baseline_df <- if (has_source)
+    fut_mod_df[fut_mod_df$source == "Baseline", , drop = FALSE]
+  else fut_mod_df
+  fut_policy_df <- if (has_source)
+    fut_mod_df[fut_mod_df$source == "Policy", , drop = FALSE]
+  else fut_mod_df[0, , drop = FALSE]
+  hist_mean  <- if (nrow(hist_df) > 0L) mean(hist_df$central, na.rm = TRUE) else NA_real_
+  ann_y      <- if (isTRUE(logit_x)) 0.97 else 0.95
 
+  # ---- Plot ---------------------------------------------------------------
+  # Layer order (back to front): inter-model ribbon (future) -> coefficient
+  # band (optional) -> ensemble median curves.
   p <- if (has_source) ggplot2::ggplot(
     agg_df,
     ggplot2::aes(
       x        = .data$central,
       y        = .data$exceed_prob,
-      colour   = .data$scenario,
-      linetype = .data$scenario,
-      alpha    = .data$source,
+      colour   = .data$line_key,
+      linetype = .data$scenario_key,
+      linewidth = if (has_source) .data$source else NULL,
       group    = .data$line_id
     )
   ) else ggplot2::ggplot(
@@ -864,9 +891,9 @@ enhance_exceedance <- function(curves_tbl,
     ggplot2::aes(
       x        = .data$central,
       y        = .data$exceed_prob,
-      colour   = .data$scenario,
-      linetype = .data$scenario,
-      group    = .data$scenario
+      colour   = .data$line_key,
+      linetype = .data$scenario_key,
+      group    = .data$line_id
     )
   )
 
@@ -875,18 +902,23 @@ enhance_exceedance <- function(curves_tbl,
   if (nrow(fut_mod_df) > 0L) {
     ribbon_aes <- if (has_source)
       ggplot2::aes(y = .data$exceed_prob, xmin = .data$intermod_lo,
-                   xmax = .data$intermod_hi, fill = .data$scenario,
-                   group = .data$line_id)
+                   xmax = .data$intermod_hi, fill = .data$ribbon_key,
+                   alpha = .data$source, group = .data$line_id)
     else
       ggplot2::aes(y = .data$exceed_prob, xmin = .data$intermod_lo,
-                   xmax = .data$intermod_hi, fill = .data$scenario,
-                   group = .data$scenario)
-    p <- p + ggplot2::geom_ribbon(
-      data    = fut_mod_df,
-      mapping = ribbon_aes,
-      alpha       = if (has_source) 0.10 else 0.18,
-      inherit.aes = FALSE
-    )
+                   xmax = .data$intermod_hi, fill = .data$ribbon_key,
+                   group = .data$line_id)
+    ribbon_layer <- if (has_source) {
+      ggplot2::geom_ribbon(
+        data = fut_mod_df, mapping = ribbon_aes, inherit.aes = FALSE
+      )
+    } else {
+      ggplot2::geom_ribbon(
+        data = fut_mod_df, mapping = ribbon_aes, alpha = 0.18,
+        inherit.aes = FALSE
+      )
+    }
+    p <- p + ribbon_layer
   }
 
   # Coefficient uncertainty band: drawn as a pair of dashed outline curves
@@ -896,72 +928,100 @@ enhance_exceedance <- function(curves_tbl,
     coef_df <- agg_df[!is.na(agg_df$coef_lo), , drop = FALSE]
     coef_aes_lo <- if (has_source)
       ggplot2::aes(x = .data$coef_lo, y = .data$exceed_prob,
-                   colour = .data$scenario, alpha = .data$source,
+                   colour = .data$line_key, linetype = .data$scenario_key,
+                   linewidth = .data$source,
                    group  = .data$line_id)
     else
       ggplot2::aes(x = .data$coef_lo, y = .data$exceed_prob,
-                   colour = .data$scenario, group = .data$scenario)
+                   colour = .data$line_key, linetype = .data$scenario_key,
+                   group = .data$line_id)
     coef_aes_hi <- if (has_source)
       ggplot2::aes(x = .data$coef_hi, y = .data$exceed_prob,
-                   colour = .data$scenario, alpha = .data$source,
+                   colour = .data$line_key, linetype = .data$scenario_key,
+                   linewidth = .data$source,
                    group  = .data$line_id)
     else
       ggplot2::aes(x = .data$coef_hi, y = .data$exceed_prob,
-                   colour = .data$scenario, group = .data$scenario)
+                   colour = .data$line_key, linetype = .data$scenario_key,
+                   group = .data$line_id)
     p <- p +
       ggplot2::geom_line(data = coef_df, mapping = coef_aes_lo,
-                         linetype = "dashed", linewidth = 0.5,
+                          linetype = "dashed", linewidth = 0.5,
                          inherit.aes = FALSE, show.legend = FALSE) +
       ggplot2::geom_line(data = coef_df, mapping = coef_aes_hi,
-                         linetype = "dashed", linewidth = 0.5,
+                          linetype = "dashed", linewidth = 0.5,
                          inherit.aes = FALSE, show.legend = FALSE)
   }
 
-  # Central median line: historical baseline only. For future scenarios the
-  # inter-model ribbon carries the full distribution - overlaying the median
-  # curve overly emphasises centrality.
-  p <- p +
-    ggplot2::geom_line(data = hist_df, linewidth = 0.9)
+  # Central median lines. Future lines show the across-model median at each
+  # exceedance probability, making the centre of the ensemble explicit.
+  p <- if (has_source) {
+    p +
+      ggplot2::geom_line(data = hist_df, colour = "black", na.rm = TRUE) +
+      # Baseline retains the Mod 2 scenario colour and period linetype;
+      # policy is the additional red overlay drawn last.
+      ggplot2::geom_line(data = fut_baseline_df, na.rm = TRUE) +
+      # Draw policy last so the red centre line stays visible at crossings.
+      ggplot2::geom_line(data = fut_policy_df, colour = "#c62828",
+                         na.rm = TRUE,
+                         show.legend = c(colour = FALSE, linetype = FALSE,
+                                         linewidth = TRUE))
+  } else {
+    p +
+      ggplot2::geom_line(data = hist_df, linewidth = 0.9, na.rm = TRUE) +
+      ggplot2::geom_line(data = fut_mod_df, linewidth = 0.9, na.rm = TRUE)
+  }
 
+  if (is.finite(hist_mean)) {
+    p <- p +
+      ggplot2::geom_vline(
+        xintercept = hist_mean, linetype = "dotted",
+        colour = "black", linewidth = 0.5
+      ) +
+      ggplot2::annotate(
+        "text", x = hist_mean, y = ann_y,
+        label = "Hist. mean", hjust = 1.05, vjust = -0.4,
+        size = 2.8, colour = "grey30"
+      )
+  }
   p <- p +
-    ggplot2::geom_vline(
-      xintercept = hist_mean, linetype = "dotted",
-      colour = "black", linewidth = 0.5
-    ) +
-    ggplot2::annotate(
-      "text", x = hist_mean, y = ann_y,
-      label = "Hist. mean", hjust = 1.05, vjust = -0.4,
-      size = 2.8, colour = "grey30"
-    ) +
-    # Merged legend: a single entry per scenario showing its colour (SSP)
-    # and linetype (period). Both scales share the same `name` and `breaks`
-    # so ggplot collapses them into one combined legend. Only the colour
-    # scale carries `override.aes`; specifying it on the linetype scale too
-    # triggers a "Duplicated override.aes is ignored" warning at draw time.
     ggplot2::scale_color_manual(
-      values = scen_colour_map,
-      breaks = scen_levels,
+      values = scenario_colour_map,
+      breaks = scenario_levels,
+      labels = scenario_levels,
       name   = "Scenario",
-      guide  = ggplot2::guide_legend(override.aes = list(linewidth = 0.9))
+      guide  = ggplot2::guide_legend(
+        override.aes = list(linewidth = 0.9, linetype = "solid", alpha = 1)
+      )
     ) +
     ggplot2::scale_fill_manual(
-      values   = scen_colour_map,
-      breaks   = scen_levels,
+      values   = ribbon_palette,
       na.value = "grey70",
       guide    = "none"
     ) +
     ggplot2::scale_linetype_manual(
-      values = scen_ltype_map,
-      breaks = scen_levels,
+      values = scenario_linetype_map,
+      breaks = scenario_levels,
       name   = "Scenario"
     )
   if (has_source) {
-    p <- p + ggplot2::scale_alpha_manual(
-      values = c(Baseline = 0.35, Policy = 1.0),
-      breaks = c("Baseline", "Policy"),
-      name   = "Source",
-      guide  = ggplot2::guide_legend(order = 3,
-                                     override.aes = list(linewidth = 0.9))
+    p <- p +
+      ggplot2::scale_linewidth_manual(
+        values = c(Baseline = 0.7, Policy = 1.35),
+        breaks = c("Baseline", "Policy"),
+        name   = "Series",
+        guide  = ggplot2::guide_legend(
+          override.aes = list(
+            colour = c("#4b5563", "#c62828"), linetype = "solid"
+          )
+        )
+      ) +
+      ggplot2::scale_alpha_manual(
+        # Keep both uncertainty bands transparent; policy's central line is
+        # opaque and therefore remains the primary policy signal.
+        values = c(Baseline = 0.18, Policy = 0.10),
+        breaks = c("Baseline", "Policy"),
+        guide  = "none"
     )
   }
   p <- p +

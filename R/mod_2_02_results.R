@@ -220,8 +220,12 @@ mod_2_02_results_ui <- function(id) {
           ),
           shiny::p(shiny::tags$b("Solid curve"),
             " (historical) = empirical exceedance curve of the historical baseline."),
+          shiny::p(shiny::tags$b("Central line"),
+            " (future scenarios) = median across climate-model ensemble",
+            " members at each exceedance probability."),
           shiny::p(shiny::tags$b("Filled ribbon"),
-            " (future scenarios only) = inter-model spread; quantile across ensemble members at each return period. No central curve is drawn for future scenarios so the full spread stays visible."),
+            " (future scenarios only) = inter-model spread; quantile across",
+            " ensemble members at each return period."),
           shiny::p(shiny::tags$b("Dashed outlines"),
             " (when coefficient uncertainty enabled) = analytic per-outcome SE band around the median. May fall inside or outside the inter-model ribbon depending on which source dominates."),
           shiny::p(
