@@ -62,8 +62,8 @@ filter_outcome_vars <- function(variable_list, survey_colnames) {
 #' Returns `TRUE` when `name` is `"welfare"` or `"poor"`, or when `units` is
 #' `"LCU"`. All comparisons are scalar-safe.
 #'
-#' @param name  A single character string — the outcome variable name.
-#' @param units A single character string — the outcome units (may be `NA`).
+#' @param name  A single character string - the outcome variable name.
+#' @param units A single character string - the outcome units (may be `NA`).
 #'
 #' @return A single logical value.
 #'
@@ -139,7 +139,7 @@ poverty_line_label <- function(currency) {
 #' Returns `"log"` for numeric/continuous outcomes and `NA_character_` for all
 #' others (binary, logical, etc.).
 #'
-#' @param type A single character string — the outcome type as stored in the
+#' @param type A single character string - the outcome type as stored in the
 #'   variable list (e.g. `"numeric"`, `"logical"`, `"binary"`).
 #'
 #' @return `"log"` or `NA_character_`.
@@ -207,7 +207,7 @@ build_selected_outcome <- function(info, currency = NULL, poverty_line = NULL) {
 #' Returns a `shiny::tagList` with styled divs describing the selected outcome
 #' type. Returns an empty `tagList` for unrecognised types.
 #'
-#' @param type A single character string — the outcome type (e.g. `"numeric"`,
+#' @param type A single character string - the outcome type (e.g. `"numeric"`,
 #'   `"logical"`).
 #'
 #' @return A `shiny.tag.list`.
@@ -242,7 +242,7 @@ outcome_info_message <- function(type) {
 #' Compute missingness summary for the selected outcome variable
 #'
 #' @param df      Survey data frame.
-#' @param outcome Single character string — the outcome variable name.
+#' @param outcome Single character string - the outcome variable name.
 #'
 #' @return A one-row data frame with columns \code{variable}, \code{n_total},
 #'   \code{n_available}, \code{n_missing}, \code{pct_available}.
@@ -278,7 +278,7 @@ outcome_missing_summary <- function(df, outcome) {
 #' log scale when all values are positive.
 #'
 #' @param df A data frame with a `countryyear` column for ridge grouping.
-#' @param outcome Single character string — outcome variable name. Defaults to
+#' @param outcome Single character string - outcome variable name. Defaults to
 #'   `"welfare"`.
 #' @param label Human-readable label for the x axis.
 #' @param type Outcome type: `"numeric"` or `"logical"`.
@@ -363,7 +363,7 @@ plot_welfare_dist <- function(df,
 #'   Pass cell features from \code{build_cell_features()} together with
 #'   \code{cell_map} to draw non-overlapping H3 cells.
 #' @param df       Survey data frame with \code{loc_id} and the outcome column.
-#' @param outcome  Single character string — the outcome variable name.
+#' @param outcome  Single character string - the outcome variable name.
 #' @param cell_map Optional location-to-cell mapping. When supplied, coverage
 #'   is merged onto H3 cells instead of drawn per overlapping location.
 #'
@@ -379,15 +379,15 @@ plot_outcome_coverage_map <- function(geojson, df, outcome, cell_map = NULL) {
   loc_avail <- df |>
     dplyr::mutate(.has = !is.na(.data[[outcome]])) |>
     dplyr::summarise(
-      pct  = mean(.data$.has) * 100,
+      pct  = mean(.data$.has, na.rm = TRUE) * 100,
       n_hh = dplyr::n(),
       .by  = dplyr::any_of(c(keys))
     )
 
   # Survey locations overlap, so drawing one translucent polygon per location
   # stacks fills and shows shades that are in neither the data nor the legend.
-  # When the H3 cell mapping is available, merge coverage onto cells — which
-  # tile without overlapping — weighting each contributing location by the
+  # When the H3 cell mapping is available, merge coverage onto cells - which
+  # tile without overlapping - weighting each contributing location by the
   # units it has in that cell.
   if (!is.null(cell_map) && all(keys %in% names(loc_avail))) {
     lv <- loc_avail
@@ -416,7 +416,9 @@ plot_outcome_coverage_map <- function(geojson, df, outcome, cell_map = NULL) {
   }
 
   pal <- leaflet::colorNumeric(
-    palette = c("#e74c3c", "#f1c40f", "#2ecc71"),
+    # UI-04: colorblind-safe bad/mid/good ramp (vermillion / orange /
+    # bluish green) replacing the red-yellow-green ramp.
+    palette = c("#D55E00", "#E69F00", "#009E73"),
     domain  = rng
   )
 
@@ -424,38 +426,59 @@ plot_outcome_coverage_map <- function(geojson, df, outcome, cell_map = NULL) {
 
   on_cells <- !is.null(cell_map)
 
-  m <- leaflet::leaflet(
-    options = leaflet::leafletOptions(preferCanvas = on_cells)
-  ) |>
-    leaflet::addProviderTiles(leaflet::providers$CartoDB.Positron)
-
-  # Group features by colour: one addGeoJSON call per distinct shade rather
-  # than one per location, which for a country-sized sample is hundreds of
-  # calls and as many layers on the map.
-  cols <- vapply(geojson$features, function(f) {
+  # MapLibre GL on the keyless CARTO vector Positron basemap. One fill layer
+  # carrying a per-feature colour via a `__fill` property (`get` expression);
+  # a continuous ramp gives almost every location its own shade, which the old
+  # Leaflet group-by-colour loop turned into hundreds of separate layers.
+  fill <- vapply(geojson$features, function(f) {
     pct <- avail_map[as.character(f$properties$loc_id)]
     pal(if (is.na(pct)) rng[1] else min(max(pct, rng[1]), rng[2]))
   }, character(1))
+  props_json <- paste0(
+    '{"loc_id":',   .json_vec(.prop_col(geojson$features, "loc_id")),
+    ',"bbox":',     .bbox_frag(geojson$features),
+    ',"__fill":',   .json_vec(fill),
+    '}'
+  )
+  geoms <- vapply(geojson$features, function(f) f$geom_json, character(1))
 
-  for (col in unique(cols)) {
-    sub_gc <- list(type     = "FeatureCollection",
-                   features = geojson$features[cols == col])
+  m <- .maplibre_geojson_source(
+    mapgl::maplibre(style = .map_style(), projection = "mercator"),
+    "coverage",
+    .geojson_fc_string(geoms, props_json, ids = seq_along(geojson$features))
+  ) |>
+    mapgl::add_fill_layer(
+      id                 = "coverage-fill",
+      source             = "coverage",
+      fill_color         = mapgl::get_column("__fill"),
+      # Cells tile edge to edge, so per-cell outlines only add noise - but the
+      # same-colour hairline removes the anti-aliasing seams between them.
+      fill_outline_color = mapgl::get_column("__fill"),
+      fill_opacity       = if (on_cells) 0.75 else 0.5
+    )
+
+  # Location polygons keep a thin outline, as before.
+  if (!on_cells) {
     m <- m |>
-      leaflet::addGeoJSON(
-        geojson     = sub_gc,
-        color       = col,
-        fillColor   = col,
-        # Cells tile edge to edge, so per-cell outlines only add noise.
-        stroke      = !on_cells,
-        fillOpacity = if (on_cells) 0.75 else 0.5,
-        weight      = if (on_cells) 0 else 1
+      mapgl::add_line_layer(
+        id         = "coverage-outline",
+        source     = "coverage",
+        line_color = mapgl::get_column("__fill"),
+        line_width = 1
       )
   }
 
+  m <- m |>
+    mapgl::add_navigation_control(
+      position = "top-left", show_compass = FALSE, visualize_pitch = FALSE
+    ) |>
+    mapgl::fit_bounds(c(bounds$lng1, bounds$lat1, bounds$lng2, bounds$lat2)) |>
+    mapgl::add_reset_control(position = "top-left")
+
   m |>
-    leaflet::fitBounds(bounds$lng1, bounds$lat1, bounds$lng2, bounds$lat2) |>
-    leaflet::addControl(
-      position = "bottomright",
+    mapgl::add_control(
+      position = "bottom-right",
+      className = "wise-map-legend",
       html = .compact_legend_html(
         pal_info = list(pal = pal, domain = rng),
         binned   = FALSE,
@@ -468,9 +491,7 @@ plot_outcome_coverage_map <- function(geojson, df, outcome, cell_map = NULL) {
           " differences stay visible."
         )
       )
-    ) |>
-    .add_reset_button(bounds) |>
-    htmlwidgets::onRender(.map_autofit_js(bounds))
+    )
 }
 
 
@@ -484,8 +505,8 @@ plot_outcome_coverage_map <- function(geojson, df, outcome, cell_map = NULL) {
 #' simulated value represents a worse outcome. Returns `"higher_is_better"` for
 #' all other outcomes (welfare, employment, hours worked, etc.).
 #'
-#' @param name A single character string — the outcome variable name.
-#' @param type A single character string — the outcome type.
+#' @param name A single character string - the outcome variable name.
+#' @param type A single character string - the outcome type.
 #'
 #' @return `"lower_is_better"` or `"higher_is_better"`.
 #'

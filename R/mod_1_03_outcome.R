@@ -23,9 +23,9 @@ mod_1_03_outcome_ui <- function(id) {
 #' 1_03_outcome Server Functions
 #'
 #' @param id Module id.
-#' @param variable_list Reactive data frame — variable metadata from
+#' @param variable_list Reactive data frame - variable metadata from
 #'   `mod_0_overview`.
-#' @param survey_data Reactive data frame — loaded survey data from
+#' @param survey_data Reactive data frame - loaded survey data from
 #'   `mod_1_02_surveystats`.
 #' @param map_data Reactive GeoJSON FeatureCollection from
 #'   `mod_1_02_surveystats` (H3 map data). Used for outcome coverage map.
@@ -39,6 +39,7 @@ mod_1_03_outcome_ui <- function(id) {
 mod_1_03_outcome_server <- function(id, variable_list, survey_data,
                                     map_data       = reactive(NULL),
                                     cell_data      = reactive(NULL),
+                                    survey_version = reactive(0L),
                                     tabset_id      = NULL,
                                     tabset_session = NULL) {
   moduleServer(id, function(input, output, session) {
@@ -47,6 +48,19 @@ mod_1_03_outcome_server <- function(id, variable_list, survey_data,
     if (is.null(tabset_session)) {
       tabset_session <- session$parent %||% session
     }
+
+    # INT-08: banner when the survey data behind these statistics was
+    # reloaded after the button was last pressed.
+    output$outcome_stale_banner <- renderUI({
+      spec <- outcome_spec()
+      if (!is.null(spec) &&
+          !identical(survey_version(), spec$survey_version)) {
+        .stale_banner(
+          "Outcome stats",
+          note = "Survey data was reloaded after these statistics were produced."
+        )
+      } else NULL
+    })
 
     # ---- Available outcome variables present in the survey data -------------
 
@@ -153,15 +167,22 @@ mod_1_03_outcome_server <- function(id, variable_list, survey_data,
 
     outcome_tab_added <- reactiveVal(FALSE)
 
+    # ---- Button-time selection snapshot (INT-05 pattern) ----------------------
+    # The Outcome stats tab must describe the run the button captured, not the
+    # live selector: outputs render from `outcome_spec()` and stay stable
+    # until the button is pressed again.
+    outcome_spec <- reactiveVal(NULL)
+
     # ---- Survey data augmented with synthetic "poor" column -------------------
 
     outcome_data <- reactive({
-      req(survey_data(), selected_outcome_info())
+      spec <- outcome_spec()
+      req(survey_data(), spec)
+      inf <- spec$info
       df <- survey_data()
-      inf <- selected_outcome_info()
       oname <- as.character(inf$name[1])
       if (identical(oname, "poor") && !"poor" %in% names(df)) {
-        so <- selected_outcome()
+        so <- spec$so
         pl <- if (!is.null(so) && !is.na(so$povline)) so$povline else 3.00
         if ("welfare" %in% names(df)) {
           line <- .povline_to_ppp(
@@ -180,12 +201,19 @@ mod_1_03_outcome_server <- function(id, variable_list, survey_data,
     observeEvent(input$outcome_stats_btn, {
       req(input$outcome, survey_data(), selected_outcome_info())
 
+      # Snapshot the current selection; outputs below bind to it so selector
+      # changes do not re-render the tab until the button is pressed again.
+      outcome_spec(list(info            = selected_outcome_info(),
+                        so              = selected_outcome(),
+                        survey_version  = survey_version()))
+
       # Define outputs (once)
       if (!outcome_tab_added()) {
 
         output$outcome_dist <- renderPlot({
-          req(outcome_data(), selected_outcome_info())
-          inf <- selected_outcome_info()
+          spec <- outcome_spec()
+          req(outcome_data(), spec)
+          inf <- spec$info
           p <- plot_welfare_dist(
             outcome_data(),
             outcome = as.character(inf$name[1]),
@@ -200,12 +228,16 @@ mod_1_03_outcome_server <- function(id, variable_list, survey_data,
           p
         })
 
-        cov_view_mem <- map_view_memory(input, session, "outcome_coverage_map")
+        cov_view_mem <- map_view_memory(
+          input, session, "outcome_coverage_map",
+          key = shiny::reactive(digest::digest(outcome_spec()))
+        )
         cov_view_mem$remember()
 
-        output$outcome_coverage_map <- leaflet::renderLeaflet({
-          req(outcome_data(), selected_outcome_info(), map_data())
-          inf <- selected_outcome_info()
+        output$outcome_coverage_map <- mapgl::renderMaplibre({
+          spec <- outcome_spec()
+          req(outcome_data(), spec, map_data())
+          inf <- spec$info
 
           # Prefer H3 cells when Survey stats has supplied them: locations
           # overlap, and stacking translucent fills shows shades that mean
@@ -229,25 +261,24 @@ mod_1_03_outcome_server <- function(id, variable_list, survey_data,
           cov_view_mem$restore(m)
         })
 
-        # Wave picker, shown only when there is more than one wave to pick.
+        # Wave toggle slider, shown only when there is more than one wave to pick.
         output$cov_wave_ui <- shiny::renderUI({
           w <- survey_wave_list(survey_data())
           if (is.null(w) || nrow(w) < 2) return(NULL)
-          shiny::selectInput(
-            ns("cov_wave"), NULL,
-            choices  = c(stats::setNames("all", "All waves"),
-                         stats::setNames(w$key, w$label)),
-            selected = shiny::isolate(input$cov_wave) %||% "all",
-            width    = "160px"
-          ) |>
-            htmltools::tagAppendAttributes(
-              style = "margin-bottom: 0;", class = "small"
-            )
+          choices <- wave_slider_choices(w, include_all = TRUE)
+          selected <- shiny::isolate(input$cov_wave) %||% "all"
+          if (!selected %in% choices) selected <- "all"
+          wave_toggle_slider(
+            ns("cov_wave"),
+            choices  = choices,
+            selected = selected
+          )
         })
 
         output$outcome_summary_stats <- renderTable({
-          req(outcome_data(), selected_outcome_info())
-          inf <- selected_outcome_info()
+          spec <- outcome_spec()
+          req(outcome_data(), spec)
+          inf <- spec$info
           oname_local <- as.character(inf$name[1])
           otype_local <- as.character(inf$type[1])
           vals <- outcome_data()[[oname_local]]
@@ -310,6 +341,7 @@ mod_1_03_outcome_server <- function(id, variable_list, survey_data,
             shiny::tabPanel(
               title = "Outcome stats",
               value = "outcome_stats_tab",
+              shiny::uiOutput(ns("outcome_stale_banner")),
               bslib::layout_columns(
                 col_widths = c(6, 6),
                 bslib::card(
@@ -337,14 +369,16 @@ mod_1_03_outcome_server <- function(id, variable_list, survey_data,
                     shiny::h4("Spatial coverage", class = "mb-0"),
                     shiny::uiOutput(ns("cov_wave_ui"), inline = TRUE)
                   ),
-                  leaflet::leafletOutput(ns("outcome_coverage_map"),
+                  mapgl::maplibreOutput(ns("outcome_coverage_map"),
                                          height = "100%")
                 )
               ),
               shiny::br(),
               bslib::card(
                 shiny::h4("Outcome Distribution (by survey wave)"),
-                shiny::plotOutput(ns("outcome_dist"), height = "300px")
+                wise_plot_output(ns("outcome_dist"),
+                                 "Histogram of the selected outcome variable in the selected surveys",
+                                 height = "300px")
               ),
               tags$div(style = "height: 40px;")
             ),

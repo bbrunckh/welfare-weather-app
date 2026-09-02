@@ -29,7 +29,7 @@ mod_2_simulation_ui <- function(id) {
           title = "Clear simulation results",
           shiny::p(paste(
             "Removes all saved future-scenario runs and the historical",
-            "baseline from this session. Your settings are kept —",
+            "baseline from this session. Your settings are kept -",
             "re-run the simulation to regenerate results."
           ))
         )
@@ -88,7 +88,8 @@ mod_2_simulation_server <- function(id,
                                     selected_surveys,
                                     survey_weather,
                                     model_fit,
-                                    stored_breaks = reactive(NULL)) {
+                                    stored_breaks = reactive(NULL),
+                                    survey_version = reactive(0L)) {
   moduleServer(id, function(input, output, session) {
 
     # ---- 1. Unified sidebar + simulation engine ----------------------------
@@ -100,7 +101,8 @@ mod_2_simulation_server <- function(id,
       selected_surveys  = selected_surveys,
       survey_weather    = survey_weather,
       model_fit         = model_fit,
-      stored_breaks     = stored_breaks
+      stored_breaks     = stored_breaks,
+      survey_version    = survey_version
     )
 
     # ---- 2. Results tab ----------------------------------------------------
@@ -112,7 +114,8 @@ mod_2_simulation_server <- function(id,
       tabset_id       = "step2_output_tabs",
       tabset_session  = session,
       residuals       = s1$residuals,
-      skip_coef_draws = s1$skip_coef_draws
+      skip_coef_draws = s1$skip_coef_draws,
+      stale           = s1$stale
     )
 
     # ---- 3. Diagnostics tab ------------------------------------------------
@@ -125,7 +128,8 @@ mod_2_simulation_server <- function(id,
       variance_breakdown = s2$variance_breakdown,
       timeseries_curves  = s2$timeseries_curves,
       tabset_id          = "step2_output_tabs",
-      tabset_session     = session
+      tabset_session     = session,
+      stale              = s1$stale
     )
 
     # ---- Clear scenarios button --------------------------------------------
@@ -146,7 +150,8 @@ mod_2_simulation_server <- function(id,
       saved_scenarios = s1$saved_scenarios,
       skip_coef_draws = s1$skip_coef_draws,
       residuals       = s1$residuals,
-      propagate_all_covariate_uncertainty = s1$propagate_all_covariate_uncertainty
+      propagate_all_covariate_uncertainty = s1$propagate_all_covariate_uncertainty,
+      stale           = s1$stale
     )
   })
 }

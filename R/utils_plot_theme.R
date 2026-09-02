@@ -21,3 +21,33 @@ theme_wise <- function(base_size = 14, ...) {
       strip.text    = ggplot2::element_text(face = "bold")
     )
 }
+
+# ---- Colorblind-safe categorical palettes (UI-04) --------------------------
+# Okabe-Ito is the canonical colorblind-safe qualitative palette. All
+# categorical/discrete plot scales should draw from here via the wrappers
+# below instead of ColorBrewer "Set1" or ad-hoc red/green choices.
+
+.okabe_ito <- c(
+  "#E69F00", # orange
+  "#56B4E9", # sky blue
+  "#009E73", # bluish green
+  "#F0E442", # yellow
+  "#0072B2", # blue
+  "#D55E00", # vermillion
+  "#CC79A7", # reddish purple
+  "#000000"  # black
+)
+
+#' Colorblind-safe discrete scales (Okabe-Ito), UI-04.
+#' `...` forwards to [ggplot2::scale_colour_manual()] (name, breaks, labels, ...).
+#' @name wise_scale_colour_okabe_ito
+#' @noRd
+wise_scale_colour_okabe_ito <- function(...) {
+  ggplot2::scale_colour_manual(values = .okabe_ito, ...)
+}
+
+#' @rdname wise_scale_colour_okabe_ito
+#' @noRd
+wise_scale_fill_okabe_ito <- function(...) {
+  ggplot2::scale_fill_manual(values = .okabe_ito, ...)
+}

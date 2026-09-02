@@ -23,7 +23,7 @@
 
 #' Aggregate welfare predictions with delta-method coefficient uncertainty
 #'
-#' Pure closed-form variance — no Monte Carlo. Returns the point estimate and
+#' Pure closed-form variance - no Monte Carlo. Returns the point estimate and
 #' analytic band endpoints in O(N*K) time.
 #'
 #' @param y_point Numeric vector length N. Log-scale point predictions.
@@ -42,6 +42,10 @@
 #' @param bandwidth_p0 Numeric scalar. Kernel smoothing bandwidth for
 #'   \code{headcount_ratio}. Default 0.05 (log-welfare scale).
 #' @param seed Integer seed for stochastic residual modes.
+#' @param resid_lookup Optional pre-built ID-to-residual lookup from
+#'   \code{.residual_lookup()} (PERF-34). Built per call when NULL.
+#' @param resid_sigma2 Optional pre-built residual variance from
+#'   \code{.residual_sigma2()} (PERF-34). Computed per call when NULL.
 #'
 #' @return Named list:
 #'   \describe{
@@ -64,7 +68,9 @@ aggregate_with_uncertainty_delta <- function(y_point,
                                               is_log       = TRUE,
                                               band_q       = c(lo = 0.10, hi = 0.90),
                                               bandwidth_p0 = 0.05,
-                                              seed          = WISEAPP_DEFAULT_SEED) {
+                                              seed          = WISEAPP_DEFAULT_SEED,
+                                              resid_lookup  = NULL,
+                                              resid_sigma2  = NULL) {
 
   N <- length(y_point)
   stopifnot(is.numeric(y_point) && N > 0)
@@ -78,7 +84,8 @@ aggregate_with_uncertainty_delta <- function(y_point,
   }
 
   resid_vec <- draw_residuals_vec(
-    residuals, train_aug, N, id_vec, id_col, seed = seed
+    residuals, train_aug, N, id_vec, id_col, seed = seed,
+    resid_lookup = resid_lookup, resid_sigma2 = resid_sigma2
   )
   mu        <- if (is_log) exp(y_point + resid_vec) else y_point + resid_vec
 
@@ -102,9 +109,12 @@ aggregate_with_uncertainty_delta <- function(y_point,
   var_coef <- if (!is.null(F_agg)) sum(F_agg * F_agg) else 0
 
   # Residual variance (only for stochastic residual draws)
+  # PERF-34: reuse a caller-supplied variance; identical value to the
+  # per-call stats::var() this replaces.
   var_resid <- if (residuals %in% c("normal", "resample") &&
                    !is.null(train_aug) && ".resid" %in% names(train_aug)) {
-    sigma_e2 <- stats::var(train_aug$.resid, na.rm = TRUE)
+    sigma_e2 <- resid_sigma2 %||%
+      stats::var(train_aug$.resid, na.rm = TRUE)
     if (is.finite(sigma_e2)) sigma_e2 * sum(h * h, na.rm = TRUE) else 0
   } else 0
 
@@ -132,7 +142,7 @@ aggregate_with_uncertainty_delta <- function(y_point,
 # ---------------------------------------------------------------------------- #
 # Per-method gradient functions                                                #
 # ---------------------------------------------------------------------------- #
-# Each returns h = (dT/dwelfare) * mu, length N. Sign matters — preserves the
+# Each returns h = (dT/dwelfare) * mu, length N. Sign matters - preserves the
 # direction of perturbation so var = ||F' h||^2 reflects the true Taylor
 # expansion. For aggregates where the sign cancels in the variance (everything
 # here), we still keep it explicit for clarity.
@@ -157,16 +167,22 @@ gradient_for_method <- function(method, mu, weights, pov_line, value_pt,
     },
 
     prosperity_gap = {
-      # Point estimate: mean(pmax(28/mu, 1)).
-      # d/d(log mu_i) pmax(28/mu_i, 1) = -28/mu_i * 1{mu_i < 28} * mu_i = -28 * 1{mu_i < 28}
-      # pov_line is ignored — threshold hardcoded to $28/day.
-      below28 <- as.numeric(is.finite(mu) & mu < 28)
+      # Point estimate: mean(pmax(28/mu, 1)); pov_line ignored - $28/day
+      # threshold hardcoded. With h = (dT/dwelfare) * welfare:
+      #   dT/dw_i = t_i * (-28/w_i^2) * 1{0 < w < 28},  t_i = 1/N or w_i/W,
+      # so h_i = -t_i * 28 / w_i below the threshold:
+      #   unweighted -28/(N * mu_i); weighted -(w_i/W) * 28/mu_i.
+      # Non-positive mu contributes zero (pmax(28/mu, 1) is flat there).
+      below28 <- is.finite(mu) & mu > 0 & mu < 28
       if (is.null(weights)) {
-        -w_tilde * 28 * below28 / N
+        h <- rep(0, N)
+        h[below28] <- -28 / (N * mu[below28])
       } else {
         W <- sum(weights, na.rm = TRUE)
-        if (W > 0) -(weights / W) * 28 * below28 else rep(0, N)
+        h <- rep(0, N)
+        if (W > 0) h[below28] <- -(weights[below28] / W) * 28 / mu[below28]
       }
+      h
     },
 
     fgt2 = {
@@ -193,18 +209,18 @@ gradient_for_method <- function(method, mu, weights, pov_line, value_pt,
     },
 
     avg_poverty = {
-      # Point estimate: mean(1 / mu), mu > 0.
-      # d/d(log mu_i) (1/mu_i) = -1/mu_i * mu_i = -1.
-      # Gradient: h_i = w_tilde_i * (-1) / sum(w), only for finite mu > 0.
-      # pov_line ignored.
+      # Point estimate: mean(1 / mu) over valid rows ("days needed to earn $1").
+      # With h = (dT/dwelfare) * welfare: dT/dw_i = -t_i / w_i^2 for w_i > 0,
+      # so h_i = -t_i / w_i, i.e. unweighted -1/(n_ok * mu_i) and weighted
+      # -w_i / (W_ok * mu_i). pov_line ignored.
       ok <- is.finite(mu) & mu > 0
       h  <- rep(0, N)
       if (is.null(weights)) {
         n_ok <- sum(ok)
-        if (n_ok > 0) h[ok] <- -w_tilde[ok] / n_ok
+        if (n_ok > 0) h[ok] <- -1 / (n_ok * mu[ok])
       } else {
-        W <- sum(weights[ok], na.rm = TRUE)
-        if (W > 0) h[ok] <- -(weights[ok] / W)
+        W_ok <- sum(weights[ok], na.rm = TRUE)
+        if (W_ok > 0) h[ok] <- -weights[ok] / (W_ok * mu[ok])
       }
       h
     },
@@ -230,7 +246,7 @@ gradient_for_method <- function(method, mu, weights, pov_line, value_pt,
       # the delta-method propagation of regression coefficient uncertainty
       # through y_i = exp(X_i beta). Distinct from Monti's (1991) IF (which
       # is correct for sample-variance estimation but inflates the SE when
-      # mis-used in the chain rule through beta — it violates Gini's scale
+      # mis-used in the chain rule through beta - it violates Gini's scale
       # invariance under intercept shifts).
       #
       # Derivation (ordering held locally fixed):
@@ -325,15 +341,15 @@ apply_band_transform <- function(method, value_pt, se, z_lo, z_hi) {
 #'   \code{sim_year} scalar.
 #' @export
 aggregate_pipeline_per_year <- function(pipe,
-                                        method,
-                                        weighted    = TRUE,
-                                        pov_line     = NULL,
-                                        residuals    = "original",
-                                        is_log       = TRUE,
-                                        band_q       = c(lo = 0.10, hi = 0.90),
-                                        skip_coef    = FALSE,
-                                        bandwidth_p0 = 0.05,
-                                        seed          = WISEAPP_DEFAULT_SEED) {
+                                         method,
+                                         weighted    = TRUE,
+                                         pov_line     = NULL,
+                                         residuals    = "original",
+                                         is_log       = TRUE,
+                                         band_q       = c(lo = 0.10, hi = 0.90),
+                                         skip_coef    = FALSE,
+                                         bandwidth_p0 = 0.05,
+                                         seed          = WISEAPP_DEFAULT_SEED) {
   if (is.null(pipe) || is.null(pipe$y_point)) return(list())
 
   yrs <- sort(unique(pipe$sim_year))
@@ -348,6 +364,11 @@ aggregate_pipeline_per_year <- function(pipe,
   res_mode <- residuals %||% "original"
   if (is.null(pipe$train_aug) && !identical(res_mode, "none"))
     res_mode <- "none"
+
+  # PERF-34: the ID-to-residual lookup and the residual variance are the
+  # same for every year of this pipeline - build them once, not per year.
+  lk  <- .residual_lookup(pipe$train_aug, pipe$id_col)
+  sg2 <- .residual_sigma2(pipe$train_aug)
 
   lapply(yrs, function(yr) {
     idx   <- pipe$sim_year == yr
@@ -369,7 +390,9 @@ aggregate_pipeline_per_year <- function(pipe,
       is_log       = is_log,
       band_q       = band_q,
       bandwidth_p0 = bandwidth_p0,
-      seed          = wise_seed(seed, "residual", yr)
+      seed          = wise_seed(seed, "residual", yr),
+      resid_lookup  = lk,
+      resid_sigma2  = sg2
     )
     m$sim_year <- yr
     m

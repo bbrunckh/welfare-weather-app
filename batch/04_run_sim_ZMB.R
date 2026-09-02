@@ -194,7 +194,6 @@ PROPAGATE_ALL_COVARIATE_UNCERTAINTY <- FALSE
 # The delta-method is used for all standard aggregates; MC is the fallback for
 # aggregates where the gradient is unavailable (e.g. avg_poverty with few poor).
 SIM_N    <- 150L
-DEV_MODE <- FALSE   # TRUE = 1 ensemble member only; fast debug runs
 
 # =============================================================================
 # SECTION 1C — POLICY SCENARIO SETTINGS (mod_3)
@@ -1563,7 +1562,6 @@ for (si in SAMPLE_LABELS) {
         fp_list     = fp_list,
         ssps        = SSPS,
         residuals   = if (identical(fs$mf$engine, "rif")) "none" else RESIDUALS,
-        dev_mode    = DEV_MODE,
         skip_coef_draws             = !INCLUDE_COEF_UNCERTAINTY,
         sim_dates                   = sim_dates,
         perturbation_method         = if (.has_future) build_perturbation_method(fs$sw) else NULL,

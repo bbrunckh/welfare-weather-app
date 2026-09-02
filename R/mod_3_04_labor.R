@@ -1,6 +1,6 @@
 #' 3_04_labor UI Function
 #'
-#' @description A shiny Module. Labor market scenario configuration —
+#' @description A shiny Module. Labor market scenario configuration -
 #'   allows the user to simulate changes in labor force participation,
 #'   employment rate, and sectoral composition.
 #'
@@ -45,47 +45,14 @@ mod_3_04_labor_server <- function(id,
     ns <- session$ns
 
     # ---- Get model coefficients ------------------------------------------
-    sm <- reactive({
-      req(selected_model())
-      selected_model()
-    })
-
-    extract_cov_names <- function(x) {
-      if (is.null(x)) return(character(0))
-      nms <- names(x)
-      if (!is.null(nms) && any(nzchar(nms))) {
-        unique(nms[nzchar(nms)])
-      } else {
-        unique(as.character(unlist(x, use.names = FALSE)))
-      }
-    }
-
-    ind_coeff <- reactive({
-      s <- sm()
-      extract_cov_names(s$individual_covariates)
-    })
-    hh_coeff <- reactive({
-      s <- sm()
-      extract_cov_names(s$hh_covariates)
-    })
-    firm_coeff <- reactive({
-      s <- sm()
-      extract_cov_names(s$firm_covariates)
-    })
-    area_coeff <- reactive({
-      s <- sm()
-      extract_cov_names(s$area_covariates)
-    })
-
-    interaction_names <- reactive({
-      s <- sm()
-      extract_cov_names(s$interactions)
-    })
-
-    coeffs <- reactive({
-      unique(c(ind_coeff(), hh_coeff(), firm_coeff(), area_coeff(),
-               interaction_names()))
-    })
+    # REACT-08: shared coefficient decomposition (utils_mod_1_helpers.R).
+    coeffs_rx        <- model_coefficient_reactives(selected_model)
+    ind_coeff        <- coeffs_rx$individual
+    hh_coeff         <- coeffs_rx$hh
+    firm_coeff       <- coeffs_rx$firm
+    area_coeff       <- coeffs_rx$area
+    interaction_names <- coeffs_rx$interactions
+    coeffs           <- coeffs_rx$all
 
     # ---- Candidate variables for this category --------------------------
     labor_patterns <- c("employed", "selfemployed", "agriculture", "industry", "services")
@@ -125,6 +92,7 @@ mod_3_04_labor_server <- function(id,
       tagList(
         tags$label(
           class = "control-label",
+          `for` = ns(input_id),
           tags$i(class = paste("fa", icon_class, "me-1")),
           label
         ),
@@ -156,7 +124,7 @@ mod_3_04_labor_server <- function(id,
     })
 
     # ---- Sectoral composition ------------------------------------------
-    # Three sliders sum to 100pp — agriculture anchors, manufacturing and
+    # Three sliders sum to 100pp - agriculture anchors, manufacturing and
     # services are user-controlled, agriculture = 100 - mfg - services.
 
     show_sector <- reactive({
@@ -178,6 +146,7 @@ mod_3_04_labor_server <- function(id,
         ),
         tags$label(
           class = "control-label",
+          `for` = ns("sector_manufacturing"),
           tags$i(class = "fa fa-industry me-1"),
           "Manufacturing (%)"
         ),
@@ -192,6 +161,7 @@ mod_3_04_labor_server <- function(id,
         ),
         tags$label(
           class = "control-label",
+          `for` = ns("sector_services"),
           tags$i(class = "fa fa-shop me-1"),
           "Services (%)"
         ),
@@ -228,7 +198,7 @@ mod_3_04_labor_server <- function(id,
         tags$label(
           class = "control-label",
           tags$i(class = "fa fa-wheat-awn me-1"),
-          "Agriculture (%) — derived"
+          "Agriculture (%) - derived"
         ),
         tags$div(
           class = "well well-sm text-center",

@@ -138,7 +138,7 @@ add_derived_policy_vars_to_vl <- function(vl) {
 }
 
 #' Named vector of policy choices for selectize input
-#' @return Named character vector (display label → key).
+#' @return Named character vector (display label -> key).
 #' @export
 get_policy_choices <- function() {
   setNames(
@@ -194,7 +194,7 @@ get_policy_locked_vars <- function(selected_policies, variable_list = NULL) {
 #' `group_cols` are present in `df`, completeness is evaluated within each
 #' group (e.g. each survey-year combination) and a variable must meet the
 #' threshold in **every** group to be retained. When `outcome` is supplied,
-#' completeness is computed only over rows where the outcome is non-missing —
+#' completeness is computed only over rows where the outcome is non-missing -
 #' i.e. the rows that would actually be used in the model.
 #'
 #' @param df            A data frame (e.g. `survey_weather()`).
@@ -225,15 +225,24 @@ filter_valid_vars <- function(df, variable_list, min_complete = 0.5,
 
   if (length(group_cols) == 0) {
     valid <- names(df)[colMeans(!is.na(df)) >= min_complete]
+  } else if (nrow(df) == 0) {
+    # No rows: completeness is vacuously met in every group, matching the
+    # per-group scan this replaces (min over no groups).
+    valid <- c(group_cols, setdiff(names(df), group_cols))
   } else {
     data_cols  <- setdiff(names(df), group_cols)
     group_key  <- do.call(paste, c(df[group_cols], sep = "\x01"))
     groups     <- unique(group_key)
 
-    # completeness matrix: rows = data columns, cols = groups
-    comp_mat <- vapply(groups, function(g) {
-      colMeans(!is.na(df[group_key == g, data_cols, drop = FALSE]))
-    }, numeric(length(data_cols)))
+    # One grouped pass over the frame (C-level rowsum) instead of one full
+    # scan per group: completeness matrix, rows = data columns, cols = groups
+    # in first-appearance order (PERF-08).
+    grp_idx  <- match(group_key, groups)
+    n_g      <- tabulate(grp_idx, nbins = length(groups))
+    notna    <- !is.na(df[data_cols])
+    storage.mode(notna) <- "double"
+    sums     <- rowsum(notna, grp_idx, reorder = FALSE)
+    comp_mat <- t(sums / n_g)
 
     # a column is valid only if it meets the threshold in every group
     min_comp <- if (is.matrix(comp_mat)) apply(comp_mat, 1, min) else comp_mat
@@ -447,7 +456,7 @@ build_selected_model <- function(model_type          = NULL,
     firm_covariates     = firm_covariates     %||% chr0,
     area_covariates     = area_covariates     %||% chr0,
     cluster             = cluster             %||% chr0,
-    # Lasso / MI options — only meaningful when covariate_selection == "Lasso"
+    # Lasso / MI options - only meaningful when covariate_selection == "Lasso"
     lasso_alpha         = lasso_alpha         %||% 1,
     lasso_lambda        = lasso_lambda        %||% "lambda.1se",
     lasso_nfolds        = lasso_nfolds        %||% 10L,

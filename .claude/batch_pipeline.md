@@ -120,7 +120,7 @@ Shares Section 1 model-fitting config with `03_run_mod1.R` (identical settings b
 - `SSPS` — SSP scenarios (`"ssp2_4_5"`, `"ssp3_7_0"`, `"ssp5_8_5"`); `character(0)` = historical only
 - `RESIDUALS` — `"original"` (recommended) / `"resample"` / `"normal"` / `"none"`
 - `INCLUDE_COEF_UNCERTAINTY`, `PROPAGATE_ALL_COVARIATE_UNCERTAINTY` — delta-method SE controls
-- `SIM_N`, `DEV_MODE` — MC fallback draws; debug mode (1 ensemble member)
+- `SIM_N` — MC fallback draws (delta-method used for standard aggregates)
 
 *Section 1C — Policy (mod_3):*
 - `SP_SCENARIO` — cash transfer (targeting, budget mode, transfer amount, frequency)

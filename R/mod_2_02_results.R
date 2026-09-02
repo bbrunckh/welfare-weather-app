@@ -11,7 +11,7 @@
 #'
 #' @importFrom shiny NS tagList
 mod_2_02_results_ui <- function(id) {
-  # Placeholder — the real content is injected via insertUI in the server.
+  # Placeholder - the real content is injected via insertUI in the server.
   tagList()
 }
 
@@ -20,6 +20,9 @@ mod_2_02_results_ui <- function(id) {
 #' @noRd
 .results_content_ui <- function(ns, so) {
   tagList(
+    # ---- 0. Stale banner (INT-08) -------------------------------------------
+    shiny::uiOutput(ns("stale_banner")),
+
     # ---- 1. Results header -------------------------------------------------
     shiny::uiOutput(ns("results_header_ui")),
 
@@ -66,13 +69,13 @@ mod_2_02_results_ui <- function(id) {
             ns("uncertainty_band"),
             label   = "Coefficient band",
             choices = c(
-              "50% (p25–p75)"   = "p25_p75",
-              "60% (p20–p80)"   = "p20_p80",
-              "80% (p10–p90)"   = "p10_p90",
-              "90% (p05–p95)"   = "p05_p95",
-              "95% (p025–p975)" = "p025_p975",
-              "99% (p005–p995)" = "p005_p995",
-              "Max (min–max)"   = "minmax"
+              "50% (p25-p75)"   = "p25_p75",
+              "60% (p20-p80)"   = "p20_p80",
+              "80% (p10-p90)"   = "p10_p90",
+              "90% (p05-p95)"   = "p05_p95",
+              "95% (p025-p975)" = "p025_p975",
+              "99% (p005-p995)" = "p005_p995",
+              "Max (min-max)"   = "minmax"
             ),
             selected = "p10_p90"
           )
@@ -82,13 +85,13 @@ mod_2_02_results_ui <- function(id) {
             ns("ensemble_band"),
             label    = "Inter-model band",
             choices  = c(
-              "50% (p25–p75)"   = "p25_p75",
-              "60% (p20–p80)"   = "p20_p80",
-              "80% (p10–p90)"   = "p10_p90",
-              "90% (p05–p95)"   = "p05_p95",
-              "95% (p025–p975)" = "p025_p975",
-              "99% (p005–p995)" = "p005_p995",
-              "Full range (min–max)" = "minmax"
+              "50% (p25-p75)"   = "p25_p75",
+              "60% (p20-p80)"   = "p20_p80",
+              "80% (p10-p90)"   = "p10_p90",
+              "90% (p05-p95)"   = "p05_p95",
+              "95% (p025-p975)" = "p025_p975",
+              "99% (p005-p995)" = "p005_p995",
+              "Full range (min-max)" = "minmax"
             ),
             selected = "minmax"
           )
@@ -113,7 +116,7 @@ mod_2_02_results_ui <- function(id) {
       shiny::tags$details(
         shiny::tags$summary(
           style = "cursor:pointer; font-size:11px; color:#555; font-weight:600;",
-          "Advanced ▼"
+          "Advanced \u25BC"
         ),
         shiny::tags$div(
           style = "display:flex; gap:10px; flex-wrap:wrap; margin-top:4px;",
@@ -129,8 +132,8 @@ mod_2_02_results_ui <- function(id) {
               ns("cmp_group_order"),
               label    = "Group by",
               choices  = c(
-                "Scenario × Year" = "scenario_x_year",
-                "Year × Scenario" = "year_x_scenario"
+                "Scenario \u00D7 Year" = "scenario_x_year",
+                "Year \u00D7 Scenario" = "year_x_scenario"
               ),
               selected = "scenario_x_year",
               inline   = TRUE
@@ -160,29 +163,29 @@ mod_2_02_results_ui <- function(id) {
           shiny::p(
             "All bands are drawn relative to the central dot and answer",
             "different questions about uncertainty. They are not meant to be",
-            "added together — see the variance-contribution bar on the",
+            "added together - see the variance-contribution bar on the",
             "Diagnostics tab for how the sources combine."
           ),
           shiny::p(shiny::tags$b("Central dot"),
             " = mean of the annual aggregate across all simulated (model, year) outcomes."),
           shiny::p(shiny::tags$b("Thick coloured band"),
-            " (future scenarios only) — how much do climate models disagree?",
+            " (future scenarios only) - how much do climate models disagree?",
             " Inter-model spread: quantile across CMIP6 ensemble members of",
             " each model's time-mean. Can be asymmetric around the dot when",
             " models lean one way."),
           shiny::p(shiny::tags$b("Middle band"),
-            " — how much does weather vary year-to-year within a typical model?",
+            " - how much does weather vary year-to-year within a typical model?",
             " Inter-annual variability: per-model quantile across simulation",
             " years, then averaged across models. Reflects the natural range",
             " of outcomes a single climate trajectory produces."),
           shiny::p(shiny::tags$b("Innermost line"),
-            " (shown when coefficient uncertainty is enabled) — how precisely",
+            " (shown when coefficient uncertainty is enabled) - how precisely",
             " is each (model, year) aggregate estimated? Analytic per-outcome",
             " SE from the regression fit. By default, under 'original'",
             " residuals, restricted to coefficients on weather variables and",
-            " their interactions (additive-decomposition SE — see Step 2",
+            " their interactions (additive-decomposition SE - see Step 2",
             " settings to widen to all coefficients). This is precision of a",
-            " point estimate, not a spread of outcomes — conceptually",
+            " point estimate, not a spread of outcomes - conceptually",
             " distinct from the two coloured bands."),
           shiny::p(
             "Historical = single 'model', so no inter-model band is shown.",
@@ -193,10 +196,12 @@ mod_2_02_results_ui <- function(id) {
           docs = TRUE
         )
       ),
-      shiny::plotOutput(ns("summary_box_plot"), height = "600px"),
+      wise_plot_output(ns("summary_box_plot"),
+                       "Box plot of the simulated outcome by scenario",
+                       height = "600px"),
       shiny::tags$p(
         style = "font-size:11px; color:#666; margin-top:6px;",
-        "Dot = mean outcome; bands = uncertainty ranges (not additive) — click ",
+        "Dot = mean outcome; bands = uncertainty ranges (not additive) - click ",
         shiny::icon("circle-info"), " above for details."
       )
     ),
@@ -215,8 +220,12 @@ mod_2_02_results_ui <- function(id) {
           ),
           shiny::p(shiny::tags$b("Solid curve"),
             " (historical) = empirical exceedance curve of the historical baseline."),
+          shiny::p(shiny::tags$b("Central line"),
+            " (future scenarios) = median across climate-model ensemble",
+            " members at each exceedance probability."),
           shiny::p(shiny::tags$b("Filled ribbon"),
-            " (future scenarios only) = inter-model spread; quantile across ensemble members at each return period. No central curve is drawn for future scenarios so the full spread stays visible."),
+            " (future scenarios only) = inter-model spread; quantile across",
+            " ensemble members at each return period."),
           shiny::p(shiny::tags$b("Dashed outlines"),
             " (when coefficient uncertainty enabled) = analytic per-outcome SE band around the median. May fall inside or outside the inter-model ribbon depending on which source dominates."),
           shiny::p(
@@ -239,7 +248,9 @@ mod_2_02_results_ui <- function(id) {
           value = TRUE
         ),
       ),
-      shiny::plotOutput(ns("exceedance_plot"), height = "400px"),
+      wise_plot_output(ns("exceedance_plot"),
+                       "Plot of the population share above the poverty threshold by scenario",
+                       height = "400px"),
       shiny::uiOutput(ns("exceedance_caption"))
     ),
 
@@ -276,13 +287,23 @@ mod_2_02_results_server <- function(id,
                                      saved_scenarios,
                                      selected_hist,
                                      tabset_id,
-                                     tabset_session  = NULL,
-                                     residuals       = reactive("none"),
-                                     skip_coef_draws = reactive(FALSE)) {
+                                     tabset_session = NULL,
+                                     residuals = reactive("original"),
+                                     skip_coef_draws = reactive(FALSE),
+                                     stale = reactive(FALSE)) {
   moduleServer(id, function(input, output, session) {
     ns <- session$ns
 
     if (is.null(tabset_session)) tabset_session <- session$parent %||% session
+
+    # INT-08: stale banner above the results pane. This surface gates its
+    # CSV export while stale.
+    output$stale_banner <- renderUI({
+      if (isTRUE(stale())) .stale_banner(
+        "Step 2 simulation results",
+        note = "Interpretation and exports are disabled until then."
+      ) else NULL
+    })
 
     # ---- Lazy delta-method aggregation -------------------------------------
     # Replaces the eager compute_hist_agg / compute_scenario_agg path. Returns
@@ -306,14 +327,22 @@ mod_2_02_results_server <- function(id,
       as.numeric(input$bandwidth_p0 %||% 0.05)
     })
 
-    band_q_active <- reactive({
-      resolve_band_q(input$uncertainty_band %||% "p10_p90")
-    })
+    # ---- Value-affecting aggregation inputs ---------------------------------
+    # The aggregation cache is keyed by the inputs each method actually
+    # consumes (PERF-30), so moving the coefficient-band or poverty-line
+    # control only invalidates the methods that read it. band_q is display-
+    # only: aggregate_with_uncertainty_delta() applies it to value_lo/hi,
+    # which no builder below consumes - the band is re-derived from the
+    # cached SDs at render time. Display uses a fixed neutral pair.
+    AGG_BAND_Q <- c(lo = 0.10, hi = 0.90)
+    .POV_LINE_METHODS   <- c("headcount_ratio", "gap", "fgt2")
+    .BANDWIDTH_METHODS  <- "headcount_ratio"
 
     .one_member_delta <- function(pipe, idx, method, weighted, pov_line,
-                                  band_q, is_log, seed, res_mode) {
+                                  band_q, is_log, seed, res_mode,
+                                  resid_lookup = NULL, resid_sigma2 = NULL) {
       # Some upstream paths can hand us F_loading as a length-K numeric
-      # vector instead of a 1×K matrix (single-row residual / dropped dim).
+      # vector instead of a 1*K matrix (single-row residual / dropped dim).
       # Promote to matrix before any row-subset so the indexing below never
       # triggers "incorrect number of dimensions".
       F_full <- pipe$F_loading
@@ -348,45 +377,63 @@ mod_2_02_results_server <- function(id,
         is_log       = is_log,
         band_q       = band_q,
         bandwidth_p0 = bandwidth_p0(),
-        seed          = seed
+        seed          = seed,
+        resid_lookup  = resid_lookup,
+        resid_sigma2  = resid_sigma2
       )
     }
 
     # ---- Aggregation workspace + per-method cache --------------------------
-    # Captures heavy dependencies (band, poverty line, bandwidth, residuals,
-    # skip_coef_draws) into a workspace that's recreated whenever any of them
-    # changes. The workspace carries a mutable cache so we only compute each
-    # aggregation method once per workspace version. The Results tab reads
-    # only the currently selected method, and an eager observer pre-computes
-    # the default ("mean") as soon as hist_sim() arrives — so the first render
-    # is fast even before the user clicks anything.
+    # Captures the heavy dependencies that invalidate every cached method
+    # (hist_sim, saved scenarios, residuals, coef-draw skipping) into a
+    # workspace that's recreated whenever any of them changes. The workspace
+    # carries a mutable cache so we only compute each aggregation method once
+    # per workspace version. The Results tab reads only the currently selected
+    # method, and an eager observer pre-computes the default ("mean") as soon
+    # as hist_sim() arrives - so the first render is fast even before the
+    # user clicks anything.
+    #
+    # Display-only controls (coefficient band, poverty line, headcount
+    # bandwidth) are deliberately NOT workspace dependencies: changing them
+    # used to destroy the whole cache. Instead they are read at cache-lookup
+    # time and folded into the per-method cache key for exactly the methods
+    # that consume them (see .pl_bw_key).
     agg_workspace <- reactive({
       req(hist_sim())
       list(
         hs       = hist_sim(),
         sc       = saved_scenarios(),
-        bq       = band_q_active(),
-        pl_v     = pov_line_val(),
-        bw       = bandwidth_p0(),
         res      = hist_sim()$residuals %||% residuals() %||% "original",
         skip     = isTRUE(skip_coef_draws()),
         cache    = new.env(parent = emptyenv())
       )
     })
 
-    .build_hist_for_method <- function(ws, method) {
+    # Cache-key suffix for the poverty line / bandwidth values a method reads.
+    # Methods that ignore them get a constant key so moving the poverty-line
+    # slider does not force their recomputation.
+    .pl_bw_key <- function(method, pl_v, bw) {
+      parts <- character(0)
+      if (method %in% .POV_LINE_METHODS)  parts <- c(parts, format(pl_v))
+      if (method %in% .BANDWIDTH_METHODS) parts <- c(parts, format(bw))
+      if (length(parts) == 0L) "" else paste0("_", paste(parts, collapse = "_"))
+    }
+
+    .build_hist_for_method <- function(ws, method, pl_v) {
       pl   <- ws$hs$pipeline
       yrs  <- sort(unique(pl$sim_year))
-      bq   <- ws$bq
-      pl_v <- ws$pl_v
+      bq   <- AGG_BAND_Q
       is_log <- isTRUE(ws$hs$so$transform == "log")
+      # PERF-34: residual lookup/variance are per-pipeline constants.
+      lk   <- .residual_lookup(pl$train_aug, pl$id_col)
+      sg2  <- .residual_sigma2(pl$train_aug)
       build_for <- function(weighted) {
         rows <- lapply(yrs, function(yr) {
           idx <- pl$sim_year == yr
           m   <- .one_member_delta(
             pl, idx, method, weighted, pl_v, bq, is_log,
             seed = wise_seed(WISEAPP_DEFAULT_SEED, "residual", yr),
-            res_mode = ws$res
+            res_mode = ws$res, resid_lookup = lk, resid_sigma2 = sg2
           )
           sd_yr <- sqrt((m$var_coef %||% 0) + (m$var_resid %||% 0))
           F_yr  <- m$F_agg
@@ -414,16 +461,18 @@ mod_2_02_results_server <- function(id,
       )
     }
 
-    .build_scn_for_method <- function(ws, method) {
+    .build_scn_for_method <- function(ws, method, pl_v) {
       sc <- ws$sc
       if (length(sc) == 0L) return(NULL)
-      bq   <- ws$bq
-      pl_v <- ws$pl_v
+      bq   <- AGG_BAND_Q
       setNames(lapply(sc, function(s) {
         pipes  <- s$pipelines
         is_log <- isTRUE(s$so$transform == "log")
         yrs    <- sort(unique(pipes[[1L]]$sim_year))
         has_w  <- !is.null(pipes[[1L]]$weight)
+        # PERF-34: per-member lookup/variance, built once per member.
+        lk_s   <- lapply(pipes, function(pp) .residual_lookup(pp$train_aug, pp$id_col))
+        sg2_s  <- lapply(pipes, function(pp) .residual_sigma2(pp$train_aug))
         build_for <- function(weighted) {
           rows <- lapply(yrs, function(yr) {
             mod_ids <- names(pipes) %||% paste0("m", seq_along(pipes))
@@ -432,7 +481,8 @@ mod_2_02_results_server <- function(id,
               m   <- .one_member_delta(
                 pipes[[i]], idx, method, weighted, pl_v, bq, is_log,
                 seed = wise_seed(WISEAPP_DEFAULT_SEED, "residual", yr),
-                res_mode = ws$res
+                res_mode = ws$res, resid_lookup = lk_s[[i]],
+                resid_sigma2 = sg2_s[[i]]
               )
               if (is.null(m)) return(NULL)
               list(id = mod_ids[[i]], m = m)
@@ -482,19 +532,23 @@ mod_2_02_results_server <- function(id,
     }
 
     .get_hist_agg <- function(method) {
-      ws <- agg_workspace()
-      key <- paste0("h_", method)
+      ws   <- agg_workspace()
+      pl_v <- pov_line_val()
+      bw   <- bandwidth_p0()
+      key <- paste0("h_", method, .pl_bw_key(method, pl_v, bw))
       if (!exists(key, envir = ws$cache, inherits = FALSE)) {
-        assign(key, .build_hist_for_method(ws, method), envir = ws$cache)
+        assign(key, .build_hist_for_method(ws, method, pl_v), envir = ws$cache)
       }
       get(key, envir = ws$cache, inherits = FALSE)
     }
 
     .get_scn_agg <- function(method) {
-      ws <- agg_workspace()
-      key <- paste0("s_", method)
+      ws   <- agg_workspace()
+      pl_v <- pov_line_val()
+      bw   <- bandwidth_p0()
+      key <- paste0("s_", method, .pl_bw_key(method, pl_v, bw))
       if (!exists(key, envir = ws$cache, inherits = FALSE)) {
-        assign(key, .build_scn_for_method(ws, method), envir = ws$cache)
+        assign(key, .build_scn_for_method(ws, method, pl_v), envir = ws$cache)
       }
       get(key, envir = ws$cache, inherits = FALSE)
     }
@@ -572,14 +626,14 @@ mod_2_02_results_server <- function(id,
     outputOptions(output, "coef_uncertainty_status_ui",
                   suspendWhenHidden = TRUE)
 
-    # Always use survey weights when available (UI toggle removed — weighting
+    # Always use survey weights when available (UI toggle removed - weighting
     # is the correct default for survey-based welfare estimates).
     weight_key <- reactive({
       if (!is.null(hist_sim()) && isTRUE(hist_sim()$has_weights))
         "weighted" else "unweighted"
     })
 
-    # Shared deviation reference — used by all_series_tbl and exceedance_ribbon
+    # Shared deviation reference - used by all_series_tbl and exceedance_ribbon
         hist_ref_val <- reactive({
           req(hist_agg_rv())
           method    <- input$cmp_agg_method %||% "mean"
@@ -671,6 +725,37 @@ mod_2_02_results_server <- function(id,
 
 
 
+    # UI-38: hold the most recent non-empty grid selection so unchecking the
+    # final scenario never silently re-displays the first one.
+    last_selected_scenarios <- reactiveVal(NULL)
+
+    observe({
+      sc   <- saved_scenarios()
+      if (length(sc) == 0L) return(invisible(NULL))
+      keys <- names(sc)
+
+      selected <- Filter(Negate(is.null), lapply(keys, function(key) {
+        cb_id <- paste0("sc_", gsub("[^a-zA-Z0-9]", "_", key))
+        if (isTRUE(input[[cb_id]])) key else NULL
+      }))
+
+      if (length(selected) > 0L) {
+        last_selected_scenarios(unlist(selected))
+      } else {
+        # Re-check the held boxes so the grid never sits fully unchecked.
+        held <- last_selected_scenarios()
+        held <- held[held %in% keys]
+        if (length(held) == 0L) held <- keys[1L]
+        for (key in held) {
+          shiny::updateCheckboxInput(
+            session,
+            inputId = paste0("sc_", gsub("[^a-zA-Z0-9]", "_", key)),
+            value   = TRUE
+          )
+        }
+      }
+    })
+
     selected_scenario_names <- reactive({
       sc   <- saved_scenarios()
       if (length(sc) == 0L) return(character(0))
@@ -683,8 +768,16 @@ mod_2_02_results_server <- function(id,
         if (isTRUE(val)) key else NULL
       }))
 
-      # Enforce minimum 1 selected
-      if (length(selected) == 0L) keys[1L] else unlist(selected)
+      # Enforce minimum 1 selected: hold the last real selection (UI-38)
+      # rather than silently re-adding the first scenario.
+      if (length(selected) == 0L) {
+        held <- last_selected_scenarios()
+        held <- held[held %in% keys]
+        if (length(held) == 0L) held <- keys[1L]
+        held
+      } else {
+        unlist(selected)
+      }
     })
 
     agg_hist <- reactive({
@@ -722,14 +815,14 @@ mod_2_02_results_server <- function(id,
       Filter(function(x) !is.null(x) && !is.null(x$out) && nrow(x$out) > 0, result)
     })
 
-    # `exceedance_ribbon` removed — the ribbon is now built inside
+    # `exceedance_ribbon` removed - the ribbon is now built inside
     # enhance_exceedance() directly from each series' (value_all, value_all_sd)
     # using analytic delta-method bands, so there is nothing to precompute here.
     
 
     # `all_series` is now a thin passthrough: it gathers the deviation-shifted
     # tibbles from agg_hist()/agg_scenarios() and tags each with its scenario
-    # name. No analytic band augmentation — each plot/table reactive below
+    # name. No analytic band augmentation - each plot/table reactive below
     # constructs its own bands from value_all + value_all_sd directly.
     all_series <- reactive({
       req(agg_hist())
@@ -793,7 +886,7 @@ mod_2_02_results_server <- function(id,
       if (length(sc) == 0L)
         return(shiny::helpText("Run a simulation."))
 
-      # Parse scenario keys into SSP × period grid
+      # Parse scenario keys into SSP * period grid
       keys  <- names(sc)
       ssps  <- sort(unique(sub(" / .*$", "", keys)))
       yrs   <- sort(unique(sub("^.* / ", "", keys)))
@@ -820,15 +913,19 @@ mod_2_02_results_server <- function(id,
             shiny::tags$td(
               style = "text-align:center; padding:2px 4px;",
               if (exists)
+                # UI-03: the grid's row/column headers carry the meaning
+                # visually; give each checkbox its own accessible name.
                 shiny::checkboxInput(
                   cb_id,
-                  label = NULL,
+                  label = shiny::tags$span(class = "visually-hidden",
+                                           paste("Include", s, yr,
+                                                 "in the comparison")),
                   value = TRUE
                 )
               else
                 shiny::tags$span(
                   style = "color:#ccc; font-size:11px;",
-                  "—"
+                  "-"
                 )
             )
           })
@@ -926,7 +1023,7 @@ mod_2_02_results_server <- function(id,
 
         # "Pooled" band: pooled SE on the central (year- and model-
         # averaged) estimate. Mirrors the return-period table's "Pooled"
-        # convention (see fct_sim_compare.R::build_threshold_table_df) —
+        # convention (see fct_sim_compare.R::build_threshold_table_df) -
         # inter-annual variability is a property of the simulated
         # distribution, not uncertainty about the central tendency, and
         # is shown separately as the middle band.
@@ -1032,11 +1129,11 @@ mod_2_02_results_server <- function(id,
         sds_flat <- as.numeric(unlist(tbl$value_all_sd))
         var_coef <- if (length(sds_flat))
           mean(sds_flat^2, na.rm = TRUE) else 0
-        # Use value-matrix–derived var_within / var_across so the metric
+        # Use value-matrix-derived var_within / var_across so the metric
         # matches what the inter-annual / inter-model bands visualise and
         # avoids double-counting var_coef. (Unlike the pointrange total
         # band, this decomposition panel intentionally includes
-        # var_within — its purpose is to show the share of every source,
+        # var_within - its purpose is to show the share of every source,
         # including year-to-year spread.)
         mm <- by_model_matrix(tbl)
         vals <- if (is.null(mm)) NULL else mm$vals
@@ -1126,8 +1223,8 @@ mod_2_02_results_server <- function(id,
     # ensemble=minmax the rows are "Central (P50)", "Coef P10", "Coef P90",
     # "Ensemble min", "Ensemble max", "Pooled P10", "Pooled P90". Pooled
     # rows combine the coefficient and inter-model components assuming
-    # independence: SE_pooled = sqrt(coef_sd² + var_across_at_rp).
-    # Historical (no inter-model component) does not emit Pooled rows —
+    # independence: SE_pooled = sqrt(coef_sd^2 + var_across_at_rp).
+    # Historical (no inter-model component) does not emit Pooled rows -
     # they would duplicate the Coef rows.
     threshold_table_rv <- reactive({
       req(hist_agg_rv())
@@ -1151,29 +1248,17 @@ mod_2_02_results_server <- function(id,
 
         # Drop RPs that aren't comfortably supported by n_yrs of data. A 1-in-N
         # return period needs at least N observations (p in [1/n, 1-1/n]); we
-        # don't report tighter probabilities — they'd rest on the single most
+        # don't report tighter probabilities - they'd rest on the single most
         # extreme observed year and are not meaningful as a "1-in-N" estimate.
         rp_ok    <- RPs >= (1 / n_yrs) & RPs <= (1 - 1 / n_yrs)
         RPs_keep <- RPs[rp_ok]
         if (length(RPs_keep) == 0L) return(NULL)
 
-        # Per-model rank-interp at each kept RP (matrix: model × RP)
-        per_model_rp <- t(apply(vals, 1L, function(v) {
-          v <- v[is.finite(v)]
-          if (length(v) < 2L) return(rep(NA_real_, length(RPs_keep)))
-          sv <- sort(v)
-          vapply(RPs_keep, function(p) .rank_interp(sv, p), numeric(1L))
-        }))
-        # Per-model SD at each kept RP via the same rank-position math, so the
-        # coefficient band on the table matches the exceedance plot.
-        per_model_sd_at_rp <- t(vapply(seq_len(nrow(vals)), function(i) {
-          v <- vals[i, ]; s <- sds[i, ]
-          ok <- is.finite(v)
-          if (sum(ok) < 2L) return(rep(NA_real_, length(RPs_keep)))
-          ord <- order(v[ok])
-          s_sorted <- s[ok][ord]
-          vapply(RPs_keep, function(p) .rank_interp(s_sorted, p), numeric(1L))
-        }, numeric(length(RPs_keep))))
+        # Per-model rank-interp at each kept RP (matrix: model * RP) - shape
+        # guaranteed by the helper (see by_model_rp_matrix()).
+        mm        <- by_model_rp_matrix(vals, sds, RPs_keep)
+        per_model_rp       <- mm$rp
+        per_model_sd_at_rp <- mm$sd
 
         # Aggregate across models for each RP
         central_vec <- if (is_hist) per_model_rp[1L, ] else
@@ -1280,12 +1365,16 @@ mod_2_02_results_server <- function(id,
         return(DT::datatable(data.frame(Message = "Insufficient data"),
                              rownames = FALSE, class = "compact stripe",
                              options  = list(dom = "t")))
+      # INT-08: export is disabled while the results are stale - the table
+      # stays visible, the CSV button does not.
+      dt_buttons <- if (isTRUE(stale())) NULL else
+        list(list(extend = "csv", filename = "outcome_thresholds"))
       DT::datatable(
         df, rownames = FALSE, class = "compact stripe",
         options = list(
           pageLength = 15, dom = "Btip", ordering = list(list(2, "desc")),
           columnDefs = list(list(className = "dt-center", targets = "_all")),
-          buttons = list(list(extend = "csv", filename = "outcome_thresholds"))
+          buttons = dt_buttons
         ),
         extensions = "Buttons"
       )
@@ -1305,7 +1394,7 @@ mod_2_02_results_server <- function(id,
             shiny::p(shiny::tags$b("Ensemble Pxx / min / max"),
               " (future only) = quantile of per-model return-period values across CMIP6 ensemble members. Percentiles follow the 'Weather + model spread band' selector."),
             shiny::p(shiny::tags$b("Pooled Pxx"),
-              " = combined band assuming independence: SE_pooled = sqrt(coef_SE² + var_across_models). Future scenarios only — for historical (no inter-model component) Pooled would equal Coef and is not reported."),
+              " = combined band assuming independence: SE_pooled = sqrt(coef_SE\u00B2 + var_across_models). Future scenarios only - for historical (no inter-model component) Pooled would equal Coef and is not reported."),
             shiny::p(
               "Low odds show the value exceeded in only 1-in-N years; high odds",
               "= value reached in all but 1-in-N years; 1:1 is the median year."
@@ -1313,7 +1402,7 @@ mod_2_02_results_server <- function(id,
             shiny::p(
               "Obs = number of simulated years feeding each per-model exceedance",
               "curve. Return periods that fall outside the empirical range",
-              "supported by Obs (probability < 0.5/Obs or > 1 − 0.5/Obs) are not",
+              "supported by Obs (probability < 0.5/Obs or > 1 - 0.5/Obs) are not",
               "reported rather than extrapolated."
             ),
             docs = TRUE
@@ -1327,7 +1416,7 @@ mod_2_02_results_server <- function(id,
       req(agg_hist())
       shiny::tags$p(
         style = "font-size:11px; color:#666; margin-top:6px;",
-        "Central = median estimate; Coef/Ensemble/Pooled = uncertainty bands — click ",
+        "Central = median estimate; Coef/Ensemble/Pooled = uncertainty bands - click ",
         shiny::icon("circle-info"), " above for definitions."
       )
     })
@@ -1355,7 +1444,7 @@ mod_2_02_results_server <- function(id,
       axis_txt <- if (isTRUE(input$exceedance_logit_x))
         "Probability axis is logit-scaled, giving equal visual weight to both tails."
       else
-        "Annual exceedance probability — each curve is computed over the simulation years."
+        "Annual exceedance probability - each curve is computed over the simulation years."
       shiny::tags$p(
         style = "font-size:11px; color:#666; margin-top:6px;",
         axis_txt
@@ -1365,9 +1454,23 @@ mod_2_02_results_server <- function(id,
 
     # ---- observeEvent handlers ---------------------------------------------
 
-    # Insert Results tab + content once (on first hist_sim).
+    # Insert Results tab + content on first hist_sim; remove it again when
+    # hist_sim is cleared (INT-07) so the empty state returns and a later
+    # run re-inserts a fresh tab instead of writing into a stale one.
+    results_tab_added <- reactiveVal(FALSE)
+
     observeEvent(hist_sim(), {
-      req(hist_sim())
+      if (is.null(hist_sim())) {
+        if (results_tab_added()) {
+          shiny::removeTab(
+            inputId = tabset_id,
+            target  = "sim_tab",
+            session = tabset_session
+          )
+          results_tab_added(FALSE)
+        }
+        return()
+      }
 
       shiny::appendTab(
         inputId = tabset_id,
@@ -1385,15 +1488,18 @@ mod_2_02_results_server <- function(id,
         where    = "afterBegin",
         ui       = .results_content_ui(ns, hist_sim()$so)
       )
-    }, ignoreInit = TRUE, once = TRUE)
+      results_tab_added(TRUE)
+    }, ignoreInit = TRUE, ignoreNULL = FALSE)
 
     # On subsequent runs, just re-select the tab.
     observeEvent(hist_sim(), {
-      shiny::updateTabsetPanel(
-        session  = tabset_session,
-        inputId  = tabset_id,
-        selected = "sim_tab"
-      )
+      if (!is.null(hist_sim())) {
+        shiny::updateTabsetPanel(
+          session  = tabset_session,
+          inputId  = tabset_id,
+          selected = "sim_tab"
+        )
+      }
     }, ignoreInit = TRUE)
 
     # Keep agg method choices in sync with outcome.
@@ -1425,6 +1531,7 @@ mod_2_02_results_server <- function(id,
     # inter-model band quantiles resolved from the Results-tab controls.
     list(
       variance_breakdown = variance_breakdown_rv,
+      results_tab_added  = results_tab_added,
       timeseries_curves  = reactive({
         req(timeseries_curves_rv())
         ens_q <- if (isTRUE(input$show_model_spread))

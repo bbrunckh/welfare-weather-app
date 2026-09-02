@@ -5,8 +5,8 @@
 # Firpo, Fortin & Lemieux (2009) for estimating distributional impacts.        #
 #                                                                              #
 # Used by:                                                                     #
-#   Module 1 — fct_fit_model.R (compute_rif, build_rif_grid)                   #
-#   Module 2 — fct_simulations.R (predict_rif)                                 #
+#   Module 1 - fct_fit_model.R (compute_rif, build_rif_grid)                   #
+#   Module 2 - fct_simulations.R (predict_rif)                                 #
 # ============================================================================ #
 
 
@@ -125,7 +125,7 @@ build_rif_grid <- function(fits_multi, taus, model_id) {
 #' quantile, then adds the delta to the observed baseline welfare.
 #'
 #' @param fit_multi A \code{fixest_multi} object (9 sub-models, one per tau).
-#' @param newdata Data frame from \code{prepare_hist_weather()} — has scenario
+#' @param newdata Data frame from \code{prepare_hist_weather()} - has scenario
 #'   weather columns and \code{.svy_row_id}.
 #' @param svy The raw survey data passed to \code{prepare_hist_weather()}.
 #' @param train_data Training data used for ecdf quantile assignment.
@@ -180,7 +180,7 @@ predict_rif <- function(fit_multi, newdata, svy, train_data, taus, outcome,
   # Swap weather columns: save scenario, insert baseline from svy
   saved_weather <- newdata[, weather_cols, drop = FALSE]
 
-  # Pre-build baseline and scenario data frames ONCE (avoid K×2 column copies)
+  # Pre-build baseline and scenario data frames ONCE (avoid K*2 column copies)
   newdata_base <- newdata
   for (wc in weather_cols) {
     newdata_base[[wc]] <- svy[[wc]][svy_row]
@@ -200,7 +200,7 @@ predict_rif <- function(fit_multi, newdata, svy, train_data, taus, outcome,
   #     Comparable in width to OLS level bands.
   #   - Deviation/contrast mode: the aggregation layer subtracts the
   #     historical reference F_agg, so F_agg_s - F_agg_h reduces (per
-  #     household i) to (X_scenario_i - X_hist_i) %*% t(L_tau_i) — the
+  #     household i) to (X_scenario_i - X_hist_i) %*% t(L_tau_i) - the
   #     paired-contrast variance, matching the X_diff construction we
   #     previously used. Deviation bands stay tight.
   #
@@ -209,8 +209,8 @@ predict_rif <- function(fit_multi, newdata, svy, train_data, taus, outcome,
   # observed-anchored displayed value (analogous to how OLS's level SE
   # refers to its predicted, not "true," welfare).
   #
-  # Memory: rather than materialising all K full N×P scenario design matrices
-  # up front (≈ K × N × p × 8 bytes — ~8 GB for a large-N country with K=9),
+  # Memory: rather than materialising all K full N*P scenario design matrices
+  # up front (~ K * N * p * 8 bytes - ~8 GB for a large-N country with K=9),
   # interpolate_F_loading() builds each quantile's design matrix on demand for
   # only the rows that need it (it processes rows grouped by their (lo, hi)
   # quantile pair). We hand it a lazy accessor that calls model.matrix() on a
@@ -248,7 +248,7 @@ predict_rif <- function(fit_multi, newdata, svy, train_data, taus, outcome,
 
   # Compute F_loading by interpolating X_scenario %*% L_k at each tau_i.
   # X_scen_fn(k, rows) builds the quantile-k scenario design matrix for the
-  # given rows only — model.matrix() on a row subset of newdata_scen.
+  # given rows only - model.matrix() on a row subset of newdata_scen.
   if (compute_loading) {
     active_mask <- attr(chol_list, "active_mask")
     X_scen_fn <- function(k, rows) {
@@ -265,7 +265,7 @@ predict_rif <- function(fit_multi, newdata, svy, train_data, taus, outcome,
     if (!is.null(F_loading)) {
       attr(newdata, "F_loading") <- F_loading
       # Diagnostic: confirm the additive-decomposition mask reached predict_rif.
-      # Compare ncol(F_loading) against the per-tau design width — if the mask
+      # Compare ncol(F_loading) against the per-tau design width - if the mask
       # is active, ncol should be < length(active_mask).
       if (!is.null(active_mask) && ncol(F_loading) < length(active_mask)) {
         message(sprintf(
@@ -290,8 +290,8 @@ predict_rif <- function(fit_multi, newdata, svy, train_data, taus, outcome,
 #' \eqn{X\_diff_k = X_{scenario} - X_{baseline}} at quantile k.
 #'
 #' @param X_diff_fn  Function \code{(k, rows)} returning the quantile-k design
-#'   matrix (\code{length(rows) x p}) for the requested rows only — built on
-#'   demand so all K full N×p matrices never coexist in memory. (For backward
+#'   matrix (\code{length(rows) x p}) for the requested rows only - built on
+#'   demand so all K full N*p matrices never coexist in memory. (For backward
 #'   compatibility, a list of K full \code{n x p} matrices is also accepted and
 #'   wrapped automatically.)
 #' @param chol_list  List of K Cholesky factor matrices (p x p), one per quantile.
@@ -329,7 +329,7 @@ interpolate_F_loading <- function(X_diff_fn, chol_list, taus, tau_i,
   w      <- ifelse(tau_hi > tau_lo, (tau_i - tau_lo) / (tau_hi - tau_lo), 0)
 
   # F = X %*% L (lower triangular L with LL' = Sigma) so that
-  # F F' = X L L' X' = X Sigma X' — the correct level variance.
+  # F F' = X L L' X' = X Sigma X' - the correct level variance.
   # Earlier versions used t(L) here, which gives X L' L X' (not Sigma)
   # and inflated SEs by ~25% on realistic Sigma. The linear path
   # (compute_factor_loading) was fixed for this; this matches.
@@ -340,13 +340,13 @@ interpolate_F_loading <- function(X_diff_fn, chol_list, taus, tau_i,
   # We subset X to active columns before multiplying.
   #
   # Memory: each output row i reads from exactly two quantile loadings,
-  # at idx[i] and idx_hi[i]. Rather than materialising all K full N×P design
-  # matrices (≈ K × N × p × 8 bytes), we process rows grouped by their
+  # at idx[i] and idx_hi[i]. Rather than materialising all K full N*P design
+  # matrices (~ K * N * p * 8 bytes), we process rows grouped by their
   # (lo, hi) quantile pair and build (via X_diff_fn) only that group's rows of
   # the at-most-two quantiles it needs. Matrix multiply distributes over row
-  # subsetting exactly — (X[rows, ] %*% C) is row-for-row identical to
-  # (X %*% C)[rows, ] — so the result is bit-equivalent to the all-at-once
-  # form, at a fraction of the peak allocation (one N×P result + small
+  # subsetting exactly - (X[rows, ] %*% C) is row-for-row identical to
+  # (X %*% C)[rows, ] - so the result is bit-equivalent to the all-at-once
+  # form, at a fraction of the peak allocation (one N*P result + small
   # per-group scratch).
 
   # Subset a group's design matrix to active columns when masking is on.

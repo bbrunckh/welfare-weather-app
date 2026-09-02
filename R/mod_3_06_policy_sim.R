@@ -14,35 +14,6 @@ mod_3_06_policy_sim_ui <- function(id) {
   )
 }
 
-#' Collect the variable / term names referenced by a selected model
-#'
-#' Mirrors the `coeffs()` logic used by the policy lever modules: the union of
-#' all covariate roles plus interactions. Used to gate which covariate levers
-#' may mutate the survey in \code{apply_policy_to_svy()}.
-#'
-#' @param sm Selected-model list (or NULL).
-#' @return Character vector of term names, or NULL when `sm` is NULL.
-#' @noRd
-.model_term_names <- function(sm) {
-  if (is.null(sm)) return(NULL)
-  get_names <- function(x) {
-    if (is.null(x)) return(character(0))
-    nms <- names(x)
-    if (!is.null(nms) && any(nzchar(nms))) {
-      unique(nms[nzchar(nms)])
-    } else {
-      unique(as.character(unlist(x, use.names = FALSE)))
-    }
-  }
-  unique(c(
-    get_names(sm$individual_covariates),
-    get_names(sm$hh_covariates),
-    get_names(sm$firm_covariates),
-    get_names(sm$area_covariates),
-    get_names(sm$interactions)
-  ))
-}
-
 #' 3_06_policy_sim Server Functions
 #'
 #' Applies user-defined policy adjustments to survey covariates from the
@@ -64,6 +35,9 @@ mod_3_06_policy_sim_ui <- function(id) {
 #' @param selected_weather  Reactive selected-weather metadata.
 #' @param hist_sim          Reactive Step 2 hist_sim list.
 #' @param saved_scenarios   Reactive Step 2 named scenario list.
+#' @param run_trigger       Reactive the parent fires to request a policy run
+#'   (REACT-09): the run lifecycle stays inside this module instead of the
+#'   parent calling the exported `run()` closure.
 #'
 #' @return Named list with baseline_svy, policy_svy, sim_run_id, plus
 #'   re-simulated baseline_hist_sim/baseline_saved_scenarios and
@@ -86,7 +60,10 @@ mod_3_06_policy_sim_server <- function(id,
                                         skip_coef_draws    = reactive(FALSE),
                                         residuals          = reactive("original"),
                                         propagate_all_covariate_uncertainty =
-                                          reactive(FALSE)) {
+                                          reactive(FALSE),
+                                        survey_version     = reactive(0L),
+                                        sim_stale          = reactive(FALSE),
+                                        run_trigger        = reactive(NULL)) {
   moduleServer(id, function(input, output, session) {
     ns <- session$ns
 
@@ -94,8 +71,13 @@ mod_3_06_policy_sim_server <- function(id,
     policy_svy_rv       <- reactiveVal(NULL)
     sim_error           <- reactiveVal(NULL)
     sim_run_id          <- reactiveVal(0L)
+    # REACT-02: TRUE while a policy simulation is executing.
+    sim_running         <- reactiveVal(FALSE)
     decomp_rv           <- reactiveVal(NULL)
     decomp_scenarios_rv <- reactiveVal(list())
+    # INT-08: TRUE while the stored policy results' run signature no longer
+    # matches the current Step 2 output / scenario inputs.
+    policy_stale        <- reactiveVal(FALSE)
 
     baseline_hist_sim_rv        <- reactiveVal(NULL)
     baseline_saved_scenarios_rv <- reactiveVal(list())
@@ -114,7 +96,55 @@ mod_3_06_policy_sim_server <- function(id,
       )
     })
 
+    # ---- Run signature (INT-08) ----------------------------------------------
+    # The policy run inherits Step 2's signature and adds the scenario
+    # configuration; a mismatch (or a stale Step 2) marks the results stale.
+
+    .policy_sig_from_live <- function(hs = hist_sim()) {
+      list(
+        step           = "policy",
+        sim_sig        = if (!is.null(hs)) hs$.sig %||% NULL else NULL,
+        survey_version = survey_version(),
+        scenarios      = .sig_plain(list(
+          sp        = sp_scenario(),
+          infra     = infra_scenario(),
+          digital   = digital_scenario(),
+          labor     = labor_scenario(),
+          education = education_scenario()
+        ))
+      )
+    }
+
+    .mark_stale_on_change <- function(observe_what) {
+      shiny::observeEvent(observe_what, {
+        bh <- baseline_hist_sim_rv()
+        if (!is.null(bh) && !identical(.policy_sig_from_live(), bh$.sig))
+          policy_stale(TRUE)
+      }, ignoreInit = TRUE)
+    }
+    .mark_stale_on_change(hist_sim())
+    .mark_stale_on_change(sp_scenario())
+    .mark_stale_on_change(infra_scenario())
+    .mark_stale_on_change(digital_scenario())
+    .mark_stale_on_change(labor_scenario())
+    .mark_stale_on_change(education_scenario())
+    .mark_stale_on_change(survey_version())
+    # Cascade: when Step 2 is stale (inputs changed, not yet re-run) the
+    # policy results built on it are stale too.
+    shiny::observeEvent(sim_stale(), {
+      if (isTRUE(sim_stale()) && !is.null(baseline_hist_sim_rv()))
+        policy_stale(TRUE)
+    }, ignoreInit = TRUE)
+    shiny::observeEvent(baseline_hist_sim_rv(), policy_stale(FALSE))
+
     run <- function() {
+      # REACT-02: one policy simulation at a time. The guard is owned by the
+      # module doing the work; the triggering button (mod_3_scenario) is
+      # disabled via the exposed reactive.
+      if (isTRUE(sim_running())) return(invisible(NULL))
+      sim_running(TRUE)
+      on.exit(sim_running(FALSE), add = TRUE)
+
       sim_error(NULL)
 
       mf  <- model_fit()
@@ -124,7 +154,7 @@ mod_3_06_policy_sim_server <- function(id,
       # Use the exact survey that Step 2 used as the baseline. Step 2 may have
       # filtered survey_weather() to a single survey round (baseline_svy). The
       # Step 2 weather_raw was fetched against that filtered survey, so it
-      # contains rows for all survey years in selected_surveys — joining the
+      # contains rows for all survey years in selected_surveys - joining the
       # FULL survey_weather() would pull in extra households from non-baseline
       # rounds and produce a systematically different aggregate.
       svy <- hs$svy %||% survey_weather()
@@ -142,7 +172,10 @@ mod_3_06_policy_sim_server <- function(id,
 
       tryCatch(
         {
-          baseline_svy_rv(svy)
+          # INT-08: the signature is captured up front from the exact inputs
+          # this run consumes (scenario reactives are read again below); a
+          # signature built at publish time could record mid-run edits.
+          policy_sig <- .policy_sig_from_live(hs)
 
           svy_mod <- apply_policy_to_svy(
             svy,
@@ -151,11 +184,10 @@ mod_3_06_policy_sim_server <- function(id,
             digital       = digital_scenario(),
             labor         = labor_scenario(),
             education     = education_scenario(),
-            model_vars    = .model_term_names(selected_model()),
+            model_vars    = model_term_names(selected_model()),
             analysis_unit = analysis_unit(),
             seed          = WISEAPP_DEFAULT_SEED
           )
-          policy_svy_rv(svy_mod)
 
           shiny::withProgress(
             message = "Re-running simulations for baseline and policy...",
@@ -169,61 +201,81 @@ mod_3_06_policy_sim_server <- function(id,
               # values Mod 2 shows. The Results pane and policy resimulation
               # both consume the Mod 2 schema ($pipeline for hist_sim,
               # $pipelines for each saved scenario), so no translation is
-              # required here.
+              # required here. (Held in locals - INT-09 publishes all state
+              # atomically at the end of a fully successful run.)
               res_choice <- hs$residuals %||% residuals() %||% "original"
               # Preserve the residual treatment captured by the Step 2 run.
               hs_for_baseline <- hs
               hs_for_baseline$residuals <- res_choice
-              baseline_hist_sim_rv(hs_for_baseline)
-              baseline_saved_scenarios_rv(ss %||% list())
+              baseline_out         <- hs_for_baseline
+              baseline_scenarios_out <- ss %||% list()
 
               shiny::setProgress(value = 0.6, detail = "Policy...")
               # Derive the policy arm from the baseline pipelines by adding
               # the analytic per-household delta_total (the same number the
               # Decomposition pane reports). This (a) eliminates the
               # baseline/policy disagreement when residual draws have any
-              # stochastic component — both arms now share identical
+              # stochastic component - both arms now share identical
               # train_aug / id_vec / svy_row_id, so residuals line up
               # household-for-household and a no-op policy yields a no-op
               # visual effect; and (b) removes the per-CMIP6-member re-
               # simulation, which was the dominant cost of every policy
               # adjustment.
               skip_coef_val <- isTRUE(skip_coef_draws())
+
+              # PERF-22: covariate deltas and the training-outcome ecdf are
+              # weather- and scenario-independent - every decompose_policy_
+              # effect() call below (historical + per scenario-year) would
+              # otherwise rebuild both. Compute once, pass through.
+              deltas_pre <- .compute_policy_deltas(
+                svy, svy_mod, hs$so$name, mf$weather_terms
+              )
+              F_hat_pre <- if (identical(mf$engine, "rif") &&
+                               !is.null(mf$train_data) &&
+                               hs$so$name %in% names(mf$train_data)) {
+                stats::ecdf(mf$train_data[[hs$so$name]])
+              } else NULL
+
               pol_out <- apply_policy_delta_to_baseline(
                 svy_baseline             = svy,
                 svy_policy               = svy_mod,
                 model_fit                = mf,
                 so                       = hs$so,
-                hist_sim_baseline        = hs_for_baseline,
-                saved_scenarios_baseline = ss %||% list(),
-                skip_coef                = skip_coef_val
+                hist_sim_baseline        = baseline_out,
+                saved_scenarios_baseline = baseline_scenarios_out,
+                skip_coef                = skip_coef_val,
+                deltas                   = deltas_pre,
+                F_hat                    = F_hat_pre
               )
-              if (!is.null(pol_out)) {
-                policy_hist_sim_rv(pol_out$hist_sim)
-                policy_saved_scenarios_rv(pol_out$saved_scenarios)
+              if (is.null(pol_out)) {
+                stop("Policy simulation produced no results.", call. = FALSE)
               }
 
-              # Decompose policy effects using HISTORICAL mean weather
+              # Decompose policy effects using HISTORICAL mean weather.
+              # REACT-05: a decomposition failure now fails the whole run
+              # instead of silently presenting the previous run as new.
               shiny::setProgress(value = 0.85, detail = "Decomposing effects...")
-              decomp <- tryCatch(
-                decompose_policy_effect(
-                  svy_baseline = svy,
-                  svy_policy   = policy_svy_rv(),
-                  model_fit    = mf,
-                  so           = hs$so,
-                  weather_raw  = hs$weather_raw,
-                  skip_coef    = skip_coef_val
-                ),
-                error = function(e) {
-                  warning("[mod_3_05] Decomposition failed: ", conditionMessage(e))
-                  NULL
-                }
+              decomp <- decompose_policy_effect(
+                svy_baseline = svy,
+                svy_policy   = svy_mod,
+                model_fit    = mf,
+                so           = hs$so,
+                weather_raw  = hs$weather_raw,
+                skip_coef    = skip_coef_val,
+                deltas       = deltas_pre,
+                F_hat        = F_hat_pre
               )
-              decomp_rv(decomp)
+              if (is.null(decomp)) {
+                stop("Effect decomposition produced no results.", call. = FALSE)
+              }
 
-              # Decompose per saved scenario × sim_year for year-to-year variation
+              # Decompose per saved scenario * sim_year for year-to-year
+              # variation. Per-year failures are collected: if every attempt
+              # fails the run fails; otherwise partial results are published
+              # with a warning naming the count of dropped pieces (INT-04).
               shiny::setProgress(value = 0.90, detail = "Decomposing scenario effects...")
               sc_list <- pol_out$saved_scenarios %||% list()
+              decomp_sc_errors <- character(0)
               decomp_sc <- lapply(seq_along(sc_list), function(i) {
                 sc       <- sc_list[[i]]
                 w_raw    <- sc$weather_raw
@@ -237,7 +289,7 @@ mod_3_06_policy_sim_server <- function(id,
                   w_years   <- as.integer(format(w_raw$timestamp, "%Y"))
                   sim_years <- sort(unique(w_years))
                 } else {
-                  # No year column — fall back to single decomposition (mean weather)
+                  # No year column - fall back to single decomposition (mean weather)
                   w_years   <- NULL
                   sim_years <- NA_integer_
                 }
@@ -252,11 +304,13 @@ mod_3_06_policy_sim_server <- function(id,
                   tryCatch(
                     decompose_policy_effect(
                       svy_baseline = svy,
-                      svy_policy   = policy_svy_rv(),
+                      svy_policy   = svy_mod,
                       model_fit    = mf,
                       so           = hs$so,
                       weather_raw  = w_yr,
-                      skip_coef    = skip_coef_val
+                      skip_coef    = skip_coef_val,
+                      deltas       = deltas_pre,
+                      F_hat        = F_hat_pre
                     ) |> dplyr::mutate(
                       scenario   = sc_label,
                       sim_year   = yr,
@@ -264,27 +318,62 @@ mod_3_06_policy_sim_server <- function(id,
                       year_end   = sc$year_range[[2]] %||% NA_integer_
                     ),
                     error = function(e) {
-                      warning("[mod_3_05] Year decomp failed for '", sc_label,
-                              "' yr ", yr, ": ", conditionMessage(e))
+                      decomp_sc_errors <<- c(decomp_sc_errors, paste0(
+                        sc_label, if (!is.na(yr)) paste0(" (", yr, ")"), ": ",
+                        conditionMessage(e)
+                      ))
                       NULL
                     }
                   )
                 })
                 dplyr::bind_rows(Filter(Negate(is.null), year_results))
               })
-              decomp_scenarios_rv(
-                dplyr::bind_rows(Filter(Negate(is.null), decomp_sc))
-              )
+              decomp_sc <- dplyr::bind_rows(Filter(Negate(is.null), decomp_sc))
+              if (length(decomp_sc_errors) > 0L && nrow(decomp_sc) == 0L) {
+                stop(
+                  "All scenario decompositions failed. First error: ",
+                  decomp_sc_errors[[1]],
+                  call. = FALSE
+                )
+              }
 
               shiny::setProgress(value = 1, detail = "Complete")
             }
           )
 
+          # -- Atomic publish (INT-09) -----------------------------------------
+          # Every reactive value is written only now that the complete run
+          # (simulation + decomposition) succeeded, so a failure anywhere
+          # above leaves the previous results, diagnostics, and run ID intact.
+          # INT-08: the policy run signature is stored with both result arms.
+          baseline_out$.sig <- policy_sig
+          if (!is.null(pol_out$hist_sim)) pol_out$hist_sim$.sig <- policy_sig
+          baseline_svy_rv(svy)
+          policy_svy_rv(svy_mod)
+          baseline_hist_sim_rv(baseline_out)
+          baseline_saved_scenarios_rv(baseline_scenarios_out)
+          policy_hist_sim_rv(pol_out$hist_sim)
+          policy_saved_scenarios_rv(pol_out$saved_scenarios)
+          decomp_rv(decomp)
+          decomp_scenarios_rv(decomp_sc)
+          policy_stale(FALSE)
+
           sim_run_id(isolate(sim_run_id()) + 1L)
-          shiny::showNotification(
-            "Policy adjustments applied and simulation re-run.",
-            type = "message", duration = 3
-          )
+          if (length(decomp_sc_errors) > 0L) {
+            shiny::showNotification(
+              paste0(
+                "Policy simulation succeeded, but ", length(decomp_sc_errors),
+                " scenario decomposition(s) failed and are omitted (first: ",
+                decomp_sc_errors[[1]], ")."
+              ),
+              type = "warning", duration = 10
+            )
+          } else {
+            shiny::showNotification(
+              "Policy adjustments applied and simulation re-run.",
+              type = "message", duration = 3
+            )
+          }
         },
         error = function(e) {
           sim_error(e)
@@ -297,8 +386,15 @@ mod_3_06_policy_sim_server <- function(id,
       invisible(NULL)
     }
 
+    # REACT-09: the parent requests a run by firing this trigger instead of
+    # calling the exported run() closure. ignoreInit + the parent's req() on
+    # the dynamically rendered button keep the trigger click-only.
+    shiny::observeEvent(run_trigger(), {
+      run()
+    }, ignoreInit = TRUE)
+
     list(
-      run                      = run,
+      running                  = sim_running,
       baseline_svy             = baseline_svy_rv,
       policy_svy               = policy_svy_rv,
       sim_run_id               = sim_run_id,
@@ -307,7 +403,8 @@ mod_3_06_policy_sim_server <- function(id,
       baseline_hist_sim        = baseline_hist_sim_rv,
       baseline_saved_scenarios = baseline_saved_scenarios_rv,
       policy_hist_sim          = policy_hist_sim_rv,
-      policy_saved_scenarios   = policy_saved_scenarios_rv
+      policy_saved_scenarios   = policy_saved_scenarios_rv,
+      stale                    = policy_stale
     )
   })
 }

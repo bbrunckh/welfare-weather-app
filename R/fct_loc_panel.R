@@ -5,7 +5,7 @@
 #' graph where two locations are linked when their H3 cell overlap meets or
 #' exceeds \code{threshold} in \emph{both} directions (mutual overlap).
 #' Overlap can be unweighted (cell counts) or weighted by a numeric column.
-#' Transitivity applies: if A–B and B–C both pass, all three are grouped.
+#' Transitivity applies: if A-B and B-C both pass, all three are grouped.
 #'
 #' @param data A data frame or lazy frame with at least \code{id_col} and
 #'   \code{h3_col} columns. Lazy frames are collected after all computation.
@@ -124,9 +124,9 @@ loc_panel <- function(data,
 
   # --- 2. Total weight per location ------------------------------------------
   totals <- base |>
-    dplyr::summarise(total = sum(weight), .by = loc_id)
+    dplyr::summarise(total = sum(weight, na.rm = TRUE), .by = loc_id)
 
-  # --- 3. Candidate pairs: loc_ids sharing ≥1 h3 cell -----------------------
+  # --- 3. Candidate pairs: loc_ids sharing > =1 h3 cell -----------------------
   pairs <- dplyr::inner_join(base, base,
                              by           = "h3",
                              suffix       = c("_x", "_y"),
@@ -136,8 +136,8 @@ loc_panel <- function(data,
   # --- 4. Overlap in both directions (all still lazy / in DuckDB) ------------
   edges <- pairs |>
     dplyr::summarise(
-      shared_x = sum(weight_x),
-      shared_y = sum(weight_y),
+      shared_x = sum(weight_x, na.rm = TRUE),
+      shared_y = sum(weight_y, na.rm = TRUE),
       .by = c(loc_id_x, loc_id_y)
     ) |>
     dplyr::left_join(totals, by = c("loc_id_x" = "loc_id")) |>
@@ -151,7 +151,7 @@ loc_panel <- function(data,
     dplyr::filter(pmin(overlap_x, overlap_y) >= threshold) |>
     dplyr::select(from = loc_id_x, to = loc_id_y)
 
-  # --- 5. Collect — single trip to DuckDB for both edges and all IDs ---------
+  # --- 5. Collect - single trip to DuckDB for both edges and all IDs ---------
   edges_df <- collect_deterministic(edges, c("from", "to"))
   ids_df   <- totals |>
     dplyr::select(loc_id) |>

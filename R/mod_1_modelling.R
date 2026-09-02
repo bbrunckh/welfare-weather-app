@@ -73,7 +73,7 @@ mod_1_modelling_ui <- function(id) {
 
 #' 1_modelling Server Functions
 #'
-#' Orchestrates sub-modules 01–08. All pure logic is delegated to
+#' Orchestrates sub-modules 01-08. All pure logic is delegated to
 #' `fct_modelling.R`. Returns a flat API list consumed by Step 2 / Step 3.
 #'
 #' @param id              Module id.
@@ -123,6 +123,7 @@ mod_1_modelling_server <- function(id,
       survey_data    = s2$survey_data,
       map_data       = s2$map_data,
       cell_data      = s2$cell_data,
+      survey_version = s2$survey_version,
       tabset_id      = "step1_output_tabs",
       tabset_session = session
     )
@@ -149,6 +150,7 @@ mod_1_modelling_server <- function(id,
       survey_data       = s2$survey_data,
       map_data          = s2$map_data,
       cell_data         = s2$cell_data,
+      survey_version    = s2$survey_version,
       tabset_id         = "step1_output_tabs",
       tabset_session    = session
     )
@@ -176,6 +178,8 @@ mod_1_modelling_server <- function(id,
       survey_weather   = s5$survey_weather,
       selected_model   = s6$selected_model,
       run_model        = s6$run_model,
+      fit_guard        = s6$fit_guard,
+      survey_version   = s2$survey_version,
       tabset_id        = "step1_output_tabs",
       tabset_session   = session
     )
@@ -189,6 +193,7 @@ mod_1_modelling_server <- function(id,
       model_fit        = s7$model_fit,
       tabset_id        = "step1_output_tabs",
       survey_weather   = s5$survey_weather,
+      fit_stale        = s7$stale,
       tabset_session   = session
     )
 
@@ -207,7 +212,11 @@ mod_1_modelling_server <- function(id,
       survey_data    = s2$survey_data,
       survey_weather = s5$survey_weather,
       model_fit      = s7$model_fit,
-      stored_breaks  = s5$stored_breaks
+      stored_breaks  = s5$stored_breaks,
+
+      # Provenance (INT-08)
+      survey_version = s2$survey_version,
+      fit_stale      = s7$stale
     )
   })
 }

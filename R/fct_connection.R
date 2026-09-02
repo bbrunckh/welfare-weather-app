@@ -1,11 +1,24 @@
 #' Build connection parameters from raw input values
+#'
+#' One supported auth contract per source (DEP-02):
+#' \itemize{
+#'   \item local - filesystem path.
+#'   \item s3 - HMAC keys: UI fields or AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY.
+#'   \item gcs - HMAC (interop) keys: UI fields or GCS_ACCESS_KEY_ID / GCS_SECRET_ACCESS_KEY.
+#'   \item azure - storage Account Key, or service principal via
+#'     AZURE_CLIENT_ID / AZURE_CLIENT_SECRET / AZURE_TENANT_ID.
+#'   \item hf - public repositories only (httpfs reads `hf://` directly).
+#'   \item databricks - M2M service principal via environment variables.
+#' }
+#' Blank UI inputs never shadow environment credentials (`%|||%`).
+#'
 #' @param type One of "local", "s3", "gcs", "azure", "hf"
 #' @param ... Named arguments specific to each type
 #' @return A named list of connection parameters
 #' @export
 build_connection_params <- function(type, ...) {
   args <- list(...)
-  # Like %||% but also treats empty strings as missing — needed so blank UI
+  # Like %||% but also treats empty strings as missing - needed so blank UI
   # inputs don't shadow .Renviron values
   `%|||%` <- function(a, b) if (!is.null(a) && nzchar(a %||% "")) a else b
 
@@ -14,9 +27,12 @@ build_connection_params <- function(type, ...) {
     "local" = list(type = "local", path = args$path %||% "data/"),
     "s3"    = list(type = "s3",    bucket = args$s3_bucket %||% "",
                    prefix = args$s3_prefix %||% "", region = args$s3_region %||% "us-east-1",
-                   key_id = args$s3_key_id %||% "", secret = args$s3_secret %||% ""),
+                   key_id = args$s3_key_id %|||% Sys.getenv("AWS_ACCESS_KEY_ID"),
+                   secret = args$s3_secret %|||% Sys.getenv("AWS_SECRET_ACCESS_KEY")),
     "gcs"   = list(type = "gcs",   bucket = args$gcs_bucket  %||% "",
-                   prefix = args$gcs_prefix  %||% "", keyfile = args$gcs_keyfile %||% ""),
+                   prefix = args$gcs_prefix  %||% "",
+                   key_id = args$gcs_key_id %|||% Sys.getenv("GCS_ACCESS_KEY_ID"),
+                   secret = args$gcs_secret %|||% Sys.getenv("GCS_SECRET_ACCESS_KEY")),
     "azure" = list(type           = "azure",
                    account        = args$azure_account        %||% "",
                    container      = args$azure_container      %||% "",
@@ -26,7 +42,7 @@ build_connection_params <- function(type, ...) {
                    client_secret  = args$azure_client_secret  %|||% Sys.getenv("AZURE_CLIENT_SECRET"),
                    tenant_id      = args$azure_tenant_id      %|||% Sys.getenv("AZURE_TENANT_ID")),
     "hf"    = list(type = "hf",    repo = args$hf_repo   %||% "",
-                   subdir = args$hf_subdir %||% "", token = args$hf_token %||% ""),
+                   subdir = args$hf_subdir %||% ""),
     "databricks" = list(
       type          = "databricks",
       workspace     = args$db_workspace     %|||% Sys.getenv("DATABRICKS_HOST"),

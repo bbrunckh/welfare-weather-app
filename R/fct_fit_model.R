@@ -7,16 +7,16 @@
 # Each supported engine is registered in `ENGINE_REGISTRY` as a named list
 # with four fields:
 #
-#   $requires       – character vector of package names that must be installed
-#   $model_types    – character vector of model types the engine supports
+#   $requires       - character vector of package names that must be installed
+#   $model_types    - character vector of model types the engine supports
 #                     (must match values of selected_model$type)
-#   $build_formulas – function(y_var, terms, fe_vars) -> named list of formulae
+#   $build_formulas - function(y_var, terms, fe_vars) -> named list of formulae
 #                     with elements formula1, formula2, formula3
-#   $fit_one        – function(formula, data, model_type, model_spec, opts) ->
+#   $fit_one        - function(formula, data, model_type, model_spec, opts) ->
 #                     a fitted model object
-#   $make_spec      – function(model_type, use_logit) -> parsnip model spec
+#   $make_spec      - function(model_type, use_logit) -> parsnip model spec
 #                     (or NULL for non-parsnip engines)
-#   $prepare_outcome – function(df, y_var, use_logit) -> df with outcome
+#   $prepare_outcome - function(df, y_var, use_logit) -> df with outcome
 #                     coerced to the type expected by this engine
 #
 # To add a new engine (e.g. "ranger", "xgboost"):
@@ -35,7 +35,7 @@
 ENGINE_REGISTRY <- list(
 
   # -------------------------------------------------------------------------- #
-  # fixest (feols / feglm) — high-dimensional fixed effects                    #
+  # fixest (feols / feglm) - high-dimensional fixed effects                    #
   # -------------------------------------------------------------------------- #
   fixest = list(
 
@@ -93,7 +93,7 @@ ENGINE_REGISTRY <- list(
   #   * FE variables are passed as regular features (no absorbing).
   #   * Polynomial / interaction formula terms are included because parsnip
   #     passes the formula to the underlying engine, which evaluates I(x^2) etc.
-  #     For tree-based models this is usually unnecessary — the model learns
+  #     For tree-based models this is usually unnecessary - the model learns
   #     non-linearities automatically. Keeping them is harmless but redundant.
   #   * Only "Linear regression" (regression mode) is wired here. Add
   #     "Logistic regression" support by switching set_mode("classification").
@@ -189,7 +189,7 @@ ENGINE_REGISTRY <- list(
   ),
 
   # -------------------------------------------------------------------------- #
-  # RIF — Unconditional Quantile Regression (Firpo, Fortin & Lemieux 2009)     #
+  # RIF - Unconditional Quantile Regression (Firpo, Fortin & Lemieux 2009)     #
   # -------------------------------------------------------------------------- #
   # Estimates distributional impacts by transforming the outcome into its
   # Recentered Influence Function at each quantile, then fitting standard OLS
@@ -214,7 +214,7 @@ ENGINE_REGISTRY <- list(
         } else {
           paste(rhs_main, collapse = " + ")
         }
-        # Store as character — fit_one will prepend the stacked RIF LHS
+        # Store as character - fit_one will prepend the stacked RIF LHS
         rhs
       }
       list(
@@ -272,7 +272,7 @@ ENGINE_REGISTRY <- list(
 #' @param weather_vars character vector weather vars (unpenalized)
 #' @param fe_vars character vector fixed-effect vars (unpenalized)
 #' @param int_vars character vector interaction moderators (unpenalized;
-#'   weather × int_vars interactions are also forced into the unpenalized core)
+#'   weather * int_vars interactions are also forced into the unpenalized core)
 #' @param valid_vl data.frame variable list with columns name, ind, hh, area, firm
 #' @param model_type character scalar ("Linear regression" / "Logistic regression")
 #' @param alpha numeric glmnet alpha
@@ -283,6 +283,10 @@ ENGINE_REGISTRY <- list(
 #' @param mi_maxit integer mice iterations
 #' @param mi_method character; mice imputation method (default "pmm";
 #'   "norm.predict" / "norm" are much faster for numeric-heavy candidate pools)
+#' @param use_mice logical; when `FALSE` (default) incomplete rows are dropped
+#'   via complete-case filtering and no imputation runs. When `TRUE`, the
+#'   mice multiple-imputation path (`mi_m` / `mi_maxit` / `mi_method`) is
+#'   restored.
 #' @param stability_threshold numeric in (0,1)
 #' @param use_parallel logical; use future.apply / futuremice for parallel runs
 #' @param n_workers integer; number of workers for parallel plan (capped at mi_m)
@@ -340,12 +344,12 @@ run_lasso_selection <- function(
   is_logit <- identical(model_type, "Logistic regression")
   if (is_logit) {
     if (!identical(outcome_type, "logical")) {
-      warning("Logistic regression requested but outcome type is not 'logical' — falling back to linear.")
+      warning("Logistic regression requested but outcome type is not 'logical' - falling back to linear.")
       is_logit <- FALSE
     } else {
       y_vals <- df[[y_var]][!is.na(df[[y_var]])]
       if (!all(y_vals %in% c(0, 1, TRUE, FALSE))) {
-        warning("Outcome values are not 0/1 — falling back to linear.")
+        warning("Outcome values are not 0/1 - falling back to linear.")
         is_logit <- FALSE
       }
     }
@@ -360,7 +364,7 @@ run_lasso_selection <- function(
   #
   # Real column names that must be unpenalized go in `core_main_terms`.
   # Formula-syntax interaction strings ("int:weather") go in `interaction_terms`
-  # and are appended directly to the formula — model.matrix expands them.
+  # and are appended directly to the formula - model.matrix expands them.
   # `int_vars` themselves are unpenalized main effects.
   # ---------------------------------------------------------------------------
   weather_vars <- weather_vars[weather_vars %in% names(df)]
@@ -444,12 +448,12 @@ run_lasso_selection <- function(
   }
 
   # ---------------------------------------------------------------------------
-  # 5. Parallel plan (workers capped at mi_m — extra workers idle)
+  # 5. Parallel plan (workers capped at mi_m - extra workers idle)
   #
   # Auto-disable parallelism on small samples: below `parallel_min_n` rows the
   # multisession fork + globals-export overhead exceeds the actual work. The
   # 20k default reflects the break-even point on a 16-core Mac with mi_m = 5
-  # (see dev/bench_lasso.R).
+  # (see dev/archive/bench_lasso.R).
   # ---------------------------------------------------------------------------
   m <- max(1L, as.integer(mi_m))
   family_type <- if (is_logit) "binomial" else "gaussian"
@@ -465,7 +469,7 @@ run_lasso_selection <- function(
 
   # Parallel plan setup is deferred to the MI path (step 8) where map_fun is
 
-  # actually used. The fast path (step 7, no NAs) forces sequential lapply —
+  # actually used. The fast path (step 7, no NAs) forces sequential lapply -
   # spawning multisession workers here would waste startup time.
   map_fun <- lapply
 
@@ -508,10 +512,10 @@ run_lasso_selection <- function(
   # ---------------------------------------------------------------------------
   # 7. Fast path: no NAs in candidates (always true after complete-case filter)
   #
-  # X_full and penalty are identical across iterations — build once.  The loop
+  # X_full and penalty are identical across iterations - build once.  The loop
   # only varies the random CV fold assignment for stability selection.
   # Sequential lapply: globals-export overhead of multisession exceeds the
-  # cv.glmnet compute time (confirmed via dev/bench_lasso.R).
+  # cv.glmnet compute time (confirmed via dev/archive/bench_lasso.R).
   # ---------------------------------------------------------------------------
   if (!has_na) {
     X_lasso <- drop_constant(as.matrix(df[, candidate_vars, drop = FALSE]))
@@ -691,7 +695,7 @@ run_lasso_selection <- function(
 #'
 #' The fitting backend is selected via \code{selected_model$engine} and
 #' dispatched through \code{ENGINE_REGISTRY}. Adding support for a new engine
-#' only requires a new entry in that registry — no changes to this function.
+#' only requires a new entry in that registry - no changes to this function.
 #'
 #' @param df A \code{data.frame} containing all variables.
 #' @param selected_outcome Named list with \code{$name} (outcome column) and
@@ -714,8 +718,8 @@ run_lasso_selection <- function(
 #'     \item{\code{$hh_covariates}, \code{$area_covariates},
 #'       \code{$ind_covariates}, \code{$firm_covariates}}{Control variables.}
 #'     \item{\code{$cluster}}{Variable name(s) for clustered SEs (fixest
-#'       only). Step 1 defaults to \code{"loc_id_panel"} — the survey-location
-#'       panel level at which the weather hazard is assigned — matching
+#'       only). Step 1 defaults to \code{"loc_id_panel"} - the survey-location
+#'       panel level at which the weather hazard is assigned - matching
 #'       \code{COEF_VCOV_SPEC} in fct_simulations.R. Variables absent from
 #'       the data trigger a warning and an unclustered fit.}
 #'   }
@@ -786,6 +790,10 @@ fit_model <- function(df, selected_outcome, selected_weather, selected_model) {
   # 2. Validate
   # ---------------------------------------------------------------------------
 
+  # REACT-14: structured record of every specification fallback applied below,
+  # surfaced by the Step 1 results banner instead of only a console warning.
+  fallbacks <- list()
+
   if (!y_var %in% names(df))
     stop(sprintf("Outcome variable '%s' not found in data.", y_var))
 
@@ -806,12 +814,24 @@ fit_model <- function(df, selected_outcome, selected_weather, selected_model) {
 
   if (use_logit) {
     if (!identical(outcome_type, "logical")) {
-      warning("Logistic regression requested but outcome type is not 'logical' — falling back to linear.")
+      warning("Logistic regression requested but outcome type is not 'logical' - falling back to linear.")
+      fallbacks <- c(fallbacks, list(list(
+        kind      = "model_family",
+        requested = "logistic",
+        used      = "linear",
+        reason    = "outcome column is not logical (TRUE/FALSE or 0/1)"
+      )))
       use_logit <- FALSE
     } else {
       y_vals <- df[[y_var]][!is.na(df[[y_var]])]
       if (!all(y_vals %in% c(0, 1, TRUE, FALSE))) {
-        warning("Outcome values are not 0/1 — falling back to linear.")
+        warning("Outcome values are not 0/1 - falling back to linear.")
+        fallbacks <- c(fallbacks, list(list(
+          kind      = "model_family",
+          requested = "logistic",
+          used      = "linear",
+          reason    = "outcome values are not restricted to 0/1"
+        )))
         use_logit <- FALSE
       }
     }
@@ -852,13 +872,13 @@ fit_model <- function(df, selected_outcome, selected_weather, selected_model) {
   #
   # Two modes, selected via selected_model$interaction_mode:
   #
-  #   "pairwise"  (default) — each moderator is crossed with every weather term
+  #   "pairwise"  (default) - each moderator is crossed with every weather term
   #     independently.  For weather term W and moderators M1, M2 this gives:
   #       W * M1  and  W * M2  as separate terms on the RHS.
   #     This estimates a separate W:M1 slope and a separate W:M2 slope,
   #     and is almost always what you want in practice.
   #
-  #   "saturated" — all moderators are crossed simultaneously with each weather
+  #   "saturated" - all moderators are crossed simultaneously with each weather
   #     term.  For W and moderators M1, M2 this gives:
   #       W * M1 * M2
   #     which includes the three-way interaction W:M1:M2.  Use this only when
@@ -880,7 +900,7 @@ fit_model <- function(df, selected_outcome, selected_weather, selected_model) {
   if (length(interaction_vars) > 0) {
 
     if (interaction_mode == "pairwise") {
-      # One `W * Mk` term per (weather-term, moderator) pair — kept separate
+      # One `W * Mk` term per (weather-term, moderator) pair - kept separate
       interaction_formula_terms <- as.vector(outer(
         weather_formula_terms, interaction_vars,
         FUN = function(h, m) paste0(h, " * ", m)
@@ -892,7 +912,7 @@ fit_model <- function(df, selected_outcome, selected_weather, selected_model) {
       ))
 
     } else {
-      # "saturated": W * M1 * M2 * … — one term per weather term
+      # "saturated": W * M1 * M2 * ... - one term per weather term
       mod_str <- paste(interaction_vars, collapse = " * ")
       interaction_formula_terms <- paste0(weather_formula_terms, " * ", mod_str)
       # Reporting strings: all combinations of W with each subset of moderators
@@ -946,9 +966,18 @@ fit_model <- function(df, selected_outcome, selected_weather, selected_model) {
   cluster_missing <- setdiff(cluster_vars, names(df))
   if (length(cluster_missing) > 0) {
     warning(sprintf(
-      "Cluster variable(s) not found in data — fitting without clustered SEs: %s",
+      "Cluster variable(s) not found in data - fitting without clustered SEs: %s",
       paste(cluster_missing, collapse = ", ")
     ))
+    fallbacks <- c(fallbacks, list(list(
+      kind      = "vcv",
+      requested = paste0("clustered (", paste(cluster_vars, collapse = ", "), ")"),
+      used      = "default (heteroskedasticity-robust)",
+      reason    = sprintf(
+        "cluster variable(s) not found in data: %s",
+        paste(cluster_missing, collapse = ", ")
+      )
+    )))
     cluster_vars <- intersect(cluster_vars, names(df))
   }
 
@@ -969,7 +998,7 @@ fit_model <- function(df, selected_outcome, selected_weather, selected_model) {
   # default specification). fixest caches this fit-time VCV, so Step 1's
   # displayed standard errors and Step 2's coefficient-uncertainty draws
   # (compute_chol_vcov() tries the fit-time VCV first) share one sampling
-  # distribution — matching COEF_VCOV_SPEC in fct_simulations.R.
+  # distribution - matching COEF_VCOV_SPEC in fct_simulations.R.
   engine_opts <- list(
     fixest = if (length(cluster_vars) > 0) {
       list(cluster = stats::as.formula(
@@ -1005,13 +1034,13 @@ fit_model <- function(df, selected_outcome, selected_weather, selected_model) {
   # ---------------------------------------------------------------------------
   # do.call(feols, args) captures the full evaluated `data` argument inside
 
-  # the call slot — for large surveys this adds hundreds of MB per fit element
-  # (×27 for RIF with 9 taus × 3 fits). Strip the embedded data from $call
+  # the call slot - for large surveys this adds hundreds of MB per fit element
+  # (*27 for RIF with 9 taus * 3 fits). Strip the embedded data from $call
   # and remove $scores (only needed to re-compute robust VCV, which is already
 
   # stored in $coeftable). vcov(), r2() and fixef() continue to work after this.
   #
-  # NOTE: stats::model.matrix(fit) does NOT survive slimming — fixest
+  # NOTE: stats::model.matrix(fit) does NOT survive slimming - fixest
   # re-evaluates the `data` argument from $call to rebuild the design matrix,
   # so once $call[[3]] is gone it errors. The marginal-effect plot
   # (make_weather_effect_plot) needs that matrix for the linear path, so for
@@ -1039,7 +1068,7 @@ fit_model <- function(df, selected_outcome, selected_weather, selected_model) {
   # effect plots can rebuild predictions / importance without re-evaluating the
   # (now removed) embedded data. fit3 is the only fit plotted. For RIF, all
   # quantile sub-fits share one design matrix, so we cache a single copy on the
-  # median sub-fit (the one extract_rif_median() returns) — not all 9 — keeping
+  # median sub-fit (the one extract_rif_median() returns) - not all 9 - keeping
   # this to at most one stored matrix either way.
   .cache_mm <- function(fit) {
     if (inherits(fit, "fixest")) {
@@ -1048,7 +1077,7 @@ fit_model <- function(df, selected_outcome, selected_weather, selected_model) {
       if (!is.null(mm)) attr(fit, "wise_mm") <- mm
     } else if (is.list(fit) && length(fit) > 0) {
       # fixest_multi: cache on the median sub-fit (index matches extract_rif_median).
-      # Pull the sub-fit out, attach the attr, and write it back — assigning to
+      # Pull the sub-fit out, attach the attr, and write it back - assigning to
       # attr(fit[[idx]], ...) directly would mutate a throwaway copy.
       idx <- min(5L, length(fit))
       sub <- fit[[idx]]
@@ -1100,6 +1129,7 @@ fit_model <- function(df, selected_outcome, selected_weather, selected_model) {
     train_data        = df,
     formulas          = formulas,
     rif_grid          = rif_grid,
-    taus              = rif_taus
+    taus              = rif_taus,
+    fallbacks         = fallbacks
   )
 }

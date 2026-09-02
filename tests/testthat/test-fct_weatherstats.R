@@ -83,10 +83,10 @@ test_that("merge_survey_weather converts year to factor", {
   expect_s3_class(out$year, "factor")
 })
 
-test_that("merge_survey_weather normalises weights to sum to 1 per group", {
-  out <- merge_survey_weather(make_survey(), make_weather())
-  total_weight <- sum(out$weight, na.rm = TRUE)
-  expect_equal(total_weight, 1, tolerance = 1e-6)
+test_that("merge_survey_weather preserves raw survey weights", {
+  sv  <- make_survey()
+  out <- merge_survey_weather(sv, make_weather())
+  expect_equal(sum(out$weight, na.rm = TRUE), sum(sv$weight, na.rm = TRUE))
 })
 
 test_that("merge_survey_weather returns NULL when join produces zero rows", {

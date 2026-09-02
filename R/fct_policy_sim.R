@@ -198,10 +198,14 @@ policy_placeholder_tag <- function(category_label, candidate_df) {
 #' @param education Named list returned by \code{mod_3_05_education_server()}.
 #' @param model_vars Character vector of variable / term names in the current
 #'   Step 1 model (covariates and interactions). When supplied, covariate
-#'   levers only mutate columns that appear in the model — a variable dropped
+#'   levers only mutate columns that appear in the model - a variable dropped
 #'   from Step 1 leaves the survey untouched. When \code{NULL} (the default)
 #'   no gating is applied (legacy behaviour).
 #' @param seed Integer seed for stochastic policy assignment.
+#' @param analysis_unit Character. Analysis unit of the survey frame:
+#'   `"hh"` scales social-protection transfers by household size when an
+#'   `hhsize` column is present; `"pc"` treats rows as per-capita
+#'   observations. Default `"hh"`.
 #'
 #' @return The modified survey data frame.
 #' @export
@@ -221,8 +225,8 @@ apply_policy_to_svy <- function(svy,
   # Columns eligible for covariate-lever manipulation. A lever whose variable
   # has been removed from the Step 1 model (its UI control is hidden) must not
   # mutate the survey, otherwise the diagnostics tab would surface phantom
-  # "manipulated" variables that the model — and hence the Results and
-  # Decomposition tabs — ignore. Matching mirrors the lever modules' show_*
+  # "manipulated" variables that the model - and hence the Results and
+  # Decomposition tabs - ignore. Matching mirrors the lever modules' show_*
   # logic (substring match against model term names). SP transfers act on
   # `welfare` (the outcome, not a covariate) and are intentionally not gated.
   lever_cols <- if (is.null(model_vars)) {
@@ -370,7 +374,7 @@ apply_policy_to_svy <- function(svy,
                         (!is.null(labor$sector_services) && labor$sector_services != 0)
 
     if (has_labor_change) {
-      # Employment rate change (percentage points): unemployed → employed/selfemployed
+      # Employment rate change (percentage points): unemployed -> employed/selfemployed
       # Requires all three employment status columns to be present
       emp_change <- (labor$employment_change_pp %||% 0) / 100
       if (emp_change != 0 && all(c("employed", "selfemployed", "unemployed") %in%
@@ -382,7 +386,7 @@ apply_policy_to_svy <- function(svy,
 
       # emp_change is the target shift in employment rate (as a fraction of
       # total N), so multiply by nrow(svy) to get the number of workers to
-      # flip — giving a true percentage-point change in employment rate.
+      # flip - giving a true percentage-point change in employment rate.
       n_total <- nrow(svy)
 
       if (emp_change > 0 && length(unemp_idx) > 0) {
@@ -469,7 +473,7 @@ apply_policy_to_svy <- function(svy,
           stringsAsFactors = FALSE
         )
 
-        # Agriculture → (deficit sectors)
+        # Agriculture -> (deficit sectors)
         if (surplus_agri > 0) {
           agri_workers <- which(working & svy$agriculture == 1L)
           if (length(agri_workers) > 0) {
@@ -493,7 +497,7 @@ apply_policy_to_svy <- function(svy,
           }
         }
 
-        # Industry → (deficit sectors)
+        # Industry -> (deficit sectors)
         if (surplus_ind > 0 && (deficit_agri > 0 || deficit_serv > 0)) {
           ind_workers <- which(working & svy$industry == 1L)
           if (length(ind_workers) > 0) {
@@ -520,7 +524,7 @@ apply_policy_to_svy <- function(svy,
           }
         }
 
-        # Services → (deficit sectors)
+        # Services -> (deficit sectors)
         if (surplus_serv > 0 && (deficit_agri > 0 || deficit_ind > 0)) {
           serv_workers <- which(working & svy$services == 1L)
           if (length(serv_workers) > 0) {
@@ -569,10 +573,10 @@ apply_policy_to_svy <- function(svy,
   # transfer amount here; run_sim_pipeline() (fct_simulations.R) reads the
   # column post-prediction and adds it to y_point on the level scale
   # (re-logged when so$transform == "log") so the boost flows into
-  # aggregate_with_uncertainty_delta() and matches the decomposition's δ_sp.
+  # aggregate_with_uncertainty_delta() and matches the decomposition's delta_sp.
   #
   # When analysis_unit == "hh" each row is a household and the SP "recipient"
-  # is the household, but welfare is per-capita — so the per-household
+  # is the household, but welfare is per-capita - so the per-household
   # transfer must be divided by hhsize to match scale. When analysis_unit ==
   # "ind" the SP transfer is already per-individual and applies to every
   # eligible (individual) row as-is. `hhsize_scale` performs that scaling.
@@ -646,6 +650,10 @@ apply_policy_to_svy <- function(svy,
 #'   \code{$train_data}, and (for RIF) \code{$taus}, \code{$weather_terms}.
 #' @param hist_sim_baseline      Step 2 hist_sim list.
 #' @param saved_scenarios_baseline Step 2 named scenario list.
+#' @param svy_baseline Optional data frame. The pre-policy survey-weather
+#'   frame; when supplied (with a Cholesky factor present), the
+#'   additive-decomposition active mask is rebuilt by diffing \code{svy}
+#'   against \code{svy_baseline}.
 #'
 #' @return A named list with elements \code{hist_sim} and
 #'   \code{saved_scenarios} matching the Step 2 schema, or \code{NULL} on
@@ -672,7 +680,7 @@ resimulate_with_svy <- function(svy, sw, so, mf,
   # (e.g. electricity, internet, employed) that must also stay active.
   # Diff svy (post-policy) against svy_baseline (the pre-policy survey) so
   # the detected modifications are exactly what apply_policy_to_svy()
-  # flipped — robust to baseline/training mismatch.
+  # flipped - robust to baseline/training mismatch.
   if (!is.null(chol_obj)) {
     is_rif_shape <- is.list(chol_obj) && !("L" %in% names(chol_obj))
     if (is_rif_shape) attr(chol_obj, "active_mask") <- NULL
@@ -707,8 +715,8 @@ resimulate_with_svy <- function(svy, sw, so, mf,
   # train_aug: identical for every run_one() call below (same model, same
   # train_data). Compute once here instead of repeating
   # predict(model, train_data) per scenario/ensemble member (see PERF-19),
-  # mirroring fct_run_simulation(). RIF engines never use train_aug —
-  # run_sim_pipeline() returns NULL for it on the RIF path — so leave it NULL
+  # mirroring fct_run_simulation(). RIF engines never use train_aug -
+  # run_sim_pipeline() returns NULL for it on the RIF path - so leave it NULL
   # there. On failure, NULL restores run_sim_pipeline()'s per-call fallback,
   # which keeps the existing warning/fallback behaviour.
   precomputed_train_aug <- if (is_rif) NULL else tryCatch({
@@ -802,7 +810,7 @@ resimulate_with_svy <- function(svy, sw, so, mf,
       sc_label <- names(saved_scenarios_baseline)[[i]] %||% paste0("scenario_", i)
       message("[resimulate_with_svy] Scenario '", sc_label,
               "' has no $pipelines; falling back to representative weather ",
-              "(single model — inter-model spread will not be available).")
+              "(single model - inter-model spread will not be available).")
       out <- run_one(s$weather_raw, slim = TRUE)
       if (is.null(out)) return(NULL)
       pipes_new <- list(single = out)
@@ -842,7 +850,7 @@ resimulate_with_svy <- function(svy, sw, so, mf,
 #' Apply a per-household policy delta to the baseline Step 2 pipelines
 #'
 #' Module 3 historically built its policy arm by calling
-#' \code{resimulate_with_svy()} — a full re-prediction against the policy-
+#' \code{resimulate_with_svy()} - a full re-prediction against the policy-
 #' adjusted survey. That works, but it (a) duplicates compute for every
 #' CMIP6 member, and (b) historically caused the Results pane to disagree with
 #' the Decomposition pane when baseline and policy aggregation used independent
@@ -875,7 +883,7 @@ resimulate_with_svy <- function(svy, sw, so, mf,
 #'     \item The delta is computed once per pipeline using that pipeline's
 #'           full \code{weather_raw} (period-mean hazard), matching the
 #'           Decomposition Summary table. Per-\code{sim_year} delta variation
-#'           inside a scenario is not yet modelled — also a follow-up.
+#'           inside a scenario is not yet modelled - also a follow-up.
 #'   }
 #'
 #' @param svy_baseline           Baseline survey-weather data frame.
@@ -885,8 +893,15 @@ resimulate_with_svy <- function(svy, sw, so, mf,
 #' @param hist_sim_baseline      Step 2 \code{hist_sim} list (verbatim).
 #' @param saved_scenarios_baseline Step 2 named \code{saved_scenarios} list.
 #' @param skip_coef              Logical. Forwarded to
-#'   \code{decompose_policy_effect()} — when TRUE, per-channel SEs are zeroed
+#'   \code{decompose_policy_effect()} - when TRUE, per-channel SEs are zeroed
 #'   but \code{delta_total} is still computed.
+#' @param deltas                 Optional pre-computed covariate deltas from
+#'   \code{.compute_policy_deltas()} - weather-independent, so computed once
+#'   here and reused for every pipeline/scenario instead of per call
+#'   (PERF-22). Computed internally when NULL.
+#' @param F_hat                  Optional pre-built ecdf of the training
+#'   outcome (RIF path; see \code{.compute_rif_channels()}). Computed
+#'   internally when NULL.
 #'
 #' @return Named list with \code{hist_sim} and \code{saved_scenarios} on the
 #'   Step 2 schema, or \code{NULL} on failure.
@@ -897,10 +912,23 @@ apply_policy_delta_to_baseline <- function(svy_baseline,
                                             so,
                                             hist_sim_baseline,
                                             saved_scenarios_baseline = list(),
-                                            skip_coef = FALSE) {
+                                            skip_coef = FALSE,
+                                            deltas    = NULL,
+                                            F_hat     = NULL) {
   if (is.null(svy_baseline) || is.null(svy_policy) ||
       is.null(model_fit) || is.null(so) ||
       is.null(hist_sim_baseline)) return(NULL)
+
+  # PERF-22: both pieces are identical for every pipeline and scenario, so
+  # build them once instead of inside delta_for() per call.
+  deltas <- deltas %||% .compute_policy_deltas(
+    svy_baseline, svy_policy, so$name, model_fit$weather_terms
+  )
+  F_hat <- F_hat %||% (if (identical(model_fit$engine, "rif") &&
+                           !is.null(model_fit$train_data) &&
+                           so$name %in% names(model_fit$train_data)) {
+    stats::ecdf(model_fit$train_data[[so$name]])
+  } else NULL)
 
   # Per-HH delta_total for a given weather panel. Returns NULL when the
   # decomposition is unavailable (engine outside {rif, fixest}, missing
@@ -913,7 +941,9 @@ apply_policy_delta_to_baseline <- function(svy_baseline,
         model_fit    = model_fit,
         so           = so,
         weather_raw  = weather_raw,
-        skip_coef    = skip_coef
+        skip_coef    = skip_coef,
+        deltas       = deltas,
+        F_hat        = F_hat
       ),
       error = function(e) {
         warning("[apply_policy_delta_to_baseline] decompose_policy_effect() ",

@@ -164,7 +164,7 @@ parse_custom_breaks <- function(x) {
 #' when `NULL` is supplied.
 #'
 #' @param name          Scalar character. Variable name (e.g. `"tx"`).
-#' @param units         Scalar character. Variable units (e.g. `"°C"`).
+#' @param units         Scalar character. Variable units (e.g. `"degC"`).
 #' @param ref_period    Integer vector of length 2: `c(start, end)` months
 #'   before interview. Defaults to `c(1L, 1L)`.
 #' @param temporal_agg  Scalar character. Temporal aggregation method.

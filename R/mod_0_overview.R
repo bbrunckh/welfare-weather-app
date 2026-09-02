@@ -30,7 +30,7 @@ mod_0_overview_ui <- function(id) {
           "welfare under historical and projected climate scenarios,",
           "and to evaluate resilience-building policy interventions."
         )),
-        p("Work through the three steps below — each step builds on the previous one."),
+        p("Work through the three steps below - each step builds on the previous one."),
 
         p(tags$a(
           icon("book-open"), "WISE-APP Use Guide",
@@ -65,8 +65,8 @@ mod_0_overview_ui <- function(id) {
       "1", "Model welfare",
       paste(
         "Estimate the empirical relationship between local weather and an",
-        "outcome of interest — such as household consumption or",
-        "poverty status — from survey microdata. The fitted model is the",
+        "outcome of interest - such as household consumption or",
+        "poverty status - from survey microdata. The fitted model is the",
         "foundation for all subsequent steps."
       )
     ),
@@ -94,23 +94,22 @@ mod_0_overview_ui <- function(id) {
     bslib::card_header(icon("triangle-exclamation"), " Limitations"),
     bslib::card_body(
       p(paste(
-        "WISE-APP is an illustrative stress-testing tool — not a forecast or a",
+        "WISE-APP is an illustrative stress-testing tool - not a forecast or a",
         "causal impact evaluation framework. Its estimates capture conditional",
         "statistical associations between local weather variability and household",
-        "welfare. The User Guide includes important"
+        "welfare. The User Guide includes"
       ),
       tags$a(
-        "caveats",
+        "important caveats.",
         href = "https://datanalytics.worldbank.org/wise-app-docs/#limitations",
         target = "_blank"
-      ),
-      "."
+      )
       )
     )
   )
 
   # On Posit Connect with Databricks env vars: skip the connection form
-  # entirely and just show the status badge — server auto-connects on startup.
+  # entirely and just show the status badge - server auto-connects on startup.
   if (.auto_connect()) {
     return(tagList(
       hero,
@@ -220,9 +219,11 @@ mod_0_overview_server <- function(id) {
         "gcs" = tagList(
           textInput(ns("gcs_bucket"),  "GCS bucket",           placeholder = "my-bucket"),
           textInput(ns("gcs_prefix"),  "Prefix (optional)",    placeholder = "data/"),
-          textInput(ns("gcs_keyfile"), "Service account JSON", placeholder = "/path/to/key.json"),
+          textInput(ns("gcs_key_id"),  "HMAC access key ID (optional)",  placeholder = ""),
+          passwordInput(ns("gcs_secret"), "HMAC secret (optional)",       placeholder = ""),
           helpText(
-            "Leave key file blank to use Application Default Credentials.",
+            "GCS uses HMAC (interoperability) keys. Leave both blank to use",
+            " GCS_ACCESS_KEY_ID / GCS_SECRET_ACCESS_KEY from .Renviron.",
             style = "font-size: 12px;"
           )
         ),
@@ -238,7 +239,7 @@ mod_0_overview_server <- function(id) {
           helpText(
             "Credentials are optional if a service principal is set via AZURE_CLIENT_ID /",
             "AZURE_CLIENT_SECRET / AZURE_TENANT_ID in .Renviron.",
-            "Alternatively supply an account key or SAS token (?sv=...) in the key field.",
+            "Alternatively supply the storage account key in the key field.",
             style = "font-size: 12px;"
           )
         ),
@@ -246,9 +247,9 @@ mod_0_overview_server <- function(id) {
         "hf" = tagList(
           textInput(ns("hf_repo"),          "Repository",              placeholder = "username/dataset-name"),
           textInput(ns("hf_subdir"),        "Subdirectory (optional)", placeholder = "data/"),
-          passwordInput(ns("hf_token"),     "HF token (private repos)", placeholder = "hf_..."),
           helpText(
-            "Leave token blank for public repositories.",
+            "Public Hugging Face datasets only; private repositories and",
+            " personal-access tokens are not supported by this connection type.",
             style = "font-size: 12px;"
           )
         ),
@@ -285,7 +286,8 @@ mod_0_overview_server <- function(id) {
         s3_secret       = input$s3_secret,
         gcs_bucket      = input$gcs_bucket,
         gcs_prefix      = input$gcs_prefix,
-        gcs_keyfile     = input$gcs_keyfile,
+        gcs_key_id      = input$gcs_key_id,
+        gcs_secret      = input$gcs_secret,
         azure_account   = input$azure_account,
         azure_container = input$azure_container,
         azure_prefix    = input$azure_prefix,
@@ -295,7 +297,6 @@ mod_0_overview_server <- function(id) {
         azure_tenant_id      = input$azure_tenant_id,
         hf_repo         = input$hf_repo,
         hf_subdir       = input$hf_subdir,
-        hf_token        = input$hf_token,
         db_workspace     = input$db_workspace,
         db_client_id     = input$db_client_id,
         db_client_secret = input$db_client_secret,
@@ -310,8 +311,31 @@ mod_0_overview_server <- function(id) {
       validate_connection_params(connection_params())
     })
 
+    # Verified/failed connection state from the last connect attempt (NULL =
+    # no attempt yet). "Verified" means the metadata actually loaded; the
+    # plain field check below only says "configured" (DEP-03).
+    connection_status <- reactiveVal(NULL)
+
     output$connection_status_ui <- renderUI({
       req(input$connection_type)
+      st <- connection_status()
+      if (!is.null(st)) {
+        if (identical(st$state, "connected")) {
+          return(p(
+            icon("circle-check"), " ", st$message,
+            style = "color: #2e7d32; font-size: 12px; margin-top: 4px;"
+          ))
+        }
+        return(div(
+          p(
+            icon("circle-exclamation"), " ", st$message,
+            style = "color: #c62828; font-weight: 600; font-size: 12px; margin-top: 4px;"
+          ),
+          if (!is.null(st$detail)) p(
+            st$detail, style = "color: #c62828; font-size: 12px;"
+          )
+        ))
+      }
       if (isTRUE(connection_valid())) {
         p(
           icon("circle-check"), " Connection configured.",
@@ -326,6 +350,11 @@ mod_0_overview_server <- function(id) {
     })
 
     # ---- Apply connection on button click -----------------------------------
+
+    # A source switch invalidates the previous attempt's status
+    observeEvent(input$connection_type, {
+      connection_status(NULL)
+    }, ignoreInit = TRUE)
 
     applied_connection <- reactiveVal(NULL)
     survey_list        <- reactiveVal(NULL)
@@ -347,21 +376,15 @@ mod_0_overview_server <- function(id) {
             paste("Auto-connect to Databricks failed:", msg),
             type = "error", duration = 15
           )
-          output$connection_status_ui <- renderUI({
-            div(
-              p(icon("circle-exclamation"), " Failed to connect to Databricks.",
-                style = "color: #c62828; font-weight: 600; font-size: 12px; margin-top: 4px;"
-              ),
-              p(msg, style = "color: #c62828; font-size: 12px;"),
-              p(paste(
-                "Check the DATABRICKS_HOST, DATABRICKS_CLIENT_ID,",
-                "DATABRICKS_CLIENT_SECRET and DATABRICKS_VOLUME_PATH environment",
-                "variables configured for this app on Posit Connect, then reload the app."
-              ),
-              style = "font-size: 12px;"
-              )
+          connection_status(list(
+            state   = "error",
+            message = "Failed to connect to Databricks.",
+            detail  = paste0(
+              msg, "\n\nCheck the DATABRICKS_HOST, DATABRICKS_CLIENT_ID, ",
+              "DATABRICKS_CLIENT_SECRET and DATABRICKS_VOLUME_PATH environment ",
+              "variables configured for this app on Posit Connect, then reload the app."
             )
-          })
+          ))
         }
 
         tryCatch({
@@ -377,11 +400,9 @@ mod_0_overview_server <- function(id) {
 
           # Only expose the connection once all metadata has loaded successfully
           applied_connection(params)
-
-          output$connection_status_ui <- renderUI({
-            p(icon("circle-check"), " Connected to Databricks.",
-              style = "color: #2e7d32; font-size: 12px; margin-top: 4px;")
-          })
+          connection_status(list(
+            state = "connected", message = "Connected to Databricks.", detail = NULL
+          ))
         }, error = function(e) auto_connect_fail(e))
       }) |> bindEvent(TRUE, once = TRUE)
     }
@@ -399,6 +420,8 @@ mod_0_overview_server <- function(id) {
       params <- connection_params()
 
       if (identical(params$type, "local")) {
+        # DEP-03: configuration completeness is not reachability - the folder
+        # must exist (and be readable) before anything is published.
         path_ok <- tryCatch({
           params$path <- normalise_local_path(params$path)
           TRUE
@@ -407,45 +430,93 @@ mod_0_overview_server <- function(id) {
           FALSE
         })
         if (!path_ok) return()
+        if (!dir.exists(params$path)) {
+          connection_status(list(
+            state   = "error",
+            message = "Local folder not found.",
+            detail  = paste0(
+              "The path does not exist or is not readable: ", params$path,
+              "\nCheck the folder path, then reconnect."
+            )
+          ))
+          showNotification(
+            paste("Local folder not found:", params$path),
+            type = "error", duration = 8
+          )
+          return()
+        }
         message("[overview] applied local folder: ", params$path)
       } else {
         message("[overview] applied connection: ", params$type)
       }
 
-      applied_connection(params)
+      # INT-02: never mix a new connection with the previous source's
+      # metadata. Reset everything up front and re-publish only after every
+      # metadata file has loaded from the new source.
+      applied_connection(NULL)
+      survey_list(NULL)
+      variable_list(NULL)
+      cpi_ppp(NULL)
+      pov_lines(NULL)
 
       # ---- Load metadata files ----------------------------------------------
 
       load_notif <- showNotification("Loading metadata files...", duration = NULL, type = "message")
       on.exit(removeNotification(load_notif), add = TRUE)
 
-      tryCatch({
-        survey_list(load_data("metadata/survey_list.csv", params, collect = TRUE))
-        showNotification(paste0("Survey list loaded (", nrow(survey_list()), " rows)"), type = "message", duration = 2)
-      }, error = function(e) {
-        showNotification("Failed to load metadata/survey_list.csv", type = "error", duration = 5)
-      })
+      errors <- character(0)
+      load_step <- function(label, expr) {
+        tryCatch(expr, error = function(e) {
+          errors <<- c(errors, paste0(label, ": ", conditionMessage(e)))
+          NULL
+        })
+      }
 
-      tryCatch({
+      load_step("metadata/survey_list.csv", {
+        survey_list(load_data("metadata/survey_list.csv", params, collect = TRUE))
+      })
+      load_step("metadata/variable_list.csv", {
         variable_list(add_derived_policy_vars_to_vl(
           load_data("metadata/variable_list.csv", params, collect = TRUE)
         ) |> dplyr::mutate(name = dplyr::if_else(name == "loc_id", "loc_id_panel", name)))
-        showNotification(paste0("Variable list loaded (", nrow(variable_list()), " rows)"), type = "message", duration = 2)
-      }, error = function(e) {
-        showNotification("Failed to load metadata/variable_list.csv", type = "error", duration = 5)
       })
-
-      tryCatch({
+      load_step("metadata/cpi_ppp.csv", {
         cpi_ppp(load_data("metadata/cpi_ppp.csv", params, collect = TRUE))
-        showNotification("CPI / PPP conversions loaded", type = "message", duration = 2)
-      }, error = function(e) {
-        showNotification("Failed to load metadata/cpi_ppp.csv", type = "error", duration = 5)
       })
-
-      showNotification(paste0("Connected to ", input$connection_type, " data source."), type = "message", duration = 3)
-
-      # poverty lines (delegates to fct_connection.R)
       pov_lines(default_poverty_lines())
+
+      if (length(errors) > 0L) {
+        connection_status(list(
+          state   = "error",
+          message = paste0(
+            "Could not load metadata from the ", params$type, " source."
+          ),
+          detail  = paste(errors, collapse = "\n")
+        ))
+        showNotification(
+          paste0(
+            "Connection failed: metadata could not be loaded from the ",
+            params$type, " source. ", length(errors), " file(s) failed - ",
+            "see the status panel for details."
+          ),
+          type = "error", duration = 10
+        )
+        return()
+      }
+
+      # Only expose the connection once all metadata has loaded successfully
+      applied_connection(params)
+      connection_status(list(
+        state   = "connected",
+        message = paste0(
+          "Connected to ", params$type, " data source (metadata verified)."
+        ),
+        detail  = NULL
+      ))
+      showNotification(
+        paste0("Connected to ", params$type, " data source."),
+        type = "message", duration = 3
+      )
 
     }, ignoreInit = TRUE)
 
@@ -454,7 +525,7 @@ mod_0_overview_server <- function(id) {
     output$folder_path_echo <- renderText({
       p <- applied_connection()
       if (is.null(p)) return("No connection applied yet.")
-      if (identical(p$type, "local")) paste0("Connected: local folder — ", p$path)
+      if (identical(p$type, "local")) paste0("Connected: local folder - ", p$path)
       else paste0("Connected: ", p$type)
     })
 

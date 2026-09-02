@@ -46,11 +46,14 @@ mod_1_04_weather_server <- function(id, variable_list, selected_surveys, survey_
       choice_labels <- paste0(wl$label, " (", wl$name, ")")
       choice_map <- stats::setNames(wl$name, choice_labels)
 
+      # INT-01: keep the user's variable selection when the choice set is
+      # rebuilt; fall back to the first variable only when nothing survives.
+      prev_sel <- shiny::isolate(input$weather_variable_selector)
       shiny::selectizeInput(
         inputId  = ns("weather_variable_selector"),
         label    = "Weather variables",
         choices  = choice_map,
-        selected = wl$name[1],
+        selected = .restore_selection(prev_sel, wl$name, fallback = wl$name[1]),
         multiple = TRUE,
         options  = list(
           placeholder = "Select up to 2 weather variables",
@@ -76,30 +79,14 @@ mod_1_04_weather_server <- function(id, variable_list, selected_surveys, survey_
           if (i > 1 && n_vars > 1) hr(),
           tags$p(tags$strong(paste0(var_info$label, ":")),
                  style = "font-size: 15px;"),
-          shiny::actionButton(ns(paste0(prefix, "toggle")), "Configure",
-                 icon  = shiny::icon("sliders"),
-                 class = "btn-outline-primary btn-sm",
-                 style = "margin-bottom: 10px;"),
           # Options render in a floating panel beside the sidebar
           # (.config-flyout in custom.css) so they are visible without
           # scrolling. Content stays in the DOM at all times, so input
-          # defaults register immediately.
-          shiny::conditionalPanel(
-            condition = paste0("input['", ns(paste0(prefix, "toggle")), "'] % 2 == 1"),
-            class     = "config-flyout",
-            div(
-              class = "config-flyout-header",
-              tags$h6(paste0(var_info$label, " settings")),
-              tags$button(
-                type    = "button",
-                class   = "btn-close",
-                `aria-label` = "Close",
-                onclick = sprintf(
-                  "document.getElementById('%s').click();",
-                  ns(paste0(prefix, "toggle"))
-                )
-              )
-            ),
+          # defaults register immediately. UI-02: anchored to its toggle,
+          # one-open state, aria-expanded, focus management, Escape to close.
+          config_flyout_block(
+            ns(paste0(prefix, "toggle")),
+            paste0(var_info$label, " settings"),
             tagList(
 
               shiny::sliderInput(
@@ -190,31 +177,15 @@ mod_1_04_weather_server <- function(id, variable_list, selected_surveys, survey_
       this_year <- as.integer(format(Sys.Date(), "%Y"))
 
       # Same shape as a weather variable's block above: heading, "Configure"
-      # button, flyout with the settings — so the sidebar reads as one list of
+      # button, flyout with the settings - so the sidebar reads as one list of
       # configurable sections rather than a list plus an odd one out.
       tagList(
         hr(),
         tags$p(tags$strong("Historical comparison:"),
                style = "font-size: 15px;"),
-        shiny::actionButton(ns("hist_toggle"), "Configure",
-               icon  = shiny::icon("sliders"),
-               class = "btn-outline-primary btn-sm",
-               style = "margin-bottom: 10px;"),
-        shiny::conditionalPanel(
-          condition = paste0("input['", ns("hist_toggle"), "'] % 2 == 1"),
-          class     = "config-flyout",
-          div(
-            class = "config-flyout-header",
-            tags$h6("Historical comparison settings"),
-            tags$button(
-              type    = "button",
-              class   = "btn-close",
-              `aria-label` = "Close",
-              onclick = sprintf(
-                "document.getElementById('%s').click();", ns("hist_toggle")
-              )
-            )
-          ),
+        config_flyout_block(
+          ns("hist_toggle"),
+          "Historical comparison settings",
           tagList(
             shiny::numericInput(
               ns("hist_year_from"), "From year",
@@ -300,11 +271,11 @@ mod_1_04_weather_server <- function(id, variable_list, selected_surveys, survey_
           paste0(r$ref_start, if (r$ref_start == 1) " month" else " months",
                  " before interview")
         } else {
-          paste0(r$ref_start, "–", r$ref_end, " months before interview")
+          paste0(r$ref_start, "-", r$ref_end, " months before interview")
         }
 
         form_txt <- if (identical(r$cont_binned, "Binned")) {
-          paste0("binned × ", r$num_bins, " (", tolower(r$binning_method), ")")
+          paste0("binned * ", r$num_bins, " (", tolower(r$binning_method), ")")
         } else {
           poly <- unlist(r$polynomial)
           if (length(poly) > 0) {
@@ -320,7 +291,7 @@ mod_1_04_weather_server <- function(id, variable_list, selected_surveys, survey_
 
         tagList(
           tags$b(paste0(r$label, ":")),
-          paste0(" ", paste(parts, collapse = " · ")),
+          paste0(" ", paste(parts, collapse = " \u00B7 ")),
           tags$br()
         )
       })
@@ -332,7 +303,7 @@ mod_1_04_weather_server <- function(id, variable_list, selected_surveys, survey_
         rows,
         tagList(
           tags$b("Historical comparison:"),
-          paste0(" ", hy[["from"]], "–", hy[["to"]])
+          paste0(" ", hy[["from"]], "-", hy[["to"]])
         )
       )
     })

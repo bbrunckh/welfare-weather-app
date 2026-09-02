@@ -13,3 +13,11 @@
 ^app\.R$
 ^rsconnect$
 ^\.rscignore$
+^manifest\.json$
+^CLAUDE\.md$
+^batch$
+^review$
+^\.claude$
+^\.kilo$
+^\.posit$
+^AGENTS\.md$

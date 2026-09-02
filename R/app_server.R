@@ -33,7 +33,8 @@ app_server <- function(input, output, session) {
     selected_surveys  = step1_api$selected_surveys,
     survey_weather    = step1_api$survey_weather,
     model_fit         = step1_api$model_fit,
-    stored_breaks     = step1_api$stored_breaks
+    stored_breaks     = step1_api$stored_breaks,
+    survey_version    = step1_api$survey_version
   )
 
   # ---- Step 3: policy scenarios --------------------------------------------
@@ -56,6 +57,8 @@ app_server <- function(input, output, session) {
     skip_coef_draws   = step2_api$skip_coef_draws,
     residuals         = step2_api$residuals,
     propagate_all_covariate_uncertainty =
-      step2_api$propagate_all_covariate_uncertainty
+      step2_api$propagate_all_covariate_uncertainty,
+    survey_version    = step1_api$survey_version,
+    sim_stale         = step2_api$stale
   )
 }

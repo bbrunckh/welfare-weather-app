@@ -36,6 +36,17 @@ mc_se <- function(pipe, method, weights = NULL, pov_line = NULL,
   stats::sd(vals)
 }
 
+# Compare a finite-difference aggregate move against the analytic gradient's
+# prediction, scaled by the larger of the two to stay meaningful near zero.
+expect_near_fd <- function(object, expected, tol = 1e-4, info = NULL) {
+  scale <- max(abs(expected), abs(object), 1e-12)
+  testthat::expect_true(
+    abs(object - expected) <= tol * scale,
+    info = paste0(info, ": observed=", format(object),
+                  " expected=", format(expected))
+  )
+}
+
 test_that("delta-method mean matches MC SE within 5%", {
   pipe <- make_pipeline()
   res <- wiseapp:::aggregate_with_uncertainty_delta(
@@ -112,50 +123,160 @@ test_that("delta-method headcount with smoothing returns finite SE", {
   expect_lt(abs(se_delta - se_mc) / se_mc, 0.5)
 })
 
-test_that("avg_poverty SE matches MC and has correct gradient sign", {
-  # avg_poverty uses the partial-derivative gradient (not the empirical
-  # influence function — see method_uncertainty.md §3.7). Key qualitative
-  # property: h_j >= 0 for every poor household — lifting any poor
-  # household's welfare raises the conditional poverty mean. The previous
-  # implementation used h_j = (w̃_j / B) * 1{poor} * (μ_j − T) * μ_j, which
-  # flipped sign for households with μ_j < T (the very poorest) and
-  # overstated the SE.
+test_that("avg_poverty SE matches MC for the days-needed-to-earn-$1 metric", {
+  # avg_poverty is mean(1 / welfare) over valid rows — "days needed to earn
+  # $1" — not the conditional mean among the poor (method_uncertainty.md
+  # §3.7). Gradient: h_i = -1/(n_ok * mu_i) unweighted and
+  # -w_i / (W_ok * mu_i) weighted; strictly negative for every valid
+  # household because raising welfare lowers days-to-$1, zero otherwise.
   pipe <- make_pipeline()
-  pov_line <- 3.00
 
-  # Gradient sign check: extract h directly from gradient_for_method().
   mu <- exp(pipe$y_point)
   w_tilde <- pipe$weights / sum(pipe$weights)
-  value_pt <- wiseapp:::resolve_agg_fn("avg_poverty")(mu, pipe$weights, pov_line)
+  value_pt <- wiseapp:::resolve_agg_fn("avg_poverty")(mu, pipe$weights, NULL)
   h <- wiseapp:::gradient_for_method(
     method   = "avg_poverty",
     mu       = mu,
     weights  = pipe$weights,
-    pov_line = pov_line,
+    pov_line = NULL,
     value_pt = value_pt
   )
-  poor <- mu < pov_line
-  expect_true(all(h[poor]  >= 0))   # every poor household lifts T
-  expect_true(all(h[!poor] == 0))   # non-poor never contribute
-  # Some poor are above T (mean), some below T — under the buggy formula
-  # the below-T set would have h < 0. Verify both sets exist in this
-  # fixture so the test is non-trivial.
-  expect_true(any(mu[poor] < value_pt))
-  expect_true(any(mu[poor] > value_pt))
+  ok <- is.finite(mu) & mu > 0
+  expect_true(all(h[ok] < 0))              # every valid household lowers T
+  expect_equal(h[!ok], rep(0, sum(!ok)))   # invalid rows never contribute
+  W_ok <- sum(pipe$weights[ok])
+  expect_equal(h[ok], -pipe$weights[ok] / (W_ok * mu[ok]))  # exact formula
 
   # SE accuracy vs. MC
   res <- wiseapp:::aggregate_with_uncertainty_delta(
     y_point   = pipe$y_point,
     F_loading = pipe$F_loading,
     method    = "avg_poverty",
-    weights   = pipe$weights,
-    pov_line  = pov_line
+    weights   = pipe$weights
   )
   se_delta <- sqrt(res$var_coef)
-  se_mc    <- mc_se(pipe, "avg_poverty", weights = pipe$weights,
-                    pov_line = pov_line)
+  se_mc    <- mc_se(pipe, "avg_poverty", weights = pipe$weights)
   expect_true(is.finite(se_delta) && se_delta > 0)
   expect_lt(abs(se_delta - se_mc) / se_mc, 0.10)
+})
+
+test_that("prosperity_gap gradient matches MC and exact formula", {
+  # prosperity_gap is mean(pmax(28 / welfare, 1)) — the average factor by
+  # which incomes must rise to reach $28/day. Gradient below the threshold:
+  # h_i = -28/(N * mu_i) unweighted, -(w_i/W) * 28/mu_i weighted; zero above
+  # (pmax is flat) and for non-positive mu.
+  pipe <- make_pipeline()
+
+  mu <- exp(pipe$y_point)
+  h <- wiseapp:::gradient_for_method(
+    method   = "prosperity_gap",
+    mu       = mu,
+    weights  = pipe$weights,
+    pov_line = NULL,
+    value_pt = wiseapp:::resolve_agg_fn("prosperity_gap")(mu, pipe$weights, NULL)
+  )
+  below <- is.finite(mu) & mu > 0 & mu < 28
+  W <- sum(pipe$weights)
+  expect_true(all(h[!below] == 0))
+  expect_equal(h[below], -(pipe$weights[below] / W) * 28 / mu[below])  # exact
+
+  res <- wiseapp:::aggregate_with_uncertainty_delta(
+    y_point   = pipe$y_point,
+    F_loading = pipe$F_loading,
+    method    = "prosperity_gap",
+    weights   = pipe$weights
+  )
+  se_delta <- sqrt(res$var_coef)
+  se_mc    <- mc_se(pipe, "prosperity_gap", weights = pipe$weights)
+  expect_true(is.finite(se_delta) && se_delta > 0)
+  expect_lt(abs(se_delta - se_mc) / se_mc, 0.10)
+})
+
+test_that("all smooth delta-method gradients match finite differences (unweighted)", {
+  # h_i = (dT/dw_i) * w_i, so a small relative welfare perturbation
+  # dw_i/w_i = eps must move the point estimate by h_i * eps. Excluded:
+  # median (piecewise-constant estimate — Hampel IF is not FD-visible) and
+  # headcount_ratio (discontinuous estimate; the gradient is defined on the
+  # kernel-smoothed surrogate, validated separately below).
+  pipe  <- make_pipeline()
+  mu    <- exp(pipe$y_point)
+  eps   <- 1e-6
+  idx   <- 101L
+  specs <- list(
+    list(method = "mean",           args = list(), tol = 1e-4),
+    list(method = "total",          args = list(), tol = 1e-4),
+    list(method = "gap",            args = list(pov_line = 3.00), tol = 1e-4),
+    list(method = "fgt2",           args = list(pov_line = 3.00), tol = 1e-4),
+    list(method = "prosperity_gap", args = list(), tol = 1e-4),
+    list(method = "avg_poverty",    args = list(), tol = 1e-4),
+    list(method = "gini",           args = list(), tol = 1e-2)
+  )
+  for (sp in specs) {
+    agg_fn <- wiseapp:::resolve_agg_fn(sp$method)
+    z <- if (is.null(sp$args$pov_line)) 1 else sp$args$pov_line
+    T0 <- agg_fn(mu, NULL, z)
+    y1 <- pipe$y_point; y1[idx] <- y1[idx] + eps
+    T1 <- agg_fn(exp(y1), NULL, z)
+    h <- wiseapp:::gradient_for_method(
+      method = sp$method, mu = mu, weights = NULL,
+      pov_line = sp$args$pov_line, value_pt = T0
+    )
+    expect_near_fd(T1 - T0, h[idx] * eps, tol = sp$tol,
+                   info = paste(sp$method, "unweighted"))
+  }
+})
+
+test_that("all smooth delta-method gradients match finite differences (weighted)", {
+  pipe  <- make_pipeline()
+  mu    <- exp(pipe$y_point)
+  eps   <- 1e-6
+  idx   <- 51L
+  specs <- list(
+    list(method = "mean",           args = list(), tol = 1e-4),
+    list(method = "total",          args = list(), tol = 1e-4),
+    list(method = "gap",            args = list(pov_line = 3.00), tol = 1e-4),
+    list(method = "fgt2",           args = list(pov_line = 3.00), tol = 1e-4),
+    list(method = "prosperity_gap", args = list(), tol = 1e-4),
+    list(method = "avg_poverty",    args = list(), tol = 1e-4),
+    list(method = "gini",           args = list(), tol = 1e-2)
+  )
+  for (sp in specs) {
+    agg_fn <- wiseapp:::resolve_agg_fn(sp$method)
+    z <- if (is.null(sp$args$pov_line)) 1 else sp$args$pov_line
+    T0 <- agg_fn(mu, pipe$weights, z)
+    y1 <- pipe$y_point; y1[idx] <- y1[idx] + eps
+    T1 <- agg_fn(exp(y1), pipe$weights, z)
+    h <- wiseapp:::gradient_for_method(
+      method = sp$method, mu = mu, weights = pipe$weights,
+      pov_line = sp$args$pov_line, value_pt = T0
+    )
+    expect_near_fd(T1 - T0, h[idx] * eps, tol = sp$tol,
+                   info = paste(sp$method, "weighted"))
+  }
+})
+
+test_that("kernel-smoothed headcount_ratio gradient matches finite differences", {
+  # The gradient is defined on the kernel-smoothed surrogate of the hard
+  # headcount (the raw estimate is discontinuous and not FD-visible). With
+  # F_loading = NULL the bandwidth is the fixed user value b_w = p0 * z, so
+  # the surrogate is differentiable and FD-comparable.
+  pipe <- make_pipeline()
+  mu   <- exp(pipe$y_point)
+  eps  <- 1e-6
+  idx  <- 77L
+  pov_line <- 3.00
+  b_w  <- 0.05 * pov_line
+  w_tilde <- pipe$weights / sum(pipe$weights)
+  smooth <- function(mu_vec) sum(w_tilde * stats::pnorm((pov_line - mu_vec) / b_w))
+
+  T0 <- smooth(mu)
+  y1 <- pipe$y_point; y1[idx] <- y1[idx] + eps
+  T1 <- smooth(exp(y1))
+  h <- wiseapp:::gradient_for_method(
+    method = "headcount_ratio", mu = mu, weights = pipe$weights,
+    pov_line = pov_line, value_pt = T0, bandwidth_p0 = 0.05
+  )
+  expect_near_fd(T1 - T0, h[idx] * eps, tol = 1e-4, info = "headcount_ratio")
 })
 
 

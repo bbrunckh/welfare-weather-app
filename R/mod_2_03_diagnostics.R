@@ -12,6 +12,9 @@
 mod_2_03_diagnostics_ui <- function(id) {
   ns <- NS(id)
   tagList(
+    # ---- 0. Stale banner (INT-08) -------------------------------------------
+    shiny::uiOutput(ns("stale_banner")),
+
     # ---- 0. Scenario filters -----------------------------------------------
     shiny::uiOutput(ns("scenario_filter_panel")),
 
@@ -48,7 +51,9 @@ mod_2_03_diagnostics_ui <- function(id) {
         class = "btn-sm btn-default",
         style = "margin-bottom:8px;"
       ),
-      shiny::plotOutput(ns("diag_weather_density"), height = "340px"),
+      wise_plot_output(ns("diag_weather_density"),
+                       "Density plot comparing the selected weather variable in the historical sample against its own climate history",
+                       height = "340px"),
       shiny::uiOutput(ns("diag_weather_log_ui")),
       shiny::tags$p(
         style = "font-size:11px; color:#666; margin-top:4px;",
@@ -68,7 +73,7 @@ mod_2_03_diagnostics_ui <- function(id) {
             " of the bar's total length."),
           shiny::p(shiny::tags$b("Note:"),
             " variances (not SDs) add under independence, so the stacked total",
-            " is an upper bound on the true combined SD — read the bar as a",
+            " is an upper bound on the true combined SD - read the bar as a",
             " side-by-side decomposition of where uncertainty comes from, not",
             " as a literal additive total."),
           shiny::p(shiny::tags$b("Coefficient uncertainty"),
@@ -79,15 +84,17 @@ mod_2_03_diagnostics_ui <- function(id) {
             " about the central tendency."),
           shiny::p(shiny::tags$b("Inter-model spread"),
             " (future scenarios only) = SD of across-model disagreement in",
-            " the per-model mean aggregate — uncertainty about the central",
+            " the per-model mean aggregate - uncertainty about the central",
             " tendency arising from model choice."),
           docs = TRUE
         )
       ),
-      shiny::plotOutput(ns("variance_contribution_plot"), height = "320px"),
+      wise_plot_output(ns("variance_contribution_plot"),
+                       "Bar plot of each weather variable's contribution to simulated outcome variance",
+                       height = "320px"),
       shiny::tags$p(
         style = "font-size:11px; color:#666; margin-top:6px;",
-        "Each segment = one source's SD contribution (not strictly additive) — click ",
+        "Each segment = one source's SD contribution (not strictly additive) - click ",
         shiny::icon("circle-info"), " above for details."
       )
     ),
@@ -105,13 +112,15 @@ mod_2_03_diagnostics_ui <- function(id) {
           shiny::p(shiny::tags$b("Translucent ribbon"),
             " (future scenarios only) = inter-model spread at the selected band quantiles."),
           shiny::p(
-            "Each scenario × projection period gets its own colour (SSP",
+            "Each scenario \u00D7 projection period gets its own colour (SSP",
             "family) and linetype (period), shown as one entry in the legend."
           ),
           docs = TRUE
         )
       ),
-      shiny::plotOutput(ns("timeseries_plot"), height = "380px"),
+      wise_plot_output(ns("timeseries_plot"),
+                       "Time series of the outcome across survey years",
+                       height = "380px"),
       shiny::tags$p(
         style = "font-size:11px; color:#666; margin-top:6px;",
         "Thin lines = ensemble members; bold = median; ribbon = inter-model spread."
@@ -144,9 +153,15 @@ mod_2_03_diagnostics_server <- function(id,
                                          variance_breakdown = NULL,
                                          timeseries_curves = NULL,
                                          tabset_id,
-                                         tabset_session = NULL) {
+                                         tabset_session = NULL,
+                                         stale = reactive(FALSE)) {
   moduleServer(id, function(input, output, session) {
     ns <- session$ns
+
+    # INT-08: stale banner above the diagnostics pane.
+    output$stale_banner <- shiny::renderUI({
+      if (isTRUE(stale())) .stale_banner("Step 2 diagnostics") else NULL
+    })
 
     if (is.null(tabset_session)) tabset_session <- session$parent %||% session
 
@@ -189,11 +204,11 @@ mod_2_03_diagnostics_server <- function(id,
       else if (has_w && !tog_on)
         shiny::tags$p(
           style = "font-size:11px; color:#e65100; margin:2px 0 6px 0;",
-          "⚠ Survey weights available but not applied")
+          "\u26A0 Survey weights available but not applied")
       else
         shiny::tags$p(
           style = "font-size:11px; color:#c62828; margin:2px 0 6px 0;",
-          "🔴 No weight column found — unweighted")
+          "\U0001F534 No weight column found - unweighted")
     })
 
 
@@ -339,10 +354,22 @@ mod_2_03_diagnostics_server <- function(id,
 
 
 
-    # ---- Insert Diagnostics tab once (first hist_sim only) -----------------
+    # ---- Insert Diagnostics tab on first hist_sim; remove when cleared -----
+
+    diag_tab_added <- reactiveVal(FALSE)
 
     observeEvent(hist_sim(), {
-      req(hist_sim())
+      if (is.null(hist_sim())) {
+        if (diag_tab_added()) {
+          shiny::removeTab(
+            inputId = tabset_id,
+            target  = "diag_tab",
+            session = tabset_session
+          )
+          diag_tab_added(FALSE)
+        }
+        return()
+      }
 
       sw      <- if (!is.null(selected_weather)) selected_weather() else NULL
       choices <- if (!is.null(sw) && "name" %in% names(sw)) {
@@ -363,7 +390,8 @@ mod_2_03_diagnostics_server <- function(id,
       shiny::updateSelectInput(session, "diag_weather_vars",
                                choices  = choices,
                                selected = choices[seq_len(min(2, length(choices)))])
-    }, ignoreInit = TRUE, once = TRUE)
+      diag_tab_added(TRUE)
+    }, ignoreInit = TRUE, ignoreNULL = FALSE)
 
     observeEvent(selected_weather(), {
       sw      <- if (!is.null(selected_weather)) selected_weather() else NULL
@@ -387,6 +415,6 @@ mod_2_03_diagnostics_server <- function(id,
     outputOptions(output, "weight_status_diag_ui",   suspendWhenHidden = TRUE)
 
     # ---- Return API --------------------------------------------------------
-    list()
+    list(diag_tab_added = diag_tab_added)
   })
 }

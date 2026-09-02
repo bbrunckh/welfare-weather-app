@@ -124,7 +124,9 @@ mod_3_scenario_server <- function(id,
                                    skip_coef_draws = reactive(FALSE),
                                    residuals       = reactive("original"),
                                    propagate_all_covariate_uncertainty =
-                                     reactive(FALSE)) {
+                                     reactive(FALSE),
+                                   survey_version  = reactive(0L),
+                                   sim_stale       = reactive(FALSE)) {
   moduleServer(id, function(input, output, session) {
     ns <- session$ns
 
@@ -164,7 +166,7 @@ mod_3_scenario_server <- function(id,
         tags$small(
           class = "text-muted",
           paste(
-            "Adjust these inputs (and any others) in the sections below —",
+            "Adjust these inputs (and any others) in the sections below -",
             "results update when you re-run the simulation."
           )
         )
@@ -231,7 +233,13 @@ mod_3_scenario_server <- function(id,
       analysis_unit     = analysis_unit,
       skip_coef_draws   = skip_coef_draws,
       residuals         = residuals,
-      propagate_all_covariate_uncertainty = propagate_all_covariate_uncertainty
+      propagate_all_covariate_uncertainty = propagate_all_covariate_uncertainty,
+      survey_version    = survey_version,
+      sim_stale         = sim_stale,
+      # REACT-09: fire the child's run trigger on button click. req() blocks
+      # the NULL/zero state of the dynamically rendered button, so the trigger
+      # only fires on real clicks.
+      run_trigger       = reactive({ req(input$run_policy_sim); input$run_policy_sim })
     )
 
     # ---- Results tabs: Baseline & Policy (both re-simulated) -------------
@@ -245,7 +253,8 @@ mod_3_scenario_server <- function(id,
       sim_run_id               = s6$sim_run_id,
       tabset_id                = "step3_output_tabs",
       tabset_session           = session,
-      residuals                = residuals
+      residuals                = residuals,
+      stale                    = s6$stale
     )
 
     # ---- Diagnostics tab: before/after variable analysis ----------------
@@ -302,11 +311,19 @@ mod_3_scenario_server <- function(id,
       )
     })
 
-    # ---- Run policy simulation on button click ---------------------------
+    # REACT-02: keep the button disabled while the policy simulation runs.
+    observeEvent(s6$running(), {
+      tryCatch(
+        shiny::updateActionButton(
+          session, inputId = "run_policy_sim",
+          disabled = isTRUE(s6$running())
+        ),
+        error = function(e) NULL
+      )
+    }, ignoreInit = TRUE)
 
-    observeEvent(input$run_policy_sim, {
-      s6$run()
-    })
+    # ---- Run policy simulation on button click ---------------------------
+    # REACT-09: handled by the run_trigger reactive passed to the child.
 
     # ---- Return API ------------------------------------------------------
 

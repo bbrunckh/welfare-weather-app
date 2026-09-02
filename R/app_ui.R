@@ -62,7 +62,7 @@ app_ui <- function(request) {
     bslib::nav_item(
       tags$a(
         icon("database"), "Data",
-        href = "https://github.com/bbrunckh/wise-app-data",
+        href = "https://github.com/worldbank/wise-app-data",
         target = "_blank",
         rel = "noopener noreferrer",
         title = "View data prep repository on GitHub",

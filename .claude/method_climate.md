@@ -43,7 +43,6 @@ The Step 2 sidebar exposes these climate-relevant controls:
 | `fut_start_{1,2,3}` / `fut_end_{1,2,3}` | numeric pairs | period 1: `2025–2035` | Up to three future periods. Empty pairs are ignored. Each period is a year band over which the GCM future climatology is averaged. |
 | `baseline_survey` | select (multi) | Step 1 default | Survey × year(s) that define the microdata population. |
 | `residuals` | radio | `"original"` | Residual-draw mode (not climate-specific — see [`method_uncertainty.md`](method_uncertainty.md) §1.2). |
-| `dev_mode` | checkbox | off | Caps each SSP × period at 1 GCM member for fast iteration. |
 
 Two scenario tables are built from these inputs:
 

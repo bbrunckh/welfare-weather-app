@@ -94,6 +94,7 @@ test_that("one map output is created per weather variable, not per wave", {
     args = weatherstats_args(sw, swd, make_map_data()),
     {
       survey_weather(swd)
+      wx_spec(list(sw = sw, so = NULL))
       session$flushReact()
 
       expect_equal(nrow(wave_list()), 2L)
@@ -104,8 +105,8 @@ test_that("one map output is created per weather variable, not per wave", {
 
       # Both cards are laid out, each headed by its variable and the wave.
       html <- as.character(output$weather_map_layout$html)
-      expect_true(grepl("Max temp — Testland, 2018", html, fixed = TRUE))
-      expect_true(grepl("Precipitation — Testland, 2018", html, fixed = TRUE))
+      expect_true(grepl("Max temp - Testland, 2018", html, fixed = TRUE))
+      expect_true(grepl("Precipitation - Testland, 2018", html, fixed = TRUE))
       expect_equal(lengths(regmatches(html, gregexpr("wxmap_", html))), 2L)
     }
   )
@@ -122,24 +123,31 @@ test_that("the wave picker selects which wave the maps draw", {
     args = weatherstats_args(sw, swd, make_map_data()),
     {
       survey_weather(swd)
+      wx_spec(list(sw = sw, so = NULL))
       session$flushReact()
 
       # Defaults to the first wave rather than to nothing.
       expect_equal(wxmap_wave(), "TST|2018|SRV")
-      map_2018 <- as.character(output$wxmap_1)
-      expect_true(grepl("25.00", map_2018, fixed = TRUE))
-      expect_false(grepl("28.00", map_2018, fixed = TRUE))
+      # The wave's values are encoded as the per-feature fill colours (no
+      # popups): read the registered GeoJSON source out of the widget payload.
+      fill_colors <- function(widget) {
+        j <- jsonlite::fromJSON(widget, simplifyVector = FALSE)
+        vapply(j$x$sources[[1]]$data$features,
+               function(f) f$properties$`__fill`, character(1))
+      }
+      cols_2018 <- fill_colors(output$wxmap_1)
+      expect_true(all(nzchar(cols_2018)))
 
       # Switching the picker redraws the same widget with the other wave's
       # values rather than adding a second one.
       session$setInputs(wxmap_wave = "TST|2021|SRV")
       expect_equal(wxmap_wave(), "TST|2021|SRV")
-      map_2021 <- as.character(output$wxmap_1)
-      expect_true(grepl("28.00", map_2021, fixed = TRUE))
-      expect_false(grepl("25.00", map_2021, fixed = TRUE))
+      cols_2021 <- fill_colors(output$wxmap_1)
+      expect_true(all(nzchar(cols_2021)))
+      expect_false(identical(cols_2018, cols_2021))
 
       # The card header follows the picker.
-      expect_true(grepl("Max temp — Testland, 2021",
+      expect_true(grepl("Max temp - Testland, 2021",
                         as.character(output$weather_map_layout$html),
                         fixed = TRUE))
 
@@ -161,6 +169,7 @@ test_that("the wave picker is hidden when there is only one wave", {
     args = weatherstats_args(sw, swd, make_map_data(waves = 2018)),
     {
       survey_weather(swd)
+      wx_spec(list(sw = sw, so = NULL))
       session$flushReact()
 
       expect_equal(nrow(wave_list()), 1L)
@@ -183,6 +192,7 @@ test_that("the map colour scale spans every wave, not just the one shown", {
     args = weatherstats_args(sw, swd, make_map_data()),
     {
       survey_weather(swd)
+      wx_spec(list(sw = sw, so = NULL))
       session$flushReact()
 
       lv  <- weather_loc_vals()[[1]]

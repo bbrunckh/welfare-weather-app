@@ -120,7 +120,6 @@ INCLUDE_COEF_UNCERTAINTY            <- TRUE
 PROPAGATE_ALL_COVARIATE_UNCERTAINTY <- FALSE
 
 SIM_N    <- 150L
-DEV_MODE <- FALSE
 
 # =============================================================================
 # SECTION 1C — POLICY SCENARIO SETTINGS
@@ -482,7 +481,6 @@ cfg <- list(
   RESIDUALS                           = RESIDUALS,
   INCLUDE_COEF_UNCERTAINTY            = INCLUDE_COEF_UNCERTAINTY,
   PROPAGATE_ALL_COVARIATE_UNCERTAINTY = PROPAGATE_ALL_COVARIATE_UNCERTAINTY,
-  DEV_MODE                            = DEV_MODE,
   SIM_N                               = SIM_N,
   SSPS                                = SSPS,
   HIST_YEARS                          = HIST_YEARS,
@@ -570,7 +568,6 @@ run_one_country <- function(si, cfg) {
     RESIDUALS               <- cfg$RESIDUALS
     INCLUDE_COEF_UNCERTAINTY            <- cfg$INCLUDE_COEF_UNCERTAINTY
     PROPAGATE_ALL_COVARIATE_UNCERTAINTY <- cfg$PROPAGATE_ALL_COVARIATE_UNCERTAINTY
-    DEV_MODE                <- cfg$DEV_MODE
     SIM_N                   <- cfg$SIM_N
     SSPS                    <- cfg$SSPS
     HIST_YEARS              <- cfg$HIST_YEARS
@@ -1390,7 +1387,6 @@ run_one_country <- function(si, cfg) {
           fp_list     = fp_list,
           ssps        = SSPS,
           residuals   = if (identical(fs$mf$engine, "rif")) "none" else RESIDUALS,
-          dev_mode    = DEV_MODE,
           skip_coef_draws             = !INCLUDE_COEF_UNCERTAINTY,
           sim_dates                   = sim_dates,
           perturbation_method         = if (.has_future) build_perturbation_method(fs$sw) else NULL,

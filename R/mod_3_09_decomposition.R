@@ -24,7 +24,9 @@ mod_3_09_decomposition_ui <- function(id) {
           ))
         )
       ),
-      shiny::plotOutput(ns("decomp_bar_plot"), height = "450px"),
+      wise_plot_output(ns("decomp_bar_plot"),
+                       "Bar plot of the average policy effect by channel and baseline welfare decile",
+                       height = "450px"),
       shiny::tags$p(
         style = "font-size:11px; color:#666; margin-top:6px;",
         "Bars = average effect by channel and welfare decile (decile 1 = poorest)."
@@ -36,11 +38,11 @@ mod_3_09_decomposition_ui <- function(id) {
       shiny::h4(
         "Decomposition summary",
         info_popover(
-          title = "± SE columns",
+          title = "\u00B1 SE columns",
           shiny::p(
             "Report the standard error of each channel's mean policy effect,",
             "propagated from the regression coefficient covariance via the",
-            "delta method (", shiny::tags$code("SE = sqrt(Σ w² · ||F_loading_i||²)"),
+            "delta method (", shiny::tags$code("SE = sqrt(\u03A3 w\u00B2 \u00B7 ||F_loading_i||\u00B2)"),
             "where F_loading_i is each household's per-coefficient gradient",
             "of that channel's contribution). Because this is a paired",
             "counterfactual on the same population, the residual and",
@@ -60,7 +62,7 @@ mod_3_09_decomposition_ui <- function(id) {
       shiny::uiOutput(ns("interaction_warning_ui")),
       shiny::tags$p(
         style = "font-size:11px; color:#666; margin-top:6px;",
-        "± SE = standard error of each channel's mean effect — click ",
+        "\u00B1 SE = standard error of each channel's mean effect - click ",
         shiny::icon("circle-info"), " above for the formula."
       )
     )
@@ -123,8 +125,8 @@ mod_3_09_decomposition_server <- function(id,
           " The decile bar chart and summary table use the ",
           shiny::tags$strong("mean weather from the historical baseline"),
           " as the weather hazard. Because weather changes across climate ",
-          "scenarios and years, the decomposition channels — especially ",
-          "repositioning and interaction — will differ. ",
+          "scenarios and years, the decomposition channels - especially ",
+          "repositioning and interaction - will differ. ",
           "See the ", shiny::tags$em("Scenario Range"), " panel below."
         )
       )
@@ -150,7 +152,10 @@ mod_3_09_decomposition_server <- function(id,
         weather_plot_layout(
           ns, n_vars,
           ids    = c("beta_curve_plot1", "beta_curve_plot2"),
-          height = "400px"
+          height = "400px",
+          alts   = paste("Beta curve plot: unconditional quantile regression weather",
+                         "sensitivity across welfare quantiles for",
+                         mf$weather_terms)
         ),
         shiny::tags$p(
           style = "font-size:11px; color:#666; margin-top:6px;",
@@ -194,7 +199,9 @@ mod_3_09_decomposition_server <- function(id,
           "in the model coefficients.",
           "The dashed reference line (0) is the historical baseline mean."
         ),
-        shiny::plotOutput(ns("scenario_range_plot"), height = "420px")
+        wise_plot_output(ns("scenario_range_plot"),
+                         "Dot-and-line plot of the policy effect for each climate scenario and period against the historical baseline",
+                         height = "420px")
       )
     })
 
@@ -241,8 +248,8 @@ mod_3_09_decomposition_server <- function(id,
   if (!requireNamespace("ggplot2", quietly = TRUE)) return(NULL)
   if (is.null(decomp_df) || nrow(decomp_df) == 0) return(NULL)
 
-  # Aggregate by decile (weighted mean) — point estimates only. Per-channel
-  # uncertainty is read off the summary table's ± SE columns.
+  # Aggregate by decile (weighted mean) - point estimates only. Per-channel
+  # uncertainty is read off the summary table's +/- SE columns.
   agg <- do.call(rbind, lapply(sort(unique(decomp_df$decile)), function(d) {
     idx <- decomp_df$decile == d
     w <- decomp_df$weight[idx]
@@ -309,37 +316,50 @@ mod_3_09_decomposition_server <- function(id,
       "delta_total" = "Total")
   }
 
-  # Weighted mean per channel per scenario × sim_year
-  # (each row in sc_df is a household; aggregate to year-level first)
+  # Weighted mean per channel per scenario * sim_year
+  # (each row in sc_df is a household; aggregate to year-level first).
+  # One shared grouping, one grouped pass per channel (PERF-05 follow-up):
+  # the old code re-split the full frame for every channel.
   has_years <- "sim_year" %in% names(sc_df) && !all(is.na(sc_df$sim_year))
 
-  agg_rows <- lapply(names(channels), function(col) {
-    if (!col %in% names(sc_df)) return(NULL)
+  key_cols <- if (has_years) {
+    c("scenario", "year_start", "year_end", "sim_year")
+  } else {
+    c("scenario", "year_start", "year_end")
+  }
 
-    by_vars <- if (has_years) {
-      list(sc_df$scenario, sc_df$year_start, sc_df$year_end, sc_df$sim_year)
-    } else {
-      list(sc_df$scenario, sc_df$year_start, sc_df$year_end)
-    }
-    groups <- split(seq_len(nrow(sc_df)), interaction(by_vars, drop = TRUE))
+  # interaction()/split() dropped rows with missing grouping keys
+  keep <- complete.cases(sc_df[key_cols])
+  sc   <- sc_df[keep, , drop = FALSE]
+  if (nrow(sc) == 0) return(NULL)
 
-    rows <- lapply(groups, function(idx) {
-      d <- sc_df[idx, ]
-      w <- d$weight
-      data.frame(
-        scenario   = d$scenario[[1]],
-        year_start = d$year_start[[1]],
-        year_end   = d$year_end[[1]],
-        sim_year   = if (has_years) d$sim_year[[1]] else NA_integer_,
-        channel    = channels[[col]],
-        pct        = stats::weighted.mean((exp(d[[col]]) - 1) * 100, w,
-                                          na.rm = TRUE),
-        stringsAsFactors = FALSE
-      )
-    })
-    do.call(rbind, rows)
-  })
-  agg_df <- do.call(rbind, Filter(Negate(is.null), agg_rows))
+  g   <- collapse::GRP(sc, by = key_cols)
+  first_idx <- match(seq_len(g$N.groups), g$group.id)
+  w   <- sc$weight
+  w[is.na(w)] <- NA_real_
+  key_at <- function(col) sc[[col]][first_idx]
+
+  agg_df <- do.call(rbind, Filter(Negate(is.null), lapply(names(channels), function(col) {
+    if (!col %in% names(sc)) return(NULL)
+
+    # weighted.mean(..., na.rm = TRUE) drops NA values but keeps Inf and
+    # zero/negative weights, so only NAs are folded out here
+    z <- (exp(sc[[col]]) - 1) * 100
+    z[is.na(w)] <- NA_real_
+
+    pct <- as.numeric(collapse::fmean(z, g = g, w = w, na.rm = TRUE))
+    pct[is.nan(pct)] <- NA_real_
+
+    data.frame(
+      scenario   = key_at("scenario"),
+      year_start = key_at("year_start"),
+      year_end   = key_at("year_end"),
+      sim_year   = if (has_years) key_at("sim_year") else NA_integer_,
+      channel    = unname(channels[[col]]),
+      pct        = pct,
+      stringsAsFactors = FALSE
+    )
+  })))
   if (is.null(agg_df) || nrow(agg_df) == 0) return(NULL)
 
   agg_df$channel    <- factor(agg_df$channel, levels = unname(channels))
@@ -386,8 +406,8 @@ mod_3_09_decomposition_server <- function(id,
       ~channel, scales = "free_y",
       ncol = if (is_rif) 2L else 3L
     ) +
-    ggplot2::scale_colour_brewer(palette = "Set1", name = "SSP scenario") +
-    ggplot2::scale_fill_brewer(palette = "Set1", name = "SSP scenario") +
+    wise_scale_colour_okabe_ito(name = "SSP scenario") +
+    wise_scale_fill_okabe_ito(name = "SSP scenario") +
     ggplot2::labs(
       x        = "Projection period",
       y        = "Effect (% change in welfare)",
@@ -413,7 +433,7 @@ mod_3_09_decomposition_server <- function(id,
   has_sd <- all(c("sd_main", "sd_res1", "sd_res2", "sd_total") %in% names(decomp_df))
 
   # Aggregated SE on a log-scale delta given a per-household SD column.
-  # Var(Σ w·δ_i) ≈ Σ w_i² · Var(δ_i) under household independence.
+  # Var(Sigma w*delta_i) ~ Sigma w_i^2 * Var(delta_i) under household independence.
   agg_se <- function(sd_col) {
     if (!has_sd || is.null(decomp_df[[sd_col]])) return(NA_real_)
     sqrt(sum((w_norm^2) * (decomp_df[[sd_col]])^2, na.rm = TRUE))
@@ -427,9 +447,9 @@ mod_3_09_decomposition_server <- function(id,
     data.frame(
       Channel           = label,
       `Mean (log-pts)`  = round(mean_log, 4),
-      `± SE (log-pts)`  = if (is.na(se_log)) NA_real_ else round(se_log, 4),
+      `+/- SE (log-pts)`  = if (is.na(se_log)) NA_real_ else round(se_log, 4),
       `Mean (%)`        = round(mean_pct, 2),
-      `± SE (%)`        = if (is.na(se_pct)) NA_real_ else round(se_pct, 2),
+      `+/- SE (%)`        = if (is.na(se_pct)) NA_real_ else round(se_pct, 2),
       `Median (%)`      = round(median((exp(vals) - 1) * 100), 2),
       check.names = FALSE
     )

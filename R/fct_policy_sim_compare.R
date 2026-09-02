@@ -66,7 +66,7 @@
     Group = factor(
       c(rep("Baseline", length(baseline_clean)),
         rep("Policy-adjusted", length(policy_clean))),
-      # ggridges renders the FIRST level at the bottom, last at the top —
+      # ggridges renders the FIRST level at the bottom, last at the top -
       # so "Baseline" first puts policy-adjusted on top.
       levels = c("Baseline", "Policy-adjusted")
     ),
@@ -106,7 +106,7 @@
 #'
 #' Returns the names of columns whose values differ between
 #' \code{baseline_svy} and \code{policy_svy}. Used by the Step 3 diagnostics
-#' table to surface any variable a user manipulation has touched —
+#' table to surface any variable a user manipulation has touched -
 #' covariates, interaction variables, or outcomes alike.
 #'
 #' Comparison rules:
@@ -200,10 +200,12 @@ policy_input_diagnostics <- function(baseline_svy, policy_svy, vars = NULL) {
 #' @noRd
 .results_pane_ui <- function(ns, so) {
   tagList(
-    shiny::uiOutput(ns("results_header_ui")),
-    shiny::wellPanel(
-      class = "results-controls",
-      style = "padding: 10px 14px 6px 14px;",
+      shiny::uiOutput(ns("stale_banner_ui")),
+      shiny::uiOutput(ns("results_header_ui")),
+      shiny::wellPanel(
+        class = "results-controls",
+      # Padding matches the Step 2 results controls panel (alignment).
+      style = "padding: 8px 12px 4px 12px;",
       # Single compact row: outcome + uncertainty controls wrap as needed
       shiny::tags$div(
         style = "display:flex; align-items:flex-end; gap:12px; flex-wrap:wrap;",
@@ -215,8 +217,19 @@ policy_input_diagnostics <- function(baseline_svy, policy_svy, vars = NULL) {
             selected = "mean"
           )
         ),
-        shiny::tags$div(style = "flex:0 1 170px;",
-          shiny::uiOutput(ns("cmp_pov_line_ui"))
+        # Poverty-line cell: identical conditionalPanel markup to the Step 2
+        # controls, so the cell is removed (not left as an empty flex slot)
+        # for non-poverty aggregation methods.
+        shiny::conditionalPanel(
+          condition = paste0("['headcount_ratio','gap','fgt2',",
+                             "'prosperity_gap','avg_poverty']",
+                             ".indexOf(input['", ns("cmp_agg_method"), "']) > -1"),
+          style = "flex:0 1 170px;",
+          shiny::numericInput(
+            ns("cmp_pov_line"),
+            label = "Poverty line ($/day, 2021 PPP)",
+            value = 3.00, min = 0, step = 0.5
+          )
         ),
         shiny::tags$div(style = "flex:0 1 200px;",
           shiny::selectInput(
@@ -235,13 +248,13 @@ policy_input_diagnostics <- function(baseline_svy, policy_svy, vars = NULL) {
             ns("uncertainty_band"),
             label   = "Coefficient band",
             choices = c(
-              "50% (p25–p75)"   = "p25_p75",
-              "60% (p20–p80)"   = "p20_p80",
-              "80% (p10–p90)"   = "p10_p90",
-              "90% (p05–p95)"   = "p05_p95",
-              "95% (p025–p975)" = "p025_p975",
-              "99% (p005–p995)" = "p005_p995",
-              "Max (min–max)"   = "minmax"
+              "50% (p25-p75)"   = "p25_p75",
+              "60% (p20-p80)"   = "p20_p80",
+              "80% (p10-p90)"   = "p10_p90",
+              "90% (p05-p95)"   = "p05_p95",
+              "95% (p025-p975)" = "p025_p975",
+              "99% (p005-p995)" = "p005_p995",
+              "Max (min-max)"   = "minmax"
             ),
             selected = "p10_p90"
           )
@@ -251,13 +264,13 @@ policy_input_diagnostics <- function(baseline_svy, policy_svy, vars = NULL) {
             ns("ensemble_band"),
             label    = "Inter-model band",
             choices  = c(
-              "50% (p25–p75)"   = "p25_p75",
-              "60% (p20–p80)"   = "p20_p80",
-              "80% (p10–p90)"   = "p10_p90",
-              "90% (p05–p95)"   = "p05_p95",
-              "95% (p025–p975)" = "p025_p975",
-              "99% (p005–p995)" = "p005_p995",
-              "Full range (min–max)" = "minmax"
+              "50% (p25-p75)"   = "p25_p75",
+              "60% (p20-p80)"   = "p20_p80",
+              "80% (p10-p90)"   = "p10_p90",
+              "90% (p05-p95)"   = "p05_p95",
+              "95% (p025-p975)" = "p025_p975",
+              "99% (p005-p995)" = "p005_p995",
+              "Full range (min-max)" = "minmax"
             ),
             selected = "minmax"
           )
@@ -279,17 +292,23 @@ policy_input_diagnostics <- function(baseline_svy, policy_svy, vars = NULL) {
       shiny::tags$details(
         shiny::tags$summary(
           style = "cursor:pointer; font-size:11px; color:#555; font-weight:600;",
-          "Advanced ▼"
+          "Advanced \u25BC"
         ),
-        shiny::radioButtons(
-          ns("cmp_group_order"),
-          label    = "Group charts and tables by",
-          choices  = c(
-            "Scenario × Year" = "scenario_x_year",
-            "Year × Scenario" = "year_x_scenario"
-          ),
-          selected = "scenario_x_year",
-          inline   = TRUE
+        # Same structure as the Step 2 Advanced section (alignment).
+        shiny::tags$div(
+          style = "display:flex; gap:10px; flex-wrap:wrap; margin-top:4px;",
+          shiny::tags$div(style = "flex:1; min-width:160px;",
+            shiny::radioButtons(
+              ns("cmp_group_order"),
+              label    = "Group charts and tables by",
+              choices  = c(
+                "Scenario \u00D7 Year" = "scenario_x_year",
+                "Year \u00D7 Scenario" = "year_x_scenario"
+              ),
+              selected = "scenario_x_year",
+              inline   = TRUE
+            )
+          )
         )
       ),
       shiny::tags$hr(style = "margin: 6px 0;"),
@@ -307,28 +326,28 @@ policy_input_diagnostics <- function(baseline_svy, policy_svy, vars = NULL) {
             " and ", shiny::tags$b("policy-adjusted (red)"),
             ". All bands are drawn relative to the dot (the ensemble-mean",
             " annual aggregate) and answer different questions about",
-            " uncertainty. They are not meant to be added together — see",
+            " uncertainty. They are not meant to be added together - see",
             " the Diagnostics tab for how the sources combine."
           ),
           shiny::p(shiny::tags$b("Thick coloured band"),
-            " (future scenarios only) — how much do climate models disagree?",
+            " (future scenarios only) - how much do climate models disagree?",
             " Inter-model spread: quantile across CMIP6 ensemble members of",
             " each model's time-mean. Can be asymmetric around the dot when",
             " models lean one way."),
           shiny::p(shiny::tags$b("Middle band"),
-            " — how much does weather vary year-to-year within a typical",
+            " - how much does weather vary year-to-year within a typical",
             " model? Inter-annual variability: per-model quantile across",
             " simulation years, then averaged across models. Reflects the",
             " natural range of outcomes a single climate trajectory produces."),
           shiny::p(shiny::tags$b("Innermost line"),
-            " (shown when coefficient uncertainty is enabled) — how precisely",
+            " (shown when coefficient uncertainty is enabled) - how precisely",
             " is each (model, year) aggregate estimated? Analytic per-outcome",
             " SE from the regression fit. By default, under 'original'",
             " residuals, restricted to coefficients on weather and the",
             " policy-modified variables, and their interactions",
-            " (additive-decomposition SE — see Step 2 settings to widen to",
+            " (additive-decomposition SE - see Step 2 settings to widen to",
             " all coefficients). This is precision of a point estimate, not",
-            " a spread of outcomes — conceptually distinct from the two",
+            " a spread of outcomes - conceptually distinct from the two",
             " coloured bands."),
           shiny::p(
             "Historical = single 'model', so no inter-model band is shown.",
@@ -339,10 +358,12 @@ policy_input_diagnostics <- function(baseline_svy, policy_svy, vars = NULL) {
           docs = TRUE
         )
       ),
-      shiny::plotOutput(ns("summary_box_plot"), height = "600px"),
+      wise_plot_output(ns("summary_box_plot"),
+                       "Point plot of baseline versus policy-adjusted outcomes by scenario, with uncertainty bands",
+                       height = "600px"),
       shiny::tags$p(
         style = "font-size:11px; color:#666; margin-top:6px;",
-        "Grey dot = baseline; red dot = policy-adjusted; bands = uncertainty ranges (not additive) — click ",
+        "Grey dot = baseline; red dot = policy-adjusted; bands = uncertainty ranges (not additive) - click ",
         shiny::icon("circle-info"), " above for details."
       )
     ),
@@ -356,6 +377,16 @@ policy_input_diagnostics <- function(baseline_svy, policy_svy, vars = NULL) {
             "threshold, by scenario. The logit axis emphasises both tails;",
             "return period lines mark standard thresholds (e.g. 1-in-20-year",
             "events)."
+          ),
+          shiny::p(shiny::tags$b("Central line"),
+            " = median across climate-model ensemble members at each",
+            " exceedance probability. Baseline retains the scenario colour;",
+            " policy is the red overlay."
+          ),
+          shiny::p(shiny::tags$b("Filled ribbon"),
+            " = inter-model spread. Baseline and policy ribbons use the",
+            " same SSP colour, with transparency keeping the central lines",
+            " visible."
           ),
           docs = TRUE
         )
@@ -373,7 +404,9 @@ policy_input_diagnostics <- function(baseline_svy, policy_svy, vars = NULL) {
           value = TRUE
         )
       ),
-      shiny::plotOutput(ns("exceedance_plot"), height = "400px"),
+      wise_plot_output(ns("exceedance_plot"),
+                       "Plot of the probability that the outcome exceeds a given threshold, by climate scenario",
+                       height = "400px"),
       shiny::uiOutput(ns("exceedance_caption"))
     ),
     shiny::wellPanel(
@@ -394,7 +427,9 @@ policy_input_diagnostics <- function(baseline_svy, policy_svy, vars = NULL) {
           docs = TRUE
         )
       ),
-      shiny::plotOutput(ns("timeseries_plot"), height = "420px"),
+      wise_plot_output(ns("timeseries_plot"),
+                       "Line plot of annual outcome trajectories per climate model across simulation years, baseline and policy-adjusted",
+                       height = "420px"),
       shiny::tags$p(
         style = "font-size:11px; color:#666; margin-top:6px;",
         "Faded = baseline; opaque = policy-adjusted; bold = median trajectory."
@@ -415,8 +450,18 @@ policy_input_diagnostics <- function(baseline_svy, policy_svy, vars = NULL) {
                                policy_hist_sim,
                                policy_saved_scenarios,
                                selected_hist,
-                               residuals = reactive("original")) {
+                               residuals = reactive("original"),
+                               stale = reactive(FALSE)) {
   ns <- session$ns
+
+  # INT-08: stale banner above the results pane. This surface gates its
+  # CSV export while stale.
+  output$stale_banner_ui <- shiny::renderUI({
+    if (isTRUE(stale())) .stale_banner(
+      "Step 3 policy results",
+      note = "Interpretation and exports are disabled until then."
+    ) else NULL
+  })
 
   # Resolve the residuals choice captured by the Step 2 run. The live control
   # is only a fallback for older in-memory result objects.
@@ -424,63 +469,148 @@ policy_input_diagnostics <- function(baseline_svy, policy_svy, vars = NULL) {
     hs$residuals %||% residuals() %||% "original"
   }
 
+  # INT-05: prefer the historical label captured by the Step 2 run; the live
+  # selection is only a fallback for older in-memory result objects.
   hist_label <- reactive({
-    nm <- if (!is.null(selected_hist)) selected_hist()$scenario_name else NULL
+    hs  <- baseline_hist_sim()
+    nm  <- hs$hist_label %||%
+      (if (!is.null(selected_hist)) selected_hist()$scenario_name else NULL)
     if (!is.null(nm) && nzchar(nm)) nm else "Historical"
   })
-
-  # SSP / year / model metadata is identical across baseline and policy
-  # (same set of saved scenarios), so derive from baseline.
-  all_ssps <- reactive({
-    sc <- baseline_saved_scenarios()
-    if (length(sc) == 0) return(character(0))
-    ssps <- unique(.normalise_ssp(names(sc)))
-    sort(ssps[!is.na(ssps) & grepl("^SSP", ssps)])
-  })
-
-  all_anchor_years <- reactive({
-    sc <- baseline_saved_scenarios()
-    if (length(sc) == 0) return(character(0))
-    ranges <- sort(na.omit(unique(.parse_year(names(sc)))))
-    setNames(sub("-", "_", ranges), ranges)
-  })
-
-  all_models_info <- reactive({
-    sc <- baseline_saved_scenarios()
-    if (length(sc) == 0) return(character(0))
-    vapply(sc, function(s) s$n_models %||% 1L, integer(1))
-  })
-
-  # Survey weights are always applied when available (toggle removed).
-  output$weight_status_ui <- shiny::renderUI(NULL)
 
   # Debounced (400 ms) so rapid spinner/typing edits don't retrigger the
   # aggregation pipeline on every keystroke. Non-poverty methods keep the
   # NULL behaviour so downstream consumers skip the poverty line.
+  # Family list matches the Step 2 poverty-line conditionalPanel (alignment).
+  # While the user has not edited the value, the run's own poverty line is
+  # authoritative (the sync observer keeps the visible input in step with it);
+  # once edited (INT-01), the user's value wins.
   pov_line_val <- shiny::debounce(reactive({
     if (isTRUE(input$cmp_agg_method %in%
-               c("headcount_ratio", "gap", "fgt2"))) {
-      as.numeric(input$cmp_pov_line) %||% 3.00
+               c("headcount_ratio", "gap", "fgt2",
+                 "prosperity_gap", "avg_poverty"))) {
+      if (pov_line_touched()) {
+        pl <- suppressWarnings(as.numeric(input$cmp_pov_line))
+        if (!is.null(pl) && length(pl) > 0L && !is.na(pl)) return(pl)
+      }
+      baseline_hist_sim()$pov_line %||% 3.00
     } else NULL
   }), 400)
+
+  # Sync the static poverty-line input to the run's value while the user has
+  # not edited it (INT-01: once edited, the user's value survives re-runs).
+  # "Edited" means the input differs from the last-synced value, so the
+  # sync's own updateNumericInput round-trip never counts as an edit.
+  pov_line_touched  <- reactiveVal(FALSE)
+  .pov_line_last_sync <- reactiveVal(3.00)
+  observeEvent(input$cmp_pov_line, {
+    v <- suppressWarnings(as.numeric(input$cmp_pov_line)[1])
+    if (!identical(v, .pov_line_last_sync())) pov_line_touched(TRUE)
+  }, ignoreInit = TRUE)
+  observeEvent(baseline_hist_sim(), {
+    hs <- baseline_hist_sim()
+    if (is.null(hs)) return()
+    v <- hs$pov_line %||% 3.00
+    .pov_line_last_sync(v)
+    if (pov_line_touched()) return()
+    shiny::updateNumericInput(session, "cmp_pov_line", value = v)
+  })
+
+  # ---- Scenario filter grid (alignment with the Step 2 results tab) --------
+  # One checkbox per scenario key laid out as an SSP x period grid, replacing
+  # the former pair of SSP/period checkbox groups. Non-SSP keys (if any) are
+  # always kept and not shown in the grid.
+  .grid_key_id <- function(key) paste0("sc_", gsub("[^a-zA-Z0-9]", "_", key))
+
+  # UI-38: hold the most recent non-empty grid selection so unchecking the
+  # final scenario never silently re-displays the first one.
+  last_selected_scenarios <- reactiveVal(NULL)
+
+  .grid_scenario_keys <- function() {
+    sc <- baseline_saved_scenarios()
+    if (length(sc) == 0) return(character(0))
+    nms <- names(sc)
+    nms[grepl("^SSP", nms)]
+  }
+
+  observe({
+    keys <- .grid_scenario_keys()
+    if (length(keys) == 0L) return(invisible(NULL))
+
+    selected <- Filter(Negate(is.null), lapply(keys, function(key) {
+      if (isTRUE(input[[.grid_key_id(key)]])) key else NULL
+    }))
+
+    if (length(selected) > 0L) {
+      last_selected_scenarios(unlist(selected))
+    } else {
+      # Re-check the held boxes so the grid never sits fully unchecked.
+      held <- last_selected_scenarios()
+      held <- held[held %in% keys]
+      if (length(held) == 0L) held <- keys[1L]
+      for (key in held) {
+        shiny::updateCheckboxInput(
+          session,
+          inputId = .grid_key_id(key),
+          value   = TRUE
+        )
+      }
+    }
+  })
 
   selected_scenario_names <- reactive({
     sc <- baseline_saved_scenarios()
     if (length(sc) == 0) return(character(0))
     nms  <- names(sc)
-    ssps <- if (length(input$filter_ssp) == 0) all_ssps()
-            else input$filter_ssp
-    yr_vals <- if (length(input$filter_year) == 0) names(all_anchor_years())
-               else sub("_", "-", input$filter_year)
-    keep <- vapply(nms, function(nm) {
-      is_ssp <- grepl("^SSP", nm)
-      if (!is_ssp) return(TRUE)
-      ssp_match <- any(vapply(ssps, function(s) startsWith(nm, s), logical(1)))
-      yr_match  <- length(yr_vals) == 0 ||
-        any(vapply(yr_vals, function(y) grepl(y, nm, fixed = TRUE), logical(1)))
-      ssp_match && yr_match
-    }, logical(1))
-    nms[keep]
+    keys <- .grid_scenario_keys()
+
+    # Read each grid checkbox (INT-01: selections survive republishes via the
+    # restore-on-render in scenario_filter_ui).
+    selected <- Filter(Negate(is.null), lapply(keys, function(key) {
+      if (isTRUE(input[[.grid_key_id(key)]])) key else NULL
+    }))
+
+    # Enforce minimum 1 selected: hold the last real selection (UI-38)
+    # rather than silently re-adding the first scenario.
+    if (length(selected) == 0L) {
+      held <- last_selected_scenarios()
+      held <- held[held %in% keys]
+      if (length(held) == 0L) held <- keys[1L]
+      selected <- held
+    } else {
+      selected <- unlist(selected)
+    }
+
+    # Non-SSP keys (if any) always pass, as before the grid.
+    nms[nms %in% selected | !grepl("^SSP", nms)]
+  })
+
+  # ---- PERF-31: per-method aggregation cache -------------------------------
+  # Aggregating baseline/policy hist + every scenario member is expensive and
+  # depends only on (source, aggregation method, poverty line). `cmp_deviation`
+  # is applied downstream (hist_ref subtraction in the row builders + axis
+  # labels), so it must NOT be part of the key - moving the deviation control
+  # used to destroy the entire cache and re-aggregate everything.
+  #
+  # Invalidation: a fresh cache environment is created whenever any underlying
+  # simulation object changes (publishes are atomic - INT-09/REACT-12), so
+  # stale entries can never be served. Residual mode is part of the source
+  # identity (it is snapshotted per run on the sim objects themselves).
+  agg_cache_ws <- reactive({
+    baseline_hist_sim(); policy_hist_sim()
+    baseline_saved_scenarios(); policy_saved_scenarios()
+    new.env(parent = emptyenv())
+  })
+  .agg_cache_key <- function(tag, method, pov_line) {
+    paste(tag, method, format(pov_line), sep = "\r")
+  }
+
+  agg_axis_label <- reactive({
+    method    <- input$cmp_agg_method %||% "mean"
+    deviation <- input$cmp_deviation  %||% "none"
+    if (identical(deviation, "none")) label_agg_method(method)
+    else paste0(label_agg_method(method), " \u2014 ",
+                label_deviation(deviation))
   })
 
   # Helper: aggregate hist_sim into Mod 2's rich list-col schema
@@ -490,13 +620,16 @@ policy_input_diagnostics <- function(baseline_svy, policy_svy, vars = NULL) {
   #
   # Both baseline (Mod 2 hist_sim, passed verbatim) and policy (re-simulated
   # by resimulate_with_svy) wrap their single historical run under $pipeline
-  # — read it once here so the downstream code paths are identical.
-  make_agg_hist <- function(hs) {
+  # - read it once here so the downstream code paths are identical.
+  make_agg_hist <- function(hs, tag) {
     if (is.null(hs)) return(NULL)
     pl <- hs$pipeline
     if (is.null(pl) || is.null(pl$y_point)) return(NULL)
     method    <- input$cmp_agg_method %||% "mean"
-    deviation <- input$cmp_deviation  %||% "none"
+
+    ws <- agg_cache_ws()
+    hit <- get0(.agg_cache_key(tag, method, pov_line_val()), envir = ws)
+    if (!is.null(hit)) return(hit)
 
     is_log <- isTRUE(hs$so$transform == "log")
     bq     <- c(lo = 0.10, hi = 0.90)
@@ -524,26 +657,58 @@ policy_input_diagnostics <- function(baseline_svy, policy_svy, vars = NULL) {
       )
     })
     agg <- dplyr::bind_rows(rows)
-    x_label <- if (identical(deviation, "none")) label_agg_method(method)
-               else paste0(label_agg_method(method), " \u2014 ",
-                           label_deviation(deviation))
-    list(out = agg, x_label = x_label)
+    res <- list(out = agg)
+    assign(.agg_cache_key(tag, method, pov_line_val()), res, envir = ws)
+    res
   }
 
   # Helper: build agg per saved scenario in Mod 2 schema. Each `s$pipelines`
   # entry is one CMIP6 ensemble member with its own y_point / F_loading.
   # Mod 2's run_full_simulation() and Mod 3's resimulate_with_svy() both
   # populate $pipelines, so this reader works for baseline and policy alike.
-  make_agg_scenarios <- function(sc, hs_for_dev) {
+  #
+  # INT-04: scenario failures are collected (not silently dropped) and
+  # surfaced once per distinct failure set via a persistent warning toast.
+  .agg_failure_state <- new.env(parent = emptyenv())
+  .agg_failure_state$last_key <- NULL
+
+  .notify_agg_failures <- function(failed_names, n_total) {
+    if (length(failed_names) == 0L) {
+      .agg_failure_state$last_key <- NULL
+      return(invisible(NULL))
+    }
+    key <- paste(sort(failed_names), collapse = "\r")
+    if (identical(key, .agg_failure_state$last_key)) return(invisible(NULL))
+    .agg_failure_state$last_key <- key
+    shiny::showNotification(
+      ui = shiny::tagList(
+        shiny::strong(sprintf(
+          "%d of %d scenario%s could not be aggregated:",
+          length(failed_names), n_total, if (length(failed_names) == 1L) "" else "s"
+        )),
+        shiny::br(),
+        paste(failed_names, collapse = ", ")
+      ),
+      type = "warning", duration = NULL, session = session
+    )
+  }
+
+  make_agg_scenarios <- function(sc, hs_for_dev, tag) {
     if (length(sc) == 0) return(list())
     method    <- input$cmp_agg_method %||% "mean"
-    deviation <- input$cmp_deviation  %||% "none"
     use_w     <- TRUE
-    x_label   <- if (identical(deviation, "none")) label_agg_method(method)
-                 else paste0(label_agg_method(method), " \u2014 ",
-                             label_deviation(deviation))
 
-    lapply(sc, function(s) {
+    ws <- agg_cache_ws()
+    hit <- get0(.agg_cache_key(tag, method, pov_line_val()), envir = ws)
+    if (!is.null(hit)) return(hit)
+
+    failed <- character(0)
+    # NB: iterate by index (the error handler needs `names(sc)[i]`) but
+    # re-attach the scenario names - every consumer below (all_series,
+    # pointrange/timeseries/exceedance/threshold row builders) selects
+    # scenarios by name, and lapply(seq_along(...)) drops them.
+    res <- stats::setNames(lapply(seq_along(sc), function(i) {
+      s <- sc[[i]]
       tryCatch({
         pipes <- s$pipelines
         if (is.null(pipes) || length(pipes) == 0L) return(NULL)
@@ -597,27 +762,37 @@ policy_input_diagnostics <- function(baseline_svy, policy_svy, vars = NULL) {
         })
         combined <- dplyr::bind_rows(Filter(Negate(is.null), per_year_rows))
         if (nrow(combined) == 0L) return(NULL)
-        list(out = combined, x_label = x_label)
-      }, error = function(e) NULL)
-    })
+        list(out = combined)
+      }, error = function(e) {
+        nm <- s$scenario_name %||% names(sc)[i]
+        if (is.null(nm) || is.na(nm)) nm <- paste0("scenario_", i)
+        failed[[length(failed) + 1L]] <<- nm
+        NULL
+      })
+    }), names(sc))
+    .notify_agg_failures(failed, length(sc))
+    assign(.agg_cache_key(tag, method, pov_line_val()), res, envir = ws)
+    res
   }
 
   baseline_agg_hist <- reactive({
     req(baseline_hist_sim())
-    make_agg_hist(baseline_hist_sim())
+    make_agg_hist(baseline_hist_sim(), "baseline_hist")
   })
   policy_agg_hist <- reactive({
     req(policy_hist_sim())
-    make_agg_hist(policy_hist_sim())
+    make_agg_hist(policy_hist_sim(), "policy_hist")
   })
 
   baseline_agg_scenarios <- reactive({
     req(baseline_hist_sim())
-    make_agg_scenarios(baseline_saved_scenarios(), baseline_hist_sim())
+    make_agg_scenarios(baseline_saved_scenarios(), baseline_hist_sim(),
+                       "baseline_scn")
   })
   policy_agg_scenarios <- reactive({
     req(policy_hist_sim())
-    make_agg_scenarios(policy_saved_scenarios(), policy_hist_sim())
+    make_agg_scenarios(policy_saved_scenarios(), policy_hist_sim(),
+                       "policy_scn")
   })
 
   baseline_all_series <- reactive({
@@ -811,19 +986,11 @@ policy_input_diagnostics <- function(baseline_svy, policy_svy, vars = NULL) {
       rp_ok    <- RPs >= (1 / n_yrs) & RPs <= (1 - 1 / n_yrs)
       RPs_keep <- RPs[rp_ok]
       if (length(RPs_keep) == 0L) return(NULL)
-      per_model_rp <- t(apply(vals, 1L, function(v) {
-        v <- v[is.finite(v)]
-        if (length(v) < 2L) return(rep(NA_real_, length(RPs_keep)))
-        sv <- sort(v)
-        vapply(RPs_keep, function(p) rank_interp(sv, p), numeric(1L))
-      }))
-      per_model_sd_at_rp <- t(vapply(seq_len(nrow(vals)), function(i) {
-        v <- vals[i, ]; s <- sds[i, ]
-        ok <- is.finite(v)
-        if (sum(ok) < 2L) return(rep(NA_real_, length(RPs_keep)))
-        ord <- order(v[ok]); s_sorted <- s[ok][ord]
-        vapply(RPs_keep, function(p) rank_interp(s_sorted, p), numeric(1L))
-      }, numeric(length(RPs_keep))))
+      # Per-model rank-interp at each kept RP (matrix: model * RP) - shape
+      # guaranteed by the helper (see by_model_rp_matrix()).
+      mm        <- by_model_rp_matrix(vals, sds, RPs_keep)
+      per_model_rp    <- mm$rp
+      per_model_sd_at_rp <- mm$sd
       central_vec <- if (is_hist) per_model_rp[1L, ] else
         apply(per_model_rp, 2L, stats::median, na.rm = TRUE)
       coef_sd_vec <- if (is_hist) per_model_sd_at_rp[1L, ] else
@@ -934,7 +1101,7 @@ policy_input_diagnostics <- function(baseline_svy, policy_svy, vars = NULL) {
   table_subtitle <- reactive({
     req(baseline_agg_hist(), input$cmp_agg_method, input$cmp_deviation)
     paste0(
-      baseline_agg_hist()$x_label, " — ",
+      agg_axis_label(), " - ",
       label_agg_method(input$cmp_agg_method), " | ",
       label_deviation(input$cmp_deviation)
     )
@@ -964,52 +1131,85 @@ policy_input_diagnostics <- function(baseline_svy, policy_svy, vars = NULL) {
     )
   })
 
-  output$cmp_pov_line_ui <- renderUI({
-    req(input$cmp_agg_method)
-    if (input$cmp_agg_method %in% c("headcount_ratio", "gap", "fgt2")) {
-      default_val <- baseline_hist_sim()$pov_line %||% 3.00
-      shiny::numericInput(
-        inputId = ns("cmp_pov_line"),
-        label   = "Poverty line ($/day)",
-        value   = default_val,
-        min     = 0.01,
-        step    = 0.5
-      )
-    }
-  })
-
+  # Scenario filter grid: same compact SSP x period table as the Step 2
+  # results tab (alignment). INT-01: the user's cell selection survives a
+  # republish; a first render (or a fresh key set) starts fully checked.
   output$scenario_filter_ui <- renderUI({
     sc <- baseline_saved_scenarios()
     if (length(sc) == 0)
       return(shiny::helpText("Run a simulation."))
-    ssps <- all_ssps()
-    yrs  <- all_anchor_years()
-    mi   <- all_models_info()
-    tagList(
-      shiny::fluidRow(
-        shiny::column(4,
-          if (length(yrs) > 0)
-            shiny::checkboxGroupInput(
-              ns("filter_year"), label = "Projection periods",
-              choices = yrs, selected = yrs, inline = TRUE
-            )
-        ),
-        shiny::column(4,
-          if (length(ssps) > 0)
-            shiny::checkboxGroupInput(
-              ns("filter_ssp"), label = "SSPs",
-              choices = ssps, selected = ssps, inline = TRUE
-            )
-        ),
-        shiny::column(4,
-          if (any(mi > 1L))
-            shiny::helpText(
-              style = "font-size:11px; color:#555; margin-top:24px;",
-              paste0("Each SSP aggregates results from ",
-                     max(mi), " ensemble model(s).")
-            )
-        )
+    keys <- .grid_scenario_keys()
+    if (length(keys) == 0)
+      return(shiny::helpText("Run a simulation."))
+
+    ssps <- unique(sub(" / .*$", "", keys))
+    yrs  <- unique(sub("^.* / ", "", keys))
+
+    grid_id <- ns("scenario-filter-grid")
+
+    # Build header row
+    header <- shiny::tags$tr(
+      shiny::tags$th(""),
+      lapply(ssps, function(s)
+        shiny::tags$th(s,
+          style = "text-align:center; font-size:11px;
+                  font-weight:600; padding:2px 8px;"))
+    )
+
+    # Build one row per period
+    period_rows <- lapply(yrs, function(yr) {
+      shiny::tags$tr(
+        shiny::tags$td(yr,
+          style = "font-size:11px; font-weight:600;
+                  padding:2px 8px; white-space:nowrap;"),
+        lapply(ssps, function(s) {
+          key     <- paste0(s, " / ", yr)
+          exists  <- key %in% keys
+          cb_id   <- ns(.grid_key_id(key))
+          # INT-01: restore the user's previous cell selection when the
+          # grid is re-rendered; a first render starts fully checked.
+          prev    <- shiny::isolate(input[[.grid_key_id(key)]])
+          shiny::tags$td(
+            style = "text-align:center; padding:2px 4px;",
+            if (exists)
+              shiny::checkboxInput(
+                cb_id,
+                label = shiny::tags$span(class = "visually-hidden",
+                                         paste("Include", s, yr,
+                                               "in the comparison")),
+                value = if (is.null(prev)) TRUE else isTRUE(prev)
+              )
+            else
+              shiny::tags$span(
+                style = "color:#ccc; font-size:11px;",
+                "-"
+              )
+          )
+        })
       )
+    })
+
+    shiny::tags$table(
+      id    = grid_id,
+      style = "border-collapse:collapse; margin-top:4px;",
+      shiny::tags$style(shiny::HTML(sprintf("
+        #%s .checkbox { margin: 0; padding: 0; }
+        #%s .checkbox label {
+          padding-left: 0;
+          min-height: 0;
+        }
+        #%s .checkbox label span { display: none; }
+        #%s input[type='checkbox'] {
+          width: 16px; height: 16px;
+          margin: 0 auto;
+          display: block;
+          position: static;
+        }
+        #%s td { padding: 4px 12px; }
+        #%s th { padding: 4px 12px; font-size: 11px; }
+      ", grid_id, grid_id, grid_id, grid_id, grid_id, grid_id))),
+      shiny::tags$thead(header),
+      shiny::tags$tbody(period_rows)
     )
   })
 
@@ -1022,12 +1222,12 @@ policy_input_diagnostics <- function(baseline_svy, policy_svy, vars = NULL) {
     }
     plot_pointrange_climate(
       bands_tbl   = bands,
-      x_label     = baseline_agg_hist()$x_label,
+      x_label     = agg_axis_label(),
       group_order = input$cmp_group_order %||% "scenario_x_year",
       show_coef   = isTRUE(input$show_coef_uncertainty) && has_draws()
     )
   }, height = 600)
-  outputOptions(output, "summary_box_plot", suspendWhenHidden = FALSE)
+  outputOptions(output, "summary_box_plot", suspendWhenHidden = TRUE)
 
   output$summary_threshold_table <- DT::renderDT({
     req(threshold_table_rv())
@@ -1048,12 +1248,14 @@ policy_input_diagnostics <- function(baseline_svy, policy_svy, vars = NULL) {
       options = list(
         pageLength = 30, dom = "Bt", ordering = list(list(2, "desc")),
         columnDefs = list(list(className = "dt-center", targets = "_all")),
-        buttons = list(list(extend = "csv", filename = "outcome_thresholds"))
+        # INT-08: export is disabled while the results are stale.
+        buttons = if (isTRUE(stale())) NULL else
+          list(list(extend = "csv", filename = "outcome_thresholds"))
       ),
       extensions = "Buttons"
     )
   })
-  outputOptions(output, "summary_threshold_table", suspendWhenHidden = FALSE)
+  outputOptions(output, "summary_threshold_table", suspendWhenHidden = TRUE)
 
   output$threshold_table_header <- renderUI({
     req(baseline_agg_hist())
@@ -1076,7 +1278,7 @@ policy_input_diagnostics <- function(baseline_svy, policy_svy, vars = NULL) {
     req(baseline_agg_hist())
     shiny::tags$p(
       style = "font-size:11px; color:#666; margin-top:6px;",
-      "Odds relative to a 1-in-N-year event — click ",
+      "Odds relative to a 1-in-N-year event - click ",
       shiny::icon("circle-info"), " above for definitions."
     )
   })
@@ -1088,7 +1290,7 @@ policy_input_diagnostics <- function(baseline_svy, policy_svy, vars = NULL) {
     else c(lo = 0.5, hi = 0.5)
     enhance_exceedance(
       curves_tbl      = exceedance_curves_rv(),
-      x_label         = baseline_agg_hist()$x_label,
+      x_label         = agg_axis_label(),
       return_period   = isTRUE(input$show_return_period),
       n_sim_years     = nrow(baseline_agg_hist()$out),
       logit_x         = isTRUE(input$exceedance_logit_x),
@@ -1098,7 +1300,7 @@ policy_input_diagnostics <- function(baseline_svy, policy_svy, vars = NULL) {
       ensemble_band_q = ens_q
     )
   })
-  outputOptions(output, "exceedance_plot", suspendWhenHidden = FALSE)
+  outputOptions(output, "exceedance_plot", suspendWhenHidden = TRUE)
 
   output$timeseries_plot <- renderPlot({
     req(timeseries_curves_rv())
@@ -1107,11 +1309,11 @@ policy_input_diagnostics <- function(baseline_svy, policy_svy, vars = NULL) {
     else c(lo = 0.5, hi = 0.5)
     plot_timeseries_spaghetti(
       ts_tbl          = timeseries_curves_rv(),
-      x_label         = baseline_agg_hist()$x_label,
+      x_label         = agg_axis_label(),
       ensemble_band_q = ens_q
     )
   })
-  outputOptions(output, "timeseries_plot", suspendWhenHidden = FALSE)
+  outputOptions(output, "timeseries_plot", suspendWhenHidden = TRUE)
 
   output$exceedance_caption <- renderUI({
     req(baseline_agg_hist())
@@ -1121,9 +1323,22 @@ policy_input_diagnostics <- function(baseline_svy, policy_svy, vars = NULL) {
       "The curve shows the estimated annual exceedance probability for each outcome value."
     shiny::tags$p(
       style = "font-size:11px; color:#666; margin-top:6px;",
-      axis_txt
+      axis_txt,
+      " Grey line = baseline; red line = policy-adjusted ensemble median."
     )
   })
 
-  invisible(NULL)
+  # Invisibly expose the aggregation internals for regression tests
+  # (test-policy-sim-compare-agg-cache.R).
+  invisible(list(
+    baseline_agg_hist      = baseline_agg_hist,
+    baseline_agg_scenarios = baseline_agg_scenarios,
+    policy_agg_hist        = policy_agg_hist,
+    policy_agg_scenarios   = policy_agg_scenarios,
+    agg_cache_ws           = agg_cache_ws,
+    hist_label             = hist_label,
+    threshold_table        = threshold_table_rv,
+    selected_scenario_names = selected_scenario_names,
+    pov_line_val            = pov_line_val
+  ))
 }

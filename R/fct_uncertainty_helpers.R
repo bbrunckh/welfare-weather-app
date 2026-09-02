@@ -7,11 +7,11 @@
 # (not exported) and take plain R data; they have no Shiny dependencies.
 # ============================================================================ #
 
-#' Reshape a per-sim_year tibble with list-cols into a (model × year) matrix.
+#' Reshape a per-sim_year tibble with list-cols into a (model * year) matrix.
 #'
 #' Input `tbl` carries list-columns `model_id`, `value_all`, `value_all_sd`,
 #' one row per simulation year. Output reshapes them into parallel matrices
-#' keyed by model_id (rows) × sim_year (cols), recycling a scalar SD across
+#' keyed by model_id (rows) * sim_year (cols), recycling a scalar SD across
 #' members when only one (historical) is present.
 #'
 #' @param tbl A data frame with `sim_year`, `model_id`, `value_all`,
@@ -37,6 +37,40 @@ by_model_matrix <- function(tbl) {
   }
   list(vals = vals_mat, sds = sds_mat, model_ids = all_ids,
        sim_years = tbl$sim_year)
+}
+
+#' Per-model rank-interpolated values (and coefficient SDs) at each kept
+#' return probability.
+#'
+#' Builds the `models x RPs` matrices explicitly with a loop. The previous
+#' `t(apply(...))` formulation relied on `apply()` returning a matrix; with a
+#' single admissible RP (two simulation years) and several ensemble members it
+#' simplified to a vector and `t()` transposed it, silently recycling every
+#' downstream row (duplicated threshold-table entries).
+#'
+#' @param vals    Numeric matrix (`models x sim years`) of point values.
+#' @param sds     Numeric matrix (`models x sim years`) of coefficient SDs.
+#' @param RPs_keep Named numeric vector of admissible exceedance probabilities.
+#' @return List with `rp` and `sd`, both `models x RPs`.
+#' @noRd
+by_model_rp_matrix <- function(vals, sds, RPs_keep) {
+  n_m <- nrow(vals)
+  n_r <- length(RPs_keep)
+  rp    <- matrix(NA_real_, nrow = n_m, ncol = n_r)
+  sd_at <- matrix(NA_real_, nrow = n_m, ncol = n_r)
+  for (i in seq_len(n_m)) {
+    v  <- vals[i, ]
+    ok <- is.finite(v)
+    if (sum(ok) < 2L) next
+    sv <- sort(v[ok])
+    rp[i, ] <- vapply(RPs_keep, function(p) rank_interp(sv, p), numeric(1L))
+    s <- sds[i, ]
+    if (all(is.na(s))) next
+    s_sorted <- s[ok][order(v[ok])]
+    sd_at[i, ] <- vapply(RPs_keep, function(p) rank_interp(s_sorted, p),
+                         numeric(1L))
+  }
+  list(rp = rp, sd = sd_at)
 }
 
 #' Format a quantile probability as "P05" / "P50" / "min" / "max".

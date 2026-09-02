@@ -81,3 +81,9 @@ m <- jsonlite::fromJSON("manifest.json", simplifyVector = FALSE)
 m$packages[["sf"]] <- NULL
 jsonlite::write_json(m, "manifest.json", auto_unbox = TRUE, pretty = TRUE, null = "null")
 ## Verify before committing: grep -c '"sf":' manifest.json  ->  should be 0
+##
+## NOTE: keep brand.yml in DESCRIPTION Imports. The static dependency scan
+## cannot see it (bslib loads it dynamically for bs_theme(brand = ...)), so a
+## regenerated manifest silently drops it when it sits in Suggests -- and the
+## app aborts on Connect via rlang::check_installed("brand.yml"). See review
+## report §10.1.

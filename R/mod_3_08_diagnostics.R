@@ -223,7 +223,11 @@ mod_3_08_diagnostics_server <- function(id,
             paste0(toupper(substr(var, 1, 1)), substr(var, 2, nchar(var))),
             style = "margin-bottom: 8px; font-weight: 600;"
           ),
-          shiny::plotOutput(ns(paste0("hist_", var)), height = "300px")
+          wise_plot_output(
+            ns(paste0("hist_", var)),
+            paste("Histogram of", var, "before and after the policy adjustment"),
+            height = "300px"
+          )
         )
       })
 

@@ -1,6 +1,6 @@
 # fct_aggregation.R
 # -----------------
-# Welfare aggregation functions — all called at simulation time.
+# Welfare aggregation functions - all called at simulation time.
 # Stateless and testable without Shiny.
 #
 # Called by:
@@ -9,7 +9,7 @@
 #   - mod_3_07_results.R    (apply_deviation)
 #
 # Exports:
-#   resolve_agg_fn, resolve_band_q
+#   resolve_agg_fn
 #   combine_ensemble_results
 #   hist_aggregate_choices
 #   aggregate_outcome, deviation_from_centre
@@ -17,6 +17,9 @@
 #
 # Internal:
 #   draw_residuals_vec
+#
+# resolve_band_q() is defined once, in fct_sim_compare.R (a duplicate here
+# with divergent "minmax" semantics was removed - DUP-01).
 #
 # The closed-form delta-method aggregator (aggregate_with_uncertainty_delta)
 # lives in fct_aggregation_delta.R.
@@ -94,7 +97,7 @@ resolve_agg_fn <- function(method) {
     },
 
     gini = function(welfare, weights, pov_line) {
-      # Weighted Gini via the covariance formula — NA guard first
+      # Weighted Gini via the covariance formula - NA guard first
       valid   <- !is.na(welfare)
       welfare <- welfare[valid]
       if (!is.null(weights)) weights <- weights[valid]
@@ -116,7 +119,7 @@ resolve_agg_fn <- function(method) {
 
     prosperity_gap = function(welfare, weights, pov_line) {
       # Average factor by which incomes must be multiplied to reach $28/day.
-      # pov_line ignored — threshold is always hardcoded to $28/day.
+      # pov_line ignored - threshold is always hardcoded to $28/day.
       pg <- pmax(28 / welfare, 1)
       if (!is.null(weights))
         stats::weighted.mean(pg, weights, na.rm = TRUE)
@@ -142,35 +145,47 @@ resolve_agg_fn <- function(method) {
 }
 
 
-#' Resolve Band Quantiles from Band Width Selection
-#'
-#' Maps the user-facing band width UI selection to a named numeric vector
-#' of lower and upper quantile values for percentile band computation.
-#'
-#' @param band_width Character. One of \code{"p10_p90"}, \code{"p025_p975"},
-#'   \code{"p005_p995"}, \code{"minmax"}, \code{"none"}.
-#'
-#' @return Named numeric vector \code{c(lo = ..., hi = ...)} or \code{NULL}
-#'   when \code{band_width = "none"}.
-#'
-#' @export
-resolve_band_q <- function(band_width) {
-  switch(band_width %||% "p10_p90",
-    p25_p75   = c(lo = 0.25,  hi = 0.75),
-    p20_p80   = c(lo = 0.20,  hi = 0.80),
-    p10_p90   = c(lo = 0.10,  hi = 0.90),
-    p05_p95   = c(lo = 0.05,  hi = 0.95),
-    p025_p975 = c(lo = 0.025, hi = 0.975),
-    p005_p995 = c(lo = 0.005, hi = 0.995),
-    minmax    = c(lo = 0.001, hi = 0.999),
-    none      = NULL,
-               c(lo = 0.10,  hi = 0.90)   # default
-  )
-}
-
 # ---------------------------------------------------------------------------- #
 # Residual drawing helper                                                       #
 # ---------------------------------------------------------------------------- #
+
+#' Build the ID-to-residual named lookup for the "original" residual mode
+#'
+#' PERF-34: the lookup is identical for every year/method/weighting
+#' combination over the same pipeline, so callers can build it once per
+#' pipeline and pass it through instead of rebuilding the named vector and
+#' character keys on every `draw_residuals_vec()` call. Returns NULL when
+#' the inputs cannot support it (callers then compute internally).
+#'
+#' @param train_aug Data frame with `.resid` column.
+#' @param id_col    Character name of the ID column.
+#' @return Named numeric vector, or NULL.
+#' @noRd
+.residual_lookup <- function(train_aug, id_col) {
+  if (is.null(train_aug) || !".resid" %in% names(train_aug) ||
+      is.null(id_col) || !id_col %in% names(train_aug)) {
+    NULL
+  } else {
+    stats::setNames(train_aug$.resid, train_aug[[id_col]])
+  }
+}
+
+#' Residual variance of the training augmentation
+#'
+#' PERF-34 companion: `var(train_aug$.resid)` is rebuilt by every aggregate
+#' call; build it once per pipeline alongside `.residual_lookup()`. NULL
+#' when unavailable.
+#'
+#' @param train_aug Data frame with `.resid` column.
+#' @return Numeric scalar, or NULL.
+#' @noRd
+.residual_sigma2 <- function(train_aug) {
+  if (is.null(train_aug) || !".resid" %in% names(train_aug)) {
+    NULL
+  } else {
+    stats::var(train_aug$.resid, na.rm = TRUE)
+  }
+}
 
 #' Draw a Residual Vector for Welfare Simulation
 #'
@@ -189,6 +204,10 @@ resolve_band_q <- function(band_width) {
 #'   in simulation newdata for \code{residuals = "original"} matching.
 #' @param id_col Optional character. Name of the ID column in \code{train_aug}.
 #' @param seed Integer seed for stochastic residual modes.
+#' @param resid_lookup Optional pre-built named residual vector from
+#'   \code{.residual_lookup()} (PERF-34). When NULL it is built here.
+#' @param resid_sigma2 Optional pre-built residual variance from
+#'   \code{.residual_sigma2()} (PERF-34). When NULL it is computed here.
 #'
 #' @return Numeric vector of length N. Zero vector when
 #'   \code{residuals = "none"}.
@@ -199,7 +218,9 @@ draw_residuals_vec <- function(residuals,
                                N,
                                id_vec  = NULL,
                                id_col  = NULL,
-                               seed    = WISEAPP_DEFAULT_SEED) {
+                               seed    = WISEAPP_DEFAULT_SEED,
+                               resid_lookup = NULL,
+                               resid_sigma2 = NULL) {
   switch(residuals,
 
     none = rep(0, N),
@@ -215,7 +236,8 @@ draw_residuals_vec <- function(residuals,
       # Match simulation households to their training residuals by ID.
       # Unmatched households use a stable hash-indexed lookup so the fallback
       # neither depends on caller RNG state nor consumes the global stream.
-      resid_lookup <- stats::setNames(train_aug$.resid, train_aug[[id_col]])
+      # PERF-34: the lookup may be supplied pre-built by the pipeline owner.
+      resid_lookup <- resid_lookup %||% .residual_lookup(train_aug, id_col)
       matched      <- as.character(id_vec) %in% names(resid_lookup)
 
       out <- numeric(N)
@@ -231,7 +253,10 @@ draw_residuals_vec <- function(residuals,
     normal = {
       if (is.null(train_aug) || !".resid" %in% names(train_aug))
         stop("[draw_residuals_vec] train_aug with .resid required for residuals = 'normal'.")
-      sigma_hat <- stats::sd(train_aug$.resid, na.rm = TRUE)
+      # sd(x) is sqrt(var(x)) in R, so sqrt of a cached var() is bit-identical
+      # to the per-call stats::sd() this replaces (PERF-34).
+      sigma_hat <- if (!is.null(resid_sigma2)) sqrt(resid_sigma2)
+                   else stats::sd(train_aug$.resid, na.rm = TRUE)
       withr::with_seed(seed, stats::rnorm(N, mean = 0, sd = sigma_hat))
     },
 
@@ -254,6 +279,8 @@ draw_residuals_vec <- function(residuals,
 #'
 #' @param member_results List of M lists, each from
 #'   `aggregate_with_uncertainty_delta()` (one per CMIP6 ensemble member).
+#' @param band_q Named numeric vector \code{c(lo =, hi =)} of ensemble
+#'   quantiles for the thick model-spread band. Default \code{c(0.10, 0.90)}.
 #' @return A tibble with columns: `sim_year`, `value`, `value_p05`,
 #'   `value_p95`, `model_values`.
 #' @export
@@ -290,11 +317,11 @@ combine_ensemble_results <- function(member_results,
     value     = value,
     value_all = values,
 
-    # Thick band — point estimates only (weather + model spread)
+    # Thick band - point estimates only (weather + model spread)
     value_lo  = unname(stats::quantile(values, band_q[["lo"]], na.rm = TRUE)),
     value_hi  = unname(stats::quantile(values, band_q[["hi"]], na.rm = TRUE)),
 
-    # Thin line — analytic pooled SE (coefficient + residual + model spread)
+    # Thin line - analytic pooled SE (coefficient + residual + model spread)
     coef_lo   = value + z_lo * se_pool,
     coef_hi   = value + z_hi * se_pool,
 
@@ -326,6 +353,9 @@ combine_ensemble_results <- function(member_results,
 #'
 #' @param outcome_type A character string; `"logical"` for binary outcomes,
 #'   any other value for continuous outcomes.
+#' @param outcome_name Optional character scalar. Outcome variable name; when
+#'   `"welfare"` (with a numeric outcome type), the full welfare-specific
+#'   method suite is offered.
 #'
 #' @return A named character vector suitable for use in `shiny::selectInput()`.
 #'
@@ -646,14 +676,14 @@ aggregate_sim_preds <- function(preds, so, agg_method, deviation, loss_frame,
   }
 
   # Group by (model, sim_year) when a model column is present (future scenarios
-  # with all ensemble members pooled), so the CI reflects model × year variation.
+  # with all ensemble members pooled), so the CI reflects model * year variation.
   # --- Two-stage aggregation ----------------------------------------------- #
   # IMPORTANT: order of operations matters for coefficient uncertainty bands.  #
   # Stage 1: aggregate within each (draw_id, model, sim_year) to a scalar.    #
   #          This gives one aggregate statistic per coefficient draw.           #
   # Stage 2: take percentiles of that scalar across draw_id.                   #
   # Taking percentiles BEFORE aggregating gives quantiles of the individual    #
-  # welfare distribution — a completely different quantity. Don't mix these up. #
+  # welfare distribution - a completely different quantity. Don't mix these up. #
   # --------------------------------------------------------------------------- #
 
   has_draws <- "draw_id" %in% names(preds) && !all(is.na(preds$draw_id))
@@ -738,7 +768,7 @@ apply_deviation <- function(d, deviation, hist_ref = NA_real_) {
 #'
 #' For each of S coefficient draws, computes the exceedance probability
 #' (1 - ECDF) at a grid of welfare values across all N simulation years.
-#' Returns p10/p90 envelope across S draws — the coefficient uncertainty
+#' Returns p10/p90 envelope across S draws - the coefficient uncertainty
 #' ribbon for the exceedance plot.
 #'
 #' @param agg_tbl  Tibble. Output of compute_hist_agg() or
@@ -768,7 +798,7 @@ compute_exceedance_ribbon <- function(agg_tbl,
 
   if (has_draws) {
     S <- length(draw_list[[1L]])
-    # Build N_years × S matrix — each column = one draw across all years
+    # Build N_years * S matrix - each column = one draw across all years
     draw_mat <- matrix(
       unlist(draw_list, use.names = FALSE),
       nrow  = N_years,
@@ -781,7 +811,7 @@ compute_exceedance_ribbon <- function(agg_tbl,
     coef_hi <- matrixStats::rowQuantiles(
                 ordered_mat, probs = band_q[["hi"]], na.rm = TRUE)
   } else if (all(c("coef_lo", "coef_hi") %in% names(agg_tbl))) {
-    # Delta-method path — use analytic band columns directly.
+    # Delta-method path - use analytic band columns directly.
     # Re-order to match the descending welfare ranking.
     coef_lo <- agg_tbl$coef_lo[rank_order]
     coef_hi <- agg_tbl$coef_hi[rank_order]
@@ -789,7 +819,7 @@ compute_exceedance_ribbon <- function(agg_tbl,
     return(NULL)
   }
 
-  # Option A approximation — apply coef width to ensemble bounds
+  # Option A approximation - apply coef width to ensemble bounds
   # Ensemble uncertainty bands use coefficient uncertainty width from
   # the mean ensemble member applied to lo/hi members.
   # This approximates the joint distribution. Error is small for linear

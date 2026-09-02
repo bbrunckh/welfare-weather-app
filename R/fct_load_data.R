@@ -19,10 +19,11 @@
 # -----------------------------------------------------------------------------
 
 .duck <- new.env(parent = emptyenv())
-# .duck$con          — the live DuckDB connection (set by .duck_con())
-# .duck$extensions   — character vector of already-loaded extensions
-# .duck$db_tokens    — named list: params_hash -> list(token, expires_at)
-# .duck$db_secrets   — named list: params_hash -> token currently written as secret
+# .duck$con          - the live DuckDB connection (set by .duck_con())
+# .duck$extensions   - character vector of already-loaded extensions
+# .duck$db_tokens    - named list: params_hash -> list(token, expires_at)
+# .duck$db_secrets   - named list: params_hash / secret name -> credential
+#                      digest currently registered with the connection
 
 
 # Canonical identity columns used before the all-column tie-break. The fallback
@@ -63,7 +64,7 @@ collect_deterministic <- function(data, keys = NULL) {
 
 #' Return (and if necessary initialise) the module-level DuckDB connection.
 #'
-#' Safe to call multiple times — returns the existing connection if it is still
+#' Safe to call multiple times - returns the existing connection if it is still
 #' valid, and creates a fresh one if the connection has been closed or the
 #' process has just started.
 #'
@@ -80,12 +81,15 @@ collect_deterministic <- function(data, keys = NULL) {
 
 #' Install and load a DuckDB extension exactly once per process.
 #'
-#' On Posit Connect, fetches the binary from Databricks Files API to bypass
-#' the unavailable extensions.duckdb.org endpoint. Locally, uses the standard
-#' DuckDB INSTALL mechanism.
+#' On Posit Connect, uses a binary bundled with the package (the public
+#' extensions.duckdb.org endpoint is unreachable there) and fails fast when the
+#' required bundle is absent. Locally, uses the standard DuckDB INSTALL
+#' mechanism. The extension is recorded as loaded only after a successful
+#' LOAD, so a failed load is retried on the next call instead of being
+#' permanently cached.
 #'
 #' @param ext        Extension name e.g. "httpfs", "spatial", "h3".
-#' @param db_token   Bearer token — only required on Posit Connect.
+#' @param db_token   Bearer token - only required on Posit Connect.
 #' @param ext_base_url Databricks Files API URL to the folder containing
 #'   pre-uploaded .duckdb_extension binaries. Only required on Posit Connect.
 #' @noRd
@@ -110,10 +114,17 @@ collect_deterministic <- function(data, keys = NULL) {
       )
     }
 
-    if (nzchar(bundled)) {
-      DBI::dbExecute(con, sprintf("INSTALL '%s';", bundled))
-      DBI::dbExecute(con, sprintf("LOAD '%s';",    ext))
-    } 
+    if (!nzchar(bundled)) stop(
+      "DuckDB extension '", ext, "' is not bundled with this deployment ",
+      "(expected inst/duckdb_extensions/", ext, ".duckdb_extension.gz). ",
+      "Posit Connect cannot reach the public extension repository, so every ",
+      "required extension binary must ship with the package (see the ",
+      "git-backed deployment notes in dev/03_deploy.R).",
+      call. = FALSE
+    )
+
+    DBI::dbExecute(con, sprintf("INSTALL '%s';", bundled))
+    DBI::dbExecute(con, sprintf("LOAD '%s';",    ext))
 
   } else {
     # Local: load from cache, otherwise install from network if missing
@@ -149,7 +160,7 @@ collect_deterministic <- function(data, keys = NULL) {
 #' interpolation for ordinary inputs.
 #'
 #' @param x Character scalar to embed in SQL.
-#' @return Character scalar — a single-quoted DuckDB string literal.
+#' @return Character scalar - a single-quoted DuckDB string literal.
 #' @noRd
 .sql_literal <- function(x) {
   paste0("'", gsub("'", "''", as.character(x), fixed = TRUE), "'")
@@ -167,7 +178,7 @@ collect_deterministic <- function(data, keys = NULL) {
 #' @param host          Databricks workspace URL.
 #' @param client_id     OAuth2 client ID.
 #' @param client_secret OAuth2 client secret.
-#' @return Character scalar — bearer token.
+#' @return Character scalar - bearer token.
 #' @noRd
 .get_db_token <- function(host, client_id, client_secret) {
   key    <- paste(host, client_id, client_secret, sep = "\n")
@@ -207,8 +218,8 @@ collect_deterministic <- function(data, keys = NULL) {
 #' executed when the token has changed.
 #'
 #' @param con         DBI connection.
-#' @param db_token    Character scalar — bearer token.
-#' @param params_hash Character scalar — key identifying this credential set.
+#' @param db_token    Character scalar - bearer token.
+#' @param params_hash Character scalar - key identifying this credential set.
 #' @noRd
 .register_db_secret <- function(con, db_token, params_hash) {
   secret_name <- paste0("db_http_", params_hash)
@@ -223,6 +234,29 @@ collect_deterministic <- function(data, keys = NULL) {
 }
 
 
+#' Create a named DuckDB secret only when its resolved credentials changed.
+#'
+#' Applies the Databricks fast path to the object-store secrets: the SQL
+#' round-trip is skipped when the credential tuple is unchanged since the last
+#' call in this process. The cache lives in `.duck$db_secrets` and is reset
+#' with the connection by `.duck_con()`, so a fresh connection always
+#' re-registers. Only the credential digest is cached - never the values.
+#'
+#' @param con   DBI connection.
+#' @param name  Secret name to (re)create.
+#' @param creds Named list of resolved credential values (hash input only).
+#' @param sql   Fully formatted CREATE OR REPLACE SECRET statement.
+#' @noRd
+.register_cached_secret <- function(con, name, creds, sql) {
+  creds_hash <- substr(digest::digest(list(name, creds)), 1, 8)
+  if (!identical(.duck$db_secrets[[name]], creds_hash)) {
+    DBI::dbExecute(con, sql)
+    .duck$db_secrets[[name]] <- creds_hash
+  }
+  invisible(NULL)
+}
+
+
 # -----------------------------------------------------------------------------
 # DuckDB SQL builder
 # -----------------------------------------------------------------------------
@@ -231,8 +265,8 @@ collect_deterministic <- function(data, keys = NULL) {
 #'
 #' @param paths         Character vector of resolved paths / URIs.
 #' @param format        "parquet" or "csv".
-#' @param unify_schemas Logical — pass union_by_name = true.
-#' @return Character scalar — SQL fragment for use in a FROM clause.
+#' @param unify_schemas Logical - pass union_by_name = true.
+#' @return Character scalar - SQL fragment for use in a FROM clause.
 #' @noRd
 .build_read_expr <- function(paths, format, unify_schemas) {
   path_sql <- paste0(
@@ -285,7 +319,7 @@ collect_deterministic <- function(data, keys = NULL) {
 #' Load data files lazily via DuckDB
 #'
 #' A unified data loading function that opens local or remote datasets via a
-#' module-level DuckDB connection. Returns a lazy \code{dplyr::tbl()} — no
+#' module-level DuckDB connection. Returns a lazy \code{dplyr::tbl()} - no
 #' data is read into memory until \code{dplyr::collect()} is called.
 #'
 #' Supports \code{.parquet} and \code{.csv} files. Format is detected from the
@@ -321,14 +355,14 @@ collect_deterministic <- function(data, keys = NULL) {
 #' \dontrun{
 #' params <- list(type = "local", path = "/data")
 #'
-#' # Bare filename — resolved to /data/survey_list.csv
+#' # Bare filename - resolved to /data/survey_list.csv
 #' survey_list <- load_data("survey_list.csv", params, collect = TRUE)
 #'
-#' # Lazy — filter before collecting
+#' # Lazy - filter before collecting
 #' tbl <- load_data(c("/data/nga_survey.parquet", "/data/eth_survey.parquet"), params)
 #' df  <- dplyr::collect(dplyr::filter(tbl, year >= 2015))
 #'
-#' # S3 — bare filenames resolved to s3://my-bucket/data/survey_list.csv
+#' # S3 - bare filenames resolved to s3://my-bucket/data/survey_list.csv
 #' params_s3 <- list(type = "s3", bucket = "my-bucket", prefix = "data/",
 #'                   region = "us-east-1", key_id = "", secret = "")
 #' survey_list <- load_data("survey_list.csv", params_s3, collect = TRUE)
@@ -351,7 +385,7 @@ load_data <- function(
   con   <- .duck_con()
 
   # ---------------------------------------------------------------------------
-  # 1. Detect format early — fail before any network calls
+  # 1. Detect format early - fail before any network calls
   # ---------------------------------------------------------------------------
 
   if (is.null(format)) {
@@ -410,30 +444,45 @@ load_data <- function(
   if (type == "s3") {
 
     .duck_load_ext("httpfs")
-    DBI::dbExecute(con, sprintf(
-      "CREATE OR REPLACE SECRET s3_secret (
-         TYPE   S3,
-         KEY_ID %s,
-         SECRET %s,
-         REGION %s
-       );",
-      .sql_literal(connection_params$key_id  %||% Sys.getenv("AWS_ACCESS_KEY_ID")),
-      .sql_literal(connection_params$secret  %||% Sys.getenv("AWS_SECRET_ACCESS_KEY")),
-      .sql_literal(connection_params$region  %||% "us-east-1")
-    ))
+    s3_creds <- list(
+      key_id = connection_params$key_id %||% Sys.getenv("AWS_ACCESS_KEY_ID"),
+      secret = connection_params$secret %||% Sys.getenv("AWS_SECRET_ACCESS_KEY"),
+      region = connection_params$region %||% "us-east-1"
+    )
+    .register_cached_secret(
+      con, "s3_secret", s3_creds,
+      sprintf(
+        "CREATE OR REPLACE SECRET s3_secret (
+           TYPE   S3,
+           KEY_ID %s,
+           SECRET %s,
+           REGION %s
+         );",
+        .sql_literal(s3_creds$key_id),
+        .sql_literal(s3_creds$secret),
+        .sql_literal(s3_creds$region)
+      )
+    )
 
   } else if (type == "gcs") {
 
     .duck_load_ext("httpfs")
-    DBI::dbExecute(con, sprintf(
-      "CREATE OR REPLACE SECRET gcs_secret (
-         TYPE   GCS,
-         KEY_ID %s,
-         SECRET %s
-       );",
-      .sql_literal(connection_params$key_id %||% Sys.getenv("GCS_ACCESS_KEY_ID")),
-      .sql_literal(connection_params$secret %||% Sys.getenv("GCS_SECRET_ACCESS_KEY"))
-    ))
+    gcs_creds <- list(
+      key_id = connection_params$key_id %||% Sys.getenv("GCS_ACCESS_KEY_ID"),
+      secret = connection_params$secret %||% Sys.getenv("GCS_SECRET_ACCESS_KEY")
+    )
+    .register_cached_secret(
+      con, "gcs_secret", gcs_creds,
+      sprintf(
+        "CREATE OR REPLACE SECRET gcs_secret (
+           TYPE   GCS,
+           KEY_ID %s,
+           SECRET %s
+         );",
+        .sql_literal(gcs_creds$key_id),
+        .sql_literal(gcs_creds$secret)
+      )
+    )
 
   } else if (type == "azure") {
 
@@ -446,27 +495,44 @@ load_data <- function(
     tenant_id     <- connection_params$tenant_id     %||% Sys.getenv("AZURE_TENANT_ID")
 
     if (nzchar(key)) {
-      DBI::dbExecute(con, sprintf(
-        "CREATE OR REPLACE SECRET azure_secret (
-           TYPE              AZURE,
-           CONNECTION_STRING %s
-         );",
-        .sql_literal(paste0(
-          "AccountName=", connection_params$account %||% "",
-          ";AccountKey=", key
-        ))
-      ))
+      az_creds <- list(
+        provider = "key",
+        account  = connection_params$account %||% "",
+        key      = key
+      )
+      .register_cached_secret(
+        con, "azure_secret", az_creds,
+        sprintf(
+          "CREATE OR REPLACE SECRET azure_secret (
+             TYPE              AZURE,
+             CONNECTION_STRING %s
+           );",
+          .sql_literal(paste0(
+            "AccountName=", az_creds$account,
+            ";AccountKey=", az_creds$key
+          ))
+        )
+      )
     } else if (nzchar(client_id) && nzchar(client_secret) && nzchar(tenant_id)) {
-      DBI::dbExecute(con, sprintf(
-        "CREATE OR REPLACE SECRET azure_secret (
-           TYPE          AZURE,
-           PROVIDER      SERVICE_PRINCIPAL,
-           TENANT_ID     %s,
-           CLIENT_ID     %s,
-           CLIENT_SECRET %s
-         );",
-        .sql_literal(tenant_id), .sql_literal(client_id), .sql_literal(client_secret)
-      ))
+      az_creds <- list(
+        provider      = "service_principal",
+        tenant_id     = tenant_id,
+        client_id     = client_id,
+        client_secret = client_secret
+      )
+      .register_cached_secret(
+        con, "azure_secret", az_creds,
+        sprintf(
+          "CREATE OR REPLACE SECRET azure_secret (
+             TYPE          AZURE,
+             PROVIDER      SERVICE_PRINCIPAL,
+             TENANT_ID     %s,
+             CLIENT_ID     %s,
+             CLIENT_SECRET %s
+           );",
+          .sql_literal(tenant_id), .sql_literal(client_id), .sql_literal(client_secret)
+        )
+      )
     } else {
       tryCatch(
         DBI::dbExecute(con,
@@ -498,13 +564,13 @@ load_data <- function(
     db_token    <- .get_db_token(host, client_id, client_secret)
     params_hash <- substr(digest::digest(list(host, client_id)), 1, 8)
 
-    # Fast path: single CSV — bypass DuckDB entirely
+    # Fast path: single CSV - bypass DuckDB entirely
     if (format == "csv" && length(paths) == 1L) {
       out <- .fetch_db_csv_direct(paths, db_token)
       return(if (collect) collect_deterministic(out, order_by) else out)
     }
 
-    # Build the extensions base URL — points to the folder you uploaded binaries to
+    # Build the extensions base URL - points to the folder you uploaded binaries to
     vol_path    <- connection_params$volume_path %||% Sys.getenv("DATABRICKS_VOLUME_PATH")
     ext_base_url <- paste0(
       host, "/api/2.0/fs/files",

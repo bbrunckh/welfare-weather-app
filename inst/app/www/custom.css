@@ -115,17 +115,44 @@
   color: var(--bs-primary);
 }
 
-/* ---- Hide intermediate (non-validation) output errors ------------------- */
+/* ---- Output error states (UI-01) -----------------------------------------
+   Errors are VISIBLE. By the time a render expression errors, every
+   long-running renderer is guarded by validate(need(...)), so what reaches
+   .shiny-output-error is a genuine bug - show it as a warning card instead
+   of silently blanking the pane. Validation messages keep their muted
+   italic style via .shiny-output-error-validation.                       */
 
 .shiny-output-error {
-  visibility: hidden;
+  visibility: visible;
+  border: 1px solid var(--bs-border-color);
+  border-left: 3px solid var(--bs-warning, #b8860b);
+  border-radius: var(--bs-border-radius);
+  background: #fff8e6;
+  color: var(--bs-secondary);
+  font-size: 13px;
+  padding: 0.75rem 1rem;
+  margin: 0.5rem 0;
+  white-space: pre-wrap;
+}
+
+.shiny-output-error:before {
+  content: "\f071  ";  /* fa-exclamation-triangle */
+  font-family: "Font Awesome 6 Free";
+  font-weight: 900;
+  color: var(--bs-warning, #b8860b);
 }
 
 .shiny-output-error-validation {
-  visibility: visible;
-  color: var(--bs-secondary);
+  border: none;
+  border-left: none;
+  background: transparent;
+  padding: 0.25rem 0;
   font-style: italic;
-  padding: 0.75rem 0;
+  color: var(--bs-secondary);
+}
+
+.shiny-output-error-validation:before {
+  content: "";
 }
 
 /* ---- Empty state (Overview tabs before outputs exist) ------------------- */
@@ -181,7 +208,12 @@
 /* ---- Configure flyout (weather variable settings) ------------------------
    Content stays in the DOM (conditionalPanel), but is presented as a
    floating panel beside the sidebar so options are visible without
-   scrolling. Falls back to inline flow on narrow screens.               */
+   scrolling. Falls back to inline flow on narrow screens.
+
+   UI-02: custom.js positions each open flyout beside its own toggle
+   (`.config-flyout-anchor`) instead of the shared viewport spot below, and
+   owns one-open state, aria-expanded, focus and Escape. The fixed
+   left/top here is only the no-JS fallback. */
 
 /* bslib sets `display: contents` on conditionalPanels inside gap-spacing
    containers, which destroys the flyout box entirely — restore it. Same
@@ -584,3 +616,104 @@ table.dataTable {
 .results-controls hr {
   margin: 0.4rem 0;
 }
+
+/* ---- Toggle-style Slider (Segmented Control) ----------------------------- */
+
+.toggle-slider {
+  display: inline-flex;
+  align-items: center;
+  vertical-align: middle;
+  margin-bottom: 0 !important;
+  max-width: 100%;
+}
+
+.toggle-slider > label.control-label {
+  display: none !important;
+}
+
+.toggle-slider .shiny-options-group {
+  display: inline-flex !important;
+  flex-direction: row !important;
+  flex-wrap: nowrap !important;
+  align-items: center;
+  background-color: #f1f3f5;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 2rem;
+  padding: 2px;
+  gap: 2px;
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(0, 0, 0, 0.2) transparent;
+  -webkit-overflow-scrolling: touch;
+}
+
+.toggle-slider .shiny-options-group::-webkit-scrollbar {
+  height: 3px;
+}
+
+.toggle-slider .shiny-options-group::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 2px;
+}
+
+.toggle-slider .radio-inline,
+.toggle-slider .form-check-inline {
+  display: inline-flex !important;
+  align-items: center;
+  justify-content: center;
+  margin: 0 !important;
+  padding: 0 !important;
+  position: relative;
+  cursor: pointer;
+  border-radius: 1.5rem;
+}
+
+.toggle-slider input[type="radio"] {
+  position: absolute !important;
+  opacity: 0 !important;
+  width: 0 !important;
+  height: 0 !important;
+  margin: 0 !important;
+  pointer-events: none !important;
+}
+
+.toggle-slider .radio-inline span,
+.toggle-slider .form-check-inline label,
+.toggle-slider .form-check-inline span {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.22rem 0.65rem;
+  font-size: 0.78rem;
+  font-weight: 500;
+  color: #495057;
+  border-radius: 1.5rem;
+  white-space: nowrap;
+  transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+  user-select: none;
+  line-height: 1.25;
+}
+
+.toggle-slider .radio-inline:hover span,
+.toggle-slider .form-check-inline:hover span {
+  color: #212529;
+  background-color: rgba(255, 255, 255, 0.5);
+}
+
+.toggle-slider input[type="radio"]:checked + span,
+.toggle-slider input[type="radio"]:checked + label,
+.toggle-slider input[type="radio"]:checked ~ span {
+  background-color: #ffffff !important;
+  color: var(--bs-primary, #0071bc) !important;
+  font-weight: 600 !important;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12), 0 1px 2px rgba(0, 0, 0, 0.06) !important;
+}
+
+.toggle-slider input[type="radio"]:focus-visible + span,
+.toggle-slider input[type="radio"]:focus-visible + label {
+  outline: 2px solid var(--bs-primary, #0071bc);
+  outline-offset: 1px;
+}
+
