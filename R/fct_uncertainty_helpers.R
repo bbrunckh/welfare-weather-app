@@ -42,16 +42,16 @@ by_model_matrix <- function(tbl) {
 #' Per-model rank-interpolated values (and coefficient SDs) at each kept
 #' return probability.
 #'
-#' Builds the [models x RPs] matrices explicitly with a loop. The previous
+#' Builds the `models x RPs` matrices explicitly with a loop. The previous
 #' `t(apply(...))` formulation relied on `apply()` returning a matrix; with a
 #' single admissible RP (two simulation years) and several ensemble members it
 #' simplified to a vector and `t()` transposed it, silently recycling every
 #' downstream row (duplicated threshold-table entries).
 #'
-#' @param vals    Numeric matrix [models x sim years] of point values.
-#' @param sds     Numeric matrix [models x sim years] of coefficient SDs.
+#' @param vals    Numeric matrix (`models x sim years`) of point values.
+#' @param sds     Numeric matrix (`models x sim years`) of coefficient SDs.
 #' @param RPs_keep Named numeric vector of admissible exceedance probabilities.
-#' @return List with `rp` and `sd`, both [models x RPs].
+#' @return List with `rp` and `sd`, both `models x RPs`.
 #' @noRd
 by_model_rp_matrix <- function(vals, sds, RPs_keep) {
   n_m <- nrow(vals)

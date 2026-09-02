@@ -1123,6 +1123,11 @@ make_stats_dt <- function(survey_data, variable_list, flag_col = NULL, vars = NU
         dplyr::select(variable, dplyr::everything(), -dplyr::any_of("label"))
     }
 
+    # Omit variables with no observed values and the redundant unweighted mean.
+    tab <- tab |>
+      dplyr::filter(is.na(.data$N) | .data$N > 0) |>
+      dplyr::select(-dplyr::any_of("unweighted_mean"))
+
     # Sort by variable label, then wave (countryyear) where available
     if (all(c("variable", "countryyear") %in% names(tab))) {
       tab <- tab |>

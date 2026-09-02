@@ -39,7 +39,7 @@ theme_wise <- function(base_size = 14, ...) {
 )
 
 #' Colorblind-safe discrete scales (Okabe-Ito), UI-04.
-#' `...` forwards to [ggplot2::scale_*_manual()] (name, breaks, labels, ...).
+#' `...` forwards to [ggplot2::scale_colour_manual()] (name, breaks, labels, ...).
 #' @name wise_scale_colour_okabe_ito
 #' @noRd
 wise_scale_colour_okabe_ito <- function(...) {
