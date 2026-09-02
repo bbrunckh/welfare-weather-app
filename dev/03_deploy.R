@@ -70,17 +70,37 @@ rsconnect::writeManifest(
   appPrimaryDoc = "app.R"
 )
 
-## IMPORTANT: the line above WILL re-add "sf" to manifest.json. {leaflet}
-## hard-Imports sf (>= 0.9-6) on CRAN -- a real transitive dependency, not
-## something .rscignore can hide -- and the Connect host cannot build sf. The
-## app itself never touches {sf} at runtime (only batch/, which is excluded
-## from appFiles, uses it), so sf is never actually loaded; Connect's install
-## step just needs to not attempt it. After every writeManifest() run,
-## re-strip it:
+## IMPORTANT (2026-09-02, MapLibre rollback): after every writeManifest() run,
+## re-strip "sf" from manifest.json. The Connect host cannot build sf
+## (GDAL 3.10.2 headers exist but the runtime libgdal.so.36 is missing, so
+## configure fails; see the 2026-09-02 deploy incident). It is safe to drop sf
+## because nothing in the executed app loads it:
+##   - leaflet lists sf (>= 0.9-6) in Imports, but its NAMESPACE only
+##     registers S3 methods for sf classes (no import(sf)), so the package
+##     loads fine without sf installed;
+##   - the mapgl/vector-basemap experiment was rolled back to leaflet for
+##     exactly this reason: mapgl hard-Imports sf/terra/geojsonsf in both
+##     DESCRIPTION and NAMESPACE (import(sf)/import(terra)/import(geojsonsf)),
+##     which made the sf strip fatal for mapgl -- and per-feature styles are
+##     available on leaflet via feature.properties.style anyway, so the
+##     one-layer-per-map rendering survives the rollback.
+##   - batch/ scripts do use sf but batch/ is excluded from appFiles.
+## geojsonsf, classInt and the other mapgl-only deps drop out of the dep scan
+## automatically once mapgl leaves DESCRIPTION Imports. terra STAYS: raster
+## (a leaflet dependency) requires it and terra builds without GDAL.
 m <- jsonlite::fromJSON("manifest.json", simplifyVector = FALSE)
+stopifnot(!is.null(m$packages[["sf"]]))
 m$packages[["sf"]] <- NULL
 jsonlite::write_json(m, "manifest.json", auto_unbox = TRUE, pretty = TRUE, null = "null")
-## Verify before committing: grep -c '"sf":' manifest.json  ->  should be 0
+## Verify before committing:
+##   jq -r '.packages | has("sf")' manifest.json          ->  false
+##   jq -r '.packages | has("mapgl")' manifest.json       ->  false
+##   jq -r '.packages | has("brand.yml")' manifest.json   ->  true
+##
+## If the Connect admins later install the GDAL runtime (libgdal.so.36 +
+## proj/geos) or we ever re-attempt a mapgl/deck.gl migration, the sf entry
+## must come back -- and mapgl additionally needs terra and geojsonsf, with
+## no possibility of stripping (see the 2026-08-28 review report history).
 ##
 ## NOTE: keep brand.yml in DESCRIPTION Imports. The static dependency scan
 ## cannot see it (bslib loads it dynamically for bs_theme(brand = ...)), so a

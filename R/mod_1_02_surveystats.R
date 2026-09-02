@@ -329,17 +329,17 @@ mod_1_02_surveystats_server <- function(
           p
         })
 
-        # Leaflet→MapLibre maps: the widget only rebuilds on view toggles and
-        # data loads. Wave changes swap the GeoJSON source in place (observer
-        # below) - no widget rebuild, no basemap/style re-fetch, and the
-        # user's pan/zoom survives without any view-memory machinery.
+        # Leaflet maps: the widget only rebuilds on view toggles and data
+        # loads. Wave changes swap the GeoJSON layer in place (observer
+        # below) - no widget rebuild, no basemap re-fetch, and the user's
+        # pan/zoom survives without any view-memory machinery.
         map_view_mem <- map_view_memory(
           input, session, "map",
           key = shiny::reactive(digest::digest(selected_surveys()))
         )
         map_view_mem$remember()
 
-        output$map <- mapgl::renderMaplibre({
+        output$map <- leaflet::renderLeaflet({
           wave <- shiny::isolate(input$map_wave %||% "all")
 
           m <- if (identical(input$map_view, "density")) {
@@ -357,25 +357,66 @@ mod_1_02_surveystats_server <- function(
           map_view_mem$restore(m)
         })
 
-        # Wave-only changes: update the active layer's source in place.
+        # Wave-only changes: swap the active layer in place. The serialized
+        # FeatureCollection string per wave is cached (one entry per wave) so
+        # toggling between waves does not re-serialize the shared geometry on
+        # every click; the cache is dropped when either data source reloads
+        # (locations map -> map_data, density map -> cell_data).
+        fc_cache <- new.env(parent = emptyenv())
+        observeEvent(map_data(), {
+          fc_cache$locs  <- new.env(parent = emptyenv())
+          fc_cache$dens  <- new.env(parent = emptyenv())
+        })
+        observeEvent(cell_data(), {
+          fc_cache$dens  <- new.env(parent = emptyenv())
+        })
+        cached_loc_fc <- function(wave) {
+          if (is.null(fc_cache$locs[[wave]])) {
+            loc <- filter_features_by_wave(map_data(), wave)
+            shiny::req(!is.null(loc))
+            fc_cache$locs[[wave]] <- .survey_fc_string(loc$features)
+          }
+          fc_cache$locs[[wave]]
+        }
+        cached_density_fc <- function(wave) {
+          if (is.null(fc_cache$dens[[wave]])) {
+            fc <- .sample_density_fc(density_cells(wave))
+            shiny::req(fc)
+            fc_cache$dens[[wave]] <- fc$fc
+          }
+          fc_cache$dens[[wave]]
+        }
+
+        # Wave-only changes: update the active layer in place.
         observeEvent(input$map_wave,
           {
             wave <- input$map_wave %||% "all"
-            px   <- mapgl::maplibre_proxy(ns("map"), session)
+            px   <- leaflet::leafletProxy(ns("map"), session)
             if (identical(input$map_view %||% "locations", "density")) {
-              fc <- .sample_density_fc(density_cells(wave))
-              shiny::req(fc)
-              mapgl::set_source(
-                px, "density-cells-fill",
-                jsonlite::fromJSON(fc$fc, simplifyVector = FALSE)
+              leaflet::removeGeoJSON(px, "density-cells")
+              leaflet::addGeoJSON(
+                px,
+                geojson     = cached_density_fc(wave),
+                layerId     = "density-cells",
+                stroke      = FALSE,
+                color       = "#000000",
+                weight      = 1,
+                opacity     = 0.5,
+                fill        = TRUE,
+                fillOpacity = 0.75
               )
             } else {
-              loc <- filter_features_by_wave(map_data(), wave)
-              shiny::req(!is.null(loc))
-              mapgl::set_source(
-                px, "locs-outline",
-                jsonlite::fromJSON(.survey_fc_string(loc$features),
-                                   simplifyVector = FALSE)
+              leaflet::removeGeoJSON(px, "locs")
+              leaflet::addGeoJSON(
+                px,
+                geojson     = cached_loc_fc(wave),
+                layerId     = "locs",
+                stroke      = TRUE,
+                color       = "#000000",
+                weight      = 1,
+                opacity     = 0.5,
+                fill        = TRUE,
+                fillOpacity = 0
               )
             }
           },
@@ -525,7 +566,7 @@ mod_1_02_surveystats_server <- function(
                       shiny::uiOutput(ns("map_view_ui"), inline = TRUE)
                     )
                   ),
-                  mapgl::maplibreOutput(ns("map"), height = "100%")
+                  leaflet::leafletOutput(ns("map"), height = "100%")
                 )
               ),
               h4(

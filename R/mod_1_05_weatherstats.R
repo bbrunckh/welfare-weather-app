@@ -876,7 +876,7 @@ mod_1_05_weatherstats_server <- function(
         }
         .mem <- wxmap_view_mem[[.id]]
 
-        output[[.id]] <- mapgl::renderMaplibre({
+        output[[.id]] <- leaflet::renderLeaflet({
           gj <- wxmap_features()
           req(gj)
           key <- wxmap_wave()
@@ -973,7 +973,7 @@ mod_1_05_weatherstats_server <- function(
           if (is.na(wave_label)) sw$label[i] else
             paste0(sw$label[i], " - ", wave_label)
         ),
-        mapgl::maplibreOutput(ns(wxmap_id(i)), height = "100%")
+        leaflet::leafletOutput(ns(wxmap_id(i)), height = "100%")
       )
     })
 

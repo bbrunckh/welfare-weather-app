@@ -8,9 +8,7 @@
 library(testthat)
 
 make_map <- function() {
-  m <- mapgl::maplibre(style = "https://example.invalid/style.json")
-  m$x$fitBounds <- list(bounds = c(10, -18, 40, 15), options = list(animate = FALSE))
-  m
+  leaflet::leaflet()
 }
 
 test_that("map_view_memory keeps the view for the same key and re-fits when it changes", {
@@ -32,7 +30,7 @@ test_that("map_view_memory keeps the view for the same key and re-fits when it c
     session$setInputs(m_center = list(lng = 0, lat = 0), m_zoom = 0L)
     session$flushReact()
 
-    # MapLibre reports a view; it is recorded under the current key.
+    # Leaflet reports a view; it is recorded under the current key.
     session$setInputs(m_center = list(lng = 10, lat = 0), m_zoom = 5L)
     session$flushReact()
     st <- mem$stored()
@@ -40,12 +38,14 @@ test_that("map_view_memory keeps the view for the same key and re-fits when it c
     expect_equal(st$zoom, 5L)
     expect_identical(st$key, "A")
 
-    # Same key: the view is reapplied to a rebuilt widget - center/zoom are
-    # overridden and the widget's own fitBounds is dropped.
+    # Same key: the view is reapplied to a rebuilt widget - setView is added
+    # and the autofit hook is suppressed.
     r <- mem$restore(make_map())
-    expect_equal(r$x$center, c(10, 0))
-    expect_equal(r$x$zoom, 5L)
-    expect_null(r$x$fitBounds)
+    expect_false(is.null(r$x$setView))
+    # Widget stores the view positionally: list(c(lat, lng), zoom, options).
+    expect_equal(r$x$setView[[1]], c(0, 10))
+    expect_equal(r$x$setView[[2]], 5L)
+    expect_false(r$x$fitOnResize)
 
     # Key change (new sample country): the stale view is dropped, so the
     # rebuilt widget fits its own data bounds.
@@ -60,8 +60,8 @@ test_that("map_view_memory keeps the view for the same key and re-fits when it c
     session$flushReact()
     expect_identical(mem$stored()$key, "B")
     r3 <- mem$restore(make_map())
-    expect_equal(r3$x$center, c(35, 0))
-    expect_equal(r3$x$zoom, 4L)
+    expect_equal(r3$x$setView[[1]], c(0, 35))
+    expect_equal(r3$x$setView[[2]], 4L)
   })
 })
 
@@ -82,8 +82,8 @@ test_that("map_view_memory without a key behaves as before (view always restored
     session$flushReact()
     expect_identical(mem$stored()$key, NULL)
     r <- mem$restore(make_map())
-    expect_equal(r$x$center, c(1, 2))
-    expect_equal(r$x$zoom, 3L)
-    expect_null(r$x$fitBounds)
+    expect_equal(r$x$setView[[1]], c(2, 1))
+    expect_equal(r$x$setView[[2]], 3L)
+    expect_false(r$x$fitOnResize)
   })
 })

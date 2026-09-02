@@ -426,10 +426,10 @@ plot_outcome_coverage_map <- function(geojson, df, outcome, cell_map = NULL) {
 
   on_cells <- !is.null(cell_map)
 
-  # MapLibre GL on the keyless CARTO vector Positron basemap. One fill layer
-  # carrying a per-feature colour via a `__fill` property (`get` expression);
-  # a continuous ramp gives almost every location its own shade, which the old
-  # Leaflet group-by-colour loop turned into hundreds of separate layers.
+  # Keyless raster Positron basemap. One GeoJSON layer carrying a per-feature
+  # colour via properties.style; a continuous ramp gives almost every location
+  # its own shade, which a group-by-colour loop would turn into hundreds of
+  # separate layers.
   fill <- vapply(geojson$features, function(f) {
     pct <- avail_map[as.character(f$properties$loc_id)]
     pal(if (is.na(pct)) rng[1] else min(max(pct, rng[1]), rng[2]))
@@ -437,48 +437,31 @@ plot_outcome_coverage_map <- function(geojson, df, outcome, cell_map = NULL) {
   props_json <- paste0(
     '{"loc_id":',   .json_vec(.prop_col(geojson$features, "loc_id")),
     ',"bbox":',     .bbox_frag(geojson$features),
-    ',"__fill":',   .json_vec(fill),
+    ',',            .feature_style_frag(fill, stroke = !on_cells),
     '}'
   )
   geoms <- vapply(geojson$features, function(f) f$geom_json, character(1))
 
-  m <- .maplibre_geojson_source(
-    mapgl::maplibre(style = .map_style(), projection = "mercator"),
-    "coverage",
-    .geojson_fc_string(geoms, props_json, ids = seq_along(geojson$features))
-  ) |>
-    mapgl::add_fill_layer(
-      id                 = "coverage-fill",
-      source             = "coverage",
-      fill_color         = mapgl::get_column("__fill"),
-      # Cells tile edge to edge, so per-cell outlines only add noise - but the
-      # same-colour hairline removes the anti-aliasing seams between them.
-      fill_outline_color = mapgl::get_column("__fill"),
-      fill_opacity       = if (on_cells) 0.75 else 0.5
+  m <- .basemap() |>
+    .add_geojson_layer(
+      fc_string = .geojson_fc_string(geoms, props_json,
+                                     ids = seq_along(geojson$features)),
+      layer_id  = "coverage",
+      stroke    = !on_cells,
+      # Cells tile edge to edge, so per-cell outlines only add noise; location
+      # polygons (overlapping) keep a thin outline as before.
+      fill_opacity = if (on_cells) 0.75 else 0.5
     )
 
-  # Location polygons keep a thin outline, as before.
-  if (!on_cells) {
-    m <- m |>
-      mapgl::add_line_layer(
-        id         = "coverage-outline",
-        source     = "coverage",
-        line_color = mapgl::get_column("__fill"),
-        line_width = 1
-      )
-  }
-
-  m <- m |>
-    mapgl::add_navigation_control(
-      position = "top-left", show_compass = FALSE, visualize_pitch = FALSE
-    ) |>
-    mapgl::fit_bounds(c(bounds$lng1, bounds$lat1, bounds$lng2, bounds$lat2)) |>
-    mapgl::add_reset_control(position = "top-left")
-
   m |>
-    mapgl::add_control(
-      position = "bottom-right",
-      className = "wise-map-legend",
+    leaflet::fitBounds(
+      lng1 = bounds$lng1, lat1 = bounds$lat1,
+      lng2 = bounds$lng2, lat2 = bounds$lat2
+    ) |>
+    .add_reset_button(bounds) |>
+    htmlwidgets::onRender(.map_autofit_js(bounds)) |>
+    leaflet::addControl(
+      position = "bottomright",
       html = .compact_legend_html(
         pal_info = list(pal = pal, domain = rng),
         binned   = FALSE,
