@@ -1,0 +1,41 @@
+meta:
+  name: WISE-APP
+  link: https://www.worldbank.org
+
+color:
+  palette:
+    wb-navy: "#002244"
+    wb-blue: "#0071BC"
+    wb-cyan: "#009FDA"
+    wb-green: "#00AB51"
+    wb-yellow: "#FDB714"
+    wb-red: "#EB1C2D"
+    charcoal: "#1D2A35"
+    slate: "#5B6B79"
+    off-white: "#F7F9FB"
+  foreground: charcoal
+  background: "#FFFFFF"
+  primary: wb-blue
+  secondary: slate
+  info: wb-cyan
+  success: wb-green
+  warning: wb-yellow
+  danger: wb-red
+  light: off-white
+  dark: wb-navy
+
+typography:
+  fonts:
+    - family: Open Sans
+      source: google
+      weight: [400, 600, 700]
+  base:
+    family: Open Sans
+    size: 15px
+    line-height: 1.55
+  headings:
+    family: Open Sans
+    weight: 600
+    color: wb-navy
+  link:
+    color: wb-blue

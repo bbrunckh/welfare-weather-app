@@ -1,0 +1,719 @@
+/* ==========================================================================
+   WISE-APP custom styles (Bootstrap 5 / bslib)
+   Complements inst/app/_brand.yml. Loaded via golem::bundle_resources().
+   ========================================================================== */
+
+/* ---- Navbar ------------------------------------------------------------ */
+
+.navbar .navbar-brand {
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.navbar .navbar-brand .app-version {
+  font-size: 0.55em;
+  font-weight: 400;
+  opacity: 0.6;
+  margin-left: 0.35rem;
+}
+
+.navbar .nav-link {
+  font-weight: 600;
+}
+
+/* ---- Step pages ---------------------------------------------------------- */
+
+.step-question {
+  font-size: 1.15rem;
+  font-weight: 600;
+  color: var(--bs-dark);
+  margin: 0.25rem 0 1rem 0;
+}
+
+/* Sidebar polish */
+.bslib-sidebar-layout > .sidebar {
+  background-color: var(--bs-light);
+}
+
+.bslib-sidebar-layout > .sidebar .accordion {
+  --bs-accordion-bg: #ffffff;
+}
+
+.sidebar .accordion-button {
+  font-weight: 600;
+  color: var(--bs-dark);
+  padding: 0.7rem 0.9rem;
+}
+
+.sidebar .accordion-button:not(.collapsed) {
+  background-color: rgba(0, 113, 188, 0.07);
+  color: var(--bs-primary);
+  box-shadow: none;
+}
+
+.sidebar .accordion-body {
+  padding: 0.9rem;
+}
+
+/* Numbered step badge used in accordion panel titles */
+.step-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: 50%;
+  background-color: var(--bs-primary);
+  color: #fff;
+  font-size: 0.8rem;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+/* ---- Legacy wellPanel (.well has no styling in Bootstrap 5) ------------- */
+
+.well {
+  background-color: #ffffff;
+  border: 1px solid var(--bs-border-color);
+  border-radius: var(--bs-border-radius);
+  padding: 0.9rem;
+  margin-bottom: 0.9rem;
+}
+
+.well .well {
+  background-color: var(--bs-light);
+}
+
+/* ---- Output tabsets: underline style ------------------------------------ */
+
+.tab-content {
+  padding-top: 1.1rem;
+}
+
+.nav-tabs {
+  gap: 0.25rem;
+  border-bottom: 1px solid var(--bs-border-color);
+}
+
+.nav-tabs .nav-link {
+  border: none;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  color: var(--bs-secondary);
+  font-weight: 600;
+  padding: 0.5rem 1rem;
+}
+
+.nav-tabs .nav-link:hover {
+  border-bottom-color: var(--bs-border-color);
+  color: var(--bs-dark);
+}
+
+.nav-tabs .nav-link.active {
+  background: transparent;
+  border-bottom: 2px solid var(--bs-primary);
+  color: var(--bs-primary);
+}
+
+/* ---- Output error states (UI-01) -----------------------------------------
+   Errors are VISIBLE. By the time a render expression errors, every
+   long-running renderer is guarded by validate(need(...)), so what reaches
+   .shiny-output-error is a genuine bug - show it as a warning card instead
+   of silently blanking the pane. Validation messages keep their muted
+   italic style via .shiny-output-error-validation.                       */
+
+.shiny-output-error {
+  visibility: visible;
+  border: 1px solid var(--bs-border-color);
+  border-left: 3px solid var(--bs-warning, #b8860b);
+  border-radius: var(--bs-border-radius);
+  background: #fff8e6;
+  color: var(--bs-secondary);
+  font-size: 13px;
+  padding: 0.75rem 1rem;
+  margin: 0.5rem 0;
+  white-space: pre-wrap;
+}
+
+.shiny-output-error:before {
+  content: "\f071  ";  /* fa-exclamation-triangle */
+  font-family: "Font Awesome 6 Free";
+  font-weight: 900;
+  color: var(--bs-warning, #b8860b);
+}
+
+.shiny-output-error-validation {
+  border: none;
+  border-left: none;
+  background: transparent;
+  padding: 0.25rem 0;
+  font-style: italic;
+  color: var(--bs-secondary);
+}
+
+.shiny-output-error-validation:before {
+  content: "";
+}
+
+/* ---- Empty state (Overview tabs before outputs exist) ------------------- */
+
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: 2.5rem 1.5rem;
+  border: 1px dashed var(--bs-border-color);
+  border-radius: var(--bs-border-radius-lg);
+  background-color: var(--bs-light);
+  color: var(--bs-secondary);
+  margin-bottom: 1.25rem;
+}
+
+.empty-state .fa,
+.empty-state .fas,
+.empty-state .far {
+  font-size: 1.9rem;
+  color: var(--bs-primary);
+  opacity: 0.55;
+  margin-bottom: 0.75rem;
+}
+
+.empty-state h5 {
+  color: var(--bs-dark);
+  margin-bottom: 0.35rem;
+}
+
+.empty-state p {
+  max-width: 46rem;
+  margin-bottom: 0;
+}
+
+/* ---- Settings summary banner (Step 1 weather/model, matches Step 2) ------ */
+
+.settings-summary {
+  border-left: 3px solid #2166ac;
+  background: #f4f8fd;
+  padding: 8px 12px;
+  margin-bottom: 10px;
+  border-radius: 3px;
+  font-size: 12px;
+  color: #444;
+}
+
+.settings-summary b {
+  color: #333;
+}
+
+/* ---- Configure flyout (weather variable settings) ------------------------
+   Content stays in the DOM (conditionalPanel), but is presented as a
+   floating panel beside the sidebar so options are visible without
+   scrolling. Falls back to inline flow on narrow screens.
+
+   UI-02: custom.js positions each open flyout beside its own toggle
+   (`.config-flyout-anchor`) instead of the shared viewport spot below, and
+   owns one-open state, aria-expanded, focus and Escape. The fixed
+   left/top here is only the no-JS fallback. */
+
+/* bslib sets `display: contents` on conditionalPanels inside gap-spacing
+   containers, which destroys the flyout box entirely — restore it. Same
+   specificity as bslib's rule (two classes) but later in the cascade;
+   deliberately no !important so Shiny's inline display:none still hides it. */
+.shiny-panel-conditional.config-flyout {
+  display: block;
+}
+
+.config-flyout {
+  position: fixed;
+  left: 400px;
+  top: 90px;
+  z-index: 1046;
+  width: 340px;
+  max-height: calc(100vh - 120px);
+  overflow-y: auto;
+  background: #ffffff;
+  border: 1px solid var(--bs-border-color);
+  border-radius: var(--bs-border-radius-lg);
+  box-shadow: 0 10px 30px rgba(0, 34, 68, 0.18);
+  padding: 1rem 1.1rem;
+}
+
+.config-flyout .config-flyout-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.75rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid var(--bs-border-color);
+}
+
+.config-flyout .config-flyout-header h6 {
+  margin: 0;
+  font-weight: 700;
+}
+
+@media (max-width: 991px) {
+  .config-flyout {
+    position: static;
+    width: auto;
+    max-height: none;
+    box-shadow: none;
+    background-color: var(--bs-light);
+    margin-top: 0.5rem;
+  }
+}
+
+/* Dense form controls inside the flyout — these panels are long */
+.config-flyout .form-group,
+.config-flyout .shiny-input-container {
+  margin-bottom: 0.4rem;
+}
+
+.config-flyout label {
+  font-size: 0.8rem;
+  font-weight: 600;
+  margin-bottom: 0.15rem;
+}
+
+.config-flyout .form-check,
+.config-flyout .radio,
+.config-flyout .checkbox {
+  margin-bottom: 0.1rem;
+  min-height: 0;
+}
+
+.config-flyout .form-check-label,
+.config-flyout .radio label,
+.config-flyout .checkbox label {
+  font-size: 0.82rem;
+  font-weight: 400;
+}
+
+.config-flyout h6 {
+  font-size: 0.8rem;
+  margin: 0.35rem 0 0.15rem;
+}
+
+.config-flyout hr {
+  margin: 0.4rem 0;
+}
+
+.config-flyout .help-block,
+.config-flyout .form-text {
+  line-height: 1.35;
+  margin-top: 0.1rem;
+  margin-bottom: 0.3rem;
+}
+
+/* ---- Native <details> blocks (Step 2 advanced settings) ----------------- */
+
+details {
+  border: 1px solid var(--bs-border-color);
+  border-radius: var(--bs-border-radius);
+  padding: 0.5rem 0.75rem;
+  margin-bottom: 0.75rem;
+  background-color: #ffffff;
+}
+
+details summary {
+  font-weight: 600;
+  color: var(--bs-dark);
+  cursor: pointer;
+  list-style: none;
+}
+
+details summary::-webkit-details-marker {
+  display: none;
+}
+
+details summary::after {
+  content: "\f078";
+  font-family: "Font Awesome 6 Free";
+  font-weight: 900;
+  font-size: 0.7em;
+  margin-left: 0.35rem;
+  display: inline-block;
+  transition: transform 0.15s;
+}
+
+details[open] summary::after {
+  transform: rotate(180deg);
+}
+
+details[open] summary {
+  margin-bottom: 0.6rem;
+  color: var(--bs-primary);
+}
+
+/* ---- Overview landing page ---------------------------------------------- */
+
+.hero-panel {
+  background: linear-gradient(135deg, #002244 0%, #0a3a6b 60%, #0071bc 100%);
+  color: #fff;
+  border-radius: var(--bs-border-radius-lg);
+  padding: 2rem;
+  margin-bottom: 1rem;
+}
+
+.hero-panel-inner {
+  display: flex;
+  align-items: center;
+  gap: 1.75rem;
+}
+
+.hero-logo {
+  width: 108px;
+  height: auto;
+  flex-shrink: 0;
+  filter: drop-shadow(0 6px 16px rgba(0, 0, 0, 0.35));
+}
+
+.hero-panel h1 {
+  color: #fff;
+  font-weight: 700;
+  font-size: 2rem;
+  margin-bottom: 0.4rem;
+}
+
+.hero-panel .hero-subtitle {
+  font-weight: 600;
+  opacity: 0.85;
+  margin-bottom: 0.75rem;
+}
+
+.hero-panel p {
+  max-width: 52rem;
+  opacity: 0.9;
+  margin-bottom: 0.25rem;
+}
+
+.hero-panel a {
+  color: #9adcff;
+  font-weight: 600;
+}
+
+.hero-panel .hero-team {
+  margin-top: 0.75rem;
+  margin-bottom: 0;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  opacity: 0.65;
+}
+
+@media (max-width: 700px) {
+  .hero-panel-inner {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
+
+.step-card {
+  height: 100%;
+}
+
+.step-card .card-body {
+  padding: 0.85rem 1.1rem;
+  gap: 0.35rem; /* override bslib's ~1rem flex gap between title and text */
+}
+
+.step-card-title {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  margin-bottom: 0;
+}
+
+.step-card-title h5 {
+  margin-bottom: 0;
+}
+
+.step-card .step-badge {
+  width: 1.6rem;
+  height: 1.6rem;
+  font-size: 0.85rem;
+  flex-shrink: 0;
+}
+
+.step-card p {
+  color: var(--bs-secondary);
+  font-size: 0.87rem;
+  margin-bottom: 0;
+}
+
+/* Data connection card: full width, natural height, no internal scroll */
+.connect-card .card-body {
+  padding: 0.9rem 1.1rem;
+  overflow: visible;
+  flex: none;
+}
+
+.connect-card {
+  overflow: visible;
+  flex: 0 0 auto; /* don't stretch to fill the page's remaining height */
+}
+
+.connect-card .form-group,
+.connect-card .shiny-input-container {
+  margin-bottom: 0.5rem;
+}
+
+.connect-card .help-block,
+.connect-card .form-text {
+  margin-top: -0.35rem;
+  margin-bottom: 0.4rem;
+  line-height: 1.3;
+}
+
+.connect-card .btn {
+  margin-top: 0.3rem;
+}
+
+.connect-card pre {
+  margin: 0.6rem 0 0 0;
+  padding: 0.4rem 0.6rem;
+  max-height: 3.5rem;
+  font-size: 0.78rem;
+  overflow-y: auto;
+}
+
+/* Limitations card: full width, natural height, no internal scroll */
+.limitation-card {
+  overflow: visible;
+  flex: 0 0 auto;
+}
+
+.limitation-card .card-body {
+  padding: 0.9rem 1.1rem;
+}
+
+.limitation-card .card-body > p:first-child {
+  margin-bottom: 0;
+}
+
+/* ---- Misc ---------------------------------------------------------------- */
+
+/* Denser controls in sidebars */
+.bslib-sidebar-layout > .sidebar > .sidebar-content {
+  gap: 0.5rem; /* bslib default ~1rem between every sidebar child */
+}
+
+.sidebar hr {
+  margin: 0.4rem 0;
+}
+
+.sidebar .form-check,
+.sidebar .radio,
+.sidebar .checkbox {
+  margin-bottom: 0.15rem;
+  min-height: 0;
+}
+
+.sidebar .form-group,
+.sidebar .shiny-input-container {
+  margin-bottom: 0.6rem;
+}
+
+.sidebar .form-label,
+.sidebar label.control-label {
+  font-weight: 600;
+  font-size: 0.86rem;
+  margin-bottom: 0.25rem;
+}
+
+.sidebar .help-block,
+.sidebar .form-text {
+  font-size: 0.78rem;
+}
+
+/* DT tables: lighter chrome */
+table.dataTable {
+  font-size: 0.88rem;
+}
+
+/* ---- Info popovers (info_popover() in R/utils_ui.R) ---------------------- */
+
+.wise-info-icon {
+  font-size: 0.65em;
+  color: var(--bs-secondary-color, #6c757d);
+  margin-left: 0.4rem;
+  vertical-align: middle;
+  cursor: pointer;
+  opacity: 0.75;
+  line-height: 1;
+}
+
+.wise-info-icon:hover,
+.wise-info-icon:focus {
+  opacity: 1;
+  color: var(--bs-primary);
+  outline: none;
+}
+
+.popover {
+  --bs-popover-max-width: 420px;
+}
+
+.popover .popover-body p:last-child {
+  margin-bottom: 0;
+}
+
+/* ---- Server-rendered equations (wise_math() in R/utils_math.R) ---------- */
+
+.wise-equation {
+  font-size: 1.35rem;
+  margin: 0.5rem 0 0.75rem;
+}
+
+/* ---- Compact results controls (Steps 2/3 Results tab) -------------------- */
+
+.results-controls .form-group,
+.results-controls .shiny-input-container {
+  margin-bottom: 0.25rem;
+}
+
+.results-controls label {
+  font-size: 0.78rem;
+  font-weight: 600;
+  margin-bottom: 0.1rem;
+}
+
+.results-controls details summary {
+  font-size: 0.85rem;
+}
+
+.results-controls .form-select,
+.results-controls .form-control {
+  padding-top: 0.2rem;
+  padding-bottom: 0.2rem;
+  font-size: 0.85rem;
+}
+
+.results-controls .form-check,
+.results-controls .radio,
+.results-controls .checkbox {
+  margin-bottom: 0.1rem;
+  min-height: 0;
+}
+
+.results-controls .form-check-label,
+.results-controls .checkbox label {
+  font-size: 0.82rem;
+  font-weight: 400;
+}
+
+.results-controls details {
+  border: none;
+  background: transparent;
+  padding: 0;
+  margin: 0.15rem 0 0;
+}
+
+.results-controls details[open] summary {
+  margin-bottom: 0.25rem;
+}
+
+.results-controls hr {
+  margin: 0.4rem 0;
+}
+
+/* ---- Toggle-style Slider (Segmented Control) ----------------------------- */
+
+.toggle-slider {
+  display: inline-flex;
+  align-items: center;
+  vertical-align: middle;
+  margin-bottom: 0 !important;
+  max-width: 100%;
+}
+
+.toggle-slider > label.control-label {
+  display: none !important;
+}
+
+.toggle-slider .shiny-options-group {
+  display: inline-flex !important;
+  flex-direction: row !important;
+  flex-wrap: nowrap !important;
+  align-items: center;
+  background-color: #f1f3f5;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 2rem;
+  padding: 2px;
+  gap: 2px;
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(0, 0, 0, 0.2) transparent;
+  -webkit-overflow-scrolling: touch;
+}
+
+.toggle-slider .shiny-options-group::-webkit-scrollbar {
+  height: 3px;
+}
+
+.toggle-slider .shiny-options-group::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 2px;
+}
+
+.toggle-slider .radio-inline,
+.toggle-slider .form-check-inline {
+  display: inline-flex !important;
+  align-items: center;
+  justify-content: center;
+  margin: 0 !important;
+  padding: 0 !important;
+  position: relative;
+  cursor: pointer;
+  border-radius: 1.5rem;
+}
+
+.toggle-slider input[type="radio"] {
+  position: absolute !important;
+  opacity: 0 !important;
+  width: 0 !important;
+  height: 0 !important;
+  margin: 0 !important;
+  pointer-events: none !important;
+}
+
+.toggle-slider .radio-inline span,
+.toggle-slider .form-check-inline label,
+.toggle-slider .form-check-inline span {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.22rem 0.65rem;
+  font-size: 0.78rem;
+  font-weight: 500;
+  color: #495057;
+  border-radius: 1.5rem;
+  white-space: nowrap;
+  transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+  user-select: none;
+  line-height: 1.25;
+}
+
+.toggle-slider .radio-inline:hover span,
+.toggle-slider .form-check-inline:hover span {
+  color: #212529;
+  background-color: rgba(255, 255, 255, 0.5);
+}
+
+.toggle-slider input[type="radio"]:checked + span,
+.toggle-slider input[type="radio"]:checked + label,
+.toggle-slider input[type="radio"]:checked ~ span {
+  background-color: #ffffff !important;
+  color: var(--bs-primary, #0071bc) !important;
+  font-weight: 600 !important;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12), 0 1px 2px rgba(0, 0, 0, 0.06) !important;
+}
+
+.toggle-slider input[type="radio"]:focus-visible + span,
+.toggle-slider input[type="radio"]:focus-visible + label {
+  outline: 2px solid var(--bs-primary, #0071bc);
+  outline-offset: 1px;
+}
+

@@ -1,0 +1,1062 @@
+# fct_get_weather.R
+# -----------------
+# Weather loading and processing pipeline.
+# Loads ERA5 historical weather and CMIP6 climate projections from parquet
+# files via DuckDB. Applies spatial aggregation (H3 -> survey location),
+# temporal rolling windows, and climate perturbations.
+#
+# Called by:
+#   - mod_1_04_weather.R  (weather preview in Module 1)
+#   - fct_run_simulation.R / mod_2_01_weathersim.R (simulation in Module 2)
+#
+# Main exports:
+#   get_weather()          - full weather loading pipeline
+#
+# Internal helpers (not exported):
+#   .harmonise_h3()        - H3 resolution matching
+#   .apply_transformations() - anomaly/deviation computation in DuckDB
+#   .compute_breaks()      - histogram/quantile breakpoints
+#   .apply_binning()       - apply cut points to weather data frame
+
+# ---------------------------------------------------------------------------- #
+# Section 0 - Remote weather disk cache (PERF-13)                              #
+#                                                                              #
+# get_weather() re-reads identical ERA5/CMIP6 parquet files from the remote    #
+# store on every run. For remote backends (s3/gcs/azure/databricks) each read  #
+# is a network fetch; a bounded local parquet cache removes the repeat cost    #
+# across runs while leaving the data flow byte-identical: the cache stores     #
+# exactly the rows (and, where applied, the column/date slice) the lazy remote #
+# scan would have produced, in the same scan order (DuckDB is pinned to one    #
+# thread for the duration of get_weather, so order is deterministic).          #
+#                                                                              #
+# Keying: digest of (cache version, resolved file paths, variable columns,     #
+# date bounds). The version constant must be bumped whenever the upstream      #
+# file layout changes. Kill switch: WISEAPP_WEATHER_CACHE_DISABLE=1. Size cap: #
+# WISEAPP_WEATHER_CACHE_MAX_MB (default 2048), LRU-evicted by mtime.           #
+# ---------------------------------------------------------------------------- #
+
+WISEAPP_WX_CACHE_VERSION <- "v1"
+
+.weather_cache_dir <- function() {
+  base <- Sys.getenv("WISEAPP_WEATHER_CACHE_DIR")
+  if (!nzchar(base)) {
+    base <- tools::R_user_dir("wiseapp", "cache")
+  }
+  file.path(base, "weather", WISEAPP_WX_CACHE_VERSION)
+}
+
+.weather_cache_evict <- function(dir, max_mb = NULL) {
+  if (is.null(max_mb)) {
+    max_mb <- suppressWarnings(as.numeric(Sys.getenv("WISEAPP_WEATHER_CACHE_MAX_MB")))
+    if (is.na(max_mb) || max_mb < 0) max_mb <- 2048
+  }
+  files <- list.files(dir, pattern = "\\.parquet$", full.names = TRUE,
+                      recursive = TRUE)
+  if (length(files) == 0) return(invisible(NULL))
+  info <- file.info(files)
+  total_mb <- sum(info$size, na.rm = TRUE) / 1024^2
+  if (total_mb <= max_mb) return(invisible(NULL))
+  # LRU: delete oldest-accessed files first until under budget
+  ord <- order(info$mtime)
+  for (f in files[ord]) {
+    if (total_mb <= max_mb) break
+    sz <- info[f, "size"]
+    if (unlink(f) == 0 && is.finite(sz)) total_mb <- total_mb - sz / 1024^2
+  }
+  invisible(NULL)
+}
+
+#' Load a remote weather/h3 parquet set through the bounded disk cache.
+#'
+#' Returns a lazy DuckDB relation whose contents are identical to applying
+#' `cols` / `tmin` / `tmax` directly to `load_data(fnames, ...)`. On local
+#' connections the cache is bypassed (local parquet reads are already fast)
+#' and the plain lazy relation is returned.
+#'
+#' @param fnames           Character vector of store-relative parquet paths.
+#' @param connection_params Passed to load_data().
+#' @param cols             Character column subset to keep, or NULL for all
+#'   columns. The slice copied to the cache holds exactly these columns.
+#' @param tmin,tmax        Optional date bounds on `tcol` (applied in the
+#'   cached COPY and re-applied downstream - idempotent).
+#' @param cache_version    Bump to invalidate every cached slice.
+#' @noRd
+.wx_cache_load <- function(fnames, connection_params,
+                           cols = NULL, tcol = "timestamp",
+                           tmin = NULL, tmax = NULL,
+                           cache_version = WISEAPP_WX_CACHE_VERSION) {
+  apply_slice <- function(lazy) {
+    if (!is.null(cols)) lazy <- dplyr::select(lazy, dplyr::all_of(cols))
+    if (!is.null(tcol) && !is.null(tmin)) {
+      lazy <- dplyr::filter(lazy,
+        !!rlang::sym(tcol) >= !!tmin, !!rlang::sym(tcol) <= !!tmax)
+    }
+    lazy
+  }
+
+  force_cache <- isTRUE(Sys.getenv("WISEAPP_WEATHER_CACHE_FORCE") %in%
+                          c("1", "true", "TRUE"))
+  type <- connection_params$type %||% "local"
+  use_cache <- (!identical(type, "local") || force_cache) &&
+    !isTRUE(Sys.getenv("WISEAPP_WEATHER_CACHE_DISABLE") %in% c("1", "true", "TRUE"))
+
+  key <- digest::digest(list(cache_version, sort(fnames), cols, tcol, tmin, tmax))
+  dir <- .weather_cache_dir()
+  path <- file.path(dir, paste0(key, ".parquet"))
+
+  # Cache hit: load the local slice WITHOUT opening the remote store, so a
+  # cached fetch still works when the source is temporarily unreachable.
+  if (use_cache && file.exists(path)) {
+    local <- tryCatch(
+      load_data(path, list(type = "local", path = dirname(path)), collect = FALSE),
+      error = function(e) NULL
+    )
+    if (!is.null(local)) return(apply_slice(local))
+  }
+
+  lazy <- load_data(fnames, connection_params, collect = FALSE)
+
+  if (!use_cache) return(apply_slice(lazy))
+
+  if (!file.exists(path)) {
+    ok_create <- dir.create(dir, showWarnings = FALSE, recursive = TRUE)
+    filtered <- apply_slice(lazy)
+    con <- .duck_con()
+    tmp_path <- paste0(path, ".tmp")
+    ok <- tryCatch({
+      DBI::dbExecute(con, sprintf(
+        "COPY (%s) TO '%s' (FORMAT PARQUET, COMPRESSION ZSTD);",
+        dbplyr::sql_render(filtered), tmp_path
+      ))
+      TRUE
+    }, error = function(e) {
+      warning("[wiseapp] weather disk cache write failed; continuing remote: ",
+              conditionMessage(e), call. = FALSE)
+      FALSE
+    })
+    if (!ok) return(filtered)
+    if (!file.rename(tmp_path, path)) {
+      # Concurrent write race: another session won; use its file
+      try(unlink(tmp_path), silent = TRUE)
+      if (!file.exists(path)) return(filtered)
+    }
+    .weather_cache_evict(dir)
+  }
+
+  # Load the cached slice locally. Contents are identical to the remote scan
+  # (same rows, same order - single-threaded COPY preserves scan order), and
+  # the slice filter is re-applied downstream as a no-op.
+  local <- tryCatch(
+    load_data(path, list(type = "local", path = dirname(path)), collect = FALSE),
+    error = function(e) NULL
+  )
+  if (is.null(local)) return(apply_slice(lazy))
+  apply_slice(local)
+}
+
+# ---------------------------------------------------------------------------- #
+# Section 1 - H3 spatial helpers                                               #
+# ---------------------------------------------------------------------------- #
+
+#' Harmonise H3 resolution and type between microdata and weather tables.
+#'
+#' This helper:
+#' 1. Detects the H3 resolution of each table by sampling one row.
+#' 2. Chooses the **coarser** (lower numeric) resolution as the join key.
+#'    This handles all three cases:
+#'    * weather coarser than microdata  -> map microdata up to weather res
+#'    * microdata coarser than weather  -> map weather up to microdata res
+#'    * same resolution                 -> type-cast only, no parent lookup
+#' 3. Adds an `h3_weather` column (bigint) to `h3_slim` so the caller can
+#'    join on `h3_slim$h3_weather == weather$h3` without further casting.
+#'
+#' The H3 DuckDB extension must already be loaded before calling this
+#' function (`.duck_load_ext("h3")`).
+#'
+#' @param h3_slim  Lazy `dplyr::tbl` with an `h3` column (string).
+#' @param weather  Lazy `dplyr::tbl` with an `h3` column (bigint / int64).
+#' @param con      DBI connection - used for the resolution-detection query.
+#'
+#' @return A list with:
+#'   * `h3_slim`      - original `h3_slim` augmented with an `h3_weather`
+#'                      bigint column at the chosen target resolution.
+#'   * `weather`      - `weather` tbl, possibly with `h3` mapped to the
+#'                      target resolution (when weather is *finer* than micro).
+#'   * `target_res`   - integer, the target (coarser) H3 resolution.
+#'   * `same_res`     - logical, TRUE when no parent lookup was needed.
+#' @noRd
+.harmonise_h3 <- function(h3_slim, weather, con) {
+
+  micro_h3_sql   <- dbplyr::sql_render(
+    h3_slim |> dplyr::filter(!is.na(h3)) |> dplyr::select(h3) |> head(1)
+  )
+  weather_h3_sql <- dbplyr::sql_render(
+    weather |> dplyr::filter(!is.na(h3)) |> dplyr::select(h3) |> head(1)
+  )
+
+  res_micro <- DBI::dbGetQuery(
+    con,
+    sprintf("SELECT h3_get_resolution(h3) AS res FROM (%s) _t", micro_h3_sql)
+  )$res[[1L]]
+
+  res_weather <- DBI::dbGetQuery(
+    con,
+    sprintf("SELECT h3_get_resolution(h3) AS res FROM (%s) _t", weather_h3_sql)
+  )$res[[1L]]
+
+  target_res <- min(res_micro, res_weather)
+  same_res   <- (res_micro == res_weather)
+
+  if (same_res) {
+    h3_slim <- h3_slim |>
+      dplyr::mutate(h3_weather = dbplyr::sql("h3_string_to_h3(h3)"))
+  } else if (res_micro > res_weather) {
+    h3_slim <- h3_slim |>
+      dplyr::mutate(
+        h3_weather = dbplyr::sql(
+          sprintf("h3_cell_to_parent(h3_string_to_h3(h3), %d)", target_res)
+        )
+      )
+  } else {
+    h3_slim <- h3_slim |>
+      dplyr::mutate(h3_weather = dbplyr::sql("h3_string_to_h3(h3)"))
+    weather <- weather |>
+      dplyr::mutate(
+        h3 = dbplyr::sql(
+          sprintf("h3_cell_to_parent(h3, %d)", target_res)
+        )
+      )
+  }
+
+  list(
+    h3_slim     = h3_slim,
+    weather     = weather,
+    target_res  = target_res,
+    res_micro   = res_micro,
+    res_weather = res_weather,
+    same_res    = same_res
+  )
+}
+
+# ---------------------------------------------------------------------------- #
+# Section 2 - Weather transformation helpers                                   #
+# .apply_transformations() - anomaly/deviation in DuckDB SQL                   #
+# .compute_breaks()        - binning breakpoint computation                    #
+# .apply_binning()         - apply breakpoints to data frame                   #
+# ---------------------------------------------------------------------------- #
+
+#' Apply deviation-from-mean or standardised-anomaly transformations lazily.
+#'
+#' Iterates over `selected_weather` rows and chains lazy join + mutate steps
+#' onto `tbl` for every variable that requires a transformation.  Variables
+#' in `skip_vars` (e.g. `"spi6"`, `"spei6"`) and variables with
+#' `transformation == "None"` or `NA` are left untouched.
+#'
+#' Reference statistics (monthly mean and SD) are always derived from
+#' `loc_weather_base` over the 1991-2020 climate normal period.
+#'
+#' @param tbl              Lazy `dplyr::tbl` containing rolled weather columns.
+#' @param selected_weather Data frame with columns `name` and `transformation`.
+#' @param loc_weather_base Materialised temp-table tbl (the unperturbed rolled
+#'   series) used as the climate reference source.
+#' @param skip_vars        Character vector of variable names to skip.
+#'   Defaults to `c("spi6", "spei6")`.
+#'
+#' @return `tbl` with transformation steps chained lazily.
+#' @noRd
+.apply_transformations <- function(
+  tbl,
+  selected_weather,
+  loc_weather_base,
+  skip_vars = c("spi6", "spei6")
+) {
+
+  for (i in seq_len(nrow(selected_weather))) {
+    v              <- selected_weather$name[i]
+    transformation <- selected_weather$transformation[i]
+
+    if (is.na(transformation) || transformation == "None" || v %in% skip_vars) next
+
+    climate_ref <- loc_weather_base |>
+      dplyr::filter(
+        timestamp >= as.Date("1991-01-01"),
+        timestamp <= as.Date("2020-12-31")
+      ) |>
+      dplyr::mutate(month = dbplyr::sql("MONTH(timestamp)")) |>
+      dplyr::group_by(code, year, survname, loc_id, month) |>
+      dplyr::summarise(
+        ref_mean = dbplyr::sql(paste0("AVG(", v, ")")),
+        ref_sd   = dbplyr::sql(paste0("STDDEV_SAMP(", v, ")")),
+        .groups  = "drop"
+      )
+
+    tbl <- local({
+      .v   <- v
+      .tf  <- transformation
+      .ref <- climate_ref
+      function(t) {
+        t |>
+          dplyr::mutate(month = dbplyr::sql("MONTH(timestamp)")) |>
+          dplyr::left_join(.ref, by = c("code", "year", "survname", "loc_id", "month")) |>
+          dplyr::mutate(
+            !!.v := if (.tf == "Deviation from mean") {
+              dbplyr::sql(paste0(.v, " - ref_mean"))
+            } else if (.tf == "Standardized anomaly") {
+              dbplyr::sql(paste0("(", .v, " - ref_mean) / ref_sd"))
+            }
+          ) |>
+          dplyr::select(-month, -ref_mean, -ref_sd)
+      }
+    })(tbl)
+  }
+
+  tbl
+}
+
+# ---------------------------------------------------------------------------- #
+
+#' Compute bin breakpoints from a reference data frame.
+#'
+#' Examines each row of `selected_weather` whose `cont_binned` column is
+#' `"Binned"` and derives the requested number of cut-points from `ref_df`
+#' (typically the historical result filtered to actual survey timestamps).
+#'
+#' The bottom and top bins are always open-ended (`-Inf` / `Inf`) so that
+#' values outside the reference range (e.g. from climate projections) still
+#' map into the extreme bins.
+#'
+#' @param ref_df           Collected data frame containing the weather columns.
+#' @param selected_weather Data frame with columns `name`, `cont_binned`,
+#'   `num_bins`, `binning_method`, and (optionally) `custom_breaks` (list
+#'   column of numeric vectors used when `binning_method == "Custom"`).
+#'
+#' @return A named list of break vectors (one per binned variable).
+#'   Variables that are not binned or fail to produce valid breaks are omitted.
+#' @noRd
+.compute_breaks <- function(ref_df, selected_weather) {
+  stored_breaks <- list()
+  has_custom_col <- "custom_breaks" %in% names(selected_weather)
+
+  for (i in seq_len(nrow(selected_weather))) {
+    v              <- selected_weather$name[i]
+    cont_binned    <- selected_weather$cont_binned[i]
+    num_bins       <- selected_weather$num_bins[i]
+    binning_method <- selected_weather$binning_method[i]
+
+    if (is.na(cont_binned) || cont_binned != "Binned") next
+
+    haz_vals <- ref_df[[v]][is.finite(ref_df[[v]])]
+
+    # sort for consistent quantile breaks and k-means results
+    haz_vals <- sort(haz_vals)
+
+    cutoffs <- switch(binning_method,
+                      "Equal frequency" = {
+                        unique(quantile(haz_vals, probs = seq(0, 1, length.out = num_bins + 1), na.rm = TRUE))
+                      },
+                      "Equal width" = {
+                        unique(seq(min(haz_vals, na.rm = TRUE), max(haz_vals, na.rm = TRUE), length.out = num_bins + 1))
+                      },
+                      "K-means" = {
+                        tryCatch({
+                          if (length(unique(haz_vals)) >= num_bins) {
+                            km <- withr::with_seed(
+                              123,
+                              stats::kmeans(haz_vals, centers = num_bins)
+                            )
+                            centers <- sort(as.numeric(km$centers))
+                            unique(c(
+                              min(haz_vals, na.rm = TRUE),
+                              (centers[-length(centers)] + centers[-1]) / 2,
+                              max(haz_vals, na.rm = TRUE)
+                            ))
+                          } else {
+                            message("Not enough unique values for K-means in ", v, ". Keeping continuous.")
+                            NULL
+                          }
+                        }, error = function(e) {
+                          message("K-means failed for ", v, ": ", e$message)
+                          NULL
+                        })
+                      },
+                      "Custom" = {
+                        user_cuts <- if (has_custom_col) selected_weather$custom_breaks[[i]] else NULL
+                        if (is.null(user_cuts) || length(user_cuts) == 0) {
+                          message("Custom binning for ", v, " requires cut values but none were provided. Keeping continuous.")
+                          NULL
+                        } else {
+                          user_cuts <- sort(unique(as.numeric(user_cuts[is.finite(user_cuts)])))
+                          expected  <- as.integer(num_bins) - 1L
+                          if (length(user_cuts) != expected) {
+                            message(
+                              "Custom binning for ", v, " expected ", expected,
+                              " cut values (num_bins - 1) but got ", length(user_cuts),
+                              ". Using the supplied values as-is."
+                            )
+                          }
+                          # Mirror the structure used by the other branches: a vector whose
+                          # first/last entries are dropped by the breaks_ext step below.
+                          c(min(haz_vals, na.rm = TRUE), user_cuts, max(haz_vals, na.rm = TRUE))
+                        }
+                      },
+                      NULL
+    )
+
+    if (!is.null(cutoffs) && length(cutoffs) > 1) {
+      breaks_ext         <- c(-Inf, cutoffs[-c(1, length(cutoffs))], Inf)
+      stored_breaks[[v]] <- breaks_ext
+      message(binning_method, " cutoffs for ", v, ": ", paste(round(cutoffs, 3), collapse = ", "))
+    } else {
+      message("Insufficient variation in ", v, ". Keeping continuous.")
+    }
+  }
+
+  stored_breaks
+}
+
+
+#' Apply pre-computed bin breaks to weather columns in a data frame.
+#'
+#' @param df     Collected data frame.
+#' @param breaks Named list of break vectors as returned by `.compute_breaks()`.
+#'
+#' @return `df` with binned columns converted to factors via `cut()`.
+#' @noRd
+.apply_binning <- function(df, breaks) {
+  for (v in names(breaks)) {
+    if (v %in% names(df)) {
+      df[[v]] <- cut(df[[v]], breaks = breaks[[v]], include.lowest = TRUE)
+    }
+  }
+  df
+}
+
+# ---------------------------------------------------------------------------- #
+# Section 3 - Main weather loading pipeline                                    #
+# get_weather() - loads ERA5 + CMIP6, applies rolling windows + perturbations  #
+# Note: DuckDB rolling window (0%/16% stall) occurs in loc_weather_base        #
+# materialisation and batch query. See tradeoffs for improvements              #
+# in known_issues.md #13, #15.                                                 #
+# ---------------------------------------------------------------------------- #
+
+#' Load, aggregate, and construct weather variables for survey locations.
+#'
+#' 1. Loads weather and H3-to-location parquet files lazily in DuckDB.
+#' 2. Spatially aggregates weather to `loc_id` (population-weighted mean).
+#' 3. Applies rolling temporal aggregation and materialises the unperturbed
+#'    weather series as a temp table (`loc_weather_base`).
+#' 4. If `ssp` is supplied: loads CMIP6 files for each scenario.
+#'    For each SSP, computes population-weighted loc-level raw deltas,
+#'    then processes all models in a single batched DuckDB query -
+#'    perturb raw monthly values -> roll -> transform -> collect.
+#'    All models with a complete set of weather variable deltas are returned.
+#' 5. Transformations (deviation-from-mean, standardised anomaly) are applied
+#'    using the 1991-2020 climate reference, always derived from
+#'    `loc_weather_base`.
+#' 6. Returns a flat named list of collected data frames.
+#'
+#' @param survey_data       Data frame with columns: `code`, `year`, `survname`,
+#'   `loc_id`, `timestamp`. Loaded microdata observations.
+#' @param selected_surveys  Data frame from the survey list with columns: `code`,
+#'   `year`, `survname`, `source`. Used to derive H3 file paths.
+#' @param selected_weather  Data frame with one row per weather variable and
+#'   columns: `name`, `ref_start`, `ref_end`, `temporalAgg`, `transformation`.
+#' @param dates             Date vector of unique survey timestamps (monthly).
+#'   Only these rows are retained after temporal aggregation.
+#' @param connection_params List passed to `load_data()`.
+#' @param ssp               Character vector of SSP scenario identifiers, e.g.
+#'   `c("ssp2_4_5", "ssp5_8_5")`. `NULL` (default) skips climate perturbation.
+#' @param future_period     A length-2 character vector of dates for a single
+#'   projection period, e.g. `c("2045-01-01", "2055-12-31")`, **or** a list
+#'   of such vectors for multiple periods.  Required when `ssp != NULL`.
+#' @param perturbation_method Named character vector mapping each weather
+#'   variable name to `"additive"` or `"multiplicative"`. Required when
+#'   `ssp != NULL`.
+#' @param epsilon           Guard constant for multiplicative delta denominators.
+#'   Default `0.001`.
+#' @param weather_source    Source identifier for observed weather files.
+#'   Default `"era5land"`.
+#' @param proj_source       Source identifier for climate projection files.
+#'   Default `"cmip6"`.
+#' @param stored_breaks     Optional named list of pre-computed bin breaks
+#'   keyed by weather variable name. When non-empty, these breaks are used
+#'   for the matching binned variables instead of re-deriving them.
+#' @return A named list of collected data frames with columns
+#'   `code, year, survname, loc_id, timestamp, <weather_vars>`:
+#'   * `"historical"` - unperturbed result filtered to `dates`.
+#'   * `"<ssp>_<start>_<end>_<model>"` - e.g.
+#'     `"ssp2_4_5_2045_2055_MPI.ESM1.2.HR"` (model name sanitised via
+#'     `make.names()`).  All models with a complete set of weather variable
+#'     deltas are returned.
+#'
+#'   When any variable is binned, the list also carries a
+#'   `"continuous_weather"` attribute: the key columns plus the binned
+#'   variables' pre-`cut()` (but post-transformation) values for the
+#'   historical slice. Descriptive use only - the modelling pipeline uses the
+#'   binned columns in `"historical"`.
+#'
+#' @export
+get_weather <- function(
+  survey_data,
+  selected_surveys,
+  selected_weather,
+  dates,
+  connection_params,
+  ssp                  = NULL,
+  future_period        = NULL,
+  perturbation_method  = NULL,
+  epsilon              = 0.001,
+  weather_source       = "era5land",
+  proj_source          = "cmip6",
+  stored_breaks        = NULL
+) {
+
+  # -- Pin DuckDB to single thread for floating-point determinism ------------
+  # Multi-threaded aggregation sums floats in non-deterministic order,
+  # causing last-bit differences (~1e-14) across identical calls.
+  con_det <- .duck_con()
+  prev_threads <- DBI::dbGetQuery(con_det, "SELECT current_setting('threads') AS t")$t
+  DBI::dbExecute(con_det, "SET threads TO 1")
+  on.exit(DBI::dbExecute(con_det, paste("SET threads TO", prev_threads)), add = TRUE)
+
+  # -- Validate ---------------------------------------------------------------
+  climate_scenario <- !is.null(ssp)
+
+  if (climate_scenario) {
+    stopifnot(
+      "future_period is required when ssp is supplied" =
+        !is.null(future_period),
+      "perturbation_method is required when ssp is supplied" =
+        !is.null(perturbation_method),
+      "All selected_weather variables must have an entry in perturbation_method" =
+        all(selected_weather$name %in% names(perturbation_method)),
+      "perturbation_method values must be 'additive' or 'multiplicative'" =
+        all(perturbation_method[selected_weather$name] %in% c("additive", "multiplicative"))
+    )
+
+    # Normalise future_period: a bare length-2 vector -> single-element list
+    if (is.character(future_period) || inherits(future_period, "Date")) {
+      future_period <- list(future_period)
+    }
+  }
+
+  # -- File paths -------------------------------------------------------------
+  survey_codes <- unique(survey_data$code)
+
+  weather_fnames <- paste0(
+    "hazard/weather/historical/", survey_codes, "/",
+    survey_codes, "_", weather_source, ".parquet"
+  )
+
+  h3_fnames <- selected_surveys |>
+    dplyr::distinct(code, year, survname, source) |>
+    dplyr::mutate(fname = paste0(
+      "microdata/h3/", code, "/",
+      code, "_", year, "_", survname, "_", source, "_h3.parquet"
+    )) |>
+    dplyr::pull(fname)
+
+  # -- Date range ------------------------------------------------------------
+  weather_vars <- selected_weather$name
+  max_lag      <- as.integer(max(selected_weather$ref_end, na.rm = TRUE))
+  date_min     <- seq.Date(min(dates), by = paste0("-", max_lag, " months"), length.out = 2L)[[2L]]
+  date_max     <- max(dates)
+
+  needs_climate_ref <- any(
+    !is.na(selected_weather$transformation) &
+      selected_weather$transformation != "None"
+  )
+  if (needs_climate_ref) {
+    date_min <- min(date_min, seq.Date(as.Date("1991-01-01"), by = paste0("-", max_lag, " months"), length.out = 2L)[[2L]])
+    date_max <- max(date_max, as.Date("2020-12-31"))
+  }
+
+  # -- Load weather lazily -------------------------------------------------------
+  .duck_load_ext("h3")
+  con <- .duck_con()
+
+  # -- Temp-table cleanup ledger (SEC-02) --------------------------------------
+  # DuckDB connections are process-wide, so materialised temp tables survive
+  # errors until the worker exits. Every table created below is registered here
+  # the moment it is created and dropped best-effort on function exit (happy
+  # path or error). Tables released early are removed from the ledger first;
+  # on.exit only runs after every relation has been collected, so no live lazy
+  # query can reference a dropped table when results are returned.
+  tmp_tables <- character(0)
+  on.exit({
+    for (tn in tmp_tables) {
+      try(DBI::dbRemoveTable(con, tn), silent = TRUE)
+    }
+  }, add = TRUE)
+
+  # PERF-13: remote parquet loads go through the bounded disk cache. The
+  # cached slice holds exactly the columns/rows the lazy scan would produce,
+  # so the pipelines below are unchanged and results stay bit-identical.
+  weather <- .wx_cache_load(
+    weather_fnames, connection_params,
+    cols = c("h3", "timestamp", weather_vars),
+    tmin = date_min, tmax = date_max
+  ) |>
+    dplyr::select(h3, timestamp, dplyr::all_of(weather_vars)) |>
+    dplyr::filter(dplyr::if_all(dplyr::all_of(weather_vars), ~ !is.na(.x))) |>
+    dplyr::filter(timestamp >= date_min, timestamp <= date_max)
+
+  h3_slim <- .wx_cache_load(h3_fnames, connection_params, cols = NULL, tcol = NULL)
+
+  if (!"pop_2020" %in% colnames(h3_slim)) {
+    h3_slim <- h3_slim |> dplyr::mutate(pop_2020 = 1L)
+  }
+
+  h3_slim <- h3_slim |>
+    dplyr::filter(!is.na(h3), !is.na(pop_2020), pop_2020 > 0) |>
+    dplyr::select(h3, code, year, survname, loc_id, pop_2020)
+
+  # -- H3 resolution + type harmonisation ------------------------------------
+  h3_harmonised <- .harmonise_h3(h3_slim, weather, con)
+  h3_slim       <- h3_harmonised$h3_slim
+  weather       <- h3_harmonised$weather
+
+  # -- One population weight per location x weather cell ---------------------
+  # The mapping file is finer-grained than the weather grid: it carries one row
+  # per populated sub-cell of the cell the weather is measured on, so a cell's
+  # weight in a location is the *sum* of the sub-cells of it that fall there.
+  #
+  # These rows must not be de-duplicated on `pop_2020`. Sub-cell populations
+  # are small integers (they run from 1 upwards) and two sub-cells of the same
+  # cell frequently carry the same count, so a `distinct()` here silently
+  # deletes real population: about 1% of rows in the EHCVM files, which shifts
+  # the relative weight of cells inside a location by up to a fifth in the
+  # worst case. Aggregating explicitly also makes the join below one-to-one.
+  h3_slim <- h3_slim |>
+    dplyr::group_by(code, year, survname, loc_id, h3_weather) |>
+    dplyr::summarise(pop_2020 = sum(pop_2020, na.rm = TRUE), .groups = "drop")
+
+  # -- Spatial aggregation: h3 -> loc_id (population-weighted mean) ----------
+  .pop_weighted_mean <- function(tbl, vars) {
+    tbl |>
+      dplyr::summarise(
+        dplyr::across(
+          dplyr::all_of(vars),
+          ~ dplyr::if_else(
+              sum(dplyr::if_else(!is.na(.x), pop_2020, 0), na.rm = TRUE) > 0,
+              sum(dplyr::if_else(!is.na(.x), .x * pop_2020, 0), na.rm = TRUE) /
+              sum(dplyr::if_else(!is.na(.x), pop_2020, 0), na.rm = TRUE),
+              NA_real_
+            )
+        ),
+        .groups = "drop"
+      )
+  }
+
+  loc_monthly <- weather |>
+    dplyr::inner_join(h3_slim, by = c("h3" = "h3_weather")) |>
+    dplyr::group_by(code, year, survname, loc_id, timestamp) |>
+    .pop_weighted_mean(weather_vars)
+
+  # -- Rolling window expressions --------------------------------------------
+  agg_fn_map <- c(
+    "Mean"   = "AVG",
+    "Median" = "MEDIAN",
+    "Min"    = "MIN",
+    "Max"    = "MAX",
+    "Sum"    = "SUM"
+  )
+
+  roll_exprs <- stats::setNames(
+    lapply(seq_len(nrow(selected_weather)), function(i) {
+      v      <- selected_weather$name[i]
+      agg_fn <- agg_fn_map[[selected_weather$temporalAgg[i]]]
+      dbplyr::sql(sprintf(
+        "%s(%s) FILTER (WHERE %s IS NOT NULL) OVER (PARTITION BY code, year, survname, loc_id ORDER BY timestamp ROWS BETWEEN %d PRECEDING AND %d PRECEDING)",
+        agg_fn, v, v,
+        as.integer(selected_weather$ref_end[i]),
+        as.integer(selected_weather$ref_start[i])
+      ))
+    }),
+    weather_vars
+  )
+
+  # -- Materialise unperturbed rolled base (loc_weather_base) ----------------
+  # All transformations and the historical result are derived from this table.
+  # Name generated via tempfile() rather than sample() so this does not
+  # consume/advance the caller's RNG stream (see DET-04).
+  tmp_base_name <- basename(tempfile(pattern = "lw_base_"))
+  tmp_tables <- c(tmp_tables, tmp_base_name)
+
+  loc_weather_base <- loc_monthly |>
+    dplyr::mutate(!!!roll_exprs) |>
+    dplyr::compute(name = tmp_base_name, temporary = TRUE)
+
+  # -- Assemble result -------------------------------------------------------
+  result <- list()
+
+  result[["historical"]] <- loc_weather_base |>
+    .apply_transformations(selected_weather, loc_weather_base) |>
+    dplyr::filter(timestamp %in% !!dates) |>
+    dplyr::arrange(code, year, survname, loc_id, timestamp) |>
+    dplyr::collect()
+
+  # -- Binning setup ----------------------------------------------------------
+  # Determine whether any variables require binning.  Guard against
+
+  # selected_weather missing the binning columns entirely (backward compat).
+  has_binning <- "cont_binned" %in% names(selected_weather) &&
+    any(!is.na(selected_weather$cont_binned) & selected_weather$cont_binned == "Binned")
+
+  # Pre-binning copy of the binned columns, kept for descriptive plots only
+  # (attached as an attribute below so the returned list keeps exactly one
+  # element per scenario).
+  continuous_hist <- NULL
+
+  if (has_binning) {
+    if (is.null(stored_breaks) || length(stored_breaks) == 0) {
+      # Compute breaks from the full survey-period loc_id x timestamp distribution.
+      # Sort by full location identity + timestamp for a deterministic
+      # order regardless of DuckDB's non-guaranteed collect() row order.
+      survey_timestamps <- unique(survey_data$timestamp[!is.na(survey_data$timestamp)])
+      wx_cols   <- selected_weather$name[selected_weather$cont_binned == "Binned" & !is.na(selected_weather$cont_binned)]
+      sort_cols <- intersect(c("code", "year", "survname", "loc_id", "timestamp"), names(result[["historical"]]))
+      keep      <- unique(c(sort_cols, wx_cols))
+      hist_ref  <- result[["historical"]][result[["historical"]]$timestamp %in% survey_timestamps, keep, drop = FALSE]
+      hist_ref  <- hist_ref[do.call(order, hist_ref[sort_cols]), ]
+
+      stored_breaks <- .compute_breaks(hist_ref, selected_weather)
+    }
+
+    # Keep the untouched (already transformed) values of the binned columns
+    # before `cut()` overwrites them, so the UI can show the underlying
+    # continuous distribution alongside the bins.
+    binned_vars <- intersect(names(stored_breaks), names(result[["historical"]]))
+    if (length(binned_vars) > 0) {
+      keep_cols <- unique(c(
+        intersect(
+          c("code", "year", "survname", "loc_id", "timestamp"),
+          names(result[["historical"]])
+        ),
+        binned_vars
+      ))
+      continuous_hist <- result[["historical"]][, keep_cols, drop = FALSE]
+    }
+
+    # Apply to historical slice immediately
+    result[["historical"]] <- .apply_binning(result[["historical"]], stored_breaks)
+  }
+
+  # -- Climate perturbation ---------------------------------------------------
+  if (climate_scenario) {
+
+    bp           <- range(dates)
+    baseline_start <- as.Date(bp[1])
+    baseline_end   <- as.Date(bp[2])
+    delta_vars   <- paste0("delta_", weather_vars)
+
+    # -- CMIP6 helpers --------------------------------------------------------
+
+    # Build the delta expressions once (shared across SSPs)
+    .make_delta_exprs <- function(perturbation_method, weather_vars, epsilon) {
+      stats::setNames(
+        lapply(weather_vars, function(v) {
+          h <- paste0(v, "_hist")
+          f <- paste0(v, "_fut")
+          if (perturbation_method[[v]] == "additive") {
+            dbplyr::sql(paste0(f, " - ", h))
+          } else {
+            dbplyr::sql(paste0("(", f, " + ", epsilon, ") / (", h, " + ", epsilon, ")"))
+          }
+        }),
+        paste0("delta_", weather_vars)
+      )
+    }
+
+    .make_perturb_exprs <- function(perturbation_method, weather_vars) {
+      stats::setNames(
+        lapply(weather_vars, function(v) {
+          delta_col <- paste0("delta_", v)
+          if (identical(perturbation_method[[v]], "multiplicative")) {
+            dbplyr::sql(paste0(v, " * ", delta_col))
+          } else {
+            dbplyr::sql(paste0(v, " + ", delta_col))
+          }
+        }),
+        weather_vars
+      )
+    }
+
+    delta_exprs_h3 <- .make_delta_exprs(perturbation_method, weather_vars, epsilon)
+    perturb_exprs  <- .make_perturb_exprs(perturbation_method, weather_vars)
+
+    # Rolling window expressions with `model` added to PARTITION BY.
+    # Used in the batch climate query so each model gets its own independent
+    # rolling window over its own perturbed series.
+    roll_exprs_climate <- stats::setNames(
+      lapply(seq_len(nrow(selected_weather)), function(i) {
+        v      <- selected_weather$name[i]
+        agg_fn <- agg_fn_map[[selected_weather$temporalAgg[i]]]
+        dbplyr::sql(sprintf(
+          "%s(%s) FILTER (WHERE %s IS NOT NULL) OVER (PARTITION BY model, code, year, survname, loc_id ORDER BY timestamp ROWS BETWEEN %d PRECEDING AND %d PRECEDING)",
+          agg_fn, v, v,
+          as.integer(selected_weather$ref_end[i]),
+          as.integer(selected_weather$ref_start[i])
+        ))
+      }),
+      weather_vars
+    )
+
+    # Detect CMIP6 H3 resolution once using the first SSP's historical file.
+    # PERF-13: the raw historical slice is loaded once through the disk cache
+    # and reused both for the resolution probe (no second remote open) and
+    # for the monthly historical baseline below.
+    hist_fnames_probe <- paste0(
+      "hazard/weather/projections/", survey_codes, "/",
+      survey_codes, "_", proj_source, "_historical.parquet"
+    )
+
+    cmip6_cols <- c("model", "h3", "timestamp", weather_vars)
+    cmip6_hist_raw_lazy <- .wx_cache_load(
+      hist_fnames_probe, connection_params, cols = cmip6_cols, tcol = NULL
+    )
+
+    cmip6_res <- tryCatch({
+      probe_sql <- dbplyr::sql_render(
+        cmip6_hist_raw_lazy |>
+          dplyr::filter(!is.na(h3)) |>
+          dplyr::select(h3) |>
+          head(1)
+      )
+      DBI::dbGetQuery(
+        con,
+        sprintf("SELECT h3_get_resolution(h3) AS res FROM (%s) _t", probe_sql)
+      )$res[[1L]]
+    }, error = function(e) h3_harmonised$target_res)
+
+    # Determine the join resolution between CMIP6 and microdata.
+    # Both must be brought to the coarser (lower) of the two.
+    cmip6_join_res <- min(cmip6_res, h3_harmonised$target_res)
+
+    # Add h3_cmip6 column to h3_slim for CMIP6 spatial joins.
+    # When CMIP6 is coarser than the observed-weather target resolution,
+    # micro H3 cells must be mapped further up to match CMIP6.
+    if (cmip6_join_res == h3_harmonised$target_res) {
+      # CMIP6 same or finer than target - reuse existing h3_weather column
+      h3_slim <- h3_slim |>
+        dplyr::mutate(h3_cmip6 = h3_weather)
+    } else {
+      # CMIP6 coarser than target - map micro cells up to CMIP6 resolution.
+      # Coarsen the `h3_weather` bigint column: the original `h3` string
+      # column was dropped by the population summarise above, and referencing
+      # it here made DuckDB silently bind `h3` to the sibling CMIP6 `h3`
+      # join column (a bigint), failing with `h3_string_to_h3(BIGINT)`.
+      h3_slim <- h3_slim |>
+        dplyr::mutate(
+          h3_cmip6 = dbplyr::sql(
+            sprintf("h3_cell_to_parent(h3_weather, %d)", cmip6_join_res)
+          )
+        )
+    }
+
+    # Helper: aggregate a pre-loaded raw CMIP6 lazy tbl -> (model, h3, month, vars).
+    # PERF-13: callers pass a disk-cache-backed lazy relation instead of
+    # re-opening the remote parquet for every (SSP, period) combination.
+    .cmip6_h3_monthly <- function(raw_tbl, ts_start, ts_end) {
+      tbl <- raw_tbl |>
+        dplyr::select(dplyr::all_of(cmip6_cols)) |>
+        dplyr::filter(timestamp >= ts_start, timestamp <= ts_end) |>
+        dplyr::mutate(month = dbplyr::sql("MONTH(timestamp)")) |>
+        dplyr::group_by(model, h3, month) |>
+        dplyr::summarise(
+          dplyr::across(dplyr::all_of(weather_vars), ~ mean(.x, na.rm = TRUE)),
+          .groups = "drop"
+        )
+
+      # Map CMIP6 h3 to the join resolution when CMIP6 is finer
+      if (cmip6_res > cmip6_join_res) {
+        tbl <- tbl |>
+          dplyr::mutate(
+            h3 = dbplyr::sql(
+              sprintf("h3_cell_to_parent(h3, %d)", cmip6_join_res)
+            )
+          )
+      }
+      tbl
+    }
+
+    # CMIP6 historical baseline - shared across all SSPs (same files)
+    h3_hist_raw <- .cmip6_h3_monthly(cmip6_hist_raw_lazy, baseline_start, baseline_end)
+
+    # -- Per-SSP worker -------------------------------------------------------
+    # Processes all models * all future periods.  The CMIP6 historical
+    # baseline and SSP baseline-period data are loaded once and shared
+    # across periods; only the future-period projection varies.
+    # Returns a named list keyed by "<ssp>_<start>_<end>_<model>".
+    .process_ssp <- function(ssp_i) {
+
+      ssp_fname     <- gsub("_", "", ssp_i)
+      future_fnames <- paste0(
+        "hazard/weather/projections/", survey_codes, "/",
+        survey_codes, "_", proj_source, "_", ssp_fname, ".parquet"
+      )
+
+      # PERF-13: the future file is fetched through the disk cache once per
+      # SSP and reused for the baseline overlap *and* every future period
+      # (previously one remote read per period).
+      ssp_raw_lazy <- .wx_cache_load(
+        future_fnames, connection_params, cols = cmip6_cols, tcol = NULL
+      )
+
+      # SSP baseline overlap - shared across all future periods
+      h3_ssp_raw <- .cmip6_h3_monthly(ssp_raw_lazy, baseline_start, baseline_end)
+
+      # Combined CMIP6 historical baseline (hist + ssp overlap period)
+      h3_hist <- dplyr::union_all(h3_hist_raw, h3_ssp_raw) |>
+        dplyr::group_by(model, h3, month) |>
+        dplyr::summarise(
+          dplyr::across(dplyr::all_of(weather_vars), ~ mean(.x, na.rm = TRUE)),
+          .groups = "drop"
+        )
+
+      # -- Loop over future periods ------------------------------------------
+      out <- list()
+      tmp_delta_tables <- character(0L) #DRK addition
+      for (fp in future_period) {
+        fp_start <- as.Date(fp[1])
+        fp_end   <- as.Date(fp[2])
+        fp_label <- paste0(
+          format(fp_start, "%Y"), "_", format(fp_end, "%Y")
+        )
+
+        h3_fut <- .cmip6_h3_monthly(ssp_raw_lazy, fp_start, fp_end)
+
+        # Lazy per-model H3-level delta table
+        h3_deltas <- dplyr::inner_join(
+          h3_hist, h3_fut,
+          by     = c("model", "h3", "month"),
+          suffix = c("_hist", "_fut")
+        ) |>
+          dplyr::mutate(!!!delta_exprs_h3) |>
+          dplyr::select(model, h3, month, dplyr::all_of(delta_vars))
+
+        # Population-weighted loc-level deltas
+        loc_deltas_by_model <- h3_deltas |>
+          dplyr::inner_join(h3_slim, by = c("h3" = "h3_cmip6")) |>
+          dplyr::group_by(model, code, year, survname, loc_id, month) |>
+          .pop_weighted_mean(delta_vars)
+
+
+        # Materialise delta table - lets DuckDB plan a hash join in the
+        # batch query instead of replanning the full lazy delta chain.
+        # Name generated via tempfile() rather than sample() so this does not
+        # consume/advance the caller's RNG stream (see DET-04).
+        tmp_delta_name <- basename(tempfile(pattern = "lw_delta_"))
+        tmp_tables <<- c(tmp_tables, tmp_delta_name)
+        loc_deltas_by_model <- dplyr::compute(
+          loc_deltas_by_model,
+          name      = tmp_delta_name,
+          temporary = TRUE
+        )
+        tmp_delta_tables <- c(tmp_delta_tables, tmp_delta_name)
+
+
+        # Filter incomplete models
+        complete_model_tbl <- loc_deltas_by_model |>
+          dplyr::group_by(model) |>
+          dplyr::summarise(
+            n_complete = sum(
+              dplyr::if_all(dplyr::all_of(delta_vars), ~ !is.na(.x)),
+              na.rm = TRUE
+            ),
+            .groups = "drop"
+          ) |>
+          dplyr::collect()
+
+        incomplete_models <- complete_model_tbl$model[complete_model_tbl$n_complete == 0L]
+        if (length(incomplete_models) > 0L) {
+          warning(sprintf(
+            "%s / %s: %d model(s) excluded due to missing variables (%s): %s",
+            ssp_i, fp_label, length(incomplete_models),
+            paste(delta_vars, collapse = ", "),
+            paste(incomplete_models, collapse = ", ")
+          ), call. = FALSE)
+        }
+
+        complete_models <- complete_model_tbl$model[complete_model_tbl$n_complete > 0L]
+        if (length(complete_models) == 0L) next
+
+        loc_deltas_by_model <- loc_deltas_by_model |>
+          dplyr::filter(model %in% complete_models)
+
+        # -- Batch query: split into two steps to help DuckDB plan ----------
+        # Step 1: join + perturb + select -> materialise before rolling window
+        # Name generated via tempfile() rather than sample() so this does not
+        # consume/advance the caller's RNG stream (see DET-04).
+        tmp_perturb_name <- basename(tempfile(pattern = "lw_perturb_"))
+        tmp_tables <<- c(tmp_tables, tmp_perturb_name)
+        tmp_delta_tables <- c(tmp_delta_tables, tmp_perturb_name)
+
+        perturbed <- loc_monthly |>
+          dplyr::mutate(month = dbplyr::sql("MONTH(timestamp)")) |>
+          dplyr::inner_join(
+            loc_deltas_by_model,
+            by = c("code", "year", "survname", "loc_id", "month")
+          ) |>
+          dplyr::mutate(!!!perturb_exprs) |>
+          dplyr::select(
+            model, code, year, survname, loc_id, timestamp,
+            dplyr::all_of(weather_vars)
+          ) |>
+          dplyr::compute(name = tmp_perturb_name, temporary = TRUE)
+
+        # Step 2: rolling window + transformations + filter -> collect
+        batch <- perturbed |>
+          dplyr::mutate(!!!roll_exprs_climate) |>
+          .apply_transformations(selected_weather, loc_weather_base) |>
+          dplyr::filter(timestamp %in% !!dates) |>
+          dplyr::arrange(model, code, year, survname, loc_id, timestamp) |>
+          dplyr::collect()
+
+        if (nrow(batch) == 0L) next
+
+        # Split into per-model data frames
+        model_list <- split(batch, batch$model)
+        period_out <- stats::setNames(
+          lapply(model_list, function(df) {
+            df$model <- NULL
+            if (has_binning) df <- .apply_binning(df, stored_breaks)
+            df
+          }),
+          paste0(ssp_i, "_", fp_label, "_", make.names(names(model_list)))
+        )
+        out <- c(out, period_out)
+      }
+
+      # Cleanup all materialised delta temp tables (best-effort, early release;
+      # the on.exit ledger still covers any that fail to drop here)
+      for (tdn in tmp_delta_tables) {
+        try(DBI::dbRemoveTable(dbplyr::remote_con(loc_deltas_by_model), tdn), silent = TRUE)
+      }
+      tmp_tables <<- setdiff(tmp_tables, tmp_delta_tables)
+      out
+    }
+
+    # -- Run SSPs sequentially - DuckDB handles per-query parallelism --------
+    result <- c(result, do.call(c, lapply(ssp, .process_ssp)))
+  }
+
+  # -- Cleanup base temp table (best-effort; on.exit ledger is the backstop) --
+  try(
+    DBI::dbRemoveTable(dbplyr::remote_con(loc_weather_base), tmp_base_name),
+    silent = TRUE
+  )
+  tmp_tables <- setdiff(tmp_tables, tmp_base_name)
+
+  # Attach computed breaks so the caller can reuse them in subsequent calls
+  if (has_binning && !is.null(stored_breaks)) {
+    attr(result, "stored_breaks") <- stored_breaks
+  }
+
+  # Attach the pre-binning values of the binned columns (descriptive use only)
+  if (!is.null(continuous_hist)) {
+    attr(result, "continuous_weather") <- continuous_hist
+  }
+
+  result
+}
