@@ -204,7 +204,8 @@ policy_input_diagnostics <- function(baseline_svy, policy_svy, vars = NULL) {
       shiny::uiOutput(ns("results_header_ui")),
       shiny::wellPanel(
         class = "results-controls",
-      style = "padding: 10px 14px 6px 14px;",
+      # Padding matches the Step 2 results controls panel (alignment).
+      style = "padding: 8px 12px 4px 12px;",
       # Single compact row: outcome + uncertainty controls wrap as needed
       shiny::tags$div(
         style = "display:flex; align-items:flex-end; gap:12px; flex-wrap:wrap;",
@@ -216,8 +217,19 @@ policy_input_diagnostics <- function(baseline_svy, policy_svy, vars = NULL) {
             selected = "mean"
           )
         ),
-        shiny::tags$div(style = "flex:0 1 170px;",
-          shiny::uiOutput(ns("cmp_pov_line_ui"))
+        # Poverty-line cell: identical conditionalPanel markup to the Step 2
+        # controls, so the cell is removed (not left as an empty flex slot)
+        # for non-poverty aggregation methods.
+        shiny::conditionalPanel(
+          condition = paste0("['headcount_ratio','gap','fgt2',",
+                             "'prosperity_gap','avg_poverty']",
+                             ".indexOf(input['", ns("cmp_agg_method"), "']) > -1"),
+          style = "flex:0 1 170px;",
+          shiny::numericInput(
+            ns("cmp_pov_line"),
+            label = "Poverty line ($/day, 2021 PPP)",
+            value = 3.00, min = 0, step = 0.5
+          )
         ),
         shiny::tags$div(style = "flex:0 1 200px;",
           shiny::selectInput(
@@ -282,15 +294,21 @@ policy_input_diagnostics <- function(baseline_svy, policy_svy, vars = NULL) {
           style = "cursor:pointer; font-size:11px; color:#555; font-weight:600;",
           "Advanced \u25BC"
         ),
-        shiny::radioButtons(
-          ns("cmp_group_order"),
-          label    = "Group charts and tables by",
-          choices  = c(
-            "Scenario \u00D7 Year" = "scenario_x_year",
-            "Year \u00D7 Scenario" = "year_x_scenario"
-          ),
-          selected = "scenario_x_year",
-          inline   = TRUE
+        # Same structure as the Step 2 Advanced section (alignment).
+        shiny::tags$div(
+          style = "display:flex; gap:10px; flex-wrap:wrap; margin-top:4px;",
+          shiny::tags$div(style = "flex:1; min-width:160px;",
+            shiny::radioButtons(
+              ns("cmp_group_order"),
+              label    = "Group charts and tables by",
+              choices  = c(
+                "Scenario \u00D7 Year" = "scenario_x_year",
+                "Year \u00D7 Scenario" = "year_x_scenario"
+              ),
+              selected = "scenario_x_year",
+              inline   = TRUE
+            )
+          )
         )
       ),
       shiny::tags$hr(style = "margin: 6px 0;"),
@@ -450,58 +468,111 @@ policy_input_diagnostics <- function(baseline_svy, policy_svy, vars = NULL) {
     if (!is.null(nm) && nzchar(nm)) nm else "Historical"
   })
 
-  # SSP / year / model metadata is identical across baseline and policy
-  # (same set of saved scenarios), so derive from baseline.
-  all_ssps <- reactive({
-    sc <- baseline_saved_scenarios()
-    if (length(sc) == 0) return(character(0))
-    ssps <- unique(.normalise_ssp(names(sc)))
-    sort(ssps[!is.na(ssps) & grepl("^SSP", ssps)])
-  })
-
-  all_anchor_years <- reactive({
-    sc <- baseline_saved_scenarios()
-    if (length(sc) == 0) return(character(0))
-    ranges <- sort(na.omit(unique(.parse_year(names(sc)))))
-    setNames(sub("-", "_", ranges), ranges)
-  })
-
-  all_models_info <- reactive({
-    sc <- baseline_saved_scenarios()
-    if (length(sc) == 0) return(character(0))
-    vapply(sc, function(s) s$n_models %||% 1L, integer(1))
-  })
-
-  # Survey weights are always applied when available (toggle removed).
-  output$weight_status_ui <- shiny::renderUI(NULL)
-
   # Debounced (400 ms) so rapid spinner/typing edits don't retrigger the
   # aggregation pipeline on every keystroke. Non-poverty methods keep the
   # NULL behaviour so downstream consumers skip the poverty line.
+  # Family list matches the Step 2 poverty-line conditionalPanel (alignment).
+  # While the user has not edited the value, the run's own poverty line is
+  # authoritative (the sync observer keeps the visible input in step with it);
+  # once edited (INT-01), the user's value wins.
   pov_line_val <- shiny::debounce(reactive({
     if (isTRUE(input$cmp_agg_method %in%
-               c("headcount_ratio", "gap", "fgt2"))) {
-      as.numeric(input$cmp_pov_line) %||% 3.00
+               c("headcount_ratio", "gap", "fgt2",
+                 "prosperity_gap", "avg_poverty"))) {
+      if (pov_line_touched()) {
+        pl <- suppressWarnings(as.numeric(input$cmp_pov_line))
+        if (!is.null(pl) && length(pl) > 0L && !is.na(pl)) return(pl)
+      }
+      baseline_hist_sim()$pov_line %||% 3.00
     } else NULL
   }), 400)
+
+  # Sync the static poverty-line input to the run's value while the user has
+  # not edited it (INT-01: once edited, the user's value survives re-runs).
+  # "Edited" means the input differs from the last-synced value, so the
+  # sync's own updateNumericInput round-trip never counts as an edit.
+  pov_line_touched  <- reactiveVal(FALSE)
+  .pov_line_last_sync <- reactiveVal(3.00)
+  observeEvent(input$cmp_pov_line, {
+    v <- suppressWarnings(as.numeric(input$cmp_pov_line)[1])
+    if (!identical(v, .pov_line_last_sync())) pov_line_touched(TRUE)
+  }, ignoreInit = TRUE)
+  observeEvent(baseline_hist_sim(), {
+    hs <- baseline_hist_sim()
+    if (is.null(hs)) return()
+    v <- hs$pov_line %||% 3.00
+    .pov_line_last_sync(v)
+    if (pov_line_touched()) return()
+    shiny::updateNumericInput(session, "cmp_pov_line", value = v)
+  })
+
+  # ---- Scenario filter grid (alignment with the Step 2 results tab) --------
+  # One checkbox per scenario key laid out as an SSP x period grid, replacing
+  # the former pair of SSP/period checkbox groups. Non-SSP keys (if any) are
+  # always kept and not shown in the grid.
+  .grid_key_id <- function(key) paste0("sc_", gsub("[^a-zA-Z0-9]", "_", key))
+
+  # UI-38: hold the most recent non-empty grid selection so unchecking the
+  # final scenario never silently re-displays the first one.
+  last_selected_scenarios <- reactiveVal(NULL)
+
+  .grid_scenario_keys <- function() {
+    sc <- baseline_saved_scenarios()
+    if (length(sc) == 0) return(character(0))
+    nms <- names(sc)
+    nms[grepl("^SSP", nms)]
+  }
+
+  observe({
+    keys <- .grid_scenario_keys()
+    if (length(keys) == 0L) return(invisible(NULL))
+
+    selected <- Filter(Negate(is.null), lapply(keys, function(key) {
+      if (isTRUE(input[[.grid_key_id(key)]])) key else NULL
+    }))
+
+    if (length(selected) > 0L) {
+      last_selected_scenarios(unlist(selected))
+    } else {
+      # Re-check the held boxes so the grid never sits fully unchecked.
+      held <- last_selected_scenarios()
+      held <- held[held %in% keys]
+      if (length(held) == 0L) held <- keys[1L]
+      for (key in held) {
+        shiny::updateCheckboxInput(
+          session,
+          inputId = .grid_key_id(key),
+          value   = TRUE
+        )
+      }
+    }
+  })
 
   selected_scenario_names <- reactive({
     sc <- baseline_saved_scenarios()
     if (length(sc) == 0) return(character(0))
     nms  <- names(sc)
-    ssps <- if (length(input$filter_ssp) == 0) all_ssps()
-            else input$filter_ssp
-    yr_vals <- if (length(input$filter_year) == 0) names(all_anchor_years())
-               else sub("_", "-", input$filter_year)
-    keep <- vapply(nms, function(nm) {
-      is_ssp <- grepl("^SSP", nm)
-      if (!is_ssp) return(TRUE)
-      ssp_match <- any(vapply(ssps, function(s) startsWith(nm, s), logical(1)))
-      yr_match  <- length(yr_vals) == 0 ||
-        any(vapply(yr_vals, function(y) grepl(y, nm, fixed = TRUE), logical(1)))
-      ssp_match && yr_match
-    }, logical(1))
-    nms[keep]
+    keys <- .grid_scenario_keys()
+
+    # Read each grid checkbox (INT-01: selections survive republishes via the
+    # restore-on-render in scenario_filter_ui).
+    selected <- Filter(Negate(is.null), lapply(keys, function(key) {
+      if (isTRUE(input[[.grid_key_id(key)]])) key else NULL
+    }))
+
+    # Enforce minimum 1 selected: hold the last real selection (UI-38)
+    # rather than silently re-adding the first scenario.
+    if (length(selected) == 0L) {
+      held <- last_selected_scenarios()
+      held <- held[held %in% keys]
+      if (length(held) == 0L) held <- keys[1L]
+      selected <- held
+    } else {
+      selected <- unlist(selected)
+    }
+
+    # Non-SSP keys (if any) always pass, as before the grid.
+    nms[nms %in% selected | !grepl("^SSP", nms)]
   })
 
   # ---- PERF-31: per-method aggregation cache -------------------------------
@@ -1050,64 +1121,85 @@ policy_input_diagnostics <- function(baseline_svy, policy_svy, vars = NULL) {
     )
   })
 
-  output$cmp_pov_line_ui <- renderUI({
-    req(input$cmp_agg_method)
-    if (input$cmp_agg_method %in% c("headcount_ratio", "gap", "fgt2")) {
-      default_val <- baseline_hist_sim()$pov_line %||% 3.00
-      # INT-01: keep the user's poverty line when this input is rebuilt
-      # (aggregation-method toggle); the run's value is only the fallback.
-      prev_pl <- shiny::isolate(input$cmp_pov_line)
-      shiny::numericInput(
-        inputId = ns("cmp_pov_line"),
-        label   = "Poverty line ($/day)",
-        value   = .restore_numeric(prev_pl, 0.01, Inf, fallback = default_val),
-        min     = 0.01,
-        step    = 0.5
-      )
-    }
-  })
-
+  # Scenario filter grid: same compact SSP x period table as the Step 2
+  # results tab (alignment). INT-01: the user's cell selection survives a
+  # republish; a first render (or a fresh key set) starts fully checked.
   output$scenario_filter_ui <- renderUI({
     sc <- baseline_saved_scenarios()
     if (length(sc) == 0)
       return(shiny::helpText("Run a simulation."))
-    ssps <- all_ssps()
-    yrs  <- all_anchor_years()
-    mi   <- all_models_info()
-    # INT-01: keep the user's filter selection across re-runs that change the
-    # scenario set; only filters that no longer exist are dropped, and an
-    # empty result falls back to "all selected".
-    prev_fy  <- shiny::isolate(input$filter_year)
-    prev_fs  <- shiny::isolate(input$filter_ssp)
-    tagList(
-      shiny::fluidRow(
-        shiny::column(4,
-          if (length(yrs) > 0)
-            shiny::checkboxGroupInput(
-              ns("filter_year"), label = "Projection periods",
-              choices = yrs,
-              selected = .restore_selection(prev_fy, yrs, fallback = yrs),
-              inline = TRUE
-            )
-        ),
-        shiny::column(4,
-          if (length(ssps) > 0)
-            shiny::checkboxGroupInput(
-              ns("filter_ssp"), label = "SSPs",
-              choices = ssps,
-              selected = .restore_selection(prev_fs, ssps, fallback = ssps),
-              inline = TRUE
-            )
-        ),
-        shiny::column(4,
-          if (any(mi > 1L))
-            shiny::helpText(
-              style = "font-size:11px; color:#555; margin-top:24px;",
-              paste0("Each SSP aggregates results from ",
-                     max(mi), " ensemble model(s).")
-            )
-        )
+    keys <- .grid_scenario_keys()
+    if (length(keys) == 0)
+      return(shiny::helpText("Run a simulation."))
+
+    ssps <- unique(sub(" / .*$", "", keys))
+    yrs  <- unique(sub("^.* / ", "", keys))
+
+    grid_id <- ns("scenario-filter-grid")
+
+    # Build header row
+    header <- shiny::tags$tr(
+      shiny::tags$th(""),
+      lapply(ssps, function(s)
+        shiny::tags$th(s,
+          style = "text-align:center; font-size:11px;
+                  font-weight:600; padding:2px 8px;"))
+    )
+
+    # Build one row per period
+    period_rows <- lapply(yrs, function(yr) {
+      shiny::tags$tr(
+        shiny::tags$td(yr,
+          style = "font-size:11px; font-weight:600;
+                  padding:2px 8px; white-space:nowrap;"),
+        lapply(ssps, function(s) {
+          key     <- paste0(s, " / ", yr)
+          exists  <- key %in% keys
+          cb_id   <- ns(.grid_key_id(key))
+          # INT-01: restore the user's previous cell selection when the
+          # grid is re-rendered; a first render starts fully checked.
+          prev    <- shiny::isolate(input[[.grid_key_id(key)]])
+          shiny::tags$td(
+            style = "text-align:center; padding:2px 4px;",
+            if (exists)
+              shiny::checkboxInput(
+                cb_id,
+                label = shiny::tags$span(class = "visually-hidden",
+                                         paste("Include", s, yr,
+                                               "in the comparison")),
+                value = if (is.null(prev)) TRUE else isTRUE(prev)
+              )
+            else
+              shiny::tags$span(
+                style = "color:#ccc; font-size:11px;",
+                "-"
+              )
+          )
+        })
       )
+    })
+
+    shiny::tags$table(
+      id    = grid_id,
+      style = "border-collapse:collapse; margin-top:4px;",
+      shiny::tags$style(shiny::HTML(sprintf("
+        #%s .checkbox { margin: 0; padding: 0; }
+        #%s .checkbox label {
+          padding-left: 0;
+          min-height: 0;
+        }
+        #%s .checkbox label span { display: none; }
+        #%s input[type='checkbox'] {
+          width: 16px; height: 16px;
+          margin: 0 auto;
+          display: block;
+          position: static;
+        }
+        #%s td { padding: 4px 12px; }
+        #%s th { padding: 4px 12px; font-size: 11px; }
+      ", grid_id, grid_id, grid_id, grid_id, grid_id, grid_id))),
+      shiny::tags$thead(header),
+      shiny::tags$tbody(period_rows)
     )
   })
 
@@ -1234,6 +1326,8 @@ policy_input_diagnostics <- function(baseline_svy, policy_svy, vars = NULL) {
     policy_agg_scenarios   = policy_agg_scenarios,
     agg_cache_ws           = agg_cache_ws,
     hist_label             = hist_label,
-    threshold_table        = threshold_table_rv
+    threshold_table        = threshold_table_rv,
+    selected_scenario_names = selected_scenario_names,
+    pov_line_val            = pov_line_val
   ))
 }

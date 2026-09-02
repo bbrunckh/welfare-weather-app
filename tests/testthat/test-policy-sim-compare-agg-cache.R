@@ -60,7 +60,7 @@ make_step3_scenarios_fixture_multi <- function() {
 
 # ---- INT-01: Step 3 filters and poverty line survive pane rebuilds ----------
 
-test_that("Step 3 scenario filters and poverty line survive rebuilds (INT-01)", {
+test_that("Step 3 scenario filter grid and poverty line survive rebuilds (INT-01)", {
   skip_if_not_installed("shiny")
 
   bh  <- shiny::reactiveVal(make_step3_hist_fixture())
@@ -82,45 +82,60 @@ test_that("Step 3 scenario filters and poverty line survive rebuilds (INT-01)", 
       NULL
     },
     {
-      session$flushReact()
+      settle <- function() { session$elapse(500); session$flushReact() }
       html_text <- function(html) paste(as.character(html), collapse = "\n")
-      checked <- function(html) {
-        txt <- html_text(html)
-        regmatches(txt, gregexpr('value="[^"]*"\\s+checked', txt))[[1]]
+      n_checked <- function(txt) {
+        length(regmatches(txt, gregexpr('checked="checked"', txt))[[1]])
+      }
+      cell_checked <- function(txt, key_id) {
+        grepl(paste0('id="[^"]*', key_id, '"[^>]*checked="checked"'), txt)
+      }
+      cell_present <- function(txt, key_id) {
+        grepl(paste0('id="[^"]*', key_id, '"'), txt)
       }
 
-      # First render: all filters checked (historical default)
+      # First render: every grid cell checked (historical default)
       html <- session$output$scenario_filter_ui
-      expect_length(checked(html), 3L)  # 1 period + 2 SSPs
+      expect_equal(n_checked(html_text(html)), 2L)  # SSP2 + SSP5 cells
 
-      # User narrows the SSP filter, then the scenario set is republished
-      # (Step 2 re-run): the surviving filter is kept, not reset to all.
-      session$setInputs(filter_ssp = "SSP2-4.5")
-      bsc(make_step3_scenarios_fixture())
-      session$flushReact()
-      html <- session$output$scenario_filter_ui
-      expect_true(grepl('value="SSP2-4.5"\\s+checked', html_text(html)))
-      expect_false(grepl('value="SSP5-8.5"\\s+checked', html_text(html)))
+      # User unchecks a scenario cell, then the scenario set is republished
+      # (Step 2 re-run): the surviving selection is kept, not reset to all.
+      session$setInputs(`sc_SSP5_8_5___2030_2040` = FALSE); settle()
+      bsc(make_step3_scenarios_fixture()); settle()
+      txt <- html_text(session$output$scenario_filter_ui)
+      expect_true(cell_checked(txt, "sc_SSP2_4_5___2030_2040"))
+      expect_false(cell_present(txt, "sc_SSP5_8_5___2030_2040"))
 
-      # Fully-empty filter falls back to all (old-defaults decision)
-      session$setInputs(filter_ssp = character(0))
-      bsc(make_step3_scenarios_fixture_multi())
-      session$flushReact()
-      html <- session$output$scenario_filter_ui
-      expect_true(grepl('value="SSP2-4.5"\\s+checked', html_text(html)))
-      expect_true(grepl('value="SSP5-8.5"\\s+checked', html_text(html)))
+      # Unchecking the final cell falls back to the held selection (UI-38),
+      # aligned with the Step 2 grid: the selection never becomes empty.
+      # (testServer does not simulate the updateCheckboxInput round-trip on
+      # renderUI-created inputs, so assert the selection reactive rather
+      # than the re-rendered markup here.)
+      session$setInputs(`sc_SSP2_4_5___2030_2040` = FALSE); settle()
+      expect_setequal(internals$selected_scenario_names(),
+                      "SSP2-4.5 / 2030-2040")
+      bsc(make_step3_scenarios_fixture_multi()); settle()
+      expect_setequal(internals$selected_scenario_names(),
+                      "SSP2-4.5 / 2030-2040")
 
-      # Poverty line: user value survives an aggregation-method round trip
-      session$setInputs(cmp_agg_method = "gap")
-      session$flushReact()
-      html <- session$output$cmp_pov_line_ui
-      expect_true(grepl('value="3"', html_text(html)))
-      session$setInputs(cmp_pov_line = 5.5)
-      session$setInputs(cmp_agg_method = "mean")   # input removed
-      session$setInputs(cmp_agg_method = "gap")    # input re-rendered
-      session$flushReact()
-      html <- session$output$cmp_pov_line_ui
-      expect_true(grepl('value="5.5"', html_text(html)))
+      # Poverty line: the input is a static conditionalPanel cell (Step 2
+      # alignment). The run's value is the aggregation default while the
+      # user has not edited it; an edited value survives method toggles and
+      # re-runs (INT-01). Assert the debounced aggregation value (a second
+      # settle lets the debounce timer fire after a republish).
+      session$setInputs(cmp_agg_method = "gap"); settle()
+      bh({ hs <- make_step3_hist_fixture(); hs$pov_line <- 2.15; hs }); settle()
+      settle()
+      expect_equal(internals$pov_line_val(), 2.15)
+      session$setInputs(cmp_pov_line = 5.5); settle()
+      expect_equal(internals$pov_line_val(), 5.5)
+      bh(make_step3_hist_fixture()); settle()       # republish, no run value
+      settle()
+      expect_equal(internals$pov_line_val(), 5.5)   # user edit sticks
+      session$setInputs(cmp_agg_method = "mean"); settle()
+      expect_null(internals$pov_line_val())
+      session$setInputs(cmp_agg_method = "gap"); settle()
+      expect_equal(internals$pov_line_val(), 5.5)
     }
   )
 })
