@@ -127,3 +127,67 @@ test_that("fit snapshot captures fit-time labels; headings follow re-fit engine"
     }
   )
 })
+
+test_that("REACT-14: specification fallbacks render the provenance banner", {
+  skip_if_not_installed("shiny")
+
+  local_mocked_bindings(
+    prepare_outcome_df = function(df, so) df,
+    fit_model = function(df, selected_outcome, selected_weather, selected_model) {
+      list(
+        engine            = selected_model$engine,
+        y_var             = selected_outcome$name,
+        weather_terms     = selected_weather$name,
+        interaction_terms = character(0),
+        fit1 = NULL, fit2 = NULL, fit3 = NULL,
+        rif_grid = NULL,
+        fallbacks = list(list(
+          kind      = "model_family",
+          requested = "logistic",
+          used      = "linear",
+          reason    = "outcome column is not logical (TRUE/FALSE or 0/1)"
+        ))
+      )
+    },
+    make_coefplot            = function(...) ggplot2::ggplot(),
+    make_weather_effect_plot = function(...) ggplot2::ggplot(),
+    make_regtable            = function(...) shiny::tags$p("table"),
+    is_logistic_fit          = function(mf) FALSE
+  )
+
+  run_model <- shiny::reactiveVal(0L)
+
+  shiny::testServer(
+    mod_1_07_results_server,
+    args = list(
+      id               = "res",
+      variable_list    = shiny::reactiveVal(make_vl()),
+      selected_surveys = shiny::reactiveVal(data.frame()),
+      selected_outcome = shiny::reactiveVal(make_outcome()),
+      selected_weather = shiny::reactiveVal(make_weather_sel()),
+      survey_weather   = shiny::reactiveVal(
+        data.frame(tx = 1:4, welfare = 1:4, weight = 1)
+      ),
+      selected_model   = shiny::reactiveVal(list(engine = "fixest")),
+      model_type       = shiny::reactiveVal("linear"),
+      run_model        = run_model,
+      tabset_id        = "step1_tabs"
+    ),
+    {
+      settle <- function() { session$elapse(500); session$flushReact() }
+      html_of <- function(output_id) {
+        paste(as.character(session$output[[output_id]]), collapse = " ")
+      }
+
+      # Prime the fit counter (see the quirk note in the test above)
+      run_model(1L); settle()
+      run_model(2L); settle()
+
+      expect_length(model_fit_val()$fallbacks, 1)
+      html <- html_of("fallback_banner")
+      expect_match(html, "differs from the requested specification",
+                   fixed = TRUE)
+      expect_match(html, "requested logistic, fitted linear", fixed = TRUE)
+    }
+  )
+})

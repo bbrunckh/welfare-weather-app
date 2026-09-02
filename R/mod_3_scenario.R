@@ -235,7 +235,11 @@ mod_3_scenario_server <- function(id,
       residuals         = residuals,
       propagate_all_covariate_uncertainty = propagate_all_covariate_uncertainty,
       survey_version    = survey_version,
-      sim_stale         = sim_stale
+      sim_stale         = sim_stale,
+      # REACT-09: fire the child's run trigger on button click. req() blocks
+      # the NULL/zero state of the dynamically rendered button, so the trigger
+      # only fires on real clicks.
+      run_trigger       = reactive({ req(input$run_policy_sim); input$run_policy_sim })
     )
 
     # ---- Results tabs: Baseline & Policy (both re-simulated) -------------
@@ -319,10 +323,7 @@ mod_3_scenario_server <- function(id,
     }, ignoreInit = TRUE)
 
     # ---- Run policy simulation on button click ---------------------------
-
-    observeEvent(input$run_policy_sim, {
-      s6$run()
-    })
+    # REACT-09: handled by the run_trigger reactive passed to the child.
 
     # ---- Return API ------------------------------------------------------
 

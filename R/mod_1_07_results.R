@@ -92,6 +92,36 @@ mod_1_07_results_server <- function(id,
       if (isTRUE(stale())) .stale_banner("Step 1 model results") else NULL
     })
 
+    # REACT-14: persistent provenance banner for specification fallbacks
+    # (logistic -> linear, clustered -> unclustered VCV) recorded by
+    # fit_model(). The results below come from the fitted specification, so
+    # the deviation from the requested one must stay visible.
+    output$fallback_banner <- renderUI({
+      fb <- model_fit_val()$fallbacks %||% list()
+      if (!length(fb)) return(NULL)
+      items <- lapply(fb, function(x) {
+        shiny::tags$li(sprintf(
+          "%s: requested %s, fitted %s (%s).",
+          switch(x$kind,
+                 model_family = "Model family",
+                 vcv          = "Standard errors",
+                 x$kind),
+          x$requested, x$used, x$reason
+        ))
+      })
+      shiny::div(
+        class = "alert alert-warning",
+        role  = "alert",
+        style = "margin-bottom: 10px;",
+        shiny::tags$b(
+          "\u26a0 The fitted model differs from the requested specification."
+        ),
+        "The fit fell back as follows; all results below come from the",
+        "fitted specification:",
+        shiny::tags$ul(items)
+      )
+    })
+
     native_fit <- function(fit) extract_native_fit(fit, model_fit_val()$engine)
 
     # ---- Run model -----------------------------------------------------------
@@ -144,6 +174,37 @@ mod_1_07_results_server <- function(id,
         model_fit_val(fit_list)
         shiny::showNotification("Models fitted successfully.",
                                 type = "message", duration = 3)
+
+        # REACT-14: disclose any specification fallback the fitter applied.
+        # A model-family change (logistic -> linear) alters the estimand, so
+        # it additionally requires explicit acknowledgement.
+        fb <- fit_list$fallbacks %||% list()
+        if (length(fb)) {
+          shiny::showNotification(
+            paste0(
+              "Models fitted with specification fallbacks (see the banner ",
+              "on the Results tab)."
+            ),
+            type = "warning", duration = 10
+          )
+          family_fb <- Filter(function(x) identical(x$kind, "model_family"), fb)
+          if (length(family_fb)) {
+            shiny::showModal(shiny::modalDialog(
+              title = "Model family fallback",
+              shiny::tags$p(
+                "The requested logistic regression could not be fitted and",
+                " the model fell back to linear. All Step 1-3 results use the",
+                " fitted specification unless you re-fit:"
+              ),
+              shiny::tags$ul(
+                lapply(family_fb, function(x)
+                  shiny::tags$li(sprintf("%s (%s).", x$reason, x$used)))
+              ),
+              easyClose = FALSE,
+              footer    = shiny::modalButton("I understand")
+            ))
+          }
+        }
       }
     }, ignoreInit = TRUE)
 
@@ -300,6 +361,7 @@ mod_1_07_results_server <- function(id,
           shiny::tabPanel(
             title = "Results",
             value = "results",
+            shiny::uiOutput(ns("fallback_banner")),
             shiny::uiOutput(ns("stale_banner")),
             shiny::uiOutput(ns("heading_effect")),
             shiny::uiOutput(ns("effectplot_layout")),

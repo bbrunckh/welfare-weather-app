@@ -501,6 +501,28 @@ mod_2_01_weathersim_server <- function(id,
       unsupported <- !is.null(mf) &&
                      !engine %in% c("fixest", "rif")
 
+      # UI-29: name the missing prerequisites before the click instead of
+      # letting the button silently no-op (the click observer req()s on all
+      # of these).
+      missing <- character(0)
+      swd <- tryCatch(selected_weather(), error = function(e) NULL)
+      so  <- tryCatch(selected_outcome(), error = function(e) NULL)
+      svy <- tryCatch(survey_weather(), error = function(e) NULL)
+      ss  <- tryCatch(selected_surveys(), error = function(e) NULL)
+      hist_ok <- tryCatch({ selected_hist(); TRUE }, error = function(e) FALSE)
+      if (is.null(so) || nrow(as.data.frame(so)) == 0)
+        missing <- c(missing, "an outcome variable")
+      if (is.null(swd) || nrow(as.data.frame(swd)) == 0)
+        missing <- c(missing, "weather variable selections")
+      if (is.null(svy) || nrow(as.data.frame(svy)) == 0)
+        missing <- c(missing, "loaded survey + weather data")
+      if (is.null(ss) || nrow(as.data.frame(ss)) == 0)
+        missing <- c(missing, "a baseline survey selection")
+      if (!hist_ok)
+        missing <- c(missing, "a historical period selection")
+      if (is.null(mf))
+        missing <- c(missing, "a fitted Step 1 model (run the Step 1 model first)")
+
       if (unsupported) {
         shiny::div(
           class = "alert alert-warning",
@@ -510,12 +532,24 @@ mod_2_01_weathersim_server <- function(id,
           " Please select a linear or RIF model engine to run simulations."
         )
       } else {
-        shiny::actionButton(
-          ns("run_sim"),
-          label = "Run simulation",
-          class = "btn-primary",
-          icon  = shiny::icon("play"),
-          style = "width: 100%; margin-top: 4px;"
+        shiny::tagList(
+          if (length(missing)) {
+            shiny::div(
+              class = "alert alert-warning",
+              role  = "alert",
+              style = "font-size: 13px; margin-top: 4px;",
+              shiny::tags$b("Prerequisites: "), "select ",
+              paste(missing, collapse = ", "), "."
+            )
+          },
+          shiny::actionButton(
+            ns("run_sim"),
+            label = "Run simulation",
+            class = "btn-primary",
+            icon  = shiny::icon("play"),
+            style = "width: 100%; margin-top: 4px;",
+            disabled = length(missing) > 0
+          )
         )
       }
     })

@@ -209,3 +209,80 @@ ridge_distribution_plot <- function(
     p
 }
 
+#' Extract covariate names from a model-spec entry
+#'
+#' Model-spec entries are either named (use the names; blank names are
+#' dropped) or unnamed (use the values).
+#'
+#' @param x A model-spec entry (named/unnamed list or character vector), or
+#'   NULL.
+#'
+#' @return Character vector of unique covariate names.
+#'
+#' @noRd
+model_covariate_names <- function(x) {
+	if (is.null(x)) return(character(0))
+	nms <- names(x)
+	if (!is.null(nms) && any(nzchar(nms))) {
+		unique(nms[nzchar(nms)])
+	} else {
+		unique(as.character(unlist(x, use.names = FALSE)))
+	}
+}
+
+#' Coefficient-name reactives for the selected Step 1 model
+#'
+#' Shared by the Step 3 lever modules (REACT-08): one definition of how a
+#' selected-model list is decomposed into covariate roles.
+#'
+#' @param selected_model Reactive returning the selected-model list.
+#'
+#' @return Named list of reactives: `individual`, `hh`, `firm`, `area`,
+#'   `interactions` (each a character vector of term names) and `all` (their
+#'   union). Each stays silent-empty until `selected_model()` is populated.
+#'
+#' @noRd
+model_coefficient_reactives <- function(selected_model) {
+	sm <- reactive({ req(selected_model()); selected_model() })
+
+	individual   <- reactive(model_covariate_names(sm()$individual_covariates))
+	hh           <- reactive(model_covariate_names(sm()$hh_covariates))
+	firm         <- reactive(model_covariate_names(sm()$firm_covariates))
+	area         <- reactive(model_covariate_names(sm()$area_covariates))
+	interactions <- reactive(model_covariate_names(sm()$interactions))
+	all          <- reactive({
+		unique(c(individual(), hh(), firm(), area(), interactions()))
+	})
+
+	list(
+		individual   = individual,
+		hh           = hh,
+		firm         = firm,
+		area         = area,
+		interactions = interactions,
+		all          = all
+	)
+}
+
+#' Collect the variable / term names referenced by a selected model
+#'
+#' Union of all covariate roles plus interactions, mirroring the `coeffs()`
+#' reactive of the policy lever modules. Used to gate which covariate levers
+#' may mutate the survey in `apply_policy_to_svy()`. Returns NULL when `sm`
+#' is NULL, which `apply_policy_to_svy()` treats as "no gating".
+#'
+#' @param sm Selected-model list (or NULL).
+#' @return Character vector of term names, or NULL when `sm` is NULL.
+#'
+#' @noRd
+model_term_names <- function(sm) {
+	if (is.null(sm)) return(NULL)
+	unique(c(
+		model_covariate_names(sm$individual_covariates),
+		model_covariate_names(sm$hh_covariates),
+		model_covariate_names(sm$firm_covariates),
+		model_covariate_names(sm$area_covariates),
+		model_covariate_names(sm$interactions)
+	))
+}
+

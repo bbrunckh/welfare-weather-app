@@ -453,7 +453,7 @@ run_lasso_selection <- function(
   # Auto-disable parallelism on small samples: below `parallel_min_n` rows the
   # multisession fork + globals-export overhead exceeds the actual work. The
   # 20k default reflects the break-even point on a 16-core Mac with mi_m = 5
-  # (see dev/bench_lasso.R).
+  # (see dev/archive/bench_lasso.R).
   # ---------------------------------------------------------------------------
   m <- max(1L, as.integer(mi_m))
   family_type <- if (is_logit) "binomial" else "gaussian"
@@ -515,7 +515,7 @@ run_lasso_selection <- function(
   # X_full and penalty are identical across iterations - build once.  The loop
   # only varies the random CV fold assignment for stability selection.
   # Sequential lapply: globals-export overhead of multisession exceeds the
-  # cv.glmnet compute time (confirmed via dev/bench_lasso.R).
+  # cv.glmnet compute time (confirmed via dev/archive/bench_lasso.R).
   # ---------------------------------------------------------------------------
   if (!has_na) {
     X_lasso <- drop_constant(as.matrix(df[, candidate_vars, drop = FALSE]))
@@ -790,6 +790,10 @@ fit_model <- function(df, selected_outcome, selected_weather, selected_model) {
   # 2. Validate
   # ---------------------------------------------------------------------------
 
+  # REACT-14: structured record of every specification fallback applied below,
+  # surfaced by the Step 1 results banner instead of only a console warning.
+  fallbacks <- list()
+
   if (!y_var %in% names(df))
     stop(sprintf("Outcome variable '%s' not found in data.", y_var))
 
@@ -811,11 +815,23 @@ fit_model <- function(df, selected_outcome, selected_weather, selected_model) {
   if (use_logit) {
     if (!identical(outcome_type, "logical")) {
       warning("Logistic regression requested but outcome type is not 'logical' - falling back to linear.")
+      fallbacks <- c(fallbacks, list(list(
+        kind      = "model_family",
+        requested = "logistic",
+        used      = "linear",
+        reason    = "outcome column is not logical (TRUE/FALSE or 0/1)"
+      )))
       use_logit <- FALSE
     } else {
       y_vals <- df[[y_var]][!is.na(df[[y_var]])]
       if (!all(y_vals %in% c(0, 1, TRUE, FALSE))) {
         warning("Outcome values are not 0/1 - falling back to linear.")
+        fallbacks <- c(fallbacks, list(list(
+          kind      = "model_family",
+          requested = "logistic",
+          used      = "linear",
+          reason    = "outcome values are not restricted to 0/1"
+        )))
         use_logit <- FALSE
       }
     }
@@ -953,6 +969,15 @@ fit_model <- function(df, selected_outcome, selected_weather, selected_model) {
       "Cluster variable(s) not found in data - fitting without clustered SEs: %s",
       paste(cluster_missing, collapse = ", ")
     ))
+    fallbacks <- c(fallbacks, list(list(
+      kind      = "vcv",
+      requested = paste0("clustered (", paste(cluster_vars, collapse = ", "), ")"),
+      used      = "default (heteroskedasticity-robust)",
+      reason    = sprintf(
+        "cluster variable(s) not found in data: %s",
+        paste(cluster_missing, collapse = ", ")
+      )
+    )))
     cluster_vars <- intersect(cluster_vars, names(df))
   }
 
@@ -1104,6 +1129,7 @@ fit_model <- function(df, selected_outcome, selected_weather, selected_model) {
     train_data        = df,
     formulas          = formulas,
     rif_grid          = rif_grid,
-    taus              = rif_taus
+    taus              = rif_taus,
+    fallbacks         = fallbacks
   )
 }

@@ -46,6 +46,7 @@ mod_1_06_model_ui <- function(id) {
         style = "color: red; font-size: 12px;"
       )
     ),
+    shiny::uiOutput(ns("run_prereq_ui")),
     shiny::actionButton(ns("run_model"), "Run model",
                         class = "btn-primary", style = "width: 100%;")
   )
@@ -894,6 +895,46 @@ mod_1_06_model_server <- function(id,
     # REACT-02: shared busy guard for model fitting (Lasso + fit both key off
     # input$run_model). Exposed so mod_1_07's fit observer honours it too.
     fit_guard <- .busy_guard(session, run_model)
+
+    # ---- Run-button prerequisites (UI-29) ------------------------------------
+    # The fit observers req() on these upstream inputs; surface them before
+    # the click instead of letting the button silently no-op.
+    run_prereqs_missing <- reactive({
+      missing <- character(0)
+      # Upstream reactives can throw silent req() errors when nothing is
+      # loaded; either way the prerequisite is unmet.
+      so  <- tryCatch(selected_outcome(), error = function(e) NULL)
+      swd <- tryCatch(selected_weather(), error = function(e) NULL)
+      svy <- tryCatch(survey_weather(), error = function(e) NULL)
+      if (is.null(so) || nrow(as.data.frame(so)) == 0)
+        missing <- c(missing, "an outcome variable")
+      if (is.null(swd) || nrow(as.data.frame(swd)) == 0)
+        missing <- c(missing, "weather variable selections")
+      if (is.null(svy) || nrow(as.data.frame(svy)) == 0)
+        missing <- c(missing, "loaded survey + weather data")
+      if (is.null(input$model_type) || !nzchar(input$model_type))
+        missing <- c(missing, "a model type")
+      missing
+    })
+
+    output$run_prereq_ui <- renderUI({
+      missing <- run_prereqs_missing()
+      if (!length(missing)) return(NULL)
+      shiny::div(
+        class = "alert alert-warning",
+        role  = "alert",
+        style = "font-size: 13px; margin-bottom: 4px;",
+        shiny::tags$b("Prerequisites: "), "select ",
+        paste(missing, collapse = ", "), " to enable Run model."
+      )
+    })
+
+    observe({
+      shiny::updateActionButton(
+        session, inputId = "run_model",
+        disabled = length(run_prereqs_missing()) > 0
+      )
+    })
 
     list(
       selected_model    = selected_model,

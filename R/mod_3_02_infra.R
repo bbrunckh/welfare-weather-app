@@ -46,47 +46,14 @@ mod_3_02_infra_server <- function(id,
     ns <- session$ns
     
     # ---- Get model coefficients ------------------------------------------
-    sm <- reactive({
-      req(selected_model())
-      selected_model()
-    })
-
-    extract_cov_names <- function(x) {
-      if (is.null(x)) return(character(0))
-      # if named list/vector, use names; otherwise use values
-      nms <- names(x)
-      if (!is.null(nms) && any(nzchar(nms))) {
-        unique(nms[nzchar(nms)])
-      } else {
-        unique(as.character(unlist(x, use.names = FALSE)))
-      }
-    }
-
-    ind_coeff <- reactive({
-      s <- sm()
-      extract_cov_names(s$individual_covariates)
-    })
-    hh_coeff <- reactive({
-      s <- sm()
-      extract_cov_names(s$hh_covariates)
-    })
-    firm_coeff <- reactive({
-      s <- sm()
-      extract_cov_names(s$firm_covariates)
-    })
-    area_coeff <- reactive({
-      s <- sm()
-      extract_cov_names(s$area_covariates)
-    })
-
-    interaction_names <- reactive({
-      s <- sm()
-      extract_cov_names(s$interactions)
-    })
-
-    coeffs <- reactive({
-      unique(c(ind_coeff(), hh_coeff(), firm_coeff(), area_coeff(), interaction_names()))
-    })
+    # REACT-08: shared coefficient decomposition (utils_mod_1_helpers.R).
+    coeffs_rx        <- model_coefficient_reactives(selected_model)
+    ind_coeff        <- coeffs_rx$individual
+    hh_coeff         <- coeffs_rx$hh
+    firm_coeff       <- coeffs_rx$firm
+    area_coeff       <- coeffs_rx$area
+    interaction_names <- coeffs_rx$interactions
+    coeffs           <- coeffs_rx$all
 
     # ---- Candidate variables for this category --------------------------
     infra_patterns <- c("electricity", "imp_wat_rec", "imp_san_rec", "ttime_health", "piped", "piped_to_prem", "imp_wat_san_rec")

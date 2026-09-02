@@ -14,35 +14,6 @@ mod_3_06_policy_sim_ui <- function(id) {
   )
 }
 
-#' Collect the variable / term names referenced by a selected model
-#'
-#' Mirrors the `coeffs()` logic used by the policy lever modules: the union of
-#' all covariate roles plus interactions. Used to gate which covariate levers
-#' may mutate the survey in \code{apply_policy_to_svy()}.
-#'
-#' @param sm Selected-model list (or NULL).
-#' @return Character vector of term names, or NULL when `sm` is NULL.
-#' @noRd
-.model_term_names <- function(sm) {
-  if (is.null(sm)) return(NULL)
-  get_names <- function(x) {
-    if (is.null(x)) return(character(0))
-    nms <- names(x)
-    if (!is.null(nms) && any(nzchar(nms))) {
-      unique(nms[nzchar(nms)])
-    } else {
-      unique(as.character(unlist(x, use.names = FALSE)))
-    }
-  }
-  unique(c(
-    get_names(sm$individual_covariates),
-    get_names(sm$hh_covariates),
-    get_names(sm$firm_covariates),
-    get_names(sm$area_covariates),
-    get_names(sm$interactions)
-  ))
-}
-
 #' 3_06_policy_sim Server Functions
 #'
 #' Applies user-defined policy adjustments to survey covariates from the
@@ -64,6 +35,9 @@ mod_3_06_policy_sim_ui <- function(id) {
 #' @param selected_weather  Reactive selected-weather metadata.
 #' @param hist_sim          Reactive Step 2 hist_sim list.
 #' @param saved_scenarios   Reactive Step 2 named scenario list.
+#' @param run_trigger       Reactive the parent fires to request a policy run
+#'   (REACT-09): the run lifecycle stays inside this module instead of the
+#'   parent calling the exported `run()` closure.
 #'
 #' @return Named list with baseline_svy, policy_svy, sim_run_id, plus
 #'   re-simulated baseline_hist_sim/baseline_saved_scenarios and
@@ -88,7 +62,8 @@ mod_3_06_policy_sim_server <- function(id,
                                         propagate_all_covariate_uncertainty =
                                           reactive(FALSE),
                                         survey_version     = reactive(0L),
-                                        sim_stale          = reactive(FALSE)) {
+                                        sim_stale          = reactive(FALSE),
+                                        run_trigger        = reactive(NULL)) {
   moduleServer(id, function(input, output, session) {
     ns <- session$ns
 
@@ -209,7 +184,7 @@ mod_3_06_policy_sim_server <- function(id,
             digital       = digital_scenario(),
             labor         = labor_scenario(),
             education     = education_scenario(),
-            model_vars    = .model_term_names(selected_model()),
+            model_vars    = model_term_names(selected_model()),
             analysis_unit = analysis_unit(),
             seed          = WISEAPP_DEFAULT_SEED
           )
@@ -411,8 +386,14 @@ mod_3_06_policy_sim_server <- function(id,
       invisible(NULL)
     }
 
+    # REACT-09: the parent requests a run by firing this trigger instead of
+    # calling the exported run() closure. ignoreInit + the parent's req() on
+    # the dynamically rendered button keep the trigger click-only.
+    shiny::observeEvent(run_trigger(), {
+      run()
+    }, ignoreInit = TRUE)
+
     list(
-      run                      = run,
       running                  = sim_running,
       baseline_svy             = baseline_svy_rv,
       policy_svy               = policy_svy_rv,
