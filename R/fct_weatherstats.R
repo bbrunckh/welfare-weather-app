@@ -1211,8 +1211,8 @@ isTRUE_vec <- function(x) !is.na(x) & x
 #' @param legend_info Longer explanation shown when hovering the legend's info
 #'   marker. Defaults to `label`.
 #'
-#' @return A `leaflet` widget, or `NULL` invisibly when there is nothing to
-#'   draw.
+#' @return A MapLibre (`mapgl`) widget, or `NULL` invisibly when there is
+#'   nothing to draw.
 #'
 #' @export
 plot_weather_loc_map <- function(geojson, loc_vals, label,
@@ -1274,64 +1274,64 @@ plot_weather_loc_map <- function(geojson, loc_vals, label,
 
   # A location surveyed across several interview months has several weather
   # values behind it; its colour is a summary of them rather than the value
-  # any single household contributes to the regression. Draw those dotted.
+  # any single household contributes to the regression. Those locations are
+  # counted for the note below the map.
   averaged <- vapply(feats, function(f) {
     isTRUE((lookup(mon_by_loc, as.character(f$properties$loc_id)) %||% 1L) > 1L)
   }, logical(1))
 
   bounds <- .geojson_bounds(list(features = feats))
 
-  # Same rendering as the other cell maps: no outlines (at a country view the
-  # borders of a thousand hexagons cover more pixels than the fills do), and
-  # canvas rather than SVG so panning stays smooth with that many polygons.
-  m <- leaflet::leaflet(options = leaflet::leafletOptions(preferCanvas = TRUE)) |>
-    leaflet::addProviderTiles(leaflet::providers$CartoDB.Positron)
-
-  for (cl in unique(cols)) {
-    {
-      sel <- cols == cl
-      grp <- feats[sel]
-      fj  <- vapply(grp, function(f) {
-        lid   <- as.character(f$properties$loc_id)
-        v     <- lookup(val_by_loc, lid)
-        nm    <- lookup(mon_by_loc, lid) %||% 1L
-        props <- f$properties
-        props$popup <- paste0(
-          "<b>", htmltools::htmlEscape(label), "</b><br/>",
-          if (is.null(v) || all(is.na(v))) "no value" else htmltools::htmlEscape(fmt(v)),
-          "<br/><small>loc ", htmltools::htmlEscape(lid), " &middot; ",
-          lookup(n_by_loc, lid) %||% 0, " households",
-          if (isTRUE(nm > 1L)) {
-            paste0("<br/>surveyed over ", nm, " interview months - shown value",
-                   " is the household-weighted ",
-                   if (binned) "modal bin" else "mean",
-                   " across them")
-          } else {
-            "<br/>single interview month"
-          },
-          "</small>"
-        )
-        sprintf('{"type":"Feature","geometry":%s,"properties":%s}',
-                f$geom_json, jsonlite::toJSON(props, auto_unbox = TRUE))
-      }, character(1L))
-
-      m <- m |>
-        leaflet::addGeoJSON(
-          geojson     = sprintf('{"type":"FeatureCollection","features":[%s]}',
-                                paste(fj, collapse = ",")),
-          stroke      = FALSE,
-          weight      = 0,
-          fillColor   = cl,
-          fillOpacity = 0.75
-        )
-    }
-  }
-
-  m <- m |>
-    leaflet::fitBounds(
-      lng1 = bounds$lng1, lat1 = bounds$lat1,
-      lng2 = bounds$lng2, lat2 = bounds$lat2
+  # MapLibre GL on the keyless CARTO vector Positron basemap. One fill layer
+  # carrying a per-feature colour via a `__fill` property (`get` expression);
+  # on a continuous ramp almost every location gets its own shade, which the
+  # old Leaflet group-by-colour loop turned into one layer per distinct value.
+  popups <- vapply(seq_along(feats), function(i) {
+    f   <- feats[[i]]
+    lid <- as.character(f$properties$loc_id)
+    v   <- lookup(val_by_loc, lid)
+    nm  <- lookup(mon_by_loc, lid) %||% 1L
+    paste0(
+      "<b>", htmltools::htmlEscape(label), "</b><br/>",
+      if (is.null(v) || all(is.na(v))) "no value" else htmltools::htmlEscape(fmt(v)),
+      "<br/><small>loc ", htmltools::htmlEscape(lid), " &middot; ",
+      lookup(n_by_loc, lid) %||% 0, " households",
+      if (isTRUE(nm > 1L)) {
+        paste0("<br/>surveyed over ", nm, " interview months - shown value",
+               " is the household-weighted ",
+               if (binned) "modal bin" else "mean",
+               " across them")
+      } else {
+        "<br/>single interview month"
+      },
+      "</small>"
     )
+  }, character(1))
+  props_json <- paste0(
+    '{"loc_id":',   .json_vec(.prop_col(feats, "loc_id")),
+    ',"bbox":',     .bbox_frag(feats),
+    ',"__fill":',   .json_vec(cols),
+    ',"popup":',    .json_vec(popups),
+    '}'
+  )
+  geoms <- vapply(feats, function(f) f$geom_json, character(1))
+
+  # Same rendering as the other cell maps: no outlines (at a country view the
+  # borders of a thousand hexagons cover more pixels than the fills do). GPU
+  # rendering keeps panning smooth with that many polygons.
+  m <- .maplibre_geojson_source(
+    mapgl::maplibre(style = .map_style(), projection = "mercator"),
+    "weather-locs",
+    .geojson_fc_string(geoms, props_json, ids = seq_along(feats))
+  ) |>
+    mapgl::add_fill_layer(
+      id           = "weather-locs-fill",
+      source       = "weather-locs",
+      fill_color   = mapgl::get_column("__fill"),
+      fill_opacity = 0.75,
+      popup        = "{popup}"
+    ) |>
+    mapgl::fit_bounds(c(bounds$lng1, bounds$lat1, bounds$lng2, bounds$lat2))
 
   # Areas with no weather value are drawn in neutral grey rather than left
   # out, so a gap in the weather is visible as a gap rather than as absent
@@ -1386,7 +1386,7 @@ plot_weather_loc_map <- function(geojson, loc_vals, label,
     } else ""
 
     m <- m |>
-      leaflet::addControl(
+      mapgl::add_control(
         position = "bottomleft",
         html = paste0(
           '<div style="background: rgba(255,255,255,0.88); padding: 3px 5px; ',
@@ -1399,7 +1399,7 @@ plot_weather_loc_map <- function(geojson, loc_vals, label,
   }
 
   m <- m |>
-    leaflet::addControl(
+    mapgl::add_control(
       position = "bottomright",
       html = .compact_legend_html(
         pal_info = pal_info,
@@ -1410,11 +1410,9 @@ plot_weather_loc_map <- function(geojson, loc_vals, label,
       )
     )
 
-  # Keeps the map correct when its card is expanded to full screen, scales the
-  # averaged-area dots with zoom, and offers a way back to the opening view.
-  m |>
-    .add_reset_button(bounds) |>
-    htmlwidgets::onRender(.map_autofit_js(bounds, dashes = TRUE))
+  # MapLibre tracks container resizes natively and the reset control above
+  # offers a way back to the opening view.
+  m
 }
 
 

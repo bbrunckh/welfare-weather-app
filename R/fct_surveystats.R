@@ -270,6 +270,24 @@ plot_interview_dates <- function(plot_data) {
   all_lng <- numeric()
   all_lat <- numeric()
 
+  # PERF-36 fast path: features built by the H3 pipeline carry a
+  # [xmin, ymin, xmax, ymax] bbox computed in DuckDB beside the geometry, so
+  # the bounds come from a numeric min/max with no JSON parsing at all.
+  # (`props` is the density map's internal spelling of `properties`.)
+  bboxes <- lapply(geojson$features, function(f)
+    f$properties$bbox %||% f$props$bbox)
+  if (length(bboxes) > 0) {
+    have <- vapply(bboxes, function(b)
+      is.numeric(b) && length(b) == 4L && !anyNA(b), logical(1))
+    if (all(have)) {
+      m <- matrix(unlist(bboxes, use.names = FALSE), nrow = 4L)
+      return(list(
+        lng1 = min(m[1, ]), lat1 = min(m[2, ]),
+        lng2 = max(m[3, ]), lat2 = max(m[4, ])
+      ))
+    }
+  }
+
   # Recursively extract all coordinate pairs from any nesting depth
   extract_coords <- function(coords) {
     if (is.numeric(coords) && length(coords) == 2) {
@@ -386,39 +404,6 @@ filter_by_wave <- function(df, key = "all") {
 }
 
 
-#' Reset-view control
-#'
-#' A third button under Leaflet's zoom controls that returns the map to the
-#' extent it opened at, so panning and zooming is always recoverable.
-#'
-#' @param m      A `leaflet` widget.
-#' @param bounds List with `lng1`, `lat1`, `lng2`, `lat2`.
-#'
-#' @return `m` with the button added (unchanged if `bounds` is not finite).
-#' @noRd
-.add_reset_button <- function(m, bounds) {
-  if (!all(vapply(bounds, is.finite, logical(1)))) return(m)
-
-  js <- sprintf(
-    "function(btn, map) { map.fitBounds([[%s, %s], [%s, %s]]); }",
-    format(bounds$lat1, digits = 10), format(bounds$lng1, digits = 10),
-    format(bounds$lat2, digits = 10), format(bounds$lng2, digits = 10)
-  )
-
-  m |>
-    leaflet::addEasyButton(
-      leaflet::easyButton(
-        position = "topleft",
-        icon     = htmltools::HTML(
-          '<span style="font-size: 15px; line-height: 26px;">&#9678;</span>'
-        ),
-        title   = "Reset view",
-        onClick = htmlwidgets::JS(js)
-      )
-    )
-}
-
-
 #' Remember and restore a leaflet map's view across re-renders
 #'
 #' Switching a map's view (or reloading its data) rebuilds the widget, which
@@ -429,12 +414,17 @@ filter_by_wave <- function(df, key = "all") {
 #' @param input,session Shiny `input` and `session` objects.
 #' @param output_id Character. The `outputId` of the leaflet output, without
 #'   the module namespace.
+#' @param key Optional reactive returning a value identifying the data behind
+#'   the map (e.g. a digest of the selected sample). The stored view is only
+#'   reapplied while the key is unchanged; when the key changes the view
+#'   describes geography that is no longer on the map, so it is dropped and
+#'   the new build fits its own data bounds.
 #'
 #' @return A list with `remember()` - call once to start tracking - and
 #'   `restore(m)`, which applies the stored view to a widget.
 #'
 #' @noRd
-map_view_memory <- function(input, session, output_id) {
+map_view_memory <- function(input, session, output_id, key = NULL) {
   stored <- shiny::reactiveVal(NULL)
 
   list(
@@ -447,7 +437,10 @@ map_view_memory <- function(input, session, output_id) {
           zm  <- input[[paste0(output_id, "_zoom")]]
           if (!is.null(ctr) && !is.null(zm) &&
               is.finite(ctr$lng) && is.finite(ctr$lat)) {
-            stored(list(lng = ctr$lng, lat = ctr$lat, zoom = zm))
+            # The key is read in isolation: a key change alone must not
+            # re-record the previous data's view under the new key.
+            stored(list(lng = ctr$lng, lat = ctr$lat, zoom = zm,
+                        key = if (!is.null(key)) shiny::isolate(key()) else NULL))
           }
         },
         ignoreInit = TRUE, ignoreNULL = TRUE
@@ -455,117 +448,196 @@ map_view_memory <- function(input, session, output_id) {
     },
     restore = function(m) {
       v <- shiny::isolate(stored())
-      if (is.null(m) || is.null(v)) return(m)
-      m$x$fitOnResize <- FALSE
-      leaflet::setView(m, lng = v$lng, lat = v$lat, zoom = v$zoom)
+      k <- if (!is.null(key)) shiny::isolate(key()) else NULL
+      if (is.null(m)) return(m)
+      if (is.null(v) || !identical(v$key, k)) {
+        # Data changed underneath (or nothing stored yet): drop the stale view
+        # and let the widget fit the new data bounds.
+        shiny::isolate(stored(NULL))
+        return(m)
+      }
+      # MapLibre: overriding the initial view means replacing the recorded
+      # center/zoom and dropping the widget's own fitBounds, which the
+      # binding would otherwise apply after the style loads.
+      m$x$fitBounds <- NULL
+      m$x$center <- c(v$lng, v$lat)
+      m$x$zoom <- v$zoom
+      m
     },
     get = stored
   )
 }
 
-#' JS hook keeping a map correct when its container resizes
+
+#' JSON-escape a character vector
 #'
-#' Leaflet caches its container size, so a map whose card is expanded to full
-#' screen keeps drawing at the old size (grey gutters, controls in the wrong
-#' place) until something nudges it. This watches the container and
-#' re-measures.
+#' PERF-36 helper. Escapes the characters JSON requires in string values:
+#' backslash, double quote, and C0 control characters. Vectorized: a handful of
+#' `gsub` calls over the whole vector, so the cost is per-map rather than
+#' per-feature.
 #'
-#' Re-measuring alone keeps the old zoom, which leaves the locations marooned
-#' in the middle of a much bigger map, so the data bounds are re-fitted too -
-#' expanding then magnifies the sample rather than its surroundings. Reading
-#' the pre-resize bounds instead would not work: Leaflet has usually
-#' re-measured by the time the callback runs, so they already describe the new
-#' size. Once the user has panned or zoomed, their view is left alone.
+#' @param x Character vector (NA elements pass through as NA).
+#' @return Character vector of escaped strings.
 #'
-#' With `dashes = TRUE` the stroke width of dashed sub-layers is also tapered
-#' as the map zooms out - stroke width is in screen pixels, so an outline that
-#' reads well when zoomed in swamps the shapes once they shrink.
-#'
-#' @param bounds List with `lng1`, `lat1`, `lng2`, `lat2`, from
-#'   `.geojson_bounds()`.
-#' @param dashes Logical. Also scale dashed stroke widths with zoom.
-#'
-#' @return An `htmlwidgets::JS()` string for `htmlwidgets::onRender()`.
 #' @noRd
-.map_autofit_js <- function(bounds, dashes = FALSE) {
-  fit_ok <- all(vapply(bounds, is.finite, logical(1)))
+.json_escape_str <- function(x) {
+  needs <- grepl('[\\\\"]|[\\x00-\\x1f]', x, perl = TRUE)
+  needs[is.na(needs)] <- FALSE
+  if (!any(needs)) return(x)
 
-  # `dashes` is retained for callers that once drew per-area markers; there
-  # are none now, so the hook is a no-op.
-  dash_fn <- "
-        var scaleDashes = function() {};
-  "
+  s <- x[needs]
+  # Backslash first, so the escapes inserted below are not re-doubled.
+  s <- gsub("\\", "\\\\", s, fixed = TRUE)
+  s <- gsub('"', '\\"', s, fixed = TRUE)
+  s <- gsub("\n", "\\n", s, fixed = TRUE)
+  s <- gsub("\r", "\\r", s, fixed = TRUE)
+  s <- gsub("\t", "\\t", s, fixed = TRUE)
+  # Any remaining C0 control characters become \u00XX.
+  m <- gregexpr("[\\x00-\\x08\\x0b\\x0c\\x0e-\\x1f]", s, perl = TRUE)
+  hit <- which(vapply(m, function(mm) mm[1] != -1L, logical(1)))
+  for (i in hit) {
+    chrs <- regmatches(s[i], m[i])[[1]]
+    regmatches(s[i], m[i])[[1]] <- vapply(
+      chrs, function(ch) sprintf("\\u%04x", as.integer(charToRaw(ch))),
+      character(1)
+    )
+  }
+  x[needs] <- s
+  x
+}
 
-  htmlwidgets::JS(sprintf("
-      function(el, x) {
-        var map = this;
-        // The caller can suppress the fit when it has restored a remembered
-        // view - refitting would throw that view away on the first resize.
-        var fit = %s && (x.fitOnResize !== false);
-        var b   = [[%s, %s], [%s, %s]];
-        var userMoved = false;
-        var ro;
-        ['mousedown', 'wheel', 'dblclick', 'touchstart'].forEach(function(ev) {
-          el.addEventListener(ev, function() { userMoved = true; },
-                              { passive: true });
-        });
-        // Expanding a card usually changes width far more than height, so a
-        // whole zoom level rarely fits and integer snapping would leave the
-        // sample as small as before. Quarter steps let the re-fit actually
-        // use the new space; the +/- buttons still step by whole levels.
-        map.options.zoomSnap = 0.25;
-        %s
-        // Re-rendering the output (switching view, reloading data) destroys
-        // this map while the observer on its container is still live, so bail
-        // out once the map is gone rather than reaching into dead panes.
-        var alive = function() {
-          // el.isConnected catches the window between Shiny detaching the old
-          // output node and Leaflet firing 'unload'; touching the map in that
-          // window schedules a redraw against a canvas that no longer exists.
-          return el.isConnected !== false && map._loaded &&
-                 map._container && map._container.parentNode;
-        };
-        var refit = function() {
-          if (!alive()) { if (ro) ro.disconnect(); return; }
-          window.requestAnimationFrame(function() {
-            if (!el.offsetWidth || !el.offsetHeight || !alive()) return;
-            try {
-              map.invalidateSize();
-              if (fit && !userMoved) map.fitBounds(b, { animate: false });
-              scaleDashes();
-            } catch (err) { /* map torn down mid-resize */ }
-          });
-        };
-        if (window.ResizeObserver) {
-          ro = new ResizeObserver(refit);
-          ro.observe(el);
-        } else {
-          window.addEventListener('resize', refit);
-        }
-        map.on('unload', function() {
-          if (ro) ro.disconnect();
-          // Leaflet leaves a queued canvas redraw behind when a map is
-          // replaced (switching view rebuilds the widget). It then runs
-          // against a destroyed 2d context and throws. Cancel it.
-          try {
-            var rs = map._renderer ? [map._renderer] : [];
-            map.eachLayer(function(l) {
-              if (l._renderer && rs.indexOf(l._renderer) < 0) rs.push(l._renderer);
-            });
-            rs.forEach(function(r) {
-              if (r._redrawRequest && window.cancelAnimationFrame) {
-                window.cancelAnimationFrame(r._redrawRequest);
-                r._redrawRequest = null;
-              }
-            });
-          } catch (err) { /* nothing queued */ }
-        });
-      }",
-    if (fit_ok) "true" else "false",
-    format(bounds$lat1, digits = 10), format(bounds$lng1, digits = 10),
-    format(bounds$lat2, digits = 10), format(bounds$lng2, digits = 10),
-    dash_fn
-  ))
+#' Serialize a property column as JSON values
+#'
+#' PERF-36 helper. Property schemas are uniform across a map's features, so
+#' each property serializes as a whole column in one vectorized pass.
+#' NULL/NA become null, strings are escaped, numbers keep full precision
+#' (the old per-feature toJSON rounded to 4 decimals), logicals become
+#' true/false.
+#'
+#' @param x An atomic vector (character/numeric/logical).
+#'
+#' @return Character vector of JSON texts, one per element.
+#'
+#' @noRd
+.json_vec <- function(x) {
+  if (is.character(x)) {
+    return(ifelse(is.na(x), "null", paste0('"', .json_escape_str(x), '"')))
+  }
+  if (is.logical(x)) {
+    return(ifelse(is.na(x), "null", ifelse(x, "true", "false")))
+  }
+  if (is.numeric(x)) {
+    return(ifelse(is.na(x), "null", format(x, digits = 15, trim = TRUE)))
+  }
+  stop("Unsupported property type: ", class(x)[1], call. = FALSE)
+}
+
+#' Extract one property as a column over a feature list
+#'
+#' @param features A list of features with `properties` (or `props`, the
+#'   density map's internal spelling) lists.
+#' @param name Property name.
+#'
+#' @return An atomic vector, one value per feature; missing properties become
+#'   NA of the column's dominant type.
+#'
+#' @noRd
+.prop_col <- function(features, name) {
+  vals <- lapply(features, function(f) {
+    v <- f$properties[[name]]
+    if (is.null(v)) v <- f$props[[name]]
+    if (is.null(v) || length(v) == 0L) NA else v[[1]]
+  })
+  if (all(vapply(vals, is.numeric, logical(1)))) {
+    return(vapply(vals, as.numeric, numeric(1), USE.NAMES = FALSE))
+  }
+  vapply(vals, as.character, character(1), USE.NAMES = FALSE)
+}
+
+#' Per-feature bbox JSON fragment
+#'
+#' @param features Feature list whose properties carry a length-4 numeric
+#'   `bbox` (as the DuckDB pipeline emits).
+#'
+#' @return Character vector `"[xmin,ymin,xmax,ymax]"`, or the JSON literal
+#'   `null` when any feature lacks a bbox (the fast bounds path then drops
+#'   out, as it did before the bbox columns existed).
+#'
+#' @noRd
+.bbox_frag <- function(features) {
+  b <- lapply(features, function(f) {
+    v <- f$properties$bbox %||% f$props$bbox
+    if (is.null(v) || !is.numeric(v) || length(v) != 4L) NA_real_ else v
+  })
+  if (anyNA(unlist(b))) return("null")
+  m <- do.call(rbind, b)
+  paste0("[", .json_vec(m[, 1L]), ",", .json_vec(m[, 2L]), ",",
+         .json_vec(m[, 3L]), ",", .json_vec(m[, 4L]), "]")
+}
+
+#' Basemap style for all maps
+#'
+#' The CARTO Positron **vector** basemap, keyless (the raster Positron tiles
+#' the app previously used via `providers$CartoDB.Positron` are watermarked
+#' "API key required" without a key and are being retired - see
+#' <https://docs.carto.com/faqs/carto-basemaps>). Rendered through MapLibre GL
+#' via the `mapgl` package.
+#'
+#' @noRd
+.map_style <- function() {
+  mapgl::carto_style("positron")
+}
+
+#' Assemble a GeoJSON FeatureCollection string
+#'
+#' PERF-36: the collection is assembled with vectorized concatenation over
+#' per-feature property JSON fragments (built by the callers with
+#' `.json_vec()`/`.bbox_frag()`), replacing a per-feature `sprintf` +
+#' `jsonlite::toJSON` pair whose jsonlite calls dominated widget build time
+#' (~0.2 ms per feature). Geometry texts are already valid JSON and are
+#' embedded verbatim, so the output matches the previous serialization.
+#'
+#' @param geoms Character vector of geometry JSON texts, one per feature.
+#' @param props_json Character vector of properties JSON objects, same length
+#'   and order as `geoms` (each element is `{...}`).
+#' @param ids Optional integer vector of feature ids (MapLibre feature-state
+#'   hover needs them).
+#'
+#' @return A GeoJSON FeatureCollection JSON string.
+#'
+#' @noRd
+.geojson_fc_string <- function(geoms, props_json, ids = NULL) {
+  stopifnot(length(geoms) == length(props_json))
+  id_frag <- if (is.null(ids)) "" else paste0('"id":', as.integer(ids), ',')
+  feats <- paste0(
+    '{', id_frag, '"type":"Feature","geometry":', geoms,
+    ',"properties":', props_json, '}'
+  )
+  sprintf('{"type":"FeatureCollection","features":[%s]}',
+          paste(feats, collapse = ","))
+}
+
+#' Attach a GeoJSON FeatureCollection source to a MapLibre widget
+#'
+#' `mapgl::add_source()` only accepts sf objects or remote URLs; the maps here
+#' carry locally assembled GeoJSON strings (PERF-36), so the string is parsed
+#' once and the source is registered directly on the widget, mirroring what
+#' `add_source` does for sf input.
+#'
+#' @param m A `maplibre` widget.
+#' @param id Source id.
+#' @param fc_string A GeoJSON FeatureCollection JSON string.
+#'
+#' @return `m` with the source registered.
+#'
+#' @noRd
+.maplibre_geojson_source <- function(m, id, fc_string) {
+  m$x$sources <- c(m$x$sources, list(list(
+    id   = id,
+    type = "geojson",
+    data = jsonlite::fromJSON(fc_string, simplifyVector = FALSE)
+  )))
+  m
 }
 
 
@@ -579,8 +651,8 @@ map_view_memory <- function(input, session, output_id) {
 #'   feature, as produced by the H3-to-polygon aggregation step in
 #'   `mod_1_02_surveystats_server()`.
 #'
-#' @return A `leaflet` widget, or `NULL` invisibly when `loc` is `NULL` or
-#'   has no features.
+#' @return A MapLibre (`mapgl`) widget, or `NULL` invisibly when `loc` is
+#'   `NULL` or has no features.
 #'
 #' @export
 plot_survey_map <- function(loc) {
@@ -591,74 +663,38 @@ plot_survey_map <- function(loc) {
   code_color <- setNames(scales::hue_pal()(length(u_codes)), u_codes)
   bounds     <- .geojson_bounds(loc)
 
-  m <- leaflet::leaflet() |>
-    leaflet::addProviderTiles(leaflet::providers$CartoDB.Positron)
+  # MapLibre GL on the keyless CARTO vector Positron basemap (the raster
+  # Positron tiles now watermark without an API key). GPU rendering replaces
+  # the Leaflet canvas rasterizer; the old onRender hover-highlight JS is
+  # replaced by mapgl's feature-state hover_options.
+  m <- mapgl::maplibre(style = .map_style(), projection = "mercator")
 
-  # One addGeoJSON call per code so each gets a static colour.
-  # Geometry is embedded as a raw JSON string to avoid a jsonlite named-vector
-  # warning that fires when R matrices (fromJSON default) are re-serialised.
-  for (cd in u_codes) {
-    features_for_code <- loc$features[codes == cd]
-    features_json <- vapply(features_for_code, function(f) {
-      sprintf('{"type":"Feature","geometry":%s,"properties":%s}',
-              f$geom_json,
-              jsonlite::toJSON(f$properties, auto_unbox = TRUE))
-    }, character(1L))
-    sub_geojson_str <- sprintf('{"type":"FeatureCollection","features":[%s]}',
-                               paste(features_json, collapse = ","))
+  strokes <- unname(code_color[codes])
+  props_json <- paste0(
+    '{"code":',     .json_vec(.prop_col(loc$features, "code")),
+    ',"year":',     .json_vec(.prop_col(loc$features, "year")),
+    ',"survname":', .json_vec(.prop_col(loc$features, "survname")),
+    ',"loc_id":',   .json_vec(.prop_col(loc$features, "loc_id")),
+    ',"bbox":',     .bbox_frag(loc$features),
+    ',"__stroke":', .json_vec(strokes),
+    '}'
+  )
+  geoms <- vapply(loc$features, function(f) f$geom_json, character(1))
 
-    m <- m |>
-      leaflet::addGeoJSON(
-        geojson     = sub_geojson_str,
-        color       = code_color[[cd]],
-        opacity     = 0.5,
-        fillOpacity = 0,
-        weight      = 1
-      )
-  }
-
-  # Hover highlight via vanilla Leaflet JS.
-  #
-  # The un-highlight uses Leaflet's own `resetStyle()` rather than style values
-  # captured in JS variables at render time. Captured values are wrong (or
-  # undefined) for any sub-layer Leaflet builds as a group instead of a single
-  # path, and writing an undefined colour/weight back makes the stroke invalid.
-  # These polygons are drawn with `fillOpacity = 0`, so a broken stroke means
-  # the shape vanishes completely and stays gone - every later mouseout writes
-  # the same invalid style again.
-  #
-  # Handlers are bound on the GeoJSON layer itself, not on each sub-layer:
-  # L.GeoJSON is a FeatureGroup, so child events propagate up, and the binding
-  # then also covers sub-layers regardless of the geometry type they came from.
-  hover_js <- htmlwidgets::JS("
-    function(el, x) {
-      this.eachLayer(function(layer) {
-        if (typeof layer.resetStyle !== 'function') return;  // not GeoJSON
-
-        layer.on('mouseover', function(e) {
-          var target = e.propagatedFrom || e.layer;
-          if (target && target.setStyle) {
-            target.setStyle({ weight: 2, color: '#FF0000' });
-            if (target.bringToFront) target.bringToFront();
-          }
-        });
-
-        layer.on('mouseout', function(e) {
-          var target = e.propagatedFrom || e.layer;
-          if (target) layer.resetStyle(target);
-        });
-      });
-    }
-  ")
-
-  m |>
-    leaflet::fitBounds(
-      lng1 = bounds$lng1, lat1 = bounds$lat1,
-      lng2 = bounds$lng2, lat2 = bounds$lat2
+  m <- .maplibre_geojson_source(
+    m, "locs",
+    .geojson_fc_string(geoms, props_json, ids = seq_along(loc$features))
+  ) |>
+    mapgl::add_line_layer(
+      id           = "locs-outline",
+      source       = "locs",
+      line_color   = mapgl::get_column("__stroke"),
+      line_width   = 1,
+      line_opacity = 0.5,
+      hover_options = list(line_color = "#FF0000", line_width = 2)
     ) |>
-    .add_reset_button(bounds) |>
-    htmlwidgets::onRender(hover_js) |>
-    htmlwidgets::onRender(.map_autofit_js(bounds))
+    mapgl::fit_bounds(c(bounds$lng1, bounds$lat1, bounds$lng2, bounds$lat2)) |>
+    mapgl::add_reset_control(position = "top-left")
 }
 
 
@@ -903,15 +939,21 @@ build_cell_features <- function(cell_geo, cell_map, by_wave = TRUE) {
   if (nrow(d) == 0) return(NULL)
 
   features <- lapply(seq_len(nrow(d)), function(i) {
+    props <- list(
+      code     = d$code[i],
+      year     = d$year[i],
+      survname = d$survname[i],
+      loc_id   = d$h3[i]
+    )
+    # PERF-36: carry the DuckDB-computed bbox when the geometry frame has it,
+    # so bounds never need to re-parse the geometry string downstream.
+    if (all(c("xmin", "ymin", "xmax", "ymax") %in% names(d))) {
+      props$bbox <- as.numeric(c(d$xmin[i], d$ymin[i], d$xmax[i], d$ymax[i]))
+    }
     list(
-      type      = "Feature",
-      geom_json = d$geom[i],
-      properties = list(
-        code     = d$code[i],
-        year     = d$year[i],
-        survname = d$survname[i],
-        loc_id   = d$h3[i]
-      )
+      type       = "Feature",
+      geom_json  = d$geom[i],
+      properties = props
     )
   })
 
@@ -931,8 +973,8 @@ build_cell_features <- function(cell_geo, cell_map, by_wave = TRUE) {
 #' @param unit_label Plural noun for what a row of the survey is, e.g.
 #'   `"households"`.
 #'
-#' @return A `leaflet` widget, or `NULL` invisibly when there is nothing to
-#'   draw.
+#' @return A MapLibre (`mapgl`) widget, or `NULL` invisibly when there is
+#'   nothing to draw.
 #'
 #' @export
 plot_sample_density_map <- function(cells, unit_label = "households") {
@@ -961,46 +1003,56 @@ plot_sample_density_map <- function(cells, unit_label = "households") {
   col_of <- function(v) pal(log(pmin(pmax(v, rng[1]), rng[2])))
 
   feats <- lapply(seq_len(nrow(cells)), function(i) {
+    props <- list(
+      h3    = cells$h3[i] %||% "",
+      popup = paste0(
+        "<b>", format(round(cells$n_units[i], 1), big.mark = ","), " ",
+        htmltools::htmlEscape(unit_label), "</b><br/><small>area ",
+        htmltools::htmlEscape(cells$h3[i] %||% ""), "</small>"
+      )
+    )
+    # PERF-36: DuckDB bbox rides along when the cell geometry frame has it.
+    if (all(c("xmin", "ymin", "xmax", "ymax") %in% names(cells))) {
+      props$bbox <- as.numeric(c(cells$xmin[i], cells$ymin[i],
+                                 cells$xmax[i], cells$ymax[i]))
+    }
     list(
       geom_json = cells$geom[i],
-      props     = list(
-        h3    = cells$h3[i] %||% "",
-        popup = paste0(
-          "<b>", format(round(cells$n_units[i], 1), big.mark = ","), " ",
-          htmltools::htmlEscape(unit_label), "</b><br/><small>area ",
-          htmltools::htmlEscape(cells$h3[i] %||% ""), "</small>"
-        )
-      )
+      props     = props
     )
   })
 
   bounds <- .geojson_bounds(list(features = feats))
   cols   <- col_of(cells$n_units)
 
-  # One addGeoJSON call carrying a per-feature style, rather than one call per
-  # distinct colour. With a continuous ramp almost every cell has its own
-  # colour, so grouping by colour would create a thousand separate Leaflet
-  # layers - enough event and pane bookkeeping to make dragging stutter.
-  fj <- vapply(seq_along(feats), function(i) {
-    props <- feats[[i]]$props
-    props$style <- list(fillColor = cols[i], fillOpacity = 0.75,
-                        stroke = FALSE, weight = 0)
-    sprintf('{"type":"Feature","geometry":%s,"properties":%s}',
-            feats[[i]]$geom_json, jsonlite::toJSON(props, auto_unbox = TRUE))
-  }, character(1L))
+  # MapLibre GL: one fill layer carrying a per-feature colour via a `__fill`
+  # property (`get` expression), rather than one layer per distinct colour.
+  # With a continuous ramp almost every cell has its own colour, so the old
+  # Leaflet grouping-by-colour approach would create a thousand separate
+  # layers; GPU rendering draws all of them in a single pass.
+  props_json <- paste0(
+    '{"h3":',    .json_vec(.prop_col(feats, "h3")),
+    ',"popup":', .json_vec(.prop_col(feats, "popup")),
+    ',"bbox":',  .bbox_frag(feats),
+    ',"__fill":', .json_vec(cols),
+    '}'
+  )
+  geoms <- vapply(feats, function(f) f$geom_json, character(1))
 
-  # Canvas rather than SVG: a thousand-plus filled hexagons as individual SVG
-  # paths makes dragging stutter, because the browser re-rasterises every one.
-  # Canvas draws them in a single pass and pans smoothly; popups still work.
-  m <- leaflet::leaflet(options = leaflet::leafletOptions(preferCanvas = TRUE)) |>
-    leaflet::addProviderTiles(leaflet::providers$CartoDB.Positron) |>
-    leaflet::addGeoJSON(
-      geojson     = sprintf('{"type":"FeatureCollection","features":[%s]}',
-                            paste(fj, collapse = ",")),
-      stroke      = FALSE,
-      weight      = 0,
-      fillOpacity = 0.75
-    )
+  m <- .maplibre_geojson_source(
+    mapgl::maplibre(style = .map_style(), projection = "mercator"),
+    "density-cells",
+    .geojson_fc_string(geoms, props_json, ids = seq_along(feats))
+  ) |>
+    mapgl::add_fill_layer(
+      id           = "density-cells-fill",
+      source       = "density-cells",
+      fill_color   = mapgl::get_column("__fill"),
+      fill_opacity = 0.75,
+      popup        = "{popup}"
+    ) |>
+    mapgl::fit_bounds(c(bounds$lng1, bounds$lat1, bounds$lng2, bounds$lat2)) |>
+    mapgl::add_reset_control(position = "top-left")
 
   # The legend ramp samples this palette across the domain, so both are given
   # on the count scale; `col_of()` applies the log internally. `mid` is the
@@ -1015,13 +1067,7 @@ plot_sample_density_map <- function(cells, unit_label = "households") {
   )
 
   m |>
-    leaflet::fitBounds(
-      lng1 = bounds$lng1, lat1 = bounds$lat1,
-      lng2 = bounds$lng2, lat2 = bounds$lat2
-    ) |>
-    .add_reset_button(bounds) |>
-    htmlwidgets::onRender(.map_autofit_js(bounds)) |>
-    leaflet::addControl(
+    mapgl::add_control(
       position = "bottomright",
       html = .compact_legend_html(
         pal_info = pal_info,

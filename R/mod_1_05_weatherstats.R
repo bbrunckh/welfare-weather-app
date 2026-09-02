@@ -94,6 +94,8 @@ mod_1_05_weatherstats_server <- function(
     wx_spec     <- reactiveVal(NULL)
     wx_spec_sw  <- shiny::reactive({ req(wx_spec()); wx_spec()$sw })
     wx_spec_so  <- shiny::reactive({ req(wx_spec()); wx_spec()$so })
+    # REACT-03: digest of the last successfully completed weather load.
+    last_wx_load_sig <- reactiveVal(NULL)
 
     # INT-08: banner when the survey data behind the weather load was
     # reloaded after the button was last pressed.
@@ -118,6 +120,17 @@ mod_1_05_weatherstats_server <- function(
       sw  <- selected_weather()
       svy <- survey_data()
       ss  <- selected_surveys()
+
+      # REACT-03: an identical request to the last completed load is served
+      # from state instead of re-running the weather I/O. `survey_version()`
+      # stands in for the (large) survey frame itself; it is stored only when
+      # the load finishes, so a failed load always retries.
+      sig <- digest::digest(list(sw, ss, survey_version(), connection_params()))
+      if (identical(sig, last_wx_load_sig())) {
+        showNotification("Weather data is already loaded for this selection.",
+                         duration = 3, type = "message")
+        return(invisible(NULL))
+      }
 
       # -- Load weather -------------------------------------------------------
       notif_load <- showNotification("Loading weather data...", duration = NULL, type = "message")
@@ -199,6 +212,8 @@ mod_1_05_weatherstats_server <- function(
       # the button is pressed again.
       wx_spec(list(sw = sw, so = selected_outcome(),
                    survey_version = survey_version()))
+
+      last_wx_load_sig(sig)
 
       showNotification("Weather data ready.", duration = 3, type = "message")
 
@@ -854,12 +869,17 @@ mod_1_05_weatherstats_server <- function(
         .id    <- wxmap_id(i)
 
         if (is.null(wxmap_view_mem[[.id]])) {
-          wxmap_view_mem[[.id]] <- map_view_memory(input, session, .id)
+          wxmap_view_mem[[.id]] <- map_view_memory(
+            input, session, .id,
+            # A weather reload can change the geography on screen; a wave or
+            # view switch within one load keeps the user's view.
+            key = shiny::reactive(digest::digest(list(wx_spec(), .id)))
+          )
           wxmap_view_mem[[.id]]$remember()
         }
         .mem <- wxmap_view_mem[[.id]]
 
-        output[[.id]] <- leaflet::renderLeaflet({
+        output[[.id]] <- mapgl::renderMaplibre({
           gj <- wxmap_features()
           req(gj)
           key <- wxmap_wave()
@@ -956,7 +976,7 @@ mod_1_05_weatherstats_server <- function(
           if (is.na(wave_label)) sw$label[i] else
             paste0(sw$label[i], " - ", wave_label)
         ),
-        leaflet::leafletOutput(ns(wxmap_id(i)), height = "100%")
+        mapgl::maplibreOutput(ns(wxmap_id(i)), height = "100%")
       )
     })
 

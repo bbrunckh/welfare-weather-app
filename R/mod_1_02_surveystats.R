@@ -103,6 +103,8 @@ mod_1_02_surveystats_server <- function(
     # Cell geometry plus the location-to-cell mapping, shared with the outcome
     # and weather maps so they can merge overlapping locations onto cells.
     cell_data    <- reactiveVal(NULL)
+    # REACT-03: digest of the last successfully completed load request.
+    last_load_sig <- reactiveVal(NULL)
 
     # ---- Load and prepare data on button click ------------------------------
 
@@ -110,6 +112,21 @@ mod_1_02_surveystats_server <- function(
       req(nrow(selected_surveys()) > 0)
       if (!load_guard$begin()) return(invisible(NULL))
       on.exit(load_guard$end(), add = TRUE)
+
+      # REACT-03: an identical request to the last completed load is served
+      # from state instead of re-running the full I/O pipeline. The signature
+      # covers everything this handler consumes; it is stored only when no
+      # inner stage warned, so a partially failed load always retries on the
+      # next click.
+      sig <- digest::digest(list(
+        selected_surveys(), connection_params(), variable_list(), cpi_ppp()
+      ))
+      load_ok <- TRUE
+      if (identical(sig, last_load_sig())) {
+        showNotification("Survey data is already loaded for this selection.",
+                         duration = 3, type = "message")
+        return(invisible(NULL))
+      }
 
       busy_id <- showNotification("Loading survey data...", duration = NULL, type = "message")
       on.exit(removeNotification(busy_id), add = TRUE)
@@ -190,10 +207,20 @@ mod_1_02_surveystats_server <- function(
 
           loc_df <- h3_local |>
             dplyr::summarise(
-              # Emit GeoJSON string directly from DuckDB - no WKB or sf needed
-              geom = st_asgeojson(st_union_agg(st_geomfromtext(h3_cell_to_boundary_wkt(h3)))),
-              .by  = c(code, year, survname, loc_id)
+              # PERF-36: the per-location envelope rides along with the GeoJSON
+              # string, so bounds never require re-parsing geometry in R.
+              geom_union = st_union_agg(st_geomfromtext(h3_cell_to_boundary_wkt(h3))),
+              .by        = c(code, year, survname, loc_id)
             ) |>
+            dplyr::mutate(
+              geom = st_asgeojson(geom_union),
+              env  = st_extent(geom_union)
+            ) |>
+            dplyr::mutate(
+              xmin = st_xmin(env), ymin = st_ymin(env),
+              xmax = st_xmax(env), ymax = st_ymax(env)
+            ) |>
+            dplyr::select(-geom_union, -env) |>
             collect_deterministic(c("code", "year", "survname", "loc_id")) |>
             dplyr::filter(!is.na(geom), nchar(geom) > 2)   # drop NULLs and empty "{}"
 
@@ -207,7 +234,10 @@ mod_1_02_surveystats_server <- function(
                 code     = row$code,
                 year     = row$year,
                 survname = row$survname,
-                loc_id   = row$loc_id
+                loc_id   = row$loc_id,
+                # PERF-36: [xmin, ymin, xmax, ymax] from DuckDB, so
+                # .geojson_bounds() can skip parsing the geometry string.
+                bbox    = as.numeric(c(row$xmin, row$ymin, row$xmax, row$ymax))
               )
             )
           })
@@ -216,6 +246,7 @@ mod_1_02_surveystats_server <- function(
           map_data(geojson)
 
         }, error = function(e) {
+          load_ok <<- FALSE
           notify(paste("Failed to build map data:", conditionMessage(e)), type = "warning", duration = 5)
         })
 
@@ -226,9 +257,17 @@ mod_1_02_surveystats_server <- function(
         tryCatch({
           cell_geo <- h3_local |>
             dplyr::distinct(h3) |>
+            dplyr::mutate(g = st_geomfromtext(h3_cell_to_boundary_wkt(h3))) |>
             dplyr::mutate(
-              geom = st_asgeojson(st_geomfromtext(h3_cell_to_boundary_wkt(h3)))
+              geom = st_asgeojson(g),
+              # PERF-36: per-cell bbox beside the geometry string.
+              env  = st_extent(g)
             ) |>
+            dplyr::mutate(
+              xmin = st_xmin(env), ymin = st_ymin(env),
+              xmax = st_xmax(env), ymax = st_ymax(env)
+            ) |>
+            dplyr::select(-g, -env) |>
             collect_deterministic("h3")
 
           cell_map <- h3_local |>
@@ -237,6 +276,7 @@ mod_1_02_surveystats_server <- function(
 
           cell_data(list(geom = cell_geo, map = cell_map))
         }, error = function(e) {
+          load_ok <<- FALSE
           notify(paste("Failed to build sample density map:", conditionMessage(e)),
                  type = "warning", duration = 5)
         })
@@ -259,6 +299,7 @@ mod_1_02_surveystats_server <- function(
         }, error = function(e) {
           # INT-06: loc_id_panel is not a cosmetic join - downstream VCV
           # estimation falls back when it is missing, which changes inference.
+          load_ok <<- FALSE
           notify(paste0(
             "Failed to compute loc_id_panel: ", conditionMessage(e), "\n",
             "Location-level panels are unavailable, so variance estimation ",
@@ -266,7 +307,11 @@ mod_1_02_surveystats_server <- function(
             "accordingly."
           ), type = "warning", duration = 8)
         })
+      } else {
+        load_ok <- FALSE
       }
+
+      if (load_ok) last_load_sig(sig)
 
       notify(
         paste0("Loaded ", nrow(ss), " survey file(s) - ", nrow(df), " rows."),
@@ -286,12 +331,16 @@ mod_1_02_surveystats_server <- function(
 
         # Leaflet map of interview locations.
         # Keep the view across a switch between Locations and Sample density,
-        # and across a reload - rebuilding the widget would otherwise snap
-        # back to the full extent.
-        map_view_mem <- map_view_memory(input, session, "map")
+        # and across a same-sample reload - rebuilding the widget would
+        # otherwise snap back to the full extent. Changing the sample (e.g.
+        # another country) re-fits to the new geography instead.
+        map_view_mem <- map_view_memory(
+          input, session, "map",
+          key = shiny::reactive(digest::digest(selected_surveys()))
+        )
         map_view_mem$remember()
 
-        output$map <- leaflet::renderLeaflet({
+        output$map <- mapgl::renderMaplibre({
           wave <- input$map_wave %||% "all"
 
           m <- if (identical(input$map_view, "density")) {
@@ -454,7 +503,7 @@ mod_1_02_surveystats_server <- function(
                       shiny::uiOutput(ns("map_view_ui"), inline = TRUE)
                     )
                   ),
-                  leaflet::leafletOutput(ns("map"), height = "100%")
+                  mapgl::maplibreOutput(ns("map"), height = "100%")
                 )
               ),
               h4(

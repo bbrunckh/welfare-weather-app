@@ -228,10 +228,13 @@ mod_1_03_outcome_server <- function(id, variable_list, survey_data,
           p
         })
 
-        cov_view_mem <- map_view_memory(input, session, "outcome_coverage_map")
+        cov_view_mem <- map_view_memory(
+          input, session, "outcome_coverage_map",
+          key = shiny::reactive(digest::digest(outcome_spec()))
+        )
         cov_view_mem$remember()
 
-        output$outcome_coverage_map <- leaflet::renderLeaflet({
+        output$outcome_coverage_map <- mapgl::renderMaplibre({
           spec <- outcome_spec()
           req(outcome_data(), spec, map_data())
           inf <- spec$info
@@ -368,7 +371,7 @@ mod_1_03_outcome_server <- function(id, variable_list, survey_data,
                     shiny::h4("Spatial coverage", class = "mb-0"),
                     shiny::uiOutput(ns("cov_wave_ui"), inline = TRUE)
                   ),
-                  leaflet::leafletOutput(ns("outcome_coverage_map"),
+                  mapgl::maplibreOutput(ns("outcome_coverage_map"),
                                          height = "100%")
                 )
               ),
