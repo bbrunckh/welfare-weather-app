@@ -208,7 +208,12 @@
 /* ---- Configure flyout (weather variable settings) ------------------------
    Content stays in the DOM (conditionalPanel), but is presented as a
    floating panel beside the sidebar so options are visible without
-   scrolling. Falls back to inline flow on narrow screens.               */
+   scrolling. Falls back to inline flow on narrow screens.
+
+   UI-02: custom.js positions each open flyout beside its own toggle
+   (`.config-flyout-anchor`) instead of the shared viewport spot below, and
+   owns one-open state, aria-expanded, focus and Escape. The fixed
+   left/top here is only the no-JS fallback. */
 
 /* bslib sets `display: contents` on conditionalPanels inside gap-spacing
    containers, which destroys the flyout box entirely — restore it. Same

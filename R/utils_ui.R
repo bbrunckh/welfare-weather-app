@@ -30,6 +30,83 @@ info_popover <- function(..., title = NULL, docs = FALSE, placement = "right") {
   )
 }
 
+# ---- Config flyout blocks (UI-02) ---------------------------------------------
+
+#' Accessible plot output (UI-36)
+#'
+#' `shiny::plotOutput()` output has no intrinsic alt text. This wrapper adds
+#' `role="img"` and a descriptive `aria-label` directly on the plot's own
+#' container (no extra DOM, so bslib fill/layout behaviour is unchanged), so
+#' screen readers announce what the plot shows. Where the surrounding UI
+#' re-renders with the current selections (per-variable panels), the label is
+#' built from the live variable names; fixed-id plots describe the plot type
+#' and content.
+#'
+#' @param plot_id Namespaced output id for the plot.
+#' @param alt     Descriptive text: what the plot shows.
+#' @param ...     Forwarded to `shiny::plotOutput()` (height, width, brush,
+#'   click, ...).
+#'
+#' @noRd
+wise_plot_output <- function(plot_id, alt, ...) {
+  shiny::tagAppendAttributes(
+    shiny::plotOutput(plot_id, ...),
+    role = "img",
+    `aria-label` = alt
+  )
+}
+
+#' Toggle button + anchored config flyout panel
+#'
+#' Shared builder for the Step 1/2 config sidebars' disclosure panels
+#' (`.config-flyout` in custom.css). The button and panel are wired for the
+#' shared `custom.js` behavior: the button carries `aria-expanded` /
+#' `aria-controls`, the panel is marked `data-flyout-for` = toggle id and gets
+#' a stable `_panel` id, and `custom.js` enforces one-open-at-a-time, moves
+#' focus on open/close, closes on Escape, and positions the flyout beside its
+#' own toggle instead of at a shared viewport position.
+#'
+#' The content stays in the DOM at all times (conditionalPanel odd/even parity,
+#' as before), so input defaults register immediately.
+#'
+#' @param toggle_id    Namespaced input id of the toggle button.
+#' @param title        Flyout header title.
+#' @param ...          Flyout content, rendered below the header.
+#' @param toggle_label Button label. Default "Configure".
+#'
+#' @noRd
+config_flyout_block <- function(toggle_id, title, ..., toggle_label = "Configure") {
+  panel_id <- paste0(toggle_id, "_panel")
+  shiny::tags$div(
+    class = "config-flyout-anchor",
+    shiny::actionButton(
+      toggle_id, toggle_label,
+      icon  = shiny::icon("sliders"),
+      class = "btn-outline-primary btn-sm config-flyout-toggle",
+      style = "margin-bottom: 10px;",
+      `aria-expanded` = "false",
+      `aria-controls` = panel_id
+    ),
+    shiny::conditionalPanel(
+      condition = paste0("input['", toggle_id, "'] % 2 == 1"),
+      class     = "config-flyout",
+      id        = panel_id,
+      `data-flyout-for` = toggle_id,
+      shiny::tags$div(
+        class = "config-flyout-header",
+        shiny::tags$h6(title),
+        shiny::tags$button(
+          type    = "button",
+          class   = "btn-close",
+          `aria-label` = "Close",
+          onclick = sprintf("document.getElementById('%s').click();", toggle_id)
+        )
+      ),
+      ...
+    )
+  )
+}
+
 # ---- Run signatures & stale-state marking (INT-08) ---------------------------
 
 #' Canonicalise a value for identity comparison in a run signature.

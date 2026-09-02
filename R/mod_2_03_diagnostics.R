@@ -51,7 +51,9 @@ mod_2_03_diagnostics_ui <- function(id) {
         class = "btn-sm btn-default",
         style = "margin-bottom:8px;"
       ),
-      shiny::plotOutput(ns("diag_weather_density"), height = "340px"),
+      wise_plot_output(ns("diag_weather_density"),
+                       "Density plot comparing the selected weather variable in the historical sample against its own climate history",
+                       height = "340px"),
       shiny::uiOutput(ns("diag_weather_log_ui")),
       shiny::tags$p(
         style = "font-size:11px; color:#666; margin-top:4px;",
@@ -87,7 +89,9 @@ mod_2_03_diagnostics_ui <- function(id) {
           docs = TRUE
         )
       ),
-      shiny::plotOutput(ns("variance_contribution_plot"), height = "320px"),
+      wise_plot_output(ns("variance_contribution_plot"),
+                       "Bar plot of each weather variable's contribution to simulated outcome variance",
+                       height = "320px"),
       shiny::tags$p(
         style = "font-size:11px; color:#666; margin-top:6px;",
         "Each segment = one source's SD contribution (not strictly additive) - click ",
@@ -114,7 +118,9 @@ mod_2_03_diagnostics_ui <- function(id) {
           docs = TRUE
         )
       ),
-      shiny::plotOutput(ns("timeseries_plot"), height = "380px"),
+      wise_plot_output(ns("timeseries_plot"),
+                       "Time series of the outcome across survey years",
+                       height = "380px"),
       shiny::tags$p(
         style = "font-size:11px; color:#666; margin-top:6px;",
         "Thin lines = ensemble members; bold = median; ribbon = inter-model spread."

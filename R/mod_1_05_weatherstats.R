@@ -388,12 +388,19 @@ mod_1_05_weatherstats_server <- function(
 
           if (!any(vapply(seq_len(n_vars), is_binned, logical(1)))) {
             return(weather_plot_layout(
-              ns, n_vars, ids = dist_ids, height = "300px"
+              ns, n_vars, ids = dist_ids, height = "300px",
+              alts = paste("Distribution of", sw$label,
+                           "in the selected surveys and their climate history")
             ))
           }
 
           var_panel <- function(i) {
-            items <- list(shiny::plotOutput(ns(dist_ids[i]), height = "300px"))
+            items <- list(wise_plot_output(
+              ns(dist_ids[i]),
+              paste("Distribution of", sw$label[i],
+                    "in the selected surveys and their climate history"),
+              height = "300px"
+            ))
             if (is_binned(i)) {
               items <- c(items, list(
                 shiny::helpText(
@@ -402,7 +409,12 @@ mod_1_05_weatherstats_server <- function(
                         "derived from."),
                   style = "font-size: 12px;"
                 ),
-                shiny::plotOutput(ns(cont_ids[i]), height = "300px")
+                wise_plot_output(
+                  ns(cont_ids[i]),
+                  paste("Continuous distribution of", sw$label[i],
+                        "underlying the binned configuration"),
+                  height = "300px"
+                )
               ))
             }
             do.call(bslib::card, items)
@@ -417,10 +429,14 @@ mod_1_05_weatherstats_server <- function(
           }
         })
         output$binscatter_layout <- shiny::renderUI({
+          wx <- wx_spec_sw() %||% data.frame()
           weather_plot_layout(
-            ns, nrow(wx_spec_sw() %||% data.frame()),
+            ns, nrow(wx),
             ids    = c("binscatter1", "binscatter2"),
-            height = "300px"
+            height = "300px",
+            alts   = if (nrow(wx)) {
+              paste("Binscatter of the outcome against", wx$label)
+            } else NULL
           )
         })
 

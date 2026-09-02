@@ -420,7 +420,9 @@ mod_1_02_surveystats_server <- function(
                       p("Monthly breakdown of interview waves.")
                     )
                   ),
-                  plotOutput(ns("interview_date"), height = "300px")
+                  wise_plot_output(ns("interview_date"),
+                                   "Bar plot of the distribution of interview dates across the selected surveys",
+                                   height = "300px")
                 ),
                 # Pairing a definite card height with a 100%-height map is what
                 # lets the map fill the card in both the normal and the

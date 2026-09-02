@@ -338,20 +338,45 @@ mod_1_07_results_server <- function(id,
 
       # Reactive layouts so panels switch between 1 and 2 columns when the
       # model is re-fit with a different number of weather variables.
+      # UI-36: alt text follows the fitted engine and current weather labels.
       output$effectplot_layout <- shiny::renderUI({
         req(model_fit_val())
+        mf <- model_fit_val()
+        wt <- mf$weather_terms %||% character(0)
+        is_rif <- identical(mf$engine, "rif")
         weather_plot_layout(
-          ns, length(model_fit_val()$weather_terms %||% character(0)),
+          ns, length(wt),
           ids    = c("effectplot1", "effectplot2"),
-          height = "500px"
+          height = "500px",
+          alts   = vapply(seq_len(max(length(wt), 1L)), function(i) {
+            if (is_rif) {
+              paste("Weather sensitivity plot (unconditional quantile regression effect of",
+                    label_fun(wt[i]), "across the welfare distribution)")
+            } else {
+              paste("Line plot of predicted", outcome_snap$label,
+                    "versus", label_fun(wt[i]))
+            }
+          }, character(1))
         )
       })
       output$coefplot_layout <- shiny::renderUI({
         req(model_fit_val())
+        mf <- model_fit_val()
+        wt <- mf$weather_terms %||% character(0)
+        is_rif <- identical(mf$engine, "rif")
         weather_plot_layout(
-          ns, length(model_fit_val()$weather_terms %||% character(0)),
+          ns, length(wt),
           ids    = c("coefplot1", "coefplot2"),
-          height = "600px"
+          height = "600px",
+          alts   = vapply(seq_len(max(length(wt), 1L)), function(i) {
+            if (is_rif) {
+              paste("Coefficient plot of unconditional quantile regression coefficients",
+                    "by quantile for", label_fun(wt[i]))
+            } else {
+              paste("Coefficient plot with confidence intervals for",
+                    label_fun(wt[i]), "across the three model specifications")
+            }
+          }, character(1))
         )
       })
 

@@ -204,7 +204,8 @@ mod_3_02_infra_server <- function(id,
         ),
         radioButtons(
           inputId  = ns("health_mode"),
-          label    = NULL,
+          label    = shiny::tags$span(class = "visually-hidden",
+                                      "Access to health facility"),
           choices  = c(
             "Reduce travel time by (%)" = "pct",
             "Set maximum travel time (min)" = "max"

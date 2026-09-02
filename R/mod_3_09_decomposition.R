@@ -24,7 +24,9 @@ mod_3_09_decomposition_ui <- function(id) {
           ))
         )
       ),
-      shiny::plotOutput(ns("decomp_bar_plot"), height = "450px"),
+      wise_plot_output(ns("decomp_bar_plot"),
+                       "Bar plot of the average policy effect by channel and baseline welfare decile",
+                       height = "450px"),
       shiny::tags$p(
         style = "font-size:11px; color:#666; margin-top:6px;",
         "Bars = average effect by channel and welfare decile (decile 1 = poorest)."
@@ -150,7 +152,10 @@ mod_3_09_decomposition_server <- function(id,
         weather_plot_layout(
           ns, n_vars,
           ids    = c("beta_curve_plot1", "beta_curve_plot2"),
-          height = "400px"
+          height = "400px",
+          alts   = paste("Beta curve plot: unconditional quantile regression weather",
+                         "sensitivity across welfare quantiles for",
+                         mf$weather_terms)
         ),
         shiny::tags$p(
           style = "font-size:11px; color:#666; margin-top:6px;",
@@ -194,7 +199,9 @@ mod_3_09_decomposition_server <- function(id,
           "in the model coefficients.",
           "The dashed reference line (0) is the historical baseline mean."
         ),
-        shiny::plotOutput(ns("scenario_range_plot"), height = "420px")
+        wise_plot_output(ns("scenario_range_plot"),
+                         "Dot-and-line plot of the policy effect for each climate scenario and period against the historical baseline",
+                         height = "420px")
       )
     })
 

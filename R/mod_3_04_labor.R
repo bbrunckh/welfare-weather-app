@@ -92,6 +92,7 @@ mod_3_04_labor_server <- function(id,
       tagList(
         tags$label(
           class = "control-label",
+          `for` = ns(input_id),
           tags$i(class = paste("fa", icon_class, "me-1")),
           label
         ),
@@ -145,6 +146,7 @@ mod_3_04_labor_server <- function(id,
         ),
         tags$label(
           class = "control-label",
+          `for` = ns("sector_manufacturing"),
           tags$i(class = "fa fa-industry me-1"),
           "Manufacturing (%)"
         ),
@@ -159,6 +161,7 @@ mod_3_04_labor_server <- function(id,
         ),
         tags$label(
           class = "control-label",
+          `for` = ns("sector_services"),
           tags$i(class = "fa fa-shop me-1"),
           "Services (%)"
         ),

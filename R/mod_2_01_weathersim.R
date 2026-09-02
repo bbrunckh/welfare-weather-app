@@ -32,29 +32,16 @@ mod_2_01_weathersim_ui <- function(id) {
       ),
 
     # ---- Simulation settings flyout (same pattern as Step 1 'Configure') ---
-    shiny::actionButton(
-      ns("settings_toggle"), "Simulation settings",
-      icon  = shiny::icon("sliders"),
-      class = "btn-outline-primary btn-sm",
-      style = "margin-bottom: 10px;"
-    ),
-    shiny::conditionalPanel(
-      condition = paste0("input['", ns("settings_toggle"), "'] % 2 == 1"),
-      class     = "config-flyout",
-      shiny::tags$div(
-        class = "config-flyout-header",
-        shiny::tags$h6("Simulation settings"),
-        shiny::tags$button(
-          type = "button",
-          class = "btn-close",
-          `aria-label` = "Close",
-          onclick = sprintf(
-            "document.getElementById('%s').click();", ns("settings_toggle")
-          )
-        )
-      ),
+    # UI-02: shared flyout block - anchored to its toggle, one-open state,
+    # aria-expanded, focus management, Escape to close (see custom.js).
+    config_flyout_block(
+      ns("settings_toggle"),
+      "Simulation settings",
+      toggle_label = "Simulation settings",
 
       # -- Baseline survey ------------------------------------------------
+      # UI-03: the h6 headings stay visual; each control carries a
+      # visually-hidden label so screen readers announce it.
       shiny::tags$h6("Baseline survey",
                      style = "font-weight:600; margin-top:8px; margin-bottom:4px;"),
       shiny::uiOutput(ns("baseline_survey_ui")),
@@ -66,7 +53,8 @@ mod_2_01_weathersim_ui <- function(id) {
                      style = "font-weight:600; margin-top:8px; margin-bottom:4px;"),
       shiny::sliderInput(
         inputId = ns("hist_years"),
-        label   = NULL,
+        label   = shiny::tags$span(class = "visually-hidden",
+                                   "Historical weather distribution period"),
         min     = 1950,
         max     = 2024,
         value   = c(1991, 2020),
@@ -90,30 +78,48 @@ mod_2_01_weathersim_ui <- function(id) {
       shiny::tags$div(
         style = "display:flex; gap:8px; align-items:center; margin-bottom:4px;",
         shiny::tags$span("Period 1:", style = "min-width:60px; font-weight:500;"),
-        shiny::numericInput(ns("fut_start_1"), label = NULL, value = 2025,
+        shiny::numericInput(ns("fut_start_1"),
+                            label = shiny::tags$span(class = "visually-hidden",
+                                                     "Period 1 start year"),
+                            value = 2025,
                             min = 2015, max = 2100, step = 1, width = "90px"),
         shiny::tags$span("\u2013"),
-        shiny::numericInput(ns("fut_end_1"), label = NULL, value = 2035,
+        shiny::numericInput(ns("fut_end_1"),
+                            label = shiny::tags$span(class = "visually-hidden",
+                                                     "Period 1 end year"),
+                            value = 2035,
                             min = 2015, max = 2100, step = 1, width = "90px")
       ),
       # Period 2 (optional)
       shiny::tags$div(
         style = "display:flex; gap:8px; align-items:center; margin-bottom:4px;",
         shiny::tags$span("Period 2:", style = "min-width:60px; font-weight:500;"),
-        shiny::numericInput(ns("fut_start_2"), label = NULL, value = NA,
+        shiny::numericInput(ns("fut_start_2"),
+                            label = shiny::tags$span(class = "visually-hidden",
+                                                     "Period 2 start year"),
+                            value = NA,
                             min = 2015, max = 2100, step = 1, width = "90px"),
         shiny::tags$span("\u2013"),
-        shiny::numericInput(ns("fut_end_2"), label = NULL, value = NA,
+        shiny::numericInput(ns("fut_end_2"),
+                            label = shiny::tags$span(class = "visually-hidden",
+                                                     "Period 2 end year"),
+                            value = NA,
                             min = 2015, max = 2100, step = 1, width = "90px")
       ),
       # Period 3 (optional)
       shiny::tags$div(
         style = "display:flex; gap:8px; align-items:center; margin-bottom:4px;",
         shiny::tags$span("Period 3:", style = "min-width:60px; font-weight:500;"),
-        shiny::numericInput(ns("fut_start_3"), label = NULL, value = NA,
+        shiny::numericInput(ns("fut_start_3"),
+                            label = shiny::tags$span(class = "visually-hidden",
+                                                     "Period 3 start year"),
+                            value = NA,
                             min = 2015, max = 2100, step = 1, width = "90px"),
         shiny::tags$span("\u2013"),
-        shiny::numericInput(ns("fut_end_3"), label = NULL, value = NA,
+        shiny::numericInput(ns("fut_end_3"),
+                            label = shiny::tags$span(class = "visually-hidden",
+                                                     "Period 3 end year"),
+                            value = NA,
                             min = 2015, max = 2100, step = 1, width = "90px")
       ),
       shiny::uiOutput(ns("fut_years_warning")),
@@ -125,7 +131,8 @@ mod_2_01_weathersim_ui <- function(id) {
                      style = "font-weight:600; margin-bottom:4px;"),
       shiny::checkboxGroupInput(
         inputId  = ns("climate"),
-        label    = NULL,
+        label    = shiny::tags$span(class = "visually-hidden",
+                                    "Climate scenarios"),
         choices  = c(
           "SSP2-4.5" = "ssp2_4_5",
           "SSP3-7.0" = "ssp3_7_0",
@@ -149,7 +156,8 @@ mod_2_01_weathersim_ui <- function(id) {
       ),
       shiny::radioButtons(
         inputId  = ns("residuals"),
-        label    = NULL,
+        label    = shiny::tags$span(class = "visually-hidden",
+                                    "Simulation residuals"),
         choices  = residual_choices(),
         selected = "original"
       ),
@@ -312,7 +320,8 @@ mod_2_01_weathersim_server <- function(id,
       prev_bs <- shiny::isolate(input$baseline_survey)
       shiny::selectInput(
         ns("baseline_survey"),
-        label    = NULL,
+        label    = shiny::tags$span(class = "visually-hidden",
+                                    "Baseline survey"),
         choices  = ch,
         selected = .restore_selection(prev_bs, ch, fallback = def),
         multiple = TRUE,

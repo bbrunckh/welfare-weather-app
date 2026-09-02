@@ -123,7 +123,8 @@ mod_3_01_sp_server <- function(id,
         ),
         radioButtons(
           inputId  = ns("sp_type"),
-          label    = NULL,
+          label    = shiny::tags$span(class = "visually-hidden",
+                                      "Program type"),
           choices  = c(
             # "Shock-responsive cash transfer" = "shock",
             "Regular cash transfer"          = "regular"
@@ -180,7 +181,8 @@ mod_3_01_sp_server <- function(id,
         ),
         selectInput(
           inputId  = ns("targeting"),
-          label    = NULL,
+          label    = shiny::tags$span(class = "visually-hidden",
+                                      "Targeting"),
           choices  = stats::setNames(
             c("universal", "exante_poor", "pmt"),
             c(
@@ -333,7 +335,8 @@ mod_3_01_sp_server <- function(id,
         ),
         radioButtons(
           inputId  = ns("budget_mode"),
-          label    = NULL,
+          label    = shiny::tags$span(class = "visually-hidden",
+                                      "Budget mode"),
           choices  = stats::setNames(
             c("transfer_first", "budget_first"),
             c(

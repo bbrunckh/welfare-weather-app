@@ -340,7 +340,9 @@ policy_input_diagnostics <- function(baseline_svy, policy_svy, vars = NULL) {
           docs = TRUE
         )
       ),
-      shiny::plotOutput(ns("summary_box_plot"), height = "600px"),
+      wise_plot_output(ns("summary_box_plot"),
+                       "Point plot of baseline versus policy-adjusted outcomes by scenario, with uncertainty bands",
+                       height = "600px"),
       shiny::tags$p(
         style = "font-size:11px; color:#666; margin-top:6px;",
         "Grey dot = baseline; red dot = policy-adjusted; bands = uncertainty ranges (not additive) - click ",
@@ -374,7 +376,9 @@ policy_input_diagnostics <- function(baseline_svy, policy_svy, vars = NULL) {
           value = TRUE
         )
       ),
-      shiny::plotOutput(ns("exceedance_plot"), height = "400px"),
+      wise_plot_output(ns("exceedance_plot"),
+                       "Plot of the probability that the outcome exceeds a given threshold, by climate scenario",
+                       height = "400px"),
       shiny::uiOutput(ns("exceedance_caption"))
     ),
     shiny::wellPanel(
@@ -395,7 +399,9 @@ policy_input_diagnostics <- function(baseline_svy, policy_svy, vars = NULL) {
           docs = TRUE
         )
       ),
-      shiny::plotOutput(ns("timeseries_plot"), height = "420px"),
+      wise_plot_output(ns("timeseries_plot"),
+                       "Line plot of annual outcome trajectories per climate model across simulation years, baseline and policy-adjusted",
+                       height = "420px"),
       shiny::tags$p(
         style = "font-size:11px; color:#666; margin-top:6px;",
         "Faded = baseline; opaque = policy-adjusted; bold = median trajectory."

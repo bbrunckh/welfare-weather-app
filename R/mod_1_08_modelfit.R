@@ -172,7 +172,8 @@ mod_1_08_modelfit_server <- function(id,
             ))
           )
         ),
-        shiny::plotOutput(ns("relaimpo"))
+        wise_plot_output(ns("relaimpo"),
+                         "Bar plot of the relative importance of model predictors")
       )
     })
 
@@ -203,10 +204,15 @@ mod_1_08_modelfit_server <- function(id,
     # with a different number of weather variables.
     output$resid_weather_layout <- shiny::renderUI({
       req(model_fit())
+      wt <- model_fit()$weather_terms %||% character(0)
       weather_plot_layout(
-        ns, length(model_fit()$weather_terms %||% character(0)),
+        ns, length(wt),
         ids    = c("resid_weather1", "resid_weather2"),
-        height = "300px"
+        height = "300px",
+        alts   = vapply(seq_len(max(length(wt), 1L)), function(i) {
+          paste("Scatter plot of model residuals versus", wt[i],
+                "with the fitted relationship")
+        }, character(1))
       )
     })
 
@@ -252,10 +258,16 @@ mod_1_08_modelfit_server <- function(id,
           shiny::uiOutput(ns("relaimpo_ui")),
           shiny::hr(),
           shiny::h4("Predicted vs actual welfare"),
-          bslib::card(shiny::plotOutput(ns("pred_welf_dist"))),
+          bslib::card(wise_plot_output(
+            ns("pred_welf_dist"),
+            "Scatter plot of predicted welfare versus actual welfare in the training data"
+          )),
           shiny::hr(),
           shiny::h4("Diagnostic plots"),
-          bslib::card(shiny::plotOutput(ns("diagnostic_plots"))),
+          bslib::card(wise_plot_output(
+            ns("diagnostic_plots"),
+            "Diagnostic plots for the fitted model: residuals versus fitted values and related checks"
+          )),
           shiny::hr(),
           shiny::tags$details(
             shiny::tags$summary("Raw model summary (advanced)"),

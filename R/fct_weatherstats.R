@@ -1612,17 +1612,29 @@ make_weather_binned_stats_dt <- function(survey_weather, selected_weather) {
 #' @param ids      Character vector of length 2 - output IDs for plot 1
 #'                 and plot 2. Only `ids[1]` is used when `n_vars < 2`.
 #' @param height   CSS height passed to `shiny::plotOutput`.
+#' @param alts     Optional character vector of alt texts (UI-36), one per
+#'                 plot id; entries beyond `n_vars` are unused.
 #'
 #' @return A Shiny tag.
 #' @noRd
-weather_plot_layout <- function(ns, n_vars, ids, height = "500px") {
+weather_plot_layout <- function(ns, n_vars, ids, height = "500px",
+                                alts = NULL) {
+  plot_at <- function(i) {
+    alt <- if (!is.null(alts) && length(alts) >= i &&
+               !is.na(alts[i]) && nzchar(alts[i])) alts[i] else NULL
+    if (is.null(alt)) {
+      shiny::plotOutput(ns(ids[i]), height = height)
+    } else {
+      wise_plot_output(ns(ids[i]), alt, height = height)
+    }
+  }
   if (isTRUE(n_vars >= 2)) {
     bslib::layout_columns(
       col_widths = c(6, 6),
-      bslib::card(shiny::plotOutput(ns(ids[1]), height = height)),
-      bslib::card(shiny::plotOutput(ns(ids[2]), height = height))
+      bslib::card(plot_at(1)),
+      bslib::card(plot_at(2))
     )
   } else {
-    bslib::card(shiny::plotOutput(ns(ids[1]), height = height))
+    bslib::card(plot_at(1))
   }
 }

@@ -196,7 +196,9 @@ mod_2_02_results_ui <- function(id) {
           docs = TRUE
         )
       ),
-      shiny::plotOutput(ns("summary_box_plot"), height = "600px"),
+      wise_plot_output(ns("summary_box_plot"),
+                       "Box plot of the simulated outcome by scenario",
+                       height = "600px"),
       shiny::tags$p(
         style = "font-size:11px; color:#666; margin-top:6px;",
         "Dot = mean outcome; bands = uncertainty ranges (not additive) - click ",
@@ -242,7 +244,9 @@ mod_2_02_results_ui <- function(id) {
           value = TRUE
         ),
       ),
-      shiny::plotOutput(ns("exceedance_plot"), height = "400px"),
+      wise_plot_output(ns("exceedance_plot"),
+                       "Plot of the population share above the poverty threshold by scenario",
+                       height = "400px"),
       shiny::uiOutput(ns("exceedance_caption"))
     ),
 
@@ -905,9 +909,13 @@ mod_2_02_results_server <- function(id,
             shiny::tags$td(
               style = "text-align:center; padding:2px 4px;",
               if (exists)
+                # UI-03: the grid's row/column headers carry the meaning
+                # visually; give each checkbox its own accessible name.
                 shiny::checkboxInput(
                   cb_id,
-                  label = NULL,
+                  label = shiny::tags$span(class = "visually-hidden",
+                                           paste("Include", s, yr,
+                                                 "in the comparison")),
                   value = TRUE
                 )
               else
