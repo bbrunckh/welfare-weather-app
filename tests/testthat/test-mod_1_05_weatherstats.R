@@ -128,17 +128,23 @@ test_that("the wave picker selects which wave the maps draw", {
 
       # Defaults to the first wave rather than to nothing.
       expect_equal(wxmap_wave(), "TST|2018|SRV")
-      map_2018 <- as.character(output$wxmap_1)
-      expect_true(grepl("25.00", map_2018, fixed = TRUE))
-      expect_false(grepl("28.00", map_2018, fixed = TRUE))
+      # The wave's values are encoded as the per-feature fill colours (no
+      # popups): read the registered GeoJSON source out of the widget payload.
+      fill_colors <- function(widget) {
+        j <- jsonlite::fromJSON(widget, simplifyVector = FALSE)
+        vapply(j$x$sources[[1]]$data$features,
+               function(f) f$properties$`__fill`, character(1))
+      }
+      cols_2018 <- fill_colors(output$wxmap_1)
+      expect_true(all(nzchar(cols_2018)))
 
       # Switching the picker redraws the same widget with the other wave's
       # values rather than adding a second one.
       session$setInputs(wxmap_wave = "TST|2021|SRV")
       expect_equal(wxmap_wave(), "TST|2021|SRV")
-      map_2021 <- as.character(output$wxmap_1)
-      expect_true(grepl("28.00", map_2021, fixed = TRUE))
-      expect_false(grepl("25.00", map_2021, fixed = TRUE))
+      cols_2021 <- fill_colors(output$wxmap_1)
+      expect_true(all(nzchar(cols_2021)))
+      expect_false(identical(cols_2018, cols_2021))
 
       # The card header follows the picker.
       expect_true(grepl("Max temp - Testland, 2021",

@@ -218,7 +218,7 @@ plot_weather_bins_compare <- function(df, hv, label, hist_df = NULL,
     stringsAsFactors = FALSE
   ) |>
     dplyr::group_by(.data$countryyear, .data$bin) |>
-    dplyr::summarise(w = sum(.data$w), .groups = "drop") |>
+    dplyr::summarise(w = sum(.data$w, na.rm = TRUE), .groups = "drop") |>
     as.data.frame()
   samp$source <- .wx_sample_lab
 
@@ -1240,7 +1240,6 @@ plot_weather_loc_map <- function(geojson, loc_vals, label,
   if (length(feats) == 0) return(invisible(NULL))
 
   val_by_loc <- stats::setNames(loc_vals$value, as.character(loc_vals$loc_id))
-  n_by_loc   <- stats::setNames(loc_vals$n_hh, as.character(loc_vals$loc_id))
   mon_by_loc <- stats::setNames(loc_vals$n_months %||% rep(1L, nrow(loc_vals)),
                                 as.character(loc_vals$loc_id))
 
@@ -1254,10 +1253,6 @@ plot_weather_loc_map <- function(geojson, loc_vals, label,
   lookup <- function(v, key) {
     i <- match(key, names(v))
     if (is.na(i)) NULL else v[[i]]
-  }
-
-  fmt <- function(v) {
-    if (binned || is.character(v)) as.character(v) else format(round(v, 2), nsmall = 2)
   }
 
   # Group features by fill colour, and by whether the value is a single
@@ -1286,50 +1281,33 @@ plot_weather_loc_map <- function(geojson, loc_vals, label,
   # carrying a per-feature colour via a `__fill` property (`get` expression);
   # on a continuous ramp almost every location gets its own shade, which the
   # old Leaflet group-by-colour loop turned into one layer per distinct value.
-  popups <- vapply(seq_along(feats), function(i) {
-    f   <- feats[[i]]
-    lid <- as.character(f$properties$loc_id)
-    v   <- lookup(val_by_loc, lid)
-    nm  <- lookup(mon_by_loc, lid) %||% 1L
-    paste0(
-      "<b>", htmltools::htmlEscape(label), "</b><br/>",
-      if (is.null(v) || all(is.na(v))) "no value" else htmltools::htmlEscape(fmt(v)),
-      "<br/><small>loc ", htmltools::htmlEscape(lid), " &middot; ",
-      lookup(n_by_loc, lid) %||% 0, " households",
-      if (isTRUE(nm > 1L)) {
-        paste0("<br/>surveyed over ", nm, " interview months - shown value",
-               " is the household-weighted ",
-               if (binned) "modal bin" else "mean",
-               " across them")
-      } else {
-        "<br/>single interview month"
-      },
-      "</small>"
-    )
-  }, character(1))
+  # No popups: the legend and the maps' colours already carry the message.
   props_json <- paste0(
     '{"loc_id":',   .json_vec(.prop_col(feats, "loc_id")),
     ',"bbox":',     .bbox_frag(feats),
     ',"__fill":',   .json_vec(cols),
-    ',"popup":',    .json_vec(popups),
     '}'
   )
   geoms <- vapply(feats, function(f) f$geom_json, character(1))
 
   # Same rendering as the other cell maps: no outlines (at a country view the
-  # borders of a thousand hexagons cover more pixels than the fills do). GPU
-  # rendering keeps panning smooth with that many polygons.
+  # borders of a thousand hexagons cover more pixels than the fills do - the
+  # same-colour hairline just kills anti-aliasing seams). GPU rendering keeps
+  # panning smooth with that many polygons.
   m <- .maplibre_geojson_source(
     mapgl::maplibre(style = .map_style(), projection = "mercator"),
     "weather-locs",
     .geojson_fc_string(geoms, props_json, ids = seq_along(feats))
   ) |>
     mapgl::add_fill_layer(
-      id           = "weather-locs-fill",
-      source       = "weather-locs",
-      fill_color   = mapgl::get_column("__fill"),
-      fill_opacity = 0.75,
-      popup        = "{popup}"
+      id                 = "weather-locs-fill",
+      source             = "weather-locs",
+      fill_color         = mapgl::get_column("__fill"),
+      fill_outline_color = mapgl::get_column("__fill"),
+      fill_opacity       = 0.75
+    ) |>
+    mapgl::add_navigation_control(
+      position = "top-left", show_compass = FALSE, visualize_pitch = FALSE
     ) |>
     mapgl::fit_bounds(c(bounds$lng1, bounds$lat1, bounds$lng2, bounds$lat2))
 
@@ -1387,7 +1365,9 @@ plot_weather_loc_map <- function(geojson, loc_vals, label,
 
     m <- m |>
       mapgl::add_control(
-        position = "bottomleft",
+        position = "bottom-left",
+        id = "wx-note",
+        className = "wise-map-legend",
         html = paste0(
           '<div style="background: rgba(255,255,255,0.88); padding: 3px 5px; ',
           'border-radius: 4px; font-size: 10px; line-height: 1.35; ',
@@ -1400,7 +1380,9 @@ plot_weather_loc_map <- function(geojson, loc_vals, label,
 
   m <- m |>
     mapgl::add_control(
-      position = "bottomright",
+      position = "bottom-right",
+      id = "wx-legend",
+      className = "wise-map-legend",
       html = .compact_legend_html(
         pal_info = pal_info,
         binned   = binned,
@@ -1533,7 +1515,7 @@ make_weather_binned_stats_dt <- function(survey_weather, selected_weather) {
         dplyr::group_by(.data$countryyear, .data[[v]]) |>
         dplyr::summarise(N = dplyr::n(), .groups = "drop") |>
         dplyr::group_by(.data$countryyear) |>
-        dplyr::mutate(share = 100 * .data$N / sum(.data$N)) |>
+        dplyr::mutate(share = 100 * .data$N / sum(.data$N, na.rm = TRUE)) |>
         dplyr::ungroup() |>
         dplyr::mutate(
           variable = v,

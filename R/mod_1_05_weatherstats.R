@@ -801,15 +801,12 @@ mod_1_05_weatherstats_server <- function(
   output$wxmap_wave_ui <- shiny::renderUI({
     w <- wave_list()
     if (is.null(w) || nrow(w) < 2) return(NULL)
-    shiny::selectInput(
-      ns("wxmap_wave"), NULL,
-      choices  = stats::setNames(w$key, w$label),
-      selected = wxmap_wave(),
-      width    = "180px"
-    ) |>
-      htmltools::tagAppendAttributes(
-        style = "margin-bottom: 0;", class = "small"
-      )
+    choices <- wave_slider_choices(w, include_all = FALSE)
+    wave_toggle_slider(
+      ns("wxmap_wave"),
+      choices  = choices,
+      selected = wxmap_wave()
+    )
   })
 
   # Every picker copy (the one above the maps plus one per card) writes to the

@@ -261,20 +261,18 @@ mod_1_03_outcome_server <- function(id, variable_list, survey_data,
           cov_view_mem$restore(m)
         })
 
-        # Wave picker, shown only when there is more than one wave to pick.
+        # Wave toggle slider, shown only when there is more than one wave to pick.
         output$cov_wave_ui <- shiny::renderUI({
           w <- survey_wave_list(survey_data())
           if (is.null(w) || nrow(w) < 2) return(NULL)
-          shiny::selectInput(
-            ns("cov_wave"), NULL,
-            choices  = c(stats::setNames("all", "All waves"),
-                         stats::setNames(w$key, w$label)),
-            selected = shiny::isolate(input$cov_wave) %||% "all",
-            width    = "160px"
-          ) |>
-            htmltools::tagAppendAttributes(
-              style = "margin-bottom: 0;", class = "small"
-            )
+          choices <- wave_slider_choices(w, include_all = TRUE)
+          selected <- shiny::isolate(input$cov_wave) %||% "all"
+          if (!selected %in% choices) selected <- "all"
+          wave_toggle_slider(
+            ns("cov_wave"),
+            choices  = choices,
+            selected = selected
+          )
         })
 
         output$outcome_summary_stats <- renderTable({

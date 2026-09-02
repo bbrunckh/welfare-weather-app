@@ -124,7 +124,7 @@ loc_panel <- function(data,
 
   # --- 2. Total weight per location ------------------------------------------
   totals <- base |>
-    dplyr::summarise(total = sum(weight), .by = loc_id)
+    dplyr::summarise(total = sum(weight, na.rm = TRUE), .by = loc_id)
 
   # --- 3. Candidate pairs: loc_ids sharing > =1 h3 cell -----------------------
   pairs <- dplyr::inner_join(base, base,
@@ -136,8 +136,8 @@ loc_panel <- function(data,
   # --- 4. Overlap in both directions (all still lazy / in DuckDB) ------------
   edges <- pairs |>
     dplyr::summarise(
-      shared_x = sum(weight_x),
-      shared_y = sum(weight_y),
+      shared_x = sum(weight_x, na.rm = TRUE),
+      shared_y = sum(weight_y, na.rm = TRUE),
       .by = c(loc_id_x, loc_id_y)
     ) |>
     dplyr::left_join(totals, by = c("loc_id_x" = "loc_id")) |>

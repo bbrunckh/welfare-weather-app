@@ -171,3 +171,48 @@ test_that("Step 2-style run observer refuses re-entry during the run", {
     }
   )
 })
+
+# ---- Wave toggle-style slider helpers ----------------------------------------
+
+test_that("wave_slider_choices formats single and multi-country choices correctly", {
+  # Empty or NULL input
+  expect_identical(wave_slider_choices(NULL), character(0))
+  expect_identical(wave_slider_choices(data.frame()), character(0))
+
+  # Single country: years directly
+  df_single <- data.frame(
+    key      = c("MWI|2010|IHS3", "MWI|2016|IHS4"),
+    year     = c("2010", "2016"),
+    code     = c("MWI", "MWI"),
+    economy  = c("Malawi", "Malawi"),
+    stringsAsFactors = FALSE
+  )
+  choices_all <- wave_slider_choices(df_single, include_all = TRUE)
+  expect_equal(choices_all, c("All" = "all", "2010" = "MWI|2010|IHS3", "2016" = "MWI|2016|IHS4"))
+
+  choices_no_all <- wave_slider_choices(df_single, include_all = FALSE)
+  expect_equal(choices_no_all, c("2010" = "MWI|2010|IHS3", "2016" = "MWI|2016|IHS4"))
+
+  # Multi-country: prefixed with country code
+  df_multi <- data.frame(
+    key      = c("MWI|2010|IHS3", "TZA|2012|NPS"),
+    year     = c("2010", "2012"),
+    code     = c("MWI", "TZA"),
+    economy  = c("Malawi", "Tanzania"),
+    stringsAsFactors = FALSE
+  )
+  choices_multi <- wave_slider_choices(df_multi, include_all = TRUE)
+  expect_equal(choices_multi, c("All" = "all", "MWI 2010" = "MWI|2010|IHS3", "TZA 2012" = "TZA|2012|NPS"))
+})
+
+test_that("wave_toggle_slider builds radio group with toggle-slider classes", {
+  choices <- c("All" = "all", "2010" = "MWI|2010", "2016" = "MWI|2016")
+  tag <- wave_toggle_slider("test_wave", choices = choices, selected = "all")
+  tag_html <- as.character(tag)
+
+  expect_true(grepl("toggle-slider", tag_html, fixed = TRUE))
+  expect_true(grepl("wave-toggle-slider", tag_html, fixed = TRUE))
+  expect_true(grepl("type=\"radio\"", tag_html, fixed = TRUE))
+  expect_true(grepl("value=\"all\"", tag_html, fixed = TRUE))
+  expect_true(grepl("value=\"MWI|2010\"", tag_html, fixed = TRUE))
+})

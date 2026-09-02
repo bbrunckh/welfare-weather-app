@@ -379,7 +379,7 @@ plot_outcome_coverage_map <- function(geojson, df, outcome, cell_map = NULL) {
   loc_avail <- df |>
     dplyr::mutate(.has = !is.na(.data[[outcome]])) |>
     dplyr::summarise(
-      pct  = mean(.data$.has) * 100,
+      pct  = mean(.data$.has, na.rm = TRUE) * 100,
       n_hh = dplyr::n(),
       .by  = dplyr::any_of(c(keys))
     )
@@ -448,11 +448,13 @@ plot_outcome_coverage_map <- function(geojson, df, outcome, cell_map = NULL) {
     .geojson_fc_string(geoms, props_json, ids = seq_along(geojson$features))
   ) |>
     mapgl::add_fill_layer(
-      id           = "coverage-fill",
-      source       = "coverage",
-      fill_color   = mapgl::get_column("__fill"),
-      # Cells tile edge to edge, so per-cell outlines only add noise.
-      fill_opacity = if (on_cells) 0.75 else 0.5
+      id                 = "coverage-fill",
+      source             = "coverage",
+      fill_color         = mapgl::get_column("__fill"),
+      # Cells tile edge to edge, so per-cell outlines only add noise - but the
+      # same-colour hairline removes the anti-aliasing seams between them.
+      fill_outline_color = mapgl::get_column("__fill"),
+      fill_opacity       = if (on_cells) 0.75 else 0.5
     )
 
   # Location polygons keep a thin outline, as before.
@@ -467,12 +469,16 @@ plot_outcome_coverage_map <- function(geojson, df, outcome, cell_map = NULL) {
   }
 
   m <- m |>
+    mapgl::add_navigation_control(
+      position = "top-left", show_compass = FALSE, visualize_pitch = FALSE
+    ) |>
     mapgl::fit_bounds(c(bounds$lng1, bounds$lat1, bounds$lng2, bounds$lat2)) |>
     mapgl::add_reset_control(position = "top-left")
 
   m |>
     mapgl::add_control(
-      position = "bottomright",
+      position = "bottom-right",
+      className = "wise-map-legend",
       html = .compact_legend_html(
         pal_info = list(pal = pal, domain = rng),
         binned   = FALSE,

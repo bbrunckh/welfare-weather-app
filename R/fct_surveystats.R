@@ -658,33 +658,16 @@ map_view_memory <- function(input, session, output_id, key = NULL) {
 plot_survey_map <- function(loc) {
   if (is.null(loc) || length(loc$features) == 0) return(invisible(NULL))
 
-  codes      <- sapply(loc$features, function(f) f$properties$code)
-  u_codes    <- unique(codes)
-  code_color <- setNames(scales::hue_pal()(length(u_codes)), u_codes)
-  bounds     <- .geojson_bounds(loc)
+  bounds <- .geojson_bounds(loc)
 
   # MapLibre GL on the keyless CARTO vector Positron basemap (the raster
   # Positron tiles now watermark without an API key). GPU rendering replaces
   # the Leaflet canvas rasterizer; the old onRender hover-highlight JS is
-  # replaced by mapgl's feature-state hover_options.
+  # replaced by mapgl's feature-state hover_options. No popups: the wave
+  # pickers and stats tables already carry this information.
   m <- mapgl::maplibre(style = .map_style(), projection = "mercator")
 
-  strokes <- unname(code_color[codes])
-  props_json <- paste0(
-    '{"code":',     .json_vec(.prop_col(loc$features, "code")),
-    ',"year":',     .json_vec(.prop_col(loc$features, "year")),
-    ',"survname":', .json_vec(.prop_col(loc$features, "survname")),
-    ',"loc_id":',   .json_vec(.prop_col(loc$features, "loc_id")),
-    ',"bbox":',     .bbox_frag(loc$features),
-    ',"__stroke":', .json_vec(strokes),
-    '}'
-  )
-  geoms <- vapply(loc$features, function(f) f$geom_json, character(1))
-
-  m <- .maplibre_geojson_source(
-    m, "locs",
-    .geojson_fc_string(geoms, props_json, ids = seq_along(loc$features))
-  ) |>
+  m <- .maplibre_geojson_source(m, "locs", .survey_fc_string(loc$features)) |>
     mapgl::add_line_layer(
       id           = "locs-outline",
       source       = "locs",
@@ -692,6 +675,9 @@ plot_survey_map <- function(loc) {
       line_width   = 1,
       line_opacity = 0.5,
       hover_options = list(line_color = "#FF0000", line_width = 2)
+    ) |>
+    mapgl::add_navigation_control(
+      position = "top-left", show_compass = FALSE, visualize_pitch = FALSE
     ) |>
     mapgl::fit_bounds(c(bounds$lng1, bounds$lat1, bounds$lng2, bounds$lat2)) |>
     mapgl::add_reset_control(position = "top-left")
@@ -961,29 +947,54 @@ build_cell_features <- function(cell_geo, cell_map, by_wave = TRUE) {
 }
 
 
-#' Heatmap of sampled units per H3 cell
+#' FeatureCollection string for the survey-locations map
 #'
-#' Draws one filled hexagon per cell, shaded by the number of sampled units
-#' allocated to it by `allocate_units_to_cells()`. Cells tile the plane, so
-#' unlike the location-outline map nothing overlaps and dense areas read
-#' directly off the colour.
+#' Strokes are assigned per distinct economy code with a hue palette over the
+#' codes present in the given feature set (matching the historical
+#' per-code-layer behaviour on whatever subset is drawn).
 #'
-#' @param cells     Data frame with `h3`, `geom` (a GeoJSON geometry string)
-#'   and `n_units`.
-#' @param unit_label Plural noun for what a row of the survey is, e.g.
-#'   `"households"`.
+#' @param features The survey-location feature list.
 #'
-#' @return A MapLibre (`mapgl`) widget, or `NULL` invisibly when there is
-#'   nothing to draw.
+#' @return A GeoJSON FeatureCollection JSON string.
 #'
-#' @export
-plot_sample_density_map <- function(cells, unit_label = "households") {
-  if (is.null(cells) || nrow(cells) == 0) return(invisible(NULL))
-  if (!all(c("geom", "n_units") %in% names(cells))) return(invisible(NULL))
+#' @noRd
+.survey_fc_string <- function(features) {
+  codes <- vapply(features, function(f) {
+    as.character(f$properties$code %||% NA_character_)
+  }, character(1), USE.NAMES = FALSE)
+  u_codes    <- sort(unique(codes))
+  code_color <- setNames(scales::hue_pal()(length(u_codes)), u_codes)
+  strokes    <- unname(code_color[codes])
+
+  props_json <- paste0(
+    '{"code":',     .json_vec(.prop_col(features, "code")),
+    ',"year":',     .json_vec(.prop_col(features, "year")),
+    ',"survname":', .json_vec(.prop_col(features, "survname")),
+    ',"loc_id":',   .json_vec(.prop_col(features, "loc_id")),
+    ',"bbox":',     .bbox_frag(features),
+    ',"__stroke":', .json_vec(strokes),
+    '}'
+  )
+  geoms <- vapply(features, function(f) f$geom_json, character(1))
+  .geojson_fc_string(geoms, props_json, ids = seq_along(features))
+}
+
+#' FeatureCollection pieces for the sample density map
+#'
+#' @param cells Data frame with `h3`, `geom`, `n_units` (plus optional bbox
+#'   columns), as produced by `density_cells()`.
+#'
+#' @return A list with `fc` (the FeatureCollection JSON string), `bounds` and
+#'   `pal_info` for the legend; `NULL` when there is nothing to draw.
+#'
+#' @noRd
+.sample_density_fc <- function(cells) {
+  if (is.null(cells) || nrow(cells) == 0) return(NULL)
+  if (!all(c("geom", "n_units") %in% names(cells))) return(NULL)
 
   cells <- cells[!is.na(cells$geom) & nchar(cells$geom) > 2 &
                    is.finite(cells$n_units), , drop = FALSE]
-  if (nrow(cells) == 0) return(invisible(NULL))
+  if (nrow(cells) == 0) return(NULL)
 
   # Counts are heavily skewed - a handful of urban cells dwarf everything - so
   # the colour scale runs on log, over the range actually present. Shares are
@@ -1003,74 +1014,98 @@ plot_sample_density_map <- function(cells, unit_label = "households") {
   col_of <- function(v) pal(log(pmin(pmax(v, rng[1]), rng[2])))
 
   feats <- lapply(seq_len(nrow(cells)), function(i) {
-    props <- list(
-      h3    = cells$h3[i] %||% "",
-      popup = paste0(
-        "<b>", format(round(cells$n_units[i], 1), big.mark = ","), " ",
-        htmltools::htmlEscape(unit_label), "</b><br/><small>area ",
-        htmltools::htmlEscape(cells$h3[i] %||% ""), "</small>"
-      )
-    )
+    props <- list(h3 = cells$h3[i] %||% "")
     # PERF-36: DuckDB bbox rides along when the cell geometry frame has it.
     if (all(c("xmin", "ymin", "xmax", "ymax") %in% names(cells))) {
       props$bbox <- as.numeric(c(cells$xmin[i], cells$ymin[i],
                                  cells$xmax[i], cells$ymax[i]))
     }
-    list(
-      geom_json = cells$geom[i],
-      props     = props
-    )
+    list(geom_json = cells$geom[i], props = props)
   })
 
   bounds <- .geojson_bounds(list(features = feats))
   cols   <- col_of(cells$n_units)
 
-  # MapLibre GL: one fill layer carrying a per-feature colour via a `__fill`
-  # property (`get` expression), rather than one layer per distinct colour.
-  # With a continuous ramp almost every cell has its own colour, so the old
-  # Leaflet grouping-by-colour approach would create a thousand separate
-  # layers; GPU rendering draws all of them in a single pass.
   props_json <- paste0(
     '{"h3":',    .json_vec(.prop_col(feats, "h3")),
-    ',"popup":', .json_vec(.prop_col(feats, "popup")),
     ',"bbox":',  .bbox_frag(feats),
     ',"__fill":', .json_vec(cols),
     '}'
   )
   geoms <- vapply(feats, function(f) f$geom_json, character(1))
 
-  m <- .maplibre_geojson_source(
-    mapgl::maplibre(style = .map_style(), projection = "mercator"),
-    "density-cells",
-    .geojson_fc_string(geoms, props_json, ids = seq_along(feats))
-  ) |>
-    mapgl::add_fill_layer(
-      id           = "density-cells-fill",
-      source       = "density-cells",
-      fill_color   = mapgl::get_column("__fill"),
-      fill_opacity = 0.75,
-      popup        = "{popup}"
-    ) |>
-    mapgl::fit_bounds(c(bounds$lng1, bounds$lat1, bounds$lng2, bounds$lat2)) |>
-    mapgl::add_reset_control(position = "top-left")
-
   # The legend ramp samples this palette across the domain, so both are given
   # on the count scale; `col_of()` applies the log internally. `mid` is the
   # count that actually lands halfway along the ramp.
-  pal_info <- list(
-    pal    = function(v) col_of(v),
-    domain = rng,
-    mid    = exp(mean(log(rng))),
-    # Evenly spaced along the log ramp, so the legend bar shows the same
-    # colour progression the cells do.
-    stops  = exp(seq(log(rng[1]), log(rng[2]), length.out = 9))
+  list(
+    fc     = .geojson_fc_string(geoms, props_json, ids = seq_along(feats)),
+    bounds = bounds,
+    pal_info = list(
+      pal    = function(v) col_of(v),
+      domain = rng,
+      mid    = exp(mean(log(rng))),
+      # Evenly spaced along the log ramp, so the legend bar shows the same
+      # colour progression the cells do.
+      stops  = exp(seq(log(rng[1]), log(rng[2]), length.out = 9))
+    )
   )
+}
 
+
+#' Heatmap of sampled units per H3 cell
+#'
+#' Draws one filled hexagon per cell, shaded by the number of sampled units
+#' allocated to it by `allocate_units_to_cells()`. Cells tile the plane, so
+#' unlike the location-outline map nothing overlaps and dense areas read
+#' directly off the colour.
+#'
+#' @param cells     Data frame with `h3`, `geom` (a GeoJSON geometry string)
+#'   and `n_units`.
+#' @param unit_label Plural noun for what a row of the survey is, e.g.
+#'   `"households"`.
+#'
+#' @return A MapLibre (`mapgl`) widget, or `NULL` invisibly when there is
+#'   nothing to draw.
+#'
+#' @export
+plot_sample_density_map <- function(cells, unit_label = "households") {
+  fc <- .sample_density_fc(cells)
+  if (is.null(fc)) return(invisible(NULL))
+
+  # MapLibre GL: one fill layer carrying a per-feature colour via a `__fill`
+  # property (`get` expression), rather than one layer per distinct colour.
+  # With a continuous ramp almost every cell has its own colour, so the old
+  # Leaflet grouping-by-colour approach would create a thousand separate
+  # layers; GPU rendering draws all of them in a single pass.
+  m <- .maplibre_geojson_source(
+    mapgl::maplibre(style = .map_style(), projection = "mercator"),
+    "density-cells", fc$fc
+  ) |>
+    mapgl::add_fill_layer(
+      id                 = "density-cells-fill",
+      source             = "density-cells",
+      fill_color         = mapgl::get_column("__fill"),
+      # Same-colour hairline outline kills the anti-aliasing seams between
+      # edge-to-edge cells.
+      fill_outline_color = mapgl::get_column("__fill"),
+      fill_opacity       = 0.75
+    ) |>
+    mapgl::add_navigation_control(
+      position = "top-left", show_compass = FALSE, visualize_pitch = FALSE
+    ) |>
+    mapgl::fit_bounds(c(fc$bounds$lng1, fc$bounds$lat1,
+                        fc$bounds$lng2, fc$bounds$lat2)) |>
+    mapgl::add_reset_control(position = "top-left")
+
+  # The legend ramp samples this palette across the domain, so both are given
+  # on the count scale; the helper applies the log internally.
   m |>
     mapgl::add_control(
-      position = "bottomright",
+      position = "bottom-right",
+      id = "density-legend",
+      className = "wise-map-legend",
       html = .compact_legend_html(
-        pal_info = pal_info,
+        pal_info = fc$pal_info,
         binned   = FALSE,
         title    = paste0(.capitalise(unit_label), " per area"),
         info     = paste0(

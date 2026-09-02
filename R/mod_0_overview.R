@@ -97,14 +97,13 @@ mod_0_overview_ui <- function(id) {
         "WISE-APP is an illustrative stress-testing tool - not a forecast or a",
         "causal impact evaluation framework. Its estimates capture conditional",
         "statistical associations between local weather variability and household",
-        "welfare. The User Guide includes important"
+        "welfare. The User Guide includes"
       ),
       tags$a(
-        "caveats",
+        "important caveats.",
         href = "https://datanalytics.worldbank.org/wise-app-docs/#limitations",
         target = "_blank"
-      ),
-      "."
+      )
       )
     )
   )

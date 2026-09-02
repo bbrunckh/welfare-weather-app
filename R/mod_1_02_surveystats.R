@@ -329,11 +329,10 @@ mod_1_02_surveystats_server <- function(
           p
         })
 
-        # Leaflet map of interview locations.
-        # Keep the view across a switch between Locations and Sample density,
-        # and across a same-sample reload - rebuilding the widget would
-        # otherwise snap back to the full extent. Changing the sample (e.g.
-        # another country) re-fits to the new geography instead.
+        # Leaflet→MapLibre maps: the widget only rebuilds on view toggles and
+        # data loads. Wave changes swap the GeoJSON source in place (observer
+        # below) - no widget rebuild, no basemap/style re-fetch, and the
+        # user's pan/zoom survives without any view-memory machinery.
         map_view_mem <- map_view_memory(
           input, session, "map",
           key = shiny::reactive(digest::digest(selected_surveys()))
@@ -341,7 +340,7 @@ mod_1_02_surveystats_server <- function(
         map_view_mem$remember()
 
         output$map <- mapgl::renderMaplibre({
-          wave <- input$map_wave %||% "all"
+          wave <- shiny::isolate(input$map_wave %||% "all")
 
           m <- if (identical(input$map_view, "density")) {
             unit <- if (is.function(analysis_unit)) analysis_unit() else NULL
@@ -358,20 +357,43 @@ mod_1_02_surveystats_server <- function(
           map_view_mem$restore(m)
         })
 
-        # Wave picker, shown only when there is more than one wave to pick.
+        # Wave-only changes: update the active layer's source in place.
+        observeEvent(input$map_wave,
+          {
+            wave <- input$map_wave %||% "all"
+            px   <- mapgl::maplibre_proxy(ns("map"), session)
+            if (identical(input$map_view %||% "locations", "density")) {
+              fc <- .sample_density_fc(density_cells(wave))
+              shiny::req(fc)
+              mapgl::set_source(
+                px, "density-cells-fill",
+                jsonlite::fromJSON(fc$fc, simplifyVector = FALSE)
+              )
+            } else {
+              loc <- filter_features_by_wave(map_data(), wave)
+              shiny::req(!is.null(loc))
+              mapgl::set_source(
+                px, "locs-outline",
+                jsonlite::fromJSON(.survey_fc_string(loc$features),
+                                   simplifyVector = FALSE)
+              )
+            }
+          },
+          ignoreInit = TRUE
+        )
+
+        # Wave toggle slider, shown only when there is more than one wave to pick.
         output$map_wave_ui <- shiny::renderUI({
           w <- survey_wave_list(survey_data())
           if (is.null(w) || nrow(w) < 2) return(NULL)
-          shiny::selectInput(
-            ns("map_wave"), NULL,
-            choices  = c(stats::setNames("all", "All waves"),
-                         stats::setNames(w$key, w$label)),
-            selected = shiny::isolate(input$map_wave) %||% "all",
-            width    = "160px"
-          ) |>
-            htmltools::tagAppendAttributes(
-              style = "margin-bottom: 0;", class = "small"
-            )
+          choices <- wave_slider_choices(w, include_all = TRUE)
+          selected <- shiny::isolate(input$map_wave) %||% "all"
+          if (!selected %in% choices) selected <- "all"
+          wave_toggle_slider(
+            ns("map_wave"),
+            choices  = choices,
+            selected = selected
+          )
         })
 
         # Toggle between outlined locations and the per-cell heatmap.
@@ -383,7 +405,7 @@ mod_1_02_surveystats_server <- function(
             choiceValues = list("locations", "density")
           ) |>
             htmltools::tagAppendAttributes(
-              style = "margin-bottom: 0;", class = "small"
+              class = "toggle-slider"
             )
         })
 

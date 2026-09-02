@@ -256,3 +256,67 @@ shinyjs_disable_button <- function(input_id, enabled = TRUE) {
     disabled = !enabled
   )
 }
+
+# ---- Wave / Survey Year Toggle Slider ----------------------------------------
+
+#' Survey year / wave toggle-style slider input
+#'
+#' Renders an inline segmented toggle-style slider for selecting survey years or waves.
+#' Handles few or many survey years gracefully with compact styling and horizontal
+#' overflow scrolling.
+#'
+#' @param inputId Input ID.
+#' @param choices Named character vector of choices (values = wave keys,
+#'   names = display labels).
+#' @param selected Currently selected value.
+#' @param label Optional control label.
+#' @param width Optional width.
+#'
+#' @noRd
+wave_toggle_slider <- function(inputId, choices, selected = NULL, label = NULL, width = NULL) {
+  if (is.null(selected) && length(choices) > 0) {
+    selected <- unname(choices)[1]
+  }
+  rb <- shiny::radioButtons(
+    inputId  = inputId,
+    label    = label,
+    choices  = choices,
+    selected = selected,
+    inline   = TRUE,
+    width    = width
+  )
+  htmltools::tagAppendAttributes(
+    rb,
+    class = "toggle-slider wave-toggle-slider"
+  )
+}
+
+#' Build choices vector for survey wave toggle slider
+#'
+#' Formats wave choices: "All" (if include_all = TRUE) followed by
+#' survey years. When multiple economies are selected, prefixes with the country
+#' code (e.g. "MWI 2010", "TZA 2012"); when only one economy is selected,
+#' uses the year directly (e.g. "2010", "2013", "2016").
+#'
+#' @param wave_df Data frame from `survey_wave_list()` with columns `key`, `year`,
+#'   `code`, `economy`.
+#' @param include_all Logical; whether to include an "All" choice at the start.
+#'
+#' @return Named character vector for use in `wave_toggle_slider()`.
+#' @noRd
+wave_slider_choices <- function(wave_df, include_all = TRUE) {
+  if (is.null(wave_df) || nrow(wave_df) == 0) return(character(0))
+  multi_country <- length(unique(wave_df$code)) > 1
+  labels <- if (multi_country) {
+    paste(wave_df$code, wave_df$year)
+  } else {
+    as.character(wave_df$year)
+  }
+  wave_choices <- stats::setNames(wave_df$key, labels)
+  if (isTRUE(include_all)) {
+    c(stats::setNames("all", "All"), wave_choices)
+  } else {
+    wave_choices
+  }
+}
+
