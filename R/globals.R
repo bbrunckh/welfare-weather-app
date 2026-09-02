@@ -30,6 +30,5 @@ utils::globalVariables(c(
   "shared_x", "shared_y", "ssp", "st_asgeojson", "st_geomfromtext",
   "st_union_agg", "survname", "tau", "timestamp", "title", "total",
   "total_x", "total_y", "value", "value_p50", "variable",
-  "variable_label", "weight", "weight_x", "weight_y", "welfare", "year",
   ":="
 ))

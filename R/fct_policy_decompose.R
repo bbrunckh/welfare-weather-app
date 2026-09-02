@@ -304,12 +304,25 @@
 
       if (is.factor(vals) || is.character(vals)) {
         if (has_loc) {
+          # Modal bin per location: unweighted counts of the non-NA values,
+          # ties broken alphabetically like table() did (PERF-05 follow-up).
+          loc_id    <- weather_raw[["loc_id"]]
           chr_vals  <- as.character(vals)
-          modal_bin <- tapply(chr_vals, weather_raw[["loc_id"]], function(x) {
-            tbl <- table(x[!is.na(x)])
-            if (length(tbl) == 0) return(NA_character_)
-            names(tbl)[which.max(tbl)]
-          })
+          ok        <- !is.na(loc_id) & !is.na(chr_vals)
+          modal_bin <- if (any(ok)) {
+            gv <- collapse::GRP(
+              list(loc_id = loc_id[ok], value = chr_vals[ok]),
+              group.sizes = TRUE
+            )
+            cnt <- as.integer(gv$group.sizes)
+            ord <- order(gv$groups$loc_id, -cnt,
+                         match(gv$groups$value, sort(unique(chr_vals[ok]))))
+            take <- ord[!duplicated(gv$groups$loc_id[ord])]
+            setNames(gv$groups$value[take],
+                     as.character(gv$groups$loc_id[take]))
+          } else {
+            setNames(character(0), character(0))
+          }
           hh_bin      <- modal_bin[as.character(svy_baseline[["loc_id"]])]
           orig_levels <- levels(svy_baseline[[wv]])
           return(factor(hh_bin, levels = orig_levels))
@@ -320,7 +333,12 @@
       if (!is.numeric(vals)) return(rep(0, n))
 
       if (has_loc) {
-        loc_means  <- tapply(vals, weather_raw[["loc_id"]], mean, na.rm = TRUE)
+        loc_id <- weather_raw[["loc_id"]]
+        ok     <- !is.na(loc_id)
+        g_loc  <- collapse::GRP(data.frame(loc_id = loc_id[ok]), by = "loc_id")
+        loc_means <- collapse::fmean(vals[ok], g = g_loc, na.rm = TRUE)
+        loc_means <- setNames(as.numeric(loc_means),
+                              as.character(g_loc$groups$loc_id))
         hh_vals    <- loc_means[as.character(svy_baseline[["loc_id"]])]
         grand_mean <- mean(vals, na.rm = TRUE)
         hh_vals[is.na(hh_vals)] <- grand_mean

@@ -792,42 +792,72 @@ merge_loc_values_to_cells <- function(cell_map, loc_vals, by_wave = TRUE) {
     dplyr::ungroup()
 
   grp <- if (by_wave) {
-    interaction(j$code, j$year, j$survname, j$h3, drop = TRUE, sep = "\r")
+    c("code", "year", "survname", "h3")
   } else {
-    factor(j$h3)
+    "h3"
   }
 
-  parts <- lapply(split(seq_len(nrow(j)), grp), function(idx) {
-    w <- j$.w[idx]
-    v <- j$value[idx]
+  # `split()` dropped rows with missing grouping keys, so they are removed
+  # before the grouping is built (PERF-05).
+  j <- j[complete.cases(j[grp]), , drop = FALSE]
+  if (nrow(j) == 0) return(NULL)
 
-    value <- if (binned) {
-      tot <- tapply(w, as.character(v), sum, na.rm = TRUE)
-      if (length(tot) == 0) NA_character_ else names(tot)[which.max(tot)]
-    } else {
-      vn <- suppressWarnings(as.numeric(v))
-      ok <- is.finite(vn) & is.finite(w) & w > 0
-      if (!any(ok)) NA_real_ else sum(vn[ok] * w[ok]) / sum(w[ok])
+  g <- collapse::GRP(j, by = grp)
+  n_g <- g$N.groups
+  first_idx <- match(seq_len(n_g), g$group.id)
+  w <- j$.w
+
+  out <- data.frame(
+    code     = j$code[first_idx],
+    year     = j$year[first_idx],
+    survname = j$survname[first_idx],
+    loc_id   = j$h3[first_idx],
+    value    = if (binned) rep(NA_character_, n_g) else rep(NA_real_, n_g),
+    # The colour summarises more than one number when several locations
+    # meet here, or when a contributing location spans several months.
+    n_hh     = { nh <- collapse::fsum(w, g = g, na.rm = TRUE); nh[is.na(nh)] <- 0; nh },
+    n_months = collapse::fmax(j$n_months, g = g, na.rm = TRUE),
+    n_locs   = as.integer(collapse::fndistinct(j$loc_id, g = g, na.rm = FALSE)),
+    stringsAsFactors = FALSE
+  )
+  if (length(carry)) out$economy <- j$economy[first_idx]
+
+  if (binned) {
+    # Modal bin per cell by summed weight; ties broken by the alphabetical
+    # order `tapply()` used before, and NA values carry no vote (PERF-05).
+    vv <- as.character(j$value)
+    ok <- !is.na(vv)
+    if (any(ok)) {
+      gv <- collapse::GRP(
+        list(gid = g$group.id[ok], value = vv[ok]),
+        group.sizes = TRUE
+      )
+      wsum <- collapse::fsum(w[ok], g = gv, na.rm = TRUE)
+      wsum[is.na(wsum)] <- 0
+      ord  <- order(gv$groups$gid, -wsum, match(gv$groups$value, sort(unique(vv[ok]))))
+      take <- ord[!duplicated(gv$groups$gid[ord])]
+      out$value[gv$groups$gid[take]] <- gv$groups$value[take]
     }
+  } else {
+    vn <- suppressWarnings(as.numeric(j$value))
+    ok <- is.finite(vn) & is.finite(w) & (w > 0)
+    # Invalid rows are NA-ed out of both value and weight so the grouped mean
+    # skips them, as the old per-cell mask did.
+    vn2 <- vn; w2 <- w
+    vn2[!ok] <- NA_real_
+    w2[!ok] <- NA_real_
+    val <- suppressWarnings(collapse::fmean(vn2, g = g, w = w2, na.rm = TRUE))
+    val[is.nan(val)] <- NA_real_
+    out$value <- unname(val)
+  }
 
-    row <- data.frame(
-      code     = j$code[idx[1]],
-      year     = j$year[idx[1]],
-      survname = j$survname[idx[1]],
-      loc_id   = j$h3[idx[1]],
-      value    = value,
-      n_hh     = sum(w, na.rm = TRUE),
-      # The colour summarises more than one number when several locations
-      # meet here, or when a contributing location spans several months.
-      n_months = max(j$n_months[idx], na.rm = TRUE),
-      n_locs   = length(unique(j$loc_id[idx])),
-      stringsAsFactors = FALSE
-    )
-    if ("economy" %in% names(j)) row$economy <- j$economy[idx[1]]
-    row
-  })
-
-  out <- dplyr::bind_rows(parts)
+  # `interaction()` ordered its levels with `code` varying fastest (by_wave)
+  # and `factor(h3)` sorted alphabetically otherwise; restore that order.
+  out <- if (by_wave) {
+    out[order(out$loc_id, out$survname, out$year, out$code), ]
+  } else {
+    out[order(out$loc_id), ]
+  }
   rownames(out) <- NULL
   attr(out, "binned") <- binned
   attr(out, "levels") <- lvls
@@ -1034,7 +1064,8 @@ plot_sample_density_map <- function(cells, unit_label = "households") {
 #' \itemize{
 #'   \item Weighted summary statistics from `weighted_summary_long()`
 #'   \item Wave-specific missingness (`% Missing`) by `countryyear` and variable
-#'   \item Variable labels joined from `variable_list` (`Variable Label`)
+#'   \item Readable variable labels (from `variable_list`) shown in a single
+#'     `Variable` column, falling back to the raw name when no label exists
 #'   \item Standardized column names (capitalized first letter)
 #'   \item Basic display formatting (numeric columns to 2 decimals except `N`)
 #'   \item Soft text wrapping for long character/factor fields
@@ -1075,39 +1106,30 @@ make_stats_dt <- function(survey_data, variable_list, flag_col = NULL, vars = NU
         stop("countryyear column is required in survey_data() to compute wave-specific missingness.")
       }
 
-      # Build long missingness table by wave
-      miss_list <- lapply(vars, function(v) {
-        df |>
-          dplyr::group_by(countryyear) |>
-          dplyr::summarise(
-            `% Missing` = 100 * mean(is.na(.data[[v]])),
-            .groups = "drop"
-          ) |>
-          dplyr::mutate(variable = v)
-      })
-
-      fill_df <- dplyr::bind_rows(miss_list)
+      # Wave-specific missingness by countryyear and variable, in one
+      # grouped pass (PERF-09)
+      fill_df <- survey_missingness_long(df, vars)
 
       tab <- tab |>
         dplyr::left_join(fill_df, by = c("countryyear", "variable"))
     }
 
+    # Show only the readable variable label, falling back to the raw name
     if ("variable" %in% names(tab)) {
       lab_map <- vl[, c("name", "label"), drop = FALSE]
       tab <- tab |>
         dplyr::left_join(lab_map, by = c("variable" = "name")) |>
-        dplyr::mutate(variable_label = dplyr::coalesce(.data$label, .data$variable)) |>
-        dplyr::select(variable, variable_label, dplyr::everything(), -dplyr::any_of("label"))
+        dplyr::mutate(variable = dplyr::coalesce(.data$label, .data$variable)) |>
+        dplyr::select(variable, dplyr::everything(), -dplyr::any_of("label"))
     }
 
-    # Sort by variable name, then wave (countryyear) where available
+    # Sort by variable label, then wave (countryyear) where available
     if (all(c("variable", "countryyear") %in% names(tab))) {
       tab <- tab |>
         dplyr::arrange(.data$variable, .data$countryyear)
     }
 
     # ---- Column renaming ----------------------------------------------------
-    if ("variable_label" %in% names(tab)) names(tab)[names(tab) == "variable_label"] <- "Variable Label"
     if ("countryyear" %in% names(tab))    names(tab)[names(tab) == "countryyear"]    <- "Country, Year"
 
     names(tab) <- vapply(names(tab), function(nm) {

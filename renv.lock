@@ -6611,6 +6611,27 @@
       "Author": "Achim Zeileis [aut, cre] (ORCID: <https://orcid.org/0000-0003-0918-3766>), Gabor Grothendieck [aut], Jeffrey A. Ryan [aut], Joshua M. Ulrich [ctb], Felix Andrews [ctb]",
       "Maintainer": "Achim Zeileis <Achim.Zeileis@R-project.org>",
       "Repository": "CRAN"
+    },
+    "collapse": {
+      "Package": "collapse",
+      "Version": "2.1.7",
+      "Source": "Repository",
+      "Title": "Advanced and Fast Data Transformation",
+      "Authors@R": "c(\nperson(\"Sebastian\", \"Krantz\", role = c(\"aut\", \"cre\"),\nemail = \"sebastian.krantz@graduateinstitute.ch\",\ncomment = c(ORCID = \"0000-0001-6212-5229\")),\nperson(\"Matt\", \"Dowle\", role = \"ctb\"),\nperson(\"Arun\", \"Srinivasan\", role = \"ctb\"),\nperson(\"Morgan\", \"Jacob\", role = \"ctb\"),\nperson(\"Dirk\", \"Eddelbuettel\", role = \"ctb\"),\nperson(\"Laurent\", \"Berge\", role = \"ctb\"),\nperson(\"Kevin\", \"Tappe\", role = \"ctb\"),\nperson(\"Alina\", \"Cherkas\", role = \"ctb\"),\nperson(\"Ivan\", \"Krylov\", role = \"ctb\"),\nperson(\"R Core Team and contributors worldwide\", role = \"ctb\"),\nperson(\"Martyn\", \"Plummer\", role = \"cph\"),\nperson(\"1999-2016 The R Core Team\", role = \"cph\")\n)",
+      "Description": "A large C/C++-based package for advanced data transformation and\nstatistical computing in R that is extremely fast, class-agnostic, robust, and\nprogrammer friendly. Core functionality includes a rich set of S3 generic grouped\nand weighted statistical functions for vectors, matrices and data frames, which\nprovide efficient low-level vectorizations, OpenMP multithreading, and skip missing\nvalues by default. These are integrated with fast grouping and ordering algorithms\n(also callable from C), and efficient data manipulation functions. The package also\nprovides a flexible and rigorous approach to time series and panel data in R, fast\nfunctions for data transformation and common statistical procedures, detailed\n(grouped, weighted) summary statistics, powerful tools to work with nested data,\nfast data object conversions, functions for memory efficient R programming, and\nhelpers to effectively deal with variable labels, attributes, and missing data. It\nseamlessly supports base R objects/classes as well as 'units', 'integer64', 'xts'/\n'zoo', 'tibble', 'grouped_df', 'data.table', 'sf', and 'pseries'/'pdata.frame'.\nFor a concise overview of the package see Krantz (2026) <doi:10.18637/jss.v116.i01>.",
+      "URL": "https://fastverse.org/collapse/,\nhttps://github.com/fastverse/collapse",
+      "BugReports": "https://github.com/fastverse/collapse/issues",
+      "Depends": "R (>= 4.1.0)",
+      "Imports": "Rcpp (>= 1.0.1)",
+      "LinkingTo": "Rcpp",
+      "Suggests": "fastverse, data.table, magrittr, kit, xts, zoo, plm, fixest,\nvars, RcppArmadillo, RcppEigen, tibble, dplyr, ggplot2, scales,\nmicrobenchmark, testthat, covr, knitr, rmarkdown, withr, bit64",
+      "License": "GPL (>= 2) | file LICENSE",
+      "VignetteBuilder": "knitr",
+      "Encoding": "UTF-8",
+      "NeedsCompilation": "yes",
+      "Author": "Sebastian Krantz [aut, cre] (ORCID:\n<https://orcid.org/0000-0001-6212-5229>),\nMatt Dowle [ctb],\nArun Srinivasan [ctb],\nMorgan Jacob [ctb],\nDirk Eddelbuettel [ctb],\nLaurent Berge [ctb],\nKevin Tappe [ctb],\nAlina Cherkas [ctb],\nIvan Krylov [ctb],\nR Core Team and contributors worldwide [ctb],\nMartyn Plummer [cph],\n1999-2016 The R Core Team [cph]",
+      "Maintainer": "Sebastian Krantz <sebastian.krantz@graduateinstitute.ch>",
+      "Repository": "CRAN"
     }
   }
 }

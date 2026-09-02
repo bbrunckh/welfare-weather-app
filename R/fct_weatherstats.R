@@ -707,15 +707,20 @@ join_hist_sample_cells <- function(hist_df, survey_weather) {
 #' Prepare the shared grouping behind `summarise_weather_by_loc()`
 #'
 #' The location grouping (year coercion, economy default, interview months,
-#' interaction groups, split indices) is identical for every weather variable,
-#' so the Step 1 weather map computes it once per survey frame and passes it
-#' back in via `summarise_weather_by_loc(prep = )` instead of rebuilding it
-#' once per variable (PERF-25).
+#' location grouping) is identical for every weather variable, so the Step 1
+#' weather map computes it once per survey frame and passes it back in via
+#' `summarise_weather_by_loc(prep = )` instead of rebuilding it once per
+#' variable (PERF-25). Since PERF-05 the grouping itself is a single
+#' `collapse::GRP()` over the frame, shared by every variable.
+#'
+#' Rows with a missing location key are dropped here, matching the rows the
+#' previous `interaction()` + `split()` grouping silently discarded.
 #'
 #' @param survey_weather Merged survey-weather frame (household level).
 #'
-#' @return A list with `df` (the normalised frame), `months`, and `idx` (the
-#'   per-location row-index split). `NULL` when the input is `NULL`.
+#' @return A list with `df` (the normalised frame, missing-key rows dropped),
+#'   `months`, and `grp` (a `collapse::GRP()` grouping over `df`). `NULL` when
+#'   the input is `NULL`.
 #' @noRd
 .summarise_loc_prep <- function(survey_weather) {
   if (is.null(survey_weather)) return(NULL)
@@ -724,16 +729,18 @@ join_hist_sample_cells <- function(hist_df, survey_weather) {
   df$year <- as.character(df$year)
   if (!"economy" %in% names(df)) df$economy <- df$code
 
+  keys <- c("code", "year", "survname", "loc_id")
+  df <- df[complete.cases(df[keys]), , drop = FALSE]
+
   months <- if ("timestamp" %in% names(df)) {
     as.integer(format(as.Date(df$timestamp), "%m"))
   } else {
     rep(1L, nrow(df))
   }
 
-  grp <- interaction(df$code, df$year, df$survname, df$loc_id,
-                     drop = TRUE, sep = "\r")
+  grp <- collapse::GRP(df, by = keys, group.sizes = TRUE)
 
-  list(df = df, months = months, idx = split(seq_len(nrow(df)), grp))
+  list(df = df, months = months, grp = grp)
 }
 
 
@@ -749,7 +756,8 @@ join_hist_sample_cells <- function(hist_df, survey_weather) {
 #' @param hv Scalar character. Name of the weather variable column.
 #' @param prep Optional result of `.summarise_loc_prep()` on the same frame.
 #'   Pass it when collapsing several variables over the same frame so the
-#'   grouping is built once (PERF-25).
+#'   grouping is built once (PERF-25). Since PERF-05 the collapse itself runs
+#'   as grouped `collapse` passes over that shared grouping.
 #'
 #' @return A data frame with one row per wave x location: `code`, `year`,
 #'   `survname`, `economy`, `loc_id`, `value`, `n_hh`, `n_months`, plus a
@@ -768,6 +776,7 @@ summarise_weather_by_loc <- function(survey_weather, hv, prep = NULL) {
   if (is.null(prep)) prep <- .summarise_loc_prep(survey_weather)
   df     <- prep$df
   months <- prep$months
+  g      <- prep$grp
   vals   <- df[[hv]]
 
   binned <- is.factor(vals) || is.character(vals)
@@ -775,29 +784,45 @@ summarise_weather_by_loc <- function(survey_weather, hv, prep = NULL) {
             else if (is.factor(vals)) levels(vals)
             else sort(unique(as.character(vals)))
 
-  parts <- lapply(prep$idx, function(idx) {
-    v <- vals[idx]
-    value <- if (binned) {
-      tbl <- table(as.character(v)[!is.na(v)])
-      if (length(tbl) == 0) NA_character_ else names(tbl)[which.max(tbl)]
-    } else {
-      m <- mean(suppressWarnings(as.numeric(v)), na.rm = TRUE)
-      if (is.nan(m)) NA_real_ else m
-    }
-    data.frame(
-      code     = df$code[idx[1]],
-      year     = df$year[idx[1]],
-      survname = df$survname[idx[1]],
-      economy  = df$economy[idx[1]],
-      loc_id   = df$loc_id[idx[1]],
-      value    = value,
-      n_hh     = length(idx),
-      n_months = length(unique(months[idx])),
-      stringsAsFactors = FALSE
-    )
-  })
+  n_g <- g$N.groups
+  first_idx <- match(seq_len(n_g), g$group.id)
 
-  out <- dplyr::bind_rows(parts)
+  out <- data.frame(
+    code     = df$code[first_idx],
+    year     = df$year[first_idx],
+    survname = df$survname[first_idx],
+    economy  = df$economy[first_idx],
+    loc_id   = df$loc_id[first_idx],
+    value    = if (binned) rep(NA_character_, n_g) else rep(NA_real_, n_g),
+    n_hh     = as.integer(g$group.sizes),
+    n_months = as.integer(collapse::fndistinct(months, g = g, na.rm = FALSE)),
+    stringsAsFactors = FALSE
+  )
+
+  if (binned) {
+    # Modal bin per location: unweighted counts of the non-NA values, ties
+    # broken by the alphabetical order `table()` used before (PERF-05).
+    vv <- as.character(vals)
+    ok <- !is.na(vv)
+    if (any(ok)) {
+      gv <- collapse::GRP(
+        list(gid = g$group.id[ok], value = vv[ok]),
+        group.sizes = TRUE
+      )
+      cnt <- as.integer(gv$group.sizes)
+      ord <- order(gv$groups$gid, -cnt, match(gv$groups$value, sort(unique(vv[ok]))))
+      take <- ord[!duplicated(gv$groups$gid[ord])]
+      out$value[gv$groups$gid[take]] <- gv$groups$value[take]
+    }
+  } else {
+    m <- suppressWarnings(collapse::fmean(as.numeric(vals), g = g, na.rm = TRUE))
+    m[is.nan(m)] <- NA_real_
+    out$value <- unname(m)
+  }
+
+  # `interaction()` ordered its levels with `code` varying fastest; restore
+  # that presentation order (GRP() sorts lexicographically instead).
+  out <- out[order(out$loc_id, out$survname, out$year, out$code), ]
   rownames(out) <- NULL
   attr(out, "binned") <- binned
   attr(out, "levels") <- lvls
@@ -856,48 +881,101 @@ summarise_weather_anomaly_by_loc <- function(cells_df, hv, year_from, year_to,
   in_range <- d$cal_year >= as.integer(year_from) &
     d$cal_year <= as.integer(year_to)
 
-  grp <- interaction(d$code, d$year, d$survname, d$loc_id,
-                     drop = TRUE, sep = "\r")
+  keys <- c("code", "year", "survname", "loc_id")
+  keep <- complete.cases(d[keys])   # interaction()/split() dropped NA-key rows
+  if (!any(keep)) return(NULL)
+  d  <- d[keep, , drop = FALSE]
+  # NA cal_year was never in the old in-window sums (na.rm skipped it), so
+  # it counts as out-of-window here
+  hi <- !is.na(in_range[keep]) & in_range[keep]
+  si <- isTRUE_vec(d$is_sample)
 
-  parts <- lapply(split(seq_len(nrow(d)), grp), function(idx) {
-    hi <- idx[in_range[idx]]
-    si <- idx[isTRUE_vec(d$is_sample[idx])]
-    if (length(hi) == 0 || length(si) == 0) return(NULL)
+  g   <- collapse::GRP(d, by = keys)
+  gid <- as.integer(g$group.id)
+  n_g <- g$N.groups
+  first_idx <- match(seq_len(n_g), gid)
+  vv <- d$.v
+  w  <- as.numeric(d$.w)
 
-    samp <- stats::weighted.mean(d$.v[si], d$.w[si], na.rm = TRUE)
-    if (!is.finite(samp)) return(NULL)
-
-    value <- if (measure == "percentile") {
-      hw    <- d$.w[hi]
-      hvv   <- d$.v[hi]
-      denom <- sum(hw, na.rm = TRUE)
-      if (!is.finite(denom) || denom == 0) return(NULL)
-      # Mid-rank so an exact tie sits at the middle of its own mass.
-      100 * (sum(hw * (hvv < samp), na.rm = TRUE) +
-               0.5 * sum(hw * (hvv == samp), na.rm = TRUE)) / denom
-    } else {
-      ref <- stats::weighted.mean(d$.v[hi], d$.w[hi], na.rm = TRUE)
-      if (!is.finite(ref)) return(NULL)
-      samp - ref
-    }
-
-    data.frame(
-      code     = d$code[si[1]],
-      year     = d$year[si[1]],
-      survname = d$survname[si[1]],
-      economy  = d$economy[si[1]],
-      loc_id   = d$loc_id[si[1]],
-      value    = value,
-      n_hh     = sum(d$.w[si], na.rm = TRUE),
-      n_months = length(unique(d$int_month[si])),
-      stringsAsFactors = FALSE
+  # --- sample-side stats: one grouped pass over the wave's own rows ---------
+  # stats::weighted.mean(na.rm = TRUE) strips NA values but an NA *weight*
+  # poisons the result, so samp is a plain weighted ratio over the sample
+  # rows (groups with an NA sample weight come out NA and are dropped below,
+  # exactly as the old per-group loop did).
+  si_rows <- which(si)
+  g_si    <- collapse::GRP(list(gid = gid[si_rows]))
+  samp_full  <- rep(NA_real_, n_g)
+  n_hh_full  <- rep(NA_real_, n_g)
+  n_mn_full  <- rep(NA_integer_, n_g)
+  if (length(si_rows)) {
+    gid_si <- as.integer(g_si$groups$gid)
+    vw     <- vv[si_rows] * w[si_rows]
+    samp_full[gid_si] <- as.numeric(
+      collapse::fsum(vw, g = g_si, na.rm = FALSE) /
+        collapse::fsum(w[si_rows], g = g_si, na.rm = FALSE)
     )
-  })
+    n_hh_full[gid_si] <- as.numeric(
+      collapse::fsum(w[si_rows], g = g_si, na.rm = TRUE)
+    )
+    n_mn_full[gid_si] <- as.integer(
+      collapse::fndistinct(d$int_month[si_rows], g = g_si, na.rm = FALSE)
+    )
+  }
 
-  parts <- Filter(Negate(is.null), parts)
-  if (length(parts) == 0) return(NULL)
+  # --- historical-side stats: one grouped pass over the window rows ---------
+  hi_rows <- which(hi)
+  g_hi    <- collapse::GRP(list(gid = gid[hi_rows]))
+  samp_row <- samp_full[gid]
 
-  out <- dplyr::bind_rows(parts)
+  value <- if (measure == "percentile") {
+    # sum(..., na.rm = TRUE) skips NA weights here (they never entered the
+    # old numerator/denominator sums)
+    denom <- rep(NA_real_, n_g)
+    denom[as.integer(g_hi$groups$gid)] <- as.numeric(
+      collapse::fsum(w[hi_rows], g = g_hi, na.rm = TRUE)
+    )
+    num <- rep(NA_real_, n_g)
+    num[as.integer(g_hi$groups$gid)] <- as.numeric(collapse::fsum(
+      w[hi_rows] * (vv[hi_rows] < samp_row[hi_rows]),
+      g = g_hi, na.rm = TRUE
+    ))
+    num_eq <- rep(NA_real_, n_g)
+    num_eq[as.integer(g_hi$groups$gid)] <- as.numeric(collapse::fsum(
+      w[hi_rows] * (vv[hi_rows] == samp_row[hi_rows]),
+      g = g_hi, na.rm = TRUE
+    ))
+    # Mid-rank so an exact tie sits at the middle of its own mass.
+    100 * (num + 0.5 * num_eq) / denom
+  } else {
+    ref <- rep(NA_real_, n_g)
+    ref[as.integer(g_hi$groups$gid)] <- as.numeric(
+      collapse::fsum(vv[hi_rows] * w[hi_rows], g = g_hi, na.rm = FALSE) /
+        collapse::fsum(w[hi_rows], g = g_hi, na.rm = FALSE)
+    )
+    samp_full - ref
+  }
+
+  # Groups the old loop dropped: no sample rows, no window rows, or a
+  # degenerate window weight sum.
+  ok_g <- is.finite(value)
+  if (!any(ok_g)) return(NULL)
+
+  out <- data.frame(
+    code     = d$code[first_idx],
+    year     = d$year[first_idx],
+    survname = d$survname[first_idx],
+    economy  = d$economy[first_idx],
+    loc_id   = d$loc_id[first_idx],
+    value    = value,
+    n_hh     = n_hh_full,
+    n_months = n_mn_full,
+    stringsAsFactors = FALSE
+  )
+  out <- out[ok_g, ]
+
+  # interaction() ordered its levels with `code` varying fastest; restore
+  # that presentation order (GRP() sorts lexicographically instead).
+  out <- out[order(out$loc_id, out$survname, out$year, out$code), ]
   rownames(out) <- NULL
   attr(out, "binned") <- FALSE
   attr(out, "levels") <- NULL
@@ -1371,31 +1449,25 @@ make_weather_stats_dt <- function(survey_weather, selected_weather) {
     }
 
     # Add wave-specific missingness (% Missing) by countryyear and variable
+    # in one grouped pass (PERF-09)
     if ("countryyear" %in% names(tab) && "variable" %in% names(tab)) {
-      miss_list <- lapply(vars, function(v) {
-        df |>
-          dplyr::group_by(.data$countryyear) |>
-          dplyr::summarise(`% Missing` = 100 * mean(is.na(.data[[v]]), na.rm = TRUE), .groups = "drop") |>
-          dplyr::mutate(variable = v)
-      })
-      miss_df <- dplyr::bind_rows(miss_list)
+      miss_df <- survey_missingness_long(df, vars)
       tab <- dplyr::left_join(tab, miss_df, by = c("countryyear", "variable"))
     }
 
-    # Add variable label
+    # Show only the readable variable label, falling back to the raw name
     if ("variable" %in% names(tab)) {
       lab_map <- sw |>
         dplyr::select(name, label) |>
         dplyr::distinct()
       tab <- tab |>
         dplyr::left_join(lab_map, by = c("variable" = "name")) |>
-        dplyr::mutate(variable_label = dplyr::coalesce(.data$label, .data$variable)) |>
-        dplyr::select(variable, variable_label, dplyr::everything(), -dplyr::any_of("label"))
+        dplyr::mutate(variable = dplyr::coalesce(.data$label, .data$variable)) |>
+        dplyr::select(variable, dplyr::everything(), -dplyr::any_of("label"))
     }
 
     # Rename key columns
     if ("variable" %in% names(tab))       names(tab)[names(tab) == "variable"] <- "Variable"
-    if ("variable_label" %in% names(tab)) names(tab)[names(tab) == "variable_label"] <- "Variable Label"
     if ("countryyear" %in% names(tab))    names(tab)[names(tab) == "countryyear"] <- "County, Year"
 
     # Capitalize first letter of all column names
@@ -1454,6 +1526,9 @@ make_weather_binned_stats_dt <- function(survey_weather, selected_weather) {
       ))
     }
 
+    # One grouped pass for every binned variable's missingness (PERF-09)
+    miss_all <- survey_missingness_long(df, binned_vars)
+
     rows_list <- lapply(binned_vars, function(v) {
       counts <- df |>
         dplyr::filter(!is.na(.data[[v]])) |>
@@ -1469,10 +1544,8 @@ make_weather_binned_stats_dt <- function(survey_weather, selected_weather) {
         dplyr::select(.data$variable, .data$countryyear, .data$level,
                       .data$N, .data$share)
 
-      miss_df <- df |>
-        dplyr::group_by(.data$countryyear) |>
-        dplyr::summarise(`% Missing` = 100 * mean(is.na(.data[[v]])),
-                         .groups = "drop")
+      miss_df <- miss_all[miss_all$variable == v,
+                          c("countryyear", "% Missing"), drop = FALSE]
 
       counts |> dplyr::left_join(miss_df, by = "countryyear")
     })
@@ -1482,6 +1555,7 @@ make_weather_binned_stats_dt <- function(survey_weather, selected_weather) {
       return(data.frame(Note = "No binned weather observations found."))
     }
 
+    # Show only the readable variable label, falling back to the raw name
     if ("variable" %in% names(tab) &&
         all(c("name", "label") %in% names(sw))) {
       lab_map <- sw |>
@@ -1490,11 +1564,10 @@ make_weather_binned_stats_dt <- function(survey_weather, selected_weather) {
       tab <- tab |>
         dplyr::left_join(lab_map, by = c("variable" = "name")) |>
         dplyr::mutate(
-          variable_label = dplyr::coalesce(.data$label, .data$variable)
+          variable = dplyr::coalesce(.data$label, .data$variable)
         ) |>
-        dplyr::select(.data$variable, .data$variable_label,
-                      .data$countryyear, .data$level, .data$N,
-                      .data$share, .data$`% Missing`)
+        dplyr::select(.data$variable, .data$countryyear, .data$level,
+                      .data$N, .data$share, .data$`% Missing`)
     }
 
     # Sort: by variable, country-year, then by level (factor order if available)
@@ -1503,8 +1576,6 @@ make_weather_binned_stats_dt <- function(survey_weather, selected_weather) {
 
     if ("variable" %in% names(tab))
       names(tab)[names(tab) == "variable"] <- "Variable"
-    if ("variable_label" %in% names(tab))
-      names(tab)[names(tab) == "variable_label"] <- "Variable Label"
     if ("countryyear" %in% names(tab))
       names(tab)[names(tab) == "countryyear"] <- "Country, Year"
     if ("level" %in% names(tab))

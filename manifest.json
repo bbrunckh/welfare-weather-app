@@ -1126,6 +1126,36 @@
         "Built": "R 4.5.3; ; 2026-03-12 02:04:47 UTC; unix"
       }
     },
+    "collapse": {
+      "Source": "CRAN",
+      "Repository": "https://cran.rstudio.com",
+      "description": {
+        "Package": "collapse",
+        "Title": "Advanced and Fast Data Transformation",
+        "Version": "2.1.7",
+        "Date": "2026-05-17",
+        "Authors@R": "c(\n           person(\"Sebastian\", \"Krantz\", role = c(\"aut\", \"cre\"), \n                  email = \"sebastian.krantz@graduateinstitute.ch\", \n                  comment = c(ORCID = \"0000-0001-6212-5229\")),\n           person(\"Matt\", \"Dowle\", role = \"ctb\"),\n           person(\"Arun\", \"Srinivasan\", role = \"ctb\"),\n           person(\"Morgan\", \"Jacob\", role = \"ctb\"),\n           person(\"Dirk\", \"Eddelbuettel\", role = \"ctb\"),\n           person(\"Laurent\", \"Berge\", role = \"ctb\"),\n           person(\"Kevin\", \"Tappe\", role = \"ctb\"),\n           person(\"Alina\", \"Cherkas\", role = \"ctb\"),\n           person(\"Ivan\", \"Krylov\", role = \"ctb\"),\n           person(\"R Core Team and contributors worldwide\", role = \"ctb\"),\n           person(\"Martyn\", \"Plummer\", role = \"cph\"),\n           person(\"1999-2016 The R Core Team\", role = \"cph\")\n           )",
+        "Description": "A large C/C++-based package for advanced data transformation and \n    statistical computing in R that is extremely fast, class-agnostic, robust, and \n    programmer friendly. Core functionality includes a rich set of S3 generic grouped \n    and weighted statistical functions for vectors, matrices and data frames, which \n    provide efficient low-level vectorizations, OpenMP multithreading, and skip missing \n    values by default. These are integrated with fast grouping and ordering algorithms \n    (also callable from C), and efficient data manipulation functions. The package also \n    provides a flexible and rigorous approach to time series and panel data in R, fast \n    functions for data transformation and common statistical procedures, detailed \n    (grouped, weighted) summary statistics, powerful tools to work with nested data, \n    fast data object conversions, functions for memory efficient R programming, and \n    helpers to effectively deal with variable labels, attributes, and missing data. It \n    seamlessly supports base R objects/classes as well as 'units', 'integer64', 'xts'/\n    'zoo', 'tibble', 'grouped_df', 'data.table', 'sf', and 'pseries'/'pdata.frame'. \n    For a concise overview of the package see Krantz (2026) <doi:10.18637/jss.v116.i01>.",
+        "URL": "https://fastverse.org/collapse/,\nhttps://github.com/fastverse/collapse",
+        "BugReports": "https://github.com/fastverse/collapse/issues",
+        "License": "GPL (>= 2) | file LICENSE",
+        "Encoding": "UTF-8",
+        "LazyData": "true",
+        "Depends": "R (>= 4.1.0)",
+        "Imports": "Rcpp (>= 1.0.1)",
+        "LinkingTo": "Rcpp",
+        "Suggests": "fastverse, data.table, magrittr, kit, xts, zoo, plm, fixest,\nvars, RcppArmadillo, RcppEigen, tibble, dplyr, ggplot2, scales,\nmicrobenchmark, testthat, covr, knitr, rmarkdown, withr, bit64",
+        "VignetteBuilder": "knitr",
+        "NeedsCompilation": "yes",
+        "Packaged": "2026-05-18 15:25:18 UTC; sebastiankrantz",
+        "Author": "Sebastian Krantz [aut, cre] (ORCID:\n    <https://orcid.org/0000-0001-6212-5229>),\n  Matt Dowle [ctb],\n  Arun Srinivasan [ctb],\n  Morgan Jacob [ctb],\n  Dirk Eddelbuettel [ctb],\n  Laurent Berge [ctb],\n  Kevin Tappe [ctb],\n  Alina Cherkas [ctb],\n  Ivan Krylov [ctb],\n  R Core Team and contributors worldwide [ctb],\n  Martyn Plummer [cph],\n  1999-2016 The R Core Team [cph]",
+        "Maintainer": "Sebastian Krantz <sebastian.krantz@graduateinstitute.ch>",
+        "Repository": "CRAN",
+        "Date/Publication": "2026-05-19 05:10:15 UTC",
+        "Built": "R 4.5.2; aarch64-apple-darwin20; 2026-05-19 10:28:16 UTC; unix",
+        "Archs": "collapse.so.dSYM"
+      }
+    },
     "colorspace": {
       "Source": "CRAN",
       "Repository": "https://cran.rstudio.com",
@@ -5412,7 +5442,7 @@
       "checksum": "b544c98e7d55c33a6c62b5c905878c65"
     },
     "DESCRIPTION": {
-      "checksum": "7493a17caac5ad4d8e1cc2010fcac9f7"
+      "checksum": "32f27b183e805601ce591a2db9bc68bc"
     },
     "inst/.DS_Store": {
       "checksum": "1da13fcef58e8b6eb9eb812486e19f2d"
@@ -5424,7 +5454,7 @@
       "checksum": "194577a7e20bdcc7afbb718f502c134c"
     },
     "inst/app/www/custom.css": {
-      "checksum": "6700813d4b009fabe7d99eb700f92fcd"
+      "checksum": "f2a7be23bd4dc3ac168aba811136193c"
     },
     "inst/app/www/custom.js": {
       "checksum": "abbd895a69e10ec5fb814f74722890c9"
@@ -5532,10 +5562,10 @@
       "checksum": "186c4f4ada6fde2694a6b4c07bd61be1"
     },
     "man/aggregate_with_uncertainty_delta.Rd": {
-      "checksum": "74454128cf8f3c7fce9308fe36a5f19b"
+      "checksum": "529b9e0b3a895db9be1e0a60fc967e05"
     },
     "man/allocate_units_to_cells.Rd": {
-      "checksum": "dfc03aa927edfdcb0902b20462e42938"
+      "checksum": "1de666b8054f737fe881bbddb78cee4e"
     },
     "man/apply_deviation.Rd": {
       "checksum": "767b49991524c03d82d1edb90041f69b"
@@ -5544,19 +5574,19 @@
       "checksum": "ceefc8755d85511b40a3661b60271201"
     },
     "man/apply_policy_delta_to_baseline.Rd": {
-      "checksum": "95da1a6e081a351e92f1c426ee1ff8d4"
+      "checksum": "12b3d95c299e155ef9e46ad025288f0f"
     },
     "man/apply_policy_derivations.Rd": {
       "checksum": "007d6d203947a643870eb38546ddc4fc"
     },
     "man/apply_policy_to_svy.Rd": {
-      "checksum": "c973a8825718f016bf0dae712b1c5541"
+      "checksum": "c89265482816672e822cdd42414f72bf"
     },
     "man/assign_data_level.Rd": {
       "checksum": "721d6e1c1feb1225a0f2fc26524a9894"
     },
     "man/attach_active_mask.Rd": {
-      "checksum": "9825225d4453205f80f9be66bd2f467f"
+      "checksum": "edc6831ac8f4e23653cbfd489fb981e1"
     },
     "man/bottom_code_welfare.Rd": {
       "checksum": "3fe4cd0fc96a5aeffd6cf145bc6cd487"
@@ -5565,19 +5595,19 @@
       "checksum": "ba48e05906bde1b86059fd04f5ec58b7"
     },
     "man/build_cell_features.Rd": {
-      "checksum": "3a29775ee5fa5d7ed8b5ddb4f36a3d9c"
+      "checksum": "90ea20ce2eacfdb5d1946878c181f196"
     },
     "man/build_connection_params.Rd": {
-      "checksum": "fcec229e9749c0ddc193e092eca72f37"
+      "checksum": "e5e250e1b4e825998761af9af8772d58"
     },
     "man/build_hist_sim_dates.Rd": {
       "checksum": "8a7ebe44162f674e3ebf420d0213ed1e"
     },
     "man/build_perturbation_method.Rd": {
-      "checksum": "0be53ffd8d4ef3dcb9a8c4849f133b3d"
+      "checksum": "bf5833400feb970346e23973a43ce88f"
     },
     "man/build_ridge_kde_data.Rd": {
-      "checksum": "bcadcdc89d530608b042687644d43d58"
+      "checksum": "ce6b97db6ea1f94c9c3eb5f8944cfd7d"
     },
     "man/build_rif_grid.Rd": {
       "checksum": "fc1bfe268a2ed1d9c24ccce8c85a0aa1"
@@ -5598,25 +5628,25 @@
       "checksum": "970b78f9717300c8cad09946a619b822"
     },
     "man/build_threshold_table_df.Rd": {
-      "checksum": "c7b8661bb67f1235ebbf63f1b4fc7caf"
+      "checksum": "f638602e18d4df561e001d2a51bc6ff1"
     },
     "man/build_weather_spec.Rd": {
-      "checksum": "8bbc53bda691cb1a9d980f0f7487259f"
+      "checksum": "ff15ecbfb820cc3dbc774ffe6f5bdd12"
     },
     "man/calc_fit_stats.Rd": {
       "checksum": "5d059731e85e7fd47bda51ec6dd470fc"
     },
     "man/coef_label.Rd": {
-      "checksum": "07b4f5eb114288a7a995913b04cb7c99"
+      "checksum": "50e7b4e3985ecab0454c5e5ab09c95ae"
     },
     "man/combine_ensemble_results.Rd": {
-      "checksum": "77e7b01e58cd742d7864a6c3fd1f14ea"
+      "checksum": "91d37dd86c3a17cb80d94cf159514867"
     },
     "man/compute_chol_vcov.Rd": {
-      "checksum": "43a238d39fca757a734824743ef9f605"
+      "checksum": "42e33a684acf84066f7f374107a47fd9"
     },
     "man/compute_cluster_counts.Rd": {
-      "checksum": "5330af7af2164c20fccb502c5a2bfed8"
+      "checksum": "ab8f642073edeb3db11702607eda539f"
     },
     "man/compute_factor_loading.Rd": {
       "checksum": "d624b2c1a4ebe92afa4710bb9f8e6048"
@@ -5628,7 +5658,7 @@
       "checksum": "688f4ef2ebba779c8fe280f5ada43841"
     },
     "man/decompose_policy_effect.Rd": {
-      "checksum": "8f604e692a285436cda6f53936fe6a8d"
+      "checksum": "40b121a3a5ec01cb207792d4c0c22132"
     },
     "man/default_lcu_poverty_line.Rd": {
       "checksum": "94ad933fb60c4f0645cce810a961f0f2"
@@ -5637,7 +5667,7 @@
       "checksum": "1fd494323cff14587635f93db3b7b8a4"
     },
     "man/detect_manipulated_vars.Rd": {
-      "checksum": "d5503fac0c85f1dcfef7875bfb971cd0"
+      "checksum": "268ee754b4a51128a2cf35225e2fc812"
     },
     "man/detect_modified_cols.Rd": {
       "checksum": "61880342e4995787289d63d9dea35e7e"
@@ -5652,28 +5682,25 @@
       "checksum": "28a27fa1f44e753f86f5d59f0c59b88a"
     },
     "man/dot-compute_rif_channels.Rd": {
-      "checksum": "69516e9b75cd995904469398eb48dc54"
+      "checksum": "d39263a7623499db8431a258a7597281"
     },
     "man/dot-compute_rif_policy_correction.Rd": {
-      "checksum": "f7fd3802f79ac86fdc02ec6fe4db15fc"
+      "checksum": "3de8bc11035e5472dd97470ab6907083"
     },
     "man/dot-fixest_vcov.Rd": {
-      "checksum": "1dd93a98c7be3983119b802888d4421d"
-    },
-    "man/dot-geojson_bounds.Rd": {
-      "checksum": "5ee71936d708474c16e06a2c6159515f"
+      "checksum": "f63a52ff08a49a83e6cb7440f4d698e7"
     },
     "man/enhance_exceedance.Rd": {
-      "checksum": "8c739a46c9c5aec0114e1daccdbe4152"
+      "checksum": "ad727a7ef5fd1f3cca4caa90c1e610f3"
     },
     "man/exclude_selected_vars.Rd": {
       "checksum": "f9ffd4b5f8e154f2c8b0bf213f3add82"
     },
     "man/expand_hist_dates.Rd": {
-      "checksum": "c86a2244252f0ef28742f2780123f1cc"
+      "checksum": "05db88ece0a3dd420a822ef6bddf0379"
     },
     "man/extract_native_fit.Rd": {
-      "checksum": "71e531659425dc8298f91f26932a9897"
+      "checksum": "cf72c6192b029c71b66299f12f3cbc9b"
     },
     "man/extract_rif_median.Rd": {
       "checksum": "41523b382231ece105fcd89b91c6c004"
@@ -5703,7 +5730,7 @@
       "checksum": "208bd5550d25bcc1261656a3a9d445c5"
     },
     "man/filter_valid_vars.Rd": {
-      "checksum": "8ba66fccdc8ae61f1b16937fecff2c55"
+      "checksum": "33489f4fb7cc490f112cbc144b4eaaca"
     },
     "man/filter_vars_by_role.Rd": {
       "checksum": "51c7a4c98bd3df65b4b240c37605dc18"
@@ -5718,7 +5745,7 @@
       "checksum": "4fd3251be4ac4d9e2198da1516ee134f"
     },
     "man/get_policy_choices.Rd": {
-      "checksum": "841cd1b1262978cd892df74a65c7d4e0"
+      "checksum": "f6dfe0d58de760cf980f6872a64ddb0b"
     },
     "man/get_policy_locked_vars.Rd": {
       "checksum": "3b4826606513ca09851864cfc164a62b"
@@ -5727,10 +5754,10 @@
       "checksum": "482df4ac5a8cfbd8a6c5f725fbee97d9"
     },
     "man/get_weather.Rd": {
-      "checksum": "13544cf90485dbb2653ab564a7cc69d3"
+      "checksum": "7b135a59430138caee2e7aacdb154a37"
     },
     "man/hist_aggregate_choices.Rd": {
-      "checksum": "a297d458e21dfe24b2386dfe204b310c"
+      "checksum": "c4809d55aa6666c8fffb4883a45ba12a"
     },
     "man/infer_engine.Rd": {
       "checksum": "85ef96d0e010548dbd286ba893b93482"
@@ -5739,16 +5766,16 @@
       "checksum": "63afdb56aef1400a3a8b044354285a4c"
     },
     "man/interpolate_F_loading.Rd": {
-      "checksum": "d437cbf74707157ee5d4ff9927923a89"
+      "checksum": "b4347090086f765d6b59671b4abd3679"
     },
     "man/is_logistic_fit.Rd": {
       "checksum": "bd3dfcd58a42238527a99aa9aa919aa4"
     },
     "man/is_monetary_outcome.Rd": {
-      "checksum": "22c23814fdb5d4676957086d2730db3c"
+      "checksum": "e7d0bc77177ac849cea44acf1c19f1ee"
     },
     "man/join_hist_sample_cells.Rd": {
-      "checksum": "7570b756f01ed6d0d901bd4960f9490f"
+      "checksum": "394df313997093f05c93d0760b902d12"
     },
     "man/label_agg_method.Rd": {
       "checksum": "bc0c80dd53e3d61a8f5e5310ca295122"
@@ -5760,31 +5787,31 @@
       "checksum": "c030a660c7c90e0e76d79ea73d74a819"
     },
     "man/loc_panel.Rd": {
-      "checksum": "e0d4f746561491ebdff79ddc683d4bff"
+      "checksum": "6b6907408c0d11ec66bb7741f0ebf875"
     },
     "man/make_coef_map.Rd": {
       "checksum": "1e3e86fa3264fba3d4dfc42be2582819"
     },
     "man/make_coefplot.Rd": {
-      "checksum": "2a1b89cc1e93abde290a6040512bb3c7"
+      "checksum": "ae99d7d3fff3fe4cf233b954228141e4"
     },
     "man/make_stats_dt.Rd": {
-      "checksum": "b9e432eec107517582bb1516f93b6169"
+      "checksum": "66e21e4613b018898a39894337947a83"
     },
     "man/make_weather_binned_stats_dt.Rd": {
       "checksum": "f785962212412eab26dee2b16a6113a4"
     },
     "man/make_weather_effect_plot.Rd": {
-      "checksum": "74f651c03a582e460e579b0c00a2a11c"
+      "checksum": "1fd83a059d34dea74946267e185de263"
     },
     "man/make_weather_stats_dt.Rd": {
       "checksum": "8802095a124665277f42002924464040"
     },
     "man/merge_loc_values_to_cells.Rd": {
-      "checksum": "b50f7187325c46adb2fbcae818bc9839"
+      "checksum": "127f8490f86db208f9eb1cb3a7218b9c"
     },
     "man/merge_survey_weather.Rd": {
-      "checksum": "c8f2460bf3b452088de921ca30afb18f"
+      "checksum": "18e97a8e792d2e34784b07031d62794e"
     },
     "man/model_type_choices.Rd": {
       "checksum": "c53188a3f1c8d1c52d2ce6dd94d511e8"
@@ -5793,16 +5820,16 @@
       "checksum": "c906bd3a97b4abfaf19ea3551baea899"
     },
     "man/outcome_direction.Rd": {
-      "checksum": "916982a89a5f24f1d1ab856c52b5d90a"
+      "checksum": "522b04d8e475c1405b7fb1710c487970"
     },
     "man/outcome_info_message.Rd": {
-      "checksum": "83d7d1a5e413b076f4c6d23c227e3349"
+      "checksum": "3b67d4f86b17366f098bd01ca0a7124a"
     },
     "man/outcome_missing_summary.Rd": {
-      "checksum": "5dff0affe4fec3d00da072e54c448ca9"
+      "checksum": "8315fa11a912f2cbffa2dab177f452ac"
     },
     "man/outcome_transform.Rd": {
-      "checksum": "0955a0fb0220bbac620124bec47f62aa"
+      "checksum": "81908863ccfc512338f86b8cad01fe86"
     },
     "man/parse_custom_breaks.Rd": {
       "checksum": "51f0de9d34017266bd1a674aa0fda1fb"
@@ -5817,10 +5844,10 @@
       "checksum": "ff075250c1929e6314d933de5fdb04db"
     },
     "man/plot_outcome_coverage_map.Rd": {
-      "checksum": "05c00740770e6179f163d3b0e7069d87"
+      "checksum": "0c93e22c64a14c1f4aa8efb903ff53b2"
     },
     "man/plot_pointrange_climate.Rd": {
-      "checksum": "72f077987a95a21bf7340d6f92e04ac6"
+      "checksum": "9f855d0cf181b0ed36e24bc21df04440"
     },
     "man/plot_pred_vs_actual.Rd": {
       "checksum": "b21ad213817414ed951dbb7a2c942914"
@@ -5829,7 +5856,7 @@
       "checksum": "ff2f487146ab48fe801638cf0116a91b"
     },
     "man/plot_resid_weather.Rd": {
-      "checksum": "86bdf51b50ecf38ca7fca453e1d970c4"
+      "checksum": "cf35dbfcf9bc8c8d9e34eb13882870b3"
     },
     "man/plot_sample_density_map.Rd": {
       "checksum": "e9f979601ded32d15d2eb02c1fd7d40b"
@@ -5838,28 +5865,28 @@
       "checksum": "a24562d79213b11990b2ac49269031c8"
     },
     "man/plot_timeseries_spaghetti.Rd": {
-      "checksum": "8f49545bc3cd6747dad2d4a3339014f4"
+      "checksum": "4b08e2fabad445acefc290667623b826"
     },
     "man/plot_variance_contribution.Rd": {
       "checksum": "d57426ddd301f4255be54b229b4c7091"
     },
     "man/plot_weather_bins_compare.Rd": {
-      "checksum": "e5c2abc7a01bc6edd4eb325ea73fb756"
+      "checksum": "4bef8731f9e6a6cf26d00bcee77dbb9f"
     },
     "man/plot_weather_density_panel.Rd": {
       "checksum": "194220726c85ec2987f0c4653cb31a29"
     },
     "man/plot_weather_dist.Rd": {
-      "checksum": "970a54df2a64062e819a003f0dde3874"
+      "checksum": "90c6958749d5b454db23e5ef26cb767c"
     },
     "man/plot_weather_loc_map.Rd": {
-      "checksum": "7c77fd13f02493d2d6e5695644934faa"
+      "checksum": "906021f20b8e1725f7a0c1b09a64cda1"
     },
     "man/plot_weather_ridges_compare.Rd": {
       "checksum": "ea558a52fdfbdd7a4a87dd04806d4bb0"
     },
     "man/plot_welfare_dist.Rd": {
-      "checksum": "86d20bc3c3a0a92cf7c1cfe290db2de7"
+      "checksum": "a18df12c0b769a174d68c90cc2717a83"
     },
     "man/plot_year_anchored_ridge.Rd": {
       "checksum": "4e5548cb2a74ac2f0cb65fe4b94a0916"
@@ -5880,31 +5907,31 @@
       "checksum": "03a3de677e66b9f2d3eee6d24219dffb"
     },
     "man/predict_outcome.Rd": {
-      "checksum": "b9b542b7e0c403feb08906bc9b5460f7"
+      "checksum": "6063444047f2129198d0f3d7ea3c4e7f"
     },
     "man/predict_rif.Rd": {
-      "checksum": "206f930026b51fdb9745530272cb7178"
+      "checksum": "2d5748cf617b55ea7c72ad28168fe26c"
     },
     "man/prepare_hist_weather.Rd": {
       "checksum": "67e2dab10ee3539c700be8ef2a140073"
     },
     "man/prepare_outcome_df.Rd": {
-      "checksum": "7cb44eeb8aacc6ad2124d526982a48e0"
+      "checksum": "2ffd16f832b7c7bc053ffd1fa35f5578"
     },
     "man/residual_choices.Rd": {
-      "checksum": "6e90a69876526d3ab17ceca05cd346cf"
+      "checksum": "72d54e07e6b48fa95917d0a7dedb8993"
     },
     "man/residual_method_ui.Rd": {
       "checksum": "556d685c5014866805d29a95de77ccea"
     },
     "man/resimulate_with_svy.Rd": {
-      "checksum": "4b3f5c62f1add1442d5c44c510aaec0f"
+      "checksum": "595e05bc316779511895cb6ec023ef4f"
     },
     "man/resolve_agg_fn.Rd": {
       "checksum": "88016d9c479467b8bb8418e2fda96a39"
     },
     "man/resolve_band_q.Rd": {
-      "checksum": "797f0de3274555d4f990a1355dd09522"
+      "checksum": "54316f750e7d1410a92910fe2b9811ef"
     },
     "man/resolve_model_matrix.Rd": {
       "checksum": "9f41a5d5bc74383b5eacdf2fb90295ad"
@@ -5916,10 +5943,10 @@
       "checksum": "634c12f88fd618bdc1780d585c8102b7"
     },
     "man/run_lasso_selection.Rd": {
-      "checksum": "3350903d201bd15928c8fb25093a6afc"
+      "checksum": "69985a9aaec0168b6ebae2a6df1b8345"
     },
     "man/run_sim_pipeline.Rd": {
-      "checksum": "f092757766d73a16ccd0a65045f4e1b6"
+      "checksum": "e9d65e8bc4192438799bf3de4978d200"
     },
     "man/SP_TRANSFER_COL.Rd": {
       "checksum": "086b7802421417ea345d2dcc0f39d15f"
@@ -5931,10 +5958,10 @@
       "checksum": "88a25d3acc8a4f0682a28eeac787c764"
     },
     "man/summarise_weather_anomaly_by_loc.Rd": {
-      "checksum": "71ce49e9bc27224ca3abea716df7e4b3"
+      "checksum": "44c5b669b383db9190d442799157e8ac"
     },
     "man/summarise_weather_by_loc.Rd": {
-      "checksum": "d85f162d8cfb303f5d9d29cfb69b811c"
+      "checksum": "83e5f054293f635ce65fa835872fbca7"
     },
     "man/survey_wave_list.Rd": {
       "checksum": "cf0b5f87b5176a257b430f808dcd991e"
@@ -5960,8 +5987,11 @@
     "man/welfare_poverty_lines.Rd": {
       "checksum": "36ea2bf6f23c8b0a4557508e3d3b6308"
     },
+    "man/wise-package-globals.Rd": {
+      "checksum": "6acbc5ac7fc9a86ed74524fd235beab3"
+    },
     "NAMESPACE": {
-      "checksum": "d3ad63ede8cfb5b48866b7dd4e55f747"
+      "checksum": "ccfb4f84ef6642a3538ebc4c9c636402"
     },
     "R/_disable_autoload.R": {
       "checksum": "1178c335d6c11555fd1c4ec6098dfee6"
@@ -5970,169 +6000,172 @@
       "checksum": "5c279a695e6b90f1ddece82189def667"
     },
     "R/app_server.R": {
-      "checksum": "5ced54578f82dbccee7954aa0416e445"
+      "checksum": "db05910e697f73e50cff2a22f3726095"
     },
     "R/app_ui.R": {
-      "checksum": "14cd33999386eab459cefb63e96774f0"
+      "checksum": "0e64dff24ebd7e75c488cf60ed63834f"
     },
     "R/fct_aggregation_delta.R": {
-      "checksum": "a13ddc92f343ca3d03a7fddc6c4bcdad"
+      "checksum": "61d5f95d5733a5ae8d0e5f1bfeb0f868"
     },
     "R/fct_aggregation.R": {
-      "checksum": "c22a41f27eaf15296547f09ef2f4bb69"
+      "checksum": "84b9ea9f66a0f771e03130e96cce3e0a"
     },
     "R/fct_connection.R": {
-      "checksum": "6c352a07d29d8e02f3d9fe7f96062e3b"
+      "checksum": "348690ad3b7629f708aacc37741a0826"
     },
     "R/fct_fit_model.R": {
-      "checksum": "c43f074e9bfe2e8fdc80be5d74c4209a"
+      "checksum": "22ccaea8d1f302a4455b791ca3864f7d"
     },
     "R/fct_get_weather.R": {
-      "checksum": "f24874190aaba73ac6e9669a6fdc565b"
+      "checksum": "12dcafdbc788b56062bb05bddea2ba86"
     },
     "R/fct_load_data.R": {
-      "checksum": "042136fc9ca4330927c6802fc4478f91"
+      "checksum": "f44bc1d5e80c4e3506a716f180065a52"
     },
     "R/fct_loc_panel.R": {
-      "checksum": "e0506a1b56eac2254937d321e56025a6"
+      "checksum": "83b8c9462b7b5823208397280ec1f373"
     },
     "R/fct_model_select.R": {
-      "checksum": "cea6b57fe7fb0cb150270dbf63f94c76"
+      "checksum": "87969feb3d30728bf3aecf3a67962d8d"
     },
     "R/fct_outcome.R": {
-      "checksum": "0e63934aa17ae90b0e1a8c49a3fcef6f"
+      "checksum": "1a1852469d89bf8d5fd16905440385b4"
     },
     "R/fct_policy_decompose.R": {
-      "checksum": "48807fb2fc9df600f218509bd203a8b3"
+      "checksum": "5ac20633a8c84cbae3eb167af72b3b2b"
     },
     "R/fct_policy_sim_compare.R": {
-      "checksum": "01a6545674d982cc75c3c26dc95f2ab4"
+      "checksum": "cbeefcecc0dbf75566c78ed247c3e329"
     },
     "R/fct_policy_sim.R": {
-      "checksum": "b53a39689240944efd31bb69c4348c89"
+      "checksum": "bc0345968689b7532036058f1bd3d528"
     },
     "R/fct_predict_outcomes.R": {
-      "checksum": "bd0f631e9be46dedee6bca15a8159d43"
+      "checksum": "d72e37aeb2719316263337160d263cfe"
     },
     "R/fct_results.R": {
-      "checksum": "82524a79b03a79f6ac239da110b573a7"
+      "checksum": "081cb151b27882030330722482d06583"
     },
     "R/fct_rif_sim.R": {
-      "checksum": "95caf6e70a4ddc818215fb3a47a25adc"
+      "checksum": "f1f7f93d0f2507c78ea1732b271c47db"
     },
     "R/fct_run_simulation.R": {
-      "checksum": "ddf3181a80d966522fecae03e0460cd8"
+      "checksum": "2d9116295bdbc1ddbc57c7f2b8cd7e9b"
     },
     "R/fct_sample.R": {
       "checksum": "b5a9f6721c0d6b5b2ac437807b6c9946"
     },
     "R/fct_sim_compare.R": {
-      "checksum": "8d5e9c949ceaeb2c1c63cc6bec9d0677"
+      "checksum": "3e8fbaf721626089bd35ba02e2790d2e"
     },
     "R/fct_sim_diag.R": {
-      "checksum": "d51fae3c2d8de3a00120dc41c7ae1ddf"
+      "checksum": "b2fbae71224c4f9eb1dd14898dbdd887"
     },
     "R/fct_simulations.R": {
-      "checksum": "9093a1b04fef7c5e6d96d0ec3688d6a2"
+      "checksum": "f291121e5d1129b5729f208fb5630b4b"
     },
     "R/fct_surveystats.R": {
-      "checksum": "e5d9388b69612af7bc1a1a417cb3937b"
+      "checksum": "e6c78cca1590f7cca7d5e741842d3746"
     },
     "R/fct_uncertainty_helpers.R": {
-      "checksum": "4c281ad469e8649a23737e86e5e9b627"
+      "checksum": "e9afdfc1c1791fdfd0a8a21622264bb0"
     },
     "R/fct_weather_select.R": {
-      "checksum": "b274f7fa2b63067a183066961969d3d4"
+      "checksum": "30de0bd40333d11a8dd82d324588004e"
     },
     "R/fct_weatherstats.R": {
-      "checksum": "b4d046ce23fdd92f138d5340ecc43f92"
+      "checksum": "27d31b34ed8fa8dcc22faf7e2ce6c1e6"
+    },
+    "R/globals.R": {
+      "checksum": "320aad9167a2eec96c0ded6fd6f10143"
     },
     "R/mod_0_overview.R": {
-      "checksum": "eb95418b6da329bccc4e3253a2acd152"
+      "checksum": "7b8fc1ceae9d5f2b5ded51363f869ed3"
     },
     "R/mod_1_01_sample.R": {
-      "checksum": "7e620170c55245c4eb79a2b0827e511c"
+      "checksum": "cb09bcf726d307e58bb58c8dab04c0ab"
     },
     "R/mod_1_02_surveystats.R": {
-      "checksum": "0675f0e33dcb653e374e2c7d715b2e53"
+      "checksum": "31e0125520235da7be06eab018e1e2ab"
     },
     "R/mod_1_03_outcome.R": {
-      "checksum": "2a30b10cabe650ed1c1a749a782928f4"
+      "checksum": "1fd2925322c46446c707dc5e4637a5dc"
     },
     "R/mod_1_04_weather.R": {
-      "checksum": "921095e9e5f5ad169f9eb352d83273bb"
+      "checksum": "5212e758a027a0a57170d11fff5c8901"
     },
     "R/mod_1_05_weatherstats.R": {
-      "checksum": "aab0a9fd46902c759e15322b3b17b079"
+      "checksum": "e6278f2d9ab4c5a4bea09a78a9862d65"
     },
     "R/mod_1_06_model.R": {
-      "checksum": "646142f3158250c234da2ca4e0bf62e8"
+      "checksum": "f025eb1671c4338491d95c97564a8a3d"
     },
     "R/mod_1_07_results.R": {
-      "checksum": "1853264f37057b3101bbcea2572f94b2"
+      "checksum": "9f7fe3658512701ee5084a5705cedb08"
     },
     "R/mod_1_08_modelfit.R": {
-      "checksum": "5368ce790e6c70dc0f14f5fb387ceebf"
+      "checksum": "ebfde8a663b6afea1644cba0821fa734"
     },
     "R/mod_1_modelling.R": {
-      "checksum": "2fb9cd289aa960bc748c3ef7471ffcd6"
+      "checksum": "dcc98bdb7ba5b499226ff5fe357e9e97"
     },
     "R/mod_2_01_weathersim.R": {
-      "checksum": "bb20d5ab1ac892cf262c9f679f64dfb8"
+      "checksum": "f4f2482b56e3dafa1ef3c1521d1bc3fd"
     },
     "R/mod_2_02_results.R": {
-      "checksum": "f3861f4c32d75a9d715528595f15c136"
+      "checksum": "170d33e641cc510ab1dcb6e2b0c5d97e"
     },
     "R/mod_2_03_diagnostics.R": {
-      "checksum": "588843a282909b2078cd21529ee1c4ee"
+      "checksum": "cdc11317ec926c44e7c1399959006a2d"
     },
     "R/mod_2_simulation.R": {
-      "checksum": "4fc77e8a697a30c77c7168cb27f27d05"
+      "checksum": "3f729eed232f491f085b86edd101222f"
     },
     "R/mod_3_01_sp.R": {
-      "checksum": "2b015c85dbb19a4a3acea5cb65fac082"
+      "checksum": "e92ccc1ab7d81e112900b464869c6cd7"
     },
     "R/mod_3_02_infra.R": {
-      "checksum": "2cd26bea81485448d856540a037b5af2"
+      "checksum": "9b2de1973fa05b2d7635783cbf45e72e"
     },
     "R/mod_3_03_digital.R": {
-      "checksum": "493a0011dada67a7b005fba75d900fcc"
+      "checksum": "ec55491bb4cfd3cd28f8e846e0ec68b3"
     },
     "R/mod_3_04_labor.R": {
-      "checksum": "af629fc41389977a4e5f0b705edf441b"
+      "checksum": "9f354676d29a27628d8e5b0a5259eea9"
     },
     "R/mod_3_05_education.R": {
-      "checksum": "123fbebff98bf3573bbeebafea400a08"
+      "checksum": "389cfc45a257ea9a5718f3dc4d7d3495"
     },
     "R/mod_3_06_policy_sim.R": {
-      "checksum": "469f0db29d1bddb448edc2fd2efc5eec"
+      "checksum": "2bc6ae77570909cecb5a045c9764d2a9"
     },
     "R/mod_3_07_results.R": {
-      "checksum": "59d8536d7cdbb8887b2a248ffd3cea83"
+      "checksum": "545de35fc78f73b44ede5b3acfdcc1d7"
     },
     "R/mod_3_08_diagnostics.R": {
       "checksum": "b500ec191a5845767c3c03eadb470f1c"
     },
     "R/mod_3_09_decomposition.R": {
-      "checksum": "7abbc1e9f0355a5b0513778f3a309a73"
+      "checksum": "fe96869adca998a74fb8592c306b7038"
     },
     "R/mod_3_scenario.R": {
-      "checksum": "da14a84056d42fee03ae6b3da7c5c179"
+      "checksum": "23595086582e4107a54ddb6528bcf198"
     },
     "R/run_app.R": {
       "checksum": "8c7dd4416135685d5d40681c52f5e920"
     },
     "R/utils_math.R": {
-      "checksum": "70be52f3edd2cdfdb6e5b8ae84a15f30"
+      "checksum": "c935ad087463b6b54d4a011b143cf298"
     },
     "R/utils_mod_1_helpers.R": {
-      "checksum": "4aa7b4cf37db703f45c683c29060737c"
+      "checksum": "d690cf6c479f3a004c62418f4c5cd1a6"
     },
     "R/utils_plot_theme.R": {
-      "checksum": "a803289bd7427d767d06a57ea93fd08f"
+      "checksum": "b10a72f6d3b122b6210b7731bea624f0"
     },
     "R/utils_ui.R": {
-      "checksum": "8cc0686bd2a75c65e58c65eaf82c4941"
+      "checksum": "e281209e66235016eb1fcd6e48b4053a"
     }
   },
   "users": null

@@ -310,36 +310,49 @@ mod_3_09_decomposition_server <- function(id,
   }
 
   # Weighted mean per channel per scenario * sim_year
-  # (each row in sc_df is a household; aggregate to year-level first)
+  # (each row in sc_df is a household; aggregate to year-level first).
+  # One shared grouping, one grouped pass per channel (PERF-05 follow-up):
+  # the old code re-split the full frame for every channel.
   has_years <- "sim_year" %in% names(sc_df) && !all(is.na(sc_df$sim_year))
 
-  agg_rows <- lapply(names(channels), function(col) {
-    if (!col %in% names(sc_df)) return(NULL)
+  key_cols <- if (has_years) {
+    c("scenario", "year_start", "year_end", "sim_year")
+  } else {
+    c("scenario", "year_start", "year_end")
+  }
 
-    by_vars <- if (has_years) {
-      list(sc_df$scenario, sc_df$year_start, sc_df$year_end, sc_df$sim_year)
-    } else {
-      list(sc_df$scenario, sc_df$year_start, sc_df$year_end)
-    }
-    groups <- split(seq_len(nrow(sc_df)), interaction(by_vars, drop = TRUE))
+  # interaction()/split() dropped rows with missing grouping keys
+  keep <- complete.cases(sc_df[key_cols])
+  sc   <- sc_df[keep, , drop = FALSE]
+  if (nrow(sc) == 0) return(NULL)
 
-    rows <- lapply(groups, function(idx) {
-      d <- sc_df[idx, ]
-      w <- d$weight
-      data.frame(
-        scenario   = d$scenario[[1]],
-        year_start = d$year_start[[1]],
-        year_end   = d$year_end[[1]],
-        sim_year   = if (has_years) d$sim_year[[1]] else NA_integer_,
-        channel    = channels[[col]],
-        pct        = stats::weighted.mean((exp(d[[col]]) - 1) * 100, w,
-                                          na.rm = TRUE),
-        stringsAsFactors = FALSE
-      )
-    })
-    do.call(rbind, rows)
-  })
-  agg_df <- do.call(rbind, Filter(Negate(is.null), agg_rows))
+  g   <- collapse::GRP(sc, by = key_cols)
+  first_idx <- match(seq_len(g$N.groups), g$group.id)
+  w   <- sc$weight
+  w[is.na(w)] <- NA_real_
+  key_at <- function(col) sc[[col]][first_idx]
+
+  agg_df <- do.call(rbind, Filter(Negate(is.null), lapply(names(channels), function(col) {
+    if (!col %in% names(sc)) return(NULL)
+
+    # weighted.mean(..., na.rm = TRUE) drops NA values but keeps Inf and
+    # zero/negative weights, so only NAs are folded out here
+    z <- (exp(sc[[col]]) - 1) * 100
+    z[is.na(w)] <- NA_real_
+
+    pct <- as.numeric(collapse::fmean(z, g = g, w = w, na.rm = TRUE))
+    pct[is.nan(pct)] <- NA_real_
+
+    data.frame(
+      scenario   = key_at("scenario"),
+      year_start = key_at("year_start"),
+      year_end   = key_at("year_end"),
+      sim_year   = if (has_years) key_at("sim_year") else NA_integer_,
+      channel    = unname(channels[[col]]),
+      pct        = pct,
+      stringsAsFactors = FALSE
+    )
+  })))
   if (is.null(agg_df) || nrow(agg_df) == 0) return(NULL)
 
   agg_df$channel    <- factor(agg_df$channel, levels = unname(channels))
