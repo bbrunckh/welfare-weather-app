@@ -508,11 +508,7 @@ run_sim_pipeline <- function(weather_raw,
   }
 
   survey_wd_sim <- weather_raw |>
-    dplyr::mutate(
-      year      = as.character(year),
-      int_month = as.integer(format(timestamp, "%m")),
-      sim_year  = as.integer(format(timestamp, "%Y"))
-    ) |>
+    .add_sim_timestamp_fields() |>
     dplyr::select(-timestamp) |>
     dplyr::inner_join(svy_join, by = c("code", "year", "survname", "loc_id", "int_month")) |>
     dplyr::mutate(year = as.factor(year))
@@ -842,12 +838,38 @@ build_perturbation_method <- function(selected_weather) {
 # Weather preparation for simulation                                           #
 # ---------------------------------------------------------------------------- #
 
+#' Add Simulation Month/Year Fields Derived from `timestamp`
+#'
+#' Converts `timestamp` to `Date`-character `year`, plus integer `int_month`
+#' and `sim_year` extracted in a single `as.POSIXlt()` pass. POSIXlt truncates
+#' fractional seconds, so timestamps cannot roll across a month/year boundary
+#' the way `format()` rounding could.
+#'
+#' @param df A data frame with a `timestamp` column.
+#'
+#' @return `df` with `year` as character and `int_month`/`sim_year` integers.
+#' @noRd
+.add_sim_timestamp_fields <- function(df) {
+  ts_lt <- as.POSIXlt(df$timestamp)
+  dplyr::mutate(
+    df,
+    year      = as.character(year),
+    int_month = as.integer(ts_lt$mon + 1L),
+    sim_year  = as.integer(ts_lt$year + 1900L)
+  )
+}
+
 #' Prepare Historical Weather Data for Simulation
 #'
 #' Takes raw output from `get_weather()` and joins it back to the survey frame,
 #' adding `sim_year` and ensuring `year` is a factor consistent with the
 #' training data. Weather and outcome columns from the survey frame are dropped
 #' before the join to avoid duplication.
+#'
+#' @details `int_month` and `sim_year` are derived from `timestamp` via
+#'   `as.POSIXlt()` (truncating) rather than `format()`, which rounds
+#'   fractional seconds and could shift boundary timestamps into the next
+#'   month/year.
 #'
 #' @param weather_raw A data frame returned by `get_weather()`, containing at
 #'   least columns `code`, `year`, `survname`, `loc_id`, `int_month`, and
@@ -873,11 +895,7 @@ prepare_hist_weather <- function(weather_raw,
   drop_cols <- c(selected_weather$name, outcome_name)
 
     weather_raw |>
-    dplyr::mutate(
-      year      = as.character(year),
-      int_month = as.integer(format(timestamp, "%m")),
-      sim_year  = as.integer(format(timestamp, "%Y"))
-    ) |>
+    .add_sim_timestamp_fields() |>
     dplyr::select(-timestamp) |>
     dplyr::inner_join(
       survey_weather |>

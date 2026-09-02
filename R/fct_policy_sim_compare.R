@@ -1217,7 +1217,7 @@ policy_input_diagnostics <- function(baseline_svy, policy_svy, vars = NULL) {
       show_coef   = isTRUE(input$show_coef_uncertainty) && has_draws()
     )
   }, height = 600)
-  outputOptions(output, "summary_box_plot", suspendWhenHidden = FALSE)
+  outputOptions(output, "summary_box_plot", suspendWhenHidden = TRUE)
 
   output$summary_threshold_table <- DT::renderDT({
     req(threshold_table_rv())
@@ -1245,7 +1245,7 @@ policy_input_diagnostics <- function(baseline_svy, policy_svy, vars = NULL) {
       extensions = "Buttons"
     )
   })
-  outputOptions(output, "summary_threshold_table", suspendWhenHidden = FALSE)
+  outputOptions(output, "summary_threshold_table", suspendWhenHidden = TRUE)
 
   output$threshold_table_header <- renderUI({
     req(baseline_agg_hist())
@@ -1290,7 +1290,7 @@ policy_input_diagnostics <- function(baseline_svy, policy_svy, vars = NULL) {
       ensemble_band_q = ens_q
     )
   })
-  outputOptions(output, "exceedance_plot", suspendWhenHidden = FALSE)
+  outputOptions(output, "exceedance_plot", suspendWhenHidden = TRUE)
 
   output$timeseries_plot <- renderPlot({
     req(timeseries_curves_rv())
@@ -1303,7 +1303,7 @@ policy_input_diagnostics <- function(baseline_svy, policy_svy, vars = NULL) {
       ensemble_band_q = ens_q
     )
   })
-  outputOptions(output, "timeseries_plot", suspendWhenHidden = FALSE)
+  outputOptions(output, "timeseries_plot", suspendWhenHidden = TRUE)
 
   output$exceedance_caption <- renderUI({
     req(baseline_agg_hist())
