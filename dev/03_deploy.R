@@ -70,42 +70,37 @@ rsconnect::writeManifest(
   appPrimaryDoc = "app.R"
 )
 
-## IMPORTANT (2026-09-02, MapLibre migration): do NOT strip sf/terra/geojsonsf
-## from the manifest. {mapgl} hard-depends on all three -- they are in its
-## DESCRIPTION Imports AND its NAMESPACE does import(sf)/import(terra)/
-## import(geojsonsf) -- so packrat cannot even INSTALL mapgl without them
-## (build fails with "dependencies 'geojsonsf', 'sf', 'terra' are not
-## available for package 'mapgl'"), and mapgl could not be loaded at runtime
-## without them either. The old leaflet-era strip was only ever safe by
-## accident: leaflet does list sf (>= 0.9-6) in Imports, but its NAMESPACE
-## merely registers S3 methods for sf classes (no import(sf)), and packrat
-## kept restoring the already-installed packrat library from the earlier
-## push-button deploys instead of re-running the dependency check.
-##
-## The Connect host also has no GDAL/GEOS/PROJ headers, so installing the
-## three from source (Repository = cran.rstudio.com) is not an option. Point
-## them at Posit Package Manager's centos8 BINARY repo -- Connect already
-## hands packrat exactly this URL -- after every writeManifest() run:
+## IMPORTANT (2026-09-02, MapLibre rollback): after every writeManifest() run,
+## re-strip "sf" from manifest.json. The Connect host cannot build sf
+## (GDAL 3.10.2 headers exist but the runtime libgdal.so.36 is missing, so
+## configure fails; see the 2026-09-02 deploy incident). It is safe to drop sf
+## because nothing in the executed app loads it:
+##   - leaflet lists sf (>= 0.9-6) in Imports, but its NAMESPACE only
+##     registers S3 methods for sf classes (no import(sf)), so the package
+##     loads fine without sf installed;
+##   - the mapgl/vector-basemap experiment was rolled back to leaflet for
+##     exactly this reason: mapgl hard-Imports sf/terra/geojsonsf in both
+##     DESCRIPTION and NAMESPACE (import(sf)/import(terra)/import(geojsonsf)),
+##     which made the sf strip fatal for mapgl -- and per-feature styles are
+##     available on leaflet via feature.properties.style anyway, so the
+##     one-layer-per-map rendering survives the rollback.
+##   - batch/ scripts do use sf but batch/ is excluded from appFiles.
+## geojsonsf, classInt and the other mapgl-only deps drop out of the dep scan
+## automatically once mapgl leaves DESCRIPTION Imports. terra STAYS: raster
+## (a leaflet dependency) requires it and terra builds without GDAL.
 m <- jsonlite::fromJSON("manifest.json", simplifyVector = FALSE)
-ppm_bin <- "https://packagemanager.posit.co/cran/__linux__/centos8/latest"
-for (p in c("sf", "terra", "geojsonsf")) {
-  stopifnot(!is.null(m$packages[[p]]))
-  m$packages[[p]]$Repository <- ppm_bin
-}
+stopifnot(!is.null(m$packages[["sf"]]))
+m$packages[["sf"]] <- NULL
 jsonlite::write_json(m, "manifest.json", auto_unbox = TRUE, pretty = TRUE, null = "null")
 ## Verify before committing:
-##   jq -r '.packages | keys[]' manifest.json | grep -cxE 'sf|terra|geojsonsf'  ->  3
-##   jq -r '.packages.sf.Repository' manifest.json  ->  ...__linux__/centos8/latest
+##   jq -r '.packages | has("sf")' manifest.json          ->  false
+##   jq -r '.packages | has("mapgl")' manifest.json       ->  false
+##   jq -r '.packages | has("brand.yml")' manifest.json   ->  true
 ##
-## NOTE: the PPM binaries still require the GDAL/GEOS/PROJ/udunits RUNTIME
-## libraries on the Connect host at load time (EPEL 8). terra 1.9-11 has been
-## in every committed manifest and deployed fine, which suggests the stack is
-## present; if the build instead fails with a "libgdal.so / libgeos.so cannot
-## open shared object" error, the Connect admins must install the runtime
-## libraries -- there is no way to run {mapgl} without them. If packrat
-## cannot find the recorded versions on PPM's `latest` snapshot (version
-## drift since the manifest was generated), refresh the local packages to
-## current CRAN and regenerate.
+## If the Connect admins later install the GDAL runtime (libgdal.so.36 +
+## proj/geos) or we ever re-attempt a mapgl/deck.gl migration, the sf entry
+## must come back -- and mapgl additionally needs terra and geojsonsf, with
+## no possibility of stripping (see the 2026-08-28 review report history).
 ##
 ## NOTE: keep brand.yml in DESCRIPTION Imports. The static dependency scan
 ## cannot see it (bslib loads it dynamically for bs_theme(brand = ...)), so a

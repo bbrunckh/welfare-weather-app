@@ -1968,68 +1968,6 @@
         "Built": "R 4.5.0; ; 2025-05-10 00:42:34 UTC; unix"
       }
     },
-    "geojsonsf": {
-      "Source": "CRAN",
-      "Repository": "https://packagemanager.posit.co/cran/__linux__/centos8/latest",
-      "description": {
-        "Package": "geojsonsf",
-        "Type": "Package",
-        "Title": "GeoJSON to Simple Feature Converter",
-        "Version": "2.0.5",
-        "Date": "2025-11-25",
-        "Authors@R": "c(\n    person(\"David\", \"Cooley\", ,\"dcooley@symbolix.com.au\", role = c(\"aut\", \"cre\")),\n    person(\"Andy\", \"Teucher\", ,\"andy.teucher@gmail.com\", role = \"ctb\")\n    )",
-        "Description": "Converts Between GeoJSON and simple feature objects. ",
-        "License": "MIT + file LICENSE",
-        "URL": "https://github.com/SymbolixAU/geojsonsf",
-        "BugReports": "https://github.com/SymbolixAU/geojsonsf/issues",
-        "Encoding": "UTF-8",
-        "LazyData": "true",
-        "Depends": "R (>= 4.0.0)",
-        "Imports": "Rcpp (>= 1.1.0)",
-        "LinkingTo": "geometries (>= 0.2.5), jsonify (>= 1.2.3), rapidjsonr (>=\n1.2.1), Rcpp, sfheaders (>= 0.4.5)",
-        "RoxygenNote": "7.3.3",
-        "Suggests": "covr, jsonify, knitr, rmarkdown, tinytest",
-        "VignetteBuilder": "knitr",
-        "NeedsCompilation": "yes",
-        "Packaged": "2025-11-26 08:50:31 UTC; david",
-        "Author": "David Cooley [aut, cre],\n  Andy Teucher [ctb]",
-        "Maintainer": "David Cooley <dcooley@symbolix.com.au>",
-        "Repository": "CRAN",
-        "Date/Publication": "2025-11-26 10:00:02 UTC",
-        "Built": "R 4.5.2; aarch64-apple-darwin20; 2025-11-26 10:08:13 UTC; unix",
-        "Archs": "geojsonsf.so.dSYM"
-      }
-    },
-    "geometries": {
-      "Source": "CRAN",
-      "Repository": "https://cran.rstudio.com",
-      "description": {
-        "Package": "geometries",
-        "Type": "Package",
-        "Title": "Convert Between R Objects and Geometric Structures",
-        "Date": "2025-11-23",
-        "Version": "0.2.5",
-        "Authors@R": "c(\n    person(\"David\", \"Cooley\", ,\"david.cooley.au@gmail.com\", role = c(\"aut\", \"cre\"))\n    )",
-        "Description": "Geometry shapes in 'R' are typically represented by matrices (points, lines), with more complex \n  shapes being lists of matrices (polygons). 'Geometries' will convert various 'R' objects into these shapes. \n  Conversion functions are available at both the 'R' level, and through 'Rcpp'.",
-        "License": "MIT + file LICENSE",
-        "URL": "https://dcooley.github.io/geometries/",
-        "BugReports": "https://github.com/dcooley/geometries/issues",
-        "Encoding": "UTF-8",
-        "RoxygenNote": "7.2.3",
-        "LinkingTo": "Rcpp",
-        "Imports": "Rcpp (>= 1.1.0)",
-        "Suggests": "covr, knitr, rmarkdown, tinytest",
-        "VignetteBuilder": "knitr",
-        "NeedsCompilation": "yes",
-        "Packaged": "2025-11-23 16:09:52 UTC; david",
-        "Author": "David Cooley [aut, cre]",
-        "Maintainer": "David Cooley <david.cooley.au@gmail.com>",
-        "Repository": "CRAN",
-        "Date/Publication": "2025-11-23 16:30:02 UTC",
-        "Built": "R 4.5.2; aarch64-apple-darwin20; 2025-11-23 19:54:06 UTC; unix",
-        "Archs": "geometries.so.dSYM"
-      }
-    },
     "ggplot2": {
       "Source": "CRAN",
       "Repository": "https://cran.rstudio.com",
@@ -2704,36 +2642,6 @@
         "Built": "R 4.5.0; ; 2025-04-01 11:50:17 UTC; unix"
       }
     },
-    "jsonify": {
-      "Source": "CRAN",
-      "Repository": "https://cran.rstudio.com",
-      "description": {
-        "Package": "jsonify",
-        "Type": "Package",
-        "Title": "Convert Between 'R' Objects and Javascript Object Notation\n(JSON)",
-        "Version": "1.2.3",
-        "Date": "2025-11-24",
-        "Authors@R": "c(\n    person(\"David\", \"Cooley\", ,\"dcooley@symbolix.com.au\", role = c(\"aut\", \"cre\")),\n    person(\"Chris\", \"Muir\", role = \"ctb\"),\n    person(\"Brendan\", \"Knapp\", role = \"ctb\", comment = c(ORCID = \"0000-0003-3284-4972\"))\n    )",
-        "Description": "Conversions between 'R' objects and Javascript Object Notation (JSON) using \n    the 'rapidjsonr' library <https://CRAN.R-project.org/package=rapidjsonr>. ",
-        "License": "MIT + file LICENSE",
-        "Depends": "R (>= 4.0.0)",
-        "Imports": "Rcpp (>= 1.1.0)",
-        "LinkingTo": "rapidjsonr (>= 1.2.1), Rcpp",
-        "RoxygenNote": "7.3.2",
-        "Suggests": "covr, testthat, knitr, rmarkdown",
-        "Encoding": "UTF-8",
-        "URL": "https://symbolixau.github.io/jsonify/,\nhttps://github.com/SymbolixAU/jsonify",
-        "BugReports": "https://github.com/SymbolixAU/jsonify/issues",
-        "NeedsCompilation": "yes",
-        "Packaged": "2025-11-24 13:03:46 UTC; david",
-        "Author": "David Cooley [aut, cre],\n  Chris Muir [ctb],\n  Brendan Knapp [ctb] (ORCID: <https://orcid.org/0000-0003-3284-4972>)",
-        "Maintainer": "David Cooley <dcooley@symbolix.com.au>",
-        "Repository": "CRAN",
-        "Date/Publication": "2025-11-25 19:22:12 UTC",
-        "Built": "R 4.5.2; aarch64-apple-darwin20; 2025-11-25 19:55:00 UTC; unix",
-        "Archs": "jsonify.so.dSYM"
-      }
-    },
     "jsonlite": {
       "Source": "CRAN",
       "Repository": "https://cran.rstudio.com",
@@ -3184,35 +3092,6 @@
         "RemoteReposName": "CRAN",
         "RemotePkgPlatform": "aarch64-apple-darwin20",
         "RemoteSha": "2.0.5"
-      }
-    },
-    "mapgl": {
-      "Source": "CRAN",
-      "Repository": "https://cran.rstudio.com",
-      "description": {
-        "Package": "mapgl",
-        "Title": "Interactive Maps with 'Mapbox GL JS' and 'MapLibre GL JS'",
-        "Version": "0.5.0",
-        "Date": "2026-06-19",
-        "Authors@R": "c(\n    person(given = \"Kyle\", family = \"Walker\", email = \"kyle@walker-data.com\", role = c(\"aut\", \"cre\")),\n    person(given = \"Egor\", family = \"Kotov\", email = \"kotov.egor@gmail.com\", role = \"ctb\"))",
-        "Description": "Provides an interface to the 'Mapbox GL JS' (<https://docs.mapbox.com/mapbox-gl-js/guides>)\n    and the 'MapLibre GL JS' (<https://maplibre.org/maplibre-gl-js/docs/>) interactive mapping libraries to help users\n    create custom interactive maps in R.  Users can create interactive globe visualizations; layer 'sf' objects to create\n    filled maps, circle maps, 'heatmaps', and three-dimensional graphics; and customize map styles and views.  The package\n    also includes utilities to use 'Mapbox' and 'MapLibre' maps in 'Shiny' web applications.",
-        "URL": "https://walker-data.com/mapgl/",
-        "BugReports": "https://github.com/walkerke/mapgl/issues",
-        "License": "MIT + file LICENSE",
-        "Encoding": "UTF-8",
-        "LazyData": "true",
-        "RoxygenNote": "7.3.3",
-        "Depends": "R (>= 4.1.0)",
-        "Imports": "htmlwidgets, geojsonsf, sf, rlang, htmltools, grDevices,\nbase64enc, terra, classInt, shiny, viridisLite, png, jsonlite,\nhttpuv",
-        "Suggests": "chromote, knitr, mapboxapi, testthat (>= 3.0.0), usethis,\nleaflet",
-        "Config/testthat/edition": "3",
-        "NeedsCompilation": "no",
-        "Packaged": "2026-06-19 18:11:52 UTC; kylewalker",
-        "Author": "Kyle Walker [aut, cre],\n  Egor Kotov [ctb]",
-        "Maintainer": "Kyle Walker <kyle@walker-data.com>",
-        "Repository": "CRAN",
-        "Date/Publication": "2026-06-20 05:10:34 UTC",
-        "Built": "R 4.5.2; ; 2026-06-20 10:24:40 UTC; unix"
       }
     },
     "markdown": {
@@ -4162,30 +4041,6 @@
         "RemoteSha": "0.18.0"
       }
     },
-    "rapidjsonr": {
-      "Source": "CRAN",
-      "Repository": "https://cran.rstudio.com",
-      "description": {
-        "Package": "rapidjsonr",
-        "Type": "Package",
-        "Title": "'Rapidjson' C++ Header Files",
-        "Version": "1.2.1",
-        "Date": "2025-11-23",
-        "Authors@R": "c(\n    person(\"David\", \"Cooley\", ,\"dcooley@symbolix.com.au\", role = c(\"aut\", \"cre\")),\n    person(\"Milo\", \"Yip\", , role = \"ctb\", comment = \"Author of c++ rapidjson library, provided through THL A29 Limited, a Tencent company\"),\n    person(\"Alexander\", \"Chemeris\", role = \"ctb\", comment = \"Author of c++ msinttypes library\")\n    )",
-        "Description": "Provides JSON parsing capability through the 'Rapidjson' 'C++' header-only library. ",
-        "License": "MIT + file LICENSE",
-        "Encoding": "UTF-8",
-        "RoxygenNote": "7.3.1",
-        "SystemRequirements": "GNU make",
-        "NeedsCompilation": "no",
-        "Packaged": "2025-11-23 16:12:43 UTC; david",
-        "Author": "David Cooley [aut, cre],\n  Milo Yip [ctb] (Author of c++ rapidjson library, provided through THL\n    A29 Limited, a Tencent company),\n  Alexander Chemeris [ctb] (Author of c++ msinttypes library)",
-        "Maintainer": "David Cooley <dcooley@symbolix.com.au>",
-        "Repository": "CRAN",
-        "Date/Publication": "2025-11-24 08:50:07 UTC",
-        "Built": "R 4.5.2; ; 2025-11-24 08:55:55 UTC; unix"
-      }
-    },
     "rappdirs": {
       "Source": "CRAN",
       "Repository": "https://cran.rstudio.com",
@@ -4621,69 +4476,6 @@
         "Built": "R 4.5.0; ; 2025-04-24 11:54:38 UTC; unix"
       }
     },
-    "sf": {
-      "Source": "CRAN",
-      "Repository": "https://packagemanager.posit.co/cran/__linux__/centos8/latest",
-      "description": {
-        "Package": "sf",
-        "Version": "1.1-0",
-        "Title": "Simple Features for R",
-        "Authors@R": "\n    c(person(given = \"Edzer\",\n             family = \"Pebesma\",\n             role = c(\"aut\", \"cre\"),\n             email = \"edzer.pebesma@uni-muenster.de\",\n             comment = c(ORCID = \"0000-0001-8049-7069\")),\n      person(given = \"Roger\",\n             family = \"Bivand\",\n             role = \"ctb\",\n             comment = c(ORCID = \"0000-0003-2392-6140\")),\n      person(given = \"Etienne\",\n             family = \"Racine\",\n             role = \"ctb\"),\n      person(given = \"Michael\",\n             family = \"Sumner\",\n             role = \"ctb\"),\n      person(given = \"Ian\",\n             family = \"Cook\",\n             role = \"ctb\"),\n      person(given = \"Tim\",\n             family = \"Keitt\",\n             role = \"ctb\"),\n      person(given = \"Robin\",\n             family = \"Lovelace\",\n             role = \"ctb\"),\n      person(given = \"Hadley\",\n             family = \"Wickham\",\n             role = \"ctb\"),\n      person(given = \"Jeroen\",\n             family = \"Ooms\",\n             role = \"ctb\",\n             comment = c(ORCID = \"0000-0002-4035-0289\")),\n      person(given = \"Kirill\",\n             family = \"M\\u00fcller\",\n             role = \"ctb\"),\n      person(given = \"Thomas Lin\",\n             family = \"Pedersen\",\n             role = \"ctb\"),\n      person(given = \"Dan\",\n             family = \"Baston\",\n             role = \"ctb\"),\n      person(given = \"Dewey\",\n             family = \"Dunnington\",\n             role = \"ctb\",\n             comment = c(ORCID = \"0000-0002-9415-4582\"))\n\t\t\t )",
-        "Description": "Support for simple feature access, a standardized way to\n    encode and analyze spatial vector data. Binds to 'GDAL' \n\t<doi:10.5281/zenodo.5884351> for reading and writing data, to 'GEOS'\n    <doi:10.5281/zenodo.11396894> for geometrical operations,\n    and to 'PROJ' <doi:10.5281/zenodo.5884394> for projection\n    conversions and datum transformations. Uses by default the 's2'\n    package for geometry operations on geodetic (long/lat degree)\n\tcoordinates.",
-        "License": "GPL-2 | MIT + file LICENSE",
-        "URL": "https://r-spatial.github.io/sf/, https://github.com/r-spatial/sf",
-        "BugReports": "https://github.com/r-spatial/sf/issues",
-        "Depends": "methods, R (>= 3.3.0)",
-        "Imports": "classInt (>= 0.4-1), DBI (>= 0.8), graphics, grDevices, grid,\nmagrittr, s2 (>= 1.1.0), stats, tools, units (>= 0.7-0), utils",
-        "Suggests": "blob, nanoarrow, covr, dplyr (>= 1.0.0), ggplot2, knitr,\nlwgeom (>= 0.2-14), maps, mapview, Matrix, microbenchmark,\nodbc, pbapply, pillar, pool, raster, rlang, rmarkdown,\nRPostgres (>= 1.1.0), RPostgreSQL, RSQLite, sp (>= 1.2-4),\nspatstat (>= 2.0-1), spatstat.geom, spatstat.random,\nspatstat.linnet, spatstat.utils, stars (>= 0.6-0), terra,\ntestthat (>= 3.0.0), tibble (>= 1.4.1), tidyr (>= 1.2.0),\ntidyselect (>= 1.0.0), tmap (>= 2.0), vctrs, wk (>= 0.9.0)",
-        "LinkingTo": "Rcpp",
-        "VignetteBuilder": "knitr",
-        "Encoding": "UTF-8",
-        "RoxygenNote": "7.3.3",
-        "Config/testthat/edition": "2",
-        "Config/needs/coverage": "XML",
-        "SystemRequirements": "GDAL (>= 2.0.1), GEOS (>= 3.4.0), PROJ (>= 4.8.0),\nsqlite3",
-        "Collate": "'RcppExports.R' 'init.R' 'import-standalone-s3-register.R'\n'crs.R' 'bbox.R' 'read.R' 'db.R' 'sfc.R' 'sfg.R' 'sf.R'\n'bind.R' 'wkb.R' 'wkt.R' 'plot.R' 'geom-measures.R'\n'geom-predicates.R' 'geom-transformers.R' 'transform.R'\n'proj.R' 'sp.R' 'grid.R' 'arith.R' 'tidyverse.R'\n'tidyverse-vctrs.R' 'cast_sfg.R' 'cast_sfc.R' 'graticule.R'\n'datasets.R' 'aggregate.R' 'agr.R' 'maps.R' 'join.R' 'sample.R'\n'valid.R' 'collection_extract.R' 'jitter.R' 'sgbp.R'\n'spatstat.R' 'stars.R' 'crop.R' 'gdal_utils.R' 'nearest.R'\n'normalize.R' 'sf-package.R' 'defunct.R' 'z_range.R'\n'm_range.R' 'shift_longitude.R' 'make_grid.R' 's2.R' 'terra.R'\n'geos-overlayng.R' 'break_antimeridian.R'",
-        "NeedsCompilation": "yes",
-        "Packaged": "2026-02-23 19:06:55 UTC; edzer",
-        "Author": "Edzer Pebesma [aut, cre] (ORCID:\n    <https://orcid.org/0000-0001-8049-7069>),\n  Roger Bivand [ctb] (ORCID: <https://orcid.org/0000-0003-2392-6140>),\n  Etienne Racine [ctb],\n  Michael Sumner [ctb],\n  Ian Cook [ctb],\n  Tim Keitt [ctb],\n  Robin Lovelace [ctb],\n  Hadley Wickham [ctb],\n  Jeroen Ooms [ctb] (ORCID: <https://orcid.org/0000-0002-4035-0289>),\n  Kirill Müller [ctb],\n  Thomas Lin Pedersen [ctb],\n  Dan Baston [ctb],\n  Dewey Dunnington [ctb] (ORCID: <https://orcid.org/0000-0002-9415-4582>)",
-        "Maintainer": "Edzer Pebesma <edzer.pebesma@uni-muenster.de>",
-        "Repository": "CRAN",
-        "Date/Publication": "2026-02-24 07:50:02 UTC",
-        "Built": "R 4.5.2; aarch64-apple-darwin20; 2026-02-24 08:57:03 UTC; unix",
-        "Archs": "sf.so.dSYM"
-      }
-    },
-    "sfheaders": {
-      "Source": "CRAN",
-      "Repository": "https://cran.rstudio.com",
-      "description": {
-        "Package": "sfheaders",
-        "Type": "Package",
-        "Title": "Converts Between R Objects and Simple Feature Objects",
-        "Date": "2025-11-24",
-        "Version": "0.4.5",
-        "Authors@R": "c(\n    person(\"David\", \"Cooley\", ,\"david.cooley.au@gmail.com\", role = c(\"aut\", \"cre\")),\n    person(given = \"Michael\", family = \"Sumner\", role = \"ctb\")\n    )",
-        "Description": "Converts between R and Simple Feature 'sf' objects, without depending\n  on the Simple Feature library. Conversion functions are available at both the R level, \n  and through 'Rcpp'.",
-        "License": "MIT + file LICENSE",
-        "URL": "https://dcooley.github.io/sfheaders/",
-        "BugReports": "https://github.com/dcooley/sfheaders/issues",
-        "Encoding": "UTF-8",
-        "RoxygenNote": "7.3.2",
-        "Depends": "R (>= 3.0.2)",
-        "LinkingTo": "geometries (>= 0.2.5), Rcpp",
-        "Imports": "Rcpp (>= 1.1.0)",
-        "Suggests": "covr, knitr, testthat",
-        "NeedsCompilation": "yes",
-        "Packaged": "2025-11-24 13:15:04 UTC; david",
-        "Author": "David Cooley [aut, cre],\n  Michael Sumner [ctb]",
-        "Maintainer": "David Cooley <david.cooley.au@gmail.com>",
-        "Repository": "CRAN",
-        "Date/Publication": "2025-11-25 19:20:02 UTC",
-        "Built": "R 4.5.2; aarch64-apple-darwin20; 2025-11-25 19:23:52 UTC; unix",
-        "Archs": "sfheaders.so.dSYM"
-      }
-    },
     "shape": {
       "Source": "CRAN",
       "Repository": "https://cran.rstudio.com",
@@ -5025,7 +4817,7 @@
     },
     "terra": {
       "Source": "CRAN",
-      "Repository": "https://packagemanager.posit.co/cran/__linux__/centos8/latest",
+      "Repository": "https://cran.rstudio.com",
       "description": {
         "Package": "terra",
         "Type": "Package",
@@ -5750,7 +5542,7 @@
       "checksum": "b544c98e7d55c33a6c62b5c905878c65"
     },
     "DESCRIPTION": {
-      "checksum": "a2e02613d26616ee2e60b09cf1b67c5f"
+      "checksum": "3cc80350658b5b57e2d280391ba1bfa4"
     },
     "inst/.DS_Store": {
       "checksum": "1da13fcef58e8b6eb9eb812486e19f2d"
@@ -6167,10 +5959,10 @@
       "checksum": "cf35dbfcf9bc8c8d9e34eb13882870b3"
     },
     "man/plot_sample_density_map.Rd": {
-      "checksum": "5013e7b8463e8f5e9590c4f6b7fddfd8"
+      "checksum": "302cd5d413dad658dc8f4cdcc2f2d71c"
     },
     "man/plot_survey_map.Rd": {
-      "checksum": "df66346eae21defc52d42f7ea0a13a27"
+      "checksum": "c4077ef9b9d7587c6ed138060e3a06f2"
     },
     "man/plot_timeseries_spaghetti.Rd": {
       "checksum": "4b08e2fabad445acefc290667623b826"
@@ -6188,7 +5980,7 @@
       "checksum": "90c6958749d5b454db23e5ef26cb767c"
     },
     "man/plot_weather_loc_map.Rd": {
-      "checksum": "347cbf5d9bae6d23092a9e43b8f7a469"
+      "checksum": "9f71edb05783887308508120401933ed"
     },
     "man/plot_weather_ridges_compare.Rd": {
       "checksum": "ea558a52fdfbdd7a4a87dd04806d4bb0"
@@ -6338,7 +6130,7 @@
       "checksum": "87969feb3d30728bf3aecf3a67962d8d"
     },
     "R/fct_outcome.R": {
-      "checksum": "939594c77077a784d3b9bcfa5b1a1ced"
+      "checksum": "cc566e35515079da36b8b846b809e02a"
     },
     "R/fct_policy_decompose.R": {
       "checksum": "5ac20633a8c84cbae3eb167af72b3b2b"
@@ -6374,7 +6166,7 @@
       "checksum": "2aaea7303b49c8787be292f56d2ca460"
     },
     "R/fct_surveystats.R": {
-      "checksum": "300fe62ec1997afd4fcfcb341bbacfb1"
+      "checksum": "029dbd8f1d29aac8c636c0de1b731cad"
     },
     "R/fct_uncertainty_helpers.R": {
       "checksum": "d64c46429e54cf1768d6e6cffa415d27"
@@ -6383,7 +6175,7 @@
       "checksum": "30de0bd40333d11a8dd82d324588004e"
     },
     "R/fct_weatherstats.R": {
-      "checksum": "3ca3662f99ac3b08d9b9d7a431210432"
+      "checksum": "b847f725ca68cb2a009419ceba9e8a30"
     },
     "R/globals.R": {
       "checksum": "320aad9167a2eec96c0ded6fd6f10143"
@@ -6395,16 +6187,16 @@
       "checksum": "cb09bcf726d307e58bb58c8dab04c0ab"
     },
     "R/mod_1_02_surveystats.R": {
-      "checksum": "0931fed17c73d268d3ffc198200023d7"
+      "checksum": "fd4b4478ceeba7f48893ef037d5fb7d1"
     },
     "R/mod_1_03_outcome.R": {
-      "checksum": "0039f72a44392bfb8e5ac8514036b83a"
+      "checksum": "0f41540aa9ac03bf1adc3c8a300d77cc"
     },
     "R/mod_1_04_weather.R": {
       "checksum": "c9dcc8e955716a52986454b06dd7847c"
     },
     "R/mod_1_05_weatherstats.R": {
-      "checksum": "da787e06e7bd0e2cfae94b4087e4b30b"
+      "checksum": "1d85330c049665709f2067badeda94a8"
     },
     "R/mod_1_06_model.R": {
       "checksum": "afb3dc8049d5777d8f56b7ef4e217703"

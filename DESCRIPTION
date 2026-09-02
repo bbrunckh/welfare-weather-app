@@ -40,7 +40,6 @@ Imports:
     katex,
     leaflet,
     lubridate,
-    mapgl,
     matrixStats,
     mice,
     patchwork,
