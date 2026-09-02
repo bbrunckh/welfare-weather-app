@@ -70,17 +70,42 @@ rsconnect::writeManifest(
   appPrimaryDoc = "app.R"
 )
 
-## IMPORTANT: the line above WILL re-add "sf" to manifest.json. {leaflet}
-## hard-Imports sf (>= 0.9-6) on CRAN -- a real transitive dependency, not
-## something .rscignore can hide -- and the Connect host cannot build sf. The
-## app itself never touches {sf} at runtime (only batch/, which is excluded
-## from appFiles, uses it), so sf is never actually loaded; Connect's install
-## step just needs to not attempt it. After every writeManifest() run,
-## re-strip it:
+## IMPORTANT (2026-09-02, MapLibre migration): do NOT strip sf/terra/geojsonsf
+## from the manifest. {mapgl} hard-depends on all three -- they are in its
+## DESCRIPTION Imports AND its NAMESPACE does import(sf)/import(terra)/
+## import(geojsonsf) -- so packrat cannot even INSTALL mapgl without them
+## (build fails with "dependencies 'geojsonsf', 'sf', 'terra' are not
+## available for package 'mapgl'"), and mapgl could not be loaded at runtime
+## without them either. The old leaflet-era strip was only ever safe by
+## accident: leaflet does list sf (>= 0.9-6) in Imports, but its NAMESPACE
+## merely registers S3 methods for sf classes (no import(sf)), and packrat
+## kept restoring the already-installed packrat library from the earlier
+## push-button deploys instead of re-running the dependency check.
+##
+## The Connect host also has no GDAL/GEOS/PROJ headers, so installing the
+## three from source (Repository = cran.rstudio.com) is not an option. Point
+## them at Posit Package Manager's centos8 BINARY repo -- Connect already
+## hands packrat exactly this URL -- after every writeManifest() run:
 m <- jsonlite::fromJSON("manifest.json", simplifyVector = FALSE)
-m$packages[["sf"]] <- NULL
+ppm_bin <- "https://packagemanager.posit.co/cran/__linux__/centos8/latest"
+for (p in c("sf", "terra", "geojsonsf")) {
+  stopifnot(!is.null(m$packages[[p]]))
+  m$packages[[p]]$Repository <- ppm_bin
+}
 jsonlite::write_json(m, "manifest.json", auto_unbox = TRUE, pretty = TRUE, null = "null")
-## Verify before committing: grep -c '"sf":' manifest.json  ->  should be 0
+## Verify before committing:
+##   jq -r '.packages | keys[]' manifest.json | grep -cxE 'sf|terra|geojsonsf'  ->  3
+##   jq -r '.packages.sf.Repository' manifest.json  ->  ...__linux__/centos8/latest
+##
+## NOTE: the PPM binaries still require the GDAL/GEOS/PROJ/udunits RUNTIME
+## libraries on the Connect host at load time (EPEL 8). terra 1.9-11 has been
+## in every committed manifest and deployed fine, which suggests the stack is
+## present; if the build instead fails with a "libgdal.so / libgeos.so cannot
+## open shared object" error, the Connect admins must install the runtime
+## libraries -- there is no way to run {mapgl} without them. If packrat
+## cannot find the recorded versions on PPM's `latest` snapshot (version
+## drift since the manifest was generated), refresh the local packages to
+## current CRAN and regenerate.
 ##
 ## NOTE: keep brand.yml in DESCRIPTION Imports. The static dependency scan
 ## cannot see it (bslib loads it dynamically for bs_theme(brand = ...)), so a
