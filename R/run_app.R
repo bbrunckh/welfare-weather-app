@@ -14,6 +14,9 @@ run_app <- function(
 	uiPattern = "/",
 	...
 ) {
+	# Force Shiny to use the ultra-fast AGG engine for all renderPlot calls
+	options(shiny.useragg = TRUE)
+
 	with_golem_options(
 		app = shinyApp(
 			ui = app_ui,
