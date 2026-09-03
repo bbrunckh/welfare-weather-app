@@ -16,9 +16,12 @@
 //
 // Guarantees:
 //   - boot-once per container; maps boot lazily on the first payload
-//   - load-order tolerant and idempotent (golem::bundle_resources() also
-//     serves this file in alphabetical order; the explicit htmlDependency
-//     always loads it again afterwards)
+//   - load-once: the file is served twice (golem::bundle_resources() also
+//     serves it in alphabetical order and the explicit htmlDependency loads
+//     it again); the second copy is a no-op. Without the guard the two
+//     copies keep separate message queues/replay registries and race their
+//     MutationObservers: a re-rendered uiOutput's replacement container
+//     could boot from the copy holding no replay state and stay blank.
 //   - camera persists across "set"; "fit" fires only when R says the data
 //     key changed, so wave toggles re-colour without a camera jump
 //   - messages arriving before the container exists are queued per id and
@@ -27,6 +30,11 @@
 //     re-rendered uiOutput), so a re-render can never leave a blank map
 (function () {
   "use strict";
+
+  // Load-once guard: the first copy of this file owns the message router,
+  // queues and replay registry; every later copy must not touch them.
+  if (window.__wiseappHexmapLoaded) return;
+  window.__wiseappHexmapLoaded = true;
 
   var CARTO_POSITRON_STYLE =
     "https://tiles.basemaps.cartocdn.com/gl/positron-gl-style/style.json";

@@ -4,6 +4,13 @@
 
 ### Changed
 
+- **Fixed: Weather-by-location maps could boot blank.** `hexmap.js` is served
+  twice (golem's `bundle_resources()` scan plus the explicit htmlDependency),
+  and each copy kept its own message queues/replay registry while both raced
+  their MutationObservers. A re-rendered card could boot its replacement
+  container from the copy holding no replay state, leaving the weather maps
+  at the world view with no cells. The engine now carries a load-once guard
+  (v1.0.5): the first copy owns the router, later copies are strict no-ops.
 - **Leaflet removed as a dependency.** All Step-1 maps render through the
   MapLibre/H3 engine only: the WebGL fallback machinery (`<id>_webgl`
   inputs, `renderLeaflet` surfaces, `plot_sample_density_map()`,

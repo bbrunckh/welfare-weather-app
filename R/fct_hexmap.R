@@ -31,9 +31,11 @@
 #                                                                              #
 # Note: `golem::bundle_resources()` also scans inst/app/www and re-attaches    #
 # these scripts in alphabetical order (hexmap.js would load before the         #
-# libraries). hexmap.js is written load-order-tolerant and idempotent, and     #
-# the explicit dependency below always loads last, so the final global state   #
-# is correct regardless of the scan order.                                     #
+# libraries). hexmap.js is load-order tolerant, and its load-once guard makes  #
+# the second copy a strict no-op: without it the two copies keep separate      #
+# message queues/replay registries and race their MutationObservers, so a      #
+# re-rendered container could boot from the copy holding no replay state and   #
+# stay blank. The explicit dependency below always loads last.                 #
 # ============================================================================ #
 
 
@@ -54,7 +56,7 @@ hexmap_dependency <- function() {
     name       = "wiseapp-hexmap",
     # Bump on every engine change: the version is part of the script URL,
     # so browsers re-fetch instead of serving a stale cached engine.
-    version    = "1.0.4",
+    version    = "1.0.5",
     src        = app_sys("app", "www"),
     script     = c(
       "vendor/maplibre-gl.js",
