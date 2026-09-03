@@ -114,10 +114,15 @@ hexmap_ui <- function(id, height = "400px", aria_label = "Map", legend = NULL) {
     ),
     if (!is.null(legend)) {
       # Top-right keeps the legend clear of MapLibre's attribution control
-      # (bottom-right); the zoom/reset controls sit top-left.
+      # (bottom-right); the zoom/reset controls sit top-left. The max-width
+      # keeps any legend content inside the map: without it a long note line
+      # would inherit the card's font and spill across the map.
       shiny::tags$div(
         class = "hexmap-legend",
-        style = "position: absolute; right: 8px; top: 8px; z-index: 10;",
+        style = paste(
+          "position: absolute; right: 8px; top: 8px; z-index: 10;",
+          "max-width: calc(100% - 70px);"
+        ),
         legend
       )
     }

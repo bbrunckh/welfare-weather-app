@@ -1276,18 +1276,27 @@ isTRUE_vec <- function(x) !is.na(x) & x
   n_missing <- sum(is.na(v))
   n_avg <- sum(dash %||% FALSE, na.rm = TRUE)
   notes <- if (n_missing > 0 || n_avg > 0) {
+    # Same compact styling as .compact_legend_html()'s box: the notes render
+    # as a second small pill directly under it (they are appended outside the
+    # legend box, so they must carry their own styling or they inherit the
+    # card's font and spill across the map).
+    row <- function(...) {
+      paste0(
+        '<div style="background: rgba(255,255,255,0.88); padding: 3px 5px; ',
+        'border-radius: 4px; font-size: 10px; line-height: 1.3; color: #333; ',
+        'max-width: 160px; margin-top: 2px;">', ..., '</div>'
+      )
+    }
     paste0(
-      if (n_missing > 0) paste0(
-        '<div style="white-space: nowrap;">',
+      if (n_missing > 0) row(
         '<span style="display: inline-block; width: 10px; height: 10px; ',
         'background: #cccccc; border: 1px solid #aaa; ',
         'vertical-align: -1px;"></span> ',
-        n_missing, " of ", nrow(cells), " areas without weather</div>"
+        n_missing, " of ", nrow(cells), " areas without weather"
       ),
-      if (n_avg > 0) paste0(
-        '<div style="white-space: nowrap;">',
+      if (n_avg > 0) row(
         n_avg, " of ", nrow(cells), " areas averaged across interview",
-        " months (dashed outline)</div>"
+        " months (dashed outline)"
       )
     )
   } else ""
