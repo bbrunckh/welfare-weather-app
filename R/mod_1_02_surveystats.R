@@ -203,7 +203,7 @@ mod_1_02_surveystats_server <- function(
             .duck_load_ext("spatial")
             .duck_load_ext("h3")
 
-          # -- Sample density map -------------------------------------------
+          # -- Location of interviews map ------------------------------------
           # One row per H3 cell: a GeoJSON geometry string (the Leaflet
           # fallback artifact; MapLibre decodes geometry in the browser from
           # cell ids, so it is never sent when WebGL is available) plus the
@@ -291,30 +291,7 @@ mod_1_02_surveystats_server <- function(
                  "households")
         }
 
-        # ---- Leaflet fallback (WebGL unavailable) ---------------------------
-        # The widget only rebuilds on data loads. Wave changes swap the
-        # GeoJSON layer in place (observer below) - no widget rebuild, no
-        # basemap re-fetch, and the user's pan/zoom survives without any
-        # view-memory machinery. map_view_memory stays Leaflet-only: the
-        # MapLibre container persists across payloads, so it keeps pan/zoom
-        # by construction.
-        map_view_mem <- map_view_memory(
-          input, session, "map",
-          key = shiny::reactive(digest::digest(selected_surveys()))
-        )
-        map_view_mem$remember()
-
-        output$map <- leaflet::renderLeaflet({
-          req(isFALSE(input$density_map_webgl))
-
-          wave <- shiny::isolate(input$map_wave %||% "all")
-          m <- plot_sample_density_map(density_cells(wave),
-                                       unit_label = unit_label())
-          req(!is.null(m))
-          map_view_mem$restore(m)
-        })
-
-        # ---- MapLibre density payload stream ---------------------------------
+        # ---- Location of interviews payload stream ---------------------------
         # One reactive observer drives the hex map: data loads and wave
         # toggles both land here as fresh `set` payloads (cheap - cell ids
         # and values only, no geometry serialization). The camera is fitted
@@ -322,9 +299,8 @@ mod_1_02_surveystats_server <- function(
         # wave toggle re-colours in place and the user's pan/zoom survives.
         density_key <- reactiveVal(NULL)
         density_lgd <- reactiveVal(NULL)
+        density_nloc <- reactiveVal(NULL)
         observe({
-          shiny::req(!isFALSE(input$density_map_webgl))  # fallback drives itself
-
           cd   <- cell_data()
           wave <- input$map_wave %||% "all"
 
@@ -334,6 +310,7 @@ mod_1_02_surveystats_server <- function(
           if (is.null(pl)) {
             hexmap_clear(session, ns, "density_map")
             density_lgd(NULL)
+            density_nloc(NULL)
           } else {
             hexmap_update(session, ns, "density_map", pl$payload)
             key <- digest::digest(selected_surveys())
@@ -342,68 +319,49 @@ mod_1_02_surveystats_server <- function(
               density_key(key)
             }
             density_lgd(pl$legend)
+
+            # Number of unique locations behind the map: the locations of the
+            # selected wave (summed across waves on "all") that carry sampled
+            # units AND have an H3 mapping - the same set the allocation
+            # draws from.
+            sd   <- survey_data()
+            cmap <- filter_by_wave(cd$map, wave)
+            locs <- dplyr::distinct(
+              filter_by_wave(sd, wave),
+              .data$code, .data$year, .data$survname, .data$loc_id
+            )
+            locs <- dplyr::inner_join(
+              locs,
+              dplyr::distinct(cmap, .data$code, .data$year, .data$survname,
+                              .data$loc_id),
+              by = c("code", "year", "survname", "loc_id")
+            )
+            density_nloc(nrow(locs))
           }
         })
 
         # R-side legend: same palette state as the payloads, rebuilt per wave
-        # and positioned over the map's bottom-right corner by hexmap_ui().
+        # and positioned over the map's top-right corner by hexmap_ui().
         output$map_legend_ui <- shiny::renderUI({
           lgd <- density_lgd()
           shiny::req(!is.null(lgd))
-          htmltools::HTML(.compact_legend_html(
+          html <- .compact_legend_html(
             pal_info = lgd$pal_info,
             binned   = lgd$binned,
+            levels   = lgd$levels,
             title    = lgd$title,
             info     = lgd$info
-          ))
+          )
+          n <- density_nloc()
+          note <- if (is.null(n)) "" else paste0(
+            '<div style="white-space: nowrap; font-size: 10px; color: #333; ',
+            'background: rgba(255,255,255,0.88); border-radius: 4px; ',
+            'padding: 2px 5px; margin-top: 2px;">',
+            'Number of unique locations: ',
+            format(n, big.mark = ",", scientific = FALSE), '</div>'
+          )
+          htmltools::HTML(paste0(html, note))
         })
-
-        # Surface switch: MapLibre container (default, optimistic) or the
-        # Leaflet fallback once the browser reports WebGL as unavailable.
-        output$map_surface_ui <- shiny::renderUI({
-          if (isFALSE(input$density_map_webgl)) {
-            shiny::tags$div(
-              style = "position: relative; height: 100%;",
-              leaflet::leafletOutput(ns("map"), height = "100%")
-            )
-          } else {
-            hexmap_ui(
-              ns("density_map"),
-              height     = "100%",
-              aria_label = paste0(
-                "Map of sample density: number of sampled ",
-                unit_label(), " per hexagonal area cell"
-              ),
-              legend = shiny::uiOutput(ns("map_legend_ui"))
-            )
-          }
-        })
-
-        # Wave-only changes: swap the fallback layer in place. The MapLibre
-        # path needs nothing here - its payload observer tracks map_wave.
-        observeEvent(input$map_wave,
-          {
-            if (!isFALSE(input$density_map_webgl)) return()
-            wave <- input$map_wave %||% "all"
-            fc   <- .sample_density_fc(density_cells(wave))
-            px   <- leaflet::leafletProxy(ns("map"), session)
-            leaflet::removeGeoJSON(px, "density-cells")
-            if (!is.null(fc)) {
-              leaflet::addGeoJSON(
-                px,
-                geojson     = fc$fc,
-                layerId     = "density-cells",
-                stroke      = FALSE,
-                color       = "#000000",
-                weight      = 1,
-                opacity     = 0.5,
-                fill        = TRUE,
-                fillOpacity = 0.75
-              )
-            }
-          },
-          ignoreInit = TRUE
-        )
 
         # Wave toggle slider, shown only when there is more than one wave to pick.
         output$map_wave_ui <- shiny::renderUI({
@@ -518,9 +476,9 @@ mod_1_02_surveystats_server <- function(
                     class = paste("d-flex align-items-center",
                                   "justify-content-between flex-wrap gap-2 mb-2"),
                     h4(
-                      "Sample density", class = "mb-0",
+                      "Location of interviews", class = "mb-0",
                       info_popover(
-                        title = "Sample density",
+                        title = "Location of interviews",
                         p(paste(
                           "Geographic distribution of sampled interviews.",
                           "Each hexagon is an H3 cell shaded by how many",
@@ -532,9 +490,18 @@ mod_1_02_surveystats_server <- function(
                     ),
                     shiny::uiOutput(ns("map_wave_ui"), inline = TRUE)
                   ),
-                  # The MapLibre hex map, or the Leaflet fallback when the
-                  # browser reports WebGL as unavailable.
-                  shiny::uiOutput(ns("map_surface_ui")) |>
+                  # The MapLibre hex map. hexmap_ui() is placed directly in
+                  # the card (no renderUI): the container persists for the
+                  # session and the payload observer drives everything.
+                  hexmap_ui(
+                    ns("density_map"),
+                    height     = "100%",
+                    aria_label = paste0(
+                      "Map of sample density: number of sampled units ",
+                      "per hexagonal area cell"
+                    ),
+                    legend = shiny::uiOutput(ns("map_legend_ui"))
+                  ) |>
                     bslib::as_fill_carrier()
                 )
               ),

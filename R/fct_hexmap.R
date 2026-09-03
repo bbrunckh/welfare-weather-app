@@ -52,7 +52,9 @@
 hexmap_dependency <- function() {
   htmltools::htmlDependency(
     name       = "wiseapp-hexmap",
-    version    = "1.0.0",
+    # Bump on every engine change: the version is part of the script URL,
+    # so browsers re-fetch instead of serving a stale cached engine.
+    version    = "1.0.4",
     src        = app_sys("app", "www"),
     script     = c(
       "vendor/maplibre-gl.js",
@@ -70,9 +72,9 @@ hexmap_dependency <- function() {
 #' Hex-map container (UI-36 parity)
 #'
 #' A `<div>` with `role="region"` + `aria-label` that hexmap.js boots a
-#' MapLibre map into on the first payload it receives. Data attributes name
-#' the Shiny inputs the JS writes: `<id>_webgl` (capability check result) and
-#' `<id>_hex_click` (last clicked cell's H3 index).
+#' MapLibre map into on the first payload it receives. The `data-hexmap-click`
+#' attribute names the Shiny input the JS writes: `<id>_hex_click` (last
+#' clicked cell's H3 index).
 #'
 #' @param id         Namespaced container id, e.g. `ns("density_map")`. The
 #'   same string must be passed as the `id` of the matching `hexmap_*`
@@ -81,28 +83,39 @@ hexmap_dependency <- function() {
 #'   fillable bslib card (wrap the call in `bslib::as_fill_carrier()`).
 #' @param aria_label Descriptive text for screen readers.
 #' @param legend     Optional tag (e.g. a `uiOutput`) positioned over the
-#'   map's bottom-right corner. The R side rebuilds it from the same palette
+#'   map's top-right corner. The R side rebuilds it from the same palette
 #'   state as the payloads (`.compact_legend_html()`), so the legend always
 #'   matches what the cells show.
 #'
 #' @noRd
 hexmap_ui <- function(id, height = "400px", aria_label = "Map", legend = NULL) {
+  # Percentage heights need flex behaviour: the modules render this container
+  # through a uiOutput, which bslib flattens with `display: contents` - so the
+  # shell becomes a direct flex child of the card body and `height: 100%`
+  # alone would resolve against the body (including the title row) and
+  # overflow the card. A flex shell fills exactly the space left over.
+  flex <- grepl("%$", height)
+  style <- paste0(
+    "position: relative; width: 100%; overflow: hidden; height: ", height, ";",
+    if (flex) " flex: 1 1 auto; min-height: 120px;" else NULL
+  )
   shiny::tags$div(
     class = "hexmap-shell",
-    style = sprintf("position: relative; height: %s; width: 100%%;", height),
+    style = style,
     shiny::tags$div(
       id                  = id,
       class               = "hexmap-container",
       role                = "region",
       `aria-label`        = aria_label,
       style               = "position: relative; height: 100%; width: 100%; overflow: hidden;",
-      `data-hexmap-webgl` = paste0(id, "_webgl"),
       `data-hexmap-click` = paste0(id, "_hex_click")
     ),
     if (!is.null(legend)) {
+      # Top-right keeps the legend clear of MapLibre's attribution control
+      # (bottom-right); the zoom/reset controls sit top-left.
       shiny::tags$div(
         class = "hexmap-legend",
-        style = "position: absolute; right: 8px; bottom: 8px; z-index: 10;",
+        style = "position: absolute; right: 8px; top: 8px; z-index: 10;",
         legend
       )
     }

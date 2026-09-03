@@ -89,10 +89,10 @@ make_cell_data <- function(waves = c(2018, 2021)) {
 # ============================================================================ #
 
 test_that("one map output is created per weather variable, not per wave", {
-  skip_if_not_installed("leaflet")
 
   sw <- make_selected_weather(2)
-  # Two variables x two waves used to stand up four leaflet widgets.
+  # Two variables x two waves used to stand up four leaflet widgets; the
+  # payload stream sends one hex map per variable instead.
   swd <- make_survey_weather()
   swd$pr <- swd$tx * 2
 
@@ -105,10 +105,9 @@ test_that("one map output is created per weather variable, not per wave", {
       session$flushReact()
 
       expect_equal(nrow(wave_list()), 2L)
-      # One widget per variable — two, where the per-wave layout would have
-      # stood up four.
-      expect_true(nchar(as.character(output$wxmap_1)) > 0)
-      expect_true(nchar(as.character(output$wxmap_2)) > 0)
+      # One hex-map surface per variable, each holding the engine container.
+      expect_true(all(nzchar(as.character(output$wxmap_1_surface))))
+      expect_true(all(nzchar(as.character(output$wxmap_2_surface))))
 
       # Both cards are laid out, each headed by its variable and the wave.
       html <- as.character(output$weather_map_layout$html)
@@ -120,8 +119,6 @@ test_that("one map output is created per weather variable, not per wave", {
 })
 
 test_that("the wave picker selects which wave the maps draw", {
-  skip_if_not_installed("leaflet")
-
   sw  <- make_selected_weather(1)
   swd <- make_survey_weather()
 
@@ -135,28 +132,15 @@ test_that("the wave picker selects which wave the maps draw", {
 
       # Defaults to the first wave rather than to nothing.
       expect_equal(wxmap_wave(), "TST|2018|SRV")
-      # The wave's values are encoded as the per-feature fill colours (no
-      # popups): read them out of the widget's addGeoJSON call. The FC
-      # string's properties carry a nested `style.fillColor` since the
-      # Leaflet rollback (the mapgl experiment used a flat `__fill`).
-      fill_colors <- function(widget) {
-        j <- jsonlite::fromJSON(widget, simplifyVector = FALSE)
-        call <- Filter(function(k) identical(k$method, "addGeoJSON"),
-                       j$x$calls)[[1]]
-        fc <- jsonlite::fromJSON(call$args[[1]], simplifyVector = FALSE)
-        vapply(fc$features,
-               function(f) f$properties$style$fillColor, character(1))
-      }
-      cols_2018 <- fill_colors(output$wxmap_1)
-      expect_true(all(nzchar(cols_2018)))
+      # The wave's values feed the payload stream; check the merged rows the
+      # payloads are built from differ between waves.
+      v2018 <- wxmap_sub(1)$value
+      expect_true(all(nzchar(as.character(v2018))))
 
-      # Switching the picker redraws the same widget with the other wave's
-      # values rather than adding a second one.
       session$setInputs(wxmap_wave = "TST|2021|SRV")
       expect_equal(wxmap_wave(), "TST|2021|SRV")
-      cols_2021 <- fill_colors(output$wxmap_1)
-      expect_true(all(nzchar(cols_2021)))
-      expect_false(identical(cols_2018, cols_2021))
+      v2021 <- wxmap_sub(1)$value
+      expect_false(identical(v2018, v2021))
 
       # The card header follows the picker.
       expect_true(grepl("Max temp - Testland, 2021",
@@ -171,7 +155,6 @@ test_that("the wave picker selects which wave the maps draw", {
 })
 
 test_that("the wave picker is hidden when there is only one wave", {
-  skip_if_not_installed("leaflet")
 
   sw  <- make_selected_weather(1)
   swd <- make_survey_weather(waves = 2018)
@@ -191,7 +174,6 @@ test_that("the wave picker is hidden when there is only one wave", {
 })
 
 test_that("the map colour scale spans every wave, not just the one shown", {
-  skip_if_not_installed("leaflet")
 
   sw  <- make_selected_weather(1)
   swd <- make_survey_weather()

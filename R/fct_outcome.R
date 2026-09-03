@@ -397,110 +397,11 @@ plot_welfare_dist <- function(df,
   " differences stay visible."
 )
 
-#' Build a leaflet map highlighting locations with outcome data
-#'
-#' Colours H3 polygons by whether the outcome variable is available (non-NA)
-#' at each location. Uses the same GeoJSON FeatureCollection as the survey
-#' map but overlays availability shading.
-#'
-#' @param geojson  GeoJSON FeatureCollection (from Survey Stats H3 pipeline).
-#'   Pass cell features from \code{build_cell_features()} together with
-#'   \code{cell_map} to draw non-overlapping H3 cells.
-#' @param df       Survey data frame with \code{loc_id} and the outcome column.
-#' @param outcome  Single character string - the outcome variable name.
-#' @param cell_map Optional location-to-cell mapping. When supplied, coverage
-#'   is merged onto H3 cells instead of drawn per overlapping location.
-#'
-#' @return A \code{leaflet} widget, or \code{NULL}.
-#' @export
-plot_outcome_coverage_map <- function(geojson, df, outcome, cell_map = NULL) {
-  if (is.null(geojson) || length(geojson$features) == 0) return(invisible(NULL))
-  if (is.null(df) || !outcome %in% names(df) || !"loc_id" %in% names(df))
-    return(invisible(NULL))
-
-  keys <- c("code", "year", "survname", "loc_id")
-
-  loc_avail <- .outcome_loc_availability(df, outcome)
-  if (is.null(loc_avail)) return(invisible(NULL))
-
-  # Survey locations overlap, so drawing one translucent polygon per location
-  # stacks fills and shows shades that are in neither the data nor the legend.
-  # When the H3 cell mapping is available, merge coverage onto cells - which
-  # tile without overlapping - weighting each contributing location by the
-  # units it has in that cell.
-  if (!is.null(cell_map) && all(keys %in% names(loc_avail))) {
-    lv <- loc_avail
-    names(lv)[names(lv) == "pct"] <- "value"
-    merged <- merge_loc_values_to_cells(cell_map, lv, by_wave = FALSE)
-    if (!is.null(merged)) loc_avail <- data.frame(
-      loc_id = merged$loc_id, pct = merged$value, stringsAsFactors = FALSE
-    )
-  }
-
-  # Weighted merging can leave a hair outside [0, 100] in floating point, and
-  # colorNumeric turns anything outside its domain into NA.
-  loc_avail$pct <- pmin(pmax(loc_avail$pct, 0), 100)
-
-  avail_map <- stats::setNames(loc_avail$pct, as.character(loc_avail$loc_id))
-
-  rng <- .coverage_rng(loc_avail$pct)
-
-  pal <- leaflet::colorNumeric(palette = .coverage_ramp, domain = rng)
-
-  bounds <- .geojson_bounds(geojson)
-
-  on_cells <- !is.null(cell_map)
-
-  # Keyless raster Positron basemap. One GeoJSON layer carrying a per-feature
-  # colour via properties.style; a continuous ramp gives almost every location
-  # its own shade, which a group-by-colour loop would turn into hundreds of
-  # separate layers.
-  fill <- vapply(geojson$features, function(f) {
-    pct <- avail_map[as.character(f$properties$loc_id)]
-    pal(if (is.na(pct)) rng[1] else min(max(pct, rng[1]), rng[2]))
-  }, character(1))
-  props_json <- paste0(
-    '{"loc_id":',   .json_vec(.prop_col(geojson$features, "loc_id")),
-    ',"bbox":',     .bbox_frag(geojson$features),
-    ',',            .feature_style_frag(fill, stroke = !on_cells),
-    '}'
-  )
-  geoms <- vapply(geojson$features, function(f) f$geom_json, character(1))
-
-  m <- .basemap() |>
-    .add_geojson_layer(
-      fc_string = .geojson_fc_string(geoms, props_json,
-                                     ids = seq_along(geojson$features)),
-      layer_id  = "coverage",
-      stroke    = !on_cells,
-      # Cells tile edge to edge, so per-cell outlines only add noise; location
-      # polygons (overlapping) keep a thin outline as before.
-      fill_opacity = if (on_cells) 0.75 else 0.5
-    )
-
-  m |>
-    leaflet::fitBounds(
-      lng1 = bounds$lng1, lat1 = bounds$lat1,
-      lng2 = bounds$lng2, lat2 = bounds$lat2
-    ) |>
-    .add_reset_button(bounds) |>
-    htmlwidgets::onRender(.map_autofit_js(bounds)) |>
-    leaflet::addControl(
-      position = "bottomright",
-      html = .compact_legend_html(
-        pal_info = list(pal = pal, domain = rng),
-        binned   = FALSE,
-        title    = "% available",
-        info     = .coverage_legend_info(rng)
-      )
-    )
-}
-
-
 #' Columnar hex-map payload for the outcome coverage map
 #'
-#' The MapLibre twin of `plot_outcome_coverage_map()`'s cell path: the same
-#' per-location availability, the same weighted cell merge, the same
+#' Colours H3 polygons by whether the outcome variable is available (non-NA)
+#' per cell: the same per-location availability, the same weighted cell merge,
+#' the same
 #' vermillion / orange / green ramp over the coverage range actually
 #' present - but the payload carries only cell ids and coverage percentages,
 #' and the browser applies colour. Cells the survey reached without a
@@ -576,7 +477,7 @@ plot_outcome_coverage_map <- function(geojson, df, outcome, cell_map = NULL) {
     unit   = "%"
   )
 
-  pal <- leaflet::colorNumeric(palette = .coverage_ramp, domain = rng)
+  pal <- .ramp_numeric(.coverage_ramp, domain = rng)
   list(
     payload = payload,
     legend = list(

@@ -73,7 +73,7 @@ R/
 - `fct_policy_decompose.R` – **policy effect decomposition** (main effect + resilience: repositioning + interaction)
 - `fct_rif_sim.R` – Recentered Influence Function (RIF) quantile regression helpers
 - `fct_weatherstats.R` – weather statistics computation
-- `fct_hexmap.R` – **hex-map engine bridge**: vendored MapLibre GL + h3-js assets (`inst/app/www/vendor/`, pins + sha256 in-file), payload contract (`hexmap_payload()` — columnar cell ids/values/ramp stops, no geometry on the wire), senders (`hexmap_update`/`hexmap_clear`/`hexmap_fit`) and the `hexmap_ui()` container. Browser side: `inst/app/www/hexmap.js` (lazy boot, WebGL2 probe → `input$<id>_webgl` with Leaflet fallback, camera persistence, queued messages). Maps using it: sample density (mod_1_02), outcome coverage (mod_1_03), per-variable weather maps (mod_1_05); Leaflet builders remain as the runtime fallback.
+- `fct_hexmap.R` – **hex-map engine bridge**: vendored MapLibre GL + h3-js assets (`inst/app/www/vendor/`, pins + sha256 in-file), payload contract (`hexmap_payload()` — columnar cell ids/values/ramp stops, no geometry on the wire), senders (`hexmap_update`/`hexmap_clear`/`hexmap_fit`) and the `hexmap_ui()` container. Browser side: `inst/app/www/hexmap.js` (lazy boot, camera persistence, queued + replayed messages). Maps using it: sample density (mod_1_02), outcome coverage (mod_1_03), per-variable weather maps (mod_1_05); there is no Leaflet fallback — MapLibre is the only map surface and `leaflet` is no longer a dependency.
 
 ### Modeling Engine Registry
 

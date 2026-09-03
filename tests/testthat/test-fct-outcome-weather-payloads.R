@@ -87,7 +87,7 @@ test_that("coverage payload: degenerate inputs return NULL", {
   expect_null(wiseapp:::.coverage_hex_payload(geo, cmap, NULL, "welfare"))
 })
 
-test_that("coverage payload: matches the Leaflet fallback's rng", {
+test_that("coverage payload: single value gets a 1-wide domain", {
   geo  <- make_cell_geo(2)
   cmap <- make_cmap(geo)
   df <- data.frame(
@@ -96,9 +96,6 @@ test_that("coverage payload: matches the Leaflet fallback's rng", {
     stringsAsFactors = FALSE
   )
   pl <- wiseapp:::.coverage_hex_payload(geo, cmap, df, "welfare")
-  fc <- wiseapp:::build_cell_features(geo, cmap, by_wave = FALSE)
-  m  <- plot_outcome_coverage_map(fc, df, "welfare", cell_map = cmap)
-  expect_true(!is.null(m))
   # Same uniform-coverage token span: a single value gets a 1-wide domain.
   expect_equal(diff(pl$payload$stops$domain), 1, tolerance = 1e-9)
 })

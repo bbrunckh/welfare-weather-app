@@ -990,7 +990,7 @@ isTRUE_vec <- function(x) !is.na(x) & x
 
 #' Compact map legend
 #'
-#' `leaflet::addLegend()` renders a tall colour ramp with a full-width title,
+#' leaflet's `addLegend()` renders a tall colour ramp with a full-width title,
 #' which swamps the small per-wave maps. This builds a small fixed-width
 #' block instead: a short title, a thin horizontal ramp (or a few swatches for
 #' bins) and two or three tick labels, with the long explanation moved into an
@@ -1009,7 +1009,7 @@ isTRUE_vec <- function(x) !is.na(x) & x
   head <- paste0(
     .wx_tip_css(),
     '<div style="font-weight: 600; white-space: nowrap;">',
-    .html_escape(title), .wx_info_marker(info), '</div>'
+    .html_escape(title), .wx_info_marker(info, placement = "below"), '</div>'
   )
 
   body <- if (binned) {
@@ -1061,12 +1061,17 @@ isTRUE_vec <- function(x) !is.na(x) & x
 #' @param side Which map corner the marker sits in - the tooltip opens away
 #'   from that edge so it is not clipped.
 #' @noRd
-.wx_info_marker <- function(info, side = c("right", "left")) {
+.wx_info_marker <- function(info, side = c("right", "left"),
+                             placement = c("above", "below")) {
   if (!nzchar(info %||% "")) return("")
   side <- match.arg(side)
+  placement <- match.arg(placement)
+  cls <- paste0("wx-tip",
+                if (side == "left") " wx-tip-l" else "",
+                if (placement == "below") " wx-tip-b" else "")
   paste0(
-    '<span class="wx-tip', if (side == "left") " wx-tip-l" else "",
-    '" tabindex="0" data-tip="', .html_escape(info), '">i</span>'
+    '<span class="', cls, '" tabindex="0" data-tip="', .html_escape(info),
+    '">i</span>'
   )
 }
 
@@ -1087,6 +1092,9 @@ isTRUE_vec <- function(x) !is.na(x) & x
     'visibility:hidden;pointer-events:none;z-index:1200;',
     'transition:opacity 0.06s linear;}',
     '.wx-tip.wx-tip-l::after{right:auto;left:-4px;}',
+    # placement == "below": legends sitting at the map's top-right corner
+    # need the popup to open downward, or the card clips it.
+    '.wx-tip.wx-tip-b::after{bottom:auto;top:150%;}',
     '.wx-tip:hover::after,.wx-tip:focus::after{opacity:1;visibility:visible;}',
     '</style>'
   )
@@ -1120,7 +1128,7 @@ isTRUE_vec <- function(x) !is.na(x) & x
 #' @param domain         Optional length-2 numeric to fix the colour domain
 #'   (e.g. `c(0, 100)` for percentiles) instead of deriving it from `values`.
 #'
-#' @return A list with `pal` (a leaflet palette function), `domain` (values to
+#' @return A list with `pal` (a colour-mapping function), `domain` (values to
 #'   pass to `addLegend`), `diverging` (logical), plus `colors` (the hex stops
 #'   the palette draws from, in order) and `levels` (the level order, for
 #'   binned variables) - the hex-map payload sends these straight to the
@@ -1137,9 +1145,7 @@ isTRUE_vec <- function(x) !is.na(x) & x
     n_lv <- max(length(lv), 2L)
     ramp <- rev(grDevices::hcl.colors(n_lv + 2L, "YlOrRd"))[seq(2L, n_lv + 1L)]
     return(list(
-      pal = leaflet::colorFactor(
-        palette = ramp, levels = lv, na.color = "#cccccc"
-      ),
+      pal = .ramp_factor(ramp, lv),
       # A factor, not a bare character vector: addLegend sorts its values, and
       # bin labels like "[-Inf,29.5]" sort after "(29.5,31]" as plain text.
       domain    = factor(lv, levels = lv),
@@ -1167,17 +1173,17 @@ isTRUE_vec <- function(x) !is.na(x) & x
       if (!is.finite(lim) || lim == 0) lim <- 1
       dom <- c(-lim, lim)
     }
-    pal <- leaflet::colorNumeric("RdBu", domain = dom, reverse = TRUE,
-                                 na.color = "#cccccc")
+    # reverse = TRUE: red for hot anomalies, blue for cold ones.
+    pal <- .ramp_numeric(rev(grDevices::hcl.colors(11, "RdBu")), domain = dom)
   } else {
     dom <- domain
     if (is.null(dom)) {
       dom <- range(v, na.rm = TRUE)
       if (diff(dom) == 0) dom <- dom + c(-0.5, 0.5)
     }
-    pal <- leaflet::colorNumeric(
+    pal <- .ramp_numeric(
       rev(grDevices::hcl.colors(11, "YlOrRd"))[2:10],
-      domain = dom, na.color = "#cccccc"
+      domain = dom
     )
   }
 
@@ -1189,214 +1195,6 @@ isTRUE_vec <- function(x) !is.na(x) & x
 }
 
 
-#' Map survey locations shaded by a weather variable
-#'
-#' Draws one survey wave's locations, filled by the weather value the sample
-#' experienced there - the bin for binned variables, the value on its
-#' configured scale (raw, deviation from mean, standardised anomaly) for
-#' continuous ones.
-#'
-#' The shaded value is the same quantity that enters the model as a regressor.
-#' `fit_model()` puts the weather column on the right-hand side unchanged, so
-#' a household's regressor is the value for its location in its own interview
-#' month, with the configured temporal aggregation and transformation already
-#' applied. For a location surveyed in a single interview month - the majority
-#' - every household there shares that one value and the colour *is* the
-#' regressor. A location surveyed across several interview months holds
-#' several values, so its colour is the household-weighted mean (or modal
-#' bin); those locations are drawn with a dotted outline to mark the colour as
-#' a summary rather than a single household's input.
-#'
-#' @param geojson  GeoJSON FeatureCollection of survey locations, as built by
-#'   `mod_1_02_surveystats_server()`. Features carry `code`, `year`,
-#'   `survname` and `loc_id` properties plus a raw `geom_json` string.
-#' @param loc_vals One wave's rows from `summarise_weather_by_loc()`.
-#' @param label    Scalar character. Legend / popup label for the variable.
-#' @param transformation The variable's configured transformation.
-#' @param pal_info Optional palette from `.weather_map_palette()`. Pass a
-#'   shared one to keep the colour scale comparable across waves.
-#' @param legend_title Short legend heading - a couple of words, since the
-#'   per-wave maps are small. Defaults to `label`.
-#' @param legend_info Longer explanation shown when hovering the legend's info
-#'   marker. Defaults to `label`.
-#'
-#' @return A `leaflet` widget, or `NULL` invisibly when there is
-#'   nothing to draw.
-#'
-#' @export
-plot_weather_loc_map <- function(geojson, loc_vals, label,
-                                 transformation = "None", pal_info = NULL,
-                                 legend_title = NULL, legend_info = NULL) {
-  if (is.null(geojson) || length(geojson$features) == 0) return(invisible(NULL))
-  if (is.null(loc_vals) || nrow(loc_vals) == 0) return(invisible(NULL))
-
-  binned <- isTRUE(attr(loc_vals, "binned"))
-  lvls   <- attr(loc_vals, "levels")
-
-  # Keep this wave's features - all of them, not just the ones carrying a
-  # value. Filtering on the individual area id used to drop any area without
-  # a weather value, punching holes in a footprint that the outcome map draws
-  # whole; areas with no value are shown in neutral grey instead.
-  wave_keys  <- unique(paste(loc_vals$code, loc_vals$year, loc_vals$survname,
-                             sep = "\r"))
-  feat_waves <- vapply(geojson$features, function(f) {
-    p <- f$properties
-    paste(as.character(p$code), as.character(p$year),
-          as.character(p$survname), sep = "\r")
-  }, character(1))
-
-  feats <- geojson$features[feat_waves %in% wave_keys]
-  if (length(feats) == 0) return(invisible(NULL))
-
-  val_by_loc <- stats::setNames(loc_vals$value, as.character(loc_vals$loc_id))
-  mon_by_loc <- stats::setNames(loc_vals$n_months %||% rep(1L, nrow(loc_vals)),
-                                as.character(loc_vals$loc_id))
-
-  if (is.null(pal_info)) {
-    pal_info <- .weather_map_palette(loc_vals$value, binned, lvls, transformation)
-  }
-  pal <- pal_info$pal
-
-  # Areas without a value are drawn too (see above), so every lookup has to
-  # tolerate a missing key - `[[` errors on one, unlike `[`.
-  lookup <- function(v, key) {
-    i <- match(key, names(v))
-    if (is.na(i)) NULL else v[[i]]
-  }
-
-  # Group features by fill colour, and by whether the value is a single
-  # interview month's value or an average across several. Each combination
-  # costs one addGeoJSON call rather than one call per location.
-  cols <- vapply(feats, function(f) {
-    v <- lookup(val_by_loc, as.character(f$properties$loc_id))
-    if (is.null(v) || (is.numeric(v) && !is.finite(v)) || is.na(v)) {
-      "#cccccc"
-    } else {
-      pal(if (binned) as.character(v) else as.numeric(v))
-    }
-  }, character(1))
-
-  # A location surveyed across several interview months has several weather
-  # values behind it; its colour is a summary of them rather than the value
-  # any single household contributes to the regression. Those locations are
-  # counted for the note below the map.
-  averaged <- vapply(feats, function(f) {
-    isTRUE((lookup(mon_by_loc, as.character(f$properties$loc_id)) %||% 1L) > 1L)
-  }, logical(1))
-
-  bounds <- .geojson_bounds(list(features = feats))
-
-  # Keyless raster Positron basemap. One GeoJSON layer carrying a per-feature
-  # colour via properties.style; on a continuous ramp almost every location
-  # gets its own shade, which a group-by-colour loop would turn into one layer
-  # per distinct value. No popups: the legend and the maps' colours already
-  # carry the message.
-  props_json <- paste0(
-    '{"loc_id":',   .json_vec(.prop_col(feats, "loc_id")),
-    ',"bbox":',     .bbox_frag(feats),
-    ',',            .feature_style_frag(cols, stroke = FALSE),
-    '}'
-  )
-  geoms <- vapply(feats, function(f) f$geom_json, character(1))
-
-  # Same rendering as the other cell maps: no outlines (at a country view the
-  # borders of a thousand hexagons cover more pixels than the fills do).
-  # Canvas rendering keeps panning smooth with that many polygons.
-  m <- .basemap() |>
-    .add_geojson_layer(
-      fc_string = .geojson_fc_string(geoms, props_json, ids = seq_along(feats)),
-      layer_id  = "weather-locs",
-      stroke    = FALSE,
-      fill_opacity = 0.75
-    ) |>
-    leaflet::fitBounds(
-      lng1 = bounds$lng1, lat1 = bounds$lat1,
-      lng2 = bounds$lng2, lat2 = bounds$lat2
-    )
-
-  # Areas with no weather value are drawn in neutral grey rather than left
-  # out, so a gap in the weather is visible as a gap rather than as absent
-  # geography. Count them so the size of the gap is legible.
-  n_missing <- sum(cols == "#cccccc")
-
-  # Areas whose value averages several interview months are no longer marked
-  # on the map itself - per-area marks turned out to be more distracting than
-  # informative. Instead, state how many there are.
-  if (any(averaged) || n_missing > 0) {
-    n_avg <- sum(averaged)
-    missing_line <- if (n_missing > 0) {
-      paste0(
-        '<div style="white-space: nowrap;">',
-        '<span style="display: inline-block; width: 10px; height: 10px; ',
-        'background: #cccccc; border: 1px solid #aaa; ',
-        'vertical-align: -1px;"></span> ',
-        n_missing, " of ", length(feats), " areas without weather",
-        .wx_info_marker(
-          paste0(
-            n_missing, " of the ", length(feats), " areas shown have no",
-            " weather value for this variable - the survey reached them, but",
-            " the weather series did not, so they drop out of the merge that",
-            " feeds the model. They are shaded grey rather than left off the",
-            " map so the gap is visible."
-          ),
-          side = "left"
-        ),
-        '</div>'
-      )
-    } else ""
-
-    avg_line <- if (n_avg > 0) {
-      paste0(
-        '<div style="white-space: nowrap;">',
-        n_avg, " of ", length(feats), " areas averaged",
-        .wx_info_marker(
-            paste0(
-                n_avg, " of the ", length(feats), " area",
-              if (length(feats) == 1) "" else "s",
-              " shown draw on several interview months and so have several",
-              " weather values behind them. Their colour is the area's",
-              " household-weighted ",
-              if (binned) "modal bin" else "mean",
-              " across those household-month observations, rather than the",
-              " single value every household there contributes to the model."
-            ),
-            side = "left"   # this control sits bottom-left
-          ),
-          '</div>'
-      )
-    } else ""
-
-    m <- m |>
-      leaflet::addControl(
-        position = "bottomleft",
-        html = paste0(
-          '<div style="background: rgba(255,255,255,0.88); padding: 3px 5px; ',
-          'border-radius: 4px; font-size: 10px; line-height: 1.35; ',
-          'color: #333;">',
-          missing_line, avg_line,
-          '</div>'
-        )
-      )
-  }
-
-  m <- m |>
-    leaflet::addControl(
-      position = "bottomright",
-      html = .compact_legend_html(
-        pal_info = pal_info,
-        binned   = binned,
-        levels   = lvls,
-        title    = legend_title %||% stringr::str_replace_all(label, "\n", " "),
-        info     = legend_info %||% stringr::str_replace_all(label, "\n", " ")
-      )
-    )
-
-  # Keeps the map correct when its card is expanded to full screen, and offers
-  # a way back to the opening view.
-  m |>
-    .add_reset_button(bounds) |>
-    htmlwidgets::onRender(.map_autofit_js(bounds))
-}
 
 
 #' Columnar hex-map payload for one weather variable and wave

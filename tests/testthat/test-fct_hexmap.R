@@ -77,30 +77,43 @@ test_that("hexmap_payload: validates lengths and bounds", {
 
 # ---- density payload --------------------------------------------------------
 
-test_that("density payload: log domain, ramp stops, bbox bounds", {
-  cells <- make_density_cells()
+test_that("density payload: binned levels, stops, bbox bounds", {
+  cells <- make_density_cells() # n_units = 1, 3.5, 40, 250
   pl <- wiseapp:::.density_hex_payload(cells, "households")
 
   expect_identical(pl$payload$action, "set")
-  expect_identical(pl$payload$v_kind, "continuous")
+  expect_identical(pl$payload$v_kind, "binned")
   expect_identical(pl$payload$h3, cells$h3)
-  expect_identical(pl$payload$v, cells$n_units)
 
-  # v_log is the log of the counts, and the ramp domain matches it.
-  expect_identical(pl$payload$v_log, log(cells$n_units))
-  dom <- pl$payload$stops$domain
-  expect_true(all(is.finite(dom)) && dom[2] > dom[1])
-  expect_length(pl$payload$stops$colors, 9L)
+  # v holds one level string per cell; every level is in the ramp stops.
+  lvls <- pl$payload$stops$levels
+  expect_true(all(pl$payload$v %in% lvls))
+  expect_identical(pl$payload$stops$levels, lvls)
+  expect_length(pl$payload$stops$colors, length(lvls))
+  # The fixture's smallest cell (1 hh) is not thin: no "< 1" bin appears.
+  expect_false("< 1" %in% lvls)
 
   # Bounds span the per-cell bbox columns.
   expect_identical(pl$payload$bounds,
                    c(min(cells$xmin), min(cells$ymin),
                      max(cells$xmax), max(cells$ymax)))
 
-  # Legend shares the payload's domain (both on the count scale).
-  expect_equal(pl$legend$pal_info$domain, exp(pl$payload$stops$domain),
-               tolerance = 1e-12)
+  # Legend is binned over the same levels.
+  expect_true(pl$legend$binned)
+  expect_identical(pl$legend$levels, lvls)
   expect_identical(pl$legend$title, "Households per area")
+})
+
+test_that("density payload: thin cells land in the pale '< 1' bin", {
+  cells <- make_density_cells()
+  cells$n_units <- c(0.5, 0.02, 40, 250)
+  pl <- wiseapp:::.density_hex_payload(cells, "households")
+
+  lvls <- pl$payload$stops$levels
+  expect_identical(lvls[1], "< 1")
+  expect_identical(pl$payload$v[1:2], c("< 1", "< 1"))
+  # Occupied bins split the >= 1 range at its quantiles.
+  expect_true(all(nzchar(pl$payload$v)))
 })
 
 test_that("density payload: degenerate and empty inputs return NULL", {
@@ -112,18 +125,23 @@ test_that("density payload: degenerate and empty inputs return NULL", {
     data.frame(h3 = "89a", n_units = 0), "households"))
 })
 
-test_that("density ramp: matches the Leaflet fallback's log domain", {
+test_that("density ramp: '< 1' bin plus quantile bins above", {
   cells <- make_density_cells()
+  cells$n_units <- c(0.5, 0.02, 40, 250)
   r <- wiseapp:::.density_ramp(cells$n_units)
-  fc <- wiseapp:::.sample_density_fc(cells)
-  pl <- wiseapp:::.density_hex_payload(cells, "households")
 
-  # The ramp domain is the log-range of the positive counts; both renderers
-  # must agree with the payload.
-  expect_identical(log(r$rng), unname(pl$payload$stops$domain))
-  expect_identical(log(r$rng), unname(pl$payload$stops$domain))
-  # The Leaflet path colours with the same ramp over the same log domain.
-  expect_true(is.function(fc$pal_info$pal))
+  # The thin bin exists and the occupied range is split at its quantiles.
+  expect_identical(r$levels[1], "< 1")
+  expect_true(length(r$levels) >= 3)
+  expect_length(r$colors, length(r$levels))
+  expect_identical(r$cuts[1], 1)
+  expect_true(r$thin)
+
+  # No thin cells: no "< 1" level, and the occupied quantile bins remain.
+  r2 <- wiseapp:::.density_ramp(c(1, 3.5, 40, 250))
+  expect_false("< 1" %in% r2$levels)
+  expect_true(all(nzchar(r2$levels)))
+  expect_false(r2$thin)
 })
 
 # ---- senders ----------------------------------------------------------------
@@ -166,10 +184,10 @@ test_that("hexmap_ui: container id, aria, input hooks, legend slot", {
   expect_match(html, "id=\"mod-density_map\"", fixed = TRUE)
   expect_match(html, "role=\"region\"", fixed = TRUE)
   expect_match(html, "aria-label=\"Density map\"", fixed = TRUE)
-  expect_match(html, "data-hexmap-webgl=\"mod-density_map_webgl\"", fixed = TRUE)
   expect_match(html, "data-hexmap-click=\"mod-density_map_hex_click\"",
                fixed = TRUE)
   expect_match(html, "hexmap-legend", fixed = TRUE)
+  expect_false(grepl("data-hexmap-webgl", html, fixed = TRUE))
 })
 
 test_that("hexmap_dependency: scripts in engine order", {

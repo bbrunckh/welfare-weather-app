@@ -19,12 +19,12 @@
 //   - load-order tolerant and idempotent (golem::bundle_resources() also
 //     serves this file in alphabetical order; the explicit htmlDependency
 //     always loads it again afterwards)
-//   - WebGL2 unavailable -> input$<id>_webgl = false, no map; R falls back
-//     to its Leaflet builder
 //   - camera persists across "set"; "fit" fires only when R says the data
 //     key changed, so wave toggles re-colour without a camera jump
 //   - messages arriving before the container exists are queued per id and
-//     drained when the container appears (uiOutput flush order)
+//     drained when the container appears (uiOutput flush order); the last
+//     set/fit per id is also replayed onto a *replacement* container (a
+//     re-rendered uiOutput), so a re-render can never leave a blank map
 (function () {
   "use strict";
 
@@ -48,19 +48,6 @@
     }
   }
 
-  // ---- WebGL capability ----------------------------------------------------
-  // maplibregl.supported() was removed in MapLibre v3+, which requires
-  // WebGL2. Probe for a WebGL2 context the way the old check did.
-  function webglSupported() {
-    try {
-      if (!window.WebGL2RenderingContext || !window.maplibregl) return false;
-      var c = document.createElement("canvas");
-      return !!c.getContext("webgl2");
-    } catch (err) {
-      return false;
-    }
-  }
-
   // ---- Colour expressions --------------------------------------------------
   // Ramp input is the cell property the payload says to read: "v_log" when
   // the ramp is log-scaled, "v" otherwise. Cells without a value (JSON null)
@@ -78,12 +65,20 @@
     }
     var dom = asArr(stops && stops.domain);
     if (dom.length >= 2 && colors.length >= 2) {
-      var lo = dom[0], hi = dom[dom.length - 1];
-      var span = hi - lo;
       var e2 = ["interpolate", ["linear"], inputExpr];
-      for (var j = 0; j < colors.length; j++) {
-        var t = colors.length === 1 ? 0 : j / (colors.length - 1);
-        e2.push(span === 0 ? lo : lo + t * span, colors[j]);
+      if (dom.length === colors.length) {
+        // Quantile-style domain: the caller supplies one value per colour,
+        // so stops land at the actual distribution (thin cells spread out,
+        // dense-city outliers compressed into the dark end).
+        for (var j = 0; j < colors.length; j++) e2.push(dom[j], colors[j]);
+      } else {
+        // Legacy uniform domain: expand the stops evenly across [lo, hi].
+        var lo = dom[0], hi = dom[dom.length - 1];
+        var span = hi - lo;
+        for (var j = 0; j < colors.length; j++) {
+          var t = colors.length === 1 ? 0 : j / (colors.length - 1);
+          e2.push(span === 0 ? lo : lo + t * span, colors[j]);
+        }
       }
       return e2;
     }
@@ -107,7 +102,9 @@
       var id = ids[i];
       if (typeof id !== "string" || !id) continue;
       var ring = null;
-      try { ring = lib.cellToBoundary(id); } catch (err) { ring = null; }
+      // "geojson" forces [lng, lat] pairs: h3-js 4.x defaults to [lat, lng],
+      // which mirrors every cell across the equator/prime meridian.
+      try { ring = lib.cellToBoundary(id, "geojson"); } catch (err) { ring = null; }
       if (!ring || ring.length < 3) continue;
 
       // Unwrap antimeridian crossings so cell rings never smear across the
@@ -176,8 +173,7 @@
     state.tip.innerHTML =
       "<strong>" + escHtml(state.label || "Value") + ":</strong> " +
       escHtml(fmtVal(p.v)) + escHtml(unit) +
-      (p.info ? "<br>" + escHtml(p.info) : "") +
-      "<br><span style=\"color:#777\">cell " + escHtml(p.h3 || "") + "</span>";
+      (p.info ? "<br>" + escHtml(p.info) : "");
     state.tip.style.display = "block";
     var box = state.map.getContainer();
     var x = e.point.x + 14, y = e.point.y + 14;
@@ -237,6 +233,10 @@
     var expr = colourExpr(state);
     state.map.setPaintProperty("hex-fill", "fill-color", expr);
     state.map.setPaintProperty("hex-line", "line-color", expr);
+    // Fresh data alone does not always wake a stalled render loop (the
+    // first tiles can sit unloaded until some layout event pokes the map -
+    // seen on bslib cards whose size settles after boot); repaint now.
+    state.map.triggerRepaint();
   }
 
   function applyClear(state) {
@@ -271,14 +271,6 @@
     if (container.__hexmap) return container.__hexmap;
     if (!window.maplibregl) return null;
 
-    var webglInput = container.getAttribute("data-hexmap-webgl");
-    var ok = webglSupported();
-    reportInput(webglInput, ok);
-    if (!ok) {
-      container.__hexmap = { unsupported: true };
-      return null;
-    }
-
     var tip = document.createElement("div");
     tip.className = "hexmap-tooltip";
     tip.setAttribute("aria-hidden", "true");
@@ -303,9 +295,8 @@
         attributionControl: { compact: true }
       });
     } catch (err) {
-      // Context creation can still fail behind the probe; fall back to R's
-      // Leaflet path rather than a dead container.
-      reportInput(webglInput, false);
+      // Context creation failed (no WebGL2 in this browser): no map can
+      // boot here. The container stays blank rather than half-working.
       container.__hexmap = { unsupported: true };
       return null;
     }
@@ -362,6 +353,9 @@
         state.fitPending = false;
         fitNow(state);
       }
+      // Kick the render loop: the first tiles must load even when the
+      // card's layout settles after boot (see applySet).
+      map.triggerRepaint();
       map.on("mousemove", "hex-fill", function (e) { showTip(state, e); });
       map.on("mouseleave", "hex-fill", function () { hideTip(state); });
       map.on("click", "hex-fill", function (e) {
@@ -371,7 +365,18 @@
       });
     });
 
-    // Cards expand to full screen; keep the canvas measured.
+    // Cards expand to full screen; keep the canvas measured. The one-shot
+    // kicks below also cover layouts that settle AFTER boot (bslib card
+    // entrance animation, tab activation): without them the canvas keeps
+    // its boot-time size and the first tile batch never renders.
+    var kicks = [400, 1500];
+    for (var kk = 0; kk < kicks.length; kk++) {
+      setTimeout(function () {
+        if (!container.isConnected) return;
+        map.resize();
+        map.triggerRepaint();
+      }, kicks[kk]);
+    }
     if (window.ResizeObserver) {
       var ro = new ResizeObserver(function () {
         if (!container.isConnected) { ro.disconnect(); return; }
@@ -387,6 +392,20 @@
 
   // ---- Message routing -----------------------------------------------------
   var queued = {}; // container id -> [payloads] not yet deliverable
+  var replay = {}; // container id -> {set: msg|null, fit: msg|null} last known
+                   // state, re-applied when a re-rendered uiOutput swaps in a
+                   // replacement container element
+
+  function record(id, msg) {
+    var action = asArr(msg.action)[0];
+    var rp = replay[id] || (replay[id] = {});
+    if (action === "fit") {
+      rp.fit = msg;
+    } else {
+      rp.set = msg;
+      if (action === "clear") rp.fit = null;
+    }
+  }
 
   function handleMessage(msg) {
     if (!msg) return;
@@ -397,22 +416,39 @@
     var el = document.getElementById(id);
     if (el) {
       var st = boot(el);
-      if (st) dispatch(st, msg);
+      if (st) {
+        record(id, msg);
+        dispatch(st, msg);
+      }
       return;
     }
     // Container not rendered yet (renderUI flush order): queue and drain
     // when it appears. Only the most recent few payloads are worth keeping.
+    record(id, msg);
     var q = queued[id] || (queued[id] = []);
     q.push(msg);
     if (q.length > 20) q.shift();
   }
 
   function drain(id, el) {
+    var wasFresh = !el.__hexmap;
     var q = queued[id];
-    if (!q || !q.length) return;
-    delete queued[id];
+    if (q && q.length) delete queued[id];
     var st = boot(el);
-    for (var i = 0; i < q.length && st; i++) dispatch(st, q[i]);
+    if (!st) return;
+    if (q && q.length) {
+      for (var i = 0; i < q.length; i++) {
+        record(id, q[i]);
+        dispatch(st, q[i]);
+      }
+      return;
+    }
+    // No fresh messages: this is a replacement container from a re-rendered
+    // uiOutput. Re-apply the last known set/fit so the map is never blank.
+    if (wasFresh && replay[id]) {
+      if (replay[id].set) dispatch(st, replay[id].set);
+      if (replay[id].fit) dispatch(st, replay[id].fit);
+    }
   }
 
   function scanContainers() {
