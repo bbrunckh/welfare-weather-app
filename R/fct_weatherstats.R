@@ -1121,7 +1121,10 @@ isTRUE_vec <- function(x) !is.na(x) & x
 #'   (e.g. `c(0, 100)` for percentiles) instead of deriving it from `values`.
 #'
 #' @return A list with `pal` (a leaflet palette function), `domain` (values to
-#'   pass to `addLegend`) and `diverging` (logical).
+#'   pass to `addLegend`), `diverging` (logical), plus `colors` (the hex stops
+#'   the palette draws from, in order) and `levels` (the level order, for
+#'   binned variables) - the hex-map payload sends these straight to the
+#'   browser so both renderers share one scale.
 #'
 #' @noRd
 .weather_map_palette <- function(values, binned, levels = NULL,
@@ -1140,7 +1143,9 @@ isTRUE_vec <- function(x) !is.na(x) & x
       # A factor, not a bare character vector: addLegend sorts its values, and
       # bin labels like "[-Inf,29.5]" sort after "(29.5,31]" as plain text.
       domain    = factor(lv, levels = lv),
-      diverging = FALSE
+      diverging = FALSE,
+      colors    = ramp,
+      levels    = as.character(lv)
     ))
   }
 
@@ -1176,7 +1181,11 @@ isTRUE_vec <- function(x) !is.na(x) & x
     )
   }
 
-  list(pal = pal, domain = dom, diverging = diverging)
+  # Sample the palette across its domain: the hex-map payload interpolates
+  # these stops evenly in the browser, reproducing colorNumeric's ramp.
+  list(pal = pal, domain = dom, diverging = diverging,
+       colors = pal(seq(dom[1], dom[2], length.out = 9)),
+       levels = NULL)
 }
 
 
@@ -1387,6 +1396,113 @@ plot_weather_loc_map <- function(geojson, loc_vals, label,
   m |>
     .add_reset_button(bounds) |>
     htmlwidgets::onRender(.map_autofit_js(bounds))
+}
+
+
+#' Columnar hex-map payload for one weather variable and wave
+#'
+#' The MapLibre twin of `plot_weather_loc_map()`'s cell path: same merged
+#' per-cell values, same palette, same grey `na.color` for cells the weather
+#' series did not reach. Cells whose colour summarises several interview
+#' months are flagged (`dash`) and outlined with a dashed line layer in the
+#' browser - the dotted-outline marker the location maps used, restated for
+#' cells.
+#'
+#' @param cell_geo Per-cell geometry frame (`cell_data()$geom`).
+#' @param cmap     Wave-filtered location-to-cell map (`cell_data()$map`).
+#' @param sub      One variable's wave rows from `merge_loc_values_to_cells()`
+#'   (i.e. `weather_loc_vals()[[i]]` filtered to the wave): `loc_id` carries
+#'   the H3 index, `value` the colour value, `n_months` the interview-month
+#'   count behind each cell.
+#' @param pal_info A shared palette from `.weather_map_palette()`, built
+#'   across all waves so the colour scale does not shift between waves.
+#'
+#' @return A list with `payload` (for `hexmap_update()`) and `legend` (for
+#'   `.compact_legend_html()` plus the averaged/missing note lines); `NULL`
+#'   when there is nothing to draw.
+#'
+#' @noRd
+.weather_hex_payload <- function(cell_geo, cmap, sub, pal_info) {
+  if (is.null(cell_geo) || is.null(cmap) || nrow(cmap) == 0) return(NULL)
+  if (is.null(sub) || nrow(sub) == 0) return(NULL)
+
+  binned <- isTRUE(attr(sub, "binned"))
+  lvls   <- attr(sub, "levels")
+
+  # Drawn set: every wave cell that carries geometry - cells the weather
+  # series did not reach are sent with NA and painted grey.
+  cells <- cell_geo |>
+    dplyr::inner_join(dplyr::distinct(cmap, .data$h3), by = "h3") |>
+    dplyr::filter(!is.na(.data$geom), nchar(.data$geom) > 2)
+  if (nrow(cells) == 0) return(NULL)
+
+  by_h3 <- stats::setNames(sub$value, as.character(sub$loc_id))
+  v <- unname(by_h3[cells$h3])
+
+  # A cell averaging several interview months gets the dashed outline.
+  n_mn <- if ("n_months" %in% names(sub)) sub$n_months else rep(1L, nrow(sub))
+  avg_by_h3 <- stats::setNames(!is.na(n_mn) & n_mn > 1L,
+                               as.character(sub$loc_id))
+  dash <- unname(avg_by_h3[cells$h3] %||% rep(FALSE, nrow(cells)))
+
+  # Tooltip line for averaged cells: the value summarises several months.
+  nm_by_h3 <- stats::setNames(as.integer(n_mn), as.character(sub$loc_id))
+  n_mn_cell <- unname(nm_by_h3[cells$h3])
+  tip <- ifelse(is.na(n_mn_cell) | n_mn_cell <= 1L, NA_character_,
+                paste0(n_mn_cell, " interview months averaged"))
+
+  bounds <- NULL
+  if (all(c("xmin", "ymin", "xmax", "ymax") %in% names(cells))) {
+    bounds <- c(
+      min(cells$xmin, na.rm = TRUE), min(cells$ymin, na.rm = TRUE),
+      max(cells$xmax, na.rm = TRUE), max(cells$ymax, na.rm = TRUE)
+    )
+  }
+
+  stops <- if (binned) {
+    list(levels = pal_info$levels %||% lvls, colors = pal_info$colors)
+  } else {
+    list(domain = pal_info$domain, colors = pal_info$colors)
+  }
+
+  payload <- hexmap_payload(
+    h3     = cells$h3,
+    v      = v,
+    v_kind = if (binned) "binned" else "continuous",
+    stops  = stops,
+    bounds = bounds,
+    info   = tip,
+    dash   = dash
+  )
+
+  n_missing <- sum(is.na(v))
+  n_avg <- sum(dash %||% FALSE, na.rm = TRUE)
+  notes <- if (n_missing > 0 || n_avg > 0) {
+    paste0(
+      if (n_missing > 0) paste0(
+        '<div style="white-space: nowrap;">',
+        '<span style="display: inline-block; width: 10px; height: 10px; ',
+        'background: #cccccc; border: 1px solid #aaa; ',
+        'vertical-align: -1px;"></span> ',
+        n_missing, " of ", nrow(cells), " areas without weather</div>"
+      ),
+      if (n_avg > 0) paste0(
+        '<div style="white-space: nowrap;">',
+        n_avg, " of ", nrow(cells), " areas averaged across interview",
+        " months (dashed outline)</div>"
+      )
+    )
+  } else ""
+
+  list(
+    payload = payload,
+    legend = list(
+      pal_info = pal_info,
+      binned   = binned,
+      levels   = lvls,
+      notes    = notes
+    )
+  )
 }
 
 

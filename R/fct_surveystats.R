@@ -363,30 +363,6 @@ survey_wave_list <- function(df) {
 }
 
 
-#' Keep only the features belonging to one survey wave
-#'
-#' @param geojson A FeatureCollection whose features carry `code`, `year` and
-#'   `survname` properties.
-#' @param key A `"code|year|survname"` string, or `"all"` to keep everything.
-#'
-#' @return The filtered FeatureCollection.
-#'
-#' @export
-filter_features_by_wave <- function(geojson, key = "all") {
-  if (is.null(geojson) || is.null(key) || identical(key, "all")) return(geojson)
-  if (length(geojson$features) == 0) return(geojson)
-
-  keep <- vapply(geojson$features, function(f) {
-    p <- f$properties
-    identical(paste(as.character(p$code), as.character(p$year),
-                    as.character(p$survname), sep = "|"), key)
-  }, logical(1))
-
-  geojson$features <- geojson$features[keep]
-  geojson
-}
-
-
 #' Restrict a data frame to one survey wave
 #'
 #' @param df  A frame with `code`, `year`, `survname`.
@@ -810,84 +786,6 @@ map_view_memory <- function(input, session, output_id, key = NULL) {
 }
 
 
-#' Build a leaflet map of survey interview locations
-#'
-#' Renders a `leaflet` widget from a GeoJSON FeatureCollection of H3-aggregated
-#' survey locations. Polygons are coloured by economy code and the viewport is
-#' fitted to the bounding box. Accepts both Polygon and MultiPolygon geometries.
-#'
-#' @param loc A GeoJSON FeatureCollection list with a `code` property on each
-#'   feature, as produced by the H3-to-polygon aggregation step in
-#'   `mod_1_02_surveystats_server()`.
-#'
-#' @return A `leaflet` widget, or `NULL` invisibly when `loc` is
-#'   `NULL` or has no features.
-#'
-#' @export
-plot_survey_map <- function(loc) {
-  if (is.null(loc) || length(loc$features) == 0) return(invisible(NULL))
-
-  bounds <- .geojson_bounds(loc)
-
-  # Keyless raster Positron basemap (see .basemap()). One GeoJSON layer
-  # carrying a per-feature stroke colour via properties.style; the old
-  # onRender hover-highlight JS handles hover (fill stays transparent, so a
-  # broken stroke would mean a vanished shape - resetStyle restores it).
-  # No popups: the wave pickers and stats tables already carry this
-  # information.
-  m <- .basemap() |>
-    .add_geojson_layer(
-      fc_string = .survey_fc_string(loc$features),
-      layer_id  = "locs",
-      stroke    = TRUE,
-      # Fill stays invisible: these are location outlines, and overlapping
-      # translucent fills would stack into shades outside the legend.
-      fill_opacity = 0,
-      weight    = 1
-    )
-
-  # Hover highlight via vanilla Leaflet JS.
-  #
-  # The un-highlight uses Leaflet's own `resetStyle()` rather than style values
-  # captured in JS variables at render time. Captured values are wrong (or
-  # undefined) for any sub-layer Leaflet builds as a group instead of a single
-  # path, and writing an undefined colour/weight back makes the stroke invalid.
-  #
-  # Handlers are bound on the GeoJSON layer itself, not on each sub-layer:
-  # L.GeoJSON is a FeatureGroup, so child events propagate up, and the binding
-  # then also covers sub-layers regardless of the geometry type they came from.
-  hover_js <- htmlwidgets::JS("
-    function(el, x) {
-      this.eachLayer(function(layer) {
-        if (typeof layer.resetStyle !== 'function') return;  // not GeoJSON
-
-        layer.on('mouseover', function(e) {
-          var target = e.propagatedFrom || e.layer;
-          if (target && target.setStyle) {
-            target.setStyle({ weight: 2, color: '#FF0000' });
-            if (target.bringToFront) target.bringToFront();
-          }
-        });
-
-        layer.on('mouseout', function(e) {
-          var target = e.propagatedFrom || e.layer;
-          if (target) layer.resetStyle(target);
-        });
-      });
-    }
-  ")
-
-  m |>
-    leaflet::fitBounds(
-      lng1 = bounds$lng1, lat1 = bounds$lat1,
-      lng2 = bounds$lng2, lat2 = bounds$lat2
-    ) |>
-    .add_reset_button(bounds) |>
-    htmlwidgets::onRender(hover_js) |>
-    htmlwidgets::onRender(.map_autofit_js(bounds))
-}
-
-
 # ---------------------------------------------------------------------------- #
 # Sample density heatmap                                                        #
 # ---------------------------------------------------------------------------- #
@@ -1151,36 +1049,45 @@ build_cell_features <- function(cell_geo, cell_map, by_wave = TRUE) {
 }
 
 
-#' FeatureCollection string for the survey-locations map
-#'
-#' Strokes are assigned per distinct economy code with a hue palette over the
-#' codes present in the given feature set (matching the historical
-#' per-code-layer behaviour on whatever subset is drawn).
-#'
-#' @param features The survey-location feature list.
-#'
-#' @return A GeoJSON FeatureCollection JSON string.
-#'
+# Log domain + Mako ramp shared by the density map's two renderers (the
+# MapLibre payload builder and the Leaflet fallback) so their colour scales
+# cannot drift apart.
+#' @param n_units Numeric vector of per-cell unit counts.
+#' @return A list with `rng` (the finite, positive log domain) and `ramp`
+#'   (colour hex stops, light to dark).
 #' @noRd
-.survey_fc_string <- function(features) {
-  codes <- vapply(features, function(f) {
-    as.character(f$properties$code %||% NA_character_)
-  }, character(1), USE.NAMES = FALSE)
-  u_codes    <- sort(unique(codes))
-  code_color <- setNames(scales::hue_pal()(length(u_codes)), u_codes)
-  strokes    <- unname(code_color[codes])
+.density_ramp <- function(n_units) {
+  # Counts are heavily skewed - a handful of urban cells dwarf everything - so
+  # the colour scale runs on log, over the range actually present. Shares are
+  # fractional where a location's units are split across its cells, so the
+  # bottom of the ramp can sit below one.
+  pos <- n_units[is.finite(n_units) & n_units > 0]
+  rng <- range(pos, na.rm = TRUE)
+  if (length(pos) == 0 || !all(is.finite(rng)) || rng[1] <= 0) rng <- c(0.5, 1)
+  if (diff(rng) <= 0) rng <- c(rng[1], rng[1] * 2)
+  # Mako (viridis family: perceptually uniform, colour-blind safe, and still
+  # readable in greyscale) running light to dark, with the palest stops
+  # trimmed off - near-white yellows and creams disappear against the light
+  # basemap, which is what made the old Inferno ramp hard to read at the
+  # bottom end.
+  ramp <- rev(grDevices::hcl.colors(12, "Mako"))[3:11]
+  list(rng = rng, ramp = ramp)
+}
 
-  props_json <- paste0(
-    '{"code":',     .json_vec(.prop_col(features, "code")),
-    ',"year":',     .json_vec(.prop_col(features, "year")),
-    ',"survname":', .json_vec(.prop_col(features, "survname")),
-    ',"loc_id":',   .json_vec(.prop_col(features, "loc_id")),
-    ',"bbox":',     .bbox_frag(features),
-    ',',            .feature_style_frag(strokes, stroke = TRUE),
-    '}'
+# Long explanation under the density legend's info marker, shared by both
+# renderers.
+#' @noRd
+.density_legend_info <- function(unit_label) {
+  paste0(
+    "Number of sampled ", unit_label, " in each hexagon. Every ",
+    sub("s$", "", unit_label), " is placed in exactly one hexagon: a",
+    " location's ", unit_label, " are assigned across the cells it",
+    " covers in proportion to their 2020 population, then rolled up to",
+    " this display grid - so an area covered by many overlapping survey",
+    " locations accumulates all of them, and the totals match the",
+    " sample exactly. Colour runs on a log scale because a handful of",
+    " urban areas would otherwise flatten everything else."
   )
-  geoms <- vapply(features, function(f) f$geom_json, character(1))
-  .geojson_fc_string(geoms, props_json, ids = seq_along(features))
 }
 
 #' FeatureCollection pieces for the sample density map
@@ -1200,20 +1107,9 @@ build_cell_features <- function(cell_geo, cell_map, by_wave = TRUE) {
                    is.finite(cells$n_units), , drop = FALSE]
   if (nrow(cells) == 0) return(NULL)
 
-  # Counts are heavily skewed - a handful of urban cells dwarf everything - so
-  # the colour scale runs on log, over the range actually present. Shares are
-  # fractional where a location's units are split across its cells, so the
-  # bottom of the ramp can sit below one.
-  pos <- cells$n_units[cells$n_units > 0]
-  rng <- range(pos, na.rm = TRUE)
-  if (!all(is.finite(rng)) || rng[1] <= 0) rng <- c(0.5, 1)
-  if (diff(rng) <= 0) rng <- c(rng[1], rng[1] * 2)
-  # Mako (viridis family: perceptually uniform, colour-blind safe, and still
-  # readable in greyscale) running light to dark, with the palest stops
-  # trimmed off - near-white yellows and creams disappear against the light
-  # basemap, which is what made the old Inferno ramp hard to read at the
-  # bottom end.
-  ramp <- rev(grDevices::hcl.colors(12, "Mako"))[3:11]
+  ramp_info <- .density_ramp(cells$n_units)
+  rng  <- ramp_info$rng
+  ramp <- ramp_info$ramp
   pal  <- leaflet::colorNumeric(ramp, domain = log(rng), na.color = "#cccccc")
   col_of <- function(v) pal(log(pmin(pmax(v, rng[1]), rng[2])))
 
@@ -1307,18 +1203,74 @@ plot_sample_density_map <- function(cells, unit_label = "households") {
         pal_info = fc$pal_info,
         binned   = FALSE,
         title    = paste0(.capitalise(unit_label), " per area"),
-        info     = paste0(
-          "Number of sampled ", unit_label, " in each hexagon. Every ",
-          sub("s$", "", unit_label), " is placed in exactly one hexagon: a",
-          " location's ", unit_label, " are assigned across the cells it",
-          " covers in proportion to their 2020 population, then rolled up to",
-          " this display grid - so an area covered by many overlapping survey",
-          " locations accumulates all of them, and the totals match the",
-          " sample exactly. Colour runs on a log scale because a handful of",
-          " urban areas would otherwise flatten everything else."
-        )
+        info     = .density_legend_info(unit_label)
       )
     )
+}
+
+
+#' Columnar hex-map payload for the sample density map
+#'
+#' The MapLibre twin of `.sample_density_fc()`: same log domain, same Mako
+#' ramp, same legend - but the payload carries only cell ids and values, and
+#' the browser decodes geometry and applies colour. `v` stays on the count
+#' scale (the hover tooltip shows raw counts); `v_log` carries the log the
+#' ramp reads.
+#'
+#' @param cells      Data frame with `h3` and `n_units` (bbox columns ride
+#'   along from `density_cells()` when present), as produced for one wave.
+#' @param unit_label Plural noun for what a row of the survey is.
+#'
+#' @return A list with `payload` (for `hexmap_update()`) and `legend` (for
+#'   `.compact_legend_html()`); `NULL` when there is nothing to draw.
+#'
+#' @noRd
+.density_hex_payload <- function(cells, unit_label = "households") {
+  if (is.null(cells) || nrow(cells) == 0) return(NULL)
+  if (!all(c("h3", "n_units") %in% names(cells))) return(NULL)
+
+  ok <- !is.na(cells$h3) & nzchar(cells$h3) &
+    is.finite(cells$n_units) & cells$n_units > 0
+  cells <- cells[ok, , drop = FALSE]
+  if (nrow(cells) == 0) return(NULL)
+
+  ramp_info <- .density_ramp(cells$n_units)
+  rng <- ramp_info$rng
+
+  bounds <- NULL
+  if (all(c("xmin", "ymin", "xmax", "ymax") %in% names(cells))) {
+    bounds <- c(
+      min(cells$xmin, na.rm = TRUE), min(cells$ymin, na.rm = TRUE),
+      max(cells$xmax, na.rm = TRUE), max(cells$ymax, na.rm = TRUE)
+    )
+  }
+
+  payload <- hexmap_payload(
+    h3     = cells$h3,
+    v      = cells$n_units,
+    v_log  = log(pmin(pmax(cells$n_units, rng[1]), rng[2])),
+    v_kind = "continuous",
+    stops  = list(domain = log(rng), colors = ramp_info$ramp),
+    bounds = bounds,
+    label  = paste0(.capitalise(unit_label), " per cell")
+  )
+
+  pal <- leaflet::colorNumeric(ramp_info$ramp, domain = log(rng),
+                               na.color = "#cccccc")
+  list(
+    payload = payload,
+    legend = list(
+      pal_info = list(
+        pal    = function(v) pal(log(pmin(pmax(v, rng[1]), rng[2]))),
+        domain = rng,
+        mid    = exp(mean(log(rng))),
+        stops  = exp(seq(log(rng[1]), log(rng[2]), length.out = 9))
+      ),
+      binned = FALSE,
+      title  = paste0(.capitalise(unit_label), " per area"),
+      info   = .density_legend_info(unit_label)
+    )
+  )
 }
 
 

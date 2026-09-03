@@ -61,8 +61,8 @@ test_that("INT-06: reload clears stale map/cell state; H3 failure leaves it clea
     ),
     {
       # Pre-seed the state a previous survey would have left behind.
-      map_data(list(type = "FeatureCollection",
-                    features = list(list(properties = list(stale = TRUE)))))
+      # (Location-level map_data no longer carries geography - all maps
+      # render H3 cells - so the INT-06 contract is about cell state.)
       cell_data(list(geom = data.frame(h3 = "stale", geom = "stale"),
                      map = data.frame(h3 = "stale")))
       survey_data(NULL)
@@ -73,17 +73,15 @@ test_that("INT-06: reload clears stale map/cell state; H3 failure leaves it clea
       session$setInputs(survey_stats = 1L)
       session$flushReact()
 
-      # Microdata published; map/cell cleared and NOT repopulated by the
+      # Microdata published; cell state cleared and NOT repopulated by the
       # failed H3 build - the map goes blank instead of showing stale
       # geography (INT-06).
       expect_false(is.null(survey_data()))
-      expect_null(map_data())
       expect_null(cell_data())
 
       # A second load starts from the same cleared baseline.
       session$setInputs(survey_stats = 3L)
       session$flushReact()
-      expect_null(map_data())
       expect_null(cell_data())
     }
   )

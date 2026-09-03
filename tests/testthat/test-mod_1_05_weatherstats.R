@@ -34,34 +34,8 @@ make_selected_weather <- function(n = 1) {
   )
 }
 
-# A FeatureCollection shaped like the one mod_1_02 hands over: parsed geometry
-# for the bounds plus the raw `geom_json` string each layer is built from.
-make_map_data <- function(waves = c(2018, 2021)) {
-  square <- function(x0, y0) {
-    list(c(x0, y0), c(x0 + 1, y0), c(x0 + 1, y0 + 1), c(x0, y0 + 1),
-         c(x0, y0))
-  }
-  feats <- list()
-  for (y in waves) {
-    for (i in seq_along(c("L1", "L2", "L3"))) {
-      ring <- square(i, i)
-      feats <- c(feats, list(list(
-        properties = list(code = "TST", year = as.character(y),
-                          survname = "SRV",
-                          loc_id = c("L1", "L2", "L3")[i]),
-        geometry   = list(type = "Polygon", coordinates = list(ring)),
-        geom_json  = jsonlite::toJSON(
-          list(type = "Polygon", coordinates = list(ring)),
-          auto_unbox = TRUE
-        ) |> as.character()
-      )))
-    }
-  }
-  list(type = "FeatureCollection", features = feats)
-}
-
 # Boilerplate the module needs but that these tests do not exercise.
-weatherstats_args <- function(sw, swd, md) {
+weatherstats_args <- function(sw, swd, cell_data = NULL) {
   list(
     connection_params = shiny::reactive(list(type = "local", path = ".")),
     variable_list     = shiny::reactive(NULL),
@@ -70,10 +44,43 @@ weatherstats_args <- function(sw, swd, md) {
     selected_weather  = shiny::reactive(sw),
     hist_years        = shiny::reactive(c(from = 1991L, to = 2020L)),
     survey_data       = shiny::reactive(NULL),
-    map_data          = shiny::reactive(md),
-    cell_data         = shiny::reactive(NULL),
+    cell_data         = shiny::reactive(cell_data),
     tabset_id         = "tabs"
   )
+}
+
+# An H3 cell fixture shaped like what mod_1_02 hands over: one `geom` row per
+# cell (geometry string + DuckDB bbox) and a `map` of location-to-cell pairs.
+# The merged per-cell values differ per wave, so a rendered map can be told
+# apart by its fill colours.
+make_cell_data <- function(waves = c(2018, 2021)) {
+  locs  <- c("L1", "L2", "L3")
+  h3    <- c("879754048ffffff", "87975404affffff", "87975404bffffff")
+  vals  <- c(25, 30, 35)
+  cell_geo <- data.frame(
+    h3   = h3,
+    geom = sprintf(
+      '{"type":"Polygon","coordinates":[[[%f,%f],[%f,%f],[%f,%f],[%f,%f],[%f,%f]]]}',
+      -19 - seq_along(h3), 27, -18 - seq_along(h3), 27,
+      -18 - seq_along(h3), 28, -19 - seq_along(h3), 28,
+      -19 - seq_along(h3), 27
+    ),
+    xmin = -20 - seq_along(h3), ymin = 27,
+    xmax = -18 - seq_along(h3), ymax = 28,
+    stringsAsFactors = FALSE
+  )
+  cell_map <- do.call(rbind, lapply(waves, function(y) {
+    data.frame(
+      code     = "TST",
+      year     = as.character(y),
+      survname = "SRV",
+      loc_id   = locs,
+      h3       = h3,
+      pop_2020 = c(10, 20, 30),
+      stringsAsFactors = FALSE
+    )
+  }))
+  list(geom = cell_geo, map = cell_map)
 }
 
 
@@ -91,7 +98,7 @@ test_that("one map output is created per weather variable, not per wave", {
 
   shiny::testServer(
     mod_1_05_weatherstats_server,
-    args = weatherstats_args(sw, swd, make_map_data()),
+    args = weatherstats_args(sw, swd, make_cell_data()),
     {
       survey_weather(swd)
       wx_spec(list(sw = sw, so = NULL))
@@ -120,7 +127,7 @@ test_that("the wave picker selects which wave the maps draw", {
 
   shiny::testServer(
     mod_1_05_weatherstats_server,
-    args = weatherstats_args(sw, swd, make_map_data()),
+    args = weatherstats_args(sw, swd, make_cell_data()),
     {
       survey_weather(swd)
       wx_spec(list(sw = sw, so = NULL))
@@ -129,11 +136,16 @@ test_that("the wave picker selects which wave the maps draw", {
       # Defaults to the first wave rather than to nothing.
       expect_equal(wxmap_wave(), "TST|2018|SRV")
       # The wave's values are encoded as the per-feature fill colours (no
-      # popups): read the registered GeoJSON source out of the widget payload.
+      # popups): read them out of the widget's addGeoJSON call. The FC
+      # string's properties carry a nested `style.fillColor` since the
+      # Leaflet rollback (the mapgl experiment used a flat `__fill`).
       fill_colors <- function(widget) {
         j <- jsonlite::fromJSON(widget, simplifyVector = FALSE)
-        vapply(j$x$sources[[1]]$data$features,
-               function(f) f$properties$`__fill`, character(1))
+        call <- Filter(function(k) identical(k$method, "addGeoJSON"),
+                       j$x$calls)[[1]]
+        fc <- jsonlite::fromJSON(call$args[[1]], simplifyVector = FALSE)
+        vapply(fc$features,
+               function(f) f$properties$style$fillColor, character(1))
       }
       cols_2018 <- fill_colors(output$wxmap_1)
       expect_true(all(nzchar(cols_2018)))
@@ -166,7 +178,7 @@ test_that("the wave picker is hidden when there is only one wave", {
 
   shiny::testServer(
     mod_1_05_weatherstats_server,
-    args = weatherstats_args(sw, swd, make_map_data(waves = 2018)),
+    args = weatherstats_args(sw, swd),
     {
       survey_weather(swd)
       wx_spec(list(sw = sw, so = NULL))
@@ -189,7 +201,7 @@ test_that("the map colour scale spans every wave, not just the one shown", {
 
   shiny::testServer(
     mod_1_05_weatherstats_server,
-    args = weatherstats_args(sw, swd, make_map_data()),
+    args = weatherstats_args(sw, swd),
     {
       survey_weather(swd)
       wx_spec(list(sw = sw, so = NULL))

@@ -353,6 +353,50 @@ plot_welfare_dist <- function(df,
 # Outcome spatial coverage map                                                  #
 # ---------------------------------------------------------------------------- #
 
+# Per-location availability of the outcome, pooled over the passed rows: the
+# share of sampled units with a non-missing value plus the unit count.
+#' @return A data frame keyed by `code/year/survname/loc_id` (whichever keys
+#'   the frame carries), or `NULL` when the inputs are unusable.
+#' @noRd
+.outcome_loc_availability <- function(df, outcome) {
+  keys <- c("code", "year", "survname", "loc_id")
+  if (is.null(df) || !outcome %in% names(df) || !"loc_id" %in% names(df))
+    return(NULL)
+  df |>
+    dplyr::mutate(.has = !is.na(.data[[outcome]])) |>
+    dplyr::summarise(
+      pct  = mean(.data$.has, na.rm = TRUE) * 100,
+      n_hh = dplyr::n(),
+      .by  = dplyr::any_of(c(keys))
+    )
+}
+
+# UI-04: colorblind-safe bad/mid/good ramp (vermillion / orange / bluish
+# green) replacing the red-yellow-green ramp.
+.coverage_ramp <- c("#D55E00", "#E69F00", "#009E73")
+
+# Scale to the coverage actually present rather than a fixed 0-100: when
+# every area sits at 95-100% a full-range ramp paints them all the same
+# green and hides the variation that matters. A uniform map still needs a
+# legend with width, so give it a token span ending at its own value.
+.coverage_rng <- function(vals) {
+  rng <- range(vals, na.rm = TRUE)
+  if (!all(is.finite(rng))) rng <- c(0, 100)
+  if (diff(rng) < 1) {
+    rng <- c(max(0, rng[2] - 1), rng[2])
+    if (diff(rng) == 0) rng <- c(max(0, rng[2] - 1), rng[2] + 1e-9)
+  }
+  rng
+}
+
+.coverage_legend_info <- function(rng) paste0(
+  "Share of sampled units at each location with a non-missing value",
+  " for this outcome. The scale runs over the coverage present in",
+  " this sample (", format(signif(rng[1], 3)), "% to ",
+  format(signif(rng[2], 3)), "%), not a fixed 0-100, so small",
+  " differences stay visible."
+)
+
 #' Build a leaflet map highlighting locations with outcome data
 #'
 #' Colours H3 polygons by whether the outcome variable is available (non-NA)
@@ -376,13 +420,8 @@ plot_outcome_coverage_map <- function(geojson, df, outcome, cell_map = NULL) {
 
   keys <- c("code", "year", "survname", "loc_id")
 
-  loc_avail <- df |>
-    dplyr::mutate(.has = !is.na(.data[[outcome]])) |>
-    dplyr::summarise(
-      pct  = mean(.data$.has, na.rm = TRUE) * 100,
-      n_hh = dplyr::n(),
-      .by  = dplyr::any_of(c(keys))
-    )
+  loc_avail <- .outcome_loc_availability(df, outcome)
+  if (is.null(loc_avail)) return(invisible(NULL))
 
   # Survey locations overlap, so drawing one translucent polygon per location
   # stacks fills and shows shades that are in neither the data nor the legend.
@@ -404,23 +443,9 @@ plot_outcome_coverage_map <- function(geojson, df, outcome, cell_map = NULL) {
 
   avail_map <- stats::setNames(loc_avail$pct, as.character(loc_avail$loc_id))
 
-  # Scale to the coverage actually present rather than a fixed 0-100: when
-  # every area sits at 95-100% a full-range ramp paints them all the same
-  # green and hides the variation that matters. A uniform map still needs a
-  # legend with width, so give it a token span ending at its own value.
-  rng <- range(loc_avail$pct, na.rm = TRUE)
-  if (!all(is.finite(rng))) rng <- c(0, 100)
-  if (diff(rng) < 1) {
-    rng <- c(max(0, rng[2] - 1), rng[2])
-    if (diff(rng) == 0) rng <- c(max(0, rng[2] - 1), rng[2] + 1e-9)
-  }
+  rng <- .coverage_rng(loc_avail$pct)
 
-  pal <- leaflet::colorNumeric(
-    # UI-04: colorblind-safe bad/mid/good ramp (vermillion / orange /
-    # bluish green) replacing the red-yellow-green ramp.
-    palette = c("#D55E00", "#E69F00", "#009E73"),
-    domain  = rng
-  )
+  pal <- leaflet::colorNumeric(palette = .coverage_ramp, domain = rng)
 
   bounds <- .geojson_bounds(geojson)
 
@@ -466,15 +491,101 @@ plot_outcome_coverage_map <- function(geojson, df, outcome, cell_map = NULL) {
         pal_info = list(pal = pal, domain = rng),
         binned   = FALSE,
         title    = "% available",
-        info     = paste0(
-          "Share of sampled units at each location with a non-missing value",
-          " for this outcome. The scale runs over the coverage present in",
-          " this sample (", format(signif(rng[1], 3)), "% to ",
-          format(signif(rng[2], 3)), "%), not a fixed 0-100, so small",
-          " differences stay visible."
-        )
+        info     = .coverage_legend_info(rng)
       )
     )
+}
+
+
+#' Columnar hex-map payload for the outcome coverage map
+#'
+#' The MapLibre twin of `plot_outcome_coverage_map()`'s cell path: the same
+#' per-location availability, the same weighted cell merge, the same
+#' vermillion / orange / green ramp over the coverage range actually
+#' present - but the payload carries only cell ids and coverage percentages,
+#' and the browser applies colour. Cells the survey reached without a
+#' non-missing outcome value arrive as `NA` and the browser paints them with
+#' its grey `na.color` (the Leaflet fallback shades them at the bottom of
+#' the ramp, as it always has).
+#'
+#' @param cell_geo Per-cell geometry frame (`cell_data()$geom`).
+#' @param cmap     Wave-filtered location-to-cell map (`cell_data()$map`).
+#' @param df       Wave-filtered outcome data.
+#' @param outcome  Outcome variable name.
+#'
+#' @return A list with `payload` (for `hexmap_update()`) and `legend` (for
+#'   `.compact_legend_html()`); `NULL` when there is nothing to draw.
+#'
+#' @noRd
+.coverage_hex_payload <- function(cell_geo, cmap, df, outcome) {
+  if (is.null(cell_geo) || is.null(cmap) || nrow(cmap) == 0) return(NULL)
+  loc_avail <- .outcome_loc_availability(df, outcome)
+  if (is.null(loc_avail)) return(NULL)
+
+  lv <- loc_avail
+  names(lv)[names(lv) == "pct"] <- "value"
+  # by_wave = FALSE: one value per cell, pooling every selected wave, so a
+  # cell sampled by two waves is painted once (PERF-36 draw-once rule).
+  merged <- merge_loc_values_to_cells(cmap, lv, by_wave = FALSE)
+  if (is.null(merged) || nrow(merged) == 0) return(NULL)
+
+  # Weighted merging can leave a hair outside [0, 100] in floating point.
+  vals <- pmin(pmax(merged$value, 0), 100)
+  rng  <- .coverage_rng(vals)
+
+  # Drawn set: every selected-wave cell that carries geometry - cells the
+  # merge produced no value for are sent with NA and painted grey.
+  cells <- cell_geo |>
+    dplyr::inner_join(dplyr::distinct(cmap, .data$h3), by = "h3") |>
+    dplyr::filter(!is.na(.data$geom), nchar(.data$geom) > 2)
+  if (nrow(cells) == 0) return(NULL)
+
+  by_h3 <- stats::setNames(vals, merged$loc_id)
+  v <- unname(by_h3[cells$h3])
+
+  # Tooltip identifiers from the cell map: the first contributing wave plus
+  # how many locations feed the cell.
+  wave_txt <- trimws(paste(
+    ifelse(is.na(merged$code), "", as.character(merged$code)),
+    ifelse(is.na(merged$year), "", as.character(merged$year)),
+    ifelse(is.na(merged$survname), "", as.character(merged$survname))
+  ))
+  info <- paste0(
+    wave_txt, ifelse(nzchar(wave_txt), " \u00b7 ", ""),
+    merged$n_locs, ifelse(merged$n_locs == 1L, " location", " locations")
+  )
+  info_by_h3 <- stats::setNames(info, merged$loc_id)
+  tip <- unname(info_by_h3[cells$h3])
+
+  bounds <- NULL
+  if (all(c("xmin", "ymin", "xmax", "ymax") %in% names(cells))) {
+    bounds <- c(
+      min(cells$xmin, na.rm = TRUE), min(cells$ymin, na.rm = TRUE),
+      max(cells$xmax, na.rm = TRUE), max(cells$ymax, na.rm = TRUE)
+    )
+  }
+
+  payload <- hexmap_payload(
+    h3     = cells$h3,
+    v      = v,
+    v_kind = "continuous",
+    stops  = list(domain = rng, colors = .coverage_ramp),
+    bounds = bounds,
+    info   = tip,
+    label  = "% available",
+    unit   = "%"
+  )
+
+  pal <- leaflet::colorNumeric(palette = .coverage_ramp, domain = rng)
+  list(
+    payload = payload,
+    legend = list(
+      pal_info = list(pal = pal, domain = rng),
+      binned   = FALSE,
+      title    = "% available",
+      info     = .coverage_legend_info(rng)
+    )
+  )
 }
 
 
