@@ -42,7 +42,7 @@ mod_1_01_sample_server <- function(id, connection_params, survey_list, variable_
     # ---- Level of analysis selector -----------------------------------------
 
     output$unit_ui <- renderUI({
-      radioButtons(
+      pill_toggle(
         inputId  = ns("unit"),
         label    = "Level of analysis",
         choices  = c(

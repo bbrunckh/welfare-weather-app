@@ -292,13 +292,12 @@ mod_3_01_sp_server <- function(id,
 
       if (length(uniq) == 2 && all(uniq %in% c(0, 1))) {
         # Binary variable: choose target value
-        radioButtons(
+        pill_toggle(
           ns("pmt_cutoff"),
           label = paste("Target", unit_word(plural = TRUE),
                         "where variable equals"),
           choices = c("0" = 0, "1" = 1),
-          selected = 0,
-          inline = TRUE
+          selected = 0
         )
       } else {
         # Continuous variable: choose threshold

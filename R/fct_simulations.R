@@ -333,7 +333,7 @@ compute_factor_loading <- function(X_nonFE, chol_obj) {
 #' @export
 residual_method_ui <- function(ns, input_id) {
   shiny::tagList(
-    shiny::radioButtons(
+    pill_toggle(
       inputId  = ns(input_id),
       label    = "Residuals method",
       choices  = residual_choices(),

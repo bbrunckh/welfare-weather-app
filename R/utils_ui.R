@@ -257,6 +257,51 @@ shinyjs_disable_button <- function(input_id, enabled = TRUE) {
   )
 }
 
+# ---- Segmented radio controls -------------------------------------------------
+
+pill_toggle <- function(
+    inputId,
+    choices = NULL,
+    selected = NULL,
+    label = NULL,
+    width = NULL,
+    choiceNames = NULL,
+    choiceValues = NULL,
+    extra_class = NULL,
+    layout = c("horizontal", "vertical")
+) {
+  layout <- match.arg(layout)
+  if (is.null(choiceNames) && is.null(selected) && length(choices) > 0) {
+    selected <- unname(choices)[1]
+  }
+
+  args <- list(
+    inputId = inputId,
+    label = label,
+    selected = selected,
+    inline = TRUE,
+    width = width
+  )
+  if (!is.null(choiceNames)) {
+    args$choiceNames  <- choiceNames
+    args$choiceValues <- choiceValues
+  } else {
+    args$choices <- choices
+  }
+
+  rb <- do.call(shiny::radioButtons, args)
+  classes <- c(
+    "toggle-slider",
+    "pill-toggle",
+    if (identical(layout, "vertical")) "pill-toggle-vertical",
+    extra_class
+  )
+  htmltools::tagAppendAttributes(
+    rb,
+    class = paste(classes[!is.na(classes) & nzchar(classes)], collapse = " ")
+  )
+}
+
 # ---- Wave / Survey Year Toggle Slider ----------------------------------------
 
 #' Survey year / wave toggle-style slider input
@@ -274,20 +319,13 @@ shinyjs_disable_button <- function(input_id, enabled = TRUE) {
 #'
 #' @noRd
 wave_toggle_slider <- function(inputId, choices, selected = NULL, label = NULL, width = NULL) {
-  if (is.null(selected) && length(choices) > 0) {
-    selected <- unname(choices)[1]
-  }
-  rb <- shiny::radioButtons(
-    inputId  = inputId,
-    label    = label,
-    choices  = choices,
+  pill_toggle(
+    inputId = inputId,
+    choices = choices,
     selected = selected,
-    inline   = TRUE,
-    width    = width
-  )
-  htmltools::tagAppendAttributes(
-    rb,
-    class = "toggle-slider wave-toggle-slider"
+    label = label,
+    width = width,
+    extra_class = "wave-toggle-slider"
   )
 }
 
@@ -319,4 +357,3 @@ wave_slider_choices <- function(wave_df, include_all = TRUE) {
     wave_choices
   }
 }
-

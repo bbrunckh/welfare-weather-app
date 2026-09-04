@@ -34,6 +34,31 @@ test_that("restore_selection clips invalid values and falls back on empty", {
   )
 })
 
+test_that("pill_toggle preserves choices and selected state", {
+  tag_html <- as.character(pill_toggle(
+    "test_pill",
+    choices = c("First option" = "first", "Second option" = "second"),
+    selected = "second",
+    label = "Choose one"
+  ))
+
+  expect_true(grepl("pill-toggle", tag_html, fixed = TRUE))
+  expect_true(grepl("toggle-slider", tag_html, fixed = TRUE))
+  expect_true(grepl("Choose one", tag_html, fixed = TRUE))
+  expect_true(grepl("value=\"first\"", tag_html, fixed = TRUE))
+  expect_true(grepl("value=\"second\" checked=\"checked\"", tag_html, fixed = TRUE))
+})
+
+test_that("pill_toggle supports vertical layout", {
+  tag_html <- as.character(pill_toggle(
+    "test_vertical",
+    choices = c("Short label" = "short", "A longer label" = "long"),
+    layout = "vertical"
+  ))
+
+  expect_true(grepl("pill-toggle-vertical", tag_html, fixed = TRUE))
+})
+
 test_that("restore_numeric keeps in-range values and falls back otherwise", {
   expect_identical(.restore_numeric(5.5, 0.01, Inf, fallback = 3), 5.5)
   expect_identical(.restore_numeric(7, 5, 20, fallback = 10), 7)

@@ -101,7 +101,7 @@ mod_1_03_outcome_server <- function(id, variable_list, survey_data,
 
       if (!is_monetary_outcome(info$name[1], info$units[1])) return(NULL)
 
-      radioButtons(
+      pill_toggle(
         inputId  = ns("currency"),
         label    = "Currency",
         choices  = c("PPP (2021)" = "PPP", "LCU (2021)" = "LCU"),
