@@ -789,6 +789,19 @@ table.dataTable {
   display: none !important;
 }
 
+.pill-toggle > label.control-label:not(.shiny-label-null) {
+  display: block !important;
+  color: var(--bs-body-color);
+  font-size: 0.86rem;
+  font-weight: 600;
+  margin: 0 0 0.25rem;
+}
+
+.pill-toggle:has(> label.control-label:not(.shiny-label-null)) {
+  align-items: flex-start;
+  flex-direction: column;
+}
+
 .toggle-slider .shiny-options-group {
   display: inline-flex !important;
   flex-direction: row !important;
@@ -873,4 +886,32 @@ table.dataTable {
 .toggle-slider input[type="radio"]:focus-visible + label {
   outline: 2px solid var(--bs-primary, #0071bc);
   outline-offset: 1px;
+}
+
+/* Long-label pills stack vertically after the base segmented-control rules. */
+.pill-toggle-vertical {
+  align-items: stretch;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+}
+
+.pill-toggle-vertical .shiny-options-group {
+  align-items: stretch;
+  display: flex !important;
+  flex-direction: column !important;
+  overflow-x: visible;
+  width: 100%;
+}
+
+.pill-toggle-vertical .radio-inline,
+.pill-toggle-vertical .form-check-inline {
+  width: 100%;
+}
+
+.pill-toggle-vertical .radio-inline span,
+.pill-toggle-vertical .form-check-inline label,
+.pill-toggle-vertical .form-check-inline span {
+  justify-content: flex-start;
+  width: 100%;
 }

@@ -338,3 +338,13 @@ Use a short, dated record containing the commit, fixture/workload definition, de
 - Ship bounded parallelism behind the default-off worker setting.
 - Reject parallelism because of memory, service-throughput, correctness, or insufficient-benefit evidence.
 
+## Decision Record — Overview Metadata — 2026-09-04
+
+- **Commit/worktree:** `overview-metadata-optimization`, based on `642a524` (`Use pill selectors for compact controls`); implementation is currently uncommitted.
+- **Workload:** three small Overview CSV files (`survey_list.csv`, `variable_list.csv`, and `cpi_ppp.csv`) plus the static poverty-line table. Local timings used a representative local metadata directory; Databricks timings used the configured metadata volume and live HTTP requests.
+- **Changes:** shared path and Databricks request helpers, direct parallel Databricks CSV requests, validated atomic metadata publication, process-local metadata cache with local file-signature invalidation and remote TTL/LRU controls, and retained OAuth token caching.
+- **Correctness:** sequential and parallel Databricks loads produce equivalent validated bundles. Focused metadata, connection, parsing, and diff checks pass. The cache is credential-isolated and disabled by `WISEAPP_METADATA_CACHE_DISABLE=1`.
+- **Measurements:** five-run medians from `dev/bench_overview_metadata.R` using `WISEAPP_DATA_PATH`: local uncached `0.290s`, local cold-cache `0.285s`, local warm-cache `0.001s`, Databricks uncached `1.973s`, Databricks parallel `1.496s` (`1.319x`), Databricks cold-cache `1.523s`, and Databricks warm-cache approximately `0s`.
+- **Decision:** retain the parallel Databricks metadata path and cache. Do not add asynchronous loading or key-level simulation parallelism based on this benchmark. The metadata speedup is below the provisional 2x gate, and the fresh load is approximately one second; worker lifecycle and Shiny complexity are not justified for this path.
+- **Operational controls:** `WISEAPP_METADATA_LOAD_PARALLEL` defaults to enabled; `WISEAPP_METADATA_CACHE_MAX_AGE` defaults to 900 seconds for remote entries; invalid overrides use safe defaults. Review or remove these flags after production latency and cache-hit rates are observed.
+- **Validation:** full test suite, R parsing, `styler` formatting of changed R files, and `git diff --check` pass. `lintr` runs successfully but reports existing package-wide namespace and style findings, including unresolved Shiny globals and long UI strings; no broad lint cleanup is included in this focused change.

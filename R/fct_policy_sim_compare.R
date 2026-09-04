@@ -298,15 +298,14 @@ policy_input_diagnostics <- function(baseline_svy, policy_svy, vars = NULL) {
         shiny::tags$div(
           style = "display:flex; gap:10px; flex-wrap:wrap; margin-top:4px;",
           shiny::tags$div(style = "flex:1; min-width:160px;",
-            shiny::radioButtons(
+            pill_toggle(
               ns("cmp_group_order"),
               label    = "Group charts and tables by",
               choices  = c(
                 "Scenario \u00D7 Year" = "scenario_x_year",
                 "Year \u00D7 Scenario" = "year_x_scenario"
               ),
-              selected = "scenario_x_year",
-              inline   = TRUE
+              selected = "scenario_x_year"
             )
           )
         )

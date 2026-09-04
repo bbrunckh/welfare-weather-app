@@ -639,15 +639,16 @@ mod_1_05_weatherstats_server <- function(
     selected <- wxmap_view_val()
     if (!has_hist) selected <- "value"
 
-    radios <- shiny::radioButtons(
-      ns(id), NULL, inline = TRUE,
+    radios <- pill_toggle(
+      ns(id),
       selected    = selected,
       choiceNames = list(
         "Wave value",
         paste0("Difference from own historical mean", span),
         paste0("Percentile in own history", span)
       ),
-      choiceValues = list("value", "anomaly", "pctile")
+      choiceValues = list("value", "anomaly", "pctile"),
+      layout = "vertical"
     )
 
     if (!has_hist) {

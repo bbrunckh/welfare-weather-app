@@ -101,15 +101,16 @@ mod_1_04_weather_server <- function(id, variable_list, selected_surveys, survey_
                 choices  = temporal_agg_choices(units),
                 selected = temporal_agg_default(units)
               ),
-              shiny::radioButtons(
+              pill_toggle(
                 ns(paste0(prefix, "varConstruction")),
-                "Transformation",
+                label = "Transformation",
                 choices  = transformation_choices(units),
-                selected = transformation_default(units)
+                selected = transformation_default(units),
+                layout = "vertical"
               ),
-              shiny::radioButtons(
+              pill_toggle(
                 ns(paste0(prefix, "contOrBinned")),
-                "Continuous or binned",
+                label = "Continuous or binned",
                 choices = c("Binned", "Continuous")
               ),
               shiny::conditionalPanel(
@@ -120,10 +121,11 @@ mod_1_04_weather_server <- function(id, variable_list, selected_surveys, survey_
                     "Number of bins:",
                     min = 2, max = 10, value = 5
                   ),
-                  shiny::radioButtons(
+                  pill_toggle(
                     ns(paste0(prefix, "binningMethod")),
-                    "Binning method:",
-                    choices = c("Equal frequency", "Equal width", "K-means", "Custom")
+                    label = "Binning method:",
+                    choices = c("Equal frequency", "Equal width", "K-means", "Custom"),
+                    layout = "vertical"
                   ),
                   shiny::conditionalPanel(
                     condition = paste0("input['", ns(paste0(prefix, "binningMethod")), "'] == 'Custom'"),

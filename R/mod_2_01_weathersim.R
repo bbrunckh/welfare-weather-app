@@ -154,7 +154,7 @@ mod_2_01_weathersim_ui <- function(id) {
         ),
         style = "font-weight:600; margin-bottom:4px;"
       ),
-      shiny::radioButtons(
+      pill_toggle(
         inputId  = ns("residuals"),
         label    = shiny::tags$span(class = "visually-hidden",
                                     "Simulation residuals"),

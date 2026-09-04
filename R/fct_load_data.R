@@ -62,6 +62,70 @@ collect_deterministic <- function(data, keys = NULL) {
 }
 
 
+# -----------------------------------------------------------------------------
+# Shared path and Databricks HTTP helpers
+# -----------------------------------------------------------------------------
+
+.is_bare_data_path <- function(path) {
+  !grepl("://", path, fixed = TRUE) &&
+    !grepl("^[/~]|^[A-Za-z]:[/\\\\]", path)
+}
+
+
+.resolve_data_path <- function(path, connection_params) {
+  if (!.is_bare_data_path(path)) return(path)
+
+  type <- connection_params$type %||% "local"
+  switch(
+    type,
+    "local" = file.path(connection_params$path %||% "data/", path),
+    "s3" = paste0(
+      "s3://", connection_params$bucket, "/",
+      connection_params$prefix %||% "", path
+    ),
+    "gcs" = paste0(
+      "gs://", connection_params$bucket, "/",
+      connection_params$prefix %||% "", path
+    ),
+    "azure" = paste0(
+      "abfss://", connection_params$container, "@",
+      connection_params$account, ".dfs.core.windows.net/",
+      connection_params$prefix %||% "", path
+    ),
+    "hf" = paste0(
+      "hf://datasets/", connection_params$repo, "/",
+      connection_params$subdir %||% "", path
+    ),
+    "databricks" = {
+      host <- connection_params$workspace %||% Sys.getenv("DATABRICKS_HOST")
+      vol_path <- connection_params$volume_path %||%
+        Sys.getenv("DATABRICKS_VOLUME_PATH")
+      if (!nzchar(vol_path %||% "")) stop(
+        "load_data(): Set DATABRICKS_VOLUME_PATH in .Renviron:\n",
+        "  DATABRICKS_VOLUME_PATH=/Volumes/catalog/schema/volume/path"
+      )
+      paste0(
+        host, "/api/2.0/fs/files", sub("/$", "", vol_path), "/", path
+      )
+    },
+    path
+  )
+}
+
+
+.databricks_connection_params <- function(connection_params) {
+  list(
+    host = connection_params$workspace %||% Sys.getenv("DATABRICKS_HOST"),
+    client_id = connection_params$client_id %||%
+      Sys.getenv("DATABRICKS_CLIENT_ID"),
+    client_secret = connection_params$client_secret %||%
+      Sys.getenv("DATABRICKS_CLIENT_SECRET"),
+    volume_path = connection_params$volume_path %||%
+      Sys.getenv("DATABRICKS_VOLUME_PATH")
+  )
+}
+
+
 #' Return (and if necessary initialise) the module-level DuckDB connection.
 #'
 #' Safe to call multiple times - returns the existing connection if it is still
@@ -74,7 +138,8 @@ collect_deterministic <- function(data, keys = NULL) {
   if (!is.null(.duck$con) && DBI::dbIsValid(.duck$con)) return(.duck$con)
   .duck$con        <- DBI::dbConnect(duckdb::duckdb(), dbdir = ":memory:")
   .duck$extensions <- character(0)
-  .duck$db_tokens  <- list()
+  # Metadata may cache a token before DuckDB is initialized.
+  if (is.null(.duck$db_tokens)) .duck$db_tokens <- list()
   .duck$db_secrets <- list()
   .duck$con
 }
@@ -181,6 +246,7 @@ collect_deterministic <- function(data, keys = NULL) {
 #' @return Character scalar - bearer token.
 #' @noRd
 .get_db_token <- function(host, client_id, client_secret) {
+  if (is.null(.duck$db_tokens)) .duck$db_tokens <- list()
   key    <- paste(host, client_id, client_secret, sep = "\n")
   cached <- .duck$db_tokens[[key]]
 
@@ -286,21 +352,30 @@ collect_deterministic <- function(data, keys = NULL) {
 # Fast path: small CSV via Databricks Files REST API
 # -----------------------------------------------------------------------------
 
-#' Fetch a single CSV from the Databricks Files API directly.
-#'
-#' For small files the overhead of opening a DuckDB dataset over HTTP exceeds
-#' the actual transfer time.  A direct GET + readr::read_csv is faster.
-#'
-#' @param url   Full Databricks Files API URL.
-#' @param token Bearer token.
-#' @return A tibble.
-#' @noRd
+# Direct CSV loading avoids DuckDB setup for small Databricks files.
 .fetch_db_csv_direct <- function(url, token) {
-  resp <- httr2::request(url) |>
-    httr2::req_headers(Authorization = paste("Bearer", token)) |>
-    httr2::req_options(http_version = 2L) |> 
-    httr2::req_error(is_error = \(r) FALSE) |>
+  resp <- .db_csv_request(url, token) |>
     httr2::req_perform()
+
+  .parse_db_csv_response(resp, url)
+}
+
+
+.db_csv_request <- function(url, token) {
+  httr2::request(url) |>
+    httr2::req_headers(Authorization = paste("Bearer", token)) |>
+    httr2::req_options(http_version = 2L) |>
+    httr2::req_error(is_error = \(r) FALSE)
+}
+
+
+.parse_db_csv_response <- function(resp, url) {
+  if (inherits(resp, "error")) {
+    stop(
+      "load_data(): Failed to fetch CSV from Databricks (", url, "): ",
+      conditionMessage(resp)
+    )
+  }
 
   if (httr2::resp_is_error(resp)) {
     stop("load_data(): Failed to fetch CSV from Databricks (", url, "): ",
@@ -402,40 +477,10 @@ load_data <- function(
   # 2. Resolve bare filenames to full paths / URIs
   # ---------------------------------------------------------------------------
 
-  is_bare <- function(p) {
-    !grepl("://",                      p, fixed = TRUE) &
-    !grepl("^[/~]|^[A-Za-z]:[/\\\\]", p)               &
-    !grepl("^https?://",               p)
-  }
-
-  resolve_path <- function(p) {
-    if (!is_bare(p)) return(p)
-    switch(type,
-      "local"      = file.path(connection_params$path %||% "data/", p),
-      "s3"         = paste0("s3://",  connection_params$bucket, "/",
-                             connection_params$prefix %||% "", p),
-      "gcs"        = paste0("gs://",  connection_params$bucket, "/",
-                             connection_params$prefix %||% "", p),
-      "azure"      = paste0("abfss://", connection_params$container, "@",
-                             connection_params$account,
-                             ".dfs.core.windows.net/",
-                             connection_params$prefix %||% "", p),
-      "hf"         = paste0("hf://datasets/", connection_params$repo, "/",
-                             connection_params$subdir %||% "", p),
-      "databricks" = {
-        host     <- connection_params$workspace   %||% Sys.getenv("DATABRICKS_HOST")
-        vol_path <- connection_params$volume_path %||% Sys.getenv("DATABRICKS_VOLUME_PATH")
-        if (!nzchar(vol_path %||% "")) stop(
-          "load_data(): Set DATABRICKS_VOLUME_PATH in .Renviron:\n",
-          "  DATABRICKS_VOLUME_PATH=/Volumes/catalog/schema/volume/path"
-        )
-        paste0(host, "/api/2.0/fs/files", sub("/$", "", vol_path), "/", p)
-      },
-      p
-    )
-  }
-
-  paths <- vapply(paths, resolve_path, character(1), USE.NAMES = FALSE)
+  paths <- vapply(
+    paths, .resolve_data_path, character(1),
+    connection_params = connection_params, USE.NAMES = FALSE
+  )
 
   # ---------------------------------------------------------------------------
   # 3. Configure credentials / load extensions per backend
@@ -550,11 +595,12 @@ load_data <- function(
       )
     }
 
-    } else if (type == "databricks") {
+  } else if (type == "databricks") {
 
-    host          <- connection_params$workspace     %||% Sys.getenv("DATABRICKS_HOST")
-    client_id     <- connection_params$client_id     %||% Sys.getenv("DATABRICKS_CLIENT_ID")
-    client_secret <- connection_params$client_secret %||% Sys.getenv("DATABRICKS_CLIENT_SECRET")
+    db_params     <- .databricks_connection_params(connection_params)
+    host          <- db_params$host
+    client_id     <- db_params$client_id
+    client_secret <- db_params$client_secret
 
     if (!nzchar(host) || !nzchar(client_id) || !nzchar(client_secret)) stop(
       "load_data(): Databricks requires DATABRICKS_HOST, DATABRICKS_CLIENT_ID, ",
@@ -570,8 +616,8 @@ load_data <- function(
       return(if (collect) collect_deterministic(out, order_by) else out)
     }
 
-    # Build the extensions base URL - points to the folder you uploaded binaries to
-    vol_path    <- connection_params$volume_path %||% Sys.getenv("DATABRICKS_VOLUME_PATH")
+    # Build the base URL for bundled DuckDB extensions.
+    vol_path    <- db_params$volume_path
     ext_base_url <- paste0(
       host, "/api/2.0/fs/files",
       sub("/$", "", vol_path), "/duckdb_extensions"

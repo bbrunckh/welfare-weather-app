@@ -128,15 +128,14 @@ mod_2_02_results_ui <- function(id) {
             )
           ),
           shiny::tags$div(style = "flex:1; min-width:160px;",
-            shiny::radioButtons(
+            pill_toggle(
               ns("cmp_group_order"),
               label    = "Group by",
               choices  = c(
                 "Scenario \u00D7 Year" = "scenario_x_year",
                 "Year \u00D7 Scenario" = "year_x_scenario"
               ),
-              selected = "scenario_x_year",
-              inline   = TRUE
+              selected = "scenario_x_year"
             )
           )
         ),

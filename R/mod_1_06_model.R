@@ -150,10 +150,11 @@ mod_1_06_model_server <- function(id,
       }
 
       mc <- model_type_choices(selected_outcome()$type)
-      shiny::radioButtons(
+      pill_toggle(
         inputId  = ns("model_type"),
         label    = mc$label,
-        choices  = mc$choices
+        choices  = mc$choices,
+        layout   = "vertical"
       )
     })
 
@@ -347,9 +348,9 @@ mod_1_06_model_server <- function(id,
         hr(),
 
         # Covariate selection method
-        shiny::radioButtons(
+        pill_toggle(
           ns("covariates"),
-          "Covariate selection:",
+          label = "Covariate selection:",
           choices  = c("User-defined", "Lasso"),
           selected = "User-defined"
         ),
@@ -663,9 +664,9 @@ mod_1_06_model_server <- function(id,
           step = 1
         ),
 
-        shiny::radioButtons(
+        pill_toggle(
           ns("lasso_standardize"),
-          "Standardize predictors:",
+          label = "Standardize predictors:",
           choices  = c("Standardize", "Do not standardize"),
           selected = .restore_selection(prev("lasso_standardize"),
                                         c("Standardize", "Do not standardize"),
