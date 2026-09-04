@@ -197,7 +197,6 @@ mod_0_overview_server <- function(id) {
 
     # ---- Per-type connection options UI -------------------------------------
 
-    
     output$connection_options_ui <- renderUI({
       req(input$connection_type)
 
@@ -297,38 +296,39 @@ mod_0_overview_server <- function(id) {
     connection_params <- reactive({
       req(input$connection_type)
       build_connection_params(
-        type            = input$connection_type,
-        path            = input$local_path,
-        s3_bucket       = input$s3_bucket,
-        s3_prefix       = input$s3_prefix,
-        s3_region       = input$s3_region,
-        s3_key_id       = input$s3_key_id,
-        s3_secret       = input$s3_secret,
-        gcs_bucket      = input$gcs_bucket,
-        gcs_prefix      = input$gcs_prefix,
-        gcs_key_id      = input$gcs_key_id,
-        gcs_secret      = input$gcs_secret,
-        azure_account   = input$azure_account,
+        type = input$connection_type,
+        path = input$local_path,
+        s3_bucket = input$s3_bucket,
+        s3_prefix = input$s3_prefix,
+        s3_region = input$s3_region,
+        s3_key_id = input$s3_key_id,
+        s3_secret = input$s3_secret,
+        gcs_bucket = input$gcs_bucket,
+        gcs_prefix = input$gcs_prefix,
+        gcs_key_id = input$gcs_key_id,
+        gcs_secret = input$gcs_secret,
+        azure_account = input$azure_account,
         azure_container = input$azure_container,
-        azure_prefix    = input$azure_prefix,
-        azure_key       = input$azure_key,
-        azure_client_id      = input$azure_client_id,
-        azure_client_secret  = input$azure_client_secret,
-        azure_tenant_id      = input$azure_tenant_id,
-        hf_repo         = input$hf_repo,
-        hf_subdir       = input$hf_subdir,
-        db_workspace     = input$db_workspace,
-        db_client_id     = input$db_client_id,
+        azure_prefix = input$azure_prefix,
+        azure_key = input$azure_key,
+        azure_client_id = input$azure_client_id,
+        azure_client_secret = input$azure_client_secret,
+        azure_tenant_id = input$azure_tenant_id,
+        hf_repo = input$hf_repo,
+        hf_subdir = input$hf_subdir,
+        db_workspace = input$db_workspace,
+        db_client_id = input$db_client_id,
         db_client_secret = input$db_client_secret,
-        db_volume_path   = input$db_volume_path
+        db_volume_path = input$db_volume_path
       )
     })
 
     # ---- Validation (delegates to fct_connection.R) -------------------------
 
     connection_valid <- reactive({
-      req(connection_params())
-      validate_connection_params(connection_params())
+      params <- connection_params()
+      req(params)
+      validate_connection_params(params)
     })
 
     # Verified/failed connection state from the last connect attempt (NULL =
@@ -387,6 +387,12 @@ mod_0_overview_server <- function(id) {
     variable_list      <- reactiveVal(NULL)
     cpi_ppp            <- reactiveVal(NULL)
     pov_lines          <- reactiveVal(NULL)
+    publish_metadata <- function(metadata) {
+      survey_list(metadata$survey_list)
+      variable_list(metadata$variable_list)
+      cpi_ppp(metadata$cpi_ppp)
+      pov_lines(metadata$pov_lines)
+    }
 
     # On Posit Connect with env vars set: auto-connect once on startup,
     # no button click or UI input required. Any failure (auth, network,
@@ -396,7 +402,7 @@ mod_0_overview_server <- function(id) {
         auto_connect_fail <- function(e) {
           msg <- conditionMessage(e)
           message("[overview] auto-connect to Databricks failed: ", msg)
-          # Roll back so downstream modules do not run against a broken connection
+          # Prevent downstream work after a failed startup connection.
           applied_connection(NULL)
           showNotification(
             paste("Auto-connect to Databricks failed:", msg),
@@ -417,14 +423,10 @@ mod_0_overview_server <- function(id) {
           params <- build_connection_params("databricks")
           message("[overview] auto-connecting to Databricks (Posit Connect)")
 
-          survey_list(load_data("metadata/survey_list.csv", params, collect = TRUE))
-          variable_list(add_derived_policy_vars_to_vl(
-            load_data("metadata/variable_list.csv", params, collect = TRUE)
-          ) |> dplyr::mutate(name = dplyr::if_else(name == "loc_id", "loc_id_panel", name)))
-          cpi_ppp(load_data("metadata/cpi_ppp.csv", params, collect = TRUE))
-          pov_lines(default_poverty_lines())
+          metadata <- load_overview_metadata(params)
+          publish_metadata(metadata)
 
-          # Only expose the connection once all metadata has loaded successfully
+          # Expose the connection only after metadata succeeds.
           applied_connection(params)
           connection_status(list(
             state = "connected", message = "Connected to Databricks.", detail = NULL
@@ -446,8 +448,7 @@ mod_0_overview_server <- function(id) {
       params <- connection_params()
 
       if (identical(params$type, "local")) {
-        # DEP-03: configuration completeness is not reachability - the folder
-        # must exist (and be readable) before anything is published.
+        # DEP-03: configuration is not reachability; verify the folder exists.
         path_ok <- tryCatch({
           params$path <- normalise_local_path(params$path)
           TRUE
@@ -476,61 +477,46 @@ mod_0_overview_server <- function(id) {
         message("[overview] applied connection: ", params$type)
       }
 
-      # INT-02: never mix a new connection with the previous source's
-      # metadata. Reset everything up front and re-publish only after every
-      # metadata file has loaded from the new source.
+      # INT-02: clear the previous source before loading the new bundle.
       applied_connection(NULL)
       survey_list(NULL)
       variable_list(NULL)
       cpi_ppp(NULL)
       pov_lines(NULL)
 
-      # ---- Load metadata files ----------------------------------------------
+      # ---- Load metadata -----------------------------------------------------
 
-      load_notif <- showNotification("Loading metadata files...", duration = NULL, type = "message")
+      load_notif <- showNotification(
+        "Loading metadata files...", duration = NULL, type = "message"
+      )
       on.exit(removeNotification(load_notif), add = TRUE)
 
-      errors <- character(0)
-      load_step <- function(label, expr) {
-        tryCatch(expr, error = function(e) {
-          errors <<- c(errors, paste0(label, ": ", conditionMessage(e)))
-          NULL
-        })
-      }
+      metadata <- tryCatch(
+        load_overview_metadata(params),
+        error = function(e) e
+      )
 
-      load_step("metadata/survey_list.csv", {
-        survey_list(load_data("metadata/survey_list.csv", params, collect = TRUE))
-      })
-      load_step("metadata/variable_list.csv", {
-        variable_list(add_derived_policy_vars_to_vl(
-          load_data("metadata/variable_list.csv", params, collect = TRUE)
-        ) |> dplyr::mutate(name = dplyr::if_else(name == "loc_id", "loc_id_panel", name)))
-      })
-      load_step("metadata/cpi_ppp.csv", {
-        cpi_ppp(load_data("metadata/cpi_ppp.csv", params, collect = TRUE))
-      })
-      pov_lines(default_poverty_lines())
-
-      if (length(errors) > 0L) {
+      if (inherits(metadata, "error")) {
         connection_status(list(
           state   = "error",
           message = paste0(
             "Could not load metadata from the ", params$type, " source."
           ),
-          detail  = paste(errors, collapse = "\n")
+          detail  = conditionMessage(metadata)
         ))
         showNotification(
           paste0(
             "Connection failed: metadata could not be loaded from the ",
-            params$type, " source. ", length(errors), " file(s) failed - ",
-            "see the status panel for details."
+            params$type, " source. See the status panel for details."
           ),
           type = "error", duration = 10
         )
         return()
       }
 
-      # Only expose the connection once all metadata has loaded successfully
+      publish_metadata(metadata)
+
+      # Expose the connection only after metadata succeeds.
       applied_connection(params)
       connection_status(list(
         state   = "connected",
