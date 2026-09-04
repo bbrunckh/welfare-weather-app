@@ -347,22 +347,63 @@ details[open] summary {
 
 /* ---- Overview landing page ---------------------------------------------- */
 
+.overview-shell {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+  width: calc(100% + var(--bs-gutter-x, 1.5rem));
+  margin-left: calc(-0.5 * var(--bs-gutter-x, 1.5rem));
+}
+
+body.bslib-page-navbar:has(> .container-fluid > .tab-content > .tab-pane.active > .overview-shell) > .container-fluid {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+body.bslib-page-navbar:has(> .container-fluid > .tab-content > .tab-pane.active > .overview-shell) > .container-fluid > .tab-content {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.tab-pane.active:has(> .overview-shell) {
+  align-items: stretch;
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  gap: 0;
+  min-height: 0;
+  padding-bottom: 0;
+}
+
+.overview-page {
+  flex: 0 0 auto;
+  width: 100%;
+  max-width: 1480px;
+  margin: 0 auto 0.5rem;
+}
+
 .hero-panel {
   background: linear-gradient(135deg, #002244 0%, #0a3a6b 60%, #0071bc 100%);
   color: #fff;
   border-radius: var(--bs-border-radius-lg);
-  padding: 2rem;
-  margin-bottom: 1rem;
+  padding: 1.45rem 1.75rem;
+  margin-bottom: 0.75rem;
 }
 
 .hero-panel-inner {
   display: flex;
   align-items: center;
-  gap: 1.75rem;
+  gap: 1.5rem;
 }
 
 .hero-logo {
-  width: 108px;
+  width: 100px;
   height: auto;
   flex-shrink: 0;
   filter: drop-shadow(0 6px 16px rgba(0, 0, 0, 0.35));
@@ -378,7 +419,7 @@ details[open] summary {
 .hero-panel .hero-subtitle {
   font-weight: 600;
   opacity: 0.85;
-  margin-bottom: 0.75rem;
+  margin-bottom: 0.55rem;
 }
 
 .hero-panel p {
@@ -393,7 +434,7 @@ details[open] summary {
 }
 
 .hero-panel .hero-team {
-  margin-top: 0.75rem;
+  margin-top: 0.55rem;
   margin-bottom: 0;
   font-size: 0.78rem;
   text-transform: uppercase;
@@ -413,8 +454,13 @@ details[open] summary {
 }
 
 .step-card .card-body {
-  padding: 0.85rem 1.1rem;
+  padding: 0.4rem 1.1rem 0.65rem;
   gap: 0.35rem; /* override bslib's ~1rem flex gap between title and text */
+}
+
+.overview-page > .bslib-grid,
+.overview-page > .connect-card {
+  margin-bottom: 0.6rem;
 }
 
 .step-card-title {
@@ -441,32 +487,89 @@ details[open] summary {
   margin-bottom: 0;
 }
 
-/* Data connection card: full width, natural height, no internal scroll */
+/* Data and limitations cards: shared neutral treatment */
 .connect-card .card-body {
-  padding: 0.9rem 1.1rem;
+  padding: 0.65rem 1.1rem;
   overflow: visible;
   flex: none;
 }
 
-.connect-card {
+.connect-card,
+.limitation-card {
   overflow: visible;
   flex: 0 0 auto; /* don't stretch to fill the page's remaining height */
+  border: 1px solid var(--bs-border-color);
+  box-shadow: 0 0.25rem 0.75rem rgba(0, 34, 68, 0.09);
+}
+
+.connect-card .card-header,
+.limitation-card .card-header {
+  padding: 0.55rem 1.1rem;
+  background-color: rgba(0, 113, 188, 0.035);
 }
 
 .connect-card .form-group,
 .connect-card .shiny-input-container {
-  margin-bottom: 0.5rem;
+  margin-bottom: 0.35rem;
+}
+
+.connection-source-field {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.connection-source-label {
+  color: var(--bs-secondary);
+  flex: 0 0 auto;
+  font-size: 0.87rem;
+}
+
+.connection-source-field .toggle-slider {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.connection-options .shiny-input-container {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.connection-options .shiny-input-container > label {
+  color: var(--bs-secondary);
+  flex: 0 0 auto;
+  font-size: 0.87rem;
+  font-weight: 400;
+  margin-bottom: 0;
+}
+
+.connection-options .shiny-input-container > .form-control,
+.connection-options .shiny-input-container > .form-select {
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 .connect-card .help-block,
 .connect-card .form-text {
   margin-top: -0.35rem;
-  margin-bottom: 0.4rem;
+  margin-bottom: 0.3rem;
   line-height: 1.3;
 }
 
-.connect-card .btn {
-  margin-top: 0.3rem;
+.connection-action-row {
+  display: flex;
+  justify-content: flex-start;
+  margin-top: 0.35rem;
+}
+
+.connection-action-row > .btn {
+  min-width: 11rem;
+  white-space: nowrap;
+}
+
+.connection-options-output {
+  min-width: 0;
 }
 
 .connect-card pre {
@@ -477,18 +580,73 @@ details[open] summary {
   overflow-y: auto;
 }
 
-/* Limitations card: full width, natural height, no internal scroll */
-.limitation-card {
-  overflow: visible;
-  flex: 0 0 auto;
+.limitation-card .card-body {
+  padding: 0.5rem 1.1rem;
 }
 
-.limitation-card .card-body {
-  padding: 0.9rem 1.1rem;
+.limitation-card .card-header {
+  padding: 0.55rem 1.1rem;
+}
+
+.overview-page > .limitation-card {
+  margin-bottom: 0;
 }
 
 .limitation-card .card-body > p:first-child {
+  color: var(--bs-secondary);
+  font-size: 0.87rem;
+  line-height: 1.35;
   margin-bottom: 0;
+}
+
+.overview-footer {
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex: 0 0 auto;
+  width: 100%;
+  margin-top: auto;
+  margin-left: 0;
+  padding: 0.75rem max(
+    0.75rem,
+    calc((100% - 1480px) / 2)
+  );
+  background: #002244;
+  color: rgba(255, 255, 255, 0.68);
+  font-size: 0.78rem;
+}
+
+.overview-footer-brand,
+.overview-footer-meta,
+.overview-footer-links {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+}
+
+.overview-footer-brand strong {
+  color: #fff;
+  letter-spacing: 0.04em;
+}
+
+.overview-footer-links a {
+  color: rgba(255, 255, 255, 0.72);
+  text-decoration: none;
+}
+
+.overview-footer-links a:hover,
+.overview-footer-links a:focus-visible {
+  color: #fff;
+  text-decoration: underline;
+}
+
+@media (max-width: 700px) {
+  .overview-footer {
+    align-items: flex-start;
+    flex-direction: column;
+  }
 }
 
 /* ---- Misc ---------------------------------------------------------------- */
@@ -716,4 +874,3 @@ table.dataTable {
   outline: 2px solid var(--bs-primary, #0071bc);
   outline-offset: 1px;
 }
-

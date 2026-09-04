@@ -27,6 +27,21 @@
   });
 })();
 
+// Submit the overview connection form with Enter from a single-line field.
+// Scope this to the Data card so other module inputs keep their own behavior.
+(function () {
+  document.addEventListener('keydown', function (e) {
+    if (e.key !== 'Enter' || e.isComposing) return;
+    var field = e.target;
+    if (!field.matches('.connect-card input[type="text"], .connect-card input[type="password"], .connect-card select')) return;
+    if (field.closest('textarea, [contenteditable="true"]')) return;
+    var button = field.closest('.connect-card').querySelector('.connection-action-row .btn');
+    if (!button || button.disabled) return;
+    e.preventDefault();
+    button.click();
+  });
+})();
+
 // ---- Config flyouts (UI-02) --------------------------------------------------
 // Shared behavior for the .config-flyout disclosure panels built by
 // config_flyout_block() (utils_ui.R):

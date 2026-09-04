@@ -25,22 +25,14 @@ mod_0_overview_ui <- function(id) {
         h1("Welcome to WISE-APP"),
         p(class = "hero-subtitle",
           "Weather Impact Simulation and Evaluation for Adaptation Policy and Planning"),
-        p(paste(
-          "WISE-APP is an analytical tool designed to stress-test household",
-          "welfare under historical and projected climate scenarios,",
-          "and to evaluate resilience-building policy interventions."
-        )),
+        p("WISE-APP is designed to stress-test household welfare under historical and projected climate scenarios, and to evaluate resilience-building policy interventions."),
         p("Work through the three steps below - each step builds on the previous one."),
 
         p(tags$a(
-          icon("book-open"), "WISE-APP Use Guide",
+          icon("book-open"), "WISE-APP User Guide",
           href = "https://datanalytics.worldbank.org/wise-app-docs",
           target = "_blank"
-        )),
-
-        p(class = "hero-team",
-          "Distributional Impact of Policies | World Bank Group"
-        )
+        ))
       )
     )
   )
@@ -63,29 +55,15 @@ mod_0_overview_ui <- function(id) {
     width = 1 / 3, fill = FALSE,
     step_card(
       "1", "Model welfare",
-      paste(
-        "Estimate the empirical relationship between local weather and an",
-        "outcome of interest - such as household consumption or",
-        "poverty status - from survey microdata. The fitted model is the",
-        "foundation for all subsequent steps."
-      )
+      "Estimate the empirical relationship between local weather and an outcome of interest - such as household consumption or poverty status - from survey microdata. The fitted model is the foundation for all subsequent steps."
     ),
     step_card(
       "2", "Climate scenarios",
-      paste(
-        "Simulate the distribution of weather-driven welfare outcomes",
-        "under historical conditions and for future climate projections",
-        "(CMIP6 scenarios), by applying the model from Step 1."
-      )
+      "Simulate the distribution of weather-driven welfare outcomes under historical conditions and for future climate projections (CMIP6 scenarios), by applying the model from Step 1."
     ),
     step_card(
       "3", "Policy scenarios",
-      paste(
-        "Re-simulate welfare under counterfactual policy scenarios",
-        "(social protection, infrastructure, labor, education...)",
-        "to quantify welfare gains and evaluate changes in",
-        "climate resilience against the Step 2 baseline."
-      )
+      "Re-simulate welfare under counterfactual policy scenarios (social protection, infrastructure, labor, education...) to quantify welfare gains and evaluate changes in climate resilience against the Step 2 baseline."
     )
   )
 
@@ -93,40 +71,26 @@ mod_0_overview_ui <- function(id) {
     class = "limitation-card",
     bslib::card_header(icon("triangle-exclamation"), " Limitations"),
     bslib::card_body(
-      p(paste(
-        "WISE-APP is an illustrative stress-testing tool - not a forecast or a",
-        "causal impact evaluation framework. Its estimates capture conditional",
-        "statistical associations between local weather variability and household",
-        "welfare. The User Guide includes"
-      ),
-      tags$a(
-        "important caveats.",
-        href = "https://datanalytics.worldbank.org/wise-app-docs/#limitations",
-        target = "_blank"
-      )
+      p(
+        "WISE-APP is an illustrative stress-testing tool - not a forecast or a causal impact evaluation framework. Its estimates capture conditional statistical associations between local weather variability and household welfare. The User Guide includes",
+        tags$a(
+          "important caveats.",
+          href = "https://datanalytics.worldbank.org/wise-app-docs/#limitations",
+          target = "_blank"
+        )
       )
     )
   )
 
   # On Posit Connect with Databricks env vars: skip the connection form
   # entirely and just show the status badge - server auto-connects on startup.
-  if (.auto_connect()) {
-    return(tagList(
-      hero,
-      steps,
-      limitations_card,
-      bslib::card(
-        class = "connect-card",
-        bslib::card_header(icon("database"), " Data"),
-        bslib::card_body(uiOutput(ns("connection_status_ui")))
-      )
-    ))
-  }
-
-  tagList(
-    hero,
-    steps,
-    limitations_card,
+  data_card <- if (.auto_connect()) {
+    bslib::card(
+      class = "connect-card",
+      bslib::card_header(icon("database"), " Data"),
+      bslib::card_body(uiOutput(ns("connection_status_ui")))
+    )
+  } else {
     bslib::card(
       class = "connect-card",
       bslib::card_header(icon("database"), " Data"),
@@ -134,34 +98,83 @@ mod_0_overview_ui <- function(id) {
         bslib::layout_columns(
           col_widths = c(4, 8),
           div(
-            selectInput(
-              inputId  = ns("connection_type"),
-              label    = "Source",
-              choices  = c(
-                "Local folder"         = "local",
-                "Amazon S3"            = "s3",
-                "Google Cloud Storage" = "gcs",
-                "Azure Blob Storage"   = "azure",
-                "Hugging Face"         = "hf",
-                "Databricks"           = "databricks"
-              ),
-              selected = "local"
+            div(
+              class = "connection-source-field",
+              tags$span("Source:", class = "connection-source-label"),
+              wave_toggle_slider(
+                ns("connection_type"),
+                choices = c(
+                  "Local folder" = "local",
+                  "Databricks" = "databricks",
+                  "GCS" = "gcs",
+                  "S3" = "s3"
+                ),
+                selected = "local"
+              )
             ),
-            uiOutput(ns("connection_status_ui")),
-            actionButton(
-              ns("apply_connection"),
-              "Connect to data",
-              class = "btn-primary",
-              style = "width: 100%;"
+            uiOutput(ns("connection_status_ui"))
+          ),
+            div(
+              class = "connection-options-output",
+              uiOutput(ns("connection_options_ui"))
             )
           ),
-          div(
-            uiOutput(ns("connection_options_ui")),
-            verbatimTextOutput(ns("folder_path_echo"))
+        div(
+          class = "connection-action-row",
+          actionButton(
+            ns("apply_connection"),
+            "Connect to data",
+            class = "btn-primary"
           )
         )
       )
     )
+  }
+
+  overview_footer <- tags$footer(
+    class = "overview-footer",
+    div(
+      class = "overview-footer-brand",
+      tags$strong("WISE-APP"),
+      tags$span("Distributional Impact of Policies | World Bank Group")
+    ),
+    div(
+      class = "overview-footer-meta",
+      tags$span("Version ", golem::get_golem_version()),
+      tags$span(
+        class = "overview-footer-links",
+        tags$a(
+          "Docs",
+          href = "https://datanalytics.worldbank.org/wise-app-docs/",
+          target = "_blank",
+          rel = "noopener noreferrer"
+        ),
+        tags$a(
+          "Data",
+          href = "https://github.com/worldbank/wise-app-data",
+          target = "_blank",
+          rel = "noopener noreferrer"
+        ),
+        tags$a(
+          "Source",
+          href = "https://github.com/worldbank/wise-app",
+          target = "_blank",
+          rel = "noopener noreferrer"
+        )
+      )
+    )
+  )
+
+  div(
+    class = "overview-shell",
+    div(
+      class = "overview-page",
+      hero,
+      steps,
+      data_card,
+      limitations_card
+    ),
+    overview_footer
   )
 }
 
@@ -188,85 +201,92 @@ mod_0_overview_server <- function(id) {
     output$connection_options_ui <- renderUI({
       req(input$connection_type)
 
-      switch(
-        input$connection_type,
+      div(
+        class = "connection-options",
+        switch(
+          input$connection_type,
 
-        "local" = tagList(
-          textInput(
-            ns("local_path"),
-            label       = "Path",
-            value       = "data/",
-            placeholder = "/path/to/data"
+          "local" = tagList(
+            textInput(
+              ns("local_path"),
+              label       = "Path:",
+              value       = "data/",
+              placeholder = "/path/to/data"
+            ),
+            helpText(
+              "Path to a local folder containing WISE-APP data files.",
+              style = "font-size: 12px;"
+            )
           ),
-          helpText(
-            "Path to a local folder containing WISE-APP data files.",
-            style = "font-size: 12px;"
-          )
-        ),
 
-        "s3" = tagList(
-          textInput(ns("s3_bucket"),     "S3 bucket",             placeholder = "my-bucket"),
-          textInput(ns("s3_prefix"),     "Key prefix (optional)", placeholder = "data/"),
-          textInput(ns("s3_region"),     "Region",                placeholder = "us-east-1"),
-          textInput(ns("s3_key_id"),     "Access key ID",         placeholder = "AKIA..."),
-          passwordInput(ns("s3_secret"), "Secret access key",     placeholder = ""),
-          helpText(
-            "Leave key ID and secret blank to use environment credentials (AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY).",
-            style = "font-size: 12px;"
-          )
-        ),
+          "s3" = tagList(
+            textInput(ns("s3_bucket"),     "S3 bucket:",             placeholder = "my-bucket"),
+            textInput(ns("s3_prefix"),     "Key prefix (optional):", placeholder = "data/"),
+            textInput(ns("s3_region"),     "Region:",                placeholder = "us-east-1"),
+            textInput(ns("s3_key_id"),     "Access key ID:",         placeholder = "AKIA..."),
+            passwordInput(ns("s3_secret"), "Secret access key:",     placeholder = ""),
+            helpText(
+              "Leave key ID and secret blank to use environment credentials (AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY).",
+              style = "font-size: 12px;"
+            )
+          ),
 
-        "gcs" = tagList(
-          textInput(ns("gcs_bucket"),  "GCS bucket",           placeholder = "my-bucket"),
-          textInput(ns("gcs_prefix"),  "Prefix (optional)",    placeholder = "data/"),
-          textInput(ns("gcs_key_id"),  "HMAC access key ID (optional)",  placeholder = ""),
-          passwordInput(ns("gcs_secret"), "HMAC secret (optional)",       placeholder = ""),
-          helpText(
-            "GCS uses HMAC (interoperability) keys. Leave both blank to use",
-            " GCS_ACCESS_KEY_ID / GCS_SECRET_ACCESS_KEY from .Renviron.",
-            style = "font-size: 12px;"
-          )
-        ),
+          "gcs" = tagList(
+            textInput(ns("gcs_bucket"),  "GCS bucket:",                  placeholder = "my-bucket"),
+            textInput(ns("gcs_prefix"),  "Prefix (optional):",           placeholder = "data/"),
+            textInput(ns("gcs_key_id"),  "HMAC access key ID (optional):", placeholder = ""),
+            passwordInput(ns("gcs_secret"), "HMAC secret (optional):",    placeholder = ""),
+            helpText(
+              "GCS uses HMAC (interoperability) keys. Leave both blank to use",
+              " GCS_ACCESS_KEY_ID / GCS_SECRET_ACCESS_KEY from .Renviron.",
+              style = "font-size: 12px;"
+            )
+          ),
 
-        "azure" = tagList(
-          textInput(ns("azure_account"),          "Storage account",          placeholder = "datalakeesouoprod"),
-          textInput(ns("azure_container"),        "Container",                placeholder = "data"),
-          textInput(ns("azure_prefix"),           "Prefix (optional)",        placeholder = "DAP/data/wiseapp/"),
-          passwordInput(ns("azure_key"),          "Account key (optional)",   placeholder = ""),
-          passwordInput(ns("azure_client_id"),    "Client ID (optional)",     placeholder = ""),
-          passwordInput(ns("azure_client_secret"),"Client secret (optional)", placeholder = ""),
-          textInput(ns("azure_tenant_id"),        "Tenant ID (optional)",     placeholder = ""),
-          helpText(
-            "Credentials are optional if a service principal is set via AZURE_CLIENT_ID /",
-            "AZURE_CLIENT_SECRET / AZURE_TENANT_ID in .Renviron.",
-            "Alternatively supply the storage account key in the key field.",
-            style = "font-size: 12px;"
-          )
-        ),
+          "azure" = tagList(
+            textInput(ns("azure_account"),           "Storage account:",           placeholder = "datalakeesouoprod"),
+            textInput(ns("azure_container"),         "Container:",                 placeholder = "data"),
+            textInput(ns("azure_prefix"),            "Prefix (optional):",         placeholder = "DAP/data/wiseapp/"),
+            passwordInput(ns("azure_key"),           "Account key (optional):",    placeholder = ""),
+            passwordInput(ns("azure_client_id"),     "Client ID (optional):",      placeholder = ""),
+            passwordInput(ns("azure_client_secret"), "Client secret (optional):",  placeholder = ""),
+            textInput(ns("azure_tenant_id"),         "Tenant ID (optional):",      placeholder = ""),
+            helpText(
+              "Credentials are optional if a service principal is set via AZURE_CLIENT_ID /",
+              "AZURE_CLIENT_SECRET / AZURE_TENANT_ID in .Renviron.",
+              "Alternatively supply the storage account key in the key field.",
+              style = "font-size: 12px;"
+            )
+          ),
 
-        "hf" = tagList(
-          textInput(ns("hf_repo"),          "Repository",              placeholder = "username/dataset-name"),
-          textInput(ns("hf_subdir"),        "Subdirectory (optional)", placeholder = "data/"),
-          helpText(
-            "Public Hugging Face datasets only; private repositories and",
-            " personal-access tokens are not supported by this connection type.",
-            style = "font-size: 12px;"
-          )
-        ),
+          "hf" = tagList(
+            textInput(ns("hf_repo"),   "Repository:",               placeholder = "username/dataset-name"),
+            textInput(ns("hf_subdir"), "Subdirectory (optional):",  placeholder = "data/"),
+            helpText(
+              "Public Hugging Face datasets only; private repositories and",
+              " personal-access tokens are not supported by this connection type.",
+              style = "font-size: 12px;"
+            )
+          ),
 
-        "databricks" = tagList(
-          textInput(ns("db_workspace"),
-                    "Workspace URL",
-                    placeholder = "https://adb-xxxxxxxxxxxxxxxxx.xx.azuredatabricks.net"),
-          passwordInput(ns("db_client_id"),    "Client ID",     placeholder = ""),
-          passwordInput(ns("db_client_secret"), "Client secret", placeholder = ""),
-          textInput(ns("db_volume_path"),
-                    "Volume path",
-                    placeholder = "/Volumes/..."),
-          helpText(
-            "Set DATABRICKS_HOST, DATABRICKS_CLIENT_ID, DATABRICKS_CLIENT_SECRET,",
-            "and DATABRICKS_VOLUME_PATH in .Renviron to leave all fields blank.",
-            style = "font-size: 12px;"
+          "databricks" = tagList(
+            textInput(
+              ns("db_workspace"),
+              "Workspace URL:",
+              placeholder = "https://adb-xxxxxxxxxxxxxxxxx.xx.azuredatabricks.net"
+            ),
+            passwordInput(ns("db_client_id"),     "Client ID:",     placeholder = ""),
+            passwordInput(ns("db_client_secret"),  "Client secret:", placeholder = ""),
+            textInput(
+              ns("db_volume_path"),
+              "Volume path:",
+              placeholder = "/Volumes/..."
+            ),
+            helpText(
+              "Set DATABRICKS_HOST, DATABRICKS_CLIENT_ID, DATABRICKS_CLIENT_SECRET,",
+              "and DATABRICKS_VOLUME_PATH in .Renviron to leave all fields blank.",
+              style = "font-size: 12px;"
+            )
           )
         )
       )
@@ -317,34 +337,40 @@ mod_0_overview_server <- function(id) {
     connection_status <- reactiveVal(NULL)
 
     output$connection_status_ui <- renderUI({
-      req(input$connection_type)
       st <- connection_status()
       if (!is.null(st)) {
         if (identical(st$state, "connected")) {
           return(p(
             icon("circle-check"), " ", st$message,
-            style = "color: #2e7d32; font-size: 12px; margin-top: 4px;"
+            style = "color: #2e7d32; font-size: 0.87rem; margin-top: 4px;"
           ))
         }
         return(div(
           p(
             icon("circle-exclamation"), " ", st$message,
-            style = "color: #c62828; font-weight: 600; font-size: 12px; margin-top: 4px;"
+            style = "color: #c62828; font-weight: 600; font-size: 0.87rem; margin-top: 4px;"
           ),
           if (!is.null(st$detail)) p(
-            st$detail, style = "color: #c62828; font-size: 12px;"
+            st$detail, style = "color: #c62828; font-size: 0.87rem;"
           )
         ))
       }
+      if (.auto_connect()) {
+        return(p(
+          icon("spinner", class = "fa-spin"), " Connecting to Databricks...",
+          style = "color: var(--bs-secondary); font-size: 0.87rem; margin: 0;"
+        ))
+      }
+      req(input$connection_type)
       if (isTRUE(connection_valid())) {
         p(
           icon("circle-check"), " Connection configured.",
-          style = "color: #2e7d32; font-size: 12px; margin-top: 4px;"
+          style = "color: #2e7d32; font-size: 0.87rem; margin-top: 4px;"
         )
       } else {
         p(
           icon("circle-exclamation"), " Fill in required fields above.",
-          style = "color: #c62828; font-size: 12px; margin-top: 4px;"
+          style = "color: #c62828; font-size: 0.87rem; margin-top: 4px;"
         )
       }
     })
@@ -519,15 +545,6 @@ mod_0_overview_server <- function(id) {
       )
 
     }, ignoreInit = TRUE)
-
-    # ---- Diagnostic outputs -------------------------------------------------
-
-    output$folder_path_echo <- renderText({
-      p <- applied_connection()
-      if (is.null(p)) return("No connection applied yet.")
-      if (identical(p$type, "local")) paste0("Connected: local folder - ", p$path)
-      else paste0("Connected: ", p$type)
-    })
 
     # ---- Return API ---------------------------------------------------------
 
