@@ -27,8 +27,6 @@ mod_1_03_outcome_ui <- function(id) {
 #'   `mod_0_overview`.
 #' @param survey_data Reactive data frame - loaded survey data from
 #'   `mod_1_02_surveystats`.
-#' @param map_data Reactive GeoJSON FeatureCollection from
-#'   `mod_1_02_surveystats` (H3 map data). Used for outcome coverage map.
 #' @param cell_data Reactive list of `geom` (H3 cell geometry) and `map`
 #'   (location-to-cell mapping) from `mod_1_02_surveystats`. When present,
 #'   coverage is merged onto non-overlapping cells.
@@ -37,7 +35,6 @@ mod_1_03_outcome_ui <- function(id) {
 #'
 #' @noRd
 mod_1_03_outcome_server <- function(id, variable_list, survey_data,
-                                    map_data       = reactive(NULL),
                                     cell_data      = reactive(NULL),
                                     survey_version = reactive(0L),
                                     tabset_id      = NULL,
@@ -228,37 +225,87 @@ mod_1_03_outcome_server <- function(id, variable_list, survey_data,
           p
         })
 
-        cov_view_mem <- map_view_memory(
-          input, session, "outcome_coverage_map",
-          key = shiny::reactive(digest::digest(outcome_spec()))
-        )
-        cov_view_mem$remember()
-
-        output$outcome_coverage_map <- leaflet::renderLeaflet({
+        # ---- MapLibre coverage payload stream ---------------------------------
+        # One reactive observer drives the hex map: survey/outcome loads and
+        # wave toggles land here as fresh `set` payloads. The camera is fitted
+        # only when the data key changes (PERF-36 view-key semantics), so a
+        # wave toggle re-colours in place and the user's pan/zoom survives.
+        cov_key <- shiny::reactiveVal(NULL)
+        cov_lgd <- shiny::reactiveVal(NULL)
+        observe({
           spec <- outcome_spec()
-          req(outcome_data(), spec, map_data())
-          inf <- spec$info
+          cd   <- if (is.function(cell_data)) cell_data() else NULL
+          wave <- input$cov_wave %||% "all"
 
-          # Prefer H3 cells when Survey stats has supplied them: locations
-          # overlap, and stacking translucent fills shows shades that mean
-          # nothing on the legend.
-          wave  <- input$cov_wave %||% "all"
-          cd    <- if (is.function(cell_data)) cell_data() else NULL
-          # by_wave = FALSE: a wave selection is applied by filtering the
-          # inputs, so whatever is drawn must still paint each cell once.
-          cmap  <- if (!is.null(cd)) filter_by_wave(cd$map, wave) else NULL
-          feats <- if (!is.null(cmap) && nrow(cmap) > 0) {
-            build_cell_features(cd$geom, cmap, by_wave = FALSE)
-          } else NULL
+          pl <- NULL
+          if (!is.null(spec) && !is.null(cd)) {
+            od   <- outcome_data()
+            cmap <- if (!is.null(cd$map)) filter_by_wave(cd$map, wave) else NULL
+            if (!is.null(od) && !is.null(cmap) && nrow(cmap) > 0) {
+              pl <- .coverage_hex_payload(
+                cd$geom, cmap, filter_by_wave(od, wave),
+                as.character(spec$info$name[1])
+              )
+            }
+          }
 
-          m <- plot_outcome_coverage_map(
-            geojson  = feats %||% filter_features_by_wave(map_data(), wave),
-            df       = filter_by_wave(outcome_data(), wave),
-            outcome  = as.character(inf$name[1]),
-            cell_map = if (!is.null(feats)) cmap else NULL
-          )
-          req(!is.null(m))
-          cov_view_mem$restore(m)
+          if (is.null(pl)) {
+            hexmap_clear(session, ns, "coverage_map")
+            cov_lgd(NULL)
+          } else {
+            hexmap_update(session, ns, "coverage_map", pl$payload)
+            # Refit only when the selection, wave or cell footprint changes;
+            # wave re-colours keep pan/zoom.
+            key <- digest::digest(list(
+              spec, wave, sort(unique(cmap$h3))
+            ))
+            if (!identical(key, cov_key())) {
+              hexmap_fit(session, ns, "coverage_map", pl$payload$bounds)
+              cov_key(key)
+            }
+            cov_lgd(pl$legend)
+          }
+        })
+
+        # R-side legend: same palette state as the payloads, rebuilt per wave
+        # and positioned over the map's top-right corner by hexmap_ui().
+        output$cov_legend_ui <- shiny::renderUI({
+          lgd <- cov_lgd()
+          shiny::req(!is.null(lgd))
+          htmltools::HTML(.compact_legend_html(
+            pal_info = lgd$pal_info,
+            binned   = lgd$binned,
+            title    = lgd$title,
+            info     = lgd$info
+          ))
+        })
+
+        # Map surface: the MapLibre hex map once cell geography exists, with
+        # an explanatory notice while it does not (INT-06: a failed load
+        # leaves no map to show).
+        output$cov_surface_ui <- shiny::renderUI({
+          cd <- if (is.function(cell_data)) cell_data() else NULL
+          if (is.null(cd)) {
+            shiny::tags$div(
+              class = paste("text-muted small d-flex align-items-center",
+                            "justify-content-center text-center"),
+              style = "height: 100%;",
+              shiny::p(paste(
+                "No H3 cell geography is available for this selection.",
+                "Load surveys in Survey stats to draw the coverage map."
+              ))
+            )
+          } else {
+            hexmap_ui(
+              ns("coverage_map"),
+              height     = "100%",
+              aria_label = paste(
+                "Map of outcome data coverage: share of sampled units with a",
+                "non-missing outcome value, per hexagonal area cell"
+              ),
+              legend = shiny::uiOutput(ns("cov_legend_ui"))
+            )
+          }
         })
 
         # Wave toggle slider, shown only when there is more than one wave to pick.
@@ -369,8 +416,11 @@ mod_1_03_outcome_server <- function(id, variable_list, survey_data,
                     shiny::h4("Spatial coverage", class = "mb-0"),
                     shiny::uiOutput(ns("cov_wave_ui"), inline = TRUE)
                   ),
-                  leaflet::leafletOutput(ns("outcome_coverage_map"),
-                                         height = "100%")
+                  # The MapLibre hex map, the Leaflet fallback when the
+                  # browser reports WebGL as unavailable, or a notice while
+                  # no cell geography exists.
+                  shiny::uiOutput(ns("cov_surface_ui")) |>
+                    bslib::as_fill_carrier()
                 )
               ),
               shiny::br(),

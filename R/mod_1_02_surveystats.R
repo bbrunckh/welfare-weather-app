@@ -83,10 +83,9 @@ mod_1_02_surveystats_server <- function(
     # signatures include it so a reload invalidates fit/sim/policy results
     # even when the selection string is unchanged.
     survey_version <- shiny::reactiveVal(0L)
-    map_data     <- reactiveVal(NULL)
-    # Per-H3-cell counts behind the "Sample density" view of the same map,
-    # recomputed for whichever wave the picker is on. Cheap: it is a regrouping
-    # of data already in memory, no round trip to the store.
+    # Per-H3-cell counts behind the density map, recomputed for whichever
+    # wave the picker is on. Cheap: it is a regrouping of data already in
+    # memory, no round trip to the store.
     density_cells <- function(wave = "all") {
       cd <- cell_data()
       df <- survey_data()
@@ -132,11 +131,10 @@ mod_1_02_surveystats_server <- function(
       on.exit(removeNotification(busy_id), add = TRUE)
 
       # INT-06: drop the previous survey's map/cell state as soon as a reload
-      # starts, and on every inner failure below. The map output re-renders
-      # reactively, so the previous survey's geography can never outlive its
-      # microdata - a failure now leaves a blank map instead of a misleading
-      # one.
-      map_data(NULL)
+      # starts, and on every inner failure below. The hex-map payload
+      # observer reacts by sending `clear`, so the previous survey's
+      # geography can never outlive its microdata - a failure now leaves a
+      # blank map instead of a misleading one.
       cell_data(NULL)
 
       ss <- selected_surveys()
@@ -205,56 +203,12 @@ mod_1_02_surveystats_server <- function(
             .duck_load_ext("spatial")
             .duck_load_ext("h3")
 
-          loc_df <- h3_local |>
-            dplyr::summarise(
-              # PERF-36: the per-location envelope rides along with the GeoJSON
-              # string, so bounds never require re-parsing geometry in R.
-              geom_union = st_union_agg(st_geomfromtext(h3_cell_to_boundary_wkt(h3))),
-              .by        = c(code, year, survname, loc_id)
-            ) |>
-            dplyr::mutate(
-              geom = st_asgeojson(geom_union),
-              env  = st_extent(geom_union)
-            ) |>
-            dplyr::mutate(
-              xmin = st_xmin(env), ymin = st_ymin(env),
-              xmax = st_xmax(env), ymax = st_ymax(env)
-            ) |>
-            dplyr::select(-geom_union, -env) |>
-            collect_deterministic(c("code", "year", "survname", "loc_id")) |>
-            dplyr::filter(!is.na(geom), nchar(geom) > 2)   # drop NULLs and empty "{}"
-
-          # Assemble a GeoJSON FeatureCollection
-          features <- lapply(seq_len(nrow(loc_df)), function(i) {
-            row <- loc_df[i, ]
-            list(
-              type      = "Feature",
-              geom_json = row$geom,                     # raw string for addGeoJSON
-              properties = list(
-                code     = row$code,
-                year     = row$year,
-                survname = row$survname,
-                loc_id   = row$loc_id,
-                # PERF-36: [xmin, ymin, xmax, ymax] from DuckDB, so
-                # .geojson_bounds() can skip parsing the geometry string.
-                bbox    = as.numeric(c(row$xmin, row$ymin, row$xmax, row$ymax))
-              )
-            )
-          })
-
-          geojson <- list(type = "FeatureCollection", features = features)
-          map_data(geojson)
-
-        }, error = function(e) {
-          load_ok <<- FALSE
-          notify(paste("Failed to build map data:", conditionMessage(e)), type = "warning", duration = 5)
-        })
-
-        # -- Sample density heatmap -------------------------------------------
-        # One hexagon per H3 cell rather than one polygon per location: cells
-        # tile without overlapping, so the sample's density reads directly off
-        # the colour instead of a pile of outlines.
-        tryCatch({
+          # -- Location of interviews map ------------------------------------
+          # One row per H3 cell: a GeoJSON geometry string (the Leaflet
+          # fallback artifact; MapLibre decodes geometry in the browser from
+          # cell ids, so it is never sent when WebGL is available) plus the
+          # per-cell bbox that the payload's fit bounds come from, and the
+          # location-to-cell mapping shared with the outcome and weather maps.
           cell_geo <- h3_local |>
             dplyr::distinct(h3) |>
             dplyr::mutate(g = st_geomfromtext(h3_cell_to_boundary_wkt(h3))) |>
@@ -294,8 +248,8 @@ mod_1_02_surveystats_server <- function(
               dplyr::left_join(loc_keys, panel_map, by = c("code", "year", "survname", "loc_id")),
               by = c("code", "year", "survname", "loc_id")
             )
-      survey_data(df)
-      survey_version(survey_version() + 1L)
+          survey_data(df)
+          survey_version(survey_version() + 1L)
         }, error = function(e) {
           # INT-06: loc_id_panel is not a cosmetic join - downstream VCV
           # estimation falls back when it is missing, which changes inference.
@@ -329,99 +283,85 @@ mod_1_02_surveystats_server <- function(
           p
         })
 
-        # Leaflet maps: the widget only rebuilds on view toggles and data
-        # loads. Wave changes swap the GeoJSON layer in place (observer
-        # below) - no widget rebuild, no basemap re-fetch, and the user's
-        # pan/zoom survives without any view-memory machinery.
-        map_view_mem <- map_view_memory(
-          input, session, "map",
-          key = shiny::reactive(digest::digest(selected_surveys()))
-        )
-        map_view_mem$remember()
+        # Unit label for legend/tooltip text ("households", "individuals",
+        # "firms"), resolved live so an analysis-unit switch re-labels.
+        unit_label <- function() {
+          unit <- if (is.function(analysis_unit)) analysis_unit() else NULL
+          switch(unit %||% "hh", ind = "individuals", firm = "firms",
+                 "households")
+        }
 
-        output$map <- leaflet::renderLeaflet({
-          wave <- shiny::isolate(input$map_wave %||% "all")
+        # ---- Location of interviews payload stream ---------------------------
+        # One reactive observer drives the hex map: data loads and wave
+        # toggles both land here as fresh `set` payloads (cheap - cell ids
+        # and values only, no geometry serialization). The camera is fitted
+        # only when the data key changes (PERF-36 view-key semantics), so a
+        # wave toggle re-colours in place and the user's pan/zoom survives.
+        density_key <- reactiveVal(NULL)
+        density_lgd <- reactiveVal(NULL)
+        density_nloc <- reactiveVal(NULL)
+        observe({
+          cd   <- cell_data()
+          wave <- input$map_wave %||% "all"
 
-          m <- if (identical(input$map_view, "density")) {
-            unit <- if (is.function(analysis_unit)) analysis_unit() else NULL
-            plot_sample_density_map(
-              density_cells(wave),
-              unit_label = switch(unit %||% "hh",
-                                  ind = "individuals", firm = "firms",
-                                  "households")
-            )
+          pl <- if (is.null(cd)) NULL else {
+            .density_hex_payload(density_cells(wave), unit_label())
+          }
+          if (is.null(pl)) {
+            hexmap_clear(session, ns, "density_map")
+            density_lgd(NULL)
+            density_nloc(NULL)
           } else {
-            plot_survey_map(filter_features_by_wave(map_data(), wave))
-          }
-          req(!is.null(m))
-          map_view_mem$restore(m)
-        })
-
-        # Wave-only changes: swap the active layer in place. The serialized
-        # FeatureCollection string per wave is cached (one entry per wave) so
-        # toggling between waves does not re-serialize the shared geometry on
-        # every click; the cache is dropped when either data source reloads
-        # (locations map -> map_data, density map -> cell_data).
-        fc_cache <- new.env(parent = emptyenv())
-        observeEvent(map_data(), {
-          fc_cache$locs  <- new.env(parent = emptyenv())
-          fc_cache$dens  <- new.env(parent = emptyenv())
-        })
-        observeEvent(cell_data(), {
-          fc_cache$dens  <- new.env(parent = emptyenv())
-        })
-        cached_loc_fc <- function(wave) {
-          if (is.null(fc_cache$locs[[wave]])) {
-            loc <- filter_features_by_wave(map_data(), wave)
-            shiny::req(!is.null(loc))
-            fc_cache$locs[[wave]] <- .survey_fc_string(loc$features)
-          }
-          fc_cache$locs[[wave]]
-        }
-        cached_density_fc <- function(wave) {
-          if (is.null(fc_cache$dens[[wave]])) {
-            fc <- .sample_density_fc(density_cells(wave))
-            shiny::req(fc)
-            fc_cache$dens[[wave]] <- fc$fc
-          }
-          fc_cache$dens[[wave]]
-        }
-
-        # Wave-only changes: update the active layer in place.
-        observeEvent(input$map_wave,
-          {
-            wave <- input$map_wave %||% "all"
-            px   <- leaflet::leafletProxy(ns("map"), session)
-            if (identical(input$map_view %||% "locations", "density")) {
-              leaflet::removeGeoJSON(px, "density-cells")
-              leaflet::addGeoJSON(
-                px,
-                geojson     = cached_density_fc(wave),
-                layerId     = "density-cells",
-                stroke      = FALSE,
-                color       = "#000000",
-                weight      = 1,
-                opacity     = 0.5,
-                fill        = TRUE,
-                fillOpacity = 0.75
-              )
-            } else {
-              leaflet::removeGeoJSON(px, "locs")
-              leaflet::addGeoJSON(
-                px,
-                geojson     = cached_loc_fc(wave),
-                layerId     = "locs",
-                stroke      = TRUE,
-                color       = "#000000",
-                weight      = 1,
-                opacity     = 0.5,
-                fill        = TRUE,
-                fillOpacity = 0
-              )
+            hexmap_update(session, ns, "density_map", pl$payload)
+            key <- digest::digest(selected_surveys())
+            if (!identical(key, density_key())) {
+              hexmap_fit(session, ns, "density_map", pl$payload$bounds)
+              density_key(key)
             }
-          },
-          ignoreInit = TRUE
-        )
+            density_lgd(pl$legend)
+
+            # Number of unique locations behind the map: the locations of the
+            # selected wave (summed across waves on "all") that carry sampled
+            # units AND have an H3 mapping - the same set the allocation
+            # draws from.
+            sd   <- survey_data()
+            cmap <- filter_by_wave(cd$map, wave)
+            locs <- dplyr::distinct(
+              filter_by_wave(sd, wave),
+              .data$code, .data$year, .data$survname, .data$loc_id
+            )
+            locs <- dplyr::inner_join(
+              locs,
+              dplyr::distinct(cmap, .data$code, .data$year, .data$survname,
+                              .data$loc_id),
+              by = c("code", "year", "survname", "loc_id")
+            )
+            density_nloc(nrow(locs))
+          }
+        })
+
+        # R-side legend: same palette state as the payloads, rebuilt per wave
+        # and positioned over the map's top-right corner by hexmap_ui().
+        output$map_legend_ui <- shiny::renderUI({
+          lgd <- density_lgd()
+          shiny::req(!is.null(lgd))
+          html <- .compact_legend_html(
+            pal_info = lgd$pal_info,
+            binned   = lgd$binned,
+            levels   = lgd$levels,
+            title    = lgd$title,
+            info     = lgd$info
+          )
+          n <- density_nloc()
+          note <- if (is.null(n)) "" else paste0(
+            '<div style="white-space: nowrap; font-size: 10px; color: #333; ',
+            'background: rgba(255,255,255,0.88); border-radius: 4px; ',
+            'padding: 2px 5px; margin-top: 2px;">',
+            'Number of unique locations: ',
+            format(n, big.mark = ",", scientific = FALSE), '</div>'
+          )
+          htmltools::HTML(paste0(html, note))
+        })
 
         # Wave toggle slider, shown only when there is more than one wave to pick.
         output$map_wave_ui <- shiny::renderUI({
@@ -435,19 +375,6 @@ mod_1_02_surveystats_server <- function(
             choices  = choices,
             selected = selected
           )
-        })
-
-        # Toggle between outlined locations and the per-cell heatmap.
-        output$map_view_ui <- shiny::renderUI({
-          shiny::radioButtons(
-            ns("map_view"), NULL, inline = TRUE,
-            selected = shiny::isolate(input$map_view) %||% "locations",
-            choiceNames  = list("Locations", "Sample density"),
-            choiceValues = list("locations", "density")
-          ) |>
-            htmltools::tagAppendAttributes(
-              class = "toggle-slider"
-            )
         })
 
         output$outcome_stats <- make_stats_dt(survey_data, variable_list, "outcome")
@@ -539,9 +466,9 @@ mod_1_02_surveystats_server <- function(
                 # Pairing a definite card height with a 100%-height map is what
                 # lets the map fill the card in both the normal and the
                 # expanded state; a fixed pixel height would stay small when
-                # the card fans out.
-                # Title and view toggle share one row so the map keeps as much
-                # of the card as possible, expanded or not.
+                # the card fans out. The title shares one row with the wave
+                # toggle so the map keeps as much of the card as possible,
+                # expanded or not.
                 bslib::card(
                   full_screen = TRUE,
                   height      = "400px",
@@ -554,19 +481,28 @@ mod_1_02_surveystats_server <- function(
                         title = "Location of interviews",
                         p(paste(
                           "Geographic distribution of sampled interviews.",
-                          "'Locations' outlines each survey location;",
-                          "'Sample density' shades H3 cells by how many",
-                          "sampled units fall in them."
+                          "Each hexagon is an H3 cell shaded by how many",
+                          "sampled units fall in it; cells tile without",
+                          "overlapping, so dense areas read directly off the",
+                          "colour. Pick the survey wave on the right."
                         ))
                       )
                     ),
-                    shiny::div(
-                      class = "d-flex align-items-center gap-2 flex-wrap",
-                      shiny::uiOutput(ns("map_wave_ui"), inline = TRUE),
-                      shiny::uiOutput(ns("map_view_ui"), inline = TRUE)
-                    )
+                    shiny::uiOutput(ns("map_wave_ui"), inline = TRUE)
                   ),
-                  leaflet::leafletOutput(ns("map"), height = "100%")
+                  # The MapLibre hex map. hexmap_ui() is placed directly in
+                  # the card (no renderUI): the container persists for the
+                  # session and the payload observer drives everything.
+                  hexmap_ui(
+                    ns("density_map"),
+                    height     = "100%",
+                    aria_label = paste0(
+                      "Map of sample density: number of sampled units ",
+                      "per hexagonal area cell"
+                    ),
+                    legend = shiny::uiOutput(ns("map_legend_ui"))
+                  ) |>
+                    bslib::as_fill_carrier()
                 )
               ),
               h4(
@@ -612,7 +548,6 @@ mod_1_02_surveystats_server <- function(
 
     list(
       survey_data    = survey_data,
-      map_data       = map_data,
       cell_data      = cell_data,
       survey_version = survey_version
     )

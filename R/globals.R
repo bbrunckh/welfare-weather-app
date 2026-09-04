@@ -28,7 +28,7 @@ utils::globalVariables(c(
   "n_obs", "name", "overlap_x", "overlap_y", "pct", "period_lbl",
   "plot.new", "pop_2020", "prop", "ref_mean", "ref_sd", "scenario", "se",
   "shared_x", "shared_y", "ssp", "st_asgeojson", "st_geomfromtext",
-  "st_union_agg", "survname", "tau", "timestamp", "title", "total",
+  "survname", "tau", "timestamp", "title", "total",
   "total_x", "total_y", "value", "value_p50", "variable",
   ":="
 ))

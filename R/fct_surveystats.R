@@ -247,88 +247,6 @@ plot_interview_dates <- function(plot_data) {
     )
 }
 
-# ---------------------------------------------------------------------------- #
-# Leaflet survey location map                                                  #
-# ---------------------------------------------------------------------------- #
-
-#' Extract bounding box from a GeoJSON FeatureCollection
-#'
-#' Iterates over all Polygon and MultiPolygon coordinate arrays to find the
-#' overall lng/lat extent. No spatial libraries required.
-#'
-#' Features may carry either a parsed `geometry` or a raw `geom_json` (or
-#' `geom`) geometry string. The raw string is parsed on demand here and
-#' immediately discarded, so feature builders no longer need to retain a
-#' parsed copy alongside the string (PERF-10).
-#'
-#' @param geojson A GeoJSON FeatureCollection list, as produced by
-#'   `jsonlite::fromJSON` or assembled manually.
-#' @return A named list with `lng1`, `lat1`, `lng2`, `lat2`.
-#'
-#' @noRd
-.geojson_bounds <- function(geojson) {
-  all_lng <- numeric()
-  all_lat <- numeric()
-
-  # PERF-36 fast path: features built by the H3 pipeline carry a
-  # [xmin, ymin, xmax, ymax] bbox computed in DuckDB beside the geometry, so
-  # the bounds come from a numeric min/max with no JSON parsing at all.
-  # (`props` is the density map's internal spelling of `properties`.)
-  bboxes <- lapply(geojson$features, function(f)
-    f$properties$bbox %||% f$props$bbox)
-  if (length(bboxes) > 0) {
-    have <- vapply(bboxes, function(b)
-      is.numeric(b) && length(b) == 4L && !anyNA(b), logical(1))
-    if (all(have)) {
-      m <- matrix(unlist(bboxes, use.names = FALSE), nrow = 4L)
-      return(list(
-        lng1 = min(m[1, ]), lat1 = min(m[2, ]),
-        lng2 = max(m[3, ]), lat2 = max(m[4, ])
-      ))
-    }
-  }
-
-  # Recursively extract all coordinate pairs from any nesting depth
-  extract_coords <- function(coords) {
-    if (is.numeric(coords) && length(coords) == 2) {
-      # A single [lng, lat] pair
-      all_lng <<- c(all_lng, coords[1])
-      all_lat <<- c(all_lat, coords[2])
-    } else if (is.array(coords) && length(dim(coords)) >= 2L &&
-               utils::tail(dim(coords), 1L) == 2L) {
-      # jsonlite collapses coordinate nesting into an array whenever the rings
-      # are regular: n x 2 (matrix) for a Polygon with one ring, 1 x n x 2 for
-      # the same geometry read straight from GeoJSON, and deeper for
-      # MultiPolygons. The lng/lat pair is always the last dimension, and R
-      # stores it column-major, so the first half of the values are lng and
-      # the second half lat regardless of the leading dimensions.
-      flat <- matrix(as.numeric(coords), ncol = 2L)
-      all_lng <<- c(all_lng, flat[, 1L])
-      all_lat <<- c(all_lat, flat[, 2L])
-    } else if (is.list(coords)) {
-      lapply(coords, extract_coords)
-    }
-  }
-
-  for (f in geojson$features) {
-    coords <- f$geometry$coordinates
-    if (is.null(coords)) {
-      geom_str <- f$geom_json %||% f$geom
-      if (is.null(geom_str)) next
-      coords <- tryCatch(
-        jsonlite::fromJSON(geom_str)$coordinates,
-        error = function(e) NULL
-      )
-      if (is.null(coords)) next
-    }
-    extract_coords(coords)
-  }
-
-  list(
-    lng1 = min(all_lng), lat1 = min(all_lat),
-    lng2 = max(all_lng), lat2 = max(all_lat)
-  )
-}
 
 
 
@@ -363,30 +281,6 @@ survey_wave_list <- function(df) {
 }
 
 
-#' Keep only the features belonging to one survey wave
-#'
-#' @param geojson A FeatureCollection whose features carry `code`, `year` and
-#'   `survname` properties.
-#' @param key A `"code|year|survname"` string, or `"all"` to keep everything.
-#'
-#' @return The filtered FeatureCollection.
-#'
-#' @export
-filter_features_by_wave <- function(geojson, key = "all") {
-  if (is.null(geojson) || is.null(key) || identical(key, "all")) return(geojson)
-  if (length(geojson$features) == 0) return(geojson)
-
-  keep <- vapply(geojson$features, function(f) {
-    p <- f$properties
-    identical(paste(as.character(p$code), as.character(p$year),
-                    as.character(p$survname), sep = "|"), key)
-  }, logical(1))
-
-  geojson$features <- geojson$features[keep]
-  geojson
-}
-
-
 #' Restrict a data frame to one survey wave
 #'
 #' @param df  A frame with `code`, `year`, `survname`.
@@ -404,488 +298,6 @@ filter_by_wave <- function(df, key = "all") {
 }
 
 
-#' Reset-view control
-#'
-#' A third button under Leaflet's zoom controls that returns the map to the
-#' extent it opened at, so panning and zooming is always recoverable.
-#'
-#' @param m      A `leaflet` widget.
-#' @param bounds List with `lng1`, `lat1`, `lng2`, `lat2`.
-#'
-#' @return `m` with the button added (unchanged if `bounds` is not finite).
-#' @noRd
-.add_reset_button <- function(m, bounds) {
-  if (!all(vapply(bounds, is.finite, logical(1)))) return(m)
-
-  js <- sprintf(
-    "function(btn, map) { map.fitBounds([[%s, %s], [%s, %s]]); }",
-    format(bounds$lat1, digits = 10), format(bounds$lng1, digits = 10),
-    format(bounds$lat2, digits = 10), format(bounds$lng2, digits = 10)
-  )
-
-  m |>
-    leaflet::addEasyButton(
-      leaflet::easyButton(
-        position = "topleft",
-        icon     = htmltools::HTML(
-          '<span style="font-size: 15px; line-height: 26px;">&#9678;</span>'
-        ),
-        title   = "Reset view",
-        onClick = htmlwidgets::JS(js)
-      )
-    )
-}
-
-
-#' JS hook keeping a map correct when its container resizes
-#'
-#' Leaflet caches its container size, so a map whose card is expanded to full
-#' screen keeps drawing at the old size (grey gutters, controls in the wrong
-#' place) until something nudges it. This watches the container and
-#' re-measures.
-#'
-#' Re-measuring alone keeps the old zoom, which leaves the locations marooned
-#' in the middle of a much bigger map, so the data bounds are re-fitted too -
-#' expanding then magnifies the sample rather than its surroundings. Reading
-#' the pre-resize bounds instead would not work: Leaflet has usually
-#' re-measured by the time the callback runs, so they already describe the new
-#' size. Once the user has panned or zoomed, their view is left alone.
-#'
-#' With `dashes = TRUE` the stroke width of dashed sub-layers is also tapered
-#' as the map zooms out - stroke width is in screen pixels, so an outline that
-#' reads well when zoomed in swamps the shapes once they shrink.
-#'
-#' @param bounds List with `lng1`, `lat1`, `lng2`, `lat2`, from
-#'   `.geojson_bounds()`.
-#' @param dashes Logical. Also scale dashed stroke widths with zoom.
-#'
-#' @return An `htmlwidgets::JS()` string for `htmlwidgets::onRender()`.
-#' @noRd
-.map_autofit_js <- function(bounds, dashes = FALSE) {
-  fit_ok <- all(vapply(bounds, is.finite, logical(1)))
-
-  # `dashes` is retained for callers that once drew per-area markers; there
-  # are none now, so the hook is a no-op.
-  dash_fn <- "
-        var scaleDashes = function() {};
-  "
-
-  htmlwidgets::JS(sprintf("
-      function(el, x) {
-        var map = this;
-        // The caller can suppress the fit when it has restored a remembered
-        // view - refitting would throw that view away on the first resize.
-        var fit = %s && (x.fitOnResize !== false);
-        var b   = [[%s, %s], [%s, %s]];
-        var userMoved = false;
-        var ro;
-        ['mousedown', 'wheel', 'dblclick', 'touchstart'].forEach(function(ev) {
-          el.addEventListener(ev, function() { userMoved = true; },
-                              { passive: true });
-        });
-        // Expanding a card usually changes width far more than height, so a
-        // whole zoom level rarely fits and integer snapping would leave the
-        // sample as small as before. Quarter steps let the re-fit actually
-        // use the new space; the +/- buttons still step by whole levels.
-        map.options.zoomSnap = 0.25;
-        %s
-        // Re-rendering the output (switching view, reloading data) destroys
-        // this map while the observer on its container is still live, so bail
-        // out once the map is gone rather than reaching into dead panes.
-        var alive = function() {
-          // el.isConnected catches the window between Shiny detaching the old
-          // output node and Leaflet firing 'unload'; touching the map in that
-          // window schedules a redraw against a canvas that no longer exists.
-          return el.isConnected !== false && map._loaded &&
-                 map._container && map._container.parentNode;
-        };
-        var refit = function() {
-          if (!alive()) { if (ro) ro.disconnect(); return; }
-          window.requestAnimationFrame(function() {
-            if (!el.offsetWidth || !el.offsetHeight || !alive()) return;
-            try {
-              map.invalidateSize();
-              if (fit && !userMoved) map.fitBounds(b, { animate: false });
-              scaleDashes();
-            } catch (err) { /* map torn down mid-resize */ }
-          });
-        };
-        if (window.ResizeObserver) {
-          ro = new ResizeObserver(refit);
-          ro.observe(el);
-        } else {
-          window.addEventListener('resize', refit);
-        }
-        map.on('unload', function() {
-          if (ro) ro.disconnect();
-          // Leaflet leaves a queued canvas redraw behind when a map is
-          // replaced (switching view rebuilds the widget). It then runs
-          // against a destroyed 2d context and throws. Cancel it.
-          try {
-            var rs = map._renderer ? [map._renderer] : [];
-            map.eachLayer(function(l) {
-              if (l._renderer && rs.indexOf(l._renderer) < 0) rs.push(l._renderer);
-            });
-            rs.forEach(function(r) {
-              if (r._redrawRequest && window.cancelAnimationFrame) {
-                window.cancelAnimationFrame(r._redrawRequest);
-                r._redrawRequest = null;
-              }
-            });
-          } catch (err) { /* nothing queued */ }
-        });
-      }",
-    if (fit_ok) "true" else "false",
-    format(bounds$lat1, digits = 10), format(bounds$lng1, digits = 10),
-    format(bounds$lat2, digits = 10), format(bounds$lng2, digits = 10),
-    dash_fn
-  ))
-}
-
-
-#' Remember and restore a leaflet map's view across re-renders
-#'
-#' Switching a map's view (or reloading its data) rebuilds the widget, which
-#' would otherwise snap back to the data bounds and lose wherever the user had
-#' panned and zoomed to. This records the view Leaflet reports through Shiny
-#' and reapplies it to the next build of the same output.
-#'
-#' @param input,session Shiny `input` and `session` objects.
-#' @param output_id Character. The `outputId` of the leaflet output, without
-#'   the module namespace.
-#' @param key Optional reactive returning a value identifying the data behind
-#'   the map (e.g. a digest of the selected sample). The stored view is only
-#'   reapplied while the key is unchanged; when the key changes the view
-#'   describes geography that is no longer on the map, so it is dropped and
-#'   the new build fits its own data bounds.
-#'
-#' @return A list with `remember()` - call once to start tracking - and
-#'   `restore(m)`, which applies the stored view to a widget.
-#'
-#' @noRd
-map_view_memory <- function(input, session, output_id, key = NULL) {
-  stored <- shiny::reactiveVal(NULL)
-
-  list(
-    remember = function() {
-      shiny::observeEvent(
-        list(input[[paste0(output_id, "_center")]],
-             input[[paste0(output_id, "_zoom")]]),
-        {
-          ctr <- input[[paste0(output_id, "_center")]]
-          zm  <- input[[paste0(output_id, "_zoom")]]
-          if (!is.null(ctr) && !is.null(zm) &&
-              is.finite(ctr$lng) && is.finite(ctr$lat)) {
-            # The key is read in isolation: a key change alone must not
-            # re-record the previous data's view under the new key.
-            stored(list(lng = ctr$lng, lat = ctr$lat, zoom = zm,
-                        key = if (!is.null(key)) shiny::isolate(key()) else NULL))
-          }
-        },
-        ignoreInit = TRUE, ignoreNULL = TRUE
-      )
-    },
-    restore = function(m) {
-      v <- shiny::isolate(stored())
-      k <- if (!is.null(key)) shiny::isolate(key()) else NULL
-      if (is.null(m)) return(m)
-      if (is.null(v) || !identical(v$key, k)) {
-        # Data changed underneath (or nothing stored yet): drop the stale view
-        # and let the widget fit the new data bounds.
-        shiny::isolate(stored(NULL))
-        return(m)
-      }
-      # Leaflet: suppressing the autofit hook and setting the view directly
-      # overrides the widget's own fitBounds, which would otherwise overwrite
-      # the remembered view at bind time.
-      m$x$fitOnResize <- FALSE
-      leaflet::setView(m, lng = v$lng, lat = v$lat, zoom = v$zoom)
-    },
-    get = stored
-  )
-}
-
-
-#' JSON-escape a character vector
-#'
-#' PERF-36 helper. Escapes the characters JSON requires in string values:
-#' backslash, double quote, and C0 control characters. Vectorized: a handful of
-#' `gsub` calls over the whole vector, so the cost is per-map rather than
-#' per-feature.
-#'
-#' @param x Character vector (NA elements pass through as NA).
-#' @return Character vector of escaped strings.
-#'
-#' @noRd
-.json_escape_str <- function(x) {
-  needs <- grepl('[\\\\"]|[\\x00-\\x1f]', x, perl = TRUE)
-  needs[is.na(needs)] <- FALSE
-  if (!any(needs)) return(x)
-
-  s <- x[needs]
-  # Backslash first, so the escapes inserted below are not re-doubled.
-  s <- gsub("\\", "\\\\", s, fixed = TRUE)
-  s <- gsub('"', '\\"', s, fixed = TRUE)
-  s <- gsub("\n", "\\n", s, fixed = TRUE)
-  s <- gsub("\r", "\\r", s, fixed = TRUE)
-  s <- gsub("\t", "\\t", s, fixed = TRUE)
-  # Any remaining C0 control characters become \u00XX.
-  m <- gregexpr("[\\x00-\\x08\\x0b\\x0c\\x0e-\\x1f]", s, perl = TRUE)
-  hit <- which(vapply(m, function(mm) mm[1] != -1L, logical(1)))
-  for (i in hit) {
-    chrs <- regmatches(s[i], m[i])[[1]]
-    regmatches(s[i], m[i])[[1]] <- vapply(
-      chrs, function(ch) sprintf("\\u%04x", as.integer(charToRaw(ch))),
-      character(1)
-    )
-  }
-  x[needs] <- s
-  x
-}
-
-#' Serialize a property column as JSON values
-#'
-#' PERF-36 helper. Property schemas are uniform across a map's features, so
-#' each property serializes as a whole column in one vectorized pass.
-#' NULL/NA become null, strings are escaped, numbers keep full precision
-#' (the old per-feature toJSON rounded to 4 decimals), logicals become
-#' true/false.
-#'
-#' @param x An atomic vector (character/numeric/logical).
-#'
-#' @return Character vector of JSON texts, one per element.
-#'
-#' @noRd
-.json_vec <- function(x) {
-  if (is.character(x)) {
-    return(ifelse(is.na(x), "null", paste0('"', .json_escape_str(x), '"')))
-  }
-  if (is.logical(x)) {
-    return(ifelse(is.na(x), "null", ifelse(x, "true", "false")))
-  }
-  if (is.numeric(x)) {
-    return(ifelse(is.na(x), "null", format(x, digits = 15, trim = TRUE)))
-  }
-  stop("Unsupported property type: ", class(x)[1], call. = FALSE)
-}
-
-#' Extract one property as a column over a feature list
-#'
-#' @param features A list of features with `properties` (or `props`, the
-#'   density map's internal spelling) lists.
-#' @param name Property name.
-#'
-#' @return An atomic vector, one value per feature; missing properties become
-#'   NA of the column's dominant type.
-#'
-#' @noRd
-.prop_col <- function(features, name) {
-  vals <- lapply(features, function(f) {
-    v <- f$properties[[name]]
-    if (is.null(v)) v <- f$props[[name]]
-    if (is.null(v) || length(v) == 0L) NA else v[[1]]
-  })
-  if (all(vapply(vals, is.numeric, logical(1)))) {
-    return(vapply(vals, as.numeric, numeric(1), USE.NAMES = FALSE))
-  }
-  vapply(vals, as.character, character(1), USE.NAMES = FALSE)
-}
-
-#' Per-feature bbox JSON fragment
-#'
-#' @param features Feature list whose properties carry a length-4 numeric
-#'   `bbox` (as the DuckDB pipeline emits).
-#'
-#' @return Character vector `"[xmin,ymin,xmax,ymax]"`, or the JSON literal
-#'   `null` when any feature lacks a bbox (the fast bounds path then drops
-#'   out, as it did before the bbox columns existed).
-#'
-#' @noRd
-.bbox_frag <- function(features) {
-  b <- lapply(features, function(f) {
-    v <- f$properties$bbox %||% f$props$bbox
-    if (is.null(v) || !is.numeric(v) || length(v) != 4L) NA_real_ else v
-  })
-  if (anyNA(unlist(b))) return("null")
-  m <- do.call(rbind, b)
-  paste0("[", .json_vec(m[, 1L]), ",", .json_vec(m[, 2L]), ",",
-         .json_vec(m[, 3L]), ",", .json_vec(m[, 4L]), "]")
-}
-
-#' Keyless raster basemap for all maps
-#'
-#' CARTO Positron raster tiles via `providers$CartoDB.Positron`. The vector
-#' basemap experiment (MapLibre GL, 2026-09-02) was rolled back because its
-#' `mapgl` dependency needs the sf/GDAL stack the Connect host cannot provide.
-#' CARTO has announced the retirement of unauthenticated raster basemaps; if
-#' these tiles start watermarking or 404ing, the like-for-like keyless
-#' fallback is `providers$Esri.WorldGrayCanvas` (light grey, similar
-#' contrast to Positron).
-#'
-#' @noRd
-.basemap <- function() {
-  leaflet::leaflet(options = leaflet::leafletOptions(preferCanvas = TRUE)) |>
-    leaflet::addProviderTiles(leaflet::providers$CartoDB.Positron)
-}
-
-#' Assemble a GeoJSON FeatureCollection string
-#'
-#' PERF-36: the collection is assembled with vectorized concatenation over
-#' per-feature property JSON fragments (built by the callers with
-#' `.json_vec()`/`.bbox_frag()`), replacing a per-feature `sprintf` +
-#' `jsonlite::toJSON` pair whose jsonlite calls dominated widget build time
-#' (~0.2 ms per feature). Geometry texts are already valid JSON and are
-#' embedded verbatim, so the output matches the previous serialization.
-#'
-#' @param geoms Character vector of geometry JSON texts, one per feature.
-#' @param props_json Character vector of properties JSON objects, same length
-#'   and order as `geoms` (each element is `{...}`).
-#' @param ids Optional integer vector of feature ids.
-#'
-#' @return A GeoJSON FeatureCollection JSON string.
-#'
-#' @noRd
-.geojson_fc_string <- function(geoms, props_json, ids = NULL) {
-  stopifnot(length(geoms) == length(props_json))
-  id_frag <- if (is.null(ids)) "" else paste0('"id":', as.integer(ids), ',')
-  feats <- paste0(
-    '{', id_frag, '"type":"Feature","geometry":', geoms,
-    ',"properties":', props_json, '}'
-  )
-  sprintf('{"type":"FeatureCollection","features":[%s]}',
-          paste(feats, collapse = ","))
-}
-
-#' Per-feature style JSON for leaflet's addGeoJSON
-#'
-#' The leaflet widget merges each feature's `properties.style` object over the
-#' layer's global style (see `methods.addGeoJSON` in the widget JS), which
-#' gives one layer per map carrying a per-feature colour - the Leaflet
-#' equivalent of mapgl's single fill layer with a `get("__fill")` expression,
-#' and a return to one data layer instead of the old one-layer-per-shade
-#' grouping that made continuous-ramp maps slow to build.
-#'
-#' @param cols Character vector of hex colours, one per feature.
-#' @param stroke Fill colour also used for the stroke (when the caller draws
-#'   outlines), or `NULL` for fill-only layers.
-#'
-#' @return A JSON object fragment, e.g. `"style":{"fillColor":"#123"}`.
-#'
-#' @noRd
-.feature_style_frag <- function(cols, stroke = FALSE) {
-  col_json <- .json_vec(cols)
-  if (stroke) {
-    paste0('"style":{"color":', col_json, ',"fillColor":', col_json, '}')
-  } else {
-    paste0('"style":{"fillColor":', col_json, '}')
-  }
-}
-
-#' Add one styled GeoJSON layer to a leaflet widget
-#'
-#' @param m A `leaflet` widget.
-#' @param fc_string FeatureCollection JSON string from `.geojson_fc_string()`.
-#' @param layer_id Stable layer id, so wave switches can swap the layer
-#'   in place via `removeGeoJSON()`/`addGeoJSON()`.
-#' @param stroke Render feature outlines (colour comes from the per-feature
-#'   `style.color`).
-#' @param fill_opacity Fill opacity for the layer.
-#'
-#' @return `m` with the layer added.
-#'
-#' @noRd
-.add_geojson_layer <- function(m, fc_string, layer_id, stroke = FALSE,
-                               fill_opacity = 0.75, weight = 1) {
-  leaflet::addGeoJSON(
-    m,
-    geojson     = fc_string,
-    layerId     = layer_id,
-    stroke      = stroke,
-    color       = "#000000",
-    weight      = weight,
-    opacity     = 0.5,
-    fill        = TRUE,
-    fillOpacity = fill_opacity
-  )
-}
-
-
-#' Build a leaflet map of survey interview locations
-#'
-#' Renders a `leaflet` widget from a GeoJSON FeatureCollection of H3-aggregated
-#' survey locations. Polygons are coloured by economy code and the viewport is
-#' fitted to the bounding box. Accepts both Polygon and MultiPolygon geometries.
-#'
-#' @param loc A GeoJSON FeatureCollection list with a `code` property on each
-#'   feature, as produced by the H3-to-polygon aggregation step in
-#'   `mod_1_02_surveystats_server()`.
-#'
-#' @return A `leaflet` widget, or `NULL` invisibly when `loc` is
-#'   `NULL` or has no features.
-#'
-#' @export
-plot_survey_map <- function(loc) {
-  if (is.null(loc) || length(loc$features) == 0) return(invisible(NULL))
-
-  bounds <- .geojson_bounds(loc)
-
-  # Keyless raster Positron basemap (see .basemap()). One GeoJSON layer
-  # carrying a per-feature stroke colour via properties.style; the old
-  # onRender hover-highlight JS handles hover (fill stays transparent, so a
-  # broken stroke would mean a vanished shape - resetStyle restores it).
-  # No popups: the wave pickers and stats tables already carry this
-  # information.
-  m <- .basemap() |>
-    .add_geojson_layer(
-      fc_string = .survey_fc_string(loc$features),
-      layer_id  = "locs",
-      stroke    = TRUE,
-      # Fill stays invisible: these are location outlines, and overlapping
-      # translucent fills would stack into shades outside the legend.
-      fill_opacity = 0,
-      weight    = 1
-    )
-
-  # Hover highlight via vanilla Leaflet JS.
-  #
-  # The un-highlight uses Leaflet's own `resetStyle()` rather than style values
-  # captured in JS variables at render time. Captured values are wrong (or
-  # undefined) for any sub-layer Leaflet builds as a group instead of a single
-  # path, and writing an undefined colour/weight back makes the stroke invalid.
-  #
-  # Handlers are bound on the GeoJSON layer itself, not on each sub-layer:
-  # L.GeoJSON is a FeatureGroup, so child events propagate up, and the binding
-  # then also covers sub-layers regardless of the geometry type they came from.
-  hover_js <- htmlwidgets::JS("
-    function(el, x) {
-      this.eachLayer(function(layer) {
-        if (typeof layer.resetStyle !== 'function') return;  // not GeoJSON
-
-        layer.on('mouseover', function(e) {
-          var target = e.propagatedFrom || e.layer;
-          if (target && target.setStyle) {
-            target.setStyle({ weight: 2, color: '#FF0000' });
-            if (target.bringToFront) target.bringToFront();
-          }
-        });
-
-        layer.on('mouseout', function(e) {
-          var target = e.propagatedFrom || e.layer;
-          if (target) layer.resetStyle(target);
-        });
-      });
-    }
-  ")
-
-  m |>
-    leaflet::fitBounds(
-      lng1 = bounds$lng1, lat1 = bounds$lat1,
-      lng2 = bounds$lng2, lat2 = bounds$lat2
-    ) |>
-    .add_reset_button(bounds) |>
-    htmlwidgets::onRender(hover_js) |>
-    htmlwidgets::onRender(.map_autofit_js(bounds))
-}
 
 
 # ---------------------------------------------------------------------------- #
@@ -899,16 +311,19 @@ plot_survey_map <- function(loc) {
 #' many households sit where. H3 cells, by contrast, tile the plane without
 #' gaps or overlaps, which makes them the natural unit for a heatmap.
 #'
-#' A location's units are divided evenly over the cells it covers, and cells
-#' are then summed across locations, so a cell reached by several overlapping
-#' locations accumulates a share from each. The result is smooth and the
-#' totals reconcile with the sample exactly. Values are therefore fractional:
-#' a location of a dozen households spread over two dozen cells contributes
-#' half a household to each, and only the accumulation across overlapping
-#' locations builds that back up.
+#' A location's units are spread over the cells it covers in proportion to
+#' each cell's 2020 population (`pop_2020`), so a large settlement inside a
+#' multi-cell location keeps most of its households; locations without usable
+#' weights fall back to an even split. Cells are then summed across
+#' locations, so a cell reached by several overlapping locations accumulates
+#' a share from each. The result is smooth and the totals reconcile with the
+#' sample exactly. Values are therefore fractional: a location of a dozen
+#' households spread over two dozen cells contributes half a household to
+#' each, and only the accumulation across overlapping locations builds that
+#' back up.
 #'
 #' @param cell_map    Data frame with one row per location-cell pair: `code`,
-#'   `year`, `survname`, `loc_id`, `h3`.
+#'   `year`, `survname`, `loc_id`, `h3`, optionally `pop_2020`.
 #' @param survey_data Loaded survey observations, one row per sampled unit,
 #'   with `code`, `year`, `survname` and `loc_id`.
 #'
@@ -937,9 +352,26 @@ allocate_units_to_cells <- function(cell_map, survey_data) {
     dplyr::inner_join(n_loc, by = keys)
   if (nrow(cm) == 0) return(NULL)
 
+  # Spread each location's units across its cells in proportion to the
+  # cells' 2020 population, so a big settlement inside a multi-cell
+  # location keeps most of its households. Locations without usable
+  # weights (all NA / zero / negative) fall back to an even split.
+  has_pop <- "pop_2020" %in% names(cm)
   cm |>
     dplyr::group_by(.data$code, .data$year, .data$survname, .data$loc_id) |>
-    dplyr::mutate(.alloc = .data$n_units / dplyr::n()) |>
+    dplyr::mutate(
+      .alloc = if (has_pop) {
+        .pop <- pmax(.data$pop_2020, 0, na.rm = TRUE)
+        .pop_sum <- sum(.pop)
+        if (.pop_sum > 0) {
+          .data$n_units * .pop / .pop_sum
+        } else {
+          .data$n_units / dplyr::n()
+        }
+      } else {
+        .data$n_units / dplyr::n()
+      }
+    ) |>
     dplyr::ungroup() |>
     dplyr::group_by(.data$h3) |>
     dplyr::summarise(n_units = sum(.data$.alloc, na.rm = TRUE),
@@ -1091,234 +523,175 @@ merge_loc_values_to_cells <- function(cell_map, loc_vals, by_wave = TRUE) {
 }
 
 
-#' GeoJSON features for H3 cells, tagged with their survey wave
-#'
-#' Produces features whose `loc_id` property is the H3 index, so cell-level
-#' values from `merge_loc_values_to_cells()` can be drawn by the same plotters
-#' that draw location polygons.
-#'
-#' @param cell_geo Data frame with `h3` and `geom` (a GeoJSON geometry
-#'   string).
-#' @param cell_map Data frame with `code`, `year`, `survname` and `h3`.
-#' @param by_wave Tag features with their wave (the default), so per-wave maps
-#'   can filter to their own. Set `FALSE` to emit each cell exactly once -
-#'   maps that draw all waves together must not paint a shared cell twice.
-#'
-#' @return A GeoJSON FeatureCollection list, or `NULL`.
-#'
-#' @export
-build_cell_features <- function(cell_geo, cell_map, by_wave = TRUE) {
-  if (is.null(cell_geo) || is.null(cell_map)) return(NULL)
-  if (!all(c("h3", "geom") %in% names(cell_geo))) return(NULL)
-  if (!all(c("code", "year", "survname", "h3") %in% names(cell_map))) return(NULL)
-
-  waves <- if (by_wave) {
-    cell_map |>
-      dplyr::distinct(.data$code, .data$year, .data$survname, .data$h3)
-  } else {
-    cell_map |>
-      dplyr::distinct(.data$h3) |>
-      dplyr::mutate(code = NA_character_, year = NA_character_,
-                    survname = NA_character_)
-  }
-  waves$year <- as.character(waves$year)
-
-  d <- waves |>
-    dplyr::inner_join(cell_geo, by = "h3") |>
-    dplyr::filter(!is.na(.data$geom), nchar(.data$geom) > 2)
-  if (nrow(d) == 0) return(NULL)
-
-  features <- lapply(seq_len(nrow(d)), function(i) {
-    props <- list(
-      code     = d$code[i],
-      year     = d$year[i],
-      survname = d$survname[i],
-      loc_id   = d$h3[i]
-    )
-    # PERF-36: carry the DuckDB-computed bbox when the geometry frame has it,
-    # so bounds never need to re-parse the geometry string downstream.
-    if (all(c("xmin", "ymin", "xmax", "ymax") %in% names(d))) {
-      props$bbox <- as.numeric(c(d$xmin[i], d$ymin[i], d$xmax[i], d$ymax[i]))
+# ---- Colour-ramp builders ------------------------------------------------ #
+# Stand-ins for leaflet's colour-scale helpers (colorNumeric / colorFactor):
+# the map palettes only
+# need a function mapping values to hex colours, not a leaflet dependency.
+#' @noRd
+.ramp_numeric <- function(colors, domain, na_color = "#cccccc") {
+  lo <- domain[1]
+  hi <- domain[length(domain)]
+  ramp <- grDevices::colorRamp(colors)
+  function(v) {
+    v <- as.numeric(v)
+    out <- rep(na_color, length(v))
+    ok <- is.finite(v)
+    if (any(ok)) {
+      t <- if (hi > lo) (v[ok] - lo) / (hi - lo) else rep(0.5, sum(ok))
+      t <- pmin(1, pmax(0, t))
+      rgbv <- ramp(t)
+      out[ok] <- grDevices::rgb(rgbv[, 1], rgbv[, 2], rgbv[, 3],
+                                maxColorValue = 255)
     }
-    list(
-      type       = "Feature",
-      geom_json  = d$geom[i],
-      properties = props
-    )
-  })
-
-  list(type = "FeatureCollection", features = features)
+    out
+  }
 }
 
-
-#' FeatureCollection string for the survey-locations map
-#'
-#' Strokes are assigned per distinct economy code with a hue palette over the
-#' codes present in the given feature set (matching the historical
-#' per-code-layer behaviour on whatever subset is drawn).
-#'
-#' @param features The survey-location feature list.
-#'
-#' @return A GeoJSON FeatureCollection JSON string.
-#'
+#' @param levels Level order for binned palettes; the palette recycles
+#'   across them, matching the leaflet colorFactor() mapping.
 #' @noRd
-.survey_fc_string <- function(features) {
-  codes <- vapply(features, function(f) {
-    as.character(f$properties$code %||% NA_character_)
-  }, character(1), USE.NAMES = FALSE)
-  u_codes    <- sort(unique(codes))
-  code_color <- setNames(scales::hue_pal()(length(u_codes)), u_codes)
-  strokes    <- unname(code_color[codes])
+.ramp_factor <- function(colors, levels, na_color = "#cccccc") {
+  cols <- rep(colors, length.out = length(levels))
+  names(cols) <- as.character(levels)
+  function(v) {
+    out <- rep(na_color, length(v))
+    key <- as.character(v)
+    hit <- key %in% names(cols)
+    out[hit] <- unname(cols[key[hit]])
+    out
+  }
+}
 
-  props_json <- paste0(
-    '{"code":',     .json_vec(.prop_col(features, "code")),
-    ',"year":',     .json_vec(.prop_col(features, "year")),
-    ',"survname":', .json_vec(.prop_col(features, "survname")),
-    ',"loc_id":',   .json_vec(.prop_col(features, "loc_id")),
-    ',"bbox":',     .bbox_frag(features),
-    ',',            .feature_style_frag(strokes, stroke = TRUE),
-    '}'
+# Square-root domain + Mako ramp behind the density map's colour scale. The
+# legend reads the same palette state as the payloads, so the two cannot
+# drift apart.
+#' @param n_units Numeric vector of per-cell unit counts.
+#' @return A list with `breaks` (increasing colour-break values over the
+#'   positive counts) and `ramp` (colour hex stops, light to dark, one per
+#'   break).
+#' @noRd
+.density_ramp <- function(n_units) {
+  # Binned colour scale. Cells averaging fewer than one unit — where a
+  # location's units spread thin across many cells — share one pale "less
+  # than 1" bin; the occupied range above 1 is split at its quantiles, so
+  # rural variation stays visible and cities sit in the dark end. A single
+  # global transform cannot do both: sqrt left most cells nearly
+  # indistinguishable, log made thin cells look busier than they are.
+  band <- rev(grDevices::hcl.colors(12, "Mako"))[3:11]
+  pale <- band[1]
+  pos   <- n_units[is.finite(n_units) & n_units > 0]
+  above <- pos[pos >= 1]
+  has_thin <- length(pos) > length(above)
+  fmt <- function(x) format(signif(x, 3), trim = TRUE, scientific = FALSE)
+
+  if (length(above) == 0) {
+    return(list(levels = "< 1", colors = pale, cuts = 1, thin = TRUE))
+  }
+
+  brks <- unique(stats::quantile(above, probs = seq(0, 1, length.out = 4),
+                                 names = FALSE, type = 7))
+  cuts <- unique(brks[-c(1, length(brks))])
+  cuts <- cuts[cuts > brks[1] & cuts < brks[length(brks)]]
+
+  upper <- if (length(cuts) == 0) {
+    paste0("\u2265 ", fmt(brks[1]))
+  } else {
+    edges <- c(brks[1], cuts, brks[length(brks)])
+    vapply(seq_len(length(edges) - 1), function(i) {
+      if (i == length(edges) - 1) {
+        paste0("\u2265 ", fmt(edges[i + 1]))
+      } else {
+        paste0(fmt(edges[i]), " \u2013 ", fmt(edges[i + 1]))
+      }
+    }, character(1))
+  }
+
+  n_up <- length(upper)
+  colors <- c(if (has_thin) pale,
+              band[round(seq(3, length(band), length.out = n_up))])
+  levels <- c(if (has_thin) "< 1", upper)
+  list(levels = levels, colors = colors, cuts = c(1, cuts), thin = has_thin)
+}
+
+# Long explanation under the density legend's info marker, shared by both
+# renderers.
+#' @noRd
+.density_legend_info <- function(unit_label) {
+  unit_s <- sub("s$", "", unit_label)
+  paste0(
+    "Number of sampled ", unit_label, " in each hexagon. A location's ",
+    unit_label, " are spread across the hexagons it covers in proportion ",
+    "to each cell's 2020 population, then summed across overlapping ",
+    "locations, so the totals match the sample exactly. Values are ",
+    "shares, not whole counts: a hexagon can hold less than one ",
+    unit_s, " when a location covers many cells or its cells are ",
+    "sparsely populated. Those thin cells share the palest colour; the ",
+    "occupied range above one is split at its quantiles, so thin cells ",
+    "stay pale and dense cities stay dark."
   )
-  geoms <- vapply(features, function(f) f$geom_json, character(1))
-  .geojson_fc_string(geoms, props_json, ids = seq_along(features))
 }
 
-#' FeatureCollection pieces for the sample density map
+#' Columnar hex-map payload for the sample density map
 #'
-#' @param cells Data frame with `h3`, `geom`, `n_units` (plus optional bbox
-#'   columns), as produced by `density_cells()`.
+#' The payload carries only cell ids and values; the browser decodes
+#' geometry and applies colour. `v` stays on the count scale (the hover
+#' tooltip shows raw counts), and the colour ramp interpolates on `v`
+#' against the quantile breaks in `stops$domain`.
 #'
-#' @return A list with `fc` (the FeatureCollection JSON string), `bounds` and
-#'   `pal_info` for the legend; `NULL` when there is nothing to draw.
+#' @param cells      Data frame with `h3` and `n_units` (bbox columns ride
+#'   along from `density_cells()` when present), as produced for one wave.
+#' @param unit_label Plural noun for what a row of the survey is.
+#'
+#' @return A list with `payload` (for `hexmap_update()`) and `legend` (for
+#'   `.compact_legend_html()`); `NULL` when there is nothing to draw.
 #'
 #' @noRd
-.sample_density_fc <- function(cells) {
+.density_hex_payload <- function(cells, unit_label = "households") {
   if (is.null(cells) || nrow(cells) == 0) return(NULL)
-  if (!all(c("geom", "n_units") %in% names(cells))) return(NULL)
+  if (!all(c("h3", "n_units") %in% names(cells))) return(NULL)
 
-  cells <- cells[!is.na(cells$geom) & nchar(cells$geom) > 2 &
-                   is.finite(cells$n_units), , drop = FALSE]
+  ok <- !is.na(cells$h3) & nzchar(cells$h3) &
+    is.finite(cells$n_units) & cells$n_units > 0
+  cells <- cells[ok, , drop = FALSE]
   if (nrow(cells) == 0) return(NULL)
 
-  # Counts are heavily skewed - a handful of urban cells dwarf everything - so
-  # the colour scale runs on log, over the range actually present. Shares are
-  # fractional where a location's units are split across its cells, so the
-  # bottom of the ramp can sit below one.
-  pos <- cells$n_units[cells$n_units > 0]
-  rng <- range(pos, na.rm = TRUE)
-  if (!all(is.finite(rng)) || rng[1] <= 0) rng <- c(0.5, 1)
-  if (diff(rng) <= 0) rng <- c(rng[1], rng[1] * 2)
-  # Mako (viridis family: perceptually uniform, colour-blind safe, and still
-  # readable in greyscale) running light to dark, with the palest stops
-  # trimmed off - near-white yellows and creams disappear against the light
-  # basemap, which is what made the old Inferno ramp hard to read at the
-  # bottom end.
-  ramp <- rev(grDevices::hcl.colors(12, "Mako"))[3:11]
-  pal  <- leaflet::colorNumeric(ramp, domain = log(rng), na.color = "#cccccc")
-  col_of <- function(v) pal(log(pmin(pmax(v, rng[1]), rng[2])))
+  ramp_info <- .density_ramp(cells$n_units)
+  lvls <- ramp_info$levels
 
-  feats <- lapply(seq_len(nrow(cells)), function(i) {
-    props <- list(h3 = cells$h3[i] %||% "")
-    # PERF-36: DuckDB bbox rides along when the cell geometry frame has it.
-    if (all(c("xmin", "ymin", "xmax", "ymax") %in% names(cells))) {
-      props$bbox <- as.numeric(c(cells$xmin[i], cells$ymin[i],
-                                 cells$xmax[i], cells$ymax[i]))
-    }
-    list(geom_json = cells$geom[i], props = props)
-  })
+  bounds <- NULL
+  if (all(c("xmin", "ymin", "xmax", "ymax") %in% names(cells))) {
+    bounds <- c(
+      min(cells$xmin, na.rm = TRUE), min(cells$ymin, na.rm = TRUE),
+      max(cells$xmax, na.rm = TRUE), max(cells$ymax, na.rm = TRUE)
+    )
+  }
 
-  bounds <- .geojson_bounds(list(features = feats))
-  cols   <- col_of(cells$n_units)
+  # Classify each cell into its bin: findInterval against the bin edges
+  # (the first edge is the thin/occupied boundary at 1), shifted by one
+  # level when the pale "< 1" bin exists.
+  fi <- findInterval(cells$n_units, ramp_info$cuts)
+  v <- lvls[pmin(length(lvls), fi + as.integer(ramp_info$thin))]
 
-  props_json <- paste0(
-    '{"h3":',    .json_vec(.prop_col(feats, "h3")),
-    ',"bbox":',  .bbox_frag(feats),
-    ',',         .feature_style_frag(cols, stroke = FALSE),
-    '}'
-  )
-  geoms <- vapply(feats, function(f) f$geom_json, character(1))
-
-  # The legend ramp samples this palette across the domain, so both are given
-  # on the count scale; `col_of()` applies the log internally. `mid` is the
-  # count that actually lands halfway along the ramp.
-  list(
-    fc     = .geojson_fc_string(geoms, props_json, ids = seq_along(feats)),
+  payload <- hexmap_payload(
+    h3     = cells$h3,
+    v      = v,
+    v_kind = "binned",
+    stops  = list(levels = lvls, colors = ramp_info$colors),
     bounds = bounds,
-    pal_info = list(
-      pal    = function(v) col_of(v),
-      domain = rng,
-      mid    = exp(mean(log(rng))),
-      # Evenly spaced along the log ramp, so the legend bar shows the same
-      # colour progression the cells do.
-      stops  = exp(seq(log(rng[1]), log(rng[2]), length.out = 9))
+    label  = paste0(.capitalise(unit_label), " per cell")
+  )
+
+  pal <- setNames(ramp_info$colors, lvls)
+  list(
+    payload = payload,
+    legend = list(
+      pal_info = list(pal = function(l) unname(pal[as.character(l)])),
+      binned   = TRUE,
+      levels   = lvls,
+      title    = paste0(.capitalise(unit_label), " per area"),
+      info     = .density_legend_info(unit_label)
     )
   )
-}
-
-
-#' Heatmap of sampled units per H3 cell
-#'
-#' Draws one filled hexagon per cell, shaded by the number of sampled units
-#' allocated to it by `allocate_units_to_cells()`. Cells tile the plane, so
-#' unlike the location-outline map nothing overlaps and dense areas read
-#' directly off the colour.
-#'
-#' @param cells     Data frame with `h3`, `geom` (a GeoJSON geometry string)
-#'   and `n_units`.
-#' @param unit_label Plural noun for what a row of the survey is, e.g.
-#'   `"households"`.
-#'
-#' @return A `leaflet` widget, or `NULL` invisibly when there is
-#'   nothing to draw.
-#'
-#' @export
-plot_sample_density_map <- function(cells, unit_label = "households") {
-  fc <- .sample_density_fc(cells)
-  if (is.null(fc)) return(invisible(NULL))
-
-  # One GeoJSON layer carrying a per-feature colour via properties.style -
-  # with a continuous ramp almost every cell has its own colour, and the old
-  # one-layer-per-shade grouping created a thousand separate layers.
-  m <- .basemap() |>
-    .add_geojson_layer(
-      fc_string = fc$fc,
-      layer_id  = "density-cells",
-      stroke    = FALSE,
-      # Same-colour hairline outline kills the anti-aliasing seams between
-      # edge-to-edge cells - omitted here; the ramp fills read fine and a
-      # per-cell outline doubles the paint cost at country zooms.
-      fill_opacity = 0.75
-    )
-
-  m <- m |>
-    leaflet::fitBounds(
-      lng1 = fc$bounds$lng1, lat1 = fc$bounds$lat1,
-      lng2 = fc$bounds$lng2, lat2 = fc$bounds$lat2
-    ) |>
-    .add_reset_button(fc$bounds) |>
-    htmlwidgets::onRender(.map_autofit_js(fc$bounds))
-
-  # The legend ramp samples this palette across the domain, so both are given
-  # on the count scale; the helper applies the log internally.
-  m |>
-    leaflet::addControl(
-      position = "bottomright",
-      html = .compact_legend_html(
-        pal_info = fc$pal_info,
-        binned   = FALSE,
-        title    = paste0(.capitalise(unit_label), " per area"),
-        info     = paste0(
-          "Number of sampled ", unit_label, " in each hexagon. Every ",
-          sub("s$", "", unit_label), " is placed in exactly one hexagon: a",
-          " location's ", unit_label, " are assigned across the cells it",
-          " covers in proportion to their 2020 population, then rolled up to",
-          " this display grid - so an area covered by many overlapping survey",
-          " locations accumulates all of them, and the totals match the",
-          " sample exactly. Colour runs on a log scale because a handful of",
-          " urban areas would otherwise flatten everything else."
-        )
-      )
-    )
 }
 
 

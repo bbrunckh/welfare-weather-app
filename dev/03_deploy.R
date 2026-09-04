@@ -70,37 +70,38 @@ rsconnect::writeManifest(
   appPrimaryDoc = "app.R"
 )
 
-## IMPORTANT (2026-09-02, MapLibre rollback): after every writeManifest() run,
-## re-strip "sf" from manifest.json. The Connect host cannot build sf
-## (GDAL 3.10.2 headers exist but the runtime libgdal.so.36 is missing, so
-## configure fails; see the 2026-09-02 deploy incident). It is safe to drop sf
-## because nothing in the executed app loads it:
-##   - leaflet lists sf (>= 0.9-6) in Imports, but its NAMESPACE only
-##     registers S3 methods for sf classes (no import(sf)), so the package
-##     loads fine without sf installed;
-##   - the mapgl/vector-basemap experiment was rolled back to leaflet for
-##     exactly this reason: mapgl hard-Imports sf/terra/geojsonsf in both
-##     DESCRIPTION and NAMESPACE (import(sf)/import(terra)/import(geojsonsf)),
-##     which made the sf strip fatal for mapgl -- and per-feature styles are
-##     available on leaflet via feature.properties.style anyway, so the
-##     one-layer-per-map rendering survives the rollback.
-##   - batch/ scripts do use sf but batch/ is excluded from appFiles.
-## geojsonsf, classInt and the other mapgl-only deps drop out of the dep scan
-## automatically once mapgl leaves DESCRIPTION Imports. terra STAYS: raster
-## (a leaflet dependency) requires it and terra builds without GDAL.
+## IMPORTANT (updated 2026-09-03, Leaflet removal): re-run writeManifest()
+## whenever dependencies or the shipped file set change, and commit the diff.
+## The dependency scan no longer includes sf at all: it only entered the
+## manifest as a leaflet dependency, and leaflet left DESCRIPTION Imports
+## when the Leaflet fallback was removed (the maps are MapLibre-only, with
+## vendored inst/app/www/vendor/ assets that ship inside inst/). The strip
+## below stays as a harmless safety net for stale manifests.
+##
+## GOTCHA (2026-09-03): if a stale wiseapp INSTALL is present in the local
+## library (from the Leaflet era), the scan resolves `wiseapp` from the
+## installed DESCRIPTION -- re-importing leaflet/sf/raster/terra into the
+## manifest even though the source DESCRIPTION is clean. Uninstall it first
+## (remove.packages("wiseapp")); the app runs via pkgload::load_all() both
+## locally and on Connect, so an install is never needed.
+## SUGGESTS ARE SWEPT (2026-09-03): writeManifest() includes every package in
+## the app DESCRIPTION's Suggests field, plus their dependency closures. Keep
+## Suggests to runtime-optional features only (model backends parsnip /
+## ranger / xgboost live in Imports now); dev/test-only packages (covr,
+## testthat, arrow, bit64, spelling) were dropped so they leave the manifest.
 m <- jsonlite::fromJSON("manifest.json", simplifyVector = FALSE)
-stopifnot(!is.null(m$packages[["sf"]]))
 m$packages[["sf"]] <- NULL
 jsonlite::write_json(m, "manifest.json", auto_unbox = TRUE, pretty = TRUE, null = "null")
 ## Verify before committing:
-##   jq -r '.packages | has("sf")' manifest.json          ->  false
-##   jq -r '.packages | has("mapgl")' manifest.json       ->  false
-##   jq -r '.packages | has("brand.yml")' manifest.json   ->  true
+##   jq -r '.packages | has("sf")' manifest.json           ->  false
+##   jq -r '.packages | has("leaflet")' manifest.json      ->  false
+##   jq -r '.packages | has("mapgl")' manifest.json        ->  false
+##   jq -r '.packages | has("brand.yml")' manifest.json    ->  true
 ##
 ## If the Connect admins later install the GDAL runtime (libgdal.so.36 +
-## proj/geos) or we ever re-attempt a mapgl/deck.gl migration, the sf entry
-## must come back -- and mapgl additionally needs terra and geojsonsf, with
-## no possibility of stripping (see the 2026-08-28 review report history).
+## proj/geos), sf may re-enter the manifest through any future dependency
+## that Imports it -- re-check the strip then. The 2026-08-28 mapgl/deck.gl
+## experiment history is in the review report §10.1.
 ##
 ## NOTE: keep brand.yml in DESCRIPTION Imports. The static dependency scan
 ## cannot see it (bslib loads it dynamically for bs_theme(brand = ...)), so a

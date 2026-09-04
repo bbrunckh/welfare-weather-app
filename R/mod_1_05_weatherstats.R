@@ -27,9 +27,6 @@ mod_1_05_weatherstats_ui <- function(id) {
 #'   from `mod_1_04_weather_server()`, bounding the historical comparison.
 #'   Defaults to 1991-2020 when not supplied.
 #' @param survey_data      Reactive data frame of loaded survey observations.
-#' @param map_data         Reactive GeoJSON FeatureCollection of survey
-#'   locations from `mod_1_02_surveystats_server()`. Optional - the
-#'   weather-by-location maps are skipped when it is `NULL`.
 #' @param cell_data        Reactive list of `geom` (H3 cell geometry) and
 #'   `map` (location-to-cell mapping) from `mod_1_02_surveystats_server()`.
 #'   When present, values are merged onto H3 cells so overlapping survey
@@ -48,7 +45,6 @@ mod_1_05_weatherstats_server <- function(
     selected_weather,
     hist_years = NULL,
     survey_data,
-    map_data = NULL,
     cell_data = NULL,
     survey_version = reactive(0L),
     tabset_id,
@@ -688,13 +684,6 @@ mod_1_05_weatherstats_server <- function(
     cd
   })
 
-  wxmap_features <- reactive({
-    cd <- wxmap_cells()
-    if (is.null(cd)) return(if (is.null(map_data)) NULL else map_data())
-    build_cell_features(cd$geom, cd$map) %||%
-      (if (is.null(map_data)) NULL else map_data())
-  })
-
   # Per-location values, merged onto cells when cell geometry is in use.
   to_cells <- function(lv) {
     cd <- wxmap_cells()
@@ -776,7 +765,7 @@ mod_1_05_weatherstats_server <- function(
 
   # One map per weather variable, not per variable x wave. A wave is picked
   # above the maps instead: a country with several waves and two variables
-  # would otherwise stand up a leaflet widget for every combination, and they
+  # would otherwise stand up a chart for every combination, and they
   # all render whether or not anyone looks at them. This is the same
   # arrangement the survey-stats and outcome-coverage maps already use.
   wxmap_id <- function(i) paste0("wxmap_", i)
@@ -825,27 +814,22 @@ mod_1_05_weatherstats_server <- function(
     }
   }, ignoreNULL = FALSE)
 
-  # Per-map view memory, so switching view keeps the pan and zoom.
-  wxmap_view_mem <- new.env(parent = emptyenv())
-
-  # One output per weather variable. The palette is still built across *all*
-  # waves, so the colour scale does not shift under the user when they change
-  # wave - the whole point of the picker is to compare them.
-  observe({
+  # Shared palettes: built across all waves so the colour scale does not
+  # shift under the user when they change wave - the whole point of the
+  # picker is to compare them.
+  wxmap_pals <- shiny::reactive({
     lv_list <- weather_loc_vals()
-    req(lv_list)
+    if (is.null(lv_list)) return(NULL)
     sw   <- wx_spec_sw()
     view <- wxmap_view()
-
-    for (i in seq_along(lv_list)) {
+    lapply(seq_along(lv_list), function(i) {
       lv <- lv_list[[i]]
-      if (is.null(lv)) next
-
+      if (is.null(lv)) return(NULL)
       tf <- if ("transformation" %in% names(sw)) sw$transformation[i] else "None"
 
       # A difference is diverging around zero whatever the variable's own
       # configuration; a percentile is a fixed 0-100 scale.
-      pal <- switch(
+      switch(
         view,
         anomaly = .weather_map_palette(lv$value, FALSE, NULL, tf,
                                        force = "diverging"),
@@ -855,50 +839,106 @@ mod_1_05_weatherstats_server <- function(
         .weather_map_palette(lv$value, isTRUE(attr(lv, "binned")),
                              attr(lv, "levels"), tf)
       )
+    })
+  })
 
-      local({
-        .lv    <- lv
-        .pal   <- pal
-        .tf    <- tf
-        .label <- sw$label[i]
-        .info  <- wxmap_label(sw$label[i])
-        .short <- wxmap_short(sw$label[i])
-        .id    <- wxmap_id(i)
+  # One variable's merged rows for the wave on screen.
+  wxmap_sub <- function(i) {
+    lv  <- weather_loc_vals()[[i]]
+    key <- wxmap_wave()
+    if (is.null(lv) || is.null(key)) return(NULL)
+    sub <- lv[paste(lv$code, as.character(lv$year), lv$survname,
+                    sep = "|") == key, , drop = FALSE]
+    if (nrow(sub) == 0) return(NULL)
+    attr(sub, "binned") <- attr(lv, "binned")
+    attr(sub, "levels") <- attr(lv, "levels")
+    sub
+  }
 
-        if (is.null(wxmap_view_mem[[.id]])) {
-          wxmap_view_mem[[.id]] <- map_view_memory(
-            input, session, .id,
-            # A weather reload can change the geography on screen; a wave or
-            # view switch within one load keeps the user's view.
-            key = shiny::reactive(digest::digest(list(wx_spec(), .id)))
-          )
-          wxmap_view_mem[[.id]]$remember()
+  # ---- MapLibre payload stream (one hex map per weather variable) ----------
+  # One output per weather variable. The palette is built across *all* waves
+  # (above), so the colour scale does not shift under the user when they
+  # change wave. The payload carries cell ids and values only, and the
+  # browser applies colour. The camera is fitted only when the data key
+  # changes (PERF-36 view-key semantics), so a wave or view toggle
+  # re-colours in place and the user's pan/zoom survives.
+  wxmap_lgd  <- shiny::reactiveValues()
+  wxmap_keys <- shiny::reactiveValues()
+
+  observe({
+    lv_list <- tryCatch(weather_loc_vals(), error = function(e) NULL)
+    sw      <- tryCatch(wx_spec_sw(), error = function(e) NULL)
+    if (is.null(lv_list) || is.null(sw)) return()
+    pals <- wxmap_pals()
+    cd   <- wxmap_cells()
+    wave <- wxmap_wave()
+    view <- wxmap_view()
+
+    n <- max(length(lv_list), nrow(sw) %||% 0L)
+    for (i in seq_len(n)) {
+      id <- wxmap_id(i)
+
+      cmap <- if (!is.null(cd) && !is.null(wave)) {
+        filter_by_wave(cd$map, wave)
+      } else NULL
+      sub <- if (!is.null(cmap) && nrow(cmap) > 0) {
+        wxmap_sub(i)
+      } else NULL
+      pl <- if (!is.null(sub) && !is.null(pals[[i]])) {
+        .weather_hex_payload(cd$geom, cmap, sub, pals[[i]])
+      } else NULL
+
+      if (is.null(pl)) {
+        hexmap_clear(session, ns, id)
+        wxmap_lgd[[id]] <- NULL
+      } else {
+        hexmap_update(session, ns, id, pl$payload)
+        key <- digest::digest(list(wx_spec(), id, wave, view,
+                                   sort(unique(cmap$h3))))
+        if (!identical(key, wxmap_keys[[id]])) {
+          hexmap_fit(session, ns, id, pl$payload$bounds)
+          wxmap_keys[[id]] <- key
         }
-        .mem <- wxmap_view_mem[[.id]]
+        wxmap_lgd[[id]] <- list(
+          legend = pl$legend,
+          title  = wxmap_short(sw$label[i]),
+          info   = wxmap_label(sw$label[i])
+        )
+      }
+    }
+  })
 
-        output[[.id]] <- leaflet::renderLeaflet({
-          gj <- wxmap_features()
-          req(gj)
-          key <- wxmap_wave()
-          req(key)
+  # Map surface per weather variable: a MapLibre hex map. Legends are
+  # rebuilt R-side from the same palette state as the payloads
+  # (`.compact_legend_html()`), positioned by hexmap_ui().
+  observe({
+    sw <- tryCatch(wx_spec_sw(), error = function(e) NULL)
+    if (is.null(sw)) return()
+    for (i in seq_len(nrow(sw))) {
+      local({
+        .i   <- i
+        .id  <- wxmap_id(i)
+        .lab <- sw$label[i]
 
-          sub <- .lv[paste(.lv$code, as.character(.lv$year), .lv$survname,
-                           sep = "|") == key, , drop = FALSE]
-          req(nrow(sub) > 0)
-          attr(sub, "binned") <- attr(.lv, "binned")
-          attr(sub, "levels") <- attr(.lv, "levels")
-
-          m <- plot_weather_loc_map(
-            geojson        = gj,
-            loc_vals       = sub,
-            label          = .label,
-            transformation = .tf,
-            pal_info       = .pal,
-            legend_title   = .short,
-            legend_info    = .info
+        output[[paste0(.id, "_surface")]] <- shiny::renderUI({
+          hexmap_ui(
+            ns(.id),
+            height     = "100%",
+            aria_label = paste("Map of", .lab, "across hexagonal area cells"),
+            legend     = shiny::uiOutput(ns(paste0(.id, "_lgd")))
           )
-          req(!is.null(m))
-          .mem$restore(m)
+        })
+        output[[paste0(.id, "_lgd")]] <- shiny::renderUI({
+          lgd <- wxmap_lgd[[.id]]
+          shiny::req(!is.null(lgd))
+          html <- .compact_legend_html(
+            pal_info = lgd$legend$pal_info,
+            binned   = lgd$legend$binned,
+            levels   = lgd$legend$levels,
+            title    = lgd$title,
+            info     = lgd$info
+          )
+          htmltools::HTML(paste0(html, lgd$legend$notes))
         })
       })
     }
@@ -931,7 +971,7 @@ mod_1_05_weatherstats_server <- function(
   })
 
   output$weather_map_layout <- shiny::renderUI({
-    if (is.null(wxmap_features())) {
+    if (is.null(wxmap_cells())) {
       return(shiny::helpText(
         "Location map data is not available for this sample.",
         style = "font-size: 12px;"
@@ -973,7 +1013,9 @@ mod_1_05_weatherstats_server <- function(
           if (is.na(wave_label)) sw$label[i] else
             paste0(sw$label[i], " - ", wave_label)
         ),
-        leaflet::leafletOutput(ns(wxmap_id(i)), height = "100%")
+        # The MapLibre hex map (surface renderUI per variable above).
+        shiny::uiOutput(ns(paste0(wxmap_id(i), "_surface"))) |>
+          bslib::as_fill_carrier()
       )
     })
 
