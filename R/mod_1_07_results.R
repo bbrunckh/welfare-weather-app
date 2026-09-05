@@ -92,10 +92,13 @@ mod_1_07_results_server <- function(id,
       if (isTRUE(stale())) .stale_banner("Step 1 model results") else NULL
     })
 
-    # REACT-14: persistent provenance banner for specification fallbacks
+    # REACT-14: persistent banner disclosing specification fallbacks
     # (logistic -> linear, clustered -> unclustered VCV) recorded by
     # fit_model(). The results below come from the fitted specification, so
-    # the deviation from the requested one must stay visible.
+    # the deviation from the requested one must stay visible. This is a
+    # correctness disclosure and stays on screen; the descriptive run
+    # provenance it used to sit beside now travels with the export bundle
+    # instead (see fct_provenance.R).
     output$fallback_banner <- renderUI({
       fb <- model_fit_val()$fallbacks %||% list()
       if (!length(fb)) return(NULL)
@@ -226,6 +229,73 @@ mod_1_07_results_server <- function(id,
       sw_snap    <- snap$weather
       outcome_snap <- snap$outcome
 
+      # UI-48: one builder per figure, used by both renderPlot and the export
+      # bundle - a downloaded PNG is the plot on screen, not a re-derivation
+      # of it. Registered inside this observer so each re-fit refreshes the
+      # closure (and with it the fit-time snapshot the figure is drawn from);
+      # `wise_export_register()` replaces by key, so re-fits cannot accumulate
+      # duplicate entries.
+      coef_fig <- function(i) function() {
+        mf <- tryCatch(model_fit_val(), error = function(e) NULL)
+        if (is.null(mf) || length(mf$weather_terms) < i) return(NULL)
+        make_coefplot(
+          fit1              = extract_native_fit(mf$fit1, mf$engine),
+          fit2              = extract_native_fit(mf$fit2, mf$engine),
+          fit3              = extract_native_fit(mf$fit3, mf$engine),
+          weather_terms     = mf$weather_terms,
+          interaction_terms = mf$interaction_terms,
+          outcome_label     = outcome_snap$label,
+          label_fun         = label_fun,
+          engine            = mf$engine,
+          rif_grid          = mf$rif_grid,
+          pred_var          = mf$weather_terms[i]
+        )
+      }
+
+      effect_fig <- function(i) function() {
+        mf <- tryCatch(model_fit_val(), error = function(e) NULL)
+        if (is.null(mf) || length(mf$weather_terms) < i) return(NULL)
+        make_weather_effect_plot(
+          fit               = native_fit(mf$fit3),
+          pred_var          = mf$weather_terms[i],
+          interaction_terms = mf$interaction_terms,
+          is_binned         = identical(sw_snap$cont_binned[i], "Binned"),
+          label_fun         = label_fun,
+          engine            = mf$engine,
+          selected_weather  = sw_snap,
+          weather_df        = snap$survey_weather,
+          rif_grid          = mf$rif_grid
+        )
+      }
+
+      for (i in seq_along(mf$weather_terms)) local({
+        idx  <- i
+        term <- label_fun(mf$weather_terms[idx])
+        wise_export_figure(
+          key   = paste0("coefficient_plot_", idx),
+          label = paste0("Coefficient plot - ", term),
+          step  = 1L,
+          fun   = coef_fig(idx),
+          description = paste0(
+            "Weather coefficients with confidence intervals across the three ",
+            "nested specifications, for ", term, ". Outcome: ",
+            outcome_snap$label, "."
+          ),
+          width = 9, height = 6
+        )
+        wise_export_figure(
+          key   = paste0("marginal_effect_plot_", idx),
+          label = paste0("Marginal effect - ", term),
+          step  = 1L,
+          fun   = effect_fig(idx),
+          description = paste0(
+            "Predicted welfare across the observed range of ", term,
+            " from the full specification (fixed effects and controls)."
+          ),
+          width = 9, height = 6
+        )
+      })
+
       # RIF coefficient plots: one per weather variable
       output$coefplot1 <- renderPlot({
         req(model_fit_val(), length(model_fit_val()$weather_terms) >= 1)
@@ -277,6 +347,38 @@ mod_1_07_results_server <- function(id,
           rif_grid          = mf$rif_grid
         )
       })
+
+      # UI-45: the coefficient table is presentation HTML, so its export goes
+      # through a tidy data frame of the same estimates rather than scraping
+      # the rendered markup.
+      regtable_df <- function() {
+        mf <- tryCatch(model_fit_val(), error = function(e) NULL)
+        if (is.null(mf)) return(NULL)
+        make_regtable_df(
+          fit1 = extract_native_fit(mf$fit1, mf$engine),
+          fit2 = extract_native_fit(mf$fit2, mf$engine),
+          fit3 = extract_native_fit(mf$fit3, mf$engine),
+          engine    = mf$engine,
+          rif_grid  = mf$rif_grid,
+          label_fun = label_fun
+        )
+      }
+
+      output$regtable_csv <- csv_download_handler("model_coefficients",
+                                                  regtable_df)
+
+      # UI-48: the same estimates go into the export bundle.
+      wise_export_table(
+        key   = "model_coefficients",
+        label = "Model coefficients",
+        step  = 1L,
+        fun   = regtable_df,
+        description = paste(
+          "Coefficients, standard errors and p-values for all three nested",
+          "specifications (weather only; + fixed effects; + fixed effects and",
+          "controls). One row per specification and term."
+        )
+      )
 
 
       # Marginal effects plots (one per weather variable)
@@ -399,7 +501,8 @@ mod_1_07_results_server <- function(id,
               style = "display:flex; justify-content:center;",
               shiny::div(
                 style = "overflow-x: auto; max-width: 100%;",
-                shiny::uiOutput(ns("regtable"))
+                shiny::uiOutput(ns("regtable")),
+                csv_download_link(ns("regtable_csv"))
               )
             )
           ),

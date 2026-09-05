@@ -320,6 +320,28 @@ mod_2_03_diagnostics_server <- function(id,
     }) |> shiny::bindEvent(input$diag_update_weather, hist_sim(),
                            ignoreNULL = TRUE, ignoreInit = FALSE)
 
+    # UI-48: Step 2 diagnostic figures for the export bundle.
+    wise_export_figure(
+      key   = "simulation_variance_contribution",
+      label = "Variance contribution by source",
+      step  = 2L,
+      fun   = function() {
+        vb <- tryCatch(variance_breakdown(), error = function(e) NULL)
+        if (is.null(vb) || !nrow(vb)) return(NULL)
+        active <- tryCatch(active_scenarios_data(), error = function(e) character(0))
+        if (length(active) > 0L) {
+          vb <- vb[vb$is_historical | vb$scenario %in% active, , drop = FALSE]
+        }
+        if (!nrow(vb)) return(NULL)
+        plot_variance_contribution(vb)
+      },
+      description = paste(
+        "How much of the simulated welfare variance comes from each source",
+        "(weather, coefficients, residuals, inter-model spread)."
+      ),
+      width = 9, height = 6
+    )
+
     output$variance_contribution_plot <- renderPlot({
       req(variance_breakdown)
       vb <- variance_breakdown()
@@ -376,21 +398,26 @@ mod_2_03_diagnostics_server <- function(id,
         if ("label" %in% names(sw)) setNames(sw$name, sw$label) else sw$name
       } else character(0)
 
-      shiny::appendTab(
-        inputId = tabset_id,
-        shiny::tabPanel(
-          title = "Diagnostics",
-          value = "diag_tab",
-          mod_2_03_diagnostics_ui(sub("-$", "", session$ns("")))
-        ),
-        select  = FALSE,
-        session = tabset_session
-      )
+      # UI-50: one Diagnostics tab, not one per Step 2 run. The tab's contents
+      # are a module UI bound to fixed output ids, so an already-present tab
+      # needs no rebuild - only its weather choices refreshed below.
+      if (!diag_tab_added()) {
+        shiny::appendTab(
+          inputId = tabset_id,
+          shiny::tabPanel(
+            title = "Diagnostics",
+            value = "diag_tab",
+            mod_2_03_diagnostics_ui(sub("-$", "", session$ns("")))
+          ),
+          select  = FALSE,
+          session = tabset_session
+        )
+        diag_tab_added(TRUE)
+      }
 
       shiny::updateSelectInput(session, "diag_weather_vars",
                                choices  = choices,
                                selected = choices[seq_len(min(2, length(choices)))])
-      diag_tab_added(TRUE)
     }, ignoreInit = TRUE, ignoreNULL = FALSE)
 
     observeEvent(selected_weather(), {

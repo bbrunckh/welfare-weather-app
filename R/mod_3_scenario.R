@@ -51,6 +51,7 @@ mod_3_scenario_ui <- function(id) {
         )
       ),
       hr(),
+      uiOutput(ns("run3_prereq_ui")),
       uiOutput(ns("run_policy_sim_ui"))
     ),
     h4("How could policy and structural adjustments mitigate the welfare impacts of weather?",
@@ -180,7 +181,10 @@ mod_3_scenario_server <- function(id,
       selected_outcome = selected_outcome,
       survey_weather   = survey_weather,
       variable_list    = variable_list,
-      analysis_unit    = analysis_unit
+      analysis_unit    = analysis_unit,
+      # UI-32: the reach preview must estimate over the same survey the policy
+      # run consumes (Step 2's baseline round), not the full multi-round frame.
+      hist_sim         = hist_sim
     )
 
     # ---- Infrastructure scenario -----------------------------------------
@@ -311,16 +315,48 @@ mod_3_scenario_server <- function(id,
       )
     })
 
-    # REACT-02: keep the button disabled while the policy simulation runs.
-    observeEvent(s6$running(), {
+    # ---- Run-button prerequisites (UI-44) --------------------------------
+    # The policy run needs a Step 1 fit and a Step 2 simulation. Those were
+    # only discovered inside run(), where an unmet upstream req() made the
+    # click a silent no-op; name them here, before the click.
+    run3_prereqs_missing <- reactive({
+      missing <- character(0)
+      mf <- tryCatch(model_fit(),        error = function(e) NULL)
+      hs <- tryCatch(hist_sim(),         error = function(e) NULL)
+      sw <- tryCatch(selected_weather(), error = function(e) NULL)
+      if (is.null(sw) || nrow(as.data.frame(sw)) == 0)
+        missing <- c(missing, "weather variables (Step 1)")
+      if (is.null(mf))
+        missing <- c(missing, "a fitted model (Step 1)")
+      if (is.null(hs))
+        missing <- c(missing, "a historical simulation (Step 2)")
+      missing
+    })
+
+    output$run3_prereq_ui <- renderUI({
+      missing <- run3_prereqs_missing()
+      if (!length(missing)) return(NULL)
+      div(
+        class = "alert alert-warning",
+        role  = "alert",
+        style = "font-size: 13px; margin-bottom: 4px;",
+        tags$b("Prerequisites: "), "you still need ",
+        paste(missing, collapse = ", "), " to run a policy simulation."
+      )
+    })
+
+    # REACT-02: keep the button disabled while the policy simulation runs,
+    # and while a prerequisite is missing.
+    observe({
+      blocked <- isTRUE(s6$running()) || length(run3_prereqs_missing()) > 0
       tryCatch(
         shiny::updateActionButton(
           session, inputId = "run_policy_sim",
-          disabled = isTRUE(s6$running())
+          disabled = blocked
         ),
         error = function(e) NULL
       )
-    }, ignoreInit = TRUE)
+    })
 
     # ---- Run policy simulation on button click ---------------------------
     # REACT-09: handled by the run_trigger reactive passed to the child.
@@ -329,7 +365,10 @@ mod_3_scenario_server <- function(id,
 
     list(
       policy_hist_sim        = s6$policy_hist_sim,
-      policy_saved_scenarios = s6$policy_saved_scenarios
+      policy_saved_scenarios = s6$policy_saved_scenarios,
+      # UI-47: consumed by the navbar step badge in app_server.
+      stale                  = s6$stale,
+      sim_run_id             = s6$sim_run_id
     )
   })
 }

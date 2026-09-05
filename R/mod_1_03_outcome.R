@@ -207,6 +207,31 @@ mod_1_03_outcome_server <- function(id, variable_list, survey_data,
       # Define outputs (once)
       if (!outcome_tab_added()) {
 
+        outcome_dist_fig <- function() {
+          spec <- tryCatch(outcome_spec(), error = function(e) NULL)
+          od   <- tryCatch(outcome_data(), error = function(e) NULL)
+          if (is.null(spec) || is.null(od)) return(NULL)
+          inf <- spec$info
+          plot_welfare_dist(
+            od,
+            outcome = as.character(inf$name[1]),
+            label   = as.character(inf$label[1]),
+            type    = as.character(inf$type[1])
+          )
+        }
+
+        wise_export_figure(
+          key   = "outcome_distribution",
+          label = "Outcome distribution",
+          step  = 1L,
+          fun   = outcome_dist_fig,
+          description = paste(
+            "Distribution of the selected welfare outcome over the pooled",
+            "sample."
+          ),
+          width = 9, height = 6
+        )
+
         output$outcome_dist <- renderPlot({
           spec <- outcome_spec()
           req(outcome_data(), spec)
@@ -322,7 +347,9 @@ mod_1_03_outcome_server <- function(id, variable_list, survey_data,
           )
         })
 
-        output$outcome_summary_stats <- renderTable({
+        # UI-45: the table and its CSV export read one shared data frame, so
+        # the download can never drift from what is on screen.
+        outcome_summary_df <- reactive({
           spec <- outcome_spec()
           req(outcome_data(), spec)
           inf <- spec$info
@@ -379,7 +406,29 @@ mod_1_03_outcome_server <- function(id, variable_list, survey_data,
           }
 
           rbind(obs_rows, stat_rows)
-        }, striped = TRUE, hover = TRUE, bordered = TRUE)
+        })
+
+        output$outcome_summary_stats <- renderTable(
+          outcome_summary_df(),
+          striped = TRUE, hover = TRUE, bordered = TRUE
+        )
+
+        output$outcome_summary_csv <- csv_download_handler(
+          "outcome_summary_stats",
+          function() outcome_summary_df()
+        )
+
+        wise_export_table(
+          key   = "outcome_summary",
+          label = "Outcome summary statistics",
+          step  = 1L,
+          fun   = function() tryCatch(outcome_summary_df(),
+                                      error = function(e) NULL),
+          description = paste(
+            "Distribution of the selected welfare outcome over the pooled",
+            "sample: observations, coverage, mean, median, SD and percentiles."
+          )
+        )
 
         # Append tab
         tryCatch(
@@ -402,7 +451,8 @@ mod_1_03_outcome_server <- function(id, variable_list, survey_data,
                       "country and wave."
                     )
                   ),
-                  shiny::tableOutput(ns("outcome_summary_stats"))
+                  shiny::tableOutput(ns("outcome_summary_stats")),
+                  csv_download_link(ns("outcome_summary_csv"))
                 ),
                 # full_screen gives the card bslib's expand control; the map
                 # fills the card body in both states (see the height pairing

@@ -39,7 +39,7 @@ app_server <- function(input, output, session) {
 
   # ---- Step 3: policy scenarios --------------------------------------------
   # Pass selected Step 1 & 2 reactives
-  mod_3_scenario_server(
+  step3_api <- mod_3_scenario_server(
     id                = "step3",
     connection_params = overview_api$connection_params,
     selected_outcome  = step1_api$selected_outcome,
@@ -61,4 +61,59 @@ app_server <- function(input, output, session) {
     survey_version    = step1_api$survey_version,
     sim_stale         = step2_api$stale
   )
+
+  # ---- Navbar step status badges (UI-47) -----------------------------------
+  # Steps are freely navigable and results persist across tab switches, so the
+  # navbar is the one place that shows every step's state at once. Each badge
+  # reads the step's stored result plus its INT-08 stale flag, so it agrees
+  # with the in-page stale banner by construction: a check while the results
+  # match the current inputs, a reload arrow once an input has changed, and
+  # nothing at all before the step has been run.
+
+  output$step1_badge <- render_step_badge(
+    has_result = step1_api$model_fit,
+    is_stale   = step1_api$fit_stale,
+    step_label = "Step 1 (model)"
+  )
+
+  output$step2_badge <- render_step_badge(
+    has_result = step2_api$hist_sim,
+    is_stale   = step2_api$stale,
+    step_label = "Step 2 (climate scenarios)"
+  )
+
+  output$step3_badge <- render_step_badge(
+    has_result = step3_api$policy_hist_sim,
+    is_stale   = step3_api$stale,
+    step_label = "Step 3 (policy scenarios)"
+  )
+
+  # ---- Run provenance (UI-49) ----------------------------------------------
+  # One record per completed step, built from the immutable metadata stored
+  # with each result (`.snap` / `.sig`) rather than from live inputs - so it
+  # describes the run that produced the results, not whatever is selected now.
+  # The step banners and the export bundle's metadata read the same record.
+
+  run_provenance <- reactive({
+    cp <- read_connection_params(overview_api$connection_params)
+    Filter(Negate(is.null), list(
+      step1 = wise_provenance(1L, tryCatch(step1_api$model_fit(),
+                                           error = function(e) NULL),
+                              connection_params = cp),
+      step2 = wise_provenance(2L, tryCatch(step2_api$hist_sim(),
+                                           error = function(e) NULL),
+                              connection_params = cp),
+      step3 = wise_provenance(3L, tryCatch(step3_api$policy_hist_sim(),
+                                           error = function(e) NULL),
+                              connection_params = cp)
+    ))
+  })
+
+  # ---- Export menu (UI-48) --------------------------------------------------
+  # Not a module: the configuration snapshot reads the *root* input object, so
+  # every module's namespaced controls are captured in one pass.
+
+  export_menu_server(input, output, session,
+                     provenance = run_provenance,
+                     seed = WISEAPP_DEFAULT_SEED)
 }

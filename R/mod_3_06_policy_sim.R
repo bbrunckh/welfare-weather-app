@@ -115,20 +115,29 @@ mod_3_06_policy_sim_server <- function(id,
       )
     }
 
-    .mark_stale_on_change <- function(observe_what) {
-      shiny::observeEvent(observe_what, {
+    # REACT-18: take the *reactive*, not its value. Passing `sp_scenario()`
+    # here handed the helper a promise; `observeEvent()` quotes the symbol
+    # `observe_what`, so the promise was forced on the observer's first run -
+    # registering the dependency once - and every later evaluation returned
+    # the cached value without re-registering it. The observer therefore fired
+    # exactly once per session and then went deaf, which is why changing a
+    # Step 3 lever never marked the policy results stale. Calling `react()`
+    # inside the quoted expression re-establishes the dependency on every
+    # invalidation.
+    .mark_stale_on_change <- function(react) {
+      shiny::observeEvent(react(), {
         bh <- baseline_hist_sim_rv()
         if (!is.null(bh) && !identical(.policy_sig_from_live(), bh$.sig))
           policy_stale(TRUE)
       }, ignoreInit = TRUE)
     }
-    .mark_stale_on_change(hist_sim())
-    .mark_stale_on_change(sp_scenario())
-    .mark_stale_on_change(infra_scenario())
-    .mark_stale_on_change(digital_scenario())
-    .mark_stale_on_change(labor_scenario())
-    .mark_stale_on_change(education_scenario())
-    .mark_stale_on_change(survey_version())
+    .mark_stale_on_change(hist_sim)
+    .mark_stale_on_change(sp_scenario)
+    .mark_stale_on_change(infra_scenario)
+    .mark_stale_on_change(digital_scenario)
+    .mark_stale_on_change(labor_scenario)
+    .mark_stale_on_change(education_scenario)
+    .mark_stale_on_change(survey_version)
     # Cascade: when Step 2 is stale (inputs changed, not yet re-run) the
     # policy results built on it are stale too.
     shiny::observeEvent(sim_stale(), {
@@ -147,27 +156,50 @@ mod_3_06_policy_sim_server <- function(id,
 
       sim_error(NULL)
 
-      mf  <- model_fit()
-      sw  <- selected_weather()
-      hs  <- hist_sim()
-      ss  <- saved_scenarios()
+      # REACT-17: these are upstream reactives that req() internally (e.g.
+      # selected_weather() on the Step 1 weather selector). An unmet req()
+      # used to propagate out of this function as a silent error, so the
+      # click produced no progress bar, no notification and no banner - a
+      # dead button with nothing to explain it. Read them defensively and
+      # turn every missing prerequisite into a message the user can act on.
+      .safe <- function(expr) tryCatch(expr, error = function(e) NULL)
+      mf  <- .safe(model_fit())
+      sw  <- .safe(selected_weather())
+      hs  <- .safe(hist_sim())
+      ss  <- .safe(saved_scenarios())
       # Use the exact survey that Step 2 used as the baseline. Step 2 may have
       # filtered survey_weather() to a single survey round (baseline_svy). The
       # Step 2 weather_raw was fetched against that filtered survey, so it
       # contains rows for all survey years in selected_surveys - joining the
       # FULL survey_weather() would pull in extra households from non-baseline
       # rounds and produce a systematically different aggregate.
-      svy <- hs$svy %||% survey_weather()
+      svy <- hs$svy %||% .safe(survey_weather())
 
-      if (is.null(svy)) {
-        sim_error(simpleError("Survey data not available."))
-        return(invisible(NULL))
+      .fail <- function(msg) {
+        sim_error(simpleError(msg))
+        shiny::showNotification(msg, type = "error", duration = 8)
+        invisible(NULL)
       }
-      if (is.null(mf) || is.null(hs)) {
-        sim_error(simpleError(
+
+      if (is.null(mf)) {
+        return(.fail(paste(
+          "No fitted model. Run the Step 1 model before simulating policy",
+          "scenarios."
+        )))
+      }
+      if (is.null(hs)) {
+        return(.fail(
           "Step 2 simulation must be run before policy simulation."
         ))
-        return(invisible(NULL))
+      }
+      if (is.null(sw)) {
+        return(.fail(paste(
+          "No weather variables selected. Configure them in Step 1 before",
+          "simulating policy scenarios."
+        )))
+      }
+      if (is.null(svy)) {
+        return(.fail("Survey data not available."))
       }
 
       tryCatch(
@@ -184,10 +216,28 @@ mod_3_06_policy_sim_server <- function(id,
             digital       = digital_scenario(),
             labor         = labor_scenario(),
             education     = education_scenario(),
-            model_vars    = model_term_names(selected_model()),
+            model_vars    = model_term_names(.safe(selected_model())),
             analysis_unit = analysis_unit(),
             seed          = WISEAPP_DEFAULT_SEED
           )
+
+          # A social-protection-only scenario changes nothing but the cash
+          # transfer column, which is deliberately excluded from the covariate
+          # deltas - so it is a perfectly valid run and must not be treated as
+          # "nothing configured". What is worth flagging is a scenario that is
+          # a literal no-op (every lever at its zero default): the run still
+          # goes ahead, but the policy arm will equal the baseline.
+          if (!.scenario_has_effect(svy, svy_mod)) {
+            shiny::showNotification(
+              paste(
+                "No policy change is configured - every lever is at zero, so",
+                "the policy results will match the baseline. Set a transfer",
+                "amount or budget under Social protection, or adjust another",
+                "lever."
+              ),
+              type = "warning", duration = 10
+            )
+          }
 
           shiny::withProgress(
             message = "Re-running simulations for baseline and policy...",
@@ -387,11 +437,19 @@ mod_3_06_policy_sim_server <- function(id,
     }
 
     # REACT-09: the parent requests a run by firing this trigger instead of
-    # calling the exported run() closure. ignoreInit + the parent's req() on
-    # the dynamically rendered button keep the trigger click-only.
+    # calling the exported run() closure.
+    #
+    # REACT-19: no `ignoreInit` here. The parent's `req()` already blocks both
+    # states that precede a real click - NULL while the button has not been
+    # rendered, and 0 once it has (an action button's 0 is not truthy). That
+    # made `ignoreInit` actively harmful: it skips the handler on the
+    # observer's first *successful* evaluation of the event expression, and
+    # because every earlier evaluation aborted on the unmet `req()`, the first
+    # successful one was the user's first click. Step 3 therefore ignored the
+    # first "Run simulation" and worked on every click after that.
     shiny::observeEvent(run_trigger(), {
       run()
-    }, ignoreInit = TRUE)
+    })
 
     list(
       running                  = sim_running,

@@ -19,7 +19,11 @@ mod_3_01_sp_ui <- function(id) {
     # ---- Collapsible configuration panel -------------------------------
     uiOutput(ns("sp_budget_amount_ui")),
     uiOutput(ns("sp_targeting_ui")),
-    uiOutput(ns("sp_timing_ui"))
+    uiOutput(ns("sp_timing_ui")),
+
+    # UI-32: live reach/cost of the configured scenario, so the targeting and
+    # transfer controls give feedback before a simulation is run.
+    uiOutput(ns("sp_reach_ui"))
   )
 }
 
@@ -60,7 +64,8 @@ mod_3_01_sp_server <- function(id,
                                 selected_outcome = reactive(NULL),
                                 survey_weather   = reactive(NULL),
                                 variable_list    = reactive(NULL),
-                                analysis_unit    = reactive("hh")) {
+                                analysis_unit    = reactive("hh"),
+                                hist_sim         = reactive(NULL)) {
   moduleServer(id, function(input, output, session) {
     ns <- session$ns
 
@@ -615,56 +620,166 @@ mod_3_01_sp_server <- function(id,
     #   )
     # })
 
+    # ---- Scenario specification ----------------------------------------
+    #
+    # UI-43: the whole module sits in a bslib accordion panel that starts
+    # collapsed, and hidden outputs are suspended - so none of these inputs
+    # existed until the user expanded "Social protection", and the scenario
+    # below silently fell back to the `%||%` defaults (including sp_type
+    # "shock", which is no longer one of the offered choices). Render them
+    # eagerly so an untouched panel still reports its real defaults.
+    lapply(c("sp_type_ui", "sp_budget_amount_ui",
+             "sp_targeting_ui", "sp_timing_ui"),
+           function(out_id) {
+             shiny::outputOptions(output, out_id, suspendWhenHidden = FALSE)
+           })
+
+    # One definition of the scenario, read by both the reach preview below and
+    # the module's return API - the preview cannot drift from what is run.
+    sp_scenario_spec <- reactive({
+      # "regular" is the only program type offered; treat an unreported
+      # input as that rather than as the retired "shock" branch.
+      sp_type_val <- input$sp_type %||% "regular"
+      is_regular  <- identical(sp_type_val, "regular")
+      list(
+        # program type
+        sp_type               = sp_type_val,
+        # Budget mode
+        budget_mode           = input$budget_mode             %||% "transfer_first",
+        # Default to 0 (not 1,000,000) so an un-touched budget can never
+        # accidentally apply a million-USD transfer if budget-first mode is
+        # selected before a budget is entered.
+        budget_fixed          = input$budget_fixed            %||% 0,
+        # Targeting
+        targeting             = input$targeting               %||% "exante_poor",
+        targeting_threshold   = input$targeting_threshold_pct %||% 20,
+        pmt_variable          = input$pmt_variable            %||% NA_character_,
+        pmt_cutoff            = input$pmt_cutoff              %||% NA_real_,
+        inclusion_error_pct   = input$inclusion_error_pct     %||% 10,
+        exclusion_error_pct   = input$exclusion_error_pct     %||% 10,
+        # Transfer amount
+        transfer_amount_usd   = input$transfer_amount_usd     %||% 0,
+        # Timing - regular programs always have n payments
+        transfer_frequency =
+          if (is_regular) "regular"
+          else input$transfer_frequency %||% "oneoff",
+        transfer_n_payments =
+          if (is_regular) input$transfer_n_payments %||% 6L
+          else input$transfer_n_payments %||% 1L,
+        transfer_timing =
+          if (is_regular) NA_character_
+          else input$transfer_timing %||% "expost",
+        timeliness_weeks =
+          if (is_regular) NA_integer_
+          else input$timeliness_weeks %||% 4L
+      )
+    })
+
+    # ---- Live reach / cost preview (UI-32) -----------------------------
+    #
+    # Answers "who does this reach and what does it cost?" while the user is
+    # still choosing a cutoff, instead of only after a full policy run. The
+    # figures come from `.sp_scenario_reach()`, which reuses the run's own
+    # eligibility function under the run's derived seed and the diagnostics
+    # tab's cost arithmetic - so this is the number the simulation will
+    # produce, not a separate approximation of it.
+
+    sp_reach <- reactive({
+      # The frame must be the one the policy run will use. Step 2 may have
+      # filtered survey_weather() down to a single baseline round; estimating
+      # over every round instead inflates both the eligible population and the
+      # cost, and shifts the welfare quantile that defines "ex-ante poor".
+      # This mirrors `svy <- hs$svy %||% survey_weather()` in mod_3_06.
+      hs  <- tryCatch(hist_sim(), error = function(e) NULL)
+      svy <- hs$svy %||% tryCatch(survey_weather(), error = function(e) NULL)
+      if (is.null(svy)) return(NULL)
+      r <- .sp_scenario_reach(
+        svy           = as.data.frame(svy),
+        sp            = sp_scenario_spec(),
+        analysis_unit = tryCatch(analysis_unit(), error = function(e) "hh")
+      )
+      if (is.null(r)) return(NULL)
+      # Record which frame these figures describe. Before Step 2 has run there
+      # is no baseline round to filter to, so the preview covers every survey
+      # round and will drop once Step 2 narrows it - worth saying, rather than
+      # letting the number appear to change on its own.
+      r$on_baseline <- !is.null(hs$svy)
+      r
+    })
+
+    output$sp_reach_ui <- renderUI({
+      r <- sp_reach()
+      if (is.null(r)) {
+        return(tags$div(
+          class = "sp-reach text-muted",
+          tags$i(class = "fa fa-circle-info me-1"),
+          "Load survey data in Step 1 to preview how many ",
+          unit_word(plural = TRUE), " this scenario reaches."
+        ))
+      }
+
+      unit_pl <- unit_word(plural = TRUE)
+      row <- function(label, value, hint = NULL) {
+        tags$div(
+          class = "sp-reach-row",
+          tags$span(class = "sp-reach-label", label),
+          tags$span(class = "sp-reach-value", value),
+          if (!is.null(hint))
+            tags$span(class = "sp-reach-hint", hint)
+        )
+      }
+
+      # Population counts only mean something when the survey carries weights;
+      # say which is being shown rather than passing a sample count off as a
+      # population figure.
+      count_hint <- if (isTRUE(r$weighted)) {
+        paste0("weighted to population; ", fmt_count(r$n_rows), " of ",
+               fmt_count(r$n_total), " sampled")
+      } else {
+        "unweighted sample count (survey carries no weights)"
+      }
+
+      cost_label <- if (isTRUE(r$budget_first))
+        "Total budget (annual)" else "Estimated cost (annual)"
+      per_label  <- paste0("Transfer per ",
+                           unit_word(plural = FALSE), " (annual)")
+
+      tags$div(
+        class = "sp-reach",
+        tags$div(
+          class = "sp-reach-title",
+          tags$i(class = "fa fa-bullseye me-1"),
+          "Scenario reach"
+        ),
+        row(paste("Eligible", unit_pl),
+            fmt_count(r$n_pop), count_hint),
+        row("Share of population",
+            fmt_num(r$share_pct, suffix = "%")),
+        row(per_label, fmt_num(r$transfer_per_unit, prefix = "$")),
+        row(cost_label, fmt_num(r$transfer_total, prefix = "$")),
+        if (isTRUE(r$transfer_total <= 0)) tags$div(
+          class = "sp-reach-note",
+          tags$i(class = "fa fa-triangle-exclamation me-1"),
+          "No transfer is configured yet, so this scenario would leave ",
+          "welfare unchanged."
+        ),
+        if (!isTRUE(r$on_baseline)) tags$div(
+          class = "sp-reach-note",
+          tags$i(class = "fa fa-circle-info me-1"),
+          "Covers every survey round. Once the Step 2 simulation has run, ",
+          "these figures narrow to its baseline round \u2014 the population ",
+          "the policy simulation actually costs."
+        )
+      )
+    })
+
+    # Rendered eagerly for the same reason as the panels above (UI-43).
+    shiny::outputOptions(output, "sp_reach_ui", suspendWhenHidden = FALSE)
+
     # ---- Return API ----------------------------------------------------
 
     list(
-      sp_scenario = reactive({
-        is_regular <- isTRUE(input$sp_type == "regular")
-        list(
-          # program type
-          sp_type               = input$sp_type                 %||% "shock",
-          # Trigger (shock only)
-          # trigger_type          = input$trigger_type            %||% "return_period",
-          # trigger_value         = input$trigger_value           %||% 10,
-          # Budget mode
-          budget_mode           = input$budget_mode             %||% "transfer_first",
-          # budget_type           = input$budget_type             %||% "fixed",
-          # Default to 0 (not 1,000,000) so an un-touched budget can never
-          # accidentally apply a million-USD transfer if budget-first mode is
-          # selected before a budget is entered.
-          budget_fixed          = input$budget_fixed            %||% 0,
-          # budget_share_pct      = input$budget_share_pct        %||% 50,
-          # Targeting
-          targeting             = input$targeting               %||% "exante_poor",
-          targeting_threshold   = input$targeting_threshold_pct %||% 20,
-          pmt_variable          = input$pmt_variable            %||% NA_character_,
-          pmt_cutoff            = input$pmt_cutoff              %||% NA_real_,
-          inclusion_error_pct   = input$inclusion_error_pct     %||% 10,
-          exclusion_error_pct   = input$exclusion_error_pct     %||% 10,
-          # Transfer amount
-          # amount_type           = input$amount_type             %||% "equal",
-          transfer_amount_usd   = input$transfer_amount_usd     %||% 0,
-          # Admin cost (deducted from budget before transfer calculation)
-          # admin_cost_pct        = input$admin_cost_pct          %||% 10,
-          # Timing - regular programs always have n payments
-          transfer_frequency =
-            if (is_regular) "regular"
-            else input$transfer_frequency %||% "oneoff",
-          transfer_n_payments =
-            if (is_regular) input$transfer_n_payments %||% 6L
-            else input$transfer_n_payments %||% 1L,
-          transfer_timing =
-            if (is_regular) NA_character_
-            else input$transfer_timing %||% "expost",
-          timeliness_weeks =
-            if (is_regular) NA_integer_
-            else input$timeliness_weeks %||% 4L
-          # Delivery
-          # delivery_mobile_money = isTRUE(input$delivery_mobile_money),
-          # Revenue source
-          # revenue_source = input$revenue_source %||% "govt_reallocation"
-        )
-      })
+      sp_scenario = sp_scenario_spec
     )
 
   })

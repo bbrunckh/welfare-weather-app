@@ -15,6 +15,205 @@
 SP_TRANSFER_COL <- ".wiseapp_sp_transfer"
 
 
+#' Population-level cost of an applied social-protection transfer
+#'
+#' The single implementation of the transfer arithmetic the Step 3 diagnostics
+#' tab reports. Reads the transfer column `apply_policy_to_svy()` wrote, so it
+#' cannot drift from what was actually applied.
+#'
+#' `SP_TRANSFER_COL` holds a *daily* amount, already divided by household size
+#' where welfare is per-capita (analysis unit "hh"). Multiplying back by
+#' `hhsize` recovers what a household receives; weighting and annualising then
+#' gives the population-level cost.
+#'
+#' @param svy_policy    Survey frame after `apply_policy_to_svy()`.
+#' @param analysis_unit `"hh"`, `"ind"` or `"firm"`.
+#'
+#' @return A named list: `total` (annual population cost), `per_unit` (annual
+#'   amount per recipient), `n_recipients` (sample rows receiving a transfer),
+#'   `n_recipients_weighted` (population equivalent) and `weighted` (whether
+#'   survey weights were used).
+#' @keywords internal
+.sp_transfer_totals <- function(svy_policy, analysis_unit = "hh") {
+  zero <- list(total = 0, per_unit = 0, n_recipients = 0L,
+               n_recipients_weighted = 0, weighted = FALSE)
+  if (is.null(svy_policy) || !is.data.frame(svy_policy) ||
+      !SP_TRANSFER_COL %in% names(svy_policy)) return(zero)
+
+  v <- suppressWarnings(as.numeric(svy_policy[[SP_TRANSFER_COL]]))
+
+  has_w <- "weight" %in% names(svy_policy)
+  w <- if (has_w) suppressWarnings(as.numeric(svy_policy$weight))
+       else rep(1, nrow(svy_policy))
+
+  # Undo the per-capita scaling apply_policy_to_svy() applied, guarding the
+  # same way it did so a missing or non-positive hhsize cannot turn the whole
+  # sum into NA.
+  hh <- if (identical(analysis_unit, "hh") && "hhsize" %in% names(svy_policy)) {
+    h <- suppressWarnings(as.numeric(svy_policy$hhsize))
+    h[!is.finite(h) | h <= 0] <- 1
+    h
+  } else {
+    rep(1, nrow(svy_policy))
+  }
+
+  ok <- is.finite(v) & is.finite(w)
+  if (!any(ok)) return(zero)
+
+  total <- sum(v[ok] * w[ok] * hh[ok]) * 365
+
+  elig <- ok & v > 0
+  per_unit <- if (any(elig) && sum(w[elig]) > 0) {
+    (sum(v[elig] * w[elig] * hh[elig]) / sum(w[elig])) * 365
+  } else 0
+
+  list(
+    total                 = total,
+    per_unit              = per_unit,
+    n_recipients          = sum(elig),
+    n_recipients_weighted = if (any(elig)) sum(w[elig]) else 0,
+    weighted              = has_w
+  )
+}
+
+
+#' Reach and cost of a social-protection scenario, before it is run
+#'
+#' UI-32: the targeting controls used to give no feedback until a full policy
+#' simulation had run, so picking a cutoff was guesswork. This answers "who
+#' does this reach, and what does it cost?" directly from the survey and the
+#' scenario.
+#'
+#' The numbers are the run's numbers, not an approximation of them, because
+#' this *is* the run's code path: `apply_policy_to_svy()` writes the transfer
+#' column exactly as a policy simulation would (same seed, so the same
+#' inclusion/exclusion error draws), and `.sp_transfer_totals()` is the single
+#' implementation of the arithmetic the diagnostics tab reports.
+#'
+#' The caller must pass the survey frame the *run* will use - Step 2 may have
+#' filtered `survey_weather()` down to one baseline round, and totals computed
+#' over every round instead would overstate both the eligible population and
+#' the cost.
+#'
+#' @param svy Survey frame the policy run will use (`hist_sim()$svy`, falling
+#'   back to `survey_weather()`). Needs `welfare`; `weight` and `hhsize` are
+#'   used when present.
+#' @param sp  Scenario list from `mod_3_01_sp_server()`.
+#' @param analysis_unit `"hh"`, `"ind"` or `"firm"`.
+#' @param seed Base seed; must match the one passed to `apply_policy_to_svy()`.
+#'
+#' @return A named list, or NULL when the survey cannot support the estimate:
+#'   \describe{
+#'     \item{n_rows}{Sample rows receiving a transfer.}
+#'     \item{n_total}{Sample rows in the survey.}
+#'     \item{n_pop}{Population-weighted recipient count (sample count when the
+#'       survey carries no weights).}
+#'     \item{share_pct}{Weighted recipient share of the population, 0-100.}
+#'     \item{weighted}{TRUE when survey weights were used.}
+#'     \item{transfer_per_unit}{Annual transfer per recipient.}
+#'     \item{transfer_total}{Annual population-level cost.}
+#'     \item{budget_first}{TRUE when the per-unit amount was derived from a
+#'       fixed budget rather than set directly.}
+#'   }
+#' @keywords internal
+.sp_scenario_reach <- function(svy, sp, analysis_unit = "hh",
+                               seed = WISEAPP_DEFAULT_SEED) {
+  if (is.null(svy) || is.null(sp) || !is.data.frame(svy) || nrow(svy) == 0) {
+    return(NULL)
+  }
+  if (!"welfare" %in% names(svy)) return(NULL)
+
+  # Run the real transfer application. Only `sp` is supplied, so no covariate
+  # lever touches the frame; the seed matches the run's, so eligibility -
+  # including the random inclusion/exclusion errors - is identical.
+  svy_mod <- tryCatch(
+    apply_policy_to_svy(svy, sp = sp, analysis_unit = analysis_unit,
+                        seed = seed),
+    error = function(e) NULL
+  )
+  if (is.null(svy_mod) || !SP_TRANSFER_COL %in% names(svy_mod)) return(NULL)
+
+  totals <- .sp_transfer_totals(svy_mod, analysis_unit)
+
+  # Eligibility is reported separately from receipt: a scenario with a zero
+  # transfer still targets a population, and saying "0 eligible" there would
+  # be misleading.
+  eligible <- withr::with_seed(
+    wise_seed(seed, "policy"),
+    tryCatch(.determine_sp_eligibility(svy, sp), error = function(e) NULL)
+  )
+  if (is.null(eligible) || length(eligible) != nrow(svy)) return(NULL)
+  eligible[is.na(eligible)] <- FALSE
+
+  w <- if ("weight" %in% names(svy)) suppressWarnings(as.numeric(svy$weight))
+       else rep(1, nrow(svy))
+  w[!is.finite(w) | w < 0] <- 0
+  weighted <- "weight" %in% names(svy) && sum(w) > 0
+  if (!weighted) w <- rep(1, nrow(svy))
+
+  w_elig  <- sum(w[eligible])
+  w_total <- sum(w)
+
+  list(
+    n_rows            = sum(eligible),
+    n_total           = nrow(svy),
+    n_pop             = w_elig,
+    share_pct         = if (w_total > 0) 100 * w_elig / w_total else NA_real_,
+    weighted          = weighted,
+    transfer_per_unit = totals$per_unit,
+    transfer_total    = totals$total,
+    budget_first      = identical(sp$budget_mode %||% "transfer_first",
+                                  "budget_first")
+  )
+}
+
+
+#' Does a policy scenario actually change the survey?
+#'
+#' TRUE when \code{apply_policy_to_svy()} moved anything at all - a covariate
+#' lever, or a non-zero social-protection transfer. Unlike
+#' \code{.compute_policy_deltas()} (which deliberately excludes
+#' \code{SP_TRANSFER_COL}, since the transfer enters through welfare rather
+#' than as a covariate), an SP-only scenario counts as an effect here.
+#'
+#' Used to warn - never to block - when every lever sits at its zero default,
+#' so a run that will reproduce the baseline says so instead of looking like
+#' a simulation that failed to start.
+#'
+#' @param svy_baseline Baseline survey-weather data frame.
+#' @param svy_policy   Policy-adjusted survey-weather data frame.
+#' @return Scalar logical.
+#' @keywords internal
+.scenario_has_effect <- function(svy_baseline, svy_policy) {
+  if (is.null(svy_baseline) || is.null(svy_policy)) return(FALSE)
+
+  # Social protection: any non-zero transfer is an effect on its own.
+  sp <- svy_policy[[SP_TRANSFER_COL]]
+  if (!is.null(sp)) {
+    sp <- suppressWarnings(as.numeric(sp))
+    if (any(is.finite(sp) & abs(sp) > 1e-10)) return(TRUE)
+  }
+
+  # Covariate levers: any column that moved between the two frames.
+  shared <- setdiff(
+    intersect(names(svy_baseline), names(svy_policy)),
+    SP_TRANSFER_COL
+  )
+  for (col in shared) {
+    b <- svy_baseline[[col]]
+    p <- svy_policy[[col]]
+    if (is.factor(b)) b <- as.character(b)
+    if (is.factor(p)) p <- as.character(p)
+    if (is.numeric(b) && is.numeric(p)) {
+      if (any(abs(p - b) > 1e-10, na.rm = TRUE)) return(TRUE)
+    } else if (!identical(b, p)) {
+      return(TRUE)
+    }
+  }
+  FALSE
+}
+
+
 # ---------------------------------------------------------------------------- #
 # Policy scenario: candidate variable discovery & placeholder UI               #
 # ---------------------------------------------------------------------------- #

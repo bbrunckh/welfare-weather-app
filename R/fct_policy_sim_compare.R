@@ -1246,11 +1246,12 @@ policy_input_diagnostics <- function(baseline_svy, policy_svy, vars = NULL) {
     DT::datatable(
       df, rownames = FALSE, class = "compact stripe",
       options = list(
-        pageLength = 30, dom = "Bt", ordering = list(list(2, "desc")),
+        pageLength = 30, dom = wise_csv_dom("t"),
+        ordering = list(list(2, "desc")),
         columnDefs = list(list(className = "dt-center", targets = "_all")),
         # INT-08: export is disabled while the results are stale.
-        buttons = if (isTRUE(stale())) NULL else
-          list(list(extend = "csv", filename = "outcome_thresholds"))
+        buttons = wise_csv_button("policy_outcome_thresholds",
+                                  enabled = !isTRUE(stale()))
       ),
       extensions = "Buttons"
     )
@@ -1282,6 +1283,33 @@ policy_input_diagnostics <- function(baseline_svy, policy_svy, vars = NULL) {
       shiny::icon("circle-info"), " above for definitions."
     )
   })
+
+  # UI-48: Step 3's baseline-vs-policy comparison figures.
+  wise_export_figure(
+    key   = "policy_outcome_distribution",
+    label = "Baseline vs policy welfare by scenario",
+    step  = 3L,
+    fun   = function() {
+      bands <- tryCatch(pointrange_bands_rv(), error = function(e) NULL)
+      if (is.null(bands)) return(NULL)
+      if (!isTRUE(input$show_model_spread)) {
+        bands$intermod_lo <- NA_real_
+        bands$intermod_hi <- NA_real_
+      }
+      plot_pointrange_climate(
+        bands_tbl   = bands,
+        x_label     = tryCatch(baseline_agg_hist()$x_label,
+                               error = function(e) NULL),
+        group_order = input$cmp_group_order %||% "scenario_x_year",
+        show_coef   = isTRUE(input$show_coef_uncertainty) && has_draws()
+      )
+    },
+    description = paste(
+      "Simulated welfare under the baseline and the policy scenario, by",
+      "climate scenario and projection period."
+    ),
+    width = 10, height = 6.5
+  )
 
   output$exceedance_plot <- renderPlot({
     req(exceedance_curves_rv())

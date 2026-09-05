@@ -1318,30 +1318,31 @@ isTRUE_vec <- function(x) !is.na(x) & x
 # ---------------------------------------------------------------------------- #
 
 
-#' Weather summary stats DT renderer
+#' Build the weather summary data frame behind `make_weather_stats_dt()`
+#'
+#' UI-45/UI-48: one builder behind the table, its CSV button and the
+#' export bundle.
 #'
 #' @param survey_weather Reactive returning merged survey-weather data.
-#' @param selected_weather Reactive returning selected weather rows (needs name/label).
+#' @param selected_weather Reactive returning selected weather rows
+#'   (needs `name` and `label`).
 #'
-#' @return A DT render function.
-#' @export
-make_weather_stats_dt <- function(survey_weather, selected_weather) {
-  DT::renderDT({
-    shiny::req(survey_weather(), selected_weather())
+#' @return A data frame, or NULL when there is nothing to summarise.
+#' @noRd
+build_weather_stats_table <- function(survey_weather, selected_weather) {
+    sw_df <- tryCatch(survey_weather(), error = function(e) NULL)
+    sw_sel <- tryCatch(selected_weather(), error = function(e) NULL)
+    if (is.null(sw_df) || is.null(sw_sel)) return(NULL)
 
-    df <- survey_weather() |>
+    df <- sw_df |>
       dplyr::mutate(countryyear = paste0(.data$economy, ", ", .data$year))
 
-    sw <- selected_weather()
+    sw <- sw_sel
     vars <- intersect(sw$name, names(df))
-    if (length(vars) == 0) return(data.frame(Note = "No weather variables found"))
+    if (length(vars) == 0) return(NULL)
 
     tab <- weighted_summary_long(df, vars = vars)
-    if (!is.data.frame(tab) || nrow(tab) == 0) {
-      return(data.frame(
-        Note = "No continuous weather variables to summarise (binned variables are shown below)."
-      ))
-    }
+    if (!is.data.frame(tab) || nrow(tab) == 0) return(NULL)
 
     # Add wave-specific missingness (% Missing) by countryyear and variable
     # in one grouped pass (PERF-09)
@@ -1363,7 +1364,7 @@ make_weather_stats_dt <- function(survey_weather, selected_weather) {
 
     # Rename key columns
     if ("variable" %in% names(tab))       names(tab)[names(tab) == "variable"] <- "Variable"
-    if ("countryyear" %in% names(tab))    names(tab)[names(tab) == "countryyear"] <- "County, Year"
+    if ("countryyear" %in% names(tab))    names(tab)[names(tab) == "countryyear"] <- "Country, Year"
 
     # Capitalize first letter of all column names
     names(tab) <- vapply(names(tab), function(nm) {
@@ -1371,11 +1372,44 @@ make_weather_stats_dt <- function(survey_weather, selected_weather) {
       paste0(toupper(substr(nm, 1, 1)), substr(nm, 2, nchar(nm)))
     }, character(1))
 
+    tab
+}
+
+#' Weather summary stats DT renderer
+#'
+#' @param survey_weather Reactive returning merged survey-weather data.
+#' @param selected_weather Reactive returning selected weather rows (needs name/label).
+#'
+#' @return A DT render function.
+#' @export
+make_weather_stats_dt <- function(survey_weather, selected_weather) {
+  DT::renderDT({
+    shiny::req(survey_weather(), selected_weather())
+    tab <- build_weather_stats_table(survey_weather, selected_weather)
+    if (is.null(tab)) {
+      return(data.frame(
+        Note = paste("No continuous weather variables to summarise",
+                     "(binned variables are shown below).")
+      ))
+    }
+
+    # UI-46: this is a summary-stats table like the Sample tab's
+    # individual/household/area tables, so it is presented like them
+    # (`make_stats_dt()` in fct_surveystats.R): auto-width columns, wrapped
+    # text, paging + search + row count. It previously rendered as a bare
+    # compact listing, which made the Weather stats tab look unlike every
+    # other table in Step 1.
     dt <- DT::datatable(
       tab,
-      rownames = FALSE,
-      options = list(dom = "t", paging = FALSE, searching = FALSE, info = FALSE),
-      class = "compact"
+      rownames   = FALSE,
+      extensions = "Buttons",
+      options = list(
+        autoWidth  = TRUE,
+        pageLength = 10,
+        columnDefs = list(list(className = "dt-wrap", targets = "_all")),
+        dom     = wise_csv_dom("lfrtip"),
+        buttons = wise_csv_button("weather_summary_stats")
+      )
     )
 
     # Formatting: N no decimals, others numeric 2 decimals
@@ -1388,38 +1422,32 @@ make_weather_stats_dt <- function(survey_weather, selected_weather) {
 }
 
 
-#' Weather binned-variable level-distribution DT renderer
+#' Build the binned-weather distribution frame
 #'
-#' Builds a DT for binned (factor / character) weather variables, showing
-#' count and share of observations in each bin per `countryyear`. Numeric
-#' weather variables are skipped (handled by `make_weather_stats_dt`).
+#' UI-45/UI-48: one builder behind the table, its CSV button and the
+#' export bundle.
 #'
-#' @param survey_weather   Reactive returning merged survey-weather data.
+#' @param survey_weather Reactive returning merged survey-weather data.
 #' @param selected_weather Reactive returning selected weather rows
 #'   (needs `name` and `label`).
 #'
-#' @return A DT render function.
-#' @export
-make_weather_binned_stats_dt <- function(survey_weather, selected_weather) {
-  DT::renderDT({
-    shiny::req(survey_weather(), selected_weather())
+#' @return A data frame, or NULL when there is nothing to summarise.
+#' @noRd
+build_weather_binned_table <- function(survey_weather, selected_weather) {
+    sw_df  <- tryCatch(survey_weather(),  error = function(e) NULL)
+    sw_sel <- tryCatch(selected_weather(), error = function(e) NULL)
+    if (is.null(sw_df) || is.null(sw_sel)) return(NULL)
 
-    df <- survey_weather() |>
+    df <- sw_df |>
       dplyr::mutate(countryyear = paste0(.data$economy, ", ", .data$year))
 
-    sw <- selected_weather()
+    sw <- sw_sel
     vars <- intersect(sw$name, names(df))
-    if (length(vars) == 0) {
-      return(data.frame(Note = "No weather variables found"))
-    }
+    if (length(vars) == 0) return(NULL)
 
     binned_vars <- vars[vapply(df[vars],
                                function(x) !is.numeric(x), logical(1))]
-    if (length(binned_vars) == 0) {
-      return(data.frame(
-        Note = "No binned weather variables to summarise."
-      ))
-    }
+    if (length(binned_vars) == 0) return(NULL)
 
     # One grouped pass for every binned variable's missingness (PERF-09)
     miss_all <- survey_missingness_long(df, binned_vars)
@@ -1446,9 +1474,7 @@ make_weather_binned_stats_dt <- function(survey_weather, selected_weather) {
     })
 
     tab <- dplyr::bind_rows(rows_list)
-    if (nrow(tab) == 0) {
-      return(data.frame(Note = "No binned weather observations found."))
-    }
+    if (nrow(tab) == 0) return(NULL)
 
     # Show only the readable variable label, falling back to the raw name
     if ("variable" %in% names(tab) &&
@@ -1478,12 +1504,42 @@ make_weather_binned_stats_dt <- function(survey_weather, selected_weather) {
     if ("share" %in% names(tab))
       names(tab)[names(tab) == "share"] <- "Share (%)"
 
+    tab
+}
+
+#' Weather binned-variable level-distribution DT renderer
+#'
+#' Builds a DT for binned (factor / character) weather variables, showing
+#' count and share of observations in each bin per `countryyear`. Numeric
+#' weather variables are skipped (handled by `make_weather_stats_dt`).
+#'
+#' @param survey_weather   Reactive returning merged survey-weather data.
+#' @param selected_weather Reactive returning selected weather rows
+#'   (needs `name` and `label`).
+#'
+#' @return A DT render function.
+#' @export
+make_weather_binned_stats_dt <- function(survey_weather, selected_weather) {
+  DT::renderDT({
+    shiny::req(survey_weather(), selected_weather())
+    tab <- build_weather_binned_table(survey_weather, selected_weather)
+    if (is.null(tab)) {
+      return(data.frame(Note = "No binned weather variables to summarise."))
+    }
+
+    # UI-46: same presentation as the continuous weather stats table above
+    # and the Sample tab's summary tables.
     dt <- DT::datatable(
       tab,
-      rownames = FALSE,
-      options  = list(dom = "t", paging = FALSE,
-                      searching = FALSE, info = FALSE),
-      class    = "compact"
+      rownames   = FALSE,
+      extensions = "Buttons",
+      options = list(
+        autoWidth  = TRUE,
+        pageLength = 10,
+        columnDefs = list(list(className = "dt-wrap", targets = "_all")),
+        dom     = wise_csv_dom("lfrtip"),
+        buttons = wise_csv_button("weather_binned_stats")
+      )
     )
 
     num_cols <- intersect(c("Share (%)", "% Missing"), names(tab))

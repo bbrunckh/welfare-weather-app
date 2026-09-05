@@ -707,49 +707,29 @@ merge_loc_values_to_cells <- function(cell_map, loc_vals, by_wave = TRUE) {
 # Summary stats tables                                                         #
 # ---------------------------------------------------------------------------- #
 
-#' Build a formatted DT summary table by variable group flag
+#' Build the summary-statistics data frame behind `make_stats_dt()`
 #'
-#' Creates a `DT::renderDT()` expression for survey summary statistics of the
-#' variables flagged in `variable_list[[flag_col]] == 1` and present in
-#' `survey_data()`.
+#' UI-45/UI-48: the table, its per-table CSV button and the export bundle
+#' all read this one builder, so a downloaded file cannot differ from what
+#' is on screen.
 #'
-#' The returned table includes:
-#' \itemize{
-#'   \item Weighted summary statistics from `weighted_summary_long()`
-#'   \item Wave-specific missingness (`% Missing`) by `countryyear` and variable
-#'   \item Readable variable labels (from `variable_list`) shown in a single
-#'     `Variable` column, falling back to the raw name when no label exists
-#'   \item Standardized column names (capitalized first letter)
-#'   \item Basic display formatting (numeric columns to 2 decimals except `N`)
-#'   \item Soft text wrapping for long character/factor fields
-#' }
+#' @param survey_data A reactive (or data frame) of survey data.
+#' @param variable_list A reactive (or data frame) of variable metadata.
+#' @param flag_col Character scalar naming the grouping flag column.
+#' @param vars Optional character vector of variable names to summarise;
+#'   takes precedence over `flag_col`.
 #'
-#' @param survey_data A reactive expression returning a survey `data.frame`.
-#'   The data should include `countryyear` when wave-specific missingness is
-#'   required.
-#' @param variable_list A reactive expression or `data.frame` containing at least
-#'   columns `name`, `label`, and the grouping flag column given in `flag_col`.
-#' @param flag_col Character scalar naming the grouping flag column in
-#'   `variable_list` (e.g., `"outcome"`, `"ind"`, `"hh"`, `"firm"`, `"area"`).
-#'   Ignored if `vars` is supplied.
-#' @param vars Optional character vector of variable names to summarise. When
-#'   supplied, takes precedence over `flag_col`.
-#'
-#' @return A `shiny.render.function` (from `DT::renderDT`) that renders the
-#'   formatted summary statistics table.
-#' @export
-make_stats_dt <- function(survey_data, variable_list, flag_col = NULL, vars = NULL) {
-  DT::renderDT({
-    shiny::req(survey_data())
-    df <- survey_data()
+#' @return A data frame, or NULL when there is nothing to summarise.
+#' @noRd
+build_stats_table <- function(survey_data, variable_list, flag_col = NULL,
+                              vars = NULL) {
+    df <- if (is.function(survey_data)) survey_data() else survey_data
+    if (is.null(df) || !nrow(as.data.frame(df))) return(NULL)
     vl <- if (is.function(variable_list)) variable_list() else variable_list
 
     target <- if (!is.null(vars)) vars else vl$name[vl[[flag_col]] == 1]
     vars   <- intersect(target, names(df))
-    if (length(vars) == 0) {
-      tag <- flag_col %||% "specified"
-      return(data.frame(Note = paste("No", tag, "variables found")))
-    }
+    if (length(vars) == 0) return(NULL)
 
     tab <- weighted_summary_long(df, vars = vars)
 
@@ -812,14 +792,63 @@ make_stats_dt <- function(survey_data, variable_list, flag_col = NULL, vars = NU
       })
     }
 
+    tab
+}
+
+#' Build a formatted DT summary table by variable group flag
+#'
+#' Creates a `DT::renderDT()` expression for survey summary statistics of the
+#' variables flagged in `variable_list[[flag_col]] == 1` and present in
+#' `survey_data()`.
+#'
+#' The returned table includes:
+#' \itemize{
+#'   \item Weighted summary statistics from `weighted_summary_long()`
+#'   \item Wave-specific missingness (`% Missing`) by `countryyear` and variable
+#'   \item Readable variable labels (from `variable_list`) shown in a single
+#'     `Variable` column, falling back to the raw name when no label exists
+#'   \item Standardized column names (capitalized first letter)
+#'   \item Basic display formatting (numeric columns to 2 decimals except `N`)
+#'   \item Soft text wrapping for long character/factor fields
+#' }
+#'
+#' @param survey_data A reactive expression returning a survey `data.frame`.
+#'   The data should include `countryyear` when wave-specific missingness is
+#'   required.
+#' @param variable_list A reactive expression or `data.frame` containing at least
+#'   columns `name`, `label`, and the grouping flag column given in `flag_col`.
+#' @param flag_col Character scalar naming the grouping flag column in
+#'   `variable_list` (e.g., `"outcome"`, `"ind"`, `"hh"`, `"firm"`, `"area"`).
+#'   Ignored if `vars` is supplied.
+#' @param vars Optional character vector of variable names to summarise. When
+#'   supplied, takes precedence over `flag_col`.
+#'
+#' @return A `shiny.render.function` (from `DT::renderDT`) that renders the
+#'   formatted summary statistics table.
+#' @export
+make_stats_dt <- function(survey_data, variable_list, flag_col = NULL,
+                          vars = NULL) {
+  DT::renderDT({
+    shiny::req(survey_data())
+    tab <- build_stats_table(survey_data, variable_list, flag_col, vars)
+    if (is.null(tab)) {
+      tag <- flag_col %||% "specified"
+      return(data.frame(Note = paste("No", tag, "variables found")))
+    }
+
     dt <- DT::datatable(
       tab,
       rownames = FALSE,
       escape = FALSE,
+      extensions = "Buttons",
       options = list(
         autoWidth = TRUE,
         pageLength = 10,
-        columnDefs = list(list(className = "dt-wrap", targets = "_all"))
+        columnDefs = list(list(className = "dt-wrap", targets = "_all")),
+        dom     = wise_csv_dom("lfrtip"),
+        buttons = wise_csv_button(
+          paste0("summary_stats_", flag_col %||% "selected")
+        )
       )
     )
 

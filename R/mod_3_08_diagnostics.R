@@ -79,31 +79,12 @@ mod_3_08_diagnostics_server <- function(id,
         p$welfare <- p$welfare + p[[SP_TRANSFER_COL]]
       }
 
-      if (SP_TRANSFER_COL %in% names(p)) {
-        v   <- p[[SP_TRANSFER_COL]]
-        w_p <- p$weight
-        # When analysis_unit == "hh" each row is a household and `v` is the
-        # per-household transfer divided by hhsize (so it's per-capita).
-        # Multiplying back by hhsize reconstitutes the per-household amount.
-        # When analysis_unit == "ind" each row is already an individual and
-        # `v` is the per-individual amount, so the multiplier is 1.
-        hh <- if (identical(analysis_unit(), "hh")) {
-          p$hhsize
-        } else {
-          rep(1L, nrow(p))
-        }
-        ok <- is.finite(v) & is.finite(w_p)
-        # Population-level total annual cost = sum(daily transfer * weight) * 365
-        transfer_sum <- sum(v[ok] * w_p[ok] * hh[ok]) * 365
-        # Population-weighted mean transfer per recipient unit (annual)
-        elig <- ok & v > 0
-        transfer_unit <- if (any(elig) && sum(w_p[elig]) > 0) {
-          (sum(v[elig] * w_p[elig] * hh[elig]) / sum(w_p[elig])) * 365
-        } else 0
-      } else {
-        transfer_sum  <- 0
-        transfer_unit <- 0
-      }
+      # UI-32: this arithmetic now lives in `.sp_transfer_totals()`, which the
+      # Step 3 sidebar's reach preview also calls - the two showed different
+      # totals while each re-derived it, so there is one implementation.
+      totals        <- .sp_transfer_totals(p, analysis_unit())
+      transfer_sum  <- totals$total
+      transfer_unit <- totals$per_unit
 
       vars <- detect_manipulated_vars(b, p)
       if (length(vars) == 0) return(list(status = "no_change"))
@@ -127,18 +108,23 @@ mod_3_08_diagnostics_server <- function(id,
           rownames = FALSE, options = list(dom = "t")
         ))
       }
+      # UI-32: displayed figures are rounded to one decimal, matching the
+      # Step 3 sidebar's reach preview (fmt_num()) so the same quantity never
+      # appears at two precisions.
       df <- data.frame(
         Type  = c(
           "Total transfer $ amount (population-level)",
           paste0("Per-", unit_word(plural = FALSE),
                  " $ equivalent (eligible ", unit_word(plural = TRUE), ")")
         ),
-        Value = c(d$transfer_sum, d$transfer_pp),
+        Value = fmt_num(c(d$transfer_sum, d$transfer_pp), prefix = "$"),
         stringsAsFactors = FALSE
       )
       DT::datatable(
         df, rownames = FALSE, class = "compact stripe",
-        options = list(dom = "t", ordering = FALSE)
+        extensions = "Buttons",
+        options = list(dom = wise_csv_dom("t"), ordering = FALSE,
+                       buttons = wise_csv_button("policy_transfer_summary"))
       )
     })
 
@@ -188,16 +174,64 @@ mod_3_08_diagnostics_server <- function(id,
         ))
       }
 
+      # UI-32: one decimal everywhere, instead of 4 significant figures which
+      # rendered as 0.1234 next to 12340 in the same column.
       num_cols <- setdiff(names(df), "variable")
-      df[num_cols] <- lapply(df[num_cols], function(x) signif(x, 4))
+      df[num_cols] <- lapply(df[num_cols], function(x) {
+        if (is.numeric(x)) round(x, 1) else x
+      })
 
       DT::datatable(
         df, rownames = FALSE, class = "compact stripe",
-        options = list(pageLength = 25, dom = "tp", ordering = TRUE)
+        extensions = "Buttons",
+        options = list(pageLength = 25, dom = wise_csv_dom("tp"),
+                       ordering = TRUE,
+                       buttons = wise_csv_button("policy_diagnostics"))
       )
     })
 
     outputOptions(output, "diag_summary_table", suspendWhenHidden = FALSE)
+
+    # UI-48: register Step 3's diagnostics for the export bundle.
+    wise_export_table(
+      key   = "policy_transfer_summary",
+      label = "Social protection transfer summary",
+      step  = 3L,
+      fun   = function() {
+        d <- tryCatch(diag_data(), error = function(e) NULL)
+        if (is.null(d) || !is.null(d$status)) return(NULL)
+        data.frame(
+          metric = c("total_transfer_population", "transfer_per_unit"),
+          value  = round(c(d$transfer_sum, d$transfer_pp), 1),
+          stringsAsFactors = FALSE
+        )
+      },
+      description = paste(
+        "Population-level annual cost of the social protection transfer and",
+        "the per-recipient equivalent."
+      )
+    )
+
+    wise_export_table(
+      key   = "policy_input_diagnostics",
+      label = "Policy input diagnostics",
+      step  = 3L,
+      fun   = function() {
+        d <- tryCatch(diag_data(), error = function(e) NULL)
+        if (is.null(d) || !is.null(d$status)) return(NULL)
+        vars <- d$manipulated_vars
+        if (!length(vars)) return(NULL)
+        df <- policy_input_diagnostics(d$baseline_svy, d$policy_svy, vars = vars)
+        if (is.null(df) || nrow(df) == 0) return(NULL)
+        num <- setdiff(names(df), "variable")
+        df[num] <- lapply(df[num], function(x) if (is.numeric(x)) round(x, 1) else x)
+        df
+      },
+      description = paste(
+        "Before/after summary of every covariate the policy scenario changed,",
+        "so the levers that actually moved can be checked."
+      )
+    )
 
     # ---- Histogram plots container ------------------------------------------
 

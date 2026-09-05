@@ -67,7 +67,12 @@ wise_plot_output <- function(plot_id, alt, ...) {
 #' own toggle instead of at a shared viewport position.
 #'
 #' The content stays in the DOM at all times (conditionalPanel odd/even parity,
-#' as before), so input defaults register immediately.
+#' as before). Note that this is not on its own enough for input defaults to
+#' register: a `uiOutput()` placed in here is still *hidden*, and hidden
+#' outputs are suspended until first shown. Callers that need the flyout's
+#' inputs to exist before it is opened must also set
+#' `outputOptions(output, "<id>", suspendWhenHidden = FALSE)` (see
+#' `mod_1_06_model.R` and `mod_1_04_weather.R`).
 #'
 #' @param toggle_id    Namespaced input id of the toggle button.
 #' @param title        Flyout header title.
@@ -104,6 +109,241 @@ config_flyout_block <- function(toggle_id, title, ..., toggle_label = "Configure
       ),
       ...
     )
+  )
+}
+
+# ---- Number formatting for displayed figures (UI-32) -------------------------
+
+#' Format a number for display at one decimal place
+#'
+#' One rule for every dynamically computed figure the app shows - the Step 3
+#' sidebar's social-protection preview and the diagnostics tab's transfer
+#' summary included - so the same quantity never appears at two precisions.
+#' Values are rounded, not truncated, and thousands are separated.
+#'
+#' @param x       Numeric vector.
+#' @param digits  Decimal places. Default 1.
+#' @param prefix,suffix Optional strings placed either side of the number
+#'   (e.g. `prefix = "$"`, `suffix = "%"`).
+#' @param na Text used for non-finite values.
+#'
+#' @return A character vector the same length as `x`.
+#' @noRd
+fmt_num <- function(x, digits = 1, prefix = "", suffix = "", na = "\u2014") {
+  x <- suppressWarnings(as.numeric(x))
+  out <- vapply(x, function(v) {
+    if (!is.finite(v)) return(na)
+    paste0(prefix,
+           formatC(round(v, digits), format = "f", digits = digits,
+                   big.mark = ","),
+           suffix)
+  }, character(1))
+  out
+}
+
+#' Format a count for display
+#'
+#' Whole units (households, individuals, firms) are counts, so they get
+#' thousands separators and no decimals - even when survey weights make the
+#' underlying value fractional.
+#'
+#' @param x Numeric vector.
+#' @param na Text used for non-finite values.
+#' @return A character vector.
+#' @noRd
+fmt_count <- function(x, na = "\u2014") {
+  x <- suppressWarnings(as.numeric(x))
+  vapply(x, function(v) {
+    if (!is.finite(v)) return(na)
+    formatC(round(v), format = "d", big.mark = ",")
+  }, character(1))
+}
+
+
+# ---- Nav-header step status (UI-47) ------------------------------------------
+#
+# Steps can be visited in any order, and results survive a move to another tab,
+# so the navbar is the only place where the state of every step is visible at
+# once. Each step tab carries a small badge:
+#
+#   none  - the step has not produced results yet; no badge, navbar stays quiet
+#   done  - results exist and match the current inputs (check mark)
+#   stale - results exist but an input has changed since (reload arrow)
+#
+# "stale" reuses the per-step run signatures already maintained for the
+# in-page stale banners (INT-08), so the badge and the banner can never
+# disagree. A stale step is still fully usable - the badge asks for a re-run,
+# it does not lock anything.
+
+#' Placeholder for a step's status badge in the navbar
+#'
+#' @param output_id Output id, matched by `render_step_badge()` in the server.
+#' @return A `span` output container, safe to nest inside a nav link.
+#' @noRd
+step_badge_ui <- function(output_id) {
+  shiny::uiOutput(output_id, container = shiny::tags$span, inline = TRUE,
+                  class = "nav-step-status-slot")
+}
+
+#' Build the badge for one step state
+#'
+#' @param state One of `"none"`, `"done"`, `"stale"`.
+#' @param step_label Human name of the step, used in the accessible text.
+#' @return A `span` tag, or NULL for `"none"`.
+#' @noRd
+step_status_badge <- function(state, step_label = "This step") {
+  # The glyphs are decorative: aria-hidden takes them out of the
+  # accessibility tree (which also suppresses the aria-label shiny::icon()
+  # always attaches), and the visually-hidden text carries the meaning.
+  deco <- function(name) shiny::icon(name, `aria-hidden` = "true")
+
+  if (identical(state, "done")) {
+    tip <- paste0(step_label, ": complete \u2014 results are up to date.")
+    return(shiny::tags$span(
+      class = "nav-step-status nav-step-status-done",
+      title = tip,
+      deco("check"),
+      shiny::tags$span(class = "visually-hidden", tip)
+    ))
+  }
+  if (identical(state, "stale")) {
+    tip <- paste0(step_label, ": inputs changed \u2014 re-run to refresh ",
+                  "the results.")
+    return(shiny::tags$span(
+      class = "nav-step-status nav-step-status-stale",
+      title = tip,
+      deco("rotate"),
+      shiny::tags$span(class = "visually-hidden", tip)
+    ))
+  }
+  NULL
+}
+
+#' Classify a step as none / done / stale
+#'
+#' @param has_result Reactive returning the step's result object (NULL until it
+#'   has run), or a logical.
+#' @param is_stale   Reactive returning TRUE when the stored result no longer
+#'   matches the live inputs.
+#'
+#' @return A reactive returning `"none"`, `"done"` or `"stale"`.
+#' @noRd
+step_status <- function(has_result, is_stale = NULL) {
+  # Fail fast on a mis-wired badge. If an upstream module renames the key this
+  # reads, the argument arrives as NULL - and without this the badge would
+  # simply sit on "none" (or, for a missing staleness flag, permanently on
+  # "done"), which is worse than an error: it looks like working UI.
+  if (!is.function(has_result)) {
+    stop("step_status(): `has_result` must be a reactive, got ",
+         class(has_result)[1], ".", call. = FALSE)
+  }
+  if (!is.null(is_stale) && !is.function(is_stale)) {
+    stop("step_status(): `is_stale` must be a reactive or NULL, got ",
+         class(is_stale)[1], ".", call. = FALSE)
+  }
+
+  shiny::reactive({
+    res <- tryCatch(has_result(), error = function(e) NULL)
+    done <- if (is.logical(res) && length(res) == 1L) isTRUE(res) else !is.null(res)
+    if (!done) return("none")
+    stale <- if (is.null(is_stale)) FALSE else
+      isTRUE(tryCatch(is_stale(), error = function(e) FALSE))
+    if (stale) "stale" else "done"
+  })
+}
+
+#' Render a step's navbar status badge
+#'
+#' @param has_result,is_stale Reactives, as for `step_status()`.
+#' @param step_label Human name of the step, used in the accessible text.
+#'
+#' @return A `renderUI` expression to assign to the matching output id.
+#' @noRd
+render_step_badge <- function(has_result, is_stale = NULL,
+                              step_label = "This step") {
+  status <- step_status(has_result, is_stale)
+  shiny::renderUI(step_status_badge(status(), step_label))
+}
+
+
+# ---- Table CSV export (UI-45) ------------------------------------------------
+#
+# Every table in the app offers the same export affordance: one small, quiet
+# "Download CSV" control. For DT tables that is the Buttons extension, driven
+# by the two helpers below; for the handful of hand-built HTML tables it is
+# `csv_download_link()` over a `downloadHandler`. Both render as
+# `.wise-csv-btn` so they look identical wherever they appear (custom.css).
+
+#' DT `buttons` spec for a single, discreet CSV export
+#'
+#' @param filename Base name of the downloaded file, without extension.
+#' @param enabled  When FALSE, returns NULL so the button is omitted (used to
+#'   withhold exports while results are stale - INT-08).
+#'
+#' @return A list suitable for `DT::datatable(options = list(buttons = ...))`,
+#'   or NULL.
+#' @noRd
+wise_csv_button <- function(filename, enabled = TRUE) {
+  if (!isTRUE(enabled)) return(NULL)
+  list(list(
+    extend        = "csv",
+    text          = "Download CSV",
+    filename      = filename,
+    className     = "wise-csv-btn",
+    # Export every row, not just the visible page; keep any active search.
+    exportOptions = list(modifier = list(page = "all"))
+  ))
+}
+
+#' Add the Buttons placeholder to a DT `dom` string
+#'
+#' @param dom A DataTables `dom` string (e.g. "t", "lfrtip").
+#' @return The same string with a leading "B" if it lacked one.
+#' @noRd
+wise_csv_dom <- function(dom = "lfrtip") {
+  if (grepl("B", dom, fixed = TRUE)) dom else paste0("B", dom)
+}
+
+#' Small "Download CSV" link for a non-DT table
+#'
+#' Pairs with a `downloadHandler()` registered under the same output id. Use
+#' for hand-built HTML tables (`renderTable()` / `renderUI()`), which have no
+#' DataTables toolbar to hang a button off.
+#'
+#' @param output_id Namespaced id of the matching `downloadHandler` output.
+#' @param label     Link text. Default "Download CSV".
+#'
+#' @return A `downloadLink` tag.
+#' @noRd
+csv_download_link <- function(output_id, label = "Download CSV") {
+  shiny::downloadLink(
+    output_id,
+    label = shiny::tagList(shiny::icon("download"), label),
+    class = "wise-csv-btn wise-csv-link"
+  )
+}
+
+#' `downloadHandler` writing a data frame to CSV
+#'
+#' @param filename_base Base name of the file, without extension.
+#' @param data_fun      Function of no arguments returning a data frame, or
+#'   NULL when there is nothing to export.
+#'
+#' @return A shiny download handler.
+#' @noRd
+csv_download_handler <- function(filename_base, data_fun) {
+  shiny::downloadHandler(
+    filename = function() {
+      paste0(filename_base, "_", format(Sys.Date(), "%Y%m%d"), ".csv")
+    },
+    content = function(file) {
+      df <- tryCatch(data_fun(), error = function(e) NULL)
+      if (is.null(df) || !is.data.frame(df) || nrow(df) == 0) {
+        df <- data.frame(Note = "No data available")
+      }
+      utils::write.csv(df, file, row.names = FALSE, na = "")
+    },
+    contentType = "text/csv"
   )
 }
 

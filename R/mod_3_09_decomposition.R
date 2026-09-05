@@ -133,6 +133,40 @@ mod_3_09_decomposition_server <- function(id,
     })
 
     # --- Stacked bar chart by decile ---
+    # UI-48: register Step 3's decomposition figures for the export bundle.
+    wise_export_figure(
+      key   = "policy_decomposition_channels",
+      label = "Policy effect by channel",
+      step  = 3L,
+      fun   = function() {
+        res <- tryCatch(decomp_result(), error = function(e) NULL)
+        if (is.null(res) || !is.data.frame(res) || nrow(res) == 0) return(NULL)
+        .plot_decomp_bars(res, is_rif(),
+                          show_coef = isTRUE(show_coef_uncertainty()))
+      },
+      description = paste(
+        "The policy effect split into its main effect and resilience",
+        "channels (repositioning and weather interaction)."
+      ),
+      width = 9, height = 6
+    )
+
+    wise_export_figure(
+      key   = "policy_decomposition_by_scenario",
+      label = "Policy effect range across scenarios",
+      step  = 3L,
+      fun   = function() {
+        sc <- tryCatch(decomp_scenarios(), error = function(e) NULL)
+        if (is.null(sc) || !is.data.frame(sc) || nrow(sc) == 0) return(NULL)
+        .plot_decomp_scenario_range(sc, is_rif())
+      },
+      description = paste(
+        "Year-to-year range of the decomposed policy effect across the saved",
+        "climate scenarios."
+      ),
+      width = 9, height = 6
+    )
+
     output$decomp_bar_plot <- shiny::renderPlot({
       req(decomp_result())
       .plot_decomp_bars(decomp_result(), is_rif(),
@@ -216,6 +250,25 @@ mod_3_09_decomposition_server <- function(id,
       req(decomp_result())
       .build_decomp_table(decomp_result(), is_rif())
     })
+
+    # UI-48: the decomposition summary, as tidy numbers rather than the
+    # rendered table's formatted strings.
+    wise_export_table(
+      key   = "policy_effect_decomposition",
+      label = "Policy effect decomposition",
+      step  = 3L,
+      fun   = function() {
+        res <- tryCatch(decomp_result(), error = function(e) NULL)
+        if (is.null(res) || !is.data.frame(res) || nrow(res) == 0) return(NULL)
+        res
+      },
+      description = paste(
+        "Per-household decomposition of the policy effect into its main",
+        "effect (including the cash transfer) and resilience channels",
+        "(repositioning and weather interaction), with per-channel standard",
+        "deviations where available."
+      )
+    )
 
     # --- Interaction warning ---
     output$interaction_warning_ui <- renderUI({
@@ -476,7 +529,9 @@ mod_3_09_decomposition_server <- function(id,
 
   DT::datatable(
     df, rownames = FALSE, class = "compact stripe",
-    options = list(dom = "t", ordering = FALSE,
+    extensions = "Buttons",
+    options = list(dom = wise_csv_dom("t"), ordering = FALSE,
+                   buttons = wise_csv_button("policy_decomposition"),
                    columnDefs = list(list(className = "dt-right", targets = 1:5)))
   )
 }

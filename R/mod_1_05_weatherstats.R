@@ -224,25 +224,33 @@ mod_1_05_weatherstats_server <- function(
         # the breaks the sample was binned on (`stored_breaks`) to land in the
         # same bins.
 
+        # UI-48: builder first, renderer second, so the export bundle and the
+        # screen draw the same figure.
+        weather_dist_fig <- function(idx) function() {
+          swx <- tryCatch(wx_spec(), error = function(e) NULL)
+          swd <- tryCatch(survey_weather(), error = function(e) NULL)
+          if (is.null(swx) || is.null(swd)) return(NULL)
+          sw <- swx$sw
+          if (is.null(sw) || nrow(sw) < idx) return(NULL)
+          df   <- swd |>
+            dplyr::mutate(countryyear = paste0(economy, ", ", year))
+          hv   <- sw$name[idx]
+          yrs  <- hist_cells_years()
+          brks <- stored_breaks()
+
+          plot_weather_dist(
+            df, hv, sw$label[idx], sw$cont_binned[idx],
+            hist_df   = hist_cells(),
+            breaks    = if (is.null(brks)) NULL else brks[[hv]],
+            year_from = if (is.null(yrs)) NULL else yrs[["from"]],
+            year_to   = if (is.null(yrs)) NULL else yrs[["to"]]
+          )
+        }
+
         make_weather_dist <- function(idx) {
           renderPlot({
             req(survey_weather(), wx_spec())
-            df          <- survey_weather() |>
-              dplyr::mutate(countryyear = paste0(economy, ", ", year))
-            sw          <- wx_spec()$sw
-            hv          <- sw$name[idx]
-            label       <- sw$label[idx]
-            cont_binned <- sw$cont_binned[idx]
-            yrs         <- hist_cells_years()
-            brks        <- stored_breaks()
-
-            p <- plot_weather_dist(
-              df, hv, label, cont_binned,
-              hist_df   = hist_cells(),
-              breaks    = if (is.null(brks)) NULL else brks[[hv]],
-              year_from = if (is.null(yrs)) NULL else yrs[["from"]],
-              year_to   = if (is.null(yrs)) NULL else yrs[["to"]]
-            )
+            p <- weather_dist_fig(idx)()
             if (is.null(p)) {
               plot.new(); title(main = "Weather variable not configured")
               return(invisible(NULL))
@@ -259,22 +267,28 @@ mod_1_05_weatherstats_server <- function(
         # values are the same transformed series the bins were cut from, so a
         # deviation-from-mean / anomaly configuration carries through.
 
+        weather_dist_cont_fig <- function(idx) function() {
+          swx <- tryCatch(wx_spec(), error = function(e) NULL)
+          swc <- tryCatch(survey_weather_cont(), error = function(e) NULL)
+          if (is.null(swx) || is.null(swc)) return(NULL)
+          sw <- swx$sw
+          if (is.null(sw) || nrow(sw) < idx) return(NULL)
+          df  <- swc |>
+            dplyr::mutate(countryyear = paste0(economy, ", ", year))
+          yrs <- hist_cells_years()
+
+          plot_weather_ridges_compare(
+            df, sw$name[idx], sw$label[idx],
+            hist_df   = hist_cells(),
+            year_from = if (is.null(yrs)) NULL else yrs[["from"]],
+            year_to   = if (is.null(yrs)) NULL else yrs[["to"]]
+          )
+        }
+
         make_weather_dist_cont <- function(idx) {
           renderPlot({
             req(survey_weather_cont(), wx_spec())
-            df    <- survey_weather_cont() |>
-              dplyr::mutate(countryyear = paste0(economy, ", ", year))
-            sw    <- wx_spec()$sw
-            hv    <- sw$name[idx]
-            label <- sw$label[idx]
-            yrs   <- hist_cells_years()
-
-            p <- plot_weather_ridges_compare(
-              df, hv, label,
-              hist_df   = hist_cells(),
-              year_from = if (is.null(yrs)) NULL else yrs[["from"]],
-              year_to   = if (is.null(yrs)) NULL else yrs[["to"]]
-            )
+            p <- weather_dist_cont_fig(idx)()
             if (is.null(p)) {
               plot.new(); title(main = "Continuous distribution unavailable")
               return(invisible(NULL))
@@ -289,26 +303,33 @@ mod_1_05_weatherstats_server <- function(
 
         # -- Binscatter plots (one per variable) ------------------------------
 
+        binscatter_fig <- function(idx) function() {
+          so  <- tryCatch(wx_spec_so(), error = function(e) NULL)
+          swd <- tryCatch(survey_weather(), error = function(e) NULL)
+          sw  <- tryCatch(wx_spec_sw(), error = function(e) NULL)
+          if (is.null(so) || is.null(swd) || is.null(sw) || nrow(sw) < idx) {
+            return(NULL)
+          }
+          df <- swd |> prepare_outcome_df(so)
+
+          # fix so$label for plotting if it has been transformed
+          if ("transform" %in% colnames(so) && isTRUE(so$transform == "log")) {
+            so$label <- paste0("Log ", so$label)
+          }
+
+          plot_binscatter(
+            df       = df,
+            hv       = sw$name[idx],
+            hv_label = paste0(sw$label[idx], "\n(as configured)"),
+            y_var    = so$name,
+            y_label  = so$label
+          )
+        }
+
         make_binscatter <- function(idx) {
           renderPlot({
-            so  <- wx_spec_so()
-            req(survey_weather(), so)
-            df <- survey_weather() |> prepare_outcome_df(so)
-            sw  <- wx_spec_sw()
-            
-            # fix so$label for plotting if it has been transformed
-            if ("transform" %in% colnames(so) && isTRUE(so$transform == "log")) {
-              so$label <- paste0("Log ", so$label)
-            }
-
-            p <- plot_binscatter(
-              df       = df,
-              hv       = sw$name[idx],
-              hv_label = paste0(sw$label[idx], "\n(as configured)"),
-              y_var    = so$name,
-              y_label  = so$label
-            )
-
+            req(survey_weather(), wx_spec_so())
+            p <- binscatter_fig(idx)()
             if (is.null(p)) {
               plot.new()
               title(main = "Weather variable not configured")
@@ -320,6 +341,51 @@ mod_1_05_weatherstats_server <- function(
 
         output$binscatter1 <- make_binscatter(1)
         output$binscatter2 <- make_binscatter(2)
+
+        # UI-48: one registration per weather variable, for each of the three
+        # per-variable figures. Labels come from the live specification so the
+        # bundle names them by variable rather than by slot number.
+        observe({
+          sw <- tryCatch(wx_spec_sw(), error = function(e) NULL)
+          if (is.null(sw) || !nrow(sw)) return()
+          for (i in seq_len(min(nrow(sw), 2L))) local({
+            idx <- i
+            nm  <- sw$label[idx]
+            wise_export_figure(
+              key   = paste0("weather_distribution_", idx),
+              label = paste0("Weather distribution - ", nm),
+              step  = 1L,
+              fun   = weather_dist_fig(idx),
+              description = paste0(
+                "Distribution of ", nm, " as configured, in the survey sample ",
+                "and (where loaded) the same locations' historical climate."
+              ),
+              width = 9, height = 6
+            )
+            wise_export_figure(
+              key   = paste0("weather_distribution_continuous_", idx),
+              label = paste0("Continuous distribution - ", nm),
+              step  = 1L,
+              fun   = weather_dist_cont_fig(idx),
+              description = paste0(
+                "The continuous series underlying ", nm, " before binning, ",
+                "compared with its historical distribution."
+              ),
+              width = 9, height = 6
+            )
+            wise_export_figure(
+              key   = paste0("binscatter_", idx),
+              label = paste0("Outcome vs weather binscatter - ", nm),
+              step  = 1L,
+              fun   = binscatter_fig(idx),
+              description = paste0(
+                "Binned mean of the welfare outcome across the range of ", nm,
+                " - the raw relationship before any model is fitted."
+              ),
+              width = 9, height = 6
+            )
+          })
+        })
 
         # -- Summary stats tables (continuous + binned) -----------------------
         output$weather_stats_table <- make_weather_stats_dt(
@@ -369,12 +435,49 @@ mod_1_05_weatherstats_server <- function(
 
         # -- Selected weather config table ------------------------------------
 
+        # UI-48: register Step 1's weather artefacts with the export bundle.
+        wise_export_table(
+          key   = "weather_summary",
+          label = "Weather summary statistics",
+          step  = 1L,
+          fun   = function() build_weather_stats_table(survey_weather,
+                                                       wx_spec_sw),
+          description = paste(
+            "Weighted summary statistics for each continuous weather variable",
+            "(N, mean, SD, percentiles, % missing), by country and survey wave."
+          )
+        )
+        wise_export_table(
+          key   = "weather_binned_distribution",
+          label = "Binned weather level distribution",
+          step  = 1L,
+          fun   = function() build_weather_binned_table(survey_weather,
+                                                        wx_spec_sw),
+          description = paste(
+            "Count and share of observations in each bin of every binned",
+            "weather variable, by country and survey wave."
+          )
+        )
+        wise_export_table(
+          key   = "weather_specification",
+          label = "Weather variable specification",
+          step  = 1L,
+          fun   = function() tryCatch(wx_spec_sw(), error = function(e) NULL),
+          description = paste(
+            "The configuration of each selected weather variable: aggregation",
+            "period, temporal aggregation, transformation and binning."
+          )
+        )
+
         output$selected_weather <- DT::renderDT({
           wx_spec_sw()
         },
-        rownames = FALSE,
-        options  = list(dom = "t", paging = FALSE, searching = FALSE, info = FALSE),
-        class    = "compact")
+        rownames   = FALSE,
+        extensions = "Buttons",
+        options    = list(dom = wise_csv_dom("t"), paging = FALSE,
+                          searching = FALSE, info = FALSE,
+                          buttons = wise_csv_button("selected_weather")),
+        class      = "compact")
 
         # -- Append tab -------------------------------------------------------
 

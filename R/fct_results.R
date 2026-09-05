@@ -1401,6 +1401,83 @@ make_weather_effect_plot <- function(fit, pred_var, interaction_terms, is_binned
 }
 
 
+#' Tidy regression results behind the Step 1 coefficient table
+#'
+#' `make_regtable()` emits presentation HTML (AER-style, stars, stacked SEs),
+#' which is not something anyone can load into a spreadsheet. This returns the
+#' same estimates as one long data frame so the "Download CSV" link under the
+#' table hands over usable numbers.
+#'
+#' @param fit1,fit2,fit3 fixest model objects (ignored on the RIF path).
+#' @param engine    Estimation engine; `"rif"` reads `rif_grid` instead.
+#' @param rif_grid  RIF coefficient grid (term, tau, model, estimate, ...).
+#' @param label_fun Function mapping variable names to human labels.
+#'
+#' @return A data.frame, or NULL when nothing can be extracted.
+#' @noRd
+make_regtable_df <- function(fit1, fit2, fit3,
+                             engine    = "fixest",
+                             rif_grid  = NULL,
+                             label_fun = identity) {
+  # --- RIF: one row per (term, quantile) from the full specification --------
+  if (identical(engine, "rif") && !is.null(rif_grid)) {
+    g <- rif_grid[rif_grid$model == 3L, , drop = FALSE]
+    if (nrow(g) == 0) return(NULL)
+    keep <- intersect(
+      c("term", "tau", "estimate", "std.error", "statistic", "p.value"),
+      names(g)
+    )
+    out <- g[order(g$term, g$tau), keep, drop = FALSE]
+    out$term <- vapply(as.character(out$term), function(x) {
+      lbl <- tryCatch(label_fun(x), error = function(e) x)
+      if (length(lbl) == 1 && !is.na(lbl) && nzchar(lbl)) lbl else x
+    }, character(1))
+    # Same column names as the fixest branch below, so both engines export a
+    # CSV with the same header.
+    rename <- c(term = "Variable", tau = "Quantile", estimate = "Estimate",
+                std.error = "Std. error", statistic = "Statistic",
+                p.value = "p value")
+    hit <- names(out) %in% names(rename)
+    names(out)[hit] <- unname(rename[names(out)[hit]])
+    out$Model <- "(3) FE + Controls"
+    front <- intersect(c("Model", "Variable", "Quantile"), names(out))
+    return(out[, c(front, setdiff(names(out), front)), drop = FALSE])
+  }
+
+  # --- fixest: one row per (specification, term) ----------------------------
+  specs <- list(
+    "(1) No FE"           = fit1,
+    "(2) FE"              = fit2,
+    "(3) FE + Controls"   = fit3
+  )
+  rows <- lapply(names(specs), function(nm) {
+    fit <- specs[[nm]]
+    if (!inherits(fit, "fixest")) return(NULL)
+    ct <- tryCatch(.fixest_coeftable(fit), error = function(e) NULL)
+    if (is.null(ct) || nrow(ct) == 0) return(NULL)
+    terms <- rownames(ct)
+    data.frame(
+      Model     = nm,
+      Variable  = vapply(terms, function(x) {
+        lbl <- tryCatch(label_fun(x), error = function(e) x)
+        if (length(lbl) == 1 && !is.na(lbl) && nzchar(lbl)) lbl else x
+      }, character(1)),
+      Term      = terms,
+      Estimate  = unname(ct[, 1]),
+      `Std. error` = unname(ct[, 2]),
+      `p value`    = unname(ct[, 4]),
+      Observations = tryCatch(stats::nobs(fit), error = function(e) NA_integer_),
+      check.names = FALSE,
+      stringsAsFactors = FALSE,
+      row.names = NULL
+    )
+  })
+  rows <- Filter(Negate(is.null), rows)
+  if (length(rows) == 0) return(NULL)
+  do.call(rbind, rows)
+}
+
+
 #' Build an AER-style regression table from up to 3 fixest models
 #'
 #' @param fit1,fit2,fit3 fixest model objects.
@@ -1408,6 +1485,8 @@ make_weather_effect_plot <- function(fit, pred_var, interaction_terms, is_binned
 #' @param interaction_terms Character vector of interaction variable names.
 #' @param label_fun      Function mapping variable names to human labels.
 #' @param engine         Character, estimation engine (default "fixest").
+#' @param is_logistic    Logical, TRUE for a logistic specification.
+#' @param rif_grid       RIF coefficient grid, used when `engine == "rif"`.
 #'
 #' @return A data.frame suitable for renderTable().
 #' @noRd

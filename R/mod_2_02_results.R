@@ -1335,6 +1335,32 @@ mod_2_02_results_server <- function(id,
       dplyr::bind_rows(Filter(Negate(is.null), rows))
     })
 
+    # UI-48: register Step 2's result figures for the export bundle.
+    wise_export_figure(
+      key   = "climate_outcome_distribution",
+      label = "Simulated welfare by scenario and period",
+      step  = 2L,
+      fun   = function() {
+        bands <- tryCatch(pointrange_bands_rv(), error = function(e) NULL)
+        if (is.null(bands)) return(NULL)
+        if (!isTRUE(input$show_model_spread)) {
+          bands$intermod_lo <- NA_real_
+          bands$intermod_hi <- NA_real_
+        }
+        plot_pointrange_climate(
+          bands_tbl    = bands,
+          x_label      = tryCatch(agg_hist()$x_label, error = function(e) NULL),
+          group_order  = input$cmp_group_order %||% "scenario_x_year",
+          show_coef    = isTRUE(input$show_coef_uncertainty) && has_draws()
+        )
+      },
+      description = paste(
+        "Simulated welfare by climate scenario and projection period, with",
+        "coefficient and inter-model uncertainty bands where enabled."
+      ),
+      width = 10, height = 6.5
+    )
+
     output$summary_box_plot <- renderPlot({
       req(pointrange_bands_rv())
       bands <- pointrange_bands_rv()
@@ -1349,6 +1375,32 @@ mod_2_02_results_server <- function(id,
         show_coef    = isTRUE(input$show_coef_uncertainty) && has_draws()
       )
     }, height = 600)
+
+    # UI-48: one builder behind the on-screen table, its CSV button and the
+    # export bundle.
+    threshold_table_df <- function() {
+      tbl <- tryCatch(threshold_table_rv(), error = function(e) NULL)
+      if (is.null(tbl)) return(NULL)
+      if (!isTRUE(input$show_model_spread)) {
+        tbl <- tbl[!grepl("^Ensemble |^Pooled ", tbl$Estimate), , drop = FALSE]
+      }
+      build_threshold_table_df(
+        threshold_tbl = tbl,
+        group_order   = input$cmp_group_order %||% "scenario_x_year",
+        show_coef     = isTRUE(input$show_coef_uncertainty) && has_draws()
+      )
+    }
+
+    wise_export_table(
+      key   = "climate_outcome_thresholds",
+      label = "Outcome threshold exceedance",
+      step  = 2L,
+      fun   = threshold_table_df,
+      description = paste(
+        "Simulated welfare outcomes against each threshold, by climate",
+        "scenario and projection period, with uncertainty bounds."
+      )
+    )
 
     output$summary_threshold_table <- DT::renderDT({
       req(threshold_table_rv())
@@ -1367,12 +1419,13 @@ mod_2_02_results_server <- function(id,
                              options  = list(dom = "t")))
       # INT-08: export is disabled while the results are stale - the table
       # stays visible, the CSV button does not.
-      dt_buttons <- if (isTRUE(stale())) NULL else
-        list(list(extend = "csv", filename = "outcome_thresholds"))
+      dt_buttons <- wise_csv_button("outcome_thresholds",
+                                    enabled = !isTRUE(stale()))
       DT::datatable(
         df, rownames = FALSE, class = "compact stripe",
         options = list(
-          pageLength = 15, dom = "Btip", ordering = list(list(2, "desc")),
+          pageLength = 15, dom = wise_csv_dom("tip"),
+          ordering = list(list(2, "desc")),
           columnDefs = list(list(className = "dt-center", targets = "_all")),
           buttons = dt_buttons
         ),
@@ -1420,6 +1473,37 @@ mod_2_02_results_server <- function(id,
         shiny::icon("circle-info"), " above for definitions."
       )
     })
+
+    # UI-48: the exceedance curve, for the export bundle.
+    wise_export_figure(
+      key   = "climate_exceedance_curve",
+      label = "Welfare exceedance probability",
+      step  = 2L,
+      fun   = function() {
+        curves <- tryCatch(exceedance_curves_rv(), error = function(e) NULL)
+        ah     <- tryCatch(agg_hist(), error = function(e) NULL)
+        if (is.null(curves) || is.null(ah)) return(NULL)
+        ens_q <- if (isTRUE(input$show_model_spread))
+          resolve_band_q(input$ensemble_band %||% "minmax")
+        else c(lo = 0.5, hi = 0.5)
+        enhance_exceedance(
+          curves_tbl      = curves,
+          x_label         = ah$x_label,
+          return_period   = isTRUE(input$show_return_period),
+          n_sim_years     = nrow(ah$out),
+          logit_x         = isTRUE(input$exceedance_logit_x),
+          band_q          = if (isTRUE(input$show_coef_uncertainty) && has_draws())
+                              resolve_band_q(input$uncertainty_band %||% "p10_p90")
+                            else NULL,
+          ensemble_band_q = ens_q
+        )
+      },
+      description = paste(
+        "Probability of welfare falling below each level, by climate scenario",
+        "and projection period."
+      ),
+      width = 10, height = 6.5
+    )
 
     output$exceedance_plot <- renderPlot({
       req(exceedance_curves_rv())
@@ -1472,23 +1556,43 @@ mod_2_02_results_server <- function(id,
         return()
       }
 
-      shiny::appendTab(
-        inputId = tabset_id,
-        shiny::tabPanel(
-          title = "Results",
-          value = "sim_tab",
-          shiny::div(id = "results_section")
-        ),
-        select  = TRUE,
-        session = tabset_session
-      )
+      # UI-50: only ever one Results tab. This used to append unconditionally,
+      # so every re-run of Step 2 added another copy - and because the new tab
+      # carried a second `#results_section`, the `insertUI()` below targeted
+      # the *first* match, filling the original tab and leaving the new one
+      # empty. Steps 1 and 3 already guarded their appends; this brings Step 2
+      # into line.
+      if (!results_tab_added()) {
+        shiny::appendTab(
+          inputId = tabset_id,
+          shiny::tabPanel(
+            title = "Results",
+            value = "sim_tab",
+            shiny::div(id = "results_section")
+          ),
+          select  = TRUE,
+          session = tabset_session
+        )
+        results_tab_added(TRUE)
+      } else {
+        # The tab is already there. Clear its contents so the re-run's results
+        # replace the previous run's rather than stacking beneath them - the
+        # pane is built from `hist_sim()$so`, which a new run may have changed.
+        # Both this and the insert below are deferred to the end of the flush
+        # and run in call order, so the clear always precedes the rewrite.
+        # Deferring also keeps the first-run path byte-for-byte as it was:
+        # appendTab's DOM insertion lands before anything targets
+        # #results_section.
+        shiny::removeUI(selector = "#results_section > *", multiple = TRUE)
+        try(shiny::updateTabsetPanel(tabset_session, inputId = tabset_id,
+                                     selected = "sim_tab"), silent = TRUE)
+      }
 
       shiny::insertUI(
         selector = "#results_section",
         where    = "afterBegin",
         ui       = .results_content_ui(ns, hist_sim()$so)
       )
-      results_tab_added(TRUE)
     }, ignoreInit = TRUE, ignoreNULL = FALSE)
 
     # On subsequent runs, just re-select the tab.
