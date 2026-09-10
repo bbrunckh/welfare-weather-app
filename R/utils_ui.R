@@ -47,8 +47,9 @@ no_data_warning <- function(...) {
 
 # ---- Selection summary card ----------------------------------------------------
 # Thin "what is loaded" card at the top of the stats tabs (Survey, Outcome,
-# Weather, Model). Head: uppercase title + right-aligned badge; body: one row
-# per item with a bold name, muted sub-label and small pills.
+# Weather, Model). Head: uppercase title only; body: one row per item with a
+# bold name, muted sub-label and small pills. Everything the card says lives
+# in those rows - nothing is parked in a corner (UI-52).
 # Styled by .selection-card rules in inst/app/www/custom.css.
 
 #' Build one row of a `selection_summary_card()`
@@ -92,52 +93,87 @@ selection_card_row <- function(name, sub = NULL, pills = NULL, note = NULL) {
 #'   headerless card.
 #' @param rows  List of row specs; each a list with `name`, optional `sub`
 #'   and `pills` (see `selection_card_row()`), or pre-built row tags.
-#' @param badge Optional right-aligned badge in the card head (e.g. level of
-#'   analysis).
+#' @param badge Optional single pill (e.g. level of analysis, model type,
+#'   scenario count). UI-52: never placed in the head. Where it needs no
+#'   explanation it rides on the first row (`badge_label = NULL`); where it
+#'   does, `badge_label` gives it a row of its own with a preamble.
+#' @param badge_label Optional preamble naming what `badge` is, e.g.
+#'   `"Regression model"`. When supplied the badge becomes its own labelled
+#'   row; when `NULL` it is appended to the first row's pills instead of
+#'   spending a row on a bare, unexplained pill.
 #' @param info  Optional text; when supplied an (i) popover explaining the
 #'   card is attached to the title.
 #' @param compact Logical; tighter paddings/font sizes for sidebar use.
 #'
 #' @noRd
-selection_summary_card <- function(title, rows, badge = NULL, info = NULL,
+selection_summary_card <- function(title, rows, badge = NULL,
+                                   badge_label = NULL, info = NULL,
                                    compact = FALSE) {
-  head <- if (is.null(title) && is.null(badge)) {
+  # UI-52: `badge` used to sit right-aligned in the head, which put a piece of
+  # content (the comparison period, the simulation years, the level of
+  # analysis) in a corner with nothing to tie it to the rows it qualified.
+  # It is content now: inline on the first row when it speaks for itself, or a
+  # labelled row when it needs a preamble to be read at all - "2,400
+  # simulation years" says nothing on its own.
+  has_badge <- !is.null(badge) && length(badge) == 1L && nzchar(badge)
+
+  head <- if (is.null(title)) {
     NULL
   } else {
     shiny::tags$div(
       class = "selection-card-head",
-      if (!is.null(title)) {
-        shiny::tags$span(
-          class = "selection-card-title",
-          title,
-          if (!is.null(info) && nzchar(info)) info_popover(shiny::p(info))
-        )
-      },
-      if (!is.null(badge) && nzchar(badge)) {
-        shiny::tags$span(class = "selection-card-badge", badge)
-      }
+      shiny::tags$span(
+        class = "selection-card-title",
+        title,
+        if (!is.null(info) && nzchar(info)) info_popover(shiny::p(info))
+      )
     )
   }
   # Headerless card with an info popover: anchor the (i) on the first row.
   if (is.null(title) && !is.null(info) && nzchar(info)) {
     rows[[1]] <- shiny::tagAppendChildren(rows[[1]], info_popover(shiny::p(info)))
   }
+  # Inline: hang the pill off the first row rather than spending a row on it.
+  if (has_badge && is.null(badge_label) && length(rows)) {
+    first <- rows[[1]]
+    if (inherits(first, c("shiny.tag", "shiny.tag.list"))) {
+      rows[[1]] <- shiny::tagAppendChild(
+        first,
+        shiny::tags$span(class = "selection-card-badge", badge)
+      )
+    } else {
+      first$pills <- c(first$pills, badge)
+      rows[[1]] <- first
+    }
+    has_badge <- FALSE
+  }
+
+  badge_row <- if (has_badge) {
+    selection_card_row(
+      name  = badge_label %||% NULL,
+      pills = badge
+    )
+  }
+
+  built <- lapply(rows, function(r) {
+    # Accept both pre-built row tags and raw name/sub/pills spec lists
+    if (inherits(r, c("shiny.tag", "shiny.tag.list"))) {
+      r
+    } else {
+      selection_card_row(
+        name  = r$name,
+        sub   = r$sub,
+        pills = r$pills,
+        note  = r$note
+      )
+    }
+  })
+
   shiny::tags$div(
     class = paste("selection-card", if (isTRUE(compact)) "compact"),
     head,
-    lapply(rows, function(r) {
-      # Accept both pre-built row tags and raw name/sub/pills spec lists
-      if (inherits(r, c("shiny.tag", "shiny.tag.list"))) {
-        r
-      } else {
-        selection_card_row(
-          name  = r$name,
-          sub   = r$sub,
-          pills = r$pills,
-          note  = r$note
-        )
-      }
-    })
+    badge_row,
+    built
   )
 }
 
@@ -221,6 +257,7 @@ simulation_summary_card <- function(hist_sim, saved_scenarios = list(),
   selection_summary_card(
     title = "Selected Climate Scenario",
     badge = badge,
+    badge_label = "Simulation scope",
     rows = list(
       list(
         name = "Climate scenarios",
@@ -253,7 +290,11 @@ policy_summary_card <- function(selected_policies = NULL,
                                 baseline_hist_sim = NULL,
                                 policy_saved_scenarios = list(),
                                 selected_weather = NULL,
-                                sp_scenario = NULL) {
+                                sp_scenario = NULL,
+                                infra_scenario = NULL,
+                                digital_scenario = NULL,
+                                labor_scenario = NULL,
+                                education_scenario = NULL) {
   policies <- selected_policies %||% character(0)
   policies <- policies[!is.na(policies) & nzchar(policies)]
   labels <- vapply(policies, function(key) {
@@ -288,15 +329,19 @@ policy_summary_card <- function(selected_policies = NULL,
   historical <- if (length(historical_years) >= 2L) {
     paste0("Historical ", historical_years[1], "-", historical_years[2])
   } else NULL
-  policy_pills <- if (length(labels)) {
-    paste0(policies, " \u00B7 ", labels)
-  } else "None"
-  sp <- sp_scenario %||% list()
-  if (is.function(sp)) sp <- sp()
-  sp_active <- is.list(sp) && (
-    isTRUE(sp$transfer_amount_usd > 0) || isTRUE(sp$budget_fixed > 0)
-  )
-  sp_label <- if (sp_active) {
+  # UI-64: count what was actually *moved*, not what was selected. The pills
+  # used to be built from `selected_policies` - the Step 1 choice of which
+  # policy variable interacts with weather - so a domain the user never
+  # touched in Step 3 still reported as a configured policy. Each domain now
+  # has to pass the same predicate `apply_policy_to_svy()` uses before it
+  # will change the survey at all.
+  deref <- function(x) {
+    if (is.function(x)) x <- tryCatch(x(), error = function(e) NULL)
+    if (is.list(x)) x else NULL
+  }
+  sp <- deref(sp_scenario)
+
+  sp_label <- if (has_sp_change(sp)) {
     amount <- if (isTRUE(sp$transfer_amount_usd > 0)) {
       paste0("$", format(sp$transfer_amount_usd, trim = TRUE, big.mark = ","), "/payment")
     } else {
@@ -306,17 +351,25 @@ policy_summary_card <- function(selected_policies = NULL,
       paste0(" x ", sp$transfer_n_payments, "/year")
     } else ""
     targeting <- sp$targeting %||% "universal"
-    paste("SP", amount, payments, "-", targeting)
+    paste("Social protection", amount, payments, "-", targeting)
   } else NULL
-  policy_pills <- c(sp_label, policy_pills[policy_pills != "None"])
-  if (!length(policy_pills)) policy_pills <- "None"
-  configured_count <- length(policy_pills[policy_pills != "None"])
+
+  active <- c(
+    sp_label,
+    if (has_infra_change(deref(infra_scenario)))     "Infrastructure",
+    if (has_digital_change(deref(digital_scenario))) "Digital inclusion",
+    if (has_labor_change(deref(labor_scenario)))     "Labor market",
+    if (has_education_change(deref(education_scenario))) "Education"
+  )
+  configured_count <- length(active)
+  policy_pills <- if (configured_count > 0L) active else "None"
   climate_scenarios <- names(policy_saved_scenarios)
 
   selection_summary_card(
     title = "Selected Policy Scenarios",
     badge = paste(configured_count,
                   if (configured_count == 1L) "policy" else "policies"),
+    badge_label = "Levers configured",
     rows = list(
       list(
         name = "Climate scenarios",
@@ -325,7 +378,7 @@ policy_summary_card <- function(selected_policies = NULL,
       ),
       list(
         name  = "Policies",
-        sub   = NULL,
+        sub   = if (configured_count == 0L) "no lever has been changed yet",
         pills = policy_pills
       ),
       list(
@@ -335,6 +388,12 @@ policy_summary_card <- function(selected_policies = NULL,
           paste0("Outcome: ", so_label),
           if (length(weather_labels)) paste0(
             "Weather: ", paste(weather_labels, collapse = ", ")
+          ),
+          # The Step 1 policy selection belongs here: it names the variable
+          # crossed with weather in the model, which is a specification
+          # choice, not a Step 3 lever that was moved.
+          if (length(labels)) paste0(
+            "Policy interaction: ", paste(labels, collapse = ", ")
           ),
           model_bits
         )
@@ -595,6 +654,46 @@ step_status <- function(has_result, is_stale = NULL) {
   })
 }
 
+#' Treat a step as stale until it is re-run after a configuration import
+#'
+#' UI-68: importing a `configuration.json` replaces the settings but never
+#' replays the runs - so every stored result was produced by the *previous*
+#' configuration and is out of date the moment the file is applied. The
+#' per-step stale flags cannot see this on their own: they compare a stored
+#' run signature against live inputs, and an imported value that happens to
+#' match what was already there moves neither.
+#'
+#' This ORs the step's own staleness with "an import has happened since this
+#' step last produced a result", so the navbar reads the same after a restore
+#' as it does after a setting is changed by hand - and each badge clears
+#' independently as its step is re-run, rather than all at once.
+#'
+#' @param has_result Reactive returning the step's stored result.
+#' @param is_stale   Reactive for the step's own staleness, or NULL.
+#' @param imported   Reactive returning a counter bumped on each import.
+#'
+#' @return A reactive returning a scalar logical.
+#' @noRd
+stale_after_import <- function(has_result, is_stale = NULL, imported = NULL) {
+  if (is.null(imported)) return(is_stale %||% shiny::reactive(FALSE))
+
+  # Import generation the current result was produced under. Bumped whenever
+  # the step publishes a new result, which is what clears the badge.
+  seen <- shiny::reactiveVal(0L)
+  shiny::observeEvent(has_result(), {
+    seen(shiny::isolate(tryCatch(imported(), error = function(e) 0L)))
+  })
+
+  shiny::reactive({
+    own <- isTRUE(tryCatch(
+      if (is.null(is_stale)) FALSE else is_stale(),
+      error = function(e) FALSE
+    ))
+    gen <- tryCatch(imported(), error = function(e) 0L)
+    own || isTRUE(gen > seen())
+  })
+}
+
 #' Render a step's navbar status badge
 #'
 #' @param has_result,is_stale Reactives, as for `step_status()`.
@@ -640,11 +739,25 @@ wise_csv_button <- function(filename, enabled = TRUE) {
 
 #' Add the Buttons placeholder to a DT `dom` string
 #'
+#' UI-51: DataTables renders each `dom` control as its own block, so a table
+#' with buttons, a page-length picker and a search box spent three stacked
+#' rows on chrome before the first data row - on top of the title and
+#' subtitle above it. Where the table has both a length picker (`l`) and a
+#' search box (`f`), the three are wrapped in one `<'wise-dt-controls'>` flex
+#' row (download + length left, search right, see custom.css). Tables without
+#' those controls just gain the buttons placeholder.
+#'
 #' @param dom A DataTables `dom` string (e.g. "t", "lfrtip").
-#' @return The same string with a leading "B" if it lacked one.
+#' @return A `dom` string including the Buttons placeholder.
 #' @noRd
 wise_csv_dom <- function(dom = "lfrtip") {
-  if (grepl("B", dom, fixed = TRUE)) dom else paste0("B", dom)
+  if (grepl("B", dom, fixed = TRUE)) return(dom)
+  has_len    <- grepl("l", dom, fixed = TRUE)
+  has_search <- grepl("f", dom, fixed = TRUE)
+  if (!has_len || !has_search) return(paste0("B", dom))
+  # Pull l and f out of their original positions and into the shared row.
+  rest <- gsub("[lf]", "", dom)
+  paste0("<'wise-dt-controls'Blf>", rest)
 }
 
 #' Small "Download CSV" link for a non-DT table

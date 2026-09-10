@@ -28,6 +28,33 @@ mod_2_02_results_ui <- function(id) {
     shiny::wellPanel(
       class = "results-controls",
       style = "padding: 8px 12px 4px 12px;",
+      # UI-60: the panel had no heading, so a block of aggregation and
+      # uncertainty controls sat under the summary card with nothing saying
+      # what it governed or that it only changes the presentation of results
+      # already computed.
+      shiny::tags$div(
+        class = "results-controls-head",
+        shiny::tags$span(
+          class = "results-controls-title",
+          "How results are summarised",
+          info_popover(
+            title = "How results are summarised",
+            shiny::p(paste(
+              "These controls change how the simulated outcomes below are",
+              "aggregated and displayed. They do not re-run the simulation -",
+              "nothing here changes the underlying draws, so switching",
+              "between them is instant."
+            )),
+            shiny::p(paste(
+              "Aggregation method sets the statistic computed across",
+              "households (mean, a poverty measure, a quantile).",
+              "Deviation re-expresses each scenario relative to the",
+              "historical baseline instead of in outcome units. The",
+              "uncertainty options control which bands are drawn."
+            ))
+          )
+        )
+      ),
       # Single compact row: outcome + uncertainty controls wrap as needed
       shiny::tags$div(
         style = "display:flex; align-items:flex-end; gap:12px; flex-wrap:wrap;",

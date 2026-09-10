@@ -89,7 +89,10 @@ mod_1_modelling_server <- function(id,
                                     survey_list,
                                     variable_list,
                                     cpi_ppp,
-                                    pov_lines) {
+                                    pov_lines,
+                                    run_trigger = reactive(NULL),
+                                    load_survey_trigger = reactive(NULL),
+                                    load_weather_trigger = reactive(NULL)) {
   moduleServer(id, function(input, output, session) {
 
     # ---- 1. Sample ----------------------------------------------------------
@@ -112,7 +115,8 @@ mod_1_modelling_server <- function(id,
       selected_outcome  = NULL,
       tabset_id         = "step1_output_tabs",
       tabset_session    = session,
-      analysis_unit     = s1$analysis_unit
+      analysis_unit     = s1$analysis_unit,
+      run_trigger       = load_survey_trigger
     )
 
     # ---- 3. Outcome ---------------------------------------------------------
@@ -150,7 +154,8 @@ mod_1_modelling_server <- function(id,
       cell_data         = s2$cell_data,
       survey_version    = s2$survey_version,
       tabset_id         = "step1_output_tabs",
-      tabset_session    = session
+      tabset_session    = session,
+      run_trigger       = load_weather_trigger
     )
 
     # ---- 6. Model -----------------------------------------------------------
@@ -162,7 +167,8 @@ mod_1_modelling_server <- function(id,
       analysis_unit    = s1$analysis_unit,
       selected_outcome = s3$selected_outcome,
       selected_weather = s4$selected_weather,
-      survey_weather   = s5$survey_weather
+      survey_weather   = s5$survey_weather,
+      run_trigger      = run_trigger
     )
 
     # ---- 7. Results ---------------------------------------------------------
@@ -175,7 +181,15 @@ mod_1_modelling_server <- function(id,
       selected_weather = s4$selected_weather,
       survey_weather   = s5$survey_weather,
       selected_model   = s6$selected_model,
-      run_model        = s6$run_model,
+      # UI-69: the fit fires on the button or on an external pipeline request.
+      # The handler ignores the value, so pairing them in a list is enough to
+      # invalidate on either.
+      run_model        = reactive({
+        btn <- s6$run_model(); ext <- run_trigger()
+        # UI-75: see the loaders - NULL until a real click or a run request.
+        if (!shiny::isTruthy(btn) && is.null(ext)) return(NULL)
+        list(btn = btn, ext = ext)
+      }),
       fit_guard        = s6$fit_guard,
       survey_version   = s2$survey_version,
       tabset_id        = "step1_output_tabs",
@@ -209,6 +223,9 @@ mod_1_modelling_server <- function(id,
       # Data
       survey_data    = s2$survey_data,
       survey_weather = s5$survey_weather,
+      # UI-75: completion ticks for the pipeline runner.
+      survey_load_done  = s2$load_done,
+      weather_load_done = s5$load_done,
       model_fit      = s7$model_fit,
       stored_breaks  = s5$stored_breaks,
 

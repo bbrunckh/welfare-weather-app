@@ -54,7 +54,8 @@ mod_1_06_model_server <- function(id,
                                    analysis_unit,
                                    selected_outcome,
                                    selected_weather,
-                                   survey_weather) {
+                                   survey_weather,
+                                   run_trigger = reactive(NULL)) {
   moduleServer(id, function(input, output, session) {
     ns <- session$ns
 
@@ -800,7 +801,21 @@ mod_1_06_model_server <- function(id,
     # `selected_model()`. The explicit priority is what orders the two - both
     # observers key off the same button, and flush order between equal
     # priorities is not something to rely on.
-    observeEvent(input$run_model, {
+    # UI-69: the run can be requested by the button or by the configuration
+    # pipeline runner. Both go through one signal so the Lasso is selected the
+    # same way either way - an external run that skipped it would fit the
+    # model with no covariates at all.
+    run_signal <- reactive({
+      btn <- input$run_model; ext <- run_trigger()
+      # UI-75: NULL until a real click or a pipeline request. Wrapping the
+      # button in a list defeated ignoreNULL, so the value 0 that a freshly
+      # rendered button reports counted as an event - which loaded the survey
+      # the instant surveys were selected, before anyone pressed anything.
+      if (!shiny::isTruthy(btn) && is.null(ext)) return(NULL)
+      list(btn = btn, ext = ext)
+    })
+
+    observeEvent(run_signal(), {
       if (!isTRUE(input$covariates == "Lasso")) {
         lasso_store(NULL)
         return(invisible(NULL))
@@ -839,7 +854,7 @@ mod_1_06_model_server <- function(id,
           duration = 3
         )
       }
-    }, priority = 100)
+    }, priority = 100, ignoreInit = TRUE)
 
     # ---- Return API ---------------------------------------------------------
 
@@ -972,6 +987,15 @@ mod_1_06_model_server <- function(id,
         session, inputId = "run_model",
         disabled = length(run_prereqs_missing()) > 0
       )
+    })
+
+    # UI-73: rendered eagerly so the controls exist before their accordion
+    # panel is opened. Sidebars open one panel at a time and hidden outputs
+    # are suspended, so a setting restored from a configuration had nothing to
+    # land on until the user happened to visit that panel - which is why an
+    # import reported dozens of controls that "never appeared".
+    lapply(c("model_selector_ui", "policy_ui", "lasso_force_ui", "lasso_advanced_ui"), function(out_id) {
+      shiny::outputOptions(output, out_id, suspendWhenHidden = FALSE)
     })
 
     list(

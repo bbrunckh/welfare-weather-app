@@ -15,6 +15,103 @@
 SP_TRANSFER_COL <- ".wiseapp_sp_transfer"
 
 
+# ---------------------------------------------------------------------------- #
+# "Has this lever actually been moved?" predicates                              #
+#                                                                              #
+# UI-64. Selecting a policy domain in Step 1 says which levers are *available*, #
+# not that any value was changed. The Step 3 summary card counted the           #
+# selection, so a domain the user never touched still reported as "configured". #
+# These predicates are the same tests `apply_policy_to_svy()` uses to decide    #
+# whether to touch the survey at all, so the card and the simulation cannot     #
+# disagree about what is active.                                                #
+# ---------------------------------------------------------------------------- #
+
+#' TRUE when a numeric lever field is present and non-zero
+#' @noRd
+.lever_moved <- function(x) {
+  !is.null(x) && length(x) == 1L && !is.na(x) && is.numeric(x) && x != 0
+}
+
+#' TRUE when an access lever is either set to universal or shifted
+#' @noRd
+.access_moved <- function(universal, change_pct) {
+  isTRUE(universal) || .lever_moved(change_pct)
+}
+
+#' Has the infrastructure scenario been changed from its defaults?
+#' @param infra Scenario list from `mod_3_02_infra_server()`.
+#' @return Scalar logical.
+#' @export
+has_infra_change <- function(infra) {
+  if (is.null(infra)) return(FALSE)
+  .access_moved(infra$elec_universal, infra$elec_access_change_pct) ||
+    .access_moved(infra$water_universal, infra$water_access_change_pct) ||
+    .access_moved(infra$sanitation_universal,
+                  infra$sanitation_access_change_pct) ||
+    .lever_moved(infra$health_travel_pct) ||
+    identical(infra$health_mode, "max") ||
+    .access_moved(infra$piped_universal, infra$piped_access_change_pct) ||
+    .access_moved(infra$piped_to_prem_universal,
+                  infra$piped_to_prem_access_change_pct) ||
+    .access_moved(infra$imp_wat_san_universal,
+                  infra$imp_wat_san_access_change_pct)
+}
+
+#' Has the digital inclusion scenario been changed from its defaults?
+#' @param digital Scenario list from `mod_3_03_digital_server()`.
+#' @return Scalar logical.
+#' @export
+has_digital_change <- function(digital) {
+  if (is.null(digital)) return(FALSE)
+  .access_moved(digital$internet_universal,
+                digital$internet_access_change_pct) ||
+    .access_moved(digital$mobile_universal, digital$mobile_access_change_pct)
+}
+
+#' Has the education scenario been changed from its defaults?
+#' @param education Scenario list from `mod_3_05_education_server()`.
+#' @return Scalar logical.
+#' @export
+has_education_change <- function(education) {
+  if (is.null(education)) return(FALSE)
+  .access_moved(education$primary_universal,
+                education$primary_access_change_pct) ||
+    .access_moved(education$secondary_universal,
+                  education$secondary_access_change_pct) ||
+    .access_moved(education$postsec_universal,
+                  education$postsec_access_change_pct)
+}
+
+#' Has the labor market scenario been changed from its defaults?
+#' @param labor Scenario list from `mod_3_04_labor_server()`.
+#' @return Scalar logical.
+#' @export
+has_labor_change <- function(labor) {
+  if (is.null(labor)) return(FALSE)
+  .lever_moved(labor$employment_change_pp) ||
+    .lever_moved(labor$sector_manufacturing) ||
+    .lever_moved(labor$sector_services)
+}
+
+#' Has the social protection scenario been given money to spend?
+#'
+#' Targeting alone changes nothing: a scenario with a cutoff but a zero
+#' transfer leaves welfare untouched.
+#'
+#' @param sp Scenario list from `mod_3_01_sp_server()`.
+#' @return Scalar logical.
+#' @export
+has_sp_change <- function(sp) {
+  if (is.null(sp)) return(FALSE)
+  if (identical(sp$budget_mode %||% "transfer_first", "budget_first")) {
+    .lever_moved(sp$budget_fixed)
+  } else {
+    .lever_moved(sp$transfer_amount_usd) &&
+      .lever_moved(sp$transfer_n_payments)
+  }
+}
+
+
 #' Population-level cost of an applied social-protection transfer
 #'
 #' The single implementation of the transfer arithmetic the Step 3 diagnostics
@@ -436,24 +533,7 @@ apply_policy_to_svy <- function(svy,
 
   # Infrastructure: only apply if user has specified non-zero changes
   if (!is.null(infra)) {
-    # Check if any infrastructure policy is actually active (non-zero or universal)
-    has_infra_change <- (isTRUE(infra$elec_universal) ||
-                         (!is.null(infra$elec_access_change_pct) && infra$elec_access_change_pct != 0)) ||
-                        (isTRUE(infra$water_universal) ||
-                         (!is.null(infra$water_access_change_pct) && infra$water_access_change_pct != 0)) ||
-                        (isTRUE(infra$sanitation_universal) ||
-                        (!is.null(infra$sanitation_access_change_pct) && infra$sanitation_access_change_pct != 0)) ||
-                        (!is.null(infra$health_travel_pct) && infra$health_travel_pct != 0) ||
-                        identical(infra$health_mode, "max") ||
-                        (isTRUE(infra$piped_universal) ||
-                         (!is.null(infra$piped_access_change_pct) && infra$piped_access_change_pct != 0)) ||
-                        (isTRUE(infra$piped_to_prem_universal) ||
-                         (!is.null(infra$piped_to_prem_access_change_pct) && infra$piped_to_prem_access_change_pct != 0)) ||
-                        (isTRUE(infra$imp_wat_san_universal) ||
-                         (!is.null(infra$imp_wat_san_access_change_pct) && infra$imp_wat_san_access_change_pct != 0))
-
-
-    if (has_infra_change) {
+    if (has_infra_change(infra)) {
       if ("electricity" %in% lever_cols) {
         svy$electricity <- .apply_binary_access(
           svy$electricity,
@@ -509,12 +589,7 @@ apply_policy_to_svy <- function(svy,
 
   # Digital inclusion: only apply if user has specified non-zero changes
   if (!is.null(digital)) {
-    has_digital_change <- (isTRUE(digital$internet_universal) ||
-                           (!is.null(digital$internet_access_change_pct) && digital$internet_access_change_pct != 0)) ||
-                          (isTRUE(digital$mobile_universal) ||
-                           (!is.null(digital$mobile_access_change_pct) && digital$mobile_access_change_pct != 0))
-
-    if (has_digital_change) {
+    if (has_digital_change(digital)) {
       if ("internet" %in% lever_cols) {
         svy$internet <- .apply_binary_access(
           svy$internet,
@@ -534,14 +609,7 @@ apply_policy_to_svy <- function(svy,
 
   # Education: only apply if user has specified non-zero changes
   if (!is.null(education)) {
-    has_education_change <- (isTRUE(education$primary_universal) ||
-                             (!is.null(education$primary_access_change_pct) && education$primary_access_change_pct != 0)) ||
-                            (isTRUE(education$secondary_universal) ||
-                             (!is.null(education$secondary_access_change_pct) && education$secondary_access_change_pct != 0)) ||
-                            (isTRUE(education$postsec_universal) ||
-                             (!is.null(education$postsec_access_change_pct) && education$postsec_access_change_pct != 0))
-
-    if (has_education_change) {
+    if (has_education_change(education)) {
       if ("educ_com1_hh" %in% lever_cols) {
         svy$educ_com1_hh <- .apply_binary_access(
           svy$educ_com1_hh,
@@ -568,11 +636,7 @@ apply_policy_to_svy <- function(svy,
 
   # Labour market: only apply if user has specified non-zero changes
   if (!is.null(labor)) {
-    has_labor_change <- (!is.null(labor$employment_change_pp) && labor$employment_change_pp != 0) ||
-                        (!is.null(labor$sector_manufacturing) && labor$sector_manufacturing != 0) ||
-                        (!is.null(labor$sector_services) && labor$sector_services != 0)
-
-    if (has_labor_change) {
+    if (has_labor_change(labor)) {
       # Employment rate change (percentage points): unemployed -> employed/selfemployed
       # Requires all three employment status columns to be present
       emp_change <- (labor$employment_change_pp %||% 0) / 100

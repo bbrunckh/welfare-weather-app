@@ -239,6 +239,7 @@ mod_1_07_results_server <- function(id,
         selection_summary_card(
           title = "Selected model",
           badge = model_badge(snap$model),
+          badge_label = "Regression model",
           rows  = model_card_rows(
             snap$model,
             label_fun      = label_fun,

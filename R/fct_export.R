@@ -180,10 +180,21 @@ wise_export_items <- function(session = shiny::getDefaultReactiveDomain()) {
 # provenance side - the snapshot must agree with it.
 .EXPORT_INPUT_DROP <- c(
   "^run_model$", "^run_sim$", "^run_policy_sim$", "^load_", "^refresh",
+  # Buttons in configurations exported before they were excluded by type.
+  # The class-based rule in wise_config_snapshot() covers anything written
+  # since; these keep older files from queueing controls that can never be
+  # restored.
+  "^survey_stats$", "^weather_stats$", "_btn$",
   "^apply_", "^import_config", "^show_lasso",
   "_toggle$", "_open$", "^hide_",
   "_rows_current$", "_rows_all$", "_rows_selected$", "_columns_selected$",
   "_cells_selected$", "_search$", "_state$", "_cell_clicked$",
+  # DT registers its own controls as Shiny inputs under auto-numbered ids
+  # (DataTables_Table_0_length, ..._3_length). They are per-render UI state,
+  # not analysis configuration, and the number is assigned by render order -
+  # so the same table is Table_0 in one session and Table_3 in the next, and
+  # the value could never be restored to the control it came from anyway.
+  "^DataTables_Table_", "_cell_edit$", "_state_change$",
   "^plotly_", "_click$", "_hover$", "_brush$", "_dblclick$",
   "^\\.clientdata", "^sidebar", "^accordion$", "_bounds$", "_center$",
   "_zoom$", "_shape_", "_marker_", "_groups$",
@@ -192,6 +203,14 @@ wise_export_items <- function(session = shiny::getDefaultReactiveDomain()) {
 
 # How long the import retry keeps waiting for renderUI() controls to appear
 # before it gives up, audibly (see export_menu_server()).
+#
+# UI-70: this is measured from the last sign of progress, not from the import.
+# Controls that only exist once a step has run (the outcome picker, the
+# currency selector) cannot appear until that step finishes, and a model fit
+# alone outlasts any fixed window - so every one of them was abandoned while
+# the pipeline was still working. `export_menu_server()` pushes the deadline
+# out on each pipeline transition; the window then applies from the moment the
+# run stops making progress.
 .EXPORT_RETRY_SECONDS <- 120
 
 #' Should an input be carried in the exported configuration?
@@ -228,6 +247,15 @@ wise_config_snapshot <- function(input, seed = WISEAPP_DEFAULT_SEED,
   vals <- tryCatch(shiny::reactiveValuesToList(input), error = function(e) list())
   if (length(vals)) {
     vals <- vals[.export_keep_input(names(vals))]
+    # UI-70: action buttons cannot be restored at all - Shiny's button binding
+    # ignores `value` in receiveMessage - so carrying them achieves nothing and
+    # they sit in the deferred queue until it gives up, reported to the user as
+    # settings that could not be applied. Excluded by type rather than by name,
+    # which catches every button however it is called (survey_stats,
+    # outcome_stats_btn, run_model, ...).
+    vals <- vals[!vapply(vals, function(v) {
+      inherits(v, "shinyActionButtonValue")
+    }, logical(1))]
     # Drop values that carry no meaning outside the live session.
     vals <- vals[vapply(vals, function(v) {
       is.null(v) || is.atomic(v) || is.list(v)
@@ -263,15 +291,37 @@ wise_config_apply <- function(config, session, existing = character(0)) {
   vals <- config$inputs %||% list()
   if (!length(vals)) return(invisible(list(applied = character(0),
                                            pending = character(0))))
+
+  # UI-72: filter on the way in as well as on the way out. A file exported
+  # before a given control was excluded still lists it, and an id that can
+  # never be restored - a button, a DataTables page-length - would otherwise
+  # sit in the deferred queue until the retry window closed and then be
+  # reported to the user as a setting that could not be applied.
+  vals <- vals[.export_keep_input(names(vals))]
+  if (!length(vals)) return(invisible(list(applied = character(0),
+                                           pending = character(0))))
+
   ids <- names(vals)
   can <- if (length(existing)) ids %in% existing else rep(TRUE, length(ids))
+
+  # A control that exists and turns out to be an action button is skipped for
+  # the same reason: Shiny's binding ignores `value`, so the send is a no-op
+  # that would be counted as a restored setting.
+  is_button <- function(id) {
+    v <- tryCatch(session$input[[id]], error = function(e) NULL)
+    inherits(v, "shinyActionButtonValue")
+  }
+
+  applied <- character(0)
   for (id in ids[can]) {
+    if (is_button(id)) next
     tryCatch(
       session$sendInputMessage(id, list(value = vals[[id]])),
       error = function(e) NULL
     )
+    applied <- c(applied, id)
   }
-  invisible(list(applied = ids[can], pending = ids[!can]))
+  invisible(list(applied = applied, pending = ids[!can]))
 }
 
 #' Validate an imported configuration before anything is applied
@@ -811,7 +861,7 @@ export_menu_ui <- function() {
   note <- function(txt) shiny::tags$div(class = "export-menu-note", txt)
 
   bslib::nav_menu(
-    title = shiny::tagList(shiny::icon("file-export"), "Export"),
+    title = shiny::tagList(shiny::icon("file-export"), "Export/Import"),
     align = "right",
 
     item(shiny::tags$div(
@@ -890,7 +940,10 @@ export_menu_ui <- function() {
 #' @noRd
 export_menu_server <- function(input, output, session,
                                provenance = shiny::reactive(list()),
-                               seed = WISEAPP_DEFAULT_SEED) {
+                               seed = WISEAPP_DEFAULT_SEED,
+                               on_import = NULL,
+                               run_triggers = list(),
+                               step_results = list()) {
 
   stamp <- function() format(Sys.time(), "%Y%m%d-%H%M%S")
 
@@ -963,29 +1016,55 @@ export_menu_server <- function(input, output, session,
 
   shiny::observeEvent(input$import_config_open, {
     shiny::showModal(shiny::modalDialog(
-      title = "Import configuration",
+      title = "Restore a saved analysis",
       shiny::p(
-        "Select a ", shiny::tags$code("configuration.json"),
-        " exported from WISE-APP. Settings are restored; results are not ",
-        "re-computed, so re-run each step afterwards."
+        class = "import-lede",
+        "Load a configuration you exported earlier and re-run the analysis ",
+        "from it. Your current work is untouched until you choose to start."
       ),
-      shiny::p(
-        class = "text-muted small",
-        "Connect to the data source first. Controls that only appear once ",
-        "data has loaded are restored as the interface fills in."
+
+      shiny::tags$div(
+        class = "import-prereq",
+        shiny::tags$div(class = "import-prereq-title", "Before you start"),
+        shiny::tags$p(
+          class = "import-prereq-step",
+          "Open ", shiny::tags$b("Overview"), " in the navigation bar at the ",
+          "top and connect to your data source."
+        ),
+        shiny::tags$p(
+          class = "import-prereq-note",
+          "Everything else is done for you: the sample and weather variables ",
+          "named in the file are loaded, then the model is fitted and both ",
+          "simulations run. The one thing this window cannot do is connect ",
+          "to data or enter credentials on your behalf."
+        )
       ),
-      # UI-03: a label = NULL control still needs an accessible name; the
-      # visually-hidden label keeps the modal compact for sighted users.
-      shiny::tags$label(
-        class = "visually-hidden", `for` = "import_config_file",
-        "Configuration file (JSON) to import"
-      ),
-      shiny::fileInput("import_config_file", NULL, accept = c(".json"),
+
+      shiny::fileInput("import_config_file",
+                       "Configuration file (.json)", accept = c(".json"),
                        width = "100%"),
       shiny::uiOutput("import_config_status"),
-      footer = shiny::modalButton("Close"),
+      shiny::uiOutput("import_pipeline_ui"),
+      footer = shiny::tagList(
+        shiny::uiOutput("import_action_ui", inline = TRUE),
+        # UI-71: a real button, not modalButton(), so closing can stop the
+        # run. `custom.js` mirrors this for Escape and backdrop clicks.
+        shiny::actionButton("import_close", "Close",
+                            class = "btn-outline-secondary btn-sm")
+      ),
       easyClose = TRUE
     ))
+  })
+
+  shiny::observeEvent(input$import_close, {
+    runner$cancel()
+    shiny::removeModal()
+  })
+
+  # Escape and backdrop dismissals never reach the Close button; custom.js
+  # sends this instead so every way out of the dialog stops the pipeline.
+  shiny::observeEvent(input$import_dismissed, {
+    runner$cancel()
   })
 
   # Deferred-control retry state lives in a plain environment, not a
@@ -1018,7 +1097,15 @@ export_menu_server <- function(input, output, session,
                style = "margin-top: 8px; font-size: 13px;", st$text)
   })
 
+  # UI-69: selecting a file stages it - parsed, validated, described - but
+  # applies nothing. The app is only touched when the user presses Run, which
+  # makes closing the preview a genuine no-op rather than an undo.
+  staged_cfg <- shiny::reactiveVal(NULL)
+  # Configuration in force before a run, so it can be put back.
+  previous_cfg <- shiny::reactiveVal(NULL)
+
   shiny::observeEvent(input$import_config_file, {
+    staged_cfg(NULL)
     f <- input$import_config_file
     if (is.null(f) || !nzchar(f$datapath %||% "")) return(invisible(NULL))
 
@@ -1039,6 +1126,23 @@ export_menu_server <- function(input, output, session,
       return(invisible(NULL))
     }
 
+    staged_cfg(cfg)
+    exported <- cfg$exported_at %||% NULL
+    set_import_status(list(
+      class = if (length(verdict$notes)) "alert-warning" else "alert-info",
+      # UI-72: settings counts told the user nothing they could act on. What
+      # matters is that the file is usable and what pressing Start will do.
+      text = paste(c(
+        verdict$notes,
+        if (!is.null(exported)) paste0("Saved ", exported, ".") ,
+        "Press Start to load the data it names and re-run Steps 1 to 3."
+      ), collapse = " ")
+    ))
+  })
+
+  # ---- Applying, and running the pipeline ---------------------------------
+
+  apply_config <- function(cfg) {
     live <- names(shiny::reactiveValuesToList(input))
     res  <- wise_config_apply(cfg, session, existing = live)
     # Honesty: the server cannot see client-side send failures, and a value
@@ -1054,25 +1158,108 @@ export_menu_server <- function(input, output, session,
     ) else NULL
     import_wake(import_wake() + 1L)
 
-    parts <- c(
-      verdict$notes,
-      if (length(res$applied)) {
-        if (n_changed == length(res$applied))
-          paste0("Applied ", n_changed, " setting(s).")
-        else paste0("Applied ", n_changed, " of ", length(res$applied),
-                    " matching setting(s) (the rest were already in force).")
-      } else if (!length(res$pending)) {
-        "Nothing to apply - the file lists no controls this session has."
-      },
-      if (length(res$pending))
-        paste0(length(res$pending), " more will be applied as the matching ",
-               "controls appear."),
-      "Re-run each step to refresh results."
-    )
+    list(applied = res$applied, pending = res$pending, n_changed = n_changed)
+  }
+
+  pipeline_view <- shiny::reactiveVal(NULL)
+  runner <- pipeline_runner(
+    triggers = run_triggers,
+    results  = step_results,
+    # Re-arm the deferred apply during every settle window.
+    on_settle = function() import_wake(shiny::isolate(import_wake()) + 1L),
+    on_state = function(state, phase, message) {
+      pipeline_view(list(state = state, phase = phase, message = message))
+      # UI-70: a stage finishing is what makes the next step's controls exist,
+      # so every transition both re-arms the retry pass and pushes its
+      # deadline out. Without this the window expired mid-fit and every
+      # control not yet rendered was given up on.
+      p <- import_state$pending
+      if (!is.null(p) && length(p$ids)) {
+        import_state$pending <- list(
+          config = p$config, ids = p$ids,
+          deadline = Sys.time() + .EXPORT_RETRY_SECONDS
+        )
+        import_wake(shiny::isolate(import_wake()) + 1L)
+      }
+    }
+  )
+
+  shiny::observeEvent(input$import_run_config, {
+    cfg <- staged_cfg()
+    if (is.null(cfg)) return(invisible(NULL))
+
+    # Snapshot what is in force so the user can put it back. Results are not
+    # captured: each step owns its result privately, so a cancelled run
+    # leaves whatever completed marked stale against the restored settings
+    # rather than reverting it.
+    previous_cfg(wise_config_snapshot(input, seed = seed))
+
+    out <- apply_config(cfg)
+    if (is.function(on_import) && (out$n_changed > 0L || length(out$pending))) {
+      on_import()
+    }
+    set_import_status(NULL)   # the stage list below is the feedback now
+    runner$start()
+  })
+
+  shiny::observeEvent(input$import_restore_previous, {
+    prev <- previous_cfg()
+    if (is.null(prev)) return(invisible(NULL))
+    out <- apply_config(prev)
+    runner$reset()
+    if (is.function(on_import)) on_import()
     set_import_status(list(
-      class = if (length(verdict$notes)) "alert-warning" else "alert-success",
-      text = paste(parts, collapse = " ")
+      class = "alert-secondary",
+      text = paste(
+        "Your previous settings are back. Any step that had already re-run",
+        "keeps its new results and is marked out of date in the navigation",
+        "bar - re-run it when you are ready."
+      )
     ))
+  })
+
+  # ---- Modal panels --------------------------------------------------------
+
+  output$import_pipeline_ui <- shiny::renderUI({
+    v <- pipeline_view()
+    if (is.null(v) || identical(v$phase, "idle")) return(NULL)
+    shiny::tagList(
+      .pipeline_progress_ui(v$state),
+      if (!is.null(v$message)) shiny::div(
+        class = paste("alert", switch(v$phase,
+                                      done = "alert-success",
+                                      failed = "alert-danger",
+                                      "alert-info")),
+        role = "alert", style = "margin-top: 8px; font-size: 13px;",
+        v$message
+      )
+    )
+  })
+
+  output$import_action_ui <- shiny::renderUI({
+    v <- pipeline_view()
+    phase <- v$phase %||% "idle"
+    if (identical(phase, "running")) {
+      # Say plainly what Close does here, because it is not obvious and it is
+      # not instant: the step in flight cannot be interrupted.
+      return(shiny::tags$span(
+        class = "import-running-note me-2",
+        shiny::icon("circle-info"),
+        " Closing stops the run after the current step. That step has to ",
+        "finish before the app responds again."
+      ))
+    }
+    shiny::tagList(
+      if (!is.null(previous_cfg())) shiny::actionButton(
+        "import_restore_previous", "Undo - restore my previous settings",
+        class = "btn-outline-secondary btn-sm me-2"
+      ),
+      if (!is.null(staged_cfg())) shiny::actionButton(
+        "import_run_config",
+        if (identical(phase, "idle")) "Start" else "Run again",
+        class = "btn-primary btn-sm me-2", icon = shiny::icon("play")
+      )
+    )
   })
 
   # Controls inside renderUI() do not exist until their upstream data has
@@ -1106,17 +1293,310 @@ export_menu_server <- function(input, output, session,
     }
     if (length(still)) {
       set_import_status(list(class = "alert-warning", text = paste0(
-        "Gave up on ", length(still), " setting(s) whose controls never ",
-        "appeared - they may belong to a step this session has not loaded: ",
+        "Some settings could not be restored because their controls were ",
+        "never shown in this session - usually the sample and outcome ",
+        "pickers, which need a data source connected in Overview and Step 1 ",
+        "loaded first. Affected: ",
         paste(utils::head(vapply(still, function(id) sub("^.*-", "", id),
-                          character(1)), 6L), collapse = ", "), ".")))
+                          character(1)), 6L), collapse = ", "),
+        if (length(still) > 6L) paste0(" and ", length(still) - 6L, " more"),
+        ". Set those by hand, or connect the data source and import again.")))
     } else {
       set_import_status(list(class = "alert-success", text = paste0(
-        "All deferred settings restored as controls appeared. Re-run each ",
-        "step to refresh results.")))
+        "All settings restored.")))
     }
     import_state$pending <- NULL
   })
 
   invisible(NULL)
+}
+
+
+# ---------------------------------------------------------------------------- #
+# Configuration pipeline runner (UI-69)                                         #
+#                                                                              #
+# Importing settings without running anything leaves the app in a state no one  #
+# asked for: the sidebar says one thing, the results say another, and the       #
+# restored values are lost the moment a renderUI-built control rebuilds with    #
+# its own defaults. The runner closes that gap - read the file, apply it, and   #
+# drive Step 1 -> 2 -> 3 to completion, reporting progress in the modal.        #
+#                                                                              #
+# What is and is not transactional:                                            #
+#                                                                              #
+#   Settings   fully. The current configuration is snapshotted before anything  #
+#              is applied and can be put back exactly.                         #
+#   Results    not. Each step owns its result in a private reactiveVal and      #
+#              appends its own output tabs; once Step 1 re-fits, the previous   #
+#              fit is gone. Cancelling therefore restores the settings and      #
+#              leaves whatever ran marked stale against them - which the navbar #
+#              badges already show. Nothing is applied at all until the user    #
+#              presses Run, so closing the preview is a true no-op.             #
+# ---------------------------------------------------------------------------- #
+
+# Seconds a stage may take before the runner stops waiting. Fits and
+# simulations on large surveys are minutes, not seconds.
+.PIPELINE_STAGE_TIMEOUT <- 900
+
+#' The stages the runner drives, in order
+#' @noRd
+.pipeline_stages <- function() list(
+  list(key = "load_survey",  label = "Load the survey sample"),
+  list(key = "load_weather", label = "Load the weather variables"),
+  list(key = "step1",        label = "Step 1 - Fit the welfare model"),
+  list(key = "step2",        label = "Step 2 - Run the climate simulation"),
+  list(key = "step3",        label = "Step 3 - Run the policy simulation")
+)
+
+# UI-74: how long to wait between "a stage may fire" and firing it. Restored
+# settings reach a control through session$sendInputMessage(), which is a
+# client round-trip: the server does not hold the new value until the browser
+# echoes it back. Firing a stage in the same flush as the apply made it read
+# the *old* values - the sample loaded was whatever was selected before the
+# import, not what the file said. Each stage also creates the controls the
+# next one's settings need (the outcome picker exists only after the survey
+# loads), so the pending re-apply has to get a turn here too.
+.PIPELINE_SETTLE_SECONDS <- 3
+
+#' Settle window in force, overridable for tests via
+#' `options(wiseapp.pipeline_settle = 0)`.
+#' @noRd
+.pipeline_settle_seconds <- function() {
+  getOption("wiseapp.pipeline_settle", .PIPELINE_SETTLE_SECONDS)
+}
+
+#' Render the runner's stage list
+#'
+#' @param state Named list: `status` per stage key, one of "pending",
+#'   "running", "done", "failed", "skipped".
+#' @noRd
+.pipeline_progress_ui <- function(state) {
+  icons <- list(
+    pending = shiny::icon("circle", class = "pipeline-pending"),
+    running = shiny::icon("spinner", class = "fa-spin pipeline-running"),
+    done    = shiny::icon("circle-check", class = "pipeline-done"),
+    failed  = shiny::icon("circle-xmark", class = "pipeline-failed"),
+    skipped = shiny::icon("minus", class = "pipeline-skipped")
+  )
+  shiny::tags$ul(
+    class = "pipeline-stages",
+    lapply(.pipeline_stages(), function(st) {
+      status <- state[[st$key]] %||% "pending"
+      shiny::tags$li(
+        class = paste0("pipeline-stage pipeline-stage-", status),
+        icons[[status]],
+        shiny::tags$span(st$label),
+        if (identical(status, "running")) {
+          shiny::tags$span(class = "pipeline-note", "running\u2026")
+        }
+      )
+    })
+  )
+}
+
+#' Drive Step 1 -> 2 -> 3 after a configuration import
+#'
+#' A small state machine. Each stage fires its module's run trigger and then
+#' waits for that step's result reactive to change; a stage that does not
+#' complete within `.PIPELINE_STAGE_TIMEOUT` is reported rather than left
+#' hanging, because a failed run publishes no result and would otherwise wait
+#' for ever.
+#'
+#' @param triggers Named list of `reactiveVal`s, one per stage key, that the
+#'   step modules observe.
+#' @param results  Named list of reactives returning each step's stored result.
+#' @param on_state Callback invoked with (state, phase, message) on every
+#'   transition; drives the modal.
+#'
+#' @return A list with `start()` and `state()`.
+#' @noRd
+pipeline_runner <- function(triggers, results, on_state = NULL,
+                            on_settle = NULL) {
+  stages <- .pipeline_stages()
+  keys   <- vapply(stages, `[[`, character(1), "key")
+  # Only stages that were actually wired can be driven. A caller that supplies
+  # none (tests of the import half, say) gets an inert runner rather than an
+  # error from calling a NULL result reactive.
+  keys <- keys[vapply(keys, function(k) {
+    is.function(triggers[[k]]) && is.function(results[[k]])
+  }, logical(1))]
+
+  state    <- shiny::reactiveVal(stats::setNames(
+    rep(list("pending"), length(keys)), keys))
+  phase    <- shiny::reactiveVal("idle")   # idle | running | done | failed
+  message  <- shiny::reactiveVal(NULL)
+  active   <- shiny::reactiveVal(NULL)     # key of the stage being awaited
+  deadline <- shiny::reactiveVal(NULL)
+  # Result value seen when the active stage started; the stage is complete
+  # when its result differs from this.
+  baseline <- shiny::reactiveVal(NULL)
+
+  emit <- function() {
+    if (is.function(on_state)) on_state(state(), phase(), message())
+  }
+  set_stage <- function(key, status) {
+    st <- state(); st[[key]] <- status; state(st)
+  }
+
+  # A stage waiting for its settle window; fired by the observer below once
+  # the window closes, so restored values have made the round trip first.
+  settling     <- shiny::reactiveVal(NULL)
+  settle_until <- shiny::reactiveVal(NULL)
+
+  n_fired <- 0L
+
+  # UI-76: a trigger is disarmed once its stage has been consumed. Left set,
+  # it kept the merged run signal non-NULL - so when a lazily rendered Run
+  # button later registered (opening Step 3 for the first time makes its
+  # button report 0), the signal re-evaluated to a new list and the step ran
+  # again with nobody clicking. NULL is what ignoreNULL blocks.
+  clear_trigger <- function(key) {
+    trig <- triggers[[key]]
+    if (is.function(trig) && !is.null(shiny::isolate(trig()))) trig(NULL)
+  }
+  clear_all_triggers <- function() for (k in keys) clear_trigger(k)
+
+  fire_now <- function(key) {
+    settling(NULL); settle_until(NULL)
+    active(key)
+    baseline(tryCatch(results[[key]](), error = function(e) NULL))
+    deadline(Sys.time() + .PIPELINE_STAGE_TIMEOUT)
+    n_fired <<- n_fired + 1L
+    triggers[[key]](list(n = n_fired, at = Sys.time()))
+    emit()
+  }
+
+  fire <- function(key) {
+    set_stage(key, "running")
+    settling(key)
+    settle_until(Sys.time() + .pipeline_settle_seconds())
+    if (is.function(on_settle)) on_settle()
+    emit()
+  }
+
+  shiny::observe({
+    key <- settling()
+    until <- settle_until()
+    if (is.null(key) || is.null(until)) return(invisible(NULL))
+    if (Sys.time() >= until) {
+      fire_now(key)
+    } else {
+      # Give the pending re-apply another turn while we wait: a control that
+      # appeared during the window gets its value before the stage reads it.
+      if (is.function(on_settle)) on_settle()
+      shiny::invalidateLater(750)
+    }
+  })
+
+  advance <- function(from) {
+    idx <- match(from, keys)
+    if (is.na(idx) || idx >= length(keys)) {
+      active(NULL); deadline(NULL)
+      phase("done")
+      message(paste("Data loaded and all three steps re-run. Close this",
+                    "window to see the results."))
+      emit()
+      return(invisible(NULL))
+    }
+    fire(keys[[idx + 1L]])
+  }
+
+  fail <- function(key, why) {
+    set_stage(key, "failed")
+    later <- keys[seq_along(keys) > match(key, keys)]
+    for (k in later) set_stage(k, "skipped")
+    active(NULL); deadline(NULL)
+    clear_all_triggers()
+    phase("failed")
+    message(why)
+    emit()
+  }
+
+  # Completion watcher: a stage is done when its step publishes a result that
+  # differs from the one standing when the stage started.
+  for (k in keys) local({
+    key <- k
+    shiny::observeEvent(results[[key]](), {
+      # `active` is cleared by cancel(), so a stage that publishes after the
+      # user stopped the run does not start the next one.
+      if (!identical(active(), key)) return(invisible(NULL))
+      if (identical(results[[key]](), baseline())) return(invisible(NULL))
+      set_stage(key, "done")
+      clear_trigger(key)
+      emit()
+      advance(key)
+    }, ignoreInit = TRUE, ignoreNULL = FALSE)
+  })
+
+  # Timeout watcher. A failed run publishes no result, so without this the
+  # runner would wait for ever on a stage that already gave up.
+  shiny::observe({
+    dl <- deadline()
+    if (is.null(dl) || is.null(active())) return(invisible(NULL))
+    shiny::invalidateLater(2000)
+    if (Sys.time() > dl) {
+      fail(active(), paste0(
+        "This step has not finished after ",
+        round(.PIPELINE_STAGE_TIMEOUT / 60), " minutes, so the run has ",
+        "stopped waiting. Check the notifications for an error, then run the ",
+        "remaining steps from their own tabs."
+      ))
+    }
+  })
+
+  # UI-71: closing the dialog stops the pipeline. A stage already executing
+  # cannot be interrupted - the fit and the simulations run synchronously
+  # inside their modules' observers - so cancelling means "do not start the
+  # next one". Whatever finished stays, and the navbar badges mark anything
+  # the settings have since moved past.
+  cancel <- function() {
+    if (!identical(phase(), "running")) return(invisible(NULL))
+    running_now <- active()
+    active(NULL); deadline(NULL)
+    settling(NULL); settle_until(NULL)
+    clear_all_triggers()
+    st <- state()
+    for (k in keys) {
+      if (identical(st[[k]], "running") || identical(st[[k]], "pending")) {
+        st[[k]] <- "skipped"
+      }
+    }
+    state(st)
+    phase("cancelled")
+    message(paste0(
+      "Stopped.",
+      if (!is.null(running_now)) paste0(
+        " The step that was already running has to finish before the app",
+        " responds again - nothing after it was started."
+      ),
+      " Whatever completed is kept; anything now out of date is marked with",
+      " a reload symbol in the navigation bar."
+    ))
+    emit()
+  }
+
+  list(
+    cancel = cancel,
+    start = function() {
+      if (!length(keys)) {
+        phase("failed")
+        message("No steps are wired to the runner in this session.")
+        emit()
+        return(invisible(NULL))
+      }
+      state(stats::setNames(rep(list("pending"), length(keys)), keys))
+      phase("running")
+      message(NULL)
+      emit()
+      fire(keys[[1]])
+    },
+    reset = function() {
+      state(stats::setNames(rep(list("pending"), length(keys)), keys))
+      phase("idle"); message(NULL); active(NULL); deadline(NULL)
+      clear_all_triggers()
+      emit()
+    },
+    state   = state,
+    phase   = phase,
+    message = message
+  )
 }

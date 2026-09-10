@@ -44,6 +44,10 @@ mod_3_07_results_server <- function(id,
                                       tabset_session = NULL,
                                       selected_policies = reactive(NULL),
                                       sp_scenario    = reactive(NULL),
+                                      infra_scenario     = reactive(NULL),
+                                      digital_scenario   = reactive(NULL),
+                                      labor_scenario     = reactive(NULL),
+                                      education_scenario = reactive(NULL),
                                       residuals      = reactive("original"),
                                      stale          = reactive(FALSE)) {
   moduleServer(id, function(input, output, session) {
@@ -68,6 +72,10 @@ mod_3_07_results_server <- function(id,
        selected_hist            = selected_hist,
        selected_policies        = selected_policies,
        sp_scenario              = sp_scenario,
+       infra_scenario           = infra_scenario,
+       digital_scenario         = digital_scenario,
+       labor_scenario           = labor_scenario,
+       education_scenario       = education_scenario,
        residuals                = residuals,
       stale                    = stale
     )

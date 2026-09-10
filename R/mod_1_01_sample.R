@@ -146,6 +146,15 @@ mod_1_01_sample_server <- function(id, connection_params, survey_list, variable_
 
     # ---- Return API ---------------------------------------------------------
 
+    # UI-73: rendered eagerly so the controls exist before their accordion
+    # panel is opened. Sidebars open one panel at a time and hidden outputs
+    # are suspended, so a setting restored from a configuration had nothing to
+    # land on until the user happened to visit that panel - which is why an
+    # import reported dozens of controls that "never appeared".
+    lapply(c("unit_ui", "sample_ui", "survey_year_ui"), function(out_id) {
+      shiny::outputOptions(output, out_id, suspendWhenHidden = FALSE)
+    })
+
     list(
       selected_surveys = selected_surveys,
       analysis_unit    = reactive(input$unit)

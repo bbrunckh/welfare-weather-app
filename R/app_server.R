@@ -17,13 +17,25 @@ app_server <- function(input, output, session) {
   # ---- Step 1: modelling ---------------------------------------------------
   # Pass reactives from overview_api
 
+  # UI-69: programmatic run requests, one per step, fired in sequence by the
+  # configuration pipeline runner. Each module merges its own Run button with
+  # these, so a pipeline run and a click take exactly the same path.
+  load_survey  <- reactiveVal(NULL)
+  load_weather <- reactiveVal(NULL)
+  run_step1    <- reactiveVal(NULL)
+  run_step2    <- reactiveVal(NULL)
+  run_step3    <- reactiveVal(NULL)
+
   step1_api <- mod_1_modelling_server(
     id                = "step1",
     connection_params = overview_api$connection_params,
     survey_list       = overview_api$survey_list,
     variable_list     = overview_api$variable_list,
     cpi_ppp           = overview_api$cpi_ppp,
-    pov_lines         = overview_api$pov_lines
+    pov_lines         = overview_api$pov_lines,
+    run_trigger       = run_step1,
+    load_survey_trigger  = load_survey,
+    load_weather_trigger = load_weather
   )
 
   # ---- Step 2: simulation --------------------------------------------------
@@ -38,7 +50,8 @@ app_server <- function(input, output, session) {
     survey_weather    = step1_api$survey_weather,
     model_fit         = step1_api$model_fit,
     stored_breaks     = step1_api$stored_breaks,
-    survey_version    = step1_api$survey_version
+    survey_version    = step1_api$survey_version,
+    run_trigger       = run_step2
   )
 
   # ---- Step 3: policy scenarios --------------------------------------------
@@ -63,7 +76,8 @@ app_server <- function(input, output, session) {
     propagate_all_covariate_uncertainty =
       step2_api$propagate_all_covariate_uncertainty,
     survey_version    = step1_api$survey_version,
-    sim_stale         = step2_api$stale
+    sim_stale         = step2_api$stale,
+    run_trigger       = run_step3
   )
 
   # ---- Navbar step status badges (UI-47) -----------------------------------
@@ -74,21 +88,30 @@ app_server <- function(input, output, session) {
   # match the current inputs, a reload arrow once an input has changed, and
   # nothing at all before the step has been run.
 
+  # UI-68: importing a configuration replaces the settings but never replays
+  # the runs, so results produced under the previous configuration are out of
+  # date the moment the file lands. Bumped by the import handler below; each
+  # badge clears again as its own step is re-run.
+  config_imported <- reactiveVal(0L)
+
   output$step1_badge <- render_step_badge(
     has_result = step1_api$model_fit,
-    is_stale   = step1_api$fit_stale,
+    is_stale   = stale_after_import(step1_api$model_fit,
+                                    step1_api$fit_stale, config_imported),
     step_label = "Step 1 (model)"
   )
 
   output$step2_badge <- render_step_badge(
     has_result = step2_api$hist_sim,
-    is_stale   = step2_api$stale,
+    is_stale   = stale_after_import(step2_api$hist_sim,
+                                    step2_api$stale, config_imported),
     step_label = "Step 2 (climate scenarios)"
   )
 
   output$step3_badge <- render_step_badge(
     has_result = step3_api$policy_hist_sim,
-    is_stale   = step3_api$stale,
+    is_stale   = stale_after_import(step3_api$policy_hist_sim,
+                                    step3_api$stale, config_imported),
     step_label = "Step 3 (policy scenarios)"
   )
 
@@ -126,7 +149,28 @@ app_server <- function(input, output, session) {
   # Not a module: the configuration snapshot reads the *root* input object, so
   # every module's namespaced controls are captured in one pass.
 
-  export_menu_server(input, output, session,
-                     provenance = run_provenance,
-                     seed = WISEAPP_DEFAULT_SEED)
+  export_menu_server(
+    input, output, session,
+    provenance = run_provenance,
+    seed = WISEAPP_DEFAULT_SEED,
+    on_import = function() {
+      config_imported(isolate(config_imported()) + 1L)
+    },
+    # UI-69: the runner fires these in order and waits for the matching result
+    # to change before moving on.
+    # UI-74: the loads are stages too. The configuration names the sample
+    # and the weather variables, so making the user click Survey stats and
+    # Weather stats by hand first was asking them to repeat what the file
+    # already says.
+    run_triggers = list(load_survey = load_survey, load_weather = load_weather,
+                        step1 = run_step1, step2 = run_step2,
+                        step3 = run_step3),
+    # The two loads are watched through completion ticks, not the data: a
+    # load that short-circuits as "already loaded" publishes no new frame.
+    step_results = list(load_survey  = step1_api$survey_load_done,
+                        load_weather = step1_api$weather_load_done,
+                        step1 = step1_api$model_fit,
+                        step2 = step2_api$hist_sim,
+                        step3 = step3_api$policy_hist_sim)
+  )
 }

@@ -503,28 +503,34 @@ mod_3_01_sp_server <- function(id,
         #     "input['", ns("sp_type"), "'] == 'regular' || ",
         #     "input['", ns("transfer_frequency"), "'] == 'regular'"
         #   ),
+          # UI-59: this explanation used to sit under the slider as a muted
+          # paragraph behind an (i) glyph - the icon looked like a control but
+          # the text was always on, which is what made the panel feel like it
+          # was reading its help aloud. It is a click popover on the label now,
+          # matching every other explanation in the app.
           sliderInput(
             inputId = ns("transfer_n_payments"),
             label   = tags$span(
               tags$i(class = "fa fa-hashtag me-1"),
-              "Number of payments per year"
+              "Number of payments per year",
+              info_popover(
+                title = "Payments per year",
+                shiny::p(paste(
+                  "The transfer amount above is per payment. Annual support =",
+                  "payment amount \u00d7 payments per year, which the simulation",
+                  "converts to a daily equivalent added to daily welfare."
+                )),
+                shiny::p(paste(
+                  "More payments per year means a larger annual transfer for",
+                  "the same per-payment amount."
+                ))
+              )
             ),
             min = 2, max = 24, value = 6, step = 1
           ) |>
             # 11 intervals -> majors at 2, 4, ..., 24 (whole numbers);
             # step = 1 keeps every whole number selectable.
-            with_grid_num(11),
-          tags$small(
-            class = "text-muted d-block mb-2",
-            tags$i(class = "fa fa-circle-info me-1"),
-            paste(
-              "The transfer amount above is per payment. Annual support =",
-              "payment amount \u00d7 payments per year, which the simulation",
-              "converts to a daily equivalent added to daily welfare \u2014 more",
-              "payments per year means a larger annual transfer for the same",
-              "per-payment amount."
-            )
-          )
+            with_grid_num(11)
         )
 
         # Anticipatory vs ex-post - hidden for regular programs
@@ -726,12 +732,11 @@ mod_3_01_sp_server <- function(id,
         )
       }
 
-      # Population counts only mean something when the survey carries weights;
-      # say which is being shown rather than passing a sample count off as a
-      # population figure.
+      # UI-58: the weighted-count qualifier is gone at the user's request.
+      # It is still worth saying when a figure is *not* population-weighted,
+      # since an unweighted sample count reads as a population otherwise.
       count_hint <- if (isTRUE(r$weighted)) {
-        paste0("weighted to population; ", fmt_count(r$n_rows), " of ",
-               fmt_count(r$n_total), " sampled")
+        NULL
       } else {
         "unweighted sample count (survey carries no weights)"
       }

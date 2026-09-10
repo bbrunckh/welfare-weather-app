@@ -84,6 +84,13 @@ mod_3_06_policy_sim_server <- function(id,
     policy_hist_sim_rv          <- reactiveVal(NULL)
     policy_saved_scenarios_rv   <- reactiveVal(list())
     sp_scenario_rv              <- reactiveVal(NULL)
+    # UI-64: the other four levers are snapshotted at run time for the same
+    # reason sp is - the Step 3 summary cards describe the run that produced
+    # the results, not whatever the sidebar happens to hold now.
+    infra_scenario_rv           <- reactiveVal(NULL)
+    digital_scenario_rv         <- reactiveVal(NULL)
+    labor_scenario_rv           <- reactiveVal(NULL)
+    education_scenario_rv       <- reactiveVal(NULL)
 
     output$sim_status_ui <- shiny::renderUI({
       err <- sim_error()
@@ -175,7 +182,19 @@ mod_3_06_policy_sim_server <- function(id,
       # FULL survey_weather() would pull in extra households from non-baseline
       # rounds and produce a systematically different aggregate.
       svy <- hs$svy %||% .safe(survey_weather())
-      sp_cfg <- .safe(sp_scenario())
+      # UI-65: `poor` is derived (welfare < poverty line), not stored. Step 2's
+      # baseline survey never passes through `prepare_outcome_df()`, so with a
+      # derived outcome the frame reaching the decomposition had no outcome
+      # column at all and `stats::ecdf(NULL)` aborted the whole run with
+      # "'x' must have 1 or more non-missing values". Derive it here - the
+      # transform is deliberately left alone, because the decomposition takes
+      # the outcome on the level scale and logs it itself.
+      svy <- ensure_outcome_column(svy, hs$so)
+      sp_cfg        <- .safe(sp_scenario())
+      infra_cfg     <- .safe(infra_scenario())
+      digital_cfg   <- .safe(digital_scenario())
+      labor_cfg     <- .safe(labor_scenario())
+      education_cfg <- .safe(education_scenario())
 
       .fail <- function(msg) {
         sim_error(simpleError(msg))
@@ -407,6 +426,10 @@ mod_3_06_policy_sim_server <- function(id,
            policy_hist_sim_rv(pol_out$hist_sim)
            policy_saved_scenarios_rv(pol_out$saved_scenarios)
            sp_scenario_rv(sp_cfg)
+           infra_scenario_rv(infra_cfg)
+           digital_scenario_rv(digital_cfg)
+           labor_scenario_rv(labor_cfg)
+           education_scenario_rv(education_cfg)
           decomp_rv(decomp)
           decomp_scenarios_rv(decomp_sc)
           policy_stale(FALSE)
@@ -466,6 +489,10 @@ mod_3_06_policy_sim_server <- function(id,
       policy_hist_sim          = policy_hist_sim_rv,
       policy_saved_scenarios   = policy_saved_scenarios_rv,
       sp_scenario              = sp_scenario_rv,
+      infra_scenario           = infra_scenario_rv,
+      digital_scenario         = digital_scenario_rv,
+      labor_scenario           = labor_scenario_rv,
+      education_scenario       = education_scenario_rv,
       stale                    = policy_stale
     )
   })

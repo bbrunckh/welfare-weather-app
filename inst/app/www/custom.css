@@ -167,6 +167,13 @@
   letter-spacing: 0.05em;
 }
 
+/* UI-52: the badge is a row now, not a head corner. Left-aligned with the
+   rows it qualifies, with a little air below before the detail rows. */
+.selection-card-badge-row {
+  padding-top: 0;
+  padding-bottom: 0.15rem;
+}
+
 .selection-card-badge {
   font-size: 0.72rem;
   font-weight: 600;
@@ -244,6 +251,13 @@
   color: var(--bs-body-color);
   background: #fff;
   white-space: nowrap;
+}
+
+/* UI-55: the history chip leads the chain. Tinted so the reference period
+   is distinguishable from the transformation stages that follow it. */
+.selection-card-stage-hist {
+  color: var(--bs-primary);
+  background: rgba(0, 113, 188, 0.08);
 }
 
 .selection-card-stage svg {
@@ -1158,6 +1172,230 @@ table.dataTable td.dt-wrap {
    identical wherever they appear. Kept deliberately understated - the export
    is a secondary action next to reading the table itself. */
 
+/* ---- UI-72: import dialog copy ------------------------------------------ */
+
+.import-lede {
+  font-size: 0.92rem;
+  margin-bottom: 0.8rem;
+}
+
+/* The two prerequisites are the most common reason a restore only half
+   works, so they get a panel rather than a muted footnote. */
+.import-prereq {
+  border: 1px solid var(--bs-border-color, #dee2e6);
+  border-left: 3px solid var(--bs-primary);
+  border-radius: 0.25rem;
+  background: var(--bs-tertiary-bg, #f8f9fa);
+  padding: 0.6rem 0.75rem;
+  margin-bottom: 0.9rem;
+}
+
+.import-prereq-title {
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--bs-secondary-color, #6c757d);
+  margin-bottom: 0.35rem;
+}
+
+.import-prereq-step {
+  margin: 0;
+  font-size: 0.87rem;
+}
+
+.import-prereq-note {
+  margin: 0.45rem 0 0;
+  font-size: 0.78rem;
+  color: var(--bs-secondary-color, #6c757d);
+}
+
+.import-running-note {
+  font-size: 0.78rem;
+  color: var(--bs-secondary-color, #6c757d);
+  max-width: 26rem;
+  display: inline-block;
+  text-align: left;
+  vertical-align: middle;
+  line-height: 1.3;
+}
+
+/* ---- UI-69: configuration pipeline progress ------------------------------
+   Shown inside the Import modal while the runner drives Step 1 -> 2 -> 3. */
+
+.pipeline-stages {
+  list-style: none;
+  margin: 0.6rem 0 0;
+  padding: 0;
+}
+
+.pipeline-stage {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.28rem 0;
+  font-size: 0.85rem;
+}
+
+.pipeline-stage .fa,
+.pipeline-stage .fas,
+.pipeline-stage .far {
+  width: 1rem;
+  text-align: center;
+}
+
+.pipeline-pending  { color: var(--bs-border-color, #dee2e6); }
+.pipeline-running  { color: var(--bs-primary); }
+.pipeline-done     { color: #198754; }
+.pipeline-failed   { color: var(--bs-danger, #dc3545); }
+.pipeline-skipped  { color: var(--bs-secondary-color, #6c757d); }
+
+.pipeline-stage-pending { color: var(--bs-secondary-color, #6c757d); }
+.pipeline-stage-done    { color: var(--bs-body-color); }
+.pipeline-stage-skipped { color: var(--bs-secondary-color, #6c757d); }
+
+.pipeline-note {
+  color: var(--bs-secondary-color, #6c757d);
+  font-size: 0.78rem;
+}
+
+/* ---- UI-60: heading for the results-controls panel ----------------------- */
+
+/* Same head/title treatment as the scenario summary card directly above it
+   (.selection-card-head / .selection-card-title), so the two panels read as
+   one stack rather than two unrelated blocks. */
+.results-controls-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.3rem;
+}
+
+.results-controls-title {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--bs-dark);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+/* ---- UI-57: map controls sit under their heading -------------------------
+   Map pickers used to be pushed to the far right of the card heading, where
+   they read as chrome rather than as the map's own controls. They now form a
+   row directly beneath the heading. */
+
+.map-controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem 1.1rem;
+}
+
+/* Stacked variant: one control per row. Used where the controls carry enough
+   options that a single row wraps awkwardly (the weather map). */
+.map-controls-stacked {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+/* UI-62: each label sits beside its control rather than above it - one row
+   per control either way, but without spending a second line on the caption.
+   `nowrap` is what keeps them together: a wide toggle (twelve interview
+   months) otherwise exceeded the space left after the caption and dropped to
+   its own flex line. The toggle shrinks instead, and its own
+   `overflow-x: auto` (.toggle-slider .shiny-options-group) takes over. */
+.map-controls-stacked > div {
+  display: flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: 0.5rem;
+}
+
+.map-control-label {
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--bs-secondary-color, #6c757d);
+  /* Natural width, so the control starts immediately after the caption
+     rather than at a shared indent. */
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+/* Shiny input containers are block-level and carry their own bottom margin;
+   inside the row they need to behave as shrinkable flex items. */
+.map-controls-stacked > div > .shiny-input-container,
+.map-controls-stacked > div > .form-group,
+.map-controls-stacked > div > .toggle-slider {
+  flex: 0 1 auto;
+  min-width: 0;
+  width: auto;
+  margin-bottom: 0 !important;
+}
+
+/* ---- UI-54: sections inside the shared weather settings flyout ----------- */
+
+.wx-flyout-section {
+  font-size: 0.82rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--bs-primary);
+  margin: 0 0 0.4rem;
+}
+
+.wx-flyout-sep {
+  margin: 0.9rem 0 0.7rem;
+  opacity: 0.35;
+}
+
+/* ---- UI-51: one row of table chrome -------------------------------------
+   `wise_csv_dom()` wraps the Buttons, page-length and search controls in this
+   container so they share a single row - download and length on the left,
+   search held to the right - instead of stacking three deep above the data. */
+
+.wise-dt-controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem 0.9rem;
+  margin-bottom: 0.4rem;
+}
+
+/* The search box keeps its right-hand position regardless of what precedes
+   it, so the column of search fields stays aligned down the tab. */
+.wise-dt-controls > .dataTables_filter,
+.wise-dt-controls > .dt-search {
+  margin-left: auto;
+  text-align: right;
+}
+
+/* DataTables gives these blocks their own floats and margins; inside the flex
+   row those fight the layout. */
+.wise-dt-controls > .dataTables_length,
+.wise-dt-controls > .dataTables_filter,
+.wise-dt-controls > .dt-length,
+.wise-dt-controls > .dt-search,
+.wise-dt-controls > div.dt-buttons {
+  float: none;
+  margin-bottom: 0;
+  padding: 0;
+}
+
+.wise-dt-controls .dataTables_length label,
+.wise-dt-controls .dataTables_filter label,
+.wise-dt-controls .dt-length label,
+.wise-dt-controls .dt-search label {
+  margin-bottom: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  white-space: nowrap;
+}
+
 div.dt-buttons {
   float: none !important;
   display: block;
@@ -1220,7 +1458,9 @@ button.wise-csv-btn .fa {
 /* ---- Info popovers (info_popover() in R/utils_ui.R) ---------------------- */
 
 .wise-info-icon {
-  font-size: 0.65em;
+  /* UI-53: nudged up from 0.65em - at that size the (i) read as punctuation
+     rather than a control, and card titles are small to begin with. */
+  font-size: 0.82em;
   color: var(--bs-secondary-color, #6c757d);
   margin-left: 0.4rem;
   vertical-align: middle;

@@ -48,7 +48,8 @@ mod_1_05_weatherstats_server <- function(
     cell_data = NULL,
     survey_version = reactive(0L),
     tabset_id,
-    tabset_session = NULL
+    tabset_session = NULL,
+    run_trigger = reactive(NULL)
 ) {
   moduleServer(id, function(input, output, session) {
     ns <- session$ns
@@ -92,6 +93,8 @@ mod_1_05_weatherstats_server <- function(
     wx_spec_so  <- shiny::reactive({ req(wx_spec()); wx_spec()$so })
     # REACT-03: digest of the last successfully completed weather load.
     last_wx_load_sig <- reactiveVal(NULL)
+    # UI-75: see mod_1_02 - completion tick the pipeline runner waits on.
+    load_done        <- reactiveVal(0L)
 
     # INT-08: banner when the survey data behind the weather load was
     # reloaded after the button was last pressed.
@@ -108,7 +111,19 @@ mod_1_05_weatherstats_server <- function(
 
     # ---- Load and merge weather on button click ------------------------------
 
-    observeEvent(input$weather_stats, {
+    # UI-69: the load fires on the button or on an external pipeline request.
+    # The handler ignores the value, so pairing them invalidates on either.
+    weather_stats_signal <- reactive({
+      btn <- input$weather_stats; ext <- run_trigger()
+      # UI-75: NULL until a real click or a pipeline request. Wrapping the
+      # button in a list defeated ignoreNULL, so the value 0 that a freshly
+      # rendered button reports counted as an event - which loaded the survey
+      # the instant surveys were selected, before anyone pressed anything.
+      if (!shiny::isTruthy(btn) && is.null(ext)) return(NULL)
+      list(btn = btn, ext = ext)
+    })
+
+    observeEvent(weather_stats_signal(), {
       req(selected_weather(), selected_surveys(), survey_data())
       if (!load_guard$begin()) return(invisible(NULL))
       on.exit(load_guard$end(), add = TRUE)
@@ -133,6 +148,7 @@ mod_1_05_weatherstats_server <- function(
       if (identical(sig, last_wx_load_sig())) {
         showNotification("Weather data is already loaded for this selection.",
                          duration = 3, type = "message")
+        load_done(load_done() + 1L)
         return(invisible(NULL))
       }
 
@@ -204,6 +220,7 @@ mod_1_05_weatherstats_server <- function(
       req(!is.null(survey_wd))
 
       survey_weather(survey_wd)
+      load_done(load_done() + 1L)
 
       # Companion frame with the continuous values behind the bins. Merged
       # from a slim slice of the survey data so it stays cheap and leaves
@@ -501,8 +518,7 @@ mod_1_05_weatherstats_server <- function(
           hy <- hist_years()
           selection_summary_card(
             title = "Selected weather",
-            badge = paste0("Historical comparison ", hy[["from"]], "-", hy[["to"]]),
-            rows  = weather_pipeline_rows(sw),
+            rows  = weather_pipeline_rows(sw, hist_years = hy),
             info  = paste(
               "Each row reads left to right: the reference window (months",
               "before each interview), how those months are aggregated into",
@@ -688,10 +704,15 @@ mod_1_05_weatherstats_server <- function(
                 bslib::card(
                   bslib::card_body(
                     gap = 0,
+                    # UI-57: heading on its own line; the two pickers stack
+                    # one per row underneath, each under its own sub-heading.
+                    # They carry enough options that a single row wrapped
+                    # awkwardly, and the wave picker was pushed to the far
+                    # right of the heading where it read as unrelated chrome.
                     shiny::div(
-                      class = "d-flex align-items-center justify-content-between flex-wrap gap-2 mb-2",
+                      class = "mb-1",
                       shiny::h4(
-                        "Map",
+                        "Weather map",
                         class = "mb-0",
                         info_popover(
                        shiny::tagList(
@@ -755,9 +776,16 @@ mod_1_05_weatherstats_server <- function(
                        )
                         )
                       ),
-                      shiny::uiOutput(ns("wxmap_wave_ui"), inline = TRUE)
                     ),
-                    shiny::uiOutput(ns("wxmap_view_ui")),
+                    shiny::div(
+                      class = "map-controls-stacked mb-2",
+                      shiny::div(
+                        shiny::tags$span(class = "map-control-label",
+                                         "Survey wave"),
+                        shiny::uiOutput(ns("wxmap_wave_ui"), inline = TRUE)
+                      ),
+                      shiny::uiOutput(ns("wxmap_view_ui"))
+                    ),
                    shiny::uiOutput(ns("weather_map_layout"))
                  )
                )
@@ -1198,18 +1226,27 @@ mod_1_05_weatherstats_server <- function(
     # matching reset of the shared value).
     has_hist <- !is.null(hist_cells()) && !is.null(hist_cells_years())
 
+      # UI-57: one control per row, each under its own sub-heading, rather
+      # than a single wrapping flex row of unlabelled pickers.
       shiny::tagList(
         shiny::div(
-          class = "d-flex align-items-center gap-3 flex-wrap",
-          wxmap_view_picker("wxmap_view"),
+          class = "map-controls-stacked",
+          shiny::div(
+            shiny::tags$span(class = "map-control-label", "View"),
+            wxmap_view_picker("wxmap_view")
+          ),
           {
             choices <- wxmap_month_choices()
             if (length(choices) > 0L) {
-              wave_toggle_slider(
-                ns("wxmap_month"),
-                choices  = choices,
-                selected = wxmap_month(),
-                label    = "Interview month"
+              shiny::div(
+                shiny::tags$span(class = "map-control-label",
+                                 "Interview month"),
+                wave_toggle_slider(
+                  ns("wxmap_month"),
+                  choices  = choices,
+                  selected = wxmap_month(),
+                  label    = NULL
+                )
               )
             }
           }
@@ -1376,6 +1413,7 @@ mod_1_05_weatherstats_server <- function(
     # ---- Return API ---------------------------------------------------------
 
     list(survey_weather = survey_weather,
-         stored_breaks  = stored_breaks)
+         stored_breaks  = stored_breaks,
+         load_done      = load_done)
   })
 }

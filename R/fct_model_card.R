@@ -1,7 +1,7 @@
 # ============================================================================ #
-# Pure functions translating a `build_selected_model()` spec into the sparse   #
-# formula line of the "Selected model" card (Results / Model fit tabs):        #
-#   outcome ~ weather (+ interactions) + covariates | FE | clustering          #
+# Pure functions translating a `build_selected_model()` spec into the labelled #
+# rows of the "Selected model" card (Results / Model fit tabs): outcome,       #
+# weather terms, covariates, fixed effects, standard errors.                   #
 # Stateless and testable without Shiny.                                        #
 # ============================================================================ #
 
@@ -31,7 +31,7 @@ model_badge <- function(selected_model) {
   paste0(type, " \u00B7 ", eng)
 }
 
-#' Plain-language clustering phrase for the formula tail
+#' Plain-language clustering phrase for the standard-errors row
 #'
 #' @param cluster Scalar character cluster column name, or empty/NULL for
 #'   unclustered.
@@ -79,20 +79,26 @@ model_covariate_total <- function(selected_model) {
 # Card assembly                                                                 #
 # ---------------------------------------------------------------------------- #
 
-#' Assemble the "Selected model" card rows (sparse formula line)
+#' Assemble the "Selected model" card rows
 #'
-#' One row echoing a regression formula: outcome ~ weather terms (crossed
-#' with interaction moderators when present) + covariates | fixed effects |
-#' clustering. Model type and engine live in the card badge.
+#' UI-56: this was a single formula line -
+#' `outcome ~ weather + N covariates | year FE | clustered` - which packed the
+#' whole specification into one dense string. The fixed-effect segment in
+#' particular was unreadable: a middle `|` section whose only clue was a
+#' trailing " FE". It now emits the same labelled `name` / `sub` / `pills`
+#' rows the Sample, Outcome and Weather cards use, so every Step 1 card reads
+#' the same way and each part of the model names itself.
+#'
+#' Model type and engine remain the card's badge row.
 #'
 #' @param selected_model Named list from `build_selected_model()`.
 #' @param label_fun Optional function mapping variable names to display
 #'   labels.
-#' @param outcome_label Optional outcome label (left-hand side).
+#' @param outcome_label Optional outcome label.
 #' @param weather_labels Optional character vector of weather variable labels
 #'   ("Monthly ..." prefixes are stripped).
 #'
-#' @return A list with one pre-built row tag for `selection_summary_card()`.
+#' @return A list of row specs for `selection_summary_card()`.
 #'
 #' @export
 model_card_rows <- function(selected_model, label_fun = NULL,
@@ -115,7 +121,8 @@ model_card_rows <- function(selected_model, label_fun = NULL,
   mods <- to_lab(sm$interactions)
   mode <- as.character(sm$interaction_mode[1] %||% "pairwise")
   fe   <- to_lab(sm$fixedeffects)
-  n_cov <- model_covariate_total(sm)
+  counts <- model_covariate_counts(sm)
+  n_cov  <- sum(counts)
 
   # Weather terms: crossed with the moderators when interactions are set.
   # Saturated mode crosses each weather with the full moderator set; pairwise
@@ -130,51 +137,63 @@ model_card_rows <- function(selected_model, label_fun = NULL,
   } else {
     wx
   }
+  wx_terms <- as.character(wx_terms)
 
-  rhs <- as.character(wx_terms)
-  if (n_cov > 0) rhs <- c(rhs, paste0(n_cov, " covariates"))
-  if (!length(rhs)) rhs <- "no covariates"
+  rows <- list()
 
-  # Token list: (op, text, muted); op tokens render as light-blue symbols.
-  toks <- list(
-    list(op = NA, text = if (is.null(outcome_label) || !nzchar(outcome_label)) {
-      "Outcome"
-    } else outcome_label, muted = FALSE),
-    list(op = "~", text = NA, muted = FALSE)
-  )
-  for (i in seq_along(rhs)) {
-    if (i > 1) toks[[length(toks) + 1L]] <- list(op = "+", text = NA, muted = FALSE)
-    toks[[length(toks) + 1L]] <- list(op = NA, text = rhs[i], muted = FALSE)
-  }
-  toks[[length(toks) + 1L]] <- list(op = "|", text = NA, muted = FALSE)
-  if (length(fe)) {
-    toks[[length(toks) + 1L]] <- list(
-      op = NA, text = paste0(paste(fe, collapse = " \u00B7 "), " FE"), muted = TRUE
-    )
-    toks[[length(toks) + 1L]] <- list(op = "|", text = NA, muted = FALSE)
-  }
-  toks[[length(toks) + 1L]] <- list(
-    op = NA, text = model_cluster_phrase(sm$cluster), muted = TRUE
+  # UI-66: label first, like every other row. This read
+  # "Poor (welfare < poverty line) outcome" - the value bolded and the label
+  # trailing it - which inverted the order of the rows around it.
+  rows[[length(rows) + 1L]] <- list(
+    name  = "Outcome",
+    sub   = NULL,
+    pills = if (!is.null(outcome_label) && nzchar(outcome_label)) outcome_label
   )
 
-  kids <- lapply(toks, function(t) {
-    if (!is.na(t$op)) {
-      shiny::tags$span(class = "selection-card-op", t$op)
-    } else {
-      shiny::tags$span(
-        class = if (isTRUE(t$muted)) "selection-card-muted" else "selection-card-formula",
-        t$text
-      )
-    }
-  })
+  rows[[length(rows) + 1L]] <- list(
+    name  = if (length(wx_terms)) "Weather terms" else "No weather terms",
+    sub   = if (length(mods)) {
+      paste0("interacted with ", paste(mods, collapse = ", "))
+    },
+    pills = if (length(wx_terms)) wx_terms
+  )
 
-  list(
-    shiny::tags$div(
-      class = "selection-card-row",
-      shiny::tags$span(
-        class = "selection-card-formula",
-        do.call(htmltools::tagList, kids)
-      )
+  # UI-67: interaction moderators are covariates. `build_formulas()` puts
+  # `terms$interactions_main` on the right-hand side of models 2 and 3, so a
+  # variable locked in by a policy scenario is estimated as a main effect
+  # exactly like a chosen control - and the card said "No covariates" while
+  # the model was fitting one. They are counted here and named in the pills,
+  # so it is still clear which came from the policy lock rather than from a
+  # covariate selection.
+  #
+  # Spelled out by role: "7 covariates" said nothing about what they were.
+  mod_labels <- unique(mods)
+  n_total <- n_cov + length(mod_labels)
+  rows[[length(rows) + 1L]] <- list(
+    name  = if (n_total > 0) {
+      paste0(n_total, " covariate", if (n_total != 1L) "s")
+    } else "No covariates",
+    sub   = if (n_cov > 0) {
+      as.character(sm$covariate_selection[1] %||% "User-defined")
+    },
+    pills = c(
+      if (n_cov > 0) paste0(unname(counts), " ", names(counts)),
+      if (length(mod_labels)) paste0(mod_labels, " (moderator)")
     )
   )
+
+  # The row the formula line hid: named, and explicit when there are none.
+  rows[[length(rows) + 1L]] <- list(
+    name  = if (length(fe)) "Fixed effects" else "No fixed effects",
+    sub   = if (length(fe)) "absorbed",
+    pills = if (length(fe)) fe
+  )
+
+  rows[[length(rows) + 1L]] <- list(
+    name  = "Standard errors",
+    sub   = model_cluster_phrase(sm$cluster),
+    pills = NULL
+  )
+
+  rows
 }

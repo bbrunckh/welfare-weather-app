@@ -2,11 +2,47 @@
 
 test_that("wise_csv_dom adds the Buttons placeholder exactly once", {
   expect_equal(wise_csv_dom("t"), "Bt")
-  expect_equal(wise_csv_dom("lfrtip"), "Blfrtip")
   expect_equal(wise_csv_dom("tip"), "Btip")
   # Already carries a B - left alone rather than gaining a second toolbar.
   expect_equal(wise_csv_dom("Btip"), "Btip")
   expect_equal(wise_csv_dom("Bt"), "Bt")
+})
+
+test_that("length and search share one row with the buttons (UI-51)", {
+  dom <- wise_csv_dom("lfrtip")
+  # A table with both a page-length picker and a search box spent three
+  # stacked rows on chrome; the three controls now share one container.
+  expect_equal(dom, "<'wise-dt-controls'Blf>rtip")
+  # Every control still appears exactly once. Count only the control letters,
+  # not the quoted class name - that string contains l, t, r, i and so on.
+  letters_only <- gsub("<'[^']*'", "<", dom)
+  for (letter in c("B", "l", "f", "r", "t", "i", "p")) {
+    expect_equal(
+      lengths(regmatches(letters_only,
+                         gregexpr(letter, letters_only, fixed = TRUE))),
+      1L, info = letter
+    )
+  }
+})
+
+test_that("tables without those controls keep the plain prefix", {
+  # Nothing to group, so no wrapper div is introduced.
+  expect_false(grepl("wise-dt-controls", wise_csv_dom("t"), fixed = TRUE))
+  expect_false(grepl("wise-dt-controls", wise_csv_dom("tip"), fixed = TRUE))
+  # A length picker without a search box (or vice versa) is left alone too.
+  expect_equal(wise_csv_dom("lrtip"), "Blrtip")
+  expect_equal(wise_csv_dom("frtip"), "Bfrtip")
+})
+
+test_that("a DT built with the grouped dom still renders", {
+  dt <- DT::datatable(
+    head(iris),
+    extensions = "Buttons",
+    options = list(dom = wise_csv_dom("lfrtip"),
+                   buttons = wise_csv_button("iris"))
+  )
+  expect_s3_class(dt, "datatables")
+  expect_equal(dt$x$options$dom, "<'wise-dt-controls'Blf>rtip")
 })
 
 test_that("wise_csv_button emits one discreet, fully-exporting CSV button", {

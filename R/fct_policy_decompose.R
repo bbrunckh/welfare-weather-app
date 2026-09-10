@@ -483,6 +483,24 @@ decompose_policy_effect <- function(svy_baseline,
   outcome <- so$name
   is_log <- isTRUE(so$transform == "log")
 
+  # UI-65: every channel below is measured against the baseline outcome, so an
+  # absent or entirely missing outcome column cannot produce a decomposition.
+  # Say so here: without this the first thing to touch it was
+  # `stats::ecdf(y_baseline)`, whose "'x' must have 1 or more non-missing
+  # values" gave no clue which column was at fault or why. Callers already
+  # treat NULL as "no decomposition available".
+  y_probe <- svy_baseline[[outcome]]
+  if (is.null(y_probe) || !any(is.finite(suppressWarnings(as.numeric(y_probe))))) {
+    warning(
+      "[decompose_policy_effect] outcome '", outcome, "' is missing from the ",
+      "baseline survey or has no usable values, so no decomposition can be ",
+      "computed. Derived outcomes (e.g. 'poor') must be built with ",
+      "ensure_outcome_column() before this point.",
+      call. = FALSE
+    )
+    return(NULL)
+  }
+
   # Identify weather hazard variable(s) and their realised values
   weather_vars <- model_fit$weather_terms
   if (is.null(weather_vars) || length(weather_vars) == 0) return(NULL)

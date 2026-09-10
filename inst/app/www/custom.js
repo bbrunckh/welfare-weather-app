@@ -168,3 +168,22 @@
     sync(false);
   });
 })();
+
+/* ---- UI-71: stop the configuration pipeline when its dialog is dismissed --
+   The Close button is a real actionButton and handles itself, but Escape and
+   backdrop clicks bypass it entirely - Bootstrap just hides the modal. Those
+   dismissals fire `hidden.bs.modal`, which is mirrored to the server here so
+   every way out of the dialog stops the run rather than leaving it advancing
+   behind a closed window. */
+(function () {
+  var seq = 0;
+
+  document.addEventListener('hidden.bs.modal', function (e) {
+    if (!e.target || e.target.id !== 'shiny-modal') return;
+    // Only meaningful once Shiny is connected; before that there is no
+    // pipeline to stop.
+    if (!window.Shiny || !Shiny.setInputValue) return;
+    seq += 1;
+    Shiny.setInputValue('import_dismissed', seq, { priority: 'event' });
+  }, true);
+})();

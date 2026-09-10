@@ -294,11 +294,23 @@ weather_stage_chip <- function(stage) {
 #'   `selection_summary_card()`.
 #'
 #' @export
-weather_pipeline_row <- function(spec_row) {
+weather_pipeline_row <- function(spec_row, hist_years = NULL) {
   r <- spec_row
   stages <- weather_pipeline_stages(r)
 
   chips <- lapply(stages, weather_stage_chip)
+
+  # UI-55: the comparison period is where the chain starts - every stage
+  # downstream is defined against it - so it leads the row as a chip rather
+  # than sitting apart as a card badge.
+  hist_chip <- if (!is.null(hist_years) &&
+                   all(c("from", "to") %in% names(hist_years))) {
+    shiny::tags$span(
+      class = "selection-card-stage selection-card-stage-hist",
+      paste0("History ", hist_years[["from"]], "-", hist_years[["to"]])
+    )
+  }
+  if (!is.null(hist_chip)) chips <- c(list(hist_chip), chips)
   # interleave: chip, chevron, chip, ... inside one wrapping pipe span
   pipe_kids <- list()
   for (i in seq_along(chips)) {
@@ -313,6 +325,11 @@ weather_pipeline_row <- function(spec_row) {
   label <- paste0(toupper(substr(label, 1, 1)), substr(label, 2, nchar(label)))
   units <- as.character(r$units[1])
 
+  # UI-55: the chevrons used to start only between the pipeline chips, so the
+  # row read as "<variable>  <stage> > <stage>" - a separator that appeared
+  # partway along and looked like an inconsistency rather than a chain. The
+  # variable is where the chain starts, so it gets one too and every adjacent
+  # pair in the row is separated the same way.
   shiny::tags$div(
     class = "selection-card-row",
     shiny::tags$span(
@@ -327,6 +344,9 @@ weather_pipeline_row <- function(spec_row) {
         }
       )
     ),
+    if (length(chips)) {
+      shiny::tags$span(class = "selection-card-chevron", "\u203A")
+    },
     shiny::tags$span(
       class = "selection-card-pipe",
       do.call(htmltools::tagList, pipe_kids)
@@ -338,11 +358,12 @@ weather_pipeline_row <- function(spec_row) {
 #'
 #' @param sw A data frame from `build_selected_weather()` (one or more rows).
 #' @param hist_years Optional named vector `c(from = , to = )`; when supplied
-#'   it is only used for the card badge text, not as a separate row.
+#'   it leads each row's chain as a "History from-to" chip (UI-55).
 #'
 #' @return A list of pre-built row tags.
 #'
 #' @export
 weather_pipeline_rows <- function(sw, hist_years = NULL) {
-  lapply(seq_len(nrow(sw)), function(i) weather_pipeline_row(sw[i, ]))
+  lapply(seq_len(nrow(sw)),
+         function(i) weather_pipeline_row(sw[i, ], hist_years = hist_years))
 }

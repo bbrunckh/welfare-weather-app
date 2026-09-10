@@ -54,6 +54,41 @@ prepare_outcome_df <- function(df, so) {
 }
 
 
+#' Ensure a derived outcome column exists, without touching transforms
+#'
+#' `poor` is not a stored variable: `prepare_outcome_df()` derives it as
+#' `welfare < poverty line`. Surfaces that never call that function - Step 2's
+#' baseline survey, and therefore the Step 3 policy decomposition built on it -
+#' see a frame with no `poor` column at all, and downstream code that reads
+#' `df[[outcome]]` gets NULL.
+#'
+#' This derives the column when it is missing and otherwise returns the frame
+#' untouched. Unlike `prepare_outcome_df()` it deliberately does *not* apply
+#' the log transform or the LCU/PPP conversion: `decompose_policy_effect()`
+#' takes the outcome on the level scale and logs it itself, so running the
+#' full preparation there would double-transform it.
+#'
+#' @param df A survey data frame.
+#' @param so One-row outcome metadata (`name`, `units`, `povline`).
+#'
+#' @return `df`, with the outcome column added when it was derivable.
+#' @export
+ensure_outcome_column <- function(df, so) {
+  if (is.null(df) || !is.data.frame(df) || is.null(so)) return(df)
+  name <- as.character(so$name[1])
+  if (length(name) != 1L || is.na(name) || !nzchar(name)) return(df)
+  if (name %in% names(df)) return(df)
+
+  units   <- as.character(so$units[1])
+  povline <- so$povline[1]
+  if (identical(name, "poor") && !is.na(povline) && "welfare" %in% names(df)) {
+    line <- .povline_to_ppp(povline, df, isTRUE(units == "LCU"))
+    df[[name]] <- as.numeric(df[["welfare"]] < line)
+  }
+  df
+}
+
+
 # Scale a user-specified poverty line to match the stored welfare column
 # (2021 PPP). LCU lines are divided by the per-observation ppp2021 factor;
 # PPP lines - and data loaded without deflators, where no load-time

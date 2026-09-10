@@ -64,7 +64,12 @@ wise_math <- function(tex, display = FALSE) {
   out <- .katex_cache[[key]]
   if (is.null(out)) {
     out <- as.character(
-      katex::katex_html(tex, displayMode = display, include_css = FALSE))
+      # preview = FALSE: katex_html() defaults to preview = interactive(),
+      # which opens an HTML viewer for every distinct formula on its first
+      # render when the app is launched from an interactive console (the
+      # VSCode R extension shows each one as a new editor tab).
+      katex::katex_html(tex, displayMode = display, include_css = FALSE,
+                        preview = FALSE))
     .katex_cache[[key]] <- out
   }
   htmltools::HTML(out)

@@ -79,7 +79,8 @@ mod_2_simulation_server <- function(id,
                                     survey_weather,
                                     model_fit,
                                     stored_breaks = reactive(NULL),
-                                    survey_version = reactive(0L)) {
+                                    survey_version = reactive(0L),
+                                    run_trigger = reactive(NULL)) {
   moduleServer(id, function(input, output, session) {
 
     # ---- 1. Unified sidebar + simulation engine ----------------------------
@@ -92,7 +93,8 @@ mod_2_simulation_server <- function(id,
       survey_weather    = survey_weather,
       model_fit         = model_fit,
       stored_breaks     = stored_breaks,
-      survey_version    = survey_version
+      survey_version    = survey_version,
+      run_trigger       = run_trigger
     )
 
     # ---- 2. Results tab ----------------------------------------------------

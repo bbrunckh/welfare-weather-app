@@ -218,6 +218,15 @@ mod_3_04_labor_server <- function(id,
     })
 
     # ---- Return API -----------------------------------------------------
+    # UI-73: rendered eagerly so the controls exist before their accordion
+    # panel is opened. Sidebars open one panel at a time and hidden outputs
+    # are suspended, so a setting restored from a configuration had nothing to
+    # land on until the user happened to visit that panel - which is why an
+    # import reported dozens of controls that "never appeared".
+    lapply(c("labor_emp_ui", "labor_sector_ui"), function(out_id) {
+      shiny::outputOptions(output, out_id, suspendWhenHidden = FALSE)
+    })
+
     list(
       labor_scenario = reactive({
         list(

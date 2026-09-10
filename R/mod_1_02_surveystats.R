@@ -40,7 +40,8 @@ mod_1_02_surveystats_server <- function(
     cpi_ppp,
     tabset_id,
     tabset_session = NULL,
-    analysis_unit  = NULL
+    analysis_unit  = NULL,
+    run_trigger = reactive(NULL)
 ) {
   moduleServer(id, function(input, output, session) {
     ns <- session$ns
@@ -81,6 +82,11 @@ mod_1_02_surveystats_server <- function(
     # signatures include it so a reload invalidates fit/sim/policy results
     # even when the selection string is unchanged.
     survey_version <- shiny::reactiveVal(0L)
+    # UI-75: bumped every time the load handler finishes - fresh load or
+    # REACT-03 short-circuit alike. The pipeline runner waits on this rather
+    # than on survey_data(): a short-circuit publishes no new frame, so a
+    # runner watching the data sat on "Load the survey sample" until timeout.
+    load_done      <- shiny::reactiveVal(0L)
     # Per-H3-cell counts behind the density map, recomputed for whichever
     # wave the picker is on. Cheap: it is a regrouping of data already in
     # memory, no round trip to the store.
@@ -143,7 +149,19 @@ mod_1_02_surveystats_server <- function(
 
     # ---- Load and prepare data on button click ------------------------------
 
-    observeEvent(input$survey_stats, {
+    # UI-69: the load fires on the button or on an external pipeline request.
+    # The handler ignores the value, so pairing them invalidates on either.
+    survey_stats_signal <- reactive({
+      btn <- input$survey_stats; ext <- run_trigger()
+      # UI-75: NULL until a real click or a pipeline request. Wrapping the
+      # button in a list defeated ignoreNULL, so the value 0 that a freshly
+      # rendered button reports counted as an event - which loaded the survey
+      # the instant surveys were selected, before anyone pressed anything.
+      if (!shiny::isTruthy(btn) && is.null(ext)) return(NULL)
+      list(btn = btn, ext = ext)
+    })
+
+    observeEvent(survey_stats_signal(), {
       req(nrow(selected_surveys()) > 0)
       if (!load_guard$begin()) return(invisible(NULL))
       on.exit(load_guard$end(), add = TRUE)
@@ -160,6 +178,7 @@ mod_1_02_surveystats_server <- function(
       if (identical(sig, last_load_sig())) {
         showNotification("Survey data is already loaded for this selection.",
                          duration = 3, type = "message")
+        load_done(load_done() + 1L)
         return(invisible(NULL))
       }
 
@@ -303,6 +322,7 @@ mod_1_02_surveystats_server <- function(
       }
 
       if (load_ok) last_load_sig(sig)
+      load_done(load_done() + 1L)
 
       notify(
         paste0("Loaded ", nrow(ss), " survey file(s) - ", nrow(df), " rows."),
@@ -637,22 +657,25 @@ mod_1_02_surveystats_server <- function(
                   # remains.
                   bslib::card_body(
                     gap = 0,
+                    # UI-57: heading on its own line, control on the row
+                    # below. The wave picker used to sit far right of the
+                    # heading, which read as unrelated chrome and left the
+                    # heading row unbalanced on narrow cards.
+                    h4(
+                      "Location of interviews", class = "mb-1",
+                      info_popover(
+                        title = "Location of interviews",
+                        p(paste(
+                          "Geographic distribution of sampled interviews.",
+                          "Each hexagon is an H3 cell shaded by how many",
+                          "sampled units fall in it; cells tile without",
+                          "overlapping, so dense areas read directly off the",
+                          "colour."
+                        ))
+                      )
+                    ),
                     shiny::div(
-                      class = paste("d-flex align-items-center",
-                                    "justify-content-between flex-wrap gap-2 mb-2"),
-                      h4(
-                        "Location of interviews", class = "mb-0",
-                        info_popover(
-                          title = "Location of interviews",
-                          p(paste(
-                            "Geographic distribution of sampled interviews.",
-                            "Each hexagon is an H3 cell shaded by how many",
-                            "sampled units fall in it; cells tile without",
-                            "overlapping, so dense areas read directly off the",
-                            "colour. Pick the survey wave on the right."
-                          ))
-                        )
-                      ),
+                      class = "map-controls mb-2",
                       shiny::uiOutput(ns("map_wave_ui"), inline = TRUE)
                     ),
                     # The MapLibre hex map. hexmap_ui() is placed directly in
@@ -711,7 +734,8 @@ mod_1_02_surveystats_server <- function(
     list(
       survey_data    = survey_data,
       cell_data      = cell_data,
-      survey_version = survey_version
+      survey_version = survey_version,
+      load_done      = load_done
     )
   })
 }

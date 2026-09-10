@@ -141,6 +141,15 @@ mod_3_03_digital_server <- function(id,
 
     # ---- Return API -----------------------------------------------------
 
+    # UI-73: rendered eagerly so the controls exist before their accordion
+    # panel is opened. Sidebars open one panel at a time and hidden outputs
+    # are suspended, so a setting restored from a configuration had nothing to
+    # land on until the user happened to visit that panel - which is why an
+    # import reported dozens of controls that "never appeared".
+    lapply(c("internet_ui", "mobile_ui"), function(out_id) {
+      shiny::outputOptions(output, out_id, suspendWhenHidden = FALSE)
+    })
+
     list(
       digital_scenario = reactive({
         list(

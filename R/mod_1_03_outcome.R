@@ -568,25 +568,28 @@ mod_1_03_outcome_server <- function(id, variable_list, survey_data,
                   height      = "470px",
                   bslib::card_body(
                     gap = 0,
+                    # UI-57: named heading on its own line, with both
+                    # toggles on the row beneath it. "Map" said nothing the
+                    # card did not already imply, and the two pickers were
+                    # pushed to the far right of the heading where they read
+                    # as chrome rather than as the map's own controls.
+                    shiny::h4(
+                      "Outcome map", class = "mb-1",
+                      info_popover(
+                        title = "Outcome map",
+                        p(paste(
+                          "Geographic distribution of the selected",
+                          "outcome. Each hexagon is an H3 cell shaded by",
+                          "the share of sampled units reporting the",
+                          "outcome (Coverage) or their mean value (Mean",
+                          "value); a location's units spread across the",
+                          "cells it covers in proportion to each cell's",
+                          "2020 population."
+                        ))
+                      )
+                    ),
                     shiny::div(
-                      class = paste("d-flex align-items-center",
-                                    "justify-content-between flex-wrap gap-2 mb-2"),
-                      shiny::h4(
-                        "Map",
-                        info_popover(
-                          title = "Map",
-                          p(paste(
-                            "Geographic distribution of the selected",
-                            "outcome. Each hexagon is an H3 cell shaded by",
-                            "the share of sampled units reporting the",
-                            "outcome (Coverage) or their mean value (Mean",
-                            "value); a location's units spread across the",
-                            "cells it covers in proportion to each cell's",
-                            "2020 population. Pick the view and the survey",
-                            "wave on the right."
-                          ))
-                        )
-                      ),
+                      class = "map-controls mb-2",
                       shiny::uiOutput(ns("cov_view_ui"), inline = TRUE),
                       shiny::uiOutput(ns("cov_wave_ui"), inline = TRUE)
                     ),
@@ -648,6 +651,15 @@ mod_1_03_outcome_server <- function(id, variable_list, survey_data,
     }, ignoreInit = TRUE)
 
     # ---- Module return API --------------------------------------------------
+
+    # UI-73: rendered eagerly so the controls exist before their accordion
+    # panel is opened. Sidebars open one panel at a time and hidden outputs
+    # are suspended, so a setting restored from a configuration had nothing to
+    # land on until the user happened to visit that panel - which is why an
+    # import reported dozens of controls that "never appeared".
+    lapply(c("outcome_ui", "currency_ui", "poverty_line_ui"), function(out_id) {
+      shiny::outputOptions(output, out_id, suspendWhenHidden = FALSE)
+    })
 
     list(
       selected_outcome = selected_outcome

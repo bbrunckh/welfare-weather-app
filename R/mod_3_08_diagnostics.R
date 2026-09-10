@@ -48,6 +48,10 @@ mod_3_08_diagnostics_server <- function(id,
                                          baseline_hist_sim = reactive(NULL),
                                          selected_weather = reactive(NULL),
                                          sp_scenario = reactive(NULL),
+                                         infra_scenario = reactive(NULL),
+                                         digital_scenario = reactive(NULL),
+                                         labor_scenario = reactive(NULL),
+                                         education_scenario = reactive(NULL),
                                          policy_saved_scenarios = reactive(list())) {
   moduleServer(id, function(input, output, session) {
     ns <- session$ns
@@ -309,27 +313,69 @@ mod_3_08_diagnostics_server <- function(id,
       if (!diag_tab_added()) {
         shiny::appendTab(
           inputId = tabset_id,
+          # UI-61: each section sits in its own wellPanel with an h4 and an
+          # (i), matching the Step 2 Diagnostics tab and the Step 3 Results
+          # pane. Previously the content ran edge-to-edge as bare headings
+          # and tables, so this tab had no panel boundaries while every other
+          # output tab did.
           shiny::tabPanel(
             title = "Diagnostics",
             value = "diag_tab",
             shiny::uiOutput(ns("policy_summary_ui")),
-            shiny::h4("Total social protection transfer amount"),
-            DT::DTOutput(ns("transfer_summary_ui")),
-            shiny::div(style = "margin: 12px 0;"),
-            shiny::h4("Summary of manipulated variables"),
-            shiny::tags$small(
-              class = "text-muted",
-              "Summary statistics (mean, SD) for variables changed by ",
-              "policy adjustments."
+
+            shiny::wellPanel(
+              shiny::h4(
+                "Total social protection transfer amount",
+                info_popover(
+                  title = "Total social protection transfer amount",
+                  shiny::p(paste(
+                    "Annual cost of the configured cash transfer at",
+                    "population level, and the equivalent per recipient."
+                  )),
+                  shiny::p(paste(
+                    "Both are computed from the transfer actually applied to",
+                    "the survey, so they match the reach preview in the",
+                    "Social protection sidebar."
+                  ))
+                )
+              ),
+              DT::DTOutput(ns("transfer_summary_ui"))
             ),
-            DT::DTOutput(ns("diag_summary_table")),
-            shiny::h4("Before/after distributions"),
-            shiny::tags$small(
-              class = "text-muted",
-              "Kernel density plots comparing baseline (grey) vs. ",
-              "policy-adjusted (red) distributions."
+
+            shiny::wellPanel(
+              shiny::h4(
+                "Summary of manipulated variables",
+                info_popover(
+                  title = "Summary of manipulated variables",
+                  shiny::p(paste(
+                    "Mean and standard deviation, before and after the policy",
+                    "adjustment, for every variable a lever changed."
+                  )),
+                  shiny::p(paste(
+                    "Only variables still present in the Step 1 model appear:",
+                    "a lever acting on a variable the model dropped would not",
+                    "affect the results, so it is not applied."
+                  ))
+                )
+              ),
+              DT::DTOutput(ns("diag_summary_table"))
             ),
-            shiny::uiOutput(ns("hist_plots_ui"))
+
+            shiny::wellPanel(
+              shiny::h4(
+                "Before/after distributions",
+                info_popover(
+                  title = "Before/after distributions",
+                  shiny::p(paste(
+                    "Distribution of each manipulated variable before (grey)",
+                    "and after (red) the policy adjustment - useful for",
+                    "checking that a lever moved the population it was",
+                    "meant to."
+                  ))
+                )
+              ),
+              shiny::uiOutput(ns("hist_plots_ui"))
+            )
           ),
           select = FALSE,
           session = tabset_session
@@ -345,6 +391,10 @@ mod_3_08_diagnostics_server <- function(id,
         baseline_hist_sim    = baseline_hist_sim(),
         selected_weather     = selected_weather(),
         sp_scenario          = sp_scenario(),
+        infra_scenario       = infra_scenario(),
+        digital_scenario     = digital_scenario(),
+        labor_scenario       = labor_scenario(),
+        education_scenario   = education_scenario(),
         policy_saved_scenarios = policy_saved_scenarios()
       )
     })

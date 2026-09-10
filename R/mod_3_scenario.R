@@ -115,7 +115,8 @@ mod_3_scenario_server <- function(id,
                                    propagate_all_covariate_uncertainty =
                                      reactive(FALSE),
                                    survey_version  = reactive(0L),
-                                   sim_stale       = reactive(FALSE)) {
+                                   sim_stale       = reactive(FALSE),
+                                   run_trigger     = reactive(NULL)) {
   moduleServer(id, function(input, output, session) {
     ns <- session$ns
 
@@ -231,7 +232,15 @@ mod_3_scenario_server <- function(id,
       # REACT-09: fire the child's run trigger on button click. req() blocks
       # the NULL/zero state of the dynamically rendered button, so the trigger
       # only fires on real clicks.
-      run_trigger       = reactive({ req(input$run_policy_sim); input$run_policy_sim })
+      # UI-69: button or external pipeline request. Neither the NULL nor the
+      # zero state of the dynamically rendered button may fire (REACT-19), so
+      # the merged trigger returns NULL until one of the two is real.
+      run_trigger       = reactive({
+        btn <- input$run_policy_sim
+        ext <- run_trigger()
+        if (!shiny::isTruthy(btn) && is.null(ext)) return(NULL)
+        list(btn = btn, ext = ext)
+      })
     )
 
     # ---- Results tabs: Baseline & Policy (both re-simulated) -------------
@@ -247,6 +256,10 @@ mod_3_scenario_server <- function(id,
        tabset_session           = session,
        selected_policies        = selected_policies,
        sp_scenario              = s6$sp_scenario,
+       infra_scenario           = s6$infra_scenario,
+       digital_scenario         = s6$digital_scenario,
+       labor_scenario           = s6$labor_scenario,
+       education_scenario       = s6$education_scenario,
        residuals                = residuals,
       stale                    = s6$stale
     )
@@ -264,6 +277,10 @@ mod_3_scenario_server <- function(id,
       baseline_hist_sim = s6$baseline_hist_sim,
       selected_weather = selected_weather,
       sp_scenario = s6$sp_scenario,
+      infra_scenario = s6$infra_scenario,
+      digital_scenario = s6$digital_scenario,
+      labor_scenario = s6$labor_scenario,
+      education_scenario = s6$education_scenario,
       policy_saved_scenarios = s6$policy_saved_scenarios
     )
 

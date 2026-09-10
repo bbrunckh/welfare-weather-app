@@ -488,6 +488,15 @@ test_that("already-in-force values are not counted as changes", {
   }
 }
 
+# UI-69: selecting a file stages it; pressing Run applies it and starts the
+# pipeline. These tests exercise the applying half, so they do both.
+.import_and_run <- function(session, path, n = 1L) {
+  session$setInputs(import_config_file = list(
+    datapath = path, name = "configuration.json", size = 20L,
+    type = "application/json"))
+  session$setInputs(import_run_config = n)
+}
+
 .import_file <- function(inputs) {
   # Plain tempfile: withr::local_tempfile() would delete the file when this
   # helper returns, before the import handler reads it.
@@ -502,13 +511,12 @@ test_that("a deferred setting is applied once its control appears (UI-52)", {
   testServer(.import_e2e_server(sent), {
     session$setInputs(`dummy_existing` = 1L)  # live before the import
     f <- .import_file(list(late_ctrl = "restored"))
-    session$setInputs(import_config_file = list(
-      datapath = f, name = "configuration.json", size = 20L,
-      type = "application/json"))
+    .import_and_run(session, f)
 
-    st <- session$userData$wise_import_status
-    expect_equal(st$class, "alert-success")
-    expect_match(st$text, "1 more will be applied")
+    # UI-72: the dialog no longer counts settings at the user - the pipeline
+    # stage list is the feedback. The deferred queue is still the contract,
+    # so assert on that instead of on prose.
+    expect_true("late_ctrl" %in% session$userData$wise_import_state$pending$ids)
     expect_false("late_ctrl" %in% ls(sent))
 
     # The mock session flushes synchronously when the control appears, so the
@@ -516,7 +524,7 @@ test_that("a deferred setting is applied once its control appears (UI-52)", {
     session$setInputs(`late_ctrl` = "placeholder")
     expect_equal(sent$late_ctrl, "restored")
     expect_match(session$userData$wise_import_status$text,
-                 "All deferred settings restored")
+                 "All settings restored", fixed = TRUE)
   })
 })
 
@@ -526,9 +534,7 @@ test_that("the heartbeat applies deferred settings without any input change", {
     skip_if_not(is.function(session$elapse),
                 "MockShinySession$elapse() unavailable")
     f <- .import_file(list(late_ctrl = "restored"))
-    session$setInputs(import_config_file = list(
-      datapath = f, name = "configuration.json", size = 20L,
-      type = "application/json"))
+    .import_and_run(session, f)
     # Let the heartbeat run while the control is still absent. The pending
     # state remains active until the control appears in a later flush.
     session$elapse(1500)
@@ -545,18 +551,18 @@ test_that("deferred settings that never appear are abandoned audibly", {
   testServer(.import_e2e_server(sent), {
     session$setInputs(`dummy_existing` = 1L)
     f <- .import_file(list(never_ctrl = "x"))
-    session$setInputs(import_config_file = list(
-      datapath = f, name = "configuration.json", size = 20L,
-      type = "application/json"))
-    expect_match(session$userData$wise_import_status$text,
-                 "1 more will be applied")
+    .import_and_run(session, f)
+    expect_true("never_ctrl" %in% session$userData$wise_import_state$pending$ids)
 
     # Expire the retry window; the next retry pass gives up, audibly.
     session$userData$wise_import_state$pending$deadline <- Sys.time() - 1
     session$setInputs(`dummy_existing` = 2L)
     st <- session$userData$wise_import_status
     expect_equal(st$class, "alert-warning")
-    expect_match(st$text, "Gave up on 1 setting")
+    # UI-72: the message says what to do about it, not just that it happened.
+    expect_match(st$text, "could not be restored", fixed = TRUE)
+    expect_match(st$text, "never_ctrl", fixed = TRUE)
+    expect_match(st$text, "Overview", fixed = TRUE)
     expect_false("never_ctrl" %in% ls(sent))
     expect_null(session$userData$wise_import_state$pending)
   })
@@ -695,4 +701,56 @@ test_that("a real list-column table round-trips through a bundle", {
   expect_length(csv, 1L)
   back <- utils::read.csv(csv, stringsAsFactors = FALSE)
   expect_equal(back$polynomial, "1; 2")
+})
+
+
+# ---- UI-70: what must never enter a configuration --------------------------
+
+test_that("DataTables' own UI state is never exported", {
+  # DT registers its controls as Shiny inputs under auto-numbered ids. The
+  # number comes from render order, so the same table is Table_0 in one
+  # session and Table_3 in the next - the value could not be restored to the
+  # control it came from even in principle.
+  for (id in c("DataTables_Table_0_length", "DataTables_Table_1_length",
+               "DataTables_Table_3_length")) {
+    expect_false(.export_keep_input(id), info = id)
+  }
+  expect_false(.export_keep_input("tbl_cell_edit"))
+  expect_false(.export_keep_input("grid_state_change"))
+})
+
+test_that("real settings with similar names are still exported", {
+  for (id in c("outcome", "currency", "step1-model-model_type",
+               "step3-sp-targeting", "step1-weather-numBins")) {
+    expect_true(.export_keep_input(id), info = id)
+  }
+})
+
+test_that("action buttons are excluded by type, not by name", {
+  testServer(function(input, output, session) {}, {
+    btn <- function(n) structure(as.integer(n),
+                                 class = c("shinyActionButtonValue", "integer"))
+    session$setInputs(
+      `step1-model-model_type` = "Linear regression",
+      outcome                  = "welfare",
+      outcome_stats_btn        = btn(3),   # names vary; the class does not
+      survey_stats             = btn(1),
+      some_future_button       = btn(2)
+    )
+    cfg <- wise_config_snapshot(input)
+    # Shiny's button binding ignores `value`, so a button can never be
+    # restored - carrying it only fills the deferred queue until it gives up.
+    expect_setequal(names(cfg$inputs),
+                    c("step1-model-model_type", "outcome"))
+  })
+})
+
+test_that("a button-free config still round-trips its real settings", {
+  testServer(function(input, output, session) {}, {
+    session$setInputs(`step1-model-covariates` = "Lasso",
+                      `step2-sim-climate` = c("ssp2_4_5", "ssp5_8_5"))
+    cfg <- wise_config_snapshot(input)
+    expect_equal(cfg$inputs$`step1-model-covariates`, "Lasso")
+    expect_equal(cfg$inputs$`step2-sim-climate`, c("ssp2_4_5", "ssp5_8_5"))
+  })
 })

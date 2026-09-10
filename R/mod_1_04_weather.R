@@ -71,6 +71,11 @@ mod_1_04_weather_server <- function(id, variable_list, selected_surveys, survey_
       wl <- weather_vars()
 
       n_vars <- length(input$weather_variable_selector)
+      # UI-54: one flyout for the whole selection rather than one per
+      # variable. Two adjacent "Configure" buttons distinguished only by a
+      # variable name read as a list of unrelated settings; a single
+      # "Weather variable(s)" control with a section per selected variable
+      # says what it configures without depending on the labels beside it.
       ui_list <- lapply(seq_along(input$weather_variable_selector), function(i) {
         v        <- input$weather_variable_selector[i]
         var_info <- wl[wl$name == v, ]
@@ -79,16 +84,13 @@ mod_1_04_weather_server <- function(id, variable_list, selected_surveys, survey_
         prefix   <- paste0(v, "_")
 
         tagList(
-          if (i > 1 && n_vars > 1) hr(),
-          # Options render in a floating panel beside the sidebar
-          # (.config-flyout in custom.css) so they are visible without
-          # scrolling. Content stays in the DOM at all times, so input
-          # defaults register immediately. UI-02: anchored to its toggle,
-          # one-open state, aria-expanded, focus management, Escape to close.
-          config_flyout_block(
-            ns(paste0(prefix, "toggle")),
-            paste0(var_info$label, " settings"),
-            tagList(
+          # Section heading inside the shared flyout; with one variable
+          # selected it is redundant with the flyout title, so it is dropped.
+          if (n_vars > 1) tagList(
+            if (i > 1) hr(class = "wx-flyout-sep"),
+            tags$div(class = "wx-flyout-section", display_label)
+          ),
+          tagList(
 
               shiny::sliderInput(
                 ns(paste0(prefix, "relativePeriod")),
@@ -171,13 +173,25 @@ mod_1_04_weather_server <- function(id, variable_list, selected_surveys, survey_
                   choices = c("Quadratic" = "2", "Cubic" = "3")
                 )
               )
-            ),
-            display_label = display_label
-          )
+            )
         )
       })
 
-      tagList(do.call(tagList, ui_list))
+      # Options render in a floating panel beside the sidebar (.config-flyout
+      # in custom.css) so they are visible without scrolling. Content stays in
+      # the DOM at all times, so input defaults register immediately. UI-02:
+      # anchored to its toggle, one-open state, aria-expanded, focus
+      # management, Escape to close.
+      config_flyout_block(
+        ns("wx_settings_toggle"),
+        if (n_vars > 1) "Weather variable settings"
+        else paste0(sub("^Monthly\\s+", "",
+                        as.character(wl$label[wl$name ==
+                          input$weather_variable_selector[1]][1])),
+                    " settings"),
+        do.call(tagList, ui_list),
+        display_label = "Weather variable(s)"
+      )
     })
 
     # ---- Historical comparison config ---------------------------------------
@@ -285,8 +299,7 @@ mod_1_04_weather_server <- function(id, variable_list, selected_surveys, survey_
       hy <- hist_years()
       selection_summary_card(
         title   = NULL,
-        badge   = paste0("History ", hy[["from"]], "-", hy[["to"]]),
-        rows    = weather_pipeline_rows(sw),
+        rows    = weather_pipeline_rows(sw, hist_years = hy),
         info    = paste(
           "Each row reads left to right: the reference window (months before",
           "each interview), how those months are aggregated into one value",
@@ -301,6 +314,15 @@ mod_1_04_weather_server <- function(id, variable_list, selected_surveys, survey_
     })
 
     # ---- Module return API --------------------------------------------------
+
+    # UI-73: rendered eagerly so the controls exist before their accordion
+    # panel is opened. Sidebars open one panel at a time and hidden outputs
+    # are suspended, so a setting restored from a configuration had nothing to
+    # land on until the user happened to visit that panel - which is why an
+    # import reported dozens of controls that "never appeared".
+    lapply(c("weather_selector_ui", "weather_construction_ui"), function(out_id) {
+      shiny::outputOptions(output, out_id, suspendWhenHidden = FALSE)
+    })
 
     list(
       selected_weather = selected_weather,

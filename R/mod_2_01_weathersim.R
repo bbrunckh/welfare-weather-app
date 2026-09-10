@@ -249,7 +249,8 @@ mod_2_01_weathersim_server <- function(id,
                                         survey_weather,
                                         model_fit,
                                         stored_breaks = reactive(NULL),
-                                        survey_version = reactive(0L)) {
+                                        survey_version = reactive(0L),
+                                        run_trigger = reactive(NULL)) {
   moduleServer(id, function(input, output, session) {
     ns <- session$ns
 
@@ -633,7 +634,19 @@ mod_2_01_weathersim_server <- function(id,
 
     observeEvent(hist_sim(), sim_stale(FALSE))
 
-    observeEvent(input$run_sim, {
+    # UI-69: the run fires on the button or on an external pipeline request.
+    # The handler ignores the value, so pairing them invalidates on either.
+    sim_run_signal <- reactive({
+      btn <- input$run_sim; ext <- run_trigger()
+      # UI-75: NULL until a real click or a pipeline request. Wrapping the
+      # button in a list defeated ignoreNULL, so the value 0 that a freshly
+      # rendered button reports counted as an event - which loaded the survey
+      # the instant surveys were selected, before anyone pressed anything.
+      if (!shiny::isTruthy(btn) && is.null(ext)) return(NULL)
+      list(btn = btn, ext = ext)
+    })
+
+    observeEvent(sim_run_signal(), {
       req(selected_weather(), selected_outcome(),
           survey_weather(), selected_hist(), model_fit())
       if (!sim_guard$begin()) return(invisible(NULL))
@@ -793,6 +806,15 @@ mod_2_01_weathersim_server <- function(id,
     }, ignoreInit = TRUE)
 
     # ---- Return API --------------------------------------------------------
+
+    # UI-73: rendered eagerly so the controls exist before their accordion
+    # panel is opened. Sidebars open one panel at a time and hidden outputs
+    # are suspended, so a setting restored from a configuration had nothing to
+    # land on until the user happened to visit that panel - which is why an
+    # import reported dozens of controls that "never appeared".
+    lapply(c("baseline_survey_ui"), function(out_id) {
+      shiny::outputOptions(output, out_id, suspendWhenHidden = FALSE)
+    })
 
     list(
       hist_sim        = hist_sim,

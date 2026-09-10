@@ -43,6 +43,7 @@ mod_1_08_modelfit_server <- function(id,
       selection_summary_card(
         title = "Selected model",
         badge = model_badge(snap$model),
+        badge_label = "Regression model",
         rows  = model_card_rows(
           snap$model,
           label_fun      = .label_lookup(snap$variable_list),

@@ -134,3 +134,128 @@ test_that("every step tab carries a badge slot and a stable tab value", {
   }
   expect_false(grepl("data-value=\"Step 1", h, fixed = TRUE))
 })
+
+
+# ---- UI-68: a configuration import invalidates every stored result ----------
+#
+# Importing a configuration.json replaces the settings but never replays the
+# runs, so results produced under the previous configuration are out of date
+# the moment the file lands. The per-step stale flags cannot see this: they
+# compare a stored run signature against live inputs, and an imported value
+# that happens to match what was already there moves neither.
+
+test_that("an import marks a completed step stale until it is re-run", {
+  srv <- function(input, output, session) {
+    result   <- reactiveVal(NULL)
+    imported <- reactiveVal(0L)
+    session$userData$h <- list(
+      result = result, imported = imported,
+      status = step_status(result,
+                           stale_after_import(result, reactiveVal(FALSE),
+                                              imported))
+    )
+  }
+  testServer(srv, {
+    h <- session$userData$h
+    session$flushReact()
+    expect_equal(isolate(h$status()), "none")
+
+    h$result(list(fit = 1)); session$flushReact()
+    expect_equal(isolate(h$status()), "done")
+
+    h$imported(1L); session$flushReact()
+    expect_equal(isolate(h$status()), "stale")
+
+    # Re-running the step is what clears it.
+    h$result(list(fit = 2)); session$flushReact()
+    expect_equal(isolate(h$status()), "done")
+  })
+})
+
+test_that("each step clears independently as it is re-run", {
+  srv <- function(input, output, session) {
+    imported <- reactiveVal(0L)
+    r1 <- reactiveVal(list(a = 1)); r2 <- reactiveVal(list(b = 1))
+    session$userData$h <- list(
+      imported = imported, r1 = r1, r2 = r2,
+      s1 = step_status(r1, stale_after_import(r1, NULL, imported)),
+      s2 = step_status(r2, stale_after_import(r2, NULL, imported))
+    )
+  }
+  testServer(srv, {
+    h <- session$userData$h
+    session$flushReact()
+    h$imported(1L); session$flushReact()
+    expect_equal(isolate(h$s1()), "stale")
+    expect_equal(isolate(h$s2()), "stale")
+
+    # Re-running step 1 must not clear step 2's badge.
+    h$r1(list(a = 2)); session$flushReact()
+    expect_equal(isolate(h$s1()), "done")
+    expect_equal(isolate(h$s2()), "stale")
+  })
+})
+
+test_that("a step that never ran shows no badge, imported or not", {
+  srv <- function(input, output, session) {
+    result <- reactiveVal(NULL); imported <- reactiveVal(0L)
+    session$userData$h <- list(
+      result = result, imported = imported,
+      status = step_status(result, stale_after_import(result, NULL, imported)))
+  }
+  testServer(srv, {
+    h <- session$userData$h
+    h$imported(1L); session$flushReact()
+    expect_equal(isolate(h$status()), "none")
+  })
+})
+
+test_that("a later import re-stales a step that was re-run after an earlier one", {
+  srv <- function(input, output, session) {
+    result <- reactiveVal(list(v = 1)); imported <- reactiveVal(0L)
+    session$userData$h <- list(
+      result = result, imported = imported,
+      status = step_status(result, stale_after_import(result, NULL, imported)))
+  }
+  testServer(srv, {
+    h <- session$userData$h
+    session$flushReact()
+    h$imported(1L); session$flushReact()
+    h$result(list(v = 2)); session$flushReact()
+    expect_equal(isolate(h$status()), "done")
+    # Generations are compared, not a one-shot flag.
+    h$imported(2L); session$flushReact()
+    expect_equal(isolate(h$status()), "stale")
+  })
+})
+
+test_that("the step's own staleness still applies without an import", {
+  srv <- function(input, output, session) {
+    result <- reactiveVal(list(v = 1)); own <- reactiveVal(FALSE)
+    session$userData$h <- list(
+      result = result, own = own,
+      status = step_status(result,
+                           stale_after_import(result, own, reactiveVal(0L))))
+  }
+  testServer(srv, {
+    h <- session$userData$h
+    session$flushReact()
+    expect_equal(isolate(h$status()), "done")
+    h$own(TRUE); session$flushReact()
+    expect_equal(isolate(h$status()), "stale")
+  })
+})
+
+test_that("without an import counter the step's own flag is used unchanged", {
+  own <- reactiveVal(TRUE)
+  st <- stale_after_import(reactiveVal(list(1)), own, imported = NULL)
+  isolate(expect_true(st()))
+})
+
+test_that("the navbar menu is labelled for both directions (UI-68)", {
+  # nav_menu() returns a list, not a rendered tag - flatten before matching.
+  h <- paste(as.character(export_menu_ui()), collapse = " ")
+  # It imports as well as exports; the tile said only "Export".
+  expect_match(h, "Export/Import", fixed = TRUE)
+  expect_false(grepl('">Export"', h, fixed = TRUE))
+})

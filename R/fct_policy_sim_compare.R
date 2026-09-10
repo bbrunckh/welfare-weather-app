@@ -216,6 +216,33 @@ policy_input_diagnostics <- function(baseline_svy, policy_svy, vars = NULL) {
         class = "results-controls",
       # Padding matches the Step 2 results controls panel (alignment).
       style = "padding: 8px 12px 4px 12px;",
+      # UI-60: the panel had no heading, so a block of aggregation and
+      # uncertainty controls sat under the summary card with nothing saying
+      # what it governed or that it only changes the presentation of results
+      # already computed.
+      shiny::tags$div(
+        class = "results-controls-head",
+        shiny::tags$span(
+          class = "results-controls-title",
+          "How results are summarised",
+          info_popover(
+            title = "How results are summarised",
+            shiny::p(paste(
+              "These controls change how the simulated outcomes below are",
+              "aggregated and displayed. They do not re-run the simulation -",
+              "nothing here changes the underlying draws, so switching",
+              "between them is instant."
+            )),
+            shiny::p(paste(
+              "Aggregation method sets the statistic computed across",
+              "households (mean, a poverty measure, a quantile).",
+              "Deviation re-expresses each scenario relative to the",
+              "historical baseline instead of in outcome units. The",
+              "uncertainty options control which bands are drawn."
+            ))
+          )
+        )
+      ),
       # Single compact row: outcome + uncertainty controls wrap as needed
       shiny::tags$div(
         style = "display:flex; align-items:flex-end; gap:12px; flex-wrap:wrap;",
@@ -461,6 +488,10 @@ policy_input_diagnostics <- function(baseline_svy, policy_svy, vars = NULL) {
                                selected_hist,
                                selected_policies = reactive(NULL),
                                sp_scenario = reactive(NULL),
+                               infra_scenario = reactive(NULL),
+                               digital_scenario = reactive(NULL),
+                               labor_scenario = reactive(NULL),
+                               education_scenario = reactive(NULL),
                                residuals = reactive("original"),
                                stale = reactive(FALSE)) {
   ns <- session$ns
@@ -482,7 +513,11 @@ policy_input_diagnostics <- function(baseline_svy, policy_svy, vars = NULL) {
       baseline_hist_sim      = bh,
       policy_saved_scenarios = policy_saved_scenarios(),
       selected_weather       = bh$sim_summary$weather %||% NULL,
-      sp_scenario             = sp_scenario()
+      sp_scenario             = sp_scenario(),
+      infra_scenario          = infra_scenario(),
+      digital_scenario        = digital_scenario(),
+      labor_scenario          = labor_scenario(),
+      education_scenario      = education_scenario()
     )
   })
 
