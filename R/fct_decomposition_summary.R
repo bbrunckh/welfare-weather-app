@@ -16,6 +16,155 @@
   w
 }
 
+# Baseline characteristics eligible for the grouped decomposition view. The
+# actual survey column type is authoritative: continuous numeric fields are
+# deliberately excluded even when metadata marks them as covariates.
+decomposition_group_candidates <- function(svy, variable_list = NULL,
+                                            analysis_unit = NULL,
+                                            outcome = NULL) {
+  if (is.null(svy) || !is.data.frame(svy) || !nrow(svy) ||
+      is.null(variable_list) || !is.data.frame(variable_list) ||
+      !nrow(variable_list)) {
+    return(tibble::tibble(name = character(), label = character(),
+                          n_categories = integer(), n_missing = integer()))
+  }
+  unit <- tolower(as.character(analysis_unit %||% ""))
+  unit_map <- c(ind = "ind", individual = "ind", individuals = "ind",
+                hh = "hh", household = "hh", households = "hh",
+                firm = "firm", firms = "firm")
+  unit <- unname(unit_map[unit]) %||% unit
+  if (is.na(unit) || !nzchar(unit)) unit <- ""
+  role <- if (unit %in% c("ind", "hh", "firm")) unit else NULL
+  if (is.null(role) || !role %in% names(variable_list)) {
+    return(tibble::tibble(name = character(), label = character(),
+                          n_categories = integer(), n_missing = integer()))
+  }
+  rows <- lapply(seq_len(nrow(variable_list)), function(i) {
+    name <- as.character(variable_list$name[[i]] %||% "")
+    role_raw <- variable_list[[role]][[i]]
+    role_value <- if (is.logical(role_raw)) {
+      isTRUE(role_raw)
+    } else {
+      tolower(trimws(as.character(role_raw))) %in% c("1", "true", "yes", "y")
+    }
+    if (!nzchar(name) || !name %in% names(svy) ||
+        !isTRUE(role_value) ||
+        identical(name, outcome) ||
+        grepl("(^|_)(id|weight|wgt|hhweight|pw|code|year)$|timestamp",
+              name, ignore.case = TRUE)) return(NULL)
+    values <- svy[[name]]
+    if (!(is.logical(values) || is.factor(values))) return(NULL)
+    labels <- decomposition_group_labels(values)
+    observed <- unique(labels[labels != "Missing"])
+    if (length(observed) < 2L || length(observed) > 10L) return(NULL)
+    tibble::tibble(
+      name = name,
+      label = as.character(variable_list$label[[i]] %||% name),
+      n_categories = length(observed),
+      n_missing = sum(labels == "Missing")
+    )
+  })
+  dplyr::bind_rows(Filter(Negate(is.null), rows))
+}
+
+decomposition_group_labels <- function(values) {
+  if (is.logical(values)) {
+    out <- ifelse(is.na(values), "Missing", ifelse(values, "Yes", "No"))
+  } else {
+    out <- as.character(values)
+    out[is.na(out) | !nzchar(out)] <- "Missing"
+  }
+  out
+}
+
+decomposition_group_levels <- function(values) {
+  if (is.factor(values)) {
+    return(c(levels(values), if (any(is.na(values)) || any(!nzchar(as.character(values)))) "Missing"))
+  }
+  if (is.logical(values)) return(c("No", "Yes", if (any(is.na(values))) "Missing"))
+  character(0)
+}
+
+decomposition_group_vectors <- function(svy, variable_list = NULL,
+                                        analysis_unit = NULL, outcome = NULL) {
+  candidates <- decomposition_group_candidates(
+    svy, variable_list, analysis_unit, outcome
+  )
+  if (!nrow(candidates)) return(list())
+  stats::setNames(
+    lapply(candidates$name, function(name) decomposition_group_labels(svy[[name]])),
+    candidates$name
+  )
+}
+
+.decomposition_channels_by_key <- function(decomp_df, key, key_levels = NULL,
+                                            is_rif = NULL, key_name = "group") {
+  if (is.null(decomp_df) || !nrow(decomp_df)) return(tibble::tibble())
+  is_rif <- if (is.null(is_rif)) {
+    "delta_res1" %in% names(decomp_df) &&
+      any(abs(decomp_df$delta_res1 %||% 0) > 1e-12, na.rm = TRUE)
+  } else isTRUE(is_rif)
+  key <- as.character(key)
+  ok_key <- !is.na(key) & nzchar(key)
+  decomp_df <- decomp_df[ok_key, , drop = FALSE]
+  key <- key[ok_key]
+  if (!nrow(decomp_df)) return(tibble::tibble())
+  valid_prediction <- is.finite(decomp_df$delta_total %||% rep(NA_real_, nrow(decomp_df)))
+  decomp_df <- decomp_df[valid_prediction, , drop = FALSE]
+  key <- key[valid_prediction]
+  if (!nrow(decomp_df)) return(tibble::tibble())
+  w <- .decomp_weights(decomp_df)
+  main <- decomp_df$delta_main %||% rep(0, nrow(decomp_df))
+  direct <- decomp_df$delta_sp %||% rep(0, nrow(decomp_df))
+  covariate <- decomp_df$delta_main_covar %||% (main - direct)
+  repositioning <- decomp_df$delta_res1 %||% rep(0, nrow(decomp_df))
+  interaction <- decomp_df$delta_res2 %||% rep(0, nrow(decomp_df))
+  resilience <- repositioning + interaction
+  total <- decomp_df$delta_total %||% (main + resilience)
+  levels <- key_levels %||% unique(key)
+  levels <- c(setdiff(as.character(levels), "Missing"),
+              if ("Missing" %in% key) "Missing")
+  dplyr::bind_rows(lapply(levels[levels %in% key], function(group) {
+    ok <- key == group
+    level_log <- .weighted_mean_safe(main[ok], w[ok])
+    resilience_log <- .weighted_mean_safe(resilience[ok], w[ok])
+    total_log <- .weighted_mean_safe(total[ok], w[ok])
+    tibble::tibble(
+      !!key_name := group,
+      level_log = level_log,
+      resilience_log = resilience_log,
+      total_log = total_log,
+      level_percent = log_effect_to_percent(level_log),
+      resilience_percent = log_effect_to_percent(resilience_log),
+      main_percent = log_effect_to_percent(level_log),
+      cash_transfer_percent = log_effect_to_percent(.weighted_mean_safe(direct[ok], w[ok])),
+      covariate_shift_percent = log_effect_to_percent(.weighted_mean_safe(covariate[ok], w[ok])),
+      repositioning_percent = log_effect_to_percent(.weighted_mean_safe(repositioning[ok], w[ok])),
+      interaction_percent = log_effect_to_percent(.weighted_mean_safe(interaction[ok], w[ok])),
+      total_percent = log_effect_to_percent(total_log),
+      n_households = sum(ok),
+      weighted_population = sum(w[ok], na.rm = TRUE)
+    )
+  }))
+}
+
+decomposition_channels_by_group <- function(decomp_df, svy, group_var,
+                                             is_rif = NULL,
+                                             group_vectors = NULL) {
+  if (is.null(group_var) || !nzchar(group_var) ||
+      is.null(svy) || !group_var %in% names(svy)) return(tibble::tibble())
+  labels <- if (!is.null(group_vectors) && group_var %in% names(group_vectors)) {
+    group_vectors[[group_var]]
+  } else decomposition_group_labels(svy[[group_var]])
+  ids <- suppressWarnings(as.integer(decomp_df$id))
+  mapped <- is.finite(ids) & ids >= 1L & ids <= length(labels)
+  if (!any(mapped)) return(tibble::tibble())
+  key <- rep(NA_character_, nrow(decomp_df))
+  key[mapped] <- labels[ids[mapped]]
+  levels <- decomposition_group_levels(svy[[group_var]])
+  .decomposition_channels_by_key(decomp_df, key, levels, is_rif, "group")
+}
+
 decomposition_summary_data <- function(decomp_df, is_rif = TRUE,
                                         tolerance = 1e-10) {
   if (is.null(decomp_df) || !is.data.frame(decomp_df) || !nrow(decomp_df)) {
@@ -252,6 +401,52 @@ plot_decomposition_channels_by_decile <- function(tbl, is_rif = NULL) {
     theme_wise(base_size = 13) + ggplot2::theme(legend.position = "bottom")
 }
 
+plot_decomposition_channels_by_group <- function(tbl, group_label = "Baseline characteristic",
+                                                  is_rif = NULL) {
+  if (is.null(tbl) || !nrow(tbl)) {
+    return(blank_plot("Characteristic decomposition is unavailable for this run.", size = 4))
+  }
+  is_rif <- if (is.null(is_rif)) "repositioning_percent" %in% names(tbl) &&
+    any(abs(tbl$repositioning_percent) > 1e-12, na.rm = TRUE) else isTRUE(is_rif)
+  channel_cols <- c(
+    "cash_transfer_percent", "covariate_shift_percent",
+    if (is_rif) "repositioning_percent", "interaction_percent"
+  )
+  active <- vapply(channel_cols, function(col)
+    any(abs(tbl[[col]]) > 1e-12, na.rm = TRUE), logical(1L))
+  if (any(active)) channel_cols <- channel_cols[active]
+  channel_labels <- c(
+    cash_transfer_percent = "SP direct effect",
+    covariate_shift_percent = "Main effect (covariate shift)",
+    repositioning_percent = "Resilience - Repositioning effect",
+    interaction_percent = "Resilience - Interaction effect"
+  )
+  long <- tidyr::pivot_longer(
+    tbl[, c("group", channel_cols)], cols = tidyselect::all_of(channel_cols),
+    names_to = "channel", values_to = "effect"
+  )
+  long$channel <- factor(unname(channel_labels[long$channel]),
+                         levels = unname(channel_labels[channel_cols]))
+  colours <- c(
+    "SP direct effect" = .wise_cat[[1]],
+    "Main effect (covariate shift)" = .wise_cat[[4]],
+    "Resilience - Repositioning effect" = .wise_cat[[3]],
+    "Resilience - Interaction effect" = .wise_cat[[6]]
+  )
+  ggplot2::ggplot(long, ggplot2::aes(x = factor(.data$group), y = .data$effect,
+                                     fill = .data$channel)) +
+    ggplot2::geom_hline(yintercept = 0, linetype = "dashed", colour = .wise_zero) +
+    ggplot2::geom_col(position = "stack", width = 0.62) +
+    ggplot2::geom_point(data = tbl,
+                        ggplot2::aes(x = factor(.data$group), y = .data$total_percent),
+                        inherit.aes = FALSE, shape = 21, fill = "white",
+                        colour = .wise_support, size = 2.8, stroke = 1.1) +
+    ggplot2::scale_fill_manual(values = colours, drop = FALSE) +
+    ggplot2::labs(x = group_label, y = "Policy effect (percent change)",
+                  fill = "Channel", subtitle = NULL) +
+    theme_wise(base_size = 13) + ggplot2::theme(legend.position = "bottom")
+}
+
 decomposition_decile_export <- function(tbl, is_rif = FALSE) {
   if (is.null(tbl) || !nrow(tbl)) return(NULL)
   cols <- c(
@@ -266,6 +461,28 @@ decomposition_decile_export <- function(tbl, is_rif = FALSE) {
   if (isTRUE(is_rif)) {
     cols <- append(cols, c(repositioning_percent = "Repositioning effect (%)"),
                    after = 3L)
+  }
+  cols <- cols[names(cols) %in% names(tbl)]
+  out <- as.data.frame(tbl[, names(cols), drop = FALSE])
+  names(out) <- unname(cols)
+  out
+}
+
+decomposition_group_export <- function(tbl, group_label = "Baseline characteristic",
+                                        is_rif = FALSE) {
+  if (is.null(tbl) || !nrow(tbl)) return(NULL)
+  cols <- c(
+    group = group_label,
+    cash_transfer_percent = "Direct transfer effect (%)",
+    covariate_shift_percent = "Covariate shift effect (%)",
+    interaction_percent = "Weather-policy interaction (%)",
+    total_percent = "Total policy effect (%)",
+    n_households = "Sample units",
+    weighted_population = "Population represented"
+  )
+  if (isTRUE(is_rif)) {
+    cols <- append(cols, c(repositioning_percent = "Repositioning effect (%)"),
+                    after = 3L)
   }
   cols <- cols[names(cols) %in% names(tbl)]
   out <- as.data.frame(tbl[, names(cols), drop = FALSE])
