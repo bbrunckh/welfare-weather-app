@@ -940,7 +940,7 @@ plot_step2_adverse_dot <- function(tbl, x_label = "Outcome level",
     ggplot2::geom_rect(
       data = rp_band_data,
       ggplot2::aes(ymin = .data$ymin, ymax = .data$ymax),
-      xmin = -Inf, xmax = Inf, fill = "#F7F9FB", colour = NA,
+      xmin = -Inf, xmax = Inf, fill = ggplot2::alpha("#F7F9FB", 0.5), colour = NA,
       inherit.aes = FALSE, show.legend = FALSE
     ) +
     ggplot2::geom_segment(ggplot2::aes(x = .data$intermod_lo, xend = .data$intermod_hi,
