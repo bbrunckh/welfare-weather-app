@@ -36,11 +36,11 @@
 ### 1. Selective Survey-Side Join Cache
 
 **Location:** `R/fct_run_simulation.R`, `R/fct_simulations.R`
-**Status:** Existing opt-in path; default remains disabled.
+**Status:** Gate-failed for automatic enablement; explicit opt-in remains available.
 
-For Colombia 2018, `8,364` future weather rows joined to `231,087` projected survey rows took `0.516s` normally versus `0.269s` with the cache over five joins. Cache overhead was approximately `1 MB` over the retained `122 MB` projected survey. An older LKA full-pipeline test regressed with the cache, so the isolated win is not sufficient.
+The cache preserves exact fixture output, duplicate-key expansion, canonical ordering, and NA-key behavior. However, corrected isolated probes show cache construction dominates repeated joins: at `231,087` survey rows and `8,364` weather rows, five uncached joins took `0.078s` versus `0.786s` including cache construction. At `250,000` survey rows, five joins took `0.074s` uncached versus `0.776s` cached. The retained cache was approximately `44-48 MB`, compared with an `11-12 MB` survey in these probes. A prior LKA full-pipeline comparison also regressed from approximately `11.5s` to `18.5s` and increased RSS. External isolated process-tree RSS was effectively flat (`525.9 MB` cached versus `522.7 MB` uncached), but did not offset the elapsed-time and retained-memory costs.
 
-**Next gate:** Small/large country, historical/future, OLS/RIF, one/many keys, cold/warm, and external process-tree RSS. If consistently positive, use a workload threshold rather than unconditional enablement.
+**Decision:** Do not add thresholded automatic enablement. Keep `join_cache = FALSE` by default and retain the path only for deliberate workload-specific experiments. A future redesign should avoid retaining the full survey projection, or amortize construction through a longer-lived shared key index, before reopening this candidate.
 
 ### 2. PERF-15 Prediction-Matrix Reuse
 
