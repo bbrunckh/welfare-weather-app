@@ -103,8 +103,8 @@ test_that("Program scale & reach counts units affected by all implemented polici
     baseline_svy   = base
   )
 
-  # Touched rows: 1, 2, 3 -> population = 100*4 + 200*3 + 300*2 = 1600
-  expect_identical(cards[[4]]$value, paste0(fmt_num(1600 / 1e6, 1), "M"))
+  # Touched rows: 1, 2, 3 -> represented population = 100 + 200 + 300 = 600
+  expect_identical(cards[[4]]$value, paste0(fmt_num(600 / 1e6, 1), "M"))
   expect_match(cards[[4]]$info, "another policy lever", fixed = TRUE)
 
   # Without a baseline frame, falls back to SP recipients only (rows 1 and 3).
@@ -112,7 +112,7 @@ test_that("Program scale & reach counts units affected by all implemented polici
     paired_summary = paired_sum,
     policy_svy     = pol
   )
-  expect_identical(cards_sp[[4]]$value, paste0(fmt_num(1000 / 1e6, 1), "M"))
+  expect_identical(cards_sp[[4]]$value, paste0(fmt_num(400 / 1e6, 1), "M"))
 
   # No touched units at all -> Unavailable.
   pol_none <- base
@@ -143,6 +143,17 @@ test_that("step3_adverse_dot_data and plot_step3_adverse_dot work correctly", {
 
   plt <- plot_step3_adverse_dot(dot_df, x_label = "Consumption ($/day)")
   expect_s3_class(plt, "ggplot")
+  # Design D: two constant-colour spread bands (transparent blue baseline,
+  # transparent vermillion policy) plus the solid arrow connector; no legend.
+  seg_layers <- Filter(function(l) inherits(l$geom, "GeomSegment"), plt$layers)
+  expect_true(length(seg_layers) >= 3L)
+  seg_cols <- vapply(seg_layers, function(l) l$aes_params$colour %||% NA_character_,
+                     character(1))
+  expect_true("#0072B2" %in% seg_cols)
+  expect_true("#D55E00" %in% seg_cols)
+  # Return-period names moved to the y axis: no blanked axis text.
+  y_scale <- plt$scales$get_scales("y")
+  expect_true(!is.null(y_scale$labels))
 })
 
 test_that("step3 adverse dot data carries model spread for baseline and policy", {
@@ -170,13 +181,14 @@ test_that("step3 adverse dot data carries model spread for baseline and policy",
   expect_true(is.finite(dot_df$policy_lo[rp10]) && is.finite(dot_df$policy_hi[rp10]))
 
   plt <- plot_step3_adverse_dot(dot_df, x_label = "Consumption ($/day)")
-  # Two spread-segment layers: baseline and policy.
-  n_spread_layers <- sum(vapply(plt$layers, function(l) {
-    inherits(l$geom, "GeomSegment") &&
-      !is.null(l$mapping) && !is.null(l$mapping$xend) &&
-      !is.null(l$mapping$colour)
-  }, logical(1)))
-  expect_equal(n_spread_layers, 2L)
+  # Two constant-colour spread-segment layers (transparent blue baseline,
+  # transparent vermillion policy); the slate connector carries no mapping.
+  band_cols <- vapply(plt$layers, function(l) {
+    if (!inherits(l$geom, "GeomSegment")) return(NA_character_)
+    l$aes_params$colour %||% NA_character_
+  }, character(1))
+  expect_equal(sum(band_cols == "#0072B2", na.rm = TRUE), 1L)
+  expect_equal(sum(band_cols == "#D55E00", na.rm = TRUE), 1L)
 })
 
 test_that("step3_variance_breakdown and plot_step3_variance_contribution work correctly", {

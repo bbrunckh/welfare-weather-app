@@ -382,10 +382,10 @@ step3_headline_cards <- function(paired_summary,
 
   if (!is.null(touched) && any(touched, na.rm = TRUE)) {
     w <- if ("weight" %in% names(policy_svy)) as.numeric(policy_svy$weight) else rep(1, nrow(policy_svy))
-    hhsize <- if ("hhsize" %in% names(policy_svy)) as.numeric(policy_svy$hhsize) else rep(1, nrow(policy_svy))
-    hhsize[!is.finite(hhsize) | hhsize <= 0] <- 1
     ok <- touched & is.finite(w)
-    pop <- sum(w[ok] * hhsize[ok])
+    # Match Diagnostics' Population represented column: survey weights already
+    # represent the covered or affected population at the analysis unit.
+    pop <- sum(w[ok])
     scale_val <- if (is.finite(pop) && pop > 0) paste0(fmt_num(pop / 1e6, 1), "M") else "Unavailable"
   }
 
@@ -400,7 +400,7 @@ step3_headline_cards <- function(paired_summary,
       "Population covered or affected is the weighted number of people represented",
       "by units touched by any implemented policy: social protection recipients plus",
       "units whose covariates another policy lever changed. It matches the coverage",
-      "table on the Diagnostics tab, and uses household size where applicable."
+      "table on the Diagnostics tab."
     )
   )
 
@@ -596,8 +596,10 @@ plot_step3_adverse_dot <- function(tbl, x_label = "Outcome level",
     "Historical",
     sort(unique(as.character(tbl$scenario[!tbl$is_historical])))
   )
+  # Scenario colours follow the exceedance plot's scheme: Historical in the
+  # dark support navy, futures in their fixed SSP colour.
   scenario_colours <- stats::setNames(vapply(scenario_levels, function(s) {
-    if (identical(s, "Historical")) return(.wise_history)
+    if (identical(s, "Historical")) return(.wise_support)
     ssp <- .normalise_ssp(s)
     if (ssp %in% names(.ssp_colours)) unname(.ssp_colours[[ssp]]) else .wise_slate
   }, character(1L)), scenario_levels)
@@ -605,10 +607,10 @@ plot_step3_adverse_dot <- function(tbl, x_label = "Outcome level",
     ifelse(tbl$is_historical, "Historical", as.character(tbl$scenario)),
     levels = scenario_levels
   )
-  tbl$series <- ifelse(tbl$is_historical, "Historical", "Future")
 
   # Vertical dodge: multiple scenarios share each return-period row, so
-  # offset the dumbbells per scenario to keep them readable.
+  # offset the dumbbells per scenario to keep them readable. Historical
+  # keeps the lower slot; each future scenario takes its own slot above it.
   dodge_width <- 0.42
   tbl$rp_y <- as.integer(tbl$rp_label)
   tbl$dodge_offset <- stats::ave(
@@ -623,80 +625,111 @@ plot_step3_adverse_dot <- function(tbl, x_label = "Outcome level",
     }
   )
 
+  # Direct labeling replaces the legend. Series names anchor just past the
+  # right end of each top-row (Expected) dumbbell; the x expansion is
+  # enlarged so the longest label stays inside the panel.
+  top_y <- max(tbl$rp_y)
+  top_rows <- tbl[tbl$rp_y == top_y, , drop = FALSE]
+  # One label per scenario even if a scenario contributes several top rows.
+  top_rows <- top_rows[!duplicated(top_rows$scenario_key), , drop = FALSE]
+  top_rows$lab_x <- vapply(seq_len(nrow(top_rows)), function(i) {
+    r <- top_rows[i, ]
+    hi <- max(r$policy_hi[[1L]], r$policy_val[[1L]], na.rm = TRUE)
+    if (!is.finite(hi)) hi <- r$baseline_val[[1L]]
+    hi
+  }, numeric(1L))
+  top_rows$lab_col <- unname(scenario_colours[as.character(top_rows$scenario_key)])
+  # One-time Baseline/Policy captions on the topmost dumbbell of the top row.
+  cap_row <- top_rows[which.max(top_rows$dodge_offset), , drop = FALSE]
+
+  x_vals <- c(tbl$baseline_val, tbl$policy_val, tbl$policy_lo, tbl$policy_hi,
+              tbl$base_lo, tbl$base_hi)
+  x_span <- diff(range(x_vals, na.rm = TRUE))
+  right_mult <- if (is.finite(x_span) && x_span > 0) {
+    max(0.10, max(nchar(as.character(top_rows$scenario_key)), 0L) * 0.009)
+  } else 0.05
+
+  y_breaks <- sort(unique(tbl$rp_y))
+  y_labs   <- levels(tbl$rp_label)[y_breaks]
+
   p <- ggplot2::ggplot(tbl, ggplot2::aes(y = .data$rp_y + .data$dodge_offset)) +
+    # Climate-model spread bands, future scenarios only (Historical runs a
+    # single climate model): same width for both sources; baseline in
+    # transparent blue, policy in transparent policy vermillion.
+    ggplot2::geom_segment(
+      data = subset(tbl, !is_historical),
+      ggplot2::aes(x = .data$base_lo, xend = .data$base_hi,
+                   yend = .data$rp_y + .data$dodge_offset),
+      colour = "#0072B2", alpha = 0.40, linewidth = 2.4,
+      lineend = "round", na.rm = TRUE
+    ) +
+    ggplot2::geom_segment(
+      data = subset(tbl, !is_historical),
+      ggplot2::aes(x = .data$policy_lo, xend = .data$policy_hi,
+                   yend = .data$rp_y + .data$dodge_offset),
+      colour = .wise_policy, alpha = 0.40, linewidth = 2.4,
+      lineend = "round", na.rm = TRUE
+    ) +
+    # Baseline -> policy connector: solid with an arrowhead for every
+    # scenario, so the policy direction reads at a glance.
     ggplot2::geom_segment(
       ggplot2::aes(x = .data$baseline_val, xend = .data$policy_val,
                    yend = .data$rp_y + .data$dodge_offset),
-      colour = .wise_slate, linewidth = 1.0, na.rm = TRUE
+      colour = .wise_slate, linewidth = 0.9,
+      arrow = ggplot2::arrow(length = ggplot2::unit(7, "pt"), type = "closed"),
+      na.rm = TRUE
     ) +
-    ggplot2::geom_segment(
-      ggplot2::aes(x = .data$policy_lo, xend = .data$policy_hi,
-                   yend = .data$rp_y + .data$dodge_offset,
-                    colour = .data$scenario_key),
-      linewidth = 2.4, alpha = 0.55, na.rm = TRUE
-    ) +
-    # Baseline (no-policy) model-spread band: thinner than the policy band,
-    # same scenario colour, so both series carry model disagreement.
-    ggplot2::geom_segment(
-      ggplot2::aes(x = .data$base_lo, xend = .data$base_hi,
-                   yend = .data$rp_y + .data$dodge_offset,
-                    colour = .data$scenario_key),
-      linewidth = 1.3, alpha = 0.40, na.rm = TRUE
-    ) +
+    # Baseline point: open marker in the scenario colour.
     ggplot2::geom_point(
-      ggplot2::aes(x = .data$baseline_val,
-                   shape = .data$series, colour = .data$scenario_key,
-                   fill = "Baseline"),
-      stroke = 1.1, size = 3.0, na.rm = TRUE
+      ggplot2::aes(x = .data$baseline_val, colour = .data$scenario_key),
+      fill = "white", shape = 21, stroke = 1.2, size = 3.0, na.rm = TRUE
     ) +
+    # Policy point: filled policy vermillion.
     ggplot2::geom_point(
-      ggplot2::aes(x = .data$policy_val,
-                   shape = .data$series, colour = .data$scenario_key,
-                   fill = "Policy"),
-      stroke = 1.0,
-      size = 3.6, na.rm = TRUE
+      ggplot2::aes(x = .data$policy_val),
+      fill = .wise_policy, colour = .wise_policy_dark, shape = 21,
+      stroke = 1.0, size = 3.4, na.rm = TRUE
     ) +
-     ggplot2::scale_colour_manual(
-       values = scenario_colours, breaks = scenario_levels,
-        labels = scenario_levels, name = "Climate scenario and period"
-      ) +
-    # Shape mirrors the colour legend (circle = historical, triangle = future),
-    # so its guide is suppressed to avoid a duplicate legend.
-    ggplot2::scale_shape_manual(values = c(Historical = 21, Future = 24),
-                                 guide = "none") +
-      ggplot2::scale_fill_manual(
-        values = c("Baseline" = "#ffffff", "Policy" = .wise_policy),
-        breaks = c("Baseline", "Policy"),
-        name = NULL,
-        guide = ggplot2::guide_legend(
-          order = 2,
-          override.aes = list(shape = 21, colour = .wise_slate, stroke = 1.0)
-        )
-      ) +
-    ggplot2::annotate(
-      "text", x = -Inf,
-      y = sort(unique(tbl$rp_y)),
-      hjust = -0.08,
-      label = levels(droplevels(tbl$rp_label)),
-      size = 4.8, fontface = "bold",
-      colour = .wise_slate
+    # One-time Baseline/Policy captions above the topmost dumbbell only.
+    ggplot2::geom_text(
+      data = cap_row,
+      ggplot2::aes(x = .data$baseline_val, y = .data$rp_y + .data$dodge_offset),
+      label = "Baseline", vjust = -1.4, size = 2.9, fontface = "bold",
+      colour = .wise_slate, show.legend = FALSE, inherit.aes = FALSE
+    ) +
+    ggplot2::geom_text(
+      data = cap_row,
+      ggplot2::aes(x = .data$policy_val, y = .data$rp_y + .data$dodge_offset),
+      label = "Policy", vjust = -1.4, size = 2.9, fontface = "bold",
+      colour = .wise_policy_dark, show.legend = FALSE, inherit.aes = FALSE
+    ) +
+    # One-time series labels on the top row, coloured per scenario.
+    ggplot2::geom_text(
+      data = top_rows,
+      ggplot2::aes(x = .data$lab_x, y = .data$rp_y + .data$dodge_offset,
+                   label = as.character(.data$scenario_key)),
+      colour = top_rows$lab_col, hjust = -0.08, size = 3.2,
+      fontface = "bold", show.legend = FALSE, inherit.aes = FALSE
+    ) +
+    ggplot2::scale_colour_manual(values = scenario_colours, guide = "none") +
+    # Return-period names are the y-axis text, outside the panel like every
+    # other chart.
+    ggplot2::scale_y_continuous(
+      breaks = y_breaks, labels = y_labs,
+      expand = ggplot2::expansion(add = c(0.6, 0.6))
+    ) +
+    ggplot2::scale_x_continuous(
+      expand = ggplot2::expansion(mult = c(0.02, right_mult))
     ) +
     ggplot2::labs(
       x = x_label, y = NULL,
       title = title,
       subtitle = subtitle
     ) +
-     theme_wise() +
-     ggplot2::theme(
-       legend.position = "bottom",
-       # Return-period names are drawn as annotations next to each row band;
-       # suppress the default axis labels to avoid duplication.
-       axis.text.y  = ggplot2::element_blank(),
-       axis.ticks.y = ggplot2::element_blank()
-     ) +
-     ggplot2::guides(
-       colour = ggplot2::guide_legend(order = 1)
-     )
+    theme_wise() +
+    ggplot2::theme(
+      legend.position = "none"
+    )
 
   fut_periods <- unique(tbl$yr_lbl[!tbl$is_historical])
   if (length(fut_periods) > 1L) {

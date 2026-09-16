@@ -755,7 +755,7 @@ test_that("adverse plot uses the selected climate-model spread", {
   expect_equal(plot$data$intermod_hi, c(6, 7))
 })
 
-test_that("adverse plot legend identifies projection periods", {
+test_that("adverse plot labels scenarios directly and facets by period", {
   threshold_tbl <- tibble::tibble(
     scenario = c(rep("SSP2-4.5 / 2030-2040", 6L),
                  rep("SSP2-4.5 / 2050-2060", 6L)),
@@ -772,10 +772,15 @@ test_that("adverse plot legend identifies projection periods", {
   plot <- plot_step2_adverse_dot(dot)
   colour_scale <- plot$scales$get_scales("colour")
 
-  expect_identical(colour_scale$name, "Climate scenario and period")
-  expect_true(all(c("SSP2-4.5 / 2030-2040", "SSP2-4.5 / 2050-2060") %in%
-                  colour_scale$breaks))
+  # Design D: the colour legend is replaced by direct scenario labels on the
+  # top row, so the colour scale carries no guide.
+  expect_identical(colour_scale$guide, "none")
   expect_true("yr_lbl" %in% names(plot$facet$params$facets))
+  # One bold text layer per scenario on the Expected row.
+  text_layers <- Filter(function(l) inherits(l$geom, "GeomText"), plot$layers)
+  expect_equal(length(text_layers), 1L)
+  expect_setequal(text_layers[[1L]]$data$scenario_key,
+                  c("SSP2-4.5 / 2030-2040", "SSP2-4.5 / 2050-2060"))
 })
 
 test_that("adverse dot plot offsets scenario dumbbells vertically", {
