@@ -57,6 +57,31 @@ For Colombia 2018, `8,364` future weather rows joined to `231,087` projected sur
 
 Investigate reuse of the RIF-first prediction/design representation between simulation and prediction paths. Keep `predict.fixest()` as the oracle until row dropping, offsets, factor levels, exclusions, and downstream outputs are proven equivalent.
 
+### Additional Independent Step 2 Review
+
+These are unimplemented follow-ups from an independent read-only review of the prediction and policy paths.
+
+**Highest-confidence, investigate first:**
+
+- Remove the dead RIF weather copy in `R/fct_rif_sim.R`; it allocates an `N x weather-columns` object that is not needed for restoration.
+- Add a no-copy aligned-design fast path when `model.matrix()` columns already exactly match coefficient order.
+- Propagate already-computed residual variance into aggregation instead of recomputing `var()` per year.
+- Avoid full covariance reconstruction when selecting active RIF blocks; operate directly on the relevant Cholesky block after orientation validation.
+
+**Potentially valuable but contract-sensitive:**
+
+- Cache RIF-policy survey projections across keys; preserve `.svy_row_id`, factor levels, and policy columns.
+- Cache policy deltas across keys and reuse location grouping across hazard variables; preserve NA, tie, fallback, and invalidation behavior.
+- Stream RIF delta interpolation or replace repeated quantile-pair scans with one grouping pass; preserve endpoint, interval, and row-order semantics.
+- Pre-index RIF coefficient curves to avoid repeated filtering and `approx()` calls inside weather/term loops.
+
+**Lower priority:**
+
+- Reduce shared-payload resolution copies.
+- Enable central-only policy correction when downstream consumers do not require variance/SE vectors.
+
+Each candidate requires a focused microbenchmark, exact output/parity checks, and peak-RSS measurement before implementation. No candidate is authorized by this section.
+
 ### Deferred or Deprioritized
 
 | Candidate | Decision |
