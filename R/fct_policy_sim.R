@@ -1140,6 +1140,9 @@ resimulate_with_svy <- function(svy, sw, so, mf,
   direct_rif_metadata <- if (is_rif) {
     tryCatch(build_direct_rif_metadata(fit_multi), error = function(e) NULL)
   } else NULL
+  direct_rif_baseline_cache <- if (is_rif) {
+    new.env(parent = emptyenv())
+  } else NULL
 
   # train_aug: identical for every run_one() call below (same model, same
   # train_data). Compute once here instead of repeating
@@ -1193,9 +1196,10 @@ resimulate_with_svy <- function(svy, sw, so, mf,
         rif_grid     = rif_grid,
         precomputed_train_aug = precomputed_train_aug,
          svy_prepared = svy_prepared,
-         precomputed_ecdf_train = precomputed_ecdf_train,
-         direct_rif_predictions = TRUE,
-         direct_rif_metadata = direct_rif_metadata
+          precomputed_ecdf_train = precomputed_ecdf_train,
+          direct_rif_predictions = TRUE,
+          direct_rif_metadata = direct_rif_metadata,
+          direct_rif_baseline_cache = direct_rif_baseline_cache
       ),
       error = function(e) {
         warning("[resimulate_with_svy] run_sim_pipeline failed: ",

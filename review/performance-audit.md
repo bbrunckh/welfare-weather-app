@@ -16,7 +16,7 @@
 | S2-P9 | Integrated | Reference-weather ownership/leases/cleanup; `df7d31b` |
 | S2-P17 | Integrated | Materialized location-month weather; exact remote parity; `e1404d4`, validation `9b928a7` |
 | S2-P19 | Integrated | Materialized `loc_deltas_all` before completeness; exact parity/cleanup; `5ce2f23` |
-| S2-P20 | Integrated | Within-key direct-RIF design/FE reuse; exact parity; `237a433` |
+| S2-P20 | Integrated | Within-key and cross-key direct-RIF baseline design/FE reuse; exact parity; working-tree validation |
 | S3-P15 | Integrated | Per-year indices through shared aggregation preparation cache |
 | S2-P16 | Gate-failed for automatic rollout | Five-decimal weather contract; `auto` and production remain at one thread |
 | P15 | Removed | Not authorized for this delivery |
@@ -29,19 +29,11 @@
 - **S2-P19:** Local one-variable matrix improvements: `24.5%` for 1 SSP/1 period, `25.3%` for 1 SSP/3 periods, `27.4%` for 2 SSPs/1 period, `29.6%` for 2 SSPs/3 periods. Databricks one SSP/one period improved `70.96s -> 65.0s` (`8.4%`), with exact `24`-output/`200,736`-row parity. Materialization has higher RSS risk and needs peak-RSS measurement before broader rollout.
 - **S2-P16:** Five-decimal rounding made one/two-thread weather outputs equal across focused historical/future continuous/binned additive/multiplicative cases. Future local gain was only about `1.14x`; historical and remote workloads regressed. Automatic two-thread selection stays disabled.
 - **S3-P15:** Shared preparation cache covers Step 3 Results, policy comparison, and central-kernel consumers. A `550,000`-row/11-year probe reduced repeated year scans `2.04s -> 0.465s` over 100 runs.
+- **Cross-key direct-RIF baseline reuse:** One-entry per-run cache retains only baseline design/index objects; scenario design remains key-specific. A 50,000-row training/10,000-row expanded nine-quantile probe improved five-key preparation from `0.082s -> 0.026s` (`3.15x`), with one miss and five hits. Baseline/scenario designs were each approximately `0.15 MB`. Focused direct/fallback parity, factor/FE invalidation, unsupported-model fallback, Step 2 contract/payload, and full package tests passed.
 
 ## Next Candidates
 
-### 1. Cross-Key Direct-RIF Baseline Reuse
-
-**Location:** `R/fct_rif_sim.R`, `R/fct_simulations.R`
-**Status:** Characterization candidate; extension of S2-P20.
-
-`.direct_rif_design_cache()` still rebuilds baseline `model.matrix()`, fixed-effect indices, and coefficient-column mappings for every weather key. A 50,000-row, nine-quantile probe measured `0.269s` for five per-key preparations versus `0.075s` when baseline structures were reused.
-
-**Next gate:** Prove bit-identical nine-quantile baseline/scenario parity, unsupported-model fallback, factor/FE edge cases, and peak RSS. Retain only the baseline design/index objects; scenario design remains key-specific.
-
-### 2. Selective Survey-Side Join Cache
+### 1. Selective Survey-Side Join Cache
 
 **Location:** `R/fct_run_simulation.R`, `R/fct_simulations.R`
 **Status:** Existing opt-in path; default remains disabled.
@@ -50,7 +42,7 @@ For Colombia 2018, `8,364` future weather rows joined to `231,087` projected sur
 
 **Next gate:** Small/large country, historical/future, OLS/RIF, one/many keys, cold/warm, and external process-tree RSS. If consistently positive, use a workload threshold rather than unconditional enablement.
 
-### 3. PERF-15 Prediction-Matrix Reuse
+### 2. PERF-15 Prediction-Matrix Reuse
 
 **Location:** `R/fct_simulations.R`, `R/fct_predict_outcomes.R`
 **Status:** Deferred characterization from the independent review.

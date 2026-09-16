@@ -277,6 +277,13 @@ test_that("treatment diagnostics distinguish eligibility from realized treatment
     )
   )
 
+  no_sp <- wiseapp:::policy_treatment_matrix(
+    baseline,
+    transform(policy, .wiseapp_sp_transfer = rep(0, 4)),
+    eligible
+  )
+  expect_equal(no_sp$n, c(4L, 0L, 0L, 0L))
+
   note <- wiseapp:::.policy_treatment_explanation(list(
     targeting = "exante_poor", targeting_threshold = 20,
     inclusion_error_pct = 10, exclusion_error_pct = 5
@@ -284,7 +291,7 @@ test_that("treatment diagnostics distinguish eligibility from realized treatment
   expect_match(note, "bottom 20%", fixed = TRUE)
   expect_match(note, "10% inclusion error", fixed = TRUE)
   expect_match(note, "5% exclusion error", fixed = TRUE)
-  expect_match(note, "not observed cash receipt", fixed = TRUE)
+  expect_match(note, "counterfactual assignment", fixed = TRUE)
 })
 
 test_that("selected eligibility omits inclusion and exclusion errors", {

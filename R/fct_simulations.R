@@ -510,6 +510,7 @@ run_sim_pipeline <- function(weather_raw,
                               batch_rif_predictions = FALSE,
                               direct_rif_predictions = FALSE,
                               direct_rif_metadata = NULL,
+                              direct_rif_baseline_cache = NULL,
                               svy_baseline = NULL,
                              rif_grid     = NULL,
                              precomputed_ecdf_train = NULL) {
@@ -609,10 +610,11 @@ run_sim_pipeline <- function(weather_raw,
       so           = so,
       chol_list    = chol_list,
       ecdf_train   = precomputed_ecdf_train,
-      batch_predictions = batch_rif_predictions,
-      direct_predictions = direct_rif_predictions,
-      direct_metadata = direct_rif_metadata
-    )
+       batch_predictions = batch_rif_predictions,
+       direct_predictions = direct_rif_predictions,
+       direct_metadata = direct_rif_metadata,
+       direct_baseline_cache = direct_rif_baseline_cache
+     )
   } else {
     # Standard OLS path - unchanged
     tryCatch(

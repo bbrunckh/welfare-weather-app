@@ -6,11 +6,17 @@ policy_treatment_matrix <- function(baseline_svy, policy_svy,
                                     eligibility = NULL, weight_col = "weight") {
   if (is.null(baseline_svy) || is.null(policy_svy) ||
       nrow(baseline_svy) != nrow(policy_svy)) return(data.frame())
-  b <- if (!is.null(eligibility)) as.logical(eligibility) else {
-    if ("sp_eligible" %in% names(baseline_svy)) as.logical(baseline_svy$sp_eligible) else rep(FALSE, nrow(baseline_svy))
-  }
   p <- if (SP_TRANSFER_COL %in% names(policy_svy)) policy_svy[[SP_TRANSFER_COL]] > 0 else {
     if ("sp_eligible" %in% names(policy_svy)) as.logical(policy_svy$sp_eligible) else rep(FALSE, nrow(policy_svy))
+  }
+  p[is.na(p)] <- FALSE
+  # A zero-transfer run has no social-protection assignment, even if an
+  # inactive scenario still supplies an ideal eligibility vector.
+  has_transfer_col <- SP_TRANSFER_COL %in% names(policy_svy)
+  b <- if (has_transfer_col && !any(p)) {
+    rep(FALSE, nrow(baseline_svy))
+  } else if (!is.null(eligibility)) as.logical(eligibility) else {
+    if ("sp_eligible" %in% names(baseline_svy)) as.logical(baseline_svy$sp_eligible) else rep(FALSE, nrow(baseline_svy))
   }
   b[is.na(b)] <- FALSE; p[is.na(p)] <- FALSE
   w <- if (weight_col %in% names(baseline_svy)) as.numeric(baseline_svy[[weight_col]]) else rep(1, nrow(baseline_svy))

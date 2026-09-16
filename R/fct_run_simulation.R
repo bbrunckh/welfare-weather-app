@@ -314,6 +314,9 @@ fct_run_simulation <- function(sw,
   direct_rif_metadata <- if (is_rif && isTRUE(direct_rif_predictions)) {
     tryCatch(build_direct_rif_metadata(fit_multi), error = function(e) NULL)
   } else NULL
+  direct_rif_baseline_cache <- if (is_rif && isTRUE(direct_rif_predictions)) {
+    new.env(parent = emptyenv())
+  } else NULL
 
   # Project the survey before the weather expansion. The full baseline remains
   # retained separately in hist_sim_result$svy for Step 3 policy consumers.
@@ -376,7 +379,8 @@ fct_run_simulation <- function(sw,
         svy_prepared = svy_prepared, weather_join_cache = weather_join_cache,
         precomputed_ecdf_train = precomputed_ecdf_train,
         direct_rif_predictions = direct_rif_predictions,
-        direct_rif_metadata = direct_rif_metadata
+        direct_rif_metadata = direct_rif_metadata,
+        direct_rif_baseline_cache = direct_rif_baseline_cache
       ),
       error = function(e) {
         key_err <<- conditionMessage(e)
@@ -464,7 +468,8 @@ fct_run_simulation <- function(sw,
   has_weather_references <- identical(weather_storage, "reference") &&
     length(weather_refs) > 0L
   rm(weather_result, weather_refs, precomputed_train_aug,
-     svy_prepared, weather_join_cache, direct_rif_metadata)
+     svy_prepared, weather_join_cache, direct_rif_metadata,
+     direct_rif_baseline_cache)
   gc(verbose = FALSE)
 
   t_pipeline_done <- proc.time()[["elapsed"]] - t_start_pipeline

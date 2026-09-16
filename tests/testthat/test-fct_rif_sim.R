@@ -107,6 +107,8 @@ test_that("predict_rif returns correct structure", {
   expect_true("y" %in% names(result))
   expect_equal(nrow(result), 50)
   expect_true(all(is.na(result$.residual)))
+  expect_identical(result$temp, newdata$temp)
+  expect_identical(result$rain, newdata$rain)
   deltas <- result$.fitted - svy$y[1:50]
   expect_true(any(abs(deltas) > 0.01))
 })
@@ -184,6 +186,65 @@ test_that("direct RIF prediction reuses one design and preserves nine-tau parity
       as.numeric(stats::predict(fit_multi[[i]], newdata = scenario))
     )
   }
+})
+
+test_that("cross-key direct RIF reuse caches only the baseline design", {
+  skip_if_not_installed("fixest")
+  set.seed(147)
+  n <- 220
+  taus <- seq(0.1, 0.9, by = 0.1)
+  df <- data.frame(
+    y = rnorm(n), temp = rnorm(n), rain = rnorm(n),
+    loc = factor(sample(letters[1:5], n, replace = TRUE)),
+    year = factor(sample(2010:2016, n, replace = TRUE))
+  )
+  rif_cols <- paste0("rif_", formatC(taus * 100, format = "d"))
+  for (i in seq_along(taus)) df[[rif_cols[i]]] <- compute_rif(df$y, taus[i])
+  fit_multi <- fixest::feols(
+    stats::as.formula(paste0("c(", paste(rif_cols, collapse = ","), ") ~ temp + rain | loc + year")),
+    data = df, warn = FALSE
+  )
+  base <- df[1:100, ]
+  scenario_a <- base
+  scenario_a$temp <- scenario_a$temp + 0.5
+  scenario_b <- base
+  scenario_b$temp <- scenario_b$temp - 0.25
+  metadata <- build_direct_rif_metadata(fit_multi)
+  cache <- new.env(parent = emptyenv())
+
+  pairs_a <- .direct_rif_prediction_pair(
+    fit_multi, base, scenario_a, metadata, baseline_cache = cache
+  )
+  pairs_b <- .direct_rif_prediction_pair(
+    fit_multi, base, scenario_b, metadata, baseline_cache = cache
+  )
+  pairs_b_uncached <- .direct_rif_prediction_pair(
+    fit_multi, base, scenario_b, metadata
+  )
+
+  expect_identical(cache$misses, 1L)
+  expect_identical(cache$hits, 1L)
+  expect_identical(attr(pairs_a, "design_cache")$base_X,
+                   attr(pairs_b, "design_cache")$base_X)
+  expect_false(identical(attr(pairs_a, "design_cache")$scenario_X,
+                         attr(pairs_b, "design_cache")$scenario_X))
+  for (i in seq_along(taus)) {
+    expect_identical(pairs_b[[i]]$base, pairs_b_uncached[[i]]$base)
+    expect_identical(pairs_b[[i]]$scenario, pairs_b_uncached[[i]]$scenario)
+    expect_identical(pairs_b[[i]]$base,
+                     as.numeric(stats::predict(fit_multi[[i]], newdata = base)))
+    expect_identical(pairs_b[[i]]$scenario,
+                     as.numeric(stats::predict(fit_multi[[i]], newdata = scenario_b)))
+  }
+
+  changed_base <- base
+  changed_base$temp[[1L]] <- changed_base$temp[[1L]] + 1
+  pairs_changed <- .direct_rif_prediction_pair(
+    fit_multi, changed_base, scenario_b, metadata, baseline_cache = cache
+  )
+  expect_identical(cache$misses, 2L)
+  expect_identical(pairs_changed[[1L]]$base,
+                   as.numeric(stats::predict(fit_multi[[1L]], newdata = changed_base)))
 })
 
 test_that("predict_rif direct mode matches fallback within numeric tolerance", {

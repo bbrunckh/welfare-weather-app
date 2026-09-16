@@ -87,7 +87,10 @@ compute_rif <- function(y, tau, bw = NULL, dens = NULL) {
     vars
   })
   if (length(fe_vars) && any(vapply(fe_names, is.null, logical(1L)))) return(NULL)
-  list(beta = beta, fixefs = fixefs, fe_vars = fe_vars, fe_names = fe_names)
+  rhs_vars <- tryCatch(all.vars(fit$fml[[3L]]), error = function(e) NULL)
+  if (is.null(rhs_vars)) return(NULL)
+  list(beta = beta, fixefs = fixefs, fe_vars = fe_vars, fe_names = fe_names,
+       rhs_vars = rhs_vars)
 }
 
 build_direct_rif_metadata <- function(fits) {
@@ -103,22 +106,39 @@ build_direct_rif_metadata <- function(fits) {
   list(X = X, data = data)
 }
 
-.direct_rif_design_cache <- function(fits, metadata, base, scenario) {
+.direct_rif_baseline_signature <- function(fit, metadata, base) {
+  rhs_vars <- metadata[[1L]]$rhs_vars %||% character()
+  fe_names <- metadata[[1L]]$fe_names %||% list()
+  fe_vars <- if (length(fe_names)) {
+    vapply(fe_names, `[[`, character(1L), 1L)
+  } else character()
+  relevant <- unique(c(rhs_vars, fe_vars))
+  if (any(!relevant %in% names(base))) return(NULL)
+
+  # The cache is scoped to one model run. Retaining factor levels in the
+  # signature prevents unsafe reuse when a caller changes their encoding.
+  digest::digest(list(
+    formula = paste(deparse(fit$fml), collapse = ""),
+    contrasts = getOption("contrasts"),
+    beta_names = lapply(metadata, function(meta) names(meta$beta)),
+    fe_levels = lapply(metadata[[1L]]$fixefs, names),
+    n = nrow(base),
+    data = base[, relevant, drop = FALSE]
+  ), serialize = TRUE, algo = "xxhash64")
+}
+
+.direct_rif_baseline_design <- function(fits, metadata, base,
+                                        signature = NULL) {
   if (!length(fits) || !length(metadata)) return(NULL)
   base_design <- .direct_fixest_design(fits[[1L]], base)
-  scen_design <- .direct_fixest_design(fits[[1L]], scenario)
-  if (is.null(base_design) || is.null(scen_design) ||
-      !identical(colnames(base_design$X), colnames(scen_design$X))) return(NULL)
+  if (is.null(base_design)) return(NULL)
 
   fe_vars <- metadata[[1L]]$fe_vars %||% character()
   fe_names <- metadata[[1L]]$fe_names %||% list()
   if (length(fe_vars) != length(fe_names)) return(NULL)
-
-  # Encode each FE column once. Quantile-specific fixed-effect values are
-  # looked up by these shared level indices instead of matching N rows per tau.
   level_values <- lapply(seq_along(fe_vars), function(i) {
     var <- fe_names[[i]][[1L]]
-    if (!var %in% names(base) || !var %in% names(scenario)) return(NULL)
+    if (!var %in% names(base)) return(NULL)
     names(metadata[[1L]]$fixefs[[fe_vars[[i]]]])
   })
   if (length(level_values) && any(vapply(level_values, is.null, logical(1))))
@@ -128,29 +148,69 @@ build_direct_rif_metadata <- function(fits) {
     match(as.character(data[[fe_names[[i]][[1L]]]]), level_values[[i]])
   }
   base_fe_index <- lapply(seq_along(fe_vars), function(i) level_index(base, i))
-  scen_fe_index <- lapply(seq_along(fe_vars), function(i) level_index(scenario, i))
-  if (any(vapply(c(base_fe_index, scen_fe_index), anyNA, logical(1)))) return(NULL)
+  if (any(vapply(base_fe_index, anyNA, logical(1)))) return(NULL)
 
   beta_columns <- lapply(metadata, function(meta) {
     match(names(meta$beta), colnames(base_design$X))
   })
   if (any(vapply(beta_columns, function(x) anyNA(x), logical(1)))) return(NULL)
 
-  list(
-    base_X = base_design$X,
-    scenario_X = scen_design$X,
-    beta_columns = beta_columns,
-    fe_indices = list(base = base_fe_index, scenario = scen_fe_index),
-    fe_levels = level_values
-  )
+  list(base_X = base_design$X, base_fe_index = base_fe_index,
+       beta_columns = beta_columns, fe_levels = level_values,
+       signature = signature)
+}
+
+.direct_rif_baseline_get <- function(fits, metadata, base, cache = NULL) {
+  signature <- .direct_rif_baseline_signature(fits[[1L]], metadata, base)
+  if (is.environment(cache) && !is.null(signature) &&
+      exists("entry", envir = cache, inherits = FALSE) &&
+      identical(cache$signature, signature)) {
+    cache$hits <- (cache$hits %||% 0L) + 1L
+    return(cache$entry)
+  }
+  baseline <- .direct_rif_baseline_design(fits, metadata, base, signature)
+  if (is.environment(cache) && !is.null(baseline) && !is.null(signature)) {
+    cache$entry <- baseline
+    cache$signature <- signature
+    cache$misses <- (cache$misses %||% 0L) + 1L
+  }
+  baseline
+}
+
+.direct_rif_design_cache <- function(fits, metadata, base, scenario,
+                                     baseline_cache = NULL) {
+  if (!length(fits) || !length(metadata)) return(NULL)
+  baseline <- .direct_rif_baseline_get(fits, metadata, base, baseline_cache)
+  if (is.null(baseline)) return(NULL)
+  scen_design <- .direct_fixest_design(fits[[1L]], scenario)
+  if (is.null(scen_design) ||
+      !identical(colnames(baseline$base_X), colnames(scen_design$X))) return(NULL)
+
+  fe_vars <- metadata[[1L]]$fe_vars %||% character()
+  fe_names <- metadata[[1L]]$fe_names %||% list()
+  level_index <- function(data, i) {
+    if (!length(baseline$fe_levels)) return(integer(nrow(data)))
+    match(as.character(data[[fe_names[[i]][[1L]]]]), baseline$fe_levels[[i]])
+  }
+  scen_fe_index <- lapply(seq_along(fe_vars), function(i) level_index(scenario, i))
+  if (any(vapply(scen_fe_index, anyNA, logical(1)))) return(NULL)
+
+  list(base_X = baseline$base_X, scenario_X = scen_design$X,
+       beta_columns = baseline$beta_columns,
+       fe_indices = list(base = baseline$base_fe_index,
+                         scenario = scen_fe_index),
+       fe_levels = baseline$fe_levels)
 }
 
 .direct_rif_prediction_pair <- function(fits, base, scenario,
-                                        metadata = NULL) {
+                                        metadata = NULL,
+                                        baseline_cache = NULL) {
   if (!length(fits)) return(NULL)
   metadata <- metadata %||% build_direct_rif_metadata(fits)
   if (is.null(metadata) || length(metadata) != length(fits)) return(NULL)
-  design_cache <- .direct_rif_design_cache(fits, metadata, base, scenario)
+  design_cache <- .direct_rif_design_cache(
+    fits, metadata, base, scenario, baseline_cache = baseline_cache
+  )
   if (is.null(design_cache)) return(NULL)
 
   direct_one <- function(meta, k) {
@@ -313,7 +373,8 @@ predict_rif <- function(fit_multi, newdata, svy, train_data, taus, outcome,
                         weather_cols, so = NULL, chol_list = NULL,
                         ecdf_train = NULL, batch_predictions = FALSE,
                         direct_predictions = FALSE,
-                        direct_metadata = NULL) {
+                        direct_metadata = NULL,
+                        direct_baseline_cache = NULL) {
   stopifnot(
     ".svy_row_id must be present in newdata" = ".svy_row_id" %in% names(newdata),
     "taus must be non-empty" = length(taus) > 0,
@@ -337,9 +398,6 @@ predict_rif <- function(fit_multi, newdata, svy, train_data, taus, outcome,
   F_hat <- if (!is.null(ecdf_train)) ecdf_train else stats::ecdf(train_data[[outcome]])
   tau_i <- pmin(pmax(F_hat(y_baseline), min(taus)), max(taus))
 
-  # Swap weather columns: save scenario, insert baseline from svy
-  saved_weather <- newdata[, weather_cols, drop = FALSE]
-
   # Pre-build baseline and scenario data frames ONCE (avoid K*2 column copies)
   newdata_base <- newdata
   for (wc in weather_cols) {
@@ -353,7 +411,8 @@ predict_rif <- function(fit_multi, newdata, svy, train_data, taus, outcome,
 
   direct_pairs <- if (isTRUE(direct_predictions)) {
     .direct_rif_prediction_pair(
-      fit_multi, newdata_base, newdata_scen, metadata = direct_metadata
+      fit_multi, newdata_base, newdata_scen, metadata = direct_metadata,
+      baseline_cache = direct_baseline_cache
     )
   } else NULL
 
@@ -416,12 +475,9 @@ predict_rif <- function(fit_multi, newdata, svy, train_data, taus, outcome,
     delta_mat[, k] <- pred_new - pred_base
   }
 
-  # Restore scenario weather in newdata (for output)
-  for (wc in weather_cols) newdata[[wc]] <- saved_weather[[wc]]
-
-  # Clean up pre-built frames. newdata_scen is retained until after F_loading
+  # Clean up the baseline frame. newdata_scen is retained until after F_loading
   # is built below, since the lazy design-matrix accessor reads from it.
-  rm(newdata_base, saved_weather)
+  rm(newdata_base)
 
   # Interpolate delta at each household's tau_i position
   delta_i <- interpolate_delta(delta_mat, taus, tau_i)

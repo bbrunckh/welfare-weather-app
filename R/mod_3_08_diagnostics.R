@@ -46,9 +46,8 @@
 .policy_treatment_explanation <- function(sp) {
   if (is.null(sp) || !is.list(sp)) {
     return(paste(
-      "Eligibility is defined by the selected targeting rule before targeting errors.",
-      "Realized treatment is a positive transfer after the targeting draw.",
-      "The table therefore describes a counterfactual assignment, not observed cash receipt."
+      "Eligibility follows the selected targeting rule; treatment is a positive transfer after assignment.",
+      "This table shows counterfactual assignment, not observed cash receipt."
     ))
   }
 
@@ -57,10 +56,10 @@
     targeting,
     exante_poor = paste0(
       "Eligibility is the bottom ", sp$targeting_threshold %||% 20,
-      "% by baseline welfare before targeting errors."
+      "% by baseline welfare."
     ),
     pmt = paste0(
-      "Eligibility follows the selected proxy variable and cutoff before targeting errors."
+      "Eligibility follows the selected proxy variable and cutoff."
     ),
     universal = "Universal targeting makes every baseline unit eligible and applies no targeting errors.",
     "Eligibility follows the selected targeting rule before targeting errors."
@@ -69,8 +68,7 @@
   if (identical(targeting, "universal")) {
     return(paste(
       targeting_text,
-      "Realized treatment is a positive transfer after the policy assignment.",
-      "The table describes the counterfactual assignment, not observed cash receipt."
+      "Treatment is a positive transfer after assignment; this table shows counterfactual assignment."
     ))
   }
 
@@ -80,10 +78,10 @@
     targeting_text,
     paste0(
       "The run then applies the selected targeting errors: ", incl,
-      "% inclusion error can treat units outside the eligible group, and ", excl,
-      "% exclusion error can miss units inside it."
+      "% inclusion error can treat ineligible units, and ", excl,
+      "% exclusion error can miss eligible units."
     ),
-    "Realized treatment is a positive transfer after that draw; this is a counterfactual assignment, not observed cash receipt."
+    "Treatment is a positive transfer after that draw; this is counterfactual assignment."
   )
 }
 
@@ -110,8 +108,8 @@
     ),
     shiny::div(
       class = "results-section-card diagnostic-section-card",
-            shiny::tags$p(class = "diagnostic-note",
-                    "Summary statistics describe the same baseline units before and after applying the policy levers."),
+      shiny::tags$p(class = "diagnostic-note",
+                    "Before/after summaries use the same baseline units."),
       DT::DTOutput(ns("diag_summary_table"))
     ),
 
@@ -122,7 +120,7 @@
     shiny::div(
       class = "results-section-card diagnostic-section-card",
       shiny::tags$p(class = "diagnostic-note",
-                    "Charts compare the same baseline survey units before and after applying the policy levers. Differences are constructed counterfactual inputs, not observed program impacts."),
+                    "Charts show constructed before/after inputs, not observed impacts."),
       shiny::uiOutput(ns("hist_plots_ui"))
     ),
 
@@ -142,12 +140,12 @@
     shiny::div(
       class = "results-section-card diagnostic-section-card",
       shiny::tags$p(class = "diagnostic-note",
-                    "Social protection coverage is defined by positive transfers. Other policy rows show units whose modeled covariates changed; the overlap row counts units touched by both social protection and another policy. Only social protection has a monetary cost here."),
+                    "Social protection counts positive transfers; other rows count changed covariates. Overlap counts units touched by both. Only social protection has a cost."),
       DT::DTOutput(ns("transfer_summary_ui")),
       DT::DTOutput(ns("policy_component_table")),
       shiny::h5("Eligibility versus realized social-protection treatment"),
       shiny::tags$p(class = "diagnostic-note",
-                    "Eligibility is defined by the selected targeting rule before errors; realized treatment is a positive transfer after the targeting draw. The rows show how the specified targeting errors change the counterfactual assignment, not who already received cash."),
+                    "Eligibility follows the selected rule; treatment is a positive transfer after errors. Rows show counterfactual assignment, not observed cash receipt."),
       shiny::uiOutput(ns("treatment_explanation_ui")),
       DT::DTOutput(ns("treatment_table"))
     ),
