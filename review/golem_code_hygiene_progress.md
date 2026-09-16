@@ -15,8 +15,8 @@ touched files against the pre-refactor snapshot, (2) full `devtools::test()`,
 | 1 | Section banner normalization (`# Section ----`) | 39 files | Done | `9b1558f` |
 | 2 | Styler full pass (Tidyverse style) | all `R/` | Done | — |
 | 3 | Namespace, dead code, comment cleanup | `R/` + roxygen | Done | — |
-| 4 | Module convention audit (`NS`/`moduleServer`) | `mod_*.R` | Pending | — |
-| 5 | Final validation + report | — | Pending | — |
+| 4 | Module convention audit (`NS`/`moduleServer`) | `mod_*.R` | Done | — |
+| 5 | Final validation + report | — | Done | — |
 
 ## User decisions
 
@@ -78,6 +78,39 @@ _(filled per batch below)_
   `fct_sim_compare.R` x2, `mod_3_01_sp.R`).
 - All edits verified expression-identical (modulo namespace prefixes)
   against HEAD; full test suite green.
+
+### Batch 4 — module convention audit (no edits needed)
+
+- No `library()`/`require()` calls in any `mod_*.R`.
+- All 24 modules call `moduleServer(id, ...)` exactly once.
+- 20 modules use `NS(id)` in their UI; the 4 without (`mod_1_07_results`,
+  `mod_1_08_modelfit`, `mod_2_02_results`, `mod_3_07_results`) are
+  placeholder UIs whose content is injected server-side via `insertUI`
+  with `session$ns`-namespaced ids — compliant.
+- Mixed `shiny::`/bare qualification for wholesale-imported Shiny
+  functions is stylistic only (covered by `import(shiny)`); left as-is.
+
+### Batch 5 — final validation
+
+- `devtools::test()`: all green at baseline (`90dee76`) and after every
+  batch; final state green.
+- `devtools::check(--no-tests)`: **0 errors**; 5 warnings + 3 notes, all
+  verified pre-existing (non-ASCII strings confirmed present at
+  `HEAD~2`; Rd/doc issues in `man/` are out of scope; undeclared
+  `tidyselect`/unused `Imports` are flagged above; codetools NSE notes
+  unchanged or reduced by the `stats::` work).
+- `git diff --check`: clean on every batch.
+
+## Outcome
+
+All executable-scope hygiene tasks in `golem_code_hygiene_prompt.md` are
+applied to `R/`: no `%>%` anywhere, no module `library()` calls, uniform
+`NS`/`moduleServer` patterns, standardized outline headers, full
+Tidyverse restyle (one CRLF outlier excluded and flagged), explicit
+qualification of collision-prone calls, and all positively-confirmed
+dead commented code removed. Remaining items are user-decision flags
+above (DESCRIPTION declarations, logging policy, CRLF outlier), not
+pending edits.
 
 ## Flagged items
 
