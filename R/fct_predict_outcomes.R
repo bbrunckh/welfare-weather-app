@@ -1,6 +1,4 @@
-# ---------------------------------------------------------------------------- #
-# Predict outcomes                                                               #
-# ---------------------------------------------------------------------------- #
+# Predict outcomes ----
 
 #' Predict an Outcome from a Fitted Model with Optional Residual Simulation
 #'

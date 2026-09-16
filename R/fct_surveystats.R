@@ -1,13 +1,10 @@
-# ============================================================================ #
-# Pure functions for survey statistics and data preparation logic.             #
-# Used by mod_1_02_surveystats_server(). 
-# All functions are stateless and testable without a Shiny session.                                            #
-# ============================================================================ #
+# Survey statistics and data preparation ----
+# Pure functions for survey statistics and data preparation logic.
+# Used by mod_1_02_surveystats_server().
+# All functions are stateless and testable without a Shiny session.
 
 
-# ---------------------------------------------------------------------------- #
-# Time columns                                                                  #
-# ---------------------------------------------------------------------------- #
+# Time columns ----
 
 #' Add derived time columns to a survey data frame
 #'
@@ -36,9 +33,7 @@ add_time_columns <- function(df) {
 }
 
 
-# ---------------------------------------------------------------------------- #
-# Data level                                                                    #
-# ---------------------------------------------------------------------------- #
+# Data level ----
 
 #' Assign a data level indicator for CPI/PPP joining
 #'
@@ -64,9 +59,7 @@ assign_data_level <- function(df) {
 }
 
 
-# ---------------------------------------------------------------------------- #
-# LCU variable identification                                                   #
-# ---------------------------------------------------------------------------- #
+# LCU variable identification ----
 
 #' Identify LCU monetary variables present in a data frame
 #'
@@ -89,9 +82,7 @@ get_lcu_vars <- function(df, variable_list) {
 }
 
 
-# ---------------------------------------------------------------------------- #
-# LCU -> PPP conversion                                                         #
-# ---------------------------------------------------------------------------- #
+# LCU to PPP conversion ----
 
 #' Convert LCU monetary variables to 2021 PPP
 #'
@@ -120,9 +111,7 @@ convert_lcu_to_ppp <- function(df, cpi_ppp_data, lcu_vars) {
     )
 }
 
-# ---------------------------------------------------------------------------- #
-# Bottom code welfare (2021 PPP)                                          #
-# ---------------------------------------------------------------------------- #
+# Bottom code welfare (2021 PPP) ----
 
 #' Bottom code welfare (2021 PPP)
 #'
@@ -145,9 +134,7 @@ bottom_code_welfare <- function(df, floor_value = 0.28) {
   }
 }
 
-# ---------------------------------------------------------------------------- #
-# Interview date summary                                                        #
-# ---------------------------------------------------------------------------- #
+# Interview date summary ----
 
 #' Summarise interview dates for the timing-of-interviews bar chart
 #'
@@ -212,9 +199,7 @@ summarise_interview_dates <- function(df) {
 }
 
 
-# ---------------------------------------------------------------------------- #
-# Welfare poverty lines                                                         #
-# ---------------------------------------------------------------------------- #
+# Welfare poverty lines ----
 
 #' Standard welfare poverty line thresholds (2021 PPP)
 #'
@@ -235,9 +220,7 @@ welfare_poverty_lines <- function() {
 }
 
 
-# ---------------------------------------------------------------------------- #
-# Interview date bar chart                                                      #
-# ---------------------------------------------------------------------------- #
+# Interview date bar chart ----
 
 #' Plot timing of survey interviews by month.
 #'
@@ -487,9 +470,7 @@ filter_by_wave <- function(df, key = "all") {
 
 
 
-# ---------------------------------------------------------------------------- #
-# Sample density heatmap                                                        #
-# ---------------------------------------------------------------------------- #
+# Sample density heatmap ----
 
 #' Spread each location's sampled units across the H3 cells it covers
 #'
@@ -728,7 +709,7 @@ merge_loc_values_to_cells <- function(cell_map, loc_vals, by_wave = TRUE) {
 }
 
 
-# ---- Colour-ramp builders ------------------------------------------------ #
+# Colour-ramp builders ----
 # Stand-ins for leaflet's colour-scale helpers (colorNumeric / colorFactor):
 # the map palettes only
 # need a function mapping values to hex colours, not a leaflet dependency.
@@ -908,9 +889,7 @@ merge_loc_values_to_cells <- function(cell_map, loc_vals, by_wave = TRUE) {
 }
 
 
-# ---------------------------------------------------------------------------- #
-# Summary stats tables                                                         #
-# ---------------------------------------------------------------------------- #
+# Summary stats tables ----
 
 #' Build the summary-stats table frame by variable group flag
 #'
@@ -1118,9 +1097,7 @@ build_stats_table <- function(survey_data, variable_list, flag_col = NULL,
 }
 
 
-# ---------------------------------------------------------------------------- #
-# Outcome summary statistics                                                    #
-# ---------------------------------------------------------------------------- #
+# Outcome summary statistics ----
 
 #' Summary statistics for one outcome, pooled and per survey wave
 #'

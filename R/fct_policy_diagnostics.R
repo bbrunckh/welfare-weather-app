@@ -1,6 +1,5 @@
-# ============================================================================ #
-# Step 3 construction, treatment assignment, and covariate support diagnostics.
-# ============================================================================ #
+# Step 3 policy diagnostics ----
+# Construction, treatment assignment, and covariate support diagnostics.
 
 policy_treatment_matrix <- function(baseline_svy, policy_svy,
                                     eligibility = NULL, weight_col = "weight") {

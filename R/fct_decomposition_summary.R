@@ -1,6 +1,4 @@
-# ============================================================================ #
-# Step 3 decomposition summaries and headline reconciliation.                 #
-# ============================================================================ #
+# Step 3 decomposition summaries ----
 
 .weighted_mean_safe <- function(x, w) {
   ok <- is.finite(x) & is.finite(w) & w > 0

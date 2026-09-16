@@ -1,13 +1,10 @@
-# ============================================================================ #
-# Pure functions translating a selected-weather specification row into the     #
+# Weather pipeline card helpers ----
+# Pure functions translating a selected-weather specification row into the
 # stage sequence rendered by the "Selected weather" pipeline card.             #
 # Stateless and testable without Shiny.                                        #
-# ============================================================================ #
 
 
-# ---------------------------------------------------------------------------- #
-# Stage labels                                                                  #
-# ---------------------------------------------------------------------------- #
+# Stage labels ----
 
 #' Human label for a weather spec's reference window
 #'
@@ -86,9 +83,7 @@ weather_form_label <- function(cont_binned, num_bins, binning_method,
 }
 
 
-# ---------------------------------------------------------------------------- #
-# Stage glyphs (compact inline SVG)                                             #
-# ---------------------------------------------------------------------------- #
+# Stage glyphs (compact inline SVG) ----
 
 #' Timeline strip glyph: 12 month cells, reference window highlighted,
 #' interview block at the right edge.
@@ -199,9 +194,7 @@ weather_form_label <- function(cont_binned, num_bins, binning_method,
 }
 
 
-# ---------------------------------------------------------------------------- #
-# Pipeline assembly                                                             #
-# ---------------------------------------------------------------------------- #
+# Pipeline assembly ----
 
 #' Build the stage list for one weather spec row
 #'

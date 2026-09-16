@@ -919,9 +919,7 @@ mod_3_09_decomposition_server <- function(id,
 }
 
 
-# ---------------------------------------------------------------------------- #
-# Plot helpers
-# ---------------------------------------------------------------------------- #
+# Plot helpers ----
 
 #' @noRd
 .build_decomp_table <- function(decomp_df, is_rif) {

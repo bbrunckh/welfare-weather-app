@@ -1,5 +1,5 @@
-# ============================================================================ #
-# Pure functions for Unconditional Quantile Regression (RIF).                  #
+# RIF simulation helpers ----
+# Unconditional Quantile Regression (RIF).                                     #
 #                                                                              #
 # Implements the Recentered Influence Function approach of                     #
 # Firpo, Fortin & Lemieux (2009) for estimating distributional impacts.        #
@@ -7,12 +7,9 @@
 # Used by:                                                                     #
 #   Module 1 - fct_fit_model.R (compute_rif, build_rif_grid)                   #
 #   Module 2 - fct_simulations.R (predict_rif)                                 #
-# ============================================================================ #
 
 
-# ---------------------------------------------------------------------------- #
-# RIF computation                                                               #
-# ---------------------------------------------------------------------------- #
+# RIF computation ----
 
 #' Compute the Recentered Influence Function for a given quantile
 #'
@@ -288,9 +285,7 @@ compute_rif_multi <- function(y, taus, bw = NULL, dens = NULL) {
 }
 
 
-# ---------------------------------------------------------------------------- #
-# Grid construction                                                             #
-# ---------------------------------------------------------------------------- #
+# Grid construction ----
 
 #' Build a tidy data frame of RIF regression coefficients ("beta curves")
 #'
@@ -332,9 +327,7 @@ build_rif_grid <- function(fits_multi, taus, model_id) {
 }
 
 
-# ---------------------------------------------------------------------------- #
-# RIF Simulation: Delta Method Prediction                                      #
-# ---------------------------------------------------------------------------- #
+# RIF simulation: delta-method prediction ----
 
 #' Predict welfare outcomes using RIF delta method
 #'

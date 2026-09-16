@@ -1,6 +1,4 @@
-# -----------------------------------------------------------------------------
-# Overview metadata loading
-# -----------------------------------------------------------------------------
+# Overview metadata loading ----
 # Databricks uses direct HTTP for small metadata files. Other sources use the
 # existing sequential load_data() path.
 
@@ -28,9 +26,7 @@ OVERVIEW_METADATA_REQUIRED_COLUMNS <- list(
 )
 
 
-# -----------------------------------------------------------------------------
-# Public loader
-# -----------------------------------------------------------------------------
+# Public loader ----
 
 #' Read the Overview metadata bundle from a connection.
 #'
@@ -68,9 +64,7 @@ load_overview_metadata <- function(connection_params, force_refresh = FALSE) {
 }
 
 
-# -----------------------------------------------------------------------------
-# Cache
-# -----------------------------------------------------------------------------
+# Cache ----
 
 # Cache keys include source identity, credential fingerprints, and local file
 # signatures. Remote entries use a TTL because no source version is available.
@@ -202,9 +196,7 @@ load_overview_metadata <- function(connection_params, force_refresh = FALSE) {
 }
 
 
-# -----------------------------------------------------------------------------
-# Source loaders
-# -----------------------------------------------------------------------------
+# Source loaders ----
 
 .load_overview_metadata_sequential <- function(connection_params) {
   errors <- list()
@@ -238,9 +230,7 @@ load_overview_metadata <- function(connection_params, force_refresh = FALSE) {
 }
 
 
-# -----------------------------------------------------------------------------
-# Databricks request helpers
-# -----------------------------------------------------------------------------
+# Databricks request helpers ----
 
 .load_overview_metadata_databricks <- function(connection_params) {
   db_params <- .databricks_connection_params(connection_params)

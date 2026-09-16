@@ -34,7 +34,7 @@ theme_wise <- function(base_size = 16, ...) {
     )
 }
 
-# ---- Brand tokens (inst/app/_brand.yml) ------------------------------------
+# Brand tokens (inst/app/_brand.yml) ----
 # Single source for plot colours so figures match the UI.
 
 .wise_navy      <- "#002244"  # headings, strongest text emphasis
@@ -44,7 +44,7 @@ theme_wise <- function(base_size = 16, ...) {
 .wise_slate     <- "#5B6B79"  # secondary text, reference/zero lines, baseline
 .wise_grid      <- "#E3E9EE"  # major gridlines
 
-# ---- Semantic role colours ---------------------------------------------------
+# Semantic role colours ----
 # Fixed meaning across every figure; do not repurpose ad hoc.
 
 .wise_history     <- "#808080"  # historical sample / pre-policy reference
@@ -56,7 +56,7 @@ theme_wise <- function(base_size = 16, ...) {
 .wise_support     <- "#243746"  # ensemble / support points and outlines
 .wise_zero        <- "#5B6B79"  # zero / reference lines
 
-# ---- Categorical palettes (UI-04) ------------------------------------------
+# Categorical palettes (UI-04) ----
 # Okabe-Ito is the canonical colorblind-safe qualitative palette, reordered
 # blue-first so the lead colour echoes the brand blue. All categorical or
 # discrete scales must draw from here via the wrappers below instead of
@@ -92,7 +92,7 @@ wise_scale_fill_cat <- function(...) {
 wise_scale_colour_okabe_ito <- wise_scale_colour_cat
 wise_scale_fill_okabe_ito <- wise_scale_fill_cat
 
-# ---- SSP scenario colours ---------------------------------------------------
+# SSP scenario colours ----
 # Fixed semantic mapping (not positional): lower emissions = green, mid = blue,
 # high = vermillion. Canonical keys must match .normalise_ssp().
 
@@ -115,7 +115,7 @@ wise_scale_fill_ssp <- function(...) {
   ggplot2::scale_fill_manual(values = .ssp_colours, ...)
 }
 
-# ---- Sequential ramp (charts) ----------------------------------------------
+# Sequential ramp (charts) ----
 # Single-hue brand-blue ramp for magnitude fills in ggplot charts. Map ramps
 # (YlOrRd / RdBu / Mako in fct_weatherstats.R, fct_surveystats.R,
 # fct_outcome.R) are reserved for maps and must not be reused in charts.
@@ -124,7 +124,7 @@ wise_seq_ramp <- function(n) {
   grDevices::colorRampPalette(c("#D9EFF8", "#0071BC", "#002244"))(n)
 }
 
-# ---- Shared placeholder -----------------------------------------------------
+# Shared placeholder ----
 
 #' Uniform placeholder for figures whose inputs are unavailable.
 #' Replaces the per-file `blank_plot()` copies and base-graphics fallbacks.

@@ -1,13 +1,10 @@
-# ============================================================================ #
-# Pure functions for model results: outcome preparation, coefficient helpers, #
-# and plot/table builders.                                                     #
+# Model results helpers ----
+# Outcome preparation, coefficient helpers, and plot/table builders.
+# Outcome preparation, coefficient helpers, and plot/table builders.
 # Used by mod_1_07_results_server(). Stateless and testable without Shiny.    #
-# ============================================================================ #
 
 
-# ---------------------------------------------------------------------------- #
-# Outcome preparation                                                          #
-# ---------------------------------------------------------------------------- #
+# Outcome preparation ----
 
 #' Prepare the outcome column in survey_weather before model fitting
 #'
@@ -92,9 +89,7 @@ ensure_outcome_column <- function(df, so) {
 }
 
 
-# ---------------------------------------------------------------------------- #
-# Coefficient helpers                                                          #
-# ---------------------------------------------------------------------------- #
+# Coefficient helpers ----
 
 #' Extract the Variance-Covariance Matrix from a fixest Fit
 #'
@@ -473,9 +468,7 @@ make_coef_map <- function(coef_names, label_fun = identity) {
 }
 
 
-# ---------------------------------------------------------------------------- #
-# Engine helpers                                                               #
-# ---------------------------------------------------------------------------- #
+# Engine helpers ----
 
 #' Extract the native model object from a fit_model result
 #'
@@ -671,9 +664,7 @@ get_first_bin_label <- function(df, hv) {
   labels[[1]]
 }
 
-# ---------------------------------------------------------------------------- #
-# Plot / table builders                                                        #
-# ---------------------------------------------------------------------------- #
+# Plot / table builders ----
 
 #' Build a coefficient plot across three progressive model fits
 #'
@@ -2081,9 +2072,7 @@ make_regtable <- function(fit1, fit2, fit3,
 }
 
 
-# ---------------------------------------------------------------------------- #
-# Model fit diagnostic plots                                                   #
-# ---------------------------------------------------------------------------- #
+# Model fit diagnostic plots ----
 
 #' Plot residuals against a single weather predictor
 #'

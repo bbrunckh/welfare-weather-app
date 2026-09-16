@@ -1,13 +1,9 @@
-# ============================================================================ #
-# fct_weatherstats.R                                                           #
-# Pure functions for weather statistics logic.                                 #
-# Used by mod_1_05_weatherstats_server(). Stateless and testable without Shiny.#
-# ============================================================================ #
+# Weather statistics ----
+# Pure functions for weather statistics logic.
+# Used by mod_1_05_weatherstats_server(). Stateless and testable without Shiny.
 
 
-# ---------------------------------------------------------------------------- #
-# Date helpers                                                                  #
-# ---------------------------------------------------------------------------- #
+# Date helpers ----
 
 #' Extract unique non-NA survey timestamps from survey data
 #'
@@ -28,9 +24,7 @@ extract_survey_dates <- function(survey_data) {
 }
 
 
-# ---------------------------------------------------------------------------- #
-# Survey-weather merge                                                          #
-# ---------------------------------------------------------------------------- #
+# Survey-weather merge ----
 
 #' Merge survey data with weather data
 #'
@@ -69,9 +63,7 @@ merge_survey_weather <- function(survey_data, weather_data) {
 }
 
 
-# ---------------------------------------------------------------------------- #
-# Weather distribution plots                                                    #
-# ---------------------------------------------------------------------------- #
+# Weather distribution plots ----
 # Both the binned bar chart and the continuous ridge plot draw the survey wave
 # and that wave's own climate history in the same panel, so the comparison the
 # user cares about ("was this wave unusual?") is a within-panel one. Historical
@@ -565,9 +557,7 @@ plot_weather_dist <- function(df, hv, label, cont_binned, hist_df = NULL,
 }
 
 
-# ---------------------------------------------------------------------------- #
-# Binscatter plot                                                               #
-# ---------------------------------------------------------------------------- #
+# Binscatter plot ----
 
 #' Plot a binscatter of an outcome against a weather variable
 #'
@@ -748,9 +738,7 @@ plot_binscatter <- function(df, hv, hv_label = hv, y_var, y_label = y_var) {
   p
 }
 
-# ---------------------------------------------------------------------------- #
-# Historical vs sample weather comparison                                       #
-# ---------------------------------------------------------------------------- #
+# Historical vs sample weather comparison ----
 
 #' Expand survey timestamps across a range of calendar years
 #'
@@ -882,9 +870,7 @@ join_hist_sample_cells <- function(hist_df, survey_weather) {
 }
 
 
-# ---------------------------------------------------------------------------- #
-# Weather-by-location map                                                       #
-# ---------------------------------------------------------------------------- #
+# Weather-by-location map ----
 
 #' Prepare the shared grouping behind `summarise_weather_by_loc()`
 #'
@@ -1490,9 +1476,7 @@ isTRUE_vec <- function(x) !is.na(x) & x
 }
 
 
-# ---------------------------------------------------------------------------- #
-# Summary stats table                                                          #
-# ---------------------------------------------------------------------------- #
+# Summary stats table ----
 
 
 #' Build the weather summary data frame behind `make_weather_stats_dt()`

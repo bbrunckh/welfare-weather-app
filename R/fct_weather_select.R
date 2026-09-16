@@ -1,12 +1,9 @@
-# ============================================================================ #
+# Weather selection helpers ----
 # Pure functions for weather variable selection and specification logic.       #
 # Used by mod_1_04_weather_server(). Stateless and testable without Shiny.    #
-# ============================================================================ #
 
 
-# ---------------------------------------------------------------------------- #
-# Variable list helpers                                                         #
-# ---------------------------------------------------------------------------- #
+# Variable list helpers ----
 
 #' Filter a variable list to weather variables
 #'
@@ -28,9 +25,7 @@ get_weather_vars <- function(variable_list) {
 }
 
 
-# ---------------------------------------------------------------------------- #
-# UI choice helpers                                                             #
-# ---------------------------------------------------------------------------- #
+# UI choice helpers ----
 
 #' Temporal aggregation choices for a weather variable
 #'
@@ -90,9 +85,7 @@ transformation_default <- function(units) {
 }
 
 
-# ---------------------------------------------------------------------------- #
-# Spec defaults                                                                 #
-# ---------------------------------------------------------------------------- #
+# Spec defaults ----
 
 #' Safe defaults for a weather variable specification
 #'
@@ -153,9 +146,7 @@ parse_custom_breaks <- function(x) {
 }
 
 
-# ---------------------------------------------------------------------------- #
-# Spec assembly                                                                 #
-# ---------------------------------------------------------------------------- #
+# Spec assembly ----
 
 #' Build a single weather variable specification tibble row
 #'
@@ -223,9 +214,7 @@ build_weather_spec <- function(name,
 }
 
 
-# ---------------------------------------------------------------------------- #
-# Selected weather assembly                                                     #
-# ---------------------------------------------------------------------------- #
+# Selected weather assembly ----
 
 #' Build the full selected weather specification data frame
 #'
@@ -283,9 +272,7 @@ build_selected_weather <- function(selected_vars, var_info, spec_inputs = list()
     dplyr::left_join(dplyr::bind_rows(specs), by = "name")
 }
 
-# ---------------------------------------------------------------------------- #
-# Bin-level relabelling                                                         #
-# ---------------------------------------------------------------------------- #
+# Bin-level relabelling ----
 
 #' Replace sentinel +/-Inf edges in binned weather factor levels
 #'

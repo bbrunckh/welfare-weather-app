@@ -30,7 +30,7 @@ info_popover <- function(..., title = NULL, docs = FALSE, placement = "right") {
   )
 }
 
-# ---- Inline "no data" warning --------------------------------------------------
+# Inline "no data" warning ----
 
 #' Amber inline warning with an exclamation icon, shown when a selection
 #' has no data (e.g. no variables found for the current level of analysis).
@@ -45,7 +45,7 @@ no_data_warning <- function(...) {
   )
 }
 
-# ---- Selection summary card ----------------------------------------------------
+# Selection summary card ----
 # Thin "what is loaded" card at the top of the stats tabs (Survey, Outcome,
 # Weather, Model). Head: uppercase title + right-aligned badge; body: one row
 # per item with a bold name, muted sub-label and small pills.
@@ -332,7 +332,7 @@ policy_summary_card <- function(selected_policies = NULL,
   )
 }
 
-# ---- Variable label shortening -----------------------------------------------
+# Variable label shortening ----
 
 #' Drop the "Monthly " prefix from a variable label and capitalise the first
 #' letter, so "Monthly daily maximum temperature" reads
@@ -395,7 +395,7 @@ format_weather_heading_phrase <- function(weather_var) {
   }
 }
 
-# ---- Config flyout blocks (UI-02) ---------------------------------------------
+# Config flyout blocks (UI-02) ----
 
 #' Accessible plot output (UI-36)
 #'
@@ -485,7 +485,7 @@ config_flyout_block <- function(toggle_id, title, ..., toggle_label = "Configure
   )
 }
 
-# ---- Number formatting for displayed figures (UI-32) -------------------------
+# Number formatting for displayed figures (UI-32) ----
 
 #' Format a number for display at one decimal place
 #'
@@ -533,7 +533,7 @@ fmt_count <- function(x, na = "\u2014") {
 }
 
 
-# ---- Nav-header step status (UI-47) ------------------------------------------
+# Nav-header step status (UI-47) ----
 #
 # Steps can be visited in any order, and results survive a move to another tab,
 # so the navbar is the only place where the state of every step is visible at
@@ -653,7 +653,7 @@ stale_after_import <- function(has_result, is_stale = NULL, imported = NULL) {
 }
 
 
-# ---- Table CSV export (UI-45) ------------------------------------------------
+# Table CSV export (UI-45) ----
 #
 # Every table in the app offers the same export affordance: one small, quiet
 # "Download CSV" control. For DT tables that is the Buttons extension, driven
@@ -751,7 +751,7 @@ csv_download_handler <- function(filename_base, data_fun, stale = NULL) {
   )
 }
 
-# ---- Run signatures & stale-state marking (INT-08) ---------------------------
+# Run signatures & stale-state marking (INT-08) ----
 
 #' Canonicalise a value for identity comparison in a run signature.
 #'
@@ -788,7 +788,7 @@ csv_download_handler <- function(filename_base, data_fun, stale = NULL) {
   )
 }
 
-# ---- Dynamic-input selection restore (INT-01) -------------------------------
+# Dynamic-input selection restore (INT-01) ----
 
 #' Build a label-lookup function bound to a fixed variable-metadata frame
 #' (INT-05). Result renderers pass this instead of looking labels up in the
@@ -851,7 +851,7 @@ csv_download_handler <- function(filename_base, data_fun, stale = NULL) {
   prev
 }
 
-# ---- Busy guards (REACT-02) -------------------------------------------------
+# Busy guards (REACT-02) ----
 # Long actions (data loads, model fits, simulations) use a module-local
 # `running` reactiveVal so double-clicks cannot re-enter the observer while
 # the previous run is still executing. Triggering controls are disabled for
@@ -911,7 +911,7 @@ shinyjs_disable_button <- function(input_id, enabled = TRUE) {
   )
 }
 
-# ---- Segmented radio controls -------------------------------------------------
+# Segmented radio controls ----
 
 pill_toggle <- function(
     inputId,
@@ -956,7 +956,7 @@ pill_toggle <- function(
   )
 }
 
-# ---- Wave / Survey Year Toggle Slider ----------------------------------------
+# Wave / Survey Year Toggle Slider ----
 
 #' Survey year / wave toggle-style slider input
 #'

@@ -1,13 +1,10 @@
-# ============================================================================ #
+# Model card helpers ----
 # Pure functions translating a `build_selected_model()` spec into a concise     #
 # model-card equation for the sidebar, Results, and Model fit tabs.              #
 # Stateless and testable without Shiny.                                        #
-# ============================================================================ #
 
 
-# ---------------------------------------------------------------------------- #
-# Labels                                                                        #
-# ---------------------------------------------------------------------------- #
+# Labels ----
 
 #' Badge text for the model card: model type and fitting engine
 #'
@@ -84,9 +81,7 @@ model_covariate_badge <- function(selected_model) {
 }
 
 
-# ---------------------------------------------------------------------------- #
-# Card assembly                                                                 #
-# ---------------------------------------------------------------------------- #
+# Card assembly ----
 
 #' Assemble the concise "Selected model" card equation
 #'

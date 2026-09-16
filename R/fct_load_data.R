@@ -1,6 +1,4 @@
-# =============================================================================
-# load_data.R
-# =============================================================================
+# Data loading ----
 # Unified lazy data loader backed by DuckDB directly (no duckdbfs dependency).
 #
 # Design notes:
@@ -11,12 +9,9 @@
 #     environment to avoid redundant network calls and SQL round-trips.
 #   - httr2 is used throughout for HTTP (replaces httr).
 #   - duckdbfs is no longer required.
-# =============================================================================
 
 
-# -----------------------------------------------------------------------------
-# Module-level state
-# -----------------------------------------------------------------------------
+# Module-level state ----
 
 .duck <- new.env(parent = emptyenv())
 # .duck$con          - the live DuckDB connection (set by .duck_con())
@@ -106,9 +101,7 @@ collect_deterministic <- function(data, keys = NULL) {
 }
 
 
-# -----------------------------------------------------------------------------
-# Shared path and Databricks HTTP helpers
-# -----------------------------------------------------------------------------
+# Shared path and Databricks HTTP helpers ----
 
 .is_bare_data_path <- function(path) {
   !grepl("://", path, fixed = TRUE) &&
@@ -256,9 +249,7 @@ collect_deterministic <- function(data, keys = NULL) {
   invisible(NULL)
 }
 
-# -----------------------------------------------------------------------------
-# SQL literal quoting (SEC-01)
-# -----------------------------------------------------------------------------
+# SQL literal quoting (SEC-01) ----
 
 #' Escape and quote a character scalar as a safe DuckDB string literal.
 #'
@@ -275,9 +266,7 @@ collect_deterministic <- function(data, keys = NULL) {
   paste0("'", gsub("'", "''", as.character(x), fixed = TRUE), "'")
 }
 
-# -----------------------------------------------------------------------------
-# Credential helpers
-# -----------------------------------------------------------------------------
+# Credential helpers ----
 
 #' Obtain a Databricks M2M OAuth token, reusing a cached one when valid.
 #'
@@ -368,9 +357,7 @@ collect_deterministic <- function(data, keys = NULL) {
 }
 
 
-# -----------------------------------------------------------------------------
-# DuckDB SQL builder
-# -----------------------------------------------------------------------------
+# DuckDB SQL builder ----
 
 #' Build a DuckDB read expression for a set of paths.
 #'
@@ -393,9 +380,7 @@ collect_deterministic <- function(data, keys = NULL) {
 }
 
 
-# -----------------------------------------------------------------------------
-# Fast path: small CSV via Databricks Files REST API
-# -----------------------------------------------------------------------------
+# Fast path: small CSV via Databricks Files REST API ----
 
 # Direct CSV loading avoids DuckDB setup for small Databricks files.
 .fetch_db_csv_direct <- function(url, token) {
@@ -432,9 +417,7 @@ collect_deterministic <- function(data, keys = NULL) {
 
 
 
-# -----------------------------------------------------------------------------
-# Main function
-# -----------------------------------------------------------------------------
+# Main function ----
 
 #' Load data files lazily via DuckDB
 #'

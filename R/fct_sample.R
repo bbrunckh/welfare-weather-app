@@ -1,12 +1,9 @@
-# ============================================================================ #
+# Survey sample selection helpers ----
 # Pure functions for survey sample selection logic.                            #
 # Used by mod_1_01_sample_server(). 
 # All functions are stateless and testable without a Shiny session.                                                     #
-# ============================================================================ #
 
-# ---------------------------------------------------------------------------- #
-# File listing                                                                  #
-# ---------------------------------------------------------------------------- #
+# File listing ----
 
 #' List available data files at a connection endpoint
 #'
@@ -37,9 +34,7 @@ list_available_files <- function(connection_params) {
 }
 
 
-# ---------------------------------------------------------------------------- #
-# Survey file construction                                                      #
-# ---------------------------------------------------------------------------- #
+# Survey file construction ----
 
 #' Construct expected parquet filenames from survey metadata
 #'
@@ -74,9 +69,7 @@ build_survey_fnames <- function(survey_list, unit, connection_params) {
 }
 
 
-# ---------------------------------------------------------------------------- #
-# Survey filtering                                                              #
-# ---------------------------------------------------------------------------- #
+# Survey filtering ----
 
 #' Filter a survey list to files available at the endpoint
 #'
@@ -97,9 +90,7 @@ filter_surveys_to_available <- function(surveys, available_files) {
 }
 
 
-# ---------------------------------------------------------------------------- #
-# Year helpers                                                                  #
-# ---------------------------------------------------------------------------- #
+# Year helpers ----
 
 #' Get available survey years per economy code
 #'
@@ -126,9 +117,7 @@ get_available_years <- function(surveys, codes) {
 }
 
 
-# ---------------------------------------------------------------------------- #
-# Selected survey assembly                                                      #
-# ---------------------------------------------------------------------------- #
+# Selected survey assembly ----
 
 #' Build the selected surveys data frame from economy/year selections
 #'

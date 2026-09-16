@@ -1,4 +1,4 @@
-# ============================================================================ #
+# Step 1 focused regression table ----
 # Step 1 focused regression table (T2). Results-first `.wise-table` of the      #
 # weather + interaction coefficients of the full specification (3), with a      #
 # per-row translation on the outcome's reporting scale. Complements             #
@@ -9,12 +9,9 @@
 # the export data frame, so the two cannot diverge. Translations mirror the     #
 # pct/pp/level formatting rules of step1_fmt_effect() / .s1_fmt_scaled() in     #
 # fct_step1_headline.R without calling those private helpers.                   #
-# ============================================================================ #
 
 
-# ---------------------------------------------------------------------------- #
-# Small helpers                                                                 #
-# ---------------------------------------------------------------------------- #
+# Small helpers ----
 
 .t2_esc <- function(x) gsub("([][{}().+*^$|?\\\\])", "\\\\\\1", x)
 
@@ -150,9 +147,7 @@
 }
 
 
-# ---------------------------------------------------------------------------- #
-# Shared row derivation                                                         #
-# ---------------------------------------------------------------------------- #
+# Shared row derivation ----
 
 # Tidy rows behind both the focused table and its data-frame export.
 # fixest: one row per weather/interaction term of fit3.
@@ -331,9 +326,7 @@
 }
 
 
-# ---------------------------------------------------------------------------- #
-# HTML renderer (over the shared tidy rows)                                     #
-# ---------------------------------------------------------------------------- #
+# HTML renderer (over the shared tidy rows) ----
 
 .t2_render_focused <- function(rows, engine, is_logistic, is_lpm, subheader, footnotes) {
   .f3 <- function(x) if (length(x) && is.finite(x)) formatC(x, format = "f", digits = 3) else ""
@@ -430,9 +423,7 @@
 }
 
 
-# ---------------------------------------------------------------------------- #
-# Public entry points                                                           #
-# ---------------------------------------------------------------------------- #
+# Public entry points ----
 
 #' Focused regression table for the Step 1 results tab (T2)
 #'

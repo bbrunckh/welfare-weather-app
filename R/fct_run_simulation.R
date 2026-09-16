@@ -11,9 +11,7 @@
 #   - fct_aggregation.R  (compute_hist_agg, compute_scenario_agg)
 
 
-# ---------------------------------------------------------------------------- #
-# Run full simulation pipeline - called once per button click                  #
-# ---------------------------------------------------------------------------- #
+# Run full simulation pipeline ----
 
 # REACT-12: parse a future simulation key into its (SSP x period) group.
 # Key format: "ssp2_4_5_2030_2040_ensemble_mean" ->

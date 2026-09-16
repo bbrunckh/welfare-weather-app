@@ -1,9 +1,6 @@
-# ---------------------------------------------------------------------------- #
-# fit_model.R                                                                   #
-# ---------------------------------------------------------------------------- #
+# Model engine registry ----
 #
 # Architecture: backend dispatch
-# --------------------------------
 # Each supported engine is registered in `ENGINE_REGISTRY` as a named list
 # with four fields:
 #
@@ -26,11 +23,9 @@
 #
 # No other changes to this function are needed.
 #
-# ---------------------------------------------------------------------------- #
+#
 
-# ---------------------------------------------------------------------------- #
-# Engine registry                                                                #
-# ---------------------------------------------------------------------------- #
+# Engine registry ----
 
 ENGINE_REGISTRY <- list(
 
@@ -264,9 +259,7 @@ ENGINE_REGISTRY <- list(
 
 )
 
-# ---------------------------------------------------------------------------- #
-# run_lasso()                                                                  #
-# ---------------------------------------------------------------------------- #
+# Stability LASSO variable selection ----
 
 #' Run stability LASSO variable selection
 #'
@@ -683,9 +676,7 @@ run_lasso_selection <- function(
   )
 }
 
-# ---------------------------------------------------------------------------- #
-# fit_model()                                                                  #
-# ---------------------------------------------------------------------------- #
+# Progressive model fitting ----
 
 #' Fit progressive weather-welfare regression models
 #'

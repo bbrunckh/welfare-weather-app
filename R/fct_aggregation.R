@@ -144,9 +144,7 @@ resolve_agg_fn <- function(method) {
 }
 
 
-# ---------------------------------------------------------------------------- #
-# Residual drawing helper                                                       #
-# ---------------------------------------------------------------------------- #
+# Residual drawing helper ----
 
 #' Build the ID-to-residual named lookup for the "original" residual mode
 #'
@@ -340,9 +338,7 @@ combine_ensemble_results <- function(member_results,
   )
 }
 
-# ---------------------------------------------------------------------------- #
-# Aggregation choices                                                          #
-# ---------------------------------------------------------------------------- #
+# Aggregation choices ----
 
 #' Aggregation Method Choices for Historical Simulation
 #'
@@ -393,9 +389,7 @@ hist_aggregate_choices <- function(outcome_type, outcome_name = NULL) {
 
 
 
-# ---------------------------------------------------------------------------- #
-# Aggregate predictions for plotting
-# ---------------------------------------------------------------------------- #
+# Aggregate predictions for plotting ----
 
 #' Aggregate a Predicted Outcome Across Observations Within Groups
 #'
@@ -564,9 +558,7 @@ aggregate_outcome <- function(df,
     )
 }
 
-# ---------------------------------------------------------------------------- #
-# Convert to deviation from centre for plotting
-# ---------------------------------------------------------------------------- #
+# Convert to deviation from centre for plotting ----
 
 #' Express Aggregate Values as Deviation from a Central Tendency
 #'
@@ -634,9 +626,7 @@ deviation_from_centre <- function(df,
 # dev/archived_fct/plot_exceedance_archived.R). They are superseded by
 # enhance_exceedance() in fct_sim_compare.R.
 
-# ---------------------------------------------------------------------------- #
-# Shared aggregation helper                                                    #
-# ---------------------------------------------------------------------------- #
+# Shared aggregation helper ----
 
 #' Aggregate Simulation Predictions for Exceedance Plotting
 #'
@@ -728,9 +718,7 @@ aggregate_sim_preds <- function(preds, so, agg_method, deviation, loss_frame,
   )
 }
 
-# ---------------------------------------------------------------------------- #
-# Shared pipeline aggregation table                                             #
-# ---------------------------------------------------------------------------- #
+# Shared pipeline aggregation table ----
 
 #' Build the canonical per-year aggregation table for one or more pipelines
 #'

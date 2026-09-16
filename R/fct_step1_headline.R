@@ -1,5 +1,4 @@
-# ============================================================================ #
-# Step 1 "At a glance" headline cards (mod_1_07_results).                       #
+# Step 1 headline helpers ----
 # Pure functions: a fit_model() result plus its fit-time snapshot -> card       #
 # values. One translation path for every configuration, so cards, figures and   #
 # the table cannot diverge:                                                     #
@@ -8,12 +7,9 @@
 #   weather   : continuous / polynomial / binned (omitted reference bin)        #
 #   interact. : none / moderator (pairwise or saturated)                        #
 # All values are computed from the fitted run only (fit snapshot, INT-05).      #
-# ============================================================================ #
 
 
-# ---------------------------------------------------------------------------- #
-# Small helpers                                                                 #
-# ---------------------------------------------------------------------------- #
+# Small helpers ----
 
 .s1_engine <- function(mf) {
   e <- tolower(mf$engine %||% "fixest")
@@ -148,11 +144,9 @@
 }
 
 
-# ---------------------------------------------------------------------------- #
-# Design-matrix rows (fixest engine): value of every design column at a          #
+# Design-matrix rows ----
 # counterfactual point. Mirrors the manual-prediction logic of                   #
 # make_weather_effect_plot() so cards and figures share one construction.        #
-# ---------------------------------------------------------------------------- #
 
 # Polynomial term matcher: fixest double-wraps I() terms in coefficient
 # names ("I(I(x^2))"); accept the plain "I(x^2)" spelling too.
@@ -243,9 +237,7 @@
 }
 
 
-# ---------------------------------------------------------------------------- #
-# Effect scenarios                                                              #
-# ---------------------------------------------------------------------------- #
+# Effect scenarios ----
 
 # fixest (feols / feglm): one contrast per moderator level. Each scenario
 # carries the model-scale contrast (w = design row difference), its SE from the
@@ -472,9 +464,7 @@
 }
 
 
-# ---------------------------------------------------------------------------- #
-# RIF heterogeneity screen                                                      #
-# ---------------------------------------------------------------------------- #
+# RIF heterogeneity screen ----
 
 # Approximate Wald screen for differences in the weather effect across the
 # quantile grid (tau = 0.1 ... 0.9). Restacks the RIF responses (already stored
@@ -567,9 +557,7 @@ step1_rif_heterogeneity_p <- function(mf, snap, var) {
 }
 
 
-# ---------------------------------------------------------------------------- #
-# Public scenario / formatting contract                                          #
-# ---------------------------------------------------------------------------- #
+# Public scenario / formatting contract ----
 
 #' Effect scenarios for one weather variable (public wrapper)
 #'
@@ -639,9 +627,7 @@ step1_fmt_effect <- function(est, se, scale, digits = 1, ci = NULL) {
 }
 
 
-# ---------------------------------------------------------------------------- #
-# Cards                                                                         #
-# ---------------------------------------------------------------------------- #
+# Cards ----
 
 .s1_effect_card <- function(mf, snap, var, engine, scale, label_fun,
                             scenario = NULL, scenario_cached = FALSE) {
@@ -1012,9 +998,7 @@ step1_fmt_effect <- function(est, se, scale, digits = 1, ci = NULL) {
 }
 
 
-# ---------------------------------------------------------------------------- #
-# Public entry points                                                           #
-# ---------------------------------------------------------------------------- #
+# Public entry points ----
 
 #' Build the "At a glance" card rows for the Step 1 results tab
 #'

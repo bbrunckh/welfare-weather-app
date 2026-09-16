@@ -1,4 +1,4 @@
-# ============================================================================ #
+# Simulation helpers ----
 # Pure functions used by mod_2_01.
 # Stateless and testable without Shiny.
 #
@@ -13,9 +13,8 @@
 # Simulation pipeline helper:
 #   run_sim_pipeline()  -- weather join -> predict -> back-transform in one call
 
-# ============================================================================ #
 
-# ---- Internal colour / style helpers ---------------------------------------
+# Internal colour / style helpers ----
 # Used by enhance_exceedance() and plot_pointrange_climate(). Not exported.
 
 # SSP scenario colours (.ssp_colours) live in utils_plot_theme.R together with
@@ -45,9 +44,7 @@
   out
 }
 
-# ---------------------------------------------------------------------------- #
-# Shared constants                                                             #
-# ---------------------------------------------------------------------------- #
+# Shared constants ----
 
 #' Symmetric Return-Period Probability Maps
 #'
@@ -78,9 +75,7 @@ SSP_SHORT_LABELS <- c(
   "SSP5-8.5" = "SSP5"
 )
 
-# ---------------------------------------------------------------------------- #
-# Coefficient-draw constants and helpers                                       #
-# ---------------------------------------------------------------------------- #
+# Coefficient-draw constants and helpers ----
 
 #' Format elapsed seconds into a human-readable string (e.g. "2m 14s")
 #' Used by the simulation progress bar.
@@ -173,9 +168,7 @@ compute_cluster_counts <- function(data) {
   counts
 }
 
-# ---------------------------------------------------------------------------- #
-# Cholesky uncertainty propagation                                              #
-# ---------------------------------------------------------------------------- #
+# Cholesky uncertainty propagation ----
 
 #' Compute Cholesky Factor of Model VCV Matrix
 #'
@@ -359,9 +352,7 @@ align_factor_loading_matrix <- function(X_nonFE, beta_names) {
 
 
 
-# ---------------------------------------------------------------------------- #
-# Shared UI helper                                                             #
-# ---------------------------------------------------------------------------- #
+# Shared UI helper ----
 
 #' Residual Method Radio Buttons UI
 #'
@@ -393,9 +384,7 @@ residual_method_ui <- function(ns, input_id) {
   )
 }
 
-# ---------------------------------------------------------------------------- #
-# Simulation pipeline helper                                                   #
-# ---------------------------------------------------------------------------- #
+# Simulation pipeline helper ----
 
 #' Resolve the ID Column for Residual Matching
 #'
@@ -804,9 +793,7 @@ run_sim_pipeline <- function(weather_raw,
   )
 }
 
-# ---------------------------------------------------------------------------- #
-# Simulation date grid                                                         #
-# ---------------------------------------------------------------------------- #
+# Simulation date grid ----
 
 #' Build the Date Grid for the Historical Simulation
 #'
@@ -840,9 +827,7 @@ build_hist_sim_dates <- function(survey_weather, year_range) {
   )
 }
 
-# ---------------------------------------------------------------------------- #
-# Residual choice helpers                                                      #
-# ---------------------------------------------------------------------------- #
+# Residual choice helpers ----
 
 #' Available residual handling choices
 #'
@@ -862,9 +847,7 @@ residual_choices <- function() {
 }
 
 
-# ---------------------------------------------------------------------------- #
-# Perturbation method helper                                                   #
-# ---------------------------------------------------------------------------- #
+# Perturbation method helper ----
 
 #' Build a Perturbation Method Vector for Climate Simulations
 #'
@@ -890,9 +873,7 @@ build_perturbation_method <- function(selected_weather) {
 }
 
 
-# ---------------------------------------------------------------------------- #
-# Weather preparation for simulation                                           #
-# ---------------------------------------------------------------------------- #
+# Weather preparation for simulation ----
 
 #' Add Simulation Month/Year Fields Derived from `timestamp`
 #'
@@ -1009,9 +990,7 @@ prepare_hist_weather <- function(weather_raw,
     ) |>
     dplyr::mutate(year = as.factor(year))
 }
-# ---------------------------------------------------------------------------- #
-# Back-transformation                                                          #
-# ---------------------------------------------------------------------------- #
+# Back-transformation ----
 
 #' Back-Transform a Log-Transformed Outcome Column
 #'

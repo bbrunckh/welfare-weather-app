@@ -1,6 +1,5 @@
-# ============================================================================ #
+# Distributional incidence summaries ----
 # Fixed-baseline distributional incidence summaries.
-# ============================================================================ #
 
 weighted_baseline_deciles <- function(svy, outcome, weight = NULL) {
   if (is.null(svy) || !is.data.frame(svy) || !outcome %in% names(svy)) {

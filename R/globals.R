@@ -1,7 +1,4 @@
-# ============================================================================ #
-# globals.R                                                                    #
-# Package-wide import declarations and data-masking bindings.                  #
-# ============================================================================ #
+# Package-wide imports and bindings ----
 
 #' Package-wide imports and dynamically created column names
 #'

@@ -1,5 +1,5 @@
-# ============================================================================ #
-# fct_sim_diag.R                                                               #
+# Simulation diagnostics ----
+# fct_sim_diag.R
 #                                                                              #
 # Pure diagnostic functions for Module 2 Diagnostics tab.                     #
 # Called by mod_2_05_sim_diag_server() only.                                  #
@@ -13,12 +13,9 @@
 #   .kde_group()                 -- compute KDE for one group (internal)       #
 #   build_ridge_kde_data()       -- pre-compute all KDE data (exported)        #
 #   plot_year_anchored_ridge()   -- render ridge plot from kde_data            #
-# ============================================================================ #
 
 
-# ---------------------------------------------------------------------------- #
-# Internal helpers                                                             #
-# ---------------------------------------------------------------------------- #
+# Internal helpers ----
 
 # Derive int_month from timestamp if not already present.
 #' @noRd
@@ -45,9 +42,7 @@
 }
 
 
-# ---------------------------------------------------------------------------- #
-# Weather input density panel                                                  #
-# ---------------------------------------------------------------------------- #
+# Weather input density panel ----
 
 # Single-variable density plot (internal).
 #' @noRd
@@ -543,9 +538,7 @@ weather_support_summary <- function(regression_weather, scenario_weather,
   dplyr::bind_rows(Filter(Negate(is.null), rows))
 }
 
-# ---------------------------------------------------------------------------- #
-# Year-anchored welfare ridge plot                                             #
-# ---------------------------------------------------------------------------- #
+# Year-anchored welfare ridge plot ----
 
 # Compute KDE for one group using supplied bandwidth and x-range.
 # Returns a data.frame(x, density_raw) on the shared n-point grid.

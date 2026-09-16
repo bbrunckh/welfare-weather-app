@@ -201,9 +201,7 @@ policy_input_diagnostics <- function(baseline_svy, policy_svy, vars = NULL) {
 }
 
 
-# ---------------------------------------------------------------------------- #
-# Step 3 Results pure helpers                                                  #
-# ---------------------------------------------------------------------------- #
+# Step 3 Results pure helpers ----
 
 #' Build Step 3 Results Headline Cards
 #'

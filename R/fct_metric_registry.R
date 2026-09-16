@@ -1,6 +1,4 @@
-# ============================================================================ #
-# Metric metadata used by result summaries and visualisations.
-# ============================================================================ #
+# Metric metadata ----
 
 .WISE_METRIC_REGISTRY <- list(
   mean = list(label = "Mean", unit = "outcome units", format = "number", direction = "higher_is_better", percent_change = TRUE, poverty_line = FALSE, engines = c("ols", "rif"), uncertainty = c("coefficient", "weather", "ensemble"), caveat = "Weighted annual aggregate for the fixed survey population."),

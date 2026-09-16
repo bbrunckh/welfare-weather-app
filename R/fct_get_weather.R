@@ -17,8 +17,7 @@
 #   .compute_breaks()      - histogram/quantile breakpoints
 #   .apply_binning()       - apply cut points to weather data frame
 
-# ---------------------------------------------------------------------------- #
-# Section 0 - Remote weather disk cache (PERF-13)                              #
+# Remote weather disk cache (PERF-13) ----
 #                                                                              #
 # get_weather() re-reads identical ERA5/CMIP6 parquet files from the remote    #
 # store on every run. For remote backends (s3/gcs/azure/databricks) each read  #
@@ -32,7 +31,6 @@
 # date bounds). The version constant must be bumped whenever the upstream      #
 # file layout changes. Kill switch: WISEAPP_WEATHER_CACHE_DISABLE=1. Size cap: #
 # WISEAPP_WEATHER_CACHE_MAX_MB (default 2048), LRU-evicted by mtime.           #
-# ---------------------------------------------------------------------------- #
 
 WISEAPP_WX_CACHE_VERSION <- "v1"
 WISEAPP_WX_ROUND_DIGITS <- 5L
@@ -316,9 +314,7 @@ WISEAPP_WX_ROUND_DIGITS <- 5L
   apply_slice(local)
 }
 
-# ---------------------------------------------------------------------------- #
-# Section 1 - H3 spatial helpers                                               #
-# ---------------------------------------------------------------------------- #
+# H3 spatial helpers ----
 
 #' Harmonise H3 resolution and type between microdata and weather tables.
 #'
@@ -400,12 +396,10 @@ WISEAPP_WX_ROUND_DIGITS <- 5L
   )
 }
 
-# ---------------------------------------------------------------------------- #
-# Section 2 - Weather transformation helpers                                   #
+# Weather transformation helpers ----
 # .apply_transformations() - anomaly/deviation in DuckDB SQL                   #
 # .compute_breaks()        - binning breakpoint computation                    #
 # .apply_binning()         - apply breakpoints to data frame                   #
-# ---------------------------------------------------------------------------- #
 
 #' Build transformation specifications for selected weather variables.
 #'
@@ -541,8 +535,6 @@ WISEAPP_WX_ROUND_DIGITS <- 5L
     dplyr::select(-month, -dplyr::all_of(ref_cols))
 }
 
-# ---------------------------------------------------------------------------- #
-
 #' Compute bin breakpoints from a reference data frame.
 #'
 #' Examines each row of `selected_weather` whose `cont_binned` column is
@@ -669,13 +661,11 @@ WISEAPP_WX_ROUND_DIGITS <- 5L
   relabel_bin_levels(df, breaks)
 }
 
-# ---------------------------------------------------------------------------- #
-# Section 3 - Main weather loading pipeline                                    #
+# Main weather loading pipeline ----
 # get_weather() - loads ERA5 + CMIP6, applies rolling windows + perturbations  #
 # Note: DuckDB rolling window (0%/16% stall) occurs in loc_weather_base        #
 # materialisation and batch query. See tradeoffs for improvements              #
 # in known_issues.md #13, #15.                                                 #
-# ---------------------------------------------------------------------------- #
 
 #' Load, aggregate, and construct weather variables for survey locations.
 #'

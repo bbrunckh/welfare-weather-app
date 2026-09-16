@@ -1,5 +1,5 @@
-# ============================================================================ #
-# Export bundle: configuration, tables, figures and a metadata document.       #
+# Export bundle ----
+# Configuration, tables, figures and a metadata document.
 #                                                                              #
 # UI-48. Two problems this solves:                                             #
 #                                                                              #
@@ -17,12 +17,9 @@
 # a root session and every module session under it, so a module registers an   #
 # artefact without any change to its server signature or return API - see      #
 # `wise_export_table()` / `wise_export_figure()`.                              #
-# ============================================================================ #
 
 
-# ---------------------------------------------------------------------------- #
-# Registry                                                                      #
-# ---------------------------------------------------------------------------- #
+# Registry ----
 
 #' Access (creating on first use) the session's export registry
 #'
@@ -152,9 +149,7 @@ wise_export_items <- function(session = shiny::getDefaultReactiveDomain()) {
 }
 
 
-# ---------------------------------------------------------------------------- #
-# File naming                                                                   #
-# ---------------------------------------------------------------------------- #
+# File naming ----
 
 #' Slugify a string for use in a file name
 #'
@@ -195,9 +190,7 @@ wise_export_items <- function(session = shiny::getDefaultReactiveDomain()) {
 }
 
 
-# ---------------------------------------------------------------------------- #
-# Configuration state                                                           #
-# ---------------------------------------------------------------------------- #
+# Configuration state ----
 
 # Inputs that describe transient UI state rather than analysis configuration.
 # Restoring them would replay clicks (re-running models on import) or fight the
@@ -397,9 +390,7 @@ wise_config_apply <- function(config, session, existing = character(0)) {
 }
 
 
-# ---------------------------------------------------------------------------- #
-# Configuration pipeline runner                                                   #
-# ---------------------------------------------------------------------------- #
+# Configuration pipeline runner ----
 
 .PIPELINE_STAGE_TIMEOUT <- 900
 .PIPELINE_SETTLE_SECONDS <- 3
@@ -677,9 +668,7 @@ pipeline_runner <- function(triggers, results, on_state = NULL,
 }
 
 
-# ---------------------------------------------------------------------------- #
-# Bundle assembly                                                               #
-# ---------------------------------------------------------------------------- #
+# Bundle assembly ----
 
 #' Materialise one registry item to a file
 #'
@@ -819,9 +808,7 @@ pipeline_runner <- function(triggers, results, on_state = NULL,
 }
 
 
-# ---------------------------------------------------------------------------- #
-# Metadata document                                                             #
-# ---------------------------------------------------------------------------- #
+# Metadata document ----
 
 #' Build the README that explains the bundle
 #'
@@ -1043,9 +1030,7 @@ wise_export_readme <- function(entries, provenance = list(), config = list(),
   }
 
 
-# ---------------------------------------------------------------------------- #
-# Bundle writer                                                                 #
-# ---------------------------------------------------------------------------- #
+# Bundle writer ----
 
 #' Assemble an export bundle as a zip archive
 #'
@@ -1166,9 +1151,7 @@ wise_export_bundle <- function(zipfile, items, config = NULL,
 }
 
 
-# ---------------------------------------------------------------------------- #
-# Navbar export menu                                                            #
-# ---------------------------------------------------------------------------- #
+# Navbar export menu ----
 
 #' Export dropdown for the navbar
 #'

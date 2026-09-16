@@ -1,7 +1,6 @@
-# ============================================================================ #
+# Policy scenario discovery and diagnostics ----
 # Pure functions for policy scenario variable discovery and diagnostics.
 # Stateless and testable without Shiny.
-# ============================================================================ #
 
 
 #' Internal column name holding the per-household SP cash-transfer amount
@@ -15,9 +14,7 @@
 SP_TRANSFER_COL <- ".wiseapp_sp_transfer"
 
 
-# ---------------------------------------------------------------------------- #
-# Policy activity predicates                                                      #
-# ---------------------------------------------------------------------------- #
+# Policy activity predicates ----
 
 # Keep the summary card and policy application on the same definition of an
 # active lever. Selecting a policy domain alone is not an intervention.
@@ -473,9 +470,7 @@ has_sp_change <- function(sp) {
 }
 
 
-# ---------------------------------------------------------------------------- #
-# Policy scenario: candidate variable discovery & placeholder UI               #
-# ---------------------------------------------------------------------------- #
+# Policy scenario candidate discovery ----
 
 #' Identify candidate variables in the variable list matching given patterns
 #'
@@ -544,9 +539,7 @@ policy_placeholder_tag <- function(category_label, candidate_df) {
 }
 
 
-# ---------------------------------------------------------------------------- #
-# Binary access flip helper                                                    #
-# ---------------------------------------------------------------------------- #
+# Binary access flip helper ----
 #
 # Treats `change_pct` as the share of currently-without-access observations to
 # flip to access (positive) or share of with-access to flip to no-access
@@ -1292,9 +1285,7 @@ resimulate_with_svy <- function(svy, sw, so, mf,
 }
 
 
-# ---------------------------------------------------------------------------- #
-# Policy-by-delta: derive policy pipelines from baseline + analytic per-HH delta
-# ---------------------------------------------------------------------------- #
+# Policy-by-delta derivation ----
 
 #' Apply a per-household policy delta to the baseline Step 2 pipelines
 #'

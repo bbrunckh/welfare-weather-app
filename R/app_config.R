@@ -21,7 +21,7 @@ get_golem_config <- function(
   config::get(value = value, config = config, file = config_file, use_parent = use_parent)
 }
 
-# ---- Deployment environment helpers ------------------------------------
+# Deployment environment helpers ----
 
 #' TRUE when all four Databricks env vars are present
 #' @noRd

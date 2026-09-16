@@ -1,4 +1,4 @@
-# ============================================================================ #
+# Policy effect decomposition ----
 # Harmonized policy effect decomposition for RIF and OLS/fixest engines.
 #
 # Decomposes total policy effect into:
@@ -15,12 +15,9 @@
 #
 # Used by: mod_3_06_policy_sim.R (decomposition display)
 #          fct_simulations.R     (run_sim_pipeline RIF policy correction)
-# ============================================================================ #
 
 
-# ---------------------------------------------------------------------------- #
-# Shared helpers                                                               #
-# ---------------------------------------------------------------------------- #
+# Shared helpers ----
 
 #' Compute covariate deltas between baseline and policy survey data
 #'
@@ -898,9 +895,7 @@
 }
 
 
-# ---------------------------------------------------------------------------- #
-# Public API                                                                   #
-# ---------------------------------------------------------------------------- #
+# Public API ----
 
 #' Decompose policy effects into main and resilience channels
 #'
@@ -1018,9 +1013,7 @@ decompose_policy_effect <- function(svy_baseline,
 }
 
 
-# ---------------------------------------------------------------------------- #
-# RIF decomposition (delegates to .compute_rif_channels)                       #
-# ---------------------------------------------------------------------------- #
+# RIF decomposition (delegates to .compute_rif_channels) ----
 
 .decompose_rif <- function(svy_baseline, model_fit, so, deltas, sp_transfer,
                             hazard_values, weather_vars, n,
@@ -1091,9 +1084,7 @@ decompose_policy_effect <- function(svy_baseline,
 }
 
 
-# ---------------------------------------------------------------------------- #
-# OLS/fixest decomposition (simplified: main + interaction only)               #
-# ---------------------------------------------------------------------------- #
+# OLS/fixest decomposition (simplified: main + interaction only) ----
 
 .decompose_ols <- function(svy_baseline, model_fit, so, deltas, sp_transfer,
                             hazard_values, weather_vars, n,

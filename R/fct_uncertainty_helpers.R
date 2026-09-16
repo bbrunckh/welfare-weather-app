@@ -1,11 +1,9 @@
-# ============================================================================ #
-# fct_uncertainty_helpers.R
+# Uncertainty decomposition helpers ----
 #
 # Small pure helpers shared by Module 2 (climate sim results) and Module 3
 # (policy simulation results) for the three-source uncertainty decomposition
 # (coefficient / inter-annual / inter-model). All functions are package-internal
 # (not exported) and take plain R data; they have no Shiny dependencies.
-# ============================================================================ #
 
 #' Reshape a per-sim_year tibble with list-cols into a (model * year) matrix.
 #'

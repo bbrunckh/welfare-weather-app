@@ -1,12 +1,9 @@
-# ============================================================================ #
-# Pure functions for model type and covariate selection logic.                 #
-# Used by mod_1_06_model_server(). Stateless and testable without Shiny.      #
-# ============================================================================ #
+# Model and covariate selection ----
+# Pure functions for model type and covariate selection logic.
+# Used by mod_1_06_model_server(). Stateless and testable without Shiny.
 
 
-# ---------------------------------------------------------------------------- #
-# Policy scenario definitions                                                   #
-# ---------------------------------------------------------------------------- #
+# Policy scenario definitions ----
 
 #' Predefined policy scenario definitions
 #'
@@ -183,9 +180,7 @@ get_policy_locked_vars <- function(selected_policies, variable_list = NULL) {
 }
 
 
-# ---------------------------------------------------------------------------- #
-# Variable list filtering                                                       #
-# ---------------------------------------------------------------------------- #
+# Variable list filtering ----
 
 #' Filter a variable list to columns present and sufficiently non-missing in df
 #'
@@ -284,9 +279,7 @@ filter_vars_by_role <- function(variable_list, role, extra_filter = NULL) {
 }
 
 
-# ---------------------------------------------------------------------------- #
-# Model type helpers                                                            #
-# ---------------------------------------------------------------------------- #
+# Model type helpers ----
 
 #' Model type choices and radio-button label for a given outcome type
 #'
@@ -315,9 +308,7 @@ model_type_choices <- function(outcome_type) {
 }
 
 
-# ---------------------------------------------------------------------------- #
-# Covariate exclusion                                                           #
-# ---------------------------------------------------------------------------- #
+# Covariate exclusion ----
 
 #' Remove already-selected variables from a candidate variable list
 #'
@@ -355,9 +346,7 @@ exclude_selected_vars <- function(candidate_vl,
 }
 
 
-# ---------------------------------------------------------------------------- #
-# Engine inference                                                               #
-# ---------------------------------------------------------------------------- #
+# Engine inference ----
 
 #' Infer the fitting engine from the model type
 #'
@@ -383,9 +372,7 @@ infer_engine <- function(model_type) {
 }
 
 
-# ---------------------------------------------------------------------------- #
-# Spec assembly                                                                 #
-# ---------------------------------------------------------------------------- #
+# Specification assembly ----
 
 #' Assemble the full model selection specification
 #'

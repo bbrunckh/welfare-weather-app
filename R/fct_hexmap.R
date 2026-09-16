@@ -1,5 +1,5 @@
-# ============================================================================ #
-# Hex-map engine: MapLibre GL JS + browser-side H3 cell decoding.              #
+# Hex-map engine ----
+# MapLibre GL JS + browser-side H3 cell decoding.                              #
 #                                                                              #
 # Every map in the app renders at H3-cell level. Geometry never leaves the     #
 # browser except as H3 index strings: R sends a columnar payload              #
@@ -36,10 +36,9 @@
 # message queues/replay registries and race their MutationObservers, so a      #
 # re-rendered container could boot from the copy holding no replay state and   #
 # stay blank. The explicit dependency below always loads last.                 #
-# ============================================================================ #
 
 
-# ---- Dependency ------------------------------------------------------------ #
+# Dependency ----
 
 #' Attach the vendored hex-map engine (scripts in strict order)
 #'
@@ -69,7 +68,7 @@ hexmap_dependency <- function() {
 }
 
 
-# ---- UI -------------------------------------------------------------------- #
+# UI ----
 
 #' Hex-map container (UI-36 parity)
 #'
@@ -130,7 +129,7 @@ hexmap_ui <- function(id, height = "400px", aria_label = "Map", legend = NULL) {
 }
 
 
-# ---- Payload builders ------------------------------------------------------ #
+# Payload builders ----
 
 #' Build a columnar `set` payload for one hex map
 #'
@@ -216,7 +215,7 @@ hexmap_payload <- function(h3, v, v_kind = c("continuous", "binned", "binary"),
 }
 
 
-# ---- Senders --------------------------------------------------------------- #
+# Senders ----
 
 # Messages ride one fixed custom-message type; the payload carries the
 # namespaced container id and hexmap.js routes on it.

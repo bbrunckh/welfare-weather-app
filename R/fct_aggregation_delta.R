@@ -144,9 +144,7 @@ aggregate_with_uncertainty_delta <- function(y_point,
 }
 
 
-# ---------------------------------------------------------------------------- #
-# Per-method gradient functions                                                #
-# ---------------------------------------------------------------------------- #
+# Per-method gradient functions ----
 # Each returns h = (dT/dwelfare) * mu, length N. Sign matters - preserves the
 # direction of perturbation so var = ||F' h||^2 reflects the true Taylor
 # expansion. For aggregates where the sign cancels in the variance (everything
@@ -280,9 +278,7 @@ gradient_for_method <- function(method, mu, weights, pov_line, value_pt,
 }
 
 
-# ---------------------------------------------------------------------------- #
-# Band transforms                                                              #
-# ---------------------------------------------------------------------------- #
+# Band transforms ----
 # Some aggregates are bounded (headcount in [0,1], gap in [0,1]) or strictly
 # positive (mean welfare). Build bands on a transformed scale and invert so
 # they respect natural bounds.
@@ -314,9 +310,7 @@ apply_band_transform <- function(method, value_pt, se, z_lo, z_hi) {
 }
 
 
-# ---------------------------------------------------------------------------- #
-# Shared per-year pipeline aggregator                                          #
-# ---------------------------------------------------------------------------- #
+# Shared per-year pipeline aggregator ----
 
 #' Aggregate a single pipeline-like list across simulation years
 #'

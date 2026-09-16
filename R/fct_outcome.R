@@ -1,13 +1,10 @@
-# ============================================================================ #
+# Outcome selection helpers ----
 # Pure functions for outcome variable selection logic.                         #
 # Used by mod_1_03_outcome_server(). 
 # All functions are stateless and testable without a Shiny session.                                                     #
-# ============================================================================ #
 
 
-# ---------------------------------------------------------------------------- #
-# Available outcomes                                                            #
-# ---------------------------------------------------------------------------- #
+# Available outcomes ----
 
 #' Filter variable list to available outcome variables
 #'
@@ -53,9 +50,7 @@ filter_outcome_vars <- function(variable_list, survey_colnames) {
 }
 
 
-# ---------------------------------------------------------------------------- #
-# Monetary outcome guard                                                        #
-# ---------------------------------------------------------------------------- #
+# Monetary outcome guard ----
 
 #' Test whether an outcome row represents a monetary variable
 #'
@@ -75,9 +70,7 @@ is_monetary_outcome <- function(name, units) {
 }
 
 
-# ---------------------------------------------------------------------------- #
-# Default LCU poverty line                                                      #
-# ---------------------------------------------------------------------------- #
+# Default LCU poverty line ----
 
 #' Compute the default LCU poverty line from survey welfare data
 #'
@@ -108,9 +101,7 @@ default_lcu_poverty_line <- function(df) {
 }
 
 
-# ---------------------------------------------------------------------------- #
-# Poverty line label                                                            #
-# ---------------------------------------------------------------------------- #
+# Poverty line label ----
 
 #' Return the appropriate poverty line input label for the selected currency
 #'
@@ -130,9 +121,7 @@ poverty_line_label <- function(currency) {
 }
 
 
-# ---------------------------------------------------------------------------- #
-# Outcome transform classification                                              #
-# ---------------------------------------------------------------------------- #
+# Outcome transform classification ----
 
 #' Classify the transformation to apply to an outcome variable
 #'
@@ -151,9 +140,7 @@ outcome_transform <- function(type) {
 }
 
 
-# ---------------------------------------------------------------------------- #
-# Outcome direction note                                                        #
-# ---------------------------------------------------------------------------- #
+# Outcome direction note ----
 
 #' Plain-language interpretation of an outcome direction
 #'
@@ -172,9 +159,7 @@ outcome_direction_note <- function(direction) {
 }
 
 
-# ---------------------------------------------------------------------------- #
-# Build selected outcome row                                                    #
-# ---------------------------------------------------------------------------- #
+# Build selected outcome row ----
 
 #' Augment an outcome info row with transform, units, and poverty-line metadata
 #'
@@ -219,9 +204,7 @@ build_selected_outcome <- function(info, currency = NULL, poverty_line = NULL) {
 }
 
 
-# ---------------------------------------------------------------------------- #
-# Outcome missingness summary                                                   #
-# ---------------------------------------------------------------------------- #
+# Outcome missingness summary ----
 
 #' Compute missingness summary for the selected outcome variable
 #'
@@ -263,10 +246,7 @@ outcome_missing_summary <- function(df, outcome) {
 }
 
 
-# # ---------------------------------------------------------------------------- #
-# ---------------------------------------------------------------------------- #
-# Outcome distribution ridge plot (by survey wave)                              #
-# ---------------------------------------------------------------------------- #
+# Outcome distribution ridge plot (by survey wave) ----
 
 #' Plot outcome distribution by survey wave
 #'
@@ -453,9 +433,7 @@ plot_welfare_dist <- function(df,
 }
 
 
-# ---------------------------------------------------------------------------- #
-# Outcome spatial coverage map                                                  #
-# ---------------------------------------------------------------------------- #
+# Outcome spatial coverage map ----
 
 # Per-location availability of the outcome, pooled over the passed rows: the
 # share of sampled units with a non-missing value plus the unit count.
@@ -594,9 +572,7 @@ plot_welfare_dist <- function(df,
 }
 
 
-# ---------------------------------------------------------------------------- #
-# Outcome mean-value map                                                       #
-# ---------------------------------------------------------------------------- #
+# Outcome mean-value map ----
 
 # Per-location mean of the outcome, pooled over the passed rows: the plain
 # mean of the sampled units' non-missing values plus how many of them sit
@@ -735,9 +711,7 @@ plot_welfare_dist <- function(df,
 }
 
 
-# ---------------------------------------------------------------------------- #
-# Outcome directionality                                                       #
-# ---------------------------------------------------------------------------- #
+# Outcome directionality ----
 
 #' Classify whether larger simulated values are better or worse for an outcome
 #'

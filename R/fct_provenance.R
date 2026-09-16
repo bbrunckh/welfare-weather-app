@@ -1,5 +1,5 @@
-# =========================================================================== #
-# Run provenance: one immutable record of what produced a set of results.     #
+# Run provenance ----
+# One immutable record of what produced a set of results.                     #
 #                                                                             #
 # UI-49. An exported table carried no record of what produced it - not        #
 # the data source, the model specification, the random seed, or which         #
@@ -18,7 +18,6 @@
 # There is deliberately no on-screen provenance banner: the same              #
 # information travels with the export, and a permanent panel above            #
 # every result surface cost more space than it earned.                        #
-# =========================================================================== #
 
 
 #' Strip credentials from a connection-parameter list

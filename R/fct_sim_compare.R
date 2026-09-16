@@ -1,4 +1,4 @@
-# ============================================================================ #
+# Simulation comparison and visualisation ----
 # fct_sim_compare.R
 #
 # Pure comparison and visualisation functions for Module 2.
@@ -14,11 +14,8 @@
 #
 # NOTE: plot_bar_climate() had no active call sites and was removed
 #   (formerly archived under dev/archived_fct/plot_bar_climate_archived.R).
-# ============================================================================ #
 
-# ---------------------------------------------------------------------------- #
-# Label helpers                                                                #
-# ---------------------------------------------------------------------------- #
+# Label helpers ----
 
 #' Human-Readable Label for Aggregation Method
 #'
@@ -60,9 +57,7 @@ label_deviation <- function(key) {
   )
 }
 
-# ---------------------------------------------------------------------------- #
-# Band quantile resolver                                                       #
-# ---------------------------------------------------------------------------- #
+# Band quantile resolver ----
 
 #' Resolve Uncertainty Band Key to Quantile Pair
 #'
@@ -93,11 +88,11 @@ resolve_band_q <- function(band_key) {
   )
 }
 
-# ---- Internal helpers: parse scenario key components ----------------------
+# Internal helpers: parse scenario key components ----
 # .normalise_ssp() and .parse_year() live in fct_simulations.R (single robust
 # implementation - do not re-define them here).
 
-# ---- Internal: dynamic year linetype helper --------------------------------
+# Internal: dynamic year linetype helper ----
 .resolve_year_styles <- function(year_labels) {
   linetypes <- c("solid", "dashed", "dotted", "longdash", "twodash")
   years     <- sort(unique(year_labels))
@@ -109,9 +104,7 @@ resolve_band_q <- function(band_key) {
   )
 }
 
-# ---------------------------------------------------------------------------- #
-# Shared CI summary helper                                                     #
-# ---------------------------------------------------------------------------- #
+# Shared CI summary helper ----
 
 # plot_pointrange_climate uses coef_lo/coef_hi from the analytic envelope tbl.
 .summarise_vals <- function(x, band_q = c(lo = 0.10, hi = 0.90)) {
@@ -149,9 +142,7 @@ resolve_band_q <- function(band_key) {
        coef_lo = coef_lo, coef_hi = coef_hi)
 }
 
-# ---------------------------------------------------------------------------- #
-# Grouped point-range chart (mean + 90% CI + 95% CI)                    #
-# ---------------------------------------------------------------------------- #
+# Grouped point-range chart ----
 
 #' Grouped Point-Range Chart Comparing Scenarios
 #'
@@ -336,9 +327,7 @@ plot_pointrange_climate <- function(bands_tbl,
     )
 }
 
-# ---------------------------------------------------------------------------- #
-# Decision-first annual and paired summaries                                    #
-# ---------------------------------------------------------------------------- #
+# Decision-first annual and paired summaries ----
 
 # Build paired model-year effects from the two arms' canonical aggregate
 # tables. F_agg is used whenever available so the coefficient interval retains
@@ -1059,9 +1048,7 @@ plot_step2_adverse_dot <- function(tbl, x_label = "Outcome level",
   p
 }
 
-# ---------------------------------------------------------------------------- #
-# Step 2 headline cards                                                        #
-# ---------------------------------------------------------------------------- #
+# Step 2 headline cards ----
 
 #' Build Step 2 Results Headline Cards
 #'
@@ -1453,9 +1440,7 @@ make_decision_table_html <- function(df, subheader = NULL, footnotes = NULL) {
   )
 }
 
-# ---------------------------------------------------------------------------- #
-# Threshold table data frame                                                   #
-# ---------------------------------------------------------------------------- #
+# Threshold table data frame ----
 
 #' Build Return-Period Threshold Table Data Frame
 #'
@@ -1615,9 +1600,7 @@ build_threshold_table_df <- function(threshold_tbl,
 
 
 
-# ---------------------------------------------------------------------------- #
-# Time-series spaghetti + envelope plot                                        #
-# ---------------------------------------------------------------------------- #
+# Time-series spaghetti and envelope plot ----
 
 #' Per-Model Time-Series Spaghetti With Ensemble Envelope
 #'
@@ -1789,9 +1772,7 @@ plot_timeseries_spaghetti <- function(ts_tbl,
   p
 }
 
-# ---------------------------------------------------------------------------- #
-# Variance-contribution stacked bar                                            #
-# ---------------------------------------------------------------------------- #
+# Variance-contribution stacked bar ----
 
 #' Aligned SD-Contribution Bars by Scenario
 #'
@@ -1920,9 +1901,7 @@ plot_model_robustness <- function(tbl, x_label = "Expected annual outcome") {
     theme_wise()
 }
 
-# ---------------------------------------------------------------------------- #
-# Enhanced exceedance curve                                                    #
-# ---------------------------------------------------------------------------- #
+# Enhanced exceedance curve ----
 
 #' Enhanced Exceedance Probability Curve with Return Period Axis
 #'
