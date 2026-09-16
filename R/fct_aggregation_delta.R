@@ -429,7 +429,8 @@ apply_band_transform <- function(method, value_pt, se, z_lo, z_hi) {
     weights = weights,
     weights_normalized = weights_normalized,
     residuals = residual_vectors,
-    mu = mu
+    mu = mu,
+    resid_sigma2 = sigma2
   )
 
   if (!is.null(cache) && is.environment(cache)) {
@@ -501,10 +502,10 @@ aggregate_pipeline_per_year <- function(pipe,
   if (!is.null(F_full) && is.null(dim(F_full))) {
     F_full <- matrix(F_full, nrow = 1L)
   }
-  # PERF-34: the ID-to-residual lookup and the residual variance are the
-  # same for every year of this pipeline - build them once, not per year.
-  lk <- NULL
-  sg2 <- NULL
+  # PERF-34: reuse the preparation-owned residual variance for every year
+  # instead of rebuilding var(.resid) per year. Prepared residual vectors have
+  # already consumed the temporary ID lookup during preparation.
+  sg2 <- prep$resid_sigma2
 
   lapply(seq_along(prep$years), function(i) {
     yr <- prep$years[[i]]
@@ -526,7 +527,7 @@ aggregate_pipeline_per_year <- function(pipe,
       band_q       = band_q,
       bandwidth_p0 = bandwidth_p0,
       seed          = wise_seed(seed, "residual", yr),
-      resid_lookup  = lk,
+       resid_lookup  = NULL,
       resid_sigma2  = sg2,
       prepared_mu   = prep$mu[[i]]
     )

@@ -14,6 +14,42 @@ test_that("interpolate_delta works correctly", {
   expect_equal(result2, tau_i2, tolerance = 1e-10)
 })
 
+test_that("grouped RIF loading interpolation preserves endpoints and row order", {
+  set.seed(20260916)
+  n <- 80L
+  K <- 5L
+  taus <- seq(0.1, 0.9, length.out = K)
+  tau_i <- c(taus[1L], taus[K], runif(n - 2L, taus[1L], taus[K]))
+  X_diff <- lapply(seq_len(K), function(k) {
+    matrix(rnorm(n * 3L), nrow = n, ncol = 3L)
+  })
+  chol_list <- lapply(seq_len(K), function(k) diag(3L))
+
+  legacy <- function() {
+    idx <- findInterval(tau_i, taus, all.inside = TRUE)
+    idx_hi <- pmin(idx + 1L, K)
+    tau_lo <- taus[idx]
+    tau_hi <- taus[idx_hi]
+    w <- ifelse(tau_hi > tau_lo, (tau_i - tau_lo) / (tau_hi - tau_lo), 0)
+    out <- matrix(NA_real_, nrow = n, ncol = 3L)
+    pair_key <- idx + idx_hi * (K + 1L)
+    for (key in unique(pair_key)) {
+      rows <- which(pair_key == key)
+      a <- idx[rows[1L]]
+      b <- idx_hi[rows[1L]]
+      fa <- X_diff[[a]][rows, , drop = FALSE] %*% chol_list[[a]]
+      fb <- if (a == b) fa else X_diff[[b]][rows, , drop = FALSE] %*% chol_list[[b]]
+      out[rows, ] <- (1 - w[rows]) * fa + w[rows] * fb
+    }
+    out
+  }
+
+  actual <- interpolate_F_loading(X_diff, chol_list, taus, tau_i)
+  expect_identical(actual, legacy())
+  expect_identical(actual[1L, ], X_diff[[1L]][1L, ])
+  expect_identical(actual[2L, ], X_diff[[K]][2L, ])
+})
+
 legacy_compute_rif_multi <- function(y, taus, bw = NULL, dens = NULL) {
   lapply(taus, function(tau) compute_rif(y, tau = tau, bw = bw, dens = dens))
 }

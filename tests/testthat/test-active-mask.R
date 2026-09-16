@@ -133,6 +133,19 @@ test_that("compute_factor_loading aligns reordered and absent design columns", {
   )
 })
 
+test_that("aligned factor-loading designs take the identity fast path", {
+  beta_names <- c("(Intercept)", "tx", "urban")
+  X <- matrix(seq_len(12), nrow = 4L,
+              dimnames = list(NULL, beta_names))
+
+  aligned <- wiseapp:::align_factor_loading_matrix(X, beta_names)
+
+  expect_identical(aligned, X)
+  expect_identical(compute_factor_loading(
+    X, list(L = diag(3), beta = setNames(rep(1, 3), beta_names))
+  ), unname(X %*% diag(3)))
+})
+
 test_that("active mask gives correct (block-Cholesky) additive-decomposition variance", {
   # Regression test for the column-subset bug: when Sigma has off-diagonal
   # terms between active and inactive coefficients, naively subsetting
@@ -175,6 +188,34 @@ test_that("active mask gives correct (block-Cholesky) additive-decomposition var
   var_full <- sum(as.numeric(crossprod(F_full, h))^2)
   expect_true(is.finite(var_full) && is.finite(var_masked))
   expect_gt(var_masked, 0)
+})
+
+test_that("active block selection preserves parity and falls back for upper factors", {
+  set.seed(20260916)
+  K <- 8L
+  A <- matrix(rnorm(K * K), K)
+  Sigma <- crossprod(A) + diag(K) * 0.1
+  L_lower <- t(chol(Sigma))
+  mask <- c(TRUE, FALSE, TRUE, FALSE, TRUE, FALSE, FALSE, TRUE)
+  beta <- setNames(seq_len(K), paste0("b", seq_len(K)))
+  svy <- data.frame(hhid = seq_len(20L), b1 = rnorm(20L))
+  train <- svy
+
+  lower <- suppressMessages(attach_active_mask(
+    chol_obj = list(L = L_lower, beta = beta),
+    svy_modified = svy, svy_reference = train, train_data = train,
+    weather_terms = names(beta)[mask], residuals = "original"
+  ))
+  expected <- t(chol(Sigma[mask, mask, drop = FALSE]))
+  expect_equal(lower$L_active, expected, tolerance = 1e-12)
+
+  upper <- suppressMessages(attach_active_mask(
+    chol_obj = list(L = t(L_lower), beta = beta),
+    svy_modified = svy, svy_reference = train, train_data = train,
+    weather_terms = names(beta)[mask], residuals = "original"
+  ))
+  expected_upper <- t(chol((t(L_lower) %*% L_lower)[mask, mask, drop = FALSE]))
+  expect_equal(upper$L_active, expected_upper, tolerance = 1e-12)
 })
 
 

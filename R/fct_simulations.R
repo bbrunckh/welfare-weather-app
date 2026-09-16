@@ -339,6 +339,10 @@ align_factor_loading_matrix <- function(X_nonFE, beta_names) {
          call. = FALSE)
   }
 
+  # The common prediction path already emits coefficient-order columns. Avoid
+  # the subset/reorder allocation when the names are an exact match.
+  if (identical(x_names, beta_names)) return(X_nonFE)
+
   common <- intersect(beta_names, x_names)
   aligned <- X_nonFE[, common, drop = FALSE]
   missing <- setdiff(beta_names, common)
@@ -462,6 +466,8 @@ resolve_id_col <- function(a, b) {
 #'   computed against this frame.
 #' @param rif_grid Optional tidy data frame of RIF beta curves (from
 #'   \code{fit_model()}), attached to the pipeline output for diagnostics.
+#' @param rif_policy_deltas Optional precomputed RIF policy covariate deltas.
+#'   Reused across weather keys when supplied.
 #'
 #' @return Named list or \code{NULL} on prediction failure:
 #'   \describe{
@@ -509,10 +515,11 @@ run_sim_pipeline <- function(weather_raw,
                               weather_join_cache = NULL,
                               batch_rif_predictions = FALSE,
                               direct_rif_predictions = FALSE,
-                              direct_rif_metadata = NULL,
-                              direct_rif_baseline_cache = NULL,
-                              svy_baseline = NULL,
-                             rif_grid     = NULL,
+                               direct_rif_metadata = NULL,
+                               direct_rif_baseline_cache = NULL,
+                               svy_baseline = NULL,
+                               rif_policy_deltas = NULL,
+                              rif_grid     = NULL,
                              precomputed_ecdf_train = NULL) {
 
   n_pre_join <- nrow(svy)
@@ -541,7 +548,7 @@ run_sim_pipeline <- function(weather_raw,
   # Use pre-prepared survey (columns already dropped, year converted) when
   # available. RIF policy mode and Module 3 callers prepare svy differently,
   # so fall back to full prepare_hist_weather() when svy_prepared is NULL.
-  if (!is.null(svy_prepared) && !is_rif_policy) {
+  if (!is.null(svy_prepared)) {
     svy_join <- svy_prepared
     svy_join$.svy_row_id <- svy_for_predict$.svy_row_id
   } else {
@@ -661,7 +668,8 @@ run_sim_pipeline <- function(weather_raw,
       taus         = taus,
       train_data   = train_data,
       outcome      = so$name,
-      is_log       = isTRUE(so$transform == "log")
+      is_log       = isTRUE(so$transform == "log"),
+      deltas       = rif_policy_deltas
     )
     # corr is one entry per household (nrow(svy_baseline)); broadcast it to
     # each expanded survey*weather row via .svy_row_id (set by predict_rif()

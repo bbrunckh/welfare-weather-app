@@ -1143,6 +1143,11 @@ resimulate_with_svy <- function(svy, sw, so, mf,
   direct_rif_baseline_cache <- if (is_rif) {
     new.env(parent = emptyenv())
   } else NULL
+  rif_policy_deltas <- if (is_rif && !is.null(svy_baseline)) {
+    tryCatch(.compute_policy_deltas(
+      svy_baseline, svy, so$name, mf$weather_terms
+    ), error = function(e) NULL)
+  } else NULL
 
   # train_aug: identical for every run_one() call below (same model, same
   # train_data). Compute once here instead of repeating
@@ -1166,12 +1171,14 @@ resimulate_with_svy <- function(svy, sw, so, mf,
 
   # Survey-side join prep: drop weather/outcome columns and convert year once,
   # so run_sim_pipeline() skips that manipulation per member (see PERF-19).
-  # Leave it NULL in RIF policy mode, which predicts against svy_baseline and
-  # prepares that frame itself. On failure here, NULL makes
+  # In RIF policy mode prepare the baseline frame used for prediction; this is
+  # identical across all weather members and avoids repeating the projection.
+  # On failure here, NULL makes
   # run_sim_pipeline() fall back to the identical per-call preparation, so
   # run_one()'s existing error handling is preserved.
-  svy_prepared <- if (is_rif) NULL else tryCatch({
-    svy |>
+  svy_prepared <- tryCatch({
+    survey_for_prediction <- if (is_rif) svy_baseline else svy
+    survey_for_prediction |>
       dplyr::mutate(year = as.character(year)) |>
       dplyr::select(-dplyr::any_of(c(sw$name, so$name)))
   }, error = function(e) NULL)
@@ -1197,9 +1204,10 @@ resimulate_with_svy <- function(svy, sw, so, mf,
         precomputed_train_aug = precomputed_train_aug,
          svy_prepared = svy_prepared,
           precomputed_ecdf_train = precomputed_ecdf_train,
-          direct_rif_predictions = TRUE,
-          direct_rif_metadata = direct_rif_metadata,
-          direct_rif_baseline_cache = direct_rif_baseline_cache
+           direct_rif_predictions = TRUE,
+           direct_rif_metadata = direct_rif_metadata,
+           direct_rif_baseline_cache = direct_rif_baseline_cache,
+           rif_policy_deltas = rif_policy_deltas
       ),
       error = function(e) {
         warning("[resimulate_with_svy] run_sim_pipeline failed: ",

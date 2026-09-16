@@ -608,8 +608,8 @@ interpolate_F_loading <- function(X_diff_fn, chol_list, taus, tau_i,
   # Group rows by their (lo, hi) quantile-index pair. Each group needs at
   # most two per-quantile matmuls, restricted to the group's rows.
   pair_key <- idx + idx_hi * (K + 1L)  # unique per (lo, hi) combination
-  for (key in unique(pair_key)) {
-    rows <- which(pair_key == key)
+  pair_groups <- split(seq_len(n), pair_key, drop = TRUE)
+  for (rows in pair_groups) {
     a <- idx[rows[1]]
     b <- idx_hi[rows[1]]
     w_g <- w[rows]

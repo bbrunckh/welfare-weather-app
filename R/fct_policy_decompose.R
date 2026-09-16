@@ -338,8 +338,20 @@
 #' @return Named list (length `length(weather_vars)`) of hazard vectors, each
 #'   of length `nrow(svy_baseline)`.
 #' @keywords internal
-.compute_hazard_values <- function(svy_baseline, weather_raw, weather_vars) {
+.compute_hazard_values <- function(svy_baseline, weather_raw, weather_vars,
+                                   location_group = NULL) {
   n <- nrow(svy_baseline)
+  has_location_keys <- !is.null(weather_raw) &&
+    "loc_id" %in% names(weather_raw) && "loc_id" %in% names(svy_baseline)
+  if (is.null(location_group) && has_location_keys) {
+    loc_id <- weather_raw[["loc_id"]]
+    ok_loc <- !is.na(loc_id)
+    if (any(ok_loc)) {
+      location_group <- collapse::GRP(
+        data.frame(loc_id = loc_id[ok_loc]), by = "loc_id"
+      )
+    }
+  }
   hazard_values <- lapply(weather_vars, function(wv) {
     if (!is.null(weather_raw) && wv %in% names(weather_raw)) {
       vals    <- weather_raw[[wv]]
@@ -379,7 +391,8 @@
       if (has_loc) {
         loc_id <- weather_raw[["loc_id"]]
         ok     <- !is.na(loc_id)
-        g_loc  <- collapse::GRP(data.frame(loc_id = loc_id[ok]), by = "loc_id")
+        g_loc  <- if (!is.null(location_group)) location_group else
+          collapse::GRP(data.frame(loc_id = loc_id[ok]), by = "loc_id")
         loc_means <- collapse::fmean(vals[ok], g = g_loc, na.rm = TRUE)
         loc_means <- setNames(as.numeric(loc_means),
                               as.character(g_loc$groups$loc_id))

@@ -46,6 +46,35 @@ test_that("central kernel matches OLS and ignores uncertainty mask metadata", {
   expect_identical(names(delta), NULL)
 })
 
+test_that("hazard location grouping is reused without changing numeric or factor results", {
+  svy <- data.frame(
+    loc_id = c(1, 1, 2, 3, NA),
+    temp = c(10, 20, 30, 40, 50),
+    rain = c(1, 2, 3, 4, 5),
+    temp_bin = factor(c("low", "high", "mid", "low", "high"),
+                      levels = c("low", "mid", "high"))
+  )
+  weather <- data.frame(
+    loc_id = c(1, 1, 2, 3, NA),
+    temp = c(12, 18, 35, 41, NA),
+    rain = c(2, 4, 6, 8, 10),
+    temp_bin = factor(c("low", "high", "mid", "low", NA),
+                      levels = c("low", "mid", "high"))
+  )
+  ok <- !is.na(weather$loc_id)
+  location_group <- collapse::GRP(
+    data.frame(loc_id = weather$loc_id[ok]), by = "loc_id"
+  )
+  expected <- .compute_hazard_values(svy, weather,
+                                     c("temp", "rain", "temp_bin"))
+  actual <- .compute_hazard_values(svy, weather,
+                                   c("temp", "rain", "temp_bin"),
+                                   location_group = location_group)
+
+  expect_equal(actual, expected)
+  expect_identical(actual$temp_bin, expected$temp_bin)
+})
+
 
 test_that("policy correction changes only y_point and preserves pipeline types", {
   set.seed(111)

@@ -323,18 +323,30 @@ attach_active_mask <- function(chol_obj,
   )
   if (is.null(mask)) return(chol_obj)
 
-  # Build L_active: Cholesky factor of the active block of Sigma. Naive
-  # "subset columns of F = X %*% L" is INCORRECT when Sigma has non-zero
-  # off-diagonal terms between active and inactive coefficients, because
-  # column j of L still picks up contributions from inactive rows of X.
-  # The mathematically correct additive-decomposition variance is
-  #   var_coef_active = h' X_active Sigma_active,active X_active' h
-  # which requires re-decomposing Sigma_active. Compute once here so
-  # compute_factor_loading() / interpolate_F_loading() can use it.
+  # Build L_active: Cholesky factor of the active block of Sigma. For the
+  # lower-triangular factor emitted by compute_chol_vcov(),
+  # Sigma[mask, mask] = L[mask, ] %*% t(L[mask, ]), so the full K x K
+  # covariance reconstruction is unnecessary. Legacy or differently oriented
+  # factors use the old route after this validation fails.
   cholesky_active_block <- function(L_full) {
-    Sigma_full <- L_full %*% t(L_full)
-    Sigma_w    <- Sigma_full[mask, mask, drop = FALSE]
-    tryCatch(t(chol(Sigma_w)),
+    valid_factor <- is.matrix(L_full) && nrow(L_full) == ncol(L_full) &&
+      all(is.finite(L_full))
+    if (valid_factor) {
+      upper <- L_full[upper.tri(L_full)]
+      scale <- max(1, max(abs(L_full)))
+      valid_factor <- !length(upper) ||
+        max(abs(upper)) <= sqrt(.Machine$double.eps) * scale
+    }
+
+    active_rows <- L_full[mask, , drop = FALSE]
+    active_covariance <- if (valid_factor) {
+      tcrossprod(active_rows)
+    } else {
+      Sigma_full <- L_full %*% t(L_full)
+      Sigma_full[mask, mask, drop = FALSE]
+    }
+
+    tryCatch(t(chol(active_covariance)),
              error = function(e) {
                warning("[attach_active_mask] Cholesky of active block failed: ",
                        conditionMessage(e),

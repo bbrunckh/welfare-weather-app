@@ -247,3 +247,20 @@ test_that("bounded aggregation preparation and method caches evict oldest entrie
     NA
   )
 })
+
+test_that("aggregation preparation reuses residual variance across years", {
+  pipe <- make_w3a_pipeline()
+  prepared <- wiseapp:::.aggregation_prepare_pipeline(
+    pipe = pipe, train_aug = pipe$train_aug, id_col = pipe$id_col,
+    residuals = "normal", seed = 1L, is_log = TRUE
+  )
+
+  expect_identical(prepared$resid_sigma2,
+                   stats::var(pipe$train_aug$.resid, na.rm = TRUE))
+
+  observed <- aggregate_pipeline_per_year(
+    pipe, method = "mean", residuals = "normal", seed = 1L
+  )
+  expected <- lapply(observed, function(x) x$var_resid)
+  expect_true(all(is.finite(unlist(expected))))
+})
