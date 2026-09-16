@@ -755,7 +755,7 @@ test_that("adverse plot uses the selected climate-model spread", {
   expect_equal(plot$data$intermod_hi, c(6, 7))
 })
 
-test_that("adverse plot labels scenarios directly and facets by period", {
+test_that("adverse plot labels scenarios directly on one shared x-axis", {
   threshold_tbl <- tibble::tibble(
     scenario = c(rep("SSP2-4.5 / 2030-2040", 6L),
                  rep("SSP2-4.5 / 2050-2060", 6L)),
@@ -775,7 +775,9 @@ test_that("adverse plot labels scenarios directly and facets by period", {
   # Design D: the colour legend is replaced by direct scenario labels on the
   # top row, so the colour scale carries no guide.
   expect_identical(colour_scale$guide, "none")
-  expect_true("yr_lbl" %in% names(plot$facet$params$facets))
+  # Multiple future periods share one x-axis: no facet is added, each period
+  # variant is its own labelled row instead.
+  expect_true(inherits(plot$facet, "FacetNull"))
   # One bold text layer per scenario on the Expected row.
   text_layers <- Filter(function(l) inherits(l$geom, "GeomText"), plot$layers)
   expect_equal(length(text_layers), 1L)

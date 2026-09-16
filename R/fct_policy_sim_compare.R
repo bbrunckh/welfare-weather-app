@@ -754,11 +754,8 @@ plot_step3_adverse_dot <- function(tbl, x_label = "Outcome level",
     ggplot2::theme(
       legend.position = "none"
     )
-
-  fut_periods <- unique(tbl$yr_lbl[!tbl$is_historical])
-  if (length(fut_periods) > 1L) {
-    p <- p + ggplot2::facet_wrap(~yr_lbl)
-  }
+  # Multiple future periods stay on one shared x-axis: every period variant
+  # is its own scenario row with its own top-row label, so no faceting.
   p
 }
 
