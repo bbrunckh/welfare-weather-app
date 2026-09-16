@@ -623,120 +623,179 @@ plot_annual_distribution <- function(tbl, x_label = "Outcome (outcome units)",
   has_source <- "source" %in% names(df) && length(unique(df$source)) > 1L
   plot_type <- match.arg(plot_type, c("violin", "boxplot"))
 
+  # Horizontal Design-B/D layout: one row per scenario on a numeric y (so the
+  # row banding and right-edge n captions line up), Historical on top, and a
+  # single shared outcome axis. The Violin/Boxplot toggle picks the row
+  # rendering: full violins over dots (Design B) or slim boxes over faded
+  # dots (Design D).
+  n_rows <- length(scenario_levels)
+  df$row_y <- n_rows + 1L - as.integer(df$scenario_key)
+
+  x_span <- diff(range(df$value, na.rm = TRUE))
+  lab_gap <- if (is.finite(x_span) && x_span > 0) 0.015 * x_span else 0
+
+  # One draw-count caption per scenario row, anchored just past the row's
+  # right-most draw so it never collides with the distribution.
+  n_df <- do.call(rbind, lapply(scenario_levels, function(s) {
+    vals <- df$value[df$scenario == s]
+    vals <- vals[is.finite(vals)]
+    if (!length(vals)) return(NULL)
+    data.frame(
+      scenario_key = factor(s, levels = scenario_levels),
+      row_y = n_rows + 1L - which(scenario_levels == s),
+      n = length(vals),
+      lab_x = max(vals) + lab_gap
+    )
+  }))
+
+  y_breaks <- sort(unique(df$row_y))
+  # Rows count top-down from n_rows, so break value b maps back to level
+  # index n_rows + 1 - b. Two-line gutter label: scenario name over period.
+  y_labs <- vapply(y_breaks, function(b) {
+    sub(" / ", "\n", scenario_levels[n_rows + 1L - b], fixed = TRUE)
+  }, character(1L))
+
+  # Alternating light-grey banding behind every second scenario row (counting
+  # from the top), drawn first so gridlines show through.
+  band_ys <- y_breaks[(max(y_breaks) - y_breaks) %% 2 == 1]
+  row_band_data <- data.frame(
+    ymin = band_ys - 0.45, ymax = band_ys + 0.45
+  )
+
   if (has_source) {
     df$source <- factor(df$source, levels = c("Baseline", "Policy"))
-    p <- ggplot2::ggplot(df, ggplot2::aes(x = .data$scenario, y = .data$value))
+    # Two series share each scenario row: baseline takes the upper half-slot,
+    # policy the lower one, so the pairs read as one group.
+    src_off <- c(Baseline = 0.19, Policy = -0.19)
+    df$y_off <- unname(src_off[as.character(df$source)])
+  }
 
-    if (is.finite(hist_mean)) {
-      p <- p + ggplot2::geom_hline(yintercept = hist_mean, linetype = "dashed",
-                                   colour = .wise_zero, linewidth = 0.5)
-    }
+  p <- ggplot2::ggplot(df, ggplot2::aes(x = .data$value)) +
+    ggplot2::geom_rect(
+      data = row_band_data,
+      ggplot2::aes(ymin = .data$ymin, ymax = .data$ymax),
+      xmin = -Inf, xmax = Inf, fill = ggplot2::alpha("#F7F9FB", 0.5), colour = NA,
+      inherit.aes = FALSE, show.legend = FALSE
+    )
 
-    # Show one distribution summary at a time to keep the chart readable.
+  if (is.finite(hist_mean)) {
+    p <- p +
+      ggplot2::geom_vline(xintercept = hist_mean, linetype = "dashed",
+                          colour = .wise_zero, linewidth = 0.5) +
+      ggplot2::annotate(
+        "text", x = hist_mean, y = n_rows + 0.45, label = "Historical mean",
+        hjust = 0, vjust = 0.5, size = 3, colour = .wise_zero
+      )
+  }
+
+  if (has_source) {
+
     distribution_layer <- if (identical(plot_type, "violin")) {
       ggplot2::geom_violin(
-         ggplot2::aes(fill = .data$scenario_key, alpha = .data$source,
-                      group = interaction(.data$scenario, .data$source)),
-        position = ggplot2::position_dodge(width = 0.65),
-        scale = "width", colour = NA, na.rm = TRUE
+        ggplot2::aes(y = .data$row_y + .data$y_off,
+                     fill = .data$scenario_key, alpha = .data$source,
+                     group = interaction(.data$scenario_key, .data$source)),
+        orientation = "y", scale = "width", width = 0.34, colour = NA,
+        na.rm = TRUE
       )
     } else {
       ggplot2::geom_boxplot(
-        ggplot2::aes(group = interaction(.data$scenario, .data$source),
-                      fill = .data$scenario_key, alpha = .data$source),
-        position = ggplot2::position_dodge(width = 0.65),
-        width = 0.22, outlier.shape = NA, colour = .wise_support, na.rm = TRUE
+        ggplot2::aes(y = .data$row_y + .data$y_off,
+                     fill = .data$scenario_key, alpha = .data$source,
+                     group = interaction(.data$scenario_key, .data$source)),
+        orientation = "y", width = 0.16, outlier.shape = NA,
+        colour = .wise_support, na.rm = TRUE
       )
     }
 
-    mean_df <- stats::aggregate(value ~ scenario + source, data = df,
+    mean_df <- stats::aggregate(value ~ scenario_key + source, data = df,
                                 FUN = mean, na.rm = TRUE)
-    mean_df$scenario <- factor(mean_df$scenario, levels = scenario_levels)
-    mean_df$source <- factor(mean_df$source, levels = c("Baseline", "Policy"))
+    mean_df$y_off <- unname(src_off[as.character(mean_df$source)])
+    mean_df$row_y <- n_rows + 1L - as.integer(mean_df$scenario_key)
 
     p <- p + distribution_layer +
       ggplot2::geom_point(
-        ggplot2::aes(group = interaction(.data$scenario, .data$source),
-                      colour = .data$scenario_key, alpha = .data$source),
-        position = ggplot2::position_jitterdodge(jitter.width = 0.06, dodge.width = 0.65),
+        ggplot2::aes(y = .data$row_y + .data$y_off,
+                     colour = .data$scenario_key, alpha = .data$source),
+        position = ggplot2::position_jitter(width = 0.06, height = 0.07),
         size = 1.0, na.rm = TRUE
       ) +
       ggplot2::geom_point(
         data = mean_df[mean_df$source == "Baseline", , drop = FALSE],
-        ggplot2::aes(x = .data$scenario, y = .data$value),
-        shape = 21, size = 3.0, fill = "white", colour = .wise_slate, stroke = 1.0,
-        position = ggplot2::position_nudge(x = -0.1625),
-        na.rm = TRUE
+        ggplot2::aes(x = .data$value, y = .data$row_y + .data$y_off),
+        shape = 21, size = 3.0, fill = "white", colour = .wise_slate,
+        stroke = 1.0, na.rm = TRUE
       ) +
       ggplot2::geom_point(
         data = mean_df[mean_df$source == "Policy", , drop = FALSE],
-        ggplot2::aes(x = .data$scenario, y = .data$value),
+        ggplot2::aes(x = .data$value, y = .data$row_y + .data$y_off),
         shape = 21, size = 3.4, fill = .wise_policy, colour = .wise_policy_dark,
-        stroke = 1.0,
-        position = ggplot2::position_nudge(x = 0.1625),
-        na.rm = TRUE
-      ) +
-      ggplot2::scale_fill_manual(
-         values = scenario_palette,
-        na.value = .wise_history, name = "Climate scenario"
-      ) +
-      ggplot2::scale_colour_manual(
-         values = scenario_palette,
-        na.value = .wise_history, guide = "none"
+        stroke = 1.0, na.rm = TRUE
       ) +
       ggplot2::scale_alpha_manual(
-        values = c(Baseline = 0.30, Policy = 0.85),
-        name = "Series"
-      ) +
-      ggplot2::scale_shape_manual(
-        values = c(Baseline = 21, Policy = 23),
-        name = "Series",
-        labels = c(Baseline = "Baseline mean", Policy = "Policy mean")
-      ) +
-       ggplot2::guides(fill = "none", alpha = "none", shape = "none") +
-      ggplot2::labs(x = NULL, y = x_label, title = title, subtitle = subtitle) +
-      theme_wise() +
-       ggplot2::theme(legend.position = "none",
-                      plot.margin = ggplot2::margin(8, 8, 72, 8),
-                     axis.text.x = ggplot2::element_text(angle = 25, hjust = 1))
-
-    return(p)
-  }
-
-  p <- ggplot2::ggplot(df, ggplot2::aes(x = .data$scenario, y = .data$value,
-                                    fill = .data$scenario_key))
-
-  if (is.finite(hist_mean)) {
-    p <- p + ggplot2::geom_hline(yintercept = hist_mean, linetype = "dashed",
-                                 colour = .wise_zero, linewidth = 0.5)
-  }
-
-  distribution_layer <- if (identical(plot_type, "violin")) {
-    ggplot2::geom_violin(scale = "width", alpha = 0.25, colour = NA,
-                         na.rm = TRUE)
+        values = c(Baseline = 0.30, Policy = 0.85), guide = "none"
+      )
   } else {
-    ggplot2::geom_boxplot(width = 0.22, outlier.shape = NA, na.rm = TRUE,
-                          colour = .wise_support, fill = "white")
-  }
+    distribution_layer <- if (identical(plot_type, "violin")) {
+      ggplot2::geom_violin(
+        ggplot2::aes(y = .data$row_y, fill = .data$scenario_key),
+        orientation = "y", scale = "width", width = 0.62, alpha = 0.28,
+        colour = NA, na.rm = TRUE
+      )
+    } else {
+      ggplot2::geom_boxplot(
+        ggplot2::aes(y = .data$row_y, fill = .data$scenario_key),
+        orientation = "y", width = 0.30, outlier.shape = NA,
+        alpha = 0.45, colour = .wise_support, na.rm = TRUE
+      )
+    }
+
+    dot_jitter <- if (identical(plot_type, "violin")) {
+      ggplot2::position_jitter(width = 0.08, height = 0.18)
+    } else {
+      ggplot2::position_jitter(width = 0.08, height = 0.26)
+    }
+    dot_alpha <- if (identical(plot_type, "violin")) 0.40 else 0.30
+
+    mean_df <- stats::aggregate(value ~ scenario_key, data = df,
+                                FUN = mean, na.rm = TRUE)
+    mean_df$row_y <- n_rows + 1L - as.integer(mean_df$scenario_key)
 
     p <- p + distribution_layer +
-      ggplot2::geom_point(ggplot2::aes(colour = .data$scenario_key),
-                          position = ggplot2::position_jitter(width = 0.08),
-                          alpha = 0.55, size = 1.2, na.rm = TRUE) +
-      ggplot2::stat_summary(
-        fun = mean, geom = "point", shape = 23,
-        size = 2.8, fill = "white", colour = .wise_slate, stroke = 1.0,
-        na.rm = TRUE
+      ggplot2::geom_point(
+        ggplot2::aes(y = .data$row_y, colour = .data$scenario_key),
+        position = dot_jitter, alpha = dot_alpha, size = 1.0, na.rm = TRUE
       ) +
-     ggplot2::scale_fill_manual(values = scenario_palette,
-                                na.value = .wise_history, guide = "none") +
-     ggplot2::scale_colour_manual(values = scenario_palette, guide = "none") +
-    ggplot2::labs(x = NULL, y = x_label, title = title,
-                  subtitle = subtitle) +
+      ggplot2::geom_point(
+        data = mean_df,
+        ggplot2::aes(x = .data$value, y = .data$row_y),
+        shape = 23, size = 2.8, fill = "white", colour = .wise_slate,
+        stroke = 1.0, na.rm = TRUE
+      )
+  }
+
+  p <- p +
+    ggplot2::geom_text(
+      data = n_df,
+      ggplot2::aes(x = .data$lab_x, y = .data$row_y,
+                   label = paste0("n = ", .data$n)),
+      hjust = 0, size = 3, colour = .wise_slate, inherit.aes = FALSE,
+      show.legend = FALSE, na.rm = TRUE
+    ) +
+    ggplot2::scale_fill_manual(values = scenario_palette,
+                               na.value = .wise_history, guide = "none") +
+    ggplot2::scale_colour_manual(values = scenario_palette,
+                                 na.value = .wise_history, guide = "none") +
+    ggplot2::scale_y_continuous(
+      breaks = y_breaks, labels = y_labs,
+      expand = ggplot2::expansion(add = c(0.6, 0.6))
+    ) +
+    ggplot2::scale_x_continuous(
+      expand = ggplot2::expansion(mult = c(0.02, 0.10))
+    ) +
+    ggplot2::labs(x = x_label, y = NULL, title = title, subtitle = subtitle) +
     theme_wise() +
-     ggplot2::theme(legend.position = "none",
-                    plot.margin = ggplot2::margin(8, 8, 72, 8),
-                   axis.text.x = ggplot2::element_text(angle = 25, hjust = 1))
+    ggplot2::theme(legend.position = "none")
   p
 }
 
