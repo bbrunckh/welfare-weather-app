@@ -1319,9 +1319,9 @@ make_step3_decision_table_html <- function(df, subheader = NULL, footnotes = NUL
   })
 
   headline_cards_data_rv <- reactive({
-    req(paired_effect_summary_rv())
+    req(headline_paired_effect_summary_rv())
     step3_headline_cards(
-      paired_summary    = paired_effect_summary_rv(),
+      paired_summary    = headline_paired_effect_summary_rv(),
       threshold_tbl     = threshold_table_rv(),
       baseline_agg      = baseline_agg_scenarios(),
       policy_agg        = policy_agg_scenarios(),
@@ -1664,6 +1664,16 @@ make_step3_decision_table_html <- function(df, subheader = NULL, footnotes = NUL
       resolve_band_q(input$ensemble_band %||% "none")
     dplyr::bind_rows(lapply(names(dat), function(nm) {
       paired_effect_summary(dat[[nm]], band_q = bq, scenario = nm)
+    }))
+  })
+
+  # Headline robustness is a factual model range, independent of the
+  # ensemble-spread setting used to tune individual plots.
+  headline_paired_effect_summary_rv <- reactive({
+    dat <- paired_effect_data()
+    if (!length(dat)) return(tibble::tibble())
+    dplyr::bind_rows(lapply(names(dat), function(nm) {
+      paired_effect_summary(dat[[nm]], band_q = c(lo = 0, hi = 1), scenario = nm)
     }))
   })
 
