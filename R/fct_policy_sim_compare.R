@@ -652,7 +652,21 @@ plot_step3_adverse_dot <- function(tbl, x_label = "Outcome level",
   y_breaks <- sort(unique(tbl$rp_y))
   y_labs   <- levels(tbl$rp_label)[y_breaks]
 
+  # Alternating light-grey banding behind every second return-period row
+  # (counting from the top), so the dumbbells that share a row read as one
+  # group. Drawn first, i.e. behind every geom.
+  band_ys <- y_breaks[(max(y_breaks) - y_breaks) %% 2 == 1]
+  rp_band_data <- data.frame(
+    ymin = band_ys - 0.45, ymax = band_ys + 0.45
+  )
+
   p <- ggplot2::ggplot(tbl, ggplot2::aes(y = .data$rp_y + .data$dodge_offset)) +
+    ggplot2::geom_rect(
+      data = rp_band_data,
+      ggplot2::aes(ymin = .data$ymin, ymax = .data$ymax),
+      xmin = -Inf, xmax = Inf, fill = "#F7F9FB", colour = NA,
+      inherit.aes = FALSE, show.legend = FALSE
+    ) +
     # Climate-model spread bands, future scenarios only (Historical runs a
     # single climate model): same width for both sources; baseline in
     # transparent blue, policy in transparent policy vermillion.

@@ -925,10 +925,24 @@ plot_step2_adverse_dot <- function(tbl, x_label = "Outcome level",
   y_breaks <- sort(unique(tbl$rp_y))
   y_labs   <- levels(tbl$rp_label)[y_breaks]
 
+  # Alternating light-grey banding behind every second return-period row
+  # (counting from the top), so the markers that share a row read as one
+  # group. Drawn first, i.e. behind every geom.
+  band_ys <- y_breaks[(max(y_breaks) - y_breaks) %% 2 == 1]
+  rp_band_data <- data.frame(
+    ymin = band_ys - 0.45, ymax = band_ys + 0.45
+  )
+
   p <- ggplot2::ggplot(tbl, ggplot2::aes(y = .data$rp_y + .data$dodge_offset,
                                          x = .data$value,
                                          colour = .data$scenario_key,
                                          fill = .data$scenario_key)) +
+    ggplot2::geom_rect(
+      data = rp_band_data,
+      ggplot2::aes(ymin = .data$ymin, ymax = .data$ymax),
+      xmin = -Inf, xmax = Inf, fill = "#F7F9FB", colour = NA,
+      inherit.aes = FALSE, show.legend = FALSE
+    ) +
     ggplot2::geom_segment(ggplot2::aes(x = .data$intermod_lo, xend = .data$intermod_hi,
                                        yend = .data$rp_y + .data$dodge_offset),
                           linewidth = 2.0, alpha = 0.5, lineend = "round", na.rm = TRUE) +
