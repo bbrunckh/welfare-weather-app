@@ -41,7 +41,6 @@ decomposition_group_candidates <- function(svy, variable_list = NULL,
   }
   rows <- lapply(seq_len(nrow(variable_list)), function(i) {
     name <- as.character(variable_list$name[[i]] %||% "")
-    if (length(name) != 1L || is.na(name)) name <- ""
     role_raw <- variable_list[[role]][[i]]
     role_value <- if (is.logical(role_raw)) {
       isTRUE(role_raw)
@@ -55,13 +54,11 @@ decomposition_group_candidates <- function(svy, variable_list = NULL,
               name, ignore.case = TRUE)) return(NULL)
     values <- svy[[name]]
     declared_type <- if ("type" %in% names(variable_list)) {
-      type_i <- as.character(variable_list$type[[i]] %||% "")
-      if (length(type_i) != 1L || is.na(type_i)) "" else
-        tolower(trimws(type_i))
+      tolower(trimws(as.character(variable_list$type[[i]] %||% "")))
     } else ""
-    semantic_categorical <- isTRUE(declared_type %in% c(
+    semantic_categorical <- declared_type %in% c(
       "logical", "factor", "categorical", "category", "binary", "character"
-    ))
+    )
     storage_categorical <- is.logical(values) || is.factor(values) ||
       is.character(values)
     if (!storage_categorical && !semantic_categorical) return(NULL)
