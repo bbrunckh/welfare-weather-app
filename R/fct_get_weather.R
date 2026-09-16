@@ -1,5 +1,4 @@
-# fct_get_weather.R
-# -----------------
+# Weather loading and processing ----
 # Weather loading and processing pipeline.
 # Loads ERA5 historical weather and CMIP6 climate projections from parquet
 # files via DuckDB. Applies spatial aggregation (H3 -> survey location),

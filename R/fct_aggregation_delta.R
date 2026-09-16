@@ -1,5 +1,4 @@
-# fct_aggregation_delta.R
-# -----------------------
+# Delta-method aggregation ----
 # Closed-form delta-method uncertainty aggregation.
 #
 # Closed-form variance for (value, var) tuples that feed into

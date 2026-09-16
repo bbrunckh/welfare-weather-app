@@ -217,17 +217,17 @@ compute_chol_vcov <- function(fit, vcov_spec = COEF_VCOV_SPEC) {
   }
 
   stopifnot("fit must be a fixest model" = inherits(fit, "fixest"))
-  beta  <- coef(fit)
+  beta  <- stats::coef(fit)
 
   # Try fit-time VCV first (respects cluster= passed at estimation), then
   # requested spec, then fallback chain
   vcov_fallbacks <- list(vcov_spec, ~loc_id, "HC1", "iid")
-  Sigma <- tryCatch(vcov(fit), error = function(e) NULL)
+  Sigma <- tryCatch(stats::vcov(fit), error = function(e) NULL)
   if (is.null(Sigma) || !all(is.finite(Sigma))) {
     Sigma <- NULL
     for (spec in vcov_fallbacks) {
       Sigma <- tryCatch(
-        vcov(fit, vcov = spec),
+        stats::vcov(fit, vcov = spec),
         error = function(e) NULL
       )
       if (!is.null(Sigma) && all(is.finite(Sigma))) {
@@ -745,7 +745,7 @@ run_sim_pipeline <- function(weather_raw,
     if (!is.null(chol_obj)) {
       # Standard OLS path only - skip for RIF (model is fixest_multi)
       X_nonFE <- tryCatch(
-        model.matrix(model, data = survey_wd_sim, type = "rhs"),
+        stats::model.matrix(model, data = survey_wd_sim, type = "rhs"),
         error = function(e) {
           warning("[run_sim_pipeline] model.matrix() failed: ", conditionMessage(e))
           NULL

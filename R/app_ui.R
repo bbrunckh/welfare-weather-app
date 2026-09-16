@@ -103,23 +103,23 @@ app_ui <- function(request) {
 #' resources inside the Shiny application.
 #'
 #' @import shiny
-#' @importFrom golem add_resource_path activate_js favicon bundle_resources
+#' @importFrom golem add_resource_path favicon bundle_resources
 #' @noRd
 golem_add_external_resources <- function() {
-	add_resource_path(
-		"www",
-		app_sys("app/www")
-	)
 
-	tags$head(
-		favicon(ext = 'png'),
-		bundle_resources(
-			path = app_sys("app/www"),
-			app_title = "wiseapp"
+  add_resource_path(
+    "www",
+    app_sys("app/www")
+  )
 
-		),
-		# Vendored MapLibre/H3 map engine, after bundle_resources so the
-		# explicit script order (maplibre -> h3-js -> hexmap.js) always wins.
-		hexmap_dependency()
-	)
+  tags$head(
+    favicon(ext = "png"),
+    bundle_resources(
+      path = app_sys("app/www"),
+      app_title = "wiseapp"
+    ),
+    # Vendored MapLibre/H3 map engine, after bundle_resources so the
+    # explicit script order (maplibre -> h3-js -> hexmap.js) always wins.
+    hexmap_dependency()
+  )
 }

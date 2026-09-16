@@ -1,5 +1,4 @@
-# fct_aggregation.R
-# -----------------
+# Aggregation helpers ----
 # Welfare aggregation functions - all called at simulation time.
 # Stateless and testable without Shiny.
 #
@@ -435,8 +434,6 @@ hist_aggregate_choices <- function(outcome_type, outcome_name = NULL) {
 #'   and a column named `value` holding the computed aggregate.
 #'
 #' @examples
-#' library(dplyr)
-#'
 #' # Simulate 50 simulation years, 1000 individuals each
 #' set.seed(42)
 #' sim_data <- data.frame(
@@ -592,8 +589,6 @@ aggregate_outcome <- function(df,
 #'   replaced by the deviation from the chosen centre, optionally sign-flipped.
 #'
 #' @examples
-#' library(dplyr)
-#'
 #' set.seed(42)
 #' sim_data <- data.frame(
 #'   sim_year = rep(1:50, each = 1000),

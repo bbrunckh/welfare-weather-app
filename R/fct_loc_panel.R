@@ -44,8 +44,6 @@
 #'   \code{\link[igraph:graph_from_data_frame]{igraph::graph_from_data_frame}}
 #'
 #' @examples
-#' library(dplyr)
-#'
 #' survey <- tibble::tribble(
 #'   ~loc_id, ~h3_7,  ~population,
 #'   1L,      "a",    100,

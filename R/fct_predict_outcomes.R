@@ -87,7 +87,6 @@
 #'   }
 #'
 #' @examples
-#' library(dplyr)
 #' set.seed(42)
 #' train_data <- data.frame(
 #'   id      = 1:1000,

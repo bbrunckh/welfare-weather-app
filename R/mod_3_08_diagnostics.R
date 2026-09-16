@@ -212,7 +212,7 @@ mod_3_08_diagnostics_server <- function(id,
                                          education_scenario = reactive(NULL),
                                          policy_saved_scenarios = reactive(list()),
                                          stale = reactive(FALSE)) {
-  moduleServer(id, function(input, output, session) {
+  shiny::moduleServer(id, function(input, output, session) {
     ns <- session$ns
     session$userData$wise_step3_stale <- stale
 
@@ -440,7 +440,7 @@ mod_3_08_diagnostics_server <- function(id,
         )
       })
 
-      do.call(tagList, tags)
+      do.call(shiny::tagList, tags)
     })
 
     # ---- Per-variable histogram outputs -------------------------------------

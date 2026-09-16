@@ -1,5 +1,4 @@
-# fct_run_simulation.R
-# --------------------
+# Simulation orchestration ----
 # Orchestration function for the full simulation pipeline.
 # Pure function - no reactives. Called from mod_2_01_weathersim.R.
 #
