@@ -908,18 +908,23 @@ plot_step2_adverse_dot <- function(tbl, x_label = "Outcome level",
   top_rows <- tbl[tbl$rp_y == top_y, , drop = FALSE]
   # One label per scenario even if a scenario contributes several top rows.
   top_rows <- top_rows[!duplicated(top_rows$scenario_key), , drop = FALSE]
+
+  x_vals <- c(tbl$value, tbl$intermod_lo, tbl$intermod_hi)
+  x_span <- diff(range(x_vals, na.rm = TRUE))
+  # Uniform label gap, in data units, so every series label clears its
+  # marker by the same distance.
+  lab_gap <- if (is.finite(x_span) && x_span > 0) 0.012 * x_span else 0
+
   top_rows$lab_x <- vapply(seq_len(nrow(top_rows)), function(i) {
     r <- top_rows[i, ]
     hi <- r$intermod_hi[[1L]]
     if (!is.finite(hi)) hi <- r$value[[1L]]
-    hi
+    hi + lab_gap
   }, numeric(1L))
   top_rows$lab_col <- unname(scenario_colours[as.character(top_rows$scenario_key)])
 
-  x_vals <- c(tbl$value, tbl$intermod_lo, tbl$intermod_hi)
-  x_span <- diff(range(x_vals, na.rm = TRUE))
   right_mult <- if (is.finite(x_span) && x_span > 0) {
-    max(0.10, max(nchar(as.character(top_rows$scenario_key)), 0L) * 0.009)
+    max(0.12, max(nchar(as.character(top_rows$scenario_key)), 0L) * 0.012)
   } else 0.05
 
   y_breaks <- sort(unique(tbl$rp_y))
@@ -952,7 +957,7 @@ plot_step2_adverse_dot <- function(tbl, x_label = "Outcome level",
       data = top_rows,
       ggplot2::aes(x = .data$lab_x, y = .data$rp_y + .data$dodge_offset,
                    label = as.character(.data$scenario_key)),
-      colour = top_rows$lab_col, hjust = -0.08, size = 3.2,
+      colour = top_rows$lab_col, hjust = 0, size = 3.9,
       fontface = "bold", show.legend = FALSE, inherit.aes = FALSE
     ) +
     ggplot2::scale_colour_manual(values = scenario_colours, guide = "none") +

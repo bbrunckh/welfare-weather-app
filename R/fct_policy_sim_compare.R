@@ -626,27 +626,36 @@ plot_step3_adverse_dot <- function(tbl, x_label = "Outcome level",
   )
 
   # Direct labeling replaces the legend. Series names anchor just past the
-  # right end of each top-row (Expected) dumbbell; the x expansion is
-  # enlarged so the longest label stays inside the panel.
+  # right-most end of each top-row (Expected) dumbbell - baseline end
+  # included, so the label stays on the right-hand side even when the
+  # outcome direction flips and policy sits left of baseline. The x
+  # expansion is enlarged so the longest label stays inside the panel.
   top_y <- max(tbl$rp_y)
   top_rows <- tbl[tbl$rp_y == top_y, , drop = FALSE]
   # One label per scenario even if a scenario contributes several top rows.
   top_rows <- top_rows[!duplicated(top_rows$scenario_key), , drop = FALSE]
+
+  x_vals <- c(tbl$baseline_val, tbl$policy_val, tbl$policy_lo, tbl$policy_hi,
+              tbl$base_lo, tbl$base_hi)
+  x_span <- diff(range(x_vals, na.rm = TRUE))
+  # Uniform label gap, in data units, so every series label clears its
+  # marker by the same distance regardless of bands or direction.
+  lab_gap <- if (is.finite(x_span) && x_span > 0) 0.012 * x_span else 0
+
   top_rows$lab_x <- vapply(seq_len(nrow(top_rows)), function(i) {
     r <- top_rows[i, ]
-    hi <- max(r$policy_hi[[1L]], r$policy_val[[1L]], na.rm = TRUE)
-    if (!is.finite(hi)) hi <- r$baseline_val[[1L]]
-    hi
+    hi <- suppressWarnings(max(r$policy_hi[[1L]], r$policy_val[[1L]],
+                               r$base_hi[[1L]], r$baseline_val[[1L]],
+                               na.rm = TRUE))
+    if (!is.finite(hi)) hi <- r$policy_val[[1L]]
+    hi + lab_gap
   }, numeric(1L))
   top_rows$lab_col <- unname(scenario_colours[as.character(top_rows$scenario_key)])
   # One-time Baseline/Policy captions on the topmost dumbbell of the top row.
   cap_row <- top_rows[which.max(top_rows$dodge_offset), , drop = FALSE]
 
-  x_vals <- c(tbl$baseline_val, tbl$policy_val, tbl$policy_lo, tbl$policy_hi,
-              tbl$base_lo, tbl$base_hi)
-  x_span <- diff(range(x_vals, na.rm = TRUE))
   right_mult <- if (is.finite(x_span) && x_span > 0) {
-    max(0.10, max(nchar(as.character(top_rows$scenario_key)), 0L) * 0.009)
+    max(0.12, max(nchar(as.character(top_rows$scenario_key)), 0L) * 0.012)
   } else 0.05
 
   y_breaks <- sort(unique(tbl$rp_y))
@@ -709,13 +718,13 @@ plot_step3_adverse_dot <- function(tbl, x_label = "Outcome level",
     ggplot2::geom_text(
       data = cap_row,
       ggplot2::aes(x = .data$baseline_val, y = .data$rp_y + .data$dodge_offset),
-      label = "Baseline", vjust = -1.4, size = 2.9, fontface = "bold",
+      label = "Baseline", vjust = -1.4, size = 3.5, fontface = "bold",
       colour = .wise_slate, show.legend = FALSE, inherit.aes = FALSE
     ) +
     ggplot2::geom_text(
       data = cap_row,
       ggplot2::aes(x = .data$policy_val, y = .data$rp_y + .data$dodge_offset),
-      label = "Policy", vjust = -1.4, size = 2.9, fontface = "bold",
+      label = "Policy", vjust = -1.4, size = 3.5, fontface = "bold",
       colour = .wise_policy_dark, show.legend = FALSE, inherit.aes = FALSE
     ) +
     # One-time series labels on the top row, coloured per scenario.
@@ -723,7 +732,7 @@ plot_step3_adverse_dot <- function(tbl, x_label = "Outcome level",
       data = top_rows,
       ggplot2::aes(x = .data$lab_x, y = .data$rp_y + .data$dodge_offset,
                    label = as.character(.data$scenario_key)),
-      colour = top_rows$lab_col, hjust = -0.08, size = 3.2,
+      colour = top_rows$lab_col, hjust = 0, size = 3.9,
       fontface = "bold", show.legend = FALSE, inherit.aes = FALSE
     ) +
     ggplot2::scale_colour_manual(values = scenario_colours, guide = "none") +
