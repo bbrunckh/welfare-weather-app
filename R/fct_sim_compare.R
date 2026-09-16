@@ -1926,9 +1926,11 @@ plot_model_robustness <- function(tbl, x_label = "Expected annual outcome") {
 
 #' Enhanced Exceedance Probability Curve with Return Period Axis
 #'
-#' Colour and line type identify the combined climate scenario and period
-#' (for example, `SSP3-7.0 / 2025-2035`). When baseline and policy series are
-#' present, line width distinguishes them. Historical = black/solid/medium.
+#' Colour identifies the SSP family and line type identifies the projection
+#' period (for example, `SSP3-7.0 / 2025-2035`). Historical is navy and solid.
+#' When baseline and policy series are present, endpoint markers distinguish
+#' them; their lines retain the same scenario colour, period linetype, and
+#' uniform width.
 #' Optional logit probability axis.
 #'
 #' Each SSP x period combination has an inter-model ribbon and a central

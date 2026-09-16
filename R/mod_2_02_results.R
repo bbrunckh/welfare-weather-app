@@ -223,10 +223,10 @@ mod_2_02_results_ui <- function(id) {
         shiny::p(
           "Shows the annual probability of reaching or exceeding severe outcome",
           "thresholds across simulated weather years under each climate regime.",
-          "Dashed lines indicate standard return periods (e.g. 1-in-10 or 1-in-20 year events)."
+          "The probability axis labels standard return periods (e.g. 1 in 10 or 1 in 20 year events)."
         ),
         shiny::p(
-          "Solid black curve is the historical baseline. Coloured curves show the",
+          "The navy curve is the historical baseline. Coloured curves show the",
           "ensemble median across climate models, with shaded ribbons indicating inter-model spread."
         ),
         docs = TRUE
