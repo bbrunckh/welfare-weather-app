@@ -688,7 +688,7 @@ policy_placeholder_tag <- function(category_label, candidate_df) {
   if (targeting == "universal") {
     eligible <- rep(TRUE, n)
   } else if (targeting == "exante_poor") {
-    q <- quantile(svy$welfare,
+    q <- stats::quantile(svy$welfare,
       (sp$targeting_threshold %||% 20) / 100,
       na.rm = TRUE
     )

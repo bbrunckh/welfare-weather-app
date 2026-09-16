@@ -1859,7 +1859,7 @@ make_step3_decision_table_html <- function(df, subheader = NULL, footnotes = NUL
     if (identical(deviation, "mean")) {
       mean(raw_vals, na.rm = TRUE)
     } else if (identical(deviation, "median")) {
-      median(raw_vals, na.rm = TRUE)
+      stats::median(raw_vals, na.rm = TRUE)
     } else {
       0
     }

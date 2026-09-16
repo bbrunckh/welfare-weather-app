@@ -520,7 +520,7 @@ aggregate_outcome <- function(df,
           sum(x * w, na.rm = TRUE)
         },
         median = if (is.null(w)) {
-          median(x, na.rm = TRUE)
+          stats::median(x, na.rm = TRUE)
         } else {
           valid <- is.finite(x) & is.finite(w) & w > 0
           if (sum(valid) == 0L) {
@@ -655,7 +655,7 @@ deviation_from_centre <- function(df,
 
   ref <- switch(centre,
     mean   = mean(df$value, na.rm = TRUE),
-    median = median(df$value, na.rm = TRUE)
+    median = stats::median(df$value, na.rm = TRUE)
   )
 
   sign <- if (loss) -1 else 1

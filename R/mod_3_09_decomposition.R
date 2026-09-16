@@ -1064,7 +1064,7 @@ mod_3_09_decomposition_server <- function(id,
       `+/- SE (log-pts)` = if (is.na(se_log)) NA_real_ else round(se_log, 4),
       `Mean (%)` = round(mean_pct, 2),
       `+/- SE (%)` = if (is.na(se_pct)) NA_real_ else round(se_pct, 2),
-      `Median (%)` = round(median((exp(vals) - 1) * 100), 2),
+      `Median (%)` = round(stats::median((exp(vals) - 1) * 100), 2),
       check.names = FALSE
     )
   }

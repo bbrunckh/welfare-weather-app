@@ -113,8 +113,8 @@ resolve_band_q <- function(band_key) {
   }
   list(
     mean    = mean(x, na.rm = TRUE),
-    lo_full = unname(quantile(x, band_q[["lo"]], na.rm = TRUE)),
-    hi_full = unname(quantile(x, band_q[["hi"]], na.rm = TRUE))
+    lo_full = unname(stats::quantile(x, band_q[["lo"]], na.rm = TRUE)),
+    hi_full = unname(stats::quantile(x, band_q[["hi"]], na.rm = TRUE))
   )
 }
 

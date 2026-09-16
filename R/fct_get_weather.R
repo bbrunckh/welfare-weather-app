@@ -628,7 +628,7 @@ WISEAPP_WX_ROUND_DIGITS <- 5L
 
     cutoffs <- switch(binning_method,
       "Equal frequency" = {
-        unique(quantile(haz_vals, probs = seq(0, 1, length.out = num_bins + 1), na.rm = TRUE))
+        unique(stats::quantile(haz_vals, probs = seq(0, 1, length.out = num_bins + 1), na.rm = TRUE))
       },
       "Equal width" = {
         unique(seq(min(haz_vals, na.rm = TRUE), max(haz_vals, na.rm = TRUE), length.out = num_bins + 1))

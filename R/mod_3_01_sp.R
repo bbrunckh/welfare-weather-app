@@ -163,39 +163,9 @@ mod_3_01_sp_server <- function(id,
     })
 
     # ---- 2. Trigger (shock-responsive only) ----------------------------
-
-    # output$sp_trigger_ui <- renderUI({
-    #   req(input$sp_type == "shock")
-    #   tagList(
-    #     tags$label(
-    #       class = "control-label",
-    #       tags$i(class = "fa fa-triangle-exclamation me-1"),
-    #       "Trigger type"
-    #     ),
-    #     selectInput(
-    #       inputId  = ns("trigger_type"),
-    #       label    = NULL,
-    #       choices  = c(
-    #         "Return period of event \u2265 x years"      = "return_period",
-    #         "Weather variable exceeds x"                 = "weather_threshold",
-    #         "Modelled welfare loss \u2265 $x"            = "welfare_loss",
-    #         "Modelled increase in poverty gap \u2265 $x" = "poverty_increase"
-    #       ),
-    #       selected = "return_period"
-    #     ),
-    #     numericInput(
-    #       inputId = ns("trigger_value"),
-    #       label   = tags$span(
-    #         tags$i(class = "fa fa-sliders me-1"),
-    #         "Trigger value (x)"
-    #       ),
-    #       value = 10,
-    #       min   = 0,
-    #       step  = 1
-    #     ),
-    #     tags$hr(style = "margin: 8px 0;")
-    #   )
-    # })
+    #
+    # Shock-responsive trigger and timing UIs were prototyped but are not
+    # implemented; see the shock note in section 1. Commented stubs removed.
 
     # ---- 3. Targeting --------------------------------------------------
 
@@ -345,7 +315,7 @@ mod_3_01_sp_server <- function(id,
           ),
           min = floor(min(col)),
           max = ceiling(max(col)),
-          value = quantile(col, 0.2),
+          value = stats::quantile(col, 0.2),
           step = if (diff(range(col)) > 10) 1 else 0.1
         )
       }
@@ -463,7 +433,6 @@ mod_3_01_sp_server <- function(id,
         condition = paste0(
           "input['", ns("budget_mode"), "'] == 'transfer_first'"
         ),
-        # is_regular <- isTRUE(input$sp_type == "regular")
         tagList(
           tags$label(
             class = "control-label",
@@ -481,26 +450,7 @@ mod_3_01_sp_server <- function(id,
             )
           ),
 
-          # One-off vs regular - hidden for regular programs
-          # if (!is_regular) {
-          #   radioButtons(
-          #     inputId  = ns("transfer_frequency"),
-          #     label    = tags$span(
-          #       tags$i(class = "fa fa-rotate me-1"),
-          #       "One-off vs regular"
-          #     ),
-          #     choices  = c("One-off" = "oneoff", "Regular" = "regular"),
-          #     selected = isolate(input$transfer_frequency) %||% "oneoff",
-          #     inline   = TRUE
-          #   )
-          # },
-
           # Number of payments - shown when regular (either via type or frequency)
-          # conditionalPanel(
-          #   condition = paste0(
-          #     "input['", ns("sp_type"), "'] == 'regular' || ",
-          #     "input['", ns("transfer_frequency"), "'] == 'regular'"
-          #   ),
           tags$div(
             class = "sp-inline-slider",
             tags$span(
@@ -518,96 +468,8 @@ mod_3_01_sp_server <- function(id,
             )
           )
         )
-
-        # Anticipatory vs ex-post - hidden for regular programs
-        # if (!is_regular) {
-        #   tagList(
-        #     radioButtons(
-        #       inputId  = ns("transfer_timing"),
-        #       label    = tags$span(
-        #         tags$i(class = "fa fa-calendar-check me-1"),
-        #         "Anticipatory vs ex-post"
-        #       ),
-        #       choices  = c(
-        #         "Anticipatory (pre-event)" = "anticipatory",
-        #         "Ex-post (post-event)"     = "expost"
-        #       ),
-        #       selected = isolate(input$transfer_timing) %||% "expost",
-        #       inline   = TRUE
-        #     ),
-        #     sliderInput(
-        #       inputId = ns("timeliness_weeks"),
-        #       label   = tags$span(
-        #         tags$i(class = "fa fa-hourglass-half me-1"),
-        #         "Timeliness (weeks after trigger)"
-        #       ),
-        #       min = 0, max = 26, value = 4, step = 1, post = " wks"
-        #     )
-        #   )
-        # }
       )
     })
-
-    # ---- 6. Delivery system --------------------------------------------
-
-    # output$sp_delivery_ui <- renderUI({
-    #   tagList(
-    #     tags$label(
-    #       class = "control-label",
-    #       tags$i(class = "fa fa-mobile-screen me-1"),
-    #       "Delivery system"
-    #     ),
-    #     checkboxInput(
-    #       inputId = ns("delivery_mobile_money"),
-    #       label   = tagList(
-    #         tags$i(class = "fa fa-wallet me-1"),
-    #         "Mobile money (recipients need mobile wallet)"
-    #       ),
-    #       value = FALSE
-    #     ),
-    #     conditionalPanel(
-    #       condition = paste0("input['", ns("delivery_mobile_money"), "']"),
-    #       tags$small(
-    #         class = "text-muted d-block mb-2",
-    #         tags$i(class = "fa fa-circle-info me-1"),
-    #         "Coverage will be constrained by mobile phone ownership rate in the simulation."
-    #       )
-    #     ),
-    #     tags$hr(style = "margin: 8px 0;")
-    #   )
-    # })
-
-    # ---- 7. Revenue source ---------------------------------------------
-
-    # output$sp_revenue_ui <- renderUI({
-    #   tagList(
-    #     tags$label(
-    #       class = "control-label",
-    #       tags$i(class = "fa fa-money-bill-trend-up me-1"),
-    #       "Revenue source"
-    #     ),
-    #     selectInput(
-    #       inputId  = ns("revenue_source"),
-    #       label    = NULL,
-    #       choices  = c(
-    #         "Government budget reallocation"         = "govt_reallocation",
-    #         "Dedicated social protection budget"     = "sp_budget",
-    #         "International aid / donor funding"      = "donor",
-    #         "Contingency fund / reserve"             = "contingency",
-    #         "Sovereign parametric insurance payout"  = "insurance",
-    #         "Catastrophe bond trigger"               = "cat_bond",
-    #         "Deficit spending / borrowing"           = "borrowing"
-    #       ),
-    #       selected = "govt_reallocation"
-    #     ),
-    #     tags$small(
-    #       class = "text-muted d-block mb-2",
-    #       tags$i(class = "fa fa-circle-info me-1"),
-    #       "Revenue source affects fiscal cost interpretation in the simulation output."
-    #     ),
-    #     tags$hr(style = "margin: 8px 0;")
-    #   )
-    # })
 
     # ---- Scenario specification ----------------------------------------
     #

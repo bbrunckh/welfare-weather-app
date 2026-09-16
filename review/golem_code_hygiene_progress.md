@@ -14,7 +14,7 @@ touched files against the pre-refactor snapshot, (2) full `devtools::test()`,
 | 0 | First hygiene pass (prior session) | 10 files | Done | `90dee76` |
 | 1 | Section banner normalization (`# Section ----`) | 39 files | Done | `9b1558f` |
 | 2 | Styler full pass (Tidyverse style) | all `R/` | Done | — |
-| 3 | Namespace, dead code, comment cleanup | `R/` + roxygen | Pending | — |
+| 3 | Namespace, dead code, comment cleanup | `R/` + roxygen | Done | — |
 | 4 | Module convention audit (`NS`/`moduleServer`) | `mod_*.R` | Pending | — |
 | 5 | Final validation + report | — | Pending | — |
 
@@ -62,15 +62,44 @@ _(filled per batch below)_
   roxygen example re-wrapping.
 - Full test suite green after batch.
 
+### Batch 3 — namespace + dead code
+
+- Removed 5 orphaned commented-out code blocks:
+  - `R/mod_1_06_model.R`: dead "Model parameters toggle" (reactiveVal,
+    button UI, observer, commented guard inside live renderUI).
+  - `R/mod_3_01_sp.R`: dead trigger UI stub (section 2), commented
+    `is_regular` fragment, commented one-off/regular radio group,
+    commented conditionalPanel opener, commented anticipatory/ex-post
+    block, and dead section 6 (delivery) + section 7 (revenue) stubs.
+- Qualified 10 collision-prone calls: `stats::median` (4 sites:
+  `fct_aggregation.R` x2, `fct_policy_sim_compare.R`,
+  `mod_3_09_decomposition.R`) and `stats::quantile` (6 sites:
+  `fct_get_weather.R`, `fct_outcome.R`, `fct_policy_sim.R`,
+  `fct_sim_compare.R` x2, `mod_3_01_sp.R`).
+- All edits verified expression-identical (modulo namespace prefixes)
+  against HEAD; full test suite green.
+
 ## Flagged items
 
 _(updated per batch)_
 
-- `mod_1_08_modelfit.R:337` `cat()` inside `renderPrint` is intended UI output, not debug printing — kept.
-- `message()` diagnostics in `fct_simulations.R` fallback chain are behavior-visible logging — kept, flagged.
-- `R/mod_2_simulation.R` retains tabs + CRLF/mixed line endings; excluded from
-  the styler batch to avoid whole-file line-ending churn. Normalizing it to
-  LF/2-space would make it consistent with all other files (recommendation).
+- `summary()` left unqualified: it is the base S3 generic (the earlier
+  inventory mislabeled it as stats); dispatch is unaffected.
+- `importFrom(stats, median, quantile)` in NAMESPACE is now unused;
+  left in place to avoid a doc-regeneration churn; harmless.
+- Packages used but not declared in DESCRIPTION `Imports`: `parallel`,
+  `grDevices`, `grid` (base-recommended, runtime-safe) and `tidyselect`
+  (transitive via dplyr). Adding them to `Imports:` is a DESCRIPTION
+  change and needs user approval per the safety protocol.
+- Console logging policy: `message()` diagnostics in `fct_simulations.R`,
+  `fct_rif_sim.R`, `fct_fit_model.R`, `fct_get_weather.R`,
+  `fct_results.R`, `fct_run_simulation.R`, `fct_policy_sim.R`,
+  `fct_outcome.R`, `mod_2_01_weathersim.R`, `mod_0_overview.R` kept —
+  they are behavior-visible logging; removing them is a policy decision.
+- `mod_1_08_modelfit.R` `cat()` inside `renderPrint` is intended UI
+  output — kept.
+- `R/mod_2_simulation.R` retains tabs + CRLF/mixed line endings; excluded
+  from the styler batch to avoid whole-file line-ending churn.
 - Styler quote normalization touched string literals in
   `fct_weather_pipeline.R`, `mod_1_02_surveystats.R`, `mod_2_01_weathersim.R`
   (verified value-preserving).

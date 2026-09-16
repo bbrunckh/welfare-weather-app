@@ -96,7 +96,7 @@ default_lcu_poverty_line <- function(df) {
           probs = 0.2, na.rm = TRUE
         )
       } else {
-        p20 <- quantile(df_lcu$welfare_lcu, probs = 0.2, na.rm = TRUE)
+        p20 <- stats::quantile(df_lcu$welfare_lcu, probs = 0.2, na.rm = TRUE)
       }
       round(as.numeric(p20), 2)
     },
