@@ -170,6 +170,7 @@ test_that("categorical baseline grouping preserves missing values and prediction
   vl <- data.frame(
     name = c("region", "flag", "continuous", "welfare", "weight"),
     label = c("Region", "Flag", "Continuous", "Welfare", "Weight"),
+    type = c(NA_character_, "logical", "numeric", "numeric", NA_character_),
     hh = c(1, 1, 1, 1, 1), stringsAsFactors = FALSE
   )
   candidates <- wiseapp:::decomposition_group_candidates(
