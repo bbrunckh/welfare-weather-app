@@ -335,8 +335,26 @@ mod_3_09_decomposition_ui <- function(id) {
       wise_plot_output(ns("headline_decomp_plot"),
                        "Main effect, resilience, and total policy effect decomposition",
                        height = "360px"),
-      DT::DTOutput(ns("headline_decomp_table")),
-      shiny::uiOutput(ns("headline_decomp_note_ui"))
+      # Table starts collapsed: the plot carries the message, the table is
+      # there for anyone who wants the numbers.
+      shiny::tags$button(
+        class = "btn btn-sm btn-outline-secondary mt-2",
+        type = "button",
+        `data-bs-toggle` = "collapse",
+        `data-bs-target` = paste0("#", ns("headline_decomp_table_wrap")),
+        `aria-expanded` = "false",
+        `aria-controls` = ns("headline_decomp_table_wrap"),
+        "Show / hide data table"
+      ),
+      shiny::div(
+        id = ns("headline_decomp_table_wrap"),
+        class = "collapse",
+        shiny::div(
+          style = "margin-top: 10px;",
+          DT::DTOutput(ns("headline_decomp_table")),
+          shiny::uiOutput(ns("headline_decomp_note_ui"))
+        )
+      )
     ),
 
     shiny::h4(
@@ -755,20 +773,39 @@ mod_3_09_decomposition_server <- function(id,
           "How does weather sensitivity vary across the welfare distribution?",
           class = "diagnostic-section-heading"
         ),
+        # RIF-only diagnostic; collapsed by default because it re-uses the
+        # Step 1 model fit rather than the Step 3 policy simulation.
+        shiny::tags$button(
+          class = "btn btn-sm btn-outline-secondary mb-2",
+          type = "button",
+          `data-bs-toggle` = "collapse",
+          `data-bs-target` = paste0("#", ns("beta_curve_section")),
+          `aria-expanded` = "false",
+          `aria-controls` = ns("beta_curve_section"),
+          "Show / hide weather-sensitivity curves"
+        ),
+        shiny::tags$p(
+          class = "diagnostic-note",
+          "These curves are defined by the model fit in Step 1 and do not change with the policy or climate selections in Steps 2-3."
+        ),
         shiny::div(
-          class = "results-section-card diagnostic-section-card",
-          weather_plot_layout(
-            ns, n_vars,
-            ids    = c("beta_curve_plot1", "beta_curve_plot2"),
-            height = "400px",
-            alts   = paste("Beta curve plot: unconditional quantile regression weather",
-                           "sensitivity across welfare quantiles for",
-                           mf$weather_terms)
-          ),
-          shiny::tags$p(
-            class = "diagnostic-note",
-            "Shows how weather sensitivity varies by quantile.",
-            "Repositioning exists only for RIF models and arises when households move along this curve."
+          id = ns("beta_curve_section"),
+          class = "collapse",
+          shiny::div(
+            class = "results-section-card diagnostic-section-card",
+            weather_plot_layout(
+              ns, n_vars,
+              ids    = c("beta_curve_plot1", "beta_curve_plot2"),
+              height = "400px",
+              alts   = paste("Beta curve plot: unconditional quantile regression weather",
+                             "sensitivity across welfare quantiles for",
+                             mf$weather_terms)
+            ),
+            shiny::tags$p(
+              class = "diagnostic-note",
+              "Shows how weather sensitivity varies by quantile.",
+              "Repositioning exists only for RIF models and arises when households move along this curve."
+            )
           )
         )
       )
