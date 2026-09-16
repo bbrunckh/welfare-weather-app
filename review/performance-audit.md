@@ -24,8 +24,9 @@
 | **3** | **S2-P6** | **Bounded Results aggregation cache** | **Integrated** |
 | **3** | **S2-P9** | **Reference-weather store ownership** | **Integrated** |
 | **3** | **S2-P20** | **Shared RIF design and FE indexing** | **Integrated** |
+| **3** | **S3-P15** | **Shared per-year row indexing through aggregation preparation cache** | **Integrated** |
 
-S2-P6, S2-P9, S2-P20, and S2-P17 are integrated. P15 is removed from the authorized scope and is not required for this delivery. S2-P16 has an implemented, opt-in characterization path; its automatic two-thread rollout is gate-failed for the current delivery because the focused evidence does not meet the speed gate and remote execution regresses. Production remains pinned to one thread.
+S2-P6, S2-P9, S2-P20, S2-P17, and S3-P15 are integrated. P15 is removed from the authorized scope and is not required for this delivery. S2-P16 has an implemented, opt-in characterization path; its automatic two-thread rollout is gate-failed for the current delivery because the focused evidence does not meet the speed gate and remote execution regresses. Production remains pinned to one thread.
 
 ---
 
@@ -92,6 +93,16 @@ The scenario/year loop row-binds a full 21-column household frame into `decomp_s
 - Fixed weighted baseline deciles, adverse-year selection, channel SE summaries, factor/bin behavior, scenario ordering, and empty-result behavior are unchanged under the contract tests.
 - Full package suite passed 2,644 assertions with 0 failures. Commit: `7766333` (`Compact future decomposition retention`).
 - Timing caveat: the isolated retention benchmark was slower (`0.009s` legacy vs `0.274s` compact median on 11 years x 50,000 rows); this is a memory-retention optimization, not a demonstrated elapsed-time optimization. Production end-to-end timing remains a follow-up.
+
+---
+
+### S3-P15 — Shared Per-Year Row Index
+
+`R/fct_aggregation_delta.R`, `R/fct_aggregation.R`, Step 3 Results and policy comparison consumers
+
+**Status:** Integrated through the W3-A shared aggregation path; no separate implementation is required.
+
+**Validation:** `aggregate_pipeline_per_year()` obtains a bounded preparation cache containing per-year row indices, validity masks, normalized weights, and residual vectors. `aggregate_pipeline_table()` creates one cache per aggregation operation and passes it to every model pipeline. Step 3 Results passes `ws$prep_cache` for historical and scenario results; policy comparison passes shared context and the same table helper for baseline and scenario consumers; baseline/policy central-kernel paths also use the shared per-year aggregator. Focused W3-A characterization, policy comparison/cache, policy central-kernel, and Step 2 payload contract suites passed. A 550,000-row, 11-year probe measured `2.04s` for 100 repeated direct year scans versus `0.465s` using the prepared row indices. The cache is bounded and shared across weighting arms/methods without caching method-specific `N x P` matrices.
 
 ---
 
@@ -206,7 +217,7 @@ These require a separate authorization decision. No implementation without expli
 | ID | Finding | Potential benefit | Blocked by |
 |---|---|---|---|
 | S3-P14 | Lazy paired policy pipelines | Potentially substantial retained-memory reduction for large baselines and many members; limited CPU benefit | Needs benchmark fixture and serialized-payload compatibility tests |
-| S3-P15 | Per-year row index | ~1.2x–2x for long panels; avoids O(N × years) logical scans per method | Overlaps shared Step 2/3 aggregation path — implement once for both |
+| S3-P15 | Per-year row index | ~1.2x–2x for long panels; avoids O(N × years) logical scans per method | Integrated through the bounded shared aggregation-preparation cache |
 | S3-P16 | Direct model/year lookup | Near-free to implement; prevents quadratic growth with more years/models | Overlaps shared aggregation path — implement once for both |
 | S3-P17 | Typed policy-diff pass | Moderate allocation reduction; removes duplicated comparison logic across policy construction, no-op detection, decomposition, and Diagnostics | Deferred; should replace S3-P2 caches, not coexist |
 | S3-P18 | Direct residual ID lookup | ~1.05x–1.2x isolated; compounds across aggregation methods | Overlaps shared aggregation path — implement once for both |
