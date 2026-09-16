@@ -213,7 +213,7 @@ policy_input_diagnostics <- function(baseline_svy, policy_svy, vars = NULL) {
 #'   \item Expected policy effect (signed change, baseline vs policy context, focus scenario)
 #'   \item Adverse 1-in-10 protection (1-in-20 and 1-in-50 tail effects)
 #'   \item Policy channels (level vs resilience breakdown)
-#'   \item Program scale & reach (budget and beneficiary counts)
+#'   \item Program scale & reach (population covered/affected by all implemented policies)
 #'   \item Policy robustness (model agreement & simulation scope)
 #' }
 #' @noRd
@@ -227,7 +227,8 @@ step3_headline_cards <- function(paired_summary,
                                  timeseries_curves = NULL,
                                  method = "mean",
                                  deviation = "none",
-                                 so = NULL) {
+                                 so = NULL,
+                                 baseline_svy = NULL) {
   if (is.null(paired_summary) || !nrow(paired_summary) ||
       !"scenario" %in% names(paired_summary)) {
     return(NULL)
@@ -358,22 +359,34 @@ step3_headline_cards <- function(paired_summary,
   )
 
   # 4. Program scale & reach
-  realized <- if (!is.null(policy_svy)) {
-    tryCatch(.sp_transfer_totals(policy_svy, "hh"), error = function(e) NULL)
-  } else NULL
+  # Units covered or affected by any implemented policy: social protection
+  # recipients plus units whose covariates another policy lever changed -
+  # the same union the Diagnostics tab's coverage table reports. Without a
+  # baseline frame, fall back to social-protection recipients only.
+  touched <- if (!is.null(policy_svy) && is.data.frame(policy_svy)) {
+    if (!is.null(baseline_svy) && is.data.frame(baseline_svy) &&
+        nrow(baseline_svy) == nrow(policy_svy)) {
+      tryCatch(policy_reach_mask(baseline_svy, policy_svy), error = function(e) NULL)
+    } else if (SP_TRANSFER_COL %in% names(policy_svy)) {
+      v <- suppressWarnings(as.numeric(policy_svy[[SP_TRANSFER_COL]]))
+      is.finite(v) & v > 0
+    } else {
+      NULL
+    }
+  } else {
+    NULL
+  }
 
   scale_val <- "Unavailable"
-  line1_4 <- "Population reached"
+  line1_4 <- "Population covered or affected"
 
-  if (!is.null(realized) && is.finite(realized$total) && realized$total > 0) {
+  if (!is.null(touched) && any(touched, na.rm = TRUE)) {
     w <- if ("weight" %in% names(policy_svy)) as.numeric(policy_svy$weight) else rep(1, nrow(policy_svy))
-    transfer <- as.numeric(policy_svy[[SP_TRANSFER_COL]])
     hhsize <- if ("hhsize" %in% names(policy_svy)) as.numeric(policy_svy$hhsize) else rep(1, nrow(policy_svy))
     hhsize[!is.finite(hhsize) | hhsize <= 0] <- 1
-    pop <- sum(w[is.finite(w) & is.finite(transfer) & transfer > 0] *
-               hhsize[is.finite(w) & is.finite(transfer) & transfer > 0])
-    scale_val <- if (is.finite(pop)) paste0(fmt_num(pop / 1e6, 1), "M") else "Unavailable"
-    line1_4 <- "Population reached"
+    ok <- touched & is.finite(w)
+    pop <- sum(w[ok] * hhsize[ok])
+    scale_val <- if (is.finite(pop) && pop > 0) paste0(fmt_num(pop / 1e6, 1), "M") else "Unavailable"
   }
 
   card4 <- list(
@@ -384,8 +397,10 @@ step3_headline_cards <- function(paired_summary,
       shiny::tags$div(line1_4)
     ),
     info = paste(
-      "Population reached is the weighted number of people receiving the policy,",
-      "using household size where applicable."
+      "Population covered or affected is the weighted number of people represented",
+      "by units touched by any implemented policy: social protection recipients plus",
+      "units whose covariates another policy lever changed. It matches the coverage",
+      "table on the Diagnostics tab, and uses household size where applicable."
     )
   )
 
@@ -1261,7 +1276,8 @@ make_step3_decision_table_html <- function(df, subheader = NULL, footnotes = NUL
       timeseries_curves = timeseries_curves_rv(),
       method            = input$cmp_agg_method %||% "mean",
       deviation         = input$cmp_deviation %||% "none",
-      so                = baseline_hist_sim()$so
+      so                = baseline_hist_sim()$so,
+      baseline_svy      = baseline_svy()
     )
   })
 

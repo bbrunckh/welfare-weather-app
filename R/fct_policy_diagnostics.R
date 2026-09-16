@@ -35,6 +35,42 @@ policy_treatment_matrix <- function(baseline_svy, policy_svy,
   }))
 }
 
+# Unit-level masks shared by the diagnostics coverage table and the Step 3
+# Results headline card, so "population represented" cannot drift between the
+# two surfaces.
+
+.policy_sp_mask <- function(policy_svy) {
+  if (SP_TRANSFER_COL %in% names(policy_svy))
+    is.finite(as.numeric(policy_svy[[SP_TRANSFER_COL]])) & as.numeric(policy_svy[[SP_TRANSFER_COL]]) > 0
+  else rep(FALSE, nrow(policy_svy))
+}
+
+.policy_other_mask <- function(baseline_svy, policy_svy, weight_col = "weight") {
+  changed <- detect_manipulated_vars(baseline_svy, policy_svy)
+  non_sp_vars <- setdiff(changed, c("welfare", SP_TRANSFER_COL, weight_col, "sim_year", "year"))
+  if (!length(non_sp_vars)) return(rep(FALSE, nrow(policy_svy)))
+  changed_mask <- function(v) {
+    b <- baseline_svy[[v]]; p <- policy_svy[[v]]
+    (!is.na(b) & !is.na(p) & b != p) | (is.na(b) != is.na(p))
+  }
+  Reduce("|", lapply(non_sp_vars, changed_mask))
+}
+
+#' Units touched by any implemented policy
+#'
+#' Logical mask over \code{policy_svy} rows: TRUE where the unit receives a
+#' positive social-protection transfer or has any covariate changed by another
+#' policy lever. The same union the Diagnostics tab's coverage table reports.
+#'
+#' @param baseline_svy Data frame before \code{apply_policy_to_svy()}.
+#' @param policy_svy   Data frame after \code{apply_policy_to_svy()}.
+#' @param weight_col   Weight column excluded from the covariate comparison.
+#' @return Logical vector of length \code{nrow(policy_svy)}.
+#' @keywords internal
+policy_reach_mask <- function(baseline_svy, policy_svy, weight_col = "weight") {
+  .policy_sp_mask(policy_svy) | .policy_other_mask(baseline_svy, policy_svy, weight_col)
+}
+
 policy_component_matrix <- function(baseline_svy, policy_svy,
                                     weight_col = "weight", analysis_unit = "hh",
                                     candidates = NULL) {
@@ -51,9 +87,7 @@ policy_component_matrix <- function(baseline_svy, policy_svy,
     b <- baseline_svy[[v]]; p <- policy_svy[[v]]
     (!is.na(b) & !is.na(p) & b != p) | (is.na(b) != is.na(p))
   }
-  sp_mask <- if (SP_TRANSFER_COL %in% names(policy_svy))
-    is.finite(as.numeric(policy_svy[[SP_TRANSFER_COL]])) & as.numeric(policy_svy[[SP_TRANSFER_COL]]) > 0
-  else rep(FALSE, nrow(policy_svy))
+  sp_mask <- .policy_sp_mask(policy_svy)
   other_mask <- if (length(non_sp_vars)) Reduce("|", lapply(non_sp_vars, changed_mask)) else rep(FALSE, nrow(policy_svy))
   rows <- list()
   add_row <- function(component, mask, cost = NA_real_) {

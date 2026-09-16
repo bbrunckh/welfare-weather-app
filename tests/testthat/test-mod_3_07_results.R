@@ -60,7 +60,7 @@ test_that("step3_headline_cards builds 5 concise policy cards", {
   # Card 4: Program scale & reach
   expect_identical(cards[[4]]$label, "Program scale & reach")
   expect_identical(cards[[4]]$value, "Unavailable")
-  expect_match(cards[[4]]$note, "Population reached", fixed = TRUE)
+  expect_match(cards[[4]]$note, "Population covered or affected", fixed = TRUE)
 
   # Card 5: Policy robustness
   expect_identical(cards[[5]]$label, "Policy robustness")
@@ -73,6 +73,55 @@ test_that("step3_headline_cards builds 5 concise policy cards", {
   expect_equal(nrow(df), 5L)
   expect_identical(df$label, c("Expected policy effect", "Adverse 1-in-20 year protection",
                                "Resilience effect", "Program scale & reach", "Policy robustness"))
+})
+
+test_that("Program scale & reach counts units affected by all implemented policies", {
+  paired_sum <- tibble::tibble(
+    scenario    = c("Historical", "SSP2-4.5 / 2030-2040"),
+    value       = c(0.00, 0.45),
+    intermod_lo = c(0.00, 0.32),
+    intermod_hi = c(0.00, 0.58),
+    n_models    = c(1L, 4L),
+    n_years     = c(30L, 30L)
+  )
+
+  base <- data.frame(
+    welfare = c(1.0, 2.0, 3.0, 4.0),
+    road_access = c(1, 1, 0, 0),
+    weight = c(100, 200, 300, 400),
+    hhsize = c(4, 3, 2, 1),
+    stringsAsFactors = FALSE
+  )
+  # Row 1: SP transfer only; row 2: infra lever only; row 3: both; row 4: untouched.
+  pol <- base
+  pol$.wiseapp_sp_transfer <- c(0.5, 0, 0.25, 0)
+  pol$road_access <- c(1, 0, 0, 0)
+
+  cards <- step3_headline_cards(
+    paired_summary = paired_sum,
+    policy_svy     = pol,
+    baseline_svy   = base
+  )
+
+  # Touched rows: 1, 2, 3 -> population = 100*4 + 200*3 + 300*2 = 1600
+  expect_identical(cards[[4]]$value, paste0(fmt_num(1600 / 1e6, 1), "M"))
+  expect_match(cards[[4]]$info, "another policy lever", fixed = TRUE)
+
+  # Without a baseline frame, falls back to SP recipients only (rows 1 and 3).
+  cards_sp <- step3_headline_cards(
+    paired_summary = paired_sum,
+    policy_svy     = pol
+  )
+  expect_identical(cards_sp[[4]]$value, paste0(fmt_num(1000 / 1e6, 1), "M"))
+
+  # No touched units at all -> Unavailable.
+  pol_none <- base
+  cards_none <- step3_headline_cards(
+    paired_summary = paired_sum,
+    policy_svy     = pol_none,
+    baseline_svy   = base
+  )
+  expect_identical(cards_none[[4]]$value, "Unavailable")
 })
 
 test_that("step3_adverse_dot_data and plot_step3_adverse_dot work correctly", {
