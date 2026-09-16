@@ -2082,7 +2082,9 @@ enhance_exceedance <- function(curves_tbl,
     fut_mod_df[fut_mod_df$source == "Policy", , drop = FALSE]
   else fut_mod_df[0, , drop = FALSE]
   hist_mean  <- if (nrow(hist_df) > 0L) mean(hist_df$central, na.rm = TRUE) else NA_real_
-  ann_y      <- if (max(agg_df$exceed_prob, na.rm = TRUE) <= 0.55) 0.48 else if (isTRUE(logit_x)) 0.97 else 0.95
+  # The mean-line label anchors at the low-probability (left) end of the
+  # reference line, where it sits clear of every curve.
+  mean_lbl_y <- min(agg_df$exceed_prob, na.rm = TRUE)
 
   # ---- Plot ---------------------------------------------------------------
   # Layer order (back to front): inter-model ribbon (future) -> coefficient
@@ -2191,13 +2193,13 @@ enhance_exceedance <- function(curves_tbl,
   if (is.finite(hist_mean)) {
     p <- p +
       ggplot2::geom_vline(
-        xintercept = hist_mean, linetype = "dotted",
-        colour = .wise_support, linewidth = 0.5
+        xintercept = hist_mean, linetype = "dashed",
+        colour = .wise_zero, linewidth = 0.5
       ) +
       ggplot2::annotate(
-        "text", x = hist_mean, y = ann_y,
-        label = "Hist. mean", hjust = 1.05, vjust = -0.4,
-        size = 3.2, colour = .wise_slate
+        "text", x = hist_mean, y = mean_lbl_y,
+        label = "Historical mean", hjust = 0, vjust = -0.6,
+        size = 3.9, colour = .wise_zero
       )
   }
   p <- p +
@@ -2237,9 +2239,9 @@ enhance_exceedance <- function(curves_tbl,
   }
   endpoint_rows <- dplyr::bind_rows(lapply(split(agg_df, agg_df$line_id), function(x) {
     x <- x[which.max(x$exceed_prob), , drop = FALSE]
-    x$curve_label <- if (has_source) {
-      paste(as.character(x$scenario_key), as.character(x$source), sep = " - ")
-    } else as.character(x$scenario_key)
+    # Labels carry the scenario name only; the series (baseline vs policy) is
+    # encoded by the endpoint marker and the one-time captions below.
+    x$curve_label <- as.character(x$scenario_key)
     # Label colour must match the colour the line is actually drawn in:
     # the policy line uses the vermillion accent override, everything else
     # keeps its scenario colour from the map.
@@ -2266,7 +2268,62 @@ enhance_exceedance <- function(curves_tbl,
       inherit.aes = FALSE
     )
   })
-  p <- p + label_layers +
+  p <- p + label_layers
+
+  # Endpoint markers on each future series: an open circle (baseline) and a
+  # filled vermillion circle (policy) at the right-hand end of the curve, so
+  # the pair reads like the adverse plot's dumbbells even where a scenario's
+  # SSP colour matches the policy accent (SSP5-8.5).
+  if (has_source) {
+    fut_end <- endpoint_rows[!endpoint_rows$is_historical, , drop = FALSE]
+    base_end <- fut_end[fut_end$source == "Baseline", , drop = FALSE]
+    pol_end  <- fut_end[fut_end$source == "Policy", , drop = FALSE]
+    if (nrow(base_end) > 0L) {
+      p <- p + ggplot2::geom_point(
+        data = base_end,
+        ggplot2::aes(x = .data$central, y = .data$exceed_prob,
+                     colour = .data$scenario_key),
+        shape = 21, fill = "white", stroke = 1.2, size = 3.0,
+        inherit.aes = FALSE, show.legend = FALSE, na.rm = TRUE
+      )
+    }
+    if (nrow(pol_end) > 0L) {
+      p <- p + ggplot2::geom_point(
+        data = pol_end,
+        ggplot2::aes(x = .data$central, y = .data$exceed_prob),
+        shape = 21, fill = .wise_policy, colour = .wise_policy_dark,
+        stroke = 1.1, size = 3.4,
+        inherit.aes = FALSE, show.legend = FALSE, na.rm = TRUE
+      )
+    }
+    # One-time Baseline/Policy captions on the topmost pair only, echoing the
+    # adverse plot's caption convention: the caption sits just outside its
+    # marker along the outcome axis.
+    if (nrow(pol_end) > 0L && nrow(base_end) > 0L) {
+      top_pol  <- pol_end[which.max(pol_end$central), , drop = FALSE]
+      top_base <- base_end[base_end$scenario_key == top_pol$scenario_key, ,
+                           drop = FALSE]
+      if (nrow(top_base) > 0L) {
+        x_span <- diff(range(agg_df$central, na.rm = TRUE))
+        cap_off <- if (is.finite(x_span) && x_span > 0) 0.035 * x_span else 0
+        cap_df <- rbind(
+          data.frame(x = top_pol$central, y = top_pol$exceed_prob,
+                     off = cap_off, label = "Policy", col = .wise_policy_dark),
+          data.frame(x = top_base$central, y = top_base$exceed_prob,
+                     off = -cap_off, label = "Baseline", col = .wise_slate)
+        )
+        p <- p + ggplot2::geom_text(
+          data = cap_df,
+          ggplot2::aes(x = .data$x + .data$off, y = .data$y,
+                       label = .data$label),
+          colour = cap_df$col, hjust = 0.5, size = 3.9, fontface = "bold",
+          inherit.aes = FALSE, show.legend = FALSE, na.rm = TRUE
+        )
+      }
+    }
+  }
+
+  p <- p +
     ggplot2::labs(
       x = x_label,
       y = if (max(agg_df$exceed_prob, na.rm = TRUE) <= 0.55) "Annual adverse exceedance probability (AEP)" else "Annual exceedance probability"
@@ -2277,7 +2334,9 @@ enhance_exceedance <- function(curves_tbl,
     ) +
     ggplot2::coord_flip()
 
-  # ---- Return period lines -----------------------
+  # ---- Probability axis scaling ------------------------------------------
+  # Return-period guides are carried by the axis ticks alone; the redundant
+  # in-panel dashed guide lines and their floating labels were removed.
   is_adverse_tail <- max(agg_df$exceed_prob, na.rm = TRUE) <= 0.55
   support_years <- if (!is.null(n_sim_years) && is.finite(n_sim_years)) {
     max(2L, floor(n_sim_years))
@@ -2289,36 +2348,10 @@ enhance_exceedance <- function(curves_tbl,
     denom <- suppressWarnings(as.numeric(sub(".*:", "", names(x))))
     x[is.na(denom) | denom <= support_years]
   }
-  if (isTRUE(return_period)) {
-    min_prob <- max(min(agg_df$exceed_prob, na.rm = TRUE), 0.005)
-    rp_all <- if (is_adverse_tail) {
-      rp_adv <- c("1:2" = 0.50, RP_LOW)
-      rp_adv <- supported_rp(rp_adv)
-      rp_adv[rp_adv >= min_prob * 0.85]
-    } else {
-      supported_rp(c(RP_LOW, RP_HIGH))
-    }
-    for (nm in names(rp_all)) {
-      prob      <- rp_all[nm]
-      reliable  <- is.null(n_sim_years) ||
-        (!(nm == "1:20" && n_sim_years < 20) &&
-         !(nm == "1:50" && n_sim_years < 50))
-      if (!reliable) next
-      rp_label  <- nm
-      label_col <- .wise_slate
-      p <- p +
-        ggplot2::geom_hline(
-          yintercept = prob, linetype = "dashed",
-          colour = .wise_zero, linewidth = 0.3
-        ) +
-        ggplot2::annotate(
-          "text", x = -Inf, y = prob, label = rp_label,
-          hjust = -0.1, vjust = -0.3, size = 3.2, colour = label_col
-        )
-    }
+  rp_tick_label <- function(nm, prob) {
+    paste0(sub(":", " in ", nm), "\n(",
+           scales::percent(prob, accuracy = 1), ")")
   }
-
-  # ---- Probability axis scaling ------------------------------------------
   if (is_adverse_tail) {
     # Adverse tail: log scale covering only periods supported by the
     # available simulated years. Do not imply a 1-in-50 estimate from 30 years.
@@ -2326,7 +2359,8 @@ enhance_exceedance <- function(curves_tbl,
     log_rp <- supported_rp(log_rp)
     log_rp <- log_rp[order(log_rp, decreasing = TRUE)]
     log_breaks <- unname(log_rp)
-    log_labels <- paste0(names(log_rp), " (", scales::percent(log_rp, accuracy = 1), ")")
+    log_labels <- mapply(rp_tick_label, names(log_rp), unname(log_rp),
+                         USE.NAMES = FALSE)
     min_prob <- max(min(agg_df$exceed_prob, na.rm = TRUE), 0.005)
     keep_b <- log_breaks >= min_prob * 0.9
     low_lim <- min(min_prob * 0.9, min(log_breaks[keep_b]) * 0.9)
@@ -2337,23 +2371,29 @@ enhance_exceedance <- function(curves_tbl,
       limits = c(low_lim, 0.55),
       # Right-hand gutter so the endpoint series labels sit clear of the
       # curves while remaining inside the plot window.
-      expand = ggplot2::expansion(mult = c(0.02, 0.30))
+      expand = ggplot2::expansion(mult = c(0.02, 0.22))
     )
   } else if (isTRUE(logit_x)) {
     rp_low <- supported_rp(RP_LOW)
     rp_high <- supported_rp(RP_HIGH)
     logit_breaks <- c(unname(rp_low), 0.50, rev(1 - unname(rp_high)))
-    logit_labels <- c(names(rp_low), "Median", rev(names(rp_high)))
+    # Label each tick from its own exceedance probability ("1 in 10 (10%)"),
+    # so complementary-period breaks read in the same convention.
+    logit_labels <- ifelse(
+      logit_breaks == 0.5, "Median",
+      paste0("1 in ", format(round(1 / logit_breaks)), "\n(",
+             scales::percent(logit_breaks, accuracy = 1), ")")
+    )
     p <- p + ggplot2::scale_y_continuous(
       trans  = scales::logit_trans(),
       breaks = logit_breaks,
       labels = logit_labels,
       limits = c(0.005, 0.995),
-      expand = ggplot2::expansion(mult = c(0.02, 0.30))
+      expand = ggplot2::expansion(mult = c(0.02, 0.22))
     )
   } else {
     p <- p + ggplot2::scale_y_continuous(
-      expand = ggplot2::expansion(mult = c(0.02, 0.30))
+      expand = ggplot2::expansion(mult = c(0.02, 0.22))
     )
   }
   p

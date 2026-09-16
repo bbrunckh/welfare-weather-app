@@ -367,7 +367,7 @@ mod_2_02_results_server <- function(id,
     output$stale_banner <- renderUI({
       if (isTRUE(stale())) .stale_banner(
         "Step 2 simulation results",
-        note = "Interpretation and exports are disabled until then."
+        note = NULL
       ) else NULL
     })
 
@@ -1742,7 +1742,11 @@ mod_2_02_results_server <- function(id,
         }
         enhance_exceedance(
           curves_tbl      = curves,
-          x_label         = ah$x_label,
+          x_label         = metric_axis_label(
+            input$cmp_agg_method %||% "mean",
+            hist_sim()$so,
+            input$cmp_deviation %||% "none"
+          ),
           return_period   = TRUE,
           n_sim_years     = nrow(ah$out),
           logit_x         = TRUE,
@@ -1767,7 +1771,11 @@ mod_2_02_results_server <- function(id,
       }
       enhance_exceedance(
         curves_tbl      = exceedance_curves_rv(),
-        x_label         = agg_hist()$x_label,
+        x_label         = metric_axis_label(
+          input$cmp_agg_method %||% "mean",
+          hist_sim()$so,
+          input$cmp_deviation %||% "none"
+        ),
         return_period   = TRUE,
         n_sim_years     = nrow(agg_hist()$out),
         logit_x         = TRUE,

@@ -1297,7 +1297,7 @@ make_step3_decision_table_html <- function(df, subheader = NULL, footnotes = NUL
   output$stale_banner_ui <- shiny::renderUI({
     if (isTRUE(stale())) .stale_banner(
       "Step 3 policy results",
-      note = "Interpretation and exports are disabled until then."
+      note = NULL
     ) else NULL
   })
 
@@ -1466,13 +1466,8 @@ make_step3_decision_table_html <- function(df, subheader = NULL, footnotes = NUL
     invisible(value)
   }
 
-  agg_axis_label <- reactive({
-    method    <- input$cmp_agg_method %||% "mean"
-    deviation <- input$cmp_deviation  %||% "none"
-    if (identical(deviation, "none")) label_agg_method(method)
-    else paste0(label_agg_method(method), " \u2014 ",
-                label_deviation(deviation))
-  })
+  # The exceedance chart's outcome-axis label now comes from
+  # metric_axis_label() at each call site, matching the other charts.
 
   # Helper: aggregate hist_sim into Mod 2's rich list-col schema
   # (one row per sim_year, list-cols value_all / value_all_sd / model_id,
@@ -2326,7 +2321,11 @@ make_step3_decision_table_html <- function(df, subheader = NULL, footnotes = NUL
       }
       enhance_exceedance(
         curves_tbl = curves,
-        x_label = agg_axis_label(),
+        x_label = metric_axis_label(
+          input$cmp_agg_method %||% "mean",
+          baseline_hist_sim()$so,
+          input$cmp_deviation %||% "none"
+        ),
         return_period = TRUE,
         n_sim_years = nrow(ah$out),
         logit_x = TRUE,
@@ -2351,7 +2350,11 @@ make_step3_decision_table_html <- function(df, subheader = NULL, footnotes = NUL
     }
     enhance_exceedance(
       curves_tbl      = exceedance_curves_rv(),
-      x_label         = agg_axis_label(),
+      x_label         = metric_axis_label(
+        input$cmp_agg_method %||% "mean",
+        baseline_hist_sim()$so,
+        input$cmp_deviation %||% "none"
+      ),
       return_period   = TRUE,
       n_sim_years     = nrow(baseline_agg_hist()$out),
       logit_x         = TRUE,
