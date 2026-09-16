@@ -53,7 +53,15 @@ decomposition_group_candidates <- function(svy, variable_list = NULL,
         grepl("(^|_)(id|weight|wgt|hhweight|pw|code|year)$|timestamp",
               name, ignore.case = TRUE)) return(NULL)
     values <- svy[[name]]
-    if (!(is.logical(values) || is.factor(values))) return(NULL)
+    declared_type <- if ("type" %in% names(variable_list)) {
+      tolower(trimws(as.character(variable_list$type[[i]] %||% "")))
+    } else ""
+    semantic_categorical <- declared_type %in% c(
+      "logical", "factor", "categorical", "category", "binary", "character"
+    )
+    storage_categorical <- is.logical(values) || is.factor(values) ||
+      is.character(values)
+    if (!storage_categorical && !semantic_categorical) return(NULL)
     labels <- decomposition_group_labels(values)
     observed <- unique(labels[labels != "Missing"])
     if (length(observed) < 2L || length(observed) > 10L) return(NULL)
@@ -79,9 +87,14 @@ decomposition_group_labels <- function(values) {
 
 decomposition_group_levels <- function(values) {
   if (is.factor(values)) {
-    return(c(levels(values), if (any(is.na(values)) || any(!nzchar(as.character(values)))) "Missing"))
+    chars <- as.character(values)
+    return(c(levels(values), if (any(is.na(chars) | !nzchar(chars))) "Missing"))
   }
-  if (is.logical(values)) return(c("No", "Yes", if (any(is.na(values))) "Missing"))
+  if (is.logical(values)) return(c("No", "Yes", if (anyNA(values)) "Missing"))
+  if (is.character(values)) {
+    return(c(unique(values[!is.na(values) & nzchar(values)]),
+             if (any(is.na(values) | !nzchar(values))) "Missing"))
+  }
   character(0)
 }
 

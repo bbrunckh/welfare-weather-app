@@ -574,11 +574,14 @@ mod_3_09_decomposition_server <- function(id,
       choices <- if (nrow(candidates)) {
         stats::setNames(candidates$name, candidates$label)
       } else c("No eligible categorical characteristics" = "")
+      current <- isolate(input$decomp_group_var)
+      selected <- if (nrow(candidates) && current %in% candidates$name) {
+        current
+      } else if (nrow(candidates)) candidates$name[[1L]] else ""
       shiny::selectizeInput(
         ns("decomp_group_var"), label = "Population characteristic",
         choices = choices,
-        selected = isolate(input$decomp_group_var) %||%
-          if (nrow(candidates)) candidates$name[[1L]] else "",
+        selected = selected,
         options = list(
           placeholder = "Select a population characteristic",
           allowEmptyOption = FALSE,
