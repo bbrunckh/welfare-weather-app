@@ -684,14 +684,15 @@ plot_step3_adverse_dot <- function(tbl, x_label = "Outcome level",
       colour = .wise_policy, alpha = 0.40, linewidth = 2.4,
       lineend = "round", na.rm = TRUE
     ) +
-    # Baseline -> policy connector: solid with an arrowhead for every
-    # scenario, so the policy direction reads at a glance.
+    # Baseline -> policy connector: solid, in the scenario colour, with a
+    # large open arrowhead so the policy direction reads at a glance.
     ggplot2::geom_segment(
       ggplot2::aes(x = .data$baseline_val, xend = .data$policy_val,
-                   yend = .data$rp_y + .data$dodge_offset),
-      colour = .wise_slate, linewidth = 0.9,
-      arrow = ggplot2::arrow(length = ggplot2::unit(7, "pt"), type = "closed"),
-      na.rm = TRUE
+                   yend = .data$rp_y + .data$dodge_offset,
+                   colour = .data$scenario_key),
+      linewidth = 1.0, lineend = "round",
+      arrow = ggplot2::arrow(length = ggplot2::unit(10, "pt"), type = "open"),
+      na.rm = TRUE, show.legend = FALSE
     ) +
     # Baseline point: open marker in the scenario colour.
     ggplot2::geom_point(
