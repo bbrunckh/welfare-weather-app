@@ -1,4 +1,4 @@
-# wiseapp 0.1.0
+# wiseapp 0.2.0
 
 ## Unreleased — 2026-09-03
 
@@ -65,4 +65,3 @@
   builders (`test-fct_hexmap.R`, `test-fct-outcome-weather-payloads.R`).
 - Payload benchmark harness (`dev/archive/bench_maps.R`) with recorded
   results at 1k/10k/50k cells.
-
