@@ -611,7 +611,8 @@ plot_step3_adverse_dot <- function(tbl, x_label = "Outcome level",
   # Vertical dodge: multiple scenarios share each return-period row, so
   # offset the dumbbells per scenario to keep them readable. Historical
   # keeps the lower slot; each future scenario takes its own slot above it.
-  dodge_width <- 0.42
+  # Wide multi-SSP runs need generous slot spacing to avoid crowding.
+  dodge_width <- 0.6
   tbl$rp_y <- as.integer(tbl$rp_label)
   tbl$dodge_offset <- stats::ave(
     seq_len(nrow(tbl)),
@@ -1137,7 +1138,7 @@ make_step3_decision_table_html <- function(df, subheader = NULL, footnotes = NUL
       shiny::tags$p(
         class = "text-muted small",
          style = "margin-top: 18px; margin-bottom: 0;",
-         "Each dot is one simulated weather-year annual aggregate for the fixed population. The selected violin or boxplot summarizes the distribution; dodged pairs contrast baseline (muted) with policy (highlighted), and diamonds mark scenario means."
+         "Each dot is one simulated weather-year annual aggregate for the fixed population. The selected violin or boxplot summarizes the distribution; dodged pairs contrast baseline (muted, upper) with policy (highlighted, lower), and circle markers mark series means."
       )
     ),
 

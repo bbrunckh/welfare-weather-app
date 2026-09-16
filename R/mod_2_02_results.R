@@ -136,7 +136,7 @@ mod_2_02_results_ui <- function(id) {
           "climate regime."
         ),
         shiny::p(
-          "The dashed horizontal line marks the historical baseline mean. The white diamond",
+          "The dashed vertical line marks the historical baseline mean. The white circle",
           "shows the central expected outcome."
         ),
         docs = TRUE
@@ -163,7 +163,7 @@ mod_2_02_results_ui <- function(id) {
        shiny::tags$p(
          class = "text-muted small",
          style = "margin-top: 18px; margin-bottom: 0;",
-         "Each dot is one simulated weather-year annual aggregate for the fixed baseline population. The selected violin or boxplot summarizes the distribution; diamonds show scenario means. This captures weather-year variability, not household inequality."
+         "Each dot is one simulated weather-year annual aggregate for the fixed baseline population. The selected violin or boxplot summarizes the distribution; open circles mark scenario means. This captures weather-year variability, not household inequality."
       )
     ),
 

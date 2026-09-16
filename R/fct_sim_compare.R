@@ -725,7 +725,9 @@ plot_annual_distribution <- function(tbl, x_label = "Outcome (outcome units)",
       ggplot2::geom_point(
         ggplot2::aes(y = .data$row_y + .data$y_off,
                      colour = .data$scenario_key, alpha = .data$source),
-        position = ggplot2::position_jitter(width = 0.06, height = 0.07),
+        # Jitter within the row only - never along the value axis, or the
+        # dots would smear past their true outcome values.
+        position = ggplot2::position_jitter(width = 0, height = 0.07),
         size = 1.0, na.rm = TRUE
       ) +
       ggplot2::geom_point(
@@ -759,9 +761,9 @@ plot_annual_distribution <- function(tbl, x_label = "Outcome (outcome units)",
     }
 
     dot_jitter <- if (identical(plot_type, "violin")) {
-      ggplot2::position_jitter(width = 0.08, height = 0.18)
+      ggplot2::position_jitter(width = 0, height = 0.18)
     } else {
-      ggplot2::position_jitter(width = 0.08, height = 0.26)
+      ggplot2::position_jitter(width = 0, height = 0.26)
     }
     dot_alpha <- if (identical(plot_type, "violin")) 0.40 else 0.30
 
@@ -958,7 +960,8 @@ plot_step2_adverse_dot <- function(tbl, x_label = "Outcome level",
   # Vertical dodge: multiple scenarios share each return-period row, so
   # offset the markers per scenario to keep them readable. Historical
   # keeps the lower slot; each future scenario takes its own slot above it.
-  dodge_width <- 0.42
+  # Wide multi-SSP runs need generous slot spacing to avoid crowding.
+  dodge_width <- 0.6
   tbl$rp_y <- as.integer(tbl$rp_label)
   tbl$dodge_offset <- stats::ave(
     seq_len(nrow(tbl)),
