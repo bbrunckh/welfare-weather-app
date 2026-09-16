@@ -616,37 +616,28 @@ plot_annual_distribution <- function(tbl, x_label = "Outcome (outcome units)",
   }
   df$scenario_key <- factor(df$scenario, levels = scenario_levels)
 
-  hist_mean <- if (any(df$scenario == "Historical")) {
-    mean(df$value[df$scenario == "Historical"], na.rm = TRUE)
-  } else NA_real_
-
   has_source <- "source" %in% names(df) && length(unique(df$source)) > 1L
   plot_type <- match.arg(plot_type, c("violin", "boxplot"))
 
+  # Reference line: the historical *baseline* mean. With both sources
+  # present, pooling them would average baseline and policy outcomes.
+  hist_vals <- if (has_source) {
+    h <- df$value[df$scenario == "Historical" & df$source == "Baseline"]
+    if (!length(h)) df$value[df$scenario == "Historical"] else h
+  } else {
+    df$value[df$scenario == "Historical"]
+  }
+  hist_mean <- if (length(hist_vals)) mean(hist_vals, na.rm = TRUE) else NA_real_
+
   # Horizontal Design-B/D layout: one row per scenario on a numeric y (so the
-  # row banding and right-edge n captions line up), Historical on top, and a
-  # single shared outcome axis. The Violin/Boxplot toggle picks the row
-  # rendering: full violins over dots (Design B) or slim boxes over faded
-  # dots (Design D).
+  # row banding lines up), Historical on top, and a single shared outcome
+  # axis. The Violin/Boxplot toggle picks the row rendering: full violins
+  # over dots (Design B) or slim boxes over faded dots (Design D).
   n_rows <- length(scenario_levels)
   df$row_y <- n_rows + 1L - as.integer(df$scenario_key)
 
   x_span <- diff(range(df$value, na.rm = TRUE))
   lab_gap <- if (is.finite(x_span) && x_span > 0) 0.015 * x_span else 0
-
-  # One draw-count caption per scenario row, anchored just past the row's
-  # right-most draw so it never collides with the distribution.
-  n_df <- do.call(rbind, lapply(scenario_levels, function(s) {
-    vals <- df$value[df$scenario == s]
-    vals <- vals[is.finite(vals)]
-    if (!length(vals)) return(NULL)
-    data.frame(
-      scenario_key = factor(s, levels = scenario_levels),
-      row_y = n_rows + 1L - which(scenario_levels == s),
-      n = length(vals),
-      lab_x = max(vals) + lab_gap
-    )
-  }))
 
   y_breaks <- sort(unique(df$row_y))
   # Rows count top-down from n_rows, so break value b maps back to level
@@ -684,9 +675,26 @@ plot_annual_distribution <- function(tbl, x_label = "Outcome (outcome units)",
                           colour = .wise_zero, linewidth = 0.5) +
       ggplot2::annotate(
         "text", x = hist_mean, y = n_rows + 0.45, label = "Historical mean",
-        hjust = 0, vjust = 0.5, size = 3, colour = .wise_zero
+        hjust = 0, vjust = 0.5, size = 3.9, colour = .wise_zero
       )
   }
+
+  # One-time Baseline/Policy captions on the top row, like the adverse
+  # dumbbells: each anchored just past the right-most draw of its series.
+  if (has_source) {
+    top_scen <- scenario_levels[[1L]]
+    top_row_y <- n_rows
+    cap_df <- do.call(rbind, lapply(names(src_off), function(src) {
+      vals <- df$value[df$scenario == top_scen & df$source == src]
+      vals <- vals[is.finite(vals)]
+      if (!length(vals)) return(NULL)
+      data.frame(
+        lab_x = max(vals) + lab_gap,
+        y = top_row_y + unname(src_off[[src]]),
+        label = src
+      )
+    }))
+  } else cap_df <- NULL
 
   if (has_source) {
 
@@ -769,19 +777,12 @@ plot_annual_distribution <- function(tbl, x_label = "Outcome (outcome units)",
       ggplot2::geom_point(
         data = mean_df,
         ggplot2::aes(x = .data$value, y = .data$row_y),
-        shape = 23, size = 2.8, fill = "white", colour = .wise_slate,
+        shape = 21, size = 3.0, fill = "white", colour = .wise_slate,
         stroke = 1.0, na.rm = TRUE
       )
   }
 
   p <- p +
-    ggplot2::geom_text(
-      data = n_df,
-      ggplot2::aes(x = .data$lab_x, y = .data$row_y,
-                   label = paste0("n = ", .data$n)),
-      hjust = 0, size = 3, colour = .wise_slate, inherit.aes = FALSE,
-      show.legend = FALSE, na.rm = TRUE
-    ) +
     ggplot2::scale_fill_manual(values = scenario_palette,
                                na.value = .wise_history, guide = "none") +
     ggplot2::scale_colour_manual(values = scenario_palette,
@@ -791,11 +792,22 @@ plot_annual_distribution <- function(tbl, x_label = "Outcome (outcome units)",
       expand = ggplot2::expansion(add = c(0.6, 0.6))
     ) +
     ggplot2::scale_x_continuous(
-      expand = ggplot2::expansion(mult = c(0.02, 0.10))
+      # Reserve right-hand room for the one-time Baseline/Policy captions.
+      expand = ggplot2::expansion(mult = c(0.02, if (has_source) 0.12 else 0.02))
     ) +
     ggplot2::labs(x = x_label, y = NULL, title = title, subtitle = subtitle) +
     theme_wise() +
     ggplot2::theme(legend.position = "none")
+
+  if (!is.null(cap_df)) {
+    p <- p + ggplot2::geom_text(
+      data = cap_df,
+      ggplot2::aes(x = .data$lab_x, y = .data$y, label = .data$label),
+      hjust = 0, size = 3.9, fontface = "bold",
+      colour = c(.wise_slate, .wise_policy_dark), inherit.aes = FALSE,
+      show.legend = FALSE, na.rm = TRUE
+    )
+  }
   p
 }
 
