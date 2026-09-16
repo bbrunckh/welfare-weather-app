@@ -1270,6 +1270,12 @@ test_that("materialized multi-period future deltas preserve each period", {
   # Output timestamps are the survey dates; the future-period window selects
   # the projection source, not the returned survey timestamp.
   expect_gt(nrow(both[[second_key]]), 0L)
+
+  leftovers <- DBI::dbGetQuery(
+    .duck_con(),
+    "SELECT table_name FROM information_schema.tables WHERE table_name LIKE 'lw_%'"
+  )$table_name
+  expect_false(any(grepl("^lw_", leftovers)))
 })
 
 test_that("SSP perturbation with equal-frequency bins is deterministic", {

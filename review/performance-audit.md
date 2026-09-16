@@ -26,7 +26,7 @@
 | **3** | **S2-P20** | **Shared RIF design and FE indexing** | **Integrated** |
 | **3** | **S3-P15** | **Shared per-year row indexing through aggregation preparation cache** | **Integrated** |
 
-S2-P6, S2-P9, S2-P20, S2-P17, and S3-P15 are integrated. P15 is removed from the authorized scope and is not required for this delivery. S2-P16 has an implemented, opt-in characterization path; its automatic two-thread rollout is gate-failed for the current delivery because the focused evidence does not meet the speed gate and remote execution regresses. Production remains pinned to one thread.
+S2-P6, S2-P9, S2-P20, S2-P17, S2-P19, and S3-P15 are integrated. P15 is removed from the authorized scope and is not required for this delivery. S2-P16 has an implemented, opt-in characterization path; its automatic two-thread rollout is gate-failed for the current delivery because the focused evidence does not meet the speed gate and remote execution regresses. Production remains pinned to one thread.
 
 ---
 
@@ -171,6 +171,16 @@ P15 — Stable Weather Map Surfaces — is removed from the authorized scope. It
 
 **Validation results:** Multi-period weather tests and the full package suite passed. Historical location-month weather and each SSP's complete period-tagged location-month delta relation are materialized once, with per-period intermediates cleaned up after collection. A controlled Colombia parquet experiment reduced repeated three-period spatial aggregation from `0.826s` to `0.315s` at one thread (`2.62x`), `0.484s` to `0.218s` at two threads (`2.22x`), and `0.366s` to `0.193s` at four threads (`1.90x`). The remote Databricks Colombia 2018 two-period app path returned `47/47` exact output matches and no remaining `lw_*` temporary tables; cold uncached elapsed time was `72.14s` legacy versus `69.52s` materialized (`1.04x`). Remote I/O dominates the end-to-end path, so the larger isolated gain does not transfer directly to wall time.
 
+### S2-P19 — Fused Future-Model Completeness Filter
+
+`R/fct_get_weather.R`
+
+**Status:** Integrated in the current implementation.
+
+**Change:** Materialize each SSP's complete location-level delta relation once immediately before completeness evaluation. Run the complete-model scan against that bounded temporary relation, then reuse it for complete-model and period filtering. Unique SSP-scoped temporary names are registered in the existing cleanup ledger and removed after the SSP completes; the `on.exit()` ledger remains the failure backstop.
+
+**Validation:** Focused weather tests and the full package suite passed. Multi-period parity, incomplete-model handling, fast/bounded collection, and no-leftover-`lw_*` cleanup passed. Local Colombia one-variable probes measured current versus materialized elapsed times of `3.177s` versus `2.400s` for 1 SSP/1 period, `6.405s` versus `4.785s` for 1 SSP/3 periods, `5.028s` versus `3.651s` for 2 SSPs/1 period, and `12.584s` versus `8.858s` for 2 SSPs/3 periods; output digests and row counts matched in every completed comparison. The actual implementation measured `2.005s` for 1 period and `4.730s` for 3 periods on the same local workload. A Databricks Colombia 2018 one-SSP/one-period probe measured `70.96s` before versus `65.0s` after (`8.4%`), with exact `24`-output/`200,736`-row parity; the actual implementation measured `65.92s`. Post-run RSS was higher in the remote materialized probe (`1,030 MB` versus `909 MB`), but these are not peak measurements; external peak-RSS characterization remains a follow-up gate.
+
 ### S2-P16 — Bounded DuckDB Thread Scaling
 
 `R/fct_get_weather.R`
@@ -209,7 +219,6 @@ These require a separate authorization decision. No implementation without expli
 | S2-P15 | Key-level parallelism | Wall-clock reduction when prediction dominates; may be net loss from serialization overhead and duplicated model/survey memory | Deferred until post-Sets 2A/2B RSS is known |
 | S2-P17 | Materialized location-month weather | Potentially high for 3-SSP/3-period runs (spatial aggregation paid once); memory impact ambiguous — depends on temporary-table lifetime | Needs query-plan comparison and RSS measurement |
 | S2-P18 | Shared historical weight denominators | Moderate with many weather variables; low with one or two; DuckDB may already eliminate repeated expressions | Needs plan inspection and complete-case verification |
-| S2-P19 | Fused future-model completeness filter | Moderate-to-high if the query plan executes the H3/delta relation twice | Needs query-plan confirmation |
 | S2-P20 | Shared RIF design and FE indexing | Potentially high CPU reduction for fixed-effect RIF; point-prediction and loading-reuse variants need separate benchmarks due to peak-RSS trade-off | Needs production RIF benchmark |
 
 ### Step 3

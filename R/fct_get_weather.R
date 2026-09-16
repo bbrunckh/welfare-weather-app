@@ -1302,6 +1302,18 @@ get_weather <- function(
         dplyr::group_by(period_id, model, code, year, survname, loc_id, month) |>
         .pop_weighted_mean(delta_vars)
 
+      # Materialise the complete location-level delta relation before the
+      # completeness scan. Both the scan and the per-period filtered queries
+      # consume this relation; leaving it lazy would repeat the expensive H3
+      # join and population-weighted aggregation.
+      tmp_delta_all_name <- basename(tempfile(pattern = "lw_delta_all_"))
+      tmp_tables <<- c(tmp_tables, tmp_delta_all_name)
+      loc_deltas_all <- dplyr::compute(
+        loc_deltas_all,
+        name = tmp_delta_all_name,
+        temporary = TRUE
+      )
+
       complete_model_tbl <- loc_deltas_all |>
         dplyr::group_by(period_id, model) |>
         dplyr::summarise(
@@ -1327,13 +1339,6 @@ get_weather <- function(
       }, character(1L))
       loc_deltas_complete <- loc_deltas_all |>
         dplyr::filter(!!dbplyr::sql(paste(complete_predicates, collapse = " OR ")))
-      tmp_delta_all_name <- basename(tempfile(pattern = "lw_delta_all_"))
-      tmp_tables <<- c(tmp_tables, tmp_delta_all_name)
-      loc_deltas_complete <- dplyr::compute(
-        loc_deltas_complete,
-        name = tmp_delta_all_name,
-        temporary = TRUE
-      )
 
       # -- Loop over future periods ------------------------------------------
       out <- list()
