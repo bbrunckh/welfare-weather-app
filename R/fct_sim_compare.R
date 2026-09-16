@@ -2062,8 +2062,8 @@ enhance_exceedance <- function(curves_tbl,
   agg_df$yr_lbl  <- factor(agg_df$yr_lbl, levels = c("Historical", fut_yr_labels))
   if (has_source) {
     agg_df$source <- factor(agg_df$source, levels = c("Baseline", "Policy"))
-    # Baseline ribbons take the scenario colour; policy ribbons take the
-    # policy vermillion, matching each band to the series it belongs to.
+    # All ribbons take the scenario colour; the series distinction lives in
+    # the endpoint markers and one-time captions only.
     ribbon_palette <- scenario_colour_map
     agg_df$ribbon_key <- as.character(agg_df$scenario_key)
     agg_df$line_key <- as.character(agg_df$scenario_key)
@@ -2084,17 +2084,7 @@ enhance_exceedance <- function(curves_tbl,
   # ---- Plot ---------------------------------------------------------------
   # Layer order (back to front): inter-model ribbon (future) -> coefficient
   # band (optional) -> ensemble median curves.
-  p <- if (has_source) ggplot2::ggplot(
-    agg_df,
-    ggplot2::aes(
-      x        = .data$central,
-      y        = .data$exceed_prob,
-      colour   = .data$line_key,
-      linetype = .data$scenario_key,
-      linewidth = if (has_source) .data$source else NULL,
-      group    = .data$line_id
-    )
-  ) else ggplot2::ggplot(
+  p <- ggplot2::ggplot(
     agg_df,
     ggplot2::aes(
       x        = .data$central,
@@ -2106,9 +2096,10 @@ enhance_exceedance <- function(curves_tbl,
   )
 
   # Inter-model ribbons for each future series. Baseline and policy are both
-  # simulated across climate models, so each has its own spread. Bands take
-  # the colour of the series they belong to - the scenario colour for
-  # baselines and the policy vermillion for policy - as in the adverse plot.
+  # simulated across climate models, so each has its own spread. Every band
+  # takes its scenario's colour, matching its median line; the series
+  # (baseline vs policy) is distinguished only by the endpoint markers and
+  # the one-time captions.
   show_ens_ribbon <- !is.null(ensemble_band_q) &&
     (ensemble_band_q[["hi"]] > ensemble_band_q[["lo"]])
   if (nrow(fut_mod_df) > 0L && isTRUE(show_ens_ribbon)) {
@@ -2121,16 +2112,11 @@ enhance_exceedance <- function(curves_tbl,
       p <- p +
         ggplot2::geom_ribbon(
           data = fut_baseline_df, mapping = ribbon_aes,
-          alpha = 0.10, inherit.aes = FALSE
+          alpha = 0.12, inherit.aes = FALSE
         ) +
         ggplot2::geom_ribbon(
-          data = fut_policy_df,
-          mapping = ggplot2::aes(
-            y = .data$exceed_prob, xmin = .data$intermod_lo,
-            xmax = .data$intermod_hi, fill = I(.wise_policy),
-            group = .data$line_id
-          ),
-          alpha = 0.18, inherit.aes = FALSE
+          data = fut_policy_df, mapping = ribbon_aes,
+          alpha = 0.12, inherit.aes = FALSE
         )
     } else {
       p <- p + ggplot2::geom_ribbon(
@@ -2145,24 +2131,14 @@ enhance_exceedance <- function(curves_tbl,
   # of whether it falls inside or outside the inter-model ribbon.
   if (!is.null(band_q) && any(!is.na(agg_df$coef_lo))) {
     coef_df <- agg_df[!is.na(agg_df$coef_lo), , drop = FALSE]
-    coef_aes_lo <- if (has_source)
-      ggplot2::aes(x = .data$coef_lo, y = .data$exceed_prob,
-                   colour = .data$line_key, linetype = .data$scenario_key,
-                   linewidth = .data$source,
-                   group  = .data$line_id)
-    else
-      ggplot2::aes(x = .data$coef_lo, y = .data$exceed_prob,
-                   colour = .data$line_key, linetype = .data$scenario_key,
-                   group = .data$line_id)
-    coef_aes_hi <- if (has_source)
-      ggplot2::aes(x = .data$coef_hi, y = .data$exceed_prob,
-                   colour = .data$line_key, linetype = .data$scenario_key,
-                   linewidth = .data$source,
-                   group  = .data$line_id)
-    else
-      ggplot2::aes(x = .data$coef_hi, y = .data$exceed_prob,
-                   colour = .data$line_key, linetype = .data$scenario_key,
-                   group = .data$line_id)
+    coef_aes_lo <- ggplot2::aes(x = .data$coef_lo, y = .data$exceed_prob,
+                                colour = .data$line_key,
+                                linetype = .data$scenario_key,
+                                group = .data$line_id)
+    coef_aes_hi <- ggplot2::aes(x = .data$coef_hi, y = .data$exceed_prob,
+                                colour = .data$line_key,
+                                linetype = .data$scenario_key,
+                                group = .data$line_id)
     p <- p +
       ggplot2::geom_line(data = coef_df, mapping = coef_aes_lo,
                           linetype = "dashed", linewidth = 0.5,
@@ -2173,24 +2149,12 @@ enhance_exceedance <- function(curves_tbl,
   }
 
   # Central median lines. Future lines show the across-model median at each
-  # exceedance probability, making the centre of the ensemble explicit.
-  p <- if (has_source) {
-    p +
-      ggplot2::geom_line(data = hist_df, colour = .wise_support, na.rm = TRUE) +
-      # Baseline: solid line with scenario colour; labels distinguish it from
-      # the thicker policy line.
-      ggplot2::geom_line(data = fut_baseline_df, linetype = "solid",
-                         alpha = 0.8, na.rm = TRUE) +
-      ggplot2::geom_line(data = fut_policy_df, linetype = "solid",
-                         colour = .wise_policy, linewidth = 1.5,
-                         na.rm = TRUE,
-                         show.legend = c(colour = FALSE, linetype = FALSE,
-                                          linewidth = TRUE))
-  } else {
-    p +
-      ggplot2::geom_line(data = hist_df, linewidth = 0.9, na.rm = TRUE) +
-      ggplot2::geom_line(data = fut_mod_df, linewidth = 0.9, na.rm = TRUE)
-  }
+  # exceedance probability, making the centre of the ensemble explicit. All
+  # lines share the theme's default width and the scenario colours; the
+  # series (baseline vs policy) is distinguished by the endpoint markers.
+  p <- p +
+    ggplot2::geom_line(data = hist_df, linewidth = 0.9, na.rm = TRUE) +
+    ggplot2::geom_line(data = fut_mod_df, linewidth = 0.9, na.rm = TRUE)
   # No historical-mean reference line here: the exceedance curve aggregates
   # the adverse tail only, so its mean would not match the full-sample
   # historical mean shown on the other charts.
@@ -2213,35 +2177,15 @@ enhance_exceedance <- function(curves_tbl,
       name   = NULL,
       guide  = "none"
     )
-  if (has_source) {
-    p <- p +
-      ggplot2::scale_linewidth_manual(
-        values = c(Baseline = 0.8, Policy = 1.5),
-        breaks = c("Baseline", "Policy"),
-         name   = NULL,
-         guide  = "none"
-      ) +
-      ggplot2::scale_alpha_manual(
-        # Keep both uncertainty bands transparent; policy's central line is
-        # opaque and therefore remains the primary policy signal.
-        values = c(Baseline = 0.18, Policy = 0.10),
-        breaks = c("Baseline", "Policy"),
-        guide  = "none"
-    )
-  }
   endpoint_rows <- dplyr::bind_rows(lapply(split(agg_df, agg_df$line_id), function(x) {
     x <- x[which.max(x$exceed_prob), , drop = FALSE]
     # Labels carry the scenario name only; the series (baseline vs policy) is
     # encoded by the endpoint marker and the one-time captions below.
     x$curve_label <- as.character(x$scenario_key)
-    # Label colour must match the colour the line is actually drawn in:
-    # the policy line uses the vermillion accent override, everything else
-    # keeps its scenario colour from the map.
-    x$label_col <- if (has_source && identical(as.character(x$source), "Policy")) {
-      .wise_policy
-    } else {
-      unname(scenario_colour_map[[as.character(x$scenario_key)]]) %||% .wise_slate
-    }
+    # Label colour must match the colour the line is actually drawn in, so
+    # every label takes its scenario colour from the map.
+    x$label_col <- unname(scenario_colour_map[[as.character(x$scenario_key)]]) %||%
+      .wise_slate
     x
   }))
   max_prob <- max(agg_df$exceed_prob, na.rm = TRUE)
@@ -2298,12 +2242,15 @@ enhance_exceedance <- function(curves_tbl,
                            drop = FALSE]
       if (nrow(top_base) > 0L) {
         x_span <- diff(range(agg_df$central, na.rm = TRUE))
-        cap_off <- if (is.finite(x_span) && x_span > 0) 0.05 * x_span else 0
+        # Both captions sit just ABOVE their marker, in the clear gap between
+        # the pair's curves, so each caption visibly attaches to its own
+        # endpoint instead of drifting toward the neighbouring series.
+        cap_off <- if (is.finite(x_span) && x_span > 0) 0.04 * x_span else 0
         cap_df <- rbind(
           data.frame(x = top_pol$central, y = top_pol$exceed_prob,
                      off = cap_off, label = "Policy", col = .wise_policy_dark),
           data.frame(x = top_base$central, y = top_base$exceed_prob,
-                     off = -cap_off, label = "Baseline", col = .wise_slate)
+                     off = cap_off, label = "Baseline", col = .wise_slate)
         )
         p <- p + ggplot2::geom_text(
           data = cap_df,
