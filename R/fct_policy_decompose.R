@@ -61,6 +61,21 @@
   deltas
 }
 
+.build_rif_curve_index <- function(grid3) {
+  if (is.null(grid3) || !nrow(grid3) ||
+      !all(c("term", "tau", "estimate") %in% names(grid3))) {
+    return(list())
+  }
+  groups <- split(seq_len(nrow(grid3)), as.character(grid3$term), drop = TRUE)
+  lapply(groups, function(rows) {
+    list(
+      tau = grid3$tau[rows],
+      estimate = grid3$estimate[rows],
+      std.error = if ("std.error" %in% names(grid3)) grid3$std.error[rows] else NULL
+    )
+  })
+}
+
 
 #' Compute all RIF policy channels (single source of truth)
 #'
@@ -114,22 +129,27 @@
   grid3 <- context$grid3 %||% rif_grid[rif_grid$model == 3L, ]
   if (nrow(grid3) == 0) return(NULL)
   all_terms <- context$all_terms %||% unique(grid3$term)
+  curve_index <- context$rif_curve_index %||% .build_rif_curve_index(grid3)
 
   # Beta curve interpolation helper
   beta_at <- function(term_name, tau_values) {
     if (!is.null(context$beta_at)) return(context$beta_at(term_name, tau_values))
-    rows <- grid3[grid3$term == term_name, ]
-    if (nrow(rows) == 0) return(rep(0, length(tau_values)))
-    stats::approx(x = rows$tau, y = rows$estimate, xout = tau_values, rule = 2)$y
+    curve <- curve_index[[term_name]]
+    if (is.null(curve)) return(rep(0, length(tau_values)))
+    if (length(curve$tau) == 1L) return(rep(curve$estimate[[1L]], length(tau_values)))
+    stats::approx(x = curve$tau, y = curve$estimate,
+                  xout = tau_values, rule = 2)$y
   }
   # SE curve interpolation helper (same shape; returns 0 if SE absent)
   se_at <- function(term_name, tau_values) {
     if (isTRUE(skip_coef) || isTRUE(central_only)) {
       return(rep(0, length(tau_values)))
     }
-    rows <- grid3[grid3$term == term_name, ]
-    if (nrow(rows) == 0 || is.null(rows$std.error)) return(rep(0, length(tau_values)))
-    stats::approx(x = rows$tau, y = rows$std.error, xout = tau_values, rule = 2)$y
+    curve <- curve_index[[term_name]]
+    if (is.null(curve) || is.null(curve$std.error)) return(rep(0, length(tau_values)))
+    if (length(curve$tau) == 1L) return(rep(curve$std.error[[1L]], length(tau_values)))
+    stats::approx(x = curve$tau, y = curve$std.error,
+                  xout = tau_values, rule = 2)$y
   }
 
   # Baseline welfare in model scale
@@ -622,6 +642,7 @@
       NULL
     } else ctx$rif_grid[ctx$rif_grid$model == 3L, , drop = FALSE]
     ctx$all_terms <- unique(ctx$grid3$term)
+    ctx$rif_curve_index <- .build_rif_curve_index(ctx$grid3)
     ctx$rif_term_map <- setNames(lapply(names(deltas), function(v) {
       if (v %in% ctx$all_terms) v else {
         hit <- grep(paste0("^", v), ctx$all_terms, value = TRUE)
@@ -632,10 +653,10 @@
       ctx$all_terms, weather_vars, deltas
     )
     beta_at <- function(term, tau) {
-      rows <- ctx$grid3[ctx$grid3$term == term, , drop = FALSE]
-      if (!nrow(rows)) return(rep(0, length(tau)))
-      if (nrow(rows) == 1L) return(rep(rows$estimate[[1L]], length(tau)))
-      stats::approx(rows$tau, rows$estimate, xout = tau, rule = 2)$y
+      curve <- ctx$rif_curve_index[[term]]
+      if (is.null(curve)) return(rep(0, length(tau)))
+      if (length(curve$tau) == 1L) return(rep(curve$estimate[[1L]], length(tau)))
+      stats::approx(curve$tau, curve$estimate, xout = tau, rule = 2)$y
     }
     ctx$beta_at <- beta_at
     ctx$tau_i_pre <- pmin(pmax(ctx$F_hat(ctx$y_baseline), min(ctx$taus)), max(ctx$taus))

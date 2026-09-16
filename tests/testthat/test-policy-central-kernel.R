@@ -75,6 +75,23 @@ test_that("hazard location grouping is reused without changing numeric or factor
   expect_identical(actual$temp_bin, expected$temp_bin)
 })
 
+test_that("RIF curve indexing preserves interpolation, endpoints, and missing SEs", {
+  grid <- data.frame(
+    term = rep(c("temp", "rain", "missing_se"), each = 3L),
+    tau = rep(c(0.1, 0.5, 0.9), 3L),
+    estimate = c(-2, 0, 2, 1, 3, 5, 4, 6, 8),
+    stringsAsFactors = FALSE
+  )
+  index <- .build_rif_curve_index(grid)
+  expect_named(index, c("missing_se", "rain", "temp"))
+  expect_equal(stats::approx(index$temp$tau, index$temp$estimate,
+                              xout = c(0.1, 0.3, 0.9), rule = 2)$y,
+               c(-2, -1, 2))
+  expect_null(index$temp$std.error)
+  expect_equal(index$rain$tau, c(0.1, 0.5, 0.9))
+})
+
+
 
 test_that("policy correction changes only y_point and preserves pipeline types", {
   set.seed(111)

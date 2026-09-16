@@ -23,6 +23,7 @@
 | RIF policy projection/delta reuse | Integrated | Caller-scoped baseline projection and policy-delta preparation across resimulation keys; exact policy/Step 2 parity; working-tree validation |
 | Policy hazard grouping | Integrated | Reuse numeric location grouping across hazard variables; exact NA/factor/numeric parity; working-tree validation |
 | RIF interpolation grouping | Integrated | One `split()` grouping pass for quantile-pair rows; exact endpoint/order parity; working-tree validation |
+| RIF coefficient-curve indexing | Integrated | Term-indexed tau/estimate/SE curves; exact interpolation parity; working-tree validation |
 | S3-P15 | Integrated | Per-year indices through shared aggregation preparation cache |
 | S2-P16 | Gate-failed for automatic rollout | Five-decimal weather contract; `auto` and production remain at one thread |
 | P15 | Removed | Not authorized for this delivery |
@@ -42,6 +43,7 @@
 - **RIF policy projection/delta reuse:** Legacy RIF resimulation now prepares the baseline prediction frame and policy covariate deltas once per resimulation run and passes them through every weather member. A 100,000-row probe measured projection preparation `0.056s -> 0.002s` (`28x`) and policy-delta preparation `0.369s -> 0.002s` (`184.5x`) over 20 repeated keys. The retained prepared projection was `4.58 MB`; deltas were `1.53 MB`. Existing `.svy_row_id`, factor, policy-column, and fallback contracts remain unchanged.
 - **Policy hazard grouping:** Numeric hazard aggregation now accepts a caller-provided location grouping and otherwise builds it once per hazard call, rather than rebuilding it for each weather variable. A 100,000-row/four-variable probe measured `0.579s -> 0.116s` (`4.99x`) over 10 calls with exact output parity. Factor/modal-bin and NA-location behavior remain on the existing path and are covered by focused tests.
 - **RIF interpolation grouping:** `interpolate_F_loading()` now builds one row-index grouping with `split()` instead of repeatedly scanning `pair_key` with `which()`. A 100,000-row/nine-quantile probe measured `0.036s -> 0.020s` (`1.80x`) with exact matrix parity; endpoint and row-order regression tests pass.
+- **RIF coefficient-curve indexing:** Policy decomposition now builds a compact term-indexed curve representation once per context/call, avoiding repeated `grid3[grid3$term == ...]` scans while preserving original tau order, endpoint clamping, one-point curves, and missing SE behavior. A 10,000-lookup/80-term/nine-quantile probe measured `0.453s -> 0.143s` (`3.17x`) with exact parity; index size was `0.08 MB` versus `0.03 MB` for the source grid. Focused policy and uncertainty tests passed.
 
 ## Next Candidates
 
@@ -73,7 +75,6 @@ No remaining highest-confidence candidate from this group; active Cholesky block
 
 **Potentially valuable but contract-sensitive:**
 
-- Pre-index RIF coefficient curves to avoid repeated filtering and `approx()` calls inside weather/term loops.
 
 **Lower priority:**
 
