@@ -2062,9 +2062,8 @@ enhance_exceedance <- function(curves_tbl,
   agg_df$yr_lbl  <- factor(agg_df$yr_lbl, levels = c("Historical", fut_yr_labels))
   if (has_source) {
     agg_df$source <- factor(agg_df$source, levels = c("Baseline", "Policy"))
-    # Baseline keeps Mod 2's scenario-colour ribbon. The policy ribbon uses
-    # the same colour with a lower alpha, so the added series stays readable
-    # without changing the underlying scenario encoding.
+    # Baseline ribbons take the scenario colour; policy ribbons take the
+    # policy vermillion, matching each band to the series it belongs to.
     ribbon_palette <- scenario_colour_map
     agg_df$ribbon_key <- as.character(agg_df$scenario_key)
     agg_df$line_key <- as.character(agg_df$scenario_key)
@@ -2081,10 +2080,6 @@ enhance_exceedance <- function(curves_tbl,
   fut_policy_df <- if (has_source)
     fut_mod_df[fut_mod_df$source == "Policy", , drop = FALSE]
   else fut_mod_df[0, , drop = FALSE]
-  hist_mean  <- if (nrow(hist_df) > 0L) mean(hist_df$central, na.rm = TRUE) else NA_real_
-  # The mean-line label anchors at the low-probability (left) end of the
-  # reference line, where it sits clear of every curve.
-  mean_lbl_y <- min(agg_df$exceed_prob, na.rm = TRUE)
 
   # ---- Plot ---------------------------------------------------------------
   # Layer order (back to front): inter-model ribbon (future) -> coefficient
@@ -2111,7 +2106,9 @@ enhance_exceedance <- function(curves_tbl,
   )
 
   # Inter-model ribbons for each future series. Baseline and policy are both
-  # simulated across climate models, so each has its own spread.
+  # simulated across climate models, so each has its own spread. Bands take
+  # the colour of the series they belong to - the scenario colour for
+  # baselines and the policy vermillion for policy - as in the adverse plot.
   show_ens_ribbon <- !is.null(ensemble_band_q) &&
     (ensemble_band_q[["hi"]] > ensemble_band_q[["lo"]])
   if (nrow(fut_mod_df) > 0L && isTRUE(show_ens_ribbon)) {
@@ -2127,7 +2124,12 @@ enhance_exceedance <- function(curves_tbl,
           alpha = 0.10, inherit.aes = FALSE
         ) +
         ggplot2::geom_ribbon(
-          data = fut_policy_df, mapping = ribbon_aes,
+          data = fut_policy_df,
+          mapping = ggplot2::aes(
+            y = .data$exceed_prob, xmin = .data$intermod_lo,
+            xmax = .data$intermod_hi, fill = I(.wise_policy),
+            group = .data$line_id
+          ),
           alpha = 0.18, inherit.aes = FALSE
         )
     } else {
@@ -2189,19 +2191,9 @@ enhance_exceedance <- function(curves_tbl,
       ggplot2::geom_line(data = hist_df, linewidth = 0.9, na.rm = TRUE) +
       ggplot2::geom_line(data = fut_mod_df, linewidth = 0.9, na.rm = TRUE)
   }
-
-  if (is.finite(hist_mean)) {
-    p <- p +
-      ggplot2::geom_vline(
-        xintercept = hist_mean, linetype = "dashed",
-        colour = .wise_zero, linewidth = 0.5
-      ) +
-      ggplot2::annotate(
-        "text", x = hist_mean, y = mean_lbl_y,
-        label = "Historical mean", hjust = 0, vjust = -0.6,
-        size = 3.9, colour = .wise_zero
-      )
-  }
+  # No historical-mean reference line here: the exceedance curve aggregates
+  # the adverse tail only, so its mean would not match the full-sample
+  # historical mean shown on the other charts.
   p <- p +
     ggplot2::scale_color_manual(
       values = scenario_colour_map,
@@ -2261,10 +2253,11 @@ enhance_exceedance <- function(curves_tbl,
       data = endpoint_rows[i, , drop = FALSE],
       ggplot2::aes(x = .data$central, y = label_prob, label = .data$curve_label),
       colour = endpoint_rows$label_col[[i]],
-      # Anchor each label just past its line's end and left-align it, so it
-      # starts off the right-hand side of the curves and reads into the axis
-      # expansion gutter, clear of every line regardless of curve direction.
-      hjust = -0.05, size = 3.5, fontface = "bold", show.legend = FALSE,
+      # Anchor each label just past its line's end marker and left-align it,
+      # so it starts off the right-hand side of the curves and reads into the
+      # axis expansion gutter, clear of every line regardless of curve
+      # direction. Size matches the series labels on the other results plots.
+      hjust = -0.12, size = 3.9, fontface = "bold", show.legend = FALSE,
       inherit.aes = FALSE
     )
   })
@@ -2305,7 +2298,7 @@ enhance_exceedance <- function(curves_tbl,
                            drop = FALSE]
       if (nrow(top_base) > 0L) {
         x_span <- diff(range(agg_df$central, na.rm = TRUE))
-        cap_off <- if (is.finite(x_span) && x_span > 0) 0.035 * x_span else 0
+        cap_off <- if (is.finite(x_span) && x_span > 0) 0.05 * x_span else 0
         cap_df <- rbind(
           data.frame(x = top_pol$central, y = top_pol$exceed_prob,
                      off = cap_off, label = "Policy", col = .wise_policy_dark),
@@ -2330,7 +2323,12 @@ enhance_exceedance <- function(curves_tbl,
     ) +
     theme_wise() +
     ggplot2::theme(
-         legend.position = "none"
+         legend.position = "none",
+      # The probability ticks bunch where the log/logit scale compresses
+      # (e.g. 1-in-5 vs 1-in-10); keep them a notch smaller than the theme
+      # default so the two-line labels stay clear of each other. Under
+      # coord_flip the bottom probability axis is themed by axis.text.x.
+      axis.text.x = ggplot2::element_text(size = 11, colour = .wise_slate)
     ) +
     ggplot2::coord_flip()
 
@@ -2376,7 +2374,10 @@ enhance_exceedance <- function(curves_tbl,
   } else if (isTRUE(logit_x)) {
     rp_low <- supported_rp(RP_LOW)
     rp_high <- supported_rp(RP_HIGH)
-    logit_breaks <- c(unname(rp_low), 0.50, rev(1 - unname(rp_high)))
+    # The complementary periods (1 - RP_HIGH) land on the same exceedance
+    # probabilities as RP_LOW; dedupe so each tick renders once.
+    logit_breaks <- sort(unique(c(unname(rp_low), 0.50,
+                                  1 - unname(rp_high))))
     # Label each tick from its own exceedance probability ("1 in 10 (10%)"),
     # so complementary-period breaks read in the same convention.
     logit_labels <- ifelse(
