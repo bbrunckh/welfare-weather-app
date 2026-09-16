@@ -488,6 +488,24 @@ test_that("applying an empty config is a no-op", {
   expect_length(res$pending, 0L)
 })
 
+test_that("configuration validation rejects non-object JSON and malformed inputs", {
+  bad_empty <- .import_validate(list())
+  expect_false(bad_empty$ok)
+  bad_scalar <- .import_validate(1)
+  expect_false(bad_scalar$ok)
+  bad_inputs <- .import_validate(list(inputs = "not-an-object"))
+  expect_false(bad_inputs$ok)
+})
+
+test_that("input application keeps failed controls pending", {
+  fake <- list(sendInputMessage = function(id, msg) stop("unavailable"))
+  res <- wise_config_apply(list(inputs = list(setting = "value")), fake,
+                           existing = "setting")
+  expect_equal(res$failed, "setting")
+  expect_equal(res$pending, "setting")
+  expect_length(res$applied, 0L)
+})
+
 
 # ---- Import validation & deferred retry (UI-52) ------------------------------
 

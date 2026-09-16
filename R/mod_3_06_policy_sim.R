@@ -251,7 +251,7 @@ mod_3_06_policy_sim_server <- function(id,
             education     = education_cfg,
             model_vars    = model_vars,
             analysis_unit = analysis_unit(),
-            seed          = WISEAPP_DEFAULT_SEED
+            seed          = wise_current_seed()
           )
 
           policy_candidates <- .policy_candidate_cols(
@@ -283,10 +283,10 @@ mod_3_06_policy_sim_server <- function(id,
           }
 
           shiny::withProgress(
-            message = "Re-running simulations for baseline and policy...",
+            message = "Running policy simulation...",
             value   = 0.1,
             {
-              shiny::setProgress(value = 0.2, detail = "Baseline (reusing Step 2)...")
+              shiny::setProgress(value = 0.2, detail = "Preparing baseline results...")
               # Baseline = Step 2 output verbatim. The survey is unchanged in
               # the baseline arm, so re-simulating would just reproduce the
               # Step 2 results. Pass Step 2's hist_sim and saved_scenarios
@@ -303,7 +303,7 @@ mod_3_06_policy_sim_server <- function(id,
               baseline_out         <- hs_for_baseline
               baseline_scenarios_out <- ss %||% list()
 
-              shiny::setProgress(value = 0.6, detail = "Policy...")
+              shiny::setProgress(value = 0.6, detail = "Calculating policy scenario results...")
               # Derive the policy arm from the baseline pipelines by adding
               # the analytic per-household delta_total (the same number the
               # Decomposition pane reports). This (a) eliminates the
@@ -379,7 +379,7 @@ mod_3_06_policy_sim_server <- function(id,
               # Decompose policy effects using HISTORICAL mean weather.
               # REACT-05: a decomposition failure now fails the whole run
               # instead of silently presenting the previous run as new.
-              shiny::setProgress(value = 0.85, detail = "Decomposing effects...")
+              shiny::setProgress(value = 0.85, detail = "Summarizing policy effects...")
               decomp <- decompose_policy_effect(
                 svy_baseline = svy,
                 svy_policy   = svy_mod,
@@ -413,7 +413,7 @@ mod_3_06_policy_sim_server <- function(id,
               # variation. Per-year failures are collected: if every attempt
               # fails the run fails; otherwise partial results are published
               # with a warning naming the count of dropped pieces (INT-04).
-              shiny::setProgress(value = 0.90, detail = "Decomposing scenario effects...")
+              shiny::setProgress(value = 0.90, detail = "Finalizing scenario summaries...")
               sc_list <- pol_out$saved_scenarios %||% list()
               decomp_sc_errors <- character(0)
               decomp_sc_parts <- lapply(seq_along(sc_list), function(i) {
@@ -501,7 +501,7 @@ mod_3_06_policy_sim_server <- function(id,
                 stop("Policy diagnostics produced no results.", call. = FALSE)
               }
 
-              shiny::setProgress(value = 1, detail = "Complete")
+              shiny::setProgress(value = 1, detail = "Results ready")
             }
           )
 
@@ -545,16 +545,23 @@ mod_3_06_policy_sim_server <- function(id,
            completed <- TRUE
           if (length(decomp_sc_errors) > 0L) {
             shiny::showNotification(
-              paste0(
-                "Policy simulation succeeded, but ", length(decomp_sc_errors),
-                " scenario decomposition(s) failed and are omitted (first: ",
-                decomp_sc_errors[[1]], ")."
+              ui = shiny::tagList(
+                shiny::tags$b(
+                  "Policy results are ready, but some scenario summaries are unavailable."
+                ),
+                shiny::tags$details(
+                  shiny::tags$summary("Show details"),
+                  shiny::tags$div(
+                    style = "font-size: 12px; white-space: pre-wrap;",
+                    paste(decomp_sc_errors, collapse = "\n")
+                  )
+                )
               ),
               type = "warning", duration = 10
             )
           } else {
             shiny::showNotification(
-              "Policy adjustments applied and simulation re-run.",
+               "Policy scenario results are ready.",
               type = "message", duration = 3
             )
           }

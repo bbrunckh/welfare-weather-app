@@ -358,11 +358,11 @@ mod_3_scenario_server <- function(id,
       hs <- tryCatch(hist_sim(),         error = function(e) NULL)
       sw <- tryCatch(selected_weather(), error = function(e) NULL)
       if (is.null(sw) || nrow(as.data.frame(sw)) == 0)
-        missing <- c(missing, "weather variables (Step 1)")
+        missing <- c(missing, "weather variables in Step 1")
       if (is.null(mf))
-        missing <- c(missing, "a fitted model (Step 1)")
+        missing <- c(missing, "a fitted model in Step 1")
       if (is.null(hs))
-        missing <- c(missing, "a historical simulation (Step 2)")
+        missing <- c(missing, "a historical simulation in Step 2")
       missing
     })
 
@@ -373,8 +373,8 @@ mod_3_scenario_server <- function(id,
         class = "alert alert-warning",
         role  = "alert",
         style = "font-size: 13px; margin-bottom: 4px;",
-        tags$b("Prerequisites: "), "you still need ",
-        paste(missing, collapse = ", "), " to run a policy simulation."
+        tags$b("To run a policy simulation, first complete "),
+        paste(missing, collapse = ", "), "."
       )
     })
 

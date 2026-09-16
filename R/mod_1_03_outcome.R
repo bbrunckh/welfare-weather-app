@@ -281,7 +281,8 @@ mod_1_03_outcome_server <- function(id, variable_list, survey_data,
             od,
             outcome = as.character(inf$name[1]),
             label   = as.character(inf$label[1]),
-            type    = as.character(inf$type[1])
+            type    = as.character(inf$type[1]),
+            wave_labels = survey_wave_meta()$plot_labels
           )
         }
 
@@ -513,7 +514,8 @@ mod_1_03_outcome_server <- function(id, variable_list, survey_data,
           .format_outcome_summary(s, summary_wave_val())
         }
         output$outcome_summary_csv <- csv_download_handler(
-          "outcome_summary", outcome_summary_df
+          "outcome_summary", outcome_summary_df,
+          stale = function() FALSE
         )
         wise_export_table(
           key   = "outcome_summary",

@@ -526,7 +526,7 @@ mod_0_overview_server <- function(id) {
         detail  = NULL
       ))
       showNotification(
-        paste0("Connected to ", params$type, " data source."),
+        paste0("Connected to ", params$type, " data source. Metadata is ready."),
         type = "message", duration = 3
       )
 

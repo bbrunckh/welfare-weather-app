@@ -134,7 +134,7 @@ mod_1_07_results_server <- function(id,
         on.exit(fit_guard$end(), add = TRUE)
       }
 
-      nid <- shiny::showNotification("Fitting models - please wait...",
+      nid <- shiny::showNotification("Fitting the welfare model...",
                                      type = "message", duration = NULL,
                                      closeButton = FALSE)
       on.exit(shiny::removeNotification(nid), add = TRUE)
@@ -152,13 +152,17 @@ mod_1_07_results_server <- function(id,
       )
       df <- prepare_outcome_df(svw, selected_outcome())
 
+      fit_args <- list(
+        df               = df,
+        selected_outcome = selected_outcome(),
+        selected_weather = selected_weather(),
+        selected_model   = selected_model()
+      )
+      if ("seed" %in% names(formals(fit_model))) {
+        fit_args$seed <- wise_current_seed()
+      }
       fit_list <- tryCatch(
-        fit_model(
-          df               = df,
-          selected_outcome = selected_outcome(),
-          selected_weather = selected_weather(),
-          selected_model   = selected_model()
-        ),
+        do.call(fit_model, fit_args),
         error = function(e) {
           shiny::showNotification(paste("Model failed:", conditionMessage(e)),
                                   type = "error", duration = 10)
@@ -184,9 +188,6 @@ mod_1_07_results_server <- function(id,
         model_fit_val(fit_list)
         fit_status("success")
         completed <- TRUE
-        shiny::showNotification("Models fitted successfully.",
-                                type = "message", duration = 3)
-
         # REACT-14: disclose any specification fallback the fitter applied.
         # A model-family change (logistic -> linear) alters the estimand, so
         # it additionally requires explicit acknowledgement.
@@ -224,11 +225,6 @@ mod_1_07_results_server <- function(id,
 
     observeEvent(model_fit_val(), {
       req(model_fit_val(), selected_weather())
-
-      nid <- shiny::showNotification("Preparing results...",
-                                     type = "message", duration = NULL,
-                                     closeButton = FALSE)
-      on.exit(shiny::removeNotification(nid), add = TRUE)
 
       mf      <- model_fit_val()
       snap    <- mf$.snap
@@ -531,7 +527,7 @@ mod_1_07_results_server <- function(id,
       for (i in seq_along(mf$weather_terms)) local({
         idx  <- i
         term <- label_fun(mf$weather_terms[idx])
-        wise_export_figure(
+        if (!is_rif) wise_export_figure(
           key   = paste0("coefficient_plot_", idx),
           label = paste0("Coefficient stability - ", term),
           step  = 1L,
@@ -557,7 +553,8 @@ mod_1_07_results_server <- function(id,
           ),
           width = 9, height = 6
         )
-        wise_export_figure(
+        if (is_rif || any(grepl(paste0("\\b", mf$weather_terms[idx], "\\b"),
+                            mf$interaction_terms %||% character(0)))) wise_export_figure(
           key   = paste0("who_affected_plot_", idx),
           label = paste0("Who is most affected - ", term),
           step  = 1L,
@@ -621,7 +618,7 @@ mod_1_07_results_server <- function(id,
       }
 
       output$regtable_csv <- csv_download_handler("model_coefficients",
-                                                  regtable_df)
+                                                  regtable_df, stale = stale)
 
       # UI-48: the same estimates go into the export bundle.
       wise_export_table(
@@ -744,7 +741,7 @@ mod_1_07_results_server <- function(id,
         )
       })
       output$focused_csv <- csv_download_handler("step1_focused_estimates",
-                                                  focused_df)
+                                                  focused_df, stale = stale)
       wise_export_table(
         key   = "step1_focused_estimates",
         label = "Focused weather estimates",

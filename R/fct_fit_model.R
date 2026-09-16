@@ -77,7 +77,8 @@ ENGINE_REGISTRY <- list(
       }
     },
 
-    make_spec = function(model_type, use_logit) NULL,
+    make_spec = function(model_type, use_logit,
+                         seed = WISEAPP_DEFAULT_SEED) NULL,
 
     prepare_outcome = function(df, y_var, use_logit) {
       # feglm needs integer 0/1, not a factor
@@ -120,12 +121,13 @@ ENGINE_REGISTRY <- list(
       parsnip::fit(model_spec, formula = formula, data = data)
     },
 
-    make_spec = function(model_type, use_logit) {
+    make_spec = function(model_type, use_logit,
+                         seed = WISEAPP_DEFAULT_SEED) {
       parsnip::rand_forest(trees = 500, min_n = 5) |>
         parsnip::set_engine(
           "ranger",
           importance = "impurity",
-          seed = WISEAPP_DEFAULT_SEED,
+           seed = seed,
           num.threads = 1L
         ) |>
         parsnip::set_mode("regression")
@@ -164,7 +166,8 @@ ENGINE_REGISTRY <- list(
       parsnip::fit(model_spec, formula = formula, data = data)
     },
 
-    make_spec = function(model_type, use_logit) {
+    make_spec = function(model_type, use_logit,
+                         seed = WISEAPP_DEFAULT_SEED) {
       mode <- if (model_type == "logistic" && use_logit) "classification" else "regression"
       parsnip::boost_tree(
         trees          = 500,
@@ -175,7 +178,7 @@ ENGINE_REGISTRY <- list(
       ) |>
         parsnip::set_engine(
           "xgboost",
-          seed = WISEAPP_DEFAULT_SEED,
+           seed = seed,
           nthread = 1L
         ) |>
         parsnip::set_mode(mode)
@@ -238,7 +241,8 @@ ENGINE_REGISTRY <- list(
       do.call(fixest::feols, args)
     },
 
-    make_spec = function(model_type, use_logit) NULL,
+    make_spec = function(model_type, use_logit,
+                         seed = WISEAPP_DEFAULT_SEED) NULL,
 
     prepare_outcome = function(df, y_var, use_logit) {
       taus     <- seq(0.1, 0.9, by = 0.1)
@@ -729,7 +733,8 @@ run_lasso_selection <- function(
 #'   and \code{formulas}.
 #'
 #' @noRd
-fit_model <- function(df, selected_outcome, selected_weather, selected_model) {
+fit_model <- function(df, selected_outcome, selected_weather, selected_model,
+                      seed = WISEAPP_DEFAULT_SEED) {
 
   # ---------------------------------------------------------------------------
   # 1. Unpack inputs
@@ -991,7 +996,7 @@ fit_model <- function(df, selected_outcome, selected_weather, selected_model) {
   # 7. Build model spec + engine-level options
   # ---------------------------------------------------------------------------
 
-  model_spec <- backend$make_spec(model_type, use_logit)
+  model_spec <- backend$make_spec(model_type, use_logit, seed = seed)
 
   # Cluster-robust VCV at the location level (~loc_id_panel in Step 1's
   # default specification). fixest caches this fit-time VCV, so Step 1's

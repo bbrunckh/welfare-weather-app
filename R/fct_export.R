@@ -70,9 +70,17 @@ wise_export_register <- function(key, label, step, kind, fun,
   store <- .export_store(session)
   if (is.null(store)) return(invisible(key))
   stopifnot(is.function(fun))
-  stale_ref <- if (identical(as.integer(step), 3L)) {
-    stale %||% if (!is.null(session)) session$userData$wise_step3_stale else NULL
-  } else NULL
+  stale_ref <- stale
+  if (is.null(stale_ref) && !is.null(session) && as.integer(step) > 0L) {
+    stale_ref <- local({
+      s <- session
+      step_id <- as.integer(step)
+      function() {
+        ref <- s$userData[[paste0("wise_step", step_id, "_stale")]]
+        if (is.function(ref)) isTRUE(ref()) else isTRUE(ref)
+      }
+    })
+  }
   store$items[[key]] <- list(
     key         = key,
     label       = label,
@@ -85,6 +93,22 @@ wise_export_register <- function(key, label, step, kind, fun,
     stale       = stale_ref
   )
   invisible(key)
+}
+
+wise_export_remove <- function(keys, session = shiny::getDefaultReactiveDomain()) {
+  store <- .export_store(session)
+  if (is.null(store) || !length(keys)) return(invisible(FALSE))
+  store$items[keys] <- NULL
+  invisible(TRUE)
+}
+
+wise_export_retain <- function(prefix, keys,
+                               session = shiny::getDefaultReactiveDomain()) {
+  store <- .export_store(session)
+  if (is.null(store)) return(invisible(FALSE))
+  current <- names(store$items)
+  drop <- current[startsWith(current, prefix) & !current %in% keys]
+  wise_export_remove(drop, session)
 }
 
 #' @rdname wise_export_register
@@ -207,6 +231,13 @@ wise_export_items <- function(session = shiny::getDefaultReactiveDomain()) {
 # before it gives up, audibly (see export_menu_server()).
 .EXPORT_RETRY_SECONDS <- 120
 
+wise_current_seed <- function(default = WISEAPP_DEFAULT_SEED,
+                              session = shiny::getDefaultReactiveDomain()) {
+  value <- if (!is.null(session)) session$userData$wise_analysis_seed else NULL
+  value <- suppressWarnings(as.integer(value)[1L])
+  if (is.na(value)) as.integer(default) else value
+}
+
 #' Should an input be carried in the exported configuration?
 #'
 #' @param ids Character vector of (namespaced) input ids.
@@ -295,15 +326,17 @@ wise_config_apply <- function(config, session, existing = character(0)) {
   }
 
   applied <- character(0)
+  failed <- character(0)
   for (id in ids[can]) {
     if (is_button(id)) next
-    tryCatch(
-      session$sendInputMessage(id, list(value = vals[[id]])),
-      error = function(e) NULL
-    )
-    applied <- c(applied, id)
+    ok <- tryCatch({
+      session$sendInputMessage(id, list(value = vals[[id]]))
+      TRUE
+    }, error = function(e) FALSE)
+    if (ok) applied <- c(applied, id) else failed <- c(failed, id)
   }
-  invisible(list(applied = applied, pending = ids[!can]))
+  invisible(list(applied = applied, pending = unique(c(ids[!can], failed)),
+                failed = failed))
 }
 
 #' Validate an imported configuration before anything is applied
@@ -319,10 +352,16 @@ wise_config_apply <- function(config, session, existing = character(0)) {
 #' @noRd
 .import_validate <- function(cfg, app_version = NA_character_) {
   reject <- function(text) list(ok = FALSE, text = text, notes = character(0))
+  if (!is.list(cfg) || is.null(names(cfg))) {
+    return(reject("That file must contain a JSON object exported by WISE-APP."))
+  }
   if (is.null(cfg$inputs)) {
     return(reject(paste(
       "That file has no `inputs` section - it does not look like a",
       "WISE-APP configuration export.")))
+  }
+  if (!is.list(cfg$inputs) || is.null(names(cfg$inputs))) {
+    return(reject("The `inputs` section must be a named JSON object."))
   }
   v <- cfg$wiseapp_config_version
   if (is.null(v)) {
@@ -408,6 +447,7 @@ wise_config_apply <- function(config, session, existing = character(0)) {
 #' @noRd
 pipeline_runner <- function(triggers, results, on_state = NULL,
                             on_settle = NULL,
+                            ready_to_run = function() TRUE,
                             stage_timeout = .PIPELINE_STAGE_TIMEOUT) {
   stages <- .pipeline_stages()
   keys <- vapply(stages, `[[`, character(1), "key")
@@ -515,6 +555,11 @@ pipeline_runner <- function(triggers, results, on_state = NULL,
     until <- settle_until()
     if (is.null(key) || is.null(until)) return(invisible(NULL))
     if (Sys.time() >= until) {
+      if (!isTRUE(ready_to_run())) {
+        if (is.function(on_settle)) on_settle()
+        shiny::invalidateLater(250)
+        return(invisible(NULL))
+      }
       settling(NULL)
       settle_until(NULL)
       request_id <<- request_id + 1L
@@ -682,11 +727,12 @@ pipeline_runner <- function(triggers, results, on_state = NULL,
   fail <- function(msg) list(status = "error", note = msg)
   path <- file.path(dir, file)
 
-  # Do not materialise a previous Step 3 result while the published run is stale.
-  if (identical(as.integer(item$step), 3L) && is.function(item$stale) &&
+  # Do not materialise a previous result while the published run is stale.
+  if (is.function(item$stale) &&
       isTRUE(shiny::isolate(item$stale()))) {
     if (file.exists(path)) unlink(path)
-    return(list(status = "skipped", note = "Step 3 results are stale."))
+    return(list(status = "skipped", note = paste0("Step ", item$step,
+                                                    " results are stale.")))
   }
 
   value <- tryCatch(item$fun(), error = function(e) e)
@@ -1024,6 +1070,12 @@ wise_export_bundle <- function(zipfile, items, config = NULL,
     (identical(it$kind, "figure") && "figures" %in% include)
   }, items)
 
+  all_items <- Filter(function(it) {
+    identical(it$kind, "table") || identical(it$kind, "figure")
+  }, items)
+  stable_index <- setNames(seq_along(all_items),
+                           vapply(all_items, `[[`, character(1), "key"))
+
   entries <- list()
   skipped <- list()
   # Numbering follows the registry's stable order (step, then tables before
@@ -1033,7 +1085,7 @@ wise_export_bundle <- function(zipfile, items, config = NULL,
   # differ in what they produced.
   for (i in seq_along(wanted)) {
     it   <- wanted[[i]]
-    file <- .export_filename(i, it$step, it$key, it$kind)
+    file <- .export_filename(stable_index[[it$key]], it$step, it$key, it$kind)
     if (is.function(progress)) progress(i, length(wanted), it$label)
     res  <- .export_write_item(it, stage, file)
     if (is.null(res)) next
@@ -1381,7 +1433,10 @@ export_menu_server <- function(input, output, session,
       return(invisible(NULL))
     }
     staged_cfg(cfg)
+    import_state$cancelled <- FALSE
     if (!pipeline_enabled) {
+      imported_seed <- suppressWarnings(as.integer(cfg$random_seed)[1L])
+      session$userData$wise_analysis_seed <- if (is.na(imported_seed)) as.integer(seed) else imported_seed
       live <- names(shiny::reactiveValuesToList(input))
       res <- wise_config_apply(cfg, session, existing = live)
       import_state$pending <- if (length(res$pending)) list(
@@ -1389,13 +1444,13 @@ export_menu_server <- function(input, output, session,
         deadline = Sys.time() + .EXPORT_RETRY_SECONDS
       ) else NULL
       import_wake(import_wake() + 1L)
-      set_import_status(list(
-        class = "alert-success",
+       set_import_status(list(
+         class = "alert-success",
         text = if (length(res$pending)) {
           paste0("Applied ", length(res$applied), " setting(s); ",
                  length(res$pending), " more will be applied as controls appear.")
         } else {
-          "Configuration settings restored. Re-run each step to refresh results."
+           "Configuration settings restored. Data-source settings are not imported; re-run each step to refresh results."
         }
       ))
       return(invisible(NULL))
@@ -1419,10 +1474,18 @@ export_menu_server <- function(input, output, session,
       deadline = Sys.time() + .EXPORT_RETRY_SECONDS
     ) else NULL
     import_wake(import_wake() + 1L)
+    if (length(res$failed)) {
+      set_import_status(list(
+        class = "alert-warning",
+        text = paste0("Some settings could not be restored yet: ",
+                      paste(res$failed, collapse = ", "))
+      ))
+    }
     res
   }
 
   apply_pending <- function() {
+    if (isTRUE(import_state$cancelled)) return(invisible(NULL))
     pending <- import_state$pending
     if (is.null(pending) || !length(pending$ids)) return(invisible(NULL))
     live <- names(shiny::reactiveValuesToList(input))
@@ -1430,9 +1493,12 @@ export_menu_server <- function(input, output, session,
     if (length(ready)) {
       sub <- pending$config
       sub$inputs <- sub$inputs[ready]
-      wise_config_apply(sub, session, existing = ready)
+      retry <- wise_config_apply(sub, session, existing = ready)
+      failed <- retry$failed %||% character(0)
+    } else {
+      failed <- character(0)
     }
-    still <- setdiff(pending$ids, ready)
+    still <- unique(c(setdiff(pending$ids, ready), failed))
     if (length(still)) {
       import_state$pending <- list(
         config = pending$config, ids = still, deadline = pending$deadline
@@ -1448,6 +1514,7 @@ export_menu_server <- function(input, output, session,
   # what causes some downstream controls to appear.
   shiny::observe({
     import_wake()
+    if (isTRUE(import_state$cancelled)) return(invisible(NULL))
     pending <- import_state$pending
     if (is.null(pending) || !length(pending$ids)) return(invisible(NULL))
     apply_pending()
@@ -1479,6 +1546,10 @@ export_menu_server <- function(input, output, session,
       apply_pending()
       import_wake(shiny::isolate(import_wake()) + 1L)
     },
+    ready_to_run = function() {
+      pending <- import_state$pending
+      is.null(pending) || !length(pending$ids)
+    },
     on_state = function(state, phase, text) {
       pipeline_view(list(state = state, phase = phase, message = text))
       pending <- import_state$pending
@@ -1498,19 +1569,29 @@ export_menu_server <- function(input, output, session,
 
   shiny::observeEvent(input$import_close, {
     runner$cancel()
+    import_state$cancelled <- TRUE
+    import_state$pending <- NULL
+    staged_cfg(NULL)
     shiny::removeModal()
   })
 
   shiny::observeEvent(input$import_dismissed, {
     runner$cancel()
+    import_state$cancelled <- TRUE
+    import_state$pending <- NULL
   })
 
   shiny::observeEvent(input$import_run_config, {
     cfg <- staged_cfg()
     if (is.null(cfg)) return(invisible(NULL))
-    previous_cfg(wise_config_snapshot(input, seed = seed))
+    import_state$cancelled <- FALSE
+    previous_cfg(wise_config_snapshot(input, seed = wise_current_seed(seed, session)))
+    imported_seed <- suppressWarnings(as.integer(cfg$random_seed)[1L])
+    session$userData$wise_analysis_seed <- if (is.na(imported_seed)) {
+      as.integer(seed)
+    } else imported_seed
     apply_config(cfg)
-    if (is.function(on_import)) on_import()
+    if (is.function(on_import)) on_import(if (is.na(imported_seed)) NULL else imported_seed)
     set_import_status(NULL)
     runner$start()
   })
@@ -1520,7 +1601,7 @@ export_menu_server <- function(input, output, session,
     if (is.null(previous)) return(invisible(NULL))
     runner$cancel()
     apply_config(previous)
-    if (is.function(on_import)) on_import()
+    if (is.function(on_import)) on_import(wise_current_seed(seed, session))
     set_import_status(list(
       class = "alert-secondary",
       text = "Previous settings restored. Re-run any stale steps as needed."
@@ -1549,7 +1630,7 @@ export_menu_server <- function(input, output, session,
     if (identical(phase, "running")) {
       return(shiny::tags$span(
         class = "text-muted small me-2",
-        "Close stops later stages; a synchronous stage already running will finish."
+        "The current operation will finish, but later steps will not run."
       ))
     }
     shiny::tagList(

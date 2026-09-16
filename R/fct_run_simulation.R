@@ -169,9 +169,10 @@ fct_run_simulation <- function(sw,
                                   weather_storage = c("memory", "reference"),
                                   weather_store_root = NULL,
                                   weather_collect = c("fast", "bounded"),
-                                  weather_threads = c("auto", "1", "2"),
-                                  join_cache = FALSE,
+                                 weather_threads = c("auto", "1", "2"),
+                                 join_cache = FALSE,
                                  direct_rif_predictions = TRUE,
+                                 seed        = WISEAPP_DEFAULT_SEED,
                                  notify_fn   = function(msg) message(msg),
                                 progress_fn = function(value, detail) invisible(NULL),
                                 weather_fn  = get_weather,
@@ -185,6 +186,9 @@ fct_run_simulation <- function(sw,
   weather_storage <- match.arg(weather_storage)
   weather_collect <- match.arg(weather_collect)
   weather_threads <- match.arg(weather_threads)
+  seed <- as.integer(seed)[1L]
+  if (is.na(seed)) seed <- WISEAPP_DEFAULT_SEED
+  withr::local_seed(seed)
   has_future <- length(fp_list) > 0 && length(ssps) > 0
   weather_store <- NULL
   weather_store_published <- FALSE
@@ -213,7 +217,7 @@ fct_run_simulation <- function(sw,
   t_start_total <- proc.time()[["elapsed"]]
 
   # ---- Weather loading ---------------------------------------------------- #
-  progress_fn(0.05, "Querying weather data (this may take 1-2 minutes)...")
+  progress_fn(0.05, "Loading climate data...")
   t_weather_start <- proc.time()[["elapsed"]]
 
   weather_result <- NULL
@@ -342,14 +346,12 @@ fct_run_simulation <- function(sw,
   failures <- list()
 
   # ---- Run pipelines (one key at a time) ---------------------------------- #
-  progress_fn(0.50, "Running simulations...")
-
   t_start <- t_start_total   # key loop elapsed = total elapsed from function entry
 
 
   t_start_pipeline <- proc.time()[["elapsed"]]
   message("[wiseapp] Running simulation pipelines...")
-  progress_fn(0.35, "Running simulation pipelines as weather keys arrive...")
+  progress_fn(0.15, "Preparing climate scenarios...")
 
   weather_refs <- list()
   emitted_keys <- character(0)
@@ -449,8 +451,7 @@ fct_run_simulation <- function(sw,
     }
   )
   t_weather <- proc.time()[["elapsed"]] - t_weather_start
-  progress_fn(0.20, sprintf("Weather loaded (%s) - preparing simulation...",
-                             format_elapsed(t_weather)))
+  progress_fn(0.35, "Climate data loaded. Running scenarios...")
   if (is.list(weather_result) && length(weather_result)) {
     for (key in setdiff(names(weather_result), emitted_keys))
       consume_key(key, weather_result[[key]])
@@ -473,8 +474,7 @@ fct_run_simulation <- function(sw,
   gc(verbose = FALSE)
 
   t_pipeline_done <- proc.time()[["elapsed"]] - t_start_pipeline
-  progress_fn(0.80, sprintf("Pipelines complete (%s) - grouping results...",
-                              format_elapsed(t_pipeline_done)))
+  progress_fn(0.80, "Finalizing scenario results...")
 
   # ---- REACT-12: classify failures - fail fast or publish with ledger ----- #
   # The run is unusable when the historical key failed (no baseline to show)

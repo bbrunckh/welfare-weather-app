@@ -2207,12 +2207,12 @@ make_step3_decision_table_html <- function(df, subheader = NULL, footnotes = NUL
     description = "Expected, 1-in-5, 1-in-10, and 1-in-20 equal-probability paired tail effects where supported."
   )
   wise_export_figure(
-    key = "policy_annual_effect_distribution",
-    label = "Annual paired policy-effect distribution",
+    key = "policy_annual_distribution",
+    label = "Annual baseline and policy welfare distribution",
     step = 3L,
     fun = function() {
       plot_annual_distribution(
-        paired_annual_effects_rv(),
+        timeseries_curves_rv(),
         x_label = metric_axis_label(input$cmp_agg_method %||% "mean",
                                     baseline_hist_sim()$so,
                                     input$cmp_deviation %||% "none"),
@@ -2220,22 +2220,22 @@ make_step3_decision_table_html <- function(df, subheader = NULL, footnotes = NUL
         plot_type = input$annual_distribution_type %||% "violin"
       )
     },
-    description = "Distribution of paired annual policy effects, not household welfare outcomes.",
+    description = "Annual baseline and policy welfare distribution shown in the comparison panel.",
     width = 10, height = 6.5
   )
   wise_export_figure(
-    key = "policy_adverse_effect_plot",
-    label = "Adverse-year paired policy effect",
+    key = "policy_adverse_distribution",
+    label = "Adverse-year baseline and policy welfare",
     step = 3L,
     fun = function() {
-      plot_adverse_effects(
-        paired_adverse_effects_rv(),
+      plot_step3_adverse_dot(
+        adverse_dot_data_rv(),
         x_label = metric_axis_label(input$cmp_agg_method %||% "mean",
                                     baseline_hist_sim()$so,
                                     input$cmp_deviation %||% "none")
       )
     },
-    description = "Equal-probability tail contrast of policy minus baseline at adverse return-period probabilities.",
+    description = "Adverse-year baseline and policy welfare comparison shown in the comparison panel.",
     width = 10, height = 6.5
   )
   wise_export_table(

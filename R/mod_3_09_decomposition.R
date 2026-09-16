@@ -420,7 +420,7 @@ mod_3_09_decomposition_server <- function(id,
     output$stale_banner_ui <- shiny::renderUI({
       if (isTRUE(stale())) .stale_banner(
         "Step 3 policy decomposition",
-        note = "Interpretation and exports are disabled until then."
+        note = NULL
       ) else NULL
     })
 

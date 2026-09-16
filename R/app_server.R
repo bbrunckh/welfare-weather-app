@@ -103,6 +103,12 @@ app_server <- function(input, output, session) {
                  status = step3_api$run_status)
   )
 
+  # Export registrations use these shared stale references so every step has
+  # the same stale suppression contract, including imports.
+  session$userData$wise_step1_stale <- step1_api$fit_stale
+  session$userData$wise_step2_stale <- step2_api$stale
+  session$userData$wise_step3_stale <- step3_api$stale
+
   config_imported <- shiny::reactiveVal(0L)
 
   # ---- Navbar step status badges (UI-47) -----------------------------------
@@ -173,7 +179,10 @@ app_server <- function(input, output, session) {
                      seed = WISEAPP_DEFAULT_SEED,
                      run_triggers = pipeline_triggers,
                      step_results = pipeline_results,
-                     on_import = function() {
-                       config_imported(isolate(config_imported()) + 1L)
-                     })
+                      on_import = function(imported_seed = NULL) {
+                        if (!is.null(imported_seed) && is.finite(imported_seed)) {
+                          session$userData$wise_analysis_seed <- as.integer(imported_seed)
+                        }
+                        config_imported(isolate(config_imported()) + 1L)
+                      })
 }

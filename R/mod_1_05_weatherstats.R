@@ -231,7 +231,7 @@ mod_1_05_weatherstats_server <- function(
 
       # -- Merge with survey data ---------------------------------------------
       notif_merge <- showNotification(
-        "Merging survey and weather data...", duration = NULL, type = "message"
+         "Combining survey and weather data...", duration = NULL, type = "message"
       )
 
       survey_wd <- tryCatch({
@@ -284,7 +284,8 @@ mod_1_05_weatherstats_server <- function(
       load_status("success")
       completed <- TRUE
 
-      showNotification("Weather data ready.", duration = 3, type = "message")
+       showNotification("Weather data loaded. You can now run the model.",
+                        duration = 3, type = "message")
 
       # ---- Define outputs once then add tab ---------------------------------
 
@@ -313,7 +314,8 @@ mod_1_05_weatherstats_server <- function(
             hist_df   = hist_cells(),
             breaks    = if (is.null(brks)) NULL else brks[[hv]],
             year_from = if (is.null(yrs)) NULL else yrs[["from"]],
-            year_to   = if (is.null(yrs)) NULL else yrs[["to"]]
+            year_to   = if (is.null(yrs)) NULL else yrs[["to"]],
+            wave_labels = survey_wave_meta()$plot_labels
           )
         }
 
@@ -363,7 +365,8 @@ mod_1_05_weatherstats_server <- function(
             df, sw$name[idx], sw$label[idx],
             hist_df   = hist_cells(),
             year_from = if (is.null(yrs)) NULL else yrs[["from"]],
-            year_to   = if (is.null(yrs)) NULL else yrs[["to"]]
+            year_to   = if (is.null(yrs)) NULL else yrs[["to"]],
+            wave_labels = survey_wave_meta()$plot_labels
           )
         }
 
@@ -444,9 +447,17 @@ mod_1_05_weatherstats_server <- function(
         observe({
           sw <- tryCatch(wx_spec_sw(), error = function(e) NULL)
           if (is.null(sw) || !nrow(sw)) return()
+          active_keys <- character(0)
           for (i in seq_len(min(nrow(sw), 2L))) local({
             idx <- i
             nm  <- sw$label[idx]
+            active_keys <<- c(active_keys,
+                              paste0("weather_distribution_", idx),
+                              paste0("binscatter_", idx))
+            if (identical(sw$cont_binned[idx], "Binned")) {
+              active_keys <<- c(active_keys,
+                                paste0("weather_distribution_continuous_", idx))
+            }
             wise_export_figure(
               key   = paste0("weather_distribution_", idx),
               label = paste0("Weather distribution - ", nm),
@@ -458,7 +469,7 @@ mod_1_05_weatherstats_server <- function(
               ),
               width = 9, height = 6
             )
-            wise_export_figure(
+            if (identical(sw$cont_binned[idx], "Binned")) wise_export_figure(
               key   = paste0("weather_distribution_continuous_", idx),
               label = paste0("Continuous distribution - ", nm),
               step  = 1L,
@@ -481,6 +492,9 @@ mod_1_05_weatherstats_server <- function(
               width = 9, height = 6
             )
           })
+          wise_export_retain("weather_distribution_", active_keys)
+          wise_export_retain("weather_distribution_continuous_", active_keys)
+          wise_export_retain("binscatter_", active_keys)
         })
 
         # -- Summary stats tables (continuous + binned) -----------------------
@@ -1380,8 +1394,8 @@ mod_1_05_weatherstats_server <- function(
 
       hist_cells(cells)
       hist_cells_years(c(from = yf, to = yt))
-      showNotification("Historical weather ready.", duration = 3,
-                       type = "message")
+       showNotification("Historical comparison updated.", duration = 3,
+                        type = "message")
       invisible(TRUE)
     }
 

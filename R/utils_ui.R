@@ -739,13 +739,13 @@ csv_download_handler <- function(filename_base, data_fun, stale = NULL) {
     content = function(file) {
       if (is.function(stale) && isTRUE(shiny::isolate(stale()))) {
         if (file.exists(file)) unlink(file)
-        stop("Step 3 results are stale; rerun before downloading.", call. = FALSE)
+        stop("Results are stale; rerun before downloading.", call. = FALSE)
       }
       df <- tryCatch(data_fun(), error = function(e) NULL)
       if (is.null(df) || !is.data.frame(df) || nrow(df) == 0) {
         df <- data.frame(Note = "No data available")
       }
-      utils::write.csv(df, file, row.names = FALSE, na = "")
+      utils::write.csv(.export_flatten_df(df), file, row.names = FALSE, na = "")
     },
     contentType = "text/csv"
   )
@@ -773,8 +773,7 @@ csv_download_handler <- function(filename_base, data_fun, stale = NULL) {
 #' are explicitly labelled as describing an earlier configuration.
 #'
 #' @param step        Optional label for the affected surface.
-#' @param note        Optional extra sentence; the export-gating surfaces pass
-#'   "Interpretation and exports are disabled until then."
+#' @param note        Optional extra sentence.
 #' @noRd
 .stale_banner <- function(step = NULL, note = NULL) {
   step_txt <- if (!is.null(step)) paste0(" (", step, ")") else NULL
@@ -784,9 +783,8 @@ csv_download_handler <- function(filename_base, data_fun, stale = NULL) {
     role  = "alert",
     style = "margin-bottom: 10px;",
     shiny::tags$b("\u26a0 Results are out of date", step_txt, "."),
-    "Upstream inputs changed after this run, so the results below were",
-    "produced by an earlier configuration and no longer describe the",
-    "current selections. Re-run to refresh them.", note_txt
+    "Inputs changed after this run. Re-run this step before interpreting or",
+    "exporting these results.", note_txt
   )
 }
 

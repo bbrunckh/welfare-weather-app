@@ -579,15 +579,15 @@ mod_2_01_weathersim_server <- function(id,
       ss  <- tryCatch(selected_surveys(), error = function(e) NULL)
       hist_ok <- tryCatch({ selected_hist(); TRUE }, error = function(e) FALSE)
       if (is.null(so) || nrow(as.data.frame(so)) == 0)
-        missing <- c(missing, "an outcome variable")
+        missing <- c(missing, "an outcome")
       if (is.null(swd) || nrow(as.data.frame(swd)) == 0)
-        missing <- c(missing, "weather variable selections")
+        missing <- c(missing, "weather variables")
       if (is.null(svy) || nrow(as.data.frame(svy)) == 0)
-        missing <- c(missing, "loaded survey + weather data")
+        missing <- c(missing, "survey and weather data")
       if (is.null(ss) || nrow(as.data.frame(ss)) == 0)
-        missing <- c(missing, "a baseline survey selection")
+        missing <- c(missing, "a baseline survey")
       if (!hist_ok)
-        missing <- c(missing, "a historical period selection")
+        missing <- c(missing, "a historical period")
       if (is.null(mf))
         missing <- c(missing, "a fitted Step 1 model (run the Step 1 model first)")
 
@@ -606,8 +606,8 @@ mod_2_01_weathersim_server <- function(id,
               class = "alert alert-warning warning-message",
               role  = "alert",
               style = "font-size: 13px; margin-top: 4px;",
-              shiny::tags$b("Prerequisites: "), "select ",
-              paste(missing, collapse = ", "), "."
+            shiny::tags$b("To run the simulation, first select "),
+            paste(missing, collapse = ", "), "."
             )
           },
           shiny::actionButton(
@@ -725,7 +725,7 @@ mod_2_01_weathersim_server <- function(id,
       sh_residuals <- if (is_rif) "none" else sh$residuals
 
 
-      shiny::withProgress(message = "Running simulation...", value = 0, {
+      shiny::withProgress(message = "Running climate simulation...", value = 0, {
 
         # ---- Run simulation ------------------------------------------------
         result <- tryCatch(
@@ -760,8 +760,9 @@ mod_2_01_weathersim_server <- function(id,
               Sys.getenv("WISEAPP_STEP2_WEATHER_THREADS", "auto"),
               c("auto", "1", "2")
             ),
-            direct_rif_predictions = TRUE,
-            payload_mode        = "compact",
+             direct_rif_predictions = TRUE,
+             seed                = wise_current_seed(),
+             payload_mode        = "compact",
             progress_fn         = function(value, detail)
                                     shiny::setProgress(value = value,
                                                        detail = detail)
@@ -815,7 +816,7 @@ mod_2_01_weathersim_server <- function(id,
         run_status("success")
         completed <- TRUE
 
-        shiny::setProgress(value = 1, detail = "Complete")
+        shiny::setProgress(value = 1, detail = "Results ready")
       })
 
       # ---- REACT-12: partial failures get a prominent persistent warning ----
@@ -827,12 +828,13 @@ mod_2_01_weathersim_server <- function(id,
           sprintf("%s: %s", f$key, f$error), character(1)), collapse = "\n")
         shiny::showNotification(
           ui = tagList(
-            tags$b(sprintf(paste0("\u26a0 Simulation finished with partial results ",
-                                  "(%d of %d simulation keys failed)"),
-                           length(sim_failures), result$n_keys)),
+            tags$b("Simulation completed with some scenarios unavailable."),
             tags$br(),
-            tags$div(style = "font-size: 12px; white-space: pre-wrap;",
-                     fail_txt)
+            tags$details(
+              tags$summary("Show details"),
+              tags$div(style = "font-size: 12px; white-space: pre-wrap;",
+                       fail_txt)
+            )
           ),
           type = "warning", duration = NULL
         )
@@ -847,25 +849,12 @@ mod_2_01_weathersim_server <- function(id,
         result$n_keys_ok %||% result$n_keys, result$n_keys
       ))
 
-      shiny::showNotification(
-        ui = tagList(
-          tags$b(if (length(sim_failures) > 0L)
-            sprintf("\u2713 Simulation complete (partial: %d of %d keys succeeded)",
-                    result$n_keys_ok %||% result$n_keys, result$n_keys)
-            else "\u2713 Simulation complete"),
-          tags$br(),
-          sprintf("%s total | %d/%d key(s) | ~%d runs",
-                  format_elapsed(result$t_elapsed),
-                  result$n_keys_ok %||% result$n_keys,
-                  result$n_keys, result$total_runs),
-          tags$br(),
-          sprintf("Weather: %s | Pipelines: %s | Aggregation: lazy (delta method)",
-                  format_elapsed(result$t_weather %||% 0),
-                  format_elapsed(result$t_elapsed - (result$t_weather %||% 0)))
-        ),
-        type = if (length(sim_failures) > 0L) "warning" else "message",
-        duration = 10
-      )
+      if (!length(sim_failures)) {
+        shiny::showNotification(
+          "Climate scenario results are ready.",
+          type = "message", duration = 3
+        )
+      }
     }, ignoreInit = TRUE)
 
     # ---- Return API --------------------------------------------------------

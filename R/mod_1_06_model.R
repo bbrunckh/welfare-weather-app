@@ -834,9 +834,6 @@ mod_1_06_model_server <- function(id,
       # REACT-02: one fit at a time
       if (!fit_guard$begin()) return(invisible(NULL))
       on.exit(fit_guard$end(), add = TRUE)
-      showNotification("Lasso started...",
-                      type = "message",
-                      duration = 2)
       result <- tryCatch({
         .compute_lasso()
       }, error = function(e) {
@@ -848,13 +845,6 @@ mod_1_06_model_server <- function(id,
         return(NULL)
       })
       lasso_store(result)
-      if (!is.null(result)) {
-        showNotification(
-          "Lasso completed successfully.",
-          type = "message",
-          duration = 3
-        )
-      }
     }, priority = 100)
 
     # ---- Return API ---------------------------------------------------------
@@ -961,11 +951,11 @@ mod_1_06_model_server <- function(id,
       swd <- tryCatch(selected_weather(), error = function(e) NULL)
       svy <- tryCatch(survey_weather(), error = function(e) NULL)
       if (is.null(so) || nrow(as.data.frame(so)) == 0)
-        missing <- c(missing, "an outcome variable")
+        missing <- c(missing, "an outcome")
       if (is.null(swd) || nrow(as.data.frame(swd)) == 0)
-        missing <- c(missing, "weather variable selections")
+        missing <- c(missing, "weather variables")
       if (is.null(svy) || nrow(as.data.frame(svy)) == 0)
-        missing <- c(missing, "loaded survey + weather data")
+        missing <- c(missing, "survey and weather data")
       if (is.null(input$model_type) || !nzchar(input$model_type))
         missing <- c(missing, "a model type")
       missing
@@ -978,8 +968,8 @@ mod_1_06_model_server <- function(id,
         class = "alert alert-warning warning-message",
         role  = "alert",
         style = "font-size: 13px; margin-bottom: 4px;",
-        shiny::tags$b("Prerequisites "), "select ",
-        paste(missing, collapse = ", "), " to enable Run model."
+        shiny::tags$b("To run the model, first select "),
+        paste(missing, collapse = ", "), "."
       )
     })
 

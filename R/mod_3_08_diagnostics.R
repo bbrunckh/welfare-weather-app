@@ -219,7 +219,7 @@ mod_3_08_diagnostics_server <- function(id,
     output$stale_banner_ui <- shiny::renderUI({
       if (isTRUE(stale())) .stale_banner(
         "Step 3 policy diagnostics",
-        note = "Interpretation and exports are disabled until then."
+        note = NULL
       ) else NULL
     })
 
@@ -361,7 +361,7 @@ mod_3_08_diagnostics_server <- function(id,
     outputOptions(output, "diag_summary_table", suspendWhenHidden = FALSE)
 
     # UI-48: register Step 3's diagnostics for the export bundle.
-    wise_export_table(
+      wise_export_table(
       key   = "policy_transfer_summary",
       label = "Social protection transfer summary",
       step  = 3L,
@@ -369,18 +369,24 @@ mod_3_08_diagnostics_server <- function(id,
         d <- diag_data()
         if (is.null(d) || !is.null(d$status)) return(NULL)
         data.frame(
-          metric = c("total_transfer_population", "transfer_per_unit"),
-          value  = round(c(d$transfer_sum, d$transfer_pp), 1),
+          Type = c(
+            "Total transfer $ amount (population-level)",
+            paste0("Per-", unit_word(plural = FALSE, au = d$analysis_unit),
+                   " $ equivalent (eligible ",
+                   unit_word(plural = TRUE, au = d$analysis_unit), ")")
+          ),
+          Value = fmt_num(c(d$transfer_sum, d$transfer_pp), prefix = "$"),
           stringsAsFactors = FALSE
         )
       },
-      description = paste(
+       stale = stale,
+       description = paste(
         "Population-level annual cost of the social protection transfer and",
         "the per-recipient equivalent."
       )
     )
 
-    wise_export_table(
+      wise_export_table(
       key   = "policy_input_diagnostics",
       label = "Policy input diagnostics",
       step  = 3L,
@@ -393,11 +399,10 @@ mod_3_08_diagnostics_server <- function(id,
         count_label <- if (identical(d$analysis_unit, "hh")) "Households changed" else "Observations changed"
         df[[count_label]] <- unname(counts[df$variable])
         df <- df[, c("variable", count_label, setdiff(names(df), c("variable", count_label))), drop = FALSE]
-        num <- setdiff(names(df), "variable")
-        df[num] <- lapply(df[num], function(x) if (is.numeric(x)) round(x, 1) else x)
-        df
+        .format_policy_input_table(df)
       },
-      description = paste(
+       stale = stale,
+       description = paste(
         "Before/after summary of every covariate the policy scenario changed,",
         "so the levers that actually moved can be checked."
       )
@@ -445,6 +450,10 @@ mod_3_08_diagnostics_server <- function(id,
       if (is.null(d) || is.list(d) && !is.null(d$status)) return()
 
       vars <- d$manipulated_vars
+      wise_export_retain(
+        "policy_before_after_",
+        paste0("policy_before_after_", vars)
+      )
       if (length(vars) == 0) return()
 
       for (var in vars) {
@@ -470,6 +479,7 @@ mod_3_08_diagnostics_server <- function(id,
               "variable", var_name, "."
             ),
             width = 9, height = 5
+            , stale = stale
           )
         })
       }
@@ -551,10 +561,11 @@ mod_3_08_diagnostics_server <- function(id,
       label = "Eligibility versus realized treatment assignment",
       step = 3L,
       fun = function() {
-        d <- diag_data(); if (is.null(d)) return(NULL)
-        d$treatment_matrix
+        d <- diag_data(); if (is.null(d) || !is.data.frame(d$treatment_matrix)) return(NULL)
+        .format_policy_treatment_table(d$treatment_matrix)
       },
-      description = paste(
+       stale = stale,
+       description = paste(
         "Weighted eligibility versus realized positive-transfer treatment.",
         "Eligibility is measured before inclusion and exclusion errors;",
         "realized treatment includes the selected targeting-error draw."
@@ -565,10 +576,11 @@ mod_3_08_diagnostics_server <- function(id,
       label = "Policy component coverage summary",
       step = 3L,
       fun = function() {
-        d <- diag_data(); if (is.null(d)) return(NULL)
-        d$component_matrix
+        d <- diag_data(); if (is.null(d) || !is.data.frame(d$component_matrix)) return(NULL)
+        .format_policy_component_table(d$component_matrix, d$analysis_unit)
       },
-      description = "Population affected or covered by social protection and other modeled policy components, including overlap."
+       stale = stale,
+       description = "Population affected or covered by social protection and other modeled policy components, including overlap."
     )
     invisible(NULL)
   })

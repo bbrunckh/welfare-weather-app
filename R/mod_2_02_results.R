@@ -1625,7 +1625,9 @@ mod_2_02_results_server <- function(id,
       )
     }
 
-    output$threshold_csv <- csv_download_handler("climate_outcome_thresholds", function() threshold_table_df())
+    output$threshold_csv <- csv_download_handler(
+      "climate_outcome_thresholds", function() threshold_table_df(), stale = stale
+    )
 
     output$uncertainty_sources_plot <- renderPlot({
       req(variance_breakdown_rv())

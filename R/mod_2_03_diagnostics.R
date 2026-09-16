@@ -344,8 +344,14 @@ mod_2_03_diagnostics_server <- function(id,
         req(length(vars) > 0L)
         plot_weather_density_panel(
           survey_weather(), hist_sim()$weather_raw, vars,
+          weather_labels = {
+            sw <- if (!is.null(selected_weather)) selected_weather() else NULL
+            if (!is.null(sw) && all(c("name", "label") %in% names(sw)))
+              setNames(sw$label, sw$name) else NULL
+          },
           scenario_weather = scenario_weather_data(),
           active_scenarios = active_weather_scenarios(),
+          log_x = rep(FALSE, length(vars)),
           show_regression = TRUE
         )
       },
@@ -377,7 +383,30 @@ mod_2_03_diagnostics_server <- function(id,
       key = "simulation_weather_support_summary",
       label = "Weather support summary",
       step = 2L,
-      fun = weather_support_data,
+      fun = function() {
+        tbl <- weather_support_data()
+        if (is.null(tbl) || !nrow(tbl)) return(NULL)
+        sw <- if (!is.null(selected_weather)) selected_weather() else NULL
+        label_map <- if (!is.null(sw) && all(c("name", "label") %in% names(sw)))
+          setNames(as.character(sw$label), as.character(sw$name)) else character(0)
+        reference_display <- ifelse(
+          tbl$is_binned,
+          paste0("Supported bins: ", tbl$reference_label),
+          paste0(formatC(tbl$robust_lo, format = "fg", digits = 4), " to ",
+                 formatC(tbl$robust_hi, format = "fg", digits = 4))
+        )
+        data.frame(
+          `Weather variable` = ifelse(tbl$weather_variable %in% names(label_map),
+                                      label_map[tbl$weather_variable], tbl$weather_variable),
+          `Scenario / period` = tbl$scenario,
+          `Reference support` = reference_display,
+          `Scenario values` = tbl$n_scenario,
+          `Outside interval` = paste0(tbl$outside_n, " (", round(100 * tbl$outside_share, 1), "%)"),
+          Status = ifelse(tbl$warning, "Review: extrapolation", "Within support"),
+          check.names = FALSE, stringsAsFactors = FALSE
+        )
+      },
+      stale = stale,
       description = "Sample sizes, robust Step 1 support intervals, outside-support shares, and warnings."
     )
     wise_export_figure(
@@ -413,7 +442,8 @@ mod_2_03_diagnostics_server <- function(id,
         req(timeseries_curves)
         tc <- timeseries_curves()
         req(!is.null(tc$tbl), nrow(tc$tbl) > 0L)
-        plot_timeseries_spaghetti(tc$tbl, x_label = tc$x_label)
+        plot_timeseries_spaghetti(tc$tbl, x_label = tc$x_label,
+                                  ensemble_band_q = tc$ens_q)
       },
       description = "Advanced climate-model trajectories by discrete simulation window.",
       width = 10, height = 6.5

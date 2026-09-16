@@ -232,7 +232,7 @@ mod_1_08_modelfit_server <- function(id,
 
     output$additional_stats_csv <- csv_download_handler(
       "model_fit_statistics",
-      function() additional_stats_df()
+      function() additional_stats_df(), stale = fit_stale
     )
 
     wise_export_table(
@@ -261,9 +261,9 @@ mod_1_08_modelfit_server <- function(id,
           req(full_model(), model_fit(), fit_snap())
           h <- model_fit()$weather_terms[idx]
           if (is.na(h) || is.null(h)) return(NULL)
-          plot_resid_weather(rif_single_model(), h,
-                             weather_df = fit_snap()$survey_weather,
-                             x_label = snap_label_fun()(h))
+                             plot_resid_weather(rif_single_model(), h,
+                              weather_df = fit_snap()$survey_weather,
+                              x_label = resid_axis_lab(h))
         },
         description = paste(
           "Model residuals against the realised weather variable, for",

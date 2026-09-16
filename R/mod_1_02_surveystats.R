@@ -247,7 +247,8 @@ mod_1_02_surveystats_server <- function(
       h3_df <- tryCatch(
         load_data(h3_fnames, connection_params()),
         error = function(e) {
-          notify(paste("Failed to load H3 data:", conditionMessage(e)), type = "warning", duration = 5)
+          notify(paste("Some map data could not be loaded. Survey results are still available:",
+                       conditionMessage(e)), type = "warning", duration = 5)
           NULL
         }
       )
@@ -268,7 +269,7 @@ mod_1_02_surveystats_server <- function(
           )
           local_h3
         }, error = function(e) {
-          notify(paste("Could not cache H3 data locally; continuing remote:",
+          notify(paste("Map data could not be prepared locally. Survey results are still available:",
                        conditionMessage(e)), type = "warning", duration = 5)
           h3_df
         })
@@ -307,7 +308,8 @@ mod_1_02_surveystats_server <- function(
           map_data_version(map_data_version() + 1L)
         }, error = function(e) {
           load_ok <<- FALSE
-          notify(paste("Failed to build sample density map:", conditionMessage(e)),
+          notify(paste("The sample coverage map could not be prepared. Other survey results are still available:",
+                       conditionMessage(e)),
                  type = "warning", duration = 5)
         })
 
@@ -331,10 +333,8 @@ mod_1_02_surveystats_server <- function(
           # estimation falls back when it is missing, which changes inference.
           load_ok <<- FALSE
           notify(paste0(
-            "Failed to compute loc_id_panel: ", conditionMessage(e), "\n",
-            "Location-level panels are unavailable, so variance estimation ",
-            "will fall back to survey-design defaults. Treat inference ",
-            "accordingly."
+            "Location-level uncertainty estimates are unavailable, so standard ",
+            "survey-design uncertainty is being used. Details: ", conditionMessage(e)
           ), type = "warning", duration = 8)
         })
       } else {
@@ -349,7 +349,7 @@ mod_1_02_surveystats_server <- function(
       completed <- TRUE
 
       notify(
-        paste0("Loaded ", nrow(ss), " survey file(s) - ", nrow(df), " rows."),
+        "Survey data loaded. Summary statistics and maps are ready.",
         type = "message", duration = 3
       )
 
@@ -732,7 +732,6 @@ mod_1_02_surveystats_server <- function(
         )
 
         survey_tab_added(TRUE)
-        notify("Survey stats ready.", type = "message", duration = 2)
       }
 
       if (survey_tab_added()) select_tab("desc_stats")
