@@ -562,7 +562,6 @@
 .build_decomposition_context <- function(svy_baseline, svy_policy, model_fit, so,
                                          deltas = NULL, skip_coef = FALSE,
                                          F_hat = NULL, baseline_deciles = NULL,
-                                         group_vectors = list(),
                                          run_identity = NULL,
                                          weather_panels = list(),
                                          adverse_bases = list(),
@@ -614,7 +613,6 @@
         baseline_weight_column(svy_baseline) else NULL
       weighted_baseline_deciles(svy_baseline, outcome, weight_col)
     } else NULL,
-    group_vectors = group_vectors %||% list(),
     hazard_products = setNames(
       lapply(weather_panels, function(panel)
         .compute_hazard_values(svy_baseline, panel, weather_vars)),

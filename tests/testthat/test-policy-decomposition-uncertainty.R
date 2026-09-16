@@ -161,35 +161,6 @@ test_that("decile decomposition plot uses engine-specific channels", {
                     "Resilience - Interaction effect") %in% as.character(p$data$channel)))
 })
 
-test_that("categorical baseline grouping preserves missing values and prediction rows", {
-  fx <- make_ols_fixture(N = 80)
-  fx$svy_base$region <- factor(rep(c("North", "South", NA_character_),
-                                    length.out = nrow(fx$svy_base)))
-  fx$svy_base$flag <- as.logical(seq_len(nrow(fx$svy_base)) %% 2L)
-  fx$svy_base$continuous <- seq_len(nrow(fx$svy_base))
-  vl <- data.frame(
-    name = c("region", "flag", "continuous", "welfare", "weight"),
-    label = c("Region", "Flag", "Continuous", "Welfare", "Weight"),
-    hh = c(1, 1, 1, 1, 1), stringsAsFactors = FALSE
-  )
-  candidates <- wiseapp:::decomposition_group_candidates(
-    fx$svy_base, vl, "hh", "welfare"
-  )
-  expect_equal(candidates$name, c("region", "flag"))
-
-  result <- wiseapp::decompose_policy_effect(fx$svy_base, fx$svy_policy,
-                                              fx$model_fit, fx$so)
-  result$delta_total[1] <- NA_real_
-  grouped <- wiseapp:::decomposition_channels_by_group(
-    result, fx$svy_base, "region", is_rif = FALSE
-  )
-  expect_true(all(c("North", "South", "Missing") %in% grouped$group))
-  expect_equal(sum(grouped$n_households), sum(is.finite(result$delta_total)))
-  expect_s3_class(wiseapp:::plot_decomposition_channels_by_group(
-    grouped, "Region", is_rif = FALSE
-  ), "ggplot")
-})
-
 test_that("decomposition module renders core plots for OLS and RIF schemas", {
   fx <- make_ols_fixture(N = 180)
   ols <- wiseapp::decompose_policy_effect(
@@ -230,8 +201,7 @@ test_that("decomposition module renders core plots for OLS and RIF schemas", {
       {
         session$flushReact()
         expect_false(is.null(session$output$headline_decomp_plot))
-      expect_false(is.null(session$output$decomp_decile_plot))
-      expect_false(is.null(session$output$decomp_group_plot))
+        expect_false(is.null(session$output$decomp_bar_plot))
         if (identical(engine, "rif")) {
           expect_false(is.null(session$output$beta_curve_ui))
           expect_false(is.null(session$output$beta_curve_plot1))

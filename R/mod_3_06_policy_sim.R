@@ -60,7 +60,6 @@ mod_3_06_policy_sim_server <- function(id,
                                         education_scenario = reactive(NULL),
                                         selected_model     = reactive(NULL),
                                         model_fit          = reactive(NULL),
-                                        variable_list      = reactive(NULL),
                                         selected_weather   = reactive(NULL),
                                         hist_sim           = reactive(NULL),
                                         saved_scenarios    = reactive(list()),
@@ -336,13 +335,6 @@ mod_3_06_policy_sim_server <- function(id,
                 .prepare_decomp_adverse_bases(hs$weather_raw, hs, hs$so)
               } else list()
 
-              group_vectors_pre <- if (exists("decomposition_group_vectors",
-                                              mode = "function")) {
-                decomposition_group_vectors(
-                  svy, variable_list(), analysis_unit(), hs$so$name
-                )
-              } else list()
-
               # W2-D: all decomposition calls in this published run share
               # invariant survey/model state. Weather hazards remain supplied
               # per panel so member-specific and year-specific weather cannot
@@ -351,7 +343,6 @@ mod_3_06_policy_sim_server <- function(id,
                 svy_baseline = svy, svy_policy = svy_mod, model_fit = mf,
                 so = hs$so, deltas = deltas_pre,
                 skip_coef = skip_coef_val, F_hat = F_hat_pre,
-                group_vectors = group_vectors_pre,
                 run_identity = paste0("generation-", run_generation()),
                 weather_panels = Filter(Negate(is.null), c(
                   list(step2_resolve_weather(hs$weather_raw, hs)),
@@ -470,7 +461,6 @@ mod_3_06_policy_sim_server <- function(id,
                       year_start = sc$year_range[[1]] %||% NA_integer_,
                       year_end = sc$year_range[[2]] %||% NA_integer_,
                       baseline_deciles = decomp_context$baseline_deciles,
-                      group_vectors = decomp_context$group_vectors,
                       is_rif = identical(mf$engine, "rif"),
                       engine = mf$engine
                     )

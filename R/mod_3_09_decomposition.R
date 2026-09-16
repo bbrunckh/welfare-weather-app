@@ -94,8 +94,7 @@ select_decomp_weather_basis <- function(decomp_df, basis = "mean", so = NULL) {
                                           year_start = NA_integer_,
                                           year_end = NA_integer_,
                                           baseline_deciles = NULL,
-                                          is_rif = FALSE, engine = NULL,
-                                          group_vectors = list()) {
+                                          is_rif = FALSE, engine = NULL) {
   if (is.null(decomp_df) || !is.data.frame(decomp_df) || !nrow(decomp_df)) {
     return(NULL)
   }
@@ -136,34 +135,9 @@ select_decomp_weather_basis <- function(decomp_df, basis = "mean", so = NULL) {
     deciles_out$weighted_population <- as.numeric(deciles_out$weighted_population)
   }
 
-  group_rows <- list()
-  if (length(group_vectors)) {
-    for (variable in names(group_vectors)) {
-      labels <- group_vectors[[variable]]
-      ids <- suppressWarnings(as.integer(decomp_df$id))
-      key <- rep(NA_character_, nrow(decomp_df))
-      ok <- is.finite(ids) & ids >= 1L & ids <= length(labels)
-      key[ok] <- labels[ids[ok]]
-      for (group in unique(key[!is.na(key)])) {
-        keep <- key == group
-        row <- c(metadata, list(variable = variable, group = group,
-                                n_households = sum(keep),
-                                weighted_population = sum(weights[keep], na.rm = TRUE)))
-        row <- c(row, .compact_decomp_stats(
-          lapply(values, `[`, keep), weights[keep]
-        ))
-        group_rows[[length(group_rows) + 1L]] <- as.data.frame(
-          row, stringsAsFactors = FALSE
-        )
-      }
-    }
-  }
-  group_out <- if (length(group_rows)) dplyr::bind_rows(group_rows) else data.frame()
-
   list(
     channel = channel,
     decile = deciles_out,
-    group = group_out,
     metadata = metadata,
     engine = channel$engine[[1L]],
     is_rif = isTRUE(is_rif)
@@ -177,7 +151,6 @@ select_decomp_weather_basis <- function(decomp_df, basis = "mean", so = NULL) {
     return(structure(list(
       channel_summary = data.frame(),
       decile_summary = data.frame(),
-      group_summary = data.frame(),
       scenario_metadata = data.frame(),
       engine = engine %||% if (isTRUE(is_rif)) "rif" else "fixest",
       is_rif = isTRUE(is_rif),
@@ -186,16 +159,12 @@ select_decomp_weather_basis <- function(decomp_df, basis = "mean", so = NULL) {
   }
   channel <- dplyr::bind_rows(lapply(parts, `[[`, "channel"))
   decile <- dplyr::bind_rows(lapply(parts, `[[`, "decile"))
-  group <- dplyr::bind_rows(lapply(parts, function(part) {
-    part$group %||% data.frame()
-  }))
   scenario_order <- unique(vapply(parts, function(x) x$metadata$scenario, character(1L)))
   metadata <- unique(channel[, c("scenario", "year_start", "year_end", "engine", "is_rif"),
                              drop = FALSE])
   structure(list(
     channel_summary = channel,
     decile_summary = decile,
-    group_summary = group,
     scenario_metadata = metadata,
     engine = engine %||% parts[[1L]]$engine,
     is_rif = isTRUE(is_rif),
@@ -297,45 +266,6 @@ select_decomp_weather_basis <- function(decomp_df, basis = "mean", so = NULL) {
   out
 }
 
-.compact_future_group_summary <- function(x, scenario, variable,
-                                         basis = "mean", so = NULL,
-                                         is_rif = x$is_rif) {
-  if (is.null(x$group_summary) || !nrow(x$group_summary)) {
-    return(tibble::tibble())
-  }
-  rows <- x$group_summary[
-    as.character(x$group_summary$scenario) == as.character(scenario) &
-      as.character(x$group_summary$variable) == as.character(variable), ,
-    drop = FALSE
-  ]
-  if (!nrow(rows)) return(tibble::tibble())
-  selected <- .compact_future_year(x, scenario, basis, so)
-  if (nrow(selected) && !identical(basis, "mean")) {
-    rows <- rows[rows$sim_year %in% selected$sim_year, , drop = FALSE]
-  }
-  if (!nrow(rows)) return(tibble::tibble())
-  dplyr::bind_rows(lapply(unique(as.character(rows$group)), function(group) {
-    current <- rows[as.character(rows$group) == group, , drop = FALSE]
-    values <- .compact_future_combine(current)
-    tibble::tibble(
-      group = group,
-      level_log = values[["delta_main"]],
-      resilience_log = values[["delta_res"]],
-      total_log = values[["delta_total"]],
-      level_percent = log_effect_to_percent(values[["delta_main"]]),
-      resilience_percent = log_effect_to_percent(values[["delta_res"]]),
-      main_percent = log_effect_to_percent(values[["delta_main"]]),
-      cash_transfer_percent = log_effect_to_percent(values[["delta_sp"]]),
-      covariate_shift_percent = log_effect_to_percent(values[["delta_main_covar"]]),
-      repositioning_percent = log_effect_to_percent(values[["delta_res1"]]),
-      interaction_percent = log_effect_to_percent(values[["delta_res2"]]),
-      total_percent = log_effect_to_percent(values[["delta_total"]]),
-      n_households = sum(current$n_households),
-      weighted_population = sum(current$weighted_population)
-    )
-  }))
-}
-
 .prepare_decomp_adverse_bases <- function(weather_raw, hist_sim, so) {
   raw <- step2_resolve_weather(weather_raw, hist_sim)
   if (is.null(raw) || !nrow(raw)) return(list())
@@ -431,28 +361,21 @@ mod_3_09_decomposition_ui <- function(id) {
       "Who gains, and through which channel?",
       class = "diagnostic-section-heading"
     ),
+    shiny::div(
+      class = "results-section-card diagnostic-section-card",
       shiny::div(
-        class = "results-section-card diagnostic-section-card",
-        shiny::div(
-          style = "display: flex; gap: 14px; flex-wrap: wrap; align-items: center; margin-bottom: 8px;",
+        style = "display: flex; gap: 14px; flex-wrap: wrap; align-items: center; margin-bottom: 8px;",
         pill_toggle(
           ns("decile_weather_basis"),
           label = "Weather-year basis",
           choices = c("Mean" = "mean", "Adverse 1-in-10" = "adverse_10", "Adverse 1-in-20" = "adverse_20"),
-            selected = "mean",
-            layout = "horizontal"
-          ),
+          selected = "mean",
+          layout = "horizontal"
+        ),
         shiny::uiOutput(ns("decile_scenario_ui"))
       ),
-      shiny::h5("By welfare decile", class = "diagnostic-subsection-heading"),
-      wise_plot_output(ns("decomp_decile_plot"),
+      wise_plot_output(ns("decomp_bar_plot"),
                        "Stacked policy-effect channels by baseline welfare decile",
-                       height = "450px"),
-      shiny::h5("By population subgroup", class = "diagnostic-subsection-heading",
-                style = "margin-top: 24px;"),
-      shiny::uiOutput(ns("decomp_group_ui")),
-      wise_plot_output(ns("decomp_group_plot"),
-                       "Stacked policy-effect channels by population subgroup",
                        height = "450px"),
       shiny::uiOutput(ns("decomp_bar_note_ui"))
     ),
@@ -492,10 +415,9 @@ mod_3_09_decomposition_server <- function(id,
                                             decomp_result     = reactive(NULL),
                                             decomp_scenarios  = reactive(list()),
                                             decomp_context    = reactive(NULL),
-                                            model_fit         = reactive(NULL),
-                                            variable_list     = reactive(NULL),
-                                            analysis_unit     = reactive("hh"),
-                                            so                = reactive(NULL),
+                                           model_fit         = reactive(NULL),
+                                           variable_list     = reactive(NULL),
+                                           so                = reactive(NULL),
                                            show_coef_uncertainty = reactive(TRUE),
                                            selected_policies = reactive(NULL),
                                            policy_scenarios = reactive(list()),
@@ -557,35 +479,6 @@ mod_3_09_decomposition_server <- function(id,
       if (length(idx) == 0 || is.na(idx)) var_name
       else as.character(vl$label[idx])
     }
-
-    decomposition_group_candidates_rv <- reactive({
-      decomposition_group_candidates(
-        baseline_svy(), variable_list(), analysis_unit(), so()$name %||% NULL
-      )
-    })
-    decomposition_group_vectors_rv <- reactive({
-      decomposition_group_vectors(
-        baseline_svy(), variable_list(), analysis_unit(), so()$name %||% NULL
-      )
-    })
-
-    output$decomp_group_ui <- shiny::renderUI({
-      candidates <- decomposition_group_candidates_rv()
-      choices <- if (nrow(candidates)) {
-        stats::setNames(candidates$name, candidates$label)
-      } else c("No eligible categorical characteristics" = "")
-      shiny::selectizeInput(
-        ns("decomp_group_var"), label = "Population characteristic",
-        choices = choices,
-        selected = isolate(input$decomp_group_var) %||%
-          if (nrow(candidates)) candidates$name[[1L]] else "",
-        options = list(
-          placeholder = "Select a population characteristic",
-          allowEmptyOption = FALSE,
-          maxOptions = 100L
-        ), width = "360px"
-      )
-    })
 
     weather_basis_label <- reactive({
       switch(input$decomp_weather_basis %||% "mean",
@@ -811,13 +704,11 @@ mod_3_09_decomposition_server <- function(id,
       }
       scenario <- input$decile_scenario %||% "Historical"
       basis <- input$decile_weather_basis %||% "mean"
-      group_var <- input$decomp_group_var %||% ""
       if (identical(scenario, "Historical")) {
         res <- decomp_for_basis(basis)
       } else if (.is_compact_decomp_scenarios(decomp_scenarios())) {
-        if (!nzchar(group_var)) return(tibble::tibble())
-        return(.compact_future_group_summary(
-          decomp_scenarios(), scenario, group_var, basis, outcome, is_rif()
+        return(.compact_future_decile_summary(
+          decomp_scenarios(), scenario, basis, outcome, is_rif()
         ))
       } else {
         sc <- decomp_scenarios()
@@ -826,90 +717,30 @@ mod_3_09_decomposition_server <- function(id,
         res <- select_decomp_weather_basis(res, basis, outcome)
       }
       if (is.null(res) || !is.data.frame(res) || !nrow(res)) return(tibble::tibble())
-      decomposition_channels_by_group(
-        res, baseline_svy(), group_var, is_rif(), decomposition_group_vectors_rv()
+      decomposition_channels_by_decile(
+        res, baseline_svy(), outcome$name %||% "welfare", is_rif(), baseline_deciles()
       )
     })
 
-    decile_plot_data <- reactive({
-      scenario <- input$decile_scenario %||% "Historical"
-      basis <- input$decile_weather_basis %||% "mean"
-      outcome <- so()
-      if (identical(scenario, "Historical")) {
-        decomposition_channels_by_decile(
-          decomp_for_basis(basis), baseline_svy(), outcome$name %||% "welfare",
-          is_rif(), baseline_deciles()
-        )
-      } else if (.is_compact_decomp_scenarios(decomp_scenarios())) {
-        .compact_future_decile_summary(decomp_scenarios(), scenario, basis,
-                                       outcome, is_rif())
-      } else {
-        sc <- decomp_scenarios()
-        res <- if (is.data.frame(sc) && nrow(sc))
-          sc[sc$scenario == scenario, , drop = FALSE] else NULL
-        res <- select_decomp_weather_basis(res, basis, outcome)
-        decomposition_channels_by_decile(
-          res, baseline_svy(), outcome$name %||% "welfare", is_rif(), baseline_deciles()
-        )
-      }
-    })
-
-    output$decomp_decile_plot <- shiny::renderPlot({
-      plot_decomposition_channels_by_decile(decile_plot_data(), is_rif())
+    output$decomp_bar_plot <- shiny::renderPlot({
+      plot_decomposition_channels_by_decile(
+        decile_decomp_data(),
+        is_rif()
+      )
     }, height = 450)
-    outputOptions(output, "decomp_decile_plot", suspendWhenHidden = FALSE)
-
-    output$decomp_group_plot <- shiny::renderPlot({
-      tbl <- decile_decomp_data()
-      if (is.null(tbl) || !nrow(tbl)) {
-        return(blank_plot("Select an eligible population characteristic.", size = 4))
-      }
-      plot_decomposition_channels_by_group(tbl, get_label(input$decomp_group_var), is_rif())
-    }, height = 450)
-    outputOptions(output, "decomp_group_plot", suspendWhenHidden = FALSE)
+    outputOptions(output, "decomp_bar_plot", suspendWhenHidden = FALSE)
     wise_export_figure(
       key = "policy_decomposition_channels_selected",
       label = "Selected policy decomposition channels",
       step = 3L,
       fun = function() {
-        plot_decomposition_channels_by_decile(decile_plot_data(), is_rif())
+        plot_decomposition_channels_by_decile(
+          decile_decomp_data(),
+          is_rif()
+        )
       },
       description = "Policy-effect channels by fixed baseline welfare decile for the selected scenario and weather basis.",
       width = 9, height = 6
-    )
-    wise_export_table(
-      key = "policy_decomposition_channels_selected_data",
-      label = "Selected policy decomposition channels data",
-      step = 3L,
-      fun = function() {
-        decomposition_decile_export(decile_plot_data(), is_rif())
-      },
-      description = "Policy decomposition channels by fixed baseline welfare decile."
-    )
-    wise_export_figure(
-      key = "policy_decomposition_channels_by_group",
-      label = "Policy effect by population subgroup",
-      step = 3L,
-      fun = function() {
-        tbl <- decile_decomp_data()
-        if (is.null(tbl) || !nrow(tbl)) return(NULL)
-        plot_decomposition_channels_by_group(
-          tbl, get_label(input$decomp_group_var), is_rif()
-        )
-      },
-      description = "Policy-effect channels by the selected eligible categorical baseline characteristic.",
-      width = 9, height = 6
-    )
-    wise_export_table(
-      key = "policy_decomposition_channels_by_group_data",
-      label = "Policy effect by population subgroup data",
-      step = 3L,
-      fun = function() {
-        tbl <- decile_decomp_data()
-        if (is.null(tbl) || !nrow(tbl)) return(NULL)
-        decomposition_group_export(tbl, get_label(input$decomp_group_var), is_rif())
-      },
-      description = "Policy-effect channels and population counts by the selected eligible categorical baseline characteristic."
     )
     output$decomp_bar_note_ui <- renderUI({
       basis <- input$decile_weather_basis %||% "mean"
@@ -922,10 +753,9 @@ mod_3_09_decomposition_server <- function(id,
       shiny::tags$p(
         class = "diagnostic-note",
         paste0(
-           "Missing values are shown as a separate subgroup; only units with decomposition predictions are included. ",
-           "Stacked bars separate direct transfer, covariate shift, weather-policy interaction, and - for RIF models only - repositioning. The marker shows the total policy effect for ",
+          "Decile 1 is the poorest. Stacked bars separate direct transfer, covariate shift, weather-policy interaction, and - for RIF models only - repositioning. The marker shows the total policy effect for ",
           basis_label, " under the ", input$decile_scenario %||% "Historical",
-           " scenario. Groups use only baseline units with decomposition predictions."
+          " scenario. Deciles are fixed from weighted observed baseline welfare."
         )
       )
     })
