@@ -13,23 +13,35 @@
 theme_wise <- function(base_size = 16, ...) {
   ggplot2::theme_minimal(base_size = base_size, ...) +
     ggplot2::theme(
-      plot.title    = ggplot2::element_text(size = ggplot2::rel(1.0),
-                                            face = "bold", hjust = 0),
-      plot.subtitle = ggplot2::element_text(size = ggplot2::rel(0.85),
-                                            colour = "grey40"),
-      plot.caption  = ggplot2::element_text(size = ggplot2::rel(0.8),
-                                            colour = "grey40", hjust = 0),
-      axis.title    = ggplot2::element_text(size = ggplot2::rel(1.0),
-                                            colour = .wise_charcoal),
-      axis.text     = ggplot2::element_text(size = ggplot2::rel(0.85),
-                                            colour = .wise_slate),
-      legend.title  = ggplot2::element_text(size = ggplot2::rel(0.9)),
-      legend.text   = ggplot2::element_text(size = ggplot2::rel(0.85)),
-      strip.text    = ggplot2::element_text(size = ggplot2::rel(0.95), face = "bold"),
-      panel.grid.major = ggplot2::element_line(colour = "#E3E9EE",
-                                               linewidth = 0.4),
+      plot.title = ggplot2::element_text(
+        size = ggplot2::rel(1.0),
+        face = "bold", hjust = 0
+      ),
+      plot.subtitle = ggplot2::element_text(
+        size = ggplot2::rel(0.85),
+        colour = "grey40"
+      ),
+      plot.caption = ggplot2::element_text(
+        size = ggplot2::rel(0.8),
+        colour = "grey40", hjust = 0
+      ),
+      axis.title = ggplot2::element_text(
+        size = ggplot2::rel(1.0),
+        colour = .wise_charcoal
+      ),
+      axis.text = ggplot2::element_text(
+        size = ggplot2::rel(0.85),
+        colour = .wise_slate
+      ),
+      legend.title = ggplot2::element_text(size = ggplot2::rel(0.9)),
+      legend.text = ggplot2::element_text(size = ggplot2::rel(0.85)),
+      strip.text = ggplot2::element_text(size = ggplot2::rel(0.95), face = "bold"),
+      panel.grid.major = ggplot2::element_line(
+        colour = "#E3E9EE",
+        linewidth = 0.4
+      ),
       panel.grid.minor = ggplot2::element_blank(),
-      legend.position  = "bottom",
+      legend.position = "bottom",
       legend.justification = "left"
     )
 }
@@ -37,24 +49,24 @@ theme_wise <- function(base_size = 16, ...) {
 # Brand tokens (inst/app/_brand.yml) ----
 # Single source for plot colours so figures match the UI.
 
-.wise_navy      <- "#002244"  # headings, strongest text emphasis
-.wise_blue      <- "#0071BC"  # brand primary: single-series charts
-.wise_cyan      <- "#009FDA"  # bright cyan accent (wave/binscatter means)
-.wise_charcoal  <- "#1D2A35"  # body text colour
-.wise_slate     <- "#5B6B79"  # secondary text, reference/zero lines, baseline
-.wise_grid      <- "#E3E9EE"  # major gridlines
+.wise_navy <- "#002244" # headings, strongest text emphasis
+.wise_blue <- "#0071BC" # brand primary: single-series charts
+.wise_cyan <- "#009FDA" # bright cyan accent (wave/binscatter means)
+.wise_charcoal <- "#1D2A35" # body text colour
+.wise_slate <- "#5B6B79" # secondary text, reference/zero lines, baseline
+.wise_grid <- "#E3E9EE" # major gridlines
 
 # Semantic role colours ----
 # Fixed meaning across every figure; do not repurpose ad hoc.
 
-.wise_history     <- "#808080"  # historical sample / pre-policy reference
-.wise_baseline    <- "#5B6B79"  # baseline scenario in policy comparisons
-.wise_policy      <- "#D55E00"  # policy accent (bright, colourblind-safe)
-.wise_policy_dark <- "#7F2704"  # darker companion for policy outlines/labels
-.wise_marker      <- "#D55E00"  # poverty lines, tau/quantile markers
-.wise_marker_alt  <- "#E69F00"  # secondary markers (quantile labels)
-.wise_support     <- "#243746"  # ensemble / support points and outlines
-.wise_zero        <- "#5B6B79"  # zero / reference lines
+.wise_history <- "#808080" # historical sample / pre-policy reference
+.wise_baseline <- "#5B6B79" # baseline scenario in policy comparisons
+.wise_policy <- "#D55E00" # policy accent (bright, colourblind-safe)
+.wise_policy_dark <- "#7F2704" # darker companion for policy outlines/labels
+.wise_marker <- "#D55E00" # poverty lines, tau/quantile markers
+.wise_marker_alt <- "#E69F00" # secondary markers (quantile labels)
+.wise_support <- "#243746" # ensemble / support points and outlines
+.wise_zero <- "#5B6B79" # zero / reference lines
 
 # Categorical palettes (UI-04) ----
 # Okabe-Ito is the canonical colorblind-safe qualitative palette, reordered
@@ -70,7 +82,7 @@ theme_wise <- function(base_size = 16, ...) {
   "#56B4E9", # sky blue
   "#CC79A7", # reddish purple
   "#F0E442", # yellow
-  "#000000"  # black
+  "#000000" # black
 )
 .wise_cat <- .okabe_ito
 
@@ -97,9 +109,9 @@ wise_scale_fill_okabe_ito <- wise_scale_fill_cat
 # high = vermillion. Canonical keys must match .normalise_ssp().
 
 .ssp_colours <- c(
-  "SSP2-4.5" = "#009E73",   # bluish green (lower emissions)
-  "SSP3-7.0" = "#0072B2",   # blue          (mid emissions)
-  "SSP5-8.5" = "#D55E00"    # vermillion    (high emissions)
+  "SSP2-4.5" = "#009E73", # bluish green (lower emissions)
+  "SSP3-7.0" = "#0072B2", # blue          (mid emissions)
+  "SSP5-8.5" = "#D55E00" # vermillion    (high emissions)
 )
 
 #' Discrete scales bound to the fixed SSP scenario mapping.
@@ -131,7 +143,9 @@ wise_seq_ramp <- function(n) {
 #' @noRd
 blank_plot <- function(message = "Not available", size = 4.2) {
   ggplot2::ggplot() +
-    ggplot2::annotate("text", x = 0.5, y = 0.5, label = message,
-                      size = size, colour = "grey40") +
+    ggplot2::annotate("text",
+      x = 0.5, y = 0.5, label = message,
+      size = size, colour = "grey40"
+    ) +
     ggplot2::theme_void()
 }

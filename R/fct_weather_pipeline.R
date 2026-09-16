@@ -17,11 +17,15 @@
 #' @export
 weather_ref_label <- function(ref_start, ref_end) {
   ref_start <- as.integer(ref_start[1])
-  ref_end   <- as.integer(ref_end[1])
-  if (anyNA(c(ref_start, ref_end))) return(NA_character_)
+  ref_end <- as.integer(ref_end[1])
+  if (anyNA(c(ref_start, ref_end))) {
+    return(NA_character_)
+  }
   if (identical(ref_start, ref_end)) {
-    paste0(ref_start, " month", if (ref_start == 1) "" else "s",
-           " before interview")
+    paste0(
+      ref_start, " month", if (ref_start == 1) "" else "s",
+      " before interview"
+    )
   } else {
     paste0(ref_start, "-", ref_end, " months before interview")
   }
@@ -90,20 +94,24 @@ weather_form_label <- function(cont_binned, num_bins, binning_method,
 #' @noRd
 .wx_timeline_svg <- function(ref_start, ref_end, height = 12) {
   cell <- 10
-  gap  <- 2
+  gap <- 2
   w_interview <- 12
-  width  <- 12 * cell + 11 * gap + 4 + w_interview
+  width <- 12 * cell + 11 * gap + 4 + w_interview
   rects <- vapply(seq_len(12), function(p) {
     months_before <- 13 - p
     fill <- if (months_before >= ref_start && months_before <= ref_end) {
       "#0071BC"
-    } else "#e3e9ee"
-    sprintf('<rect x="%.1f" y="1" width="%d" height="%d" rx="2" fill="%s"/>',
-            (p - 1) * (cell + gap), cell, height - 2, fill)
+    } else {
+      "#e3e9ee"
+    }
+    sprintf(
+      '<rect x="%.1f" y="1" width="%d" height="%d" rx="2" fill="%s"/>',
+      (p - 1) * (cell + gap), cell, height - 2, fill
+    )
   }, character(1))
   x_int <- 12 * cell + 11 * gap + 4
   htmltools::HTML(paste0(
-    '<svg width="', width, '" height="', height, '" viewBox="0 0 ', width, ' ',
+    '<svg width="', width, '" height="', height, '" viewBox="0 0 ', width, " ",
     height, '" aria-hidden="true">',
     paste(rects, collapse = ""),
     '<rect x="', x_int, '" y="1" width="', w_interview,
@@ -117,13 +125,15 @@ weather_form_label <- function(cont_binned, num_bins, binning_method,
   n <- max(2, min(as.integer(n_steps), 5))
   step_w <- (width - (n - 1)) / n
   rects <- vapply(seq_len(n), function(i) {
-    h  <- round(height * i / n)
-    sprintf('<rect x="%.1f" y="%.1f" width="%.1f" height="%.1f" rx="1.5" fill="#0071BC"/>',
-            (i - 1) * (step_w + 1), height - h, step_w, h)
+    h <- round(height * i / n)
+    sprintf(
+      '<rect x="%.1f" y="%.1f" width="%.1f" height="%.1f" rx="1.5" fill="#0071BC"/>',
+      (i - 1) * (step_w + 1), height - h, step_w, h
+    )
   }, character(1))
   htmltools::HTML(paste0(
-    '<svg width="', width, '" height="', height, '" viewBox="0 0 ', width, ' ',
-    height, '" aria-hidden="true">', paste(rects, collapse = ""), '</svg>'
+    '<svg width="', width, '" height="', height, '" viewBox="0 0 ', width, " ",
+    height, '" aria-hidden="true">', paste(rects, collapse = ""), "</svg>"
   ))
 }
 
@@ -138,7 +148,7 @@ weather_form_label <- function(cont_binned, num_bins, binning_method,
     "M2,7 C14,5 26,9 38,7"
   )
   htmltools::HTML(paste0(
-    '<svg width="', width, '" height="', height, '" viewBox="0 0 ', width, ' ',
+    '<svg width="', width, '" height="', height, '" viewBox="0 0 ', width, " ",
     height, '" aria-hidden="true"><path d="', d,
     '" fill="none" stroke="#0071BC" stroke-width="1.8"/></svg>'
   ))
@@ -148,15 +158,15 @@ weather_form_label <- function(cont_binned, num_bins, binning_method,
 #' @noRd
 .wx_devline_svg <- function(width = 24, height = 12) {
   y_mean <- height - 3
-  y_top  <- 2
+  y_top <- 2
   htmltools::HTML(paste0(
-    '<svg width="', width, '" height="', height, '" viewBox="0 0 ', width, ' ',
+    '<svg width="', width, '" height="', height, '" viewBox="0 0 ', width, " ",
     height, '" aria-hidden="true">',
     '<line x1="0" y1="', y_mean, '" x2="', width, '" y2="', y_mean,
     '" stroke="#5B6B79" stroke-width="1" stroke-dasharray="2.5 2"/>',
     '<line x1="3" y1="', y_mean, '" x2="', width - 3, '" y2="', y_top,
     '" stroke="#0071BC" stroke-width="1.6"/>',
-    '</svg>'
+    "</svg>"
   ))
 }
 
@@ -164,15 +174,15 @@ weather_form_label <- function(cont_binned, num_bins, binning_method,
 #' @noRd
 .wx_band_svg <- function(width = 24, height = 12) {
   band_h <- height - 4
-  y_mid  <- 2 + band_h / 2
+  y_mid <- 2 + band_h / 2
   htmltools::HTML(paste0(
-    '<svg width="', width, '" height="', height, '" viewBox="0 0 ', width, ' ',
+    '<svg width="', width, '" height="', height, '" viewBox="0 0 ', width, " ",
     height, '" aria-hidden="true">',
     '<rect x="0" y="2" width="', width, '" height="', band_h,
     '" fill="rgba(0,113,188,.12)"/>',
     '<line x1="0" y1="', y_mid, '" x2="', width, '" y2="', y_mid,
     '" stroke="#5B6B79" stroke-width="1" stroke-dasharray="2.5 2"/>',
-    '</svg>'
+    "</svg>"
   ))
 }
 
@@ -185,7 +195,7 @@ weather_form_label <- function(cont_binned, num_bins, binning_method,
   w <- (as.integer(to) - as.integer(from)) / span * width
   h <- height - 2
   htmltools::HTML(paste0(
-    '<svg width="', width, '" height="', height, '" viewBox="0 0 ', width, ' ',
+    '<svg width="', width, '" height="', height, '" viewBox="0 0 ', width, " ",
     height, '" aria-hidden="true">',
     '<rect x="0" y="1" width="', width, '" height="', h, '" rx="1.5" fill="#e3e9ee"/>',
     '<rect x="', round(x, 1), '" y="1" width="', round(w, 1), '" height="', h,
@@ -232,14 +242,16 @@ weather_pipeline_stages <- function(spec_row) {
 
   if (!identical(as.character(r$transformation[1]), "None")) {
     stages[[length(stages) + 1L]] <- list(
-      glyph  = if (identical(as.character(r$transformation[1]),
-                             "Standardized anomaly")) {
+      glyph = if (identical(
+        as.character(r$transformation[1]),
+        "Standardized anomaly"
+      )) {
         .wx_band_svg()
       } else {
         .wx_devline_svg()
       },
       symbol = NULL,
-      label  = as.character(r$transformation[1])
+      label = as.character(r$transformation[1])
     )
   }
 
@@ -253,7 +265,7 @@ weather_pipeline_stages <- function(spec_row) {
       .wx_curve_svg(poly)
     },
     symbol = NULL,
-    label  = weather_form_label(
+    label = weather_form_label(
       cont_binned    = as.character(r$cont_binned[1]),
       num_bins       = as.integer(r$num_bins[1]),
       binning_method = as.character(r$binning_method[1]),

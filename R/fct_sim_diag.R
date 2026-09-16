@@ -20,9 +20,12 @@
 # Derive int_month from timestamp if not already present.
 #' @noRd
 .add_int_month <- function(df) {
-  if ("int_month" %in% names(df)) return(df)
-  if ("timestamp" %in% names(df))
+  if ("int_month" %in% names(df)) {
+    return(df)
+  }
+  if ("timestamp" %in% names(df)) {
     df$int_month <- as.integer(format(as.Date(df$timestamp), "%m"))
+  }
   df
 }
 
@@ -34,10 +37,11 @@
 .filter_hist_weather <- function(weather_raw, survey_weather) {
   wr <- .add_int_month(weather_raw)
   wr$cal_year <- as.integer(format(as.Date(wr$timestamp), "%Y"))
-  if (!"int_month" %in% names(survey_weather) && "timestamp" %in% names(survey_weather))
+  if (!"int_month" %in% names(survey_weather) && "timestamp" %in% names(survey_weather)) {
     survey_weather$int_month <- as.integer(format(as.Date(survey_weather$timestamp), "%m"))
+  }
   sw_cells <- unique(survey_weather[, c("loc_id", "int_month")])
-  wr        <- merge(wr, sw_cells, by = c("loc_id", "int_month"))
+  wr <- merge(wr, sw_cells, by = c("loc_id", "int_month"))
   wr[!duplicated(wr[, c("loc_id", "int_month", "cal_year")]), ]
 }
 
@@ -72,41 +76,43 @@
 .plot_density_one <- function(survey_weather,
                               weather_raw,
                               weather_var,
-                              weather_label    = NULL,
+                              weather_label = NULL,
                               scenario_weather = NULL,
                               active_scenarios = NULL,
-                              log_x            = FALSE,
-                              show_legend      = TRUE,
-                              show_regression  = FALSE,
-                              hist_filt        = NULL,
-                              reg_filt         = NULL) {
-
+                              log_x = FALSE,
+                              show_legend = TRUE,
+                              show_regression = FALSE,
+                              hist_filt = NULL,
+                              reg_filt = NULL) {
   disp_label <- weather_label %||% weather_var
 
-  if (!weather_var %in% names(weather_raw))
+  if (!weather_var %in% names(weather_raw)) {
     return(ggplot2::ggplot() +
       ggplot2::labs(title = paste0("'", disp_label, "' not found.")))
+  }
 
   if (is.null(hist_filt)) {
     hist_filt <- .filter_hist_weather(weather_raw, survey_weather)
 
-    if (!"int_month" %in% names(survey_weather) && "timestamp" %in% names(survey_weather))
+    if (!"int_month" %in% names(survey_weather) && "timestamp" %in% names(survey_weather)) {
       survey_weather$int_month <- as.integer(format(as.Date(survey_weather$timestamp), "%m"))
-    if ("timestamp" %in% names(survey_weather))
+    }
+    if ("timestamp" %in% names(survey_weather)) {
       survey_weather$cal_year <- as.integer(format(as.Date(survey_weather$timestamp), "%Y"))
+    }
     sw_years <- unique(survey_weather$cal_year)
     reg_filt <- hist_filt[hist_filt$cal_year %in% sw_years, ]
   }
 
   # ---- Detect variable type -------------------------------------------
-  raw_col   <- weather_raw[[weather_var]]
+  raw_col <- weather_raw[[weather_var]]
   is_factor <- is.factor(raw_col) || is.character(raw_col) ||
-               (is.integer(raw_col) && length(unique(raw_col[is.finite(raw_col)])) <= 20)
+    (is.integer(raw_col) && length(unique(raw_col[is.finite(raw_col)])) <= 20)
 
   # ======================================================================
   # FACTOR / CATEGORICAL PATH
   # ======================================================================
-      if (is_factor) {
+  if (is_factor) {
     # Preserve original factor levels for correct bin ordering on x-axis
     raw_levels <- if (is.factor(raw_col)) levels(raw_col) else NULL
 
@@ -123,11 +129,13 @@
 
     hist_vals <- .to_ordered_factor(hist_filt[[weather_var]])
     hist_vals <- hist_vals[!is.na(hist_vals)]
-    if (length(hist_vals) == 0)
-      return(ggplot2::ggplot() + ggplot2::labs(title = "No values to plot."))
+    if (length(hist_vals) == 0) {
+      return(ggplot2::ggplot() +
+        ggplot2::labs(title = "No values to plot."))
+    }
 
     all_df <- data.frame(
-      value  = hist_vals,
+      value = hist_vals,
       source = "Full historical",
       stringsAsFactors = FALSE
     )
@@ -135,18 +143,20 @@
     if (isTRUE(show_regression)) {
       reg_vals_fct <- .to_ordered_factor(reg_filt[[weather_var]])
       reg_vals_fct <- reg_vals_fct[!is.na(reg_vals_fct)]
-      if (length(reg_vals_fct) > 0)
+      if (length(reg_vals_fct) > 0) {
         all_df <- rbind(all_df, data.frame(
-          value  = reg_vals_fct,
-           source = "Model support",
+          value = reg_vals_fct,
+          source = "Model support",
           stringsAsFactors = FALSE
         ))
+      }
     }
 
     if (!is.null(scenario_weather) && length(scenario_weather) > 0) {
       visible_nms <- names(scenario_weather)
-      if (!is.null(active_scenarios))
+      if (!is.null(active_scenarios)) {
         visible_nms <- intersect(visible_nms, active_scenarios)
+      }
       for (scen_nm in visible_nms) {
         sw_df <- scenario_weather[[scen_nm]]
         if (is.null(sw_df) || !weather_var %in% names(sw_df)) next
@@ -154,7 +164,7 @@
         vals <- vals[!is.na(vals)]
         if (length(vals) == 0) next
         all_df <- rbind(all_df, data.frame(
-          value  = vals,
+          value = vals,
           source = scen_nm,
           stringsAsFactors = FALSE
         ))
@@ -163,37 +173,54 @@
 
     # Re-apply factor with correct level order after rbind (which drops factor)
     all_df$value <- factor(all_df$value,
-                           levels = if (!is.null(raw_levels)) raw_levels
-                                    else sort(unique(as.character(all_df$value))))
+      levels = if (!is.null(raw_levels)) {
+        raw_levels
+      } else {
+        sort(unique(as.character(all_df$value)))
+      }
+    )
 
     all_df$source <- factor(all_df$source,
-                             levels = c("Full historical", "Model support",
-                                        setdiff(unique(all_df$source),
-                                                c("Full historical", "Model support"))))
+      levels = c(
+        "Full historical", "Model support",
+        setdiff(
+          unique(all_df$source),
+          c("Full historical", "Model support")
+        )
+      )
+    )
 
-    sources    <- levels(all_df$source)
+    sources <- levels(all_df$source)
     colour_map <- vapply(sources, function(s) {
-      if (s == "Full historical")  return(.wise_history)
-      if (s == "Model support") return(.wise_support)
+      if (s == "Full historical") {
+        return(.wise_history)
+      }
+      if (s == "Model support") {
+        return(.wise_support)
+      }
       ssp_key <- .normalise_ssp(s)
-      if (!is.na(ssp_key) && ssp_key %in% names(.ssp_colours))
-        .ssp_colours[ssp_key] else "#cccccc"
+      if (!is.na(ssp_key) && ssp_key %in% names(.ssp_colours)) {
+        .ssp_colours[ssp_key]
+      } else {
+        "#cccccc"
+      }
     }, character(1))
-    fill_map           <- colour_map
-    fill_map["Model support"] <- "#ffffff"  # white fill with a clear outline
+    fill_map <- colour_map
+    fill_map["Model support"] <- "#ffffff" # white fill with a clear outline
 
     n_scen_shown <- length(unique(all_df$source)) -
-                    sum(c("Full historical", "Model support") %in% all_df$source)
+      sum(c("Full historical", "Model support") %in% all_df$source)
 
-    p <- ggplot2::ggplot(all_df,
-           ggplot2::aes(
-             x      = .data$value,
-             y      = ggplot2::after_stat(prop),
-             group  = .data$source,
-             fill   = .data$source,
-             colour = .data$source
-           )
-         ) +
+    p <- ggplot2::ggplot(
+      all_df,
+      ggplot2::aes(
+        x      = .data$value,
+        y      = ggplot2::after_stat(prop),
+        group  = .data$source,
+        fill   = .data$source,
+        colour = .data$source
+      )
+    ) +
       ggplot2::geom_bar(
         position  = ggplot2::position_dodge(preserve = "single"),
         alpha     = 0.6,
@@ -213,7 +240,7 @@
       ) +
       ggplot2::scale_y_continuous(labels = scales::percent_format(accuracy = 1)) +
       ggplot2::labs(
-        title    = NULL,
+        title = NULL,
         subtitle = NULL,
         x = disp_label,
         y = "Relative frequency"
@@ -232,30 +259,36 @@
   # ======================================================================
   hist_vals <- as.numeric(hist_filt[[weather_var]])
   hist_vals <- hist_vals[is.finite(hist_vals)]
-  reg_vals  <- if (isTRUE(show_regression)) {
+  reg_vals <- if (isTRUE(show_regression)) {
     v <- as.numeric(reg_filt[[weather_var]])
     v[is.finite(v)]
-  } else numeric(0)
+  } else {
+    numeric(0)
+  }
 
-  if (length(hist_vals) == 0)
+  if (length(hist_vals) == 0) {
     return(blank_plot("No finite values to plot."))
+  }
 
   # ---- SSP scenario overlays -------------------------------------------
-  ssp_colour_map   <- character(0)
+  ssp_colour_map <- character(0)
   ssp_linetype_map <- character(0)
-  ssp_df_list      <- list()
+  ssp_df_list <- list()
 
   if (!is.null(scenario_weather) && length(scenario_weather) > 0) {
     visible_nms <- names(scenario_weather)
-    if (!is.null(active_scenarios))
+    if (!is.null(active_scenarios)) {
       visible_nms <- intersect(visible_nms, active_scenarios)
+    }
 
-    yrs_visible    <- vapply(visible_nms,
-                             function(nm) as.integer(sub("-.*", "", .parse_year(nm))),
-                             integer(1))
-    unique_yrs     <- sort(unique(yrs_visible[!is.na(yrs_visible)]))
+    yrs_visible <- vapply(
+      visible_nms,
+      function(nm) as.integer(sub("-.*", "", .parse_year(nm))),
+      integer(1)
+    )
+    unique_yrs <- sort(unique(yrs_visible[!is.na(yrs_visible)]))
     yr_lty_palette <- c("solid", "dashed", "dotted", "dotdash", "longdash")
-    yr_lty_map     <- setNames(
+    yr_lty_map <- setNames(
       yr_lty_palette[seq_len(min(length(unique_yrs), length(yr_lty_palette)))],
       as.character(unique_yrs)
     )
@@ -267,25 +300,31 @@
       vals <- vals[is.finite(vals)]
       if (length(vals) == 0) next
       ssp_key <- .normalise_ssp(scen_nm)
-      col     <- if (!is.na(ssp_key) && ssp_key %in% names(.ssp_colours))
-        .ssp_colours[ssp_key] else "#cccccc"
-      yr_chr  <- as.character(as.integer(sub("-.*", "", .parse_year(scen_nm))))
-      lty     <- if (!is.na(yr_chr) && yr_chr %in% names(yr_lty_map))
-        yr_lty_map[yr_chr] else "solid"
-      ssp_colour_map[scen_nm]   <- col
+      col <- if (!is.na(ssp_key) && ssp_key %in% names(.ssp_colours)) {
+        .ssp_colours[ssp_key]
+      } else {
+        "#cccccc"
+      }
+      yr_chr <- as.character(as.integer(sub("-.*", "", .parse_year(scen_nm))))
+      lty <- if (!is.na(yr_chr) && yr_chr %in% names(yr_lty_map)) {
+        yr_lty_map[yr_chr]
+      } else {
+        "solid"
+      }
+      ssp_colour_map[scen_nm] <- col
       ssp_linetype_map[scen_nm] <- lty
-      ssp_df_list[[scen_nm]]    <- data.frame(
-        value  = vals,
+      ssp_df_list[[scen_nm]] <- data.frame(
+        value = vals,
         source = scen_nm,
         stringsAsFactors = FALSE
       )
     }
   }
 
-  colour_map   <- ssp_colour_map
+  colour_map <- ssp_colour_map
   linetype_map <- ssp_linetype_map
   if (isTRUE(show_regression)) {
-    colour_map["Model support"]   <- .wise_support
+    colour_map["Model support"] <- .wise_support
     linetype_map["Model support"] <- "dashed"
   }
 
@@ -301,21 +340,23 @@
 
   if (isTRUE(show_regression) && length(reg_vals) > 0) {
     p <- p + ggplot2::geom_density(
-      data      = data.frame(value = reg_vals, source = "Model support",
-                             stringsAsFactors = FALSE),
-      mapping   = ggplot2::aes(x = .data$value, colour = .data$source),
-      fill      = NA,
-      linetype  = "dashed",
+      data = data.frame(
+        value = reg_vals, source = "Model support",
+        stringsAsFactors = FALSE
+      ),
+      mapping = ggplot2::aes(x = .data$value, colour = .data$source),
+      fill = NA,
+      linetype = "dashed",
       linewidth = 0.9
     )
   }
 
   for (scen_nm in names(ssp_df_list)) {
     p <- p + ggplot2::geom_density(
-      data      = ssp_df_list[[scen_nm]],
+      data = ssp_df_list[[scen_nm]],
       ggplot2::aes(x = .data$value, colour = .data$source),
-      fill      = NA,
-      linetype  = ssp_linetype_map[[scen_nm]],
+      fill = NA,
+      linetype = ssp_linetype_map[[scen_nm]],
       linewidth = 0.8
     )
   }
@@ -383,12 +424,11 @@
 plot_weather_density_panel <- function(survey_weather,
                                        weather_raw,
                                        weather_vars,
-                                       weather_labels   = NULL,
+                                       weather_labels = NULL,
                                        scenario_weather = NULL,
                                        active_scenarios = NULL,
-                                       log_x            = FALSE,
-                                       show_regression  = FALSE) {
-
+                                       log_x = FALSE,
+                                       show_regression = FALSE) {
   stopifnot(
     is.data.frame(survey_weather),
     is.data.frame(weather_raw),
@@ -396,9 +436,10 @@ plot_weather_density_panel <- function(survey_weather,
   )
 
   weather_vars <- intersect(weather_vars, names(weather_raw))
-  if (length(weather_vars) == 0)
+  if (length(weather_vars) == 0) {
     return(ggplot2::ggplot() +
       ggplot2::labs(title = "No selected weather variables found in weather_raw."))
+  }
 
   # Vectorise log_x to one value per variable
   if (length(log_x) == 1L) log_x <- rep(log_x, length(weather_vars))
@@ -408,17 +449,22 @@ plot_weather_density_panel <- function(survey_weather,
   # recomputing per variable inside .plot_density_one() (see PERF-24).
   hist_filt <- .filter_hist_weather(weather_raw, survey_weather)
   sw_for_years <- survey_weather
-  if (!"int_month" %in% names(sw_for_years) && "timestamp" %in% names(sw_for_years))
+  if (!"int_month" %in% names(sw_for_years) && "timestamp" %in% names(sw_for_years)) {
     sw_for_years$int_month <- as.integer(format(as.Date(sw_for_years$timestamp), "%m"))
-  if ("timestamp" %in% names(sw_for_years))
+  }
+  if ("timestamp" %in% names(sw_for_years)) {
     sw_for_years$cal_year <- as.integer(format(as.Date(sw_for_years$timestamp), "%Y"))
+  }
   sw_years <- unique(sw_for_years$cal_year)
   reg_filt <- hist_filt[hist_filt$cal_year %in% sw_years, ]
 
   panels <- lapply(seq_along(weather_vars), function(i) {
-    wv  <- weather_vars[[i]]
-    lbl <- if (!is.null(weather_labels) && wv %in% names(weather_labels))
-      weather_labels[[wv]] else wv
+    wv <- weather_vars[[i]]
+    lbl <- if (!is.null(weather_labels) && wv %in% names(weather_labels)) {
+      weather_labels[[wv]]
+    } else {
+      wv
+    }
     .plot_density_one(
       survey_weather   = survey_weather,
       weather_raw      = weather_raw,
@@ -434,7 +480,9 @@ plot_weather_density_panel <- function(survey_weather,
     )
   })
 
-  if (length(panels) == 1L) return(panels[[1L]])
+  if (length(panels) == 1L) {
+    return(panels[[1L]])
+  }
 
   patchwork::wrap_plots(panels, nrow = 1) +
     patchwork::plot_layout(guides = "collect") &
@@ -448,7 +496,9 @@ weather_density_data <- function(survey_weather, weather_raw, weather_vars,
                                  active_scenarios = NULL,
                                  show_regression = TRUE) {
   weather_vars <- intersect(weather_vars, names(weather_raw))
-  if (!length(weather_vars)) return(data.frame())
+  if (!length(weather_vars)) {
+    return(data.frame())
+  }
   hist_filt <- .filter_hist_weather(weather_raw, survey_weather)
   if (!"int_month" %in% names(survey_weather) && "timestamp" %in% names(survey_weather)) {
     survey_weather$int_month <- as.integer(format(as.Date(survey_weather$timestamp), "%m"))
@@ -459,7 +509,9 @@ weather_density_data <- function(survey_weather, weather_raw, weather_vars,
   reg_filt <- hist_filt[hist_filt$cal_year %in% unique(survey_weather$cal_year), , drop = FALSE]
   rows <- list()
   add <- function(df, source) {
-    if (is.null(df)) return()
+    if (is.null(df)) {
+      return()
+    }
     for (wv in weather_vars) {
       x <- suppressWarnings(as.numeric(df[[wv]]))
       rows[[length(rows) + 1L]] <<- data.frame(
@@ -468,7 +520,7 @@ weather_density_data <- function(survey_weather, weather_raw, weather_vars,
       )
     }
   }
-    add(reg_filt, "Model support")
+  add(reg_filt, "Model support")
   add(hist_filt, "Full historical archive")
   visible <- names(scenario_weather %||% list())
   if (!is.null(active_scenarios)) visible <- intersect(visible, active_scenarios)
@@ -486,23 +538,32 @@ weather_support_summary <- function(regression_weather, scenario_weather,
   }
   scenarios <- scenario_weather %||% list()
   rows <- lapply(intersect(weather_vars, names(regression_weather)), function(v) {
-    spec <- if (!is.null(weather_specs) && "name" %in% names(weather_specs))
-      weather_specs[weather_specs$name == v, , drop = FALSE] else NULL
+    spec <- if (!is.null(weather_specs) && "name" %in% names(weather_specs)) {
+      weather_specs[weather_specs$name == v, , drop = FALSE]
+    } else {
+      NULL
+    }
     is_binned <- !is.null(spec) && nrow(spec) &&
       identical(as.character(spec$cont_binned[1]), "Binned")
     if (is_binned) {
       ref <- as.character(regression_weather[[v]])
       ref <- ref[!is.na(ref) & nzchar(ref)]
       supported <- unique(ref)
-      if (!length(supported)) return(NULL)
+      if (!length(supported)) {
+        return(NULL)
+      }
       reference_label <- paste(supported, collapse = ", ")
       robust <- c(NA_real_, NA_real_)
     } else {
       ref <- suppressWarnings(as.numeric(regression_weather[[v]]))
       ref <- ref[is.finite(ref)]
-      if (!length(ref)) return(NULL)
-      robust <- as.numeric(stats::quantile(ref, c(lower, upper), names = FALSE,
-                                           na.rm = TRUE, type = 8))
+      if (!length(ref)) {
+        return(NULL)
+      }
+      robust <- as.numeric(stats::quantile(ref, c(lower, upper),
+        names = FALSE,
+        na.rm = TRUE, type = 8
+      ))
       supported <- NULL
       reference_label <- NA_character_
     }
@@ -515,9 +576,14 @@ weather_support_summary <- function(regression_weather, scenario_weather,
         x <- suppressWarnings(as.numeric(x_raw))
         x[is.finite(x)]
       }
-      if (!length(x)) return(NULL)
-      outside <- if (is_binned) !(x %in% supported) else
+      if (!length(x)) {
+        return(NULL)
+      }
+      outside <- if (is_binned) {
+        !(x %in% supported)
+      } else {
         x < robust[[1L]] | x > robust[[2L]]
+      }
       data.frame(
         weather_variable = v, scenario = nm,
         n_reference = length(ref), n_scenario = length(x),
@@ -526,10 +592,17 @@ weather_support_summary <- function(regression_weather, scenario_weather,
         is_binned = is_binned,
         outside_n = sum(outside), outside_share = mean(outside),
         warning = mean(outside) > warn_share,
-        warning_rule = if (is_binned) paste0("Reference bins; warn above ",
-                                              warn_share * 100, "% outside") else
-          paste0("Robust ", lower * 100, "%-", upper * 100,
-                 "% reference interval; warn above ", warn_share * 100, "% outside"),
+        warning_rule = if (is_binned) {
+          paste0(
+            "Reference bins; warn above ",
+            warn_share * 100, "% outside"
+          )
+        } else {
+          paste0(
+            "Robust ", lower * 100, "%-", upper * 100,
+            "% reference interval; warn above ", warn_share * 100, "% outside"
+          )
+        },
         stringsAsFactors = FALSE
       )
     })
@@ -547,23 +620,27 @@ weather_support_summary <- function(regression_weather, scenario_weather,
   vals <- as.numeric(vals)
   vals <- vals[is.finite(vals)]
   if (!length(vals)) {
-    return(data.frame(x = seq(x_lo, x_hi, length.out = n),
-                      density_raw = 0))
+    return(data.frame(
+      x = seq(x_lo, x_hi, length.out = n),
+      density_raw = 0
+    ))
   }
 
   rd <- build_ridge_distribution_data(
     data.frame(.x = vals, .g = "ridge", .f = "ridge"),
-    x_var        = ".x",
-    group_var    = ".g",
-    fill_var     = ".f",
-    n_bins       = 256L,
-    n_grid       = n,
-    x_range      = c(x_lo, x_hi),
-    bandwidth    = bw
+    x_var = ".x",
+    group_var = ".g",
+    fill_var = ".f",
+    n_bins = 256L,
+    n_grid = n,
+    x_range = c(x_lo, x_hi),
+    bandwidth = bw
   )
   if (is.null(rd)) {
-    return(data.frame(x = seq(x_lo, x_hi, length.out = n),
-                      density_raw = 0))
+    return(data.frame(
+      x = seq(x_lo, x_hi, length.out = n),
+      density_raw = 0
+    ))
   }
   data.frame(x = rd$data$x, density_raw = rd$data$height)
 }
@@ -598,27 +675,31 @@ build_ridge_kde_data <- function(hist_preds,
                                  scenario_list,
                                  outcome_name,
                                  actual_vals = NULL,
-                                 log_scale   = FALSE) {
-
-  if (is.null(hist_preds) || !outcome_name %in% names(hist_preds))
+                                 log_scale = FALSE) {
+  if (is.null(hist_preds) || !outcome_name %in% names(hist_preds)) {
     return(NULL)
+  }
 
   yr_col <- intersect(c("sim_year", "year"), names(hist_preds))[1]
-  if (is.na(yr_col)) return(NULL)
+  if (is.na(yr_col)) {
+    return(NULL)
+  }
 
   hist_preds$.__yr <- as.integer(as.character(hist_preds[[yr_col]]))
-  sim_years        <- sort(unique(hist_preds$.__yr[!is.na(hist_preds$.__yr)]))
+  sim_years <- sort(unique(hist_preds$.__yr[!is.na(hist_preds$.__yr)]))
 
   hist_groups <- lapply(sim_years, function(yr) {
     vals <- as.numeric(hist_preds[[outcome_name]][hist_preds$.__yr == yr])
     vals[is.finite(vals)]
   })
   names(hist_groups) <- as.character(sim_years)
-  hist_groups        <- Filter(function(v) length(v) >= 2L, hist_groups)
-  if (length(hist_groups) == 0L) return(NULL)
+  hist_groups <- Filter(function(v) length(v) >= 2L, hist_groups)
+  if (length(hist_groups) == 0L) {
+    return(NULL)
+  }
 
   scenario_groups <- list()
-  yr_col_fut      <- yr_col
+  yr_col_fut <- yr_col
 
   for (scen_nm in names(scenario_list)) {
     sp <- scenario_list[[scen_nm]]$preds
@@ -633,14 +714,15 @@ build_ridge_kde_data <- function(hist_preds,
       vals <- as.numeric(sp[[outcome_name]][sp$.__yr == yr])
       vals <- vals[is.finite(vals)]
       if (length(vals) < 2L) next
-      if (is.null(scenario_groups[[scen_nm]]))
+      if (is.null(scenario_groups[[scen_nm]])) {
         scenario_groups[[scen_nm]] <- list()
+      }
       scenario_groups[[scen_nm]][[as.character(yr)]] <- vals
     }
   }
 
   all_vals <- c(
-    unlist(hist_groups,     use.names = FALSE),
+    unlist(hist_groups, use.names = FALSE),
     unlist(scenario_groups, use.names = FALSE)
   )
   all_vals <- all_vals[is.finite(all_vals)]
@@ -648,13 +730,15 @@ build_ridge_kde_data <- function(hist_preds,
   # every simulated draw just to determine the display range and KDE scale.
   global_rd <- build_ridge_distribution_data(
     data.frame(.x = all_vals, .g = "all", .f = "all"),
-    x_var     = ".x",
+    x_var = ".x",
     group_var = ".g",
-    fill_var  = ".f",
-    n_bins    = 512L,
-    n_grid    = 64L
+    fill_var = ".f",
+    n_bins = 512L,
+    n_grid = 64L
   )
-  if (is.null(global_rd)) return(NULL)
+  if (is.null(global_rd)) {
+    return(NULL)
+  }
   global_bw <- global_rd$bandwidth
   qs <- global_rd$quantile_range
 
@@ -666,19 +750,25 @@ build_ridge_kde_data <- function(hist_preds,
   # predicted = unique back-transformed outcome values (outcome_name col is
   # already back-transformed by apply_log_backtransform(); .fitted is NOT).
   # Deduplicate across draws so bandwidth is estimated at training-sample scale.
-  predicted_vals <- tryCatch({
-    v <- unique(as.numeric(hist_preds[[outcome_name]]))
-    v[is.finite(v)]
-  }, error = function(e) numeric(0))
-
-  actual_vals_clean <- tryCatch({
-    if (is.null(actual_vals)) {
-      numeric(0)
-    } else {
-      v <- as.numeric(actual_vals)
+  predicted_vals <- tryCatch(
+    {
+      v <- unique(as.numeric(hist_preds[[outcome_name]]))
       v[is.finite(v)]
-    }
-  }, error = function(e) numeric(0))
+    },
+    error = function(e) numeric(0)
+  )
+
+  actual_vals_clean <- tryCatch(
+    {
+      if (is.null(actual_vals)) {
+        numeric(0)
+      } else {
+        v <- as.numeric(actual_vals)
+        v[is.finite(v)]
+      }
+    },
+    error = function(e) numeric(0)
+  )
 
   # Separate bandwidth for regression curves: estimated from the regression
   # sample alone so it is not dominated by the 30yr x N hist_groups pool.
@@ -689,16 +779,21 @@ build_ridge_kde_data <- function(hist_preds,
       n_bins = 256L, n_grid = 64L
     )
     if (is.null(pred_rd)) global_bw else pred_rd$bandwidth
-  } else global_bw
+  } else {
+    global_bw
+  }
 
   # Materialise every curve once while the source vectors are available. The
   # renderer can then switch between display modes without re-scanning the
   # simulation draws or re-running a KDE for each visible curve.
   hist_curves <- lapply(hist_groups, .kde_group,
-                        bw = global_bw, x_lo = qs[1L], x_hi = qs[2L])
+    bw = global_bw, x_lo = qs[1L], x_hi = qs[2L]
+  )
   scenario_curves <- lapply(scenario_groups, function(by_year) {
-    lapply(by_year, .kde_group, bw = global_bw,
-           x_lo = qs[1L], x_hi = qs[2L])
+    lapply(by_year, .kde_group,
+      bw = global_bw,
+      x_lo = qs[1L], x_hi = qs[2L]
+    )
   })
   scenario_pooled_curves <- lapply(scenario_groups, function(by_year) {
     vals <- unlist(by_year, use.names = FALSE)
@@ -706,34 +801,38 @@ build_ridge_kde_data <- function(hist_preds,
   })
   predicted_curve <- if (length(predicted_vals) >= 2L) {
     .kde_group(predicted_vals, bw = reg_bw, x_lo = qs[1L], x_hi = qs[2L])
-  } else NULL
+  } else {
+    NULL
+  }
   actual_curve <- if (length(actual_vals_clean) >= 2L) {
     .kde_group(actual_vals_clean, bw = reg_bw, x_lo = qs[1L], x_hi = qs[2L])
-  } else NULL
+  } else {
+    NULL
+  }
 
-  scen_nms     <- names(scenario_groups)
-  ssp_keys     <- vapply(scen_nms, .normalise_ssp, character(1))
+  scen_nms <- names(scenario_groups)
+  ssp_keys <- vapply(scen_nms, .normalise_ssp, character(1))
   fore_yrs_raw <- vapply(scen_nms, function(nm) {
     m <- regmatches(nm, regexpr("[0-9]{4}", nm))
     if (length(m) == 0L) NA_integer_ else as.integer(m)
   }, integer(1))
 
   list(
-    hist_groups     = hist_groups,
+    hist_groups = hist_groups,
     scenario_groups = scenario_groups,
-    global_bw       = global_bw,
-    x_lo_tr         = qs[[1L]],
-    x_hi_tr         = qs[[2L]],
-    scen_nms        = scen_nms,
-    ssp_keys        = ssp_keys,
-    fore_yrs_raw    = fore_yrs_raw,
-    sim_years       = sim_years,
-    log_scale       = log_scale,
-    outcome_name    = outcome_name,
-    predicted_vals  = predicted_vals,
-    actual_vals     = actual_vals_clean,
-    reg_bw          = reg_bw,
-    ridge_curves    = list(
+    global_bw = global_bw,
+    x_lo_tr = qs[[1L]],
+    x_hi_tr = qs[[2L]],
+    scen_nms = scen_nms,
+    ssp_keys = ssp_keys,
+    fore_yrs_raw = fore_yrs_raw,
+    sim_years = sim_years,
+    log_scale = log_scale,
+    outcome_name = outcome_name,
+    predicted_vals = predicted_vals,
+    actual_vals = actual_vals_clean,
+    reg_bw = reg_bw,
+    ridge_curves = list(
       hist            = hist_curves,
       scenario        = scenario_curves,
       scenario_pooled = scenario_pooled_curves,
@@ -780,47 +879,49 @@ build_ridge_kde_data <- function(hist_preds,
 #' @export
 plot_year_anchored_ridge <- function(kde_data,
                                      x_label,
-                                     primary_group   = "hist_year",
-                                     log_scale       = NULL,
-                                     ridge_scale     = 1.5,
-                                     row_gap         = 1.0,
+                                     primary_group = "hist_year",
+                                     log_scale = NULL,
+                                     ridge_scale = 1.5,
+                                     row_gap = 1.0,
                                      show_regression = FALSE,
-                                     scenario_names  = NULL) {
-
-  if (is.null(kde_data))
-    return(ggplot2::ggplot() + ggplot2::labs(title = "No simulation data available."))
+                                     scenario_names = NULL) {
+  if (is.null(kde_data)) {
+    return(ggplot2::ggplot() +
+      ggplot2::labs(title = "No simulation data available."))
+  }
 
   use_log <- if (!is.null(log_scale)) isTRUE(log_scale) else isTRUE(kde_data$log_scale)
 
-  hist_groups     <- kde_data$hist_groups
+  hist_groups <- kde_data$hist_groups
   # Apply scenario filter: NULL means show all; otherwise subset to named keys.
-  scenario_groups <- if (!is.null(scenario_names))
+  scenario_groups <- if (!is.null(scenario_names)) {
     kde_data$scenario_groups[intersect(scenario_names, names(kde_data$scenario_groups))]
-  else
+  } else {
     kde_data$scenario_groups
-  global_bw       <- kde_data$global_bw
-  x_lo_tr         <- kde_data$x_lo_tr
-  x_hi_tr         <- kde_data$x_hi_tr
+  }
+  global_bw <- kde_data$global_bw
+  x_lo_tr <- kde_data$x_lo_tr
+  x_hi_tr <- kde_data$x_hi_tr
   # Derive scen_nms / ssp_keys / fore_yrs_raw from filtered scenario_groups
   # so they stay in sync when scenario_names subsets the full KDE data.
-  scen_nms     <- names(scenario_groups)
-  ssp_keys     <- vapply(scen_nms, .normalise_ssp, character(1))
+  scen_nms <- names(scenario_groups)
+  ssp_keys <- vapply(scen_nms, .normalise_ssp, character(1))
   fore_yrs_raw <- suppressWarnings(
     vapply(scen_nms, function(nm) as.integer(.parse_year(nm)), integer(1))
   )
-  predicted_vals  <- kde_data$predicted_vals  %||% numeric(0)
-  actual_vals     <- kde_data$actual_vals     %||% numeric(0)
-  ridge_curves    <- kde_data$ridge_curves %||% list()
-  hist_curves     <- ridge_curves$hist %||% list()
+  predicted_vals <- kde_data$predicted_vals %||% numeric(0)
+  actual_vals <- kde_data$actual_vals %||% numeric(0)
+  ridge_curves <- kde_data$ridge_curves %||% list()
+  hist_curves <- ridge_curves$hist %||% list()
   scenario_curves <- ridge_curves$scenario %||% list()
-  pooled_curves   <- ridge_curves$scenario_pooled %||% list()
+  pooled_curves <- ridge_curves$scenario_pooled %||% list()
 
 
-  hist_fill    <- "#d0d0d0"
-  hist_colour  <- "#333333"
-  hist_alpha   <- 0.55
+  hist_fill <- "#d0d0d0"
+  hist_colour <- "#333333"
+  hist_alpha <- 0.55
 
-  yr_lty_palette  <- c("solid", "dashed", "dotted", "longdash", "twodash")
+  yr_lty_palette <- c("solid", "dashed", "dotted", "longdash", "twodash")
   unique_fore_yrs <- sort(unique(fore_yrs_raw[!is.na(fore_yrs_raw)]))
   fore_yr_lty_map <- setNames(
     yr_lty_palette[seq_len(min(length(unique_fore_yrs), length(yr_lty_palette)))],
@@ -841,35 +942,36 @@ plot_year_anchored_ridge <- function(kde_data,
   )
 
   .run_kde <- function(vals, precomputed = NULL) {
-    if (!is.null(precomputed)) return(precomputed)
+    if (!is.null(precomputed)) {
+      return(precomputed)
+    }
     kv <- vals[is.finite(vals)]
     kd <- .kde_group(kv, global_bw, x_lo_tr, x_hi_tr)
-    dns  <- kd$density_raw
-    dns  <- dns / max(dns[is.finite(dns) & dns > 0], 1e-12)  # normalise peak to 1
+    dns <- kd$density_raw
+    dns <- dns / max(dns[is.finite(dns) & dns > 0], 1e-12) # normalise peak to 1
     list(x = kd$x, density_raw = dns)
   }
   # Mode A: hist_year primary                                             #
   # ==================================================================== #
   if (primary_group == "hist_year") {
-
     yr_rank <- setNames(
       seq_len(length(hist_groups)) * row_gap,
       names(hist_groups)
     )
 
     hist_ribbons <- list()
-    scen_lines   <- list()
+    scen_lines <- list()
 
     for (yr_chr in names(hist_groups)) {
       y_anch <- yr_rank[yr_chr]
-      kd     <- .run_kde(
+      kd <- .run_kde(
         hist_groups[[yr_chr]], hist_curves[[yr_chr]]
       )
 
       hist_ribbons[[yr_chr]] <- data.frame(
-        x         = kd$x,
-        ymin      = y_anch,
-        ymax      = y_anch + kd$density_raw * ridge_scale,
+        x = kd$x,
+        ymin = y_anch,
+        ymax = y_anch + kd$density_raw * ridge_scale,
         row.names = NULL,
         stringsAsFactors = FALSE
       )
@@ -884,10 +986,10 @@ plot_year_anchored_ridge <- function(kde_data,
           scenario_curves[[nm]][[yr_chr]]
         )
         scen_lines[[paste0(nm, "__", yr_chr)]] <- data.frame(
-          x         = kd2$x,
-          y         = y_anch + kd2$density_raw * ridge_scale * 0.85,
-          line_col  = scen_colour_map[nm],
-          lty       = scen_lty_map[nm],
+          x = kd2$x,
+          y = y_anch + kd2$density_raw * ridge_scale * 0.85,
+          line_col = scen_colour_map[nm],
+          lty = scen_lty_map[nm],
           row.names = NULL,
           stringsAsFactors = FALSE
         )
@@ -896,37 +998,39 @@ plot_year_anchored_ridge <- function(kde_data,
 
     y_breaks <- as.numeric(yr_rank)
     y_labels <- paste0("  ", names(yr_rank))
-    subtitle  <- paste0(
+    subtitle <- paste0(
       "Primary: historical year.  Grey fill = base year.  ",
       "Coloured lines = scenario perturbations at same baseline.  ",
       "X clipped P1\u2013P99."
     )
 
-  # ==================================================================== #
-  # Mode B: scenario primary                                              #
-  # ==================================================================== #
+    # ==================================================================== #
+    # Mode B: scenario primary                                              #
+    # ==================================================================== #
   } else if (primary_group == "scenario") {
-
     # scenario mode: sort row_keys by SSP then forecast year
-    row_keys <- if (length(scen_nms) > 0)
+    row_keys <- if (length(scen_nms) > 0) {
       scen_nms[order(ssp_keys[scen_nms], fore_yrs_raw[scen_nms])]
-    else scen_nms
-    if (length(row_keys) == 0L)
+    } else {
+      scen_nms
+    }
+    if (length(row_keys) == 0L) {
       return(ggplot2::ggplot() +
         ggplot2::labs(title = "No scenario data. Run future scenarios first."))
+    }
 
     row_rank <- setNames(seq_len(length(row_keys)) * row_gap, row_keys)
 
-    yr_chrs   <- names(hist_groups)
-    n_yrs     <- length(yr_chrs)
+    yr_chrs <- names(hist_groups)
+    n_yrs <- length(yr_chrs)
     grey_vals <- seq(0.75, 0.15, length.out = max(n_yrs, 1L))
-    yr_grey   <- setNames(grDevices::grey(grey_vals), yr_chrs)
+    yr_grey <- setNames(grDevices::grey(grey_vals), yr_chrs)
 
     hist_ribbons <- list()
-    scen_lines   <- list()
+    scen_lines <- list()
 
     for (scen_nm in row_keys) {
-      y_anch        <- row_rank[scen_nm]
+      y_anch <- row_rank[scen_nm]
       all_scen_vals <- unlist(scenario_groups[[scen_nm]], use.names = FALSE)
       all_scen_vals <- all_scen_vals[is.finite(all_scen_vals)]
       if (length(all_scen_vals) >= 2L) {
@@ -934,9 +1038,9 @@ plot_year_anchored_ridge <- function(kde_data,
           all_scen_vals, pooled_curves[[scen_nm]]
         )
         hist_ribbons[[scen_nm]] <- data.frame(
-          x         = kd_base$x,
-          ymin      = y_anch,
-          ymax      = y_anch + kd_base$density_raw * ridge_scale,
+          x = kd_base$x,
+          ymin = y_anch,
+          ymax = y_anch + kd_base$density_raw * ridge_scale,
           row.names = NULL, stringsAsFactors = FALSE
         )
       }
@@ -955,36 +1059,37 @@ plot_year_anchored_ridge <- function(kde_data,
     }
 
     y_breaks <- as.numeric(row_rank)
-    y_labels  <- paste0("  ", names(row_rank))
-    subtitle  <- paste0(
+    y_labels <- paste0("  ", names(row_rank))
+    subtitle <- paste0(
       "Primary: scenario * forecast year.  ",
       "Fill = pooled scenario distribution.  ",
       "Grey lines = individual historical years (darkest = most recent).  ",
       "X clipped P1-P99."
     )
-
   } else {
-
     # forecast_yr mode: sort row_keys by forecast year then SSP
-    row_keys <- if (length(scen_nms) > 0)
+    row_keys <- if (length(scen_nms) > 0) {
       scen_nms[order(fore_yrs_raw[scen_nms], ssp_keys[scen_nms])]
-    else scen_nms
-    if (length(row_keys) == 0L)
+    } else {
+      scen_nms
+    }
+    if (length(row_keys) == 0L) {
       return(ggplot2::ggplot() +
         ggplot2::labs(title = "No scenario data. Run future scenarios first."))
+    }
 
     row_rank <- setNames(seq_len(length(row_keys)) * row_gap, row_keys)
 
-    yr_chrs   <- names(hist_groups)
-    n_yrs     <- length(yr_chrs)
+    yr_chrs <- names(hist_groups)
+    n_yrs <- length(yr_chrs)
     grey_vals <- seq(0.75, 0.15, length.out = max(n_yrs, 1L))
-    yr_grey   <- setNames(grDevices::grey(grey_vals), yr_chrs)
+    yr_grey <- setNames(grDevices::grey(grey_vals), yr_chrs)
 
     hist_ribbons <- list()
-    scen_lines   <- list()
+    scen_lines <- list()
 
     for (scen_nm in row_keys) {
-      y_anch        <- row_rank[scen_nm]
+      y_anch <- row_rank[scen_nm]
       all_scen_vals <- unlist(scenario_groups[[scen_nm]], use.names = FALSE)
       all_scen_vals <- all_scen_vals[is.finite(all_scen_vals)]
       if (length(all_scen_vals) >= 2L) {
@@ -992,9 +1097,9 @@ plot_year_anchored_ridge <- function(kde_data,
           all_scen_vals, pooled_curves[[scen_nm]]
         )
         hist_ribbons[[scen_nm]] <- data.frame(
-          x         = kd_base$x,
-          ymin      = y_anch,
-          ymax      = y_anch + kd_base$density_raw * ridge_scale,
+          x = kd_base$x,
+          ymin = y_anch,
+          ymax = y_anch + kd_base$density_raw * ridge_scale,
           row.names = NULL, stringsAsFactors = FALSE
         )
       }
@@ -1013,14 +1118,13 @@ plot_year_anchored_ridge <- function(kde_data,
     }
 
     y_breaks <- as.numeric(row_rank)
-    y_labels  <- paste0("  ", names(row_rank))
-    subtitle  <- paste0(
+    y_labels <- paste0("  ", names(row_rank))
+    subtitle <- paste0(
       "Primary: forecast year * scenario.  ",
       "Fill = pooled scenario distribution.  ",
       "Grey lines = individual historical years (darkest = most recent).  ",
       "X clipped P1-P99."
     )
-
   }
 
   # ==================================================================== #
@@ -1064,34 +1168,39 @@ plot_year_anchored_ridge <- function(kde_data,
   #   predicted_vals  -- dashed black line  (simulated outcome distribution)
   #   actual_vals     -- dotted black line  (observed survey outcomes)
   has_predicted <- isTRUE(show_regression) && length(predicted_vals) >= 2L
-  has_actual    <- isTRUE(show_regression) && length(actual_vals)    >= 2L
+  has_actual <- isTRUE(show_regression) && length(actual_vals) >= 2L
 
   if (has_predicted || has_actual) {
-    rank_vec <- tryCatch(yr_rank, error = function(e)
-                  tryCatch(row_rank, error = function(e2) c(1)))
+    rank_vec <- tryCatch(yr_rank, error = function(e) {
+      tryCatch(row_rank, error = function(e2) c(1))
+    })
     y_reg <- min(as.numeric(rank_vec)) - row_gap * 0.8
 
     if (has_predicted) {
-      reg_bw_use  <- kde_data$reg_bw %||% global_bw
+      reg_bw_use <- kde_data$reg_bw %||% global_bw
       kd_pred_raw <- ridge_curves$predicted %||%
-        .kde_group(predicted_vals[is.finite(predicted_vals)],
-                   reg_bw_use, x_lo_tr, x_hi_tr)
-      pred_dns    <- kd_pred_raw$density_raw
-      pred_dns    <- pred_dns / max(pred_dns[is.finite(pred_dns) & pred_dns > 0], 1e-12)
+        .kde_group(
+          predicted_vals[is.finite(predicted_vals)],
+          reg_bw_use, x_lo_tr, x_hi_tr
+        )
+      pred_dns <- kd_pred_raw$density_raw
+      pred_dns <- pred_dns / max(pred_dns[is.finite(pred_dns) & pred_dns > 0], 1e-12)
       pred_df <- data.frame(
-        x    = kd_pred_raw$x,
-        y    = y_reg + pred_dns * ridge_scale * 0.85,
+        x = kd_pred_raw$x,
+        y = y_reg + pred_dns * ridge_scale * 0.85,
         ymin = y_reg,
         stringsAsFactors = FALSE
       )
       p <- p +
         ggplot2::geom_ribbon(
-          data    = pred_df,
-          mapping = ggplot2::aes(x = .data$x, ymin = .data$ymin,
-                                 ymax = .data$y),
-          fill    = "#cccccc",
-          alpha   = 0.25,
-          colour  = NA
+          data = pred_df,
+          mapping = ggplot2::aes(
+            x = .data$x, ymin = .data$ymin,
+            ymax = .data$y
+          ),
+          fill = "#cccccc",
+          alpha = 0.25,
+          colour = NA
         ) +
         ggplot2::geom_line(
           data      = pred_df,
@@ -1103,16 +1212,16 @@ plot_year_anchored_ridge <- function(kde_data,
     }
 
     if (has_actual) {
-      reg_bw_use  <- kde_data$reg_bw %||% global_bw
+      reg_bw_use <- kde_data$reg_bw %||% global_bw
       act_vals_fi <- actual_vals[is.finite(actual_vals)]
       # Use reg_bw from predicted_vals since both are on the same scale
-      kd_act_raw  <- ridge_curves$actual %||%
+      kd_act_raw <- ridge_curves$actual %||%
         .kde_group(act_vals_fi, reg_bw_use, x_lo_tr, x_hi_tr)
-      act_dns     <- kd_act_raw$density_raw
-      act_dns     <- act_dns / max(act_dns[is.finite(act_dns) & act_dns > 0], 1e-12)
+      act_dns <- kd_act_raw$density_raw
+      act_dns <- act_dns / max(act_dns[is.finite(act_dns) & act_dns > 0], 1e-12)
       act_df <- data.frame(
-        x    = kd_act_raw$x,
-        y    = y_reg + act_dns * ridge_scale * 0.85,
+        x = kd_act_raw$x,
+        y = y_reg + act_dns * ridge_scale * 0.85,
         ymin = y_reg,
         stringsAsFactors = FALSE
       )
@@ -1132,7 +1241,7 @@ plot_year_anchored_ridge <- function(kde_data,
   }
 
   if (primary_group == "hist_year") {
-    ssp_disp     <- sort(unique(ssp_keys[!is.na(ssp_keys)]))
+    ssp_disp <- sort(unique(ssp_keys[!is.na(ssp_keys)]))
     ssp_col_vals <- vapply(ssp_disp, function(k) {
       if (k %in% names(.ssp_colours)) .ssp_colours[k] else "#aaaaaa"
     }, character(1))
@@ -1140,18 +1249,20 @@ plot_year_anchored_ridge <- function(kde_data,
     if (length(ssp_disp) > 0) {
       p <- p +
         ggplot2::geom_point(
-          data    = data.frame(x       = rep(NA_real_, length(ssp_disp)),
-                               y       = rep(NA_real_, length(ssp_disp)),
-                               ssp_key = ssp_disp,
-                               stringsAsFactors = FALSE),
+          data = data.frame(
+            x = rep(NA_real_, length(ssp_disp)),
+            y = rep(NA_real_, length(ssp_disp)),
+            ssp_key = ssp_disp,
+            stringsAsFactors = FALSE
+          ),
           mapping = ggplot2::aes(x = .data$x, y = .data$y, colour = .data$ssp_key),
-          size    = 0,
-          na.rm   = TRUE
+          size = 0,
+          na.rm = TRUE
         ) +
         ggplot2::scale_colour_manual(
-          name   = "Climate scenario",
+          name = "Climate scenario",
           values = setNames(ssp_col_vals, ssp_disp),
-          guide  = ggplot2::guide_legend(
+          guide = ggplot2::guide_legend(
             override.aes = list(linewidth = 2.5, linetype = "solid", size = 4)
           )
         )
@@ -1160,18 +1271,20 @@ plot_year_anchored_ridge <- function(kde_data,
     if (length(fore_yr_lty_map) > 0) {
       p <- p +
         ggplot2::geom_line(
-          data    = data.frame(x        = rep(NA_real_, length(fore_yr_lty_map)),
-                               y        = rep(NA_real_, length(fore_yr_lty_map)),
-                               fore_lbl = names(fore_yr_lty_map),
-                               stringsAsFactors = FALSE),
+          data = data.frame(
+            x = rep(NA_real_, length(fore_yr_lty_map)),
+            y = rep(NA_real_, length(fore_yr_lty_map)),
+            fore_lbl = names(fore_yr_lty_map),
+            stringsAsFactors = FALSE
+          ),
           mapping = ggplot2::aes(x = .data$x, y = .data$y, linetype = .data$fore_lbl),
-          colour  = "#555555",
-          na.rm   = TRUE
+          colour = "#555555",
+          na.rm = TRUE
         ) +
         ggplot2::scale_linetype_manual(
-          name   = "Forecast year",
+          name = "Forecast year",
           values = fore_yr_lty_map,
-          guide  = ggplot2::guide_legend(
+          guide = ggplot2::guide_legend(
             override.aes = list(linewidth = 0.9, colour = "#555555")
           )
         )

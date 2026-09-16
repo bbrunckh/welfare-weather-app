@@ -30,14 +30,17 @@
 #' @param session A Shiny session object.
 #' @noRd
 .duck_register_session <- function(session) {
-  if (is.null(session) || isTRUE(session$userData$wise_duck_registered))
+  if (is.null(session) || isTRUE(session$userData$wise_duck_registered)) {
     return(invisible(FALSE))
+  }
 
   .duck$active_sessions <- as.integer(.duck$active_sessions %||% 0L) + 1L
   session$userData$wise_duck_registered <- TRUE
   session$userData$wise_duck_released <- FALSE
   session$onSessionEnded(function() {
-    if (isTRUE(session$userData$wise_duck_released)) return(invisible(FALSE))
+    if (isTRUE(session$userData$wise_duck_released)) {
+      return(invisible(FALSE))
+    }
     session$userData$wise_duck_released <- TRUE
     .duck_release_session()
   })
@@ -51,7 +54,9 @@
 .duck_release_session <- function() {
   active <- max(0L, as.integer(.duck$active_sessions %||% 1L) - 1L)
   .duck$active_sessions <- active
-  if (active > 0L) return(invisible(FALSE))
+  if (active > 0L) {
+    return(invisible(FALSE))
+  }
 
   con <- .duck$con
   .duck$con <- NULL
@@ -87,7 +92,9 @@
 #' @noRd
 collect_deterministic <- function(data, keys = NULL) {
   out <- if (inherits(data, "data.frame")) data else dplyr::collect(data)
-  if (nrow(out) < 2L || ncol(out) == 0L) return(out)
+  if (nrow(out) < 2L || ncol(out) == 0L) {
+    return(out)
+  }
 
   preferred <- unique(c(keys %||% character(0), .DETERMINISTIC_ORDER_KEYS))
   fallback <- sort(setdiff(names(out), preferred), method = "radix")
@@ -96,7 +103,9 @@ collect_deterministic <- function(data, keys = NULL) {
     is.atomic(x) && is.null(dim(x))
   }, logical(1))]
 
-  if (length(order_cols) == 0L) return(out)
+  if (length(order_cols) == 0L) {
+    return(out)
+  }
   dplyr::arrange(out, !!!rlang::syms(order_cols), .locale = "C")
 }
 
@@ -110,11 +119,12 @@ collect_deterministic <- function(data, keys = NULL) {
 
 
 .resolve_data_path <- function(path, connection_params) {
-  if (!.is_bare_data_path(path)) return(path)
+  if (!.is_bare_data_path(path)) {
+    return(path)
+  }
 
   type <- connection_params$type %||% "local"
-  switch(
-    type,
+  switch(type,
     "local" = file.path(connection_params$path %||% "data/", path),
     "s3" = paste0(
       "s3://", connection_params$bucket, "/",
@@ -137,10 +147,12 @@ collect_deterministic <- function(data, keys = NULL) {
       host <- connection_params$workspace %||% Sys.getenv("DATABRICKS_HOST")
       vol_path <- connection_params$volume_path %||%
         Sys.getenv("DATABRICKS_VOLUME_PATH")
-      if (!nzchar(vol_path %||% "")) stop(
-        "load_data(): Set DATABRICKS_VOLUME_PATH in .Renviron:\n",
-        "  DATABRICKS_VOLUME_PATH=/Volumes/catalog/schema/volume/path"
-      )
+      if (!nzchar(vol_path %||% "")) {
+        stop(
+          "load_data(): Set DATABRICKS_VOLUME_PATH in .Renviron:\n",
+          "  DATABRICKS_VOLUME_PATH=/Volumes/catalog/schema/volume/path"
+        )
+      }
       paste0(
         host, "/api/2.0/fs/files", sub("/$", "", vol_path), "/", path
       )
@@ -172,8 +184,10 @@ collect_deterministic <- function(data, keys = NULL) {
 #' @return A DBI connection to an in-process DuckDB instance.
 #' @noRd
 .duck_con <- function() {
-  if (!is.null(.duck$con) && DBI::dbIsValid(.duck$con)) return(.duck$con)
-  .duck$con        <- DBI::dbConnect(duckdb::duckdb(), dbdir = ":memory:")
+  if (!is.null(.duck$con) && DBI::dbIsValid(.duck$con)) {
+    return(.duck$con)
+  }
+  .duck$con <- DBI::dbConnect(duckdb::duckdb(), dbdir = ":memory:")
   .duck$extensions <- character(0)
   # Metadata may cache a token before DuckDB is initialized.
   if (is.null(.duck$db_tokens)) .duck$db_tokens <- list()
@@ -196,10 +210,12 @@ collect_deterministic <- function(data, keys = NULL) {
 #'   pre-uploaded .duckdb_extension binaries. Only required on Posit Connect.
 #' @noRd
 .duck_load_ext <- function(ext, db_token = NULL, ext_base_url = NULL) {
-  if (ext %in% (.duck$extensions %||% character(0))) return(invisible(NULL))
+  if (ext %in% (.duck$extensions %||% character(0))) {
+    return(invisible(NULL))
+  }
   con <- .duck_con()
 
-  # auto_connect() is a proxy for "running on Posit Connect" 
+  # auto_connect() is a proxy for "running on Posit Connect"
   # if it exists and returns TRUE, otherwise assume local environment
   if (exists(".auto_connect") && .auto_connect()) {
     # Check for a bundled binary first (avoids any network call).
@@ -216,22 +232,23 @@ collect_deterministic <- function(data, keys = NULL) {
       )
     }
 
-    if (!nzchar(bundled)) stop(
-      "DuckDB extension '", ext, "' is not bundled with this deployment ",
-      "(expected inst/duckdb_extensions/", ext, ".duckdb_extension.gz). ",
-      "Posit Connect cannot reach the public extension repository, so every ",
-      "required extension binary must ship with the package (see the ",
-      "git-backed deployment notes in dev/03_deploy.R).",
-      call. = FALSE
-    )
+    if (!nzchar(bundled)) {
+      stop(
+        "DuckDB extension '", ext, "' is not bundled with this deployment ",
+        "(expected inst/duckdb_extensions/", ext, ".duckdb_extension.gz). ",
+        "Posit Connect cannot reach the public extension repository, so every ",
+        "required extension binary must ship with the package (see the ",
+        "git-backed deployment notes in dev/03_deploy.R).",
+        call. = FALSE
+      )
+    }
 
     DBI::dbExecute(con, sprintf("INSTALL '%s';", bundled))
-    DBI::dbExecute(con, sprintf("LOAD '%s';",    ext))
-
+    DBI::dbExecute(con, sprintf("LOAD '%s';", ext))
   } else {
     # Local: load from cache, otherwise install from network if missing
-      .core_extensions <- c("azure",  "delta", "httpfs", "spatial")
-      tryCatch(
+    .core_extensions <- c("azure", "delta", "httpfs", "spatial")
+    tryCatch(
       DBI::dbExecute(con, sprintf("LOAD '%s';", ext)),
       error = function(e) {
         if (ext %in% .core_extensions) {
@@ -280,24 +297,26 @@ collect_deterministic <- function(data, keys = NULL) {
 #' @noRd
 .get_db_token <- function(host, client_id, client_secret) {
   if (is.null(.duck$db_tokens)) .duck$db_tokens <- list()
-  key    <- paste(host, client_id, client_secret, sep = "\n")
+  key <- paste(host, client_id, client_secret, sep = "\n")
   cached <- .duck$db_tokens[[key]]
 
   if (!is.null(cached) &&
-      difftime(cached$expires_at, Sys.time(), units = "secs") > 300) {
+    difftime(cached$expires_at, Sys.time(), units = "secs") > 300) {
     return(cached$token)
   }
 
   resp <- httr2::request(paste0(host, "/oidc/v1/token")) |>
     httr2::req_auth_basic(client_id, client_secret) |>
     httr2::req_body_form(grant_type = "client_credentials", scope = "all-apis") |>
-    httr2::req_options(http_version = 2L) |> 
+    httr2::req_options(http_version = 2L) |>
     httr2::req_error(is_error = \(r) FALSE) |>
     httr2::req_perform()
 
   if (httr2::resp_is_error(resp)) {
-    stop("load_data(): Failed to obtain Databricks OAuth token: ",
-         httr2::resp_status_desc(resp))
+    stop(
+      "load_data(): Failed to obtain Databricks OAuth token: ",
+      httr2::resp_status_desc(resp)
+    )
   }
 
   parsed <- httr2::resp_body_json(resp)
@@ -373,8 +392,8 @@ collect_deterministic <- function(data, keys = NULL) {
   union_arg <- if (unify_schemas) ", union_by_name = true" else ""
 
   switch(format,
-    parquet = sprintf("read_parquet(%s%s)",   path_sql, union_arg),
-    csv     = sprintf("read_csv_auto(%s%s)",  path_sql, union_arg),
+    parquet = sprintf("read_parquet(%s%s)", path_sql, union_arg),
+    csv     = sprintf("read_csv_auto(%s%s)", path_sql, union_arg),
     stop("load_data(): Unsupported format '", format, "'. Use 'parquet' or 'csv'.")
   )
 }
@@ -408,13 +427,14 @@ collect_deterministic <- function(data, keys = NULL) {
   }
 
   if (httr2::resp_is_error(resp)) {
-    stop("load_data(): Failed to fetch CSV from Databricks (", url, "): ",
-         httr2::resp_status_desc(resp))
+    stop(
+      "load_data(): Failed to fetch CSV from Databricks (", url, "): ",
+      httr2::resp_status_desc(resp)
+    )
   }
 
   readr::read_csv(httr2::resp_body_raw(resp), show_col_types = FALSE)
 }
-
 
 
 # Main function ----
@@ -463,42 +483,45 @@ collect_deterministic <- function(data, keys = NULL) {
 #'
 #' # Lazy - filter before collecting
 #' tbl <- load_data(c("/data/nga_survey.parquet", "/data/eth_survey.parquet"), params)
-#' df  <- dplyr::collect(dplyr::filter(tbl, year >= 2015))
+#' df <- dplyr::collect(dplyr::filter(tbl, year >= 2015))
 #'
 #' # S3 - bare filenames resolved to s3://my-bucket/data/survey_list.csv
-#' params_s3 <- list(type = "s3", bucket = "my-bucket", prefix = "data/",
-#'                   region = "us-east-1", key_id = "", secret = "")
+#' params_s3 <- list(
+#'   type = "s3", bucket = "my-bucket", prefix = "data/",
+#'   region = "us-east-1", key_id = "", secret = ""
+#' )
 #' survey_list <- load_data("survey_list.csv", params_s3, collect = TRUE)
 #' }
 #'
 #' @noRd
 load_data <- function(
-    paths,
-    connection_params = list(type = "local", path = "/data"),
-    format            = NULL,
-    unify_schemas     = FALSE,
-    collect           = FALSE,
-    order_by          = NULL,
-    preserve_order    = FALSE
+  paths,
+  connection_params = list(type = "local", path = "/data"),
+  format = NULL,
+  unify_schemas = FALSE,
+  collect = FALSE,
+  order_by = NULL,
+  preserve_order = FALSE
 ) {
-
-  if (length(paths) == 0) return(tibble::tibble())
+  if (length(paths) == 0) {
+    return(tibble::tibble())
+  }
 
   paths <- as.character(paths)
-  type  <- connection_params$type %||% "local"
-  con   <- .duck_con()
+  type <- connection_params$type %||% "local"
+  con <- .duck_con()
 
   # ---------------------------------------------------------------------------
   # 1. Detect format early - fail before any network calls
   # ---------------------------------------------------------------------------
 
   if (is.null(format)) {
-    ext    <- tolower(tools::file_ext(paths[1]))
+    ext <- tolower(tools::file_ext(paths[1]))
     format <- switch(ext,
       "parquet" = "parquet",
       "csv"     = "csv",
       "tsv"     = "csv",
-      "parquet"           # default
+      "parquet" # default
     )
   }
 
@@ -516,7 +539,6 @@ load_data <- function(
   # ---------------------------------------------------------------------------
 
   if (type == "s3") {
-
     .duck_load_ext("httpfs")
     s3_creds <- list(
       key_id = connection_params$key_id %||% Sys.getenv("AWS_ACCESS_KEY_ID"),
@@ -537,9 +559,7 @@ load_data <- function(
         .sql_literal(s3_creds$region)
       )
     )
-
   } else if (type == "gcs") {
-
     .duck_load_ext("httpfs")
     gcs_creds <- list(
       key_id = connection_params$key_id %||% Sys.getenv("GCS_ACCESS_KEY_ID"),
@@ -557,16 +577,14 @@ load_data <- function(
         .sql_literal(gcs_creds$secret)
       )
     )
-
   } else if (type == "azure") {
-
     .duck_load_ext("azure")
     .duck_load_ext("delta")
 
-    key           <- connection_params$key           %||% Sys.getenv("AZURE_STORAGE_KEY")
-    client_id     <- connection_params$client_id     %||% Sys.getenv("AZURE_CLIENT_ID")
+    key <- connection_params$key %||% Sys.getenv("AZURE_STORAGE_KEY")
+    client_id <- connection_params$client_id %||% Sys.getenv("AZURE_CLIENT_ID")
     client_secret <- connection_params$client_secret %||% Sys.getenv("AZURE_CLIENT_SECRET")
-    tenant_id     <- connection_params$tenant_id     %||% Sys.getenv("AZURE_TENANT_ID")
+    tenant_id <- connection_params$tenant_id %||% Sys.getenv("AZURE_TENANT_ID")
 
     if (nzchar(key)) {
       az_creds <- list(
@@ -609,34 +627,37 @@ load_data <- function(
       )
     } else {
       tryCatch(
-        DBI::dbExecute(con,
+        DBI::dbExecute(
+          con,
           "CREATE OR REPLACE SECRET azure_secret (
              TYPE     AZURE,
              PROVIDER CREDENTIAL_CHAIN,
              CHAIN    'managed_identity;workload_identity'
            );"
         ),
-        error = function(e) stop(
-          "load_data(): No Azure credentials found. Provide one of:\n",
-          "  1. Account key     : AZURE_STORAGE_KEY\n",
-          "  2. Service principal: AZURE_CLIENT_ID + AZURE_CLIENT_SECRET + AZURE_TENANT_ID\n"
-        )
+        error = function(e) {
+          stop(
+            "load_data(): No Azure credentials found. Provide one of:\n",
+            "  1. Account key     : AZURE_STORAGE_KEY\n",
+            "  2. Service principal: AZURE_CLIENT_ID + AZURE_CLIENT_SECRET + AZURE_TENANT_ID\n"
+          )
+        }
+      )
+    }
+  } else if (type == "databricks") {
+    db_params <- .databricks_connection_params(connection_params)
+    host <- db_params$host
+    client_id <- db_params$client_id
+    client_secret <- db_params$client_secret
+
+    if (!nzchar(host) || !nzchar(client_id) || !nzchar(client_secret)) {
+      stop(
+        "load_data(): Databricks requires DATABRICKS_HOST, DATABRICKS_CLIENT_ID, ",
+        "DATABRICKS_CLIENT_SECRET.\nSet via usethis::edit_r_environ()"
       )
     }
 
-  } else if (type == "databricks") {
-
-    db_params     <- .databricks_connection_params(connection_params)
-    host          <- db_params$host
-    client_id     <- db_params$client_id
-    client_secret <- db_params$client_secret
-
-    if (!nzchar(host) || !nzchar(client_id) || !nzchar(client_secret)) stop(
-      "load_data(): Databricks requires DATABRICKS_HOST, DATABRICKS_CLIENT_ID, ",
-      "DATABRICKS_CLIENT_SECRET.\nSet via usethis::edit_r_environ()"
-    )
-
-    db_token    <- .get_db_token(host, client_id, client_secret)
+    db_token <- .get_db_token(host, client_id, client_secret)
     params_hash <- substr(digest::digest(list(host, client_id)), 1, 8)
 
     # Fast path: single CSV - bypass DuckDB entirely
@@ -644,19 +665,20 @@ load_data <- function(
       out <- .fetch_db_csv_direct(paths, db_token)
       return(if (collect && !isTRUE(preserve_order)) {
         collect_deterministic(out, order_by)
-      } else out)
+      } else {
+        out
+      })
     }
 
     # Build the base URL for bundled DuckDB extensions.
-    vol_path    <- db_params$volume_path
+    vol_path <- db_params$volume_path
     ext_base_url <- paste0(
       host, "/api/2.0/fs/files",
       sub("/$", "", vol_path), "/duckdb_extensions"
     )
 
-    .duck_load_ext("httpfs",  db_token, ext_base_url)
+    .duck_load_ext("httpfs", db_token, ext_base_url)
     .register_db_secret(con, db_token, params_hash)
-
   }
 
   # ---------------------------------------------------------------------------
@@ -688,10 +710,12 @@ load_data <- function(
       "CREATE OR REPLACE VIEW %s AS %s;",
       view_name, view_expr
     )),
-    error = function(e) stop(sprintf(
-      "load_data(): Failed to open dataset.\n  paths : %s\n  format: %s\n  error : %s",
-      paste(head(paths, 3), collapse = ", "), format, conditionMessage(e)
-    ))
+    error = function(e) {
+      stop(sprintf(
+        "load_data(): Failed to open dataset.\n  paths : %s\n  format: %s\n  error : %s",
+        paste(head(paths, 3), collapse = ", "), format, conditionMessage(e)
+      ))
+    }
   )
 
   tbl <- dplyr::tbl(con, view_name)

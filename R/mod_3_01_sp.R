@@ -36,7 +36,7 @@ with_grid_num <- function(slider_tag, n) {
   for (i in seq_along(slider_tag$children)) {
     ch <- slider_tag$children[[i]]
     if (is.list(ch) && !is.null(ch$attribs) &&
-        "data-grid-num" %in% names(ch$attribs)) {
+      "data-grid-num" %in% names(ch$attribs)) {
       ch$attribs[["data-grid-num"]] <- n
       slider_tag$children[[i]] <- ch
       break
@@ -60,11 +60,11 @@ with_grid_num <- function(slider_tag, n) {
 #'
 #' @noRd
 mod_3_01_sp_server <- function(id,
-                                selected_outcome = reactive(NULL),
-                                survey_weather   = reactive(NULL),
-                                variable_list    = reactive(NULL),
-                                analysis_unit    = reactive("hh"),
-                                hist_sim         = reactive(NULL)) {
+                               selected_outcome = reactive(NULL),
+                               survey_weather = reactive(NULL),
+                               variable_list = reactive(NULL),
+                               analysis_unit = reactive("hh"),
+                               hist_sim = reactive(NULL)) {
   moduleServer(id, function(input, output, session) {
     ns <- session$ns
 
@@ -76,21 +76,25 @@ mod_3_01_sp_server <- function(id,
       au <- if (is.null(au) || !nzchar(au)) "hh" else au
       word <- switch(au,
         ind  = if (plural) "individuals" else "individual",
-        hh   = if (plural) "households"  else "household",
-        firm = if (plural) "firms"       else "firm",
+        hh   = if (plural) "households" else "household",
+        firm = if (plural) "firms" else "firm",
         if (plural) "households" else "household"
       )
       if (capitalize) {
         paste0(toupper(substr(word, 1, 1)), substr(word, 2, nchar(word)))
-      } else word
+      } else {
+        word
+      }
     }
 
     # ---- Proxy variable candidates (numeric, non-missing for welfare rows) ----
     pmt_candidates <- reactive({
       svy <- survey_weather()
-      vl  <- variable_list()
-      so  <- selected_outcome()
-      if (is.null(svy) || is.null(vl) || is.null(so) || nrow(vl) == 0) return(character(0))
+      vl <- variable_list()
+      so <- selected_outcome()
+      if (is.null(svy) || is.null(vl) || is.null(so) || nrow(vl) == 0) {
+        return(character(0))
+      }
 
       # Filter variable_list to ind/hh/firm/area level only
       level_mask <- vapply(seq_len(nrow(vl)), function(i) {
@@ -100,7 +104,9 @@ mod_3_01_sp_server <- function(id,
 
       # Intersect with survey columns
       cands <- intersect(cands, names(svy))
-      if (length(cands) == 0) return(character(0))
+      if (length(cands) == 0) {
+        return(character(0))
+      }
 
       # Keep only numeric vars with no NAs where outcome is non-missing
       outcome_rows <- !is.na(svy[[so$name]])
@@ -207,15 +213,17 @@ mod_3_01_sp_server <- function(id,
         tags$div(
           class = "sp-targeting-select",
           selectInput(
-            inputId  = ns("targeting"),
-            label    = NULL,
-            choices  = stats::setNames(
+            inputId = ns("targeting"),
+            label = NULL,
+            choices = stats::setNames(
               c("universal", "exante_poor", "pmt"),
               c(
                 "Universal",
                 "Welfare below threshold (ex-ante poor)",
-                paste(unit_word(plural = FALSE, capitalize = TRUE),
-                      "characteristics (Proxy)")
+                paste(
+                  unit_word(plural = FALSE, capitalize = TRUE),
+                  "characteristics (Proxy)"
+                )
               )
             ),
             selected = "universal"
@@ -227,7 +235,7 @@ mod_3_01_sp_server <- function(id,
           condition = paste0("input['", ns("targeting"), "'] == 'exante_poor'"),
           sliderInput(
             inputId = ns("targeting_threshold_pct"),
-            label   = tags$span(
+            label = tags$span(
               tags$i(class = "fa fa-users me-1"),
               "Poorest (bottom x%)"
             ),
@@ -251,7 +259,7 @@ mod_3_01_sp_server <- function(id,
             tags$summary("Errors"),
             sliderInput(
               inputId = ns("inclusion_error_pct"),
-              label   = tags$div(
+              label = tags$div(
                 tags$span(
                   tags$i(class = "fa fa-user-plus me-1"),
                   "Inclusion error (%)"
@@ -266,7 +274,7 @@ mod_3_01_sp_server <- function(id,
             ),
             sliderInput(
               inputId = ns("exclusion_error_pct"),
-              label   = tags$div(
+              label = tags$div(
                 tags$span(
                   tags$i(class = "fa fa-user-minus me-1"),
                   "Exclusion error (%)"
@@ -320,8 +328,10 @@ mod_3_01_sp_server <- function(id,
         # Binary variable: choose target value
         pill_toggle(
           ns("pmt_cutoff"),
-          label = paste("Target", unit_word(plural = TRUE),
-                        "where variable equals"),
+          label = paste(
+            "Target", unit_word(plural = TRUE),
+            "where variable equals"
+          ),
           choices = c("0" = 0, "1" = 1),
           selected = 0
         )
@@ -329,12 +339,14 @@ mod_3_01_sp_server <- function(id,
         # Continuous variable: choose threshold
         sliderInput(
           ns("pmt_cutoff"),
-          label = paste("Include", unit_word(plural = TRUE),
-                        "with value \u2264"),
-          min   = floor(min(col)),
-          max   = ceiling(max(col)),
+          label = paste(
+            "Include", unit_word(plural = TRUE),
+            "with value \u2264"
+          ),
+          min = floor(min(col)),
+          max = ceiling(max(col)),
           value = quantile(col, 0.2),
-          step  = if (diff(range(col)) > 10) 1 else 0.1
+          step = if (diff(range(col)) > 10) 1 else 0.1
         )
       }
     })
@@ -350,18 +362,20 @@ mod_3_01_sp_server <- function(id,
     # Admin cost reduces the amount available for direct transfers in both modes.
 
     output$sp_budget_amount_ui <- renderUI({
-      currency <- tryCatch({
-        so <- selected_outcome()
-        if (is.null(so) || nrow(so) == 0 || !"units" %in% names(so)) {
-          "PPP"
-        } else {
-          as.character(so$units[[1]])
-        }
-      }, error = function(e) "PPP")
+      currency <- tryCatch(
+        {
+          so <- selected_outcome()
+          if (is.null(so) || nrow(so) == 0 || !"units" %in% names(so)) {
+            "PPP"
+          } else {
+            as.character(so$units[[1]])
+          }
+        },
+        error = function(e) "PPP"
+      )
       if (is.na(currency) || !nzchar(currency)) currency <- "PPP"
 
       tagList(
-
         # -- Amount and budget mode --------------------------------------
         tags$label(
           class = "control-label",
@@ -413,7 +427,6 @@ mod_3_01_sp_server <- function(id,
             )
           )
         ),
-
         conditionalPanel(
           condition = paste0(
             "input['", ns("budget_mode"), "'] == 'transfer_first'"
@@ -468,26 +481,26 @@ mod_3_01_sp_server <- function(id,
             )
           ),
 
-        # One-off vs regular - hidden for regular programs
-        # if (!is_regular) {
-        #   radioButtons(
-        #     inputId  = ns("transfer_frequency"),
-        #     label    = tags$span(
-        #       tags$i(class = "fa fa-rotate me-1"),
-        #       "One-off vs regular"
-        #     ),
-        #     choices  = c("One-off" = "oneoff", "Regular" = "regular"),
-        #     selected = isolate(input$transfer_frequency) %||% "oneoff",
-        #     inline   = TRUE
-        #   )
-        # },
+          # One-off vs regular - hidden for regular programs
+          # if (!is_regular) {
+          #   radioButtons(
+          #     inputId  = ns("transfer_frequency"),
+          #     label    = tags$span(
+          #       tags$i(class = "fa fa-rotate me-1"),
+          #       "One-off vs regular"
+          #     ),
+          #     choices  = c("One-off" = "oneoff", "Regular" = "regular"),
+          #     selected = isolate(input$transfer_frequency) %||% "oneoff",
+          #     inline   = TRUE
+          #   )
+          # },
 
-        # Number of payments - shown when regular (either via type or frequency)
-        # conditionalPanel(
-        #   condition = paste0(
-        #     "input['", ns("sp_type"), "'] == 'regular' || ",
-        #     "input['", ns("transfer_frequency"), "'] == 'regular'"
-        #   ),
+          # Number of payments - shown when regular (either via type or frequency)
+          # conditionalPanel(
+          #   condition = paste0(
+          #     "input['", ns("sp_type"), "'] == 'regular' || ",
+          #     "input['", ns("transfer_frequency"), "'] == 'regular'"
+          #   ),
           tags$div(
             class = "sp-inline-slider",
             tags$span(
@@ -533,7 +546,7 @@ mod_3_01_sp_server <- function(id,
         #   )
         # }
       )
-  })
+    })
 
     # ---- 6. Delivery system --------------------------------------------
 
@@ -604,11 +617,15 @@ mod_3_01_sp_server <- function(id,
     # below silently fell back to the `%||%` defaults (including sp_type
     # "shock", which is no longer one of the offered choices). Render them
     # eagerly so an untouched panel still reports its real defaults.
-    lapply(c("sp_type_ui", "sp_budget_amount_ui", "sp_targeting_ui",
-             "pmt_variable_ui", "pmt_cutoff_ui", "sp_timing_ui"),
-           function(out_id) {
-             shiny::outputOptions(output, out_id, suspendWhenHidden = FALSE)
-           })
+    lapply(
+      c(
+        "sp_type_ui", "sp_budget_amount_ui", "sp_targeting_ui",
+        "pmt_variable_ui", "pmt_cutoff_ui", "sp_timing_ui"
+      ),
+      function(out_id) {
+        shiny::outputOptions(output, out_id, suspendWhenHidden = FALSE)
+      }
+    )
 
     # One definition of the scenario, read by both the reach preview below and
     # the module's return API - the preview cannot drift from what is run.
@@ -616,40 +633,55 @@ mod_3_01_sp_server <- function(id,
       # Shock-responsive transfers are displayed in the selector but are not
       # implemented yet. Keep the returned scenario on the regular path until
       # trigger and timing logic is wired through the policy simulation.
-      sp_type_val <- if (identical(input$sp_type, "shock")) "regular" else
+      sp_type_val <- if (identical(input$sp_type, "shock")) {
+        "regular"
+      } else {
         input$sp_type %||% "regular"
-      is_regular  <- TRUE
+      }
+      is_regular <- TRUE
       list(
         # program type
-        sp_type               = sp_type_val,
+        sp_type = sp_type_val,
         # Budget mode
-        budget_mode           = input$budget_mode             %||% "transfer_first",
+        budget_mode = input$budget_mode %||% "transfer_first",
         # Default to 0 (not 1,000,000) so an un-touched budget can never
         # accidentally apply a million-USD transfer if budget-first mode is
         # selected before a budget is entered.
-        budget_fixed          = input$budget_fixed            %||% 0,
+        budget_fixed = input$budget_fixed %||% 0,
         # Targeting
-        targeting             = input$targeting               %||% "exante_poor",
-        targeting_threshold   = input$targeting_threshold_pct %||% 20,
-        pmt_variable          = input$pmt_variable            %||% NA_character_,
-        pmt_cutoff            = input$pmt_cutoff              %||% NA_real_,
-        inclusion_error_pct   = input$inclusion_error_pct     %||% 10,
-        exclusion_error_pct   = input$exclusion_error_pct     %||% 10,
+        targeting = input$targeting %||% "exante_poor",
+        targeting_threshold = input$targeting_threshold_pct %||% 20,
+        pmt_variable = input$pmt_variable %||% NA_character_,
+        pmt_cutoff = input$pmt_cutoff %||% NA_real_,
+        inclusion_error_pct = input$inclusion_error_pct %||% 10,
+        exclusion_error_pct = input$exclusion_error_pct %||% 10,
         # Transfer amount
-        transfer_amount_usd   = input$transfer_amount_usd     %||% 0,
+        transfer_amount_usd = input$transfer_amount_usd %||% 0,
         # Timing - regular programs always have n payments
         transfer_frequency =
-          if (is_regular) "regular"
-          else input$transfer_frequency %||% "oneoff",
+          if (is_regular) {
+            "regular"
+          } else {
+            input$transfer_frequency %||% "oneoff"
+          },
         transfer_n_payments =
-          if (is_regular) input$transfer_n_payments %||% 6L
-          else input$transfer_n_payments %||% 1L,
+          if (is_regular) {
+            input$transfer_n_payments %||% 6L
+          } else {
+            input$transfer_n_payments %||% 1L
+          },
         transfer_timing =
-          if (is_regular) NA_character_
-          else input$transfer_timing %||% "expost",
+          if (is_regular) {
+            NA_character_
+          } else {
+            input$transfer_timing %||% "expost"
+          },
         timeliness_weeks =
-          if (is_regular) NA_integer_
-          else input$timeliness_weeks %||% 4L
+          if (is_regular) {
+            NA_integer_
+          } else {
+            input$timeliness_weeks %||% 4L
+          }
       )
     })
 
@@ -663,9 +695,12 @@ mod_3_01_sp_server <- function(id,
     # produce, not a separate approximation of it.
 
     sp_preview_inputs <- shiny::debounce(reactive({
-      hs  <- tryCatch(hist_sim(), error = function(e) NULL)
-      svy <- if (!is.null(hs$svy)) hs$svy else
+      hs <- tryCatch(hist_sim(), error = function(e) NULL)
+      svy <- if (!is.null(hs$svy)) {
+        hs$svy
+      } else {
         tryCatch(survey_weather(), error = function(e) NULL)
+      }
       list(
         hs = hs, svy = svy, spec = sp_scenario_spec(),
         analysis_unit = tryCatch(analysis_unit(), error = function(e) "hh"),
@@ -682,13 +717,17 @@ mod_3_01_sp_server <- function(id,
       preview <- sp_preview_inputs()
       hs <- preview$hs
       svy <- preview$svy
-      if (is.null(svy)) return(NULL)
+      if (is.null(svy)) {
+        return(NULL)
+      }
       r <- .sp_scenario_reach(
         svy           = as.data.frame(svy),
         sp            = preview$spec,
         analysis_unit = preview$analysis_unit
       )
-      if (is.null(r)) return(NULL)
+      if (is.null(r)) {
+        return(NULL)
+      }
       # Record which frame these figures describe. Before Step 2 has run there
       # is no baseline round to filter to, so the preview covers every survey
       # round and will drop once Step 2 narrows it - worth saying, rather than
@@ -721,7 +760,7 @@ mod_3_01_sp_server <- function(id,
       if (is.null(r)) {
         return(selection_summary_card(
           title = program_title,
-          rows  = list(list(
+          rows = list(list(
             name = paste("Population in recipient", unit_pl),
             pills = "Not available"
           )),
@@ -732,19 +771,25 @@ mod_3_01_sp_server <- function(id,
       # The headline count is a population-weighted count; the sample count is
       # explained in the info popover rather than taking up a visible row.
       count_hint <- if (isTRUE(r$weighted)) {
-        paste0("Survey-weighted; ", fmt_count(r$n_rows), " of ",
-               fmt_count(r$n_total), " sampled ", unit_pl)
+        paste0(
+          "Survey-weighted; ", fmt_count(r$n_rows), " of ",
+          fmt_count(r$n_total), " sampled ", unit_pl
+        )
       } else {
-        paste0("Unweighted sample count; ", fmt_count(r$n_rows), " of ",
-               fmt_count(r$n_total), " sampled ", unit_pl)
+        paste0(
+          "Unweighted sample count; ", fmt_count(r$n_rows), " of ",
+          fmt_count(r$n_total), " sampled ", unit_pl
+        )
       }
 
-      cost_label <- if (isTRUE(r$budget_first))
-        "Configured annual budget" else "Estimated annual cost"
+      cost_label <- if (isTRUE(r$budget_first)) {
+        "Configured annual budget"
+      } else {
+        "Estimated annual cost"
+      }
 
       targeting <- preview_spec$targeting
-      targeting_info <- switch(
-        targeting,
+      targeting_info <- switch(targeting,
         exante_poor = paste(
           "The bottom", preview_spec$targeting_threshold,
           "% is selected by sampled", unit_pl, "before inclusion and exclusion",
@@ -786,10 +831,16 @@ mod_3_01_sp_server <- function(id,
         info = paste(
           count_hint,
           targeting_info,
-          if (isTRUE(r$transfer_total <= 0))
-            "No transfer is configured yet, so welfare would remain unchanged." else "",
-          if (!isTRUE(r$on_baseline))
-            "Before Step 2 runs, this preview covers every survey round; after the run it uses the baseline round used by the simulation." else ""
+          if (isTRUE(r$transfer_total <= 0)) {
+            "No transfer is configured yet, so welfare would remain unchanged."
+          } else {
+            ""
+          },
+          if (!isTRUE(r$on_baseline)) {
+            "Before Step 2 runs, this preview covers every survey round; after the run it uses the baseline round used by the simulation."
+          } else {
+            ""
+          }
         ),
         compact = TRUE
       )
@@ -805,6 +856,5 @@ mod_3_01_sp_server <- function(id,
       sp_preview_inputs = sp_preview_inputs,
       sp_reach = sp_reach
     )
-
   })
 }

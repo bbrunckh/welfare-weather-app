@@ -38,19 +38,19 @@ mod_3_03_digital_ui <- function(id) {
 mod_3_03_digital_server <- function(id,
                                     selected_model = reactive(NULL),
                                     survey_data = reactive(NULL),
-                                    variable_list  = reactive(NULL)) {
+                                    variable_list = reactive(NULL)) {
   moduleServer(id, function(input, output, session) {
     ns <- session$ns
 
     # ---- Get model coefficients ------------------------------------------
     # REACT-08: shared coefficient decomposition (utils_mod_1_helpers.R).
-    coeffs_rx        <- model_coefficient_reactives(selected_model)
-    ind_coeff        <- coeffs_rx$individual
-    hh_coeff         <- coeffs_rx$hh
-    firm_coeff       <- coeffs_rx$firm
-    area_coeff       <- coeffs_rx$area
+    coeffs_rx <- model_coefficient_reactives(selected_model)
+    ind_coeff <- coeffs_rx$individual
+    hh_coeff <- coeffs_rx$hh
+    firm_coeff <- coeffs_rx$firm
+    area_coeff <- coeffs_rx$area
     interaction_names <- coeffs_rx$interactions
-    coeffs           <- coeffs_rx$all
+    coeffs <- coeffs_rx$all
 
     # ---- Candidate variables for this category --------------------------
     digital_patterns <- c("internet", "cellphone")
@@ -62,13 +62,17 @@ mod_3_03_digital_server <- function(id,
     # Digital variables available in the selected survey
     digital_vars_available <- reactive({
       svy <- survey_data()
-      if (is.null(svy)) return(character(0))
+      if (is.null(svy)) {
+        return(character(0))
+      }
       # Check which digital variables are actually in the selected survey
       intersect(digital_patterns, names(svy))
     })
 
     output$placeholder_ui <- renderUI({
-      if (isTRUE(any_selected())) return(NULL)
+      if (isTRUE(any_selected())) {
+        return(NULL)
+      }
       # Only show placeholder if there are digital variables in the survey
       if (length(digital_vars_available()) == 0) {
         return(no_data_warning(
@@ -148,13 +152,18 @@ mod_3_03_digital_server <- function(id,
     list(
       digital_scenario = reactive({
         list(
-          internet_universal        = isTRUE(input$internet_universal),
-          internet_access_change_pct = if (isTRUE(input$internet_universal)) 100L
-                                       else input$internet_pct %||% 0L,
-
-          mobile_universal        = isTRUE(input$mobile_universal),
-          mobile_access_change_pct = if (isTRUE(input$mobile_universal)) 100L
-                                     else input$mobile_pct %||% 0L
+          internet_universal = isTRUE(input$internet_universal),
+          internet_access_change_pct = if (isTRUE(input$internet_universal)) {
+            100L
+          } else {
+            input$internet_pct %||% 0L
+          },
+          mobile_universal = isTRUE(input$mobile_universal),
+          mobile_access_change_pct = if (isTRUE(input$mobile_universal)) {
+            100L
+          } else {
+            input$mobile_pct %||% 0L
+          }
         )
       })
     )

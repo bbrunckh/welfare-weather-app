@@ -12,7 +12,9 @@
 )
 
 .step2_compute_copy <- function(x) {
-  if (is.null(x) || is.atomic(x)) return(x)
+  if (is.null(x) || is.atomic(x)) {
+    return(x)
+  }
   if (is.data.frame(x)) {
     out <- lapply(x, .step2_compute_copy)
     names(out) <- names(x)
@@ -32,47 +34,56 @@
 .step2_compute_validate <- function(input) {
   if (!is.list(input) || is.null(names(input))) {
     stop("step2_compute() requires a named ordinary-object input snapshot.",
-         call. = FALSE)
+      call. = FALSE
+    )
   }
   missing <- setdiff(.step2_compute_required, names(input))
   if (length(missing)) {
     stop("step2_compute() input snapshot is missing: ",
-         paste(missing, collapse = ", "), call. = FALSE)
+      paste(missing, collapse = ", "),
+      call. = FALSE
+    )
   }
   if (!is.list(input$mf)) stop("step2_compute()$mf must be a list.", call. = FALSE)
   if (!is.list(input$cp) || !validate_connection_params(input$cp)) {
     stop("step2_compute()$cp is not a valid connection parameter list.",
-         call. = FALSE)
+      call. = FALSE
+    )
   }
   if (!is.data.frame(input$sw) || !"name" %in% names(input$sw)) {
     stop("step2_compute()$sw must be a data frame with a name column.",
-         call. = FALSE)
+      call. = FALSE
+    )
   }
   if (!is.data.frame(input$so) || !"name" %in% names(input$so) ||
-      length(input$so$name) != 1L) {
+    length(input$so$name) != 1L) {
     stop("step2_compute()$so must contain exactly one outcome name.",
-         call. = FALSE)
+      call. = FALSE
+    )
   }
   if (!is.data.frame(input$svy)) {
     stop("step2_compute()$svy must be a data frame.", call. = FALSE)
   }
   if (!is.list(input$fp_list) || !is.character(input$ssps) ||
-      !is.character(input$sim_dates)) {
+    !is.character(input$sim_dates)) {
     stop("step2_compute() date and scenario fields have invalid types.",
-         call. = FALSE)
+      call. = FALSE
+    )
   }
   if (length(input$fp_list) && any(lengths(input$fp_list) != 2L)) {
     stop("Each step2_compute() future period must contain two dates.",
-         call. = FALSE)
+      call. = FALSE
+    )
   }
   if (length(input$residuals) != 1L ||
-      !input$residuals %in% c("none", "original", "normal", "resample")) {
+    !input$residuals %in% c("none", "original", "normal", "resample")) {
     stop("step2_compute()$residuals is invalid.", call. = FALSE)
   }
   if (length(input$skip_coef_draws) != 1L ||
-      !is.logical(input$skip_coef_draws) || is.na(input$skip_coef_draws)) {
+    !is.logical(input$skip_coef_draws) || is.na(input$skip_coef_draws)) {
     stop("step2_compute()$skip_coef_draws must be one non-missing logical value.",
-         call. = FALSE)
+      call. = FALSE
+    )
   }
   invisible(TRUE)
 }
@@ -164,7 +175,9 @@ step2_compute <- function(input,
 
   old_seed <- if (exists(".Random.seed", envir = .GlobalEnv, inherits = FALSE)) {
     get(".Random.seed", envir = .GlobalEnv, inherits = FALSE)
-  } else NULL
+  } else {
+    NULL
+  }
   had_seed <- !is.null(old_seed)
   old_rng_kind <- RNGkind()
   cache_env_names <- c(
@@ -174,12 +187,17 @@ step2_compute <- function(input,
   old_cache_env <- Sys.getenv(cache_env_names, unset = NA_character_)
   restore_rng <- function() {
     do.call(RNGkind, as.list(old_rng_kind))
-    if (had_seed) assign(".Random.seed", old_seed, envir = .GlobalEnv)
-    else if (exists(".Random.seed", envir = .GlobalEnv, inherits = FALSE))
+    if (had_seed) {
+      assign(".Random.seed", old_seed, envir = .GlobalEnv)
+    } else if (exists(".Random.seed", envir = .GlobalEnv, inherits = FALSE)) {
       rm(".Random.seed", envir = .GlobalEnv)
+    }
     for (i in seq_along(cache_env_names)) {
-      if (is.na(old_cache_env[[i]])) Sys.unsetenv(cache_env_names[[i]])
-      else Sys.setenv(setNames(old_cache_env[[i]], cache_env_names[[i]]))
+      if (is.na(old_cache_env[[i]])) {
+        Sys.unsetenv(cache_env_names[[i]])
+      } else {
+        Sys.setenv(setNames(old_cache_env[[i]], cache_env_names[[i]]))
+      }
     }
   }
   on.exit(restore_rng(), add = TRUE)

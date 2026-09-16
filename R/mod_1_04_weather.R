@@ -50,16 +50,16 @@ mod_1_04_weather_server <- function(id, variable_list, selected_surveys, survey_
       # rebuilt; fall back to the first variable only when nothing survives.
       prev_sel <- shiny::isolate(input$weather_variable_selector)
       shiny::selectizeInput(
-        inputId  = ns("weather_variable_selector"),
-        label    = "Weather variables",
-        choices  = choice_map,
+        inputId = ns("weather_variable_selector"),
+        label = "Weather variables",
+        choices = choice_map,
         selected = .restore_selection(prev_sel, wl$name, fallback = wl$name[1]),
         multiple = TRUE,
-        options  = list(
+        options = list(
           placeholder = "Select up to 2 weather variables",
-          maxItems    = 2,
+          maxItems = 2,
           # Selectize otherwise sorts the displayed labels alphabetically.
-          sortField  = list(field = "$order", direction = "asc")
+          sortField = list(field = "$order", direction = "asc")
         )
       )
     })
@@ -72,11 +72,11 @@ mod_1_04_weather_server <- function(id, variable_list, selected_surveys, survey_
 
       n_vars <- length(input$weather_variable_selector)
       ui_list <- lapply(seq_along(input$weather_variable_selector), function(i) {
-        v        <- input$weather_variable_selector[i]
+        v <- input$weather_variable_selector[i]
         var_info <- wl[wl$name == v, ]
-        units    <- as.character(var_info$units[1])
+        units <- as.character(var_info$units[1])
         display_label <- wise_label_short(as.character(var_info$label[1]))
-        prefix   <- paste0(v, "_")
+        prefix <- paste0(v, "_")
 
         tagList(
           if (i > 1 && n_vars > 1) hr(),
@@ -89,11 +89,10 @@ mod_1_04_weather_server <- function(id, variable_list, selected_surveys, survey_
             ns(paste0(prefix, "toggle")),
             paste0(var_info$label, " settings"),
             tagList(
-
               shiny::sliderInput(
                 ns(paste0(prefix, "relativePeriod")),
                 "Months before interview",
-                min   = 0, max = 12,
+                min = 0, max = 12,
                 value = c(1, 1)
               ),
               # Aggregation is only meaningful when the window spans more
@@ -115,7 +114,7 @@ mod_1_04_weather_server <- function(id, variable_list, selected_surveys, survey_
               pill_toggle(
                 ns(paste0(prefix, "varConstruction")),
                 label = "Transformation",
-                choices  = transformation_choices(units),
+                choices = transformation_choices(units),
                 selected = transformation_default(units),
                 layout = "vertical"
               ),
@@ -185,9 +184,11 @@ mod_1_04_weather_server <- function(id, variable_list, selected_surveys, survey_
       tagList(do.call(tagList, ui_list))
     })
     shiny::outputOptions(output, "weather_selector_ui",
-                         suspendWhenHidden = FALSE)
+      suspendWhenHidden = FALSE
+    )
     shiny::outputOptions(output, "weather_construction_ui",
-                         suspendWhenHidden = FALSE)
+      suspendWhenHidden = FALSE
+    )
 
     # ---- Historical comparison config ---------------------------------------
     # The weather stats tab always draws each wave against its own climate
@@ -245,7 +246,9 @@ mod_1_04_weather_server <- function(id, variable_list, selected_surveys, survey_
       yf <- years[1]
       yt <- years[2]
       if (yf > yt) {
-        tmp <- yf; yf <- yt; yt <- tmp
+        tmp <- yf
+        yf <- yt
+        yt <- tmp
       }
       c(from = yf, to = yt)
     })
@@ -254,7 +257,7 @@ mod_1_04_weather_server <- function(id, variable_list, selected_surveys, survey_
 
     selected_weather <- reactive({
       req(input$weather_variable_selector)
-      wl   <- weather_vars()
+      wl <- weather_vars()
       vars <- input$weather_variable_selector
 
       # Collect only the specific per-variable spec inputs.
@@ -290,7 +293,9 @@ mod_1_04_weather_server <- function(id, variable_list, selected_surveys, survey_
 
     output$weather_summary_ui <- renderUI({
       sw <- tryCatch(selected_weather(), error = function(e) NULL)
-      if (is.null(sw) || nrow(sw) == 0) return(NULL)
+      if (is.null(sw) || nrow(sw) == 0) {
+        return(NULL)
+      }
 
       hy <- hist_years()
       single_weather <- nrow(sw) == 1L
@@ -300,7 +305,9 @@ mod_1_04_weather_server <- function(id, variable_list, selected_surveys, survey_
           class = "weather-sidebar-title",
           paste0(toupper(substr(label, 1, 1)), substr(label, 2, nchar(label)))
         )
-      } else NULL
+      } else {
+        NULL
+      }
       weather_rows <- weather_pipeline_rows(sw)
       if (single_weather) {
         # Move the variable name into the card header, keeping its units in

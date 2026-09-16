@@ -1,6 +1,6 @@
 # Outcome selection helpers ----
 # Pure functions for outcome variable selection logic.                         #
-# Used by mod_1_03_outcome_server(). 
+# Used by mod_1_03_outcome_server().
 # All functions are stateless and testable without a Shiny session.                                                     #
 
 
@@ -35,17 +35,17 @@ filter_outcome_vars <- function(variable_list, survey_colnames) {
     outs <- dplyr::bind_rows(
       outs,
       data.frame(
-        name  = "poor",
+        name = "poor",
         label = "Poor (welfare < poverty line)",
         units = "",
-        type  = "logical",
+        type = "logical",
         stringsAsFactors = FALSE
       )
     )
   }
 
   priority <- c("welfare", "poor")
-  rest     <- setdiff(outs$name, priority)
+  rest <- setdiff(outs$name, priority)
   outs |> dplyr::arrange(factor(.data$name, levels = c(priority, rest)))
 }
 
@@ -64,7 +64,7 @@ filter_outcome_vars <- function(variable_list, survey_colnames) {
 #'
 #' @export
 is_monetary_outcome <- function(name, units) {
-  name  <- as.character(name[1])
+  name <- as.character(name[1])
   units <- as.character(units[1])
   name %in% c("welfare", "poor") || (!is.na(units) && units == "LCU")
 }
@@ -84,20 +84,27 @@ is_monetary_outcome <- function(name, units) {
 #'
 #' @export
 default_lcu_poverty_line <- function(df) {
-  tryCatch({
-    if (!all(c("welfare", "ppp2021") %in% names(df))) return(1.00)
-    df_lcu <- df |> dplyr::mutate(welfare_lcu = .data$welfare * .data$ppp2021)
-    if ("weight" %in% names(df_lcu)) {
-      p20 <- Hmisc::wtd.quantile(df_lcu$welfare_lcu, weights = df_lcu$weight,
-                                  probs = 0.2, na.rm = TRUE)
-    } else {
-      p20 <- quantile(df_lcu$welfare_lcu, probs = 0.2, na.rm = TRUE)
+  tryCatch(
+    {
+      if (!all(c("welfare", "ppp2021") %in% names(df))) {
+        return(1.00)
+      }
+      df_lcu <- df |> dplyr::mutate(welfare_lcu = .data$welfare * .data$ppp2021)
+      if ("weight" %in% names(df_lcu)) {
+        p20 <- Hmisc::wtd.quantile(df_lcu$welfare_lcu,
+          weights = df_lcu$weight,
+          probs = 0.2, na.rm = TRUE
+        )
+      } else {
+        p20 <- quantile(df_lcu$welfare_lcu, probs = 0.2, na.rm = TRUE)
+      }
+      round(as.numeric(p20), 2)
+    },
+    error = function(e) {
+      message("default_lcu_poverty_line() error: ", e$message)
+      1.00
     }
-    round(as.numeric(p20), 2)
-  }, error = function(e) {
-    message("default_lcu_poverty_line() error: ", e$message)
-    1.00
-  })
+  )
 }
 
 
@@ -176,12 +183,13 @@ outcome_direction_note <- function(direction) {
 #'
 #' @export
 build_selected_outcome <- function(info, currency = NULL, poverty_line = NULL) {
+  if (is.null(info) || nrow(info) == 0) {
+    return(info)
+  }
 
-  if (is.null(info) || nrow(info) == 0) return(info)
-
-  name  <- as.character(info$name[1])
+  name <- as.character(info$name[1])
   units <- as.character(info$units[1])
-  type  <- as.character(info$type[1])
+  type <- as.character(info$type[1])
 
   info$transform <- outcome_transform(type)
   info$direction <- outcome_direction(name, type)
@@ -215,18 +223,21 @@ build_selected_outcome <- function(info, currency = NULL, poverty_line = NULL) {
 #'   \code{n_available}, \code{n_missing}, \code{pct_available}.
 #' @export
 outcome_missing_summary <- function(df, outcome) {
-  if (is.null(df) || !outcome %in% names(df))
-    return(data.frame(variable = outcome, n_total = NA_integer_,
-                      n_available = NA_integer_, n_missing = NA_integer_,
-                      pct_available = NA_real_, stringsAsFactors = FALSE))
-  x     <- df[[outcome]]
-  n     <- length(x)
-  n_ok  <- sum(!is.na(x))
+  if (is.null(df) || !outcome %in% names(df)) {
+    return(data.frame(
+      variable = outcome, n_total = NA_integer_,
+      n_available = NA_integer_, n_missing = NA_integer_,
+      pct_available = NA_real_, stringsAsFactors = FALSE
+    ))
+  }
+  x <- df[[outcome]]
+  n <- length(x)
+  n_ok <- sum(!is.na(x))
   data.frame(
-    variable      = outcome,
-    n_total       = n,
-    n_available   = n_ok,
-    n_missing     = n - n_ok,
+    variable = outcome,
+    n_total = n,
+    n_available = n_ok,
+    n_missing = n - n_ok,
     pct_available = round(100 * n_ok / max(n, 1), 1),
     stringsAsFactors = FALSE
   )
@@ -241,7 +252,9 @@ outcome_missing_summary <- function(df, outcome) {
 .outcome_density_palette <- function(codes) {
   codes <- sort(unique(as.character(codes)))
   codes <- codes[!is.na(codes) & nzchar(codes)]
-  if (!length(codes)) return(character(0))
+  if (!length(codes)) {
+    return(character(0))
+  }
   .wave_palette(codes)
 }
 
@@ -274,9 +287,11 @@ plot_welfare_dist <- function(df,
                               type = "numeric",
                               poverty_lines = welfare_poverty_lines(),
                               wave_labels = NULL) {
-  if (is.null(df) || !(outcome %in% names(df))) return(invisible(NULL))
+  if (is.null(df) || !(outcome %in% names(df))) {
+    return(invisible(NULL))
+  }
 
-  vals   <- df[[outcome]][!is.na(df[[outcome]])]
+  vals <- df[[outcome]][!is.na(df[[outcome]])]
   type_l <- tolower(type %||% "")
   is_binary <- type_l %in% c("logical", "binary", "boolean") ||
     (length(vals) > 0 && is.numeric(vals) && all(vals %in% c(0, 1)))
@@ -287,11 +302,15 @@ plot_welfare_dist <- function(df,
   # 100% stacked bar makes the 0/1 shares immediately readable and avoids the
   # unnecessary histogram/KDE pass used for continuous outcomes.
   if (is_binary) {
-    if (!"countryyear" %in% names(df)) return(invisible(NULL))
+    if (!"countryyear" %in% names(df)) {
+      return(invisible(NULL))
+    }
     x <- suppressWarnings(as.numeric(as.character(df[[outcome]])))
     if (is.logical(df[[outcome]])) x <- as.integer(df[[outcome]])
     keep <- is.finite(x) & x %in% c(0, 1) & !is.na(df$countryyear)
-    if (!any(keep)) return(invisible(NULL))
+    if (!any(keep)) {
+      return(invisible(NULL))
+    }
     bars <- data.frame(
       countryyear = as.character(df$countryyear[keep]),
       value = factor(x[keep], levels = c(0, 1), labels = c("No", "Yes")),
@@ -320,7 +339,8 @@ plot_welfare_dist <- function(df,
     })
     bars$ymax <- bars$ymin + bars$share
     bars$countryyear <- factor(
-      bars$countryyear, levels = sort(unique(bars$countryyear))
+      bars$countryyear,
+      levels = sort(unique(bars$countryyear))
     )
     display_waves <- levels(bars$countryyear)
     if (!is.null(wave_labels)) {
@@ -399,7 +419,9 @@ plot_welfare_dist <- function(df,
     group_labels  = wave_labels
   )
 
-  if (is.null(p)) return(invisible(NULL))
+  if (is.null(p)) {
+    return(invisible(NULL))
+  }
 
   p <- p + ggplot2::scale_fill_manual(
     values = .outcome_density_palette(df$code),
@@ -442,8 +464,9 @@ plot_welfare_dist <- function(df,
 #' @noRd
 .outcome_loc_availability <- function(df, outcome) {
   keys <- c("code", "year", "survname", "loc_id")
-  if (is.null(df) || !outcome %in% names(df) || !"loc_id" %in% names(df))
+  if (is.null(df) || !outcome %in% names(df) || !"loc_id" %in% names(df)) {
     return(NULL)
+  }
   df |>
     dplyr::mutate(.has = !is.na(.data[[outcome]])) |>
     dplyr::summarise(
@@ -471,13 +494,15 @@ plot_welfare_dist <- function(df,
   rng
 }
 
-.coverage_legend_info <- function(rng) paste0(
-  "Share of sampled units at each location with a non-missing value",
-  " for this outcome. The scale runs over the coverage present in",
-  " this sample (", format(signif(rng[1], 3)), "% to ",
-  format(signif(rng[2], 3)), "%), not a fixed 0-100, so small",
-  " differences stay visible."
-)
+.coverage_legend_info <- function(rng) {
+  paste0(
+    "Share of sampled units at each location with a non-missing value",
+    " for this outcome. The scale runs over the coverage present in",
+    " this sample (", format(signif(rng[1], 3)), "% to ",
+    format(signif(rng[2], 3)), "%), not a fixed 0-100, so small",
+    " differences stay visible."
+  )
+}
 
 #' Columnar hex-map payload for the outcome coverage map
 #'
@@ -501,27 +526,35 @@ plot_welfare_dist <- function(df,
 #'
 #' @noRd
 .coverage_hex_payload <- function(cell_geo, cmap, df, outcome) {
-  if (is.null(cell_geo) || is.null(cmap) || nrow(cmap) == 0) return(NULL)
+  if (is.null(cell_geo) || is.null(cmap) || nrow(cmap) == 0) {
+    return(NULL)
+  }
   loc_avail <- .outcome_loc_availability(df, outcome)
-  if (is.null(loc_avail)) return(NULL)
+  if (is.null(loc_avail)) {
+    return(NULL)
+  }
 
   lv <- loc_avail
   names(lv)[names(lv) == "pct"] <- "value"
   # by_wave = FALSE: one value per cell, pooling every selected wave, so a
   # cell sampled by two waves is painted once (PERF-36 draw-once rule).
   merged <- merge_loc_values_to_cells(cmap, lv, by_wave = FALSE)
-  if (is.null(merged) || nrow(merged) == 0) return(NULL)
+  if (is.null(merged) || nrow(merged) == 0) {
+    return(NULL)
+  }
 
   # Weighted merging can leave a hair outside [0, 100] in floating point.
   vals <- pmin(pmax(merged$value, 0), 100)
-  rng  <- .coverage_rng(vals)
+  rng <- .coverage_rng(vals)
 
   # Drawn set: every selected-wave cell that carries geometry - cells the
   # merge produced no value for are sent with NA and painted grey.
   cells <- cell_geo |>
     dplyr::inner_join(dplyr::distinct(cmap, .data$h3), by = "h3") |>
     dplyr::filter(!is.na(.data$geom), nchar(.data$geom) > 2)
-  if (nrow(cells) == 0) return(NULL)
+  if (nrow(cells) == 0) {
+    return(NULL)
+  }
 
   by_h3 <- stats::setNames(vals, merged$loc_id)
   v <- unname(by_h3[cells$h3])
@@ -583,8 +616,9 @@ plot_welfare_dist <- function(df,
 #' @noRd
 .outcome_loc_means <- function(df, outcome) {
   keys <- c("code", "year", "survname", "loc_id")
-  if (is.null(df) || !outcome %in% names(df) || !"loc_id" %in% names(df))
+  if (is.null(df) || !outcome %in% names(df) || !"loc_id" %in% names(df)) {
     return(NULL)
+  }
   df |>
     dplyr::mutate(.val = suppressWarnings(as.numeric(.data[[outcome]]))) |>
     dplyr::filter(!is.na(.data$.val)) |>
@@ -598,13 +632,15 @@ plot_welfare_dist <- function(df,
 # Legend hover text for the mean map. The sample-statistics caveat is the
 # whole point of the view, so it rides along wherever the map is read.
 #' @noRd
-.outcome_mean_legend_info <- function(is_binary) paste0(
-  "Mean of the sampled units' outcome value at each location",
-  if (is_binary) " (share of 1s, shown as %)" else "",
-  ". Mean values reflect sample statistics in a given location, not ",
-  "population-representative statistics (location sample sizes are not ",
-  "sufficient)."
-)
+.outcome_mean_legend_info <- function(is_binary) {
+  paste0(
+    "Mean of the sampled units' outcome value at each location",
+    if (is_binary) " (share of 1s, shown as %)" else "",
+    ". Mean values reflect sample statistics in a given location, not ",
+    "population-representative statistics (location sample sizes are not ",
+    "sufficient)."
+  )
+}
 
 #' Columnar hex-map payload for the outcome mean-value map
 #'
@@ -629,9 +665,13 @@ plot_welfare_dist <- function(df,
 #' @noRd
 .outcome_mean_hex_payload <- function(cell_geo, cmap, df, outcome,
                                       type = "numeric") {
-  if (is.null(cell_geo) || is.null(cmap) || nrow(cmap) == 0) return(NULL)
+  if (is.null(cell_geo) || is.null(cmap) || nrow(cmap) == 0) {
+    return(NULL)
+  }
   loc_means <- .outcome_loc_means(df, outcome)
-  if (is.null(loc_means) || nrow(loc_means) == 0) return(NULL)
+  if (is.null(loc_means) || nrow(loc_means) == 0) {
+    return(NULL)
+  }
 
   is_binary <- tolower(as.character(type[1])) %in%
     c("logical", "binary", "boolean")
@@ -643,7 +683,9 @@ plot_welfare_dist <- function(df,
   # cell sampled by two waves is painted once (PERF-36 draw-once rule) -
   # the same pooling the coverage map applies.
   merged <- merge_loc_values_to_cells(cmap, lv, by_wave = FALSE)
-  if (is.null(merged) || nrow(merged) == 0) return(NULL)
+  if (is.null(merged) || nrow(merged) == 0) {
+    return(NULL)
+  }
 
   vals <- suppressWarnings(as.numeric(merged$value))
 
@@ -660,7 +702,9 @@ plot_welfare_dist <- function(df,
   cells <- cell_geo |>
     dplyr::inner_join(dplyr::distinct(cmap, .data$h3), by = "h3") |>
     dplyr::filter(!is.na(.data$geom), nchar(.data$geom) > 2)
-  if (nrow(cells) == 0) return(NULL)
+  if (nrow(cells) == 0) {
+    return(NULL)
+  }
 
   by_h3 <- stats::setNames(vals, merged$loc_id)
   v <- unname(by_h3[cells$h3])

@@ -31,18 +31,26 @@ SP_TRANSFER_COL <- ".wiseapp_sp_transfer"
 #' @return Scalar logical.
 #' @export
 has_infra_change <- function(infra) {
-  if (!is.list(infra)) return(FALSE)
+  if (!is.list(infra)) {
+    return(FALSE)
+  }
   .access_moved(infra$elec_universal, infra$elec_access_change_pct) ||
     .access_moved(infra$water_universal, infra$water_access_change_pct) ||
-    .access_moved(infra$sanitation_universal,
-                  infra$sanitation_access_change_pct) ||
+    .access_moved(
+      infra$sanitation_universal,
+      infra$sanitation_access_change_pct
+    ) ||
     .lever_moved(infra$health_travel_pct) ||
     identical(infra$health_mode, "max") ||
     .access_moved(infra$piped_universal, infra$piped_access_change_pct) ||
-    .access_moved(infra$piped_to_prem_universal,
-                  infra$piped_to_prem_access_change_pct) ||
-    .access_moved(infra$imp_wat_san_universal,
-                  infra$imp_wat_san_access_change_pct)
+    .access_moved(
+      infra$piped_to_prem_universal,
+      infra$piped_to_prem_access_change_pct
+    ) ||
+    .access_moved(
+      infra$imp_wat_san_universal,
+      infra$imp_wat_san_access_change_pct
+    )
 }
 
 #' Has the digital inclusion scenario been changed from its defaults?
@@ -50,11 +58,17 @@ has_infra_change <- function(infra) {
 #' @return Scalar logical.
 #' @export
 has_digital_change <- function(digital) {
-  if (!is.list(digital)) return(FALSE)
-  .access_moved(digital$internet_universal,
-                digital$internet_access_change_pct) ||
-    .access_moved(digital$mobile_universal,
-                  digital$mobile_access_change_pct)
+  if (!is.list(digital)) {
+    return(FALSE)
+  }
+  .access_moved(
+    digital$internet_universal,
+    digital$internet_access_change_pct
+  ) ||
+    .access_moved(
+      digital$mobile_universal,
+      digital$mobile_access_change_pct
+    )
 }
 
 #' Has the education scenario been changed from its defaults?
@@ -62,13 +76,21 @@ has_digital_change <- function(digital) {
 #' @return Scalar logical.
 #' @export
 has_education_change <- function(education) {
-  if (!is.list(education)) return(FALSE)
-  .access_moved(education$primary_universal,
-                education$primary_access_change_pct) ||
-    .access_moved(education$secondary_universal,
-                  education$secondary_access_change_pct) ||
-    .access_moved(education$postsec_universal,
-                  education$postsec_access_change_pct)
+  if (!is.list(education)) {
+    return(FALSE)
+  }
+  .access_moved(
+    education$primary_universal,
+    education$primary_access_change_pct
+  ) ||
+    .access_moved(
+      education$secondary_universal,
+      education$secondary_access_change_pct
+    ) ||
+    .access_moved(
+      education$postsec_universal,
+      education$postsec_access_change_pct
+    )
 }
 
 #' Has the labor market scenario been changed from its defaults?
@@ -76,7 +98,9 @@ has_education_change <- function(education) {
 #' @return Scalar logical.
 #' @export
 has_labor_change <- function(labor) {
-  if (!is.list(labor)) return(FALSE)
+  if (!is.list(labor)) {
+    return(FALSE)
+  }
   .lever_moved(labor$employment_change_pp) ||
     .lever_moved(labor$sector_manufacturing) ||
     .lever_moved(labor$sector_services)
@@ -87,7 +111,9 @@ has_labor_change <- function(labor) {
 #' @return Scalar logical.
 #' @export
 has_sp_change <- function(sp) {
-  if (!is.list(sp)) return(FALSE)
+  if (!is.list(sp)) {
+    return(FALSE)
+  }
   if (identical(sp$budget_mode %||% "transfer_first", "budget_first")) {
     .lever_moved(sp$budget_fixed)
   } else {
@@ -127,60 +153,78 @@ has_sp_change <- function(sp) {
   scenarios_supplied <- !all(vapply(
     list(infra, digital, labor, education), is.null, logical(1)
   ))
-  if (!scenarios_supplied) return(unique(c(all_candidates, outcome)))
+  if (!scenarios_supplied) {
+    return(unique(c(all_candidates, outcome)))
+  }
 
   changed <- function(x) {
-    if (is.null(x) || length(x) != 1L || is.na(x)) return(FALSE)
+    if (is.null(x) || length(x) != 1L || is.na(x)) {
+      return(FALSE)
+    }
     if (is.logical(x)) isTRUE(x) else x != 0
   }
   candidates <- character()
 
   if (!is.null(infra)) {
-    if (isTRUE(infra$elec_universal) || changed(infra$elec_access_change_pct))
+    if (isTRUE(infra$elec_universal) || changed(infra$elec_access_change_pct)) {
       candidates <- c(candidates, "electricity")
-    if (isTRUE(infra$water_universal) || changed(infra$water_access_change_pct))
+    }
+    if (isTRUE(infra$water_universal) || changed(infra$water_access_change_pct)) {
       candidates <- c(candidates, "imp_wat_rec")
+    }
     if (isTRUE(infra$sanitation_universal) ||
-        changed(infra$sanitation_access_change_pct))
+      changed(infra$sanitation_access_change_pct)) {
       candidates <- c(candidates, "imp_san_rec")
+    }
     if (changed(infra$health_travel_pct) ||
-        identical(infra$health_mode, "max"))
+      identical(infra$health_mode, "max")) {
       candidates <- c(candidates, "ttime_health")
-    if (isTRUE(infra$piped_universal) || changed(infra$piped_access_change_pct))
+    }
+    if (isTRUE(infra$piped_universal) || changed(infra$piped_access_change_pct)) {
       candidates <- c(candidates, "piped")
+    }
     if (isTRUE(infra$piped_to_prem_universal) ||
-        changed(infra$piped_to_prem_access_change_pct))
+      changed(infra$piped_to_prem_access_change_pct)) {
       candidates <- c(candidates, "piped_to_prem")
+    }
     if (isTRUE(infra$imp_wat_san_universal) ||
-        changed(infra$imp_wat_san_access_change_pct))
+      changed(infra$imp_wat_san_access_change_pct)) {
       candidates <- c(candidates, "imp_wat_san_rec")
+    }
   }
   if (!is.null(digital)) {
     if (isTRUE(digital$internet_universal) ||
-        changed(digital$internet_access_change_pct))
+      changed(digital$internet_access_change_pct)) {
       candidates <- c(candidates, "internet")
+    }
     if (isTRUE(digital$mobile_universal) ||
-        changed(digital$mobile_access_change_pct))
+      changed(digital$mobile_access_change_pct)) {
       candidates <- c(candidates, "cellphone")
+    }
   }
   if (!is.null(education)) {
     if (isTRUE(education$primary_universal) ||
-        changed(education$primary_access_change_pct))
+      changed(education$primary_access_change_pct)) {
       candidates <- c(candidates, "educ_com1_hh")
+    }
     if (isTRUE(education$secondary_universal) ||
-        changed(education$secondary_access_change_pct))
+      changed(education$secondary_access_change_pct)) {
       candidates <- c(candidates, "educ_com2_hh")
+    }
     if (isTRUE(education$postsec_universal) ||
-        changed(education$postsec_access_change_pct))
+      changed(education$postsec_access_change_pct)) {
       candidates <- c(candidates, "educ_com3_hh")
+    }
   }
   if (!is.null(labor)) {
     if (changed(labor$employment_change_pp)) {
       candidates <- c(candidates, "employed", "selfemployed", "unemployed")
     }
     if (changed(labor$sector_manufacturing) || changed(labor$sector_services)) {
-      candidates <- c(candidates, "employed", "selfemployed",
-                      "agriculture", "industry", "services")
+      candidates <- c(
+        candidates, "employed", "selfemployed",
+        "agriculture", "industry", "services"
+      )
     }
   }
 
@@ -215,16 +259,23 @@ has_sp_change <- function(sp) {
 #'   survey weights were used).
 #' @keywords internal
 .sp_transfer_totals <- function(svy_policy, analysis_unit = "hh") {
-  zero <- list(total = 0, per_unit = 0, n_recipients = 0L,
-               n_recipients_weighted = 0, weighted = FALSE)
+  zero <- list(
+    total = 0, per_unit = 0, n_recipients = 0L,
+    n_recipients_weighted = 0, weighted = FALSE
+  )
   if (is.null(svy_policy) || !is.data.frame(svy_policy) ||
-      !SP_TRANSFER_COL %in% names(svy_policy)) return(zero)
+    !SP_TRANSFER_COL %in% names(svy_policy)) {
+    return(zero)
+  }
 
   v <- suppressWarnings(as.numeric(svy_policy[[SP_TRANSFER_COL]]))
 
   has_w <- "weight" %in% names(svy_policy)
-  w <- if (has_w) suppressWarnings(as.numeric(svy_policy$weight))
-       else rep(1, nrow(svy_policy))
+  w <- if (has_w) {
+    suppressWarnings(as.numeric(svy_policy$weight))
+  } else {
+    rep(1, nrow(svy_policy))
+  }
 
   # Undo the per-capita scaling apply_policy_to_svy() applied, guarding the
   # same way it did so a missing or non-positive hhsize cannot turn the whole
@@ -238,14 +289,18 @@ has_sp_change <- function(sp) {
   }
 
   ok <- is.finite(v) & is.finite(w)
-  if (!any(ok)) return(zero)
+  if (!any(ok)) {
+    return(zero)
+  }
 
   total <- sum(v[ok] * w[ok] * hh[ok]) * 365
 
   elig <- ok & v > 0
   per_unit <- if (any(elig) && sum(w[elig]) > 0) {
     (sum(v[elig] * w[elig] * hh[elig]) / sum(w[elig])) * 365
-  } else 0
+  } else {
+    0
+  }
 
   list(
     total                 = total,
@@ -301,17 +356,23 @@ has_sp_change <- function(sp) {
   if (is.null(svy) || is.null(sp) || !is.data.frame(svy) || nrow(svy) == 0) {
     return(NULL)
   }
-  if (!"welfare" %in% names(svy)) return(NULL)
+  if (!"welfare" %in% names(svy)) {
+    return(NULL)
+  }
 
   # Run the real transfer application. Only `sp` is supplied, so no covariate
   # lever touches the frame; the seed matches the run's, so eligibility -
   # including the random inclusion/exclusion errors - is identical.
   svy_mod <- tryCatch(
-    apply_policy_to_svy(svy, sp = sp, analysis_unit = analysis_unit,
-                        seed = seed),
+    apply_policy_to_svy(svy,
+      sp = sp, analysis_unit = analysis_unit,
+      seed = seed
+    ),
     error = function(e) NULL
   )
-  if (is.null(svy_mod) || !SP_TRANSFER_COL %in% names(svy_mod)) return(NULL)
+  if (is.null(svy_mod) || !SP_TRANSFER_COL %in% names(svy_mod)) {
+    return(NULL)
+  }
 
   totals <- .sp_transfer_totals(svy_mod, analysis_unit)
 
@@ -322,28 +383,35 @@ has_sp_change <- function(sp) {
     wise_seed(seed, "policy"),
     tryCatch(.determine_sp_eligibility(svy, sp), error = function(e) NULL)
   )
-  if (is.null(eligible) || length(eligible) != nrow(svy)) return(NULL)
+  if (is.null(eligible) || length(eligible) != nrow(svy)) {
+    return(NULL)
+  }
   eligible[is.na(eligible)] <- FALSE
 
-  w <- if ("weight" %in% names(svy)) suppressWarnings(as.numeric(svy$weight))
-       else rep(1, nrow(svy))
+  w <- if ("weight" %in% names(svy)) {
+    suppressWarnings(as.numeric(svy$weight))
+  } else {
+    rep(1, nrow(svy))
+  }
   w[!is.finite(w) | w < 0] <- 0
   weighted <- "weight" %in% names(svy) && sum(w) > 0
   if (!weighted) w <- rep(1, nrow(svy))
 
-  w_elig  <- sum(w[eligible])
+  w_elig <- sum(w[eligible])
   w_total <- sum(w)
 
   list(
-    n_rows            = sum(eligible),
-    n_total           = nrow(svy),
-    n_pop             = w_elig,
-    share_pct         = if (w_total > 0) 100 * w_elig / w_total else NA_real_,
-    weighted          = weighted,
+    n_rows = sum(eligible),
+    n_total = nrow(svy),
+    n_pop = w_elig,
+    share_pct = if (w_total > 0) 100 * w_elig / w_total else NA_real_,
+    weighted = weighted,
     transfer_per_unit = totals$per_unit,
-    transfer_total    = totals$total,
-    budget_first      = identical(sp$budget_mode %||% "transfer_first",
-                                  "budget_first")
+    transfer_total = totals$total,
+    budget_first = identical(
+      sp$budget_mode %||% "transfer_first",
+      "budget_first"
+    )
   )
 }
 
@@ -366,13 +434,17 @@ has_sp_change <- function(sp) {
 #' @keywords internal
 .scenario_has_effect <- function(svy_baseline, svy_policy,
                                  candidates = NULL) {
-  if (is.null(svy_baseline) || is.null(svy_policy)) return(FALSE)
+  if (is.null(svy_baseline) || is.null(svy_policy)) {
+    return(FALSE)
+  }
 
   # Social protection: any non-zero transfer is an effect on its own.
   sp <- svy_policy[[SP_TRANSFER_COL]]
   if (!is.null(sp)) {
     sp <- suppressWarnings(as.numeric(sp))
-    if (any(is.finite(sp) & abs(sp) > 1e-10)) return(TRUE)
+    if (any(is.finite(sp) & abs(sp) > 1e-10)) {
+      return(TRUE)
+    }
   }
 
   # Covariate levers: only columns apply_policy_to_svy() can mutate. Survey
@@ -385,7 +457,9 @@ has_sp_change <- function(sp) {
     if (is.factor(b)) b <- as.character(b)
     if (is.factor(p)) p <- as.character(p)
     if (is.numeric(b) && is.numeric(p)) {
-      if (any(abs(p - b) > 1e-10, na.rm = TRUE)) return(TRUE)
+      if (any(abs(p - b) > 1e-10, na.rm = TRUE)) {
+        return(TRUE)
+      }
     } else if (!identical(b, p)) {
       return(TRUE)
     }
@@ -417,18 +491,21 @@ has_sp_change <- function(sp) {
                                            outcome = outcome
                                          ),
                                          sp = NULL) {
-  if (is.null(svy_baseline) || is.null(svy_policy)) return(NULL)
+  if (is.null(svy_baseline) || is.null(svy_policy)) {
+    return(NULL)
+  }
 
   policy_diag <- svy_policy
   if (SP_TRANSFER_COL %in% names(policy_diag) &&
-      outcome %in% names(policy_diag)) {
+    outcome %in% names(policy_diag)) {
     policy_diag[[outcome]] <- policy_diag[[outcome]] +
       policy_diag[[SP_TRANSFER_COL]]
   }
 
   totals <- .sp_transfer_totals(policy_diag, analysis_unit)
   vars <- detect_manipulated_vars(
-    svy_baseline, policy_diag, candidates = candidates
+    svy_baseline, policy_diag,
+    candidates = candidates
   )
 
   input_summary <- if (length(vars) > 0L) {
@@ -437,7 +514,7 @@ has_sp_change <- function(sp) {
     NULL
   }
   baseline_values <- lapply(vars, function(v) svy_baseline[[v]])
-  policy_values   <- lapply(vars, function(v) policy_diag[[v]])
+  policy_values <- lapply(vars, function(v) policy_diag[[v]])
   names(baseline_values) <- names(policy_values) <- vars
   changed_counts <- .policy_changed_counts(svy_baseline, policy_diag, vars)
   eligibility <- tryCatch(
@@ -450,20 +527,22 @@ has_sp_change <- function(sp) {
   )
 
   list(
-    status           = if (length(vars) == 0L) "no_change" else NULL,
+    status = if (length(vars) == 0L) "no_change" else NULL,
     manipulated_vars = vars,
-    baseline_values  = baseline_values,
-    policy_values    = policy_values,
-    changed_counts   = changed_counts,
-    transfer_sum     = totals$total,
-    transfer_pp      = totals$per_unit,
-    input_summary    = input_summary,
-    analysis_unit    = analysis_unit,
+    baseline_values = baseline_values,
+    policy_values = policy_values,
+    changed_counts = changed_counts,
+    transfer_sum = totals$total,
+    transfer_pp = totals$per_unit,
+    input_summary = input_summary,
+    analysis_unit = analysis_unit,
     treatment_matrix = policy_treatment_matrix(
-      svy_baseline, policy_diag, eligibility = eligibility
+      svy_baseline, policy_diag,
+      eligibility = eligibility
     ),
     component_matrix = policy_component_matrix(
-      svy_baseline, policy_diag, analysis_unit = analysis_unit,
+      svy_baseline, policy_diag,
+      analysis_unit = analysis_unit,
       candidates = unique(c(candidates, SP_TRANSFER_COL))
     )
   )
@@ -483,24 +562,34 @@ has_sp_change <- function(sp) {
 #'   or \code{NULL} if no matches.
 #' @export
 policy_candidate_info <- function(variable_list, patterns) {
-  if (is.null(variable_list) || nrow(variable_list) == 0) return(NULL)
+  if (is.null(variable_list) || nrow(variable_list) == 0) {
+    return(NULL)
+  }
   nm <- variable_list$name
-  if (is.null(nm)) return(NULL)
+  if (is.null(nm)) {
+    return(NULL)
+  }
   mask <- Reduce(`|`, lapply(patterns, function(p) grepl(p, nm, ignore.case = TRUE)))
-  if (!any(mask)) return(NULL)
+  if (!any(mask)) {
+    return(NULL)
+  }
   df <- variable_list[mask, , drop = FALSE]
   level <- vapply(seq_len(nrow(df)), function(i) {
     for (lvl in c("ind", "hh", "firm", "area")) {
       v <- df[[lvl]][i]
       if (!is.null(v) && !is.na(v) && v == 1L) {
-        return(switch(lvl, ind = "Individual", hh = "Household",
-                      firm = "Firm", area = "Area"))
+        return(switch(lvl,
+          ind = "Individual",
+          hh = "Household",
+          firm = "Firm",
+          area = "Area"
+        ))
       }
     }
     ""
   }, character(1))
   data.frame(
-    name  = df$name,
+    name = df$name,
     label = if (!is.null(df$label)) df$label else df$name,
     level = level,
     stringsAsFactors = FALSE
@@ -521,9 +610,11 @@ policy_placeholder_tag <- function(category_label, candidate_df) {
     "Go back to Step 1 to include them in the model."
   )
   if (is.null(candidate_df) || nrow(candidate_df) == 0) {
-    return(shiny::div(class = "alert alert-info",
+    return(shiny::div(
+      class = "alert alert-info",
       msg_head, shiny::tags$br(),
-      shiny::tags$em("No candidate variables were found in the variable list for this category.")))
+      shiny::tags$em("No candidate variables were found in the variable list for this category.")
+    ))
   }
   items <- lapply(seq_len(nrow(candidate_df)), function(i) {
     lvl <- candidate_df$level[i]
@@ -532,10 +623,12 @@ policy_placeholder_tag <- function(category_label, candidate_df) {
       if (nzchar(lvl)) paste0(" (", lvl, ")") else ""
     ))
   })
-  shiny::div(class = "alert alert-info",
+  shiny::div(
+    class = "alert alert-info",
     msg_head, shiny::tags$br(),
     shiny::tags$strong("Candidates available to select:"),
-    do.call(shiny::tags$ul, items))
+    do.call(shiny::tags$ul, items)
+  )
 }
 
 
@@ -549,7 +642,9 @@ policy_placeholder_tag <- function(category_label, candidate_df) {
   if (isTRUE(universal)) {
     return(ifelse(is.na(x), NA_integer_, 1L))
   }
-  if (is.null(change_pct) || is.na(change_pct) || change_pct == 0) return(x)
+  if (is.null(change_pct) || is.na(change_pct) || change_pct == 0) {
+    return(x)
+  }
 
   x_out <- as.integer(x)
   if (change_pct > 0) {
@@ -572,10 +667,14 @@ policy_placeholder_tag <- function(category_label, candidate_df) {
 
 .apply_health_travel <- function(x, mode, pct, max_min) {
   if (identical(mode, "pct")) {
-    if (is.null(pct) || is.na(pct) || pct == 0) return(x)
+    if (is.null(pct) || is.na(pct) || pct == 0) {
+      return(x)
+    }
     x * (1 + pct / 100)
   } else if (identical(mode, "max")) {
-    if (is.null(max_min) || is.na(max_min)) return(x)
+    if (is.null(max_min) || is.na(max_min)) {
+      return(x)
+    }
     pmin(x, max_min)
   } else {
     x
@@ -583,25 +682,26 @@ policy_placeholder_tag <- function(category_label, candidate_df) {
 }
 
 .determine_sp_eligibility <- function(svy, sp, apply_errors = TRUE) {
-  n         <- nrow(svy)
+  n <- nrow(svy)
   targeting <- sp$targeting %||% "exante_poor"
 
   if (targeting == "universal") {
     eligible <- rep(TRUE, n)
   } else if (targeting == "exante_poor") {
-    q        <- quantile(svy$welfare,
-                        (sp$targeting_threshold %||% 20) / 100,
-                        na.rm = TRUE)
+    q <- quantile(svy$welfare,
+      (sp$targeting_threshold %||% 20) / 100,
+      na.rm = TRUE
+    )
     eligible <- !is.na(svy$welfare) & svy$welfare <= q
   } else if (targeting == "pmt") {
     pmt_var <- sp$pmt_variable
     pmt_cut <- as.numeric(sp$pmt_cutoff %||% NA)
     if (is.null(pmt_var) || is.na(pmt_var) || is.na(pmt_cut) ||
-        !(pmt_var %in% names(svy))) {
+      !(pmt_var %in% names(svy))) {
       eligible <- rep(FALSE, n)
     } else {
-      col      <- svy[[pmt_var]]
-      uniq     <- sort(unique(col[!is.na(col)]))
+      col <- svy[[pmt_var]]
+      uniq <- sort(unique(col[!is.na(col)]))
       if (length(uniq) == 2 && all(uniq %in% c(0, 1))) {
         # Binary: match the selected value exactly
         eligible <- !is.na(col) & col == pmt_cut
@@ -619,8 +719,8 @@ policy_placeholder_tag <- function(category_label, candidate_df) {
   if (isTRUE(apply_errors) && targeting != "universal") {
     incl_rate <- (sp$inclusion_error_pct %||% 0) / 100
     excl_rate <- (sp$exclusion_error_pct %||% 0) / 100
-    non_elig  <- which(!eligible)
-    elig      <- which(eligible)
+    non_elig <- which(!eligible)
+    elig <- which(eligible)
     if (length(non_elig) > 0 && incl_rate > 0) {
       n_flip <- round(length(non_elig) * incl_rate)
       eligible[sample(non_elig, min(n_flip, length(non_elig)))] <-
@@ -662,392 +762,427 @@ policy_placeholder_tag <- function(category_label, candidate_df) {
 #' @return The modified survey data frame.
 #' @export
 apply_policy_to_svy <- function(svy,
-                                infra     = NULL,
-                                sp        = NULL,
-                                digital   = NULL,
-                                labor     = NULL,
+                                infra = NULL,
+                                sp = NULL,
+                                digital = NULL,
+                                labor = NULL,
                                 education = NULL,
                                 model_vars = NULL,
                                 analysis_unit = "hh",
                                 seed = WISEAPP_DEFAULT_SEED) {
-  if (is.null(svy)) return(svy)
+  if (is.null(svy)) {
+    return(svy)
+  }
   withr::with_seed(wise_seed(seed, "policy"), {
     cols <- names(svy)
 
-  # Columns eligible for covariate-lever manipulation. A lever whose variable
-  # has been removed from the Step 1 model (its UI control is hidden) must not
-  # mutate the survey, otherwise the diagnostics tab would surface phantom
-  # "manipulated" variables that the model - and hence the Results and
-  # Decomposition tabs - ignore. Matching mirrors the lever modules' show_*
-  # logic (substring match against model term names). SP transfers act on
-  # `welfare` (the outcome, not a covariate) and are intentionally not gated.
-  lever_cols <- if (is.null(model_vars)) {
-    cols
-  } else {
-    Filter(function(v) any(grepl(v, model_vars, ignore.case = TRUE)), cols)
-  }
-
-  # Infrastructure: only apply if user has specified non-zero changes
-  if (!is.null(infra)) {
-    if (has_infra_change(infra)) {
-      if ("electricity" %in% lever_cols) {
-        svy$electricity <- .apply_binary_access(
-          svy$electricity,
-          infra$elec_universal,
-          infra$elec_access_change_pct
-        )
-      }
-      if ("imp_wat_rec" %in% lever_cols) {
-        svy$imp_wat_rec <- .apply_binary_access(
-          svy$imp_wat_rec,
-          infra$water_universal,
-          infra$water_access_change_pct
-        )
-      }
-      if ("imp_san_rec" %in% lever_cols) {
-        svy$imp_san_rec <- .apply_binary_access(
-          svy$imp_san_rec,
-          infra$sanitation_universal,
-          infra$sanitation_access_change_pct
-        )
-      }
-      if ("piped" %in% lever_cols) {
-        svy$piped <- .apply_binary_access(
-          svy$piped,
-          infra$piped_universal,
-          infra$piped_access_change_pct
-        )
-      }
-      if ("piped_to_prem" %in% lever_cols) {
-        svy$piped_to_prem <- .apply_binary_access(
-          svy$piped_to_prem,
-          infra$piped_to_prem_universal,
-          infra$piped_to_prem_access_change_pct
-        )
-      }
-      if ("imp_wat_san_rec" %in% lever_cols) {
-        svy$imp_wat_san_rec <- .apply_binary_access(
-          svy$imp_wat_san_rec,
-          infra$imp_wat_san_universal,
-          infra$imp_wat_san_access_change_pct
-        )
-      }
-      if ("ttime_health" %in% lever_cols) {
-        svy$ttime_health <- .apply_health_travel(
-          svy$ttime_health,
-          infra$health_mode,
-          infra$health_travel_pct,
-          infra$health_travel_max
-        )
-      }
-    }
-  }
-
-  # Digital inclusion: only apply if user has specified non-zero changes
-  if (!is.null(digital)) {
-    if (has_digital_change(digital)) {
-      if ("internet" %in% lever_cols) {
-        svy$internet <- .apply_binary_access(
-          svy$internet,
-          digital$internet_universal,
-          digital$internet_access_change_pct
-        )
-      }
-      if ("cellphone" %in% lever_cols) {
-        svy$cellphone <- .apply_binary_access(
-          svy$cellphone,
-          digital$mobile_universal,
-          digital$mobile_access_change_pct
-        )
-      }
-    }
-  }
-
-  # Education: only apply if user has specified non-zero changes
-  if (!is.null(education)) {
-    if (has_education_change(education)) {
-      if ("educ_com1_hh" %in% lever_cols) {
-        svy$educ_com1_hh <- .apply_binary_access(
-          svy$educ_com1_hh,
-          education$primary_universal,
-          education$primary_access_change_pct
-        )
-      }
-      if ("educ_com2_hh" %in% lever_cols) {
-        svy$educ_com2_hh <- .apply_binary_access(
-          svy$educ_com2_hh,
-          education$secondary_universal,
-          education$secondary_access_change_pct
-        )
-      }
-      if ("educ_com3_hh" %in% lever_cols) {
-        svy$educ_com3_hh <- .apply_binary_access(
-          svy$educ_com3_hh,
-          education$postsec_universal,
-          education$postsec_access_change_pct
-        )
-      }
-    }
-  }
-
-  # Labour market: only apply if user has specified non-zero changes
-  if (!is.null(labor)) {
-    if (has_labor_change(labor)) {
-      # Employment rate change (percentage points): unemployed -> employed/selfemployed
-      # Requires all three employment status columns to be present
-      emp_change <- (labor$employment_change_pp %||% 0) / 100
-      if (emp_change != 0 && all(c("employed", "selfemployed", "unemployed") %in%
-          lever_cols)) {
-      # Find unemployed individuals and current ratio of employed/selfemployed
-      unemp_idx <- which(svy$unemployed == 1L & !is.na(svy$unemployed))
-      employed_idx <- which(svy$employed == 1L & !is.na(svy$employed))
-      selfemp_idx <- which(svy$selfemployed == 1L & !is.na(svy$selfemployed))
-
-      # emp_change is the target shift in employment rate (as a fraction of
-      # total N), so multiply by nrow(svy) to get the number of workers to
-      # flip - giving a true percentage-point change in employment rate.
-      n_total <- nrow(svy)
-
-      if (emp_change > 0 && length(unemp_idx) > 0) {
-        # Calculate ratio of employed vs selfemployed among currently employed
-        n_employed <- length(employed_idx)
-        n_selfemp <- length(selfemp_idx)
-        total_employed <- n_employed + n_selfemp
-        ratio_employed <- if (total_employed > 0) n_employed / total_employed
-                          else 0.5
-
-        n_flip <- min(round(n_total * emp_change), length(unemp_idx))
-        if (n_flip > 0) {
-          flip_idx <- sample(unemp_idx, n_flip)
-          n_to_employed <- round(length(flip_idx) * ratio_employed)
-          n_to_selfemp <- length(flip_idx) - n_to_employed
-
-          if (n_to_employed > 0) {
-            flip_employed <- flip_idx[seq_len(n_to_employed)]
-            svy$unemployed[flip_employed] <- 0L
-            svy$employed[flip_employed] <- 1L
-          }
-          if (n_to_selfemp > 0) {
-            flip_selfemp <- flip_idx[seq(n_to_employed + 1, length(flip_idx))]
-            svy$unemployed[flip_selfemp] <- 0L
-            svy$selfemployed[flip_selfemp] <- 1L
-          }
-        }
-      } else if (emp_change < 0 && length(c(employed_idx, selfemp_idx)) > 0) {
-        # Decrease employment: flip some employed/selfemployed to unemployed
-        employed_all <- c(employed_idx, selfemp_idx)
-        n_flip <- min(round(n_total * abs(emp_change)), length(employed_all))
-        if (n_flip > 0) {
-          flip_idx <- sample(employed_all, n_flip)
-          svy$employed[flip_idx] <- 0L
-          svy$selfemployed[flip_idx] <- 0L
-          svy$unemployed[flip_idx] <- 1L
-        }
-      }
-    }
-
-    # Sectoral composition: minimize reallocation to achieve target percentages
-    # Only move workers from sectors exceeding their target
-    if (all(c("employed", "selfemployed", "agriculture", "industry", "services") %in% lever_cols)) {
-      working <- (svy$employed == 1L | svy$selfemployed == 1L) &
-                 !is.na(svy$employed) & !is.na(svy$selfemployed)
-
-      if (any(working)) {
-        working_idx <- which(working)
-        n_working <- length(working_idx)
-
-        # Target percentages: manufacturing and services chosen by user,
-        # agriculture is the residual. Clamp so targets cannot exceed 100%
-        # combined (which would make target_agri negative and corrupt the
-        # reallocation logic).
-        target_ind  <- min((labor$sector_manufacturing %||% 0) / 100, 1)
-        target_serv <- min((labor$sector_services %||% 0) / 100, 1 - target_ind)
-        target_agri <- 1.0 - target_ind - target_serv
-
-        # Convert targets to row counts
-        n_target_ind <- round(n_working * target_ind)
-        n_target_serv <- round(n_working * target_serv)
-        n_target_agri <- n_working - n_target_ind - n_target_serv
-
-        # Count current sector distribution (within working population)
-        n_curr_agri <- sum(svy$agriculture[working_idx] == 1L, na.rm = TRUE)
-        n_curr_ind <- sum(svy$industry[working_idx] == 1L, na.rm = TRUE)
-        n_curr_serv <- sum(svy$services[working_idx] == 1L, na.rm = TRUE)
-
-        # Surplus = current exceeds target; deficit = current below target
-        surplus_agri <- max(0L, n_curr_agri - n_target_agri)
-        surplus_ind <- max(0L, n_curr_ind - n_target_ind)
-        surplus_serv <- max(0L, n_curr_serv - n_target_serv)
-
-        deficit_agri <- max(0L, n_target_agri - n_curr_agri)
-        deficit_ind <- max(0L, n_target_ind - n_curr_ind)
-        deficit_serv <- max(0L, n_target_serv - n_curr_serv)
-
-        # Build list of workers to reallocate and their target sectors
-        # Priority: reallocate from agriculture, then industry, then services
-        reallocations <- data.frame(
-          worker = integer(0),
-          from_sector = character(0),
-          to_sector = character(0),
-          stringsAsFactors = FALSE
-        )
-
-        # Agriculture -> (deficit sectors)
-        if (surplus_agri > 0) {
-          agri_workers <- which(working & svy$agriculture == 1L)
-          if (length(agri_workers) > 0) {
-            n_to_move <- min(surplus_agri, length(agri_workers))
-            candidates <- sample(agri_workers, n_to_move)
-            n_to_ind <- if (deficit_ind > 0) min(n_to_move, deficit_ind) else 0L
-            n_to_serv <- if (deficit_serv > 0) max(0L, n_to_move - n_to_ind) else 0L
-            targets <- c(
-              rep("industry", n_to_ind),
-              rep("services", n_to_serv)
-            )
-            if (length(targets) > 0 && length(targets) == length(candidates)) {
-              reallocations <- rbind(reallocations,
-                data.frame(worker = candidates[seq_along(targets)],
-                          from_sector = "agriculture",
-                          to_sector = targets,
-                          stringsAsFactors = FALSE))
-              deficit_ind <- max(0, deficit_ind - sum(targets == "industry"))
-              deficit_serv <- max(0, deficit_serv - sum(targets == "services"))
-            }
-          }
-        }
-
-        # Industry -> (deficit sectors)
-        if (surplus_ind > 0 && (deficit_agri > 0 || deficit_serv > 0)) {
-          ind_workers <- which(working & svy$industry == 1L)
-          if (length(ind_workers) > 0) {
-            n_to_move <- min(surplus_ind, length(ind_workers),
-                            deficit_agri + deficit_serv)
-            candidates <- sample(ind_workers, n_to_move)
-            n_to_agri <- if (deficit_agri > 0) min(n_to_move, deficit_agri)
-                         else 0L
-            n_to_serv <- if (deficit_serv > 0) max(0L, n_to_move - n_to_agri)
-                         else 0L
-            targets <- c(
-              rep("agriculture", n_to_agri),
-              rep("services", n_to_serv)
-            )
-            if (length(targets) > 0 && length(targets) == length(candidates)) {
-              reallocations <- rbind(reallocations,
-                data.frame(worker = candidates[seq_along(targets)],
-                          from_sector = "industry",
-                          to_sector = targets,
-                          stringsAsFactors = FALSE))
-              deficit_agri <- max(0, deficit_agri - sum(targets == "agriculture"))
-              deficit_serv <- max(0, deficit_serv - sum(targets == "services"))
-            }
-          }
-        }
-
-        # Services -> (deficit sectors)
-        if (surplus_serv > 0 && (deficit_agri > 0 || deficit_ind > 0)) {
-          serv_workers <- which(working & svy$services == 1L)
-          if (length(serv_workers) > 0) {
-            n_to_move <- min(surplus_serv, length(serv_workers),
-                            deficit_agri + deficit_ind)
-            candidates <- sample(serv_workers, n_to_move)
-            n_to_agri <- if (deficit_agri > 0) min(n_to_move, deficit_agri)
-                         else 0L
-            n_to_ind <- if (deficit_ind > 0) max(0L, n_to_move - n_to_agri)
-                        else 0L
-            targets <- c(
-              rep("agriculture", n_to_agri),
-              rep("industry", n_to_ind)
-            )
-            if (length(targets) > 0 && length(targets) == length(candidates)) {
-              reallocations <- rbind(reallocations,
-                data.frame(worker = candidates[seq_along(targets)],
-                          from_sector = "services",
-                          to_sector = targets,
-                          stringsAsFactors = FALSE))
-            }
-          }
-        }
-
-        # Execute reallocations: clear all sector flags for movers then assign
-        # target sector. Vectorised over sector to avoid a row-by-row loop.
-        if (nrow(reallocations) > 0) {
-          movers <- reallocations$worker
-          svy$agriculture[movers] <- 0L
-          svy$industry[movers]    <- 0L
-          svy$services[movers]    <- 0L
-          for (sec in c("agriculture", "industry", "services")) {
-            targets <- reallocations$worker[reallocations$to_sector == sec]
-            if (length(targets) > 0 && sec %in% names(svy)) {
-              svy[[sec]][targets] <- 1L
-            }
-          }
-        }
-      }
-    }
-    }
-  }
-
-  # Social protection: add per-recipient transfer as SP_TRANSFER_COL column.
-  # welfare is the regression outcome (not a covariate), so we tag the
-  # transfer amount here; run_sim_pipeline() (fct_simulations.R) reads the
-  # column post-prediction and adds it to y_point on the level scale
-  # (re-logged when so$transform == "log") so the boost flows into
-  # aggregate_with_uncertainty_delta() and matches the decomposition's delta_sp.
-  #
-  # When analysis_unit == "hh" each row is a household and the SP "recipient"
-  # is the household, but welfare is per-capita - so the per-household
-  # transfer must be divided by hhsize to match scale. When analysis_unit ==
-  # "ind" the SP transfer is already per-individual and applies to every
-  # eligible (individual) row as-is. `hhsize_scale` performs that scaling.
-  if (!is.null(sp) && "welfare" %in% cols) {
-
-    hhsize_scale <- if (identical(analysis_unit, "hh") && "hhsize" %in% cols) {
-      hs <- suppressWarnings(as.numeric(svy$hhsize))
-      hs[!is.finite(hs) | hs <= 0] <- 1   # guard against NA / zero / negative
-      hs
+    # Columns eligible for covariate-lever manipulation. A lever whose variable
+    # has been removed from the Step 1 model (its UI control is hidden) must not
+    # mutate the survey, otherwise the diagnostics tab would surface phantom
+    # "manipulated" variables that the model - and hence the Results and
+    # Decomposition tabs - ignore. Matching mirrors the lever modules' show_*
+    # logic (substring match against model term names). SP transfers act on
+    # `welfare` (the outcome, not a covariate) and are intentionally not gated.
+    lever_cols <- if (is.null(model_vars)) {
+      cols
     } else {
-      rep_len(1, nrow(svy))
+      Filter(function(v) any(grepl(v, model_vars, ignore.case = TRUE)), cols)
     }
 
-    if (sp$budget_mode == "transfer_first") {
-      # If transfer-first budget mode is selected, apply the transfer to the
-      # survey immediately so it is included in the predictions and thus the
-      # targeting can be based on post-transfer welfare. The transfer amount is
-      # annualized and converted to a daily amount for this purpose, since the
-      # model is based on daily welfare.
-      n_pay     <- sp$transfer_n_payments
-      annual_transfer <- sp$transfer_amount_usd * n_pay
-      daily_transfer  <- annual_transfer / 365
-      eligible  <- .determine_sp_eligibility(svy, sp)
-      if (length(eligible) == nrow(svy)) {
-        svy[[SP_TRANSFER_COL]] <- ifelse(eligible,
-                                         daily_transfer / hhsize_scale, 0)
+    # Infrastructure: only apply if user has specified non-zero changes
+    if (!is.null(infra)) {
+      if (has_infra_change(infra)) {
+        if ("electricity" %in% lever_cols) {
+          svy$electricity <- .apply_binary_access(
+            svy$electricity,
+            infra$elec_universal,
+            infra$elec_access_change_pct
+          )
+        }
+        if ("imp_wat_rec" %in% lever_cols) {
+          svy$imp_wat_rec <- .apply_binary_access(
+            svy$imp_wat_rec,
+            infra$water_universal,
+            infra$water_access_change_pct
+          )
+        }
+        if ("imp_san_rec" %in% lever_cols) {
+          svy$imp_san_rec <- .apply_binary_access(
+            svy$imp_san_rec,
+            infra$sanitation_universal,
+            infra$sanitation_access_change_pct
+          )
+        }
+        if ("piped" %in% lever_cols) {
+          svy$piped <- .apply_binary_access(
+            svy$piped,
+            infra$piped_universal,
+            infra$piped_access_change_pct
+          )
+        }
+        if ("piped_to_prem" %in% lever_cols) {
+          svy$piped_to_prem <- .apply_binary_access(
+            svy$piped_to_prem,
+            infra$piped_to_prem_universal,
+            infra$piped_to_prem_access_change_pct
+          )
+        }
+        if ("imp_wat_san_rec" %in% lever_cols) {
+          svy$imp_wat_san_rec <- .apply_binary_access(
+            svy$imp_wat_san_rec,
+            infra$imp_wat_san_universal,
+            infra$imp_wat_san_access_change_pct
+          )
+        }
+        if ("ttime_health" %in% lever_cols) {
+          svy$ttime_health <- .apply_health_travel(
+            svy$ttime_health,
+            infra$health_mode,
+            infra$health_travel_pct,
+            infra$health_travel_max
+          )
+        }
       }
     }
-    else if (sp$budget_mode == "budget_first") {
-      # Distribute the fixed budget across eligible households. Eligibility is
-      # determined once here using the baseline survey; SP_TRANSFER_COL holds
-      # the resulting daily per-household amount.
-      #
-      # When survey weights are present, divide the budget by the weighted
-      # count of eligible households so that the population-level total
-      # sum(transfer * weight) equals budget_fixed. Without weight adjustment
-      # the realised budget would scale with mean(weight) on eligible HHs.
-      eligible <- .determine_sp_eligibility(svy, sp)
-      n_eligible <- sum(eligible)
-      if (n_eligible > 0) {
-        w_elig <- if ("weight" %in% names(svy)) {
-          w <- svy$weight[eligible]
-          sum(w[is.finite(w) & w > 0], na.rm = TRUE)
-        } else 0
-        divisor <- if (w_elig > 0) w_elig else n_eligible
-        annual_transfer <- sp$budget_fixed / divisor
-        daily_transfer  <- annual_transfer / 365
-        svy[[SP_TRANSFER_COL]] <- ifelse(eligible,
-                                         daily_transfer / hhsize_scale, 0)
+
+    # Digital inclusion: only apply if user has specified non-zero changes
+    if (!is.null(digital)) {
+      if (has_digital_change(digital)) {
+        if ("internet" %in% lever_cols) {
+          svy$internet <- .apply_binary_access(
+            svy$internet,
+            digital$internet_universal,
+            digital$internet_access_change_pct
+          )
+        }
+        if ("cellphone" %in% lever_cols) {
+          svy$cellphone <- .apply_binary_access(
+            svy$cellphone,
+            digital$mobile_universal,
+            digital$mobile_access_change_pct
+          )
+        }
       }
     }
-  }
+
+    # Education: only apply if user has specified non-zero changes
+    if (!is.null(education)) {
+      if (has_education_change(education)) {
+        if ("educ_com1_hh" %in% lever_cols) {
+          svy$educ_com1_hh <- .apply_binary_access(
+            svy$educ_com1_hh,
+            education$primary_universal,
+            education$primary_access_change_pct
+          )
+        }
+        if ("educ_com2_hh" %in% lever_cols) {
+          svy$educ_com2_hh <- .apply_binary_access(
+            svy$educ_com2_hh,
+            education$secondary_universal,
+            education$secondary_access_change_pct
+          )
+        }
+        if ("educ_com3_hh" %in% lever_cols) {
+          svy$educ_com3_hh <- .apply_binary_access(
+            svy$educ_com3_hh,
+            education$postsec_universal,
+            education$postsec_access_change_pct
+          )
+        }
+      }
+    }
+
+    # Labour market: only apply if user has specified non-zero changes
+    if (!is.null(labor)) {
+      if (has_labor_change(labor)) {
+        # Employment rate change (percentage points): unemployed -> employed/selfemployed
+        # Requires all three employment status columns to be present
+        emp_change <- (labor$employment_change_pp %||% 0) / 100
+        if (emp_change != 0 && all(c("employed", "selfemployed", "unemployed") %in%
+          lever_cols)) {
+          # Find unemployed individuals and current ratio of employed/selfemployed
+          unemp_idx <- which(svy$unemployed == 1L & !is.na(svy$unemployed))
+          employed_idx <- which(svy$employed == 1L & !is.na(svy$employed))
+          selfemp_idx <- which(svy$selfemployed == 1L & !is.na(svy$selfemployed))
+
+          # emp_change is the target shift in employment rate (as a fraction of
+          # total N), so multiply by nrow(svy) to get the number of workers to
+          # flip - giving a true percentage-point change in employment rate.
+          n_total <- nrow(svy)
+
+          if (emp_change > 0 && length(unemp_idx) > 0) {
+            # Calculate ratio of employed vs selfemployed among currently employed
+            n_employed <- length(employed_idx)
+            n_selfemp <- length(selfemp_idx)
+            total_employed <- n_employed + n_selfemp
+            ratio_employed <- if (total_employed > 0) {
+              n_employed / total_employed
+            } else {
+              0.5
+            }
+
+            n_flip <- min(round(n_total * emp_change), length(unemp_idx))
+            if (n_flip > 0) {
+              flip_idx <- sample(unemp_idx, n_flip)
+              n_to_employed <- round(length(flip_idx) * ratio_employed)
+              n_to_selfemp <- length(flip_idx) - n_to_employed
+
+              if (n_to_employed > 0) {
+                flip_employed <- flip_idx[seq_len(n_to_employed)]
+                svy$unemployed[flip_employed] <- 0L
+                svy$employed[flip_employed] <- 1L
+              }
+              if (n_to_selfemp > 0) {
+                flip_selfemp <- flip_idx[seq(n_to_employed + 1, length(flip_idx))]
+                svy$unemployed[flip_selfemp] <- 0L
+                svy$selfemployed[flip_selfemp] <- 1L
+              }
+            }
+          } else if (emp_change < 0 && length(c(employed_idx, selfemp_idx)) > 0) {
+            # Decrease employment: flip some employed/selfemployed to unemployed
+            employed_all <- c(employed_idx, selfemp_idx)
+            n_flip <- min(round(n_total * abs(emp_change)), length(employed_all))
+            if (n_flip > 0) {
+              flip_idx <- sample(employed_all, n_flip)
+              svy$employed[flip_idx] <- 0L
+              svy$selfemployed[flip_idx] <- 0L
+              svy$unemployed[flip_idx] <- 1L
+            }
+          }
+        }
+
+        # Sectoral composition: minimize reallocation to achieve target percentages
+        # Only move workers from sectors exceeding their target
+        if (all(c("employed", "selfemployed", "agriculture", "industry", "services") %in% lever_cols)) {
+          working <- (svy$employed == 1L | svy$selfemployed == 1L) &
+            !is.na(svy$employed) & !is.na(svy$selfemployed)
+
+          if (any(working)) {
+            working_idx <- which(working)
+            n_working <- length(working_idx)
+
+            # Target percentages: manufacturing and services chosen by user,
+            # agriculture is the residual. Clamp so targets cannot exceed 100%
+            # combined (which would make target_agri negative and corrupt the
+            # reallocation logic).
+            target_ind <- min((labor$sector_manufacturing %||% 0) / 100, 1)
+            target_serv <- min((labor$sector_services %||% 0) / 100, 1 - target_ind)
+            target_agri <- 1.0 - target_ind - target_serv
+
+            # Convert targets to row counts
+            n_target_ind <- round(n_working * target_ind)
+            n_target_serv <- round(n_working * target_serv)
+            n_target_agri <- n_working - n_target_ind - n_target_serv
+
+            # Count current sector distribution (within working population)
+            n_curr_agri <- sum(svy$agriculture[working_idx] == 1L, na.rm = TRUE)
+            n_curr_ind <- sum(svy$industry[working_idx] == 1L, na.rm = TRUE)
+            n_curr_serv <- sum(svy$services[working_idx] == 1L, na.rm = TRUE)
+
+            # Surplus = current exceeds target; deficit = current below target
+            surplus_agri <- max(0L, n_curr_agri - n_target_agri)
+            surplus_ind <- max(0L, n_curr_ind - n_target_ind)
+            surplus_serv <- max(0L, n_curr_serv - n_target_serv)
+
+            deficit_agri <- max(0L, n_target_agri - n_curr_agri)
+            deficit_ind <- max(0L, n_target_ind - n_curr_ind)
+            deficit_serv <- max(0L, n_target_serv - n_curr_serv)
+
+            # Build list of workers to reallocate and their target sectors
+            # Priority: reallocate from agriculture, then industry, then services
+            reallocations <- data.frame(
+              worker = integer(0),
+              from_sector = character(0),
+              to_sector = character(0),
+              stringsAsFactors = FALSE
+            )
+
+            # Agriculture -> (deficit sectors)
+            if (surplus_agri > 0) {
+              agri_workers <- which(working & svy$agriculture == 1L)
+              if (length(agri_workers) > 0) {
+                n_to_move <- min(surplus_agri, length(agri_workers))
+                candidates <- sample(agri_workers, n_to_move)
+                n_to_ind <- if (deficit_ind > 0) min(n_to_move, deficit_ind) else 0L
+                n_to_serv <- if (deficit_serv > 0) max(0L, n_to_move - n_to_ind) else 0L
+                targets <- c(
+                  rep("industry", n_to_ind),
+                  rep("services", n_to_serv)
+                )
+                if (length(targets) > 0 && length(targets) == length(candidates)) {
+                  reallocations <- rbind(
+                    reallocations,
+                    data.frame(
+                      worker = candidates[seq_along(targets)],
+                      from_sector = "agriculture",
+                      to_sector = targets,
+                      stringsAsFactors = FALSE
+                    )
+                  )
+                  deficit_ind <- max(0, deficit_ind - sum(targets == "industry"))
+                  deficit_serv <- max(0, deficit_serv - sum(targets == "services"))
+                }
+              }
+            }
+
+            # Industry -> (deficit sectors)
+            if (surplus_ind > 0 && (deficit_agri > 0 || deficit_serv > 0)) {
+              ind_workers <- which(working & svy$industry == 1L)
+              if (length(ind_workers) > 0) {
+                n_to_move <- min(
+                  surplus_ind, length(ind_workers),
+                  deficit_agri + deficit_serv
+                )
+                candidates <- sample(ind_workers, n_to_move)
+                n_to_agri <- if (deficit_agri > 0) {
+                  min(n_to_move, deficit_agri)
+                } else {
+                  0L
+                }
+                n_to_serv <- if (deficit_serv > 0) {
+                  max(0L, n_to_move - n_to_agri)
+                } else {
+                  0L
+                }
+                targets <- c(
+                  rep("agriculture", n_to_agri),
+                  rep("services", n_to_serv)
+                )
+                if (length(targets) > 0 && length(targets) == length(candidates)) {
+                  reallocations <- rbind(
+                    reallocations,
+                    data.frame(
+                      worker = candidates[seq_along(targets)],
+                      from_sector = "industry",
+                      to_sector = targets,
+                      stringsAsFactors = FALSE
+                    )
+                  )
+                  deficit_agri <- max(0, deficit_agri - sum(targets == "agriculture"))
+                  deficit_serv <- max(0, deficit_serv - sum(targets == "services"))
+                }
+              }
+            }
+
+            # Services -> (deficit sectors)
+            if (surplus_serv > 0 && (deficit_agri > 0 || deficit_ind > 0)) {
+              serv_workers <- which(working & svy$services == 1L)
+              if (length(serv_workers) > 0) {
+                n_to_move <- min(
+                  surplus_serv, length(serv_workers),
+                  deficit_agri + deficit_ind
+                )
+                candidates <- sample(serv_workers, n_to_move)
+                n_to_agri <- if (deficit_agri > 0) {
+                  min(n_to_move, deficit_agri)
+                } else {
+                  0L
+                }
+                n_to_ind <- if (deficit_ind > 0) {
+                  max(0L, n_to_move - n_to_agri)
+                } else {
+                  0L
+                }
+                targets <- c(
+                  rep("agriculture", n_to_agri),
+                  rep("industry", n_to_ind)
+                )
+                if (length(targets) > 0 && length(targets) == length(candidates)) {
+                  reallocations <- rbind(
+                    reallocations,
+                    data.frame(
+                      worker = candidates[seq_along(targets)],
+                      from_sector = "services",
+                      to_sector = targets,
+                      stringsAsFactors = FALSE
+                    )
+                  )
+                }
+              }
+            }
+
+            # Execute reallocations: clear all sector flags for movers then assign
+            # target sector. Vectorised over sector to avoid a row-by-row loop.
+            if (nrow(reallocations) > 0) {
+              movers <- reallocations$worker
+              svy$agriculture[movers] <- 0L
+              svy$industry[movers] <- 0L
+              svy$services[movers] <- 0L
+              for (sec in c("agriculture", "industry", "services")) {
+                targets <- reallocations$worker[reallocations$to_sector == sec]
+                if (length(targets) > 0 && sec %in% names(svy)) {
+                  svy[[sec]][targets] <- 1L
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+
+    # Social protection: add per-recipient transfer as SP_TRANSFER_COL column.
+    # welfare is the regression outcome (not a covariate), so we tag the
+    # transfer amount here; run_sim_pipeline() (fct_simulations.R) reads the
+    # column post-prediction and adds it to y_point on the level scale
+    # (re-logged when so$transform == "log") so the boost flows into
+    # aggregate_with_uncertainty_delta() and matches the decomposition's delta_sp.
+    #
+    # When analysis_unit == "hh" each row is a household and the SP "recipient"
+    # is the household, but welfare is per-capita - so the per-household
+    # transfer must be divided by hhsize to match scale. When analysis_unit ==
+    # "ind" the SP transfer is already per-individual and applies to every
+    # eligible (individual) row as-is. `hhsize_scale` performs that scaling.
+    if (!is.null(sp) && "welfare" %in% cols) {
+      hhsize_scale <- if (identical(analysis_unit, "hh") && "hhsize" %in% cols) {
+        hs <- suppressWarnings(as.numeric(svy$hhsize))
+        hs[!is.finite(hs) | hs <= 0] <- 1 # guard against NA / zero / negative
+        hs
+      } else {
+        rep_len(1, nrow(svy))
+      }
+
+      if (sp$budget_mode == "transfer_first") {
+        # If transfer-first budget mode is selected, apply the transfer to the
+        # survey immediately so it is included in the predictions and thus the
+        # targeting can be based on post-transfer welfare. The transfer amount is
+        # annualized and converted to a daily amount for this purpose, since the
+        # model is based on daily welfare.
+        n_pay <- sp$transfer_n_payments
+        annual_transfer <- sp$transfer_amount_usd * n_pay
+        daily_transfer <- annual_transfer / 365
+        eligible <- .determine_sp_eligibility(svy, sp)
+        if (length(eligible) == nrow(svy)) {
+          svy[[SP_TRANSFER_COL]] <- ifelse(eligible,
+            daily_transfer / hhsize_scale, 0
+          )
+        }
+      } else if (sp$budget_mode == "budget_first") {
+        # Distribute the fixed budget across eligible households. Eligibility is
+        # determined once here using the baseline survey; SP_TRANSFER_COL holds
+        # the resulting daily per-household amount.
+        #
+        # When survey weights are present, divide the budget by the weighted
+        # count of eligible households so that the population-level total
+        # sum(transfer * weight) equals budget_fixed. Without weight adjustment
+        # the realised budget would scale with mean(weight) on eligible HHs.
+        eligible <- .determine_sp_eligibility(svy, sp)
+        n_eligible <- sum(eligible)
+        if (n_eligible > 0) {
+          w_elig <- if ("weight" %in% names(svy)) {
+            w <- svy$weight[eligible]
+            sum(w[is.finite(w) & w > 0], na.rm = TRUE)
+          } else {
+            0
+          }
+          divisor <- if (w_elig > 0) w_elig else n_eligible
+          annual_transfer <- sp$budget_fixed / divisor
+          daily_transfer <- annual_transfer / 365
+          svy[[SP_TRANSFER_COL]] <- ifelse(eligible,
+            daily_transfer / hhsize_scale, 0
+          )
+        }
+      }
+    }
 
     svy
   })
@@ -1083,11 +1218,13 @@ resimulate_with_svy <- function(svy, sw, so, mf,
                                 saved_scenarios_baseline = list(),
                                 svy_baseline = NULL) {
   if (is.null(svy) || is.null(mf) || is.null(hist_sim_baseline) ||
-      is.null(so)) return(NULL)
+    is.null(so)) {
+    return(NULL)
+  }
 
-  pov_line   <- hist_sim_baseline$pov_line
-  residuals  <- hist_sim_baseline$residuals %||%
-                hist_sim_baseline$pipeline$residuals %||% "none"
+  pov_line <- hist_sim_baseline$pov_line
+  residuals <- hist_sim_baseline$residuals %||%
+    hist_sim_baseline$pipeline$residuals %||% "none"
   # Canonical Cholesky-factor key is $chol_obj (matches Step 2 hist_sim and
   # the primary run_sim_pipeline parameter). Older Mod 3 outputs stored it
   # under $chol_Sigma; read that as a fallback so existing in-memory state
@@ -1102,45 +1239,61 @@ resimulate_with_svy <- function(svy, sw, so, mf,
   # flipped - robust to baseline/training mismatch.
   if (!is.null(chol_obj)) {
     is_rif_shape <- is.list(chol_obj) && !("L" %in% names(chol_obj))
-    if (is_rif_shape) attr(chol_obj, "active_mask") <- NULL
-    else              chol_obj$active_mask         <- NULL
+    if (is_rif_shape) {
+      attr(chol_obj, "active_mask") <- NULL
+    } else {
+      chol_obj$active_mask <- NULL
+    }
     chol_obj <- attach_active_mask(
-      chol_obj                            = chol_obj,
-      svy_modified                        = svy,
-      svy_reference                       = svy_baseline,
-      train_data                          = mf$train_data,
-      weather_terms                       = mf$weather_terms,
-      outcome_col                         = so$name,
-      residuals                           = residuals,
+      chol_obj = chol_obj,
+      svy_modified = svy,
+      svy_reference = svy_baseline,
+      train_data = mf$train_data,
+      weather_terms = mf$weather_terms,
+      outcome_col = so$name,
+      residuals = residuals,
       propagate_all_covariate_uncertainty =
         isTRUE(hist_sim_baseline$propagate_all_covariate_uncertainty)
     )
   }
 
-  is_rif       <- identical(mf$engine, "rif")
-  fit_multi    <- if (is_rif) mf$fit3 else NULL
-  rif_taus     <- if (is_rif) mf$taus else NULL
-  rif_weather  <- if (is_rif) mf$weather_terms else NULL
-  rif_grid     <- if (is_rif) mf$rif_grid else NULL
-  model        <- if (is_rif) extract_rif_median(mf$fit3, mf$engine) else mf$fit3
+  is_rif <- identical(mf$engine, "rif")
+  fit_multi <- if (is_rif) mf$fit3 else NULL
+  rif_taus <- if (is_rif) mf$taus else NULL
+  rif_weather <- if (is_rif) mf$weather_terms else NULL
+  rif_grid <- if (is_rif) mf$rif_grid else NULL
+  model <- if (is_rif) extract_rif_median(mf$fit3, mf$engine) else mf$fit3
 
   # ecdf_train: RIF-only. mf$train_data is identical across every scenario/
   # ensemble-member call to run_one() below, so build the ecdf once here
   # instead of rebuilding it inside predict_rif() on each call (see PERF-27).
-  precomputed_ecdf_train <- if (is_rif) tryCatch({
-    stats::ecdf(mf$train_data[[so$name]])
-  }, error = function(e) NULL) else NULL
+  precomputed_ecdf_train <- if (is_rif) {
+    tryCatch(
+      {
+        stats::ecdf(mf$train_data[[so$name]])
+      },
+      error = function(e) NULL
+    )
+  } else {
+    NULL
+  }
   direct_rif_metadata <- if (is_rif) {
     tryCatch(build_direct_rif_metadata(fit_multi), error = function(e) NULL)
-  } else NULL
+  } else {
+    NULL
+  }
   direct_rif_baseline_cache <- if (is_rif) {
     new.env(parent = emptyenv())
-  } else NULL
+  } else {
+    NULL
+  }
   rif_policy_deltas <- if (is_rif && !is.null(svy_baseline)) {
     tryCatch(.compute_policy_deltas(
       svy_baseline, svy, so$name, mf$weather_terms
     ), error = function(e) NULL)
-  } else NULL
+  } else {
+    NULL
+  }
 
   # train_aug: identical for every run_one() call below (same model, same
   # train_data). Compute once here instead of repeating
@@ -1149,18 +1302,27 @@ resimulate_with_svy <- function(svy, sw, so, mf,
   # run_sim_pipeline() returns NULL for it on the RIF path - so leave it NULL
   # there. On failure, NULL restores run_sim_pipeline()'s per-call fallback,
   # which keeps the existing warning/fallback behaviour.
-  precomputed_train_aug <- if (is_rif) NULL else tryCatch({
-    fitted_train <- as.numeric(stats::predict(model, newdata = mf$train_data))
-    mf$train_data |>
-      dplyr::mutate(
-        .fitted = fitted_train,
-        .resid  = !!rlang::sym(so$name) - fitted_train
-      )
-  }, error = function(e) {
-    warning("[resimulate_with_svy] train_aug precomputation failed: ",
-            conditionMessage(e))
+  precomputed_train_aug <- if (is_rif) {
     NULL
-  })
+  } else {
+    tryCatch(
+      {
+        fitted_train <- as.numeric(stats::predict(model, newdata = mf$train_data))
+        mf$train_data |>
+          dplyr::mutate(
+            .fitted = fitted_train,
+            .resid  = !!rlang::sym(so$name) - fitted_train
+          )
+      },
+      error = function(e) {
+        warning(
+          "[resimulate_with_svy] train_aug precomputation failed: ",
+          conditionMessage(e)
+        )
+        NULL
+      }
+    )
+  }
 
   # Survey-side join prep: drop weather/outcome columns and convert year once,
   # so run_sim_pipeline() skips that manipulation per member (see PERF-19).
@@ -1169,49 +1331,56 @@ resimulate_with_svy <- function(svy, sw, so, mf,
   # On failure here, NULL makes
   # run_sim_pipeline() fall back to the identical per-call preparation, so
   # run_one()'s existing error handling is preserved.
-  svy_prepared <- tryCatch({
-    survey_for_prediction <- if (is_rif) svy_baseline else svy
-    survey_for_prediction |>
-      dplyr::mutate(year = as.character(year)) |>
-      dplyr::select(-dplyr::any_of(c(sw$name, so$name)))
-  }, error = function(e) NULL)
+  svy_prepared <- tryCatch(
+    {
+      survey_for_prediction <- if (is_rif) svy_baseline else svy
+      survey_for_prediction |>
+        dplyr::mutate(year = as.character(year)) |>
+        dplyr::select(-dplyr::any_of(c(sw$name, so$name)))
+    },
+    error = function(e) NULL
+  )
 
   run_one <- function(weather_raw, slim) {
     tryCatch(
       run_sim_pipeline(
-        weather_raw  = weather_raw,
-        svy          = svy,
-        sw           = sw,
-        so           = so,
-        model        = model,
-        residuals    = residuals,
-        train_data   = mf$train_data,
-        engine       = mf$engine,
-        chol_obj     = chol_obj,
-        slim         = slim,
-        fit_multi    = fit_multi,
-        taus         = rif_taus,
+        weather_raw = weather_raw,
+        svy = svy,
+        sw = sw,
+        so = so,
+        model = model,
+        residuals = residuals,
+        train_data = mf$train_data,
+        engine = mf$engine,
+        chol_obj = chol_obj,
+        slim = slim,
+        fit_multi = fit_multi,
+        taus = rif_taus,
         weather_cols = rif_weather,
         svy_baseline = svy_baseline,
-        rif_grid     = rif_grid,
+        rif_grid = rif_grid,
         precomputed_train_aug = precomputed_train_aug,
-         svy_prepared = svy_prepared,
-          precomputed_ecdf_train = precomputed_ecdf_train,
-           direct_rif_predictions = TRUE,
-           direct_rif_metadata = direct_rif_metadata,
-           direct_rif_baseline_cache = direct_rif_baseline_cache,
-           rif_policy_deltas = rif_policy_deltas
+        svy_prepared = svy_prepared,
+        precomputed_ecdf_train = precomputed_ecdf_train,
+        direct_rif_predictions = TRUE,
+        direct_rif_metadata = direct_rif_metadata,
+        direct_rif_baseline_cache = direct_rif_baseline_cache,
+        rif_policy_deltas = rif_policy_deltas
       ),
       error = function(e) {
-        warning("[resimulate_with_svy] run_sim_pipeline failed: ",
-                conditionMessage(e))
+        warning(
+          "[resimulate_with_svy] run_sim_pipeline failed: ",
+          conditionMessage(e)
+        )
         NULL
       }
     )
   }
 
   hist_out <- run_one(hist_sim_baseline$weather_raw, slim = FALSE)
-  if (is.null(hist_out)) return(NULL)
+  if (is.null(hist_out)) {
+    return(NULL)
+  }
 
   # Emit the same schema Mod 2's run_full_simulation() produces, so the Mod 3
   # Results pane (and any downstream consumer) can read baseline and policy
@@ -1244,11 +1413,15 @@ resimulate_with_svy <- function(svy, sw, so, mf,
       # Log so mixed-version deployments aren't silently downgraded to a
       # single-member spread without the user noticing.
       sc_label <- names(saved_scenarios_baseline)[[i]] %||% paste0("scenario_", i)
-      message("[resimulate_with_svy] Scenario '", sc_label,
-              "' has no $pipelines; falling back to representative weather ",
-              "(single model - inter-model spread will not be available).")
+      message(
+        "[resimulate_with_svy] Scenario '", sc_label,
+        "' has no $pipelines; falling back to representative weather ",
+        "(single model - inter-model spread will not be available)."
+      )
       out <- run_one(s$weather_raw, slim = TRUE)
-      if (is.null(out)) return(NULL)
+      if (is.null(out)) {
+        return(NULL)
+      }
       pipes_new <- list(single = out)
     } else {
       member_names <- names(pipes) %||% paste0("model_", seq_along(pipes))
@@ -1258,7 +1431,9 @@ resimulate_with_svy <- function(svy, sw, so, mf,
       })
       names(pipes_new) <- member_names
       pipes_new <- Filter(Negate(is.null), pipes_new)
-      if (length(pipes_new) == 0L) return(NULL)
+      if (length(pipes_new) == 0L) {
+        return(NULL)
+      }
     }
 
     out_scenario <- list(
@@ -1347,21 +1522,24 @@ resimulate_with_svy <- function(svy, sw, so, mf,
 #'   Step 2 schema, or \code{NULL} on failure.
 #' @export
 apply_policy_delta_to_baseline <- function(svy_baseline,
-                                            svy_policy,
-                                            model_fit,
-                                            so,
-                                            hist_sim_baseline,
-                                            saved_scenarios_baseline = list(),
-                                            skip_coef = FALSE,
-                                            deltas    = NULL,
-                                            F_hat     = NULL,
-                                            decomp_context = NULL,
-                                            run_identity = NULL) {
+                                           svy_policy,
+                                           model_fit,
+                                           so,
+                                           hist_sim_baseline,
+                                           saved_scenarios_baseline = list(),
+                                           skip_coef = FALSE,
+                                           deltas = NULL,
+                                           F_hat = NULL,
+                                           decomp_context = NULL,
+                                           run_identity = NULL) {
   if (is.null(svy_baseline) || is.null(svy_policy) ||
-      is.null(model_fit) || is.null(so) ||
-      is.null(hist_sim_baseline)) return(NULL)
-  if (!is.null(decomp_context) && is.null(run_identity))
+    is.null(model_fit) || is.null(so) ||
+    is.null(hist_sim_baseline)) {
+    return(NULL)
+  }
+  if (!is.null(decomp_context) && is.null(run_identity)) {
     stop("Current run identity is required.", call. = FALSE)
+  }
 
   shared_context <- hist_sim_baseline$shared_context %||% list()
 
@@ -1371,45 +1549,54 @@ apply_policy_delta_to_baseline <- function(svy_baseline,
     svy_baseline, svy_policy, so$name, model_fit$weather_terms
   )
   F_hat <- F_hat %||% (if (identical(model_fit$engine, "rif") &&
-                           !is.null(model_fit$train_data) &&
-                           so$name %in% names(model_fit$train_data)) {
+    !is.null(model_fit$train_data) &&
+    so$name %in% names(model_fit$train_data)) {
     stats::ecdf(model_fit$train_data[[so$name]])
-  } else NULL)
+  } else {
+    NULL
+  })
 
   # Per-HH delta_total for a given weather panel. The active simulation path
   # needs only the central correction, not the full decomposition data frame
   # or channel uncertainty vectors.
   delta_for <- function(weather_raw) {
-      tryCatch(
-        .policy_central_delta(
+    tryCatch(
+      .policy_central_delta(
         svy_baseline = svy_baseline,
-        svy_policy   = svy_policy,
-        model_fit    = model_fit,
-        so           = so,
-        weather_raw  = weather_raw,
-        deltas       = deltas,
-        F_hat        = F_hat,
-          context      = decomp_context,
-          run_identity = run_identity
+        svy_policy = svy_policy,
+        model_fit = model_fit,
+        so = so,
+        weather_raw = weather_raw,
+        deltas = deltas,
+        F_hat = F_hat,
+        context = decomp_context,
+        run_identity = run_identity
       ),
       error = function(e) {
         if (grepl(
           "Current run identity|run identity mismatch|decomposition context|Incompatible or stale",
-          conditionMessage(e), ignore.case = TRUE
+          conditionMessage(e),
+          ignore.case = TRUE
         )) {
           stop(e)
         }
-        warning("[apply_policy_delta_to_baseline] central policy kernel ",
-                "failed: ", conditionMessage(e))
+        warning(
+          "[apply_policy_delta_to_baseline] central policy kernel ",
+          "failed: ", conditionMessage(e)
+        )
         NULL
       }
     )
   }
 
   apply_to_pipeline <- function(pipe, weather_raw_for_delta) {
-    if (is.null(pipe) || is.null(pipe$y_point)) return(pipe)
+    if (is.null(pipe) || is.null(pipe$y_point)) {
+      return(pipe)
+    }
     delta_hh <- delta_for(weather_raw_for_delta)
-    if (is.null(delta_hh)) return(pipe)
+    if (is.null(delta_hh)) {
+      return(pipe)
+    }
 
     # Broadcast delta_hh (length nrow(svy_baseline)) onto the expanded
     # (HH x year) pipeline rows via svy_row_id. When svy_row_id is missing
@@ -1420,14 +1607,16 @@ apply_policy_delta_to_baseline <- function(svy_baseline,
     if (is.null(sri) || length(sri) != length(pipe$y_point)) {
       id_col <- pipe$id_col %||% shared_context$id_col
       if (!is.null(id_col) && !is.null(pipe$id_vec) &&
-          id_col %in% names(svy_baseline)) {
+        id_col %in% names(svy_baseline)) {
         lookup <- match(pipe$id_vec, svy_baseline[[id_col]])
         delta_per_row <- delta_hh[lookup]
         delta_per_row[is.na(delta_per_row)] <- 0
       } else {
-        warning("[apply_policy_delta_to_baseline] pipeline lacks svy_row_id ",
-                "and no usable id_col fallback; policy arm will equal ",
-                "baseline for this pipeline.")
+        warning(
+          "[apply_policy_delta_to_baseline] pipeline lacks svy_row_id ",
+          "and no usable id_col fallback; policy arm will equal ",
+          "baseline for this pipeline."
+        )
         return(pipe)
       }
     } else {
@@ -1451,7 +1640,9 @@ apply_policy_delta_to_baseline <- function(svy_baseline,
   hist_sim_new$pipeline <- hist_pipeline_new
 
   saved_scenarios_new <- lapply(saved_scenarios_baseline, function(s) {
-    if (is.null(s) || is.null(s$pipelines)) return(s)
+    if (is.null(s) || is.null(s$pipelines)) {
+      return(s)
+    }
     pipes_new <- lapply(s$pipelines, function(pipe) {
       apply_to_pipeline(
         pipe,

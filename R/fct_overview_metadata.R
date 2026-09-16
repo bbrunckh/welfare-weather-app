@@ -284,7 +284,9 @@ load_overview_metadata <- function(connection_params, force_refresh = FALSE) {
     parsed <- tryCatch(
       {
         value <- .parse_db_csv_response(responses[[name]], urls[[name]])
-        if (identical(name, "variable_list")) value else {
+        if (identical(name, "variable_list")) {
+          value
+        } else {
           collect_deterministic(value)
         }
       },

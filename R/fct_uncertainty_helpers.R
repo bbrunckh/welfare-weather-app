@@ -18,42 +18,57 @@
 #'   `sim_years` (numeric/int), or NULL if `tbl` is empty/NULL.
 #' @noRd
 by_model_matrix <- function(tbl) {
-  if (is.null(tbl) || nrow(tbl) == 0L) return(NULL)
+  if (is.null(tbl) || nrow(tbl) == 0L) {
+    return(NULL)
+  }
   required <- c("sim_year", "model_id", "value_all", "value_all_sd")
-  if (!all(required %in% names(tbl))) return(NULL)
+  if (!all(required %in% names(tbl))) {
+    return(NULL)
+  }
 
   cell <- function(x, k) if (is.list(x)) x[[k]] else x[[k]]
-  ids_by_year <- lapply(seq_len(nrow(tbl)), function(k)
-    as.character(cell(tbl$model_id, k)))
-  vals_by_year <- lapply(seq_len(nrow(tbl)), function(k)
-    as.numeric(cell(tbl$value_all, k)))
-  sds_by_year <- lapply(seq_len(nrow(tbl)), function(k)
-    as.numeric(cell(tbl$value_all_sd, k)))
+  ids_by_year <- lapply(seq_len(nrow(tbl)), function(k) {
+    as.character(cell(tbl$model_id, k))
+  })
+  vals_by_year <- lapply(seq_len(nrow(tbl)), function(k) {
+    as.numeric(cell(tbl$value_all, k))
+  })
+  sds_by_year <- lapply(seq_len(nrow(tbl)), function(k) {
+    as.numeric(cell(tbl$value_all_sd, k))
+  })
   valid_rows <- vapply(seq_along(ids_by_year), function(k) {
     length(ids_by_year[[k]]) > 0L &&
       length(vals_by_year[[k]]) == length(ids_by_year[[k]])
   }, logical(1L))
-  if (!any(valid_rows)) return(NULL)
+  if (!any(valid_rows)) {
+    return(NULL)
+  }
 
   all_ids <- unique(unlist(ids_by_year[valid_rows], use.names = FALSE))
-  n_yrs   <- nrow(tbl)
-  vals_mat <- matrix(NA_real_, nrow = length(all_ids), ncol = n_yrs,
-                     dimnames = list(all_ids, tbl$sim_year))
-  sds_mat  <- matrix(NA_real_, nrow = length(all_ids), ncol = n_yrs,
-                     dimnames = list(all_ids, tbl$sim_year))
+  n_yrs <- nrow(tbl)
+  vals_mat <- matrix(NA_real_,
+    nrow = length(all_ids), ncol = n_yrs,
+    dimnames = list(all_ids, tbl$sim_year)
+  )
+  sds_mat <- matrix(NA_real_,
+    nrow = length(all_ids), ncol = n_yrs,
+    dimnames = list(all_ids, tbl$sim_year)
+  )
   for (k in seq_len(n_yrs)) {
     if (!valid_rows[[k]]) next
-    ids  <- ids_by_year[[k]]
+    ids <- ids_by_year[[k]]
     vals <- vals_by_year[[k]]
-    sds  <- sds_by_year[[k]]
+    sds <- sds_by_year[[k]]
     if (length(sds) == 1L && length(vals) > 1L) sds <- rep(sds, length(vals))
     if (length(sds) != length(vals)) sds <- rep(NA_real_, length(vals))
     keep <- !is.na(ids) & nzchar(ids) & ids %in% all_ids
     vals_mat[ids[keep], k] <- vals[keep]
-    sds_mat[ids[keep],  k] <- sds[keep]
+    sds_mat[ids[keep], k] <- sds[keep]
   }
-  list(vals = vals_mat, sds = sds_mat, model_ids = all_ids,
-       sim_years = tbl$sim_year)
+  list(
+    vals = vals_mat, sds = sds_mat, model_ids = all_ids,
+    sim_years = tbl$sim_year
+  )
 }
 
 #' Per-model rank-interpolated values (and coefficient SDs) at each kept
@@ -76,10 +91,10 @@ by_model_rp_matrix <- function(vals, sds, RPs_keep,
   adverse_tail <- match.arg(adverse_tail)
   n_m <- nrow(vals)
   n_r <- length(RPs_keep)
-  rp    <- matrix(NA_real_, nrow = n_m, ncol = n_r)
+  rp <- matrix(NA_real_, nrow = n_m, ncol = n_r)
   sd_at <- matrix(NA_real_, nrow = n_m, ncol = n_r)
   for (i in seq_len(n_m)) {
-    v  <- vals[i, ]
+    v <- vals[i, ]
     ok <- is.finite(v)
     if (sum(ok) < 2L) next
     sv <- sort(v[ok])
@@ -104,8 +119,12 @@ by_model_rp_matrix <- function(vals, sds, RPs_keep,
 #' @return A character scalar.
 #' @noRd
 pct_label <- function(q, use_minmax = FALSE) {
-  if (isTRUE(use_minmax) && q <= 0.001) return("min")
-  if (isTRUE(use_minmax) && q >= 0.999) return("max")
+  if (isTRUE(use_minmax) && q <= 0.001) {
+    return("min")
+  }
+  if (isTRUE(use_minmax) && q >= 0.999) {
+    return("max")
+  }
   paste0("P", formatC(round(q * 100), width = 2, flag = "0"))
 }
 
@@ -121,10 +140,18 @@ pct_label <- function(q, use_minmax = FALSE) {
 #' @noRd
 rank_interp <- function(sorted_vals, p) {
   n <- length(sorted_vals)
-  if (n == 0L) return(NA_real_)
+  if (n == 0L) {
+    return(NA_real_)
+  }
   k <- n * (1 - p) + 0.5
-  if (k < 1 || k > n) return(NA_real_)
-  lo <- floor(k); hi <- ceiling(k)
-  if (lo == hi) sorted_vals[lo]
-  else sorted_vals[lo] + (k - lo) * (sorted_vals[hi] - sorted_vals[lo])
+  if (k < 1 || k > n) {
+    return(NA_real_)
+  }
+  lo <- floor(k)
+  hi <- ceiling(k)
+  if (lo == hi) {
+    sorted_vals[lo]
+  } else {
+    sorted_vals[lo] + (k - lo) * (sorted_vals[hi] - sorted_vals[lo])
+  }
 }

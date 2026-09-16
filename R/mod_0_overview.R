@@ -23,11 +23,12 @@ mod_0_overview_ui <- function(id) {
       ),
       div(
         h1("Welcome to WISE-APP"),
-        p(class = "hero-subtitle",
-          "Weather Impact Simulation and Evaluation for Adaptation Policy and Planning"),
+        p(
+          class = "hero-subtitle",
+          "Weather Impact Simulation and Evaluation for Adaptation Policy and Planning"
+        ),
         p("WISE-APP is designed to stress-test household welfare under historical and projected climate scenarios, and to evaluate resilience-building policy interventions."),
         p("Work through the three steps below - each step builds on the previous one."),
-
         p(tags$a(
           icon("book-open"), "WISE-APP User Guide",
           href = "https://datanalytics.worldbank.org/wise-app-docs",
@@ -202,9 +203,7 @@ mod_0_overview_server <- function(id) {
 
       div(
         class = "connection-options",
-        switch(
-          input$connection_type,
-
+        switch(input$connection_type,
           "local" = tagList(
             textInput(
               ns("local_path"),
@@ -217,39 +216,36 @@ mod_0_overview_server <- function(id) {
               style = "font-size: 12px;"
             )
           ),
-
           "s3" = tagList(
-            textInput(ns("s3_bucket"),     "S3 bucket:",             placeholder = "my-bucket"),
-            textInput(ns("s3_prefix"),     "Key prefix (optional):", placeholder = "data/"),
-            textInput(ns("s3_region"),     "Region:",                placeholder = "us-east-1"),
-            textInput(ns("s3_key_id"),     "Access key ID:",         placeholder = "AKIA..."),
-            passwordInput(ns("s3_secret"), "Secret access key:",     placeholder = ""),
+            textInput(ns("s3_bucket"), "S3 bucket:", placeholder = "my-bucket"),
+            textInput(ns("s3_prefix"), "Key prefix (optional):", placeholder = "data/"),
+            textInput(ns("s3_region"), "Region:", placeholder = "us-east-1"),
+            textInput(ns("s3_key_id"), "Access key ID:", placeholder = "AKIA..."),
+            passwordInput(ns("s3_secret"), "Secret access key:", placeholder = ""),
             helpText(
               "Leave key ID and secret blank to use environment credentials (AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY).",
               style = "font-size: 12px;"
             )
           ),
-
           "gcs" = tagList(
-            textInput(ns("gcs_bucket"),  "GCS bucket:",                  placeholder = "my-bucket"),
-            textInput(ns("gcs_prefix"),  "Prefix (optional):",           placeholder = "data/"),
-            textInput(ns("gcs_key_id"),  "HMAC access key ID (optional):", placeholder = ""),
-            passwordInput(ns("gcs_secret"), "HMAC secret (optional):",    placeholder = ""),
+            textInput(ns("gcs_bucket"), "GCS bucket:", placeholder = "my-bucket"),
+            textInput(ns("gcs_prefix"), "Prefix (optional):", placeholder = "data/"),
+            textInput(ns("gcs_key_id"), "HMAC access key ID (optional):", placeholder = ""),
+            passwordInput(ns("gcs_secret"), "HMAC secret (optional):", placeholder = ""),
             helpText(
               "GCS uses HMAC (interoperability) keys. Leave both blank to use",
               " GCS_ACCESS_KEY_ID / GCS_SECRET_ACCESS_KEY from .Renviron.",
               style = "font-size: 12px;"
             )
           ),
-
           "azure" = tagList(
-            textInput(ns("azure_account"),           "Storage account:",           placeholder = "datalakeesouoprod"),
-            textInput(ns("azure_container"),         "Container:",                 placeholder = "data"),
-            textInput(ns("azure_prefix"),            "Prefix (optional):",         placeholder = "DAP/data/wiseapp/"),
-            passwordInput(ns("azure_key"),           "Account key (optional):",    placeholder = ""),
-            passwordInput(ns("azure_client_id"),     "Client ID (optional):",      placeholder = ""),
-            passwordInput(ns("azure_client_secret"), "Client secret (optional):",  placeholder = ""),
-            textInput(ns("azure_tenant_id"),         "Tenant ID (optional):",      placeholder = ""),
+            textInput(ns("azure_account"), "Storage account:", placeholder = "datalakeesouoprod"),
+            textInput(ns("azure_container"), "Container:", placeholder = "data"),
+            textInput(ns("azure_prefix"), "Prefix (optional):", placeholder = "DAP/data/wiseapp/"),
+            passwordInput(ns("azure_key"), "Account key (optional):", placeholder = ""),
+            passwordInput(ns("azure_client_id"), "Client ID (optional):", placeholder = ""),
+            passwordInput(ns("azure_client_secret"), "Client secret (optional):", placeholder = ""),
+            textInput(ns("azure_tenant_id"), "Tenant ID (optional):", placeholder = ""),
             helpText(
               "Credentials are optional if a service principal is set via AZURE_CLIENT_ID /",
               "AZURE_CLIENT_SECRET / AZURE_TENANT_ID in .Renviron.",
@@ -257,25 +253,23 @@ mod_0_overview_server <- function(id) {
               style = "font-size: 12px;"
             )
           ),
-
           "hf" = tagList(
-            textInput(ns("hf_repo"),   "Repository:",               placeholder = "username/dataset-name"),
-            textInput(ns("hf_subdir"), "Subdirectory (optional):",  placeholder = "data/"),
+            textInput(ns("hf_repo"), "Repository:", placeholder = "username/dataset-name"),
+            textInput(ns("hf_subdir"), "Subdirectory (optional):", placeholder = "data/"),
             helpText(
               "Public Hugging Face datasets only; private repositories and",
               " personal-access tokens are not supported by this connection type.",
               style = "font-size: 12px;"
             )
           ),
-
           "databricks" = tagList(
             textInput(
               ns("db_workspace"),
               "Workspace URL:",
               placeholder = "https://adb-xxxxxxxxxxxxxxxxx.xx.azuredatabricks.net"
             ),
-            passwordInput(ns("db_client_id"),     "Client ID:",     placeholder = ""),
-            passwordInput(ns("db_client_secret"),  "Client secret:", placeholder = ""),
+            passwordInput(ns("db_client_id"), "Client ID:", placeholder = ""),
+            passwordInput(ns("db_client_secret"), "Client secret:", placeholder = ""),
             textInput(
               ns("db_volume_path"),
               "Volume path:",
@@ -350,9 +344,12 @@ mod_0_overview_server <- function(id) {
             icon("circle-exclamation"), " ", st$message,
             style = "color: #c62828; font-weight: 600; font-size: 0.87rem; margin-top: 4px;"
           ),
-          if (!is.null(st$detail)) p(
-            st$detail, style = "color: #c62828; font-size: 0.87rem;"
-          )
+          if (!is.null(st$detail)) {
+            p(
+              st$detail,
+              style = "color: #c62828; font-size: 0.87rem;"
+            )
+          }
         ))
       }
       if (.auto_connect()) {
@@ -378,15 +375,18 @@ mod_0_overview_server <- function(id) {
     # ---- Apply connection on button click -----------------------------------
 
     # A source switch invalidates the previous attempt's status
-    observeEvent(input$connection_type, {
-      connection_status(NULL)
-    }, ignoreInit = TRUE)
+    observeEvent(input$connection_type,
+      {
+        connection_status(NULL)
+      },
+      ignoreInit = TRUE
+    )
 
     applied_connection <- reactiveVal(NULL)
-    survey_list        <- reactiveVal(NULL)
-    variable_list      <- reactiveVal(NULL)
-    cpi_ppp            <- reactiveVal(NULL)
-    pov_lines          <- reactiveVal(NULL)
+    survey_list <- reactiveVal(NULL)
+    variable_list <- reactiveVal(NULL)
+    cpi_ppp <- reactiveVal(NULL)
+    pov_lines <- reactiveVal(NULL)
     publish_metadata <- function(metadata) {
       survey_list(metadata$survey_list)
       variable_list(metadata$variable_list)
@@ -409,9 +409,9 @@ mod_0_overview_server <- function(id) {
             type = "error", duration = 15
           )
           connection_status(list(
-            state   = "error",
+            state = "error",
             message = "Failed to connect to Databricks.",
-            detail  = paste0(
+            detail = paste0(
               msg, "\n\nCheck the DATABRICKS_HOST, DATABRICKS_CLIENT_ID, ",
               "DATABRICKS_CLIENT_SECRET and DATABRICKS_VOLUME_PATH environment ",
               "variables configured for this app on Posit Connect, then reload the app."
@@ -419,132 +419,144 @@ mod_0_overview_server <- function(id) {
           ))
         }
 
-        tryCatch({
-          params <- build_connection_params("databricks")
-          message("[overview] auto-connecting to Databricks (Posit Connect)")
+        tryCatch(
+          {
+            params <- build_connection_params("databricks")
+            message("[overview] auto-connecting to Databricks (Posit Connect)")
 
-          metadata <- load_overview_metadata(params)
-          publish_metadata(metadata)
+            metadata <- load_overview_metadata(params)
+            publish_metadata(metadata)
 
-          # Expose the connection only after metadata succeeds.
-          applied_connection(params)
-          connection_status(list(
-            state = "connected", message = "Connected to Databricks.", detail = NULL
-          ))
-        }, error = function(e) auto_connect_fail(e))
+            # Expose the connection only after metadata succeeds.
+            applied_connection(params)
+            connection_status(list(
+              state = "connected", message = "Connected to Databricks.", detail = NULL
+            ))
+          },
+          error = function(e) auto_connect_fail(e)
+        )
       }) |> bindEvent(TRUE, once = TRUE)
     }
 
-    observeEvent(input$apply_connection, {
-
-      if (!isTRUE(connection_valid())) {
-        showNotification(
-          "Please fill in all required connection fields before connecting.",
-          type = "warning", duration = 4
-        )
-        return()
-      }
-
-      params <- connection_params()
-
-      if (identical(params$type, "local")) {
-        # DEP-03: configuration is not reachability; verify the folder exists.
-        path_ok <- tryCatch({
-          params$path <- normalise_local_path(params$path)
-          TRUE
-        }, error = function(e) {
-          showNotification("Please enter a valid folder path.", type = "warning", duration = 4)
-          FALSE
-        })
-        if (!path_ok) return()
-        if (!dir.exists(params$path)) {
-          connection_status(list(
-            state   = "error",
-            message = "Local folder not found.",
-            detail  = paste0(
-              "The path does not exist or is not readable: ", params$path,
-              "\nCheck the folder path, then reconnect."
-            )
-          ))
+    observeEvent(input$apply_connection,
+      {
+        if (!isTRUE(connection_valid())) {
           showNotification(
-            paste("Local folder not found:", params$path),
-            type = "error", duration = 8
+            "Please fill in all required connection fields before connecting.",
+            type = "warning", duration = 4
           )
           return()
         }
-        message("[overview] applied local folder: ", params$path)
-      } else {
-        message("[overview] applied connection: ", params$type)
-      }
 
-      # INT-02: clear the previous source before loading the new bundle.
-      applied_connection(NULL)
-      survey_list(NULL)
-      variable_list(NULL)
-      cpi_ppp(NULL)
-      pov_lines(NULL)
+        params <- connection_params()
 
-      # ---- Load metadata -----------------------------------------------------
+        if (identical(params$type, "local")) {
+          # DEP-03: configuration is not reachability; verify the folder exists.
+          path_ok <- tryCatch(
+            {
+              params$path <- normalise_local_path(params$path)
+              TRUE
+            },
+            error = function(e) {
+              showNotification("Please enter a valid folder path.", type = "warning", duration = 4)
+              FALSE
+            }
+          )
+          if (!path_ok) {
+            return()
+          }
+          if (!dir.exists(params$path)) {
+            connection_status(list(
+              state = "error",
+              message = "Local folder not found.",
+              detail = paste0(
+                "The path does not exist or is not readable: ", params$path,
+                "\nCheck the folder path, then reconnect."
+              )
+            ))
+            showNotification(
+              paste("Local folder not found:", params$path),
+              type = "error", duration = 8
+            )
+            return()
+          }
+          message("[overview] applied local folder: ", params$path)
+        } else {
+          message("[overview] applied connection: ", params$type)
+        }
 
-      load_notif <- showNotification(
-        "Loading metadata files...", duration = NULL, type = "message"
-      )
-      on.exit(removeNotification(load_notif), add = TRUE)
+        # INT-02: clear the previous source before loading the new bundle.
+        applied_connection(NULL)
+        survey_list(NULL)
+        variable_list(NULL)
+        cpi_ppp(NULL)
+        pov_lines(NULL)
 
-      metadata <- tryCatch(
-        load_overview_metadata(params),
-        error = function(e) e
-      )
+        # ---- Load metadata -----------------------------------------------------
 
-      if (inherits(metadata, "error")) {
+        load_notif <- showNotification(
+          "Loading metadata files...",
+          duration = NULL, type = "message"
+        )
+        on.exit(removeNotification(load_notif), add = TRUE)
+
+        metadata <- tryCatch(
+          load_overview_metadata(params),
+          error = function(e) e
+        )
+
+        if (inherits(metadata, "error")) {
+          connection_status(list(
+            state = "error",
+            message = paste0(
+              "Could not load metadata from the ", params$type, " source."
+            ),
+            detail = conditionMessage(metadata)
+          ))
+          showNotification(
+            paste0(
+              "Connection failed: metadata could not be loaded from the ",
+              params$type, " source. See the status panel for details."
+            ),
+            type = "error", duration = 10
+          )
+          return()
+        }
+
+        publish_metadata(metadata)
+
+        # Expose the connection only after metadata succeeds.
+        applied_connection(params)
         connection_status(list(
-          state   = "error",
+          state = "connected",
           message = paste0(
-            "Could not load metadata from the ", params$type, " source."
+            "Connected to ", params$type, " data source (metadata verified)."
           ),
-          detail  = conditionMessage(metadata)
+          detail = NULL
         ))
         showNotification(
-          paste0(
-            "Connection failed: metadata could not be loaded from the ",
-            params$type, " source. See the status panel for details."
-          ),
-          type = "error", duration = 10
+          paste0("Connected to ", params$type, " data source. Metadata is ready."),
+          type = "message", duration = 3
         )
-        return()
-      }
-
-      publish_metadata(metadata)
-
-      # Expose the connection only after metadata succeeds.
-      applied_connection(params)
-      connection_status(list(
-        state   = "connected",
-        message = paste0(
-          "Connected to ", params$type, " data source (metadata verified)."
-        ),
-        detail  = NULL
-      ))
-      showNotification(
-        paste0("Connected to ", params$type, " data source. Metadata is ready."),
-        type = "message", duration = 3
-      )
-
-    }, ignoreInit = TRUE)
+      },
+      ignoreInit = TRUE
+    )
 
     # ---- Return API ---------------------------------------------------------
 
     list(
-      local_dir       = reactive({
+      local_dir = reactive({
         p <- applied_connection()
-        if (is.null(p) || !identical(p$type, "local")) return(NULL)
+        if (is.null(p) || !identical(p$type, "local")) {
+          return(NULL)
+        }
         p$path
       }),
       connection_params = reactive(applied_connection()),
-      survey_list       = reactive(survey_list()),
-      variable_list     = reactive(variable_list()),
-      cpi_ppp           = reactive(cpi_ppp()),
-      pov_lines         = reactive(pov_lines())
+      survey_list = reactive(survey_list()),
+      variable_list = reactive(variable_list()),
+      cpi_ppp = reactive(cpi_ppp()),
+      pov_lines = reactive(pov_lines())
     )
   })
 }

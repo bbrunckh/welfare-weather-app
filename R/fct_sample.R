@@ -1,6 +1,6 @@
 # Survey sample selection helpers ----
 # Pure functions for survey sample selection logic.                            #
-# Used by mod_1_01_sample_server(). 
+# Used by mod_1_01_sample_server().
 # All functions are stateless and testable without a Shiny session.                                                     #
 
 # File listing ----
@@ -20,11 +20,15 @@
 #'
 #' @export
 list_available_files <- function(connection_params) {
-  if (is.null(connection_params) || !is.list(connection_params)) return(NULL)
+  if (is.null(connection_params) || !is.list(connection_params)) {
+    return(NULL)
+  }
 
   if (identical(connection_params$type, "local")) {
     path <- connection_params$path %||% ""
-    if (!nzchar(path) || !dir.exists(path)) return(character(0))
+    if (!nzchar(path) || !dir.exists(path)) {
+      return(character(0))
+    }
     list.files(path, recursive = TRUE)
   } else {
     # Remote sources (S3, GCS, Azure, HF) cannot cheaply list files without
@@ -54,16 +58,20 @@ list_available_files <- function(connection_params) {
 #'
 #' @export
 build_survey_fnames <- function(survey_list, unit, connection_params) {
-  if (is.null(survey_list) || nrow(survey_list) == 0) return(survey_list)
+  if (is.null(survey_list) || nrow(survey_list) == 0) {
+    return(survey_list)
+  }
 
-  is_local  <- identical(connection_params$type, "local")
+  is_local <- identical(connection_params$type, "local")
   base_path <- if (is_local) connection_params$path %||% "" else ""
 
   survey_list |>
     dplyr::filter(.data$level == unit) |>
     dplyr::mutate(
-      fname = paste0("microdata/",unit, "/", .data$code, "/",
-      .data$code, "_", .data$year, "_", .data$survname, "_", .data$source, "_", unit, ".parquet"),
+      fname = paste0(
+        "microdata/", unit, "/", .data$code, "/",
+        .data$code, "_", .data$year, "_", .data$survname, "_", .data$source, "_", unit, ".parquet"
+      ),
       fpath = if (is_local) file.path(base_path, .data$fname) else .data$fname
     )
 }
@@ -85,7 +93,9 @@ build_survey_fnames <- function(survey_list, unit, connection_params) {
 #'
 #' @export
 filter_surveys_to_available <- function(surveys, available_files) {
-  if (is.null(available_files)) return(surveys)
+  if (is.null(available_files)) {
+    return(surveys)
+  }
   surveys |> dplyr::filter(.data$fname %in% available_files)
 }
 
@@ -138,7 +148,9 @@ get_available_years <- function(surveys, codes) {
 build_selected_surveys <- function(surveys, years_by_code) {
   years_by_code <- Filter(function(x) !is.null(x) && length(x) > 0, years_by_code)
 
-  if (length(years_by_code) == 0) return(surveys[0L, ])
+  if (length(years_by_code) == 0) {
+    return(surveys[0L, ])
+  }
 
   combos <- do.call(rbind, lapply(names(years_by_code), function(code) {
     data.frame(

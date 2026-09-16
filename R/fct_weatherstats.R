@@ -47,7 +47,9 @@ extract_survey_dates <- function(survey_data) {
 #'
 #' @export
 merge_survey_weather <- function(survey_data, weather_data) {
-  if (is.null(survey_data) || is.null(weather_data)) return(NULL)
+  if (is.null(survey_data) || is.null(weather_data)) {
+    return(NULL)
+  }
 
   joined <- survey_data |>
     dplyr::inner_join(
@@ -58,7 +60,9 @@ merge_survey_weather <- function(survey_data, weather_data) {
     dplyr::group_by(.data$code, .data$year, .data$survname) |>
     dplyr::ungroup()
 
-  if (nrow(joined) == 0) return(NULL)
+  if (nrow(joined) == 0) {
+    return(NULL)
+  }
   joined
 }
 
@@ -93,7 +97,9 @@ merge_survey_weather <- function(survey_data, weather_data) {
 #' @noRd
 .wave_palette <- function(waves) {
   n <- length(waves)
-  if (n == 0) return(character(0))
+  if (n == 0) {
+    return(character(0))
+  }
   # Match the outcome and interview-location plots: blue/teal first, with
   # additional restrained series for larger multi-wave selections.
   series <- c(
@@ -101,7 +107,7 @@ merge_survey_weather <- function(survey_data, weather_data) {
     "#00A6C7", # bright cyan
     "#8667B3", # violet
     "#C28C2C", # ochre
-    "#B85C6B"  # muted red
+    "#B85C6B" # muted red
   )
   base <- rep(series, length.out = n)
   stats::setNames(base[seq_len(n)], waves)
@@ -121,8 +127,8 @@ merge_survey_weather <- function(survey_data, weather_data) {
 #' @noRd
 .blend_colour <- function(col, towards = "white", amount = 0.55) {
   from <- grDevices::col2rgb(col) / 255
-  to   <- as.numeric(grDevices::col2rgb(towards)) / 255
-  out  <- from * (1 - amount) + to * amount
+  to <- as.numeric(grDevices::col2rgb(towards)) / 255
+  out <- from * (1 - amount) + to * amount
   grDevices::rgb(out[1, ], out[2, ], out[3, ])
 }
 
@@ -145,25 +151,35 @@ merge_survey_weather <- function(survey_data, weather_data) {
 #' @noRd
 .hist_bin_counts <- function(hist_df, hv, breaks, year_from = NULL,
                              year_to = NULL) {
-  if (is.null(hist_df) || is.null(breaks) || length(breaks) < 2) return(NULL)
-  if (is.na(hv) || !(hv %in% names(hist_df))) return(NULL)
-  if (!all(c("n_hh", "countryyear") %in% names(hist_df))) return(NULL)
+  if (is.null(hist_df) || is.null(breaks) || length(breaks) < 2) {
+    return(NULL)
+  }
+  if (is.na(hv) || !(hv %in% names(hist_df))) {
+    return(NULL)
+  }
+  if (!all(c("n_hh", "countryyear") %in% names(hist_df))) {
+    return(NULL)
+  }
 
-  v    <- suppressWarnings(as.numeric(hist_df[[hv]]))
+  v <- suppressWarnings(as.numeric(hist_df[[hv]]))
   keep <- is.finite(v)
   if (!is.null(year_from) && !is.null(year_to) &&
-      "cal_year" %in% names(hist_df)) {
+    "cal_year" %in% names(hist_df)) {
     keep <- keep &
       hist_df$cal_year >= as.integer(year_from) &
       hist_df$cal_year <= as.integer(year_to)
   }
-  if (!any(keep)) return(NULL)
+  if (!any(keep)) {
+    return(NULL)
+  }
 
   out <- data.frame(
     countryyear = as.character(hist_df$countryyear[keep]),
-    bin         = as.character(cut(v[keep], breaks = breaks,
-                                   include.lowest = TRUE)),
-    w           = as.numeric(hist_df$n_hh[keep]),
+    bin = as.character(cut(v[keep],
+      breaks = breaks,
+      include.lowest = TRUE
+    )),
+    w = as.numeric(hist_df$n_hh[keep]),
     stringsAsFactors = FALSE
   )
 
@@ -177,15 +193,20 @@ merge_survey_weather <- function(survey_data, weather_data) {
     finite_levels <- vapply(seq_along(raw_levels), function(i) {
       parts <- trimws(strsplit(
         substr(raw_levels[[i]], 2L, nchar(raw_levels[[i]]) - 1L),
-        ",", fixed = TRUE
+        ",",
+        fixed = TRUE
       )[[1L]])
-      if (length(parts) != 2L) return(raw_levels[[i]])
+      if (length(parts) != 2L) {
+        return(raw_levels[[i]])
+      }
       lo <- if (parts[[1L]] == "-Inf") observed[[i]] else as.numeric(parts[[1L]])
       hi <- if (parts[[2L]] == "Inf") observed[[i + 1L]] else as.numeric(parts[[2L]])
-      paste0(substr(raw_levels[[i]], 1L, 1L),
-             formatC(lo, format = "f", digits = 1), ", ",
-             formatC(hi, format = "f", digits = 1),
-             substr(raw_levels[[i]], nchar(raw_levels[[i]]), nchar(raw_levels[[i]])))
+      paste0(
+        substr(raw_levels[[i]], 1L, 1L),
+        formatC(lo, format = "f", digits = 1), ", ",
+        formatC(hi, format = "f", digits = 1),
+        substr(raw_levels[[i]], nchar(raw_levels[[i]]), nchar(raw_levels[[i]]))
+      )
     }, character(1L))
     out$bin <- finite_levels[match(out$bin, raw_levels)]
   }
@@ -225,11 +246,17 @@ merge_survey_weather <- function(survey_data, weather_data) {
 plot_weather_bins_compare <- function(df, hv, label, hist_df = NULL,
                                       breaks = NULL, year_from = NULL,
                                       year_to = NULL, wave_labels = NULL) {
-  if (is.null(df) || is.na(hv) || !(hv %in% names(df))) return(invisible(NULL))
-  if (!("countryyear" %in% names(df))) return(invisible(NULL))
+  if (is.null(df) || is.na(hv) || !(hv %in% names(df))) {
+    return(invisible(NULL))
+  }
+  if (!("countryyear" %in% names(df))) {
+    return(invisible(NULL))
+  }
 
   keep <- !is.na(df[[hv]])
-  if (!any(keep)) return(invisible(NULL))
+  if (!any(keep)) {
+    return(invisible(NULL))
+  }
 
   lvls <- if (is.factor(df[[hv]])) {
     levels(df[[hv]])
@@ -239,8 +266,8 @@ plot_weather_bins_compare <- function(df, hv, label, hist_df = NULL,
 
   samp <- data.frame(
     countryyear = as.character(df$countryyear[keep]),
-    bin         = as.character(df[[hv]][keep]),
-    w           = 1,
+    bin = as.character(df[[hv]][keep]),
+    w = 1,
     stringsAsFactors = FALSE
   ) |>
     dplyr::group_by(.data$countryyear, .data$bin) |>
@@ -248,9 +275,9 @@ plot_weather_bins_compare <- function(df, hv, label, hist_df = NULL,
     as.data.frame()
   samp$source <- .wx_sample_lab
 
-  hist_lab   <- .wx_hist_lab(year_from, year_to)
-  hist_bins  <- .hist_bin_counts(hist_df, hv, breaks, year_from, year_to)
-  has_hist   <- !is.null(hist_bins) && nrow(hist_bins) > 0
+  hist_lab <- .wx_hist_lab(year_from, year_to)
+  hist_bins <- .hist_bin_counts(hist_df, hv, breaks, year_from, year_to)
+  has_hist <- !is.null(hist_bins) && nrow(hist_bins) > 0
   if (has_hist) hist_bins$source <- hist_lab
 
   d <- if (has_hist) rbind(samp, hist_bins) else samp
@@ -264,22 +291,24 @@ plot_weather_bins_compare <- function(df, hv, label, hist_df = NULL,
     as.data.frame()
 
   waves <- sort(unique(d$countryyear))
-  pal   <- .wave_palette(waves)
+  pal <- .wave_palette(waves)
 
   # Wave-major key order, so each wave's pair of bars sits side by side inside
   # a bin rather than all samples first and all histories after. The historical
   # bar is a lighter shade of the wave's own colour.
   sources <- if (has_hist) c(.wx_sample_lab, hist_lab) else .wx_sample_lab
-  series  <- .wx_series_grid(waves, sources)
+  series <- .wx_series_grid(waves, sources)
   key_cols <- stats::setNames(
     ifelse(series$source == .wx_sample_lab,
-           pal[series$wave],
-           .blend_colour(pal[series$wave], "white", 0.6)),
+      pal[series$wave],
+      .blend_colour(pal[series$wave], "white", 0.6)
+    ),
     series$key
   )
 
   d$key <- factor(.wx_series_key(d$countryyear, d$source),
-                  levels = series$key)
+    levels = series$key
+  )
   d$bin <- factor(d$bin, levels = lvls)
 
   ggplot2::ggplot(
@@ -287,7 +316,7 @@ plot_weather_bins_compare <- function(df, hv, label, hist_df = NULL,
   ) +
     ggplot2::geom_col(
       position = ggplot2::position_dodge(preserve = "single"),
-      colour   = "grey45", linewidth = 0.25, alpha = 0.9
+      colour = "grey45", linewidth = 0.25, alpha = 0.9
     ) +
     ggplot2::scale_fill_manual(
       values = key_cols, name = NULL, drop = FALSE,
@@ -316,8 +345,10 @@ plot_weather_bins_compare <- function(df, hv, label, hist_df = NULL,
 # them.
 #' @noRd
 .wx_series_grid <- function(waves, sources) {
-  g <- expand.grid(source = sources, wave = waves,
-                   KEEP.OUT.ATTRS = FALSE, stringsAsFactors = FALSE)
+  g <- expand.grid(
+    source = sources, wave = waves,
+    KEEP.OUT.ATTRS = FALSE, stringsAsFactors = FALSE
+  )
   g$key <- .wx_series_key(g$wave, g$source)
   g[, c("wave", "source", "key")]
 }
@@ -325,7 +356,9 @@ plot_weather_bins_compare <- function(df, hv, label, hist_df = NULL,
 #' @noRd
 .wx_display_series_labels <- function(series_keys, wave_labels = NULL) {
   labels <- as.character(series_keys)
-  if (is.null(wave_labels) || !length(labels)) return(labels)
+  if (is.null(wave_labels) || !length(labels)) {
+    return(labels)
+  }
   wave <- sub(" - .*", "", labels)
   source <- sub("^.* - ", "", labels)
   mapped <- unname(wave_labels[wave])
@@ -337,7 +370,9 @@ plot_weather_bins_compare <- function(df, hv, label, hist_df = NULL,
 #' @noRd
 .wx_display_wave_labels <- function(series_keys, wave_labels = NULL) {
   labels <- as.character(series_keys)
-  if (is.null(wave_labels) || !length(labels)) return(labels)
+  if (is.null(wave_labels) || !length(labels)) {
+    return(labels)
+  }
   wave <- sub(" - .*", "", labels)
   mapped <- unname(wave_labels[wave])
   keep <- !is.na(mapped) & nzchar(mapped)
@@ -371,31 +406,37 @@ plot_weather_bins_compare <- function(df, hv, label, hist_df = NULL,
 #'
 #' @export
 plot_weather_ridges_compare <- function(df, hv, label, hist_df = NULL,
-                                         year_from = NULL, year_to = NULL,
-                                         wave_labels = NULL) {
-  if (is.null(df) || is.na(hv) || !(hv %in% names(df))) return(invisible(NULL))
-  if (!("countryyear" %in% names(df))) return(invisible(NULL))
+                                        year_from = NULL, year_to = NULL,
+                                        wave_labels = NULL) {
+  if (is.null(df) || is.na(hv) || !(hv %in% names(df))) {
+    return(invisible(NULL))
+  }
+  if (!("countryyear" %in% names(df))) {
+    return(invisible(NULL))
+  }
 
-  sv   <- suppressWarnings(as.numeric(df[[hv]]))
+  sv <- suppressWarnings(as.numeric(df[[hv]]))
   keep <- is.finite(sv)
-  if (!any(keep)) return(invisible(NULL))
+  if (!any(keep)) {
+    return(invisible(NULL))
+  }
 
   samp <- data.frame(
     countryyear = as.character(df$countryyear[keep]),
-    x           = sv[keep],
-    w           = 1,
-    source      = .wx_sample_lab,
+    x = sv[keep],
+    w = 1,
+    source = .wx_sample_lab,
     stringsAsFactors = FALSE
   )
 
   hist_lab <- .wx_hist_lab(year_from, year_to)
   hist_use <- NULL
   if (!is.null(hist_df) && !is.na(hv) && hv %in% names(hist_df) &&
-      all(c("n_hh", "countryyear") %in% names(hist_df))) {
+    all(c("n_hh", "countryyear") %in% names(hist_df))) {
     hv_vals <- suppressWarnings(as.numeric(hist_df[[hv]]))
-    hkeep   <- is.finite(hv_vals)
+    hkeep <- is.finite(hv_vals)
     if (!is.null(year_from) && !is.null(year_to) &&
-        "cal_year" %in% names(hist_df)) {
+      "cal_year" %in% names(hist_df)) {
       hkeep <- hkeep &
         hist_df$cal_year >= as.integer(year_from) &
         hist_df$cal_year <= as.integer(year_to)
@@ -405,35 +446,40 @@ plot_weather_ridges_compare <- function(df, hv, label, hist_df = NULL,
     if (sum(hkeep) >= 10) {
       hist_use <- data.frame(
         countryyear = as.character(hist_df$countryyear[hkeep]),
-        x           = hv_vals[hkeep],
-        w           = as.numeric(hist_df$n_hh[hkeep]),
-        source      = hist_lab,
+        x = hv_vals[hkeep],
+        w = as.numeric(hist_df$n_hh[hkeep]),
+        source = hist_lab,
         stringsAsFactors = FALSE
       )
       # Only keep waves the sample also has, so no row appears with a
       # historical curve and no sample curve.
       hist_use <- hist_use[hist_use$countryyear %in% samp$countryyear, ,
-                           drop = FALSE]
+        drop = FALSE
+      ]
       if (nrow(hist_use) == 0) hist_use <- NULL
     }
   }
 
-  waves   <- sort(unique(samp$countryyear))
-  pal     <- .wave_palette(waves)
-  sources <- if (is.null(hist_use)) .wx_sample_lab else
+  waves <- sort(unique(samp$countryyear))
+  pal <- .wave_palette(waves)
+  sources <- if (is.null(hist_use)) {
+    .wx_sample_lab
+  } else {
     c(.wx_sample_lab, hist_lab)
+  }
 
   # The sample is a filled ridge in the wave's colour; the history is drawn
   # over it as an unfilled dashed outline in a darker shade of the same colour,
   # so the pair reads as one wave rather than two unrelated series.
   series <- .wx_series_grid(waves, sources)
-  fills  <- stats::setNames(
+  fills <- stats::setNames(
     ifelse(series$source == .wx_sample_lab, pal[series$wave], NA_character_),
     series$key
   )
   lines <- stats::setNames(
     ifelse(series$source == .wx_sample_lab, "grey30",
-           .blend_colour(pal[series$wave], "black", 0.35)),
+      .blend_colour(pal[series$wave], "black", 0.35)
+    ),
     series$key
   )
 
@@ -446,21 +492,25 @@ plot_weather_ridges_compare <- function(df, hv, label, hist_df = NULL,
   # keeps the weather ridge cost proportional to cells/waves, not households.
   rd <- build_ridge_distribution_data(
     d,
-    x_var      = "x",
-    group_var  = "key",
-    fill_var   = "key",
+    x_var = "x",
+    group_var = "key",
+    fill_var = "key",
     weight_var = "w",
-    ridge_var  = "countryyear",
-    n_bins     = 256L,
-    n_grid     = 256L,
+    ridge_var = "countryyear",
+    n_bins = 256L,
+    n_grid = 256L,
     bandwidth_scale = 0.85
   )
-  if (is.null(rd)) return(invisible(NULL))
+  if (is.null(rd)) {
+    return(invisible(NULL))
+  }
   ridge_data <- rd$data
   ridge_data$key <- factor(ridge_data$group, levels = series$key)
   ridge_data$source <- factor(
-    vapply(strsplit(as.character(ridge_data$key), " - ", fixed = TRUE),
-           `[`, character(1), 2L),
+    vapply(
+      strsplit(as.character(ridge_data$key), " - ", fixed = TRUE),
+      `[`, character(1), 2L
+    ),
     levels = sources
   )
   ridge_data$fill <- ridge_data$key
@@ -488,19 +538,19 @@ plot_weather_ridges_compare <- function(df, hv, label, hist_df = NULL,
       ggplot2::aes(y = .data$y + .data$height * 2),
       linewidth = 0.5
     ) +
-     ggplot2::scale_y_continuous(
-       breaks = seq_along(rd$ridges),
-       labels = .wx_display_wave_labels(rd$ridges, wave_labels),
-       expand = ggplot2::expansion(mult = c(0.02, 0.12))
+    ggplot2::scale_y_continuous(
+      breaks = seq_along(rd$ridges),
+      labels = .wx_display_wave_labels(rd$ridges, wave_labels),
+      expand = ggplot2::expansion(mult = c(0.02, 0.12))
     ) +
-     ggplot2::scale_fill_manual(values = fills, na.value = NA, guide = "none") +
+    ggplot2::scale_fill_manual(values = fills, na.value = NA, guide = "none") +
     ggplot2::scale_colour_manual(values = lines, guide = "none") +
-     ggplot2::scale_linetype_manual(
+    ggplot2::scale_linetype_manual(
       values = stats::setNames(
         c("solid", "22")[seq_along(sources)], sources
       ),
-        labels = sources,
-        name = NULL
+      labels = sources,
+      name = NULL
     ) +
     theme_wise() +
     ggplot2::labs(
@@ -541,17 +591,19 @@ plot_weather_ridges_compare <- function(df, hv, label, hist_df = NULL,
 plot_weather_dist <- function(df, hv, label, cont_binned, hist_df = NULL,
                               breaks = NULL, year_from = NULL,
                               year_to = NULL, wave_labels = NULL) {
-  if (is.null(df) || is.na(hv) || !(hv %in% names(df))) return(invisible(NULL))
+  if (is.null(df) || is.na(hv) || !(hv %in% names(df))) {
+    return(invisible(NULL))
+  }
 
   if (!is.na(cont_binned) && cont_binned == "Binned") {
     plot_weather_bins_compare(
-       df = df, hv = hv, label = label, hist_df = hist_df, breaks = breaks,
-       year_from = year_from, year_to = year_to, wave_labels = wave_labels
+      df = df, hv = hv, label = label, hist_df = hist_df, breaks = breaks,
+      year_from = year_from, year_to = year_to, wave_labels = wave_labels
     )
   } else {
     plot_weather_ridges_compare(
-       df = df, hv = hv, label = label, hist_df = hist_df,
-       year_from = year_from, year_to = year_to, wave_labels = wave_labels
+      df = df, hv = hv, label = label, hist_df = hist_df,
+      year_from = year_from, year_to = year_to, wave_labels = wave_labels
     )
   }
 }
@@ -575,7 +627,9 @@ plot_weather_dist <- function(df, hv, label, cont_binned, hist_df = NULL,
 #'
 #' @export
 plot_binscatter <- function(df, hv, hv_label = hv, y_var, y_label = y_var) {
-  if (is.null(df) || !all(c(hv, y_var) %in% names(df))) return(NULL)
+  if (is.null(df) || !all(c(hv, y_var) %in% names(df))) {
+    return(NULL)
+  }
 
   raw <- df[, c(hv, y_var), drop = FALSE]
   x_raw <- raw[[1L]]
@@ -627,10 +681,14 @@ plot_binscatter <- function(df, hv, hv_label = hv, y_var, y_label = y_var) {
   } else {
     keep <- keep & is.finite(x_num)
   }
-  if (!any(keep)) return(NULL)
+  if (!any(keep)) {
+    return(NULL)
+  }
 
-  d <- data.frame(x = x_num[keep], y = y_num[keep],
-                  stringsAsFactors = FALSE)
+  d <- data.frame(
+    x = x_num[keep], y = y_num[keep],
+    stringsAsFactors = FALSE
+  )
 
   # Keep the point layer bounded; bin summaries below still use every row.
   # Round to integer row positions because tibble row slicing rejects the
@@ -641,7 +699,9 @@ plot_binscatter <- function(df, hv, hv_label = hv, y_var, y_label = y_var) {
       seq(1, nrow(d), length.out = point_max)
     )))
     d[idx, , drop = FALSE]
-  } else d
+  } else {
+    d
+  }
 
   summarise_bins <- function(bin, x_value = NULL) {
     g <- collapse::GRP(data.frame(bin = bin), by = "bin")
@@ -697,7 +757,9 @@ plot_binscatter <- function(df, hv, hv_label = hv, y_var, y_label = y_var) {
 
   # Continuous x
   x_range <- range(d$x, finite = TRUE)
-  if (!all(is.finite(x_range))) return(NULL)
+  if (!all(is.finite(x_range))) {
+    return(NULL)
+  }
   breaks <- if (diff(x_range) == 0) {
     x_range[1] + c(-0.5, 0.5)
   } else {
@@ -762,17 +824,23 @@ plot_binscatter <- function(df, hv, hv_label = hv, y_var, y_label = y_var) {
 expand_hist_dates <- function(survey_dates, year_from, year_to) {
   survey_dates <- as.Date(survey_dates)
   survey_dates <- survey_dates[!is.na(survey_dates)]
-  if (length(survey_dates) == 0) return(as.Date(character(0)))
+  if (length(survey_dates) == 0) {
+    return(as.Date(character(0)))
+  }
 
   year_from <- as.integer(year_from)
-  year_to   <- as.integer(year_to)
-  if (is.na(year_from) || is.na(year_to)) return(sort(unique(survey_dates)))
+  year_to <- as.integer(year_to)
+  if (is.na(year_from) || is.na(year_to)) {
+    return(sort(unique(survey_dates)))
+  }
   if (year_from > year_to) {
-    tmp <- year_from; year_from <- year_to; year_to <- tmp
+    tmp <- year_from
+    year_from <- year_to
+    year_to <- tmp
   }
 
   month_day <- unique(format(survey_dates, "%m-%d"))
-  grid      <- expand.grid(
+  grid <- expand.grid(
     year = seq.int(year_from, year_to), md = month_day,
     stringsAsFactors = FALSE
   )
@@ -808,13 +876,15 @@ expand_hist_dates <- function(survey_dates, year_from, year_to) {
 #' @export
 join_hist_sample_cells <- function(hist_df, survey_weather) {
   keys <- c("code", "year", "survname", "loc_id", "timestamp")
-  if (is.null(hist_df) || is.null(survey_weather)) return(NULL)
+  if (is.null(hist_df) || is.null(survey_weather)) {
+    return(NULL)
+  }
   if (!all(keys %in% names(hist_df)) || !all(keys %in% names(survey_weather))) {
     return(NULL)
   }
 
   sw <- survey_weather
-  sw$year      <- as.character(sw$year)
+  sw$year <- as.character(sw$year)
   sw$timestamp <- as.Date(sw$timestamp)
   sw$int_month <- as.integer(format(sw$timestamp, "%m"))
   if (!"economy" %in% names(sw)) sw$economy <- sw$code
@@ -848,23 +918,27 @@ join_hist_sample_cells <- function(hist_df, survey_weather) {
     dplyr::mutate(is_sample = TRUE)
 
   h <- hist_df
-  h$year      <- as.character(h$year)
+  h$year <- as.character(h$year)
   h$timestamp <- as.Date(h$timestamp)
   h$int_month <- as.integer(format(h$timestamp, "%m"))
-  h$cal_year  <- as.integer(format(h$timestamp, "%Y"))
+  h$cal_year <- as.integer(format(h$timestamp, "%Y"))
 
   h <- h |>
     dplyr::inner_join(
-      cells, by = c("code", "year", "survname", "loc_id", "int_month")
+      cells,
+      by = c("code", "year", "survname", "loc_id", "int_month")
     ) |>
     dplyr::left_join(waves, by = c("code", "year", "survname")) |>
     dplyr::left_join(
-      wave_dates, by = c("code", "year", "survname", "timestamp")
+      wave_dates,
+      by = c("code", "year", "survname", "timestamp")
     )
 
-  if (nrow(h) == 0) return(NULL)
+  if (nrow(h) == 0) {
+    return(NULL)
+  }
 
-  h$is_sample   <- !is.na(h$is_sample)
+  h$is_sample <- !is.na(h$is_sample)
   h$countryyear <- paste0(h$economy, ", ", h$year)
   h
 }
@@ -891,7 +965,9 @@ join_hist_sample_cells <- function(hist_df, survey_weather) {
 #'   the input is `NULL`.
 #' @noRd
 .summarise_loc_prep <- function(survey_weather) {
-  if (is.null(survey_weather)) return(NULL)
+  if (is.null(survey_weather)) {
+    return(NULL)
+  }
 
   df <- survey_weather
   df$year <- as.character(df$year)
@@ -936,33 +1012,37 @@ join_hist_sample_cells <- function(hist_df, survey_weather) {
 summarise_weather_by_loc <- function(survey_weather, hv, prep = NULL) {
   keys <- c("code", "year", "survname", "loc_id")
   if (is.null(survey_weather) || is.na(hv) ||
-      !(hv %in% names(survey_weather)) ||
-      !all(keys %in% names(survey_weather))) {
+    !(hv %in% names(survey_weather)) ||
+    !all(keys %in% names(survey_weather))) {
     return(NULL)
   }
 
   if (is.null(prep)) prep <- .summarise_loc_prep(survey_weather)
-  df     <- prep$df
+  df <- prep$df
   months <- prep$months
-  g      <- prep$grp
-  vals   <- df[[hv]]
+  g <- prep$grp
+  vals <- df[[hv]]
 
   binned <- is.factor(vals) || is.character(vals)
-  lvls   <- if (!binned) NULL
-            else if (is.factor(vals)) levels(vals)
-            else sort(unique(as.character(vals)))
+  lvls <- if (!binned) {
+    NULL
+  } else if (is.factor(vals)) {
+    levels(vals)
+  } else {
+    sort(unique(as.character(vals)))
+  }
 
   n_g <- g$N.groups
   first_idx <- match(seq_len(n_g), g$group.id)
 
   out <- data.frame(
-    code     = df$code[first_idx],
-    year     = df$year[first_idx],
+    code = df$code[first_idx],
+    year = df$year[first_idx],
     survname = df$survname[first_idx],
-    economy  = df$economy[first_idx],
-    loc_id   = df$loc_id[first_idx],
-    value    = if (binned) rep(NA_character_, n_g) else rep(NA_real_, n_g),
-    n_hh     = as.integer(g$group.sizes),
+    economy = df$economy[first_idx],
+    loc_id = df$loc_id[first_idx],
+    value = if (binned) rep(NA_character_, n_g) else rep(NA_real_, n_g),
+    n_hh = as.integer(g$group.sizes),
     n_months = as.integer(collapse::fndistinct(months, g = g, na.rm = FALSE)),
     stringsAsFactors = FALSE
   )
@@ -1030,15 +1110,17 @@ summarise_weather_by_loc <- function(survey_weather, hv, prep = NULL) {
 summarise_weather_anomaly_by_loc <- function(cells_df, hv, year_from, year_to,
                                              measure = c("anomaly", "percentile")) {
   measure <- match.arg(measure)
-  keys    <- c("code", "year", "survname", "loc_id", "cal_year", "is_sample")
+  keys <- c("code", "year", "survname", "loc_id", "cal_year", "is_sample")
   if (is.null(cells_df) || is.na(hv) || !(hv %in% names(cells_df)) ||
-      !all(keys %in% names(cells_df))) {
+    !all(keys %in% names(cells_df))) {
     return(NULL)
   }
 
   v <- suppressWarnings(as.numeric(cells_df[[hv]]))
   d <- cells_df[is.finite(v), , drop = FALSE]
-  if (nrow(d) == 0) return(NULL)
+  if (nrow(d) == 0) {
+    return(NULL)
+  }
   d$.v <- v[is.finite(v)]
   d$.w <- if ("n_hh" %in% names(d)) d$n_hh else 1
   if (!"economy" %in% names(d)) d$economy <- d$code
@@ -1050,20 +1132,22 @@ summarise_weather_anomaly_by_loc <- function(cells_df, hv, year_from, year_to,
     d$cal_year <= as.integer(year_to)
 
   keys <- c("code", "year", "survname", "loc_id")
-  keep <- complete.cases(d[keys])   # interaction()/split() dropped NA-key rows
-  if (!any(keep)) return(NULL)
-  d  <- d[keep, , drop = FALSE]
+  keep <- complete.cases(d[keys]) # interaction()/split() dropped NA-key rows
+  if (!any(keep)) {
+    return(NULL)
+  }
+  d <- d[keep, , drop = FALSE]
   # NA cal_year was never in the old in-window sums (na.rm skipped it), so
   # it counts as out-of-window here
   hi <- !is.na(in_range[keep]) & in_range[keep]
   si <- isTRUE_vec(d$is_sample)
 
-  g   <- collapse::GRP(d, by = keys)
+  g <- collapse::GRP(d, by = keys)
   gid <- as.integer(g$group.id)
   n_g <- g$N.groups
   first_idx <- match(seq_len(n_g), gid)
   vv <- d$.v
-  w  <- as.numeric(d$.w)
+  w <- as.numeric(d$.w)
 
   # --- sample-side stats: one grouped pass over the wave's own rows ---------
   # stats::weighted.mean(na.rm = TRUE) strips NA values but an NA *weight*
@@ -1071,13 +1155,13 @@ summarise_weather_anomaly_by_loc <- function(cells_df, hv, year_from, year_to,
   # rows (groups with an NA sample weight come out NA and are dropped below,
   # exactly as the old per-group loop did).
   si_rows <- which(si)
-  g_si    <- collapse::GRP(list(gid = gid[si_rows]))
-  samp_full  <- rep(NA_real_, n_g)
-  n_hh_full  <- rep(NA_real_, n_g)
-  n_mn_full  <- rep(NA_integer_, n_g)
+  g_si <- collapse::GRP(list(gid = gid[si_rows]))
+  samp_full <- rep(NA_real_, n_g)
+  n_hh_full <- rep(NA_real_, n_g)
+  n_mn_full <- rep(NA_integer_, n_g)
   if (length(si_rows)) {
     gid_si <- as.integer(g_si$groups$gid)
-    vw     <- vv[si_rows] * w[si_rows]
+    vw <- vv[si_rows] * w[si_rows]
     samp_full[gid_si] <- as.numeric(
       collapse::fsum(vw, g = g_si, na.rm = FALSE) /
         collapse::fsum(w[si_rows], g = g_si, na.rm = FALSE)
@@ -1092,7 +1176,7 @@ summarise_weather_anomaly_by_loc <- function(cells_df, hv, year_from, year_to,
 
   # --- historical-side stats: one grouped pass over the window rows ---------
   hi_rows <- which(hi)
-  g_hi    <- collapse::GRP(list(gid = gid[hi_rows]))
+  g_hi <- collapse::GRP(list(gid = gid[hi_rows]))
   samp_row <- samp_full[gid]
 
   value <- if (measure == "percentile") {
@@ -1126,16 +1210,18 @@ summarise_weather_anomaly_by_loc <- function(cells_df, hv, year_from, year_to,
   # Groups the old loop dropped: no sample rows, no window rows, or a
   # degenerate window weight sum.
   ok_g <- is.finite(value)
-  if (!any(ok_g)) return(NULL)
+  if (!any(ok_g)) {
+    return(NULL)
+  }
 
   out <- data.frame(
-    code     = d$code[first_idx],
-    year     = d$year[first_idx],
+    code = d$code[first_idx],
+    year = d$year[first_idx],
     survname = d$survname[first_idx],
-    economy  = d$economy[first_idx],
-    loc_id   = d$loc_id[first_idx],
-    value    = value,
-    n_hh     = n_hh_full,
+    economy = d$economy[first_idx],
+    loc_id = d$loc_id[first_idx],
+    value = value,
+    n_hh = n_hh_full,
     n_months = n_mn_full,
     stringsAsFactors = FALSE
   )
@@ -1177,17 +1263,17 @@ isTRUE_vec <- function(x) !is.na(x) & x
   head <- paste0(
     .wx_tip_css(),
     '<div style="font-weight: 600; white-space: nowrap;">',
-    .html_escape(title), .wx_info_marker(info, placement = "below"), '</div>'
+    .html_escape(title), .wx_info_marker(info, placement = "below"), "</div>"
   )
 
   body <- if (binned) {
-    lv   <- levels %||% character(0)
+    lv <- levels %||% character(0)
     rows <- vapply(lv, function(l) {
       paste0(
         '<div style="white-space: nowrap;"><span style="display: inline-block; ',
-        'width: 10px; height: 10px; background: ', pal_info$pal(l),
+        "width: 10px; height: 10px; background: ", pal_info$pal(l),
         '; border: 1px solid #999; vertical-align: -1px;"></span> ',
-        .html_escape(l), '</div>'
+        .html_escape(l), "</div>"
       )
     }, character(1))
     paste(rows, collapse = "")
@@ -1198,24 +1284,24 @@ isTRUE_vec <- function(x) !is.na(x) & x
     # the first eighth of the bar. Callers with a transformed scale pass the
     # values that are evenly spaced in *colour* space instead.
     stops <- pal_info$stops %||% seq(dom[1], dom[2], length.out = 9)
-    grad  <- paste(pal_info$pal(stops), collapse = ", ")
+    grad <- paste(pal_info$pal(stops), collapse = ", ")
     # On a non-linear ramp the middle of the bar is not the middle of the
     # range, so the caller can say which value sits there.
-    mid   <- pal_info$mid %||% mean(dom)
-    lab   <- function(x) format(signif(x, 3), trim = TRUE)
+    mid <- pal_info$mid %||% mean(dom)
+    lab <- function(x) format(signif(x, 3), trim = TRUE)
     paste0(
       '<div style="width: 108px; height: 8px; border: 1px solid #bbb; ',
-      'background: linear-gradient(to right, ', grad, ');"></div>',
+      "background: linear-gradient(to right, ", grad, ');"></div>',
       '<div style="width: 110px; display: flex; justify-content: space-between;">',
-      '<span>', lab(dom[1]), '</span><span>', lab(mid), '</span>',
-      '<span>', lab(dom[2]), '</span></div>'
+      "<span>", lab(dom[1]), "</span><span>", lab(mid), "</span>",
+      "<span>", lab(dom[2]), "</span></div>"
     )
   }
 
   paste0(
     '<div style="background: rgba(255,255,255,0.88); padding: 3px 5px; ',
-    'border-radius: 4px; font-size: 10px; line-height: 1.3; color: #333; ',
-    'max-width: 160px;">', head, body, '</div>'
+    "border-radius: 4px; font-size: 10px; line-height: 1.3; color: #333; ",
+    'max-width: 160px;">', head, body, "</div>"
   )
 }
 
@@ -1230,13 +1316,17 @@ isTRUE_vec <- function(x) !is.na(x) & x
 #'   from that edge so it is not clipped.
 #' @noRd
 .wx_info_marker <- function(info, side = c("right", "left"),
-                             placement = c("above", "below")) {
-  if (!nzchar(info %||% "")) return("")
+                            placement = c("above", "below")) {
+  if (!nzchar(info %||% "")) {
+    return("")
+  }
   side <- match.arg(side)
   placement <- match.arg(placement)
-  cls <- paste0("wx-tip",
-                if (side == "left") " wx-tip-l" else "",
-                if (placement == "below") " wx-tip-b" else "")
+  cls <- paste0(
+    "wx-tip",
+    if (side == "left") " wx-tip-l" else "",
+    if (placement == "below") " wx-tip-b" else ""
+  )
   paste0(
     '<span class="', cls, '" tabindex="0" data-tip="', .html_escape(info),
     '">i</span>'
@@ -1248,23 +1338,23 @@ isTRUE_vec <- function(x) !is.na(x) & x
 #' @noRd
 .wx_tip_css <- function() {
   paste0(
-    '<style>',
-    '.wx-tip{position:relative;display:inline-block;width:12px;height:12px;',
-    'line-height:12px;text-align:center;border:1px solid #888;',
-    'border-radius:50%;font-size:9px;font-weight:700;font-style:normal;',
-    'color:#555;margin-left:3px;cursor:pointer;background:#fff;}',
-    '.wx-tip::after{content:attr(data-tip);position:absolute;bottom:150%;',
-    'right:-4px;width:210px;background:rgba(33,33,33,0.96);color:#fff;',
-    'padding:6px 8px;border-radius:4px;font-size:11px;font-weight:400;',
-    'line-height:1.35;white-space:normal;text-align:left;opacity:0;',
-    'visibility:hidden;pointer-events:none;z-index:1200;',
-    'transition:opacity 0.06s linear;}',
-    '.wx-tip.wx-tip-l::after{right:auto;left:-4px;}',
+    "<style>",
+    ".wx-tip{position:relative;display:inline-block;width:12px;height:12px;",
+    "line-height:12px;text-align:center;border:1px solid #888;",
+    "border-radius:50%;font-size:9px;font-weight:700;font-style:normal;",
+    "color:#555;margin-left:3px;cursor:pointer;background:#fff;}",
+    ".wx-tip::after{content:attr(data-tip);position:absolute;bottom:150%;",
+    "right:-4px;width:210px;background:rgba(33,33,33,0.96);color:#fff;",
+    "padding:6px 8px;border-radius:4px;font-size:11px;font-weight:400;",
+    "line-height:1.35;white-space:normal;text-align:left;opacity:0;",
+    "visibility:hidden;pointer-events:none;z-index:1200;",
+    "transition:opacity 0.06s linear;}",
+    ".wx-tip.wx-tip-l::after{right:auto;left:-4px;}",
     # placement == "below": legends sitting at the map's top-right corner
     # need the popup to open downward, or the card clips it.
-    '.wx-tip.wx-tip-b::after{bottom:auto;top:150%;}',
-    '.wx-tip:hover::after,.wx-tip:focus::after{opacity:1;visibility:visible;}',
-    '</style>'
+    ".wx-tip.wx-tip-b::after{bottom:auto;top:150%;}",
+    ".wx-tip:hover::after,.wx-tip:focus::after{opacity:1;visibility:visible;}",
+    "</style>"
   )
 }
 
@@ -1273,8 +1363,8 @@ isTRUE_vec <- function(x) !is.na(x) & x
 #' @noRd
 .html_escape <- function(x) {
   x <- gsub("&", "&amp;", x, fixed = TRUE)
-  x <- gsub("<", "&lt;",  x, fixed = TRUE)
-  x <- gsub(">", "&gt;",  x, fixed = TRUE)
+  x <- gsub("<", "&lt;", x, fixed = TRUE)
+  x <- gsub(">", "&gt;", x, fixed = TRUE)
   gsub('"', "&quot;", x, fixed = TRUE)
 }
 
@@ -1316,10 +1406,10 @@ isTRUE_vec <- function(x) !is.na(x) & x
       pal = .ramp_factor(ramp, lv),
       # A factor, not a bare character vector: addLegend sorts its values, and
       # bin labels like "[-Inf,29.5]" sort after "(29.5,31]" as plain text.
-      domain    = factor(lv, levels = lv),
+      domain = factor(lv, levels = lv),
       diverging = FALSE,
-      colors    = ramp,
-      levels    = as.character(lv)
+      colors = ramp,
+      levels = as.character(lv)
     ))
   }
 
@@ -1357,12 +1447,12 @@ isTRUE_vec <- function(x) !is.na(x) & x
 
   # Sample the palette across its domain: the hex-map payload interpolates
   # these stops evenly in the browser, reproducing colorNumeric's ramp.
-  list(pal = pal, domain = dom, diverging = diverging,
-       colors = pal(seq(dom[1], dom[2], length.out = 9)),
-       levels = NULL)
+  list(
+    pal = pal, domain = dom, diverging = diverging,
+    colors = pal(seq(dom[1], dom[2], length.out = 9)),
+    levels = NULL
+  )
 }
-
-
 
 
 #' Columnar hex-map payload for one weather variable and wave
@@ -1385,18 +1475,24 @@ isTRUE_vec <- function(x) !is.na(x) & x
 #'
 #' @noRd
 .weather_hex_payload <- function(cell_geo, cmap, sub, pal_info) {
-  if (is.null(cell_geo) || is.null(cmap) || nrow(cmap) == 0) return(NULL)
-  if (is.null(sub) || nrow(sub) == 0) return(NULL)
+  if (is.null(cell_geo) || is.null(cmap) || nrow(cmap) == 0) {
+    return(NULL)
+  }
+  if (is.null(sub) || nrow(sub) == 0) {
+    return(NULL)
+  }
 
   binned <- isTRUE(attr(sub, "binned"))
-  lvls   <- attr(sub, "levels")
+  lvls <- attr(sub, "levels")
 
   # Drawn set: every wave cell that carries geometry - cells the weather
   # series did not reach are sent with NA and painted grey.
   cells <- cell_geo |>
     dplyr::inner_join(dplyr::distinct(cmap, .data$h3), by = "h3") |>
     dplyr::filter(!is.na(.data$geom), nchar(.data$geom) > 2)
-  if (nrow(cells) == 0) return(NULL)
+  if (nrow(cells) == 0) {
+    return(NULL)
+  }
 
   by_h3 <- stats::setNames(sub$value, as.character(sub$loc_id))
   v <- unname(by_h3[cells$h3])
@@ -1404,10 +1500,11 @@ isTRUE_vec <- function(x) !is.na(x) & x
   # Cells that average several interview months are drawn with a dashed
   # border and say so in their tooltip ("2 interview months averaged").
   n_m_by <- stats::setNames(sub$n_months, as.character(sub$loc_id))
-  n_m    <- unname(n_m_by[cells$h3])
+  n_m <- unname(n_m_by[cells$h3])
   dashed <- !is.na(n_m) & n_m > 1
-  info   <- ifelse(dashed, paste0(n_m, " interview months averaged"),
-                   NA_character_)
+  info <- ifelse(dashed, paste0(n_m, " interview months averaged"),
+    NA_character_
+  )
 
   bounds <- NULL
   if (all(c("xmin", "ymin", "xmax", "ymax") %in% names(cells))) {
@@ -1426,8 +1523,8 @@ isTRUE_vec <- function(x) !is.na(x) & x
   note_row <- function(...) {
     paste0(
       '<div style="background: rgba(255,255,255,0.88); padding: 3px 5px; ',
-      'border-radius: 4px; font-size: 10px; line-height: 1.3; color: #333; ',
-      'max-width: 160px; margin-top: 2px;">', ..., '</div>'
+      "border-radius: 4px; font-size: 10px; line-height: 1.3; color: #333; ",
+      'max-width: 160px; margin-top: 2px;">', ..., "</div>"
     )
   }
 
@@ -1450,11 +1547,13 @@ isTRUE_vec <- function(x) !is.na(x) & x
     # card's font and spill across the map).
     note_row(
       '<span style="display: inline-block; width: 10px; height: 10px; ',
-      'background: #cccccc; border: 1px solid #aaa; ',
+      "background: #cccccc; border: 1px solid #aaa; ",
       'vertical-align: -1px;"></span> ',
       n_missing, " of ", nrow(cells), " areas without weather"
     )
-  } else ""
+  } else {
+    ""
+  }
 
   if (n_avg > 0) {
     notes <- paste0(notes, note_row(
@@ -1493,66 +1592,74 @@ isTRUE_vec <- function(x) !is.na(x) & x
 #' @noRd
 build_weather_stats_table <- function(survey_weather, selected_weather,
                                       survey_reference = NULL) {
-    sw_df <- tryCatch(survey_weather(), error = function(e) NULL)
-    sw_sel <- tryCatch(selected_weather(), error = function(e) NULL)
-    if (is.null(sw_df) || is.null(sw_sel)) return(NULL)
+  sw_df <- tryCatch(survey_weather(), error = function(e) NULL)
+  sw_sel <- tryCatch(selected_weather(), error = function(e) NULL)
+  if (is.null(sw_df) || is.null(sw_sel)) {
+    return(NULL)
+  }
 
-    df <- sw_df |>
-      dplyr::mutate(countryyear = paste0(.data$economy, ", ", .data$year))
+  df <- sw_df |>
+    dplyr::mutate(countryyear = paste0(.data$economy, ", ", .data$year))
 
-    sw <- sw_sel
-    vars <- intersect(sw$name, names(df))
-    if (length(vars) == 0) return(NULL)
+  sw <- sw_sel
+  vars <- intersect(sw$name, names(df))
+  if (length(vars) == 0) {
+    return(NULL)
+  }
 
-    tab <- weighted_summary_long(df, vars = vars)
-    if (!is.data.frame(tab) || nrow(tab) == 0) return(NULL)
+  tab <- weighted_summary_long(df, vars = vars)
+  if (!is.data.frame(tab) || nrow(tab) == 0) {
+    return(NULL)
+  }
 
-    # Missingness is measured against the original survey rows. Weather joins
-    # can drop location-months, so using df here would inflate completeness.
-    if ("countryyear" %in% names(tab) && "variable" %in% names(tab)) {
-      miss_source <- if (is.null(survey_reference)) df else survey_reference()
-      if (!is.null(survey_reference)) {
-        join_keys <- intersect(
-          c("code", "year", "survname", "loc_id", "timestamp"),
-          intersect(names(miss_source), names(df))
-        )
-        weather_values <- df |>
-          dplyr::mutate(year = as.character(.data$year)) |>
-          dplyr::select(dplyr::all_of(c(join_keys, vars))) |>
-          dplyr::distinct(dplyr::across(dplyr::all_of(join_keys)), .keep_all = TRUE)
-        miss_source <- miss_source |>
-          dplyr::mutate(year = as.character(.data$year)) |>
-          dplyr::left_join(weather_values, by = join_keys)
-      }
+  # Missingness is measured against the original survey rows. Weather joins
+  # can drop location-months, so using df here would inflate completeness.
+  if ("countryyear" %in% names(tab) && "variable" %in% names(tab)) {
+    miss_source <- if (is.null(survey_reference)) df else survey_reference()
+    if (!is.null(survey_reference)) {
+      join_keys <- intersect(
+        c("code", "year", "survname", "loc_id", "timestamp"),
+        intersect(names(miss_source), names(df))
+      )
+      weather_values <- df |>
+        dplyr::mutate(year = as.character(.data$year)) |>
+        dplyr::select(dplyr::all_of(c(join_keys, vars))) |>
+        dplyr::distinct(dplyr::across(dplyr::all_of(join_keys)), .keep_all = TRUE)
       miss_source <- miss_source |>
-        dplyr::mutate(countryyear = paste0(.data$economy, ", ", .data$year))
-      for (v in setdiff(vars, names(miss_source))) miss_source[[v]] <- NA
-      miss_df <- survey_missingness_long(miss_source, vars)
-      tab <- dplyr::left_join(tab, miss_df, by = c("countryyear", "variable"))
+        dplyr::mutate(year = as.character(.data$year)) |>
+        dplyr::left_join(weather_values, by = join_keys)
     }
+    miss_source <- miss_source |>
+      dplyr::mutate(countryyear = paste0(.data$economy, ", ", .data$year))
+    for (v in setdiff(vars, names(miss_source))) miss_source[[v]] <- NA
+    miss_df <- survey_missingness_long(miss_source, vars)
+    tab <- dplyr::left_join(tab, miss_df, by = c("countryyear", "variable"))
+  }
 
-    # Show only the readable variable label, falling back to the raw name
-    if ("variable" %in% names(tab)) {
-      lab_map <- sw |>
-        dplyr::select(name, label) |>
-        dplyr::distinct()
-      tab <- tab |>
-        dplyr::left_join(lab_map, by = c("variable" = "name")) |>
-        dplyr::mutate(variable = dplyr::coalesce(.data$label, .data$variable)) |>
-        dplyr::select(variable, dplyr::everything(), -dplyr::any_of("label"))
+  # Show only the readable variable label, falling back to the raw name
+  if ("variable" %in% names(tab)) {
+    lab_map <- sw |>
+      dplyr::select(name, label) |>
+      dplyr::distinct()
+    tab <- tab |>
+      dplyr::left_join(lab_map, by = c("variable" = "name")) |>
+      dplyr::mutate(variable = dplyr::coalesce(.data$label, .data$variable)) |>
+      dplyr::select(variable, dplyr::everything(), -dplyr::any_of("label"))
+  }
+
+  # Rename key columns
+  if ("variable" %in% names(tab)) names(tab)[names(tab) == "variable"] <- "Variable"
+  if ("countryyear" %in% names(tab)) names(tab)[names(tab) == "countryyear"] <- "Country, Year"
+
+  # Capitalize first letter of all column names
+  names(tab) <- vapply(names(tab), function(nm) {
+    if (!nzchar(nm)) {
+      return(nm)
     }
+    paste0(toupper(substr(nm, 1, 1)), substr(nm, 2, nchar(nm)))
+  }, character(1))
 
-    # Rename key columns
-    if ("variable" %in% names(tab))       names(tab)[names(tab) == "variable"] <- "Variable"
-    if ("countryyear" %in% names(tab))    names(tab)[names(tab) == "countryyear"] <- "Country, Year"
-
-    # Capitalize first letter of all column names
-    names(tab) <- vapply(names(tab), function(nm) {
-      if (!nzchar(nm)) return(nm)
-      paste0(toupper(substr(nm, 1, 1)), substr(nm, 2, nchar(nm)))
-    }, character(1))
-
-    tab
+  tab
 }
 
 #' Weather summary stats DT renderer
@@ -1568,12 +1675,16 @@ make_weather_stats_dt <- function(survey_weather, selected_weather,
                                   survey_reference = NULL) {
   DT::renderDT({
     shiny::req(survey_weather(), selected_weather())
-    tab <- build_weather_stats_table(survey_weather, selected_weather,
-                                     survey_reference)
+    tab <- build_weather_stats_table(
+      survey_weather, selected_weather,
+      survey_reference
+    )
     if (is.null(tab)) {
       return(data.frame(
-        Note = paste("No continuous weather variables to summarise",
-                     "(binned variables are shown below).")
+        Note = paste(
+          "No continuous weather variables to summarise",
+          "(binned variables are shown below)."
+        )
       ))
     }
 
@@ -1585,13 +1696,13 @@ make_weather_stats_dt <- function(survey_weather, selected_weather,
     # other table in Step 1.
     dt <- DT::datatable(
       tab,
-      rownames   = FALSE,
+      rownames = FALSE,
       extensions = "Buttons",
       options = list(
-        autoWidth  = TRUE,
+        autoWidth = TRUE,
         pageLength = 10,
         columnDefs = list(list(className = "dt-wrap", targets = "_all")),
-        dom     = wise_csv_dom("lfrtip"),
+        dom = wise_csv_dom("lfrtip"),
         buttons = wise_csv_button("weather_summary")
       )
     )
@@ -1621,128 +1732,151 @@ make_weather_stats_dt <- function(survey_weather, selected_weather,
 #' @noRd
 build_weather_binned_table <- function(survey_weather, selected_weather,
                                        survey_reference = NULL) {
-    sw_df  <- tryCatch(survey_weather(),  error = function(e) NULL)
-    sw_sel <- tryCatch(selected_weather(), error = function(e) NULL)
-    if (is.null(sw_df) || is.null(sw_sel)) return(NULL)
+  sw_df <- tryCatch(survey_weather(), error = function(e) NULL)
+  sw_sel <- tryCatch(selected_weather(), error = function(e) NULL)
+  if (is.null(sw_df) || is.null(sw_sel)) {
+    return(NULL)
+  }
 
-    df <- sw_df |>
-      dplyr::mutate(countryyear = paste0(.data$economy, ", ", .data$year))
+  df <- sw_df |>
+    dplyr::mutate(countryyear = paste0(.data$economy, ", ", .data$year))
 
-    sw <- sw_sel
-    vars <- intersect(sw$name, names(df))
-    if (length(vars) == 0) return(NULL)
+  sw <- sw_sel
+  vars <- intersect(sw$name, names(df))
+  if (length(vars) == 0) {
+    return(NULL)
+  }
 
-    binned_vars <- vars[vapply(df[vars],
-                               function(x) !is.numeric(x), logical(1))]
-    if (length(binned_vars) == 0) return(NULL)
+  binned_vars <- vars[vapply(
+    df[vars],
+    function(x) !is.numeric(x), logical(1)
+  )]
+  if (length(binned_vars) == 0) {
+    return(NULL)
+  }
 
-    # Measure missingness against all original survey rows, not only rows that
-    # survived the survey-weather inner join.
-    miss_source <- if (is.null(survey_reference)) df else survey_reference()
-    if (!is.null(survey_reference)) {
-      join_keys <- intersect(
-        c("code", "year", "survname", "loc_id", "timestamp"),
-        intersect(names(miss_source), names(df))
-      )
-      weather_values <- df |>
-        dplyr::mutate(year = as.character(.data$year)) |>
-        dplyr::select(dplyr::all_of(c(join_keys, binned_vars))) |>
-        dplyr::distinct(dplyr::across(dplyr::all_of(join_keys)), .keep_all = TRUE)
-      miss_source <- miss_source |>
-        dplyr::mutate(year = as.character(.data$year)) |>
-        dplyr::left_join(weather_values, by = join_keys)
-    }
+  # Measure missingness against all original survey rows, not only rows that
+  # survived the survey-weather inner join.
+  miss_source <- if (is.null(survey_reference)) df else survey_reference()
+  if (!is.null(survey_reference)) {
+    join_keys <- intersect(
+      c("code", "year", "survname", "loc_id", "timestamp"),
+      intersect(names(miss_source), names(df))
+    )
+    weather_values <- df |>
+      dplyr::mutate(year = as.character(.data$year)) |>
+      dplyr::select(dplyr::all_of(c(join_keys, binned_vars))) |>
+      dplyr::distinct(dplyr::across(dplyr::all_of(join_keys)), .keep_all = TRUE)
     miss_source <- miss_source |>
-      dplyr::mutate(countryyear = paste0(.data$economy, ", ", .data$year))
-    for (v in setdiff(binned_vars, names(miss_source))) miss_source[[v]] <- NA
-    miss_all <- survey_missingness_long(miss_source, binned_vars)
+      dplyr::mutate(year = as.character(.data$year)) |>
+      dplyr::left_join(weather_values, by = join_keys)
+  }
+  miss_source <- miss_source |>
+    dplyr::mutate(countryyear = paste0(.data$economy, ", ", .data$year))
+  for (v in setdiff(binned_vars, names(miss_source))) miss_source[[v]] <- NA
+  miss_all <- survey_missingness_long(miss_source, binned_vars)
 
-    # PERF-42: reshape the selected binned columns once, build one
-    # country-year / variable / level grouping, and aggregate every bin in a
-    # single collapse pass. The old implementation rebuilt a dplyr grouping
-    # and share denominator once per variable, which made the binned table's
-    # cost grow with the number of weather variables.
-    long <- do.call(rbind, lapply(binned_vars, function(v) {
-      vals <- df[[v]]
-      level_values <- if (is.factor(vals)) levels(vals) else
-        unique(as.character(vals[!is.na(vals)]))
-      data.frame(
-        variable = v,
-        countryyear = as.character(df$countryyear),
-        level = as.character(vals),
-        level_order = match(as.character(vals), level_values),
-        stringsAsFactors = FALSE
-      )
-    }))
-    long <- long[!is.na(long$level), , drop = FALSE]
-    if (nrow(long)) {
-      g <- collapse::GRP(long, by = c("countryyear", "variable", "level"),
-                         group.sizes = TRUE)
-      count <- as.numeric(g$group.sizes)
-      level_key <- g$groups
-      level_key$N <- count
-      denom_g <- collapse::GRP(level_key, by = c("countryyear", "variable"))
-      denom <- as.numeric(collapse::fsum(level_key$N, g = denom_g))
-      level_key$share <- 100 * count /
-        denom[match(
-          paste(level_key$countryyear, level_key$variable),
-          paste(denom_g$groups$countryyear, denom_g$groups$variable)
-        )]
-      level_key$level_order <- match(
-        paste(level_key$variable, level_key$level),
-        paste(long$variable, long$level)
-      )
-      tab <- as.data.frame(level_key, stringsAsFactors = FALSE)
-      tab <- tab[, c("variable", "countryyear", "level", "N", "share",
-                     "level_order"), drop = FALSE]
+  # PERF-42: reshape the selected binned columns once, build one
+  # country-year / variable / level grouping, and aggregate every bin in a
+  # single collapse pass. The old implementation rebuilt a dplyr grouping
+  # and share denominator once per variable, which made the binned table's
+  # cost grow with the number of weather variables.
+  long <- do.call(rbind, lapply(binned_vars, function(v) {
+    vals <- df[[v]]
+    level_values <- if (is.factor(vals)) {
+      levels(vals)
     } else {
-      tab <- data.frame(
-        variable = character(), countryyear = character(), level = character(),
-        N = integer(), share = numeric(), level_order = integer(),
-        stringsAsFactors = FALSE
-      )
+      unique(as.character(vals[!is.na(vals)]))
     }
+    data.frame(
+      variable = v,
+      countryyear = as.character(df$countryyear),
+      level = as.character(vals),
+      level_order = match(as.character(vals), level_values),
+      stringsAsFactors = FALSE
+    )
+  }))
+  long <- long[!is.na(long$level), , drop = FALSE]
+  if (nrow(long)) {
+    g <- collapse::GRP(long,
+      by = c("countryyear", "variable", "level"),
+      group.sizes = TRUE
+    )
+    count <- as.numeric(g$group.sizes)
+    level_key <- g$groups
+    level_key$N <- count
+    denom_g <- collapse::GRP(level_key, by = c("countryyear", "variable"))
+    denom <- as.numeric(collapse::fsum(level_key$N, g = denom_g))
+    level_key$share <- 100 * count /
+      denom[match(
+        paste(level_key$countryyear, level_key$variable),
+        paste(denom_g$groups$countryyear, denom_g$groups$variable)
+      )]
+    level_key$level_order <- match(
+      paste(level_key$variable, level_key$level),
+      paste(long$variable, long$level)
+    )
+    tab <- as.data.frame(level_key, stringsAsFactors = FALSE)
+    tab <- tab[, c(
+      "variable", "countryyear", "level", "N", "share",
+      "level_order"
+    ), drop = FALSE]
+  } else {
+    tab <- data.frame(
+      variable = character(), countryyear = character(), level = character(),
+      N = integer(), share = numeric(), level_order = integer(),
+      stringsAsFactors = FALSE
+    )
+  }
 
-    if (nrow(tab)) {
-      tab <- dplyr::left_join(
-        tab,
-        miss_all,
-        by = c("countryyear", "variable")
-      )
-    }
-    if (nrow(tab) == 0) return(NULL)
+  if (nrow(tab)) {
+    tab <- dplyr::left_join(
+      tab,
+      miss_all,
+      by = c("countryyear", "variable")
+    )
+  }
+  if (nrow(tab) == 0) {
+    return(NULL)
+  }
 
-    # Show only the readable variable label, falling back to the raw name
-    if ("variable" %in% names(tab) &&
-        all(c("name", "label") %in% names(sw))) {
-      lab_map <- sw |>
-        dplyr::select(name, label) |>
-        dplyr::distinct()
-      tab <- tab |>
-        dplyr::left_join(lab_map, by = c("variable" = "name")) |>
-        dplyr::mutate(
-          variable = dplyr::coalesce(.data$label, .data$variable)
-        ) |>
-        dplyr::select(dplyr::all_of(c("variable", "countryyear", "level",
-                                      "N", "share", "% Missing",
-                                      "level_order")))
-    }
-
-    # Sort bins by their factor/creation order rather than interval text.
+  # Show only the readable variable label, falling back to the raw name
+  if ("variable" %in% names(tab) &&
+    all(c("name", "label") %in% names(sw))) {
+    lab_map <- sw |>
+      dplyr::select(name, label) |>
+      dplyr::distinct()
     tab <- tab |>
-      dplyr::arrange(.data$variable, .data$countryyear, .data$level_order) |>
-      dplyr::select(-dplyr::all_of("level_order"))
+      dplyr::left_join(lab_map, by = c("variable" = "name")) |>
+      dplyr::mutate(
+        variable = dplyr::coalesce(.data$label, .data$variable)
+      ) |>
+      dplyr::select(dplyr::all_of(c(
+        "variable", "countryyear", "level",
+        "N", "share", "% Missing",
+        "level_order"
+      )))
+  }
 
-    if ("variable" %in% names(tab))
-      names(tab)[names(tab) == "variable"] <- "Variable"
-    if ("countryyear" %in% names(tab))
-      names(tab)[names(tab) == "countryyear"] <- "Country, Year"
-    if ("level" %in% names(tab))
-      names(tab)[names(tab) == "level"] <- "Level"
-    if ("share" %in% names(tab))
-      names(tab)[names(tab) == "share"] <- "Share (%)"
+  # Sort bins by their factor/creation order rather than interval text.
+  tab <- tab |>
+    dplyr::arrange(.data$variable, .data$countryyear, .data$level_order) |>
+    dplyr::select(-dplyr::all_of("level_order"))
 
-    tab
+  if ("variable" %in% names(tab)) {
+    names(tab)[names(tab) == "variable"] <- "Variable"
+  }
+  if ("countryyear" %in% names(tab)) {
+    names(tab)[names(tab) == "countryyear"] <- "Country, Year"
+  }
+  if ("level" %in% names(tab)) {
+    names(tab)[names(tab) == "level"] <- "Level"
+  }
+  if ("share" %in% names(tab)) {
+    names(tab)[names(tab) == "share"] <- "Share (%)"
+  }
+
+  tab
 }
 
 #' Weather binned-variable level-distribution DT renderer
@@ -1763,8 +1897,10 @@ make_weather_binned_stats_dt <- function(survey_weather, selected_weather,
                                          survey_reference = NULL) {
   DT::renderDT({
     shiny::req(survey_weather(), selected_weather())
-    tab <- build_weather_binned_table(survey_weather, selected_weather,
-                                      survey_reference)
+    tab <- build_weather_binned_table(
+      survey_weather, selected_weather,
+      survey_reference
+    )
     if (is.null(tab)) {
       return(data.frame(Note = "No binned weather variables to summarise."))
     }
@@ -1773,13 +1909,13 @@ make_weather_binned_stats_dt <- function(survey_weather, selected_weather,
     # and the Sample tab's summary tables.
     dt <- DT::datatable(
       tab,
-      rownames   = FALSE,
+      rownames = FALSE,
       extensions = "Buttons",
       options = list(
-        autoWidth  = TRUE,
+        autoWidth = TRUE,
         pageLength = 10,
         columnDefs = list(list(className = "dt-wrap", targets = "_all")),
-        dom     = wise_csv_dom("lfrtip"),
+        dom = wise_csv_dom("lfrtip"),
         buttons = wise_csv_button("weather_binned_distribution")
       )
     )
@@ -1814,7 +1950,11 @@ weather_plot_layout <- function(ns, n_vars, ids, height = "500px",
                                 alts = NULL) {
   plot_at <- function(i) {
     alt <- if (!is.null(alts) && length(alts) >= i &&
-               !is.na(alts[i]) && nzchar(alts[i])) alts[i] else NULL
+      !is.na(alts[i]) && nzchar(alts[i])) {
+      alts[i]
+    } else {
+      NULL
+    }
     if (is.null(alt)) {
       shiny::plotOutput(ns(ids[i]), height = height)
     } else {

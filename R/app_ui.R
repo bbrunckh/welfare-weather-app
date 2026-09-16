@@ -16,7 +16,6 @@ app_ui <- function(request) {
       brand   = app_sys("app/_brand.yml")
     ),
     navbar_options = bslib::navbar_options(theme = "dark", bg = "#002244"),
-
     header = tagList(
       golem_add_external_resources(),
       shiny::useBusyIndicators(),
@@ -63,7 +62,6 @@ app_ui <- function(request) {
     # top-right utilities rather than inside a step, because it spans all of
     # them.
     export_menu_ui(),
-
     bslib::nav_item(
       tags$a(
         icon("book-open"), "Docs",
@@ -106,7 +104,6 @@ app_ui <- function(request) {
 #' @importFrom golem add_resource_path favicon bundle_resources
 #' @noRd
 golem_add_external_resources <- function() {
-
   add_resource_path(
     "www",
     app_sys("app/www")

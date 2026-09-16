@@ -52,18 +52,18 @@
 #' @noRd
 hexmap_dependency <- function() {
   htmltools::htmlDependency(
-    name       = "wiseapp-hexmap",
+    name = "wiseapp-hexmap",
     # Bump on every engine change: the version is part of the script URL,
     # so browsers re-fetch instead of serving a stale cached engine.
-    version    = "1.0.5",
-    src        = app_sys("app", "www"),
-    script     = c(
+    version = "1.0.5",
+    src = app_sys("app", "www"),
+    script = c(
       "vendor/maplibre-gl.js",
       "vendor/h3-js.umd.js",
       "hexmap.js"
     ),
     stylesheet = "vendor/maplibre-gl.css",
-    all_files  = FALSE
+    all_files = FALSE
   )
 }
 
@@ -167,7 +167,7 @@ hexmap_payload <- function(h3, v, v_kind = c("continuous", "binned", "binary"),
   v_kind <- match.arg(v_kind)
 
   h3 <- as.character(unname(h3))
-  v  <- if (v_kind == "continuous") as.numeric(unname(v)) else as.character(unname(v))
+  v <- if (v_kind == "continuous") as.numeric(unname(v)) else as.character(unname(v))
   if (length(h3) != length(v)) {
     stop("hexmap_payload: h3 and v must be the same length", call. = FALSE)
   }
@@ -188,7 +188,7 @@ hexmap_payload <- function(h3, v, v_kind = c("continuous", "binned", "binary"),
   keep <- !is.na(h3) & nzchar(h3)
 
   label <- as.character(label)[1]
-  unit  <- as.character(unit)[1]
+  unit <- as.character(unit)[1]
   payload <- list(
     action  = "set",
     h3      = h3[keep],
@@ -199,14 +199,15 @@ hexmap_payload <- function(h3, v, v_kind = c("continuous", "binned", "binary"),
     unit    = if (is.na(unit)) "" else unit
   )
   if (!is.null(v_log)) payload$v_log <- v_log[keep]
-  if (!is.null(info))  payload$info  <- info[keep]
-  if (!is.null(dash))  payload$dash  <- as.logical(dash)[keep]
+  if (!is.null(info)) payload$info <- info[keep]
+  if (!is.null(dash)) payload$dash <- as.logical(dash)[keep]
 
   if (!is.null(bounds)) {
     bounds <- as.numeric(bounds)
     if (length(bounds) != 4L || anyNA(bounds) || any(!is.finite(bounds))) {
       stop("hexmap_payload: bounds must be finite [xmin, ymin, xmax, ymax]",
-           call. = FALSE)
+        call. = FALSE
+      )
     }
     payload$bounds <- unname(bounds)
   }
@@ -256,7 +257,9 @@ hexmap_clear <- function(session, ns, id) {
 #'
 #' @noRd
 hexmap_fit <- function(session, ns, id, bounds) {
-  if (is.null(bounds)) return(invisible(FALSE))
+  if (is.null(bounds)) {
+    return(invisible(FALSE))
+  }
   bounds <- unname(as.numeric(bounds))
   if (length(bounds) != 4L || anyNA(bounds) || any(!is.finite(bounds))) {
     return(invisible(FALSE))

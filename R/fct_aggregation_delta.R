@@ -56,22 +56,21 @@
 #'   }
 #' @export
 aggregate_with_uncertainty_delta <- function(y_point,
-                                              F_loading,
-                                              method,
-                                              weights      = NULL,
-                                              pov_line     = NULL,
-                                              residuals    = "original",
-                                              train_aug    = NULL,
-                                              id_vec       = NULL,
-                                              id_col       = NULL,
-                                              is_log       = TRUE,
-                                              band_q       = c(lo = 0.10, hi = 0.90),
-                                              bandwidth_p0 = 0.05,
-                                              seed          = WISEAPP_DEFAULT_SEED,
-                                              resid_lookup  = NULL,
-                                              resid_sigma2  = NULL,
-                                              prepared_mu   = NULL) {
-
+                                             F_loading,
+                                             method,
+                                             weights = NULL,
+                                             pov_line = NULL,
+                                             residuals = "original",
+                                             train_aug = NULL,
+                                             id_vec = NULL,
+                                             id_col = NULL,
+                                             is_log = TRUE,
+                                             band_q = c(lo = 0.10, hi = 0.90),
+                                             bandwidth_p0 = 0.05,
+                                             seed = WISEAPP_DEFAULT_SEED,
+                                             resid_lookup = NULL,
+                                             resid_sigma2 = NULL,
+                                             prepared_mu = NULL) {
   N <- length(y_point)
   stopifnot(is.numeric(y_point) && N > 0)
 
@@ -79,13 +78,14 @@ aggregate_with_uncertainty_delta <- function(y_point,
   # train_aug = NULL by construction). Avoids forcing every caller to repeat
   # the safety check now that "original" is the default.
   if (!identical(residuals, "none") &&
-      (is.null(train_aug) || !".resid" %in% names(train_aug))) {
+    (is.null(train_aug) || !".resid" %in% names(train_aug))) {
     residuals <- "none"
   }
 
   if (is.null(prepared_mu)) {
     resid_vec <- draw_residuals_vec(
-      residuals, train_aug, N, id_vec, id_col, seed = seed,
+      residuals, train_aug, N, id_vec, id_col,
+      seed = seed,
       resid_lookup = resid_lookup, resid_sigma2 = resid_sigma2
     )
     mu <- if (is_log) exp(y_point + resid_vec) else y_point + resid_vec
@@ -95,13 +95,14 @@ aggregate_with_uncertainty_delta <- function(y_point,
   }
 
   # Point estimate via existing resolver
-  agg_fn   <- resolve_agg_fn(method)
+  agg_fn <- resolve_agg_fn(method)
   value_pt <- agg_fn(mu, weights, pov_line)
 
   # Welfare-scale gradient h_i = (dT/dw_i) * mu_i
   h <- gradient_for_method(method, mu, weights, pov_line, value_pt,
-                           bandwidth_p0 = bandwidth_p0,
-                           F_loading    = F_loading)
+    bandwidth_p0 = bandwidth_p0,
+    F_loading    = F_loading
+  )
 
   # Coefficient variance: ||F' h||^2
   # F_agg is the per-coefficient gradient of the aggregated scalar with
@@ -110,21 +111,25 @@ aggregate_with_uncertainty_delta <- function(y_point,
   # is the right SE for paired counterfactuals on the same population.
   F_agg <- if (!is.null(F_loading) && !any(!is.finite(h))) {
     as.numeric(crossprod(F_loading, h))
-  } else NULL
+  } else {
+    NULL
+  }
   var_coef <- if (!is.null(F_agg)) sum(F_agg * F_agg) else 0
 
   # Residual variance (only for stochastic residual draws)
   # PERF-34: reuse a caller-supplied variance; identical value to the
   # per-call stats::var() this replaces.
   var_resid <- if (residuals %in% c("normal", "resample") &&
-                   !is.null(train_aug) && ".resid" %in% names(train_aug)) {
+    !is.null(train_aug) && ".resid" %in% names(train_aug)) {
     sigma_e2 <- resid_sigma2 %||%
       stats::var(train_aug$.resid, na.rm = TRUE)
     if (is.finite(sigma_e2)) sigma_e2 * sum(h * h, na.rm = TRUE) else 0
-  } else 0
+  } else {
+    0
+  }
 
   var_total <- var_coef + var_resid
-  se        <- sqrt(max(var_total, 0))
+  se <- sqrt(max(var_total, 0))
 
   # Band via method-appropriate transform
   z_lo <- stats::qnorm(band_q[["lo"]])
@@ -152,7 +157,7 @@ aggregate_with_uncertainty_delta <- function(y_point,
 
 gradient_for_method <- function(method, mu, weights, pov_line, value_pt,
                                 bandwidth_p0 = 0.05,
-                                F_loading    = NULL) {
+                                F_loading = NULL) {
   N <- length(mu)
   W <- if (!is.null(weights)) sum(weights, na.rm = TRUE) else N
   if (!is.finite(W) || W <= 0) W <- N
@@ -161,14 +166,11 @@ gradient_for_method <- function(method, mu, weights, pov_line, value_pt,
   # F_loading carried in for headcount bandwidth tuning (closed over below).
   switch(method,
     mean = w_tilde * mu,
-
     total = if (!is.null(weights)) weights * mu else mu,
-
     gap = {
       stopifnot(!is.null(pov_line))
       -w_tilde * mu * as.numeric(mu < pov_line) / pov_line
     },
-
     prosperity_gap = {
       # Point estimate: mean(pmax(28/mu, 1)); pov_line ignored - $28/day
       # threshold hardcoded. With h = (dT/dwelfare) * welfare:
@@ -187,12 +189,10 @@ gradient_for_method <- function(method, mu, weights, pov_line, value_pt,
       }
       h
     },
-
     fgt2 = {
       stopifnot(!is.null(pov_line))
       -2 * w_tilde * mu * pmax(pov_line - mu, 0) / pov_line^2
     },
-
     headcount_ratio = {
       stopifnot(!is.null(pov_line))
       # Kernel-smoothed indicator on welfare scale:
@@ -205,19 +205,20 @@ gradient_for_method <- function(method, mu, weights, pov_line, value_pt,
       b_auto <- if (!is.null(F_loading)) {
         log_se <- sqrt(rowSums(F_loading * F_loading))
         stats::median(mu * log_se, na.rm = TRUE)
-      } else 0
+      } else {
+        0
+      }
       b_w <- max(b_user, b_auto, .Machine$double.eps)
       arg <- (pov_line - mu) / b_w
       -w_tilde * stats::dnorm(arg) * mu / b_w
     },
-
     avg_poverty = {
       # Point estimate: mean(1 / mu) over valid rows ("days needed to earn $1").
       # With h = (dT/dwelfare) * welfare: dT/dw_i = -t_i / w_i^2 for w_i > 0,
       # so h_i = -t_i / w_i, i.e. unweighted -1/(n_ok * mu_i) and weighted
       # -w_i / (W_ok * mu_i). pov_line ignored.
       ok <- is.finite(mu) & mu > 0
-      h  <- rep(0, N)
+      h <- rep(0, N)
       if (is.null(weights)) {
         n_ok <- sum(ok)
         if (n_ok > 0) h[ok] <- -1 / (n_ok * mu[ok])
@@ -227,23 +228,30 @@ gradient_for_method <- function(method, mu, weights, pov_line, value_pt,
       }
       h
     },
-
     median = {
       # Hampel IF: IF_i = -(1{w_i<=m} - 0.5) / f(m)
       # Lift to log scale: h_i = w_tilde_i * mu_i * IF_i, with mu_i chain rule
       # cancelling because median is in welfare units.
-      f_hat <- tryCatch({
-        d <- if (!is.null(weights))
-               suppressWarnings(stats::density(mu, weights = weights / sum(weights, na.rm = TRUE),
-                              na.rm = TRUE))
-             else stats::density(mu, na.rm = TRUE)
-        approx_y <- stats::approx(d$x, d$y, xout = value_pt)$y
-        if (is.finite(approx_y) && approx_y > 1e-12) approx_y else NA_real_
-      }, error = function(e) NA_real_)
-      if (is.na(f_hat)) return(rep(0, N))
+      f_hat <- tryCatch(
+        {
+          d <- if (!is.null(weights)) {
+            suppressWarnings(stats::density(mu,
+              weights = weights / sum(weights, na.rm = TRUE),
+              na.rm = TRUE
+            ))
+          } else {
+            stats::density(mu, na.rm = TRUE)
+          }
+          approx_y <- stats::approx(d$x, d$y, xout = value_pt)$y
+          if (is.finite(approx_y) && approx_y > 1e-12) approx_y else NA_real_
+        },
+        error = function(e) NA_real_
+      )
+      if (is.na(f_hat)) {
+        return(rep(0, N))
+      }
       w_tilde * (0.5 - as.numeric(mu <= value_pt)) / f_hat
     },
-
     gini = {
       # Partial-derivative gradient of the weighted Gini wrt y_i, used in
       # the delta-method propagation of regression coefficient uncertainty
@@ -258,21 +266,24 @@ gradient_for_method <- function(method, mu, weights, pov_line, value_pt,
       #   h_i = (dG/dy_i) * y_i = w_tilde_i * y_i * (2 F_i - 1 - G) / mu_bar
       # Scale invariance check: sum h_i = (G*mu_bar - G*mu_bar)/mu_bar = 0.
       valid <- !is.na(mu)
-      if (sum(valid) < 2L) return(rep(0, N))
-      ord    <- order(mu)
-      mu_o   <- mu[ord]
-      w_o    <- if (!is.null(weights)) weights[ord] else rep(1, N)
-      w_n    <- w_o / sum(w_o, na.rm = TRUE)
-      F_vec  <- cumsum(w_n) - w_n / 2
+      if (sum(valid) < 2L) {
+        return(rep(0, N))
+      }
+      ord <- order(mu)
+      mu_o <- mu[ord]
+      w_o <- if (!is.null(weights)) weights[ord] else rep(1, N)
+      w_n <- w_o / sum(w_o, na.rm = TRUE)
+      F_vec <- cumsum(w_n) - w_n / 2
       mu_bar <- sum(w_n * mu_o, na.rm = TRUE)
-      if (!is.finite(mu_bar) || mu_bar <= 0) return(rep(0, N))
-      G_pt   <- value_pt
-      h_o    <- w_n * mu_o * (2 * F_vec - 1 - G_pt) / mu_bar
-      h      <- numeric(N)
+      if (!is.finite(mu_bar) || mu_bar <= 0) {
+        return(rep(0, N))
+      }
+      G_pt <- value_pt
+      h_o <- w_n * mu_o * (2 * F_vec - 1 - G_pt) / mu_bar
+      h <- numeric(N)
       h[ord] <- h_o
       h
     },
-
     stop(sprintf("[gradient_for_method] unsupported method: '%s'", method))
   )
 }
@@ -289,18 +300,18 @@ apply_band_transform <- function(method, value_pt, se, z_lo, z_hi) {
   }
 
   use_logit <- method %in% c("headcount_ratio", "gap", "fgt2")
-  use_log   <- method %in% c("median", "avg_poverty")
+  use_log <- method %in% c("median", "avg_poverty")
 
   if (use_logit && value_pt > 0 && value_pt < 1) {
     # SE on logit scale via delta: d logit / d p = 1 / (p(1-p))
     se_t <- se / (value_pt * (1 - value_pt))
-    lt   <- log(value_pt / (1 - value_pt))
-    lo   <- 1 / (1 + exp(-(lt + z_lo * se_t)))
-    hi   <- 1 / (1 + exp(-(lt + z_hi * se_t)))
+    lt <- log(value_pt / (1 - value_pt))
+    lo <- 1 / (1 + exp(-(lt + z_lo * se_t)))
+    hi <- 1 / (1 + exp(-(lt + z_hi * se_t)))
   } else if (use_log && value_pt > 0) {
     se_t <- se / value_pt
-    lo   <- exp(log(value_pt) + z_lo * se_t)
-    hi   <- exp(log(value_pt) + z_hi * se_t)
+    lo <- exp(log(value_pt) + z_lo * se_t)
+    hi <- exp(log(value_pt) + z_hi * se_t)
   } else {
     lo <- value_pt + z_lo * se
     hi <- value_pt + z_hi * se
@@ -352,10 +363,15 @@ apply_band_transform <- function(method, value_pt, se, z_lo, z_hi) {
   resid_data <- if (!is.null(train_aug) && ".resid" %in% names(train_aug)) {
     list(
       residuals = train_aug$.resid,
-      ids = if (!is.null(id_col) && id_col %in% names(train_aug))
-        train_aug[[id_col]] else NULL
+      ids = if (!is.null(id_col) && id_col %in% names(train_aug)) {
+        train_aug[[id_col]]
+      } else {
+        NULL
+      }
     )
-  } else NULL
+  } else {
+    NULL
+  }
   digest::digest(list(
     sim_year = pipe$sim_year,
     y_point = pipe$y_point,
@@ -376,7 +392,7 @@ apply_band_transform <- function(method, value_pt, se, z_lo, z_hi) {
     pipe, train_aug, id_col, residuals, seed, is_log
   )
   if (!is.null(cache) && is.environment(cache) &&
-      !is.null(cache$entries[[key]])) {
+    !is.null(cache$entries[[key]])) {
     cache$keys <- c(setdiff(cache$keys, key), key)
     return(cache$entries[[key]])
   }
@@ -389,7 +405,9 @@ apply_band_transform <- function(method, value_pt, se, z_lo, z_hi) {
     if (!is.null(pipe$weight)) as.numeric(pipe$weight[idx]) else NULL
   })
   weights_normalized <- lapply(weights, function(w) {
-    if (is.null(w)) return(NULL)
+    if (is.null(w)) {
+      return(NULL)
+    }
     total <- sum(w, na.rm = TRUE)
     if (is.finite(total) && total != 0) w / total else w
   })
@@ -455,18 +473,20 @@ apply_band_transform <- function(method, value_pt, se, z_lo, z_hi) {
 #' @return A list of per-year aggregation results.
 #' @export
 aggregate_pipeline_per_year <- function(pipe,
-                                         method,
-                                         weighted    = TRUE,
-                                         pov_line     = NULL,
-                                         residuals    = "original",
-                                         is_log       = TRUE,
-                                         band_q       = c(lo = 0.10, hi = 0.90),
-                                         skip_coef    = FALSE,
-                                         bandwidth_p0 = 0.05,
-                                         seed          = WISEAPP_DEFAULT_SEED,
-                                         shared_context = NULL,
-                                         preparation_cache = NULL) {
-  if (is.null(pipe) || is.null(pipe$y_point)) return(list())
+                                        method,
+                                        weighted = TRUE,
+                                        pov_line = NULL,
+                                        residuals = "original",
+                                        is_log = TRUE,
+                                        band_q = c(lo = 0.10, hi = 0.90),
+                                        skip_coef = FALSE,
+                                        bandwidth_p0 = 0.05,
+                                        seed = WISEAPP_DEFAULT_SEED,
+                                        shared_context = NULL,
+                                        preparation_cache = NULL) {
+  if (is.null(pipe) || is.null(pipe$y_point)) {
+    return(list())
+  }
 
   context <- step2_pipeline_context(pipe, shared_context)
   train_aug <- context$train_aug
@@ -475,11 +495,13 @@ aggregate_pipeline_per_year <- function(pipe,
   # train_aug carries .resid for "original"/"resample" residual paths. RIF
   # pipelines set train_aug = NULL by construction; honour that.
   res_mode <- residuals %||% "original"
-  if (is.null(train_aug) && !identical(res_mode, "none"))
+  if (is.null(train_aug) && !identical(res_mode, "none")) {
     res_mode <- "none"
+  }
 
-  if (is.null(preparation_cache))
+  if (is.null(preparation_cache)) {
     preparation_cache <- .new_aggregation_preparation_cache()
+  }
   prep <- .aggregation_prepare_pipeline(
     pipe = pipe,
     train_aug = train_aug,
@@ -503,26 +525,29 @@ aggregate_pipeline_per_year <- function(pipe,
   lapply(seq_along(prep$years), function(i) {
     yr <- prep$years[[i]]
     idx <- prep$rows[[i]][prep$valid[[i]]]
-    F_idx <- if (!is.null(F_full) && !isTRUE(skip_coef))
-               F_full[idx, , drop = FALSE] else NULL
+    F_idx <- if (!is.null(F_full) && !isTRUE(skip_coef)) {
+      F_full[idx, , drop = FALSE]
+    } else {
+      NULL
+    }
     w_idx <- if (isTRUE(weighted)) prep$weights[[i]] else NULL
     m <- aggregate_with_uncertainty_delta(
-      y_point      = pipe$y_point[idx],
-      F_loading    = F_idx,
-      method       = method,
-      weights      = w_idx,
-      pov_line     = pov_line,
-      residuals    = res_mode,
-      train_aug    = train_aug,
-      id_vec       = NULL,
-      id_col       = id_col,
-      is_log       = is_log,
-      band_q       = band_q,
+      y_point = pipe$y_point[idx],
+      F_loading = F_idx,
+      method = method,
+      weights = w_idx,
+      pov_line = pov_line,
+      residuals = res_mode,
+      train_aug = train_aug,
+      id_vec = NULL,
+      id_col = id_col,
+      is_log = is_log,
+      band_q = band_q,
       bandwidth_p0 = bandwidth_p0,
-      seed          = wise_seed(seed, "residual", yr),
-       resid_lookup  = NULL,
-      resid_sigma2  = sg2,
-      prepared_mu   = prep$mu[[i]]
+      seed = wise_seed(seed, "residual", yr),
+      resid_lookup = NULL,
+      resid_sigma2 = sg2,
+      prepared_mu = prep$mu[[i]]
     )
     m$sim_year <- yr
     m

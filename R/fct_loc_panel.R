@@ -61,8 +61,10 @@
 #'   dplyr::mutate(survey, code = "GNB", year = 2021L, survname = "EHCVM"),
 #'   dplyr::mutate(survey, code = "SEN", year = 2021L, survname = "EHCVM")
 #' )
-#' loc_panel(survey_multi, id_col = loc_id, h3_col = h3_7,
-#'           group_cols = c("code", "year", "survname"))
+#' loc_panel(survey_multi,
+#'   id_col = loc_id, h3_col = h3_7,
+#'   group_cols = c("code", "year", "survname")
+#' )
 #'
 #' @importFrom dplyr select distinct mutate summarise inner_join left_join
 #'   filter rename
@@ -73,17 +75,16 @@
 loc_panel <- function(data,
                       id_col,
                       h3_col,
-                      threshold  = 0.5,
+                      threshold = 0.5,
                       weight_col = NULL,
                       group_cols = NULL) {
-
-  wt_quo     <- rlang::enquo(weight_col)
+  wt_quo <- rlang::enquo(weight_col)
   has_groups <- !is.null(group_cols) && length(group_cols) > 0
 
   # --- 0. If group_cols supplied, stamp a composite loc_id ------------------
   # paste(!!!syms(...), ...) is translatable to SQL by DuckDB/dbplyr.
   if (has_groups) {
-    actual_cols  <- colnames(data)
+    actual_cols <- colnames(data)
     missing_cols <- setdiff(group_cols, actual_cols)
     if (length(missing_cols) > 0) {
       stop("group_cols not found in data: ", paste(missing_cols, collapse = ", "))
@@ -97,7 +98,7 @@ loc_panel <- function(data,
       dplyr::mutate(loc_id_composite = paste(!!!grp_syms, loc_id_orig, sep = "__")) |>
       collect_deterministic(c(group_cols, "loc_id_orig", "loc_id_composite"))
 
-    data   <- data |>
+    data <- data |>
       dplyr::mutate(.loc_id_composite = paste(!!!grp_syms, {{ id_col }}, sep = "__"))
     id_sym <- rlang::sym(".loc_id_composite")
   } else {
@@ -107,15 +108,21 @@ loc_panel <- function(data,
   # --- 1. Build a distinct (id, h3, weight) base table -----------------------
   if (!rlang::quo_is_null(wt_quo)) {
     base <- data |>
-      dplyr::select(loc_id = !!id_sym,
-                    h3     = {{ h3_col }},
-                    weight = {{ weight_col }}) |>
-      dplyr::summarise(weight = sum(weight, na.rm = TRUE),
-                       .by = c(loc_id, h3))
+      dplyr::select(
+        loc_id = !!id_sym,
+        h3 = {{ h3_col }},
+        weight = {{ weight_col }}
+      ) |>
+      dplyr::summarise(
+        weight = sum(weight, na.rm = TRUE),
+        .by = c(loc_id, h3)
+      )
   } else {
     base <- data |>
-      dplyr::select(loc_id = !!id_sym,
-                    h3     = {{ h3_col }}) |>
+      dplyr::select(
+        loc_id = !!id_sym,
+        h3 = {{ h3_col }}
+      ) |>
       dplyr::distinct() |>
       dplyr::mutate(weight = 1L)
   }
@@ -126,9 +133,10 @@ loc_panel <- function(data,
 
   # --- 3. Candidate pairs: loc_ids sharing > =1 h3 cell -----------------------
   pairs <- dplyr::inner_join(base, base,
-                             by           = "h3",
-                             suffix       = c("_x", "_y"),
-                             relationship = "many-to-many") |>
+    by           = "h3",
+    suffix       = c("_x", "_y"),
+    relationship = "many-to-many"
+  ) |>
     dplyr::filter(loc_id_x != loc_id_y)
 
   # --- 4. Overlap in both directions (all still lazy / in DuckDB) ------------
@@ -151,7 +159,7 @@ loc_panel <- function(data,
 
   # --- 5. Collect - single trip to DuckDB for both edges and all IDs ---------
   edges_df <- collect_deterministic(edges, c("from", "to"))
-  ids_df   <- totals |>
+  ids_df <- totals |>
     dplyr::select(loc_id) |>
     collect_deterministic("loc_id")
 
@@ -175,8 +183,10 @@ loc_panel <- function(data,
     min
   )
   component_order <- order(component_first)
-  component_map <- stats::setNames(seq_along(component_order),
-                                   names(component_first)[component_order])
+  component_map <- stats::setNames(
+    seq_along(component_order),
+    names(component_first)[component_order]
+  )
   stable_membership <- unname(component_map[as.character(comp$membership)])
 
   # --- 7. Map components back to (composite) loc_id -------------------------
@@ -190,8 +200,9 @@ loc_panel <- function(data,
     panel_map |>
       dplyr::left_join(restore_key, by = "loc_id_composite") |>
       dplyr::select(dplyr::all_of(group_cols),
-                    loc_id = loc_id_orig,
-                    loc_id_panel)
+        loc_id = loc_id_orig,
+        loc_id_panel
+      )
   } else {
     panel_map |>
       dplyr::left_join(

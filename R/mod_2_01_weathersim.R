@@ -17,13 +17,12 @@
 #'
 #' @importFrom shiny NS tagList
 mod_2_01_weathersim_ui <- function(id) {
-
   ns <- NS(id)
   step2_with_grid_num <- function(slider_tag, n) {
     for (i in seq_along(slider_tag$children)) {
       ch <- slider_tag$children[[i]]
       if (is.list(ch) && !is.null(ch$attribs) &&
-          "data-grid-num" %in% names(ch$attribs)) {
+        "data-grid-num" %in% names(ch$attribs)) {
         ch$attribs[["data-grid-num"]] <- n
         slider_tag$children[[i]] <- ch
         break
@@ -60,9 +59,9 @@ mod_2_01_weathersim_ui <- function(id) {
         "Climate scenarios"
       ),
       shiny::checkboxGroupInput(
-        inputId  = ns("climate"),
-        label    = shiny::tags$span(class = "visually-hidden", "Climate scenarios"),
-        choices  = c(
+        inputId = ns("climate"),
+        label = shiny::tags$span(class = "visually-hidden", "Climate scenarios"),
+        choices = c(
           "SSP2" = "ssp2_4_5",
           "SSP3" = "ssp3_7_0",
           "SSP5" = "ssp5_8_5"
@@ -105,24 +104,26 @@ mod_2_01_weathersim_ui <- function(id) {
       ),
       shiny::sliderInput(
         inputId = ns("hist_years"),
-        label   = shiny::tags$span(class = "visually-hidden",
-                                   "Historical weather distribution period"),
-        min     = 1950,
-        max     = 2024,
-        value   = c(1991, 2020),
-        sep     = ""
+        label = shiny::tags$span(
+          class = "visually-hidden",
+          "Historical weather distribution period"
+        ),
+        min = 1950,
+        max = 2024,
+        value = c(1991, 2020),
+        sep = ""
       ),
       shiny::uiOutput(ns("hist_years_warning")),
       shiny::helpText(
         tags$b("30 years is the recommended default."),
         style = "font-size: 11px; color: #555; margin-top: 2px; margin-bottom: 8px;"
       ),
-
       shiny::tags$hr(style = "margin: 6px 0;"),
 
       # -- Additional future periods ------------------------------------------
       shiny::tags$h6("Additional projection periods",
-                     style = "font-weight:600; margin-bottom:4px;"),
+        style = "font-weight:600; margin-bottom:4px;"
+      ),
 
       # Period 2 (optional)
       shiny::tags$div(
@@ -150,7 +151,6 @@ mod_2_01_weathersim_ui <- function(id) {
           9
         )
       ),
-
       shiny::tags$hr(style = "margin: 6px 0;"),
 
       # -- Residual method ----------------------------------------------------
@@ -165,10 +165,12 @@ mod_2_01_weathersim_ui <- function(id) {
         style = "font-weight:600; margin-bottom:4px;"
       ),
       pill_toggle(
-        inputId  = ns("residuals"),
-        label    = shiny::tags$span(class = "visually-hidden",
-                                    "Simulation residuals"),
-        choices  = residual_choices(),
+        inputId = ns("residuals"),
+        label = shiny::tags$span(
+          class = "visually-hidden",
+          "Simulation residuals"
+        ),
+        choices = residual_choices(),
         selected = "original"
       ),
       shiny::tags$hr(style = "margin: 6px 0;"),
@@ -227,14 +229,18 @@ mod_2_01_weathersim_ui <- function(id) {
 }
 
 .step2_filter_baseline_surveys <- function(selected_surveys,
-                                            baseline_selection) {
+                                           baseline_selection) {
   if (is.null(selected_surveys) || length(baseline_selection) == 0L) {
     return(selected_surveys)
   }
   required <- c("code", "year")
-  if (!all(required %in% names(selected_surveys))) return(selected_surveys)
-  wave_key <- paste0(selected_surveys$code, "|",
-                     as.character(selected_surveys$year))
+  if (!all(required %in% names(selected_surveys))) {
+    return(selected_surveys)
+  }
+  wave_key <- paste0(
+    selected_surveys$code, "|",
+    as.character(selected_surveys$year)
+  )
   selected_surveys[wave_key %in% baseline_selection, , drop = FALSE]
 }
 
@@ -258,26 +264,26 @@ mod_2_01_weathersim_ui <- function(id) {
 #'
 #' @noRd
 mod_2_01_weathersim_server <- function(id,
-                                        connection_params,
-                                        selected_outcome,
-                                        selected_weather,
-                                        selected_surveys,
-                                        survey_weather,
-                                        model_fit,
-                                        stored_breaks = reactive(NULL),
-                                        survey_version = reactive(0L),
-                                        run_trigger = reactive(NULL)) {
+                                       connection_params,
+                                       selected_outcome,
+                                       selected_weather,
+                                       selected_surveys,
+                                       survey_weather,
+                                       model_fit,
+                                       stored_breaks = reactive(NULL),
+                                       survey_version = reactive(0L),
+                                       run_trigger = reactive(NULL)) {
   moduleServer(id, function(input, output, session) {
     ns <- session$ns
 
     # ---- Internal state ----------------------------------------------------
-    hist_sim        <- reactiveVal(NULL)
+    hist_sim <- reactiveVal(NULL)
     saved_scenarios <- reactiveVal(list())
     # INT-08: TRUE while the stored simulation's run signature no longer
     # matches the current fit/climate inputs.
-    sim_stale       <- reactiveVal(FALSE)
-    run_generation  <- reactiveVal(0L)
-    run_status      <- reactiveVal("idle")
+    sim_stale <- reactiveVal(FALSE)
+    run_generation <- reactiveVal(0L)
+    run_status <- reactiveVal("idle")
     weather_store_lease <- reactiveVal(NULL)
 
     cleanup_weather_stores <- function() {
@@ -296,42 +302,46 @@ mod_2_01_weathersim_server <- function(id,
 
     baseline_survey_choices <- reactive({
       req(survey_weather())
-      svy  <- survey_weather()
-      if (!all(c('code', 'survname', 'year') %in% names(svy))) return(character(0))
-      combos <- unique(svy[, c('code', 'survname', 'year')])
+      svy <- survey_weather()
+      if (!all(c("code", "survname", "year") %in% names(svy))) {
+        return(character(0))
+      }
+      combos <- unique(svy[, c("code", "survname", "year")])
       combos <- combos[order(combos$code, combos$year), ]
 
       # Join economy (country) name from selected_surveys via code column.
       # NOTE: code (e.g. TGO, GNB) is unique per country; survname (e.g. EHCVM)
       # is shared across countries in the same survey programme and must NOT
       # be used as the join key -- this was the bug causing Togo to disappear.
-      
+
       ss <- tryCatch(selected_surveys(), error = function(e) NULL)
-      if (!is.null(ss) && all(c('code', 'economy') %in% names(ss))) {
-        lbl_map <- unique(ss[, c('code', 'economy')])
-        combos  <- merge(combos, lbl_map, by = 'code', all.x = TRUE)
+      if (!is.null(ss) && all(c("code", "economy") %in% names(ss))) {
+        lbl_map <- unique(ss[, c("code", "economy")])
+        combos <- merge(combos, lbl_map, by = "code", all.x = TRUE)
         combos$economy[is.na(combos$economy)] <- combos$code[is.na(combos$economy)]
       } else {
         combos$economy <- combos$code
       }
-      vals <- paste0(combos$code, '|', combos$year)
-      lbls <- paste0(combos$economy, ' ', combos$year)
+      vals <- paste0(combos$code, "|", combos$year)
+      lbls <- paste0(combos$economy, " ", combos$year)
       setNames(vals, lbls)
     })
 
     # Default selection: latest year per unique economy (code), not survname.
     baseline_default <- reactive({
       ch <- baseline_survey_choices()
-      if (length(ch) == 0) return(character(0))
+      if (length(ch) == 0) {
+        return(character(0))
+      }
       df <- data.frame(
-        val      = ch,
+        val = ch,
         code = sub("^(.*?)\\|.*$", "\\1", ch),
         year = as.integer(sub("^.*\\|", "", ch)),
         stringsAsFactors = FALSE
       )
 
       latest <- tapply(df$year, df$code, max)
-      keep   <- mapply(function(c, y) latest[c] == y, df$code, df$year)
+      keep <- mapply(function(c, y) latest[c] == y, df$code, df$year)
       unname(ch[keep])
     })
 
@@ -339,37 +349,43 @@ mod_2_01_weathersim_server <- function(id,
     # ---- Settings summary banner -------------------------------------------
 
     output$baseline_survey_ui <- shiny::renderUI({
-      ch  <- baseline_survey_choices()
+      ch <- baseline_survey_choices()
       def <- baseline_default()
-      if (length(ch) == 0)
+      if (length(ch) == 0) {
         return(shiny::helpText("No survey data loaded.", style = "font-size:11px;"))
+      }
       # INT-01: keep the user's baseline selection across rebuilds (e.g. the
       # survey list changing after a Step 1 reload); only invalid values are
       # dropped, and the default applies only when nothing survives.
       prev_bs <- shiny::isolate(input$baseline_survey)
       shiny::selectInput(
         ns("baseline_survey"),
-        label    = shiny::tags$span(class = "visually-hidden",
-                                    "Baseline survey"),
-        choices  = ch,
+        label = shiny::tags$span(
+          class = "visually-hidden",
+          "Baseline survey"
+        ),
+        choices = ch,
         selected = .restore_selection(prev_bs, ch, fallback = def),
         multiple = TRUE,
         selectize = TRUE
       )
     })
     shiny::outputOptions(output, "baseline_survey_ui",
-                         suspendWhenHidden = FALSE)
+      suspendWhenHidden = FALSE
+    )
 
     output$baseline_warning_ui <- shiny::renderUI({
       sel <- input$baseline_survey %||% baseline_default()
-      if (length(sel) <= 1) return(NULL)
+      if (length(sel) <= 1) {
+        return(NULL)
+      }
       # Multiple economies or years selected -- show warning
       n_economies <- length(unique(sub("\\|.*$", "", sel)))
-      n_years     <- length(unique(sub("^.*\\|", "", sel)))
+      n_years <- length(unique(sub("^.*\\|", "", sel)))
       if (n_economies > 1 || n_years > 1) {
         shiny::helpText(
           shiny::tags$b("\u26a0 Warning:"),
-           "Using multiple survey years or economies is not recommended. Requires normalizing weights based on sample design, which is not currently implemented - verify before interpreting results.",
+          "Using multiple survey years or economies is not recommended. Requires normalizing weights based on sample design, which is not currently implemented - verify before interpreting results.",
           style = "color: #c0392b; font-size: 11px; margin-top: 2px;"
         )
       }
@@ -384,7 +400,7 @@ mod_2_01_weathersim_server <- function(id,
       )
       ssp_sel <- input$climate %||% character(0)
       sel <- input$baseline_survey %||% baseline_default()
-      ch  <- baseline_survey_choices()
+      ch <- baseline_survey_choices()
       survey_txt <- {
         nms <- names(ch)[ch %in% sel]
         if (length(nms) == 0) "None" else paste(nms, collapse = ", ")
@@ -394,7 +410,9 @@ mod_2_01_weathersim_server <- function(id,
         period <- input[[paste0("fut_period_", i)]]
         if (length(period) >= 2 && all(is.finite(period)) && period[2] > period[1]) {
           as.integer(period[1:2])
-        } else NULL
+        } else {
+          NULL
+        }
       })
       period_values <- Filter(Negate(is.null), period_values)
 
@@ -414,17 +432,23 @@ mod_2_01_weathersim_server <- function(id,
         lapply(period_values, function(period) {
           shiny::tags$span(
             class = "step2-summary-item",
-            shiny::tags$span(class = "step2-summary-label step2-summary-scenario-label",
-                             unname(ssp_map[[ssp]])),
-            shiny::tags$span(class = "step2-summary-value",
-                             paste0(period[1], "\u2013", period[2]))
+            shiny::tags$span(
+              class = "step2-summary-label step2-summary-scenario-label",
+              unname(ssp_map[[ssp]])
+            ),
+            shiny::tags$span(
+              class = "step2-summary-value",
+              paste0(period[1], "\u2013", period[2])
+            )
           )
         })
       }), recursive = FALSE)
       climate_items <- if (length(scenario_items)) {
         do.call(c, lapply(seq_along(scenario_items), function(i) {
-          c(if (i > 1L) list(separator) else list(),
-            list(scenario_items[[i]]))
+          c(
+            if (i > 1L) list(separator) else list(),
+            list(scenario_items[[i]])
+          )
         }))
       } else {
         list(item("Climate scenarios", "None", pill = FALSE))
@@ -475,7 +499,9 @@ mod_2_01_weathersim_server <- function(id,
           ))
         }
       }
-      if (length(issues) == 0) return(NULL)
+      if (length(issues) == 0) {
+        return(NULL)
+      }
       shiny::helpText(
         shiny::tags$b("Warning:"),
         " invalid projection period(s) will be excluded from the simulation: ",
@@ -490,7 +516,9 @@ mod_2_01_weathersim_server <- function(id,
     # Used in place of survey_weather() inside observeEvent(run_sim).
     baseline_svy <- reactive({
       sel <- input$baseline_survey %||% baseline_default()
-      if (length(sel) == 0) return(survey_weather())
+      if (length(sel) == 0) {
+        return(survey_weather())
+      }
       svy <- survey_weather()
       vals <- paste0(svy$code, "|", as.character(svy$year))
       svy[vals %in% sel, , drop = FALSE]
@@ -509,11 +537,13 @@ mod_2_01_weathersim_server <- function(id,
     selected_hist <- reactive({
       req(input$hist_years)
       data.frame(
-        type          = "historical",
-        year_range    = I(list(input$hist_years)),
-        residuals     = input$residuals %||% "original",
-        scenario_name = paste0("Historical / ",
-                               input$hist_years[1], "-", input$hist_years[2]),
+        type = "historical",
+        year_range = I(list(input$hist_years)),
+        residuals = input$residuals %||% "original",
+        scenario_name = paste0(
+          "Historical / ",
+          input$hist_years[1], "-", input$hist_years[2]
+        ),
         stringsAsFactors = FALSE
       )
     })
@@ -532,7 +562,9 @@ mod_2_01_weathersim_server <- function(id,
     selected_fut <- reactive({
       req(input$climate)
       fp <- future_periods()
-      if (length(fp) == 0) return(NULL)
+      if (length(fp) == 0) {
+        return(NULL)
+      }
 
       ssp_choices <- c(
         "ssp2_4_5" = "SSP2-4.5",
@@ -545,11 +577,11 @@ mod_2_01_weathersim_server <- function(id,
         lapply(fp, function(yr) {
           scene_name <- paste0(prefix, " / ", yr[1], "-", yr[2])
           data.frame(
-            type          = "future",
-            year_range    = I(list(yr)),
-            ssp           = ssp,
-            method        = "delta",
-            residuals     = input$residuals %||% "original",
+            type = "future",
+            year_range = I(list(yr)),
+            ssp = ssp,
+            method = "delta",
+            residuals = input$residuals %||% "original",
             scenario_name = scene_name,
             stringsAsFactors = FALSE
           )
@@ -562,41 +594,55 @@ mod_2_01_weathersim_server <- function(id,
     # ---- Run simulation button (hidden for non-linear or RIF engine) --------------------
 
     output$run_sim_ui <- shiny::renderUI({
-      mf     <- model_fit()
+      mf <- model_fit()
       engine <- if (!is.null(mf)) mf$engine %||% "fixest" else "fixest"
 
       # Block only unsupported engines - linear (fixest) and RIF both supported
       unsupported <- !is.null(mf) &&
-                     !engine %in% c("fixest", "rif")
+        !engine %in% c("fixest", "rif")
 
       # UI-29: name the missing prerequisites before the click instead of
       # letting the button silently no-op (the click observer req()s on all
       # of these).
       missing <- character(0)
       swd <- tryCatch(selected_weather(), error = function(e) NULL)
-      so  <- tryCatch(selected_outcome(), error = function(e) NULL)
+      so <- tryCatch(selected_outcome(), error = function(e) NULL)
       svy <- tryCatch(survey_weather(), error = function(e) NULL)
-      ss  <- tryCatch(selected_surveys(), error = function(e) NULL)
-      hist_ok <- tryCatch({ selected_hist(); TRUE }, error = function(e) FALSE)
-      if (is.null(so) || nrow(as.data.frame(so)) == 0)
+      ss <- tryCatch(selected_surveys(), error = function(e) NULL)
+      hist_ok <- tryCatch(
+        {
+          selected_hist()
+          TRUE
+        },
+        error = function(e) FALSE
+      )
+      if (is.null(so) || nrow(as.data.frame(so)) == 0) {
         missing <- c(missing, "an outcome")
-      if (is.null(swd) || nrow(as.data.frame(swd)) == 0)
+      }
+      if (is.null(swd) || nrow(as.data.frame(swd)) == 0) {
         missing <- c(missing, "weather variables")
-      if (is.null(svy) || nrow(as.data.frame(svy)) == 0)
+      }
+      if (is.null(svy) || nrow(as.data.frame(svy)) == 0) {
         missing <- c(missing, "survey and weather data")
-      if (is.null(ss) || nrow(as.data.frame(ss)) == 0)
+      }
+      if (is.null(ss) || nrow(as.data.frame(ss)) == 0) {
         missing <- c(missing, "a baseline survey")
-      if (!hist_ok)
+      }
+      if (!hist_ok) {
         missing <- c(missing, "a historical period")
-      if (is.null(mf))
+      }
+      if (is.null(mf)) {
         missing <- c(missing, "a fitted Step 1 model (run the Step 1 model first)")
+      }
 
       if (unsupported) {
         shiny::div(
           class = "alert alert-warning",
           style = "font-size: 13px; margin-top: 4px;",
-          shiny::tags$b("\u26a0 Simulations are not yet implemented for ",
-                        engine, " models."),
+          shiny::tags$b(
+            "\u26a0 Simulations are not yet implemented for ",
+            engine, " models."
+          ),
           " Please select a linear or RIF model engine to run simulations."
         )
       } else {
@@ -604,17 +650,17 @@ mod_2_01_weathersim_server <- function(id,
           if (length(missing)) {
             shiny::div(
               class = "alert alert-warning warning-message",
-              role  = "alert",
+              role = "alert",
               style = "font-size: 13px; margin-top: 4px;",
-            shiny::tags$b("To run the simulation, first select "),
-            paste(missing, collapse = ", "), "."
+              shiny::tags$b("To run the simulation, first select "),
+              paste(missing, collapse = ", "), "."
             )
           },
           shiny::actionButton(
             ns("run_sim"),
             label = "Run simulation",
             class = "btn-primary",
-            icon  = shiny::icon("play"),
+            icon = shiny::icon("play"),
             style = "width: 100%; margin-top: 4px;",
             disabled = length(missing) > 0
           )
@@ -634,16 +680,16 @@ mod_2_01_weathersim_server <- function(id,
 
     .sim_sig_from_live <- function(fit_sig) {
       list(
-        step           = "sim",
-        fit_sig        = fit_sig,
+        step = "sim",
+        fit_sig = fit_sig,
         survey_version = survey_version(),
         selected_surveys = .sig_plain(selected_surveys()),
-        hist_years     = input$hist_years,
-        climate        = input$climate,
+        hist_years = input$hist_years,
+        climate = input$climate,
         future_periods = future_periods(),
-        fut_sel        = .sig_plain(selected_fut()),
+        fut_sel = .sig_plain(selected_fut()),
         baseline_survey = input$baseline_survey,
-        residuals      = input$residuals,
+        residuals = input$residuals,
         skip_coef_draws = isTRUE(input$include_coef_uncertainty),
         propagate_all_covariate_uncertainty =
           isTRUE(input$propagate_all_covariate_uncertainty)
@@ -663,214 +709,245 @@ mod_2_01_weathersim_server <- function(id,
       input$fut_period_1, input$fut_period_2, input$fut_period_3
     ))
 
-    observeEvent(stale_dependencies(), {
-      hs <- hist_sim()
-      if (!is.null(hs) && !identical(live_sim_sig(), hs$.sig))
-        sim_stale(TRUE)
-    }, ignoreInit = TRUE)
+    observeEvent(stale_dependencies(),
+      {
+        hs <- hist_sim()
+        if (!is.null(hs) && !identical(live_sim_sig(), hs$.sig)) {
+          sim_stale(TRUE)
+        }
+      },
+      ignoreInit = TRUE
+    )
 
     observeEvent(hist_sim(), sim_stale(FALSE))
 
     sim_run_event <- shiny::reactiveVal(NULL)
-    shiny::observeEvent(input$run_sim, {
-      if (shiny::isTruthy(input$run_sim)) {
-        sim_run_event(list(source = "manual", value = input$run_sim))
-      }
-    }, ignoreInit = FALSE, ignoreNULL = TRUE)
-    shiny::observeEvent(run_trigger(), {
-      ext <- run_trigger()
-      if (!is.null(ext)) sim_run_event(list(source = "pipeline", value = ext))
-    }, ignoreInit = FALSE, ignoreNULL = TRUE)
+    shiny::observeEvent(input$run_sim,
+      {
+        if (shiny::isTruthy(input$run_sim)) {
+          sim_run_event(list(source = "manual", value = input$run_sim))
+        }
+      },
+      ignoreInit = FALSE,
+      ignoreNULL = TRUE
+    )
+    shiny::observeEvent(run_trigger(),
+      {
+        ext <- run_trigger()
+        if (!is.null(ext)) sim_run_event(list(source = "pipeline", value = ext))
+      },
+      ignoreInit = FALSE,
+      ignoreNULL = TRUE
+    )
 
-    observeEvent(sim_run_event(), {
-      run_generation(run_generation() + 1L)
-      run_status("running")
-      completed <- FALSE
-      on.exit({
-        if (!completed) run_status("failure")
-      }, add = TRUE)
-      req(selected_weather(), selected_outcome(),
-          survey_weather(), selected_hist(), model_fit())
-      if (!sim_guard$begin()) return(invisible(NULL))
-      on.exit(sim_guard$end(), add = TRUE)
-
-      # ---- Gather inputs ---------------------------------------------------
-      sw  <- selected_weather()
-      so  <- selected_outcome()
-      sh  <- selected_hist()
-      svy <- baseline_svy()
-      ss  <- baseline_surveys()
-      req(ss)
-      mf  <- model_fit()
-      cp  <- connection_params()
-
-      sim_dates           <- build_hist_sim_dates(svy, unlist(sh$year_range))
-      fut_periods         <- future_periods()
-      sf                  <- selected_fut()
-      has_future          <- !is.null(sf) && length(fut_periods) > 0
-      ssps                <- if (has_future) unique(sf$ssp) else character(0)
-      perturbation_method <- if (has_future) build_perturbation_method(sw) else NULL
-      fp_list             <- if (has_future) lapply(fut_periods, function(yr)
-                               c(paste0(yr[1], "-01-01"), paste0(yr[2], "-12-31")))
-                             else list()
-
-      # ---- RIF-specific params -------------------------------------------
-      engine      <- mf$engine %||% "fixest"
-      is_rif      <- identical(engine, "rif")
-      fit_multi   <- if (is_rif) mf$fit3          else NULL
-      rif_taus    <- if (is_rif) mf$taus           else NULL
-      rif_weather <- if (is_rif) mf$weather_terms  else NULL
-
-      # Force residuals = "none" for RIF (delta method, no residual draw)
-      sh_residuals <- if (is_rif) "none" else sh$residuals
-
-
-      shiny::withProgress(message = "Running climate simulation...", value = 0, {
-
-        # ---- Run simulation ------------------------------------------------
-        result <- tryCatch(
-          fct_run_simulation(
-            sw                  = sw,
-            so                  = so,
-            svy                 = svy,
-            ss                  = ss,
-            mf                  = mf,
-            cp                  = cp,
-            fp_list             = fp_list,
-            ssps                = ssps,
-            residuals           = sh_residuals, #sh$residuals,
-            skip_coef_draws     = !isTRUE(input$include_coef_uncertainty),
-            propagate_all_covariate_uncertainty =
-              isTRUE(input$propagate_all_covariate_uncertainty),
-            sim_dates           = sim_dates,
-            perturbation_method = perturbation_method,
-            stored_breaks       = stored_breaks(),
-            fit_multi           = fit_multi,
-            taus                = rif_taus,
-            weather_cols        = rif_weather,   
-            weather_storage     = match.arg(
-              Sys.getenv("WISEAPP_STEP2_WEATHER_STORAGE", "memory"),
-              c("memory", "reference")
-            ),
-            weather_collect     = match.arg(
-              Sys.getenv("WISEAPP_STEP2_WEATHER_COLLECT", "fast"),
-              c("fast", "bounded")
-            ),
-            weather_threads     = match.arg(
-              Sys.getenv("WISEAPP_STEP2_WEATHER_THREADS", "auto"),
-              c("auto", "1", "2")
-            ),
-             direct_rif_predictions = TRUE,
-             seed                = wise_current_seed(),
-             payload_mode        = "compact",
-            progress_fn         = function(value, detail)
-                                    shiny::setProgress(value = value,
-                                                       detail = detail)
-          ),
-          error = function(e) {
-            shiny::showNotification(
-              paste0("Simulation failed: ", conditionMessage(e)),
-              type = "error", duration = 8
-            )
-            NULL
-          }
-        )
-        req(!is.null(result))
-
-        # ---- Store results (reactive side effects) -------------------------
-        # Aggregation now happens lazily in mod_2_02_results.R via the analytic
-        # delta method - no pre-aggregation step here.
-        # INT-05: bind the historical scenario label into the result so the
-        # Step 3 pane describes the simulated run, not the live selection.
-        result$hist_sim_result$hist_label <- sh$scenario_name
-        model_spec <- mf$.snap$model %||% list()
-        result$hist_sim_result$sim_summary <- list(
-          weather = sw,
-          historical_years = unlist(sh$year_range[[1]], use.names = FALSE),
-          baseline_survey = {
-            ch <- baseline_survey_choices()
-            sel <- input$baseline_survey %||% baseline_default()
-            nms <- names(ch)[ch %in% sel]
-            if (length(nms)) paste(nms, collapse = ", ") else "Selected baseline survey"
+    observeEvent(sim_run_event(),
+      {
+        run_generation(run_generation() + 1L)
+        run_status("running")
+        completed <- FALSE
+        on.exit(
+          {
+            if (!completed) run_status("failure")
           },
-          baseline_n = nrow(svy),
-          model = list(
-            label = if (length(model_spec)) model_badge(model_spec) else "Fitted model",
-            weather_terms = length(mf$weather_terms %||% character(0)),
-            fixed_effects = length(model_spec$fixedeffects %||% mf$fe_terms %||% character(0)),
-            covariates = if (length(model_spec)) model_covariate_total(model_spec) else NA_integer_
-          ),
-          total_runs = result$total_runs
+          add = TRUE
         )
-        # INT-08: the immutable run signature travels with the result so
-        # Step 3 can detect that it is consuming a superseded simulation.
-        result$hist_sim_result$.sig <- .sim_sig_from_live(mf$.sig %||% NULL)
-        sim_stale(FALSE)
-        old_lease <- weather_store_lease()
-        weather_store_lease(result$weather_store_lease %||% NULL)
-        result$hist_sim_result$weather_store_lease <-
-          result$weather_store_lease %||% NULL
-        hist_sim(result$hist_sim_result)
-        saved_scenarios(result$new_scenarios)
-        step2_weather_store_release(old_lease)
-        run_status("success")
-        completed <- TRUE
-
-        shiny::setProgress(value = 1, detail = "Results ready")
-      })
-
-      # ---- REACT-12: partial failures get a prominent persistent warning ----
-      # (Historical or whole-group failures throw inside fct_run_simulation,
-      # so reaching this point means results are publishable.)
-      sim_failures <- result$failures %||% list()
-      if (length(sim_failures) > 0L) {
-        fail_txt <- paste(vapply(sim_failures, function(f)
-          sprintf("%s: %s", f$key, f$error), character(1)), collapse = "\n")
-        shiny::showNotification(
-          ui = tagList(
-            tags$b("Simulation completed with some scenarios unavailable."),
-            tags$br(),
-            tags$details(
-              tags$summary("Show details"),
-              tags$div(style = "font-size: 12px; white-space: pre-wrap;",
-                       fail_txt)
-            )
-          ),
-          type = "warning", duration = NULL
+        req(
+          selected_weather(), selected_outcome(),
+          survey_weather(), selected_hist(), model_fit()
         )
-      }
+        if (!sim_guard$begin()) {
+          return(invisible(NULL))
+        }
+        on.exit(sim_guard$end(), add = TRUE)
 
-      # ---- Completion notification -----------------------------------------
-      message(sprintf(
-        "[wiseapp] TOTAL wall time: %s | weather: %s | pipelines: %s | %d/%d key(s)",
-        format_elapsed(result$t_elapsed),
-        format_elapsed(result$t_weather %||% 0),
-        format_elapsed(result$t_elapsed - (result$t_weather %||% 0)),
-        result$n_keys_ok %||% result$n_keys, result$n_keys
-      ))
+        # ---- Gather inputs ---------------------------------------------------
+        sw <- selected_weather()
+        so <- selected_outcome()
+        sh <- selected_hist()
+        svy <- baseline_svy()
+        ss <- baseline_surveys()
+        req(ss)
+        mf <- model_fit()
+        cp <- connection_params()
 
-      if (!length(sim_failures)) {
-        shiny::showNotification(
-          "Climate scenario results are ready.",
-          type = "message", duration = 3
-        )
-      }
-    }, ignoreInit = TRUE)
+        sim_dates <- build_hist_sim_dates(svy, unlist(sh$year_range))
+        fut_periods <- future_periods()
+        sf <- selected_fut()
+        has_future <- !is.null(sf) && length(fut_periods) > 0
+        ssps <- if (has_future) unique(sf$ssp) else character(0)
+        perturbation_method <- if (has_future) build_perturbation_method(sw) else NULL
+        fp_list <- if (has_future) {
+          lapply(fut_periods, function(yr) {
+            c(paste0(yr[1], "-01-01"), paste0(yr[2], "-12-31"))
+          })
+        } else {
+          list()
+        }
+
+        # ---- RIF-specific params -------------------------------------------
+        engine <- mf$engine %||% "fixest"
+        is_rif <- identical(engine, "rif")
+        fit_multi <- if (is_rif) mf$fit3 else NULL
+        rif_taus <- if (is_rif) mf$taus else NULL
+        rif_weather <- if (is_rif) mf$weather_terms else NULL
+
+        # Force residuals = "none" for RIF (delta method, no residual draw)
+        sh_residuals <- if (is_rif) "none" else sh$residuals
+
+
+        shiny::withProgress(message = "Running climate simulation...", value = 0, {
+          # ---- Run simulation ------------------------------------------------
+          result <- tryCatch(
+            fct_run_simulation(
+              sw = sw,
+              so = so,
+              svy = svy,
+              ss = ss,
+              mf = mf,
+              cp = cp,
+              fp_list = fp_list,
+              ssps = ssps,
+              residuals = sh_residuals, # sh$residuals,
+              skip_coef_draws = !isTRUE(input$include_coef_uncertainty),
+              propagate_all_covariate_uncertainty =
+                isTRUE(input$propagate_all_covariate_uncertainty),
+              sim_dates = sim_dates,
+              perturbation_method = perturbation_method,
+              stored_breaks = stored_breaks(),
+              fit_multi = fit_multi,
+              taus = rif_taus,
+              weather_cols = rif_weather,
+              weather_storage = match.arg(
+                Sys.getenv("WISEAPP_STEP2_WEATHER_STORAGE", "memory"),
+                c("memory", "reference")
+              ),
+              weather_collect = match.arg(
+                Sys.getenv("WISEAPP_STEP2_WEATHER_COLLECT", "fast"),
+                c("fast", "bounded")
+              ),
+              weather_threads = match.arg(
+                Sys.getenv("WISEAPP_STEP2_WEATHER_THREADS", "auto"),
+                c("auto", "1", "2")
+              ),
+              direct_rif_predictions = TRUE,
+              seed = wise_current_seed(),
+              payload_mode = "compact",
+              progress_fn = function(value, detail) {
+                shiny::setProgress(
+                  value = value,
+                  detail = detail
+                )
+              }
+            ),
+            error = function(e) {
+              shiny::showNotification(
+                paste0("Simulation failed: ", conditionMessage(e)),
+                type = "error", duration = 8
+              )
+              NULL
+            }
+          )
+          req(!is.null(result))
+
+          # ---- Store results (reactive side effects) -------------------------
+          # Aggregation now happens lazily in mod_2_02_results.R via the analytic
+          # delta method - no pre-aggregation step here.
+          # INT-05: bind the historical scenario label into the result so the
+          # Step 3 pane describes the simulated run, not the live selection.
+          result$hist_sim_result$hist_label <- sh$scenario_name
+          model_spec <- mf$.snap$model %||% list()
+          result$hist_sim_result$sim_summary <- list(
+            weather = sw,
+            historical_years = unlist(sh$year_range[[1]], use.names = FALSE),
+            baseline_survey = {
+              ch <- baseline_survey_choices()
+              sel <- input$baseline_survey %||% baseline_default()
+              nms <- names(ch)[ch %in% sel]
+              if (length(nms)) paste(nms, collapse = ", ") else "Selected baseline survey"
+            },
+            baseline_n = nrow(svy),
+            model = list(
+              label = if (length(model_spec)) model_badge(model_spec) else "Fitted model",
+              weather_terms = length(mf$weather_terms %||% character(0)),
+              fixed_effects = length(model_spec$fixedeffects %||% mf$fe_terms %||% character(0)),
+              covariates = if (length(model_spec)) model_covariate_total(model_spec) else NA_integer_
+            ),
+            total_runs = result$total_runs
+          )
+          # INT-08: the immutable run signature travels with the result so
+          # Step 3 can detect that it is consuming a superseded simulation.
+          result$hist_sim_result$.sig <- .sim_sig_from_live(mf$.sig %||% NULL)
+          sim_stale(FALSE)
+          old_lease <- weather_store_lease()
+          weather_store_lease(result$weather_store_lease %||% NULL)
+          result$hist_sim_result$weather_store_lease <-
+            result$weather_store_lease %||% NULL
+          hist_sim(result$hist_sim_result)
+          saved_scenarios(result$new_scenarios)
+          step2_weather_store_release(old_lease)
+          run_status("success")
+          completed <- TRUE
+
+          shiny::setProgress(value = 1, detail = "Results ready")
+        })
+
+        # ---- REACT-12: partial failures get a prominent persistent warning ----
+        # (Historical or whole-group failures throw inside fct_run_simulation,
+        # so reaching this point means results are publishable.)
+        sim_failures <- result$failures %||% list()
+        if (length(sim_failures) > 0L) {
+          fail_txt <- paste(vapply(sim_failures, function(f) {
+            sprintf("%s: %s", f$key, f$error)
+          }, character(1)), collapse = "\n")
+          shiny::showNotification(
+            ui = tagList(
+              tags$b("Simulation completed with some scenarios unavailable."),
+              tags$br(),
+              tags$details(
+                tags$summary("Show details"),
+                tags$div(
+                  style = "font-size: 12px; white-space: pre-wrap;",
+                  fail_txt
+                )
+              )
+            ),
+            type = "warning", duration = NULL
+          )
+        }
+
+        # ---- Completion notification -----------------------------------------
+        message(sprintf(
+          "[wiseapp] TOTAL wall time: %s | weather: %s | pipelines: %s | %d/%d key(s)",
+          format_elapsed(result$t_elapsed),
+          format_elapsed(result$t_weather %||% 0),
+          format_elapsed(result$t_elapsed - (result$t_weather %||% 0)),
+          result$n_keys_ok %||% result$n_keys, result$n_keys
+        ))
+
+        if (!length(sim_failures)) {
+          shiny::showNotification(
+            "Climate scenario results are ready.",
+            type = "message", duration = 3
+          )
+        }
+      },
+      ignoreInit = TRUE
+    )
 
     # ---- Return API --------------------------------------------------------
 
     list(
-      hist_sim        = hist_sim,
+      hist_sim = hist_sim,
       saved_scenarios = saved_scenarios,
-      selected_hist   = selected_hist,
-      selected_fut    = selected_fut,
-      residuals       = reactive(input$residuals %||% "original"),
+      selected_hist = selected_hist,
+      selected_fut = selected_fut,
+      residuals = reactive(input$residuals %||% "original"),
       skip_coef_draws = reactive(!isTRUE(input$include_coef_uncertainty)),
       propagate_all_covariate_uncertainty =
         reactive(isTRUE(input$propagate_all_covariate_uncertainty)),
-      stale           = sim_stale,
-      run_generation  = run_generation,
-      run_status      = run_status,
+      stale = sim_stale,
+      run_generation = run_generation,
+      run_status = run_status,
       clear_weather_stores = cleanup_weather_stores
     )
   })

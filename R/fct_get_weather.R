@@ -47,13 +47,17 @@ WISEAPP_WX_ROUND_DIGITS <- 5L
 
 .wx_available_cpu_count <- function() {
   configured <- .wx_env_number("WISEAPP_WEATHER_CPU_COUNT", NA_real_)
-  if (is.finite(configured)) return(max(1L, floor(configured)))
+  if (is.finite(configured)) {
+    return(max(1L, floor(configured)))
+  }
   detected <- tryCatch(parallel::detectCores(logical = TRUE), error = function(e) NA_integer_)
   if (length(detected) != 1L || !is.finite(detected)) 1L else max(1L, as.integer(detected))
 }
 
 .wx_round_weather_values <- function(df, vars, digits = WISEAPP_WX_ROUND_DIGITS) {
-  if (!is.data.frame(df) || !length(vars)) return(df)
+  if (!is.data.frame(df) || !length(vars)) {
+    return(df)
+  }
   for (v in intersect(vars, names(df))) {
     x <- df[[v]]
     if (!is.numeric(x)) next
@@ -80,8 +84,11 @@ WISEAPP_WX_ROUND_DIGITS <- 5L
   connection_type <- connection_type %||% "local"
   available_cpus <- max(1L, as.integer(available_cpus[[1L]] %||% 1L))
   finite_rss <- is.finite(rss_before) && is.finite(budget_bytes)
-  projected_rss <- if (is.finite(rss_before) && is.finite(estimated_bytes))
-    rss_before + estimated_bytes * 1.25 else NA_real_
+  projected_rss <- if (is.finite(rss_before) && is.finite(estimated_bytes)) {
+    rss_before + estimated_bytes * 1.25
+  } else {
+    NA_real_
+  }
   fits_budget <- finite_rss && is.finite(projected_rss) &&
     projected_rss <= budget_bytes
   local_source <- identical(connection_type, "local")
@@ -89,12 +96,14 @@ WISEAPP_WX_ROUND_DIGITS <- 5L
     estimated_bytes >= min_workload_bytes
 
   selected <- 1L
-  reason <- switch(
-    requested,
+  reason <- switch(requested,
     "1" = "explicit_one",
     "2" = "explicit_two_requires_preflight",
-    "auto" = if (!isTRUE(auto_enabled)) "auto_rollout_disabled" else
+    "auto" = if (!isTRUE(auto_enabled)) {
+      "auto_rollout_disabled"
+    } else {
       "auto_requires_preflight"
+    }
   )
 
   if (requested %in% c("auto", "2")) {
@@ -141,15 +150,22 @@ WISEAPP_WX_ROUND_DIGITS <- 5L
 # pages, so they are not safe gates for a deployment memory budget.
 .wx_process_tree_rss_bytes <- function(pid = Sys.getpid()) {
   rows <- tryCatch(system2("ps", c("-axo", "pid=,ppid=,rss="), stdout = TRUE),
-                   error = function(e) character())
-  if (!length(rows)) return(NA_real_)
+    error = function(e) character()
+  )
+  if (!length(rows)) {
+    return(NA_real_)
+  }
   fields <- strsplit(trimws(rows), "[[:space:]]+")
   tab <- do.call(rbind, lapply(fields, function(x) {
-    if (length(x) < 3L) return(c(NA, NA, NA))
+    if (length(x) < 3L) {
+      return(c(NA, NA, NA))
+    }
     as.numeric(x[1:3])
   }))
   tab <- tab[stats::complete.cases(tab), , drop = FALSE]
-  if (!nrow(tab)) return(NA_real_)
+  if (!nrow(tab)) {
+    return(NA_real_)
+  }
   pids <- as.numeric(pid)
   repeat {
     children <- tab[tab[, 2L] %in% pids, 1L]
@@ -162,8 +178,11 @@ WISEAPP_WX_ROUND_DIGITS <- 5L
 
 .wx_estimate_weather_bytes <- function(survey_data, selected_weather, dates,
                                        ssp = NULL, future_period = NULL) {
-  n_loc <- if ("loc_id" %in% names(survey_data))
-    length(unique(survey_data$loc_id[!is.na(survey_data$loc_id)])) else nrow(survey_data)
+  n_loc <- if ("loc_id" %in% names(survey_data)) {
+    length(unique(survey_data$loc_id[!is.na(survey_data$loc_id)]))
+  } else {
+    nrow(survey_data)
+  }
   n_dates <- max(1L, length(unique(as.character(dates))))
   n_periods <- if (is.null(future_period)) 0L else length(future_period)
   n_members <- if (is.null(ssp)) 0L else max(1L, length(ssp)) * 16L
@@ -175,17 +194,20 @@ WISEAPP_WX_ROUND_DIGITS <- 5L
 .wx_collection_policy <- function(estimated_bytes, requested = c("fast", "bounded")) {
   requested <- match.arg(requested)
   budget_mb <- suppressWarnings(as.numeric(Sys.getenv(
-    "WISEAPP_STEP2_WEATHER_RSS_BUDGET_MB", "4096")))
+    "WISEAPP_STEP2_WEATHER_RSS_BUDGET_MB", "4096"
+  )))
   if (!is.finite(budget_mb) || budget_mb <= 0) budget_mb <- 4096
   budget <- budget_mb * 1024^2
   fallback <- identical(requested, "fast") && is.finite(estimated_bytes) &&
     estimated_bytes > budget
   measure_rss <- isTRUE(Sys.getenv("WISEAPP_STEP2_WEATHER_RSS_MEASURE") %in%
-                          c("1", "true", "TRUE"))
-  list(requested = requested, effective = if (fallback) "bounded" else requested,
-       estimated_bytes = estimated_bytes, budget_bytes = budget,
-       fallback = fallback,
-       external_rss_before = if (measure_rss) .wx_process_tree_rss_bytes() else NULL)
+    c("1", "true", "TRUE"))
+  list(
+    requested = requested, effective = if (fallback) "bounded" else requested,
+    estimated_bytes = estimated_bytes, budget_bytes = budget,
+    fallback = fallback,
+    external_rss_before = if (measure_rss) .wx_process_tree_rss_bytes() else NULL
+  )
 }
 
 .wx_collection_rss_guard <- function(policy) {
@@ -210,12 +232,18 @@ WISEAPP_WX_ROUND_DIGITS <- 5L
     max_mb <- suppressWarnings(as.numeric(Sys.getenv("WISEAPP_WEATHER_CACHE_MAX_MB")))
     if (is.na(max_mb) || max_mb < 0) max_mb <- 2048
   }
-  files <- list.files(dir, pattern = "\\.parquet$", full.names = TRUE,
-                      recursive = TRUE)
-  if (length(files) == 0) return(invisible(NULL))
+  files <- list.files(dir,
+    pattern = "\\.parquet$", full.names = TRUE,
+    recursive = TRUE
+  )
+  if (length(files) == 0) {
+    return(invisible(NULL))
+  }
   info <- file.info(files)
   total_mb <- sum(info$size, na.rm = TRUE) / 1024^2
-  if (total_mb <= max_mb) return(invisible(NULL))
+  if (total_mb <= max_mb) {
+    return(invisible(NULL))
+  }
   # LRU: delete oldest-accessed files first until under budget
   ord <- order(info$mtime)
   for (f in files[ord]) {
@@ -248,14 +276,16 @@ WISEAPP_WX_ROUND_DIGITS <- 5L
   apply_slice <- function(lazy) {
     if (!is.null(cols)) lazy <- dplyr::select(lazy, dplyr::all_of(cols))
     if (!is.null(tcol) && !is.null(tmin)) {
-      lazy <- dplyr::filter(lazy,
-        !!rlang::sym(tcol) >= !!tmin, !!rlang::sym(tcol) <= !!tmax)
+      lazy <- dplyr::filter(
+        lazy,
+        !!rlang::sym(tcol) >= !!tmin, !!rlang::sym(tcol) <= !!tmax
+      )
     }
     lazy
   }
 
   force_cache <- isTRUE(Sys.getenv("WISEAPP_WEATHER_CACHE_FORCE") %in%
-                          c("1", "true", "TRUE"))
+    c("1", "true", "TRUE"))
   type <- connection_params$type %||% "local"
   use_cache <- (!identical(type, "local") || force_cache) &&
     !isTRUE(Sys.getenv("WISEAPP_WEATHER_CACHE_DISABLE") %in% c("1", "true", "TRUE"))
@@ -271,34 +301,47 @@ WISEAPP_WX_ROUND_DIGITS <- 5L
       load_data(path, list(type = "local", path = dirname(path)), collect = FALSE),
       error = function(e) NULL
     )
-    if (!is.null(local)) return(apply_slice(local))
+    if (!is.null(local)) {
+      return(apply_slice(local))
+    }
   }
 
   lazy <- load_data(fnames, connection_params, collect = FALSE)
 
-  if (!use_cache) return(apply_slice(lazy))
+  if (!use_cache) {
+    return(apply_slice(lazy))
+  }
 
   if (!file.exists(path)) {
     ok_create <- dir.create(dir, showWarnings = FALSE, recursive = TRUE)
     filtered <- apply_slice(lazy)
     con <- .duck_con()
     tmp_path <- paste0(path, ".tmp")
-    ok <- tryCatch({
-      DBI::dbExecute(con, sprintf(
-        "COPY (%s) TO '%s' (FORMAT PARQUET, COMPRESSION ZSTD);",
-        dbplyr::sql_render(filtered), tmp_path
-      ))
-      TRUE
-    }, error = function(e) {
-      warning("[wiseapp] weather disk cache write failed; continuing remote: ",
-              conditionMessage(e), call. = FALSE)
-      FALSE
-    })
-    if (!ok) return(filtered)
+    ok <- tryCatch(
+      {
+        DBI::dbExecute(con, sprintf(
+          "COPY (%s) TO '%s' (FORMAT PARQUET, COMPRESSION ZSTD);",
+          dbplyr::sql_render(filtered), tmp_path
+        ))
+        TRUE
+      },
+      error = function(e) {
+        warning("[wiseapp] weather disk cache write failed; continuing remote: ",
+          conditionMessage(e),
+          call. = FALSE
+        )
+        FALSE
+      }
+    )
+    if (!ok) {
+      return(filtered)
+    }
     if (!file.rename(tmp_path, path)) {
       # Concurrent write race: another session won; use its file
       try(unlink(tmp_path), silent = TRUE)
-      if (!file.exists(path)) return(filtered)
+      if (!file.exists(path)) {
+        return(filtered)
+      }
     }
     .weather_cache_evict(dir)
   }
@@ -310,7 +353,9 @@ WISEAPP_WX_ROUND_DIGITS <- 5L
     load_data(path, list(type = "local", path = dirname(path)), collect = FALSE),
     error = function(e) NULL
   )
-  if (is.null(local)) return(apply_slice(lazy))
+  if (is.null(local)) {
+    return(apply_slice(lazy))
+  }
   apply_slice(local)
 }
 
@@ -344,8 +389,7 @@ WISEAPP_WX_ROUND_DIGITS <- 5L
 #'   * `same_res`     - logical, TRUE when no parent lookup was needed.
 #' @noRd
 .harmonise_h3 <- function(h3_slim, weather, con) {
-
-  micro_h3_sql   <- dbplyr::sql_render(
+  micro_h3_sql <- dbplyr::sql_render(
     h3_slim |> dplyr::filter(!is.na(h3)) |> dplyr::select(h3) |> head(1)
   )
   weather_h3_sql <- dbplyr::sql_render(
@@ -363,7 +407,7 @@ WISEAPP_WX_ROUND_DIGITS <- 5L
   )$res[[1L]]
 
   target_res <- min(res_micro, res_weather)
-  same_res   <- (res_micro == res_weather)
+  same_res <- (res_micro == res_weather)
 
   if (same_res) {
     h3_slim <- h3_slim |>
@@ -423,7 +467,9 @@ WISEAPP_WX_ROUND_DIGITS <- 5L
     selected_weather$transformation != "None" &
     !selected_weather$name %in% skip_vars
   idx <- which(keep)
-  if (length(idx) == 0L) return(NULL)
+  if (length(idx) == 0L) {
+    return(NULL)
+  }
 
   data.frame(
     row_id = idx,
@@ -448,26 +494,34 @@ WISEAPP_WX_ROUND_DIGITS <- 5L
   skip_vars = c("spi6", "spei6")
 ) {
   specs <- .transformation_specs(selected_weather, skip_vars)
-  if (is.null(specs)) return(NULL)
+  if (is.null(specs)) {
+    return(NULL)
+  }
 
   existing <- colnames(loc_weather_base)
   ref_cols <- c(specs$mean_col, specs$sd_col)
   if (any(ref_cols %in% existing)) {
-    stop("Generated climate-reference column collides with weather data: ",
-         paste(intersect(ref_cols, existing), collapse = ", "))
+    stop(
+      "Generated climate-reference column collides with weather data: ",
+      paste(intersect(ref_cols, existing), collapse = ", ")
+    )
   }
 
   stats_exprs <- c(
     stats::setNames(
-      lapply(specs$name, function(v) dbplyr::sql(paste0(
-        "AVG(", v, ") FILTER (WHERE ", v, " IS NOT NULL)"
-      ))),
+      lapply(specs$name, function(v) {
+        dbplyr::sql(paste0(
+          "AVG(", v, ") FILTER (WHERE ", v, " IS NOT NULL)"
+        ))
+      }),
       specs$mean_col
     ),
     stats::setNames(
-      lapply(specs$name, function(v) dbplyr::sql(paste0(
-        "STDDEV_SAMP(", v, ") FILTER (WHERE ", v, " IS NOT NULL)"
-      ))),
+      lapply(specs$name, function(v) {
+        dbplyr::sql(paste0(
+          "STDDEV_SAMP(", v, ") FILTER (WHERE ", v, " IS NOT NULL)"
+        ))
+      }),
       specs$sd_col
     )
   )
@@ -505,7 +559,9 @@ WISEAPP_WX_ROUND_DIGITS <- 5L
       loc_weather_base, selected_weather, skip_vars
     )
   }
-  if (is.null(climate_ref)) return(tbl)
+  if (is.null(climate_ref)) {
+    return(tbl)
+  }
 
   specs <- climate_ref$specs
   ref_cols <- c(specs$mean_col, specs$sd_col)
@@ -558,9 +614,9 @@ WISEAPP_WX_ROUND_DIGITS <- 5L
   has_custom_col <- "custom_breaks" %in% names(selected_weather)
 
   for (i in seq_len(nrow(selected_weather))) {
-    v              <- selected_weather$name[i]
-    cont_binned    <- selected_weather$cont_binned[i]
-    num_bins       <- selected_weather$num_bins[i]
+    v <- selected_weather$name[i]
+    cont_binned <- selected_weather$cont_binned[i]
+    num_bins <- selected_weather$num_bins[i]
     binning_method <- selected_weather$binning_method[i]
 
     if (is.na(cont_binned) || cont_binned != "Binned") next
@@ -571,59 +627,62 @@ WISEAPP_WX_ROUND_DIGITS <- 5L
     haz_vals <- sort(haz_vals)
 
     cutoffs <- switch(binning_method,
-                      "Equal frequency" = {
-                        unique(quantile(haz_vals, probs = seq(0, 1, length.out = num_bins + 1), na.rm = TRUE))
-                      },
-                      "Equal width" = {
-                        unique(seq(min(haz_vals, na.rm = TRUE), max(haz_vals, na.rm = TRUE), length.out = num_bins + 1))
-                      },
-                      "K-means" = {
-                        tryCatch({
-                          if (length(unique(haz_vals)) >= num_bins) {
-                            km <- withr::with_seed(
-                              123,
-                              stats::kmeans(haz_vals, centers = num_bins)
-                            )
-                            centers <- sort(as.numeric(km$centers))
-                            unique(c(
-                              min(haz_vals, na.rm = TRUE),
-                              (centers[-length(centers)] + centers[-1]) / 2,
-                              max(haz_vals, na.rm = TRUE)
-                            ))
-                          } else {
-                            message("Not enough unique values for K-means in ", v, ". Keeping continuous.")
-                            NULL
-                          }
-                        }, error = function(e) {
-                          message("K-means failed for ", v, ": ", e$message)
-                          NULL
-                        })
-                      },
-                      "Custom" = {
-                        user_cuts <- if (has_custom_col) selected_weather$custom_breaks[[i]] else NULL
-                        if (is.null(user_cuts) || length(user_cuts) == 0) {
-                          message("Custom binning for ", v, " requires cut values but none were provided. Keeping continuous.")
-                          NULL
-                        } else {
-                          user_cuts <- sort(unique(as.numeric(user_cuts[is.finite(user_cuts)])))
-                          expected  <- as.integer(num_bins) - 1L
-                          if (length(user_cuts) != expected) {
-                            message(
-                              "Custom binning for ", v, " expected ", expected,
-                              " cut values (num_bins - 1) but got ", length(user_cuts),
-                              ". Using the supplied values as-is."
-                            )
-                          }
-                          # Mirror the structure used by the other branches: a vector whose
-                          # first/last entries are dropped by the breaks_ext step below.
-                          c(min(haz_vals, na.rm = TRUE), user_cuts, max(haz_vals, na.rm = TRUE))
-                        }
-                      },
-                      NULL
+      "Equal frequency" = {
+        unique(quantile(haz_vals, probs = seq(0, 1, length.out = num_bins + 1), na.rm = TRUE))
+      },
+      "Equal width" = {
+        unique(seq(min(haz_vals, na.rm = TRUE), max(haz_vals, na.rm = TRUE), length.out = num_bins + 1))
+      },
+      "K-means" = {
+        tryCatch(
+          {
+            if (length(unique(haz_vals)) >= num_bins) {
+              km <- withr::with_seed(
+                123,
+                stats::kmeans(haz_vals, centers = num_bins)
+              )
+              centers <- sort(as.numeric(km$centers))
+              unique(c(
+                min(haz_vals, na.rm = TRUE),
+                (centers[-length(centers)] + centers[-1]) / 2,
+                max(haz_vals, na.rm = TRUE)
+              ))
+            } else {
+              message("Not enough unique values for K-means in ", v, ". Keeping continuous.")
+              NULL
+            }
+          },
+          error = function(e) {
+            message("K-means failed for ", v, ": ", e$message)
+            NULL
+          }
+        )
+      },
+      "Custom" = {
+        user_cuts <- if (has_custom_col) selected_weather$custom_breaks[[i]] else NULL
+        if (is.null(user_cuts) || length(user_cuts) == 0) {
+          message("Custom binning for ", v, " requires cut values but none were provided. Keeping continuous.")
+          NULL
+        } else {
+          user_cuts <- sort(unique(as.numeric(user_cuts[is.finite(user_cuts)])))
+          expected <- as.integer(num_bins) - 1L
+          if (length(user_cuts) != expected) {
+            message(
+              "Custom binning for ", v, " expected ", expected,
+              " cut values (num_bins - 1) but got ", length(user_cuts),
+              ". Using the supplied values as-is."
+            )
+          }
+          # Mirror the structure used by the other branches: a vector whose
+          # first/last entries are dropped by the breaks_ext step below.
+          c(min(haz_vals, na.rm = TRUE), user_cuts, max(haz_vals, na.rm = TRUE))
+        }
+      },
+      NULL
     )
 
     if (!is.null(cutoffs) && length(cutoffs) > 1) {
-      breaks_ext         <- c(-Inf, cutoffs[-c(1, length(cutoffs))], Inf)
+      breaks_ext <- c(-Inf, cutoffs[-c(1, length(cutoffs))], Inf)
       stored_breaks[[v]] <- breaks_ext
       # The extended breaks are what cut() needs, but the outer sentinel
       # edges hide the observed weather range from every downstream label.
@@ -734,18 +793,17 @@ get_weather <- function(
   selected_weather,
   dates,
   connection_params,
-  ssp                  = NULL,
-  future_period        = NULL,
-  perturbation_method  = NULL,
-  epsilon              = 0.001,
-  weather_source       = "era5land",
-  proj_source          = "cmip6",
-  stored_breaks        = NULL,
-  weather_collect      = c("fast", "bounded"),
-  weather_threads      = c("auto", "1", "2"),
-  weather_consumer     = NULL
+  ssp = NULL,
+  future_period = NULL,
+  perturbation_method = NULL,
+  epsilon = 0.001,
+  weather_source = "era5land",
+  proj_source = "cmip6",
+  stored_breaks = NULL,
+  weather_collect = c("fast", "bounded"),
+  weather_threads = c("auto", "1", "2"),
+  weather_consumer = NULL
 ) {
-
   # -- Select and pin DuckDB weather-query threads ----------------------------
   # Multi-threaded aggregation sums floats in non-deterministic order. The
   # output boundary rounds weather values to a fixed five-decimal precision, while one
@@ -794,9 +852,9 @@ get_weather <- function(
   }
   collection_policy$rss_guard_activated <- FALSE
   if (!is.null(collection_policy$external_rss_before) &&
-      is.finite(collection_policy$external_rss_before) &&
-      collection_policy$external_rss_before + collection_policy$estimated_bytes >
-        collection_policy$budget_bytes) {
+    is.finite(collection_policy$external_rss_before) &&
+    collection_policy$external_rss_before + collection_policy$estimated_bytes >
+      collection_policy$budget_bytes) {
     weather_collect <- "bounded"
     collection_policy$effective <- "bounded"
     collection_policy$rss_guard_activated <- TRUE
@@ -841,9 +899,9 @@ get_weather <- function(
 
   # -- Date range ------------------------------------------------------------
   weather_vars <- selected_weather$name
-  max_lag      <- as.integer(max(selected_weather$ref_end, na.rm = TRUE))
-  date_min     <- seq.Date(min(dates), by = paste0("-", max_lag, " months"), length.out = 2L)[[2L]]
-  date_max     <- max(dates)
+  max_lag <- as.integer(max(selected_weather$ref_end, na.rm = TRUE))
+  date_min <- seq.Date(min(dates), by = paste0("-", max_lag, " months"), length.out = 2L)[[2L]]
+  date_max <- max(dates)
 
   needs_climate_ref <- any(
     !is.na(selected_weather$transformation) &
@@ -866,11 +924,14 @@ get_weather <- function(
   # on.exit only runs after every relation has been collected, so no live lazy
   # query can reference a dropped table when results are returned.
   tmp_tables <- character(0)
-  on.exit({
-    for (tn in tmp_tables) {
-      try(DBI::dbRemoveTable(con, tn), silent = TRUE)
-    }
-  }, add = TRUE)
+  on.exit(
+    {
+      for (tn in tmp_tables) {
+        try(DBI::dbRemoveTable(con, tn), silent = TRUE)
+      }
+    },
+    add = TRUE
+  )
 
   # PERF-13: remote parquet loads go through the bounded disk cache. The
   # cached slice holds exactly the columns/rows the lazy scan would produce,
@@ -911,8 +972,8 @@ get_weather <- function(
 
   # -- H3 resolution + type harmonisation ------------------------------------
   h3_harmonised <- .harmonise_h3(h3_slim, weather, con)
-  h3_slim       <- h3_harmonised$h3_slim
-  weather       <- h3_harmonised$weather
+  h3_slim <- h3_harmonised$h3_slim
+  weather <- h3_harmonised$weather
 
   # -- One population weight per location x weather cell ---------------------
   # The mapping file is finer-grained than the weather grid: it carries one row
@@ -942,11 +1003,11 @@ get_weather <- function(
         dplyr::across(
           dplyr::all_of(vars),
           ~ dplyr::if_else(
-              sum(dplyr::if_else(!is.na(.x), pop_2020, 0), na.rm = TRUE) > 0,
-              sum(dplyr::if_else(!is.na(.x), .x * pop_2020, 0), na.rm = TRUE) /
+            sum(dplyr::if_else(!is.na(.x), pop_2020, 0), na.rm = TRUE) > 0,
+            sum(dplyr::if_else(!is.na(.x), .x * pop_2020, 0), na.rm = TRUE) /
               sum(dplyr::if_else(!is.na(.x), pop_2020, 0), na.rm = TRUE),
-              NA_real_
-            )
+            NA_real_
+          )
         ),
         .groups = "drop"
       )
@@ -961,7 +1022,8 @@ get_weather <- function(
   tmp_loc_monthly_name <- basename(tempfile(pattern = "lw_loc_monthly_"))
   tmp_tables <- c(tmp_tables, tmp_loc_monthly_name)
   loc_monthly <- dplyr::compute(
-    loc_monthly, name = tmp_loc_monthly_name, temporary = TRUE
+    loc_monthly,
+    name = tmp_loc_monthly_name, temporary = TRUE
   )
 
   # -- Rolling window expressions --------------------------------------------
@@ -975,7 +1037,7 @@ get_weather <- function(
 
   roll_exprs <- stats::setNames(
     lapply(seq_len(nrow(selected_weather)), function(i) {
-      v      <- selected_weather$name[i]
+      v <- selected_weather$name[i]
       agg_fn <- agg_fn_map[[selected_weather$temporalAgg[i]]]
       dbplyr::sql(sprintf(
         "%s(%s) FILTER (WHERE %s IS NOT NULL) OVER (PARTITION BY code, year, survname, loc_id ORDER BY timestamp ROWS BETWEEN %d PRECEDING AND %d PRECEDING)",
@@ -1016,7 +1078,8 @@ get_weather <- function(
 
   result[["historical"]] <- loc_weather_base |>
     .apply_transformations(
-      selected_weather, loc_weather_base, climate_ref = climate_ref
+      selected_weather, loc_weather_base,
+      climate_ref = climate_ref
     ) |>
     dplyr::filter(timestamp %in% !!dates) |>
     dplyr::arrange(code, year, survname, loc_id, timestamp) |>
@@ -1042,10 +1105,10 @@ get_weather <- function(
       # Sort by full location identity + timestamp for a deterministic
       # order regardless of DuckDB's non-guaranteed collect() row order.
       survey_timestamps <- unique(survey_data$timestamp[!is.na(survey_data$timestamp)])
-      wx_cols   <- selected_weather$name[selected_weather$cont_binned == "Binned" & !is.na(selected_weather$cont_binned)]
+      wx_cols <- selected_weather$name[selected_weather$cont_binned == "Binned" & !is.na(selected_weather$cont_binned)]
       sort_cols <- intersect(c("code", "year", "survname", "loc_id", "timestamp"), names(result[["historical"]]))
-      keep      <- unique(c(sort_cols, wx_cols))
-      hist_ref  <- result[["historical"]][result[["historical"]]$timestamp %in% survey_timestamps, keep, drop = FALSE]
+      keep <- unique(c(sort_cols, wx_cols))
+      hist_ref <- result[["historical"]][result[["historical"]]$timestamp %in% survey_timestamps, keep, drop = FALSE]
       stored_breaks <- .compute_breaks(hist_ref, selected_weather)
     }
 
@@ -1071,17 +1134,18 @@ get_weather <- function(
   emitted_order <- 0L
   if (is.function(weather_consumer)) {
     emitted_order <- emitted_order + 1L
-    weather_consumer("historical", result[["historical"]],
-                     list(order = emitted_order, is_historical = TRUE))
+    weather_consumer(
+      "historical", result[["historical"]],
+      list(order = emitted_order, is_historical = TRUE)
+    )
   }
 
   # -- Climate perturbation ---------------------------------------------------
   if (climate_scenario) {
-
-    bp           <- range(dates)
+    bp <- range(dates)
     baseline_start <- as.Date(bp[1])
-    baseline_end   <- as.Date(bp[2])
-    delta_vars   <- paste0("delta_", weather_vars)
+    baseline_end <- as.Date(bp[2])
+    delta_vars <- paste0("delta_", weather_vars)
 
     # -- CMIP6 helpers --------------------------------------------------------
 
@@ -1116,14 +1180,14 @@ get_weather <- function(
     }
 
     delta_exprs_h3 <- .make_delta_exprs(perturbation_method, weather_vars, epsilon)
-    perturb_exprs  <- .make_perturb_exprs(perturbation_method, weather_vars)
+    perturb_exprs <- .make_perturb_exprs(perturbation_method, weather_vars)
 
     # Rolling window expressions with `model` added to PARTITION BY.
     # Used in the batch climate query so each model gets its own independent
     # rolling window over its own perturbed series.
     roll_exprs_climate <- stats::setNames(
       lapply(seq_len(nrow(selected_weather)), function(i) {
-        v      <- selected_weather$name[i]
+        v <- selected_weather$name[i]
         agg_fn <- agg_fn_map[[selected_weather$temporalAgg[i]]]
         dbplyr::sql(sprintf(
           "%s(%s) FILTER (WHERE %s IS NOT NULL) OVER (PARTITION BY model, code, year, survname, loc_id ORDER BY timestamp ROWS BETWEEN %d PRECEDING AND %d PRECEDING)",
@@ -1146,21 +1210,25 @@ get_weather <- function(
 
     cmip6_cols <- c("model", "h3", "timestamp", weather_vars)
     cmip6_hist_raw_lazy <- .wx_cache_load(
-      hist_fnames_probe, connection_params, cols = cmip6_cols, tcol = NULL
+      hist_fnames_probe, connection_params,
+      cols = cmip6_cols, tcol = NULL
     )
 
-    cmip6_res <- tryCatch({
-      probe_sql <- dbplyr::sql_render(
-        cmip6_hist_raw_lazy |>
-          dplyr::filter(!is.na(h3)) |>
-          dplyr::select(h3) |>
-          head(1)
-      )
-      DBI::dbGetQuery(
-        con,
-        sprintf("SELECT h3_get_resolution(h3) AS res FROM (%s) _t", probe_sql)
-      )$res[[1L]]
-    }, error = function(e) h3_harmonised$target_res)
+    cmip6_res <- tryCatch(
+      {
+        probe_sql <- dbplyr::sql_render(
+          cmip6_hist_raw_lazy |>
+            dplyr::filter(!is.na(h3)) |>
+            dplyr::select(h3) |>
+            head(1)
+        )
+        DBI::dbGetQuery(
+          con,
+          sprintf("SELECT h3_get_resolution(h3) AS res FROM (%s) _t", probe_sql)
+        )$res[[1L]]
+      },
+      error = function(e) h3_harmonised$target_res
+    )
 
     # Determine the join resolution between CMIP6 and microdata.
     # Both must be brought to the coarser (lower) of the two.
@@ -1222,8 +1290,10 @@ get_weather <- function(
         id = i,
         start = as.Date(fp[1]),
         end = as.Date(fp[2]),
-        label = paste0(format(as.Date(fp[1]), "%Y"), "_",
-                       format(as.Date(fp[2]), "%Y"))
+        label = paste0(
+          format(as.Date(fp[1]), "%Y"), "_",
+          format(as.Date(fp[2]), "%Y")
+        )
       )
     })
 
@@ -1233,8 +1303,7 @@ get_weather <- function(
     # across periods; only the future-period projection varies.
     # Returns a named list keyed by "<ssp>_<start>_<end>_<model>".
     .process_ssp <- function(ssp_i) {
-
-      ssp_fname     <- gsub("_", "", ssp_i)
+      ssp_fname <- gsub("_", "", ssp_i)
       future_fnames <- paste0(
         "hazard/weather/projections/", survey_codes, "/",
         survey_codes, "_", proj_source, "_", ssp_fname, ".parquet"
@@ -1317,7 +1386,9 @@ get_weather <- function(
       complete_keys <- complete_model_tbl |>
         dplyr::filter(n_complete > 0L) |>
         dplyr::select(period_id, model)
-      if (!nrow(complete_keys)) return(list())
+      if (!nrow(complete_keys)) {
+        return(list())
+      }
 
       complete_predicates <- vapply(seq_len(nrow(complete_keys)), function(i) {
         sprintf(
@@ -1350,7 +1421,7 @@ get_weather <- function(
 
       for (spec in period_specs) {
         fp_start <- spec$start
-        fp_end   <- spec$end
+        fp_end <- spec$end
         fp_label <- spec$label
         current_period_id <- spec$id
 
@@ -1382,7 +1453,7 @@ get_weather <- function(
         loc_deltas_by_model <- dplyr::compute(
           loc_deltas_by_model |>
             dplyr::select(-period_id),
-          name      = tmp_delta_name,
+          name = tmp_delta_name,
           temporary = TRUE
         )
         tmp_delta_tables <- c(tmp_delta_tables, tmp_delta_name)
@@ -1414,7 +1485,8 @@ get_weather <- function(
         rolled_lazy <- perturbed |>
           dplyr::mutate(!!!roll_exprs_climate) |>
           .apply_transformations(
-            selected_weather, loc_weather_base, climate_ref = climate_ref
+            selected_weather, loc_weather_base,
+            climate_ref = climate_ref
           ) |>
           dplyr::filter(timestamp %in% !!dates)
         tmp_roll_name <- NULL
@@ -1486,12 +1558,14 @@ get_weather <- function(
               emitted_order <<- emitted_order + 1L
               weather_consumer(
                 member_key, model_df,
-                list(order = emitted_order, is_historical = FALSE,
-                     ssp = ssp_i, period = fp_label,
-                     collection = "bounded",
-                     rss_bytes = guard$rss,
-                     budget_exceeded = guard$exceeded,
-                     buffered_members = 1L)
+                list(
+                  order = emitted_order, is_historical = FALSE,
+                  ssp = ssp_i, period = fp_label,
+                  collection = "bounded",
+                  rss_bytes = guard$rss,
+                  budget_exceeded = guard$exceeded,
+                  buffered_members = 1L
+                )
               )
               rm(model_df)
               gc(verbose = FALSE)
@@ -1505,16 +1579,22 @@ get_weather <- function(
         if (is.function(weather_consumer) && length(period_out)) {
           invisible(lapply(names(period_out), function(key) {
             emitted_order <<- emitted_order + 1L
-            weather_consumer(key, period_out[[key]],
-                             list(order = emitted_order, is_historical = FALSE,
-                                  ssp = ssp_i, period = fp_label))
+            weather_consumer(
+              key, period_out[[key]],
+              list(
+                order = emitted_order, is_historical = FALSE,
+                ssp = ssp_i, period = fp_label
+              )
+            )
           }))
         }
 
         # All returned frames are now detached from the query intermediates.
         .drop_period_tables(tmp_delta_name, tmp_perturb_name, tmp_roll_name)
-        rm(perturbed, rolled_lazy,
-           rolled, period_out)
+        rm(
+          perturbed, rolled_lazy,
+          rolled, period_out
+        )
         if (exists("batch", inherits = FALSE)) rm(batch)
         if (exists("model_list", inherits = FALSE)) rm(model_list)
         if (exists("model_names", inherits = FALSE)) rm(model_names)
@@ -1555,8 +1635,9 @@ get_weather <- function(
     attr(result, "continuous_weather") <- continuous_hist
   }
 
-  if (!is.null(collection_policy$external_rss_before))
+  if (!is.null(collection_policy$external_rss_before)) {
     collection_policy$external_rss_after <- .wx_process_tree_rss_bytes()
+  }
   attr(result, "weather_collection_policy") <- collection_policy
 
   result

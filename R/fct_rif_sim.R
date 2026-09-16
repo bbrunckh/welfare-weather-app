@@ -36,8 +36,8 @@
 #' @export
 compute_rif <- function(y, tau, bw = NULL, dens = NULL) {
   na_mask <- !is.finite(y)
-  y_obs   <- y[!na_mask]
-  q_tau   <- stats::quantile(y_obs, probs = tau, names = FALSE)
+  y_obs <- y[!na_mask]
+  q_tau <- stats::quantile(y_obs, probs = tau, names = FALSE)
 
   # Robust bandwidth: SJ can fail on large/multimodal data
 
@@ -51,7 +51,7 @@ compute_rif <- function(y, tau, bw = NULL, dens = NULL) {
 
     dens <- stats::density(y_obs, bw = bw_use, n = 1024)
   }
-  f_q  <- stats::approx(dens$x, dens$y, xout = q_tau)$y
+  f_q <- stats::approx(dens$x, dens$y, xout = q_tau)$y
 
   # Scale-aware floor: fraction of peak density
 
@@ -71,35 +71,53 @@ compute_rif <- function(y, tau, bw = NULL, dens = NULL) {
 # fixest::predict() fallback.
 .direct_fixest_metadata_one <- function(fit) {
   if (!inherits(fit, "fixest") || !identical(fit$method_type, "feols") ||
-      isTRUE(fit$iv) || !is.null(fit$NL.fml) || !is.null(fit$call$offset) ||
-      !is.null(fit$fixef_terms)) return(NULL)
+    isTRUE(fit$iv) || !is.null(fit$NL.fml) || !is.null(fit$call$offset) ||
+    !is.null(fit$fixef_terms)) {
+    return(NULL)
+  }
   beta <- tryCatch(stats::coef(fit), error = function(e) NULL)
   fixefs <- tryCatch(fixest::fixef(fit, notes = FALSE),
-                     error = function(e) NULL)
-  if (is.null(beta) || is.null(fixefs)) return(NULL)
+    error = function(e) NULL
+  )
+  if (is.null(beta) || is.null(fixefs)) {
+    return(NULL)
+  }
   fe_vars <- fit$fixef_vars %||% character()
   fe_names <- lapply(fe_vars, function(fe_var) {
     vars <- all.vars(tryCatch(str2lang(fe_var), error = function(e) NULL))
-    if (length(vars) != 1L) return(NULL)
+    if (length(vars) != 1L) {
+      return(NULL)
+    }
     vars
   })
-  if (length(fe_vars) && any(vapply(fe_names, is.null, logical(1L)))) return(NULL)
+  if (length(fe_vars) && any(vapply(fe_names, is.null, logical(1L)))) {
+    return(NULL)
+  }
   rhs_vars <- tryCatch(all.vars(fit$fml[[3L]]), error = function(e) NULL)
-  if (is.null(rhs_vars)) return(NULL)
-  list(beta = beta, fixefs = fixefs, fe_vars = fe_vars, fe_names = fe_names,
-       rhs_vars = rhs_vars)
+  if (is.null(rhs_vars)) {
+    return(NULL)
+  }
+  list(
+    beta = beta, fixefs = fixefs, fe_vars = fe_vars, fe_names = fe_names,
+    rhs_vars = rhs_vars
+  )
 }
 
 build_direct_rif_metadata <- function(fits) {
   metadata <- lapply(fits, .direct_fixest_metadata_one)
-  if (!length(metadata) || any(vapply(metadata, is.null, logical(1L)))) return(NULL)
+  if (!length(metadata) || any(vapply(metadata, is.null, logical(1L)))) {
+    return(NULL)
+  }
   metadata
 }
 
 .direct_fixest_design <- function(fit, data) {
   X <- tryCatch(stats::model.matrix(fit, data = data, type = "rhs"),
-                error = function(e) NULL)
-  if (is.null(X) || !is.numeric(X)) return(NULL)
+    error = function(e) NULL
+  )
+  if (is.null(X) || !is.numeric(X)) {
+    return(NULL)
+  }
   list(X = X, data = data)
 }
 
@@ -108,9 +126,13 @@ build_direct_rif_metadata <- function(fits) {
   fe_names <- metadata[[1L]]$fe_names %||% list()
   fe_vars <- if (length(fe_names)) {
     vapply(fe_names, `[[`, character(1L), 1L)
-  } else character()
+  } else {
+    character()
+  }
   relevant <- unique(c(rhs_vars, fe_vars))
-  if (any(!relevant %in% names(base))) return(NULL)
+  if (any(!relevant %in% names(base))) {
+    return(NULL)
+  }
 
   # The cache is scoped to one model run. Retaining factor levels in the
   # signature prevents unsafe reuse when a caller changes their encoding.
@@ -126,42 +148,59 @@ build_direct_rif_metadata <- function(fits) {
 
 .direct_rif_baseline_design <- function(fits, metadata, base,
                                         signature = NULL) {
-  if (!length(fits) || !length(metadata)) return(NULL)
+  if (!length(fits) || !length(metadata)) {
+    return(NULL)
+  }
   base_design <- .direct_fixest_design(fits[[1L]], base)
-  if (is.null(base_design)) return(NULL)
+  if (is.null(base_design)) {
+    return(NULL)
+  }
 
   fe_vars <- metadata[[1L]]$fe_vars %||% character()
   fe_names <- metadata[[1L]]$fe_names %||% list()
-  if (length(fe_vars) != length(fe_names)) return(NULL)
+  if (length(fe_vars) != length(fe_names)) {
+    return(NULL)
+  }
   level_values <- lapply(seq_along(fe_vars), function(i) {
     var <- fe_names[[i]][[1L]]
-    if (!var %in% names(base)) return(NULL)
+    if (!var %in% names(base)) {
+      return(NULL)
+    }
     names(metadata[[1L]]$fixefs[[fe_vars[[i]]]])
   })
-  if (length(level_values) && any(vapply(level_values, is.null, logical(1))))
+  if (length(level_values) && any(vapply(level_values, is.null, logical(1)))) {
     return(NULL)
+  }
   level_index <- function(data, i) {
-    if (!length(level_values)) return(integer(nrow(data)))
+    if (!length(level_values)) {
+      return(integer(nrow(data)))
+    }
     match(as.character(data[[fe_names[[i]][[1L]]]]), level_values[[i]])
   }
   base_fe_index <- lapply(seq_along(fe_vars), function(i) level_index(base, i))
-  if (any(vapply(base_fe_index, anyNA, logical(1)))) return(NULL)
+  if (any(vapply(base_fe_index, anyNA, logical(1)))) {
+    return(NULL)
+  }
 
   beta_columns <- lapply(metadata, function(meta) {
     match(names(meta$beta), colnames(base_design$X))
   })
-  if (any(vapply(beta_columns, function(x) anyNA(x), logical(1)))) return(NULL)
+  if (any(vapply(beta_columns, function(x) anyNA(x), logical(1)))) {
+    return(NULL)
+  }
 
-  list(base_X = base_design$X, base_fe_index = base_fe_index,
-       beta_columns = beta_columns, fe_levels = level_values,
-       signature = signature)
+  list(
+    base_X = base_design$X, base_fe_index = base_fe_index,
+    beta_columns = beta_columns, fe_levels = level_values,
+    signature = signature
+  )
 }
 
 .direct_rif_baseline_get <- function(fits, metadata, base, cache = NULL) {
   signature <- .direct_rif_baseline_signature(fits[[1L]], metadata, base)
   if (is.environment(cache) && !is.null(signature) &&
-      exists("entry", envir = cache, inherits = FALSE) &&
-      identical(cache$signature, signature)) {
+    exists("entry", envir = cache, inherits = FALSE) &&
+    identical(cache$signature, signature)) {
     cache$hits <- (cache$hits %||% 0L) + 1L
     return(cache$entry)
   }
@@ -176,44 +215,67 @@ build_direct_rif_metadata <- function(fits) {
 
 .direct_rif_design_cache <- function(fits, metadata, base, scenario,
                                      baseline_cache = NULL) {
-  if (!length(fits) || !length(metadata)) return(NULL)
+  if (!length(fits) || !length(metadata)) {
+    return(NULL)
+  }
   baseline <- .direct_rif_baseline_get(fits, metadata, base, baseline_cache)
-  if (is.null(baseline)) return(NULL)
+  if (is.null(baseline)) {
+    return(NULL)
+  }
   scen_design <- .direct_fixest_design(fits[[1L]], scenario)
   if (is.null(scen_design) ||
-      !identical(colnames(baseline$base_X), colnames(scen_design$X))) return(NULL)
+    !identical(colnames(baseline$base_X), colnames(scen_design$X))) {
+    return(NULL)
+  }
 
   fe_vars <- metadata[[1L]]$fe_vars %||% character()
   fe_names <- metadata[[1L]]$fe_names %||% list()
   level_index <- function(data, i) {
-    if (!length(baseline$fe_levels)) return(integer(nrow(data)))
+    if (!length(baseline$fe_levels)) {
+      return(integer(nrow(data)))
+    }
     match(as.character(data[[fe_names[[i]][[1L]]]]), baseline$fe_levels[[i]])
   }
   scen_fe_index <- lapply(seq_along(fe_vars), function(i) level_index(scenario, i))
-  if (any(vapply(scen_fe_index, anyNA, logical(1)))) return(NULL)
+  if (any(vapply(scen_fe_index, anyNA, logical(1)))) {
+    return(NULL)
+  }
 
-  list(base_X = baseline$base_X, scenario_X = scen_design$X,
-       beta_columns = baseline$beta_columns,
-       fe_indices = list(base = baseline$base_fe_index,
-                         scenario = scen_fe_index),
-       fe_levels = baseline$fe_levels)
+  list(
+    base_X = baseline$base_X, scenario_X = scen_design$X,
+    beta_columns = baseline$beta_columns,
+    fe_indices = list(
+      base = baseline$base_fe_index,
+      scenario = scen_fe_index
+    ),
+    fe_levels = baseline$fe_levels
+  )
 }
 
 .direct_rif_prediction_pair <- function(fits, base, scenario,
                                         metadata = NULL,
                                         baseline_cache = NULL) {
-  if (!length(fits)) return(NULL)
+  if (!length(fits)) {
+    return(NULL)
+  }
   metadata <- metadata %||% build_direct_rif_metadata(fits)
-  if (is.null(metadata) || length(metadata) != length(fits)) return(NULL)
+  if (is.null(metadata) || length(metadata) != length(fits)) {
+    return(NULL)
+  }
   design_cache <- .direct_rif_design_cache(
-    fits, metadata, base, scenario, baseline_cache = baseline_cache
+    fits, metadata, base, scenario,
+    baseline_cache = baseline_cache
   )
-  if (is.null(design_cache)) return(NULL)
+  if (is.null(design_cache)) {
+    return(NULL)
+  }
 
   direct_one <- function(meta, k) {
     beta <- meta$beta
     add_fixed_effects <- function(which, n) {
-      if (!length(meta$fe_vars)) return(numeric(n))
+      if (!length(meta$fe_vars)) {
+        return(numeric(n))
+      }
       indices <- design_cache$fe_indices[[which]]
       Reduce(`+`, lapply(seq_along(meta$fe_vars), function(i) {
         values <- meta$fixefs[[meta$fe_vars[[i]]]]
@@ -230,7 +292,9 @@ build_direct_rif_metadata <- function(fits) {
   }
 
   out <- lapply(seq_along(metadata), function(k) direct_one(metadata[[k]], k))
-  if (any(vapply(out, is.null, logical(1L)))) return(NULL)
+  if (any(vapply(out, is.null, logical(1L)))) {
+    return(NULL)
+  }
   attr(out, "design_cache") <- design_cache
   out
 }
@@ -255,8 +319,8 @@ build_direct_rif_metadata <- function(fits) {
 #' @keywords internal
 compute_rif_multi <- function(y, taus, bw = NULL, dens = NULL) {
   na_mask <- !is.finite(y)
-  y_obs   <- y[!na_mask]
-  q_taus  <- stats::quantile(y_obs, probs = taus, names = FALSE, type = 7)
+  y_obs <- y[!na_mask]
+  q_taus <- stats::quantile(y_obs, probs = taus, names = FALSE, type = 7)
 
   if (is.null(dens)) {
     bw_use <- bw
@@ -266,7 +330,7 @@ compute_rif_multi <- function(y, taus, bw = NULL, dens = NULL) {
     dens <- stats::density(y_obs, bw = bw_use, n = 1024)
   }
 
-  f_taus   <- stats::approx(dens$x, dens$y, xout = q_taus)$y
+  f_taus <- stats::approx(dens$x, dens$y, xout = q_taus)$y
   dens_max <- max(dens$y)
 
   lapply(seq_along(taus), function(i) {
@@ -320,7 +384,7 @@ build_rif_grid <- function(fits_multi, taus, model_id) {
       }
     }
     if (is.null(tbl)) tbl <- broom::tidy(fit_i, conf.int = TRUE)
-    tbl$tau   <- taus[i]
+    tbl$tau <- taus[i]
     tbl$model <- model_id
     tbl
   })
@@ -374,15 +438,15 @@ predict_rif <- function(fit_multi, newdata, svy, train_data, taus, outcome,
     "fit_multi must have same length as taus" = length(fit_multi) == length(taus)
   )
 
-  svy_row    <- newdata$.svy_row_id
-  y_raw      <- svy[[outcome]][svy_row]
-  n          <- nrow(newdata)
-  K          <- length(taus)
+  svy_row <- newdata$.svy_row_id
+  y_raw <- svy[[outcome]][svy_row]
+  n <- nrow(newdata)
+  K <- length(taus)
 
   # Transform y_baseline to model scale (log if applicable)
   # train_data[[outcome]] is already in model scale (log-transformed by
   # prepare_outcome_df before fitting), so ecdf and predictions are in log scale.
-  is_log     <- isTRUE(so$transform == "log")
+  is_log <- isTRUE(so$transform == "log")
   y_baseline <- if (is_log) log(y_raw) else y_raw
 
   # Assign quantile position via ecdf of training data (in model scale).
@@ -396,7 +460,7 @@ predict_rif <- function(fit_multi, newdata, svy, train_data, taus, outcome,
   for (wc in weather_cols) {
     newdata_base[[wc]] <- svy[[wc]][svy_row]
   }
-  newdata_scen <- newdata  # already has scenario weather
+  newdata_scen <- newdata # already has scenario weather
 
   # Predict at each quantile for baseline and scenario weather
   # Store deltas in a matrix: rows = observations, cols = quantiles
@@ -404,23 +468,30 @@ predict_rif <- function(fit_multi, newdata, svy, train_data, taus, outcome,
 
   direct_pairs <- if (isTRUE(direct_predictions)) {
     .direct_rif_prediction_pair(
-      fit_multi, newdata_base, newdata_scen, metadata = direct_metadata,
+      fit_multi, newdata_base, newdata_scen,
+      metadata = direct_metadata,
       baseline_cache = direct_baseline_cache
     )
-  } else NULL
+  } else {
+    NULL
+  }
 
   predict_pair <- function(fit, base, scenario) {
     if (isTRUE(batch_predictions)) {
       combined <- tryCatch(rbind(base, scenario), error = function(e) NULL)
       if (!is.null(combined)) {
         pair <- tryCatch(
-          as.numeric(stats::predict(fit, newdata = combined,
-                                    type = "response")),
+          as.numeric(stats::predict(fit,
+            newdata = combined,
+            type = "response"
+          )),
           error = function(e) NULL
         )
         if (length(pair) == 2L * n) {
-          return(list(base = pair[seq_len(n)],
-                      scenario = pair[n + seq_len(n)]))
+          return(list(
+            base = pair[seq_len(n)],
+            scenario = pair[n + seq_len(n)]
+          ))
         }
       }
     }
@@ -463,7 +534,7 @@ predict_rif <- function(fit_multi, newdata, svy, train_data, taus, outcome,
     pair <- direct_pairs[[k]] %||%
       predict_pair(fit_multi[[k]], newdata_base, newdata_scen)
     pred_base <- pair$base
-    pred_new  <- pair$scenario
+    pred_new <- pair$scenario
 
     delta_mat[, k] <- pred_new - pred_base
   }
@@ -476,8 +547,8 @@ predict_rif <- function(fit_multi, newdata, svy, train_data, taus, outcome,
   delta_i <- interpolate_delta(delta_mat, taus, tau_i)
 
   # Assemble output
-  newdata$.fitted    <- y_baseline + delta_i
-  newdata$.residual  <- NA_real_
+  newdata$.fitted <- y_baseline + delta_i
+  newdata$.residual <- NA_real_
   newdata[[outcome]] <- y_baseline + delta_i
 
   # Compute F_loading by interpolating X_scenario %*% L_k at each tau_i.
@@ -488,17 +559,25 @@ predict_rif <- function(fit_multi, newdata, svy, train_data, taus, outcome,
     direct_design_cache <- attr(direct_pairs, "design_cache")
     X_scen_fn <- if (!is.null(direct_design_cache)) {
       function(k, rows) direct_design_cache$scenario_X[rows, , drop = FALSE]
-    } else function(k, rows) {
-      stats::model.matrix(fit_multi[[k]], data = newdata_scen[rows, , drop = FALSE],
-                          type = "rhs")
+    } else {
+      function(k, rows) {
+        stats::model.matrix(fit_multi[[k]],
+          data = newdata_scen[rows, , drop = FALSE],
+          type = "rhs"
+        )
+      }
     }
-    F_loading <- tryCatch({
-      interpolate_F_loading(X_scen_fn, chol_list, taus, tau_i,
-                             active_mask = active_mask)
-    }, error = function(e) {
-      warning("[predict_rif] F_loading interpolation failed: ", conditionMessage(e))
-      NULL
-    })
+    F_loading <- tryCatch(
+      {
+        interpolate_F_loading(X_scen_fn, chol_list, taus, tau_i,
+          active_mask = active_mask
+        )
+      },
+      error = function(e) {
+        warning("[predict_rif] F_loading interpolation failed: ", conditionMessage(e))
+        NULL
+      }
+    )
     if (!is.null(F_loading)) {
       attr(newdata, "F_loading") <- F_loading
       # Diagnostic: confirm the additive-decomposition mask reached predict_rif.
@@ -507,7 +586,8 @@ predict_rif <- function(fit_multi, newdata, svy, train_data, taus, outcome,
       if (!is.null(active_mask) && ncol(F_loading) < length(active_mask)) {
         message(sprintf(
           "[predict_rif] additive-decomposition mask applied: F_loading is %d x %d (out of %d coefficients).",
-          nrow(F_loading), ncol(F_loading), length(active_mask)))
+          nrow(F_loading), ncol(F_loading), length(active_mask)
+        ))
       }
     }
   }
@@ -543,7 +623,7 @@ predict_rif <- function(fit_multi, newdata, svy, train_data, taus, outcome,
 #'
 #' @keywords internal
 interpolate_F_loading <- function(X_diff_fn, chol_list, taus, tau_i,
-                                   active_mask = NULL) {
+                                  active_mask = NULL) {
   K <- length(taus)
 
   # Accept a prebuilt list of K matrices (legacy callers / tests) by wrapping
@@ -563,7 +643,7 @@ interpolate_F_loading <- function(X_diff_fn, chol_list, taus, tau_i,
   # Interpolation weights
   tau_lo <- taus[idx]
   tau_hi <- taus[idx_hi]
-  w      <- ifelse(tau_hi > tau_lo, (tau_i - tau_lo) / (tau_hi - tau_lo), 0)
+  w <- ifelse(tau_hi > tau_lo, (tau_i - tau_lo) / (tau_hi - tau_lo), 0)
 
   # F = X %*% L (lower triangular L with LL' = Sigma) so that
   # F F' = X L L' X' = X Sigma X' - the correct level variance.
@@ -600,7 +680,7 @@ interpolate_F_loading <- function(X_diff_fn, chol_list, taus, tau_i,
 
   # Group rows by their (lo, hi) quantile-index pair. Each group needs at
   # most two per-quantile matmuls, restricted to the group's rows.
-  pair_key <- idx + idx_hi * (K + 1L)  # unique per (lo, hi) combination
+  pair_key <- idx + idx_hi * (K + 1L) # unique per (lo, hi) combination
   pair_groups <- split(seq_len(n), pair_key, drop = TRUE)
   for (rows in pair_groups) {
     a <- idx[rows[1]]
@@ -636,7 +716,7 @@ interpolate_delta <- function(delta_mat, taus, tau_i) {
   # Linear interpolation weights
   tau_lo <- taus[idx]
   tau_hi <- taus[pmin(idx + 1L, K)]
-  w      <- ifelse(tau_hi > tau_lo, (tau_i - tau_lo) / (tau_hi - tau_lo), 0)
+  w <- ifelse(tau_hi > tau_lo, (tau_i - tau_lo) / (tau_hi - tau_lo), 0)
 
   # Interpolated delta
   delta_lo <- delta_mat[cbind(seq_len(n), idx)]

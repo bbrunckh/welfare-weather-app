@@ -42,9 +42,9 @@ mod_1_01_sample_server <- function(id, connection_params, survey_list, variable_
 
     output$unit_ui <- renderUI({
       pill_toggle(
-        inputId  = ns("unit"),
-        label    = "Level of analysis",
-        choices  = c(
+        inputId = ns("unit"),
+        label = "Level of analysis",
+        choices = c(
           "Individual" = "ind",
           "Household"  = "hh",
           "Firm"       = "firm"
@@ -71,8 +71,8 @@ mod_1_01_sample_server <- function(id, connection_params, survey_list, variable_
           "No data files found for the selected level of analysis."
         ))
       }
-      choices         <- setNames(sv$code, sv$economy)
-      choices         <- choices[!duplicated(choices)]
+      choices <- setNames(sv$code, sv$economy)
+      choices <- choices[!duplicated(choices)]
       selectizeInput(
         inputId  = ns("economy"),
         label    = "Economy",
@@ -102,7 +102,7 @@ mod_1_01_sample_server <- function(id, connection_params, survey_list, variable_
       all_yrs <- available_years()
 
       year_inputs <- lapply(codes, function(code) {
-        yrs          <- all_yrs[[code]]
+        yrs <- all_yrs[[code]]
         economy_name <- sv |>
           dplyr::filter(.data$code == !!code) |>
           dplyr::pull(.data$economy) |>

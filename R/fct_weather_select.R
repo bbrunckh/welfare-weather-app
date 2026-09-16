@@ -16,8 +16,10 @@
 #' @export
 get_weather_vars <- function(variable_list) {
   if (is.null(variable_list) || nrow(variable_list) == 0) {
-    return(data.frame(name = character(), label = character(),
-                      units = character(), stringsAsFactors = FALSE))
+    return(data.frame(
+      name = character(), label = character(),
+      units = character(), stringsAsFactors = FALSE
+    ))
   }
   variable_list |>
     dplyr::filter(.data$hazard == 1) |>
@@ -128,16 +130,22 @@ weather_spec_defaults <- function(units) {
 #'
 #' @export
 parse_custom_breaks <- function(x) {
-  if (is.null(x)) return(numeric(0))
+  if (is.null(x)) {
+    return(numeric(0))
+  }
   if (is.numeric(x)) {
     v <- x[is.finite(x)]
     return(sort(unique(v)))
   }
   if (is.character(x)) {
-    if (length(x) == 0 || all(!nzchar(x))) return(numeric(0))
+    if (length(x) == 0 || all(!nzchar(x))) {
+      return(numeric(0))
+    }
     tokens <- unlist(strsplit(paste(x, collapse = ","), "[,;[:space:]]+"))
     tokens <- tokens[nzchar(tokens)]
-    if (length(tokens) == 0) return(numeric(0))
+    if (length(tokens) == 0) {
+      return(numeric(0))
+    }
     v <- suppressWarnings(as.numeric(tokens))
     v <- v[is.finite(v)]
     return(sort(unique(v)))
@@ -176,28 +184,28 @@ parse_custom_breaks <- function(x) {
 #'
 #' @export
 build_weather_spec <- function(name,
-                                units,
-                                ref_period     = NULL,
-                                temporal_agg   = NULL,
-                                transformation = NULL,
-                                cont_binned    = NULL,
-                                num_bins       = NULL,
-                                binning_method = NULL,
-                                custom_breaks  = NULL,
-                                polynomial     = NULL) {
-  defs           <- weather_spec_defaults(units)
-  ref_period     <- ref_period     %||% c(defs$ref_start, defs$ref_end)
-  temporal_agg   <- temporal_agg   %||% defs$temporal_agg
+                               units,
+                               ref_period = NULL,
+                               temporal_agg = NULL,
+                               transformation = NULL,
+                               cont_binned = NULL,
+                               num_bins = NULL,
+                               binning_method = NULL,
+                               custom_breaks = NULL,
+                               polynomial = NULL) {
+  defs <- weather_spec_defaults(units)
+  ref_period <- ref_period %||% c(defs$ref_start, defs$ref_end)
+  temporal_agg <- temporal_agg %||% defs$temporal_agg
   transformation <- transformation %||% defs$transformation
-  cont_binned    <- cont_binned    %||% defs$cont_binned
-  polynomial     <- polynomial     %||% defs$polynomial
+  cont_binned <- cont_binned %||% defs$cont_binned
+  polynomial <- polynomial %||% defs$polynomial
 
-  is_binned      <- identical(cont_binned, "Binned")
-  num_bins       <- if (is_binned) as.integer(num_bins %||% 5L) else NA_integer_
+  is_binned <- identical(cont_binned, "Binned")
+  num_bins <- if (is_binned) as.integer(num_bins %||% 5L) else NA_integer_
   binning_method <- if (is_binned) (binning_method %||% "Equal frequency") else NA_character_
 
-  is_custom      <- is_binned && identical(binning_method, "Custom")
-  custom_breaks  <- if (is_custom) parse_custom_breaks(custom_breaks) else numeric(0)
+  is_custom <- is_binned && identical(binning_method, "Custom")
+  custom_breaks <- if (is_custom) parse_custom_breaks(custom_breaks) else numeric(0)
 
   tibble::tibble(
     name           = name,
@@ -249,8 +257,8 @@ build_selected_weather <- function(selected_vars, var_info, spec_inputs = list()
   }
 
   specs <- lapply(selected_vars, function(v) {
-    units  <- var_info$units[var_info$name == v]
-    units  <- if (length(units) == 0 || is.na(units[1])) "" else as.character(units[1])
+    units <- var_info$units[var_info$name == v]
+    units <- if (length(units) == 0 || is.na(units[1])) "" else as.character(units[1])
     prefix <- paste0(v, "_")
 
     build_weather_spec(
@@ -294,15 +302,20 @@ build_selected_weather <- function(selected_vars, var_info, spec_inputs = list()
 #'
 #' @export
 relabel_bin_levels <- function(df, breaks) {
-  if (is.null(df) || is.null(breaks) || !length(breaks)) return(df)
+  if (is.null(df) || is.null(breaks) || !length(breaks)) {
+    return(df)
+  }
   for (v in intersect(names(breaks), names(df))) {
     col <- df[[v]]
     if (!is.factor(col)) next
     obs <- attr(breaks[[v]], "observed")
-    lb  <- if (!is.null(obs)) suppressWarnings(as.numeric(obs)) else
+    lb <- if (!is.null(obs)) {
+      suppressWarnings(as.numeric(obs))
+    } else {
       suppressWarnings(as.numeric(breaks[[v]]))
-    lb  <- lb[is.finite(lb)]
-    lv  <- levels(col)
+    }
+    lb <- lb[is.finite(lb)]
+    lv <- levels(col)
     if (length(lb) != length(lv) + 1L) next
     fmt <- function(x) formatC(x, format = "f", digits = 1)
     new_lv <- vapply(seq_along(lv), function(j) {
@@ -310,12 +323,22 @@ relabel_bin_levels <- function(df, breaks) {
       r0 <- substr(lv[j], nchar(lv[j]), nchar(lv[j]))
       inner <- substr(lv[j], 2, nchar(lv[j]) - 1)
       parts <- trimws(strsplit(inner, ",", fixed = TRUE)[[1]])
-      if (length(parts) != 2L) return(lv[j])
-      lo <- if (identical(parts[1], "-Inf")) lb[j] else
+      if (length(parts) != 2L) {
+        return(lv[j])
+      }
+      lo <- if (identical(parts[1], "-Inf")) {
+        lb[j]
+      } else {
         suppressWarnings(as.numeric(parts[1]))
-      hi <- if (identical(parts[2], "Inf")) lb[j + 1L] else
+      }
+      hi <- if (identical(parts[2], "Inf")) {
+        lb[j + 1L]
+      } else {
         suppressWarnings(as.numeric(parts[2]))
-      if (!is.finite(lo) || !is.finite(hi)) return(lv[j])
+      }
+      if (!is.finite(lo) || !is.finite(hi)) {
+        return(lv[j])
+      }
       paste0(l0, fmt(lo), ", ", fmt(hi), r0)
     }, character(1))
     if (!anyDuplicated(new_lv)) levels(col) <- new_lv

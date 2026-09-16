@@ -15,13 +15,14 @@
 #'
 #' @export
 model_badge <- function(selected_model) {
-  type   <- as.character(selected_model$type[1] %||% "")
+  type <- as.character(selected_model$type[1] %||% "")
   engine <- as.character(selected_model$engine[1] %||% "fixest")
   eng <- switch(engine,
     fixest = switch(type,
       "Linear regression"   = "OLS",
       "Logistic regression" = "logit",
-      engine),
+      engine
+    ),
     engine
   )
   paste0(type, " \u00B7 ", eng)
@@ -37,7 +38,9 @@ model_badge <- function(selected_model) {
 #' @export
 model_cluster_phrase <- function(cluster) {
   cl <- as.character(cluster[1])
-  if (length(cl) == 0 || is.na(cl) || !nzchar(cl)) return("unclustered")
+  if (length(cl) == 0 || is.na(cl) || !nzchar(cl)) {
+    return("unclustered")
+  }
   paste0("clustered by ", switch(cl,
     loc_id_panel = "location panel",
     loc_id       = "location",
@@ -55,8 +58,10 @@ model_cluster_phrase <- function(cluster) {
 #' @export
 model_covariate_counts <- function(selected_model) {
   n <- vapply(
-    selected_model[c("hh_covariates", "area_covariates", "ind_covariates",
-                     "firm_covariates")],
+    selected_model[c(
+      "hh_covariates", "area_covariates", "ind_covariates",
+      "firm_covariates"
+    )],
     function(x) length(unlist(x)), integer(1)
   )
   n <- n[n > 0L]
@@ -108,19 +113,23 @@ model_card_rows <- function(selected_model, label_fun = NULL,
 
   to_lab <- function(nms) {
     nms <- unlist(nms)
-    if (!length(nms)) return(character(0))
-    if (is.null(label_fun)) return(as.character(nms))
+    if (!length(nms)) {
+      return(character(0))
+    }
+    if (is.null(label_fun)) {
+      return(as.character(nms))
+    }
     vapply(nms, function(v) {
       l <- label_fun(v)
       if (length(l) > 0 && !is.na(l[1]) && nzchar(l[1])) l[1] else v
     }, character(1), USE.NAMES = FALSE)
   }
 
-  wx  <- wise_label_short(weather_labels)
-  wx  <- wx[!is.na(wx) & nzchar(wx)]
+  wx <- wise_label_short(weather_labels)
+  wx <- wx[!is.na(wx) & nzchar(wx)]
   mods <- to_lab(sm$interactions)
   n_cov <- model_covariate_total(sm)
-  n_fe  <- length(unlist(sm$fixedeffects))
+  n_fe <- length(unlist(sm$fixedeffects))
   pill <- function(value) shiny::tags$span(class = "selection-card-pill", value)
   op <- function(value) shiny::tags$span(class = "selection-card-op", value)
   append_values <- function(kids, values, separator = "+") {
@@ -133,7 +142,9 @@ model_card_rows <- function(selected_model, label_fun = NULL,
 
   outcome <- if (is.null(outcome_label) || !nzchar(outcome_label)) {
     "Selected outcome"
-  } else outcome_label
+  } else {
+    outcome_label
+  }
   if (!length(wx)) wx <- "Selected weather"
 
   equation <- list()

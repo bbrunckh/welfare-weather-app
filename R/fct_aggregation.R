@@ -41,104 +41,105 @@
 #' @export
 resolve_agg_fn <- function(method) {
   switch(method,
-
     mean = function(welfare, weights, pov_line) {
-      if (!is.null(weights))
+      if (!is.null(weights)) {
         stats::weighted.mean(welfare, weights, na.rm = TRUE)
-      else
+      } else {
         mean(welfare, na.rm = TRUE)
+      }
     },
-
     median = function(welfare, weights, pov_line) {
       if (!is.null(weights)) {
         # Weighted median via cumulative weight
-        ord  <- order(welfare)
-        w    <- weights[ord] / sum(weights, na.rm = TRUE)
+        ord <- order(welfare)
+        w <- weights[ord] / sum(weights, na.rm = TRUE)
         cumw <- cumsum(w)
         welfare[ord][which(cumw >= 0.5)[1L]]
       } else {
         stats::median(welfare, na.rm = TRUE)
       }
     },
-
     total = function(welfare, weights, pov_line) {
-      if (!is.null(weights))
+      if (!is.null(weights)) {
         sum(welfare * weights, na.rm = TRUE)
-      else
+      } else {
         sum(welfare, na.rm = TRUE)
+      }
     },
-
     headcount_ratio = function(welfare, weights, pov_line) {
       stopifnot("pov_line required for headcount_ratio" = !is.null(pov_line))
       poor <- as.numeric(welfare < pov_line)
-      if (!is.null(weights))
+      if (!is.null(weights)) {
         stats::weighted.mean(poor, weights, na.rm = TRUE)
-      else
+      } else {
         mean(poor, na.rm = TRUE)
+      }
     },
-
     gap = function(welfare, weights, pov_line) {
       stopifnot("pov_line required for gap" = !is.null(pov_line))
       gaps <- pmax(pov_line - welfare, 0) / pov_line
-      if (!is.null(weights))
+      if (!is.null(weights)) {
         stats::weighted.mean(gaps, weights, na.rm = TRUE)
-      else
+      } else {
         mean(gaps, na.rm = TRUE)
+      }
     },
-
     fgt2 = function(welfare, weights, pov_line) {
       stopifnot("pov_line required for fgt2" = !is.null(pov_line))
       sq <- (pmax(pov_line - welfare, 0) / pov_line)^2
-      if (!is.null(weights))
+      if (!is.null(weights)) {
         stats::weighted.mean(sq, weights, na.rm = TRUE)
-      else
+      } else {
         mean(sq, na.rm = TRUE)
+      }
     },
-
     gini = function(welfare, weights, pov_line) {
       # Weighted Gini via the covariance formula - NA guard first
-      valid   <- !is.na(welfare)
+      valid <- !is.na(welfare)
       welfare <- welfare[valid]
       if (!is.null(weights)) weights <- weights[valid]
       n <- length(welfare)
-      if (n < 2L) return(NA_real_)
+      if (n < 2L) {
+        return(NA_real_)
+      }
       if (!is.null(weights)) {
-        ord  <- order(welfare)
-        w    <- weights[ord] / sum(weights, na.rm = TRUE)
-        y    <- welfare[ord]
-        F_i  <- cumsum(w) - w / 2
+        ord <- order(welfare)
+        w <- weights[ord] / sum(weights, na.rm = TRUE)
+        y <- welfare[ord]
+        F_i <- cumsum(w) - w / 2
         2 * sum(w * y * F_i) / sum(w * y) - 1
       } else {
         ord <- order(welfare)
-        y   <- welfare[ord]
-        n   <- length(y)
+        y <- welfare[ord]
+        n <- length(y)
         2 * sum((seq_len(n) / n - 0.5) * y) / (n * mean(y))
       }
     },
-
     prosperity_gap = function(welfare, weights, pov_line) {
       # Average factor by which incomes must be multiplied to reach $28/day.
       # pov_line ignored - threshold is always hardcoded to $28/day.
       pg <- pmax(28 / welfare, 1)
-      if (!is.null(weights))
+      if (!is.null(weights)) {
         stats::weighted.mean(pg, weights, na.rm = TRUE)
-      else
+      } else {
         mean(pg, na.rm = TRUE)
+      }
     },
-
     avg_poverty = function(welfare, weights, pov_line) {
       # Average poverty = mean(1 / welfare): days needed to earn $1.
       # pov_line ignored.
-      ok  <- is.finite(welfare) & welfare > 0
-      wp  <- welfare[ok]
+      ok <- is.finite(welfare) & welfare > 0
+      wp <- welfare[ok]
       wts <- if (!is.null(weights)) weights[ok] else NULL
-      if (length(wp) == 0L) return(NA_real_)
-      if (!is.null(wts))
+      if (length(wp) == 0L) {
+        return(NA_real_)
+      }
+      if (!is.null(wts)) {
         stats::weighted.mean(1 / wp, wts, na.rm = TRUE)
-      else
+      } else {
         mean(1 / wp, na.rm = TRUE)
+      }
     },
-
     stop(sprintf("[resolve_agg_fn] Unknown method: '%s'", method))
   )
 }
@@ -160,7 +161,7 @@ resolve_agg_fn <- function(method) {
 #' @noRd
 .residual_lookup <- function(train_aug, id_col) {
   if (is.null(train_aug) || !".resid" %in% names(train_aug) ||
-      is.null(id_col) || !id_col %in% names(train_aug)) {
+    is.null(id_col) || !id_col %in% names(train_aug)) {
     NULL
   } else {
     stats::setNames(train_aug$.resid, train_aug[[id_col]])
@@ -213,32 +214,33 @@ resolve_agg_fn <- function(method) {
 draw_residuals_vec <- function(residuals,
                                train_aug = NULL,
                                N,
-                               id_vec  = NULL,
-                               id_col  = NULL,
-                               seed    = WISEAPP_DEFAULT_SEED,
+                               id_vec = NULL,
+                               id_col = NULL,
+                               seed = WISEAPP_DEFAULT_SEED,
                                resid_lookup = NULL,
                                resid_sigma2 = NULL) {
   switch(residuals,
-
     none = rep(0, N),
-
     original = {
-      if (is.null(train_aug) || !".resid" %in% names(train_aug))
+      if (is.null(train_aug) || !".resid" %in% names(train_aug)) {
         stop("[draw_residuals_vec] train_aug with .resid required for residuals = 'original'.")
-      if (is.null(id_vec) || is.null(id_col))
+      }
+      if (is.null(id_vec) || is.null(id_col)) {
         stop("[draw_residuals_vec] id_vec and id_col required for residuals = 'original'.")
-      if (!id_col %in% names(train_aug))
+      }
+      if (!id_col %in% names(train_aug)) {
         stop(sprintf("[draw_residuals_vec] id_col '%s' not found in train_aug.", id_col))
+      }
 
       # Match simulation households to their training residuals by ID.
       # Unmatched households use a stable hash-indexed lookup so the fallback
       # neither depends on caller RNG state nor consumes the global stream.
       # PERF-34: the lookup may be supplied pre-built by the pipeline owner.
       resid_lookup <- resid_lookup %||% .residual_lookup(train_aug, id_col)
-      matched      <- as.character(id_vec) %in% names(resid_lookup)
+      matched <- as.character(id_vec) %in% names(resid_lookup)
 
       out <- numeric(N)
-      out[matched]  <- resid_lookup[as.character(id_vec[matched])]
+      out[matched] <- resid_lookup[as.character(id_vec[matched])]
       out[!matched] <- deterministic_values_by_key(
         train_aug$.resid,
         id_vec[!matched],
@@ -246,23 +248,25 @@ draw_residuals_vec <- function(residuals,
       )
       out
     },
-
     normal = {
-      if (is.null(train_aug) || !".resid" %in% names(train_aug))
+      if (is.null(train_aug) || !".resid" %in% names(train_aug)) {
         stop("[draw_residuals_vec] train_aug with .resid required for residuals = 'normal'.")
+      }
       # sd(x) is sqrt(var(x)) in R, so sqrt of a cached var() is bit-identical
       # to the per-call stats::sd() this replaces (PERF-34).
-      sigma_hat <- if (!is.null(resid_sigma2)) sqrt(resid_sigma2)
-                   else stats::sd(train_aug$.resid, na.rm = TRUE)
+      sigma_hat <- if (!is.null(resid_sigma2)) {
+        sqrt(resid_sigma2)
+      } else {
+        stats::sd(train_aug$.resid, na.rm = TRUE)
+      }
       withr::with_seed(seed, stats::rnorm(N, mean = 0, sd = sigma_hat))
     },
-
     resample = {
-      if (is.null(train_aug) || !".resid" %in% names(train_aug))
+      if (is.null(train_aug) || !".resid" %in% names(train_aug)) {
         stop("[draw_residuals_vec] train_aug with .resid required for residuals = 'resample'.")
+      }
       withr::with_seed(seed, sample(train_aug$.resid, N, replace = TRUE))
     },
-
     stop(sprintf("[draw_residuals_vec] Unknown residuals option: '%s'", residuals))
   )
 }
@@ -284,24 +288,30 @@ draw_residuals_vec <- function(residuals,
 combine_ensemble_results <- function(member_results,
                                      band_q = c(lo = 0.10, hi = 0.90)) {
   member_results <- Filter(Negate(is.null), member_results)
-  if (length(member_results) == 0L) return(NULL)
+  if (length(member_results) == 0L) {
+    return(NULL)
+  }
 
   values <- vapply(member_results, `[[`, numeric(1L), "value")
-  value  <- mean(values, na.rm = TRUE)
+  value <- mean(values, na.rm = TRUE)
 
   # Analytic pooling via law of total variance:
   #   Var(T) = E[Var(T|m)] + Var(E[T|m])
   #          = mean(var_coef + var_resid) + var(values across members)
-  var_coef_vec <- vapply(member_results,
-                         function(x) x$var_coef  %||% NA_real_, numeric(1L))
-  var_res_vec  <- vapply(member_results,
-                         function(x) x$var_resid %||% NA_real_, numeric(1L))
+  var_coef_vec <- vapply(
+    member_results,
+    function(x) x$var_coef %||% NA_real_, numeric(1L)
+  )
+  var_res_vec <- vapply(
+    member_results,
+    function(x) x$var_resid %||% NA_real_, numeric(1L)
+  )
   var_within <- mean(var_coef_vec + var_res_vec, na.rm = TRUE)
   if (!is.finite(var_within)) var_within <- 0
   var_across <- if (length(values) > 1L) stats::var(values, na.rm = TRUE) else 0
   if (!is.finite(var_across)) var_across <- 0
-  var_pool   <- var_within + var_across
-  se_pool    <- sqrt(max(var_pool, 0))
+  var_pool <- var_within + var_across
+  se_pool <- sqrt(max(var_pool, 0))
 
   # Per-member SDs propagated separately so callers can build per-outcome
   # bands without recovering var_coef/var_resid from the member list.
@@ -311,30 +321,29 @@ combine_ensemble_results <- function(member_results,
   z_hi <- stats::qnorm(band_q[["hi"]])
 
   list(
-    value     = value,
+    value = value,
     value_all = values,
 
     # Thick band - point estimates only (weather + model spread)
-    value_lo  = unname(stats::quantile(values, band_q[["lo"]], na.rm = TRUE)),
-    value_hi  = unname(stats::quantile(values, band_q[["hi"]], na.rm = TRUE)),
+    value_lo = unname(stats::quantile(values, band_q[["lo"]], na.rm = TRUE)),
+    value_hi = unname(stats::quantile(values, band_q[["hi"]], na.rm = TRUE)),
 
     # Thin line - analytic pooled SE (coefficient + residual + model spread)
-    coef_lo   = value + z_lo * se_pool,
-    coef_hi   = value + z_hi * se_pool,
-
-    model_lo  = min(values,  na.rm = TRUE),
+    coef_lo = value + z_lo * se_pool,
+    coef_hi = value + z_hi * se_pool,
+    model_lo = min(values, na.rm = TRUE),
     model_q10 = unname(stats::quantile(values, 0.10, na.rm = TRUE)),
     model_q25 = unname(stats::quantile(values, 0.25, na.rm = TRUE)),
     model_med = unname(stats::quantile(values, 0.50, na.rm = TRUE)),
     model_q75 = unname(stats::quantile(values, 0.75, na.rm = TRUE)),
     model_q90 = unname(stats::quantile(values, 0.90, na.rm = TRUE)),
-    model_hi  = max(values,  na.rm = TRUE),
+    model_hi = max(values, na.rm = TRUE),
     draw_values = NULL,
-    var_pool    = var_pool,
-    var_within  = var_within,
-    var_across  = var_across,
+    var_pool = var_pool,
+    var_within = var_within,
+    var_across = var_across,
     per_member_sd = per_member_sd,
-    n_members   = length(member_results)
+    n_members = length(member_results)
   )
 }
 
@@ -360,7 +369,7 @@ hist_aggregate_choices <- function(outcome_type, outcome_name = NULL) {
     # Binary outcomes: Mean
     c("Mean" = "mean")
   } else if (identical(outcome_type, "numeric") &&
-             identical(outcome_name, "welfare")) {
+    identical(outcome_name, "welfare")) {
     # Welfare outcomes: full suite including FGT, Gini, prosperity gap, and average poverty
     c(
       "Mean"                     = "mean",
@@ -386,7 +395,6 @@ hist_aggregate_choices <- function(outcome_type, outcome_name = NULL) {
     )
   }
 }
-
 
 
 # Aggregate predictions for plotting ----
@@ -451,15 +459,16 @@ hist_aggregate_choices <- function(outcome_type, outcome_name = NULL) {
 #' @export
 aggregate_outcome <- function(df,
                               outcome,
-                              group     = "sim_year",
-                              type      = c("continuous", "binary"),
-                              aggregate = c("mean", "sum", "total", "median",
-                                            "headcount_ratio", "gap", "fgt2", "gini",
-                                            "prosperity_gap", "avg_poverty"),
-                              pov_line  = NULL,
-                              weights   = NULL) {
-
-  type      <- match.arg(type)
+                              group = "sim_year",
+                              type = c("continuous", "binary"),
+                              aggregate = c(
+                                "mean", "sum", "total", "median",
+                                "headcount_ratio", "gap", "fgt2", "gini",
+                                "prosperity_gap", "avg_poverty"
+                              ),
+                              pov_line = NULL,
+                              weights = NULL) {
+  type <- match.arg(type)
   # For binary outcomes the aggregate argument is ignored (always population
   # share). Skip match.arg so UI values like "binary" don't cause an error.
   if (type != "binary") {
@@ -472,76 +481,111 @@ aggregate_outcome <- function(df,
     # Remove NA / non-finite values (present in future sim predictions)
     ok <- is.finite(x)
     if (!is.null(w)) ok <- ok & is.finite(w)
-    x  <- x[ok]
-    w  <- if (!is.null(w)) w[ok] else NULL
+    x <- x[ok]
+    w <- if (!is.null(w)) w[ok] else NULL
 
-    if (length(x) < 2) return(NA_real_)
+    if (length(x) < 2) {
+      return(NA_real_)
+    }
 
-    ord    <- order(x)
-    x      <- x[ord]
-    w      <- if (is.null(w)) rep(1, length(x)) else w[ord]
-    w      <- w / sum(w)
+    ord <- order(x)
+    x <- x[ord]
+    w <- if (is.null(w)) rep(1, length(x)) else w[ord]
+    w <- w / sum(w)
     lorenz <- cumsum(w * x) / sum(w * x)
     lorenz <- c(0, lorenz)
-    cx     <- c(0, cumsum(w))
-    B      <- sum(diff(cx) * (lorenz[-length(lorenz)] + lorenz[-1]) / 2)
+    cx <- c(0, cumsum(w))
+    B <- sum(diff(cx) * (lorenz[-length(lorenz)] + lorenz[-1]) / 2)
     1 - 2 * B
   }
 
   compute <- function(x, w) {
     if (type == "binary") {
       # multiply by 100 to express as percentage points
-      if (is.null(w)) 100*mean(as.numeric(x), na.rm = TRUE)
-      else 100*sum(as.numeric(x) * w, na.rm = TRUE) / sum(w, na.rm = TRUE)
+      if (is.null(w)) {
+        100 * mean(as.numeric(x), na.rm = TRUE)
+      } else {
+        100 * sum(as.numeric(x) * w, na.rm = TRUE) / sum(w, na.rm = TRUE)
+      }
     } else {
       switch(aggregate,
-        mean            = if (is.null(w)) mean(x, na.rm = TRUE)
-                          else sum(x * w, na.rm = TRUE) / sum(w, na.rm = TRUE),
-        sum             = if (is.null(w)) sum(x, na.rm = TRUE)
-                          else sum(x * w, na.rm = TRUE),
-        median          = if (is.null(w)) median(x, na.rm = TRUE) else {
-                            valid <- is.finite(x) & is.finite(w) & w > 0
-                            if (sum(valid) == 0L) return(NA_real_)
-                            x <- x[valid]; w <- w[valid]
-                            ord  <- order(x); x <- x[ord]; w <- w[ord]
-                            cumw <- cumsum(w) / sum(w)
-                            x[which(cumw >= 0.5)[1]]
-                          },
+        mean = if (is.null(w)) {
+          mean(x, na.rm = TRUE)
+        } else {
+          sum(x * w, na.rm = TRUE) / sum(w, na.rm = TRUE)
+        },
+        sum = if (is.null(w)) {
+          sum(x, na.rm = TRUE)
+        } else {
+          sum(x * w, na.rm = TRUE)
+        },
+        median = if (is.null(w)) {
+          median(x, na.rm = TRUE)
+        } else {
+          valid <- is.finite(x) & is.finite(w) & w > 0
+          if (sum(valid) == 0L) {
+            return(NA_real_)
+          }
+          x <- x[valid]
+          w <- w[valid]
+          ord <- order(x)
+          x <- x[ord]
+          w <- w[ord]
+          cumw <- cumsum(w) / sum(w)
+          x[which(cumw >= 0.5)[1]]
+        },
         headcount_ratio = {
           if (is.null(pov_line)) stop("`pov_line` must be supplied for headcount_ratio")
           poor <- as.numeric(x < pov_line)
-          if (is.null(w)) mean(poor, na.rm = TRUE)
-          else sum(poor * w, na.rm = TRUE) / sum(w, na.rm = TRUE)
+          if (is.null(w)) {
+            mean(poor, na.rm = TRUE)
+          } else {
+            sum(poor * w, na.rm = TRUE) / sum(w, na.rm = TRUE)
+          }
         },
-        gap             = {
+        gap = {
           if (is.null(pov_line)) stop("`pov_line` must be supplied for gap")
           shortfall <- pmax(pov_line - x, 0) / pov_line
-          if (is.null(w)) mean(shortfall, na.rm = TRUE)
-          else sum(shortfall * w, na.rm = TRUE) / sum(w, na.rm = TRUE)
+          if (is.null(w)) {
+            mean(shortfall, na.rm = TRUE)
+          } else {
+            sum(shortfall * w, na.rm = TRUE) / sum(w, na.rm = TRUE)
+          }
         },
         fgt2 = {
           if (is.null(pov_line)) stop("`pov_line` must be supplied for fgt2")
           shortfall <- pmax(pov_line - x, 0) / pov_line
-          if (is.null(w)) mean(shortfall^2, na.rm = TRUE)
-          else sum((shortfall^2) * w, na.rm = TRUE) / sum(w, na.rm = TRUE)
+          if (is.null(w)) {
+            mean(shortfall^2, na.rm = TRUE)
+          } else {
+            sum((shortfall^2) * w, na.rm = TRUE) / sum(w, na.rm = TRUE)
+          }
         },
-        gini            = gini_coef(x, w),
-        prosperity_gap  = {
+        gini = gini_coef(x, w),
+        prosperity_gap = {
           # Average factor by which incomes must be multiplied to reach $28/day.
           # For incomes already >= 28 the gap factor is 1 (no gap).
           pg <- pmax(28 / x, 1)
-          if (is.null(w)) mean(pg, na.rm = TRUE)
-          else sum(pg * w, na.rm = TRUE) / sum(w, na.rm = TRUE)
+          if (is.null(w)) {
+            mean(pg, na.rm = TRUE)
+          } else {
+            sum(pg * w, na.rm = TRUE) / sum(w, na.rm = TRUE)
+          }
         },
-        avg_poverty     = {
+        avg_poverty = {
           # Average poverty = mean(1 / x): days needed to earn $1.
           # Non-positive incomes are excluded to avoid Inf / NaN.
           ok <- is.finite(x) & x > 0
           xp <- x[ok]
           wp <- if (!is.null(w)) w[ok] else NULL
-          if (length(xp) == 0) return(NA_real_)
-          if (is.null(wp)) mean(1 / xp, na.rm = TRUE)
-          else sum((1 / xp) * wp, na.rm = TRUE) / sum(wp, na.rm = TRUE)
+          if (length(xp) == 0) {
+            return(NA_real_)
+          }
+          if (is.null(wp)) {
+            mean(1 / xp, na.rm = TRUE)
+          } else {
+            sum((1 / xp) * wp, na.rm = TRUE) / sum(wp, na.rm = TRUE)
+          }
         }
       )
     }
@@ -604,14 +648,13 @@ aggregate_outcome <- function(df,
 #' @importFrom dplyr mutate
 #' @export
 deviation_from_centre <- function(df,
-                                  group  = "sim_year",
+                                  group = "sim_year",
                                   centre = c("mean", "median"),
-                                  loss   = FALSE) {
-
+                                  loss = FALSE) {
   centre <- match.arg(centre)
 
   ref <- switch(centre,
-    mean   = mean(df$value,   na.rm = TRUE),
+    mean   = mean(df$value, na.rm = TRUE),
     median = median(df$value, na.rm = TRUE)
   )
 
@@ -653,7 +696,6 @@ deviation_from_centre <- function(df,
 #' @export
 aggregate_sim_preds <- function(preds, so, agg_method, deviation, loss_frame,
                                 pov_line = NULL, weights = NULL) {
-
   if (agg_method %in% c("headcount_ratio", "gap", "fgt2") && is.null(pov_line)) {
     rlang::abort(
       "`pov_line` must be supplied when `agg_method` is 'headcount_ratio','gap', or 'fgt2'."
@@ -676,8 +718,8 @@ aggregate_sim_preds <- function(preds, so, agg_method, deviation, loss_frame,
   # Stage 1 grouping: always include draw_id when present so each draw
   # produces its own aggregate scalar before we summarise across draws.
   grp_cols <- c(
-    if (has_draws)                          "draw_id",
-    if ("model" %in% names(preds))          "model",
+    if (has_draws) "draw_id",
+    if ("model" %in% names(preds)) "model",
     "sim_year"
   )
 
@@ -745,53 +787,60 @@ aggregate_sim_preds <- function(preds, so, agg_method, deviation, loss_frame,
 #' @noRd
 aggregate_pipeline_table <- function(pipelines,
                                      method,
-                                     weighted     = TRUE,
-                                     pov_line     = NULL,
-                                     residuals    = "original",
-                                     is_log       = TRUE,
-                                     band_q       = c(lo = 0.10, hi = 0.90),
-                                     skip_coef    = FALSE,
+                                     weighted = TRUE,
+                                     pov_line = NULL,
+                                     residuals = "original",
+                                     is_log = TRUE,
+                                     band_q = c(lo = 0.10, hi = 0.90),
+                                     skip_coef = FALSE,
                                      bandwidth_p0 = 0.05,
-                                     seed         = WISEAPP_DEFAULT_SEED,
-                                     model_ids    = NULL,
+                                     seed = WISEAPP_DEFAULT_SEED,
+                                     model_ids = NULL,
                                      method_label = method,
-                                     scenario     = NULL,
+                                     scenario = NULL,
                                      shared_context = NULL,
                                      preparation_cache = NULL) {
-  if (is.null(pipelines)) return(tibble::tibble())
-  if (!is.null(pipelines$y_point)) pipelines <- list(pipelines)
-  if (!is.list(pipelines) || length(pipelines) == 0L)
+  if (is.null(pipelines)) {
     return(tibble::tibble())
+  }
+  if (!is.null(pipelines$y_point)) pipelines <- list(pipelines)
+  if (!is.list(pipelines) || length(pipelines) == 0L) {
+    return(tibble::tibble())
+  }
 
   if (is.null(model_ids)) model_ids <- names(pipelines)
   if (is.null(model_ids)) model_ids <- character(0)
-  if (length(model_ids) != length(pipelines) || any(!nzchar(model_ids)))
+  if (length(model_ids) != length(pipelines) || any(!nzchar(model_ids))) {
     model_ids <- paste0("model_", seq_along(pipelines))
+  }
 
-  if (is.null(preparation_cache))
+  if (is.null(preparation_cache)) {
     preparation_cache <- .new_aggregation_preparation_cache()
+  }
 
   per_model <- lapply(pipelines, function(pipe) {
     aggregate_pipeline_per_year(
-      pipe         = pipe,
-      method       = method,
-      weighted     = weighted,
-      pov_line     = pov_line,
-      residuals    = residuals,
-      is_log       = is_log,
-      band_q       = band_q,
-      skip_coef    = skip_coef,
-       bandwidth_p0 = bandwidth_p0,
-       seed         = seed,
-       shared_context = shared_context,
-       preparation_cache = preparation_cache
-     )
+      pipe = pipe,
+      method = method,
+      weighted = weighted,
+      pov_line = pov_line,
+      residuals = residuals,
+      is_log = is_log,
+      band_q = band_q,
+      skip_coef = skip_coef,
+      bandwidth_p0 = bandwidth_p0,
+      seed = seed,
+      shared_context = shared_context,
+      preparation_cache = preparation_cache
+    )
   })
 
   # The first pipeline defines the simulation-year grid, matching the
   # simulation contract used by both result panes.
   years <- sort(unique(pipelines[[1L]]$sim_year))
-  if (length(years) == 0L) return(tibble::tibble())
+  if (length(years) == 0L) {
+    return(tibble::tibble())
+  }
 
   rows <- lapply(years, function(year) {
     per_year <- lapply(per_model, function(results) {
@@ -801,7 +850,9 @@ aggregate_pipeline_table <- function(pipelines,
     keep <- !vapply(per_year, is.null, logical(1L))
     per_year <- per_year[keep]
     ids <- model_ids[keep]
-    if (length(per_year) == 0L) return(NULL)
+    if (length(per_year) == 0L) {
+      return(NULL)
+    }
 
     values <- vapply(per_year, `[[`, numeric(1L), "value")
     sds <- sqrt(pmax(vapply(
@@ -870,12 +921,15 @@ aggregate_pipeline_table <- function(pipelines,
 #'
 #' @export
 apply_deviation <- function(d, deviation, hist_ref = NA_real_) {
-  if (identical(deviation, "none") || is.null(d)) return(d)
+  if (identical(deviation, "none") || is.null(d)) {
+    return(d)
+  }
   if (is.na(hist_ref)) {
-    hist_ref <- if (identical(deviation, "mean"))
+    hist_ref <- if (identical(deviation, "mean")) {
       mean(d$value, na.rm = TRUE)
-    else
+    } else {
       stats::median(d$value, na.rm = TRUE)
+    }
   }
   dplyr::mutate(d, value = value - hist_ref)
 }
@@ -902,30 +956,36 @@ compute_exceedance_ribbon <- function(agg_tbl,
                                       band_q = c(lo = 0.10, hi = 0.90),
                                       model_lo = NULL, model_hi = NULL) {
   N_years <- nrow(agg_tbl)
-  if (N_years == 0L) return(NULL)
+  if (N_years == 0L) {
+    return(NULL)
+  }
 
-  rank_order     <- order(agg_tbl$value, decreasing = TRUE)
-  probs          <- (seq_len(N_years) - 0.5) / N_years
+  rank_order <- order(agg_tbl$value, decreasing = TRUE)
+  probs <- (seq_len(N_years) - 0.5) / N_years
   welfare_sorted <- sort(agg_tbl$value, decreasing = TRUE)
 
   draw_list <- agg_tbl$draw_values
   has_draws <- !is.null(draw_list) && length(draw_list) > 0L &&
-               !is.null(draw_list[[1L]]) && length(draw_list[[1L]]) >= 2L
+    !is.null(draw_list[[1L]]) && length(draw_list[[1L]]) >= 2L
 
   if (has_draws) {
     S <- length(draw_list[[1L]])
     # Build N_years * S matrix - each column = one draw across all years
     draw_mat <- matrix(
       unlist(draw_list, use.names = FALSE),
-      nrow  = N_years,
-      ncol  = S,
+      nrow = N_years,
+      ncol = S,
       byrow = TRUE
     )
     ordered_mat <- draw_mat[rank_order, ]
     coef_lo <- matrixStats::rowQuantiles(
-               ordered_mat, probs = band_q[["lo"]], na.rm = TRUE)
+      ordered_mat,
+      probs = band_q[["lo"]], na.rm = TRUE
+    )
     coef_hi <- matrixStats::rowQuantiles(
-                ordered_mat, probs = band_q[["hi"]], na.rm = TRUE)
+      ordered_mat,
+      probs = band_q[["hi"]], na.rm = TRUE
+    )
   } else if (all(c("coef_lo", "coef_hi") %in% names(agg_tbl))) {
     # Delta-method path - use analytic band columns directly.
     # Re-order to match the descending welfare ranking.
@@ -943,16 +1003,20 @@ compute_exceedance_ribbon <- function(agg_tbl,
   # (understates true joint uncertainty by ~10-20%).
   # Option B (per-member Cholesky draws) available if tighter bounds needed.
   # See known_issues.md #18 and methodology workplan for full discussion.
-  coef_width_lo <- welfare_sorted - coef_lo   # half-width below central
-  coef_width_hi <- coef_hi - welfare_sorted   # half-width above central
+  coef_width_lo <- welfare_sorted - coef_lo # half-width below central
+  coef_width_hi <- coef_hi - welfare_sorted # half-width above central
 
-  final_lo <- if (!is.null(model_lo))
+  final_lo <- if (!is.null(model_lo)) {
     pmin(coef_lo, model_lo - coef_width_lo)
-  else coef_lo
+  } else {
+    coef_lo
+  }
 
-  final_hi <- if (!is.null(model_hi))
+  final_hi <- if (!is.null(model_hi)) {
     pmax(coef_hi, model_hi + coef_width_hi)
-  else coef_hi
+  } else {
+    coef_hi
+  }
 
   tibble::tibble(
     exceed_prob  = probs,

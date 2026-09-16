@@ -21,9 +21,15 @@
 # Scale of the reported effect: "pct" (% change), "pp" (percentage points),
 # or "level" (raw outcome units).
 .s1_scale <- function(mf, snap) {
-  if (is_logistic_fit(mf)) return("pp")
-  if (identical(tolower(as.character(snap$outcome$type[1])), "logical")) return("pp")
-  if (identical(as.character(snap$outcome$transform[1]), "log")) return("pct")
+  if (is_logistic_fit(mf)) {
+    return("pp")
+  }
+  if (identical(tolower(as.character(snap$outcome$type[1])), "logical")) {
+    return("pp")
+  }
+  if (identical(as.character(snap$outcome$transform[1]), "log")) {
+    return("pct")
+  }
   "level"
 }
 
@@ -43,32 +49,46 @@
   w <- snap$weather
   if (!is.null(w) && !is.null(w$name) && var %in% as.character(w$name)) {
     cb <- as.character(w$cont_binned[w$name == var][1])
-    if (!is.na(cb) && nzchar(cb)) return(cb)
+    if (!is.na(cb) && nzchar(cb)) {
+      return(cb)
+    }
   }
   "Continuous"
 }
 
 .s1_x_stats <- function(td, var) {
-  if (is.null(td) || !var %in% names(td)) return(NULL)
+  if (is.null(td) || !var %in% names(td)) {
+    return(NULL)
+  }
   x <- suppressWarnings(as.numeric(td[[var]]))
   x <- x[is.finite(x)]
-  if (length(x) < 10) return(NULL)
+  if (length(x) < 10) {
+    return(NULL)
+  }
   m <- mean(x)
   s <- stats::sd(x)
-  if (!is.finite(m) || !is.finite(s) || s <= 0) return(NULL)
+  if (!is.finite(m) || !is.finite(s) || s <= 0) {
+    return(NULL)
+  }
   list(mean = m, sd = s)
 }
 
 # First moderator variable interacting with `var`, from the fit snapshot.
 .s1_modx_var <- function(mf, var) {
   its <- mf$interaction_terms %||% character(0)
-  if (!length(its)) return(NULL)
+  if (!length(its)) {
+    return(NULL)
+  }
   pat <- paste0("(\\b|^)", .s1_esc(var), "(\\b|\\[|\\^)")
   mt <- its[grepl(pat, its)]
-  if (!length(mt)) return(NULL)
+  if (!length(mt)) {
+    return(NULL)
+  }
   parts <- strsplit(mt[1], ":", fixed = TRUE)[[1]]
   cand <- parts[!grepl(pat, parts)]
-  if (!length(cand) || is.na(cand[1]) || !nzchar(cand[1])) return(NULL)
+  if (!length(cand) || is.na(cand[1]) || !nzchar(cand[1])) {
+    return(NULL)
+  }
   cand[1]
 }
 
@@ -86,15 +106,19 @@
   }
   mx <- suppressWarnings(as.numeric(td[[modx_var]]))
   mx <- mx[is.finite(mx)]
-  if (!length(mx)) return(list(list(value = 0, label = NULL)))
+  if (!length(mx)) {
+    return(list(list(value = 0, label = NULL)))
+  }
   u <- sort(unique(mx))
   if (length(u) <= 5) {
     # Binary 0/1 moderators get yes/no level labels instead of raw codes.
     is_bin <- length(u) == 2 && all(u %in% c(0, 1))
-    lapply(u, function(v) list(
-      value = v,
-      label = if (is_bin) (if (v == 1) "yes" else "no") else as.character(v)
-    ))
+    lapply(u, function(v) {
+      list(
+        value = v,
+        label = if (is_bin) (if (v == 1) "yes" else "no") else as.character(v)
+      )
+    })
   } else {
     m <- mean(mx)
     s <- stats::sd(mx)
@@ -119,9 +143,12 @@
     inner
   }
   ref <- tryCatch(get_first_bin_label(snap$survey_weather, var),
-                  error = function(e) NA_character_)
-  paste0(rng, " bin vs reference bin",
-         if (!is.na(ref) && nzchar(ref)) paste0(" (", ref, ")") else "")
+    error = function(e) NA_character_
+  )
+  paste0(
+    rng, " bin vs reference bin",
+    if (!is.na(ref) && nzchar(ref)) paste0(" (", ref, ")") else ""
+  )
 }
 
 # Format an estimate/SE pair in the outcome's reporting scale.
@@ -129,7 +156,8 @@
   f <- switch(scale,
     pct = function(v) sprintf("%+.*f%%", digits, 100 * (exp(v) - 1)),
     pp  = function(v) sprintf("%+.*f pp", digits, 100 * v),
-    function(v) sprintf("%+.*f", digits, v))
+    function(v) sprintf("%+.*f", digits, v)
+  )
   lo <- est - 1.96 * se
   hi <- est + 1.96 * se
   # Precomputed transformed interval (logit pp): carried by the scenario
@@ -139,8 +167,10 @@
     lo <- min(ci)
     hi <- max(ci)
   }
-  list(value = f(est), lo_txt = f(lo), hi_txt = f(hi),
-       spans_zero = (lo < 0 && hi > 0))
+  list(
+    value = f(est), lo_txt = f(lo), hi_txt = f(hi),
+    spans_zero = (lo < 0 && hi > 0)
+  )
 }
 
 
@@ -156,23 +186,33 @@
 
 .s1_poly_col <- function(cols, var, k) {
   hit <- grep(paste0("^I\\((?:I\\()?", .s1_esc(var), "\\^", k, "\\)\\)?$"),
-              cols, value = TRUE)
+    cols,
+    value = TRUE
+  )
   if (length(hit)) hit[1] else NA_character_
 }
 
 .s1_part_value <- function(part, pred_var, x, active_bin, row) {
-  if (part == pred_var) return(x)
-  if (.s1_is_poly_term(part, pred_var, 2)) return(x^2)
-  if (.s1_is_poly_term(part, pred_var, 3)) return(x^3)
+  if (part == pred_var) {
+    return(x)
+  }
+  if (.s1_is_poly_term(part, pred_var, 2)) {
+    return(x^2)
+  }
+  if (.s1_is_poly_term(part, pred_var, 3)) {
+    return(x^3)
+  }
   if (grepl(paste0("^", .s1_esc(pred_var), "[\\[\\(]"), part)) {
     return(as.numeric(identical(part, active_bin)))
   }
-  if (part %in% names(row)) return(row[[part]])
+  if (part %in% names(row)) {
+    return(row[[part]])
+  }
   NA_real_
 }
 
 .s1_design_row <- function(mm, pred_var, x = 0, modx_var = NULL, modx_value = 0,
-                            active_bin = NULL, base_row = NULL) {
+                           active_bin = NULL, base_row = NULL) {
   cols <- names(mm)
   if (!is.null(base_row)) {
     # Counterfactual profile of a real household (used for binary outcomes,
@@ -190,7 +230,9 @@
         if (is.finite(m)) m else 0
       } else {
         tb <- sort(table(col), decreasing = TRUE)
-        if (!length(tb)) return(0)
+        if (!length(tb)) {
+          return(0)
+        }
         v <- suppressWarnings(as.numeric(names(tb)[1]))
         if (is.finite(v)) v else 0
       }
@@ -229,8 +271,10 @@
 
   for (nm in grep(":", cols, value = TRUE, fixed = TRUE)) {
     parts <- strsplit(nm, ":", fixed = TRUE)[[1]]
-    vals <- vapply(parts, .s1_part_value, numeric(1), pred_var = pred_var,
-                   x = x, active_bin = active_bin, row = row)
+    vals <- vapply(parts, .s1_part_value, numeric(1),
+      pred_var = pred_var,
+      x = x, active_bin = active_bin, row = row
+    )
     if (!anyNA(vals)) row[[nm]] <- prod(vals)
   }
   row
@@ -243,121 +287,160 @@
 # carries the model-scale contrast (w = design row difference), its SE from the
 # full vcov, and - for logit - the pieces needed to convert to probabilities.
 .s1_fixest_scenarios <- function(mf, snap, var) {
-  tryCatch({
-    fit <- extract_native_fit(mf$fit3, mf$engine)
-    mm  <- resolve_model_matrix(fit)
-    if (is.null(mm)) return(NULL)
-    beta <- stats::coef(fit)
-    V    <- .fixest_vcov(fit)
-    if (is.null(beta) || is.null(V)) return(NULL)
+  tryCatch(
+    {
+      fit <- extract_native_fit(mf$fit3, mf$engine)
+      mm <- resolve_model_matrix(fit)
+      if (is.null(mm)) {
+        return(NULL)
+      }
+      beta <- stats::coef(fit)
+      V <- .fixest_vcov(fit)
+      if (is.null(beta) || is.null(V)) {
+        return(NULL)
+      }
 
-    td     <- mf$train_data
-    binned <- identical(.s1_cont_binned(snap, var), "Binned")
-    xd     <- .s1_x_stats(td, var)
-    if (!binned && is.null(xd)) return(NULL)
+      td <- mf$train_data
+      binned <- identical(.s1_cont_binned(snap, var), "Binned")
+      xd <- .s1_x_stats(td, var)
+      if (!binned && is.null(xd)) {
+        return(NULL)
+      }
 
-    modx_var  <- .s1_modx_var(mf, var)
-    modx_vals <- .s1_modx_levels(td, modx_var)
+      modx_var <- .s1_modx_var(mf, var)
+      modx_vals <- .s1_modx_levels(td, modx_var)
 
-    bin_cols <- grep(paste0("^", .s1_esc(var), "[\\[\\(]"), names(mm), value = TRUE)
-    top_bin  <- if (length(bin_cols)) bin_cols[which.max(.s1_bin_lower(bin_cols, var))] else NULL
-    if (binned && is.null(top_bin)) return(NULL)
+      bin_cols <- grep(paste0("^", .s1_esc(var), "[\\[\\(]"), names(mm), value = TRUE)
+      top_bin <- if (length(bin_cols)) bin_cols[which.max(.s1_bin_lower(bin_cols, var))] else NULL
+      if (binned && is.null(top_bin)) {
+        return(NULL)
+      }
 
-    contrast_label <- if (binned) {
-      .s1_bin_contrast_label(snap, var, top_bin)
-    } else {
-      paste0("+1 SD of ", .s1_weather_label(snap, var))
-    }
+      contrast_label <- if (binned) {
+        .s1_bin_contrast_label(snap, var, top_bin)
+      } else {
+        paste0("+1 SD of ", .s1_weather_label(snap, var))
+      }
 
-    is_logit <- is_logistic_fit(mf)
+      is_logit <- is_logistic_fit(mf)
 
-    # Binary outcomes are evaluated at a real household whose fitted risk is
-    # the sample median, not at the average-covariate hybrid: with strongly
-    # separating logit fits the hybrid profile can sit at a probability of
-    # ~0, where the pp effect saturates to zero.
-    is_binary <- identical(tolower(as.character(snap$outcome$type[1])), "logical")
-    profile_note <- "sample-average household"
-    base_row <- NULL
-    xb_lo_binary <- NULL
-    if (is_binary) {
-      f <- tryCatch(stats::fitted(fit), error = function(e) NULL)
-      if (!is.null(f) && length(f) == nrow(mm) && any(is.finite(f))) {
-        i_med <- which.min(abs(f - stats::median(f, na.rm = TRUE)))
-        base_row <- stats::setNames(as.numeric(mm[i_med, ]), names(mm))
-        profile_note <- "median-risk household"
-        # Baseline linear predictor of that household, fixed effects included:
-        # fitted = plogis(X beta + FE_i), so qlogis(fitted) is exact, and the
-        # fixed effects cancel in the +1 SD contrast (same household).
-        if (is_logit && is.finite(f[i_med]) && f[i_med] > 0 && f[i_med] < 1) {
-          xb_lo_binary <- stats::qlogis(f[i_med])
+      # Binary outcomes are evaluated at a real household whose fitted risk is
+      # the sample median, not at the average-covariate hybrid: with strongly
+      # separating logit fits the hybrid profile can sit at a probability of
+      # ~0, where the pp effect saturates to zero.
+      is_binary <- identical(tolower(as.character(snap$outcome$type[1])), "logical")
+      profile_note <- "sample-average household"
+      base_row <- NULL
+      xb_lo_binary <- NULL
+      if (is_binary) {
+        f <- tryCatch(stats::fitted(fit), error = function(e) NULL)
+        if (!is.null(f) && length(f) == nrow(mm) && any(is.finite(f))) {
+          i_med <- which.min(abs(f - stats::median(f, na.rm = TRUE)))
+          base_row <- stats::setNames(as.numeric(mm[i_med, ]), names(mm))
+          profile_note <- "median-risk household"
+          # Baseline linear predictor of that household, fixed effects included:
+          # fitted = plogis(X beta + FE_i), so qlogis(fitted) is exact, and the
+          # fixed effects cancel in the +1 SD contrast (same household).
+          if (is_logit && is.finite(f[i_med]) && f[i_med] > 0 && f[i_med] < 1) {
+            xb_lo_binary <- stats::qlogis(f[i_med])
+          }
         }
       }
-    }
-    # Counterfactual baselines for moderator levels: shift only the moderator
-    # (and its interactions) away from the reference household's own values,
-    # keeping the household's weather level.
-    modx_shift_beta <- function(mv) {
-      if (is.null(xb_lo_binary)) return(NULL)
-      r_hh <- if (!is.null(base_row) && var %in% names(base_row)) base_row[[var]] else 0
-      mv_hh <- if (!is.null(modx_var) && !is.null(base_row) &&
-                   modx_var %in% names(base_row)) base_row[[modx_var]] else 0
-      row_mv <- .s1_design_row(mm, var, x = r_hh, modx_var = modx_var,
-                               modx_value = mv, base_row = base_row)
-      row_hh <- .s1_design_row(mm, var, x = r_hh, modx_var = modx_var,
-                               modx_value = mv_hh, base_row = base_row)
-      d <- row_mv - row_hh
-      cc <- intersect(names(d), names(beta))
-      sum(d[cc] * beta[cc])
-    }
-
-    sc <- lapply(modx_vals, function(mv) {
-      if (binned) {
-        r_hi <- .s1_design_row(mm, var, x = 0, modx_var = modx_var,
-                               modx_value = mv$value, active_bin = top_bin,
-                               base_row = base_row)
-        r_lo <- .s1_design_row(mm, var, x = 0, modx_var = modx_var,
-                               modx_value = mv$value, active_bin = NULL,
-                               base_row = base_row)
-      } else {
-        r_hi <- .s1_design_row(mm, var, x = xd$mean + xd$sd, modx_var = modx_var,
-                               modx_value = mv$value, base_row = base_row)
-        r_lo <- .s1_design_row(mm, var, x = xd$mean, modx_var = modx_var,
-                               modx_value = mv$value, base_row = base_row)
+      # Counterfactual baselines for moderator levels: shift only the moderator
+      # (and its interactions) away from the reference household's own values,
+      # keeping the household's weather level.
+      modx_shift_beta <- function(mv) {
+        if (is.null(xb_lo_binary)) {
+          return(NULL)
+        }
+        r_hh <- if (!is.null(base_row) && var %in% names(base_row)) base_row[[var]] else 0
+        mv_hh <- if (!is.null(modx_var) && !is.null(base_row) &&
+          modx_var %in% names(base_row)) {
+          base_row[[modx_var]]
+        } else {
+          0
+        }
+        row_mv <- .s1_design_row(mm, var,
+          x = r_hh, modx_var = modx_var,
+          modx_value = mv, base_row = base_row
+        )
+        row_hh <- .s1_design_row(mm, var,
+          x = r_hh, modx_var = modx_var,
+          modx_value = mv_hh, base_row = base_row
+        )
+        d <- row_mv - row_hh
+        cc <- intersect(names(d), names(beta))
+        sum(d[cc] * beta[cc])
       }
-      w <- r_hi - r_lo
-      common <- intersect(names(w), names(beta))
-      if (!length(common)) return(NULL)
-      wc <- w[common]
-      est <- sum(wc * beta[common])
-      se  <- tryCatch(
-        sqrt(max(drop(t(wc) %*% V[common, common, drop = FALSE] %*% wc), 0)),
-        error = function(e) NA_real_)
-      list(value = mv$value, label = mv$label,
-           estimate = est, se = se,
-           xb_lo = if (!is.null(xb_lo_binary)) {
-             xb_lo_binary + (modx_shift_beta(mv$value) %||% 0)
-           } else {
-             sum(r_lo[common] * beta[common])
-           },
-           w = wc, cols = common, V = V, is_logit = is_logit)
-    })
-    sc <- Filter(Negate(is.null), sc)
-    if (!length(sc)) return(NULL)
-    attr(sc, "contrast_label") <- contrast_label
-    attr(sc, "profile_note") <- profile_note
-    sc
-  }, error = function(e) NULL)
+
+      sc <- lapply(modx_vals, function(mv) {
+        if (binned) {
+          r_hi <- .s1_design_row(mm, var,
+            x = 0, modx_var = modx_var,
+            modx_value = mv$value, active_bin = top_bin,
+            base_row = base_row
+          )
+          r_lo <- .s1_design_row(mm, var,
+            x = 0, modx_var = modx_var,
+            modx_value = mv$value, active_bin = NULL,
+            base_row = base_row
+          )
+        } else {
+          r_hi <- .s1_design_row(mm, var,
+            x = xd$mean + xd$sd, modx_var = modx_var,
+            modx_value = mv$value, base_row = base_row
+          )
+          r_lo <- .s1_design_row(mm, var,
+            x = xd$mean, modx_var = modx_var,
+            modx_value = mv$value, base_row = base_row
+          )
+        }
+        w <- r_hi - r_lo
+        common <- intersect(names(w), names(beta))
+        if (!length(common)) {
+          return(NULL)
+        }
+        wc <- w[common]
+        est <- sum(wc * beta[common])
+        se <- tryCatch(
+          sqrt(max(drop(t(wc) %*% V[common, common, drop = FALSE] %*% wc), 0)),
+          error = function(e) NA_real_
+        )
+        list(
+          value = mv$value, label = mv$label,
+          estimate = est, se = se,
+          xb_lo = if (!is.null(xb_lo_binary)) {
+            xb_lo_binary + (modx_shift_beta(mv$value) %||% 0)
+          } else {
+            sum(r_lo[common] * beta[common])
+          },
+          w = wc, cols = common, V = V, is_logit = is_logit
+        )
+      })
+      sc <- Filter(Negate(is.null), sc)
+      if (!length(sc)) {
+        return(NULL)
+      }
+      attr(sc, "contrast_label") <- contrast_label
+      attr(sc, "profile_note") <- profile_note
+      sc
+    },
+    error = function(e) NULL
+  )
 }
 
 # Convert a fixest scenario to probability-scale (pp) for logistic fits.
 .s1_to_pp <- function(s) {
-  if (is.null(s) || !isTRUE(s$is_logit) || !is.finite(s$estimate)) return(s)
+  if (is.null(s) || !isTRUE(s$is_logit) || !is.finite(s$estimate)) {
+    return(s)
+  }
   p_lo <- stats::plogis(s$xb_lo)
   p_hi <- stats::plogis(s$xb_lo + s$estimate)
   grad <- p_hi * (1 - p_hi) * s$w - p_lo * (1 - p_lo) * s$w
   se <- tryCatch(
     sqrt(max(drop(t(grad) %*% s$V[s$cols, s$cols, drop = FALSE] %*% grad), 0)),
-    error = function(e) NA_real_)
+    error = function(e) NA_real_
+  )
   # Confidence interval: transform the link-scale contrast endpoints through
   # the same profile map. plogis is monotone, so the interval inherits the
   # link interval's containment of zero - a symmetric delta-method pp interval
@@ -366,14 +449,19 @@
   ci <- NULL
   se_link <- tryCatch(
     sqrt(max(drop(t(s$w) %*% s$V[s$cols, s$cols, drop = FALSE] %*% s$w), 0)),
-    error = function(e) NA_real_)
+    error = function(e) NA_real_
+  )
   if (is.finite(se_link) && se_link > 0) {
     pp_at <- function(v) stats::plogis(s$xb_lo + v) - p_lo
-    ci <- sort(c(pp_at(s$estimate - 1.96 * se_link),
-                 pp_at(s$estimate + 1.96 * se_link)))
+    ci <- sort(c(
+      pp_at(s$estimate - 1.96 * se_link),
+      pp_at(s$estimate + 1.96 * se_link)
+    ))
   }
-  list(value = s$value, label = s$label, estimate = p_hi - p_lo, se = se,
-       ci = ci, w = s$w, cols = s$cols, V = s$V, is_logit = TRUE)
+  list(
+    value = s$value, label = s$label, estimate = p_hi - p_lo, se = se,
+    ci = ci, w = s$w, cols = s$cols, V = s$V, is_logit = TRUE
+  )
 }
 
 # RIF: term weights for the same contrast, evaluated analytically from the
@@ -381,85 +469,125 @@
 # standard errors without cross-term covariance - the same approximation the
 # RIF effect plot discloses in its caption.
 .s1_rif_scenarios <- function(mf, snap, var, taus = c(0.1, 0.5, 0.9)) {
-  tryCatch({
-    g3 <- mf$rif_grid
-    if (is.null(g3)) return(NULL)
-    g3 <- g3[g3$model == 3L, , drop = FALSE]
-    if (!nrow(g3)) return(NULL)
+  tryCatch(
+    {
+      g3 <- mf$rif_grid
+      if (is.null(g3)) {
+        return(NULL)
+      }
+      g3 <- g3[g3$model == 3L, , drop = FALSE]
+      if (!nrow(g3)) {
+        return(NULL)
+      }
 
-    pat <- paste0("(\\b|^)", .s1_esc(var), "(\\b|\\[|\\^)")
-    tt <- unique(as.character(g3$term[grepl(pat, g3$term)]))
-    if (!length(tt)) return(NULL)
+      pat <- paste0("(\\b|^)", .s1_esc(var), "(\\b|\\[|\\^)")
+      tt <- unique(as.character(g3$term[grepl(pat, g3$term)]))
+      if (!length(tt)) {
+        return(NULL)
+      }
 
-    td        <- mf$train_data
-    binned    <- identical(.s1_cont_binned(snap, var), "Binned")
-    xd        <- .s1_x_stats(td, var)
-    modx_var  <- .s1_modx_var(mf, var)
-    modx_vals <- .s1_modx_levels(td, modx_var)
+      td <- mf$train_data
+      binned <- identical(.s1_cont_binned(snap, var), "Binned")
+      xd <- .s1_x_stats(td, var)
+      modx_var <- .s1_modx_var(mf, var)
+      modx_vals <- .s1_modx_levels(td, modx_var)
 
-    bin_cols <- tt[grepl(paste0("^", .s1_esc(var), "[\\[\\(]"), tt)]
-    top_bin  <- if (length(bin_cols)) bin_cols[which.max(.s1_bin_lower(bin_cols, var))] else NULL
-    if (binned && is.null(top_bin)) return(NULL)
-    if (!binned && is.null(xd)) return(NULL)
+      bin_cols <- tt[grepl(paste0("^", .s1_esc(var), "[\\[\\(]"), tt)]
+      top_bin <- if (length(bin_cols)) bin_cols[which.max(.s1_bin_lower(bin_cols, var))] else NULL
+      if (binned && is.null(top_bin)) {
+        return(NULL)
+      }
+      if (!binned && is.null(xd)) {
+        return(NULL)
+      }
 
-    contrast_label <- if (binned) {
-      .s1_bin_contrast_label(snap, var, top_bin)
-    } else {
-      paste0("+1 SD of ", .s1_weather_label(snap, var))
-    }
+      contrast_label <- if (binned) {
+        .s1_bin_contrast_label(snap, var, top_bin)
+      } else {
+        paste0("+1 SD of ", .s1_weather_label(snap, var))
+      }
 
-    term_value <- function(t, x, mv, bin) {
-      parts <- strsplit(t, ":", fixed = TRUE)[[1]]
-      pv <- vapply(parts, function(p) {
-        if (p == var) return(x)
-        if (.s1_is_poly_term(p, var, 2)) return(x^2)
-        if (.s1_is_poly_term(p, var, 3)) return(x^3)
-        if (grepl(paste0("^", .s1_esc(var), "[\\[\\(]"), p)) {
-          return(as.numeric(identical(p, bin)))
-        }
-        if (!is.null(modx_var) && p == modx_var) return(mv)
-        NA_real_
-      }, numeric(1))
-      if (anyNA(pv)) NA_real_ else prod(pv)
-    }
-
-    out <- lapply(modx_vals, function(mv) {
-      lapply(taus, function(tau) {
-        gt <- g3[abs(g3$tau - tau) < 1e-9, c("term", "estimate", "std.error"),
-                 drop = FALSE]
-        if (!nrow(gt)) return(NULL)
-        x_hi <- if (binned) 0 else xd$mean + xd$sd
-        x_lo <- if (binned) 0 else xd$mean
-        w <- vapply(tt, function(t) {
-          vh <- term_value(t, x_hi, mv$value, if (binned) top_bin else NULL)
-          vl <- term_value(t, x_lo, mv$value, NULL)
-          if (anyNA(c(vh, vl))) NA_real_ else vh - vl
+      term_value <- function(t, x, mv, bin) {
+        parts <- strsplit(t, ":", fixed = TRUE)[[1]]
+        pv <- vapply(parts, function(p) {
+          if (p == var) {
+            return(x)
+          }
+          if (.s1_is_poly_term(p, var, 2)) {
+            return(x^2)
+          }
+          if (.s1_is_poly_term(p, var, 3)) {
+            return(x^3)
+          }
+          if (grepl(paste0("^", .s1_esc(var), "[\\[\\(]"), p)) {
+            return(as.numeric(identical(p, bin)))
+          }
+          if (!is.null(modx_var) && p == modx_var) {
+            return(mv)
+          }
+          NA_real_
         }, numeric(1))
-        ok <- !is.na(w)
-        if (!any(ok)) return(NULL)
-        m <- match(tt[ok], gt$term)
-        keep <- !is.na(m)
-        if (!any(keep)) return(NULL)
-        wt <- w[ok][keep]
-        list(tau = tau, value = mv$value, label = mv$label,
-             estimate = sum(wt * gt$estimate[m[keep]]),
-             se = sqrt(sum((wt * gt$std.error[m[keep]])^2)))
+        if (anyNA(pv)) NA_real_ else prod(pv)
+      }
+
+      out <- lapply(modx_vals, function(mv) {
+        lapply(taus, function(tau) {
+          gt <- g3[abs(g3$tau - tau) < 1e-9, c("term", "estimate", "std.error"),
+            drop = FALSE
+          ]
+          if (!nrow(gt)) {
+            return(NULL)
+          }
+          x_hi <- if (binned) 0 else xd$mean + xd$sd
+          x_lo <- if (binned) 0 else xd$mean
+          w <- vapply(tt, function(t) {
+            vh <- term_value(t, x_hi, mv$value, if (binned) top_bin else NULL)
+            vl <- term_value(t, x_lo, mv$value, NULL)
+            if (anyNA(c(vh, vl))) NA_real_ else vh - vl
+          }, numeric(1))
+          ok <- !is.na(w)
+          if (!any(ok)) {
+            return(NULL)
+          }
+          m <- match(tt[ok], gt$term)
+          keep <- !is.na(m)
+          if (!any(keep)) {
+            return(NULL)
+          }
+          wt <- w[ok][keep]
+          list(
+            tau = tau, value = mv$value, label = mv$label,
+            estimate = sum(wt * gt$estimate[m[keep]]),
+            se = sqrt(sum((wt * gt$std.error[m[keep]])^2))
+          )
+        })
       })
-    })
-    out <- lapply(out, function(x) Filter(Negate(is.null), x))
-    if (!length(out) || !length(out[[1]])) return(NULL)
-    attr(out, "contrast_label") <- contrast_label
-    out
-  }, error = function(e) NULL)
+      out <- lapply(out, function(x) Filter(Negate(is.null), x))
+      if (!length(out) || !length(out[[1]])) {
+        return(NULL)
+      }
+      attr(out, "contrast_label") <- contrast_label
+      out
+    },
+    error = function(e) NULL
+  )
 }
 
 .s1_scen_at <- function(scens, tau) {
-  if (is.null(scens) || !length(scens)) return(NULL)
+  if (is.null(scens) || !length(scens)) {
+    return(NULL)
+  }
   first <- scens[[1]]
-  if (!is.list(first) || !length(first)) return(NULL)
-  hit <- Filter(function(s) !is.null(s) && is.finite(s$tau) && abs(s$tau - tau) < 1e-9,
-                first)
-  if (!length(hit)) return(NULL)
+  if (!is.list(first) || !length(first)) {
+    return(NULL)
+  }
+  hit <- Filter(
+    function(s) !is.null(s) && is.finite(s$tau) && abs(s$tau - tau) < 1e-9,
+    first
+  )
+  if (!length(hit)) {
+    return(NULL)
+  }
   hit[[1]]
 }
 
@@ -475,85 +603,114 @@
 # approximation of the exact quantile-by-quantile comparison. Returns a p-value
 # or NULL when the screen cannot be run (falls back to no p-value on the card).
 step1_rif_heterogeneity_p <- function(mf, snap, var) {
-  tryCatch({
-    if (!identical(.s1_engine(mf), "rif")) return(NULL)
-    td <- mf$train_data
-    if (is.null(td)) return(NULL)
-    rif_cols <- grep("^rif_[0-9]+$", names(td), value = TRUE)
-    K <- length(rif_cols)
-    if (K < 3) return(NULL)
-
-    med <- extract_rif_median(mf$fit3, "rif")
-    mm  <- resolve_model_matrix(med)
-    if (is.null(mm)) return(NULL)
-    pat <- paste0("(\\b|^)", .s1_esc(var), "(\\b|\\[|\\^)")
-    vcols <- grep(pat, names(mm), value = TRUE)
-    if (!length(vcols) || length(vcols) > 8) return(NULL)
-
-    idx <- med$obs
-    if (is.null(idx) || !length(idx)) idx <- seq_len(nrow(td))
-    if (length(idx) != nrow(mm)) return(NULL)
-    tds <- td[idx, , drop = FALSE]
-    N <- nrow(tds)
-    if (N * K > 250000) return(NULL)
-
-    covs <- unique(unlist(snap$model[c("hh_covariates", "ind_covariates",
-                                        "area_covariates", "firm_covariates")]))
-    covs <- unique(c(covs, .s1_modx_var(mf, var)))
-    covs <- covs[!is.na(covs) & nzchar(covs) & covs %in% names(tds)]
-    fe <- (mf$fe_terms %||% character(0))
-    fe <- fe[!is.na(fe) & nzchar(fe) & fe %in% names(tds)]
-
-    # Keep only the columns the stacked fit needs; configuration columns that
-    # ride along on train_data (e.g. the polynomial list-column) would break
-    # fixest's model frame.
-    keep <- unique(c(covs, fe))
-    keep <- keep[vapply(keep, function(v) !is.list(tds[[v]]), logical(1))]
-    base_cols <- tds[, intersect(keep, names(tds)), drop = FALSE]
-
-    vnames <- paste0(".v", rep(seq_len(K), each = length(vcols)), "_",
-                     rep(seq_along(vcols), times = K))
-    M <- as.matrix(mm[, vcols, drop = FALSE])
-    stack <- do.call(rbind, lapply(seq_len(K), function(k) {
-      d <- base_cols
-      d$.rif_y <- tds[[rif_cols[k]]]
-      d$.tau   <- k
-      for (v in vnames) d[[v]] <- 0
-      for (j in seq_along(vcols)) d[[paste0(".v", k, "_", j)]] <- M[, j]
-      d
-    }))
-    stack$.tau_f <- factor(stack$.tau)
-
-    rhs <- c(".tau_f", covs, vnames)
-    fml <- stats::as.formula(paste(
-      "`.rif_y` ~ 0 +", paste(rhs, collapse = " + "),
-      if (length(fe)) paste0(" | ", paste(fe, collapse = " + ")) else ""))
-    fit <- suppressWarnings(fixest::feols(fml, data = stack, warn = FALSE))
-    b <- stats::coef(fit)
-    V <- .fixest_vcov(fit)
-    if (is.null(b) || is.null(V)) return(NULL)
-
-    # H0: the tau-specific effect of each design column is flat across taus.
-    R <- NULL
-    for (j in seq_along(vcols)) {
-      nms <- paste0(".v", seq_len(K), "_", j)
-      if (!all(nms %in% names(b))) next
-      Rj <- matrix(0, nrow = K - 1L, ncol = length(b), dimnames = list(NULL, names(b)))
-      for (k in 2:K) {
-        Rj[k - 1L, nms[k]] <- 1
-        Rj[k - 1L, nms[1]] <- -1
+  tryCatch(
+    {
+      if (!identical(.s1_engine(mf), "rif")) {
+        return(NULL)
       }
-      R <- rbind(R, Rj)
-    }
-    if (is.null(R) || !nrow(R)) return(NULL)
-    Rb <- as.numeric(R %*% b[colnames(R)])
-    Vsub <- V[colnames(R), colnames(R), drop = FALSE]
-    stat <- tryCatch(
-      as.numeric(t(Rb) %*% solve(R %*% Vsub %*% t(R)) %*% Rb),
-      error = function(e) NA_real_)
-    if (!is.finite(stat) || stat < 0) return(NULL)
-    stats::pchisq(stat, df = nrow(R), lower.tail = FALSE)
-  }, error = function(e) NULL)
+      td <- mf$train_data
+      if (is.null(td)) {
+        return(NULL)
+      }
+      rif_cols <- grep("^rif_[0-9]+$", names(td), value = TRUE)
+      K <- length(rif_cols)
+      if (K < 3) {
+        return(NULL)
+      }
+
+      med <- extract_rif_median(mf$fit3, "rif")
+      mm <- resolve_model_matrix(med)
+      if (is.null(mm)) {
+        return(NULL)
+      }
+      pat <- paste0("(\\b|^)", .s1_esc(var), "(\\b|\\[|\\^)")
+      vcols <- grep(pat, names(mm), value = TRUE)
+      if (!length(vcols) || length(vcols) > 8) {
+        return(NULL)
+      }
+
+      idx <- med$obs
+      if (is.null(idx) || !length(idx)) idx <- seq_len(nrow(td))
+      if (length(idx) != nrow(mm)) {
+        return(NULL)
+      }
+      tds <- td[idx, , drop = FALSE]
+      N <- nrow(tds)
+      if (N * K > 250000) {
+        return(NULL)
+      }
+
+      covs <- unique(unlist(snap$model[c(
+        "hh_covariates", "ind_covariates",
+        "area_covariates", "firm_covariates"
+      )]))
+      covs <- unique(c(covs, .s1_modx_var(mf, var)))
+      covs <- covs[!is.na(covs) & nzchar(covs) & covs %in% names(tds)]
+      fe <- (mf$fe_terms %||% character(0))
+      fe <- fe[!is.na(fe) & nzchar(fe) & fe %in% names(tds)]
+
+      # Keep only the columns the stacked fit needs; configuration columns that
+      # ride along on train_data (e.g. the polynomial list-column) would break
+      # fixest's model frame.
+      keep <- unique(c(covs, fe))
+      keep <- keep[vapply(keep, function(v) !is.list(tds[[v]]), logical(1))]
+      base_cols <- tds[, intersect(keep, names(tds)), drop = FALSE]
+
+      vnames <- paste0(
+        ".v", rep(seq_len(K), each = length(vcols)), "_",
+        rep(seq_along(vcols), times = K)
+      )
+      M <- as.matrix(mm[, vcols, drop = FALSE])
+      stack <- do.call(rbind, lapply(seq_len(K), function(k) {
+        d <- base_cols
+        d$.rif_y <- tds[[rif_cols[k]]]
+        d$.tau <- k
+        for (v in vnames) d[[v]] <- 0
+        for (j in seq_along(vcols)) d[[paste0(".v", k, "_", j)]] <- M[, j]
+        d
+      }))
+      stack$.tau_f <- factor(stack$.tau)
+
+      rhs <- c(".tau_f", covs, vnames)
+      fml <- stats::as.formula(paste(
+        "`.rif_y` ~ 0 +", paste(rhs, collapse = " + "),
+        if (length(fe)) paste0(" | ", paste(fe, collapse = " + ")) else ""
+      ))
+      fit <- suppressWarnings(fixest::feols(fml, data = stack, warn = FALSE))
+      b <- stats::coef(fit)
+      V <- .fixest_vcov(fit)
+      if (is.null(b) || is.null(V)) {
+        return(NULL)
+      }
+
+      # H0: the tau-specific effect of each design column is flat across taus.
+      R <- NULL
+      for (j in seq_along(vcols)) {
+        nms <- paste0(".v", seq_len(K), "_", j)
+        if (!all(nms %in% names(b))) next
+        Rj <- matrix(0, nrow = K - 1L, ncol = length(b), dimnames = list(NULL, names(b)))
+        for (k in 2:K) {
+          Rj[k - 1L, nms[k]] <- 1
+          Rj[k - 1L, nms[1]] <- -1
+        }
+        R <- rbind(R, Rj)
+      }
+      if (is.null(R) || !nrow(R)) {
+        return(NULL)
+      }
+      Rb <- as.numeric(R %*% b[colnames(R)])
+      Vsub <- V[colnames(R), colnames(R), drop = FALSE]
+      stat <- tryCatch(
+        as.numeric(t(Rb) %*% solve(R %*% Vsub %*% t(R)) %*% Rb),
+        error = function(e) NA_real_
+      )
+      if (!is.finite(stat) || stat < 0) {
+        return(NULL)
+      }
+      stats::pchisq(stat, df = nrow(R), lower.tail = FALSE)
+    },
+    error = function(e) NULL
+  )
 }
 
 
@@ -579,19 +736,29 @@ step1_rif_heterogeneity_p <- function(mf, snap, var) {
 step1_scenarios <- function(mf, snap, var) {
   engine <- .s1_engine(mf)
   scale <- .s1_scale(mf, snap)
-  if (engine == "ml") return(NULL)
+  if (engine == "ml") {
+    return(NULL)
+  }
   if (engine == "rif") {
     rs <- .s1_rif_scenarios(mf, snap, var, taus = 0.5)
-    if (!length(rs)) return(NULL)
+    if (!length(rs)) {
+      return(NULL)
+    }
     sc <- lapply(rs, function(x) if (length(x)) x[[1]] else NULL)
     sc <- Filter(Negate(is.null), sc)
-    if (!length(sc)) return(NULL)
-    return(list(engine = engine, scale = scale,
-                contrast_label = attr(rs, "contrast_label"),
-                profile_note = NULL, scenarios = sc))
+    if (!length(sc)) {
+      return(NULL)
+    }
+    return(list(
+      engine = engine, scale = scale,
+      contrast_label = attr(rs, "contrast_label"),
+      profile_note = NULL, scenarios = sc
+    ))
   }
   sc <- .s1_fixest_scenarios(mf, snap, var)
-  if (!length(sc)) return(NULL)
+  if (!length(sc)) {
+    return(NULL)
+  }
   # Read attributes before any lapply/Filter - they drop list attributes.
   clab <- attr(sc, "contrast_label")
   pnote <- attr(sc, "profile_note")
@@ -600,10 +767,14 @@ step1_scenarios <- function(mf, snap, var) {
   profile_eta <- if (is_logistic_fit(mf) && !is.null(sc[[1]]$xb_lo)) sc[[1]]$xb_lo else NULL
   if (is_logistic_fit(mf)) sc <- lapply(sc, .s1_to_pp)
   sc <- Filter(Negate(is.null), sc)
-  if (!length(sc)) return(NULL)
-  list(engine = engine, scale = scale,
-       contrast_label = clab, profile_note = pnote,
-       profile_eta = profile_eta, scenarios = sc)
+  if (!length(sc)) {
+    return(NULL)
+  }
+  list(
+    engine = engine, scale = scale,
+    contrast_label = clab, profile_note = pnote,
+    profile_eta = profile_eta, scenarios = sc
+  )
 }
 
 #' Format an effect estimate and SE in the outcome's reporting scale
@@ -633,8 +804,12 @@ step1_fmt_effect <- function(est, se, scale, digits = 1, ci = NULL) {
                             scenario = NULL, scenario_cached = FALSE) {
   varlab <- .s1_weather_label(snap, var, label_fun)
   lab <- paste0("Effect of ", varlab)
-  blank <- function(note) list(label = lab, value = "Unavailable",
-                               note = note, class = "neutral")
+  blank <- function(note) {
+    list(
+      label = lab, value = "Unavailable",
+      note = note, class = "neutral"
+    )
+  }
   if (isTRUE(scenario_cached)) {
     if (is.null(scenario) || !length(scenario$scenarios)) {
       return(blank("the effect could not be translated for this configuration"))
@@ -649,13 +824,15 @@ step1_fmt_effect <- function(est, se, scale, digits = 1, ci = NULL) {
     pnote <- NULL
   } else {
     sc <- .s1_fixest_scenarios(mf, snap, var)
-    if (!length(sc)) return(blank("the effect could not be translated for this configuration"))
+    if (!length(sc)) {
+      return(blank("the effect could not be translated for this configuration"))
+    }
     s <- if (is_logistic_fit(mf)) .s1_to_pp(sc[[1]]) else sc[[1]]
     clab <- attr(sc, "contrast_label")
     pnote <- attr(sc, "profile_note")
   }
   if (is.null(s) || !is.finite(s$estimate) || is.null(s$se) ||
-      !is.finite(s$se) || s$se <= 0) {
+    !is.finite(s$se) || s$se <= 0) {
     return(blank("the effect could not be translated for this configuration"))
   }
   fmt <- .s1_fmt_scaled(s$estimate, s$se, scale, ci = s$ci)
@@ -668,24 +845,35 @@ step1_fmt_effect <- function(est, se, scale, digits = 1, ci = NULL) {
   info_bits <- c(
     "Translated effect of the fitted model for the contrast shown, in the outcome's units.",
     if (binned) paste0("Bin contrast: ", clab, ".") else NULL,
-    if (engine == "rif")
+    if (engine == "rif") {
       "For RIF models this is the median-quantile (\u03c4 = 0.5) effect."
-      else NULL,
-    if (!is.null(pnote) && nzchar(pnote))
-      paste0("Evaluated for the sample-average household (all other ",
-             "variables held at sample means).")
-      else NULL,
-    paste0("The same number feeds the effect plot and the focused table ",
-           "below. Estimates are associations in this survey population ",
-           "\u2014 the relationship Steps 2\u20133 apply to simulated weather ",
-           "and policies, not causal weather impacts."))
-  list(label = lab, value = fmt$value,
-       note = paste(ci_line, contrast_line, sep = " \u00b7 "),
-       note_html = shiny::tagList(
-         shiny::tags$div(ci_line),
-         shiny::tags$div(style = "font-weight: 600;", contrast_line)
-       ),
-       info = paste(info_bits, collapse = " "))
+    } else {
+      NULL
+    },
+    if (!is.null(pnote) && nzchar(pnote)) {
+      paste0(
+        "Evaluated for the sample-average household (all other ",
+        "variables held at sample means)."
+      )
+    } else {
+      NULL
+    },
+    paste0(
+      "The same number feeds the effect plot and the focused table ",
+      "below. Estimates are associations in this survey population ",
+      "\u2014 the relationship Steps 2\u20133 apply to simulated weather ",
+      "and policies, not causal weather impacts."
+    )
+  )
+  list(
+    label = lab, value = fmt$value,
+    note = paste(ci_line, contrast_line, sep = " \u00b7 "),
+    note_html = shiny::tagList(
+      shiny::tags$div(ci_line),
+      shiny::tags$div(style = "font-weight: 600;", contrast_line)
+    ),
+    info = paste(info_bits, collapse = " ")
+  )
 }
 
 .s1_who_card <- function(mf, snap, var, engine, scale, label_fun,
@@ -693,8 +881,8 @@ step1_fmt_effect <- function(est, se, scale, digits = 1, ci = NULL) {
                          rif_scenarios = NULL, rif_scenarios_cached = FALSE,
                          rif_p = NULL, rif_p_cached = FALSE) {
   bits_val <- character(0)
-  note_parts <- character(0)   # plain text (CSV export)
-  html_parts <- list()         # display: p-value line + bold comparison line
+  note_parts <- character(0) # plain text (CSV export)
+  html_parts <- list() # display: p-value line + bold comparison line
   info_bits <- character(0)
   rif_p_line <- NULL
   rif_cmp_line <- NULL
@@ -704,14 +892,16 @@ step1_fmt_effect <- function(est, se, scale, digits = 1, ci = NULL) {
 
   # Distribution sensitivity (RIF only)
   if (engine == "rif") {
-    sc <- if (isTRUE(rif_scenarios_cached)) rif_scenarios else {
+    sc <- if (isTRUE(rif_scenarios_cached)) {
+      rif_scenarios
+    } else {
       .s1_rif_scenarios(mf, snap, var, taus = c(0.1, 0.9))
     }
     s1 <- .s1_scen_at(sc, 0.1)
     s9 <- .s1_scen_at(sc, 0.9)
     if (!is.null(s1) && !is.null(s9) &&
-        all(is.finite(c(s1$estimate, s9$estimate, s1$se, s9$se))) &&
-        s1$se > 0 && s9$se > 0) {
+      all(is.finite(c(s1$estimate, s9$estimate, s1$se, s9$se))) &&
+      s1$se > 0 && s9$se > 0) {
       f1 <- .s1_fmt_scaled(s1$estimate, s1$se, scale)
       f9 <- .s1_fmt_scaled(s9$estimate, s9$se, scale)
       bits_val <- c(bits_val, paste0(f1$value, " vs ", f9$value))
@@ -721,8 +911,11 @@ step1_fmt_effect <- function(est, se, scale, digits = 1, ci = NULL) {
       info_bits <- c(info_bits, paste0(
         "Compares the translated effect between the poorest 10% and the ",
         "richest 10% of households (RIF quantile estimates; values are ",
-        "log-point approximations of % changes)."))
-      p <- if (isTRUE(rif_p_cached)) rif_p else {
+        "log-point approximations of % changes)."
+      ))
+      p <- if (isTRUE(rif_p_cached)) {
+        rif_p
+      } else {
         tryCatch(step1_rif_heterogeneity_p(mf, snap, var), error = function(e) NULL)
       }
       if (!is.null(p) && is.finite(p)) {
@@ -731,7 +924,8 @@ step1_fmt_effect <- function(est, se, scale, digits = 1, ci = NULL) {
         note_parts <- c(p_line, note_parts)
         info_bits <- c(info_bits, paste0(
           "The p-value screens whether the effect differs across the welfare ",
-          "distribution."))
+          "distribution."
+        ))
       }
     }
   }
@@ -745,11 +939,16 @@ step1_fmt_effect <- function(est, se, scale, digits = 1, ci = NULL) {
       ss <- .s1_fixest_scenarios(mf, snap, var)
       if (!length(ss)) NULL else if (is_logistic_fit(mf)) lapply(ss, .s1_to_pp) else ss
     }
-    sc <- Filter(function(s) !is.null(s) && is.finite(s$estimate) &&
-                   is.finite(s$se) && s$se > 0, sc)
+    sc <- Filter(function(s) {
+      !is.null(s) && is.finite(s$estimate) &&
+        is.finite(s$se) && s$se > 0
+    }, sc)
     if (length(sc) >= 2) {
-      fmts <- lapply(sc, function(s) .s1_fmt_scaled(s$estimate, s$se, scale,
-                                                    ci = s$ci))
+      fmts <- lapply(sc, function(s) {
+        .s1_fmt_scaled(s$estimate, s$se, scale,
+          ci = s$ci
+        )
+      })
       imax <- which.max(abs(vapply(sc, function(s) s$estimate, numeric(1))))
       i_rng <- paste0(fmts[[1]]$value, " vs ", fmts[[length(sc)]]$value)
       interaction_value_line <- i_rng
@@ -762,8 +961,10 @@ step1_fmt_effect <- function(est, se, scale, digits = 1, ci = NULL) {
       }
       lvl1 <- sc[[1]]$label %||% ""
       lvlN <- sc[[length(sc)]]$label %||% ""
-      cmp_line <- paste0(ml, lvl_sep(lvl1), lvl1, " vs ", ml,
-                         lvl_sep(lvlN), lvlN)
+      cmp_line <- paste0(
+        ml, lvl_sep(lvl1), lvl1, " vs ", ml,
+        lvl_sep(lvlN), lvlN
+      )
       interaction_cmp_line <- cmp_line
       note_parts <- c(note_parts, cmp_line)
       if (length(sc) > 2) {
@@ -771,24 +972,30 @@ step1_fmt_effect <- function(est, se, scale, digits = 1, ci = NULL) {
         note_parts <- c(note_parts, largest_line)
         html_parts <- c(html_parts, list(shiny::tags$div(largest_line)))
       }
-      pdiff <- tryCatch({
-        if (engine == "rif") {
-          z <- (sc[[1]]$estimate - sc[[length(sc)]]$estimate) /
-            sqrt(sc[[1]]$se^2 + sc[[length(sc)]]$se^2)
-          2 * stats::pnorm(-abs(z))
-        } else {
-          # Between-level contrast: difference of the two level estimates with
-          # an exact SE from the full vcov (w_last - w_first).
-          wd <- (sc[[length(sc)]]$w - sc[[1]]$w)[sc[[1]]$cols]
-          estd <- sc[[length(sc)]]$estimate - sc[[1]]$estimate
-          V <- sc[[1]]$V
-          se <- tryCatch(
-            sqrt(max(drop(t(wd) %*% V[sc[[1]]$cols, sc[[1]]$cols, drop = FALSE] %*% wd), 0)),
-            error = function(e) NA_real_)
-          if (!is.finite(se) || se <= 0) return(NA_real_)
-          2 * stats::pnorm(-abs(estd / se))
-        }
-      }, error = function(e) NULL)
+      pdiff <- tryCatch(
+        {
+          if (engine == "rif") {
+            z <- (sc[[1]]$estimate - sc[[length(sc)]]$estimate) /
+              sqrt(sc[[1]]$se^2 + sc[[length(sc)]]$se^2)
+            2 * stats::pnorm(-abs(z))
+          } else {
+            # Between-level contrast: difference of the two level estimates with
+            # an exact SE from the full vcov (w_last - w_first).
+            wd <- (sc[[length(sc)]]$w - sc[[1]]$w)[sc[[1]]$cols]
+            estd <- sc[[length(sc)]]$estimate - sc[[1]]$estimate
+            V <- sc[[1]]$V
+            se <- tryCatch(
+              sqrt(max(drop(t(wd) %*% V[sc[[1]]$cols, sc[[1]]$cols, drop = FALSE] %*% wd), 0)),
+              error = function(e) NA_real_
+            )
+            if (!is.finite(se) || se <= 0) {
+              return(NA_real_)
+            }
+            2 * stats::pnorm(-abs(estd / se))
+          }
+        },
+        error = function(e) NULL
+      )
       if (!is.null(pdiff) && is.finite(pdiff)) {
         p_line <- if (pdiff < 0.001) "Interaction p < 0.001" else sprintf("Interaction p = %.3f", pdiff)
         interaction_p_line <- p_line
@@ -797,7 +1004,8 @@ step1_fmt_effect <- function(est, se, scale, digits = 1, ci = NULL) {
       info_bits <- c(info_bits, paste0(
         "Compares the translated effect between levels of ", ml,
         " (interaction model). The p-value tests whether the difference ",
-        "between the first and last level is statistically significant."))
+        "between the first and last level is statistically significant."
+      ))
       # The interaction range only becomes the headline value when there is no
       # RIF distribution range to lead with.
       if (!length(bits_val)) bits_val <- c(bits_val, i_rng)
@@ -810,9 +1018,11 @@ step1_fmt_effect <- function(est, se, scale, digits = 1, ci = NULL) {
     } else {
       " add interactions or use the quantile (RIF) engine for heterogeneity"
     }
-    return(list(label = "Who is most affected", value = "Uniform by design",
-                note = paste0("This specification applies one weather effect to all households;", extra),
-                class = "neutral"))
+    return(list(
+      label = "Who is most affected", value = "Uniform by design",
+      note = paste0("This specification applies one weather effect to all households;", extra),
+      class = "neutral"
+    ))
   }
 
   if (engine == "rif") {
@@ -829,10 +1039,12 @@ step1_fmt_effect <- function(est, se, scale, digits = 1, ci = NULL) {
     }
   }
 
-  list(label = "Who is most affected", value = bits_val[1],
-       note = paste(note_parts, collapse = " \u00b7 "),
-       note_html = if (length(html_parts)) shiny::tagList(html_parts),
-       info = paste(info_bits, collapse = " "))
+  list(
+    label = "Who is most affected", value = bits_val[1],
+    note = paste(note_parts, collapse = " \u00b7 "),
+    note_html = if (length(html_parts)) shiny::tagList(html_parts),
+    info = paste(info_bits, collapse = " ")
+  )
 }
 
 # Pick the coefficient that represents the headline effect of `var`:
@@ -840,32 +1052,55 @@ step1_fmt_effect <- function(est, se, scale, digits = 1, ci = NULL) {
 .s1_pick_term <- function(terms, var) {
   terms <- as.character(terms)
   hit <- terms[terms == var]
-  if (length(hit)) return(hit[1])
+  if (length(hit)) {
+    return(hit[1])
+  }
   bins <- terms[grepl(paste0("^", .s1_esc(var), "[\\[\\(]"), terms)]
-  if (length(bins)) return(bins[which.max(.s1_bin_lower(bins, var))])
+  if (length(bins)) {
+    return(bins[which.max(.s1_bin_lower(bins, var))])
+  }
   m <- terms[grepl(paste0("(\\b|^)", .s1_esc(var), "(\\b|\\[|\\^)"), terms)]
-  if (length(m)) return(m[1])
+  if (length(m)) {
+    return(m[1])
+  }
   NA_character_
 }
 
 .s1_coef_at <- function(mf, var, spec) {
   if (identical(.s1_engine(mf), "rif")) {
     g <- mf$rif_grid
-    if (is.null(g)) return(NULL)
+    if (is.null(g)) {
+      return(NULL)
+    }
     g <- g[g$model == spec & abs(g$tau - 0.5) < 1e-9, , drop = FALSE]
-    if (!nrow(g)) return(NULL)
+    if (!nrow(g)) {
+      return(NULL)
+    }
     t <- .s1_pick_term(unique(as.character(g$term)), var)
-    if (is.na(t)) return(NULL)
+    if (is.na(t)) {
+      return(NULL)
+    }
     r <- g[g$term == t, , drop = FALSE]
-    if (!nrow(r)) return(NULL)
+    if (!nrow(r)) {
+      return(NULL)
+    }
     list(estimate = r$estimate[1], se = r$std.error[1], term = t)
   } else {
-    fit <- switch(as.character(spec), "1" = mf$fit1, "2" = mf$fit2, mf$fit3)
+    fit <- switch(as.character(spec),
+      "1" = mf$fit1,
+      "2" = mf$fit2,
+      mf$fit3
+    )
     ct <- tryCatch(.fixest_coeftable(extract_native_fit(fit, mf$engine)),
-                   error = function(e) NULL)
-    if (is.null(ct) || !nrow(ct)) return(NULL)
+      error = function(e) NULL
+    )
+    if (is.null(ct) || !nrow(ct)) {
+      return(NULL)
+    }
     t <- .s1_pick_term(rownames(ct), var)
-    if (is.na(t) || !t %in% rownames(ct)) return(NULL)
+    if (is.na(t) || !t %in% rownames(ct)) {
+      return(NULL)
+    }
     list(estimate = ct[t, 1], se = ct[t, 2], term = t)
   }
 }
@@ -873,17 +1108,21 @@ step1_fmt_effect <- function(est, se, scale, digits = 1, ci = NULL) {
 .s1_stability_card <- function(mf, snap, var, engine) {
   lab <- "Spec robustness"
   if (engine == "ml") {
-    return(list(label = lab, value = "\u2014",
-                note = "specification comparison is not available for tree-based models",
-                class = "neutral"))
+    return(list(
+      label = lab, value = "\u2014",
+      note = "specification comparison is not available for tree-based models",
+      class = "neutral"
+    ))
   }
   b1 <- .s1_coef_at(mf, var, 1L)
   b3 <- .s1_coef_at(mf, var, 3L)
   if (is.null(b1) || is.null(b3) || !is.finite(b1$estimate) ||
-      !is.finite(b3$estimate) || !is.finite(b1$se) || !is.finite(b3$se)) {
-    return(list(label = lab, value = "\u2014",
-                note = "stability across specifications could not be assessed",
-                class = "neutral"))
+    !is.finite(b3$estimate) || !is.finite(b1$se) || !is.finite(b3$se)) {
+    return(list(
+      label = lab, value = "\u2014",
+      note = "stability across specifications could not be assessed",
+      class = "neutral"
+    ))
   }
   sign_agree <- sign(b1$estimate) == sign(b3$estimate) && sign(b1$estimate) != 0
   ci_overlap <- abs(b1$estimate - b3$estimate) <=
@@ -892,27 +1131,36 @@ step1_fmt_effect <- function(est, se, scale, digits = 1, ci = NULL) {
   # full coefficient table instead and names the quantile it describes.
   rif_provenance <- if (identical(engine, "rif")) {
     " The RIF coefficient comparison is at the median quantile (\u03c4 = 0.5); full coefficients are in the table below."
-  } else ""
+  } else {
+    ""
+  }
   stab_info <- paste0(
     "Compares the weather coefficient across the three nested specifications ",
     "shown in the table below: (1) weather only, (2) + fixed effects, ",
     "(3) + controls. Stable: same sign and overlapping 95% confidence ",
     "intervals; Sensitive: sign holds but the magnitude moves; Unstable: ",
-    "sign changes \u2014 interpret with caution.")
+    "sign changes \u2014 interpret with caution."
+  )
   if (sign_agree && ci_overlap) {
-    list(label = lab, value = "Stable",
-         note = "same sign and overlapping 95% CIs across specifications",
-         info = paste0(stab_info, rif_provenance))
+    list(
+      label = lab, value = "Stable",
+      note = "same sign and overlapping 95% CIs across specifications",
+      info = paste0(stab_info, rif_provenance)
+    )
   } else if (sign_agree) {
-    list(label = lab, value = "Sensitive",
-         note = "sign consistent, but the magnitude changes across specifications",
-         info = paste0(stab_info, rif_provenance),
-         class = "neutral")
+    list(
+      label = lab, value = "Sensitive",
+      note = "sign consistent, but the magnitude changes across specifications",
+      info = paste0(stab_info, rif_provenance),
+      class = "neutral"
+    )
   } else {
-    list(label = lab, value = "Unstable",
-         note = "sign changes across specifications \u2014 interpret with caution",
-         info = paste0(stab_info, rif_provenance),
-         class = "neutral")
+    list(
+      label = lab, value = "Unstable",
+      note = "sign changes across specifications \u2014 interpret with caution",
+      info = paste0(stab_info, rif_provenance),
+      class = "neutral"
+    )
   }
 }
 
@@ -926,52 +1174,74 @@ step1_fmt_effect <- function(est, se, scale, digits = 1, ci = NULL) {
   # Same R² the full coefficient table reports (within R², FE contribution
   # excluded) - a different metric here used to contradict the table.
   fmt_r2 <- function(w) {
-    if (!is.finite(w)) "\u2014"
-    else if (w < 0.005) "<0.01"
-    else sprintf("%.2f", w)
-  }
-  stat <- tryCatch({
-    if (engine == "ml") {
-      "tree-based model"
-    } else if (engine == "rif") {
-      w <- fixest::r2(fit3n, "wr2")
-      if (!is.finite(w)) w <- fixest::r2(fit3n, "r2")
-      paste0("Within R\u00b2 (\u03c4 = 0.5) ", fmt_r2(w))
-    } else if (is_logistic_fit(mf)) {
-      sprintf("McFadden R\u00b2 %s", fmt_r2(fixest::r2(fit3n, "pr2")))
+    if (!is.finite(w)) {
+      "\u2014"
+    } else if (w < 0.005) {
+      "<0.01"
     } else {
-      w <- fixest::r2(fit3n, "wr2")
-      if (!is.finite(w)) w <- fixest::r2(fit3n, "r2")
-      paste0("Within R\u00b2 ", fmt_r2(w))
+      sprintf("%.2f", w)
     }
-  }, error = function(e) "")
-  list(label = "Sample & fit",
-       value = if (is.finite(N)) formatC(N, format = "d", big.mark = ",") else "\u2014",
-       note = paste(c(if (is.finite(N)) "observations" else NULL,
-                      if (nzchar(stat)) stat else NULL),
-                    collapse = " \u00b7 "),
-       info = paste0(
-         "Observations used in estimation and the reported fit statistic: ",
-         "Within R\u00b2 (fixed-effect contribution excluded) for linear and ",
-         "RIF models, McFadden R\u00b2 for binary outcomes \u2014 the same ",
-         "statistics the Model fit tab reports. Values refer to the full ",
-         "specification (fixed effects and controls)."),
-       class = "neutral")
+  }
+  stat <- tryCatch(
+    {
+      if (engine == "ml") {
+        "tree-based model"
+      } else if (engine == "rif") {
+        w <- fixest::r2(fit3n, "wr2")
+        if (!is.finite(w)) w <- fixest::r2(fit3n, "r2")
+        paste0("Within R\u00b2 (\u03c4 = 0.5) ", fmt_r2(w))
+      } else if (is_logistic_fit(mf)) {
+        sprintf("McFadden R\u00b2 %s", fmt_r2(fixest::r2(fit3n, "pr2")))
+      } else {
+        w <- fixest::r2(fit3n, "wr2")
+        if (!is.finite(w)) w <- fixest::r2(fit3n, "r2")
+        paste0("Within R\u00b2 ", fmt_r2(w))
+      }
+    },
+    error = function(e) ""
+  )
+  list(
+    label = "Sample & fit",
+    value = if (is.finite(N)) formatC(N, format = "d", big.mark = ",") else "\u2014",
+    note = paste(
+      c(
+        if (is.finite(N)) "observations" else NULL,
+        if (nzchar(stat)) stat else NULL
+      ),
+      collapse = " \u00b7 "
+    ),
+    info = paste0(
+      "Observations used in estimation and the reported fit statistic: ",
+      "Within R\u00b2 (fixed-effect contribution excluded) for linear and ",
+      "RIF models, McFadden R\u00b2 for binary outcomes \u2014 the same ",
+      "statistics the Model fit tab reports. Values refer to the full ",
+      "specification (fixed effects and controls)."
+    ),
+    class = "neutral"
+  )
 }
 
 .s1_cards_ml <- function(mf, snap, var, label_fun) {
   varlab <- .s1_weather_label(snap, var, label_fun)
   list(
-    list(label = paste0("Effect of ", varlab), value = "ML model",
-         note = paste0("tree-based fit: no coefficients or standard errors; ",
-                       "see the effect plot for a prediction sweep"),
-         class = "neutral"),
-    list(label = "Who is most affected", value = "Not identified",
-         note = "tree-based models do not expose per-covariate effects",
-         class = "neutral"),
-    list(label = "Spec robustness", value = "\u2014",
-         note = "specification comparison is not available for tree-based models",
-         class = "neutral"),
+    list(
+      label = paste0("Effect of ", varlab), value = "ML model",
+      note = paste0(
+        "tree-based fit: no coefficients or standard errors; ",
+        "see the effect plot for a prediction sweep"
+      ),
+      class = "neutral"
+    ),
+    list(
+      label = "Who is most affected", value = "Not identified",
+      note = "tree-based models do not expose per-covariate effects",
+      class = "neutral"
+    ),
+    list(
+      label = "Spec robustness", value = "\u2014",
+      note = "specification comparison is not available for tree-based models",
+      class = "neutral"
+    ),
     .s1_fit_card(mf, snap, "ml")
   )
 }
@@ -984,7 +1254,8 @@ step1_fmt_effect <- function(est, se, scale, digits = 1, ci = NULL) {
   scale <- .s1_scale(mf, snap)
   list(
     .s1_effect_card(mf, snap, var, engine, scale, label_fun,
-                    scenario = scenario, scenario_cached = scenario_cached),
+      scenario = scenario, scenario_cached = scenario_cached
+    ),
     .s1_who_card(
       mf, snap, var, engine, scale, label_fun,
       scenario = scenario, scenario_cached = scenario_cached,
@@ -1024,29 +1295,36 @@ step1_headline_cards <- function(mf, snap, label_fun = identity,
                                  scenarios_list = NULL,
                                  rif_scenarios = NULL,
                                  rif_heterogeneity = NULL) {
-  tryCatch({
-    if (is.null(mf) || is.null(snap)) return(NULL)
-    engine <- .s1_engine(mf)
-    vars <- mf$weather_terms %||% character(0)
-    if (!length(vars)) return(NULL)
-    rows <- lapply(vars, function(var) {
-      cards <- if (engine == "ml") {
-        .s1_cards_ml(mf, snap, var, label_fun)
-      } else {
-        .s1_cards_model(
-          mf, snap, var, engine, label_fun,
-          scenario = scenarios_list[[var]],
-          scenario_cached = var %in% names(scenarios_list),
-          rif_scenarios = rif_scenarios[[var]],
-          rif_scenarios_cached = var %in% names(rif_scenarios),
-          rif_p = rif_heterogeneity[[var]],
-          rif_p_cached = var %in% names(rif_heterogeneity)
-        )
+  tryCatch(
+    {
+      if (is.null(mf) || is.null(snap)) {
+        return(NULL)
       }
-      list(var_label = .s1_weather_label(snap, var, label_fun), cards = cards)
-    })
-    list(rows = rows)
-  }, error = function(e) NULL)
+      engine <- .s1_engine(mf)
+      vars <- mf$weather_terms %||% character(0)
+      if (!length(vars)) {
+        return(NULL)
+      }
+      rows <- lapply(vars, function(var) {
+        cards <- if (engine == "ml") {
+          .s1_cards_ml(mf, snap, var, label_fun)
+        } else {
+          .s1_cards_model(
+            mf, snap, var, engine, label_fun,
+            scenario = scenarios_list[[var]],
+            scenario_cached = var %in% names(scenarios_list),
+            rif_scenarios = rif_scenarios[[var]],
+            rif_scenarios_cached = var %in% names(rif_scenarios),
+            rif_p = rif_heterogeneity[[var]],
+            rif_p_cached = var %in% names(rif_heterogeneity)
+          )
+        }
+        list(var_label = .s1_weather_label(snap, var, label_fun), cards = cards)
+      })
+      list(rows = rows)
+    },
+    error = function(e) NULL
+  )
 }
 
 #' Tidy data frame behind the headline cards (export bundle / CSV)
@@ -1065,7 +1343,9 @@ step1_headline_table <- function(mf = NULL, snap = NULL, label_fun = identity,
   } else {
     result
   }
-  if (is.null(res)) return(NULL)
+  if (is.null(res)) {
+    return(NULL)
+  }
   do.call(rbind, lapply(res$rows, function(r) {
     data.frame(
       weather_variable = r$var_label,

@@ -34,27 +34,27 @@ mod_3_07_results_ui <- function(id) {
 #'
 #' @noRd
 mod_3_07_results_server <- function(id,
-                                     baseline_hist_sim,
-                                     baseline_saved_scenarios,
-                                     policy_hist_sim,
-                                     policy_saved_scenarios,
-                                     selected_hist  = reactive(NULL),
-                                     sim_run_id     = reactive(0L),
-                                     tabset_id,
-                                     tabset_session = NULL,
-                                      selected_policies = reactive(NULL),
-                                      policy_scenarios = reactive(list()),
-                                      sp_scenario    = reactive(NULL),
-                                      infra_scenario = reactive(NULL),
-                                      digital_scenario = reactive(NULL),
-                                      labor_scenario = reactive(NULL),
-                                      education_scenario = reactive(NULL),
-                                      residuals      = reactive("original"),
-                                      stale          = reactive(FALSE),
-                                      decomp_result  = reactive(NULL),
-                                      decomp_context = reactive(NULL),
-                                      baseline_svy   = reactive(NULL),
-                                     policy_svy     = reactive(NULL)) {
+                                    baseline_hist_sim,
+                                    baseline_saved_scenarios,
+                                    policy_hist_sim,
+                                    policy_saved_scenarios,
+                                    selected_hist = reactive(NULL),
+                                    sim_run_id = reactive(0L),
+                                    tabset_id,
+                                    tabset_session = NULL,
+                                    selected_policies = reactive(NULL),
+                                    policy_scenarios = reactive(list()),
+                                    sp_scenario = reactive(NULL),
+                                    infra_scenario = reactive(NULL),
+                                    digital_scenario = reactive(NULL),
+                                    labor_scenario = reactive(NULL),
+                                    education_scenario = reactive(NULL),
+                                    residuals = reactive("original"),
+                                    stale = reactive(FALSE),
+                                    decomp_result = reactive(NULL),
+                                    decomp_context = reactive(NULL),
+                                    baseline_svy = reactive(NULL),
+                                    policy_svy = reactive(NULL)) {
   moduleServer(id, function(input, output, session) {
     ns <- session$ns
     session$userData$wise_step3_stale <- stale
@@ -62,7 +62,9 @@ mod_3_07_results_server <- function(id,
       tabset_session <- session$parent %||% session
     }
     select_tab <- function(value) {
-      if (is.null(tabset_id) || !nzchar(tabset_id)) return(invisible(FALSE))
+      if (is.null(tabset_id) || !nzchar(tabset_id)) {
+        return(invisible(FALSE))
+      }
       try(shiny::updateTabsetPanel(tabset_session, inputId = tabset_id, selected = value), silent = TRUE)
       invisible(TRUE)
     }
@@ -71,67 +73,71 @@ mod_3_07_results_server <- function(id,
 
     .wire_results_pane(
       input, output, session,
-      baseline_hist_sim        = baseline_hist_sim,
+      baseline_hist_sim = baseline_hist_sim,
       baseline_saved_scenarios = baseline_saved_scenarios,
-      policy_hist_sim          = policy_hist_sim,
-      policy_saved_scenarios   = policy_saved_scenarios,
-      selected_hist            = selected_hist,
-      selected_policies        = selected_policies,
-       policy_scenarios         = policy_scenarios,
-       sp_scenario              = sp_scenario,
-       infra_scenario           = infra_scenario,
-       digital_scenario         = digital_scenario,
-       labor_scenario           = labor_scenario,
-       education_scenario       = education_scenario,
-       residuals                = residuals,
-      stale                    = stale,
-       decomp_result            = decomp_result,
-       decomp_context           = decomp_context,
-       baseline_svy             = baseline_svy,
-      policy_svy               = policy_svy
+      policy_hist_sim = policy_hist_sim,
+      policy_saved_scenarios = policy_saved_scenarios,
+      selected_hist = selected_hist,
+      selected_policies = selected_policies,
+      policy_scenarios = policy_scenarios,
+      sp_scenario = sp_scenario,
+      infra_scenario = infra_scenario,
+      digital_scenario = digital_scenario,
+      labor_scenario = labor_scenario,
+      education_scenario = education_scenario,
+      residuals = residuals,
+      stale = stale,
+      decomp_result = decomp_result,
+      decomp_context = decomp_context,
+      baseline_svy = baseline_svy,
+      policy_svy = policy_svy
     )
 
-    observeEvent(sim_run_id(), {
-      req(sim_run_id() > 0)
-      # sim_run_id is incremented inside the policy_sim run() after the
-      # reactiveVals are set, but if a downstream step (e.g. decomposition)
-      # silently fails the increment can still fire with NULL hist_sim values.
-      # Guard explicitly so we never try to read $so on NULL.
-      req(baseline_hist_sim(), policy_hist_sim())
+    observeEvent(sim_run_id(),
+      {
+        req(sim_run_id() > 0)
+        # sim_run_id is incremented inside the policy_sim run() after the
+        # reactiveVals are set, but if a downstream step (e.g. decomposition)
+        # silently fails the increment can still fire with NULL hist_sim values.
+        # Guard explicitly so we never try to read $so on NULL.
+        req(baseline_hist_sim(), policy_hist_sim())
 
-      if (!tabs_added()) {
-        bs <- baseline_hist_sim()
-        if (is.null(bs) || is.null(bs$so)) return()
-        shiny::appendTab(
-          inputId = tabset_id,
-          shiny::tabPanel(
-            title = "Results",
-            value = "results_tab",
-            # Insert the module UI after the tab exists in the browser. This
-            # mirrors Step 2 and lets Shiny bind the nested outputs/inputs.
-            shiny::div(id = ns("results_section"))
-          ),
-          select  = TRUE,
-          session = tabset_session
-        )
-        w_var <- bs$weather_var %||% bs$sim_summary$weather %||% NULL
-        shiny::insertUI(
-          selector = paste0("#", ns("results_section")),
-          where = "afterBegin",
-          ui = .results_pane_ui(ns, bs$so, weather_var = w_var),
-          session = session
-        )
-        tabs_added(TRUE)
-      }
+        if (!tabs_added()) {
+          bs <- baseline_hist_sim()
+          if (is.null(bs) || is.null(bs$so)) {
+            return()
+          }
+          shiny::appendTab(
+            inputId = tabset_id,
+            shiny::tabPanel(
+              title = "Results",
+              value = "results_tab",
+              # Insert the module UI after the tab exists in the browser. This
+              # mirrors Step 2 and lets Shiny bind the nested outputs/inputs.
+              shiny::div(id = ns("results_section"))
+            ),
+            select = TRUE,
+            session = tabset_session
+          )
+          w_var <- bs$weather_var %||% bs$sim_summary$weather %||% NULL
+          shiny::insertUI(
+            selector = paste0("#", ns("results_section")),
+            where = "afterBegin",
+            ui = .results_pane_ui(ns, bs$so, weather_var = w_var),
+            session = session
+          )
+          tabs_added(TRUE)
+        }
 
-      if (tabs_added()) select_tab("results_tab")
-
-    }, ignoreInit = TRUE)
+        if (tabs_added()) select_tab("results_tab")
+      },
+      ignoreInit = TRUE
+    )
 
     # Expose the current uncertainty settings to sibling tabs.
     list(
       show_coef_uncertainty = reactive(isTRUE(input$show_coef_uncertainty)),
-      show_model_spread     = reactive(
+      show_model_spread = reactive(
         !identical(input$ensemble_band %||% "minmax", "none")
       )
     )

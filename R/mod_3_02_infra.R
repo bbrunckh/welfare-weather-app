@@ -41,19 +41,19 @@ mod_3_02_infra_ui <- function(id) {
 mod_3_02_infra_server <- function(id,
                                   selected_model = reactive(NULL),
                                   survey_data = reactive(NULL),
-                                  variable_list  = reactive(NULL)) {
+                                  variable_list = reactive(NULL)) {
   moduleServer(id, function(input, output, session) {
     ns <- session$ns
-    
+
     # ---- Get model coefficients ------------------------------------------
     # REACT-08: shared coefficient decomposition (utils_mod_1_helpers.R).
-    coeffs_rx        <- model_coefficient_reactives(selected_model)
-    ind_coeff        <- coeffs_rx$individual
-    hh_coeff         <- coeffs_rx$hh
-    firm_coeff       <- coeffs_rx$firm
-    area_coeff       <- coeffs_rx$area
+    coeffs_rx <- model_coefficient_reactives(selected_model)
+    ind_coeff <- coeffs_rx$individual
+    hh_coeff <- coeffs_rx$hh
+    firm_coeff <- coeffs_rx$firm
+    area_coeff <- coeffs_rx$area
     interaction_names <- coeffs_rx$interactions
-    coeffs           <- coeffs_rx$all
+    coeffs <- coeffs_rx$all
 
     # ---- Candidate variables for this category --------------------------
     infra_patterns <- c("electricity", "imp_wat_rec", "imp_san_rec", "ttime_health", "piped", "piped_to_prem", "imp_wat_san_rec")
@@ -65,13 +65,17 @@ mod_3_02_infra_server <- function(id,
     # Infrastructure variables available in the selected survey
     infra_vars_available <- reactive({
       svy <- survey_data()
-      if (is.null(svy)) return(character(0))
+      if (is.null(svy)) {
+        return(character(0))
+      }
       # Check which infrastructure variables are actually in the selected survey
       intersect(infra_patterns, names(svy))
     })
 
     output$placeholder_ui <- renderUI({
-      if (isTRUE(any_selected())) return(NULL)
+      if (isTRUE(any_selected())) {
+        return(NULL)
+      }
       # Only show placeholder if there are infrastructure variables in the survey
       if (length(infra_vars_available()) == 0) {
         return(no_data_warning(
@@ -202,15 +206,17 @@ mod_3_02_infra_server <- function(id,
           "Access to health facility"
         ),
         radioButtons(
-          inputId  = ns("health_mode"),
-          label    = shiny::tags$span(class = "visually-hidden",
-                                      "Access to health facility"),
-          choices  = c(
+          inputId = ns("health_mode"),
+          label = shiny::tags$span(
+            class = "visually-hidden",
+            "Access to health facility"
+          ),
+          choices = c(
             "Reduce travel time by (%)" = "pct",
             "Set maximum travel time (min)" = "max"
           ),
           selected = "pct",
-          inline   = TRUE
+          inline = TRUE
         ),
         conditionalPanel(
           condition = paste0("input['", ns("health_mode"), "'] === 'pct'"),
@@ -239,11 +245,15 @@ mod_3_02_infra_server <- function(id,
       )
     })
 
-    lapply(c("elec_ui", "water_ui", "sanitation_ui", "piped_ui",
-             "piped_to_prem_ui", "imp_wat_san_ui", "health_ui"),
-           function(out_id) {
-             shiny::outputOptions(output, out_id, suspendWhenHidden = FALSE)
-           })
+    lapply(
+      c(
+        "elec_ui", "water_ui", "sanitation_ui", "piped_ui",
+        "piped_to_prem_ui", "imp_wat_san_ui", "health_ui"
+      ),
+      function(out_id) {
+        shiny::outputOptions(output, out_id, suspendWhenHidden = FALSE)
+      }
+    )
 
     # ---- Return API -----------------------------------------------------
 
@@ -251,39 +261,57 @@ mod_3_02_infra_server <- function(id,
       infra_scenario = reactive({
         list(
           # Electricity: TRUE = set all to 1, FALSE = increase by pct
-          elec_universal          = isTRUE(input$elec_universal),
-          elec_access_change_pct  = if (isTRUE(input$elec_universal)) 100L
-                                    else input$elec_pct %||% 0L,
+          elec_universal = isTRUE(input$elec_universal),
+          elec_access_change_pct = if (isTRUE(input$elec_universal)) {
+            100L
+          } else {
+            input$elec_pct %||% 0L
+          },
 
           # Water
-          water_universal         = isTRUE(input$water_universal),
-          water_access_change_pct = if (isTRUE(input$water_universal)) 100L
-                                    else input$water_pct %||% 0L,
+          water_universal = isTRUE(input$water_universal),
+          water_access_change_pct = if (isTRUE(input$water_universal)) {
+            100L
+          } else {
+            input$water_pct %||% 0L
+          },
 
           # Sanitation
-          sanitation_universal        = isTRUE(input$sanitation_universal),
-          sanitation_access_change_pct = if (isTRUE(input$sanitation_universal)) 100L
-                                         else input$sanitation_pct %||% 0L,
+          sanitation_universal = isTRUE(input$sanitation_universal),
+          sanitation_access_change_pct = if (isTRUE(input$sanitation_universal)) {
+            100L
+          } else {
+            input$sanitation_pct %||% 0L
+          },
 
           # Piped water
-          piped_universal         = isTRUE(input$piped_universal),
-          piped_access_change_pct = if (isTRUE(input$piped_universal)) 100L
-                                    else input$piped_pct %||% 0L,
+          piped_universal = isTRUE(input$piped_universal),
+          piped_access_change_pct = if (isTRUE(input$piped_universal)) {
+            100L
+          } else {
+            input$piped_pct %||% 0L
+          },
 
           # Piped to premises water
-          piped_to_prem_universal         = isTRUE(input$piped_to_prem_universal),
-          piped_to_prem_access_change_pct = if (isTRUE(input$piped_to_prem_universal)) 100L
-                                            else input$piped_to_prem_pct %||% 0L,
+          piped_to_prem_universal = isTRUE(input$piped_to_prem_universal),
+          piped_to_prem_access_change_pct = if (isTRUE(input$piped_to_prem_universal)) {
+            100L
+          } else {
+            input$piped_to_prem_pct %||% 0L
+          },
 
           # Improved water and sanitation
-          imp_wat_san_universal         = isTRUE(input$imp_wat_san_universal),
-          imp_wat_san_access_change_pct = if (isTRUE(input$imp_wat_san_universal)) 100L
-                                           else input$imp_wat_san_pct %||% 0L,
+          imp_wat_san_universal = isTRUE(input$imp_wat_san_universal),
+          imp_wat_san_access_change_pct = if (isTRUE(input$imp_wat_san_universal)) {
+            100L
+          } else {
+            input$imp_wat_san_pct %||% 0L
+          },
 
           # Health facility travel time
-          health_mode        = input$health_mode %||% "pct",
-          health_travel_pct  = input$health_travel_pct  %||% 0L,
-          health_travel_max  = input$health_travel_max  %||% 60L
+          health_mode = input$health_mode %||% "pct",
+          health_travel_pct = input$health_travel_pct %||% 0L,
+          health_travel_max = input$health_travel_max %||% 60L
         )
       })
     )

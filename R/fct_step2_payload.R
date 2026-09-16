@@ -15,18 +15,28 @@ STEP2_WEATHER_KEY_COLUMNS <- c(
 
 step2_weather_share_members <- function(members,
                                         key_columns = STEP2_WEATHER_KEY_COLUMNS) {
-  if (!is.list(members) || !length(members)) return(list(shared = NULL, members = members))
+  if (!is.list(members) || !length(members)) {
+    return(list(shared = NULL, members = members))
+  }
   frames <- lapply(members, function(x) {
-    if (!is.data.frame(x)) return(NULL)
-    if (!all(key_columns %in% names(x))) return(NULL)
+    if (!is.data.frame(x)) {
+      return(NULL)
+    }
+    if (!all(key_columns %in% names(x))) {
+      return(NULL)
+    }
     x[, key_columns, drop = FALSE]
   })
   if (any(vapply(frames, is.null, logical(1)))) {
     return(list(shared = NULL, members = members))
   }
-  same_keys <- all(vapply(frames[-1L], function(x) identical(x, frames[[1L]]),
-                          logical(1)))
-  if (!same_keys) return(list(shared = NULL, members = members))
+  same_keys <- all(vapply(
+    frames[-1L], function(x) identical(x, frames[[1L]]),
+    logical(1)
+  ))
+  if (!same_keys) {
+    return(list(shared = NULL, members = members))
+  }
 
   shared <- frames[[1L]]
   descriptors <- lapply(members, function(x) {
@@ -40,24 +50,28 @@ step2_weather_share_members <- function(members,
     )
   })
   list(
-    shared = list(schema = 2L, kind = "shared-weather-keys",
-                  key_columns = key_columns, keys = shared),
+    shared = list(
+      schema = 2L, kind = "shared-weather-keys",
+      key_columns = key_columns, keys = shared
+    ),
     members = descriptors
   )
 }
 
 step2_weather_resolve_shared <- function(value, owner = NULL) {
   if (!is.list(value) || !identical(value$schema, 2L) ||
-      !identical(value$kind, "shared-weather-member")) return(NULL)
+    !identical(value$kind, "shared-weather-member")) {
+    return(NULL)
+  }
   shared <- owner$weather_shared %||% NULL
   if (is.null(shared) || !identical(shared$schema, 2L) ||
-      !identical(shared$kind, "shared-weather-keys")) {
+    !identical(shared$kind, "shared-weather-keys")) {
     stop("Shared Step 2 weather member has no valid owning key frame.", call. = FALSE)
   }
   keys <- shared$keys
   values <- value$values
   if (!is.data.frame(keys) || !is.data.frame(values) ||
-      nrow(keys) != nrow(values)) {
+    nrow(keys) != nrow(values)) {
     stop("Shared Step 2 weather member has incompatible row counts.", call. = FALSE)
   }
   out <- cbind(keys, values[, setdiff(names(values), names(keys)), drop = FALSE])
@@ -83,8 +97,10 @@ step2_weather_store_create <- function(run_id, signature, root = NULL) {
     created_at_utc = format(Sys.time(), tz = "UTC", usetz = TRUE)
   )
   saveRDS(manifest, file.path(dir, "manifest.rds"))
-  store <- list(schema = manifest$schema, run_id = run_id, signature = signature,
-                dir = dir, manifest = file.path(dir, "manifest.rds"))
+  store <- list(
+    schema = manifest$schema, run_id = run_id, signature = signature,
+    dir = dir, manifest = file.path(dir, "manifest.rds")
+  )
   .step2_weather_store_register(store)
   store
 }
@@ -99,92 +115,147 @@ step2_weather_store_create <- function(run_id, signature, root = NULL) {
 
 .step2_weather_store_key <- function(store) {
   dir <- if (is.list(store)) store$dir else as.character(store)[1L]
-  if (length(dir) != 1L || !nzchar(dir)) return(NA_character_)
+  if (length(dir) != 1L || !nzchar(dir)) {
+    return(NA_character_)
+  }
   normalizePath(dir, winslash = "/", mustWork = FALSE)
 }
 
 .step2_weather_store_register <- function(store) {
   key <- .step2_weather_store_key(store)
-  if (is.na(key)) return(invisible(NULL))
+  if (is.na(key)) {
+    return(invisible(NULL))
+  }
   assign(key, store, envir = .step2_weather_store_registry$stores)
-  if (!exists(key, envir = .step2_weather_store_registry$refs, inherits = FALSE))
+  if (!exists(key, envir = .step2_weather_store_registry$refs, inherits = FALSE)) {
     assign(key, 0L, envir = .step2_weather_store_registry$refs)
+  }
   invisible(NULL)
 }
 
 .step2_weather_store_unlink <- function(key) {
-  if (!is.na(key) && exists(key, envir = .step2_weather_store_registry$stores,
-                            inherits = FALSE)) {
-    store <- get(key, envir = .step2_weather_store_registry$stores,
-                 inherits = FALSE)
+  if (!is.na(key) && exists(key,
+    envir = .step2_weather_store_registry$stores,
+    inherits = FALSE
+  )) {
+    store <- get(key,
+      envir = .step2_weather_store_registry$stores,
+      inherits = FALSE
+    )
     dir <- store$dir
-    if (length(dir) && nzchar(dir) && dir.exists(dir))
+    if (length(dir) && nzchar(dir) && dir.exists(dir)) {
       unlink(dir, recursive = TRUE)
+    }
     rm(list = key, envir = .step2_weather_store_registry$stores)
   }
-  if (!is.na(key) && exists(key, envir = .step2_weather_store_registry$refs,
-                            inherits = FALSE))
+  if (!is.na(key) && exists(key,
+    envir = .step2_weather_store_registry$refs,
+    inherits = FALSE
+  )) {
     rm(list = key, envir = .step2_weather_store_registry$refs)
+  }
   lease_ids <- ls(envir = .step2_weather_store_registry$leases, all.names = TRUE)
   for (lease_id in lease_ids) {
-    lease_keys <- get(lease_id, envir = .step2_weather_store_registry$leases,
-                      inherits = FALSE)
-    if (key %in% lease_keys)
+    lease_keys <- get(lease_id,
+      envir = .step2_weather_store_registry$leases,
+      inherits = FALSE
+    )
+    if (key %in% lease_keys) {
       rm(list = lease_id, envir = .step2_weather_store_registry$leases)
+    }
   }
   invisible(NULL)
 }
 
 step2_weather_store_acquire <- function(stores) {
-  if (is.null(stores)) return(NULL)
+  if (is.null(stores)) {
+    return(NULL)
+  }
   if (is.list(stores) && !is.null(stores$dir)) stores <- list(stores)
-  if (!is.list(stores) || !length(stores)) return(NULL)
-  keys <- unique(Filter(function(key) !is.na(key),
-                        vapply(stores, .step2_weather_store_key, character(1))))
-  if (!length(keys)) return(NULL)
+  if (!is.list(stores) || !length(stores)) {
+    return(NULL)
+  }
+  keys <- unique(Filter(
+    function(key) !is.na(key),
+    vapply(stores, .step2_weather_store_key, character(1))
+  ))
+  if (!length(keys)) {
+    return(NULL)
+  }
   for (key in keys) {
-    if (!exists(key, envir = .step2_weather_store_registry$stores,
-                inherits = FALSE)) {
-      store <- stores[[which(vapply(stores, .step2_weather_store_key,
-                                    character(1)) == key)[1L]]]
+    if (!exists(key,
+      envir = .step2_weather_store_registry$stores,
+      inherits = FALSE
+    )) {
+      store <- stores[[which(vapply(
+        stores, .step2_weather_store_key,
+        character(1)
+      ) == key)[1L]]]
       .step2_weather_store_register(store)
     }
-    refs <- if (exists(key, envir = .step2_weather_store_registry$refs,
-                       inherits = FALSE)) {
+    refs <- if (exists(key,
+      envir = .step2_weather_store_registry$refs,
+      inherits = FALSE
+    )) {
       get(key, envir = .step2_weather_store_registry$refs, inherits = FALSE)
-    } else 0L
+    } else {
+      0L
+    }
     assign(key, refs + 1L, envir = .step2_weather_store_registry$refs)
   }
-  lease_id <- paste0("lease-", substr(digest::digest(list(Sys.time(), keys,
-                                                           runif(1L))), 1L, 20L))
-  lease <- list(schema = 1L, kind = "step2-weather-store-lease",
-                lease_id = lease_id, dirs = keys)
+  lease_id <- paste0("lease-", substr(digest::digest(list(
+    Sys.time(), keys,
+    runif(1L)
+  )), 1L, 20L))
+  lease <- list(
+    schema = 1L, kind = "step2-weather-store-lease",
+    lease_id = lease_id, dirs = keys
+  )
   assign(lease_id, keys, envir = .step2_weather_store_registry$leases)
   lease
 }
 
 step2_weather_store_release <- function(lease) {
-  if (is.null(lease)) return(invisible(NULL))
+  if (is.null(lease)) {
+    return(invisible(NULL))
+  }
   lease_id <- if (is.list(lease)) lease$lease_id else as.character(lease)[1L]
   if (length(lease_id) != 1L || !nzchar(lease_id) ||
-      !exists(lease_id, envir = .step2_weather_store_registry$leases,
-              inherits = FALSE)) return(invisible(NULL))
-  keys <- get(lease_id, envir = .step2_weather_store_registry$leases,
-              inherits = FALSE)
+    !exists(lease_id,
+      envir = .step2_weather_store_registry$leases,
+      inherits = FALSE
+    )) {
+    return(invisible(NULL))
+  }
+  keys <- get(lease_id,
+    envir = .step2_weather_store_registry$leases,
+    inherits = FALSE
+  )
   rm(list = lease_id, envir = .step2_weather_store_registry$leases)
   for (key in keys) {
-    if (!exists(key, envir = .step2_weather_store_registry$refs,
-                inherits = FALSE)) next
-    refs <- get(key, envir = .step2_weather_store_registry$refs,
-                inherits = FALSE) - 1L
-    if (refs <= 0L) .step2_weather_store_unlink(key)
-    else assign(key, refs, envir = .step2_weather_store_registry$refs)
+    if (!exists(key,
+      envir = .step2_weather_store_registry$refs,
+      inherits = FALSE
+    )) {
+      next
+    }
+    refs <- get(key,
+      envir = .step2_weather_store_registry$refs,
+      inherits = FALSE
+    ) - 1L
+    if (refs <= 0L) {
+      .step2_weather_store_unlink(key)
+    } else {
+      assign(key, refs, envir = .step2_weather_store_registry$refs)
+    }
   }
   invisible(NULL)
 }
 
 step2_weather_store_acquire_scenarios <- function(scenarios) {
-  if (!is.list(scenarios) || !length(scenarios)) return(NULL)
+  if (!is.list(scenarios) || !length(scenarios)) {
+    return(NULL)
+  }
   stores <- lapply(scenarios, function(s) s$weather_store %||% NULL)
   stores <- Filter(Negate(is.null), stores)
   step2_weather_store_acquire(stores)
@@ -196,16 +267,21 @@ step2_weather_store_registry_snapshot <- function() {
     stores = keys,
     refs = if (length(keys)) {
       stats::setNames(vapply(keys, get, integer(1L),
-                             envir = .step2_weather_store_registry$refs,
-                             inherits = FALSE), keys)
-    } else integer(0),
+        envir = .step2_weather_store_registry$refs,
+        inherits = FALSE
+      ), keys)
+    } else {
+      integer(0)
+    },
     leases = ls(envir = .step2_weather_store_registry$leases, all.names = TRUE)
   )
 }
 
 step2_weather_store_put <- function(store, key, weather_raw) {
-  stopifnot(is.list(store), is.character(key), length(key) == 1L,
-            is.data.frame(weather_raw))
+  stopifnot(
+    is.list(store), is.character(key), length(key) == 1L,
+    is.data.frame(weather_raw)
+  )
   file_key <- digest::digest(key, algo = "sha256")
   path <- file.path(store$dir, paste0(file_key, ".rds"))
   tmp <- paste0(path, ".tmp")
@@ -214,18 +290,20 @@ step2_weather_store_put <- function(store, key, weather_raw) {
     unlink(tmp)
     stop("Could not publish Step 2 weather reference: ", key, call. = FALSE)
   }
-  list(schema = store$schema, run_id = store$run_id, key = key,
-       file = path, signature = store$signature)
+  list(
+    schema = store$schema, run_id = store$run_id, key = key,
+    file = path, signature = store$signature
+  )
 }
 
 step2_weather_store_get <- function(reference, expected_signature = NULL) {
   if (is.null(reference) || !is.list(reference) ||
-      !identical(reference$schema, 1L) ||
-      !file.exists(reference$file)) {
+    !identical(reference$schema, 1L) ||
+    !file.exists(reference$file)) {
     stop("Step 2 weather reference is missing or invalid.", call. = FALSE)
   }
   if (!is.null(expected_signature) &&
-      !identical(reference$signature, expected_signature)) {
+    !identical(reference$signature, expected_signature)) {
     stop("Step 2 weather reference is stale for the current run.", call. = FALSE)
   }
   readRDS(reference$file)
@@ -233,12 +311,17 @@ step2_weather_store_get <- function(reference, expected_signature = NULL) {
 
 step2_weather_store_cleanup <- function(store) {
   key <- .step2_weather_store_key(store)
-  if (!is.na(key) && exists(key, envir = .step2_weather_store_registry$refs,
-                            inherits = FALSE) &&
-      get(key, envir = .step2_weather_store_registry$refs,
-          inherits = FALSE) > 0L) {
+  if (!is.na(key) && exists(key,
+    envir = .step2_weather_store_registry$refs,
+    inherits = FALSE
+  ) &&
+    get(key,
+      envir = .step2_weather_store_registry$refs,
+      inherits = FALSE
+    ) > 0L) {
     warning("Step 2 weather store is still referenced; use its lease to release it.",
-            call. = FALSE)
+      call. = FALSE
+    )
     return(invisible(NULL))
   }
   .step2_weather_store_unlink(key)
@@ -247,7 +330,7 @@ step2_weather_store_cleanup <- function(store) {
 
 step2_weather_reference <- function(value, expected_signature = NULL) {
   if (is.list(value) && !is.data.frame(value) &&
-      identical(value$schema, 1L) && !is.null(value$file)) {
+    identical(value$schema, 1L) && !is.null(value$file)) {
     return(step2_weather_store_get(value, expected_signature))
   }
   value
@@ -258,8 +341,8 @@ step2_resolve_weather <- function(value, owner = NULL) {
   # descriptors; exclude them before touching $schema/$kind so the tibble
   # `$` accessor cannot emit "Unknown or uninitialised column" warnings.
   if (is.list(value) && !is.data.frame(value) &&
-      identical(value$schema, 2L) &&
-      identical(value$kind, "shared-weather-member")) {
+    identical(value$schema, 2L) &&
+    identical(value$kind, "shared-weather-member")) {
     return(step2_weather_resolve_shared(value, owner))
   }
   signature <- owner$weather_signature %||% owner$signature %||% NULL
@@ -267,12 +350,12 @@ step2_resolve_weather <- function(value, owner = NULL) {
 }
 
 step2_shared_context <- function(train_aug = NULL,
-                                  id_col = NULL,
-                                  residuals = NULL,
-                                  chol_obj = NULL,
-                                  so = NULL,
-                                  train_data = NULL,
-                                  model_metadata = list()) {
+                                 id_col = NULL,
+                                 residuals = NULL,
+                                 chol_obj = NULL,
+                                 so = NULL,
+                                 train_data = NULL,
+                                 model_metadata = list()) {
   list(
     schema = 1L,
     train_aug = train_aug,
@@ -296,19 +379,27 @@ step2_pipeline_context <- function(pipe, shared_context = NULL) {
 
 .compact_residual_context <- function(train_aug, id_col, residuals,
                                       compact = TRUE) {
-  if (!isTRUE(compact)) return(train_aug)
-  if (is.null(train_aug) || identical(residuals, "none")) return(NULL)
-  if (!".resid" %in% names(train_aug)) return(train_aug)
+  if (!isTRUE(compact)) {
+    return(train_aug)
+  }
+  if (is.null(train_aug) || identical(residuals, "none")) {
+    return(NULL)
+  }
+  if (!".resid" %in% names(train_aug)) {
+    return(train_aug)
+  }
   keep <- ".resid"
   if (identical(residuals, "original") && !is.null(id_col) &&
-      id_col %in% names(train_aug)) {
+    id_col %in% names(train_aug)) {
     keep <- c(id_col, keep)
   }
   train_aug[, keep, drop = FALSE]
 }
 
 .compact_pipeline <- function(pipe) {
-  if (is.null(pipe) || !is.list(pipe)) return(pipe)
+  if (is.null(pipe) || !is.list(pipe)) {
+    return(pipe)
+  }
   pipe$train_aug <- NULL
   pipe$id_col <- NULL
   pipe
@@ -349,7 +440,9 @@ compact_step2_result <- function(result,
 }
 
 .results_defensive_copy <- function(value) {
-  if (is.null(value)) return(NULL)
+  if (is.null(value)) {
+    return(NULL)
+  }
   unserialize(serialize(value, connection = NULL, version = 3L))
 }
 

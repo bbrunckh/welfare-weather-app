@@ -46,7 +46,7 @@ POLICY_DEFINITIONS <- list(
   ),
   "I" = list(
     label = "Improved water and sanitation access",
-    vars  = c("imp_wat_san_rec"),
+    vars = c("imp_wat_san_rec"),
     # Derived: 1 iff both sources are 1, 0 if any source is 0, NA if any
     # source is NA. Built by apply_policy_derivations() after data load.
     derived = list(
@@ -116,7 +116,9 @@ apply_policy_derivations <- function(df) {
 #' @return `vl` extended with derived-variable rows.
 #' @export
 add_derived_policy_vars_to_vl <- function(vl) {
-  if (is.null(vl) || nrow(vl) == 0) return(vl)
+  if (is.null(vl) || nrow(vl) == 0) {
+    return(vl)
+  }
   for (key in names(POLICY_DEFINITIONS)) {
     der <- POLICY_DEFINITIONS[[key]]$derived
     if (is.null(der)) next
@@ -125,9 +127,9 @@ add_derived_policy_vars_to_vl <- function(vl) {
       spec <- der[[vname]]
       role <- spec$role %||% "hh"
       new_row <- vl[NA_integer_, , drop = FALSE][1, , drop = FALSE]
-      new_row$name  <- vname
+      new_row$name <- vname
       if ("label" %in% names(new_row)) new_row$label <- spec$label %||% vname
-      if (role %in% names(new_row))    new_row[[role]] <- 1L
+      if (role %in% names(new_row)) new_row[[role]] <- 1L
       vl <- rbind(vl, new_row)
     }
   }
@@ -158,25 +160,37 @@ get_policy_choices <- function() {
 #'   \code{area}, each a character vector of locked variable names.
 #' @export
 get_policy_locked_vars <- function(selected_policies, variable_list = NULL) {
-  empty <- list(ind = character(0), hh = character(0),
-                firm = character(0), area = character(0))
-  if (is.null(selected_policies) || length(selected_policies) == 0) return(empty)
-  if (is.null(variable_list) || nrow(variable_list) == 0) return(empty)
+  empty <- list(
+    ind = character(0), hh = character(0),
+    firm = character(0), area = character(0)
+  )
+  if (is.null(selected_policies) || length(selected_policies) == 0) {
+    return(empty)
+  }
+  if (is.null(variable_list) || nrow(variable_list) == 0) {
+    return(empty)
+  }
 
   all_vars <- unique(unlist(lapply(selected_policies, function(k) {
     POLICY_DEFINITIONS[[k]]$vars
   })))
 
   vl <- variable_list[variable_list$name %in% all_vars, , drop = FALSE]
-  if (nrow(vl) == 0) return(empty)
+  if (nrow(vl) == 0) {
+    return(empty)
+  }
 
   get_role <- function(role) {
     v <- vl[[role]]
-    if (is.null(v)) return(character(0))
+    if (is.null(v)) {
+      return(character(0))
+    }
     vl$name[!is.na(v) & v == 1L]
   }
-  list(ind = get_role("ind"), hh = get_role("hh"),
-       firm = get_role("firm"), area = get_role("area"))
+  list(
+    ind = get_role("ind"), hh = get_role("hh"),
+    firm = get_role("firm"), area = get_role("area")
+  )
 }
 
 
@@ -210,7 +224,9 @@ get_policy_locked_vars <- function(selected_policies, variable_list = NULL) {
 filter_valid_vars <- function(df, variable_list, min_complete = 0.5,
                               group_cols = c("code", "year", "survname"),
                               outcome = NULL) {
-  if (is.null(df) || is.null(variable_list)) return(variable_list)
+  if (is.null(df) || is.null(variable_list)) {
+    return(variable_list)
+  }
 
   if (!is.null(outcome) && outcome %in% names(df)) {
     df <- df[!is.na(df[[outcome]]), , drop = FALSE]
@@ -225,23 +241,23 @@ filter_valid_vars <- function(df, variable_list, min_complete = 0.5,
     # per-group scan this replaces (min over no groups).
     valid <- c(group_cols, setdiff(names(df), group_cols))
   } else {
-    data_cols  <- setdiff(names(df), group_cols)
-    group_key  <- do.call(paste, c(df[group_cols], sep = "\x01"))
-    groups     <- unique(group_key)
+    data_cols <- setdiff(names(df), group_cols)
+    group_key <- do.call(paste, c(df[group_cols], sep = "\x01"))
+    groups <- unique(group_key)
 
     # One grouped pass over the frame (C-level rowsum) instead of one full
     # scan per group: completeness matrix, rows = data columns, cols = groups
     # in first-appearance order (PERF-08).
-    grp_idx  <- match(group_key, groups)
-    n_g      <- tabulate(grp_idx, nbins = length(groups))
-    notna    <- !is.na(df[data_cols])
+    grp_idx <- match(group_key, groups)
+    n_g <- tabulate(grp_idx, nbins = length(groups))
+    notna <- !is.na(df[data_cols])
     storage.mode(notna) <- "double"
-    sums     <- rowsum(notna, grp_idx, reorder = FALSE)
+    sums <- rowsum(notna, grp_idx, reorder = FALSE)
     comp_mat <- t(sums / n_g)
 
     # a column is valid only if it meets the threshold in every group
     min_comp <- if (is.matrix(comp_mat)) apply(comp_mat, 1, min) else comp_mat
-    valid    <- c(group_cols, data_cols[min_comp >= min_complete])
+    valid <- c(group_cols, data_cols[min_comp >= min_complete])
   }
 
   variable_list[variable_list$name %in% valid, , drop = FALSE]
@@ -262,8 +278,12 @@ filter_valid_vars <- function(df, variable_list, min_complete = 0.5,
 #'
 #' @export
 filter_vars_by_role <- function(variable_list, role, extra_filter = NULL) {
-  if (is.null(variable_list) || nrow(variable_list) == 0) return(variable_list)
-  if (!role %in% names(variable_list)) return(variable_list[0L, , drop = FALSE])
+  if (is.null(variable_list) || nrow(variable_list) == 0) {
+    return(variable_list)
+  }
+  if (!role %in% names(variable_list)) {
+    return(variable_list[0L, , drop = FALSE])
+  }
 
   out <- variable_list[variable_list[[role]] == 1L, , drop = FALSE]
 
@@ -325,17 +345,19 @@ model_type_choices <- function(outcome_type) {
 #'
 #' @export
 exclude_selected_vars <- function(candidate_vl,
-                                   outcome_name  = character(0),
-                                   weather_names = character(0),
-                                   interactions  = character(0),
-                                   fixedeffects  = character(0)) {
-  if (is.null(candidate_vl) || nrow(candidate_vl) == 0) return(candidate_vl)
+                                  outcome_name = character(0),
+                                  weather_names = character(0),
+                                  interactions = character(0),
+                                  fixedeffects = character(0)) {
+  if (is.null(candidate_vl) || nrow(candidate_vl) == 0) {
+    return(candidate_vl)
+  }
 
   exclude <- unique(c(
-    outcome_name  %||% character(0),
+    outcome_name %||% character(0),
     weather_names %||% character(0),
-    interactions  %||% character(0),
-    fixedeffects  %||% character(0)
+    interactions %||% character(0),
+    fixedeffects %||% character(0)
   ))
 
   candidate_vl <- candidate_vl[!candidate_vl$name %in% exclude, , drop = FALSE]
@@ -360,14 +382,13 @@ exclude_selected_vars <- function(candidate_vl,
 #'
 #' @export
 infer_engine <- function(model_type) {
-  switch(
-    model_type %||% "",
-    "Linear regression"       = "fixest",
-    "Logistic regression"     = "fixest",
-    "Random forest"           = "ranger",
-    "XGBoost"                 = "xgboost",
+  switch(model_type %||% "",
+    "Linear regression" = "fixest",
+    "Logistic regression" = "fixest",
+    "Random forest" = "ranger",
+    "XGBoost" = "xgboost",
     "Unconditional quantile regression (RIF)" = "rif",
-    "fixest"  # safe default
+    "fixest" # safe default
   )
 }
 
@@ -412,44 +433,44 @@ infer_engine <- function(model_type) {
 #'   `covariate_selection == "Lasso"`.
 #'
 #' @export
-build_selected_model <- function(model_type          = NULL,
-                                  engine              = NULL,
-                                  interactions        = NULL,
-                                  interaction_mode    = NULL,
-                                  fixedeffects        = NULL,
-                                  covariate_selection = NULL,
-                                  ind_covariates      = NULL,
-                                  hh_covariates       = NULL,
-                                  firm_covariates     = NULL,
-                                  area_covariates     = NULL,
-                                  cluster             = NULL,
-                                  lasso_alpha         = NULL,
-                                  lasso_lambda        = NULL,
-                                  lasso_nfolds        = NULL,
-                                  lasso_standardize   = NULL,
-                                  mi_m                = NULL,
-                                  mi_maxit            = NULL,
-                                  stability_threshold = NULL) {
+build_selected_model <- function(model_type = NULL,
+                                 engine = NULL,
+                                 interactions = NULL,
+                                 interaction_mode = NULL,
+                                 fixedeffects = NULL,
+                                 covariate_selection = NULL,
+                                 ind_covariates = NULL,
+                                 hh_covariates = NULL,
+                                 firm_covariates = NULL,
+                                 area_covariates = NULL,
+                                 cluster = NULL,
+                                 lasso_alpha = NULL,
+                                 lasso_lambda = NULL,
+                                 lasso_nfolds = NULL,
+                                 lasso_standardize = NULL,
+                                 mi_m = NULL,
+                                 mi_maxit = NULL,
+                                 stability_threshold = NULL) {
   chr0 <- character(0)
   list(
-    type                = model_type          %||% chr0,
-    engine              = engine              %||% infer_engine(model_type),
-    interactions        = interactions        %||% chr0,
-    interaction_mode    = interaction_mode    %||% "pairwise",
-    fixedeffects        = fixedeffects        %||% chr0,
+    type                = model_type %||% chr0,
+    engine              = engine %||% infer_engine(model_type),
+    interactions        = interactions %||% chr0,
+    interaction_mode    = interaction_mode %||% "pairwise",
+    fixedeffects        = fixedeffects %||% chr0,
     covariate_selection = covariate_selection %||% "User-defined",
-    ind_covariates      = ind_covariates      %||% chr0,
-    hh_covariates       = hh_covariates       %||% chr0,
-    firm_covariates     = firm_covariates     %||% chr0,
-    area_covariates     = area_covariates     %||% chr0,
-    cluster             = cluster             %||% chr0,
+    ind_covariates      = ind_covariates %||% chr0,
+    hh_covariates       = hh_covariates %||% chr0,
+    firm_covariates     = firm_covariates %||% chr0,
+    area_covariates     = area_covariates %||% chr0,
+    cluster             = cluster %||% chr0,
     # Lasso / MI options - only meaningful when covariate_selection == "Lasso"
-    lasso_alpha         = lasso_alpha         %||% 1,
-    lasso_lambda        = lasso_lambda        %||% "lambda.1se",
-    lasso_nfolds        = lasso_nfolds        %||% 10L,
-    lasso_standardize   = lasso_standardize   %||% TRUE,
-    mi_m                = mi_m                %||% 5L,
-    mi_maxit            = mi_maxit            %||% 5L,
+    lasso_alpha         = lasso_alpha %||% 1,
+    lasso_lambda        = lasso_lambda %||% "lambda.1se",
+    lasso_nfolds        = lasso_nfolds %||% 10L,
+    lasso_standardize   = lasso_standardize %||% TRUE,
+    mi_m                = mi_m %||% 5L,
+    mi_maxit            = mi_maxit %||% 5L,
     stability_threshold = stability_threshold %||% 0.5
   )
 }

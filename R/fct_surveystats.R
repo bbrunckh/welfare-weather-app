@@ -27,7 +27,7 @@ add_time_columns <- function(df) {
     lubridate::month(timestamp)
   }
 
-  df$month       <- month
+  df$month <- month
   df$countryyear <- paste0(df$economy, ", ", df$year)
   df
 }
@@ -103,7 +103,9 @@ get_lcu_vars <- function(df, variable_list) {
 #'
 #' @export
 convert_lcu_to_ppp <- function(df, cpi_ppp_data, lcu_vars) {
-  if (length(lcu_vars) == 0) return(df)
+  if (length(lcu_vars) == 0) {
+    return(df)
+  }
   df |>
     dplyr::left_join(cpi_ppp_data, by = c("code", "year", "data_level")) |>
     dplyr::mutate(
@@ -118,9 +120,9 @@ convert_lcu_to_ppp <- function(df, cpi_ppp_data, lcu_vars) {
 #' Replaces any welfare values below `floor_value` $/person/day (2021 PPP) with `floor_value`.
 #'
 #' @param df A data frame with column `welfare`
-#' @param floor_value A numeric value representing the minimum welfare value in $/person/day at 2021 PPP. 
+#' @param floor_value A numeric value representing the minimum welfare value in $/person/day at 2021 PPP.
 #'
-#' @return `df` with the 
+#' @return `df` with the
 #'
 #' @export
 bottom_code_welfare <- function(df, floor_value = 0.28) {
@@ -159,10 +161,14 @@ summarise_interview_dates <- function(df) {
     stringsAsFactors = FALSE
   )
   if (is.null(df) || nrow(df) == 0L ||
-      !all(c("timestamp", "economy") %in% names(df))) return(empty)
+    !all(c("timestamp", "economy") %in% names(df))) {
+    return(empty)
+  }
 
   ok <- !is.na(df$timestamp)
-  if (!any(ok)) return(empty)
+  if (!any(ok)) {
+    return(empty)
+  }
 
   month_num <- if ("month" %in% names(df)) {
     as.integer(df$month)
@@ -172,7 +178,9 @@ summarise_interview_dates <- function(df) {
     lubridate::month(df$timestamp)
   }
   ok <- ok & !is.na(month_num)
-  if (!any(ok)) return(empty)
+  if (!any(ok)) {
+    return(empty)
+  }
 
   countryyear <- if ("countryyear" %in% names(df)) {
     df$countryyear
@@ -180,9 +188,9 @@ summarise_interview_dates <- function(df) {
     paste0(df$economy, ", ", df$year)
   }
   grouped <- data.frame(
-    economy    = as.character(df$economy[ok]),
+    economy = as.character(df$economy[ok]),
     countryyear = as.character(countryyear[ok]),
-    month_num  = month_num[ok],
+    month_num = month_num[ok],
     stringsAsFactors = FALSE
   )
 
@@ -250,14 +258,18 @@ plot_interview_dates <- function(plot_data,
                                  unit_label = "Households",
                                  palette = c("sequential", "okabe_ito", "wise", "blue"),
                                  wave_labels = NULL) {
-  if (is.null(plot_data) || nrow(plot_data) == 0) return(invisible(NULL))
+  if (is.null(plot_data) || nrow(plot_data) == 0) {
+    return(invisible(NULL))
+  }
   variant <- match.arg(variant)
   palette <- match.arg(palette)
   unit_label <- as.character(unit_label)[1L]
   if (is.na(unit_label) || !nzchar(unit_label)) unit_label <- "Observations"
 
-  month_labels <- c("Jan", "Feb", "Mar", "Apr", "May", "Jun",
-                     "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+  month_labels <- c(
+    "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+    "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
+  )
   plot_data <- as.data.frame(plot_data)
   plot_data$month_fct <- factor(
     plot_data$month_num,
@@ -278,7 +290,7 @@ plot_interview_dates <- function(plot_data,
     stringsAsFactors = FALSE
   )
   wave_info$economy[is.na(wave_info$economy) |
-                     !nzchar(wave_info$economy)] <- "Unknown"
+    !nzchar(wave_info$economy)] <- "Unknown"
   wave_info <- wave_info[order(
     wave_info$economy,
     is.na(wave_info$year),
@@ -293,15 +305,17 @@ plot_interview_dates <- function(plot_data,
     display_waves[keep] <- mapped[keep]
   }
   plot_data$countryyear <- factor(plot_data$countryyear, levels = waves)
-  wave_cols <- switch(
-    palette,
+  wave_cols <- switch(palette,
     sequential = .wave_palette(waves),
     okabe_ito = stats::setNames(
-      c("#0072B2", "#009E73", "#E69F00", "#56B4E9", "#CC79A7"), waves),
-    wise      = stats::setNames(
-      c("#0071BC", "#00AB51", "#FDB714", "#009FDA", "#5B6B79"), waves),
-    blue      = stats::setNames(
-      c("#003B5C", "#0071BC", "#2C9CCB", "#78C6D0", "#B6DDE2"), waves)
+      c("#0072B2", "#009E73", "#E69F00", "#56B4E9", "#CC79A7"), waves
+    ),
+    wise = stats::setNames(
+      c("#0071BC", "#00AB51", "#FDB714", "#009FDA", "#5B6B79"), waves
+    ),
+    blue = stats::setNames(
+      c("#003B5C", "#0071BC", "#2C9CCB", "#78C6D0", "#B6DDE2"), waves
+    )
   )
   if (palette != "sequential") {
     wave_cols <- stats::setNames(rep(wave_cols, length.out = length(waves)), waves)
@@ -311,8 +325,10 @@ plot_interview_dates <- function(plot_data,
     return(
       ggplot2::ggplot(
         plot_data,
-        ggplot2::aes(x = .data$month_fct, y = .data$countryyear,
-                     fill = .data$hh)
+        ggplot2::aes(
+          x = .data$month_fct, y = .data$countryyear,
+          fill = .data$hh
+        )
       ) +
         ggplot2::geom_tile(colour = "white", linewidth = 0.7) +
         ggplot2::geom_text(
@@ -342,12 +358,14 @@ plot_interview_dates <- function(plot_data,
       ggplot2::aes(x = .data$month_fct, y = .data$hh)
     ) +
       ggplot2::geom_col(fill = "#0071BC", width = 0.72) +
-      ggplot2::facet_wrap(~ countryyear, ncol = 1, scales = "free_y")
+      ggplot2::facet_wrap(~countryyear, ncol = 1, scales = "free_y")
   } else {
     ggplot2::ggplot(
       plot_data,
-      ggplot2::aes(x = .data$month_fct, y = .data$hh,
-                   fill = .data$countryyear)
+      ggplot2::aes(
+        x = .data$month_fct, y = .data$hh,
+        fill = .data$countryyear
+      )
     ) +
       ggplot2::geom_col(
         position = ggplot2::position_dodge2(width = 0.82, preserve = "single"),
@@ -368,20 +386,16 @@ plot_interview_dates <- function(plot_data,
     ggplot2::labs(x = NULL, y = unit_label) +
     theme_wise(base_size = 13) +
     ggplot2::theme(
-      axis.ticks.x       = ggplot2::element_line(colour = "#5B6B79"),
+      axis.ticks.x = ggplot2::element_line(colour = "#5B6B79"),
       panel.grid.major.x = ggplot2::element_blank(),
       panel.grid.minor.x = ggplot2::element_blank(),
       panel.grid.major.y = ggplot2::element_line(colour = "#E3E9EE"),
       panel.grid.minor.y = ggplot2::element_blank(),
-      legend.position    = if (variant == "faceted") "none" else "top",
+      legend.position = if (variant == "faceted") "none" else "top",
       legend.justification = "left",
       plot.margin = ggplot2::margin(4, 8, 4, 4)
     )
 }
-
-
-
-
 
 
 #' Survey waves present in a data frame, for a wave picker
@@ -396,16 +410,20 @@ plot_interview_dates <- function(plot_data,
 #' @export
 survey_wave_list <- function(df) {
   keys <- c("code", "year", "survname")
-  if (is.null(df) || !all(keys %in% names(df))) return(NULL)
+  if (is.null(df) || !all(keys %in% names(df))) {
+    return(NULL)
+  }
 
   d <- df
   d$year <- as.character(d$year)
   if (!"economy" %in% names(d)) d$economy <- d$code
 
   w <- unique(d[, c(keys, "economy")])
-  if (nrow(w) == 0) return(NULL)
+  if (nrow(w) == 0) {
+    return(NULL)
+  }
 
-  w$key   <- paste(w$code, w$year, w$survname, sep = "|")
+  w$key <- paste(w$code, w$year, w$survname, sep = "|")
   w$label <- paste0(w$economy, ", ", w$year)
   w <- w[order(w$label), , drop = FALSE]
   rownames(w) <- NULL
@@ -461,13 +479,15 @@ cached_survey_wave_metadata <- function(session, df, generation) {
 #' @export
 filter_by_wave <- function(df, key = "all") {
   keys <- c("code", "year", "survname")
-  if (is.null(df) || identical(key, "all") || is.null(key)) return(df)
-  if (!all(keys %in% names(df))) return(df)
+  if (is.null(df) || identical(key, "all") || is.null(key)) {
+    return(df)
+  }
+  if (!all(keys %in% names(df))) {
+    return(df)
+  }
   k <- paste(df$code, as.character(df$year), df$survname, sep = "|")
   df[k == key, , drop = FALSE]
 }
-
-
 
 
 # Sample density heatmap ----
@@ -508,9 +528,15 @@ allocate_units_to_cells <- function(cell_map, survey_data) {
 #' @noRd
 .density_cell_summary <- function(cell_map, survey_data) {
   keys <- c("code", "year", "survname", "loc_id")
-  if (is.null(cell_map) || is.null(survey_data)) return(NULL)
-  if (!all(c(keys, "h3") %in% names(cell_map))) return(NULL)
-  if (!all(keys %in% names(survey_data))) return(NULL)
+  if (is.null(cell_map) || is.null(survey_data)) {
+    return(NULL)
+  }
+  if (!all(c(keys, "h3") %in% names(cell_map))) {
+    return(NULL)
+  }
+  if (!all(keys %in% names(survey_data))) {
+    return(NULL)
+  }
 
   cm <- cell_map
   cm$year <- as.character(cm$year)
@@ -527,7 +553,9 @@ allocate_units_to_cells <- function(cell_map, survey_data) {
 
   cm <- cm |>
     dplyr::inner_join(n_loc, by = keys)
-  if (nrow(cm) == 0) return(NULL)
+  if (nrow(cm) == 0) {
+    return(NULL)
+  }
 
   # Spread each location's units across its cells in proportion to the
   # cells' 2020 population, so a big settlement inside a multi-cell
@@ -535,12 +563,16 @@ allocate_units_to_cells <- function(cell_map, survey_data) {
   # weights (all NA / zero / negative) fall back to an even split.
   has_pop <- "pop_2020" %in% names(cm)
   loc_group <- cm$.loc_group
-  n_cells <- collapse::fsum(rep.int(1L, nrow(cm)), g = loc_group,
-                            TRA = "replace")
+  n_cells <- collapse::fsum(rep.int(1L, nrow(cm)),
+    g = loc_group,
+    TRA = "replace"
+  )
   alloc <- if (has_pop) {
     pop <- pmax(cm$pop_2020, 0, na.rm = TRUE)
-    pop_sum <- collapse::fsum(pop, g = loc_group, na.rm = TRUE,
-                              TRA = "replace")
+    pop_sum <- collapse::fsum(pop,
+      g = loc_group, na.rm = TRUE,
+      TRA = "replace"
+    )
     use_pop <- pop_sum > 0
     ifelse(use_pop, cm$n_units * pop / pop_sum, cm$n_units / n_cells)
   } else {
@@ -600,12 +632,18 @@ allocate_units_to_cells <- function(cell_map, survey_data) {
 #' @export
 merge_loc_values_to_cells <- function(cell_map, loc_vals, by_wave = TRUE) {
   keys <- c("code", "year", "survname", "loc_id")
-  if (is.null(cell_map) || is.null(loc_vals) || nrow(loc_vals) == 0) return(NULL)
-  if (!all(c(keys, "h3") %in% names(cell_map))) return(NULL)
-  if (!all(c(keys, "value") %in% names(loc_vals))) return(NULL)
+  if (is.null(cell_map) || is.null(loc_vals) || nrow(loc_vals) == 0) {
+    return(NULL)
+  }
+  if (!all(c(keys, "h3") %in% names(cell_map))) {
+    return(NULL)
+  }
+  if (!all(c(keys, "value") %in% names(loc_vals))) {
+    return(NULL)
+  }
 
   binned <- isTRUE(attr(loc_vals, "binned"))
-  lvls   <- attr(loc_vals, "levels")
+  lvls <- attr(loc_vals, "levels")
 
   cm <- cell_map
   cm$year <- as.character(cm$year)
@@ -614,24 +652,28 @@ merge_loc_values_to_cells <- function(cell_map, loc_vals, by_wave = TRUE) {
 
   lv <- loc_vals
   lv$year <- as.character(lv$year)
-  if (!"n_hh" %in% names(lv))     lv$n_hh <- 1
+  if (!"n_hh" %in% names(lv)) lv$n_hh <- 1
   if (!"n_months" %in% names(lv)) lv$n_months <- 1L
 
   carry <- intersect(c("economy"), names(lv))
   j <- cm |>
     dplyr::inner_join(
-      lv[, c(keys, "value", "n_hh", "n_months", carry)], by = keys
+      lv[, c(keys, "value", "n_hh", "n_months", carry)],
+      by = keys
     )
-  if (nrow(j) == 0) return(NULL)
+  if (nrow(j) == 0) {
+    return(NULL)
+  }
 
   # Units of this location that sit in this cell.
   j <- j |>
     dplyr::group_by(.data$code, .data$year, .data$survname, .data$loc_id) |>
     dplyr::mutate(
       .tot = sum(.data$pop_2020, na.rm = TRUE),
-      .w   = .data$n_hh * dplyr::if_else(.data$.tot > 0,
-                                         .data$pop_2020 / .data$.tot,
-                                         1 / dplyr::n())
+      .w = .data$n_hh * dplyr::if_else(.data$.tot > 0,
+        .data$pop_2020 / .data$.tot,
+        1 / dplyr::n()
+      )
     ) |>
     dplyr::ungroup()
 
@@ -644,7 +686,9 @@ merge_loc_values_to_cells <- function(cell_map, loc_vals, by_wave = TRUE) {
   # `split()` dropped rows with missing grouping keys, so they are removed
   # before the grouping is built (PERF-05).
   j <- j[complete.cases(j[grp]), , drop = FALSE]
-  if (nrow(j) == 0) return(NULL)
+  if (nrow(j) == 0) {
+    return(NULL)
+  }
 
   g <- collapse::GRP(j, by = grp)
   n_g <- g$N.groups
@@ -652,16 +696,20 @@ merge_loc_values_to_cells <- function(cell_map, loc_vals, by_wave = TRUE) {
   w <- j$.w
 
   out <- data.frame(
-    code     = j$code[first_idx],
-    year     = j$year[first_idx],
+    code = j$code[first_idx],
+    year = j$year[first_idx],
     survname = j$survname[first_idx],
-    loc_id   = j$h3[first_idx],
-    value    = if (binned) rep(NA_character_, n_g) else rep(NA_real_, n_g),
+    loc_id = j$h3[first_idx],
+    value = if (binned) rep(NA_character_, n_g) else rep(NA_real_, n_g),
     # The colour summarises more than one number when several locations
     # meet here, or when a contributing location spans several months.
-    n_hh     = { nh <- collapse::fsum(w, g = g, na.rm = TRUE); nh[is.na(nh)] <- 0; nh },
+    n_hh = {
+      nh <- collapse::fsum(w, g = g, na.rm = TRUE)
+      nh[is.na(nh)] <- 0
+      nh
+    },
     n_months = collapse::fmax(j$n_months, g = g, na.rm = TRUE),
-    n_locs   = as.integer(collapse::fndistinct(j$loc_id, g = g, na.rm = FALSE)),
+    n_locs = as.integer(collapse::fndistinct(j$loc_id, g = g, na.rm = FALSE)),
     stringsAsFactors = FALSE
   )
   if (length(carry)) out$economy <- j$economy[first_idx]
@@ -678,7 +726,7 @@ merge_loc_values_to_cells <- function(cell_map, loc_vals, by_wave = TRUE) {
       )
       wsum <- collapse::fsum(w[ok], g = gv, na.rm = TRUE)
       wsum[is.na(wsum)] <- 0
-      ord  <- order(gv$groups$gid, -wsum, match(gv$groups$value, sort(unique(vv[ok]))))
+      ord <- order(gv$groups$gid, -wsum, match(gv$groups$value, sort(unique(vv[ok]))))
       take <- ord[!duplicated(gv$groups$gid[ord])]
       out$value[gv$groups$gid[take]] <- gv$groups$value[take]
     }
@@ -687,7 +735,8 @@ merge_loc_values_to_cells <- function(cell_map, loc_vals, by_wave = TRUE) {
     ok <- is.finite(vn) & is.finite(w) & (w > 0)
     # Invalid rows are NA-ed out of both value and weight so the grouped mean
     # skips them, as the old per-cell mask did.
-    vn2 <- vn; w2 <- w
+    vn2 <- vn
+    w2 <- w
     vn2[!ok] <- NA_real_
     w2[!ok] <- NA_real_
     val <- suppressWarnings(collapse::fmean(vn2, g = g, w = w2, na.rm = TRUE))
@@ -727,7 +776,8 @@ merge_loc_values_to_cells <- function(cell_map, loc_vals, by_wave = TRUE) {
       t <- pmin(1, pmax(0, t))
       rgbv <- ramp(t)
       out[ok] <- grDevices::rgb(rgbv[, 1], rgbv[, 2], rgbv[, 3],
-                                maxColorValue = 255)
+        maxColorValue = 255
+      )
     }
     out
   }
@@ -765,7 +815,7 @@ merge_loc_values_to_cells <- function(cell_map, loc_vals, by_wave = TRUE) {
   # indistinguishable, log made thin cells look busier than they are.
   band <- rev(grDevices::hcl.colors(12, "Mako"))[3:11]
   pale <- band[1]
-  pos   <- n_units[is.finite(n_units) & n_units > 0]
+  pos <- n_units[is.finite(n_units) & n_units > 0]
   above <- pos[pos >= 1]
   has_thin <- length(pos) > length(above)
   fmt <- function(x) format(signif(x, 3), trim = TRUE, scientific = FALSE)
@@ -774,8 +824,10 @@ merge_loc_values_to_cells <- function(cell_map, loc_vals, by_wave = TRUE) {
     return(list(levels = "< 1", colors = pale, cuts = 1, thin = TRUE))
   }
 
-  brks <- unique(stats::quantile(above, probs = seq(0, 1, length.out = 4),
-                                 names = FALSE, type = 7))
+  brks <- unique(stats::quantile(above,
+    probs = seq(0, 1, length.out = 4),
+    names = FALSE, type = 7
+  ))
   cuts <- unique(brks[-c(1, length(brks))])
   cuts <- cuts[cuts > brks[1] & cuts < brks[length(brks)]]
 
@@ -793,8 +845,10 @@ merge_loc_values_to_cells <- function(cell_map, loc_vals, by_wave = TRUE) {
   }
 
   n_up <- length(upper)
-  colors <- c(if (has_thin) pale,
-              band[round(seq(3, length(band), length.out = n_up))])
+  colors <- c(
+    if (has_thin) pale,
+    band[round(seq(3, length(band), length.out = n_up))]
+  )
   levels <- c(if (has_thin) "< 1", upper)
   list(levels = levels, colors = colors, cuts = c(1, cuts), thin = has_thin)
 }
@@ -833,13 +887,19 @@ merge_loc_values_to_cells <- function(cell_map, loc_vals, by_wave = TRUE) {
 #'
 #' @noRd
 .density_hex_payload <- function(cells, unit_label = "households") {
-  if (is.null(cells) || nrow(cells) == 0) return(NULL)
-  if (!all(c("h3", "n_units") %in% names(cells))) return(NULL)
+  if (is.null(cells) || nrow(cells) == 0) {
+    return(NULL)
+  }
+  if (!all(c("h3", "n_units") %in% names(cells))) {
+    return(NULL)
+  }
 
   ok <- !is.na(cells$h3) & nzchar(cells$h3) &
     is.finite(cells$n_units) & cells$n_units > 0
   cells <- cells[ok, , drop = FALSE]
-  if (nrow(cells) == 0) return(NULL)
+  if (nrow(cells) == 0) {
+    return(NULL)
+  }
 
   ramp_info <- .density_ramp(cells$n_units)
   lvls <- ramp_info$levels
@@ -884,7 +944,9 @@ merge_loc_values_to_cells <- function(cell_map, loc_vals, by_wave = TRUE) {
 # Upper-case the first letter only; `toupper()` on the whole word would shout.
 #' @noRd
 .capitalise <- function(x) {
-  if (!nzchar(x %||% "")) return(x)
+  if (!nzchar(x %||% "")) {
+    return(x)
+  }
   paste0(toupper(substr(x, 1, 1)), substr(x, 2, nchar(x)))
 }
 
@@ -908,7 +970,7 @@ merge_loc_values_to_cells <- function(cell_map, loc_vals, by_wave = TRUE) {
 #' @noRd
 stats_table_frame <- function(df, vl, flag_col = NULL, vars = NULL, base = NULL) {
   target <- if (!is.null(vars)) vars else vl$name[vl[[flag_col]] == 1]
-  vars   <- intersect(target, names(df))
+  vars <- intersect(target, names(df))
   if (length(vars) == 0) {
     tag <- flag_col %||% "specified"
     return(data.frame(Note = paste("No", tag, "variables found")))
@@ -942,8 +1004,11 @@ stats_table_frame <- function(df, vl, flag_col = NULL, vars = NULL, base = NULL)
     # grouped pass (PERF-09)
     fill_df <- if (shared) {
       ms <- base_list$missing
-      if (is.null(ms)) survey_missingness_long(df, vars) else
+      if (is.null(ms)) {
+        survey_missingness_long(df, vars)
+      } else {
         ms[ms$variable %in% vars, , drop = FALSE]
+      }
     } else {
       survey_missingness_long(df, vars)
     }
@@ -978,10 +1043,12 @@ stats_table_frame <- function(df, vl, flag_col = NULL, vars = NULL, base = NULL)
   }
 
   # ---- Column renaming ----------------------------------------------------
-  if ("countryyear" %in% names(tab))    names(tab)[names(tab) == "countryyear"]    <- "Country, Year"
+  if ("countryyear" %in% names(tab)) names(tab)[names(tab) == "countryyear"] <- "Country, Year"
 
   names(tab) <- vapply(names(tab), function(nm) {
-    if (!nzchar(nm)) return(nm)
+    if (!nzchar(nm)) {
+      return(nm)
+    }
     paste0(toupper(substr(nm, 1, 1)), substr(nm, 2, nchar(nm)))
   }, character(1))
 
@@ -991,7 +1058,9 @@ stats_table_frame <- function(df, vl, flag_col = NULL, vars = NULL, base = NULL)
     tab[text_cols] <- lapply(tab[text_cols], function(x) {
       x_chr <- as.character(x)
       vapply(x_chr, function(s) {
-        if (is.na(s)) return(NA_character_)
+        if (is.na(s)) {
+          return(NA_character_)
+        }
         # HTML-escape each wrapped line before joining with the literal
         # <br> markup below (the table is rendered with escape = FALSE,
         # so any unescaped data-derived text would render as raw HTML;
@@ -1056,10 +1125,13 @@ make_stats_dt <- function(survey_data, variable_list, flag_col = NULL,
         autoWidth = TRUE,
         pageLength = 10,
         columnDefs = list(list(className = "dt-wrap", targets = "_all")),
-        dom     = wise_csv_dom("lfrtip"),
+        dom = wise_csv_dom("lfrtip"),
         buttons = wise_csv_button(
-          if (!is.null(vars)) "survey_summary_policy"
-          else paste0("survey_summary_", flag_col %||% "selected")
+          if (!is.null(vars)) {
+            "survey_summary_policy"
+          } else {
+            paste0("survey_summary_", flag_col %||% "selected")
+          }
         )
       )
     )
@@ -1083,16 +1155,27 @@ make_stats_dt <- function(survey_data, variable_list, flag_col = NULL,
 build_stats_table <- function(survey_data, variable_list, flag_col = NULL,
                               vars = NULL, base = NULL) {
   df <- tryCatch(if (is.function(survey_data)) survey_data() else survey_data,
-                 error = function(e) NULL)
-  if (is.null(df) || !nrow(as.data.frame(df))) return(NULL)
+    error = function(e) NULL
+  )
+  if (is.null(df) || !nrow(as.data.frame(df))) {
+    return(NULL)
+  }
   vl <- tryCatch(if (is.function(variable_list)) variable_list() else variable_list,
-                 error = function(e) NULL)
-  if (is.null(vl)) return(NULL)
+    error = function(e) NULL
+  )
+  if (is.null(vl)) {
+    return(NULL)
+  }
   base_value <- tryCatch(if (is.function(base)) base() else base,
-                         error = function(e) NULL)
-  tab <- stats_table_frame(df, vl, flag_col = flag_col, vars = vars,
-                           base = base_value)
-  if (identical(names(tab), "Note")) return(NULL)
+    error = function(e) NULL
+  )
+  tab <- stats_table_frame(df, vl,
+    flag_col = flag_col, vars = vars,
+    base = base_value
+  )
+  if (identical(names(tab), "Note")) {
+    return(NULL)
+  }
   tab
 }
 
@@ -1140,30 +1223,41 @@ outcome_summary_wide <- function(df, outcome, type) {
     waves = "all",
     mat   = matrix(NA_real_, 0, 1, dimnames = list(NULL, "all"))
   )
-  if (is.null(df) || !nrow(df) || !outcome %in% names(df)) return(empty)
+  if (is.null(df) || !nrow(df) || !outcome %in% names(df)) {
+    return(empty)
+  }
 
   numeric <- identical(as.character(type)[1], "numeric")
   x <- df[[outcome]]
 
   # Sample weights: weighted statistics use only rows with a finite,
   # positive weight (the app-wide validity rule); counts stay raw.
-  w_all <- if ("weight" %in% names(df)) as.numeric(df$weight) else
+  w_all <- if ("weight" %in% names(df)) {
+    as.numeric(df$weight)
+  } else {
     rep(1, nrow(df))
+  }
   w_ok <- is.finite(w_all) & (w_all > 0)
 
   stat_ids <- if (numeric) {
-    c("n", "n_miss", "coverage", "mean", "sd", "min",
-      paste0("p", seq(10, 90, 10)), "max")
+    c(
+      "n", "n_miss", "coverage", "mean", "sd", "min",
+      paste0("p", seq(10, 90, 10)), "max"
+    )
   } else {
     c("n", "n_miss", "coverage", "n1", "n0", "share1")
   }
   stat_labels <- if (numeric) {
-    c("Observations", "Missing", "Coverage (%)", "Mean", "Std Dev", "Min",
+    c(
+      "Observations", "Missing", "Coverage (%)", "Mean", "Std Dev", "Min",
       "P10", "P20", "P30", "P40", "Median (P50)", "P60", "P70", "P80", "P90",
-      "Max")
+      "Max"
+    )
   } else {
-    c("Observations", "Missing", "Coverage (%)",
-      "Count = 1 (Yes)", "Count = 0 (No)", "Share = 1")
+    c(
+      "Observations", "Missing", "Coverage (%)",
+      "Count = 1 (Yes)", "Count = 0 (No)", "Share = 1"
+    )
   }
 
   # Wave columns: the same "code|year|survname" keys the wave pickers use,
@@ -1171,15 +1265,17 @@ outcome_summary_wide <- function(df, outcome, type) {
   w <- survey_wave_list(df)
   has_waves <- !is.null(w)
   waves <- if (has_waves) c("all", w$key) else "all"
-  mat <- matrix(NA_real_, nrow = length(stat_ids), ncol = length(waves),
-                dimnames = list(stat_ids, waves))
+  mat <- matrix(NA_real_,
+    nrow = length(stat_ids), ncol = length(waves),
+    dimnames = list(stat_ids, waves)
+  )
 
   key <- if (has_waves) {
     paste(df$code, as.character(df$year), df$survname, sep = "|")
   } else {
     rep("all", nrow(df))
   }
-  g  <- collapse::GRP(key, group.sizes = TRUE)
+  g <- collapse::GRP(key, group.sizes = TRUE)
   gl <- as.character(g$groups[[1]])
 
   # Row counts and available (non-missing) values per wave. Group levels
@@ -1193,14 +1289,14 @@ outcome_summary_wide <- function(df, outcome, type) {
 
   n_all <- nrow(df)
   a_all <- sum(!is.na(x))
-  mat["n", "all"]        <- n_all
-  mat["n_miss", "all"]   <- n_all - a_all
+  mat["n", "all"] <- n_all
+  mat["n_miss", "all"] <- n_all - a_all
   mat["coverage", "all"] <- 100 * a_all / max(n_all, 1)
 
   cols <- setdiff(intersect(gl, waves), "all")
   if (length(cols)) {
-    mat["n", cols]        <- total[cols]
-    mat["n_miss", cols]   <- miss[cols]
+    mat["n", cols] <- total[cols]
+    mat["n_miss", cols] <- miss[cols]
     mat["coverage", cols] <- 100 * avail[cols] / pmax(total[cols], 1)
   }
 
@@ -1216,12 +1312,16 @@ outcome_summary_wide <- function(df, outcome, type) {
     # fsd's sum(w) - 1 denominator needs more than one unit of weight.
     mat["sd", "all"] <- if (length(xv) > 1 && sum(xw) > 1) {
       collapse::fsd(xv, w = xw)
-    } else NA_real_
-    mat["min", "all"]  <- if (length(xv)) collapse::fmin(xv) else NA_real_
-    mat["max", "all"]  <- if (length(xv)) collapse::fmax(xv) else NA_real_
+    } else {
+      NA_real_
+    }
+    mat["min", "all"] <- if (length(xv)) collapse::fmin(xv) else NA_real_
+    mat["max", "all"] <- if (length(xv)) collapse::fmax(xv) else NA_real_
     if (length(xv)) {
-      mat[deciles, "all"] <- collapse::fquantile(xv, probs = probs, w = xw,
-                                                 type = 7)
+      mat[deciles, "all"] <- collapse::fquantile(xv,
+        probs = probs, w = xw,
+        type = 7
+      )
     }
 
     if (length(xv)) {
@@ -1233,47 +1333,51 @@ outcome_summary_wide <- function(df, outcome, type) {
       sds <- setNames(collapse::fsd(xv, g = gv, w = xw), gvl)
       swg <- setNames(collapse::fsum(xw, g = gv), gvl)
       sds[swg <= 1] <- NA_real_
-      mat["sd", gcols]   <- sds[gcols]
-      mat["min", gcols]  <- setNames(collapse::fmin(xv, g = gv), gvl)[gcols]
-      mat["max", gcols]  <- setNames(collapse::fmax(xv, g = gv), gvl)[gcols]
+      mat["sd", gcols] <- sds[gcols]
+      mat["min", gcols] <- setNames(collapse::fmin(xv, g = gv), gvl)[gcols]
+      mat["max", gcols] <- setNames(collapse::fmax(xv, g = gv), gvl)[gcols]
 
       # Grouped weighted deciles: sort valid rows by group id (radix), then
       # one weighted fquantile per contiguous slice.
-      ord    <- order(gv$group.id, method = "radix")
-      xs     <- xv[ord]
-      ws     <- xw[ord]
-      sz     <- gv$group.sizes
+      ord <- order(gv$group.id, method = "radix")
+      xs <- xv[ord]
+      ws <- xw[ord]
+      sz <- gv$group.sizes
       starts <- c(1L, head(cumsum(sz), -1) + 1L)
       for (j in seq_along(gvl)) {
         wv <- gvl[[j]]
         if (!wv %in% waves) next
         idx <- starts[[j]] + seq_len(sz[[j]]) - 1L
-        mat[deciles, wv] <- collapse::fquantile(xs[idx], probs = probs,
-                                                w = ws[idx], type = 7)
+        mat[deciles, wv] <- collapse::fquantile(xs[idx],
+          probs = probs,
+          w = ws[idx], type = 7
+        )
       }
     }
   } else {
-    xi   <- suppressWarnings(as.integer(x))
-    one  <- as.integer(!is.na(xi) & xi == 1L)
+    xi <- suppressWarnings(as.integer(x))
+    one <- as.integer(!is.na(xi) & xi == 1L)
     zero <- as.integer(!is.na(xi) & xi == 0L)
 
     n1_all <- sum(one)
     n0_all <- sum(zero)
-    mat["n1", "all"]     <- n1_all
-    mat["n0", "all"]     <- n0_all
+    mat["n1", "all"] <- n1_all
+    mat["n0", "all"] <- n0_all
     # Weighted share of 1s among rows with a valid weight.
     sw1_all <- sum(w_all * one * w_ok)
     sw0_all <- sum(w_all * zero * w_ok)
     mat["share1", "all"] <- if (sw1_all + sw0_all > 0) {
       sw1_all / (sw1_all + sw0_all)
-    } else NA_real_
+    } else {
+      NA_real_
+    }
 
-    n1w <- setNames(as.numeric(collapse::fsum(one,  g = g)), gl)
+    n1w <- setNames(as.numeric(collapse::fsum(one, g = g)), gl)
     n0w <- setNames(as.numeric(collapse::fsum(zero, g = g)), gl)
-    sw1w <- setNames(as.numeric(collapse::fsum(w_all * one * w_ok,  g = g)), gl)
+    sw1w <- setNames(as.numeric(collapse::fsum(w_all * one * w_ok, g = g)), gl)
     sw0w <- setNames(as.numeric(collapse::fsum(w_all * zero * w_ok, g = g)), gl)
-    mat["n1", cols]     <- n1w[cols]
-    mat["n0", cols]     <- n0w[cols]
+    mat["n1", cols] <- n1w[cols]
+    mat["n0", cols] <- n0w[cols]
     den <- sw1w[cols] + sw0w[cols]
     share <- ifelse(den > 0, sw1w[cols] / den, NA_real_)
     mat["share1", cols] <- share
@@ -1301,7 +1405,9 @@ outcome_summary_wide <- function(df, outcome, type) {
   counts <- c("n", "n_miss", "n1", "n0")
   fmt <- vapply(seq_along(v), function(i) {
     x <- v[[i]]
-    if (is.na(x)) return("\u2013")
+    if (is.na(x)) {
+      return("\u2013")
+    }
     id <- s$stat[[i]]
     if (id %in% counts) {
       format(x, big.mark = ",", scientific = FALSE)

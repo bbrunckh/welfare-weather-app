@@ -21,7 +21,6 @@
 # the rest of the shared colour system.
 
 
-
 # Normalise any SSP token found in a scenario name to a canonical key
 # Strips trailing " / P{pct}" suffix first so keys like "SSP3-7.0 / 2030 / P50"
 # are handled identically to the old "SSP3-7.0 / 2030" format.
@@ -29,16 +28,20 @@
 .normalise_ssp <- function(nm) {
   nm_clean <- sub(" / P[0-9]+$", "", nm)
   m_full <- regmatches(nm_clean, regexpr("SSP[0-9]-[0-9.]+", nm_clean))
-  if (length(m_full) > 0) return(m_full)
+  if (length(m_full) > 0) {
+    return(m_full)
+  }
   m_short <- regmatches(nm_clean, regexpr("SSP([2-9])", nm_clean))
-  if (length(m_short) == 0) return(NA_character_)
-  digit  <- sub("SSP", "", m_short)
+  if (length(m_short) == 0) {
+    return(NA_character_)
+  }
+  digit <- sub("SSP", "", m_short)
   lookup <- c("2" = "SSP2-4.5", "3" = "SSP3-7.0", "5" = "SSP5-8.5")
   if (digit %in% names(lookup)) lookup[[digit]] else NA_character_
 }
 
 .parse_year <- function(nm) {
-  m   <- regexpr("\\d{4}-\\d{4}", nm)
+  m <- regexpr("\\d{4}-\\d{4}", nm)
   out <- regmatches(nm, m)
   out[m == -1L] <- NA_character_
   out
@@ -57,7 +60,7 @@
 #'   \item{RP_HIGH}{Rare high-outcome tail: 4:5, 9:10, 19:20, 49:50}
 #' }
 #' @export
-RP_LOW  <- c("1:50" = 0.02, "1:20" = 0.05, "1:10" = 0.10, "1:5" = 0.20)
+RP_LOW <- c("1:50" = 0.02, "1:20" = 0.05, "1:10" = 0.10, "1:5" = 0.20)
 
 #' @rdname RP_LOW
 #' @export
@@ -82,7 +85,9 @@ SSP_SHORT_LABELS <- c(
 #' @noRd
 format_elapsed <- function(secs) {
   secs <- round(secs)
-  if (secs < 60L) return(sprintf("%ds", secs))
+  if (secs < 60L) {
+    return(sprintf("%ds", secs))
+  }
   sprintf("%dm %02ds", secs %/% 60L, secs %% 60L)
 }
 
@@ -99,8 +104,8 @@ format_elapsed <- function(secs) {
 #
 # Named alternatives - available as constants, not default.
 # Use compute_cluster_counts() to check G before switching.
-COEF_VCOV_SPEC              <- ~loc_id_panel
-COEF_VCOV_SPEC_MOULTON      <- ~loc_id_panel:int_month
+COEF_VCOV_SPEC <- ~loc_id_panel
+COEF_VCOV_SPEC_MOULTON <- ~ loc_id_panel:int_month
 
 #' Compute Cluster Counts for SE Specification Diagnostics
 #'
@@ -133,18 +138,26 @@ COEF_VCOV_SPEC_MOULTON      <- ~loc_id_panel:int_month
 compute_cluster_counts <- function(data) {
   has_cols <- function(...) all(c(...) %in% names(data))
 
-  g_loc        <- if (has_cols("loc_id_panel"))
-                    dplyr::n_distinct(data[["loc_id_panel"]])
-                  else NA_integer_
+  g_loc <- if (has_cols("loc_id_panel")) {
+    dplyr::n_distinct(data[["loc_id_panel"]])
+  } else {
+    NA_integer_
+  }
 
-  g_loc_month  <- if (has_cols("loc_id_panel", "int_month"))
-                    dplyr::n_distinct(paste(data[["loc_id_panel"]], data[["int_month"]]))
-                  else NA_integer_
+  g_loc_month <- if (has_cols("loc_id_panel", "int_month")) {
+    dplyr::n_distinct(paste(data[["loc_id_panel"]], data[["int_month"]]))
+  } else {
+    NA_integer_
+  }
 
-  g_conserv    <- if (has_cols("code", "year", "survname", "loc_id_panel"))
-                    dplyr::n_distinct(paste(data[["code"]], data[["year"]],
-                                           data[["survname"]], data[["loc_id_panel"]]))
-                  else NA_integer_
+  g_conserv <- if (has_cols("code", "year", "survname", "loc_id_panel")) {
+    dplyr::n_distinct(paste(
+      data[["code"]], data[["year"]],
+      data[["survname"]], data[["loc_id_panel"]]
+    ))
+  } else {
+    NA_integer_
+  }
 
   counts <- list(
     loc_id_panel           = g_loc,
@@ -204,13 +217,13 @@ compute_cluster_counts <- function(data) {
 compute_chol_vcov <- function(fit, vcov_spec = COEF_VCOV_SPEC) {
   # fixest_multi: iterate over sub-models (needed for RIF quantile fits)
   if (inherits(fit, "fixest_multi")) {
-    return(lapply(seq_along(fit), function(i)
+    return(lapply(seq_along(fit), function(i) {
       compute_chol_vcov(fit[[i]], vcov_spec = vcov_spec)
-    ))
+    }))
   }
 
   stopifnot("fit must be a fixest model" = inherits(fit, "fixest"))
-  beta  <- stats::coef(fit)
+  beta <- stats::coef(fit)
 
   # Try fit-time VCV first (respects cluster= passed at estimation), then
   # requested spec, then fallback chain
@@ -231,14 +244,18 @@ compute_chol_vcov <- function(fit, vcov_spec = COEF_VCOV_SPEC) {
     }
   }
 
-  if (is.null(Sigma))
+  if (is.null(Sigma)) {
     stop("[compute_chol_vcov] all vcov specs failed - cannot compute Sigma.")
+  }
 
   L <- tryCatch(
     t(chol(Sigma)),
-    error = function(e)
-      stop("[compute_chol_vcov] Cholesky decomposition failed: ",
-           conditionMessage(e))
+    error = function(e) {
+      stop(
+        "[compute_chol_vcov] Cholesky decomposition failed: ",
+        conditionMessage(e)
+      )
+    }
   )
   list(L = L, K = nrow(L), beta = beta, spec = vcov_spec)
 }
@@ -280,8 +297,8 @@ compute_chol_vcov <- function(fit, vcov_spec = COEF_VCOV_SPEC) {
 #' @export
 compute_factor_loading <- function(X_nonFE, chol_obj) {
   stopifnot(
-    "X_nonFE must be a numeric matrix"        = is.matrix(X_nonFE) && is.numeric(X_nonFE),
-    "chol_obj must contain L and beta"        = all(c("L", "beta") %in% names(chol_obj)),
+    "X_nonFE must be a numeric matrix" = is.matrix(X_nonFE) && is.numeric(X_nonFE),
+    "chol_obj must contain L and beta" = all(c("L", "beta") %in% names(chol_obj)),
     "chol_obj$beta must be a named numeric vector" =
       is.numeric(chol_obj$beta) && !is.null(names(chol_obj$beta)),
     "X_nonFE columns must match chol_obj$beta names" =
@@ -302,7 +319,7 @@ compute_factor_loading <- function(X_nonFE, chol_obj) {
   # off-diagonal Sigma contributions from inactive coefficients.
   active_mask <- chol_obj$active_mask
   if (!is.null(active_mask) && !is.null(chol_obj$L_active) &&
-      length(active_mask) == ncol(X_nonFE)) {
+    length(active_mask) == ncol(X_nonFE)) {
     return(X_nonFE[, active_mask, drop = FALSE] %*% chol_obj$L_active)
   }
 
@@ -329,12 +346,15 @@ align_factor_loading_matrix <- function(X_nonFE, beta_names) {
 
   if (!length(intersect(x_names, beta_names))) {
     stop("Prediction design matrix has no columns matching fitted coefficients.",
-         call. = FALSE)
+      call. = FALSE
+    )
   }
 
   # The common prediction path already emits coefficient-order columns. Avoid
   # the subset/reorder allocation when the names are an exact match.
-  if (identical(x_names, beta_names)) return(X_nonFE)
+  if (identical(x_names, beta_names)) {
+    return(X_nonFE)
+  }
 
   common <- intersect(beta_names, x_names)
   aligned <- X_nonFE[, common, drop = FALSE]
@@ -342,14 +362,15 @@ align_factor_loading_matrix <- function(X_nonFE, beta_names) {
   if (length(missing)) {
     aligned <- cbind(
       aligned,
-      matrix(0, nrow = nrow(X_nonFE), ncol = length(missing),
-             dimnames = list(NULL, missing))
+      matrix(0,
+        nrow = nrow(X_nonFE), ncol = length(missing),
+        dimnames = list(NULL, missing)
+      )
     )
   }
 
   aligned[, beta_names, drop = FALSE]
 }
-
 
 
 # Shared UI helper ----
@@ -394,8 +415,8 @@ residual_method_ui <- function(ns, input_id) {
 #' @noRd
 resolve_id_col <- function(a, b) {
   candidates <- c("pid", "hhid", "fid")
-  shared     <- intersect(names(a), names(b))
-  match      <- candidates[candidates %in% shared]
+  shared <- intersect(names(a), names(b))
+  match <- candidates[candidates %in% shared]
   if (length(match) == 0L) NULL else match[[1L]]
 }
 
@@ -491,33 +512,30 @@ run_sim_pipeline <- function(weather_raw,
                              train_data,
                              engine,
                              chol_obj = NULL,
-
-                            chol_Sigma  = NULL,   # golem compat alias
-                            slim        = FALSE,  # accepted, ignored
-
-                             #RIF
-                             fit_multi   = NULL,
-                             taus        = NULL,
+                             chol_Sigma = NULL, # golem compat alias
+                             slim = FALSE, # accepted, ignored
+                             # RIF
+                             fit_multi = NULL,
+                             taus = NULL,
                              weather_cols = NULL,
-                              precomputed_train_aug = NULL,
-                              svy_prepared = NULL,
-                              weather_join_cache = NULL,
-                              batch_rif_predictions = FALSE,
-                              direct_rif_predictions = FALSE,
-                               direct_rif_metadata = NULL,
-                               direct_rif_baseline_cache = NULL,
-                               svy_baseline = NULL,
-                               rif_policy_deltas = NULL,
-                              rif_grid     = NULL,
+                             precomputed_train_aug = NULL,
+                             svy_prepared = NULL,
+                             weather_join_cache = NULL,
+                             batch_rif_predictions = FALSE,
+                             direct_rif_predictions = FALSE,
+                             direct_rif_metadata = NULL,
+                             direct_rif_baseline_cache = NULL,
+                             svy_baseline = NULL,
+                             rif_policy_deltas = NULL,
+                             rif_grid = NULL,
                              precomputed_ecdf_train = NULL) {
-
   n_pre_join <- nrow(svy)
 
   # Define is_rif once - all conditions in one place
   is_rif <- identical(engine, "rif") &&
-            !is.null(fit_multi)      &&
-            !is.null(taus)           &&
-            !is.null(weather_cols)
+    !is.null(fit_multi) &&
+    !is.null(taus) &&
+    !is.null(weather_cols)
 
   # RIF policy mode: caller supplied an svy_baseline so we can separate the
   # baseline (no-policy) RIF prediction from the policy net level effect.
@@ -526,7 +544,7 @@ run_sim_pipeline <- function(weather_raw,
   # OLS path doesn't need this because predict_outcome() naturally picks up
   # the policy level shift from the policy-modified design matrix.
   is_rif_policy <- is_rif && !is.null(svy_baseline) &&
-                   !is.null(rif_grid) && !is.null(train_data)
+    !is.null(rif_grid) && !is.null(train_data)
   svy_for_predict <- if (is_rif_policy) svy_baseline else svy
 
   # Tag svy with row IDs so downstream consumers can broadcast per-household
@@ -559,10 +577,11 @@ run_sim_pipeline <- function(weather_raw,
   rm(svy_join)
 
   # Resolve ID column for "original" residual matching
-  id_col <- if (residuals == "original")
-               resolve_id_col(train_data, survey_wd_sim)
-             else
-               NULL
+  id_col <- if (residuals == "original") {
+    resolve_id_col(train_data, survey_wd_sim)
+  } else {
+    NULL
+  }
 
   # ---- Prediction - dispatch on engine ------------------------------------
 
@@ -580,56 +599,65 @@ run_sim_pipeline <- function(weather_raw,
     # columns of F = X %*% L_full would be incorrect when Sigma has
     # off-diagonal terms between active and inactive coefficients.
     chol_list <- if (!is.null(chol_src) && is.list(chol_src) &&
-                     !("L" %in% names(chol_src))) {
+      !("L" %in% names(chol_src))) {
       active_mask <- attr(chol_src, "active_mask")
-      use_active  <- !is.null(active_mask) &&
-                      all(vapply(chol_src,
-                                 function(x) "L_active" %in% names(x),
-                                 logical(1)))
+      use_active <- !is.null(active_mask) &&
+        all(vapply(
+          chol_src,
+          function(x) "L_active" %in% names(x),
+          logical(1)
+        ))
       tmp <- lapply(chol_src, function(x) {
-        if (use_active && is.matrix(x$L_active)) x$L_active
-        else if (is.list(x) && "L" %in% names(x)) x$L
-        else if (is.matrix(x)) x
-        else NULL
+        if (use_active && is.matrix(x$L_active)) {
+          x$L_active
+        } else if (is.list(x) && "L" %in% names(x)) {
+          x$L
+        } else if (is.matrix(x)) {
+          x
+        } else {
+          NULL
+        }
       })
       if (use_active) attr(tmp, "active_mask") <- active_mask
       tmp
-    } else NULL
+    } else {
+      NULL
+    }
     predict_rif(
-      fit_multi    = fit_multi,
-      newdata      = survey_wd_sim, #joined,
-      svy          = svy_for_predict,
-      train_data   = train_data,
-      taus         = taus,
-      outcome      = so$name,
+      fit_multi = fit_multi,
+      newdata = survey_wd_sim, # joined,
+      svy = svy_for_predict,
+      train_data = train_data,
+      taus = taus,
+      outcome = so$name,
       weather_cols = weather_cols,
-      so           = so,
-      chol_list    = chol_list,
-      ecdf_train   = precomputed_ecdf_train,
-       batch_predictions = batch_rif_predictions,
-       direct_predictions = direct_rif_predictions,
-       direct_metadata = direct_rif_metadata,
-       direct_baseline_cache = direct_rif_baseline_cache
-     )
+      so = so,
+      chol_list = chol_list,
+      ecdf_train = precomputed_ecdf_train,
+      batch_predictions = batch_rif_predictions,
+      direct_predictions = direct_rif_predictions,
+      direct_metadata = direct_rif_metadata,
+      direct_baseline_cache = direct_rif_baseline_cache
+    )
   } else {
     # Standard OLS path - unchanged
     tryCatch(
-    predict_outcome(
-      model      = model,
-      newdata    = survey_wd_sim,
-      residuals  = "none",     # residuals drawn at display time, not here
-      outcome    = so$name,
-      id         = id_col,
-      train_data = train_data,
-      engine     = engine
-    ),
-    error = function(e) {
-      warning("[run_sim_pipeline] predict_outcome() failed: ", conditionMessage(e))
-      NULL
-    }
+      predict_outcome(
+        model      = model,
+        newdata    = survey_wd_sim,
+        residuals  = "none", # residuals drawn at display time, not here
+        outcome    = so$name,
+        id         = id_col,
+        train_data = train_data,
+        engine     = engine
+      ),
+      error = function(e) {
+        warning("[run_sim_pipeline] predict_outcome() failed: ", conditionMessage(e))
+        NULL
+      }
     )
   }
-  
+
   if (is.null(out)) {
     rm(survey_wd_sim)
     return(NULL)
@@ -637,7 +665,7 @@ run_sim_pipeline <- function(weather_raw,
 
   # y_point stays log-scale - back-transformation happens inside
   # aggregate_with_uncertainty_delta() after coefficient perturbation.
-  y_point  <- out$.fitted
+  y_point <- out$.fitted
 
   # ---- RIF policy correction --------------------------------------------- #
   # In RIF policy mode the prediction above was made against svy_baseline,
@@ -666,11 +694,13 @@ run_sim_pipeline <- function(weather_raw,
     # but corr is per HH, so the lengths mismatch and the correction would
     # be silently dropped.
     if (!is.null(corr) && ".svy_row_id" %in% names(out) &&
-        length(corr) == nrow(svy_baseline)) {
+      length(corr) == nrow(svy_baseline)) {
       y_point <- y_point + corr[out$.svy_row_id]
     } else {
-      warning("[run_sim_pipeline] RIF policy correction unavailable; ",
-              "policy y_point will reflect weather-sensitivity changes only.")
+      warning(
+        "[run_sim_pipeline] RIF policy correction unavailable; ",
+        "policy y_point will reflect weather-sensitivity changes only."
+      )
     }
   }
 
@@ -686,13 +716,16 @@ run_sim_pipeline <- function(weather_raw,
   # correction added above. (svy_for_predict = svy_baseline carries no
   # SP_TRANSFER_COL, so `out` wouldn't have it anyway - the guard is
   # defensive.)
-  sp_vec <- if (!is_rif_policy && SP_TRANSFER_COL %in% names(out))
-              out[[SP_TRANSFER_COL]] else NULL
+  sp_vec <- if (!is_rif_policy && SP_TRANSFER_COL %in% names(out)) {
+    out[[SP_TRANSFER_COL]]
+  } else {
+    NULL
+  }
   if (!is.null(sp_vec) && any(sp_vec > 0, na.rm = TRUE)) {
     is_log <- isTRUE(so$transform == "log")
     if (is_log) {
       welfare_lvl <- exp(y_point) + sp_vec
-      y_point     <- log(pmax(welfare_lvl, .Machine$double.eps))
+      y_point <- log(pmax(welfare_lvl, .Machine$double.eps))
     } else {
       y_point <- y_point + sp_vec
     }
@@ -703,10 +736,11 @@ run_sim_pipeline <- function(weather_raw,
 
   weight <- if ("weight" %in% names(out)) out$weight else NULL
 
-  id_vec   <- if (!is.null(id_col) && id_col %in% names(out))
-                out[[id_col]]
-              else
-                NULL
+  id_vec <- if (!is.null(id_col) && id_col %in% names(out)) {
+    out[[id_col]]
+  } else {
+    NULL
+  }
 
   # Pipeline row -> baseline household lookup. Used by Module 3 to broadcast
   # per-household policy deltas (decompose_policy_effect output, indexed by
@@ -765,18 +799,23 @@ run_sim_pipeline <- function(weather_raw,
   } else if (!is.null(precomputed_train_aug)) {
     precomputed_train_aug
   } else {
-    tryCatch({
-      fitted_train <- as.numeric(stats::predict(model, newdata = train_data))
-      train_data |>
-        dplyr::mutate(
-          .fitted = fitted_train,
-          .resid  = !!rlang::sym(so$name) - fitted_train
+    tryCatch(
+      {
+        fitted_train <- as.numeric(stats::predict(model, newdata = train_data))
+        train_data |>
+          dplyr::mutate(
+            .fitted = fitted_train,
+            .resid  = !!rlang::sym(so$name) - fitted_train
+          )
+      },
+      error = function(e) {
+        warning(
+          "[run_sim_pipeline] train_aug computation failed: ",
+          conditionMessage(e)
         )
-    }, error = function(e) {
-      warning("[run_sim_pipeline] train_aug computation failed: ",
-              conditionMessage(e))
-      NULL
-    })
+        NULL
+      }
+    )
   }
 
   list(
@@ -819,7 +858,7 @@ run_sim_pipeline <- function(weather_raw,
 build_hist_sim_dates <- function(survey_weather, year_range) {
   months <- unique(survey_weather$int_month)
   months <- months[!is.na(months)]
-  years  <- seq(year_range[1], year_range[2])
+  years <- seq(year_range[1], year_range[2])
 
   with(
     expand.grid(int_month = months, int_year = years),
@@ -842,7 +881,7 @@ build_hist_sim_dates <- function(survey_weather, year_range) {
 residual_choices <- function() {
   c(
     "Original" = "original",
-    "Resample"  = "resample"
+    "Resample" = "resample"
   )
 }
 
@@ -906,15 +945,19 @@ build_perturbation_method <- function(selected_weather) {
 }
 
 build_weather_join_cache <- function(survey_join,
-                                     by = c("code", "year", "survname",
-                                            "loc_id", "int_month")) {
+                                     by = c(
+                                       "code", "year", "survname",
+                                       "loc_id", "int_month"
+                                     )) {
   stopifnot(is.data.frame(survey_join), all(by %in% names(survey_join)))
   list(
     by = by,
     survey = survey_join,
     survey_nonjoin = setdiff(names(survey_join), by),
     lookup = split(seq_len(nrow(survey_join)),
-                   .weather_join_key(survey_join, by), drop = TRUE)
+      .weather_join_key(survey_join, by),
+      drop = TRUE
+    )
   )
 }
 
@@ -938,7 +981,8 @@ join_weather_survey_cached <- function(weather_raw, cache) {
     dplyr::bind_cols(
       tibble::as_tibble(weather[weather_rows, , drop = FALSE]),
       tibble::as_tibble(cache$survey[survey_rows, cache$survey_nonjoin,
-                                     drop = FALSE])
+        drop = FALSE
+      ])
     ),
     year = as.factor(year)
   ))
@@ -979,7 +1023,7 @@ prepare_hist_weather <- function(weather_raw,
                                  outcome_name) {
   drop_cols <- c(selected_weather$name, outcome_name)
 
-    weather_raw |>
+  weather_raw |>
     .add_sim_timestamp_fields() |>
     dplyr::select(-timestamp) |>
     dplyr::inner_join(
@@ -1008,7 +1052,9 @@ prepare_hist_weather <- function(weather_raw,
 #' @importFrom rlang sym .data
 #' @export
 apply_log_backtransform <- function(preds, so) {
-  if (!isTRUE(so$transform == "log")) return(preds)
+  if (!isTRUE(so$transform == "log")) {
+    return(preds)
+  }
 
   preds |>
     dplyr::mutate(!!rlang::sym(so$name) := exp(.data[[so$name]]))

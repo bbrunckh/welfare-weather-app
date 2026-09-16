@@ -31,7 +31,7 @@ wise_seed <- function(seed = WISEAPP_DEFAULT_SEED, ...) {
   )
   derived <- strtoi(substr(hash, 1L, 7L), base = 16L)
   as.integer((as.double(derived) + abs(as.double(seed))) %%
-               (.Machine$integer.max - 1L) + 1L)
+    (.Machine$integer.max - 1L) + 1L)
 }
 
 #' Select deterministic fallback values from a reference vector
@@ -45,7 +45,9 @@ wise_seed <- function(seed = WISEAPP_DEFAULT_SEED, ...) {
 #' @noRd
 deterministic_values_by_key <- function(values, keys,
                                         seed = WISEAPP_DEFAULT_SEED) {
-  if (length(values) == 0L) return(values)
+  if (length(values) == 0L) {
+    return(values)
+  }
   keys <- as.character(keys)
   keys[is.na(keys)] <- paste0("<NA>", which(is.na(keys)))
   unique_keys <- unique(keys)
@@ -64,7 +66,8 @@ wise_math <- function(tex, display = FALSE) {
   out <- .katex_cache[[key]]
   if (is.null(out)) {
     out <- as.character(
-      katex::katex_html(tex, displayMode = display, include_css = FALSE))
+      katex::katex_html(tex, displayMode = display, include_css = FALSE)
+    )
     .katex_cache[[key]] <- out
   }
   htmltools::HTML(out)
@@ -76,9 +79,12 @@ wise_math <- function(tex, display = FALSE) {
 #' @noRd
 welfare_equation_ui <- function(predicted = FALSE) {
   y_tex <- if (predicted) "\\widehat{Y_{ijt}}" else "Y_{ijt}"
-  eq    <- paste0(y_tex, " = f(W_{jf(t)}, X_{ijt}, E_{jt}) + \\epsilon_{ijt}")
-  y_txt <- if (predicted) ": predicted outcome of individual/household "
-           else ": outcome of individual/household "
+  eq <- paste0(y_tex, " = f(W_{jf(t)}, X_{ijt}, E_{jt}) + \\epsilon_{ijt}")
+  y_txt <- if (predicted) {
+    ": predicted outcome of individual/household "
+  } else {
+    ": outcome of individual/household "
+  }
 
   htmltools::tagList(
     shiny::h5(if (predicted) "Predicted welfare" else "Welfare function"),

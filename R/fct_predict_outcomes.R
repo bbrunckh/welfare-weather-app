@@ -90,14 +90,16 @@
 #'   id      = 1:1000,
 #'   welfare = exp(rnorm(1000, mean = log(3.5), sd = 0.8)),
 #'   age     = rnorm(1000, mean = 35, sd = 10),
-#'   educ    = rnorm(1000, mean = 8,  sd = 3)
+#'   educ    = rnorm(1000, mean = 8, sd = 3)
 #' )
 #' model <- lm(log(welfare) ~ age + educ, data = train_data)
 #' new_data <- data.frame(id = 1:500, age = rnorm(500), educ = rnorm(500))
 #'
 #' # Original residuals matched by id
-#' predict_outcome(model, new_data, residuals = "original",
-#'                 id = "id", train_data = train_data)
+#' predict_outcome(model, new_data,
+#'   residuals = "original",
+#'   id = "id", train_data = train_data
+#' )
 #'
 #' # Parametric residuals
 #' predict_outcome(model, new_data, residuals = "normal", train_data = train_data)
@@ -109,16 +111,15 @@
 #' @export
 predict_outcome <- function(model,
                             newdata,
-                            type       = "response",
-                            residuals  = c("none", "original", "normal", "resample"),
-                            id         = NULL,
-                            outcome    = "predicted",
+                            type = "response",
+                            residuals = c("none", "original", "normal", "resample"),
+                            id = NULL,
+                            outcome = "predicted",
                             train_data = NULL,
-                            engine     = NULL,
-                            seed       = WISEAPP_DEFAULT_SEED) {
-
+                            engine = NULL,
+                            seed = WISEAPP_DEFAULT_SEED) {
   if (length(residuals) == 0) stop("`residuals` must be a single string; got length 0.")
-  if (length(residuals) > 1)  residuals <- residuals[[1]]
+  if (length(residuals) > 1) residuals <- residuals[[1]]
   residuals <- match.arg(residuals)
 
   # ---------------------------------------------------------------------------
@@ -127,8 +128,8 @@ predict_outcome <- function(model,
   # Priority: explicit `engine` argument > class-based detection.
   # This mirrors the `engine` field returned by fit_model().
 
-  is_fixest  <- inherits(model, "fixest") ||
-                (!is.null(engine) && identical(engine, "fixest"))
+  is_fixest <- inherits(model, "fixest") ||
+    (!is.null(engine) && identical(engine, "fixest"))
   is_parsnip <- !is_fixest && inherits(model, "model_fit")
 
   # For parsnip: distinguish linear vs logistic to pick the right augment column
@@ -144,7 +145,6 @@ predict_outcome <- function(model,
   # ---------------------------------------------------------------------------
 
   if (is_fixest) {
-
     # fixest does not have a broom::augment method that accepts new data cleanly.
     # Use predict.fixest directly:
     #   feols  -> numeric fitted values
@@ -153,7 +153,7 @@ predict_outcome <- function(model,
     preds_vec <- tryCatch(
       stats::predict(model, newdata = newdata, type = "response"),
       error = function(e) stop(sprintf("fixest predict failed: %s", conditionMessage(e)))
-)
+    )
     # fixest::predict() silently drops rows where FE levels are absent from
     # training data. Trim newdata to match preds_vec length before mutating,
     # so that preds, X_nonFE (from model.matrix), and resid_draw are all
@@ -165,10 +165,7 @@ predict_outcome <- function(model,
     # slopes (e.g. loc_id[Haz_jt] in fixest notation), FE estimates would
     # depend on beta and this delta approach would be incorrect. Revisit if
     # location-specific hazard slopes are added.
-
-
   } else if (is_parsnip) {
-
     preds <- broom::augment(model, new_data = newdata)
 
     # Resolve the fitted-value column produced by augment
@@ -191,7 +188,6 @@ predict_outcome <- function(model,
     if (!identical(fitted_col, ".fitted")) {
       preds <- dplyr::mutate(preds, .fitted = .data[[fitted_col]])
     }
-
   } else {
     # Bare lm / glm
     preds <- broom::augment(model, newdata = newdata, type.predict = type)
@@ -205,19 +201,18 @@ predict_outcome <- function(model,
   train_aug <- NULL
 
   if (residuals != "none") {
-
-    if (is.null(train_data))
+    if (is.null(train_data)) {
       stop("`train_data` must be supplied when `residuals != 'none'`.")
+    }
 
     if (is_fixest) {
-
       # fixest stores residuals internally; extract them and bind to train_data.
       # For feols:  residuals() returns OLS residuals (observed - fitted).
       # For feglm:  residuals(, type = "deviance") are the canonical residuals
       #             used for diagnostic purposes.  For simulation we keep them
       #             so the caller can choose how to use them.
       resid_type <- if (is_fixest_logistic) "deviance" else "response"
-      resid_vec  <- tryCatch(
+      resid_vec <- tryCatch(
         stats::residuals(model, type = resid_type),
         error = function(e) {
           warning(sprintf(
@@ -231,9 +226,11 @@ predict_outcome <- function(model,
 
       fitted_train <- tryCatch(
         stats::predict(model, newdata = train_data, type = "response"),
-        error = function(e) stop(sprintf(
-          "fixest predict on train_data failed: %s", conditionMessage(e)
-        ))
+        error = function(e) {
+          stop(sprintf(
+            "fixest predict on train_data failed: %s", conditionMessage(e)
+          ))
+        }
       )
 
       train_aug <- dplyr::mutate(
@@ -241,18 +238,20 @@ predict_outcome <- function(model,
         .fitted = as.numeric(fitted_train),
         .resid  = as.numeric(resid_vec)
       )
-
     } else if (is_parsnip) {
-
       train_aug <- broom::augment(model, new_data = train_data)
 
       # Normalise fitted column name
       fitted_col_tr <- if (is_parsnip_logistic) ".pred_1" else ".pred"
       if (!fitted_col_tr %in% names(train_aug)) {
         candidates <- grep("^\\.pred", names(train_aug), value = TRUE)
-        if (length(candidates) > 0) fitted_col_tr <- candidates[[1L]]
-        else if (".fitted" %in% names(train_aug)) fitted_col_tr <- ".fitted"
-        else stop("No fitted-value column in training augment output.")
+        if (length(candidates) > 0) {
+          fitted_col_tr <- candidates[[1L]]
+        } else if (".fitted" %in% names(train_aug)) {
+          fitted_col_tr <- ".fitted"
+        } else {
+          stop("No fitted-value column in training augment output.")
+        }
       }
       if (!identical(fitted_col_tr, ".fitted")) {
         train_aug <- dplyr::mutate(train_aug, .fitted = .data[[fitted_col_tr]])
@@ -266,11 +265,11 @@ predict_outcome <- function(model,
 
       if (!has_resid) {
         # Try to compute response residual = observed - predicted probability.
-        
+
         # The outcome column is in train_data but may not have survived augment.
         outcome_col <- intersect(names(train_data), names(train_aug))
         outcome_col <- outcome_col[outcome_col %in% names(train_data)]
-        
+
         # Pick the column that differs from newdata (i.e. the outcome)
         outcome_col <- setdiff(outcome_col, names(newdata))
         outcome_col <- outcome_col[outcome_col %in% names(train_aug)]
@@ -284,16 +283,16 @@ predict_outcome <- function(model,
             "using centred fitted values as proxy residuals."
           )
           train_aug <- dplyr::mutate(
-            train_aug, .resid = .data$.fitted - mean(.data$.fitted, na.rm = TRUE)
+            train_aug,
+            .resid = .data$.fitted - mean(.data$.fitted, na.rm = TRUE)
           )
         }
       }
-
     } else {
       # Bare lm / glm
       train_aug <- broom::augment(model, data = train_data)
       if (!".resid" %in% names(train_aug) ||
-          length(stats::na.omit(train_aug$.resid)) == 0) {
+        length(stats::na.omit(train_aug$.resid)) == 0) {
         f <- train_aug$.fitted %||% 0
         train_aug <- dplyr::mutate(train_aug, .resid = f - mean(f, na.rm = TRUE))
       }
@@ -308,22 +307,21 @@ predict_outcome <- function(model,
   # ---------------------------------------------------------------------------
 
   resid_draw <- switch(residuals,
-
     none = 0,
-
     original = {
       train_resid <- train_aug$.resid
-      if (length(train_resid) == 0)
+      if (length(train_resid) == 0) {
         stop("No training residuals available for `residuals = 'original'`.")
+      }
 
       if (!is.null(id)) {
         if (!id %in% names(train_aug)) stop("`id` column not found in training augmentation.")
-        if (!id %in% names(preds))     stop("`id` column not found in `newdata`.")
+        if (!id %in% names(preds)) stop("`id` column not found in `newdata`.")
 
         train_resid_df <- dplyr::select(train_aug, !!rlang::sym(id), .resid)
-        joined    <- dplyr::left_join(preds, train_resid_df, by = id)
+        joined <- dplyr::left_join(preds, train_resid_df, by = id)
         resid_vec <- joined$.resid[seq_len(nrow(preds))]
-        missing   <- is.na(resid_vec)
+        missing <- is.na(resid_vec)
         if (any(missing)) {
           warning("Some IDs in `newdata` not in training data; filling deterministically.")
           resid_vec[missing] <- deterministic_values_by_key(
@@ -334,31 +332,36 @@ predict_outcome <- function(model,
         }
         resid_vec
       } else {
-        if (nrow(preds) %% length(train_resid) != 0)
-          warning("`residuals = 'original'`: repeating training residuals ",
-                  "(length not an integer multiple).")
+        if (nrow(preds) %% length(train_resid) != 0) {
+          warning(
+            "`residuals = 'original'`: repeating training residuals ",
+            "(length not an integer multiple)."
+          )
+        }
         rep(train_resid, length.out = nrow(preds))
       }
     },
-
     normal = {
       train_resid <- train_aug$.resid
-      if (length(train_resid) == 0)
+      if (length(train_resid) == 0) {
         stop("No training residuals available for `residuals = 'normal'`.")
+      }
       # Use nrow(preds) not nrow(newdata): fixest::predict() silently drops rows
       # with FE levels absent from training data, so preds may have fewer rows
       # than newdata. Sizing resid_draw to nrow(newdata) causes a mutate() error.
       withr::with_seed(
         wise_seed(seed, "predict-outcome", "normal", outcome),
-        stats::rnorm(nrow(preds), mean = 0,
-                     sd = stats::sd(train_resid, na.rm = TRUE))
+        stats::rnorm(nrow(preds),
+          mean = 0,
+          sd = stats::sd(train_resid, na.rm = TRUE)
+        )
       )
     },
-
     resample = {
       train_resid <- train_aug$.resid
-      if (length(train_resid) == 0)
+      if (length(train_resid) == 0) {
         stop("No training residuals available for `residuals = 'resample'`.")
+      }
       # Same reason as normal above - use nrow(preds).
       withr::with_seed(
         wise_seed(seed, "predict-outcome", "resample", outcome),
@@ -373,7 +376,7 @@ predict_outcome <- function(model,
 
   preds |>
     dplyr::mutate(
-      .residual            = if (residuals == "none") NA_real_ else resid_draw,
+      .residual = if (residuals == "none") NA_real_ else resid_draw,
       !!rlang::sym(outcome) := .data$.fitted + resid_draw
     )
 }

@@ -28,13 +28,11 @@
 # Engine registry ----
 
 ENGINE_REGISTRY <- list(
-
   # -------------------------------------------------------------------------- #
   # fixest (feols / feglm) - high-dimensional fixed effects                    #
   # -------------------------------------------------------------------------- #
   fixest = list(
-
-    requires    = "fixest",
+    requires = "fixest",
     model_types = c("Linear regression", "Logistic regression"),
 
     # Fixed effects absorbed via | syntax: y ~ x1 + x2 | fe1 + fe2
@@ -44,8 +42,10 @@ ENGINE_REGISTRY <- list(
         if (length(rhs_main) == 0) rhs_main <- "1"
         rhs_fe <- rhs_fe[nzchar(rhs_fe) & !is.na(rhs_fe)]
         rhs <- if (length(rhs_fe) > 0) {
-          paste(paste(rhs_main, collapse = " + "), "|",
-                paste(rhs_fe,   collapse = " + "))
+          paste(
+            paste(rhs_main, collapse = " + "), "|",
+            paste(rhs_fe, collapse = " + ")
+          )
         } else {
           paste(rhs_main, collapse = " + ")
         }
@@ -54,11 +54,12 @@ ENGINE_REGISTRY <- list(
       list(
         formula1 = build(terms$hazard),
         formula2 = build(c(terms$hazard, terms$interactions_main), fe_vars),
-        formula3 = build(c(terms$hazard, terms$interactions_main,
-                           terms$covariates),                        fe_vars)
+        formula3 = build(c(
+          terms$hazard, terms$interactions_main,
+          terms$covariates
+        ), fe_vars)
       )
     },
-
     fit_one = function(formula, data, model_type, model_spec, opts) {
       # opts$fixest (e.g. cluster) is merged exactly once: `cluster` is a
       # formal argument of both feols and feglm, so appending it a second
@@ -71,10 +72,10 @@ ENGINE_REGISTRY <- list(
         do.call(fixest::feols, args)
       }
     },
-
     make_spec = function(model_type, use_logit,
-                         seed = WISEAPP_DEFAULT_SEED) NULL,
-
+                         seed = WISEAPP_DEFAULT_SEED) {
+      NULL
+    },
     prepare_outcome = function(df, y_var, use_logit) {
       # feglm needs integer 0/1, not a factor
       if (use_logit) df[[y_var]] <- as.integer(as.logical(df[[y_var]]))
@@ -95,10 +96,8 @@ ENGINE_REGISTRY <- list(
   #     "Logistic regression" support by switching set_mode("classification").
   # -------------------------------------------------------------------------- #
   ranger = list(
-
-    requires    = c("parsnip", "ranger"),
+    requires = c("parsnip", "ranger"),
     model_types = c("Linear regression"),
-
     build_formulas = function(y_var, terms, fe_vars) {
       build <- function(rhs) {
         rhs <- unique(rhs[nzchar(rhs) & !is.na(rhs)])
@@ -111,23 +110,20 @@ ENGINE_REGISTRY <- list(
         formula3 = build(c(terms$hazard, fe_vars, terms$covariates))
       )
     },
-
     fit_one = function(formula, data, model_type, model_spec, opts) {
       parsnip::fit(model_spec, formula = formula, data = data)
     },
-
     make_spec = function(model_type, use_logit,
                          seed = WISEAPP_DEFAULT_SEED) {
       parsnip::rand_forest(trees = 500, min_n = 5) |>
         parsnip::set_engine(
           "ranger",
           importance = "impurity",
-           seed = seed,
+          seed = seed,
           num.threads = 1L
         ) |>
         parsnip::set_mode("regression")
     },
-
     prepare_outcome = function(df, y_var, use_logit) df
   ),
 
@@ -140,10 +136,8 @@ ENGINE_REGISTRY <- list(
   #     via selected_model for user-tunable control.
   # -------------------------------------------------------------------------- #
   xgboost = list(
-
-    requires    = c("parsnip", "xgboost"),
+    requires = c("parsnip", "xgboost"),
     model_types = c("Linear regression", "Logistic regression"),
-
     build_formulas = function(y_var, terms, fe_vars) {
       build <- function(rhs) {
         rhs <- unique(rhs[nzchar(rhs) & !is.na(rhs)])
@@ -156,11 +150,9 @@ ENGINE_REGISTRY <- list(
         formula3 = build(c(terms$hazard, fe_vars, terms$covariates))
       )
     },
-
     fit_one = function(formula, data, model_type, model_spec, opts) {
       parsnip::fit(model_spec, formula = formula, data = data)
     },
-
     make_spec = function(model_type, use_logit,
                          seed = WISEAPP_DEFAULT_SEED) {
       mode <- if (model_type == "logistic" && use_logit) "classification" else "regression"
@@ -173,12 +165,11 @@ ENGINE_REGISTRY <- list(
       ) |>
         parsnip::set_engine(
           "xgboost",
-           seed = seed,
+          seed = seed,
           nthread = 1L
         ) |>
         parsnip::set_mode(mode)
     },
-
     prepare_outcome = function(df, y_var, use_logit) {
       # xgboost classification needs a factor outcome
       if (use_logit) df[[y_var]] <- factor(df[[y_var]], levels = c(0, 1))
@@ -195,8 +186,7 @@ ENGINE_REGISTRY <- list(
   # syntax fits all quantiles simultaneously. Returns a fixest_multi object.
   # -------------------------------------------------------------------------- #
   rif = list(
-
-    requires    = c("fixest", "broom"),
+    requires = c("fixest", "broom"),
     model_types = c("Unconditional quantile regression (RIF)"),
 
     # Same FE-absorbing formula structure as fixest; fit_one replaces the LHS
@@ -207,8 +197,10 @@ ENGINE_REGISTRY <- list(
         if (length(rhs_main) == 0) rhs_main <- "1"
         rhs_fe <- rhs_fe[nzchar(rhs_fe) & !is.na(rhs_fe)]
         rhs <- if (length(rhs_fe) > 0) {
-          paste(paste(rhs_main, collapse = " + "), "|",
-                paste(rhs_fe,   collapse = " + "))
+          paste(
+            paste(rhs_main, collapse = " + "), "|",
+            paste(rhs_fe, collapse = " + ")
+          )
         } else {
           paste(rhs_main, collapse = " + ")
         }
@@ -218,16 +210,17 @@ ENGINE_REGISTRY <- list(
       list(
         formula1 = build(terms$hazard),
         formula2 = build(c(terms$hazard, terms$interactions_main), fe_vars),
-        formula3 = build(c(terms$hazard, terms$interactions_main,
-                           terms$covariates),                        fe_vars)
+        formula3 = build(c(
+          terms$hazard, terms$interactions_main,
+          terms$covariates
+        ), fe_vars)
       )
     },
-
     fit_one = function(formula, data, model_type, model_spec, opts) {
       # formula is actually the RHS string from build_formulas above
-      rhs_str  <- formula
+      rhs_str <- formula
       rif_cols <- opts$rif$rif_cols
-      lhs      <- paste0("c(", paste(rif_cols, collapse = ", "), ")")
+      lhs <- paste0("c(", paste(rif_cols, collapse = ", "), ")")
       stacked_fml <- stats::as.formula(paste(lhs, "~", rhs_str))
       args <- list(fml = stacked_fml, data = data, warn = FALSE)
       if (!is.null(opts$fixest) && length(opts$fixest) > 0) {
@@ -235,20 +228,20 @@ ENGINE_REGISTRY <- list(
       }
       do.call(fixest::feols, args)
     },
-
     make_spec = function(model_type, use_logit,
-                         seed = WISEAPP_DEFAULT_SEED) NULL,
-
+                         seed = WISEAPP_DEFAULT_SEED) {
+      NULL
+    },
     prepare_outcome = function(df, y_var, use_logit) {
-      taus     <- seq(0.1, 0.9, by = 0.1)
+      taus <- seq(0.1, 0.9, by = 0.1)
       rif_cols <- paste0("rif_", formatC(taus * 100, format = "d"))
-      y        <- df[[y_var]]
+      y <- df[[y_var]]
       # Bandwidth selection and the KDE depend only on `y`, not on `tau`, so
       # compute them once here and reuse across all 9 quantiles instead of
       # letting compute_rif() repeat bw.SJ()/density() on every call (PERF-03).
-      y_obs  <- y[is.finite(y)]
+      y_obs <- y[is.finite(y)]
       bw_use <- tryCatch(stats::bw.SJ(y_obs), error = function(e) stats::bw.nrd0(y_obs))
-      dens   <- stats::density(y_obs, bw = bw_use, n = 1024)
+      dens <- stats::density(y_obs, bw = bw_use, n = 1024)
       rif_values <- compute_rif_multi(y, taus = taus, dens = dens)
       for (i in seq_along(taus)) df[[rif_cols[i]]] <- rif_values[[i]]
       attr(df, "rif_taus") <- taus
@@ -256,7 +249,6 @@ ENGINE_REGISTRY <- list(
       df
     }
   )
-
 )
 
 # Stability LASSO variable selection ----
@@ -330,7 +322,7 @@ run_lasso_selection <- function(
   # ---------------------------------------------------------------------------
   # 1. Outcome validation / coercion (same pattern as fit_model())
   # ---------------------------------------------------------------------------
-  y_var        <- selected_outcome$name
+  y_var <- selected_outcome$name
   outcome_type <- selected_outcome$type
 
   if (!y_var %in% names(df)) {
@@ -364,8 +356,8 @@ run_lasso_selection <- function(
   # `int_vars` themselves are unpenalized main effects.
   # ---------------------------------------------------------------------------
   weather_vars <- weather_vars[weather_vars %in% names(df)]
-  fe_vars      <- fe_vars[fe_vars %in% names(df)]
-  int_vars     <- int_vars[int_vars %in% names(df)]
+  fe_vars <- fe_vars[fe_vars %in% names(df)]
+  int_vars <- int_vars[int_vars %in% names(df)]
 
   # Drop FE terms with <2 observed levels (prevents contrasts errors)
   if (length(fe_vars) > 0) {
@@ -413,8 +405,10 @@ run_lasso_selection <- function(
   }
   if (length(candidate_vars) == 0) stop("No valid numeric candidate covariates available for LASSO.")
 
-  non_all_na <- vapply(df[, candidate_vars, drop = FALSE],
-                       function(x) any(!is.na(x)), logical(1))
+  non_all_na <- vapply(
+    df[, candidate_vars, drop = FALSE],
+    function(x) any(!is.na(x)), logical(1)
+  )
   candidate_vars <- candidate_vars[non_all_na]
   if (length(candidate_vars) == 0) {
     stop("No candidate variables with observed values remain for imputation/LASSO.")
@@ -438,8 +432,9 @@ run_lasso_selection <- function(
         n_dropped, nrow(df)
       ))
       df <- df[cc_mask, , drop = FALSE]
-      if (nrow(df) < 100L)
+      if (nrow(df) < 100L) {
         stop("Too few complete cases for LASSO selection (<100 rows remain).")
+      }
     }
   }
 
@@ -480,7 +475,7 @@ run_lasso_selection <- function(
     ))
   }
   mm_core <- stats::model.matrix(core_formula, data = df)
-  X_core  <- if (ncol(mm_core) > 1) {
+  X_core <- if (ncol(mm_core) > 1) {
     mm_core[, -1, drop = FALSE]
   } else {
     matrix(0, nrow = nrow(df), ncol = 0)
@@ -491,12 +486,15 @@ run_lasso_selection <- function(
 
   has_matrixStats <- requireNamespace("matrixStats", quietly = TRUE)
   drop_constant <- function(X) {
-    if (ncol(X) == 0) return(X)
+    if (ncol(X) == 0) {
+      return(X)
+    }
     keep <- if (has_matrixStats) {
       matrixStats::colMaxs(X) > matrixStats::colMins(X)
     } else {
       vapply(seq_len(ncol(X)), function(j) {
-        v <- X[, j]; length(v) > 0L && (max(v) > min(v))
+        v <- X[, j]
+        length(v) > 0L && (max(v) > min(v))
       }, logical(1))
     }
     X[, keep, drop = FALSE]
@@ -518,7 +516,7 @@ run_lasso_selection <- function(
     if (ncol(X_lasso) == 0) stop("All candidate variables are constant.")
     lasso_names <- colnames(X_lasso)
 
-    X_full  <- if (ncol(X_core) > 0) cbind(X_core, X_lasso) else X_lasso
+    X_full <- if (ncol(X_core) > 0) cbind(X_core, X_lasso) else X_lasso
     penalty <- c(rep(0, ncol(X_core)), rep(1, ncol(X_lasso)))
     rm(X_core, X_lasso)
 
@@ -541,12 +539,11 @@ run_lasso_selection <- function(
         }
         cvfit <- do.call(glmnet::cv.glmnet, cv_args)
         coefs <- stats::coef(cvfit, s = lambda_choice)
-        sel   <- rownames(coefs)[as.numeric(coefs) != 0]
-        sel   <- setdiff(sel, "(Intercept)")
+        sel <- rownames(coefs)[as.numeric(coefs) != 0]
+        sel <- setdiff(sel, "(Intercept)")
         intersect(sel, lasso_names)
       })
     })
-
   } else {
     # -------------------------------------------------------------------------
     # 8. MI path: impute candidates, rebuild X_lasso per imputation
@@ -556,7 +553,7 @@ run_lasso_selection <- function(
     # multisession worker-spawn cost.
     if (isTRUE(use_parallel)) {
       if (!requireNamespace("future", quietly = TRUE) ||
-          !requireNamespace("future.apply", quietly = TRUE)) {
+        !requireNamespace("future.apply", quietly = TRUE)) {
         stop("Parallel LASSO requires packages 'future' and 'future.apply'.")
       }
       old_plan <- future::plan()
@@ -578,15 +575,19 @@ run_lasso_selection <- function(
       }
     }
 
-    mi_cols  <- unique(c(y_var, core_main_terms, candidate_vars))
+    mi_cols <- unique(c(y_var, core_main_terms, candidate_vars))
     mi_frame <- df[, mi_cols, drop = FALSE]
 
     non_num_idx <- vapply(mi_frame, function(x) !is.numeric(x), logical(1))
     if (any(non_num_idx)) {
       mi_frame[non_num_idx] <- lapply(mi_frame[non_num_idx], function(x) {
-        if (is.logical(x)) as.integer(x)
-        else if (is.factor(x)) as.integer(x)
-        else as.integer(as.factor(x))
+        if (is.logical(x)) {
+          as.integer(x)
+        } else if (is.factor(x)) {
+          as.integer(x)
+        } else {
+          as.integer(as.factor(x))
+        }
       })
     }
 
@@ -606,7 +607,8 @@ run_lasso_selection <- function(
         )
       )
     } else {
-      imp <- withr::with_seed(wise_seed(parallel_seed, "lasso", "mice"),
+      imp <- withr::with_seed(
+        wise_seed(parallel_seed, "lasso", "mice"),
         mice::mice(
           mi_frame,
           m = m,
@@ -625,9 +627,11 @@ run_lasso_selection <- function(
     selection_results <- map_fun(seq_len(m), function(i) {
       withr::with_seed(wise_seed(parallel_seed, "lasso", "imputation", i), {
         X_lasso <- drop_constant(as.matrix(completed_cands_list[[i]]))
-        if (ncol(X_lasso) == 0) return(character(0))
+        if (ncol(X_lasso) == 0) {
+          return(character(0))
+        }
 
-        X_full  <- if (ncol(X_core) > 0) cbind(X_core, X_lasso) else X_lasso
+        X_full <- if (ncol(X_core) > 0) cbind(X_core, X_lasso) else X_lasso
         penalty <- c(rep(0, ncol(X_core)), rep(1, ncol(X_lasso)))
 
         foldid <- NULL
@@ -644,21 +648,21 @@ run_lasso_selection <- function(
           standardize = isTRUE(standardize),
           penalty.factor = penalty
         )
-        if (!is.null(foldid))     cv_args$foldid <- foldid
+        if (!is.null(foldid)) cv_args$foldid <- foldid
         if (!is.null(glmnet_tol)) cv_args$thresh <- glmnet_tol
 
         cvfit <- do.call(glmnet::cv.glmnet, cv_args)
 
         coefs <- stats::coef(cvfit, s = lambda_choice)
-        sel   <- rownames(coefs)[as.numeric(coefs) != 0]
-        sel   <- setdiff(sel, "(Intercept)")
+        sel <- rownames(coefs)[as.numeric(coefs) != 0]
+        sel <- setdiff(sel, "(Intercept)")
         intersect(sel, colnames(X_lasso))
       })
     })
   }
 
   selected_list <- selection_results
-  all_selected  <- unique(unlist(selected_list))
+  all_selected <- unique(unlist(selected_list))
   if (length(all_selected) == 0) stop("No covariates selected across imputations.")
 
   # ---------------------------------------------------------------------------
@@ -726,21 +730,20 @@ run_lasso_selection <- function(
 #' @noRd
 fit_model <- function(df, selected_outcome, selected_weather, selected_model,
                       seed = WISEAPP_DEFAULT_SEED) {
-
   # ---------------------------------------------------------------------------
   # 1. Unpack inputs
   # ---------------------------------------------------------------------------
 
-  y_var        <- selected_outcome$name
+  y_var <- selected_outcome$name
   outcome_type <- selected_outcome$type
 
   weather_vars <- selected_weather$name
   weather_vars <- weather_vars[nzchar(weather_vars) & !is.na(weather_vars)]
   if (length(weather_vars) == 0) stop("At least one weather variable must be selected.")
 
-  n_weather   <- length(weather_vars)
+  n_weather <- length(weather_vars)
   cont_binned <- rep_len(selected_weather$cont_binned %||% "Continuous", n_weather)
-  polynomial  <- if (is.list(selected_weather$polynomial)) {
+  polynomial <- if (is.list(selected_weather$polynomial)) {
     rep_len(selected_weather$polynomial, n_weather)
   } else {
     rep_len(list(selected_weather$polynomial %||% character(0)), n_weather)
@@ -789,13 +792,17 @@ fit_model <- function(df, selected_outcome, selected_weather, selected_model,
   # surfaced by the Step 1 results banner instead of only a console warning.
   fallbacks <- list()
 
-  if (!y_var %in% names(df))
+  if (!y_var %in% names(df)) {
     stop(sprintf("Outcome variable '%s' not found in data.", y_var))
+  }
 
   missing_weather <- setdiff(weather_vars, names(df))
-  if (length(missing_weather) > 0)
-    stop(sprintf("Weather variable(s) not found in data: %s",
-                 paste(missing_weather, collapse = ", ")))
+  if (length(missing_weather) > 0) {
+    stop(sprintf(
+      "Weather variable(s) not found in data: %s",
+      paste(missing_weather, collapse = ", ")
+    ))
+  }
 
   if (!selected_model$type %in% backend$model_types) {
     stop(sprintf(
@@ -844,17 +851,17 @@ fit_model <- function(df, selected_outcome, selected_weather, selected_model,
   # Extract RIF metadata (set by the rif engine's prepare_outcome)
   rif_taus <- attr(df, "rif_taus")
   rif_cols <- attr(df, "rif_cols")
-  is_rif   <- !is.null(rif_taus)
+  is_rif <- !is.null(rif_taus)
 
   # ---------------------------------------------------------------------------
   # 4. Build formula terms
   # ---------------------------------------------------------------------------
 
   weather_formula_terms <- unlist(lapply(seq_along(weather_vars), function(i) {
-    v         <- weather_vars[i]
+    v <- weather_vars[i]
     is_binned <- identical(cont_binned[i], "Binned")
-    poly      <- if (is_binned) character(0) else (polynomial[[i]] %||% character(0))
-    terms     <- v
+    poly <- if (is_binned) character(0) else (polynomial[[i]] %||% character(0))
+    terms <- v
     if (!is_binned) {
       if ("2" %in% poly) terms <- c(terms, sprintf("I(%s^2)", v))
       if ("3" %in% poly) terms <- c(terms, sprintf("I(%s^3)", v))
@@ -893,7 +900,6 @@ fit_model <- function(df, selected_outcome, selected_weather, selected_model,
   }
 
   if (length(interaction_vars) > 0) {
-
     if (interaction_mode == "pairwise") {
       # One `W * Mk` term per (weather-term, moderator) pair - kept separate
       interaction_formula_terms <- as.vector(outer(
@@ -905,7 +911,6 @@ fit_model <- function(df, selected_outcome, selected_weather, selected_model,
         weather_formula_terms, interaction_vars,
         FUN = function(h, m) paste0(h, ":", m)
       ))
-
     } else {
       # "saturated": W * M1 * M2 * ... - one term per weather term
       mod_str <- paste(interaction_vars, collapse = " * ")
@@ -923,11 +928,10 @@ fit_model <- function(df, selected_outcome, selected_weather, selected_model,
     # The `*` expansion already pulls in weather main effects and all moderator
     # main effects, so rhs_weather can be set to the interaction terms only.
     rhs_weather <- interaction_formula_terms
-
   } else {
     interaction_formula_terms <- character(0)
-    interaction_terms         <- character(0)
-    rhs_weather               <- weather_formula_terms
+    interaction_terms <- character(0)
+    rhs_weather <- weather_formula_terms
   }
 
   # Bundle term groups for backend$build_formulas()
@@ -936,7 +940,7 @@ fit_model <- function(df, selected_outcome, selected_weather, selected_model,
   # For lm/parsnip the * expansion in rhs_weather already includes them.
   terms_bundle <- list(
     hazard            = rhs_weather,
-    interactions_main = interaction_vars,   # all moderator variables, any length
+    interactions_main = interaction_vars, # all moderator variables, any length
     covariates        = covariate_vars
   )
 
@@ -965,10 +969,10 @@ fit_model <- function(df, selected_outcome, selected_weather, selected_model,
       paste(cluster_missing, collapse = ", ")
     ))
     fallbacks <- c(fallbacks, list(list(
-      kind      = "vcv",
+      kind = "vcv",
       requested = paste0("clustered (", paste(cluster_vars, collapse = ", "), ")"),
-      used      = "default (heteroskedasticity-robust)",
-      reason    = sprintf(
+      used = "default (heteroskedasticity-robust)",
+      reason = sprintf(
         "cluster variable(s) not found in data: %s",
         paste(cluster_missing, collapse = ", ")
       )
@@ -976,10 +980,12 @@ fit_model <- function(df, selected_outcome, selected_weather, selected_model,
     cluster_vars <- intersect(cluster_vars, names(df))
   }
 
-  vars_used <- unique(c(y_var, weather_formula_terms, interaction_vars,
-                        fe_vars, covariate_vars, cluster_vars))
+  vars_used <- unique(c(
+    y_var, weather_formula_terms, interaction_vars,
+    fe_vars, covariate_vars, cluster_vars
+  ))
   vars_used <- vars_used[vars_used %in% names(df)]
-  df        <- df[stats::complete.cases(df[, vars_used, drop = FALSE]), ]
+  df <- df[stats::complete.cases(df[, vars_used, drop = FALSE]), ]
 
   if (nrow(df) == 0) stop("No complete cases after dropping NA rows.")
 
@@ -1068,7 +1074,8 @@ fit_model <- function(df, selected_outcome, selected_weather, selected_model,
   .cache_mm <- function(fit) {
     if (inherits(fit, "fixest")) {
       mm <- tryCatch(as.data.frame(stats::model.matrix(fit)),
-                     error = function(e) NULL)
+        error = function(e) NULL
+      )
       if (!is.null(mm)) attr(fit, "wise_mm") <- mm
     } else if (is.list(fit) && length(fit) > 0) {
       # fixest_multi: cache on the median sub-fit (index matches extract_rif_median).
@@ -1078,7 +1085,8 @@ fit_model <- function(df, selected_outcome, selected_weather, selected_model,
       sub <- fit[[idx]]
       if (inherits(sub, "fixest")) {
         mm <- tryCatch(as.data.frame(stats::model.matrix(sub)),
-                       error = function(e) NULL)
+          error = function(e) NULL
+        )
         if (!is.null(mm)) {
           attr(sub, "wise_mm") <- mm
           fit[[idx]] <- sub

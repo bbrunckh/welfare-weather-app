@@ -7,12 +7,12 @@ app_sys <- function(...) {
 #' Read App Config (always use packaged config)
 #' @noRd
 get_golem_config <- function(
-    value,
-    config = Sys.getenv(
-      "GOLEM_CONFIG_ACTIVE",
-      Sys.getenv("R_CONFIG_ACTIVE", "default")
-    ),
-    use_parent = TRUE
+  value,
+  config = Sys.getenv(
+    "GOLEM_CONFIG_ACTIVE",
+    Sys.getenv("R_CONFIG_ACTIVE", "default")
+  ),
+  use_parent = TRUE
 ) {
   config_file <- app_sys("golem-config.yml")
   if (config_file == "") {
@@ -26,10 +26,10 @@ get_golem_config <- function(
 #' TRUE when all four Databricks env vars are present
 #' @noRd
 .databricks_env_configured <- function() {
-  nzchar(Sys.getenv("DATABRICKS_HOST"))          &&
-  nzchar(Sys.getenv("DATABRICKS_CLIENT_ID"))     &&
-  nzchar(Sys.getenv("DATABRICKS_CLIENT_SECRET")) &&
-  nzchar(Sys.getenv("DATABRICKS_VOLUME_PATH"))
+  nzchar(Sys.getenv("DATABRICKS_HOST")) &&
+    nzchar(Sys.getenv("DATABRICKS_CLIENT_ID")) &&
+    nzchar(Sys.getenv("DATABRICKS_CLIENT_SECRET")) &&
+    nzchar(Sys.getenv("DATABRICKS_VOLUME_PATH"))
 }
 
 #' TRUE when deployed on Posit Connect

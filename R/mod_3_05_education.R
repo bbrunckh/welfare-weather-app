@@ -41,19 +41,19 @@ mod_3_05_education_ui <- function(id) {
 mod_3_05_education_server <- function(id,
                                       selected_model = reactive(NULL),
                                       survey_data = reactive(NULL),
-                                      variable_list  = reactive(NULL)) {
+                                      variable_list = reactive(NULL)) {
   moduleServer(id, function(input, output, session) {
     ns <- session$ns
 
     # ---- Get model coefficients ------------------------------------------
     # REACT-08: shared coefficient decomposition (utils_mod_1_helpers.R).
-    coeffs_rx        <- model_coefficient_reactives(selected_model)
-    ind_coeff        <- coeffs_rx$individual
-    hh_coeff         <- coeffs_rx$hh
-    firm_coeff       <- coeffs_rx$firm
-    area_coeff       <- coeffs_rx$area
+    coeffs_rx <- model_coefficient_reactives(selected_model)
+    ind_coeff <- coeffs_rx$individual
+    hh_coeff <- coeffs_rx$hh
+    firm_coeff <- coeffs_rx$firm
+    area_coeff <- coeffs_rx$area
     interaction_names <- coeffs_rx$interactions
-    coeffs           <- coeffs_rx$all
+    coeffs <- coeffs_rx$all
 
     # ---- Candidate variables for this category --------------------------
     education_patterns <- c("educ_com1_hh", "educ_com2_hh", "educ_com3_hh")
@@ -65,13 +65,17 @@ mod_3_05_education_server <- function(id,
     # Education variables available in the selected survey
     education_vars_available <- reactive({
       svy <- survey_data()
-      if (is.null(svy)) return(character(0))
+      if (is.null(svy)) {
+        return(character(0))
+      }
       # Check which education variables are actually in the selected survey
       intersect(education_patterns, names(svy))
     })
 
     output$placeholder_ui <- renderUI({
-      if (isTRUE(any_selected())) return(NULL)
+      if (isTRUE(any_selected())) {
+        return(NULL)
+      }
       # Only show placeholder if there are education variables in the survey
       if (length(education_vars_available()) == 0) {
         return(no_data_warning(
@@ -162,17 +166,24 @@ mod_3_05_education_server <- function(id,
     list(
       education_scenario = reactive({
         list(
-          primary_universal        = isTRUE(input$primary_universal),
-          primary_access_change_pct = if (isTRUE(input$primary_universal)) 100L
-                                      else input$primary_pct %||% 0L,
-
-          secondary_universal        = isTRUE(input$secondary_universal),
-          secondary_access_change_pct = if (isTRUE(input$secondary_universal)) 100L
-                                        else input$secondary_pct %||% 0L,
-
-          postsec_universal        = isTRUE(input$postsec_universal),
-          postsec_access_change_pct = if (isTRUE(input$postsec_universal)) 100L
-                                      else input$postsec_pct %||% 0L
+          primary_universal = isTRUE(input$primary_universal),
+          primary_access_change_pct = if (isTRUE(input$primary_universal)) {
+            100L
+          } else {
+            input$primary_pct %||% 0L
+          },
+          secondary_universal = isTRUE(input$secondary_universal),
+          secondary_access_change_pct = if (isTRUE(input$secondary_universal)) {
+            100L
+          } else {
+            input$secondary_pct %||% 0L
+          },
+          postsec_universal = isTRUE(input$postsec_universal),
+          postsec_access_change_pct = if (isTRUE(input$postsec_universal)) {
+            100L
+          } else {
+            input$postsec_pct %||% 0L
+          }
         )
       })
     )

@@ -37,7 +37,9 @@ metric_metadata <- function(method = "mean", so = NULL) {
       so$direction[[1]]
     } else if (is.list(so)) {
       so$direction %||% NULL
-    } else NULL
+    } else {
+      NULL
+    }
     if (!is.null(so_direction) && nzchar(as.character(so_direction))) {
       direction <- as.character(so_direction)[1]
     }
@@ -64,7 +66,9 @@ metric_metadata <- function(method = "mean", so = NULL) {
 
 metric_axis_label <- function(method = "mean", so = NULL, deviation = "none") {
   spec <- metric_metadata(method, so)
-  label <- if (identical(deviation, "none")) spec$label else {
+  label <- if (identical(deviation, "none")) {
+    spec$label
+  } else {
     paste0(spec$label, " - ", label_deviation(deviation))
   }
   unit <- switch(spec$format,
@@ -77,11 +81,15 @@ metric_axis_label <- function(method = "mean", so = NULL, deviation = "none") {
 metric_decision_return_periods <- function(method = "mean", so = NULL) {
   spec <- metric_metadata(method, so)
   tail_names <- if (identical(spec$adverse_tail, "high")) {
-    c("Adverse 1-in-5" = "1:5", "Adverse 1-in-10" = "1:10",
-      "Adverse 1-in-20" = "1:20", "Adverse 1-in-50" = "1:50")
+    c(
+      "Adverse 1-in-5" = "1:5", "Adverse 1-in-10" = "1:10",
+      "Adverse 1-in-20" = "1:20", "Adverse 1-in-50" = "1:50"
+    )
   } else {
-    c("Adverse 1-in-5" = "1:5", "Adverse 1-in-10" = "1:10",
-      "Adverse 1-in-20" = "1:20", "Adverse 1-in-50" = "1:50")
+    c(
+      "Adverse 1-in-5" = "1:5", "Adverse 1-in-10" = "1:10",
+      "Adverse 1-in-20" = "1:20", "Adverse 1-in-50" = "1:50"
+    )
   }
   c("Expected" = "1:1", tail_names)
 }
@@ -116,7 +124,9 @@ annotate_visualization_export <- function(data, method = "mean", so = NULL,
                                           observation_unit,
                                           aggregation_order,
                                           uncertainty = "none") {
-  if (is.null(data) || !is.data.frame(data)) return(data)
+  if (is.null(data) || !is.data.frame(data)) {
+    return(data)
+  }
   meta <- visualization_export_metadata(
     method, so, observation_unit, aggregation_order, uncertainty
   )
