@@ -176,6 +176,22 @@ WISEAPP_WX_ROUND_DIGITS <- 5L
   sum(tab[tab[, 1L] %in% pids, 3L], na.rm = TRUE) * 1024
 }
 
+# W3 benchmark instrumentation is deliberately opt-in.  It records stage
+# timings and lightweight relation/frame metadata without changing the normal
+# weather path when WISEAPP_WEATHER_PROFILE is unset.
+.wx_profile_enabled <- function() {
+  .wx_env_flag("WISEAPP_WEATHER_PROFILE")
+}
+
+.wx_profile_plan <- function() {
+  plan <- Sys.getenv("WISEAPP_WEATHER_W3_PLAN", unset = "current")
+  if (!plan %in% c("current", "shared_hist", "shared_period")) {
+    stop("WISEAPP_WEATHER_W3_PLAN must be current, shared_hist, or shared_period.",
+         call. = FALSE)
+  }
+  plan
+}
+
 .wx_estimate_weather_bytes <- function(survey_data, selected_weather, dates,
                                        ssp = NULL, future_period = NULL) {
   n_loc <- if ("loc_id" %in% names(survey_data)) {
@@ -804,6 +820,12 @@ get_weather <- function(
   weather_threads = c("auto", "1", "2"),
   weather_consumer = NULL
 ) {
+  weather_profile <- if (.wx_profile_enabled()) new.env(parent = emptyenv()) else NULL
+  if (!is.null(weather_profile)) {
+    weather_profile$records <- list()
+    weather_profile$plan <- .wx_profile_plan()
+    weather_profile$started <- proc.time()[["elapsed"]]
+  }
   # -- Select and pin DuckDB weather-query threads ----------------------------
   # Multi-threaded aggregation sums floats in non-deterministic order. The
   # output boundary rounds weather values to a fixed five-decimal precision, while one
@@ -916,6 +938,58 @@ get_weather <- function(
   .duck_load_ext("h3")
   con <- .duck_con()
 
+  .profile_record <- function(stage, started, value = NULL, detail = NULL) {
+    if (is.null(weather_profile)) return(invisible(NULL))
+    tables <- tryCatch(DBI::dbListTables(con), error = function(e) character())
+    is_frame <- is.data.frame(value)
+    is_result_list <- is.list(value) && length(value) > 0L &&
+      all(vapply(value, is.data.frame, logical(1L)))
+    is_relation <- inherits(value, "tbl_lazy")
+    serialized_bytes <- if (is_frame || is_result_list) {
+      length(serialize(value, NULL, version = 3L))
+    } else {
+      NA_real_
+    }
+    relation_sql_bytes <- if (is_relation) {
+      tryCatch(nchar(dbplyr::sql_render(value), type = "bytes"),
+               error = function(e) NA_real_)
+    } else {
+      NA_real_
+    }
+    rss <- .wx_process_tree_rss_bytes()
+    previous_rss <- weather_profile$last_rss %||% NA_real_
+    weather_profile$last_rss <- rss
+    weather_profile$records[[length(weather_profile$records) + 1L]] <- data.frame(
+      stage = stage,
+      elapsed_seconds = proc.time()[["elapsed"]] - started,
+      rows = if (is_frame) nrow(value) else if (is_result_list) sum(vapply(value, nrow, integer(1L))) else NA_real_,
+      frame_bytes = if (is_frame || is_result_list) as.numeric(utils::object.size(value)) else NA_real_,
+      serialized_bytes = serialized_bytes,
+      relation_sql_bytes = relation_sql_bytes,
+      rss_bytes = rss,
+      rss_delta_bytes = if (is.finite(previous_rss)) rss - previous_rss else NA_real_,
+      temp_table_count = sum(grepl("^lw_", tables)),
+      temp_tables = paste(sort(tables[grepl("^lw_", tables)]), collapse = ";"),
+      detail = detail %||% "",
+      stringsAsFactors = FALSE
+    )
+    invisible(NULL)
+  }
+
+  .profile_timed <- function(stage, expr, detail = NULL) {
+    if (is.null(weather_profile)) return(force(expr))
+    started <- proc.time()[["elapsed"]]
+    value <- force(expr)
+    .profile_record(stage, started, value, detail)
+    value
+  }
+
+  .profile_relation <- function(stage, value, detail = NULL) {
+    if (is.null(weather_profile)) return(value)
+    .profile_record(stage, proc.time()[["elapsed"]], value, detail)
+    value
+  }
+
   # -- Temp-table cleanup ledger (SEC-02) --------------------------------------
   # DuckDB connections are process-wide, so materialised temp tables survive
   # errors until the worker exits. Every table created below is registered here
@@ -924,32 +998,42 @@ get_weather <- function(
   # on.exit only runs after every relation has been collected, so no live lazy
   # query can reference a dropped table when results are returned.
   tmp_tables <- character(0)
-  on.exit(
-    {
-      for (tn in tmp_tables) {
-        try(DBI::dbRemoveTable(con, tn), silent = TRUE)
-      }
-    },
-    add = TRUE
-  )
+  .profile_cleanup <- function() {
+    if (is.null(weather_profile) && !length(tmp_tables)) return(invisible(NULL))
+    started <- proc.time()[["elapsed"]]
+    before <- length(tmp_tables)
+    for (tn in tmp_tables) {
+      try(DBI::dbRemoveTable(con, tn), silent = TRUE)
+    }
+    tmp_tables <<- character(0)
+    if (!is.null(weather_profile)) {
+      .profile_record(
+        "cleanup", started,
+        detail = paste0("removed_or_attempted=", before)
+      )
+    }
+    invisible(NULL)
+  }
+  on.exit(.profile_cleanup(), add = TRUE)
 
   # PERF-13: remote parquet loads go through the bounded disk cache. The
   # cached slice holds exactly the columns/rows the lazy scan would produce,
   # so the pipelines below are unchanged and results stay bit-identical.
-  weather <- .wx_cache_load(
+  weather <- .profile_timed("weather_read", .wx_cache_load(
     weather_fnames, connection_params,
     cols = c("h3", "timestamp", weather_vars),
     tmin = date_min, tmax = date_max
   ) |>
     dplyr::select(h3, timestamp, dplyr::all_of(weather_vars)) |>
     dplyr::filter(dplyr::if_all(dplyr::all_of(weather_vars), ~ !is.na(.x))) |>
-    dplyr::filter(timestamp >= date_min, timestamp <= date_max)
+    dplyr::filter(timestamp >= date_min, timestamp <= date_max),
+    detail = paste(length(weather_fnames), "file(s)"))
 
   # Projection-prune the mapping scan. These are the only fields used by the
   # H3 harmonisation and population-weighted aggregation below; requesting the
   # full parquet schema made DuckDB read unused microdata columns.
   h3_cols <- c("h3", "code", "year", "survname", "loc_id", "pop_2020")
-  h3_slim <- tryCatch(
+  h3_slim <- .profile_timed("h3_mapping_read", tryCatch(
     .wx_cache_load(h3_fnames, connection_params, cols = h3_cols, tcol = NULL),
     error = function(e) {
       # Older mapping files may not carry population weights; preserve their
@@ -960,7 +1044,7 @@ get_weather <- function(
         cols = setdiff(h3_cols, "pop_2020"), tcol = NULL
       )
     }
-  )
+  ), detail = paste(length(h3_fnames), "file(s)"))
 
   if (!"pop_2020" %in% colnames(h3_slim)) {
     h3_slim <- h3_slim |> dplyr::mutate(pop_2020 = 1L)
@@ -971,7 +1055,9 @@ get_weather <- function(
     dplyr::select(h3, code, year, survname, loc_id, pop_2020)
 
   # -- H3 resolution + type harmonisation ------------------------------------
-  h3_harmonised <- .harmonise_h3(h3_slim, weather, con)
+  h3_harmonised <- .profile_timed(
+    "h3_harmonisation", .harmonise_h3(h3_slim, weather, con)
+  )
   h3_slim <- h3_harmonised$h3_slim
   weather <- h3_harmonised$weather
 
@@ -994,7 +1080,9 @@ get_weather <- function(
   # relation is joined by historical weather and every future model/period.
   h3_weights_name <- basename(tempfile(pattern = "lw_h3_weights_"))
   tmp_tables <- c(tmp_tables, h3_weights_name)
-  h3_slim <- dplyr::compute(h3_slim, name = h3_weights_name, temporary = TRUE)
+  h3_slim <- .profile_timed(
+    "h3_weights", dplyr::compute(h3_slim, name = h3_weights_name, temporary = TRUE)
+  )
 
   # -- Spatial aggregation: h3 -> loc_id (population-weighted mean) ----------
   .pop_weighted_mean <- function(tbl, vars) {
@@ -1021,10 +1109,10 @@ get_weather <- function(
   # the historical result and every future SSP/period batch.
   tmp_loc_monthly_name <- basename(tempfile(pattern = "lw_loc_monthly_"))
   tmp_tables <- c(tmp_tables, tmp_loc_monthly_name)
-  loc_monthly <- dplyr::compute(
+  loc_monthly <- .profile_timed("loc_monthly", dplyr::compute(
     loc_monthly,
     name = tmp_loc_monthly_name, temporary = TRUE
-  )
+  ))
 
   # -- Rolling window expressions --------------------------------------------
   agg_fn_map <- c(
@@ -1056,9 +1144,9 @@ get_weather <- function(
   tmp_base_name <- basename(tempfile(pattern = "lw_base_"))
   tmp_tables <- c(tmp_tables, tmp_base_name)
 
-  loc_weather_base <- loc_monthly |>
+  loc_weather_base <- .profile_timed("rolling_base", loc_monthly |>
     dplyr::mutate(!!!roll_exprs) |>
-    dplyr::compute(name = tmp_base_name, temporary = TRUE)
+    dplyr::compute(name = tmp_base_name, temporary = TRUE))
 
   # PERF-02: aggregate every transformed weather variable once and reuse the
   # materialised reference across the historical and future-period queries.
@@ -1066,24 +1154,24 @@ get_weather <- function(
   if (!is.null(climate_ref)) {
     tmp_ref_name <- basename(tempfile(pattern = "lw_ref_"))
     tmp_tables <- c(tmp_tables, tmp_ref_name)
-    climate_ref$tbl <- dplyr::compute(
+    climate_ref$tbl <- .profile_timed("climate_reference", dplyr::compute(
       climate_ref$tbl,
       name = tmp_ref_name,
       temporary = TRUE
-    )
+    ))
   }
 
   # -- Assemble result -------------------------------------------------------
   result <- list()
 
-  result[["historical"]] <- loc_weather_base |>
+  result[["historical"]] <- .profile_timed("historical_collect", loc_weather_base |>
     .apply_transformations(
       selected_weather, loc_weather_base,
       climate_ref = climate_ref
     ) |>
     dplyr::filter(timestamp %in% !!dates) |>
     dplyr::arrange(code, year, survname, loc_id, timestamp) |>
-    dplyr::collect()
+    dplyr::collect(), detail = "historical")
   result[["historical"]] <- .wx_round_weather_values(
     result[["historical"]], weather_vars
   )
@@ -1282,7 +1370,19 @@ get_weather <- function(
     }
 
     # CMIP6 historical baseline - shared across all SSPs (same files)
-    h3_hist_raw <- .cmip6_h3_monthly(cmip6_hist_raw_lazy, baseline_start, baseline_end)
+    h3_hist_raw <- .profile_timed(
+      "cmip6_historical_aggregate",
+      .cmip6_h3_monthly(cmip6_hist_raw_lazy, baseline_start, baseline_end),
+      detail = "shared historical baseline"
+    )
+    if (!is.null(weather_profile) && identical(weather_profile$plan, "shared_hist")) {
+      tmp_hist_name <- basename(tempfile(pattern = "lw_hist_monthly_"))
+      tmp_tables <- c(tmp_tables, tmp_hist_name)
+      h3_hist_raw <- .profile_timed(
+        "cmip6_historical_materialise",
+        dplyr::compute(h3_hist_raw, name = tmp_hist_name, temporary = TRUE)
+      )
+    }
 
     period_specs <- lapply(seq_along(future_period), function(i) {
       fp <- future_period[[i]]
@@ -1329,10 +1429,14 @@ get_weather <- function(
       )
 
       # SSP baseline overlap - shared across all future periods
-      h3_ssp_raw <- .cmip6_h3_monthly(ssp_raw_lazy, baseline_start, baseline_end)
+       h3_ssp_raw <- .profile_timed(
+         "cmip6_ssp_baseline_aggregate",
+         .cmip6_h3_monthly(ssp_raw_lazy, baseline_start, baseline_end),
+         detail = ssp_i
+       )
 
       # Combined CMIP6 historical baseline (hist + ssp overlap period)
-      h3_hist <- dplyr::union_all(h3_hist_raw, h3_ssp_raw) |>
+       h3_hist <- dplyr::union_all(h3_hist_raw, h3_ssp_raw) |>
         dplyr::group_by(model, h3, month) |>
         dplyr::summarise(
           dplyr::across(dplyr::all_of(weather_vars), ~ mean(.x, na.rm = TRUE)),
@@ -1342,10 +1446,53 @@ get_weather <- function(
       # Aggregate every requested period once, then join the combined relation
       # to h3_slim once. This removes the repeated location-level spatial join
       # from the period loop while retaining a period key for exact semantics.
-      h3_fut_by_period <- lapply(period_specs, function(spec) {
-        .cmip6_h3_monthly(ssp_raw_lazy, spec$start, spec$end) |>
-          dplyr::mutate(period_id = spec$id)
-      })
+       h3_fut_by_period <- if (!is.null(weather_profile) &&
+         identical(weather_profile$plan, "shared_period")) {
+         raw_by_year <- ssp_raw_lazy |>
+           dplyr::select(dplyr::all_of(cmip6_cols)) |>
+           dplyr::filter(timestamp >= ssp_tmin, timestamp <= ssp_tmax) |>
+             dplyr::mutate(
+               cmip_year = dbplyr::sql("YEAR(timestamp)"),
+               cmip_month_key = dbplyr::sql("YEAR(timestamp) * 100 + MONTH(timestamp)"),
+               month = dbplyr::sql("MONTH(timestamp)")
+             ) |>
+             dplyr::group_by(model, h3, cmip_year, cmip_month_key, month) |>
+           dplyr::summarise(
+             dplyr::across(dplyr::all_of(weather_vars), ~ mean(.x, na.rm = TRUE)),
+             .groups = "drop"
+           )
+         tmp_period_monthly_name <- basename(tempfile(pattern = "lw_ssp_monthly_"))
+         tmp_tables <<- c(tmp_tables, tmp_period_monthly_name)
+         raw_by_year <- .profile_timed(
+           "cmip6_ssp_monthly_materialise",
+           dplyr::compute(raw_by_year, name = tmp_period_monthly_name, temporary = TRUE),
+           detail = ssp_i
+         )
+         lapply(period_specs, function(spec) {
+           spec_start_year <- as.integer(format(spec$start, "%Y"))
+           spec_end_year <- as.integer(format(spec$end, "%Y"))
+           spec_start_month <- as.integer(format(spec$start, "%m"))
+           spec_end_month <- as.integer(format(spec$end, "%m"))
+           spec_start_key <- spec_start_year * 100L + spec_start_month
+           spec_end_key <- spec_end_year * 100L + spec_end_month
+           raw_by_year |>
+             dplyr::filter(
+               cmip_month_key >= !!spec_start_key,
+               cmip_month_key <= !!spec_end_key
+             ) |>
+             dplyr::group_by(model, h3, month) |>
+             dplyr::summarise(
+               dplyr::across(dplyr::all_of(weather_vars), ~ mean(.x, na.rm = TRUE)),
+               .groups = "drop"
+             ) |>
+             dplyr::mutate(period_id = spec$id)
+         })
+       } else {
+         lapply(period_specs, function(spec) {
+           .cmip6_h3_monthly(ssp_raw_lazy, spec$start, spec$end) |>
+             dplyr::mutate(period_id = spec$id)
+         })
+       }
       h3_fut_all <- Reduce(dplyr::union_all, h3_fut_by_period)
       h3_deltas_all <- dplyr::inner_join(
         h3_hist, h3_fut_all,
@@ -1355,10 +1502,10 @@ get_weather <- function(
         dplyr::mutate(!!!delta_exprs_h3) |>
         dplyr::select(period_id, model, h3, month, dplyr::all_of(delta_vars))
 
-      loc_deltas_all <- h3_deltas_all |>
-        dplyr::inner_join(h3_slim, by = c("h3" = "h3_cmip6")) |>
-        dplyr::group_by(period_id, model, code, year, survname, loc_id, month) |>
-        .pop_weighted_mean(delta_vars)
+       loc_deltas_all <- .profile_timed("cmip6_delta_materialise", h3_deltas_all |>
+         dplyr::inner_join(h3_slim, by = c("h3" = "h3_cmip6")) |>
+         dplyr::group_by(period_id, model, code, year, survname, loc_id, month) |>
+         .pop_weighted_mean(delta_vars), detail = ssp_i)
 
       # Materialise the complete location-level delta relation before the
       # completeness scan. Both the scan and the per-period filtered queries
@@ -1476,8 +1623,12 @@ get_weather <- function(
           dplyr::select(
             model, code, year, survname, loc_id, timestamp,
             dplyr::all_of(weather_vars)
-          ) |>
-          dplyr::compute(name = tmp_perturb_name, temporary = TRUE)
+          )
+        perturbed <- .profile_timed(
+          "future_perturbation_materialise",
+          dplyr::compute(perturbed, name = tmp_perturb_name, temporary = TRUE),
+          detail = paste(ssp_i, fp_label)
+        )
 
         # Step 2: rolling window + transformations. The fast path keeps this
         # relation lazy and performs one direct collect; the bounded path
@@ -1489,6 +1640,11 @@ get_weather <- function(
             climate_ref = climate_ref
           ) |>
           dplyr::filter(timestamp %in% !!dates)
+        rolled_lazy <- .profile_timed(
+          "future_rolling_query",
+          rolled_lazy,
+          detail = paste(ssp_i, fp_label)
+        )
         tmp_roll_name <- NULL
         rolled <- rolled_lazy
         if (identical(weather_collect, "bounded")) {
@@ -1501,9 +1657,10 @@ get_weather <- function(
           # Production path: one collect after the transformed relation has
           # been materialised. This avoids a DuckDB query/collect round trip per
           # model and is materially faster when latency is the primary concern.
-          batch <- rolled_lazy |>
+           batch <- .profile_timed(
+             "future_collect", rolled_lazy |>
             dplyr::arrange(model, code, year, survname, loc_id, timestamp) |>
-            dplyr::collect()
+             dplyr::collect(), detail = paste(ssp_i, fp_label))
           if (!nrow(batch)) {
             list()
           } else {
@@ -1532,11 +1689,12 @@ get_weather <- function(
           )$model
           model_out <- if (is.function(weather_consumer)) NULL else list()
           for (model_name in model_names) {
-            model_df <- rolled |>
-              dplyr::filter(model == !!model_name) |>
-              dplyr::arrange(code, year, survname, loc_id, timestamp) |>
-              dplyr::select(-model) |>
-              dplyr::collect()
+             model_df <- .profile_timed(
+               "future_collect", rolled |>
+               dplyr::filter(model == !!model_name) |>
+               dplyr::arrange(code, year, survname, loc_id, timestamp) |>
+               dplyr::select(-model) |>
+               dplyr::collect(), detail = paste(ssp_i, fp_label, model_name))
             if (!nrow(model_df)) {
               rm(model_df)
               next
@@ -1625,6 +1783,10 @@ get_weather <- function(
   )
   tmp_tables <- setdiff(tmp_tables, tmp_base_name)
 
+  # Profile cleanup before publishing the final record so the returned profile
+  # includes the post-cleanup table count and RSS boundary.
+  .profile_cleanup()
+
   # Attach computed breaks so the caller can reuse them in subsequent calls
   if (has_binning && !is.null(stored_breaks)) {
     attr(result, "stored_breaks") <- stored_breaks
@@ -1639,6 +1801,13 @@ get_weather <- function(
     collection_policy$external_rss_after <- .wx_process_tree_rss_bytes()
   }
   attr(result, "weather_collection_policy") <- collection_policy
+  if (!is.null(weather_profile)) {
+    .profile_record("complete", weather_profile$started, result, weather_profile$plan)
+    profile_df <- if (length(weather_profile$records)) {
+      do.call(rbind, weather_profile$records)
+    } else data.frame()
+    attr(result, "weather_profile") <- profile_df
+  }
 
   result
 }

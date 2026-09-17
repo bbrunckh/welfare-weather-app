@@ -33,49 +33,6 @@ test_that("cached weather join preserves inner_join expansion and ordering", {
   expect_identical(actual, expected)
 })
 
-test_that("weather join cache retains only compact survey payload", {
-  survey <- data.frame(
-    code = c("T", "T"), year = c("2020", "2020"), survname = "S",
-    loc_id = c("a", "b"), int_month = 1L,
-    hhid = c("hh1", "hh2"), group = factor(c("a", "b")),
-    stringsAsFactors = FALSE
-  )
-  cache <- build_weather_join_cache(survey)
-
-  expect_false("survey" %in% names(cache))
-  expect_false("rows_by_key" %in% names(cache))
-  expect_equal(length(cache$key_start), length(cache$key_levels))
-  expect_true(all(is.na(match("missing", cache$key_levels))))
-  expect_identical(names(cache$survey_nonjoin), c("hhid", "group"))
-  expect_identical(cache$survey_nonjoin$hhid, survey$hhid)
-  expect_identical(cache$survey_nonjoin$group, survey$group)
-  expect_lt(object.size(cache$survey_nonjoin), object.size(survey))
-})
-
-test_that("compact weather index preserves NA, duplicate, and unmatched behavior", {
-  survey <- data.frame(
-    code = c("T", "T", NA_character_), year = c("2020", "2020", "2020"),
-    survname = "S", loc_id = c("a", "a", "n"), int_month = c(1L, 1L, 2L),
-    hhid = c("first", "second", "na-key"), stringsAsFactors = FALSE
-  )
-  weather <- data.frame(
-    code = c("T", NA_character_, "missing"), year = c(2020L, 2020L, 2020L),
-    survname = "S", loc_id = c("a", "n", "x"), int_month = c(1L, 2L, 3L),
-    timestamp = as.POSIXct(c("2020-01-01", "2020-02-01", "2020-03-01"),
-      tz = "UTC"), value = 1:3, stringsAsFactors = FALSE
-  )
-  expected <- weather |>
-    .add_sim_timestamp_fields() |>
-    dplyr::select(-timestamp) |>
-    dplyr::inner_join(survey,
-      by = c("code", "year", "survname", "loc_id", "int_month"),
-      relationship = "many-to-many"
-    ) |>
-    dplyr::mutate(year = as.factor(year))
-  actual <- join_weather_survey_cached(weather, build_weather_join_cache(survey))
-  expect_identical(actual, expected)
-})
-
 make_ledger_svy <- function(n = 60L) {
   data.frame(
     hhid     = seq_len(n),

@@ -490,7 +490,9 @@ fct_run_simulation <- function(sw,
       "code", "year", "survname", "loc_id",
       "int_month"
     ) %in% names(svy_prepared))) {
-    build_weather_join_cache(svy_prepared)
+    build_weather_join_cache(
+      dplyr::mutate(svy_prepared, .svy_row_id = seq_len(nrow(svy_prepared)))
+    )
   } else {
     NULL
   }

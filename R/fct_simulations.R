@@ -420,6 +420,30 @@ resolve_id_col <- function(a, b) {
   if (length(match) == 0L) NULL else match[[1L]]
 }
 
+.prediction_profile_enabled <- function() {
+  identical(tolower(Sys.getenv("WISEAPP_PREDICTION_PROFILE", "")), "1")
+}
+
+.prediction_profile_record <- function(profile, stage, started, value = NULL,
+                                       rows = NA_integer_, detail = NULL) {
+  if (is.null(profile)) return(invisible(NULL))
+  rss <- if (exists(".wx_process_tree_rss_bytes", mode = "function")) {
+    .wx_process_tree_rss_bytes()
+  } else {
+    NA_real_
+  }
+  profile$records[[length(profile$records) + 1L]] <- data.frame(
+    stage = stage,
+    elapsed_seconds = proc.time()[["elapsed"]] - started,
+    rows = if (is.null(value)) rows else if (is.data.frame(value)) nrow(value) else rows,
+    frame_bytes = if (is.null(value)) NA_real_ else as.numeric(utils::object.size(value)),
+    rss_bytes = rss,
+    detail = detail %||% "",
+    stringsAsFactors = FALSE
+  )
+  invisible(NULL)
+}
+
 #' Run Simulation Pipeline for One Weather Key
 #'
 #' Prepares counterfactual survey data for one weather key, computes point-
@@ -529,6 +553,17 @@ run_sim_pipeline <- function(weather_raw,
                              rif_policy_deltas = NULL,
                              rif_grid = NULL,
                              precomputed_ecdf_train = NULL) {
+  prediction_profile <- if (.prediction_profile_enabled()) new.env(parent = emptyenv()) else NULL
+  if (!is.null(prediction_profile)) {
+    prediction_profile$records <- list()
+    prediction_profile$started <- proc.time()[["elapsed"]]
+  }
+  profile_stage <- function(stage, expr, rows = NA_integer_, detail = NULL) {
+    started <- proc.time()[["elapsed"]]
+    value <- force(expr)
+    .prediction_profile_record(prediction_profile, stage, started, value, rows, detail)
+    value
+  }
   n_pre_join <- nrow(svy)
 
   # Define is_rif once - all conditions in one place
@@ -565,7 +600,7 @@ run_sim_pipeline <- function(weather_raw,
       dplyr::select(-dplyr::any_of(drop_cols))
   }
 
-  survey_wd_sim <- if (!is.null(weather_join_cache) && !is_rif_policy) {
+  survey_wd_sim <- profile_stage("join", if (!is.null(weather_join_cache) && !is_rif_policy) {
     join_weather_survey_cached(weather_raw, weather_join_cache)
   } else {
     weather_raw |>
@@ -573,7 +608,7 @@ run_sim_pipeline <- function(weather_raw,
       dplyr::select(-timestamp) |>
       dplyr::inner_join(svy_join, by = c("code", "year", "survname", "loc_id", "int_month")) |>
       dplyr::mutate(year = as.factor(year))
-  }
+  }, detail = if (!is.null(weather_join_cache) && !is_rif_policy) "compact_cache" else "inline")
   rm(svy_join)
 
   # Resolve ID column for "original" residual matching
@@ -623,7 +658,7 @@ run_sim_pipeline <- function(weather_raw,
     } else {
       NULL
     }
-    predict_rif(
+    profile_stage("prediction", predict_rif(
       fit_multi = fit_multi,
       newdata = survey_wd_sim, # joined,
       svy = svy_for_predict,
@@ -637,12 +672,13 @@ run_sim_pipeline <- function(weather_raw,
       batch_predictions = batch_rif_predictions,
       direct_predictions = direct_rif_predictions,
       direct_metadata = direct_rif_metadata,
-      direct_baseline_cache = direct_rif_baseline_cache
-    )
+      direct_baseline_cache = direct_rif_baseline_cache,
+      prediction_profile = prediction_profile
+    ), detail = "rif")
   } else {
     # Standard OLS path - unchanged
     tryCatch(
-      predict_outcome(
+      profile_stage("prediction", predict_outcome(
         model      = model,
         newdata    = survey_wd_sim,
         residuals  = "none", # residuals drawn at display time, not here
@@ -650,7 +686,7 @@ run_sim_pipeline <- function(weather_raw,
         id         = id_col,
         train_data = train_data,
         engine     = engine
-      ),
+      ), detail = "ols"),
       error = function(e) {
         warning("[run_sim_pipeline] predict_outcome() failed: ", conditionMessage(e))
         NULL
@@ -767,20 +803,22 @@ run_sim_pipeline <- function(weather_raw,
     rm(out)
     if (!is.null(chol_obj)) {
       # Standard OLS path only - skip for RIF (model is fixest_multi)
-      X_nonFE <- tryCatch(
+      X_nonFE <- profile_stage("design_matrix", tryCatch(
         stats::model.matrix(model, data = survey_wd_sim, type = "rhs"),
         error = function(e) {
           warning("[run_sim_pipeline] model.matrix() failed: ", conditionMessage(e))
           NULL
         }
-      )
+      ), detail = "ols")
       if (!is.null(X_nonFE)) {
         if (is.list(chol_obj) && "L" %in% names(chol_obj)) {
           # Our named list format - use compute_factor_loading()
-          F_loading <- compute_factor_loading(X_nonFE, chol_obj)
+          F_loading <- profile_stage("factor_loading",
+            compute_factor_loading(X_nonFE, chol_obj), detail = "ols")
         } else if (is.matrix(chol_obj)) {
           # Golem matrix format - inline multiply
-          F_loading <- X_nonFE %*% t(chol_obj)
+          F_loading <- profile_stage("factor_loading",
+            X_nonFE %*% t(chol_obj), detail = "ols")
         }
       }
       rm(X_nonFE)
@@ -818,7 +856,7 @@ run_sim_pipeline <- function(weather_raw,
     )
   }
 
-  list(
+  result <- list(
     y_point     = y_point,
     F_loading   = F_loading,
     sim_year    = sim_year,
@@ -830,6 +868,14 @@ run_sim_pipeline <- function(weather_raw,
     weather_raw = weather_raw,
     train_aug   = train_aug
   )
+  if (!is.null(prediction_profile)) {
+    .prediction_profile_record(
+      prediction_profile, "assembly", prediction_profile$started,
+      result, detail = if (is_rif) "rif" else "ols"
+    )
+    attr(result, "prediction_profile") <- do.call(rbind, prediction_profile$records)
+  }
+  result
 }
 
 # Simulation date grid ----
@@ -950,23 +996,14 @@ build_weather_join_cache <- function(survey_join,
                                        "loc_id", "int_month"
                                      )) {
   stopifnot(is.data.frame(survey_join), all(by %in% names(survey_join)))
-  survey_nonjoin <- setdiff(names(survey_join), by)
-  key <- .weather_join_key(survey_join, by)
-  key_levels <- unique(key)
-  key_id <- match(key, key_levels)
-  row_order <- order(key_id)
-  key_counts <- tabulate(key_id, nbins = length(key_levels))
-  key_end <- cumsum(key_counts)
-  key_start <- key_end - key_counts + 1L
   list(
     by = by,
-    # Retain only payload columns. Join keys are represented by the lookup
-    # names, so keeping the projected survey frame here needlessly multiplies
-    # memory across long-lived simulation runs.
-    survey_nonjoin = survey_join[row_order, survey_nonjoin, drop = FALSE],
-    key_levels = key_levels,
-    key_start = key_start,
-    key_end = key_end
+    survey = survey_join,
+    survey_nonjoin = setdiff(names(survey_join), by),
+    lookup = split(seq_len(nrow(survey_join)),
+      .weather_join_key(survey_join, by),
+      drop = TRUE
+    )
   )
 }
 
@@ -975,27 +1012,23 @@ join_weather_survey_cached <- function(weather_raw, cache) {
   weather <- weather_raw |>
     .add_sim_timestamp_fields() |>
     dplyr::select(-timestamp)
-  key_id <- match(.weather_join_key(weather, by), cache$key_levels)
-  n_matches <- ifelse(is.na(key_id), 0L,
-    cache$key_end[key_id] - cache$key_start[key_id] + 1L
-  )
+  matches <- cache$lookup[.weather_join_key(weather, by)]
+  n_matches <- lengths(matches)
   if (!any(n_matches)) {
     out <- dplyr::bind_cols(
       tibble::as_tibble(weather[FALSE, , drop = FALSE]),
-      tibble::as_tibble(cache$survey_nonjoin[FALSE, , drop = FALSE])
+      tibble::as_tibble(cache$survey[FALSE, cache$survey_nonjoin, drop = FALSE])
     )
     return(as.data.frame(dplyr::mutate(out, year = as.factor(year))))
   }
   weather_rows <- rep.int(seq_len(nrow(weather)), n_matches)
-  matched_keys <- key_id[n_matches > 0L]
-  survey_rows <- unlist(Map(
-    seq.int,
-    cache$key_start[matched_keys], cache$key_end[matched_keys]
-  ), use.names = FALSE)
+  survey_rows <- unlist(matches[n_matches > 0L], use.names = FALSE)
   as.data.frame(dplyr::mutate(
     dplyr::bind_cols(
       tibble::as_tibble(weather[weather_rows, , drop = FALSE]),
-      tibble::as_tibble(cache$survey_nonjoin[survey_rows, , drop = FALSE])
+      tibble::as_tibble(cache$survey[survey_rows, cache$survey_nonjoin,
+        drop = FALSE
+      ])
     ),
     year = as.factor(year)
   ))

@@ -441,12 +441,21 @@ predict_rif <- function(fit_multi, newdata, svy, train_data, taus, outcome,
                         ecdf_train = NULL, batch_predictions = FALSE,
                         direct_predictions = FALSE,
                         direct_metadata = NULL,
-                        direct_baseline_cache = NULL) {
+                         direct_baseline_cache = NULL,
+                         prediction_profile = NULL) {
   stopifnot(
     ".svy_row_id must be present in newdata" = ".svy_row_id" %in% names(newdata),
     "taus must be non-empty" = length(taus) > 0,
     "fit_multi must have same length as taus" = length(fit_multi) == length(taus)
   )
+  profile_stage <- function(stage, expr, rows = NA_integer_, detail = NULL) {
+    started <- proc.time()[["elapsed"]]
+    value <- force(expr)
+    if (!is.null(prediction_profile) && exists(".prediction_profile_record", mode = "function")) {
+      .prediction_profile_record(prediction_profile, stage, started, value, rows, detail)
+    }
+    value
+  }
 
   svy_row <- newdata$.svy_row_id
   y_raw <- svy[[outcome]][svy_row]
@@ -463,13 +472,18 @@ predict_rif <- function(fit_multi, newdata, svy, train_data, taus, outcome,
   # Reuse a caller-supplied ecdf when available (see PERF-27); otherwise
   # build it here as before.
   F_hat <- if (!is.null(ecdf_train)) ecdf_train else stats::ecdf(train_data[[outcome]])
-  tau_i <- pmin(pmax(F_hat(y_baseline), min(taus)), max(taus))
+  tau_i <- profile_stage(
+    "rif_quantile_assignment",
+    pmin(pmax(F_hat(y_baseline), min(taus)), max(taus)),
+    rows = n
+  )
 
   # Pre-build baseline and scenario data frames ONCE (avoid K*2 column copies)
-  newdata_base <- newdata
-  for (wc in weather_cols) {
-    newdata_base[[wc]] <- svy[[wc]][svy_row]
-  }
+  newdata_base <- profile_stage("rif_baseline_frame", {
+    out <- newdata
+    for (wc in weather_cols) out[[wc]] <- svy[[wc]][svy_row]
+    out
+  }, rows = n)
   newdata_scen <- newdata # already has scenario weather
 
   # Interpolate directly into the final delta vector. Each quantile is needed
@@ -486,12 +500,12 @@ predict_rif <- function(fit_multi, newdata, svy, train_data, taus, outcome,
   })
 
   direct_pairs <- if (isTRUE(direct_predictions)) {
-    .direct_rif_prediction_pair(
+    profile_stage("rif_direct_pair", .direct_rif_prediction_pair(
       fit_multi, newdata_base, newdata_scen,
       metadata = direct_metadata,
       baseline_cache = direct_baseline_cache,
       rows_by_quantile = rows_by_quantile
-    )
+    ), rows = n, detail = "direct")
   } else {
     NULL
   }
@@ -557,8 +571,11 @@ predict_rif <- function(fit_multi, newdata, svy, train_data, taus, outcome,
     if (!length(rows)) next
     # Baseline weather prediction (needed for the climate-delta point
     # estimate; not used for F_loading any more).
-    pair <- direct_pairs[[k]] %||%
-      predict_pair(fit_multi[[k]], newdata_base, newdata_scen, rows)
+    pair <- profile_stage(
+      "rif_quantile_prediction",
+      direct_pairs[[k]] %||% predict_pair(fit_multi[[k]], newdata_base, newdata_scen, rows),
+      rows = length(rows), detail = paste0("k=", k)
+    )
     pred_base <- pair$base
     pred_new <- pair$scenario
 
@@ -598,11 +615,12 @@ predict_rif <- function(fit_multi, newdata, svy, train_data, taus, outcome,
       }
     }
     F_loading <- tryCatch(
-      {
+      profile_stage(
+        "rif_factor_loading",
         interpolate_F_loading(X_scen_fn, chol_list, taus, tau_i,
-          active_mask = active_mask
-        )
-      },
+          active_mask = active_mask),
+        rows = n
+      ),
       error = function(e) {
         warning("[predict_rif] F_loading interpolation failed: ", conditionMessage(e))
         NULL
