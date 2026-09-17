@@ -184,11 +184,33 @@ Do not apply generic in-place/data.table changes without exact payload and order
 
 **Prerequisite:** Complete W3 and join/prediction instrumentation. Serial future runs already reach approximately 4–7+ GiB process RSS.
 
+**Characterization design:** the opt-in `key_workers` argument accepts only 1
+or 2. `key_workers = 2` uses `future::multisession`, avoiding Unix-only fork
+semantics and remaining usable on Windows/macOS/Linux. Historical execution is
+always serial. Future weather frames are partitioned into two worker-local
+chunks; workers receive only their assigned frame, use worker-local RIF cache
+state, and return indexed results. The parent reorders results by canonical key
+index before applying the existing failure ledger and scenario assembly. No
+shared DuckDB connection is sent to workers, and `future.seed = FALSE` avoids
+implicit RNG stream changes while the existing parent seed contract remains the
+oracle.
+
 **Work packets:**
 
 - [ ] Run a two-worker experiment only, historical key serial-first, future keys in canonical order, worker-local DuckDB connections, parent-side result ordering.
 - [ ] Compare wall time, process-tree peak RSS, remote I/O, failures, warnings, exact hashes, and deterministic RNG against serial execution for OLS/RIF and uncertainty on/off.
 - [ ] Implement only if two workers provide a material wall-time gain without exceeding the configured RSS budget.
+
+**Benchmark status:** the two-worker path parses and passes the in-memory smoke
+harness, including worker-count bounds and canonical result assembly. Smoke
+timings are not evidence because the fixture bypasses real pipelines. The
+production LKA run used the local OneDrive data path and was intentionally
+stopped after the full all-years/two-SSP/two-period workload expanded to 63 keys
+and approximately 1,890 pipeline runs. A reduced production run is blocked by an
+unrelated in-progress syntax error in `R/fct_connection.R`; no wall-time, RSS,
+warning, failure, or fingerprint conclusion has been drawn. The next benchmark
+must use one SSP/one period and one repetition first, then expand only if the
+serial/two-worker comparison is healthy.
 
 Do not implement immediately or infer safety from R object sizes.
 
