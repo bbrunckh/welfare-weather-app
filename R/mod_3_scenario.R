@@ -130,8 +130,8 @@ mod_3_scenario_server <- function(id,
         return(selection_summary_card(
           title = "Selected policy scenarios",
           rows = list(list(
-            name = "No policy scenarios selected",
-            sub  = "Select a policy scenario in Step 1 to configure it here."
+            name = "No policy scenarios selected in Step 1",
+            sub  = "Configure Social Protection below, or select another policy scenario in Step 1."
           )),
           compact = TRUE
         ))

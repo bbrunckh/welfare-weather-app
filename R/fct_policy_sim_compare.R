@@ -1607,7 +1607,10 @@ make_step3_decision_table_html <- function(df, subheader = NULL, footnotes = NUL
     baseline_skip_coef <- is.null(pl$F_loading)
     suite_pov <- poverty_line %||% 3
     shared_key <- shared_aggregation_cache_key(
-      hs$.step2_sig %||% hs$.sig %||% list(pipeline = "step2"),
+      list(
+        arm = tag,
+        signature = hs$.step2_sig %||% hs$.sig %||% list(pipeline = "step2")
+      ),
       suite_pov, 0.05, TRUE, active_residuals(hs), baseline_skip_coef,
       isTRUE(hs$so$transform == "log"), .agg_suite_methods()
     )

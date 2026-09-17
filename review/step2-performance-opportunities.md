@@ -171,12 +171,12 @@ an RSS-bounded cache. No replay implementation is currently justified.
 **Work packets:**
 
 - [x] Measure retained sizes of `cached_weather`, `weather_raw` in each pipeline, joined frames, `F_loading`, and final payloads at `R/fct_run_simulation.R:520-703` and `R/fct_simulations.R:755-832`. Opt-in `WISEAPP_MEMORY_PROFILE=1` records object/serialized bytes and process-tree RSS at orchestration retention boundaries. Local LKA profiling found approximately 2.25 GB cached weather for two SSPs/two periods, approximately 79 MB per pipeline, and approximately 7.19 GB transient scenario staging before publication.
-- [x] Prototype targeted staging release: each completed scenario group now releases its `group_agg`/weather staging references after ownership transfers to `new_scenarios`. This avoids retaining duplicate group containers while preserving diagnostics, member provenance, and final payload references. Broad production-scale timing validation remains pending because the LKA two-SSP/two-period matrix expands to 63 keys and approximately 1,890 pipeline runs per repetition.
+- [x] Prototype targeted staging release: each completed scenario group now releases its `group_agg`/weather staging references after ownership transfers to `new_scenarios`. This avoids retaining duplicate group containers while preserving diagnostics, member provenance, and final payload references. A focused post-change LKA OLS benchmark (historical and one-SSP/one-period, one repetition) was approximately 6--10% faster than the matching pre-change artifact, but sampled future RSS increased by about 10--14% and external process peak RSS was approximately 6.73 GB. Treat the wall-time signal as provisional; no memory improvement is established.
 - [ ] Benchmark narrower `fixest` prediction-frame handling and RIF `newdata_base`/`delta_mat` allocations; preserve FE row-drop and row-ID contracts.
 
 Do not apply generic in-place/data.table changes without exact payload and ordering tests.
 
-**Item 6 characterization status:** The local LKA retention run used the configured OneDrive filesystem, not Databricks. Historical and one-SSP workloads completed; the two-SSP/two-period cold repetitions completed before the long matrix was stopped. The retained-size evidence identifies weather frames and temporary scenario staging as the dominant memory costs; per-key prediction payloads are not the dominant retained object. The remaining safe validation is focused parity testing and a short one-SSP comparison of memory versus reference weather storage, not another unbounded matrix.
+**Item 6 characterization status:** The local LKA retention run used the configured OneDrive filesystem, not Databricks. Historical and one-SSP workloads completed; the two-SSP/two-period cold repetitions completed before the long matrix was stopped. The retained-size evidence identifies weather frames and temporary scenario staging as the dominant memory costs; per-key prediction payloads are not the dominant retained object. The focused staging-release rerun preserved result sizes and completed successfully, with wall-time improvement but higher future RSS; keep the change subject to RSS-budget review rather than claiming a memory win. Narrower `fixest`/RIF frame-allocation profiling remains open.
 
 ---
 
@@ -185,32 +185,39 @@ Do not apply generic in-place/data.table changes without exact payload and order
 **Prerequisite:** Complete W3 and join/prediction instrumentation. Serial future runs already reach approximately 4–7+ GiB process RSS.
 
 **Characterization design:** the opt-in `key_workers` argument accepts only 1
-or 2. `key_workers = 2` uses `future::multisession`, avoiding Unix-only fork
+or 2. `key_workers = 2` uses a base-R PSOCK cluster, avoiding Unix-only fork
 semantics and remaining usable on Windows/macOS/Linux. Historical execution is
 always serial. Future weather frames are partitioned into two worker-local
 chunks; workers receive only their assigned frame, use worker-local RIF cache
 state, and return indexed results. The parent reorders results by canonical key
 index before applying the existing failure ledger and scenario assembly. No
-shared DuckDB connection is sent to workers, and `future.seed = FALSE` avoids
-implicit RNG stream changes while the existing parent seed contract remains the
-oracle.
+shared DuckDB connection is sent to workers, and no implicit worker RNG stream
+is created; the existing parent seed contract remains the oracle.
 
 **Work packets:**
 
-- [ ] Run a two-worker experiment only, historical key serial-first, future keys in canonical order, worker-local DuckDB connections, parent-side result ordering.
-- [ ] Compare wall time, process-tree peak RSS, remote I/O, failures, warnings, exact hashes, and deterministic RNG against serial execution for OLS/RIF and uncertainty on/off.
+- [x] Run a two-worker experiment only, historical key serial-first, future keys in canonical order, worker-local DuckDB connections, parent-side result ordering.
+- [x] Compare wall time, process-tree peak RSS, failures, warnings, exact hashes, and deterministic RNG against serial execution for OLS.
 - [ ] Implement only if two workers provide a material wall-time gain without exceeding the configured RSS budget.
 
-**Benchmark status:** the two-worker path parses and passes the in-memory smoke
-harness, including worker-count bounds and canonical result assembly. Smoke
-timings are not evidence because the fixture bypasses real pipelines. The
-production LKA run used the local OneDrive data path and was intentionally
-stopped after the full all-years/two-SSP/two-period workload expanded to 63 keys
-and approximately 1,890 pipeline runs. A reduced production run is blocked by an
-unrelated in-progress syntax error in `R/fct_connection.R`; no wall-time, RSS,
-warning, failure, or fingerprint conclusion has been drawn. The next benchmark
-must use one SSP/one period and one repetition first, then expand only if the
-serial/two-worker comparison is healthy.
+**Benchmark result:** the scoped production LKA run used the local OneDrive data
+path, survey year 2016, one SSP, one period, OLS, point estimates only, and 17
+future keys. Serial elapsed time was 8.24--8.98 seconds per case; PSOCK
+two-worker elapsed time was 11.01--13.10 seconds, approximately 25% slower by
+median. External peak RSS was 1.318 GB for serial and 0.939 GB for parallel in
+the matched final runs, while sampled RSS varied across repetitions; the RSS
+reduction did not compensate for the wall-time regression. Both modes completed
+17/17 keys with zero failures, identical normalized result fingerprints
+(`69eaeb9bd3a81701`), and the same model-exclusion and warning behavior. Earlier
+attempts also demonstrated that future-based export would exceed its default
+global-size limit and could not attach this development checkout as a worker
+package; the PSOCK path avoids those portability issues.
+
+**Decision:** retain the PSOCK path as opt-in characterization code only, do not
+enable it by default, and do not expand to uncertainty/RIF or the unbounded
+all-years/two-SSP/two-period matrix. The two-worker wall-time gate failed on a
+real local workload; revisit only if production profiling shows materially
+different per-key compute/I/O characteristics.
 
 Do not implement immediately or infer safety from R object sizes.
 

@@ -374,6 +374,38 @@ test_that("Step 3 aggregation cache is bounded, LRU, and value-preserving", {
   })
 })
 
+test_that("Step 3 shared cache keeps baseline and policy historical arms distinct", {
+  skip_if_not_installed("shiny")
+  baseline <- make_step3_hist_fixture()
+  policy <- baseline
+  policy$pipeline$y_point <- policy$pipeline$y_point + 5
+  bh <- shiny::reactiveVal(baseline)
+  ph <- shiny::reactiveVal(policy)
+  bsc <- shiny::reactiveVal(list())
+  psc <- shiny::reactiveVal(list())
+  shared <- new_shared_aggregation_cache()
+
+  shiny::testServer(function(input, output, session) {
+    internals <<- .wire_results_pane(
+      input, output, session,
+      baseline_hist_sim = bh,
+      baseline_saved_scenarios = bsc,
+      policy_hist_sim = ph,
+      policy_saved_scenarios = psc,
+      selected_hist = shiny::reactiveVal(NULL),
+      residuals = shiny::reactiveVal("none"),
+      aggregation_cache = shared
+    )
+  }, {
+    session$setInputs(cmp_agg_method = "mean", cmp_deviation = "none")
+    session$flushReact()
+    baseline_out <- internals$baseline_agg_hist()$out
+    policy_out <- internals$policy_agg_hist()$out
+    expect_true(all(policy_out$value > baseline_out$value))
+    expect_length(shared$keys, 2L)
+  })
+})
+
 test_that("historical matrix transforms use the canonical cache key and preserve values", {
   skip_if_not_installed("shiny")
   hist <- make_step3_hist_fixture()

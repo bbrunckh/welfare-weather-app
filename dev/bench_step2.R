@@ -539,7 +539,9 @@ inputs_by_country <- setNames(
 }
 
 .bench_fingerprint <- function(value) {
-  digest::digest(value, algo = "xxhash64", serialize = TRUE)
+  stable <- value[c("hist_sim_result", "new_scenarios", "n_keys", "total_runs",
+    "failures", "n_keys_ok")]
+  digest::digest(stable, algo = "xxhash64", serialize = TRUE)
 }
 
 .bench_state <- function() {
@@ -846,10 +848,10 @@ inputs_by_country <- setNames(
     list(
       notify_fn = function(...) invisible(NULL),
       progress_fn = function(...) invisible(NULL),
-      weather_fn = weather_fn,
-      pipeline_fn = pipeline_fn
+      weather_fn = weather_fn
     )
   )
+  if (config$key_workers <= 1L) call_args$pipeline_fn <- pipeline_fn
   evidence_class <- if (identical(config$fixture_mode, "smoke")) {
     "smoke_only_not_production_evidence"
   } else {

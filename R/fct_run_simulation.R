@@ -13,6 +13,24 @@
 
 # Run full simulation pipeline ----
 
+.run_simulation_parallel_chunk <- function(jobs, pipeline_args, package_path = NULL) {
+  if (!is.null(package_path) && !isNamespaceLoaded("wiseapp")) {
+    pkgload::load_all(package_path, quiet = TRUE)
+  }
+  worker_pipeline <- get("run_sim_pipeline", envir = asNamespace("wiseapp"))
+  lapply(jobs, function(job) {
+    started <- proc.time()[["elapsed"]]
+    tryCatch(
+      c(list(index = job$index, key = job$key),
+        list(out = do.call(worker_pipeline, c(list(weather_raw = job$weather), pipeline_args)),
+          error = NULL, elapsed = proc.time()[["elapsed"]] - started)),
+      error = function(e) list(index = job$index, key = job$key, out = NULL,
+        error = conditionMessage(e), elapsed = proc.time()[["elapsed"]] - started)
+    )
+  })
+}
+environment(.run_simulation_parallel_chunk) <- baseenv()
+
 # REACT-12: parse a future simulation key into its (SSP x period) group.
 # Key format: "ssp2_4_5_2030_2040_ensemble_mean" ->
 #   ssp_code "ssp2_4_5", yr_parts c(2030, 2040), gk "ssp2_4_5_2030_2040".
@@ -673,59 +691,32 @@ fct_run_simulation <- function(sw,
   future_keys <- setdiff(cached_keys, hist_keys)
   for (key in hist_keys) consume_key(key, cached_weather[[key]])
   if (length(future_keys) && key_workers > 1L) {
-    if (!requireNamespace("future", quietly = TRUE) ||
-      !requireNamespace("future.apply", quietly = TRUE)) {
-      stop("key_workers > 1 requires the future and future.apply packages.",
-        call. = FALSE)
-    }
-    old_plan <- future::plan()
-    on.exit(future::plan(old_plan), add = TRUE)
     future_jobs <- lapply(seq_along(future_keys), function(i) {
       list(index = i, key = future_keys[[i]], weather = cached_weather[[future_keys[[i]]]])
     })
     future_chunks <- lapply(seq_len(min(key_workers, length(future_jobs))), function(worker) {
       future_jobs[seq.int(worker, length(future_jobs), by = key_workers)]
     })
-    future::plan(future::multisession, workers = length(future_chunks))
-    future_results <- future.apply::future_lapply(
-      future_chunks,
-      function(jobs) {
-        worker_rif_cache <- if (is_rif && isTRUE(direct_rif_predictions)) {
-          new.env(parent = emptyenv())
-        } else {
-          NULL
-        }
-        lapply(jobs, function(job) {
-          started <- proc.time()[["elapsed"]]
-          tryCatch(
-            list(
-              index = job$index,
-              key = job$key,
-              out = pipeline_fn(
-                weather_raw = job$weather, svy = svy, sw = sw, so = so,
-                model = model, residuals = residuals, train_data = train_data,
-                engine = engine, chol_obj = chol_obj, fit_multi = fit_multi,
-                taus = taus, weather_cols = weather_cols,
-                precomputed_train_aug = precomputed_train_aug,
-                svy_prepared = svy_prepared, weather_join_cache = weather_join_cache,
-                precomputed_ecdf_train = precomputed_ecdf_train,
-                direct_rif_predictions = direct_rif_predictions,
-                direct_rif_metadata = direct_rif_metadata,
-                direct_rif_baseline_cache = worker_rif_cache
-              ),
-              error = NULL,
-              elapsed = proc.time()[["elapsed"]] - started
-            ),
-            error = function(e) list(
-              index = job$index, key = job$key, out = NULL,
-              error = conditionMessage(e),
-              elapsed = proc.time()[["elapsed"]] - started
-            )
-          )
-        })
-      },
-      future.seed = FALSE,
-      future.scheduling = 1
+    cluster <- parallel::makeCluster(length(future_chunks), type = "PSOCK")
+    on.exit(parallel::stopCluster(cluster), add = TRUE)
+    if (!identical(pipeline_fn, run_sim_pipeline)) {
+      stop("key_workers > 1 requires the default run_sim_pipeline().", call. = FALSE)
+    }
+    pipeline_args <- list(
+      svy = svy, sw = sw, so = so, model = model, residuals = residuals,
+      train_data = train_data, engine = engine, chol_obj = chol_obj,
+      fit_multi = fit_multi, taus = taus, weather_cols = weather_cols,
+      precomputed_train_aug = precomputed_train_aug, svy_prepared = svy_prepared,
+      weather_join_cache = weather_join_cache,
+      precomputed_ecdf_train = precomputed_ecdf_train,
+      direct_rif_predictions = direct_rif_predictions,
+      direct_rif_metadata = direct_rif_metadata,
+      direct_rif_baseline_cache = NULL
+    )
+    package_path <- getNamespaceInfo(asNamespace("wiseapp"), "path")
+    future_results <- parallel::clusterApply(
+      cluster, future_chunks, .run_simulation_parallel_chunk,
+      pipeline_args = pipeline_args, package_path = package_path
     )
     future_results <- do.call(c, future_results)
     future_results <- future_results[order(vapply(future_results, `[[`, integer(1), "index"))]

@@ -110,7 +110,7 @@ mod_2_simulation_server <- function(id,
       tabset_id       = "step2_output_tabs",
       tabset_session  = session,
        residuals       = s1$residuals,
-       aggregation_cache = shared_aggregation_cache,
+       shared_aggregation_cache = shared_aggregation_cache,
       skip_coef_draws = s1$skip_coef_draws,
       stale           = s1$stale
     )

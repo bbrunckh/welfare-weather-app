@@ -23,7 +23,7 @@ build_connection_params <- function(type, ...) {
   `%|||%` <- function(a, b) if (!is.null(a) && nzchar(a %||% "")) a else b
 
   switch(type,
-    "local" = list(type = "local", path = args$path %||% Sys.getenv("WISEAPP_DATA_PATH")),
+    "local" = list(type = "local", path = args$path %|||% Sys.getenv("WISEAPP_DATA_PATH")),
     "s3" = list(
       type = "s3", bucket = args$s3_bucket %||% "",
       prefix = args$s3_prefix %||% "", region = args$s3_region %||% "us-east-1",
