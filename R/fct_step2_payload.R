@@ -447,6 +447,40 @@ step2_weather_store_release <- function(lease) {
   invisible(NULL)
 }
 
+# Transfer a worker-created store to another R process without deleting its
+# files. The receiving process calls step2_weather_store_acquire() and becomes
+# responsible for the eventual filesystem cleanup.
+step2_weather_store_detach <- function(lease) {
+  if (is.null(lease)) {
+    return(invisible(NULL))
+  }
+  lease_id <- if (is.list(lease)) lease$lease_id else as.character(lease)[1L]
+  if (length(lease_id) != 1L || !nzchar(lease_id) ||
+      !exists(lease_id, envir = .step2_weather_store_registry$leases,
+              inherits = FALSE)) {
+    return(invisible(NULL))
+  }
+  keys <- get(lease_id, envir = .step2_weather_store_registry$leases,
+              inherits = FALSE)
+  rm(list = lease_id, envir = .step2_weather_store_registry$leases)
+  for (key in keys) {
+    if (!exists(key, envir = .step2_weather_store_registry$refs,
+                inherits = FALSE)) next
+    refs <- get(key, envir = .step2_weather_store_registry$refs,
+                inherits = FALSE) - 1L
+    if (refs <= 0L) {
+      rm(list = key, envir = .step2_weather_store_registry$refs)
+      if (exists(key, envir = .step2_weather_store_registry$stores,
+                 inherits = FALSE)) {
+        rm(list = key, envir = .step2_weather_store_registry$stores)
+      }
+    } else {
+      assign(key, refs, envir = .step2_weather_store_registry$refs)
+    }
+  }
+  invisible(NULL)
+}
+
 step2_weather_store_acquire_scenarios <- function(scenarios) {
   if (!is.list(scenarios) || !length(scenarios)) {
     return(NULL)

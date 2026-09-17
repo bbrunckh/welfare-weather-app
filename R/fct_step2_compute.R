@@ -155,9 +155,21 @@ step2_compute <- function(input,
                           run_id = NULL,
                           event_fn = function(event) invisible(NULL),
                           cache_dir = NULL,
+                          weather_storage = c("memory", "reference"),
+                          weather_store_root = NULL,
+                          weather_collect = c("fast", "bounded"),
+                          weather_threads = c("auto", "1", "2"),
                           weather_fn = get_weather,
                           pipeline_fn = run_sim_pipeline) {
   .step2_compute_validate(input)
+  weather_storage <- match.arg(weather_storage)
+  weather_collect <- match.arg(weather_collect)
+  weather_threads <- match.arg(weather_threads)
+  propagate_all_covariate_uncertainty <-
+    isTRUE(input$propagate_all_covariate_uncertainty)
+  fit_multi <- input$fit_multi %||% NULL
+  taus <- input$taus %||% NULL
+  weather_cols <- input$weather_cols %||% NULL
   seed <- as.integer(seed)[1L]
   if (is.na(seed)) stop("step2_compute()$seed must be an integer.", call. = FALSE)
   run_id <- as.character(run_id %||% paste0("step2-", .provenance_digest(
@@ -233,18 +245,27 @@ step2_compute <- function(input,
     emit("pipeline", "completed", sprintf("key %d", pipeline_index))
     value
   }
+  simulation_args <- snapshot
+  simulation_args$notify_fn <- function(message) emit("simulation", "message", message)
+  simulation_args$progress_fn <- function(value, detail) {
+    emit("simulation", "progress", detail)
+  }
+  simulation_args$weather_fn <- weather_wrapper
+  simulation_args$pipeline_fn <- pipeline_wrapper
+  simulation_args$weather_storage <- weather_storage
+  simulation_args$weather_store_root <- weather_store_root
+  simulation_args$weather_collect <- weather_collect
+  simulation_args$weather_threads <- weather_threads
+  simulation_args$propagate_all_covariate_uncertainty <-
+    propagate_all_covariate_uncertainty
+  simulation_args$fit_multi <- fit_multi
+  simulation_args$taus <- taus
+  simulation_args$weather_cols <- weather_cols
+  simulation_args$payload_mode <- "compact"
+  simulation_args$direct_rif_predictions <- TRUE
+  simulation_args$seed <- seed
   result <- tryCatch(
-    do.call(
-      fct_run_simulation,
-      c(snapshot, list(
-        notify_fn = function(message) emit("simulation", "message", message),
-        progress_fn = function(value, detail) {
-          emit("simulation", "progress", detail)
-        },
-        weather_fn = weather_wrapper,
-        pipeline_fn = pipeline_wrapper
-      ))
-    ),
+    do.call(fct_run_simulation, simulation_args),
     error = function(e) {
       emit("simulation", "failed", error = e)
       stop(e)

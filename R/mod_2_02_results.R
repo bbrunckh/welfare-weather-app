@@ -99,7 +99,7 @@ mod_2_02_results_ui <- function(id) {
         ),
         shiny::conditionalPanel(
           condition = paste0(
-            "['headcount_ratio','gap','fgt2','prosperity_gap','avg_poverty']",
+            "['headcount_ratio','gap','fgt2','prosperity_gap']",
             ".indexOf(input['", ns("cmp_agg_method"), "']) > -1"
           ),
           shiny::div(

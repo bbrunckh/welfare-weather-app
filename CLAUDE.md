@@ -8,14 +8,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 - R package name: `wiseapp`
 - Framework: [Golem](https://thinkr-open.github.io/golem/) (production-ready Shiny scaffolding)
-- R version: 4.5.3 (pinned via `renv.lock`)
+- R version: 4.5.3 (configured by the local development environment)
 - License: MIT
 
 ## Development Commands
 
 ```r
-# Install dependencies (restore from renv.lock)
-renv::restore()
+# Install dependencies from DESCRIPTION
+install.packages(read.dcf("DESCRIPTION")[1, "Imports"] |>
+  strsplit(",\\s*") |>
+  unlist())
 
 # Run the app locally
 wiseapp::run_app()

@@ -123,7 +123,7 @@ prepare_weather_manifest <- function(
     stored_breaks = NULL, epsilon = 0.001, weather_source = "era5land",
     proj_source = "cmip6", weather_collect = c("fast", "bounded"),
     weather_threads = c("auto", "1", "2"),
-    prepared_weather_cache = c("auto", "off", "read_write"),
+    prepared_weather_cache = c("off", "auto", "read_write"),
     prepared_weather_cache_root = NULL, weather_fn = get_weather) {
   weather_collect <- match.arg(weather_collect)
   weather_threads <- match.arg(weather_threads)
@@ -307,7 +307,7 @@ fct_run_simulation <- function(sw,
                                weather_store_root = NULL,
                                 weather_collect = c("fast", "bounded"),
                                 weather_threads = c("auto", "1", "2"),
-                                prepared_weather_cache = c("auto", "off", "read_write"),
+                                prepared_weather_cache = c("off", "auto", "read_write"),
                                 prepared_weather_cache_root = NULL,
                                 epsilon = 0.001,
                                 weather_source = "era5land",
@@ -484,12 +484,33 @@ fct_run_simulation <- function(sw,
   } else {
     tryCatch(
       {
-        fitted_train <- as.numeric(stats::predict(model, newdata = train_data))
-        train_data |>
-          dplyr::mutate(
-            .fitted = fitted_train,
-            .resid  = !!rlang::sym(so$name) - fitted_train
+        fitted_values <- if (inherits(model, "fixest")) {
+          model$fitted.values %||% numeric(0)
+        } else {
+          numeric(0)
+        }
+        fitted_train <- if (length(fitted_values) == nrow(train_data) &&
+          all(is.finite(as.numeric(fitted_values)))) {
+          # train_data is the complete-case frame used for fitting. Reuse the
+          # model's stored fitted values instead of rebuilding a fixest model
+          # matrix, which is slower and can fail for slimmed/serialized fits.
+          as.numeric(model$fitted.values)
+        } else {
+          tryCatch(
+            stats::predict(model, newdata = as.data.frame(train_data)),
+            error = function(e) NULL
           )
+        }
+        if (is.null(fitted_train) || length(fitted_train) != nrow(train_data)) {
+          NULL
+        } else {
+          fitted_train <- as.numeric(fitted_train)
+          train_data |>
+            dplyr::mutate(
+              .fitted = fitted_train,
+              .resid  = !!rlang::sym(so$name) - fitted_train
+            )
+        }
       },
       error = function(e) {
         warning(
@@ -663,71 +684,47 @@ fct_run_simulation <- function(sw,
     invisible(NULL)
   }
 
-  manifest <- weather_manifest %||% prepare_weather_manifest(
-    survey_data = svy, selected_surveys = ss, selected_weather = sw,
-    dates = sim_dates, connection_params = cp,
-    ssp = if (has_future) ssps else NULL,
-    future_period = if (has_future) fp_list else NULL,
-    perturbation_method = perturbation_method, stored_breaks = stored_breaks,
-    epsilon = epsilon, weather_source = weather_source, proj_source = proj_source,
-    weather_collect = weather_collect, weather_threads = weather_threads,
-    prepared_weather_cache = prepared_weather_cache,
-    prepared_weather_cache_root = prepared_weather_cache_root,
-    weather_fn = weather_fn
-  )
-  profile_memory(
-    "weather_manifest", manifest,
-    detail = if (isTRUE(manifest$cache_hit)) "cache_hit" else "built"
-  )
-  if (!inherits(manifest, "wiseapp_weather_manifest")) {
-    stop("weather_manifest must be created by prepare_weather_manifest().", call. = FALSE)
-  }
-  cached_weather <- manifest$frames
-  profile_memory("cached_weather", cached_weather)
-  if (isTRUE(manifest$cache_hit)) message("[wiseapp] Reusing prepared weather cache")
-  weather_result <- list()
-  cached_keys <- names(cached_weather)
-  hist_keys <- intersect("historical", cached_keys)
-  future_keys <- setdiff(cached_keys, hist_keys)
-  for (key in hist_keys) consume_key(key, cached_weather[[key]])
-  if (length(future_keys) && key_workers > 1L) {
-    future_jobs <- lapply(seq_along(future_keys), function(i) {
-      list(index = i, key = future_keys[[i]], weather = cached_weather[[future_keys[[i]]]])
-    })
-    future_chunks <- lapply(seq_len(min(key_workers, length(future_jobs))), function(worker) {
-      future_jobs[seq.int(worker, length(future_jobs), by = key_workers)]
-    })
-    cluster <- parallel::makeCluster(length(future_chunks), type = "PSOCK")
-    on.exit(parallel::stopCluster(cluster), add = TRUE)
-    if (!identical(pipeline_fn, run_sim_pipeline)) {
-      stop("key_workers > 1 requires the default run_sim_pipeline().", call. = FALSE)
-    }
-    pipeline_args <- list(
-      svy = svy, sw = sw, so = so, model = model, residuals = residuals,
-      train_data = train_data, engine = engine, chol_obj = chol_obj,
-      fit_multi = fit_multi, taus = taus, weather_cols = weather_cols,
-      precomputed_train_aug = precomputed_train_aug, svy_prepared = svy_prepared,
-      weather_join_cache = weather_join_cache,
-      precomputed_ecdf_train = precomputed_ecdf_train,
-      direct_rif_predictions = direct_rif_predictions,
-      direct_rif_metadata = direct_rif_metadata,
-      direct_rif_baseline_cache = NULL
+  weather_result <- if (!is.null(weather_manifest) ||
+      !identical(prepared_weather_cache, "off")) {
+    manifest <- weather_manifest %||% prepare_weather_manifest(
+      survey_data = svy, selected_surveys = ss, selected_weather = sw,
+      dates = sim_dates, connection_params = cp,
+      ssp = if (has_future) ssps else NULL,
+      future_period = if (has_future) fp_list else NULL,
+      perturbation_method = perturbation_method, stored_breaks = stored_breaks,
+      epsilon = epsilon, weather_source = weather_source, proj_source = proj_source,
+      weather_collect = weather_collect, weather_threads = weather_threads,
+      prepared_weather_cache = prepared_weather_cache,
+      prepared_weather_cache_root = prepared_weather_cache_root,
+      weather_fn = weather_fn
     )
-    package_path <- getNamespaceInfo(asNamespace("wiseapp"), "path")
-    future_results <- parallel::clusterApply(
-      cluster, future_chunks, .run_simulation_parallel_chunk,
-      pipeline_args = pipeline_args, package_path = package_path
-    )
-    future_results <- do.call(c, future_results)
-    future_results <- future_results[order(vapply(future_results, `[[`, integer(1), "index"))]
-    for (item in future_results) {
-      key <- item$key
-      consume_key(key, cached_weather[[key]], out_override = item$out,
-        key_err_override = item$error %||% NULL, out_supplied = TRUE)
+    if (!inherits(manifest, "wiseapp_weather_manifest")) {
+      stop("weather_manifest must be created by prepare_weather_manifest().", call. = FALSE)
     }
-  } else {
-    for (key in future_keys) consume_key(key, cached_weather[[key]])
-  }
+    manifest$frames
+  } else tryCatch(
+    weather_fn(
+      survey_data = svy, selected_surveys = ss, selected_weather = sw,
+      dates = sim_dates, connection_params = cp,
+      ssp = if (has_future) ssps else NULL,
+      future_period = if (has_future) fp_list else NULL,
+      perturbation_method = perturbation_method, stored_breaks = stored_breaks,
+      weather_collect = weather_collect, weather_threads = weather_threads,
+      weather_consumer = consume_key
+    ),
+    error = function(e) {
+      if (length(emitted_keys)) stop(e)
+      weather_fn(
+        survey_data = svy, selected_surveys = ss, selected_weather = sw,
+        dates = sim_dates, connection_params = cp,
+        ssp = if (has_future) ssps else NULL,
+        future_period = if (has_future) fp_list else NULL,
+        perturbation_method = perturbation_method,
+        stored_breaks = stored_breaks, weather_collect = weather_collect,
+        weather_threads = weather_threads
+      )
+    }
+  )
   t_weather <- proc.time()[["elapsed"]] - t_weather_start
   progress_fn(0.35, "Climate data loaded. Running scenarios...")
   if (is.list(weather_result) && length(weather_result)) {

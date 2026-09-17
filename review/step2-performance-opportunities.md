@@ -219,6 +219,17 @@ all-years/two-SSP/two-period matrix. The two-worker wall-time gate failed on a
 real local workload; revisit only if production profiling shows materially
 different per-key compute/I/O characteristics.
 
+**Mirai follow-up:** the same scoped workload was rerun with
+`parallel::makeCluster(type = "MIRAI")` through the opt-in
+`WISEAPP_STEP2_KEY_BACKEND=mirai` switch. Mirai completed 17/17 keys with the
+same normalized fingerprint and warnings. Its elapsed time was 11.07--11.55
+seconds per case, effectively the same as PSOCK (11.01--13.10 seconds) and still
+approximately 25% slower than serial (8.24--8.98 seconds). External peak RSS
+was 1.215 GB, between the serial and PSOCK observations. Mirai therefore does
+not provide a measured Step 2 runtime advantage; it remains a possible future
+choice for persistent daemon or asynchronous Shiny orchestration, not a reason
+to parallelize the key loop.
+
 Do not implement immediately or infer safety from R object sizes.
 
 ---

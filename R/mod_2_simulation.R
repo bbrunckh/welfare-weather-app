@@ -14,26 +14,7 @@ mod_2_simulation_ui <- function(id) {
   bslib::layout_sidebar(
     sidebar = bslib::sidebar(
       width = 360,
-      mod_2_01_weathersim_ui(ns("weathersim")),
-      shiny::hr(),
-      shiny::div(
-        style = "display:flex; align-items:center; gap:0.4rem;",
-        shiny::actionButton(
-          ns("clear_scenarios"),
-          label = "Clear simulation results",
-          icon  = shiny::icon("trash"),
-          width = "100%",
-          class = "btn-outline-danger"
-        ),
-        info_popover(
-          title = "Clear simulation results",
-          shiny::p(paste(
-            "Removes all saved future-scenario runs and the historical",
-            "baseline from this session. Your settings are kept -",
-            "re-run the simulation to regenerate results."
-          ))
-        )
-      )
+      mod_2_01_weathersim_ui(ns("weathersim"))
     ),
     h4("What welfare is expected given historical weather conditions? In future climate scenarios?",
        class = "step-question"),
@@ -129,17 +110,6 @@ mod_2_simulation_server <- function(id,
       tabset_session     = session,
       stale              = s1$stale
     )
-
-    # Clear scenarios button ----
-    observeEvent(input$clear_scenarios, {
-      if (is.function(s1$clear_weather_stores)) s1$clear_weather_stores()
-      s1$saved_scenarios(list())
-      s1$hist_sim(NULL)
-      shiny::showNotification(
-        "All scenarios and historical baseline cleared. Re-run simulations to populate.",
-        type = "message", duration = 4
-      )
-    })
 
     # Return API ----
     list(

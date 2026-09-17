@@ -27,9 +27,9 @@ devtools::build()
 
 ## Docker ----
 ## If you want to deploy via a generic Dockerfile
-golem::add_dockerfile_with_renv()
+golem::add_dockerfile()
 ## If you want to deploy to ShinyProxy
-golem::add_dockerfile_with_renv_shinyproxy()
+golem::add_dockerfile_shinyproxy()
 
 ## Posit ----
 ## If you want to deploy on Posit related platforms

@@ -9,7 +9,7 @@
   fgt2 = list(label = "Poverty severity", unit = "percent", format = "percent", direction = "lower_is_better", percent_change = FALSE, poverty_line = TRUE, engines = c("ols", "rif"), uncertainty = c("coefficient", "weather", "ensemble"), caveat = "Squared normalized poverty shortfall."),
   gini = list(label = "Gini coefficient", unit = "index", format = "number", direction = "lower_is_better", percent_change = FALSE, poverty_line = FALSE, engines = c("ols", "rif"), uncertainty = c("coefficient", "weather", "ensemble"), caveat = "Relative inequality index."),
   prosperity_gap = list(label = "Prosperity gap", unit = "ratio", format = "number", direction = "lower_is_better", percent_change = FALSE, poverty_line = TRUE, engines = c("ols", "rif"), uncertainty = c("coefficient", "weather", "ensemble"), caveat = "Gap relative to the prosperity threshold."),
-  avg_poverty = list(label = "Average poverty", unit = "days per dollar", format = "number", direction = "lower_is_better", percent_change = FALSE, poverty_line = TRUE, engines = c("ols", "rif"), uncertainty = c("coefficient", "weather", "ensemble"), caveat = "Average poverty burden across the fixed population.")
+  avg_poverty = list(label = "Average poverty", unit = "days per dollar", format = "number", direction = "lower_is_better", percent_change = FALSE, poverty_line = FALSE, engines = c("ols", "rif"), uncertainty = c("coefficient", "weather", "ensemble"), caveat = "Average poverty burden across the fixed population.")
 )
 
 #' Return the metadata contract for a displayed metric.

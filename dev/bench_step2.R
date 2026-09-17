@@ -101,7 +101,8 @@ source(file.path(.bench_repo_root, "dev", "bench_step3_helpers.R"), local = TRUE
   default_periods <- list(c(2025L, 2035L), c(2040L, 2060L), c(2080L, 2100L))
   list(
     seed          = .bench_env_int("WISEAPP_STEP2_SEED", 123L),
-    repetitions   = max(2L, .bench_env_int("WISEAPP_STEP2_REPETITIONS", 3L)),
+    repetitions   = max(1L, .bench_env_int("WISEAPP_STEP2_REPETITIONS", 3L)),
+    cache_states  = .bench_env_csv("WISEAPP_STEP2_CACHE_STATES", c("cold", "warm")),
     countries     = .bench_env_csv("WISEAPP_STEP2_COUNTRIES", c("LKA")),
     unit          = .bench_env("WISEAPP_STEP2_UNIT", "hh"),
     outcome       = .bench_env("WISEAPP_STEP2_OUTCOME", "welfare"),
@@ -206,6 +207,9 @@ if (!cfg$weather_threads %in% c("auto", "1", "2")) {
 }
 if (!cfg$fixture_mode %in% c("production", "smoke")) {
   stop("WISEAPP_STEP2_FIXTURE must be production or smoke.", call. = FALSE)
+}
+if (!length(cfg$cache_states) || !all(cfg$cache_states %in% c("cold", "warm"))) {
+  stop("WISEAPP_STEP2_CACHE_STATES values must be cold and/or warm.", call. = FALSE)
 }
 if (cfg$include_step3) invisible(
   .bench_step3_policy_fixtures(cfg$step3_policies)
@@ -1000,7 +1004,7 @@ for (country in names(inputs_by_country)) {
       if (identical(workload, "two_ssps_two_periods") &&
           (length(workload_cfg$ssps) < 2L || length(workload_cfg$fp_list) < 2L)) next
       for (uncertainty in cfg$uncertainty_modes) {
-        for (cache_state in c("cold", "warm")) {
+        for (cache_state in cfg$cache_states) {
           for (repetition in seq_len(cfg$repetitions)) {
             message(sprintf(
               "Benchmarking %s / %s / %s / uncertainty=%s / cache=%s / rep=%d",

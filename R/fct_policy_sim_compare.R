@@ -1142,7 +1142,7 @@ make_step3_decision_table_html <- function(df, subheader = NULL, footnotes = NUL
         ),
         shiny::conditionalPanel(
           condition = paste0(
-            "['headcount_ratio','gap','fgt2','prosperity_gap','avg_poverty']",
+            "['headcount_ratio','gap','fgt2','prosperity_gap']",
             ".indexOf(input['", ns("cmp_agg_method"), "']) > -1"
           ),
           shiny::div(
@@ -1480,7 +1480,7 @@ make_step3_decision_table_html <- function(df, subheader = NULL, footnotes = NUL
 
   poverty_methods <- c(
     "headcount_ratio", "gap", "fgt2",
-    "prosperity_gap", "avg_poverty"
+    "prosperity_gap"
   )
   valid_pov_line <- function(x) {
     x <- suppressWarnings(as.numeric(x)[1L])

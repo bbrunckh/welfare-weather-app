@@ -17,7 +17,7 @@
   `plot_outcome_coverage_map()`, `plot_weather_loc_map()` and their
   GeoJSON/view-memory helpers) is gone, and the palettes use small local
   ramp builders (`R/fct_surveystats.R` `.ramp_numeric()`/`.ramp_factor()`).
-  `leaflet`/`leaflet.providers` dropped from `DESCRIPTION` and `renv.lock`.
+  `leaflet`/`leaflet.providers` dropped from the production dependency metadata.
 - Map engine migration (review §5.3 remediation): all Step-1 maps now render
   through a vendored MapLibre GL 5.24.0 + h3-js 4.1.0 browser engine
   (`inst/app/www/vendor/`, `inst/app/www/hexmap.js`, `R/fct_hexmap.R`). Maps
@@ -25,7 +25,7 @@
   serialized geometry; geometry is decoded client-side and colours are
   applied by MapLibre expressions. Camera persists across wave toggles.
   `map_data` (per-location aggregated geometry) removed
-  end-to-end. No new R packages; `renv.lock` unchanged.
+  end-to-end. No new R packages; deployment metadata unchanged.
 - Sample-density allocation is now population-weighted:
   `allocate_units_to_cells()` spreads each location's sampled units across
   its H3 cells in proportion to `pop_2020` (even split when weights are

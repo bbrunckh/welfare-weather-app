@@ -60,9 +60,9 @@ and the dynamic `appendTab()` output-tab pattern are unchanged.
 
 ### Dependencies
 - **Removed** from `Imports`: `bsplus`, `waiter` (no longer referenced).
-- **Added**: `brand.yml` (required by `bs_theme(brand=)`); installed via
-  `renv::install("brand.yml")` and snapshotted (note: `renv.lock` is
-  gitignored in this repo).
+- **Added**: `brand.yml` (required by `bs_theme(brand=)`) (the repository uses
+  `DESCRIPTION` and the
+  Posit Connect `manifest.json` rather than committing an `renv.lock`).
 - `NAMESPACE` regenerated with `devtools::document()`.
 
 ## Not changed (intentionally)

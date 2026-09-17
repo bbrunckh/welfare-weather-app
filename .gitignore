@@ -29,9 +29,6 @@
 # never tracked by git)
 !.Rbuildignore
 
-# Keep renv lockfile for reproducible installs/deploys
-!renv.lock
-
 # Keep Posit Connect deploy manifest and its exclude list
 !.rscignore
 !manifest.json
@@ -75,7 +72,6 @@
 !/**/*.Rproj
 !/**/*.qmd
 # !/**/*.Rprofile
-!/**/renv/
 
 # Still ignore user file for R projects
 .Rproj.user
