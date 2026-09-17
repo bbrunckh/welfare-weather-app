@@ -253,8 +253,9 @@ build_direct_rif_metadata <- function(fits) {
 }
 
 .direct_rif_prediction_pair <- function(fits, base, scenario,
-                                        metadata = NULL,
-                                        baseline_cache = NULL) {
+                                         metadata = NULL,
+                                         baseline_cache = NULL,
+                                         rows_by_quantile = NULL) {
   if (!length(fits)) {
     return(NULL)
   }
@@ -270,7 +271,14 @@ build_direct_rif_metadata <- function(fits) {
     return(NULL)
   }
 
-  direct_one <- function(meta, k) {
+  if (is.null(rows_by_quantile)) {
+    rows_by_quantile <- rep(list(seq_len(nrow(base))), length(metadata))
+  }
+  if (length(rows_by_quantile) != length(metadata)) {
+    return(NULL)
+  }
+
+  direct_one <- function(meta, k, rows) {
     beta <- meta$beta
     add_fixed_effects <- function(which, n) {
       if (!length(meta$fe_vars)) {
@@ -283,15 +291,17 @@ build_direct_rif_metadata <- function(fits) {
         values[indices[[i]]]
       }))
     }
-    base_fe <- add_fixed_effects("base", nrow(design_cache$base_X))
-    scen_fe <- add_fixed_effects("scenario", nrow(design_cache$scenario_X))
+    base_fe <- add_fixed_effects("base", nrow(design_cache$base_X))[rows]
+    scen_fe <- add_fixed_effects("scenario", nrow(design_cache$scenario_X))[rows]
     list(
-      base = as.numeric(design_cache$base_X[, design_cache$beta_columns[[k]], drop = FALSE] %*% beta) + base_fe,
-      scenario = as.numeric(design_cache$scenario_X[, design_cache$beta_columns[[k]], drop = FALSE] %*% beta) + scen_fe
+      base = as.numeric(design_cache$base_X[rows, design_cache$beta_columns[[k]], drop = FALSE] %*% beta) + base_fe,
+      scenario = as.numeric(design_cache$scenario_X[rows, design_cache$beta_columns[[k]], drop = FALSE] %*% beta) + scen_fe
     )
   }
 
-  out <- lapply(seq_along(metadata), function(k) direct_one(metadata[[k]], k))
+  out <- lapply(seq_along(metadata), function(k) {
+    direct_one(metadata[[k]], k, rows_by_quantile[[k]])
+  })
   if (any(vapply(out, is.null, logical(1L)))) {
     return(NULL)
   }
@@ -462,21 +472,34 @@ predict_rif <- function(fit_multi, newdata, svy, train_data, taus, outcome,
   }
   newdata_scen <- newdata # already has scenario weather
 
-  # Predict at each quantile for baseline and scenario weather
-  # Store deltas in a matrix: rows = observations, cols = quantiles
-  delta_mat <- matrix(NA_real_, nrow = n, ncol = K)
+  # Interpolate directly into the final delta vector. Each quantile is needed
+  # only by rows whose interpolation interval touches that quantile; this
+  # avoids materialising the N x K delta matrix and avoids predictions for rows
+  # that cannot contribute to the requested result.
+  idx <- findInterval(tau_i, taus, all.inside = TRUE)
+  idx_hi <- pmin(idx + 1L, K)
+  tau_lo <- taus[idx]
+  tau_hi <- taus[idx_hi]
+  w <- ifelse(tau_hi > tau_lo, (tau_i - tau_lo) / (tau_hi - tau_lo), 0)
+  rows_by_quantile <- lapply(seq_len(K), function(k) {
+    which(idx == k | idx_hi == k)
+  })
 
   direct_pairs <- if (isTRUE(direct_predictions)) {
     .direct_rif_prediction_pair(
       fit_multi, newdata_base, newdata_scen,
       metadata = direct_metadata,
-      baseline_cache = direct_baseline_cache
+      baseline_cache = direct_baseline_cache,
+      rows_by_quantile = rows_by_quantile
     )
   } else {
     NULL
   }
 
-  predict_pair <- function(fit, base, scenario) {
+  predict_pair <- function(fit, base, scenario, rows) {
+    n_rows <- length(rows)
+    base <- base[rows, , drop = FALSE]
+    scenario <- scenario[rows, , drop = FALSE]
     if (isTRUE(batch_predictions)) {
       combined <- tryCatch(rbind(base, scenario), error = function(e) NULL)
       if (!is.null(combined)) {
@@ -487,10 +510,10 @@ predict_rif <- function(fit_multi, newdata, svy, train_data, taus, outcome,
           )),
           error = function(e) NULL
         )
-        if (length(pair) == 2L * n) {
+        if (length(pair) == 2L * n_rows) {
           return(list(
-            base = pair[seq_len(n)],
-            scenario = pair[n + seq_len(n)]
+            base = pair[seq_len(n_rows)],
+            scenario = pair[n_rows + seq_len(n_rows)]
           ))
         }
       }
@@ -528,23 +551,30 @@ predict_rif <- function(fit_multi, newdata, svy, train_data, taus, outcome,
   # matrix multiply distributes over row subsetting.
   compute_loading <- !is.null(chol_list) && length(chol_list) == K
 
+  delta_i <- numeric(n)
   for (k in seq_len(K)) {
+    rows <- rows_by_quantile[[k]]
+    if (!length(rows)) next
     # Baseline weather prediction (needed for the climate-delta point
     # estimate; not used for F_loading any more).
     pair <- direct_pairs[[k]] %||%
-      predict_pair(fit_multi[[k]], newdata_base, newdata_scen)
+      predict_pair(fit_multi[[k]], newdata_base, newdata_scen, rows)
     pred_base <- pair$base
     pred_new <- pair$scenario
 
-    delta_mat[, k] <- pred_new - pred_base
+    delta <- pred_new - pred_base
+    delta_i[rows] <- delta_i[rows] + ifelse(idx[rows] == k,
+      (1 - w[rows]) * delta,
+      0
+    ) + ifelse(idx_hi[rows] == k,
+      w[rows] * delta,
+      0
+    )
   }
 
   # Clean up the baseline frame. newdata_scen is retained until after F_loading
   # is built below, since the lazy design-matrix accessor reads from it.
   rm(newdata_base)
-
-  # Interpolate delta at each household's tau_i position
-  delta_i <- interpolate_delta(delta_mat, taus, tau_i)
 
   # Assemble output
   newdata$.fitted <- y_baseline + delta_i

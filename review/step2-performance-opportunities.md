@@ -159,9 +159,19 @@ bands. Focused aggregation and W3-A characterization tests pass.
 
 ---
 
-### 9. Further RIF Vectorisation *(Priority: Medium for RIF-heavy / Low for OLS-heavy)*
+### 9. Further RIF Vectorisation *(Priority: Medium for RIF-heavy / Low for OLS-heavy; implemented)*
 
 Direct RIF baseline reuse already yielded 3.15× improvement. Remaining targets: scenario design-matrix construction, quantile interpolation, per-key factor loading, repeated row-ID propagation. Do not trade away exact row ordering, quantile endpoints, or policy correction parity.
+
+**Implementation:** `predict_rif()` now streams quantile deltas directly into the
+interpolated result. It groups rows by the quantile interval they use, evaluates
+only the required rows for each quantile, and avoids materialising the full
+`N x K` delta matrix. Direct fixed-effect prediction accepts the same row groups,
+preserving the existing coefficient and fixed-effect assembly contract. Endpoint,
+ordering, direct/fallback, and full-matrix oracle tests pass. The remaining
+`F_loading` interpolation path is intentionally unchanged because its grouped
+row strategy already bounds peak memory and preserves exact factor-loading
+parity.
 
 ---
 

@@ -149,6 +149,42 @@ test_that("predict_rif returns correct structure", {
   expect_true(any(abs(deltas) > 0.01))
 })
 
+test_that("streamed RIF interpolation matches the full matrix oracle", {
+  skip_if_not_installed("fixest")
+  set.seed(148)
+  n <- 180
+  taus <- c(0.1, 0.3, 0.7, 0.9)
+  df <- data.frame(
+    y = rnorm(n, 10, 2), temp = rnorm(n), rain = rnorm(n),
+    loc = factor(sample(letters[1:4], n, replace = TRUE)),
+    year = factor(sample(2010:2015, n, replace = TRUE))
+  )
+  rif_cols <- paste0("rif_", formatC(taus * 100, format = "d"))
+  for (i in seq_along(taus)) df[[rif_cols[i]]] <- compute_rif(df$y, taus[i])
+  fit_multi <- fixest::feols(
+    stats::as.formula(paste0("c(", paste(rif_cols, collapse = ","), ") ~ temp + rain | loc + year")),
+    data = df, warn = FALSE
+  )
+  svy <- df[1:90, ]
+  svy$.svy_row_id <- seq_len(nrow(svy))
+  scenario <- svy
+  scenario$temp <- scenario$temp + seq_len(nrow(scenario)) / 100
+
+  actual <- predict_rif(
+    fit_multi, scenario, svy, df, taus, "y", c("temp", "rain"),
+    direct_predictions = TRUE
+  )
+  tau_i <- stats::ecdf(df$y)(svy$y)
+  tau_i <- pmin(pmax(tau_i, min(taus)), max(taus))
+  delta_mat <- do.call(cbind, lapply(seq_along(taus), function(k) {
+    as.numeric(stats::predict(fit_multi[[k]], newdata = scenario)) -
+      as.numeric(stats::predict(fit_multi[[k]], newdata = svy))
+  }))
+  expected <- svy$y + interpolate_delta(delta_mat, taus, tau_i)
+  expect_equal(actual$.fitted, expected, tolerance = 1e-10)
+  expect_equal(actual$y, expected, tolerance = 1e-10)
+})
+
 test_that("direct RIF prediction matches fixest prediction with fixed effects", {
   skip_if_not_installed("fixest")
   set.seed(142)
