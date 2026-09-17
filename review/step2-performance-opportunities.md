@@ -44,6 +44,14 @@ Focused cold/warm tests pass with exact pipeline and member-weather parity; date
 changes create a distinct cache entry. Production-scale warm-run and remote
 backend characterization remains required before relying on the default mode.
 
+**Default status:** the normal Step 2 UI call leaves
+`prepared_weather_cache = "auto"`. For the standard `get_weather()` loader,
+`"auto"` is enabled by default (`WISEAPP_PREPARED_WEATHER_CACHE` defaults to
+`1`), using the per-user cache directory and a 2 GB LRU limit. It can be
+disabled with `prepared_weather_cache = "off"` or
+`WISEAPP_PREPARED_WEATHER_CACHE=0`. The implementation is enabled by default
+locally, but production-scale local/remote rollout evidence remains incomplete.
+
 ---
 
 ### 2. Separate Weather Generation From Prediction *(Priority: High; implemented)*
@@ -68,6 +76,12 @@ fits can consume one manifest with one weather-loader call and identical weather
 frames. Full production-scale local/remote timing and RSS characterization is
 still the rollout gate for the persistent cache, not a prerequisite for using the
 manifest API.
+
+**Default status:** `fct_run_simulation()` always creates a manifest when one is
+not supplied, so the weather-generation/prediction boundary is active in the
+normal UI path. Supplying `weather_manifest` enables explicit reuse across model
+fits; the UI currently relies on the compatibility wrapper rather than exposing
+that multi-fit reuse as a separate control.
 
 ---
 
@@ -123,7 +137,7 @@ Do not reintroduce the full survey join cache without a new design that avoids r
 
 ---
 
-### 5. Prediction-Core Replay and RIF Delta *(Priority: Medium–High; prediction-heavy workloads)*
+### 5. Prediction-Core Replay *(Priority: Medium–High; prediction-heavy workloads)*
 
 **Problem:** Future OLS prediction sums to approximately 18–22 seconds across 17 keys; RIF prediction is also material. Repeated uncertainty/display changes can recompute deterministic work.
 
@@ -131,12 +145,24 @@ Do not reintroduce the full survey join cache without a new design that avoids r
 
 - [x] Instrument `run_sim_pipeline()` per key: actual join, `predict_outcome`/`predict_rif`, design matrix, factor loading, post-prediction assembly, joined rows, and payload bytes. Add opt-in RIF-specific traces; do not use the old `prepare_hist_weather` proxy.
 - [ ] Characterize a replay product containing joined row mapping, `y_point`, `sim_year`, weights, IDs, and required context. Define cache identity separately for model, weather manifest, residual mode, policy mode, log scale, and active coefficient mask. Defer implementation until production-scale traces show deterministic replay work is material.
-- [x] Characterize an exact RIF weather-only paired-delta path using existing direct-RIF design deltas × coefficients for supported models. Synthetic parity passed for direct and fallback paths, but direct RIF was approximately 6% slower on the 800-row, nine-quantile fixture; retain the current oracle and do not add another delta path without a production-scale win.
-- [ ] Implement the replay cache or RIF delta only after focused parity, ordering, missingness, deterministic RNG, Step 3 context, and RSS tests.
+- [x] Characterize an exact RIF weather-only paired-delta path using existing direct-RIF design deltas × coefficients for supported models. Synthetic parity passed for direct and fallback paths, but direct RIF was approximately 6% slower on the 800-row, nine-quantile fixture; this path is rejected for now.
+- [ ] Implement a replay cache only after focused parity, ordering, missingness, deterministic RNG, Step 3 context, and RSS tests. Do not implement another RIF delta path without a production-scale win.
 
 Relevant code: `R/fct_simulations.R:532-832`, `R/fct_rif_sim.R:458-695`, `R/fct_predict_outcomes.R:143-190`.
 
-**Item 5 characterization:** Opt-in `WISEAPP_PREDICTION_PROFILE=1` traces record join mode/rows, prediction, design matrix, factor loading, RIF quantile assignment, baseline frame, direct pair, per-quantile prediction, factor-loading interpolation, assembly, frame bytes, and process-tree RSS. The synthetic benchmark is `dev/bench_prediction_core.R`; corrected results are in `dev/outputs/prediction-core/summary.csv`. OLS inline and compact-cache outputs are exact, but compact caching was approximately 34% slower. Direct and fallback RIF outputs are exact, but direct RIF was approximately 6% slower. These are characterization results, not a basis for a new default optimization.
+**Item 5 status:** opt-in `WISEAPP_PREDICTION_PROFILE=1` traces record join
+mode/rows, prediction, design matrix, factor loading, RIF quantile assignment,
+baseline frame, direct pair, per-quantile prediction, factor-loading
+interpolation, assembly, frame bytes, and process-tree RSS. The synthetic
+benchmark is `dev/bench_prediction_core.R`; corrected results are in
+`dev/outputs/prediction-core/summary.csv`. OLS inline and compact-cache outputs
+are exact, but compact caching was approximately 34% slower. Direct and
+fallback RIF outputs are exact, but direct RIF was approximately 6% slower.
+The RIF delta branch is therefore closed. The only remaining work is
+production-scale replay characterization: establish whether model/weather-
+invariant join, deterministic prediction, and design work is material across
+repeated uncertainty/display runs, then define a replay identity and benchmark
+an RSS-bounded cache. No replay implementation is currently justified.
 
 ---
 
@@ -200,8 +226,8 @@ parity.
 
 1. **W3 weather profiling and reuse benchmarks** — retain stage instrumentation and characterize shared CMIP6 historical materialisation at production scale; do not pursue shared future-period materialisation in its current form.
 2. **Adaptive weather collection/materialisation** — implement only a shared-historical or bounded hybrid plan if it passes elapsed-time and RSS gates; preserve the current fast path for small workloads.
-3. **Actual survey-weather join profiling** — test compact key/index reuse; do not revive the rejected full survey cache.
-4. **Prediction-core replay** — only if production-scale per-key traces show deterministic replay work is material; the current RIF paired-delta characterization is parity-safe but slower on the synthetic fixture.
+3. **Survey-weather join reduction** — closed for now: the production-shaped compact index benchmark regressed time and RSS; retain inline `inner_join()` and do not revive the rejected full survey cache.
+4. **Prediction-core replay** — characterize a replay product only if production-scale per-key traces show deterministic replay work is material; the RIF paired-delta branch is closed after a slower synthetic result.
 5. **Memory retention/copy reduction** — target measured payload and prediction-frame copies.
 6. **Bounded key parallelism characterization** — two workers only after join/prediction RSS is known; implementation requires a clear RSS-safe gain.
 
@@ -217,10 +243,13 @@ Safe local optimisations are largely exhausted. Meaningful remaining speedups re
 4. Reducing measured join/payload allocations without changing ordering or public contracts.
 5. Parallelizing keys only if process-tree RSS and deterministic parity permit it.
 
-W3-A through W3-C are complete on local LKA and larger India workloads. The next
+W3-A through W3-C are complete on local LKA and larger India workloads. Items 1
+and 2 are implemented and enabled through the normal wrapper/defaults, but their
+production-scale warm-run and remote-backend rollout gates remain open. The next
 agent should characterize shared historical materialisation at production scale,
 but should not implement shared-period reuse as currently designed. Implement W3-D
-only when a candidate wins both elapsed-time and RSS gates. The survey join and prediction
-packets are parallel investigations, not permission to change those paths without
+only when a candidate wins both elapsed-time and RSS gates. Survey join reduction
+is closed after a production-shaped regression. Prediction replay remains a
+characterization-only candidate, not permission to change that path without
 characterization. Every implementation must run focused parity tests, the full
 package suite, `git diff --check`, and cleanup checks for temporary `lw_*` tables.
