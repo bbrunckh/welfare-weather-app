@@ -13,6 +13,201 @@ STEP2_WEATHER_KEY_COLUMNS <- c(
   "code", "year", "survname", "loc_id", "timestamp"
 )
 
+# Prepared-weather cache (PERF-36) -------------------------------------------
+# This cache stores the frames emitted by get_weather(), after spatial joins,
+# rolling windows, transformations, rounding, and binning.  It is deliberately
+# separate from the run-scoped reference store below: prepared weather is safe
+# to reuse across model runs, while references are owned by one published run.
+STEP2_PREPARED_WEATHER_CACHE_VERSION <- "v1"
+
+.step2_prepared_weather_cache_root <- function(root = NULL) {
+  root <- root %||% Sys.getenv("WISEAPP_PREPARED_WEATHER_CACHE_DIR")
+  if (!nzchar(root)) root <- tools::R_user_dir("wiseapp", "cache")
+  file.path(root, "prepared-weather", STEP2_PREPARED_WEATHER_CACHE_VERSION)
+}
+
+.step2_prepared_weather_cache_enabled <- function(mode = c("auto", "off", "read_write"),
+                                                  default_loader = TRUE) {
+  mode <- match.arg(mode)
+  if (identical(mode, "off")) return(FALSE)
+  if (identical(mode, "read_write")) return(TRUE)
+  value <- Sys.getenv("WISEAPP_PREPARED_WEATHER_CACHE", unset = "1")
+  isTRUE(default_loader) && value %in% c("1", "true", "TRUE", "yes", "YES")
+}
+
+.step2_prepared_weather_cache_size <- function(dir) {
+  files <- list.files(dir, recursive = TRUE, full.names = TRUE, all.files = TRUE)
+  if (!length(files)) return(0)
+  sum(file.info(files)$size, na.rm = TRUE)
+}
+
+.step2_prepared_weather_cache_evict <- function(root, max_mb = NULL) {
+  if (!dir.exists(root)) return(invisible(NULL))
+  if (is.null(max_mb)) {
+    max_mb <- suppressWarnings(as.numeric(Sys.getenv(
+      "WISEAPP_PREPARED_WEATHER_CACHE_MAX_MB", "2048"
+    )))
+    if (!is.finite(max_mb) || max_mb < 0) max_mb <- 2048
+  }
+  dirs <- list.dirs(root, full.names = TRUE, recursive = FALSE)
+  dirs <- dirs[!grepl("/(\\.tmp-|\\.staging-)", dirs)]
+  if (!length(dirs)) return(invisible(NULL))
+  sizes <- vapply(dirs, .step2_prepared_weather_cache_size, numeric(1))
+  total <- sum(sizes)
+  if (total <= max_mb * 1024^2) return(invisible(NULL))
+  info <- file.info(dirs)
+  for (dir in dirs[order(info$mtime)]) {
+    if (total <= max_mb * 1024^2) break
+    i <- match(dir, dirs)
+    unlink(dir, recursive = TRUE)
+    if (!dir.exists(dir)) total <- total - sizes[[i]]
+  }
+  invisible(NULL)
+}
+
+.step2_prepared_weather_cache_signature <- function(sw, ss, survey_data, cp, sim_dates,
+                                                    fp_list, ssps,
+                                                    perturbation_method,
+                                                    stored_breaks, epsilon = 0.001,
+                                                    weather_source = "era5land",
+                                                    proj_source = "cmip6") {
+  survey_cols <- intersect(
+    c("code", "year", "survname", "loc_id", "int_month", "timestamp"),
+    names(survey_data)
+  )
+  list(
+    schema = 1L,
+    cache_version = STEP2_PREPARED_WEATHER_CACHE_VERSION,
+    weather_source_version = WISEAPP_WX_CACHE_VERSION,
+    data_version = Sys.getenv("WISEAPP_WEATHER_DATA_VERSION", unset = "unknown"),
+    selected_weather = sw,
+    selected_surveys = ss,
+    survey_identity = if (length(survey_cols)) {
+      survey_data[, survey_cols, drop = FALSE]
+    } else {
+      NULL
+    },
+    connection = cp[intersect(
+      names(cp), c("type", "path", "bucket", "prefix", "container",
+                   "account", "host", "catalog", "schema")
+    )],
+    sim_dates = as.character(sim_dates),
+    future_period = lapply(fp_list %||% list(), as.character),
+    ssps = as.character(ssps %||% character(0)),
+    perturbation_method = perturbation_method,
+    stored_breaks = stored_breaks,
+    epsilon = epsilon,
+    weather_source = weather_source,
+    proj_source = proj_source
+  ) |>
+    digest::digest(algo = "sha256")
+}
+
+.step2_prepared_weather_cache_create <- function(signature, root = NULL) {
+  root <- .step2_prepared_weather_cache_root(root)
+  if (!dir.create(root, recursive = TRUE, showWarnings = FALSE) && !dir.exists(root)) {
+    return(NULL)
+  }
+  target <- file.path(root, signature)
+  cache <- new.env(parent = emptyenv())
+  cache$root <- root
+  cache$target <- target
+  cache$stage <- NULL
+  cache$hit <- dir.exists(target)
+  cache$signature <- signature
+  cache$keys <- character(0)
+  if (!isTRUE(cache$hit)) .step2_prepared_weather_cache_open_stage(cache)
+  cache
+}
+
+.step2_prepared_weather_cache_open_stage <- function(cache) {
+  stage <- file.path(cache$root, tempfile(
+    pattern = ".staging-", tmpdir = cache$root, fileext = ""
+  ) |> basename())
+  if (!dir.create(stage, recursive = TRUE, showWarnings = FALSE)) {
+    cache$stage <- NULL
+    return(invisible(FALSE))
+  }
+  cache$stage <- stage
+  cache$keys <- character(0)
+  invisible(TRUE)
+}
+
+.step2_prepared_weather_cache_put <- function(cache, key, weather_raw) {
+  if (is.null(cache$stage) || !is.data.frame(weather_raw)) return(invisible(NULL))
+  path <- file.path(cache$stage, paste0(digest::digest(key, algo = "sha256"), ".rds"))
+  tmp <- paste0(path, ".tmp")
+  saveRDS(weather_raw, tmp)
+  if (!file.rename(tmp, path)) {
+    unlink(tmp)
+    stop("Could not write prepared weather cache entry: ", key, call. = FALSE)
+  }
+  cache$keys <- unique(c(cache$keys, key))
+  invisible(NULL)
+}
+
+.step2_prepared_weather_cache_publish <- function(cache, ssps, fp_list) {
+  if (is.null(cache$stage)) return(invisible(FALSE))
+  keys <- unique(cache$keys)
+  complete <- "historical" %in% keys &&
+    (length(ssps) == 0L || length(fp_list) == 0L ||
+      length(setdiff(keys, "historical")) > 0L)
+  if (!complete) {
+    unlink(cache$stage, recursive = TRUE)
+    return(invisible(FALSE))
+  }
+  manifest <- list(
+    schema = 1L, signature = cache$signature, keys = keys,
+    created_at_utc = format(Sys.time(), tz = "UTC", usetz = TRUE)
+  )
+  saveRDS(manifest, file.path(cache$stage, "manifest.rds"))
+  if (dir.exists(cache$target)) {
+    unlink(cache$stage, recursive = TRUE)
+  } else if (!file.rename(cache$stage, cache$target)) {
+    unlink(cache$stage, recursive = TRUE)
+    return(invisible(FALSE))
+  }
+  cache$stage <- NULL
+  .step2_prepared_weather_cache_evict(cache$root)
+  invisible(TRUE)
+}
+
+.step2_prepared_weather_cache_read <- function(cache, signature) {
+  if (is.null(cache) || !isTRUE(cache$hit) || !dir.exists(cache$target)) return(NULL)
+  manifest_path <- file.path(cache$target, "manifest.rds")
+  manifest <- tryCatch(readRDS(manifest_path), error = function(e) NULL)
+  if (is.null(manifest) || !identical(manifest$schema, 1L) ||
+    !identical(manifest$signature, signature) || !length(manifest$keys) ||
+    !identical(manifest$keys[[1L]], "historical")) {
+    unlink(cache$target, recursive = TRUE)
+    cache$hit <- FALSE
+    .step2_prepared_weather_cache_open_stage(cache)
+    return(NULL)
+  }
+  frames <- tryCatch(lapply(manifest$keys, function(key) {
+    path <- file.path(cache$target, paste0(digest::digest(key, algo = "sha256"), ".rds"))
+    value <- readRDS(path)
+    if (!is.data.frame(value)) stop("invalid prepared weather cache entry", call. = FALSE)
+    value
+  }), error = function(e) NULL)
+  if (is.null(frames)) {
+    unlink(cache$target, recursive = TRUE)
+    cache$hit <- FALSE
+    .step2_prepared_weather_cache_open_stage(cache)
+    return(NULL)
+  }
+  if (!length(setdiff(manifest$keys, "historical")) &&
+    length(manifest$keys) > 1L) {
+    unlink(cache$target, recursive = TRUE)
+    cache$hit <- FALSE
+    .step2_prepared_weather_cache_open_stage(cache)
+    return(NULL)
+  }
+  try(Sys.setFileTime(cache$target, Sys.time()), silent = TRUE)
+  names(frames) <- manifest$keys
+  frames
+}
+
 step2_weather_share_members <- function(members,
                                         key_columns = STEP2_WEATHER_KEY_COLUMNS) {
   if (!is.list(members) || !length(members)) {

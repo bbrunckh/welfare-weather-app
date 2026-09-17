@@ -548,3 +548,130 @@ test_that("experimental join cache preserves simulation outputs", {
     baseline$new_scenarios[[1L]]$pipelines$ensemble_mean$y_point
   )
 })
+
+test_that("prepared weather cache replays a complete cold run", {
+  root <- withr::local_tempdir()
+  input <- phase4_input()
+  calls <- 0L
+  loader <- function(weather_consumer, ...) {
+    calls <<- calls + 1L
+    weather <- phase4_weather()
+    for (key in names(weather)) weather_consumer(key, weather[[key]])
+    list()
+  }
+  run <- function() suppressWarnings(do.call(
+    fct_run_simulation,
+    c(input, list(
+      prepared_weather_cache = "read_write",
+      prepared_weather_cache_root = root,
+      notify_fn = function(...) invisible(NULL),
+      progress_fn = function(...) invisible(NULL),
+      weather_fn = loader,
+      pipeline_fn = phase4_pipeline
+    ))
+  ))
+
+  cold <- run()
+  warm <- run()
+  expect_identical(calls, 1L)
+  expect_identical(warm$n_keys, cold$n_keys)
+  expect_identical(warm$failures, cold$failures)
+  expect_identical(
+    warm$hist_sim_result$pipeline$y_point,
+    cold$hist_sim_result$pipeline$y_point
+  )
+  expect_identical(
+    warm$new_scenarios[[1L]]$pipelines$ensemble_hi$weather_raw,
+    cold$new_scenarios[[1L]]$pipelines$ensemble_hi$weather_raw
+  )
+  expect_length(list.dirs(file.path(root, "prepared-weather", "v1"),
+                          recursive = FALSE), 1L)
+})
+
+test_that("prepared weather cache signature invalidates changed dates", {
+  root <- withr::local_tempdir()
+  input <- phase4_input()
+  calls <- 0L
+  loader <- function(weather_consumer, ...) {
+    calls <<- calls + 1L
+    weather <- phase4_weather()
+    for (key in names(weather)) weather_consumer(key, weather[[key]])
+    list()
+  }
+  run <- function(dates) {
+    current <- input
+    current$sim_dates <- dates
+    suppressWarnings(do.call(
+    fct_run_simulation,
+    c(current, list(
+      prepared_weather_cache = "read_write",
+      prepared_weather_cache_root = root,
+      notify_fn = function(...) invisible(NULL),
+      progress_fn = function(...) invisible(NULL),
+      weather_fn = loader,
+      pipeline_fn = phase4_pipeline
+    ))))
+  }
+  run(input$sim_dates)
+  run(c("2020-02-01", "2020-12-31"))
+  expect_identical(calls, 2L)
+  expect_length(list.dirs(file.path(root, "prepared-weather", "v1"),
+                          recursive = FALSE), 2L)
+})
+
+test_that("prepared weather cache discards an incomplete manifest", {
+  root <- withr::local_tempdir()
+  signature <- .step2_prepared_weather_cache_signature(
+    phase4_input()$sw, phase4_input()$ss, phase4_input()$svy,
+    phase4_input()$cp, phase4_input()$sim_dates, phase4_input()$fp_list,
+    phase4_input()$ssps, phase4_input()$perturbation_method,
+    phase4_input()$stored_breaks
+  )
+  cache <- .step2_prepared_weather_cache_create(signature, root)
+  saveRDS(list(schema = 1L, signature = signature, keys = "historical"),
+          file.path(cache$stage, "manifest.rds"))
+  file.rename(cache$stage, cache$target)
+  cache <- .step2_prepared_weather_cache_create(signature, root)
+  expect_null(.step2_prepared_weather_cache_read(cache, signature))
+  expect_true(!dir.exists(cache$target))
+  if (!is.null(cache$stage)) unlink(cache$stage, recursive = TRUE)
+})
+
+test_that("two models consume one prepared weather manifest", {
+  input <- phase4_input()
+  calls <- 0L
+  loader <- function(...) {
+    calls <<- calls + 1L
+    phase4_weather()
+  }
+  manifest <- do.call(prepare_weather_manifest, c(
+    list(survey_data = input$svy, selected_surveys = input$ss,
+         selected_weather = input$sw, dates = input$sim_dates,
+         connection_params = input$cp, ssp = input$ssps,
+         future_period = input$fp_list,
+         perturbation_method = input$perturbation_method,
+         stored_breaks = input$stored_breaks),
+    list(prepared_weather_cache = "off", weather_fn = loader)
+  ))
+  first <- suppressWarnings(do.call(fct_run_simulation, c(
+    input, list(weather_manifest = manifest, prepared_weather_cache = "off",
+                weather_fn = function(...) stop("weather should not load"),
+                notify_fn = function(...) invisible(NULL),
+                progress_fn = function(...) invisible(NULL),
+                pipeline_fn = phase4_pipeline)
+  )))
+  second_input <- input
+  second_input$mf$fit3 <- stats::lm(welfare ~ temp + I(temp^2),
+                                    data = second_input$mf$train_data)
+  second <- suppressWarnings(do.call(fct_run_simulation, c(
+    second_input, list(weather_manifest = manifest, prepared_weather_cache = "off",
+                       weather_fn = function(...) stop("weather should not load"),
+                       notify_fn = function(...) invisible(NULL),
+                       progress_fn = function(...) invisible(NULL),
+                       pipeline_fn = phase4_pipeline)
+  )))
+  expect_identical(calls, 1L)
+  expect_identical(first$n_keys, second$n_keys)
+  expect_identical(first$hist_sim_result$weather_raw,
+                   second$hist_sim_result$weather_raw)
+})

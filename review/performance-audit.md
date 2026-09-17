@@ -47,6 +47,38 @@
 
 ## Next Candidates
 
+### 0. PERF-36 Prepared-Weather Content-Addressed Reuse
+
+**Status:** Implemented behind the `prepared_weather_cache` option; focused
+characterization passes.
+
+`fct_run_simulation()` caches the canonical frames emitted by `weather_consumer`,
+including historical and member-specific future weather after all preparation,
+transformation, rounding, and binning. The signature includes the ordered
+weather specification, survey identity, source/backend identity, dates, SSP and
+period lists, perturbation settings, stored breaks, and cache/schema versions.
+Writes use staging plus atomic rename; incomplete/corrupt entries are discarded;
+cache size is bounded by LRU eviction. A cache hit replays the existing consumer
+path, so prediction, ordering, failure handling, and payload contracts are
+unchanged.
+
+Focused tests cover cold/warm loader reuse, exact pipeline/member-weather parity,
+date-based invalidation, corrupt-entry fallback, and staging cleanup. Production
+scale local/remote cold/warm elapsed time, RSS, and stale-source behavior remain
+the acceptance gate before changing deployment defaults.
+
+### 0a. PERF-37 Reusable Weather Manifest
+
+**Status:** Implemented.
+
+`prepare_weather_manifest()` separates weather construction from model prediction
+and returns the canonical frames emitted by `weather_consumer`, together with the
+weather signature and cache metadata. `fct_run_simulation()` remains the public
+compatibility wrapper and accepts `weather_manifest` to skip weather loading.
+Focused tests prove two different model fits consume one manifest with exactly one
+weather build; member-specific frames and prediction payload contracts remain on
+the existing consumer path.
+
 ### 1. Selective Survey-Side Join Cache
 
 **Location:** `R/fct_run_simulation.R`, `R/fct_simulations.R`
@@ -92,6 +124,23 @@ Each remaining candidate requires a focused microbenchmark, exact output/parity 
 | S3-P16 direct model/year lookup | Defer standalone; low absolute cost, include only in shared aggregation cleanup. |
 | S3-P14/S3-P17/S3-P18 | Separate Step 3 work; require their own authorization and characterization. |
 | S2-P13 async deep-copy removal | No current synchronous-path benefit; revisit only after an async backend exists. |
+
+### Stage Profiling Decision
+
+The focused COL production-path profile measured historical OLS weather preparation
+at approximately `2.0-2.4s` of `4.5-5.0s` total and future OLS preparation at
+approximately `19.5-23.6s` of `41.6-48.0s` total across 17 keys. Historical RIF
+weather preparation was approximately `1.6-2.4s` of `6.5-8.7s`, while prediction
+accounted for approximately `2.9-3.6s`. Future per-key OLS prediction summed to
+approximately `18-22s`; sampled peak RSS reached approximately `4.3GB` in one
+warm run. These results support adaptive weather collection/materialisation as the
+next implementation candidate and prediction/payload replay as the next alternative.
+
+The existing benchmark's join metric was corrected to trace the cached join helper,
+but the normal inline join and RIF-specific internals still need direct timing at
+the `run_sim_pipeline()` boundary. Therefore bounded key parallelism remains
+deferred: it requires per-key join/prediction memory and a two-worker RSS probe
+before implementation.
 
 ## Delivery Rules
 

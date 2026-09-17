@@ -94,6 +94,95 @@
     dplyr::mutate(year = as.character(year))
 }
 
+#' Prepare the reusable weather manifest for Step 2.
+#'
+#' This is deliberately independent of model fitting and prediction. The
+#' returned frames are the canonical products emitted by `get_weather()` and
+#' can be consumed by multiple calls to `fct_run_simulation()`.
+prepare_weather_manifest <- function(
+    survey_data, selected_surveys, selected_weather, dates, connection_params,
+    ssp = NULL, future_period = NULL, perturbation_method = NULL,
+    stored_breaks = NULL, epsilon = 0.001, weather_source = "era5land",
+    proj_source = "cmip6", weather_collect = c("fast", "bounded"),
+    weather_threads = c("auto", "1", "2"),
+    prepared_weather_cache = c("auto", "off", "read_write"),
+    prepared_weather_cache_root = NULL, weather_fn = get_weather) {
+  weather_collect <- match.arg(weather_collect)
+  weather_threads <- match.arg(weather_threads)
+  prepared_weather_cache <- match.arg(prepared_weather_cache)
+  fp_list <- future_period %||% list()
+  ssps <- ssp %||% character(0)
+  signature <- .step2_prepared_weather_cache_signature(
+    selected_weather, selected_surveys, survey_data, connection_params, dates,
+    fp_list, ssps, perturbation_method, stored_breaks, epsilon,
+    weather_source, proj_source
+  )
+  cache <- if (.step2_prepared_weather_cache_enabled(
+    prepared_weather_cache, default_loader = identical(weather_fn, get_weather)
+  )) {
+    .step2_prepared_weather_cache_create(signature, prepared_weather_cache_root)
+  } else NULL
+  if (!is.null(cache) && is.character(cache$stage) &&
+    length(cache$stage) == 1L && nzchar(cache$stage)) {
+    on.exit(
+      if (is.character(cache$stage) && dir.exists(cache$stage)) {
+        unlink(cache$stage, recursive = TRUE)
+      },
+      add = TRUE
+    )
+  }
+  frames <- .step2_prepared_weather_cache_read(cache, signature)
+  cache_hit <- !is.null(frames)
+  if (!cache_hit && !is.null(cache) && is.null(cache$stage)) {
+    .step2_prepared_weather_cache_open_stage(cache)
+  }
+  if (is.null(frames)) {
+    frames <- list()
+    weather_result <- tryCatch(
+      weather_fn(
+        survey_data = survey_data, selected_surveys = selected_surveys,
+        selected_weather = selected_weather, dates = dates,
+        connection_params = connection_params, ssp = if (length(ssps)) ssps else NULL,
+        future_period = if (length(ssps)) fp_list else NULL,
+        perturbation_method = perturbation_method, stored_breaks = stored_breaks,
+        epsilon = epsilon, weather_source = weather_source, proj_source = proj_source,
+        weather_collect = weather_collect, weather_threads = weather_threads,
+        weather_consumer = function(key, weather, metadata = NULL) {
+          frames[[key]] <<- weather
+        }
+      ),
+      error = function(e) {
+        if (length(frames)) stop(e)
+        weather_fn(
+          survey_data = survey_data, selected_surveys = selected_surveys,
+          selected_weather = selected_weather, dates = dates,
+          connection_params = connection_params, ssp = if (length(ssps)) ssps else NULL,
+          future_period = if (length(ssps)) fp_list else NULL,
+          perturbation_method = perturbation_method, stored_breaks = stored_breaks,
+          epsilon = epsilon, weather_source = weather_source, proj_source = proj_source,
+          weather_collect = weather_collect, weather_threads = weather_threads
+        )
+      }
+    )
+    if (is.list(weather_result) && length(weather_result)) {
+      for (key in setdiff(names(weather_result), names(frames))) {
+        frames[[key]] <- weather_result[[key]]
+      }
+    }
+    if (length(frames)) {
+      for (key in names(frames)) {
+        .step2_prepared_weather_cache_put(cache, key, frames[[key]])
+      }
+      .step2_prepared_weather_cache_publish(cache, ssps, fp_list)
+    }
+  }
+  structure(
+    list(schema = 1L, signature = signature, frames = frames,
+         cache_hit = cache_hit, cache_root = cache$root %||% NULL),
+    class = "wiseapp_weather_manifest"
+  )
+}
+
 #' Run the full welfare-weather simulation pipeline
 #'
 #' Pure function - no reactives. Extracts all business logic from
@@ -132,6 +221,14 @@
 #'   collection strategy passed to `get_weather()`.
 #' @param weather_threads  DuckDB weather-query thread mode passed to
 #'   `get_weather()`: `"auto"` (default), `"1"`, or `"2"`.
+#' @param prepared_weather_cache  Cross-run prepared-weather cache mode:
+#'   `"auto"` (default), `"off"`, or `"read_write"`.
+#' @param prepared_weather_cache_root Optional cache root for prepared weather.
+#' @param weather_manifest Prepared weather manifest returned by
+#'   `prepare_weather_manifest()`. When supplied, weather loading is skipped.
+#' @param epsilon          CMIP6 perturbation epsilon passed to `get_weather()`.
+#' @param weather_source   Historical weather source passed to `get_weather()`.
+#' @param proj_source      Projection source passed to `get_weather()`.
 #' @param join_cache       Logical. Use the experimental survey-side join
 #'   cache. Defaults to FALSE until full-scale benchmarks establish a win.
 #' @param direct_rif_predictions Logical. Use direct RIF prediction with
@@ -187,9 +284,15 @@ fct_run_simulation <- function(sw,
                                payload_mode = c("compact", "legacy"),
                                weather_storage = c("memory", "reference"),
                                weather_store_root = NULL,
-                               weather_collect = c("fast", "bounded"),
-                               weather_threads = c("auto", "1", "2"),
-                               join_cache = FALSE,
+                                weather_collect = c("fast", "bounded"),
+                                weather_threads = c("auto", "1", "2"),
+                                prepared_weather_cache = c("auto", "off", "read_write"),
+                                prepared_weather_cache_root = NULL,
+                                epsilon = 0.001,
+                                weather_source = "era5land",
+                                proj_source = "cmip6",
+                                weather_manifest = NULL,
+                                join_cache = FALSE,
                                direct_rif_predictions = TRUE,
                                seed = WISEAPP_DEFAULT_SEED,
                                notify_fn = function(msg) message(msg),
@@ -204,6 +307,7 @@ fct_run_simulation <- function(sw,
   weather_storage <- match.arg(weather_storage)
   weather_collect <- match.arg(weather_collect)
   weather_threads <- match.arg(weather_threads)
+  prepared_weather_cache <- match.arg(prepared_weather_cache)
   seed <- as.integer(seed)[1L]
   if (is.na(seed)) seed <- WISEAPP_DEFAULT_SEED
   withr::local_seed(seed)
@@ -489,29 +593,25 @@ fct_run_simulation <- function(sw,
     invisible(NULL)
   }
 
-  weather_result <- tryCatch(
-    weather_fn(
-      survey_data = svy, selected_surveys = ss, selected_weather = sw,
-      dates = sim_dates, connection_params = cp,
-      ssp = if (has_future) ssps else NULL,
-      future_period = if (has_future) fp_list else NULL,
-      perturbation_method = perturbation_method, stored_breaks = stored_breaks,
-      weather_collect = weather_collect, weather_threads = weather_threads,
-      weather_consumer = consume_key
-    ),
-    error = function(e) {
-      if (length(emitted_keys)) stop(e)
-      weather_fn(
-        survey_data = svy, selected_surveys = ss, selected_weather = sw,
-        dates = sim_dates, connection_params = cp,
-        ssp = if (has_future) ssps else NULL,
-        future_period = if (has_future) fp_list else NULL,
-        perturbation_method = perturbation_method,
-        stored_breaks = stored_breaks, weather_collect = weather_collect,
-        weather_threads = weather_threads
-      )
-    }
+  manifest <- weather_manifest %||% prepare_weather_manifest(
+    survey_data = svy, selected_surveys = ss, selected_weather = sw,
+    dates = sim_dates, connection_params = cp,
+    ssp = if (has_future) ssps else NULL,
+    future_period = if (has_future) fp_list else NULL,
+    perturbation_method = perturbation_method, stored_breaks = stored_breaks,
+    epsilon = epsilon, weather_source = weather_source, proj_source = proj_source,
+    weather_collect = weather_collect, weather_threads = weather_threads,
+    prepared_weather_cache = prepared_weather_cache,
+    prepared_weather_cache_root = prepared_weather_cache_root,
+    weather_fn = weather_fn
   )
+  if (!inherits(manifest, "wiseapp_weather_manifest")) {
+    stop("weather_manifest must be created by prepare_weather_manifest().", call. = FALSE)
+  }
+  cached_weather <- manifest$frames
+  if (isTRUE(manifest$cache_hit)) message("[wiseapp] Reusing prepared weather cache")
+  weather_result <- list()
+  for (key in names(cached_weather)) consume_key(key, cached_weather[[key]])
   t_weather <- proc.time()[["elapsed"]] - t_weather_start
   progress_fn(0.35, "Climate data loaded. Running scenarios...")
   if (is.list(weather_result) && length(weather_result)) {
@@ -583,6 +683,7 @@ fct_run_simulation <- function(sw,
       )
     }
   }
+
 
   # Assemble new_scenarios ----
   for (gk in names(group_agg)) {

@@ -563,8 +563,9 @@ inputs_by_country <- setNames(
   trace_specs <- list(
     list(name = "model.matrix.fixest", where = asNamespace("fixest"), slot = "design_matrix_elapsed"),
     list(name = "predict_outcome", where = asNamespace("wiseapp"), slot = "prediction_elapsed"),
+    list(name = "predict_rif", where = asNamespace("wiseapp"), slot = "prediction_elapsed"),
     list(name = "compute_factor_loading", where = asNamespace("wiseapp"), slot = "factor_loading_elapsed"),
-    list(name = "prepare_hist_weather", where = asNamespace("wiseapp"), slot = "join_elapsed"),
+    list(name = "join_weather_survey_cached", where = asNamespace("wiseapp"), slot = "join_elapsed"),
     list(name = ".wx_cache_load", where = asNamespace("wiseapp"), slot = "cache")
   )
   installed <- list()
