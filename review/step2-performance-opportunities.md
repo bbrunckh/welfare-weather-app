@@ -170,11 +170,13 @@ an RSS-bounded cache. No replay implementation is currently justified.
 
 **Work packets:**
 
-- [ ] Measure retained sizes of `cached_weather`, `weather_raw` in each pipeline, joined frames, `F_loading`, and final payloads at `R/fct_run_simulation.R:520-703` and `R/fct_simulations.R:755-832`.
-- [ ] Prototype reference/streaming retention only where diagnostics, Step 3, replay, and member provenance do not require the full frame.
+- [x] Measure retained sizes of `cached_weather`, `weather_raw` in each pipeline, joined frames, `F_loading`, and final payloads at `R/fct_run_simulation.R:520-703` and `R/fct_simulations.R:755-832`. Opt-in `WISEAPP_MEMORY_PROFILE=1` records object/serialized bytes and process-tree RSS at orchestration retention boundaries. Local LKA profiling found approximately 2.25 GB cached weather for two SSPs/two periods, approximately 79 MB per pipeline, and approximately 7.19 GB transient scenario staging before publication.
+- [x] Prototype targeted staging release: each completed scenario group now releases its `group_agg`/weather staging references after ownership transfers to `new_scenarios`. This avoids retaining duplicate group containers while preserving diagnostics, member provenance, and final payload references. Broad production-scale timing validation remains pending because the LKA two-SSP/two-period matrix expands to 63 keys and approximately 1,890 pipeline runs per repetition.
 - [ ] Benchmark narrower `fixest` prediction-frame handling and RIF `newdata_base`/`delta_mat` allocations; preserve FE row-drop and row-ID contracts.
 
 Do not apply generic in-place/data.table changes without exact payload and ordering tests.
+
+**Item 6 characterization status:** The local LKA retention run used the configured OneDrive filesystem, not Databricks. Historical and one-SSP workloads completed; the two-SSP/two-period cold repetitions completed before the long matrix was stopped. The retained-size evidence identifies weather frames and temporary scenario staging as the dominant memory costs; per-key prediction payloads are not the dominant retained object. The remaining safe validation is focused parity testing and a short one-SSP comparison of memory versus reference weather storage, not another unbounded matrix.
 
 ---
 

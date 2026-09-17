@@ -208,11 +208,11 @@ mod_0_overview_server <- function(id) {
             textInput(
               ns("local_path"),
               label       = "Path:",
-              value       = "data/",
               placeholder = "/path/to/data"
             ),
             helpText(
               "Path to a local folder containing WISE-APP data files.",
+              "Leave blank to use WISEAPP_DATA_PATH from .Renviron.",
               style = "font-size: 12px;"
             )
           ),

@@ -149,7 +149,8 @@ source(file.path(.bench_repo_root, "dev", "bench_step3_helpers.R"), local = TRUE
     weather_collect = .bench_env("WISEAPP_STEP2_WEATHER_COLLECT", "fast"),
     weather_threads = .bench_env("WISEAPP_STEP2_WEATHER_THREADS", "auto"),
     join_cache = .bench_env_flag("WISEAPP_STEP2_JOIN_CACHE", FALSE),
-    direct_rif_predictions = .bench_env_flag("WISEAPP_STEP2_DIRECT_RIF_PREDICTIONS", TRUE)
+    direct_rif_predictions = .bench_env_flag("WISEAPP_STEP2_DIRECT_RIF_PREDICTIONS", TRUE),
+    key_workers = max(1L, min(2L, .bench_env_int("WISEAPP_STEP2_KEY_WORKERS", 1L)))
   )
 }
 
@@ -537,6 +538,10 @@ inputs_by_country <- setNames(
   )
 }
 
+.bench_fingerprint <- function(value) {
+  digest::digest(value, algo = "xxhash64", serialize = TRUE)
+}
+
 .bench_state <- function() {
   state <- new.env(parent = emptyenv())
   state$weather_elapsed <- NA_real_
@@ -557,6 +562,7 @@ inputs_by_country <- setNames(
   state$cache_last_hit <- FALSE
   state$rss_parent_peak_kb <- 0
   state$rss_tree_peak_kb <- 0
+  state$memory_profile <- data.frame()
   state
 }
 
@@ -703,6 +709,7 @@ inputs_by_country <- setNames(
     weather_collect = config$weather_collect,
     weather_threads = config$weather_threads,
     join_cache = config$join_cache,
+    key_workers = config$key_workers,
     direct_rif_predictions = config$direct_rif_predictions
   )
 }
@@ -761,6 +768,13 @@ inputs_by_country <- setNames(
   assign(".wiseapp_bench_trace_state", state, envir = .GlobalEnv)
   cache_dir <- .bench_prepare_cache(config, state, cache_state)
   case_config <- config
+  old_memory_profile <- Sys.getenv("WISEAPP_MEMORY_PROFILE", unset = NA_character_)
+  Sys.setenv(WISEAPP_MEMORY_PROFILE = "1")
+  withr::defer(
+    if (is.na(old_memory_profile)) Sys.unsetenv("WISEAPP_MEMORY_PROFILE")
+    else Sys.setenv(WISEAPP_MEMORY_PROFILE = old_memory_profile),
+    envir = environment()
+  )
   case_config$include_coef_uncertainty <- identical(uncertainty, "enabled")
   workload_cfg <- .bench_case_workload(workload, case_config)
   case <- list(
@@ -854,12 +868,23 @@ inputs_by_country <- setNames(
       NULL
     }
   )
+  if (!is.null(result) && !is.null(attr(result, "memory_profile"))) {
+    state$memory_profile <- attr(result, "memory_profile")
+    memory_path <- file.path(
+      config$output_dir,
+      sprintf("memory_%s_%s_%s_%s_%d.csv", country, model_label,
+              workload, cache_state, repetition)
+    )
+    write.csv(state$memory_profile, memory_path, row.names = FALSE)
+  }
   elapsed_total <- proc.time()[["elapsed"]] - started
   .bench_sample_rss(state)
 
   result_size <- if (is.null(result)) {
     list(object_bytes = NA_real_, serialized_bytes = NA_real_, deduplicated_bytes = NA_real_)
   } else .bench_size(result)
+  result_fingerprint <- if (is.null(result)) NA_character_ else
+    .bench_fingerprint(result)
   aggregation <- if (is.null(result)) data.frame() else
     .bench_run_aggregation(result, input, c(case, args), case_config)
 
@@ -879,6 +904,7 @@ inputs_by_country <- setNames(
     weather_collect = case_config$weather_collect,
     weather_threads = case_config$weather_threads,
     join_cache = case_config$join_cache,
+    key_workers = case_config$key_workers,
     direct_rif_predictions = case_config$direct_rif_predictions,
     uncertainty = if (isTRUE(args$skip_coef_draws)) "disabled" else "enabled",
     cache = cache_state,
@@ -904,6 +930,7 @@ inputs_by_country <- setNames(
     result_object_bytes = result_size$object_bytes,
     result_serialized_bytes = result_size$serialized_bytes,
     result_deduplicated_bytes = result_size$deduplicated_bytes,
+    result_fingerprint = result_fingerprint,
     weather_raw_count = state$weather_raw_count,
     weather_raw_bytes_total = sum(state$weather_raw_sizes, na.rm = TRUE),
     weather_cache_files_before = state$cache_files_before,
@@ -997,6 +1024,7 @@ for (country in names(inputs_by_country)) {
                 weather_collect = cfg$weather_collect,
                 weather_threads = cfg$weather_threads,
                 join_cache = cfg$join_cache,
+                key_workers = cfg$key_workers,
                 direct_rif_predictions = cfg$direct_rif_predictions,
                 uncertainty = uncertainty, cache = cache_state,
                 repetition = repetition, fixture_mode = cfg$fixture_mode,

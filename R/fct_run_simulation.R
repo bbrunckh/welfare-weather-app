@@ -231,6 +231,9 @@ prepare_weather_manifest <- function(
 #' @param proj_source      Projection source passed to `get_weather()`.
 #' @param join_cache       Logical. Use the experimental survey-side join
 #'   cache. Defaults to FALSE until full-scale benchmarks establish a win.
+#' @param key_workers      Integer. Opt-in number of multisession workers for
+#'   future keys. Historical execution remains serial and parent-side result
+#'   assembly preserves canonical key order. Values are limited to 1 or 2.
 #' @param direct_rif_predictions Logical. Use direct RIF prediction with
 #'   automatic fallback for unsupported model structures. Defaults to TRUE.
 #' @param notify_fn   Function(msg). Called for user-facing notifications.
@@ -290,15 +293,48 @@ fct_run_simulation <- function(sw,
                                 prepared_weather_cache_root = NULL,
                                 epsilon = 0.001,
                                 weather_source = "era5land",
-                                proj_source = "cmip6",
-                                weather_manifest = NULL,
-                                join_cache = FALSE,
-                               direct_rif_predictions = TRUE,
+                                 proj_source = "cmip6",
+                                 weather_manifest = NULL,
+                                 join_cache = FALSE,
+                                key_workers = 1L,
+                                direct_rif_predictions = TRUE,
                                seed = WISEAPP_DEFAULT_SEED,
                                notify_fn = function(msg) message(msg),
                                progress_fn = function(value, detail) invisible(NULL),
-                               weather_fn = get_weather,
-                               pipeline_fn = run_sim_pipeline) {
+                                weather_fn = get_weather,
+                                pipeline_fn = run_sim_pipeline) {
+  memory_profile <- if (identical(tolower(Sys.getenv("WISEAPP_MEMORY_PROFILE", "")), "1")) {
+    new.env(parent = emptyenv())
+  } else {
+    NULL
+  }
+  if (!is.null(memory_profile)) {
+    memory_profile$records <- list()
+    memory_profile$started <- proc.time()[["elapsed"]]
+  }
+  profile_memory <- function(stage, value = NULL, detail = NULL,
+                             serialize_value = TRUE) {
+    if (is.null(memory_profile)) return(invisible(NULL))
+    rss <- if (exists(".wx_process_tree_rss_bytes", mode = "function")) {
+      .wx_process_tree_rss_bytes()
+    } else {
+      NA_real_
+    }
+    memory_profile$records[[length(memory_profile$records) + 1L]] <- data.frame(
+      stage = stage,
+      elapsed_seconds = proc.time()[["elapsed"]] - memory_profile$started,
+      object_bytes = if (is.null(value)) NA_real_ else as.numeric(utils::object.size(value)),
+      serialized_bytes = if (is.null(value) || !isTRUE(serialize_value)) {
+        NA_real_
+      } else {
+        length(serialize(value, NULL, version = 3L))
+      },
+      rss_bytes = rss,
+      detail = detail %||% "",
+      stringsAsFactors = FALSE
+    )
+    invisible(NULL)
+  }
   model <- mf$fit3
   engine <- mf$engine
   train_data <- mf$train_data
@@ -308,6 +344,10 @@ fct_run_simulation <- function(sw,
   weather_collect <- match.arg(weather_collect)
   weather_threads <- match.arg(weather_threads)
   prepared_weather_cache <- match.arg(prepared_weather_cache)
+  key_workers <- as.integer(key_workers)[1L]
+  if (is.na(key_workers) || key_workers < 1L || key_workers > 2L) {
+    stop("key_workers must be an integer between 1 and 2.", call. = FALSE)
+  }
   seed <- as.integer(seed)[1L]
   if (is.na(seed)) seed <- WISEAPP_DEFAULT_SEED
   withr::local_seed(seed)
@@ -485,6 +525,7 @@ fct_run_simulation <- function(sw,
     svy, mf, sw, so,
     id_col = shared_id_col, weight_cols = wt_detected
   )
+  profile_memory("survey_prepared", svy_prepared)
   weather_join_cache <- if (isTRUE(join_cache) &&
     all(c(
       "code", "year", "survname", "loc_id",
@@ -519,7 +560,9 @@ fct_run_simulation <- function(sw,
   emitted_keys <- character(0)
   n_keys <- 0L
   n_hist_yrs <- 30L
-  consume_key <- function(key, weather_input, metadata = NULL) {
+  consume_key <- function(key, weather_input, metadata = NULL,
+                          out_override = NULL, key_err_override = NULL,
+                          out_supplied = FALSE) {
     emitted_keys <<- c(emitted_keys, key)
     n_keys <<- n_keys + 1L
     is_hist <- identical(key, "historical")
@@ -534,8 +577,13 @@ fct_run_simulation <- function(sw,
         )
       }
     }
-    key_err <- NULL
-    out <- tryCatch(
+    key_err <- key_err_override
+    out <- if (isTRUE(out_supplied) || !is.null(key_err_override)) {
+      if (!is.null(key_err)) {
+        warning(sprintf("[fct_run_simulation] Key %s failed: %s", key, key_err))
+      }
+      out_override
+    } else tryCatch(
       pipeline_fn(
         weather_raw = weather_input, svy = svy, sw = sw, so = so,
         model = model, residuals = residuals, train_data = train_data,
@@ -572,6 +620,7 @@ fct_run_simulation <- function(sw,
         train_data = train_data, cluster_counts = cluster_counts, svy = svy,
         residuals = residuals
       )
+      profile_memory("historical_pipeline", hist_sim_result$pipeline, detail = key)
       out$weather_raw <- NULL
     } else {
       gk <- key_group$gk
@@ -590,6 +639,7 @@ fct_run_simulation <- function(sw,
       }
       if (identical(weather_storage, "reference")) out$weather_raw <- weather_refs[[key]]
       group_agg[[gk]][[member_type]] <<- out
+      profile_memory("future_pipeline", out, detail = key)
       group_n[[gk]] <<- group_n[[gk]] + 1L
     }
     invisible(NULL)
@@ -607,13 +657,86 @@ fct_run_simulation <- function(sw,
     prepared_weather_cache_root = prepared_weather_cache_root,
     weather_fn = weather_fn
   )
+  profile_memory(
+    "weather_manifest", manifest,
+    detail = if (isTRUE(manifest$cache_hit)) "cache_hit" else "built"
+  )
   if (!inherits(manifest, "wiseapp_weather_manifest")) {
     stop("weather_manifest must be created by prepare_weather_manifest().", call. = FALSE)
   }
   cached_weather <- manifest$frames
+  profile_memory("cached_weather", cached_weather)
   if (isTRUE(manifest$cache_hit)) message("[wiseapp] Reusing prepared weather cache")
   weather_result <- list()
-  for (key in names(cached_weather)) consume_key(key, cached_weather[[key]])
+  cached_keys <- names(cached_weather)
+  hist_keys <- intersect("historical", cached_keys)
+  future_keys <- setdiff(cached_keys, hist_keys)
+  for (key in hist_keys) consume_key(key, cached_weather[[key]])
+  if (length(future_keys) && key_workers > 1L) {
+    if (!requireNamespace("future", quietly = TRUE) ||
+      !requireNamespace("future.apply", quietly = TRUE)) {
+      stop("key_workers > 1 requires the future and future.apply packages.",
+        call. = FALSE)
+    }
+    old_plan <- future::plan()
+    on.exit(future::plan(old_plan), add = TRUE)
+    future_jobs <- lapply(seq_along(future_keys), function(i) {
+      list(index = i, key = future_keys[[i]], weather = cached_weather[[future_keys[[i]]]])
+    })
+    future_chunks <- lapply(seq_len(min(key_workers, length(future_jobs))), function(worker) {
+      future_jobs[seq.int(worker, length(future_jobs), by = key_workers)]
+    })
+    future::plan(future::multisession, workers = length(future_chunks))
+    future_results <- future.apply::future_lapply(
+      future_chunks,
+      function(jobs) {
+        worker_rif_cache <- if (is_rif && isTRUE(direct_rif_predictions)) {
+          new.env(parent = emptyenv())
+        } else {
+          NULL
+        }
+        lapply(jobs, function(job) {
+          started <- proc.time()[["elapsed"]]
+          tryCatch(
+            list(
+              index = job$index,
+              key = job$key,
+              out = pipeline_fn(
+                weather_raw = job$weather, svy = svy, sw = sw, so = so,
+                model = model, residuals = residuals, train_data = train_data,
+                engine = engine, chol_obj = chol_obj, fit_multi = fit_multi,
+                taus = taus, weather_cols = weather_cols,
+                precomputed_train_aug = precomputed_train_aug,
+                svy_prepared = svy_prepared, weather_join_cache = weather_join_cache,
+                precomputed_ecdf_train = precomputed_ecdf_train,
+                direct_rif_predictions = direct_rif_predictions,
+                direct_rif_metadata = direct_rif_metadata,
+                direct_rif_baseline_cache = worker_rif_cache
+              ),
+              error = NULL,
+              elapsed = proc.time()[["elapsed"]] - started
+            ),
+            error = function(e) list(
+              index = job$index, key = job$key, out = NULL,
+              error = conditionMessage(e),
+              elapsed = proc.time()[["elapsed"]] - started
+            )
+          )
+        })
+      },
+      future.seed = FALSE,
+      future.scheduling = 1
+    )
+    future_results <- do.call(c, future_results)
+    future_results <- future_results[order(vapply(future_results, `[[`, integer(1), "index"))]
+    for (item in future_results) {
+      key <- item$key
+      consume_key(key, cached_weather[[key]], out_override = item$out,
+        key_err_override = item$error %||% NULL, out_supplied = TRUE)
+    }
+  } else {
+    for (key in future_keys) consume_key(key, cached_weather[[key]])
+  }
   t_weather <- proc.time()[["elapsed"]] - t_weather_start
   progress_fn(0.35, "Climate data loaded. Running scenarios...")
   if (is.list(weather_result) && length(weather_result)) {
@@ -726,7 +849,30 @@ fct_run_simulation <- function(sw,
       new_scenarios[[display_key]]$weather_store <- weather_store
       new_scenarios[[display_key]]$weather_signature <- weather_store$signature
     }
+    profile_memory(
+      "scenario_group_staging",
+      list(
+        pipelines = group_agg[[gk]],
+        weather_raw = group_weather_rep[[gk]],
+        weather_shared = group_weather_shared[[gk]]
+      ),
+      detail = display_key,
+      serialize_value = FALSE
+    )
+    # The scenario now owns these members; release the staging containers
+    # before assembling the next SSP/period group.
+    group_agg[[gk]] <- NULL
+    group_weather_rep[[gk]] <- NULL
+    group_weather_shared[[gk]] <- NULL
   }
+  profile_memory("pre_publish_context", list(
+    hist_sim_result = hist_sim_result,
+    new_scenarios = new_scenarios,
+    group_agg = group_agg,
+    group_weather_rep = group_weather_rep,
+    group_weather_shared = group_weather_shared,
+    compact_train_aug = compact_train_aug
+  ), serialize_value = FALSE)
   rm(group_agg, group_weather_rep, group_weather_shared, group_meta, group_n)
   gc(verbose = FALSE)
 
@@ -776,6 +922,10 @@ fct_run_simulation <- function(sw,
         taus = taus
       )
     )
+  }
+  if (!is.null(memory_profile)) {
+    profile_memory("final_result", result)
+    attr(result, "memory_profile") <- do.call(rbind, memory_profile$records)
   }
   if (has_weather_references) {
     result$weather_store_lease <- step2_weather_store_acquire(weather_store)
