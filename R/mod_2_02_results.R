@@ -354,9 +354,10 @@ mod_2_02_results_server <- function(id,
                                     selected_weather = NULL,
                                     tabset_id,
                                     tabset_session = NULL,
-                                    residuals = reactive("original"),
-                                    skip_coef_draws = reactive(FALSE),
-                                    stale = reactive(FALSE)) {
+                                     residuals = reactive("original"),
+                                     skip_coef_draws = reactive(FALSE),
+                                     shared_aggregation_cache = NULL,
+                                     stale = reactive(FALSE)) {
   moduleServer(id, function(input, output, session) {
     ns <- session$ns
 
@@ -683,15 +684,22 @@ mod_2_02_results_server <- function(id,
       bq <- AGG_BAND_Q
       is_log <- isTRUE(ws$hs$so$transform == "log")
        build_for <- function(weighted) {
-         if (isTRUE(weighted) || !isTRUE(has_w)) {
-           suite_key <- paste0("hist_suite_", format(pl_v), "_", format(bandwidth_p0()))
-           suite <- get0(suite_key, envir = ws$weighted_suite_cache)
+          if (isTRUE(weighted) || !isTRUE(has_w)) {
+            suite_pov <- pl_v %||% 3
+            suite_key <- paste0("hist_suite_", weighted, "_", format(suite_pov), "_", format(bandwidth_p0()))
+            shared_key <- shared_aggregation_cache_key(
+              ws$hs$.sig %||% list(pipeline = "step2"), suite_pov,
+              bandwidth_p0(), weighted, ws$res, ws$skip, is_log, agg_methods()
+            )
+            suite <- shared_aggregation_cache_get(shared_aggregation_cache, shared_key)
+            if (!is.null(suite)) return(setNames(list(suite[[method]]), method))
+            suite <- get0(suite_key, envir = ws$weighted_suite_cache)
            if (is.null(suite)) {
              suite <- aggregate_pipeline_tables_multi(
                pipelines = pl,
                methods = agg_methods(),
                weighted = weighted,
-               pov_lines = setNames(lapply(agg_methods(), function(x) pl_v %||% 3), agg_methods()),
+                pov_lines = setNames(lapply(agg_methods(), function(x) suite_pov), agg_methods()),
                residuals = ws$res,
                is_log = is_log,
                band_q = bq,
@@ -701,8 +709,9 @@ mod_2_02_results_server <- function(id,
                scenario = "Historical",
                shared_context = ws$hs$shared_context,
                preparation_cache = ws$prep_cache
-             )
-             assign(suite_key, suite, envir = ws$weighted_suite_cache)
+              )
+              assign(suite_key, suite, envir = ws$weighted_suite_cache)
+              shared_aggregation_cache_put(shared_aggregation_cache, shared_key, suite)
            }
            out <- suite[[method]]
            return(setNames(list(out), method))

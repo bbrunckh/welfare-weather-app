@@ -21,6 +21,7 @@ app_server <- function(input, output, session) {
   run_step1_trigger <- shiny::reactiveVal(NULL)
   run_step2_trigger <- shiny::reactiveVal(NULL)
   run_step3_trigger <- shiny::reactiveVal(NULL)
+  aggregation_cache <- new_shared_aggregation_cache()
 
   # Step 1: modelling ----
   # Pass reactives from overview_api
@@ -50,7 +51,8 @@ app_server <- function(input, output, session) {
     model_fit         = step1_api$model_fit,
     stored_breaks     = step1_api$stored_breaks,
     survey_version    = step1_api$survey_version,
-    run_trigger       = run_step2_trigger
+     run_trigger       = run_step2_trigger,
+     shared_aggregation_cache = aggregation_cache
   )
 
   # Step 3: policy scenarios ----
@@ -76,7 +78,8 @@ app_server <- function(input, output, session) {
       step2_api$propagate_all_covariate_uncertainty,
     survey_version = step1_api$survey_version,
     sim_stale = step2_api$stale,
-    run_trigger = run_step3_trigger
+     run_trigger = run_step3_trigger,
+     shared_aggregation_cache = aggregation_cache
   )
 
   # Explicit completion contracts for the automatic configuration runner.

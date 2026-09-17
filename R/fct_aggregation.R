@@ -1026,6 +1026,46 @@ aggregate_pipeline_tables_multi <- function(pipelines,
   setNames(lapply(methods, build_table), methods)
 }
 
+# Session-scoped cache for compact aggregation suites shared by Results tabs.
+new_shared_aggregation_cache <- function(max_entries = 16L) {
+  cache <- new.env(parent = emptyenv())
+  cache$keys <- character(0)
+  cache$max_entries <- as.integer(max_entries)
+  cache
+}
+
+shared_aggregation_cache_get <- function(cache, key) {
+  if (is.null(cache) || !is.environment(cache) || !nzchar(key)) return(NULL)
+  value <- get0(key, envir = cache)
+  if (!is.null(value)) cache$keys <- c(setdiff(cache$keys, key), key)
+  value
+}
+
+shared_aggregation_cache_put <- function(cache, key, value) {
+  if (is.null(cache) || !is.environment(cache) || !nzchar(key)) {
+    return(invisible(value))
+  }
+  assign(key, value, envir = cache)
+  cache$keys <- c(setdiff(cache$keys, key), key)
+  while (length(cache$keys) > cache$max_entries) {
+    evict <- cache$keys[[1L]]
+    cache$keys <- cache$keys[-1L]
+    if (exists(evict, envir = cache, inherits = FALSE)) rm(list = evict, envir = cache)
+  }
+  invisible(value)
+}
+
+shared_aggregation_cache_key <- function(run_signature, poverty_line,
+                                         bandwidth_p0, weighted, residuals,
+                                         skip_coef, is_log, methods) {
+  digest::digest(list(
+    schema = 1L, run_signature = run_signature,
+    poverty_line = poverty_line, bandwidth_p0 = bandwidth_p0,
+    weighted = isTRUE(weighted), residuals = residuals,
+    skip_coef = isTRUE(skip_coef), is_log = isTRUE(is_log), methods = methods
+  ), algo = "xxhash64")
+}
+
 #' Apply Deviation from Historical Reference Value
 #'
 #' Subtracts a historical reference value from a data frame's \code{value}

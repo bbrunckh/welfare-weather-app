@@ -54,7 +54,8 @@ mod_3_07_results_server <- function(id,
                                     decomp_result = reactive(NULL),
                                     decomp_context = reactive(NULL),
                                     baseline_svy = reactive(NULL),
-                                    policy_svy = reactive(NULL)) {
+                                     policy_svy = reactive(NULL),
+                                     aggregation_cache = NULL) {
   moduleServer(id, function(input, output, session) {
     ns <- session$ns
     session$userData$wise_step3_stale <- stale
@@ -90,7 +91,8 @@ mod_3_07_results_server <- function(id,
       decomp_result = decomp_result,
       decomp_context = decomp_context,
       baseline_svy = baseline_svy,
-      policy_svy = policy_svy
+       policy_svy = policy_svy,
+       aggregation_cache = aggregation_cache
     )
 
     observeEvent(sim_run_id(),

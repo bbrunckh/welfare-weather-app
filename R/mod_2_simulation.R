@@ -70,6 +70,7 @@ mod_2_simulation_ui <- function(id) {
 #' @param survey_weather   Reactive data frame of merged survey-weather data.
 #' @param model_fit        Reactive list of fitted model objects.
 #' @param run_trigger      Optional reactive trigger for a programmatic run.
+#' @param shared_aggregation_cache Optional shared session aggregation cache.
 #'
 #' @noRd
 mod_2_simulation_server <- function(id,
@@ -81,7 +82,8 @@ mod_2_simulation_server <- function(id,
                                     model_fit,
                                     stored_breaks = reactive(NULL),
                                      survey_version = reactive(0L),
-                                     run_trigger = reactive(NULL)) {
+                                      run_trigger = reactive(NULL),
+                                      shared_aggregation_cache = NULL) {
   moduleServer(id, function(input, output, session) {
 
     # 1. Unified sidebar + simulation engine ----
@@ -107,7 +109,8 @@ mod_2_simulation_server <- function(id,
       selected_weather = selected_weather,
       tabset_id       = "step2_output_tabs",
       tabset_session  = session,
-      residuals       = s1$residuals,
+       residuals       = s1$residuals,
+       aggregation_cache = shared_aggregation_cache,
       skip_coef_draws = s1$skip_coef_draws,
       stale           = s1$stale
     )

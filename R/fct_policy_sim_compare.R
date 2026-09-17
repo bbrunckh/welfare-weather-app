@@ -1357,7 +1357,8 @@ make_step3_decision_table_html <- function(df, subheader = NULL, footnotes = NUL
                                decomp_result = reactive(NULL),
                                decomp_context = reactive(NULL),
                                baseline_svy = reactive(NULL),
-                               policy_svy = reactive(NULL)) {
+                                policy_svy = reactive(NULL),
+                                aggregation_cache = NULL) {
   ns <- session$ns
 
   # INT-08: stale banner above the results pane. This surface gates its
@@ -1603,20 +1604,37 @@ make_step3_decision_table_html <- function(df, subheader = NULL, footnotes = NUL
       return(hit)
     }
 
+    baseline_skip_coef <- is.null(pl$F_loading)
+    suite_pov <- poverty_line %||% 3
+    shared_key <- shared_aggregation_cache_key(
+      hs$.step2_sig %||% hs$.sig %||% list(pipeline = "step2"),
+      suite_pov, 0.05, TRUE, active_residuals(hs), baseline_skip_coef,
+      isTRUE(hs$so$transform == "log"), .agg_suite_methods()
+    )
+    shared <- shared_aggregation_cache_get(aggregation_cache, shared_key)
+    if (!is.null(shared)) {
+      assign(suite_key, shared, envir = suite_cache)
+      hit <- list(out = shared[[method]])
+      .agg_cache_put(ws, cache_key, hit)
+      return(hit)
+    }
+
     agg <- aggregate_pipeline_tables_multi(
       pipelines = pl,
       methods = .agg_suite_methods(),
       weighted = TRUE,
-      pov_lines = setNames(lapply(.agg_suite_methods(), function(x) poverty_line %||% 3),
+       pov_lines = setNames(lapply(.agg_suite_methods(), function(x) suite_pov),
                            .agg_suite_methods()),
       residuals = active_residuals(hs),
       is_log = isTRUE(hs$so$transform == "log"),
       band_q = c(lo = 0.10, hi = 0.90),
+      skip_coef = baseline_skip_coef,
       model_ids = "Historical",
       scenario = "Historical",
       shared_context = hs$shared_context
     )
     assign(suite_key, agg, envir = suite_cache)
+    shared_aggregation_cache_put(aggregation_cache, shared_key, agg)
     .agg_cache_put(ws, cache_key, list(out = agg[[method]]))
     list(out = agg[[method]])
   }

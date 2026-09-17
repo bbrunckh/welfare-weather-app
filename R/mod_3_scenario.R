@@ -117,7 +117,8 @@ mod_3_scenario_server <- function(id,
                                     reactive(FALSE),
                                   survey_version = reactive(0L),
                                   sim_stale = reactive(FALSE),
-                                  run_trigger = reactive(NULL)) {
+                                  run_trigger = reactive(NULL),
+                                  shared_aggregation_cache = NULL) {
   moduleServer(id, function(input, output, session) {
     ns <- session$ns
 
@@ -234,7 +235,7 @@ mod_3_scenario_server <- function(id,
       labor_scenario = s4$labor_scenario,
       education_scenario = s5$education_scenario,
       selected_model = selected_model,
-      model_fit = model_fit,
+       model_fit = model_fit,
       selected_weather = selected_weather,
       hist_sim = hist_sim,
       saved_scenarios = saved_scenarios,
@@ -272,7 +273,8 @@ mod_3_scenario_server <- function(id,
       decomp_result = s6$decomp_result,
       decomp_context = s6$decomp_context,
       baseline_svy = s6$baseline_svy,
-      policy_svy = s6$policy_svy
+      policy_svy = s6$policy_svy,
+      aggregation_cache = shared_aggregation_cache
     )
 
     # Diagnostics tab: before/after variable analysis ----

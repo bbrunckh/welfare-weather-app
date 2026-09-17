@@ -318,6 +318,9 @@ mod_3_06_policy_sim_server <- function(id,
               # Preserve the residual treatment captured by the Step 2 run.
               hs_for_baseline <- hs
               hs_for_baseline$residuals <- res_choice
+              # Keep the source Step 2 signature available after this baseline
+              # is republished with the Step 3 policy signature.
+              hs_for_baseline$.step2_sig <- hs$.sig %||% NULL
               baseline_out <- hs_for_baseline
               baseline_scenarios_out <- ss %||% list()
 
