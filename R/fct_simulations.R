@@ -950,14 +950,23 @@ build_weather_join_cache <- function(survey_join,
                                        "loc_id", "int_month"
                                      )) {
   stopifnot(is.data.frame(survey_join), all(by %in% names(survey_join)))
+  survey_nonjoin <- setdiff(names(survey_join), by)
+  key <- .weather_join_key(survey_join, by)
+  key_levels <- unique(key)
+  key_id <- match(key, key_levels)
+  row_order <- order(key_id)
+  key_counts <- tabulate(key_id, nbins = length(key_levels))
+  key_end <- cumsum(key_counts)
+  key_start <- key_end - key_counts + 1L
   list(
     by = by,
-    survey = survey_join,
-    survey_nonjoin = setdiff(names(survey_join), by),
-    lookup = split(seq_len(nrow(survey_join)),
-      .weather_join_key(survey_join, by),
-      drop = TRUE
-    )
+    # Retain only payload columns. Join keys are represented by the lookup
+    # names, so keeping the projected survey frame here needlessly multiplies
+    # memory across long-lived simulation runs.
+    survey_nonjoin = survey_join[row_order, survey_nonjoin, drop = FALSE],
+    key_levels = key_levels,
+    key_start = key_start,
+    key_end = key_end
   )
 }
 
@@ -966,23 +975,27 @@ join_weather_survey_cached <- function(weather_raw, cache) {
   weather <- weather_raw |>
     .add_sim_timestamp_fields() |>
     dplyr::select(-timestamp)
-  matches <- cache$lookup[.weather_join_key(weather, by)]
-  n_matches <- lengths(matches)
+  key_id <- match(.weather_join_key(weather, by), cache$key_levels)
+  n_matches <- ifelse(is.na(key_id), 0L,
+    cache$key_end[key_id] - cache$key_start[key_id] + 1L
+  )
   if (!any(n_matches)) {
     out <- dplyr::bind_cols(
       tibble::as_tibble(weather[FALSE, , drop = FALSE]),
-      tibble::as_tibble(cache$survey[FALSE, cache$survey_nonjoin, drop = FALSE])
+      tibble::as_tibble(cache$survey_nonjoin[FALSE, , drop = FALSE])
     )
     return(as.data.frame(dplyr::mutate(out, year = as.factor(year))))
   }
   weather_rows <- rep.int(seq_len(nrow(weather)), n_matches)
-  survey_rows <- unlist(matches[n_matches > 0L], use.names = FALSE)
+  matched_keys <- key_id[n_matches > 0L]
+  survey_rows <- unlist(Map(
+    seq.int,
+    cache$key_start[matched_keys], cache$key_end[matched_keys]
+  ), use.names = FALSE)
   as.data.frame(dplyr::mutate(
     dplyr::bind_cols(
       tibble::as_tibble(weather[weather_rows, , drop = FALSE]),
-      tibble::as_tibble(cache$survey[survey_rows, cache$survey_nonjoin,
-        drop = FALSE
-      ])
+      tibble::as_tibble(cache$survey_nonjoin[survey_rows, , drop = FALSE])
     ),
     year = as.factor(year)
   ))

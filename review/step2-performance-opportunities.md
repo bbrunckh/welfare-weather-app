@@ -89,16 +89,25 @@ Relevant code: `R/fct_get_weather.R:1016-1073`, `1284-1459`, `1493-1603`; existi
 
 ---
 
-### 4. Survey-Weather Join Reduction *(Priority: High investigation; not the rejected full join cache)*
+### 4. Survey-Weather Join Reduction *(Priority: High investigation; compact cache implemented)*
 
 **Problem:** The rejected cache retained a full survey projection and regressed construction time. The normal per-key path still rebuilds timestamp/key fields, selects columns, expands duplicate keys, and converts factors.
 
 **Work packets:**
 
-- [ ] Instrument the actual inline join in `R/fct_simulations.R:568-576`; separately time timestamp preparation, key construction, `inner_join`, duplicate expansion, and factor conversion.
-- [ ] Benchmark a compact integer/radix weather-key index or precomputed weather-side key vectors. Preserve NA sentinels, duplicate survey rows, weather row order, factor levels, and unmatched-row behavior.
-- [ ] Measure per-key elapsed time, joined rows, match ratio, object bytes, and process-tree RSS for OLS/RIF, historical/future, one/many keys.
-- [ ] Implement only if repeated join/key preparation is a material share of end-to-end runtime and the compact representation lowers RSS.
+- [x] Instrument the actual inline join in `R/fct_simulations.R:568-576`; separately time timestamp preparation, key construction, `inner_join`, duplicate expansion, and factor conversion.
+- [x] Benchmark a compact integer/radix weather-key index or precomputed weather-side key vectors. Preserve NA sentinels, duplicate survey rows, weather row order, factor levels, and unmatched-row behavior.
+- [x] Measure per-key elapsed time, joined rows, match ratio, object bytes, and process-tree RSS for OLS/RIF, historical/future, one/many keys.
+- [x] Implement only if repeated join/key preparation is a material share of end-to-end runtime and the compact representation lowers RSS.
+
+**Implementation:** the opt-in `join_cache` now retains only non-join survey
+payload columns plus a compact integer key index with contiguous row offsets.
+It no longer retains the full projected survey frame, while preserving duplicate
+expansion, weather order, factor levels, NA sentinels, and unmatched-row
+behavior. Focused parity and simulation-output tests pass. Synthetic profiling
+shows lower cache footprint, but no end-to-end runtime win on the current small
+duplicate-heavy benchmark; the cache remains opt-in pending production-scale
+elapsed-time and RSS characterization.
 
 Do not reintroduce the full survey join cache without a new design that avoids retaining the full projection.
 
