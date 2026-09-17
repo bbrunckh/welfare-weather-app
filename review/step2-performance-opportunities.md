@@ -145,9 +145,17 @@ Do not implement immediately or infer safety from R object sizes.
 
 ---
 
-### 8. Point-Estimate-Only Fast Path *(Priority: Medium–Low)*
+### 8. Point-Estimate-Only Fast Path *(Priority: Medium–Low; implemented)*
 
 When coefficient uncertainty is disabled, Cholesky/factor-loading construction is already skipped. Check whether uncertainty-specific aggregation, `F_agg` structures, and payload serialisation are also fully elided under `skip_coef_draws`. If not, make this an explicit fast path.
+
+**Implementation:** deterministic point-estimate aggregation (`residuals = "none"` or
+`"original"`) now bypasses welfare-gradient construction, coefficient variance,
+and uncertainty-band transforms through `aggregate_point_estimate()`. Stochastic
+residual modes retain the delta path because residual variance requires the
+gradient. The single-method and multi-method aggregation paths share the fast
+path, preserving the existing result schema with zero variance and point-valued
+bands. Focused aggregation and W3-A characterization tests pass.
 
 ---
 

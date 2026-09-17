@@ -61,6 +61,29 @@ test_that("delta-method mean matches MC SE within 5%", {
   expect_lt(abs(se_delta - se_mc) / se_mc, 0.05)
 })
 
+test_that("point-estimate fast path returns exact values without uncertainty work", {
+  pipe <- make_pipeline(N = 80, K = 3)
+  pipe$train_aug <- data.frame(.resid = stats::rnorm(80))
+  pipe$sim_year <- rep(c(2030L, 2031L), each = 40L)
+
+  for (method in c("mean", "median", "total", "headcount_ratio", "gap",
+                   "fgt2", "gini", "prosperity_gap", "avg_poverty")) {
+    pov <- if (method %in% c("headcount_ratio", "gap", "fgt2")) 3 else NULL
+    fast <- aggregate_pipeline_per_year(
+      pipe, method = method, weighted = TRUE, pov_line = pov,
+      residuals = "none", skip_coef = TRUE, is_log = TRUE
+    )
+    oracle <- lapply(seq_along(fast), function(i) {
+      idx <- pipe$sim_year == fast[[i]]$sim_year
+      mu <- exp(pipe$y_point[idx])
+      aggregate_point_estimate(mu, method, pipe$weights[idx], pov) |>
+        within(sim_year <- fast[[i]]$sim_year)
+    })
+    expect_identical(fast, oracle, info = method)
+    expect_true(all(vapply(fast, function(x) is.null(x$F_agg), logical(1))))
+  }
+})
+
 test_that("delta-method total matches MC SE within 5%", {
   pipe <- make_pipeline()
   res <- wiseapp:::aggregate_with_uncertainty_delta(

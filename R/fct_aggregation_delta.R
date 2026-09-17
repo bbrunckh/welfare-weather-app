@@ -148,6 +148,24 @@ aggregate_with_uncertainty_delta <- function(y_point,
   )
 }
 
+# Avoid gradient and band calculations when only deterministic point estimates
+# are requested. Stochastic residual modes retain the delta-method path because
+# their residual variance still depends on the welfare gradient.
+aggregate_point_estimate <- function(mu, method, weights = NULL, pov_line = NULL) {
+  stopifnot(is.numeric(mu), length(mu) > 0L)
+  value_pt <- resolve_agg_fn(method)(mu, weights, pov_line)
+  list(
+    value = value_pt,
+    value_lo = value_pt,
+    value_p50 = value_pt,
+    value_hi = value_pt,
+    var_coef = 0,
+    var_resid = 0,
+    F_agg = NULL,
+    draw_values = NULL
+  )
+}
+
 
 # Per-method gradient functions ----
 # Each returns h = (dT/dwelfare) * mu, length N. Sign matters - preserves the
@@ -528,6 +546,8 @@ aggregate_pipeline_per_year <- function(pipe,
   # instead of rebuilding var(.resid) per year. Prepared residual vectors have
   # already consumed the temporary ID lookup during preparation.
   sg2 <- prep$resid_sigma2
+  point_estimate_only <- isTRUE(skip_coef) &&
+    res_mode %in% c("none", "original")
 
   lapply(seq_along(prep$years), function(i) {
     yr <- prep$years[[i]]
@@ -536,7 +556,9 @@ aggregate_pipeline_per_year <- function(pipe,
       prep$factor_blocks[[i]]
     } else NULL
     w_idx <- if (isTRUE(weighted)) prep$weights[[i]] else NULL
-    m <- aggregate_with_uncertainty_delta(
+    m <- if (point_estimate_only) {
+      aggregate_point_estimate(prep$mu[[i]], method, w_idx, pov_line)
+    } else aggregate_with_uncertainty_delta(
       y_point = pipe$y_point[idx],
       F_loading = F_idx,
       method = method,
@@ -621,6 +643,8 @@ aggregate_pipeline_per_year_multi <- function(pipe,
   )
 
   sg2 <- prep$resid_sigma2
+  point_estimate_only <- isTRUE(skip_coef) &&
+    res_mode %in% c("none", "original")
 
   out <- setNames(lapply(methods, function(method) vector("list", length(prep$years))),
                   methods)
@@ -638,7 +662,9 @@ aggregate_pipeline_per_year_multi <- function(pipe,
       } else {
         pov_line
       }
-      value <- aggregate_with_uncertainty_delta(
+      value <- if (point_estimate_only) {
+        aggregate_point_estimate(prep$mu[[i]], method, w_idx, method_pov)
+      } else aggregate_with_uncertainty_delta(
         y_point = pipe$y_point[idx],
         F_loading = F_idx,
         method = method,
