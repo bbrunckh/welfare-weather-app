@@ -1538,10 +1538,15 @@ make_step3_decision_table_html <- function(df, subheader = NULL, footnotes = NUL
     ws <- new.env(parent = emptyenv())
     attr(ws, "keys") <- character(0)
     attr(ws, "max_entries") <- 32L
+    attr(ws, "suite_cache") <- new.env(parent = emptyenv())
     ws
   })
   .agg_cache_key <- function(tag, method, pov_line) {
     paste(tag, method, format(pov_line), sep = "\r")
+  }
+  .agg_suite_methods <- function() {
+    c("mean", "median", "total", "headcount_ratio", "gap", "fgt2",
+      "gini", "prosperity_gap", "avg_poverty")
   }
   .agg_cache_get <- function(ws, key) {
     hit <- get0(key, envir = ws)
@@ -1589,11 +1594,21 @@ make_step3_decision_table_html <- function(df, subheader = NULL, footnotes = NUL
       return(hit)
     }
 
-    agg <- aggregate_pipeline_table(
+    suite_key <- .agg_cache_key(tag, "__suite__", poverty_line)
+    suite_cache <- attr(ws, "suite_cache")
+    suite <- get0(suite_key, envir = suite_cache)
+    if (!is.null(suite)) {
+      hit <- list(out = suite[[method]])
+      .agg_cache_put(ws, cache_key, hit)
+      return(hit)
+    }
+
+    agg <- aggregate_pipeline_tables_multi(
       pipelines = pl,
-      method = method,
+      methods = .agg_suite_methods(),
       weighted = TRUE,
-      pov_line = poverty_line,
+      pov_lines = setNames(lapply(.agg_suite_methods(), function(x) poverty_line %||% 3),
+                           .agg_suite_methods()),
       residuals = active_residuals(hs),
       is_log = isTRUE(hs$so$transform == "log"),
       band_q = c(lo = 0.10, hi = 0.90),
@@ -1601,9 +1616,9 @@ make_step3_decision_table_html <- function(df, subheader = NULL, footnotes = NUL
       scenario = "Historical",
       shared_context = hs$shared_context
     )
-    res <- list(out = agg)
-    .agg_cache_put(ws, cache_key, res)
-    res
+    assign(suite_key, agg, envir = suite_cache)
+    .agg_cache_put(ws, cache_key, list(out = agg[[method]]))
+    list(out = agg[[method]])
   }
 
   # Helper: build agg per saved scenario in Mod 2 schema. Each `s$pipelines`
@@ -1655,6 +1670,15 @@ make_step3_decision_table_html <- function(df, subheader = NULL, footnotes = NUL
       return(hit)
     }
 
+    suite_key <- .agg_cache_key(tag, "__suite__", poverty_line)
+    suite_cache <- attr(ws, "suite_cache")
+    suite <- get0(suite_key, envir = suite_cache)
+    if (!is.null(suite)) {
+      hit <- list(out = suite[[method]])
+      .agg_cache_put(ws, cache_key, hit)
+      return(hit)
+    }
+
     failed <- character(0)
     # NB: iterate by index (the error handler needs `names(sc)[i]`) but
     # re-attach the scenario names - every consumer below (all_series,
@@ -1668,21 +1692,24 @@ make_step3_decision_table_html <- function(df, subheader = NULL, footnotes = NUL
           if (is.null(pipes) || length(pipes) == 0L) {
             return(NULL)
           }
-          combined <- aggregate_pipeline_table(
-            pipelines = pipes,
-            method = method,
-            weighted = use_w,
-            pov_line = poverty_line,
+           combined <- aggregate_pipeline_tables_multi(
+             pipelines = pipes,
+             methods = .agg_suite_methods(),
+             weighted = use_w,
+             pov_lines = setNames(lapply(.agg_suite_methods(), function(x) poverty_line %||% 3),
+                                  .agg_suite_methods()),
             residuals = active_residuals(hs_for_dev),
             is_log = isTRUE(s$so$transform == "log"),
             band_q = c(lo = 0.10, hi = 0.90),
             model_ids = names(pipes),
             shared_context = s$shared_context
           )
-          if (nrow(combined) == 0L) {
-            return(NULL)
-          }
-          list(out = combined)
+           if (!length(combined) || !any(vapply(combined, function(x) {
+             !is.null(x) && nrow(x) > 0L
+           }, logical(1L)))) {
+             return(NULL)
+           }
+           list(out = combined)
         },
         error = function(e) {
           nm <- s$scenario_name %||% names(sc)[i]
@@ -1693,8 +1720,17 @@ make_step3_decision_table_html <- function(df, subheader = NULL, footnotes = NUL
       )
     }), names(sc))
     .notify_agg_failures(failed, length(sc))
-    .agg_cache_put(ws, cache_key, res)
-    res
+    suite <- lapply(res, function(value) {
+      if (is.null(value)) return(NULL)
+      value$out
+    })
+    assign(suite_key, suite, envir = suite_cache)
+    selected <- lapply(suite, function(value) {
+      if (is.null(value)) return(NULL)
+      list(out = value[[method]])
+    }) |> stats::setNames(names(suite))
+    .agg_cache_put(ws, cache_key, selected)
+    selected
   }
 
   baseline_agg_hist <- reactive({

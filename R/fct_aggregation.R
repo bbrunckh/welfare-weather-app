@@ -899,6 +899,133 @@ aggregate_pipeline_table <- function(pipelines,
   dplyr::bind_rows(Filter(Negate(is.null), rows))
 }
 
+#' Build canonical aggregation tables for several methods in one pass
+#'
+#' The weighted path shares per-pipeline preparation across all methods. The
+#' returned object is keyed by method and each value has the same schema as
+#' \\code{aggregate_pipeline_table()}.
+#'
+#' @param pipelines A pipeline-like list, or a named list of such pipelines.
+#' @param methods Character vector of aggregation methods.
+#' @param weighted Logical. Use each pipeline's survey weights when available.
+#' @param pov_lines Optional named list of method-specific poverty lines.
+#' @param pov_line Fallback poverty line.
+#' @param residuals Residual draw mode.
+#' @param is_log Logical. Whether pipeline predictions are on the log scale.
+#' @param band_q Named numeric vector of coefficient-band quantiles.
+#' @param skip_coef Logical. Drop coefficient loadings when TRUE.
+#' @param bandwidth_p0 Numeric bandwidth for the headcount-ratio kernel.
+#' @param seed Integer base seed for deterministic residual streams.
+#' @param model_ids Optional character vector naming the pipelines.
+#' @param scenario Optional scenario label stored in output metadata.
+#' @param shared_context Optional shared pipeline context.
+#' @param preparation_cache Optional bounded preparation cache.
+#' @return Named list of canonical aggregation tibbles.
+#' @noRd
+aggregate_pipeline_tables_multi <- function(pipelines,
+                                             methods,
+                                             weighted = TRUE,
+                                             pov_lines = NULL,
+                                             pov_line = NULL,
+                                             residuals = "original",
+                                             is_log = TRUE,
+                                             band_q = c(lo = 0.10, hi = 0.90),
+                                             skip_coef = FALSE,
+                                             bandwidth_p0 = 0.05,
+                                             seed = WISEAPP_DEFAULT_SEED,
+                                             model_ids = NULL,
+                                             scenario = NULL,
+                                             shared_context = NULL,
+                                             preparation_cache = NULL) {
+  if (is.null(pipelines)) return(setNames(vector("list", length(methods)), methods))
+  if (!is.null(pipelines$y_point)) pipelines <- list(pipelines)
+  if (!is.list(pipelines) || length(pipelines) == 0L || !length(methods)) {
+    return(setNames(vector("list", length(methods)), methods))
+  }
+  if (is.null(model_ids)) model_ids <- names(pipelines)
+  if (is.null(model_ids)) model_ids <- character(0)
+  if (length(model_ids) != length(pipelines) || any(!nzchar(model_ids))) {
+    model_ids <- paste0("model_", seq_along(pipelines))
+  }
+  if (is.null(preparation_cache)) {
+    preparation_cache <- .new_aggregation_preparation_cache()
+  }
+
+  per_model <- lapply(pipelines, function(pipe) {
+    aggregate_pipeline_per_year_multi(
+      pipe = pipe,
+      methods = methods,
+      weighted = weighted,
+      pov_lines = pov_lines,
+      pov_line = pov_line,
+      residuals = residuals,
+      is_log = is_log,
+      band_q = band_q,
+      skip_coef = skip_coef,
+      bandwidth_p0 = bandwidth_p0,
+      seed = seed,
+      shared_context = shared_context,
+      preparation_cache = preparation_cache
+    )
+  })
+  years <- sort(unique(pipelines[[1L]]$sim_year))
+  if (!length(years)) return(setNames(vector("list", length(methods)), methods))
+
+  build_table <- function(method) {
+    per_method <- lapply(per_model, `[[`, method)
+    rows <- lapply(years, function(year) {
+      per_year <- lapply(per_method, function(results) {
+        hit <- vapply(results, function(x) identical(x$sim_year, year), logical(1L))
+        if (any(hit)) results[[which(hit)[1L]]] else NULL
+      })
+      keep <- !vapply(per_year, is.null, logical(1L))
+      per_year <- per_year[keep]
+      ids <- model_ids[keep]
+      if (!length(per_year)) return(NULL)
+      values <- vapply(per_year, `[[`, numeric(1L), "value")
+      sds <- sqrt(pmax(vapply(
+        per_year,
+        function(x) (x$var_coef %||% 0) + (x$var_resid %||% 0),
+        numeric(1L)
+      ), 0))
+      gradients <- lapply(per_year, `[[`, "F_agg")
+      F_mat <- if (all(vapply(gradients, is.null, logical(1L)))) {
+        NULL
+      } else {
+        first_gradient <- which(!vapply(gradients, is.null, logical(1L)))[1L]
+        n_factors <- length(gradients[[first_gradient]])
+        do.call(rbind, lapply(gradients, function(value) {
+          if (is.null(value)) rep(NA_real_, n_factors) else as.numeric(value)
+        }))
+      }
+      if (length(per_year) == 1L) {
+        var_within <- sds[[1L]]^2
+        var_across <- 0
+      } else {
+        combined <- combine_ensemble_results(per_year, band_q = band_q)
+        var_within <- combined$var_within %||% mean(sds^2, na.rm = TRUE)
+        var_across <- combined$var_across %||% stats::var(values, na.rm = TRUE)
+      }
+      row <- tibble::tibble(
+        sim_year = year,
+        value = mean(values, na.rm = TRUE),
+        model_id = list(ids),
+        value_all = list(values),
+        value_all_sd = list(sds),
+        F_agg_all = list(F_mat),
+        var_within = var_within,
+        var_across = var_across,
+        agg_method = method,
+        weighted = weighted
+      )
+      if (!is.null(scenario)) row$scenario <- scenario
+      row
+    })
+    dplyr::bind_rows(Filter(Negate(is.null), rows))
+  }
+  setNames(lapply(methods, build_table), methods)
+}
+
 #' Apply Deviation from Historical Reference Value
 #'
 #' Subtracts a historical reference value from a data frame's \code{value}

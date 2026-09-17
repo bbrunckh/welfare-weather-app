@@ -486,6 +486,12 @@ mod_2_02_results_server <- function(id,
         ws$prep_cache$entries <- list()
         ws$prep_cache$keys <- character(0)
       }
+      if (is.environment(ws$weighted_suite_cache)) {
+        cached_suites <- ls(ws$weighted_suite_cache, all.names = TRUE)
+        if (length(cached_suites)) {
+          rm(list = cached_suites, envir = ws$weighted_suite_cache)
+        }
+      }
       if (identical(ws, cache_workspace_ref$current)) {
         cache_workspace_ref$current <- NULL
       }
@@ -582,15 +588,16 @@ mod_2_02_results_server <- function(id,
       cache_order$hits <- 0L
       cache_order$misses <- 0L
       cache_order$evictions <- character(0)
-      ws <- list(
+       ws <- list(
         hs = hist_sim(),
         sc = saved_scenarios(),
         res = hist_sim()$residuals %||% residuals() %||% "original",
         skip = isTRUE(skip_coef_draws()),
         cache = new.env(parent = emptyenv()),
-        cache_order = cache_order,
-        prep_cache = .new_aggregation_preparation_cache(max_entries = 32L)
-      )
+         cache_order = cache_order,
+         prep_cache = .new_aggregation_preparation_cache(max_entries = 32L),
+         weighted_suite_cache = new.env(parent = emptyenv())
+       )
       cache_workspace_ref$current <- ws
       ws
     })
@@ -671,12 +678,36 @@ mod_2_02_results_server <- function(id,
 
     length.wise_lazy_aggregation_method_list <- function(x) 1L
 
-    .build_hist_for_method <- function(ws, method, pl_v) {
+     .build_hist_for_method <- function(ws, method, pl_v) {
       pl <- ws$hs$pipeline
       bq <- AGG_BAND_Q
       is_log <- isTRUE(ws$hs$so$transform == "log")
-      build_for <- function(weighted) {
-        out <- aggregate_pipeline_table(
+       build_for <- function(weighted) {
+         if (isTRUE(weighted) && isTRUE(has_w)) {
+           suite_key <- paste0("hist_suite_", format(pl_v), "_", format(bandwidth_p0()))
+           suite <- get0(suite_key, envir = ws$weighted_suite_cache)
+           if (is.null(suite)) {
+             suite <- aggregate_pipeline_tables_multi(
+               pipelines = pl,
+               methods = agg_methods(),
+               weighted = TRUE,
+               pov_lines = setNames(lapply(agg_methods(), function(x) pl_v %||% 3), agg_methods()),
+               residuals = ws$res,
+               is_log = is_log,
+               band_q = bq,
+               skip_coef = ws$skip,
+               bandwidth_p0 = bandwidth_p0(),
+               model_ids = "Historical",
+               scenario = "Historical",
+               shared_context = ws$hs$shared_context,
+               preparation_cache = ws$prep_cache
+             )
+             assign(suite_key, suite, envir = ws$weighted_suite_cache)
+           }
+           out <- suite[[method]]
+           return(setNames(list(out), method))
+         }
+         out <- aggregate_pipeline_table(
           pipelines = pl,
           method = method,
           weighted = weighted,
@@ -690,10 +721,10 @@ mod_2_02_results_server <- function(id,
           scenario = "Historical",
           shared_context = ws$hs$shared_context,
           preparation_cache = ws$prep_cache
-        )
+         )
         setNames(list(out), method)
-      }
-      has_w <- !is.null(pl$weight)
+       }
+       has_w <- !is.null(pl$weight)
       list(
         unweighted = .build_lazy_aggregation_method(
           function() build_for(FALSE), method
@@ -705,18 +736,42 @@ mod_2_02_results_server <- function(id,
       )
     }
 
-    .build_scn_for_method <- function(ws, method, pl_v) {
+     .build_scn_for_method <- function(ws, method, pl_v) {
       sc <- ws$sc
       if (length(sc) == 0L) {
         return(NULL)
       }
       bq <- AGG_BAND_Q
-      setNames(lapply(sc, function(s) {
+      setNames(lapply(seq_along(sc), function(s_idx) {
+        s <- sc[[s_idx]]
         pipes <- s$pipelines
         is_log <- isTRUE(s$so$transform == "log")
         has_w <- !is.null(pipes[[1L]]$weight)
-        build_for <- function(weighted) {
-          out <- aggregate_pipeline_table(
+         build_for <- function(weighted) {
+         if (isTRUE(weighted) && isTRUE(has_w)) {
+             suite_key <- paste0("scenario_suite_", names(sc)[[s_idx]], "_", format(pl_v), "_", format(bandwidth_p0()))
+             suite <- get0(suite_key, envir = ws$weighted_suite_cache)
+             if (is.null(suite)) {
+               suite <- aggregate_pipeline_tables_multi(
+                 pipelines = pipes,
+                 methods = agg_methods(),
+                 weighted = TRUE,
+                 pov_lines = setNames(lapply(agg_methods(), function(x) pl_v %||% 3), agg_methods()),
+                 residuals = ws$res,
+                 is_log = is_log,
+                 band_q = bq,
+                 skip_coef = ws$skip,
+                 bandwidth_p0 = bandwidth_p0(),
+                 model_ids = names(pipes) %||% paste0("m", seq_along(pipes)),
+                 shared_context = s$shared_context,
+                 preparation_cache = ws$prep_cache
+               )
+               assign(suite_key, suite, envir = ws$weighted_suite_cache)
+             }
+             out <- suite[[method]]
+             return(setNames(list(out), method))
+           }
+           out <- aggregate_pipeline_table(
             pipelines = pipes,
             method = method,
             weighted = weighted,

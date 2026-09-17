@@ -553,3 +553,112 @@ aggregate_pipeline_per_year <- function(pipe,
     m
   })
 }
+
+#' Aggregate one prediction pipeline for several methods in one prepared pass
+#'
+#' This is the weighted Results-path accelerator. Preparation (including
+#' residual realization and per-year row selection) is shared across methods;
+#' each method still uses the production delta-method implementation so its
+#' value, gradient, and variance contract remains unchanged.
+#'
+#' @param pipe Prediction pipeline containing point predictions and metadata.
+#' @param methods Character vector of aggregation methods.
+#' @param weighted Logical; whether to use pipeline weights.
+#' @param pov_lines Optional named list of method-specific poverty lines.
+#' @param pov_line Fallback poverty line when a method is not in \\code{pov_lines}.
+#' @param residuals Residual draw mode.
+#' @param is_log Logical; whether predictions are on the log scale.
+#' @param band_q Quantile band for uncertainty output.
+#' @param skip_coef Logical; skip coefficient uncertainty calculations.
+#' @param bandwidth_p0 Bandwidth for the headcount-ratio kernel.
+#' @param seed Integer base seed for deterministic residual streams.
+#' @param shared_context Optional shared pipeline context.
+#' @param preparation_cache Optional bounded preparation cache.
+#' @return Named list of per-year aggregation-result lists, one per method.
+#' @noRd
+aggregate_pipeline_per_year_multi <- function(pipe,
+                                               methods,
+                                               weighted = TRUE,
+                                               pov_lines = NULL,
+                                               pov_line = NULL,
+                                               residuals = "original",
+                                               is_log = TRUE,
+                                               band_q = c(lo = 0.10, hi = 0.90),
+                                               skip_coef = FALSE,
+                                               bandwidth_p0 = 0.05,
+                                               seed = WISEAPP_DEFAULT_SEED,
+                                               shared_context = NULL,
+                                               preparation_cache = NULL) {
+  if (is.null(pipe) || is.null(pipe$y_point) || !length(methods)) {
+    return(setNames(vector("list", length(methods)), methods))
+  }
+
+  context <- step2_pipeline_context(pipe, shared_context)
+  train_aug <- context$train_aug
+  id_col <- context$id_col
+  res_mode <- residuals %||% "original"
+  if (is.null(train_aug) && !identical(res_mode, "none")) {
+    res_mode <- "none"
+  }
+
+  if (is.null(preparation_cache)) {
+    preparation_cache <- .new_aggregation_preparation_cache()
+  }
+  prep <- .aggregation_prepare_pipeline(
+    pipe = pipe,
+    train_aug = train_aug,
+    id_col = id_col,
+    residuals = res_mode,
+    seed = seed,
+    is_log = is_log,
+    cache = preparation_cache
+  )
+
+  F_full <- pipe$F_loading
+  if (!is.null(F_full) && is.null(dim(F_full))) {
+    F_full <- matrix(F_full, nrow = 1L)
+  }
+  sg2 <- prep$resid_sigma2
+
+  out <- setNames(lapply(methods, function(method) vector("list", length(prep$years))),
+                  methods)
+  for (i in seq_along(prep$years)) {
+    yr <- prep$years[[i]]
+    idx <- prep$rows[[i]][prep$valid[[i]]]
+    F_idx <- if (!is.null(F_full) && !isTRUE(skip_coef)) {
+      F_full[idx, , drop = FALSE]
+    } else {
+      NULL
+    }
+    w_idx <- if (isTRUE(weighted)) prep$weights[[i]] else NULL
+
+    for (method in methods) {
+      method_pov <- if (!is.null(pov_lines) && !is.null(pov_lines[[method]])) {
+        pov_lines[[method]]
+      } else {
+        pov_line
+      }
+      value <- aggregate_with_uncertainty_delta(
+        y_point = pipe$y_point[idx],
+        F_loading = F_idx,
+        method = method,
+        weights = w_idx,
+        pov_line = method_pov,
+        residuals = res_mode,
+        train_aug = train_aug,
+        id_vec = NULL,
+        id_col = id_col,
+        is_log = is_log,
+        band_q = band_q,
+        bandwidth_p0 = bandwidth_p0,
+        seed = wise_seed(seed, "residual", yr),
+        resid_lookup = NULL,
+        resid_sigma2 = sg2,
+        prepared_mu = prep$mu[[i]]
+      )
+      value$sim_year <- yr
+      out[[method]][[i]] <- value
+    }
+  }
+  out
+}
