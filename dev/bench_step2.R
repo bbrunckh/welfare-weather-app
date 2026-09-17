@@ -178,11 +178,12 @@ if (!length(cfg$aggregation)) {
   stop("At least one aggregation method is required.", call. = FALSE)
 }
 if (!length(cfg$workloads) || !all(cfg$workloads %in% c(
-  "historical", "one_ssp_one_period", "three_ssps_three_periods"
+  "historical", "one_ssp_one_period", "two_ssps_two_periods",
+  "three_ssps_three_periods"
 ))) {
   stop(
     "WISEAPP_STEP2_WORKLOADS values must be historical, one_ssp_one_period, ",
-    "and/or three_ssps_three_periods.", call. = FALSE
+    "two_ssps_two_periods, and/or three_ssps_three_periods.", call. = FALSE
   )
 }
 if (!length(cfg$uncertainty_modes) || !all(cfg$uncertainty_modes %in%
@@ -647,6 +648,16 @@ inputs_by_country <- setNames(
         paste0(config$periods[[1L]][2L], "-12-31")
       ))
     ),
+    two_ssps_two_periods = list(
+      ssps = config$ssps[seq_len(min(2L, length(config$ssps)))],
+      fp_list = lapply(
+        config$periods[seq_len(min(2L, length(config$periods)))],
+        function(period) c(
+          paste0(period[1L], "-01-01"),
+          paste0(period[2L], "-12-31")
+        )
+      )
+    ),
     three_ssps_three_periods = list(
       ssps = config$ssps[seq_len(min(3L, length(config$ssps)))],
       fp_list = lapply(
@@ -957,6 +968,8 @@ for (country in names(inputs_by_country)) {
           (!length(workload_cfg$ssps) || !length(workload_cfg$fp_list))) next
       if (identical(workload, "three_ssps_three_periods") &&
           (length(workload_cfg$ssps) < 3L || length(workload_cfg$fp_list) < 3L)) next
+      if (identical(workload, "two_ssps_two_periods") &&
+          (length(workload_cfg$ssps) < 2L || length(workload_cfg$fp_list) < 2L)) next
       for (uncertainty in cfg$uncertainty_modes) {
         for (cache_state in c("cold", "warm")) {
           for (repetition in seq_len(cfg$repetitions)) {
