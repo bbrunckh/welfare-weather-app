@@ -12,11 +12,11 @@
 mod_2_03_diagnostics_ui <- function(id) {
   ns <- NS(id)
   tagList(
-    # ---- 0. Stale banner (INT-08) -------------------------------------------
+    # 0. Stale banner (INT-08) ----
     shiny::uiOutput(ns("stale_banner")),
     shiny::uiOutput(ns("simulation_summary_ui")),
 
-    # ---- 1. Weather inputs panel -------------------------------------------
+    # 1. Weather inputs panel ----
     shiny::h4(
       "Are simulated weather conditions within model support?",
       info_popover(
@@ -50,7 +50,7 @@ mod_2_03_diagnostics_ui <- function(id) {
       )
     ),
 
-    # ---- 2. Climate-model robustness (Figure D2-3A default) -----------------
+    # 2. Climate-model robustness (Figure D2-3A default) ----
     shiny::h4(
       "Are expected outcomes consistent across climate models?",
       info_popover(
@@ -76,7 +76,7 @@ mod_2_03_diagnostics_ui <- function(id) {
       )
     ),
 
-    # ---- 3. Weather-year trajectories (Figure D2-3B advanced) ---------------
+    # 3. Weather-year trajectories (Figure D2-3B advanced) ----
     shiny::h4(
       "How much can outcomes vary across weather-year draws?",
       info_popover(
@@ -150,7 +150,7 @@ mod_2_03_diagnostics_server <- function(id,
 
     if (is.null(tabset_session)) tabset_session <- session$parent %||% session
 
-    # ---- Reactive computations ---------------------------------------------
+    # Reactive computations ----
 
     diagnostic_cache_key <- NULL
     diagnostic_cache_value <- NULL
@@ -214,7 +214,7 @@ mod_2_03_diagnostics_server <- function(id,
       out
     })
 
-    # ---- renderUI / render* outputs ----------------------------------------
+    # renderUI / render* outputs ----
 
     output$diag_weather_vars_ui <- shiny::renderUI({
       sw <- if (!is.null(selected_weather)) selected_weather() else NULL
@@ -598,7 +598,7 @@ mod_2_03_diagnostics_server <- function(id,
     outputOptions(output, "model_robustness_plot", suspendWhenHidden = TRUE)
 
 
-    # ---- Insert Diagnostics tab on first hist_sim; remove when cleared -----
+    # Insert Diagnostics tab on first hist_sim; remove when cleared ----
 
     diag_tab_added <- reactiveVal(FALSE)
 
@@ -638,7 +638,7 @@ mod_2_03_diagnostics_server <- function(id,
       ignoreNULL = FALSE
     )
 
-    # ---- Suspend outputs when Results tab is hidden ----------------------
+    # Suspend outputs when Results tab is hidden ----
     outputOptions(output, "diag_weather_vars_ui", suspendWhenHidden = TRUE)
     outputOptions(output, "diag_weather_scenario_ui", suspendWhenHidden = TRUE)
     outputOptions(output, "diag_weather_density", suspendWhenHidden = TRUE)
@@ -646,7 +646,7 @@ mod_2_03_diagnostics_server <- function(id,
     outputOptions(output, "timeseries_plot", suspendWhenHidden = TRUE)
     outputOptions(output, "variance_share_warning", suspendWhenHidden = FALSE)
 
-    # ---- Return API --------------------------------------------------------
+    # Return API ----
     list(diag_tab_added = diag_tab_added)
   })
 }

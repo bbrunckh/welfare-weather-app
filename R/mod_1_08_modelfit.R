@@ -65,11 +65,11 @@ mod_1_08_modelfit_server <- function(id,
       )
     })
 
-    # ---- Internal state -----------------------------------------------------
+    # Internal state ----
 
     modelfit_tab_added <- reactiveVal(FALSE)
 
-    # ---- Helpers ------------------------------------------------------------
+    # Helpers ----
 
     # INT-05: bind diagnostic renderers to the fit-time snapshot so new
     # selections cannot relabel or re-frame an already-fitted model.
@@ -102,7 +102,7 @@ mod_1_08_modelfit_server <- function(id,
       is_logistic_fit(model_fit())
     })
 
-    # ---- Outputs ------------------------------------------------------------
+    # Outputs ----
 
     output$resid_weather1 <- renderPlot({
       req(full_model(), model_fit(), fit_snap())
@@ -370,7 +370,7 @@ mod_1_08_modelfit_server <- function(id,
       description = "Text-formatted native model summary shown in the expandable Model fit panel."
     )
 
-    # ---- Add tab (once) -----------------------------------------------------
+    # Add tab (once) ----
 
     # Reactive layout: 1 panel for 1 weather var, 2 side-by-side for >= 2.
     # Wrapping in renderUI keeps the layout in sync if the model is re-fit

@@ -704,14 +704,13 @@ aggregate_sim_preds <- function(preds, so, agg_method, deviation, loss_frame,
 
   # Group by (model, sim_year) when a model column is present (future scenarios
   # with all ensemble members pooled), so the CI reflects model * year variation.
-  # --- Two-stage aggregation ----------------------------------------------- #
+  # Two-stage aggregation ----
   # IMPORTANT: order of operations matters for coefficient uncertainty bands.  #
   # Stage 1: aggregate within each (draw_id, model, sim_year) to a scalar.    #
   #          This gives one aggregate statistic per coefficient draw.           #
   # Stage 2: take percentiles of that scalar across draw_id.                   #
   # Taking percentiles BEFORE aggregating gives quantiles of the individual    #
   # welfare distribution - a completely different quantity. Don't mix these up. #
-  # --------------------------------------------------------------------------- #
 
   has_draws <- "draw_id" %in% names(preds) && !all(is.na(preds$draw_id))
 

@@ -14,7 +14,7 @@
   uniq_vals <- unique(all_vals)
   is_binary <- length(uniq_vals) <= 2 && all(uniq_vals %in% c(0, 1))
 
-  # ---- Binary: grouped bar plot of proportions -----------------------------
+  # Binary: grouped bar plot of proportions ----
   if (is_binary) {
     df <- data.frame(
       Group = factor(rep(c("Baseline", "Policy-adjusted"), each = 2),
@@ -58,7 +58,7 @@
     )
   }
 
-  # ---- Continuous: ridge density (Policy on top, Baseline on bottom) -------
+  # Continuous: ridge density (Policy on top, Baseline on bottom) ----
   use_log <- all(all_vals > 0)
 
   df <- data.frame(
@@ -1095,11 +1095,11 @@ make_step3_decision_table_html <- function(df, subheader = NULL, footnotes = NUL
   }
 
   tagList(
-    # ---- 0. Stale banner (INT-08), policy summary, & headline cards --------
+    # 0. Stale banner (INT-08), policy summary, & headline cards ----
     shiny::uiOutput(ns("stale_banner_ui")),
     shiny::uiOutput(ns("policy_summary_ui")),
 
-    # ---- 1. Analysis controls: Aggregation method & poverty line ------------
+    # 1. Analysis controls: Aggregation method & poverty line ----
     shiny::div(
       class = "results-aggregation-panel",
       shiny::div(
@@ -1165,10 +1165,10 @@ make_step3_decision_table_html <- function(df, subheader = NULL, footnotes = NUL
       )
     ),
 
-    # ---- 2. Headline cards --------------------------------------------------
+    # 2. Headline cards ----
     shiny::uiOutput(ns("headline_cards_ui")),
 
-    # ---- Section 1: Annual weather variation & policy shift -----------------
+    # Section 1: Annual weather variation & policy shift ----
     shiny::h4(
       sec1_heading,
       info_popover(
@@ -1211,7 +1211,7 @@ make_step3_decision_table_html <- function(df, subheader = NULL, footnotes = NUL
       )
     ),
 
-    # ---- Section 2: Adverse weather years (tail protection) ----------------
+    # Section 2: Adverse weather years (tail protection) ----
     shiny::h4(
       "Does the policy protect against adverse weather years?",
       info_popover(
@@ -1259,7 +1259,7 @@ make_step3_decision_table_html <- function(df, subheader = NULL, footnotes = NUL
       )
     ),
 
-    # ---- Section 3: Exceedance probability curves --------------------------
+    # Section 3: Exceedance probability curves ----
     shiny::h4(
       "How does the policy change the probability of severe outcomes?",
       info_popover(
@@ -1304,7 +1304,7 @@ make_step3_decision_table_html <- function(df, subheader = NULL, footnotes = NUL
       )
     ),
 
-    # ---- Section 4: Decision & return-period table -------------------------
+    # Section 4: Decision & return-period table ----
     shiny::h4(
       "Detailed baseline, policy, and return-period outcomes",
       info_popover(
@@ -1519,7 +1519,7 @@ make_step3_decision_table_html <- function(df, subheader = NULL, footnotes = NUL
     names(sc)
   })
 
-  # ---- PERF-31: per-method aggregation cache -------------------------------
+  # PERF-31: per-method aggregation cache ----
   # Aggregating baseline/policy hist + every scenario member is expensive and
   # depends only on (source, aggregation method, poverty line). `cmp_deviation`
   # is applied downstream (hist_ref subtraction in the row builders + axis
@@ -1851,7 +1851,7 @@ make_step3_decision_table_html <- function(df, subheader = NULL, footnotes = NUL
     }))
   })
 
-  # ---- Shared deviation reference (baseline historical) -------------------
+  # Shared deviation reference (baseline historical) ----
   hist_ref_val <- reactive({
     req(baseline_agg_hist())
     deviation <- input$cmp_deviation %||% "none"
@@ -1876,7 +1876,7 @@ make_step3_decision_table_html <- function(df, subheader = NULL, footnotes = NUL
     )
   })
 
-  # ---- Per-source helpers that mirror Mod 2's reactive trio --------------
+  # Per-source helpers that mirror Mod 2's reactive trio ----
   # Each takes the per-source aggregate (Mod 2 list-col tibble) and emits
   # the same long-format pointrange / timeseries / exceedance / threshold
   # rows Mod 2's plotters consume, tagged with a `source` column.
@@ -2269,7 +2269,7 @@ make_step3_decision_table_html <- function(df, subheader = NULL, footnotes = NUL
     )
   })
 
-  # ---- Section 1: Annual weather variation (baseline and policy) -----------
+  # Section 1: Annual weather variation (baseline and policy) ----
   output$annual_distribution_plot <- renderPlot({
     req(timeseries_curves_rv())
     plot_annual_distribution(
@@ -2285,7 +2285,7 @@ make_step3_decision_table_html <- function(df, subheader = NULL, footnotes = NUL
   })
   outputOptions(output, "annual_distribution_plot", suspendWhenHidden = TRUE)
 
-  # ---- Section 2: Adverse weather years (tail protection) ------------------
+  # Section 2: Adverse weather years (tail protection) ----
   adverse_dot_data_rv <- reactive({
     req(threshold_table_rv())
     dot <- step3_adverse_dot_data(
@@ -2318,7 +2318,7 @@ make_step3_decision_table_html <- function(df, subheader = NULL, footnotes = NUL
   )
   outputOptions(output, "adverse_dot_plot", suspendWhenHidden = TRUE)
 
-  # ---- Section 4: Decision & return-period table ---------------------------
+  # Section 4: Decision & return-period table ----
   threshold_table_df <- function() {
     tbl <- threshold_table_rv()
     if (is.null(tbl) || !nrow(tbl) || !"Estimate" %in% names(tbl)) {

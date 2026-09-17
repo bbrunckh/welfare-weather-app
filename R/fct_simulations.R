@@ -583,7 +583,7 @@ run_sim_pipeline <- function(weather_raw,
     NULL
   }
 
-  # ---- Prediction - dispatch on engine ------------------------------------
+  # Prediction - dispatch on engine ----
 
   out <- if (is_rif) {
     # RIF path - quantile delta method
@@ -667,7 +667,7 @@ run_sim_pipeline <- function(weather_raw,
   # aggregate_with_uncertainty_delta() after coefficient perturbation.
   y_point <- out$.fitted
 
-  # ---- RIF policy correction --------------------------------------------- #
+  # RIF policy correction ----
   # In RIF policy mode the prediction above was made against svy_baseline,
   # so y_point currently holds the *baseline-x* level (matching what Mod 2's
   # Step 2 hist_sim shows). Add the decomposition's delta_total - which
@@ -704,7 +704,7 @@ run_sim_pipeline <- function(weather_raw,
     }
   }
 
-  # ---- SP cash transfer (post-prediction, level scale) -------------------- #
+  # SP cash transfer (post-prediction, level scale) ----
   # SP_TRANSFER_COL is set on svy by apply_policy_to_svy() in fct_policy_sim.R.
   # The transfer is a direct welfare boost, not a regression covariate, so it
   # is added after prediction. To stay consistent with the decomposition
@@ -731,7 +731,7 @@ run_sim_pipeline <- function(weather_raw,
     }
   }
 
-  # ---- Simulation year and weights ---------------------------------------- #
+  # Simulation year and weights ----
   sim_year <- out$sim_year
 
   weight <- if ("weight" %in% names(out)) out$weight else NULL
@@ -747,7 +747,7 @@ run_sim_pipeline <- function(weather_raw,
   # baseline survey row) onto the expanded (HH x year) prediction rows.
   svy_row_id <- if (".svy_row_id" %in% names(out)) out$.svy_row_id else NULL
 
-  # ---- Factor loading matrix ---------------------------------------------- #
+  # Factor loading matrix ----
   # Computed once per key - not per draw.
   # F_loading = X_nonFE %*% L  where L is the Cholesky factor of Sigma.
   # NULL when chol_obj = NULL (point estimates only).
@@ -789,7 +789,7 @@ run_sim_pipeline <- function(weather_raw,
 
   rm(survey_wd_sim)
 
-  # ---- Training augmentation for residual drawing ------------------------- #
+  # Training augmentation for residual drawing ----
   # train_aug carries .resid for "original" and "resample" residual paths
   # inside aggregate_with_uncertainty_delta(). Identical across keys - prefer
   # the precomputed version when available; fall back to per-call computation

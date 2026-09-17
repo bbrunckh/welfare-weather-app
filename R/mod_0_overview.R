@@ -196,7 +196,7 @@ mod_0_overview_server <- function(id) {
   moduleServer(id, function(input, output, session) {
     ns <- session$ns
 
-    # ---- Per-type connection options UI -------------------------------------
+    # Per-type connection options UI ----
 
     output$connection_options_ui <- renderUI({
       req(input$connection_type)
@@ -285,7 +285,7 @@ mod_0_overview_server <- function(id) {
       )
     })
 
-    # ---- Collect connection parameters (delegates to fct_connection.R) ------
+    # Collect connection parameters (delegates to fct_connection.R) ----
 
     connection_params <- reactive({
       req(input$connection_type)
@@ -317,7 +317,7 @@ mod_0_overview_server <- function(id) {
       )
     })
 
-    # ---- Validation (delegates to fct_connection.R) -------------------------
+    # Validation (delegates to fct_connection.R) ----
 
     connection_valid <- reactive({
       params <- connection_params()
@@ -372,7 +372,7 @@ mod_0_overview_server <- function(id) {
       }
     })
 
-    # ---- Apply connection on button click -----------------------------------
+    # Apply connection on button click ----
 
     # A source switch invalidates the previous attempt's status
     observeEvent(input$connection_type,
@@ -492,7 +492,7 @@ mod_0_overview_server <- function(id) {
         cpi_ppp(NULL)
         pov_lines(NULL)
 
-        # ---- Load metadata -----------------------------------------------------
+        # Load metadata ----
 
         load_notif <- showNotification(
           "Loading metadata files...",
@@ -542,7 +542,7 @@ mod_0_overview_server <- function(id) {
       ignoreInit = TRUE
     )
 
-    # ---- Return API ---------------------------------------------------------
+    # Return API ----
 
     list(
       local_dir = reactive({

@@ -1460,7 +1460,7 @@ export_menu_server <- function(input, output, session,
     contentType = "application/json"
   )
 
-  # ---- Import ---------------------------------------------------------------
+  # Import ----
   # A file input inside a dropdown is awkward to operate (any click inside the
   # menu closes it), so the import flow opens a modal instead.
 

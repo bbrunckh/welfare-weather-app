@@ -45,7 +45,7 @@ mod_3_02_infra_server <- function(id,
   moduleServer(id, function(input, output, session) {
     ns <- session$ns
 
-    # ---- Get model coefficients ------------------------------------------
+    # Get model coefficients ----
     # REACT-08: shared coefficient decomposition (utils_mod_1_helpers.R).
     coeffs_rx <- model_coefficient_reactives(selected_model)
     ind_coeff <- coeffs_rx$individual
@@ -55,7 +55,7 @@ mod_3_02_infra_server <- function(id,
     interaction_names <- coeffs_rx$interactions
     coeffs <- coeffs_rx$all
 
-    # ---- Candidate variables for this category --------------------------
+    # Candidate variables for this category ----
     infra_patterns <- c("electricity", "imp_wat_rec", "imp_san_rec", "ttime_health", "piped", "piped_to_prem", "imp_wat_san_rec")
 
     any_selected <- reactive({
@@ -86,7 +86,7 @@ mod_3_02_infra_server <- function(id,
       policy_placeholder_tag("infrastructure", cand)
     })
 
-    # ---- Helper: slider + universal access toggle -----------------------
+    # Helper: slider + universal access toggle ----
     # Renders a sliderInput with a checkbox for universal access.
     # When universal access is checked the slider is hidden/ignored.
 
@@ -124,7 +124,7 @@ mod_3_02_infra_server <- function(id,
       )
     }
 
-    # ---- Electricity access ---------------------------------------------
+    # Electricity access ----
 
     show_elec <- reactive({
       any(grepl("electricity", coeffs(), ignore.case = TRUE))
@@ -135,7 +135,7 @@ mod_3_02_infra_server <- function(id,
       infra_access_ui("elec", "Access to electricity", "fa-bolt")
     })
 
-    # ---- Improved water access ------------------------------------------
+    # Improved water access ----
 
     show_water <- reactive({
       any(grepl("imp_wat_rec", coeffs(), ignore.case = TRUE))
@@ -146,7 +146,7 @@ mod_3_02_infra_server <- function(id,
       infra_access_ui("water", "Access to improved water", "fa-droplet")
     })
 
-    # ---- Improved sanitation access -------------------------------------
+    # Improved sanitation access ----
 
     show_sanitation <- reactive({
       any(grepl("imp_san_rec", coeffs(), ignore.case = TRUE))
@@ -157,7 +157,7 @@ mod_3_02_infra_server <- function(id,
       infra_access_ui("sanitation", "Access to improved sanitation", "fa-toilet")
     })
 
-    # ---- Piped water access ---------------------------------------------
+    # Piped water access ----
 
     show_piped <- reactive({
       any(grepl("piped", coeffs(), ignore.case = TRUE))
@@ -168,7 +168,7 @@ mod_3_02_infra_server <- function(id,
       infra_access_ui("piped", "Access to piped water", "fa-tint")
     })
 
-    # ---- Piped to premesis water access ---------------------------------
+    # Piped to premesis water access ----
 
     show_piped_to_prem <- reactive({
       any(grepl("piped_to_prem", coeffs(), ignore.case = TRUE))
@@ -179,7 +179,7 @@ mod_3_02_infra_server <- function(id,
       infra_access_ui("piped_to_prem", "Access to piped water (to premises)", "fa-tint")
     })
 
-    # ---- Improved water and sanitation access ---------------------------
+    # Improved water and sanitation access ----
 
     show_imp_wat_san <- reactive({
       any(grepl("imp_wat_san_rec", coeffs(), ignore.case = TRUE))
@@ -190,7 +190,7 @@ mod_3_02_infra_server <- function(id,
       infra_access_ui("imp_wat_san", "Access to improved water and sanitation", "fa-tint")
     })
 
-    # ---- Health facility access -----------------------------------------
+    # Health facility access ----
     # Two modes: reduce travel time by % OR cap at maximum minutes.
 
     show_health <- reactive({
@@ -255,7 +255,7 @@ mod_3_02_infra_server <- function(id,
       }
     )
 
-    # ---- Return API -----------------------------------------------------
+    # Return API ----
 
     list(
       infra_scenario = reactive({

@@ -9,7 +9,7 @@ app_server <- function(input, output, session) {
   # the root session so the final session in this process releases them.
   .duck_register_session(session)
 
-  # ---- Step 0: data connection, config, and metadata loading ---------------
+  # Step 0: data connection, config, and metadata loading ----
 
   overview_api <- mod_0_overview_server(id = "overview")
 
@@ -22,7 +22,7 @@ app_server <- function(input, output, session) {
   run_step2_trigger <- shiny::reactiveVal(NULL)
   run_step3_trigger <- shiny::reactiveVal(NULL)
 
-  # ---- Step 1: modelling ---------------------------------------------------
+  # Step 1: modelling ----
   # Pass reactives from overview_api
 
   step1_api <- mod_1_modelling_server(
@@ -37,7 +37,7 @@ app_server <- function(input, output, session) {
     load_weather_trigger = load_weather_trigger
   )
 
-  # ---- Step 2: simulation --------------------------------------------------
+  # Step 2: simulation ----
   # Pass selected Step 1 reactives
 
   step2_api <- mod_2_simulation_server(
@@ -53,7 +53,7 @@ app_server <- function(input, output, session) {
     run_trigger       = run_step2_trigger
   )
 
-  # ---- Step 3: policy scenarios --------------------------------------------
+  # Step 3: policy scenarios ----
   # Pass selected Step 1 & 2 reactives
   step3_api <- mod_3_scenario_server(
     id = "step3",
@@ -120,7 +120,7 @@ app_server <- function(input, output, session) {
 
   config_imported <- shiny::reactiveVal(0L)
 
-  # ---- Navbar step status badges (UI-47) -----------------------------------
+  # Navbar step status badges (UI-47) ----
   # Steps are freely navigable and results persist across tab switches, so the
   # navbar is the one place that shows every step's state at once. Each badge
   # reads the step's stored result plus its INT-08 stale flag, so it agrees
@@ -155,7 +155,7 @@ app_server <- function(input, output, session) {
     step_label = "Step 3 (policy scenarios)"
   )
 
-  # ---- Run provenance (UI-49) ----------------------------------------------
+  # Run provenance (UI-49) ----
   # One record per completed step, built from the immutable metadata stored
   # with each result (`.snap` / `.sig`) rather than from live inputs - so it
   # describes the run that produced the results, not whatever is selected now.
@@ -194,7 +194,7 @@ app_server <- function(input, output, session) {
     ))
   })
 
-  # ---- Export menu (UI-48) --------------------------------------------------
+  # Export menu (UI-48) ----
   # Not a module: the configuration snapshot reads the *root* input object, so
   # every module's namespaced controls are captured in one pass.
 

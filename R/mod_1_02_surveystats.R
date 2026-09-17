@@ -63,7 +63,7 @@ mod_1_02_surveystats_server <- function(
       shiny::showNotification(msg, type = type, duration = duration)
     }
 
-    # ---- Button (shown once selected_surveys is populated) ------------------
+    # Button (shown once selected_surveys is populated) ----
 
     output$survey_stats_button_ui <- renderUI({
       req(nrow(selected_surveys()) > 0)
@@ -78,7 +78,7 @@ mod_1_02_surveystats_server <- function(
 
     survey_tab_added <- reactiveVal(FALSE)
 
-    # ---- Data storage -------------------------------------------------------
+    # Data storage ----
 
     survey_data <- reactiveVal(NULL)
     # INT-08: bumped on every successful survey load; downstream run
@@ -137,7 +137,7 @@ mod_1_02_surveystats_server <- function(
     # sample's extent.
     map_data_version <- shiny::reactiveVal(0L)
 
-    # ---- Shared stats base (PERF-40) ----------------------------------------
+    # Shared stats base (PERF-40) ----
     # Every summary-stats table on the tab summarises the same survey frame;
     # six independent renderDT pipelines each re-subset it and re-run the
     # grouped collapse passes over their own var set on every load (~5s at
@@ -173,7 +173,7 @@ mod_1_02_surveystats_server <- function(
       )
     })
 
-    # ---- Load and prepare data on button click ------------------------------
+    # Load and prepare data on button click ----
 
     survey_stats_event <- shiny::reactiveVal(NULL)
     shiny::observeEvent(input$survey_stats,
@@ -262,7 +262,7 @@ mod_1_02_surveystats_server <- function(
 
         publish_new_survey_data(df)
 
-        # ---- H3 map data (computed once per button click) -------------------
+        # H3 map data (computed once per button click) ----
         h3_fnames <- ss |>
           dplyr::distinct(code, year, survname, source) |>
           dplyr::mutate(fname = paste0(
@@ -314,7 +314,7 @@ mod_1_02_surveystats_server <- function(
               .duck_load_ext("spatial")
               .duck_load_ext("h3")
 
-              # -- Location of interviews map ------------------------------------
+              # Location of interviews map ----
               # One row per H3 cell: a GeoJSON geometry string (the Leaflet
               # fallback artifact; MapLibre decodes geometry in the browser from
               # cell ids, so it is never sent when WebGL is available) plus the
@@ -399,7 +399,7 @@ mod_1_02_surveystats_server <- function(
           type = "message", duration = 3
         )
 
-        # ---- Outputs (defined once on first click) ---------------------------
+        # Outputs (defined once on first click) ----
 
         if (!survey_tab_added()) {
           # Interview dates bar chart. Grouped columns keep wave totals directly
@@ -449,7 +449,7 @@ mod_1_02_surveystats_server <- function(
             )
           }
 
-          # ---- Location of interviews payload stream ---------------------------
+          # Location of interviews payload stream ----
           # One reactive observer drives the hex map: data loads and wave
           # toggles both land here as fresh `set` payloads (cheap - cell ids
           # and values only, no geometry serialization). The camera is fitted
@@ -616,7 +616,7 @@ mod_1_02_surveystats_server <- function(
             )
           })
 
-          # ---- Selection summary card (replaces the old DT table) -------------
+          # Selection summary card (replaces the old DT table) ----
           # Binds live to selected_surveys()/analysis_unit() so the card follows
           # the sidebar selection, like the DT table it replaces.
 
@@ -707,7 +707,7 @@ mod_1_02_surveystats_server <- function(
             base = stats_base
           )
 
-          # ---- Outcome summary moved to the Outcome stats tab's selection card --
+          # Outcome summary moved to the Outcome stats tab's selection card ----
 
           # Append Survey stats tab to parent tabset
           tryCatch(
@@ -827,7 +827,7 @@ mod_1_02_surveystats_server <- function(
       ignoreNULL = TRUE
     )
 
-    # ---- Return API ---------------------------------------------------------
+    # Return API ----
 
     list(
       survey_data = survey_data,

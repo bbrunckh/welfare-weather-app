@@ -44,7 +44,7 @@ mod_1_07_results_server <- function(id,
 
     if (is.null(tabset_session)) tabset_session <- session$parent %||% session
 
-    # ---- Internal state ------------------------------------------------------
+    # Internal state ----
 
     model_fit_val <- reactiveVal(NULL)
     results_tab_added <- reactiveVal(FALSE)
@@ -54,7 +54,7 @@ mod_1_07_results_server <- function(id,
     fit_generation <- reactiveVal(0L)
     fit_status <- reactiveVal("idle")
 
-    # ---- Run signature (INT-08) ----------------------------------------------
+    # Run signature (INT-08) ----
     # Immutable snapshot of everything the fit depends on; recomputed from
     # live inputs and compared with the stored fit's signature.
 
@@ -122,7 +122,7 @@ mod_1_07_results_server <- function(id,
 
     native_fit <- function(fit) extract_native_fit(fit, model_fit_val()$engine)
 
-    # ---- Run model -----------------------------------------------------------
+    # Run model ----
     # The "Run model" button lives in mod_1_06_model; the reactive `run_model`
     # parameter wraps that button's input counter and fires here on click.
 
@@ -239,7 +239,7 @@ mod_1_07_results_server <- function(id,
       ignoreInit = TRUE
     )
 
-    # ---- Render outputs ------------------------------------------------------
+    # Render outputs ----
 
     observeEvent(model_fit_val(),
       {
@@ -253,7 +253,7 @@ mod_1_07_results_server <- function(id,
         sw_snap <- snap$weather
         outcome_snap <- snap$outcome
 
-        # ---- Selected model card (snapshot, INT-05 pattern) ------------------
+        # Selected model card (snapshot, INT-05 pattern) ----
         # Describes the specification the button captured, like every other
         # output on this tab.
 
@@ -282,7 +282,7 @@ mod_1_07_results_server <- function(id,
         # closure (and with it the fit-time snapshot the figure is drawn from);
         # `wise_export_register()` replaces by key, so re-fits cannot accumulate
         # duplicate entries.
-        # ---- Shared figure language (engine- and scale-aware) ------------------
+        # Shared figure language (engine- and scale-aware) ----
         # One set of labels/flags derived from the fit snapshot so section 3
         # (relationship), section 4 (who is most affected), section 5
         # (stability) and the focused table cannot disagree.
@@ -694,7 +694,7 @@ mod_1_07_results_server <- function(id,
           )
         )
 
-        # ---- At a glance: outcome definition + headline cards -----------------
+        # At a glance: outcome definition + headline cards ----
         # One row of four cards per weather variable (effect, who is most
         # affected, spec robustness, sample/fit). All values derive from the fit
         # snapshot (INT-05) through the single translation path in
@@ -724,7 +724,7 @@ mod_1_07_results_server <- function(id,
           )
         )
 
-        # ---- Section 6: focused estimates table (T2) ---------------------------
+        # Section 6: focused estimates table (T2) ----
         # Results-first: weather + interaction coefficients of the full
         # specification with CI, p, and the translated per-+1-SD column that
         # matches the At a glance cards. The full AER table stays reachable as
@@ -872,7 +872,7 @@ mod_1_07_results_server <- function(id,
           who_fig(2)()
         })
 
-        # ---- Add / switch Results tab -----------------------------------------
+        # Add / switch Results tab ----
 
         # INT-05: engine-conditional headings are reactive outputs bound to the
         # current fit, so a re-fit with a different engine updates them instead
@@ -1134,7 +1134,7 @@ mod_1_07_results_server <- function(id,
       ignoreInit = TRUE
     )
 
-    # ---- Return --------------------------------------------------------------
+    # Return ----
 
     list(
       model_fit = model_fit_val,

@@ -33,10 +33,10 @@ mod_2_01_weathersim_ui <- function(id) {
 
   tags$div(
     class = "step2-sidebar",
-    # ---- Settings summary banner (always visible) --------------------------
+    # Settings summary banner (always visible) ----
     shiny::uiOutput(ns("settings_summary")),
 
-    # ---- Simulation settings flyout (same pattern as Step 1 'Configure') ---
+    # Simulation settings flyout (same pattern as Step 1 'Configure') ----
     # UI-02: shared flyout block - anchored to its toggle, one-open state,
     # aria-expanded, focus management, Escape to close (see custom.js).
     config_flyout_block(
@@ -44,7 +44,7 @@ mod_2_01_weathersim_ui <- function(id) {
       "Simulation settings",
       toggle_label = "Simulation settings",
 
-      # -- Baseline survey ----------------------------------------------------
+      # Baseline survey ----
       shiny::tags$div(
         class = "step2-section-label",
         "Baseline survey"
@@ -53,7 +53,7 @@ mod_2_01_weathersim_ui <- function(id) {
       shiny::uiOutput(ns("baseline_warning_ui")),
       shiny::tags$hr(style = "margin: 6px 0;"),
 
-      # -- Climate scenarios --------------------------------------------------
+      # Climate scenarios ----
       shiny::tags$div(
         class = "step2-section-label",
         "Climate scenarios"
@@ -71,7 +71,7 @@ mod_2_01_weathersim_ui <- function(id) {
       ),
       shiny::tags$hr(style = "margin: 6px 0;"),
 
-      # -- Projection period -------------------------------------------------
+      # Projection period ----
       shiny::tags$div(
         class = "step2-section-label",
         "Projection period"
@@ -90,7 +90,7 @@ mod_2_01_weathersim_ui <- function(id) {
       shiny::uiOutput(ns("fut_years_warning")),
       shiny::tags$hr(style = "margin: 6px 0;"),
 
-      # -- Historical period --------------------------------------------------
+      # Historical period ----
       shiny::tags$h6(
         "Historical weather distribution period",
         info_popover(
@@ -120,7 +120,7 @@ mod_2_01_weathersim_ui <- function(id) {
       ),
       shiny::tags$hr(style = "margin: 6px 0;"),
 
-      # -- Additional future periods ------------------------------------------
+      # Additional future periods ----
       shiny::tags$h6("Additional projection periods",
         style = "font-weight:600; margin-bottom:4px;"
       ),
@@ -153,7 +153,7 @@ mod_2_01_weathersim_ui <- function(id) {
       ),
       shiny::tags$hr(style = "margin: 6px 0;"),
 
-      # -- Residual method ----------------------------------------------------
+      # Residual method ----
       shiny::tags$h6(
         "Simulation residuals",
         info_popover(
@@ -175,7 +175,7 @@ mod_2_01_weathersim_ui <- function(id) {
       ),
       shiny::tags$hr(style = "margin: 6px 0;"),
 
-      # -- Coefficient uncertainty -------------------------------------------
+      # Coefficient uncertainty ----
       shiny::tags$h6(
         "Model coefficient uncertainty",
         info_popover(
@@ -223,7 +223,7 @@ mod_2_01_weathersim_ui <- function(id) {
     ),
     shiny::tags$hr(style = "margin: 10px 0;"),
 
-    # ---- Run simulation button (hidden for RIF engine) ---------------------
+    # Run simulation button (hidden for RIF engine) ----
     shiny::uiOutput(ns("run_sim_ui"))
   )
 }
@@ -276,7 +276,7 @@ mod_2_01_weathersim_server <- function(id,
   moduleServer(id, function(input, output, session) {
     ns <- session$ns
 
-    # ---- Internal state ----------------------------------------------------
+    # Internal state ----
     hist_sim <- reactiveVal(NULL)
     saved_scenarios <- reactiveVal(list())
     # INT-08: TRUE while the stored simulation's run signature no longer
@@ -295,7 +295,7 @@ mod_2_01_weathersim_server <- function(id,
     }
     session$onSessionEnded(cleanup_weather_stores)
 
-    # ---- Baseline survey reactives ----------------------------------------
+    # Baseline survey reactives ----
 
     # Derive available survey x year choices from survey_weather.
     # Returns a named character vector: label -> "survname|year" value.
@@ -346,7 +346,7 @@ mod_2_01_weathersim_server <- function(id,
     })
 
 
-    # ---- Settings summary banner -------------------------------------------
+    # Settings summary banner ----
 
     output$baseline_survey_ui <- shiny::renderUI({
       ch <- baseline_survey_choices()
@@ -473,7 +473,7 @@ mod_2_01_weathersim_server <- function(id,
       )
     })
 
-    # ---- 30-year minimum window warning ------------------------------------
+    # 30-year minimum window warning ----
 
     output$hist_years_warning <- shiny::renderUI({
       req(input$hist_years)
@@ -510,7 +510,7 @@ mod_2_01_weathersim_server <- function(id,
       )
     })
 
-    # ---- Derived config reactives ------------------------------------------
+    # Derived config reactives ----
 
     # survey_weather filtered to the selected baseline rows.
     # Used in place of survey_weather() inside observeEvent(run_sim).
@@ -591,7 +591,7 @@ mod_2_01_weathersim_server <- function(id,
       do.call(rbind, do.call(c, rows))
     })
 
-    # ---- Run simulation button (hidden for non-linear or RIF engine) --------------------
+    # Run simulation button (hidden for non-linear or RIF engine) ----
 
     output$run_sim_ui <- shiny::renderUI({
       mf <- model_fit()
@@ -668,13 +668,13 @@ mod_2_01_weathersim_server <- function(id,
       }
     })
 
-    # ---- Run simulation on button click ------------------------------------
+    # Run simulation on button click ----
 
     # REACT-02: one simulation at a time - double-clicks are ignored and the
     # button is disabled for the duration of the run.
     sim_guard <- .busy_guard(session, run_sim)
 
-    # ---- Run signature (INT-08) ----------------------------------------------
+    # Run signature (INT-08) ----
     # Everything the simulation depends on, captured at run time into the
     # result and recomputed from live inputs for the staleness comparison.
 
@@ -760,7 +760,7 @@ mod_2_01_weathersim_server <- function(id,
         }
         on.exit(sim_guard$end(), add = TRUE)
 
-        # ---- Gather inputs ---------------------------------------------------
+        # Gather inputs ----
         sw <- selected_weather()
         so <- selected_outcome()
         sh <- selected_hist()
@@ -784,7 +784,7 @@ mod_2_01_weathersim_server <- function(id,
           list()
         }
 
-        # ---- RIF-specific params -------------------------------------------
+        # RIF-specific params ----
         engine <- mf$engine %||% "fixest"
         is_rif <- identical(engine, "rif")
         fit_multi <- if (is_rif) mf$fit3 else NULL
@@ -796,7 +796,7 @@ mod_2_01_weathersim_server <- function(id,
 
 
         shiny::withProgress(message = "Running climate simulation...", value = 0, {
-          # ---- Run simulation ------------------------------------------------
+          # Run simulation ----
           result <- tryCatch(
             fct_run_simulation(
               sw = sw,
@@ -849,7 +849,7 @@ mod_2_01_weathersim_server <- function(id,
           )
           req(!is.null(result))
 
-          # ---- Store results (reactive side effects) -------------------------
+          # Store results (reactive side effects) ----
           # Aggregation now happens lazily in mod_2_02_results.R via the analytic
           # delta method - no pre-aggregation step here.
           # INT-05: bind the historical scenario label into the result so the
@@ -891,7 +891,7 @@ mod_2_01_weathersim_server <- function(id,
           shiny::setProgress(value = 1, detail = "Results ready")
         })
 
-        # ---- REACT-12: partial failures get a prominent persistent warning ----
+        # REACT-12: partial failures get a prominent persistent warning ----
         # (Historical or whole-group failures throw inside fct_run_simulation,
         # so reaching this point means results are publishable.)
         sim_failures <- result$failures %||% list()
@@ -915,7 +915,7 @@ mod_2_01_weathersim_server <- function(id,
           )
         }
 
-        # ---- Completion notification -----------------------------------------
+        # Completion notification ----
         message(sprintf(
           "[wiseapp] TOTAL wall time: %s | weather: %s | pipelines: %s | %d/%d key(s)",
           format_elapsed(result$t_elapsed),
@@ -934,7 +934,7 @@ mod_2_01_weathersim_server <- function(id,
       ignoreInit = TRUE
     )
 
-    # ---- Return API --------------------------------------------------------
+    # Return API ----
 
     list(
       hist_sim = hist_sim,

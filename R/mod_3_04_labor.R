@@ -44,7 +44,7 @@ mod_3_04_labor_server <- function(id,
   moduleServer(id, function(input, output, session) {
     ns <- session$ns
 
-    # ---- Get model coefficients ------------------------------------------
+    # Get model coefficients ----
     # REACT-08: shared coefficient decomposition (utils_mod_1_helpers.R).
     coeffs_rx <- model_coefficient_reactives(selected_model)
     ind_coeff <- coeffs_rx$individual
@@ -54,7 +54,7 @@ mod_3_04_labor_server <- function(id,
     interaction_names <- coeffs_rx$interactions
     coeffs <- coeffs_rx$all
 
-    # ---- Candidate variables for this category --------------------------
+    # Candidate variables for this category ----
     labor_patterns <- c("employed", "selfemployed", "agriculture", "industry", "services")
 
     any_selected <- reactive({
@@ -86,7 +86,7 @@ mod_3_04_labor_server <- function(id,
       policy_placeholder_tag("labor market", cand)
     })
 
-    # ---- Helper: pp slider ---------------------------------------------
+    # Helper: pp slider ----
     # Renders a simple percentage-point slider with icon label.
 
     labor_pp_ui <- function(input_id, label, icon_class,
@@ -112,7 +112,7 @@ mod_3_04_labor_server <- function(id,
       )
     }
 
-    # ---- Employment rate change -----------------------------------------
+    # Employment rate change ----
 
     show_emp <- reactive({
       cv <- coeffs()
@@ -128,7 +128,7 @@ mod_3_04_labor_server <- function(id,
       )
     })
 
-    # ---- Sectoral composition ------------------------------------------
+    # Sectoral composition ----
     # Three sliders sum to 100pp - agriculture anchors, manufacturing and
     # services are user-controlled, agriculture = 100 - mfg - services.
 
@@ -187,7 +187,7 @@ mod_3_04_labor_server <- function(id,
       shiny::outputOptions(output, out_id, suspendWhenHidden = FALSE)
     })
 
-    # ---- Agriculture share derived from mfg + services -----------------
+    # Agriculture share derived from mfg + services ----
 
     sector_agri <- reactive({
       mfg <- input$sector_manufacturing %||% 0
@@ -227,7 +227,7 @@ mod_3_04_labor_server <- function(id,
       )
     })
 
-    # ---- Return API -----------------------------------------------------
+    # Return API ----
     list(
       labor_scenario = reactive({
         list(

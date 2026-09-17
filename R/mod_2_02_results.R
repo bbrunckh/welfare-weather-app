@@ -53,11 +53,11 @@ mod_2_02_results_ui <- function(id) {
   }
 
   tagList(
-    # ---- 0. Stale banner (INT-08) -------------------------------------------
+    # 0. Stale banner (INT-08) ----
     shiny::uiOutput(ns("stale_banner")),
     shiny::uiOutput(ns("simulation_summary_ui")),
 
-    # ---- 1. Analysis controls: Aggregation method & poverty line ------------
+    # 1. Analysis controls: Aggregation method & poverty line ----
     shiny::div(
       class = "results-aggregation-panel",
       shiny::div(
@@ -122,9 +122,9 @@ mod_2_02_results_ui <- function(id) {
       )
     ),
 
-    # ---- 2. Headline cards --------------------------------------------------
+    # 2. Headline cards ----
     shiny::uiOutput(ns("headline_cards_ui")),
-    # ---- Section 1: Central outcomes & weather-year variation ---------------
+    # Section 1: Central outcomes & weather-year variation ----
     shiny::h4(
       sec1_heading,
       info_popover(
@@ -167,7 +167,7 @@ mod_2_02_results_ui <- function(id) {
       )
     ),
 
-    # ---- Section 2: Adverse weather years (tail risk) -----------------------
+    # Section 2: Adverse weather years (tail risk) ----
     shiny::h4(
       "What outcomes are predicted in adverse weather years?",
       info_popover(
@@ -215,7 +215,7 @@ mod_2_02_results_ui <- function(id) {
       )
     ),
 
-    # ---- Section 3: Exceedance probability curves --------------------------
+    # Section 3: Exceedance probability curves ----
     shiny::h4(
       "What is the probability of severe outcomes occurring?",
       info_popover(
@@ -263,7 +263,7 @@ mod_2_02_results_ui <- function(id) {
       )
     ),
 
-    # ---- Section 4: Decision & return-period table -------------------------
+    # Section 4: Decision & return-period table ----
     shiny::h4(
       "Detailed return-period outcomes and uncertainty",
       info_popover(
@@ -290,7 +290,7 @@ mod_2_02_results_ui <- function(id) {
       )
     ),
 
-    # ---- Section 5: Uncertainty decomposition ------------------------------
+    # Section 5: Uncertainty decomposition ----
     shiny::h4(
       "What drives the uncertainty in these predictions?",
       info_popover(
@@ -417,7 +417,7 @@ mod_2_02_results_server <- function(id,
       headline_cards_ui(cards)
     })
 
-    # ---- Lazy delta-method aggregation -------------------------------------
+    # Lazy delta-method aggregation ----
     # Replaces the eager compute_hist_agg / compute_scenario_agg path. Returns
     # the same nested list shape (weighted/unweighted -> method -> tibble) so
     # downstream consumers in fct_sim_compare.R see a compatible schema.
@@ -439,7 +439,7 @@ mod_2_02_results_server <- function(id,
       as.numeric(input$bandwidth_p0 %||% 0.05)
     })
 
-    # ---- Value-affecting aggregation inputs ---------------------------------
+    # Value-affecting aggregation inputs ----
     # The aggregation cache is keyed by the inputs each method actually
     # consumes (PERF-30), so moving the coefficient-band or poverty-line
     # control only invalidates the methods that read it. band_q is display-
@@ -450,7 +450,7 @@ mod_2_02_results_server <- function(id,
     .POV_LINE_METHODS <- c("headcount_ratio", "gap", "fgt2")
     .BANDWIDTH_METHODS <- "headcount_ratio"
 
-    # ---- Aggregation workspace + per-method cache --------------------------
+    # Aggregation workspace + per-method cache ----
     # Captures the heavy dependencies that invalidate every cached method
     # (hist_sim, saved scenarios, residuals, coef-draw skipping) into a
     # workspace that's recreated whenever any of them changes. The workspace
@@ -788,7 +788,7 @@ mod_2_02_results_server <- function(id,
       .get_scn_agg(method)
     })
 
-    # ---- Reactive computations (carried over from mod_2_06) ----------------
+    # Reactive computations (carried over from mod_2_06) ----
 
     hist_label <- reactive({
       nm <- if (!is.null(selected_hist)) selected_hist()$scenario_name else NULL
@@ -985,7 +985,7 @@ mod_2_02_results_server <- function(id,
     })
 
 
-    # ---- Coefficient draws availability -----------------------------------
+    # Coefficient draws availability ----
     has_draws <- reactive({
       req(hist_sim())
       !is.null(hist_sim()$chol_obj)
@@ -1110,7 +1110,7 @@ mod_2_02_results_server <- function(id,
       )
     })
 
-    # ---- Three-source uncertainty decomposition ----------------------------
+    # Three-source uncertainty decomposition ----
     # All three downstream displays (hero, exceedance, table) source their
     # bands from the helpers below. Each helper produces a per-scenario view
     # that decomposes uncertainty into:
@@ -1133,7 +1133,7 @@ mod_2_02_results_server <- function(id,
     .pct_label <- pct_label
     .rank_interp <- rank_interp
 
-    # ---- pointrange_bands_rv: one row per scenario, three nested bands -----
+    # pointrange_bands_rv: one row per scenario, three nested bands ----
     pointrange_bands_rv <- reactive({
       req(hist_agg_rv())
       bq_coef <- resolve_band_q(input$uncertainty_band %||% "p10_p90")
@@ -1273,7 +1273,7 @@ mod_2_02_results_server <- function(id,
       dplyr::bind_rows(Filter(Negate(is.null), rows))
     })
 
-    # ---- timeseries_curves_rv: per (scenario, model, sim_year) values ------
+    # timeseries_curves_rv: per (scenario, model, sim_year) values ----
     build_timeseries_curves <- function(selected_only = TRUE) {
       req(hist_agg_rv())
       hist_ref <- hist_ref_val()
@@ -1321,7 +1321,7 @@ mod_2_02_results_server <- function(id,
     timeseries_curves_rv <- reactive(build_timeseries_curves(TRUE))
     annual_distribution_curves_rv <- reactive(build_timeseries_curves(FALSE))
 
-    # ---- variance_breakdown_rv: one row per scenario, three components -----
+    # variance_breakdown_rv: one row per scenario, three components ----
     # Aggregates the per-(sim_year) var_within / var_across columns to scalars
     # and re-computes var_coef from the per-(model, year) SD list-column.
     variance_breakdown_rv <- reactive({
@@ -1381,7 +1381,7 @@ mod_2_02_results_server <- function(id,
       dplyr::bind_rows(Filter(Negate(is.null), rows))
     })
 
-    # ---- exceedance_curves_rv: per (scenario, model) ECDF rows -------------
+    # exceedance_curves_rv: per (scenario, model) ECDF rows ----
     # One row per (scenario, model, rank). welfare_val is sorted in the adverse
     # tail direction; exceed_prob is (rank - 0.5)/n_pts limited to <= 0.50 AEP.
     exceedance_curves_rv <- reactive({
@@ -1468,7 +1468,7 @@ mod_2_02_results_server <- function(id,
       dplyr::bind_rows(Filter(Negate(is.null), rows))
     })
 
-    # ---- threshold_table_rv: long-format rows ready to pivot wide ---------
+    # threshold_table_rv: long-format rows ready to pivot wide ----
     # One row per (scenario, Estimate, RP). Estimate names are derived from
     # the user's band quantile selection: e.g., with coef=p10_p90 and
     # ensemble=minmax the rows are "Central (P50)", "Coef P10", "Coef P90",
@@ -1998,7 +1998,7 @@ mod_2_02_results_server <- function(id,
     })
 
 
-    # ---- observeEvent handlers ---------------------------------------------
+    # observeEvent handlers ----
 
     # Insert Results tab + content on first hist_sim; remove it again when
     # hist_sim is cleared (INT-07) so the empty state returns and a later
@@ -2103,13 +2103,13 @@ mod_2_02_results_server <- function(id,
       ignoreInit = TRUE
     )
 
-    # ---- Suspend outputs when Results tab is hidden ----------------------
+    # Suspend outputs when Results tab is hidden ----
     outputOptions(output, "summary_box_plot", suspendWhenHidden = TRUE)
     outputOptions(output, "annual_distribution_plot", suspendWhenHidden = TRUE)
     outputOptions(output, "summary_threshold_table", suspendWhenHidden = TRUE)
     outputOptions(output, "exceedance_plot", suspendWhenHidden = TRUE)
 
-    # ---- Return API --------------------------------------------------------
+    # Return API ----
     # timeseries_curves bundles everything the Diagnostics tab needs to render
     # the per-model trajectories plot (the plot lives there now): the
     # per-(scenario, model, sim_year) table, the x-axis label, and the

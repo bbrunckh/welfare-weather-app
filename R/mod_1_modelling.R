@@ -98,7 +98,7 @@ mod_1_modelling_server <- function(id,
                                    load_survey_trigger = shiny::reactive(NULL),
                                    load_weather_trigger = shiny::reactive(NULL)) {
   moduleServer(id, function(input, output, session) {
-    # ---- 1. Sample ----------------------------------------------------------
+    # 1. Sample ----
 
     s1 <- mod_1_01_sample_server(
       "sample",
@@ -107,7 +107,7 @@ mod_1_modelling_server <- function(id,
       variable_list     = variable_list
     )
 
-    # ---- 2. Survey stats ----------------------------------------------------
+    # 2. Survey stats ----
 
     s2 <- mod_1_02_surveystats_server(
       "surveystats",
@@ -122,7 +122,7 @@ mod_1_modelling_server <- function(id,
       run_trigger       = load_survey_trigger
     )
 
-    # ---- 3. Outcome ---------------------------------------------------------
+    # 3. Outcome ----
 
     s3 <- mod_1_03_outcome_server(
       "outcome",
@@ -135,7 +135,7 @@ mod_1_modelling_server <- function(id,
       tabset_session = session
     )
 
-    # ---- 4. Weather ---------------------------------------------------------
+    # 4. Weather ----
 
     s4 <- mod_1_04_weather_server(
       "weather",
@@ -144,7 +144,7 @@ mod_1_modelling_server <- function(id,
       survey_data      = s2$survey_data
     )
 
-    # ---- 5. Weather stats ---------------------------------------------------
+    # 5. Weather stats ----
 
     s5 <- mod_1_05_weatherstats_server(
       "weatherstats",
@@ -163,7 +163,7 @@ mod_1_modelling_server <- function(id,
       run_trigger = load_weather_trigger
     )
 
-    # ---- 6. Model -----------------------------------------------------------
+    # 6. Model ----
 
     s6 <- mod_1_06_model_server(
       "model",
@@ -176,7 +176,7 @@ mod_1_modelling_server <- function(id,
       run_trigger      = run_trigger
     )
 
-    # ---- 7. Results ---------------------------------------------------------
+    # 7. Results ----
 
     s7 <- mod_1_07_results_server(
       "results",
@@ -194,7 +194,7 @@ mod_1_modelling_server <- function(id,
       tabset_session   = session
     )
 
-    # ---- 8. Model fit diagnostics -------------------------------------------
+    # 8. Model fit diagnostics ----
 
     mod_1_08_modelfit_server(
       "modelfit",
@@ -207,7 +207,7 @@ mod_1_modelling_server <- function(id,
       tabset_session   = session
     )
 
-    # ---- Return API ---------------------------------------------------------
+    # Return API ----
 
     list(
       # Selections

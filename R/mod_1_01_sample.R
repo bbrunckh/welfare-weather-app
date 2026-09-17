@@ -31,14 +31,14 @@ mod_1_01_sample_server <- function(id, connection_params, survey_list, variable_
   moduleServer(id, function(input, output, session) {
     ns <- session$ns
 
-    # ---- List available files at the connection endpoint --------------------
+    # List available files at the connection endpoint ----
 
     available_files <- reactive({
       req(connection_params())
       list_available_files(connection_params())
     })
 
-    # ---- Level of analysis selector -----------------------------------------
+    # Level of analysis selector ----
 
     output$unit_ui <- renderUI({
       pill_toggle(
@@ -53,7 +53,7 @@ mod_1_01_sample_server <- function(id, connection_params, survey_list, variable_
       )
     })
 
-    # ---- Surveys available at the endpoint for the selected unit ------------
+    # Surveys available at the endpoint for the selected unit ----
 
     surveys <- reactive({
       req(input$unit, survey_list())
@@ -61,7 +61,7 @@ mod_1_01_sample_server <- function(id, connection_params, survey_list, variable_
       filter_surveys_to_available(sl, available_files())
     })
 
-    # ---- Economy selector ---------------------------------------------------
+    # Economy selector ----
 
     output$sample_ui <- renderUI({
       req(surveys())
@@ -84,14 +84,14 @@ mod_1_01_sample_server <- function(id, connection_params, survey_list, variable_
       )
     })
 
-    # ---- Available survey years per selected economy ------------------------
+    # Available survey years per selected economy ----
 
     available_years <- reactive({
       req(input$economy, surveys())
       get_available_years(surveys(), input$economy)
     })
 
-    # ---- Year selector UI ---------------------------------------------------
+    # Year selector UI ----
 
     output$survey_year_ui <- renderUI({
       req(input$economy, available_years())
@@ -131,7 +131,7 @@ mod_1_01_sample_server <- function(id, connection_params, survey_list, variable_
       shiny::outputOptions(output, out_id, suspendWhenHidden = FALSE)
     })
 
-    # ---- Collect selected years from dynamic inputs -------------------------
+    # Collect selected years from dynamic inputs ----
 
     selected_years_by_code <- reactive({
       req(input$economy)
@@ -142,7 +142,7 @@ mod_1_01_sample_server <- function(id, connection_params, survey_list, variable_
       Filter(Negate(is.null), years_list)
     })
 
-    # ---- Selected surveys ---------------------------------------------------
+    # Selected surveys ----
 
     selected_surveys <- reactive({
       req(input$economy)
@@ -151,7 +151,7 @@ mod_1_01_sample_server <- function(id, connection_params, survey_list, variable_
       build_selected_surveys(surveys(), years_by_code)
     })
 
-    # ---- Return API ---------------------------------------------------------
+    # Return API ----
 
     list(
       selected_surveys = selected_surveys,

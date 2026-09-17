@@ -218,7 +218,7 @@ plot_pointrange_climate <- function(bands_tbl,
 
   fut_df <- df[!df$is_historical, , drop = FALSE]
 
-  # ---- colour palette: Historical = grey; one colour per SSP x year --------
+  # colour palette: Historical = grey; one colour per SSP x year ----
   colour_palette <- c("Historical" = "#808080")
   if (nrow(fut_df) > 0L) {
     yrs_present <- sort(unique(fut_df$yr_lbl))
@@ -233,7 +233,7 @@ plot_pointrange_climate <- function(bands_tbl,
     }
   }
 
-  # ---- x-axis factor levels with spacers -----------------------------------
+  # x-axis factor levels with spacers ----
   ordered_levels <- "Historical"
   spacer_ids <- character(0)
   if (nrow(fut_df) > 0L) {
@@ -277,7 +277,7 @@ plot_pointrange_climate <- function(bands_tbl,
     return(blank_plot("Run a future simulation to see scenario comparisons."))
   }
 
-  # ---- plot: nested bands + dot --------------------------------------------
+  # plot: nested bands + dot ----
   # When a `source` column is present we dodge Baseline vs Policy side-by-side
   # within each scenario. Otherwise (Mod 2) the chart is single-source and
   # the dodge collapses to no-op via a single-level factor.
@@ -2191,7 +2191,7 @@ enhance_exceedance <- function(curves_tbl,
     return(blank_plot("Run a simulation to see exceedance probabilities."))
   }
 
-  # ---- Per-scenario summary at each rank ---------------------------------
+  # Per-scenario summary at each rank ----
   # For each (scenario, rank) collapse across models:
   #   central_at_rank    = median of welfare_val across models
   #   intermod_lo/hi     = quantile across models at ensemble_band_q
@@ -2325,7 +2325,7 @@ enhance_exceedance <- function(curves_tbl,
     fut_mod_df[0, , drop = FALSE]
   }
 
-  # ---- Plot ---------------------------------------------------------------
+  # Plot ----
   # Layer order (back to front): inter-model ribbon (future) -> coefficient
   # band (optional) -> ensemble median curves.
   p <- ggplot2::ggplot(
@@ -2540,7 +2540,7 @@ enhance_exceedance <- function(curves_tbl,
     ) +
     ggplot2::coord_flip()
 
-  # ---- Probability axis scaling ------------------------------------------
+  # Probability axis scaling ----
   # Return-period guides are carried by the axis ticks alone; the redundant
   # in-panel dashed guide lines and their floating labels were removed.
   is_adverse_tail <- max(agg_df$exceed_prob, na.rm = TRUE) <= 0.55

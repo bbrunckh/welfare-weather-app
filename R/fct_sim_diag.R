@@ -104,7 +104,7 @@
     reg_filt <- hist_filt[hist_filt$cal_year %in% sw_years, ]
   }
 
-  # ---- Detect variable type -------------------------------------------
+  # Detect variable type ----
   raw_col <- weather_raw[[weather_var]]
   is_factor <- is.factor(raw_col) || is.character(raw_col) ||
     (is.integer(raw_col) && length(unique(raw_col[is.finite(raw_col)])) <= 20)
@@ -270,7 +270,7 @@
     return(blank_plot("No finite values to plot."))
   }
 
-  # ---- SSP scenario overlays -------------------------------------------
+  # SSP scenario overlays ----
   ssp_colour_map <- character(0)
   ssp_linetype_map <- character(0)
   ssp_df_list <- list()
@@ -1163,7 +1163,7 @@ plot_year_anchored_ridge <- function(kde_data,
       )
   }
 
-  # -- Regression output overlay (when show_regression = TRUE) ----------
+  # Regression output overlay (when show_regression = TRUE) ----
   # Two curves at the same y_reg baseline:
   #   predicted_vals  -- dashed black line  (simulated outcome distribution)
   #   actual_vals     -- dotted black line  (observed survey outcomes)

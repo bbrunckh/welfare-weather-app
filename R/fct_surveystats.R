@@ -1042,7 +1042,7 @@ stats_table_frame <- function(df, vl, flag_col = NULL, vars = NULL, base = NULL)
       dplyr::arrange(.data$variable, .data$countryyear)
   }
 
-  # ---- Column renaming ----------------------------------------------------
+  # Column renaming ----
   if ("countryyear" %in% names(tab)) names(tab)[names(tab) == "countryyear"] <- "Country, Year"
 
   names(tab) <- vapply(names(tab), function(nm) {

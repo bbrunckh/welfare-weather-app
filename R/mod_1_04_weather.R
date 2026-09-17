@@ -31,14 +31,14 @@ mod_1_04_weather_server <- function(id, variable_list, selected_surveys, survey_
   moduleServer(id, function(input, output, session) {
     ns <- session$ns
 
-    # ---- Weather variable choices -------------------------------------------
+    # Weather variable choices ----
 
     weather_vars <- reactive({
       req(variable_list())
       get_weather_vars(variable_list())
     })
 
-    # ---- Variable selector --------------------------------------------------
+    # Variable selector ----
 
     output$weather_selector_ui <- renderUI({
       wl <- weather_vars()
@@ -64,7 +64,7 @@ mod_1_04_weather_server <- function(id, variable_list, selected_surveys, survey_
       )
     })
 
-    # ---- Per-variable configuration UI --------------------------------------
+    # Per-variable configuration UI ----
 
     output$weather_construction_ui <- renderUI({
       req(input$weather_variable_selector)
@@ -190,7 +190,7 @@ mod_1_04_weather_server <- function(id, variable_list, selected_surveys, survey_
       suspendWhenHidden = FALSE
     )
 
-    # ---- Historical comparison config ---------------------------------------
+    # Historical comparison config ----
     # The weather stats tab always draws each wave against its own climate
     # history, so the year range is a setting of the weather configuration
     # rather than a control on the results panel. 1991-2020 is the same
@@ -253,7 +253,7 @@ mod_1_04_weather_server <- function(id, variable_list, selected_surveys, survey_
       c(from = yf, to = yt)
     })
 
-    # ---- Selected weather spec ----------------------------------------------
+    # Selected weather spec ----
 
     selected_weather <- reactive({
       req(input$weather_variable_selector)
@@ -285,7 +285,7 @@ mod_1_04_weather_server <- function(id, variable_list, selected_surveys, survey_
       )
     })
 
-    # ---- Live weather configuration card ------------------------------------
+    # Live weather configuration card ----
     # Same pipeline card as on the Weather stats tab, but bound to the live
     # selection so it doubles as instant config feedback in the sidebar.
     # Headerless and stripped back: the variable row + stages speak for
@@ -325,7 +325,7 @@ mod_1_04_weather_server <- function(id, variable_list, selected_surveys, survey_
       )
     })
 
-    # ---- Module return API --------------------------------------------------
+    # Module return API ----
 
     list(
       selected_weather = selected_weather,

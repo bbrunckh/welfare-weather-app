@@ -84,7 +84,7 @@ mod_2_simulation_server <- function(id,
                                      run_trigger = reactive(NULL)) {
   moduleServer(id, function(input, output, session) {
 
-    # ---- 1. Unified sidebar + simulation engine ----------------------------
+    # 1. Unified sidebar + simulation engine ----
     s1 <- mod_2_01_weathersim_server(
       "weathersim",
       connection_params = connection_params,
@@ -98,7 +98,7 @@ mod_2_simulation_server <- function(id,
        run_trigger       = run_trigger
     )
 
-    # ---- 2. Results tab ----------------------------------------------------
+    # 2. Results tab ----
     s2 <- mod_2_02_results_server(
       "results",
       hist_sim        = s1$hist_sim,
@@ -112,7 +112,7 @@ mod_2_simulation_server <- function(id,
       stale           = s1$stale
     )
 
-    # ---- 3. Diagnostics tab ------------------------------------------------
+    # 3. Diagnostics tab ----
     mod_2_03_diagnostics_server(
       "diagnostics",
       hist_sim           = s1$hist_sim,
@@ -127,7 +127,7 @@ mod_2_simulation_server <- function(id,
       stale              = s1$stale
     )
 
-    # ---- Clear scenarios button --------------------------------------------
+    # Clear scenarios button ----
     observeEvent(input$clear_scenarios, {
       if (is.function(s1$clear_weather_stores)) s1$clear_weather_stores()
       s1$saved_scenarios(list())
@@ -138,7 +138,7 @@ mod_2_simulation_server <- function(id,
       )
     })
 
-    # ---- Return API --------------------------------------------------------
+    # Return API ----
     list(
       selected_hist   = s1$selected_hist,
       selected_fut    = s1$selected_fut,

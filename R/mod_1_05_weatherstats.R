@@ -92,7 +92,7 @@ mod_1_05_weatherstats_server <- function(
       df
     })
 
-    # ---- Weather stats button -----------------------------------------------
+    # Weather stats button ----
 
     output$weather_stats_button_ui <- renderUI({
       req(selected_weather())
@@ -106,7 +106,7 @@ mod_1_05_weatherstats_server <- function(
     # REACT-02: double-click guard - one weather load at a time.
     load_guard <- .busy_guard(session, weather_stats)
 
-    # ---- Button-time selection snapshot (INT-05 pattern) ----------------------
+    # Button-time selection snapshot (INT-05 pattern) ----
     # Every panel on the Weather stats tab renders from `wx_spec()`, captured
     # when the button is pressed: changing the weather-variable or outcome
     # selectors afterwards re-renders nothing until the button is used again.
@@ -140,7 +140,7 @@ mod_1_05_weatherstats_server <- function(
       }
     })
 
-    # ---- Load and merge weather on button click ------------------------------
+    # Load and merge weather on button click ----
 
     weather_stats_event <- shiny::reactiveVal(NULL)
     shiny::observeEvent(input$weather_stats,
@@ -204,7 +204,7 @@ mod_1_05_weatherstats_server <- function(
           return(invisible(NULL))
         }
 
-        # -- Load weather -------------------------------------------------------
+        # Load weather ----
         notif_load <- showNotification("Loading weather data...", duration = NULL, type = "message")
 
         weather_full <- tryCatch(
@@ -255,7 +255,7 @@ mod_1_05_weatherstats_server <- function(
             )
         }
 
-        # -- Merge with survey data ---------------------------------------------
+        # Merge with survey data ----
         notif_merge <- showNotification(
           "Combining survey and weather data...",
           duration = NULL, type = "message"
@@ -320,10 +320,10 @@ mod_1_05_weatherstats_server <- function(
           duration = 3, type = "message"
         )
 
-        # ---- Define outputs once then add tab ---------------------------------
+        # Define outputs once then add tab ----
 
         if (!weather_tab_added()) {
-          # -- Weather distribution plots (one per variable) -------------------
+          # Weather distribution plots (one per variable) ----
           # Each plot carries the sample and, once the historical years have
           # loaded, the same locations' own climate history alongside it. The
           # historical series is loaded continuous, so the bar chart cuts it with
@@ -385,7 +385,7 @@ mod_1_05_weatherstats_server <- function(
           output$weather_dist1 <- make_weather_dist(1)
           output$weather_dist2 <- make_weather_dist(2)
 
-          # -- Continuous distribution behind a binned variable -----------------
+          # Continuous distribution behind a binned variable ----
           # Only rendered for binned variables (see `weather_dist_layout`); the
           # values are the same transformed series the bins were cut from, so a
           # deviation-from-mean / anomaly configuration carries through.
@@ -438,7 +438,7 @@ mod_1_05_weatherstats_server <- function(
           output$weather_dist_cont2 <- make_weather_dist_cont(2)
 
 
-          # -- Binscatter plots (one per variable) ------------------------------
+          # Binscatter plots (one per variable) ----
 
           binscatter_fig <- function(idx) {
             function() {
@@ -549,7 +549,7 @@ mod_1_05_weatherstats_server <- function(
             wise_export_retain("binscatter_", active_keys)
           })
 
-          # -- Summary stats tables (continuous + binned) -----------------------
+          # Summary stats tables (continuous + binned) ----
           output$weather_stats_table <- make_weather_stats_dt(
             survey_weather   = survey_weather,
             selected_weather = wx_spec_sw,
@@ -603,7 +603,7 @@ mod_1_05_weatherstats_server <- function(
             )
           })
 
-          # -- Selected weather pipeline card (snapshot, INT-05 pattern) --------
+          # Selected weather pipeline card (snapshot, INT-05 pattern) ----
           # Describes the configuration the button captured, like every other
           # output on this tab.
 
@@ -685,7 +685,7 @@ mod_1_05_weatherstats_server <- function(
             class = "compact"
           )
 
-          # -- Append tab -------------------------------------------------------
+          # Append tab ----
 
           # Reactive layouts so panels update when the user toggles between
           # 1 and 2 weather variables without re-creating the tab.
@@ -946,9 +946,9 @@ mod_1_05_weatherstats_server <- function(
       ignoreNULL = TRUE
     )
 
-    # ---- Weather by location maps -------------------------------------------
+    # Weather by location maps ----
 
-    # -- Weather by location, one map per wave ----------------------------
+    # Weather by location, one map per wave ----
     # A location can appear in several interview months. The month picker below
     # keeps those values separate instead of averaging them into one map value.
 
@@ -1277,7 +1277,7 @@ mod_1_05_weatherstats_server <- function(
       sub
     }
 
-    # ---- MapLibre payload stream (one hex map per weather variable) ----------
+    # MapLibre payload stream (one hex map per weather variable) ----
     # One output per weather variable. The palette is built across *all* waves
     # (above), so the colour scale does not shift under the user when they
     # change wave. The payload carries cell ids and values only, and the
@@ -1489,7 +1489,7 @@ mod_1_05_weatherstats_server <- function(
       )
     })
 
-    # ---- Historical weather over the configured year range -------------------
+    # Historical weather over the configured year range ----
 
     # Loads historical weather for [yf, yt] and rebuilds the comparison cells.
     # Called once per weather load, and again whenever the year range under
@@ -1597,7 +1597,7 @@ mod_1_05_weatherstats_server <- function(
       ignoreNULL = TRUE
     )
 
-    # ---- Return API ---------------------------------------------------------
+    # Return API ----
 
     list(
       survey_weather = survey_weather,

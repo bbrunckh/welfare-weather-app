@@ -126,7 +126,7 @@ mod_3_06_policy_sim_server <- function(id,
       )
     })
 
-    # ---- Run signature (INT-08) ----------------------------------------------
+    # Run signature (INT-08) ----
     # The policy run inherits Step 2's signature and adds the scenario
     # configuration; a mismatch (or a stale Step 2) marks the results stale.
 
@@ -540,7 +540,7 @@ mod_3_06_policy_sim_server <- function(id,
             }
           )
 
-          # -- Atomic publish (INT-09) -----------------------------------------
+          # Atomic publish (INT-09) ----
           # Every reactive value is written only now that the complete run
           # (simulation + decomposition) succeeded, so a failure anywhere
           # above leaves the previous results, diagnostics, and run ID intact.

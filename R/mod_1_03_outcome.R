@@ -67,14 +67,14 @@ mod_1_03_outcome_server <- function(id, variable_list, survey_data,
       }
     })
 
-    # ---- Available outcome variables present in the survey data -------------
+    # Available outcome variables present in the survey data ----
 
     available_outcomes <- reactive({
       req(variable_list(), survey_data())
       filter_outcome_vars(variable_list(), colnames(survey_data()))
     })
 
-    # ---- Outcome selector UI ------------------------------------------------
+    # Outcome selector UI ----
 
     output$outcome_ui <- renderUI({
       req(available_outcomes())
@@ -96,7 +96,7 @@ mod_1_03_outcome_server <- function(id, variable_list, survey_data,
       )
     })
 
-    # ---- Selected outcome info (single row from available_outcomes) ---------
+    # Selected outcome info (single row from available_outcomes) ----
 
     selected_outcome_info <- reactive({
       req(input$outcome, available_outcomes())
@@ -104,7 +104,7 @@ mod_1_03_outcome_server <- function(id, variable_list, survey_data,
       outs[outs$name == input$outcome, , drop = FALSE]
     })
 
-    # ---- Currency selector (monetary outcomes only) -------------------------
+    # Currency selector (monetary outcomes only) ----
 
     output$currency_ui <- renderUI({
       req(selected_outcome_info())
@@ -125,7 +125,7 @@ mod_1_03_outcome_server <- function(id, variable_list, survey_data,
       )
     })
 
-    # ---- Poverty line input (poor outcome only) -----------------------------
+    # Poverty line input (poor outcome only) ----
 
     output$poverty_line_ui <- renderUI({
       req(selected_outcome_info())
@@ -154,7 +154,7 @@ mod_1_03_outcome_server <- function(id, variable_list, survey_data,
       shiny::outputOptions(output, out_id, suspendWhenHidden = FALSE)
     })
 
-    # ---- Augmented selected outcome row (with transform/units/povline) ------
+    # Augmented selected outcome row (with transform/units/povline) ----
 
     selected_outcome <- reactive({
       req(selected_outcome_info())
@@ -169,7 +169,7 @@ mod_1_03_outcome_server <- function(id, variable_list, survey_data,
       )
     })
 
-    # ---- Outcome Stats button -----------------------------------------------
+    # Outcome Stats button ----
 
     output$outcome_stats_button_ui <- renderUI({
       req(input$outcome, survey_data())
@@ -180,13 +180,13 @@ mod_1_03_outcome_server <- function(id, variable_list, survey_data,
 
     outcome_tab_added <- reactiveVal(FALSE)
 
-    # ---- Button-time selection snapshot (INT-05 pattern) ----------------------
+    # Button-time selection snapshot (INT-05 pattern) ----
     # The Outcome stats tab must describe the run the button captured, not the
     # live selector: outputs render from `outcome_spec()` and stay stable
     # until the button is pressed again.
     outcome_spec <- reactiveVal(NULL)
 
-    # ---- Survey data augmented with synthetic "poor" column -------------------
+    # Survey data augmented with synthetic "poor" column ----
 
     outcome_data <- reactive({
       spec <- outcome_spec()
@@ -209,7 +209,7 @@ mod_1_03_outcome_server <- function(id, variable_list, survey_data,
       df
     })
 
-    # ---- Outcome summary statistics (PERF-41) ---------------------------------
+    # Outcome summary statistics (PERF-41) ----
     # The summary table covers every wave plus the pooled sample in one
     # grouped pass per captured run; the wave pill re-slices the precomputed
     # matrix instead of re-running the quantiles.
@@ -225,7 +225,7 @@ mod_1_03_outcome_server <- function(id, variable_list, survey_data,
       )
     })
 
-    # ---- Outcome Stats tab creation -----------------------------------------
+    # Outcome Stats tab creation ----
 
     observeEvent(input$outcome_stats_btn,
       {
@@ -241,7 +241,7 @@ mod_1_03_outcome_server <- function(id, variable_list, survey_data,
 
         # Define outputs (once)
         if (!outcome_tab_added()) {
-          # ---- Selection summary card (snapshot, INT-05 pattern) ---------------
+          # Selection summary card (snapshot, INT-05 pattern) ----
           # Describes the outcome the button captured, like every other output
           # on this tab; selector changes do not re-render it until re-press.
 
@@ -333,7 +333,7 @@ mod_1_03_outcome_server <- function(id, variable_list, survey_data,
             p
           })
 
-          # ---- MapLibre coverage payload stream ---------------------------------
+          # MapLibre coverage payload stream ----
           # One reactive observer drives the hex map: survey/outcome loads and
           # wave toggles land here as fresh `set` payloads. The camera is fitted
           # only when the data key changes (PERF-36 view-key semantics), so a
@@ -704,7 +704,7 @@ mod_1_03_outcome_server <- function(id, variable_list, survey_data,
       ignoreInit = TRUE
     )
 
-    # ---- Module return API --------------------------------------------------
+    # Module return API ----
 
     list(
       selected_outcome = selected_outcome

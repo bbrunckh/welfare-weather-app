@@ -265,7 +265,7 @@ mod_3_08_diagnostics_server <- function(id,
       }
     }
 
-    # ---- Diagnostics data preparation ---------------------------------------
+    # Diagnostics data preparation ----
 
     # One successful run publishes one complete snapshot. Failed runs leave
     # this reactive value untouched, so renderers and exports keep the prior
@@ -288,7 +288,7 @@ mod_3_08_diagnostics_server <- function(id,
       )
     })
 
-    # ---- Transfer summary info box ------------------------------------------
+    # Transfer summary info box ----
 
     output$transfer_summary_ui <- DT::renderDT({
       d <- diag_data()
@@ -326,7 +326,7 @@ mod_3_08_diagnostics_server <- function(id,
 
     outputOptions(output, "transfer_summary_ui", suspendWhenHidden = FALSE)
 
-    # ---- Summary statistics table -------------------------------------------
+    # Summary statistics table ----
 
     output$diag_summary_table <- DT::renderDT({
       d <- diag_data()
@@ -445,7 +445,7 @@ mod_3_08_diagnostics_server <- function(id,
       )
     )
 
-    # ---- Histogram plots container ------------------------------------------
+    # Histogram plots container ----
 
     output$hist_plots_ui <- shiny::renderUI({
       d <- diag_data()
@@ -480,7 +480,7 @@ mod_3_08_diagnostics_server <- function(id,
       do.call(shiny::tagList, tags)
     })
 
-    # ---- Per-variable histogram outputs -------------------------------------
+    # Per-variable histogram outputs ----
 
     observeEvent(diag_data(),
       {
@@ -531,7 +531,7 @@ mod_3_08_diagnostics_server <- function(id,
       ignoreInit = TRUE
     )
 
-    # ---- Append Diagnostics tab on first successful run ---------------------
+    # Append Diagnostics tab on first successful run ----
 
     observeEvent(sim_run_id(),
       {

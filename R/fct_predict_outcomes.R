@@ -122,9 +122,7 @@ predict_outcome <- function(model,
   if (length(residuals) > 1) residuals <- residuals[[1]]
   residuals <- match.arg(residuals)
 
-  # ---------------------------------------------------------------------------
-  # 1. Detect model class
-  # ---------------------------------------------------------------------------
+  # 1. Detect model class ----
   # Priority: explicit `engine` argument > class-based detection.
   # This mirrors the `engine` field returned by fit_model().
 
@@ -140,9 +138,7 @@ predict_outcome <- function(model,
   is_fixest_logistic <- is_fixest &&
     inherits(model, "feglm")
 
-  # ---------------------------------------------------------------------------
-  # 2. Compute fitted values on newdata  -> stored in .fitted
-  # ---------------------------------------------------------------------------
+  # 2. Compute fitted values on newdata  -> stored in .fitted ----
 
   if (is_fixest) {
     # fixest does not have a broom::augment method that accepts new data cleanly.
@@ -194,9 +190,7 @@ predict_outcome <- function(model,
     if (!".fitted" %in% names(preds)) stop("No .fitted column in augment output.")
   }
 
-  # ---------------------------------------------------------------------------
-  # 3. Obtain training-data augmentation for residual simulation
-  # ---------------------------------------------------------------------------
+  # 3. Obtain training-data augmentation for residual simulation ----
 
   train_aug <- NULL
 
@@ -302,9 +296,7 @@ predict_outcome <- function(model,
     }
   }
 
-  # ---------------------------------------------------------------------------
-  # 4. Draw residuals
-  # ---------------------------------------------------------------------------
+  # 4. Draw residuals ----
 
   resid_draw <- switch(residuals,
     none = 0,
@@ -370,9 +362,7 @@ predict_outcome <- function(model,
     }
   )
 
-  # ---------------------------------------------------------------------------
-  # 5. Assemble output
-  # ---------------------------------------------------------------------------
+  # 5. Assemble output ----
 
   preds |>
     dplyr::mutate(

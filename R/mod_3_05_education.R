@@ -45,7 +45,7 @@ mod_3_05_education_server <- function(id,
   moduleServer(id, function(input, output, session) {
     ns <- session$ns
 
-    # ---- Get model coefficients ------------------------------------------
+    # Get model coefficients ----
     # REACT-08: shared coefficient decomposition (utils_mod_1_helpers.R).
     coeffs_rx <- model_coefficient_reactives(selected_model)
     ind_coeff <- coeffs_rx$individual
@@ -55,7 +55,7 @@ mod_3_05_education_server <- function(id,
     interaction_names <- coeffs_rx$interactions
     coeffs <- coeffs_rx$all
 
-    # ---- Candidate variables for this category --------------------------
+    # Candidate variables for this category ----
     education_patterns <- c("educ_com1_hh", "educ_com2_hh", "educ_com3_hh")
 
     any_selected <- reactive({
@@ -87,7 +87,7 @@ mod_3_05_education_server <- function(id,
       policy_placeholder_tag("education", cand)
     })
 
-    # ---- Helper: slider + universal access toggle -----------------------
+    # Helper: slider + universal access toggle ----
     # Mirrors the same pattern used in mod_3_03_digital.R.
 
     education_access_ui <- function(input_id, label, icon_class) {
@@ -124,7 +124,7 @@ mod_3_05_education_server <- function(id,
       )
     }
 
-    # ---- Primary attainment ---------------------------------------------
+    # Primary attainment ----
 
     show_primary <- reactive({
       any(grepl("educ_com1_hh", coeffs(), ignore.case = TRUE))
@@ -135,7 +135,7 @@ mod_3_05_education_server <- function(id,
       education_access_ui("primary", "Primary completion", "fa-graduation-cap")
     })
 
-    # ---- Secondary attainment -------------------------------------------
+    # Secondary attainment ----
 
     show_secondary <- reactive({
       any(grepl("educ_com2_hh", coeffs(), ignore.case = TRUE))
@@ -146,7 +146,7 @@ mod_3_05_education_server <- function(id,
       education_access_ui("secondary", "Secondary completion", "fa-graduation-cap")
     })
 
-    # ---- Post-secondary attainment --------------------------------------
+    # Post-secondary attainment ----
 
     show_postsec <- reactive({
       any(grepl("educ_com3_hh", coeffs(), ignore.case = TRUE))
@@ -161,7 +161,7 @@ mod_3_05_education_server <- function(id,
       shiny::outputOptions(output, out_id, suspendWhenHidden = FALSE)
     })
 
-    # ---- Return API -----------------------------------------------------
+    # Return API ----
 
     list(
       education_scenario = reactive({

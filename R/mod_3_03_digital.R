@@ -42,7 +42,7 @@ mod_3_03_digital_server <- function(id,
   moduleServer(id, function(input, output, session) {
     ns <- session$ns
 
-    # ---- Get model coefficients ------------------------------------------
+    # Get model coefficients ----
     # REACT-08: shared coefficient decomposition (utils_mod_1_helpers.R).
     coeffs_rx <- model_coefficient_reactives(selected_model)
     ind_coeff <- coeffs_rx$individual
@@ -52,7 +52,7 @@ mod_3_03_digital_server <- function(id,
     interaction_names <- coeffs_rx$interactions
     coeffs <- coeffs_rx$all
 
-    # ---- Candidate variables for this category --------------------------
+    # Candidate variables for this category ----
     digital_patterns <- c("internet", "cellphone")
 
     any_selected <- reactive({
@@ -84,7 +84,7 @@ mod_3_03_digital_server <- function(id,
       policy_placeholder_tag("digital inclusion", cand)
     })
 
-    # ---- Helper: slider + universal access toggle -----------------------
+    # Helper: slider + universal access toggle ----
     # Mirrors the same pattern used in mod_3_02_infra.R.
 
     digital_access_ui <- function(input_id, label, icon_class) {
@@ -121,7 +121,7 @@ mod_3_03_digital_server <- function(id,
       )
     }
 
-    # ---- Internet access ------------------------------------------------
+    # Internet access ----
 
     show_internet <- reactive({
       any(grepl("internet", coeffs(), ignore.case = TRUE))
@@ -132,7 +132,7 @@ mod_3_03_digital_server <- function(id,
       digital_access_ui("internet", "Access to internet", "fa-wifi")
     })
 
-    # ---- Mobile phone ownership -----------------------------------------
+    # Mobile phone ownership ----
 
     show_mobile <- reactive({
       any(grepl("cellphone", coeffs(), ignore.case = TRUE))
@@ -147,7 +147,7 @@ mod_3_03_digital_server <- function(id,
       shiny::outputOptions(output, out_id, suspendWhenHidden = FALSE)
     })
 
-    # ---- Return API -----------------------------------------------------
+    # Return API ----
 
     list(
       digital_scenario = reactive({

@@ -68,7 +68,7 @@ mod_1_06_model_server <- function(id,
       identical(unit, role)
     }
 
-    # ---- Valid variable list (present + >= 90 % non-missing) ----------------
+    # Valid variable list (present + >= 90 % non-missing) ----
 
     valid_vl <- reactive({
       req(survey_weather(), variable_list())
@@ -79,7 +79,7 @@ mod_1_06_model_server <- function(id,
       )
     })
 
-    # ---- Role-filtered variable lists ---------------------------------------
+    # Role-filtered variable lists ----
 
     fe_vars <- reactive(filter_vars_by_role(valid_vl(), "fe"))
     hh_vars <- reactive(filter_vars_by_role(valid_vl(), "hh"))
@@ -93,7 +93,7 @@ mod_1_06_model_server <- function(id,
       filter_vars_by_role(valid_vl(), "interact", extra_filter = list(type = "numeric"))
     )
 
-    # ---- Settings summary banner --------------------------------------------
+    # Settings summary banner ----
 
     output$model_summary_ui <- renderUI({
       so <- tryCatch(selected_outcome(), error = function(e) NULL)
@@ -149,7 +149,7 @@ mod_1_06_model_server <- function(id,
     })
 
 
-    # ---- Model type selector ------------------------------------------------
+    # Model type selector ----
 
     output$model_selector_ui <- renderUI({
       if (is.null(selected_outcome()) || !length(selected_outcome())) {
@@ -174,7 +174,7 @@ mod_1_06_model_server <- function(id,
       )
     })
 
-    # ---- Policy scenarios toggle ----------------------------------------------
+    # Policy scenarios toggle ----
 
     output$policy_ui <- renderUI({
       req(input$model_type)
@@ -269,7 +269,7 @@ mod_1_06_model_server <- function(id,
       }
     })
 
-    # ---- Model specification panel ------------------------------------------
+    # Model specification panel ----
 
     output$model_specs_ui <- renderUI({
       req(input$model_type)
@@ -378,7 +378,7 @@ mod_1_06_model_server <- function(id,
       )
     })
 
-    # ---- Covariate inputs ---------------------------------------------------
+    # Covariate inputs ----
 
     output$covariate_inputs <- renderUI({
       req(input$covariates)
@@ -397,7 +397,7 @@ mod_1_06_model_server <- function(id,
         stats::setNames(nm[keep], lbl[keep])
       }
 
-      # --- USER-DEFINED COVARIATES ---------------------------------------------------------
+      # USER-DEFINED COVARIATES ----
       if (input$covariates == "User-defined") {
         ind <- exclude_selected_vars(ind_vars(), outcome_name = selected_outcome()$name, weather_names = selected_weather()$name, interactions = input$interactions, fixedeffects = input$fixedeffects)
         hh <- exclude_selected_vars(hh_vars(), outcome_name = selected_outcome()$name, weather_names = selected_weather()$name, interactions = input$interactions, fixedeffects = input$fixedeffects)
@@ -572,7 +572,7 @@ mod_1_06_model_server <- function(id,
       )
     })
 
-    # ---- Mutual exclusion between force-include and force-exclude --------
+    # Mutual exclusion between force-include and force-exclude ----
     # When a var is selected as force-include, remove it from force-exclude
     # choices, and vice versa. Target inputs are isolated and repeated target
     # states are skipped, so an update cannot invalidate its own observer.
@@ -732,7 +732,7 @@ mod_1_06_model_server <- function(id,
     shiny::outputOptions(output, "lasso_force_ui", suspendWhenHidden = FALSE)
     shiny::outputOptions(output, "lasso_advanced_ui", suspendWhenHidden = FALSE)
 
-    # --- LASSO MODEL ---------------------------------------------------------
+    # LASSO MODEL ----
     #
     # REACT-16: the Lasso is a *run-time* step, not a selection-time one.
     # It used to be an eventReactive that `selected_model()` pulled on, which
@@ -884,7 +884,7 @@ mod_1_06_model_server <- function(id,
       priority = 100
     )
 
-    # ---- Return API ---------------------------------------------------------
+    # Return API ----
 
     selected_model <- reactive({
       req(input$model_type)
@@ -981,7 +981,7 @@ mod_1_06_model_server <- function(id,
     # input$run_model). Exposed so mod_1_07's fit observer honours it too.
     fit_guard <- .busy_guard(session, run_model)
 
-    # ---- Run-button prerequisites (UI-29) ------------------------------------
+    # Run-button prerequisites (UI-29) ----
     # The fit observers req() on these upstream inputs; surface them before
     # the click instead of letting the button silently no-op.
     run_prereqs_missing <- reactive({

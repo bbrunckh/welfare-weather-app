@@ -17,6 +17,7 @@ touched files against the pre-refactor snapshot, (2) full `devtools::test()`,
 | 3 | Namespace, dead code, comment cleanup | `R/` + roxygen | Done | — |
 | 4 | Module convention audit (`NS`/`moduleServer`) | `mod_*.R` | Done | — |
 | 5 | Final validation + report | — | Done | — |
+| 6 | Indented section-marker standardization | 34 files | Done | — |
 
 ## User decisions
 
@@ -100,6 +101,18 @@ _(filled per batch below)_
   `tidyselect`/unused `Imports` are flagged above; codetools NSE notes
   unchanged or reduced by the `stats::` work).
 - `git diff --check`: clean on every batch.
+
+### Batch 6 — indented section-marker standardization
+
+- 34 files: in-function rule-line markers converted to the same
+  `# Title ----` style as top-level headers (~296 converted: 273
+  one-liners + 23 rule-sandwiches, incl. the user-reported
+  `# --- / # 6. Collect or return lazy / # ---` pattern).
+- 11 title-less lone rule lines intentionally left as visual separators.
+- Comment-only: all 34 changed files verified expression-identical to
+  HEAD; `R/mod_2_simulation.R` CRLF endings preserved; full test suite
+  green. `git diff --check` warnings on `mod_2_simulation.R` are
+  CR-at-EOL artifacts of its CRLF endings, not real trailing spaces.
 
 ## Outcome
 

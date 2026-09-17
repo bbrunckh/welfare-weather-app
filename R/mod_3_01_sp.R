@@ -16,10 +16,10 @@ mod_3_01_sp_ui <- function(id) {
     # UI-32: live reach/cost summary, matching the Step 1 weather/model cards.
     uiOutput(ns("sp_reach_ui")),
 
-    # ---- Program type - always visible -------------------------------
+    # Program type - always visible ----
     uiOutput(ns("sp_type_ui")),
 
-    # ---- Collapsible configuration panel -------------------------------
+    # Collapsible configuration panel ----
     uiOutput(ns("sp_budget_amount_ui")),
     uiOutput(ns("sp_targeting_ui")),
     uiOutput(ns("sp_timing_ui"))
@@ -87,7 +87,7 @@ mod_3_01_sp_server <- function(id,
       }
     }
 
-    # ---- Proxy variable candidates (numeric, non-missing for welfare rows) ----
+    # Proxy variable candidates (numeric, non-missing for welfare rows) ----
     pmt_candidates <- reactive({
       svy <- survey_weather()
       vl <- variable_list()
@@ -122,7 +122,7 @@ mod_3_01_sp_server <- function(id,
       }, character(1)))
     })
 
-    # ---- 1. program type ---------------------------------------------
+    # 1. program type ----
 
     output$sp_type_ui <- renderUI({
       tagList(
@@ -162,12 +162,12 @@ mod_3_01_sp_server <- function(id,
       )
     })
 
-    # ---- 2. Trigger (shock-responsive only) ----------------------------
+    # 2. Trigger (shock-responsive only) ----
     #
     # Shock-responsive trigger and timing UIs were prototyped but are not
     # implemented; see the shock note in section 1. Commented stubs removed.
 
-    # ---- 3. Targeting --------------------------------------------------
+    # 3. Targeting ----
 
     output$sp_targeting_ui <- renderUI({
       tags$div(
@@ -263,7 +263,7 @@ mod_3_01_sp_server <- function(id,
       )
     })
 
-    # ---- Proxy variable selector ----
+    # Proxy variable selector ----
     output$pmt_variable_ui <- renderUI({
       cands <- pmt_candidates()
       if (length(cands) == 0) {
@@ -283,7 +283,7 @@ mod_3_01_sp_server <- function(id,
       )
     })
 
-    # ---- Proxy cutoff selector (type depends on variable) ----
+    # Proxy cutoff selector (type depends on variable) ----
     output$pmt_cutoff_ui <- renderUI({
       v <- input$pmt_variable
       req(v)
@@ -321,7 +321,7 @@ mod_3_01_sp_server <- function(id,
       }
     })
 
-    # ---- 4. Budget / transfer amount (linked) --------------------------
+    # 4. Budget / transfer amount (linked) ----
     #
     # Two budget modes:
     #   "budget_first"   - user sets total budget (net of admin cost)
@@ -346,7 +346,7 @@ mod_3_01_sp_server <- function(id,
       if (is.na(currency) || !nzchar(currency)) currency <- "PPP"
 
       tagList(
-        # -- Amount and budget mode --------------------------------------
+        # Amount and budget mode ----
         tags$label(
           class = "control-label",
           tags$i(class = "fa fa-money-bill-transfer me-1"),
@@ -379,7 +379,7 @@ mod_3_01_sp_server <- function(id,
           )
         ),
 
-        # -- Amount entry -------------------------------------------------
+        # Amount entry ----
         conditionalPanel(
           condition = paste0("input['", ns("budget_mode"), "'] == 'budget_first'"),
           tags$div(
@@ -420,7 +420,7 @@ mod_3_01_sp_server <- function(id,
       )
     })
 
-    # ---- 5. Frequency and timing ---------------------------------------
+    # 5. Frequency and timing ----
     #
     # If sp_type == "regular":
     #   - hide one-off vs regular radio (always regular)
@@ -471,7 +471,7 @@ mod_3_01_sp_server <- function(id,
       )
     })
 
-    # ---- Scenario specification ----------------------------------------
+    # Scenario specification ----
     #
     # UI-43: the whole module sits in a bslib accordion panel that starts
     # collapsed, and hidden outputs are suspended - so none of these inputs
@@ -547,7 +547,7 @@ mod_3_01_sp_server <- function(id,
       )
     })
 
-    # ---- Live reach / cost preview (UI-32) -----------------------------
+    # Live reach / cost preview (UI-32) ----
     #
     # Answers "who does this reach and what does it cost?" while the user is
     # still choosing a cutoff, instead of only after a full policy run. The
@@ -711,7 +711,7 @@ mod_3_01_sp_server <- function(id,
     # Rendered eagerly for the same reason as the panels above (UI-43).
     shiny::outputOptions(output, "sp_reach_ui", suspendWhenHidden = FALSE)
 
-    # ---- Return API ----------------------------------------------------
+    # Return API ----
 
     list(
       sp_scenario = sp_scenario_spec,

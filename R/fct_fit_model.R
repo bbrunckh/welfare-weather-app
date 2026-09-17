@@ -319,9 +319,7 @@ run_lasso_selection <- function(
   if (is.na(parallel_seed)) parallel_seed <- WISEAPP_DEFAULT_SEED
   withr::local_seed(wise_seed(parallel_seed, "lasso-call"))
 
-  # ---------------------------------------------------------------------------
-  # 1. Outcome validation / coercion (same pattern as fit_model())
-  # ---------------------------------------------------------------------------
+  # 1. Outcome validation / coercion (same pattern as fit_model()) ----
   y_var <- selected_outcome$name
   outcome_type <- selected_outcome$type
 
@@ -347,14 +345,12 @@ run_lasso_selection <- function(
   df <- df[!is.na(df[[y_var]]), , drop = FALSE]
   if (nrow(df) < 30) stop("Too few observations after removing missing outcome.")
 
-  # ---------------------------------------------------------------------------
-  # 2. Core term construction (correctness fix)
+  # 2. Core term construction (correctness fix) ----
   #
   # Real column names that must be unpenalized go in `core_main_terms`.
   # Formula-syntax interaction strings ("int:weather") go in `interaction_terms`
   # and are appended directly to the formula - model.matrix expands them.
   # `int_vars` themselves are unpenalized main effects.
-  # ---------------------------------------------------------------------------
   weather_vars <- weather_vars[weather_vars %in% names(df)]
   fe_vars <- fe_vars[fe_vars %in% names(df)]
   int_vars <- int_vars[int_vars %in% names(df)]
@@ -374,13 +370,11 @@ run_lasso_selection <- function(
 
   core_main_terms <- unique(c(weather_vars, int_vars, fe_vars))
 
-  # ---------------------------------------------------------------------------
-  # 3. Drop NA rows on outcome + core columns (correctness fix)
+  # 3. Drop NA rows on outcome + core columns (correctness fix) ----
   #
   # Without this, mice (which is fed only candidate_vars) leaves NAs in core
   # columns; model.matrix then drops those rows from X_core but not X_lasso,
   # producing a silent row mismatch when cbind()-ing.
-  # ---------------------------------------------------------------------------
   if (length(core_main_terms) > 0) {
     df <- df[stats::complete.cases(df[, core_main_terms, drop = FALSE]), , drop = FALSE]
   }
@@ -388,9 +382,7 @@ run_lasso_selection <- function(
     stop("Too few observations after removing NAs in outcome / core terms.")
   }
 
-  # ---------------------------------------------------------------------------
-  # 4. Candidate pool (now correctly excludes int_vars)
-  # ---------------------------------------------------------------------------
+  # 4. Candidate pool (now correctly excludes int_vars) ----
   if (is.null(valid_vl) || nrow(valid_vl) == 0) stop("Variable list not available or empty.")
   allowed <- valid_vl$name[
     (valid_vl$ind == 1 | valid_vl$hh == 1 | valid_vl$area == 1 | valid_vl$firm == 1) &
@@ -414,15 +406,13 @@ run_lasso_selection <- function(
     stop("No candidate variables with observed values remain for imputation/LASSO.")
   }
 
-  # ---------------------------------------------------------------------------
-  # 4b. Complete-case filtering (default; use_mice = TRUE restores MI path)
+  # 4b. Complete-case filtering (default; use_mice = TRUE restores MI path) ----
   #
   # For variable *selection*, complete-case analysis is sufficient when
 
   # missingness is low (filter_valid_vars enforces >= 90% complete upstream).
   # Dropping NA rows avoids the mice bottleneck at large n. Final model
   # fitting in fit_model() uses the full dataset independently.
-  # ---------------------------------------------------------------------------
   if (!isTRUE(use_mice)) {
     cc_mask <- complete.cases(df[, candidate_vars, drop = FALSE])
     n_dropped <- sum(!cc_mask)
@@ -438,14 +428,12 @@ run_lasso_selection <- function(
     }
   }
 
-  # ---------------------------------------------------------------------------
-  # 5. Parallel plan (workers capped at mi_m - extra workers idle)
+  # 5. Parallel plan (workers capped at mi_m - extra workers idle) ----
   #
   # Auto-disable parallelism on small samples: below `parallel_min_n` rows the
   # multisession fork + globals-export overhead exceeds the actual work. The
   # 20k default reflects the break-even point on a 16-core Mac with mi_m = 5
   # (see dev/archive/bench_lasso.R).
-  # ---------------------------------------------------------------------------
   m <- max(1L, as.integer(mi_m))
   family_type <- if (is_logit) "binomial" else "gaussian"
   cv_selection <- match.arg(cv_selection)
@@ -464,9 +452,7 @@ run_lasso_selection <- function(
   # spawning multisession workers here would waste startup time.
   map_fun <- lapply
 
-  # ---------------------------------------------------------------------------
-  # 6. Build design matrices (X_core + X_lasso)
-  # ---------------------------------------------------------------------------
+  # 6. Build design matrices (X_core + X_lasso) ----
   core_formula <- if (length(core_main_terms) == 0 && length(interaction_terms) == 0) {
     stats::as.formula("~ 1")
   } else {
@@ -503,14 +489,12 @@ run_lasso_selection <- function(
   has_na <- anyNA(df[, candidate_vars, drop = FALSE])
   nfolds_i <- max(2L, as.integer(nfolds))
 
-  # ---------------------------------------------------------------------------
-  # 7. Fast path: no NAs in candidates (always true after complete-case filter)
+  # 7. Fast path: no NAs in candidates (always true after complete-case filter) ----
   #
   # X_full and penalty are identical across iterations - build once.  The loop
   # only varies the random CV fold assignment for stability selection.
   # Sequential lapply: globals-export overhead of multisession exceeds the
   # cv.glmnet compute time (confirmed via dev/archive/bench_lasso.R).
-  # ---------------------------------------------------------------------------
   if (!has_na) {
     X_lasso <- drop_constant(as.matrix(df[, candidate_vars, drop = FALSE]))
     if (ncol(X_lasso) == 0) stop("All candidate variables are constant.")
@@ -545,9 +529,7 @@ run_lasso_selection <- function(
       })
     })
   } else {
-    # -------------------------------------------------------------------------
-    # 8. MI path: impute candidates, rebuild X_lasso per imputation
-    # -------------------------------------------------------------------------
+    # 8. MI path: impute candidates, rebuild X_lasso per imputation ----
 
     # Set up parallel plan here (not earlier) so the fast path never pays the
     # multisession worker-spawn cost.
@@ -665,9 +647,7 @@ run_lasso_selection <- function(
   all_selected <- unique(unlist(selected_list))
   if (length(all_selected) == 0) stop("No covariates selected across imputations.")
 
-  # ---------------------------------------------------------------------------
-  # 9. Selection frequency via tabulate
-  # ---------------------------------------------------------------------------
+  # 9. Selection frequency via tabulate ----
   freq_tbl <- table(unlist(selected_list))
   selection_freq <- setNames(as.numeric(freq_tbl) / m, names(freq_tbl))
 
@@ -730,9 +710,7 @@ run_lasso_selection <- function(
 #' @noRd
 fit_model <- function(df, selected_outcome, selected_weather, selected_model,
                       seed = WISEAPP_DEFAULT_SEED) {
-  # ---------------------------------------------------------------------------
-  # 1. Unpack inputs
-  # ---------------------------------------------------------------------------
+  # 1. Unpack inputs ----
 
   y_var <- selected_outcome$name
   outcome_type <- selected_outcome$type
@@ -784,9 +762,7 @@ fit_model <- function(df, selected_outcome, selected_weather, selected_model,
     ))
   }
 
-  # ---------------------------------------------------------------------------
-  # 2. Validate
-  # ---------------------------------------------------------------------------
+  # 2. Validate ----
 
   # REACT-14: structured record of every specification fallback applied below,
   # surfaced by the Step 1 results banner instead of only a console warning.
@@ -841,9 +817,7 @@ fit_model <- function(df, selected_outcome, selected_weather, selected_model,
 
   model_type <- if (use_logit) "logistic" else "linear"
 
-  # ---------------------------------------------------------------------------
-  # 3. Prepare variables in df
-  # ---------------------------------------------------------------------------
+  # 3. Prepare variables in df ----
 
   # Outcome coercion delegated to backend (factor, integer, or unchanged)
   df <- backend$prepare_outcome(df, y_var, use_logit)
@@ -853,9 +827,7 @@ fit_model <- function(df, selected_outcome, selected_weather, selected_model,
   rif_cols <- attr(df, "rif_cols")
   is_rif <- !is.null(rif_taus)
 
-  # ---------------------------------------------------------------------------
-  # 4. Build formula terms
-  # ---------------------------------------------------------------------------
+  # 4. Build formula terms ----
 
   weather_formula_terms <- unlist(lapply(seq_along(weather_vars), function(i) {
     v <- weather_vars[i]
@@ -869,8 +841,7 @@ fit_model <- function(df, selected_outcome, selected_weather, selected_model,
     terms
   }))
 
-  # ---------------------------------------------------------------------------
-  # 4. Build interaction formula terms
+  # 4. Build interaction formula terms ----
   #
   # Two modes, selected via selected_model$interaction_mode:
   #
@@ -889,7 +860,6 @@ fit_model <- function(df, selected_outcome, selected_weather, selected_model,
   # In both modes the `*` expansion in R automatically includes all lower-order
   # main effects and two-way interactions, so there is no need to list them
   # separately on the RHS.
-  # ---------------------------------------------------------------------------
 
   interaction_mode <- tolower(selected_model$interaction_mode %||% "saturated")
   if (!interaction_mode %in% c("pairwise", "saturated")) {
@@ -944,15 +914,11 @@ fit_model <- function(df, selected_outcome, selected_weather, selected_model,
     covariates        = covariate_vars
   )
 
-  # ---------------------------------------------------------------------------
-  # 5. Build formulas via backend
-  # ---------------------------------------------------------------------------
+  # 5. Build formulas via backend ----
 
   formulas <- backend$build_formulas(y_var, terms_bundle, fe_vars)
 
-  # ---------------------------------------------------------------------------
-  # 6. Drop incomplete cases on all variables used by the fullest model
-  # ---------------------------------------------------------------------------
+  # 6. Drop incomplete cases on all variables used by the fullest model ----
 
   # Cluster variables (e.g. loc_id_panel) are validated against the data first:
   # loc_id_panel is only joined when the H3 files loaded successfully in
@@ -989,9 +955,7 @@ fit_model <- function(df, selected_outcome, selected_weather, selected_model,
 
   if (nrow(df) == 0) stop("No complete cases after dropping NA rows.")
 
-  # ---------------------------------------------------------------------------
-  # 7. Build model spec + engine-level options
-  # ---------------------------------------------------------------------------
+  # 7. Build model spec + engine-level options ----
 
   model_spec <- backend$make_spec(model_type, use_logit, seed = seed)
 
@@ -1015,9 +979,7 @@ fit_model <- function(df, selected_outcome, selected_weather, selected_model,
     engine_opts$rif <- list(taus = rif_taus, rif_cols = rif_cols)
   }
 
-  # ---------------------------------------------------------------------------
-  # 8. Fit the three models
-  # ---------------------------------------------------------------------------
+  # 8. Fit the three models ----
 
   fit_one <- function(formula, label) {
     tryCatch(
@@ -1030,9 +992,7 @@ fit_model <- function(df, selected_outcome, selected_weather, selected_model,
   fit2 <- fit_one(formulas$formula2, "weather + FE")
   fit3 <- fit_one(formulas$formula3, "weather + FE + controls")
 
-  # ---------------------------------------------------------------------------
-  # 8b. Slim fit objects to reduce memory
-  # ---------------------------------------------------------------------------
+  # 8b. Slim fit objects to reduce memory ----
   # do.call(feols, args) captures the full evaluated `data` argument inside
 
   # the call slot - for large surveys this adds hundreds of MB per fit element
@@ -1102,9 +1062,7 @@ fit_model <- function(df, selected_outcome, selected_weather, selected_model,
   fit2 <- .slim_fit(fit2)
   fit3 <- .slim_fit(fit3)
 
-  # ---------------------------------------------------------------------------
-  # 9. Build RIF grid (beta curves) from all three model specifications
-  # ---------------------------------------------------------------------------
+  # 9. Build RIF grid (beta curves) from all three model specifications ----
 
   rif_grid <- NULL
   if (is_rif) {
@@ -1115,9 +1073,7 @@ fit_model <- function(df, selected_outcome, selected_weather, selected_model,
     )
   }
 
-  # ---------------------------------------------------------------------------
-  # 10. Return
-  # ---------------------------------------------------------------------------
+  # 10. Return ----
 
   list(
     fit1              = fit1,

@@ -511,9 +511,7 @@ load_data <- function(
   type <- connection_params$type %||% "local"
   con <- .duck_con()
 
-  # ---------------------------------------------------------------------------
-  # 1. Detect format early - fail before any network calls
-  # ---------------------------------------------------------------------------
+  # 1. Detect format early - fail before any network calls ----
 
   if (is.null(format)) {
     ext <- tolower(tools::file_ext(paths[1]))
@@ -525,18 +523,14 @@ load_data <- function(
     )
   }
 
-  # ---------------------------------------------------------------------------
-  # 2. Resolve bare filenames to full paths / URIs
-  # ---------------------------------------------------------------------------
+  # 2. Resolve bare filenames to full paths / URIs ----
 
   paths <- vapply(
     paths, .resolve_data_path, character(1),
     connection_params = connection_params, USE.NAMES = FALSE
   )
 
-  # ---------------------------------------------------------------------------
-  # 3. Configure credentials / load extensions per backend
-  # ---------------------------------------------------------------------------
+  # 3. Configure credentials / load extensions per backend ----
 
   if (type == "s3") {
     .duck_load_ext("httpfs")
@@ -681,17 +675,13 @@ load_data <- function(
     .register_db_secret(con, db_token, params_hash)
   }
 
-  # ---------------------------------------------------------------------------
-  # 4. Normalise local paths
-  # ---------------------------------------------------------------------------
+  # 4. Normalise local paths ----
 
   if (type == "local") {
     paths <- normalizePath(paths, winslash = "/", mustWork = FALSE)
   }
 
-  # ---------------------------------------------------------------------------
-  # 5. Build the read expression and expose as a lazy tbl via a view
-  # ---------------------------------------------------------------------------
+  # 5. Build the read expression and expose as a lazy tbl via a view ----
 
   read_expr <- .build_read_expr(paths, format, unify_schemas)
   source_order_col <- "__wise_source_order"
@@ -720,9 +710,7 @@ load_data <- function(
 
   tbl <- dplyr::tbl(con, view_name)
 
-  # ---------------------------------------------------------------------------
-  # 6. Collect or return lazy
-  # ---------------------------------------------------------------------------
+  # 6. Collect or return lazy ----
 
   if (collect && !isTRUE(preserve_order)) {
     collect_deterministic(tbl, order_by)

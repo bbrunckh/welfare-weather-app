@@ -235,16 +235,16 @@ fct_run_simulation <- function(sw,
     "ssp5_8_5" = "SSP5-8.5"
   )
 
-  # ---- Total elapsed timer - starts here, covers everything --------------- #
+  # Total elapsed timer - starts here, covers everything ----
   t_start_total <- proc.time()[["elapsed"]]
 
-  # ---- Weather loading ---------------------------------------------------- #
+  # Weather loading ----
   progress_fn(0.05, "Loading climate data...")
   t_weather_start <- proc.time()[["elapsed"]]
 
   weather_result <- NULL
 
-  # ---- Cholesky VCV ------------------------------------------------------- #
+  # Cholesky VCV ----
   chol_obj <- if (isTRUE(skip_coef_draws)) {
     message("[wiseapp] Coefficient draws skipped (point estimates only)")
     NULL
@@ -261,7 +261,7 @@ fct_run_simulation <- function(sw,
     )
   }
 
-  # ---- Active-coefficient mask (additive-decomposition SE) ---------------- #
+  # Active-coefficient mask (additive-decomposition SE) ----
   # Under residuals = "original" the residual is held fixed per household, so
   # uncertainty on coefficients for variables that do not change between
   # baseline and counterfactual cancels through the residual. In Module 2
@@ -285,12 +285,12 @@ fct_run_simulation <- function(sw,
     propagate_all_covariate_uncertainty = propagate_all_covariate_uncertainty
   )
 
-  # ---- Cluster counts ----------------------------------------------------- #
+  # Cluster counts ----
   cluster_counts <- tryCatch(
     compute_cluster_counts(train_data),
     error = function(e) NULL
   )
-  # ---- Key loop setup ----------------------------------------------------- #
+  # Key loop setup ----
 
   weight_col_sim <- grep("^weight$|^hhweight$|^wgt$|^pw$",
     names(svy),
@@ -311,7 +311,7 @@ fct_run_simulation <- function(sw,
   # Serial execution only - parallelisation removed
   n_workers_safe <- 1L
 
-  # ---- Precompute objects shared across all keys ----------------------------- #
+  # Precompute objects shared across all keys ----
 
   is_rif <- identical(engine, "rif")
 
@@ -401,7 +401,7 @@ fct_run_simulation <- function(sw,
   group_requested <- list()
   failures <- list()
 
-  # ---- Run pipelines (one key at a time) ---------------------------------- #
+  # Run pipelines (one key at a time) ----
   t_start <- t_start_total # key loop elapsed = total elapsed from function entry
 
 
@@ -542,7 +542,7 @@ fct_run_simulation <- function(sw,
   t_pipeline_done <- proc.time()[["elapsed"]] - t_start_pipeline
   progress_fn(0.80, "Finalizing scenario results...")
 
-  # ---- REACT-12: classify failures - fail fast or publish with ledger ----- #
+  # REACT-12: classify failures - fail fast or publish with ledger ----
   # The run is unusable when the historical key failed (no baseline to show)
   # or when every requested member of a group failed (that scenario would
   # silently vanish from the results charts). In those cases throw so the
@@ -584,7 +584,7 @@ fct_run_simulation <- function(sw,
     }
   }
 
-  # ---- Assemble new_scenarios --------------------------------------------- #
+  # Assemble new_scenarios ----
   for (gk in names(group_agg)) {
     if (identical(weather_storage, "memory")) {
       shared_members <- step2_weather_share_members(

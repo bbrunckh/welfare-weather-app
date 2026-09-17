@@ -121,7 +121,7 @@ mod_3_scenario_server <- function(id,
   moduleServer(id, function(input, output, session) {
     ns <- session$ns
 
-    # ---- Display selected policy scenarios above accordion -----------------
+    # Display selected policy scenarios above accordion ----
 
     output$policy_info_ui <- renderUI({
       pols <- selected_policies()
@@ -152,7 +152,7 @@ mod_3_scenario_server <- function(id,
       )
     })
 
-    # ---- Social Protection scenario --------------------------------------
+    # Social Protection scenario ----
 
     s1 <- mod_3_01_sp_server(
       "sp",
@@ -165,7 +165,7 @@ mod_3_scenario_server <- function(id,
       hist_sim         = hist_sim
     )
 
-    # ---- Infrastructure scenario -----------------------------------------
+    # Infrastructure scenario ----
 
     s2 <- mod_3_02_infra_server(
       "infra",
@@ -174,7 +174,7 @@ mod_3_scenario_server <- function(id,
       variable_list  = variable_list
     )
 
-    # ---- Digital & financial inclusion scenario --------------------------
+    # Digital & financial inclusion scenario ----
 
     s3 <- mod_3_03_digital_server(
       "digital",
@@ -183,7 +183,7 @@ mod_3_scenario_server <- function(id,
       variable_list = variable_list
     )
 
-    # ---- Labor market scenario -------------------------------------------
+    # Labor market scenario ----
 
     s4 <- mod_3_04_labor_server(
       "labor",
@@ -192,7 +192,7 @@ mod_3_scenario_server <- function(id,
       variable_list = variable_list
     )
 
-    # ---- Education scenario ----------------------------------------------
+    # Education scenario ----
 
     s5 <- mod_3_05_education_server(
       "education",
@@ -223,7 +223,7 @@ mod_3_scenario_server <- function(id,
       ignoreNULL = TRUE
     )
 
-    # ---- Policy adjustment module ----------------------------------------
+    # Policy adjustment module ----
 
     s6 <- mod_3_06_policy_sim_server(
       "policy_sim",
@@ -249,7 +249,7 @@ mod_3_scenario_server <- function(id,
       run_trigger = policy_run_event
     )
 
-    # ---- Results tabs: Baseline & Policy (both re-simulated) -------------
+    # Results tabs: Baseline & Policy (both re-simulated) ----
     s7 <- mod_3_07_results_server(
       "results3",
       baseline_hist_sim = s6$baseline_hist_sim,
@@ -275,7 +275,7 @@ mod_3_scenario_server <- function(id,
       policy_svy = s6$policy_svy
     )
 
-    # ---- Diagnostics tab: before/after variable analysis ----------------
+    # Diagnostics tab: before/after variable analysis ----
     mod_3_08_diagnostics_server(
       "diagnostics",
       baseline_svy = s6$baseline_svy,
@@ -298,7 +298,7 @@ mod_3_scenario_server <- function(id,
       stale = s6$stale
     )
 
-    # ---- Decomposition tab: effect channels -----------------------------
+    # Decomposition tab: effect channels ----
     mod_3_09_decomposition_server(
       "decomposition",
       decomp_result = s6$decomp_result,
@@ -353,7 +353,7 @@ mod_3_scenario_server <- function(id,
       ignoreInit = TRUE
     )
 
-    # ---- Run policy simulation button ------------------------------------
+    # Run policy simulation button ----
 
     output$run_policy_sim_ui <- renderUI({
       actionButton(
@@ -364,7 +364,7 @@ mod_3_scenario_server <- function(id,
       )
     })
 
-    # ---- Run-button prerequisites (UI-44) --------------------------------
+    # Run-button prerequisites (UI-44) ----
     # The policy run needs a Step 1 fit and a Step 2 simulation. Those were
     # only discovered inside run(), where an unmet upstream req() made the
     # click a silent no-op; name them here, before the click.
@@ -413,10 +413,10 @@ mod_3_scenario_server <- function(id,
       )
     })
 
-    # ---- Run policy simulation on button click ---------------------------
+    # Run policy simulation on button click ----
     # REACT-09: handled by the run_trigger reactive passed to the child.
 
-    # ---- Return API ------------------------------------------------------
+    # Return API ----
 
     list(
       policy_hist_sim = s6$policy_hist_sim,
