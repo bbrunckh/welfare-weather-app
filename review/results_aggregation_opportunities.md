@@ -33,18 +33,33 @@ Measure:
 - Exact baseline values, uncertainty, gradients, and ordering
 - Step 3 policy contrasts and decomposition outputs
 
-If parity is exact, implement a shared, run-scoped baseline aggregation object.
-Reuse only identical baseline inputs; policy arms remain separate.
+Implemented in `6bc4e57`. A bounded session cache shares compact historical
+aggregation suites between Step 2 and Step 3. The original Step 2 run
+signature and all aggregation controls are part of the cache key; policy arms
+remain separate. Focused and full tests pass.
 
-## Later Candidates
+## Recent Optimisations
 
-Only pursue these after baseline reuse is measured:
+### Factor-loading blocks
 
-1. Avoid repeated `F_loading[idx, ]` allocations when coefficient uncertainty
-   is enabled.
-2. Index per-model results by year to avoid repeated ensemble-year scans.
-3. Reduce cache-key hashing if profiling shows large-vector digests are costly.
-4. Persist compact aggregate tables for fixed batch/replay workflows.
+Per-year `F_loading` slices are now prepared once and reused across methods
+when coefficient uncertainty is enabled. A focused 80,000-row, ten-year
+probe reduced repeated allocation from `48.6 MB` to `22.5 MB` and elapsed time
+from `15.3 ms` to `13.2 ms`. Focused parity tests pass.
+
+### Indexed ensemble lookup
+
+Per-model aggregation results are now indexed by year before assembly. A
+12-model, 30-year probe reduced lookup time from `6.23 ms` to `0.82 ms`
+(`7.6x`), with exact first-result semantics for duplicate years.
+
+## Next Candidates
+
+1. Reduce cache-key hashing only if profiling shows large-vector digests are
+   material.
+2. Persist compact aggregate tables for fixed batch/replay workflows.
+3. Revisit compact internal result representation if list allocation is shown
+   to dominate after these changes.
 
 ## Do Not Pursue Yet
 

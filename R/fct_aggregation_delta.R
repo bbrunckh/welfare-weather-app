@@ -359,7 +359,8 @@ apply_band_transform <- function(method, value_pt, se, z_lo, z_hi) {
 }
 
 .aggregation_preparation_key <- function(pipe, train_aug, id_col,
-                                         residuals, seed, is_log) {
+                                         residuals, seed, is_log,
+                                         include_factor_loading = FALSE) {
   resid_data <- if (!is.null(train_aug) && ".resid" %in% names(train_aug)) {
     list(
       residuals = train_aug$.resid,
@@ -381,15 +382,17 @@ apply_band_transform <- function(method, value_pt, se, z_lo, z_hi) {
     residuals = residuals,
     seed = seed,
     is_log = is_log,
+    include_factor_loading = isTRUE(include_factor_loading),
     train = resid_data
   ), serialize = TRUE)
 }
 
 .aggregation_prepare_pipeline <- function(pipe, train_aug, id_col,
                                           residuals, seed, is_log,
+                                          include_factor_loading = FALSE,
                                           cache = NULL) {
   key <- .aggregation_preparation_key(
-    pipe, train_aug, id_col, residuals, seed, is_log
+    pipe, train_aug, id_col, residuals, seed, is_log, include_factor_loading
   )
   if (!is.null(cache) && is.environment(cache) &&
     !is.null(cache$entries[[key]])) {
@@ -432,6 +435,14 @@ apply_band_transform <- function(method, value_pt, se, z_lo, z_hi) {
     r <- residual_vectors[[i]]
     if (isTRUE(is_log)) exp(y + r) else y + r
   })
+  factor_blocks <- if (isTRUE(include_factor_loading) && !is.null(pipe$F_loading)) {
+    F_full <- pipe$F_loading
+    if (is.null(dim(F_full))) F_full <- matrix(F_full, nrow = 1L)
+    lapply(seq_along(rows), function(i) {
+      idx <- rows[[i]][valid[[i]]]
+      F_full[idx, , drop = FALSE]
+    })
+  } else NULL
   prepared <- list(
     key = key,
     years = years,
@@ -441,6 +452,7 @@ apply_band_transform <- function(method, value_pt, se, z_lo, z_hi) {
     weights_normalized = weights_normalized,
     residuals = residual_vectors,
     mu = mu,
+    factor_blocks = factor_blocks,
     resid_sigma2 = sigma2
   )
 
@@ -509,14 +521,9 @@ aggregate_pipeline_per_year <- function(pipe,
     residuals = res_mode,
     seed = seed,
     is_log = is_log,
+    include_factor_loading = !isTRUE(skip_coef),
     cache = preparation_cache
   )
-  F_full <- pipe$F_loading
-  # Promote a length-K numeric to a 1xK matrix so row-subsetting below never
-  # fails with "incorrect number of dimensions".
-  if (!is.null(F_full) && is.null(dim(F_full))) {
-    F_full <- matrix(F_full, nrow = 1L)
-  }
   # PERF-34: reuse the preparation-owned residual variance for every year
   # instead of rebuilding var(.resid) per year. Prepared residual vectors have
   # already consumed the temporary ID lookup during preparation.
@@ -525,11 +532,9 @@ aggregate_pipeline_per_year <- function(pipe,
   lapply(seq_along(prep$years), function(i) {
     yr <- prep$years[[i]]
     idx <- prep$rows[[i]][prep$valid[[i]]]
-    F_idx <- if (!is.null(F_full) && !isTRUE(skip_coef)) {
-      F_full[idx, , drop = FALSE]
-    } else {
-      NULL
-    }
+    F_idx <- if (!isTRUE(skip_coef) && !is.null(prep$factor_blocks)) {
+      prep$factor_blocks[[i]]
+    } else NULL
     w_idx <- if (isTRUE(weighted)) prep$weights[[i]] else NULL
     m <- aggregate_with_uncertainty_delta(
       y_point = pipe$y_point[idx],
@@ -611,13 +616,10 @@ aggregate_pipeline_per_year_multi <- function(pipe,
     residuals = res_mode,
     seed = seed,
     is_log = is_log,
+    include_factor_loading = !isTRUE(skip_coef),
     cache = preparation_cache
   )
 
-  F_full <- pipe$F_loading
-  if (!is.null(F_full) && is.null(dim(F_full))) {
-    F_full <- matrix(F_full, nrow = 1L)
-  }
   sg2 <- prep$resid_sigma2
 
   out <- setNames(lapply(methods, function(method) vector("list", length(prep$years))),
@@ -625,11 +627,9 @@ aggregate_pipeline_per_year_multi <- function(pipe,
   for (i in seq_along(prep$years)) {
     yr <- prep$years[[i]]
     idx <- prep$rows[[i]][prep$valid[[i]]]
-    F_idx <- if (!is.null(F_full) && !isTRUE(skip_coef)) {
-      F_full[idx, , drop = FALSE]
-    } else {
-      NULL
-    }
+    F_idx <- if (!isTRUE(skip_coef) && !is.null(prep$factor_blocks)) {
+      prep$factor_blocks[[i]]
+    } else NULL
     w_idx <- if (isTRUE(weighted)) prep$weights[[i]] else NULL
 
     for (method in methods) {

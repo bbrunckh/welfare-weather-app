@@ -833,6 +833,7 @@ aggregate_pipeline_table <- function(pipelines,
       preparation_cache = preparation_cache
     )
   })
+  per_model_by_year <- lapply(per_model, .index_aggregation_results_by_year)
 
   # The first pipeline defines the simulation-year grid, matching the
   # simulation contract used by both result panes.
@@ -842,10 +843,7 @@ aggregate_pipeline_table <- function(pipelines,
   }
 
   rows <- lapply(years, function(year) {
-    per_year <- lapply(per_model, function(results) {
-      hit <- vapply(results, function(x) identical(x$sim_year, year), logical(1L))
-      if (any(hit)) results[[which(hit)[1L]]] else NULL
-    })
+    per_year <- lapply(per_model_by_year, function(results) results[[as.character(year)]] %||% NULL)
     keep <- !vapply(per_year, is.null, logical(1L))
     per_year <- per_year[keep]
     ids <- model_ids[keep]
@@ -897,6 +895,17 @@ aggregate_pipeline_table <- function(pipelines,
   })
 
   dplyr::bind_rows(Filter(Negate(is.null), rows))
+}
+
+.index_aggregation_results_by_year <- function(results) {
+  if (is.null(results) || !length(results)) return(list())
+  out <- list()
+  for (result in results) {
+    year <- result$sim_year %||% NA_integer_
+    key <- as.character(year)
+    if (!identical(key, "NA") && is.null(out[[key]])) out[[key]] <- result
+  }
+  out
 }
 
 #' Build canonical aggregation tables for several methods in one pass
@@ -968,16 +977,16 @@ aggregate_pipeline_tables_multi <- function(pipelines,
       preparation_cache = preparation_cache
     )
   })
+  per_model_by_year <- lapply(per_model, function(results_by_method) {
+    lapply(results_by_method, .index_aggregation_results_by_year)
+  })
   years <- sort(unique(pipelines[[1L]]$sim_year))
   if (!length(years)) return(setNames(vector("list", length(methods)), methods))
 
   build_table <- function(method) {
-    per_method <- lapply(per_model, `[[`, method)
+    per_method <- lapply(per_model_by_year, `[[`, method)
     rows <- lapply(years, function(year) {
-      per_year <- lapply(per_method, function(results) {
-        hit <- vapply(results, function(x) identical(x$sim_year, year), logical(1L))
-        if (any(hit)) results[[which(hit)[1L]]] else NULL
-      })
+      per_year <- lapply(per_method, function(results) results[[as.character(year)]] %||% NULL)
       keep <- !vapply(per_year, is.null, logical(1L))
       per_year <- per_year[keep]
       ids <- model_ids[keep]
