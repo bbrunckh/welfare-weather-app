@@ -2779,8 +2779,9 @@ plot_importance <- function(model, label_fun = identity) {
 # export fallback use them); these draw the same statistics, computed with the
 # same parameters, as interactive echarts4r widgets.
 
-# Transparent stacked band (lo..hi) plus an estimate line: the echarts idiom
-# replacing ggplot's geom_ribbon. Returns three series (bottom, band, line).
+# Transparent polygon band (lo..hi) plus an estimate line: the echarts idiom
+# replacing ggplot's geom_ribbon. Returns three series (dummy, polygon band, line)
+# to preserve 3-series index compatibility for all callers.
 .e_ribbon_series <- function(nm, x, est, lo, hi, fill, line,
                              line_width = 2, show_points = FALSE,
                              point_size = 5, z = 2) {
@@ -2791,23 +2792,47 @@ plot_importance <- function(model, label_fun = identity) {
   if (!length(x)) {
     return(NULL)
   }
-  pts <- function(v) lapply(seq_along(x), function(i) list(x[i], v[i]))
+  ord <- order(x)
+  x <- x[ord]; est <- est[ord]; lo <- lo[ord]; hi <- hi[ord]
+
+  js_ribbon <- htmlwidgets::JS("function(params, api) {
+    if (params.dataIndex !== 0) return;
+    var count = params.dataInsideLength || 0;
+    if (!count) return;
+    var pts = [];
+    for (var i = 0; i < count; i++) {
+      pts.push(api.coord([api.value(0, i), api.value(2, i)]));
+    }
+    for (var i = count - 1; i >= 0; i--) {
+      pts.push(api.coord([api.value(0, i), api.value(3, i)]));
+    }
+    return {
+      type: 'polygon',
+      shape: { points: pts },
+      style: { fill: api.visual('color'), opacity: 0.18 }
+    };
+  }")
+
+  band_data <- lapply(seq_along(x), function(i) list(x[i], est[i], hi[i], lo[i]))
+  line_data <- lapply(seq_along(x), function(i) list(x[i], est[i]))
+
   list(
     list(
-      name = nm, type = "line", stack = paste0(nm, "_band"),
-      data = pts(lo), symbol = "none", silent = TRUE, z = z,
+      name = nm, type = "line", data = list(), symbol = "none", silent = TRUE, z = z,
       lineStyle = list(opacity = 0), itemStyle = list(opacity = 0),
       tooltip = list(show = FALSE), legendHoverLink = FALSE
     ),
     list(
-      name = nm, type = "line", stack = paste0(nm, "_band"),
-      data = pts(pmax(hi - lo, 0)), symbol = "none", silent = TRUE, z = z,
-      lineStyle = list(opacity = 0), itemStyle = list(opacity = 0),
-      tooltip = list(show = FALSE), legendHoverLink = FALSE,
-      areaStyle = list(color = fill, opacity = 0.15)
+      name = nm, type = "custom",
+      renderItem = js_ribbon,
+      data = band_data,
+      itemStyle = list(color = fill),
+      areaStyle = list(color = fill, opacity = 0.18),
+      silent = TRUE, z = z,
+      tooltip = list(show = FALSE), legendHoverLink = FALSE
     ),
     list(
-      name = nm, type = "line", data = pts(est), symbol = "none", z = z + 1,
+      name = nm, type = "line", data = line_data, symbol = if (show_points) "circle" else "none", z = z + 1,
       lineStyle = list(color = line, width = line_width),
       itemStyle = list(color = line),
       symbolSize = if (show_points) point_size else 1,
@@ -2923,8 +2948,9 @@ echart_make_coefplot <- function(fit1, fit2, fit3,
   }
 
   model_levels <- c("No FE", "FE", lab3)
-  model_cols <- c("No FE" = "grey72", "FE" = "grey58", setNames("#0072B2", lab3))
+  model_cols <- c("No FE" = "#8c8c8c", "FE" = "#404040", setNames("#0072B2", lab3))
   model_syms <- c("circle", "triangle", "rect")
+  dodges <- c(-0.2, 0, 0.2)
 
   y_cats <- rev(levels(coef_data$label_wrap))
   e <- .e_new(height)
@@ -2934,43 +2960,59 @@ echart_make_coefplot <- function(fit1, fit2, fit3,
     if (!nrow(d)) {
       return(NULL)
     }
+    col <- unname(model_cols[[nm]])
+    dy <- dodges[i]
+    pts <- lapply(seq_len(nrow(d)), function(j) {
+      cat_idx <- match(as.character(d$label_wrap[j]), y_cats) - 1L
+      list(d$Estimate[j], cat_idx + dy)
+    })
+    whiskers <- lapply(seq_len(nrow(d)), function(j) {
+      cat_idx <- match(as.character(d$label_wrap[j]), y_cats) - 1L
+      list(
+        list(coord = list(d$conf.low[j], cat_idx + dy)),
+        list(coord = list(d$conf.high[j], cat_idx + dy))
+      )
+    })
+    ml_data <- whiskers
+    if (i == 1L) {
+      ml_data <- c(
+        list(list(
+          xAxis = 0,
+          lineStyle = list(color = .wise_zero, type = "dashed", width = 1),
+          symbol = list("none", "none")
+        )),
+        whiskers
+      )
+    }
     list(
       name = nm, type = "scatter",
-      data = lapply(seq_len(nrow(d)), function(j) {
-        list(d$Estimate[j], as.character(d$label_wrap[j]))
-      }),
+      data = pts,
       symbol = model_syms[i], symbolSize = 8,
-      symbolOffset = list(0, c(-7, 0, 7)[i]),
-      itemStyle = list(color = unname(model_cols[[nm]])),
+      itemStyle = list(color = col),
       markLine = list(
-        symbol = "none", silent = TRUE,
-        lineStyle = list(color = unname(model_cols[[nm]]), width = 1.2),
-        label = list(show = FALSE), animation = FALSE,
-        data = lapply(seq_len(nrow(d)), function(j) {
-          list(
-            list(coord = list(d$conf.low[j], as.character(d$label_wrap[j]))),
-            list(coord = list(d$conf.high[j], as.character(d$label_wrap[j])))
-          )
-        })
+        symbol = list("rect", "rect"),
+        symbolSize = list(1, 6),
+        silent = TRUE, animation = FALSE,
+        lineStyle = list(color = col, width = 1.5, type = "solid"),
+        label = list(show = FALSE),
+        data = ml_data
       )
     )
   })
   series <- purrr::compact(series)
-  # Dashed zero reference line rides on the first series' markLine set.
-  series[[1]]$markLine$data <- c(
-    list(list(
-      xAxis = 0,
-      lineStyle = list(color = .wise_zero, type = "dashed", width = 1),
-      label = list(show = FALSE)
-    )),
-    series[[1]]$markLine$data
-  )
   e$x$opts$series <- series
+
+  x_min_val <- min(c(0, coef_data$conf.low), na.rm = TRUE)
+  x_max_val <- max(c(0, coef_data$conf.high), na.rm = TRUE)
+  x_pad <- max((x_max_val - x_min_val) * 0.08, 0.02)
+
   e$x$opts$xAxis <- list(
-    type = "value",
+    type = "value", scale = TRUE,
+    min = round(x_min_val - x_pad, 2),
+    max = round(x_max_val + x_pad, 2),
     name = x_label %||% stringr::str_wrap(paste0("Effect on ", outcome_label), 50),
     nameLocation = "middle", nameGap = 30,
-    nameTextStyle = wise_eaxis_name(),
+    nameTextStyle = wise_eaxis_name(align = "center"),
     axisLabel = wise_eaxis_label(),
     splitLine = wise_esplit_line()
   )
@@ -2981,7 +3023,7 @@ echart_make_coefplot <- function(fit1, fit2, fit3,
     splitLine = wise_esplit_line()
   )
   e$x$opts$legend <- wise_elegend_style(left = 0, bottom = 0)
-  e$x$opts$grid <- list(containLabel = TRUE, left = 8, right = 20, top = 14, bottom = 46)
+  e$x$opts$grid <- list(containLabel = TRUE, left = 8, right = 20, top = 20, bottom = 48)
   e$x$opts$tooltip <- list(trigger = "item")
   wise_echart_theme(e)
 }
@@ -3165,29 +3207,27 @@ echart_weather_effect_plot <- function(fit, pred_var, interaction_terms, is_binn
           splitLine = wise_esplit_line()
         )
       }
-      value_y_axis <- function(name) {
+      value_y_axis <- function(name, min_val = NULL, max_val = NULL) {
         list(
-          type = "value", scale = TRUE, name = name,
-          nameLocation = "middle", nameGap = 46,
-          nameTextStyle = list(
-            color = .wise_charcoal, fontSize = 14, rotate = 90
-          ),
+          type = "value", scale = is.null(min_val), name = name,
+          min = min_val, max = max_val,
+          nameLocation = "end",
+          nameTextStyle = wise_eaxis_name(),
           axisLabel = wise_eaxis_label(),
           splitLine = wise_esplit_line()
         )
       }
-      # Bin-index axis with R-side bin labels (dodge is done in data units).
+      # Bin category axis matching ggplot factor bins.
       bin_x_axis <- function(bin_labels, name) {
         list(
-          type = "value", min = 0.5, max = length(bin_labels) + 0.5,
-          interval = 1, name = name,
-          nameLocation = "middle", nameGap = 30,
-          nameTextStyle = wise_eaxis_name(),
-          axisLabel = modifyList(
-            wise_eaxis_label(),
-            list(formatter = .e_index_formatter(bin_labels))
-          ),
-          axisTick = list(show = FALSE),
+          type = "category",
+          data = as.character(bin_labels),
+          name = name,
+          nameLocation = "middle", nameGap = 34,
+          nameTextStyle = wise_eaxis_name(align = "center"),
+          axisLabel = wise_eaxis_label(rotate = 0),
+          axisTick = list(alignWithLabel = TRUE),
+          axisLine = list(lineStyle = list(color = .wise_grid)),
           splitLine = wise_esplit_line()
         )
       }
@@ -3610,20 +3650,52 @@ echart_weather_effect_plot <- function(fit, pred_var, interaction_terms, is_binn
 
             e <- .e_new(height)
 
+            js_err <- htmlwidgets::JS("function(params, api) {
+              var x = api.coord([api.value(0), api.value(1)])[0];
+              var high = api.coord([api.value(0), api.value(2)])[1];
+              var low = api.coord([api.value(0), api.value(3)])[1];
+              var barWidth = 8;
+              var stroke = api.visual('color') || '#0071BC';
+              return {
+                type: 'group',
+                children: [
+                  {
+                    type: 'line',
+                    shape: { x1: x, y1: high, x2: x, y2: low },
+                    style: { stroke: stroke, lineWidth: 1.5 }
+                  },
+                  {
+                    type: 'line',
+                    shape: { x1: x - barWidth/2, y1: high, x2: x + barWidth/2, y2: high },
+                    style: { stroke: stroke, lineWidth: 1.5 }
+                  },
+                  {
+                    type: 'line',
+                    shape: { x1: x - barWidth/2, y1: low, x2: x + barWidth/2, y2: low },
+                    style: { stroke: stroke, lineWidth: 1.5 }
+                  }
+                ]
+              };
+            }")
+
             if (is.null(modx_var)) {
               bins_df$conf.low <- bins_df$Estimate - 1.96 * bins_df$`Std. Error`
               bins_df$conf.high <- bins_df$Estimate + 1.96 * bins_df$`Std. Error`
               bins_df <- .apply_effect_scale(bins_df)
 
-              # Pointrange over bins + connecting line: a scatter series with
-              # per-point markLine whiskers plus a thin line behind it.
               pts <- lapply(seq_len(nrow(bins_df)), function(i) {
-                list(bins_df$bin_index[i], bins_df$Estimate[i])
+                list(i - 1L, bins_df$Estimate[i])
+              })
+              whiskers <- lapply(seq_len(nrow(bins_df)), function(i) {
+                list(
+                  list(coord = list(i - 1L, bins_df$conf.low[i])),
+                  list(coord = list(i - 1L, bins_df$conf.high[i]))
+                )
               })
               line <- list(
                 name = "Effect", type = "line",
                 data = pts, symbol = "none", silent = TRUE, z = 1,
-                lineStyle = list(color = .wise_blue, width = 1),
+                lineStyle = list(color = .wise_blue, width = 1.5),
                 itemStyle = list(color = .wise_blue),
                 tooltip = list(show = FALSE)
               )
@@ -3632,29 +3704,32 @@ echart_weather_effect_plot <- function(fit, pred_var, interaction_terms, is_binn
                 symbolSize = 8, z = 2,
                 itemStyle = list(color = .wise_blue),
                 markLine = list(
-                  symbol = list("none", "none"), silent = TRUE,
-                  animation = FALSE,
-                  lineStyle = list(color = .wise_slate, width = 1),
-                  label = list(show = FALSE),
+                  symbol = list("rect", "rect"),
+                  symbolSize = list(8, 1.5),
+                  lineStyle = list(color = .wise_blue, width = 1.5),
                   data = c(
-                    .e_zero_line()$data,
-                    lapply(seq_len(nrow(bins_df)), function(i) {
-                      list(list(
-                        coord = list(bins_df$bin_index[i], bins_df$conf.low[i])
-                      ), list(
-                        coord = list(bins_df$bin_index[i], bins_df$conf.high[i])
-                      ))
-                    })
+                    list(list(
+                      yAxis = 0,
+                      lineStyle = list(color = .wise_zero, type = "dashed", width = 1),
+                      symbol = list("none", "none")
+                    )),
+                    whiskers
                   )
                 )
               )
+              y_min_val <- min(c(0, bins_df$conf.low), na.rm = TRUE)
+              y_max_val <- max(c(0, bins_df$conf.high), na.rm = TRUE)
+              y_pad <- max((y_max_val - y_min_val) * 0.12, 0.02)
+
               e$x$opts$series <- list(line, dots)
               e$x$opts$xAxis <- list(bin_x_axis(bins_df$bin_label, pred_x_lab))
               e$x$opts$yAxis <- list(value_y_axis(
-                y_label %||% paste("Effect on", y_lab)
+                y_label %||% paste("Effect on", y_lab),
+                min_val = round(y_min_val - y_pad, 3),
+                max_val = round(y_max_val + y_pad, 3)
               ))
               e$x$opts$grid <- list(
-                containLabel = TRUE, left = 8, right = 20, top = 14,
+                containLabel = TRUE, left = 8, right = 20, top = 36,
                 bottom = grid_pad(FALSE, !is.null(cap_binned))
               )
               e$x$opts$tooltip <- list(trigger = "axis")
@@ -3722,7 +3797,7 @@ echart_weather_effect_plot <- function(fit, pred_var, interaction_terms, is_binn
             plot_df$modx <- factor(plot_df$modx, levels = modx_u, labels = modx_labels)
 
             # Dodge in data units so lines, points and whiskers share offsets.
-            dodge <- 0.14
+            dodge <- 0.16
             offs <- stats::setNames(
               (seq_along(modx_u) - (length(modx_u) + 1) / 2) * dodge,
               modx_labels
@@ -3741,50 +3816,54 @@ echart_weather_effect_plot <- function(fit, pred_var, interaction_terms, is_binn
               dx <- unname(offs[[lab]])
               col <- unname(cols[mi])
               pts <- lapply(seq_len(nrow(d)), function(i) {
-                list(d$bin_index[i] + dx, d$est[i])
+                list(i - 1L + dx, d$est[i])
               })
+              err_data <- lapply(seq_len(nrow(d)), function(i) {
+                list(i - 1L + dx, d$est[i], d$conf.high[i], d$conf.low[i])
+              })
+              err_series <- list(
+                name = lab, type = "custom", renderItem = js_err,
+                data = err_data, itemStyle = list(color = col),
+                silent = TRUE, z = 2, tooltip = list(show = FALSE)
+              )
               line <- list(
                 name = lab, type = "line", data = pts,
-                symbol = "none", silent = TRUE, z = 1,
-                lineStyle = list(color = col, width = 1),
+                symbol = "circle", symbolSize = 7, z = 3,
+                lineStyle = list(color = col, width = 1.5),
                 itemStyle = list(color = col),
-                tooltip = list(show = FALSE)
+                markLine = if (mi == 1L) {
+                  list(
+                    symbol = list("none", "none"), silent = TRUE,
+                    data = list(list(yAxis = 0, lineStyle = list(color = .wise_zero, type = "dashed", width = 1)))
+                  )
+                } else NULL
               )
-              whisk <- lapply(seq_len(nrow(d)), function(i) {
-                list(list(
-                  coord = list(d$bin_index[i] + dx, d$conf.low[i])
-                ), list(
-                  coord = list(d$bin_index[i] + dx, d$conf.high[i])
-                ))
-              })
-              dots <- list(
-                name = lab, type = "scatter", data = pts,
-                symbolSize = 6, z = 2,
-                itemStyle = list(color = col),
-                markLine = list(
-                  symbol = list("none", "none"), silent = TRUE,
-                  animation = FALSE,
-                  lineStyle = list(color = .wise_slate, width = 1),
-                  label = list(show = FALSE),
-                  data = c(.e_zero_line()$data, whisk)
-                )
-              )
-              list(line, dots)
+              list(err_series, line)
             }), recursive = FALSE)
+            series <- Filter(Negate(is.null), series)
+
+            y_min_val <- min(c(0, plot_df$conf.low), na.rm = TRUE)
+            y_max_val <- max(c(0, plot_df$conf.high), na.rm = TRUE)
+            y_pad <- max((y_max_val - y_min_val) * 0.12, 0.02)
 
             e$x$opts$series <- series
             e$x$opts$xAxis <- list(bin_x_axis(bins_df$bin_label, pred_x_lab))
             e$x$opts$yAxis <- list(value_y_axis(
-              y_label %||% paste("Effect on", y_lab)
+              y_label %||% paste("Effect on", y_lab),
+              min_val = round(y_min_val - y_pad, 3),
+              max_val = round(y_max_val + y_pad, 3)
             ))
-            e$x$opts$legend <- wise_elegend_style(left = 0, bottom = 0)
+            e$x$opts$legend <- wise_elegend_style(
+              data = as.list(modx_labels),
+              right = 36, top = 0, orient = "horizontal"
+            )
             e$x$opts$grid <- list(
-              containLabel = TRUE, left = 8, right = 20, top = 14,
+              containLabel = TRUE, left = 8, right = 20, top = 54,
               bottom = grid_pad(TRUE, !is.null(cap_binned))
             )
             e$x$opts$tooltip <- list(trigger = "axis")
             e <- .e_caption(e, cap_binned)
-            wise_echart_theme(e)
+            return(wise_echart_theme(e))
           },
           error = function(e) echart_blank(paste0("Binned effect plot error: ", conditionMessage(e)),
             height = height
@@ -4019,11 +4098,15 @@ echart_weather_effect_plot <- function(fit, pred_var, interaction_terms, is_binn
           e$x$opts$yAxis[[1]]$min <- rug_y
           e$x$opts$yAxis[[1]]$max <- y_r[2] + pad
           if (has_legend) {
-            e$x$opts$legend <- wise_elegend_style(left = 0, bottom = 0)
+            e$x$opts$legend <- wise_elegend_style(
+              data = as.list(names(curves)),
+              right = 36, top = 0, orient = "horizontal"
+            )
           }
           e$x$opts$grid <- list(
-            containLabel = TRUE, left = 8, right = 20, top = 14,
-            bottom = grid_pad(has_legend, TRUE)
+            containLabel = TRUE, left = 8, right = 20,
+            top = if (has_legend) 54 else 36,
+            bottom = grid_pad(FALSE, TRUE)
           )
           e$x$opts$tooltip <- list(trigger = "axis")
           e <- .e_caption(e, cap_text)
@@ -4114,7 +4197,7 @@ echart_importance <- function(model, label_fun = identity, height = "400px") {
     name = "Share", type = "bar",
     data = lapply(seq_len(nrow(df)), function(i) {
       list(
-        df$share[i],
+        value = df$share[i],
         label = list(
           show = TRUE, position = "right",
           formatter = sprintf("%.0f%%", df$share[i]),
@@ -4128,8 +4211,10 @@ echart_importance <- function(model, label_fun = identity, height = "400px") {
   e$x$opts$xAxis <- list(list(
     type = "value", name = "Share of explained variation (%)",
     nameLocation = "middle", nameGap = 30,
-    nameTextStyle = wise_eaxis_name(),
-    axisLabel = wise_eaxis_label(formatter = .e_percent_formatter()),
+    nameTextStyle = wise_eaxis_name(align = "center"),
+    axisLabel = wise_eaxis_label(
+      formatter = htmlwidgets::JS("function(v){ return v + '%'; }")
+    ),
     splitLine = wise_esplit_line()
   ))
   e$x$opts$yAxis <- list(list(
@@ -4139,7 +4224,7 @@ echart_importance <- function(model, label_fun = identity, height = "400px") {
     splitLine = list(show = FALSE)
   ))
   e$x$opts$grid <- list(
-    containLabel = TRUE, left = 8, right = 56, top = 14, bottom = 14
+    containLabel = TRUE, left = 8, right = 56, top = 20, bottom = 44
   )
   e$x$opts$tooltip <- list(trigger = "item")
   wise_echart_theme(e)
@@ -4208,19 +4293,19 @@ echart_residual_panels <- function(model, is_logistic = FALSE, height = "400px")
         e$x$opts$xAxis <- list(list(
           type = "value", name = "Predicted risk (bin mean)",
           nameLocation = "middle", nameGap = 30,
-          nameTextStyle = wise_eaxis_name(),
+          nameTextStyle = wise_eaxis_name(align = "center"),
           axisLabel = wise_eaxis_label(), splitLine = wise_esplit_line()
         ))
         e$x$opts$yAxis <- list(list(
           type = "value", scale = TRUE, name = "Mean residual in bin",
-          nameLocation = "middle", nameGap = 46,
-          nameTextStyle = list(color = .wise_charcoal, fontSize = 14, rotate = 90),
+          nameLocation = "end",
+          nameTextStyle = wise_eaxis_name(),
           axisLabel = wise_eaxis_label(), splitLine = wise_esplit_line()
         ))
         e$x$opts$grid <- list(
-          containLabel = TRUE, left = 8, right = 20, top = 14, bottom = 14
+          containLabel = TRUE, left = 8, right = 20, top = 36, bottom = 44
         )
-        e$x$opts$tooltip <- list(trigger = "axis")
+        e$x$opts$tooltip <- list(show = FALSE)
         wise_echart_theme(e)
       },
       error = function(e) echart_blank(paste0(
@@ -4296,45 +4381,48 @@ echart_residual_panels <- function(model, is_logistic = FALSE, height = "400px")
       ))
 
       e$x$opts$series <- c(series1, series2)
-      e$x$opts$series[[1]]$xAxisIndex <- 0L
-      e$x$opts$series[[1]]$yAxisIndex <- 0L
-      e$x$opts$series[[2]]$xAxisIndex <- 0L
-      e$x$opts$series[[2]]$yAxisIndex <- 0L
-      e$x$opts$series[[3]]$xAxisIndex <- 1L
-      e$x$opts$series[[3]]$yAxisIndex <- 1L
-      if (length(e$x$opts$series) > 3L) {
-        e$x$opts$series[[4]]$xAxisIndex <- 1L
-        e$x$opts$series[[4]]$yAxisIndex <- 1L
+      for (i in seq_along(series1)) {
+        e$x$opts$series[[i]]$xAxisIndex <- 0L
+        e$x$opts$series[[i]]$yAxisIndex <- 0L
+      }
+      s2_start <- length(series1) + 1L
+      for (i in s2_start:length(e$x$opts$series)) {
+        e$x$opts$series[[i]]$xAxisIndex <- 1L
+        e$x$opts$series[[i]]$yAxisIndex <- 1L
       }
       e$x$opts$xAxis <- list(
         list(
+          gridIndex = 0L,
           type = "value", scale = TRUE, name = "Fitted values",
           nameLocation = "middle", nameGap = 28,
-          nameTextStyle = wise_eaxis_name(),
+          nameTextStyle = wise_eaxis_name(align = "center"),
           axisLabel = wise_eaxis_label(), splitLine = wise_esplit_line()
         ),
         list(
+          gridIndex = 1L,
           type = "value", scale = TRUE, name = "Theoretical quantiles",
           nameLocation = "middle", nameGap = 28,
-          nameTextStyle = wise_eaxis_name(),
+          nameTextStyle = wise_eaxis_name(align = "center"),
           axisLabel = wise_eaxis_label(), splitLine = wise_esplit_line()
         )
       )
       e$x$opts$yAxis <- list(
         list(
+          gridIndex = 0L,
           type = "value", scale = TRUE, name = "Residuals",
-          nameLocation = "middle", nameGap = 44,
-          nameTextStyle = list(color = .wise_charcoal, fontSize = 13, rotate = 90),
+          nameLocation = "end",
+          nameTextStyle = wise_eaxis_name(),
           axisLabel = wise_eaxis_label(), splitLine = wise_esplit_line()
         ),
         list(
+          gridIndex = 1L,
           type = "value", scale = TRUE, name = "Sample quantiles",
-          nameLocation = "middle", nameGap = 44,
-          nameTextStyle = list(color = .wise_charcoal, fontSize = 13, rotate = 90),
+          nameLocation = "end",
+          nameTextStyle = wise_eaxis_name(),
           axisLabel = wise_eaxis_label(), splitLine = wise_esplit_line()
         )
       )
-      e$x$opts$tooltip <- list(trigger = "item")
+      e$x$opts$tooltip <- list(show = FALSE)
       wise_echart_theme(e)
     },
     error = function(e) echart_blank(paste0(
@@ -4407,23 +4495,31 @@ echart_pred_vs_actual <- function(model, is_logistic, outcome_label = "outcome",
       type = "category", data = as.list(labels),
       name = stringr::str_wrap(outcome_label, 40),
       nameLocation = "middle", nameGap = 30,
-      nameTextStyle = wise_eaxis_name(),
+      nameTextStyle = wise_eaxis_name(align = "center"),
       axisLabel = wise_eaxis_label(fontSize = 10),
       axisTick = list(show = FALSE),
       splitLine = wise_esplit_line()
     ))
     e$x$opts$yAxis <- list(list(
       type = "value", name = "Share of households (%)",
-      nameLocation = "middle", nameGap = 42,
+      nameLocation = "end",
       nameTextStyle = wise_eaxis_name(),
-      axisLabel = wise_eaxis_label(formatter = .e_percent_formatter()),
+      axisLabel = wise_eaxis_label(
+        formatter = htmlwidgets::JS("function(v){ return v + '%'; }")
+      ),
       splitLine = wise_esplit_line()
     ))
-    e$x$opts$legend <- wise_elegend_style(left = 0, bottom = 0)
-    e$x$opts$grid <- list(
-      containLabel = TRUE, left = 8, right = 20, top = 14, bottom = 46
+    e$x$opts$legend <- wise_elegend_style(
+      data = list("Actual", "Predicted"),
+      right = 36, top = 0, orient = "horizontal"
     )
-    e$x$opts$tooltip <- list(trigger = "axis", axisPointer = list(type = "shadow"))
+    e$x$opts$grid <- list(
+      containLabel = TRUE, left = 8, right = 20, top = 36, bottom = 46
+    )
+    e$x$opts$tooltip <- list(
+      trigger = "axis", axisPointer = list(type = "shadow"),
+      valueFormatter = htmlwidgets::JS("function(v){ return Number(v).toFixed(1) + '%'; }")
+    )
     return(wise_echart_theme(e))
   }
 

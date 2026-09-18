@@ -640,9 +640,7 @@ model_term_names <- function(sm) {
 # Precomputed-ridge renderer shared by the outcome and weather distribution
 # charts. `rd_data` is the `$data` frame of `build_ridge_distribution_data()`
 # (columns x, y, height, group); `styles` maps each `group` key to its fill
-# colour (NA = outline only), line colour and line dash. One stacked
-# (baseline, height) series pair per group reproduces the ggplot ribbon from
-# the ridge baseline to its top line.
+# colour (NA = outline only), line colour and line dash.
 ridge_echart_widget <- function(rd_data, ridge_levels, ridge_labels, styles,
                                 height = "300px", log_scale = FALSE,
                                 x_name = NULL, y_name = "") {
@@ -654,45 +652,105 @@ ridge_echart_widget <- function(rd_data, ridge_levels, ridge_labels, styles,
   n_r <- length(ridge_levels)
   x_name <- x_name %||% ""
 
-  series <- unlist(lapply(ridge_levels, function(rid) {
-    g <- rd_data[rd_data$y == match(rid, ridge_levels), , drop = FALSE]
+  make_ridge_render_js <- function(fill, stroke, is_dashed, has_fill) {
+    sprintf("function(params, api) {
+      if (params.dataIndex !== 0) return;
+      var count = params.dataInsideLength || 0;
+      if (!count) return;
+      var fill = %s;
+      var stroke = %s;
+      var isDashed = %s;
+      var hasFill = %s;
+
+      var pts = [];
+      var linePts = [];
+      for (var i = 0; i < count; i++) {
+        var p = api.coord([api.value(0, i), api.value(1, i)]);
+        linePts.push(p);
+        pts.push(p);
+      }
+      for (var i = count - 1; i >= 0; i--) {
+        pts.push(api.coord([api.value(0, i), api.value(2, i)]));
+      }
+      var base0 = api.coord([api.value(0, 0), api.value(2, 0)]);
+      var base1 = api.coord([api.value(0, count - 1), api.value(2, count - 1)]);
+
+      var children = [];
+      if (hasFill && fill && fill !== 'none' && fill !== 'transparent') {
+        children.push({
+          type: 'polygon',
+          shape: { points: pts },
+          style: { fill: fill, opacity: 0.65 }
+        });
+      }
+      children.push({
+        type: 'polyline',
+        shape: { points: linePts },
+        style: {
+          stroke: stroke,
+          lineWidth: 1.5,
+          lineDash: isDashed ? [4, 4] : undefined
+        }
+      });
+      children.push({
+        type: 'line',
+        shape: { x1: base0[0], y1: base0[1], x2: base1[0], y2: base1[1] },
+        style: { stroke: '#E3E9EE', lineWidth: 1 }
+      });
+      return { type: 'group', children: children };
+    }",
+    jsonlite::toJSON(fill, auto_unbox = TRUE),
+    jsonlite::toJSON(stroke, auto_unbox = TRUE),
+    if (is_dashed) "true" else "false",
+    if (has_fill) "true" else "false")
+  }
+
+  groups <- unique(rd_data$group)
+  series <- lapply(groups, function(grp) {
+    g <- rd_data[rd_data$group == grp, , drop = FALSE]
     g <- g[order(g$x), , drop = FALSE]
     if (!nrow(g)) {
       return(NULL)
     }
-    st <- styles[match(g$group[1], styles$group), , drop = FALSE]
-    nm <- paste0("ridge_", match(rid, ridge_levels))
-    base <- list(
-      type = "line", stack = nm,       data = lapply(seq_len(nrow(g)), function(i) {
-        list(g$x[i], g$y[i])
-      }),
-      symbol = "none", silent = TRUE, lineStyle = list(opacity = 0),
-      itemStyle = list(opacity = 0), tooltip = list(show = FALSE)
-    )
-    top_dat <- lapply(seq_len(nrow(g)), function(i) {
-      list(g$x[i], 2 * g$height[i])
+    st <- styles[match(grp, styles$group), , drop = FALSE]
+    fill_col <- if (nrow(st) && !is.na(st$fill[1L]) && nzchar(st$fill[1L])) st$fill[1L] else "#0071BC"
+    line_col <- if (nrow(st) && !is.na(st$line[1L]) && nzchar(st$line[1L])) st$line[1L] else "#002244"
+    is_dashed <- nrow(st) && isTRUE(st$dashed[1L])
+    has_fill <- nrow(st) && !is.na(st$fill[1L]) && nzchar(st$fill[1L])
+
+    y_base <- match(g$ridge[1L], ridge_levels)
+    if (is.na(y_base)) y_base <- 1.0
+    y_top <- y_base + 0.85 * g$height
+
+    dat <- lapply(seq_len(nrow(g)), function(i) {
+      list(g$x[i], y_top[i], y_base)
     })
-    top <- list(
-      type = "line", stack = nm, data = top_dat, symbol = "none",
-      name = as.character(rid),
-      lineStyle = list(
-        color = st$line[1], width = 0.5,
-        type = if (isTRUE(st$dashed[1])) "dashed" else "solid"
+
+    list(
+      type = "custom",
+      name = as.character(grp),
+      renderItem = htmlwidgets::JS(make_ridge_render_js(fill_col, line_col, is_dashed, has_fill)),
+      data = dat,
+      itemStyle = list(
+        color = if (has_fill) fill_col else "none",
+        borderColor = line_col
       ),
-      itemStyle = list(color = st$line[1])
+      z = if (has_fill) 2 else 3
     )
-    if (!is.na(st$fill[1])) {
-      top$areaStyle <- list(color = st$fill[1], opacity = 0.7)
-    }
-    list(base, top)
-  }), recursive = FALSE)
+  })
+  series <- Filter(Negate(is.null), series)
+
+  label_map <- as.list(stats::setNames(
+    as.list(as.character(ridge_labels)),
+    as.character(seq_along(ridge_labels))
+  ))
 
   e$x$opts$series <- series
   e$x$opts$xAxis <- list(
     type = if (isTRUE(log_scale)) "log" else "value",
     name = x_name,
     nameLocation = "middle", nameGap = 28,
-    nameTextStyle = wise_eaxis_name(),
+    nameTextStyle = wise_eaxis_name(align = "center"),
     axisLabel = wise_eaxis_label(
       formatter = if (isTRUE(log_scale)) {
         htmlwidgets::JS(
@@ -709,16 +767,22 @@ ridge_echart_widget <- function(rd_data, ridge_levels, ridge_labels, styles,
   )
   e$x$opts$yAxis <- list(
     type = "value", name = y_name,
-    min = 0.5, max = n_r + 2.2, interval = 1,
+    nameLocation = "end",
+    nameTextStyle = wise_eaxis_name(),
+    min = 0, max = n_r + 1, interval = 1,
     axisLabel = wise_eaxis_label(
-      formatter = htmlwidgets::JS(paste0(
-        "function(v){var m=",
-        jsonlite::toJSON(stats::setNames(ridge_labels, as.list(seq_along(ridge_labels)))),
-        ";return m[String(Math.round(v))]||'';}"
+      interval = 0L,
+      formatter = htmlwidgets::JS(sprintf(
+        "function(v){var m=%s;return m[String(Math.round(v))]||'';}",
+        jsonlite::toJSON(label_map, auto_unbox = TRUE)
       ))
     ),
     axisLine = list(show = FALSE),
-    splitLine = wise_esplit_line()
+    axisTick = list(show = FALSE),
+    splitLine = list(show = FALSE)
+  )
+  e$x$opts$grid <- list(
+    containLabel = TRUE, left = 8, right = 20, top = 40, bottom = 44
   )
   e$x$opts$tooltip <- list(trigger = "axis")
   wise_echart_theme(e)
@@ -792,8 +856,8 @@ echart_resid_weather <- function(model, haz_var, weather_df, x_label = haz_var,
   e <- .e_new(height)
   y_axis <- list(
     type = "value", scale = TRUE, name = "Residuals",
-    nameLocation = "middle", nameGap = 44,
-    nameTextStyle = list(color = .wise_charcoal, fontSize = 13, rotate = 90),
+    nameLocation = "end",
+    nameTextStyle = wise_eaxis_name(),
     axisLabel = wise_eaxis_label(), splitLine = wise_esplit_line()
   )
   zero_mark <- .e_zero_line()
@@ -808,7 +872,7 @@ echart_resid_weather <- function(model, haz_var, weather_df, x_label = haz_var,
 
     bin_idx <- match(as.character(x_vals), lvls)
     set.seed(1)
-    jit <- bin_idx + stats::runif(length(bin_idx), -0.18, 0.18)
+    jit <- (bin_idx - 1L) + stats::runif(length(bin_idx), -0.18, 0.18)
     means <- vapply(lvls, function(l) {
       mean(res[as.character(x_vals) == l], na.rm = TRUE)
     }, numeric(1))
@@ -819,25 +883,28 @@ echart_resid_weather <- function(model, haz_var, weather_df, x_label = haz_var,
         data = lapply(seq_along(jit), function(i) list(jit[i], res[i])),
         symbolSize = 4, z = 1,
         itemStyle = list(color = .wise_charcoal, opacity = 0.12),
+        silent = TRUE, tooltip = list(show = FALSE),
         markLine = zero_mark
       ),
       list(
         name = "Bin mean", type = "scatter",
-        data = lapply(seq_along(lvls), function(i) list(i, means[i])),
+        data = lapply(seq_along(lvls), function(i) list(i - 1L, means[i])),
         symbolSize = 9, z = 2,
-        itemStyle = list(color = .wise_marker_alt)
+        itemStyle = list(color = .wise_marker_alt),
+        tooltip = list(show = TRUE)
       )
     )
     e$x$opts$xAxis <- list(list(
-      type = "value", min = 0.5, max = length(lvls) + 0.5, interval = 1,
+      type = "category", data = as.character(new_lab),
       name = stringr::str_wrap(x_label, 40),
-      nameLocation = "middle", nameGap = 30,
-      nameTextStyle = wise_eaxis_name(),
+      nameLocation = "middle", nameGap = 32,
+      nameTextStyle = wise_eaxis_name(align = "center"),
       axisLabel = modifyList(
         wise_eaxis_label(rotate = 30),
-        list(formatter = .e_index_formatter(new_lab))
+        list(formatter = htmlwidgets::JS("function(v){return v;}"))
       ),
-      axisTick = list(show = FALSE), splitLine = wise_esplit_line()
+      axisTick = list(alignWithLabel = TRUE),
+      splitLine = wise_esplit_line()
     ))
   } else {
     xv <- as.numeric(x_vals)
@@ -860,25 +927,27 @@ echart_resid_weather <- function(model, haz_var, weather_df, x_label = haz_var,
         data = lapply(seq_along(xv), function(i) list(xv[i], res[i])),
         symbolSize = 4, z = 1,
         itemStyle = list(color = .wise_charcoal, opacity = 0.1),
+        silent = TRUE, tooltip = list(show = FALSE),
         markLine = zero_mark
       ),
       list(
         name = "Bin mean", type = "scatter", data = mean_pts,
         symbolSize = 8, z = 2,
-        itemStyle = list(color = .wise_marker_alt)
+        itemStyle = list(color = .wise_marker_alt),
+        tooltip = list(show = TRUE)
       )
     )
     e$x$opts$xAxis <- list(list(
       type = "value", scale = TRUE,
       name = stringr::str_wrap(x_label, 40),
-      nameLocation = "middle", nameGap = 30,
-      nameTextStyle = wise_eaxis_name(),
+      nameLocation = "middle", nameGap = 32,
+      nameTextStyle = wise_eaxis_name(align = "center"),
       axisLabel = wise_eaxis_label(), splitLine = wise_esplit_line()
     ))
   }
   e$x$opts$yAxis <- list(y_axis)
   e$x$opts$grid <- list(
-    containLabel = TRUE, left = 8, right = 20, top = 14, bottom = 14
+    containLabel = TRUE, left = 8, right = 20, top = 36, bottom = 46
   )
   e$x$opts$tooltip <- list(trigger = "item")
   wise_echart_theme(e)

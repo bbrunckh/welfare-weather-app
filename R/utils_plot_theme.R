@@ -180,7 +180,10 @@ wise_eaxis_label <- function(...) {
 #' @rdname wise_eaxis_label
 #' @noRd
 wise_eaxis_name <- function(...) {
-  modifyList(list(color = .wise_charcoal, fontSize = 14), list(...))
+  modifyList(
+    list(color = .wise_charcoal, fontSize = 13, align = "center", padding = c(0, 0, 8, 0)),
+    list(...)
+  )
 }
 
 #' @rdname wise_eaxis_label
@@ -215,6 +218,20 @@ wise_echart_theme <- function(e, base_size = 14) {
     list(textStyle = list(color = .wise_charcoal, fontSize = 13)),
     if (is.null(tip)) list() else tip
   )
+  if (is.null(e$x$opts$toolbox)) {
+    e$x$opts$toolbox <- list(
+      show = TRUE,
+      right = 8,
+      top = 0,
+      feature = list(
+        saveAsImage = list(
+          show = TRUE,
+          title = "Download image",
+          pixelRatio = 2
+        )
+      )
+    )
+  }
   e
 }
 

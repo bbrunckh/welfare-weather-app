@@ -372,18 +372,24 @@ echart_interview_dates <- function(plot_data,
     echarts4r::e_charts(month, height = height) |>
     echarts4r::e_bar(hh) |>
     echarts4r::e_color(cols) |>
-    echarts4r::e_legend(orient = "horizontal", left = 0, top = 0) |>
+    echarts4r::e_legend(orient = "horizontal", right = 36, top = 0) |>
     echarts4r::e_x_axis(
       axisLabel = list(interval = 0L, fontSize = 11),
       axisTick = list(alignWithLabel = TRUE)
     ) |>
-    echarts4r::e_y_axis(name = unit_label, axisLabel = list(formatter = fmt)) |>
+    echarts4r::e_y_axis(
+      name = unit_label,
+      nameLocation = "end",
+      nameTextStyle = wise_eaxis_name(),
+      axisLabel = list(formatter = fmt)
+    ) |>
     echarts4r::e_tooltip(
       trigger = "axis",
       axisPointer = list(type = "shadow"),
       valueFormatter = fmt
     ) |>
-    echarts4r::e_grid(containLabel = TRUE, left = 8, right = 14, top = 42, bottom = 8)
+    echarts4r::e_grid(containLabel = TRUE, left = 8, right = 14, top = 42, bottom = 8) |>
+    wise_echart_theme()
 }
 
 

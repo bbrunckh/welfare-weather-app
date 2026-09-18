@@ -454,11 +454,18 @@ wise_plot_output <- function(plot_id, alt, ...) {
 #'
 #' @noRd
 wise_chart_output <- function(chart_id, alt, ...) {
-  shiny::tagAppendAttributes(
-    echarts4r::echarts4rOutput(chart_id, ...),
-    role = "img",
-    `aria-label` = alt
-  )
+  widget <- echarts4r::echarts4rOutput(chart_id, ...)
+  if (inherits(widget, "shiny.tag")) {
+    shiny::tagAppendAttributes(widget, role = "img", `aria-label` = alt)
+  } else if (inherits(widget, "shiny.tag.list") && length(widget) >= 1L &&
+             inherits(widget[[1L]], "shiny.tag")) {
+    widget[[1L]] <- shiny::tagAppendAttributes(
+      widget[[1L]], role = "img", `aria-label` = alt
+    )
+    widget
+  } else {
+    widget
+  }
 }
 
 #' Toggle button + anchored config flyout panel

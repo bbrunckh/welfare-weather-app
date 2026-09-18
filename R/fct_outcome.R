@@ -520,7 +520,7 @@ echart_welfare_dist <- function(df,
         name = lvl, type = "bar", stack = "share",
         data = lapply(seq_len(nrow(d)), function(i) {
           list(
-            d$share[i],
+            value = d$share[i],
             label = list(
               show = nzchar(d$label[i]),
               formatter = d$label[i],
@@ -539,16 +539,18 @@ echart_welfare_dist <- function(df,
       data = as.character(display_waves),
       name = "Survey wave",
       nameLocation = "middle", nameGap = 30,
-      nameTextStyle = wise_eaxis_name(),
+      nameTextStyle = wise_eaxis_name(align = "center"),
       axisLabel = wise_eaxis_label(rotate = 30),
       axisTick = list(alignWithLabel = TRUE),
       axisLine = list(lineStyle = list(color = .wise_grid)),
       splitLine = wise_esplit_line()
     )
+    outcome_nm <- if (!is.null(label) && nzchar(label)) label else outcome
+    y_title <- paste0("Share of observations (", outcome_nm, ")")
     e$x$opts$yAxis <- list(
       type = "value", min = 0, max = 1,
-      name = "Share of observations",
-      nameLocation = "middle", nameGap = 40,
+      name = stringr::str_wrap(y_title, 40),
+      nameLocation = "end",
       nameTextStyle = wise_eaxis_name(),
       axisLabel = wise_eaxis_label(
         formatter = htmlwidgets::JS(
@@ -561,10 +563,10 @@ echart_welfare_dist <- function(df,
       make_bar("No", "#D9EFF8"), make_bar("Yes", "#0071BC")
     )
     e$x$opts$legend <- wise_elegend_style(
-      left = 0, bottom = 0, orient = "horizontal"
+      right = 36, top = 0, orient = "horizontal"
     )
     e$x$opts$grid <- list(
-      containLabel = TRUE, left = 8, right = 14, top = 14, bottom = 46
+      containLabel = TRUE, left = 8, right = 14, top = 50, bottom = 46
     )
     e$x$opts$tooltip <- list(trigger = "axis", axisPointer = list(type = "shadow"))
     return(wise_echart_theme(e))

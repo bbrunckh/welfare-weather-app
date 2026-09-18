@@ -2075,6 +2075,7 @@ echart_weather_bins_compare <- function(df, hv, label, hist_df = NULL,
     dplyr::mutate(share = 100 * .data$w / sum(.data$w, na.rm = TRUE)) |>
     dplyr::ungroup() |>
     as.data.frame()
+  d$key <- .wx_series_key(as.character(d$countryyear), as.character(d$source))
 
   waves <- sort(unique(d$countryyear))
   pal <- .wave_palette(waves)
@@ -2095,7 +2096,7 @@ echart_weather_bins_compare <- function(df, hv, label, hist_df = NULL,
     data = as.character(lvls),
     name = stringr::str_wrap(paste0(label, "\n(as configured)"), 40),
     nameLocation = "middle", nameGap = 34,
-    nameTextStyle = wise_eaxis_name(),
+    nameTextStyle = wise_eaxis_name(align = "center"),
     axisLabel = wise_eaxis_label(rotate = 30, interval = 0L),
     axisTick = list(alignWithLabel = TRUE),
     axisLine = list(lineStyle = list(color = .wise_grid)),
@@ -2103,27 +2104,27 @@ echart_weather_bins_compare <- function(df, hv, label, hist_df = NULL,
   )
   e$x$opts$yAxis <- list(
     type = "value", name = "Share of observations (%)",
-    nameLocation = "middle", nameGap = 40,
+    nameLocation = "end",
     nameTextStyle = wise_eaxis_name(),
-    axisLabel = wise_eaxis_name(fontSize = 13),
+    axisLabel = wise_eaxis_label(fontSize = 13),
     splitLine = wise_esplit_line()
   )
   e$x$opts$series <- lapply(seq_len(nrow(series)), function(i) {
     key <- series$key[i]
-    d <- d[d$key == key, , drop = FALSE]
-    vals <- stats::setNames(d$share, as.character(d$bin))[lvls]
+    d_sub <- d[d$key == key, , drop = FALSE]
+    vals <- stats::setNames(d_sub$share, as.character(d_sub$bin))[lvls]
     list(
-      name = key, type = "bar",
-      data = as.list(ifelse(is.na(vals), 0, vals)),
+      name = disp[i], type = "bar",
+      data = as.list(unname(ifelse(is.na(vals), 0, vals))),
       itemStyle = list(color = unname(key_cols[[key]])),
       barMaxWidth = 28
     )
   })
   e$x$opts$legend <- wise_elegend_style(
-    left = 0, bottom = 0, orient = "horizontal"
+    right = 36, top = 0, orient = "horizontal"
   )
   e$x$opts$grid <- list(
-    containLabel = TRUE, left = 8, right = 14, top = 20, bottom = 56
+    containLabel = TRUE, left = 8, right = 14, top = 54, bottom = 56
   )
   e$x$opts$tooltip <- list(trigger = "axis", axisPointer = list(type = "shadow"))
   wise_echart_theme(e)
@@ -2386,7 +2387,7 @@ echart_binscatter <- function(df, hv, hv_label = hv, y_var, y_label = y_var,
         type = "scatter",
         data = lapply(which(!is.na(summary_df$mean)), function(i) {
           list(
-            match(summary_df$bin[i], x_levels) - 1L, summary_df$mean[i],
+            value = c(match(summary_df$bin[i], x_levels) - 1L, summary_df$mean[i]),
             symbolSize = sym_size[i]
           )
         }),
@@ -2433,10 +2434,10 @@ echart_binscatter <- function(df, hv, hv_label = hv, y_var, y_label = y_var,
 
     e <- .e_new(height)
     e$x$opts$xAxis <- list(
-      type = "value",
+      type = "value", scale = TRUE,
       name = stringr::str_wrap(hv_label, 40),
       nameLocation = "middle", nameGap = 32,
-      nameTextStyle = wise_eaxis_name(),
+      nameTextStyle = wise_eaxis_name(align = "center"),
       axisLabel = wise_eaxis_label(),
       axisLine = list(lineStyle = list(color = .wise_grid)),
       splitLine = wise_esplit_line()
@@ -2463,7 +2464,7 @@ echart_binscatter <- function(df, hv, hv_label = hv, y_var, y_label = y_var,
         type = "scatter",
         data = lapply(seq_len(nrow(summary_df)), function(i) {
           list(
-            summary_df$x[i], summary_df$mean[i],
+            value = c(summary_df$x[i], summary_df$mean[i]),
             symbolSize = sym_size[i]
           )
         }),
@@ -2476,9 +2477,9 @@ echart_binscatter <- function(df, hv, hv_label = hv, y_var, y_label = y_var,
   }
 
   e$x$opts$yAxis <- list(
-    type = "value",
+    type = "value", scale = TRUE,
     name = stringr::str_wrap(y_label, 40),
-    nameLocation = "middle", nameGap = 44,
+    nameLocation = "end",
     nameTextStyle = wise_eaxis_name(),
     min = if (is_binary_y) 0 else NULL,
     max = if (is_binary_y) 1 else NULL,
@@ -2486,8 +2487,10 @@ echart_binscatter <- function(df, hv, hv_label = hv, y_var, y_label = y_var,
     splitLine = wise_esplit_line()
   )
   e$x$opts$legend <- NULL
+  e$x$opts$grid <- list(
+    containLabel = TRUE, left = 8, right = 16, top = 40, bottom = 48
+  )
   e$x$opts$tooltip <- list(trigger = "item")
-  e$x$opts$grid <- list(containLabel = TRUE, left = 8, right = 16, top = 14, bottom = 8)
   wise_echart_theme(e)
 }
 
