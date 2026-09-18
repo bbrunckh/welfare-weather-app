@@ -155,7 +155,7 @@ mod_2_02_results_ui <- function(id) {
           layout   = "horizontal"
         )
       ),
-      wise_plot_output(
+      wise_chart_output(
         ns("annual_distribution_plot"),
         "Distribution of annual aggregates across simulated weather years by climate scenario",
         height = "470px"
@@ -203,7 +203,7 @@ mod_2_02_results_ui <- function(id) {
           layout = "horizontal"
         )
       ),
-      wise_plot_output(
+      wise_chart_output(
         ns("adverse_dot_plot"),
         "Expected and adverse-year outcomes with climate-model ensemble spread",
         height = "380px"
@@ -251,7 +251,7 @@ mod_2_02_results_ui <- function(id) {
           layout = "horizontal"
         )
       ),
-      wise_plot_output(
+      wise_chart_output(
         ns("exceedance_plot"),
         "Exceedance probability curves across simulated climate scenarios",
         height = "400px"
@@ -280,9 +280,12 @@ mod_2_02_results_ui <- function(id) {
       class = "results-section-card",
       shiny::div(
         style = "display: flex; justify-content: flex-end; align-items: center; margin-bottom: 8px;",
-        csv_download_link(ns("threshold_csv"), "Download CSV")
+        wise_reactable_csv_button(
+          ns("summary_threshold_table"),
+          "climate_outcome_thresholds"
+        )
       ),
-      DT::DTOutput(ns("summary_threshold_table")),
+      reactable::reactableOutput(ns("summary_threshold_table")),
       shiny::tags$p(
         class = "text-muted small",
         style = "margin-top: 8px; margin-bottom: 0;",
@@ -313,7 +316,7 @@ mod_2_02_results_ui <- function(id) {
     ),
     shiny::div(
       class = "results-section-card",
-      wise_plot_output(
+      wise_chart_output(
         ns("uncertainty_sources_plot"),
         "Standard deviation of outcome by uncertainty source",
         height = "300px"
@@ -1703,58 +1706,56 @@ mod_2_02_results_server <- function(id,
       fun = function() step2_headline_df(headline_cards_data_rv()),
       description = "At-a-glance summary cards for the focus climate scenario."
     )
-    output$summary_box_plot <- renderPlot(
-      {
-        req(pointrange_bands_rv())
-        bands <- pointrange_bands_rv()
-        if (identical(input$ensemble_band %||% "none", "none")) {
-          bands$intermod_lo <- NA_real_
-          bands$intermod_hi <- NA_real_
-        }
-        plot_pointrange_climate(
-          bands_tbl    = bands,
-          x_label      = agg_hist()$x_label,
-          group_order  = input$cmp_group_order %||% "scenario_x_year",
-          show_coef    = isTRUE(input$show_coef_uncertainty) && has_draws()
-        )
-      },
-      height = 600
-    )
+
+    # Zero-arg echarts closures shared by the renders and the export bundle
+    # (guidelines §7): one builder call per chart, used for both the live
+    # output and wise_export_figure(). Heights match the UI slots.
+    pointrange_chart <- function() {
+      bands <- pointrange_bands_rv()
+      req(bands)
+      if (identical(input$ensemble_band %||% "none", "none")) {
+        bands$intermod_lo <- NA_real_
+        bands$intermod_hi <- NA_real_
+      }
+      echart_pointrange_climate(
+        bands_tbl    = bands,
+        x_label      = agg_hist()$x_label,
+        group_order  = input$cmp_group_order %||% "scenario_x_year",
+        show_coef    = isTRUE(input$show_coef_uncertainty) && has_draws(),
+        height       = "600px"
+      )
+    }
+    output$summary_box_plot <- echarts4r::renderEcharts4r({
+      ch <- pointrange_chart()
+      req(!is.null(ch))
+      ch
+    })
     wise_export_figure(
       key = "climate_outcome_distribution",
       label = "Simulated welfare by scenario and period",
       step = 2L,
-      fun = function() {
-        bands <- pointrange_bands_rv()
-        req(bands)
-        if (identical(input$ensemble_band %||% "none", "none")) {
-          bands$intermod_lo <- NA_real_
-          bands$intermod_hi <- NA_real_
-        }
-        plot_pointrange_climate(
-          bands_tbl = bands,
-          x_label = agg_hist()$x_label,
-          group_order = input$cmp_group_order %||% "scenario_x_year",
-          show_coef = isTRUE(input$show_coef_uncertainty) && has_draws()
-        )
-      },
+      fun = pointrange_chart,
       description = "Simulated welfare by climate scenario and projection period.",
       width = 10, height = 6.5
     )
 
-    output$annual_distribution_plot <- renderPlot({
+    annual_distribution_chart <- function() {
       req(annual_distribution_curves_rv())
-      curves <- annual_distribution_curves_rv()
-      plot_annual_distribution(
-        curves,
+      echart_annual_distribution(
+        annual_distribution_curves_rv(),
         x_label = metric_axis_label(
           input$cmp_agg_method %||% "mean",
           hist_sim()$so,
           input$cmp_deviation %||% "none"
         ),
-        title = NULL,
-        plot_type = input$annual_distribution_type %||% "violin"
+        plot_type = input$annual_distribution_type %||% "violin",
+        height = "470px"
       )
+    }
+    output$annual_distribution_plot <- echarts4r::renderEcharts4r({
+      ch <- annual_distribution_chart()
+      req(!is.null(ch))
+      ch
     })
 
     incidence_data_rv <- reactive({
@@ -1777,25 +1778,30 @@ mod_2_02_results_server <- function(id,
       }))
     })
 
-    output$incidence_plot <- renderPlot(
-      {
-        req(incidence_data_rv())
-        plot_incidence_by_decile(incidence_data_rv())
-      },
-      height = 420
-    )
-    outputOptions(output, "incidence_plot", suspendWhenHidden = TRUE)
-    output$incidence_table <- DT::renderDT({
+    incidence_chart <- function() {
       req(incidence_data_rv())
-      DT::datatable(
+      echart_incidence_by_decile(
         incidence_data_rv(),
-        rownames = FALSE, class = "compact stripe",
-        extensions = "Buttons",
-        options = list(
-          dom = wise_csv_dom("tp"), pageLength = 10,
-          buttons = wise_csv_button("climate_distributional_incidence_data")
-        )
+        height = "420px"
       )
+    }
+    output$incidence_plot <- echarts4r::renderEcharts4r({
+      ch <- incidence_chart()
+      req(!is.null(ch))
+      ch
+    })
+    outputOptions(output, "incidence_plot", suspendWhenHidden = TRUE)
+    # Distributional incidence table: raw values, client-side pagination;
+    # the CSV button for it moved into the export bundle's reactable flow
+    # (this table has no mounted UI slot - the data table is exported as the
+    # bundle artefact below).
+    output$incidence_table <- reactable::renderReactable({
+      req(incidence_data_rv())
+      inc <- incidence_data_rv()
+      if (!nrow(inc)) {
+        return(.step2_reactable_note("No incidence data available."))
+      }
+      .step2_reactable(inc)
     })
     outputOptions(output, "incidence_table", suspendWhenHidden = TRUE)
 
@@ -1803,7 +1809,7 @@ mod_2_02_results_server <- function(id,
       key = "climate_distributional_incidence",
       label = "Distributional incidence by baseline decile",
       step = 2L,
-      fun = function() plot_incidence_by_decile(incidence_data_rv()),
+      fun = incidence_chart,
       description = "Weighted household-level simulated effects by fixed observed baseline welfare decile.",
       width = 10, height = 6
     )
@@ -1839,17 +1845,7 @@ mod_2_02_results_server <- function(id,
       key = "climate_annual_distribution",
       label = "Annual outcome distribution across weather years",
       step = 2L,
-      fun = function() {
-        plot_annual_distribution(
-          annual_distribution_curves_rv(),
-          x_label = metric_axis_label(
-            input$cmp_agg_method %||% "mean",
-            hist_sim()$so,
-            input$cmp_deviation %||% "none"
-          ),
-          plot_type = input$annual_distribution_type %||% "violin"
-        )
-      },
+      fun = annual_distribution_chart,
       description = "Annual aggregate distribution for the fixed population; one observation is one model-weather-year draw.",
       width = 10, height = 6.5
     )
@@ -1888,29 +1884,22 @@ mod_2_02_results_server <- function(id,
       )
     }
 
-    output$threshold_csv <- csv_download_handler(
-      "climate_outcome_thresholds", function() threshold_table_df(),
-      stale = stale
-    )
-
-    output$uncertainty_sources_plot <- renderPlot(
-      {
-        req(variance_breakdown_rv())
-        plot_variance_contribution(variance_breakdown_rv())
-      },
-      height = 300
-    )
+    uncertainty_chart <- function() {
+      req(variance_breakdown_rv())
+      echart_variance_contribution(variance_breakdown_rv(), height = "300px")
+    }
+    output$uncertainty_sources_plot <- echarts4r::renderEcharts4r({
+      ch <- uncertainty_chart()
+      req(!is.null(ch))
+      ch
+    })
     outputOptions(output, "uncertainty_sources_plot", suspendWhenHidden = TRUE)
 
     wise_export_figure(
       key = "climate_uncertainty_sources",
       label = "Climate simulation uncertainty sources",
       step = 2L,
-      fun = function() {
-        vb <- variance_breakdown_rv()
-        req(!is.null(vb), nrow(vb) > 0L)
-        plot_variance_contribution(vb)
-      },
+      fun = uncertainty_chart,
       description = "Standard deviation contribution from weather-year, coefficient, residual, and climate-model uncertainty sources.",
       width = 9, height = 5
     )
@@ -1928,36 +1917,30 @@ mod_2_02_results_server <- function(id,
       }
       dot
     })
-    output$adverse_dot_plot <- renderPlot(
-      {
-        req(adverse_dot_data_rv())
-        plot_step2_adverse_dot(
-          adverse_dot_data_rv(),
-          x_label = metric_axis_label(
-            input$cmp_agg_method %||% "mean",
-            hist_sim()$so,
-            input$cmp_deviation %||% "none"
-          )
-        )
-      },
-      height = 380
-    )
+    adverse_dot_chart <- function() {
+      req(adverse_dot_data_rv())
+      echart_step2_adverse_dot(
+        adverse_dot_data_rv(),
+        x_label = metric_axis_label(
+          input$cmp_agg_method %||% "mean",
+          hist_sim()$so,
+          input$cmp_deviation %||% "none"
+        ),
+        height = "380px"
+      )
+    }
+    output$adverse_dot_plot <- echarts4r::renderEcharts4r({
+      ch <- adverse_dot_chart()
+      req(!is.null(ch))
+      ch
+    })
     outputOptions(output, "adverse_dot_plot", suspendWhenHidden = TRUE)
 
     wise_export_figure(
       key = "climate_adverse_return_periods",
       label = "Outcome in adverse weather years",
       step = 2L,
-      fun = function() {
-        plot_step2_adverse_dot(
-          adverse_dot_data_rv(),
-          x_label = metric_axis_label(
-            input$cmp_agg_method %||% "mean",
-            hist_sim()$so,
-            input$cmp_deviation %||% "none"
-          )
-        )
-      },
+      fun = adverse_dot_chart,
       description = "Expected and adverse return-period outcomes with inter-model ensemble spread.",
       width = 9, height = 5
     )
@@ -1973,64 +1956,55 @@ mod_2_02_results_server <- function(id,
       )
     )
 
-    output$summary_threshold_table <- DT::renderDT({
+    # Return-period decision table as a reactable (guidelines §6): raw values
+    # in the data (already 2-dp rounded by build_threshold_table_df), rendered
+    # client-side; the CSV download moved to the shared client-side
+    # wise_reactable_csv_button() next to the widget. INT-08: while the
+    # results are stale the table stays visible.
+    threshold_reactable <- function() {
       df <- threshold_table_df()
-      req(df)
       if (is.null(df) || nrow(df) == 0L) {
-        return(DT::datatable(data.frame(Message = "Insufficient data"),
-          rownames = FALSE, class = "compact stripe",
-          options = list(dom = "t")
-        ))
+        return(.step2_reactable_note("Insufficient data"))
       }
-      # INT-08: export is disabled while the results are stale - the table
-      # stays visible, the CSV button does not.
-      dt_buttons <- wise_csv_button("climate_outcome_thresholds",
-        enabled = !isTRUE(stale())
-      )
-      DT::datatable(
-        df,
-        rownames = FALSE, class = "compact stripe",
-        options = list(
-          pageLength = 20, dom = wise_csv_dom("tip"),
-          ordering = FALSE,
-          columnDefs = list(list(className = "dt-center", targets = "_all")),
-          buttons = dt_buttons
-        ),
-        extensions = "Buttons"
-      )
+      .step2_reactable(df)
+    }
+    output$summary_threshold_table <- reactable::renderReactable({
+      threshold_reactable()
     })
 
     # UI-48: the exceedance curve, for the export bundle.
+    exceedance_chart <- function() {
+      curves <- exceedance_curves_rv()
+      ah <- agg_hist()
+      if (is.null(curves) || is.null(ah)) {
+        return(NULL)
+      }
+      sel_spread <- input$exceedance_model_spread %||% "none"
+      ens_q <- if (identical(sel_spread, "none")) {
+        c(lo = 0.5, hi = 0.5)
+      } else {
+        resolve_band_q(sel_spread)
+      }
+      echart_exceedance(
+        curves_tbl = curves,
+        x_label = metric_axis_label(
+          input$cmp_agg_method %||% "mean",
+          hist_sim()$so,
+          input$cmp_deviation %||% "none"
+        ),
+        return_period = TRUE,
+        n_sim_years = nrow(ah$out),
+        logit_x = TRUE,
+        band_q = NULL,
+        ensemble_band_q = ens_q,
+        height = "400px"
+      )
+    }
     wise_export_figure(
       key = "climate_exceedance_curve",
       label = "Welfare exceedance probability",
       step = 2L,
-      fun = function() {
-        curves <- exceedance_curves_rv()
-        ah <- agg_hist()
-        if (is.null(curves) || is.null(ah)) {
-          return(NULL)
-        }
-        sel_spread <- input$exceedance_model_spread %||% "none"
-        ens_q <- if (identical(sel_spread, "none")) {
-          c(lo = 0.5, hi = 0.5)
-        } else {
-          resolve_band_q(sel_spread)
-        }
-        enhance_exceedance(
-          curves_tbl = curves,
-          x_label = metric_axis_label(
-            input$cmp_agg_method %||% "mean",
-            hist_sim()$so,
-            input$cmp_deviation %||% "none"
-          ),
-          return_period = TRUE,
-          n_sim_years = nrow(ah$out),
-          logit_x = TRUE,
-          band_q = NULL,
-          ensemble_band_q = ens_q
-        )
-      },
+      fun = exceedance_chart,
       description = paste(
         "Probability of welfare falling below each level in adverse weather years, by climate scenario",
         "and projection period."
@@ -2038,27 +2012,10 @@ mod_2_02_results_server <- function(id,
       width = 10, height = 6.5
     )
 
-    output$exceedance_plot <- renderPlot({
-      req(exceedance_curves_rv())
-      sel_spread <- input$exceedance_model_spread %||% "none"
-      ens_q <- if (identical(sel_spread, "none")) {
-        c(lo = 0.5, hi = 0.5)
-      } else {
-        resolve_band_q(sel_spread)
-      }
-      enhance_exceedance(
-        curves_tbl = exceedance_curves_rv(),
-        x_label = metric_axis_label(
-          input$cmp_agg_method %||% "mean",
-          hist_sim()$so,
-          input$cmp_deviation %||% "none"
-        ),
-        return_period = TRUE,
-        n_sim_years = nrow(agg_hist()$out),
-        logit_x = TRUE,
-        band_q = NULL,
-        ensemble_band_q = ens_q
-      )
+    output$exceedance_plot <- echarts4r::renderEcharts4r({
+      ch <- exceedance_chart()
+      req(!is.null(ch))
+      ch
     })
 
 

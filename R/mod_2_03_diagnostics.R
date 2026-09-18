@@ -38,12 +38,19 @@ mod_2_03_diagnostics_ui <- function(id) {
         shiny::uiOutput(ns("diag_weather_vars_ui")),
         shiny::uiOutput(ns("diag_weather_scenario_ui"))
       ),
-      wise_plot_output(ns("diag_weather_density"),
+      wise_chart_output(ns("diag_weather_density"),
         "Density plot comparing the selected weather variable in the historical sample against its own climate history",
         height = "340px"
       ),
       shiny::uiOutput(ns("weather_support_warning_ui")),
-      DT::DTOutput(ns("weather_support_table")),
+      reactable::reactableOutput(ns("weather_support_table")),
+      shiny::div(
+        style = "display: flex; justify-content: flex-end; align-items: center; margin-top: 6px;",
+        wise_reactable_csv_button(
+          ns("weather_support_table"),
+          "simulation_weather_support_summary"
+        )
+      ),
       shiny::tags$p(
         class = "diagnostic-note",
         "Distributions are normalized separately so samples with different sizes can be compared. Overlap does not by itself establish model validity."
@@ -66,7 +73,7 @@ mod_2_03_diagnostics_ui <- function(id) {
     ),
     shiny::div(
       class = "results-section-card diagnostic-section-card",
-      wise_plot_output(ns("model_robustness_plot"),
+      wise_chart_output(ns("model_robustness_plot"),
         "Climate-model mean outcome by scenario and period",
         height = "420px"
       ),
@@ -92,7 +99,7 @@ mod_2_03_diagnostics_ui <- function(id) {
     ),
     shiny::div(
       class = "results-section-card diagnostic-section-card",
-      wise_plot_output(ns("timeseries_plot"),
+      wise_chart_output(ns("timeseries_plot"),
         "Outcome across simulated weather-year draws",
         height = "380px"
       ),
@@ -257,7 +264,7 @@ mod_2_03_diagnostics_server <- function(id,
       if (identical(selected, "all")) NULL else selected
     })
 
-    output$diag_weather_density <- renderPlot({
+    weather_density_chart <- function() {
       req(hist_sim(), survey_weather())
       req(!is.null(hist_sim()$weather_raw))
       vars <- input$diag_weather_vars
@@ -270,7 +277,7 @@ mod_2_03_diagnostics_server <- function(id,
         NULL
       }
 
-      plot_weather_density_panel(
+      ch <- echart_weather_density_panel(
         survey_weather   = survey_weather(),
         weather_raw      = hist_sim()$weather_raw,
         weather_vars     = vars,
@@ -278,8 +285,16 @@ mod_2_03_diagnostics_server <- function(id,
         scenario_weather = scenario_weather_data(),
         active_scenarios = active_weather_scenarios(),
         log_x            = rep(FALSE, length(vars)),
-        show_regression  = TRUE
+        show_regression  = TRUE,
+        height           = "340px"
       )
+      req(!is.null(ch))
+      ch
+    }
+    output$diag_weather_density <- echarts4r::renderEcharts4r({
+      ch <- weather_density_chart()
+      req(!is.null(ch))
+      ch
     }) |> shiny::bindEvent(input$diag_weather_vars, input$diag_weather_scenario,
       hist_sim(), survey_weather(), selected_weather(),
       ignoreNULL = TRUE, ignoreInit = FALSE
@@ -297,13 +312,12 @@ mod_2_03_diagnostics_server <- function(id,
       )
     })
 
-    output$weather_support_table <- DT::renderDT({
+    # Shared display frame for the weather-support reactable and its export
+    # bundle artefact (one builder, two consumers).
+    weather_support_display <- function() {
       tbl <- weather_support_data()
       if (is.null(tbl) || !nrow(tbl)) {
-        return(DT::datatable(
-          data.frame(Message = "No weather-support summary is available."),
-          rownames = FALSE, options = list(dom = "t")
-        ))
+        return(NULL)
       }
       sw <- if (!is.null(selected_weather)) selected_weather() else NULL
       label_map <- if (!is.null(sw) && all(c("name", "label") %in% names(sw))) {
@@ -319,7 +333,7 @@ mod_2_03_diagnostics_server <- function(id,
           formatC(tbl$robust_hi, format = "fg", digits = 4)
         )
       )
-      display <- data.frame(
+      data.frame(
         `Weather variable` = ifelse(tbl$weather_variable %in% names(label_map),
           label_map[tbl$weather_variable], tbl$weather_variable
         ),
@@ -331,15 +345,14 @@ mod_2_03_diagnostics_server <- function(id,
         check.names = FALSE,
         stringsAsFactors = FALSE
       )
-      DT::datatable(
-        display,
-        rownames = FALSE, class = "compact stripe",
-        extensions = "Buttons",
-        options = list(
-          dom = wise_csv_dom("t"), paging = FALSE,
-          buttons = wise_csv_button("simulation_weather_support_summary")
-        )
-      )
+    }
+
+    output$weather_support_table <- reactable::renderReactable({
+      display <- weather_support_display()
+      if (is.null(display)) {
+        return(.step2_reactable_note("No weather-support summary is available."))
+      }
+      .step2_reactable(display, default_page_size = 25)
     })
     outputOptions(output, "weather_support_table", suspendWhenHidden = TRUE)
     output$weather_support_warning_ui <- renderUI({
@@ -387,21 +400,23 @@ mod_2_03_diagnostics_server <- function(id,
         req(hist_sim(), survey_weather())
         vars <- input$diag_weather_vars
         req(length(vars) > 0L)
-        plot_weather_density_panel(
+        sw <- if (!is.null(selected_weather)) selected_weather() else NULL
+        lbl_map <- if (!is.null(sw) && all(c("name", "label") %in% names(sw))) {
+          setNames(sw$label, sw$name)
+        } else {
+          NULL
+        }
+        ch <- echart_weather_density_panel(
           survey_weather(), hist_sim()$weather_raw, vars,
-          weather_labels = {
-            sw <- if (!is.null(selected_weather)) selected_weather() else NULL
-            if (!is.null(sw) && all(c("name", "label") %in% names(sw))) {
-              setNames(sw$label, sw$name)
-            } else {
-              NULL
-            }
-          },
+          weather_labels = lbl_map,
           scenario_weather = scenario_weather_data(),
           active_scenarios = active_weather_scenarios(),
           log_x = rep(FALSE, length(vars)),
-          show_regression = TRUE
+          show_regression = TRUE,
+          height = "500px"
         )
+        req(!is.null(ch))
+        ch
       },
       description = "Weather input distributions for the selected plot variables across historical and simulated sources.",
       width = 10, height = 6.5
@@ -431,49 +446,24 @@ mod_2_03_diagnostics_server <- function(id,
       key = "simulation_weather_support_summary",
       label = "Weather support summary",
       step = 2L,
-      fun = function() {
-        tbl <- weather_support_data()
-        if (is.null(tbl) || !nrow(tbl)) {
-          return(NULL)
-        }
-        sw <- if (!is.null(selected_weather)) selected_weather() else NULL
-        label_map <- if (!is.null(sw) && all(c("name", "label") %in% names(sw))) {
-          setNames(as.character(sw$label), as.character(sw$name))
-        } else {
-          character(0)
-        }
-        reference_display <- ifelse(
-          tbl$is_binned,
-          paste0("Supported bins: ", tbl$reference_label),
-          paste0(
-            formatC(tbl$robust_lo, format = "fg", digits = 4), " to ",
-            formatC(tbl$robust_hi, format = "fg", digits = 4)
-          )
-        )
-        data.frame(
-          `Weather variable` = ifelse(tbl$weather_variable %in% names(label_map),
-            label_map[tbl$weather_variable], tbl$weather_variable
-          ),
-          `Scenario / period` = tbl$scenario,
-          `Reference support` = reference_display,
-          `Scenario values` = tbl$n_scenario,
-          `Outside interval` = paste0(tbl$outside_n, " (", round(100 * tbl$outside_share, 1), "%)"),
-          Status = ifelse(tbl$warning, "Review: extrapolation", "Within support"),
-          check.names = FALSE, stringsAsFactors = FALSE
-        )
-      },
+      fun = weather_support_display,
       stale = stale,
       description = "Sample sizes, robust Step 1 support intervals, outside-support shares, and warnings."
     )
+    robustness_chart <- function() {
+      tc <- timeseries_curves()
+      req(!is.null(tc$tbl), nrow(tc$tbl) > 0L)
+      ch <- echart_model_robustness(model_robustness_data(tc$tbl), tc$x_label,
+        height = "420px"
+      )
+      req(!is.null(ch))
+      ch
+    }
     wise_export_figure(
       key = "simulation_model_robustness",
       label = "Climate-model robustness",
       step = 2L,
-      fun = function() {
-        tc <- timeseries_curves()
-        req(!is.null(tc$tbl), nrow(tc$tbl) > 0L)
-        plot_model_robustness(model_robustness_data(tc$tbl), tc$x_label)
-      },
+      fun = robustness_chart,
       description = "One point per climate model's mean across weather-year draws with ensemble spread.",
       width = 10, height = 6
     )
@@ -493,19 +483,23 @@ mod_2_03_diagnostics_server <- function(id,
       },
       description = "Tidy climate-model robustness summaries."
     )
+    trajectories_chart <- function() {
+      req(timeseries_curves)
+      tc <- timeseries_curves()
+      req(!is.null(tc$tbl), nrow(tc$tbl) > 0L)
+      ch <- echart_timeseries_spaghetti(tc$tbl,
+        x_label = tc$x_label,
+        ensemble_band_q = tc$ens_q,
+        height = "380px"
+      )
+      req(!is.null(ch))
+      ch
+    }
     wise_export_figure(
       key = "simulation_model_trajectories",
       label = "Climate-model annual trajectories",
       step = 2L,
-      fun = function() {
-        req(timeseries_curves)
-        tc <- timeseries_curves()
-        req(!is.null(tc$tbl), nrow(tc$tbl) > 0L)
-        plot_timeseries_spaghetti(tc$tbl,
-          x_label = tc$x_label,
-          ensemble_band_q = tc$ens_q
-        )
-      },
+      fun = trajectories_chart,
       description = "Advanced climate-model trajectories by discrete simulation window.",
       width = 10, height = 6.5
     )
@@ -527,11 +521,13 @@ mod_2_03_diagnostics_server <- function(id,
       description = "Tidy data behind the advanced climate-model trajectory view."
     )
 
-    output$variance_contribution_plot <- renderPlot({
+    output$variance_contribution_plot <- echarts4r::renderEcharts4r({
       req(variance_breakdown)
       vb <- variance_breakdown()
       req(!is.null(vb) && nrow(vb) > 0L)
-      plot_variance_contribution(vb)
+      ch <- echart_variance_contribution(vb, height = "300px")
+      req(!is.null(ch))
+      ch
     })
     output$variance_share_warning <- renderUI({
       if (!isTRUE(input$show_variance_shares)) {
@@ -542,22 +538,15 @@ mod_2_03_diagnostics_server <- function(id,
         "Approximate shares assume zero covariance between components and may not sum to the uncertainty of the combined estimand."
       )
     })
-    output$variance_share_table <- DT::renderDT({
+    variance_share_reactable <- function() {
       req(variance_breakdown())
       if (!isTRUE(input$show_variance_shares)) {
-        return(DT::datatable(data.frame(Message = "Approximate shares are hidden by default."),
-          rownames = FALSE, options = list(dom = "t")
-        ))
+        return(.step2_reactable_note("Approximate shares are hidden by default."))
       }
-      DT::datatable(
-        variance_component_data(variance_breakdown(), TRUE),
-        rownames = FALSE, class = "compact stripe",
-        extensions = "Buttons",
-        options = list(
-          dom = wise_csv_dom("tp"), pageLength = 20,
-          buttons = wise_csv_button("simulation_variance_shares")
-        )
-      )
+      .step2_reactable(variance_component_data(variance_breakdown(), TRUE))
+    }
+    output$variance_share_table <- reactable::renderReactable({
+      variance_share_reactable()
     })
     outputOptions(output, "variance_share_table", suspendWhenHidden = FALSE)
     wise_export_table(
@@ -574,27 +563,17 @@ mod_2_03_diagnostics_server <- function(id,
       description = "Approximate shares of simulation uncertainty by variance component."
     )
 
-    output$timeseries_plot <- renderPlot({
-      req(timeseries_curves)
-      tc <- timeseries_curves()
-      req(!is.null(tc$tbl) && nrow(tc$tbl) > 0L)
-      ts_tbl <- tc$tbl
-      plot_timeseries_spaghetti(
-        ts_tbl          = ts_tbl,
-        x_label         = tc$x_label,
-        ensemble_band_q = tc$ens_q
-      )
+    output$timeseries_plot <- echarts4r::renderEcharts4r({
+      ch <- trajectories_chart()
+      req(!is.null(ch))
+      ch
     })
 
-    output$model_robustness_plot <- renderPlot(
-      {
-        req(timeseries_curves)
-        tc <- timeseries_curves()
-        req(!is.null(tc$tbl) && nrow(tc$tbl) > 0L)
-        plot_model_robustness(model_robustness_data(tc$tbl), tc$x_label)
-      },
-      height = 420
-    )
+    output$model_robustness_plot <- echarts4r::renderEcharts4r({
+      ch <- robustness_chart()
+      req(!is.null(ch))
+      ch
+    })
     outputOptions(output, "model_robustness_plot", suspendWhenHidden = TRUE)
 
 

@@ -1320,3 +1320,394 @@ plot_year_anchored_ridge <- function(kde_data,
   if (isTRUE(use_log)) p <- p + ggplot2::scale_x_log10()
   p
 }
+
+# ============================================================================
+# Interactive (echarts4r) counterpart of the weather-density diagnostic panel
+# (guidelines §7). The ggplot/patchwork builder above stays intact for the
+# static fallback and export consumers.
+#
+# Design (documented judgment call): the patchwork multi-variable panel is
+# collapsed into ONE echarts widget. With a single selected variable the
+# widget is a plain overlapping-densities chart (grey filled Full historical
+# area, dashed Model support line, SSP-coloured scenario lines), matching the
+# ggplot panel. With several variables the curves become a ridgeline: each
+# variable's densities are normalised and offset vertically on its own row,
+# so one interactive widget replaces the patchwork without re-rendering
+# per-variable plots. Densities are computed in R with the same parameters as
+# ggplot's geom_density (bw = "nrd0", gaussian kernel, n = 512).
+# ============================================================================
+
+.e_diag_base <- function(height) {
+  e <- echarts4r::e_charts(data.frame(x = 0:1, y = 0:1), x, height = height)
+  e$x$opts$xAxis <- NULL
+  e$x$opts$yAxis <- NULL
+  e$x$opts$series <- NULL
+  e$x$opts$legend <- NULL
+  e$x$opts$tooltip <- NULL
+  e$x$opts$grid <- NULL
+  e
+}
+
+# One density curve as a line series (or filled area for the historical
+# reference). Statistics precomputed in R.
+.e_density_series <- function(name, x, y, colour, area = FALSE,
+                              area_opacity = 0.35, line_type = "solid",
+                              width = 1.2) {
+  st <- list(
+    name = name,
+    type = "line",
+    symbol = "none",
+    z = if (area) 1 else 2,
+    lineStyle = list(color = colour, width = width, type = line_type),
+    itemStyle = list(color = colour),
+    data = lapply(seq_along(x), function(i) list(value = list(x[[i]], y[[i]])))
+  )
+
+  if (area) {
+    st$areaStyle <- list(color = colour, opacity = area_opacity)
+  } else {
+    st$areaStyle <- list(color = "rgba(0,0,0,0)", opacity = 0)
+  }
+  list(st)
+}
+
+echart_weather_density_panel <- function(survey_weather,
+                                         weather_raw,
+                                         weather_vars,
+                                         weather_labels = NULL,
+                                         scenario_weather = NULL,
+                                         active_scenarios = NULL,
+                                         log_x = FALSE,
+                                         show_regression = FALSE,
+                                         height = "340px") {
+  if (is.null(weather_vars) || !is.character(weather_vars) ||
+    !length(weather_vars)) {
+    return(echart_blank("No selected weather variables found in weather_raw.",
+      height = height
+    ))
+  }
+  weather_vars <- intersect(weather_vars, names(weather_raw))
+  if (!length(weather_vars)) {
+    return(echart_blank("No selected weather variables found in weather_raw.",
+      height = height
+    ))
+  }
+  if (length(log_x) == 1L) log_x <- rep(log_x, length(weather_vars))
+
+  disp_label <- function(wv) {
+    if (!is.null(weather_labels) && wv %in% names(weather_labels)) {
+      weather_labels[[wv]]
+    } else {
+      wv
+    }
+  }
+
+  e <- .e_diag_base(height)
+
+  # ---- Multi-variable: single ridgeline widget -----------------------------
+  if (length(weather_vars) > 1L) {
+    multi_ok <- TRUE
+    curve_sets <- list()
+    for (i in seq_along(weather_vars)) {
+      wv <- weather_vars[[i]]
+      raw_col <- weather_raw[[wv]]
+      is_factor <- is.factor(raw_col) || is.character(raw_col) ||
+        (is.integer(raw_col) &&
+          length(unique(raw_col[is.finite(raw_col)])) <= 20)
+      if (is_factor) {
+        multi_ok <- FALSE
+        break
+      }
+      hist_filt <- .filter_hist_weather(weather_raw, survey_weather)
+      hist_vals <- as.numeric(hist_filt[[wv]])
+      hist_vals <- hist_vals[is.finite(hist_vals)]
+      if (!length(hist_vals)) {
+        multi_ok <- FALSE
+        break
+      }
+      d <- stats::density(hist_vals, bw = "nrd0", kernel = "gaussian", n = 512)
+      curve_sets[[wv]] <- list(
+        x = d$x,
+        historical = d$y,
+        scenarios = list()
+      )
+      visible_nms <- names(scenario_weather %||% list())
+      if (!is.null(active_scenarios)) {
+        visible_nms <- intersect(visible_nms, active_scenarios)
+      }
+      for (nm in visible_nms) {
+        sw_df <- scenario_weather[[nm]]
+        if (is.null(sw_df) || !wv %in% names(sw_df)) next
+        vals <- as.numeric(sw_df[[wv]])
+        vals <- vals[is.finite(vals)]
+        if (!length(vals)) next
+        ds <- stats::density(vals, bw = "nrd0", kernel = "gaussian", n = 512)
+        curve_sets[[wv]]$scenarios[[nm]] <- ds$y
+        # All curves for one variable share the historical grid's x range only
+        # approximately; re-evaluate on the historical grid for alignment.
+        curve_sets[[wv]]$scenarios[[nm]] <-
+          stats::approx(ds$x, ds$y, xout = d$x, rule = 2)$y
+      }
+    }
+    if (!multi_ok) {
+      # Categorical variables or empty histories across the selection fall
+      # back to one variable per chart: render the first valid one alone.
+      weather_vars <- weather_vars[[1L]]
+    } else {
+      n_rows <- length(weather_vars)
+      series <- list()
+      ridge_scale <- 0.8
+      for (i in seq_len(n_rows)) {
+        wv <- weather_vars[[i]]
+        cs <- curve_sets[[wv]]
+        y0 <- i - 1L
+        ymax_all <- max(unlist(c(list(cs$historical), cs$scenarios)), na.rm = TRUE)
+        if (!is.finite(ymax_all) || ymax_all <= 0) ymax_all <- 1
+        series <- c(series, .e_density_series(
+          paste0(wv, " | Full historical"), cs$x,
+          y0 + cs$historical / ymax_all * ridge_scale,
+          .wise_history, area = TRUE
+        ))
+        for (nm in names(cs$scenarios)) {
+          ssp_key <- .normalise_ssp(nm)
+          col <- if (!is.na(ssp_key) && ssp_key %in% names(.ssp_colours)) {
+            unname(.ssp_colours[[ssp_key]])
+          } else {
+            "#cccccc"
+          }
+          series <- c(series, .e_density_series(
+            paste0(wv, " | ", nm), cs$x,
+            y0 + cs$scenarios[[nm]] / ymax_all * ridge_scale,
+            col, area = FALSE, width = 1
+          ))
+        }
+      }
+      e$x$opts$xAxis <- list(
+        type = "value",
+        name = NULL,
+        axisLabel = wise_eaxis_label(),
+        splitLine = wise_esplit_line(),
+        axisLine = list(lineStyle = list(color = .wise_grid))
+      )
+      e$x$opts$yAxis <- list(
+        type = "category",
+        data = as.character(seq_len(n_rows) - 1L),
+        axisLabel = wise_eaxis_label(
+          interval = 0L,
+          formatter = htmlwidgets::JS(sprintf(
+            "function(v){ var m = %s; return m[v] === undefined ? '' : m[v]; }",
+            jsonlite::toJSON(as.list(stats::setNames(
+              as.list(vapply(weather_vars, disp_label, character(1L))),
+              as.list(as.character(seq_len(n_rows) - 1L))
+            )), auto_unbox = TRUE)
+          ))
+        ),
+        axisLine = list(lineStyle = list(color = .wise_grid)),
+        axisTick = list(show = FALSE),
+        splitLine = wise_esplit_line(show = FALSE)
+      )
+      e$x$opts$series <- series
+      e$x$opts$legend <- modifyList(
+        list(bottom = 0, left = 0, orient = "horizontal", type = "scroll"),
+        wise_elegend_style()
+      )
+      e$x$opts$tooltip <- list(trigger = "axis")
+      e$x$opts$grid <- list(containLabel = TRUE, left = 8, right = 16, top = 12, bottom = 50)
+      return(wise_echart_theme(e))
+    }
+  }
+
+  # ---- Single variable -----------------------------------------------------
+  wv <- weather_vars[[1L]]
+  raw_col <- weather_raw[[wv]]
+  is_factor <- is.factor(raw_col) || is.character(raw_col) ||
+    (is.integer(raw_col) && length(unique(raw_col[is.finite(raw_col)])) <= 20)
+  lbl <- disp_label(wv)
+
+  if (!wv %in% names(weather_raw)) {
+    return(echart_blank(paste0("'", lbl, "' not found."), height = height))
+  }
+
+  hist_filt <- .filter_hist_weather(weather_raw, survey_weather)
+  sw_years <- NULL
+  if (!"int_month" %in% names(survey_weather) && "timestamp" %in% names(survey_weather)) {
+    survey_weather$int_month <- as.integer(format(as.Date(survey_weather$timestamp), "%m"))
+  }
+  if ("timestamp" %in% names(survey_weather)) {
+    survey_weather$cal_year <- as.integer(format(as.Date(survey_weather$timestamp), "%Y"))
+  }
+  reg_filt <- hist_filt[hist_filt$cal_year %in% unique(survey_weather$cal_year), ,
+    drop = FALSE
+  ]
+
+  visible_nms <- names(scenario_weather %||% list())
+  if (!is.null(active_scenarios)) {
+    visible_nms <- intersect(visible_nms, active_scenarios)
+  }
+  scen_sources <- list()
+  for (nm in visible_nms) {
+    sw_df <- scenario_weather[[nm]]
+    if (is.null(sw_df) || !wv %in% names(sw_df)) next
+    scen_sources[[nm]] <- sw_df[[wv]]
+  }
+
+  source_order <- c("Full historical",
+    if (isTRUE(show_regression)) "Model support",
+    names(scen_sources)
+  )
+  colour_of <- function(s) {
+    if (identical(s, "Full historical")) return(.wise_history)
+    if (identical(s, "Model support")) return(.wise_support)
+    ssp_key <- .normalise_ssp(s)
+    if (!is.na(ssp_key) && ssp_key %in% names(.ssp_colours)) {
+      unname(.ssp_colours[[ssp_key]])
+    } else {
+      "#cccccc"
+    }
+  }
+
+  if (is_factor) {
+    # Categorical: dodged proportion bars per source (geom_bar after_stat(prop)).
+    levels <- if (is.factor(raw_col)) levels(raw_col) else NULL
+    to_chr <- function(x) as.character(x)
+    keep_finite <- function(x) {
+      x <- to_chr(x)
+      x[!is.na(x) & nzchar(x)]
+    }
+    hist_levels <- levels
+    if (is.null(hist_levels)) {
+      hist_levels <- sort(unique(keep_finite(hist_filt[[wv]])))
+    }
+    hist_vals <- keep_finite(hist_filt[[wv]])
+    if (!length(hist_vals)) {
+      return(echart_blank("No values to plot.", height = height))
+    }
+    series <- list()
+    for (s in source_order) {
+      vals <- if (identical(s, "Full historical")) {
+        hist_vals
+      } else if (identical(s, "Model support")) {
+        keep_finite(reg_filt[[wv]])
+      } else {
+        keep_finite(scen_sources[[s]])
+      }
+      if (!length(vals)) next
+      prop <- as.numeric(table(factor(vals, levels = hist_levels))) / length(vals)
+      fill <- colour_of(s)
+      series <- c(series, list(list(
+        name = s,
+        type = "bar",
+        barGap = "10%",
+        barMaxWidth = 26,
+        itemStyle = list(
+          color = if (identical(s, "Model support")) "#ffffff" else fill,
+          opacity = 0.6,
+          borderColor = fill,
+          borderWidth = 0.4
+        ),
+        data = lapply(seq_along(hist_levels), function(i) {
+          list(value = list(hist_levels[[i]], prop[[i]]))
+        })
+      )))
+    }
+    legend_names <- vapply(series, function(s) s$name, character(1L))
+    e$x$opts$xAxis <- list(
+      type = "category",
+      data = as.list(hist_levels),
+      name = lbl,
+      nameLocation = "middle",
+      nameGap = 34,
+      nameTextStyle = wise_eaxis_name(),
+      axisLabel = wise_eaxis_label(interval = 0L, rotate = 30),
+      axisLine = list(lineStyle = list(color = .wise_grid)),
+      axisTick = list(alignWithLabel = TRUE),
+      splitLine = wise_esplit_line(show = FALSE)
+    )
+    e$x$opts$yAxis <- list(
+      type = "value",
+      name = "Relative frequency",
+      nameTextStyle = wise_eaxis_name(),
+      axisLabel = wise_eaxis_label(
+        formatter = htmlwidgets::JS(
+          "function(v){ return (100 * v).toFixed(0) + '%'; }"
+        )
+      ),
+      splitLine = wise_esplit_line()
+    )
+    e$x$opts$series <- series
+    e$x$opts$legend <- modifyList(
+      list(bottom = 0, left = 0, orient = "horizontal", data = as.list(legend_names)),
+      wise_elegend_style()
+    )
+    e$x$opts$tooltip <- list(trigger = "axis", axisPointer = list(type = "shadow"))
+    e$x$opts$grid <- list(containLabel = TRUE, left = 8, right = 16, top = 12, bottom = 62)
+    return(wise_echart_theme(e))
+  }
+
+  # Continuous: overlapping densities (Full historical filled grey area,
+  # dashed Model support line, SSP-coloured scenario lines).
+  hist_vals <- as.numeric(hist_filt[[wv]])
+  hist_vals <- hist_vals[is.finite(hist_vals)]
+  if (!length(hist_vals)) {
+    return(echart_blank("No finite values to plot.", height = height))
+  }
+  d0 <- stats::density(hist_vals, bw = "nrd0", kernel = "gaussian", n = 512)
+  series <- .e_density_series(
+    "Full historical", d0$x, d0$y, .wise_history,
+    area = TRUE, area_opacity = 0.35, width = 1.2
+  )
+  legend_names <- "Full historical"
+  if (isTRUE(show_regression)) {
+    reg_vals <- as.numeric(reg_filt[[wv]])
+    reg_vals <- reg_vals[is.finite(reg_vals)]
+    if (length(reg_vals)) {
+      dr <- stats::density(reg_vals, bw = "nrd0", kernel = "gaussian", n = 512)
+      series <- c(series, .e_density_series(
+        "Model support", dr$x, dr$y, .wise_support,
+        area = FALSE, line_type = "dashed", width = 1.4
+      ))
+      legend_names <- c(legend_names, "Model support")
+    }
+  }
+  for (nm in names(scen_sources)) {
+    vals <- as.numeric(scen_sources[[nm]])
+    vals <- vals[is.finite(vals)]
+    if (!length(vals)) next
+    ds <- stats::density(vals, bw = "nrd0", kernel = "gaussian", n = 512)
+    series <- c(series, .e_density_series(
+      nm, ds$x, ds$y, colour_of(nm), area = FALSE, width = 1.2
+    ))
+    legend_names <- c(legend_names, nm)
+  }
+  e$x$opts$xAxis <- list(
+    type = "value",
+    scale = TRUE,
+    name = lbl,
+    nameLocation = "middle",
+    nameGap = 30,
+    nameTextStyle = wise_eaxis_name(),
+    axisLabel = wise_eaxis_label(),
+    splitLine = wise_esplit_line(),
+    axisLine = list(lineStyle = list(color = .wise_grid))
+  )
+  if (isTRUE(log_x[[1L]])) e$x$opts$xAxis$type <- "log"
+  e$x$opts$yAxis <- list(
+    type = "value",
+    name = "Density",
+    nameLocation = "middle",
+    nameGap = 40,
+    nameRotate = 90,
+    nameTextStyle = wise_eaxis_name(),
+    axisLabel = wise_eaxis_label(),
+    splitLine = wise_esplit_line()
+  )
+  e$x$opts$series <- series
+  e$x$opts$legend <- modifyList(
+    list(bottom = 0, left = 0, orient = "horizontal",
+      data = as.list(unique(legend_names))),
+    wise_elegend_style()
+  )
+  e$x$opts$tooltip <- list(trigger = "axis")
+  e$x$opts$grid <- list(containLabel = TRUE, left = 8, right = 16, top = 12, bottom = 62)
+  wise_echart_theme(e)
+}

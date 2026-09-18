@@ -182,16 +182,12 @@ resolve_band_q <- function(band_key) {
 #' @importFrom stats quantile
 #' @importFrom rlang .data
 #' @export
-plot_pointrange_climate <- function(bands_tbl,
-                                    x_label = "",
-                                    group_order = "scenario_x_year",
-                                    show_coef = TRUE,
-                                    show_annual = FALSE) {
-  if (is.null(bands_tbl) || nrow(bands_tbl) == 0L) {
-    return(ggplot2::ggplot() +
-      ggplot2::labs(title = "Run a simulation to see results."))
-  }
-
+# Shared preparation behind plot_pointrange_climate() and its echarts
+# counterpart echart_pointrange_climate(): scenario keys, the SSP x period
+# colour palette, and the category order with spacer gutters. Pure data prep
+# - no rendering - so both surfaces stay in lockstep (guidelines §7).
+# @noRd
+.pointrange_prep <- function(bands_tbl, group_order = "scenario_x_year") {
   df <- bands_tbl
   has_source <- "source" %in% names(df)
   if (has_source) {
@@ -272,6 +268,36 @@ plot_pointrange_climate <- function(bands_tbl,
   data_levels <- setdiff(ordered_levels, spacer_ids)
   df$pt_key <- factor(df$pt_key, levels = ordered_levels)
   df <- df[df$pt_key %in% data_levels, , drop = FALSE]
+
+  list(
+    df = df,
+    palette = colour_palette,
+    ordered_levels = ordered_levels,
+    spacer_ids = spacer_ids,
+    x_label_map = x_label_map,
+    data_levels = data_levels,
+    has_source = has_source
+  )
+}
+
+plot_pointrange_climate <- function(bands_tbl,
+                                    x_label = "",
+                                    group_order = "scenario_x_year",
+                                    show_coef = TRUE,
+                                    show_annual = FALSE) {
+  if (is.null(bands_tbl) || nrow(bands_tbl) == 0L) {
+    return(ggplot2::ggplot() +
+      ggplot2::labs(title = "Run a simulation to see results."))
+  }
+
+  prep <- .pointrange_prep(bands_tbl, group_order)
+  df <- prep$df
+  has_source <- prep$has_source
+  colour_palette <- prep$palette
+  ordered_levels <- prep$ordered_levels
+  spacer_ids <- prep$spacer_ids
+  x_label_map <- prep$x_label_map
+  data_levels <- prep$data_levels
 
   if (nrow(df) == 0L) {
     return(blank_plot("Run a future simulation to see scenario comparisons."))
@@ -2615,4 +2641,1176 @@ enhance_exceedance <- function(curves_tbl,
     )
   }
   p
+}
+
+# ============================================================================
+# Interactive (echarts4r) counterparts of the ggplot builders above.
+# Guidelines §7: same statistics computed in R with the same parameters,
+# echarts only draws precomputed values; theme tokens come from
+# utils_plot_theme.R (wise_eaxis_label / wise_echart_theme, etc.).
+# The ggplot builders above remain the static fallback and are still used by
+# Step 3 policy comparisons - nothing here replaces them.
+# ============================================================================
+
+# Empty widget shell. echarts4r 0.5.x rejects single-column and <2-row frames
+# in e_charts(); a two-column two-row dummy is never drawn on. Builders then
+# inject their own axes/series into $x$opts (e_axis_*() re-enters e_charts()
+# and would hit the same single-column defect).
+.e_step2_base <- function(height) {
+  e <- echarts4r::e_charts(data.frame(x = 0:1, y = 0:1), x, height = height)
+  e$x$opts$xAxis <- NULL
+  e$x$opts$yAxis <- NULL
+  e$x$opts$series <- NULL
+  e$x$opts$legend <- NULL
+  e$x$opts$tooltip <- NULL
+  e$x$opts$grid <- NULL
+  e
+}
+
+# Floating band between lo and hi drawn as a stacked pair of bars: a fully
+# transparent base bar up to `lo`, then the coloured (hi - lo) segment.
+# `cats` are the category-axis labels; `horizontal = TRUE` places the
+# category axis on y (ECharts data pairs are always [x, y]). Returns the two
+# series; tooltip entries are suppressed because the pair encodes one visual
+# band.
+.e_band_pair <- function(cats, lo, hi, colour, stack, bar_width,
+                         opacity = 1, z = 1, horizontal = FALSE) {
+  n <- length(cats)
+  pair_data <- function(get_val, style) {
+    lapply(seq_len(n), function(i) {
+      v <- get_val(i)
+      list(
+        value = if (horizontal) {
+          list(v, cats[[i]])
+        } else {
+          list(cats[[i]], v)
+        },
+        itemStyle = style
+      )
+    })
+  }
+  transparent <- list(color = "rgba(0,0,0,0)")
+  list(
+    list(
+      name = paste0(stack, "__base"), type = "bar", stack = stack,
+      barWidth = bar_width, silent = TRUE, z = z,
+      tooltip = list(show = FALSE),
+      itemStyle = transparent,
+      data = pair_data(
+        function(i) if (is.finite(lo[i])) lo[i] else 0,
+        transparent
+      )
+    ),
+    list(
+      name = paste0(stack, "__band"), type = "bar", stack = stack,
+      barWidth = bar_width, silent = TRUE, z = z,
+      tooltip = list(show = FALSE),
+      data = pair_data(
+        function(i) {
+          if (is.finite(lo[i]) && is.finite(hi[i])) {
+            max(hi[i] - lo[i], 0)
+          } else {
+            NA_real_
+          }
+        },
+        list(color = colour, opacity = opacity)
+      )
+    )
+  )
+}
+
+# Scatter marker series (type "scatter") with per-point value pairs.
+# Returns a one-element list so callers can append with c().
+.e_dot_series <- function(name, x, y, colour, fill = "white", size = 9,
+                          border_width = 1.2, labels = NULL) {
+  n <- length(x)
+  data <- lapply(seq_len(n), function(i) {
+    pt <- list(value = list(x[[i]], y[[i]]))
+    if (!is.null(labels) && !is.na(labels[[i]]) && nzchar(labels[[i]])) {
+      pt$label <- list(
+        show = TRUE,
+        position = "right",
+        distance = 6,
+        fontWeight = "bold",
+        color = colour,
+        fontSize = 13,
+        formatter = labels[[i]]
+      )
+    }
+    pt
+  })
+  st <- list(
+    name = name,
+    type = "scatter",
+    symbolSize = size,
+    z = 3,
+    itemStyle = list(
+      color = fill,
+      borderColor = colour,
+      borderWidth = border_width
+    ),
+    data = data
+  )
+  list(st)
+}
+
+# Line series over numeric (x, y) pairs with optional point labels on the
+# last finite point (the endpoint scenario labels the ggplot builders drew
+# with geom_text).
+.e_line_series <- function(name, x, y, colour, width = 2, type = "solid",
+                           opacity = 1, endpoint_label = FALSE,
+                           label_x = NULL) {
+  n <- length(x)
+  last <- which(is.finite(y))
+  last <- if (length(last)) max(last) else 0L
+  data <- lapply(seq_len(n), function(i) {
+    pt <- list(value = list(x[[i]], y[[i]]))
+    if (endpoint_label && i == last && is.finite(y[[i]])) {
+      pt$label <- list(
+        show = TRUE,
+        position = "right",
+        distance = 6,
+        fontWeight = "bold",
+        color = colour,
+        fontSize = 13,
+        formatter = name
+      )
+    }
+    pt
+  })
+  st <- list(
+    name = name,
+    type = "line",
+    lineStyle = list(color = colour, width = width, type = type,
+                     opacity = opacity),
+    itemStyle = list(color = colour),
+    symbol = "none",
+    z = 2,
+    data = data
+  )
+  list(st)
+}
+
+# Deterministic even-stride downsample for raw series above `cap` points
+# (guidelines §7). Aggregated series are never downsampled.
+.e_downsample_idx <- function(n, cap = 10000L) {
+  if (n <= cap) {
+    return(seq_len(n))
+  }
+  # Even stride keeps the first and last point and spreads the rest evenly,
+  # so the shape of the series is preserved without randomisation.
+  sort(unique(as.integer(floor(seq(1L, n, length.out = cap)))))
+}
+
+# ---- echart_pointrange_climate ----------------------------------------------
+
+#' Interactive pointrange (Step 2 Results point-range chart)
+#'
+#' echarts counterpart of [plot_pointrange_climate()] for the Step 2 Results
+#' surface. Reuses the exact same data preparation ([.pointrange_prep()]).
+#' Nested bands are drawn as floating bar pairs (transparent base + coloured
+#' segment) and the central estimate as an open scatter marker, matching the
+#' ggplot linerange widths: ensemble 6pt -> barWidth 14, annual 3.5pt -> 8,
+#' coefficient 1.2pt -> 3.
+#'
+#' Source-dodged policy comparisons (Baseline vs Policy) stay on the ggplot
+#' builder; this builder draws the single-source Step 2 chart and simply
+#' co-locates co-located categories when a `source` column is present.
+#'
+#' @return An `echarts4r` widget (never NULL; empty states return
+#'   [echart_blank()] with the ggplot builder's message).
+#' @noRd
+echart_pointrange_climate <- function(bands_tbl,
+                                      x_label = "",
+                                      group_order = "scenario_x_year",
+                                      show_coef = TRUE,
+                                      show_annual = FALSE,
+                                      height = "600px") {
+  if (is.null(bands_tbl) || nrow(bands_tbl) == 0L) {
+    return(echart_blank("Run a simulation to see results.", height = height))
+  }
+  prep <- .pointrange_prep(bands_tbl, group_order)
+  df <- prep$df
+  if (nrow(df) == 0L) {
+    return(echart_blank(
+      "Run a future simulation to see scenario comparisons.",
+      height = height
+    ))
+  }
+  palette <- prep$palette
+  ordered_levels <- prep$ordered_levels
+  x_label_map <- prep$x_label_map
+
+  e <- .e_step2_base(height)
+  series <- list()
+  for (i in seq_len(nrow(df))) {
+    r <- df[i, , drop = FALSE]
+    col <- unname(palette[[r$colour_key]] %||% "#808080")
+    # Unique stack per row: ECharts offsets different stacks within one
+    # category, so co-located rows (source-dodged data) read side by side.
+    st <- paste0("b", i)
+    if (is.finite(r$intermod_lo) && is.finite(r$intermod_hi)) {
+      series <- c(series, .e_band_pair(
+        ordered_levels, r$intermod_lo, r$intermod_hi, col,
+        stack = paste0("im_", st), bar_width = 14, opacity = 0.6, z = 1
+      ))
+    }
+    if (isTRUE(show_annual) && is.finite(r$interann_lo) &&
+      is.finite(r$interann_hi)) {
+      series <- c(series, .e_band_pair(
+        ordered_levels, r$interann_lo, r$interann_hi, col,
+        stack = paste0("ia_", st), bar_width = 8, opacity = 1, z = 1
+      ))
+    }
+    if (isTRUE(show_coef) && is.finite(r$coef_lo) && is.finite(r$coef_hi)) {
+      series <- c(series, .e_band_pair(
+        ordered_levels, r$coef_lo, r$coef_hi, .wise_support,
+        stack = paste0("cf_", st), bar_width = 3, opacity = 1, z = 2
+      ))
+    }
+    series <- c(series, .e_dot_series(
+      as.character(r$colour_key),
+      as.character(r$pt_key), r$value,
+      colour = .wise_support, fill = "white", size = 11,
+      border_width = 1.2
+    ))
+  }
+
+  e$x$opts$xAxis <- list(
+    type = "category",
+    data = ordered_levels,
+    axisLabel = wise_eaxis_label(interval = 0L, formatter = htmlwidgets::JS(
+      "function(v){ return v === undefined ? '' : v; }"
+    )),
+    axisLine = list(lineStyle = list(color = .wise_grid)),
+    axisTick = list(alignWithLabel = TRUE),
+    splitLine = wise_esplit_line(show = FALSE)
+  )
+  e$x$opts$yAxis <- list(
+    type = "value",
+    name = x_label,
+    nameLocation = "middle",
+    nameGap = 48,
+    nameRotate = 90,
+    nameTextStyle = wise_eaxis_name(),
+    axisLabel = wise_eaxis_label(),
+    splitLine = wise_esplit_line()
+  )
+  e$x$opts$series <- series
+  e$x$opts$tooltip <- list(
+    trigger = "axis",
+    axisPointer = list(type = "shadow")
+  )
+  e$x$opts$grid <- list(containLabel = TRUE, left = 8, right = 14, top = 16, bottom = 8)
+  wise_echart_theme(e)
+}
+
+# ---- echart_variance_contribution -------------------------------------------
+
+#' Interactive uncertainty-source bars
+#'
+#' echarts counterpart of [plot_variance_contribution()]: one horizontal bar
+#' per (scenario, source) on the same sqrt-of-variance statistics, Okabe-Ito
+#' source colours, legend bottom (the ggplot showed one).
+#' @noRd
+echart_variance_contribution <- function(var_tbl, height = "300px") {
+  if (is.null(var_tbl) || nrow(var_tbl) == 0L) {
+    return(echart_blank("Run a simulation to see SD contributions.", height = height))
+  }
+  df <- var_tbl
+  df$sd_coef <- sqrt(pmax(df$var_coef, 0))
+  df$sd_within <- sqrt(pmax(df$var_within, 0))
+  df$sd_across <- sqrt(pmax(df$var_across, 0))
+
+  src_levels <- c(
+    "Inter-model spread", "Inter-annual variability", "Coefficient uncertainty"
+  )
+  src_cols <- c(.wise_cat[[3]], .wise_cat[[2]], .wise_cat[[1]])
+  # Horizontal rows: scenarios top-down in first-appearance order (ggplot
+  # coord_flip with levels rev(unique(df$scenario)) puts Historical on top).
+  cats <- rev(unique(as.character(df$scenario)))
+  cat_idx <- setNames(seq_along(cats) - 1L, cats)
+
+  e <- .e_step2_base(height)
+  sd_cols <- c("sd_across", "sd_within", "sd_coef")
+  series <- lapply(seq_along(src_levels), function(i) {
+    vals <- vapply(cats, function(sc) {
+      v <- df[[sd_cols[[i]]]][df$scenario == sc]
+      if (length(v)) v[[1L]] else NA_real_
+    }, numeric(1))
+    list(
+      name = src_levels[[i]],
+      type = "bar",
+      barGap = "15%",
+      barMaxWidth = 22,
+      data = lapply(seq_along(cats), function(j) {
+        list(value = list(vals[[j]], cat_idx[[j]]))
+      }),
+      itemStyle = list(color = unname(src_cols[[i]]))
+    )
+  })
+
+  e$x$opts$xAxis <- list(
+    type = "value",
+    name = "Standard deviation (outcome units)",
+    nameTextStyle = wise_eaxis_name(),
+    axisLabel = wise_eaxis_label(),
+    splitLine = wise_esplit_line(),
+    axisLine = list(lineStyle = list(color = .wise_grid))
+  )
+  e$x$opts$yAxis <- list(
+    type = "category",
+    data = cats,
+    axisLabel = wise_eaxis_label(),
+    axisLine = list(lineStyle = list(color = .wise_grid)),
+    axisTick = list(show = FALSE),
+    splitLine = wise_esplit_line(show = FALSE)
+  )
+  e$x$opts$series <- series
+  e$x$opts$legend <- modifyList(
+    list(bottom = 0, left = 0, orient = "horizontal"),
+    wise_elegend_style()
+  )
+  e$x$opts$tooltip <- list(trigger = "axis", axisPointer = list(type = "shadow"))
+  e$x$opts$grid <- list(containLabel = TRUE, left = 8, right = 20, top = 10, bottom = 42)
+  e$x$opts$color <- unname(src_cols)
+  wise_echart_theme(e)
+}
+
+# ---- echart_step2_adverse_dot -----------------------------------------------
+
+#' Interactive adverse return-period dot plot
+#'
+#' echarts counterpart of [plot_step2_adverse_dot()]: per scenario, the
+#' ensemble spread as a floating bar pair and the central estimate as an open
+#' marker, scenario labels anchored right of the top-row (Expected) markers
+#' exactly like the ggplot direct labels. No legend (the ggplot used direct
+#' labels only).
+#' @noRd
+echart_step2_adverse_dot <- function(tbl, x_label = "Outcome level",
+                                     height = "380px") {
+  if (is.null(tbl) || !nrow(tbl)) {
+    return(echart_blank("Return-period outcomes are unavailable.", height = height))
+  }
+  scenario_levels <- c(
+    "Historical",
+    sort(unique(as.character(tbl$scenario[!tbl$is_historical])))
+  )
+  scenario_colours <- stats::setNames(vapply(scenario_levels, function(s) {
+    if (identical(s, "Historical")) {
+      return(.wise_support)
+    }
+    ssp <- .normalise_ssp(s)
+    if (ssp %in% names(.ssp_colours)) unname(.ssp_colours[[ssp]]) else .wise_slate
+  }, character(1L)), scenario_levels)
+  tbl$scenario_key <- ifelse(tbl$is_historical, "Historical", as.character(tbl$scenario))
+  tbl$rp_y <- as.integer(tbl$rp_label)
+  # Vertical dodge as in the ggplot builder: scenarios sharing a return-period
+  # row get distinct slots so their dumbbells stay readable.
+  dodge_width <- 0.6
+  tbl$dodge_offset <- stats::ave(
+    seq_len(nrow(tbl)),
+    tbl$rp_y,
+    FUN = function(idx) {
+      k <- length(idx)
+      if (k <= 1L) {
+        return(0)
+      }
+      seq(-(k - 1L) / 2, (k - 1L) / 2, length.out = k)[
+        order(match(tbl$scenario_key[idx], scenario_levels))
+      ] * (dodge_width / max(k - 1L, 1))
+    }
+  )
+
+  y_breaks <- sort(unique(tbl$rp_y))
+  y_cats <- as.character(seq_along(y_breaks) - 1L)
+  y_labels <- levels(tbl$rp_label)[y_breaks]
+  tbl$y_cat <- y_cats[match(tbl$rp_y, y_breaks)]
+
+  top_y <- max(tbl$rp_y)
+  top_keys <- unique(tbl$scenario_key[tbl$rp_y == top_y])
+
+  e <- .e_step2_base(height)
+  series <- list()
+  for (scn in scenario_levels) {
+    rows <- tbl[tbl$scenario_key == scn, , drop = FALSE]
+    if (!nrow(rows)) next
+    col <- unname(scenario_colours[[scn]])
+    y_pos <- as.numeric(rows$y_cat) + rows$dodge_offset
+    # Floating ensemble bar per point: unique stack per point so segments at
+    # the same row do not pile up.
+    for (j in seq_len(nrow(rows))) {
+      if (is.finite(rows$intermod_lo[[j]]) && is.finite(rows$intermod_hi[[j]])) {
+        series <- c(series, .e_band_pair(
+          rows$y_cat[[j]],
+          rows$intermod_lo[[j]],
+          rows$intermod_hi[[j]],
+          col,
+          stack = paste0("rp_", scn, "_", j),
+          bar_width = 7,
+          opacity = 0.5,
+          z = 1,
+          horizontal = TRUE
+        ))
+      }
+    }
+    labs <- rep(NA_character_, nrow(rows))
+    lab_rows <- rows$rp_y == top_y & rows$scenario_key %in% top_keys
+    # One label per scenario, on its first Expected-row marker.
+    if (any(lab_rows)) {
+      labs[[which(lab_rows)[[1L]]]] <- scn
+    }
+    series <- c(series, .e_dot_series(
+      scn, rows$value, y_pos,
+      colour = col, fill = col, size = 12, border_width = 1.1,
+      labels = labs
+    ))
+  }
+
+  e$x$opts$xAxis <- list(
+    type = "value",
+    scale = TRUE,
+    name = x_label,
+    nameLocation = "middle",
+    nameGap = 30,
+    nameTextStyle = wise_eaxis_name(),
+    axisLabel = wise_eaxis_label(),
+    splitLine = wise_esplit_line(),
+    axisLine = list(lineStyle = list(color = .wise_grid))
+  )
+  e$x$opts$yAxis <- list(
+    type = "category",
+    data = y_cats,
+    axisLabel = wise_eaxis_label(
+      interval = 0L,
+      formatter = htmlwidgets::JS(sprintf(
+        "function(v){ var m = %s; return m[v] === undefined ? '' : m[v]; }",
+        jsonlite::toJSON(as.list(stats::setNames(y_labels, y_cats)), auto_unbox = TRUE)
+      ))
+    ),
+    axisLine = list(lineStyle = list(color = .wise_grid)),
+    axisTick = list(show = FALSE),
+    splitLine = wise_esplit_line(show = FALSE)
+  )
+  e$x$opts$series <- series
+  e$x$opts$tooltip <- list(trigger = "item")
+  e$x$opts$grid <- list(containLabel = TRUE, left = 8, right = 90, top = 12, bottom = 10)
+  wise_echart_theme(e)
+}
+
+# ---- echart_annual_distribution ---------------------------------------------
+
+#' Interactive annual outcome distribution
+#'
+#' echarts counterpart of [plot_annual_distribution()] (single-source Step 2
+#' path; source-dodged policy data keep the ggplot builder). One row per
+#' scenario, Historical on top, raw weather-year draws as scatter dots and:
+#' - `"boxplot"` mode: precomputed quartiles as a floating bar pair (Q1-Q3)
+#'   plus a min-max whisker markLine - the bar+markLine recipe from §7, since
+#'   e_boxplot() computes its statistics client-side.
+#' - `"violin"` mode: a ridgeline-style density area per row. Densities are
+#'   computed in R with the same parameters as ggplot's stat_ydensity
+#'   (bw = "nrd0", kernel = gaussian, n = 512, trimmed to the data range) and
+#'   normalised like ggplot's scale = "width"; the outline is drawn one-sided
+#'   above the row baseline (echarts has no custom geometry for mirrored
+#'   violins).
+#'
+#' The dashed historical-mean reference line is kept.
+#' @noRd
+echart_annual_distribution <- function(tbl, x_label = "Outcome (outcome units)",
+                                       plot_type = "violin",
+                                       height = "470px") {
+  if (is.null(tbl) || !nrow(tbl)) {
+    return(echart_blank("No annual simulation results available.", height = height))
+  }
+  df <- tbl
+  df$scenario <- as.character(df$scenario)
+  df$period <- ifelse(df$scenario == "Historical", "Historical",
+    vapply(df$scenario, .parse_year, character(1L))
+  )
+  df$ssp <- ifelse(df$scenario == "Historical", "Historical",
+    vapply(df$scenario, .normalise_ssp, character(1L))
+  )
+  scenario_levels <- c("Historical", sort(unique(df$scenario[df$scenario != "Historical"])))
+  scenario_palette <- c(Historical = .wise_history)
+  for (ssp in unique(df$ssp[df$ssp != "Historical"])) {
+    members <- scenario_levels[scenario_levels != "Historical"]
+    members <- members[vapply(members, function(s) {
+      identical(.normalise_ssp(s), ssp)
+    }, logical(1L))]
+    members <- members[order(vapply(members, .parse_year, character(1L)))]
+    base_col <- if (ssp %in% names(.ssp_colours)) {
+      unname(.ssp_colours[[ssp]])
+    } else {
+      "#0072B2"
+    }
+    shades <- if (length(members) > 1L) {
+      colorspace::lighten(base_col, seq(0.30, 0, length.out = length(members)))
+    } else {
+      base_col
+    }
+    scenario_palette[members] <- shades
+  }
+
+  n_rows <- length(scenario_levels)
+  # Row anchor per scenario level; level 1 (Historical) gets the top row.
+  row_y <- setNames(n_rows - match(scenario_levels, scenario_levels), scenario_levels)
+  hist_vals <- df$value[df$scenario == "Historical"]
+  hist_mean <- if (length(hist_vals)) mean(hist_vals, na.rm = TRUE) else NA_real_
+
+  e <- .e_step2_base(height)
+  series <- list()
+  for (scn in scenario_levels) {
+    rows <- df[df$scenario == scn, , drop = FALSE]
+    if (!nrow(rows)) next
+    vals <- as.numeric(rows$value)
+    vals <- vals[is.finite(vals)]
+    if (!length(vals)) next
+    col <- unname(scenario_palette[[scn]] %||% .wise_history)
+    y0 <- row_y[[scn]]
+    y_cat <- as.character(y0)
+
+    if (identical(plot_type, "boxplot")) {
+      q <- stats::quantile(vals, c(0, 0.25, 0.5, 0.75, 1), names = FALSE)
+      # IQR box (floating bar pair) + min-max whiskers, horizontal.
+      series <- c(series, .e_band_pair(
+        y_cat, q[[2L]], q[[4L]], col,
+        stack = paste0("bx_", scn), bar_width = 16, opacity = 0.45, z = 2,
+        horizontal = TRUE
+      ))
+      series <- c(series, .e_band_pair(
+        y_cat, q[[1L]], q[[5L]], col,
+        stack = paste0("wk_", scn), bar_width = 2, opacity = 1, z = 1,
+        horizontal = TRUE
+      ))
+    } else {
+      # Density outline, ggplot stat_ydensity parameters, scale = "width".
+      d <- stats::density(vals, bw = "nrd0", kernel = "gaussian", n = 512)
+      keep <- d$x >= min(vals) & d$x <= max(vals)
+      dx <- d$x[keep]
+      dy <- d$y[keep]
+      dy <- dy / max(dy, na.rm = TRUE) # scale = "width"
+      series <- c(series, list(
+        list(
+          name = paste0(scn, "__base"), type = "line", stack = paste0("vn_", scn),
+          symbol = "none", silent = TRUE, z = 1,
+          tooltip = list(show = FALSE),
+          lineStyle = list(width = 0, opacity = 0),
+          areaStyle = list(color = "rgba(0,0,0,0)"),
+          data = lapply(seq_along(dx), function(i) {
+            list(value = list(dx[[i]], y0))
+          })
+        ),
+        list(
+          name = paste0(scn, "__density"), type = "line", stack = paste0("vn_", scn),
+          symbol = "none", silent = TRUE, z = 1,
+          tooltip = list(show = FALSE),
+          lineStyle = list(width = 0, opacity = 0),
+          areaStyle = list(color = col, opacity = 0.28),
+          data = lapply(seq_along(dx), function(i) {
+            list(value = list(dx[[i]], y0 + dy[[i]] * 0.31))
+          })
+        )
+      ))
+    }
+
+    # Raw draws: semi-transparent dots on the row baseline (deterministic -
+    # no jitter, parity with the reading of the ggplot dots).
+    idx <- .e_downsample_idx(length(vals))
+    draws <- list(
+      name = paste0(scn, "__draws"),
+      type = "scatter",
+      symbolSize = 5,
+      z = 3,
+      silent = TRUE,
+      itemStyle = list(color = col, opacity = 0.4),
+      data = lapply(idx, function(i) {
+        list(value = list(vals[[i]], y0))
+      })
+    )
+    draws$tooltip <- list(show = FALSE)
+    series <- c(series, list(draws))
+
+    # Open-circle mean marker (ggplot shape 21, white fill, slate border).
+    series <- c(series, .e_dot_series(
+      paste0(scn, "__mean"), mean(vals, na.rm = TRUE), y0,
+      colour = .wise_slate, fill = "white", size = 10, border_width = 1.0
+    ))
+  }
+
+  # Dashed historical-mean reference line (.wise_zero) with its label.
+  if (is.finite(hist_mean)) {
+    series <- c(series, list(list(
+      name = "Historical mean",
+      type = "line",
+      symbol = "none",
+      silent = TRUE,
+      z = 0,
+      markLine = list(
+        silent = TRUE,
+        symbol = "none",
+        lineStyle = list(color = .wise_zero, type = "dashed", width = 1),
+        label = list(
+          show = TRUE,
+          position = "insideEndTop",
+          formatter = "Historical mean",
+          color = .wise_zero,
+          fontSize = 12
+        ),
+        data = list(list(xAxis = hist_mean))
+      ),
+      data = list()
+    )))
+  }
+
+  # Historical (level 1) on top: echarts category y-axis renders the first
+  # category at the bottom, and Historical carries the highest row anchor.
+  y_cats <- as.character(seq_len(n_rows) - 1L)
+  e$x$opts$xAxis <- list(
+    type = "value",
+    scale = TRUE,
+    name = x_label,
+    nameLocation = "middle",
+    nameGap = 30,
+    nameTextStyle = wise_eaxis_name(),
+    axisLabel = wise_eaxis_label(),
+    splitLine = wise_esplit_line(),
+    axisLine = list(lineStyle = list(color = .wise_grid))
+  )
+  e$x$opts$yAxis <- list(
+    type = "category",
+    data = y_cats,
+    axisLabel = wise_eaxis_label(
+      interval = 0L,
+      formatter = htmlwidgets::JS(sprintf(
+        "function(v){ var m = %s; return m[v] === undefined ? '' : m[v]; }",
+        jsonlite::toJSON(as.list(stats::setNames(
+          vapply(scenario_levels, function(s) sub(" / ", "\n", s, fixed = TRUE),
+            character(1L)
+          ), as.character(seq_len(n_rows) - 1L)
+        )), auto_unbox = TRUE)
+      ))
+    ),
+    axisLine = list(lineStyle = list(color = .wise_grid)),
+    axisTick = list(show = FALSE),
+    splitLine = wise_esplit_line(show = FALSE),
+    inverse = FALSE
+  )
+  e$x$opts$series <- series
+  e$x$opts$tooltip <- list(trigger = "item")
+  e$x$opts$grid <- list(containLabel = TRUE, left = 8, right = 20, top = 12, bottom = 10)
+  wise_echart_theme(e)
+}
+
+# ---- echart_timeseries_spaghetti --------------------------------------------
+
+#' Interactive per-model trajectories with ensemble envelope
+#'
+#' echarts counterpart of [plot_timeseries_spaghetti()]: same envelope
+#' statistics (per (scenario, sim_year) median and quantiles at
+#' `ensemble_band_q`), one thin translucent line per model, one bold median
+#' line per scenario. The inter-model ribbon is drawn as a stacked
+#' transparent-base + translucent-fill area pair (the band recipe), which is
+#' exact here because every scenario's envelope shares one sim_year grid.
+#' Legend bottom-left, as in the ggplot builder.
+#' @noRd
+echart_timeseries_spaghetti <- function(ts_tbl, x_label = "",
+                                        ensemble_band_q = c(lo = 0, hi = 1),
+                                        height = "380px") {
+  if (is.null(ts_tbl) || nrow(ts_tbl) == 0L) {
+    return(echart_blank("Run a simulation to see model trajectories.", height = height))
+  }
+  df <- ts_tbl
+  has_source <- "source" %in% names(df)
+  if (has_source) {
+    df <- df[!(df$is_historical & df$source == "Policy"), , drop = FALSE]
+  }
+  df$ssp_key <- ifelse(df$is_historical, "Historical",
+    vapply(df$scenario, .normalise_ssp, character(1L))
+  )
+  scen_levels <- c("Historical", sort(unique(df$scenario[!df$is_historical])))
+  scen_colour_map <- vapply(scen_levels, function(s) {
+    if (s == "Historical") {
+      return(.wise_support)
+    }
+    ssp <- .normalise_ssp(s)
+    if (ssp %in% names(.ssp_colours)) unname(.ssp_colours[[ssp]]) else "grey50"
+  }, character(1L))
+
+  env_grp <- if (has_source) {
+    c("scenario", "source", "sim_year")
+  } else {
+    c("scenario", "sim_year")
+  }
+  env_df <- df |>
+    dplyr::group_by(dplyr::across(dplyr::all_of(env_grp))) |>
+    dplyr::summarise(
+      central = stats::median(.data$value, na.rm = TRUE),
+      lo = unname(stats::quantile(.data$value, ensemble_band_q[["lo"]], na.rm = TRUE)),
+      hi = unname(stats::quantile(.data$value, ensemble_band_q[["hi"]], na.rm = TRUE)),
+      n_models = dplyr::n(),
+      is_historical = any(.data$is_historical),
+      .groups = "drop"
+    )
+  fut_env <- env_df[!env_df$is_historical & env_df$n_models > 1L, , drop = FALSE]
+
+  e <- .e_step2_base(height)
+  series <- list()
+  legend_names <- character(0)
+
+  # Inter-model envelope (futures only, when >1 model): stacked transparent
+  # base + translucent fill.
+  for (scn in unique(as.character(fut_env$scenario))) {
+    env <- fut_env[fut_env$scenario == scn, , drop = FALSE]
+    env <- env[order(env$sim_year), , drop = FALSE]
+    col <- unname(scen_colour_map[[scn]] %||% "grey50")
+    xs <- as.numeric(env$sim_year)
+    base <- list(
+      name = paste0(scn, "__env_base"), type = "line",
+      stack = paste0("env_", scn), symbol = "none", silent = TRUE, z = 1,
+      tooltip = list(show = FALSE),
+      lineStyle = list(width = 0, opacity = 0),
+      areaStyle = list(color = "rgba(0,0,0,0)"),
+      data = lapply(seq_along(xs), function(i) list(value = list(xs[[i]], env$lo[[i]])))
+    )
+    band <- list(
+      name = paste0(scn, "__env_band"), type = "line",
+      stack = paste0("env_", scn), symbol = "none", silent = TRUE, z = 1,
+      tooltip = list(show = FALSE),
+      lineStyle = list(width = 0, opacity = 0),
+      areaStyle = list(color = col, opacity = 0.15),
+      data = lapply(seq_along(xs), function(i) {
+        list(value = list(xs[[i]], max(env$hi[[i]] - env$lo[[i]], 0)))
+      })
+    )
+    series <- c(series, list(base, band))
+  }
+
+  # Spaghetti: one thin translucent line per (scenario, model).
+  spaghetti_grp <- if (has_source) {
+    c("scenario", "source", "model_id")
+  } else {
+    c("scenario", "model_id")
+  }
+  for (key in unique(do.call(paste, c(df[intersect(spaghetti_grp, names(df))], sep = "__")))) {
+    parts <- strsplit(key, "__", fixed = TRUE)[[1L]]
+    scn <- parts[[1L]]
+    rows <- df[df$scenario == scn & as.character(df$model_id) == parts[[length(parts)]], ,
+      drop = FALSE
+    ]
+    if (has_source && length(parts) > 2L) {
+      rows <- rows[as.character(rows$source) == parts[[2L]], , drop = FALSE]
+    }
+    rows <- rows[order(rows$sim_year), , drop = FALSE]
+    # Guard: raw model lines above 10k points are deterministically
+    # downsampled (even stride); aggregated envelopes stay exact.
+    idx <- .e_downsample_idx(nrow(rows))
+    xs <- as.numeric(rows$sim_year)[idx]
+    ys <- as.numeric(rows$value)[idx]
+    col <- unname(scen_colour_map[[scn]] %||% "grey50")
+    series <- c(series, list(list(
+      name = key, type = "line", symbol = "none", silent = TRUE, z = 1,
+      tooltip = list(show = FALSE),
+      lineStyle = list(color = col, width = 1, opacity = 0.35),
+      itemStyle = list(color = col),
+      data = lapply(seq_along(xs), function(i) list(value = list(xs[[i]], ys[[i]])))
+    )))
+  }
+
+  # Bold across-model median per scenario (legend entry).
+  for (scn in scen_levels) {
+    env <- env_df[as.character(env_df$scenario) == scn, , drop = FALSE]
+    if (!nrow(env)) next
+    env <- env[order(env$sim_year), , drop = FALSE]
+    series <- c(series, .e_line_series(
+      scn, as.numeric(env$sim_year), env$central,
+      colour = unname(scen_colour_map[[scn]] %||% "grey50"),
+      width = 3, opacity = 1
+    ))
+    legend_names <- c(legend_names, scn)
+  }
+
+  e$x$opts$xAxis <- list(
+    type = "value",
+    name = "Historical weather-year draw (simulated)",
+    nameLocation = "middle",
+    nameGap = 30,
+    nameTextStyle = wise_eaxis_name(),
+    axisLabel = wise_eaxis_label(),
+    splitLine = wise_esplit_line(),
+    axisLine = list(lineStyle = list(color = .wise_grid))
+  )
+  e$x$opts$yAxis <- list(
+    type = "value",
+    name = x_label,
+    nameLocation = "middle",
+    nameGap = 48,
+    nameRotate = 90,
+    nameTextStyle = wise_eaxis_name(),
+    axisLabel = wise_eaxis_label(),
+    splitLine = wise_esplit_line()
+  )
+  e$x$opts$series <- series
+  e$x$opts$legend <- modifyList(
+    list(bottom = 0, left = 0, orient = "horizontal", data = as.list(legend_names)),
+    wise_elegend_style()
+  )
+  e$x$opts$tooltip <- list(trigger = "axis")
+  e$x$opts$grid <- list(containLabel = TRUE, left = 8, right = 16, top = 12, bottom = 42)
+  wise_echart_theme(e)
+}
+
+# ---- echart_model_robustness -------------------------------------------------
+
+#' Interactive climate-model robustness scatter
+#'
+#' echarts counterpart of [plot_model_robustness()]: one point per climate
+#' model's mean across weather-year draws (.wise_support), plus the green
+#' ensemble-median marker (#009E73) per scenario. Item tooltip.
+#' @noRd
+echart_model_robustness <- function(tbl, x_label = "Expected annual outcome",
+                                    height = "420px") {
+  if (is.null(tbl) || !nrow(tbl)) {
+    return(echart_blank("Climate-model robustness is unavailable.", height = height))
+  }
+  cats <- unique(as.character(tbl$scenario))
+  cat_idx <- setNames(as.character(seq_along(cats) - 1L), cats)
+
+  e <- .e_step2_base(height)
+  means <- list(
+    name = "Model means",
+    type = "scatter",
+    symbolSize = 9,
+    z = 2,
+    itemStyle = list(color = .wise_support, opacity = 0.7),
+    data = lapply(seq_len(nrow(tbl)), function(i) {
+      list(value = list(
+        tbl$model_mean[[i]],
+        cat_idx[[as.character(tbl$scenario)[[i]]]]
+      ))
+    })
+  )
+  centers <- unique(tbl[c("scenario", "center")])
+  centers <- list(
+    name = "Ensemble median",
+    type = "scatter",
+    symbolSize = 13,
+    z = 3,
+    itemStyle = list(color = "#009E73", borderColor = .wise_support, borderWidth = 1.2),
+    data = lapply(seq_len(nrow(centers)), function(i) {
+      list(value = list(
+        centers$center[[i]],
+        cat_idx[[as.character(centers$scenario)[[i]]]]
+      ))
+    })
+  )
+  e$x$opts$xAxis <- list(
+    type = "value",
+    scale = TRUE,
+    name = x_label,
+    nameLocation = "middle",
+    nameGap = 30,
+    nameTextStyle = wise_eaxis_name(),
+    axisLabel = wise_eaxis_label(),
+    splitLine = wise_esplit_line(),
+    axisLine = list(lineStyle = list(color = .wise_grid))
+  )
+  e$x$opts$yAxis <- list(
+    type = "category",
+    data = as.character(seq_along(cats) - 1L),
+    axisLabel = wise_eaxis_label(
+      interval = 0L,
+      formatter = htmlwidgets::JS(sprintf(
+        "function(v){ var m = %s; return m[v] === undefined ? '' : m[v]; }",
+        jsonlite::toJSON(as.list(stats::setNames(
+          as.list(sub(" / ", "\n", cats, fixed = TRUE)),
+          as.character(seq_along(cats) - 1L)
+        )), auto_unbox = TRUE)
+      ))
+    ),
+    axisLine = list(lineStyle = list(color = .wise_grid)),
+    axisTick = list(show = FALSE),
+    splitLine = wise_esplit_line(show = FALSE)
+  )
+  e$x$opts$series <- list(means, centers)
+  e$x$opts$tooltip <- list(trigger = "item")
+  e$x$opts$grid <- list(containLabel = TRUE, left = 8, right = 20, top = 12, bottom = 10)
+  wise_echart_theme(e)
+}
+
+# ---- echart_exceedance -------------------------------------------------------
+
+#' Interactive exceedance probability curve
+#'
+#' echarts counterpart of [enhance_exceedance()]. Same per-(scenario, rank)
+#' statistics: across-model median curve, inter-model quantile band and
+#' coefficient band (both reduced to their two boundary curves - see the
+#' judgment note below), endpoint scenario labels.
+#'
+#' Orientation: the ggplot builder drew outcome on x and probability on y
+#' under coord_flip(); the echarts widget keeps that reading (outcome on the
+#' value axis) with the probability axis horizontal.
+#'
+#' Judgment calls, documented for review:
+#' - The inter-model ribbon becomes two thin boundary lines at 35% opacity.
+#'   Stacked-area bands cannot be aligned on a shared log value axis across
+#'   scenarios whose rank grids differ, and the ggplot builder already draws
+#'   its coefficient band as dashed outline curves.
+#' - logit_x has no echarts counterpart: the probability axis uses log10
+#'   with the same supported return-period tick labels (percent-formatted).
+#'   Custom tick values require ECharts >= 5.6 (axisLabel.customValues);
+#'   older cores fall back to default log ticks, still percent-formatted.
+#' @noRd
+echart_exceedance <- function(curves_tbl,
+                              x_label,
+                              return_period = TRUE,
+                              n_sim_years = NULL,
+                              logit_x = FALSE,
+                              band_q = c(lo = 0.10, hi = 0.90),
+                              ensemble_band_q = c(lo = 0, hi = 1),
+                              height = "400px") {
+  if (is.null(curves_tbl) || nrow(curves_tbl) == 0L) {
+    return(echart_blank("Run a simulation to see exceedance probabilities.", height = height))
+  }
+
+  has_source <- "source" %in% names(curves_tbl)
+  if (has_source) {
+    curves_tbl <- curves_tbl[!(curves_tbl$is_historical &
+      curves_tbl$source == "Policy"), , drop = FALSE]
+    grp_cols <- c("scenario", "source", "rank")
+  } else {
+    grp_cols <- c("scenario", "rank")
+  }
+
+  agg_df <- curves_tbl |>
+    dplyr::group_by(dplyr::across(dplyr::all_of(grp_cols))) |>
+    dplyr::summarise(
+      exceed_prob = dplyr::first(.data$exceed_prob),
+      central = stats::median(.data$welfare_val, na.rm = TRUE),
+      intermod_lo = unname(stats::quantile(.data$welfare_val,
+        ensemble_band_q[["lo"]], na.rm = TRUE
+      )),
+      intermod_hi = unname(stats::quantile(.data$welfare_val,
+        ensemble_band_q[["hi"]], na.rm = TRUE
+      )),
+      n_models = dplyr::n(),
+      is_historical = any(.data$is_historical),
+      .groups = "drop"
+    )
+
+  if (!is.null(band_q)) {
+    sd_grp <- if (has_source) c("scenario", "source") else "scenario"
+    coef_sd_scn <- curves_tbl |>
+      dplyr::group_by(dplyr::across(dplyr::all_of(sd_grp))) |>
+      dplyr::summarise(
+        coef_sd_typ = stats::median(.data$coef_sd, na.rm = TRUE),
+        .groups = "drop"
+      )
+    agg_df <- dplyr::left_join(agg_df, coef_sd_scn, by = sd_grp)
+    agg_df$coef_lo <- agg_df$central + stats::qnorm(band_q[["lo"]]) * agg_df$coef_sd_typ
+    agg_df$coef_hi <- agg_df$central + stats::qnorm(band_q[["hi"]]) * agg_df$coef_sd_typ
+  } else {
+    agg_df$coef_lo <- NA_real_
+    agg_df$coef_hi <- NA_real_
+  }
+  if (has_source) {
+    agg_df$line_id <- paste(agg_df$scenario, agg_df$source, sep = " | ")
+  } else {
+    agg_df$line_id <- as.character(agg_df$scenario)
+  }
+
+  scenario_levels <- c(
+    "Historical",
+    sort(unique(as.character(agg_df$scenario[!agg_df$is_historical])))
+  )
+  scenario_colour_map <- stats::setNames(vapply(scenario_levels, function(s) {
+    if (identical(s, "Historical")) {
+      return(.wise_support)
+    }
+    ssp <- .normalise_ssp(s)
+    if (ssp %in% names(.ssp_colours)) unname(.ssp_colours[[ssp]]) else .wise_slate
+  }, character(1L)), scenario_levels)
+  # Period linetypes from the ggplot builder's year-style resolution.
+  agg_df$yr_lbl <- ifelse(agg_df$is_historical, "Historical",
+    vapply(agg_df$scenario, .parse_year, character(1L))
+  )
+  fut_yr_labels <- sort(unique(agg_df$yr_lbl[agg_df$yr_lbl != "Historical"]))
+  yr_styles <- .resolve_year_styles(fut_yr_labels)
+  line_type_map <- c("Historical" = "solid", yr_styles$linetype_map)
+  e_type_of <- function(scn) {
+    yr <- .parse_year(scn)
+    t <- if (!is.null(yr) && !is.na(yr) && yr %in% names(line_type_map)) {
+      unname(line_type_map[[yr]])
+    } else {
+      "solid"
+    }
+    if (identical(t, "dotdash") || identical(t, "longdash")) "dashed" else
+      if (identical(t, "twodash")) "dashed" else t
+  }
+
+  max_prob <- max(agg_df$exceed_prob, na.rm = TRUE)
+  is_adverse_tail <- max_prob <= 0.55
+  support_years <- if (!is.null(n_sim_years) && is.finite(n_sim_years)) {
+    max(2L, floor(n_sim_years))
+  } else {
+    NA_integer_
+  }
+  supported_rp <- function(x) {
+    if (!is.finite(support_years)) {
+      return(x)
+    }
+    denom <- suppressWarnings(as.numeric(sub(".*:", "", names(x))))
+    x[is.na(denom) | denom <= support_years]
+  }
+  rp_tick_label <- function(nm, prob) {
+    paste0(
+      sub(":", " in ", nm), "\n(",
+      scales::percent(prob, accuracy = 1), ")"
+    )
+  }
+
+  e <- .e_step2_base(height)
+  series <- list()
+  show_ens <- !is.null(ensemble_band_q) &&
+    (ensemble_band_q[["hi"]] > ensemble_band_q[["lo"]])
+
+  for (lid in unique(as.character(agg_df$line_id))) {
+    rows <- agg_df[agg_df$line_id == lid, , drop = FALSE]
+    rows <- rows[order(rows$exceed_prob), , drop = FALSE]
+    scn <- as.character(rows$scenario[[1L]])
+    col <- unname(scenario_colour_map[[scn]] %||% .wise_slate)
+    lty <- e_type_of(scn)
+    p <- rows$exceed_prob
+
+    if (show_ens && !rows$is_historical[[1L]]) {
+      series <- c(series,
+        .e_line_series(paste0(lid, "__ens_lo"), p, rows$intermod_lo, col,
+          width = 1, opacity = 0.35),
+        .e_line_series(paste0(lid, "__ens_hi"), p, rows$intermod_hi, col,
+          width = 1, opacity = 0.35)
+      )
+    }
+    if (any(is.finite(rows$coef_lo))) {
+      ok <- is.finite(rows$coef_lo) & is.finite(rows$coef_hi)
+      series <- c(series,
+        .e_line_series(paste0(lid, "__coef_lo"), p[ok], rows$coef_lo[ok], col,
+          width = 1, type = "dashed", opacity = 0.9),
+        .e_line_series(paste0(lid, "__coef_hi"), p[ok], rows$coef_hi[ok], col,
+          width = 1, type = "dashed", opacity = 0.9)
+      )
+    }
+    series <- c(series, .e_line_series(
+      lid, p, rows$central, col, width = 2, type = lty,
+      endpoint_label = TRUE
+    ))
+  }
+
+  # Probability axis: log10 with return-period ticks in the adverse tail
+  # (same support rule as the ggplot builder); percent-formatted labels.
+  if (is_adverse_tail) {
+    log_rp <- c("1:2" = 0.50, RP_LOW)
+    log_rp <- supported_rp(log_rp)
+    log_rp <- log_rp[order(log_rp, decreasing = TRUE)]
+    log_breaks <- unname(log_rp)
+    log_labels <- mapply(rp_tick_label, names(log_rp), unname(log_rp),
+      USE.NAMES = FALSE
+    )
+    min_prob <- max(min(agg_df$exceed_prob, na.rm = TRUE), 0.005)
+    keep_b <- log_breaks >= min_prob * 0.9
+    low_lim <- min(min_prob * 0.9, min(log_breaks[keep_b]) * 0.9)
+    tick_vals <- log_breaks[keep_b]
+    tick_labels <- log_labels[keep_b]
+    x_min <- low_lim
+    x_max <- 0.55
+  } else {
+    rp_low <- supported_rp(RP_LOW)
+    rp_high <- supported_rp(RP_HIGH)
+    tick_vals <- sort(unique(c(
+      unname(rp_low), 0.50,
+      1 - unname(rp_high)
+    )))
+    tick_labels <- ifelse(
+      tick_vals == 0.5, "Median",
+      paste0(
+        "1 in ", format(round(1 / tick_vals)), "\n(",
+        scales::percent(tick_vals, accuracy = 1), ")"
+      )
+    )
+    x_min <- 0.005
+    x_max <- 0.995
+  }
+
+  e$x$opts$xAxis <- list(
+    type = "log",
+    min = x_min,
+    max = x_max,
+    name = if (is_adverse_tail) {
+      "Annual adverse exceedance probability (AEP)"
+    } else {
+      "Annual exceedance probability"
+    },
+    nameLocation = "middle",
+    nameGap = 34,
+    nameTextStyle = wise_eaxis_name(),
+    axisLabel = wise_eaxis_label(
+      fontSize = 11,
+      customValues = as.list(tick_vals),
+      formatter = htmlwidgets::JS(sprintf(
+        "function(v){ var m = %s; return m[v] === undefined ? v : m[v]; }",
+        jsonlite::toJSON(as.list(stats::setNames(
+          as.list(tick_labels), as.list(tick_vals)
+        )), auto_unbox = TRUE)
+      ))
+    ),
+    splitLine = wise_esplit_line(),
+    axisLine = list(lineStyle = list(color = .wise_grid))
+  )
+  e$x$opts$yAxis <- list(
+    type = "value",
+    scale = TRUE,
+    name = x_label,
+    nameLocation = "middle",
+    nameGap = 48,
+    nameRotate = 90,
+    nameTextStyle = wise_eaxis_name(),
+    axisLabel = wise_eaxis_label(),
+    splitLine = wise_esplit_line()
+  )
+  e$x$opts$series <- series
+  e$x$opts$tooltip <- list(trigger = "axis")
+  # Right-hand gutter so the endpoint scenario labels stay clear of the
+  # curves, mirroring the ggplot builder's 22% expansion.
+  e$x$opts$grid <- list(containLabel = TRUE, left = 8, right = 120, top = 12, bottom = 10)
+  wise_echart_theme(e)
+}
+
+# ============================================================================
+# Shared reactable styling for the Step 2 tables (guidelines §6). Mirrors the
+# mod_1_02 .stats_reactable() recipe: compact client-side table, soft-wrapped
+# text cells, raw (unrounded) values in the data - display rounding only via
+# colFormat where the old DT rounded.
+# ============================================================================
+
+.step2_reactable <- function(tab, col_defs = NULL, default_page_size = 10) {
+  cols <- lapply(names(tab), function(nm) {
+    if (!is.null(col_defs) && !is.null(col_defs[[nm]])) {
+      return(col_defs[[nm]])
+    }
+    reactable::colDef(class = "wise-dt-wrap", minWidth = 70)
+  })
+  names(cols) <- names(tab)
+  reactable::reactable(
+    tab,
+    columns = cols,
+    compact = TRUE,
+    searchable = TRUE,
+    defaultPageSize = default_page_size,
+    showPageSizeOptions = TRUE,
+    pageSizeOptions = c(10, 25, 50, 100),
+    highlight = TRUE
+  )
+}
+
+.step2_reactable_note <- function(note) {
+  .step2_reactable(data.frame(Note = note))
 }

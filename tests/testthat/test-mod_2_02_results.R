@@ -857,3 +857,219 @@ test_that("make_decision_table_html produces clean .wise-table HTML", {
   expect_match(html, "+0.10", fixed = TRUE)
   expect_match(html, "Footnote 1", fixed = TRUE)
 })
+
+# ============================================================================ #
+# Batch 2 UI migration: DT -> reactable, ggplot -> echarts4r (guidelines §6/§7)
+# ============================================================================ #
+
+test_that("echart_pointrange_climate draws bands, dots and empty states", {
+  bands <- tibble::tibble(
+    scenario      = c("Historical", "SSP2-4.5 / 2030-2040", "SSP3-7.0 / 2030-2040"),
+    value         = c(4.50, 4.60, 4.70),
+    coef_lo       = c(4.45, 4.55, 4.65),
+    coef_hi       = c(4.55, 4.65, 4.75),
+    interann_lo   = c(4.20, 4.30, 4.40),
+    interann_hi   = c(4.80, 4.90, 5.00),
+    intermod_lo   = c(4.50, 4.55, 4.60),
+    intermod_hi   = c(4.50, 4.65, 4.75),
+    total_lo      = NA_real_, total_hi = NA_real_,
+    is_historical = c(TRUE, FALSE, FALSE),
+    n_models      = 1L
+  )
+  ch <- echart_pointrange_climate(bands, "Mean welfare", show_coef = TRUE)
+  expect_s3_class(ch, "echarts4r")
+  types <- vapply(ch$x$opts$series, `[[`, character(1), "type")
+  expect_true("bar" %in% types)
+  expect_true("scatter" %in% types)
+  # One open central marker per scenario row plus its bands.
+  expect_equal(sum(types == "scatter"), 3L)
+  expect_identical(ch$x$opts$yAxis$name, "Mean welfare")
+
+  blank <- echart_pointrange_climate(NULL)
+  expect_s3_class(blank, "echarts4r")
+  expect_match(blank$x$opts$title[[1]]$text, "Run a simulation to see results.",
+    fixed = TRUE
+  )
+})
+
+test_that("echart_annual_distribution keeps violin and boxplot modes", {
+  set.seed(2)
+  curves <- do.call(rbind, lapply(
+    c("Historical", "SSP2-4.5 / 2030-2040"),
+    function(s) {
+      data.frame(
+        scenario = s, model_id = paste0("m", 1:3),
+        sim_year = rep(2020:2022, 3),
+        value = rnorm(9, ifelse(s == "Historical", 5, 5.2)),
+        is_historical = s == "Historical"
+      )
+    }
+  ))
+  violin <- echart_annual_distribution(curves, "Mean", "violin")
+  expect_s3_class(violin, "echarts4r")
+  # Historical-mean reference markLine survives the migration.
+  ml <- violin$x$opts$series[[which(vapply(violin$x$opts$series, function(s)
+    !is.null(s$markLine), logical(1)))[1]]]$markLine
+  expect_equal(ml$data[[1]]$xAxis, mean(curves$value[curves$scenario == "Historical"]))
+
+  box <- echart_annual_distribution(curves, "Mean", "boxplot")
+  expect_s3_class(box, "echarts4r")
+  types <- vapply(box$x$opts$series, `[[`, character(1), "type")
+  expect_true(all(types == "bar" | types == "scatter" | types == "line"))
+
+  blank <- echart_annual_distribution(NULL, "Mean", "violin")
+  expect_match(blank$x$opts$title[[1]]$text, "No annual simulation results available.",
+    fixed = TRUE
+  )
+})
+
+test_that("echart_step2_adverse_dot labels scenarios on the top row", {
+  tbl <- data.frame(
+    scenario = rep(c("SSP2-4.5 / 2030-2040", "SSP5-8.5 / 2030-2040"), each = 2),
+    Estimate = "Central (P50)",
+    rp_label = rep(factor(c("Adverse 1-in-10", "Expected"),
+      levels = rev(c("Expected", "Adverse 1-in-5", "Adverse 1-in-10",
+        "Adverse 1-in-20", "Adverse 1-in-50")
+    )), 2),
+    value = c(12, 13, 12.5, 13.5),
+    is_historical = FALSE,
+    intermod_lo = c(11, 12, 11.5, 12.5),
+    intermod_hi = c(13, 14, 13.5, 14.5)
+  )
+  ch <- echart_step2_adverse_dot(tbl, "Outcome")
+  expect_s3_class(ch, "echarts4r")
+  dots <- Filter(function(s) identical(s$type, "scatter"), ch$x$opts$series)
+  expect_length(dots, 2L)
+  # One bold endpoint label per scenario (direct labels, no legend).
+  labs <- unlist(lapply(dots, function(s) {
+    vapply(s$data, function(pt) {
+      if (!is.null(pt$label)) pt$label$formatter else NA_character_
+    }, character(1))
+  }))
+  expect_setequal(stats::na.omit(labs), c("SSP2-4.5 / 2030-2040", "SSP5-8.5 / 2030-2040"))
+
+  blank <- echart_step2_adverse_dot(NULL)
+  expect_match(blank$x$opts$title[[1]]$text, "Return-period outcomes are unavailable.",
+    fixed = TRUE
+  )
+})
+
+test_that("echart_exceedance mirrors the median curves and empty state", {
+  curves <- data.frame(
+    scenario = rep(c("Historical", "SSP2 / 2030"), each = 30),
+    model_id = rep(rep(c("m1", "m2"), each = 15), 2),
+    rank = rep(seq(15), 4),
+    welfare_val = c(seq(1, 30), seq(2, 31)),
+    coef_sd = 0.1,
+    exceed_prob = rep((seq(15) - 0.5) / 30, 4),
+    is_historical = rep(c(TRUE, FALSE), each = 30)
+  )
+  ch <- echart_exceedance(curves, "Mean", n_sim_years = 30,
+    logit_x = TRUE, band_q = NULL, ensemble_band_q = c(lo = 0.25, hi = 0.75)
+  )
+  expect_s3_class(ch, "echarts4r")
+  expect_identical(ch$x$opts$xAxis$type, "log")
+  expect_match(ch$x$opts$xAxis$name, "Annual adverse exceedance probability",
+    fixed = TRUE
+  )
+  # One labelled median line per scenario plus two ensemble boundary lines
+  # per future scenario.
+  median_lines <- Filter(function(s) {
+    identical(s$type, "line") && !is.null(s$name) &&
+      !grepl("__", s$name, fixed = TRUE) && !identical(s$name, "Historical mean")
+  }, ch$x$opts$series)
+  expect_setequal(
+    vapply(median_lines, `[[`, character(1), "name"),
+    c("Historical", "SSP2 / 2030")
+  )
+
+  blank <- echart_exceedance(NULL, "Mean")
+  expect_match(blank$x$opts$title[[1]]$text,
+    "Run a simulation to see exceedance probabilities.", fixed = TRUE
+  )
+})
+
+test_that("echart_variance_contribution draws one bar series per source", {
+  vb <- data.frame(
+    scenario = c("Historical", "SSP2 / 2030"),
+    var_coef = c(1, 2), var_within = c(4, 3), var_across = c(0, 9),
+    is_historical = c(TRUE, FALSE)
+  )
+  ch <- echart_variance_contribution(vb)
+  expect_s3_class(ch, "echarts4r")
+  expect_length(ch$x$opts$series, 3L)
+  expect_true(all(vapply(ch$x$opts$series, function(s)
+    identical(s$type, "bar"), logical(1))))
+  blank <- echart_variance_contribution(NULL)
+  expect_match(blank$x$opts$title[[1]]$text, "Run a simulation to see SD contributions.",
+    fixed = TRUE
+  )
+})
+
+test_that("echart_incidence_by_decile draws scenario bars with a zero line", {
+  inc <- data.frame(
+    decile = rep(1:10, 2),
+    scenario = rep(c("Historical", "SSP2 / 2030"), each = 10),
+    effect = rnorm(20)
+  )
+  ch <- echart_incidence_by_decile(inc)
+  expect_s3_class(ch, "echarts4r")
+  expect_length(ch$x$opts$series, 2L)
+  ml <- ch$x$opts$series[[1]]$markLine
+  expect_equal(ml$data[[1]]$yAxis, 0)
+  blank <- echart_incidence_by_decile(NULL)
+  expect_match(blank$x$opts$title[[1]]$text, "Distributional incidence is unavailable.",
+    fixed = TRUE
+  )
+})
+
+test_that("results module renders echarts charts and a reactable threshold table", {
+  skip_if_not_installed("shiny")
+  testServer(
+    mod_2_02_results_server,
+    args = list(
+      id = "results", hist_sim = reactiveVal(make_hist_sim_fixture()),
+      saved_scenarios = reactiveVal(list()), selected_hist = reactiveVal(NULL),
+      tabset_id = "step2_output_tabs"
+    ),
+    {
+      session$setInputs(cmp_agg_method = "mean", cmp_deviation = "none",
+                        cmp_group_order = "scenario_x_year")
+      session$flushReact()
+
+      # Zero-arg closures return echarts widgets (render + export share them).
+      expect_s3_class(pointrange_chart(), "echarts4r")
+      expect_s3_class(annual_distribution_chart(), "echarts4r")
+      expect_s3_class(incidence_chart(), "echarts4r")
+      expect_s3_class(adverse_dot_chart(), "echarts4r")
+      expect_s3_class(exceedance_chart(), "echarts4r")
+      expect_s3_class(uncertainty_chart(), "echarts4r")
+
+      # Threshold table is a reactable widget carrying the raw rows.
+      tbl <- threshold_table_df()
+      expect_gt(nrow(tbl), 0L)
+      rt <- threshold_reactable()
+      expect_s3_class(rt, "reactable")
+      payload <- jsonlite::fromJSON(rt$x$tag$attribs$data)
+      expect_identical(as.character(payload[["Scenario / Period"]][[1]]),
+        "Historical")
+    }
+  )
+})
+
+test_that("results content UI mounts chart outputs and the reactable CSV button", {
+  so <- list(name = "welfare", type = "numeric", label = "Welfare")
+  html <- as.character(htmltools::renderTags(
+    wiseapp:::.results_content_ui(shiny::NS("results"), so)
+  )$html)
+
+  expect_match(html, "results-annual_distribution_plot", fixed = TRUE)
+  expect_match(html, "results-adverse_dot_plot", fixed = TRUE)
+  expect_match(html, "results-exceedance_plot", fixed = TRUE)
+  expect_match(html, "results-uncertainty_sources_plot", fixed = TRUE)
+  expect_match(html, "results-summary_threshold_table", fixed = TRUE)
+  # Client-side CSV button bound to the reactable widget id.
+  expect_match(html, "Reactable.downloadDataCSV", fixed = TRUE)
+  expect_match(html, "climate_outcome_thresholds.csv", fixed = TRUE)
+  expect_false(grepl("threshold_csv", html, fixed = TRUE))
+})

@@ -175,3 +175,102 @@ plot_incidence_by_decile <- function(tbl, y_label = "Household-level simulated w
     theme_wise(base_size = 13) +
     ggplot2::theme(legend.position = "bottom")
 }
+
+# Interactive (echarts4r) counterpart of plot_incidence_by_decile().
+# Same statistics as the ggplot builder: weighted mean effect per fixed
+# baseline decile (already precomputed in `tbl`); echarts only draws the
+# precomputed values (guidelines §7).
+#
+# Design notes: grouped vertical bars per scenario, Okabe-Ito palette via
+# wise_echart_theme(), axis-trigger tooltip, legend bottom-left (the ggplot
+# showed one), dashed zero reference line. The ggplot caption is dropped -
+# the module UI carries it as static text.
+echart_incidence_by_decile <- function(tbl,
+                                       y_label = "Household-level simulated welfare effect",
+                                       height = "420px") {
+  if (is.null(tbl) || !nrow(tbl)) {
+    return(echart_blank("Distributional incidence is unavailable.", height = height))
+  }
+  if (!"scenario" %in% names(tbl)) tbl$scenario <- "Effect"
+  tbl$decile <- factor(tbl$decile,
+    levels = sort(unique(as.integer(tbl$decile)))
+  )
+  scen_levels <- unique(as.character(tbl$scenario))
+  tbl$scenario <- factor(tbl$scenario, levels = scen_levels)
+
+  # Wide frame: one column per scenario so each series covers every decile
+  # (echarts4r rejects single-column frames; wide keeps the dodged bars aligned).
+  wide <- data.frame(
+    decile = levels(tbl$decile),
+    stringsAsFactors = FALSE
+  )
+  for (scn in scen_levels) {
+    vals <- tbl$effect[as.character(tbl$scenario) == scn]
+    idx <- match(as.integer(tbl$decile[as.character(tbl$scenario) == scn]),
+      as.integer(levels(tbl$decile))
+    )
+    col <- rep(NA_real_, nlevels(tbl$decile))
+    col[idx] <- vals
+    wide[[scn]] <- col
+  }
+
+  e <- echarts4r::e_charts(wide, decile, reorder = FALSE, height = height)
+  # Dodged bars per scenario, one series each, Okabe-Ito order (wise_scale_fill_cat).
+  e$x$opts$series <- lapply(seq_along(scen_levels), function(i) {
+    list(
+      name = scen_levels[[i]],
+      type = "bar",
+      data = lapply(seq_len(nrow(wide)), function(r) {
+        list(
+          value = list(levels(tbl$decile)[[r]], wide[[scen_levels[[i]]]][[r]]),
+          itemStyle = list(
+            color = unname(.wise_cat[(i - 1L) %% length(.wise_cat) + 1L]),
+            borderColor = "rgba(0,0,0,0)"
+          )
+        )
+      }),
+      barGap = "10%",
+      barMaxWidth = 42
+    )
+  })
+  e$x$opts$xAxis <- list(
+    type = "category",
+    data = as.character(levels(tbl$decile)),
+    name = "Fixed observed baseline welfare decile (1 = poorest)",
+    nameLocation = "middle",
+    nameGap = 28,
+    nameTextStyle = wise_eaxis_name(),
+    axisLabel = wise_eaxis_label(),
+    axisLine = list(lineStyle = list(color = .wise_grid)),
+    axisTick = list(alignWithLabel = TRUE),
+    splitLine = wise_esplit_line(show = FALSE)
+  )
+  e$x$opts$yAxis <- list(
+    type = "value",
+    name = y_label,
+    nameTextStyle = wise_eaxis_name(),
+    axisLabel = wise_eaxis_label(),
+    splitLine = wise_esplit_line()
+  )
+  e$x$opts$legend <- modifyList(
+    list(bottom = 0, left = 0, orient = "horizontal"),
+    wise_elegend_style()
+  )
+  e$x$opts$tooltip <- list(
+    trigger = "axis",
+    axisPointer = list(type = "shadow")
+  )
+  e$x$opts$grid <- list(containLabel = TRUE, left = 8, right = 14, top = 30, bottom = 46)
+  e$x$opts$color <- unname(.wise_cat)
+  # Dashed zero reference line (geom_hline yintercept = 0, .wise_zero).
+  if (length(e$x$opts$series)) {
+    e$x$opts$series[[1L]]$markLine <- list(
+      silent = TRUE,
+      symbol = "none",
+      lineStyle = list(color = .wise_zero, type = "dashed", width = 1),
+      label = list(show = FALSE),
+      data = list(list(yAxis = 0))
+    )
+  }
+  wise_echart_theme(e)
+}
