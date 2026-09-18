@@ -187,3 +187,18 @@ testthat::test_that("async worker matches synchronous Step 2 fixture output", {
   expect_identical(worker_result$failures, synchronous$result$failures)
   expect_identical(manifest$result_signature, synchronous$signature)
 })
+
+
+testthat::test_that("async sync-mode flag defaults off and honors env override", {
+  withr::local_envvar(WISEAPP_ASYNC_SYNC = NA)
+  expect_false(.wise_step2_async_sync())
+
+  withr::local_envvar(WISEAPP_ASYNC_SYNC = "1")
+  expect_true(.wise_step2_async_sync())
+
+  withr::local_envvar(WISEAPP_ASYNC_SYNC = "0")
+  expect_false(.wise_step2_async_sync())
+
+  withr::local_envvar(WISEAPP_ASYNC_SYNC = "garbage")
+  expect_false(.wise_step2_async_sync())
+})

@@ -73,6 +73,10 @@ step2_compute_reference <- function(input, weather) {
 }
 
 test_that("step2_compute validates and does not mutate the input snapshot", {
+  # A developer ~/.Renviron often sets WISEAPP_DATA_PATH; the NULL-path fixture
+  # below must not silently resolve to it or the "valid connection" check never
+  # triggers.
+  withr::local_envvar(WISEAPP_DATA_PATH = "")
   input <- step2_compute_fixture()
   before <- input
   expect_error(step2_compute(list()), "named ordinary-object")

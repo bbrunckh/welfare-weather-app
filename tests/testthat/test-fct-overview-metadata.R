@@ -467,3 +467,65 @@ test_that("metadata cache settings validate environment overrides", {
     "invalid value"
   )
 })
+
+
+test_that("overview_metadata_cache_store serves warm sessions without a reload", {
+  .reset_overview_metadata_cache()
+  on.exit(.reset_overview_metadata_cache(), add = TRUE)
+  path <- tempfile("wiseapp-overview-store-")
+  dir.create(path, recursive = TRUE)
+  withr::defer(unlink(path, recursive = TRUE, force = TRUE))
+  withr::local_envvar(WISEAPP_METADATA_CACHE_DISABLE = "0")
+  .overview_fixture(path)
+  params <- list(type = "local", path = path)
+
+  sentinel <- list(
+    survey_list = data.frame(code = "SENT", stringsAsFactors = FALSE),
+    variable_list = data.frame(name = "x", stringsAsFactors = FALSE),
+    cpi_ppp = data.frame(code = "SENT", stringsAsFactors = FALSE),
+    pov_lines = data.frame(ppp_year = 2021, ln = 3)
+  )
+  overview_metadata_cache_store(params, sentinel)
+
+  # A cache hit returns the stored bundle without re-reading the source: the
+  # on-disk fixture holds TST rows, so only a real cache hit can return SENT.
+  # (The cache key includes file signatures, so the files must stay put.)
+  cached <- load_overview_metadata(params)
+  expect_identical(cached, sentinel)
+})
+
+
+test_that("metadata bundle loads in a real mirai worker from verbatim params", {
+  skip_if_not_installed("mirai")
+  skip_if_not_installed("pkgload")
+  path <- tempfile("wiseapp-overview-worker-")
+  dir.create(path, recursive = TRUE)
+  withr::defer(unlink(path, recursive = TRUE, force = TRUE))
+  .overview_fixture(path)
+  params <- list(type = "local", path = path)
+
+  package_path <- getNamespaceInfo(asNamespace("wiseapp"), "path")
+  mirai::daemons(1L)
+  on.exit(mirai::daemons(0L), add = TRUE)
+
+  task <- mirai::mirai({
+    pkgload::load_all(package_path, export_all = FALSE, helpers = FALSE,
+      attach_testthat = FALSE, quiet = TRUE)
+    wiseapp:::load_overview_metadata(params, force_refresh)
+  }, package_path = package_path, params = params, force_refresh = TRUE)
+
+  deadline <- Sys.time() + 30
+  while (mirai::unresolved(task) && Sys.time() < deadline) Sys.sleep(0.05)
+  metadata <- task[]
+  if (mirai::is_error_value(metadata)) {
+    stop(as.character(metadata), call. = FALSE)
+  }
+
+  expect_named(
+    metadata,
+    c("survey_list", "variable_list", "cpi_ppp", "pov_lines")
+  )
+  expect_equal(metadata$survey_list$code, "TST")
+  expect_true("loc_id_panel" %in% metadata$variable_list$name)
+  expect_equal(metadata$pov_lines$ln, c(3, 4.2, 8.3))
+})

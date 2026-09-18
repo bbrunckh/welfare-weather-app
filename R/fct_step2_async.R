@@ -19,6 +19,13 @@
   !value %in% c("0", "false", "no", "off")
 }
 
+# Debugging escape hatch: WISEAPP_ASYNC_SYNC=1 evaluates tasks in the main
+# process instead of the daemon (mirai sync mode). Default is real workers.
+.wise_step2_async_sync <- function() {
+  value <- tolower(trimws(Sys.getenv("WISEAPP_ASYNC_SYNC", "0")))
+  value %in% c("1", "true", "yes", "on")
+}
+
 .wise_step2_async_queue_memory <- function() {
   value <- suppressWarnings(as.numeric(
     Sys.getenv("WISEAPP_ASYNC_QUEUE_MEMORY_MB", "512")
@@ -249,7 +256,7 @@
   if (!isTRUE(state$started)) {
     mirai::daemons(
       1L, dispatcher = TRUE, memory = .wise_step2_async_queue_memory(),
-      .compute = "default", sync = TRUE
+      .compute = "default", sync = .wise_step2_async_sync()
     )
     package_path <- getNamespaceInfo(asNamespace("wiseapp"), "path")
     development_package <- .wise_step2_async_is_dev_package()

@@ -397,17 +397,21 @@ mod_0_overview_server <- function(id) {
     # On Posit Connect with env vars set: auto-connect once on startup,
     # no button click or UI input required. Any failure (auth, network,
     # missing volume/metadata) rolls back and surfaces a visible error.
+    # The metadata fetch runs on the shared mirai daemon (ExtendedTask, per
+    # optimization guidelines §8) so the first session of a process never
+    # blocks the main thread on the Databricks HTTP round trip. Falls back to
+    # the synchronous load when the async subsystem is disabled (also gates
+    # WISEAPP_ASYNC_STEP2) or unavailable.
     if (.auto_connect()) {
       observe({
         auto_connect_fail <- function(e) {
           msg <- conditionMessage(e)
           message("[overview] auto-connect to Databricks failed: ", msg)
-          # Prevent downstream work after a failed startup connection.
+          # Persist the failure state before any transient UX: the status
+          # card must update even if the notification itself fails (e.g.
+          # session already closing — this handler also runs from promise
+          # callbacks, where no default reactive domain is set).
           applied_connection(NULL)
-          showNotification(
-            paste("Auto-connect to Databricks failed:", msg),
-            type = "error", duration = 15
-          )
           connection_status(list(
             state = "error",
             message = "Failed to connect to Databricks.",
@@ -417,6 +421,23 @@ mod_0_overview_server <- function(id) {
               "variables configured for this app on Posit Connect, then reload the app."
             )
           ))
+          showNotification(
+            paste("Auto-connect to Databricks failed:", msg),
+            type = "error", duration = 15, session = session
+          )
+        }
+
+        auto_connect_succeed <- function(metadata, params) {
+          publish_metadata(metadata)
+          # Warm-process cache: other sessions in this R process skip the
+          # worker round trip (the worker caches its own copy too).
+          overview_metadata_cache_store(params, metadata)
+
+          # Expose the connection only after metadata succeeds.
+          applied_connection(params)
+          connection_status(list(
+            state = "connected", message = "Connected to Databricks.", detail = NULL
+          ))
         }
 
         tryCatch(
@@ -424,14 +445,36 @@ mod_0_overview_server <- function(id) {
             params <- build_connection_params("databricks")
             message("[overview] auto-connecting to Databricks (Posit Connect)")
 
-            metadata <- load_overview_metadata(params)
-            publish_metadata(metadata)
-
-            # Expose the connection only after metadata succeeds.
-            applied_connection(params)
-            connection_status(list(
-              state = "connected", message = "Connected to Databricks.", detail = NULL
-            ))
+            async_ready <- tryCatch(
+              .wise_step2_async_init(),
+              error = function(e) FALSE
+            )
+            if (async_ready && !.wise_step2_async_sync()) {
+              # Connection params are passed verbatim: on the auto-connect
+              # path they are resolved from this process's environment, and
+              # the daemon is local (same host, IPC transport) — see the
+              # credential policy in optimization_tracking.md. A plain mirai
+              # promise (not ExtendedTask): this flow has no task button and
+              # the connection status card is the progress surface; this
+              # matches the Step 2 coordinator's dispatch pattern.
+              metadata_task <- mirai::mirai(
+                wiseapp:::load_overview_metadata(params, force_refresh),
+                .args = list(params = params, force_refresh = FALSE),
+                .compute = "default"
+              )
+              promises::then(
+                metadata_task,
+                onFulfilled = function(value) {
+                  try(auto_connect_succeed(value, params), silent = TRUE)
+                },
+                onRejected = function(e) {
+                  try(auto_connect_fail(e), silent = TRUE)
+                }
+              )
+            } else {
+              metadata <- load_overview_metadata(params)
+              auto_connect_succeed(metadata, params)
+            }
           },
           error = function(e) auto_connect_fail(e)
         )

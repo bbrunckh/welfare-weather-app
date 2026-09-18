@@ -11,7 +11,7 @@ Architecture overview is in `AGENTS.md`; constraints it does not cover:
 - No `global.R` — Section 8's one-time daemon-pool setup belongs in `run_app()` / top-level `app_server.R`.
 - Ingestion is already DuckDB over `.parquet` (`fct_load_data.R`): optimize query/fetch paths, not storage format.
 - Extend the existing process-wide mirai singleton in `fct_step2_async.R` for async work (queue memory cap, `try_mirai()`, `onStop()` teardown); never create a second pool. In dev, workers load the package via `pkgload::load_all()`.
-- Workers must never receive credentials: params are scrubbed in `.wise_step2_async_connection_params()` and workers resolve secrets from their own environment.
+- Credentials may cross to workers by explicit decision (2026-09-18): Step 2 snapshots are still scrubbed (`.wise_step2_async_connection_params()`) and workers resolve secrets from their own environment; the Overview metadata task passes connection params verbatim because user-entered credentials exist only in the params list. Never ship credentials to remote (`url=`-based) daemons — env-based resolution only.
 - Model fitting runs through `ENGINE_REGISTRY` (`fct_fit_model.R`) fitting 3 progressive specs across 4 engines — respect the contract; don't special-case one engine outside it.
 - Maps run on the custom hexmap bridge (`fct_hexmap.R`) — this is why Section 7 excludes maps; do not migrate or replace it.
 - Existing bounded caches (e.g. the aggregation preparation cache in `fct_aggregation.R`) must stay bounded per Section 4.

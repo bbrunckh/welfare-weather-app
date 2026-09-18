@@ -16,12 +16,13 @@
 //
 // Guarantees:
 //   - boot-once per container; maps boot lazily on the first payload
-//   - load-once: the file is served twice (golem::bundle_resources() also
-//     serves it in alphabetical order and the explicit htmlDependency loads
-//     it again); the second copy is a no-op. Without the guard the two
-//     copies keep separate message queues/replay registries and race their
-//     MutationObservers: a re-rendered uiOutput's replacement container
-//     could boot from the copy holding no replay state and stay blank.
+//   - load-once: the file is attached by the single explicit htmlDependency
+//     (the engine lives outside golem::bundle_resources()'s scan tree, so it
+//     is served exactly once). The guard stays as a safety net: without it,
+//     two copies (e.g. from an accidental re-attach) would keep separate
+//     message queues/replay registries and race their MutationObservers:
+//     a re-rendered uiOutput's replacement container could boot from the
+//     copy holding no replay state and stay blank.
 //   - camera persists across "set"; "fit" fires only when R says the data
 //     key changed, so wave toggles re-colour without a camera jump
 //   - messages arriving before the container exists are queued per id and

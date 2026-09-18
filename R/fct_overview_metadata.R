@@ -64,6 +64,25 @@ load_overview_metadata <- function(connection_params, force_refresh = FALSE) {
 }
 
 
+#' Store an externally loaded metadata bundle in the process-local cache.
+#'
+#' The Overview async task loads metadata on the mirai worker, so the worker's
+#' own cache never helps the main R process. After a successful task, the
+#' module publishes the bundle here so a warm process (another session in the
+#' same R process, or a reconnect) skips the worker round trip entirely.
+#'
+#' @param connection_params Named connection parameter list (same as
+#'   `load_overview_metadata()`).
+#' @param value Validated metadata bundle.
+#' @noRd
+overview_metadata_cache_store <- function(connection_params, value) {
+  .overview_metadata_cache_set(
+    .overview_metadata_cache_key(connection_params),
+    value
+  )
+}
+
+
 # Cache ----
 
 # Cache keys include source identity, credential fingerprints, and local file
