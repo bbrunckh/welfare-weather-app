@@ -1,6 +1,8 @@
-# CLAUDE.md
+# AGENTS.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to coding agents (Kilo, Claude Code, Codex, etc.) when working with code in this repository.
+
+**Performance/optimization work**: read and follow `review/optimization_guidelines.md` — it defines the app's optimization standards, app-specific constraints, and benchmarking requirements.
 
 ## What This Is
 
@@ -60,7 +62,7 @@ R/
 ├── app_config.R               # Environment detection (dev/Posit Connect/Databricks)
 ├── run_app.R                  # Entry point
 ├── mod_*.R                    # 24 Shiny modules (each has a UI and server function)
-└── fct_*.R                    # 25 business logic files (no Shiny dependencies)
+└── fct_*.R                    # 39 business logic files (no Shiny dependencies)
 ```
 
 **`fct_` files are the core engine:**
@@ -75,7 +77,8 @@ R/
 - `fct_policy_decompose.R` – **policy effect decomposition** (main effect + resilience: repositioning + interaction)
 - `fct_rif_sim.R` – Recentered Influence Function (RIF) quantile regression helpers
 - `fct_weatherstats.R` – weather statistics computation
-- `fct_hexmap.R` – **hex-map engine bridge**: vendored MapLibre GL + h3-js assets (`inst/app/www/vendor/`, pins + sha256 in-file), payload contract (`hexmap_payload()` — columnar cell ids/values/ramp stops, no geometry on the wire), senders (`hexmap_update`/`hexmap_clear`/`hexmap_fit`) and the `hexmap_ui()` container. Browser side: `inst/app/www/hexmap.js` (lazy boot, camera persistence, queued + replayed messages). Maps using it: sample density (mod_1_02), outcome coverage (mod_1_03), per-variable weather maps (mod_1_05); there is no Leaflet fallback — MapLibre is the only map surface and `leaflet` is no longer a dependency.
+- `fct_hexmap.R` – **hex-map engine bridge**: vendored MapLibre GL + h3-js (`inst/app/www/`, browser side `hexmap.js`), columnar payload contract (`hexmap_payload()`, senders `hexmap_update`/`hexmap_clear`/`hexmap_fit`), container `hexmap_ui()`. Used by mod_1_02, mod_1_03, mod_1_05; no Leaflet fallback — MapLibre is the only map surface. Asset pins and behavior details live in-file.
+- `fct_step2_async.R` – process-wide mirai async coordinator for Step 2 (FIFO queue, worker snapshots, secrets scrubbing)
 
 ### Modeling Engine Registry
 
@@ -138,6 +141,7 @@ See `fct_connection.R` and `fct_load_data.R` for implementation details.
 Target platform: **Posit Connect**. The app auto-detects Databricks credentials when running on Connect. See `dev/03_deploy.R` for deployment steps.
 
 Key environment variables for production:
+- `WISEAPP_DATA_PATH` (for local data backend)
 - `DATABRICKS_HOST`, `DATABRICKS_CLIENT_ID`, `DATABRICKS_CLIENT_SECRET`, `DATABRICKS_VOLUME_PATH` (for Databricks backend)
 - `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` (for S3)
 - `GCS_KEY_ID`, `GCS_SECRET` (for Google Cloud Storage)
@@ -150,20 +154,4 @@ Key environment variables for production:
 
 ## Testing
 
-Tests are in `tests/testthat/` (11 files) plus `tests/spelling.R`. Key test files:
-
-| Test File | Coverage |
-|-----------|----------|
-| `test-active-mask.R` | Coefficient uncertainty decomposition |
-| `test-fct_aggregation_delta.R` | Survey-level aggregation with uncertainty |
-| `test-fct_connection.R` | Connection parameter building |
-| `test-fct_get_weather.R` | Weather data retrieval (S3/Databricks) |
-| `test-fct_results.R` | LCU/PPP outcome conversion and logging |
-| `test-fct_rif_sim.R` | RIF quantile regression helpers |
-| `test-fct_weather_select.R` | Weather variable selection |
-| `test-fct_weatherstats.R` | Weather statistics computation |
-| `test-fct_hexmap.R` | Hex-map engine: payload contract, senders, container markup |
-| `test-fct-outcome-weather-payloads.R` | Outcome-coverage and weather hex-map payload builders |
-| `test-mod_1_05_weatherstats.R` | Per-variable/per-wave weather map rendering |
-| `test-policy-decomposition-uncertainty.R` | Policy effect decomposition uncertainty |
-| `test-uncertainty-decomposition.R` | Variance decomposition helpers |
+Tests are in `tests/testthat/` (62 files, named after the `fct_`/`mod_` file or concept they cover, e.g. `test-fct_hexmap.R`, `test-active-mask.R`) plus `tests/spelling.R`. Areas with dedicated coverage: connection/data loading, model fitting + coefficient uncertainty decomposition, aggregation delta, RIF helpers, hexmap payload contract, policy decomposition uncertainty, weather selection/stats, export bundles, determinism.
