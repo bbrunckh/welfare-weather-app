@@ -35,7 +35,6 @@ app_server <- function(input, output, session) {
     survey_list = overview_api$survey_list,
     variable_list = overview_api$variable_list,
     cpi_ppp = overview_api$cpi_ppp,
-    pov_lines = overview_api$pov_lines,
     run_trigger = run_step1_trigger,
     load_survey_trigger = load_survey_trigger,
     load_weather_trigger = load_weather_trigger

@@ -8,7 +8,6 @@ library(testthat)
 make_cell_geo <- function(n = 3) {
   data.frame(
     h3   = sprintf("87975404%dfffff", 8:10)[seq_len(n)],
-    geom = rep('{"type":"Polygon"}', n),
     xmin = seq(-19.6, length.out = n),
     ymin = seq(27.0, length.out = n),
     xmax = seq(-19.2, length.out = n),

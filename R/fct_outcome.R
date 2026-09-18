@@ -516,7 +516,8 @@ plot_welfare_dist <- function(df,
 #' its grey `na.color` (the Leaflet fallback shades them at the bottom of
 #' the ramp, as it always has).
 #'
-#' @param cell_geo Per-cell geometry frame (`cell_data()$geom`).
+#' @param cell_geo Per-cell bounds frame (`cell_data()$geom`): h3 plus
+#'   xmin/ymin/xmax/ymax (geometry is decoded in the browser from cell ids).
 #' @param cmap     Wave-filtered location-to-cell map (`cell_data()$map`).
 #' @param df       Wave-filtered outcome data.
 #' @param outcome  Outcome variable name.
@@ -547,11 +548,11 @@ plot_welfare_dist <- function(df,
   vals <- pmin(pmax(merged$value, 0), 100)
   rng <- .coverage_rng(vals)
 
-  # Drawn set: every selected-wave cell that carries geometry - cells the
+  # Drawn set: every selected-wave cell that carries bounds - cells the
   # merge produced no value for are sent with NA and painted grey.
   cells <- cell_geo |>
     dplyr::inner_join(dplyr::distinct(cmap, .data$h3), by = "h3") |>
-    dplyr::filter(!is.na(.data$geom), nchar(.data$geom) > 2)
+    dplyr::filter(!is.na(.data$xmin), !is.na(.data$ymax))
   if (nrow(cells) == 0) {
     return(NULL)
   }
@@ -652,7 +653,8 @@ plot_welfare_dist <- function(df,
 #' ramp over the range actually observed. Locations with no non-missing
 #' value drop out and their cells arrive as `NA` and are painted grey.
 #'
-#' @param cell_geo Per-cell geometry frame (`cell_data()$geom`).
+#' @param cell_geo Per-cell bounds frame (`cell_data()$geom`): h3 plus
+#'   xmin/ymin/xmax/ymax (geometry is decoded in the browser from cell ids).
 #' @param cmap     Wave-filtered location-to-cell map (`cell_data()$map`).
 #' @param df       Wave-filtered outcome data.
 #' @param outcome  Outcome variable name.
@@ -697,11 +699,11 @@ plot_welfare_dist <- function(df,
   )
   rng <- pal_info$domain
 
-  # Drawn set: every selected-wave cell that carries geometry - cells the
+  # Drawn set: every selected-wave cell that carries bounds - cells the
   # merge produced no mean for are sent with NA and painted grey.
   cells <- cell_geo |>
     dplyr::inner_join(dplyr::distinct(cmap, .data$h3), by = "h3") |>
-    dplyr::filter(!is.na(.data$geom), nchar(.data$geom) > 2)
+    dplyr::filter(!is.na(.data$xmin), !is.na(.data$ymax))
   if (nrow(cells) == 0) {
     return(NULL)
   }

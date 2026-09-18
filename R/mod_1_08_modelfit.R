@@ -13,9 +13,10 @@ mod_1_08_modelfit_ui <- function(id) {
 
 #' 1_08_modelfit Server Functions
 #'
+#' All display data comes from the fit snapshot (`model_fit()$.snap`), so no
+#' selection reactives are passed in.
+#'
 #' @param id              Module id.
-#' @param variable_list   Reactive data frame of variable metadata.
-#' @param selected_outcome Reactive one-row data frame from mod_1_03_outcome.
 #' @param model_fit       Reactive list returned by fit_model() via
 #'   mod_1_07_results.
 #' @param tabset_id       Character id of the parent tabset panel.
@@ -23,11 +24,8 @@ mod_1_08_modelfit_ui <- function(id) {
 #'
 #' @noRd
 mod_1_08_modelfit_server <- function(id,
-                                     variable_list,
-                                     selected_outcome,
                                      model_fit,
                                      tabset_id,
-                                     survey_weather,
                                      fit_stale = reactive(FALSE),
                                      tabset_session = NULL) {
   moduleServer(id, function(input, output, session) {

@@ -25,7 +25,6 @@ mod_1_02_surveystats_ui <- function(id) {
 #' @param connection_params Reactive named list of connection parameters.
 #' @param variable_list Reactive data frame of variable metadata.
 #' @param selected_surveys Reactive data frame of selected surveys (from mod_1_01_sample).
-#' @param selected_outcome Optional reactive returning the selected outcome row.
 #' @param cpi_ppp Reactive data frame of CPI/PPP deflators.
 #' @param tabset_id Character id of the parent tabset panel to append the tab to.
 #' @param tabset_session Shiny session for the parent tabset. Defaults to the parent session.
@@ -37,7 +36,6 @@ mod_1_02_surveystats_server <- function(
   connection_params,
   variable_list,
   selected_surveys,
-  selected_outcome = NULL,
   cpi_ppp,
   tabset_id,
   tabset_session = NULL,
@@ -352,18 +350,17 @@ mod_1_02_surveystats_server <- function(
               .duck_load_ext("h3")
 
               # Location of interviews map ----
-              # One row per H3 cell: a GeoJSON geometry string (the Leaflet
-              # fallback artifact; MapLibre decodes geometry in the browser from
-              # cell ids, so it is never sent when WebGL is available) plus the
-              # per-cell bbox that the payload's fit bounds come from, and the
-              # location-to-cell mapping shared with the outcome and weather maps.
+              # One row per H3 cell: the per-cell bbox the payload's fit
+              # bounds come from (geometry is decoded in the browser from
+              # cell ids, so no geometry string is produced server-side),
+              # plus the location-to-cell mapping shared with the outcome
+              # and weather maps.
               cell_geo <- h3_local |>
                 dplyr::distinct(h3) |>
                 dplyr::mutate(g = st_geomfromtext(h3_cell_to_boundary_wkt(h3))) |>
                 dplyr::mutate(
-                  geom = st_asgeojson(g),
-                  # PERF-36: per-cell bbox beside the geometry string.
-                  env  = st_extent(g)
+                  # PERF-36: per-cell bbox beside the geometry.
+                  env = st_extent(g)
                 ) |>
                 dplyr::mutate(
                   xmin = st_xmin(env), ymin = st_ymin(env),

@@ -82,7 +82,6 @@ mod_1_modelling_ui <- function(id) {
 #' @param survey_list     Reactive tibble of survey metadata.
 #' @param variable_list   Reactive tibble of variable metadata.
 #' @param cpi_ppp         Reactive tibble of CPI/PPP conversion factors.
-#' @param pov_lines       Reactive tibble of 2021 PPP poverty lines.
 #' @param run_trigger         Optional reactive trigger for a programmatic fit.
 #' @param load_survey_trigger Optional reactive trigger for survey loading.
 #' @param load_weather_trigger Optional reactive trigger for weather loading.
@@ -93,7 +92,6 @@ mod_1_modelling_server <- function(id,
                                    survey_list,
                                    variable_list,
                                    cpi_ppp,
-                                   pov_lines,
                                    run_trigger = shiny::reactive(NULL),
                                    load_survey_trigger = shiny::reactive(NULL),
                                    load_weather_trigger = shiny::reactive(NULL)) {
@@ -115,7 +113,6 @@ mod_1_modelling_server <- function(id,
       variable_list     = variable_list,
       cpi_ppp           = cpi_ppp,
       selected_surveys  = s1$selected_surveys,
-      selected_outcome  = NULL,
       tabset_id         = "step1_output_tabs",
       tabset_session    = session,
       analysis_unit     = s1$analysis_unit,
@@ -198,11 +195,8 @@ mod_1_modelling_server <- function(id,
 
     mod_1_08_modelfit_server(
       "modelfit",
-      variable_list    = variable_list,
-      selected_outcome = s3$selected_outcome,
       model_fit        = s7$model_fit,
       tabset_id        = "step1_output_tabs",
-      survey_weather   = s5$survey_weather,
       fit_stale        = s7$stale,
       tabset_session   = session
     )

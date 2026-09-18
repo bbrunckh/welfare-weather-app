@@ -65,7 +65,6 @@ test_that("fit snapshot captures fit-time labels; headings follow re-fit engine"
         data.frame(tx = 1:4, welfare = 1:4, weight = 1)
       ),
       selected_model   = sel_model,
-      model_type       = shiny::reactiveVal("linear"),
       run_model        = run_model,
       tabset_id        = "step1_tabs"
     ),
@@ -170,7 +169,6 @@ test_that("REACT-14: specification fallbacks render the provenance banner", {
         data.frame(tx = 1:4, welfare = 1:4, weight = 1)
       ),
       selected_model   = shiny::reactiveVal(list(engine = "fixest")),
-      model_type       = shiny::reactiveVal("linear"),
       run_model        = run_model,
       tabset_id        = "step1_tabs"
     ),
@@ -218,7 +216,7 @@ test_that("P16: one fit-signature observer preserves exact stale transitions", {
                 selected_surveys = shiny::reactiveVal(data.frame()),
                 selected_outcome = outcome, selected_weather = weather,
                 survey_weather = swd, selected_model = model,
-                model_type = shiny::reactiveVal("linear"), run_model = run,
+                run_model = run,
                 survey_version = version, tabset_id = "step1_tabs"),
     {
       settle <- function() { session$elapse(500); session$flushReact() }
@@ -280,7 +278,6 @@ test_that("redesigned sections render: who-panel, focused table, RIF suppression
         data.frame(tx = 1:4, welfare = 1:4, weight = 1)
       ),
       selected_model   = sel_model,
-      model_type       = shiny::reactiveVal("linear"),
       run_model        = run_model,
       tabset_id        = "step1_tabs"
     ),

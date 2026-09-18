@@ -1461,7 +1461,8 @@ isTRUE_vec <- function(x) !is.na(x) & x
 #' per-cell values, same palette, and same grey `na.color` for cells the
 #' weather series did not reach.
 #'
-#' @param cell_geo Per-cell geometry frame (`cell_data()$geom`).
+#' @param cell_geo Per-cell bounds frame (`cell_data()$geom`): h3 plus
+#'   xmin/ymin/xmax/ymax (geometry is decoded in the browser from cell ids).
 #' @param cmap     Wave-filtered location-to-cell map (`cell_data()$map`).
 #' @param sub      One variable's wave rows from `merge_loc_values_to_cells()`
 #'   (i.e. `weather_loc_vals()[[i]]` filtered to the wave): `loc_id` carries
@@ -1485,11 +1486,11 @@ isTRUE_vec <- function(x) !is.na(x) & x
   binned <- isTRUE(attr(sub, "binned"))
   lvls <- attr(sub, "levels")
 
-  # Drawn set: every wave cell that carries geometry - cells the weather
+  # Drawn set: every wave cell that carries bounds - cells the weather
   # series did not reach are sent with NA and painted grey.
   cells <- cell_geo |>
     dplyr::inner_join(dplyr::distinct(cmap, .data$h3), by = "h3") |>
-    dplyr::filter(!is.na(.data$geom), nchar(.data$geom) > 2)
+    dplyr::filter(!is.na(.data$xmin), !is.na(.data$ymax))
   if (nrow(cells) == 0) {
     return(NULL)
   }
