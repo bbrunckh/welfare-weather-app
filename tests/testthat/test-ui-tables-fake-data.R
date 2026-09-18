@@ -37,6 +37,10 @@ library(testthat)
     imp_wat_rec = rep(c(1L, 0L), times = 8),
     imp_san_rec = rep(c(1L, 0L), each = 4, length.out = 16),
     wx_bin      = factor(rep(c("Low", "High"), times = 8)),
+    # Numeric-range bin labels in deliberately scrambled creation order:
+    # the binned table must display them ordered by bin bounds, not
+    # lexicographically / by first appearance.
+    t_bin       = rep(c("(10, 12]", "(6, 8]", "\u2264 6"), length.out = 16),
     stringsAsFactors = FALSE
   )
 }
@@ -134,8 +138,9 @@ test_that("survey summary exports return the same frame the tables show", {
 test_that("weather stats tables render continuous and binned frames", {
   df <- .ui_df()
   sw_sel <- data.frame(
-    name  = c("welfare", "x1", "electricity", "wx_bin"),
-    label = c("Welfare", "X one", "Electricity", "Temperature bins"),
+    name  = c("welfare", "x1", "electricity", "wx_bin", "t_bin"),
+    label = c("Welfare", "X one", "Electricity", "Temperature bins",
+              "Temperature bins (num)"),
     stringsAsFactors = FALSE
   )
 
@@ -170,4 +175,11 @@ test_that("weather stats tables render continuous and binned frames", {
                     names(bdat)))
   expect_true("Temperature bins" %in% bdat$Variable)
   expect_true(nrow(bdat) >= 1)
+
+  # Bin levels display ordered by numeric bounds: creation order starts
+  # "(10, 12]" first, but the table must show "≤ 6" before "(6, 8]" before
+  # "(10, 12]" within each country-year block.
+  bnum <- bdat[bdat$Variable == "Temperature bins (num)", ]
+  lv_seen <- unique(bnum$Level)
+  expect_identical(lv_seen, c("\u2264 6", "(6, 8]", "(10, 12]"))
 })

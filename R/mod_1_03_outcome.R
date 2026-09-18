@@ -546,9 +546,11 @@ mod_1_03_outcome_server <- function(id, variable_list, survey_data,
               columns = cols,
               compact = TRUE,
               searchable = FALSE,
-              defaultPageSize = 10,
+              # Show all rows by default (pooled + waves + deciles); the
+              # page-size options remain for very long multi-wave frames.
+              defaultPageSize = 100,
               showPageSizeOptions = TRUE,
-              pageSizeOptions = c(10, 25, 50, 100),
+              pageSizeOptions = c(25, 50, 100),
               highlight = TRUE
             )
           })

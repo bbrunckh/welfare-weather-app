@@ -1163,9 +1163,11 @@ table.reactable td.wise-dt-wrap {
 }
 
 /* Toolbar row above reactable summary tables: holds the client-side CSV
-   download button, mirroring the DataTables controls row's spacing. */
+   download button, mirroring the DataTables controls row's spacing. One
+   placement everywhere: above the table, right-aligned. */
 .wise-reactable-controls {
   display: flex;
+  justify-content: flex-end;
   margin: 0 0 0.35rem;
 }
 

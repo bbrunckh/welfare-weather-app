@@ -43,14 +43,14 @@ mod_2_03_diagnostics_ui <- function(id) {
         height = "340px"
       ),
       shiny::uiOutput(ns("weather_support_warning_ui")),
-      reactable::reactableOutput(ns("weather_support_table")),
       shiny::div(
-        style = "display: flex; justify-content: flex-end; align-items: center; margin-top: 6px;",
+        class = "wise-reactable-controls",
         wise_reactable_csv_button(
           ns("weather_support_table"),
           "simulation_weather_support_summary"
         )
       ),
+      reactable::reactableOutput(ns("weather_support_table")),
       shiny::tags$p(
         class = "diagnostic-note",
         "Distributions are normalized separately so samples with different sizes can be compared. Overlap does not by itself establish model validity."

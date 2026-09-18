@@ -423,8 +423,11 @@ mod_1_08_modelfit_server <- function(id,
                     ))
                   )
                 ),
+                shiny::div(
+                  class = "wise-reactable-controls",
+                  wise_reactable_csv_button(ns("additional_stats"), "model_fit_statistics")
+                ),
                 reactable::reactableOutput(ns("additional_stats")),
-                wise_reactable_csv_button(ns("additional_stats"), "model_fit_statistics")
               ),              shiny::div(
                 shiny::h4(
                   "Predicted vs actual",

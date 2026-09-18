@@ -1663,6 +1663,27 @@ build_weather_stats_table <- function(survey_weather, selected_weather,
   tab
 }
 
+# Order binned-variable level labels by their numeric bounds. Labels carry
+# one or two numbers ("≤ 6", "(6, 8]", "8-12", "≥ 12"); ordering them
+# lexicographically would put "(10, 12]" before "(6, 8]". Levels without
+# any number keep their original relative order, placed after the numbered
+# ones; ties resolve to the original order (stable).
+#' @noRd
+.bin_level_order <- function(lv) {
+  if (length(lv) <= 1L) {
+    return(lv)
+  }
+  # Range separators ("8 - 12", "8–12") must not turn "12" into "-12";
+  # normalize them away first.
+  norm <- gsub("\\s*[-\u2013\u2014]\\s*", ";", lv, perl = TRUE)
+  nums <- lapply(regmatches(norm, gregexpr("[-+]?[0-9]+(\\.[0-9]+)?", norm, perl = TRUE)),
+                 as.numeric)
+  has <- vapply(nums, function(x) length(x) > 0L && all(is.finite(x)), logical(1))
+  lo <- vapply(nums, function(x) if (length(x)) min(x) else Inf, numeric(1))
+  hi <- vapply(nums, function(x) if (length(x)) max(x) else Inf, numeric(1))
+  lv[order(lo, hi, seq_along(lv))]
+}
+
 #' Build the binned-weather distribution frame
 #'
 #' UI-45/UI-48: one builder behind the table, its CSV button and the
@@ -1734,6 +1755,9 @@ build_weather_binned_table <- function(survey_weather, selected_weather,
     } else {
       unique(as.character(vals[!is.na(vals)]))
     }
+    # Order bin levels by their numeric bounds ("(6, 8]", "8-12", "≤ 6") so
+    # lexicographic creation order ("(10, 12]" before "(6, 8]") never wins.
+    level_values <- .bin_level_order(level_values)
     data.frame(
       variable = v,
       countryyear = as.character(df$countryyear),
@@ -1758,10 +1782,15 @@ build_weather_binned_table <- function(survey_weather, selected_weather,
         paste(level_key$countryyear, level_key$variable),
         paste(denom_g$groups$countryyear, denom_g$groups$variable)
       )]
-    level_key$level_order <- match(
+    # Rank each bin by its position in the (numerically ordered) level set -
+    # the long frame carries that rank per row, so fetch it through the
+    # (variable, level) match instead of the row index, which would rank by
+    # first appearance in the data and let collapse's lexicographic group
+    # order win.
+    level_key$level_order <- long$level_order[match(
       paste(level_key$variable, level_key$level),
       paste(long$variable, long$level)
-    )
+    )]
     tab <- as.data.frame(level_key, stringsAsFactors = FALSE)
     tab <- tab[, c(
       "variable", "countryyear", "level", "N", "share",
