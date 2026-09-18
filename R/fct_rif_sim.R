@@ -37,7 +37,11 @@
 compute_rif <- function(y, tau, bw = NULL, dens = NULL) {
   na_mask <- !is.finite(y)
   y_obs <- y[!na_mask]
-  q_tau <- stats::quantile(y_obs, probs = tau, names = FALSE)
+  # collapse::fquantile (quickselect) avoids the full sort stats::quantile()
+  # performs; bit-identical to type 7 on the model scale (log welfare) and on
+  # tied/discrete data, last-ulp differences only between distinct order
+  # statistics on raw continuous inputs.
+  q_tau <- collapse::fquantile(y_obs, probs = tau, type = 7, names = FALSE)
 
   # Robust bandwidth: SJ can fail on large/multimodal data
 
@@ -315,8 +319,8 @@ build_direct_rif_metadata <- function(fits) {
 #' This is the fit-time counterpart to \code{compute_rif()}. It preserves that
 #' function's per-quantile output while sharing the finite-value scan, type-7
 #' quantile calculation, and density interpolation across the quantile grid.
-#' Each RIF vector is still built separately to avoid an \code{N x K} logical
-#' comparison matrix.
+#' RIF values are built through one per-observation interval lookup and a
+#' pattern gather, so no \code{N x K} logical comparison matrix is formed.
 #'
 #' @param y Numeric outcome vector.
 #' @param taus Numeric vector of quantiles in the required output order.
@@ -330,7 +334,11 @@ build_direct_rif_metadata <- function(fits) {
 compute_rif_multi <- function(y, taus, bw = NULL, dens = NULL) {
   na_mask <- !is.finite(y)
   y_obs <- y[!na_mask]
-  q_taus <- stats::quantile(y_obs, probs = taus, names = FALSE, type = 7)
+  K <- length(taus)
+  # collapse::fquantile requires ascending probabilities; sort once and
+  # reorder columns back to the caller's tau order at the end.
+  ord <- order(taus)
+  q_s <- collapse::fquantile(y_obs, probs = taus[ord], type = 7, names = FALSE)
 
   if (is.null(dens)) {
     bw_use <- bw
@@ -340,22 +348,42 @@ compute_rif_multi <- function(y, taus, bw = NULL, dens = NULL) {
     dens <- stats::density(y_obs, bw = bw_use, n = 1024)
   }
 
-  f_taus <- stats::approx(dens$x, dens$y, xout = q_taus)$y
+  f_s <- stats::approx(dens$x, dens$y, xout = q_s)$y
   dens_max <- max(dens$y)
-
-  lapply(seq_along(taus), function(i) {
-    f_q <- f_taus[i]
-    if (is.na(f_q) || f_q <= 0) {
-      f_q <- dens_max * 0.01
+  bad <- is.na(f_s) | f_s <= 0
+  f_use <- ifelse(bad, dens_max * 0.01, f_s)
+  f_use <- pmax(f_use, dens_max * 0.001)
+  if (any(bad)) {
+    bad_orig <- logical(K)
+    bad_orig[ord] <- bad
+    for (i in which(bad_orig)) {
       warning(sprintf("Density near zero at quantile %.2f; using floor.", taus[i]))
     }
-    f_q <- max(f_q, dens_max * 0.001)
+  }
 
-    rif <- rep(NA_real_, length(y))
-    rif[!na_mask] <- q_taus[i] +
-      (taus[i] - as.numeric(y_obs <= q_taus[i])) / f_q
-    rif
-  })
+  # Each RIF value only takes one of two values per quantile: q + (tau - 1)/f
+  # when y <= q ("lo") and q + tau/f otherwise ("hi"). Because q_s is sorted,
+  # #{q < y} (findInterval with left.open = TRUE, exact-match inclusive) splits
+  # the observations into K + 1 groups sharing one step pattern, so a single
+  # pattern-matrix gather replaces the K-pass comparison/arithmetic loop
+  # without materialising an N x K logical matrix.
+  lo <- q_s + (taus[ord] - 1) / f_use
+  hi <- q_s + taus[ord] / f_use
+  iv <- findInterval(y_obs, q_s, left.open = TRUE)
+  pat <- matrix(0, K + 1L, K)
+  for (v in 0:K) pat[v + 1L, ] <- ifelse(seq_len(K) <= v, hi, lo)
+  vals <- pat[iv + 1L, , drop = FALSE]
+  if (!identical(ord, seq_len(K))) {
+    vals <- vals[, match(seq_len(K), ord), drop = FALSE]
+  }
+
+  if (!any(na_mask)) {
+    lapply(seq_len(K), function(i) vals[, i])
+  } else {
+    M <- matrix(NA_real_, length(y), K)
+    M[which(!na_mask), ] <- vals
+    lapply(seq_len(K), function(i) M[, i])
+  }
 }
 
 
