@@ -235,9 +235,12 @@ test_that("decomposition export contracts expose current future and historical p
                         "Adverse 1-in-10 (%)", "Adverse 1-in-20 (%)") %in%
                         names(items[["policy_decomposition_summary"]]$fun())))
 
-      expect_s3_class(items[["policy_decomposition_headline"]]$fun(), "ggplot")
+      # Batch 2: on-screen decomposition figures are echarts4r widgets (their
+      # registry funs switched); export-only figures stay ggplot. The
+      # legacy-vs-compact characterization compares widget opts below.
+      expect_s3_class(items[["policy_decomposition_headline"]]$fun(), "echarts4r")
       expect_s3_class(items[["policy_decomposition_channels"]]$fun(), "ggplot")
-      expect_s3_class(items[["policy_decomposition_channels_selected"]]$fun(), "ggplot")
+      expect_s3_class(items[["policy_decomposition_channels_selected"]]$fun(), "echarts4r")
       captured$headline_data <- items[["policy_decomposition_headline_data"]]$fun()
       captured$headline_plot <- items[["policy_decomposition_headline"]]$fun()
       captured$selected_plot <- items[["policy_decomposition_channels_selected"]]$fun()
@@ -249,14 +252,17 @@ test_that("decomposition export contracts expose current future and historical p
   legacy_exports <- check_module(future)
   compact_exports <- check_module(compact)
   expect_equal(legacy_exports$headline_data, compact_exports$headline_data, tolerance = 0)
+  # The figure contracts compare the echarts option trees: identical data prep
+  # must produce identical series/axis/tooltip opts (formatters are plain JS
+  # strings, so the comparison is exact).
   expect_equal(
-    ggplot2::ggplot_build(legacy_exports$headline_plot),
-    ggplot2::ggplot_build(compact_exports$headline_plot),
+    legacy_exports$headline_plot$x$opts,
+    compact_exports$headline_plot$x$opts,
     tolerance = 0
   )
   expect_equal(
-    ggplot2::ggplot_build(legacy_exports$selected_plot),
-    ggplot2::ggplot_build(compact_exports$selected_plot),
+    legacy_exports$selected_plot$x$opts,
+    compact_exports$selected_plot$x$opts,
     tolerance = 0
   )
 })

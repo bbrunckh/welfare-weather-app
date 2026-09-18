@@ -367,7 +367,7 @@ mod_3_09_decomposition_ui <- function(id) {
         selected = "mean",
         layout = "horizontal"
       ),
-      wise_plot_output(ns("headline_decomp_plot"),
+      wise_chart_output(ns("headline_decomp_plot"),
         "Main effect, resilience, and total policy effect decomposition",
         height = "360px"
       ),
@@ -387,7 +387,11 @@ mod_3_09_decomposition_ui <- function(id) {
         class = "collapse",
         shiny::div(
           style = "margin-top: 10px;",
-          DT::DTOutput(ns("headline_decomp_table")),
+          shiny::div(
+            class = "wise-reactable-controls",
+            wise_reactable_csv_button(ns("headline_decomp_table"), "policy_decomposition_headline_data")
+          ),
+          reactable::reactableOutput(ns("headline_decomp_table")),
           shiny::uiOutput(ns("headline_decomp_note_ui"))
         )
       )
@@ -409,7 +413,7 @@ mod_3_09_decomposition_ui <- function(id) {
         ),
         shiny::uiOutput(ns("decile_scenario_ui"))
       ),
-      wise_plot_output(ns("decomp_bar_plot"),
+      wise_chart_output(ns("decomp_bar_plot"),
         "Stacked policy-effect channels by baseline welfare decile",
         height = "450px"
       ),
@@ -422,7 +426,11 @@ mod_3_09_decomposition_ui <- function(id) {
     ),
     shiny::div(
       class = "results-section-card diagnostic-section-card",
-      DT::DTOutput(ns("decomp_summary_table")),
+      shiny::div(
+        class = "wise-reactable-controls",
+        wise_reactable_csv_button(ns("decomp_summary_table"), "policy_decomposition_summary")
+      ),
+      reactable::reactableOutput(ns("decomp_summary_table")),
       shiny::uiOutput(ns("interaction_warning_ui")),
       shiny::tags$p(
         class = "diagnostic-note",
@@ -681,35 +689,54 @@ mod_3_09_decomposition_server <- function(id,
         ". It is not a future climate-scenario result."
       ))
     })
-    output$headline_decomp_plot <- renderPlot(
-      {
-        req(headline_decomp_data())
-        plot_decomposition_headline(headline_decomp_data())
-      },
-      height = 360
-    )
+    # Zero-arg echarts closures shared by the on-screen render and the
+    # export bundle (guidelines §7 pattern).
+    headline_decomp_chart <- function() {
+      echart_decomposition_headline(
+        headline_decomp_data(),
+        height = "360px"
+      )
+    }
+    output$headline_decomp_plot <- echarts4r::renderEcharts4r({
+      ch <- headline_decomp_chart()
+      req(!is.null(ch))
+      ch
+    })
     # The Decomposition UI is inserted after the server starts. Keep plots
     # live before their DOM nodes exist so they render immediately on tab open.
     outputOptions(output, "headline_decomp_plot", suspendWhenHidden = FALSE)
-    output$headline_decomp_table <- DT::renderDT({
+    output$headline_decomp_table <- reactable::renderReactable({
       req(headline_decomp_data())
       tbl <- headline_decomp_data()
       tbl <- tbl[tbl$channel_id %in% c("level", "resilience", "total"), , drop = FALSE]
+      # Raw values in the data; display rounding lives in colFormat.
       tbl <- data.frame(
-        Scenario = tbl$scenario,
-        `Effect component` = tbl$channel,
-        `Mean effect (%)` = round(tbl$percent, 2),
-        `Share of total (%)` = round(100 * tbl$share_of_total, 1),
+        Scenario = as.character(tbl$scenario),
+        `Effect component` = as.character(tbl$channel),
+        `Mean effect (%)` = suppressWarnings(as.numeric(tbl$percent)),
+        `Share of total (%)` = 100 * suppressWarnings(as.numeric(tbl$share_of_total)),
         check.names = FALSE
       )
-      DT::datatable(
+      reactable::reactable(
         tbl,
-        rownames = FALSE, class = "compact stripe",
-        extensions = "Buttons",
-        options = list(
-          dom = wise_csv_dom("t"),
-          buttons = wise_csv_button("policy_decomposition_headline_data", enabled = !isTRUE(stale()))
-        )
+        columns = list(
+          Scenario = reactable::colDef(class = "wise-dt-wrap", minWidth = 70),
+          `Effect component` = reactable::colDef(class = "wise-dt-wrap", minWidth = 170),
+          `Mean effect (%)` = reactable::colDef(
+            format = reactable::colFormat(digits = 2),
+            class = "wise-dt-wrap"
+          ),
+          `Share of total (%)` = reactable::colDef(
+            format = reactable::colFormat(digits = 1),
+            class = "wise-dt-wrap"
+          )
+        ),
+        compact = TRUE,
+        searchable = TRUE,
+        defaultPageSize = 10,
+        showPageSizeOptions = TRUE,
+        pageSizeOptions = c(10, 25, 50, 100),
+        highlight = TRUE
       )
     })
     outputOptions(output, "headline_decomp_table", suspendWhenHidden = FALSE)
@@ -717,7 +744,7 @@ mod_3_09_decomposition_server <- function(id,
       key = "policy_decomposition_headline",
       label = "Headline main effect and resilience decomposition",
       step = 3L,
-      fun = function() plot_decomposition_headline(headline_decomp_data()),
+      fun = headline_decomp_chart,
       description = "Headline decomposition into main effect, resilience, and total effects with reconciliation on the model scale.",
       width = 9, height = 5
     )
@@ -823,26 +850,24 @@ mod_3_09_decomposition_server <- function(id,
       )
     })
 
-    output$decomp_bar_plot <- shiny::renderPlot(
-      {
-        plot_decomposition_channels_by_decile(
-          decile_decomp_data(),
-          is_rif()
-        )
-      },
-      height = 450
-    )
+    decomp_bar_chart <- function() {
+      echart_decomposition_channels_by_decile(
+        decile_decomp_data(),
+        is_rif(),
+        height = "450px"
+      )
+    }
+    output$decomp_bar_plot <- echarts4r::renderEcharts4r({
+      ch <- decomp_bar_chart()
+      req(!is.null(ch))
+      ch
+    })
     outputOptions(output, "decomp_bar_plot", suspendWhenHidden = FALSE)
     wise_export_figure(
       key = "policy_decomposition_channels_selected",
       label = "Selected policy decomposition channels",
       step = 3L,
-      fun = function() {
-        plot_decomposition_channels_by_decile(
-          decile_decomp_data(),
-          is_rif()
-        )
-      },
+      fun = decomp_bar_chart,
       description = "Policy-effect channels by fixed baseline welfare decile for the selected scenario and weather basis.",
       width = 9, height = 6
     )
@@ -910,7 +935,8 @@ mod_3_09_decomposition_server <- function(id,
                 "Beta curve plot: unconditional quantile regression weather",
                 "sensitivity across welfare quantiles for",
                 mf$weather_terms
-              )
+              ),
+              echarts = TRUE
             ),
             shiny::tags$p(
               class = "diagnostic-note",
@@ -923,19 +949,19 @@ mod_3_09_decomposition_server <- function(id,
     })
 
     .render_beta_curve <- function(idx) {
-      shiny::renderPlot({
+      echarts4r::renderEcharts4r({
         req(is_rif(), model_fit())
         mf <- model_fit()
         req(length(mf$weather_terms) >= idx)
-        make_weather_effect_plot(
-          fit               = NULL,
-          pred_var          = mf$weather_terms[idx],
+        ch <- echart_rif_weather_curve(
+          mf$rif_grid,
+          mf$weather_terms[idx],
           interaction_terms = mf$interaction_terms %||% character(0),
-          is_binned         = FALSE,
-          label_fun         = get_label,
-          engine            = "rif",
-          rif_grid          = mf$rif_grid
+          label_fun = get_label,
+          height = "400px"
         )
+        req(!is.null(ch))
+        ch
       })
     }
 
@@ -955,11 +981,11 @@ mod_3_09_decomposition_server <- function(id,
             req(is_rif(), model_fit())
             mf <- model_fit()
             req(length(mf$weather_terms) >= i)
-            make_weather_effect_plot(
-              fit = NULL, pred_var = mf$weather_terms[i],
+            echart_rif_weather_curve(
+              mf$rif_grid, mf$weather_terms[i],
               interaction_terms = mf$interaction_terms %||% character(0),
-              is_binned = FALSE, label_fun = get_label,
-              engine = "rif", rif_grid = mf$rif_grid
+              label_fun = get_label,
+              height = "400px"
             )
           },
           description = "RIF weather coefficient by baseline welfare quantile; interpolation is limited to the estimated grid.",
@@ -985,18 +1011,35 @@ mod_3_09_decomposition_server <- function(id,
     })
 
     # --- Summary table ---
-    output$decomp_summary_table <- DT::renderDT({
+    output$decomp_summary_table <- reactable::renderReactable({
       req(technical_decomp_table())
-      tbl <- technical_decomp_table()
-      numeric_targets <- if (ncol(tbl) > 1L) seq.int(1L, ncol(tbl) - 1L) else integer(0)
-      DT::datatable(
+      tbl <- as.data.frame(technical_decomp_table())
+      if (!nrow(tbl)) {
+        tbl <- data.frame(Note = "No decomposition data available")
+      }
+      cols <- lapply(names(tbl), function(nm) {
+        x <- tbl[[nm]]
+        if (is.numeric(x)) {
+          reactable::colDef(
+            format = reactable::colFormat(digits = 2),
+            class = "wise-dt-wrap"
+          )
+        } else if (is.character(x) || is.factor(x)) {
+          reactable::colDef(class = "wise-dt-wrap", minWidth = 170)
+        } else {
+          reactable::colDef(class = "wise-dt-wrap", minWidth = 70)
+        }
+      })
+      names(cols) <- names(tbl)
+      reactable::reactable(
         tbl,
-        rownames = FALSE, class = "compact stripe", extensions = "Buttons",
-        options = list(
-          dom = wise_csv_dom("t"), ordering = FALSE,
-          buttons = wise_csv_button("policy_decomposition_summary", enabled = !isTRUE(stale())),
-          columnDefs = list(list(className = "dt-right", targets = numeric_targets))
-        )
+        columns = cols,
+        compact = TRUE,
+        searchable = TRUE,
+        defaultPageSize = 10,
+        showPageSizeOptions = TRUE,
+        pageSizeOptions = c(10, 25, 50, 100),
+        highlight = TRUE
       )
     })
     outputOptions(output, "decomp_summary_table", suspendWhenHidden = FALSE)

@@ -117,6 +117,863 @@
 }
 
 
+# Echarts4r builders (guidelines §7) -----------------------------------------
+#
+# Browser-side counterparts of the ggplot builders above. Statistics stay in
+# R with the same parameters as the ggplot versions; echarts only draws the
+# precomputed values. Each builder returns a widget, never NULL: inputs that
+# the ggplot builder answered with `blank_plot("<message>")` come back as
+# `echart_blank("<message>")` so the user-facing message is preserved.
+
+# Deterministic even-stride downsample to <= max_points for very large raw
+# series (guidelines §7); aggregated series are never downsampled.
+#' @noRd
+.wise_stride_downsample <- function(x, max_points = 10000L) {
+  n <- length(x)
+  if (n <= max_points) {
+    return(x)
+  }
+  idx <- unique(pmin(pmax(floor(seq(1, n, length.out = max_points)), 1L), n))
+  x[idx]
+}
+
+#' Before/after histogram for one manipulated variable (echarts4r)
+#'
+#' Counterpart of `.make_before_after_hist()`: binary variables render as
+#' grouped proportion bars; continuous variables render the same ridge
+#' densities (`build_ridge_distribution_data`, n_bins/n_grid 256, scale 1.5)
+#' as precomputed closed polygons.
+#'
+#' @param baseline_vals,policy_vals Raw baseline/policy values.
+#' @param var_name Variable name (x-axis title).
+#' @param height   Widget height (the UI slot's height).
+#'
+#' @return An `echarts4r` widget.
+#' @noRd
+echart_before_after_hist <- function(baseline_vals, policy_vals,
+                                     var_name, height = "300px") {
+  baseline_clean <- baseline_vals[!is.na(baseline_vals)]
+  policy_clean <- policy_vals[!is.na(policy_vals)]
+  all_vals <- c(baseline_clean, policy_clean)
+
+  if (length(all_vals) == 0) {
+    return(echart_blank("No data available", height = height))
+  }
+  fill_vals <- c(Baseline = .wise_baseline, `Policy-adjusted` = .wise_policy)
+  uniq_vals <- unique(all_vals)
+  is_binary <- length(uniq_vals) <= 2 && all(uniq_vals %in% c(0, 1))
+
+  fmt <- htmlwidgets::JS(
+    "function(v){ if (v == null || isNaN(v)) return '-';",
+    " return Number(v).toFixed(2); }"
+  )
+
+  if (is_binary) {
+    df <- data.frame(
+      Value = factor(c("0", "1"), levels = c("0", "1")),
+      Baseline = c(
+        if (length(baseline_clean)) mean(baseline_clean == 0) else NA_real_,
+        if (length(baseline_clean)) mean(baseline_clean == 1) else NA_real_
+      ),
+      Policy = c(
+        if (length(policy_clean)) mean(policy_clean == 0) else NA_real_,
+        if (length(policy_clean)) mean(policy_clean == 1) else NA_real_
+      ),
+      stringsAsFactors = FALSE
+    )
+    e <- df |>
+      echarts4r::e_charts(Value, height = height) |>
+      echarts4r::e_bar(Baseline) |>
+      echarts4r::e_bar(Policy, name = "Policy-adjusted") |>
+      echarts4r::e_color(unname(fill_vals)) |>
+      # ggplot put the legend at the top, left-justified.
+      echarts4r::e_legend(orient = "horizontal", left = 0, top = 0) |>
+      echarts4r::e_x_axis(
+        name = var_name,
+        nameLocation = "middle",
+        nameGap = 26,
+        nameTextStyle = wise_eaxis_name(fontSize = 13),
+        axisLabel = wise_eaxis_label(fontSize = 12),
+        axisTick = list(alignWithLabel = TRUE)
+      ) |>
+      echarts4r::e_y_axis(
+        name = "Proportion",
+        max = 1,
+        nameTextStyle = wise_eaxis_name(),
+        axisLabel = wise_eaxis_label(),
+        splitLine = wise_esplit_line()
+      ) |>
+      echarts4r::e_tooltip(trigger = "axis", valueFormatter = fmt) |>
+      echarts4r::e_grid(containLabel = TRUE, left = 8, right = 14, top = 36, bottom = 24) |>
+      wise_echart_theme()
+    return(e)
+  }
+
+  use_log <- all(all_vals > 0)
+  df <- data.frame(
+    Group = factor(
+      c(
+        rep("Baseline", length(baseline_clean)),
+        rep("Policy-adjusted", length(policy_clean))
+      ),
+      levels = c("Baseline", "Policy-adjusted")
+    ),
+    Value = c(baseline_clean, policy_clean),
+    stringsAsFactors = FALSE
+  )
+  # Same ridge statistics as the ggplot builder: identical call parameters.
+  rd <- build_ridge_distribution_data(
+    df,
+    x_var = "Value",
+    group_var = "Group",
+    fill_var = "Group",
+    ridge_var = "Group",
+    log_transform = use_log,
+    n_bins = 256L,
+    n_grid = 256L
+  )
+  if (is.null(rd)) {
+    return(echart_blank("No data available", height = height))
+  }
+
+  ridge_scale <- 1.5
+  ridges <- rd$ridges
+  series_list <- lapply(seq_along(ridges), function(i) {
+    g <- rd$data[rd$data$group == ridges[[i]], , drop = FALSE]
+    g <- g[order(g$x), ]
+    col <- unname(fill_vals[[if (identical(ridges[[i]], "Policy-adjusted")) 2L else 1L]])
+    poly <- rbind(
+      cbind(g$x, g$y + g$height * ridge_scale),
+      cbind(rev(g$x), g$y)
+    )
+    list(
+      type = "line",
+      name = ridges[[i]],
+      data = unname(poly),
+      symbol = "none",
+      lineStyle = list(color = "#000000", width = 0.6),
+      areaStyle = list(color = col, opacity = 0.7),
+      z = 2
+    )
+  })
+
+  e <- echarts4r::e_charts(
+    data.frame(x = c(0, 1), y = c(0, 1)),
+    x,
+    height = height
+  )
+  e$x$opts$series <- series_list
+  e$x$opts$xAxis <- list(
+    type = if (use_log) "log" else "value",
+    name = if (use_log) paste0(var_name, " (log scale)") else var_name,
+    nameLocation = "middle",
+    nameGap = 26,
+    nameTextStyle = wise_eaxis_name(fontSize = 13),
+    axisLabel = wise_eaxis_label(
+      fontSize = 12,
+      formatter = htmlwidgets::JS(
+        "function(v){ return Number(v).toLocaleString('en-US'); }"
+      )
+    ),
+    axisLine = list(lineStyle = list(color = .wise_grid)),
+    splitLine = wise_esplit_line()
+  )
+  e$x$opts$yAxis <- list(
+    type = "value",
+    axisLabel = wise_eaxis_label(
+      fontSize = 12,
+      formatter = htmlwidgets::JS(sprintf(
+        "function(v){ var r = Math.round(v); var m = %s; return m[r] || ''; }",
+        jsonlite::toJSON(as.list(stats::setNames(ridges, seq_along(ridges))))
+      ))
+    ),
+    axisLine = list(show = FALSE),
+    splitLine = list(show = FALSE),
+    axisTick = list(show = FALSE)
+  )
+  e$x$opts$tooltip <- list(
+    trigger = "item",
+    textStyle = list(color = .wise_charcoal, fontSize = 13)
+  )
+  e$x$opts$textStyle <- list(fontFamily = "Helvetica, Arial, sans-serif")
+  e$x$opts$grid <- list(containLabel = TRUE, left = 8, right = 14, top = 10, bottom = 20)
+  e
+}
+
+#' Step 3 annual baseline/policy distribution chart (echarts4r)
+#'
+#' Step-3-specific counterpart of `plot_annual_distribution()`
+#' (fct_sim_compare.R) as rendered in the Step 3 results pane: one row per
+#' scenario (Historical on top) with violins or boxes over the raw weather-
+#' year draws, mean markers, and the historical-baseline reference line.
+#' Violin/box statistics are precomputed in R: violin densities use
+#' `stats::density()` with default bandwidth (ggplot's nrd0/trim behaviour),
+#' scaled to the ggplot's row width; boxes use `boxplot.stats()`. The ggplot
+#' builder stays the static export renderer and the visual reference.
+#'
+#' @param tbl       A `timeseries_curves`-style data frame (scenario, value,
+#'   and optionally source).
+#' @param x_label   Outcome-axis title.
+#' @param plot_type "violin" or "boxplot".
+#' @param height    Widget height (the UI slot's height).
+#'
+#' @return An `echarts4r` widget.
+#' @noRd
+echart_step3_annual_distribution <- function(tbl, x_label = "Outcome (outcome units)",
+                                                  plot_type = "violin",
+                                       height = "470px") {
+  plot_type <- match.arg(plot_type, c("violin", "boxplot"))
+  if (is.null(tbl) || !nrow(tbl)) {
+    return(echart_blank("No annual simulation results available.", height = height))
+  }
+  df <- tbl
+  df$scenario <- as.character(df$scenario)
+  df$period <- ifelse(df$scenario == "Historical", "Historical",
+    vapply(df$scenario, .parse_year, character(1L))
+  )
+  df$ssp <- ifelse(df$scenario == "Historical", "Historical",
+    vapply(df$scenario, .normalise_ssp, character(1L))
+  )
+  scenario_levels <- c("Historical", sort(unique(df$scenario[df$scenario != "Historical"])))
+  scenario_palette <- c(Historical = .wise_history)
+  for (ssp in unique(df$ssp[df$ssp != "Historical"])) {
+    members <- scenario_levels[scenario_levels != "Historical"]
+    members <- members[vapply(members, function(s) {
+      identical(.normalise_ssp(s), ssp)
+    }, logical(1L))]
+    members <- members[order(vapply(members, .parse_year, character(1L)))]
+    base_col <- if (ssp %in% names(.ssp_colours)) {
+      unname(.ssp_colours[[ssp]])
+    } else {
+      "#0072B2"
+    }
+    shades <- if (length(members) > 1L) {
+      colorspace::lighten(base_col, seq(0.30, 0, length.out = length(members)))
+    } else {
+      base_col
+    }
+    scenario_palette[members] <- shades
+  }
+  df$scenario_key <- factor(df$scenario, levels = scenario_levels)
+
+  has_source <- "source" %in% names(df) && length(unique(df$source)) > 1L
+  hist_vals <- if (has_source) {
+    h <- df$value[df$scenario == "Historical" & df$source == "Baseline"]
+    if (!length(h)) df$value[df$scenario == "Historical"] else h
+  } else {
+    df$value[df$scenario == "Historical"]
+  }
+  hist_mean <- if (length(hist_vals)) mean(hist_vals, na.rm = TRUE) else NA_real_
+
+  n_rows <- length(scenario_levels)
+  df$row_y <- n_rows + 1L - as.integer(df$scenario_key)
+  y_breaks <- sort(unique(df$row_y))
+  y_labs <- vapply(y_breaks, function(b) {
+    sub(" / ", "\n", scenario_levels[n_rows + 1L - b], fixed = TRUE)
+  }, character(1L))
+  band_ys <- y_breaks[(max(y_breaks) - y_breaks) %% 2 == 1]
+  if (has_source) {
+    src_off <- c(Baseline = 0.19, Policy = -0.19)
+    df$y_off <- unname(src_off[as.character(df$source)])
+    alpha_map <- c(Baseline = 0.30, Policy = 0.85)
+  }
+
+  e <- echarts4r::e_charts(
+    data.frame(x = c(0, 1), y = c(0, 1)),
+    x,
+    height = height
+  )
+  series <- list()
+  push <- function(s) {
+    if (!is.null(s)) {
+      series <<- append(series, list(s))
+    }
+    invisible(NULL)
+  }
+  area_data <- lapply(band_ys, function(b) {
+    list(list(yAxis = b - 0.45), list(yAxis = b + 0.45))
+  })
+  .mark_area <- function(s) {
+    if (!is.null(s) && !is.null(s$type)) {
+      s$markArea <- list(
+        silent = TRUE,
+        itemStyle = list(color = "rgba(247,249,251,0.5)"),
+        label = list(show = FALSE),
+        data = area_data
+      )
+    }
+    s
+  }
+
+  # Violin silhouettes as closed polygons (forward along the upper edge,
+  # back along the lower), mirroring geom_violin's trim + scale = "width".
+  violin_series <- function(y, half_w, x_vals, col, opacity) {
+    if (length(x_vals) < 2L) {
+      return(NULL)
+    }
+    x_vals <- .wise_stride_downsample(as.numeric(x_vals))
+    d <- stats::density(x_vals, n = 512L, bw = "nrd0")
+    keep <- d$x >= min(x_vals) & d$x <= max(x_vals)
+    if (sum(keep) < 2L) {
+      return(NULL)
+    }
+    d$x <- d$x[keep]
+    d$y <- d$y[keep]
+    w <- if (max(d$y) > 0) half_w * d$y / max(d$y) else rep(0, length(d$y))
+    poly <- rbind(cbind(d$x, y + w), cbind(rev(d$x), y - w))
+    list(
+      type = "line",
+      data = unname(poly),
+      symbol = "none",
+      silent = TRUE,
+      lineStyle = list(width = 0, opacity = 0),
+      areaStyle = list(color = col, opacity = opacity),
+      z = 2
+    )
+  }
+  # Boxes as whisker line + filled rectangle + median tick, using
+  # boxplot.stats() (the same summary geom_boxplot draws).
+  box_series <- function(y, half_h, x_vals, col, opacity) {
+    if (length(x_vals) < 2L) {
+      return(NULL)
+    }
+    st <- suppressWarnings(boxplot.stats(x_vals)$stats)
+    if (!length(st) || any(!is.finite(st))) {
+      return(NULL)
+    }
+    q1 <- st[[2L]]; med <- st[[3L]]; q3 <- st[[4L]]
+    list(
+      whisker = list(
+        type = "line",
+        data = unname(rbind(c(st[[1L]], y), c(st[[5L]], y))),
+        symbol = "none",
+        silent = TRUE,
+        lineStyle = list(color = .wise_support, width = 1),
+        z = 2
+      ),
+      box = list(
+        type = "line",
+        data = unname(rbind(
+          c(q1, y - half_h), c(q3, y - half_h),
+          c(q3, y + half_h), c(q1, y + half_h), c(q1, y - half_h)
+        )),
+        symbol = "none",
+        silent = TRUE,
+        lineStyle = list(color = .wise_support, width = 1),
+        areaStyle = list(color = col, opacity = opacity),
+        z = 3
+      ),
+      median = list(
+        type = "line",
+        data = unname(rbind(c(med, y - half_h), c(med, y + half_h))),
+        symbol = "none",
+        silent = TRUE,
+        lineStyle = list(color = .wise_support, width = 2),
+        z = 4
+      )
+    )
+  }
+
+  first_shape <- TRUE
+  add_shape <- function(s) {
+    if (is.null(s)) {
+      return(invisible(NULL))
+    }
+    if (first_shape) {
+      # markArea lives on a series; the row banding rides on the first shape.
+      s <- .mark_area(s)
+      first_shape <<- FALSE
+    }
+    push(s)
+  }
+
+  if (has_source) {
+    for (scen in scenario_levels) {
+      row_y <- n_rows + 1L - match(scen, scenario_levels)
+      for (src in names(src_off)) {
+        x_vals <- df$value[df$scenario == scen & df$source == src]
+        x_vals <- x_vals[is.finite(x_vals)]
+        if (!length(x_vals)) {
+          next
+        }
+        col <- unname(scenario_palette[[scen]])
+        y <- row_y + src_off[[src]]
+        if (identical(plot_type, "violin")) {
+          add_shape(violin_series(y, 0.17, x_vals, col, unname(alpha_map[[src]])))
+        } else {
+          bs <- box_series(y, 0.08, x_vals, col, unname(alpha_map[[src]]))
+          if (!is.null(bs)) {
+            add_shape(bs$whisker)
+            add_shape(bs$box)
+            add_shape(bs$median)
+          }
+        }
+      }
+    }
+  } else {
+    for (scen in scenario_levels) {
+      row_y <- n_rows + 1L - match(scen, scenario_levels)
+      x_vals <- df$value[df$scenario == scen]
+      x_vals <- x_vals[is.finite(x_vals)]
+      if (!length(x_vals)) {
+        next
+      }
+      col <- unname(scenario_palette[[scen]])
+      if (identical(plot_type, "violin")) {
+        add_shape(violin_series(row_y, 0.31, x_vals, col, 0.28))
+      } else {
+        bs <- box_series(row_y, 0.15, x_vals, col, 0.45)
+        if (!is.null(bs)) {
+          add_shape(bs$whisker)
+          add_shape(bs$box)
+          add_shape(bs$median)
+        }
+      }
+    }
+  }
+
+  # Raw weather-year draws as jittered dots (jitter is cosmetic; drawn
+  # deterministically with a fixed seed).
+  dot_spread <- if (has_source) 0.07 else if (identical(plot_type, "violin")) 0.18 else 0.26
+  dot_alpha <- if (has_source) {
+    unname(alpha_map[as.character(df$source)])
+  } else {
+    rep(if (identical(plot_type, "violin")) 0.40 else 0.30, nrow(df))
+  }
+  set.seed(1)
+  jit <- stats::runif(nrow(df), -dot_spread, dot_spread)
+  dot_rows <- which(is.finite(df$value))
+  dots <- lapply(dot_rows, function(i) {
+    base_y <- df$row_y[[i]] + if (has_source) df$y_off[[i]] else 0
+    list(
+      value = c(df$value[[i]], base_y + jit[[i]]),
+      itemStyle = list(
+        color = unname(scenario_palette[[as.character(df$scenario_key[[i]])]]),
+        opacity = dot_alpha[[i]]
+      )
+    )
+  })
+  push(list(
+    type = "scatter",
+    name = "Draws",
+    data = dots,
+    symbolSize = 2,
+    z = 5,
+    large = TRUE
+  ))
+
+  # Series means: open slate-ringed (baseline) and filled policy markers.
+  mean_series <- function(src, size, fill_col, stroke_col) {
+    if (has_source) {
+      m <- stats::aggregate(value ~ scenario_key + source,
+        data = df[is.finite(df$value), , drop = FALSE],
+        FUN = mean
+      )
+      m <- m[m$source == src, , drop = FALSE]
+      pts <- lapply(seq_len(nrow(m)), function(i) {
+        row_y <- n_rows + 1L - as.integer(m$scenario_key[[i]])
+        c(m$value[[i]], row_y + src_off[[src]])
+      })
+    } else {
+      m <- stats::aggregate(value ~ scenario_key,
+        data = df[is.finite(df$value), , drop = FALSE],
+        FUN = mean
+      )
+      pts <- lapply(seq_len(nrow(m)), function(i) {
+        row_y <- n_rows + 1L - as.integer(m$scenario_key[[i]])
+        c(m$value[[i]], row_y)
+      })
+    }
+    list(
+      type = "scatter",
+      name = paste("Mean", src),
+      data = lapply(pts, function(v) list(value = v)),
+      symbol = "circle",
+      symbolSize = size,
+      itemStyle = list(
+        color = fill_col,
+        borderColor = stroke_col,
+        borderWidth = 1
+      ),
+      z = 6
+    )
+  }
+  if (has_source) {
+    push(mean_series("Baseline", 6, "white", .wise_slate))
+    push(mean_series("Policy", 6.8, .wise_policy, .wise_policy_dark))
+  } else {
+    push(mean_series("All", 6, "white", .wise_slate))
+  }
+
+  # One-time Baseline/Policy captions right of the top row's last draw.
+  if (has_source) {
+    top_scen <- scenario_levels[[1L]]
+    cap_pts <- lapply(names(src_off), function(src) {
+      vals <- df$value[df$scenario == top_scen & df$source == src]
+      vals <- vals[is.finite(vals)]
+      if (!length(vals)) {
+        return(NULL)
+      }
+      list(
+        value = c(
+          max(vals) + 0.015 * diff(range(df$value, na.rm = TRUE)),
+          n_rows + src_off[[src]]
+        ),
+        label = list(
+          show = TRUE,
+          formatter = src,
+          position = "right",
+          color = if (identical(src, "Baseline")) .wise_slate else .wise_policy_dark,
+          fontWeight = "bold",
+          fontSize = 13
+        ),
+        symbolSize = 0
+      )
+    })
+    push(list(
+      type = "scatter",
+      data = Filter(Negate(is.null), cap_pts),
+      silent = TRUE,
+      z = 7
+    ))
+  }
+
+  # Historical mean reference line rides on the last series.
+  if (is.finite(hist_mean) && length(series)) {
+    series[[length(series)]]$markLine <- list(
+      silent = TRUE,
+      symbol = "none",
+      lineStyle = list(type = "dashed", color = .wise_zero, width = 1),
+      data = list(list(xAxis = hist_mean)),
+      label = list(
+        show = TRUE,
+        formatter = "Historical mean",
+        position = "insideEndTop",
+        color = .wise_zero,
+        fontSize = 12
+      )
+    )
+  }
+  e$x$opts$series <- series
+
+  y_pad <- 0.6
+  e$x$opts$xAxis <- list(
+    type = "value",
+    name = x_label,
+    nameLocation = "middle",
+    nameGap = 28,
+    nameTextStyle = wise_eaxis_name(fontSize = 13),
+    axisLabel = wise_eaxis_label(fontSize = 12),
+    axisLine = list(lineStyle = list(color = .wise_grid)),
+    splitLine = wise_esplit_line()
+  )
+  e$x$opts$yAxis <- list(
+    type = "value",
+    min = min(y_breaks) - y_pad,
+    max = max(y_breaks) + y_pad,
+    axisLabel = wise_eaxis_label(
+      fontSize = 12,
+      customValues = as.list(y_breaks),
+      formatter = htmlwidgets::JS(sprintf(
+        "function(v){ var m = %s; return m[v] || ''; }",
+        jsonlite::toJSON(stats::setNames(as.list(y_labs), as.character(y_breaks)))
+      ))
+    ),
+    axisLine = list(show = FALSE),
+    splitLine = list(show = FALSE)
+  )
+  e$x$opts$tooltip <- list(
+    trigger = "item",
+    textStyle = list(color = .wise_charcoal, fontSize = 13)
+  )
+  e$x$opts$textStyle <- list(fontFamily = "Helvetica, Arial, sans-serif")
+  e$x$opts$grid <- list(containLabel = TRUE, left = 8, right = 90, top = 10, bottom = 24)
+  e
+}
+
+#' Adverse return-period dumbbell chart (echarts4r)
+#'
+#' Browser-side counterpart of `plot_step3_adverse_dot()`: per return-period
+#' rows with vertical scenario dodge, alternating row banding, climate-model
+#' spread segments, baseline -> policy connector arrows, and one-time
+#' Baseline/Policy captions and scenario labels. All positions (rp_y,
+#' dodge_offset, label anchors) are precomputed in R with the same code as
+#' the ggplot version.
+#'
+#' @param tbl      A `step3_adverse_dot_data()` data frame.
+#' @param x_label  Outcome-axis title.
+#' @param height   Widget height (the UI slot's height).
+#'
+#' @return An `echarts4r` widget.
+#' @noRd
+echart_step3_adverse_dot <- function(tbl, x_label = "Outcome level",
+                                     height = "380px") {
+  if (is.null(tbl) || !nrow(tbl)) {
+    return(echart_blank("Return-period outcomes are unavailable.", height = height))
+  }
+  scenario_levels <- c(
+    "Historical",
+    sort(unique(as.character(tbl$scenario[!tbl$is_historical])))
+  )
+  scenario_colours <- stats::setNames(vapply(scenario_levels, function(s) {
+    if (identical(s, "Historical")) {
+      return(.wise_support)
+    }
+    ssp <- .normalise_ssp(s)
+    if (ssp %in% names(.ssp_colours)) unname(.ssp_colours[[ssp]]) else .wise_slate
+  }, character(1L)), scenario_levels)
+  tbl$scenario_key <- factor(
+    ifelse(tbl$is_historical, "Historical", as.character(tbl$scenario)),
+    levels = scenario_levels
+  )
+  dodge_width <- 0.6
+  tbl$rp_y <- as.integer(tbl$rp_label)
+  tbl$dodge_offset <- stats::ave(
+    seq_len(nrow(tbl)),
+    tbl$rp_y,
+    FUN = function(idx) {
+      k <- length(idx)
+      if (k <= 1L) {
+        return(0)
+      }
+      seq(-(k - 1L) / 2, (k - 1L) / 2, length.out = k)[
+        order(match(as.character(tbl$scenario_key[idx]), scenario_levels))
+      ] * (dodge_width / max(k - 1L, 1))
+    }
+  )
+  top_y <- max(tbl$rp_y)
+  top_rows <- tbl[tbl$rp_y == top_y, , drop = FALSE]
+  top_rows <- top_rows[!duplicated(top_rows$scenario_key), , drop = FALSE]
+  x_vals <- c(
+    tbl$baseline_val, tbl$policy_val, tbl$policy_lo, tbl$policy_hi,
+    tbl$base_lo, tbl$base_hi
+  )
+  x_span <- diff(range(x_vals, na.rm = TRUE))
+  lab_gap <- if (is.finite(x_span) && x_span > 0) 0.012 * x_span else 0
+  top_rows$lab_x <- vapply(seq_len(nrow(top_rows)), function(i) {
+    r <- top_rows[i, ]
+    hi <- suppressWarnings(max(r$policy_hi[[1L]], r$policy_val[[1L]],
+      r$base_hi[[1L]], r$baseline_val[[1L]],
+      na.rm = TRUE
+    ))
+    if (!is.finite(hi)) hi <- r$policy_val[[1L]]
+    hi + lab_gap
+  }, numeric(1L))
+  cap_row <- top_rows[which.max(top_rows$dodge_offset), , drop = FALSE]
+  right_mult <- if (is.finite(x_span) && x_span > 0) {
+    max(0.12, max(nchar(as.character(top_rows$scenario_key)), 0L) * 0.012)
+  } else {
+    0.05
+  }
+  y_breaks <- sort(unique(tbl$rp_y))
+  y_labs <- levels(tbl$rp_label)[y_breaks]
+  band_ys <- y_breaks[(max(y_breaks) - y_breaks) %% 2 == 1]
+
+  e <- echarts4r::e_charts(
+    data.frame(x = c(0, 1), y = c(0, 1)),
+    x,
+    height = height
+  )
+  series <- list()
+  push <- function(s) {
+    if (!is.null(s)) {
+      series <<- append(series, list(s))
+    }
+    invisible(NULL)
+  }
+
+  # Alternating return-period banding (markArea rides on the first series).
+  first <- TRUE
+  .push_marked <- function(s) {
+    if (first) {
+      s$markArea <- list(
+        silent = TRUE,
+        itemStyle = list(color = "rgba(247,249,251,0.5)"),
+        label = list(show = FALSE),
+        data = lapply(band_ys, function(b) {
+          list(list(yAxis = b - 0.45), list(yAxis = b + 0.45))
+        })
+      )
+      first <<- FALSE
+    }
+    push(s)
+  }
+
+  # Climate-model spread segments (future rows only), broken into disjoint
+  # segments with NA separators inside one series per source.
+  spread_series <- function(lo_col, hi_col, col) {
+    ok <- !tbl$is_historical & is.finite(tbl[[lo_col]]) & is.finite(tbl[[hi_col]])
+    if (!any(ok)) {
+      return(NULL)
+    }
+    d <- tbl[ok, ]
+    pts <- unlist(lapply(seq_len(nrow(d)), function(i) {
+      y <- d$rp_y[[i]] + d$dodge_offset[[i]]
+      list(c(d[[lo_col]][[i]], y), c(d[[hi_col]][[i]], y), c(NA_real_, NA_real_))
+    }), recursive = FALSE)
+    list(
+      type = "line",
+      data = pts,
+      symbol = "none",
+      silent = TRUE,
+      lineStyle = list(color = col, width = 2.4, opacity = 0.4, cap = "round"),
+      z = 2
+    )
+  }
+  s <- spread_series("base_lo", "base_hi", "#0072B2")
+  if (!is.null(s)) .push_marked(s)
+  s <- spread_series("policy_lo", "policy_hi", .wise_policy)
+  if (!is.null(s)) .push_marked(s)
+
+  # Baseline -> policy connectors with open arrowheads, one 'lines' series
+  # coloured per scenario item.
+  conn <- lapply(seq_len(nrow(tbl)), function(i) {
+    if (!is.finite(tbl$baseline_val[[i]]) || !is.finite(tbl$policy_val[[i]])) {
+      return(NULL)
+    }
+    y <- tbl$rp_y[[i]] + tbl$dodge_offset[[i]]
+    list(
+      coords = list(
+        c(tbl$baseline_val[[i]], y),
+        c(tbl$policy_val[[i]], y)
+      ),
+      lineStyle = list(
+        color = unname(scenario_colours[as.character(tbl$scenario_key[[i]])])
+      )
+    )
+  })
+  .push_marked(list(
+    type = "lines",
+    coordinateSystem = "cartesian2d",
+    data = Filter(Negate(is.null), conn),
+    symbol = c("none", "arrow"),
+    symbolSize = 7,
+    lineStyle = list(width = 1),
+    z = 3
+  ))
+
+  # Baseline (open) and policy (filled) markers.
+  y_off_i <- function(i) tbl$rp_y[[i]] + tbl$dodge_offset[[i]]
+  .push_marked(list(
+    type = "scatter",
+    name = "Baseline",
+    data = lapply(which(is.finite(tbl$baseline_val)), function(i) {
+      list(
+        value = c(tbl$baseline_val[[i]], y_off_i(i)),
+        itemStyle = list(
+          color = "white",
+          borderColor = unname(scenario_colours[as.character(tbl$scenario_key[[i]])]),
+          borderWidth = 1.2
+        )
+      )
+    }),
+    symbolSize = 6,
+    z = 5
+  ))
+  .push_marked(list(
+    type = "scatter",
+    name = "Policy",
+    data = lapply(which(is.finite(tbl$policy_val)), function(i) {
+      list(
+        value = c(tbl$policy_val[[i]], y_off_i(i)),
+        itemStyle = list(
+          color = .wise_policy,
+          borderColor = .wise_policy_dark,
+          borderWidth = 1
+        )
+      )
+    }),
+    symbolSize = 6.8,
+    z = 6
+  ))
+
+  # One-time per-scenario labels right of the top row (colour per scenario).
+  .push_marked(list(
+    type = "scatter",
+    data = lapply(seq_len(nrow(top_rows)), function(i) {
+      list(
+        value = c(top_rows$lab_x[[i]], top_rows$rp_y[[i]] + top_rows$dodge_offset[[i]]),
+        label = list(
+          show = TRUE,
+          formatter = as.character(top_rows$scenario_key[[i]]),
+          position = "right",
+          color = unname(scenario_colours[as.character(top_rows$scenario_key[[i]])]),
+          fontWeight = "bold",
+          fontSize = 13
+        ),
+        symbolSize = 0
+      )
+    }),
+    silent = TRUE,
+    z = 7
+  ))
+  # One-time Baseline/Policy captions above the topmost dumbbell.
+  if (nrow(cap_row)) {
+    cap_y <- cap_row$rp_y[[1L]] + cap_row$dodge_offset[[1L]]
+    .push_marked(list(
+      type = "scatter",
+      data = list(
+        list(
+          value = c(cap_row$baseline_val[[1L]], cap_y),
+          label = list(
+            show = TRUE, formatter = "Baseline", position = "top",
+            color = .wise_slate, fontWeight = "bold", fontSize = 12
+          ),
+          symbolSize = 0
+        ),
+        list(
+          value = c(cap_row$policy_val[[1L]], cap_y),
+          label = list(
+            show = TRUE, formatter = "Policy", position = "top",
+            color = .wise_policy_dark, fontWeight = "bold", fontSize = 12
+          ),
+          symbolSize = 0
+        )
+      ),
+      silent = TRUE,
+      z = 7
+    ))
+  }
+
+  # Baseline markers after all markArea hosting is done: the markArea rides
+  # on the first pushed series only, so the remaining pushes are plain.
+  e$x$opts$series <- series
+  e$x$opts$xAxis <- list(
+    type = "value",
+    min = min(x_vals, na.rm = TRUE) - 0.02 * x_span,
+    max = max(x_vals, na.rm = TRUE) + right_mult * x_span,
+    name = x_label,
+    nameLocation = "middle",
+    nameGap = 28,
+    nameTextStyle = wise_eaxis_name(fontSize = 13),
+    axisLabel = wise_eaxis_label(fontSize = 12),
+    axisLine = list(lineStyle = list(color = .wise_grid)),
+    splitLine = wise_esplit_line()
+  )
+  e$x$opts$yAxis <- list(
+    type = "value",
+    min = min(y_breaks) - 0.6,
+    max = max(y_breaks) + 0.6,
+    axisLabel = wise_eaxis_label(
+      fontSize = 12,
+      customValues = as.list(y_breaks),
+      formatter = htmlwidgets::JS(sprintf(
+        "function(v){ var m = %s; return m[v] || ''; }",
+        jsonlite::toJSON(stats::setNames(as.list(y_labs), as.character(y_breaks)))
+      ))
+    ),
+    axisLine = list(show = FALSE),
+    splitLine = list(show = FALSE)
+  )
+  e$x$opts$tooltip <- list(
+    trigger = "item",
+    textStyle = list(color = .wise_charcoal, fontSize = 13)
+  )
+  e$x$opts$textStyle <- list(fontFamily = "Helvetica, Arial, sans-serif")
+  e$x$opts$grid <- list(containLabel = TRUE, left = 8, right = 110, top = 10, bottom = 24)
+  e
+}
+
 #' Detect columns that differ between the baseline and policy-adjusted frames
 #'
 #' Returns the names of columns whose values differ between
@@ -1055,6 +1912,37 @@ make_step3_decision_table_html <- function(df, subheader = NULL, footnotes = NUL
   )
 }
 
+# Reactable styling for the return-period threshold table (guidelines §6):
+# the frame arrives with RP values already rounded to 2 dp by
+# build_threshold_table_df(); display keeps that precision.
+#' @noRd
+.wise_threshold_reactable <- function(df) {
+  cols <- lapply(names(df), function(nm) {
+    x <- df[[nm]]
+    if (is.numeric(x)) {
+      reactable::colDef(
+        format = reactable::colFormat(digits = 2),
+        class = "wise-dt-wrap"
+      )
+    } else if (is.character(x) || is.factor(x)) {
+      reactable::colDef(class = "wise-dt-wrap", minWidth = 170)
+    } else {
+      reactable::colDef(class = "wise-dt-wrap", minWidth = 70)
+    }
+  })
+  names(cols) <- names(df)
+  reactable::reactable(
+    df,
+    columns = cols,
+    compact = TRUE,
+    searchable = TRUE,
+    defaultPageSize = 10,
+    showPageSizeOptions = TRUE,
+    pageSizeOptions = c(10, 25, 50, 100),
+    highlight = TRUE
+  )
+}
+
 #' Render the UI block for the combined Baseline + Policy results pane.
 #'
 #' Single-pane layout mirroring Step 2's question-based section card structure.
@@ -1199,7 +2087,7 @@ make_step3_decision_table_html <- function(df, subheader = NULL, footnotes = NUL
           layout   = "horizontal"
         )
       ),
-      wise_plot_output(
+      wise_chart_output(
         ns("annual_distribution_plot"),
         "Distribution of annual aggregates across simulated weather years: baseline and policy",
         height = "470px"
@@ -1247,7 +2135,7 @@ make_step3_decision_table_html <- function(df, subheader = NULL, footnotes = NUL
           layout = "horizontal"
         )
       ),
-      wise_plot_output(
+      wise_chart_output(
         ns("adverse_dot_plot"),
         "Expected and adverse-year outcomes: baseline and policy with model ensemble spread",
         height = "380px"
@@ -1292,7 +2180,7 @@ make_step3_decision_table_html <- function(df, subheader = NULL, footnotes = NUL
           layout = "horizontal"
         )
       ),
-      wise_plot_output(
+      wise_chart_output(
         ns("exceedance_plot"),
         "Exceedance probability curves: baseline and policy across climate scenarios",
         height = "400px"
@@ -1321,9 +2209,9 @@ make_step3_decision_table_html <- function(df, subheader = NULL, footnotes = NUL
       class = "results-section-card",
       shiny::div(
         style = "display: flex; justify-content: flex-end; align-items: center; margin-bottom: 8px;",
-        csv_download_link(ns("threshold_csv"), "Download CSV")
+        wise_reactable_csv_button(ns("summary_threshold_table"), "policy_outcome_thresholds")
       ),
-      DT::DTOutput(ns("summary_threshold_table")),
+      reactable::reactableOutput(ns("summary_threshold_table")),
       shiny::tags$p(
         class = "text-muted small",
         style = "margin-top: 8px; margin-bottom: 0;",
@@ -2327,18 +3215,25 @@ make_step3_decision_table_html <- function(df, subheader = NULL, footnotes = NUL
   })
 
   # Section 1: Annual weather variation (baseline and policy) ----
-  output$annual_distribution_plot <- renderPlot({
-    req(timeseries_curves_rv())
-    plot_annual_distribution(
+  # Zero-arg echarts closures shared by the on-screen renders and the export
+  # bundle (guidelines §7 pattern); the ggplot builders remain the static
+  # export reference.
+  annual_distribution_chart <- function() {
+    echart_step3_annual_distribution(
       timeseries_curves_rv(),
       x_label = metric_axis_label(
         input$cmp_agg_method %||% "mean",
         baseline_hist_sim()$so,
         input$cmp_deviation %||% "none"
       ),
-      title = NULL,
-      plot_type = input$annual_distribution_type %||% "violin"
+      plot_type = input$annual_distribution_type %||% "violin",
+      height = "470px"
     )
+  }
+  output$annual_distribution_plot <- echarts4r::renderEcharts4r({
+    ch <- annual_distribution_chart()
+    req(!is.null(ch))
+    ch
   })
   outputOptions(output, "annual_distribution_plot", suspendWhenHidden = TRUE)
 
@@ -2359,20 +3254,22 @@ make_step3_decision_table_html <- function(df, subheader = NULL, footnotes = NUL
     dot
   })
 
-  output$adverse_dot_plot <- renderPlot(
-    {
-      req(adverse_dot_data_rv())
-      plot_step3_adverse_dot(
-        adverse_dot_data_rv(),
-        x_label = metric_axis_label(
-          input$cmp_agg_method %||% "mean",
-          baseline_hist_sim()$so,
-          input$cmp_deviation %||% "none"
-        )
-      )
-    },
-    height = 380
-  )
+  adverse_dot_chart <- function() {
+    echart_step3_adverse_dot(
+      adverse_dot_data_rv(),
+      x_label = metric_axis_label(
+        input$cmp_agg_method %||% "mean",
+        baseline_hist_sim()$so,
+        input$cmp_deviation %||% "none"
+      ),
+      height = "380px"
+    )
+  }
+  output$adverse_dot_plot <- echarts4r::renderEcharts4r({
+    ch <- adverse_dot_chart()
+    req(!is.null(ch))
+    ch
+  })
   outputOptions(output, "adverse_dot_plot", suspendWhenHidden = TRUE)
 
   # Section 4: Decision & return-period table ----
@@ -2406,10 +3303,9 @@ make_step3_decision_table_html <- function(df, subheader = NULL, footnotes = NUL
     threshold_table_df()
   })
 
-  output$threshold_csv <- csv_download_handler(
-    "policy_outcome_thresholds", function() threshold_table_df(),
-    stale = stale
-  )
+  # The threshold table's Download CSV is a client-side
+  # wise_reactable_csv_button() (guidelines §6); the R-side download handler
+  # it replaced is gone.
 
   step3_incidence_data <- reactive({
     res <- tryCatch(decomp_result(), error = function(e) NULL)
@@ -2516,18 +3412,7 @@ make_step3_decision_table_html <- function(df, subheader = NULL, footnotes = NUL
     key = "policy_annual_distribution",
     label = "Annual baseline and policy welfare distribution",
     step = 3L,
-    fun = function() {
-      plot_annual_distribution(
-        timeseries_curves_rv(),
-        x_label = metric_axis_label(
-          input$cmp_agg_method %||% "mean",
-          baseline_hist_sim()$so,
-          input$cmp_deviation %||% "none"
-        ),
-        title = NULL,
-        plot_type = input$annual_distribution_type %||% "violin"
-      )
-    },
+    fun = annual_distribution_chart,
     description = "Annual baseline and policy welfare distribution shown in the comparison panel.",
     width = 10, height = 6.5
   )
@@ -2535,16 +3420,7 @@ make_step3_decision_table_html <- function(df, subheader = NULL, footnotes = NUL
     key = "policy_adverse_distribution",
     label = "Adverse-year baseline and policy welfare",
     step = 3L,
-    fun = function() {
-      plot_step3_adverse_dot(
-        adverse_dot_data_rv(),
-        x_label = metric_axis_label(
-          input$cmp_agg_method %||% "mean",
-          baseline_hist_sim()$so,
-          input$cmp_deviation %||% "none"
-        )
-      )
-    },
+    fun = adverse_dot_chart,
     description = "Adverse-year baseline and policy welfare comparison shown in the comparison panel.",
     width = 10, height = 6.5
   )
@@ -2569,29 +3445,12 @@ make_step3_decision_table_html <- function(df, subheader = NULL, footnotes = NUL
     description = "Technical baseline, policy, and threshold detail table behind the advanced risk view."
   )
 
-  output$summary_threshold_table <- DT::renderDT({
-    req(threshold_table_df())
+  output$summary_threshold_table <- reactable::renderReactable({
     df <- threshold_table_df()
     if (is.null(df) || nrow(df) == 0L) {
-      return(DT::datatable(data.frame(Message = "Insufficient data"),
-        rownames = FALSE, class = "compact stripe",
-        options = list(dom = "t")
-      ))
+      return(.wise_threshold_reactable(data.frame(Note = "Insufficient data")))
     }
-    dt_buttons <- wise_csv_button("policy_outcome_thresholds",
-      enabled = !isTRUE(stale())
-    )
-    DT::datatable(
-      df,
-      rownames = FALSE, class = "compact stripe",
-      options = list(
-        pageLength = 20, dom = wise_csv_dom("tip"),
-        ordering = FALSE,
-        columnDefs = list(list(className = "dt-center", targets = "_all")),
-        buttons = dt_buttons
-      ),
-      extensions = "Buttons"
-    )
+    .wise_threshold_reactable(as.data.frame(df))
   })
   outputOptions(output, "summary_threshold_table", suspendWhenHidden = TRUE)
 
@@ -2625,36 +3484,38 @@ make_step3_decision_table_html <- function(df, subheader = NULL, footnotes = NUL
     width = 10, height = 6.5
   )
 
+  exceedance_chart <- function() {
+    curves <- exceedance_curves_rv()
+    ah <- baseline_agg_hist()
+    if (is.null(curves) || is.null(ah)) {
+      return(NULL)
+    }
+    sel_spread <- input$exceedance_model_spread %||% "none"
+    ens_q <- if (identical(sel_spread, "none")) {
+      c(lo = 0.5, hi = 0.5)
+    } else {
+      resolve_band_q(sel_spread)
+    }
+    echart_exceedance(
+      curves_tbl = curves,
+      x_label = metric_axis_label(
+        input$cmp_agg_method %||% "mean",
+        baseline_hist_sim()$so,
+        input$cmp_deviation %||% "none"
+      ),
+      n_sim_years = nrow(ah$out),
+      logit_x = TRUE,
+      band_q = NULL,
+      ensemble_band_q = ens_q,
+      height = "400px"
+    )
+  }
+
   wise_export_figure(
     key = "policy_exceedance_curve",
     label = "Policy welfare exceedance probability",
     step = 3L,
-    fun = function() {
-      curves <- exceedance_curves_rv()
-      ah <- baseline_agg_hist()
-      if (is.null(curves) || is.null(ah)) {
-        return(NULL)
-      }
-      sel_spread <- input$exceedance_model_spread %||% "none"
-      ens_q <- if (identical(sel_spread, "none")) {
-        c(lo = 0.5, hi = 0.5)
-      } else {
-        resolve_band_q(sel_spread)
-      }
-      enhance_exceedance(
-        curves_tbl = curves,
-        x_label = metric_axis_label(
-          input$cmp_agg_method %||% "mean",
-          baseline_hist_sim()$so,
-          input$cmp_deviation %||% "none"
-        ),
-        return_period = TRUE,
-        n_sim_years = nrow(ah$out),
-        logit_x = TRUE,
-        band_q = NULL,
-        ensemble_band_q = ens_q
-      )
-    },
+    fun = exceedance_chart,
     description = paste(
       "Annual probability of reaching an outcome level in the adverse",
       "direction under baseline and policy across climate scenarios."
@@ -2662,27 +3523,10 @@ make_step3_decision_table_html <- function(df, subheader = NULL, footnotes = NUL
     width = 10, height = 6.5
   )
 
-  output$exceedance_plot <- renderPlot({
-    req(exceedance_curves_rv())
-    sel_spread <- input$exceedance_model_spread %||% "none"
-    ens_q <- if (identical(sel_spread, "none")) {
-      c(lo = 0.5, hi = 0.5)
-    } else {
-      resolve_band_q(sel_spread)
-    }
-    enhance_exceedance(
-      curves_tbl = exceedance_curves_rv(),
-      x_label = metric_axis_label(
-        input$cmp_agg_method %||% "mean",
-        baseline_hist_sim()$so,
-        input$cmp_deviation %||% "none"
-      ),
-      return_period = TRUE,
-      n_sim_years = nrow(baseline_agg_hist()$out),
-      logit_x = TRUE,
-      band_q = NULL,
-      ensemble_band_q = ens_q
-    )
+  output$exceedance_plot <- echarts4r::renderEcharts4r({
+    ch <- exceedance_chart()
+    req(!is.null(ch))
+    ch
   })
   outputOptions(output, "exceedance_plot", suspendWhenHidden = TRUE)
 

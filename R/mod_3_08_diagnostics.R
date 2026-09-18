@@ -6,7 +6,7 @@
   tools::toTitleCase(x)
 }
 
-.format_policy_input_table <- function(df) {
+.policy_input_table_raw <- function(df) {
   if (is.null(df) || !nrow(df)) {
     return(df)
   }
@@ -24,6 +24,14 @@
     stop("Policy input summary must have six or seven columns.")
   }
   df$Variable <- .policy_display_name(df$Variable)
+  df
+}
+
+.format_policy_input_table <- function(df) {
+  df <- .policy_input_table_raw(df)
+  if (is.null(df) || !nrow(df)) {
+    return(df)
+  }
   num_cols <- setdiff(names(df), "Variable")
   df[num_cols] <- lapply(df[num_cols], function(x) fmt_num(x, digits = 2))
   df
@@ -37,15 +45,30 @@
   }, numeric(1L)), vars)
 }
 
-.format_policy_treatment_table <- function(df) {
+.policy_treatment_table_raw <- function(df) {
   if (is.null(df) || !nrow(df)) {
     return(df)
   }
   data.frame(
     `Coverage status` = df$status,
-    `Sample units` = fmt_num(df$n, digits = 0),
-    `Population represented` = fmt_num(df$weighted_n, digits = 0),
-    `Population share` = fmt_num(100 * df$weighted_share, digits = 1, suffix = "%"),
+    `Sample units` = suppressWarnings(as.numeric(df$n)),
+    `Population represented` = suppressWarnings(as.numeric(df$weighted_n)),
+    `Population share` = 100 * suppressWarnings(as.numeric(df$weighted_share)),
+    stringsAsFactors = FALSE,
+    check.names = FALSE
+  )
+}
+
+.format_policy_treatment_table <- function(df) {
+  raw <- .policy_treatment_table_raw(df)
+  if (is.null(raw) || !nrow(raw)) {
+    return(raw)
+  }
+  data.frame(
+    `Coverage status` = raw$`Coverage status`,
+    `Sample units` = fmt_num(raw$`Sample units`, digits = 0),
+    `Population represented` = fmt_num(raw$`Population represented`, digits = 0),
+    `Population share` = fmt_num(raw$`Population share`, digits = 1, suffix = "%"),
     stringsAsFactors = FALSE,
     check.names = FALSE
   )
@@ -92,18 +115,69 @@
   )
 }
 
-.format_policy_component_table <- function(df, analysis_unit = "hh") {
+.policy_component_table_raw <- function(df, analysis_unit = "hh") {
   if (is.null(df) || !nrow(df)) {
     return(df)
   }
   unit_label <- if (identical(analysis_unit, "hh")) "Households affected / covered" else "Observations affected / covered"
   data.frame(
     `Policy component` = df$component,
-    setNames(list(fmt_num(df$n_affected, digits = 0)), unit_label),
-    `Population represented` = fmt_num(df$weighted_affected, digits = 0),
-    `Population share` = fmt_num(100 * df$population_share, digits = 1, suffix = "%"),
-    `Realized cost` = ifelse(is.finite(df$realized_cost), fmt_num(df$realized_cost, digits = 0, prefix = "$"), "—"),
+    setNames(list(suppressWarnings(as.numeric(df$n_affected))), unit_label),
+    `Population represented` = suppressWarnings(as.numeric(df$weighted_affected)),
+    `Population share` = 100 * suppressWarnings(as.numeric(df$population_share)),
+    `Realized cost` = suppressWarnings(as.numeric(df$realized_cost)),
     check.names = FALSE, stringsAsFactors = FALSE
+  )
+}
+
+.format_policy_component_table <- function(df, analysis_unit = "hh") {
+  raw <- .policy_component_table_raw(df, analysis_unit)
+  if (is.null(raw) || !nrow(raw)) {
+    return(raw)
+  }
+  data.frame(
+    `Policy component` = raw$`Policy component`,
+    raw[setdiff(names(raw), c(
+      "Policy component", "Population represented", "Population share", "Realized cost"
+    ))],
+    `Population represented` = fmt_num(raw$`Population represented`, digits = 0),
+    `Population share` = fmt_num(raw$`Population share`, digits = 1, suffix = "%"),
+    `Realized cost` = fmt_num(raw$`Realized cost`, digits = 0, prefix = "$"),
+    check.names = FALSE, stringsAsFactors = FALSE
+  )
+}
+
+# Shared reactable styling for the diagnostics tables (guidelines §6): raw
+# values in the data, display rounding via colFormat; `formats` maps column
+# names to colFormat argument lists. Fallback states pass a single-column
+# Note frame (mod_1_02 pattern).
+#' @noRd
+.wise_diag_reactable <- function(df, formats = list()) {
+  cols <- lapply(names(df), function(nm) {
+    x <- df[[nm]]
+    if (is.numeric(x)) {
+      fmt <- formats[[nm]] %||% list(digits = 2, separators = TRUE)
+      reactable::colDef(
+        format = do.call(reactable::colFormat, fmt),
+        class = "wise-dt-wrap",
+        minWidth = 90
+      )
+    } else if (is.character(x) || is.factor(x)) {
+      reactable::colDef(class = "wise-dt-wrap", minWidth = 170)
+    } else {
+      reactable::colDef(class = "wise-dt-wrap", minWidth = 70)
+    }
+  })
+  names(cols) <- names(df)
+  reactable::reactable(
+    df,
+    columns = cols,
+    compact = TRUE,
+    searchable = TRUE,
+    defaultPageSize = 10,
+    showPageSizeOptions = TRUE,
+    pageSizeOptions = c(10, 25, 50, 100),
+    highlight = TRUE
   )
 }
 
@@ -121,7 +195,11 @@
         class = "diagnostic-note",
         "Before/after summaries use the same baseline units."
       ),
-      DT::DTOutput(ns("diag_summary_table"))
+      shiny::div(
+        class = "wise-reactable-controls",
+        wise_reactable_csv_button(ns("diag_summary_table"), "policy_input_diagnostics")
+      ),
+      reactable::reactableOutput(ns("diag_summary_table"))
     ),
     shiny::h4(
       "How did the policy change the baseline population?",
@@ -154,15 +232,27 @@
         class = "diagnostic-note",
         "Social protection counts positive transfers; other rows count changed covariates. Overlap counts units touched by both. Only social protection has a cost."
       ),
-      DT::DTOutput(ns("transfer_summary_ui")),
-      DT::DTOutput(ns("policy_component_table")),
+      shiny::div(
+        class = "wise-reactable-controls",
+        wise_reactable_csv_button(ns("transfer_summary_ui"), "policy_transfer_summary")
+      ),
+      reactable::reactableOutput(ns("transfer_summary_ui")),
+      shiny::div(
+        class = "wise-reactable-controls",
+        wise_reactable_csv_button(ns("policy_component_table"), "policy_component_summary")
+      ),
+      reactable::reactableOutput(ns("policy_component_table")),
       shiny::h5("Eligibility versus realized social-protection treatment"),
       shiny::tags$p(
         class = "diagnostic-note",
         "Eligibility follows the selected rule; treatment is a positive transfer after errors. Rows show counterfactual assignment, not observed cash receipt."
       ),
       shiny::uiOutput(ns("treatment_explanation_ui")),
-      DT::DTOutput(ns("treatment_table"))
+      shiny::div(
+        class = "wise-reactable-controls",
+        wise_reactable_csv_button(ns("treatment_table"), "policy_treatment_assignment")
+      ),
+      reactable::reactableOutput(ns("treatment_table"))
     ),
   )
 }
@@ -290,17 +380,17 @@ mod_3_08_diagnostics_server <- function(id,
 
     # Transfer summary info box ----
 
-    output$transfer_summary_ui <- DT::renderDT({
+    output$transfer_summary_ui <- reactable::renderReactable({
       d <- diag_data()
       if (is.null(d) || is.list(d) && !is.null(d$status)) {
-        return(DT::datatable(
-          data.frame(Message = "No transfer data available."),
-          rownames = FALSE, options = list(dom = "t")
+        return(.wise_diag_reactable(
+          data.frame(Note = "No transfer data available.")
         ))
       }
       # UI-32: displayed figures are rounded to one decimal, matching the
       # Step 3 sidebar's reach preview (fmt_num()) so the same quantity never
-      # appears at two precisions.
+      # appears at two precisions. Raw values live in the data; rounding is
+      # applied by colFormat.
       df <- data.frame(
         Type = c(
           "Total transfer $ amount (population-level)",
@@ -310,35 +400,26 @@ mod_3_08_diagnostics_server <- function(id,
             unit_word(plural = TRUE, au = d$analysis_unit), ")"
           )
         ),
-        Value = fmt_num(c(d$transfer_sum, d$transfer_pp), prefix = "$"),
+        Value = c(d$transfer_sum, d$transfer_pp),
         stringsAsFactors = FALSE
       )
-      DT::datatable(
-        df,
-        rownames = FALSE, class = "compact stripe",
-        extensions = "Buttons",
-        options = list(
-          dom = wise_csv_dom("t"), ordering = FALSE,
-          buttons = wise_csv_button("policy_transfer_summary", enabled = !isTRUE(stale()))
-        )
-      )
+      .wise_diag_reactable(df, formats = list(
+        Value = list(digits = 1, prefix = "$", separators = TRUE)
+      ))
     })
 
     outputOptions(output, "transfer_summary_ui", suspendWhenHidden = FALSE)
 
     # Summary statistics table ----
 
-    output$diag_summary_table <- DT::renderDT({
+    output$diag_summary_table <- reactable::renderReactable({
       d <- diag_data()
       if (is.null(d)) {
-        return(DT::datatable(
-          data.frame(
-            Message = paste(
-              "Select policy options and run simulation to see ",
-              "diagnostics."
-            )
-          ),
-          rownames = FALSE, options = list(dom = "t")
+        return(.wise_diag_reactable(
+          data.frame(Note = paste(
+            "Select policy options and run simulation to see ",
+            "diagnostics."
+          ))
         ))
       }
       if (is.list(d) && !is.null(d$status)) {
@@ -347,25 +428,20 @@ mod_3_08_diagnostics_server <- function(id,
         } else {
           "Manipulated variables are non-numeric or absent."
         }
-        return(DT::datatable(
-          data.frame(Message = msg),
-          rownames = FALSE, options = list(dom = "t")
-        ))
+        return(.wise_diag_reactable(data.frame(Note = msg)))
       }
 
       vars <- d$manipulated_vars
       if (length(vars) == 0) {
-        return(DT::datatable(
-          data.frame(Message = "No numeric variables to summarize."),
-          rownames = FALSE, options = list(dom = "t")
+        return(.wise_diag_reactable(
+          data.frame(Note = "No numeric variables to summarize.")
         ))
       }
 
       df <- d$input_summary
       if (is.null(df) || nrow(df) == 0) {
-        return(DT::datatable(
-          data.frame(Message = "No numeric variables to summarize."),
-          rownames = FALSE, options = list(dom = "t")
+        return(.wise_diag_reactable(
+          data.frame(Note = "No numeric variables to summarize.")
         ))
       }
 
@@ -373,18 +449,8 @@ mod_3_08_diagnostics_server <- function(id,
       count_label <- if (identical(d$analysis_unit, "hh")) "Households changed" else "Observations changed"
       df[[count_label]] <- unname(counts[df$variable])
       df <- df[, c("variable", count_label, setdiff(names(df), c("variable", count_label))), drop = FALSE]
-      df <- .format_policy_input_table(df)
-
-      DT::datatable(
-        df,
-        rownames = FALSE, class = "compact stripe",
-        extensions = "Buttons",
-        options = list(
-          dom = wise_csv_dom("t"), paging = FALSE,
-          ordering = TRUE,
-          buttons = wise_csv_button("policy_input_diagnostics", enabled = !isTRUE(stale()))
-        )
-      )
+      # Raw values in the data; display rounding lives in colFormat.
+      .wise_diag_reactable(.policy_input_table_raw(df))
     })
 
     outputOptions(output, "diag_summary_table", suspendWhenHidden = FALSE)
@@ -469,7 +535,7 @@ mod_3_08_diagnostics_server <- function(id,
             paste0(toupper(substr(var, 1, 1)), substr(var, 2, nchar(var))),
             style = "margin-bottom: 8px; font-weight: 600;"
           ),
-          wise_plot_output(
+          wise_chart_output(
             ns(paste0("hist_", var)),
             paste("Histogram of", var, "before and after the policy adjustment"),
             height = "300px"
@@ -503,21 +569,25 @@ mod_3_08_diagnostics_server <- function(id,
             var_name <- var
             baseline_vals <- d$baseline_values[[var_name]]
             policy_vals <- d$policy_values[[var_name]]
-
-            output[[paste0("hist_", var_name)]] <- renderPlot({
-              .make_before_after_hist(
-                baseline_vals, policy_vals, var_name
+            # Zero-arg echarts closure shared by the on-screen render and the
+            # export bundle (guidelines §7 pattern).
+            hist_chart <- function() {
+              echart_before_after_hist(
+                baseline_vals, policy_vals, var_name,
+                height = "300px"
               )
+            }
+
+            output[[paste0("hist_", var_name)]] <- echarts4r::renderEcharts4r({
+              ch <- hist_chart()
+              req(!is.null(ch))
+              ch
             })
             wise_export_figure(
               key = paste0("policy_before_after_", var_name),
               label = paste("Policy-adjusted before/after", var_name),
               step = 3L,
-              fun = function() {
-                .make_before_after_hist(
-                  baseline_vals, policy_vals, var_name
-                )
-              },
+              fun = hist_chart,
               description = paste(
                 "Baseline and policy-adjusted distributions for the manipulated",
                 "variable", var_name, "."
@@ -575,17 +645,15 @@ mod_3_08_diagnostics_server <- function(id,
       )
     })
 
-    output$treatment_table <- DT::renderDT({
+    output$treatment_table <- reactable::renderReactable({
       d <- diag_data()
       req(d)
-      df <- d$treatment_matrix
-      DT::datatable(
-        .format_policy_treatment_table(df),
-        rownames = FALSE, class = "compact stripe",
-        extensions = "Buttons",
-        options = list(
-          dom = wise_csv_dom("t"),
-          buttons = wise_csv_button("policy_treatment_assignment", enabled = !isTRUE(stale()))
+      .wise_diag_reactable(
+        .policy_treatment_table_raw(d$treatment_matrix),
+        formats = list(
+          `Sample units` = list(digits = 0, separators = TRUE),
+          `Population represented` = list(digits = 0, separators = TRUE),
+          `Population share` = list(digits = 1, suffix = "%")
         )
       )
     })
@@ -595,18 +663,21 @@ mod_3_08_diagnostics_server <- function(id,
         .policy_treatment_explanation(sp_scenario())
       )
     })
-    output$policy_component_table <- DT::renderDT({
+    output$policy_component_table <- reactable::renderReactable({
       d <- diag_data()
       req(d)
-      DT::datatable(
-        .format_policy_component_table(
-          d$component_matrix, d$analysis_unit
-        ),
-        rownames = FALSE, class = "compact stripe", extensions = "Buttons",
-        options = list(
-          dom = wise_csv_dom("t"), paging = FALSE,
-          ordering = FALSE,
-          buttons = wise_csv_button("policy_component_summary", enabled = !isTRUE(stale()))
+      unit_col <- if (identical(d$analysis_unit, "hh")) {
+        "Households affected / covered"
+      } else {
+        "Observations affected / covered"
+      }
+      .wise_diag_reactable(
+        .policy_component_table_raw(d$component_matrix, d$analysis_unit),
+        formats = list(
+          unit_col = list(digits = 0, separators = TRUE),
+          `Population represented` = list(digits = 0, separators = TRUE),
+          `Population share` = list(digits = 1, suffix = "%"),
+          `Realized cost` = list(digits = 0, prefix = "$", separators = TRUE)
         )
       )
     })
