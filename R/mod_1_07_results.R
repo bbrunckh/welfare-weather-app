@@ -822,6 +822,30 @@ mod_1_07_results_server <- function(id,
             "with 95% CI, p-values and the translated per-+1-SD column."
           )
         )
+        wise_export_table(
+          key = "step1_spec_comparison",
+          label = "Specification comparison",
+          step = 1L,
+          fun = function() {
+            mf <- model_fit_val()
+            if (is.null(mf) || identical(mf$engine, "rif")) {
+              return(NULL)
+            }
+            make_regtable_specs_df(
+              fit1              = extract_native_fit(mf$fit1, mf$engine),
+              fit2              = extract_native_fit(mf$fit2, mf$engine),
+              fit3              = extract_native_fit(mf$fit3, mf$engine),
+              weather_terms     = mf$weather_terms,
+              interaction_terms = mf$interaction_terms,
+              label_fun         = label_fun,
+              has_controls      = has_controls
+            )
+          },
+          description = paste(
+            "Weather and interaction coefficients across the three progressive",
+            "specifications (no FE, FE, FE + controls)."
+          )
+        )
         output$specs_table <- reactable::renderReactable({
           req(model_fit_val())
           mf <- model_fit_val()

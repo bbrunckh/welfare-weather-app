@@ -2440,8 +2440,11 @@ make_weather_binned_stats_reactable <- function(survey_weather, selected_weather
 
 # Shared reactable styling for the weather tables: §6 defaults, 2-decimal
 # display rounding via colFormat over raw values (N stays an integer count).
+# `pct_cols` names share-valued columns (0-100) that keep the same 2-decimal
+# display; declared separately so callers can express intent per column.
 #' @noRd
-.weather_reactable <- function(tab, int_cols = character(0)) {
+.weather_reactable <- function(tab, int_cols = character(0),
+                               pct_cols = character(0)) {
   cols <- lapply(names(tab), function(nm) {
     x <- tab[[nm]]
     if (is.numeric(x) && !identical(nm, "N") && !nm %in% int_cols) {
@@ -2465,7 +2468,7 @@ make_weather_binned_stats_reactable <- function(survey_weather, selected_weather
     tab,
     columns = cols,
     compact = TRUE,
-    searchable = TRUE,
+    searchable = FALSE,
     defaultPageSize = 10,
     showPageSizeOptions = TRUE,
     pageSizeOptions = c(10, 25, 50, 100),

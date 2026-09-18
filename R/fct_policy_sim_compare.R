@@ -1676,7 +1676,7 @@ plot_step3_variance_contribution <- function(var_tbl) {
     df,
     columns = cols,
     compact = TRUE,
-    searchable = TRUE,
+    searchable = FALSE,
     defaultPageSize = 10,
     showPageSizeOptions = TRUE,
     pageSizeOptions = c(10, 25, 50, 100),

@@ -40,7 +40,8 @@ make_stats_vl <- function() {
   )
 }
 
-# Module's stats_base builder, in plain form (PERF-40).
+# The module's real one-pass display base (PERF-42): built exactly as
+# mod_1_02_surveystats builds stats_base().
 build_stats_base <- function(df, vl) {
   policy_vars <- unique(unlist(lapply(POLICY_DEFINITIONS, `[[`, "vars")))
   targets <- unlist(lapply(c("outcome", "ind", "hh", "firm", "area"), function(fc) {
@@ -48,16 +49,13 @@ build_stats_base <- function(df, vl) {
   }), use.names = FALSE)
   union_vars <- intersect(unique(c(targets, policy_vars)), names(df))
   if (!length(union_vars)) return(NULL)
-  list(
-    vars    = union_vars,
-    summary = weighted_summary_long(df, vars = union_vars),
-    missing = if ("countryyear" %in% names(df)) {
-      survey_missingness_long(df, vars = union_vars)
-    } else NULL
-  )
+  stats_display_base(df, vl, union_vars)
 }
 
-test_that("stats_table_frame: shared base reproduces the standalone table (flag path)", {
+# REGRESSION (runtime BFA 2018 walkthrough): stats_table_frame used to read a
+# `base_list$summary` field the display base never carried, so every
+# base-supplied table crashed with "attempt to set an attribute on NULL".
+test_that("stats_table_frame: display base reproduces the standalone table (flag path)", {
   df <- make_stats_df(); vl <- make_stats_vl()
   base <- build_stats_base(df, vl)
 
@@ -65,10 +63,12 @@ test_that("stats_table_frame: shared base reproduces the standalone table (flag 
     standalone <- stats_table_frame(df, vl, flag_col = fc)
     shared     <- stats_table_frame(df, vl, flag_col = fc, base = base)
     expect_identical(standalone, shared, label = paste("flag_col =", fc))
+    # And the slice is the same answer at row-filter cost.
+    expect_identical(shared, stats_display_slice(base, vl, flag_col = fc))
   }
 })
 
-test_that("stats_table_frame: shared base reproduces the standalone table (vars path)", {
+test_that("stats_table_frame: display base reproduces the standalone table (vars path)", {
   df <- make_stats_df(); vl <- make_stats_vl()
   base <- build_stats_base(df, vl)
 
@@ -90,22 +90,11 @@ test_that("stats_table_frame: base missing a variable falls back to local aggreg
   base <- build_stats_base(df, vl)
   # A stale base from before "x2" was added to the union.
   base$vars    <- setdiff(base$vars, "x2")
-  base$summary <- base$summary[base$summary$variable != "x2", ]
-  base$missing <- base$missing[base$missing$variable != "x2", ]
+  base$display <- base$display[base$display$.var != "x2", ]
 
   standalone <- stats_table_frame(df, vl, vars = c("x1", "x2"))
   fallback   <- stats_table_frame(df, vl, vars = c("x1", "x2"), base = base)
   expect_identical(standalone, fallback)
-})
-
-test_that("stats_table_frame: base without missingness joins it locally", {
-  df <- make_stats_df(); vl <- make_stats_vl()
-  base <- build_stats_base(df, vl)
-  base$missing <- NULL
-
-  standalone <- stats_table_frame(df, vl, flag_col = "hh")
-  shared     <- stats_table_frame(df, vl, flag_col = "hh", base = base)
-  expect_identical(standalone, shared)
 })
 
 test_that("stats_table_frame: empty flag set returns the note frame", {

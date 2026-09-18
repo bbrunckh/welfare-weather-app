@@ -383,6 +383,80 @@
 }
 
 
+#' Tidy data frame behind the specification-comparison table (export bundle)
+#'
+#' One row per (term, specification) with model-scale numbers, mirroring the
+#' on-screen three-specification comparison. Returns NULL for the RIF engine
+#' (the tau grid is carried by \code{make_regtable_focused_df()}).
+#'
+#' @inheritParams make_regtable_specs
+#'
+#' @return A data frame (Variable, Group, Specification, Term, Estimate,
+#'   `Std. error`, `p value`), or NULL on failure / the RIF engine.
+#' @noRd
+make_regtable_specs_df <- function(fit1, fit2, fit3, weather_terms,
+                                    interaction_terms, label_fun = identity,
+                                    engine = "fixest", has_controls = TRUE) {
+  if (identical(engine, "rif")) {
+    return(NULL)
+  }
+  tryCatch(
+    {
+      weather_terms <- if (is.null(weather_terms)) character(0) else as.character(weather_terms)
+      weather_terms <- weather_terms[nzchar(weather_terms)]
+      if (!length(weather_terms)) {
+        return(NULL)
+      }
+      lab3 <- if (isTRUE(has_controls)) "(3) FE + Controls" else "(3) FE (no controls selected)"
+      specs <- list("(1) No FE" = fit1, "(2) FE" = fit2)
+      specs[[lab3]] <- fit3
+      coefs <- lapply(specs, .t2_fit_coefs)
+      cf3 <- coefs[[lab3]]
+      if (is.null(cf3)) {
+        return(NULL)
+      }
+      keep <- tryCatch(weather_coef_names(fit3, weather_terms), error = function(e) character(0))
+      keep <- as.character(keep)
+      keep <- keep[keep %in% cf3$term]
+      if (!length(keep)) {
+        return(NULL)
+      }
+      ord <- .t2_ordered_terms(keep, weather_terms, interaction_terms)
+      terms_vec <- c(ord$main, ord$inter)
+      if (!length(terms_vec)) {
+        return(NULL)
+      }
+      rows <- do.call(rbind, unlist(lapply(terms_vec, function(tm) {
+        lapply(names(specs), function(nm) {
+          cf <- coefs[[nm]]
+          r <- if (is.null(cf)) NULL else cf[cf$term == tm, , drop = FALSE]
+          if (is.null(r) || !nrow(r)) {
+            return(NULL)
+          }
+          data.frame(
+            Variable = .t2_var_label(tm, weather_terms, label_fun),
+            Group = if (grepl(":", tm, fixed = TRUE)) "Interactions" else "Weather effects",
+            Specification = nm,
+            Term = tm,
+            Estimate = r$estimate[1],
+            `Std. error` = r$std.error[1],
+            `p value` = r$p.value[1],
+            check.names = FALSE,
+            stringsAsFactors = FALSE,
+            row.names = NULL
+          )
+        })
+      }), recursive = FALSE))
+      if (is.null(rows) || !nrow(rows)) {
+        return(NULL)
+      }
+      rows
+    },
+    error = function(e) NULL
+  )
+}
+
+
 #' Tidy data frame behind the focused regression table (export bundle / CSV)
 #'
 #' One row per weather/interaction term of the full specification (3) with

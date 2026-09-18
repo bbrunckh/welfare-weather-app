@@ -1186,23 +1186,20 @@ stats_table_frame <- function(df, vl, flag_col = NULL, vars = NULL, base = NULL)
     return(data.frame(Note = paste("No", tag, "variables found")))
   }
 
-  # PERF-40: rows come from the module's shared union aggregation whenever
-  # it covers this table's variables; the row filter reproduces the
-  # per-table call exactly because the union pass computes the same
-  # grouped values per variable. Order is settled by the arrange() below
-  # (both key columns are always present on this path). Any base that
-  # does not cover the variables - a standalone caller, or a variable
-  # list that changed after the base was built - falls back to the local
-  # aggregation.
+  # PERF-42: when the module's one-pass display base is supplied it already
+  # carries the full display pipeline (aggregation, missingness, labels, N
+  # filter, sort, renames, wrapping), so a row filter reproduces the
+  # standalone path exactly at a fraction of the cost. The hidden `.var` key
+  # is dropped by the slice; an uncovered variable set returns the Note frame.
+  # A base that predates a newly-requested variable (stale union) falls back
+  # to the local aggregation below.
   base_list <- if (is.function(base)) base() else base
-  shared <- !is.null(base_list) && all(vars %in% base_list$vars)
-
-  tab <- if (shared) {
-    st <- base_list$summary
-    st[st$variable %in% vars, , drop = FALSE]
-  } else {
-    weighted_summary_long(df, vars = vars)
+  if (!is.null(base_list) && !is.null(base_list$display) &&
+      all(vars %in% base_list$vars)) {
+    return(stats_display_slice(base_list, vl, flag_col = flag_col, vars = vars))
   }
+
+  tab <- weighted_summary_long(df, vars = vars)
 
   # Add missingness by survey wave (countryyear) and variable
   if ("variable" %in% names(tab) && "countryyear" %in% names(tab)) {
@@ -1212,19 +1209,8 @@ stats_table_frame <- function(df, vl, flag_col = NULL, vars = NULL, base = NULL)
 
     # Wave-specific missingness by countryyear and variable, in one
     # grouped pass (PERF-09)
-    fill_df <- if (shared) {
-      ms <- base_list$missing
-      if (is.null(ms)) {
-        survey_missingness_long(df, vars)
-      } else {
-        ms[ms$variable %in% vars, , drop = FALSE]
-      }
-    } else {
-      survey_missingness_long(df, vars)
-    }
-
     tab <- tab |>
-      dplyr::left_join(fill_df, by = c("countryyear", "variable"))
+      dplyr::left_join(survey_missingness_long(df, vars), by = c("countryyear", "variable"))
   }
 
   # Show only the readable variable label, falling back to the raw name
@@ -1451,7 +1437,7 @@ make_stats_reactable <- function(survey_data, variable_list, flag_col = NULL,
     tab,
     columns = cols,
     compact = TRUE,
-    searchable = TRUE,
+    searchable = FALSE,
     defaultPageSize = 10,
     showPageSizeOptions = TRUE,
     pageSizeOptions = c(10, 25, 50, 100),
