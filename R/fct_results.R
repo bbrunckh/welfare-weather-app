@@ -2772,3 +2772,1813 @@ plot_importance <- function(model, label_fun = identity) {
     ) +
     theme_wise()
 }
+
+
+# Echarts counterparts of the Results / Model fit figures (guidelines §7) ----
+# The ggplot builders above stay the canonical static renderers (tests and the
+# export fallback use them); these draw the same statistics, computed with the
+# same parameters, as interactive echarts4r widgets.
+
+# Transparent stacked band (lo..hi) plus an estimate line: the echarts idiom
+# replacing ggplot's geom_ribbon. Returns three series (bottom, band, line).
+.e_ribbon_series <- function(nm, x, est, lo, hi, fill, line,
+                             line_width = 2, show_points = FALSE,
+                             point_size = 5, z = 2) {
+  stopifnot(length(x) == length(est), length(lo) == length(x),
+            length(hi) == length(x))
+  ok <- is.finite(x) & is.finite(est) & is.finite(lo) & is.finite(hi)
+  x <- x[ok]; est <- est[ok]; lo <- lo[ok]; hi <- hi[ok]
+  if (!length(x)) {
+    return(NULL)
+  }
+  pts <- function(v) lapply(seq_along(x), function(i) list(x[i], v[i]))
+  list(
+    list(
+      name = nm, type = "line", stack = paste0(nm, "_band"),
+      data = pts(lo), symbol = "none", silent = TRUE, z = z,
+      lineStyle = list(opacity = 0), itemStyle = list(opacity = 0),
+      tooltip = list(show = FALSE), legendHoverLink = FALSE
+    ),
+    list(
+      name = nm, type = "line", stack = paste0(nm, "_band"),
+      data = pts(pmax(hi - lo, 0)), symbol = "none", silent = TRUE, z = z,
+      lineStyle = list(opacity = 0), itemStyle = list(opacity = 0),
+      tooltip = list(show = FALSE), legendHoverLink = FALSE,
+      areaStyle = list(color = fill, opacity = 0.15)
+    ),
+    list(
+      name = nm, type = "line", data = pts(est), symbol = "none", z = z + 1,
+      lineStyle = list(color = line, width = line_width),
+      itemStyle = list(color = line),
+      symbolSize = if (show_points) point_size else 1,
+      showSymbol = show_points
+    )
+  )
+}
+
+# Vertical CI whiskers as per-point markLine segments on an existing series.
+.e_add_whiskers <- function(e, series_idx, x, lo, hi, color = .wise_slate) {
+  ok <- is.finite(x) & is.finite(lo) & is.finite(hi)
+  x <- x[ok]; lo <- lo[ok]; hi <- hi[ok]
+  if (!length(x)) {
+    return(e)
+  }
+  seg <- lapply(seq_along(x), function(i) {
+    list(
+      list(coord = list(x[i], lo[i])),
+      list(coord = list(x[i], hi[i]))
+    )
+  })
+  e$x$opts$series[[series_idx]]$markLine <- list(
+    symbol = "none", silent = TRUE,
+    lineStyle = list(color = color, width = 1),
+    label = list(show = FALSE),
+    animation = FALSE,
+    data = seg
+  )
+  e
+}
+
+#' Echarts coefficient plot across three progressive model fits
+#'
+#' Interactive counterpart of the non-RIF branch of [make_coefplot()]
+#' (guidelines §7): the same coefficient table, 95% CI whiskers, wrapped
+#' labels and specification colours. Rendered only for non-RIF engines (the
+#' RIF quantile curve lives in "Who is most affected?"), so the RIF branch
+#' returns `NULL`.
+#'
+#' @inheritParams make_coefplot
+#' @param height Widget height; a CSS length or a number of pixels.
+#'
+#' @return An `echarts4r` widget, or `NULL`.
+#'
+#' @export
+echart_make_coefplot <- function(fit1, fit2, fit3,
+                                 weather_terms,
+                                 interaction_terms,
+                                 outcome_label = "outcome",
+                                 label_fun = identity,
+                                 engine = "fixest",
+                                 rif_grid = NULL,
+                                 pred_var = NULL,
+                                 x_label = NULL,
+                                 has_controls = TRUE,
+                                 height = "600px") {
+  if (identical(engine, "rif")) {
+    return(invisible(NULL))
+  }
+  if (!requireNamespace("fixest", quietly = TRUE)) {
+    return(echart_blank("Package 'fixest' is required.", height = height))
+  }
+
+  lab3 <- if (isTRUE(has_controls)) "FE + controls" else "FE (no controls selected)"
+  model_list <- list("No FE" = fit1, "FE" = fit2)
+  model_list[[lab3]] <- fit3
+
+  coef_data <- tryCatch({
+    d <- do.call(rbind, lapply(names(model_list), function(model_name) {
+      ct <- tryCatch(.fixest_coeftable(model_list[[model_name]]),
+        error = function(e) NULL
+      )
+      if (is.null(ct)) {
+        return(NULL)
+      }
+      ct$term <- rownames(ct)
+      ct$model <- model_name
+      ct
+    }))
+    if (is.null(d)) {
+      return(NULL)
+    }
+    filter_terms <- if (!is.null(pred_var)) pred_var else weather_terms
+    keep_terms <- weather_coef_names(fit3, filter_terms)
+    d <- d[d$term %in% keep_terms, , drop = FALSE]
+    if (nrow(d) == 0) {
+      return(NULL)
+    }
+    coef_map <- make_coef_map(keep_terms, label_fun)
+    d$label <- names(coef_map)[match(d$term, coef_map)]
+    d$label <- ifelse(is.na(d$label), d$term, d$label)
+    d$conf.low <- d$Estimate - 1.96 * d$`Std. Error`
+    d$conf.high <- d$Estimate + 1.96 * d$`Std. Error`
+    d$label_wrap <- stringr::str_wrap(d$label, 25)
+
+    term_esc <- gsub("([\\[\\]\\(\\)\\^\\$\\.\\*\\+\\?])", "\\\\\\1", filter_terms)
+    weather_pattern <- paste0("\\b(", paste(term_esc, collapse = "|"), ")\\b")
+    protected <- gsub("::", "", d$term, fixed = TRUE)
+    parts <- strsplit(protected, ":", fixed = TRUE)
+    main_part <- vapply(parts, function(p) {
+      hit <- p[grepl(weather_pattern, p)]
+      if (length(hit) == 0) p[1] else hit[1]
+    }, character(1))
+    is_int <- lengths(parts) > 1
+    ord <- order(match(main_part, unique(main_part)), is_int)
+    label_levels <- unique(d$label_wrap[ord])
+    d$label_wrap <- factor(d$label_wrap, levels = rev(label_levels))
+    d
+  }, error = function(e) NULL)
+
+  if (is.null(coef_data) || !nrow(coef_data)) {
+    return(echart_blank("No weather coefficients found to plot.", height = height))
+  }
+
+  model_levels <- c("No FE", "FE", lab3)
+  model_cols <- c("No FE" = "grey72", "FE" = "grey58", setNames("#0072B2", lab3))
+  model_syms <- c("circle", "triangle", "rect")
+
+  y_cats <- rev(levels(coef_data$label_wrap))
+  e <- .e_new(height)
+  series <- lapply(seq_along(model_levels), function(i) {
+    nm <- model_levels[i]
+    d <- coef_data[coef_data$model == nm, , drop = FALSE]
+    if (!nrow(d)) {
+      return(NULL)
+    }
+    list(
+      name = nm, type = "scatter",
+      data = lapply(seq_len(nrow(d)), function(j) {
+        list(d$Estimate[j], as.character(d$label_wrap[j]))
+      }),
+      symbol = model_syms[i], symbolSize = 8,
+      symbolOffset = list(0, c(-7, 0, 7)[i]),
+      itemStyle = list(color = unname(model_cols[[nm]])),
+      markLine = list(
+        symbol = "none", silent = TRUE,
+        lineStyle = list(color = unname(model_cols[[nm]]), width = 1.2),
+        label = list(show = FALSE), animation = FALSE,
+        data = lapply(seq_len(nrow(d)), function(j) {
+          list(
+            list(coord = list(d$conf.low[j], as.character(d$label_wrap[j]))),
+            list(coord = list(d$conf.high[j], as.character(d$label_wrap[j])))
+          )
+        })
+      )
+    )
+  })
+  series <- purrr::compact(series)
+  # Dashed zero reference line rides on the first series' markLine set.
+  series[[1]]$markLine$data <- c(
+    list(list(
+      xAxis = 0,
+      lineStyle = list(color = .wise_zero, type = "dashed", width = 1),
+      label = list(show = FALSE)
+    )),
+    series[[1]]$markLine$data
+  )
+  e$x$opts$series <- series
+  e$x$opts$xAxis <- list(
+    type = "value",
+    name = x_label %||% stringr::str_wrap(paste0("Effect on ", outcome_label), 50),
+    nameLocation = "middle", nameGap = 30,
+    nameTextStyle = wise_eaxis_name(),
+    axisLabel = wise_eaxis_label(),
+    splitLine = wise_esplit_line()
+  )
+  e$x$opts$yAxis <- list(
+    type = "category", data = y_cats,
+    axisLabel = wise_eaxis_label(fontSize = 11),
+    axisLine = list(lineStyle = list(color = .wise_grid)),
+    splitLine = wise_esplit_line()
+  )
+  e$x$opts$legend <- wise_elegend_style(left = 0, bottom = 0)
+  e$x$opts$grid <- list(containLabel = TRUE, left = 8, right = 20, top = 14, bottom = 46)
+  e$x$opts$tooltip <- list(trigger = "item")
+  wise_echart_theme(e)
+}
+
+
+# Shared echarts fragments for the effect / diagnostics builders (guidelines
+# §7). Keep these tiny and generic; branch-specific layout stays in the
+# builders below.
+
+# Horizontal dashed y = 0 reference (geom_hline(yintercept = 0) counterpart).
+.e_zero_line <- function() {
+  list(
+    symbol = "none", silent = TRUE, animation = FALSE,
+    label = list(show = FALSE),
+    lineStyle = list(color = .wise_zero, type = "dashed", width = 1),
+    data = list(list(yAxis = 0))
+  )
+}
+
+# Percent-share axis labels (scales::percent_format counterpart).
+.e_percent_formatter <- function() {
+  htmlwidgets::JS("function(v){return Math.round(100*v)+'%';}")
+}
+
+# Numeric-axis label formatter backed by an R-side lookup table (index ->
+# label), the echarts counterpart of scale_x_continuous(breaks, labels).
+.e_index_formatter <- function(labels) {
+  htmlwidgets::JS(paste0(
+    "function(v){var m=",
+    jsonlite::toJSON(stats::setNames(as.list(labels), as.character(seq_along(labels)))),
+    ";return m[String(Math.round(v))]||'';}"
+  ))
+}
+
+# Bottom-anchored sub-text carrying the ggplot caption. echarts titles do not
+# reserve layout space, so the caller gives the grid extra bottom room.
+.e_caption <- function(e, caption) {
+  if (is.null(caption) || !nzchar(caption)) {
+    return(e)
+  }
+  e$x$opts$title <- c(e$x$opts$title %||% list(), list(
+    list(
+      text = "", subtext = caption, left = 8, bottom = 0,
+      subtextStyle = list(
+        color = .wise_slate, fontSize = 11, fontWeight = "normal"
+      )
+    )
+  ))
+  e
+}
+
+# Dashed vertical tau reference marks with small top labels (mark_taus arg).
+.e_tau_mark_data <- function(taus) {
+  lapply(taus, function(t) {
+    list(
+      xAxis = t,
+      lineStyle = list(color = .wise_zero, type = "dashed", width = 1),
+      label = list(
+        show = TRUE, position = "end",
+        formatter = paste0("\u03c4 = ", formatC(t, format = "f", digits = 1)),
+        color = .wise_slate, fontSize = 10
+      )
+    )
+  })
+}
+
+
+#' Echarts weather effect plot (continuous, binned and RIF branches)
+#'
+#' Interactive counterpart of [make_weather_effect_plot()] (guidelines §7):
+#' the ggplot builder's data preparation is re-used verbatim and drawn as an
+#' `echarts4r` widget. Branch map (same dispatch as the ggplot builder):
+#'
+#' \itemize{
+#'   \item RIF, binned predictor without interactions: one beta(tau) curve per
+#'     bin, faceted one panel per bin (echarts grids) when there is more than
+#'     one bin.
+#'   \item RIF, single term: a single beta(tau) curve panel.
+#'   \item RIF, main + interactions: combined effect per moderator level
+#'     (or the across-moderator average in `mode = "main"`), one panel per
+#'     bin when the predictor is binned.
+#'   \item Binned without moderator: bin pointrange + connecting line.
+#'   \item Binned with moderator: per-moderator overlay with dodged
+#'     pointranges.
+#'   \item Continuous: marginal-effect line with 95% CI ribbon, observed-
+#'     value rug along the bottom edge and a dashed mean reference.
+#'   \item Continuous with moderator: per-moderator marginal-effect curves.
+#' }
+#'
+#' Captions render as a small slate sub-text anchored bottom-left (echarts
+#' has no plot.caption slot); call-side captions pass through unchanged.
+#'
+#' @inheritParams make_weather_effect_plot
+#' @param height Widget height; a CSS length or a number of pixels.
+#'
+#' @return An `echarts4r` widget.
+#'
+#' @export
+echart_weather_effect_plot <- function(fit, pred_var, interaction_terms, is_binned,
+                                       label_fun, engine, selected_weather = NULL,
+                                       weather_df = NULL, rif_grid = NULL,
+                                       mode = "auto", is_logistic = FALSE,
+                                       x_label = NULL, y_label = NULL,
+                                       caption = NULL,
+                                       show_rug = TRUE, show_mean_ref = TRUE,
+                                       mark_taus = NULL,
+                                       effect_scale = "model",
+                                       profile_eta = NULL,
+                                       height = "500px") {
+  tryCatch(
+    {
+      mode <- match.arg(mode, c("auto", "main", "moderated"))
+      effect_scale <- match.arg(effect_scale, c("model", "pp", "pp100", "pct"))
+
+      # --- data preparation copied verbatim from make_weather_effect_plot() --
+      modx_level_label <- function(lab, v) {
+        v_chr <- as.character(v)
+        if (length(v_chr) != 1) v_chr <- v_chr[[1]]
+        num <- suppressWarnings(as.numeric(v_chr))
+        if (!is.na(num) && num %in% c(0, 1)) {
+          paste0(lab, ": ", if (num == 1) "yes" else "no")
+        } else if (!is.na(num)) {
+          paste0(lab, " = ", round(num, 2))
+        } else {
+          paste0(lab, " = ", v_chr)
+        }
+      }
+      .apply_effect_scale <- function(df, est_col = "Estimate",
+                                      lo_col = "conf.low", hi_col = "conf.high") {
+        if (identical(effect_scale, "pp")) {
+          if (!is.finite(profile_eta)) {
+            return(df)
+          }
+          pp_at <- function(b) {
+            100 * (stats::plogis(profile_eta + b) -
+              stats::plogis(profile_eta))
+          }
+          df[[est_col]] <- pp_at(df[[est_col]])
+          df[[lo_col]] <- pp_at(df[[lo_col]])
+          df[[hi_col]] <- pp_at(df[[hi_col]])
+        } else if (identical(effect_scale, "pp100")) {
+          df[[est_col]] <- 100 * df[[est_col]]
+          df[[lo_col]] <- 100 * df[[lo_col]]
+          df[[hi_col]] <- 100 * df[[hi_col]]
+        }
+        df
+      }
+      .t2_bin_label <- function(term, pred_var) {
+        term <- as.character(term)[[1]]
+        pred_esc <- gsub("([\\[\\]\\(\\)\\^\\$\\.\\*\\+\\?])", "\\\\\\1", pred_var)
+        s <- sub(paste0("^", pred_esc, "[\\[\\(]"), "", term)
+        if (identical(s, term)) {
+          return(term)
+        }
+        s <- sub("[])]$", "", s)
+        parts <- trimws(strsplit(s, ",", fixed = TRUE)[[1]])
+        if (length(parts) != 2L || any(!nzchar(parts))) {
+          return(term)
+        }
+        paste0(parts[[1]], "\u2013", parts[[2]])
+      }
+      mm_of <- function(fit) {
+        mm <- resolve_model_matrix(fit)
+        if (!is.null(mm)) {
+          return(mm)
+        }
+        tryCatch(stats::model.frame(fit), error = function(e) NULL)
+      }
+
+      # --- widget plumbing ----------------------------------------------------
+      tau_x_axis <- function(taus) {
+        list(
+          type = "value", min = min(taus), max = max(taus),
+          name = "Welfare quantile",
+          nameLocation = "middle", nameGap = 28,
+          nameTextStyle = wise_eaxis_name(),
+          axisLabel = modifyList(
+            wise_eaxis_label(),
+            list(formatter = .e_percent_formatter())
+          ),
+          splitLine = wise_esplit_line()
+        )
+      }
+      value_y_axis <- function(name) {
+        list(
+          type = "value", scale = TRUE, name = name,
+          nameLocation = "middle", nameGap = 46,
+          nameTextStyle = list(
+            color = .wise_charcoal, fontSize = 14, rotate = 90
+          ),
+          axisLabel = wise_eaxis_label(),
+          splitLine = wise_esplit_line()
+        )
+      }
+      # Bin-index axis with R-side bin labels (dodge is done in data units).
+      bin_x_axis <- function(bin_labels, name) {
+        list(
+          type = "value", min = 0.5, max = length(bin_labels) + 0.5,
+          interval = 1, name = name,
+          nameLocation = "middle", nameGap = 30,
+          nameTextStyle = wise_eaxis_name(),
+          axisLabel = modifyList(
+            wise_eaxis_label(),
+            list(formatter = .e_index_formatter(bin_labels))
+          ),
+          axisTick = list(show = FALSE),
+          splitLine = wise_esplit_line()
+        )
+      }
+      markline_of <- function(extra_data = list()) {
+        ml <- .e_zero_line()
+        if (length(extra_data)) ml$data <- c(ml$data, extra_data)
+        ml
+      }
+      grid_pad <- function(legend, cap) {
+        8 + 22 * legend + 24 * cap
+      }
+
+      # --- RIF branch: weather beta curve across quantiles --------------------
+      if (identical(engine, "rif") && !is.null(rif_grid)) {
+        pred_esc <- gsub("([\\[\\]\\(\\)\\^\\$\\.\\*\\+\\?])", "\\\\\\1", pred_var)
+
+        grid3 <- rif_grid[rif_grid$model == 3L, ]
+        mask <- grepl(paste0("\\b", pred_esc, "\\b"), grid3$term)
+        if (!any(mask)) {
+          return(echart_blank(paste0("No RIF terms found for '", pred_var, "'."),
+            height = height
+          ))
+        }
+        plot_data <- grid3[mask, ]
+
+        taus <- sort(unique(plot_data$tau))
+        plot_data$term_label <- vapply(
+          plot_data$term, function(t) coef_label(t, label_fun), character(1)
+        )
+
+        n_terms <- length(unique(plot_data$term))
+        has_int_terms <- any(grepl(":", plot_data$term, fixed = TRUE))
+        rif_y_lab <- tryCatch(
+          {
+            yv <- as.character(stats::formula(fit)[[2]])
+            paste0("Effect on ", label_fun(yv), " (log points)")
+          },
+          error = function(e) "Effect (log points)"
+        )
+
+      # Facet panels: shared panel setup (echarts grids).
+      panel_ribbon <- function(d, col, panel_idx, point_size, nm = "Effect") {
+        d <- d[order(d$tau), ]
+        tri <- .e_ribbon_series(
+          nm, d$tau, d$estimate, d$conf.low, d$conf.high,
+          fill = col, line = col, line_width = 2,
+          show_points = TRUE, point_size = point_size
+        )
+        lapply(tri, function(s) {
+          s$xAxisIndex <- panel_idx - 1L
+          s$yAxisIndex <- panel_idx - 1L
+          s
+        })
+      }
+
+        if (n_terms > 1 && !has_int_terms) {
+          # Binned predictor without interactions: one beta(tau) curve per bin,
+          # one facet per bin in numeric bin order (verbatim prep).
+          bin_lo <- function(tm) {
+            s <- sub(paste0("^", pred_esc, "[\\[\\(]"), "", tm)
+            suppressWarnings(as.numeric(sub("^([^,]+),.*", "\\1", s)))
+          }
+          tu <- unique(plot_data$term)
+          tu <- tu[order(suppressWarnings(bin_lo(tu)))]
+          lab_map <- stats::setNames(
+            vapply(tu, function(t) .t2_bin_label(t, pred_var), character(1)), tu
+          )
+
+          e <- .e_new(height)
+          e <- .e_multi_grids(e, length(tu), titles = unname(lab_map), height = height)
+          series <- unlist(lapply(seq_along(tu), function(i) {
+            panel_ribbon(plot_data[plot_data$term == tu[i], ], .wise_blue, i, 7)
+          }), recursive = FALSE)
+          for (i in seq_along(tu)) {
+            series[[i * 3L]]$markLine <- markline_of(.e_tau_mark_data(mark_taus))
+          }
+          e$x$opts$series <- series
+          e$x$opts$xAxis <- rep(list(tau_x_axis(taus)), length(tu))
+          yax <- value_y_axis(rif_y_lab)
+          e$x$opts$yAxis <- lapply(seq_along(tu), function(i) {
+            if (i == 1L) yax else {
+              y <- value_y_axis("")
+              y$nameGap <- 8
+              y
+            }
+          })
+          e$x$opts$tooltip <- list(trigger = "axis")
+          e <- .e_caption(e, "Ribbon = 95% CI")
+          e$x$opts$grid <- lapply(e$x$opts$grid, function(g) {
+            modifyList(g, list(bottom = grid_pad(FALSE, TRUE)))
+          })
+          return(wise_echart_theme(e))
+        }
+
+        if (n_terms == 1) {
+          # Single term: simple beta curve.
+          e <- .e_new(height)
+          tri <- panel_ribbon(plot_data, .wise_blue, 1L, 8)
+          tri[[3]]$markLine <- markline_of(.e_tau_mark_data(mark_taus))
+          e$x$opts$series <- tri
+          e$x$opts$xAxis <- list(tau_x_axis(taus))
+          e$x$opts$yAxis <- list(value_y_axis(rif_y_lab))
+          e$x$opts$grid <- list(
+            containLabel = TRUE, left = 8, right = 20, top = 14,
+            bottom = grid_pad(FALSE, TRUE)
+          )
+          e$x$opts$tooltip <- list(trigger = "axis")
+          e <- .e_caption(e, "Ribbon = 95% CI")
+          return(wise_echart_theme(e))
+        }
+
+        # Multiple terms (main + interactions): combined effect per moderator
+        # level (verbatim prep below through the bin factor).
+        protected <- gsub("::", "", plot_data$term, fixed = TRUE)
+        parts <- strsplit(protected, ":", fixed = TRUE)
+        weather_pat <- paste0("\\b", pred_esc, "\\b")
+        is_int_row <- lengths(parts) > 1
+        main_part <- vapply(parts, function(p) {
+          hit <- p[grepl(weather_pat, p)]
+          if (length(hit) == 0) p[1] else hit[1]
+        }, character(1))
+
+        modx_var <- NULL
+        modx_lab <- NULL
+        if (length(interaction_terms) > 0) {
+          pv_pat <- paste0("\\b", pred_esc, "\\b")
+          mt <- interaction_terms[grepl(pv_pat, interaction_terms)]
+          if (length(mt) > 0) {
+            mp <- strsplit(mt[1], ":", fixed = TRUE)[[1]]
+            modx_var <- mp[mp != pred_var][1]
+            if (!is.na(modx_var) && nzchar(modx_var)) {
+              modx_lab <- label_fun(modx_var)
+            }
+          }
+        }
+
+        modx_vals <- c(0, 1)
+        if (!is.null(weather_df) && !is.null(modx_var) &&
+          modx_var %in% names(weather_df)) {
+          mx <- weather_df[[modx_var]]
+          mx <- mx[!is.na(mx)]
+          if (length(mx) > 0) {
+            if (is.numeric(mx)) {
+              u <- sort(unique(mx))
+              if (length(u) <= 5) {
+                modx_vals <- u
+              } else {
+                m <- mean(mx)
+                s <- stats::sd(mx)
+                modx_vals <- c(m - s, m, m + s)
+              }
+            } else {
+              lvls <- if (is.factor(mx)) {
+                levels(droplevels(mx))
+              } else {
+                sort(unique(as.character(mx)))
+              }
+              num_try <- suppressWarnings(as.numeric(lvls))
+              modx_vals <- if (all(!is.na(num_try))) {
+                num_try
+              } else {
+                seq_along(lvls) - 1L
+              }
+            }
+          }
+        }
+
+        plot_data$.bin_id <- main_part
+        main_rows <- plot_data[!is_int_row, , drop = FALSE]
+        int_rows <- plot_data[is_int_row, , drop = FALSE]
+
+        combined <- do.call(rbind, lapply(modx_vals, function(v) {
+          do.call(rbind, lapply(seq_len(nrow(main_rows)), function(j) {
+            mr <- main_rows[j, , drop = FALSE]
+            ir <- int_rows[int_rows$.bin_id == mr$.bin_id &
+              int_rows$tau == mr$tau, , drop = FALSE]
+            ie <- if (nrow(ir) > 0) ir$estimate[1] else 0
+            ise <- if (nrow(ir) > 0) ir$std.error[1] else 0
+            effect <- mr$estimate + v * ie
+            se <- sqrt(mr$std.error^2 + v^2 * ise^2)
+            data.frame(
+              tau = mr$tau,
+              bin_id = mr$.bin_id,
+              bin_label = coef_label(mr$.bin_id, label_fun),
+              modx_val = v,
+              estimate = effect,
+              std.error = se,
+              conf.low = effect - 1.96 * se,
+              conf.high = effect + 1.96 * se,
+              stringsAsFactors = FALSE
+            )
+          }))
+        }))
+
+        modx_lab_print <- modx_lab %||% (modx_var %||% "moderator")
+        combined$modx_label <- vapply(
+          combined$modx_val,
+          function(v) modx_level_label(modx_lab_print, v),
+          character(1)
+        )
+        combined$modx_label <- factor(
+          combined$modx_label,
+          levels = unique(combined$modx_label[order(combined$modx_val)])
+        )
+
+        if (identical(mode, "main")) {
+          combined <- combined |>
+            dplyr::group_by(.data$tau, .data$bin_id, .data$bin_label) |>
+            dplyr::summarise(
+              estimate = mean(.data$estimate, na.rm = TRUE),
+              std.error = sqrt(mean(.data$std.error^2, na.rm = TRUE)),
+              conf.low = mean(.data$conf.low, na.rm = TRUE),
+              conf.high = mean(.data$conf.high, na.rm = TRUE),
+              .groups = "drop"
+            ) |>
+            dplyr::mutate(modx_label = "Average across moderator levels")
+        }
+
+        bin_ids_raw <- unique(main_rows$.bin_id)
+        .bin_lower <- function(b) {
+          s <- sub(paste0("^", pred_esc, "[\\[\\(]"), "", b)
+          suppressWarnings(as.numeric(sub("^([^,]+),.*", "\\1", s)))
+        }
+        ord <- order(.bin_lower(bin_ids_raw))
+        bin_ids_ordered <- bin_ids_raw[ord]
+        bin_levels <- vapply(
+          bin_ids_ordered,
+          function(b) coef_label(b, label_fun),
+          character(1)
+        )
+        combined$bin_label <- factor(combined$bin_label, levels = bin_levels)
+        n_bins <- length(bin_levels)
+
+        modx_levels <- levels(combined$modx_label)
+        cols <- stats::setNames(.wise_cat[seq_along(modx_levels)], modx_levels)
+        rif_cap <- if (identical(mode, "main")) {
+          "Line and ribbon average the estimated effect across moderator levels; ribbon = 95% CI (cov(main, interaction) omitted)."
+        } else {
+          "Ribbon = 95% CI (cov(main, interaction) omitted)"
+        }
+        has_legend <- length(modx_levels) > 1L
+
+        e <- .e_new(height)
+        if (n_bins > 1) {
+          e <- .e_multi_grids(e, n_bins, titles = bin_levels, height = height)
+          panel_trios <- lapply(seq_len(n_bins), function(bi) {
+            trios <- lapply(seq_along(modx_levels), function(mi) {
+              d <- combined[combined$bin_label == bin_levels[bi] &
+                combined$modx_label == modx_levels[mi], , drop = FALSE]
+              if (!nrow(d)) {
+                return(NULL)
+              }
+              panel_ribbon(d, unname(cols[mi]), bi, 7, nm = modx_levels[mi])
+            })
+            trios <- purrr::compact(trios)
+            if (length(trios)) trios[[1]][[3]]$markLine <-
+              markline_of(.e_tau_mark_data(mark_taus))
+            trios
+          })
+          series <- unlist(unlist(panel_trios, recursive = FALSE),
+            recursive = FALSE
+          )
+          e$x$opts$xAxis <- rep(list(tau_x_axis(taus)), n_bins)
+          e$x$opts$yAxis <- lapply(seq_len(n_bins), function(i) {
+            if (i == 1L) value_y_axis(rif_y_lab) else {
+              y <- value_y_axis("")
+              y$nameGap <- 8
+              y
+            }
+          })
+          e$x$opts$grid <- lapply(e$x$opts$grid, function(g) {
+            modifyList(g, list(bottom = grid_pad(has_legend, TRUE)))
+          })
+        } else {
+          series <- unlist(lapply(seq_along(modx_levels), function(mi) {
+            d <- combined[combined$modx_label == modx_levels[mi], , drop = FALSE]
+            if (!nrow(d)) {
+              return(NULL)
+            }
+            panel_ribbon(d, unname(cols[mi]), 1L, 7)
+          }), recursive = FALSE)
+          series[[3]]$markLine <- markline_of(.e_tau_mark_data(mark_taus))
+          e$x$opts$xAxis <- list(tau_x_axis(taus))
+          e$x$opts$yAxis <- list(value_y_axis(rif_y_lab))
+          e$x$opts$grid <- list(
+            containLabel = TRUE, left = 8, right = 20, top = 14,
+            bottom = grid_pad(has_legend, TRUE)
+          )
+        }
+        if (has_legend) {
+          e$x$opts$legend <- wise_elegend_style(left = 0, bottom = 0)
+        }
+        e$x$opts$series <- series
+        e$x$opts$tooltip <- list(trigger = "axis")
+        e <- .e_caption(e, rif_cap)
+        return(wise_echart_theme(e))
+      }
+
+      pred_lab <- label_fun(pred_var)
+      pred_x_lab <- x_label %||% paste0(pred_var, " (", pred_lab, ")")
+      y_var_name <- tryCatch(
+        as.character(stats::formula(fit)[[2]]),
+        error = function(e) "outcome"
+      )
+      y_lab <- label_fun(y_var_name)
+      cap_text <- caption %||% (
+        if (isTRUE(is_logistic)) {
+          paste(
+            "Line = marginal effect (95% CI); curved with polynomial terms,",
+            "flat for linear ones. pp at the median-risk household."
+          )
+        } else {
+          paste(
+            "Line = marginal effect (95% CI); curved with polynomial terms,",
+            "flat for linear ones."
+          )
+        }
+      )
+
+      mf <- mm_of(fit)
+
+      pred_esc <- gsub("([\\[\\]\\(\\)\\^\\$\\.\\*\\+\\?])", "\\\\\\1", pred_var)
+
+      if (!is.null(mf) && pred_var %in% names(mf) && !is_binned) {
+        pred_cols <- pred_var
+      } else if (!is.null(mf) && is_binned) {
+        pred_cols <- grep(paste0("^", pred_esc, "[\\[\\(]"), names(mf), value = TRUE)
+      } else {
+        pred_cols <- character(0)
+      }
+
+      if (!length(pred_cols)) {
+        return(echart_blank(paste0("'", pred_var, "' not found in model frame."),
+          height = height
+        ))
+      }
+
+      # ===================================================================== #
+      # BINNED PATH                                                           #
+      # ===================================================================== #
+      if (is_binned) {
+        return(tryCatch(
+          {
+            if (!requireNamespace("fixest", quietly = TRUE)) {
+              return(echart_blank("Package 'fixest' is required.", height = height))
+            }
+
+            mm <- mm_of(fit)
+            if (is.null(mm)) {
+              return(echart_blank("Model matrix unavailable.", height = height))
+            }
+            ct <- .fixest_coeftable(fit)
+            ct$term <- rownames(ct)
+
+            bin_cols <- grep(paste0("^", pred_esc, "[\\[\\(]"), names(mm), value = TRUE)
+            bin_cols <- bin_cols[!grepl(":", bin_cols)]
+            if (length(bin_cols) == 0) {
+              return(echart_blank("No binned columns found in model matrix.",
+                height = height
+              ))
+            }
+
+            ct_main <- ct[
+              grepl(paste0("^", pred_esc, "[\\[\\(]"), ct$term) & !grepl(":", ct$term),
+              c("term", "Estimate", "Std. Error"),
+              drop = FALSE
+            ]
+
+            .bin_lower <- function(b) {
+              s <- sub(paste0("^", pred_esc, "[\\[\\(]"), "", b)
+              suppressWarnings(as.numeric(sub("^([^,]+),.*", "\\1", s)))
+            }
+            bin_cols <- bin_cols[order(.bin_lower(bin_cols))]
+
+            omitted_note <- NULL
+            if (!is.null(weather_df)) {
+              first_bin <- get_first_bin_label(weather_df, pred_var)
+              if (!is.na(first_bin) && nzchar(first_bin)) {
+                omitted_note <- paste0("Omitted reference bin: ", first_bin, " at y = 0.")
+              }
+            }
+
+            bins_df <- data.frame(term = bin_cols, stringsAsFactors = FALSE)
+            bins_df <- dplyr::left_join(bins_df, ct_main, by = "term")
+            bins_df$Estimate[is.na(bins_df$Estimate)] <- 0
+            bins_df$`Std. Error`[is.na(bins_df$`Std. Error`)] <- 0
+            bins_df$bin_index <- seq_len(nrow(bins_df))
+            bins_df$bin_label <- vapply(
+              bins_df$term, .t2_bin_label, character(1),
+              pred_var = pred_var
+            )
+
+            modx_var <- NULL
+            modx_lab <- NULL
+            if (length(interaction_terms) > 0) {
+              pv_pat <- paste0("\\b", pred_esc, "\\b")
+              mt <- interaction_terms[grepl(pv_pat, interaction_terms)]
+              if (length(mt) > 0) {
+                parts <- strsplit(mt[1], ":")[[1]]
+                modx_var <- parts[parts != pred_var][1]
+                if (!is.na(modx_var) && nzchar(modx_var)) modx_lab <- label_fun(modx_var)
+              }
+            }
+
+            if (identical(mode, "main")) {
+              modx_var <- NULL
+              modx_lab <- NULL
+            } else if (identical(mode, "moderated") && is.null(modx_var)) {
+              return(echart_blank(paste0("No moderator specified for '", pred_var, "'."),
+                height = height
+              ))
+            }
+
+            cap_binned <- paste(c(omitted_note, caption), collapse = " ")
+            cap_binned <- if (is.null(cap_binned) || !nzchar(cap_binned)) {
+              NULL
+            } else {
+              cap_binned
+            }
+
+            e <- .e_new(height)
+
+            if (is.null(modx_var)) {
+              bins_df$conf.low <- bins_df$Estimate - 1.96 * bins_df$`Std. Error`
+              bins_df$conf.high <- bins_df$Estimate + 1.96 * bins_df$`Std. Error`
+              bins_df <- .apply_effect_scale(bins_df)
+
+              # Pointrange over bins + connecting line: a scatter series with
+              # per-point markLine whiskers plus a thin line behind it.
+              pts <- lapply(seq_len(nrow(bins_df)), function(i) {
+                list(bins_df$bin_index[i], bins_df$Estimate[i])
+              })
+              line <- list(
+                name = "Effect", type = "line",
+                data = pts, symbol = "none", silent = TRUE, z = 1,
+                lineStyle = list(color = .wise_blue, width = 1),
+                itemStyle = list(color = .wise_blue),
+                tooltip = list(show = FALSE)
+              )
+              dots <- list(
+                name = "Effect", type = "scatter", data = pts,
+                symbolSize = 8, z = 2,
+                itemStyle = list(color = .wise_blue),
+                markLine = list(
+                  symbol = list("none", "none"), silent = TRUE,
+                  animation = FALSE,
+                  lineStyle = list(color = .wise_slate, width = 1),
+                  label = list(show = FALSE),
+                  data = c(
+                    .e_zero_line()$data,
+                    lapply(seq_len(nrow(bins_df)), function(i) {
+                      list(list(
+                        coord = list(bins_df$bin_index[i], bins_df$conf.low[i])
+                      ), list(
+                        coord = list(bins_df$bin_index[i], bins_df$conf.high[i])
+                      ))
+                    })
+                  )
+                )
+              )
+              e$x$opts$series <- list(line, dots)
+              e$x$opts$xAxis <- list(bin_x_axis(bins_df$bin_label, pred_x_lab))
+              e$x$opts$yAxis <- list(value_y_axis(
+                y_label %||% paste("Effect on", y_lab)
+              ))
+              e$x$opts$grid <- list(
+                containLabel = TRUE, left = 8, right = 20, top = 14,
+                bottom = grid_pad(FALSE, !is.null(cap_binned))
+              )
+              e$x$opts$tooltip <- list(trigger = "axis")
+              e <- .e_caption(e, cap_binned)
+              return(wise_echart_theme(e))
+            }
+
+            # Moderator present: overlay lines (verbatim prep).
+            ct_int <- ct[
+              grepl(paste0(pred_esc, "[\\[\\(]"), ct$term) &
+                grepl(":", ct$term) &
+                grepl(modx_var, ct$term, fixed = TRUE),
+              c("term", "Estimate", "Std. Error"),
+              drop = FALSE
+            ]
+            int_est <- stats::setNames(ct_int$Estimate, ct_int$term)
+            int_se <- stats::setNames(ct_int$`Std. Error`, ct_int$term)
+
+            if (modx_var %in% names(mm)) {
+              modx_vals <- sort(unique(mm[[modx_var]]))
+              if (length(modx_vals) > 5 && is.numeric(modx_vals)) {
+                mu <- mean(mm[[modx_var]], na.rm = TRUE)
+                sd <- stats::sd(mm[[modx_var]], na.rm = TRUE)
+                modx_vals <- c(mu - sd, mu, mu + sd)
+              }
+            } else {
+              modx_vals <- c(0, 1)
+            }
+
+            plot_df <- do.call(
+              rbind,
+              lapply(seq_len(nrow(bins_df)), function(i) {
+                bin_term <- bins_df$term[i]
+                b0 <- bins_df$Estimate[i]
+                v0 <- bins_df$`Std. Error`[i]^2
+
+                t1 <- paste0(bin_term, ":", modx_var)
+                t2 <- paste0(modx_var, ":", bin_term)
+                iterm <- if (t1 %in% names(int_est)) t1 else if (t2 %in% names(int_est)) t2 else NA_character_
+                has_int <- !is.na(iterm)
+
+                do.call(rbind, lapply(modx_vals, function(mv) {
+                  b <- b0 + if (has_int) int_est[[iterm]] * mv else 0
+                  s <- sqrt(v0 + if (has_int) (mv^2) * int_se[[iterm]]^2 else 0)
+                  data.frame(
+                    bin_index = bins_df$bin_index[i],
+                    bin_label = bins_df$bin_label[i],
+                    est = b,
+                    conf.low = b - 1.96 * s,
+                    conf.high = b + 1.96 * s,
+                    modx = as.character(mv),
+                    stringsAsFactors = FALSE
+                  )
+                }))
+              })
+            )
+
+            plot_df <- plot_df[order(plot_df$modx, plot_df$bin_index), , drop = FALSE]
+            plot_df <- .apply_effect_scale(plot_df, est_col = "est")
+            modx_u <- sort(unique(plot_df$modx))
+            modx_labels <- vapply(
+              modx_u, function(v) modx_level_label(modx_lab, v),
+              character(1)
+            )
+            plot_df$modx <- factor(plot_df$modx, levels = modx_u, labels = modx_labels)
+
+            # Dodge in data units so lines, points and whiskers share offsets.
+            dodge <- 0.14
+            offs <- stats::setNames(
+              (seq_along(modx_u) - (length(modx_u) + 1) / 2) * dodge,
+              modx_labels
+            )
+            cols <- stats::setNames(
+              .wise_cat[seq_along(modx_labels)], modx_labels
+            )
+
+            series <- unlist(lapply(seq_along(modx_labels), function(mi) {
+              lab <- modx_labels[mi]
+              d <- plot_df[plot_df$modx == lab, , drop = FALSE]
+              d <- d[order(d$bin_index), , drop = FALSE]
+              if (!nrow(d)) {
+                return(NULL)
+              }
+              dx <- unname(offs[[lab]])
+              col <- unname(cols[mi])
+              pts <- lapply(seq_len(nrow(d)), function(i) {
+                list(d$bin_index[i] + dx, d$est[i])
+              })
+              line <- list(
+                name = lab, type = "line", data = pts,
+                symbol = "none", silent = TRUE, z = 1,
+                lineStyle = list(color = col, width = 1),
+                itemStyle = list(color = col),
+                tooltip = list(show = FALSE)
+              )
+              whisk <- lapply(seq_len(nrow(d)), function(i) {
+                list(list(
+                  coord = list(d$bin_index[i] + dx, d$conf.low[i])
+                ), list(
+                  coord = list(d$bin_index[i] + dx, d$conf.high[i])
+                ))
+              })
+              dots <- list(
+                name = lab, type = "scatter", data = pts,
+                symbolSize = 6, z = 2,
+                itemStyle = list(color = col),
+                markLine = list(
+                  symbol = list("none", "none"), silent = TRUE,
+                  animation = FALSE,
+                  lineStyle = list(color = .wise_slate, width = 1),
+                  label = list(show = FALSE),
+                  data = c(.e_zero_line()$data, whisk)
+                )
+              )
+              list(line, dots)
+            }), recursive = FALSE)
+
+            e$x$opts$series <- series
+            e$x$opts$xAxis <- list(bin_x_axis(bins_df$bin_label, pred_x_lab))
+            e$x$opts$yAxis <- list(value_y_axis(
+              y_label %||% paste("Effect on", y_lab)
+            ))
+            e$x$opts$legend <- wise_elegend_style(left = 0, bottom = 0)
+            e$x$opts$grid <- list(
+              containLabel = TRUE, left = 8, right = 20, top = 14,
+              bottom = grid_pad(TRUE, !is.null(cap_binned))
+            )
+            e$x$opts$tooltip <- list(trigger = "axis")
+            e <- .e_caption(e, cap_binned)
+            wise_echart_theme(e)
+          },
+          error = function(e) echart_blank(paste0("Binned effect plot error: ", conditionMessage(e)),
+            height = height
+          )
+        ))
+      }
+
+      # ===================================================================== #
+      # CONTINUOUS PATH: marginal effect of weather vs weather level          #
+      # ===================================================================== #
+      pred_vals <- mf[[pred_var]]
+
+      if (!any(is.finite(pred_vals))) {
+        return(echart_blank(paste0(
+          "No finite values for '", pred_var, "' - cannot build effect plot."
+        ), height = height))
+      }
+
+      if (!requireNamespace("fixest", quietly = TRUE)) {
+        return(echart_blank("Package 'fixest' is required.", height = height))
+      }
+
+      modx_var <- NULL
+      modx_lab <- NULL
+      if (length(interaction_terms) > 0) {
+        match_term <- grep(paste0("^", pred_var, ":"), interaction_terms, value = TRUE)
+        if (length(match_term) > 0) {
+          modx_var <- strsplit(match_term[1], ":")[[1]][2]
+          modx_lab <- label_fun(modx_var)
+        }
+      }
+
+      if (identical(mode, "main")) {
+        modx_var <- NULL
+        modx_lab <- NULL
+      } else if (identical(mode, "moderated") &&
+        (is.null(modx_var) || !modx_var %in% names(mf))) {
+        return(echart_blank(paste0("No moderator specified for '", pred_var, "'."),
+          height = height
+        ))
+      }
+
+      tryCatch(
+        {
+          mm <- mm_of(fit)
+          if (is.null(mm)) {
+            return(echart_blank("Model matrix unavailable.", height = height))
+          }
+          betas <- stats::coef(fit)
+          vcov_m <- .fixest_vcov(fit)
+          n_grid <- 100L
+
+          # Marginal effect gradient (verbatim from the ggplot builder).
+          grad_w <- function(nm, x, mv) {
+            if (identical(nm, pred_var)) {
+              return(1)
+            }
+            if (.s1_is_poly_term(nm, pred_var, 2)) {
+              return(2 * x)
+            }
+            if (.s1_is_poly_term(nm, pred_var, 3)) {
+              return(3 * x^2)
+            }
+            if (grepl(":", nm, fixed = TRUE)) {
+              parts <- strsplit(nm, ":", fixed = TRUE)[[1]]
+              w <- 1
+              has_x <- FALSE
+              for (pp in parts) {
+                if (identical(pp, pred_var)) {
+                  has_x <- TRUE
+                } else if (.s1_is_poly_term(pp, pred_var, 2)) {
+                  w <- w * (2 * x)
+                  has_x <- TRUE
+                } else if (.s1_is_poly_term(pp, pred_var, 3)) {
+                  w <- w * (3 * x^2)
+                  has_x <- TRUE
+                } else {
+                  w <- w * mv
+                }
+              }
+              return(if (has_x) w else 0)
+            }
+            0
+          }
+
+          slope_grid <- function(mv) {
+            W <- matrix(0,
+              nrow = length(x_seq), ncol = length(betas),
+              dimnames = list(NULL, names(betas))
+            )
+            for (nm in colnames(mm)) {
+              if (!nm %in% colnames(W)) next
+              W[, nm] <- vapply(x_seq, function(xx) grad_w(nm, xx, mv), numeric(1))
+            }
+            ok <- !is.na(betas)
+            est <- as.numeric(W[, ok, drop = FALSE] %*% betas[ok])
+            se <- sqrt(pmax(0, rowSums((W[, ok, drop = FALSE] %*%
+              vcov_m[ok, ok, drop = FALSE]) * W[, ok, drop = FALSE])))
+            data.frame(x = x_seq, est = est, se = se)
+          }
+
+          .slope_scale <- function(d) {
+            if (identical(effect_scale, "pct")) {
+              f <- function(v) 100 * (exp(v) - 1)
+              data.frame(
+                x = d$x, fit = f(d$est),
+                lo = f(d$est - 1.96 * d$se), hi = f(d$est + 1.96 * d$se)
+              )
+            } else if (identical(effect_scale, "pp")) {
+              if (is.finite(profile_eta)) {
+                f <- 100 * stats::plogis(profile_eta) * (1 - stats::plogis(profile_eta))
+              } else {
+                f <- 1
+              }
+              data.frame(
+                x = d$x, fit = f * d$est,
+                lo = f * (d$est - 1.96 * d$se), hi = f * (d$est + 1.96 * d$se)
+              )
+            } else if (identical(effect_scale, "pp100")) {
+              data.frame(
+                x = d$x, fit = 100 * d$est,
+                lo = 100 * (d$est - 1.96 * d$se), hi = 100 * (d$est + 1.96 * d$se)
+              )
+            } else {
+              data.frame(
+                x = d$x, fit = d$est,
+                lo = d$est - 1.96 * d$se, hi = d$est + 1.96 * d$se
+              )
+            }
+          }
+
+          mean_x <- mean(mm[[pred_var]], na.rm = TRUE)
+          rug_x <- if (isTRUE(show_rug)) {
+            rx <- mm[[pred_var]]
+            rx <- rx[is.finite(rx)]
+            rx
+          } else {
+            numeric(0)
+          }
+
+          x_seq <- seq(min(mm[[pred_var]], na.rm = TRUE),
+            max(mm[[pred_var]], na.rm = TRUE),
+            length.out = n_grid
+          )
+
+          curves <- if (!is.null(modx_var) && modx_var %in% names(mm)) {
+            modx_col <- mm[[modx_var]]
+            modx_uniq <- sort(unique(modx_col))
+            is_cat_modx <- is.factor(modx_col) || is.character(modx_col) ||
+              length(modx_uniq) <= 5
+
+            modx_vals <- if (is_cat_modx) {
+              modx_uniq
+            } else {
+              modx_mean <- mean(modx_col, na.rm = TRUE)
+              modx_sd <- stats::sd(modx_col, na.rm = TRUE)
+              c(modx_mean - modx_sd, modx_mean, modx_mean + modx_sd)
+            }
+
+            stats::setNames(
+              lapply(modx_vals, function(mv) .slope_scale(slope_grid(mv))),
+              vapply(
+                modx_vals, function(v) modx_level_label(modx_lab, v),
+                character(1)
+              )
+            )
+          } else {
+            list("Marginal effect" = .slope_scale(slope_grid(0)))
+          }
+
+          y_r <- range(unlist(lapply(curves, function(d) c(d$lo, d$hi))),
+            na.rm = TRUE
+          )
+          pad <- 0.06 * (diff(y_r) %||% 1)
+          rug_y <- y_r[1] - pad
+          rug_series <- if (length(rug_x)) {
+            list(list(
+              name = "Observed", type = "scatter",
+              data = lapply(rug_x, function(v) list(v, rug_y)),
+              symbol = "rect", symbolSize = list(1.5, 9),
+              itemStyle = list(color = .wise_slate, opacity = 0.15),
+              silent = TRUE, z = 1, tooltip = list(show = FALSE),
+              xAxisIndex = 0, yAxisIndex = 0
+            ))
+          } else {
+            list()
+          }
+
+          mean_mark <- if (isTRUE(show_mean_ref) && is.finite(mean_x)) {
+            list(list(
+              xAxis = mean_x,
+              lineStyle = list(color = .wise_slate, type = "dashed", width = 1),
+              label = list(
+                show = TRUE, position = "insideEndTop", formatter = "mean",
+                color = .wise_slate, fontSize = 10
+              )
+            ))
+          } else {
+            list()
+          }
+
+          has_legend <- length(curves) > 1L
+          cols <- stats::setNames(
+            if (has_legend) .wise_cat[seq_along(curves)] else .wise_blue,
+            names(curves)
+          )
+
+          ribbon_trios <- lapply(seq_along(curves), function(i) {
+            d <- curves[[i]]
+            col <- unname(cols[i])
+            .e_ribbon_series(names(curves)[i], d$x, d$fit, d$lo, d$hi,
+              fill = col, line = col, line_width = 2
+            )
+          })
+          series <- unlist(ribbon_trios, recursive = FALSE)
+          if (length(rug_series)) series <- c(series, rug_series)
+          last_curve <- 3L * length(curves)
+          series[[last_curve]]$markLine <- markline_of(mean_mark)
+
+          e <- .e_new(height)
+          e$x$opts$series <- series
+          e$x$opts$xAxis <- list(list(
+            type = "value", name = pred_x_lab,
+            nameLocation = "middle", nameGap = 30,
+            nameTextStyle = wise_eaxis_name(),
+            axisLabel = wise_eaxis_label(),
+            splitLine = wise_esplit_line()
+          ))
+          e$x$opts$yAxis <- list(value_y_axis(
+            y_label %||% paste("Change in", y_lab, "per +1 unit")
+          ))
+          e$x$opts$yAxis[[1]]$min <- rug_y
+          e$x$opts$yAxis[[1]]$max <- y_r[2] + pad
+          if (has_legend) {
+            e$x$opts$legend <- wise_elegend_style(left = 0, bottom = 0)
+          }
+          e$x$opts$grid <- list(
+            containLabel = TRUE, left = 8, right = 20, top = 14,
+            bottom = grid_pad(has_legend, TRUE)
+          )
+          e$x$opts$tooltip <- list(trigger = "axis")
+          e <- .e_caption(e, cap_text)
+          wise_echart_theme(e)
+        },
+        error = function(e) echart_blank(paste0("fixest effect plot error: ", conditionMessage(e)),
+          height = height
+        )
+      )
+    },
+    error = function(e) echart_blank(paste0("Effect plot error: ", conditionMessage(e)),
+      height = height
+    )
+  )
+}
+
+
+
+# Echarts counterparts of the Model fit figures (guidelines §7) ---------------
+
+# Shared-bin histogram shares: counts of `x` in `breaks` as % of the pooled
+# two-sample total, with bin midpoints as category labels. Mirrors the
+# ggplot histogram prep (bins = 30, y = 100 * count / sum(count)).
+.e_hist_shares <- function(x, breaks) {
+  h <- graphics::hist(x, breaks = breaks, plot = FALSE)
+  data.frame(
+    mid = (head(breaks, -1) + tail(breaks, -1)) / 2,
+    share = 100 * h$counts / sum(h$counts),
+    stringsAsFactors = FALSE
+  )
+}
+
+
+#' Echarts importance plot (squared standardized coefficient shares)
+#'
+#' Interactive counterpart of [plot_importance()] (guidelines §7): horizontal
+#' bars of each term's share of the sum of squared standardized coefficients,
+#' same data preparation, largest share at the top. The ggplot subtitle is
+#' carried by the section heading, so it is not repeated in the widget.
+#'
+#' @inheritParams plot_importance
+#' @param height Widget height; a CSS length or a number of pixels.
+#'
+#' @return An `echarts4r` widget.
+#'
+#' @export
+echart_importance <- function(model, label_fun = identity, height = "400px") {
+  mm <- resolve_model_matrix(model)
+  if (is.null(mm)) {
+    return(echart_blank("Model matrix unavailable.", height = height))
+  }
+
+  coefs <- stats::coef(model)
+  keep <- names(coefs) != "(Intercept)" & names(coefs) %in% names(mm)
+  beta <- coefs[keep]
+  if (!length(beta)) {
+    return(echart_blank("No estimable terms.", height = height))
+  }
+
+  X <- mm[, names(beta), drop = FALSE]
+  sd_x <- apply(X, 2, stats::sd, na.rm = TRUE)
+  sd_x[is.na(sd_x)] <- 0
+
+  imp <- abs(as.numeric(beta)) * as.numeric(sd_x)
+  tot <- sum(imp^2)
+  if (!is.finite(tot) || tot <= 0) {
+    return(echart_blank("No variation to decompose.", height = height))
+  }
+
+  df <- data.frame(
+    term = names(beta),
+    share = 100 * imp^2 / tot,
+    stringsAsFactors = FALSE
+  )
+  df$label <- vapply(df$term, function(t) {
+    lab <- .pretty_poly_label(t, label_fun)
+    if (is.null(lab) || is.na(lab) || !nzchar(lab)) t else lab
+  }, character(1))
+  df <- df[order(-df$share), , drop = FALSE]
+  df <- utils::head(df, 15)
+
+  # Category axes draw the first item at the bottom: feed ascending order so
+  # the largest share lands on top, like the ggplot reorder().
+  df <- df[order(df$share), , drop = FALSE]
+
+  e <- .e_new(height)
+  e$x$opts$series <- list(list(
+    name = "Share", type = "bar",
+    data = lapply(seq_len(nrow(df)), function(i) {
+      list(
+        df$share[i],
+        label = list(
+          show = TRUE, position = "right",
+          formatter = sprintf("%.0f%%", df$share[i]),
+          color = .wise_charcoal, fontSize = 11
+        )
+      )
+    }),
+    itemStyle = list(color = .wise_blue),
+    barMaxWidth = 16
+  ))
+  e$x$opts$xAxis <- list(list(
+    type = "value", name = "Share of explained variation (%)",
+    nameLocation = "middle", nameGap = 30,
+    nameTextStyle = wise_eaxis_name(),
+    axisLabel = wise_eaxis_label(formatter = .e_percent_formatter()),
+    splitLine = wise_esplit_line()
+  ))
+  e$x$opts$yAxis <- list(list(
+    type = "category", data = df$label,
+    axisLabel = wise_eaxis_label(fontSize = 11),
+    axisLine = list(lineStyle = list(color = .wise_grid)),
+    splitLine = list(show = FALSE)
+  ))
+  e$x$opts$grid <- list(
+    containLabel = TRUE, left = 8, right = 56, top = 14, bottom = 14
+  )
+  e$x$opts$tooltip <- list(trigger = "item")
+  wise_echart_theme(e)
+}
+
+
+#' Echarts residual diagnostic panels
+#'
+#' Interactive counterpart of [plot_residual_panels()] (guidelines §7).
+#' Linear / LPM / RIF models: residuals-vs-fitted (with the same loess smooth)
+#' beside a normal Q-Q plot in one widget with two echarts grids; the QQ
+#' quantiles are precomputed in R with the same methods as `stat_qq`
+#' (`ppoints` / `qnorm`) and the reference line through the quartiles.
+#' Binary outcomes: binned residual means by decile of predicted risk with a
+#' +/- 2-SE band, as in the ggplot builder.
+#'
+#' @inheritParams plot_residual_panels
+#' @param height Widget height; a CSS length or a number of pixels.
+#'
+#' @return An `echarts4r` widget.
+#'
+#' @export
+echart_residual_panels <- function(model, is_logistic = FALSE, height = "400px") {
+  if (is_logistic) {
+    # Binned residual means by decile of predicted risk (Gelman & Hill);
+    # data preparation copied verbatim from plot_residual_panels().
+    return(tryCatch(
+      {
+        p <- as.numeric(stats::fitted(model))
+        res <- tryCatch(as.numeric(stats::residuals(model, type = "response")),
+          error = function(e) as.numeric(stats::residuals(model))
+        )
+        n <- min(length(p), length(res))
+        p <- p[seq_len(n)]
+        res <- res[seq_len(n)]
+
+        k <- max(3L, min(10L, floor(n / 20)))
+        ord <- order(p)
+        brks <- unique(floor(seq(0, n, length.out = k + 1)))
+        if (length(brks) < 3) {
+          return(echart_blank("Too few observations for binned residuals.",
+            height = height
+          ))
+        }
+        grp <- cut(seq_len(n), breaks = brks, include.lowest = TRUE)
+
+        bdf <- data.frame(p = p[ord], res = res[ord], grp = grp)
+        agg <- stats::aggregate(cbind(pred = p, mean_res = res) ~ grp,
+          data = bdf, FUN = mean
+        )
+        cnt <- as.data.frame(table(bdf$grp))
+        agg$n <- cnt$Freq[match(as.character(agg$grp), as.character(cnt$Var1))]
+        agg$se <- vapply(split(bdf$res, bdf$grp), function(r) {
+          if (length(r) > 1) stats::sd(r) / sqrt(length(r)) else NA_real_
+        }, numeric(1))
+
+        e <- .e_new(height)
+        tri <- .e_ribbon_series(
+          "Binned residuals", agg$pred, agg$mean_res,
+          agg$mean_res - 2 * agg$se, agg$mean_res + 2 * agg$se,
+          fill = .wise_blue, line = .wise_blue, line_width = 1.5,
+          show_points = TRUE, point_size = 7
+        )
+        tri[[3]]$markLine <- .e_zero_line()
+        e$x$opts$series <- tri
+        e$x$opts$xAxis <- list(list(
+          type = "value", name = "Predicted risk (bin mean)",
+          nameLocation = "middle", nameGap = 30,
+          nameTextStyle = wise_eaxis_name(),
+          axisLabel = wise_eaxis_label(), splitLine = wise_esplit_line()
+        ))
+        e$x$opts$yAxis <- list(list(
+          type = "value", scale = TRUE, name = "Mean residual in bin",
+          nameLocation = "middle", nameGap = 46,
+          nameTextStyle = list(color = .wise_charcoal, fontSize = 14, rotate = 90),
+          axisLabel = wise_eaxis_label(), splitLine = wise_esplit_line()
+        ))
+        e$x$opts$grid <- list(
+          containLabel = TRUE, left = 8, right = 20, top = 14, bottom = 14
+        )
+        e$x$opts$tooltip <- list(trigger = "axis")
+        wise_echart_theme(e)
+      },
+      error = function(e) echart_blank(paste0(
+        "Diagnostic plot error: ", conditionMessage(e)
+      ), height = height)
+    ))
+  }
+
+  # Linear / LPM / RIF: residuals vs fitted next to a normal QQ plot.
+  tryCatch(
+    {
+      res <- as.numeric(stats::residuals(model))
+      fitted <- as.numeric(stats::fitted(model))
+      n <- min(length(fitted), length(res))
+      df <- data.frame(fitted = fitted[seq_len(n)], residuals = res[seq_len(n)])
+
+      e <- .e_new(height)
+      e <- .e_multi_grids(e, 2, titles = c("Residuals vs fitted", "Normal Q-Q"))
+
+      # Panel 1: scatter + loess smooth (ggplot geom_smooth(method = "loess")
+      # defaults: span 0.75, degree 2, formula y ~ x).
+      pts1 <- lapply(seq_len(nrow(df)), function(i) {
+        list(df$fitted[i], df$residuals[i])
+      })
+      smooth <- tryCatch({
+        keep <- is.finite(df$fitted) & is.finite(df$residuals)
+        xs <- sort(unique(df$fitted[keep]))
+        if (length(xs) >= 5) {
+          lo <- stats::loess(residuals ~ fitted, data = df[keep, ],
+            span = 0.75, degree = 2
+          )
+          pr <- stats::predict(lo, newdata = data.frame(fitted = xs))
+          ok <- is.finite(pr)
+          lapply(seq_along(xs)[ok], function(i) list(xs[i], pr[i]))
+        } else {
+          NULL
+        }
+      }, error = function(e) NULL)
+      series1 <- list(list(
+        name = "Residuals", type = "scatter", data = pts1,
+        symbolSize = 4, z = 1,
+        itemStyle = list(color = .wise_charcoal, opacity = 0.15),
+        markLine = .e_zero_line()
+      ))
+      if (length(smooth) >= 2) {
+        series1 <- c(series1, list(list(
+          name = "Trend", type = "line", data = smooth,
+          symbol = "none", z = 2,
+          lineStyle = list(color = .wise_blue, width = 1.5),
+          itemStyle = list(color = .wise_blue)
+        )))
+      }
+
+      # Panel 2: normal QQ precomputed with stat_qq's methods (ppoints/qnorm)
+      # and the stat_qq_line quartile reference.
+      qq <- stats::qqnorm(df$residuals, plot.it = FALSE)
+      pts2 <- lapply(seq_along(qq$x), function(i) list(qq$x[i], qq$y[i]))
+      qs <- stats::quantile(df$residuals, c(0.25, 0.75), names = FALSE, na.rm = TRUE)
+      xs <- stats::qnorm(c(0.25, 0.75))
+      series2 <- list(list(
+        name = "Sample quantiles", type = "scatter", data = pts2,
+        symbolSize = 4, z = 1,
+        itemStyle = list(color = .wise_charcoal, opacity = 0.3),
+        markLine = list(
+          symbol = "none", silent = TRUE, animation = FALSE,
+          label = list(show = FALSE),
+          lineStyle = list(color = .wise_blue, width = 1),
+          data = list(list(
+            list(coord = list(xs[1], qs[1])),
+            list(coord = list(xs[2], qs[2]))
+          ))
+        )
+      ))
+
+      e$x$opts$series <- c(series1, series2)
+      e$x$opts$series[[1]]$xAxisIndex <- 0L
+      e$x$opts$series[[1]]$yAxisIndex <- 0L
+      e$x$opts$series[[2]]$xAxisIndex <- 0L
+      e$x$opts$series[[2]]$yAxisIndex <- 0L
+      e$x$opts$series[[3]]$xAxisIndex <- 1L
+      e$x$opts$series[[3]]$yAxisIndex <- 1L
+      if (length(e$x$opts$series) > 3L) {
+        e$x$opts$series[[4]]$xAxisIndex <- 1L
+        e$x$opts$series[[4]]$yAxisIndex <- 1L
+      }
+      e$x$opts$xAxis <- list(
+        list(
+          type = "value", scale = TRUE, name = "Fitted values",
+          nameLocation = "middle", nameGap = 28,
+          nameTextStyle = wise_eaxis_name(),
+          axisLabel = wise_eaxis_label(), splitLine = wise_esplit_line()
+        ),
+        list(
+          type = "value", scale = TRUE, name = "Theoretical quantiles",
+          nameLocation = "middle", nameGap = 28,
+          nameTextStyle = wise_eaxis_name(),
+          axisLabel = wise_eaxis_label(), splitLine = wise_esplit_line()
+        )
+      )
+      e$x$opts$yAxis <- list(
+        list(
+          type = "value", scale = TRUE, name = "Residuals",
+          nameLocation = "middle", nameGap = 44,
+          nameTextStyle = list(color = .wise_charcoal, fontSize = 13, rotate = 90),
+          axisLabel = wise_eaxis_label(), splitLine = wise_esplit_line()
+        ),
+        list(
+          type = "value", scale = TRUE, name = "Sample quantiles",
+          nameLocation = "middle", nameGap = 44,
+          nameTextStyle = list(color = .wise_charcoal, fontSize = 13, rotate = 90),
+          axisLabel = wise_eaxis_label(), splitLine = wise_esplit_line()
+        )
+      )
+      e$x$opts$tooltip <- list(trigger = "item")
+      wise_echart_theme(e)
+    },
+    error = function(e) echart_blank(paste0(
+      "Diagnostic plot error: ", conditionMessage(e)
+    ), height = height)
+  )
+}
+
+
+#' Echarts predicted vs actual distribution
+#'
+#' Interactive counterpart of [plot_pred_vs_actual()] (guidelines §7).
+#' Linear models: dodged histogram of actual vs predicted values over 30
+#' shared bins, y = share of households. Logistic models: calibration curve
+#' (observed vs predicted rate by decile of predicted risk) with the diagonal
+#' reference and +/- 2-SE binomial band.
+#'
+#' @inheritParams plot_pred_vs_actual
+#' @param height Widget height; a CSS length or a number of pixels.
+#'
+#' @return An `echarts4r` widget.
+#'
+#' @export
+echart_pred_vs_actual <- function(model, is_logistic, outcome_label = "outcome",
+                                  height = "400px") {
+  # Actual recovery copied verbatim from plot_pred_vs_actual().
+  actual <- tryCatch(
+    stats::model.frame(model)[[1]],
+    error = function(e) {
+      f <- tryCatch(stats::fitted(model), error = function(e) NULL)
+      r <- tryCatch(stats::residuals(model), error = function(e) NULL)
+      if (!is.null(f) && !is.null(r)) f + r else NULL
+    }
+  )
+
+  if (is.null(actual)) {
+    return(echart_blank("Could not recover outcome values from model.",
+      height = height
+    ))
+  }
+
+  if (!is_logistic) {
+    predicted <- tryCatch(stats::fitted(model), error = function(e) stats::predict(model))
+    n <- min(length(actual), length(predicted))
+    actual <- actual[seq_len(n)]
+    predicted <- predicted[seq_len(n)]
+
+    all_vals <- c(actual, predicted)
+    brks <- seq(min(all_vals, na.rm = TRUE), max(all_vals, na.rm = TRUE),
+      length.out = 31
+    )
+    ha <- .e_hist_shares(actual, brks)
+    hp <- .e_hist_shares(predicted, brks)
+    labels <- formatC(ha$mid, format = "f", digits = 2)
+
+    e <- .e_new(height)
+    bar <- function(d, nm, col) {
+      list(
+        name = nm, type = "bar",
+        data = as.list(round(d$share, 4)),
+        itemStyle = list(color = col, opacity = 0.7),
+        barMaxWidth = 12
+      )
+    }
+    e$x$opts$series <- list(
+      bar(ha, "Actual", .wise_slate),
+      bar(hp, "Predicted", .wise_blue)
+    )
+    e$x$opts$xAxis <- list(list(
+      type = "category", data = as.list(labels),
+      name = stringr::str_wrap(outcome_label, 40),
+      nameLocation = "middle", nameGap = 30,
+      nameTextStyle = wise_eaxis_name(),
+      axisLabel = wise_eaxis_label(fontSize = 10),
+      axisTick = list(show = FALSE),
+      splitLine = wise_esplit_line()
+    ))
+    e$x$opts$yAxis <- list(list(
+      type = "value", name = "Share of households (%)",
+      nameLocation = "middle", nameGap = 42,
+      nameTextStyle = wise_eaxis_name(),
+      axisLabel = wise_eaxis_label(formatter = .e_percent_formatter()),
+      splitLine = wise_esplit_line()
+    ))
+    e$x$opts$legend <- wise_elegend_style(left = 0, bottom = 0)
+    e$x$opts$grid <- list(
+      containLabel = TRUE, left = 8, right = 20, top = 14, bottom = 46
+    )
+    e$x$opts$tooltip <- list(trigger = "axis", axisPointer = list(type = "shadow"))
+    return(wise_echart_theme(e))
+  }
+
+  # Logistic: calibration curve; data preparation copied from
+  # plot_calibration().
+  tryCatch(
+    {
+      predicted <- tryCatch(
+        stats::fitted(model),
+        error = function(e) {
+          tryCatch(stats::predict(model, type = "response"),
+            error = function(e2) NULL
+          )
+        }
+      )
+      n_bins <- 10L
+      n <- min(length(actual), length(predicted))
+      k <- max(3L, min(as.integer(n_bins), floor(n / 20)))
+      ord <- order(as.numeric(predicted[seq_len(n)]))
+      brks <- unique(floor(seq(0, n, length.out = k + 1)))
+      if (length(brks) < 3) {
+        return(echart_blank("Too few observations for calibration bins.",
+          height = height
+        ))
+      }
+      grp <- cut(seq_len(n), breaks = brks, include.lowest = TRUE)
+
+      bdf <- data.frame(
+        pred = as.numeric(predicted[seq_len(n)])[ord],
+        obs = as.numeric(actual)[ord],
+        grp = grp,
+        stringsAsFactors = FALSE
+      )
+      cal <- stats::aggregate(cbind(pred, obs) ~ grp, data = bdf, FUN = mean)
+      names(cal) <- c("grp", "pred", "obs")
+      cnt <- as.data.frame(table(bdf$grp))
+      cal$n <- cnt$Freq[match(as.character(cal$grp), as.character(cnt$Var1))]
+      cal$se <- sqrt(pmax(cal$obs * (1 - cal$obs), 0) / pmax(cal$n, 1))
+
+      e <- .e_new(height)
+      tri <- .e_ribbon_series(
+        "Calibration", cal$pred, cal$obs,
+        pmax(0, cal$obs - 2 * cal$se), pmin(1, cal$obs + 2 * cal$se),
+        fill = .wise_blue, line = .wise_blue, line_width = 1.5,
+        show_points = TRUE, point_size = 7
+      )
+      tri[[3]]$markLine <- list(
+        symbol = "none", silent = TRUE, animation = FALSE,
+        label = list(show = FALSE),
+        lineStyle = list(color = .wise_zero, type = "dashed", width = 1),
+        data = list(list(
+          list(coord = list(0, 0)), list(coord = list(1, 1))
+        ))
+      )
+      e$x$opts$series <- tri
+      e$x$opts$xAxis <- list(list(
+        type = "value", min = 0, max = 1,
+        name = "Predicted risk (bin mean)",
+        nameLocation = "middle", nameGap = 30,
+        nameTextStyle = wise_eaxis_name(),
+        axisLabel = wise_eaxis_label(), splitLine = wise_esplit_line()
+      ))
+      e$x$opts$yAxis <- list(list(
+        type = "value", min = 0, max = 1,
+        name = "Observed rate in bin",
+        nameLocation = "middle", nameGap = 42,
+        nameTextStyle = list(color = .wise_charcoal, fontSize = 14, rotate = 90),
+        axisLabel = wise_eaxis_label(), splitLine = wise_esplit_line()
+      ))
+      e$x$opts$grid <- list(
+        containLabel = TRUE, left = 8, right = 20, top = 14, bottom = 14
+      )
+      e$x$opts$tooltip <- list(trigger = "axis")
+      wise_echart_theme(e)
+    },
+    error = function(e) echart_blank(paste0(
+      "Diagnostic plot error: ", conditionMessage(e)
+    ), height = height)
+  )
+}
+
+
+#' Echarts welfare histogram with RIF quantile markers
+#'
+#' The RIF branch of the "Predicted vs actual" figure: a histogram of the
+#' original welfare outcome (30 bins, share of households) with dashed
+#' markers at the estimated quantiles, matching the ggplot version drawn
+#' inline in mod_1_08.
+#'
+#' @param y       Numeric vector of outcome values.
+#' @param taus    Numeric vector of quantile probabilities to mark.
+#' @param x_label X-axis label for the outcome variable.
+#' @param height  Widget height; a CSS length or a number of pixels.
+#'
+#' @return An `echarts4r` widget.
+#'
+#' @export
+echart_welfare_quantile_hist <- function(y, taus, x_label, height = "400px") {
+  y <- y[is.finite(y)]
+  if (length(y) < 2) {
+    return(echart_blank("Outcome distribution unavailable.", height = height))
+  }
+  brks <- seq(min(y), max(y), length.out = 31)
+  if (diff(range(brks)) == 0) {
+    return(echart_blank("Outcome distribution unavailable.", height = height))
+  }
+  h <- .e_hist_shares(y, brks)
+  labels <- formatC(h$mid, format = "f", digits = 2)
+
+  q_vals <- stats::quantile(y, probs = taus, names = FALSE)
+  tau_marks <- lapply(seq_along(taus), function(i) {
+    idx <- which(h$mid >= q_vals[i])
+    if (!length(idx)) idx <- length(h$mid)
+    list(
+      xAxis = idx[1],
+      lineStyle = list(color = .wise_marker_alt, type = "dashed", width = 1),
+      label = list(
+        show = TRUE, position = "insideEndTop",
+        formatter = paste0("\u03c4=", taus[i]),
+        color = .wise_marker_alt, fontSize = 10
+      )
+    )
+  })
+
+  e <- .e_new(height)
+  e$x$opts$series <- list(list(
+    name = "Share", type = "bar",
+    data = as.list(round(h$share, 4)),
+    itemStyle = list(color = .wise_blue, opacity = 0.7),
+    barMaxWidth = 12,
+    markLine = list(
+      symbol = "none", silent = TRUE, animation = FALSE,
+      lineStyle = list(color = .wise_marker_alt, type = "dashed", width = 0.5),
+      data = tau_marks
+    )
+  ))
+  e$x$opts$xAxis <- list(list(
+    type = "category", data = as.list(labels),
+    name = stringr::str_wrap(x_label, 40),
+    nameLocation = "middle", nameGap = 30,
+    nameTextStyle = wise_eaxis_name(),
+    axisLabel = wise_eaxis_label(fontSize = 10),
+    axisTick = list(show = FALSE),
+    splitLine = wise_esplit_line()
+  ))
+  e$x$opts$yAxis <- list(list(
+    type = "value", name = "Share of households (%)",
+    nameLocation = "middle", nameGap = 42,
+    nameTextStyle = wise_eaxis_name(),
+    axisLabel = wise_eaxis_label(formatter = .e_percent_formatter()),
+    splitLine = wise_esplit_line()
+  ))
+  e$x$opts$grid <- list(
+    containLabel = TRUE, left = 8, right = 20, top = 14, bottom = 14
+  )
+  e$x$opts$tooltip <- list(trigger = "axis", axisPointer = list(type = "shadow"))
+  wise_echart_theme(e)
+}

@@ -102,26 +102,35 @@ mod_1_08_modelfit_server <- function(id,
 
     # Outputs ----
 
-    output$resid_weather1 <- renderPlot({
-      req(full_model(), model_fit(), fit_snap())
-      h <- model_fit()$weather_terms[1]
-      req(!is.na(h))
-      m <- rif_single_model()
-      plot_resid_weather(m, h,
+    # One builder behind each residual panel and its export (UI-48).
+    resid_weather_fig <- function(i) {
+      mf <- model_fit()
+      if (is.null(mf) || length(mf$weather_terms) < i) {
+        return(NULL)
+      }
+      h <- mf$weather_terms[i]
+      if (is.na(h) || is.null(h)) {
+        return(NULL)
+      }
+      echart_resid_weather(rif_single_model(), h,
         weather_df = fit_snap()$survey_weather,
-        x_label = resid_axis_lab(h)
+        x_label = resid_axis_lab(h),
+        height = "300px"
       )
+    }
+
+    output$resid_weather1 <- echarts4r::renderEcharts4r({
+      req(full_model(), model_fit(), fit_snap())
+      ch <- resid_weather_fig(1)
+      req(!is.null(ch))
+      ch
     })
 
-    output$resid_weather2 <- renderPlot({
+    output$resid_weather2 <- echarts4r::renderEcharts4r({
       req(full_model(), model_fit(), length(model_fit()$weather_terms) >= 2, fit_snap())
-      h <- model_fit()$weather_terms[2]
-      req(!is.na(h))
-      m <- rif_single_model()
-      plot_resid_weather(m, h,
-        weather_df = fit_snap()$survey_weather,
-        x_label = resid_axis_lab(h)
-      )
+      ch <- resid_weather_fig(2)
+      req(!is.null(ch))
+      ch
     })
 
     # Unit-complete x-axis label for the residual plots, mirroring the effect
@@ -161,56 +170,42 @@ mod_1_08_modelfit_server <- function(id,
         # per quantile), so the standard predicted-vs-actual histogram is not
         # meaningful. Instead show the original welfare distribution with
         # predicted quantile markers.
-        y <- mf$train_data[[mf$y_var]]
-        taus <- mf$taus
-        q_vals <- stats::quantile(y, probs = taus, names = FALSE)
-        q_df <- data.frame(tau = paste0("\u03c4=", taus), value = q_vals)
-        ggplot2::ggplot(data.frame(y = y), ggplot2::aes(x = y)) +
-          ggplot2::geom_histogram(
-            ggplot2::aes(y = 100 * ggplot2::after_stat(count) / sum(ggplot2::after_stat(count))),
-            fill = .wise_blue, alpha = 0.7, bins = 30
-          ) +
-          ggplot2::geom_vline(
-            data = q_df, ggplot2::aes(xintercept = value),
-            linetype = "dashed", colour = .wise_marker_alt,
-            linewidth = 0.5
-          ) +
-          ggplot2::geom_text(
-            data = q_df,
-            ggplot2::aes(x = value, y = Inf, label = tau),
-            vjust = 1.5, hjust = -0.1, size = 3.2,
-            colour = .wise_marker_alt
-          ) +
-          ggplot2::labs(
-            subtitle = "Welfare distribution with estimated quantiles",
-            x = stringr::str_wrap(slf(snap$outcome$name), 40),
-            y = "Share of households (%)"
-          ) +
-          theme_wise()
+        echart_welfare_quantile_hist(
+          mf$train_data[[mf$y_var]],
+          taus = mf$taus,
+          x_label = slf(snap$outcome$name),
+          height = "400px"
+        )
       } else {
-        m <- rif_single_model()
-        plot_pred_vs_actual(
-          model         = m,
+        echart_pred_vs_actual(
+          model         = rif_single_model(),
           is_logistic   = is_logistic(),
-          outcome_label = slf(snap$outcome$name)
+          outcome_label = slf(snap$outcome$name),
+          height        = "400px"
         )
       }
     }
 
-    output$pred_welf_dist <- renderPlot({
+    output$pred_welf_dist <- echarts4r::renderEcharts4r({
       req(full_model(), fit_snap())
-      pred_welf_fig()
+      ch <- pred_welf_fig()
+      req(!is.null(ch))
+      ch
     })
 
     # Approximate contribution of each term to the model's explained
     # variation (squared standardized coefficients, share of their sum).
     importance_fig <- function() {
       req(full_model(), model_fit(), fit_snap())
-      plot_importance(rif_single_model(), label_fun = snap_label_fun())
+      echart_importance(rif_single_model(), label_fun = snap_label_fun(),
+        height = "400px"
+      )
     }
 
-    output$importance_plot <- renderPlot({
-      importance_fig()
+    output$importance_plot <- echarts4r::renderEcharts4r({
+      ch <- importance_fig()
+      req(!is.null(ch))
+      ch
     })
 
     # Residual diagnostics: residuals vs fitted + normal QQ (linear, LPM and
@@ -218,11 +213,15 @@ mod_1_08_modelfit_server <- function(id,
     # plot and its export (UI-48).
     residual_panels_fig <- function() {
       req(full_model(), model_fit())
-      plot_residual_panels(rif_single_model(), is_logistic = is_logistic())
+      echart_residual_panels(rif_single_model(), is_logistic = is_logistic(),
+        height = "400px"
+      )
     }
 
-    output$residual_panels <- renderPlot({
-      residual_panels_fig()
+    output$residual_panels <- echarts4r::renderEcharts4r({
+      ch <- residual_panels_fig()
+      req(!is.null(ch))
+      ch
     })
 
     # UI-45: one data frame behind both the table and its CSV export.
@@ -236,16 +235,28 @@ mod_1_08_modelfit_server <- function(id,
       )
     })
 
-    output$additional_stats <- renderTable(
-      additional_stats_df(),
-      striped = TRUE, hover = TRUE, bordered = TRUE
-    )
-
-    output$additional_stats_csv <- csv_download_handler(
-      "model_fit_statistics",
-      function() additional_stats_df(),
-      stale = fit_stale
-    )
+    # UI-45: client-side searchable table with a client-side CSV download;
+    # raw (already-formatted) values pass through unrounded.
+    output$additional_stats <- reactable::renderReactable({
+      tab <- additional_stats_df()
+      if (is.null(tab) || !is.data.frame(tab) || !nrow(tab)) {
+        tab <- data.frame(Note = "No data available")
+      }
+      cols <- lapply(names(tab), function(nm) {
+        reactable::colDef(class = "wise-dt-wrap", minWidth = 120)
+      })
+      names(cols) <- names(tab)
+      reactable::reactable(
+        tab,
+        columns = cols,
+        compact = TRUE,
+        striped = TRUE,
+        highlight = TRUE,
+        bordered = TRUE,
+        searchable = TRUE,
+        defaultPageSize = 10
+      )
+    })
 
     wise_export_table(
       key = "model_fit_statistics",
@@ -272,14 +283,7 @@ mod_1_08_modelfit_server <- function(id,
           step = 1L,
           fun = function() {
             req(full_model(), model_fit(), fit_snap())
-            h <- model_fit()$weather_terms[idx]
-            if (is.na(h) || is.null(h)) {
-              return(NULL)
-            }
-            plot_resid_weather(rif_single_model(), h,
-              weather_df = fit_snap()$survey_weather,
-              x_label = resid_axis_lab(h)
-            )
+            resid_weather_fig(idx)
           },
           description = paste(
             "Model residuals against the realised weather variable, for",
@@ -380,6 +384,7 @@ mod_1_08_modelfit_server <- function(id,
         ns, length(wt),
         ids = c("resid_weather1", "resid_weather2"),
         height = "300px",
+        echarts = TRUE,
         alts = vapply(seq_len(max(length(wt), 1L)), function(i) {
           paste(
             "Scatter plot of model residuals versus", wt[i],
@@ -418,10 +423,9 @@ mod_1_08_modelfit_server <- function(id,
                     ))
                   )
                 ),
-                shiny::tableOutput(ns("additional_stats")),
-                csv_download_link(ns("additional_stats_csv"))
-              ),
-              shiny::div(
+                reactable::reactableOutput(ns("additional_stats")),
+                wise_reactable_csv_button(ns("additional_stats"), "model_fit_statistics")
+              ),              shiny::div(
                 shiny::h4(
                   "Predicted vs actual",
                   info_popover(
@@ -439,9 +443,10 @@ mod_1_08_modelfit_server <- function(id,
                     ))
                   )
                 ),
-                bslib::card(wise_plot_output(
+                bslib::card(wise_chart_output(
                   ns("pred_welf_dist"),
-                  "Predicted versus actual welfare in the training data; calibration curve for binary outcomes, welfare distribution with quantile markers for RIF models"
+                  "Predicted versus actual welfare in the training data; calibration curve for binary outcomes, welfare distribution with quantile markers for RIF models",
+                  height = "400px"
                 ))
               )
             ),
@@ -458,9 +463,10 @@ mod_1_08_modelfit_server <- function(id,
                 ))
               )
             ),
-            bslib::card(wise_plot_output(
+            bslib::card(wise_chart_output(
               ns("importance_plot"),
-              "Bar plot of each term's approximate share of the model's explained variation"
+              "Bar plot of each term's approximate share of the model's explained variation",
+              height = "400px"
             )),
             shiny::hr(),
             shiny::h4(
@@ -490,9 +496,10 @@ mod_1_08_modelfit_server <- function(id,
                 ))
               )
             ),
-            bslib::card(wise_plot_output(
+            bslib::card(wise_chart_output(
               ns("residual_panels"),
-              "Diagnostic panels: residuals versus fitted values with a smooth trend, a normal quantile-quantile plot, and binned residual means for binary outcomes"
+              "Diagnostic panels: residuals versus fitted values with a smooth trend, a normal quantile-quantile plot, and binned residual means for binary outcomes",
+              height = "400px"
             )),
             shiny::hr(),
             shiny::tags$details(

@@ -331,7 +331,9 @@ mod_1_05_weatherstats_server <- function(
           # same bins.
 
           # UI-48: builder first, renderer second, so the export bundle and the
-          # screen draw the same figure.
+          # screen draw the same figure. Echarts builders (guidelines §7); the
+          # ggplot renderers above them in fct_weatherstats.R stay as the
+          # static fallback.
           weather_dist_fig <- function(idx) {
             function() {
               swx <- req(wx_spec())
@@ -344,41 +346,27 @@ mod_1_05_weatherstats_server <- function(
               yrs <- hist_cells_years()
               brks <- stored_breaks()
 
-              plot_weather_dist(
+              echart_weather_dist(
                 df, hv, sw$label[idx], sw$cont_binned[idx],
                 hist_df = hist_cells(),
                 breaks = if (is.null(brks)) NULL else brks[[hv]],
                 year_from = if (is.null(yrs)) NULL else yrs[["from"]],
                 year_to = if (is.null(yrs)) NULL else yrs[["to"]],
-                wave_labels = survey_wave_meta()$plot_labels
+                wave_labels = survey_wave_meta()$plot_labels,
+                height = "300px"
               )
             }
           }
 
           make_weather_dist <- function(idx) {
-            renderPlot({
+            echarts4r::renderEcharts4r({
               req(wx_spec())
-              df <- weather_plot_frame()
-              sw <- wx_spec()$sw
-              hv <- sw$name[idx]
-              label <- sw$label[idx]
-              cont_binned <- sw$cont_binned[idx]
-              yrs <- hist_cells_years()
-              brks <- stored_breaks()
-
-              p <- plot_weather_dist(
-                df, hv, label, cont_binned,
-                hist_df = hist_cells(),
-                breaks = if (is.null(brks)) NULL else brks[[hv]],
-                year_from = if (is.null(yrs)) NULL else yrs[["from"]],
-                year_to = if (is.null(yrs)) NULL else yrs[["to"]],
-                wave_labels = survey_wave_meta()$plot_labels
-              )
-              if (is.null(p)) {
-                blank_plot("Weather variable not configured")
-                return(invisible(NULL))
+              ch <- weather_dist_fig(idx)()
+              if (is.null(ch)) {
+                echart_blank("Weather variable not configured", height = "300px")
+              } else {
+                ch
               }
-              p
             })
           }
 
@@ -400,37 +388,26 @@ mod_1_05_weatherstats_server <- function(
               }
               yrs <- hist_cells_years()
 
-              plot_weather_ridges_compare(
+              echart_weather_ridges_compare(
                 df, sw$name[idx], sw$label[idx],
                 hist_df = hist_cells(),
                 year_from = if (is.null(yrs)) NULL else yrs[["from"]],
                 year_to = if (is.null(yrs)) NULL else yrs[["to"]],
-                wave_labels = survey_wave_meta()$plot_labels
+                wave_labels = survey_wave_meta()$plot_labels,
+                height = "300px"
               )
             }
           }
 
           make_weather_dist_cont <- function(idx) {
-            renderPlot({
+            echarts4r::renderEcharts4r({
               req(wx_spec())
-              df <- weather_plot_cont_frame()
-              sw <- wx_spec()$sw
-              hv <- sw$name[idx]
-              label <- sw$label[idx]
-              yrs <- hist_cells_years()
-
-              p <- plot_weather_ridges_compare(
-                df, hv, label,
-                hist_df = hist_cells(),
-                year_from = if (is.null(yrs)) NULL else yrs[["from"]],
-                year_to = if (is.null(yrs)) NULL else yrs[["to"]],
-                wave_labels = survey_wave_meta()$plot_labels
-              )
-              if (is.null(p)) {
-                blank_plot("Continuous distribution unavailable")
-                return(invisible(NULL))
+              ch <- weather_dist_cont_fig(idx)()
+              if (is.null(ch)) {
+                echart_blank("Continuous distribution unavailable", height = "300px")
+              } else {
+                ch
               }
-              p
             })
           }
 
@@ -458,25 +435,26 @@ mod_1_05_weatherstats_server <- function(
                 so$label <- paste0("Log ", so$label)
               }
 
-              plot_binscatter(
+              echart_binscatter(
                 df       = df,
                 hv       = sw$name[idx],
                 hv_label = paste0(sw$label[idx], "\n(as configured)"),
                 y_var    = so$name,
-                y_label  = so$label
+                y_label  = so$label,
+                height   = "300px"
               )
             }
           }
 
           make_binscatter <- function(idx) {
-            renderPlot({
+            echarts4r::renderEcharts4r({
               req(survey_weather(), wx_spec_so())
-              p <- binscatter_fig(idx)()
-              if (is.null(p)) {
-                blank_plot("Weather variable not configured")
-                return(invisible(NULL))
+              ch <- binscatter_fig(idx)()
+              if (is.null(ch)) {
+                echart_blank("Weather variable not configured", height = "300px")
+              } else {
+                ch
               }
-              p
             })
           }
 
@@ -550,12 +528,12 @@ mod_1_05_weatherstats_server <- function(
           })
 
           # Summary stats tables (continuous + binned) ----
-          output$weather_stats_table <- make_weather_stats_dt(
+          output$weather_stats_table <- make_weather_stats_reactable(
             survey_weather   = survey_weather,
             selected_weather = wx_spec_sw,
             survey_reference = survey_data
           )
-          output$weather_stats_table_binned <- make_weather_binned_stats_dt(
+          output$weather_stats_table_binned <- make_weather_binned_stats_reactable(
             survey_weather   = survey_weather,
             selected_weather = wx_spec_sw,
             survey_reference = survey_data
@@ -580,24 +558,36 @@ mod_1_05_weatherstats_server <- function(
             shiny::tagList(
               if (has_continuous) {
                 shiny::tagList(
-                  shiny::helpText(
-                    "Continuous variables - weighted summary per country-year.",
-                    style = "font-size: 12px;"
+                  shiny::div(
+                    class = "d-flex align-items-center justify-content-between flex-wrap gap-2",
+                    shiny::helpText(
+                      "Continuous variables - weighted summary per country-year.",
+                      style = "font-size: 12px;"
+                    ),
+                    wise_reactable_csv_button(
+                      ns("weather_stats_table"), "weather_summary"
+                    )
                   ),
-                  DT::DTOutput(ns("weather_stats_table"))
+                  reactable::reactableOutput(ns("weather_stats_table"))
                 )
               },
               if (has_continuous && has_binned) shiny::br(),
               if (has_binned) {
                 shiny::tagList(
-                  shiny::helpText(
-                    paste(
-                      "Binned variables - count and share of observations",
-                      "in each bin per country-year."
+                  shiny::div(
+                    class = "d-flex align-items-center justify-content-between flex-wrap gap-2",
+                    shiny::helpText(
+                      paste(
+                        "Binned variables - count and share of observations",
+                        "in each bin per country-year."
+                      ),
+                      style = "font-size: 12px;"
                     ),
-                    style = "font-size: 12px;"
+                    wise_reactable_csv_button(
+                      ns("weather_stats_table_binned"), "weather_binned_distribution"
+                    )
                   ),
-                  DT::DTOutput(ns("weather_stats_table_binned"))
+                  reactable::reactableOutput(ns("weather_stats_table_binned"))
                 )
               }
             )
@@ -671,20 +661,6 @@ mod_1_05_weatherstats_server <- function(
             )
           )
 
-          output$selected_weather <- DT::renderDT(
-            {
-              wx_spec_sw()
-            },
-            rownames = FALSE,
-            extensions = "Buttons",
-            options = list(
-              dom = wise_csv_dom("t"), paging = FALSE,
-              searching = FALSE, info = FALSE,
-              buttons = wise_csv_button("weather_specification")
-            ),
-            class = "compact"
-          )
-
           # Append tab ----
 
           # Reactive layouts so panels update when the user toggles between
@@ -709,7 +685,7 @@ mod_1_05_weatherstats_server <- function(
             if (!any(vapply(seq_len(n_vars), is_binned, logical(1)))) {
               return(weather_plot_layout(
                 ns, n_vars,
-                ids = dist_ids, height = "300px",
+                ids = dist_ids, height = "300px", echarts = TRUE,
                 alts = paste(
                   "Distribution of", sw$label,
                   "in the selected surveys and their climate history"
@@ -718,7 +694,7 @@ mod_1_05_weatherstats_server <- function(
             }
 
             var_panel <- function(i) {
-              items <- list(wise_plot_output(
+              items <- list(wise_chart_output(
                 ns(dist_ids[i]),
                 paste(
                   "Distribution of", sw$label[i],
@@ -736,7 +712,7 @@ mod_1_05_weatherstats_server <- function(
                     ),
                     style = "font-size: 12px;"
                   ),
-                  wise_plot_output(
+                  wise_chart_output(
                     ns(cont_ids[i]),
                     paste(
                       "Continuous distribution of", sw$label[i],
@@ -763,6 +739,7 @@ mod_1_05_weatherstats_server <- function(
               ns, nrow(wx),
               ids = c("binscatter1", "binscatter2"),
               height = "300px",
+              echarts = TRUE,
               alts = if (nrow(wx)) {
                 paste("Binscatter of the outcome against", wx$label)
               } else {

@@ -287,6 +287,9 @@ mod_1_03_outcome_server <- function(id, variable_list, survey_data,
             )
           })
 
+          # Outcome distribution: echarts builder shared by the screen render
+          # and the export bundle (UI-48); the ggplot renderer
+          # (plot_welfare_dist) remains the static fallback.
           outcome_dist_fig <- function() {
             spec <- outcome_spec()
             od <- outcome_data()
@@ -294,12 +297,13 @@ mod_1_03_outcome_server <- function(id, variable_list, survey_data,
               return(NULL)
             }
             inf <- spec$info
-            plot_welfare_dist(
+            echart_welfare_dist(
               od,
               outcome = as.character(inf$name[1]),
               label = as.character(inf$label[1]),
               type = as.character(inf$type[1]),
-              wave_labels = survey_wave_meta()$plot_labels
+              wave_labels = survey_wave_meta()$plot_labels,
+              height = "400px"
             )
           }
 
@@ -315,22 +319,12 @@ mod_1_03_outcome_server <- function(id, variable_list, survey_data,
             width = 9, height = 6
           )
 
-          output$outcome_dist <- renderPlot({
+          output$outcome_dist <- echarts4r::renderEcharts4r({
             spec <- outcome_spec()
             req(outcome_data(), spec)
-            inf <- spec$info
-            p <- plot_welfare_dist(
-              outcome_data(),
-              outcome = as.character(inf$name[1]),
-              label = as.character(inf$label[1]),
-              type = as.character(inf$type[1]),
-              wave_labels = survey_wave_meta()$plot_labels
-            )
-            if (is.null(p)) {
-              blank_plot("Distribution unavailable")
-              return(invisible(NULL))
-            }
-            p
+            ch <- outcome_dist_fig()
+            req(!is.null(ch))
+            ch
           })
 
           # MapLibre coverage payload stream ----
@@ -530,30 +524,35 @@ mod_1_03_outcome_server <- function(id, variable_list, survey_data,
             )
           })
 
-          output$outcome_summary_stats <- renderTable(
-            {
-              spec <- outcome_spec()
-              s <- outcome_summary()
-              shiny::req(spec, s)
-              .format_outcome_summary(s, summary_wave_val())
-            },
-            striped = TRUE,
-            hover = TRUE,
-            bordered = TRUE
-          )
-
-          # UI-45/UI-48: export the same precomputed, wave-selectable summary
-          # shown on screen rather than re-deriving a live pooled table.
+          # Summary statistics table (§6): client-side search/pagination with
+          # a client-side CSV download; the export bundle keeps the same
+          # precomputed, wave-selectable summary (UI-45/UI-48).
           outcome_summary_df <- function() {
             spec <- outcome_spec()
             s <- outcome_summary()
             req(spec, s)
             .format_outcome_summary(s, summary_wave_val())
           }
-          output$outcome_summary_csv <- csv_download_handler(
-            "outcome_summary", outcome_summary_df,
-            stale = function() FALSE
-          )
+
+          output$outcome_summary_stats <- reactable::renderReactable({
+            tab <- outcome_summary_df()
+            req(tab)
+            cols <- lapply(names(tab), function(nm) {
+              reactable::colDef(class = "wise-dt-wrap", minWidth = 170)
+            })
+            names(cols) <- names(tab)
+            reactable::reactable(
+              tab,
+              columns = cols,
+              compact = TRUE,
+              searchable = TRUE,
+              defaultPageSize = 10,
+              showPageSizeOptions = TRUE,
+              pageSizeOptions = c(10, 25, 50, 100),
+              highlight = TRUE
+            )
+          })
+
           wise_export_table(
             key = "outcome_summary",
             label = "Outcome summary statistics",
@@ -599,7 +598,7 @@ mod_1_03_outcome_server <- function(id, variable_list, survey_data,
                           ))
                         )
                       ),
-                      wise_plot_output(
+                      wise_chart_output(
                         ns("outcome_dist"),
                         "Distribution of the selected outcome variable in the selected surveys",
                         height = "400px"
@@ -666,11 +665,13 @@ mod_1_03_outcome_server <- function(id, variable_list, survey_data,
                         shiny::uiOutput(ns("summary_heading_ui"), inline = TRUE),
                         shiny::div(
                           class = "d-flex align-items-center gap-2",
-                          csv_download_link(ns("outcome_summary_csv")),
+                          wise_reactable_csv_button(
+                            ns("outcome_summary_stats"), "outcome_summary"
+                          ),
                           shiny::uiOutput(ns("summary_wave_ui"), inline = TRUE)
                         )
                       ),
-                      shiny::tableOutput(ns("outcome_summary_stats"))
+                      reactable::reactableOutput(ns("outcome_summary_stats"))
                     )
                   )
                 ),

@@ -261,6 +261,60 @@ outcome_missing_summary <- function(df, outcome) {
 
 # Outcome distribution ridge plot (by survey wave) ----
 
+# Data prep behind the binary branch of the outcome distribution figure:
+# per-wave No/Yes shares with in-bar percent labels, shared by the ggplot and
+# echarts renderers.
+#' @noRd
+.welfare_dist_binary_bars <- function(df, outcome, wave_labels = NULL) {
+  if (!"countryyear" %in% names(df)) {
+    return(NULL)
+  }
+  x <- suppressWarnings(as.numeric(as.character(df[[outcome]])))
+  if (is.logical(df[[outcome]])) x <- as.integer(df[[outcome]])
+  keep <- is.finite(x) & x %in% c(0, 1) & !is.na(df$countryyear)
+  if (!any(keep)) {
+    return(NULL)
+  }
+  bars <- data.frame(
+    countryyear = as.character(df$countryyear[keep]),
+    value = factor(x[keep], levels = c(0, 1), labels = c("No", "Yes")),
+    stringsAsFactors = FALSE
+  )
+  bars <- collapse::fcount(
+    bars,
+    countryyear,
+    value,
+    name = "n",
+    sort = FALSE
+  )
+  bars <- bars[order(bars$countryyear, bars$value), , drop = FALSE]
+  bars$n_total <- ave(bars$n, bars$countryyear, FUN = sum)
+  bars$share <- bars$n / bars$n_total
+  bars$label <- ifelse(
+    bars$share >= 0.03,
+    paste0(round(100 * bars$share, 1), "%"),
+    ""
+  )
+  bars$label_colour <- ifelse(
+    bars$value == "No", "#1D2A35", "white"
+  )
+  bars$ymin <- ave(bars$share, bars$countryyear, FUN = function(z) {
+    c(0, head(cumsum(z), -1L))
+  })
+  bars$ymax <- bars$ymin + bars$share
+  bars$countryyear <- factor(
+    bars$countryyear,
+    levels = sort(unique(bars$countryyear))
+  )
+  display_waves <- levels(bars$countryyear)
+  if (!is.null(wave_labels)) {
+    mapped <- unname(wave_labels[display_waves])
+    keep <- !is.na(mapped) & nzchar(mapped)
+    display_waves[keep] <- mapped[keep]
+  }
+  list(bars = bars, display_waves = display_waves)
+}
+
 #' Plot outcome distribution by survey wave
 #'
 #' Calls `ridge_distribution_plot()` on the specified outcome column. The
@@ -302,52 +356,12 @@ plot_welfare_dist <- function(df,
   # 100% stacked bar makes the 0/1 shares immediately readable and avoids the
   # unnecessary histogram/KDE pass used for continuous outcomes.
   if (is_binary) {
-    if (!"countryyear" %in% names(df)) {
+    bb <- .welfare_dist_binary_bars(df, outcome, wave_labels)
+    if (is.null(bb)) {
       return(invisible(NULL))
     }
-    x <- suppressWarnings(as.numeric(as.character(df[[outcome]])))
-    if (is.logical(df[[outcome]])) x <- as.integer(df[[outcome]])
-    keep <- is.finite(x) & x %in% c(0, 1) & !is.na(df$countryyear)
-    if (!any(keep)) {
-      return(invisible(NULL))
-    }
-    bars <- data.frame(
-      countryyear = as.character(df$countryyear[keep]),
-      value = factor(x[keep], levels = c(0, 1), labels = c("No", "Yes")),
-      stringsAsFactors = FALSE
-    )
-    bars <- collapse::fcount(
-      bars,
-      countryyear,
-      value,
-      name = "n",
-      sort = FALSE
-    )
-    bars <- bars[order(bars$countryyear, bars$value), , drop = FALSE]
-    bars$n_total <- ave(bars$n, bars$countryyear, FUN = sum)
-    bars$share <- bars$n / bars$n_total
-    bars$label <- ifelse(
-      bars$share >= 0.03,
-      paste0(round(100 * bars$share, 1), "%"),
-      ""
-    )
-    bars$label_colour <- ifelse(
-      bars$value == "No", "#1D2A35", "white"
-    )
-    bars$ymin <- ave(bars$share, bars$countryyear, FUN = function(z) {
-      c(0, head(cumsum(z), -1L))
-    })
-    bars$ymax <- bars$ymin + bars$share
-    bars$countryyear <- factor(
-      bars$countryyear,
-      levels = sort(unique(bars$countryyear))
-    )
-    display_waves <- levels(bars$countryyear)
-    if (!is.null(wave_labels)) {
-      mapped <- unname(wave_labels[display_waves])
-      keep <- !is.na(mapped) & nzchar(mapped)
-      display_waves[keep] <- mapped[keep]
-    }
+    bars <- bb$bars
+    display_waves <- bb$display_waves
 
     return(
       ggplot2::ggplot(
@@ -452,6 +466,171 @@ plot_welfare_dist <- function(df,
   }
 
   p
+ }
+
+
+#' Echarts outcome distribution by survey wave
+#'
+#' Interactive counterpart of [plot_welfare_dist()] (guidelines §7): the same
+#' statistics with the same parameters, drawn as an `echarts4r` widget. Binary
+#' outcomes become 100% stacked bars; continuous outcomes become ridges from
+#' the shared `build_ridge_distribution_data()` precomputation (256 bins, 256
+#' grid points), with welfare poverty lines as dashed reference marks.
+#'
+#' @inheritParams plot_welfare_dist
+#' @param height Widget height; a CSS length or a number of pixels.
+#'
+#' @return An `echarts4r` widget, or `NULL` invisibly when there is nothing
+#'   to draw.
+#'
+#' @export
+echart_welfare_dist <- function(df,
+                                outcome = "welfare",
+                                label = NULL,
+                                type = "numeric",
+                                poverty_lines = welfare_poverty_lines(),
+                                wave_labels = NULL,
+                                height = "400px") {
+  if (is.null(df) || !(outcome %in% names(df))) {
+    return(invisible(NULL))
+  }
+
+  vals <- df[[outcome]][!is.na(df[[outcome]])]
+  type_l <- tolower(type %||% "")
+  is_binary <- type_l %in% c("logical", "binary", "boolean") ||
+    (length(vals) > 0 && is.numeric(vals) && all(vals %in% c(0, 1)))
+  x_label <- label %||% outcome
+  if (identical(outcome, "welfare")) x_label <- "$ per day (2021 PPP)"
+
+  if (is_binary) {
+    bb <- .welfare_dist_binary_bars(df, outcome, wave_labels)
+    if (is.null(bb)) {
+      return(invisible(NULL))
+    }
+    bars <- bb$bars
+    display_waves <- bb$display_waves
+
+    e <- .e_new(height)
+    make_bar <- function(lvl, col) {
+      d <- bars[bars$value == lvl, , drop = FALSE]
+      d <- d[match(levels(bars$countryyear), as.character(d$countryyear)), ,
+        drop = FALSE
+      ]
+      list(
+        name = lvl, type = "bar", stack = "share",
+        data = lapply(seq_len(nrow(d)), function(i) {
+          list(
+            d$share[i],
+            label = list(
+              show = nzchar(d$label[i]),
+              formatter = d$label[i],
+              position = "inside",
+              color = d$label_colour[i],
+              fontSize = 11, fontWeight = "bold"
+            )
+          )
+        }),
+        itemStyle = list(color = col),
+        barMaxWidth = 44
+      )
+    }
+    e$x$opts$xAxis <- list(
+      type = "category",
+      data = as.character(display_waves),
+      name = "Survey wave",
+      nameLocation = "middle", nameGap = 30,
+      nameTextStyle = wise_eaxis_name(),
+      axisLabel = wise_eaxis_label(rotate = 30),
+      axisTick = list(alignWithLabel = TRUE),
+      axisLine = list(lineStyle = list(color = .wise_grid)),
+      splitLine = wise_esplit_line()
+    )
+    e$x$opts$yAxis <- list(
+      type = "value", min = 0, max = 1,
+      name = "Share of observations",
+      nameLocation = "middle", nameGap = 40,
+      nameTextStyle = wise_eaxis_name(),
+      axisLabel = wise_eaxis_label(
+        formatter = htmlwidgets::JS(
+          "function(v){return Math.round(100*v)+'%';}"
+        )
+      ),
+      splitLine = wise_esplit_line()
+    )
+    e$x$opts$series <- list(
+      make_bar("No", "#D9EFF8"), make_bar("Yes", "#0071BC")
+    )
+    e$x$opts$legend <- wise_elegend_style(
+      left = 0, bottom = 0, orient = "horizontal"
+    )
+    e$x$opts$grid <- list(
+      containLabel = TRUE, left = 8, right = 14, top = 14, bottom = 46
+    )
+    e$x$opts$tooltip <- list(trigger = "axis", axisPointer = list(type = "shadow"))
+    return(wise_echart_theme(e))
+  }
+
+  use_log <- identical(type, "numeric") &&
+    all(df[[outcome]][!is.na(df[[outcome]])] > 0)
+
+  agg <- build_ridge_distribution_data(
+    df,
+    x_var         = outcome,
+    group_var     = "countryyear",
+    fill_var      = "code",
+    log_transform = use_log
+  )
+  if (is.null(agg)) {
+    return(invisible(NULL))
+  }
+
+  ridge_labels_raw <- agg$groups
+  if (!is.null(wave_labels)) {
+    mapped <- unname(wave_labels[ridge_labels_raw])
+    keep <- !is.na(mapped) & nzchar(mapped)
+    ridge_labels_raw[keep] <- mapped[keep]
+  }
+
+  pal <- .outcome_density_palette(agg$data$fill)
+  styles <- data.frame(
+    group = agg$groups,
+    fill = vapply(agg$groups, function(g) {
+      code <- agg$data$fill[match(g, agg$data$group)]
+      col <- pal[[code]]
+      if (is.null(col) || is.na(col)) NA_character_ else col
+    }, character(1)),
+    line = "grey30",
+    dashed = FALSE,
+    stringsAsFactors = FALSE
+  )
+
+  e <- ridge_echart_widget(
+    agg$data, agg$groups, ridge_labels_raw, styles,
+    height = height, log_scale = use_log, x_name = x_label
+  )
+  if (identical(outcome, "welfare") && !is.null(poverty_lines) &&
+    nrow(agg$data)) {
+    ser <- e$x$opts$series
+    tgt <- length(ser)
+    ser[[tgt]]$markLine <- list(
+      symbol = "none", silent = TRUE,
+      lineStyle = list(
+        color = .wise_marker, type = "dashed", width = 0.5
+      ),
+      label = list(
+        color = .wise_marker, fontSize = 11, rotate = 90,
+        position = "insideEndTop", distance = 4
+      ),
+      data = lapply(seq_len(nrow(poverty_lines)), function(i) {
+        list(
+          xAxis = poverty_lines$value[i],
+          label = list(formatter = poverty_lines$label[i])
+        )
+      })
+    )
+    e$x$opts$series <- ser
+  }
+  e
 }
 
 

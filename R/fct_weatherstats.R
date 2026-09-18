@@ -1944,11 +1944,15 @@ make_weather_binned_stats_dt <- function(survey_weather, selected_weather,
 #' @param height   CSS height passed to `shiny::plotOutput`.
 #' @param alts     Optional character vector of alt texts (UI-36), one per
 #'                 plot id; entries beyond `n_vars` are unused.
+#' @param echarts  Logical. When `TRUE` the slots are `echarts4r` chart
+#'                 outputs (`wise_chart_output`) for modules migrated to
+#'                 echarts (guidelines §7); the default keeps ggplot
+#'                 `plotOutput` for modules not yet migrated.
 #'
 #' @return A Shiny tag.
 #' @noRd
 weather_plot_layout <- function(ns, n_vars, ids, height = "500px",
-                                alts = NULL) {
+                                alts = NULL, echarts = FALSE) {
   plot_at <- function(i) {
     alt <- if (!is.null(alts) && length(alts) >= i &&
       !is.na(alts[i]) && nzchar(alts[i])) {
@@ -1956,10 +1960,19 @@ weather_plot_layout <- function(ns, n_vars, ids, height = "500px",
     } else {
       NULL
     }
+    if (!echarts) {
+      return(
+        if (is.null(alt)) {
+          shiny::plotOutput(ns(ids[i]), height = height)
+        } else {
+          wise_plot_output(ns(ids[i]), alt, height = height)
+        }
+      )
+    }
     if (is.null(alt)) {
-      shiny::plotOutput(ns(ids[i]), height = height)
+      echarts4r::echarts4rOutput(ns(ids[i]), height = height)
     } else {
-      wise_plot_output(ns(ids[i]), alt, height = height)
+      wise_chart_output(ns(ids[i]), alt, height = height)
     }
   }
   if (isTRUE(n_vars >= 2)) {
@@ -1971,4 +1984,596 @@ weather_plot_layout <- function(ns, n_vars, ids, height = "500px",
   } else {
     bslib::card(plot_at(1))
   }
+}
+
+
+# Echarts counterparts of the Weather stats figures (guidelines §7) ----
+# The ggplot builders above stay the canonical static renderers; these draw
+# the same precomputed values as interactive echarts4r widgets.
+
+#' Echarts distribution of a weather variable
+#'
+#' Interactive counterpart of [plot_weather_dist()]: dodged bin-share bars
+#' for binned variables (with the same historical bin counts), ridge densities
+#' from the shared `build_ridge_distribution_data()` precomputation for
+#' continuous ones.
+#'
+#' @inheritParams plot_weather_dist
+#' @param height Widget height; a CSS length or a number of pixels.
+#'
+#' @return An `echarts4r` widget, or `NULL` invisibly when there is nothing
+#'   to draw.
+#'
+#' @export
+echart_weather_dist <- function(df, hv, label, cont_binned, hist_df = NULL,
+                                breaks = NULL, year_from = NULL,
+                                year_to = NULL, wave_labels = NULL,
+                                height = "300px") {
+  if (is.null(df) || is.na(hv) || !(hv %in% names(df))) {
+    return(invisible(NULL))
+  }
+  if (!is.na(cont_binned) && cont_binned == "Binned") {
+    echart_weather_bins_compare(
+      df = df, hv = hv, label = label, hist_df = hist_df, breaks = breaks,
+      year_from = year_from, year_to = year_to, wave_labels = wave_labels,
+      height = height
+    )
+  } else {
+    echart_weather_ridges_compare(
+      df = df, hv = hv, label = label, hist_df = hist_df,
+      year_from = year_from, year_to = year_to, wave_labels = wave_labels,
+      height = height
+    )
+  }
+}
+
+
+#' Echarts binned-weather distribution, sample vs history
+#'
+#' Dodged bars of bin shares per survey wave (and its historical series),
+#' mirroring [plot_weather_bins_compare()].
+#'
+#' @noRd
+echart_weather_bins_compare <- function(df, hv, label, hist_df = NULL,
+                                        breaks = NULL, year_from = NULL,
+                                        year_to = NULL, wave_labels = NULL,
+                                        height = "300px") {
+  if (is.null(df) || is.na(hv) || !(hv %in% names(df)) ||
+    !("countryyear" %in% names(df))) {
+    return(invisible(NULL))
+  }
+  keep <- !is.na(df[[hv]])
+  if (!any(keep)) {
+    return(invisible(NULL))
+  }
+
+  lvls <- if (is.factor(df[[hv]])) {
+    levels(df[[hv]])
+  } else {
+    sort(unique(as.character(df[[hv]][keep])))
+  }
+
+  samp <- data.frame(
+    countryyear = as.character(df$countryyear[keep]),
+    bin = as.character(df[[hv]][keep]),
+    w = 1,
+    stringsAsFactors = FALSE
+  ) |>
+    dplyr::group_by(.data$countryyear, .data$bin) |>
+    dplyr::summarise(w = sum(.data$w, na.rm = TRUE), .groups = "drop") |>
+    as.data.frame()
+  samp$source <- .wx_sample_lab
+
+  hist_lab <- .wx_hist_lab(year_from, year_to)
+  hist_bins <- .hist_bin_counts(hist_df, hv, breaks, year_from, year_to)
+  has_hist <- !is.null(hist_bins) && nrow(hist_bins) > 0
+  if (has_hist) hist_bins$source <- hist_lab
+
+  d <- if (has_hist) rbind(samp, hist_bins) else samp
+  d <- d |>
+    dplyr::group_by(.data$countryyear, .data$source) |>
+    dplyr::mutate(share = 100 * .data$w / sum(.data$w, na.rm = TRUE)) |>
+    dplyr::ungroup() |>
+    as.data.frame()
+
+  waves <- sort(unique(d$countryyear))
+  pal <- .wave_palette(waves)
+  sources <- if (has_hist) c(.wx_sample_lab, hist_lab) else .wx_sample_lab
+  series <- .wx_series_grid(waves, sources)
+  key_cols <- stats::setNames(
+    ifelse(series$source == .wx_sample_lab,
+      pal[series$wave],
+      .blend_colour(pal[series$wave], "white", 0.6)
+    ),
+    series$key
+  )
+  disp <- .wx_display_series_labels(series$key, wave_labels)
+
+  e <- .e_new(height)
+  e$x$opts$xAxis <- list(
+    type = "category",
+    data = as.character(lvls),
+    name = stringr::str_wrap(paste0(label, "\n(as configured)"), 40),
+    nameLocation = "middle", nameGap = 34,
+    nameTextStyle = wise_eaxis_name(),
+    axisLabel = wise_eaxis_label(rotate = 30, interval = 0L),
+    axisTick = list(alignWithLabel = TRUE),
+    axisLine = list(lineStyle = list(color = .wise_grid)),
+    splitLine = wise_esplit_line()
+  )
+  e$x$opts$yAxis <- list(
+    type = "value", name = "Share of observations (%)",
+    nameLocation = "middle", nameGap = 40,
+    nameTextStyle = wise_eaxis_name(),
+    axisLabel = wise_eaxis_name(fontSize = 13),
+    splitLine = wise_esplit_line()
+  )
+  e$x$opts$series <- lapply(seq_len(nrow(series)), function(i) {
+    key <- series$key[i]
+    d <- d[d$key == key, , drop = FALSE]
+    vals <- stats::setNames(d$share, as.character(d$bin))[lvls]
+    list(
+      name = key, type = "bar",
+      data = as.list(ifelse(is.na(vals), 0, vals)),
+      itemStyle = list(color = unname(key_cols[[key]])),
+      barMaxWidth = 28
+    )
+  })
+  e$x$opts$legend <- wise_elegend_style(
+    left = 0, bottom = 0, orient = "horizontal"
+  )
+  e$x$opts$grid <- list(
+    containLabel = TRUE, left = 8, right = 14, top = 20, bottom = 56
+  )
+  e$x$opts$tooltip <- list(trigger = "axis", axisPointer = list(type = "shadow"))
+  wise_echart_theme(e)
+}
+
+
+#' Echarts continuous-weather ridges, sample vs history
+#'
+#' Ridge density counterpart of [plot_weather_ridges_compare()]: the same
+#' `build_ridge_distribution_data()` precomputation (256 bins / 256 grid
+#' points, bandwidth scale 0.85), the sample filled in the wave colour and the
+#' history drawn as a dashed outline in a darker shade.
+#'
+#' @noRd
+echart_weather_ridges_compare <- function(df, hv, label, hist_df = NULL,
+                                          year_from = NULL, year_to = NULL,
+                                          wave_labels = NULL,
+                                          height = "300px") {
+  if (is.null(df) || is.na(hv) || !(hv %in% names(df)) ||
+    !("countryyear" %in% names(df))) {
+    return(invisible(NULL))
+  }
+  sv <- suppressWarnings(as.numeric(df[[hv]]))
+  keep <- is.finite(sv)
+  if (!any(keep)) {
+    return(invisible(NULL))
+  }
+
+  samp <- data.frame(
+    countryyear = as.character(df$countryyear[keep]),
+    x = sv[keep],
+    w = 1,
+    source = .wx_sample_lab,
+    stringsAsFactors = FALSE
+  )
+
+  hist_lab <- .wx_hist_lab(year_from, year_to)
+  hist_use <- NULL
+  if (!is.null(hist_df) && !is.na(hv) && hv %in% names(hist_df) &&
+    all(c("n_hh", "countryyear") %in% names(hist_df))) {
+    hv_vals <- suppressWarnings(as.numeric(hist_df[[hv]]))
+    hkeep <- is.finite(hv_vals)
+    if (!is.null(year_from) && !is.null(year_to) &&
+      "cal_year" %in% names(hist_df)) {
+      hkeep <- hkeep &
+        hist_df$cal_year >= as.integer(year_from) &
+        hist_df$cal_year <= as.integer(year_to)
+    }
+    if (sum(hkeep) >= 10) {
+      hist_use <- data.frame(
+        countryyear = as.character(hist_df$countryyear[hkeep]),
+        x = hv_vals[hkeep],
+        w = as.numeric(hist_df$n_hh[hkeep]),
+        source = hist_lab,
+        stringsAsFactors = FALSE
+      )
+      hist_use <- hist_use[hist_use$countryyear %in% samp$countryyear, ,
+        drop = FALSE
+      ]
+      if (nrow(hist_use) == 0) hist_use <- NULL
+    }
+  }
+
+  waves <- sort(unique(samp$countryyear))
+  pal <- .wave_palette(waves)
+  sources <- if (is.null(hist_use)) {
+    .wx_sample_lab
+  } else {
+    c(.wx_sample_lab, hist_lab)
+  }
+
+  series <- .wx_series_grid(waves, sources)
+  d <- if (is.null(hist_use)) samp else rbind(samp, hist_use)
+  d$key <- .wx_series_key(as.character(d$countryyear), as.character(d$source))
+
+  rd <- build_ridge_distribution_data(
+    d,
+    x_var = "x",
+    group_var = "key",
+    fill_var = "key",
+    weight_var = "w",
+    ridge_var = "countryyear",
+    n_bins = 256L,
+    n_grid = 256L,
+    bandwidth_scale = 0.85
+  )
+  if (is.null(rd)) {
+    return(invisible(NULL))
+  }
+
+  styles <- data.frame(
+    group = series$key,
+    fill = ifelse(
+      series$source == .wx_sample_lab, unname(pal[series$wave]), NA_character_
+    ),
+    line = ifelse(series$source == .wx_sample_lab, "grey30",
+      .blend_colour(pal[series$wave], "black", 0.35)
+    ),
+    dashed = series$source != .wx_sample_lab,
+    stringsAsFactors = FALSE
+  )
+
+  ridge_labels <- .wx_display_wave_labels(rd$ridges, wave_labels)
+  ridge_echart_widget(
+    rd$data, rd$ridges, ridge_labels, styles,
+    height = height,
+    x_name = stringr::str_wrap(paste0(label, "\n(as configured)"), 40)
+  )
+}
+
+
+#' Echarts binscatter of an outcome against a weather variable
+#'
+#' Interactive counterpart of [plot_binscatter()]: the same bin summaries
+#' (21 equal-width bins over the observed range for continuous weather, the
+#' model bins for binned variables), the same 2500-point scatter cap, and the
+#' same binary-outcome conditional-mean handling.
+#'
+#' @inheritParams plot_binscatter
+#' @param height Widget height; a CSS length or a number of pixels.
+#'
+#' @return An `echarts4r` widget, or `NULL` invisibly when inputs are missing
+#'   or no finite data remain.
+#'
+#' @export
+echart_binscatter <- function(df, hv, hv_label = hv, y_var, y_label = y_var,
+                              height = "300px") {
+  if (is.null(df) || !all(c(hv, y_var) %in% names(df))) {
+    return(NULL)
+  }
+
+  raw <- df[, c(hv, y_var), drop = FALSE]
+  x_raw <- raw[[1L]]
+  y_raw <- raw[[2L]]
+
+  is_binned_x <- is.factor(x_raw) || is.character(x_raw)
+  if (is_binned_x) {
+    x_levels <- if (is.factor(x_raw)) {
+      levels(x_raw)
+    } else {
+      unique(as.character(x_raw[!is.na(x_raw)]))
+    }
+    x_num <- factor(as.character(x_raw), levels = x_levels)
+  } else {
+    x_levels <- NULL
+    x_num <- suppressWarnings(as.numeric(as.character(x_raw)))
+  }
+
+  y_num <- suppressWarnings(as.numeric(as.character(y_raw)))
+  is_binary_y <- FALSE
+  finite_y <- y_num[is.finite(y_num)]
+  if (length(finite_y) && all(unique(finite_y) %in% c(0, 1))) {
+    is_binary_y <- TRUE
+  } else if (is.logical(y_raw)) {
+    y_num <- as.integer(y_raw)
+    is_binary_y <- TRUE
+  } else if (is.factor(y_raw) && nlevels(y_raw) == 2L) {
+    y_levels <- levels(y_raw)
+    y_num <- match(as.character(y_raw), y_levels) - 1L
+    is_binary_y <- TRUE
+  } else if (is.character(y_raw)) {
+    y_levels <- sort(unique(as.character(y_raw[!is.na(y_raw)])))
+    if (length(y_levels) == 2L) {
+      y_num <- match(as.character(y_raw), y_levels) - 1L
+      is_binary_y <- TRUE
+    }
+  }
+  if (!is_binary_y) {
+    y_num <- suppressWarnings(as.numeric(as.character(y_raw)))
+  }
+
+  keep <- is.finite(y_num)
+  if (is_binned_x) {
+    keep <- keep & !is.na(x_num)
+  } else {
+    keep <- keep & is.finite(x_num)
+  }
+  if (!any(keep)) {
+    return(NULL)
+  }
+
+  d <- data.frame(
+    x = x_num[keep], y = y_num[keep],
+    stringsAsFactors = FALSE
+  )
+
+  # Even-stride cap matching the ggplot builder's point_max, so the browser
+  # payload stays bounded; the bin summaries below still use every row.
+  point_max <- 2500L
+  point_df <- if (nrow(d) > point_max) {
+    idx <- unique(as.integer(round(seq(1, nrow(d), length.out = point_max))))
+    d[idx, , drop = FALSE]
+  } else {
+    d
+  }
+
+  summarise_bins <- function(bin, x_value = NULL) {
+    g <- collapse::GRP(data.frame(bin = bin), by = "bin")
+    out <- data.frame(
+      bin = as.character(g$groups[[1]]),
+      mean = as.numeric(collapse::fmean(d$y, g = g, na.rm = TRUE)),
+      n = as.integer(collapse::fnobs(d$y, g = g)),
+      stringsAsFactors = FALSE
+    )
+    if (!is.null(x_value)) {
+      idx <- suppressWarnings(as.integer(out$bin))
+      out$x <- x_value[idx]
+    }
+    out
+  }
+
+  y_rng <- if (is_binary_y) c(0, 1) else NULL
+
+  if (is_binned_x) {
+    summary_df <- summarise_bins(d$x)
+    summary_df$bin <- factor(summary_df$bin, levels = x_levels)
+    summary_df <- summary_df[order(summary_df$bin), , drop = FALSE]
+
+    pt <- data.frame(
+      x = as.character(point_df$x),
+      y = point_df$y,
+      stringsAsFactors = FALSE
+    )
+    sym_size <- if (max(summary_df$n, na.rm = TRUE) > 0) {
+      round(6 + 9 * sqrt(summary_df$n / max(summary_df$n, na.rm = TRUE)))
+    } else {
+      rep(6, nrow(summary_df))
+    }
+
+    e <- .e_new(height)
+    e$x$opts$xAxis <- list(
+      type = "category", data = as.character(x_levels),
+      name = stringr::str_wrap(hv_label, 40),
+      nameLocation = "middle", nameGap = 32,
+      nameTextStyle = wise_eaxis_name(),
+      axisLabel = wise_eaxis_label(rotate = 30, interval = 0L),
+      axisTick = list(alignWithLabel = TRUE),
+      axisLine = list(lineStyle = list(color = .wise_grid)),
+      splitLine = wise_esplit_line()
+    )
+    e$x$opts$series <- list(
+      list(
+        type = "scatter", data = lapply(seq_len(nrow(pt)), function(i) {
+          xi <- match(pt$x[i], x_levels)
+          list(if (is.na(xi)) NA_real_ else xi - 1L, pt$y[i])
+        }),
+        symbolSize = 5, itemStyle = list(
+          color = .wise_charcoal, opacity = 0.10
+        ), silent = TRUE, z = 1
+      ),
+      list(
+        type = "line",
+        data = lapply(which(!is.na(summary_df$mean)), function(i) {
+          list(match(summary_df$bin[i], x_levels) - 1L, summary_df$mean[i])
+        }),
+        lineStyle = list(color = .wise_blue, width = 1.5),
+        symbol = "none", z = 3, silent = TRUE
+      ),
+      list(
+        type = "scatter",
+        data = lapply(which(!is.na(summary_df$mean)), function(i) {
+          list(
+            match(summary_df$bin[i], x_levels) - 1L, summary_df$mean[i],
+            symbolSize = sym_size[i]
+          )
+        }),
+        symbolSize = 8,
+        itemStyle = list(color = .wise_cyan, opacity = 0.95),
+        z = 4,
+        tooltip = list(show = TRUE)
+      )
+    )
+  } else {
+    x_range <- range(d$x, finite = TRUE)
+    if (!all(is.finite(x_range))) {
+      return(NULL)
+    }
+    breaks <- if (diff(x_range) == 0) {
+      x_range[1] + c(-0.5, 0.5)
+    } else {
+      seq(x_range[1], x_range[2], length.out = 21L)
+    }
+    bin <- cut(d$x, breaks = breaks, include.lowest = TRUE, labels = FALSE)
+    bin_mid <- (breaks[-length(breaks)] + breaks[-1L]) / 2
+    summary_df <- summarise_bins(bin, bin_mid)
+    summary_df <- summary_df[is.finite(summary_df$mean), , drop = FALSE]
+    summary_df <- summary_df[order(summary_df$x), , drop = FALSE]
+
+    # Deterministic even-stride downsample of the raw scatter for the browser
+    # payload (raw rows can reach hundreds of thousands); bin means above use
+    # every row.
+    scatter_max <- 10000L
+    scat <- if (nrow(d) > scatter_max) {
+      idx <- unique(as.integer(round(
+        seq(1, nrow(d), length.out = scatter_max)
+      )))
+      d[idx, , drop = FALSE]
+    } else {
+      d
+    }
+
+    sym_size <- if (nrow(summary_df) && max(summary_df$n) > 0) {
+      round(6 + 9 * summary_df$n / max(summary_df$n))
+    } else {
+      integer(0)
+    }
+
+    e <- .e_new(height)
+    e$x$opts$xAxis <- list(
+      type = "value",
+      name = stringr::str_wrap(hv_label, 40),
+      nameLocation = "middle", nameGap = 32,
+      nameTextStyle = wise_eaxis_name(),
+      axisLabel = wise_eaxis_label(),
+      axisLine = list(lineStyle = list(color = .wise_grid)),
+      splitLine = wise_esplit_line()
+    )
+    e$x$opts$series <- list(
+      list(
+        type = "scatter",
+        data = lapply(seq_len(nrow(scat)), function(i) {
+          list(scat$x[i], scat$y[i])
+        }),
+        symbolSize = 4, itemStyle = list(
+          color = .wise_charcoal, opacity = 0.10
+        ), silent = TRUE, z = 1
+      ),
+      list(
+        type = "line",
+        data = lapply(seq_len(nrow(summary_df)), function(i) {
+          list(summary_df$x[i], summary_df$mean[i])
+        }),
+        lineStyle = list(color = .wise_blue, width = 2),
+        symbol = "none", z = 3, silent = TRUE
+      ),
+      list(
+        type = "scatter",
+        data = lapply(seq_len(nrow(summary_df)), function(i) {
+          list(
+            summary_df$x[i], summary_df$mean[i],
+            symbolSize = sym_size[i]
+          )
+        }),
+        symbolSize = 8,
+        itemStyle = list(color = .wise_cyan),
+        z = 4,
+        tooltip = list(show = TRUE)
+      )
+    )
+  }
+
+  e$x$opts$yAxis <- list(
+    type = "value",
+    name = stringr::str_wrap(y_label, 40),
+    nameLocation = "middle", nameGap = 44,
+    nameTextStyle = wise_eaxis_name(),
+    min = if (is_binary_y) 0 else NULL,
+    max = if (is_binary_y) 1 else NULL,
+    axisLabel = wise_eaxis_label(),
+    splitLine = wise_esplit_line()
+  )
+  e$x$opts$legend <- NULL
+  e$x$opts$tooltip <- list(trigger = "item")
+  e$x$opts$grid <- list(containLabel = TRUE, left = 8, right = 16, top = 14, bottom = 8)
+  wise_echart_theme(e)
+}
+
+
+#' Reactable renderer for the continuous weather summary table (guidelines §6)
+#'
+#' Client-side search/pagination replacement of the old DT renderer; the CSV
+#' download is the separate `wise_reactable_csv_button()` in the module UI.
+#'
+#' @inheritParams make_weather_stats_dt
+#'
+#' @return A `shiny.render.function` (from `reactable::renderReactable`).
+#' @export
+make_weather_stats_reactable <- function(survey_weather, selected_weather,
+                                         survey_reference = NULL) {
+  reactable::renderReactable({
+    shiny::req(survey_weather(), selected_weather())
+    tab <- build_weather_stats_table(
+      survey_weather, selected_weather,
+      survey_reference
+    )
+    if (is.null(tab)) {
+      tab <- data.frame(
+        Note = paste(
+          "No continuous weather variables to summarise",
+          "(binned variables are shown below)."
+        )
+      )
+    }
+    .weather_reactable(tab, int_cols = "N")
+  })
+}
+
+
+#' Reactable renderer for the binned-weather level distribution (guidelines §6)
+#'
+#' @inheritParams make_weather_binned_stats_dt
+#'
+#' @return A `shiny.render.function` (from `reactable::renderReactable`).
+#' @export
+make_weather_binned_stats_reactable <- function(survey_weather, selected_weather,
+                                                survey_reference = NULL) {
+  reactable::renderReactable({
+    shiny::req(survey_weather(), selected_weather())
+    tab <- build_weather_binned_table(
+      survey_weather, selected_weather,
+      survey_reference
+    )
+    if (is.null(tab)) {
+      tab <- data.frame(Note = "No binned weather variables to summarise.")
+    }
+    .weather_reactable(tab, pct_cols = c("Share (%)", "% Missing"))
+  })
+}
+
+# Shared reactable styling for the weather tables: §6 defaults, 2-decimal
+# display rounding via colFormat over raw values (N stays an integer count).
+#' @noRd
+.weather_reactable <- function(tab, int_cols = character(0)) {
+  cols <- lapply(names(tab), function(nm) {
+    x <- tab[[nm]]
+    if (is.numeric(x) && !identical(nm, "N") && !nm %in% int_cols) {
+      reactable::colDef(
+        format = reactable::colFormat(digits = 2),
+        class = "wise-dt-wrap"
+      )
+    } else if (is.numeric(x)) {
+      reactable::colDef(
+        format = reactable::colFormat(digits = 0),
+        class = "wise-dt-wrap"
+      )
+    } else if (is.character(x) || is.factor(x)) {
+      reactable::colDef(class = "wise-dt-wrap", minWidth = 170)
+    } else {
+      reactable::colDef(class = "wise-dt-wrap", minWidth = 70)
+    }
+  })
+  names(cols) <- names(tab)
+  reactable::reactable(
+    tab,
+    columns = cols,
+    compact = TRUE,
+    searchable = TRUE,
+    defaultPageSize = 10,
+    showPageSizeOptions = TRUE,
+    pageSizeOptions = c(10, 25, 50, 100),
+    highlight = TRUE
+  )
 }

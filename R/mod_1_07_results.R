@@ -465,7 +465,7 @@ mod_1_07_results_server <- function(id,
             if (is.null(mf) || length(mf$weather_terms) < i) {
               return(NULL)
             }
-            make_coefplot(
+            echart_make_coefplot(
               fit1              = extract_native_fit(mf$fit1, mf$engine),
               fit2              = extract_native_fit(mf$fit2, mf$engine),
               fit3              = extract_native_fit(mf$fit3, mf$engine),
@@ -477,7 +477,8 @@ mod_1_07_results_server <- function(id,
               rif_grid          = mf$rif_grid,
               pred_var          = mf$weather_terms[i],
               x_label           = coef_unit_lab,
-              has_controls      = has_controls
+              has_controls      = has_controls,
+              height            = "600px"
             )
           }
         }
@@ -491,7 +492,7 @@ mod_1_07_results_server <- function(id,
               return(NULL)
             }
             is_logit_i <- is_logistic_fit(mf)
-            make_weather_effect_plot(
+            echart_weather_effect_plot(
               fit = native_fit(mf$fit3),
               pred_var = mf$weather_terms[i],
               interaction_terms = mf$interaction_terms,
@@ -511,7 +512,8 @@ mod_1_07_results_server <- function(id,
                 NULL
               },
               effect_scale = effect_scale_arg(i),
-              profile_eta = profile_eta0
+              profile_eta = profile_eta0,
+              height = "500px"
             )
           }
         }
@@ -525,7 +527,7 @@ mod_1_07_results_server <- function(id,
               return(NULL)
             }
             if (is_rif) {
-              make_weather_effect_plot(
+              echart_weather_effect_plot(
                 fit               = native_fit(mf$fit3),
                 pred_var          = mf$weather_terms[i],
                 interaction_terms = mf$interaction_terms,
@@ -535,7 +537,8 @@ mod_1_07_results_server <- function(id,
                 selected_weather  = sw_snap,
                 weather_df        = snap$survey_weather,
                 rif_grid          = mf$rif_grid,
-                mark_taus         = c(0.1, 0.5, 0.9)
+                mark_taus         = c(0.1, 0.5, 0.9),
+                height            = "420px"
               )
             } else {
               has_modx <- any(grepl(
@@ -547,7 +550,7 @@ mod_1_07_results_server <- function(id,
                 # instead of a plot, so no (blank) figure is registered.
                 return(NULL)
               }
-              make_weather_effect_plot(
+              echart_weather_effect_plot(
                 fit               = native_fit(mf$fit3),
                 pred_var          = mf$weather_terms[i],
                 interaction_terms = mf$interaction_terms,
@@ -562,7 +565,8 @@ mod_1_07_results_server <- function(id,
                 x_label           = axis_lab(i),
                 y_label           = effect_y_lab(i),
                 effect_scale      = effect_scale_arg(i),
-                profile_eta       = profile_eta0
+                profile_eta       = profile_eta0,
+                height            = "420px"
               )
             }
           }
@@ -630,14 +634,18 @@ mod_1_07_results_server <- function(id,
         # Stability plots: one per weather variable (hidden for RIF - the
         # quantile curve in "Who is most affected?" already carries that
         # content, per the plan's duplicate-suppression rule).
-        output$coefplot1 <- renderPlot({
+        output$coefplot1 <- echarts4r::renderEcharts4r({
           req(model_fit_val(), length(model_fit_val()$weather_terms) >= 1)
-          coef_fig(1)()
+          ch <- coef_fig(1)()
+          req(!is.null(ch))
+          ch
         })
 
-        output$coefplot2 <- renderPlot({
+        output$coefplot2 <- echarts4r::renderEcharts4r({
           req(model_fit_val(), length(model_fit_val()$weather_terms) >= 2)
-          coef_fig(2)()
+          ch <- coef_fig(2)()
+          req(!is.null(ch))
+          ch
         })
 
         # Regression table
@@ -849,26 +857,34 @@ mod_1_07_results_server <- function(id,
 
         # Relationship plots (one per weather variable) - reuse the section-3
         # builder so screen and export stay identical.
-        output$effectplot1 <- renderPlot({
+        output$effectplot1 <- echarts4r::renderEcharts4r({
           req(model_fit_val(), length(model_fit_val()$weather_terms) >= 1)
-          effect_fig(1)()
+          ch <- effect_fig(1)()
+          req(!is.null(ch))
+          ch
         })
 
-        output$effectplot2 <- renderPlot({
+        output$effectplot2 <- echarts4r::renderEcharts4r({
           req(model_fit_val(), length(model_fit_val()$weather_terms) >= 2)
-          effect_fig(2)()
+          ch <- effect_fig(2)()
+          req(!is.null(ch))
+          ch
         })
 
         # "Who is most affected?" plots (one per weather variable): annotated
         # RIF quantile curves or moderated effect plots.
-        output$who_plot1 <- renderPlot({
+        output$who_plot1 <- echarts4r::renderEcharts4r({
           req(model_fit_val(), length(model_fit_val()$weather_terms) >= 1)
-          who_fig(1)()
+          ch <- who_fig(1)()
+          req(!is.null(ch))
+          ch
         })
 
-        output$who_plot2 <- renderPlot({
+        output$who_plot2 <- echarts4r::renderEcharts4r({
           req(model_fit_val(), length(model_fit_val()$weather_terms) >= 2)
-          who_fig(2)()
+          ch <- who_fig(2)()
+          req(!is.null(ch))
+          ch
         })
 
         # Add / switch Results tab ----
@@ -972,6 +988,7 @@ mod_1_07_results_server <- function(id,
             ns, length(wt),
             ids = c("who_plot1", "who_plot2"),
             height = "420px",
+            echarts = TRUE,
             alts = vapply(seq_len(max(length(wt), 1L)), function(i) {
               if (identical(mf$engine, "rif")) {
                 paste(
@@ -1036,6 +1053,7 @@ mod_1_07_results_server <- function(id,
             ns, length(wt),
             ids = c("effectplot1", "effectplot2"),
             height = "500px",
+            echarts = TRUE,
             alts = vapply(seq_len(max(length(wt), 1L)), function(i) {
               if (is_rif) {
                 paste(
@@ -1063,6 +1081,7 @@ mod_1_07_results_server <- function(id,
             ns, length(wt),
             ids = c("coefplot1", "coefplot2"),
             height = "600px",
+            echarts = TRUE,
             alts = vapply(seq_len(max(length(wt), 1L)), function(i) {
               paste(
                 "Coefficient stability plot with confidence intervals for",

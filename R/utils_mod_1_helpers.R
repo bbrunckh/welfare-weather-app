@@ -590,3 +590,296 @@ model_term_names <- function(sm) {
     model_covariate_names(sm$interactions)
   ))
 }
+
+
+# Shared echarts4r plumbing for the Step 1 module charts (guidelines §7) ----
+
+# Base widget with a safe two-column, two-row dummy frame (echarts4r 0.5.x
+# rejects single-column and <2-row frames in e_charts()); builders overwrite
+# the axis/series/legend opts wholesale, so the dummy is never drawn.
+.e_new <- function(height = "300px") {
+  e <- echarts4r::e_charts(data.frame(x = 0:1, y = 0:1), x, height = height)
+  e$x$opts$xAxis <- NULL
+  e$x$opts$yAxis <- NULL
+  e$x$opts$series <- NULL
+  e
+}
+
+# Section-grid injection for n side-by-side panels in one widget (used where
+# the ggplot version was a patchwork of separate panels).
+.e_multi_grids <- function(e, n, titles = NULL, height = "300px") {
+  pad <- 8
+  title_h <- if (is.null(titles)) 0 else 24
+  gap <- 4
+  slot <- (100 - pad * (n + 1) - gap * (n - 1)) / n
+  widths <- paste0(slot, "%")
+  lefts <- paste0(pad + (pad + slot + gap) * (seq_len(n) - 1), "%")
+  grids <- lapply(seq_len(n), function(i) {
+    list(
+      left = lefts[i], width = widths[i],
+      top = if (title_h > 0) title_h + pad else pad,
+      bottom = pad, containLabel = TRUE
+    )
+  })
+  e$x$opts$grid <- grids
+  e$x$opts$xAxis <- rep(e$x$opts$xAxis %||% list(), n)
+  e$x$opts$yAxis <- rep(e$x$opts$yAxis %||% list(), n)
+  if (!is.null(titles)) {
+    e$x$opts$title <- lapply(seq_len(n), function(i) {
+      list(
+        text = titles[[i]], left = lefts[i], top = pad - 4,
+        textStyle = list(
+          color = .wise_charcoal, fontSize = 13, fontWeight = "normal"
+        )
+      )
+    })
+  }
+  e
+}
+
+# Precomputed-ridge renderer shared by the outcome and weather distribution
+# charts. `rd_data` is the `$data` frame of `build_ridge_distribution_data()`
+# (columns x, y, height, group); `styles` maps each `group` key to its fill
+# colour (NA = outline only), line colour and line dash. One stacked
+# (baseline, height) series pair per group reproduces the ggplot ribbon from
+# the ridge baseline to its top line.
+ridge_echart_widget <- function(rd_data, ridge_levels, ridge_labels, styles,
+                                height = "300px", log_scale = FALSE,
+                                x_name = NULL, y_name = "") {
+  e <- .e_new(height)
+  if (is.null(rd_data) || !nrow(rd_data) ||
+    !all(c("x", "y", "height", "group") %in% names(rd_data))) {
+    return(echart_blank("Distribution unavailable", height = height))
+  }
+  n_r <- length(ridge_levels)
+  x_name <- x_name %||% ""
+
+  series <- unlist(lapply(ridge_levels, function(rid) {
+    g <- rd_data[rd_data$y == match(rid, ridge_levels), , drop = FALSE]
+    g <- g[order(g$x), , drop = FALSE]
+    if (!nrow(g)) {
+      return(NULL)
+    }
+    st <- styles[match(g$group[1], styles$group), , drop = FALSE]
+    nm <- paste0("ridge_", match(rid, ridge_levels))
+    base <- list(
+      type = "line", stack = nm,       data = lapply(seq_len(nrow(g)), function(i) {
+        list(g$x[i], g$y[i])
+      }),
+      symbol = "none", silent = TRUE, lineStyle = list(opacity = 0),
+      itemStyle = list(opacity = 0), tooltip = list(show = FALSE)
+    )
+    top_dat <- lapply(seq_len(nrow(g)), function(i) {
+      list(g$x[i], 2 * g$height[i])
+    })
+    top <- list(
+      type = "line", stack = nm, data = top_dat, symbol = "none",
+      name = as.character(rid),
+      lineStyle = list(
+        color = st$line[1], width = 0.5,
+        type = if (isTRUE(st$dashed[1])) "dashed" else "solid"
+      ),
+      itemStyle = list(color = st$line[1])
+    )
+    if (!is.na(st$fill[1])) {
+      top$areaStyle <- list(color = st$fill[1], opacity = 0.7)
+    }
+    list(base, top)
+  }), recursive = FALSE)
+
+  e$x$opts$series <- series
+  e$x$opts$xAxis <- list(
+    type = if (isTRUE(log_scale)) "log" else "value",
+    name = x_name,
+    nameLocation = "middle", nameGap = 28,
+    nameTextStyle = wise_eaxis_name(),
+    axisLabel = wise_eaxis_label(
+      formatter = if (isTRUE(log_scale)) {
+        htmlwidgets::JS(
+          "function(v){return v.toLocaleString('en-US');}"
+        )
+      } else {
+        htmlwidgets::JS(
+          "function(v){var a=Math.abs(v);if(a>=1000){return (v/1000).toLocaleString('en-US',{maximumFractionDigits:1})+'k';}return String(Math.round(v*100)/100);}"
+        )
+      }
+    ),
+    axisLine = list(lineStyle = list(color = .wise_grid)),
+    splitLine = wise_esplit_line()
+  )
+  e$x$opts$yAxis <- list(
+    type = "value", name = y_name,
+    min = 0.5, max = n_r + 2.2, interval = 1,
+    axisLabel = wise_eaxis_label(
+      formatter = htmlwidgets::JS(paste0(
+        "function(v){var m=",
+        jsonlite::toJSON(stats::setNames(ridge_labels, as.list(seq_along(ridge_labels)))),
+        ";return m[String(Math.round(v))]||'';}"
+      ))
+    ),
+    axisLine = list(show = FALSE),
+    splitLine = wise_esplit_line()
+  )
+  e$x$opts$tooltip <- list(trigger = "axis")
+  wise_echart_theme(e)
+}
+
+
+#' Echarts residuals vs weather plot
+#'
+#' Interactive counterpart of `plot_resid_weather()` (fct_results.R,
+#' guidelines §7): the same data preparation (model frame / binned column
+#' fallback, bin ordering and labels) drawn as an `echarts4r` widget. Grey
+#' points are individual residuals (jittered within bins for binned
+#' predictors), orange marks are bin means, and the dashed line marks zero.
+#'
+#' @param model      Native fitted model (single model, e.g. median RIF).
+#' @param haz_var    Weather variable name.
+#' @param weather_df Weather data frame used to recover the first configured
+#'   bin label for the omitted reference bin.
+#' @param x_label    Unit-complete x-axis label.
+#' @param height     Widget height; a CSS length or a number of pixels.
+#'
+#' @return An `echarts4r` widget, or `NULL` invisibly when there is nothing
+#'   to draw (same contract as the ggplot builder).
+#'
+#' @noRd
+echart_resid_weather <- function(model, haz_var, weather_df, x_label = haz_var,
+                                 height = "300px") {
+  # Data preparation copied verbatim from plot_resid_weather().
+  df <- tryCatch(stats::model.frame(model), error = function(e) NULL)
+
+  if (is.null(df) || !haz_var %in% names(df)) {
+    mm <- resolve_model_matrix(model)
+    if (is.null(mm)) {
+      return(invisible(NULL))
+    }
+
+    if (haz_var %in% names(mm)) {
+      df <- mm
+    } else {
+      haz_esc <- gsub("([\\[\\]\\(\\)\\^\\$\\.\\*\\+\\?])", "\\\\\\1", haz_var)
+      bin_cols <- grep(paste0("^", haz_esc, "[\\[\\(]"), names(mm), value = TRUE)
+      bin_cols <- bin_cols[!grepl(":", bin_cols)]
+      if (length(bin_cols) == 0) {
+        return(invisible(NULL))
+      }
+
+      Xb <- mm[, bin_cols, drop = FALSE]
+      idx <- max.col(as.matrix(Xb), ties.method = "first")
+      none_active <- rowSums(Xb != 0, na.rm = TRUE) == 0
+
+      x_from_bins <- sub(paste0("^", haz_esc), "", bin_cols[idx])
+      x_from_bins[none_active] <- get_first_bin_label(weather_df, haz_var)
+
+      df <- data.frame(.haz_x = x_from_bins, stringsAsFactors = FALSE)
+      haz_var <- ".haz_x"
+    }
+  }
+
+  res <- tryCatch(stats::residuals(model), error = function(e) NULL)
+  if (is.null(res)) {
+    return(invisible(NULL))
+  }
+
+  x_vals <- df[[haz_var]]
+  n <- min(length(x_vals), length(res))
+  x_vals <- x_vals[seq_len(n)]
+  res <- res[seq_len(n)]
+
+  is_binned <- is.factor(x_vals) || is.character(x_vals)
+
+  e <- .e_new(height)
+  y_axis <- list(
+    type = "value", scale = TRUE, name = "Residuals",
+    nameLocation = "middle", nameGap = 44,
+    nameTextStyle = list(color = .wise_charcoal, fontSize = 13, rotate = 90),
+    axisLabel = wise_eaxis_label(), splitLine = wise_esplit_line()
+  )
+  zero_mark <- .e_zero_line()
+
+  if (is_binned) {
+    lvls <- levels(as.factor(x_vals))
+    num_lo <- suppressWarnings(as.numeric(
+      regmatches(lvls, regexpr("[0-9]+(\\.[0-9]+)?", lvls))
+    ))
+    lvls <- lvls[order(ifelse(is.na(num_lo), Inf, num_lo))]
+    new_lab <- vapply(lvls, .cut_bin_label, character(1))
+
+    bin_idx <- match(as.character(x_vals), lvls)
+    set.seed(1)
+    jit <- bin_idx + stats::runif(length(bin_idx), -0.18, 0.18)
+    means <- vapply(lvls, function(l) {
+      mean(res[as.character(x_vals) == l], na.rm = TRUE)
+    }, numeric(1))
+
+    e$x$opts$series <- list(
+      list(
+        name = "Residuals", type = "scatter",
+        data = lapply(seq_along(jit), function(i) list(jit[i], res[i])),
+        symbolSize = 4, z = 1,
+        itemStyle = list(color = .wise_charcoal, opacity = 0.12),
+        markLine = zero_mark
+      ),
+      list(
+        name = "Bin mean", type = "scatter",
+        data = lapply(seq_along(lvls), function(i) list(i, means[i])),
+        symbolSize = 9, z = 2,
+        itemStyle = list(color = .wise_marker_alt)
+      )
+    )
+    e$x$opts$xAxis <- list(list(
+      type = "value", min = 0.5, max = length(lvls) + 0.5, interval = 1,
+      name = stringr::str_wrap(x_label, 40),
+      nameLocation = "middle", nameGap = 30,
+      nameTextStyle = wise_eaxis_name(),
+      axisLabel = modifyList(
+        wise_eaxis_label(rotate = 30),
+        list(formatter = .e_index_formatter(new_lab))
+      ),
+      axisTick = list(show = FALSE), splitLine = wise_esplit_line()
+    ))
+  } else {
+    xv <- as.numeric(x_vals)
+    ok <- is.finite(xv) & is.finite(res)
+    xv <- xv[ok]
+    res <- res[ok]
+    brks <- seq(min(xv), max(xv), length.out = 21)
+    brks[1] <- brks[1] - 1e-9
+    brks[length(brks)] <- brks[length(brks)] + 1e-9
+    bins <- cut(xv, breaks = brks, include.lowest = TRUE)
+    agg <- stats::aggregate(res ~ bins, FUN = mean)
+    mids <- (head(brks, -1) + tail(brks, -1)) / 2
+    mean_pts <- lapply(seq_len(nrow(agg)), function(i) {
+      list(mids[as.integer(agg$bins[i])], agg$res[i])
+    })
+
+    e$x$opts$series <- list(
+      list(
+        name = "Residuals", type = "scatter",
+        data = lapply(seq_along(xv), function(i) list(xv[i], res[i])),
+        symbolSize = 4, z = 1,
+        itemStyle = list(color = .wise_charcoal, opacity = 0.1),
+        markLine = zero_mark
+      ),
+      list(
+        name = "Bin mean", type = "scatter", data = mean_pts,
+        symbolSize = 8, z = 2,
+        itemStyle = list(color = .wise_marker_alt)
+      )
+    )
+    e$x$opts$xAxis <- list(list(
+      type = "value", scale = TRUE,
+      name = stringr::str_wrap(x_label, 40),
+      nameLocation = "middle", nameGap = 30,
+      nameTextStyle = wise_eaxis_name(),
+      axisLabel = wise_eaxis_label(), splitLine = wise_esplit_line()
+    ))
+  }
+  e$x$opts$yAxis <- list(y_axis)
+  e$x$opts$grid <- list(
+    containLabel = TRUE, left = 8, right = 20, top = 14, bottom = 14
+  )
+  e$x$opts$tooltip <- list(trigger = "item")
+  wise_echart_theme(e)
+}

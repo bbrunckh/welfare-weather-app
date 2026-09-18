@@ -42,8 +42,8 @@ test_that("fit snapshot captures fit-time labels; headings follow re-fit engine"
     },
     # Renderers are inert: elapse() force-executes outputs, and the plot
     # internals need real fitted models which are irrelevant here.
-    make_coefplot           = function(...) ggplot2::ggplot(),
-    make_weather_effect_plot = function(...) ggplot2::ggplot(),
+    echart_make_coefplot      = function(...) NULL,
+    echart_weather_effect_plot = function(...) NULL,
     make_regtable           = function(...) shiny::tags$p("table"),
     is_logistic_fit         = function(mf) FALSE
   )
@@ -149,8 +149,8 @@ test_that("REACT-14: specification fallbacks render the provenance banner", {
         ))
       )
     },
-    make_coefplot            = function(...) ggplot2::ggplot(),
-    make_weather_effect_plot = function(...) ggplot2::ggplot(),
+    echart_make_coefplot      = function(...) NULL,
+    echart_weather_effect_plot = function(...) NULL,
     make_regtable            = function(...) shiny::tags$p("table"),
     is_logistic_fit          = function(mf) FALSE
   )
@@ -199,8 +199,8 @@ test_that("P16: one fit-signature observer preserves exact stale transitions", {
            weather_terms = selected_weather$name, interaction_terms = character(0),
            fit1 = NULL, fit2 = NULL, fit3 = NULL, rif_grid = NULL)
     },
-    make_coefplot = function(...) ggplot2::ggplot(),
-    make_weather_effect_plot = function(...) ggplot2::ggplot(),
+    echart_make_coefplot = function(...) NULL,
+    echart_weather_effect_plot = function(...) NULL,
     make_regtable = function(...) shiny::tags$p("table"),
     is_logistic_fit = function(mf) FALSE
   )
@@ -251,8 +251,8 @@ test_that("redesigned sections render: who-panel, focused table, RIF suppression
         rif_grid = NULL
       )
     },
-    make_coefplot            = function(...) ggplot2::ggplot(),
-    make_weather_effect_plot = function(...) ggplot2::ggplot(),
+    echart_make_coefplot      = function(...) NULL,
+    echart_weather_effect_plot = function(...) NULL,
     make_regtable            = function(...) shiny::tags$p("table"),
     make_regtable_focused    = function(...) shiny::tags$p("focused-table"),
     make_regtable_specs      = function(...) shiny::tags$p("specs-table"),

@@ -32,11 +32,13 @@ test_that("outcome stats tab re-renders only on button press", {
   skip_if_not_installed("shiny")
 
   plot_calls <- 0L
-  real_plot <- plot_welfare_dist
   local_mocked_bindings(
-    plot_welfare_dist = function(...) {
+    # The distribution chart renders through the echarts builder (guidelines
+    # §7); the mock counts builder invocations, which is what the button-press
+    # contract is about.
+    echart_welfare_dist = function(...) {
       plot_calls <<- plot_calls + 1L
-      ggplot2::ggplot()
+      NULL
     }
   )
 
@@ -198,9 +200,8 @@ make_wave_survey_df <- function() {
 test_that("PERF-41: summary table shows deciles and switches waves via the pill", {
   skip_if_not_installed("shiny")
 
-  real_plot <- plot_welfare_dist
   local_mocked_bindings(
-    plot_welfare_dist = function(...) ggplot2::ggplot()
+    echart_welfare_dist = function(...) NULL
   )
 
   shiny::testServer(
@@ -236,18 +237,18 @@ test_that("PERF-41: summary table shows deciles and switches waves via the pill"
       expect_match(heading_html, "sample-weighted", fixed = TRUE)
       expect_match(heading_html, "circle-info", fixed = TRUE)
 
-      # Pooled table: 40 observations, deciles present. renderTable
-      # surfaces as the rendered HTML string in testServer.
+      # Pooled table: 40 observations, deciles present. The summary is a
+      # Reactable widget; its JSON payload surfaces in testServer.
       html_all <- paste(session$output$outcome_summary_stats, collapse = " ")
       expect_match(html_all, "Median (P50)", fixed = TRUE)
       expect_match(html_all, "P90", fixed = TRUE)
-      expect_match(html_all, "> 40 <", fixed = TRUE)
+      expect_match(html_all, "[\"40\"", fixed = TRUE)
 
       # Switching the pill re-slices without recomputation: the wave table
       # describes 20 observations and a different mean.
       session$setInputs(summary_wave = "TST|2021|SRV"); settle()
       html_21 <- paste(session$output$outcome_summary_stats, collapse = " ")
-      expect_match(html_21, "> 20 <", fixed = TRUE)
+      expect_match(html_21, "[\"20\"", fixed = TRUE)
       expect_false(identical(html_all, html_21))
     }
   )
@@ -257,7 +258,7 @@ test_that("PERF-41: summary wave pill is hidden for single-wave data", {
   skip_if_not_installed("shiny")
 
   local_mocked_bindings(
-    plot_welfare_dist = function(...) ggplot2::ggplot()
+    echart_welfare_dist = function(...) NULL
   )
 
   single <- make_wave_survey_df()
@@ -280,7 +281,7 @@ test_that("PERF-41: summary wave pill is hidden for single-wave data", {
 
       expect_null(session$output$summary_wave_ui)
       html <- paste(session$output$outcome_summary_stats, collapse = " ")
-      expect_match(html, "> 20 <", fixed = TRUE)
+      expect_match(html, "[\"20\"", fixed = TRUE)
     }
   )
 })
