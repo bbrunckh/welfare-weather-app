@@ -568,6 +568,38 @@ mod_1_02_surveystats_server <- function(
           output$outcome_stats <- make_stats_reactable(survey_data, variable_list, "outcome",
             base = stats_base
           )
+
+          # §6: the Outcome stats section (heading + CSV button + table) only
+          # renders when the variable list flags outcome candidates, so an
+          # empty survey never shows an orphaned "Download CSV" control.
+          output$outcome_stats_section_ui <- renderUI({
+            vl <- if (is.function(variable_list)) variable_list() else variable_list
+            has_outcome <- !is.null(vl) && !is.null(vl[["outcome"]]) &&
+              any(vl[["outcome"]] == 1, na.rm = TRUE)
+            if (!has_outcome) {
+              return(NULL)
+            }
+            shiny::tagList(
+              h4(
+                "Outcome stats",
+                info_popover(
+                  title = "Outcome stats",
+                  p(paste(
+                    "Candidate outcome variables available for welfare",
+                    "analysis in Step 1. Check the missingness column",
+                    "before selecting an outcome - high missingness can",
+                    "limit sample size after listwise deletion."
+                  ))
+                )
+              ),
+              p(class = "text-muted small", "Candidate outcome variables for welfare analysis"),
+              shiny::tags$div(
+                class = "wise-reactable-controls",
+                wise_reactable_csv_button(ns("outcome_stats"), "survey_summary_outcome")
+              ),
+              reactable::reactableOutput(ns("outcome_stats"))
+            )
+          })
           output$ind_stats <- make_stats_reactable(survey_data, variable_list, "ind",
             base = stats_base
           )
@@ -828,24 +860,7 @@ mod_1_02_surveystats_server <- function(
                     )
                   )
                 ),
-                h4(
-                  "Outcome stats",
-                  info_popover(
-                    title = "Outcome stats",
-                    p(paste(
-                      "Candidate outcome variables available for welfare",
-                      "analysis in Step 1. Check the missingness column",
-                      "before selecting an outcome - high missingness can",
-                      "limit sample size after listwise deletion."
-                    ))
-                  )
-                ),
-                p(class = "text-muted small", "Candidate outcome variables for welfare analysis"),
-                shiny::tags$div(
-                  class = "wise-reactable-controls",
-                  wise_reactable_csv_button(ns("outcome_stats"), "survey_summary_outcome")
-                ),
-                reactable::reactableOutput(ns("outcome_stats")),
+                shiny::uiOutput(ns("outcome_stats_section_ui")),
                 h4("Policy variables"),
                 p(class = "text-muted small", "Variables that can be adjusted in Step 3 policy scenarios"),
                 shiny::tags$div(

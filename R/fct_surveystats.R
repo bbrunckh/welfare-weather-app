@@ -1165,7 +1165,7 @@ merge_loc_values_to_cells <- function(cell_map, loc_vals, by_wave = TRUE) {
 
 #' Build the summary-stats table frame by variable group flag
 #'
-#' Pure builder behind `make_stats_dt()`: aggregates (or row-filters the
+#' Pure builder behind the survey summary-statistics tables: aggregates (or row-filters the
 #' shared PERF-40 base), joins wave missingness and readable labels, and
 #' applies the display transformations (N filter, sort, column renames,
 #' HTML-escaped soft wrapping). Stateless and testable without a Shiny
@@ -1174,7 +1174,7 @@ merge_loc_values_to_cells <- function(cell_map, loc_vals, by_wave = TRUE) {
 #' @param df A survey data frame.
 #' @param vl A data frame containing at least columns `name` and `label`
 #'   (plus the flag column named by `flag_col` when `vars` is not given).
-#' @param flag_col,vars,base See `make_stats_dt()`.
+#' @param flag_col,vars,base See `make_stats_reactable()`.
 #'
 #' @return The display-ready summary data frame.
 #' @noRd
@@ -1399,82 +1399,9 @@ stats_display_slice <- function(base, vl, flag_col = NULL, vars = NULL,
   tab
 }
 
-#' Build a formatted DT summary table by variable group flag
-#'
-#' Creates a `DT::renderDT()` expression for survey summary statistics of the
-#' variables flagged in `variable_list[[flag_col]] == 1` and present in
-#' `survey_data()`.
-#'
-#' The returned table includes:
-#' \itemize{
-#'   \item Weighted summary statistics from `weighted_summary_long()`
-#'   \item Wave-specific missingness (`% Missing`) by `countryyear` and variable
-#'   \item Readable variable labels (from `variable_list`) shown in a single
-#'     `Variable` column, falling back to the raw name when no label exists
-#'   \item Standardized column names (capitalized first letter)
-#'   \item Basic display formatting (numeric columns to 2 decimals except `N`)
-#'   \item Soft text wrapping for long character/factor fields
-#' }
-#'
-#' @param survey_data A reactive expression returning a survey `data.frame`.
-#'   The data should include `countryyear` when wave-specific missingness is
-#'   required.
-#' @param variable_list A reactive expression or `data.frame` containing at least
-#'   columns `name`, `label`, and the grouping flag column given in `flag_col`.
-#' @param flag_col Character scalar naming the grouping flag column in
-#'   `variable_list` (e.g., `"outcome"`, `"ind"`, `"hh"`, `"firm"`, `"area"`).
-#'   Ignored if `vars` is supplied.
-#' @param vars Optional character vector of variable names to summarise. When
-#'   supplied, takes precedence over `flag_col`.
-#' @param base Optional reactive or list containing the shared summary base.
-#'
-#' @return A `shiny.render.function` (from `DT::renderDT`) that renders the
-#'   formatted summary statistics table.
-#' @export
-make_stats_dt <- function(survey_data, variable_list, flag_col = NULL,
-                          vars = NULL, base = NULL) {
-  DT::renderDT({
-    shiny::req(survey_data())
-    tab <- build_stats_table(survey_data, variable_list, flag_col, vars, base)
-    if (is.null(tab)) {
-      tag <- flag_col %||% "specified"
-      return(data.frame(Note = paste("No", tag, "variables found")))
-    }
-
-    dt <- DT::datatable(
-      tab,
-      rownames = FALSE,
-      escape = FALSE,
-      extensions = "Buttons",
-      options = list(
-        autoWidth = TRUE,
-        pageLength = 10,
-        columnDefs = list(list(className = "dt-wrap", targets = "_all")),
-        dom = wise_csv_dom("lfrtip"),
-        buttons = wise_csv_button(
-          if (!is.null(vars)) {
-            "survey_summary_policy"
-          } else {
-            paste0("survey_summary_", flag_col %||% "selected")
-          }
-        )
-      )
-    )
-
-    # 2 decimals for numeric columns except N
-    num_cols <- names(tab)[vapply(tab, is.numeric, logical(1))]
-    num_cols <- setdiff(num_cols, "N")
-    if (length(num_cols) > 0) {
-      dt <- DT::formatRound(dt, columns = num_cols, digits = 2)
-    }
-
-    dt
-  })
-}
-
 #' Build a reactable summary table by variable group flag (guidelines §6)
 #'
-#' The reactable successor of `make_stats_dt()`: same data pipeline (shared
+#' Same data pipeline as `build_stats_table()` (shared
 #' one-pass display base via `build_stats_table()`), same 2-decimal display
 #' for numeric columns except `N`, same soft-wrapped text cells - but the
 #' pagination, search and sorting run client-side, so re-renders and
@@ -1482,7 +1409,7 @@ make_stats_dt <- function(survey_data, variable_list, flag_col = NULL,
 #' is a separate `wise_reactable_csv_button()` (client-side
 #' `Reactable.downloadDataCSV()`), exported from the raw values.
 #'
-#' @param survey_data,variable_list,flag_col,vars,base See `make_stats_dt()`.
+#' @param survey_data,variable_list,flag_col,vars,base See `build_stats_table()`.
 #'
 #' @return A `shiny.render.function` (from `reactable::renderReactable`).
 #' @export

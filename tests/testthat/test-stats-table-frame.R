@@ -1,7 +1,7 @@
 # ============================================================================ #
-# tests/testthat/test-make_stats_dt.R                                          #
-# PERF-40: make_stats_dt's shared-base path (stats_table_frame) must produce   #
-# exactly the table the standalone per-table aggregation produced.             #
+# tests/testthat/test-stats-table-frame.R                                      #
+# PERF-40: the shared-base path (stats_table_frame) must produce exactly the   #
+# table the standalone per-table aggregation produced.                         #
 # ============================================================================ #
 
 library(testthat)
@@ -157,30 +157,6 @@ test_that("stats_table_frame: data without countryyear skips wave missingness", 
   expect_false("% Missing" %in% names(standalone))
 })
 
-test_that("make_stats_dt renders through a session with the shared base", {
-  df <- make_stats_df(); vl <- make_stats_vl()
-  base <- build_stats_base(df, vl)
-
-  shiny::testServer(
-    function(input, output, session) {
-      output$tbl <- make_stats_dt(
-        shiny::reactive(df), shiny::reactive(vl), "hh",
-        base = shiny::reactive(base)
-      )
-    },
-    {
-      # The rendered payload (JSON sent to the output binding) carries the
-      # table columns; the frame content itself is pinned by the
-      # stats_table_frame tests above.
-      payload <- paste(jsonlite::toJSON(output$tbl, auto_unbox = TRUE),
-                       collapse = "")
-      expect_match(payload, "Variable", fixed = TRUE)
-      expect_match(payload, "Country, Year", fixed = TRUE)
-    }
-  )
-})
-
-# ---- One-pass display base (PERF-42) -----------------------------------------
 
 test_that("stats_display_base slice reproduces stats_table_frame exactly", {
   df <- make_stats_df(); vl <- make_stats_vl()

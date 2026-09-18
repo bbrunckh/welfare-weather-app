@@ -1579,7 +1579,7 @@ isTRUE_vec <- function(x) !is.na(x) & x
 # Summary stats table ----
 
 
-#' Build the weather summary data frame behind `make_weather_stats_dt()`
+#' Build the weather summary data frame behind `make_weather_stats_reactable()`
 #'
 #' UI-45/UI-48: one builder behind the table, its CSV button and the
 #' export bundle.
@@ -1662,61 +1662,6 @@ build_weather_stats_table <- function(survey_weather, selected_weather,
 
   tab
 }
-
-#' Weather summary stats DT renderer
-#'
-#' @param survey_weather Reactive returning merged survey-weather data.
-#' @param selected_weather Reactive returning selected weather rows (needs name/label).
-#' @param survey_reference Reactive returning the original survey data for
-#'   missingness denominators.
-#'
-#' @return A DT render function.
-#' @export
-make_weather_stats_dt <- function(survey_weather, selected_weather,
-                                  survey_reference = NULL) {
-  DT::renderDT({
-    shiny::req(survey_weather(), selected_weather())
-    tab <- build_weather_stats_table(
-      survey_weather, selected_weather,
-      survey_reference
-    )
-    if (is.null(tab)) {
-      return(data.frame(
-        Note = paste(
-          "No continuous weather variables to summarise",
-          "(binned variables are shown below)."
-        )
-      ))
-    }
-
-    # UI-46: this is a summary-stats table like the Sample tab's
-    # individual/household/area tables, so it is presented like them
-    # (`make_stats_dt()` in fct_surveystats.R): auto-width columns, wrapped
-    # text, paging + search + row count. It previously rendered as a bare
-    # compact listing, which made the Weather stats tab look unlike every
-    # other table in Step 1.
-    dt <- DT::datatable(
-      tab,
-      rownames = FALSE,
-      extensions = "Buttons",
-      options = list(
-        autoWidth = TRUE,
-        pageLength = 10,
-        columnDefs = list(list(className = "dt-wrap", targets = "_all")),
-        dom = wise_csv_dom("lfrtip"),
-        buttons = wise_csv_button("weather_summary")
-      )
-    )
-
-    # Formatting: N no decimals, others numeric 2 decimals
-    num_cols <- names(tab)[vapply(tab, is.numeric, logical(1))]
-    num_cols <- setdiff(num_cols, "N")
-    if (length(num_cols) > 0) dt <- DT::formatRound(dt, columns = num_cols, digits = 2)
-
-    dt
-  })
-}
-
 
 #' Build the binned-weather distribution frame
 #'
@@ -1878,56 +1823,6 @@ build_weather_binned_table <- function(survey_weather, selected_weather,
   }
 
   tab
-}
-
-#' Weather binned-variable level-distribution DT renderer
-#'
-#' Builds a DT for binned (factor / character) weather variables, showing
-#' count and share of observations in each bin per `countryyear`. Numeric
-#' weather variables are skipped (handled by `make_weather_stats_dt`).
-#'
-#' @param survey_weather   Reactive returning merged survey-weather data.
-#' @param selected_weather Reactive returning selected weather rows
-#'   (needs `name` and `label`).
-#' @param survey_reference Reactive returning the original survey data for
-#'   missingness denominators.
-#'
-#' @return A DT render function.
-#' @export
-make_weather_binned_stats_dt <- function(survey_weather, selected_weather,
-                                         survey_reference = NULL) {
-  DT::renderDT({
-    shiny::req(survey_weather(), selected_weather())
-    tab <- build_weather_binned_table(
-      survey_weather, selected_weather,
-      survey_reference
-    )
-    if (is.null(tab)) {
-      return(data.frame(Note = "No binned weather variables to summarise."))
-    }
-
-    # UI-46: same presentation as the continuous weather stats table above
-    # and the Sample tab's summary tables.
-    dt <- DT::datatable(
-      tab,
-      rownames = FALSE,
-      extensions = "Buttons",
-      options = list(
-        autoWidth = TRUE,
-        pageLength = 10,
-        columnDefs = list(list(className = "dt-wrap", targets = "_all")),
-        dom = wise_csv_dom("lfrtip"),
-        buttons = wise_csv_button("weather_binned_distribution")
-      )
-    )
-
-    num_cols <- intersect(c("Share (%)", "% Missing"), names(tab))
-    if (length(num_cols) > 0) {
-      dt <- DT::formatRound(dt, columns = num_cols, digits = 2)
-    }
-
-    dt
-  })
 }
 
 #' Per-weather-variable plot layout (full panel for 1 var, two for >= 2)
@@ -2497,7 +2392,7 @@ echart_binscatter <- function(df, hv, hv_label = hv, y_var, y_label = y_var,
 #' Client-side search/pagination replacement of the old DT renderer; the CSV
 #' download is the separate `wise_reactable_csv_button()` in the module UI.
 #'
-#' @inheritParams make_weather_stats_dt
+#' @inheritParams make_weather_stats_reactable
 #'
 #' @return A `shiny.render.function` (from `reactable::renderReactable`).
 #' @export
@@ -2524,7 +2419,7 @@ make_weather_stats_reactable <- function(survey_weather, selected_weather,
 
 #' Reactable renderer for the binned-weather level distribution (guidelines §6)
 #'
-#' @inheritParams make_weather_binned_stats_dt
+#' @inheritParams make_weather_binned_stats_reactable
 #'
 #' @return A `shiny.render.function` (from `reactable::renderReactable`).
 #' @export

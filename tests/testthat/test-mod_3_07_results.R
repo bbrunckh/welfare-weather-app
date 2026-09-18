@@ -216,34 +216,6 @@ test_that("step3_variance_breakdown and plot_step3_variance_contribution work co
   expect_s3_class(plt, "ggplot")
 })
 
-test_that("step3_decision_table_data and make_step3_decision_table_html work correctly", {
-  thresh <- tibble::tibble(
-    scenario      = rep(c("Historical", "SSP2-4.5 / 2030-2040"), each = 4),
-    source        = rep(c("Baseline", "Baseline", "Policy", "Policy"), 2),
-    Estimate      = rep("Central (P50)", 8),
-    rp_name       = rep(c("1:1", "1:10"), 4),
-    value         = c(3.0, 2.0, 3.0, 2.0,
-                      3.2, 2.1, 3.65, 2.68),
-    n_obs         = 30L,
-    is_historical = rep(c(TRUE, FALSE), each = 4)
-  )
-
-  dt_df <- step3_decision_table_data(thresh, method = "mean", so = list(type = "numeric", name = "welfare"))
-  expect_s3_class(dt_df, "data.frame")
-  expect_true(all(c("scenario", "source", "Expected", "Policy effect") %in% names(dt_df)))
-  # Policy row under SSP2-4.5 should have Policy effect = 3.65 - 3.2 = 0.45
-  pol_row <- dt_df[dt_df$scenario == "SSP2-4.5 / 2030-2040" & dt_df$source == "Policy", ]
-  expect_equal(pol_row$`Policy effect`[[1L]], 0.45, tolerance = 1e-4)
-
-  html_tag <- make_step3_decision_table_html(dt_df, subheader = "Welfare outcomes")
-  rendered <- as.character(htmltools::renderTags(html_tag)$html)
-  expect_match(rendered, "wise-table", fixed = TRUE)
-  expect_match(rendered, "policy-row", fixed = TRUE)
-  expect_match(rendered, "policy-effect-badge", fixed = TRUE)
-  expect_match(rendered, "+0.45", fixed = TRUE)
-  expect_match(rendered, "historical-row", fixed = TRUE)
-})
-
 test_that(".results_pane_ui renders aggregation panel and results sections", {
   so <- list(name = "welfare", type = "numeric", label = "Consumption", level = "hh", units = "$/day")
   ui <- .results_pane_ui(shiny::NS("results3"), so)

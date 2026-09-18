@@ -719,79 +719,12 @@ stale_after_import <- function(has_result, is_stale = NULL, imported = NULL) {
 }
 
 
-# Table CSV export (UI-45) ----
+# Table CSV export (UI-45, guidelines §6) ----
 #
-# Every table in the app offers the same export affordance: one small, quiet
-# "Download CSV" control. For DT tables that is the Buttons extension, driven
-# by the two helpers below; for the handful of hand-built HTML tables it is
-# `csv_download_link()` over a `downloadHandler`. Both render as
-# `.wise-csv-btn` so they look identical wherever they appear (custom.css).
-
-#' DT `buttons` spec for a single, discreet CSV export
-#'
-#' @param filename Base name of the downloaded file, without extension.
-#' @param enabled  When FALSE, returns NULL so the button is omitted (used to
-#'   withhold exports while results are stale - INT-08).
-#'
-#' @return A list suitable for `DT::datatable(options = list(buttons = ...))`,
-#'   or NULL.
-#' @noRd
-wise_csv_button <- function(filename, enabled = TRUE) {
-  if (!isTRUE(enabled)) {
-    return(NULL)
-  }
-  list(list(
-    extend        = "csv",
-    text          = "Download CSV",
-    filename      = filename,
-    className     = "wise-csv-btn",
-    # Export every row, not just the visible page; keep any active search.
-    exportOptions = list(modifier = list(page = "all"))
-  ))
-}
-
-#' Add the Buttons placeholder to a DT `dom` string
-#'
-#' When both the page-length picker (`l`) and search box (`f`) are present,
-#' wrap Buttons and those controls in one flex row. Tables without both retain
-#' the simple leading `B` form.
-#'
-#' @param dom A DataTables `dom` string (e.g. "t", "lfrtip").
-#' @return A `dom` string including the Buttons placeholder.
-#' @noRd
-wise_csv_dom <- function(dom = "lfrtip") {
-  if (grepl("B", dom, fixed = TRUE)) {
-    return(dom)
-  }
-  has_len <- grepl("l", dom, fixed = TRUE)
-  has_search <- grepl("f", dom, fixed = TRUE)
-  if (!has_len || !has_search) {
-    return(paste0("B", dom))
-  }
-
-  # Pull l and f out of their original positions into the shared toolbar.
-  rest <- gsub("[lf]", "", dom)
-  paste0("<'wise-dt-controls'Blf>", rest)
-}
-
-#' Small "Download CSV" link for a non-DT table
-#'
-#' Pairs with a `downloadHandler()` registered under the same output id. Use
-#' for hand-built HTML tables (`renderTable()` / `renderUI()`), which have no
-#' DataTables toolbar to hang a button off.
-#'
-#' @param output_id Namespaced id of the matching `downloadHandler` output.
-#' @param label     Link text. Default "Download CSV".
-#'
-#' @return A `downloadLink` tag.
-#' @noRd
-csv_download_link <- function(output_id, label = "Download CSV") {
-  shiny::downloadLink(
-    output_id,
-    label = shiny::tagList(shiny::icon("download"), label),
-    class = "wise-csv-btn wise-csv-link"
-  )
-}
+# Every rendered table in the app is a `reactable` table and offers the same
+# export affordance: one small, quiet "Download CSV" control implemented
+# client-side via `Reactable.downloadDataCSV()` (JavaScript), so the download
+# never round-trips the server. No R-side download handlers for table data.
 
 #' Client-side "Download CSV" button for a reactable table (guidelines §6)
 #'
@@ -817,36 +750,6 @@ wise_reactable_csv_button <- function(table_id, filename) {
       jsonlite::toJSON(paste0(filename, ".csv"), auto_unbox = TRUE)
     ),
     shiny::tagList(shiny::icon("download"), "Download CSV")
-  )
-}
-
-#' `downloadHandler` writing a data frame to CSV
-#'
-#' @param filename_base Base name of the file, without extension.
-#' @param data_fun      Function of no arguments returning a data frame, or
-#'   NULL when there is nothing to export.
-#' @param stale         Optional reactive stale flag. Stale downloads fail
-#'   before writing a file.
-#'
-#' @return A shiny download handler.
-#' @noRd
-csv_download_handler <- function(filename_base, data_fun, stale = NULL) {
-  shiny::downloadHandler(
-    filename = function() {
-      paste0(filename_base, "_", format(Sys.Date(), "%Y%m%d"), ".csv")
-    },
-    content = function(file) {
-      if (is.function(stale) && isTRUE(shiny::isolate(stale()))) {
-        if (file.exists(file)) unlink(file)
-        stop("Results are stale; rerun before downloading.", call. = FALSE)
-      }
-      df <- tryCatch(data_fun(), error = function(e) NULL)
-      if (is.null(df) || !is.data.frame(df) || nrow(df) == 0) {
-        df <- data.frame(Note = "No data available")
-      }
-      utils::write.csv(.export_flatten_df(df), file, row.names = FALSE, na = "")
-    },
-    contentType = "text/csv"
   )
 }
 
