@@ -375,6 +375,93 @@ WISEAPP_WX_ROUND_DIGITS <- 5L
   apply_slice(local)
 }
 
+# Location-month disk cache (PERF-13, one level up) ----
+#                                                                              #
+# The heaviest per-run work in get_weather() is the h3 spatial join plus       #
+# population-weighted aggregation that produces the location-month table.      #
+# It re-executes on every call even when the raw remote slices are already     #
+# cached. Cache the *materialized* loc_monthly (post-join, post-pop-weight,    #
+# pre-rolling) keyed by everything that join consumes: weather + h3 file       #
+# paths, weather vars, date span, and the harmonised h3 resolutions.           #
+# Re-runs with the same surveys/variables/span (the common interactive         #
+# re-run: changed scenario params) then skip the join entirely. Unlike the     #
+# raw cache this applies to local backends too - the join cost does not        #
+# depend on where the parquet lives. Row order inside the cached table is      #
+# irrelevant to every consumer (rolling windows ORDER BY timestamp; results    #
+# are arranged before collect).                                                #
+
+WISEAPP_WX_LOC_CACHE_VERSION <- "v1"
+
+# Best-effort COPY of a materialized temp table into the location-month
+# cache (tmp + rename race handling and LRU eviction shared with the raw
+# cache). Returns invisibly; failures degrade to the uncached path.
+.wx_loc_cache_store <- function(con, temp_table, key) {
+  dir <- .weather_cache_dir()
+  path <- file.path(dir, paste0(key, ".parquet"))
+  if (file.exists(path)) {
+    return(invisible(NULL))
+  }
+  ok <- tryCatch(
+    {
+      if (!dir.exists(dir)) dir.create(dir, showWarnings = FALSE, recursive = TRUE)
+      tmp_path <- paste0(path, ".tmp")
+      DBI::dbExecute(con, sprintf(
+        "COPY (SELECT * FROM %s) TO '%s' (FORMAT PARQUET, COMPRESSION ZSTD);",
+        temp_table, tmp_path
+      ))
+      if (!file.rename(tmp_path, path)) {
+        # Concurrent write race: another session won; discard our copy
+        try(unlink(tmp_path), silent = TRUE)
+        if (!file.exists(path)) {
+          return(invisible(NULL))
+        }
+      }
+      .weather_cache_evict(dir)
+      invisible(NULL)
+    },
+    error = function(e) {
+      warning("[wiseapp] loc_monthly disk cache write failed; continuing: ",
+        conditionMessage(e),
+        call. = FALSE
+      )
+      invisible(NULL)
+    }
+  )
+  ok
+}
+
+# Cache hit: materialize the cached slice into a fresh temp table and return
+# a lazy tbl over it, or NULL when the cache is unusable.
+.wx_loc_cache_load <- function(con, key, temp_table) {
+  path <- file.path(.weather_cache_dir(), paste0(key, ".parquet"))
+  if (!file.exists(path)) {
+    return(NULL)
+  }
+  ok <- tryCatch(
+    {
+      DBI::dbExecute(con, sprintf(
+        "CREATE TEMP TABLE %s AS SELECT * FROM read_parquet('%s');",
+        temp_table, path
+      ))
+      TRUE
+    },
+    error = function(e) NULL
+  )
+  if (is.null(ok)) {
+    return(NULL)
+  }
+  dplyr::tbl(con, temp_table)
+}
+
+.wx_loc_cache_key <- function(weather_fnames, h3_fnames, weather_vars,
+                              date_min, date_max, res_micro, res_weather) {
+  digest::digest(list(
+    "loc-monthly", WISEAPP_WX_LOC_CACHE_VERSION, WISEAPP_WX_CACHE_VERSION,
+    sort(weather_fnames), sort(h3_fnames), weather_vars,
+    date_min, date_max, res_micro, res_weather
+  ))
+}
+
 # H3 spatial helpers ----
 
 #' Harmonise H3 resolution and type between microdata and weather tables.
@@ -588,20 +675,26 @@ WISEAPP_WX_ROUND_DIGITS <- 5L
       by = c("code", "year", "survname", "loc_id", "month")
     )
 
-  for (i in seq_len(nrow(specs))) {
-    v <- specs$name[i]
-    tf <- specs$transformation[i]
-    expr <- if (tf == "Deviation from mean") {
-      dbplyr::sql(paste0(v, " - ", specs$mean_col[i]))
-    } else if (tf == "Standardized anomaly") {
-      dbplyr::sql(paste0(
-        "(", v, " - ", specs$mean_col[i], ") / ", specs$sd_col[i]
-      ))
-    } else {
-      NULL
-    }
-    tbl <- dplyr::mutate(tbl, !!v := expr)
-  }
+  # Single mutate over all variables: one SQL translation instead of one
+  # per-variable mutate that re-renders the full plan per transformed column.
+  trans_exprs <- stats::setNames(
+    lapply(seq_len(nrow(specs)), function(i) {
+      v <- specs$name[i]
+      tf <- specs$transformation[i]
+      if (tf == "Deviation from mean") {
+        dbplyr::sql(paste0(v, " - ", specs$mean_col[i]))
+      } else if (tf == "Standardized anomaly") {
+        dbplyr::sql(paste0(
+          "(", v, " - ", specs$mean_col[i], ") / ", specs$sd_col[i]
+        ))
+      } else {
+        NULL
+      }
+    }),
+    specs$name
+  )
+
+  tbl <- dplyr::mutate(tbl, !!!trans_exprs)
 
   tbl |>
     dplyr::select(-month, -dplyr::all_of(ref_cols))
@@ -1072,19 +1165,21 @@ get_weather <- function(
   # deletes real population: about 1% of rows in the EHCVM files, which shifts
   # the relative weight of cells inside a location by up to a fifth in the
   # worst case. Aggregating explicitly also makes the join below one-to-one.
-  h3_slim <- h3_slim |>
-    dplyr::group_by(code, year, survname, loc_id, h3_weather) |>
-    dplyr::summarise(pop_2020 = sum(pop_2020, na.rm = TRUE), .groups = "drop")
 
   # Materialise the normalized location-to-weather-cell weights once. The same
   # relation is joined by historical weather and every future model/period.
+  # Both this table and loc_monthly below are disk-cached: on a re-run with
+  # the same surveys/variables/span the h3 file scan and the heavy spatial
+  # join are both skipped.
   h3_weights_name <- basename(tempfile(pattern = "lw_h3_weights_"))
   tmp_tables <- c(tmp_tables, h3_weights_name)
-  h3_slim <- .profile_timed(
-    "h3_weights", dplyr::compute(h3_slim, name = h3_weights_name, temporary = TRUE)
-  )
 
   # -- Spatial aggregation: h3 -> loc_id (population-weighted mean) ----------
+  # Two SQL passes per variable (weighted numerator; population denominator
+  # restricted to non-NA rows) instead of the previous triple per-row
+  # if_else/across branching. Semantics are identical, including all-NA
+  # groups (guard below) and partial-NA groups (denominator excludes the
+  # NA rows' population, as before).
   .pop_weighted_mean <- function(tbl, vars) {
     tbl |>
       dplyr::summarise(
@@ -1092,7 +1187,7 @@ get_weather <- function(
           dplyr::all_of(vars),
           ~ dplyr::if_else(
             sum(dplyr::if_else(!is.na(.x), pop_2020, 0), na.rm = TRUE) > 0,
-            sum(dplyr::if_else(!is.na(.x), .x * pop_2020, 0), na.rm = TRUE) /
+            sum(.x * pop_2020, na.rm = TRUE) /
               sum(dplyr::if_else(!is.na(.x), pop_2020, 0), na.rm = TRUE),
             NA_real_
           )
@@ -1101,18 +1196,55 @@ get_weather <- function(
       )
   }
 
-  loc_monthly <- weather |>
-    dplyr::inner_join(h3_slim, by = c("h3" = "h3_weather")) |>
-    dplyr::group_by(code, year, survname, loc_id, timestamp) |>
-    .pop_weighted_mean(weather_vars)
+  loc_cache_enabled <- !.wx_env_flag("WISEAPP_WEATHER_CACHE_DISABLE")
+  loc_base_key <- .wx_loc_cache_key(
+    weather_fnames, h3_fnames, weather_vars, date_min, date_max,
+    h3_harmonised$res_micro, h3_harmonised$res_weather
+  )
+  h3_weights_key <- digest::digest(list(loc_base_key, "h3_weights"))
+  loc_monthly_key <- digest::digest(list(loc_base_key, "loc_monthly"))
+
+  h3_slim_cached <- .profile_timed(
+    "h3_weights_cache_hit",
+    if (loc_cache_enabled) .wx_loc_cache_load(con, h3_weights_key, h3_weights_name)
+  )
+  if (is.null(h3_slim_cached)) {
+    h3_slim <- h3_slim |>
+      dplyr::group_by(code, year, survname, loc_id, h3_weather) |>
+      dplyr::summarise(pop_2020 = sum(pop_2020, na.rm = TRUE), .groups = "drop")
+    h3_slim <- .profile_timed(
+      "h3_weights", dplyr::compute(h3_slim, name = h3_weights_name, temporary = TRUE)
+    )
+    if (loc_cache_enabled) {
+      .wx_loc_cache_store(con, h3_weights_name, h3_weights_key)
+    }
+  } else {
+    h3_slim <- h3_slim_cached
+  }
+
   # Materialise location-month weather once. The same relation is consumed by
-  # the historical result and every future SSP/period batch.
+  # the historical result and every future SSP/period batch. When a previous
+  # run already cached this exact (surveys, variables, span, resolutions)
+  # table, load it from disk and skip the join entirely.
   tmp_loc_monthly_name <- basename(tempfile(pattern = "lw_loc_monthly_"))
   tmp_tables <- c(tmp_tables, tmp_loc_monthly_name)
-  loc_monthly <- .profile_timed("loc_monthly", dplyr::compute(
-    loc_monthly,
-    name = tmp_loc_monthly_name, temporary = TRUE
-  ))
+  loc_monthly <- .profile_timed(
+    "loc_monthly_cache_hit",
+    if (loc_cache_enabled) .wx_loc_cache_load(con, loc_monthly_key, tmp_loc_monthly_name)
+  )
+  if (is.null(loc_monthly)) {
+    loc_monthly <- .profile_timed("loc_monthly", weather |>
+      dplyr::inner_join(h3_slim, by = c("h3" = "h3_weather")) |>
+      dplyr::group_by(code, year, survname, loc_id, timestamp) |>
+      .pop_weighted_mean(weather_vars))
+    loc_monthly <- .profile_timed("loc_monthly", dplyr::compute(
+      loc_monthly,
+      name = tmp_loc_monthly_name, temporary = TRUE
+    ))
+    if (loc_cache_enabled) {
+      .wx_loc_cache_store(con, tmp_loc_monthly_name, loc_monthly_key)
+    }
+  }
 
   # -- Rolling window expressions --------------------------------------------
   agg_fn_map <- c(
