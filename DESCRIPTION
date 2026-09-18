@@ -29,7 +29,7 @@ Imports:
     dplyr,
     duckdb,
     echarts4r,
-    fixest,
+    fixest (>= 0.14.0),
     future,
     future.apply,
     ggplot2,
