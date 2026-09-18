@@ -71,24 +71,19 @@ struct PoisonSum {
 };
 
 // Sort entry mirroring order(x): ascending value, NaN then NA last, ties in
-// original row order (stable).
+// original row order (stable). The missing rank is precomputed in the scan
+// pass so the comparator never calls R_IsNA/isnan - std::sort evaluates it
+// ~N log N times and the R API calls dominated the kernel's runtime.
 struct SortEntry {
   double y;
   double w;
   int idx;
+  int rank; // 0 = finite, 1 = NaN, 2 = NA
 };
 
-inline int missing_rank(double y) {
-  if (R_IsNA(y)) return 2;
-  if (std::isnan(y)) return 1;
-  return 0;
-}
-
 inline bool entry_less(const SortEntry& a, const SortEntry& b) {
-  const int ra = missing_rank(a.y);
-  const int rb = missing_rank(b.y);
-  if (ra != rb) return ra < rb;
-  if (ra > 0) return a.idx < b.idx;
+  if (a.rank != b.rank) return a.rank < b.rank;
+  if (a.rank > 0) return a.idx < b.idx;
   if (a.y != b.y) return a.y < b.y;
   return a.idx < b.idx;
 }
@@ -226,6 +221,7 @@ NumericVector welfare_stats_all(NumericVector y, NumericVector w,
     e.y = yi;
     e.w = wi;
     e.idx = i;
+    e.rank = y_missing ? (R_IsNA(yi) ? 2 : 1) : 0;
     sorted.push_back(e);
   }
 
@@ -235,7 +231,7 @@ NumericVector welfare_stats_all(NumericVector y, NumericVector w,
   // Gini (missing welfare sorts last, so rows [0, n_valid) are the values
   // R obtains from x[!is.na(x)] followed by order()).
   int n_valid = 0;
-  while (n_valid < n && missing_rank(sorted[n_valid].y) == 0) ++n_valid;
+  while (n_valid < n && sorted[n_valid].rank == 0) ++n_valid;
 
   // --- median ----
   double median_v = NA_REAL;
