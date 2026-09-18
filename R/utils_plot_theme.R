@@ -149,3 +149,112 @@ blank_plot <- function(message = "Not available", size = 4.2) {
     ) +
     ggplot2::theme_void()
 }
+
+# Shared echarts4r styling (guidelines §7) ----
+# echarts4r counterpart of `theme_wise()`: same colour tokens and type scale,
+# applied as widget opts so every interactive chart matches the ggplot figures.
+
+#' Style fragments for echarts4r axes, legends and tooltips
+#'
+#' Mirrors [theme_wise()] on the echarts side. echarts4r replaces whole option
+#' blocks on each `e_*()` call, so the theme ships as fragments to pass inside
+#' the builders' own axis/legend calls:
+#'
+#' ```r
+#' df |> e_charts(x) |>
+#'   e_bar(y) |>
+#'   e_x_axis(name = "Year", axisLabel = wise_eaxis_label(),
+#'            splitLine = wise_esplit_line()) |>
+#'   wise_echart_theme()
+#' ```
+#'
+#' `wise_echart_theme()` applies the widget-level defaults (font family, the
+#' Okabe-Ito series palette, tooltip text) and must be piped last - builders'
+#' own `e_tooltip()`/`e_color()` calls still win where set.
+#'
+#' @noRd
+wise_eaxis_label <- function(...) {
+  modifyList(list(color = .wise_slate, fontSize = 13), list(...))
+}
+
+#' @rdname wise_eaxis_label
+#' @noRd
+wise_eaxis_name <- function(...) {
+  modifyList(list(color = .wise_charcoal, fontSize = 14), list(...))
+}
+
+#' @rdname wise_eaxis_label
+#' @noRd
+wise_esplit_line <- function(...) {
+  modifyList(
+    list(lineStyle = list(color = .wise_grid, width = 0.5)),
+    list(...)
+  )
+}
+
+#' @rdname wise_eaxis_label
+#' @noRd
+wise_elegend_style <- function(...) {
+  modifyList(
+    list(textStyle = list(color = .wise_charcoal, fontSize = 13)),
+    list(...)
+  )
+}
+
+#' @rdname wise_eaxis_label
+#' @param e         An `echarts4r` widget (as returned by the `e_*` verbs).
+#' @param base_size Unused today; kept for parity with [theme_wise()].
+#' @noRd
+wise_echart_theme <- function(e, base_size = 14) {
+  e$x$opts$textStyle <- list(fontFamily = "Helvetica, Arial, sans-serif")
+  if (is.null(e$x$opts$color)) {
+    e$x$opts$color <- as.character(.wise_cat)
+  }
+  tip <- e$x$opts$tooltip
+  e$x$opts$tooltip <- modifyList(
+    list(textStyle = list(color = .wise_charcoal, fontSize = 13)),
+    if (is.null(tip)) list() else tip
+  )
+  e
+}
+
+#' Uniform echarts placeholder for figures whose inputs are unavailable
+#'
+#' echarts counterpart of [blank_plot()]: an empty chart with a centred,
+#' slate message. Use it when the old ggplot builder rendered a message the
+#' user can act on ("Insufficient data", "Select scenarios first"); charts
+#' that were simply empty can return `NULL` and let the render `req()` clear
+#' the output.
+#'
+#' @param message Text to display.
+#' @param height  Widget height; pass the slot's plot height.
+#'
+#' @return An `echarts4r` widget.
+#' @noRd
+echart_blank <- function(message = "Not available", height = "300px") {
+  # echarts4r 0.5.x rejects single-column and <2-row frames in e_charts(); a
+  # two-column, two-row dummy is invisible (no series are ever drawn on it).
+  # Axis hiding goes through direct opts injection: e_axis_*() re-enters
+  # e_charts() and hits the same single-column defect.
+  e <- echarts4r::e_charts(data.frame(x = 0:1, y = 0:1), x, height = height)
+  e <- echarts4r::e_title(
+    e,
+    text = message,
+    left = "center",
+    top = "middle",
+    textStyle = list(
+      color = .wise_slate,
+      fontSize = 14,
+      fontWeight = "normal"
+    )
+  )
+  e$x$opts$xAxis <- lapply(
+    if (is.null(e$x$opts$xAxis)) list() else e$x$opts$xAxis,
+    function(ax) modifyList(ax, list(show = FALSE))
+  )
+  e$x$opts$yAxis <- lapply(
+    if (is.null(e$x$opts$yAxis)) list() else e$x$opts$yAxis,
+    function(ax) modifyList(ax, list(show = FALSE))
+  )
+  wise_echart_theme(e)
+}
