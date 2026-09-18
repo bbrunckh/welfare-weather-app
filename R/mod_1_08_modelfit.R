@@ -253,7 +253,7 @@ mod_1_08_modelfit_server <- function(id,
         striped = TRUE,
         highlight = TRUE,
         bordered = TRUE,
-        searchable = TRUE,
+        searchable = FALSE,
         defaultPageSize = 10
       )
     })

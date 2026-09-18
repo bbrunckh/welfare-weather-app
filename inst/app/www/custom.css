@@ -1319,27 +1319,14 @@ table.reactable td.wise-dt-wrap {
   color: var(--bs-secondary-color, #6c757d);
 }
 
-/* ---- Table CSV export (UI-45) -------------------------------------------
-   One affordance for every table in the app: a small, quiet "Download CSV".
-   `.wise-csv-btn` covers both the DataTables Buttons control and the
-   `downloadLink` used under the hand-built HTML tables, so they are visually
-   identical wherever they appear. Kept deliberately understated - the export
-   is a secondary action next to reading the table itself. */
+/* ---- Table CSV export (UI-45, guidelines §6) -----------------------------
+   One affordance for every table in the app: a small, quiet "Download CSV"
+   button (`wise_reactable_csv_button()` in R/utils_ui.R) that calls
+   `Reactable.downloadDataCSV()` client-side, so the download never
+   round-trips the server. Kept deliberately understated - the export is a
+   secondary action next to reading the table itself. */
 
-div.dt-buttons {
-  float: none !important;
-  display: block;
-  margin: 0 0 0.35rem !important;
-  padding: 0;
-}
-
-/* !important throughout the DataTables case: the Buttons stylesheet ships
-   its own gradients, padding and hover states at a specificity that varies
-   between DT releases, and its load order relative to this file is not
-   guaranteed. The plain link variant needs no such help. */
-button.wise-csv-btn,
-a.wise-csv-btn,
-div.dt-buttons .wise-csv-btn.dt-button {
+button.wise-csv-btn {
   display: inline-flex !important;
   align-items: center;
   gap: 0.3rem;
@@ -1360,12 +1347,7 @@ div.dt-buttons .wise-csv-btn.dt-button {
 }
 
 button.wise-csv-btn:hover,
-a.wise-csv-btn:hover,
-button.wise-csv-btn:focus-visible,
-a.wise-csv-btn:focus-visible,
-div.dt-buttons .wise-csv-btn.dt-button:hover,
-div.dt-buttons .wise-csv-btn.dt-button:focus-visible,
-div.dt-buttons .wise-csv-btn.dt-button:active {
+button.wise-csv-btn:focus-visible {
   color: var(--bs-primary) !important;
   border-color: var(--bs-primary) !important;
   background: transparent !important;
@@ -1374,13 +1356,6 @@ div.dt-buttons .wise-csv-btn.dt-button:active {
   text-decoration: none !important;
 }
 
-/* The link variant sits under its table rather than above it. */
-a.wise-csv-link {
-  margin-top: 0.4rem;
-}
-
-a.wise-csv-link .fa,
-a.wise-csv-link .fas,
 button.wise-csv-btn .fa {
   font-size: 0.7em;
 }
@@ -2006,3 +1981,19 @@ button.wise-csv-btn .fa {
 .wise-table tr.hi td { background: #eef7f2; }
 .wise-table .se { color: #718292; font-size: 0.8rem; }
 .wise-table .t2-note { color: #718292; font-size: 0.75rem; text-align: left; border-bottom: none; }
+
+/* Reactable group separator / weather-highlight rows for the Step 1
+   regression tables (rowClass from .t2_reactable_row_class()). Mirrors the
+   old .wise-table .group / tr.hi look. */
+tr.t2-group-row td {
+  background: #eef3f8 !important;
+  font-weight: 700;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #526575;
+  text-align: left !important;
+}
+tr.t2-wx-row td {
+  background: #eef7f2;
+}

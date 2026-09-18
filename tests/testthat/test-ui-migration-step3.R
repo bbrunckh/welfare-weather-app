@@ -190,7 +190,8 @@ test_that("diagnostics reactable styling follows the mod_1_02 pattern", {
   expect_s3_class(w, "reactable")
   opts <- w$x$tag$attribs
   expect_true(isTRUE(opts$compact))
-  expect_true(isTRUE(opts$searchable))
+  # §6 follow-up: small summary tables drop the search bar.
+  expect_false(isTRUE(opts$searchable))
   expect_true(isTRUE(opts$highlight))
   expect_equal(opts$defaultPageSize, 10)
   expect_true(all(c(10, 25, 50, 100) %in% unlist(opts$pageSizeOptions)))

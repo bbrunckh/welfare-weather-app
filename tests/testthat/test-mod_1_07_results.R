@@ -201,7 +201,6 @@ test_that("P16: one fit-signature observer preserves exact stale transitions", {
     },
     echart_make_coefplot = function(...) NULL,
     echart_weather_effect_plot = function(...) NULL,
-    make_regtable = function(...) shiny::tags$p("table"),
     is_logistic_fit = function(mf) FALSE
   )
   outcome <- shiny::reactiveVal(make_outcome())
@@ -253,9 +252,15 @@ test_that("redesigned sections render: who-panel, focused table, RIF suppression
     },
     echart_make_coefplot      = function(...) NULL,
     echart_weather_effect_plot = function(...) NULL,
-    make_regtable            = function(...) shiny::tags$p("table"),
-    make_regtable_focused    = function(...) shiny::tags$p("focused-table"),
-    make_regtable_specs      = function(...) shiny::tags$p("specs-table"),
+    make_regtable_focused_reactable = function(...) {
+      reactable::reactable(data.frame(ok = "focused-reactable"))
+    },
+    make_regtable_specs_reactable = function(...) {
+      reactable::reactable(data.frame(ok = "specs-reactable"))
+    },
+    make_regtable_df_reactable = function(...) {
+      reactable::reactable(data.frame(ok = "df-reactable"))
+    },
     make_regtable_focused_df = function(...) data.frame(Variable = character(0)),
     step1_scenarios          = function(...) NULL,
     is_logistic_fit          = function(mf) FALSE
@@ -302,8 +307,8 @@ test_that("redesigned sections render: who-panel, focused table, RIF suppression
       expect_match(html_of("who_note_ui"), "moderator level", fixed = TRUE)
 
       # Focused table + spec comparison render; AER table inside details
-      expect_match(html_of("focused_table"), "focused-table", fixed = TRUE)
-      expect_match(html_of("specs_table"), "specs-table", fixed = TRUE)
+      expect_match(html_of("focused_table"), "focused-reactable", fixed = TRUE)
+      expect_match(html_of("specs_table"), "specs-reactable", fixed = TRUE)
 
       # Refit as RIF: coefficient-stability section suppressed, who note
       # switches to the quantile wording, specs comparison hidden.
@@ -314,7 +319,8 @@ test_that("redesigned sections render: who-panel, focused table, RIF suppression
       expect_identical(nchar(html_of("heading_coef")), 0L)
       expect_match(html_of("who_note_ui"),
                    "welfare distribution", fixed = TRUE)
-      expect_identical(nchar(html_of("specs_table")), 0L)
+      # renderReactable(NULL) emits an empty widget payload - no table data.
+      expect_match(html_of("specs_table"), '"x":null', fixed = TRUE)
     }
   )
 })

@@ -1,12 +1,12 @@
-# Step 1 focused regression table ----
-# Step 1 focused regression table (T2). Results-first `.wise-table` of the      #
-# weather + interaction coefficients of the full specification (3), with a      #
-# per-row translation on the outcome's reporting scale. Complements             #
-# make_regtable() - the full AER-style table stays the expandable               #
-# "all coefficients" view.                                                      #
+# Step 1 regression tables (reactable, guidelines §6) ----
+# Results-first table of the weather + interaction coefficients of the full     #
+# specification (3), with a per-row translation on the outcome's reporting      #
+# scale; a compact three-specification comparison; and the full AER-style       #
+# "all coefficients" view built from make_regtable_df(). All three render as    #
+# `reactable` widgets with the client-side CSV button in the module UI.         #
 #                                                                               #
-# One tidy row derivation (.t2_focused_rows) feeds both the HTML renderer and   #
-# the export data frame, so the two cannot diverge. Translations mirror the     #
+# One tidy row derivation (.t2_focused_rows) feeds both the on-screen renderer  #
+# and the export data frame, so the two cannot diverge. Translations mirror the #
 # pct/pp/level formatting rules of step1_fmt_effect() / .s1_fmt_scaled() in     #
 # fct_step1_headline.R without calling those private helpers.                   #
 
@@ -383,222 +383,20 @@
 }
 
 
-# HTML renderer (over the shared tidy rows) ----
-
-.t2_render_focused <- function(rows, engine, is_logistic, is_lpm, subheader, footnotes) {
-  .f3 <- function(x) if (length(x) && is.finite(x)) formatC(x, format = "f", digits = 3) else ""
-  .pci <- function(p) {
-    if (!length(p) || is.na(p) || !is.finite(p)) {
-      return("")
-    }
-    if (p < 0.001) "<0.001" else formatC(p, format = "f", digits = 3)
-  }
-  .trans <- function(x) if (!is.na(x) && nzchar(x)) x else "-"
-  .stars_cell <- function(est, p) paste0(.f3(est), .t2_stars(p))
-
-  if (identical(engine, "rif") && "Tau" %in% names(rows)) {
-    # Pivot: rows = terms, columns = tau quantiles + one translated column.
-    taus <- sort(unique(rows$Tau))
-    has_bins <- any(grepl("[\\[\\(]", rows$Term))
-    head_cells <- c(
-      list("Variable"),
-      lapply(taus, function(t) sprintf("\u03c4 = %.1f", t)),
-      list(if (has_bins) {
-        "Translated effect (\u03c4 = 0.5)"
-      } else {
-        "Per +1 SD (\u03c4 = 0.5)"
-      })
-    )
-    ncol_t <- length(taus) + 2L
-    body <- list()
-    prev <- NA_character_
-    for (tm in unique(rows$Term)) {
-      tr <- rows[rows$Term == tm, , drop = FALSE]
-      group <- tr$Group[1]
-      if (!identical(group, prev)) {
-        body[[length(body) + 1L]] <- htmltools::tags$tr(
-          class = "group",
-          htmltools::tags$td(colspan = ncol_t, group)
-        )
-        prev <- group
-      }
-      cls <- if (identical(group, "Weather effects")) "hi" else NULL
-      est_cells <- lapply(taus, function(t) {
-        r <- tr[abs(tr$Tau - t) < 1e-9, , drop = FALSE]
-        if (!nrow(r)) {
-          return(htmltools::tags$td(class = "num", ""))
-        }
-        htmltools::tags$td(class = "num", .stars_cell(r$Effect[1], r$p[1]))
-      })
-      se_cells <- lapply(taus, function(t) {
-        r <- tr[abs(tr$Tau - t) < 1e-9, , drop = FALSE]
-        if (!nrow(r)) {
-          return(htmltools::tags$td(class = "num", ""))
-        }
-        htmltools::tags$td(class = "num", if (is.finite(r$SE[1])) paste0("(", .f3(r$SE[1]), ")") else "")
-      })
-      r50 <- tr[abs(tr$Tau - 0.5) < 1e-9, , drop = FALSE]
-      trans <- if (nrow(r50)) .trans(r50$Translation[1]) else "-"
-      body[[length(body) + 1L]] <- htmltools::tags$tr(
-        class = cls,
-        htmltools::tags$td(tr$Variable[1]), est_cells, htmltools::tags$td(class = "num", trans)
-      )
-      body[[length(body) + 1L]] <- htmltools::tags$tr(
-        class = "se",
-        htmltools::tags$td(""), se_cells, htmltools::tags$td(class = "num", "")
-      )
-    }
-  } else {
-    # Binned terms translate as bin-vs-reference contrasts, not per-+1-SD
-    # effects, so the mixed case carries a neutral header and the footnote
-    # explains the per-term translation.
-    has_bins <- any(grepl("[\\[\\(]", rows$Term))
-    trans_header <- if (has_bins) {
-      "Translated effect"
-    } else if (isTRUE(is_logistic)) {
-      "pp effect per +1 SD"
-    } else if (isTRUE(is_lpm)) {
-      "pp per +1 SD"
-    } else {
-      "Per +1 SD"
-    }
-    head_cells <- list("Variable", "Effect", "95% CI", "SE", "p", trans_header)
-    ncol_t <- length(head_cells)
-    body <- list()
-    prev <- NA_character_
-    for (i in seq_len(nrow(rows))) {
-      r <- rows[i, ]
-      if (!identical(r$Group, prev)) {
-        body[[length(body) + 1L]] <- htmltools::tags$tr(
-          class = "group",
-          htmltools::tags$td(colspan = ncol_t, r$Group)
-        )
-        prev <- r$Group
-      }
-      cls <- if (identical(r$Group, "Weather effects")) "hi" else NULL
-      body[[length(body) + 1L]] <- htmltools::tags$tr(
-        class = cls,
-        htmltools::tags$td(r$Variable),
-        htmltools::tags$td(class = "num", .stars_cell(r$Effect, r$p)),
-        htmltools::tags$td(class = "num", paste0(.f3(r$CI_low), " \u2013 ", .f3(r$CI_high))),
-        htmltools::tags$td(class = "num", .f3(r$SE)),
-        htmltools::tags$td(class = "num", .pci(r$p)),
-        htmltools::tags$td(class = "num", .trans(r$Translation))
-      )
-    }
-  }
-
-  for (f in footnotes) {
-    if (!is.null(f) && !is.na(f) && nzchar(f)) {
-      body[[length(body) + 1L]] <- htmltools::tags$tr(class = "t2-note", htmltools::tags$td(colspan = ncol_t, f))
-    }
-  }
-
-  tbl <- htmltools::tags$table(
-    class = "wise-table",
-    htmltools::tags$thead(htmltools::tags$tr(lapply(head_cells, htmltools::tags$th))),
-    htmltools::tags$tbody(body)
-  )
-  htmltools::HTML(as.character(htmltools::tags$div(
-    if (!is.null(subheader) && !is.na(subheader) && nzchar(subheader)) {
-      htmltools::tags$p(class = "wise-subheader", subheader)
-    },
-    tbl
-  )))
-}
-
-
-# Public entry points ----
-
-#' Focused regression table for the Step 1 results tab (T2)
+#' Tidy data frame behind the specification-comparison table (export bundle)
 #'
-#' Renders a results-first `.wise-table` of the weather and interaction
-#' coefficients of the full specification (3): one row per term with the
-#' estimate + significance stars, 95% CI, SE, p-value and a translated
-#' per-+1-SD effect on the outcome's reporting scale. Weather rows are
-#' highlighted; interactions follow in their own group. For the RIF engine a
-#' pivot over quantiles (tau 0.1-0.9) is rendered instead, with a final
-#' "Per +1 SD (tau = 0.5)" column. The full AER-style table
-#' (\code{\link{make_regtable}}) remains the expandable "all coefficients" view.
+#' One row per (term, specification) with model-scale numbers, mirroring the
+#' on-screen three-specification comparison. Returns NULL for the RIF engine
+#' (the tau grid is carried by \code{make_regtable_focused_df()}).
 #'
-#' Translations mirror the formatting contract of \code{step1_fmt_effect()}:
-#' exact main terms translate \code{est * SD} (percent change for log
-#' outcomes, percentage points for probability outcomes), logit main terms use
-#' the reference-profile linear predictor, interactions report the slope
-#' difference, bins are reported vs the omitted reference, and polynomial rows
-#' show an em dash (nonlinear, see the curve).
+#' @inheritParams make_regtable_specs
 #'
-#' @param fit3              Native fixest model of specification (3) (fixest_multi for RIF).
-#' @param weather_terms     Character vector of base weather variable names.
-#' @param interaction_terms Character vector of interaction term strings.
-#' @param label_fun         Function mapping variable names to readable labels.
-#' @param engine            Scalar character engine key ("fixest" or "rif").
-#' @param is_logistic       TRUE for logistic fits (Effect stays log-odds; translations in pp).
-#' @param is_lpm            TRUE for linear models on a binary outcome (translations in pp).
-#' @param is_log_outcome    TRUE when the outcome is log-transformed (translations in %).
-#' @param rif_grid          Tidy RIF beta grid (from \code{fit_model()$rif_grid}).
-#' @param mf                Named list returned by \code{fit_model()}; used to derive
-#'   weather SDs from \code{mf$train_data} when \code{sd_x} is not supplied.
-#' @param scenarios_list    Result of \code{step1_scenarios()}; supplies
-#'   \code{profile_eta} for logit pp translations.
-#' @param sd_x              Named numeric vector of sample SDs per weather variable.
-#' @param subheader         Optional sub-header line above the table.
-#' @param footnotes         Character vector of footnote lines under the table.
-#'
-#' @return `htmltools::HTML` (`.wise-table`), or NULL when no rows can be built.
-#'
-#' @export
-make_regtable_focused <- function(fit3, weather_terms, interaction_terms, label_fun = identity,
-                                  engine = "fixest", is_logistic = FALSE, is_lpm = FALSE,
-                                  is_log_outcome = TRUE, rif_grid = NULL,
-                                  mf = NULL, scenarios_list = NULL, sd_x = NULL,
-                                  subheader = NULL, footnotes = character(0)) {
-  tryCatch(
-    {
-      rows <- .t2_focused_rows(fit3, weather_terms, interaction_terms,
-        label_fun = label_fun,
-        engine = engine, is_logistic = is_logistic, is_lpm = is_lpm,
-        is_log_outcome = is_log_outcome, rif_grid = rif_grid,
-        mf = mf, scenarios_list = scenarios_list, sd_x = sd_x
-      )
-      if (is.null(rows) || !nrow(rows)) {
-        return(NULL)
-      }
-      .t2_render_focused(rows,
-        engine = engine, is_logistic = is_logistic, is_lpm = is_lpm,
-        subheader = subheader, footnotes = footnotes
-      )
-    },
-    error = function(e) {
-      htmltools::tags$p(paste("Focused table error:", conditionMessage(e)))
-    }
-  )
-}
-
-
-#' Compact specification-comparison table for the Step 1 results tab
-#'
-#' Renders a `.wise-table` comparing the weather coefficients of the three
-#' progressive specifications - Variable | (1) No FE | (2) FE |
-#' (3) FE + Controls - with the same grouping, ordering, labels and
-#' estimate + stars / (SE) formatting as the focused table. Cells are empty
-#' when a term is absent from a specification. Returns NULL for the RIF
-#' engine (the caller hides the panel).
-#'
-#' @param fit1,fit2,fit3    Native fixest model objects (specifications 1-3).
-#' @param weather_terms     Character vector of base weather variable names.
-#' @param interaction_terms Character vector of interaction term strings.
-#' @param label_fun         Function mapping variable names to readable labels.
-#' @param engine            Scalar character engine key.
-#' @param rif_grid          Unused; kept for call-site symmetry.
-#'
-#' @return `htmltools::HTML` (`.wise-table`), or NULL on the RIF engine or
-#'   when no rows can be built.
-#'
-#' @export
-make_regtable_specs <- function(fit1, fit2, fit3, weather_terms, interaction_terms,
-                                label_fun = identity, engine = "fixest", rif_grid = NULL,
-                                has_controls = TRUE) {
+#' @return A data frame (Variable, Group, Specification, Term, Estimate,
+#'   `Std. error`, `p value`), or NULL on failure / the RIF engine.
+#' @noRd
+make_regtable_specs_df <- function(fit1, fit2, fit3, weather_terms,
+                                    interaction_terms, label_fun = identity,
+                                    engine = "fixest", has_controls = TRUE) {
   if (identical(engine, "rif")) {
     return(NULL)
   }
@@ -609,7 +407,307 @@ make_regtable_specs <- function(fit1, fit2, fit3, weather_terms, interaction_ter
       if (!length(weather_terms)) {
         return(NULL)
       }
+      lab3 <- if (isTRUE(has_controls)) "(3) FE + Controls" else "(3) FE (no controls selected)"
+      specs <- list("(1) No FE" = fit1, "(2) FE" = fit2)
+      specs[[lab3]] <- fit3
+      coefs <- lapply(specs, .t2_fit_coefs)
+      cf3 <- coefs[[lab3]]
+      if (is.null(cf3)) {
+        return(NULL)
+      }
+      keep <- tryCatch(weather_coef_names(fit3, weather_terms), error = function(e) character(0))
+      keep <- as.character(keep)
+      keep <- keep[keep %in% cf3$term]
+      if (!length(keep)) {
+        return(NULL)
+      }
+      ord <- .t2_ordered_terms(keep, weather_terms, interaction_terms)
+      terms_vec <- c(ord$main, ord$inter)
+      if (!length(terms_vec)) {
+        return(NULL)
+      }
+      rows <- do.call(rbind, unlist(lapply(terms_vec, function(tm) {
+        lapply(names(specs), function(nm) {
+          cf <- coefs[[nm]]
+          r <- if (is.null(cf)) NULL else cf[cf$term == tm, , drop = FALSE]
+          if (is.null(r) || !nrow(r)) {
+            return(NULL)
+          }
+          data.frame(
+            Variable = .t2_var_label(tm, weather_terms, label_fun),
+            Group = if (grepl(":", tm, fixed = TRUE)) "Interactions" else "Weather effects",
+            Specification = nm,
+            Term = tm,
+            Estimate = r$estimate[1],
+            `Std. error` = r$std.error[1],
+            `p value` = r$p.value[1],
+            check.names = FALSE,
+            stringsAsFactors = FALSE,
+            row.names = NULL
+          )
+        })
+      }), recursive = FALSE))
+      if (is.null(rows) || !nrow(rows)) {
+        return(NULL)
+      }
+      rows
+    },
+    error = function(e) NULL
+  )
+}
 
+
+#' Tidy data frame behind the focused regression table (export bundle / CSV)
+#'
+#' One row per weather/interaction term of the full specification (3) with
+#' model-scale numbers (\code{Effect}, \code{CI_low}, \code{CI_high},
+#' \code{SE}, \code{p} are unformatted numerics; only \code{Translation} is a
+#' formatted string), plus the group and raw term for traceability. For the
+#' RIF engine, one row per (term, tau) with a \code{Tau} column and
+#' \code{Translation} only at tau = 0.5.
+#'
+#' @inheritParams make_regtable_focused_df
+#'
+#' @return A data frame (Variable, Group, Term, Effect, CI_low, CI_high, SE, p,
+#'   Translation; + Tau for RIF), or NULL on failure.
+#'
+#' @export
+make_regtable_focused_df <- function(fit3, weather_terms, interaction_terms, label_fun = identity,
+                                     engine = "fixest", is_logistic = FALSE, is_lpm = FALSE,
+                                     is_log_outcome = TRUE, rif_grid = NULL,
+                                     mf = NULL, scenarios_list = NULL, sd_x = NULL) {
+  tryCatch(
+    .t2_focused_rows(fit3, weather_terms, interaction_terms,
+      label_fun = label_fun,
+      engine = engine, is_logistic = is_logistic, is_lpm = is_lpm,
+      is_log_outcome = is_log_outcome, rif_grid = rif_grid,
+      mf = mf, scenarios_list = scenarios_list, sd_x = sd_x
+    ),
+    error = function(e) NULL
+  )
+}
+
+
+# Reactable renderers (guidelines §6) ----
+
+# Shared reactable plumbing for the Step 1 regression tables: compact rows,
+# deliberate (unsortable) order, group separator rows carried in a hidden
+# `.t2grp` column that rowClass turns into styled separator rows. Weather
+# rows get the same tint the old .wise-table "hi" rows had.
+.t2_reactable_row_class <- function() {
+  htmlwidgets::JS(paste0(
+    "function(rowInfo) {",
+    "  var g = rowInfo.row['.t2grp'];",
+    "  if (g === 'sep') return 't2-group-row';",
+    "  if (g === 'wx') return 't2-wx-row';",
+    "  return '';",
+    "}"
+  ))
+}
+
+.t2_reactable_cols <- function(df, left_cols = "Variable") {
+  cols <- lapply(names(df), function(nm) {
+    if (nm == ".t2grp" || nm == "Group") {
+      return(reactable::colDef(show = FALSE))
+    }
+    reactable::colDef(
+      align = if (nm %in% left_cols) "left" else "right",
+      na = "",
+      minWidth = if (nm %in% left_cols) 200 else 90
+    )
+  })
+  stats::setNames(cols, names(df))
+}
+
+.t2_reactable_core <- function(df) {
+  reactable::reactable(
+    df,
+    columns = .t2_reactable_cols(df),
+    rowClass = .t2_reactable_row_class(),
+    compact = TRUE,
+    sortable = FALSE,
+    searchable = FALSE,
+    pagination = FALSE,
+    highlight = FALSE,
+    showSortIcon = FALSE
+  )
+}
+
+# Inject one separator row per group (Group label in the Variable column,
+# blanks elsewhere). Rows keep the caller's deliberate order. All display
+# columns are preformatted strings, so a character matrix is a safe carrier.
+.t2_with_group_rows <- function(df, group_col = "Group") {
+  grp <- as.character(df[[group_col]])
+  n <- nrow(df)
+  sep_at <- c(1L, which(grp[-1] != grp[-n]) + 1L)
+  total <- n + length(sep_at)
+  m <- matrix("", nrow = total, ncol = ncol(df) + 1L,
+              dimnames = list(NULL, c(names(df), ".t2grp")))
+  out_i <- 0L
+  di <- 0L
+  pending <- sep_at
+  while (out_i < total) {
+    if (length(pending) && di < n && di + 1L == pending[1]) {
+      out_i <- out_i + 1L
+      m[out_i, 1L] <- grp[di + 1L]
+      m[out_i, ".t2grp"] <- "sep"
+      pending <- pending[-1L]
+    }
+    di <- di + 1L
+    out_i <- out_i + 1L
+    m[out_i, seq_len(ncol(df))] <- as.character(unlist(df[di, , drop = TRUE], use.names = FALSE))
+    m[out_i, ".t2grp"] <- if (identical(grp[di], "Weather effects")) "wx" else ""
+  }
+  as.data.frame(m, stringsAsFactors = FALSE, optional = TRUE)
+}
+
+# Small note-only table for the empty/error states (mirrors the other §6
+# tables' "Note" rows).
+.t2_reactable_note <- function(msg) {
+  reactable::reactable(
+    data.frame(Note = msg),
+    columns = list(Note = reactable::colDef(align = "left")),
+    compact = TRUE,
+    sortable = FALSE,
+    searchable = FALSE,
+    pagination = FALSE
+  )
+}
+
+# Format helpers shared with the old HTML renderer (kept identical), but
+# vectorized over whole columns.
+.t2_fmt_num3 <- function(x) {
+  x <- as.numeric(x)
+  ifelse(is.finite(x), formatC(x, format = "f", digits = 3), "")
+}
+.t2_fmt_p <- function(p) {
+  p <- as.numeric(p)
+  ifelse(
+    is.finite(p),
+    ifelse(p < 0.001, "<0.001", formatC(p, format = "f", digits = 3)),
+    ""
+  )
+}
+.t2_fmt_ci <- function(lo, hi) paste0(.t2_fmt_num3(lo), " \u2013 ", .t2_fmt_num3(hi))
+
+#' Reactable focused regression table for the Step 1 results tab (guidelines §6)
+#'
+#' Renders the shared `.t2_focused_rows()` tidy rows as a reactable widget:
+#' one row per weather/interaction term with estimate + significance stars,
+#' 95% CI, SE, p-value and the translated per-+1-SD effect. Weather rows are
+#' tinted; interactions follow under a separator row. For the RIF engine the
+#' tau 0.1-0.9 grid is pivoted wide with a final translated-effect column.
+#'
+#' @param rows   Tidy rows from `.t2_focused_rows()` / `make_regtable_focused_df()`.
+#' @param engine,is_logistic,is_lpm  Only affect the translation column header
+#'   (and the RIF pivot), mirroring the old `.wise-table` renderer.
+#'
+#' @return A `reactable` widget, or a note widget when `rows` is empty.
+#' @noRd
+make_regtable_focused_reactable <- function(rows, engine = "fixest",
+                                             is_logistic = FALSE, is_lpm = FALSE) {
+  if (is.null(rows) || !nrow(rows)) {
+    return(.t2_reactable_note("Focused estimates unavailable for this fit."))
+  }
+
+  if (identical(engine, "rif") && "Tau" %in% names(rows)) {
+    # Pivot: rows = terms, columns = tau quantiles + one translated column.
+    taus <- sort(unique(rows$Tau))
+    has_bins <- any(grepl("[\\[\\(]", rows$Term))
+    trans_nm <- if (has_bins) {
+      "Translated effect (\u03c4 = 0.5)"
+    } else {
+      "Per +1 SD (\u03c4 = 0.5)"
+    }
+    tau_nms <- sprintf("\u03c4 = %.1f", taus)
+    col_nms <- c("Variable", tau_nms, trans_nm, ".t2grp")
+    body <- list()
+    prev <- NA_character_
+    for (tm in unique(rows$Term)) {
+      tr <- rows[rows$Term == tm, , drop = FALSE]
+      group <- tr$Group[1]
+      if (!identical(group, prev)) {
+        sep <- rep("", length(col_nms))
+        sep[1] <- group
+        sep[length(sep)] <- "sep"
+        body <- c(body, list(sep))
+        prev <- group
+      }
+      cells <- vapply(taus, function(t) {
+        r <- tr[abs(tr$Tau - t) < 1e-9, , drop = FALSE]
+        if (!nrow(r)) return("")
+        paste0(.t2_fmt_num3(r$Effect[1]), .t2_stars(r$p[1]), " (", .t2_fmt_num3(r$SE[1]), ")")
+      }, character(1))
+      r50 <- tr[abs(tr$Tau - 0.5) < 1e-9, , drop = FALSE]
+      trans <- if (nrow(r50) && !is.na(r50$Translation[1]) && nzchar(r50$Translation[1])) {
+        r50$Translation[1]
+      } else {
+        "-"
+      }
+      row <- c(tr$Variable[1], cells, trans,
+        if (identical(group, "Weather effects")) "wx" else ""
+      )
+      body <- c(body, list(row))
+    }
+    m <- do.call(rbind, body)
+    colnames(m) <- col_nms
+    out <- as.data.frame(m, stringsAsFactors = FALSE, optional = TRUE)
+    return(.t2_reactable_core(out))
+  }
+
+  # fixest: one row per term, group separator rows between groups.
+  has_bins <- any(grepl("[\\[\\(]", rows$Term))
+  trans_nm <- if (has_bins) {
+    "Translated effect"
+  } else if (isTRUE(is_logistic)) {
+    "pp effect per +1 SD"
+  } else if (isTRUE(is_lpm)) {
+    "pp per +1 SD"
+  } else {
+    "Per +1 SD"
+  }
+  df <- data.frame(
+    Variable = rows$Variable,
+    Effect = paste0(.t2_fmt_num3(rows$Effect), .t2_stars(rows$p)),
+    `95% CI` = .t2_fmt_ci(rows$CI_low, rows$CI_high),
+    SE = .t2_fmt_num3(rows$SE),
+    p = .t2_fmt_p(rows$p),
+    check.names = FALSE,
+    stringsAsFactors = FALSE
+  )
+  df[[trans_nm]] <- ifelse(!is.na(rows$Translation) & nzchar(rows$Translation), rows$Translation, "-")
+  df$Variable <- as.character(df$Variable)
+  df$Group <- as.character(rows$Group)
+  .t2_reactable_core(.t2_with_group_rows(df))
+}
+
+#' Reactable specification-comparison table for the Step 1 results tab
+#'
+#' Compares the weather coefficients of the three progressive specifications -
+#' Variable | (1) No FE | (2) FE | (3) FE + Controls - with the same grouping,
+#' ordering, labels and estimate + stars / (SE) formatting as the focused
+#' table. Cells are blank when a term is absent from a specification. Returns
+#' NULL for the RIF engine (the caller hides the panel).
+#'
+#' @inheritParams make_regtable_specs
+#'
+#' @return A `reactable` widget, or NULL on the RIF engine / when no rows can
+#'   be built.
+#' @noRd
+make_regtable_specs_reactable <- function(fit1, fit2, fit3, weather_terms,
+                                           interaction_terms, label_fun = identity,
+                                           engine = "fixest", rif_grid = NULL,
+                                           has_controls = TRUE) {
+  if (identical(engine, "rif")) {
+    return(NULL)
+  }
+  tryCatch(
+    {
+      weather_terms <- if (is.null(weather_terms)) character(0) else as.character(weather_terms)
+      weather_terms <- weather_terms[nzchar(weather_terms)]
+      if (!length(weather_terms)) {
+        return(NULL)
+      }
       lab3 <- if (isTRUE(has_controls)) "(3) FE + Controls" else "(3) FE (no controls selected)"
       specs <- list("(1) No FE" = fit1, "(2) FE" = fit2)
       specs[[lab3]] <- fit3
@@ -631,82 +729,70 @@ make_regtable_specs <- function(fit1, fit2, fit3, weather_terms, interaction_ter
       }
       groups <- ifelse(grepl(":", terms_vec, fixed = TRUE), "Interactions", "Weather effects")
 
-      body <- list()
-      prev <- NA_character_
-      for (i in seq_along(terms_vec)) {
-        tm <- terms_vec[i]
-        if (!identical(groups[i], prev)) {
-          body[[length(body) + 1L]] <- htmltools::tags$tr(class = "group", htmltools::tags$td(colspan = 4L, groups[i]))
-          prev <- groups[i]
+      cell <- function(cf, tm) {
+        r <- if (is.null(cf)) NULL else cf[cf$term == tm, , drop = FALSE]
+        if (is.null(r) || !nrow(r)) {
+          return("")
         }
-        cells <- lapply(coefs, function(cf) {
-          r <- if (is.null(cf)) NULL else cf[cf$term == tm, , drop = FALSE]
-          if (is.null(r) || !nrow(r)) {
-            list(est = "", se = "")
-          } else {
-            list(
-              est = paste0(
-                if (is.finite(r$estimate[1])) formatC(r$estimate[1], format = "f", digits = 3) else "",
-                .t2_stars(r$p.value[1])
-              ),
-              se = if (is.finite(r$std.error[1])) {
-                paste0("(", formatC(r$std.error[1], format = "f", digits = 3), ")")
-              } else {
-                ""
-              }
-            )
-          }
-        })
-        cls <- if (identical(groups[i], "Weather effects")) "hi" else NULL
-        body[[length(body) + 1L]] <- htmltools::tags$tr(
-          class = cls,
-          htmltools::tags$td(.t2_var_label(tm, weather_terms, label_fun)),
-          lapply(cells, function(x) htmltools::tags$td(class = "num", x$est))
-        )
-        body[[length(body) + 1L]] <- htmltools::tags$tr(
-          class = "se", htmltools::tags$td(""),
-          lapply(cells, function(x) htmltools::tags$td(class = "num", x$se))
+        paste0(
+          if (is.finite(r$estimate[1])) formatC(r$estimate[1], format = "f", digits = 3) else "",
+          .t2_stars(r$p.value[1]),
+          if (is.finite(r$std.error[1])) paste0(" (", formatC(r$std.error[1], format = "f", digits = 3), ")") else ""
         )
       }
-
-      tbl <- htmltools::tags$table(
-        class = "wise-table",
-        htmltools::tags$thead(htmltools::tags$tr(lapply(c("Variable", names(specs)), htmltools::tags$th))),
-        htmltools::tags$tbody(body)
+      spec_cols <- lapply(seq_along(specs), function(j) {
+        vapply(terms_vec, function(tm) cell(coefs[[j]], tm), character(1))
+      })
+      df <- data.frame(
+        Variable = vapply(terms_vec, .t2_var_label, character(1),
+          weather_terms = weather_terms, label_fun = label_fun
+        ),
+        spec_cols,
+        check.names = FALSE,
+        stringsAsFactors = FALSE,
+        row.names = NULL
       )
-      htmltools::HTML(as.character(tbl))
+      names(df) <- c("Variable", names(specs))
+      df$Group <- as.character(groups)
+      .t2_reactable_core(.t2_with_group_rows(df))
     },
     error = function(e) NULL
   )
 }
 
-
-#' Tidy data frame behind the focused regression table (export bundle / CSV)
+#' Reactable view of the full AER-style coefficient table (guidelines §6)
 #'
-#' One row per weather/interaction term of the full specification (3) with
-#' model-scale numbers (\code{Effect}, \code{CI_low}, \code{CI_high},
-#' \code{SE}, \code{p} are unformatted numerics; only \code{Translation} is a
-#' formatted string), plus the group and raw term for traceability. For the
-#' RIF engine, one row per (term, tau) with a \code{Tau} column and
-#' \code{Translation} only at tau = 0.5.
+#' Renders the long tidy data frame from `make_regtable_df()` (one row per
+#' specification and term, both engines) as a client-side sortable/searchable
+#' reactable - the expandable "all coefficients" view.
 #'
-#' @inheritParams make_regtable_focused
+#' @param df Tidy rows from `make_regtable_df()`, or NULL.
 #'
-#' @return A data frame (Variable, Group, Term, Effect, CI_low, CI_high, SE, p,
-#'   Translation; + Tau for RIF), or NULL on failure.
-#'
-#' @export
-make_regtable_focused_df <- function(fit3, weather_terms, interaction_terms, label_fun = identity,
-                                     engine = "fixest", is_logistic = FALSE, is_lpm = FALSE,
-                                     is_log_outcome = TRUE, rif_grid = NULL,
-                                     mf = NULL, scenarios_list = NULL, sd_x = NULL) {
-  tryCatch(
-    .t2_focused_rows(fit3, weather_terms, interaction_terms,
-      label_fun = label_fun,
-      engine = engine, is_logistic = is_logistic, is_lpm = is_lpm,
-      is_log_outcome = is_log_outcome, rif_grid = rif_grid,
-      mf = mf, scenarios_list = scenarios_list, sd_x = sd_x
-    ),
-    error = function(e) NULL
+#' @return A `reactable` widget, or a note widget when `df` is empty.
+#' @noRd
+make_regtable_df_reactable <- function(df) {
+  if (is.null(df) || !nrow(df)) {
+    return(.t2_reactable_note("No coefficients available for this fit."))
+  }
+  cols <- lapply(names(df), function(nm) {
+    x <- df[[nm]]
+    if (is.numeric(x) && identical(nm, "Observations")) {
+      reactable::colDef(format = reactable::colFormat(digits = 0), na = "")
+    } else if (is.numeric(x)) {
+      reactable::colDef(format = reactable::colFormat(digits = 3), na = "")
+    } else {
+      reactable::colDef(na = "", minWidth = if (identical(nm, "Variable")) 200 else 90)
+    }
+  })
+  names(cols) <- names(df)
+  reactable::reactable(
+    df,
+    columns = cols,
+    compact = TRUE,
+    sortable = TRUE,
+    searchable = TRUE,
+    defaultPageSize = 15,
+    showPageSizeOptions = TRUE,
+    pageSizeOptions = c(15, 25, 50, 100)
   )
 }

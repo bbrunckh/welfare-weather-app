@@ -648,26 +648,15 @@ mod_1_07_results_server <- function(id,
           ch
         })
 
-        # Regression table
-        output$regtable <- renderUI({
+        # Regression table (guidelines §6: reactable + client-side CSV)
+        output$regtable <- reactable::renderReactable({
           req(model_fit_val())
-          mf <- model_fit_val()
-          make_regtable(
-            fit1 = extract_native_fit(mf$fit1, mf$engine),
-            fit2 = extract_native_fit(mf$fit2, mf$engine),
-            fit3 = extract_native_fit(mf$fit3, mf$engine),
-            weather_terms = mf$weather_terms,
-            interaction_terms = mf$interaction_terms,
-            label_fun = label_fun,
-            engine = mf$engine,
-            is_logistic = is_logistic_fit(mf),
-            rif_grid = mf$rif_grid
-          )
+          make_regtable_df_reactable(regtable_df())
         })
 
-        # UI-45: the coefficient table is presentation HTML, so its export goes
-        # through a tidy data frame of the same estimates rather than scraping
-        # the rendered markup.
+        # UI-45: the coefficient table renders from the same tidy data frame
+        # that the export bundle registers, so screen, CSV button and bundle
+        # cannot diverge.
         regtable_df <- function() {
           mf <- model_fit_val()
           if (is.null(mf)) {
@@ -682,11 +671,6 @@ mod_1_07_results_server <- function(id,
             label_fun = label_fun
           )
         }
-
-        output$regtable_csv <- csv_download_handler("model_coefficients",
-          regtable_df,
-          stale = stale
-        )
 
         # UI-48: the same estimates go into the export bundle.
         wise_export_table(
@@ -800,33 +784,34 @@ mod_1_07_results_server <- function(id,
             error = function(e) NULL
           )
         }
-        output$focused_table <- renderUI({
+        output$focused_header_ui <- renderUI({
           req(model_fit_val())
-          mf <- model_fit_val()
-          make_regtable_focused(
-            fit3 = native_fit(mf$fit3),
-            weather_terms = mf$weather_terms,
-            interaction_terms = mf$interaction_terms,
-            label_fun = label_fun,
-            engine = mf$engine,
-            is_logistic = is_logistic_fit(mf),
-            is_lpm = is_lpm,
-            is_log_outcome = is_log_out,
-            rif_grid = mf$rif_grid,
-            mf = mf,
-            scenarios_list = scenarios_by_var,
-            sd_x = sd_named,
-            subheader = focused_subheader,
-            footnotes = c(
-              focused_footnotes,
-              if (has_poly_terms) "Polynomial terms are part of the +1 SD contrast of their base variable; their interaction slope differences vary with the weather level (see the moderated effect plot)." else NULL
-            )
+          p(class = "wise-subheader", focused_subheader)
+        })
+        output$focused_table <- reactable::renderReactable({
+          req(model_fit_val())
+          make_regtable_focused_reactable(
+            focused_df(),
+            engine = model_fit_val()$engine,
+            is_logistic = is_logistic_fit(model_fit_val()),
+            is_lpm = is_lpm
           )
         })
-        output$focused_csv <- csv_download_handler("step1_focused_estimates",
-          focused_df,
-          stale = stale
-        )
+        output$focused_notes_ui <- renderUI({
+          req(model_fit_val())
+          notes <- c(
+            focused_footnotes,
+            if (has_poly_terms) {
+              "Polynomial terms are part of the +1 SD contrast of their base variable; their interaction slope differences vary with the weather level (see the moderated effect plot)."
+            } else {
+              NULL
+            }
+          )
+          if (!length(notes)) {
+            return(NULL)
+          }
+          htmltools::tagList(lapply(notes, function(f) p(class = "t2-note", f)))
+        })
         wise_export_table(
           key = "step1_focused_estimates",
           label = "Focused weather estimates",
@@ -837,13 +822,37 @@ mod_1_07_results_server <- function(id,
             "with 95% CI, p-values and the translated per-+1-SD column."
           )
         )
-        output$specs_table <- renderUI({
+        wise_export_table(
+          key = "step1_spec_comparison",
+          label = "Specification comparison",
+          step = 1L,
+          fun = function() {
+            mf <- model_fit_val()
+            if (is.null(mf) || identical(mf$engine, "rif")) {
+              return(NULL)
+            }
+            make_regtable_specs_df(
+              fit1              = extract_native_fit(mf$fit1, mf$engine),
+              fit2              = extract_native_fit(mf$fit2, mf$engine),
+              fit3              = extract_native_fit(mf$fit3, mf$engine),
+              weather_terms     = mf$weather_terms,
+              interaction_terms = mf$interaction_terms,
+              label_fun         = label_fun,
+              has_controls      = has_controls
+            )
+          },
+          description = paste(
+            "Weather and interaction coefficients across the three progressive",
+            "specifications (no FE, FE, FE + controls)."
+          )
+        )
+        output$specs_table <- reactable::renderReactable({
           req(model_fit_val())
           mf <- model_fit_val()
           if (identical(mf$engine, "rif")) {
             return(NULL)
           }
-          make_regtable_specs(
+          make_regtable_specs_reactable(
             fit1              = extract_native_fit(mf$fit1, mf$engine),
             fit2              = extract_native_fit(mf$fit2, mf$engine),
             fit3              = extract_native_fit(mf$fit3, mf$engine),
@@ -1114,22 +1123,28 @@ mod_1_07_results_server <- function(id,
               shiny::uiOutput(ns("coefplot_layout")),
               shiny::br(),
               shiny::uiOutput(ns("heading_table")),
-              shiny::uiOutput(ns("focused_table")),
-              csv_download_link(ns("focused_csv")),
+              shiny::uiOutput(ns("focused_header_ui")),
+              shiny::tags$div(
+                class = "wise-reactable-controls",
+                wise_reactable_csv_button(ns("focused_table"), "step1_focused_estimates")
+              ),
+              reactable::reactableOutput(ns("focused_table")),
+              shiny::uiOutput(ns("focused_notes_ui")),
               shiny::tags$details(
                 shiny::tags$summary("Compare specifications (1) \u2013 (3)"),
-                shiny::uiOutput(ns("specs_table"))
+                shiny::tags$div(
+                  class = "wise-reactable-controls",
+                  wise_reactable_csv_button(ns("specs_table"), "step1_spec_comparison")
+                ),
+                reactable::reactableOutput(ns("specs_table"))
               ),
               shiny::tags$details(
                 shiny::tags$summary("All coefficients (controls, fixed effects)"),
-                shiny::div(
-                  style = "display:flex; justify-content:center;",
-                  shiny::div(
-                    style = "overflow-x: auto; max-width: 100%;",
-                    shiny::uiOutput(ns("regtable")),
-                    csv_download_link(ns("regtable_csv"))
-                  )
-                )
+                shiny::tags$div(
+                  class = "wise-reactable-controls",
+                  wise_reactable_csv_button(ns("regtable"), "model_coefficients")
+                ),
+                reactable::reactableOutput(ns("regtable"))
               ),
               shiny::p(class = "step1-headline-note", paste(
                 "Residuals, predicted vs actual, and the raw model summary",

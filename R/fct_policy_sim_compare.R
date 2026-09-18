@@ -1653,145 +1653,6 @@ plot_step3_variance_contribution <- function(var_tbl) {
     ggplot2::coord_flip()
 }
 
-step3_decision_table_data <- function(threshold_tbl, method = "mean", so = NULL) {
-  if (is.null(threshold_tbl) || !nrow(threshold_tbl) || !"Estimate" %in% names(threshold_tbl)) {
-    return(NULL)
-  }
-  tbl <- threshold_tbl[threshold_tbl$Estimate == "Central (P50)", , drop = FALSE]
-  if (!nrow(tbl)) {
-    return(NULL)
-  }
-
-  rp_map <- metric_decision_return_periods(method %||% "mean", so)
-  keep <- tbl$rp_name %in% unname(rp_map)
-  out <- tbl[keep, c("scenario", "source", "rp_name", "value", "n_obs"), drop = FALSE]
-  if (!nrow(out)) {
-    return(NULL)
-  }
-
-  out$rp_label <- names(rp_map)[match(out$rp_name, unname(rp_map))]
-  rp_order <- c("Expected", "Adverse 1-in-5", "Adverse 1-in-10", "Adverse 1-in-20", "Adverse 1-in-50")
-
-  wide <- tidyr::pivot_wider(
-    out,
-    id_cols = c("scenario", "source"),
-    names_from = "rp_label",
-    values_from = "value",
-    values_fn = mean
-  )
-
-  wide$`Policy effect` <- NA_real_
-  scenarios <- unique(as.character(wide$scenario))
-  for (sc in scenarios) {
-    b_exp <- wide$Expected[wide$scenario == sc & wide$source == "Baseline"]
-    p_idx <- which(wide$scenario == sc & wide$source == "Policy")
-    if (length(b_exp) && length(p_idx)) {
-      p_exp <- wide$Expected[p_idx[[1L]]]
-      if (is.finite(p_exp) && is.finite(b_exp[[1L]])) {
-        wide$`Policy effect`[p_idx[[1L]]] <- p_exp - b_exp[[1L]]
-      }
-    }
-  }
-
-  wide$source <- factor(wide$source, levels = c("Baseline", "Policy"))
-  is_hist <- wide$scenario == "Historical"
-  hist_part <- wide[is_hist, , drop = FALSE]
-  hist_part <- hist_part[order(hist_part$source), , drop = FALSE]
-  fut_part <- wide[!is_hist, , drop = FALSE]
-  fut_part <- fut_part[order(fut_part$scenario, fut_part$source), , drop = FALSE]
-
-  dplyr::bind_rows(hist_part, fut_part)
-}
-
-make_step3_decision_table_html <- function(df, subheader = NULL, footnotes = NULL) {
-  if (is.null(df) || !nrow(df)) {
-    return(shiny::tags$div(class = "text-muted", "No return-period data available."))
-  }
-
-  cols <- names(df)[!names(df) %in% c("n_obs", "ssp_key", "yr_lbl")]
-
-  th_tags <- lapply(cols, function(col_nm) {
-    cls <- if (col_nm == "scenario") {
-      "text-start"
-    } else if (col_nm == "source") {
-      "text-center"
-    } else {
-      "text-end num"
-    }
-    display_nm <- if (col_nm == "scenario") {
-      "Scenario & Period"
-    } else if (col_nm == "source") {
-      "Series"
-    } else {
-      col_nm
-    }
-    shiny::tags$th(class = cls, display_nm)
-  })
-
-  tbody_tags <- lapply(seq_len(nrow(df)), function(i) {
-    row_data <- df[i, , drop = FALSE]
-    is_hist <- identical(as.character(row_data$scenario[[1L]]), "Historical")
-    is_pol <- identical(as.character(row_data$source[[1L]]), "Policy")
-    row_cls <- if (is_hist) {
-      "historical-row font-weight-bold"
-    } else if (is_pol) {
-      "policy-row font-weight-bold"
-    } else {
-      ""
-    }
-
-    td_tags <- lapply(cols, function(col_nm) {
-      val <- row_data[[col_nm]][[1L]]
-      if (col_nm == "scenario") {
-        shiny::tags$td(class = "text-start", style = "font-weight: 600;", as.character(val))
-      } else if (col_nm == "source") {
-        src_cls <- if (is_pol) "text-center font-weight-bold text-primary" else "text-center text-muted"
-        shiny::tags$td(class = src_cls, as.character(val))
-      } else if (col_nm == "Policy effect") {
-        if (!is.na(val)) {
-          diff_str <- sprintf("%+.2f", val)
-          shiny::tags$td(
-            class = "text-end num",
-            shiny::tags$span(class = "policy-effect-badge", diff_str)
-          )
-        } else {
-          shiny::tags$td(class = "text-end num text-muted", "\u2014")
-        }
-      } else {
-        num_str <- if (is.numeric(val) && is.finite(val)) fmt_num(val, 2) else "\u2014"
-        shiny::tags$td(class = "text-end num", num_str)
-      }
-    })
-    shiny::tags$tr(class = row_cls, td_tags)
-  })
-
-  default_footnotes <- c(
-    "Baseline shows simulated outcomes without intervention under each climate scenario.",
-    "Policy shows counterfactual outcomes with the intervention applied to identical households and weather years.",
-    "Policy effect shows the paired shift (Policy minus Baseline) for the central expected outcome.",
-    "Adverse return-period thresholds reflect simulated outcomes reached or exceeded in the unfavorable direction."
-  )
-  all_footnotes <- footnotes %||% default_footnotes
-
-  shiny::tags$div(
-    class = "wise-table-container",
-    if (!is.null(subheader) && nzchar(subheader)) {
-      shiny::tags$div(class = "wise-subheader", subheader)
-    },
-    shiny::tags$table(
-      class = "table wise-table table-sm table-hover",
-      shiny::tags$thead(shiny::tags$tr(th_tags)),
-      shiny::tags$tbody(tbody_tags)
-    ),
-    if (!is.null(all_footnotes) && length(all_footnotes) > 0) {
-      shiny::tags$div(
-        class = "t2-note",
-        lapply(all_footnotes, function(fn) shiny::tags$div(fn))
-      )
-    }
-  )
-}
-
 # Reactable styling for the return-period threshold table (guidelines §6):
 # the frame arrives with RP values already rounded to 2 dp by
 # build_threshold_table_df(); display keeps that precision.
@@ -1815,7 +1676,7 @@ make_step3_decision_table_html <- function(df, subheader = NULL, footnotes = NUL
     df,
     columns = cols,
     compact = TRUE,
-    searchable = TRUE,
+    searchable = FALSE,
     defaultPageSize = 10,
     showPageSizeOptions = TRUE,
     pageSizeOptions = c(10, 25, 50, 100),
@@ -3064,10 +2925,6 @@ make_step3_decision_table_html <- function(df, subheader = NULL, footnotes = NUL
       n_hist_years  = n_h_yrs
     )
   }
-
-  decision_table_df_rv <- reactive({
-    threshold_table_df()
-  })
 
   # The threshold table's Download CSV is a client-side
   # wise_reactable_csv_button() (guidelines §6); the R-side download handler

@@ -173,7 +173,7 @@
     df,
     columns = cols,
     compact = TRUE,
-    searchable = TRUE,
+    searchable = FALSE,
     defaultPageSize = 10,
     showPageSizeOptions = TRUE,
     pageSizeOptions = c(10, 25, 50, 100),

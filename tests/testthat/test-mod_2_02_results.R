@@ -834,25 +834,6 @@ test_that("exceedance plot omits unsupported return-period warning annotation", 
   expect_false(any(grepl("1:50", labels, fixed = TRUE)))
 })
 
-test_that("make_decision_table_html produces clean .wise-table HTML", {
-  df <- data.frame(
-    scenario = c("Historical", "SSP3-7.0 / 2030"),
-    Expected = c(4.5, 4.6),
-    `Change from historical` = c(NA, 0.1),
-    check.names = FALSE
-  )
-  tag <- make_decision_table_html(df, subheader = "Welfare outcomes", footnotes = "Footnote 1")
-  html <- as.character(htmltools::renderTags(tag)$html)
-
-  expect_match(html, "wise-table", fixed = TRUE)
-  expect_match(html, "wise-subheader", fixed = TRUE)
-  expect_match(html, "Welfare outcomes", fixed = TRUE)
-  expect_match(html, "historical-row", fixed = TRUE)
-  expect_match(html, "+0.10", fixed = TRUE)
-  expect_match(html, "Footnote 1", fixed = TRUE)
-})
-
-# ============================================================================ #
 # Batch 2 UI migration: DT -> reactable, ggplot -> echarts4r (guidelines §6/§7)
 # ============================================================================ #
 
