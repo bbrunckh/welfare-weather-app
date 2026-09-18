@@ -54,8 +54,6 @@ test_that("Step 3 preview labels and calculations use one debounced snapshot", {
     session$setInputs(sp_type = "shock", transfer_amount_usd = 10)
     session$elapse(300); session$flushReact()
     snap <- sp_preview_inputs(); reach <- sp_reach()
-    expect_identical(reach$preview_spec, snap$spec)
-    expect_identical(reach$preview_analysis_unit, snap$analysis_unit)
     expect_identical(snap$display_type, "shock")
   })
 })

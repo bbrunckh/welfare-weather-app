@@ -37,7 +37,6 @@ test_that("step3_headline_cards builds 5 concise policy cards", {
     sp_scenario       = list(budget_fixed = 12500000),
     timeseries_curves = data.frame(scenario = "SSP2-4.5 / 2030-2040", source = "Policy", sim_year = 2030:2039),
     method            = "mean",
-    deviation         = "none",
     so                = list(type = "numeric", name = "welfare")
   )
 

@@ -138,10 +138,7 @@ mod_3_07_results_server <- function(id,
 
     # Expose the current uncertainty settings to sibling tabs.
     list(
-      show_coef_uncertainty = reactive(isTRUE(input$show_coef_uncertainty)),
-      show_model_spread = reactive(
-        !identical(input$ensemble_band %||% "minmax", "none")
-      )
+      show_coef_uncertainty = reactive(isTRUE(input$show_coef_uncertainty))
     )
   })
 }

@@ -7,22 +7,6 @@
   list(result = result, context = context)
 }
 
-#' 3_06_policy_sim UI Function
-#'
-#' @description A shiny Module. Renders status banner for policy adjustments.
-#'
-#' @param id Internal parameter for {shiny}.
-#'
-#' @noRd
-#'
-#' @importFrom shiny NS tagList
-mod_3_06_policy_sim_ui <- function(id) {
-  ns <- NS(id)
-  tagList(
-    uiOutput(ns("sim_status_ui"))
-  )
-}
-
 #' 3_06_policy_sim Server Functions
 #'
 #' Applies user-defined policy adjustments to survey covariates from the
@@ -78,7 +62,6 @@ mod_3_06_policy_sim_server <- function(id,
 
     baseline_svy_rv <- reactiveVal(NULL)
     policy_svy_rv <- reactiveVal(NULL)
-    sim_error <- reactiveVal(NULL)
     sim_run_id <- reactiveVal(0L)
     # REACT-02: TRUE while a policy simulation is executing.
     sim_running <- reactiveVal(FALSE)
@@ -111,20 +94,6 @@ mod_3_06_policy_sim_server <- function(id,
       weather_store_lease_rv(NULL)
     }
     session$onSessionEnded(cleanup_weather_stores)
-
-    output$sim_status_ui <- shiny::renderUI({
-      err <- sim_error()
-      if (is.null(err)) {
-        return(NULL)
-      }
-      shiny::div(
-        class = "alert alert-danger",
-        role  = "alert",
-        style = "margin-bottom: 10px;",
-        shiny::tags$b("Policy simulation failed:"),
-        shiny::span(conditionMessage(err))
-      )
-    })
 
     # Run signature (INT-08) ----
     # The policy run inherits Step 2's signature and adds the scenario
@@ -195,8 +164,6 @@ mod_3_06_policy_sim_server <- function(id,
         add = TRUE
       )
 
-      sim_error(NULL)
-
       # REACT-17: these are upstream reactives that req() internally (e.g.
       # selected_weather() on the Step 1 weather selector). An unmet req()
       # used to propagate out of this function as a silent error, so the
@@ -226,7 +193,6 @@ mod_3_06_policy_sim_server <- function(id,
       model_vars <- model_term_names(.safe(selected_model()))
 
       .fail <- function(msg) {
-        sim_error(simpleError(msg))
         shiny::showNotification(msg, type = "error", duration = 8)
         invisible(NULL)
       }
@@ -606,7 +572,6 @@ mod_3_06_policy_sim_server <- function(id,
           }
         },
         error = function(e) {
-          sim_error(e)
           shiny::showNotification(
             paste0("Policy simulation failed: ", conditionMessage(e)),
             type = "error", duration = 8

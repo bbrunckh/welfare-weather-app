@@ -97,44 +97,6 @@ decomposition_reconciliation <- function(summary_df) {
   )
 }
 
-plot_decomposition_headline <- function(summary_df,
-                                        y_label = "Policy effect (percent change)") {
-  if (is.null(summary_df) || !nrow(summary_df)) {
-    return(blank_plot("Decomposition is unavailable."))
-  }
-  ids <- c("level", "resilience", "total")
-  df <- summary_df[summary_df$channel_id %in% ids, , drop = FALSE]
-  df$channel <- factor(df$channel, levels = c("Main effect", "Resilience", "Total"))
-  if (!"scenario" %in% names(df)) df$scenario <- "Historical"
-  scenario_levels <- unique(as.character(df$scenario))
-  # Scenario colours follow the shared semantic mapping: grey for the
-  # historical baseline, fixed SSP hues for climate scenarios, then the
-  # categorical palette for anything else.
-  scenario_colours <- stats::setNames(vapply(scenario_levels, function(s) {
-    if (identical(s, "Historical")) {
-      return(.wise_history)
-    }
-    k <- .normalise_ssp(s)
-    if (!is.na(k) && k %in% names(.ssp_colours)) {
-      return(unname(.ssp_colours[[k]]))
-    }
-    idx <- match(s, scenario_levels)
-    unname(.wise_cat[idx])
-  }, character(1L)), scenario_levels)
-  ggplot2::ggplot(df, ggplot2::aes(
-    x = .data$channel, y = .data$percent,
-    fill = .data$scenario
-  )) +
-    ggplot2::geom_hline(yintercept = 0, linetype = "dashed", colour = .wise_zero) +
-    ggplot2::geom_col(
-      width = 0.72, colour = .wise_support,
-      position = ggplot2::position_dodge(width = 0.78)
-    ) +
-    ggplot2::scale_fill_manual(values = scenario_colours, name = NULL) +
-    ggplot2::labs(x = NULL, y = y_label) +
-    theme_wise(base_size = 13)
-}
-
 # Shared echarts colour mapping for decomposition scenarios: Historical in the
 # muted history grey, fixed SSP hues for climate scenarios, then the
 # categorical palette for anything else (same mapping as the ggplot builders).
@@ -155,18 +117,16 @@ plot_decomposition_headline <- function(summary_df,
 
 #' Headline decomposition chart (echarts4r)
 #'
-#' Browser-side counterpart of [plot_decomposition_headline()]: grouped bars,
-#' one series per scenario, over the Main effect / Resilience / Total
-#' channels. The ggplot builder stays the static export renderer.
+#' Grouped bars, one series per scenario, over the Main effect / Resilience /
+#' Total channels.
 #'
 #' @param summary_df A decomposition summary as returned by
-#'   `decomposition_summary_data()` (with a `scenario` column), as consumed
-#'   by `plot_decomposition_headline()`.
+#'   `decomposition_summary_data()` (with a `scenario` column).
 #' @param y_label Y-axis title.
 #' @param height Widget height.
 #'
 #' @return An `echarts4r` widget; a blank placeholder widget when the inputs
-#'   are unavailable (the ggplot builder draws the same message).
+#'   are unavailable.
 #'
 #' @noRd
 echart_decomposition_headline <- function(summary_df,

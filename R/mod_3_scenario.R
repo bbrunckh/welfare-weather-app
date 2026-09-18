@@ -82,9 +82,8 @@ mod_3_scenario_ui <- function(id) {
 #' Orchestrates sub-modules 01-06.
 #'
 #' @param id               Module id.
-#' @param connection_params Reactive named list from `mod_0_overview_server()`.
 #' @param selected_outcome Reactive one-row data frame of selected outcome
-#'   from `mod_1_modelling_server()`.
+#' from `mod_1_modelling_server()`.
 #' @param selected_weather Reactive data frame of selected weather variables
 #'   from `mod_1_modelling_server()`.
 #' @param survey_weather   Reactive data frame of merged survey-weather data
@@ -98,7 +97,6 @@ mod_3_scenario_ui <- function(id) {
 #'
 #' @noRd
 mod_3_scenario_server <- function(id,
-                                  connection_params,
                                   selected_outcome,
                                   selected_weather,
                                   selected_model,
@@ -422,13 +420,10 @@ mod_3_scenario_server <- function(id,
 
     list(
       policy_hist_sim = s6$policy_hist_sim,
-      policy_saved_scenarios = s6$policy_saved_scenarios,
       # UI-47: consumed by the navbar step badge in app_server.
       stale = s6$stale,
-      sim_run_id = s6$sim_run_id,
       run_generation = s6$run_generation,
-      run_status = s6$run_status,
-      clear_weather_stores = s6$clear_weather_stores
+      run_status = s6$run_status
     )
   })
 }

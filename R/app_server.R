@@ -61,7 +61,6 @@ app_server <- function(input, output, session) {
   # Pass selected Step 1 & 2 reactives
   step3_api <- mod_3_scenario_server(
     id = "step3",
-    connection_params = overview_api$connection_params,
     selected_outcome = step1_api$selected_outcome,
     selected_weather = step1_api$selected_weather,
     selected_model = step1_api$selected_model,

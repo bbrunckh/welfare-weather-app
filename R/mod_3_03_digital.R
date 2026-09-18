@@ -45,11 +45,6 @@ mod_3_03_digital_server <- function(id,
     # Get model coefficients ----
     # REACT-08: shared coefficient decomposition (utils_mod_1_helpers.R).
     coeffs_rx <- model_coefficient_reactives(selected_model)
-    ind_coeff <- coeffs_rx$individual
-    hh_coeff <- coeffs_rx$hh
-    firm_coeff <- coeffs_rx$firm
-    area_coeff <- coeffs_rx$area
-    interaction_names <- coeffs_rx$interactions
     coeffs <- coeffs_rx$all
 
     # Candidate variables for this category ----

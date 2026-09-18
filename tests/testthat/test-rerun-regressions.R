@@ -329,13 +329,12 @@ test_that("the Step 3 run trigger fires on the very first click", {
                          run_trigger    = trigger), {
     session$flushReact()
     clicks(btn_val(0)); session$flushReact()
-    expect_null(sim_error())            # rendering the button runs nothing
+    expect_identical(run_status(), "idle")  # rendering the button runs nothing
 
     # First click. No model fit is available, so run() takes its earliest
     # guard - which is exactly the observable proving the handler executed.
     clicks(btn_val(1)); session$flushReact()
-    expect_false(is.null(sim_error()))
-    expect_match(conditionMessage(sim_error()), "No fitted model")
+    expect_identical(run_status(), "failure")
   })
 })
 
@@ -349,9 +348,9 @@ test_that("every subsequent Step 3 click still runs", {
                          run_trigger    = trigger), {
     session$flushReact()
     for (i in 1:4) {
-      sim_error(NULL)
+      run_status("idle")
       clicks(btn_val(i)); session$flushReact()
-      expect_false(is.null(sim_error()), info = paste("click", i))
+      expect_identical(run_status(), "failure", info = paste("click", i))
     }
   })
 })

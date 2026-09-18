@@ -206,7 +206,7 @@ test_that("failed policy runs retain the prior published diagnostic snapshot", {
       fail_decomp <<- TRUE
       trigger(2L)
       session$flushReact()
-      expect_match(conditionMessage(sim_error()), "forced decomposition failure")
+      expect_identical(run_status(), "failure")
       expect_identical(sim_run_id(), 1L)
       expect_identical(diagnostic_summary_rv(), prior)
     }

@@ -595,9 +595,6 @@ mod_3_01_sp_server <- function(id,
       # round and will drop once Step 2 narrows it - worth saying, rather than
       # letting the number appear to change on its own.
       r$on_baseline <- !is.null(hs$svy)
-      r$preview_spec <- preview$spec
-      r$preview_analysis_unit <- preview$analysis_unit
-      r$preview_display_type <- preview$display_type
       r
     })
 

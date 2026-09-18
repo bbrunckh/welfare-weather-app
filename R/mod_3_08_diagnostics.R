@@ -257,20 +257,6 @@
   )
 }
 
-#' 3_08_diagnostics UI Function
-#'
-#' @description A shiny Module. Renders the Diagnostics tab content.
-#'
-#' @param id Internal parameter for {shiny}.
-#'
-#' @noRd
-#'
-#' @importFrom shiny NS tagList
-mod_3_08_diagnostics_ui <- function(id) {
-  ns <- shiny::NS(id)
-  .diagnostics_content_ui(ns)
-}
-
 #' 3_08_diagnostics Server Functions
 #'
 #' Displays before/after summary tables and histograms for all variables

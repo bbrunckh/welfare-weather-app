@@ -1,122 +1,3 @@
-#' Make a before/after histogram for a single variable
-#' @noRd
-.make_before_after_hist <- function(baseline_vals, policy_vals,
-                                    var_name) {
-  baseline_clean <- baseline_vals[!is.na(baseline_vals)]
-  policy_clean <- policy_vals[!is.na(policy_vals)]
-  all_vals <- c(baseline_clean, policy_clean)
-
-  if (length(all_vals) == 0) {
-    return(blank_plot("No data available"))
-  }
-
-  fill_vals <- c(Baseline = .wise_baseline, `Policy-adjusted` = .wise_policy)
-  uniq_vals <- unique(all_vals)
-  is_binary <- length(uniq_vals) <= 2 && all(uniq_vals %in% c(0, 1))
-
-  # Binary: grouped bar plot of proportions ----
-  if (is_binary) {
-    df <- data.frame(
-      Group = factor(rep(c("Baseline", "Policy-adjusted"), each = 2),
-        levels = c("Baseline", "Policy-adjusted")
-      ),
-      Value = factor(rep(c("0", "1"), 2), levels = c("0", "1")),
-      Proportion = c(
-        if (length(baseline_clean)) mean(baseline_clean == 0) else NA_real_,
-        if (length(baseline_clean)) mean(baseline_clean == 1) else NA_real_,
-        if (length(policy_clean)) mean(policy_clean == 0) else NA_real_,
-        if (length(policy_clean)) mean(policy_clean == 1) else NA_real_
-      )
-    )
-
-    return(
-      ggplot2::ggplot(df, ggplot2::aes(
-        x = Value, y = Proportion,
-        fill = Group
-      )) +
-        ggplot2::geom_col(
-          position = ggplot2::position_dodge(width = 0.75),
-          width    = 0.65,
-          colour   = NA
-        ) +
-        ggplot2::scale_fill_manual(values = fill_vals) +
-        ggplot2::scale_y_continuous(
-          limits = c(0, 1),
-          expand = ggplot2::expansion(c(0, 0.05))
-        ) +
-        ggplot2::labs(
-          x     = var_name,
-          y     = "Proportion",
-          fill  = NULL
-        ) +
-        theme_wise(base_size = 13) +
-        ggplot2::theme(
-          legend.position    = "top",
-          panel.grid.major.x = ggplot2::element_blank(),
-          panel.grid.minor.x = ggplot2::element_blank()
-        )
-    )
-  }
-
-  # Continuous: ridge density (Policy on top, Baseline on bottom) ----
-  use_log <- all(all_vals > 0)
-
-  df <- data.frame(
-    Group = factor(
-      c(
-        rep("Baseline", length(baseline_clean)),
-        rep("Policy-adjusted", length(policy_clean))
-      ),
-      levels = c("Baseline", "Policy-adjusted")
-    ),
-    Value = c(baseline_clean, policy_clean),
-    stringsAsFactors = FALSE
-  )
-
-  rd <- build_ridge_distribution_data(
-    df,
-    x_var = "Value",
-    group_var = "Group",
-    fill_var = "Group",
-    ridge_var = "Group",
-    log_transform = use_log,
-    n_bins = 256L,
-    n_grid = 256L
-  )
-  if (is.null(rd)) {
-    return(blank_plot("No data available"))
-  }
-
-  p <- ggplot2::ggplot(
-    rd$data,
-    ggplot2::aes(
-      x = .data$x, y = .data$y,
-      group = .data$group, fill = .data$fill
-    )
-  ) +
-    ridge_geometry_layers(scale = 1.5, alpha = 0.7, linewidth = 0.3) +
-    ggplot2::scale_y_continuous(
-      breaks = seq_along(rd$ridges), labels = rd$ridges,
-      expand = ggplot2::expansion(mult = c(0.02, 0.12))
-    ) +
-    ggplot2::scale_fill_manual(values = fill_vals) +
-    ggplot2::labs(
-      x     = if (use_log) paste0(var_name, " (log scale)") else var_name,
-      y     = "",
-      fill  = NULL
-    ) +
-    theme_wise(base_size = 13) +
-    ggplot2::theme(
-      legend.position = "none"
-    )
-
-  if (use_log) {
-    p <- p + ggplot2::scale_x_log10(labels = scales::comma_format())
-  }
-  p
-}
-
-
 # Echarts4r builders (guidelines §7) -----------------------------------------
 #
 # Browser-side counterparts of the ggplot builders above. Statistics stay in
@@ -139,7 +20,7 @@
 
 #' Before/after histogram for one manipulated variable (echarts4r)
 #'
-#' Counterpart of `.make_before_after_hist()`: binary variables render as
+#' Binary variables render as
 #' grouped proportion bars; continuous variables render the same ridge
 #' densities (`build_ridge_distribution_data`, n_bins/n_grid 256, scale 1.5)
 #' as precomputed closed polygons.
@@ -1100,9 +981,8 @@ step3_headline_cards <- function(paired_summary,
                                  policy_svy = NULL,
                                  sp_scenario = NULL,
                                  timeseries_curves = NULL,
-                                 method = "mean",
-                                 deviation = "none",
-                                 so = NULL,
+                                  method = "mean",
+                                  so = NULL,
                                  baseline_svy = NULL) {
   if (is.null(paired_summary) || !nrow(paired_summary) ||
     !"scenario" %in% names(paired_summary)) {
@@ -2291,7 +2171,6 @@ make_step3_decision_table_html <- function(df, subheader = NULL, footnotes = NUL
       sp_scenario       = sp_scenario(),
       timeseries_curves = timeseries_curves_rv(),
       method            = input$cmp_agg_method %||% "mean",
-      deviation         = input$cmp_deviation %||% "none",
       so                = baseline_hist_sim()$so,
       baseline_svy      = baseline_svy()
     )
@@ -2825,98 +2704,6 @@ make_step3_decision_table_html <- function(df, subheader = NULL, footnotes = NUL
   # Each takes the per-source aggregate (Mod 2 list-col tibble) and emits
   # the same long-format pointrange / timeseries / exceedance / threshold
   # rows Mod 2's plotters consume, tagged with a `source` column.
-  .build_pointrange_rows <- function(agg_hist, agg_scn, hist_ref,
-                                     source_label, bq_coef, bq_ens) {
-    z_lo <- stats::qnorm(bq_coef[["lo"]])
-    z_hi <- stats::qnorm(bq_coef[["hi"]])
-    one <- function(tbl, scenario_label, is_hist) {
-      if (is.null(tbl) || nrow(tbl) == 0L) {
-        return(NULL)
-      }
-      mm <- matrix_transform(
-        tbl, source_label,
-        if (is_hist) historical_matrix_key else scenario_label
-      )
-      if (is.null(mm)) {
-        return(NULL)
-      }
-      vals <- mm$vals
-      sds <- mm$sds
-      model_means <- rowMeans(vals, na.rm = TRUE)
-      intermod <- if (is_hist || length(model_means) <= 1L) {
-        mv <- mean(model_means, na.rm = TRUE)
-        c(lo = mv, hi = mv)
-      } else {
-        c(
-          lo = unname(stats::quantile(model_means, bq_ens[["lo"]], na.rm = TRUE)),
-          hi = unname(stats::quantile(model_means, bq_ens[["hi"]], na.rm = TRUE))
-        )
-      }
-      if (is_hist) {
-        v_flat <- as.numeric(vals)
-        interann <- c(
-          lo = unname(stats::quantile(v_flat, bq_ens[["lo"]], na.rm = TRUE)),
-          hi = unname(stats::quantile(v_flat, bq_ens[["hi"]], na.rm = TRUE))
-        )
-      } else {
-        per_lo <- apply(vals, 1L, stats::quantile, probs = bq_ens[["lo"]], na.rm = TRUE)
-        per_hi <- apply(vals, 1L, stats::quantile, probs = bq_ens[["hi"]], na.rm = TRUE)
-        interann <- c(lo = mean(per_lo, na.rm = TRUE), hi = mean(per_hi, na.rm = TRUE))
-      }
-      ens_mean <- mean(as.numeric(vals), na.rm = TRUE)
-      sd_mean <- mean(as.numeric(sds), na.rm = TRUE)
-      coef <- c(lo = ens_mean + z_lo * sd_mean, hi = ens_mean + z_hi * sd_mean)
-      # Pooled SE on the central (year- and model-averaged) estimate,
-      # mirroring the return-period table's "Pooled" convention. Inter-
-      # annual variability is shown separately as its own band rather
-      # than pooled in: it describes the spread of the simulated outcome
-      # distribution, not uncertainty about the central tendency. When
-      # var_across is zero (historical or single-member future), the
-      # pooled SE degenerates to the coef SE; we suppress the outer
-      # whisker (NA) to avoid drawing a duplicate of the coef band. See
-      # mod_2_02_results.R for the parallel implementation.
-      var_coef_total <- mean(as.numeric(sds)^2, na.rm = TRUE)
-      var_across <- if (!is_hist && nrow(vals) > 1L) {
-        v <- stats::var(rowMeans(vals, na.rm = TRUE), na.rm = TRUE)
-        if (is.finite(v)) v else 0
-      } else {
-        0
-      }
-      if (var_across > 0) {
-        sd_total <- sqrt(max(var_coef_total + var_across, 0, na.rm = TRUE))
-        total <- c(
-          lo = ens_mean + z_lo * sd_total,
-          hi = ens_mean + z_hi * sd_total
-        )
-      } else {
-        total <- c(lo = NA_real_, hi = NA_real_)
-      }
-      tibble::tibble(
-        scenario      = scenario_label,
-        source        = source_label,
-        value         = ens_mean - hist_ref,
-        coef_lo       = unname(coef[["lo"]]) - hist_ref,
-        coef_hi       = unname(coef[["hi"]]) - hist_ref,
-        interann_lo   = unname(interann[["lo"]]) - hist_ref,
-        interann_hi   = unname(interann[["hi"]]) - hist_ref,
-        intermod_lo   = unname(intermod[["lo"]]) - hist_ref,
-        intermod_hi   = unname(intermod[["hi"]]) - hist_ref,
-        total_lo      = unname(total[["lo"]]) - hist_ref,
-        total_hi      = unname(total[["hi"]]) - hist_ref,
-        is_historical = is_hist,
-        n_models      = length(mm$model_ids)
-      )
-    }
-    rows <- list(one(agg_hist$out, "Historical", TRUE))
-    if (!is.null(agg_scn)) {
-      for (dk in names(agg_scn)) {
-        if (!dk %in% selected_scenario_names()) next
-        rows[[length(rows) + 1L]] <- one(agg_scn[[dk]]$out, dk, FALSE)
-      }
-    }
-    dplyr::bind_rows(Filter(Negate(is.null), rows))
-  }
-
   .build_timeseries_rows <- function(agg_hist, agg_scn, hist_ref, source_label) {
     one <- function(tbl, scenario_label, is_hist) {
       if (is.null(tbl) || nrow(tbl) == 0L) {
@@ -3141,27 +2928,6 @@ make_step3_decision_table_html <- function(df, subheader = NULL, footnotes = NUL
     }
     dplyr::bind_rows(Filter(Negate(is.null), rows))
   }
-
-  pointrange_bands_rv <- reactive({
-    req(baseline_agg_hist())
-    bq_coef <- resolve_band_q(input$uncertainty_band %||% "p10_p90")
-    bq_ens <- if (identical(input$ensemble_band %||% "none", "none")) {
-      c(lo = 0.5, hi = 0.5)
-    } else {
-      resolve_band_q(input$ensemble_band %||% "none")
-    }
-    hr <- hist_ref_val()
-    dplyr::bind_rows(
-      .build_pointrange_rows(
-        baseline_agg_hist(), baseline_agg_scenarios(),
-        hr, "Baseline", bq_coef, bq_ens
-      ),
-      .build_pointrange_rows(
-        policy_agg_hist(), policy_agg_scenarios(),
-        hr, "Policy", bq_coef, bq_ens
-      )
-    )
-  })
 
   timeseries_curves_rv <- reactive({
     req(baseline_agg_hist())
@@ -3460,14 +3226,6 @@ make_step3_decision_table_html <- function(df, subheader = NULL, footnotes = NUL
     label = "Baseline vs policy welfare by scenario",
     step = 3L,
     fun = function() {
-      bands <- pointrange_bands_rv()
-      if (is.null(bands)) {
-        return(NULL)
-      }
-      if (identical(input$ensemble_band %||% "none", "none")) {
-        bands$intermod_lo <- NA_real_
-        bands$intermod_hi <- NA_real_
-      }
       paired_effect_plot(
         paired_effect_summary_rv(),
         metric_axis_label(

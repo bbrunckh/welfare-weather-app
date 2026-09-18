@@ -51,7 +51,7 @@ select_decomp_weather_basis <- function(decomp_df, basis = "mean", so = NULL) {
   )
 }
 
-.compact_decomp_values <- function(decomp_df, is_rif = FALSE) {
+.compact_decomp_values <- function(decomp_df) {
   n <- nrow(decomp_df)
   zero <- rep(0, n)
   main <- decomp_df$delta_main %||% zero
@@ -110,7 +110,7 @@ select_decomp_weather_basis <- function(decomp_df, basis = "mean", so = NULL) {
     rep(1, nrow(decomp_df))
   }
   weights[!is.finite(weights) | weights < 0] <- NA_real_
-  values <- .compact_decomp_values(decomp_df, is_rif = is_rif)
+  values <- .compact_decomp_values(decomp_df)
   metadata <- list(
     scenario = as.character(scenario),
     sim_year = sim_year,
@@ -610,9 +610,6 @@ mod_3_09_decomposition_server <- function(id,
         if (identical(basis, "adverse_10")) 0.10 else 0.05
       )
     }
-    historical_weather_basis <- reactive({
-      historical_weather_for_basis(input$decomp_weather_basis %||% "mean")
-    })
 
     decomp_for_basis <- function(basis) {
       if (identical(basis, "mean")) {
@@ -1103,11 +1100,8 @@ mod_3_09_decomposition_server <- function(id,
     se_pct <- if (is.na(se_log)) NA_real_ else abs(exp(mean_log)) * se_log * 100
     data.frame(
       Channel = label,
-      `Mean (log-pts)` = round(mean_log, 4),
-      `+/- SE (log-pts)` = if (is.na(se_log)) NA_real_ else round(se_log, 4),
       `Mean (%)` = round(mean_pct, 2),
       `+/- SE (%)` = if (is.na(se_pct)) NA_real_ else round(se_pct, 2),
-      `Median (%)` = round(stats::median((exp(vals) - 1) * 100), 2),
       check.names = FALSE
     )
   }
