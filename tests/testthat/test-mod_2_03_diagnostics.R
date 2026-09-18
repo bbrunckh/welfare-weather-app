@@ -141,32 +141,6 @@ test_that("robustness and trajectory charts render from precomputed data", {
   )
 })
 
-test_that("variance share table is a reactable with the hidden-shares note", {
-  skip_if_not_installed("shiny")
-  vb <- shiny::reactiveVal(data.frame(
-    scenario = "Historical", var_coef = 1, var_within = 4,
-    var_across = 0, is_historical = TRUE
-  ))
-  shiny::testServer(
-    mod_2_03_diagnostics_server,
-    args = list(
-      id = "diagnostics", hist_sim = shiny::reactiveVal(NULL),
-      survey_weather = shiny::reactiveVal(NULL),
-      selected_weather = shiny::reactiveVal(NULL),
-      tabset_id = "tabs", variance_breakdown = vb
-    ),
-    {
-      session$flushReact()
-      rt <- variance_share_reactable()
-      expect_s3_class(rt, "reactable")
-      payload <- jsonlite::fromJSON(rt$x$tag$attribs$data)
-      expect_match(payload$Note, "Approximate shares are hidden by default.",
-        fixed = TRUE
-      )
-    }
-  )
-})
-
 test_that("diagnostics UI mounts chart outputs and the reactable CSV button", {
   html <- as.character(htmltools::renderTags(
     mod_2_03_diagnostics_ui("diagnostics")

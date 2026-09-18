@@ -64,7 +64,6 @@ step2_contract_run <- function(weather_result = step2_contract_weather(),
     sim_dates = c("2020-01-01", "2020-12-31"),
     perturbation_method = NULL,
     stored_breaks = NULL,
-    notify_fn = function(...) invisible(NULL),
     progress_fn = function(...) invisible(NULL),
     weather_fn = weather_fn %||% function(...) weather_result,
     pipeline_fn = step2_contract_pipeline,
@@ -117,14 +116,13 @@ test_that("Step 2 top-level result contract is stable", {
   expect_identical(
     names(result),
     c(
-      "hist_sim_result", "new_scenarios", "chol_obj", "n_keys",
+      "hist_sim_result", "new_scenarios", "n_keys",
        "total_runs", "t_elapsed", "t_weather", "failures", "n_keys_ok",
        "payload_mode"
     )
   )
   expect_type(result$hist_sim_result, "list")
   expect_type(result$new_scenarios, "list")
-  expect_null(result$chol_obj)
   expect_identical(result$n_keys, 3L)
   expect_identical(result$n_keys_ok, 3L)
   expect_length(result$failures, 0L)
@@ -154,7 +152,7 @@ test_that("historical and scenario payload contracts preserve key fields", {
   expect_identical(
     names(scenario),
     c(
-       "pipelines", "weather_raw", "chol_obj", "so", "year_range",
+       "pipelines", "weather_raw", "so", "year_range",
         "n_models", "n_models_requested", "residuals", "weather_shared",
         "shared_context"
     )

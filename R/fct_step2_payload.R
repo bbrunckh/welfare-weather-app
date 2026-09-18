@@ -581,18 +581,12 @@ step2_resolve_weather <- function(value, owner = NULL) {
 step2_shared_context <- function(train_aug = NULL,
                                  id_col = NULL,
                                  residuals = NULL,
-                                 chol_obj = NULL,
-                                 so = NULL,
-                                 train_data = NULL,
                                  model_metadata = list()) {
   list(
     schema = 1L,
     train_aug = train_aug,
     id_col = id_col,
     residuals = residuals,
-    # chol_obj, so, and train_data already live at result/scenario scope;
-    # retaining them here would duplicate serialization without helping compact
-    # aggregation consumers.
     model_metadata = model_metadata
   )
 }
@@ -646,9 +640,6 @@ compact_step2_result <- function(result,
     train_aug = train_aug,
     id_col = id_col,
     residuals = residuals,
-    chol_obj = chol_obj,
-    so = so,
-    train_data = train_data,
     model_metadata = model_metadata
   )
   if (!is.null(result$hist_sim_result)) {

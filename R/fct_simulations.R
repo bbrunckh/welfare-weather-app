@@ -7,9 +7,6 @@
 #   RP_HIGH           -- high-tail return period map (name -> quantile prob)
 #   SSP_SHORT_LABELS  -- canonical SSP key -> short display label
 #
-# Shared UI helpers (called inside module server functions):
-#   residual_method_ui(ns, input_id)  -- radio buttons + helpText for residuals
-#
 # Simulation pipeline helper:
 #   run_sim_pipeline()  -- weather join -> predict -> back-transform in one call
 
@@ -372,38 +369,6 @@ align_factor_loading_matrix <- function(X_nonFE, beta_names) {
   aligned[, beta_names, drop = FALSE]
 }
 
-
-# Shared UI helper ----
-
-#' Residual Method Radio Buttons UI
-#'
-#' Produces a consistent `radioButtons` widget + `helpText` block for choosing
-#' how prediction residuals are handled. Used in both `mod_2_01_historical` and
-#' `mod_2_03_future` to avoid duplicating the same 24-line block.
-#'
-#' @param ns       The module namespace function (from `session$ns`).
-#' @param input_id The input id for the radio buttons (unnamespaced).
-#'
-#' @return A `tagList` containing `radioButtons` and `helpText`.
-#' @export
-residual_method_ui <- function(ns, input_id) {
-  shiny::tagList(
-    pill_toggle(
-      inputId  = ns(input_id),
-      label    = "Residuals method",
-      choices  = residual_choices(),
-      selected = "original"
-    ),
-    shiny::helpText(
-      shiny::tags$b("original:"), " match each observation's own training residual",
-      " by ID, preserving individual-level heterogeneity across simulation years.",
-      shiny::tags$br(),
-      shiny::tags$b("resample:"), " resample residuals from the training",
-      " distribution (non-parametric bootstrap).",
-      style = "font-size:11px;"
-    )
-  )
-}
 
 # Simulation pipeline helper ----
 
@@ -1079,31 +1044,6 @@ prepare_hist_weather <- function(weather_raw,
       by = c("code", "year", "survname", "loc_id", "int_month")
     ) |>
     dplyr::mutate(year = as.factor(year))
-}
-# Back-transformation ----
-
-#' Back-Transform a Log-Transformed Outcome Column
-#'
-#' Exponentiates the named outcome column in `preds` when `so$transform` is
-#' `"log"`. Returns `preds` unchanged for any other transformation or when
-#' `so$transform` is `NULL` / `NA`.
-#'
-#' @param preds A data frame of predictions from `predict_outcome()`.
-#' @param so A one-row data frame of outcome metadata as returned by
-#'   `build_selected_outcome()`. Must contain columns `name` and `transform`.
-#'
-#' @return `preds` with the outcome column exponentiated if applicable.
-#'
-#' @importFrom dplyr mutate
-#' @importFrom rlang sym .data
-#' @export
-apply_log_backtransform <- function(preds, so) {
-  if (!isTRUE(so$transform == "log")) {
-    return(preds)
-  }
-
-  preds |>
-    dplyr::mutate(!!rlang::sym(so$name) := exp(.data[[so$name]]))
 }
 
 # Stage 2 aggregation lives in fct_aggregation_delta.R

@@ -246,7 +246,6 @@ step2_compute <- function(input,
     value
   }
   simulation_args <- snapshot
-  simulation_args$notify_fn <- function(message) emit("simulation", "message", message)
   simulation_args$progress_fn <- function(value, detail) {
     emit("simulation", "progress", detail)
   }

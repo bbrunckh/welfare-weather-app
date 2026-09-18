@@ -785,7 +785,6 @@ mod_2_01_weathersim_server <- function(id,
     # function reads reactive inputs and therefore must execute inside Shiny's
     # reactive context. The click observer only paints the immediate queued
     # state, then this observer captures the snapshot safely.
-    async_submit_trigger <- shiny::reactiveVal(0L)
     async_clicked_at_epoch <- shiny::reactiveVal(NA_real_)
 
     submit_step2_async <- function() shiny::isolate({
@@ -888,20 +887,12 @@ mod_2_01_weathersim_server <- function(id,
                 nms <- names(ch)[ch %in% sel]
                 if (length(nms)) paste(nms, collapse = ", ") else "Selected baseline survey"
               },
-              baseline_n = nrow(svy),
-              model = list(
-                label = if (length(model_spec)) model_badge(model_spec) else "Fitted model",
-                weather_terms = length(mf$weather_terms %||% character(0)),
-                fixed_effects = length(model_spec$fixedeffects %||% mf$fe_terms %||% character(0)),
-                covariates = if (length(model_spec)) model_covariate_total(model_spec) else NA_integer_
-              ),
               total_runs = result$total_runs
             )
             result$hist_sim_result$.sig <- job$dependency_signature
             old_lease <- weather_store_lease()
             new_lease <- step2_weather_store_acquire(result$weather_store %||% NULL)
             result$weather_store_lease <- new_lease
-            result$hist_sim_result$weather_store_lease <- new_lease
             sim_stale(FALSE)
             weather_store_lease(new_lease)
             hist_sim(result$hist_sim_result)
@@ -1099,13 +1090,6 @@ mod_2_01_weathersim_server <- function(id,
               nms <- names(ch)[ch %in% sel]
               if (length(nms)) paste(nms, collapse = ", ") else "Selected baseline survey"
             },
-            baseline_n = nrow(svy),
-            model = list(
-              label = if (length(model_spec)) model_badge(model_spec) else "Fitted model",
-              weather_terms = length(mf$weather_terms %||% character(0)),
-              fixed_effects = length(model_spec$fixedeffects %||% mf$fe_terms %||% character(0)),
-              covariates = if (length(model_spec)) model_covariate_total(model_spec) else NA_integer_
-            ),
             total_runs = result$total_runs
           )
           # INT-08: the immutable run signature travels with the result so
@@ -1114,8 +1098,6 @@ mod_2_01_weathersim_server <- function(id,
           sim_stale(FALSE)
           old_lease <- weather_store_lease()
           weather_store_lease(result$weather_store_lease %||% NULL)
-          result$hist_sim_result$weather_store_lease <-
-            result$weather_store_lease %||% NULL
           hist_sim(result$hist_sim_result)
           saved_scenarios(result$new_scenarios)
           step2_weather_store_release(old_lease)
@@ -1175,7 +1157,6 @@ mod_2_01_weathersim_server <- function(id,
       hist_sim = hist_sim,
       saved_scenarios = saved_scenarios,
       selected_hist = selected_hist,
-      selected_fut = selected_fut,
       residuals = reactive(input$residuals %||% "original"),
       skip_coef_draws = reactive(!isTRUE(input$include_coef_uncertainty)),
       propagate_all_covariate_uncertainty =

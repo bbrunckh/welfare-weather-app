@@ -403,12 +403,6 @@ mod_2_02_results_server <- function(id,
           error = function(e) list()
         ),
         method = input$cmp_agg_method %||% "mean",
-        deviation = input$cmp_deviation %||% "none",
-        ensemble_band = input$ensemble_band %||% "none",
-        uncertainty_band = input$uncertainty_band %||% "p10_p90",
-        skip_coef_draws = tryCatch(if (is.function(skip_coef_draws)) skip_coef_draws() else skip_coef_draws,
-          error = function(e) FALSE
-        ),
         timeseries_curves = tryCatch(timeseries_curves_rv(), error = function(e) NULL)
       )
     })
@@ -862,53 +856,6 @@ mod_2_02_results_server <- function(id,
       if (!is.null(nm) && nzchar(nm)) nm else "Historical"
     })
 
-    all_ssps <- reactive({
-      sc <- saved_scenarios()
-      if (length(sc) == 0) {
-        return(character(0))
-      }
-      ssps <- unique(.normalise_ssp(names(sc)))
-      sort(ssps[!is.na(ssps) & grepl("^SSP", ssps)])
-    })
-
-    all_anchor_years <- reactive({
-      sc <- saved_scenarios()
-      if (length(sc) == 0) {
-        return(character(0))
-      }
-      ranges <- sort(na.omit(unique(.parse_year(names(sc)))))
-      setNames(sub("-", "_", ranges), ranges)
-    })
-
-    all_models_info <- reactive({
-      sc <- saved_scenarios()
-      if (length(sc) == 0) {
-        return(character(0))
-      }
-      # Return model counts per scenario for display
-      vapply(sc, function(s) s$n_models %||% 1L, integer(1))
-    })
-
-
-    output$coef_uncertainty_status_ui <- shiny::renderUI({
-      req(hist_sim())
-      if (!has_draws()) {
-        shiny::tags$p(
-          style = "font-size:11px; color:#c62828; margin:2px 0 6px 0;",
-          "\U0001f534 Coefficient draws skipped at simulation time"
-        )
-      } else if (!isTRUE(input$show_coef_uncertainty)) {
-        shiny::tags$p(
-          style = "font-size:11px; color:#e65100; margin:2px 0 6px 0;",
-          "\u26a0 Coefficient uncertainty available but not shown"
-        )
-      } else {
-        NULL
-      }
-    })
-    outputOptions(output, "coef_uncertainty_status_ui",
-      suspendWhenHidden = TRUE
-    )
 
     # Always use survey weights when available (UI toggle removed - weighting
     # is the correct default for survey-based welfare estimates).
@@ -1058,24 +1005,6 @@ mod_2_02_results_server <- function(id,
       !is.null(hist_sim()$chol_obj)
     })
 
-    # Sync the "Show coefficient uncertainty" toggle to the current sim:
-    #   - When the new sim has no chol_obj (skip_coef_draws was TRUE), force
-    #     the box off so the user sees the toggle reflect reality.
-    #   - When the new sim does have chol_obj (uncertainty was included),
-    #     re-enable the box. Without this re-set, a prior simulation that
-    #     ran without draws would leave the box stuck OFF even after the
-    #     user enables coefficient uncertainty and re-runs.
-    observeEvent(hist_sim(),
-      {
-        req(hist_sim())
-        shiny::updateCheckboxInput(
-          session, "show_coef_uncertainty",
-          value = isTRUE(has_draws())
-        )
-      },
-      ignoreInit = TRUE
-    )
-
 
     selected_scenario_names <- reactive({
       sc <- saved_scenarios()
@@ -1103,79 +1032,9 @@ mod_2_02_results_server <- function(id,
       list(out = out, x_label = x_label)
     })
 
-    agg_scenarios <- reactive({
-      req(scenario_agg_rv())
-      sc <- saved_scenarios()
-      if (length(sc) == 0) {
-        return(list())
-      }
-      method <- input$cmp_agg_method %||% "mean"
-      deviation <- input$cmp_deviation %||% "none"
-      hist_ref <- hist_ref_val()
-      x_label <- if (identical(deviation, "none")) {
-        label_agg_method(method)
-      } else {
-        paste0(label_agg_method(method), " \u2014 ", label_deviation(deviation))
-      }
-      selected <- selected_scenario_names()
-      result <- setNames(lapply(names(sc), function(display_key) {
-        if (!display_key %in% selected) {
-          return(NULL)
-        }
-        out <- scenario_agg_rv()[[display_key]][[weight_key()]][[method]]
-        if (is.null(out) || nrow(out) == 0L) {
-          return(NULL)
-        }
-        if (!identical(deviation, "none")) {
-          out <- dplyr::mutate(out, value = value - hist_ref)
-        }
-        list(out = out, x_label = x_label)
-      }), names(sc))
-      Filter(function(x) !is.null(x) && !is.null(x$out) && nrow(x$out) > 0, result)
-    })
-
     # `exceedance_ribbon` removed - the ribbon is now built inside
     # enhance_exceedance() directly from each series' (value_all, value_all_sd)
     # using analytic delta-method bands, so there is nothing to precompute here.
-
-
-    # `all_series` is now a thin passthrough: it gathers the deviation-shifted
-    # tibbles from agg_hist()/agg_scenarios() and tags each with its scenario
-    # name. No analytic band augmentation - each plot/table reactive below
-    # constructs its own bands from value_all + value_all_sd directly.
-    all_series <- reactive({
-      req(agg_hist())
-      hist_list <- list(Historical = list(
-        out      = dplyr::mutate(agg_hist()$out, scenario = "Historical"),
-        x_label  = agg_hist()$x_label
-      ))
-      sc <- agg_scenarios()
-      if (length(sc) == 0L) {
-        return(hist_list)
-      }
-      sc_list <- setNames(lapply(names(sc), function(dk) {
-        out <- sc[[dk]]$out
-        if (is.null(out) || nrow(out) == 0L) {
-          return(NULL)
-        }
-        list(
-          out = dplyr::mutate(out, scenario = dk),
-          x_label = sc[[dk]]$x_label
-        )
-      }), names(sc))
-      c(hist_list, Filter(Negate(is.null), sc_list))
-    })
-
-
-    table_subtitle <- reactive({
-      req(agg_hist(), input$cmp_agg_method)
-      deviation <- input$cmp_deviation %||% "none"
-      paste0(
-        agg_hist()$x_label, " \u2014 ",
-        label_agg_method(input$cmp_agg_method %||% "mean"), " | ",
-        label_deviation(deviation)
-      )
-    })
 
     # Three-source uncertainty decomposition ----
     # All three downstream displays (hero, exceedance, table) source their
@@ -1203,14 +1062,11 @@ mod_2_02_results_server <- function(id,
     # pointrange_bands_rv: one row per scenario, three nested bands ----
     pointrange_bands_rv <- reactive({
       req(hist_agg_rv())
-      bq_coef <- resolve_band_q(input$uncertainty_band %||% "p10_p90")
       bq_ens <- if (identical(input$ensemble_band %||% "none", "none")) {
         c(lo = 0.5, hi = 0.5)
       } else {
         resolve_band_q(input$ensemble_band %||% "none")
       }
-      z_coef_lo <- stats::qnorm(bq_coef[["lo"]])
-      z_coef_hi <- stats::qnorm(bq_coef[["hi"]])
       hist_ref <- hist_ref_val()
       wk <- weight_key()
       method <- input$cmp_agg_method %||% "mean"
@@ -1224,7 +1080,6 @@ mod_2_02_results_server <- function(id,
           return(NULL)
         }
         vals <- mm$vals
-        sds <- mm$sds
 
         # Inter-model spread: per-model mean across years, then quantile across models.
         model_means <- rowMeans(vals, na.rm = TRUE)
@@ -1267,57 +1122,14 @@ mod_2_02_results_server <- function(id,
         } else {
           stats::median(model_means, na.rm = TRUE)
         }
-        sd_mean <- mean(as.numeric(sds), na.rm = TRUE)
-        coef <- c(
-          lo = ens_mean + z_coef_lo * sd_mean,
-          hi = ens_mean + z_coef_hi * sd_mean
-        )
-
-        # "Pooled" band: pooled SE on the central (year- and model-
-        # averaged) estimate. Mirrors the return-period table's "Pooled"
-        # convention (see fct_sim_compare.R::build_threshold_table_df) -
-        # inter-annual variability is a property of the simulated
-        # distribution, not uncertainty about the central tendency, and
-        # is shown separately as the middle band.
-        # var_coef     = mean per-outcome regression-fit variance (uses
-        #                paired-contrast SEs when deviation is selected,
-        #                via .apply_contrast_sd above).
-        # var_across   = variance across model means; matches the inter-
-        #                model band's underlying statistic.
-        # When var_across is zero (historical or single-member future),
-        # the pooled SE degenerates to the coef SE; we suppress the
-        # outer whisker (NA) to avoid drawing a duplicate of the coef
-        # band.
-        var_coef_total <- mean(as.numeric(sds)^2, na.rm = TRUE)
-        var_across <- if (!is_hist && nrow(vals) > 1L) {
-          v <- stats::var(rowMeans(vals, na.rm = TRUE), na.rm = TRUE)
-          if (is.finite(v)) v else 0
-        } else {
-          0
-        }
-        if (var_across > 0) {
-          sd_total <- sqrt(max(var_coef_total + var_across, 0,
-            na.rm = TRUE
-          ))
-          total <- c(
-            lo = ens_mean + z_coef_lo * sd_total,
-            hi = ens_mean + z_coef_hi * sd_total
-          )
-        } else {
-          total <- c(lo = NA_real_, hi = NA_real_)
-        }
 
         tibble::tibble(
           scenario = scenario_label,
           value = ens_mean - hist_ref,
-          coef_lo = unname(coef[["lo"]]) - hist_ref,
-          coef_hi = unname(coef[["hi"]]) - hist_ref,
           interann_lo = unname(interann[["lo"]]) - hist_ref,
           interann_hi = unname(interann[["hi"]]) - hist_ref,
           intermod_lo = unname(intermod[["lo"]]) - hist_ref,
           intermod_hi = unname(intermod[["hi"]]) - hist_ref,
-          total_lo = unname(total[["lo"]]) - hist_ref,
-          total_hi = unname(total[["hi"]]) - hist_ref,
           is_historical = is_hist,
           n_models = length(mm$model_ids)
         )
@@ -1725,11 +1537,6 @@ mod_2_02_results_server <- function(id,
         height       = "600px"
       )
     }
-    output$summary_box_plot <- echarts4r::renderEcharts4r({
-      ch <- pointrange_chart()
-      req(!is.null(ch))
-      ch
-    })
     wise_export_figure(
       key = "climate_outcome_distribution",
       label = "Simulated welfare by scenario and period",
@@ -1785,26 +1592,9 @@ mod_2_02_results_server <- function(id,
         height = "420px"
       )
     }
-    output$incidence_plot <- echarts4r::renderEcharts4r({
-      ch <- incidence_chart()
-      req(!is.null(ch))
-      ch
-    })
-    outputOptions(output, "incidence_plot", suspendWhenHidden = TRUE)
-    # Distributional incidence table: raw values, client-side pagination;
-    # the CSV button for it moved into the export bundle's reactable flow
-    # (this table has no mounted UI slot - the data table is exported as the
-    # bundle artefact below).
-    output$incidence_table <- reactable::renderReactable({
-      req(incidence_data_rv())
-      inc <- incidence_data_rv()
-      if (!nrow(inc)) {
-        return(.step2_reactable_note("No incidence data available."))
-      }
-      .step2_reactable(inc)
-    })
-    outputOptions(output, "incidence_table", suspendWhenHidden = TRUE)
-
+    # Distributional incidence table: raw values; the CSV button for it
+    # lives in the export bundle's reactable flow (there is no mounted UI
+    # slot - the data table is exported as the bundle artefact below).
     wise_export_figure(
       key = "climate_distributional_incidence",
       label = "Distributional incidence by baseline decile",
@@ -1992,7 +1782,6 @@ mod_2_02_results_server <- function(id,
           hist_sim()$so,
           input$cmp_deviation %||% "none"
         ),
-        return_period = TRUE,
         n_sim_years = nrow(ah$out),
         logit_x = TRUE,
         band_q = NULL,
@@ -2125,7 +1914,6 @@ mod_2_02_results_server <- function(id,
     )
 
     # Suspend outputs when Results tab is hidden ----
-    outputOptions(output, "summary_box_plot", suspendWhenHidden = TRUE)
     outputOptions(output, "annual_distribution_plot", suspendWhenHidden = TRUE)
     outputOptions(output, "summary_threshold_table", suspendWhenHidden = TRUE)
     outputOptions(output, "exceedance_plot", suspendWhenHidden = TRUE)

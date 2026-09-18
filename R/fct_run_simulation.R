@@ -254,8 +254,6 @@ prepare_weather_manifest <- function(
 #'   assembly preserves canonical key order. Values are limited to 1 or 2.
 #' @param direct_rif_predictions Logical. Use direct RIF prediction with
 #'   automatic fallback for unsupported model structures. Defaults to TRUE.
-#' @param notify_fn   Function(msg). Called for user-facing notifications.
-#'   Default is message() to console only.
 #' @param progress_fn      Function(value, detail). Called to update progress.
 #'   Default is a no-op - Shiny passes shiny::setProgress here.
 #' @param weather_fn       Function. Weather loader, injectable for tests.
@@ -269,7 +267,6 @@ prepare_weather_manifest <- function(
 #'     \item{new_scenarios}{Named list. Future scenario outputs; each entry
 #'       carries `n_models` (succeeded) and `n_models_requested` (REACT-12
 #'       provenance).}
-#'     \item{chol_obj}{List or NULL. Cholesky VCV object.}
 #'     \item{n_keys}{Integer. Total number of simulation keys.}
 #'     \item{total_runs}{Integer. Total prediction runs.}
 #'     \item{t_elapsed}{Numeric. Wall-clock seconds elapsed.}
@@ -316,9 +313,8 @@ fct_run_simulation <- function(sw,
                                  join_cache = FALSE,
                                 key_workers = 1L,
                                 direct_rif_predictions = TRUE,
-                               seed = WISEAPP_DEFAULT_SEED,
-                               notify_fn = function(msg) message(msg),
-                               progress_fn = function(value, detail) invisible(NULL),
+                                seed = WISEAPP_DEFAULT_SEED,
+                                progress_fn = function(value, detail) invisible(NULL),
                                 weather_fn = get_weather,
                                 pipeline_fn = run_sim_pipeline) {
   memory_profile <- if (identical(tolower(Sys.getenv("WISEAPP_MEMORY_PROFILE", "")), "1")) {
@@ -447,11 +443,6 @@ fct_run_simulation <- function(sw,
     propagate_all_covariate_uncertainty = propagate_all_covariate_uncertainty
   )
 
-  # Cluster counts ----
-  cluster_counts <- tryCatch(
-    compute_cluster_counts(train_data),
-    error = function(e) NULL
-  )
   # Key loop setup ----
 
   weight_col_sim <- grep("^weight$|^hhweight$|^wgt$|^pw$",
@@ -656,7 +647,7 @@ fct_run_simulation <- function(sw,
       hist_sim_result <<- list(
         pipeline = out, chol_obj = chol_obj, so = so,
         has_weights = !is.null(out$weight), weather_raw = weather_input,
-        train_data = train_data, cluster_counts = cluster_counts, svy = svy,
+        train_data = train_data, svy = svy,
         residuals = residuals
       )
       profile_memory("historical_pipeline", hist_sim_result$pipeline, detail = key)
@@ -822,7 +813,6 @@ fct_run_simulation <- function(sw,
     new_scenarios[[display_key]] <- list(
       pipelines = group_agg[[gk]],
       weather_raw = group_weather_rep[[gk]],
-      chol_obj = chol_obj,
       so = so,
       year_range = meta$year_range,
       n_models = group_n[[gk]],
@@ -881,7 +871,6 @@ fct_run_simulation <- function(sw,
   result <- list(
     hist_sim_result = hist_sim_result,
     new_scenarios   = new_scenarios,
-    chol_obj        = chol_obj,
     n_keys          = n_keys,
     total_runs      = total_runs,
     t_elapsed       = t_elapsed_total,

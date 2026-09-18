@@ -96,7 +96,6 @@ run_ledger_sim <- function(weather_result, ...) {
     sim_dates           = c("2020-01-01", "2020-12-31"),
     perturbation_method = NULL,
     stored_breaks       = NULL,
-    notify_fn           = function(msg) invisible(NULL),
     weather_fn          = function(...) weather_result,
     pipeline_fn         = make_ledger_pipeline_fn(),
     ...

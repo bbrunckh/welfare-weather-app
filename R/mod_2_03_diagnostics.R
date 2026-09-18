@@ -133,7 +133,6 @@ mod_2_03_diagnostics_server <- function(id,
                                         selected_hist = NULL,
                                         survey_weather,
                                         selected_weather,
-                                        variance_breakdown = NULL,
                                         timeseries_curves = NULL,
                                         tabset_id,
                                         tabset_session = NULL,
@@ -521,48 +520,6 @@ mod_2_03_diagnostics_server <- function(id,
       description = "Tidy data behind the advanced climate-model trajectory view."
     )
 
-    output$variance_contribution_plot <- echarts4r::renderEcharts4r({
-      req(variance_breakdown)
-      vb <- variance_breakdown()
-      req(!is.null(vb) && nrow(vb) > 0L)
-      ch <- echart_variance_contribution(vb, height = "300px")
-      req(!is.null(ch))
-      ch
-    })
-    output$variance_share_warning <- renderUI({
-      if (!isTRUE(input$show_variance_shares)) {
-        return(NULL)
-      }
-      shiny::tags$p(
-        class = "text-warning small",
-        "Approximate shares assume zero covariance between components and may not sum to the uncertainty of the combined estimand."
-      )
-    })
-    variance_share_reactable <- function() {
-      req(variance_breakdown())
-      if (!isTRUE(input$show_variance_shares)) {
-        return(.step2_reactable_note("Approximate shares are hidden by default."))
-      }
-      .step2_reactable(variance_component_data(variance_breakdown(), TRUE))
-    }
-    output$variance_share_table <- reactable::renderReactable({
-      variance_share_reactable()
-    })
-    outputOptions(output, "variance_share_table", suspendWhenHidden = FALSE)
-    wise_export_table(
-      key = "simulation_variance_shares",
-      label = "Simulation variance shares",
-      step = 2L,
-      fun = function() {
-        req(variance_breakdown())
-        if (!isTRUE(input$show_variance_shares)) {
-          return(NULL)
-        }
-        variance_component_data(variance_breakdown(), TRUE)
-      },
-      description = "Approximate shares of simulation uncertainty by variance component."
-    )
-
     output$timeseries_plot <- echarts4r::renderEcharts4r({
       ch <- trajectories_chart()
       req(!is.null(ch))
@@ -621,9 +578,7 @@ mod_2_03_diagnostics_server <- function(id,
     outputOptions(output, "diag_weather_vars_ui", suspendWhenHidden = TRUE)
     outputOptions(output, "diag_weather_scenario_ui", suspendWhenHidden = TRUE)
     outputOptions(output, "diag_weather_density", suspendWhenHidden = TRUE)
-    outputOptions(output, "variance_contribution_plot", suspendWhenHidden = TRUE)
     outputOptions(output, "timeseries_plot", suspendWhenHidden = TRUE)
-    outputOptions(output, "variance_share_warning", suspendWhenHidden = FALSE)
 
     # Return API ----
     list(diag_tab_added = diag_tab_added)

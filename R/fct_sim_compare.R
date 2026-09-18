@@ -104,52 +104,6 @@ resolve_band_q <- function(band_key) {
   )
 }
 
-# Shared CI summary helper ----
-
-# plot_pointrange_climate uses coef_lo/coef_hi from the analytic envelope tbl.
-.summarise_vals <- function(x, band_q = c(lo = 0.10, hi = 0.90)) {
-  if (length(x) == 0L || all(is.na(x))) {
-    return(NULL)
-  }
-  list(
-    mean    = mean(x, na.rm = TRUE),
-    lo_full = unname(stats::quantile(x, band_q[["lo"]], na.rm = TRUE)),
-    hi_full = unname(stats::quantile(x, band_q[["hi"]], na.rm = TRUE))
-  )
-}
-
-# Decompose a scenario's aggregated $out tibble into three uncertainty sources.
-# Returns a named list:
-#   $total  - all N_models * N_years values (combined)
-#   $annual - model-averaged annual means   (N_years values)
-#   $model  - year-averaged model means     (N_models values; NULL for historical)
-.decompose_scenario_uncertainty <- function(out_df) {
-  has_model <- "model" %in% names(out_df)
-  # Coefficient uncertainty: when draw_id is present, use draw-level value_p50
-  # (the median across draws) as the per-draw aggregate, then spread across
-  # draw_id gives the coefficient uncertainty distribution.
-  has_coef <- all(c("value_p05", "value_p50", "value_p95") %in% names(out_df))
-  total <- out_df$value
-  annual <- if (has_model) {
-    as.numeric(tapply(out_df$value, out_df$sim_year, mean, na.rm = TRUE))
-  } else {
-    total
-  }
-  model_means <- if (has_model) {
-    as.numeric(tapply(out_df$value, out_df$model, mean, na.rm = TRUE))
-  } else {
-    NULL
-  }
-  # Coefficient uncertainty band: p05 and p95 are already aggregated scalars
-  # per (sim_year [, model]) from aggregate_sim_preds() Stage 2.
-  coef_lo <- if (has_coef) out_df$value_p05 else NULL
-  coef_hi <- if (has_coef) out_df$value_p95 else NULL
-  list(
-    total = total, annual = annual, model = model_means,
-    coef_lo = coef_lo, coef_hi = coef_hi
-  )
-}
-
 # Grouped point-range chart ----
 
 #' Grouped Point-Range Chart Comparing Scenarios
@@ -556,118 +510,6 @@ paired_effect_plot <- function(tbl, x_label = "Policy effect (outcome units)") {
     theme_wise()
 }
 
-#' Horizontal dumbbell chart for Step 3 Outcome Levels (Figure S3-2B)
-#' @noRd
-plot_policy_levels_dumbbell <- function(baseline_df, policy_df,
-                                        x_label = "Outcome level (outcome units)",
-                                        show_intervals = TRUE) {
-  if (is.null(baseline_df) || !nrow(baseline_df) ||
-    is.null(policy_df) || !nrow(policy_df)) {
-    return(blank_plot("Baseline and policy levels are unavailable."))
-  }
-
-  b <- baseline_df[!baseline_df$is_historical, , drop = FALSE]
-  p <- policy_df[!policy_df$is_historical, , drop = FALSE]
-  hist_b <- baseline_df[baseline_df$is_historical, , drop = FALSE]
-
-  common_scenarios <- intersect(b$scenario, p$scenario)
-  if (!length(common_scenarios)) {
-    return(blank_plot("No matching scenarios between baseline and policy."))
-  }
-
-  b <- b[b$scenario %in% common_scenarios, , drop = FALSE]
-  p <- p[p$scenario %in% common_scenarios, , drop = FALSE]
-
-  merged <- merge(
-    b[, c("scenario", "value", "intermod_lo", "intermod_hi")],
-    p[, c("scenario", "value", "intermod_lo", "intermod_hi")],
-    by = "scenario", suffixes = c("_base", "_policy")
-  )
-  merged$diff <- merged$value_policy - merged$value_base
-  merged$diff_label <- paste0(ifelse(merged$diff >= 0, "+", ""), fmt_num(merged$diff, 2))
-  merged$ssp_key <- vapply(merged$scenario, .normalise_ssp, character(1L))
-  merged$ssp_col <- vapply(merged$ssp_key, function(k) {
-    .ssp_colours[[k]] %||% "#0072B2"
-  }, character(1L))
-
-  scen_order <- rev(unique(merged$scenario))
-  if (nrow(hist_b) > 0L) {
-    hist_row <- data.frame(
-      scenario = "Historical",
-      value_base = hist_b$value[[1L]],
-      intermod_lo_base = NA_real_,
-      intermod_hi_base = NA_real_,
-      value_policy = hist_b$value[[1L]],
-      intermod_lo_policy = NA_real_,
-      intermod_hi_policy = NA_real_,
-      diff = 0,
-      diff_label = "Reference",
-      ssp_key = "Historical",
-      ssp_col = "#808080",
-      stringsAsFactors = FALSE
-    )
-    merged <- rbind(hist_row, merged)
-    scen_order <- c("Historical", scen_order)
-  }
-  merged$scenario <- factor(merged$scenario, levels = rev(scen_order))
-
-  plt <- ggplot2::ggplot(merged, ggplot2::aes(y = .data$scenario))
-
-  fut_merged <- merged[merged$scenario != "Historical", , drop = FALSE]
-  if (nrow(fut_merged) > 0L) {
-    plt <- plt + ggplot2::geom_segment(
-      data = fut_merged,
-      ggplot2::aes(
-        x = .data$value_base, xend = .data$value_policy,
-        y = .data$scenario, yend = .data$scenario
-      ),
-      colour = .wise_slate, linewidth = 1.0, na.rm = TRUE
-    )
-  }
-
-  plt <- plt + ggplot2::geom_point(
-    ggplot2::aes(x = .data$value_base),
-    shape = 21, fill = "white", colour = .wise_slate, size = 3.6, stroke = 1.4, na.rm = TRUE
-  )
-
-  if (nrow(fut_merged) > 0L) {
-    x_span <- max(c(merged$value_base, merged$value_policy), na.rm = TRUE) -
-      min(c(merged$value_base, merged$value_policy), na.rm = TRUE)
-    nudge <- if (is.finite(x_span) && x_span > 0) x_span * 0.04 else 0.5
-    plt <- plt +
-      ggplot2::geom_point(
-        data = fut_merged,
-        ggplot2::aes(x = .data$value_policy),
-        shape = 21, fill = .wise_policy, colour = .wise_policy_dark, size = 4.0,
-        stroke = 1.2, na.rm = TRUE
-      ) +
-      ggplot2::geom_text(
-        data = fut_merged,
-        ggplot2::aes(
-          x = pmax(.data$value_base, .data$value_policy),
-          label = .data$diff_label
-        ),
-        nudge_x = nudge,
-        size = 3.2, fontface = "bold", colour = .wise_support, na.rm = TRUE
-      )
-  }
-
-  if (nrow(hist_b) > 0L) {
-    plt <- plt + ggplot2::geom_vline(
-      xintercept = hist_b$value[[1L]], linetype = "dotted", colour = .wise_zero, linewidth = 0.6
-    )
-  }
-
-  plt <- plt +
-    ggplot2::labs(
-      x = x_label, y = NULL,
-      subtitle = "Connected points use identical climate-weather draws; open = Baseline, filled = Policy. Separation is the policy effect."
-    ) +
-    theme_wise() +
-    ggplot2::theme(panel.grid.major.y = ggplot2::element_line(colour = "grey92"))
-
-  plt
-}
 
 plot_annual_distribution <- function(tbl, x_label = "Outcome (outcome units)",
                                      title = NULL, subtitle = NULL,
@@ -922,36 +764,6 @@ plot_annual_distribution <- function(tbl, x_label = "Outcome (outcome units)",
   p
 }
 
-plot_adverse_effects <- function(tbl, x_label = "Policy effect (outcome units)") {
-  if (is.null(tbl) || !nrow(tbl)) {
-    return(blank_plot("Adverse-year results are unavailable."))
-  }
-  tbl$ssp_key <- ifelse(tbl$scenario == "Historical", "Historical",
-    vapply(tbl$scenario, .normalise_ssp, character(1L))
-  )
-  ggplot2::ggplot(tbl, ggplot2::aes(
-    y = .data$scenario, x = .data$effect,
-    colour = .data$ssp_key
-  )) +
-    ggplot2::geom_vline(xintercept = 0, linetype = "dashed", colour = .wise_zero) +
-    ggplot2::geom_segment(
-      ggplot2::aes(
-        x = .data$lo, xend = .data$hi,
-        y = .data$scenario, yend = .data$scenario
-      ),
-      linewidth = 1.1, na.rm = TRUE
-    ) +
-    ggplot2::geom_point(size = 2.8, na.rm = TRUE) +
-    ggplot2::scale_colour_manual(
-      values = c("Historical" = .wise_history, .ssp_colours),
-      na.value = "#0072B2", guide = "none"
-    ) +
-    ggplot2::labs(
-      x = x_label, y = NULL,
-      subtitle = "Equal-probability tail contrast: policy quantile minus baseline quantile. CMIP6 values are ensemble spread, not probabilities."
-    ) +
-    theme_wise()
-}
 
 paired_adverse_effect_table <- function(effect_tbl,
                                         metric = NULL,
@@ -1236,10 +1048,6 @@ plot_step2_adverse_dot <- function(tbl, x_label = "Outcome level",
 #' @param hist_sim List from \code{hist_sim()}.
 #' @param saved_scenarios List of saved future scenarios.
 #' @param method Character aggregation method (default "mean").
-#' @param deviation Character deviation mode ("none", "mean", "median").
-#' @param ensemble_band Character band key for inter-model/inter-annual spread.
-#' @param uncertainty_band Character band key for coefficient uncertainty.
-#' @param skip_coef_draws Logical flag.
 #' @param timeseries_curves Data frame from \code{timeseries_curves_rv()}.
 #'
 #' @return A list of 5 card lists ready for \code{headline_cards_ui()}.
@@ -1249,10 +1057,6 @@ step2_headline_cards <- function(bands,
                                  hist_sim = NULL,
                                  saved_scenarios = list(),
                                  method = "mean",
-                                 deviation = "none",
-                                 ensemble_band = "minmax",
-                                 uncertainty_band = "p10_p90",
-                                 skip_coef_draws = FALSE,
                                  timeseries_curves = NULL) {
   if (is.null(bands) || !nrow(bands) ||
     !all(c("is_historical", "scenario") %in% names(bands))) {
@@ -3563,7 +3367,6 @@ echart_model_robustness <- function(tbl, x_label = "Expected annual outcome",
 #' @noRd
 echart_exceedance <- function(curves_tbl,
                               x_label,
-                              return_period = TRUE,
                               n_sim_years = NULL,
                               logit_x = FALSE,
                               band_q = c(lo = 0.10, hi = 0.90),

@@ -76,7 +76,6 @@ phase4_run <- function(payload_mode) {
   input <- phase4_input()
   do.call(fct_run_simulation, c(input, list(
       payload_mode = payload_mode,
-      notify_fn = function(...) invisible(NULL),
       progress_fn = function(...) invisible(NULL),
       weather_fn = function(...) phase4_weather(),
       pipeline_fn = phase4_pipeline
@@ -376,7 +375,6 @@ test_that("reference weather storage preserves member-specific payloads", {
   result <- suppressWarnings(do.call(fct_run_simulation, c(input, list(
     weather_storage = "reference",
     weather_store_root = root,
-    notify_fn = function(...) invisible(NULL),
     progress_fn = function(...) invisible(NULL),
     weather_fn = function(...) phase4_weather(),
     pipeline_fn = phase4_pipeline
@@ -403,7 +401,6 @@ test_that("reference storage does not create a future store for historical-only 
   input$ssps <- character(0)
   result <- suppressWarnings(do.call(fct_run_simulation, c(input, list(
     weather_storage = "reference", weather_store_root = root,
-    notify_fn = function(...) invisible(NULL),
     progress_fn = function(...) invisible(NULL),
     weather_fn = function(...) list(historical = phase4_weather()$historical),
     pipeline_fn = phase4_pipeline
@@ -419,7 +416,6 @@ test_that("reference stores are retained by a lease and released on replacement"
   input <- phase4_input()
   first <- suppressWarnings(do.call(fct_run_simulation, c(input, list(
     weather_storage = "reference", weather_store_root = root,
-    notify_fn = function(...) invisible(NULL),
     progress_fn = function(...) invisible(NULL),
     weather_fn = function(...) phase4_weather(),
     pipeline_fn = phase4_pipeline
@@ -433,7 +429,6 @@ test_that("reference stores are retained by a lease and released on replacement"
 
   second <- suppressWarnings(do.call(fct_run_simulation, c(input, list(
     weather_storage = "reference", weather_store_root = root,
-    notify_fn = function(...) invisible(NULL),
     progress_fn = function(...) invisible(NULL),
     weather_fn = function(...) phase4_weather(),
     pipeline_fn = phase4_pipeline
@@ -456,7 +451,6 @@ test_that("failed reference runs release stores and do not publish failed member
   }
   result <- suppressWarnings(do.call(fct_run_simulation, c(input, list(
     weather_storage = "reference", weather_store_root = root,
-    notify_fn = function(...) invisible(NULL),
     progress_fn = function(...) invisible(NULL),
     weather_fn = function(...) weather,
     pipeline_fn = pipeline
@@ -529,7 +523,6 @@ test_that("experimental join cache preserves simulation outputs", {
     fct_run_simulation,
     c(input, list(
       join_cache = use_cache,
-      notify_fn = function(...) invisible(NULL),
       progress_fn = function(...) invisible(NULL),
       weather_fn = function(...) phase4_weather(),
       pipeline_fn = phase4_pipeline
@@ -564,7 +557,6 @@ test_that("prepared weather cache replays a complete cold run", {
     c(input, list(
       prepared_weather_cache = "read_write",
       prepared_weather_cache_root = root,
-      notify_fn = function(...) invisible(NULL),
       progress_fn = function(...) invisible(NULL),
       weather_fn = loader,
       pipeline_fn = phase4_pipeline
@@ -606,7 +598,6 @@ test_that("prepared weather cache signature invalidates changed dates", {
     c(current, list(
       prepared_weather_cache = "read_write",
       prepared_weather_cache_root = root,
-      notify_fn = function(...) invisible(NULL),
       progress_fn = function(...) invisible(NULL),
       weather_fn = loader,
       pipeline_fn = phase4_pipeline
@@ -656,7 +647,6 @@ test_that("two models consume one prepared weather manifest", {
   first <- suppressWarnings(do.call(fct_run_simulation, c(
     input, list(weather_manifest = manifest, prepared_weather_cache = "off",
                 weather_fn = function(...) stop("weather should not load"),
-                notify_fn = function(...) invisible(NULL),
                 progress_fn = function(...) invisible(NULL),
                 pipeline_fn = phase4_pipeline)
   )))
@@ -666,7 +656,6 @@ test_that("two models consume one prepared weather manifest", {
   second <- suppressWarnings(do.call(fct_run_simulation, c(
     second_input, list(weather_manifest = manifest, prepared_weather_cache = "off",
                        weather_fn = function(...) stop("weather should not load"),
-                       notify_fn = function(...) invisible(NULL),
                        progress_fn = function(...) invisible(NULL),
                        pipeline_fn = phase4_pipeline)
   )))

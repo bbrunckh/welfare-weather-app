@@ -65,7 +65,6 @@ step2_compute_pipeline <- function(weather_raw, ...) {
 
 step2_compute_reference <- function(input, weather) {
   do.call(fct_run_simulation, c(input, list(
-      notify_fn = function(...) invisible(NULL),
       progress_fn = function(...) invisible(NULL),
       weather_fn = function(...) weather,
       pipeline_fn = step2_compute_pipeline

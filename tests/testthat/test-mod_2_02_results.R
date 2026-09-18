@@ -556,9 +556,6 @@ test_that("step2_headline_cards returns 5 cards with mod_1 styling", {
     hist_sim         = hist_sim,
     saved_scenarios  = saved,
     method           = "mean",
-    deviation        = "none",
-    ensemble_band    = "minmax",
-    uncertainty_band = "p10_p90",
     timeseries_curves = timeseries
   )
 
@@ -592,9 +589,6 @@ test_that("step2_headline_cards returns 5 cards with mod_1 styling", {
     hist_sim         = hist_sim,
     saved_scenarios  = saved,
     method           = "median",
-    deviation        = "none",
-    ensemble_band    = "minmax",
-    uncertainty_band = "p10_p90",
     timeseries_curves = timeseries
   )
   expect_match(median_cards[[1]]$note, "Mean weather year", fixed = TRUE)
