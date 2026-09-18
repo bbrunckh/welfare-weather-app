@@ -194,10 +194,18 @@ test_that("hexmap_dependency: scripts in engine order", {
   dep <- hexmap_dependency()
   expect_identical(
     dep$script,
-    c("vendor/maplibre-gl.js", "vendor/h3-js.umd.js", "hexmap.js")
+    c("maplibre-gl.js", "h3-js.umd.js", "hexmap.js")
   )
-  expect_identical(dep$stylesheet, "vendor/maplibre-gl.css")
+  expect_identical(dep$stylesheet, "maplibre-gl.css")
   for (s in dep$script) {
     expect_true(file.exists(file.path(dep$src[[1]], s)), info = s)
   }
+  # Engine files must stay OUTSIDE the bundle_resources scan tree
+  # (inst/app/www): anything in there is also attached alphabetically by
+  # bundle_resources, so the scripts would execute twice per page load.
+  expect_false(grepl("/www$", dep$src[[1]] %||% ""))
+  expect_false(file.exists(
+    file.path(app_sys("app", "www"), "vendor", "maplibre-gl.js")
+  ))
+  expect_false(file.exists(file.path(app_sys("app", "www"), "hexmap.js")))
 })

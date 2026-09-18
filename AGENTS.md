@@ -77,7 +77,7 @@ R/
 - `fct_policy_decompose.R` – **policy effect decomposition** (main effect + resilience: repositioning + interaction)
 - `fct_rif_sim.R` – Recentered Influence Function (RIF) quantile regression helpers
 - `fct_weatherstats.R` – weather statistics computation
-- `fct_hexmap.R` – **hex-map engine bridge**: vendored MapLibre GL + h3-js (`inst/app/www/`, browser side `hexmap.js`), columnar payload contract (`hexmap_payload()`, senders `hexmap_update`/`hexmap_clear`/`hexmap_fit`), container `hexmap_ui()`. Used by mod_1_02, mod_1_03, mod_1_05; no Leaflet fallback — MapLibre is the only map surface. Asset pins and behavior details live in-file.
+- `fct_hexmap.R` – **hex-map engine bridge**: vendored MapLibre GL + h3-js (`inst/app/vendor/` — outside the `bundle_resources()` scan tree, served once via the explicit dependency; browser side `hexmap.js`), columnar payload contract (`hexmap_payload()`, senders `hexmap_update`/`hexmap_clear`/`hexmap_fit`), container `hexmap_ui()`. Used by mod_1_02, mod_1_03, mod_1_05; no Leaflet fallback — MapLibre is the only map surface. Asset pins and behavior details live in-file.
 - `fct_step2_async.R` – process-wide mirai async coordinator for Step 2 (FIFO queue, worker snapshots, secrets scrubbing)
 
 ### Modeling Engine Registry

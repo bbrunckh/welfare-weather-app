@@ -13,15 +13,15 @@
 # R packages). Pins recorded here; upgrade by re-fetching these exact URLs     #
 # and updating the pins + hashes:                                              #
 #                                                                              #
-#   inst/app/www/vendor/maplibre-gl.js    maplibre-gl 5.24.0                   #
+#   inst/app/vendor/maplibre-gl.js  maplibre-gl 5.24.0                          #
 #     https://unpkg.com/maplibre-gl@5.24.0/dist/maplibre-gl.js                 #
 #     sha256 45a9b07a9189ce56054c620a947ccf41e291e58c95e9b61533b740aaa65ee5cb  #
 #                                                                              #
-#   inst/app/www/vendor/maplibre-gl.css   maplibre-gl 5.24.0                   #
+#   inst/app/vendor/maplibre-gl.css  maplibre-gl 5.24.0                        #
 #     https://unpkg.com/maplibre-gl@5.24.0/dist/maplibre-gl.css                #
 #     sha256 ab1e70d59ec40465bae7e7030da2f3ccf28133fd502e62bd598eefbadfd7a732  #
 #                                                                              #
-#   inst/app/www/vendor/h3-js.umd.js      h3-js 4.1.0 (UMD; global `h3`;       #
+#   inst/app/vendor/h3-js.umd.js  h3-js 4.1.0 (UMD; global `h3`;               #
 #     `cellToBoundary` is the only API hexmap.js uses)                         #
 #     https://unpkg.com/h3-js@4.1.0/dist/h3-js.umd.js                          #
 #     sha256 0870d94de38503bdf6b63dce8c4812a42dc43565f15ae35694aedf4f97eaf548  #
@@ -29,24 +29,23 @@
 # Basemap: keyless CARTO vector Positron (the pattern proven in the            #
 # data-insights Connect deployment). Raster tiles die with the Leaflet maps.   #
 #                                                                              #
-# Note: `golem::bundle_resources()` also scans inst/app/www and re-attaches    #
-# these scripts in alphabetical order (hexmap.js would load before the         #
-# libraries). hexmap.js is load-order tolerant, and its load-once guard makes  #
-# the second copy a strict no-op: without it the two copies keep separate      #
-# message queues/replay registries and race their MutationObservers, so a      #
-# re-rendered container could boot from the copy holding no replay state and   #
-# stay blank. The explicit dependency below always loads last.                 #
+# Startup note: the engine lives in inst/app/vendor/, OUTSIDE the app/www      #
+# tree that golem::bundle_resources() scans, so the scripts are served and      #
+# executed exactly once per page load - via the explicit dependency below,      #
+# which keeps the strict order (maplibre -> h3-js -> hexmap.js). While the      #
+# files sat under app/www, bundle_resources also attached them alphabetically   #
+# and every script executed twice per page (~1.2 MB of duplicated JS parse).    #
+# hexmap.js stays load-order tolerant and keeps its load-once guard, so a       #
+# stray second copy is still a strict no-op rather than a broken map.           #
 
 
 # Dependency ----
 
 #' Attach the vendored hex-map engine (scripts in strict order)
 #'
-#' maplibre-gl -> h3-js -> hexmap.js. Attached once in `app_ui.R` so the
-#' ordering cannot be broken by `bundle_resources()`'s alphabetical scan;
-#' also attached by `hexmap_ui()` for standalone module harnesses
-#' (htmltools deduplicates the identical dependency, so the scripts still
-#' load exactly once).
+#' maplibre-gl -> h3-js -> hexmap.js. Attached once in `app_ui.R`. The engine
+#' files live outside the `bundle_resources()` scan tree, so this dependency
+#' is their only serving path.
 #'
 #' @return An `htmltools::htmlDependency`.
 #' @noRd
@@ -56,13 +55,13 @@ hexmap_dependency <- function() {
     # Bump on every engine change: the version is part of the script URL,
     # so browsers re-fetch instead of serving a stale cached engine.
     version = "1.0.5",
-    src = app_sys("app", "www"),
+    src = app_sys("app", "vendor"),
     script = c(
-      "vendor/maplibre-gl.js",
-      "vendor/h3-js.umd.js",
+      "maplibre-gl.js",
+      "h3-js.umd.js",
       "hexmap.js"
     ),
-    stylesheet = "vendor/maplibre-gl.css",
+    stylesheet = "maplibre-gl.css",
     all_files = FALSE
   )
 }

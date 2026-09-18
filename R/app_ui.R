@@ -115,8 +115,10 @@ golem_add_external_resources <- function() {
       path = app_sys("app/www"),
       app_title = "wiseapp"
     ),
-    # Vendored MapLibre/H3 map engine, after bundle_resources so the
-    # explicit script order (maplibre -> h3-js -> hexmap.js) always wins.
+    # Vendored MapLibre/H3 map engine. The engine lives in inst/app/vendor/,
+    # outside the bundle_resources scan tree, so this explicit dependency is
+    # its only serving path and keeps the strict script order
+    # (maplibre -> h3-js -> hexmap.js) with a single execution per page load.
     hexmap_dependency()
   )
 }
