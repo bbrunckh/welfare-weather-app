@@ -45,6 +45,16 @@
 #'   \code{.residual_lookup()} (PERF-34). Built per call when NULL.
 #' @param resid_sigma2 Optional pre-built residual variance from
 #'   \code{.residual_sigma2()} (PERF-34). Computed per call when NULL.
+#' @param prepared_mu Optional pre-computed \code{mu} from the shared
+#'   preparation cache. Skips residual drawing when supplied.
+#' @param prepared_value Optional pre-computed point estimate from the
+#'   single-pass welfare kernel (\code{welfare_stats_all()}). Skips
+#'   \code{resolve_agg_fn()} when supplied. Internal use by the multi-method
+#'   suite path; NULL keeps the resolver behaviour unchanged.
+#' @param prepared_order Optional stable sort order of \code{mu} (attribute of
+#'   the kernel result) reused by the Gini gradient in place of \code{order()}.
+#' @param F_row_ss Optional pre-computed row sums of squares of the year's
+#'   \code{F_loading} block, reused by the headcount bandwidth tuning.
 #'
 #' @return Named list:
 #'   \describe{
@@ -70,7 +80,10 @@ aggregate_with_uncertainty_delta <- function(y_point,
                                              seed = WISEAPP_DEFAULT_SEED,
                                              resid_lookup = NULL,
                                              resid_sigma2 = NULL,
-                                             prepared_mu = NULL) {
+                                             prepared_mu = NULL,
+                                             prepared_value = NULL,
+                                             prepared_order = NULL,
+                                             F_row_ss = NULL) {
   N <- length(y_point)
   stopifnot(is.numeric(y_point) && N > 0)
 
@@ -94,14 +107,20 @@ aggregate_with_uncertainty_delta <- function(y_point,
     mu <- prepared_mu
   }
 
-  # Point estimate via existing resolver
-  agg_fn <- resolve_agg_fn(method)
-  value_pt <- agg_fn(mu, weights, pov_line)
+  # Point estimate via existing resolver; the multi-method suite path
+  # supplies the single-pass kernel value instead (parity-tested).
+  value_pt <- if (!is.null(prepared_value)) {
+    as.numeric(prepared_value)
+  } else {
+    resolve_agg_fn(method)(mu, weights, pov_line)
+  }
 
   # Welfare-scale gradient h_i = (dT/dw_i) * mu_i
   h <- gradient_for_method(method, mu, weights, pov_line, value_pt,
     bandwidth_p0 = bandwidth_p0,
-    F_loading    = F_loading
+    F_loading    = F_loading,
+    prepared_order = prepared_order,
+    F_row_ss     = F_row_ss
   )
 
   # Coefficient variance: ||F' h||^2
@@ -151,9 +170,14 @@ aggregate_with_uncertainty_delta <- function(y_point,
 # Avoid gradient and band calculations when only deterministic point estimates
 # are requested. Stochastic residual modes retain the delta-method path because
 # their residual variance still depends on the welfare gradient.
-aggregate_point_estimate <- function(mu, method, weights = NULL, pov_line = NULL) {
+aggregate_point_estimate <- function(mu, method, weights = NULL, pov_line = NULL,
+                                     prepared_value = NULL) {
   stopifnot(is.numeric(mu), length(mu) > 0L)
-  value_pt <- resolve_agg_fn(method)(mu, weights, pov_line)
+  value_pt <- if (!is.null(prepared_value)) {
+    as.numeric(prepared_value)
+  } else {
+    resolve_agg_fn(method)(mu, weights, pov_line)
+  }
   list(
     value = value_pt,
     value_lo = value_pt,
@@ -175,7 +199,9 @@ aggregate_point_estimate <- function(mu, method, weights = NULL, pov_line = NULL
 
 gradient_for_method <- function(method, mu, weights, pov_line, value_pt,
                                 bandwidth_p0 = 0.05,
-                                F_loading = NULL) {
+                                F_loading = NULL,
+                                prepared_order = NULL,
+                                F_row_ss = NULL) {
   N <- length(mu)
   W <- if (!is.null(weights)) sum(weights, na.rm = TRUE) else N
   if (!is.finite(W) || W <= 0) W <- N
@@ -221,7 +247,7 @@ gradient_for_method <- function(method, mu, weights, pov_line, value_pt,
       # kernel that under-counts threshold crossings.
       b_user <- bandwidth_p0 * pov_line
       b_auto <- if (!is.null(F_loading)) {
-        log_se <- sqrt(rowSums(F_loading * F_loading))
+        log_se <- sqrt(F_row_ss %||% rowSums(F_loading * F_loading))
         stats::median(mu * log_se, na.rm = TRUE)
       } else {
         0
@@ -287,7 +313,11 @@ gradient_for_method <- function(method, mu, weights, pov_line, value_pt,
       if (sum(valid) < 2L) {
         return(rep(0, N))
       }
-      ord <- order(mu)
+      ord <- if (!is.null(prepared_order) && length(prepared_order) == N) {
+        as.integer(prepared_order)
+      } else {
+        order(mu)
+      }
       mu_o <- mu[ord]
       w_o <- if (!is.null(weights)) weights[ord] else rep(1, N)
       w_n <- w_o / sum(w_o, na.rm = TRUE)
@@ -391,7 +421,11 @@ apply_band_transform <- function(method, value_pt, se, z_lo, z_hi) {
   } else {
     NULL
   }
-  digest::digest(list(
+  # rlang::hash() serializes through rlang's C-level xxhash wrapper instead
+  # of R's serialize() round-trip; the key is session-scoped (never persisted)
+  # so the trade is purely speed. IRN-scale pipelines (~2M-row vectors) spent
+  # up to ~0.3 s per suite build in digest::digest.
+  rlang::hash(list(
     sim_year = pipe$sim_year,
     y_point = pipe$y_point,
     weight = pipe$weight,
@@ -402,7 +436,7 @@ apply_band_transform <- function(method, value_pt, se, z_lo, z_hi) {
     is_log = is_log,
     include_factor_loading = isTRUE(include_factor_loading),
     train = resid_data
-  ), serialize = TRUE)
+  ))
 }
 
 .aggregation_prepare_pipeline <- function(pipe, train_aug, id_col,
@@ -461,6 +495,12 @@ apply_band_transform <- function(method, value_pt, se, z_lo, z_hi) {
       F_full[idx, , drop = FALSE]
     })
   } else NULL
+  # Row sums of squares feed the headcount bandwidth tuning; computing them
+  # once per prepared year removes a per-method O(N*K) pass (the multiply
+  # dominates the cost for K beyond ~10).
+  factor_row_ss <- if (!is.null(factor_blocks)) {
+    lapply(factor_blocks, function(F_b) rowSums(F_b * F_b))
+  } else NULL
   prepared <- list(
     key = key,
     years = years,
@@ -471,6 +511,7 @@ apply_band_transform <- function(method, value_pt, se, z_lo, z_hi) {
     residuals = residual_vectors,
     mu = mu,
     factor_blocks = factor_blocks,
+    factor_row_ss = factor_row_ss,
     resid_sigma2 = sigma2
   )
 
@@ -646,6 +687,23 @@ aggregate_pipeline_per_year_multi <- function(pipe,
   point_estimate_only <- isTRUE(skip_coef) &&
     res_mode %in% c("none", "original")
 
+  # Single-pass welfare kernel: all covered methods share one scan + one
+  # stable sort per (pipeline, year, distinct poverty line). Method names not
+  # covered by the kernel fall back to the per-method resolver (parity
+  # oracle); poverty methods without a poverty line keep today's resolver
+  # error behaviour by falling back too.
+  pov_methods <- c("headcount_ratio", "gap", "fgt2")
+  kernel_pov <- vapply(methods, function(method) {
+    mp <- if (!is.null(pov_lines) && !is.null(pov_lines[[method]])) {
+      pov_lines[[method]]
+    } else {
+      pov_line
+    }
+    if (is.null(mp)) NA_real_ else as.numeric(mp)
+  }, numeric(1))
+  kernel_ok <- !is.na(kernel_pov) | !(methods %in% pov_methods)
+  kernel_pov_unique <- unique(kernel_pov[kernel_ok])
+
   out <- setNames(lapply(methods, function(method) vector("list", length(prep$years))),
                   methods)
   for (i in seq_along(prep$years)) {
@@ -654,7 +712,20 @@ aggregate_pipeline_per_year_multi <- function(pipe,
     F_idx <- if (!isTRUE(skip_coef) && !is.null(prep$factor_blocks)) {
       prep$factor_blocks[[i]]
     } else NULL
+    F_row_ss <- if (!isTRUE(skip_coef) && !is.null(prep$factor_row_ss)) {
+      prep$factor_row_ss[[i]]
+    } else NULL
     w_idx <- if (isTRUE(weighted)) prep$weights[[i]] else NULL
+
+    # One kernel pass per distinct poverty line shares the scan and the sort
+    # across the whole method suite.
+    kernel_suites <- lapply(kernel_pov_unique, function(p) {
+      welfare_stats_all(
+        prep$mu[[i]],
+        if (is.null(w_idx)) numeric(0) else w_idx,
+        p, p, p, 28
+      )
+    })
 
     for (method in methods) {
       method_pov <- if (!is.null(pov_lines) && !is.null(pov_lines[[method]])) {
@@ -662,8 +733,17 @@ aggregate_pipeline_per_year_multi <- function(pipe,
       } else {
         pov_line
       }
+      picked <- if (kernel_ok[[method]]) {
+        .welfare_kernel_pick(
+          kernel_suites[[match(kernel_pov[[method]], kernel_pov_unique)]],
+          method
+        )
+      } else {
+        list(value = NULL, order = NULL)
+      }
       value <- if (point_estimate_only) {
-        aggregate_point_estimate(prep$mu[[i]], method, w_idx, method_pov)
+        aggregate_point_estimate(prep$mu[[i]], method, w_idx, method_pov,
+          prepared_value = picked$value)
       } else aggregate_with_uncertainty_delta(
         y_point = pipe$y_point[idx],
         F_loading = F_idx,
@@ -680,7 +760,10 @@ aggregate_pipeline_per_year_multi <- function(pipe,
         seed = wise_seed(seed, "residual", yr),
         resid_lookup = NULL,
         resid_sigma2 = sg2,
-        prepared_mu = prep$mu[[i]]
+        prepared_mu = prep$mu[[i]],
+        prepared_value = picked$value,
+        prepared_order = picked$order,
+        F_row_ss = F_row_ss
       )
       value$sim_year <- yr
       out[[method]][[i]] <- value

@@ -724,6 +724,29 @@ inputs_by_country <- setNames(
   rows <- list()
   pipes <- .bench_aggregation_pipelines(result)
   aggregation_metadata <- .bench_aggregation_metadata(pipes, case$residuals)
+  row_frame <- function(stage, method, elapsed, n_years, err) {
+    data.frame(
+      country = case$country,
+      model = case$model,
+      workload = case$workload,
+      payload_mode = case$payload_mode,
+      weather_storage = config$weather_storage,
+      uncertainty = if (case$skip_coef_draws) "disabled" else "enabled",
+      cache = case$cache,
+      repetition = case$repetition,
+      stage = stage,
+      method = method,
+      residuals_requested = aggregation_metadata$residuals_requested,
+      residuals_effective = aggregation_metadata$residuals_effective,
+      shared_context_available = aggregation_metadata$shared_context_available,
+      elapsed_seconds = elapsed,
+      n_pipelines = length(pipes),
+      n_years = n_years,
+      status = if (is.null(err)) "ok" else "error",
+      error = err %||% "",
+      stringsAsFactors = FALSE
+    )
+  }
   for (method_label in config$aggregation) {
     pov_line <- if (method_label %in% c("headcount_ratio", "gap", "fgt2")) 3 else NULL
     started <- proc.time()[["elapsed"]]
@@ -742,27 +765,41 @@ inputs_by_country <- setNames(
       )
       n_years <- sum(lengths(out))
     }, error = function(e) err <<- conditionMessage(e))
-    rows[[length(rows) + 1L]] <- data.frame(
-      country = case$country,
-      model = case$model,
-      workload = case$workload,
-      payload_mode = case$payload_mode,
-      weather_storage = config$weather_storage,
-      uncertainty = if (case$skip_coef_draws) "disabled" else "enabled",
-      cache = case$cache,
-      repetition = case$repetition,
-      method = method_label,
-      residuals_requested = aggregation_metadata$residuals_requested,
-      residuals_effective = aggregation_metadata$residuals_effective,
-      shared_context_available = aggregation_metadata$shared_context_available,
-      elapsed_seconds = proc.time()[["elapsed"]] - started,
-      n_pipelines = length(pipes),
-      n_years = n_years,
-      status = if (is.null(err)) "ok" else "error",
-      error = err %||% "",
-      stringsAsFactors = FALSE
+    rows[[length(rows) + 1L]] <- row_frame(
+      "method", method_label,
+      proc.time()[["elapsed"]] - started, n_years, err
     )
   }
+  # Multi-method suite stage: mirrors the app's weighted Results arm, which
+  # computes the whole method suite per pipeline in one pass.
+  suite_methods <- c(
+    "mean", "median", "total", "headcount_ratio", "gap", "fgt2",
+    "gini", "prosperity_gap", "avg_poverty"
+  )
+  started <- proc.time()[["elapsed"]]
+  err <- NULL
+  n_years <- NA_integer_
+  tryCatch({
+    out <- .bench_aggregate_pipelines_suite(
+      pipelines = pipes,
+      methods = suite_methods,
+      weighted = TRUE,
+      pov_line = 3,
+      residuals = case$residuals,
+      is_log = identical(input$so$transform, "log"),
+      skip_coef = isTRUE(case$skip_coef_draws),
+      seed = config$seed
+    )
+    n_years <- sum(vapply(out, function(per_pipe) {
+      sum(vapply(per_pipe, function(method_tbl) {
+        if (is.null(method_tbl) || !nrow(method_tbl)) 0L else nrow(method_tbl)
+      }, numeric(1)))
+    }, numeric(1)))
+  }, error = function(e) err <<- conditionMessage(e))
+  rows[[length(rows) + 1L]] <- row_frame(
+    "suite", paste(suite_methods, collapse = "+"),
+    proc.time()[["elapsed"]] - started, n_years, err
+  )
   if (!length(rows)) return(data.frame())
   do.call(rbind, rows)
 }

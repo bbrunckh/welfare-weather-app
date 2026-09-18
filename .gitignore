@@ -24,6 +24,15 @@
 !DESCRIPTION
 !NAMESPACE
 
+# Compiled welfare kernel (Rcpp): sources tracked, build artifacts ignored.
+# *.cpp has no other whitelisted extension, and this section must precede
+# the trailing re-ignores (*.o etc. re-ignored at the bottom).
+!/**/*.cpp
+!/**/*.hpp
+*.o
+*.so
+*.dll
+
 # Keep R CMD build/check ignore rules (not matched by !/**/*.R since it
 # has no .R extension; without this line the file exists on disk but is
 # never tracked by git)

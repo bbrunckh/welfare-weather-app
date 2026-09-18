@@ -134,6 +134,36 @@
   })
 }
 
+# Mirrors the Step 2 Results weighted arm: one multi-method suite per pipeline
+# via aggregate_pipeline_tables_multi(), the path the application actually
+# takes when survey weights are present.
+.bench_aggregate_pipelines_suite <- function(pipelines, methods, weighted,
+                                             pov_line, residuals, is_log,
+                                             skip_coef, seed) {
+  metadata <- .bench_aggregation_metadata(pipelines, residuals)
+  if (identical(residuals, "original") &&
+      !isTRUE(metadata$shared_context_available)) {
+    stop(
+      "Original-residual aggregation requires train_aug and id_col context ",
+      "for every compact pipeline.", call. = FALSE
+    )
+  }
+  pov_lines <- setNames(rep(pov_line, length(methods)), methods)
+  lapply(pipelines, function(entry) {
+    aggregate_pipeline_tables_multi(
+      pipelines = entry$pipe,
+      methods = methods,
+      weighted = weighted,
+      pov_lines = pov_lines,
+      residuals = residuals,
+      is_log = is_log,
+      skip_coef = skip_coef,
+      seed = seed,
+      shared_context = entry$shared_context
+    )
+  })
+}
+
 .bench_aggregation_metadata <- function(pipelines, residuals) {
   available <- all(vapply(pipelines, function(entry) {
     context <- step2_pipeline_context(entry$pipe, entry$shared_context)
