@@ -33,14 +33,14 @@ Replace the triple `if_else`/`across` NA-guard with
 both terms, removing per-row branching in the hottest join. Verify all-NA group parity
 (R returns `NA_real_`; SQL yields NULL → same after `collect()`, but confirm on real data).
 
-## 4. Conditional materialization — DEFERRED (quantify-first, unchanged)
+## 4. Conditional materialization — PARTIALLY ADOPTED 2026-09-18 (single-consumer per-period tables)
 
 `dplyr::compute()` writes 4–5 temp tables per call. Materialize only when a relation has
 ≥2 consumers (multi-batch reuse is deliberate, PERF-02); use lazy views otherwise
 (single-batch runs). Benchmark the multi-period × multi-SSP worst case before changing
 any shared site — re-executing a view per batch can be slower than one materialization.
 
-## 5. Window `MEDIAN` cost — DEFERRED (quantify share first, unchanged)
+## 5. Window `MEDIAN` cost — MEASURED 2026-09-18, NO CHANGE
 
 `MEDIAN(...) OVER (ROWS BETWEEN …)` sorts per window frame (O(n log n) per frame) while
 AVG/MIN/MAX are linear. If "Median" temporal aggregation is common in real payloads,
@@ -95,3 +95,27 @@ quantify its share before micro-optimizing elsewhere.
 - **Peak RSS** (IRN, `/usr/bin/time -l`, one_ssp): 814 MB (warm) vs 780 MB (disabled) —
   within allocator noise; survey data dominates. Cache footprint after tests + LKA +
   IRN keys: 20 MB (budget default 2048 MB, shared LRU eviction).
+
+## Adopted evidence, second pass (2026-09-18, PERF-2b/2c)
+
+- **#4 partially adopted**: the per-period `lw_delta_` (filtered deltas) and
+  `lw_perturb_` (join + perturb) temp tables each have exactly one consumer in the fast
+  path and now stay lazy — one fused DuckDB query instead of write+read per period.
+  `lw_delta_all_` stays materialized (multi-period consumer); bounded path unaffected
+  (it materializes `lw_roll_` per period regardless). Measured: 48.4–48.8 s vs
+  54.2–54.9 s baseline (−11%) on the full-IRN (8-wave) two_ssps×two_periods worst case,
+  LKA two_ssps 13.1–13.2 vs 13.8–14.7 s; all SHA hashes bit-identical; peak RSS
+  unchanged (785 vs 780 MB).
+- **New (PERF-2c)**: the thread-policy RSS gate (`ps` subprocess, ~53 ms) is now only
+  called when the policy could actually select 2 threads (explicit `"2"`, or `"auto"`
+  with rollout enabled + local + large workload + ≥2 CPUs). The policy reason chain
+  gained a guard so a skipped measurement cannot overwrite `auto_rollout_disabled`.
+- **#4 remaining sub-cases measured and rejected**: lazy `lw_base_` when no
+  transformations — <1% (historical 2.94–3.00 vs 2.88–3.23 s; climate within 1%).
+  `shared_hist` plan promotion — neutral on 2-rep data (53.9–57.0 vs 54.2–54.9 s); the
+  earlier −5% was run-to-run variance; keep as opt-in profile plan. `shared_period`
+  plan re-confirmed as a loss (+63%, 96.7 s) — reject permanently.
+- **#5 MEDIAN quantified**: window stages barely move; the cost surfaces in
+  `future_collect` (0.163 → 0.274 s, +67%; ~+9% end-to-end on one IRN SSP). Real but
+  modest; a fix needs a different window-median algorithm (parity risk). No change
+  unless MEDIAN temporal aggregation proves common in real payloads.
