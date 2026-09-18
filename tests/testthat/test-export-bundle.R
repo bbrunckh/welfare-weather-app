@@ -9,10 +9,10 @@ library(testthat)
 library(shiny)
 
 item <- function(key, kind = "table", step = 1L, fun = NULL, label = key,
-                 description = "Description.") {
+                 description = "Description.", width = 6, height = 4) {
   list(key = key, label = label, step = as.integer(step), kind = kind,
        fun = fun %||% function() data.frame(a = 1:2, b = c("x", "y")),
-       description = description, width = 6, height = 4)
+       description = description, width = width, height = height)
 }
 
 # ---- Registry ---------------------------------------------------------------
@@ -195,6 +195,32 @@ test_that("a genuine builder failure is named, not silently dropped (UI-53)", {
                             tempdir(), "x.csv")
   expect_equal(res$status, "error")
   expect_match(res$note, "grid mismatch")
+})
+
+# ---- echarts figure PNG export (guidelines §7) -------------------------------
+
+test_that("an echarts figure renders to PNG through the headless browser", {
+  skip_if_not_installed("echarts4r")
+  skip_if_not_installed("webshot2")
+  has_chrome <- tryCatch({
+    ci <- chromote::Chromote$new()
+    ci$close()
+    TRUE
+  }, error = function(e) FALSE)
+  skip_if_not(has_chrome, "no headless Chrome available")
+
+  widget <- echarts4r::e_charts(data.frame(x = 1:3, y = c(1, 4, 2)), x) |>
+    echarts4r::e_bar(y)
+  path <- withr::local_tempfile(fileext = ".png")
+  unlink(path)
+  res <- .export_write_item(
+    item("ech", kind = "figure", width = 6, height = 4,
+         fun = function() widget),
+    dirname(path), basename(path)
+  )
+  expect_equal(res$status, "ok")
+  expect_true(file.exists(path))
+  expect_gt(file.size(path), 1000)
 })
 
 test_that("a req() throw inside a registered artefact leaves no failure note", {

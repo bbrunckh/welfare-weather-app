@@ -1142,10 +1142,23 @@ table.dataTable {
 
 /* Wrapped summary-table cells: long variable labels stay readable instead of
    forcing horizontal scroll. Applied via columnDefs className = "dt-wrap"
-   (fct_surveystats.R, fct_weatherstats.R). */
+   (fct_surveystats.R, fct_weatherstats.R) and colDef class = "wise-dt-wrap"
+   (reactable summary tables). */
 table.dataTable td.dt-wrap {
   white-space: normal !important;
   word-break: break-word;
+}
+
+table.reactable td.wise-dt-wrap {
+  white-space: normal;
+  word-break: break-word;
+}
+
+/* Toolbar row above reactable summary tables: holds the client-side CSV
+   download button, mirroring the DataTables controls row's spacing. */
+.wise-reactable-controls {
+  display: flex;
+  margin: 0 0 0.35rem;
 }
 
 /* One row of DataTables chrome: download and length on the left, search on

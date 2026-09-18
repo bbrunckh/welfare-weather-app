@@ -147,3 +147,19 @@ test_that("make_regtable_df returns NULL when there is nothing to export", {
                                rif_grid = data.frame(model = 1L, term = "x",
                                                      tau = 0.5, estimate = 1)))
 })
+
+test_that("wise_reactable_csv_button wires the client-side export call", {
+  btn <- wise_reactable_csv_button("ss-hh_stats", "survey_summary_hh")
+  html <- as.character(shiny::HTML(as.character(btn)))
+  # The browser decodes &quot; in the onclick attribute back to quotes, so
+  # the executed call is Reactable.downloadDataCSV("ss-hh_stats", "...csv").
+  expect_match(
+    html,
+    paste0(
+      'Reactable.downloadDataCSV(&quot;ss-hh_stats&quot;, ',
+      '&quot;survey_summary_hh.csv&quot;)'
+    ),
+    fixed = TRUE
+  )
+  expect_match(html, "wise-csv-btn", fixed = TRUE)
+})

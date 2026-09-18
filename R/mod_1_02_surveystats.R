@@ -99,29 +99,73 @@ mod_1_02_surveystats_server <- function(
         session, shiny::isolate(survey_data()), survey_data_generation()
       )
     })
+    # Monthly interview counts for the timing-of-interviews chart: aggregated
+    # once per published survey frame and read by the on-screen echarts
+    # render and the export figure, so neither re-aggregates on redraws.
+    interview_summary <- shiny::reactive({
+      summarise_interview_dates(survey_data())
+    })
     # Completion generation used by the automatic configuration pipeline.
     # Cached requests count as successful completions; failed requests do not.
     load_done <- shiny::reactiveVal(0L)
     load_status <- shiny::reactiveVal("idle")
     # Per-H3-cell counts and mapped-location count behind the density map,
-    # recomputed together for whichever wave the picker is on.
-    density_cells <- function(wave = "all") {
+    # recomputed together for whichever wave the picker is on. The wave-keyed
+    # allocation (PERF-43) runs once per load in density_waves(); a toggle
+    # re-slices its per-wave cells instead of re-running the grouped passes.
+    density_waves <- shiny::reactive({
       cd <- cell_data()
       df <- survey_data()
       if (is.null(cd) || is.null(df)) {
         return(NULL)
       }
-
-      density <- .density_cell_summary(
-        filter_by_wave(cd$map, wave), filter_by_wave(df, wave)
-      )
-      if (is.null(density)) {
+      .density_wave_summary(cd$map, df)
+    })
+    density_cells <- function(wave = "all") {
+      dw <- density_waves()
+      cd <- cell_data()
+      if (is.null(dw) || is.null(cd)) {
         return(NULL)
       }
 
-      density$cells <- dplyr::inner_join(cd$geom, density$cells, by = "h3") |>
-        dplyr::filter(!is.na(geom), nchar(geom) > 2)
-      density
+      cells <- if (identical(wave, "all")) {
+        # Pooled selection: row-sum the per-wave cells (same values as one
+        # allocation pass over the full mapping, within rounding).
+        g_h3 <- collapse::GRP(dw$cells, by = "h3")
+        n_units <- collapse::fsum(dw$cells$n_units, g = g_h3, na.rm = TRUE)
+        n_units[is.na(n_units)] <- 0
+        data.frame(
+          h3 = as.character(g_h3$groups$h3),
+          n_units = as.numeric(n_units),
+          stringsAsFactors = FALSE
+        )
+      } else {
+        d <- dw$cells[dw$cells$wave %in% wave, c("h3", "n_units"), drop = FALSE]
+        rownames(d) <- NULL
+        d
+      }
+
+      # Per-cell bounds ride along for the payload's fit bounds. Only the bbox
+      # columns are joined: the browser decodes geometry from cell ids, so the
+      # geometry strings never enter the density payload path.
+      bbox_cols <- intersect(
+        c("h3", "xmin", "ymin", "xmax", "ymax"), names(cd$geom)
+      )
+      if (length(bbox_cols) > 1L && nrow(cells)) {
+        cells <- dplyr::inner_join(
+          cd$geom[, bbox_cols, drop = FALSE], cells, by = "h3"
+        )
+      }
+
+      n_loc <- if (identical(wave, "all")) {
+        # A location belongs to exactly one wave, so the pooled count is the
+        # sum of the per-wave counts.
+        as.integer(sum(dw$n_locations))
+      } else {
+        as.integer(unname(dw$n_locations[wave]) %||% 0L)
+      }
+
+      list(cells = cells, n_locations = n_loc)
     }
     # Cell geometry plus the location-to-cell mapping, shared with the outcome
     # and weather maps so they can merge overlapping locations onto cells.
@@ -137,12 +181,13 @@ mod_1_02_surveystats_server <- function(
     # sample's extent.
     map_data_version <- shiny::reactiveVal(0L)
 
-    # Shared stats base (PERF-40) ----
+    # Shared stats base (PERF-40 / PERF-42) ----
     # Every summary-stats table on the tab summarises the same survey frame;
-    # six independent renderDT pipelines each re-subset it and re-run the
-    # grouped collapse passes over their own var set on every load (~5s at
-    # Iran scale). One pass over the union of table variables feeds every
-    # table by row-filtering via make_stats_dt(base = ).
+    # one pass over the union of table variables feeds every table: the
+    # grouped collapse for the aggregate (PERF-40) and, since PERF-42, the
+    # entire display pipeline (missingness join, labels, N filter, sort,
+    # renames, wrapping) so each table render is a row subset of a polished
+    # frame. Exports slice the same frame, unrounded.
     policy_vars <- unique(unlist(lapply(POLICY_DEFINITIONS, `[[`, "vars")))
 
     stats_base <- reactive({
@@ -162,15 +207,7 @@ mod_1_02_surveystats_server <- function(
       if (!length(union_vars)) {
         return(NULL)
       }
-      list(
-        vars = union_vars,
-        summary = weighted_summary_long(sd, vars = union_vars),
-        missing = if ("countryyear" %in% names(sd)) {
-          survey_missingness_long(sd, vars = union_vars)
-        } else {
-          NULL
-        }
-      )
+      stats_display_base(sd, vl, union_vars)
     })
 
     # Load and prepare data on button click ----
@@ -403,34 +440,35 @@ mod_1_02_surveystats_server <- function(
 
         if (!survey_tab_added()) {
           # Interview dates bar chart. Grouped columns keep wave totals directly
-          # comparable; plot_interview_dates() also exposes faceted and heatmap
-          # variants for static outputs and design comparisons.
-          interview_date_fig <- function() {
+          # comparable; the static ggplot renderer (plot_interview_dates)
+          # remains available for design comparisons.
+          interview_date_chart <- function() {
             unit <- if (is.function(analysis_unit)) analysis_unit() else NULL
             unit_label <- switch(unit %||% "hh",
               ind = "Individuals",
               firm = "Firms",
               "Households"
             )
-            plot_interview_dates(
-              summarise_interview_dates(survey_data()),
+            echart_interview_dates(
+              interview_summary(),
               unit_label = unit_label,
               palette = "sequential",
-              wave_labels = survey_wave_meta()$plot_labels
+              wave_labels = survey_wave_meta()$plot_labels,
+              height = "300px"
             )
           }
 
-          output$interview_date <- renderPlot({
-            p <- interview_date_fig()
-            req(!is.null(p))
-            p
+          output$interview_date <- echarts4r::renderEcharts4r({
+            ch <- interview_date_chart()
+            req(!is.null(ch))
+            ch
           })
 
           wise_export_figure(
             key = "interview_dates",
             label = "Interview dates",
             step = 1L,
-            fun = interview_date_fig,
+            fun = interview_date_chart,
             description = paste(
               "When the selected surveys were fielded, by month - the calendar",
               "window the weather aggregation is matched against."
@@ -530,19 +568,19 @@ mod_1_02_surveystats_server <- function(
             )
           })
 
-          output$outcome_stats <- make_stats_dt(survey_data, variable_list, "outcome",
+          output$outcome_stats <- make_stats_reactable(survey_data, variable_list, "outcome",
             base = stats_base
           )
-          output$ind_stats <- make_stats_dt(survey_data, variable_list, "ind",
+          output$ind_stats <- make_stats_reactable(survey_data, variable_list, "ind",
             base = stats_base
           )
-          output$hh_stats <- make_stats_dt(survey_data, variable_list, "hh",
+          output$hh_stats <- make_stats_reactable(survey_data, variable_list, "hh",
             base = stats_base
           )
-          output$firm_stats <- make_stats_dt(survey_data, variable_list, "firm",
+          output$firm_stats <- make_stats_reactable(survey_data, variable_list, "firm",
             base = stats_base
           )
-          output$area_stats <- make_stats_dt(survey_data, variable_list, "area",
+          output$area_stats <- make_stats_reactable(survey_data, variable_list, "area",
             base = stats_base
           )
 
@@ -582,6 +620,7 @@ mod_1_02_surveystats_server <- function(
           # Only show characteristic tables relevant to the selected level of
           # analysis: individual level implies household + area also apply;
           # household level implies area also applies; firm level is separate.
+          # Each table carries its client-side CSV download button (§6).
           output$characteristic_tables_ui <- renderUI({
             unit <- if (is.function(analysis_unit)) analysis_unit() else NULL
             show_ind <- is.null(unit) || unit == "ind"
@@ -593,32 +632,48 @@ mod_1_02_surveystats_server <- function(
                 tagList(
                   h4("Individual characteristics"),
                   p(class = "text-muted small", "Summary statistics for individual-level variables"),
-                  DT::DTOutput(ns("ind_stats"))
+                  shiny::tags$div(
+                    class = "wise-reactable-controls",
+                    wise_reactable_csv_button(ns("ind_stats"), "survey_summary_ind")
+                  ),
+                  reactable::reactableOutput(ns("ind_stats"))
                 )
               },
               if (show_hh) {
                 tagList(
                   h4("Household characteristics"),
                   p(class = "text-muted small", "Summary statistics for household-level variables"),
-                  DT::DTOutput(ns("hh_stats"))
+                  shiny::tags$div(
+                    class = "wise-reactable-controls",
+                    wise_reactable_csv_button(ns("hh_stats"), "survey_summary_hh")
+                  ),
+                  reactable::reactableOutput(ns("hh_stats"))
                 )
               },
               if (show_firm) {
                 tagList(
                   h4("Firm characteristics"),
                   p(class = "text-muted small", "Summary statistics for firm-level variables"),
-                  DT::DTOutput(ns("firm_stats"))
+                  shiny::tags$div(
+                    class = "wise-reactable-controls",
+                    wise_reactable_csv_button(ns("firm_stats"), "survey_summary_firm")
+                  ),
+                  reactable::reactableOutput(ns("firm_stats"))
                 )
               },
               h4("Area characteristics"),
               p(class = "text-muted small", "Summary statistics for area-level variables"),
-              DT::DTOutput(ns("area_stats"))
+              shiny::tags$div(
+                class = "wise-reactable-controls",
+                wise_reactable_csv_button(ns("area_stats"), "survey_summary_area")
+              ),
+              reactable::reactableOutput(ns("area_stats"))
             )
           })
 
           # Selection summary card (replaces the old DT table) ----
           # Binds live to selected_surveys()/analysis_unit() so the card follows
-          # the sidebar selection, like the DT table it replaces.
+          # the sidebar selection.
 
           wise_export_table(
             key = "survey_summary_policy",
@@ -655,21 +710,6 @@ mod_1_02_surveystats_server <- function(
             )
           )
 
-          output$selected_surveys <- DT::renderDT(
-            {
-              req(selected_surveys())
-              selected_surveys_df()
-            },
-            rownames = FALSE,
-            extensions = "Buttons",
-            options = list(
-              dom = wise_csv_dom("t"), paging = FALSE,
-              searching = FALSE, info = FALSE,
-              buttons = wise_csv_button("selected_surveys")
-            ),
-            class = "compact"
-          )
-
           output$selected_surveys_card <- renderUI({
             ss <- selected_surveys()
             req(nrow(ss) > 0)
@@ -702,7 +742,7 @@ mod_1_02_surveystats_server <- function(
             )
           })
 
-          output$policy_stats <- make_stats_dt(survey_data, variable_list,
+          output$policy_stats <- make_stats_reactable(survey_data, variable_list,
             vars = policy_vars,
             base = stats_base
           )
@@ -733,8 +773,8 @@ mod_1_02_surveystats_server <- function(
                           p("Monthly breakdown of interview waves.")
                         )
                       ),
-                      wise_plot_output(ns("interview_date"),
-                        "Bar plot of the distribution of interview dates across the selected surveys",
+                      wise_chart_output(ns("interview_date"),
+                        "Bar chart of the distribution of interview dates across the selected surveys",
                         height = "300px"
                       )
                     )
@@ -804,10 +844,18 @@ mod_1_02_surveystats_server <- function(
                   )
                 ),
                 p(class = "text-muted small", "Candidate outcome variables for welfare analysis"),
-                DT::DTOutput(ns("outcome_stats")),
+                shiny::tags$div(
+                  class = "wise-reactable-controls",
+                  wise_reactable_csv_button(ns("outcome_stats"), "survey_summary_outcome")
+                ),
+                reactable::reactableOutput(ns("outcome_stats")),
                 h4("Policy variables"),
                 p(class = "text-muted small", "Variables that can be adjusted in Step 3 policy scenarios"),
-                DT::DTOutput(ns("policy_stats")),
+                shiny::tags$div(
+                  class = "wise-reactable-controls",
+                  wise_reactable_csv_button(ns("policy_stats"), "survey_summary_policy")
+                ),
+                reactable::reactableOutput(ns("policy_stats")),
                 uiOutput(ns("characteristic_tables_ui"))
               ),
               select = TRUE,

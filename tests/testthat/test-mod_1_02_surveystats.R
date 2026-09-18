@@ -260,6 +260,64 @@ test_that("density cells share mapped-location counts with the payload", {
   )
 })
 
+test_that("PERF-43: wave toggles re-slice the density prep without recompute", {
+  prep_calls <- 0L
+  local_mocked_bindings(
+    .density_wave_summary = function(cell_map, survey_data) {
+      prep_calls <<- prep_calls + 1L
+      list(
+        cells = data.frame(
+          wave = "TST|2021|SRV", h3 = c("a", "b"), n_units = c(2.5, 0.5)
+        ),
+        n_locations = stats::setNames(2L, "TST|2021|SRV")
+      )
+    }
+  )
+
+  shiny::testServer(
+    mod_1_02_surveystats_server,
+    args = list(
+      id                = "ss",
+      connection_params = shiny::reactiveVal(list()),
+      variable_list     = shiny::reactiveVal(data.frame()),
+      selected_surveys  = shiny::reactiveVal(make_selected_surveys_fixture()),
+      cpi_ppp            = shiny::reactiveVal(data.frame()),
+      tabset_id         = "step1_tabs"
+    ),
+    {
+      survey_data(data.frame(
+        code = "TST", year = "2021", survname = "SRV",
+        loc_id = c("L1", "L1", "L2")
+      ))
+      cell_data(list(
+        geom = data.frame(
+          h3 = c("a", "b"), geom = c("{a}", "{b}"),
+          xmin = 0, ymin = 0, xmax = 1, ymax = 1
+        ),
+        map = data.frame(
+          code = "TST", year = 2021L, survname = "SRV",
+          loc_id = "L1", h3 = "a", pop_2020 = 1
+        )
+      ))
+
+      d_all <- density_cells("all")
+      expect_equal(d_all$cells$h3, c("a", "b"))
+      expect_equal(d_all$n_locations, 2L)
+      d_wave <- density_cells("TST|2021|SRV")
+      expect_equal(d_wave$cells$n_units, c(2.5, 0.5))
+      # The prep ran once for both reads.
+      expect_equal(prep_calls, 1L)
+
+      # A new published load invalidates the prep (survey_data value change).
+      sd2 <- survey_data()
+      sd2$probe <- 1L
+      publish_new_survey_data(sd2)
+      density_cells("all")
+      expect_equal(prep_calls, 2L)
+    }
+  )
+})
+
 test_that("an unmet survey prerequisite releases the load guard", {
   selected <- shiny::reactiveVal(NULL)
   shiny::testServer(

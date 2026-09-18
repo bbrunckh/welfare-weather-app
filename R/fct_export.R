@@ -828,10 +828,18 @@ pipeline_runner <- function(triggers, results, on_state = NULL,
   # Figures: ggplot objects render through ggsave with the ragg AGG device -
   # the same renderer the on-screen plots use (shiny.useragg), so fonts and
   # antialiasing in the PNG match what the user saw, and ragg is faster than
-  # the grDevices cairo path. Anything else is skipped rather than guessed at.
+  # the grDevices cairo path. echarts4r widgets render through a headless
+  # browser (htmlwidgets -> standalone HTML -> webshot2 screenshot), which is
+  # exactly the canvas ECharts paints on screen. Anything else is skipped
+  # rather than guessed at.
   tryCatch(
     {
-      if (inherits(value, "ggplot")) {
+      if (inherits(value, "echarts4r")) {
+        res <- .export_write_echarts(value, path, item)
+        if (res$status %in% c("error", "skipped")) {
+          return(res)
+        }
+      } else if (inherits(value, "ggplot")) {
         ggplot2::ggsave(path,
           plot = value, width = item$width,
           height = item$height, dpi = 150, bg = "white",
@@ -841,6 +849,51 @@ pipeline_runner <- function(triggers, results, on_state = NULL,
         return(NULL)
       }
       list(status = "ok", rows = NA_integer_, cols = NA_integer_)
+    },
+    error = function(e) {
+      if (file.exists(path)) unlink(path)
+      fail(conditionMessage(e))
+    }
+  )
+}
+
+# Render one echarts4r widget to PNG through a headless browser
+#
+# The widget is written to a standalone HTML file (animation disabled so the
+# first paint is the final state), loaded in Chromium via webshot2, and
+# captured at the registry item's figure size (inches at the same 150 dpi the
+# ggplot path uses). Requires webshot2 and a Chrome/Chromium binary; when
+# either is unavailable the figure is skipped with a note - one missing
+# capability costs that figure, not the bundle.
+#
+#' @param value An echarts4r widget.
+#' @param path  Destination PNG path.
+#' @param item  Registry item (width/height in inches).
+#' @noRd
+.export_write_echarts <- function(value, path, item) {
+  fail <- function(msg) list(status = "error", note = msg)
+  skip <- function(msg) list(status = "skipped", note = msg)
+  if (!requireNamespace("htmlwidgets", quietly = TRUE)) {
+    return(skip("htmlwidgets is not installed"))
+  }
+  if (!requireNamespace("webshot2", quietly = TRUE)) {
+    return(skip("PNG export of echarts figures needs the webshot2 package"))
+  }
+
+  tryCatch(
+    {
+      value$x$opts$animation <- FALSE
+      html <- tempfile(fileext = ".html")
+      htmlwidgets::saveWidget(value, html)
+      webshot2::webshot(html, path,
+        vwidth = max(round(item$width * 150), 1L),
+        vheight = max(round(item$height * 150), 1L),
+        delay = 1.5, quiet = TRUE
+      )
+      if (!file.exists(path)) {
+        return(fail("the headless browser did not produce a PNG"))
+      }
+      list(status = "ok")
     },
     error = function(e) {
       if (file.exists(path)) unlink(path)
@@ -1127,7 +1180,9 @@ wise_export_readme <- function(entries, provenance = list(), config = list(),
     "## Notes", "",
     paste(
       "- Figures are PNG renders at fixed per-figure dimensions, not the",
-      "on-screen plot size; text rendering matches what the app shows."
+      "on-screen plot size: ggplot figures render through the AGG device,",
+      "echarts figures through a headless browser, so text rendering matches",
+      "what the app shows."
     ),
     paste(
       "- Data CSVs carry the raw values behind the display at full double",

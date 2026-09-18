@@ -442,6 +442,25 @@ wise_plot_output <- function(plot_id, alt, ...) {
   )
 }
 
+#' Accessible echarts output (UI-36 analogue)
+#'
+#' `echarts4rOutput()` has no intrinsic alt text. This wrapper adds
+#' `role="img"` and a descriptive `aria-label` on the chart's own container,
+#' so screen readers announce what the chart shows.
+#'
+#' @param chart_id Namespaced output id for the chart.
+#' @param alt      Descriptive text: what the chart shows.
+#' @param ...      Forwarded to `echarts4r::echarts4rOutput()` (height, ...).
+#'
+#' @noRd
+wise_chart_output <- function(chart_id, alt, ...) {
+  shiny::tagAppendAttributes(
+    echarts4r::echarts4rOutput(chart_id, ...),
+    role = "img",
+    `aria-label` = alt
+  )
+}
+
 #' Toggle button + anchored config flyout panel
 #'
 #' Shared builder for the Step 1/2 config sidebars' disclosure panels
@@ -771,6 +790,33 @@ csv_download_link <- function(output_id, label = "Download CSV") {
     output_id,
     label = shiny::tagList(shiny::icon("download"), label),
     class = "wise-csv-btn wise-csv-link"
+  )
+}
+
+#' Client-side "Download CSV" button for a reactable table (guidelines §6)
+#'
+#' reactable tables export through the browser: the button calls
+#' `Reactable.downloadDataCSV()` on the table's element id, so the download
+#' never round-trips the server. Pairs with a `renderReactable()` output
+#' whose widget id equals `table_id` (the id of the matching
+#' `reactableOutput()`).
+#'
+#' @param table_id Namespaced id of the `reactableOutput()` this button
+#'   downloads from.
+#' @param filename Base name of the downloaded file, without extension.
+#'
+#' @return A `button` tag styled as `.wise-csv-btn` (custom.css).
+#' @noRd
+wise_reactable_csv_button <- function(table_id, filename) {
+  shiny::tags$button(
+    type = "button",
+    class = "wise-csv-btn",
+    onclick = sprintf(
+      "Reactable.downloadDataCSV(%s, %s)",
+      jsonlite::toJSON(table_id, auto_unbox = TRUE),
+      jsonlite::toJSON(paste0(filename, ".csv"), auto_unbox = TRUE)
+    ),
+    shiny::tagList(shiny::icon("download"), "Download CSV")
   )
 }
 

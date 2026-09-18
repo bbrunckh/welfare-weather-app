@@ -230,6 +230,163 @@ welfare_poverty_lines <- function() {
 
 # Interview date bar chart ----
 
+# Ordered waves and display labels behind the interview-date chart. Shared by
+# the ggplot renderer (plot_interview_dates) and the echarts4r renderer
+# (echart_interview_dates), so the two can never drift apart.
+#' @param plot_data The summarise_interview_dates() frame.
+#' @param wave_labels Optional named character vector replacing wave labels.
+#' @return A list with `waves` (ordered countryyear keys) and `display`
+#'   (labels shown in legend/facets).
+#' @noRd
+.interview_wave_info <- function(plot_data, wave_labels = NULL) {
+  waves <- unique(as.character(plot_data$countryyear))
+  wave_info <- data.frame(
+    countryyear = waves,
+    year = suppressWarnings(as.integer(sub(
+      ".*,[[:space:]]*", "", waves
+    ))),
+    economy = vapply(waves, function(wave) {
+      as.character(plot_data$economy[
+        match(wave, as.character(plot_data$countryyear))
+      ])[1L]
+    }, character(1)),
+    stringsAsFactors = FALSE
+  )
+  wave_info$economy[is.na(wave_info$economy) |
+    !nzchar(wave_info$economy)] <- "Unknown"
+  wave_info <- wave_info[order(
+    wave_info$economy,
+    is.na(wave_info$year),
+    wave_info$year,
+    wave_info$countryyear
+  ), , drop = FALSE]
+  waves <- wave_info$countryyear
+  display_waves <- waves
+  if (!is.null(wave_labels)) {
+    mapped <- unname(wave_labels[waves])
+    keep <- !is.na(mapped) & nzchar(mapped)
+    display_waves[keep] <- mapped[keep]
+  }
+  list(waves = waves, display = display_waves)
+}
+
+# Wave palette behind the interview-date chart, shared by both renderers.
+#' @noRd
+.interview_wave_colors <- function(palette, waves) {
+  cols <- switch(palette,
+    sequential = .wave_palette(waves),
+    okabe_ito = stats::setNames(
+      c("#0072B2", "#009E73", "#E69F00", "#56B4E9", "#CC79A7"), waves
+    ),
+    wise = stats::setNames(
+      c("#0071BC", "#00AB51", "#FDB714", "#009FDA", "#5B6B79"), waves
+    ),
+    blue = stats::setNames(
+      c("#003B5C", "#0071BC", "#2C9CCB", "#78C6D0", "#B6DDE2"), waves
+    )
+  )
+  if (palette != "sequential") {
+    cols <- stats::setNames(rep(cols, length.out = length(waves)), waves)
+  }
+  cols
+}
+
+# Thousands-separated integer formatter injected into the chart's axes and
+# tooltip (scales::label_number(big.mark = ",") equivalent, client-side).
+#' @noRd
+.interview_count_fmt <- function() {
+  htmlwidgets::JS(paste0(
+    "function(v) { if (v == null || isNaN(v)) return ''; ",
+    "var s = Number(v).toFixed(0); ",
+    "return s.replace(/\\B(?=(\\d{3})+(?!\\d))/g, ','); }"
+  ))
+}
+
+#' Timing-of-interviews bar chart (echarts4r)
+#'
+#' The on-screen renderer for the monthly interview calendar: grouped bars,
+#' one series per survey wave, months fixed to Jan-Dec. Interaction (hover,
+#' legend toggling) runs entirely in the browser, so chart re-renders never
+#' touch the Shiny event loop. Shares wave ordering, display labels and the
+#' wave palette with [plot_interview_dates()], which remains the static
+#' renderer behind the ggplot-based export path.
+#'
+#' @param plot_data A data frame with columns `month_num` (integer 1-12),
+#'   `hh` (numeric count), `economy` (character), and `countryyear`
+#'   (character), as returned by `summarise_interview_dates()`.
+#' @param unit_label Y-axis noun for the observation unit ("Households",
+#'   "Individuals", "Firms").
+#' @param wave_labels Optional named character vector replacing wave labels.
+#' @param palette Fill palette (see [plot_interview_dates()]).
+#' @param height Widget height; a CSS length or a number of pixels.
+#'
+#' @return An `echarts4r` widget, or `NULL` invisibly when `plot_data` is
+#'   `NULL` or has zero rows.
+#'
+#' @export
+echart_interview_dates <- function(plot_data,
+                                   unit_label = "Households",
+                                   wave_labels = NULL,
+                                   palette = c("sequential", "okabe_ito", "wise", "blue"),
+                                   height = "300px") {
+  if (is.null(plot_data) || nrow(plot_data) == 0 ||
+    !all(c("countryyear", "month_num", "hh") %in% names(plot_data))) {
+    return(invisible(NULL))
+  }
+  palette <- match.arg(palette)
+  unit_label <- as.character(unit_label)[1L]
+  if (is.na(unit_label) || !nzchar(unit_label)) unit_label <- "Observations"
+
+  info <- .interview_wave_info(plot_data, wave_labels)
+  waves <- info$waves
+  cols <- unname(.interview_wave_colors(palette, waves))
+
+  # One row per (wave, month) with zero-filled months, so every series covers
+  # the same 12 categories (the ggplot scale_x_discrete(drop = FALSE) parity).
+  month_labels <- c(
+    "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+    "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
+  )
+  grid <- expand.grid(
+    countryyear = waves,
+    month_num = 1:12,
+    stringsAsFactors = FALSE
+  )
+  grid <- merge(grid, plot_data[, c("countryyear", "month_num", "hh")],
+    all.x = TRUE
+  )
+  grid$hh[is.na(grid$hh)] <- 0
+  grid$month <- factor(month_labels[grid$month_num], levels = month_labels)
+  # Series (and legend entries) appear in first-appearance order, so the
+  # display-labelled wave factor fixes both.
+  grid$wave <- factor(
+    info$display[match(grid$countryyear, waves)],
+    levels = info$display
+  )
+  grid <- grid[order(grid$wave, grid$month_num), ]
+
+  fmt <- .interview_count_fmt()
+
+  grid |>
+    echarts4r::group_by(wave) |>
+    echarts4r::e_charts(month, height = height) |>
+    echarts4r::e_bar(hh) |>
+    echarts4r::e_color(cols) |>
+    echarts4r::e_legend(orient = "horizontal", left = 0, top = 0) |>
+    echarts4r::e_x_axis(
+      axisLabel = list(interval = 0L, fontSize = 11),
+      axisTick = list(alignWithLabel = TRUE)
+    ) |>
+    echarts4r::e_y_axis(name = unit_label, axisLabel = list(formatter = fmt)) |>
+    echarts4r::e_tooltip(
+      trigger = "axis",
+      axisPointer = list(type = "shadow"),
+      valueFormatter = fmt
+    ) |>
+    echarts4r::e_grid(containLabel = TRUE, left = 8, right = 14, top = 42, bottom = 8)
+}
+
+
 #' Plot timing of survey interviews by month.
 #'
 #' @param plot_data A data frame with columns `month_num` (integer 1-12),
@@ -276,50 +433,11 @@ plot_interview_dates <- function(plot_data,
     levels = 1:12,
     labels = month_labels
   )
-  waves <- unique(as.character(plot_data$countryyear))
-  wave_info <- data.frame(
-    countryyear = waves,
-    year = suppressWarnings(as.integer(sub(
-      ".*,[[:space:]]*", "", waves
-    ))),
-    economy = vapply(waves, function(wave) {
-      as.character(plot_data$economy[
-        match(wave, as.character(plot_data$countryyear))
-      ])[1L]
-    }, character(1)),
-    stringsAsFactors = FALSE
-  )
-  wave_info$economy[is.na(wave_info$economy) |
-    !nzchar(wave_info$economy)] <- "Unknown"
-  wave_info <- wave_info[order(
-    wave_info$economy,
-    is.na(wave_info$year),
-    wave_info$year,
-    wave_info$countryyear
-  ), , drop = FALSE]
-  waves <- wave_info$countryyear
-  display_waves <- waves
-  if (!is.null(wave_labels)) {
-    mapped <- unname(wave_labels[waves])
-    keep <- !is.na(mapped) & nzchar(mapped)
-    display_waves[keep] <- mapped[keep]
-  }
+  info <- .interview_wave_info(plot_data, wave_labels)
+  waves <- info$waves
+  display_waves <- info$display
   plot_data$countryyear <- factor(plot_data$countryyear, levels = waves)
-  wave_cols <- switch(palette,
-    sequential = .wave_palette(waves),
-    okabe_ito = stats::setNames(
-      c("#0072B2", "#009E73", "#E69F00", "#56B4E9", "#CC79A7"), waves
-    ),
-    wise = stats::setNames(
-      c("#0071BC", "#00AB51", "#FDB714", "#009FDA", "#5B6B79"), waves
-    ),
-    blue = stats::setNames(
-      c("#003B5C", "#0071BC", "#2C9CCB", "#78C6D0", "#B6DDE2"), waves
-    )
-  )
-  if (palette != "sequential") {
-    wave_cols <- stats::setNames(rep(wave_cols, length.out = length(waves)), waves)
-  }
+  wave_cols <- .interview_wave_colors(palette, waves)
 
   if (variant == "heatmap") {
     return(
@@ -596,6 +714,98 @@ allocate_units_to_cells <- function(cell_map, survey_data) {
     cells = cells,
     n_locations = length(unique(loc_group))
   )
+}
+
+
+# Per-wave density allocation in one pass (PERF-43) ----
+# Same allocation rule as .density_cell_summary(), but the final h3 grouping
+# carries the survey wave. A location's keys include its wave, so the
+# allocation never crosses waves; the module therefore computes every wave's
+# cells once per load, and a wave toggle re-slices (or row-sums) this table
+# instead of re-running the grouped passes over the full mapping. The
+# pooled-all result is the sum of the per-wave cells within rounding.
+#' @param cell_map    Data frame with one row per location-cell pair.
+#' @param survey_data Survey observations with the location keys.
+#'
+#' @return A list with `cells` (wave, h3, n_units; one row per positive
+#'   wave-cell) and `n_locations` (named integer vector of mapped locations
+#'   per wave). NULL when the inputs cannot be combined.
+#' @noRd
+.density_wave_summary <- function(cell_map, survey_data) {
+  keys <- c("code", "year", "survname", "loc_id")
+  if (is.null(cell_map) || is.null(survey_data)) {
+    return(NULL)
+  }
+  if (!all(c(keys, "h3") %in% names(cell_map))) {
+    return(NULL)
+  }
+  if (!all(keys %in% names(survey_data))) {
+    return(NULL)
+  }
+
+  cm <- cell_map
+  cm$year <- as.character(cm$year)
+
+  sd <- survey_data
+  sd$year <- as.character(sd$year)
+
+  # One location grouping supplies both the survey counts and stable IDs that
+  # survive the duplicate-sensitive join onto the mapping rows.
+  g_loc <- collapse::GRP(sd, by = keys, group.sizes = TRUE)
+  n_loc <- g_loc$groups
+  n_loc$n_units <- as.integer(g_loc$group.sizes)
+  n_loc$.loc_group <- seq_len(g_loc$N.groups)
+
+  cm <- cm |>
+    dplyr::inner_join(n_loc, by = keys)
+  if (nrow(cm) == 0) {
+    return(NULL)
+  }
+
+  # Same spread-and-sum allocation as .density_cell_summary(): units across
+  # the cells a location covers, in proportion to pop_2020, falling back to
+  # an even split without usable weights.
+  has_pop <- "pop_2020" %in% names(cm)
+  loc_group <- cm$.loc_group
+  n_cells <- collapse::fsum(rep.int(1L, nrow(cm)),
+    g = loc_group,
+    TRA = "replace"
+  )
+  alloc <- if (has_pop) {
+    pop <- pmax(cm$pop_2020, 0, na.rm = TRUE)
+    pop_sum <- collapse::fsum(pop,
+      g = loc_group, na.rm = TRUE,
+      TRA = "replace"
+    )
+    use_pop <- pop_sum > 0
+    ifelse(use_pop, cm$n_units * pop / pop_sum, cm$n_units / n_cells)
+  } else {
+    cm$n_units / n_cells
+  }
+
+  # The wave key matches filter_by_wave()'s `code|year|survname` strings.
+  cm$wave <- paste(cm$code, cm$year, cm$survname, sep = "|")
+  g_h3 <- collapse::GRP(cm, by = c("wave", "h3"))
+  n_units <- collapse::fsum(alloc, g = g_h3, na.rm = TRUE)
+  # base::sum(..., na.rm = TRUE) semantics: zero for all-NA allocations.
+  n_units[is.na(n_units)] <- 0
+  cells <- data.frame(
+    wave = as.character(g_h3$groups$wave),
+    h3 = as.character(g_h3$groups$h3),
+    n_units = as.numeric(n_units),
+    stringsAsFactors = FALSE
+  )
+  cells <- cells[cells$n_units > 0, , drop = FALSE]
+  rownames(cells) <- NULL
+
+  # Mapped locations per wave: one distinct (wave, location) row each.
+  uq <- !duplicated(cm[, c("wave", ".loc_group")])
+  wave_lvls <- unique(cm$wave)
+  n_locations <- stats::setNames(
+    as.integer(table(factor(cm$wave[uq], levels = wave_lvls))), wave_lvls
+  )
+
+  list(cells = cells, n_locations = n_locations)
 }
 
 
@@ -1042,6 +1252,19 @@ stats_table_frame <- function(df, vl, flag_col = NULL, vars = NULL, base = NULL)
       dplyr::arrange(.data$variable, .data$countryyear)
   }
 
+  tab <- .stats_display_polish(tab)
+  tab
+}
+
+# Display transformations shared by stats_table_frame() and the one-pass
+# base (stats_display_base()): countryyear rename, capitalized column names,
+# HTML-escaped soft wrapping of text columns. One definition so the two
+# paths cannot drift apart.
+#' @param tab       The joined/filtered/sorted summary frame.
+#' @param skip_cols Column names excluded from text wrapping (the base's
+#'   hidden raw-name column).
+#' @noRd
+.stats_display_polish <- function(tab, skip_cols = character(0)) {
   # Column renaming ----
   if ("countryyear" %in% names(tab)) names(tab)[names(tab) == "countryyear"] <- "Country, Year"
 
@@ -1053,7 +1276,10 @@ stats_table_frame <- function(df, vl, flag_col = NULL, vars = NULL, base = NULL)
   }, character(1))
 
   wrap_width <- 28
-  text_cols <- names(tab)[vapply(tab, function(x) is.character(x) || is.factor(x), logical(1))]
+  text_cols <- setdiff(
+    names(tab)[vapply(tab, function(x) is.character(x) || is.factor(x), logical(1))],
+    skip_cols
+  )
   if (length(text_cols) > 0) {
     tab[text_cols] <- lapply(tab[text_cols], function(x) {
       x_chr <- as.character(x)
@@ -1062,15 +1288,114 @@ stats_table_frame <- function(df, vl, flag_col = NULL, vars = NULL, base = NULL)
           return(NA_character_)
         }
         # HTML-escape each wrapped line before joining with the literal
-        # <br> markup below (the table is rendered with escape = FALSE,
-        # so any unescaped data-derived text would render as raw HTML;
-        # see SEC-05).
+        # <br> markup below (the table is rendered with escape = FALSE /
+        # html = TRUE, so any unescaped data-derived text would render as
+        # raw HTML; see SEC-05).
         lines <- strwrap(s, width = wrap_width)
         paste(htmltools::htmlEscape(lines), collapse = "<br>")
       }, character(1))
     })
   }
 
+  tab
+}
+
+# One-pass display base (PERF-42) ----
+
+#' Build the post-processed display frame for all summary-stats tables at once
+#'
+#' Extension of the module's shared union aggregation (PERF-40): the entire
+#' display pipeline - wave missingness join, readable labels, N filter, sort,
+#' column renames and text wrapping - runs once over the union of table
+#' variables, and every table is then served by row-filtering this frame
+#' (stats_display_slice()). The per-table cost drops to a row subset, instead
+#' of repeating the joins, sort and per-cell wrapping for each of the module's
+#' seven tables on every load.
+#'
+#' The frame carries the raw variable names in a hidden `.var` column; the
+#' slice filters on it and drops it, so its output is identical to
+#' `stats_table_frame()` for the same variable set.
+#'
+#' @param df   A survey data frame.
+#' @param vl   A data frame with columns `name` and `label`.
+#' @param vars Character vector: the union of variables behind every table.
+#'
+#' @return A list with `vars` (the union) and `display` (the polished frame),
+#'   or NULL when no target variables survive.
+#' @noRd
+stats_display_base <- function(df, vl, vars) {
+  vars <- intersect(vars, names(df))
+  if (!length(vars)) {
+    return(NULL)
+  }
+
+  tab <- weighted_summary_long(df, vars = vars)
+  if (!nrow(tab)) {
+    return(NULL)
+  }
+
+  # Wave-specific missingness by countryyear and variable, one grouped pass.
+  if ("countryyear" %in% names(df)) {
+    tab <- tab |>
+      dplyr::left_join(survey_missingness_long(df, vars), by = c("countryyear", "variable"))
+  }
+
+  # Hidden raw-name column for slicing, then the readable label.
+  tab$.var <- tab$variable
+  lab_map <- vl[, c("name", "label"), drop = FALSE]
+  tab <- tab |>
+    dplyr::left_join(lab_map, by = c("variable" = "name")) |>
+    dplyr::mutate(variable = dplyr::coalesce(.data$label, .data$variable)) |>
+    dplyr::select(variable, .var, dplyr::everything(), -dplyr::any_of("label"))
+
+  if ("N" %in% names(tab)) {
+    tab <- tab |>
+      dplyr::filter(is.na(.data$N) | .data$N > 0) |>
+      dplyr::select(-dplyr::any_of("unweighted_mean"))
+  }
+
+  # Sorting once over the union: a row subset of a globally sorted frame is
+  # itself sorted, so slices need no re-sort.
+  if (all(c("variable", "countryyear") %in% names(tab))) {
+    tab <- tab |>
+      dplyr::arrange(.data$variable, .data$countryyear)
+  }
+
+  list(
+    vars = vars,
+    display = .stats_display_polish(tab, skip_cols = ".var")
+  )
+}
+
+#' Row-filter the shared display frame for one table
+#'
+#' @param base         The list returned by `stats_display_base()`.
+#' @param vl           Variable metadata (columns `name`, `label`).
+#' @param flag_col,vars Variable selection: `vars` wins over `flag_col`.
+#' @param round_digits Optional rounding applied to numeric display columns
+#'   (everything but `N`); NULL keeps full precision for the export path.
+#'
+#' @return The display-ready frame for one table, identical to
+#'   `stats_table_frame()` for the same variable set, or the `Note` frame
+#'   when no target variables are covered.
+#' @noRd
+stats_display_slice <- function(base, vl, flag_col = NULL, vars = NULL,
+                                round_digits = NULL) {
+  display <- base$display
+  target <- if (!is.null(vars)) vars else vl$name[vl[[flag_col]] == 1]
+  tab <- display[display$.var %in% target, , drop = FALSE]
+  tab$.var <- NULL
+  if (!nrow(tab)) {
+    tag <- flag_col %||% "specified"
+    return(data.frame(Note = paste("No", tag, "variables found")))
+  }
+  if (is.numeric(round_digits)) {
+    num <- setdiff(
+      names(tab)[vapply(tab, is.numeric, logical(1))], "N"
+    )
+    for (nm in num) tab[[nm]] <- round(tab[[nm]], round_digits)
+  }
+  rownames(tab) <- NULL
   tab
 }
 
@@ -1147,9 +1472,73 @@ make_stats_dt <- function(survey_data, variable_list, flag_col = NULL,
   })
 }
 
+#' Build a reactable summary table by variable group flag (guidelines §6)
+#'
+#' The reactable successor of `make_stats_dt()`: same data pipeline (shared
+#' one-pass display base via `build_stats_table()`), same 2-decimal display
+#' for numeric columns except `N`, same soft-wrapped text cells - but the
+#' pagination, search and sorting run client-side, so re-renders and
+#' interactions never touch the Shiny event loop. The per-table CSV download
+#' is a separate `wise_reactable_csv_button()` (client-side
+#' `Reactable.downloadDataCSV()`), exported from the raw values.
+#'
+#' @param survey_data,variable_list,flag_col,vars,base See `make_stats_dt()`.
+#'
+#' @return A `shiny.render.function` (from `reactable::renderReactable`).
+#' @export
+make_stats_reactable <- function(survey_data, variable_list, flag_col = NULL,
+                                 vars = NULL, base = NULL) {
+  reactable::renderReactable({
+    shiny::req(survey_data())
+    tab <- build_stats_table(survey_data, variable_list, flag_col, vars, base)
+    if (is.null(tab)) {
+      tag <- flag_col %||% "specified"
+      tab <- data.frame(Note = paste("No", tag, "variables found"))
+    }
+    .stats_reactable(tab)
+  })
+}
+
+# Shared reactable styling behind the summary-stats tables: compact rows,
+# soft-wrapped text cells (class in custom.css), 2-decimal numerics except
+# the raw integer N.
+#' @noRd
+.stats_reactable <- function(tab) {
+  cols <- lapply(names(tab), function(nm) {
+    x <- tab[[nm]]
+    if (is.numeric(x) && !identical(nm, "N")) {
+      reactable::colDef(
+        format = reactable::colFormat(digits = 2),
+        class = "wise-dt-wrap"
+      )
+    } else if (is.character(x) || is.factor(x)) {
+      reactable::colDef(
+        html = TRUE, class = "wise-dt-wrap", minWidth = 170
+      )
+    } else {
+      reactable::colDef(class = "wise-dt-wrap", minWidth = 70)
+    }
+  })
+  names(cols) <- names(tab)
+  reactable::reactable(
+    tab,
+    columns = cols,
+    compact = TRUE,
+    searchable = TRUE,
+    defaultPageSize = 10,
+    showPageSizeOptions = TRUE,
+    pageSizeOptions = c(10, 25, 50, 100),
+    highlight = TRUE
+  )
+}
+
 #' Build the summary-statistics data frame for export consumers
 #'
-#' Uses the optimization branch's shared aggregation base when supplied.
+#' Serves from the module's one-pass display base (PERF-42) when it covers
+#' the requested variables - identical output to the standalone
+#' `stats_table_frame()` path, at a row-filter's cost. Full precision is
+#' kept: the bundle CSVs carry unrounded values, unlike the on-screen
+#' tables' 2-decimal display.
 #'
 #' @noRd
 build_stats_table <- function(survey_data, variable_list, flag_col = NULL,
@@ -1169,6 +1558,13 @@ build_stats_table <- function(survey_data, variable_list, flag_col = NULL,
   base_value <- tryCatch(if (is.function(base)) base() else base,
     error = function(e) NULL
   )
+  target <- if (!is.null(vars)) vars else vl$name[vl[[flag_col]] == 1]
+  if (!is.null(base_value) && !is.null(base_value$display) &&
+    !is.null(base_value$vars) && all(target %in% base_value$vars)) {
+    return(stats_display_slice(base_value, vl,
+      flag_col = flag_col, vars = vars
+    ))
+  }
   tab <- stats_table_frame(df, vl,
     flag_col = flag_col, vars = vars,
     base = base_value

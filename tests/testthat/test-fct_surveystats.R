@@ -246,3 +246,80 @@ test_that("P8: survey-wave metadata preserves wave ordering and labels", {
   expect_identical(meta$plot_labels, wave_plot_labels(meta$waves))
   expect_identical(names(meta$plot_labels), meta$waves$label)
 })
+
+# ---- Interview-dates echarts renderer (guidelines §7) ------------------------
+
+test_that("echart_interview_dates builds one series per wave over 12 months", {
+  skip_if_not_installed("echarts4r")
+  d <- data.frame(
+    economy = rep("A", 4),
+    countryyear = rep(c("A, 2018", "A, 2021"), each = 2),
+    month_num = c(1L, 2L, 1L, 2L),
+    hh = c(10L, 15L, 12L, 9L)
+  )
+  ch <- echart_interview_dates(
+    d, unit_label = "Households",
+    wave_labels = c("A, 2018" = "Wave 18")
+  )
+  expect_s3_class(ch, "echarts4r")
+  expect_equal(length(ch$x$opts$series), 2L)
+  expect_equal(
+    vapply(ch$x$opts$series, function(s) s$name, character(1)),
+    c("Wave 18", "A, 2021")
+  )
+  expect_equal(length(ch$x$opts$xAxis[[1]]$data), 12L)
+  # Month categories align across series: both series cover all 12 months.
+  expect_equal(sapply(ch$x$opts$series, function(s) length(s$data)), c(12L, 12L))
+  expect_null(echart_interview_dates(NULL))
+})
+
+# ---- Wave-keyed density allocation (PERF-43) ---------------------------------
+
+make_density_fixture <- function() {
+  waves <- expand.grid(code = c("AAA", "BBB"), year = c("2020", "2021"), survname = "S")
+  cm <- do.call(rbind, lapply(seq_len(nrow(waves)), function(i) {
+    data.frame(
+      code = waves$code[i], year = waves$year[i], survname = waves$survname[i],
+      loc_id = paste0(waves$code[i], waves$year[i], "-L", rep(1:3, each = 2)),
+      h3 = paste0("h", 1:6), pop_2020 = c(NA, 5, 0, 2, 1, 4)
+    )
+  }))
+  sd <- do.call(rbind, lapply(seq_len(nrow(waves)), function(i) {
+    data.frame(
+      code = waves$code[i], year = waves$year[i], survname = waves$survname[i],
+      loc_id = rep(paste0(waves$code[i], waves$year[i], "-L", 1:3), c(2, 1, 3))
+    )
+  }))
+  list(cm = cm, sd = sd)
+}
+
+test_that("wave-keyed density allocation reproduces the per-wave reference", {
+  f <- make_density_fixture()
+  wav <- .density_wave_summary(f$cm, f$sd)
+  wl <- paste(f$cm$code, as.character(f$cm$year), f$cm$survname, sep = "|")
+  for (w in unique(wl)) {
+    ref <- .density_cell_summary(
+      filter_by_wave(f$cm, w), filter_by_wave(f$sd, w)
+    )
+    d <- wav$cells[wav$cells$wave == w, c("h3", "n_units"), drop = FALSE]
+    rownames(d) <- NULL
+    expect_identical(d$h3, ref$cells$h3, info = w)
+    expect_identical(d$n_units, ref$cells$n_units, info = w)
+    expect_identical(unname(wav$n_locations[w]), ref$n_locations, info = w)
+  }
+})
+
+test_that("pooled wave cells equal the full-mapping allocation within rounding", {
+  f <- make_density_fixture()
+  ref <- .density_cell_summary(f$cm, f$sd)
+  wav <- .density_wave_summary(f$cm, f$sd)
+  g <- collapse::GRP(wav$cells, by = "h3")
+  pooled <- data.frame(
+    h3 = as.character(g$groups$h3),
+    n_units = collapse::fsum(wav$cells$n_units, g = g, na.rm = TRUE)
+  )
+  expect_identical(pooled$h3, ref$cells$h3)
+  expect_equal(pooled$n_units, ref$cells$n_units, tolerance = 1e-9)
+  expect_identical(as.integer(sum(wav$n_locations)), ref$n_locations)
+  expect_null(.density_wave_summary(NULL, f$sd))
+})

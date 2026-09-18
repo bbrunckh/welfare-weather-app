@@ -179,3 +179,68 @@ test_that("make_stats_dt renders through a session with the shared base", {
     }
   )
 })
+
+# ---- One-pass display base (PERF-42) -----------------------------------------
+
+test_that("stats_display_base slice reproduces stats_table_frame exactly", {
+  df <- make_stats_df(); vl <- make_stats_vl()
+  union_vars <- intersect(c(
+    vl$name[vl$outcome == 1], vl$name[vl$hh == 1], "chr"
+  ), names(df))
+  base <- stats_display_base(df, vl, union_vars)
+
+  for (fc in c("hh", "outcome")) {
+    expect_identical(
+      stats_table_frame(df, vl, flag_col = fc),
+      stats_display_slice(base, vl, flag_col = fc),
+      label = paste("flag_col =", fc)
+    )
+  }
+  expect_identical(
+    stats_table_frame(df, vl, vars = c("x1", "x2")),
+    stats_display_slice(base, vl, vars = c("x1", "x2"))
+  )
+  # A table whose variables the base does not cover produces the note frame.
+  expect_identical(
+    stats_table_frame(df, vl, flag_col = "firm"),
+    stats_display_slice(base, vl, flag_col = "firm")
+  )
+  expect_null(stats_display_base(df, vl, character(0)))
+})
+
+test_that("stats_display_slice rounds display columns without touching N", {
+  df <- make_stats_df(); vl <- make_stats_vl()
+  union_vars <- intersect(c(vl$name[vl$outcome == 1], vl$name[vl$hh == 1]), names(df))
+  base <- stats_display_base(df, vl, union_vars)
+  raw <- stats_display_slice(base, vl, flag_col = "hh")
+  rounded <- stats_display_slice(base, vl, flag_col = "hh", round_digits = 2)
+
+  expect_identical(raw[["N"]], rounded[["N"]])
+  for (col in setdiff(names(raw), c("Variable", "Country, Year", "N"))) {
+    expect_identical(round(raw[[col]], 2), rounded[[col]], info = col)
+  }
+})
+
+test_that("make_stats_reactable renders through a session with the shared base", {
+  df <- make_stats_df(); vl <- make_stats_vl()
+  union_vars <- intersect(c(vl$name[vl$outcome == 1], vl$name[vl$hh == 1]), names(df))
+  base <- stats_display_base(df, vl, union_vars)
+
+  shiny::testServer(
+    function(input, output, session) {
+      output$tbl <- make_stats_reactable(
+        shiny::reactive(df), shiny::reactive(vl), "hh",
+        base = shiny::reactive(base)
+      )
+    },
+    {
+      # reactable sends the table data to the client; the payload carries the
+      # column names as data keys.
+      payload <- paste(jsonlite::toJSON(output$tbl, auto_unbox = TRUE),
+                       collapse = "")
+      expect_match(payload, "Variable", fixed = TRUE)
+      expect_match(payload, "Country, Year", fixed = TRUE)
+      expect_match(payload, "% Missing", fixed = TRUE)
+    }
+  )
+})
