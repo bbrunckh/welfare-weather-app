@@ -594,11 +594,19 @@
    left/top here is only the no-JS fallback. */
 
 /* bslib sets `display: contents` on conditionalPanels inside gap-spacing
-   containers, which destroys the flyout box entirely — restore it. Same
-   specificity as bslib's rule (two classes) but later in the cascade;
-   deliberately no !important so Shiny's inline display:none still hides it. */
+   containers, which destroys the flyout box entirely — restore it. */
 .shiny-panel-conditional.config-flyout {
   display: block;
+}
+
+/* Shiny ≥ 1.14 hides conditionalPanels with the shiny-conditional--shown
+   class ([data-display-if]:not(.shiny-conditional--shown) { display: none })
+   instead of inline styles, so the block rule above would otherwise pin the
+   flyout open. Re-state the hidden state at higher specificity. The base
+   block rule remains the shown-state/fallback for the inline-style
+   mechanism of shiny ≤ 1.13. */
+.shiny-panel-conditional.config-flyout:not(.shiny-conditional--shown) {
+  display: none;
 }
 
 .config-flyout-anchor.config-flyout-inline {
