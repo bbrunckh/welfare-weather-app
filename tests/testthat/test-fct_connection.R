@@ -6,6 +6,40 @@ test_that("build_connection_params returns correct list for local", {
   expect_equal(p$path, "/data/foo")
 })
 
+test_that("automatic connection parameters use the source selector", {
+  withr::local_envvar(
+    WISEAPP_DATA_SOURCE = "LOCAL",
+    WISEAPP_DATA_PATH = "/data/foo"
+  )
+  p <- auto_connection_params()
+  expect_identical(p, list(type = "local", path = "/data/foo"))
+})
+
+test_that("remote automatic parameters use standard provider variables", {
+  withr::local_envvar(
+    WISEAPP_DATA_SOURCE = "s3",
+    S3_BUCKET = "bucket",
+    S3_PREFIX = "prefix/",
+    S3_REGION = "eu-west-1",
+    AWS_ACCESS_KEY_ID = "key",
+    AWS_SECRET_ACCESS_KEY = "secret"
+  )
+  p <- auto_connection_params()
+  expect_equal(p[c("type", "bucket", "prefix", "region", "key_id", "secret")],
+               list(type = "s3", bucket = "bucket", prefix = "prefix/",
+                    region = "eu-west-1", key_id = "key", secret = "secret"))
+})
+
+test_that("automatic connection parameters are NULL when selector is unset", {
+  withr::local_envvar(WISEAPP_DATA_SOURCE = "")
+  expect_null(auto_connection_params())
+})
+
+test_that("automatic connection parameters reject an unknown source", {
+  withr::local_envvar(WISEAPP_DATA_SOURCE = "unsupported")
+  expect_error(auto_connection_params(), "Unknown connection type")
+})
+
 test_that("build_connection_params errors on unknown type", {
   expect_error(build_connection_params("unknown"), "Unknown connection type")
 })

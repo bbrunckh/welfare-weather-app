@@ -83,54 +83,11 @@ mod_0_overview_ui <- function(id) {
     )
   )
 
-  # On Posit Connect with Databricks env vars: skip the connection form
-  # entirely and just show the status badge - server auto-connects on startup.
-  data_card <- if (.auto_connect()) {
-    bslib::card(
-      class = "connect-card",
-      bslib::card_header(icon("database"), " Data"),
-      bslib::card_body(uiOutput(ns("connection_status_ui")))
-    )
-  } else {
-    bslib::card(
-      class = "connect-card",
-      bslib::card_header(icon("database"), " Data"),
-      bslib::card_body(
-        bslib::layout_columns(
-          col_widths = c(4, 8),
-          div(
-            div(
-              class = "connection-source-field",
-              tags$span("Source:", class = "connection-source-label"),
-              wave_toggle_slider(
-                ns("connection_type"),
-                choices = c(
-                  "Local folder" = "local",
-                  "Databricks" = "databricks",
-                  "GCS" = "gcs",
-                  "S3" = "s3"
-                ),
-                selected = "local"
-              )
-            ),
-            uiOutput(ns("connection_status_ui")),
-            div(
-              class = "connection-action-row",
-              actionButton(
-                ns("apply_connection"),
-                "Connect to data",
-                class = "btn-primary"
-              )
-            )
-          ),
-          div(
-            class = "connection-options-output",
-            uiOutput(ns("connection_options_ui"))
-          )
-        )
-      )
-    )
-  }
+  data_card <- bslib::card(
+    class = "connect-card",
+    bslib::card_header(icon("database"), " Data"),
+    bslib::card_body(uiOutput(ns("connection_card_ui")))
+  )
 
   overview_footer <- tags$footer(
     class = "overview-footer",
@@ -329,6 +286,46 @@ mod_0_overview_server <- function(id) {
     # no attempt yet). "Verified" means the metadata actually loaded; the
     # plain field check below only says "configured" (DEP-03).
     connection_status <- reactiveVal(NULL)
+    auto_connect_failed <- reactiveVal(FALSE)
+
+    output$connection_card_ui <- renderUI({
+      if (.auto_connect() && !isTRUE(auto_connect_failed())) {
+        return(uiOutput(ns("connection_status_ui")))
+      }
+
+      bslib::layout_columns(
+        col_widths = c(4, 8),
+        div(
+          div(
+            class = "connection-source-field",
+            tags$span("Source:", class = "connection-source-label"),
+            wave_toggle_slider(
+              ns("connection_type"),
+              choices = c(
+                "Local folder" = "local",
+                "Databricks" = "databricks",
+                "GCS" = "gcs",
+                "S3" = "s3"
+              ),
+              selected = "local"
+            )
+          ),
+          uiOutput(ns("connection_status_ui")),
+          div(
+            class = "connection-action-row",
+            actionButton(
+              ns("apply_connection"),
+              "Connect to data",
+              class = "btn-primary"
+            )
+          )
+        ),
+        div(
+          class = "connection-options-output",
+          uiOutput(ns("connection_options_ui"))
+        )
+      )
+    })
 
     output$connection_status_ui <- renderUI({
       st <- connection_status()
@@ -352,9 +349,9 @@ mod_0_overview_server <- function(id) {
           }
         ))
       }
-      if (.auto_connect()) {
+      if (.auto_connect() && !isTRUE(auto_connect_failed())) {
         return(p(
-          icon("spinner", class = "fa-spin"), " Connecting to Databricks...",
+          icon("spinner", class = "fa-spin"), " Connecting to data source...",
           style = "color: var(--bs-secondary); font-size: 0.87rem; margin: 0;"
         ))
       }
@@ -394,8 +391,8 @@ mod_0_overview_server <- function(id) {
       pov_lines(metadata$pov_lines)
     }
 
-    # On Posit Connect with env vars set: auto-connect once on startup,
-    # no button click or UI input required. Any failure (auth, network,
+    # With WISEAPP_DATA_SOURCE set: auto-connect once on startup, no button
+    # click or UI input required. Any failure (configuration, auth, network,
     # missing volume/metadata) rolls back and surfaces a visible error.
     # The metadata fetch runs on the shared mirai daemon (ExtendedTask, per
     # optimization guidelines §8) so the first session of a process never
@@ -406,23 +403,23 @@ mod_0_overview_server <- function(id) {
       observe({
         auto_connect_fail <- function(e) {
           msg <- conditionMessage(e)
-          message("[overview] auto-connect to Databricks failed: ", msg)
+          message("[overview] automatic data-source connection failed: ", msg)
+          auto_connect_failed(TRUE)
           # Persist the failure state before any transient UX: the status
           # card must update even if the notification itself fails (e.g.
           # session already closing — this handler also runs from promise
           # callbacks, where no default reactive domain is set).
-          applied_connection(NULL)
-          connection_status(list(
-            state = "error",
-            message = "Failed to connect to Databricks.",
-            detail = paste0(
-              msg, "\n\nCheck the DATABRICKS_HOST, DATABRICKS_CLIENT_ID, ",
-              "DATABRICKS_CLIENT_SECRET and DATABRICKS_VOLUME_PATH environment ",
-              "variables configured for this app on Posit Connect, then reload the app."
-            )
+            applied_connection(NULL)
+            connection_status(list(
+              state = "error",
+              message = "Failed to connect to the configured data source.",
+              detail = paste0(
+                msg, "\n\nCheck WISEAPP_DATA_SOURCE and its associated ",
+                "environment variables, then reload the app."
+              )
           ))
           showNotification(
-            paste("Auto-connect to Databricks failed:", msg),
+            paste("Automatic data-source connection failed:", msg),
             type = "error", duration = 15, session = session
           )
         }
@@ -436,14 +433,16 @@ mod_0_overview_server <- function(id) {
           # Expose the connection only after metadata succeeds.
           applied_connection(params)
           connection_status(list(
-            state = "connected", message = "Connected to Databricks.", detail = NULL
+            state = "connected",
+            message = paste0("Connected to ", params$type, " data source."),
+            detail = NULL
           ))
         }
 
         tryCatch(
           {
-            params <- build_connection_params("databricks")
-            message("[overview] auto-connecting to Databricks (Posit Connect)")
+            params <- auto_connection_params()
+            message("[overview] auto-connecting to ", params$type)
 
             async_ready <- tryCatch(
               .wise_step2_async_init(),

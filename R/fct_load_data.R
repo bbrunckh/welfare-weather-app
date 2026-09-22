@@ -215,9 +215,9 @@ collect_deterministic <- function(data, keys = NULL) {
   }
   con <- .duck_con()
 
-  # auto_connect() is a proxy for "running on Posit Connect"
-  # if it exists and returns TRUE, otherwise assume local environment
-  if (exists(".auto_connect") && .auto_connect()) {
+  # Posit Connect cannot reach the public extension repository, so use the
+  # bundled binary there. Automatic source selection is independent of this.
+  if (exists(".on_posit_connect") && .on_posit_connect()) {
     # Check for a bundled binary first (avoids any network call).
     # Prefer .gz (DuckDB INSTALL decompresses it automatically); fall back
     # to an uncompressed binary if present.

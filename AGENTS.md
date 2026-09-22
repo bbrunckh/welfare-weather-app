@@ -105,7 +105,7 @@ DuckDB is the unified query engine with extension-based storage support:
 | Backend | Required DuckDB Extension | Auth Method |
 |---------|---------------------------|-------------|
 | S3 | httpfs | AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY |
-| GCS | httpfs | GCS_KEY_ID / GCS_SECRET |
+| GCS | httpfs | GCS_ACCESS_KEY_ID / GCS_SECRET_ACCESS_KEY |
 | Azure | azure + delta | Account key or service principal |
 | Databricks | httpfs | OAuth2 M2M (DATABRICKS_HOST/CLIENT_ID/SECRET) |
 | Local | none | File paths |
@@ -138,14 +138,16 @@ See `fct_connection.R` and `fct_load_data.R` for implementation details.
 
 ## Deployment
 
-Target platform: **Posit Connect**. The app auto-detects Databricks credentials when running on Connect. See `dev/03_deploy.R` for deployment steps.
+Target platform: **Posit Connect**. Automatic startup data-source selection is controlled by `WISEAPP_DATA_SOURCE`; see the environment variables below and the deployment scripts for deployment steps.
 
 Key environment variables for production:
-- `WISEAPP_DATA_PATH` (for local data backend)
+- `WISEAPP_DATA_SOURCE` (automatic source selector: `local`, `s3`, `gcs`, `azure`, `hf`, or `databricks`)
+- `WISEAPP_DATA_PATH` (local data backend)
 - `DATABRICKS_HOST`, `DATABRICKS_CLIENT_ID`, `DATABRICKS_CLIENT_SECRET`, `DATABRICKS_VOLUME_PATH` (for Databricks backend)
-- `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` (for S3)
-- `GCS_KEY_ID`, `GCS_SECRET` (for Google Cloud Storage)
-- `AZURE_STORAGE_KEY` or `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET`, `AZURE_TENANT_ID` (for Azure)
+- `S3_BUCKET`, `S3_PREFIX`, `S3_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` (for S3)
+- `GCS_BUCKET`, `GCS_PREFIX`, `GCS_ACCESS_KEY_ID`, `GCS_SECRET_ACCESS_KEY` (for GCS)
+- `AZURE_STORAGE_ACCOUNT`, `AZURE_STORAGE_CONTAINER`, `AZURE_STORAGE_PREFIX`, `AZURE_STORAGE_KEY` or `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET`, `AZURE_TENANT_ID` (for Azure)
+- `HF_REPO`, `HF_SUBDIR` (for public Hugging Face datasets)
 
 ## Git Remotes
 

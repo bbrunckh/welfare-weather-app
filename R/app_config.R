@@ -23,13 +23,11 @@ get_golem_config <- function(
 
 # Deployment environment helpers ----
 
-#' TRUE when all four Databricks env vars are present
+#' Return the configured automatic data source, or `NULL` when unset.
 #' @noRd
-.databricks_env_configured <- function() {
-  nzchar(Sys.getenv("DATABRICKS_HOST")) &&
-    nzchar(Sys.getenv("DATABRICKS_CLIENT_ID")) &&
-    nzchar(Sys.getenv("DATABRICKS_CLIENT_SECRET")) &&
-    nzchar(Sys.getenv("DATABRICKS_VOLUME_PATH"))
+.data_source <- function() {
+  source <- tolower(trimws(Sys.getenv("WISEAPP_DATA_SOURCE", "")))
+  if (nzchar(source)) source else NULL
 }
 
 #' TRUE when deployed on Posit Connect
@@ -38,7 +36,6 @@ get_golem_config <- function(
   identical(Sys.getenv("RSTUDIO_PRODUCT"), "CONNECT")
 }
 
-#' TRUE when app should auto-connect to Databricks silently
-#' (Posit Connect deployment with all env vars set)
+#' TRUE when the app should automatically load its configured data source.
 #' @noRd
-.auto_connect <- function() .on_posit_connect() && .databricks_env_configured()
+.auto_connect <- function() !is.null(.data_source())

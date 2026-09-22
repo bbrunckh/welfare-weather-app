@@ -12,7 +12,7 @@
 #' }
 #' Blank UI inputs never shadow environment credentials (`%|||%`).
 #'
-#' @param type One of "local", "s3", "gcs", "azure", "hf"
+#' @param type One of "local", "s3", "gcs", "azure", "hf", "databricks"
 #' @param ... Named arguments specific to each type
 #' @return A named list of connection parameters
 #' @export
@@ -25,30 +25,34 @@ build_connection_params <- function(type, ...) {
   switch(type,
     "local" = list(type = "local", path = args$path %|||% Sys.getenv("WISEAPP_DATA_PATH")),
     "s3" = list(
-      type = "s3", bucket = args$s3_bucket %||% "",
-      prefix = args$s3_prefix %||% "", region = args$s3_region %||% "us-east-1",
+      type = "s3", bucket = args$s3_bucket %|||% Sys.getenv("S3_BUCKET"),
+      prefix = args$s3_prefix %|||% Sys.getenv("S3_PREFIX"),
+      region = {
+        value <- args$s3_region %|||% Sys.getenv("S3_REGION")
+        if (nzchar(value %||% "")) value else "us-east-1"
+      },
       key_id = args$s3_key_id %|||% Sys.getenv("AWS_ACCESS_KEY_ID"),
       secret = args$s3_secret %|||% Sys.getenv("AWS_SECRET_ACCESS_KEY")
     ),
     "gcs" = list(
-      type = "gcs", bucket = args$gcs_bucket %||% "",
-      prefix = args$gcs_prefix %||% "",
+      type = "gcs", bucket = args$gcs_bucket %|||% Sys.getenv("GCS_BUCKET"),
+      prefix = args$gcs_prefix %|||% Sys.getenv("GCS_PREFIX"),
       key_id = args$gcs_key_id %|||% Sys.getenv("GCS_ACCESS_KEY_ID"),
       secret = args$gcs_secret %|||% Sys.getenv("GCS_SECRET_ACCESS_KEY")
     ),
     "azure" = list(
       type = "azure",
-      account = args$azure_account %||% "",
-      container = args$azure_container %||% "",
-      prefix = args$azure_prefix %||% "",
-      key = args$azure_key %||% "",
+      account = args$azure_account %|||% Sys.getenv("AZURE_STORAGE_ACCOUNT"),
+      container = args$azure_container %|||% Sys.getenv("AZURE_STORAGE_CONTAINER"),
+      prefix = args$azure_prefix %|||% Sys.getenv("AZURE_STORAGE_PREFIX"),
+      key = args$azure_key %|||% Sys.getenv("AZURE_STORAGE_KEY"),
       client_id = args$azure_client_id %|||% Sys.getenv("AZURE_CLIENT_ID"),
       client_secret = args$azure_client_secret %|||% Sys.getenv("AZURE_CLIENT_SECRET"),
       tenant_id = args$azure_tenant_id %|||% Sys.getenv("AZURE_TENANT_ID")
     ),
     "hf" = list(
-      type = "hf", repo = args$hf_repo %||% "",
-      subdir = args$hf_subdir %||% ""
+      type = "hf", repo = args$hf_repo %|||% Sys.getenv("HF_REPO"),
+      subdir = args$hf_subdir %|||% Sys.getenv("HF_SUBDIR")
     ),
     "databricks" = list(
       type          = "databricks",
@@ -59,6 +63,21 @@ build_connection_params <- function(type, ...) {
     ),
     stop("Unknown connection type: ", type)
   )
+}
+
+#' Build connection parameters from the configured automatic data source
+#'
+#' `WISEAPP_DATA_SOURCE` selects the source; provider-specific fields are read
+#' from their standard environment variable names by `build_connection_params`.
+#'
+#' @return A named connection parameter list.
+#' @noRd
+auto_connection_params <- function() {
+  source <- tolower(trimws(Sys.getenv("WISEAPP_DATA_SOURCE", "")))
+  if (!nzchar(source)) {
+    return(NULL)
+  }
+  build_connection_params(source)
 }
 
 #' Validate a connection params list
