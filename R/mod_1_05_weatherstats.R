@@ -348,6 +348,7 @@ mod_1_05_weatherstats_server <- function(
 
               echart_weather_dist(
                 df, hv, sw$label[idx], sw$cont_binned[idx],
+                units = sw$units[idx],
                 hist_df = hist_cells(),
                 breaks = if (is.null(brks)) NULL else brks[[hv]],
                 year_from = if (is.null(yrs)) NULL else yrs[["from"]],
@@ -390,6 +391,7 @@ mod_1_05_weatherstats_server <- function(
 
               echart_weather_ridges_compare(
                 df, sw$name[idx], sw$label[idx],
+                units = sw$units[idx],
                 hist_df = hist_cells(),
                 year_from = if (is.null(yrs)) NULL else yrs[["from"]],
                 year_to = if (is.null(yrs)) NULL else yrs[["to"]],
@@ -438,7 +440,10 @@ mod_1_05_weatherstats_server <- function(
               echart_binscatter(
                 df       = df,
                 hv       = sw$name[idx],
-                hv_label = paste0(sw$label[idx], "\n(as configured)"),
+                hv_label = .weather_display_axis_label(
+                  sw$label[idx], sw$units[idx],
+                  binned = identical(as.character(sw$cont_binned[idx]), "Binned")
+                ),
                 y_var    = so$name,
                 y_label  = so$label,
                 height   = "300px"
@@ -694,23 +699,24 @@ mod_1_05_weatherstats_server <- function(
             }
 
             var_panel <- function(i) {
-              items <- list(wise_chart_output(
+              dist_output <- wise_chart_output(
                 ns(dist_ids[i]),
                 paste(
                   "Distribution of", sw$label[i],
                   "in the selected surveys and their climate history"
                 ),
                 height = "300px"
-              ))
-              if (is_binned(i)) {
-                items <- c(items, list(
+              )
+              items <- if (is_binned(i)) {
+                list(
                   shiny::helpText(
-                    paste(
-                      "Above: binned weather distribution as configured.",
-                      "Below: the continuous distribution the bins were",
-                      "derived from."
-                    ),
-                    style = "font-size: 12px;"
+                    "Binned weather distribution",
+                    style = "font-size: 12px; margin: 0;"
+                  ),
+                  dist_output,
+                  shiny::helpText(
+                    "Continuous distribution the bins were derived from",
+                    style = "font-size: 12px; margin: 0;"
                   ),
                   wise_chart_output(
                     ns(cont_ids[i]),
@@ -720,9 +726,14 @@ mod_1_05_weatherstats_server <- function(
                     ),
                     height = "300px"
                   )
-                ))
+                )
+              } else {
+                list(dist_output)
               }
-              do.call(bslib::card, items)
+              do.call(
+                bslib::card,
+                list(do.call(bslib::card_body, c(list(gap = 0), items)))
+              )
             }
 
             if (n_vars >= 2) {

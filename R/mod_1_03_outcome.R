@@ -302,6 +302,12 @@ mod_1_03_outcome_server <- function(id, variable_list, survey_data,
               outcome = as.character(inf$name[1]),
               label = as.character(inf$label[1]),
               type = as.character(inf$type[1]),
+              currency = as.character(spec$so$units[1] %||% "PPP"),
+              poverty_lines = if (identical(as.character(spec$so$units[1]), "LCU")) {
+                NULL
+              } else {
+                welfare_poverty_lines()
+              },
               wave_labels = survey_wave_meta()$plot_labels,
               height = "400px"
             )

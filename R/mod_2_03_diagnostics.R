@@ -1,8 +1,8 @@
 #' 2_03_diagnostics UI Function
 #'
 #' @description A shiny Module. Renders the Diagnostics tab content:
-#'   weather input density panel and welfare output ridge plots.
-#'   Consolidates the former mod_2_05_sim_diag.
+#'   weather input density panel, climate-model robustness, and weather-year
+#'   trajectory diagnostics. Consolidates the former mod_2_05_sim_diag.
 #'
 #' @param id Internal parameter for {shiny}.
 #'
@@ -115,7 +115,7 @@ mod_2_03_diagnostics_ui <- function(id) {
 #' 2_03_diagnostics Server Functions
 #'
 #' Appends a Diagnostics tab to the main tabset once the historical simulation
-#' has run. Weather density and welfare ridge panels refresh only when their
+#' has run. Weather density and simulation diagnostics refresh when their
 #' respective Update button is clicked.
 #'
 #' @param id               Module id.

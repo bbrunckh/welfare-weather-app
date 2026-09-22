@@ -488,6 +488,7 @@ echart_welfare_dist <- function(df,
                                 outcome = "welfare",
                                 label = NULL,
                                 type = "numeric",
+                                currency = "PPP",
                                 poverty_lines = welfare_poverty_lines(),
                                 wave_labels = NULL,
                                 height = "400px") {
@@ -537,27 +538,44 @@ echart_welfare_dist <- function(df,
     e$x$opts$xAxis <- list(
       type = "category",
       data = as.character(display_waves),
-      name = "Survey wave",
-      nameLocation = "middle", nameGap = 30,
-      nameTextStyle = wise_eaxis_name(align = "center"),
-      axisLabel = wise_eaxis_label(rotate = 30),
+      name = NULL,
+      axisLabel = wise_eaxis_label(rotate = 0),
       axisTick = list(alignWithLabel = TRUE),
       axisLine = list(lineStyle = list(color = .wise_grid)),
       splitLine = wise_esplit_line()
     )
-    outcome_nm <- if (!is.null(label) && nzchar(label)) label else outcome
-    y_title <- paste0("Share of observations (", outcome_nm, ")")
+    y_title <- if (identical(outcome, "poor") && !is.null(poverty_lines) &&
+      nrow(poverty_lines) > 0 && is.finite(poverty_lines$value[1L])) {
+      paste0(
+        "Poor ($",
+        formatC(poverty_lines$value[1L], format = "f", digits = 2),
+        "/day)"
+      )
+    } else {
+      outcome_nm <- if (!is.null(label) && nzchar(label)) label else outcome
+      outcome_nm
+    }
     e$x$opts$yAxis <- list(
       type = "value", min = 0, max = 1,
-      name = stringr::str_wrap(y_title, 40),
-      nameLocation = "end",
-      nameTextStyle = wise_eaxis_name(),
+      name = NULL,
       axisLabel = wise_eaxis_label(
         formatter = htmlwidgets::JS(
           "function(v){return Math.round(100*v)+'%';}"
         )
       ),
       splitLine = wise_esplit_line()
+    )
+    e$x$opts$title <- list(
+      text = stringr::str_wrap(y_title, 28),
+      left = 8,
+      top = 0,
+      textStyle = list(
+        color = .wise_charcoal,
+        fontSize = 13,
+        fontWeight = "normal",
+        align = "left",
+        verticalAlign = "top"
+      )
     )
     e$x$opts$series <- list(
       make_bar("No", "#D9EFF8"), make_bar("Yes", "#0071BC")
@@ -566,17 +584,40 @@ echart_welfare_dist <- function(df,
       right = 36, top = 0, orient = "horizontal"
     )
     e$x$opts$grid <- list(
-      containLabel = TRUE, left = 8, right = 14, top = 50, bottom = 46
-    )
-    e$x$opts$tooltip <- list(trigger = "axis", axisPointer = list(type = "shadow"))
+        containLabel = TRUE, left = 8, right = 14, top = 50, bottom = 46
+      )
+      e$x$opts$tooltip <- list(
+        trigger = "axis",
+        axisPointer = list(type = "shadow"),
+        formatter = htmlwidgets::JS(
+          "function(params){\n            var rows = [];\n            (params || []).forEach(function(p){\n              var value = Number(Array.isArray(p.value) ? p.value[0] : p.value);\n              if (!isFinite(value)) return;\n              rows.push((p.marker || '') + p.seriesName + ': <b>' +\n                (100 * value).toLocaleString('en-US', {maximumFractionDigits: 1}) + '%</b>');\n            });\n            return (params && params.length ? params[0].axisValueLabel : '') +\n              (rows.length ? '<br/>' + rows.join('<br/>') : '');\n          }"
+        )
+      )
     return(wise_echart_theme(e))
   }
 
   use_log <- identical(type, "numeric") &&
     all(df[[outcome]][!is.na(df[[outcome]])] > 0)
 
+  # Survey ingestion stores monetary variables in 2021 PPP. Convert back to
+  # local currency for this display when the user explicitly selects LCU;
+  # model fitting continues to use the canonical PPP survey snapshot.
+  dist_df <- df
+  if (identical(toupper(currency %||% "PPP"), "LCU") &&
+    identical(outcome, "welfare") && "ppp2021" %in% names(dist_df)) {
+    dist_df[[outcome]] <- dist_df[[outcome]] * dist_df$ppp2021
+  }
+  if (identical(outcome, "welfare")) {
+    currency_label <- toupper(currency %||% "PPP")
+    x_label <- if (identical(currency_label, "LCU")) {
+      "LCU per day (2021)"
+    } else {
+      "$ per day (2021 PPP)"
+    }
+  }
+
   agg <- build_ridge_distribution_data(
-    df,
+    dist_df,
     x_var         = outcome,
     group_var     = "countryyear",
     fill_var      = "code",
@@ -584,6 +625,28 @@ echart_welfare_dist <- function(df,
   )
   if (is.null(agg)) {
     return(invisible(NULL))
+  }
+
+  # Carry the weighted empirical share below each hovered x value as a third
+  # point dimension. It is consumed only by the tooltip, not plotted.
+  if (identical(outcome, "welfare") || "weight" %in% names(dist_df)) {
+    values <- suppressWarnings(as.numeric(dist_df[[outcome]]))
+    weights <- if ("weight" %in% names(dist_df)) {
+      suppressWarnings(as.numeric(dist_df$weight))
+    } else {
+      rep(1, nrow(dist_df))
+    }
+    shares <- lapply(agg$groups, function(grp) {
+      ii <- which(as.character(dist_df$countryyear) == grp)
+      ok <- is.finite(values[ii]) & is.finite(weights[ii]) & weights[ii] > 0
+      x_grid <- agg$data$x[agg$data$group == grp]
+      if (!any(ok)) return(rep(NA_real_, length(x_grid)))
+      v <- values[ii][ok]
+      w <- weights[ii][ok]
+      vapply(x_grid, function(x) sum(w[v <= x]) / sum(w), numeric(1))
+    })
+    share_map <- unlist(shares, use.names = FALSE)
+    agg$data$tooltip_value <- share_map[seq_len(nrow(agg$data))]
   }
 
   ridge_labels_raw <- agg$groups
@@ -608,7 +671,8 @@ echart_welfare_dist <- function(df,
 
   e <- ridge_echart_widget(
     agg$data, agg$groups, ridge_labels_raw, styles,
-    height = height, log_scale = use_log, x_name = x_label
+    height = height, log_scale = use_log, x_name = x_label,
+    tooltip_x_name = x_label
   )
   if (identical(outcome, "welfare") && !is.null(poverty_lines) &&
     nrow(agg$data)) {
@@ -621,7 +685,7 @@ echart_welfare_dist <- function(df,
       ),
       label = list(
         color = .wise_marker, fontSize = 11, rotate = 90,
-        position = "insideEndTop", distance = 4
+        position = "insideStartBottom", distance = 4
       ),
       data = lapply(seq_len(nrow(poverty_lines)), function(i) {
         list(

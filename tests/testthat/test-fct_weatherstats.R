@@ -182,6 +182,62 @@ test_that("plot_weather_dist returns ggplot for binned variable", {
   expect_s3_class(p, "ggplot")
 })
 
+test_that("interactive binned weather distribution keeps labels and tooltip visible", {
+  skip_if_not_installed("echarts4r")
+  df <- data.frame(
+    countryyear = rep(c("TST, 2018", "TST, 2021"), each = 4),
+    tx = factor(
+      rep(c("[0, 10]", "(10, 20]"), 4),
+      levels = c("[0, 10]", "(10, 20]")
+    ),
+    stringsAsFactors = FALSE
+  )
+
+  chart <- echart_weather_bins_compare(df, "tx", "Max temp", units = "C")
+
+  expect_s3_class(chart, "echarts4r")
+  expect_null(names(chart$x$opts$xAxis$data))
+  expect_equal(chart$x$opts$xAxis$axisLabel$rotate, 0)
+  expect_null(chart$x$opts$yAxis$name)
+  expect_equal(chart$x$opts$title$left, 8)
+  expect_equal(chart$x$opts$grid$bottom, 84)
+  expect_true(!is.null(chart$x$opts$tooltip$formatter))
+})
+
+test_that("interactive binscatter serializes readable bin labels as strings", {
+  skip_if_not_installed("echarts4r")
+  binned <- data.frame(
+    tx = factor(
+      rep(c("[0, 10]", "(10, 20]"), 20),
+      levels = c("[0, 10]", "(10, 20]")
+    ),
+    welfare = seq(1, 3, length.out = 40)
+  )
+  continuous <- data.frame(
+    tx = seq(0, 20, length.out = 40),
+    welfare = seq(1, 3, length.out = 40)
+  )
+
+  binned_chart <- echart_binscatter(
+    binned, "tx", "Temperature bins", "welfare", "Welfare"
+  )
+  continuous_chart <- echart_binscatter(
+    continuous, "tx", "Temperature", "welfare", "Welfare"
+  )
+
+  expect_null(names(binned_chart$x$opts$xAxis$data))
+  expect_equal(
+    binned_chart$x$opts$xAxis$data,
+    paste0(c("0 ", "10 "), intToUtf8(8211), c(" 10", " 20")),
+    ignore_attr = TRUE
+  )
+  expect_null(names(continuous_chart$x$opts$series[[3]]$data[[1]]$binLabel))
+  expect_equal(
+    continuous_chart$x$opts$series[[3]]$data[[1]]$binLabel,
+    paste0("0 ", intToUtf8(8211), " 1")
+  )
+})
+
 test_that("historical binned counts use the survey's finite outer labels", {
   hist <- data.frame(
     countryyear = "TST, historical",

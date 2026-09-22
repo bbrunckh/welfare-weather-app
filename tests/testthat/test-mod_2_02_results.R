@@ -964,6 +964,32 @@ test_that("echart_exceedance mirrors the median curves and empty state", {
   )
 })
 
+test_that("echart_exceedance uses explicit stacked uncertainty bands", {
+  curves <- data.frame(
+    scenario = rep(c("Historical", "SSP2 / 2030"), each = 20),
+    model_id = rep(rep(c("m1", "m2"), each = 10), 2),
+    rank = rep(seq_len(10), 4),
+    welfare_val = c(seq(1, 10), seq(2, 11)),
+    coef_sd = 0.1,
+    exceed_prob = rep((seq(10) - 0.5) / 20, 4),
+    is_historical = rep(c(TRUE, FALSE), each = 20)
+  )
+  chart <- echart_exceedance(
+    curves, "Mean", n_sim_years = 20,
+    band_q = c(lo = 0.10, hi = 0.90),
+    ensemble_band_q = c(lo = 0.10, hi = 0.90)
+  )
+  bands <- Filter(function(s) grepl("__(ensemble|coefficient)$", s$name), chart$x$opts$series)
+  expect_true(length(bands) >= 3L)
+  band_shapes <- vapply(bands, function(s) {
+    !is.null(s$lineStyle) && !is.null(s$areaStyle) &&
+      is.matrix(s$data) && nrow(s$data) >= 4L
+  }, logical(1))
+  expect_true(all(band_shapes))
+  expect_true(all(vapply(bands, function(s) is.null(s$stack), logical(1))))
+  expect_gt(length(unique(vapply(bands, `[[`, character(1), "name"))), 1L)
+})
+
 test_that("echart_variance_contribution draws one bar series per source", {
   vb <- data.frame(
     scenario = c("Historical", "SSP2 / 2030"),

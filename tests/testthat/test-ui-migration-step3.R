@@ -38,6 +38,26 @@ test_that("echart_before_after_hist draws ridge polygons for continuous variable
   # series data carries the polygon as an n x 2 matrix.
   mins <- vapply(w$x$opts$series, function(s) min(s$data[, 2]), numeric(1L))
   expect_setequal(floor(mins), c(1, 2))
+  expect_setequal(
+    vapply(w$x$opts$series, function(s) s$lineStyle$color, character(1)),
+    c(.wise_baseline, .wise_policy_dark)
+  )
+})
+
+test_that("step 3 annual raincloud layers keep explicit palette styles", {
+  tbl <- data.frame(
+    scenario = rep(c("Historical", "SSP2 / 2030-2040"), each = 12),
+    value = c(rnorm(12, 5), rnorm(12, 5.5)),
+    source = rep(c("Baseline", "Policy"), 12),
+    stringsAsFactors = FALSE
+  )
+  p <- echart_step3_annual_distribution(tbl, plot_type = "violin")
+  expect_s3_class(p, "echarts4r")
+  styled <- Filter(function(s) !is.null(s$areaStyle), p$x$opts$series)
+  expect_true(length(styled) >= 2L)
+  expect_true(all(vapply(styled, function(s) {
+    !is.null(s$lineStyle) && !is.null(s$areaStyle$color)
+  }, logical(1))))
 })
 
 test_that("echart_before_after_hist keeps the empty-state message", {

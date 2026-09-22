@@ -2492,7 +2492,8 @@ enhance_exceedance <- function(curves_tbl,
 # with geom_text).
 .e_line_series <- function(name, x, y, colour, width = 2, type = "solid",
                            opacity = 1, endpoint_label = FALSE,
-                           label_x = NULL) {
+                           label_x = NULL, area = NULL, stack = NULL,
+                           z = 2) {
   n <- length(x)
   last <- which(is.finite(y))
   last <- if (length(last)) max(last) else 0L
@@ -2518,10 +2519,49 @@ enhance_exceedance <- function(curves_tbl,
                      opacity = opacity),
     itemStyle = list(color = colour),
     symbol = "none",
-    z = 2,
+    z = z,
     data = data
   )
+  if (!is.null(area)) st$areaStyle <- area
+  if (!is.null(stack)) st$stack <- stack
   list(st)
+}
+
+# A filled uncertainty ribbon represented by one closed line polygon. ECharts'
+# stacked lower/upper area series can render the upper segment from zero when
+# the lower series has a transparent area, so an explicit polygon is safer for
+# browser and export renderers.
+.e_line_band <- function(name, x, lower, upper, colour, opacity = 0.2,
+                         lower_type = "solid", z = 1) {
+  ok <- is.finite(x) & is.finite(lower) & is.finite(upper)
+  if (!any(ok)) return(list())
+  x <- x[ok]
+  lower <- lower[ok]
+  upper <- pmax(upper[ok], lower)
+  polygon <- rbind(
+    cbind(x, lower),
+    cbind(rev(x), rev(upper))
+  )
+
+  list(
+    list(
+      name = name,
+      type = "line",
+      symbol = "none",
+      silent = TRUE,
+      legendHoverLink = FALSE,
+      tooltip = list(show = FALSE),
+      lineStyle = list(
+        color = "rgba(0,0,0,0)",
+        width = 0,
+        type = lower_type,
+        opacity = 0
+      ),
+      areaStyle = list(color = colour, opacity = opacity),
+      z = z,
+      data = unname(polygon)
+    )
+  )
 }
 
 # Deterministic even-stride downsample for raw series above `cap` points
@@ -2904,18 +2944,51 @@ echart_annual_distribution <- function(tbl, x_label = "Outcome (outcome units)",
     y_cat <- as.character(y0)
 
     if (identical(plot_type, "boxplot")) {
-      q <- stats::quantile(vals, c(0, 0.25, 0.5, 0.75, 1), names = FALSE)
-      # IQR box (floating bar pair) + min-max whiskers, horizontal.
-      series <- c(series, .e_band_pair(
-        y_cat, q[[2L]], q[[4L]], col,
-        stack = paste0("bx_", scn), bar_width = 16, opacity = 0.45, z = 2,
-        horizontal = TRUE
-      ))
-      series <- c(series, .e_band_pair(
-        y_cat, q[[1L]], q[[5L]], col,
-        stack = paste0("wk_", scn), bar_width = 2, opacity = 1, z = 1,
-        horizontal = TRUE
-      ))
+      st <- suppressWarnings(grDevices::boxplot.stats(vals)$stats)
+      if (length(st) == 5L && all(is.finite(st))) {
+        half_h <- 0.18
+        q1 <- st[[2L]]
+        med <- st[[3L]]
+        q3 <- st[[4L]]
+        # Native line polygons stay aligned with the numeric ridge axis;
+        # category-oriented bar stacks would disappear after the violin-axis
+        # migration.
+        series <- c(series, list(
+          list(
+            name = paste0(scn, "__whisker"),
+            type = "line",
+            data = unname(rbind(c(st[[1L]], y0), c(st[[5L]], y0))),
+            symbol = "none",
+            silent = TRUE,
+            lineStyle = list(color = .wise_support, width = 1),
+            z = 1
+          ),
+          list(
+            name = paste0(scn, "__box"),
+            type = "line",
+            data = unname(rbind(
+              c(q1, y0 - half_h), c(q3, y0 - half_h),
+              c(q3, y0 + half_h), c(q1, y0 + half_h),
+              c(q1, y0 - half_h)
+            )),
+            symbol = "none",
+            silent = TRUE,
+            lineStyle = list(color = .wise_support, width = 1),
+            areaStyle = list(color = col, opacity = 0.45),
+            emphasis = list(focus = "series"),
+            z = 2
+          ),
+          list(
+            name = paste0(scn, "__median"),
+            type = "line",
+            data = unname(rbind(c(med, y0 - half_h), c(med, y0 + half_h))),
+            symbol = "none",
+            silent = TRUE,
+            lineStyle = list(color = .wise_support, width = 2),
+            z = 3
+          )
+        ))
+      }
     } else {
       # Density outline, ggplot stat_ydensity parameters, scale = "width".
       d <- stats::density(vals, bw = "nrd0", kernel = "gaussian", n = 512)
@@ -2925,31 +2998,24 @@ echart_annual_distribution <- function(tbl, x_label = "Outcome (outcome units)",
       dy <- dy / max(dy, na.rm = TRUE) # scale = "width"
       series <- c(series, list(
         list(
-          name = paste0(scn, "__base"), type = "line", stack = paste0("vn_", scn),
+          name = paste0(scn, "__density"), type = "line",
           symbol = "none", silent = TRUE, z = 1,
           tooltip = list(show = FALSE),
-          lineStyle = list(width = 0, opacity = 0),
-          areaStyle = list(color = "rgba(0,0,0,0)"),
-          data = lapply(seq_along(dx), function(i) {
-            list(value = list(dx[[i]], y0))
-          })
-        ),
-        list(
-          name = paste0(scn, "__density"), type = "line", stack = paste0("vn_", scn),
-          symbol = "none", silent = TRUE, z = 1,
-          tooltip = list(show = FALSE),
-          lineStyle = list(width = 0, opacity = 0),
-          areaStyle = list(color = col, opacity = 0.28),
-          data = lapply(seq_along(dx), function(i) {
-            list(value = list(dx[[i]], y0 + dy[[i]] * 0.31))
-          })
+          lineStyle = list(width = 1.2, color = col, opacity = 0.9),
+          areaStyle = list(color = col, opacity = 0.32),
+          emphasis = list(focus = "series"),
+          data = unname(rbind(
+            cbind(dx, y0 + dy * 0.31),
+            cbind(rev(dx), rep(y0, length(dx)))
+          ))
         )
       ))
     }
 
-    # Raw draws: semi-transparent dots on the row baseline (deterministic -
-    # no jitter, parity with the reading of the ggplot dots).
+    # Raw draws: deterministic vertical jitter keeps the raincloud points
+    # legible without changing their x values or summary statistics.
     idx <- .e_downsample_idx(length(vals))
+    jitter <- ((seq_along(vals) * 37L) %% 101L) / 100 - 0.5
     draws <- list(
       name = paste0(scn, "__draws"),
       type = "scatter",
@@ -2958,7 +3024,7 @@ echart_annual_distribution <- function(tbl, x_label = "Outcome (outcome units)",
       silent = TRUE,
       itemStyle = list(color = col, opacity = 0.4),
       data = lapply(idx, function(i) {
-        list(value = list(vals[[i]], y0))
+        list(value = list(vals[[i]], y0 + jitter[[i]] * 0.22))
       })
     )
     draws$tooltip <- list(show = FALSE)
@@ -2996,8 +3062,8 @@ echart_annual_distribution <- function(tbl, x_label = "Outcome (outcome units)",
     )))
   }
 
-  # Historical (level 1) on top: echarts category y-axis renders the first
-  # category at the bottom, and Historical carries the highest row anchor.
+  # Historical (level 1) on top: numeric y rows preserve the fractional
+  # silhouette coordinates while the formatter supplies scenario labels.
   y_cats <- as.character(seq_len(n_rows) - 1L)
   e$x$opts$xAxis <- list(
     type = "value",
@@ -3011,8 +3077,14 @@ echart_annual_distribution <- function(tbl, x_label = "Outcome (outcome units)",
     axisLine = list(lineStyle = list(color = .wise_grid))
   )
   e$x$opts$yAxis <- list(
-    type = "category",
+    # Density polygons use fractional y coordinates above each row baseline;
+    # a category axis would discard those coordinates and leave only the raw
+    # draw points visible.
+    type = "value",
     data = y_cats,
+    min = -0.45,
+    max = max(as.numeric(y_cats)) + 0.45,
+    interval = 1,
     axisLabel = wise_eaxis_label(
       interval = 0L,
       formatter = htmlwidgets::JS(sprintf(
@@ -3285,10 +3357,9 @@ echart_model_robustness <- function(tbl, x_label = "Expected annual outcome",
 #' value axis) with the probability axis horizontal.
 #'
 #' Judgment calls, documented for review:
-#' - The inter-model ribbon becomes two thin boundary lines at 35% opacity.
-#'   Stacked-area bands cannot be aligned on a shared log value axis across
-#'   scenarios whose rank grids differ, and the ggplot builder already draws
-#'   its coefficient band as dashed outline curves.
+#' - Uncertainty ribbons are explicit closed polygons rather than stacked-area
+#'   bands. ECharts can anchor a transparent lower stack segment at zero, which
+#'   produces an incorrect ribbon on the log probability axis.
 #' - logit_x has no echarts counterpart: the probability axis uses log10
 #'   with the same supported return-period tick labels (percent-formatted).
 #'   Custom tick values require ECharts >= 5.6 (axisLabel.customValues);
@@ -3415,21 +3486,18 @@ echart_exceedance <- function(curves_tbl,
     p <- rows$exceed_prob
 
     if (show_ens && !rows$is_historical[[1L]]) {
-      series <- c(series,
-        .e_line_series(paste0(lid, "__ens_lo"), p, rows$intermod_lo, col,
-          width = 1, opacity = 0.35),
-        .e_line_series(paste0(lid, "__ens_hi"), p, rows$intermod_hi, col,
-          width = 1, opacity = 0.35)
-      )
+      series <- c(series, .e_line_band(
+        paste0(lid, "__ensemble"), p, rows$intermod_lo, rows$intermod_hi,
+        col, opacity = 0.2, z = 1
+      ))
     }
     if (any(is.finite(rows$coef_lo))) {
       ok <- is.finite(rows$coef_lo) & is.finite(rows$coef_hi)
-      series <- c(series,
-        .e_line_series(paste0(lid, "__coef_lo"), p[ok], rows$coef_lo[ok], col,
-          width = 1, type = "dashed", opacity = 0.9),
-        .e_line_series(paste0(lid, "__coef_hi"), p[ok], rows$coef_hi[ok], col,
-          width = 1, type = "dashed", opacity = 0.9)
-      )
+      series <- c(series, .e_line_band(
+        paste0(lid, "__coefficient"), p[ok], rows$coef_lo[ok],
+        rows$coef_hi[ok], col, opacity = 0.12,
+        lower_type = "dashed", z = 1
+      ))
     }
     series <- c(series, .e_line_series(
       lid, p, rows$central, col, width = 2, type = lty,

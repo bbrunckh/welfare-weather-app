@@ -186,6 +186,22 @@ wise_eaxis_name <- function(...) {
   )
 }
 
+# Horizontal y-axis titles sit at the top/end of the axis and start at its
+# left edge, allowing wrapped text to extend into the plot instead of forcing
+# a large vertical-label margin.
+wise_eyaxis_name <- function(...) {
+  modifyList(
+    list(
+      color = .wise_charcoal,
+      fontSize = 13,
+      align = "left",
+      verticalAlign = "top",
+      padding = c(0, 0, 0, 0)
+    ),
+    list(...)
+  )
+}
+
 #' @rdname wise_eaxis_label
 #' @noRd
 wise_esplit_line <- function(...) {

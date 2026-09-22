@@ -640,10 +640,14 @@ model_term_names <- function(sm) {
 # Precomputed-ridge renderer shared by the outcome and weather distribution
 # charts. `rd_data` is the `$data` frame of `build_ridge_distribution_data()`
 # (columns x, y, height, group); `styles` maps each `group` key to its fill
-# colour (NA = outline only), line colour and line dash.
+# colour (NA = outline only), line colour and line dash. Native line series are
+# used instead of custom renderItem polygons because ECharts' custom renderer
+# can silently fall back to black fills in browser and export contexts.
 ridge_echart_widget <- function(rd_data, ridge_levels, ridge_labels, styles,
                                 height = "300px", log_scale = FALSE,
-                                x_name = NULL, y_name = "") {
+                                x_name = NULL, y_name = "",
+                                tooltip_x_name = NULL,
+                                hide_extreme_x = FALSE) {
   e <- .e_new(height)
   if (is.null(rd_data) || !nrow(rd_data) ||
     !all(c("x", "y", "height", "group") %in% names(rd_data))) {
@@ -652,60 +656,32 @@ ridge_echart_widget <- function(rd_data, ridge_levels, ridge_labels, styles,
   n_r <- length(ridge_levels)
   x_name <- x_name %||% ""
 
-  make_ridge_render_js <- function(fill, stroke, is_dashed, has_fill) {
-    sprintf("function(params, api) {
-      if (params.dataIndex !== 0) return;
-      var count = params.dataInsideLength || 0;
-      if (!count) return;
-      var fill = %s;
-      var stroke = %s;
-      var isDashed = %s;
-      var hasFill = %s;
-
-      var pts = [];
-      var linePts = [];
-      for (var i = 0; i < count; i++) {
-        var p = api.coord([api.value(0, i), api.value(1, i)]);
-        linePts.push(p);
-        pts.push(p);
-      }
-      for (var i = count - 1; i >= 0; i--) {
-        pts.push(api.coord([api.value(0, i), api.value(2, i)]));
-      }
-      var base0 = api.coord([api.value(0, 0), api.value(2, 0)]);
-      var base1 = api.coord([api.value(0, count - 1), api.value(2, count - 1)]);
-
-      var children = [];
-      if (hasFill && fill && fill !== 'none' && fill !== 'transparent') {
-        children.push({
-          type: 'polygon',
-          shape: { points: pts },
-          style: { fill: fill, opacity: 0.65 }
-        });
-      }
-      children.push({
-        type: 'polyline',
-        shape: { points: linePts },
-        style: {
-          stroke: stroke,
-          lineWidth: 1.5,
-          lineDash: isDashed ? [4, 4] : undefined
-        }
-      });
-      children.push({
-        type: 'line',
-        shape: { x1: base0[0], y1: base0[1], x2: base1[0], y2: base1[1] },
-        style: { stroke: '#E3E9EE', lineWidth: 1 }
-      });
-      return { type: 'group', children: children };
-    }",
-    jsonlite::toJSON(fill, auto_unbox = TRUE),
-    jsonlite::toJSON(stroke, auto_unbox = TRUE),
-    if (is_dashed) "true" else "false",
-    if (has_fill) "true" else "false")
+  colour_or_na <- function(x) {
+    x <- as.character(x)[1L]
+    if (is.na(x) || !nzchar(x)) return(NA_character_)
+    if (grepl("^#[0-9A-Fa-f]{6}$", x)) return(x)
+    rgb <- tryCatch(grDevices::col2rgb(x), error = function(e) NULL)
+    if (is.null(rgb)) {
+      return(NA_character_)
+    }
+    grDevices::rgb(rgb[[1L]], rgb[[2L]], rgb[[3L]], maxColorValue = 255)
+  }
+  valid_colour <- function(x, fallback) {
+    out <- colour_or_na(x)
+    if (is.na(out)) fallback else out
   }
 
   groups <- unique(rd_data$group)
+  # Keep the wave-only labels on the y-axis, but distinguish sample and
+  # historical curves in the tooltip so both statistics survive deduplication.
+  tooltip_labels <- stats::setNames(vapply(groups, function(grp) {
+    if (!grepl(" - ", grp, fixed = TRUE)) return(as.character(grp))
+    wave <- sub(" - .*", "", grp)
+    source <- sub("^.* - ", "", grp)
+    ridge_i <- match(wave, as.character(ridge_levels))
+    wave_label <- if (!is.na(ridge_i)) as.character(ridge_labels[ridge_i]) else wave
+    paste0(wave_label, " - ", source)
+  }, character(1)), as.character(groups))
   series <- lapply(groups, function(grp) {
     g <- rd_data[rd_data$group == grp, , drop = FALSE]
     g <- g[order(g$x), , drop = FALSE]
@@ -713,30 +689,68 @@ ridge_echart_widget <- function(rd_data, ridge_levels, ridge_labels, styles,
       return(NULL)
     }
     st <- styles[match(grp, styles$group), , drop = FALSE]
-    fill_col <- if (nrow(st) && !is.na(st$fill[1L]) && nzchar(st$fill[1L])) st$fill[1L] else "#0071BC"
-    line_col <- if (nrow(st) && !is.na(st$line[1L]) && nzchar(st$line[1L])) st$line[1L] else "#002244"
+    fill_value <- if (nrow(st)) as.character(st$fill[1L]) else NA_character_
+    line_value <- if (nrow(st)) as.character(st$line[1L]) else NA_character_
+    fill_col <- valid_colour(fill_value, "#0071BC")
+    line_col <- valid_colour(line_value, "#002244")
     is_dashed <- nrow(st) && isTRUE(st$dashed[1L])
-    has_fill <- nrow(st) && !is.na(st$fill[1L]) && nzchar(st$fill[1L])
+    has_fill <- nrow(st) && !is.na(colour_or_na(fill_value))
 
     y_base <- match(g$ridge[1L], ridge_levels)
     if (is.na(y_base)) y_base <- 1.0
     y_top <- y_base + 0.85 * g$height
+    has_tooltip_value <- "tooltip_value" %in% names(g)
+    tooltip_value <- if (has_tooltip_value) g$tooltip_value else NULL
 
-    dat <- lapply(seq_len(nrow(g)), function(i) {
-      list(g$x[i], y_top[i], y_base)
+    top_data <- lapply(seq_len(nrow(g)), function(i) {
+      if (has_tooltip_value) {
+        list(g$x[i], y_top[i], tooltip_value[i])
+      } else {
+        list(g$x[i], y_top[i])
+      }
     })
-
-    list(
-      type = "custom",
-      name = as.character(grp),
-      renderItem = htmlwidgets::JS(make_ridge_render_js(fill_col, line_col, is_dashed, has_fill)),
-      data = dat,
-      itemStyle = list(
-        color = if (has_fill) fill_col else "none",
-        borderColor = line_col
-      ),
-      z = if (has_fill) 2 else 3
+    polygon <- if (has_tooltip_value) {
+      rbind(
+        cbind(g$x, y_top, tooltip_value),
+        cbind(rev(g$x), rep(y_base, nrow(g)), rev(tooltip_value))
+      )
+    } else {
+      rbind(
+        cbind(g$x, y_top),
+        cbind(rev(g$x), rep(y_base, nrow(g)))
+      )
+    }
+    line_style <- list(
+      color = line_col,
+      width = 1.5,
+      type = if (is_dashed) "dashed" else "solid"
     )
+
+    if (has_fill) {
+      list(
+        type = "line",
+        name = tooltip_labels[[as.character(grp)]],
+        data = unname(polygon),
+        symbol = "none",
+        lineStyle = line_style,
+        itemStyle = list(color = fill_col),
+        areaStyle = list(color = fill_col, opacity = 0.65),
+        emphasis = list(focus = "series"),
+        z = 2
+      )
+    } else {
+      list(
+        type = "line",
+        name = tooltip_labels[[as.character(grp)]],
+        data = top_data,
+        symbol = "none",
+        lineStyle = line_style,
+        itemStyle = list(color = line_col),
+        areaStyle = list(color = "rgba(0,0,0,0)", opacity = 0),
+        emphasis = list(focus = "series"),
+        z = 3
+      )
+    }
   })
   series <- Filter(Negate(is.null), series)
 
@@ -744,14 +758,27 @@ ridge_echart_widget <- function(rd_data, ridge_levels, ridge_labels, styles,
     as.list(as.character(ridge_labels)),
     as.character(seq_along(ridge_labels))
   ))
+  x_lo <- min(rd_data$x, na.rm = TRUE)
+  x_hi <- max(rd_data$x, na.rm = TRUE)
+  x_pad <- if (isTRUE(hide_extreme_x) && !isTRUE(log_scale) && x_hi > x_lo) {
+    0.025 * (x_hi - x_lo)
+  } else {
+    0
+  }
 
   e$x$opts$series <- series
   e$x$opts$xAxis <- list(
     type = if (isTRUE(log_scale)) "log" else "value",
+    min = if (isTRUE(log_scale)) max(x_lo, .Machine$double.xmin) else x_lo - x_pad,
+    max = x_hi + x_pad,
+    scale = TRUE,
     name = x_name,
     nameLocation = "middle", nameGap = 28,
     nameTextStyle = wise_eaxis_name(align = "center"),
     axisLabel = wise_eaxis_label(
+      rotate = 0,
+      showMinLabel = if (isTRUE(hide_extreme_x)) FALSE else NULL,
+      showMaxLabel = if (isTRUE(hide_extreme_x)) FALSE else NULL,
       formatter = if (isTRUE(log_scale)) {
         htmlwidgets::JS(
           "function(v){return v.toLocaleString('en-US');}"
@@ -763,12 +790,15 @@ ridge_echart_widget <- function(rd_data, ridge_levels, ridge_labels, styles,
       }
     ),
     axisLine = list(lineStyle = list(color = .wise_grid)),
-    splitLine = wise_esplit_line()
+    splitLine = wise_esplit_line(),
+    splitNumber = if (isTRUE(hide_extreme_x)) 6 else NULL
   )
   e$x$opts$yAxis <- list(
     type = "value", name = y_name,
     nameLocation = "end",
-    nameTextStyle = wise_eaxis_name(),
+    nameRotate = 0,
+    nameGap = 8,
+    nameTextStyle = wise_eyaxis_name(),
     min = 0, max = n_r + 1, interval = 1,
     axisLabel = wise_eaxis_label(
       interval = 0L,
@@ -784,7 +814,15 @@ ridge_echart_widget <- function(rd_data, ridge_levels, ridge_labels, styles,
   e$x$opts$grid <- list(
     containLabel = TRUE, left = 8, right = 20, top = 40, bottom = 44
   )
-  e$x$opts$tooltip <- list(trigger = "axis")
+  e$x$opts$tooltip <- list(
+    trigger = "axis",
+    formatter = htmlwidgets::JS(
+      sprintf(
+        "function(params){\n          var seen = {};\n          var rows = [];\n          var axis = params && params.length ? params[0].axisValue : '';\n          var axisNumber = Number(axis);\n          var axisLabel = isFinite(axisNumber) ? axisNumber.toLocaleString('en-US', {maximumFractionDigits: 2}) : axis;\n          var xName = %s;\n          (params || []).forEach(function(p){\n            var key = p.seriesName || '';\n            if (seen[key]) return;\n            seen[key] = true;\n            var share = Array.isArray(p.value) ? Number(p.value[2]) : NaN;\n            var suffix = isFinite(share) ? (share * 100).toLocaleString('en-US', {maximumFractionDigits: 1}) + '%% < x' : '';\n            rows.push((p.marker || '') + key + (suffix ? ': <b>' + suffix + '</b>' : ''));\n          });\n          return 'x = ' + axisLabel + (xName ? ' ' + xName : '') + (rows.length ? '<br/>' + rows.join('<br/>') : '');\n        }",
+        jsonlite::toJSON(tooltip_x_name %||% "", auto_unbox = TRUE)
+      )
+    )
+  )
   wise_echart_theme(e)
 }
 

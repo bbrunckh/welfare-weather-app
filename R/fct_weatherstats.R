@@ -2,6 +2,22 @@
 # Pure functions for weather statistics logic.
 # Used by mod_1_05_weatherstats_server(). Stateless and testable without Shiny.
 
+.weather_display_bin_label <- function(level) {
+  s <- trimws(as.character(level)[1])
+  if (is.na(s) || !nzchar(s)) return(s)
+  if (startsWith(s, "t(") || startsWith(s, "t[")) s <- substr(s, 2, nchar(s))
+  if (startsWith(s, "[") || startsWith(s, "(")) s <- substr(s, 2, nchar(s))
+  if (endsWith(s, "]") || endsWith(s, ")")) s <- substr(s, 1, nchar(s) - 1)
+  parts <- strsplit(s, ",", fixed = TRUE)[[1]]
+  if (length(parts) == 2L) paste0(trimws(parts[[1]]), " \u2013 ", trimws(parts[[2]])) else s
+}
+
+.weather_display_axis_label <- function(label, units = NULL, binned = FALSE) {
+  units <- as.character(units)[1]
+  suffix <- if (!is.na(units) && nzchar(units)) paste0(" (", units, ")") else ""
+  paste0(as.character(label)[1], if (isTRUE(binned)) " bins" else "", suffix)
+}
+
 
 # Date helpers ----
 
@@ -1932,7 +1948,7 @@ weather_plot_layout <- function(ns, n_vars, ids, height = "500px",
 echart_weather_dist <- function(df, hv, label, cont_binned, hist_df = NULL,
                                 breaks = NULL, year_from = NULL,
                                 year_to = NULL, wave_labels = NULL,
-                                height = "300px") {
+                                height = "300px", units = NULL) {
   if (is.null(df) || is.na(hv) || !(hv %in% names(df))) {
     return(invisible(NULL))
   }
@@ -1940,13 +1956,13 @@ echart_weather_dist <- function(df, hv, label, cont_binned, hist_df = NULL,
     echart_weather_bins_compare(
       df = df, hv = hv, label = label, hist_df = hist_df, breaks = breaks,
       year_from = year_from, year_to = year_to, wave_labels = wave_labels,
-      height = height
+      height = height, units = units
     )
   } else {
     echart_weather_ridges_compare(
       df = df, hv = hv, label = label, hist_df = hist_df,
       year_from = year_from, year_to = year_to, wave_labels = wave_labels,
-      height = height
+      height = height, units = units
     )
   }
 }
@@ -1961,7 +1977,7 @@ echart_weather_dist <- function(df, hv, label, cont_binned, hist_df = NULL,
 echart_weather_bins_compare <- function(df, hv, label, hist_df = NULL,
                                         breaks = NULL, year_from = NULL,
                                         year_to = NULL, wave_labels = NULL,
-                                        height = "300px") {
+                                        height = "300px", units = NULL) {
   if (is.null(df) || is.na(hv) || !(hv %in% names(df)) ||
     !("countryyear" %in% names(df))) {
     return(invisible(NULL))
@@ -2005,6 +2021,7 @@ echart_weather_bins_compare <- function(df, hv, label, hist_df = NULL,
   pal <- .wave_palette(waves)
   sources <- if (has_hist) c(.wx_sample_lab, hist_lab) else .wx_sample_lab
   series <- .wx_series_grid(waves, sources)
+  display_lvls <- unname(vapply(lvls, .weather_display_bin_label, character(1)))
   key_cols <- stats::setNames(
     ifelse(series$source == .wx_sample_lab,
       pal[series$wave],
@@ -2017,20 +2034,25 @@ echart_weather_bins_compare <- function(df, hv, label, hist_df = NULL,
   e <- .e_new(height)
   e$x$opts$xAxis <- list(
     type = "category",
-    data = as.character(lvls),
-    name = stringr::str_wrap(paste0(label, "\n(as configured)"), 40),
+    data = display_lvls,
+    name = stringr::str_wrap(
+      .weather_display_axis_label(label, units, binned = TRUE), 40
+    ),
     nameLocation = "middle", nameGap = 34,
     nameTextStyle = wise_eaxis_name(align = "center"),
-    axisLabel = wise_eaxis_label(rotate = 30, interval = 0L),
+    axisLabel = wise_eaxis_label(rotate = 0, interval = 0L),
     axisTick = list(alignWithLabel = TRUE),
     axisLine = list(lineStyle = list(color = .wise_grid)),
     splitLine = wise_esplit_line()
   )
   e$x$opts$yAxis <- list(
-    type = "value", name = "Share of observations (%)",
-    nameLocation = "end",
-    nameTextStyle = wise_eaxis_name(),
-    axisLabel = wise_eaxis_label(fontSize = 13),
+    type = "value", name = NULL,
+    axisLabel = wise_eaxis_label(
+      fontSize = 13,
+      formatter = htmlwidgets::JS(
+        "function(v){return Number(v).toLocaleString('en-US',{maximumFractionDigits:1})+'%';}"
+      )
+    ),
     splitLine = wise_esplit_line()
   )
   e$x$opts$series <- lapply(seq_len(nrow(series)), function(i) {
@@ -2044,13 +2066,30 @@ echart_weather_bins_compare <- function(df, hv, label, hist_df = NULL,
       barMaxWidth = 28
     )
   })
+  # Keep the horizontal y-axis caption anchored to the plot's left edge. An
+  # ECharts y-axis name is centred by default, which can push a long caption
+  # outside the chart when the category axis also has a title.
+  e$x$opts$title <- list(
+    text = "Share of observations",
+    left = 8, top = 0,
+    textStyle = list(
+      color = .wise_charcoal, fontSize = 13, fontWeight = "normal",
+      align = "left", verticalAlign = "top"
+    )
+  )
   e$x$opts$legend <- wise_elegend_style(
-    right = 36, top = 0, orient = "horizontal"
+    left = 150, right = 8, top = 0, width = "auto",
+    orient = "horizontal", itemGap = 8
   )
   e$x$opts$grid <- list(
-    containLabel = TRUE, left = 8, right = 14, top = 54, bottom = 56
+    containLabel = TRUE, left = 8, right = 14, top = 48, bottom = 84
   )
-  e$x$opts$tooltip <- list(trigger = "axis", axisPointer = list(type = "shadow"))
+  e$x$opts$tooltip <- list(
+    trigger = "axis", axisPointer = list(type = "shadow"),
+    formatter = htmlwidgets::JS(
+      "function(params){\n        var rows = [];\n        (params || []).forEach(function(p){\n          var value = Number(Array.isArray(p.value) ? p.value[1] : p.value);\n          if (!isFinite(value)) return;\n          rows.push((p.marker || '') + p.seriesName + ': <b>' +\n            value.toLocaleString('en-US', {maximumFractionDigits: 1}) + '%</b>');\n        });\n        return (params && params.length ? params[0].axisValueLabel : '') +\n          (rows.length ? '<br/>' + rows.join('<br/>') : '');\n      }"
+    )
+  )
   wise_echart_theme(e)
 }
 
@@ -2066,7 +2105,7 @@ echart_weather_bins_compare <- function(df, hv, label, hist_df = NULL,
 echart_weather_ridges_compare <- function(df, hv, label, hist_df = NULL,
                                           year_from = NULL, year_to = NULL,
                                           wave_labels = NULL,
-                                          height = "300px") {
+                                          height = "300px", units = NULL) {
   if (is.null(df) || is.na(hv) || !(hv %in% names(df)) ||
     !("countryyear" %in% names(df))) {
     return(invisible(NULL))
@@ -2139,6 +2178,31 @@ echart_weather_ridges_compare <- function(df, hv, label, hist_df = NULL,
     return(invisible(NULL))
   }
 
+  # Keep the ridge tooltip consistent with outcome distributions: for each
+  # wave/source, report the weighted share of observations below the hovered x.
+  shares <- lapply(series$key, function(grp) {
+    ii <- which(d$key == grp)
+    x_grid <- rd$data$x[rd$data$group == grp]
+    if (!length(ii) || !length(x_grid)) {
+      return(rep(NA_real_, length(x_grid)))
+    }
+    v <- d$x[ii]
+    w <- d$w[ii]
+    ok <- is.finite(v) & is.finite(w) & w > 0
+    if (!any(ok)) {
+      return(rep(NA_real_, length(x_grid)))
+    }
+    v <- v[ok]
+    w <- w[ok]
+    vapply(x_grid, function(x) sum(w[v <= x]) / sum(w), numeric(1))
+  })
+  share_map <- stats::setNames(shares, series$key)
+  rd_groups <- unique(as.character(rd$data$group))
+  rd$data$tooltip_value <- unlist(lapply(rd_groups, function(grp) {
+    n <- sum(as.character(rd$data$group) == grp)
+    share_map[[grp]][seq_len(n)]
+  }), use.names = FALSE)
+
   styles <- data.frame(
     group = series$key,
     fill = ifelse(
@@ -2155,7 +2219,9 @@ echart_weather_ridges_compare <- function(df, hv, label, hist_df = NULL,
   ridge_echart_widget(
     rd$data, rd$ridges, ridge_labels, styles,
     height = height,
-    x_name = stringr::str_wrap(paste0(label, "\n(as configured)"), 40)
+    x_name = stringr::str_wrap(.weather_display_axis_label(label, units), 40),
+    tooltip_x_name = stringr::str_wrap(.weather_display_axis_label(label, units), 40),
+    hide_extreme_x = TRUE
   )
 }
 
@@ -2266,6 +2332,9 @@ echart_binscatter <- function(df, hv, hv_label = hv, y_var, y_label = y_var,
     summary_df <- summarise_bins(d$x)
     summary_df$bin <- factor(summary_df$bin, levels = x_levels)
     summary_df <- summary_df[order(summary_df$bin), , drop = FALSE]
+    display_x_levels <- unname(
+      vapply(x_levels, .weather_display_bin_label, character(1))
+    )
 
     pt <- data.frame(
       x = as.character(point_df$x),
@@ -2280,11 +2349,11 @@ echart_binscatter <- function(df, hv, hv_label = hv, y_var, y_label = y_var,
 
     e <- .e_new(height)
     e$x$opts$xAxis <- list(
-      type = "category", data = as.character(x_levels),
+      type = "category", data = display_x_levels,
       name = stringr::str_wrap(hv_label, 40),
       nameLocation = "middle", nameGap = 32,
       nameTextStyle = wise_eaxis_name(),
-      axisLabel = wise_eaxis_label(rotate = 30, interval = 0L),
+      axisLabel = wise_eaxis_label(rotate = 0, interval = 0L),
       axisTick = list(alignWithLabel = TRUE),
       axisLine = list(lineStyle = list(color = .wise_grid)),
       splitLine = wise_esplit_line()
@@ -2312,7 +2381,10 @@ echart_binscatter <- function(df, hv, hv_label = hv, y_var, y_label = y_var,
         data = lapply(which(!is.na(summary_df$mean)), function(i) {
           list(
             value = c(match(summary_df$bin[i], x_levels) - 1L, summary_df$mean[i]),
-            symbolSize = sym_size[i]
+            symbolSize = sym_size[i],
+            binLabel = unname(
+              .weather_display_bin_label(as.character(summary_df$bin[i]))
+            )
           )
         }),
         symbolSize = 8,
@@ -2332,6 +2404,10 @@ echart_binscatter <- function(df, hv, hv_label = hv, y_var, y_label = y_var,
       seq(x_range[1], x_range[2], length.out = 21L)
     }
     bin <- cut(d$x, breaks = breaks, include.lowest = TRUE, labels = FALSE)
+    bin_labels <- levels(cut(d$x, breaks = breaks, include.lowest = TRUE))
+    display_bin_labels <- unname(
+      vapply(bin_labels, .weather_display_bin_label, character(1))
+    )
     bin_mid <- (breaks[-length(breaks)] + breaks[-1L]) / 2
     summary_df <- summarise_bins(bin, bin_mid)
     summary_df <- summary_df[is.finite(summary_df$mean), , drop = FALSE]
@@ -2389,7 +2465,10 @@ echart_binscatter <- function(df, hv, hv_label = hv, y_var, y_label = y_var,
         data = lapply(seq_len(nrow(summary_df)), function(i) {
           list(
             value = c(summary_df$x[i], summary_df$mean[i]),
-            symbolSize = sym_size[i]
+            symbolSize = sym_size[i],
+            binLabel = unname(
+              display_bin_labels[which.min(abs(bin_mid - summary_df$x[i]))]
+            )
           )
         }),
         symbolSize = 8,
@@ -2402,19 +2481,36 @@ echart_binscatter <- function(df, hv, hv_label = hv, y_var, y_label = y_var,
 
   e$x$opts$yAxis <- list(
     type = "value", scale = TRUE,
-    name = stringr::str_wrap(y_label, 40),
-    nameLocation = "end",
-    nameTextStyle = wise_eaxis_name(),
+    name = NULL,
     min = if (is_binary_y) 0 else NULL,
     max = if (is_binary_y) 1 else NULL,
     axisLabel = wise_eaxis_label(),
     splitLine = wise_esplit_line()
   )
+  e$x$opts$title <- list(
+    text = stringr::str_wrap(y_label, 40),
+    left = 8, top = 0,
+    textStyle = list(
+      color = .wise_charcoal, fontSize = 13, fontWeight = "normal",
+      align = "left", verticalAlign = "top"
+    )
+  )
   e$x$opts$legend <- NULL
   e$x$opts$grid <- list(
-    containLabel = TRUE, left = 8, right = 16, top = 40, bottom = 48
+    containLabel = TRUE, left = 8, right = 16, top = 36, bottom = 48
   )
-  e$x$opts$tooltip <- list(trigger = "item")
+  y_formatter <- if (is_binary_y) {
+    "function(v){return (100 * Number(v)).toLocaleString('en-US',{minimumFractionDigits:1,maximumFractionDigits:1})+'%';}"
+  } else {
+    "function(v){return Number(v).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});}"
+  }
+  e$x$opts$tooltip <- list(
+    trigger = "item",
+    formatter = htmlwidgets::JS(sprintf(
+        "function(p){\n        var value = Array.isArray(p.value) ? p.value : (p.data && Array.isArray(p.data.value) ? p.data.value : []);\n        var x = value.length > 0 ? Number(value[0]) : NaN;\n        var y = value.length > 1 ? Number(value[1]) : NaN;\n        if (!isFinite(y)) return '';\n        var xText = p.data && p.data.binLabel ? p.data.binLabel : (isFinite(x) ? x.toLocaleString('en-US',{maximumFractionDigits:2}) : '');\n        return xText + '<br/>Mean = <b>' + (%s)(y) + '</b>';\n      }",
+      y_formatter
+    ))
+  )
   wise_echart_theme(e)
 }
 

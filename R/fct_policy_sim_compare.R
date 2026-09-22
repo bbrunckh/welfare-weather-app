@@ -119,6 +119,7 @@ echart_before_after_hist <- function(baseline_vals, policy_vals,
 
   ridge_scale <- 1.5
   ridges <- rd$ridges
+  line_vals <- c(Baseline = .wise_baseline, `Policy-adjusted` = .wise_policy_dark)
   series_list <- lapply(seq_along(ridges), function(i) {
     g <- rd$data[rd$data$group == ridges[[i]], , drop = FALSE]
     g <- g[order(g$x), ]
@@ -132,8 +133,12 @@ echart_before_after_hist <- function(baseline_vals, policy_vals,
       name = ridges[[i]],
       data = unname(poly),
       symbol = "none",
-      lineStyle = list(color = "#000000", width = 0.6),
-      areaStyle = list(color = col, opacity = 0.7),
+      lineStyle = list(
+        color = unname(line_vals[[ridges[[i]]]] %||% .wise_support),
+        width = 1.2
+      ),
+      areaStyle = list(color = col, opacity = 0.62),
+      emphasis = list(focus = "series"),
       z = 2
     )
   })
@@ -161,6 +166,9 @@ echart_before_after_hist <- function(baseline_vals, policy_vals,
   )
   e$x$opts$yAxis <- list(
     type = "value",
+    min = 0.5,
+    max = length(ridges) + 0.5,
+    interval = 1,
     axisLabel = wise_eaxis_label(
       fontSize = 12,
       formatter = htmlwidgets::JS(sprintf(
@@ -307,7 +315,7 @@ echart_step3_annual_distribution <- function(tbl, x_label = "Outcome (outcome un
       data = unname(poly),
       symbol = "none",
       silent = TRUE,
-      lineStyle = list(width = 0, opacity = 0),
+      lineStyle = list(width = 1, color = col, opacity = 0.9),
       areaStyle = list(color = col, opacity = opacity),
       z = 2
     )
@@ -318,7 +326,7 @@ echart_step3_annual_distribution <- function(tbl, x_label = "Outcome (outcome un
     if (length(x_vals) < 2L) {
       return(NULL)
     }
-    st <- suppressWarnings(boxplot.stats(x_vals)$stats)
+    st <- suppressWarnings(grDevices::boxplot.stats(x_vals)$stats)
     if (!length(st) || any(!is.finite(st))) {
       return(NULL)
     }
@@ -552,6 +560,7 @@ echart_step3_annual_distribution <- function(tbl, x_label = "Outcome (outcome un
     type = "value",
     min = min(y_breaks) - y_pad,
     max = max(y_breaks) + y_pad,
+    interval = 1,
     axisLabel = wise_eaxis_label(
       fontSize = 12,
       customValues = as.list(y_breaks),
