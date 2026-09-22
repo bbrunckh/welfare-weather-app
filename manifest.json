@@ -47,33 +47,6 @@
         "Built": "R 4.5.2; ; 2026-02-25 09:45:39 UTC; unix"
       }
     },
-    "DT": {
-      "Source": "CRAN",
-      "Repository": "https://cran.rstudio.com",
-      "description": {
-        "Type": "Package",
-        "Package": "DT",
-        "Title": "A Wrapper of the JavaScript Library 'DataTables'",
-        "Version": "0.34.0",
-        "Authors@R": "c(\n    person(\"Yihui\", \"Xie\", role = \"aut\"),\n    person(\"Joe\", \"Cheng\", , \"joe@posit.co\", role = \"aut\"),\n    person(\"Xianying\", \"Tan\", role = \"aut\"),\n    person(\"Garrick\", \"Aden-Buie\", , \"garrick@posit.co\", role = c(\"aut\", \"cre\"),\n           comment = c(ORCID = \"0000-0002-7111-0077\")),\n    person(\"JJ\", \"Allaire\", role = \"ctb\"),\n    person(\"Maximilian\", \"Girlich\", role = \"ctb\"),\n    person(\"Greg\", \"Freedman Ellis\", role = \"ctb\"),\n    person(\"Johannes\", \"Rauh\", role = \"ctb\"),\n    person(\"SpryMedia Limited\", role = c(\"ctb\", \"cph\"),\n           comment = \"DataTables in htmlwidgets/lib\"),\n    person(\"Brian\", \"Reavis\", role = c(\"ctb\", \"cph\"),\n           comment = \"selectize.js in htmlwidgets/lib\"),\n    person(\"Leon\", \"Gersen\", role = c(\"ctb\", \"cph\"),\n           comment = \"noUiSlider in htmlwidgets/lib\"),\n    person(\"Bartek\", \"Szopka\", role = c(\"ctb\", \"cph\"),\n           comment = \"jquery.highlight.js in htmlwidgets/lib\"),\n    person(\"Alex\", \"Pickering\", role = \"ctb\"),\n    person(\"William\", \"Holmes\", role = \"ctb\"),\n    person(\"Mikko\", \"Marttila\", role = \"ctb\"),\n    person(\"Andres\", \"Quintero\", role = \"ctb\"),\n    person(\"Stéphane\", \"Laurent\", role = \"ctb\"),\n    person(\"Posit Software, PBC\", role = c(\"cph\", \"fnd\"))\n  )",
-        "Description": "Data objects in R can be rendered as HTML tables using the\n    JavaScript library 'DataTables' (typically via R Markdown or Shiny).\n    The 'DataTables' library has been included in this R package. The\n    package name 'DT' is an abbreviation of 'DataTables'.",
-        "License": "MIT + file LICENSE",
-        "URL": "https://github.com/rstudio/DT",
-        "BugReports": "https://github.com/rstudio/DT/issues",
-        "Imports": "crosstalk, htmltools (>= 0.3.6), htmlwidgets (>= 1.3),\njquerylib, jsonlite (>= 0.9.16), magrittr, promises",
-        "Suggests": "bslib, future, httpuv, knitr (>= 1.8), rmarkdown, shiny (>=\n1.6), testit, tibble",
-        "VignetteBuilder": "knitr",
-        "Encoding": "UTF-8",
-        "RoxygenNote": "7.3.2",
-        "NeedsCompilation": "no",
-        "Packaged": "2025-09-02 13:12:27 UTC; garrick",
-        "Author": "Yihui Xie [aut],\n  Joe Cheng [aut],\n  Xianying Tan [aut],\n  Garrick Aden-Buie [aut, cre] (ORCID:\n    <https://orcid.org/0000-0002-7111-0077>),\n  JJ Allaire [ctb],\n  Maximilian Girlich [ctb],\n  Greg Freedman Ellis [ctb],\n  Johannes Rauh [ctb],\n  SpryMedia Limited [ctb, cph] (DataTables in htmlwidgets/lib),\n  Brian Reavis [ctb, cph] (selectize.js in htmlwidgets/lib),\n  Leon Gersen [ctb, cph] (noUiSlider in htmlwidgets/lib),\n  Bartek Szopka [ctb, cph] (jquery.highlight.js in htmlwidgets/lib),\n  Alex Pickering [ctb],\n  William Holmes [ctb],\n  Mikko Marttila [ctb],\n  Andres Quintero [ctb],\n  Stéphane Laurent [ctb],\n  Posit Software, PBC [cph, fnd]",
-        "Maintainer": "Garrick Aden-Buie <garrick@posit.co>",
-        "Repository": "CRAN",
-        "Date/Publication": "2025-09-02 22:00:06 UTC",
-        "Built": "R 4.5.0; ; 2025-09-03 22:19:58 UTC; unix"
-      }
-    },
     "Hmisc": {
       "Source": "CRAN",
       "Repository": "https://cran.rstudio.com",
@@ -1573,94 +1546,6 @@
         "Built": "R 4.5.2; ; 2026-06-15 17:52:53 UTC; unix"
       }
     },
-    "crosstalk": {
-      "Source": "CRAN",
-      "Repository": "https://cran.rstudio.com",
-      "description": {
-        "Type": "Package",
-        "Package": "crosstalk",
-        "Title": "Inter-Widget Interactivity for HTML Widgets",
-        "Version": "1.2.2",
-        "Authors@R": "c(\n    person(\"Joe\", \"Cheng\", , \"joe@posit.co\", role = \"aut\"),\n    person(\"Carson\", \"Sievert\", , \"carson@posit.co\", role = c(\"aut\", \"cre\"),\n           comment = c(ORCID = \"0000-0002-4958-2844\")),\n    person(\"Posit Software, PBC\", role = c(\"cph\", \"fnd\")),\n    person(, \"jQuery Foundation\", role = \"cph\",\n           comment = \"jQuery library and jQuery UI library\"),\n    person(, \"jQuery contributors\", role = c(\"ctb\", \"cph\"),\n           comment = \"jQuery library; authors listed in inst/www/shared/jquery-AUTHORS.txt\"),\n    person(\"Mark\", \"Otto\", role = \"ctb\",\n           comment = \"Bootstrap library\"),\n    person(\"Jacob\", \"Thornton\", role = \"ctb\",\n           comment = \"Bootstrap library\"),\n    person(, \"Bootstrap contributors\", role = \"ctb\",\n           comment = \"Bootstrap library\"),\n    person(, \"Twitter, Inc\", role = \"cph\",\n           comment = \"Bootstrap library\"),\n    person(\"Brian\", \"Reavis\", role = c(\"ctb\", \"cph\"),\n           comment = \"selectize.js library\"),\n    person(\"Kristopher Michael\", \"Kowal\", role = c(\"ctb\", \"cph\"),\n           comment = \"es5-shim library\"),\n    person(, \"es5-shim contributors\", role = c(\"ctb\", \"cph\"),\n           comment = \"es5-shim library\"),\n    person(\"Denis\", \"Ineshin\", role = c(\"ctb\", \"cph\"),\n           comment = \"ion.rangeSlider library\"),\n    person(\"Sami\", \"Samhuri\", role = c(\"ctb\", \"cph\"),\n           comment = \"Javascript strftime library\")\n  )",
-        "Description": "Provides building blocks for allowing HTML widgets to\n    communicate with each other, with Shiny or without (i.e. static .html\n    files). Currently supports linked brushing and filtering.",
-        "License": "MIT + file LICENSE",
-        "URL": "https://rstudio.github.io/crosstalk/,\nhttps://github.com/rstudio/crosstalk",
-        "BugReports": "https://github.com/rstudio/crosstalk/issues",
-        "Imports": "htmltools (>= 0.3.6), jsonlite, lazyeval, R6",
-        "Suggests": "bslib, ggplot2, sass, shiny, testthat (>= 2.1.0)",
-        "Config/Needs/website": "jcheng5/d3scatter, DT, leaflet, rmarkdown",
-        "Encoding": "UTF-8",
-        "RoxygenNote": "7.3.2",
-        "NeedsCompilation": "no",
-        "Packaged": "2025-08-26 22:06:47 UTC; cpsievert",
-        "Author": "Joe Cheng [aut],\n  Carson Sievert [aut, cre] (ORCID:\n    <https://orcid.org/0000-0002-4958-2844>),\n  Posit Software, PBC [cph, fnd],\n  jQuery Foundation [cph] (jQuery library and jQuery UI library),\n  jQuery contributors [ctb, cph] (jQuery library; authors listed in\n    inst/www/shared/jquery-AUTHORS.txt),\n  Mark Otto [ctb] (Bootstrap library),\n  Jacob Thornton [ctb] (Bootstrap library),\n  Bootstrap contributors [ctb] (Bootstrap library),\n  Twitter, Inc [cph] (Bootstrap library),\n  Brian Reavis [ctb, cph] (selectize.js library),\n  Kristopher Michael Kowal [ctb, cph] (es5-shim library),\n  es5-shim contributors [ctb, cph] (es5-shim library),\n  Denis Ineshin [ctb, cph] (ion.rangeSlider library),\n  Sami Samhuri [ctb, cph] (Javascript strftime library)",
-        "Maintainer": "Carson Sievert <carson@posit.co>",
-        "Repository": "CRAN",
-        "Date/Publication": "2025-08-26 23:50:02 UTC",
-        "Built": "R 4.5.0; ; 2025-08-27 01:32:20 UTC; unix"
-      }
-    },
-    "jquerylib": {
-      "Source": "CRAN",
-      "Repository": "https://cran.rstudio.com",
-      "description": {
-        "Package": "jquerylib",
-        "Title": "Obtain 'jQuery' as an HTML Dependency Object",
-        "Version": "0.1.4",
-        "Authors@R": "c(\n    person(\"Carson\", \"Sievert\", role = c(\"aut\", \"cre\"), email = \"carson@rstudio.com\", comment = c(ORCID = \"0000-0002-4958-2844\")),\n    person(\"Joe\", \"Cheng\", role = \"aut\", email = \"joe@rstudio.com\"),\n    person(family = \"RStudio\", role = \"cph\"),\n    person(family = \"jQuery Foundation\", role = \"cph\",\n    comment = \"jQuery library and jQuery UI library\"),\n    person(family = \"jQuery contributors\", role = c(\"ctb\", \"cph\"),\n    comment = \"jQuery library; authors listed in inst/lib/jquery-AUTHORS.txt\")\n    )",
-        "Description": "Obtain any major version of 'jQuery' (<https://code.jquery.com/>) and use it in any webpage generated by 'htmltools' (e.g. 'shiny', 'htmlwidgets', and 'rmarkdown').\n    Most R users don't need to use this package directly, but other R packages (e.g. 'shiny', 'rmarkdown', etc.) depend on this package to avoid bundling redundant copies of 'jQuery'.",
-        "License": "MIT + file LICENSE",
-        "Encoding": "UTF-8",
-        "Config/testthat/edition": "3",
-        "RoxygenNote": "7.0.2",
-        "Imports": "htmltools",
-        "Suggests": "testthat",
-        "NeedsCompilation": "no",
-        "Packaged": "2021-04-26 16:40:21 UTC; cpsievert",
-        "Author": "Carson Sievert [aut, cre] (<https://orcid.org/0000-0002-4958-2844>),\n  Joe Cheng [aut],\n  RStudio [cph],\n  jQuery Foundation [cph] (jQuery library and jQuery UI library),\n  jQuery contributors [ctb, cph] (jQuery library; authors listed in\n    inst/lib/jquery-AUTHORS.txt)",
-        "Maintainer": "Carson Sievert <carson@rstudio.com>",
-        "Repository": "CRAN",
-        "Date/Publication": "2021-04-26 17:10:02 UTC",
-        "Built": "R 4.5.0; ; 2025-04-01 11:50:17 UTC; unix"
-      }
-    },
-    "magrittr": {
-      "Source": "CRAN",
-      "Repository": "https://cran.rstudio.com",
-      "description": {
-        "Type": "Package",
-        "Package": "magrittr",
-        "Title": "A Forward-Pipe Operator for R",
-        "Version": "2.0.5",
-        "Authors@R": "c(\n    person(\"Stefan Milton\", \"Bache\", , \"stefan@stefanbache.dk\", role = c(\"aut\", \"cph\"),\n           comment = \"Original author and creator of magrittr\"),\n    person(\"Hadley\", \"Wickham\", , \"hadley@posit.co\", role = \"aut\"),\n    person(\"Lionel\", \"Henry\", , \"lionel@posit.co\", role = \"cre\"),\n    person(\"Posit Software, PBC\", role = c(\"cph\", \"fnd\"),\n            comment = c(ROR = \"03wc8by49\"))\n  )",
-        "Description": "Provides a mechanism for chaining commands with a new\n    forward-pipe operator, %>%. This operator will forward a value, or the\n    result of an expression, into the next function call/expression.\n    There is flexible support for the type of right-hand side expressions.\n    For more information, see package vignette.  To quote Rene Magritte,\n    \"Ceci n'est pas un pipe.\"",
-        "License": "MIT + file LICENSE",
-        "URL": "https://magrittr.tidyverse.org,\nhttps://github.com/tidyverse/magrittr",
-        "BugReports": "https://github.com/tidyverse/magrittr/issues",
-        "Depends": "R (>= 3.4.0)",
-        "Suggests": "covr, knitr, rlang, rmarkdown, testthat",
-        "VignetteBuilder": "knitr",
-        "ByteCompile": "Yes",
-        "Config/Needs/website": "tidyverse/tidytemplate",
-        "Encoding": "UTF-8",
-        "RoxygenNote": "7.3.3",
-        "NeedsCompilation": "yes",
-        "Packaged": "2026-04-03 08:09:48 UTC; lionel",
-        "Author": "Stefan Milton Bache [aut, cph] (Original author and creator of\n    magrittr),\n  Hadley Wickham [aut],\n  Lionel Henry [cre],\n  Posit Software, PBC [cph, fnd] (ROR: <https://ror.org/03wc8by49>)",
-        "Maintainer": "Lionel Henry <lionel@posit.co>",
-        "Repository": "CRAN",
-        "Date/Publication": "2026-04-04 08:00:02 UTC",
-        "Built": "R 4.5.2; aarch64-apple-darwin20; 2026-04-04 10:13:02 UTC; unix",
-        "Archs": "magrittr.so.dSYM",
-        "RemoteType": "standard",
-        "RemoteRef": "magrittr",
-        "RemotePkgRef": "magrittr",
-        "RemoteRepos": "https://cran.rstudio.com",
-        "RemoteReposName": "CRAN",
-        "RemotePkgPlatform": "aarch64-apple-darwin20",
-        "RemoteSha": "2.0.5"
-      }
-    },
     "cluster": {
       "Source": "CRAN",
       "Repository": "https://cran.rstudio.com",
@@ -2230,6 +2115,30 @@
         "Archs": "fastmap.so.dSYM"
       }
     },
+    "jquerylib": {
+      "Source": "CRAN",
+      "Repository": "https://cran.rstudio.com",
+      "description": {
+        "Package": "jquerylib",
+        "Title": "Obtain 'jQuery' as an HTML Dependency Object",
+        "Version": "0.1.4",
+        "Authors@R": "c(\n    person(\"Carson\", \"Sievert\", role = c(\"aut\", \"cre\"), email = \"carson@rstudio.com\", comment = c(ORCID = \"0000-0002-4958-2844\")),\n    person(\"Joe\", \"Cheng\", role = \"aut\", email = \"joe@rstudio.com\"),\n    person(family = \"RStudio\", role = \"cph\"),\n    person(family = \"jQuery Foundation\", role = \"cph\",\n    comment = \"jQuery library and jQuery UI library\"),\n    person(family = \"jQuery contributors\", role = c(\"ctb\", \"cph\"),\n    comment = \"jQuery library; authors listed in inst/lib/jquery-AUTHORS.txt\")\n    )",
+        "Description": "Obtain any major version of 'jQuery' (<https://code.jquery.com/>) and use it in any webpage generated by 'htmltools' (e.g. 'shiny', 'htmlwidgets', and 'rmarkdown').\n    Most R users don't need to use this package directly, but other R packages (e.g. 'shiny', 'rmarkdown', etc.) depend on this package to avoid bundling redundant copies of 'jQuery'.",
+        "License": "MIT + file LICENSE",
+        "Encoding": "UTF-8",
+        "Config/testthat/edition": "3",
+        "RoxygenNote": "7.0.2",
+        "Imports": "htmltools",
+        "Suggests": "testthat",
+        "NeedsCompilation": "no",
+        "Packaged": "2021-04-26 16:40:21 UTC; cpsievert",
+        "Author": "Carson Sievert [aut, cre] (<https://orcid.org/0000-0002-4958-2844>),\n  Joe Cheng [aut],\n  RStudio [cph],\n  jQuery Foundation [cph] (jQuery library and jQuery UI library),\n  jQuery contributors [ctb, cph] (jQuery library; authors listed in\n    inst/lib/jquery-AUTHORS.txt)",
+        "Maintainer": "Carson Sievert <carson@rstudio.com>",
+        "Repository": "CRAN",
+        "Date/Publication": "2021-04-26 17:10:02 UTC",
+        "Built": "R 4.5.0; ; 2025-04-01 11:50:17 UTC; unix"
+      }
+    },
     "memoise": {
       "Source": "CRAN",
       "Repository": "https://cran.rstudio.com",
@@ -2367,6 +2276,43 @@
         "Repository": "CRAN",
         "Date/Publication": "2026-01-14 09:10:14 UTC",
         "Built": "R 4.5.2; ; 2026-01-14 11:24:11 UTC; unix"
+      }
+    },
+    "magrittr": {
+      "Source": "CRAN",
+      "Repository": "https://cran.rstudio.com",
+      "description": {
+        "Type": "Package",
+        "Package": "magrittr",
+        "Title": "A Forward-Pipe Operator for R",
+        "Version": "2.0.5",
+        "Authors@R": "c(\n    person(\"Stefan Milton\", \"Bache\", , \"stefan@stefanbache.dk\", role = c(\"aut\", \"cph\"),\n           comment = \"Original author and creator of magrittr\"),\n    person(\"Hadley\", \"Wickham\", , \"hadley@posit.co\", role = \"aut\"),\n    person(\"Lionel\", \"Henry\", , \"lionel@posit.co\", role = \"cre\"),\n    person(\"Posit Software, PBC\", role = c(\"cph\", \"fnd\"),\n            comment = c(ROR = \"03wc8by49\"))\n  )",
+        "Description": "Provides a mechanism for chaining commands with a new\n    forward-pipe operator, %>%. This operator will forward a value, or the\n    result of an expression, into the next function call/expression.\n    There is flexible support for the type of right-hand side expressions.\n    For more information, see package vignette.  To quote Rene Magritte,\n    \"Ceci n'est pas un pipe.\"",
+        "License": "MIT + file LICENSE",
+        "URL": "https://magrittr.tidyverse.org,\nhttps://github.com/tidyverse/magrittr",
+        "BugReports": "https://github.com/tidyverse/magrittr/issues",
+        "Depends": "R (>= 3.4.0)",
+        "Suggests": "covr, knitr, rlang, rmarkdown, testthat",
+        "VignetteBuilder": "knitr",
+        "ByteCompile": "Yes",
+        "Config/Needs/website": "tidyverse/tidytemplate",
+        "Encoding": "UTF-8",
+        "RoxygenNote": "7.3.3",
+        "NeedsCompilation": "yes",
+        "Packaged": "2026-04-03 08:09:48 UTC; lionel",
+        "Author": "Stefan Milton Bache [aut, cph] (Original author and creator of\n    magrittr),\n  Hadley Wickham [aut],\n  Lionel Henry [cre],\n  Posit Software, PBC [cph, fnd] (ROR: <https://ror.org/03wc8by49>)",
+        "Maintainer": "Lionel Henry <lionel@posit.co>",
+        "Repository": "CRAN",
+        "Date/Publication": "2026-04-04 08:00:02 UTC",
+        "Built": "R 4.5.2; aarch64-apple-darwin20; 2026-04-04 10:13:02 UTC; unix",
+        "Archs": "magrittr.so.dSYM",
+        "RemoteType": "standard",
+        "RemoteRef": "magrittr",
+        "RemotePkgRef": "magrittr",
+        "RemoteRepos": "https://cran.rstudio.com",
+        "RemoteReposName": "CRAN",
+        "RemotePkgPlatform": "aarch64-apple-darwin20",
+        "RemoteSha": "2.0.5"
       }
     },
     "pillar": {
@@ -4186,39 +4132,6 @@
         "Built": "R 4.5.0; ; 2025-08-26 16:42:40 UTC; unix"
       }
     },
-    "lazyeval": {
-      "Source": "CRAN",
-      "Repository": "https://cran.rstudio.com",
-      "description": {
-        "Package": "lazyeval",
-        "Version": "0.2.3",
-        "Title": "Lazy (Non-Standard) Evaluation",
-        "Description": "An alternative approach to non-standard evaluation using\n    formulas. Provides a full implementation of LISP style 'quasiquotation',\n    making it easier to generate code with other code.",
-        "Authors@R": "c(\n    person(\"Hadley\", \"Wickham\", ,\"hadley@rstudio.com\", c(\"aut\", \"cre\")),\n    person(\"RStudio\", role = \"cph\")\n    )",
-        "License": "GPL-3",
-        "Depends": "R (>= 3.1.0)",
-        "Imports": "rlang",
-        "Suggests": "knitr, rmarkdown (>= 0.2.65), testthat, covr",
-        "VignetteBuilder": "knitr",
-        "RoxygenNote": "7.3.3",
-        "Config/build/compilation-database": "true",
-        "NeedsCompilation": "yes",
-        "Packaged": "2026-04-03 09:37:04 UTC; lionel",
-        "Author": "Hadley Wickham [aut, cre],\n  RStudio [cph]",
-        "Maintainer": "Hadley Wickham <hadley@rstudio.com>",
-        "Repository": "CRAN",
-        "Date/Publication": "2026-04-04 05:10:53 UTC",
-        "Built": "R 4.5.2; aarch64-apple-darwin20; 2026-04-04 05:36:26 UTC; unix",
-        "Archs": "lazyeval.so.dSYM",
-        "RemoteType": "standard",
-        "RemoteRef": "lazyeval",
-        "RemotePkgRef": "lazyeval",
-        "RemoteRepos": "https://cran.rstudio.com",
-        "RemoteReposName": "CRAN",
-        "RemotePkgPlatform": "aarch64-apple-darwin20",
-        "RemoteSha": "0.2.3"
-      }
-    },
     "checkmate": {
       "Source": "CRAN",
       "Repository": "https://cran.rstudio.com",
@@ -5100,7 +5013,7 @@
       "checksum": "b544c98e7d55c33a6c62b5c905878c65"
     },
     "DESCRIPTION": {
-      "checksum": "2ded625301990d227ce19348cc4e82de"
+      "checksum": "8c78cef5aae91154505e9eb890307e80"
     },
     "inst/app/_brand.yml": {
       "checksum": "0e76c1b254482f1fed96242009d7e12e"
@@ -5118,7 +5031,7 @@
       "checksum": "417d85083d6b84b9b61e59d58a9a7774"
     },
     "inst/app/www/custom.css": {
-      "checksum": "0ec695f8533a8600e153ece3b689db26"
+      "checksum": "3ebbbf0d93556b4fde5ead691eecb85a"
     },
     "inst/app/www/custom.js": {
       "checksum": "3ae58584584ac1b5c60f10b5cb51be64"
@@ -5145,7 +5058,7 @@
       "checksum": "fb332cd6d7ae6db6e4a60068f803c6f9"
     },
     "NAMESPACE": {
-      "checksum": "3c6625dc35aa89a1f5cd624867bfa14a"
+      "checksum": "5cf5227d60746f5fc451c36c5987ec49"
     },
     "R/_disable_autoload.R": {
       "checksum": "1178c335d6c11555fd1c4ec6098dfee6"
@@ -5154,7 +5067,7 @@
       "checksum": "9bc06cb165b344f47287451390b143e9"
     },
     "R/app_server.R": {
-      "checksum": "be0a8ebb3871d710fa9fca952bc25be4"
+      "checksum": "ab7bf38dc35219bafa0acdec7e0a068e"
     },
     "R/app_ui.R": {
       "checksum": "5c157cf75f1dc86575f3aec9edc649d8"
@@ -5172,7 +5085,7 @@
       "checksum": "8c7a2dcd1ebf52a753cc21e237557067"
     },
     "R/fct_decomposition_summary.R": {
-      "checksum": "a3676db897131c5b2ab906b4ae4b7556"
+      "checksum": "b7151f5cd456520c6cefe5ac023c79b4"
     },
     "R/fct_export.R": {
       "checksum": "9f76c0f73f4603b33dd990774f9f8816"
@@ -5187,7 +5100,7 @@
       "checksum": "5141232cf6e66c2fbb5f8f8dd0fcafb7"
     },
     "R/fct_incidence.R": {
-      "checksum": "8abce3ad807b3d82e9187fd6e893114f"
+      "checksum": "dbc57b147bf2a3bc7c802ddecbc0eb5c"
     },
     "R/fct_load_data.R": {
       "checksum": "d5db20ef1b76576192031b196b04aab8"
@@ -5205,7 +5118,7 @@
       "checksum": "da6a84dd581ff507407c2d39b8e129f1"
     },
     "R/fct_outcome.R": {
-      "checksum": "a2a5016241b09adf4a9e36afae871bd5"
+      "checksum": "5b0f290d9145725d61c61f1fd775915a"
     },
     "R/fct_overview_metadata.R": {
       "checksum": "bbac058db1d31202d725e16ca0fc9df0"
@@ -5217,10 +5130,10 @@
       "checksum": "487102d05d0aed893865d7fc55116981"
     },
     "R/fct_policy_sim_compare.R": {
-      "checksum": "090d6c84dcdd89963f28ba67cf13a121"
+      "checksum": "b748b0a0285ef5cc26b611762bb8f7e3"
     },
     "R/fct_policy_sim.R": {
-      "checksum": "20829f01fcac0c31cc39f970a8aaa80f"
+      "checksum": "af7d678b22b7ce8a1c401876b12a5d74"
     },
     "R/fct_predict_outcomes.R": {
       "checksum": "bddf99ebc90a573601247c485011d2a1"
@@ -5229,28 +5142,28 @@
       "checksum": "b9a156c00162978843d90d09d9569572"
     },
     "R/fct_results_table2.R": {
-      "checksum": "fcf02c630b388bd894afc5581841bacf"
+      "checksum": "bb9d65bb139517e69f7fbcf29b129f54"
     },
     "R/fct_results.R": {
-      "checksum": "aa2088ccb4bf16ddb67ac9bb2dfe8aa6"
+      "checksum": "50301e0a7aba87b8e64ee924d028e958"
     },
     "R/fct_rif_sim.R": {
       "checksum": "1fd7bec800cadd88d1b2f944099360aa"
     },
     "R/fct_run_simulation.R": {
-      "checksum": "92e6dd355891487710c888be6ae78774"
+      "checksum": "0eaf8e706cea7213aa640f14bb089011"
     },
     "R/fct_sample.R": {
       "checksum": "fd9166bd2b9dd590f5deb3b82185df53"
     },
     "R/fct_sim_compare.R": {
-      "checksum": "8ce2fdc84005f469f76184346099a493"
+      "checksum": "224fee91d8303a92d2e2a0069ac5d22d"
     },
     "R/fct_sim_diag.R": {
-      "checksum": "5510435d6da74d35ff5e9564c7176718"
+      "checksum": "d35a67868c96b641da986ef0a81a232a"
     },
     "R/fct_simulations.R": {
-      "checksum": "bc052e797efad6da675cbd092282f755"
+      "checksum": "ef4966368e5e0aab902390808388658c"
     },
     "R/fct_step1_headline.R": {
       "checksum": "89b53db2260a415dd082236f1bc54f82"
@@ -5259,13 +5172,13 @@
       "checksum": "3e0929f8ff824f6f5c9ef014e24b4b96"
     },
     "R/fct_step2_compute.R": {
-      "checksum": "c69e013e7ba53f9ef3b8628bc3e853c1"
+      "checksum": "65b152a7e335978deb2d27047e19b99f"
     },
     "R/fct_step2_payload.R": {
-      "checksum": "f570baf9b5ad224425a0b9a22f496668"
+      "checksum": "97a3380da3e134a76f51d48a9b1d14f5"
     },
     "R/fct_surveystats.R": {
-      "checksum": "f6a5aa44ce18ea4cddc9f072df75fe4c"
+      "checksum": "f9ace4334acd579a037be044ddb68a29"
     },
     "R/fct_uncertainty_helpers.R": {
       "checksum": "04012022b778a413f3e98258cae750b7"
@@ -5277,7 +5190,7 @@
       "checksum": "1c5b1e8c5bbeb525756cde4ce4cda9ab"
     },
     "R/fct_weatherstats.R": {
-      "checksum": "72d97e9c30be0a37ce7d00632204ce18"
+      "checksum": "3d299f828fbe9df42360506195f8dc70"
     },
     "R/globals.R": {
       "checksum": "a8556272ad990f732a24fe6f0f8a206b"
@@ -5289,70 +5202,70 @@
       "checksum": "4a3b59bed0148bc41a91ac6a39b47e35"
     },
     "R/mod_1_02_surveystats.R": {
-      "checksum": "be4ed484a243445de5ae874d53fa5eee"
+      "checksum": "3ed83eb3515cc62397f8805635658c55"
     },
     "R/mod_1_03_outcome.R": {
-      "checksum": "3c52041c89a25f2ecf04ed58392b5127"
+      "checksum": "083ad4d6d521040d3c236f91a0559982"
     },
     "R/mod_1_04_weather.R": {
       "checksum": "0e78bce4bb6e586ca0c7d49dcd24e617"
     },
     "R/mod_1_05_weatherstats.R": {
-      "checksum": "ad74d7c35cd35210e58cca377bd2eb42"
+      "checksum": "3d972f575a18e291849453351dad8052"
     },
     "R/mod_1_06_model.R": {
       "checksum": "b69eb1f3cfd3327f90112521913904a0"
     },
     "R/mod_1_07_results.R": {
-      "checksum": "0325116e8bd73464c842d7f88e5c984d"
+      "checksum": "50f9d0e15a312dce4c171a0ac75b8771"
     },
     "R/mod_1_08_modelfit.R": {
-      "checksum": "8fb742e37e1a066d235b32d7995ba76d"
+      "checksum": "c2921851bdc479c25d7a58a406ea3eae"
     },
     "R/mod_1_modelling.R": {
       "checksum": "070f88e49e0e62f8f5256ee6c3c594df"
     },
     "R/mod_2_01_weathersim.R": {
-      "checksum": "9ebb6097f3a0e5b2be2a24e96a75d96b"
+      "checksum": "13b6041562df2e4028149e26552d8625"
     },
     "R/mod_2_02_results.R": {
-      "checksum": "e117b2083f87a172eb123fe18ec71a58"
+      "checksum": "405f0585a0aa743044b89bd9194614bd"
     },
     "R/mod_2_03_diagnostics.R": {
-      "checksum": "86e257d1bcd41d67652c91b76fc18bff"
+      "checksum": "31d671028660ee25b319a50ab4152cac"
     },
     "R/mod_2_simulation.R": {
-      "checksum": "87dfa2891e9f3f30bd79dc2f411e2aa1"
+      "checksum": "a809809a230652c53c274c13170d7368"
     },
     "R/mod_3_01_sp.R": {
-      "checksum": "91feb5790f4201863baf0c5a512d0f3b"
+      "checksum": "8adb9048238280e38444a51c9f5e530c"
     },
     "R/mod_3_02_infra.R": {
-      "checksum": "a67faa7efbe70daf266bab9bb9b63f6a"
+      "checksum": "e4579e47f5fa63802f1138d948368fe3"
     },
     "R/mod_3_03_digital.R": {
-      "checksum": "4e9fefe58728274027316e3a24d66e8e"
+      "checksum": "48b7f28fc36cba36423adbe2ce93711f"
     },
     "R/mod_3_04_labor.R": {
-      "checksum": "f522b3095bb0876b5971d24f36adee30"
+      "checksum": "7198391b7c5102ba4a3e26b78fecce27"
     },
     "R/mod_3_05_education.R": {
-      "checksum": "cb7c0b12a4adcde84fd9933b2bb95e2f"
+      "checksum": "cca66285e5bcce2d49f8228b511d5e96"
     },
     "R/mod_3_06_policy_sim.R": {
-      "checksum": "f12c2b7880a958a86ef30498edd3ebbf"
+      "checksum": "2c9f5739fc4175b346edaa43b857eede"
     },
     "R/mod_3_07_results.R": {
-      "checksum": "8b89b9e52365a7e4e85522584c8d7230"
+      "checksum": "3c780bf100ab7ed9aa887c30627d15f8"
     },
     "R/mod_3_08_diagnostics.R": {
-      "checksum": "b3485724cff6fa96367e4a013bf2345d"
+      "checksum": "d18373583dbd01c480036616b05b8e7b"
     },
     "R/mod_3_09_decomposition.R": {
-      "checksum": "16dd737e76cb6a8c654c02abcf64bd41"
+      "checksum": "a03cadec8dfe61c233245e60b1161de8"
     },
     "R/mod_3_scenario.R": {
-      "checksum": "0293c6f191804f7d056bd8d0bb5719ce"
+      "checksum": "04a30a454f682f7e14df62f8db4ba1b2"
     },
     "R/RcppExports.R": {
       "checksum": "6729f575d994859c1ff72617f5ded89d"
@@ -5364,13 +5277,19 @@
       "checksum": "bfe3779480a4ae3155f8fca78f9da0be"
     },
     "R/utils_mod_1_helpers.R": {
-      "checksum": "4a97c172cca311e040c5c462c9bdaf1d"
+      "checksum": "52d388c9d9b0308804a49f495b48a392"
     },
     "R/utils_plot_theme.R": {
-      "checksum": "3ca07de82ae7317c79f048d1fc3f8984"
+      "checksum": "cb22a501a4e8e0222e9d236409d3d010"
     },
     "R/utils_ui.R": {
-      "checksum": "282cce96dfc317e3ff9b3baa6caebc0d"
+      "checksum": "64cf3297fa8daf8fa4e5af64fc32ed70"
+    },
+    "src/RcppExports.cpp": {
+      "checksum": "d86839517cba2338b433402e7b916ac3"
+    },
+    "src/welfare_stats.cpp": {
+      "checksum": "08808b37feab32371d2526964fd922ba"
     }
   },
   "users": null

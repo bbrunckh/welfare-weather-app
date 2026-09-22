@@ -42,7 +42,7 @@ cat("Staged committed content (git archive HEAD) at:", stage, "\n")
 # -- 2. Generate the manifest ------------------------------------------------
 rsconnect::writeManifest(
   appDir = stage,
-  appFiles = c("app.R", "R", "inst", "DESCRIPTION", "NAMESPACE"),
+  appFiles = c("app.R", "R", "src", "inst", "DESCRIPTION", "NAMESPACE"),
   appPrimaryDoc = "app.R"
 )
 manifest <- jsonlite::fromJSON(file.path(stage, "manifest.json"),
