@@ -812,7 +812,8 @@ ridge_echart_widget <- function(rd_data, ridge_levels, ridge_labels, styles,
     splitLine = list(show = FALSE)
   )
   e$x$opts$grid <- list(
-    containLabel = TRUE, left = 8, right = 20, top = 40, bottom = 44
+    containLabel = TRUE, left = 8, right = 20, top = 40, bottom = 44,
+    width = "auto", height = "auto"
   )
   e$x$opts$tooltip <- list(
     trigger = "axis",
@@ -895,7 +896,7 @@ echart_resid_weather <- function(model, haz_var, weather_df, x_label = haz_var,
   y_axis <- list(
     type = "value", scale = TRUE, name = "Residuals",
     nameLocation = "end",
-    nameTextStyle = wise_eaxis_name(),
+    nameTextStyle = wise_eyaxis_name(),
     axisLabel = wise_eaxis_label(), splitLine = wise_esplit_line()
   )
   zero_mark <- .e_zero_line()
@@ -911,9 +912,9 @@ echart_resid_weather <- function(model, haz_var, weather_df, x_label = haz_var,
     bin_idx <- match(as.character(x_vals), lvls)
     set.seed(1)
     jit <- (bin_idx - 1L) + stats::runif(length(bin_idx), -0.18, 0.18)
-    means <- vapply(lvls, function(l) {
+    means <- unname(vapply(lvls, function(l) {
       mean(res[as.character(x_vals) == l], na.rm = TRUE)
-    }, numeric(1))
+    }, numeric(1)))
 
     e$x$opts$series <- list(
       list(
@@ -925,11 +926,33 @@ echart_resid_weather <- function(model, haz_var, weather_df, x_label = haz_var,
         markLine = zero_mark
       ),
       list(
-        name = "Bin mean", type = "scatter",
-        data = lapply(seq_along(lvls), function(i) list(i - 1L, means[i])),
-        symbolSize = 9, z = 2,
+        name = "Bin mean", type = "line",
+        data = lapply(seq_along(lvls), function(i) list(
+          value = list(i - 1L, unname(means[i])), symbolSize = 10
+        )),
+        symbol = "circle", symbolSize = 10, showSymbol = TRUE, z = 10,
+        lineStyle = list(color = .wise_marker_alt, width = 2),
         itemStyle = list(color = .wise_marker_alt),
-        tooltip = list(show = TRUE)
+        tooltip = list(
+          show = TRUE,
+          formatter = htmlwidgets::JS(
+            "function(p){var v=Array.isArray(p.value)?Number(p.value[1]):Number(p.value);return isFinite(v)?'Mean residual: <b>'+v.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})+'</b>':'';}"
+          )
+        )
+      ),
+      list(
+        name = "Bin mean", type = "scatter",
+        data = lapply(seq_along(lvls), function(i) list(
+          value = list(i - 1L, unname(means[i])), symbolSize = 10
+        )),
+        symbol = "circle", symbolSize = 9, z = 11,
+        itemStyle = list(color = .wise_marker_alt),
+        tooltip = list(
+          show = TRUE,
+          formatter = htmlwidgets::JS(
+            "function(p){var v=Array.isArray(p.value)?Number(p.value[1]):Number(p.value);return isFinite(v)?'Mean residual: <b>'+v.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})+'</b>':'';}"
+          )
+        )
       )
     )
     e$x$opts$xAxis <- list(list(
@@ -938,7 +961,7 @@ echart_resid_weather <- function(model, haz_var, weather_df, x_label = haz_var,
       nameLocation = "middle", nameGap = 32,
       nameTextStyle = wise_eaxis_name(align = "center"),
       axisLabel = modifyList(
-        wise_eaxis_label(rotate = 30),
+        wise_eaxis_label(rotate = 0),
         list(formatter = htmlwidgets::JS("function(v){return v;}"))
       ),
       axisTick = list(alignWithLabel = TRUE),
@@ -956,7 +979,7 @@ echart_resid_weather <- function(model, haz_var, weather_df, x_label = haz_var,
     agg <- stats::aggregate(res ~ bins, FUN = mean)
     mids <- (head(brks, -1) + tail(brks, -1)) / 2
     mean_pts <- lapply(seq_len(nrow(agg)), function(i) {
-      list(mids[as.integer(agg$bins[i])], agg$res[i])
+      list(mids[as.integer(agg$bins[i])], unname(agg$res[i]))
     })
 
     e$x$opts$series <- list(
@@ -969,10 +992,27 @@ echart_resid_weather <- function(model, haz_var, weather_df, x_label = haz_var,
         markLine = zero_mark
       ),
       list(
-        name = "Bin mean", type = "scatter", data = mean_pts,
-        symbolSize = 8, z = 2,
+        name = "Bin mean", type = "line", data = mean_pts,
+        symbol = "circle", symbolSize = 9, showSymbol = TRUE, z = 10,
+        lineStyle = list(color = .wise_marker_alt, width = 2),
         itemStyle = list(color = .wise_marker_alt),
-        tooltip = list(show = TRUE)
+        tooltip = list(
+          show = TRUE,
+          formatter = htmlwidgets::JS(
+            "function(p){var v=Array.isArray(p.value)?Number(p.value[1]):Number(p.value);return isFinite(v)?'Mean residual: <b>'+v.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})+'</b>':'';}"
+          )
+        )
+      ),
+      list(
+        name = "Bin mean", type = "scatter", data = mean_pts,
+        symbol = "circle", symbolSize = 9, z = 11,
+        itemStyle = list(color = .wise_marker_alt),
+        tooltip = list(
+          show = TRUE,
+          formatter = htmlwidgets::JS(
+            "function(p){var v=Array.isArray(p.value)?Number(p.value[1]):Number(p.value);return isFinite(v)?'Mean residual: <b>'+v.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})+'</b>':'';}"
+          )
+        )
       )
     )
     e$x$opts$xAxis <- list(list(
@@ -984,9 +1024,10 @@ echart_resid_weather <- function(model, haz_var, weather_df, x_label = haz_var,
     ))
   }
   e$x$opts$yAxis <- list(y_axis)
-  e$x$opts$grid <- list(
-    containLabel = TRUE, left = 8, right = 20, top = 36, bottom = 46
-  )
+    e$x$opts$grid <- list(
+      containLabel = TRUE, left = 8, right = 20, top = 36, bottom = 46,
+      width = "auto", height = "auto"
+    )
   e$x$opts$tooltip <- list(trigger = "item")
   wise_echart_theme(e)
 }

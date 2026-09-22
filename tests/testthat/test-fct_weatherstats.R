@@ -199,7 +199,7 @@ test_that("interactive binned weather distribution keeps labels and tooltip visi
   expect_null(names(chart$x$opts$xAxis$data))
   expect_equal(chart$x$opts$xAxis$axisLabel$rotate, 0)
   expect_null(chart$x$opts$yAxis$name)
-  expect_equal(chart$x$opts$title$left, 8)
+  expect_null(chart$x$opts$title)
   expect_equal(chart$x$opts$grid$bottom, 84)
   expect_true(!is.null(chart$x$opts$tooltip$formatter))
 })

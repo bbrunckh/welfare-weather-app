@@ -436,6 +436,14 @@ mod_1_05_weatherstats_server <- function(
               if ("transform" %in% colnames(so) && isTRUE(so$transform == "log")) {
                 so$label <- paste0("Log ", so$label)
               }
+              if (identical(as.character(so$name[1]), "poor")) {
+                line <- suppressWarnings(as.numeric(so$povline[1]))
+                if (is.finite(line)) {
+                  so$label <- paste0(
+                    "Poor ($", formatC(line, format = "f", digits = 2), "/day)"
+                  )
+                }
+              }
 
               echart_binscatter(
                 df       = df,

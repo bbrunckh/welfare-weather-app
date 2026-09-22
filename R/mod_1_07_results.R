@@ -384,6 +384,16 @@ mod_1_07_results_server <- function(id,
           binned <- is_bin_vec[i]
           un <- as.character(sw_snap$units[sw_snap$name == mf$weather_terms[i]][1])
           if (is.na(un) || !nzchar(un)) un <- "unit"
+          if (identical(as.character(outcome_snap$name[1]), "poor")) {
+            line <- suppressWarnings(as.numeric(outcome_snap$povline[1]))
+            if (is.finite(line)) {
+              poor_label <- paste0("Poor ($", formatC(line, format = "f", digits = 2), "/day)")
+              if (binned) {
+                return(paste0("Change in ", poor_label, " probability vs reference bin (pp)"))
+              }
+              return(paste0("pp change in ", poor_label, " probability per +1 ", un))
+            }
+          }
           if (binned) {
             if (is_logit) {
               if (is.finite(profile_eta0)) {

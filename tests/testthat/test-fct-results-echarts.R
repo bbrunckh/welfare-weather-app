@@ -73,7 +73,7 @@ test_that("moderated continuous branch draws one curve per moderator level", {
   expect_false(is.null(ch$x$opts$legend))
 })
 
-test_that("binned branch draws a pointrange over bins with a connecting line", {
+test_that("binned branch draws a ribbon and estimate line over bins", {
   skip_if_not_installed("echarts4r")
   ch <- echart_weather_effect_plot(
     ec_fit_bin, "tx_bin", character(0), TRUE, ec_lf, "fixest",
@@ -81,11 +81,12 @@ test_that("binned branch draws a pointrange over bins with a connecting line", {
     x_label = "Max temp bins", y_label = "Effect vs reference bin"
   )
   expect_s3_class(ch, "echarts4r")
-  expect_equal(length(ch$x$opts$series), 2L)
-  # Model matrix carries 3 of the 4 bins (first is the omitted reference).
-  expect_equal(length(ch$x$opts$series[[1]]$data), 3L)
-  # Whiskers (3) + zero reference ride the points series' markLine.
-  expect_equal(length(ch$x$opts$series[[2]]$markLine$data), 4L)
+  expect_equal(length(ch$x$opts$series), 3L)
+  expect_equal(ch$x$opts$series[[2]]$type, "custom")
+  expect_equal(ch$x$opts$series[[3]]$type, "line")
+  expect_equal(ch$x$opts$series[[3]]$symbol, "circle")
+  expect_equal(unlist(ch$x$opts$series[[3]]$markLine$symbol), c("none", "none"))
+  expect_match(ch$x$opts$tooltip$formatter, "95% CI", fixed = TRUE)
   expect_match(ch$x$opts$xAxis[[1]]$name, "Max temp bins")
 })
 
@@ -275,9 +276,9 @@ test_that("echart resid weather draws scatter + bin means over a value axis", {
   ch <- echart_resid_weather(ec_fit_cont, "tx", weather_df = ec_dat,
                              x_label = "Max temp (deg C)")
   expect_s3_class(ch, "echarts4r")
-  expect_equal(length(ch$x$opts$series), 2L)
+  expect_equal(length(ch$x$opts$series), 3L)
   expect_equal(vapply(ch$x$opts$series, function(s) s$type, character(1)),
-               c("scatter", "scatter"))
+               c("scatter", "line", "scatter"))
   expect_match(ch$x$opts$yAxis[[1]]$name, "Residuals")
   expect_null(echart_resid_weather(ec_fit_cont, "zz", weather_df = ec_dat))
 })

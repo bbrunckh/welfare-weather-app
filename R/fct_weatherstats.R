@@ -2069,20 +2069,13 @@ echart_weather_bins_compare <- function(df, hv, label, hist_df = NULL,
   # Keep the horizontal y-axis caption anchored to the plot's left edge. An
   # ECharts y-axis name is centred by default, which can push a long caption
   # outside the chart when the category axis also has a title.
-  e$x$opts$title <- list(
-    text = "Share of observations",
-    left = 8, top = 0,
-    textStyle = list(
-      color = .wise_charcoal, fontSize = 13, fontWeight = "normal",
-      align = "left", verticalAlign = "top"
-    )
-  )
+  e$x$opts$title <- NULL
   e$x$opts$legend <- wise_elegend_style(
-    left = 150, right = 8, top = 0, width = "auto",
-    orient = "horizontal", itemGap = 8
+    left = 8, right = 8, top = 4, width = "100%", height = "42%",
+    orient = "horizontal", itemGap = 8, itemWidth = 26, itemHeight = 14
   )
   e$x$opts$grid <- list(
-    containLabel = TRUE, left = 8, right = 14, top = 48, bottom = 84
+    containLabel = TRUE, left = 8, right = 14, top = 92, bottom = 84
   )
   e$x$opts$tooltip <- list(
     trigger = "axis", axisPointer = list(type = "shadow"),
