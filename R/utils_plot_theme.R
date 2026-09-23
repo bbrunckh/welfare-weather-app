@@ -225,6 +225,46 @@ wise_elegend_style <- function(...) {
 #' @param base_size Unused today; kept for parity with [theme_wise()].
 #' @noRd
 wise_echart_theme <- function(e, base_size = 14) {
+  # Value axes should keep the regular interior ticks readable without
+  # duplicating the data-range endpoints at the plot edges. Category axes are
+  # left unchanged so their first and last category labels remain visible.
+  hide_value_axis_endpoints <- function(axes) {
+    if (is.null(axes)) return(axes)
+
+    axis_fields <- c("type", "axisLabel", "axisTick", "data", "gridIndex", "show")
+    single_axis <- !is.null(names(axes)) && any(names(axes) %in% axis_fields)
+    axis_list <- if (single_axis) list(axes) else axes
+    axis_list <- lapply(axis_list, function(axis) {
+      axis_type <- axis$type
+      is_value <- identical(axis_type, "value") || identical(axis_type, "log") ||
+        (is.null(axis_type) && is.null(axis$data))
+      if (is_value) {
+        labels <- if (is.null(axis$axisLabel)) list() else axis$axisLabel
+        if (is.null(labels$showMinLabel)) labels$showMinLabel <- FALSE
+        if (is.null(labels$showMaxLabel)) labels$showMaxLabel <- FALSE
+        axis$axisLabel <- labels
+      }
+      axis
+    })
+    if (single_axis) axis_list[[1L]] else axis_list
+  }
+
+  e$x$opts$xAxis <- hide_value_axis_endpoints(e$x$opts$xAxis)
+  e$x$opts$yAxis <- hide_value_axis_endpoints(e$x$opts$yAxis)
+  keep_x_axis_at_bottom <- function(axes) {
+    if (is.null(axes)) return(axes)
+    axis_fields <- c("type", "axisLabel", "axisTick", "data", "gridIndex", "show")
+    single_axis <- !is.null(names(axes)) && any(names(axes) %in% axis_fields)
+    axis_list <- if (single_axis) list(axes) else axes
+    axis_list <- lapply(axis_list, function(axis) {
+      axis_line <- axis$axisLine %||% list()
+      axis_line$onZero <- FALSE
+      axis$axisLine <- axis_line
+      axis
+    })
+    if (single_axis) axis_list[[1L]] else axis_list
+  }
+  e$x$opts$xAxis <- keep_x_axis_at_bottom(e$x$opts$xAxis)
   e$x$opts$textStyle <- list(fontFamily = "Helvetica, Arial, sans-serif")
   if (is.null(e$x$opts$color)) {
     e$x$opts$color <- as.character(.wise_cat)

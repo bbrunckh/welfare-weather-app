@@ -607,18 +607,19 @@ model_term_names <- function(sm) {
 
 # Section-grid injection for n side-by-side panels in one widget (used where
 # the ggplot version was a patchwork of separate panels).
-.e_multi_grids <- function(e, n, titles = NULL, height = "300px") {
+.e_multi_grids <- function(e, n, titles = NULL, height = "300px",
+                           contain_label = TRUE) {
   pad <- 8
   title_h <- if (is.null(titles)) 0 else 24
   gap <- 4
-  slot <- (100 - pad * (n + 1) - gap * (n - 1)) / n
+  slot <- (100 - 2 * pad - gap * (n - 1)) / n
   widths <- paste0(slot, "%")
-  lefts <- paste0(pad + (pad + slot + gap) * (seq_len(n) - 1), "%")
+  lefts <- paste0(pad + (slot + gap) * (seq_len(n) - 1), "%")
   grids <- lapply(seq_len(n), function(i) {
     list(
-      left = lefts[i], width = widths[i],
+      left = lefts[i], width = widths,
       top = if (title_h > 0) title_h + pad else pad,
-      bottom = pad, containLabel = TRUE
+      bottom = pad, containLabel = contain_label
     )
   })
   e$x$opts$grid <- grids

@@ -120,9 +120,10 @@ test_that("fit snapshot captures fit-time labels; headings follow re-fit engine"
       expect_identical(snap$weather$name, "pr")
       expect_match(html_of("heading_effect"),
                    "across the welfare distribution", fixed = TRUE)
-      # The RIF coefficient-stability section is suppressed (the quantile
-      # curve in "Who is most affected?" carries that content).
-      expect_identical(nchar(html_of("heading_coef")), 0L)
+      # RIF coefficient stability is available with a tau selector when the
+      # fitted model carries a quantile grid. This test fixture has no grid.
+      expect_match(html_of("heading_coef"), "stable across specifications")
+      expect_identical(nchar(html_of("rif_tau_selector")), 0L)
       expect_true(model_fit_val()$.snap$outcome$label == "Outcome B")
     }
   )
@@ -247,7 +248,13 @@ test_that("redesigned sections render: who-panel, focused table, RIF suppression
         weather_terms     = selected_weather$name,
         interaction_terms = if (identical(selected_model$engine, "fixest")) "tx:urban" else character(0),
         fit1 = NULL, fit2 = NULL, fit3 = NULL,
-        rif_grid = NULL
+        rif_grid = if (identical(selected_model$engine, "rif")) {
+          expand.grid(
+            term = "tx", tau = c(0.1, 0.5, 0.9), model = 1:3,
+            KEEP.OUT.ATTRS = FALSE, stringsAsFactors = FALSE
+          ) |>
+            transform(estimate = seq_len(9) / 10, std.error = 0.1)
+        } else NULL
       )
     },
     echart_make_coefplot      = function(...) NULL,
@@ -310,13 +317,15 @@ test_that("redesigned sections render: who-panel, focused table, RIF suppression
       expect_match(html_of("focused_table"), "focused-reactable", fixed = TRUE)
       expect_match(html_of("specs_table"), "specs-reactable", fixed = TRUE)
 
-      # Refit as RIF: coefficient-stability section suppressed, who note
-      # switches to the quantile wording, specs comparison hidden.
+      # Refit as RIF: coefficient stability gets a tau selector, the who note
+      # switches to quantile wording, and specs comparison is hidden.
       sel_model(list(engine = "rif"))
       session$elapse(500); session$flushReact()
       run_model(3L); settle()
       run_model(4L); settle()
-      expect_identical(nchar(html_of("heading_coef")), 0L)
+      expect_match(html_of("heading_coef"), "stable across specifications")
+      expect_match(html_of("rif_tau_selector"), "Welfare quantile")
+      expect_match(html_of("rif_tau_selector"), "τ = 0.5")
       expect_match(html_of("who_note_ui"),
                    "welfare distribution", fixed = TRUE)
       # renderReactable(NULL) emits an empty widget payload - no table data.

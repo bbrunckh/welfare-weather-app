@@ -50,8 +50,13 @@ mod_1_07_results_server <- function(id,
     # INT-08: TRUE while the stored fit's run signature no longer matches the
     # current upstream inputs.
     stale <- reactiveVal(FALSE)
-    fit_generation <- reactiveVal(0L)
-    fit_status <- reactiveVal("idle")
+        fit_generation <- reactiveVal(0L)
+        fit_status <- reactiveVal("idle")
+        rif_tau_input <- shiny::reactiveVal(NULL)
+        shiny::observeEvent(input$rif_tau, {
+          tau_value <- suppressWarnings(as.numeric(input$rif_tau))
+          if (length(tau_value) && is.finite(tau_value)) rif_tau_input(tau_value)
+        }, ignoreInit = TRUE)
 
     # Run signature (INT-08) ----
     # Immutable snapshot of everything the fit depends on; recomputed from
@@ -340,16 +345,16 @@ mod_1_07_results_server <- function(id,
           error = function(e) NULL
         )
 
-        # Coefficient plots show model-scale coefficients, not translated
-        # effects, so their axis carries the coefficient unit.
+        # Keep a shared effect-size label while retaining the coefficient's
+        # native scale in parentheses.
         coef_unit_lab <- if (is_logit) {
-          "Coefficient (log-odds)"
+          "Effect size (log-odds)"
         } else if (is_rif || is_log_out) {
-          "Coefficient (log points)"
+          "Effect size (log points)"
         } else if (is_lpm) {
-          "Coefficient (probability)"
+          "Effect size (probability)"
         } else {
-          "Coefficient"
+          "Effect size"
         }
 
         # Spec (3) is only "FE + controls" when controls were actually chosen;
@@ -389,45 +394,41 @@ mod_1_07_results_server <- function(id,
             if (is.finite(line)) {
               poor_label <- paste0("Poor ($", formatC(line, format = "f", digits = 2), "/day)")
               if (binned) {
-                return(paste0("Change in ", poor_label, " probability vs reference bin (pp)"))
+                return("Effect size (percentage points vs reference bin)")
               }
-              return(paste0("pp change in ", poor_label, " probability per +1 ", un))
+              return(paste0("Effect size (percentage points per +1 ", un, ")"))
             }
           }
           if (binned) {
             if (is_logit) {
               if (is.finite(profile_eta0)) {
                 paste0(
-                  "Change in ", y_short,
-                  " probability vs reference bin (pp)"
+                  "Effect size (percentage points vs reference bin)"
                 )
               } else {
-                "Effect vs reference bin (log-odds)"
+                "Effect size (log-odds vs reference bin)"
               }
             } else if (is_lpm) {
-              paste0("Change in ", y_short, " probability vs reference bin")
+              "Effect size (probability vs reference bin)"
             } else if (is_log_out) {
-              paste0(
-                "Effect on log ", y_lab_lower,
-                " vs reference bin (log points)"
-              )
+              "Effect size (log points vs reference bin)"
             } else {
-              paste0("Effect on ", y_lab_lower, " vs reference bin")
+              "Effect size (outcome units vs reference bin)"
             }
           } else {
             # Continuous shapes draw the marginal effect (slope vs weather).
             if (is_logit) {
               if (is.finite(profile_eta0)) {
-                paste0("pp change in ", y_short, " probability per +1 ", un)
+                paste0("Effect size (percentage points per +1 ", un, ")")
               } else {
-                paste0("log-odds change per +1 ", un)
+                paste0("Effect size (log-odds per +1 ", un, ")")
               }
             } else if (is_lpm) {
-              paste0("pp change in ", y_short, " probability per +1 ", un)
+              paste0("Effect size (probability per +1 ", un, ")")
             } else if (is_log_out) {
-              paste0("% change in ", y_lab_lower, " per +1 ", un)
+              paste0("Effect size (% change per +1 ", un, ")")
             } else {
-              paste0("Change in ", y_lab_lower, " per +1 ", un)
+              paste0("Effect size (outcome units per +1 ", un, ")")
             }
           }
         }
@@ -469,7 +470,18 @@ mod_1_07_results_server <- function(id,
         }, numeric(1)), mf$weather_terms)
         sd_named <- sd_named[is.finite(sd_named)]
 
-        coef_fig <- function(i) {
+        rif_taus <- if (is_rif && !is.null(mf$rif_grid) && nrow(mf$rif_grid)) {
+          sort(unique(mf$rif_grid$tau))
+        } else {
+          numeric(0)
+        }
+        rif_tau_default <- if (0.5 %in% rif_taus) 0.5 else if (length(rif_taus)) {
+          rif_taus[[which.min(abs(rif_taus - 0.5))]]
+        } else {
+          NULL
+        }
+        rif_tau_input(rif_tau_default)
+        coef_fig <- function(i, tau = NULL) {
           function() {
             mf <- tryCatch(model_fit_val(), error = function(e) NULL)
             if (is.null(mf) || length(mf$weather_terms) < i) {
@@ -488,6 +500,8 @@ mod_1_07_results_server <- function(id,
               pred_var          = mf$weather_terms[i],
               x_label           = coef_unit_lab,
               has_controls      = has_controls,
+              tau               = tau,
+              train_data        = mf$train_data,
               height            = "600px"
             )
           }
@@ -547,7 +561,7 @@ mod_1_07_results_server <- function(id,
                 selected_weather  = sw_snap,
                 weather_df        = snap$survey_weather,
                 rif_grid          = mf$rif_grid,
-                mark_taus         = c(0.1, 0.5, 0.9),
+                mark_taus         = NULL,
                 height            = "420px"
               )
             } else {
@@ -586,12 +600,12 @@ mod_1_07_results_server <- function(id,
           local({
             idx <- i
             term <- label_fun(mf$weather_terms[idx])
-            if (!is_rif) {
+            {
               wise_export_figure(
                 key = paste0("coefficient_plot_", idx),
                 label = paste0("Coefficient stability - ", term),
                 step = 1L,
-                fun = coef_fig(idx),
+                fun = coef_fig(idx, tau = rif_tau_default),
                 description = paste0(
                   "Weather coefficients with confidence intervals across the three ",
                   "nested specifications (specification 3 emphasised), for ", term,
@@ -641,19 +655,31 @@ mod_1_07_results_server <- function(id,
           })
         }
 
-        # Stability plots: one per weather variable (hidden for RIF - the
-        # quantile curve in "Who is most affected?" already carries that
-        # content, per the plan's duplicate-suppression rule).
+        # Stability plots: one per weather variable, including RIF curves.
+        output$rif_tau_selector <- shiny::renderUI({
+          if (!is_rif || !length(rif_taus)) return(NULL)
+          choices <- stats::setNames(
+            as.character(rif_taus),
+            paste0("\u03c4 = ", formatC(rif_taus, format = "f", digits = 1))
+          )
+          pill_toggle(
+            ns("rif_tau"), choices = choices,
+            selected = as.character(rif_tau_input()),
+            label = "Welfare quantile", layout = "horizontal"
+          )
+        })
         output$coefplot1 <- echarts4r::renderEcharts4r({
           req(model_fit_val(), length(model_fit_val()$weather_terms) >= 1)
-          ch <- coef_fig(1)()
+          tau <- if (is_rif) rif_tau_input() else NULL
+          ch <- coef_fig(1, tau = tau)()
           req(!is.null(ch))
           ch
         })
 
         output$coefplot2 <- echarts4r::renderEcharts4r({
           req(model_fit_val(), length(model_fit_val()$weather_terms) >= 2)
-          ch <- coef_fig(2)()
+          tau <- if (is_rif) rif_tau_input() else NULL
+          ch <- coef_fig(2, tau = tau)()
           req(!is.null(ch))
           ch
         })
@@ -977,9 +1003,6 @@ mod_1_07_results_server <- function(id,
         })
         output$heading_coef <- renderUI({
           req(model_fit_val())
-          if (identical(model_fit_val()$engine, "rif")) {
-            return(NULL)
-          }
           shiny::h4(
             "Is the estimate stable across specifications?",
             info_popover(shiny::p(paste(
@@ -1092,9 +1115,6 @@ mod_1_07_results_server <- function(id,
         output$coefplot_layout <- shiny::renderUI({
           req(model_fit_val())
           mf <- model_fit_val()
-          if (identical(mf$engine, "rif")) {
-            return(NULL)
-          }
           wt <- mf$weather_terms %||% character(0)
           weather_plot_layout(
             ns, length(wt),
@@ -1130,6 +1150,7 @@ mod_1_07_results_server <- function(id,
               shiny::uiOutput(ns("who_note_ui")),
               shiny::br(),
               shiny::uiOutput(ns("heading_coef")),
+              shiny::uiOutput(ns("rif_tau_selector")),
               shiny::uiOutput(ns("coefplot_layout")),
               shiny::br(),
               shiny::uiOutput(ns("heading_table")),

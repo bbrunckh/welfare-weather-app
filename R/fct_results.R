@@ -854,15 +854,15 @@ make_coefplot <- function(fit1, fit2, fit3,
         plot_terms <- all_terms[keep]
 
         plot_data <- rif_grid[rif_grid$term %in% plot_terms, ]
-        lab3 <- if (isTRUE(has_controls)) "FE + controls" else "FE (no controls selected)"
-        plot_data$model_label <- factor(
-          dplyr::case_when(
-            plot_data$model == 1L ~ "No FE",
-            plot_data$model == 2L ~ "FE",
-            TRUE ~ lab3
-          ),
-          levels = c("No FE", "FE", lab3)
-        )
+  lab3 <- "FE + covariates"
+      plot_data$model_label <- factor(
+        dplyr::case_when(
+          plot_data$model == 1L ~ "No FE or covariates",
+          plot_data$model == 2L ~ "No covariates",
+          TRUE ~ lab3
+        ),
+        levels = c("No FE or covariates", "No covariates", lab3)
+      )
         plot_data$term_label <- vapply(
           plot_data$term, function(t) coef_label(t, label_fun), character(1)
         )
@@ -927,9 +927,9 @@ make_coefplot <- function(fit1, fit2, fit3,
 
   # Spec (3) equals spec (2) when no controls are selected - say so instead
   # of labelling an identical column "FE + controls".
-  lab3 <- if (isTRUE(has_controls)) "FE + controls" else "FE (no controls selected)"
+  lab3 <- "FE + covariates"
 
-  model_list <- list("No FE" = fit1, "FE" = fit2)
+  model_list <- list("No FE or covariates" = fit1, "No covariates" = fit2)
   model_list[[lab3]] <- fit3
 
   p <- tryCatch(
@@ -966,7 +966,7 @@ make_coefplot <- function(fit1, fit2, fit3,
       coef_data$conf.low <- coef_data$Estimate - 1.96 * coef_data$`Std. Error`
       coef_data$conf.high <- coef_data$Estimate + 1.96 * coef_data$`Std. Error`
       coef_data$model <- factor(coef_data$model,
-        levels = c("No FE", "FE", lab3)
+        levels = c("No FE or covariates", "No covariates", lab3)
       )
 
       # Order y-axis labels: each main effect followed by its interaction(s),
@@ -1200,14 +1200,12 @@ make_weather_effect_plot <- function(fit, pred_var, interaction_terms, is_binned
 
         n_terms <- length(unique(plot_data$term))
         has_int_terms <- any(grepl(":", plot_data$term, fixed = TRUE))
-        rif_y_lab <- tryCatch(
-          {
-            yv <- as.character(stats::formula(fit)[[2]])
-            paste0("Effect on ", label_fun(yv), " (log points)")
-          },
-          error = function(e) "Effect (log points)"
-        )
-        if (n_terms > 1 && !has_int_terms) {
+        rif_y_lab <- "Effect size (log points)"
+        is_bin_terms <- all(grepl(
+          paste0("^", pred_esc, "[\\[\\(]"),
+          unique(plot_data$term)
+        ))
+        if (n_terms > 1 && !has_int_terms && is_bin_terms) {
           # Binned predictor without interactions: one beta(tau) curve per bin,
           # one facet per bin in numeric bin order. (The moderated branch below
           # is for interaction terms and would invent 0/1 moderator levels.)
@@ -2764,10 +2762,9 @@ plot_importance <- function(model, label_fun = identity) {
     share = 100 * imp^2 / tot,
     stringsAsFactors = FALSE
   )
-  df$label <- vapply(df$term, function(t) {
-    lab <- .pretty_poly_label(t, label_fun)
-    if (is.null(lab) || is.na(lab) || !nzchar(lab)) t else lab
-  }, character(1))
+  coef_map <- make_coef_map(df$term, label_fun)
+  df$label <- unname(names(coef_map)[match(df$term, unname(coef_map))])
+  df$label[is.na(df$label) | !nzchar(df$label)] <- df$term[is.na(df$label) | !nzchar(df$label)]
   df <- df[order(-df$share), , drop = FALSE]
   df <- utils::head(df, 15)
 
@@ -2907,14 +2904,13 @@ plot_importance <- function(model, label_fun = identity) {
 
 #' Echarts coefficient plot across three progressive model fits
 #'
-#' Interactive counterpart of the non-RIF branch of [make_coefplot()]
-#' (guidelines §7): the same coefficient table, 95% CI whiskers, wrapped
-#' labels and specification colours. Rendered only for non-RIF engines (the
-#' RIF quantile curve lives in "Who is most affected?"), so the RIF branch
-#' returns `NULL`.
+#' Interactive coefficient stability plot (guidelines §7), with 95% CI
+#' whiskers, wrapped labels and specification colours. RIF coefficients are
+#' filtered to one selected welfare quantile.
 #'
 #' @inheritParams make_coefplot
 #' @param height Widget height; a CSS length or a number of pixels.
+#' @param tau Scalar quantile used for RIF coefficient stability plots.
 #'
 #' @return An `echarts4r` widget, or `NULL`.
 #'
@@ -2929,16 +2925,102 @@ echart_make_coefplot <- function(fit1, fit2, fit3,
                                  pred_var = NULL,
                                  x_label = NULL,
                                  has_controls = TRUE,
-                                 height = "600px") {
+                                 height = "600px",
+                                 tau = NULL,
+                                 train_data = NULL) {
+  lab3 <- "FE + covariates"
   if (identical(engine, "rif")) {
-    return(invisible(NULL))
-  }
-  if (!requireNamespace("fixest", quietly = TRUE)) {
-    return(echart_blank("Package 'fixest' is required.", height = height))
-  }
-
-  lab3 <- if (isTRUE(has_controls)) "FE + controls" else "FE (no controls selected)"
-  model_list <- list("No FE" = fit1, "FE" = fit2)
+    if (is.null(rif_grid) || is.null(pred_var)) {
+      return(echart_blank("No RIF coefficients found to plot.", height = height))
+    }
+    term_has_predictor <- function(term) {
+      parts <- strsplit(as.character(term), ":", fixed = TRUE)[[1L]]
+      any(vapply(parts, function(part) {
+        tokens <- regmatches(part, gregexpr("[[:alnum:]_.]+", part))[[1L]]
+        pred_var %in% tokens
+      }, logical(1)))
+    }
+    term_match <- vapply(rif_grid$term, term_has_predictor, logical(1))
+    grid <- rif_grid[term_match, , drop = FALSE]
+    if (!nrow(grid)) {
+      return(echart_blank(paste0("No RIF coefficients found for '", pred_var, "'."), height = height))
+    }
+    taus <- sort(unique(grid$tau))
+    tau <- suppressWarnings(as.numeric(tau)[1L])
+    selected_tau <- if (is.null(tau) || !length(tau) || !is.finite(tau)) {
+      if (0.5 %in% taus) 0.5 else taus[[which.min(abs(taus - 0.5))]]
+    } else {
+      taus[[which.min(abs(taus - tau))]]
+    }
+    grid <- grid[grid$tau == selected_tau, , drop = FALSE]
+    grid$model <- dplyr::case_when(
+      grid$model == 1L ~ "No FE or covariates",
+      grid$model == 2L ~ "No covariates",
+      TRUE ~ lab3
+    )
+    grid$Estimate <- grid$estimate
+    grid$.term <- grid$term
+    if (!"conf.low" %in% names(grid)) grid$conf.low <- grid$Estimate - 1.96 * grid$std.error
+    if (!"conf.high" %in% names(grid)) grid$conf.high <- grid$Estimate + 1.96 * grid$std.error
+    combined_poly <- FALSE
+    poly_terms <- unique(grid$term[
+      vapply(grid$term, term_has_predictor, logical(1)) &
+        grepl(paste0("I(", pred_var, "^"), grid$term, fixed = TRUE)
+    ])
+    if (pred_var %in% grid$term && length(poly_terms)) {
+      x_mean <- NA_real_
+      if (!is.null(train_data) && pred_var %in% names(train_data)) {
+        x_mean <- mean(as.numeric(train_data[[pred_var]]), na.rm = TRUE)
+      }
+      fit3_model <- tryCatch({
+        if (inherits(fit3, "fixest_multi") && length(fit3) >= 5L) fit3[[5L]] else fit3
+      }, error = function(e) NULL)
+      mm <- if (!is.null(fit3_model)) resolve_model_matrix(fit3_model) else NULL
+      if (!is.finite(x_mean) && !is.null(mm) && pred_var %in% names(mm)) {
+        x_mean <- mean(as.numeric(mm[[pred_var]]), na.rm = TRUE)
+      }
+      if (!is.finite(x_mean)) x_mean <- 0
+      poly_power <- function(term) {
+        power <- regmatches(term, regexpr("[0-9]+", term))
+        suppressWarnings(as.integer(power))
+      }
+      related <- c(pred_var, poly_terms)
+      selected <- grid[grid$.term %in% related, , drop = FALSE]
+      groups <- split(selected, interaction(selected$model, selected$tau, drop = TRUE))
+      combined <- lapply(groups, function(d) {
+        weights <- vapply(d$.term, function(term) {
+          if (identical(term, pred_var)) return(1)
+          p <- poly_power(term)
+          p * x_mean^(p - 1L)
+        }, numeric(1))
+        estimate <- sum(weights * d$Estimate, na.rm = TRUE)
+        se <- sqrt(sum((weights * d$std.error)^2, na.rm = TRUE))
+        row <- d[1L, , drop = FALSE]
+        row$Estimate <- estimate
+        row$std.error <- se
+        row$conf.low <- estimate - 1.96 * se
+        row$conf.high <- estimate + 1.96 * se
+        row$term <- pred_var
+        row
+      })
+      grid <- do.call(rbind, combined)
+      grid$term <- pred_var
+      combined_poly <- TRUE
+    }
+    coef_map <- make_coef_map(unique(grid$term), label_fun)
+    grid$label <- unname(names(coef_map)[match(grid$term, unname(coef_map))])
+    grid$label[is.na(grid$label)] <- grid$term[is.na(grid$label)]
+    term_order <- unique(grid$term[order(grepl(":", grid$term), grid$term)])
+    grid$label_wrap <- factor(
+      stringr::str_wrap(grid$label, 25),
+      levels = rev(unique(stringr::str_wrap(grid$label[match(term_order, grid$term)], 25)))
+    )
+    coef_data <- grid
+  } else {
+    if (!requireNamespace("fixest", quietly = TRUE)) {
+      return(echart_blank("Package 'fixest' is required.", height = height))
+    }
+  model_list <- list("No FE or covariates" = fit1, "No covariates" = fit2)
   model_list[[lab3]] <- fit3
 
   coef_data <- tryCatch({
@@ -2983,16 +3065,22 @@ echart_make_coefplot <- function(fit1, fit2, fit3,
     d$label_wrap <- factor(d$label_wrap, levels = rev(label_levels))
     d
   }, error = function(e) NULL)
+  }
 
   if (is.null(coef_data) || !nrow(coef_data)) {
     return(echart_blank("No weather coefficients found to plot.", height = height))
   }
 
-  model_levels <- c("No FE", "FE", lab3)
-  model_cols <- c("No FE" = "#8C8C8C", "FE" = .wise_charcoal, setNames(.wise_blue, lab3))
+  model_levels <- c("No FE or covariates", "No covariates", lab3)
+  model_cols <- c(
+    "No FE or covariates" = "#8C8C8C",
+    "No covariates" = .wise_charcoal,
+    setNames(.wise_blue, lab3)
+  )
   dodges <- c(-0.28, 0, 0.28)
 
-  y_cats <- rev(levels(coef_data$label_wrap))
+  labels <- rev(levels(coef_data$label_wrap))
+  y_cats <- labels
   e <- .e_new(height)
   series <- lapply(seq_along(model_levels), function(i) {
     nm <- model_levels[i]
@@ -3003,12 +3091,12 @@ echart_make_coefplot <- function(fit1, fit2, fit3,
     col <- unname(model_cols[[nm]])
     dy <- dodges[i]
       pts <- lapply(seq_len(nrow(d)), function(j) {
-        cat_idx <- match(as.character(d$label_wrap[j]), y_cats) - 1L
+        cat_idx <- match(as.character(d$label_wrap[j]), y_cats)
         list(value = list(d$Estimate[j], cat_idx + dy),
           confLow = d$conf.low[j], confHigh = d$conf.high[j])
     })
     whiskers <- lapply(seq_len(nrow(d)), function(j) {
-      cat_idx <- match(as.character(d$label_wrap[j]), y_cats) - 1L
+      cat_idx <- match(as.character(d$label_wrap[j]), y_cats)
       list(
         list(coord = list(d$conf.low[j], cat_idx + dy)),
         list(coord = list(d$conf.high[j], cat_idx + dy))
@@ -3058,13 +3146,24 @@ echart_make_coefplot <- function(fit1, fit2, fit3,
     splitLine = wise_esplit_line()
   )
   e$x$opts$yAxis <- list(
-    type = "category", data = y_cats,
-    axisLabel = wise_eaxis_label(fontSize = 11),
+    type = "value", min = 0, max = length(y_cats) + 1,
+    interval = 1, inverse = TRUE,
+    axisLabel = wise_eaxis_label(
+      fontSize = 11, formatter = .e_index_formatter(y_cats),
+      showMinLabel = TRUE, showMaxLabel = TRUE
+    ),
     axisLine = list(lineStyle = list(color = .wise_grid)),
     splitLine = wise_esplit_line()
   )
-  e$x$opts$legend <- wise_elegend_style(left = 0, bottom = 0)
-  e$x$opts$grid <- list(containLabel = TRUE, left = 8, right = 20, top = 20, bottom = 48)
+  e$x$opts$legend <- wise_elegend_style(left = "center", top = 0, orient = "horizontal")
+  e$x$opts$grid <- list(containLabel = TRUE, left = 8, right = 20, top = 42, bottom = 28)
+  if (identical(engine, "rif") && combined_poly) {
+    e <- .e_caption(e, paste(
+      "Polynomial weather terms combined to total marginal effect at sample mean;",
+      "95% CI assumes zero covariance across RIF coefficients."
+    ))
+    e$x$opts$grid$bottom <- e$x$opts$grid$bottom + 24
+  }
   e$x$opts$tooltip <- list(
     trigger = "item",
     formatter = htmlwidgets::JS(
@@ -3104,8 +3203,8 @@ echart_make_coefplot <- function(fit1, fit2, fit3,
   ))
 }
 
-# Bottom-anchored sub-text carrying the ggplot caption. echarts titles do not
-# reserve layout space, so the caller gives the grid extra bottom room.
+# Bottom-anchored, left-aligned sub-text carrying the ggplot caption. ECharts
+# titles do not reserve layout space, so callers give the grid extra room.
 .e_caption <- function(e, caption) {
   if (is.null(caption) || !nzchar(caption)) {
     return(e)
@@ -3113,11 +3212,43 @@ echart_make_coefplot <- function(fit1, fit2, fit3,
   e$x$opts$title <- c(e$x$opts$title %||% list(), list(
     list(
       text = "", subtext = caption, left = 8, bottom = 0,
+      textAlign = "left",
       subtextStyle = list(
         color = .wise_slate, fontSize = 11, fontWeight = "normal"
       )
-    )
+      )
   ))
+
+  get_axis_types <- function(axes) {
+    if (is.null(axes)) return(character(0))
+    axis_fields <- c("type", "axisLabel", "axisTick", "data", "gridIndex", "show")
+    single_axis <- !is.null(names(axes)) && any(names(axes) %in% axis_fields)
+    axis_list <- if (single_axis) list(axes) else axes
+    vapply(axis_list, function(axis) {
+      if (!is.list(axis)) return("value")
+      axis[["type"]] %||% "value"
+    }, character(1))
+  }
+  axis_type <- c(get_axis_types(e$x$opts$xAxis), get_axis_types(e$x$opts$yAxis))
+  if (length(axis_type) && all(axis_type %in% c("value", "log", "time"))) {
+    grids <- e$x$opts$grid
+    if (!is.null(grids)) {
+      grid_fields <- c("left", "right", "top", "bottom", "width", "height",
+        "containLabel", "show", "backgroundColor", "borderColor", "borderWidth",
+        "shadowBlur", "shadowColor", "shadowOffsetX", "shadowOffsetY")
+      single_grid <- !is.null(names(grids)) && any(names(grids) %in% grid_fields)
+      grid_list <- if (single_grid) list(grids) else grids
+      grid_list <- lapply(grid_list, function(grid) {
+        left <- suppressWarnings(as.numeric(sub("px$", "", as.character(grid$left))))
+        if (length(left) == 1L && is.finite(left)) {
+          grid$left <- max(left, 64)
+          grid$containLabel <- FALSE
+        }
+        grid
+      })
+      e$x$opts$grid <- if (single_grid) grid_list[[1L]] else grid_list
+    }
+  }
   e
 }
 
@@ -3229,6 +3360,7 @@ echart_weather_effect_plot <- function(fit, pred_var, interaction_terms, is_binn
         if (length(parts) != 2L || any(!nzchar(parts))) {
           return(term)
         }
+        parts <- gsub("[\\[\\]()]", "", parts)
         paste0(parts[[1]], "\u2013", parts[[2]])
       }
       mm_of <- function(fit) {
@@ -3245,7 +3377,7 @@ echart_weather_effect_plot <- function(fit, pred_var, interaction_terms, is_binn
           type = "value", min = min(taus), max = max(taus),
           name = "Welfare quantile",
           nameLocation = "middle", nameGap = 28,
-           nameTextStyle = wise_eaxis_name(),
+            nameTextStyle = wise_eaxis_name(),
           axisLabel = modifyList(
             wise_eaxis_label(),
             list(formatter = .e_percent_formatter())
@@ -3253,15 +3385,37 @@ echart_weather_effect_plot <- function(fit, pred_var, interaction_terms, is_binn
           splitLine = wise_esplit_line()
         )
       }
-      value_y_axis <- function(name, min_val = NULL, max_val = NULL) {
+      value_y_axis <- function(name, min_val = NULL, max_val = NULL,
+                               vertical_name = FALSE) {
         list(
           type = "value", scale = is.null(min_val), name = name,
           min = min_val, max = max_val,
-          nameLocation = "end",
-           nameTextStyle = wise_eaxis_name(),
+          nameLocation = if (vertical_name) "middle" else "end",
+          nameRotate = if (vertical_name) 90 else 0,
+          nameGap = if (vertical_name) 44 else 8,
+          nameTextStyle = if (vertical_name) wise_eaxis_name() else wise_eyaxis_name(),
            axisLabel = wise_eaxis_label(),
           splitLine = wise_esplit_line()
         )
+      }
+      rif_y_bounds <- function(d) {
+        lo <- min(c(0, d$conf.low), na.rm = TRUE)
+        hi <- max(c(0, d$conf.high), na.rm = TRUE)
+        pad <- max((hi - lo) * 0.08, 0.02)
+        c(lo - pad, hi + pad)
+      }
+      omitted_bin_note <- function(bin_ids) {
+        observed <- unique(vapply(bin_ids, function(b) .t2_bin_label(b, pred_var), character(1)))
+        observed <- observed[nzchar(observed)]
+        all_bins <- character(0)
+        if (!is.null(weather_df) && pred_var %in% names(weather_df)) {
+          values <- weather_df[[pred_var]]
+          raw_levels <- if (is.factor(values)) levels(values) else sort(unique(as.character(values)))
+          all_bins <- vapply(raw_levels, .cut_bin_label, character(1))
+        }
+        omitted <- setdiff(all_bins, observed)
+        label <- if (length(omitted)) omitted[[1L]] else "reference bin"
+        paste0("Omitted weather bin: ", label, ".")
       }
       # Bin category axis matching ggplot factor bins.
       bin_x_axis <- function(bin_labels, name) {
@@ -3306,13 +3460,7 @@ echart_weather_effect_plot <- function(fit, pred_var, interaction_terms, is_binn
 
         n_terms <- length(unique(plot_data$term))
         has_int_terms <- any(grepl(":", plot_data$term, fixed = TRUE))
-        rif_y_lab <- tryCatch(
-          {
-            yv <- as.character(stats::formula(fit)[[2]])
-            paste0("Effect on ", label_fun(yv), " (log points)")
-          },
-          error = function(e) "Effect (log points)"
-        )
+      rif_y_lab <- "Effect size (log points)"
 
       # Facet panels: shared panel setup (echarts grids).
       panel_ribbon <- function(d, col, panel_idx, point_size, nm = "Effect") {
@@ -3329,7 +3477,11 @@ echart_weather_effect_plot <- function(fit, pred_var, interaction_terms, is_binn
         })
       }
 
-        if (n_terms > 1 && !has_int_terms) {
+         is_bin_terms <- all(grepl(
+           paste0("^", pred_esc, "[\\[\\(]"),
+           unique(plot_data$term)
+         ))
+         if (n_terms > 1 && !has_int_terms && is_bin_terms) {
           # Binned predictor without interactions: one beta(tau) curve per bin,
           # one facet per bin in numeric bin order (verbatim prep).
           bin_lo <- function(tm) {
@@ -3343,29 +3495,55 @@ echart_weather_effect_plot <- function(fit, pred_var, interaction_terms, is_binn
           )
 
           e <- .e_new(height)
-          e <- .e_multi_grids(e, length(tu), titles = unname(lab_map), height = height)
+          e <- .e_multi_grids(
+            e, length(tu), titles = paste0("Bin: ", unname(lab_map)), height = height,
+            contain_label = FALSE
+          )
           series <- unlist(lapply(seq_along(tu), function(i) {
             panel_ribbon(plot_data[plot_data$term == tu[i], ], .wise_blue, i, 7)
           }), recursive = FALSE)
-          for (i in seq_along(tu)) {
-            series[[i * 3L]]$markLine <- markline_of(.e_tau_mark_data(mark_taus))
+           for (i in seq_along(tu)) {
+             idx <- i * 3L
+             if (length(series) >= idx) {
+               series[[idx]]$markLine <- markline_of(.e_tau_mark_data(mark_taus))
+             }
           }
           e$x$opts$series <- series
-          e$x$opts$xAxis <- rep(list(tau_x_axis(taus)), length(tu))
-          yax <- value_y_axis(rif_y_lab)
-          e$x$opts$yAxis <- lapply(seq_along(tu), function(i) {
-            if (i == 1L) yax else {
-              y <- value_y_axis("")
-              y$nameGap <- 8
-              y
-            }
+          e$x$opts$xAxis <- lapply(seq_along(tu), function(i) {
+            axis <- tau_x_axis(taus)
+            axis$gridIndex <- i - 1L
+            axis
           })
+           bounds <- rif_y_bounds(plot_data[plot_data$term == tu[[1L]], , drop = FALSE])
+           yax <- value_y_axis(rif_y_lab, bounds[[1L]], bounds[[2L]], vertical_name = TRUE)
+           e$x$opts$yAxis <- lapply(seq_along(tu), function(i) {
+             d_i <- plot_data[plot_data$term == tu[[i]], , drop = FALSE]
+             b_i <- rif_y_bounds(d_i)
+             axis <- if (i == 1L) yax else {
+                y <- value_y_axis("", b_i[[1L]], b_i[[2L]])
+                y
+              }
+              if (i == 1L) axis <- value_y_axis(
+                rif_y_lab, b_i[[1L]], b_i[[2L]], vertical_name = TRUE
+              )
+              axis$gridIndex <- i - 1L
+              axis
+            })
            e$x$opts$tooltip <- .e_effect_tooltip(
              percent = effect_scale %in% c("pp", "pp100", "pct")
            )
-          e <- .e_caption(e, "Ribbon = 95% CI")
-          e$x$opts$grid <- lapply(e$x$opts$grid, function(g) {
-            modifyList(g, list(bottom = grid_pad(FALSE, TRUE)))
+           observed_bins <- unname(lab_map)
+           omitted_bins <- character(0)
+           if (!is.null(weather_df) && pred_var %in% names(weather_df)) {
+             omitted_bins <- setdiff(
+               vapply(levels(weather_df[[pred_var]]), .cut_bin_label, character(1)),
+               observed_bins
+             )
+           }
+           omitted_label <- if (length(omitted_bins)) omitted_bins[[1L]] else "reference bin"
+           e <- .e_caption(e, paste("Ribbon = 95% CI. Omitted weather bin:", omitted_label))
+           e$x$opts$grid <- lapply(seq_along(e$x$opts$grid), function(i) {
+             modifyList(e$x$opts$grid[[i]], list(bottom = grid_pad(FALSE, TRUE) + 44))
           })
           return(wise_echart_theme(e))
         }
@@ -3374,10 +3552,13 @@ echart_weather_effect_plot <- function(fit, pred_var, interaction_terms, is_binn
           # Single term: simple beta curve.
           e <- .e_new(height)
           tri <- panel_ribbon(plot_data, .wise_blue, 1L, 8)
-          tri[[3]]$markLine <- markline_of(.e_tau_mark_data(mark_taus))
+           if (length(tri) >= 3L) {
+             tri[[3]]$markLine <- markline_of(.e_tau_mark_data(mark_taus))
+           }
           e$x$opts$series <- tri
           e$x$opts$xAxis <- list(tau_x_axis(taus))
-          e$x$opts$yAxis <- list(value_y_axis(rif_y_lab))
+           bounds <- rif_y_bounds(plot_data)
+           e$x$opts$yAxis <- list(value_y_axis(rif_y_lab, bounds[[1L]], bounds[[2L]]))
           e$x$opts$grid <- list(
             containLabel = TRUE, left = 8, right = 20, top = 14,
             bottom = grid_pad(FALSE, TRUE)
@@ -3385,6 +3566,56 @@ echart_weather_effect_plot <- function(fit, pred_var, interaction_terms, is_binn
            e$x$opts$tooltip <- .e_effect_tooltip(
              percent = effect_scale %in% c("pp", "pp100", "pct")
            )
+          e <- .e_caption(e, "Ribbon = 95% CI")
+          return(wise_echart_theme(e))
+        }
+
+        if (!is_bin_terms && !has_int_terms) {
+          # Polynomial RIF terms describe one continuous weather effect. Plot
+          # their mean marginal effect as a single quantile curve rather than
+          # treating each polynomial coefficient as a separate bin panel.
+          mm <- mm_of(fit)
+          x_mean <- if (!is.null(mm) && pred_var %in% names(mm)) {
+            mean(as.numeric(mm[[pred_var]]), na.rm = TRUE)
+          } else {
+            0
+          }
+          term_weight <- function(term) {
+            if (identical(term, pred_var)) return(1)
+            power <- suppressWarnings(as.numeric(sub(
+              paste0("^I\\(", pred_esc, "\\^([0-9]+)\\)$"),
+              "\\1", term
+            )))
+            if (is.finite(power) && power > 1) return(power * x_mean^(power - 1))
+            0
+          }
+          plot_data$weight <- vapply(plot_data$term, term_weight, numeric(1))
+          combined <- dplyr::summarise(
+            dplyr::group_by(plot_data, .data$tau),
+            estimate = sum(.data$estimate * .data$weight, na.rm = TRUE),
+            std.error = sqrt(sum((.data$std.error * .data$weight)^2, na.rm = TRUE)),
+            .groups = "drop"
+          )
+          combined$conf.low <- combined$estimate - 1.96 * combined$std.error
+          combined$conf.high <- combined$estimate + 1.96 * combined$std.error
+          tri <- panel_ribbon(combined, .wise_blue, 1L, 8)
+          if (length(tri) >= 3L) tri[[3L]]$markLine <- markline_of(.e_tau_mark_data(mark_taus))
+          bounds <- rif_y_bounds(combined)
+          e <- .e_new(height)
+          e$x$opts$series <- tri
+          e$x$opts$xAxis <- list(tau_x_axis(taus))
+          e$x$opts$yAxis <- list(value_y_axis(rif_y_lab, bounds[[1L]], bounds[[2L]]))
+          e$x$opts$grid <- list(
+            containLabel = TRUE, left = 8, right = 20, top = 14,
+            bottom = grid_pad(FALSE, TRUE)
+          )
+          e$x$opts$grid <- list(
+            containLabel = TRUE, left = 8, right = 20, top = 14,
+            bottom = grid_pad(FALSE, TRUE)
+          )
+          e$x$opts$tooltip <- .e_effect_tooltip(
+            percent = effect_scale %in% c("pp", "pp100", "pct")
+          )
           e <- .e_caption(e, "Ribbon = 95% CI")
           return(wise_echart_theme(e))
         }
@@ -3461,7 +3692,7 @@ echart_weather_effect_plot <- function(fit, pred_var, interaction_terms, is_binn
             data.frame(
               tau = mr$tau,
               bin_id = mr$.bin_id,
-              bin_label = coef_label(mr$.bin_id, label_fun),
+              bin_label = .t2_bin_label(mr$.bin_id, pred_var),
               modx_val = v,
               estimate = effect,
               std.error = se,
@@ -3505,24 +3736,38 @@ echart_weather_effect_plot <- function(fit, pred_var, interaction_terms, is_binn
         bin_ids_ordered <- bin_ids_raw[ord]
         bin_levels <- vapply(
           bin_ids_ordered,
-          function(b) coef_label(b, label_fun),
+          function(b) .t2_bin_label(b, pred_var),
           character(1)
         )
         combined$bin_label <- factor(combined$bin_label, levels = bin_levels)
         n_bins <- length(bin_levels)
 
-        modx_levels <- levels(combined$modx_label)
+        modx_levels <- levels(combined$modx_label) %||%
+          unique(as.character(combined$modx_label))
         cols <- stats::setNames(.wise_cat[seq_along(modx_levels)], modx_levels)
+        omitted_note <- omitted_bin_note(main_rows$.bin_id)
         rif_cap <- if (identical(mode, "main")) {
-          "Line and ribbon average the estimated effect across moderator levels; ribbon = 95% CI (cov(main, interaction) omitted)."
+          paste(
+            "Line and ribbon average the estimated effect across moderator levels;",
+            "ribbon = 95% CI (cov(main, interaction) omitted).", omitted_note
+          )
         } else {
-          "Ribbon = 95% CI (cov(main, interaction) omitted)"
+          paste("Ribbon = 95% CI (cov(main, interaction) omitted).", omitted_note)
         }
         has_legend <- length(modx_levels) > 1L
 
         e <- .e_new(height)
         if (n_bins > 1) {
-          e <- .e_multi_grids(e, n_bins, titles = bin_levels, height = height)
+          panel_titles <- paste0("Bin: ", bin_levels)
+          e <- .e_multi_grids(
+            e, n_bins, titles = panel_titles, height = height,
+            contain_label = FALSE
+          )
+          if (has_legend) {
+            e$x$opts$title <- lapply(e$x$opts$title, function(title) {
+              modifyList(title, list(top = 34))
+            })
+          }
           panel_trios <- lapply(seq_len(n_bins), function(bi) {
             trios <- lapply(seq_along(modx_levels), function(mi) {
               d <- combined[combined$bin_label == bin_levels[bi] &
@@ -3540,17 +3785,29 @@ echart_weather_effect_plot <- function(fit, pred_var, interaction_terms, is_binn
           series <- unlist(unlist(panel_trios, recursive = FALSE),
             recursive = FALSE
           )
-          e$x$opts$xAxis <- rep(list(tau_x_axis(taus)), n_bins)
-          e$x$opts$yAxis <- lapply(seq_len(n_bins), function(i) {
-            if (i == 1L) value_y_axis(rif_y_lab) else {
-              y <- value_y_axis("")
-              y$nameGap <- 8
-              y
-            }
-          })
-          e$x$opts$grid <- lapply(e$x$opts$grid, function(g) {
-            modifyList(g, list(bottom = grid_pad(has_legend, TRUE)))
-          })
+           e$x$opts$xAxis <- lapply(seq_len(n_bins), function(i) {
+             axis <- tau_x_axis(taus)
+             axis$gridIndex <- i - 1L
+             axis
+           })
+            e$x$opts$yAxis <- lapply(seq_len(n_bins), function(i) {
+              d_i <- combined[combined$bin_label == bin_levels[[i]], , drop = FALSE]
+              b_i <- rif_y_bounds(d_i)
+              axis <- if (i == 1L) value_y_axis(
+                rif_y_lab, b_i[[1L]], b_i[[2L]], vertical_name = TRUE
+              ) else {
+                y <- value_y_axis("", b_i[[1L]], b_i[[2L]])
+               y
+             }
+              axis$gridIndex <- i - 1L
+              axis
+           })
+          e$x$opts$grid <- lapply(seq_along(e$x$opts$grid), function(i) {
+            modifyList(e$x$opts$grid[[i]], list(
+              top = if (has_legend) 58 else e$x$opts$grid[[i]]$top,
+              bottom = grid_pad(has_legend, TRUE) + 44
+            ))
+           })
         } else {
           series <- unlist(lapply(seq_along(modx_levels), function(mi) {
             d <- combined[combined$modx_label == modx_levels[mi], , drop = FALSE]
@@ -3559,9 +3816,12 @@ echart_weather_effect_plot <- function(fit, pred_var, interaction_terms, is_binn
             }
             panel_ribbon(d, unname(cols[mi]), 1L, 7, nm = modx_levels[mi])
           }), recursive = FALSE)
-          series[[3]]$markLine <- markline_of(.e_tau_mark_data(mark_taus))
+          if (length(series) >= 3L) {
+            series[[3]]$markLine <- markline_of(.e_tau_mark_data(mark_taus))
+          }
           e$x$opts$xAxis <- list(tau_x_axis(taus))
-          e$x$opts$yAxis <- list(value_y_axis(rif_y_lab))
+           bounds <- rif_y_bounds(combined)
+           e$x$opts$yAxis <- list(value_y_axis(rif_y_lab, bounds[[1L]], bounds[[2L]]))
           e$x$opts$grid <- list(
             containLabel = TRUE, left = 8, right = 20, top = 14,
             bottom = grid_pad(has_legend, TRUE)
@@ -3573,7 +3833,7 @@ echart_weather_effect_plot <- function(fit, pred_var, interaction_terms, is_binn
               name = unname(modx_levels[i]), icon = "roundRect",
               itemStyle = list(color = unname(cols[i]))
             )),
-            left = "center", top = 0, orient = "horizontal"
+            left = "center", top = 4, orient = "horizontal"
           )
         }
         e$x$opts$series <- series
@@ -3852,7 +4112,7 @@ echart_weather_effect_plot <- function(fit, pred_var, interaction_terms, is_binn
                 d$conf.low, d$conf.high, fill = col, line = col,
                 line_width = 1.5, show_points = TRUE, point_size = 7
               )
-              if (mi == 1L) {
+              if (length(tri) >= 3L && mi == 1L) {
                 tri[[3]]$markLine <- list(
                   symbol = list("none", "none"), silent = TRUE,
                   data = list(list(yAxis = 0, lineStyle = list(
@@ -3860,9 +4120,11 @@ echart_weather_effect_plot <- function(fit, pred_var, interaction_terms, is_binn
                   )))
                 )
               }
-              tri[[3]]$tooltip <- .e_effect_tooltip(
-                percent = effect_scale %in% c("pp", "pp100", "pct")
-              )
+              if (length(tri) >= 3L) {
+                tri[[3]]$tooltip <- .e_effect_tooltip(
+                  percent = effect_scale %in% c("pp", "pp100", "pct")
+                )
+              }
               tri
             }), recursive = FALSE)
             series <- Filter(Negate(is.null), series)
@@ -4070,7 +4332,11 @@ echart_weather_effect_plot <- function(fit, pred_var, interaction_terms, is_binn
             na.rm = TRUE
           )
           pad <- 0.06 * (diff(y_r) %||% 1)
+          zero_pad <- max(diff(y_r) * 0.05, 0.02)
           rug_y <- y_r[1] - pad
+          y_min <- min(0, rug_y, y_r[1] - pad)
+          y_max <- max(y_r[2] + pad, zero_pad)
+          zero_is_boundary <- y_r[1] >= 0 || y_r[2] <= 0
           rug_series <- if (length(rug_x)) {
             list(list(
               name = "Observed", type = "scatter",
@@ -4112,23 +4378,38 @@ echart_weather_effect_plot <- function(fit, pred_var, interaction_terms, is_binn
           })
           series <- unlist(ribbon_trios, recursive = FALSE)
           if (length(rug_series)) series <- c(series, rug_series)
-          last_curve <- 3L * length(curves)
-          series[[last_curve]]$markLine <- markline_of(mean_mark)
+          last_curve <- max(which(vapply(series, function(s) identical(s$type, "line") &&
+            !isTRUE(s$silent), logical(1))), 0L)
+          if (last_curve > 0L) {
+            series[[last_curve]]$markLine <- markline_of(mean_mark)
+            if (zero_is_boundary) {
+              series[[last_curve]]$markLine$data[[1L]]$label <- list(
+                show = TRUE, position = "start", formatter = "0",
+                color = .wise_slate, fontSize = 11
+              )
+            }
+          }
 
           e <- .e_new(height)
           e$x$opts$series <- series
           e$x$opts$xAxis <- list(list(
             type = "value", name = pred_x_lab,
             nameLocation = "middle", nameGap = 30,
-            nameTextStyle = wise_eaxis_name(),
+            nameTextStyle = wise_eyaxis_name(),
            axisLabel = wise_eaxis_label(showMinLabel = FALSE, showMaxLabel = FALSE),
             splitLine = wise_esplit_line()
           ))
           e$x$opts$yAxis <- list(value_y_axis(
             y_label %||% paste("Change in", y_lab, "per +1 unit")
           ))
-          e$x$opts$yAxis[[1]]$min <- rug_y
-          e$x$opts$yAxis[[1]]$max <- y_r[2] + pad
+            e$x$opts$yAxis[[1]]$min <- y_min
+            e$x$opts$yAxis[[1]]$max <- y_max
+           x_sample <- mm[[pred_var]]
+           x_sample <- x_sample[is.finite(x_sample)]
+           if (length(x_sample)) {
+             e$x$opts$xAxis[[1]]$min <- min(x_sample)
+             e$x$opts$xAxis[[1]]$max <- max(x_sample)
+           }
           if (has_legend) {
             e$x$opts$legend <- wise_elegend_style(
               data = lapply(seq_along(curves), function(i) list(
@@ -4219,10 +4500,10 @@ echart_importance <- function(model, label_fun = identity, height = "400px") {
     share = 100 * imp^2 / tot,
     stringsAsFactors = FALSE
   )
-  df$label <- vapply(df$term, function(t) {
-    lab <- .pretty_poly_label(t, label_fun)
-    if (is.null(lab) || is.na(lab) || !nzchar(lab)) t else lab
-  }, character(1))
+  coef_map <- make_coef_map(df$term, label_fun)
+  df$label <- unname(names(coef_map)[match(df$term, unname(coef_map))])
+  df$label[is.na(df$label) | !nzchar(df$label)] <-
+    df$term[is.na(df$label) | !nzchar(df$label)]
   df <- df[order(-df$share), , drop = FALSE]
   df <- utils::head(df, 15)
 
@@ -4530,6 +4811,7 @@ echart_pred_vs_actual <- function(model, is_logistic, outcome_label = "outcome",
     ha <- .e_hist_shares(actual, brks)
     hp <- .e_hist_shares(predicted, brks)
     labels <- formatC(ha$mid, format = "f", digits = 2)
+    y_max <- max(5, ceiling(max(c(ha$share, hp$share), na.rm = TRUE) / 5) * 5)
 
     e <- .e_new(height)
     bar <- function(d, nm, col) {
@@ -4554,7 +4836,8 @@ echart_pred_vs_actual <- function(model, is_logistic, outcome_label = "outcome",
       splitLine = wise_esplit_line()
     ))
     e$x$opts$yAxis <- list(list(
-      type = "value", name = "Share of households (%)",
+      type = "value", min = 0, max = y_max, interval = y_max / 5,
+      name = "Share of households (%)",
       nameLocation = "end",
       nameTextStyle = wise_eyaxis_name(),
       axisLabel = wise_eaxis_label(
@@ -4633,7 +4916,7 @@ echart_pred_vs_actual <- function(model, is_logistic, outcome_label = "outcome",
         type = "value", min = 0, max = 1,
         name = "Predicted risk (bin mean)",
         nameLocation = "middle", nameGap = 30,
-        nameTextStyle = wise_eaxis_name(),
+            nameTextStyle = wise_eyaxis_name(),
         axisLabel = wise_eaxis_label(), splitLine = wise_esplit_line()
       ))
       e$x$opts$yAxis <- list(list(
@@ -4720,7 +5003,8 @@ echart_welfare_quantile_hist <- function(y, taus, x_label, height = "400px") {
     splitLine = wise_esplit_line()
   ))
     e$x$opts$yAxis <- list(list(
-      type = "value", name = "Share of households (%)",
+      type = "value", min = 0, max = 100, interval = 20,
+      name = "Share of households (%)",
       nameLocation = "end",
       nameTextStyle = wise_eyaxis_name(),
     axisLabel = wise_eaxis_label(formatter = .e_percent_formatter()),

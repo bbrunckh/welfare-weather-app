@@ -48,7 +48,7 @@ test_that("continuous branch draws ribbon + line + rug as one widget", {
   skip_if_not_installed("echarts4r")
   ch <- echart_weather_effect_plot(
     ec_fit_cont, "tx", character(0), FALSE, ec_lf, "fixest",
-    x_label = "Max temp (deg C)", y_label = "Change in welfare per +1 unit"
+    x_label = "Max temp (deg C)", y_label = "Effect size (log points)"
   )
   expect_s3_class(ch, "echarts4r")
   # One ribbon trio (lo, band, est line) + the observed-value rug scatter.
@@ -57,9 +57,30 @@ test_that("continuous branch draws ribbon + line + rug as one widget", {
   expect_true(!is.null(ch$x$opts$series[[2]]$areaStyle))
   expect_equal(ch$x$opts$series[[4]]$name, "Observed")
   expect_match(ch$x$opts$xAxis[[1]]$name, "Max temp")
-  expect_match(ch$x$opts$yAxis[[1]]$name, "Change in welfare")
+  expect_false(ch$x$opts$xAxis[[1]]$axisLine$onZero)
+  expect_equal(ch$x$opts$yAxis[[1]]$name, "Effect size (log points)")
+  x_sample <- ec_dat$tx
+  expect_equal(ch$x$opts$xAxis[[1]]$min, min(x_sample, na.rm = TRUE))
+  expect_equal(ch$x$opts$xAxis[[1]]$max, max(x_sample, na.rm = TRUE))
+  expect_gt(ch$x$opts$xAxis[[1]]$min, 0)
+  expect_equal(ch$x$opts$title[[length(ch$x$opts$title)]]$textAlign, "left")
+  expect_false(ch$x$opts$grid$containLabel)
+  expect_equal(ch$x$opts$grid$left, 64)
   # Mean reference and the dashed zero line ride on the estimate series.
   expect_equal(length(ch$x$opts$series[[3]]$markLine$data), 2L)
+})
+
+test_that("continuous all-negative effect plot leaves room for a labeled zero", {
+  fit <- fixest::feols(welfare ~ tx, data = transform(ec_dat, welfare = -tx))
+  ch <- echart_weather_effect_plot(
+    fit, "tx", character(0), FALSE, ec_lf, "fixest",
+    weather_df = ec_dat
+  )
+  expect_lt(ch$x$opts$yAxis[[1]]$min, 0)
+  expect_gt(ch$x$opts$yAxis[[1]]$max, 0)
+  zero_mark <- ch$x$opts$series[[3]]$markLine$data[[1]]
+  expect_true(zero_mark$label$show)
+  expect_equal(zero_mark$label$formatter, "0")
 })
 
 test_that("moderated continuous branch draws one curve per moderator level", {
@@ -95,12 +116,26 @@ test_that("RIF multi-bin branch facets one grid per bin with tau marks", {
   grid <- ec_mk_grid(ec_terms_bin, ec_taus)
   ch <- echart_weather_effect_plot(
     ec_fit_bin, "tx_bin", character(0), TRUE, ec_lf, "rif",
-    rif_grid = grid, mark_taus = c(0.1, 0.5, 0.9)
+    rif_grid = grid, mark_taus = c(0.1, 0.5, 0.9), weather_df = ec_dat
   )
   expect_s3_class(ch, "echarts4r")
   expect_equal(length(ch$x$opts$grid), 3L)
+  expect_true(all(vapply(ch$x$opts$grid, function(g) !is.na(g$width), logical(1))))
+  expect_true(all(vapply(ch$x$opts$grid, function(g) identical(g$containLabel, FALSE), logical(1))))
+  expect_equal(vapply(ch$x$opts$xAxis, `[[`, integer(1), "gridIndex"), 0:2)
+  expect_equal(vapply(ch$x$opts$yAxis, `[[`, integer(1), "gridIndex"), 0:2)
+  expect_match(ch$x$opts$yAxis[[1]]$nameLocation, "middle")
+  expect_equal(ch$x$opts$yAxis[[1]]$nameRotate, 90)
+  expect_true(all(vapply(ch$x$opts$title[seq_len(3)], function(t) {
+    startsWith(t$text, "Bin: ")
+  }, logical(1))))
+  note <- ch$x$opts$title[[length(ch$x$opts$title)]]$subtext
+  expect_match(note, paste0("Omitted weather bin: ", .cut_bin_label(levels(ec_dat$tx_bin)[1])))
+  expect_true(all(vapply(ch$x$opts$grid, function(g) g$bottom >= 76, logical(1))))
   # One ribbon trio per bin; the estimate series carries zero + 3 tau marks.
   expect_equal(length(ch$x$opts$series), 9L)
+  expect_equal(vapply(ch$x$opts$series, `[[`, integer(1), "xAxisIndex"), rep(0:2, each = 3))
+  expect_equal(vapply(ch$x$opts$series, `[[`, integer(1), "yAxisIndex"), rep(0:2, each = 3))
   expect_equal(length(ch$x$opts$series[[3]]$markLine$data), 4L)
   # x labels are percent-formatted tau.
   expect_s3_class(ch$x$opts$xAxis[[1]]$axisLabel$formatter, "JS_EVAL")
@@ -139,6 +174,40 @@ test_that("RIF moderated branch draws one curve per moderator level", {
   )
   expect_s3_class(ch_main, "echarts4r")
   expect_equal(length(ch_main$x$opts$series), 3L)
+  expect_equal(ch_main$x$opts$yAxis[[1]]$name, "Effect size (log points)")
+})
+
+test_that("RIF binned Who plot separates readable panels from its legend", {
+  skip_if_not_installed("echarts4r")
+  bins <- paste0("tx_bin", levels(ec_dat$tx_bin)[2:4])
+  rif_grid <- do.call(rbind, lapply(c(bins, paste0(bins, ":urban")), function(term) {
+    ec_mk_grid(term, ec_taus)
+  }))
+  ch <- echart_weather_effect_plot(
+    ec_fit_bin, "tx_bin", "tx_bin:urban", TRUE, ec_lf, "rif",
+    rif_grid = rif_grid, weather_df = ec_dat, mode = "auto"
+  )
+
+  expect_s3_class(ch, "echarts4r")
+  expect_equal(length(ch$x$opts$grid), length(bins))
+  expect_true(all(vapply(ch$x$opts$grid, function(g) !is.na(g$width), logical(1))))
+  expect_true(all(vapply(ch$x$opts$grid, function(g) identical(g$containLabel, FALSE), logical(1))))
+  expect_equal(vapply(ch$x$opts$xAxis, `[[`, integer(1), "gridIndex"), seq_along(bins) - 1L)
+  expect_equal(vapply(ch$x$opts$yAxis, `[[`, integer(1), "gridIndex"), seq_along(bins) - 1L)
+  expect_true(all(vapply(ch$x$opts$title[seq_along(bins)], function(t) {
+    startsWith(t$text, "Bin: ") && grepl("–", t$text, fixed = TRUE)
+  }, logical(1))))
+  expect_match(ch$x$opts$yAxis[[1]]$nameLocation, "middle")
+  expect_equal(ch$x$opts$yAxis[[1]]$nameRotate, 90)
+  expect_true(all(vapply(ch$x$opts$grid, function(g) g$bottom >= 98, logical(1))))
+  who_note <- ch$x$opts$title[[length(ch$x$opts$title)]]$subtext
+  expect_match(who_note, "Omitted weather bin:")
+  expect_equal(ch$x$opts$legend$top, 4)
+  expect_true(all(vapply(ch$x$opts$grid, function(g) g$top >= 58, logical(1))))
+  expect_true(all(vapply(ch$x$opts$grid, function(g) !is.na(g$width), logical(1))))
+  expect_true(all(vapply(ch$x$opts$series, function(s) {
+    identical(s$xAxisIndex, s$yAxisIndex)
+  }, logical(1))))
 })
 
 test_that("unusable inputs return an informative blank widget", {
@@ -170,23 +239,124 @@ test_that("echart coefplot draws dodged specifications with CI whiskers", {
     fit3 = ec_fit_cont,
     weather_terms = "tx", interaction_terms = character(0),
     outcome_label = "Welfare", label_fun = ec_lf, engine = "fixest",
-    pred_var = "tx", x_label = "Coefficient (log points)",
+    pred_var = "tx", x_label = "Effect size (log points)",
     has_controls = TRUE
   )
   expect_s3_class(ch, "echarts4r")
   expect_equal(length(ch$x$opts$series), 3L)
-  expect_equal(ch$x$opts$yAxis$type, "category")
-  expect_match(ch$x$opts$xAxis$name, "Coefficient")
+  expect_equal(vapply(ch$x$opts$series, `[[`, character(1), "name"),
+    c("No FE or covariates", "No covariates", "FE + covariates"))
+  expect_equal(ch$x$opts$yAxis$type, "value")
+  expect_match(ch$x$opts$xAxis$name, "Effect size")
   # CI whiskers + dashed zero reference on the first series' markLine.
   expect_true(length(ch$x$opts$series[[1]]$markLine$data) > 1L)
+  expect_s3_class(ch$x$opts$yAxis$axisLabel$formatter, "JS_EVAL")
+  expect_match(ch$x$opts$yAxis$axisLabel$formatter, "Max temp", fixed = TRUE)
+  expect_match(ch$x$opts$yAxis$axisLabel$formatter, "²", fixed = TRUE)
+  expect_true(ch$x$opts$yAxis$axisLabel$showMinLabel)
+  expect_true(ch$x$opts$yAxis$axisLabel$showMaxLabel)
+  model_y <- lapply(ch$x$opts$series, function(s) {
+    vapply(s$data, function(d) d$value[[2]], numeric(1))
+  })
+  first_term_positions <- vapply(model_y, `[[`, numeric(1), 1L)
+  expect_length(unique(first_term_positions), 3L)
+  expect_equal(first_term_positions, c(0.72, 1, 1.28))
+  expect_equal(ch$x$opts$yAxis$min, 0)
+  expect_equal(ch$x$opts$yAxis$max, 3)
+  expect_equal(model_y[[2]], seq_along(model_y[[2]]))
 
-  # The RIF branch is suppressed (the quantile curve lives in "Who is most
-  # affected?").
-  expect_null(echart_make_coefplot(
+  # RIF uses the same specification plot, filtered to one selected tau.
+  rif_data <- do.call(rbind, lapply(1:3, function(model) {
+    d <- ec_mk_grid("tx", ec_taus, model = model)
+    d$estimate <- d$estimate + model
+    d
+  }))
+  rif_ch <- echart_make_coefplot(
     fit1 = NULL, fit2 = NULL, fit3 = NULL,
     weather_terms = "tx", interaction_terms = character(0),
-    engine = "rif", rif_grid = ec_mk_grid("tx", ec_taus)
-  ))
+    engine = "rif", rif_grid = rif_data, pred_var = "tx", tau = 0.7,
+    x_label = "Effect size (log points)"
+  )
+  expect_s3_class(rif_ch, "echarts4r")
+  expect_equal(length(rif_ch$x$opts$series), 3L)
+  expect_equal(vapply(rif_ch$x$opts$series, `[[`, character(1), "name"),
+    c("No FE or covariates", "No covariates", "FE + covariates"))
+  expect_equal(rif_ch$x$opts$legend$left, "center")
+  expect_equal(rif_ch$x$opts$xAxis$name, "Effect size (log points)")
+  estimates <- lapply(rif_ch$x$opts$series, function(s) s$data[[1]]$value[[1]])
+  expect_equal(unlist(estimates), vapply(1:3, function(model) {
+    idx <- which(rif_data$model == model & abs(rif_data$tau - 0.7) < 1e-8)
+    rif_data$estimate[idx[1]]
+  }, numeric(1)))
+  median_ch <- echart_make_coefplot(
+    fit1 = NULL, fit2 = NULL, fit3 = NULL,
+    weather_terms = "tx", interaction_terms = character(0),
+    engine = "rif", rif_grid = rif_data, pred_var = "tx"
+  )
+  median_estimates <- lapply(median_ch$x$opts$series, function(s) s$data[[1]]$value[[1]])
+  expect_equal(unlist(median_estimates), vapply(1:3, function(model) {
+    idx <- which(rif_data$model == model & abs(rif_data$tau - 0.5) < 1e-8)
+    rif_data$estimate[idx[1]]
+  }, numeric(1)))
+})
+
+test_that("RIF polynomial stability combines coefficients into total effect", {
+  skip_if_not_installed("echarts4r")
+  tau <- 0.5
+  terms <- c("tx", "I(tx^2)")
+  grid <- do.call(rbind, lapply(1:3, function(model) {
+    data.frame(
+      term = terms, tau = tau, model = model,
+      estimate = c(1, 0.1) * model,
+      std.error = c(0.2, 0.05),
+      conf.low = c(0.608, 0.002), conf.high = c(1.392, 0.198),
+      stringsAsFactors = FALSE
+    )
+  }))
+  ch <- echart_make_coefplot(
+    fit1 = NULL, fit2 = NULL, fit3 = ec_fit_cont,
+    weather_terms = "tx", interaction_terms = character(0),
+    engine = "rif", rif_grid = grid, pred_var = "tx", tau = tau,
+    label_fun = ec_lf, x_label = "Effect size (log points)",
+    train_data = ec_dat
+  )
+  mm <- resolve_model_matrix(ec_fit_cont)
+  x_mean <- mean(mm$tx)
+  expected <- c(1, 2, 3) * (1 + 2 * 0.1 * x_mean)
+  actual <- vapply(ch$x$opts$series, function(s) s$data[[1]]$value[[1]], numeric(1))
+  expect_equal(actual, expected)
+  expect_equal(ch$x$opts$xAxis$name, "Effect size (log points)")
+  expect_true(grepl("Polynomial weather terms combined", ch$x$opts$title[[1]]$subtext))
+})
+
+test_that("RIF stability predictor lookup matches wrapped predictor tokens only", {
+  grid <- data.frame(
+    term = rep(c("t", "I(t^2)", "temp", "I(temp^2)", "t:urban"), 3),
+    tau = 0.5, model = rep(1:3, each = 5),
+    estimate = seq_len(15) / 10, std.error = 0.05,
+    stringsAsFactors = FALSE
+  )
+  ch <- echart_make_coefplot(
+    fit1 = NULL, fit2 = NULL, fit3 = NULL,
+    weather_terms = "t", interaction_terms = "t:urban",
+    engine = "rif", rif_grid = grid, pred_var = "t", tau = 0.5
+  )
+  expect_s3_class(ch, "echarts4r")
+  expect_false(grepl("No RIF coefficients found", ch$x$opts$title[[1]]$text))
+  expect_equal(length(ch$x$opts$series), 3L)
+})
+
+test_that("RIF continuous polynomial effects use one marginal-effect panel", {
+  skip_if_not_installed("echarts4r")
+  rif_poly <- ec_mk_grid(c("tx", "I(tx^2)"), ec_taus)
+  ch <- echart_weather_effect_plot(
+    ec_fit_cont, "tx", character(0), FALSE, ec_lf, "rif",
+    rif_grid = rif_poly, mark_taus = NULL
+  )
+  expect_s3_class(ch, "echarts4r")
+  expect_equal(length(ch$x$opts$grid), 5L)
+  expect_equal(length(ch$x$opts$series), 3L)
+  expect_true(any(vapply(ch$x$opts$series, function(s) !is.null(s$markLine), logical(1))))
 })
 
 # ---- echart_importance -------------------------------------------------------
@@ -200,9 +370,17 @@ test_that("echart importance draws horizontal share bars, largest on top", {
   shares <- vapply(ch$x$opts$series[[1]]$data, function(d) d[[1]], numeric(1))
   expect_true(all(diff(shares) >= 0)) # ascending = largest lands on top
   expect_match(ch$x$opts$xAxis[[1]]$name, "Share of explained variation")
+  expect_false(any(grepl("\\[|\\]", ch$x$opts$yAxis[[1]]$data)))
+  expect_false(any(grepl("tx_bin", ch$x$opts$yAxis[[1]]$data, fixed = TRUE)))
   # Unresolvable model matrix -> informative blank widget.
   expect_s3_class(echart_importance(structure(list(), class = "nope")),
                   "echarts4r")
+
+  binned <- fixest::feols(welfare ~ tx_bin + urban, data = ec_dat)
+  binned_ch <- echart_importance(binned, label_fun = ec_lf)
+  labels <- binned_ch$x$opts$yAxis[[1]]$data
+  expect_false(any(grepl("tx_bin|[\\[\\]]", labels)))
+  expect_true(any(grepl("–", labels, fixed = TRUE)))
 })
 
 # ---- echart_residual_panels --------------------------------------------------
@@ -241,6 +419,12 @@ test_that("echart pred vs actual overlays actual and predicted histograms", {
                c("Actual", "Predicted"))
   expect_match(ch$x$opts$xAxis[[1]]$name, "Welfare")
   expect_match(ch$x$opts$yAxis[[1]]$name, "Share of households")
+  expect_equal(ch$x$opts$yAxis[[1]]$min, 0)
+  expect_lt(ch$x$opts$yAxis[[1]]$max, 100)
+  expect_equal(ch$x$opts$yAxis[[1]]$interval, ch$x$opts$yAxis[[1]]$max / 5)
+  expect_true(all(vapply(ch$x$opts$series, function(s) {
+    all(unlist(s$data) >= 0 & unlist(s$data) <= 100)
+  }, logical(1))))
 })
 
 test_that("echart pred vs actual draws the calibration curve for logit", {

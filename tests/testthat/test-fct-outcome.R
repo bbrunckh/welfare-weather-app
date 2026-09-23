@@ -5,6 +5,33 @@
 
 library(testthat)
 
+test_that("echarts theme hides continuous endpoint labels only", {
+  numeric_chart <- echarts4r::e_charts(data.frame(x = 1:3, y = 2:4), x) |>
+    echarts4r::e_line(y) |>
+    echarts4r::e_x_axis(axisLabel = wiseapp:::wise_eaxis_label()) |>
+    wiseapp:::wise_echart_theme()
+  expect_false(numeric_chart$x$opts$xAxis[[1L]]$axisLabel$showMinLabel)
+  expect_false(numeric_chart$x$opts$xAxis[[1L]]$axisLabel$showMaxLabel)
+
+  category_chart <- echarts4r::e_charts(
+    data.frame(x = factor(c("a", "b", "c")), y = 1:3), x
+  ) |>
+    echarts4r::e_bar(y) |>
+    echarts4r::e_x_axis(axisLabel = wiseapp:::wise_eaxis_label()) |>
+    wiseapp:::wise_echart_theme()
+  expect_null(category_chart$x$opts$xAxis[[1L]]$axisLabel$showMinLabel)
+  expect_null(category_chart$x$opts$xAxis[[1L]]$axisLabel$showMaxLabel)
+
+  explicit <- echarts4r::e_charts(data.frame(x = 1:3, y = 2:4), x) |>
+    echarts4r::e_line(y) |>
+    echarts4r::e_x_axis(axisLabel = wiseapp:::wise_eaxis_label(
+      showMinLabel = TRUE, showMaxLabel = TRUE
+    )) |>
+    wiseapp:::wise_echart_theme()
+  expect_true(explicit$x$opts$xAxis[[1L]]$axisLabel$showMinLabel)
+  expect_true(explicit$x$opts$xAxis[[1L]]$axisLabel$showMaxLabel)
+})
+
 make_outcome_plot_df <- function(n = 1000L) {
   set.seed(17)
   data.frame(
