@@ -552,7 +552,7 @@ mod_3_01_sp_server <- function(id,
     # Answers "who does this reach and what does it cost?" while the user is
     # still choosing a cutoff, instead of only after a full policy run. The
     # figures come from `.sp_scenario_reach()`, which reuses the run's own
-    # eligibility function under the run's derived seed and the diagnostics
+    # eligibility function under the run's analysis seed and the diagnostics
     # tab's cost arithmetic - so this is the number the simulation will
     # produce, not a separate approximation of it.
 
@@ -583,9 +583,10 @@ mod_3_01_sp_server <- function(id,
         return(NULL)
       }
       r <- .sp_scenario_reach(
-        svy           = as.data.frame(svy),
+        svy           = svy,
         sp            = preview$spec,
-        analysis_unit = preview$analysis_unit
+        analysis_unit = preview$analysis_unit,
+        seed          = wise_current_seed()
       )
       if (is.null(r)) {
         return(NULL)

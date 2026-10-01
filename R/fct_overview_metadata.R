@@ -83,6 +83,57 @@ overview_metadata_cache_store <- function(connection_params, value) {
 }
 
 
+# Callbacks are session-owned; is_current stops retries/adoption after a source
+# change or disconnect. Only a cache miss starts the shared local daemon.
+.overview_metadata_load <- function(params, on_result, on_error, is_current) {
+  if (!isTRUE(is_current())) return(invisible(NULL))
+  cached <- .overview_metadata_cache_get(.overview_metadata_cache_key(params), params)
+  if (!is.null(cached)) {
+    on_result(cached)
+    return(invisible(NULL))
+  }
+  async <- tryCatch(.wise_step2_async_init(), error = function(e) FALSE)
+  if (!async || .wise_step2_async_sync()) {
+    tryCatch(on_result(load_overview_metadata(params)), error = on_error)
+    return(invisible(NULL))
+  }
+  package_path <- getNamespaceInfo(asNamespace("wiseapp"), "path")
+  development_package <- .wise_step2_async_is_dev_package()
+  # Explicit params are allowed only on this local shared pool (guidelines §0).
+  submit <- function() {
+    if (!isTRUE(is_current())) return(invisible(NULL))
+    task <- tryCatch(mirai::try_mirai({
+      if (!isTRUE(getOption("wiseapp.async.worker_initialized", FALSE))) {
+        if (isTRUE(development_package)) {
+          pkgload::load_all(package_path, export_all = FALSE, helpers = FALSE,
+            attach_testthat = FALSE, quiet = TRUE)
+        } else {
+          loadNamespace("wiseapp")
+        }
+        options(wiseapp.async.worker_initialized = TRUE)
+      }
+      wiseapp:::load_overview_metadata(params)
+    }, package_path = package_path, development_package = development_package,
+      params = params, .compute = "default"), error = function(e) e)
+    if (inherits(task, "error")) {
+      on_error(task)
+    } else if (is.null(task)) {
+      later::later(submit, delay = 0.1)
+    } else {
+      promises::then(task,
+        onFulfilled = function(value) {
+          if (isTRUE(is_current())) tryCatch(on_result(value), error = on_error)
+        },
+        onRejected = function(e) {
+          if (isTRUE(is_current())) on_error(e)
+        })
+    }
+    invisible(NULL)
+  }
+  submit()
+}
+
+
 # Cache ----
 
 # Cache keys include source identity, credential fingerprints, and local file

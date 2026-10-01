@@ -374,17 +374,10 @@ mod_3_06_policy_sim_server <- function(id,
               # REACT-05: a decomposition failure now fails the whole run
               # instead of silently presenting the previous run as new.
               shiny::setProgress(value = 0.85, detail = "Summarizing policy effects...")
-              decomp <- decompose_policy_effect(
-                svy_baseline = svy,
-                svy_policy = svy_mod,
-                model_fit = mf,
-                so = hs$so,
-                weather_raw = step2_resolve_weather(hs$weather_raw, hs),
-                skip_coef = skip_coef_val,
-                deltas = deltas_pre,
-                F_hat = F_hat_pre,
+              decomp <- .decompose_policy_effect_run(
                 context = decomp_context,
-                run_identity = decomp_context$run_identity
+                run_identity = decomp_context$run_identity,
+                weather_raw = step2_resolve_weather(hs$weather_raw, hs)
               )
               if (is.null(decomp)) {
                 stop("Effect decomposition produced no results.", call. = FALSE)
@@ -394,12 +387,10 @@ mod_3_06_policy_sim_server <- function(id,
                 names(decomp_context$adverse_bases),
                 function(basis) {
                   tryCatch(
-                    decompose_policy_effect(
-                      svy, svy_mod, mf, hs$so,
-                      weather_raw = decomp_context$adverse_bases[[basis]],
-                      skip_coef = skip_coef_val, deltas = deltas_pre,
-                      F_hat = F_hat_pre, context = decomp_context,
-                      run_identity = decomp_context$run_identity
+                    .decompose_policy_effect_run(
+                      context = decomp_context,
+                      run_identity = decomp_context$run_identity,
+                      weather_raw = decomp_context$adverse_bases[[basis]]
                     ),
                     error = function(e) NULL
                   )
@@ -444,27 +435,14 @@ mod_3_06_policy_sim_server <- function(id,
                   }
                   tryCatch(
                     {
-                      decomp_year <- decompose_policy_effect(
-                        svy_baseline = svy,
-                        svy_policy = svy_mod,
-                        model_fit = mf,
-                        so = hs$so,
-                        weather_raw = w_yr,
-                        skip_coef = skip_coef_val,
-                        deltas = deltas_pre,
-                        F_hat = F_hat_pre,
+                      .compact_run_future_decomposition(
                         context = decomp_context,
-                        run_identity = decomp_context$run_identity
-                      )
-                      .compact_future_decomposition(
-                        decomp_year,
+                        run_identity = decomp_context$run_identity,
+                        weather_raw = w_yr,
                         scenario = sc_label,
                         sim_year = yr,
                         year_start = sc$year_range[[1]] %||% NA_integer_,
-                        year_end = sc$year_range[[2]] %||% NA_integer_,
-                        baseline_deciles = decomp_context$baseline_deciles,
-                        is_rif = identical(mf$engine, "rif"),
-                        engine = mf$engine
+                        year_end = sc$year_range[[2]] %||% NA_integer_
                       )
                     },
                     error = function(e) {

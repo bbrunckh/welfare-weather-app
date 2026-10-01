@@ -259,33 +259,43 @@ has_sp_change <- function(sp) {
 #'   survey weights were used).
 #' @keywords internal
 .sp_transfer_totals <- function(svy_policy, analysis_unit = "hh") {
+  if (is.null(svy_policy) || !is.data.frame(svy_policy) ||
+    !SP_TRANSFER_COL %in% names(svy_policy)) {
+    return(.sp_transfer_totals_values(NULL, svy_policy, analysis_unit))
+  }
+  .sp_transfer_totals_values(
+    svy_policy[[SP_TRANSFER_COL]], svy_policy, analysis_unit
+  )
+}
+
+.sp_transfer_totals_values <- function(v, svy, analysis_unit = "hh") {
   zero <- list(
     total = 0, per_unit = 0, n_recipients = 0L,
     n_recipients_weighted = 0, weighted = FALSE
   )
-  if (is.null(svy_policy) || !is.data.frame(svy_policy) ||
-    !SP_TRANSFER_COL %in% names(svy_policy)) {
+  if (is.null(svy) || !is.data.frame(svy) || is.null(v) ||
+    length(v) != nrow(svy)) {
     return(zero)
   }
 
-  v <- suppressWarnings(as.numeric(svy_policy[[SP_TRANSFER_COL]]))
+  v <- suppressWarnings(as.numeric(v))
 
-  has_w <- "weight" %in% names(svy_policy)
+  has_w <- "weight" %in% names(svy)
   w <- if (has_w) {
-    suppressWarnings(as.numeric(svy_policy$weight))
+    suppressWarnings(as.numeric(svy$weight))
   } else {
-    rep(1, nrow(svy_policy))
+    rep(1, nrow(svy))
   }
 
   # Undo the per-capita scaling apply_policy_to_svy() applied, guarding the
   # same way it did so a missing or non-positive hhsize cannot turn the whole
   # sum into NA.
-  hh <- if (identical(analysis_unit, "hh") && "hhsize" %in% names(svy_policy)) {
-    h <- suppressWarnings(as.numeric(svy_policy$hhsize))
+  hh <- if (identical(analysis_unit, "hh") && "hhsize" %in% names(svy)) {
+    h <- suppressWarnings(as.numeric(svy$hhsize))
     h[!is.finite(h) | h <= 0] <- 1
     h
   } else {
-    rep(1, nrow(svy_policy))
+    rep(1, nrow(svy))
   }
 
   ok <- is.finite(v) & is.finite(w)
@@ -311,6 +321,44 @@ has_sp_change <- function(sp) {
   )
 }
 
+# Build the transfer vector from an eligibility draw. Both the preview and
+# apply_policy_to_svy() use this arithmetic; only the latter writes the vector
+# onto the survey as SP_TRANSFER_COL.
+.sp_transfer_values <- function(svy, sp, analysis_unit, eligible) {
+  if (length(eligible) != nrow(svy) || !"welfare" %in% names(svy)) {
+    return(NULL)
+  }
+
+  hhsize_scale <- if (identical(analysis_unit, "hh") && "hhsize" %in% names(svy)) {
+    hs <- suppressWarnings(as.numeric(svy$hhsize))
+    hs[!is.finite(hs) | hs <= 0] <- 1
+    hs
+  } else {
+    rep_len(1, nrow(svy))
+  }
+
+  if (sp$budget_mode == "transfer_first") {
+    daily_transfer <- (sp$transfer_amount_usd * sp$transfer_n_payments) / 365
+    return(ifelse(eligible, daily_transfer / hhsize_scale, 0))
+  }
+
+  if (sp$budget_mode == "budget_first") {
+    n_eligible <- sum(eligible)
+    if (n_eligible <= 0) return(NULL)
+    w_elig <- if ("weight" %in% names(svy)) {
+      w <- svy$weight[eligible]
+      sum(w[is.finite(w) & w > 0], na.rm = TRUE)
+    } else {
+      0
+    }
+    divisor <- if (w_elig > 0) w_elig else n_eligible
+    daily_transfer <- (sp$budget_fixed / divisor) / 365
+    return(ifelse(eligible, daily_transfer / hhsize_scale, 0))
+  }
+
+  NULL
+}
+
 
 #' Reach and cost of a social-protection scenario, before it is run
 #'
@@ -319,11 +367,10 @@ has_sp_change <- function(sp) {
 #' does this reach, and what does it cost?" directly from the survey and the
 #' scenario.
 #'
-#' The numbers are the run's numbers, not an approximation of them, because
-#' this *is* the run's code path: `apply_policy_to_svy()` writes the transfer
-#' column exactly as a policy simulation would (same seed, so the same
-#' inclusion/exclusion error draws), and `.sp_transfer_totals()` is the single
-#' implementation of the arithmetic the diagnostics tab reports.
+#' The numbers use the same seeded eligibility function and transfer
+#' arithmetic as the run, without materializing a policy copy of the survey.
+#' `.sp_transfer_totals()` remains the single implementation of the arithmetic
+#' the diagnostics tab reports for the run's `.wiseapp_sp_transfer` column.
 #'
 #' The caller must pass the survey frame the *run* will use - Step 2 may have
 #' filtered `survey_weather()` down to one baseline round, and totals computed
@@ -360,32 +407,26 @@ has_sp_change <- function(sp) {
     return(NULL)
   }
 
-  # Run the real transfer application. Only `sp` is supplied, so no covariate
-  # lever touches the frame; the seed matches the run's, so eligibility -
-  # including the random inclusion/exclusion errors - is identical.
-  svy_mod <- tryCatch(
-    apply_policy_to_svy(svy,
-      sp = sp, analysis_unit = analysis_unit,
-      seed = seed
-    ),
+  # The run and preview share one eligibility draw and transfer calculation;
+  # the preview needs only this vector and the columns used by its totals.
+  values <- tryCatch(
+    withr::with_seed(wise_seed(seed, "policy"), {
+      eligible <- .determine_sp_eligibility(svy, sp)
+      transfer <- .sp_transfer_values(svy, sp, analysis_unit, eligible)
+      list(eligible = eligible, transfer = transfer)
+    }),
     error = function(e) NULL
   )
-  if (is.null(svy_mod) || !SP_TRANSFER_COL %in% names(svy_mod)) {
+  if (is.null(values) || is.null(values$transfer) ||
+    length(values$eligible) != nrow(svy)) {
     return(NULL)
   }
-
-  totals <- .sp_transfer_totals(svy_mod, analysis_unit)
+  eligible <- values$eligible
+  totals <- .sp_transfer_totals_values(values$transfer, svy, analysis_unit)
 
   # Eligibility is reported separately from receipt: a scenario with a zero
   # transfer still targets a population, and saying "0 eligible" there would
   # be misleading.
-  eligible <- withr::with_seed(
-    wise_seed(seed, "policy"),
-    tryCatch(.determine_sp_eligibility(svy, sp), error = function(e) NULL)
-  )
-  if (is.null(eligible) || length(eligible) != nrow(svy)) {
-    return(NULL)
-  }
   eligible[is.na(eligible)] <- FALSE
 
   w <- if ("weight" %in% names(svy)) {
@@ -1131,56 +1172,12 @@ apply_policy_to_svy <- function(svy,
     # is the household, but welfare is per-capita - so the per-household
     # transfer must be divided by hhsize to match scale. When analysis_unit ==
     # "ind" the SP transfer is already per-individual and applies to every
-    # eligible (individual) row as-is. `hhsize_scale` performs that scaling.
+    # eligible (individual) row as-is.
     if (!is.null(sp) && "welfare" %in% cols) {
-      hhsize_scale <- if (identical(analysis_unit, "hh") && "hhsize" %in% cols) {
-        hs <- suppressWarnings(as.numeric(svy$hhsize))
-        hs[!is.finite(hs) | hs <= 0] <- 1 # guard against NA / zero / negative
-        hs
-      } else {
-        rep_len(1, nrow(svy))
-      }
-
-      if (sp$budget_mode == "transfer_first") {
-        # If transfer-first budget mode is selected, apply the transfer to the
-        # survey immediately so it is included in the predictions and thus the
-        # targeting can be based on post-transfer welfare. The transfer amount is
-        # annualized and converted to a daily amount for this purpose, since the
-        # model is based on daily welfare.
-        n_pay <- sp$transfer_n_payments
-        annual_transfer <- sp$transfer_amount_usd * n_pay
-        daily_transfer <- annual_transfer / 365
-        eligible <- .determine_sp_eligibility(svy, sp)
-        if (length(eligible) == nrow(svy)) {
-          svy[[SP_TRANSFER_COL]] <- ifelse(eligible,
-            daily_transfer / hhsize_scale, 0
-          )
-        }
-      } else if (sp$budget_mode == "budget_first") {
-        # Distribute the fixed budget across eligible households. Eligibility is
-        # determined once here using the baseline survey; SP_TRANSFER_COL holds
-        # the resulting daily per-household amount.
-        #
-        # When survey weights are present, divide the budget by the weighted
-        # count of eligible households so that the population-level total
-        # sum(transfer * weight) equals budget_fixed. Without weight adjustment
-        # the realised budget would scale with mean(weight) on eligible HHs.
-        eligible <- .determine_sp_eligibility(svy, sp)
-        n_eligible <- sum(eligible)
-        if (n_eligible > 0) {
-          w_elig <- if ("weight" %in% names(svy)) {
-            w <- svy$weight[eligible]
-            sum(w[is.finite(w) & w > 0], na.rm = TRUE)
-          } else {
-            0
-          }
-          divisor <- if (w_elig > 0) w_elig else n_eligible
-          annual_transfer <- sp$budget_fixed / divisor
-          daily_transfer <- annual_transfer / 365
-          svy[[SP_TRANSFER_COL]] <- ifelse(eligible,
-            daily_transfer / hhsize_scale, 0
-          )
-        }
+      eligible <- .determine_sp_eligibility(svy, sp)
+      transfer <- .sp_transfer_values(svy, sp, analysis_unit, eligible)
+      if (!is.null(transfer)) {
+        svy[[SP_TRANSFER_COL]] <- transfer
       }
     }
 

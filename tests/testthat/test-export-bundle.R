@@ -585,6 +585,18 @@ test_that("already-in-force values are not counted as changes", {
   }
 }
 
+test_that("configuration exports retain the session analysis seed", {
+  testServer(function(input, output, session) {
+    export_menu_server(input, output, session, seed = 123L)
+  }, {
+    session$userData$wise_analysis_seed <- 907L
+    file <- output$export_config
+    cfg <- jsonlite::read_json(file, simplifyVector = FALSE)
+    expect_equal(cfg$random_seed, 907L)
+    expect_equal(cfg$wiseapp_config_version, 1L)
+  })
+})
+
 .import_file <- function(inputs) {
   # Plain tempfile: withr::local_tempfile() would delete the file when this
   # helper returns, before the import handler reads it.

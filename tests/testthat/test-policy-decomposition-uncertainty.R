@@ -418,6 +418,94 @@ test_that("RIF context parity caches channels and rejects stale runs", {
   )
 })
 
+test_that("run-owned compact decomposition preserves channels and deduplicates hazards", {
+  fx <- make_ols_fixture(N = 120)
+  panels <- list(fx$svy_base["temp"], transform(fx$svy_base["temp"], temp = temp + 1))
+  context <- wiseapp:::.build_decomposition_context(
+    fx$svy_base, fx$svy_policy, fx$model_fit, fx$so,
+    run_identity = "compact-run", weather_panels = c(panels, panels)
+  )
+  full <- wiseapp::decompose_policy_effect(
+    fx$svy_base, fx$svy_policy, fx$model_fit, fx$so,
+    weather_raw = panels[[2L]]
+  )
+  compact <- wiseapp:::.compact_run_future_decomposition(
+    context, "compact-run", panels[[2L]], "SSP2-4.5 / 2030-2040", 2030L,
+    2030L, 2040L
+  )
+  expected <- wiseapp:::.compact_future_decomposition(
+    full, "SSP2-4.5 / 2030-2040", 2030L, 2030L, 2040L,
+    baseline_deciles = context$baseline_deciles, engine = "fixest"
+  )
+  expect_equal(compact, expected, tolerance = 0)
+  expect_equal(context$cache_entries$hazard_prepared, 2L)
+  expect_equal(wiseapp:::.decompose_policy_effect_run(
+    context, "compact-run", panels[[2L]]), full, tolerance = 0)
+  expect_error(wiseapp:::.decompose_policy_effect_run(
+    context, "other-run", panels[[2L]]), "identity mismatch")
+  fx$svy_base$welfare[1L] <- fx$svy_base$welfare[1L] * 2
+  expect_equal(wiseapp:::.compact_run_future_decomposition(
+    context, "compact-run", panels[[2L]], "SSP2-4.5 / 2030-2040", 2030L,
+    2030L, 2040L), expected, tolerance = 0)
+})
+
+test_that("run-owned RIF compact decomposition preserves summary output", {
+  fx <- make_ols_fixture(N = 120)
+  mf <- fx$model_fit
+  mf$engine <- "rif"
+  mf$taus <- c(0.25, 0.5, 0.75)
+  mf$rif_grid <- data.frame(
+    model = 3L,
+    term = rep(c("temp", "transfer", "temp:transfer"), each = 3L),
+    tau = rep(mf$taus, 3L),
+    estimate = rep(c(-0.02, -0.01, 0, 0.1, 0.1, 0.1, 0.02, 0.02, 0.02), each = 1L),
+    std.error = 0.01
+  )
+  weather <- transform(fx$svy_base["temp"], temp = temp + 1)
+  context <- wiseapp:::.build_decomposition_context(
+    fx$svy_base, fx$svy_policy, mf, fx$so,
+    run_identity = "rif-compact-run", weather_panels = list(weather)
+  )
+  full <- wiseapp::decompose_policy_effect(
+    fx$svy_base, fx$svy_policy, mf, fx$so, weather_raw = weather
+  )
+  compact <- wiseapp:::.compact_run_future_decomposition(
+    context, "rif-compact-run", weather, "SSP2-4.5 / 2030-2040", 2030L,
+    2030L, 2040L
+  )
+  expected <- wiseapp:::.compact_future_decomposition(
+    full, "SSP2-4.5 / 2030-2040", 2030L, 2030L, 2040L,
+    baseline_deciles = context$baseline_deciles, is_rif = TRUE, engine = "rif"
+  )
+  expect_equal(compact, expected, tolerance = 0)
+})
+
+test_that("run-owned context is isolated from data.table mutation; public reuse stays strict", {
+  skip_if_not_installed("data.table")
+  fx <- make_ols_fixture(N = 120)
+  baseline <- data.table::as.data.table(data.table::copy(fx$svy_base))
+  policy <- data.table::as.data.table(data.table::copy(fx$svy_policy))
+  context <- wiseapp:::.build_decomposition_context(
+    baseline, policy, fx$model_fit, fx$so, run_identity = "owned-data-table-run"
+  )
+  expected <- wiseapp::decompose_policy_effect(
+    fx$svy_base, fx$svy_policy, fx$model_fit, fx$so
+  )
+
+  data.table::set(baseline, i = 1L, j = "welfare", value = baseline$welfare[[1L]] + 10)
+  data.table::set(policy, i = 1L, j = "transfer", value = 99)
+
+  owned <- wiseapp:::.decompose_policy_effect_run(context, "owned-data-table-run")
+  expect_equal(owned, expected, tolerance = 0)
+  expect_error(
+    wiseapp::decompose_policy_effect(
+      baseline, policy, fx$model_fit, fx$so, context = context,
+      run_identity = "owned-data-table-run"
+    ),
+    "Incompatible or stale"
+  )
+})
+
 test_that("decomposition summaries honor fixed cached deciles", {
   fx <- make_ols_fixture(N = 40)
   result <- wiseapp::decompose_policy_effect(

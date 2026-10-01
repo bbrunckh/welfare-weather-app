@@ -38,10 +38,16 @@ test_that("Step 3 preview labels and calculations use one debounced snapshot", {
     variable_list = shiny::reactiveVal(data.frame()),
     analysis_unit = shiny::reactiveVal("hh"), hist_sim = hs
   ), {
+    session$userData$wise_analysis_seed <- 12345L
     session$setInputs(sp_type = "shock", transfer_amount_usd = 10)
     session$elapse(300); session$flushReact()
     snap <- sp_preview_inputs(); reach <- sp_reach()
     expect_identical(snap$display_type, "shock")
+    expect_identical(reach$on_baseline, TRUE)
+    expect_identical(
+      reach[names(reach) != "on_baseline"],
+      .sp_scenario_reach(svy, sp_scenario_spec(), "hh", seed = 12345L)
+    )
   })
 })
 

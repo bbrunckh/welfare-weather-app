@@ -13,6 +13,7 @@ Log entries at the bottom (date, batch, result). Benchmarks per `optimization_gu
 - ☑ Welfare statistics one-sort-per-group (`review/optimize_aggregation_welfare.md`) — Rcpp kernel adopted (`ec9c665`); collapse grouped variant rejected without implementation (kernel fuses the sort + all nine scans).
 - ☑ RIF computation (`review/optimize_rif.md`) — bandwidth not hot (bw.SJ ~10 ms at n=306k; stride subsampling rejected: +136.9% drift on IRN); adopted `collapse::fquantile()` + multi-tau pattern-gather.
 - ◐ Step 2 progressive results: implemented safe cancellation/settlement, strict-checksum `qs2` artifacts, live worker progress and a separate historical mean preview; focused tests + real-worker smoke pass; user confirmed in-app testing on 2026-10-01. Deployment verification and end-to-end performance/memory validation remain outstanding.
+- ◐ Startup and Step 3 backend: demand-driven worker loading, parent-cache-first async metadata, run-owned decomposition context, compact future channels, deduplicated hazards and copy-free seeded SP reach implemented. Import/export options and schemas retained; session-seed roundtrip fixed. Focused tests pass; end-to-end timing/memory and interactive validation remain outstanding. Step 3 offloading deferred pending evidence; analytic baseline-delta calls retain strict per-call validation.
 
 ## Batch 2 — Module UI migrations (parallel, one agent per module, worktrees)
 
@@ -29,6 +30,8 @@ Log entries at the bottom (date, batch, result). Benchmarks per `optimization_gu
 Merge order: Batch 1 first → Batch 2 branches rebase onto it → Batch 3.
 
 ## Log
+
+- 2026-10-01 — Startup/Step 3 backend implementation: lazy shared-worker package loading, guarded manual/auto metadata cache misses, opt-in dev documentation (`options(wiseapp.dev.document = TRUE)`), run-owned decomposition inputs and central-only future compaction. Full historical/adverse results, import sequencing, export choices, credentials filtering and stale suppression preserved. Focused metadata/real-worker, Step 2, OLS/RIF decomposition, SP, import/export and aggregation tests passed; browser export emitted a Chromote shutdown timeout without assertion failures. No broad benchmarks or dependency/frontend/manifest changes. Outstanding: interactive startup/Step 3 validation and app timing/peak-memory measurement; profile analytic-delta validation and aggregation misses before further changes. Step 3 remains synchronous; shared-pool offloading is conditional on measured blocking/transport costs. Detailed plan retired.
 
 - 2026-10-01 — User confirmed in-app testing of the Step 2 serialization/progress changes before commit; interactive validation is no longer an outstanding implementation blocker. Deployment dependency/manifest refresh and quantitative performance/memory follow-up remain separate.
 

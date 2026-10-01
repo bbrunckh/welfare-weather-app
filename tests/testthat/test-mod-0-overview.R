@@ -97,3 +97,58 @@ test_that("auto-connect dispatches the metadata load to the mirai worker", {
   expect_true(any(grepl("auto-connecting to databricks", msgs)))
   expect_true(any(grepl("automatic data-source connection failed", msgs)))
 })
+
+test_that("manual metadata adoption ignores superseded and disconnected requests", {
+  withr::local_envvar(WISEAPP_DATA_SOURCE = NA)
+  requests <- list()
+  local_mocked_bindings(.overview_metadata_load = function(params, on_result,
+    on_error, is_current) {
+    requests[[length(requests) + 1L]] <<- list(
+      params = params, result = on_result, current = is_current)
+  }, .package = "wiseapp")
+  metadata <- list(survey_list = data.frame(code = "TST"),
+    variable_list = data.frame(name = "welfare"), cpi_ppp = data.frame(cpi = 1),
+    pov_lines = data.frame(line = 3))
+  testServer(mod_0_overview_server, {
+    session$setInputs(connection_type = "local", local_path = tempdir())
+    session$setInputs(apply_connection = 1L)
+    expect_length(requests, 1L)
+    expect_null(applied_connection())
+    session$setInputs(apply_connection = 2L)
+    expect_false(requests[[1L]]$current())
+    requests[[1L]]$result(metadata)
+    expect_null(applied_connection())
+    requests[[2L]]$result(metadata)
+    expect_identical(survey_list(), metadata$survey_list)
+    expect_identical(variable_list(), metadata$variable_list)
+    expect_identical(cpi_ppp(), metadata$cpi_ppp)
+    expect_identical(pov_lines(), metadata$pov_lines)
+    expect_identical(applied_connection()$type, "local")
+    session$setInputs(apply_connection = 3L)
+    session$setInputs(local_path = paste0(tempdir(), "/changed"))
+    expect_false(requests[[3L]]$current())
+    session$close()
+    expect_false(requests[[3L]]$current())
+  })
+})
+
+test_that("warm automatic connection publishes parent metadata without a worker", {
+  withr::local_envvar(WISEAPP_DATA_SOURCE = "local", WISEAPP_DATA_PATH = tempdir(),
+    WISEAPP_METADATA_CACHE_DISABLE = "0")
+  params <- auto_connection_params()
+  metadata <- list(survey_list = data.frame(code = "TST"),
+    variable_list = data.frame(name = "welfare"), cpi_ppp = data.frame(cpi = 1),
+    pov_lines = data.frame(line = 3))
+  overview_metadata_cache_store(params, metadata)
+  on.exit(rm(list = .overview_metadata_cache_key(params),
+    envir = .overview_metadata_cache), add = TRUE)
+  local_mocked_bindings(.wise_step2_async_init = function() {
+    stop("warm automatic connection must not start a worker")
+  }, .package = "wiseapp")
+  testServer(mod_0_overview_server, {
+    session$flushReact()
+    expect_identical(applied_connection(), params)
+    expect_identical(survey_list(), metadata$survey_list)
+    expect_identical(pov_lines(), metadata$pov_lines)
+  })
+})

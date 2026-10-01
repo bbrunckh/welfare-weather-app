@@ -55,6 +55,40 @@ test_that("the preview is stable across calls despite the error draws", {
                    .sp_scenario_reach(svy, sp, "hh"))
 })
 
+test_that("the seeded preview matches policy transfers without copying the survey", {
+  svy <- make_svy(300)
+  svy$hhsize[c(1, 2, 3)] <- c(0, NA, -2)
+  svy$weight[c(4, 5)] <- c(NA, -1)
+  seed <- 48123L
+
+  for (mode in c("transfer_first", "budget_first")) {
+    sp <- base_sp(
+      budget_mode = mode,
+      budget_fixed = 750000,
+      targeting = "exante_poor",
+      inclusion_error_pct = 20,
+      exclusion_error_pct = 15
+    )
+    for (unit in c("hh", "ind", "firm")) {
+      policy <- apply_policy_to_svy(
+        svy, sp = sp, analysis_unit = unit, seed = seed
+      )
+      before <- svy
+      reach <- .sp_scenario_reach(svy, sp, unit, seed = seed)
+      totals <- .sp_transfer_totals(policy, unit)
+      received <- policy[[SP_TRANSFER_COL]]
+      weights <- suppressWarnings(as.numeric(svy$weight))
+      weights[!is.finite(weights) | weights < 0] <- 0
+
+      expect_identical(svy, before)
+      expect_equal(reach$transfer_total, totals$total)
+      expect_equal(reach$transfer_per_unit, totals$per_unit)
+      expect_equal(reach$n_rows, sum(is.finite(received) & received > 0))
+      expect_equal(reach$n_pop, sum(weights[is.finite(received) & received > 0]))
+    }
+  }
+})
+
 test_that("universal targeting reaches the whole population", {
   svy <- make_svy()
   r <- .sp_scenario_reach(svy, base_sp(targeting = "universal"), "hh")

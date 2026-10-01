@@ -287,6 +287,23 @@ mod_0_overview_server <- function(id) {
     # plain field check below only says "configured" (DEP-03).
     connection_status <- reactiveVal(NULL)
     auto_connect_failed <- reactiveVal(FALSE)
+    metadata_generation <- 0L
+    metadata_ended <- FALSE
+    metadata_notification <- NULL
+    session$onSessionEnded(function() {
+      metadata_ended <<- TRUE
+      metadata_generation <<- metadata_generation + 1L
+    })
+    request_metadata <- function(params, on_result, on_error) {
+      metadata_generation <<- metadata_generation + 1L
+      generation <- metadata_generation
+      current <- function() !metadata_ended && identical(generation, metadata_generation)
+      callback <- function(fn) function(value) {
+        if (!current()) return(invisible(NULL))
+        shiny::withReactiveDomain(session, shiny::isolate(fn(value)))
+      }
+      .overview_metadata_load(params, callback(on_result), callback(on_error), current)
+    }
 
     output$connection_card_ui <- renderUI({
       if (.auto_connect() && !isTRUE(auto_connect_failed())) {
@@ -372,8 +389,14 @@ mod_0_overview_server <- function(id) {
     # Apply connection on button click ----
 
     # A source switch invalidates the previous attempt's status
-    observeEvent(input$connection_type,
+    observeEvent(connection_params(),
       {
+        if (.auto_connect() && !isTRUE(auto_connect_failed())) return()
+        metadata_generation <<- metadata_generation + 1L
+        if (!is.null(metadata_notification)) {
+          removeNotification(metadata_notification, session = session)
+          metadata_notification <<- NULL
+        }
         connection_status(NULL)
       },
       ignoreInit = TRUE
@@ -394,9 +417,7 @@ mod_0_overview_server <- function(id) {
     # With WISEAPP_DATA_SOURCE set: auto-connect once on startup, no button
     # click or UI input required. Any failure (configuration, auth, network,
     # missing volume/metadata) rolls back and surfaces a visible error.
-    # The metadata fetch runs on the shared mirai daemon (ExtendedTask, per
-    # optimization guidelines §8) so the first session of a process never
-    # blocks the main thread on the Databricks HTTP round trip. Falls back to
+    # Cache misses run on the shared local mirai daemon. Falls back to
     # the synchronous load when the async subsystem is disabled (also gates
     # WISEAPP_ASYNC_STEP2) or unavailable.
     if (.auto_connect()) {
@@ -444,36 +465,9 @@ mod_0_overview_server <- function(id) {
             params <- auto_connection_params()
             message("[overview] auto-connecting to ", params$type)
 
-            async_ready <- tryCatch(
-              .wise_step2_async_init(),
-              error = function(e) FALSE
-            )
-            if (async_ready && !.wise_step2_async_sync()) {
-              # Connection params are passed verbatim: on the auto-connect
-              # path they are resolved from this process's environment, and
-              # the daemon is local (same host, IPC transport) — see the
-              # credential policy in optimization_tracking.md. A plain mirai
-              # promise (not ExtendedTask): this flow has no task button and
-              # the connection status card is the progress surface; this
-              # matches the Step 2 coordinator's dispatch pattern.
-              metadata_task <- mirai::mirai(
-                wiseapp:::load_overview_metadata(params, force_refresh),
-                .args = list(params = params, force_refresh = FALSE),
-                .compute = "default"
-              )
-              promises::then(
-                metadata_task,
-                onFulfilled = function(value) {
-                  try(auto_connect_succeed(value, params), silent = TRUE)
-                },
-                onRejected = function(e) {
-                  try(auto_connect_fail(e), silent = TRUE)
-                }
-              )
-            } else {
-              metadata <- load_overview_metadata(params)
-              auto_connect_succeed(metadata, params)
-            }
+            request_metadata(params,
+              function(metadata) auto_connect_succeed(metadata, params),
+              auto_connect_fail)
           },
           error = function(e) auto_connect_fail(e)
         )
@@ -536,18 +530,21 @@ mod_0_overview_server <- function(id) {
 
         # Load metadata ----
 
-        load_notif <- showNotification(
+        if (!is.null(metadata_notification)) {
+          removeNotification(metadata_notification, session = session)
+        }
+        metadata_notification <<- showNotification(
           "Loading metadata files...",
           duration = NULL, type = "message"
         )
-        on.exit(removeNotification(load_notif), add = TRUE)
-
-        metadata <- tryCatch(
-          load_overview_metadata(params),
-          error = function(e) e
-        )
-
-        if (inherits(metadata, "error")) {
+        finish_notification <- function() {
+          if (!is.null(metadata_notification)) {
+            removeNotification(metadata_notification, session = session)
+          }
+          metadata_notification <<- NULL
+        }
+        failed <- function(metadata) {
+          finish_notification()
           connection_status(list(
             state = "error",
             message = paste0(
@@ -562,24 +559,27 @@ mod_0_overview_server <- function(id) {
             ),
             type = "error", duration = 10
           )
-          return()
+          invisible(NULL)
         }
-
-        publish_metadata(metadata)
-
-        # Expose the connection only after metadata succeeds.
-        applied_connection(params)
-        connection_status(list(
-          state = "connected",
-          message = paste0(
-            "Connected to ", params$type, " data source (metadata verified)."
-          ),
-          detail = NULL
-        ))
-        showNotification(
-          paste0("Connected to ", params$type, " data source. Metadata is ready."),
-          type = "message", duration = 3
-        )
+        succeeded <- function(metadata) {
+          finish_notification()
+          overview_metadata_cache_store(params, metadata)
+          publish_metadata(metadata)
+          # Expose the connection only after metadata succeeds.
+          applied_connection(params)
+          connection_status(list(
+            state = "connected",
+            message = paste0(
+              "Connected to ", params$type, " data source (metadata verified)."
+            ),
+            detail = NULL
+          ))
+          showNotification(
+            paste0("Connected to ", params$type, " data source. Metadata is ready."),
+            type = "message", duration = 3, session = session
+          )
+        }
+        tryCatch(request_metadata(params, succeeded, failed), error = failed)
       },
       ignoreInit = TRUE
     )

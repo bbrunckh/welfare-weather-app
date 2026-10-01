@@ -2,6 +2,47 @@
 
 library(testthat)
 
+test_that("metadata parent cache hits do not start a daemon", {
+  withr::local_envvar(WISEAPP_METADATA_CACHE_DISABLE = "0")
+  params <- list(type = "local", path = tempdir())
+  value <- list(survey_list = data.frame(code = "TST"))
+  overview_metadata_cache_store(params, value)
+  on.exit(rm(list = .overview_metadata_cache_key(params),
+    envir = .overview_metadata_cache), add = TRUE)
+  local_mocked_bindings(.wise_step2_async_init = function() {
+    stop("cache hit must not initialize worker")
+  }, .package = "wiseapp")
+  received <- NULL
+  .overview_metadata_load(params, function(x) received <<- x,
+    function(e) stop(e), function() TRUE)
+  expect_identical(received, value)
+  .overview_metadata_load(params, function(x) stop("retired request adopted"),
+    function(e) stop(e), function() FALSE)
+})
+
+test_that("metadata backpressure retries stop when the request is retired", {
+  withr::local_envvar(WISEAPP_METADATA_CACHE_DISABLE = "1", WISEAPP_ASYNC_SYNC = "0")
+  current <- TRUE
+  submissions <- 0L
+  retry <- NULL
+  local_mocked_bindings(.wise_step2_async_init = function() TRUE,
+    .package = "wiseapp")
+  local_mocked_bindings(try_mirai = function(...) {
+    submissions <<- submissions + 1L
+    NULL
+  }, .package = "mirai")
+  local_mocked_bindings(later = function(func, ...) {
+    retry <<- func
+  }, .package = "later")
+  .overview_metadata_load(list(type = "local", path = tempdir()),
+    function(x) stop("unexpected adoption"), function(e) stop(e), function() current)
+  expect_equal(submissions, 1L)
+  expect_true(is.function(retry))
+  current <- FALSE
+  retry()
+  expect_equal(submissions, 1L)
+})
+
 
 .overview_duck_state_restore <- function() {
   backup <- as.list(.duck)
@@ -504,22 +545,23 @@ test_that("metadata bundle loads in a real mirai worker from verbatim params", {
   .overview_fixture(path)
   params <- list(type = "local", path = path)
 
-  package_path <- getNamespaceInfo(asNamespace("wiseapp"), "path")
-  mirai::daemons(1L)
-  on.exit(mirai::daemons(0L), add = TRUE)
-
-  task <- mirai::mirai({
-    pkgload::load_all(package_path, export_all = FALSE, helpers = FALSE,
-      attach_testthat = FALSE, quiet = TRUE)
-    wiseapp:::load_overview_metadata(params, force_refresh)
-  }, package_path = package_path, params = params, force_refresh = TRUE)
-
+  withr::local_envvar(WISEAPP_ASYNC_STEP2 = "1", WISEAPP_ASYNC_SYNC = "0",
+    WISEAPP_METADATA_CACHE_DISABLE = "1")
+  state <- .wise_step2_async_state
+  state$started <- FALSE
+  on.exit({
+    mirai::daemons(0L)
+    state$started <- FALSE
+  }, add = TRUE)
+  metadata <- NULL
+  failure <- NULL
+  .overview_metadata_load(params, function(value) metadata <<- value,
+    function(e) failure <<- e, function() TRUE)
   deadline <- Sys.time() + 30
-  while (mirai::unresolved(task) && Sys.time() < deadline) Sys.sleep(0.05)
-  metadata <- task[]
-  if (mirai::is_error_value(metadata)) {
-    stop(as.character(metadata), call. = FALSE)
+  while (is.null(metadata) && is.null(failure) && Sys.time() < deadline) {
+    later::run_now(0.05)
   }
+  if (!is.null(failure)) stop(failure)
 
   expect_named(
     metadata,

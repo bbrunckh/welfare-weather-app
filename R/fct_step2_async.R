@@ -10,7 +10,6 @@
   state$queue <- list()
   state$active <- NULL
   state$jobs <- new.env(parent = emptyenv())
-  state$worker_initialized <- FALSE
   state
 })
 
@@ -195,7 +194,7 @@
           attach_testthat = FALSE, quiet = TRUE
         )
       } else {
-        requireNamespace("wiseapp", quietly = TRUE)
+        loadNamespace("wiseapp")
       }
       options(wiseapp.async.worker_initialized = TRUE)
     }
@@ -523,26 +522,8 @@
       1L, dispatcher = TRUE, memory = .wise_step2_async_queue_memory(),
       .compute = "default", sync = .wise_step2_async_sync()
     )
-    package_path <- getNamespaceInfo(asNamespace("wiseapp"), "path")
-    development_package <- .wise_step2_async_is_dev_package()
-    initialized <- mirai::everywhere({
-      if (isTRUE(development_package)) {
-        pkgload::load_all(
-          package_path, export_all = FALSE, helpers = FALSE,
-          attach_testthat = FALSE, quiet = TRUE
-        )
-      } else {
-        requireNamespace("wiseapp", quietly = TRUE)
-      }
-      options(wiseapp.async.worker_initialized = TRUE)
-      TRUE
-    }, package_path = package_path,
-    development_package = development_package, .compute = "default")
-    initialized <- mirai::collect_mirai(initialized)
-    if (any(vapply(initialized, inherits, logical(1), what = "miraiError"))) {
-      stop("Could not initialize the async Step 2 worker.", call. = FALSE)
-    }
-    state$worker_initialized <- TRUE
+    # The first task loads the package inside the daemon. Never wait for that
+    # cold load in the Shiny process; task rejection reports initialization errors.
     state$started <- TRUE
     shiny::onStop(function() {
       if (isTRUE(state$started)) {

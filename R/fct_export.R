@@ -1433,7 +1433,7 @@ export_menu_server <- function(input, output, session,
   snapshot <- function() {
     wise_config_snapshot(
       input,
-      seed = seed,
+      seed = wise_current_seed(seed, session),
       provenance = tryCatch(provenance(), error = function(e) list())
     )
   }

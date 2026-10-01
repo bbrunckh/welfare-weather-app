@@ -5,9 +5,6 @@
 #' @import shiny
 #' @noRd
 app_server <- function(input, output, session) {
-  # Start the single process-wide Step 2 worker before modules submit work.
-  .wise_step2_async_init()
-
   # SEC-03: data connections and credential caches are process-wide. Register
   # the root session so the final session in this process releases them.
   .duck_register_session(session)
