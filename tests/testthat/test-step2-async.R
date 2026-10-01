@@ -58,8 +58,9 @@ testthat::test_that("queued cancellation removes the job and its artifacts", {
     artifact_dir = artifact_dir, weather_store_root = weather_dir,
     on_status = function(status, ...) events <<- c(events, status)
   )
+  job <- list2env(job, parent = emptyenv())
   assign(job$id, job, envir = state$jobs)
-  state$queue <- list(job)
+  state$queue <- job$id
 
   expect_true(.wise_step2_async_cancel(job$id))
   expect_length(state$queue, 0L)
@@ -67,6 +68,74 @@ testthat::test_that("queued cancellation removes the job and its artifacts", {
   expect_false(dir.exists(artifact_dir))
   expect_false(dir.exists(weather_dir))
   expect_identical(events[[1L]], "cancelled")
+})
+
+testthat::test_that("active cancellation retires without stopping or releasing FIFO", {
+  state <- .wise_step2_async_state
+  old_queue <- state$queue
+  old_active <- state$active
+  on.exit({
+    state$queue <- old_queue
+    state$active <- old_active
+    if (exists("retired-test", envir = state$jobs, inherits = FALSE)) {
+      rm(list = "retired-test", envir = state$jobs)
+    }
+  }, add = TRUE)
+  root <- tempfile("wiseapp-async-retire-")
+  control <- file.path(root, "control")
+  dir.create(control, recursive = TRUE)
+  on.exit(unlink(root, recursive = TRUE, force = TRUE), add = TRUE)
+  job <- list2env(list(
+    id = "retired-test", session_id = "session-retire", generation = 2L,
+    status = "running", control_dir = control,
+    lock_file = file.path(control, "publication.lock"),
+    retired_file = file.path(control, "retired.rds"),
+    retired = FALSE,
+    weather_store_root = file.path(root, "weather"),
+    artifact_dir = file.path(root, "artifact"), handle = structure(list(), class = "mirai"),
+    on_status = NULL
+  ), parent = emptyenv())
+  dir.create(job$artifact_dir, recursive = TRUE)
+  dir.create(job$weather_store_root, recursive = TRUE)
+  assign(job$id, job, envir = state$jobs)
+  state$active <- job$id
+  state$queue <- "next-job"
+
+  expect_true(.wise_step2_async_cancel(job$id, "superseded"))
+  expect_true(job$retired)
+  expect_identical(state$active, job$id)
+  expect_identical(state$queue, "next-job")
+  expect_true(file.exists(job$retired_file))
+  expect_true(dir.exists(job$artifact_dir))
+  expect_true(dir.exists(job$weather_store_root))
+})
+
+testthat::test_that("progress latest record validates identity and sequence", {
+  root <- tempfile("wiseapp-async-progress-")
+  dir.create(root)
+  on.exit(unlink(root, recursive = TRUE, force = TRUE), add = TRUE)
+  path <- file.path(root, "progress.rds")
+  progress <- list(
+    schema = 1L, job_id = "job-progress", generation = 4L,
+    dependency_signature_digest = "digest", sequence = 2L,
+    stage = "pipeline", status = "progress", elapsed = 1.5,
+    completed = 3L, detail = "must not be forwarded"
+  )
+  saveRDS(progress, path)
+  received <- list()
+  job <- list2env(list(
+    id = progress$job_id, generation = progress$generation,
+    dependency_signature_digest = progress$dependency_signature_digest,
+    progress_file = path, progress_sequence = 0L,
+    on_progress = function(record, ...) received[[length(received) + 1L]] <<- record
+  ), parent = emptyenv())
+
+  .wise_step2_async_poll_progress(job)
+  expect_length(received, 1L)
+  expect_identical(received[[1L]]$completed, 3L)
+  expect_false("detail" %in% names(received[[1L]]))
+  .wise_step2_async_poll_progress(job)
+  expect_length(received, 1L)
 })
 
 testthat::test_that("async cleanup can preserve adopted weather artifacts", {
@@ -177,8 +246,12 @@ testthat::test_that("async worker matches synchronous Step 2 fixture output", {
     stop(as.character(manifest), call. = FALSE)
   }
   expect_identical(manifest$status, "succeeded")
-  expect_true(file.exists(manifest$result_file))
-  worker_result <- readRDS(manifest$result_file)
+  expect_identical(manifest$codec, "qs2")
+  expect_identical(manifest$schema, 2L)
+  worker_result <- qs2::qs_read(
+    file.path(artifact_dir, manifest$result_basename),
+    nthreads = 1L, validate_checksum = TRUE
+  )
 
   expect_identical(worker_result$hist_sim_result$pipeline$y_point,
     synchronous$result$hist_sim_result$pipeline$y_point)

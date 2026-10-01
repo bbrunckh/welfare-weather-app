@@ -57,3 +57,48 @@ test_that("every Step 2 simulation dependency marks published results stale", {
     expect_stale_after(function() session$setInputs(propagate_all_covariate_uncertainty = TRUE), "covariate uncertainty")
   })
 })
+
+test_that("historical preview is separate from committed results and clears on stop", {
+  survey <- data.frame(hhid = 1:2, code = "AAA", year = 2020L,
+    survname = "SRV", loc_id = "L1", int_month = 1:2,
+    welfare = 1:2, temp = 3:4)
+  testServer(mod_2_01_weathersim_server, args = list(
+    id = "sim", connection_params = reactiveVal(list(type = "local", path = tempdir())),
+    selected_outcome = reactiveVal(data.frame(name = "welfare")),
+    selected_weather = reactiveVal(data.frame(name = "temp")),
+    selected_surveys = reactiveVal(data.frame(code = "AAA", year = 2020L,
+      survname = "SRV", source = "src", economy = "A")),
+    survey_weather = reactiveVal(survey),
+    model_fit = reactiveVal(list(engine = "fixest", .sig = list(fit = 1L)))
+  ), {
+    old <- list(.sig = list(previous = TRUE))
+    hist_sim(old)
+    historical_preview(list(data = data.frame(sim_year = 2000:2001, value = c(2, 3)),
+      metadata = list(weighted = TRUE),
+      labels = list(historical = "1991-2020", baseline = "AAA 2020")))
+    session$flushReact()
+    expect_identical(hist_sim(), old)
+    expect_identical(saved_scenarios(), list())
+    preview_html <- paste(as.character(output$historical_preview_ui$html), collapse = "")
+    expect_match(preview_html, "Historical preview", fixed = TRUE)
+    expect_match(preview_html, "previous completed run", fixed = TRUE)
+    expect_false(grepl("download|Reactable", preview_html))
+    ended <- session_callback(function(...) stop("Must not execute after disconnect"))
+    callback_env <- parent.env(environment(ended))
+    callback_env$session_ended <- TRUE
+    expect_identical(ended(), FALSE)
+    callback_env$session_ended <- FALSE
+    async_job_id("missing-test-job")
+    session$setInputs(stop_sim = 1L)
+    expect_null(historical_preview())
+    expect_identical(hist_sim(), old)
+    expect_identical(run_status(), "cancelled")
+    callback_env$pending_submission <- TRUE
+    before_sequence <- callback_env$submission_sequence
+    run_status("queued")
+    session$setInputs(stop_sim = 2L)
+    expect_false(callback_env$pending_submission)
+    expect_gt(callback_env$submission_sequence, before_sequence)
+    expect_identical(run_status(), "cancelled")
+  })
+})

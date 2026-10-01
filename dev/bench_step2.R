@@ -887,7 +887,6 @@ inputs_by_country <- setNames(
   call_args <- c(
     args,
     list(
-      notify_fn = function(...) invisible(NULL),
       progress_fn = function(...) invisible(NULL),
       weather_fn = weather_fn
     )
@@ -1224,5 +1223,10 @@ jsonlite::write_json(
               file.path(cfg$output_dir, "step2_report.md"))
 
 .bench_remove_traces(traces)
+
+if ((nrow(summary_df) && any(summary_df$status != "ok")) ||
+    (nrow(aggregation_df) && any(aggregation_df$status != "ok"))) {
+  stop("Step 2 benchmark failed cases; inspect summary and aggregation CSVs.", call. = FALSE)
+}
 
 message("Step 2 Phase 1 benchmark complete. Outputs: ", cfg$output_dir)

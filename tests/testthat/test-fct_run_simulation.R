@@ -77,7 +77,8 @@ make_ledger_pipeline_fn <- function() {
   }
 }
 
-run_ledger_sim <- function(weather_result, ...) {
+run_ledger_sim <- function(weather_result,
+                           pipeline_fn = make_ledger_pipeline_fn(), ...) {
   fct_run_simulation(
     sw                  = data.frame(name = "temp", stringsAsFactors = FALSE),
     so                  = data.frame(name = "welfare", type = "numeric",
@@ -97,7 +98,7 @@ run_ledger_sim <- function(weather_result, ...) {
     perturbation_method = NULL,
     stored_breaks       = NULL,
     weather_fn          = function(...) weather_result,
-    pipeline_fn         = make_ledger_pipeline_fn(),
+    pipeline_fn         = pipeline_fn,
     ...
   )
 }
@@ -333,4 +334,89 @@ test_that("key worker count is bounded to the characterization range", {
     run_ledger_sim(wr, key_workers = 3L),
     "key_workers must be an integer between 1 and 2"
   )
+})
+
+test_that("historical preview is emitted before future keys and stays bounded", {
+  wr <- make_ledger_weather_result(with_ssp5 = FALSE)
+  order <- character(0)
+  previews <- list()
+  res <- suppressWarnings(run_ledger_sim(
+    wr,
+    preview_fn = function(preview) {
+      order <<- c(order, "preview")
+      previews[[length(previews) + 1L]] <<- preview
+    },
+    pipeline_fn = function(weather_raw, ...) {
+      order <<- c(order, if (as.integer(format(weather_raw$timestamp[[1]], "%Y")) == 2020L) {
+        "historical"
+      } else {
+        "future"
+      })
+      list(
+        y_point = c(1, 2), F_loading = NULL,
+        sim_year = c(2030L, 2030L), weight = c(1, 2),
+        weather_raw = weather_raw
+      )
+    }
+  ))
+
+  expect_identical(order[1:3], c("historical", "preview", "future"))
+  expect_length(previews, 1L)
+  preview <- previews[[1L]]
+  expect_identical(names(preview$data), c("sim_year", "value", "uncertainty"))
+  expect_identical(preview$data$sim_year, 2030L)
+  expect_identical(preview$metadata$method, "mean")
+  expect_identical(preview$metadata$weighted, TRUE)
+  expect_identical(preview$metadata$transform, "log")
+  expect_false(any(c("y_point", "F_loading", "weight") %in% names(preview$data)))
+  expected <- aggregate_pipeline_tables_multi(
+    pipelines = res$hist_sim_result$pipeline,
+    methods = "mean",
+    weighted = TRUE,
+    residuals = "none",
+    is_log = TRUE,
+    band_q = c(lo = 0.10, hi = 0.90),
+    skip_coef = TRUE,
+    bandwidth_p0 = 0.05,
+    seed = WISEAPP_DEFAULT_SEED,
+    model_ids = "Historical",
+    scenario = "Historical",
+    shared_context = res$hist_sim_result$shared_context
+  )[["mean"]]
+  expect_equal(preview$data$value, expected$value)
+  expect_equal(preview$data$uncertainty, sqrt(pmax(expected$var_within, 0)))
+  expect_identical(res$n_keys_ok, res$n_keys)
+})
+
+test_that("preview callback failures do not fail valid history", {
+  wr <- make_ledger_weather_result(with_ssp5 = FALSE)
+  res <- suppressWarnings(run_ledger_sim(
+    wr,
+    preview_fn = function(preview) stop("preview transport failed"),
+    pipeline_fn = make_ledger_pipeline_fn()
+  ))
+  expect_length(res$failures, 0L)
+  expect_true(is.list(res$hist_sim_result))
+})
+
+test_that("cooperative cancellation propagates rather than entering failure ledger", {
+  wr <- make_ledger_weather_result(with_ssp5 = FALSE)
+  cancellation <- structure(
+    list(message = "cancelled", call = NULL),
+    class = c("wiseapp_step2_cancelled", "error", "condition")
+  )
+  checkpoints <- list()
+  expect_error(
+    run_ledger_sim(
+      wr,
+      checkpoint_fn = function(event) {
+        checkpoints[[length(checkpoints) + 1L]] <<- event
+        if (identical(event$stage, "historical_ready")) stop(cancellation)
+      }
+    ),
+    class = "wiseapp_step2_cancelled"
+  )
+  expect_true(any(vapply(checkpoints, function(event) {
+    identical(event$stage, "historical_ready")
+  }, logical(1))))
 })

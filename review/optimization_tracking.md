@@ -12,6 +12,7 @@ Log entries at the bottom (date, batch, result). Benchmarks per `optimization_gu
 - ☑ Weather pipeline (`review/optimize_get_weather.md`) — #1 loc-month + h3-weights disk cache, #2 vectorized transformations, #3 pop-weighted mean 4→2 passes (parity-corrected); #4/#5 deferred quantify-first, #6 rejected.
 - ☑ Welfare statistics one-sort-per-group (`review/optimize_aggregation_welfare.md`) — Rcpp kernel adopted (`ec9c665`); collapse grouped variant rejected without implementation (kernel fuses the sort + all nine scans).
 - ☑ RIF computation (`review/optimize_rif.md`) — bandwidth not hot (bw.SJ ~10 ms at n=306k; stride subsampling rejected: +136.9% drift on IRN); adopted `collapse::fquantile()` + multi-tau pattern-gather.
+- ◐ Step 2 progressive results: implemented safe cancellation/settlement, strict-checksum `qs2` artifacts, live worker progress and a separate historical mean preview; focused tests + real-worker smoke pass; user confirmed in-app testing on 2026-10-01. Deployment verification and end-to-end performance/memory validation remain outstanding.
 
 ## Batch 2 — Module UI migrations (parallel, one agent per module, worktrees)
 
@@ -28,6 +29,10 @@ Log entries at the bottom (date, batch, result). Benchmarks per `optimization_gu
 Merge order: Batch 1 first → Batch 2 branches rebase onto it → Batch 3.
 
 ## Log
+
+- 2026-10-01 — User confirmed in-app testing of the Step 2 serialization/progress changes before commit; interactive validation is no longer an outstanding implementation blocker. Deployment dependency/manifest refresh and quantitative performance/memory follow-up remain separate.
+
+- 2026-10-01 — Step 2 serialization/progress implementation: single-threaded `qs2` result artifacts with versioned manifest/identity/path/size checks; `filelock` publication guards; active cancellation retires results immediately but retains FIFO ownership until natural settlement; disconnect/supersession cleanup and backpressure corrected. Added bounded 500-ms progress polling and a provisional historical annual mean/uncertainty-SD table using canonical aggregation and captured labels; committed Results, Step 3 and exports remain separate. Fixed cache-environment restoration and benchmark harness retired arguments/error exit. Focused async, compute, simulation, payload, contract and module tests + actual mirai-worker smoke passed; no new end-to-end performance claim. Outstanding: interactive Stop/rerun/input-change checks, deployment dependency/manifest refresh, full-app responsiveness and reliable peak-memory validation. XGBoost support deferred by user; additional IRN multi-scenario run waived. GC/thread/batching/cache optimizations remain unimplemented candidates; DuckDB 2.0/Parquet v2 work remains separate in `review/duckdb_parquet_plan.md`. Detailed Step 2 investigation plan retired after implementation.
 
 - 2026-09-18 — Tracking started; guidelines §0 + proposal docs (`review/optimize_*.md`) committed.
 - 2026-09-18 — App startup + mod_0 (Batch 1, ad hoc): map engine single-serve; manifest regenerated; `AGENTS.md` path updated. Tests: hexmap 61, step badges 44; resolved-page deps verified (`golem_resources` = `custom.js` only; `wiseapp-hexmap` = engine once, strict order). Warm `app_ui()` ~85 ms — htmltools-bound, no action; mod_0 does no eager work at session start. (`fct_get_weather.R` in-flight work left out; completed in the weather pass below.)

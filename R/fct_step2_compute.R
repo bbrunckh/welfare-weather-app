@@ -110,7 +110,8 @@
 }
 
 .step2_compute_event <- function(events, stage, status, started,
-                                 detail = NULL, error = NULL) {
+                                 detail = NULL, error = NULL,
+                                 fields = NULL) {
   event <- list(
     stage = stage,
     status = status,
@@ -118,7 +119,9 @@
   )
   if (!is.null(detail)) event$detail <- as.character(detail)
   if (!is.null(error)) event$error <- conditionMessage(error)
+  if (is.list(fields) && length(fields)) event <- c(event, fields)
   events[[length(events) + 1L]] <- event
+  if (length(events) > 256L) events <- events[(length(events) - 255L):length(events)]
   events
 }
 
@@ -146,6 +149,9 @@
 #'   before return.
 #' @param run_id Optional stable caller/run identifier.
 #' @param event_fn Function receiving one structured stage-event list.
+#' @param preview_fn Optional function receiving the reduced historical mean
+#'   summary before future processing.
+#' @param checkpoint_fn Optional cooperative cancellation checkpoint function.
 #' @param cache_dir Optional process/run-scoped weather-cache directory.
 #' @param weather_fn,pipeline_fn Injectable serial reference functions.
 #' @return A list with `result`, `signature`, `run`, and `events`.
@@ -160,7 +166,9 @@ step2_compute <- function(input,
                           weather_collect = c("fast", "bounded"),
                           weather_threads = c("auto", "1", "2"),
                           weather_fn = get_weather,
-                          pipeline_fn = run_sim_pipeline) {
+                          pipeline_fn = run_sim_pipeline,
+                          preview_fn = NULL,
+                          checkpoint_fn = NULL) {
   .step2_compute_validate(input)
   weather_storage <- match.arg(weather_storage)
   weather_collect <- match.arg(weather_collect)
@@ -179,9 +187,23 @@ step2_compute <- function(input,
   signature <- .step2_compute_signature(snapshot, seed, run_id)
   started <- proc.time()[["elapsed"]]
   events <- list()
-  emit <- function(stage, status, detail = NULL, error = NULL) {
-    events <<- .step2_compute_event(events, stage, status, started, detail, error)
-    try(event_fn(events[[length(events)]]), silent = TRUE)
+  emit <- function(stage, status, detail = NULL, error = NULL, fields = NULL) {
+    events <<- .step2_compute_event(
+      events, stage, status, started, detail, error, fields
+    )
+    tryCatch(
+      event_fn(events[[length(events)]]),
+      error = function(e) invisible(NULL)
+    )
+    invisible(NULL)
+  }
+  checkpoint_wrapper <- function(event) {
+    events <<- .step2_compute_event(
+      events, event$stage, "checkpoint", started,
+      fields = event[setdiff(names(event), "stage")]
+    )
+    tryCatch(event_fn(events[[length(events)]]), error = function(e) invisible(NULL))
+    if (is.function(checkpoint_fn)) checkpoint_fn(event)
     invisible(NULL)
   }
 
@@ -208,7 +230,9 @@ step2_compute <- function(input,
       if (is.na(old_cache_env[[i]])) {
         Sys.unsetenv(cache_env_names[[i]])
       } else {
-        Sys.setenv(setNames(old_cache_env[[i]], cache_env_names[[i]]))
+        do.call(Sys.setenv, as.list(setNames(
+          old_cache_env[[i]], cache_env_names[[i]]
+        )))
       }
     }
   }
@@ -238,11 +262,12 @@ step2_compute <- function(input,
     value <- tryCatch(
       pipeline_fn(...),
       error = function(e) {
-        emit("pipeline", "failed", sprintf("key %d", pipeline_index), e)
+        emit("pipeline", "failed", error = e,
+             fields = list(member_ordinal = pipeline_index))
         stop(e)
       }
     )
-    emit("pipeline", "completed", sprintf("key %d", pipeline_index))
+    emit("pipeline", "completed", fields = list(member_ordinal = pipeline_index))
     value
   }
   simulation_args <- snapshot
@@ -251,6 +276,8 @@ step2_compute <- function(input,
   }
   simulation_args$weather_fn <- weather_wrapper
   simulation_args$pipeline_fn <- pipeline_wrapper
+  simulation_args$preview_fn <- preview_fn
+  simulation_args$checkpoint_fn <- checkpoint_wrapper
   simulation_args$weather_storage <- weather_storage
   simulation_args$weather_store_root <- weather_store_root
   simulation_args$weather_collect <- weather_collect

@@ -134,6 +134,97 @@ test_that("step2_compute emits ordered stage events and restores RNG state", {
   expect_identical(out$events, events)
 })
 
+test_that("step2_compute forwards historical previews and cooperative checkpoints", {
+  input <- step2_compute_fixture()
+  weather <- step2_compute_weather()
+  previews <- list()
+  checkpoints <- list()
+  out <- suppressWarnings(step2_compute(
+    input,
+    weather_fn = function(...) weather,
+    pipeline_fn = step2_compute_pipeline,
+    preview_fn = function(value) previews[[length(previews) + 1L]] <<- value,
+    checkpoint_fn = function(event) {
+      checkpoints[[length(checkpoints) + 1L]] <<- event
+    }
+  ))
+
+  expect_length(previews, 1L)
+  expect_identical(names(previews[[1L]]$data),
+                   c("sim_year", "value", "uncertainty"))
+  expect_identical(previews[[1L]]$metadata$method, "mean")
+  expect_identical(previews[[1L]]$metadata$weighted, TRUE)
+  expect_true(any(vapply(checkpoints, function(event) {
+    identical(event$stage, "historical_ready") && event$completed == 1L
+  }, logical(1))))
+  expect_true(any(vapply(out$events, function(event) {
+    identical(event$stage, "historical_ready") &&
+      identical(event$status, "checkpoint")
+  }, logical(1))))
+})
+
+test_that("step2_compute cancellation checkpoint errors propagate", {
+  input <- step2_compute_fixture()
+  weather <- step2_compute_weather()
+  cancellation <- structure(
+    list(message = "cancelled", call = NULL),
+    class = c("wiseapp_step2_cancelled", "error", "condition")
+  )
+  expect_error(
+    step2_compute(
+      input,
+      weather_fn = function(...) weather,
+      pipeline_fn = step2_compute_pipeline,
+      checkpoint_fn = function(event) {
+        if (identical(event$stage, "historical_ready")) stop(cancellation)
+      }
+    ),
+    class = "wiseapp_step2_cancelled"
+  )
+})
+
+test_that("step2_compute restores configured cache environment values", {
+  input <- step2_compute_fixture()
+  weather <- step2_compute_weather()
+  withr::local_envvar(c(
+    WISEAPP_WEATHER_CACHE_DIR = "cache-before-step2",
+    WISEAPP_WEATHER_CACHE_DISABLE = "1"
+  ))
+  before <- Sys.getenv(c("WISEAPP_WEATHER_CACHE_DIR", "WISEAPP_WEATHER_CACHE_DISABLE"))
+  for (fails in c(FALSE, TRUE)) {
+    if (fails) {
+      expect_error(step2_compute(
+        input, cache_dir = tempfile("step2-cache-error-"),
+        weather_fn = function(...) stop("injected weather error"),
+        pipeline_fn = step2_compute_pipeline
+      ), "injected weather error")
+    } else {
+      suppressWarnings(step2_compute(
+        input, cache_dir = tempfile("step2-cache-"),
+        weather_fn = function(...) weather,
+        pipeline_fn = step2_compute_pipeline
+      ))
+    }
+    expect_identical(Sys.getenv(names(before)), before)
+  }
+
+  withr::local_envvar(c(
+    WISEAPP_WEATHER_CACHE_DIR = NA_character_,
+    WISEAPP_WEATHER_CACHE_DISABLE = NA_character_
+  ))
+  expect_equal(unname(Sys.getenv(c(
+    "WISEAPP_WEATHER_CACHE_DIR", "WISEAPP_WEATHER_CACHE_DISABLE"
+  ), unset = NA_character_)), c(NA_character_, NA_character_))
+  expect_error(step2_compute(
+    input, cache_dir = tempfile("step2-cache-unset-"),
+    weather_fn = function(...) stop("injected weather error"),
+    pipeline_fn = step2_compute_pipeline
+  ), "injected weather error")
+  expect_equal(unname(Sys.getenv(c(
+    "WISEAPP_WEATHER_CACHE_DIR", "WISEAPP_WEATHER_CACHE_DISABLE"
+  ), unset = NA_character_)), c(NA_character_, NA_character_))
+})
+
 test_that("step2_compute is deterministic for equal inputs and seed", {
   input <- step2_compute_fixture()
   weather <- step2_compute_weather()

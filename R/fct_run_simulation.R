@@ -260,6 +260,11 @@ prepare_weather_manifest <- function(
 #'   Default [get_weather].
 #' @param pipeline_fn      Function. Per-key simulation pipeline, injectable
 #'   for tests. Default [run_sim_pipeline].
+#' @param preview_fn       Optional function receiving a bounded historical
+#'   mean summary after historical prediction and before future weather work.
+#' @param checkpoint_fn    Optional cooperative checkpoint function receiving
+#'   a fixed-stage/member context. Throw a condition inheriting
+#'   `wiseapp_step2_cancelled` to cancel the run.
 #'
 #' @return Named list with elements:
 #'   \describe{
@@ -316,7 +321,9 @@ fct_run_simulation <- function(sw,
                                 seed = WISEAPP_DEFAULT_SEED,
                                 progress_fn = function(value, detail) invisible(NULL),
                                 weather_fn = get_weather,
-                                pipeline_fn = run_sim_pipeline) {
+                                pipeline_fn = run_sim_pipeline,
+                                preview_fn = NULL,
+                                checkpoint_fn = NULL) {
   memory_profile <- if (identical(tolower(Sys.getenv("WISEAPP_MEMORY_PROFILE", "")), "1")) {
     new.env(parent = emptyenv())
   } else {
@@ -577,6 +584,27 @@ fct_run_simulation <- function(sw,
   group_n <- list()
   group_requested <- list()
   failures <- list()
+  n_pipeline_completed <- 0L
+  n_pipeline_failed <- 0L
+
+  checkpoint <- function(stage, member_ordinal = 0L) {
+    if (!is.function(checkpoint_fn)) return(invisible(NULL))
+    event <- list(
+      stage = stage,
+      member_ordinal = as.integer(member_ordinal),
+      completed = n_pipeline_completed,
+      failed = n_pipeline_failed,
+      requested = NA_integer_
+    )
+    tryCatch(
+      checkpoint_fn(event),
+      error = function(e) {
+        if (inherits(e, "wiseapp_step2_cancelled")) stop(e)
+        invisible(NULL)
+      }
+    )
+    invisible(NULL)
+  }
 
   # Run pipelines (one key at a time) ----
   t_start <- t_start_total # key loop elapsed = total elapsed from function entry
@@ -607,6 +635,7 @@ fct_run_simulation <- function(sw,
         )
       }
     }
+    checkpoint("pipeline_started", n_keys)
     key_err <- key_err_override
     out <- if (isTRUE(out_supplied) || !is.null(key_err_override)) {
       if (!is.null(key_err)) {
@@ -627,21 +656,25 @@ fct_run_simulation <- function(sw,
         direct_rif_baseline_cache = direct_rif_baseline_cache
       ),
       error = function(e) {
+        if (inherits(e, "wiseapp_step2_cancelled")) stop(e)
         key_err <<- conditionMessage(e)
         warning(sprintf("[fct_run_simulation] Key %s failed: %s", key, key_err))
         NULL
       }
     )
     if (is.null(out)) {
+      n_pipeline_failed <<- n_pipeline_failed + 1L
       failures[[length(failures) + 1L]] <<- list(
         key = key, gk = if (is.null(key_group)) NA_character_ else key_group$gk,
         is_hist = is_hist, error = key_err
       )
+      checkpoint("pipeline_failed", n_keys)
       return(invisible(NULL))
     }
     if (identical(weather_storage, "reference") && !is_hist) {
       weather_refs[[key]] <<- step2_weather_store_put(weather_store, key, weather_input)
     }
+    n_pipeline_completed <<- n_pipeline_completed + 1L
     if (is_hist) {
       n_hist_yrs <<- length(unique(format(weather_input$timestamp, "%Y")))
       hist_sim_result <<- list(
@@ -652,6 +685,68 @@ fct_run_simulation <- function(sw,
       )
       profile_memory("historical_pipeline", hist_sim_result$pipeline, detail = key)
       out$weather_raw <- NULL
+      checkpoint("historical_ready", n_keys)
+      if (is.function(preview_fn)) {
+        tryCatch({
+          preview_context <- step2_shared_context(
+            train_aug = .compact_residual_context(
+              precomputed_train_aug, shared_id_col, residuals,
+              compact = identical(payload_mode, "compact")
+            ),
+            id_col = shared_id_col,
+            residuals = residuals,
+            model_metadata = list(
+              engine = engine,
+              weather_terms = weather_terms,
+              fit_multi = !is.null(fit_multi),
+              taus = taus
+            )
+          )
+          weighted <- !is.null(out$weight)
+          is_log <- isTRUE(so$transform == "log")
+          withr::with_seed(WISEAPP_DEFAULT_SEED, {
+            preview_pipeline <- .compact_pipeline(out)
+            summary <- aggregate_pipeline_tables_multi(
+              pipelines = preview_pipeline,
+              methods = "mean",
+              weighted = weighted,
+              residuals = residuals,
+              is_log = is_log,
+              band_q = c(lo = 0.10, hi = 0.90),
+              skip_coef = isTRUE(skip_coef_draws),
+              bandwidth_p0 = 0.05,
+              seed = WISEAPP_DEFAULT_SEED,
+              model_ids = "Historical",
+              scenario = "Historical",
+              shared_context = preview_context
+            )[["mean"]]
+            preview_data <- if (is.null(summary) || !nrow(summary)) {
+              data.frame(sim_year = integer(0), value = numeric(0),
+                         uncertainty = numeric(0))
+            } else {
+              data.frame(
+                sim_year = summary$sim_year,
+                value = summary$value,
+                uncertainty = sqrt(pmax(summary$var_within, 0)),
+                stringsAsFactors = FALSE
+              )
+            }
+            preview_fn(list(
+              data = preview_data,
+              metadata = list(
+                method = "mean",
+                weighted = weighted,
+                transform = so$transform %||% NA_character_,
+                is_log = is_log,
+                residuals = residuals,
+                seed = WISEAPP_DEFAULT_SEED,
+                bands = c(lo = 0.10, hi = 0.90),
+                bandwidth_p0 = 0.05
+              )
+            ))
+          })
+        }, error = function(e) invisible(NULL))
+      }
     } else {
       gk <- key_group$gk
       if (is.null(group_agg[[gk]])) group_agg[[gk]] <<- list()
@@ -672,9 +767,11 @@ fct_run_simulation <- function(sw,
       profile_memory("future_pipeline", out, detail = key)
       group_n[[gk]] <<- group_n[[gk]] + 1L
     }
+    checkpoint("pipeline_completed", n_keys)
     invisible(NULL)
   }
 
+  checkpoint("pipeline_started", 0L)
   weather_result <- if (!is.null(weather_manifest) ||
       !identical(prepared_weather_cache, "off")) {
     manifest <- weather_manifest %||% prepare_weather_manifest(
@@ -704,6 +801,7 @@ fct_run_simulation <- function(sw,
       weather_consumer = consume_key
     ),
     error = function(e) {
+      if (inherits(e, "wiseapp_step2_cancelled")) stop(e)
       if (length(emitted_keys)) stop(e)
       weather_fn(
         survey_data = svy, selected_surveys = ss, selected_weather = sw,

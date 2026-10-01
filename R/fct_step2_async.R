@@ -65,6 +65,45 @@
   normalizePath(root, winslash = "/", mustWork = FALSE)
 }
 
+.wise_step2_async_job <- function(job_id) {
+  state <- .wise_step2_async_state
+  if (exists(job_id, envir = state$jobs, inherits = FALSE)) {
+    get(job_id, envir = state$jobs, inherits = FALSE)
+  } else {
+    NULL
+  }
+}
+
+.wise_step2_async_gate <- function(job, timeout = 0) {
+  filelock::lock(job$lock_file, timeout = timeout)
+}
+
+.wise_step2_async_unlock <- function(lock) {
+  if (!is.null(lock)) try(filelock::unlock(lock), silent = TRUE)
+  invisible(NULL)
+}
+
+.wise_step2_async_write_control <- function(path, value) {
+  tmp <- paste0(path, ".", Sys.getpid(), ".tmp")
+  on.exit(unlink(tmp, force = TRUE), add = TRUE)
+  saveRDS(value, tmp, version = 3L)
+  if (!file.rename(tmp, path)) stop("Could not publish Step 2 control record.", call. = FALSE)
+  invisible(TRUE)
+}
+
+.wise_step2_async_retire_marker <- function(job) {
+  if (!dir.exists(job$control_dir)) return(invisible(FALSE))
+  .wise_step2_async_write_control(job$retired_file, list(
+    schema = 1L, job_id = job$id, generation = job$generation,
+    retired = TRUE
+  ))
+  invisible(TRUE)
+}
+
+.wise_step2_async_signature_digest <- function(signature) {
+  digest::digest(signature, algo = "sha256")
+}
+
 .wise_step2_async_connection_params <- function(params) {
   if (is.null(params) || !is.list(params)) {
     return(params)
@@ -108,6 +147,13 @@
   invisible(NULL)
 }
 
+.wise_step2_async_cleanup_control <- function(job) {
+  if (!is.null(job$control_dir) && dir.exists(job$control_dir)) {
+    unlink(job$control_dir, recursive = TRUE, force = TRUE)
+  }
+  invisible(NULL)
+}
+
 
 .wise_step2_async_dispatch <- function() {
   state <- .wise_step2_async_state
@@ -115,11 +161,29 @@
     return(invisible(NULL))
   }
 
-  job <- state$queue[[1L]]
+  job_id <- state$queue[[1L]]
   state$queue <- state$queue[-1L]
-  state$active <- job
-  assign(job$id, job, envir = state$jobs)
+  job <- .wise_step2_async_job(job_id)
+  if (is.null(job) || isTRUE(job$retired)) return(.wise_step2_async_dispatch())
+  state$active <- job_id
+  job$active <- TRUE
   .wise_step2_async_notify(job, "running")
+  artifact_dir <- job$artifact_dir
+  control_dir <- job$control_dir
+  lock_file <- job$lock_file
+  retired_file <- job$retired_file
+  progress_file <- job$progress_file
+  preview_file <- job$preview_file
+  dependency_signature_digest <- job$dependency_signature_digest
+  weather_store_root <- job$weather_store_root
+  generation <- job$generation
+  seed <- job$seed
+  run_id <- job$run_id
+  weather_storage <- job$weather_storage
+  weather_collect <- job$weather_collect
+  weather_threads <- job$weather_threads
+  job_id <- job$id
+  snapshot <- job$snapshot
 
   package_path <- getNamespaceInfo(asNamespace("wiseapp"), "path")
   development_package <- .wise_step2_async_is_dev_package()
@@ -138,12 +202,21 @@
     wiseapp:::step2_async_worker(
       snapshot = snapshot,
       job_id = job_id,
-        generation = generation,
-        artifact_dir = artifact_dir,
+      generation = generation,
+      artifact_dir = artifact_dir,
+      control_dir = control_dir,
+      lock_file = lock_file,
+      retired_file = retired_file,
+      progress_file = progress_file,
+      preview_file = preview_file,
+      dependency_signature_digest = dependency_signature_digest,
         weather_store_root = weather_store_root,
         submitted_at_epoch = submitted_at_epoch,
         seed = seed,
-        run_id = run_id
+        run_id = run_id,
+        weather_storage = weather_storage,
+        weather_collect = weather_collect,
+        weather_threads = weather_threads
     )
   })
 
@@ -158,6 +231,12 @@
       job_id = job$id,
       generation = job$generation,
       artifact_dir = job$artifact_dir,
+      control_dir = job$control_dir,
+      lock_file = job$lock_file,
+      retired_file = job$retired_file,
+      progress_file = job$progress_file,
+      preview_file = job$preview_file,
+      dependency_signature_digest = job$dependency_signature_digest,
       weather_store_root = job$weather_store_root,
       submitted_at_epoch = submitted_at_epoch,
       seed = job$seed,
@@ -170,20 +249,16 @@
   )
   if (inherits(mirai_job, "error")) {
     state$active <- NULL
-    rm(list = job$id, envir = state$jobs)
-    .wise_step2_async_cleanup_job(job)
-    .wise_step2_async_notify(job, "failed", conditionMessage(mirai_job))
-    if (is.function(job$on_error)) {
-      try(job$on_error(mirai_job, job), silent = TRUE)
-    }
-    return(.wise_step2_async_dispatch())
+    .wise_step2_async_settle(job, error = mirai_job)
+    return(invisible(NULL))
   }
   if (is.null(mirai_job)) {
     # The dispatcher memory cap is backpressure, not a job failure. Put the
     # job back at the front and retry after the active queue drains, keeping
     # the Shiny event loop non-blocking.
     state$active <- NULL
-    state$queue <- c(list(job), state$queue)
+    state$queue <- c(job$id, state$queue)
+    job$active <- FALSE
     .wise_step2_async_notify(job, "queued", "Waiting for async queue capacity")
     later::later(.wise_step2_async_dispatch, delay = 0.5)
     return(invisible(NULL))
@@ -197,49 +272,239 @@
     NA_real_
   }
   job$handle <- mirai_job
-  state$active <- job
-  assign(job$id, job, envir = state$jobs)
+  .wise_step2_async_start_poll(job$id)
   promises::then(
     mirai_job,
     onFulfilled = function(manifest) {
-      active <- state$active
-      if (is.null(active) || !identical(active$id, job$id)) {
-        return(invisible(NULL))
-      }
-      state$active <- NULL
-      rm(list = job$id, envir = state$jobs)
-      if (!is.list(manifest) || !identical(manifest$status, "succeeded")) {
-        err <- simpleError("Step 2 worker returned an invalid result manifest.")
-        .wise_step2_async_cleanup_job(job)
-        .wise_step2_async_notify(job, "failed", conditionMessage(err))
-        if (is.function(job$on_error)) try(job$on_error(err, job), silent = TRUE)
-      } else if (is.function(job$on_result)) {
-        callback_error <- tryCatch(
-          job$on_result(manifest, job),
-          error = function(e) e
-        )
-        if (inherits(callback_error, "error") && is.function(job$on_error)) {
-          try(job$on_error(callback_error, job), silent = TRUE)
-        }
-      }
-      .wise_step2_async_dispatch()
+      job <- .wise_step2_async_job(job_id)
+      if (is.null(job)) return(invisible(NULL))
+      job$settled <- TRUE
+      .wise_step2_async_stop_poll(job)
+      .wise_step2_async_settle(job, manifest = manifest)
       invisible(NULL)
     },
     onRejected = function(error) {
-      active <- state$active
-      if (is.null(active) || !identical(active$id, job$id)) {
-        return(invisible(NULL))
-      }
-      state$active <- NULL
-      rm(list = job$id, envir = state$jobs)
-      .wise_step2_async_cleanup_job(job)
-      .wise_step2_async_notify(job, "failed", conditionMessage(error))
-      if (is.function(job$on_error)) try(job$on_error(error, job), silent = TRUE)
-      .wise_step2_async_dispatch()
+      job <- .wise_step2_async_job(job_id)
+      if (is.null(job)) return(invisible(NULL))
+      job$settled <- TRUE
+      .wise_step2_async_stop_poll(job)
+      .wise_step2_async_settle(job, error = error)
       invisible(NULL)
     }
   )
   invisible(NULL)
+}
+
+.wise_step2_async_stop_poll <- function(job) {
+  job$poll_active <- FALSE
+  invisible(NULL)
+}
+
+.wise_step2_async_detach <- function(job_id) {
+  job <- .wise_step2_async_job(as.character(job_id)[1L])
+  if (is.null(job)) return(invisible(FALSE))
+  job$on_status <- NULL
+  job$on_progress <- NULL
+  job$on_preview <- NULL
+  job$on_result <- NULL
+  job$on_error <- NULL
+  job$detached <- TRUE
+  invisible(TRUE)
+}
+
+.wise_step2_async_detach_session <- function(session_id) {
+  state <- .wise_step2_async_state
+  session_id <- as.character(session_id %||% "unknown")[1L]
+  ids <- ls(state$jobs, all.names = TRUE)
+  for (id in ids) {
+    job <- .wise_step2_async_job(id)
+    if (is.null(job) || !identical(job$session_id, session_id)) next
+    .wise_step2_async_detach(id)
+    .wise_step2_async_cancel(id, "Session ended.")
+  }
+  invisible(NULL)
+}
+
+.wise_step2_async_commit <- function(job, commit_fn) {
+  if (!is.environment(job) || !is.function(commit_fn)) return(FALSE)
+  current <- .wise_step2_async_job(job$id)
+  if (is.null(current) || !identical(current, job) || isTRUE(current$retired) ||
+      isTRUE(current$detached) || isTRUE(current$parent_transition)) return(FALSE)
+  if (isTRUE(current$settling)) {
+    if (isTRUE(current$retired) || isTRUE(current$detached) || file.exists(current$retired_file)) return(FALSE)
+    current$parent_transition <- TRUE
+    on.exit(current$parent_transition <- FALSE, add = TRUE)
+    return(isTRUE(commit_fn()))
+  }
+  gate <- .wise_step2_async_gate(current, timeout = 0)
+  if (is.null(gate)) return(FALSE)
+  on.exit(.wise_step2_async_unlock(gate), add = TRUE)
+  if (isTRUE(current$retired) || file.exists(current$retired_file)) return(FALSE)
+  current$parent_transition <- TRUE
+  on.exit(current$parent_transition <- FALSE, add = TRUE)
+  isTRUE(commit_fn())
+}
+
+.wise_step2_async_settle <- function(job, manifest = NULL, error = NULL) {
+  state <- .wise_step2_async_state
+  current <- .wise_step2_async_job(job$id)
+  if (is.null(current)) return(invisible(NULL))
+  retired <- isTRUE(current$retired) || isTRUE(current$detached)
+  gate <- .wise_step2_async_gate(current, timeout = 0)
+  if (is.null(gate)) {
+    later::later(function() .wise_step2_async_settle(job, manifest, error), delay = 0.1)
+    return(invisible(FALSE))
+  }
+  on.exit(.wise_step2_async_unlock(gate), add = TRUE)
+  if (file.exists(current$retired_file)) retired <- TRUE
+  if (!is.null(error) || retired || !is.list(manifest) || !identical(manifest$status, "succeeded")) {
+    if (retired && is.null(error)) {
+      callback_error <- NULL
+    } else if (is.null(error) && !retired) {
+      callback_error <- simpleError("Step 2 worker returned an invalid result manifest.")
+    } else {
+      callback_error <- error
+    }
+    .wise_step2_async_unlock(gate)
+    gate <- NULL
+    .wise_step2_async_cleanup_job(current, remove_weather = TRUE)
+    if (identical(state$active, current$id)) state$active <- NULL
+    current$active <- FALSE
+    .wise_step2_async_notify(current, if (retired) "cancelled" else "failed",
+      if (retired) current$retire_reason %||% "Session ended." else conditionMessage(error %||% callback_error))
+    if (!retired && is.function(current$on_error)) try(current$on_error(error %||% callback_error, current), silent = TRUE)
+    if (exists(current$id, envir = state$jobs, inherits = FALSE)) rm(list = current$id, envir = state$jobs)
+    .wise_step2_async_cleanup_control(current)
+    .wise_step2_async_dispatch()
+    return(invisible(FALSE))
+  }
+  adopted <- FALSE
+  callback_error <- NULL
+  if (is.null(error) && !retired && is.list(manifest) &&
+      identical(manifest$status, "succeeded") && is.function(current$on_result)) {
+    current$settling <- TRUE
+    on.exit(current$settling <- FALSE, add = TRUE)
+    callback_error <- tryCatch({
+      accepted <- current$on_result(manifest, current)
+      adopted <- isTRUE(accepted)
+      NULL
+    }, error = function(e) e)
+    if (!is.null(callback_error)) adopted <- FALSE
+  }
+  .wise_step2_async_unlock(gate)
+  gate <- NULL
+  .wise_step2_async_cleanup_job(current, remove_weather = !adopted)
+  if (exists(current$id, envir = state$jobs, inherits = FALSE)) {
+    rm(list = current$id, envir = state$jobs)
+  }
+  if (retired) {
+    .wise_step2_async_notify(current, "cancelled", current$retire_reason %||% "Session ended.")
+  } else if (!is.null(callback_error)) {
+    .wise_step2_async_notify(current, "failed", conditionMessage(callback_error))
+    if (is.function(current$on_error)) try(current$on_error(callback_error, current), silent = TRUE)
+  } else if (adopted) {
+    .wise_step2_async_notify(current, "complete")
+  } else {
+    .wise_step2_async_notify(current, "stale", "Result was not adopted.")
+  }
+  .wise_step2_async_cleanup_control(current)
+  .wise_step2_async_dispatch()
+  invisible(adopted)
+}
+
+.wise_step2_async_start_poll <- function(job_id) {
+  job <- .wise_step2_async_job(job_id)
+  if (is.null(job) || isTRUE(job$poll_active)) return(invisible(NULL))
+  job$poll_active <- TRUE
+  started_at <- Sys.time()
+  poll <- function() {
+    current <- .wise_step2_async_job(job_id)
+    if (is.null(current) || !isTRUE(current$poll_active) ||
+        isTRUE(current$retired) || isTRUE(current$detached)) return(invisible(NULL))
+    .wise_step2_async_poll_progress(current)
+    if (as.numeric(difftime(Sys.time(), started_at, units = "secs")) > 86400) {
+      current$poll_active <- FALSE
+      return(invisible(NULL))
+    }
+    later::later(poll, delay = 0.5)
+  }
+  later::later(poll, delay = 0.5)
+  invisible(NULL)
+}
+
+.wise_step2_async_poll_progress <- function(job) {
+  path <- job$progress_file
+  if (!file.exists(path)) return(invisible(NULL))
+  info <- file.info(path)
+  if (is.na(info$size) || info$size > 65536) return(invisible(NULL))
+  value <- tryCatch(readRDS(path), error = function(e) NULL)
+  descriptor <- NULL
+  if (!is.null(job$preview_descriptor_file) && file.exists(job$preview_descriptor_file) &&
+      isTRUE(file.info(job$preview_descriptor_file)$size <= 65536)) {
+    descriptor <- tryCatch(readRDS(job$preview_descriptor_file), error = function(e) NULL)
+  }
+  if (is.list(descriptor)) .wise_step2_async_poll_preview(job, descriptor)
+  if (!is.list(value) || !identical(value$schema, 1L) ||
+      !identical(value$job_id, job$id) ||
+      !identical(value$generation, job$generation) ||
+      !identical(value$dependency_signature_digest, job$dependency_signature_digest) ||
+      !is.numeric(value$sequence) || length(value$sequence) != 1L ||
+      !is.finite(value$sequence) || value$sequence <= job$progress_sequence ||
+       !is.character(value$stage) || length(value$stage) != 1L ||
+       !value$stage %in% c("initialize", "weather", "pipeline", "simulation", "publish") ||
+       !is.character(value$status) || length(value$status) != 1L ||
+      !value$status %in% c("started", "completed", "progress", "failed") ||
+      !is.numeric(value$elapsed) || length(value$elapsed) != 1L ||
+      !is.finite(value$elapsed) || value$elapsed < 0) return(invisible(NULL))
+  job$progress_sequence <- as.integer(value$sequence)
+  phases <- c("worker_started", "initialize", "weather", "pipeline", "simulation",
+    "historical_ready", "preview_ready", "finalizing", "writing_result",
+    "result_written", "manifest_written")
+  phase <- value$phase %||% value$stage
+  if (!is.character(phase) || length(phase) != 1L || !phase %in% phases) {
+    return(invisible(NULL))
+  }
+  completed <- value$completed
+  if (!is.null(completed) && (!is.numeric(completed) || length(completed) != 1L ||
+      !is.finite(completed) || completed < 0)) return(invisible(NULL))
+  if (!is.null(value$preview)) {
+    .wise_step2_async_poll_preview(job, value$preview)
+  }
+  if (is.function(job$on_progress)) {
+    try(job$on_progress(list(stage = value$stage, status = value$status,
+      phase = phase, completed = completed,
+      elapsed = as.numeric(value$elapsed), sequence = job$progress_sequence), job), silent = TRUE)
+  }
+  invisible(NULL)
+}
+
+.wise_step2_async_poll_preview <- function(job, descriptor) {
+  if (!is.list(descriptor) || !identical(descriptor$schema, 1L) ||
+      !identical(descriptor$job_id, job$id) ||
+      !identical(descriptor$generation, job$generation) ||
+      !identical(descriptor$dependency_signature_digest, job$dependency_signature_digest) ||
+      !identical(descriptor$path, job$preview_file) ||
+      !is.numeric(descriptor$size) || length(descriptor$size) != 1L ||
+      !is.finite(descriptor$size) || descriptor$size < 0 ||
+      descriptor$size > 1024 * 1024 || !file.exists(job$preview_file)) return(invisible(FALSE))
+  root <- normalizePath(job$artifact_dir, winslash = "/", mustWork = TRUE)
+  path <- normalizePath(job$preview_file, winslash = "/", mustWork = TRUE)
+  if (!startsWith(path, paste0(root, "/")) ||
+      !identical(as.numeric(file.info(path)$size), as.numeric(descriptor$size))) return(invisible(FALSE))
+  preview <- tryCatch(readRDS(path), error = function(e) NULL)
+  if (!is.list(preview) || !is.data.frame(preview$data) ||
+      nrow(preview$data) > 100L ||
+      !all(c("sim_year", "value", "uncertainty") %in% names(preview$data)) ||
+      any(!vapply(preview$data, function(x) is.atomic(x) && is.null(dim(x)), logical(1))) ||
+      !is.list(preview$metadata) ||
+      !is.character(preview$metadata$historical_label) ||
+      !is.character(preview$metadata$baseline_label)) {
+    return(invisible(FALSE))
+  }
+  if (isTRUE(job$preview_delivered)) return(invisible(FALSE))
+  if (is.function(job$on_preview)) try(job$on_preview(preview, job), silent = TRUE)
+  job$preview_delivered <- TRUE
+  invisible(TRUE)
 }
 
 .wise_step2_async_init <- function() {
@@ -296,6 +561,8 @@
                                      dependency_signature,
                                      clicked_at_epoch = NA_real_,
                                      on_status = NULL,
+                                     on_progress = NULL,
+                                     on_preview = NULL,
                                      on_result = NULL,
                                      on_error = NULL) {
   if (!.wise_step2_async_init()) {
@@ -305,8 +572,20 @@
   id <- .wise_step2_async_id()
   root <- .wise_step2_async_artifact_root()
   job_dir <- file.path(root, "jobs", id)
+  control_dir <- file.path(root, "control", id)
   weather_root <- file.path(root, "weather", id)
   dir.create(job_dir, recursive = TRUE, showWarnings = FALSE)
+  dir.create(control_dir, recursive = TRUE, showWarnings = FALSE)
+  digest <- .wise_step2_async_signature_digest(dependency_signature)
+  snapshot$weather_storage <- snapshot$weather_storage %||% match.arg(
+    Sys.getenv("WISEAPP_STEP2_WEATHER_STORAGE", "memory"), c("memory", "reference")
+  )
+  snapshot$weather_collect <- snapshot$weather_collect %||% match.arg(
+    Sys.getenv("WISEAPP_STEP2_WEATHER_COLLECT", "fast"), c("fast", "bounded")
+  )
+  snapshot$weather_threads <- snapshot$weather_threads %||% match.arg(
+    Sys.getenv("WISEAPP_STEP2_WEATHER_THREADS", "auto"), c("auto", "1", "2")
+  )
   job <- list(
     id = id,
     session_id = as.character(session_id %||% "unknown"),
@@ -315,50 +594,62 @@
     run_id = id,
     snapshot = snapshot,
     dependency_signature = dependency_signature,
+    dependency_signature_digest = digest,
     artifact_dir = job_dir,
+    control_dir = control_dir,
+    lock_file = file.path(control_dir, "publication.lock"),
+    retired_file = file.path(control_dir, "retired.rds"),
+    progress_file = file.path(job_dir, "progress.rds"),
+    preview_file = file.path(job_dir, "preview.rds"),
+    preview_descriptor_file = file.path(job_dir, "preview-descriptor.rds"),
     weather_store_root = weather_root,
     status = "queued",
-    weather_storage = snapshot$weather_storage %||% match.arg(
-      Sys.getenv("WISEAPP_STEP2_WEATHER_STORAGE", "memory"),
-      c("memory", "reference")
-    ),
-    weather_collect = snapshot$weather_collect %||% match.arg(
-      Sys.getenv("WISEAPP_STEP2_WEATHER_COLLECT", "fast"),
-      c("fast", "bounded")
-    ),
-    weather_threads = snapshot$weather_threads %||% match.arg(
-      Sys.getenv("WISEAPP_STEP2_WEATHER_THREADS", "auto"),
-      c("auto", "1", "2")
-    ),
+    weather_storage = snapshot$weather_storage,
+    weather_collect = snapshot$weather_collect,
+    weather_threads = snapshot$weather_threads,
     clicked_at_epoch = as.numeric(clicked_at_epoch),
     metrics = .wise_step2_async_snapshot_metrics(snapshot),
     handle = NULL,
+    retired = FALSE,
+    detached = FALSE,
+    settled = FALSE,
+    active = FALSE,
+    poll_active = FALSE,
+    progress_sequence = 0L,
     on_status = on_status,
+    on_progress = on_progress,
+    on_preview = on_preview,
     on_result = on_result,
     on_error = on_error
   )
+  job <- list2env(job, parent = emptyenv())
 
-  # A session's newest request supersedes work that has not started yet. An
-  # active job is stopped as well, but jobs belonging to other sessions remain
-  # FIFO queued behind it.
-  same_session <- vapply(
-    state$queue, function(x) identical(x$session_id, job$session_id), logical(1)
-  )
+  # A session's newest request supersedes queued work and retires active work.
+  same_session <- vapply(state$queue, function(queued_id) {
+    queued <- .wise_step2_async_job(queued_id)
+    !is.null(queued) && identical(queued$session_id, job$session_id)
+  }, logical(1))
   if (any(same_session)) {
     old <- state$queue[same_session]
     state$queue <- state$queue[!same_session]
-    for (item in old) {
+    for (old_id in old) {
+      item <- .wise_step2_async_job(old_id)
+      if (is.null(item)) next
+      rm(list = old_id, envir = state$jobs)
       .wise_step2_async_cleanup_job(item)
+      .wise_step2_async_cleanup_control(item)
       .wise_step2_async_notify(item, "cancelled", "Superseded by a newer run.")
     }
   }
-  if (!is.null(state$active) &&
-      identical(state$active$session_id, job$session_id)) {
-    .wise_step2_async_cancel(state$active$id, "Superseded by a newer run.")
+  if (!is.null(state$active)) {
+    active <- .wise_step2_async_job(state$active)
+    if (!is.null(active) && identical(active$session_id, job$session_id)) {
+      .wise_step2_async_cancel(active$id, "Superseded by a newer run.")
+    }
   }
 
   assign(id, job, envir = state$jobs)
-  state$queue[[length(state$queue) + 1L]] <- job
+  state$queue[[length(state$queue) + 1L]] <- id
   .wise_step2_async_notify(job, "queued")
   .wise_step2_async_dispatch()
   job
@@ -368,40 +659,79 @@
   state <- .wise_step2_async_state
   job_id <- as.character(job_id %||% "")[1L]
   if (!nzchar(job_id)) return(invisible(FALSE))
-  queued <- vapply(state$queue, function(x) identical(x$id, job_id), logical(1))
+  queued <- vapply(state$queue, function(x) identical(x, job_id), logical(1))
   if (any(queued)) {
-    job <- state$queue[[which(queued)[1L]]]
+    job <- .wise_step2_async_job(job_id)
     state$queue <- state$queue[!queued]
-    rm(list = job_id, envir = state$jobs)
+    if (!is.null(job)) rm(list = job_id, envir = state$jobs)
+    if (is.null(job)) return(invisible(FALSE))
     .wise_step2_async_cleanup_job(job)
+    .wise_step2_async_cleanup_control(job)
     .wise_step2_async_notify(job, "cancelled", reason)
+    .wise_step2_async_dispatch()
     return(invisible(TRUE))
   }
   active <- state$active
-  if (!is.null(active) && identical(active$id, job_id)) {
-    state$active <- NULL
-    rm(list = job_id, envir = state$jobs)
-    if (!is.null(active$handle)) try(mirai::stop_mirai(active$handle), silent = TRUE)
-    .wise_step2_async_cleanup_job(active)
+  if (!is.null(active) && identical(active, job_id)) {
+    active <- .wise_step2_async_job(job_id)
+    if (is.null(active)) return(invisible(FALSE))
+    active$retired <- TRUE
+    active$retire_reason <- reason
+    active$on_status <- NULL
+    active$on_progress <- NULL
+    active$on_preview <- NULL
+    active$on_result <- NULL
+    active$on_error <- NULL
+    .wise_step2_async_stop_poll(active)
+    gate <- .wise_step2_async_gate(active, timeout = 0)
+    if (is.null(gate)) {
+      active$retire_pending <- TRUE
+      retire <- function() {
+        current <- .wise_step2_async_job(job_id)
+        if (is.null(current) || !isTRUE(current$retired)) return(invisible(NULL))
+        lock <- .wise_step2_async_gate(current, timeout = 0)
+        if (is.null(lock)) return(later::later(retire, delay = 0.1))
+        on.exit(.wise_step2_async_unlock(lock), add = TRUE)
+        .wise_step2_async_retire_marker(current)
+      }
+      later::later(retire, delay = 0.1)
+    } else {
+      on.exit(.wise_step2_async_unlock(gate), add = TRUE)
+      .wise_step2_async_retire_marker(active)
+    }
     .wise_step2_async_notify(active, "cancelled", reason)
-    .wise_step2_async_dispatch()
     return(invisible(TRUE))
   }
   invisible(FALSE)
 }
 
 .wise_step2_async_read_manifest <- function(manifest, job) {
-  if (!is.list(manifest) || !identical(manifest$schema, 1L) ||
+  if (!is.list(manifest) || !identical(manifest$schema, 2L) ||
       !identical(manifest$job_id, job$id) ||
-      !identical(as.integer(manifest$generation), job$generation)) {
+      !identical(as.integer(manifest$generation), job$generation) ||
+      !identical(manifest$codec, "qs2") ||
+      !identical(manifest$result_basename, "result.qs2") ||
+      !identical(manifest$dependency_signature_digest,
+        job$dependency_signature_digest %||% .wise_step2_async_signature_digest(job$dependency_signature))) {
     stop("Step 2 result manifest does not match the submitted job.", call. = FALSE)
   }
-  result_file <- manifest$result_file %||% ""
-  if (!nzchar(result_file) || !file.exists(result_file)) {
+  root <- normalizePath(job$artifact_dir, winslash = "/", mustWork = TRUE)
+  result_file <- file.path(root, manifest$result_basename)
+  if (!identical(manifest$manifest_basename %||% "manifest.rds", "manifest.rds") ||
+      !file.exists(file.path(root, "manifest.rds")) ||
+      !file.exists(result_file) ||
+      !startsWith(normalizePath(result_file, winslash = "/", mustWork = TRUE), paste0(root, "/")) ||
+      !is.numeric(manifest$result_bytes) || length(manifest$result_bytes) != 1L ||
+      !is.finite(manifest$result_bytes) || manifest$result_bytes < 0 ||
+      manifest$result_bytes > 2 * 1024^3 ||
+      !identical(as.numeric(file.info(result_file)$size), as.numeric(manifest$result_bytes))) {
     stop("Step 2 result artifact is missing.", call. = FALSE)
   }
-  result <- readRDS(result_file)
-  if (!is.list(result) || is.null(result$hist_sim_result)) {
+  result <- qs2::qs_read(result_file, nthreads = 1L, validate_checksum = TRUE)
+  if (!is.list(result) || !is.list(result$hist_sim_result) ||
+      !is.list(result$.run) || !identical(result$.run$id, job$id) ||
+      !identical(result$.run$schema, 1L) ||
+      !identical(result$.sig, manifest$result_signature)) {
     stop("Step 2 result artifact is invalid.", call. = FALSE)
   }
   result
@@ -435,6 +765,12 @@ step2_async_worker <- function(snapshot,
                                job_id,
                                generation,
                                artifact_dir,
+                               control_dir = dirname(artifact_dir),
+                               lock_file = file.path(control_dir, "publication.lock"),
+                               retired_file = file.path(control_dir, "retired.rds"),
+                               progress_file = file.path(artifact_dir, "progress.rds"),
+                               preview_file = file.path(artifact_dir, "preview.rds"),
+                               dependency_signature_digest = "",
                                weather_store_root,
                                submitted_at_epoch = NA_real_,
                                seed,
@@ -445,15 +781,49 @@ step2_async_worker <- function(snapshot,
                                weather_fn = get_weather,
                                pipeline_fn = run_sim_pipeline) {
   dir.create(artifact_dir, recursive = TRUE, showWarnings = FALSE)
-  result_file <- file.path(artifact_dir, "result.rds")
+  result_file <- file.path(artifact_dir, "result.qs2")
   manifest_file <- file.path(artifact_dir, "manifest.rds")
-  on.exit({
-    if (!file.exists(manifest_file) && dir.exists(artifact_dir)) {
-      unlink(artifact_dir, recursive = TRUE, force = TRUE)
+  dir.create(control_dir, recursive = TRUE, showWarnings = FALSE)
+  preview_descriptor_file <- file.path(artifact_dir, "preview-descriptor.rds")
+  sequence <- 0L
+  started <- proc.time()[["elapsed"]]
+  last_phase <- NULL
+  last_status <- NULL
+  last_write <- -Inf
+  event_fn <- function(event) {
+    if (!is.list(event) || !event$stage %in% c("initialize", "weather", "pipeline", "simulation", "publish", "historical_ready", "pipeline_started", "pipeline_completed", "pipeline_failed") ||
+        !event$status %in% c("started", "completed", "progress", "failed", "checkpoint")) return(invisible(NULL))
+    phase <- event$phase %||% switch(event$stage,
+      pipeline_started = "pipeline", pipeline_completed = "pipeline",
+      pipeline_failed = "pipeline", publish = "finalizing", event$stage)
+    now <- proc.time()[["elapsed"]]
+    if (identical(phase, last_phase) && identical(event$status, last_status) &&
+        now - last_write < 0.25) return(invisible(NULL))
+    if (file.exists(retired_file)) return(invisible(NULL))
+    sequence <<- sequence + 1L
+    record <- list(
+      schema = 1L, job_id = job_id, generation = as.integer(generation),
+      dependency_signature_digest = dependency_signature_digest,
+      sequence = sequence,
+      phase = phase,
+      stage = if (event$stage %in% c("pipeline_started", "pipeline_completed", "pipeline_failed")) "pipeline" else if (event$stage == "historical_ready") "simulation" else event$stage,
+      status = if (event$status == "checkpoint") "progress" else event$status,
+      elapsed = max(0, now - started)
+    )
+    if (!is.null(event$completed)) record$completed <- as.integer(event$completed)
+    try(.wise_step2_async_write_control(progress_file, record), silent = TRUE)
+    last_phase <<- phase
+    last_status <<- event$status
+    last_write <<- now
+    invisible(NULL)
+  }
+  checkpoint_fn <- function(...) {
+    if (file.exists(retired_file)) {
+      stop(structure(list(message = "Step 2 job was retired."),
+        class = c("wiseapp_step2_cancelled", "error", "condition")))
     }
-  }, add = TRUE)
-
-  event_fn <- function(event) invisible(NULL)
+    invisible(TRUE)
+  }
 
   if (!is.list(snapshot) || !is.list(snapshot$input)) {
     stop("Step 2 worker requires an ordinary snapshot.", call. = FALSE)
@@ -463,6 +833,8 @@ step2_async_worker <- function(snapshot,
   # values at the worker boundary so async and synchronous runs share the same
   # simulation semantics.
   snapshot$input <- .wise_step2_async_normalize_input(snapshot$input)
+  checkpoint_fn()
+  event_fn(list(stage = "initialize", status = "started", phase = "worker_started"))
   gc(verbose = FALSE)
   computed <- step2_compute(
     input = snapshot$input,
@@ -474,6 +846,34 @@ step2_async_worker <- function(snapshot,
     weather_collect = weather_collect,
     weather_threads = weather_threads,
     event_fn = event_fn,
+    preview_fn = function(summary) {
+      labels <- snapshot$preview_labels %||% list()
+      if (!is.list(summary) || !is.data.frame(summary$data) || nrow(summary$data) > 100L ||
+          !all(c("sim_year", "value", "uncertainty") %in% names(summary$data)) ||
+          any(!vapply(summary$data, function(x) is.atomic(x) && is.null(dim(x)), logical(1))) ||
+          !is.list(summary$metadata)) {
+        stop("Preview summary is outside the bounded scalar schema.", call. = FALSE)
+      }
+      summary$metadata$historical_label <- as.character(labels$historical %||% "Historical")
+      summary$metadata$baseline_label <- as.character(labels$baseline %||% "Selected baseline survey")
+      tmp <- paste0(preview_file, ".tmp")
+      on.exit(unlink(tmp, force = TRUE), add = TRUE)
+      saveRDS(summary, tmp, version = 3L)
+      size <- file.info(tmp)$size
+      if (is.na(size) || size > 1024 * 1024) stop("Preview summary exceeds 1 MiB.", call. = FALSE)
+      preview_lock <- filelock::lock(lock_file, timeout = Inf)
+      on.exit(.wise_step2_async_unlock(preview_lock), add = TRUE)
+      checkpoint_fn()
+      if (!file.rename(tmp, preview_file)) stop("Could not publish preview summary.", call. = FALSE)
+      .wise_step2_async_write_control(preview_descriptor_file, list(
+        schema = 1L, job_id = job_id, generation = as.integer(generation),
+        dependency_signature_digest = dependency_signature_digest,
+        path = preview_file, size = as.numeric(size)
+      ))
+      event_fn(list(stage = "simulation", status = "progress", phase = "preview_ready"))
+      invisible(TRUE)
+    },
+    checkpoint_fn = checkpoint_fn,
     weather_fn = weather_fn,
     pipeline_fn = pipeline_fn
   )
@@ -486,20 +886,29 @@ step2_async_worker <- function(snapshot,
   rm(snapshot)
   gc(verbose = FALSE)
   tmp_result <- paste0(result_file, ".tmp")
-  saveRDS(computed$result, tmp_result, version = 3L)
+  checkpoint_fn()
+  event_fn(list(stage = "publish", status = "started", phase = "writing_result"))
+  qs2::qs_save(computed$result, tmp_result, nthreads = 1L)
+  lock <- filelock::lock(lock_file, timeout = Inf)
+  on.exit(.wise_step2_async_unlock(lock), add = TRUE)
+  checkpoint_fn()
   if (!file.rename(tmp_result, result_file)) {
     unlink(tmp_result, force = TRUE)
     stop("Could not atomically publish Step 2 result artifact.", call. = FALSE)
   }
+  event_fn(list(stage = "publish", status = "completed", phase = "result_written"))
   manifest <- list(
-    schema = 1L,
+    schema = 2L,
     job_id = job_id,
     generation = as.integer(generation),
     status = "succeeded",
-    result_file = normalizePath(result_file, winslash = "/", mustWork = FALSE),
+    manifest_basename = basename(manifest_file),
+    codec = "qs2",
+    result_basename = basename(result_file),
+    result_bytes = as.numeric(file.info(result_file)$size),
+    dependency_signature_digest = dependency_signature_digest,
     result_signature = computed$signature,
-    warnings = character(0),
-    events = computed$events
+    qs2_version = as.character(utils::packageVersion("qs2"))
   )
   tmp_manifest <- paste0(manifest_file, ".tmp")
   saveRDS(manifest, tmp_manifest, version = 3L)
@@ -507,5 +916,8 @@ step2_async_worker <- function(snapshot,
     unlink(tmp_manifest, force = TRUE)
     stop("Could not atomically publish Step 2 manifest.", call. = FALSE)
   }
+  event_fn(list(stage = "publish", status = "completed", phase = "manifest_written"))
+  .wise_step2_async_unlock(lock)
+  lock <- NULL
   manifest
 }
