@@ -477,6 +477,9 @@ resolve_id_col <- function(a, b) {
 #'       \code{compute_factor_loading()}, or \code{NULL} when
 #'       \code{chol_obj = NULL}.}
 #'     \item{sim_year}{Integer vector length N. Simulation year per row.}
+#'     \item{weather_exposure}{Compact exact weather exposure table and
+#'       prediction-row mapping, or explicit unavailable status if prediction
+#'       output loses its row identity.}
 #'     \item{weight}{Numeric vector length N or \code{NULL}. Survey weights.}
 #'     \item{id_vec}{Vector length N or \code{NULL}. Household IDs for
 #'       \code{residuals = "original"} matching.}
@@ -565,16 +568,26 @@ run_sim_pipeline <- function(weather_raw,
       dplyr::select(-dplyr::any_of(drop_cols))
   }
 
+  # Keep a narrow locator to the exact prepared weather rows used below.
+  # IDs are assigned before either join path so duplicate timestamps remain
+  # distinguishable and cached/inline joins share the same mapping contract.
+  weather_exposure_table <- .policy_exposure_table(
+    weather_raw, weather_columns = unique(c(sw$name, weather_cols))
+  )
+  weather_join <- weather_raw
+  weather_join$.policy_exposure_id <- seq_len(nrow(weather_join))
+
   survey_wd_sim <- profile_stage("join", if (!is.null(weather_join_cache) && !is_rif_policy) {
-    join_weather_survey_cached(weather_raw, weather_join_cache)
+    join_weather_survey_cached(weather_join, weather_join_cache)
   } else {
-    weather_raw |>
+    weather_join |>
       .add_sim_timestamp_fields() |>
       dplyr::select(-timestamp) |>
       dplyr::inner_join(svy_join, by = c("code", "year", "survname", "loc_id", "int_month")) |>
       dplyr::mutate(year = as.factor(year))
   }, detail = if (!is.null(weather_join_cache) && !is_rif_policy) "compact_cache" else "inline")
   rm(svy_join)
+  survey_wd_sim$.policy_prediction_row_id <- seq_len(nrow(survey_wd_sim))
 
   # Resolve ID column for "original" residual matching
   id_col <- if (residuals == "original") {
@@ -747,6 +760,15 @@ run_sim_pipeline <- function(weather_raw,
   # per-household policy deltas (decompose_policy_effect output, indexed by
   # baseline survey row) onto the expanded (HH x year) prediction rows.
   svy_row_id <- if (".svy_row_id" %in% names(out)) out$.svy_row_id else NULL
+  weather_exposure <- .policy_exposure_mapping(
+    out = out,
+    table = weather_exposure_table,
+    n_joined = nrow(survey_wd_sim),
+    sim_year = sim_year,
+    weight = weight,
+    id_vec = id_vec,
+    id_col = id_col
+  )
 
   # Factor loading matrix ----
   # Computed once per key - not per draw.
@@ -829,6 +851,7 @@ run_sim_pipeline <- function(weather_raw,
     id_vec      = id_vec,
     id_col      = id_col,
     svy_row_id  = svy_row_id,
+    weather_exposure = weather_exposure,
     n_pre_join  = n_pre_join,
     weather_raw = weather_raw,
     train_aug   = train_aug
@@ -841,6 +864,76 @@ run_sim_pipeline <- function(weather_raw,
     attr(result, "prediction_profile") <- do.call(rbind, prediction_profile$records)
   }
   result
+}
+
+.policy_exposure_table <- function(weather_raw, weather_columns = NULL) {
+  if (!is.data.frame(weather_raw) || !all(c(
+    "code", "year", "survname", "loc_id", "timestamp"
+  ) %in% names(weather_raw))) {
+    return(NULL)
+  }
+  derived <- .add_sim_timestamp_fields(weather_raw)
+  key_cols <- c(
+    ".policy_exposure_id", "code", "year", "survname", "loc_id",
+    "int_month", "sim_year", "timestamp"
+  )
+  weather_cols <- intersect(weather_columns %||% character(), names(weather_raw))
+  weather_cols <- setdiff(weather_cols, c(
+    "code", "year", "survname", "loc_id", "timestamp"
+  ))
+  out <- derived[, unique(c(key_cols[key_cols %in% names(derived)], weather_cols)),
+    drop = FALSE
+  ]
+  out$.policy_exposure_id <- seq_len(nrow(out))
+  out
+}
+
+.policy_exposure_mapping <- function(out, table, n_joined, sim_year,
+                                     weight, id_vec, id_col) {
+  unavailable <- function(reason) {
+    list(status = "unavailable", available = FALSE, reason = reason, table = table)
+  }
+  if (is.null(table)) return(unavailable("weather exposure table unavailable"))
+  required <- c(".policy_exposure_id", ".policy_prediction_row_id", ".svy_row_id")
+  if (!all(required %in% names(out))) {
+    return(unavailable("prediction output lost weather or survey row identity"))
+  }
+  exposure_id <- out$.policy_exposure_id
+  prediction_row_id <- out$.policy_prediction_row_id
+  svy_row_id <- out$.svy_row_id
+  n <- nrow(out)
+  if (length(exposure_id) != n || length(prediction_row_id) != n ||
+    length(svy_row_id) != n || length(sim_year) != n ||
+    (!is.null(weight) && length(weight) != n) ||
+    (!is.null(id_vec) && length(id_vec) != n)) {
+    return(unavailable("prediction row metadata is not aligned"))
+  }
+  integral <- function(x) is.numeric(x) && all(is.finite(x)) &&
+    all(x == as.integer(x))
+  if (!integral(exposure_id) || !integral(prediction_row_id) ||
+    !integral(svy_row_id)) {
+    return(unavailable("prediction row metadata contains nonintegral identifiers"))
+  }
+  row_index <- as.integer(exposure_id)
+  if (anyNA(row_index) || any(row_index < 1L | row_index > nrow(table)) ||
+    anyNA(prediction_row_id) || any(prediction_row_id < 1L |
+      prediction_row_id > n_joined) || anyDuplicated(prediction_row_id) ||
+    anyNA(svy_row_id) || anyNA(sim_year)) {
+    return(unavailable("prediction row metadata contains invalid identifiers"))
+  }
+  list(
+    status = "ok",
+    available = TRUE,
+    reason = NULL,
+    table = table,
+    row_index = row_index,
+    prediction_row_id = as.integer(prediction_row_id),
+    svy_row_id = svy_row_id,
+    sim_year = sim_year,
+    weight = weight,
+    id_vec = id_vec,
+    id_col = id_col
+  )
 }
 
 # Simulation date grid ----

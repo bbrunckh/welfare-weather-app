@@ -70,6 +70,7 @@ mod_3_06_policy_sim_server <- function(id,
     decomp_bundle_rv <- reactiveVal(list(result = NULL, context = NULL))
     decomp_rv <- reactive(decomp_bundle_rv()$result)
     decomp_context_rv <- reactive(decomp_bundle_rv()$context)
+    annual_channels_rv <- reactive(decomp_bundle_rv()$annual_channels)
     decomp_scenarios_rv <- reactiveVal(list())
     diagnostic_summary_rv <- reactiveVal(NULL)
     # INT-08: TRUE while the stored policy results' run signature no longer
@@ -102,6 +103,7 @@ mod_3_06_policy_sim_server <- function(id,
     .policy_sig_from_live <- function(hs = hist_sim()) {
       list(
         step = "policy",
+        correction_version = "row_aligned_annual_v1",
         sim_sig = if (!is.null(hs)) hs$.sig %||% NULL else NULL,
         survey_version = survey_version(),
         scenarios = .sig_plain(list(
@@ -338,13 +340,6 @@ mod_3_06_policy_sim_server <- function(id,
                 run_identity = paste0("generation-", run_generation()),
                 weather_panels = Filter(Negate(is.null), c(
                   list(step2_resolve_weather(hs$weather_raw, hs)),
-                  unlist(lapply(baseline_scenarios_out, function(x) {
-                    raw <- step2_resolve_weather(x$weather_raw, x)
-                    if (is.null(raw) || !"timestamp" %in% names(raw)) {
-                      return(list(raw))
-                    }
-                    split(raw, as.integer(format(raw$timestamp, "%Y")))
-                  }), recursive = FALSE),
                   unname(adverse_bases_pre)
                 )),
                 adverse_bases = adverse_bases_pre
@@ -399,77 +394,10 @@ mod_3_06_policy_sim_server <- function(id,
               names(adverse_decompositions) <- names(decomp_context$adverse_bases)
               adverse_decompositions <- Filter(Negate(is.null), adverse_decompositions)
 
-              # Decompose per saved scenario * sim_year for year-to-year
-              # variation. Per-year failures are collected: if every attempt
-              # fails the run fails; otherwise partial results are published
-              # with a warning naming the count of dropped pieces (INT-04).
+              # Production future summaries have already been reduced from the
+              # exact channel blocks used to correct every member's predictions.
               shiny::setProgress(value = 0.90, detail = "Finalizing scenario summaries...")
-              sc_list <- pol_out$saved_scenarios %||% list()
-              decomp_sc_errors <- character(0)
-              decomp_sc_parts <- lapply(seq_along(sc_list), function(i) {
-                sc <- sc_list[[i]]
-                w_raw <- step2_resolve_weather(sc$weather_raw, sc)
-                if (is.null(w_raw)) {
-                  return(NULL)
-                }
-                sc_label <- names(sc_list)[i] %||% paste0("Scenario ", i)
-
-                # Identify years present in this scenario's weather panel
-                # (computed once and reused for subsetting below, rather than
-                # re-parsing timestamps for every year in the loop)
-                if ("timestamp" %in% names(w_raw)) {
-                  w_years <- as.integer(format(w_raw$timestamp, "%Y"))
-                  sim_years <- sort(unique(w_years))
-                } else {
-                  # No year column - fall back to single decomposition (mean weather)
-                  w_years <- NULL
-                  sim_years <- NA_integer_
-                }
-
-                year_results <- lapply(sim_years, function(yr) {
-                  # Subset to this year's weather rows (or use full panel if no year info)
-                  w_yr <- if (!is.na(yr)) {
-                    w_raw[w_years == yr, ]
-                  } else {
-                    w_raw
-                  }
-                  tryCatch(
-                    {
-                      .compact_run_future_decomposition(
-                        context = decomp_context,
-                        run_identity = decomp_context$run_identity,
-                        weather_raw = w_yr,
-                        scenario = sc_label,
-                        sim_year = yr,
-                        year_start = sc$year_range[[1]] %||% NA_integer_,
-                        year_end = sc$year_range[[2]] %||% NA_integer_
-                      )
-                    },
-                    error = function(e) {
-                      decomp_sc_errors <<- c(decomp_sc_errors, paste0(
-                        sc_label, if (!is.na(yr)) paste0(" (", yr, ")"), ": ",
-                        conditionMessage(e)
-                      ))
-                      NULL
-                    }
-                  )
-                })
-                Filter(Negate(is.null), year_results)
-              })
-              decomp_sc_parts <- unlist(decomp_sc_parts, recursive = FALSE)
-              decomp_sc_parts <- Filter(Negate(is.null), decomp_sc_parts)
-              if (length(decomp_sc_errors) > 0L && !length(decomp_sc_parts)) {
-                stop(
-                  "All scenario decompositions failed. First error: ",
-                  decomp_sc_errors[[1]],
-                  call. = FALSE
-                )
-              }
-              decomp_sc <- .bind_compact_future_decompositions(
-                decomp_sc_parts,
-                engine = mf$engine,
-                is_rif = identical(mf$engine, "rif")
-              )
+              decomp_sc <- pol_out$decomp_scenarios
 
               diagnostic_summary_out <- .policy_diagnostics_snapshot(
                 svy_baseline = svy,
@@ -492,6 +420,13 @@ mod_3_06_policy_sim_server <- function(id,
           # (simulation + decomposition) succeeded, so a failure anywhere
           # above leaves the previous results, diagnostics, and run ID intact.
           # INT-08: the policy run signature is stored with both result arms.
+          final_context <- .finalize_decomposition_context(
+            decomp_context, adverse_decompositions
+          )
+          final_bundle <- .publish_decomposition_bundle(
+            decomp_bundle_rv(), decomp, final_context, success = TRUE
+          )
+          final_bundle$annual_channels <- pol_out$annual_channels
           baseline_out$.sig <- policy_sig
           if (!is.null(pol_out$hist_sim)) pol_out$hist_sim$.sig <- policy_sig
           new_weather_lease <- step2_weather_store_acquire_scenarios(c(
@@ -512,13 +447,7 @@ mod_3_06_policy_sim_server <- function(id,
           digital_scenario_rv(digital_cfg)
           labor_scenario_rv(labor_cfg)
           education_scenario_rv(education_cfg)
-          final_context <- .finalize_decomposition_context(
-            decomp_context, adverse_decompositions
-          )
-          decomp_bundle_rv(.publish_decomposition_bundle(
-            decomp_bundle_rv(), decomp, final_context,
-            success = TRUE
-          ))
+          decomp_bundle_rv(final_bundle)
           decomp_scenarios_rv(decomp_sc)
           diagnostic_summary_rv(diagnostic_summary_out)
           policy_stale(FALSE)
@@ -526,28 +455,10 @@ mod_3_06_policy_sim_server <- function(id,
           sim_run_id(isolate(sim_run_id()) + 1L)
           run_status("success")
           completed <- TRUE
-          if (length(decomp_sc_errors) > 0L) {
-            shiny::showNotification(
-              ui = shiny::tagList(
-                shiny::tags$b(
-                  "Policy results are ready, but some scenario summaries are unavailable."
-                ),
-                shiny::tags$details(
-                  shiny::tags$summary("Show details"),
-                  shiny::tags$div(
-                    style = "font-size: 12px; white-space: pre-wrap;",
-                    paste(decomp_sc_errors, collapse = "\n")
-                  )
-                )
-              ),
-              type = "warning", duration = 10
-            )
-          } else {
-            shiny::showNotification(
-              "Policy scenario results are ready.",
-              type = "message", duration = 3
-            )
-          }
+          shiny::showNotification(
+            "Policy scenario results are ready.",
+            type = "message", duration = 3
+          )
         },
         error = function(e) {
           shiny::showNotification(
@@ -583,6 +494,7 @@ mod_3_06_policy_sim_server <- function(id,
       run_status = run_status,
       decomp_result = decomp_rv,
       decomp_context = decomp_context_rv,
+      annual_channels = annual_channels_rv,
       decomp_scenarios = decomp_scenarios_rv,
       diagnostic_summary = diagnostic_summary_rv,
       baseline_hist_sim = baseline_hist_sim_rv,

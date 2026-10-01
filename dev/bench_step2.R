@@ -145,6 +145,9 @@ source(file.path(.bench_repo_root, "dev", "bench_step3_helpers.R"), local = TRUE
     step3_policies = .bench_env_csv(
       "WISEAPP_STEP3_POLICIES", c("covariate", "targeted_sp", "combined")
     ),
+    step3_reference_rows = max(1L, .bench_env_int(
+      "WISEAPP_STEP3_REFERENCE_ROWS", 16L
+    )),
     payload_mode  = .bench_env("WISEAPP_STEP2_PAYLOAD_MODE", "compact"),
     weather_storage = .bench_env("WISEAPP_STEP2_WEATHER_STORAGE", "memory"),
     weather_collect = .bench_env("WISEAPP_STEP2_WEATHER_COLLECT", "fast"),
@@ -341,6 +344,10 @@ if (!is.null(connection_params)) {
 }
 
 .bench_model_spec <- function(config, model_label, sw, svy_wx, so) {
+  policy_interactions <- .bench_env_csv("WISEAPP_STEP3_INTERACTIONS", character(0))
+  if (!all(policy_interactions %in% names(svy_wx))) {
+    stop("Benchmark policy interaction variable unavailable.", call. = FALSE)
+  }
   requested_type <- if (identical(model_label, "rif")) {
     "Unconditional quantile regression (RIF)"
   } else {
@@ -349,7 +356,7 @@ if (!is.null(connection_params)) {
   fe <- intersect(c("year", "loc_id_panel"), names(svy_wx))
   build_selected_model(
     model_type = requested_type,
-    interactions = character(0),
+    interactions = policy_interactions,
     fixedeffects = fe,
     covariate_selection = "User-defined",
     ind_covariates = character(0),
@@ -1146,7 +1153,8 @@ report_metadata <- list(
     process_tree_rss = "The sampled values are diagnostic only. The external launcher records the complete R process tree peak.",
     step3 = if (cfg$include_step3) paste(
       "Enabled with deterministic policy fixtures:",
-      paste(cfg$step3_policies, collapse = ", ")
+      paste(cfg$step3_policies, collapse = ", "),
+      "annual reference rows per pipeline:", cfg$step3_reference_rows
     ) else "Disabled; set WISEAPP_STEP2_INCLUDE_STEP3=1 to opt in.",
     evidence_class = if (identical(cfg$fixture_mode, "smoke")) {
       "smoke_only_not_production_evidence"
@@ -1208,7 +1216,7 @@ jsonlite::write_json(
     "- `step2_per_key.csv`: per-key timing, row counts, factor-loading dimensions, and retained weather sizes.",
     "- `step2_aggregation.csv`: display aggregation elapsed time by method.",
     "- `step2_metadata.json`: workload, environment, package, and input metadata.",
-    if (metadata$configuration$include_step3) "- `step3_summary.csv`: Step 3 stage runtimes, sizes, sampled RSS, workload identity, evidence classification, and SHA-256 fingerprint." else NULL,
+    if (metadata$configuration$include_step3) "- `step3_summary.csv`: Step 3 stage runtimes, annual source/reference parity (bounded by `WISEAPP_STEP3_REFERENCE_ROWS`), mean/headcount metric-switch runtimes and compact result sizes (reuse prepared annual channels; no prediction reruns), old-versus-new characterization, blocking time, sizes, sampled RSS, workload identity, evidence classification, and SHA-256 fingerprint." else NULL,
     "- `external_process_metrics.csv`: launcher-level maximum RSS from `/usr/bin/time -l` when supported.",
     "",
     "## Decision Inputs",
@@ -1225,8 +1233,12 @@ jsonlite::write_json(
 .bench_remove_traces(traces)
 
 if ((nrow(summary_df) && any(summary_df$status != "ok")) ||
-    (nrow(aggregation_df) && any(aggregation_df$status != "ok"))) {
-  stop("Step 2 benchmark failed cases; inspect summary and aggregation CSVs.", call. = FALSE)
+    (nrow(aggregation_df) && any(aggregation_df$status != "ok")) ||
+    (nrow(step3_df) && any(step3_df$status != "ok"))) {
+  stop(
+    "Benchmark failed cases or Step 3 annual parity; inspect summary, ",
+    "aggregation, and Step 3 CSVs.", call. = FALSE
+  )
 }
 
 message("Step 2 Phase 1 benchmark complete. Outputs: ", cfg$output_dir)

@@ -266,7 +266,11 @@ select_decomp_weather_basis <- function(decomp_df, basis = "mean", so = NULL) {
   ]
   selected <- .compact_future_year(x, scenario, basis, so)
   if (nrow(selected) && !identical(basis, "mean")) {
-    rows <- rows[rows$sim_year %in% selected$sim_year, , drop = FALSE]
+    keep <- rows$sim_year %in% selected$sim_year
+    if ("member" %in% names(rows) && "member" %in% names(selected)) {
+      keep <- paste(rows$member, rows$sim_year) %in% paste(selected$member, selected$sim_year)
+    }
+    rows <- rows[keep, , drop = FALSE]
   }
   if (!nrow(rows)) {
     return(tibble::tibble())
@@ -480,6 +484,7 @@ mod_3_09_decomposition_server <- function(id,
                                           policy_saved_scenarios = reactive(list()),
                                           stale = reactive(FALSE),
                                           aggregation_method = reactive("mean"),
+                                          metric_decomposition = reactive(NULL),
                                           poverty_line = reactive(NULL),
                                           focus_scenario = reactive(NULL),
                                           metric_context = reactive(NULL),

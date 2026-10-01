@@ -346,6 +346,11 @@ test_that("policy assignment is deterministic and restores caller RNG", {
 test_that("Step 3 policy delta pipeline is identical across repeated runs", {
   fx <- make_policy_fixture(90L)
   fx$temp <- seq(20, 30, length.out = nrow(fx))
+  fx$code <- "BFA"
+  fx$year <- "2018"
+  fx$survname <- "wave-a"
+  fx$loc_id <- seq_len(nrow(fx))
+  fx$int_month <- 6L
   fit <- stats::lm(log(welfare) ~ temp + electricity + temp:electricity,
                    data = fx)
   mf <- list(
@@ -370,8 +375,21 @@ test_that("Step 3 policy delta pipeline is identical across repeated runs", {
     svy_row_id = seq_len(nrow(fx)),
     train_aug = transform(fx, .resid = stats::residuals(fit))
   )
+  exposure <- fx[pipe$svy_row_id,
+                 c("code", "year", "survname", "loc_id", "int_month", "temp")]
+  exposure$timestamp <- as.Date(sprintf("2030-06-%02d", rep(1L, nrow(exposure))))
+  pipe$weather_exposure <- c(
+    list(status = "ok", table = exposure, row_index = seq_len(nrow(exposure)),
+         prediction_row_id = seq_len(nrow(exposure))),
+    pipe[c("svy_row_id", "sim_year", "weight", "id_vec")]
+  )
   hist <- list(pipeline = pipe, weather_raw = data.frame(temp = mean(fx$temp)),
                so = so, svy = fx)
+  run_identity <- "deterministic-policy-run"
+  context <- .build_decomposition_context(
+    fx, svy_policy, mf, so, skip_coef = TRUE, run_identity = run_identity
+  )
+  annual_channels <- .prepare_policy_annual_channels(context, run_identity)
 
   run <- function() {
     apply_policy_delta_to_baseline(
@@ -380,7 +398,11 @@ test_that("Step 3 policy delta pipeline is identical across repeated runs", {
       model_fit = mf,
       so = so,
       hist_sim_baseline = hist,
-      skip_coef = TRUE
+      skip_coef = TRUE,
+      decomp_context = context,
+      run_identity = run_identity,
+      annual_channels = annual_channels,
+      chunk_size = 100000L
     )
   }
   a <- run()

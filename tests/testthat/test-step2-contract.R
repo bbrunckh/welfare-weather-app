@@ -234,7 +234,8 @@ test_that("run_sim_pipeline contract preserves joins and disabled uncertainty", 
     out,
     c(
       "y_point", "F_loading", "sim_year", "weight", "id_vec", "id_col",
-      "svy_row_id", "n_pre_join", "weather_raw", "train_aug"
+      "svy_row_id", "weather_exposure", "n_pre_join", "weather_raw",
+      "train_aug"
     )
   )
   expect_length(out$y_point, 2L)

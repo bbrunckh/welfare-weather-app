@@ -86,48 +86,179 @@
   out
 }
 
-.bench_step3_decompose_future <- function(policy_result, svy_baseline,
-                                          svy_policy, model_fit, so,
-                                          skip_coef, deltas, F_hat, context,
-                                          run_identity) {
-  rows <- list()
-  for (scenario_name in names(policy_result$saved_scenarios)) {
-    scenario <- policy_result$saved_scenarios[[scenario_name]]
-    weather <- step2_resolve_weather(scenario$weather_raw, scenario)
-    if (is.null(weather)) next
-    if ("timestamp" %in% names(weather)) {
-      weather_year <- as.integer(format(weather$timestamp, "%Y"))
-      years <- sort(unique(weather_year))
-    } else {
-      weather_year <- NULL
-      years <- NA_integer_
-    }
-    for (year in years) {
-      weather_slice <- if (is.na(year)) weather else weather[weather_year == year, ]
-      value <- decompose_policy_effect(
-        svy_baseline = svy_baseline,
-        svy_policy = svy_policy,
-        model_fit = model_fit,
-        so = so,
-        weather_raw = weather_slice,
-        skip_coef = skip_coef,
-        deltas = deltas,
-        F_hat = F_hat,
-        context = context,
-        run_identity = run_identity
+.bench_step3_decompose_future <- function(policy_result) {
+  policy_result$decomp_scenarios %||% list()
+}
+
+.bench_step3_metric_switches <- function(baseline_result, policy_result,
+                                         requested_residuals, analysis_unit,
+                                         size_fn) {
+  prepared <- policy_result$annual_channels
+  baseline_hist <- baseline_result$hist_sim_result
+  policy_hist <- policy_result$hist_sim
+  baseline_scenarios <- baseline_result$new_scenarios %||% list()
+  policy_scenarios <- policy_result$saved_scenarios %||% list()
+  wrap_scenarios <- function(scenarios) lapply(scenarios, function(scenario) {
+    list(pipelines = scenario$pipelines %||% list(),
+         shared_context = scenario$shared_context %||% NULL)
+  })
+  baseline_scenarios <- wrap_scenarios(baseline_scenarios)
+  policy_scenarios <- wrap_scenarios(policy_scenarios)
+  focus_scenario <- if (length(baseline_scenarios)) {
+    names(baseline_scenarios)[[1L]]
+  } else baseline_hist$hist_label %||% "Historical"
+  methods <- c("mean", "headcount_ratio")
+  rows <- lapply(methods, function(method) {
+    pov_line <- if (identical(method, "headcount_ratio")) 3 else NULL
+    started <- proc.time()[["elapsed"]]
+    result <- tryCatch(.policy_metric_decomposition(
+      baseline_hist = baseline_hist,
+      policy_hist = policy_hist,
+      baseline_scenarios = baseline_scenarios,
+      policy_scenarios = policy_scenarios,
+      prepared = prepared,
+      method = method,
+      pov_line = pov_line,
+      requested_residuals = requested_residuals,
+      focus_scenario = focus_scenario,
+      analysis_unit = analysis_unit
+    ), error = function(e) list(
+      status = "error", reason = conditionMessage(e),
+      annual = data.frame(), summary = data.frame(),
+      return_period = data.frame(), mechanisms = list()
+    ))
+    elapsed <- proc.time()[["elapsed"]] - started
+    result_size <- size_fn(result)
+    mechanisms <- result$mechanisms$annual %||% data.frame()
+    data.frame(
+      method = method,
+      status = result$status %||% "error",
+      error = result$reason %||% "",
+      elapsed_seconds = elapsed,
+      scope = if (nrow(result$annual %||% data.frame())) {
+        if ("scope" %in% names(result$annual)) unique(result$annual$scope)[[1L]] else
+          "production_prediction_rows"
+      } else NA_character_,
+      n_annual_rows = nrow(result$annual %||% data.frame()),
+      n_summary_rows = nrow(result$summary %||% data.frame()),
+      n_return_period_rows = nrow(result$return_period %||% data.frame()),
+      n_mechanism_rows = nrow(mechanisms),
+      result_object_bytes = result_size$object_bytes,
+      result_serialized_bytes = result_size$serialized_bytes,
+      result_deduplicated_bytes = result_size$deduplicated_bytes,
+      preparation_seconds = 0,
+      prediction_reruns = 0L,
+      stringsAsFactors = FALSE
+    )
+  })
+  do.call(rbind, rows)
+}
+
+.bench_step3_pipeline_rows <- function(pipeline, rows, context) {
+  exposure <- pipeline$weather_exposure
+  table_rows <- unique(exposure$row_index[rows])
+  table <- exposure$table[table_rows, unique(c(
+    "code", "year", "survname", "loc_id", "int_month", "timestamp",
+    context$weather_vars
+  )), drop = FALSE]
+  remap <- match(exposure$row_index[rows], table_rows)
+  out <- list(
+    y_point = pipeline$y_point[rows],
+    svy_row_id = pipeline$svy_row_id[rows],
+    sim_year = pipeline$sim_year[rows],
+    weight = pipeline$weight[rows],
+    id_vec = pipeline$id_vec[rows],
+    weather_exposure = list(
+      status = exposure$status,
+      table = table,
+      row_index = remap,
+      prediction_row_id = exposure$prediction_row_id[rows],
+      svy_row_id = exposure$svy_row_id[rows],
+      sim_year = exposure$sim_year[rows],
+      weight = exposure$weight[rows],
+      id_vec = exposure$id_vec[rows]
+    )
+  )
+  out
+}
+
+.bench_step3_annual_check <- function(pipeline, prepared, context,
+                                      run_identity, max_reference_rows) {
+  n <- length(pipeline$y_point)
+  rows <- seq_len(min(n, max(1L, as.integer(max_reference_rows))))
+  sample_pipe <- .bench_step3_pipeline_rows(pipeline, rows, context)
+  started <- proc.time()[["elapsed"]]
+  optimized <- .policy_annual_channels(
+    pipeline, prepared, run_identity, rows = rows
+  )
+  optimized_seconds <- proc.time()[["elapsed"]] - started
+  started <- proc.time()[["elapsed"]]
+  reference <- .policy_annual_channels_reference(
+    sample_pipe, context, run_identity
+  )
+  reference_seconds <- proc.time()[["elapsed"]] - started
+  fields <- c(
+    "delta_sp", "delta_main_covar", "delta_main", "delta_res1",
+    "delta_res2", "delta_total"
+  )
+  differences <- unlist(lapply(fields, function(field) {
+    abs(optimized[[field]] - reference[[field]])
+  }), use.names = FALSE)
+  list(
+    status = if (identical(reference$status, "ok") &&
+      identical(optimized$status, "ok")) "ok" else "error",
+    error = if (!identical(reference$status, "ok")) {
+      reference$reason %||% reference$status
+    } else if (!identical(optimized$status, "ok")) {
+      optimized$reason %||% optimized$status
+    } else "",
+    scope = "first_rows_per_pipeline",
+    count = length(rows),
+    total_rows = n,
+    optimized_seconds = optimized_seconds,
+    reference_seconds = reference_seconds,
+    max_abs_difference = if (length(differences)) max(differences) else NA_real_,
+    mean_abs_difference = if (length(differences)) mean(differences) else NA_real_
+  )
+}
+
+.bench_step3_pipeline_pairs <- function(hist_sim, saved_scenarios) {
+  out <- list(historical = list(
+    pipeline = hist_sim$pipeline,
+    weather = step2_resolve_weather(
+      hist_sim$weather_raw %||% hist_sim$pipeline$weather_raw, hist_sim
+    )
+  ))
+  for (scenario_name in names(saved_scenarios)) {
+    scenario <- saved_scenarios[[scenario_name]]
+    for (member_name in names(scenario$pipelines)) {
+      pipe <- scenario$pipelines[[member_name]]
+      out[[paste(scenario_name, member_name, sep = " / ")]] <- list(
+        pipeline = pipe,
+        weather = step2_resolve_weather(pipe$weather_raw %||% scenario$weather_raw,
+                                        scenario)
       )
-      if (is.null(value)) {
-        stop("Future effect decomposition produced no results.", call. = FALSE)
-      }
-      value$scenario <- scenario_name
-      value$sim_year <- year
-      value$year_start <- scenario$year_range[[1L]] %||% NA_integer_
-      value$year_end <- scenario$year_range[[2L]] %||% NA_integer_
-      rows[[length(rows) + 1L]] <- value
     }
   }
-  if (!length(rows)) return(data.frame())
-  dplyr::bind_rows(rows)
+  out
+}
+
+.bench_step3_old_correction <- function(pipeline, context, run_identity,
+                                        weather_raw) {
+  started <- proc.time()[["elapsed"]]
+  error <- ""
+  value <- tryCatch(
+    .policy_central_delta_run(context, run_identity, weather_raw),
+    error = function(e) {
+      error <<- conditionMessage(e)
+      NULL
+    }
+  )
+  list(
+    value = value,
+    seconds = proc.time()[["elapsed"]] - started,
+    error = error
+  )
 }
 
 .bench_step3_fingerprint <- function(svy_baseline, svy_policy, policy_result,
@@ -148,7 +279,11 @@
     historical_decomposition = historical_decomposition[
       intersect(decomp_columns, names(historical_decomposition))
     ],
-    future_decomposition = future_decomposition[
+    future_decomposition = if (.is_compact_decomp_scenarios(
+      policy_result$decomp_scenarios %||% list()
+    )) policy_result$decomp_scenarios[c(
+      "channel_summary", "decile_summary", "scenario_metadata"
+    )] else future_decomposition[
       intersect(decomp_columns, names(future_decomposition))
     ],
     aggregations = aggregations
@@ -179,11 +314,28 @@
   analytic_delta_seconds <- NA_real_
   historical_decomposition_seconds <- NA_real_
   future_decomposition_seconds <- NA_real_
+  annual_preparation_seconds <- NA_real_
+  old_correction_seconds <- NA_real_
+  old_correction_calls <- 0L
+  annual_reference_seconds <- 0
+  annual_optimized_seconds <- 0
+  annual_blocking_seconds <- NA_real_
+  annual_reference_rows <- 0L
+  annual_reference_total_rows <- 0L
+  annual_reference_max_abs_difference <- NA_real_
+  annual_reference_mean_abs_difference <- NA_real_
+  old_new_max_abs_difference <- NA_real_
+  old_correction_error <- ""
+  annual_reference_error <- ""
+  annual_prepared <- NULL
+  annual_checks <- list()
+  old_differences <- numeric(0)
   results_aggregation_seconds <- NA_real_
   svy_policy <- policy_result <- historical_decomposition <- NULL
   decomp_context <- NULL
-  future_decomposition <- data.frame()
+  future_decomposition <- list()
   aggregations <- list()
+  metric_switches <- data.frame()
 
   tryCatch({
     t0 <- proc.time()[["elapsed"]]
@@ -230,16 +382,87 @@
       run_identity = run_identity,
       weather_panels = Filter(Negate(is.null), c(
         list(step2_resolve_weather(hist_sim$weather_raw, hist_sim)),
-        unlist(lapply(saved_scenarios, function(x) {
-          raw <- step2_resolve_weather(x$weather_raw, x)
-          if (is.null(raw) || !"timestamp" %in% names(raw)) return(list(raw))
-          split(raw, as.integer(format(raw$timestamp, "%Y")))
-        }), recursive = FALSE)
+        lapply(saved_scenarios, function(x) step2_resolve_weather(x$weather_raw, x))
       )),
       adverse_decompositions = list(adverse_10 = data.frame())
     )
 
     t0 <- proc.time()[["elapsed"]]
+    annual_prepared <- .prepare_policy_annual_channels(
+      decomp_context, run_identity
+    )
+    annual_preparation_seconds <- proc.time()[["elapsed"]] - t0
+    if (!identical(annual_prepared$status, "ok")) {
+      stop("Annual channel preparation failed: ",
+           annual_prepared$reason %||% annual_prepared$status, call. = FALSE)
+    }
+
+    max_reference_rows <- config$step3_reference_rows %||% 16L
+    pipeline_pairs <- .bench_step3_pipeline_pairs(hist_sim, saved_scenarios)
+    old_errors <- character(0)
+    old_elapsed <- numeric(0)
+    for (pair in pipeline_pairs) {
+      pipe <- pair$pipeline
+      old <- .bench_step3_old_correction(
+        pipe, decomp_context, run_identity, pair$weather
+      )
+      old_elapsed <- c(old_elapsed, old$seconds)
+      old_correction_calls <- old_correction_calls + 1L
+      if (nzchar(old$error)) old_errors <- c(old_errors, old$error)
+      if (!is.null(old$value) && !is.null(pipe$weather_exposure) &&
+          identical(pipe$weather_exposure$status, "ok")) {
+        rows <- seq_len(min(length(pipe$y_point), max_reference_rows))
+        difference <- tryCatch(abs(old$value[pipe$svy_row_id[rows]] -
+          .policy_annual_channels(pipe, annual_prepared, run_identity,
+            rows = rows)$delta_total), error = function(e) numeric(0))
+        old_differences <- c(old_differences, difference)
+      }
+      check <- tryCatch(.bench_step3_annual_check(
+        pipe, annual_prepared, decomp_context, run_identity,
+        max_reference_rows
+      ), error = function(e) list(
+        status = "error", error = conditionMessage(e),
+        scope = "first_rows_per_pipeline", count = 0L,
+        total_rows = length(pipe$y_point), optimized_seconds = NA_real_,
+        reference_seconds = NA_real_, max_abs_difference = NA_real_,
+        mean_abs_difference = NA_real_
+      ))
+      annual_checks[[length(annual_checks) + 1L]] <- check
+      annual_reference_rows <- annual_reference_rows + check$count
+      annual_reference_total_rows <- annual_reference_total_rows + check$total_rows
+      annual_optimized_seconds <- annual_optimized_seconds + check$optimized_seconds
+      annual_reference_seconds <- annual_reference_seconds + check$reference_seconds
+      if (nzchar(check$error)) {
+        annual_reference_error <- paste(annual_reference_error, check$error,
+                                        sep = if (nzchar(annual_reference_error)) " | " else "")
+      }
+    }
+    old_correction_seconds <- sum(old_elapsed)
+    if (length(old_errors)) old_correction_error <- paste(unique(old_errors),
+                                                           collapse = " | ")
+    if (length(old_differences)) old_new_max_abs_difference <- max(old_differences)
+    check_diffs <- vapply(annual_checks, `[[`, numeric(1), "max_abs_difference")
+    check_means <- vapply(annual_checks, `[[`, numeric(1), "mean_abs_difference")
+    if (any(is.finite(check_diffs))) {
+      annual_reference_max_abs_difference <- max(check_diffs, na.rm = TRUE)
+      annual_reference_mean_abs_difference <- mean(check_means, na.rm = TRUE)
+    }
+    if (any(vapply(annual_checks, function(x) !identical(x$status, "ok"),
+                   logical(1))) ||
+        (is.finite(annual_reference_max_abs_difference) &&
+         annual_reference_max_abs_difference > 1e-10)) {
+      stop("Annual optimized/reference parity failed: ",
+           if (nzchar(annual_reference_error)) annual_reference_error else
+             "difference exceeded tolerance",
+           call. = FALSE)
+    }
+
+    t0 <- proc.time()[["elapsed"]]
+    profile <- Sys.getenv("WISEAPP_STEP3_PROFILE", "")
+    if (nzchar(profile)) {
+      utils::Rprof(file.path(config$output_dir, paste0(identity$country, "-annual.Rprof")))
+      on.exit(utils::Rprof(NULL), add = TRUE)
+    }
     policy_result <- apply_policy_delta_to_baseline(
       svy_baseline = svy_baseline,
       svy_policy = svy_policy,
@@ -251,9 +474,12 @@
       deltas = deltas,
       F_hat = F_hat,
       decomp_context = decomp_context,
-      run_identity = run_identity
+      run_identity = run_identity,
+      annual_channels = annual_prepared
     )
+    if (nzchar(profile)) utils::Rprof(NULL)
     analytic_delta_seconds <- proc.time()[["elapsed"]] - t0
+    annual_blocking_seconds <- analytic_delta_seconds
     if (is.null(policy_result)) {
       stop("Policy delta application produced no results.", call. = FALSE)
     }
@@ -277,10 +503,7 @@
     rss_sample_fn(rss_state)
 
     t0 <- proc.time()[["elapsed"]]
-    future_decomposition <- .bench_step3_decompose_future(
-      policy_result, svy_baseline, svy_policy, model_fit, so, skip_coef,
-      deltas, F_hat, decomp_context, run_identity
-    )
+    future_decomposition <- .bench_step3_decompose_future(policy_result)
     future_decomposition_seconds <- proc.time()[["elapsed"]] - t0
     rss_sample_fn(rss_state)
 
@@ -299,6 +522,12 @@
       identical(so$transform, "log"), config$seed
     )
     results_aggregation_seconds <- proc.time()[["elapsed"]] - t0
+    rss_sample_fn(rss_state)
+
+    metric_switches <- .bench_step3_metric_switches(
+      baseline_result, policy_result,
+      hist_sim$residuals %||% "original", config$unit, size_fn
+    )
     rss_sample_fn(rss_state)
   }, error = function(e) {
     status <<- "error"
@@ -381,7 +610,75 @@
     n_historical_decomposition_rows = if (is.null(historical_decomposition)) {
       NA_integer_
     } else nrow(historical_decomposition),
-    n_future_decomposition_rows = nrow(future_decomposition),
+    n_future_decomposition_rows = if (.is_compact_decomp_scenarios(
+      future_decomposition
+    )) nrow(future_decomposition$channel_summary) else nrow(future_decomposition) %||% 0L,
+    annual_correction_version = if (is.environment(annual_prepared)) {
+      annual_prepared$correction_version
+    } else NA_character_,
+    annual_preparation_seconds = annual_preparation_seconds,
+    old_full_panel_correction_seconds = old_correction_seconds,
+    old_full_panel_correction_calls = old_correction_calls,
+    old_full_panel_correction_error = old_correction_error,
+    old_new_sample_max_abs_difference = old_new_max_abs_difference,
+    annual_reference_scope = if (length(annual_checks)) {
+      "first_rows_per_pipeline"
+    } else NA_character_,
+    annual_reference_sample_rows = annual_reference_rows,
+    annual_reference_total_pipeline_rows = annual_reference_total_rows,
+    annual_reference_max_rows_per_pipeline = config$step3_reference_rows %||% 16L,
+    annual_reference_seconds = annual_reference_seconds,
+    annual_optimized_sample_seconds = annual_optimized_seconds,
+    annual_reference_max_abs_difference = annual_reference_max_abs_difference,
+    annual_reference_mean_abs_difference = annual_reference_mean_abs_difference,
+    annual_reference_error = annual_reference_error,
+    apply_policy_blocking_seconds = annual_blocking_seconds,
+    metric_mean_status = if (nrow(metric_switches)) metric_switches$status[
+      match("mean", metric_switches$method)] else NA_character_,
+    metric_mean_error = if (nrow(metric_switches)) metric_switches$error[
+      match("mean", metric_switches$method)] else NA_character_,
+    metric_mean_seconds = if (nrow(metric_switches)) metric_switches$elapsed_seconds[
+      match("mean", metric_switches$method)] else NA_real_,
+    metric_mean_scope = if (nrow(metric_switches)) metric_switches$scope[
+      match("mean", metric_switches$method)] else NA_character_,
+    metric_mean_annual_rows = if (nrow(metric_switches)) metric_switches$n_annual_rows[
+      match("mean", metric_switches$method)] else NA_integer_,
+    metric_mean_summary_rows = if (nrow(metric_switches)) metric_switches$n_summary_rows[
+      match("mean", metric_switches$method)] else NA_integer_,
+    metric_mean_return_period_rows = if (nrow(metric_switches)) metric_switches$n_return_period_rows[
+      match("mean", metric_switches$method)] else NA_integer_,
+    metric_mean_mechanism_rows = if (nrow(metric_switches)) metric_switches$n_mechanism_rows[
+      match("mean", metric_switches$method)] else NA_integer_,
+    metric_mean_object_bytes = if (nrow(metric_switches)) metric_switches$result_object_bytes[
+      match("mean", metric_switches$method)] else NA_real_,
+    metric_mean_serialized_bytes = if (nrow(metric_switches)) metric_switches$result_serialized_bytes[
+      match("mean", metric_switches$method)] else NA_real_,
+    metric_mean_deduplicated_bytes = if (nrow(metric_switches)) metric_switches$result_deduplicated_bytes[
+      match("mean", metric_switches$method)] else NA_real_,
+    metric_headcount_ratio_status = if (nrow(metric_switches)) metric_switches$status[
+      match("headcount_ratio", metric_switches$method)] else NA_character_,
+    metric_headcount_ratio_error = if (nrow(metric_switches)) metric_switches$error[
+      match("headcount_ratio", metric_switches$method)] else NA_character_,
+    metric_headcount_ratio_seconds = if (nrow(metric_switches)) metric_switches$elapsed_seconds[
+      match("headcount_ratio", metric_switches$method)] else NA_real_,
+    metric_headcount_ratio_scope = if (nrow(metric_switches)) metric_switches$scope[
+      match("headcount_ratio", metric_switches$method)] else NA_character_,
+    metric_headcount_ratio_annual_rows = if (nrow(metric_switches)) metric_switches$n_annual_rows[
+      match("headcount_ratio", metric_switches$method)] else NA_integer_,
+    metric_headcount_ratio_summary_rows = if (nrow(metric_switches)) metric_switches$n_summary_rows[
+      match("headcount_ratio", metric_switches$method)] else NA_integer_,
+    metric_headcount_ratio_return_period_rows = if (nrow(metric_switches)) metric_switches$n_return_period_rows[
+      match("headcount_ratio", metric_switches$method)] else NA_integer_,
+    metric_headcount_ratio_mechanism_rows = if (nrow(metric_switches)) metric_switches$n_mechanism_rows[
+      match("headcount_ratio", metric_switches$method)] else NA_integer_,
+    metric_headcount_ratio_object_bytes = if (nrow(metric_switches)) metric_switches$result_object_bytes[
+      match("headcount_ratio", metric_switches$method)] else NA_real_,
+    metric_headcount_ratio_serialized_bytes = if (nrow(metric_switches)) metric_switches$result_serialized_bytes[
+      match("headcount_ratio", metric_switches$method)] else NA_real_,
+    metric_headcount_ratio_deduplicated_bytes = if (nrow(metric_switches)) metric_switches$result_deduplicated_bytes[
+      match("headcount_ratio", metric_switches$method)] else NA_real_,
+    metric_preparation_seconds = if (nrow(metric_switches)) max(metric_switches$preparation_seconds) else NA_real_,
+    metric_prediction_reruns = if (nrow(metric_switches)) sum(metric_switches$prediction_reruns) else NA_integer_,
     context_hazard_cache_hits = if (is.null(decomp_context)) NA_integer_ else
       .decomposition_context_counter(decomp_context, "hazard_cache_hits", NA_integer_),
     context_adverse_cache_hits = if (is.null(decomp_context)) NA_integer_ else
@@ -404,8 +701,11 @@
   withr::with_seed(seed, {
     svy <- data.frame(
       hhid = seq_len(n),
+      code = country,
       loc_id = rep(seq_len(6L), length.out = n),
       year = 2020L,
+      survname = "fixture",
+      int_month = 7L,
       welfare = exp(0.8 + seq(-0.4, 0.4, length.out = n) +
                       stats::rnorm(n, sd = 0.08)),
       hhsize = rep(2:5, length.out = n),
@@ -475,13 +775,40 @@
   make_pipeline <- function(year_values, weather, member_offset = 0) {
     row_id <- rep(seq_len(nrow(svy)), times = length(year_values))
     sim_year <- rep(year_values, each = nrow(svy))
-    hazard <- mean(weather$temp) + member_offset
+    member_weather <- weather
+    member_weather$temp <- member_weather$temp + member_offset
+    hazard <- mean(member_weather$temp)
     y_base <- if (identical(model_label, "rif")) {
       log(svy$welfare) + 0.01 * (hazard - mean(svy$temp))
     } else {
       as.numeric(stats::predict(model_fit$fit3, newdata = svy)) +
         0.01 * (hazard - mean(svy$temp))
     }
+    weather_match <- match(
+      paste(sim_year, svy$loc_id[row_id]),
+      paste(member_weather$year, member_weather$loc_id)
+    )
+    exposure_table <- data.frame(
+      code = svy$code[row_id],
+      year = as.character(svy$year[row_id]),
+      survname = svy$survname[row_id],
+      loc_id = svy$loc_id[row_id],
+      int_month = svy$int_month[row_id],
+      sim_year = sim_year,
+      timestamp = as.Date(paste0(sim_year, "-07-01")),
+      temp = member_weather$temp[weather_match],
+      stringsAsFactors = FALSE
+    )
+    weather_exposure <- list(
+      status = "ok",
+      table = exposure_table,
+      row_index = seq_along(row_id),
+      prediction_row_id = seq_along(row_id),
+      svy_row_id = row_id,
+      sim_year = sim_year,
+      weight = rep(svy$weight, times = length(year_values)),
+      id_vec = rep(svy$hhid, times = length(year_values))
+    )
     list(
       y_point = rep(y_base, times = length(year_values)),
       F_loading = NULL,
@@ -490,9 +817,10 @@
       id_vec = rep(svy$hhid, times = length(year_values)),
       id_col = "hhid",
       svy_row_id = row_id,
+      weather_exposure = weather_exposure,
       train_aug = if (identical(model_label, "rif")) NULL else
         transform(svy, .resid = stats::residuals(model_fit$fit3)),
-      weather_raw = weather
+      weather_raw = member_weather
     )
   }
   historical_weather <- make_weather(years)

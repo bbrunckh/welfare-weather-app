@@ -1199,11 +1199,10 @@ apply_policy_to_svy <- function(svy,
 #' policy arm from the baseline still guarantees paired household-level values
 #' and avoids that duplicate prediction work.
 #'
-#' This helper takes the closed-form per-household delta the Decomposition
-#' pane already produces (\code{decompose_policy_effect()$delta_total}) and
-#' applies it directly to the cached baseline pipelines:
+#' This helper prepares invariant central channels once and evaluates resilience
+#' at the exact Step 2 weather exposure retained for each prediction row:
 #'   \itemize{
-#'     \item \code{y_point_policy = y_point_baseline + delta[svy_row_id]}
+#'     \item \code{y_point_policy = y_point_baseline + main + repositioning + interaction}
 #'     \item All other pipeline slots (\code{F_loading}, \code{train_aug},
 #'           \code{id_vec}, \code{weather_raw}, \code{sim_year},
 #'           \code{weight}) are passed through unchanged. Because
@@ -1221,10 +1220,8 @@ apply_policy_to_svy <- function(svy,
 #'           for SE bands it's a small approximation that is exact when no
 #'           covariate moves and acceptable for typical policy modifications.
 #'           Recomputing \code{F_loading} per pipeline is a follow-up.
-#'     \item The delta is computed once per pipeline using that pipeline's
-#'           full \code{weather_raw} (period-mean hazard), matching the
-#'           Decomposition Summary table. Per-\code{sim_year} delta variation
-#'           inside a scenario is not yet modelled - also a follow-up.
+#'     \item Exact retained prediction-row exposure mapping is required. Invalid
+#'           mappings fail the entire run; no period-mean fallback is used.
 #'   }
 #'
 #' @param svy_baseline           Baseline survey-weather data frame.
@@ -1243,9 +1240,14 @@ apply_policy_to_svy <- function(svy,
 #' @param F_hat                  Optional pre-built ecdf of the training
 #'   outcome (RIF path; see \code{.compute_rif_channels()}). Computed
 #'   internally when NULL.
+#' @param decomp_context Optional immutable run-owned decomposition context.
+#' @param run_identity Run identity required when a context is supplied.
+#' @param annual_channels Optional prepared annual source from that context.
+#' @param chunk_size Maximum prediction rows evaluated in each central block.
 #'
 #' @return Named list with \code{hist_sim} and \code{saved_scenarios} on the
-#'   Step 2 schema, or \code{NULL} on failure.
+#'   Step 2 schema, prepared \code{annual_channels}, compact future
+#'   \code{decomp_scenarios}, and \code{correction_version}. Invalid inputs error.
 #' @export
 apply_policy_delta_to_baseline <- function(svy_baseline,
                                            svy_policy,
@@ -1257,7 +1259,9 @@ apply_policy_delta_to_baseline <- function(svy_baseline,
                                            deltas = NULL,
                                            F_hat = NULL,
                                            decomp_context = NULL,
-                                           run_identity = NULL) {
+                                           run_identity = NULL,
+                                           annual_channels = NULL,
+                                           chunk_size = 100000L) {
   if (is.null(svy_baseline) || is.null(svy_policy) ||
     is.null(model_fit) || is.null(so) ||
     is.null(hist_sim_baseline)) {
@@ -1267,119 +1271,60 @@ apply_policy_delta_to_baseline <- function(svy_baseline,
     stop("Current run identity is required.", call. = FALSE)
   }
 
-  shared_context <- hist_sim_baseline$shared_context %||% list()
-
-  # PERF-22: both pieces are identical for every pipeline and scenario, so
-  # build them once instead of inside delta_for() per call.
-  deltas <- deltas %||% .compute_policy_deltas(
-    svy_baseline, svy_policy, so$name, model_fit$weather_terms
-  )
-  F_hat <- F_hat %||% (if (identical(model_fit$engine, "rif") &&
-    !is.null(model_fit$train_data) &&
-    so$name %in% names(model_fit$train_data)) {
-    stats::ecdf(model_fit$train_data[[so$name]])
-  } else {
-    NULL
-  })
-
-  # Per-HH delta_total for a given weather panel. The active simulation path
-  # needs only the central correction, not the full decomposition data frame
-  # or channel uncertainty vectors.
-  delta_for <- function(weather_raw) {
-    tryCatch(
-      .policy_central_delta(
-        svy_baseline = svy_baseline,
-        svy_policy = svy_policy,
-        model_fit = model_fit,
-        so = so,
-        weather_raw = weather_raw,
-        deltas = deltas,
-        F_hat = F_hat,
-        context = decomp_context,
-        run_identity = run_identity
-      ),
-      error = function(e) {
-        if (grepl(
-          "Current run identity|run identity mismatch|decomposition context|Incompatible or stale",
-          conditionMessage(e),
-          ignore.case = TRUE
-        )) {
-          stop(e)
-        }
-        warning(
-          "[apply_policy_delta_to_baseline] central policy kernel ",
-          "failed: ", conditionMessage(e)
-        )
-        NULL
-      }
-    )
+  if (length(chunk_size) != 1L || !is.numeric(chunk_size) ||
+    !is.finite(chunk_size) || chunk_size < 1 || chunk_size != as.integer(chunk_size)) {
+    stop("Invalid annual correction chunk size.", call. = FALSE)
   }
-
-  apply_to_pipeline <- function(pipe, weather_raw_for_delta) {
-    if (is.null(pipe) || is.null(pipe$y_point)) {
-      return(pipe)
-    }
-    delta_hh <- delta_for(weather_raw_for_delta)
-    if (is.null(delta_hh)) {
-      return(pipe)
-    }
-
-    # Broadcast delta_hh (length nrow(svy_baseline)) onto the expanded
-    # (HH x year) pipeline rows via svy_row_id. When svy_row_id is missing
-    # (older pipeline format pre-`.svy_row_id` tagging), fall back to
-    # broadcasting by id_vec if a matching id column is on the baseline
-    # survey, else skip the policy correction with a warning.
-    sri <- pipe$svy_row_id
-    if (is.null(sri) || length(sri) != length(pipe$y_point)) {
-      id_col <- pipe$id_col %||% shared_context$id_col
-      if (!is.null(id_col) && !is.null(pipe$id_vec) &&
-        id_col %in% names(svy_baseline)) {
-        lookup <- match(pipe$id_vec, svy_baseline[[id_col]])
-        delta_per_row <- delta_hh[lookup]
-        delta_per_row[is.na(delta_per_row)] <- 0
-      } else {
-        warning(
-          "[apply_policy_delta_to_baseline] pipeline lacks svy_row_id ",
-          "and no usable id_col fallback; policy arm will equal ",
-          "baseline for this pipeline."
-        )
-        return(pipe)
-      }
-    } else {
-      delta_per_row <- delta_hh[sri]
-      delta_per_row[is.na(delta_per_row)] <- 0
-    }
-
-    pipe$y_point <- pipe$y_point + delta_per_row
-    pipe
+  run_identity <- run_identity %||% "standalone-annual-policy"
+  if (!model_fit$engine %in% c("rif", "fixest")) {
+    stop("Annual policy correction requires RIF or linear fixest.", call. = FALSE)
   }
-
-  hist_pipeline_new <- apply_to_pipeline(
-    hist_sim_baseline$pipeline,
-    step2_resolve_weather(
-      hist_sim_baseline$weather_raw %||% hist_sim_baseline$pipeline$weather_raw,
-      hist_sim_baseline
-    )
+  decomp_context <- decomp_context %||% .build_decomposition_context(
+    svy_baseline, svy_policy, model_fit, so, deltas = deltas,
+    skip_coef = TRUE, F_hat = F_hat, run_identity = run_identity
   )
-
+  .validate_run_decomposition_context(decomp_context, run_identity)
+  annual_channels <- annual_channels %||% .prepare_policy_annual_channels(decomp_context, run_identity)
+  if (!is.environment(annual_channels) || !environmentIsLocked(annual_channels) ||
+    !identical(annual_channels$status, "ok")) {
+    stop("Annual policy correction unavailable: ", annual_channels$reason %||% "invalid source", call. = FALSE)
+  }
+  if (!identical(annual_channels$context, decomp_context)) {
+    stop("Annual policy source/context mismatch.", call. = FALSE)
+  }
+  hist_result <- .apply_policy_annual_pipeline(
+    hist_sim_baseline$pipeline, annual_channels, run_identity, chunk_size = chunk_size
+  )
   hist_sim_new <- hist_sim_baseline
-  hist_sim_new$pipeline <- hist_pipeline_new
-
-  saved_scenarios_new <- lapply(saved_scenarios_baseline, function(s) {
+  hist_sim_new$pipeline <- hist_result$pipeline
+  parts <- list()
+  saved_scenarios_new <- lapply(seq_along(saved_scenarios_baseline), function(i) {
+    s <- saved_scenarios_baseline[[i]]
     if (is.null(s) || is.null(s$pipelines)) {
-      return(s)
+      stop("Missing saved scenario prediction pipelines.", call. = FALSE)
     }
-    pipes_new <- lapply(s$pipelines, function(pipe) {
-      apply_to_pipeline(
-        pipe,
-        step2_resolve_weather(pipe$weather_raw %||% s$weather_raw, s)
+    pipes_new <- lapply(seq_along(s$pipelines), function(j) {
+      result <- .apply_policy_annual_pipeline(
+        s$pipelines[[j]], annual_channels, run_identity,
+        scenario = names(saved_scenarios_baseline)[i] %||% paste0("Scenario ", i),
+        member = names(s$pipelines)[j] %||% paste0("Member ", j),
+        year_range = s$year_range %||% c(NA_integer_, NA_integer_),
+        chunk_size = chunk_size
       )
+      parts[[length(parts) + 1L]] <<- result$compact
+      result$pipeline
     })
     names(pipes_new) <- names(s$pipelines)
     s$pipelines <- pipes_new
+    s$policy_correction_version <- annual_channels$correction_version
     s
   })
   names(saved_scenarios_new) <- names(saved_scenarios_baseline)
+  hist_sim_new$policy_correction_version <- annual_channels$correction_version
 
-  list(hist_sim = hist_sim_new, saved_scenarios = saved_scenarios_new)
+  list(hist_sim = hist_sim_new, saved_scenarios = saved_scenarios_new,
+    annual_channels = annual_channels,
+    decomp_scenarios = .bind_compact_future_decompositions(parts, model_fit$engine,
+      identical(model_fit$engine, "rif")),
+    correction_version = annual_channels$correction_version)
 }

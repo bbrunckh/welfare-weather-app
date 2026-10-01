@@ -160,7 +160,7 @@ test_that("diagnostics module reads one published snapshot without rescanning", 
 })
 
 
-test_that("failed policy runs retain the prior published diagnostic snapshot", {
+test_that("failed annual policy runs retain all previously published results", {
   trigger <- reactiveVal(NULL)
   fail_decomp <- FALSE
   svy <- data.frame(
@@ -169,15 +169,29 @@ test_that("failed policy runs retain the prior published diagnostic snapshot", {
   policy <- transform(svy, electricity = 1L)
   hs <- list(
     svy = svy, so = list(name = "welfare", transform = "none"),
-    pipeline = list(y_point = c(1, 2), svy_row_id = 1:2),
-    weather_raw = data.frame(temp = 20:21), residuals = "original"
+    pipeline = list(y_point = c(1, 2), svy_row_id = 1:2,
+                    policy_correction = list(version = "row_aligned_annual_v1")),
+    weather_raw = data.frame(temp = 20:21), residuals = "original",
+    shared_context = list(), .sig = "step2"
+  )
+  policy_hs <- hs
+  policy_hs$pipeline$y_point <- c(2, 4)
+  old_scenarios <- list()
+  context_for_run <- function(...) list(
+    run_identity = "test-run", adverse_bases = list()
   )
 
   local_mocked_bindings(
     apply_policy_to_svy = function(...) policy,
+    .build_decomposition_context = context_for_run,
     apply_policy_delta_to_baseline = function(...)
-      list(hist_sim = hs, saved_scenarios = list()),
-    decompose_policy_effect = function(...) {
+      list(hist_sim = policy_hs, saved_scenarios = old_scenarios,
+           annual_channels = new.env(parent = emptyenv()),
+           decomp_scenarios = data.frame(run = "first"),
+           correction_version = "row_aligned_annual_v1"),
+    .prepare_decomp_adverse_bases = function(...) list(),
+    .finalize_decomposition_context = function(context, ...) context,
+    .decompose_policy_effect_run = function(...) {
       if (fail_decomp) stop("forced decomposition failure")
       data.frame(delta_total = c(0, 1))
     },
@@ -202,6 +216,9 @@ test_that("failed policy runs retain the prior published diagnostic snapshot", {
       expect_identical(sim_run_id(), 1L)
       prior <- diagnostic_summary_rv()
       expect_identical(prior$run, "first")
+      prior_policy <- policy_hist_sim_rv()
+      prior_baseline <- baseline_hist_sim_rv()
+      prior_decomp <- decomp_scenarios_rv()
 
       fail_decomp <<- TRUE
       trigger(2L)
@@ -209,6 +226,9 @@ test_that("failed policy runs retain the prior published diagnostic snapshot", {
       expect_identical(run_status(), "failure")
       expect_identical(sim_run_id(), 1L)
       expect_identical(diagnostic_summary_rv(), prior)
+      expect_identical(policy_hist_sim_rv(), prior_policy)
+      expect_identical(baseline_hist_sim_rv(), prior_baseline)
+      expect_identical(decomp_scenarios_rv(), prior_decomp)
     }
   )
 })

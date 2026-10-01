@@ -100,6 +100,100 @@ test_that("Results owns validated selection and fixed prosperity threshold witho
   })
 })
 
+test_that("Results shares metric decomposition reactively and withholds stale channels", {
+  hist <- make_step3_hist_fixture()
+  scenario <- make_step3_scenarios_fixture()
+  run_context <- new.env(parent = emptyenv())
+  run_context$run_identity <- "metric-run"
+  prepared <- list2env(list(run_identity = "metric-run", context = run_context),
+    parent = emptyenv())
+  context <- reactiveVal(run_context)
+  annual <- reactiveVal(prepared)
+  stale <- reactiveVal(FALSE)
+  calls <- list()
+  local_mocked_bindings(
+    .policy_metric_decomposition = function(
+      baseline_hist, policy_hist, baseline_scenarios, policy_scenarios,
+      prepared, method, pov_line, requested_residuals,
+      endpoint_series_baseline, endpoint_series_policy,
+      focus_scenario, analysis_unit
+    ) {
+      calls[[length(calls) + 1L]] <<- list(
+        method = method, pov_line = pov_line,
+        requested_residuals = requested_residuals,
+        focus_scenario = focus_scenario, analysis_unit = analysis_unit,
+        prepared = prepared
+      )
+      list(
+        status = if (is.null(prepared)) "unavailable" else "ok",
+        reason = if (is.null(prepared)) "Prepared source missing." else NULL,
+        annual = if (is.null(prepared)) data.frame() else data.frame(value = 1),
+        summary = if (is.null(prepared)) data.frame() else list(method = method, pov_line = pov_line),
+        return_period = data.frame(), mechanisms = data.frame(),
+        endpoint_summary = list(method = method, pov_line = pov_line),
+        scenarios = list(), metadata = list()
+      )
+    },
+    .validate_run_decomposition_context = function(context, run_identity) {
+      if (!identical(context$run_identity, run_identity)) {
+        stop("decomposition context run identity mismatch", call. = FALSE)
+      }
+      invisible(context)
+    },
+    .package = "wiseapp"
+  )
+  internals <- NULL
+  testServer(function(input, output, session) {
+    internals <<- .wire_results_pane(
+      input, output, session, reactiveVal(hist), reactiveVal(scenario),
+      reactiveVal(hist), reactiveVal(scenario),
+      selected_hist = reactiveVal(NULL), residuals = reactiveVal("none"),
+      stale = stale, decomp_context = context, annual_channels = annual,
+      analysis_unit = reactiveVal("ind")
+    )
+  }, {
+    session$setInputs(cmp_agg_method = "headcount_ratio", cmp_pov_line = 3)
+    session$elapse(500); session$flushReact()
+    result <- internals$metric_decomposition()
+    expect_true(identical(result$status, "ok"), info = result$reason)
+    expect_identical(calls[[length(calls)]]$method, "headcount_ratio")
+    expect_equal(calls[[length(calls)]]$pov_line, 3)
+    expect_identical(calls[[length(calls)]]$requested_residuals, "none")
+    expect_identical(calls[[length(calls)]]$focus_scenario, names(scenario)[[1L]])
+    expect_identical(calls[[length(calls)]]$analysis_unit, "ind")
+
+    session$setInputs(cmp_pov_line = 5)
+    session$elapse(500); session$flushReact()
+    changed <- internals$metric_decomposition()
+    expect_equal(changed$summary$pov_line, 5)
+    expect_equal(calls[[length(calls)]]$pov_line, 5)
+
+    stale(TRUE); session$flushReact()
+    withheld <- internals$metric_decomposition()
+    expect_identical(withheld$status, "unavailable")
+    expect_match(withheld$reason, "stale", ignore.case = TRUE)
+    expect_equal(nrow(withheld$summary), 0L)
+    expect_equal(withheld$endpoint_summary$pov_line, 5)
+
+    stale(FALSE)
+    context(list(run_identity = "different-run"))
+    session$flushReact()
+    mismatch <- internals$metric_decomposition()
+    expect_identical(mismatch$status, "unavailable")
+    expect_match(mismatch$reason, "run identities differ", fixed = TRUE)
+    expect_equal(nrow(mismatch$summary), 0L)
+    expect_equal(mismatch$endpoint_summary$pov_line, 5)
+
+    context(run_context)
+    annual(NULL)
+    session$flushReact()
+    missing <- internals$metric_decomposition()
+    expect_identical(missing$status, "unavailable")
+    expect_equal(nrow(missing$summary), 0L)
+    expect_equal(missing$endpoint_summary$pov_line, 5)
+  })
+})
+
 test_that("unvalidated logistic policy endpoints are withheld in cards, comparisons and exports", {
   hs <- make_step3_hist_fixture()
   hs$so <- list(name = "poor", type = "numeric", transform = "none")

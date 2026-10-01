@@ -113,7 +113,7 @@
 #'   NULL it is computed here (backward compatible).
 #' @return Named list with delta_* and sd_* vectors of length n, plus
 #'   tau_i_pre / tau_i_post / has_interactions. In central-only mode, returns
-#'   only `delta_total` and `has_interactions`. NULL if inputs are invalid.
+#'   channel values and `has_interactions`. NULL if inputs are invalid.
 #' @keywords internal
 .compute_rif_channels <- function(svy_baseline, deltas, sp_transfer,
                                   hazard_values, weather_vars,
@@ -685,7 +685,7 @@
     names(svy_baseline), value = TRUE, ignore.case = TRUE
   )
   baseline_cols <- unique(c(
-    outcome, "loc_id", weather_vars, weight_cols
+    outcome, "code", "year", "survname", "loc_id", "int_month", weather_vars, weight_cols
   ))
   baseline_snapshot <- snapshot(as.data.frame(svy_baseline)[
     intersect(baseline_cols, names(svy_baseline))
@@ -710,7 +710,7 @@
     context_owned = TRUE,
     svy_baseline = baseline_snapshot,
     model_fit = model_snapshot,
-    so = snapshot(so[c("name", "transform")]),
+    so = snapshot(so[intersect(c("name", "transform", "type"), names(so))]),
     run_identity = run_identity,
     signature = .decomposition_context_signature(
       svy_baseline, svy_policy, model_fit, so, run_identity,
@@ -805,7 +805,7 @@
   } else {
     fit <- model_fit$fit3
     ctx$coefs <- tryCatch(stats::coef(fit), error = function(e) NULL)
-    ctx$se_vec <- if (is.null(fit)) {
+    ctx$se_vec <- if (is.null(fit) || isTRUE(skip_coef)) {
       setNames(rep(0, length(ctx$coefs %||% numeric(0))), names(ctx$coefs))
     } else {
       vc <- tryCatch(stats::vcov(fit), error = function(e) NULL)

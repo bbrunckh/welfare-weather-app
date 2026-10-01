@@ -50,7 +50,7 @@ test_that("Results module returns selection API while preserving uncertainty rea
     session$flushReact()
     api <- session$returned
     expect_true(all(c("aggregation_method", "poverty_line", "focus_scenario", "metric_context",
-                      "show_coef_uncertainty") %in% names(api)))
+                      "metric_decomposition", "show_coef_uncertainty") %in% names(api)))
     expect_identical(api$aggregation_method(), "mean")
     expect_identical(api$metric_context()$analysis_unit, "ind")
     session$setInputs(show_coef_uncertainty = TRUE)

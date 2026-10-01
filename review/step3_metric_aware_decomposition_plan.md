@@ -4,7 +4,7 @@
 
 Finalized implementation handoff, reviewed against the current code on 2026-10-01. This document changes no application behavior. Implement only the bounded phases below, not the deferred research items.
 
-Implementation status (2026-10-01): **Phases 1 and 2 complete; Phase 3 is next in a new agent session.** See the completion handoffs below. Summary centers, centralized display metadata, validated selection wiring, and logistic policy-output guards have been implemented; annual production corrections and metric-aware channels remain future phases.
+Implementation status (2026-10-01): **Phases 1-5 implemented; Phase 6 is next in a new agent session.** See the completion handoffs below. Production uses exact row-aligned annual corrections; Results now owns a shared native metric-aware cumulative-state calculation, expected summaries, mechanisms and separately scoped tail attribution. Primary views/cards still await Phase 6. BFA/IRN metric-switch measurements passed correctness/status checks but remain materially synchronous; multi-period/multi-SSP scaling, real-data RIF performance, responsiveness and browser verification remain release gates.
 
 Make Step 3 answer four questions clearly: what outcome is being summarized, how much the policy changes the selected metric, whether it changes modeled weather sensitivity, and whether that sensitivity change comes from repositioning or interaction. Resilience is a primary policy finding, not a hidden technical detail. Results and the primary Decomposition view must share the metric, population, scenario, prediction settings, and summary operator. Preserve existing technical outputs separately.
 
@@ -400,7 +400,7 @@ Rscript -e 'devtools::test(filter = "mod_2_02_results|mod_3_07_results|policy-si
 - Snapshot/export compatibility passed with `Rscript -e 'devtools::test(filter = "active-mask|uncertainty-decomposition|export-bundle|step2-payload", reporter = "summary", stop_on_failure = TRUE)'`; this additional suite emitted the existing incomplete weather-cache manifest missing-file warning, with no failures/skips.
 - No interactive browser check or real-data annual-correction benchmark was performed. Unit metadata remains unknown where the outcome snapshot supplies no confirmation. Metric-aware resilience cards, mechanisms, annual provenance and full component exports remain unimplemented.
 
-Next session: implement **Phase 3 only** below. Read this plan, `AGENTS.md`, optimization guidelines, and current git diff. Preserve all uncommitted Phase 1/2 work. Prepare exact exposure/index retention and canonical annual-channel adapter/reference parity without switching production policy predictions until Phase 4. Keep logistic guards and display/selection APIs intact.
+Historical Phase 2 next-session instruction (superseded by the Phase 3 handoff below): implement Phase 3 only, preserving Phase 1/2 work and leaving production annual integration to Phase 4.
 
 ### Phase 3: Annual Exposure Contract and Central Kernel
 
@@ -410,6 +410,48 @@ Characterize exact Step 2 weather exposure/row mapping first. Retain minimal los
 
 Tests: `test-policy-central-kernel.R`, `test-policy-decomposition-uncertainty.R`; new `test-fct-policy-metric-decompose.R` for adapter/alignment cases.
 
+#### Phase 3 Completion Handoff (2026-10-01)
+
+Completed scope:
+
+- Step 2 now retains exact prepared weather anchors and selected model-input weather columns, including factors, in a narrow table with integer prediction-row exposure indices. Cached and inline joins assign exposure IDs before expansion; prediction output carries both the exposure ID and expanded prediction-row ordinal. Duplicate timestamps/exposures are not collapsed. Filtering/reordering follows retained IDs, never positional assumptions. Compact Step 2 payloads preserve the nested mapping unchanged.
+- Added a separate annual central-channel source. Preparation evaluates existing `.compute_rif_channels()`/`.decompose_ols()` kernels on unit continuous hazards and individual factor categories, storing survey-row slopes/category contrasts once. It does not introduce another coefficient/interaction formula engine. RIF main-derived pre/post ranks stay fixed in the run context; production weather values are gathered exactly through the retained indices. Category diagnostics are fitted-reference contrasts, not slopes or ratios to hazard values.
+- Added a deliberately slow row-by-row explicit-exposure reference for tests/benchmarks. Optimized channels match it for RIF/linear, identity/log, continuous/multiple hazards and binned weather. Fixed comparable hazards reproduce old central corrections; zero policy yields zero modeled channels. Flat RIF curves can retain rank movement with zero repositioning, and zero hazards can have zero contributions despite nonzero sensitivity changes.
+- Alignment checks reject stale runs, missing survey join identity, missing/nonfinite exposures, unknown categories, invalid/fractional IDs, mismatched ordered survey IDs/years/weights/residual IDs, and mismatched timestamp year/month or survey wave/location/month. No missing-exposure, annual-mode-bin, mean-hazard, or technical-summary fallback was added. Unsupported logistic/binary methods and tree engines remain explicit.
+- **Production boundary preserved:** `apply_policy_delta_to_baseline()`, future technical year-loop calculations, Results aggregation/cards, and Decomposition UI were not switched to the annual adapter. Existing characterization tests still prove period-mean production broadcasting. Baseline `y_point` values are unchanged; retained metadata is the only Step 2 behavior addition.
+
+Files changed:
+
+- `R/fct_simulations.R`: exposure table/mapping retention at the authoritative join and prediction output boundary.
+- `R/fct_policy_decompose.R`: retain survey join identity and outcome type in immutable contexts; `skip_coef = TRUE` bypasses OLS covariance extraction; correct central-only return documentation. `.policy_central_delta()` retains its numeric-vector return contract.
+- New `R/fct_policy_metric_decompose.R`: internal preparation, validation, chunk-capable annual evaluation, and correctness reference. No exports or new dependency.
+- New `tests/testthat/test-fct-policy-metric-decompose.R`, new `test-policy-exposure-mapping.R`, and updated additive pipeline field contract in `test-step2-contract.R`.
+- This plan. Worktree was clean at session start; prior phases were already present. No commits were made.
+
+Internal API contracts for Phase 4:
+
+- `pipeline$weather_exposure` has `status = "ok"` or `"unavailable"`, `reason`, `available`, `table`, `row_index`, `prediction_row_id`, `svy_row_id`, `sim_year`, `weight`, `id_vec`, and `id_col`. The table retains `.policy_exposure_id`, `code`, survey `year`, `survname`, `loc_id`, interview `int_month`, `sim_year`, exact `timestamp`, and selected weather columns. Each original weather row has its own ID even with duplicate timestamp keys. Row-vector fields follow actual prediction order. Lost prediction tags yield explicit unavailable metadata, not a guessed mapping.
+- `.prepare_policy_annual_channels(context, run_identity)` returns a locked environment with `status = "ok"`, immutable context/run identity, `delta_sp`, `delta_main_covar`, `delta_main`, per-hazard `products` (survey-row `repositioning`/`interaction` matrices and `categories`, NULL for continuous), `tau_i_pre`/`tau_i_post`, `repositioning_modeled`, `interaction_included`, and `correction_version = "row_aligned_annual_v1"`. Unsupported/unavailable methods return a small status/reason list instead. Call once per policy run, then reuse it across members/scenarios and metric edits. Preparation has no coefficient-SE work when supplied a central context built with `skip_coef = TRUE`.
+- `.policy_annual_channels(pipeline, prepared, run_identity, rows = seq_along(pipeline$y_point))` validates the run and whole mapping, then returns native model-scale central `delta_*` vectors for selected rows, prediction ordinals and engine/interaction flags. `rows` may be a bounded chunk and may be reordered, but must be integral, unique and in range. It never mutates the baseline pipeline. Do not retain its full expanded channel lists for all members; consume/reduce a bounded block and discard it. Whole-mapping validation currently repeats on calls; Phase 4 should measure this before choosing its chunk orchestration rather than assume negligible overhead.
+- `.policy_annual_channels_reference(pipeline, context, run_identity)` is intentionally slow and for tests/benchmarks only. It invokes the unchanged canonical kernels at each row's exact exposures, then selects that survey row. Do not call it from Shiny production.
+- `.policy_annual_channel_status(context)` centralizes engine/link/transform support for this adapter. `.validate_policy_annual_exposure()` requires complete survey join keys in the run context and matching ordered pipeline/mapping metadata. Older Step 2 objects without exact retained mapping must fail the new policy run or require a fresh Step 2 run; no speculative reconstruction is implemented.
+- Exposure data are self-contained per pipeline, so annual evaluation needs no independent weather-panel reducer or representative-member lookup. When Phase 4 handles other technical weather references, continue using `step2_resolve_weather(member_weather, scenario_owner)` and shared residual context as specified above. Do not substitute those references for the exact retained exposure table.
+
+Validation:
+
+```sh
+Rscript -e 'devtools::test(filter = "fct-policy-metric-decompose|policy-exposure-mapping|policy-central-kernel|policy-decomposition-uncertainty|step2-contract|step2-payload|fct_run_simulation|w3-b-future-decomposition", reporter = "summary", stop_on_failure = TRUE)'
+Rscript -e 'devtools::test(filter = "mod_2_02_results|mod_3_07_results|policy-sim-compare-agg-cache|visualization-contracts|active-mask|uncertainty-decomposition|policy-context|policy-run|fct_aggregation_delta|fct-aggregation-kernel", reporter = "summary", stop_on_failure = TRUE)'
+git diff --check
+```
+
+- All completed commands passed. The first suite emitted only the existing incomplete weather-cache manifest missing-file warning; the second had no warnings/skips. `policy-context`/`policy-run` filter tokens match no dedicated files; do not treat them as separate ownership-suite coverage. Ownership rejection is tested in the new helper tests and existing central-kernel tests.
+- Independent read-only review identified fractional ID truncation and skipped missing survey identity checks; both were fixed with regressions before final validation.
+- A full `devtools::test(reporter = "summary", stop_on_failure = TRUE)` attempt stopped during `fct_get_weather` before completion through the tracked process tool; no final suite result was obtained. It is **not** a full-suite pass. Phase 1's documented preexisting diagnostic-snapshot failures were not repaired in this phase.
+- No browser check, real-data BFA/IRN timing/RSS benchmark, or production annual integration was performed. Reference parity here is synthetic correctness evidence, not release performance evidence. No new worker/coordinator/cache was created. Run-owned environments remain process-local; no worker snapshot/publication contract was needed in this phase.
+
+Next session: implement **Phase 4 only** below. Read this plan, `AGENTS.md`, optimization guidelines, current git status/diff and helper/tests. Prepare the annual source once per run, apply bounded row-aligned corrections to reused baseline predictions, derive compact future production-channel summaries from that same source, remove the duplicate central year loop, version/invalidate policy caches and publish atomically. Invalid/missing mappings must fail the new run without partial output or period-mean fallback. Extend the existing benchmark harness for reference/optimized annual parity and initial BFA/IRN measurements. Metric counterfactual aggregation/tails/shared reactive remain Phase 5; primary UI changes remain Phase 6.
+
 ### Phase 4: Production Annual Policy Integration
 
 Files: `R/fct_policy_sim.R`, `R/mod_3_06_policy_sim.R`, run-owned decomposition context/storage helpers, benchmark harness.
@@ -418,6 +460,65 @@ Replace full-panel broadcast in production with annual row-aligned correction us
 
 Tests: `test-policy-central-kernel.R`, `test-w3-b-future-decomposition-characterization.R`, run/cache ownership tests; extend `dev/bench_step3_helpers.R` through the existing harness.
 
+#### Phase 4 Completion Handoff (2026-10-01)
+
+Completed scope:
+
+- Replaced production period-mean broadcasting, ID fallback and missing-delta-to-zero behavior with exact annual exposure corrections. Historical and every future member reuse baseline predictions, weights, residual context and baseline-X gradients. Missing/invalid mappings or unsupported engines/links fail the run; no partial arm or period-mean fallback is published.
+- Annual preparation is reused once per run. Production validates each whole mapping once, then evaluates bounded 100,000-row central blocks. The channel adapter's standalone entry point remains strictly validated. Future model-scale channel/decile statistics are reduced from those same blocks, retaining only annual/member statistics. A profiled matrix/`rowsum()` reducer replaced expensive per-year data-frame assembly; intermediate storage is bounded by a block plus years/deciles, not number of chunks.
+- Removed the duplicate future central weather-year pass and its partial-success publication. Historical mean/adverse illustrative technical diagnostics and optional coefficient SE work remain separate. Run signatures include `row_aligned_annual_v1`; owner/pipeline correction metadata identify version, run, exposure basis and central/gradient limitations. Context finalization occurs before any result publication; failed runs retain the last successful bundle and run ID.
+- Technical adverse decile filtering now uses the selected member/year key, avoiding pooled deciles from other members in that year. This remains the legacy technical diagnostic, not the Phase 5 selected-metric adverse attribution.
+- Extended the existing benchmark harness with preparation, old full-panel characterization, bounded exact-reference parity, full annual blocking, compact future sizes and optional R profiling. `WISEAPP_STEP3_INTERACTIONS` enables a real fitted weather-policy interaction fixture; defaults remain unchanged. Error cases produce scalar report fields and a nonzero harness exit rather than malformed CSV construction.
+
+Files changed in Phase 4, preserving the preexisting uncommitted Phase 3 files:
+
+- `R/fct_policy_sim.R`, `R/mod_3_06_policy_sim.R`, `R/fct_policy_metric_decompose.R` (previously untracked), and the small technical member/year filter in `R/mod_3_09_decomposition.R`.
+- `dev/bench_step3_helpers.R`, `dev/bench_step2.R`.
+- `tests/testthat/test-fct-policy-metric-decompose.R`, `test-policy-central-kernel.R`, `test-determinism.R`, `test-policy-diagnostic-snapshot.R`. The latter's stale mock was updated to the actual context-owned call path because atomic failure coverage is required here; the previously documented three fixture failures now pass.
+- This plan. `devtools::document()` regenerated the changed exported helper and Phase 3 pipeline/kernel help locally; `man/` is git-ignored (confirmed with `git check-ignore`), so generated help does not appear in status. Roxygen reported existing unresolved plot/theme links. No commits were made; benchmark artifacts are under ignored `dev/outputs/`.
+
+API contracts for Phase 5:
+
+- `apply_policy_delta_to_baseline(..., decomp_context = NULL, run_identity = NULL, annual_channels = NULL, chunk_size = 100000L)` returns `hist_sim`, `saved_scenarios`, `annual_channels` (locked prepared environment), `decomp_scenarios` (existing compact class), and `correction_version`. The prepared source must belong to the exact supplied context; stale/mismatched sources error. Standalone calls build a central-only context. Required top-level NULL prerequisites still return NULL; invalid channel/mapping data error.
+- Pipelines retain every old field unchanged except `y_point`, plus `policy_correction` with version/run/exposure source/counts/scope and `baseline_X_gradient` uncertainty limitation. Owner lists gain `policy_correction_version`. Baseline objects are not mutated. No Step 2 prediction or metric formula changed.
+- `.policy_annual_channel_block()` is an internal hot loop, only for callers that have already validated the owned source and full exposure mapping. `.policy_annual_channels()` remains the strict public/internal adapter for arbitrary row selections. Phase 5 must not bypass mapping validation or recompute ranks.
+- Compact future tables now carry `member`, `correction_version`, `scope = production_prediction_rows`, and `uncertainty = central_only`; channel statistics are additive sums/weight sums. They are technical model-scale reductions, not invertible household states and not selected-metric inputs. Every member has its own exact mapping, including duplicate expanded rows.
+- `mod_3_06_policy_sim_server()` returns a new `annual_channels` reactive from the successful decomposition bundle. Its source retains the original locked preparation context; the published technical `decomp_context` is a finalized clone carrying adverse diagnostic results with the same run identity. Do not require pointer equality between these two contexts in Phase 5: use the prepared source's context for channel evaluation and run validators for ownership. Neither environment is a worker snapshot. Parent-to-Results wiring for this new reactive is intentionally left to Phase 5.
+- Old policy cache signatures cannot equal the new versioned run signature. Existing Results aggregation caches are already owned by published arm reactives and invalidate on a successful new arm. Metric-aware cache ownership, parity, residual resolution and threshold keys remain Phase 5 work.
+
+Validation:
+
+```sh
+Rscript -e 'devtools::test(filter = "policy|w3-|step3-wave2|determinism|step2-contract|visualization-contracts|mod_3_07_results|mod_2_02_results", reporter = "summary", stop_on_failure = TRUE)'
+Rscript -e 'devtools::test(filter = "mod_2_02_results|mod_3_07_results|policy-sim-compare-agg-cache|visualization-contracts|policy-exposure-mapping|step2-payload|fct_run_simulation|fct_aggregation_delta|fct-aggregation-kernel|active-mask|uncertainty-decomposition", reporter = "summary", stop_on_failure = TRUE)'
+Rscript -e 'devtools::test(filter = "fct-policy-metric-decompose|policy-central-kernel|policy-decomposition-uncertainty|policy-diagnostic-snapshot|determinism|w3-b-future-decomposition", reporter = "summary", stop_on_failure = TRUE)'
+git diff --check
+```
+
+All passed. Warnings were the existing glmnet `thresh` deprecation and the deliberate incomplete weather-cache manifest fixture's missing-file warning. New tests cover RIF/fixest identity/log and bins, chunk-independent reconstruction and weighted summaries, member-specific exposures, zero policy, single whole-map validation, stale/missing inputs, no predictor/period reducer/duplicate channel pass, atomic failure preservation, and technical adverse member/year alignment. Read-only review found chunk-summary accumulation and member/year decile mismatch; both were fixed and tested. No full suite or interactive browser run was performed.
+
+Initial real-data performance (single repetition, cold, OLS, latest baseline wave; all selected waves used for fitting, uncertainty disabled, mean aggregation):
+
+| Payload | Annual Rows Across Members | Prep (s) | Old Full-Panel Corrections (s) | Initial Annual Pass (s) | Optimized Annual Pass (s) | Sampled Step 3 Tree RSS (MiB) |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| BFA, 7,128 baseline rows | 5,132,160 | 0.045 | 1.116 | 26.487 | 3.449 | 4,448 |
+| IRN, 37,468 baseline rows | 26,976,960 | 0.033 | 4.265 | 107.491 | 18.160 | 6,920 |
+
+Both use temperature plus a fitted electricity interaction, combined covariate/SP policy, 23 future members and one SSP/period. Exact row-reference parity was zero error on 16 rows per pipeline (384 per country); this is **bounded sample parity**, not a full real-data row-reference run. Synthetic tests verify all fixture rows. The old timing is central correction only, while annual timing includes validation, correction and compact technical reduction; old/new equality is neither expected nor required. Initial-versus-optimized annual timings are comparable full passes. The combined launcher maximum RSS fell from 8,796,258,304 to 8,120,156,160 bytes (whole benchmark process, not isolated Step 3 incremental memory). Sampled Step 3 RSS is a diagnostic, not a deployment memory gate.
+
+Artifacts: `dev/outputs/step3-annual-phase4-interaction/` (before matrix reducer), `step3-annual-phase4-profile/`, and `step3-annual-phase4-optimized/`. Reproduce the optimized run:
+
+```sh
+WISEAPP_DATA_PATH="$HOME/Library/CloudStorage/OneDrive-WBG/wiseapp - Documents" WISEAPP_STEP2_COUNTRIES=BFA,IRN WISEAPP_STEP2_MODELS=ols WISEAPP_STEP2_WEATHER=t WISEAPP_STEP3_INTERACTIONS=electricity WISEAPP_STEP2_WORKLOADS=one_ssp_one_period WISEAPP_STEP2_INCLUDE_STEP3=1 WISEAPP_STEP3_POLICIES=combined WISEAPP_STEP2_REPETITIONS=1 WISEAPP_STEP2_CACHE_STATES=cold WISEAPP_STEP2_UNCERTAINTY=disabled WISEAPP_STEP2_AGG_METHODS=mean WISEAPP_STEP3_REFERENCE_ROWS=16 WISEAPP_STEP2_OUTPUT_DIR=dev/outputs/step3-annual-phase4-optimized dev/run_step2_benchmark.sh
+```
+
+Remaining limitations and next session:
+
+- Implement **Phase 5 only** next. Read the plan and current diff; aggregate cumulative states using the retained source and canonical shared residual context, match Results endpoint support, implement tails and the single shared Results reactive. No primary UI redesign until Phase 6.
+- The default two-hazard (`t,spei6`) IRN future run failed strict exposure validation (`Missing exact weather exposure or anchor identity`); baseline Step 2 itself succeeded. No missing-weather imputation or period-mean fallback was applied. Temperature-only explicit-interaction BFA/IRN runs succeeded. The default-hazard missing-data provenance still needs characterization; do not claim the default IRN combination passed.
+- Annual processing remains synchronous and IRN blocking of 18.16 seconds is material despite the measured optimization. No new pool or worker was added. Release requires further profiling and/or immutable snapshots through the existing coordinator before claiming acceptable responsiveness; the process-local locked contexts cannot simply be shipped as worker environments. Record snapshot/parent identity validation if moved async. Do not remove annual semantics to regain speed.
+- Initial checks do not complete the release gate: multi-period/multi-SSP, real-data RIF/bin performance, repeated timing/RSS, metric-switch cost, full suite and browser verification remain open for later phases. Metric-switch/tail timing cannot be measured before Phase 5 exists. Existing historical illustrative resilience cards remain technical until Phase 6; new future production predictions and technical summaries intentionally changed.
+
 ### Phase 5: Metric Counterfactuals, Tail Attribution, Shared Reactive
 
 Files: helper from Phase 3, canonical aggregation integration only as necessary, Results shared calculation/wiring.
@@ -425,6 +526,63 @@ Files: helper from Phase 3, canonical aggregation integration only as necessary,
 Aggregate annual ordered states with canonical residual/weight/threshold semantics; compute annual contributions and shared `S`; reuse endpoint aggregates for parity checks. Implement cumulative-state quantile attribution matching actual threshold endpoint operators and the separately labeled fixed-baseline-adverse-year view. Return the small status/annual/summary/return-period/mechanism contract and cache boundedly. Gate: annual, expected, and tail decompositions reconcile within their own scopes; endpoint support preserved; no prediction rerun on metric/threshold/probability edits; no stale cache leakage.
 
 Tests: new helper tests, `test-fct_aggregation_delta.R`, `test-policy-sim-compare-agg-cache.R`, `test-policy-central-kernel.R`.
+
+#### Phase 5 Completion Handoff (2026-10-01)
+
+Completed scope:
+
+- Added pure native-valued cumulative metric aggregation, using the retained annual source and actual production endpoints. One temporary member/year cumulative vector and one canonical year-seeded residual realization are reused for all states. Survey weights, strict poverty thresholds, log back-transforms and canonical state-specific eligibility are preserved. No coefficient gradients/SEs, model refit, prediction rerun or rank recomputation is performed.
+- Annual main/repositioning/interaction/resilience/total contributions and equal-model-mean summaries reconcile. Results endpoint aggregate tables are reused to validate parity and select precisely the finite matched headline support. Channel failures preserve independent endpoint summaries; they never silently filter the headline. Prediction alignment, correction version/run ownership, residual context, missingness and final-state parity are checked before publishing a scenario result.
+- Added adverse 1-in-5/10/20/50 attribution using cumulative rank-interpolated state endpoints and median model quantiles, matching the Results threshold operator. The separately labeled baseline-selected adverse-year view uses `ceiling(n*p)`, deterministic year-key ties and equal-model means. Sparse model support is unavailable, not silently reduced. Equal-probability attribution is withheld if matched channel support cannot reproduce Results marginal threshold endpoints; the valid expected summary and fixed-year view remain distinct.
+- Added hazard/category-specific annual and equal-model-mean sensitivity-change/rank summaries, signed positive/negative household shares, unchanged fitted RIF grid and explicit missing engine/interaction statuses. These use native model-scale units, not selected-metric units; confirmed weather units are resolved from the Step 2 run snapshot, otherwise a truthful fitted-input-unit fallback is retained.
+- Results owns and returns one `metric_decomposition` reactive, passed through the parent into Decomposition together with existing metric controls. Reactive memoization retains only its latest compact result. Source/context/metric/effective threshold invalidation is automatic; deviation/uncertainty plot controls do not trigger this calculation. Stale/mismatched runs withhold all channel tables. No primary UI/card redesign or new exports was performed.
+- Extended the existing benchmark harness with mean/headcount switches, timings and result sizes. Updated the stale benchmark expectation from household rows to Phase 4's compact member/year rows and added metric benchmark assertions.
+
+Files changed in Phase 5, preserving all preexisting Phase 3/4 changes:
+
+- `R/fct_policy_metric_decompose.R`, `tests/testthat/test-fct-policy-metric-decompose.R` (both already untracked at session start).
+- `R/fct_policy_sim_compare.R`, `R/mod_3_07_results.R`, `R/mod_3_scenario.R`, `R/mod_3_09_decomposition.R` (wiring only; existing technical member/year edits preserved).
+- `tests/testthat/test-policy-sim-compare-agg-cache.R`, `test-mod_3_07_results.R`, `test-bench-step3.R`.
+- `dev/bench_step3_helpers.R`, `dev/bench_step2.R` and this plan. No commits or dependency changes.
+
+API contracts for Phase 6:
+
+- `.policy_metric_decomposition(baseline_hist, policy_hist, baseline_scenarios, policy_scenarios, prepared, method, pov_line = NULL, requested_residuals = "original", endpoint_series_baseline = NULL, endpoint_series_policy = NULL, focus_scenario = NULL, analysis_unit = NULL)` returns `status`, `reason`, `annual`, `summary`, `return_period`, `mechanisms`, `metadata`, `endpoint_summary`, and named `scenarios`. Production Results always supplies its existing endpoint series. Optional absent endpoint tables support the benchmark/reference path only; that path does not prove independent Results parity.
+- `status` describes focus-scenario channel availability; individual `scenarios[[name]]` have their own status/reason. Successful scenario tables may coexist with an unavailable focus. `endpoint_summary` is independently computed with existing `paired_effect_summary(..., center = "equal_model_mean")`, including on channel failure. Logistic policy methods are unsupported and publish no policy endpoint summary. Stale Results wrapper sets `unavailable`; retained endpoint summaries then refer only to the last completed run and must not be presented as current results.
+- Numeric state columns are `baseline`, `after_main`, `after_repositioning`, `policy`; contribution columns are `main`, `repositioning`, `interaction`, `resilience`, `total`. Summary adds model/year/dropped counts and `center_method`. Numeric repositioning is an internal identity step for fixest; **display availability from metadata/mechanism status**, not a measured zero mechanism. Missing interaction terms likewise have an explicit status even though the canonical identity step is numeric zero.
+- `return_period$scope` is `equal_probability` (median cumulative model quantiles, canonical `rank_interp`) or `baseline_adverse_years` (equal-model selected-tail mean). Rows have status/reason, probability/return period, center/quantile method and support. Fixed-year rows add achieved fraction min/max and selected member/year keys. Sparse/mismatched quantile rows contain no publishable contribution values. The existing separate paired-adverse table still uses `stats::quantile` and median model effects; do not confuse it with this threshold-card operator or change it implicitly.
+- `mechanisms` contains `annual`, `summary`, `fitted_curve`, `curve_scope`, `repositioning_status`, `interaction_status` and diagnostic `metadata`. It is not part of the metric contribution sums. Its fitted RIF curve is the unchanged Step 1 grid; positions are fixed main-derived pre/post ranks. Category rows are fitted-reference contrasts, never derivatives divided by hazard exposure. Annual and summary rows carry model/weather unit labels.
+- Metadata includes centralized metric/unit/threshold context, run/focus, order, correction/exposure source, named relative parity tolerance `1e-8`, requested/effective residual modes, mixed-mode flag, canonical population/eligibility caveat and central-only uncertainty. `avg_poverty` excluded counts can change by state, as the canonical metric defines eligibility; no invented fixed positive-welfare population is claimed.
+- `.wire_results_pane()` and `mod_3_07_results_server()` accept trailing `annual_channels = reactive(NULL)` and return `metric_decomposition`. Parent passes `s6$annual_channels`, and Decomposition accepts trailing `metric_decomposition = reactive(NULL)`. Prepared and finalized technical contexts need matching validated run identities, not pointer equality. Do not independently reconstruct household channels in Phase 6.
+
+Validation:
+
+```sh
+Rscript -e 'devtools::test(filter = "fct-policy-metric-decompose|fct_aggregation_delta|fct-aggregation-kernel|policy-central-kernel|policy-decomposition-uncertainty|policy-exposure-mapping|step2-payload|w3-", reporter = "summary", stop_on_failure = TRUE)'
+Rscript -e 'devtools::test(filter = "fct-policy-metric-decompose|policy-sim-compare-agg-cache|mod_3_07_results|mod_2_02_results|visualization-contracts|policy-decomposition-uncertainty|ui-migration-step3", reporter = "summary", stop_on_failure = TRUE)'
+Rscript -e 'devtools::load_all(quiet = TRUE)'
+git diff --check
+```
+
+- Focused suites and package load passed. Coverage includes all registered metrics, identity/log fixest/RIF, all four residual modes, compact shared residual context, fallback to none, zero policy, strict poverty crossing, changing inverse-welfare eligibility, unequal model-year counts, category/rank mechanisms, member-specific exposures, endpoint support/parity failures, sparse/tied tails, marginal-versus-matched threshold mismatch and actual shared Shiny reactive/headline equality through metric/line edits with preparation/prediction calls forbidden. The payload suite emitted only the known deliberately incomplete weather-cache warning. Independent read-only helper review found no additional concrete correctness issue.
+- Full `devtools::test(reporter = "summary", stop_on_failure = TRUE)` completed but was **not a pass**: five failures, comprising the stale benchmark expectation (120 household rows versus 2 compact member/year rows) and four preexisting rate-formatting assertions in `test-result-distribution-charts.R:96-97` and `test-result-exceedance-charts.R:38-39`. The benchmark fixture was corrected and `bench-step3|fct-policy-metric-decompose|policy-sim-compare-agg-cache` then passed. The four chart failures were reproduced after replacing all definitions from `R/fct_policy_sim_compare.R` in-memory with their `HEAD` versions; untouched chart tests also remain unchanged. These unrelated chart bugs were not fixed in Phase 5. Full-suite warnings were existing glmnet `thresh` deprecation and missing-file weather-cache fixture; browser-backed tests also logged a Chromote `Browser.close` timeout. This automated full-suite run is not an interactive application browser check.
+
+Real-data performance (single cold repetition each, OLS, temperature plus electricity interaction, combined policy, one SSP/period, 23 future members; same Phase 4 workload):
+
+| Payload | Annual Rows | Initial Mean Switch (s) | Optimized Mean Switch (s) | Initial Poverty Switch (s) | Optimized Poverty Switch (s) | Retained Metric Result |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| BFA | 5,132,160 | 8.241 | 4.916 | 8.431 | 4.969 | ~534 KB object / ~798 KB serialized |
+| IRN | 26,976,960 | 53.347 | 27.727 | 52.767 | 29.199 | ~534 KB object / ~798 KB serialized |
+
+- Optimization removes duplicate whole-policy exposure validation (exact baseline/policy mapping equality is checked) and repeated per-year residual-context hashing/lookup preparation; the canonical draw helper, row mask, year seed and effective mode are unchanged and parity tested. Each result has 720 annual rows, 2 scenario summaries, 16 tail rows and 720 mechanism rows. No invariant preparation or prediction rerun occurs during a switch. Timings include all scenario calculations/mechanisms/tails but exclude preexisting Results endpoint aggregation; the real benchmark path does not supply independent cached endpoint tables.
+- Artifacts: ignored `dev/outputs/step3-metric-switch/` and `step3-metric-switch-optimized/`. Sampled Step 3 tree RSS was approximately 4,037/6,427 MiB before and 4,785/7,384 MiB after for BFA/IRN; whole-launcher maximum RSS was 8,280,702,976 / 8,527,773,696 bytes. These are noisy whole-workload single-run measurements, **not evidence of a memory improvement or isolated metric incremental peak**. Annual reference sample errors remained zero (384 sampled rows/country), not a full real-data reference run.
+- Reproduce the optimized benchmark using Phase 4's command above with output directory `dev/outputs/step3-metric-switch-optimized`; harness automatically records metric fields when Step 3 is enabled. Smoke benchmark is correctness only, not performance evidence.
+
+Remaining limitations and next session:
+
+- Implement **Phase 6 only** next. Read this plan, repository guidance and current dirty diff. Use `s7$metric_decomposition` for primary contribution/sensitivity/adverse views and resilience card; keep Results authoritative and existing separate technical math intact. Native formatting must use the effective metadata snapshot, and scope/availability must be respected per scenario and tail row.
+- Optimized 28-29 second IRN metric switching and 17.5 second annual production application still materially block the main R process. This phase does not claim acceptable responsiveness and adds no pool or worker. Release still requires further profiling and/or immutable snapshots through the existing coordinator with explicit parent run-identity validation; process-local prepared environments cannot be shipped as live worker contexts. Do not silently revert annual semantics.
+- Multi-period/multi-SSP, default IRN two-hazard missing-exposure provenance, real-data RIF/bin performance, repeated/RSS-isolated measurements and browser checks remain open. No primary UI change or browser check in Phase 5; full native browser/bundle contribution exports remain Phase 7. Component uncertainty is not estimated.
 
 ### Phase 6: Primary View and Headline Alignment
 

@@ -1,6 +1,31 @@
 library(testthat)
 
 
+.policy_test_attach_exposure <- function(pipeline, baseline, weather_values) {
+  ids <- pipeline$svy_row_id
+  keys <- c("code", "year", "survname", "loc_id", "int_month")
+  table <- baseline[ids, keys, drop = FALSE]
+  for (name in names(weather_values)) table[[name]] <- weather_values[[name]]
+  table$timestamp <- as.Date(sprintf(
+    "%d-%02d-01", pipeline$sim_year, table$int_month
+  ))
+  pipeline$weather_exposure <- c(
+    list(status = "ok", table = table, row_index = seq_along(ids),
+         prediction_row_id = seq_along(ids)),
+    pipeline[c("svy_row_id", "sim_year", "weight", "id_vec")]
+  )
+  pipeline
+}
+
+
+.policy_test_context <- function(baseline, policy, model_fit, so, run_identity) {
+  .build_decomposition_context(
+    baseline, policy, model_fit, so, skip_coef = TRUE,
+    run_identity = run_identity
+  )
+}
+
+
 expect_central_parity <- function(svy_baseline, svy_policy, model_fit, so,
                                   weather_raw = NULL, deltas = NULL,
                                   F_hat = NULL) {
@@ -98,7 +123,8 @@ test_that("policy correction changes only y_point and preserves pipeline types",
   n <- 60L
   baseline <- data.frame(
     hhid = seq_len(n), welfare = exp(rnorm(n)), temp = rnorm(n, 25),
-    electricity = rep(0:1, length.out = n)
+    electricity = rep(0:1, length.out = n), code = "BFA", year = "2018",
+    survname = "wave-a", loc_id = seq_len(n), int_month = 1L
   )
   policy <- baseline
   policy$electricity <- 1L
@@ -118,25 +144,36 @@ test_that("policy correction changes only y_point and preserves pipeline types",
     weight = seq(0.5, 1.5, length.out = n),
     weather_raw = data.frame(temp = c(22, 28))
   )
+  pipe <- .policy_test_attach_exposure(
+    pipe, baseline, list(temp = rep(c(22, 28), length.out = n))
+  )
   hist <- list(pipeline = pipe, weather_raw = pipe$weather_raw)
+  run_identity <- "central-kernel-pipeline"
+  context <- .policy_test_context(baseline, policy, model_fit,
+                                  list(name = "welfare", transform = "log"),
+                                  run_identity)
 
   out <- apply_policy_delta_to_baseline(
     baseline, policy, model_fit,
-    list(name = "welfare", transform = "log"), hist
+    list(name = "welfare", transform = "log"), hist,
+    decomp_context = context, run_identity = run_identity
   )$hist_sim$pipeline
 
-  expect_identical(names(out), names(pipe))
-  expect_identical(out[-1L], pipe[-1L])
+  expect_identical(setdiff(names(out), names(pipe)), "policy_correction")
+  expect_identical(out[intersect(names(pipe), setdiff(names(out), "y_point"))],
+                   pipe[setdiff(names(pipe), "y_point")])
+  expect_identical(out$policy_correction$version, "row_aligned_annual_v1")
   expect_type(out$y_point, typeof(pipe$y_point))
   expect_identical(attributes(out$y_point), attributes(pipe$y_point))
   expect_false(identical(out$y_point, pipe$y_point))
 })
 
 
-test_that("production broadcasts period-mean correction unlike per-year channels", {
+test_that("production applies exact annual exposure instead of period-mean broadcast", {
   baseline <- data.frame(
     welfare = exp(c(1, 1)), loc_id = 1:2, temp = c(10, 20),
-    electricity = c(0, 0)
+    electricity = c(0, 0), code = "BFA", year = "2018",
+    survname = "wave-a", int_month = 1L
   )
   train <- expand.grid(temp = c(10, 20), electricity = 0:1)
   train$welfare <- exp(
@@ -160,13 +197,29 @@ test_that("production broadcasts period-mean correction unlike per-year channels
   pipeline <- list(
     y_point = rep(0, 4L),
     svy_row_id = c(1L, 2L, 1L, 2L),
-    sim_year = c(2030L, 2030L, 2031L, 2031L)
+    sim_year = c(2030L, 2030L, 2031L, 2031L),
+    weight = NULL, id_vec = c(1L, 2L, 1L, 2L)
   )
+  pipeline <- .policy_test_attach_exposure(
+    pipeline, baseline, list(temp = weather$temp)
+  )
+  run_identity <- "annual-production-kernel"
+  context <- .policy_test_context(baseline, policy, model_fit, so, run_identity)
+  annual_channels <- .prepare_policy_annual_channels(context, run_identity)
 
   production <- apply_policy_delta_to_baseline(
     baseline, policy, model_fit, so,
-    list(pipeline = pipeline, weather_raw = weather)
-  )$hist_sim$pipeline$y_point
+    list(pipeline = pipeline, weather_raw = weather),
+    decomp_context = context, run_identity = run_identity,
+    annual_channels = annual_channels, chunk_size = 1L
+  )
+  expect_identical(
+    names(production),
+    c("hist_sim", "saved_scenarios", "annual_channels",
+      "decomp_scenarios", "correction_version")
+  )
+  expect_identical(production$correction_version, "row_aligned_annual_v1")
+  production_y <- production$hist_sim$pipeline$y_point
   period_mean_delta <- .policy_central_delta(
     baseline, policy, model_fit, so, weather_raw = weather
   )
@@ -181,9 +234,25 @@ test_that("production broadcasts period-mean correction unlike per-year channels
     )
   )
 
-  expect_equal(production, period_mean_delta[c(1L, 2L, 1L, 2L)])
+  expect_equal(production_y, explicit_annual_delta, tolerance = 1e-10)
   expect_equal(explicit_annual_delta, c(0.7, 1.2, 1.7, 2.2), tolerance = 1e-10)
-  expect_false(isTRUE(all.equal(production, explicit_annual_delta)))
+  expect_equal(period_mean_delta[c(1L, 2L, 1L, 2L)],
+               c(1.2, 1.7, 1.2, 1.7), tolerance = 1e-10)
+  expect_false(isTRUE(all.equal(production_y,
+                                period_mean_delta[c(1L, 2L, 1L, 2L)])))
+
+  unmapped <- pipeline
+  unmapped$weather_exposure <- NULL
+  expect_error(
+    apply_policy_delta_to_baseline(
+      baseline, policy, model_fit, so,
+      list(pipeline = unmapped, weather_raw = weather),
+      decomp_context = context, run_identity = run_identity,
+      annual_channels = annual_channels
+    ),
+    "Exact prediction-row weather exposure mapping unavailable"
+  )
+  expect_identical(pipeline$y_point, rep(0, 4L))
 })
 
 
@@ -201,7 +270,8 @@ test_that("deployed fixest path resolves weather references and shared IDs", {
     loc_id = rep(1:4, length.out = n),
     temp = rnorm(n, 25, 2),
     electricity = rep(0:1, length.out = n),
-    weight = runif(n, 0.5, 2)
+    weight = runif(n, 0.5, 2), code = "BFA", year = "2018",
+    survname = "wave-a", int_month = 6L
   )
   fit <- fixest::feols(
     log(welfare) ~ temp * electricity, data = baseline,
@@ -224,16 +294,27 @@ test_that("deployed fixest path resolves weather references and shared IDs", {
   future_ref <- step2_weather_store_put(store, "future-member", future_weather)
 
   order <- sample(seq_len(n))
-  make_pipe <- function(weather_ref) list(
-    y_point = unname(stats::predict(fit))[order],
-    F_loading = matrix(rnorm(n * 2L), ncol = 2L),
-    id_vec = baseline$household_key[order],
-    sim_year = rep(2030L, n),
-    weight = baseline$weight[order],
-    weather_raw = weather_ref
-  )
-  hist_pipe <- make_pipe(hist_ref)
-  future_pipe <- make_pipe(future_ref)
+  make_pipe <- function(weather_ref, weather_values) {
+    id <- order
+    pipe <- list(
+      y_point = unname(stats::predict(fit))[id],
+      F_loading = matrix(rnorm(n * 2L), ncol = 2L),
+      id_vec = baseline$household_key[id], id_col = "household_key",
+      svy_row_id = id, sim_year = rep(2030L, n),
+      weight = baseline$weight[id], weather_raw = weather_ref
+    )
+    table <- baseline[id, c("code", "year", "survname", "loc_id", "int_month")]
+    table$temp <- weather_values[match(table$loc_id, c(1:4))]
+    table$timestamp <- as.Date(rep("2030-06-01", n))
+    pipe$weather_exposure <- c(
+      list(status = "ok", table = table, row_index = seq_len(n),
+           prediction_row_id = seq_len(n)),
+      pipe[c("svy_row_id", "sim_year", "weight", "id_vec")]
+    )
+    pipe
+  }
+  hist_pipe <- make_pipe(hist_ref, hist_weather$temp)
+  future_pipe <- make_pipe(future_ref, future_weather$temp[1:4])
   hist <- list(
     pipeline = hist_pipe, weather_raw = hist_ref,
     weather_signature = "sig-policy",
@@ -250,23 +331,25 @@ test_that("deployed fixest path resolves weather references and shared IDs", {
     year_range = c(2030L, 2040L)
   ))
 
+  run_identity <- "deployed-fixest-path"
+  context <- .policy_test_context(baseline, policy, model_fit, so, run_identity)
+  annual_channels <- .prepare_policy_annual_channels(context, run_identity)
   out <- apply_policy_delta_to_baseline(
-    baseline, policy, model_fit, so, hist, scenarios
+    baseline, policy, model_fit, so, hist, scenarios,
+    decomp_context = context, run_identity = run_identity,
+    annual_channels = annual_channels
   )
-  hist_delta <- .policy_central_delta(
-    baseline, policy, model_fit, so, weather_raw = hist_weather
-  )
-  future_delta <- .policy_central_delta(
-    baseline, policy, model_fit, so, weather_raw = future_weather
-  )
-
   expect_equal(
     out$hist_sim$pipeline$y_point,
-    hist_pipe$y_point + hist_delta[order]
+    hist_pipe$y_point + .policy_annual_channels(
+      hist_pipe, annual_channels, run_identity
+    )$delta_total
   )
   expect_equal(
     out$saved_scenarios[[1]]$pipelines[[1]]$y_point,
-    future_pipe$y_point + future_delta[order]
+    future_pipe$y_point + .policy_annual_channels(
+      future_pipe, annual_channels, run_identity
+    )$delta_total
   )
   expect_identical(out$hist_sim$pipeline$weather_raw, hist_ref)
   expect_identical(out$saved_scenarios[[1]]$pipelines[[1]]$weather_raw,
@@ -277,6 +360,7 @@ test_that("deployed fixest path resolves weather references and shared IDs", {
     out$saved_scenarios[[1]]$pipelines[[1]]$F_loading,
     future_pipe$F_loading
   )
+  expect_identical(out$correction_version, "row_aligned_annual_v1")
 
   baseline_agg <- aggregate_pipeline_per_year(
     hist_pipe, method = "mean", weighted = TRUE,
@@ -427,7 +511,9 @@ test_that("central kernel matches RIF clipping, interpolation, and interaction",
 test_that("central kernel preserves no-interaction warning and fallbacks", {
   baseline <- data.frame(
     welfare = c(1.0, 2.2, 2.7, 4.4, 4.8, 6.1, 7.5, 7.9),
-    temp = seq(20, 27), electricity = rep(0:1, 4)
+    temp = seq(20, 27), electricity = rep(0:1, 4),
+    code = "BFA", year = "2018", survname = "wave-a",
+    loc_id = seq_len(8), int_month = 6L
   )
   policy <- baseline
   policy$electricity <- 1L
@@ -452,12 +538,19 @@ test_that("central kernel preserves no-interaction warning and fallbacks", {
   ))
 
   pipe <- list(y_point = rep(2, nrow(baseline)),
-               svy_row_id = seq_len(nrow(baseline)))
-  out <- apply_policy_delta_to_baseline(
-    baseline, policy, modifyList(model_fit, list(engine = "xgboost")), so,
-    hist_sim_baseline = list(pipeline = pipe)
+               svy_row_id = seq_len(nrow(baseline)),
+               sim_year = rep(2030L, nrow(baseline)), weight = NULL,
+               id_vec = seq_len(nrow(baseline)))
+  pipe <- .policy_test_attach_exposure(
+    pipe, baseline, list(temp = baseline$temp)
   )
-  expect_identical(out$hist_sim$pipeline, pipe)
+  expect_error(
+    apply_policy_delta_to_baseline(
+      baseline, policy, modifyList(model_fit, list(engine = "xgboost")), so,
+      hist_sim_baseline = list(pipeline = pipe)
+    ),
+    "requires RIF or linear fixest"
+  )
 })
 
 test_that("context identity failures propagate without returning unchanged pipelines", {
@@ -465,7 +558,8 @@ test_that("context identity failures propagate without returning unchanged pipel
   n <- 20L
   baseline <- data.frame(
     hhid = seq_len(n), welfare = exp(rnorm(n)), temp = rnorm(n, 25),
-    electricity = rep(0:1, length.out = n)
+    electricity = rep(0:1, length.out = n), code = "BFA", year = "2018",
+    survname = "wave-a", loc_id = seq_len(n), int_month = 6L
   )
   policy <- baseline
   policy$electricity <- 1L
@@ -475,18 +569,22 @@ test_that("context identity failures propagate without returning unchanged pipel
     train_data = baseline
   )
   so <- list(name = "welfare", transform = "log")
-  context <- .build_decomposition_context(
-    baseline, policy, model_fit, so, run_identity = "run-a"
+  context <- .policy_test_context(
+    baseline, policy, model_fit, so, "run-a"
   )
   pipe <- list(
     y_point = unname(predict(fit)), svy_row_id = seq_len(n),
+    sim_year = rep(2030L, n), weight = NULL, id_vec = seq_len(n),
     weather_raw = data.frame(temp = 25)
   )
+  pipe <- .policy_test_attach_exposure(pipe, baseline,
+                                       list(temp = rep(25, n)))
   expect_error(
     apply_policy_delta_to_baseline(
       baseline, policy, model_fit, so,
       hist_sim_baseline = list(pipeline = pipe),
-      decomp_context = context, run_identity = "run-b"
+      decomp_context = context, run_identity = "run-b",
+      annual_channels = .prepare_policy_annual_channels(context, "run-a")
     ),
     "run identity mismatch"
   )

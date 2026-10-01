@@ -2045,9 +2045,10 @@ plot_step3_variance_contribution <- function(var_tbl) {
                                decomp_result = reactive(NULL),
                                decomp_context = reactive(NULL),
                                baseline_svy = reactive(NULL),
-                                policy_svy = reactive(NULL),
-                                aggregation_cache = NULL,
-                                analysis_unit = reactive(NULL)) {
+                                 policy_svy = reactive(NULL),
+                                 aggregation_cache = NULL,
+                                 analysis_unit = reactive(NULL),
+                                 annual_channels = reactive(NULL)) {
   ns <- session$ns
 
   aggregation_method <- reactive({
@@ -2555,6 +2556,86 @@ plot_step3_variance_contribution <- function(var_tbl) {
       setNames(list(policy_agg_hist()), hist_label()),
       sc[intersect(sel, names(sc))]
     )
+  })
+
+  metric_decomposition <- reactive({
+    baseline_hist <- baseline_hist_sim()
+    policy_hist <- policy_hist_sim()
+    prepared <- annual_channels()
+    context <- decomp_context()
+    run_identity <- if (is.environment(prepared)) prepared$run_identity else NULL
+    endpoint_baseline <- baseline_all_series()
+    endpoint_policy <- policy_all_series()
+    method <- aggregation_method()
+    pov_line <- pov_line_val()
+    requested_residuals <- active_residuals(baseline_hist)
+    focus <- focus_scenario()
+    unit <- analysis_unit()
+
+    unavailable <- function(result, reason) {
+      result$status <- "unavailable"
+      result$reason <- reason
+      result$annual <- data.frame()
+      result$summary <- data.frame()
+      result$return_period <- data.frame()
+      result$mechanisms <- list()
+      result$scenarios <- list()
+      result
+    }
+    fallback <- list(
+      status = "unavailable", reason = "Metric decomposition is unavailable.",
+      annual = data.frame(), summary = data.frame(), return_period = data.frame(),
+      mechanisms = list(), endpoint_summary = NULL, scenarios = list(),
+      metadata = list()
+    )
+    calculate <- function(source) {
+      .policy_metric_decomposition(
+        baseline_hist, policy_hist,
+        baseline_saved_scenarios(), policy_saved_scenarios(),
+        source, method, pov_line, requested_residuals,
+        endpoint_baseline, endpoint_policy, focus, unit
+      )
+    }
+    context_error <- NULL
+    if (!is.null(prepared)) {
+      context_error <- tryCatch({
+        if (!is.environment(prepared) || is.null(run_identity)) {
+          stop("Prepared annual channels are missing a run identity.", call. = FALSE)
+        }
+        .validate_run_decomposition_context(prepared$context, run_identity)
+        if (is.null(context) || !identical(context$run_identity, run_identity)) {
+          stop("Results and prepared channel run identities differ.", call. = FALSE)
+        }
+        .validate_run_decomposition_context(context, run_identity)
+        NULL
+      }, error = function(e) conditionMessage(e))
+    }
+    source <- if (is.null(context_error) && !isTRUE(stale())) prepared else NULL
+    result <- tryCatch(calculate(source), error = function(e) {
+      # The helper still owns endpoint summarization when channel inputs are
+      # missing or invalid. A second call with no prepared source must not
+      # expose partial/stale channel values from the failed calculation.
+      tryCatch(calculate(NULL), error = function(endpoint_error) {
+        fallback$reason <<- conditionMessage(e)
+        fallback
+      })
+    })
+    if (is.null(result) || !is.list(result)) result <- fallback
+
+    if (isTRUE(stale())) {
+      return(unavailable(result, "Policy run is stale."))
+    }
+    endpoint_status <- policy_endpoint_status()
+    if (!identical(endpoint_status$status, "ok")) {
+      result <- unavailable(result, endpoint_status$reason)
+      result$endpoint_summary <- data.frame()
+      result$status <- endpoint_status$status
+      return(result)
+    }
+    if (!is.null(context_error)) {
+      return(unavailable(result, context_error))
+    }
+    result
   })
 
   matrix_transforms_rv <- reactive({
@@ -3310,6 +3391,7 @@ plot_step3_variance_contribution <- function(var_tbl) {
     poverty_line = pov_line_val,
     focus_scenario = focus_scenario,
     metric_context = metric_context,
+    metric_decomposition = metric_decomposition,
     policy_endpoint_status = policy_endpoint_status,
     selected_scenario_names = selected_scenario_names,
     pov_line_val = pov_line_val
