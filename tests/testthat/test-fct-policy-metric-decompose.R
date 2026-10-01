@@ -169,6 +169,9 @@ test_that("mechanisms remain model scale and preserve bins, ranks and missing en
     expect_identical(result$status, "ok")
     expect_true(all(result$mechanisms$annual$scale == "model_scale"))
     expect_true(any(result$mechanisms$annual$contrast == "fitted_reference_category_contrast"))
+    category_units <- result$mechanisms$annual$weather_units[
+      result$mechanisms$annual$contrast == "fitted_reference_category_contrast"]
+    expect_true(all(category_units == "category contrast; no per-unit slope"))
     if (engine == "fixest") {
       expect_true(all(is.na(result$mechanisms$annual$repositioning)))
       expect_identical(result$mechanisms$repositioning_status, "Not modeled by this engine")

@@ -4,7 +4,7 @@
 
 Finalized implementation handoff, reviewed against the current code on 2026-10-01. This document changes no application behavior. Implement only the bounded phases below, not the deferred research items.
 
-Implementation status (2026-10-01): **Phases 1-5 implemented; Phase 6 is next in a new agent session.** See the completion handoffs below. Production uses exact row-aligned annual corrections; Results now owns a shared native metric-aware cumulative-state calculation, expected summaries, mechanisms and separately scoped tail attribution. Primary views/cards still await Phase 6. BFA/IRN metric-switch measurements passed correctness/status checks but remain materially synchronous; multi-period/multi-SSP scaling, real-data RIF performance, responsiveness and browser verification remain release gates.
+Implementation status (2026-10-01): **Phases 1-7 implemented; release verification remains incomplete.** See completion handoffs below. Production uses exact row-aligned annual corrections; Results owns the shared native metric-aware cumulative-state calculation, expected summaries, mechanisms and separately scoped tail attribution. Primary metric/tail/mechanism views and the Results resilience/adverse cards consume this contract, and their browser/bundle exports carry native values plus run/metric context. Earlier BFA/IRN single-scenario metric-switch checks passed correctness/status but remained materially synchronous. The Phase 7 real-data multi-SSP run hit R's 16 GB vector-memory limit before Step 3, so multi-scenario scaling, real-data RIF performance, responsiveness, and interactive browser verification remain release gates.
 
 Make Step 3 answer four questions clearly: what outcome is being summarized, how much the policy changes the selected metric, whether it changes modeled weather sensitivity, and whether that sensitivity change comes from repositioning or interaction. Resilience is a primary policy finding, not a hidden technical detail. Results and the primary Decomposition view must share the metric, population, scenario, prediction settings, and summary operator. Preserve existing technical outputs separately.
 
@@ -592,11 +592,90 @@ Add metric tag, paired levels, main/repositioning/interaction chart/table, highl
 
 Tests: `test-mod_3_07_results.R`, `test-policy-decomposition-uncertainty.R`, `test-w3-b-future-decomposition-characterization.R`, Shiny module/reactive tests.
 
+#### Phase 6 Completion Handoff (2026-10-01)
+
+Completed scope:
+
+- Replaced the Results resilience card's historical model-scale fallback with the shared metric-aware focus-scenario summary. It displays main, repositioning and interaction contributions separately, marks missing engine/term status explicitly, links to the primary sensitivity panel, and never converts unavailable channels to zero. The adverse threshold card takes its headline total from the matching `equal_probability` cumulative-state quantile row when available, retains the Results endpoint value otherwise, labels the same-probability/not-necessarily-same-years scope and links to the tail panel.
+- Added the primary `Policy Effect in the Selected Metric` view with scenario selection defaulting to the Results focus, metric/unit/threshold/population/method/correction context, matched cumulative levels and native numeric contributions, highlighted resilience subtotal, and per-result unavailable reason. Added `Resilience in Adverse Weather` rows that distinguish equal-probability quantile contrasts from baseline-selected same-year tail means and display empirical tail support where available.
+- Added `How the Policy Changes Weather Sensitivity` with hazard/category-specific channel-implied model-scale changes, positive/negative household shares, rank movement, weather/model units, scope and rank-convention notes. RIF results reuse the unchanged Step 1 fitted curve and label it unchanged; fixest/missing-interaction statuses remain distinct. Retained historical/adverse technical diagnostics under `Technical Decomposition on the Model Scale` without changing technical calculation paths.
+- Added module coverage for native expected contributions, adverse rows and mechanism rendering; expanded UI structure assertions; added card tests verifying metric-aware resilience and tail values/links. Existing technical OLS/RIF render tests remain active.
+
+Files changed in Phase 6:
+
+- `R/fct_policy_sim_compare.R`, `R/mod_3_09_decomposition.R`.
+- `tests/testthat/test-mod_3_07_results.R`, `tests/testthat/test-policy-decomposition-uncertainty.R`.
+- This plan. No technical channel formulas, prediction code or dependencies were changed. No commits were made.
+
+UI/API contracts for Phase 7:
+
+- The UI consumes only the Results-owned `metric_decomposition` reactive passed from `mod_3_07_results_server()` through `mod_3_scenario_server()`. It does not compute or refit channels. Scenario-specific data comes from `result$scenarios[[scenario]]`; summary, tail and mechanism statuses/reasons must remain scoped to that scenario. Metric metadata is the completed calculation snapshot (`result$metadata`), falling back only when absent to the existing Results metric context.
+- The contribution table includes displayed metric values and native numeric cumulative states/contributions. The tail table preserves native baseline/after-main/after-repositioning/policy and contribution columns, probability, quantile/center method, selected year keys, achieved fraction, model support and unavailable reason in the rendered-data helper; Phase 7 must preserve these fields in browser CSV and bundle exports.
+- The mechanism table consumes `result$mechanisms$summary`, filters its rows to the chosen scenario, and retains hazard/category/contrast, signed channel-implied values, positive/negative shares, pre/post ranks, model/weather units and model support. The fitted grid is unchanged Step 1 state; never label it as policy-updated.
+- The current Step 3 browser CSV buttons use the same underlying result tables as the Phase 7 `wise_export_table()` records (`policy_metric_contributions`, `policy_metric_adverse_attribution`, `policy_weather_sensitivity`); all three are registered with numeric/context metadata. Do not replace the technical export keys or alter their scale.
+- Results cards use the shared focus metric result for resilience and the shared equal-probability tail total when that row is available. Expected endpoint summary stays independent and remains available when channels fail. Preserve explicit unavailable behavior and do not infer component zero from absent values.
+
+Validation performed:
+
+```sh
+Rscript -e 'devtools::test(filter = "mod_3_07_results|policy-decomposition-uncertainty|w3-b-future-decomposition-characterization|policy-sim-compare-agg-cache|fct-policy-metric-decompose", reporter = "summary", stop_on_failure = TRUE)'
+Rscript -e 'devtools::load_all(quiet = TRUE)'
+git diff --check
+```
+
+All listed focused suites passed after implementation. The suite covers metric-aware Results card behavior, primary contribution/tail/mechanism module rendering, expected module structural labels, and preservation of existing technical OLS/RIF rendering. A real interactive browser check has not been performed. There were no data-backed UI checks for all metric formats, sparse-return periods, multiple scenarios or RIF curves in this phase.
+
+Remaining limitations and next session:
+
+- Implement **Phase 7 only** next. Register rich native-valued exports for expected summary, annual contributions, quantile tails, baseline-selected adverse-year attribution and weather mechanisms. Verify both browser CSV and export bundle tables and preserve legacy technical export descriptions/keys.
+- Re-run focused and full suites, resolve Phase 5's documented existing chart failures only if they are still current and necessary to establish the acceptance run, perform interactive checks using the required data/backend when available, and record any skipped checks honestly.
+- Extend/use only the existing benchmark harness to record BFA/IRN multi-period/multi-SSP correctness-reference parity, timings, peak memory and main-process blocking. Include real RIF/bin runs where supported, metric-switch time, and no-rebuild behavior for display-only controls. Current single-scenario OLS timings show materially synchronous work and do not pass the responsiveness release gate.
+- Default IRN two-hazard exposure provenance, isolated/repeated RSS, deployable browser behavior and end-to-end Step 2/Step 3 metric-control parity remain release checks. No async worker refactor is authorized by this bounded phase; if responsiveness cannot meet the gate, document a separately scoped immutable-snapshot/coordinator follow-up rather than moving process-local live contexts to workers.
+
 ### Phase 7: Exports, Performance, End-to-End Verification
 
 Files: existing export registrations and metadata helpers, new export tests as necessary.
 
-Add native-valued expected/tail/paired-adverse-year/mechanism exports with numeric threshold/probability/scope/order/annual-correction/uncertainty metadata. Verify browser CSV and bundle data. Run focused/full tests, interactive checks, and final BFA/IRN multi-scenario benchmarks with timings/peak memory/blocking evidence. Gate: correctness-reference parity, bounded memory and acceptable measured runtime, no policy correction rebuild on display-only edits, all acceptance criteria verified; report environment-dependent skips honestly.
+Add native-valued expected/annual contribution, equal-probability tail, baseline-selected adverse-year and mechanism exports with numeric threshold/probability/scope/order/annual-correction/uncertainty metadata. Verify browser CSV and bundle data. Run focused/full tests, interactive checks, and final BFA/IRN multi-scenario benchmarks with timings/peak memory/blocking evidence. Gate: correctness-reference parity, bounded memory and acceptable measured runtime, no policy correction rebuild on display-only edits, all acceptance criteria verified; report environment-dependent skips honestly.
+
+#### Phase 7 Completion Handoff (2026-10-01)
+
+Completed scope:
+
+- Registered the three primary Results-owned metric-aware tables in the export bundle under `policy_metric_contributions`, `policy_metric_adverse_attribution`, and `policy_weather_sensitivity`. Contribution exports include the equal-model expected summary and annual model/year states. Tail exports retain separate equal-probability cumulative-quantile and baseline-selected adverse-year records. Mechanism exports include equal-model summary and annual diagnostics, signed repositioning/interaction values, positive/negative shares, pre/post ranks, fitted category contrast, model/weather units and rank/term conventions.
+- Added shared export annotation for native metric/unit fields, outcome identity/type/transform, numeric threshold and units, currency/time/welfare basis and missing-context note, survey unit/weight interpretation, scenario/run/scope, exposure/correction identity, requested/effective residual modes, component order/method, center, scale, uncertainty, channel availability/reason and canonical population/eligibility notes. Annual and mechanism detail rows are explicitly tagged so their center is not confused with the expected headline.
+- The three visible Reactable data frames use the same native values and provenance as the corresponding bundle artifacts. Unavailable/stale results export an explicit status and reason instead of stale values or fabricated zeros; endpoints remain separately exportable where only channel attribution is unavailable. Technical export keys/data scales were preserved.
+- Added module/export tests for all three browser CSV controls, bundle registration and CSV round-trip contents, native contribution/tail/mechanism columns, threshold/correction metadata, tail scopes, year keys, and model-scale mechanism units. Focused tests passed:
+
+```sh
+Rscript -e 'devtools::test(filter = "policy-decomposition-uncertainty|export-wiring-contract|csv-export-wiring-contract|export-bundle|mod_3_07_results|policy-sim-compare-agg-cache|fct-policy-metric-decompose|fct_aggregation_delta|fct-aggregation-kernel", reporter = "summary", stop_on_failure = TRUE)'
+Rscript -e 'devtools::load_all(quiet = TRUE)'
+git diff --check
+```
+
+- Full `devtools::test(reporter = "summary", stop_on_failure = FALSE)` completed with exactly four failures, all previously characterized unrelated rate-formatting assertions in `test-result-distribution-charts.R:96-97` and `test-result-exceedance-charts.R:38-39`; no Phase 7 export failures occurred. Existing glmnet deprecation and intentionally incomplete prepared-weather-cache warnings appeared. Browser-backed tests passed but logged the known Chromote `Browser.close` timeout. Interactive human/browser verification was not performed.
+- Attempted the existing real-data harness with local LKA input, OLS/RIF, three SSPs by three periods, warm cache, one repetition, mean/headcount aggregation, uncertainty disabled, and Step 3 enabled. The OLS Step 2 stage ran 8m44s, then failed with `vector memory limit of 16.0 Gb reached`; the command's 10-minute cap terminated the launcher during RIF Step 2. No Step 3 summary/reference-parity, Step 3 blocking, RIF result, BFA/IRN multi-scenario timing or isolated peak-memory evidence was produced. This is a failed release-gate attempt, not evidence that the annual implementation has bounded multi-scenario memory or acceptable runtime. The workload also reported excluded CMIP6 members with missing selected weather variables. Earlier single-scenario BFA/IRN metric-switch numbers in Phase 6 remain the only real-data performance measurements.
+
+Files changed in Phase 7:
+
+- `R/mod_3_09_decomposition.R`.
+- `tests/testthat/test-policy-decomposition-uncertainty.R`.
+- This plan. No dependencies or technical export keys/scales were changed. No commits were made. Preexisting Phase 6 changes in `R/fct_policy_sim_compare.R` and `tests/testthat/test-mod_3_07_results.R` remain in the shared dirty worktree and are not part of the Phase 7 file list.
+
+Remaining release gates:
+
+- Reduce/measure memory for the existing real multi-SSP Step 2 workload or use a documented bounded real workload that still exercises Step 3; then run BFA and IRN multi-period/multi-SSP benchmarks through `dev/run_step2_benchmark.sh` with Step 3 enabled. Record full annual reference parity, metric-switch timings, main-process blocking, and process-tree peak RSS. Include supported real-data RIF/binned-weather cases. Do not treat smoke fixtures or sampled rows as production parity evidence.
+- Perform interactive browser checks for multiple scenarios, all registry metric formats, sparse/available return periods, RIF curve/mechanisms, stale handling and live CSV downloads. The headless module/bundle tests are not a substitute.
+- The display-only no-channel-rebuild/reactive behavior and single-scenario switch tests from earlier phases pass, but a full Step 2/Step 3 live control-parity/browser check remains outstanding. Responsiveness is not accepted while large annual policy runs materially block the main process; any async change requires a separately scoped immutable snapshot/coordinator design.
+- The full suite retains the four unrelated chart formatting failures listed above. They were not changed in Phase 7.
+
+Independent review follow-up (2026-10-01):
+
+- Gated primary metric tables and Results headline cards while the Step 3 run is stale; stale table/CSV data now contains only unavailable status and reason, not prior-run values.
+- Kept resilience unavailable when neither repositioning nor interaction is modeled, instead of presenting the internal identity sum as a measured zero.
+- Labeled binned-weather mechanism rows as category contrasts without per-unit slope units.
+- Made intended Reactable columns explicitly visible despite hidden-by-default provenance columns; added regression assertions for display and stale status.
+- Focused Step 3, aggregation and export suites passed after these fixes. Full browser interaction and the multi-scenario performance/memory release gates above remain incomplete.
 
 Example commands from the repository root:
 

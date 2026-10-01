@@ -338,6 +338,108 @@ select_decomp_weather_basis <- function(decomp_df, basis = "mean", so = NULL) {
   out
 }
 
+.policy_metric_export_annotate <- function(data, result, scenario = NULL,
+                                           export_scope = "production_prediction_rows",
+                                           scale = "metric_aware", so = NULL,
+                                           analysis_unit = NULL, status = NULL,
+                                           reason = NULL) {
+  if (is.null(data) || !is.data.frame(data)) data <- data.frame()
+  metadata <- result$metadata %||% list()
+  status <- status %||% result$status %||% "unavailable"
+  reason <- reason %||% result$reason
+  if (!nrow(data)) {
+    data <- data.frame(status = status, availability = status,
+      reason = reason %||% "No rows are available for this export.",
+      stringsAsFactors = FALSE)
+  }
+  n <- nrow(data)
+  scalar <- function(x, fallback = NA) {
+    if (is.null(x) || !length(x)) return(fallback)
+    if (is.list(x) && !is.data.frame(x)) x <- unlist(x)
+    if (!length(x) || all(is.na(x))) return(fallback)
+    if (length(x) > 1L) return(paste(as.character(x), collapse = "; "))
+    x[[1L]]
+  }
+  add <- function(name, value, fallback = NA_character_) {
+    if (!name %in% names(data)) {
+      data[[name]] <<- rep(scalar(value, fallback), n)
+    }
+  }
+  # Retain row-level keys/status where present; add the immutable run snapshot
+  # as scalar columns so CSVs remain interpretable outside the Shiny session.
+  if (!"scenario" %in% names(data)) data$scenario <- rep(scalar(scenario), n)
+  add("outcome_name", metadata$outcome_name)
+  add("outcome_label", metadata$outcome_label)
+  add("outcome_type", metadata$outcome_type %||% .metric_context_value(so, "type"))
+  add("outcome_transform", metadata$outcome_transform %||% .metric_context_value(so, "transform"))
+  add("metric_id", metadata$method)
+  add("metric_label", metadata$label)
+  add("native_unit", metadata$native_unit)
+  add("level_unit", metadata$level_unit)
+  add("change_unit", metadata$change_unit)
+  add("display_multiplier", metadata$display_multiplier, NA_real_)
+  add("number_format", metadata$format)
+  add("threshold_kind", metadata$threshold_kind)
+  add("threshold_value", metadata$threshold_value, NA_real_)
+  add("threshold_unit", metadata$threshold_unit)
+  add("currency_basis", metadata$currency_basis)
+  add("time_basis", metadata$time_basis)
+  add("welfare_denominator", metadata$welfare_denominator)
+  add("missing_context_note", metadata$missing_context)
+  add("analysis_unit", metadata$analysis_unit %||% analysis_unit)
+  add("weight_interpretation", metadata$weight_interpretation)
+  add("run_identity", metadata$run_identity)
+  add("focus_scenario", metadata$focus_scenario)
+  add("population_scope", metadata$population_scope)
+  add("eligibility_caveat", metadata$eligibility_caveat)
+  add("export_scope", export_scope)
+  add("exposure_source", metadata$exposure_source)
+  add("exposure_mapping_id", metadata$exposure_source)
+  add("correction_version", metadata$correction_version)
+  add("requested_residuals", metadata$requested_residuals)
+  add("effective_residuals", metadata$effective_residuals)
+  add("component_order", metadata$component_order)
+  add("center_method", metadata$center_method %||% "equal_model_mean")
+  add("scale", scale)
+  add("uncertainty_status", metadata$uncertainty %||% "central_only")
+  add("parity_tolerance", metadata$parity_tolerance, NA_real_)
+  add("mixed_effective_residual_modes", metadata$mixed_effective_residuals, NA)
+  add("component_method", "ordered_cumulative_state_differences")
+  add("repositioning_status", if (isTRUE(metadata$repositioning_modeled)) "modeled" else "not_modeled_by_engine")
+  add("interaction_status", if (isTRUE(metadata$interaction_included)) "included_in_fitted_model" else "not_included_in_fitted_model")
+  if (!"availability" %in% names(data)) {
+    data$availability <- if ("status" %in% names(data)) {
+      as.character(data$status)
+    } else rep(scalar(status, "unavailable"), n)
+  }
+  add("reason", reason %||% "")
+  if (!isTRUE(metadata$repositioning_modeled) && "repositioning" %in% names(data)) {
+    data$repositioning <- NA_real_
+  }
+  if (!isTRUE(metadata$interaction_included) && "interaction" %in% names(data)) {
+    data$interaction <- NA_real_
+  }
+  if (!isTRUE(metadata$repositioning_modeled) && !isTRUE(metadata$interaction_included) &&
+      "resilience" %in% names(data)) {
+    data$resilience <- NA_real_
+  }
+  data
+}
+
+.policy_metric_export_context_fields <- c(
+  "outcome_name", "outcome_label", "outcome_type", "outcome_transform",
+  "metric_id", "metric_label", "native_unit", "level_unit", "change_unit",
+  "display_multiplier", "number_format", "threshold_kind", "threshold_value",
+  "threshold_unit", "currency_basis", "time_basis", "welfare_denominator",
+  "missing_context_note", "analysis_unit", "weight_interpretation", "run_identity",
+  "population_scope", "eligibility_caveat", "parity_tolerance",
+  "mixed_effective_residual_modes",
+  "focus_scenario", "export_scope", "exposure_source", "exposure_mapping_id",
+  "correction_version", "requested_residuals", "effective_residuals",
+  "component_order", "center_method", "scale", "uncertainty_status",
+  "component_method"
+)
+
 #' 3_09_decomposition UI Function
 #'
 #' @description A shiny Module. Renders the policy effect decomposition
@@ -355,7 +457,49 @@ mod_3_09_decomposition_ui <- function(id) {
     shiny::uiOutput(ns("stale_banner_ui")),
     shiny::uiOutput(ns("policy_summary_ui")),
     shiny::h4(
-      "What drives the total policy effect?",
+      "Policy Effect in the Selected Metric",
+      class = "diagnostic-section-heading"
+    ),
+    shiny::div(
+      class = "results-section-card diagnostic-section-card",
+      shiny::uiOutput(ns("metric_scope_ui")),
+      shiny::div(
+        class = "wise-reactable-controls",
+        wise_reactable_csv_button(ns("metric_contribution_table"), "policy_metric_contributions")
+      ),
+      shiny::uiOutput(ns("metric_contribution_unit_ui")),
+      reactable::reactableOutput(ns("metric_contribution_table")),
+      shiny::tags$p(class = "diagnostic-note",
+        "Ordered attribution at production weather conditions: main policy package, repositioning, then interaction. Central estimates only; component uncertainty is not estimated. This is not an avoided-loss contrast."),
+      shiny::h5("Resilience in Adverse Weather"),
+      shiny::div(id = "metric_adverse_attribution"),
+      shiny::uiOutput(ns("metric_scenario_ui")),
+      shiny::div(
+        class = "wise-reactable-controls",
+        wise_reactable_csv_button(ns("metric_tail_table"), "policy_metric_adverse_attribution")
+      ),
+      reactable::reactableOutput(ns("metric_tail_table")),
+      shiny::uiOutput(ns("metric_tail_note_ui"))
+    ),
+    shiny::h4(
+      "How the Policy Changes Weather Sensitivity",
+      class = "diagnostic-section-heading"
+    ),
+    shiny::div(
+      id = "metric_weather_sensitivity",
+      class = "results-section-card diagnostic-section-card",
+      shiny::uiOutput(ns("metric_mechanism_status_ui")),
+      shiny::div(
+        class = "wise-reactable-controls",
+        wise_reactable_csv_button(ns("metric_mechanism_table"), "policy_weather_sensitivity")
+      ),
+      reactable::reactableOutput(ns("metric_mechanism_table")),
+      shiny::uiOutput(ns("metric_rif_curve_ui")),
+      shiny::tags$p(class = "diagnostic-note",
+        "Sensitivity changes are channel-implied model-scale diagnostics, not currency changes or percentage-point effects. Positive/negative household shares reveal opposing changes that can cancel in the mean.")
+    ),
+    shiny::h4(
+      "Technical Decomposition on the Model Scale",
       class = "diagnostic-section-heading"
     ),
     shiny::div(
@@ -550,6 +694,476 @@ mod_3_09_decomposition_server <- function(id,
       )
     })
 
+    metric_scenario <- reactive({
+      result <- metric_decomposition()
+      scenarios <- names(result$scenarios %||% list())
+      selected <- input$metric_scenario
+      if (!is.null(selected) && selected %in% scenarios) return(selected)
+      preferred <- focus_scenario() %||% result$metadata$focus_scenario
+      if (!is.null(preferred) && preferred %in% scenarios) return(preferred)
+      if (length(scenarios)) scenarios[[1L]] else NULL
+    })
+    output$metric_scenario_ui <- shiny::renderUI({
+      result <- metric_decomposition()
+      choices <- names(result$scenarios %||% list())
+      if (length(choices) < 2L) return(NULL)
+      shiny::selectInput(ns("metric_scenario"), "Scenario", choices = choices,
+        selected = metric_scenario())
+    })
+    selected_metric_result <- reactive({
+      result <- metric_decomposition()
+      scenario <- metric_scenario()
+      if (is.null(scenario) || !is.list(result$scenarios[[scenario]])) return(NULL)
+      result$scenarios[[scenario]]
+    })
+    metric_meta <- reactive({
+      result <- metric_decomposition()
+      if (is.list(result$metadata) && length(result$metadata)) result$metadata else metric_context()
+    })
+    metric_status_text <- function(selected, result = metric_decomposition()) {
+      if (isTRUE(stale())) {
+        return("Policy run is stale; metric-aware results are withheld.")
+      }
+      if (is.null(selected) || !identical(selected$status, "ok")) {
+        return(selected$reason %||% result$reason %||% "Metric-aware channel attribution is unavailable.")
+      }
+      NULL
+    }
+    metric_display_status <- function(selected) {
+      if (isTRUE(stale())) "unavailable" else selected$status %||% "unavailable"
+    }
+    metric_export_result <- function() {
+      result <- metric_decomposition()
+      if (!isTRUE(stale())) return(result)
+      result$status <- "unavailable"
+      result$reason <- "Policy run is stale; metric-aware exports are withheld."
+      result$annual <- result$summary <- result$return_period <- data.frame()
+      result$endpoint_summary <- data.frame()
+      result$scenarios <- list()
+      result$mechanisms <- list()
+      result
+    }
+    output$metric_scope_ui <- shiny::renderUI({
+      result <- metric_decomposition()
+      selected <- selected_metric_result()
+      reason <- metric_status_text(selected, result)
+      if (!is.null(reason)) {
+        return(shiny::div(class = "alert alert-warning", role = "status", reason))
+      }
+      metadata <- metric_meta() %||% list()
+      scenario <- metric_scenario() %||% "Selected scenario"
+      row <- selected$summary[1L, , drop = FALSE]
+      same_focus <- identical(scenario, result$metadata$focus_scenario %||% focus_scenario())
+      shiny::tagList(
+        shiny::div(class = "selection-card-pill", paste(
+          metadata$outcome_label %||% metadata$outcome_name %||% "Selected outcome",
+          metadata$label %||% metadata$method %||% "Selected metric",
+          paste0("levels: ", metadata$level_unit %||% "native units"),
+          paste0("changes: ", metadata$change_unit %||% "native units"),
+          sep = " · "
+        )),
+        shiny::p(class = "diagnostic-note", metric_context_note(metadata)),
+        shiny::p(class = "diagnostic-note", paste0(
+          "Scenario: ", scenario,
+          if (!same_focus) " · Different scenario from Results headline" else " · Results focus scenario",
+          " · ", metadata$population_scope %||% "Fixed survey population",
+          " · ", metadata$weight_interpretation %||% "Canonical annual metric aggregation",
+          "; years averaged within model then climate models weighted equally",
+          " · row-aligned annual weather correction (", metadata$correction_version %||% "unavailable", ")",
+          " · ", metadata$component_order %||% "main -> repositioning -> interaction",
+          " · central estimates only"
+        )),
+        if ("n_dropped_model_years" %in% names(row) && is.finite(row$n_dropped_model_years[[1L]]) && row$n_dropped_model_years[[1L]] > 0L) {
+          shiny::p(class = "diagnostic-note", paste(row$n_dropped_model_years[[1L]],
+            "matched model/year cells dropped from shared support."))
+        }
+      )
+    })
+    metric_contribution_data <- reactive({
+      selected <- selected_metric_result()
+      reason <- metric_status_text(selected)
+      if (!is.null(reason)) return(.policy_metric_export_annotate(data.frame(),
+        metric_decomposition(), metric_scenario(), export_scope = "expected_endpoint_equal_model_mean",
+        so = so(), analysis_unit = analysis_unit(), status = metric_display_status(selected),
+        reason = reason))
+      metadata <- metric_meta() %||% list()
+      row <- selected$summary[1L, , drop = FALSE]
+      result <- metric_decomposition()
+      repositioning_modeled <- isTRUE(result$metadata$repositioning_modeled)
+      interaction_included <- isTRUE(result$metadata$interaction_included)
+      value <- function(field, change = FALSE) {
+        format_metric_value(row[[field]][[1L]], metadata, change = change)
+      }
+      out <- data.frame(
+        `Cumulative state / contribution` = c("Baseline", "After main package", "After repositioning", "Policy", "Main package", "Repositioning", "Weather-policy interaction", "Resilience subtotal", "Total policy effect"),
+        `Selected metric value` = c(value("baseline"), value("after_main"), value("after_repositioning"), value("policy"), value("main", TRUE), if (repositioning_modeled) value("repositioning", TRUE) else "Not modeled by this engine", if (interaction_included) value("interaction", TRUE) else "Not included in fitted model", if (repositioning_modeled || interaction_included) value("resilience", TRUE) else "Unavailable", value("total", TRUE)),
+        `Native numeric value` = c(row$baseline, row$after_main, row$after_repositioning, row$policy, row$main, if (repositioning_modeled) row$repositioning else NA_real_, if (interaction_included) row$interaction else NA_real_, if (repositioning_modeled || interaction_included) row$resilience else NA_real_, row$total),
+        check.names = FALSE, stringsAsFactors = FALSE
+      )
+      out$native_field <- c("baseline", "after_main", "after_repositioning", "policy",
+        "main", "repositioning", "interaction", "resilience", "total")
+      out$scenario <- metric_scenario()
+      out$center_method <- row$center_method[[1L]] %||% "equal_model_mean"
+      out$n_models <- row$n_models[[1L]]
+      out$n_model_years <- row$n_model_years[[1L]]
+      out$n_dropped_model_years <- row$n_dropped_model_years[[1L]]
+      out$scope <- row$scope[[1L]] %||% "production_prediction_rows"
+      out <- .policy_metric_export_annotate(out, result, metric_scenario(),
+        export_scope = "expected_endpoint_equal_model_mean", so = so(), analysis_unit = analysis_unit(),
+        status = selected$status, reason = selected$reason)
+      out
+    })
+    output$metric_contribution_table <- reactable::renderReactable({
+      tbl <- metric_contribution_data()
+      context_columns <- setdiff(names(tbl), c("Cumulative state / contribution",
+        "Selected metric value", "Native numeric value", "native_field", "scenario",
+        "center_method", "n_models", "n_model_years", "n_dropped_model_years",
+        "scope", "availability", "reason"))
+      columns <- if (all(c("Cumulative state / contribution", "Selected metric value", "Native numeric value") %in% names(tbl))) {
+        c(list(
+          `Cumulative state / contribution` = reactable::colDef(show = TRUE, minWidth = 230),
+          `Selected metric value` = reactable::colDef(show = TRUE, minWidth = 180),
+          `Native numeric value` = reactable::colDef(show = TRUE,
+            format = reactable::colFormat(digits = 6)),
+          native_field = reactable::colDef(show = FALSE),
+          scenario = reactable::colDef(show = FALSE),
+          center_method = reactable::colDef(show = FALSE),
+          n_models = reactable::colDef(show = FALSE),
+          n_model_years = reactable::colDef(show = FALSE),
+          n_dropped_model_years = reactable::colDef(show = FALSE),
+          scope = reactable::colDef(show = FALSE),
+          availability = reactable::colDef(show = FALSE),
+          reason = reactable::colDef(show = FALSE)
+        ), stats::setNames(rep(list(reactable::colDef(show = FALSE)), length(context_columns)),
+          context_columns))
+      } else stats::setNames(lapply(names(tbl), function(name) {
+        reactable::colDef(show = name %in% c("status", "availability", "reason"),
+          class = "wise-dt-wrap", minWidth = 130)
+      }), names(tbl))
+      reactable::reactable(tbl, compact = TRUE, searchable = FALSE, pagination = FALSE,
+        defaultColDef = reactable::colDef(show = FALSE), highlight = TRUE, rowStyle = function(index) {
+          if (index == 8L) list(background = "#e8f3f5", fontWeight = "700") else NULL
+        }, columns = columns)
+    })
+    output$metric_contribution_unit_ui <- shiny::renderUI({
+      metadata <- metric_meta() %||% list()
+      shiny::tags$p(class = "diagnostic-note", paste(
+        "Displayed levels:", metadata$level_unit %||% "native outcome units",
+        "· displayed changes:", metadata$change_unit %||% "native units",
+        "· numeric values remain in native metric units in the table/export."
+      ))
+    })
+    metric_tail_data <- reactive({
+      selected <- selected_metric_result()
+      result <- metric_decomposition()
+      reason <- metric_status_text(selected, result)
+      tails <- if (is.null(reason)) selected$return_period else NULL
+      if (!is.data.frame(tails) || !nrow(tails)) {
+        return(.policy_metric_export_annotate(data.frame(), result, metric_scenario(),
+          export_scope = "adverse_probability_or_baseline_selected_years", so = so(),
+          analysis_unit = analysis_unit(), status = metric_display_status(selected),
+          reason = reason %||% "Adverse attribution unavailable"))
+      }
+      tails <- tails[tails$scope %in% c("equal_probability", "baseline_adverse_years"), , drop = FALSE]
+      tails$return_period_label <- paste0("1-in-", format(tails$return_period, trim = TRUE))
+      meta <- metric_meta() %||% list()
+      display <- function(field) {
+        values <- if (field %in% names(tails)) tails[[field]] else rep(NA_real_, nrow(tails))
+        vapply(values, format_metric_value, character(1), metadata = meta, change = TRUE)
+      }
+      tails$main_display <- display("main")
+      tails$repositioning_display <- if (identical(result$mechanisms$repositioning_status, "modeled")) display("repositioning") else "Not modeled by this engine"
+      tails$interaction_display <- if (identical(result$mechanisms$interaction_status, "included")) display("interaction") else "Not included in fitted model"
+      tails$resilience_display <- display("resilience")
+      tails$total_display <- display("total")
+      tails$scope_label <- ifelse(tails$scope == "equal_probability",
+        "Outcome-distribution quantile contrast (not necessarily same years)",
+        "Mean on same baseline-selected adverse years")
+      tails$availability <- ifelse(tails$status == "ok", "Available", tails$reason)
+      for (field in c("baseline", "after_main", "after_repositioning", "policy",
+                      "main", "repositioning", "interaction", "resilience", "total")) {
+        tails[[paste0(field, "_native")]] <- if (field %in% names(tails)) tails[[field]] else NA_real_
+      }
+      for (field in c("achieved_fraction_min", "achieved_fraction_max")) {
+        if (!field %in% names(tails)) tails[[field]] <- NA_real_
+      }
+      for (field in c("selected_year_keys", "center_method", "quantile_method")) {
+        if (!field %in% names(tails)) tails[[field]] <- ""
+      }
+      out <- tails[, c("return_period_label", "scope_label", "main_display",
+        "repositioning_display", "interaction_display", "resilience_display",
+        "total_display", intersect(c("n_models", "n_model_years"), names(tails)),
+        intersect(c("scenario", "member", "model_id", "sim_year"), names(tails)),
+        "baseline_native", "after_main_native", "after_repositioning_native", "policy_native",
+        "main_native", "repositioning_native", "interaction_native", "resilience_native",
+        "total_native", "probability", "achieved_fraction_min", "achieved_fraction_max",
+        "selected_year_keys", "center_method", "quantile_method", "availability"), drop = FALSE]
+      names(out) <- c("Return period", "Scope", "Main", "Repositioning", "Interaction",
+        "Resilience", "Total", if ("n_models" %in% names(out)) "Models", if ("n_model_years" %in% names(out)) "Model-years",
+        intersect(c("scenario", "member", "model_id", "sim_year"), names(tails)),
+        "Baseline native", "After main native", "After repositioning native", "Policy native",
+        "Main native", "Repositioning native", "Interaction native", "Resilience native",
+        "Total native", "Probability", "Achieved fraction min", "Achieved fraction max",
+        "Selected year keys", "Center method", "Quantile method", "Availability")
+      out$scope_identifier <- tails$scope
+      out$status <- tails$status
+      out$reason <- tails$reason
+      .policy_metric_export_annotate(out, metric_decomposition(), metric_scenario(),
+        export_scope = "adverse_probability_or_baseline_selected_years", so = so(),
+        analysis_unit = analysis_unit(), status = selected$status, reason = selected$reason)
+    })
+    output$metric_tail_table <- reactable::renderReactable({
+      tbl <- metric_tail_data()
+      visible <- c("Return period", "Scope", "Main", "Repositioning", "Interaction",
+        "Resilience", "Total", "Models", "Model-years")
+      if (!"Return period" %in% names(tbl)) visible <- c(visible, "status", "availability", "reason")
+      reactable::reactable(tbl, compact = TRUE, searchable = FALSE, defaultPageSize = 8,
+        defaultColDef = reactable::colDef(show = FALSE), highlight = TRUE,
+        columns = stats::setNames(lapply(names(tbl), function(name) {
+          if (is.numeric(tbl[[name]])) reactable::colDef(show = name %in% visible,
+            format = reactable::colFormat(digits = 2))
+          else reactable::colDef(show = name %in% visible,
+            class = "wise-dt-wrap", minWidth = 130)
+        }), names(tbl)))
+    })
+    output$metric_tail_note_ui <- shiny::renderUI({
+      selected <- selected_metric_result()
+      tails <- selected$return_period %||% data.frame()
+      fixed <- tails[tails$scope == "baseline_adverse_years" & tails$status == "ok", , drop = FALSE]
+      if (!nrow(fixed)) return(NULL)
+      shiny::tags$p(class = "diagnostic-note", paste0(
+        "Same-year rows use baseline-selected adverse years; achieved empirical tail fraction ",
+        format(min(fixed$achieved_fraction_min), digits = 3), " to ",
+        format(max(fixed$achieved_fraction_max), digits = 3),
+        ". Year keys and model support are retained in the underlying result."
+      ))
+    })
+    output$metric_mechanism_status_ui <- shiny::renderUI({
+      selected <- selected_metric_result()
+      result <- metric_decomposition()
+      reason <- metric_status_text(selected, result)
+      if (!is.null(reason)) return(shiny::div(class = "alert alert-warning", reason))
+      shiny::tags$p(class = "diagnostic-note", paste(
+        paste("Repositioning:", result$mechanisms$repositioning_status %||% "Unavailable"),
+        paste("Interaction:", result$mechanisms$interaction_status %||% "Unavailable"),
+        result$mechanisms$metadata$rank_convention %||% "Rank convention unavailable.",
+        paste("Scope:", result$mechanisms$metadata$scope %||% "production prediction rows"),
+        "Continuous changes are channel-implied model-outcome units per fitted weather-input unit; binned weather values are category-versus-reference contrasts, not per-unit slopes. Neither is a complete model derivative."
+      ))
+    })
+    metric_mechanism_data <- reactive({
+      selected <- selected_metric_result()
+      result <- metric_decomposition()
+      reason <- metric_status_text(selected, result)
+      tbl <- if (is.null(reason)) result$mechanisms$summary else NULL
+      if (!is.data.frame(tbl) || !nrow(tbl)) return(.policy_metric_export_annotate(data.frame(),
+        result, metric_scenario(), scale = "model_scale", so = so(),
+        analysis_unit = analysis_unit(), status = metric_display_status(selected),
+        reason = reason %||% "Sensitivity mechanism values are not available for this run."))
+      scenario <- metric_scenario()
+      tbl <- tbl[tbl$scenario == scenario, , drop = FALSE]
+      if (!nrow(tbl)) return(.policy_metric_export_annotate(data.frame(), result, scenario,
+        scale = "model_scale", so = so(), analysis_unit = analysis_unit(),
+        status = "unavailable", reason = "No weather-sensitivity rows are available for the selected scenario."))
+      tbl$rank_movement <- ifelse(is.finite(tbl$tau_pre) & is.finite(tbl$tau_post),
+        paste0(formatC(tbl$tau_pre, digits = 3, format = "f"), " -> ",
+          formatC(tbl$tau_post, digits = 3, format = "f")), "Not modeled")
+      out <- tbl[, c("scenario", intersect(c("member", "model_id", "sim_year"), names(tbl)),
+        "hazard", "category", "contrast", "repositioning", "interaction",
+        "positive_repositioning_share", "negative_repositioning_share",
+        "positive_interaction_share", "negative_interaction_share", "tau_pre", "tau_post", "rank_movement",
+        "model_units", "weather_units", "n_models"), drop = FALSE]
+      out$scale <- "model_scale"
+      out$uncertainty_status <- "central_only"
+      result <- metric_decomposition()
+      out <- .policy_metric_export_annotate(out, result, scenario,
+        export_scope = "production_prediction_rows", scale = "model_scale",
+        so = so(), analysis_unit = analysis_unit())
+      out$rank_convention <- result$mechanisms$metadata$rank_convention %||% "fixed main-derived pre/post ranks"
+      out$included_terms <- result$mechanisms$metadata$included_terms %||% "repositioning and interaction channel changes only"
+      out$excluded_terms <- result$mechanisms$metadata$excluded_terms %||% "not a complete fitted-model derivative"
+      out$availability <- "ok"
+      out
+    })
+
+    metric_export_scenario_result <- function(result, scenario, field) {
+      selected <- result$scenarios[[scenario]]
+      if (is.null(selected) || !identical(selected$status, "ok")) {
+        return(.policy_metric_export_annotate(data.frame(), result, scenario,
+          export_scope = paste0("scenario_", field), so = so(), analysis_unit = analysis_unit(),
+          status = selected$status %||% "unavailable",
+          reason = selected$reason %||% result$reason))
+      }
+      data <- selected[[field]]
+      if (identical(field, "annual") && nrow(data)) data$center_method <- "annual_model_year"
+      .policy_metric_export_annotate(data, result, scenario,
+        export_scope = paste0("scenario_", field), so = so(), analysis_unit = analysis_unit(),
+        status = selected$status, reason = selected$reason)
+    }
+    metric_expected_export <- function() {
+      result <- metric_export_result()
+      scenario <- metric_scenario()
+      selected <- result$scenarios[[scenario]]
+      if (is.null(selected) || !identical(selected$status, "ok") ||
+          !is.data.frame(selected$summary) || !nrow(selected$summary)) {
+        endpoint <- result$endpoint_summary
+        if (!is.data.frame(endpoint) || !nrow(endpoint)) {
+          return(.policy_metric_export_annotate(data.frame(), result, scenario,
+            export_scope = "expected_endpoint_equal_model_mean", so = so(), analysis_unit = analysis_unit(),
+            status = selected$status %||% result$status,
+            reason = selected$reason %||% result$reason))
+        }
+        endpoint <- endpoint[endpoint$scenario == scenario, , drop = FALSE]
+        if (nrow(endpoint)) {
+          endpoint$availability <- "endpoint_summary_available_channels_unavailable"
+          endpoint$reason <- selected$reason %||% result$reason %||% "Channel attribution unavailable."
+        }
+        return(.policy_metric_export_annotate(endpoint, result, scenario,
+          export_scope = "expected_endpoint_equal_model_mean_channels_unavailable",
+          so = so(), analysis_unit = analysis_unit(), status = "endpoint_available_channels_unavailable",
+          reason = selected$reason %||% result$reason))
+      }
+      expected <- selected$summary
+      expected$center_method <- "equal_model_mean"
+      .policy_metric_export_annotate(expected, result, scenario,
+        export_scope = "expected_endpoint_equal_model_mean", so = so(), analysis_unit = analysis_unit())
+    }
+    metric_annual_export <- function() {
+      result <- metric_export_result()
+      scenario <- metric_scenario()
+      metric_export_scenario_result(result, scenario, "annual")
+    }
+    metric_tail_export <- function(scopes) {
+      result <- metric_export_result()
+      scenario <- metric_scenario()
+      selected <- result$scenarios[[scenario]]
+      rows <- if (is.list(selected) && identical(selected$status, "ok")) selected$return_period else NULL
+      rows <- if (is.data.frame(rows) && nrow(rows)) rows[rows$scope %in% scopes, , drop = FALSE] else data.frame()
+      label <- if (identical(scopes, "equal_probability")) {
+        "equal_probability_cumulative_quantiles"
+      } else "baseline_selected_adverse_years"
+      .policy_metric_export_annotate(rows, result, scenario,
+        export_scope = label, so = so(), analysis_unit = analysis_unit(),
+        status = if (nrow(rows)) selected$status %||% "unavailable" else "unavailable",
+        reason = selected$reason %||% if (!nrow(rows)) "No rows for this adverse-attribution scope." else result$reason)
+    }
+    metric_mechanism_export <- function() {
+      result <- metric_export_result()
+      scenario <- metric_scenario()
+      selected <- result$scenarios[[scenario]]
+      summary <- result$mechanisms$summary
+      if (is.data.frame(summary) && nrow(summary)) summary <- summary[summary$scenario == scenario, , drop = FALSE]
+      annual <- if (is.list(selected) && identical(selected$status, "ok")) selected$mechanisms else NULL
+      if (is.data.frame(summary) && nrow(summary)) {
+        summary$record_type <- "equal_model_mean_mechanism_summary"
+        summary$center_method <- "equal_model_mean"
+      }
+      if (is.data.frame(annual) && nrow(annual)) {
+        annual$record_type <- "annual_mechanism_diagnostic"
+        annual$center_method <- "annual_model_year"
+      }
+      rows <- dplyr::bind_rows(summary, annual)
+      rows <- .policy_metric_export_annotate(rows, result, scenario,
+        export_scope = "production_prediction_rows", scale = "model_scale",
+        so = so(), analysis_unit = analysis_unit(),
+        status = selected$status %||% "unavailable", reason = selected$reason %||% result$reason)
+      rows$rank_convention <- result$mechanisms$metadata$rank_convention %||%
+        "fixed main-derived pre/post ranks; interaction evaluated at post-main rank"
+      rows$included_terms <- result$mechanisms$metadata$included_terms %||%
+        "canonical repositioning and weather-policy interaction channel changes only"
+      rows$excluded_terms <- result$mechanisms$metadata$excluded_terms %||%
+        "not a complete derivative of nonlinear fitted model terms"
+      rows$repositioning_status <- result$mechanisms$repositioning_status %||% "unavailable"
+      rows$interaction_status <- result$mechanisms$interaction_status %||% "unavailable"
+      rows
+    }
+    wise_export_table(
+      key = "policy_metric_contributions",
+      label = "Metric-aware expected and annual policy contributions",
+      step = 3L,
+      fun = function() {
+        result <- metric_export_result()
+        scenario <- metric_scenario()
+        expected <- metric_expected_export()
+        annual <- metric_annual_export()
+        # Rows are explicitly tagged so the equal-model expected summary is
+        # not mistaken for a model/year observation.
+        if (nrow(expected)) expected$record_type <- "expected_summary"
+        if (nrow(annual)) annual$record_type <- "annual_model_year"
+        dplyr::bind_rows(expected, annual)
+      },
+      description = "Native metric-aware cumulative levels and ordered contributions for the equal-model expected summary and annual model-year states; central estimates only."
+    )
+    wise_export_table(
+      key = "policy_metric_adverse_attribution",
+      label = "Metric-aware adverse-weather attribution",
+      step = 3L,
+      fun = function() {
+        equal_probability <- metric_tail_export("equal_probability")
+        if (nrow(equal_probability)) equal_probability$record_type <- "equal_probability_quantile_contrast"
+        baseline_years <- metric_tail_export("baseline_adverse_years")
+        if (nrow(baseline_years)) baseline_years$record_type <- "baseline_selected_adverse_year_mean"
+        dplyr::bind_rows(equal_probability, baseline_years)
+      },
+      description = "Native cumulative-state attribution for equal-probability outcome quantiles and the separately scoped mean on identical baseline-selected adverse years, including probabilities, selected keys, support, and achieved tail fraction."
+    )
+    wise_export_table(
+      key = "policy_weather_sensitivity",
+      label = "Policy weather-sensitivity mechanisms",
+      step = 3L,
+      fun = metric_mechanism_export,
+      description = "Hazard-specific channel-implied sensitivity changes and rank diagnostics on the model scale, distinct from selected-metric contributions; includes weather units, categories, support, and central-only uncertainty status."
+    )
+    output$metric_mechanism_table <- reactable::renderReactable({
+      tbl <- metric_mechanism_data()
+      visible <- c("hazard", "category", "contrast", "repositioning", "interaction",
+        "positive_repositioning_share", "negative_repositioning_share",
+        "positive_interaction_share", "negative_interaction_share", "rank_movement",
+        "model_units", "weather_units", "n_models")
+      if (!"hazard" %in% names(tbl)) visible <- c(visible, "status", "availability", "reason")
+      reactable::reactable(tbl, compact = TRUE, searchable = FALSE, defaultPageSize = 10,
+        defaultColDef = reactable::colDef(show = FALSE), highlight = TRUE,
+        columns = stats::setNames(lapply(names(tbl), function(name) {
+          if (is.numeric(tbl[[name]])) reactable::colDef(show = name %in% visible,
+            format = reactable::colFormat(digits = 4))
+          else reactable::colDef(show = name %in% visible,
+            class = "wise-dt-wrap", minWidth = 130)
+        }), names(tbl)))
+    })
+    output$metric_rif_curve_ui <- shiny::renderUI({
+      result <- metric_decomposition()
+      selected <- selected_metric_result()
+      if (is.null(selected) || !identical(selected$status, "ok") ||
+          !identical(result$mechanisms$repositioning_status, "modeled") ||
+          is.null(result$mechanisms$fitted_curve)) return(NULL)
+      shiny::tagList(
+        shiny::h5("Unchanged Step 1 weather-sensitivity curve"),
+        shiny::tags$p(class = "diagnostic-note", result$mechanisms$curve_scope),
+        wise_chart_output(ns("metric_curve_plot1"),
+          paste("Unchanged fitted curve for", model_fit()$weather_terms[[1L]]), height = "360px"),
+        if (length(model_fit()$weather_terms) > 1L) {
+          wise_chart_output(ns("metric_curve_plot2"),
+            paste("Unchanged fitted curve for", model_fit()$weather_terms[[2L]]), height = "360px")
+        }
+      )
+    })
+    for (idx in seq_len(2L)) {
+      local({
+        i <- idx
+        output[[paste0("metric_curve_plot", i)]] <- echarts4r::renderEcharts4r({
+          result <- metric_decomposition()
+          mf <- model_fit()
+          req(!is.null(result$mechanisms$fitted_curve), length(mf$weather_terms) >= i)
+          chart <- echart_rif_weather_curve(result$mechanisms$fitted_curve,
+            mf$weather_terms[[i]], interaction_terms = mf$interaction_terms %||% character(),
+            label_fun = get_label, height = "360px")
+          req(!is.null(chart))
+          chart
+        })
+        outputOptions(output, paste0("metric_curve_plot", i), suspendWhenHidden = FALSE)
+      })
+    }
+
     get_label <- function(var_name) {
       vl <- if (is.function(variable_list)) variable_list() else variable_list
       if (is.null(vl) || is.null(var_name) || length(var_name) == 0) {
@@ -714,8 +1328,8 @@ mod_3_09_decomposition_server <- function(id,
         return(shiny::tags$p(class = "alert alert-warning", policy_method_status()$reason))
       }
       shiny::tags$p(class = "diagnostic-note", paste0(
-        "This figure summarizes the policy effect using ", weather_basis_label(),
-        ". It is not a future climate-scenario result."
+        "Illustrative technical decomposition using ", weather_basis_label(),
+        ". These transformed model-scale summaries are not selected-metric contributions or currency changes."
       ))
     })
     # Zero-arg echarts closures shared by the on-screen render and the

@@ -39,6 +39,39 @@ test_that("Step 3 cards format rate levels and absolute changes without benefit 
   expect_match(binary[[1]]$note, "indicator", fixed = TRUE)
 })
 
+test_that("resilience and adverse headline cards use metric-aware shared results", {
+  summary <- tibble::tibble(scenario = "SSP2-4.5 / 2030-2040", baseline = .32,
+    policy = .28, value = -.04, intermod_lo = -.04, intermod_hi = -.04, n_models = 2L)
+  metric <- list(
+    status = "ok", reason = NULL,
+    metadata = list(method = "headcount_ratio", label = "Poverty rate", format = "percent",
+      display_multiplier = 100, change_unit = "pp", level_unit = "percent",
+      repositioning_modeled = TRUE, interaction_included = TRUE),
+    scenarios = list("SSP2-4.5 / 2030-2040" = list(status = "ok", summary = data.frame(
+      scenario = "SSP2-4.5 / 2030-2040", baseline = .32, after_main = .30,
+      after_repositioning = .29, policy = .28, main = -.02,
+      repositioning = -.01, interaction = -.01, resilience = -.02, total = -.04))),
+    return_period = data.frame(scenario = "SSP2-4.5 / 2030-2040", return_period = 20,
+      scope = "equal_probability", status = "ok", total = -.08),
+    mechanisms = list(repositioning_status = "modeled", interaction_status = "included")
+  )
+  cards <- step3_headline_cards(summary, method = "headcount_ratio", metric_decomposition = metric)
+  expect_identical(cards[[3]]$value, "-2.00 pp")
+  expect_match(cards[[3]]$note, "Repositioning: -1.00 pp", fixed = TRUE)
+  expect_match(cards[[3]]$note, "Interaction: -1.00 pp", fixed = TRUE)
+  expect_identical(cards[[2]]$value, "-8.00 pp")
+  expect_match(cards[[2]]$note, "View adverse channel attribution", fixed = TRUE)
+
+  metric$metadata$repositioning_modeled <- FALSE
+  metric$metadata$interaction_included <- FALSE
+  metric$scenarios[[1]]$summary$resilience <- 0
+  unavailable_resilience <- step3_headline_cards(summary, method = "headcount_ratio",
+    metric_decomposition = metric)
+  expect_identical(unavailable_resilience[[3]]$value, "Unavailable")
+  expect_match(unavailable_resilience[[3]]$note, "Not modeled by this engine", fixed = TRUE)
+  expect_match(unavailable_resilience[[3]]$note, "Not included in fitted model", fixed = TRUE)
+})
+
 test_that("Results module returns selection API while preserving uncertainty reactive", {
   hs <- list(so = list(name = "welfare", type = "numeric", transform = "none"),
     pipeline = list(y_point = c(1, 2, 3, 4), sim_year = c(2020, 2020, 2021, 2021),

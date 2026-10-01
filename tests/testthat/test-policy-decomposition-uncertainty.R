@@ -218,6 +218,163 @@ test_that("decomposition module renders core plots for OLS and RIF schemas", {
   check_module(rif, "rif")
 })
 
+test_that("primary metric decomposition renders native contributions, tails and mechanisms", {
+  summary <- data.frame(scenario = "SSP2-4.5", baseline = .32, after_main = .30,
+    after_repositioning = .29, policy = .28, main = -.02, repositioning = -.01,
+    interaction = -.01, resilience = -.02, total = -.04, n_models = 2L,
+    n_model_years = 60L, n_dropped_model_years = 0L, center_method = "equal_model_mean",
+    scope = "production_prediction_rows")
+  annual <- data.frame(scenario = "SSP2-4.5", member = "model-a", model_id = "model-a",
+    sim_year = 2020L, baseline = .31, after_main = .30, after_repositioning = .29,
+    policy = .28, main = -.01, repositioning = -.01, interaction = -.01,
+    resilience = -.02, total = -.03, n_prediction_rows = 100L, n_retained_rows = 100L,
+    n_excluded_rows = 0L, parity_error = 0, requested_residuals = "original",
+    effective_residuals = "none", scope = "production_prediction_rows")
+  tails <- data.frame(scenario = rep("SSP2-4.5", 2), return_period = c(20, 20),
+    scope = c("equal_probability", "baseline_adverse_years"), status = "ok", reason = "",
+    baseline = .1, after_main = .09, after_repositioning = .08, policy = .07,
+    main = -.01, repositioning = -.01, interaction = -.01, resilience = -.02,
+    total = -.03, probability = .05, n_models = 2L, n_model_years = 60L,
+    achieved_fraction_min = c(NA, .05), achieved_fraction_max = c(NA, .05),
+    selected_year_keys = c(NA_character_, "model-a:2020"),
+    center_method = c("median_model_quantile", "equal_model_mean"),
+    quantile_method = c("rank_interp_n_p_plus_half", "selected_tail_mean_ceiling_n_p_year_key_ties"))
+  mechanisms <- data.frame(scenario = "SSP2-4.5", hazard = "temp", category = NA_character_,
+    contrast = "continuous_coefficient_change", repositioning = .02, interaction = -.01,
+    positive_repositioning_share = .6, negative_repositioning_share = .4,
+    positive_interaction_share = .2, negative_interaction_share = .8, tau_pre = .4,
+    tau_post = .6, model_units = "log outcome units", weather_units = "C", n_models = 2L)
+  result <- list(status = "ok", reason = NULL, summary = summary, return_period = tails,
+    annual = annual,
+    mechanisms = list(summary = mechanisms, annual = transform(mechanisms, sim_year = 2020L,
+      model_id = "model-a"), repositioning_status = "modeled",
+      interaction_status = "included", fitted_curve = NULL),
+    metadata = list(method = "headcount_ratio", label = "Poverty rate", format = "percent",
+      display_multiplier = 100, change_unit = "pp", level_unit = "percent",
+      component_order = "main -> repositioning -> interaction", correction_version = "row_aligned_annual_v1",
+      focus_scenario = "SSP2-4.5", repositioning_modeled = TRUE, interaction_included = TRUE,
+      population_scope = "fixed survey rows", weight_interpretation = "survey weighted",
+      native_unit = "fraction", threshold_kind = "selected poverty line", threshold_value = 3,
+      threshold_unit = "selected PPP units (2021)", exposure_source = "step2_prediction_row_mapping",
+      run_identity = "run-1", requested_residuals = "original", effective_residuals = "none",
+      uncertainty = "central_only"),
+    scenarios = list("SSP2-4.5" = list(status = "ok", summary = summary,
+      annual = annual, return_period = tails, mechanisms = transform(mechanisms,
+        sim_year = 2020L, model_id = "model-a"))))
+  stale <- shiny::reactiveVal(FALSE)
+  shiny::testServer(wiseapp:::mod_3_09_decomposition_server,
+    args = list(id = "decomposition", metric_decomposition = shiny::reactiveVal(result),
+      focus_scenario = shiny::reactiveVal("SSP2-4.5"),
+      metric_context = shiny::reactiveVal(result$metadata),
+      stale = stale,
+      so = shiny::reactiveVal(list(name = "welfare", type = "numeric"))), {
+      session$flushReact()
+      expect_false(is.null(session$output$metric_scope_ui))
+      expect_false(is.null(session$output$metric_contribution_table))
+      expect_false(is.null(session$output$metric_tail_table))
+      expect_false(is.null(session$output$metric_mechanism_table))
+      contribution_html <- as.character(session$output$metric_contribution_table)
+      expect_true(grepl('"show":true', contribution_html, fixed = TRUE))
+      expect_true(grepl("Cumulative state / contribution", contribution_html, fixed = TRUE))
+      tail_html <- as.character(session$output$metric_tail_table)
+      expect_true(grepl('"show":true', tail_html, fixed = TRUE))
+      expect_true(grepl('"show":false', tail_html, fixed = TRUE))
+      mechanism_html <- as.character(session$output$metric_mechanism_table)
+      expect_true(grepl('"show":true', mechanism_html, fixed = TRUE))
+      expect_true(grepl('"show":false', mechanism_html, fixed = TRUE))
+      expect_match(as.character(htmltools::renderTags(session$output$metric_scope_ui)$html),
+        "SSP2-4.5", fixed = TRUE)
+      expect_equal(metric_contribution_data()[["Native numeric value"]][9], -.04)
+      visible_contributions <- metric_contribution_data()
+      expect_true(all(c("metric_id", "threshold_value", "run_identity", "correction_version",
+        "scale", "uncertainty_status", "n_models", "native_field") %in% names(visible_contributions)))
+      expect_true(all(visible_contributions$run_identity == "run-1"))
+      visible_tails <- metric_tail_data()
+      expect_true(all(c("Probability", "Selected year keys", "Quantile method", "Availability",
+        "run_identity", "correction_version", "component_order", "uncertainty_status") %in% names(visible_tails)))
+      visible_mechanisms <- metric_mechanism_data()
+      expect_true(all(c("hazard", "category", "tau_pre", "tau_post", "run_identity",
+        "correction_version", "scale", "rank_convention", "uncertainty_status") %in%
+        names(visible_mechanisms)))
+      items <- wise_export_items(session)
+      export_keys <- c("policy_metric_contributions", "policy_metric_adverse_attribution",
+        "policy_weather_sensitivity")
+      expect_true(all(export_keys %in% names(items)))
+      contributions <- items$policy_metric_contributions$fun()
+      expect_true(all(c("record_type", "baseline", "policy", "main", "repositioning",
+        "interaction", "resilience", "total", .policy_metric_export_context_fields) %in%
+        names(contributions)))
+      expect_setequal(contributions$record_type, c("expected_summary", "annual_model_year"))
+      expect_equal(contributions$threshold_value, rep(3, nrow(contributions)))
+      expect_true(all(contributions$correction_version == "row_aligned_annual_v1"))
+      adverse <- items$policy_metric_adverse_attribution$fun()
+      expect_setequal(adverse$record_type, c("equal_probability_quantile_contrast",
+        "baseline_selected_adverse_year_mean"))
+      expect_true(all(c("probability", "selected_year_keys", "achieved_fraction_min",
+        "achieved_fraction_max", "quantile_method") %in% names(adverse)))
+      mechanisms_export <- items$policy_weather_sensitivity$fun()
+      expect_setequal(mechanisms_export$record_type,
+        c("equal_model_mean_mechanism_summary", "annual_mechanism_diagnostic"))
+      expect_true(all(c("hazard", "category", "contrast", "tau_pre", "tau_post",
+        "model_units", "weather_units", "rank_convention", "scale") %in% names(mechanisms_export)))
+      expect_true(all(mechanisms_export$scale == "model_scale"))
+      ui <- as.character(shiny::tagList(
+        wise_reactable_csv_button("decomposition-metric_contribution_table", "policy_metric_contributions"),
+        wise_reactable_csv_button("decomposition-metric_tail_table", "policy_metric_adverse_attribution"),
+        wise_reactable_csv_button("decomposition-metric_mechanism_table", "policy_weather_sensitivity")
+      ))
+      expect_match(ui, "policy_metric_contributions.csv", fixed = TRUE)
+      expect_match(ui, "policy_metric_adverse_attribution.csv", fixed = TRUE)
+      expect_match(ui, "policy_weather_sensitivity.csv", fixed = TRUE)
+      skip_if_not(nzchar(Sys.which("zip")), "system zip not available")
+      bundle <- withr::local_tempfile(fileext = ".zip")
+      wise_export_bundle(bundle, items, config = NULL, include = "tables")
+      dir <- withr::local_tempdir()
+      utils::unzip(bundle, exdir = dir)
+      contribution_csv <- list.files(dir, pattern = "policy-metric-contributions.*csv$",
+        full.names = TRUE)
+      expect_length(contribution_csv, 1L)
+      csv <- utils::read.csv(contribution_csv, stringsAsFactors = FALSE)
+      expect_true(all(c("baseline", "policy", "total", "threshold_value",
+        "correction_version", "center_method", "scale") %in% names(csv)))
+      expect_setequal(csv$record_type, c("expected_summary", "annual_model_year"))
+      tail_csv <- list.files(dir, pattern = "policy-metric-adverse-attribution.*csv$",
+        full.names = TRUE)
+      mechanism_csv <- list.files(dir, pattern = "policy-weather-sensitivity.*csv$",
+        full.names = TRUE)
+      expect_length(tail_csv, 1L)
+      expect_length(mechanism_csv, 1L)
+      tails_back <- utils::read.csv(tail_csv, stringsAsFactors = FALSE)
+      mechanisms_back <- utils::read.csv(mechanism_csv, stringsAsFactors = FALSE)
+      expect_setequal(tails_back$record_type, c("equal_probability_quantile_contrast",
+        "baseline_selected_adverse_year_mean"))
+      expect_true(all(c("probability", "return_period", "selected_year_keys",
+        "achieved_fraction_min", "quantile_method", "availability", "reason") %in% names(tails_back)))
+      expect_setequal(mechanisms_back$record_type,
+        c("equal_model_mean_mechanism_summary", "annual_mechanism_diagnostic"))
+      expect_true(all(c("hazard", "contrast", "category", "repositioning", "interaction",
+        "tau_pre", "tau_post", "model_units", "weather_units", "rank_convention",
+        "included_terms", "excluded_terms", "scale", "uncertainty_status") %in% names(mechanisms_back)))
+      expect_true(all(mechanisms_back$scale == "model_scale"))
+
+      stale(TRUE)
+      session$flushReact()
+      stale_contributions <- metric_contribution_data()
+      expect_equal(nrow(stale_contributions), 1L)
+      expect_identical(stale_contributions$availability, "unavailable")
+      expect_match(stale_contributions$reason, "stale", ignore.case = TRUE)
+      expect_false(any(c("baseline", "policy", "total") %in% names(stale_contributions)))
+      stale_tails <- metric_tail_data()
+      expect_equal(nrow(stale_tails), 1L)
+      expect_identical(stale_tails$availability, "unavailable")
+      expect_false(any(c("Baseline native", "Policy native", "Total native") %in% names(stale_tails)))
+      stale_mechanisms <- metric_mechanism_data()
+      expect_equal(nrow(stale_mechanisms), 1L)
+      expect_identical(stale_mechanisms$availability, "unavailable")
+      expect_false(any(c("repositioning", "interaction") %in% names(stale_mechanisms)))
+    })
+})
+
 test_that("Module 3 diagnostics formatters are callable", {
   inputs <- data.frame(
     variable = "income", baseline_mean = 1, policy_mean = 2,
@@ -260,6 +417,10 @@ test_that("decomposition UI omits redundant cards and tables", {
   expect_false(grepl("Hierarchical channel details", html, fixed = TRUE))
   expect_false(grepl("scenario_range_table", html, fixed = TRUE))
   expect_true(grepl("Weather-year basis", html, fixed = TRUE))
+  expect_true(grepl("Policy Effect in the Selected Metric", html, fixed = TRUE))
+  expect_true(grepl("How the Policy Changes Weather Sensitivity", html, fixed = TRUE))
+  expect_true(grepl("Resilience in Adverse Weather", html, fixed = TRUE))
+  expect_true(grepl("Technical Decomposition on the Model Scale", html, fixed = TRUE))
 })
 
 test_that("technical decomposition table is concise and human readable", {

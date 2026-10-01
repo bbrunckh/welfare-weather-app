@@ -1027,9 +1027,10 @@ step3_headline_cards <- function(paired_summary,
                                  timeseries_curves = NULL,
                                   method = "mean",
                                   so = NULL,
-                                 baseline_svy = NULL,
-                                 metric_context = NULL,
-                                 endpoint_status = list(status = "ok", reason = NULL)) {
+                                  baseline_svy = NULL,
+                                  metric_context = NULL,
+                                  metric_decomposition = NULL,
+                                  endpoint_status = list(status = "ok", reason = NULL)) {
   if (is.null(paired_summary) || !nrow(paired_summary) ||
     !"scenario" %in% names(paired_summary)) {
     return(NULL)
@@ -1109,19 +1110,56 @@ step3_headline_cards <- function(paired_summary,
     eff_50 <- get_eff(rp_50)
   }
 
+  metric_focus <- NULL
+  metric_focus_reason <- "Metric-aware channel summary is unavailable."
+  if (is.list(metric_decomposition) && identical(metric_decomposition$status, "ok")) {
+    candidate <- metric_decomposition$scenarios[[focus_scen]]
+    if (is.list(candidate) && identical(candidate$status, "ok") &&
+        is.data.frame(candidate$summary) && nrow(candidate$summary)) {
+      metric_focus <- candidate$summary[1L, , drop = FALSE]
+      metric_focus_reason <- NULL
+    } else if (!is.null(candidate$reason)) {
+      metric_focus_reason <- candidate$reason
+    } else if (!is.null(metric_decomposition$reason)) {
+      metric_focus_reason <- metric_decomposition$reason
+    }
+  } else if (!is.null(metric_decomposition$reason)) {
+    metric_focus_reason <- metric_decomposition$reason
+  }
+  if (!is.null(metric_focus)) {
+    tail <- metric_decomposition$return_period
+    get_metric_tail <- function(return_period) {
+      tail_row <- if (is.data.frame(tail) && nrow(tail)) {
+        tail[tail$scenario == focus_scen & tail$scope == "equal_probability" &
+          abs(tail$return_period - return_period) < 1e-8, , drop = FALSE]
+      } else data.frame()
+      if (nrow(tail_row) && identical(tail_row$status[[1L]], "ok") &&
+          is.finite(tail_row$total[[1L]])) tail_row$total[[1L]] else NA_real_
+    }
+    for (rp in c(10, 20, 50)) {
+      value <- get_metric_tail(rp)
+      if (!is.finite(value)) next
+      if (rp == 10) eff_10 <- value
+      if (rp == 20) eff_20 <- value
+      if (rp == 50) eff_50 <- value
+    }
+  }
+
   val_2 <- fmt_change(eff_20)
 
   tail_parts <- character(0)
   if (is.finite(eff_10)) tail_parts <- c(tail_parts, paste0("1-in-10: ", fmt_change(eff_10)))
   if (is.finite(eff_50)) tail_parts <- c(tail_parts, paste0("1-in-50: ", fmt_change(eff_50)))
-  line1_2 <- if (length(tail_parts)) paste(tail_parts, collapse = " \u00b7 ") else "Adverse year protection"
+  line1_2 <- if (length(tail_parts)) paste(tail_parts, collapse = " \u00b7 ") else "Adverse outcome contrast"
+  line1_2 <- paste(line1_2, "View adverse channel attribution", sep = " \u00b7 ")
 
   card2 <- list(
     label = "Policy effect at the adverse 1-in-20 threshold",
     value = val_2,
     note = line1_2,
     note_html = shiny::tagList(
-      shiny::tags$div(line1_2)
+      shiny::tags$div(line1_2),
+      shiny::tags$div(shiny::tags$a("View adverse channel attribution", href = "#metric_adverse_attribution"))
     ),
     info = paste(
       "Policy minus baseline at the same return-period probability; not necessarily the same weather years.",
@@ -1129,34 +1167,47 @@ step3_headline_cards <- function(paired_summary,
     )
   )
 
-  # 3. Resilience effect
-  lev_str <- NA_character_
-  res_str <- NA_character_
-  if (!is.null(decomp_res) && is.data.frame(decomp_res) && nrow(decomp_res) > 0) {
-    is_r <- "delta_res1" %in% names(decomp_res) && any(abs(decomp_res$delta_res1 %||% 0) > 1e-12)
-    d_sum <- tryCatch(decomposition_summary_data(decomp_res, is_rif = is_r), error = function(e) NULL)
-    if (!is.null(d_sum) && nrow(d_sum)) {
-      l_pct <- d_sum$percent[d_sum$channel_id == "level"]
-      r_pct <- d_sum$percent[d_sum$channel_id == "resilience"]
-      if (length(l_pct) && is.finite(l_pct[[1L]])) lev_str <- paste0(fmt_num(l_pct[[1L]], 0), "%")
-      if (length(r_pct) && is.finite(r_pct[[1L]])) res_str <- paste0(fmt_num(r_pct[[1L]], 0), "%")
-    }
+  # 3. Resilience effect in the selected metric. Never fall back to the
+  # historical technical decomposition when annual channel attribution fails.
+  resilience_modeled <- !is.null(metric_decomposition) &&
+    (isTRUE(metric_decomposition$metadata$repositioning_modeled) ||
+      isTRUE(metric_decomposition$metadata$interaction_included))
+  val_3 <- if (!is.null(metric_focus) && resilience_modeled &&
+      is.finite(metric_focus$resilience[[1L]])) {
+    format_metric_value(metric_focus$resilience[[1L]], spec, change = TRUE)
+  } else "Unavailable"
+  main_text <- repositioning_text <- interaction_text <- "Unavailable"
+  if (!is.null(metric_focus)) {
+    main_text <- format_metric_value(metric_focus$main[[1L]], spec, change = TRUE)
+    repositioning_modeled <- isTRUE(metric_decomposition$metadata$repositioning_modeled)
+    interaction_included <- isTRUE(metric_decomposition$metadata$interaction_included)
+    repositioning_text <- if (repositioning_modeled) {
+      format_metric_value(metric_focus$repositioning[[1L]], spec, change = TRUE)
+    } else "Not modeled by this engine"
+    interaction_text <- if (interaction_included) {
+      format_metric_value(metric_focus$interaction[[1L]], spec, change = TRUE)
+    } else "Not included in fitted model"
   }
-
-  val_3 <- if (!is.na(res_str)) res_str else "Unavailable"
-  line1_3 <- "Weather sensitivity effect"
+  line1_3 <- if (!is.null(metric_focus)) {
+    paste0("Main: ", main_text, " · Repositioning: ", repositioning_text,
+      " · Interaction: ", interaction_text)
+  } else metric_focus_reason
 
   card3 <- list(
     label = "Resilience effect",
     value = val_3,
     note = line1_3,
     note_html = shiny::tagList(
-      shiny::tags$div(line1_3)
+      shiny::tags$div(line1_3),
+      shiny::tags$div(
+        shiny::tags$a("How the Policy Changes Weather Sensitivity", href = "#metric_weather_sensitivity")
+      )
     ),
     info = paste(
-      "Decomposes the simulated policy effect into a direct level effect",
-      "(from transfers, assets, or covariate shifts) and a resilience effect",
-      "(from reduced vulnerability to weather extremes)."
+      "Ordered selected-metric attribution at simulated weather conditions:",
+      "the main policy package, then modeled repositioning, then interaction.",
+      "This is not an avoided-loss estimate. Component uncertainty is not estimated.",
+      metric_context_note(spec)
     )
   )
 
@@ -2098,6 +2149,7 @@ plot_step3_variance_contribution <- function(var_tbl) {
   })
 
   headline_cards_data_rv <- reactive({
+    if (isTRUE(stale())) return(NULL)
     summary <- headline_paired_effect_summary_rv()
     if (!nrow(summary) && !identical(policy_endpoint_status()$status, "ok")) {
       summary <- tibble::tibble(scenario = focus_scenario(), value = NA_real_,
@@ -2110,6 +2162,7 @@ plot_step3_variance_contribution <- function(var_tbl) {
       baseline_agg      = baseline_agg_scenarios(),
       policy_agg        = policy_agg_scenarios(),
       decomp_res        = decomp_result(),
+      metric_decomposition = metric_decomposition(),
       policy_svy        = policy_svy(),
       sp_scenario       = sp_scenario(),
       timeseries_curves = timeseries_curves_rv(),

@@ -560,10 +560,13 @@
         paste(annual$model_id, annual$sim_year, sep = "\r"), , drop = FALSE]
       weather <- baseline_hist$sim_summary$weather
       if (is.data.frame(weather) && all(c("name", "units") %in% names(weather))) {
-        units <- as.character(weather$units[match(diagnostic$hazard, weather$name)])
-        known <- !is.na(units) & nzchar(units)
-        diagnostic$weather_units[known] <- units[known]
-      }
+      units <- as.character(weather$units[match(diagnostic$hazard, weather$name)])
+      known <- !is.na(units) & nzchar(units)
+      continuous <- diagnostic$contrast == "continuous_coefficient_change"
+      diagnostic$weather_units[known & continuous] <- units[known & continuous]
+    }
+    diagnostic$weather_units[diagnostic$contrast != "continuous_coefficient_change"] <-
+      "category contrast; no per-unit slope"
       tails <- .policy_metric_tails(annual, nm, metadata$adverse_tail)
       # Results thresholds can use different marginal support from the matched
       # expected-effect headline. Do not assert tail parity merely by relabeling.
