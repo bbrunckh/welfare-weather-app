@@ -990,13 +990,28 @@ policy_input_diagnostics <- function(baseline_svy, policy_svy, vars = NULL) {
 
 # Step 3 Results pure helpers ----
 
+# Range-valid probabilities do not validate the analytic policy method.
+.policy_endpoint_status <- function(so, context = NULL) {
+  type <- tolower(as.character(so$type %||% ""))[1L]
+  model_type <- tolower(as.character(if (!is.null(context)) {
+    context$model_type %||% ""
+  } else ""))[1L]
+  unsupported <- type %in% c("binary", "logical", "boolean") ||
+    model_type %in% c("logistic", "logistic regression", "binomial")
+  list(status = if (unsupported) "unsupported" else "ok",
+    reason = if (unsupported) paste(
+      "Policy contrast unavailable: the analytic logistic/binary policy correction",
+      "is not a validated response-scale method, even when predictions are within [0,1]."
+    ) else NULL)
+}
+
 #' Build Step 3 Results Headline Cards
 #'
 #' Pure function returning a list of 5 card specifications for
 #' \code{headline_cards_ui()}, focused on policy outcomes:
 #' \enumerate{
 #'   \item Expected policy effect (signed change, baseline vs policy context, focus scenario)
-#'   \item Adverse 1-in-10 protection (1-in-20 and 1-in-50 tail effects)
+#'   \item Policy effect at the adverse 1-in-20 threshold (other supported tail effects)
 #'   \item Policy channels (level vs resilience breakdown)
 #'   \item Program scale & reach (population covered/affected by all implemented policies)
 #'   \item Policy robustness (model agreement & simulation scope)
@@ -1012,7 +1027,9 @@ step3_headline_cards <- function(paired_summary,
                                  timeseries_curves = NULL,
                                   method = "mean",
                                   so = NULL,
-                                 baseline_svy = NULL) {
+                                 baseline_svy = NULL,
+                                 metric_context = NULL,
+                                 endpoint_status = list(status = "ok", reason = NULL)) {
   if (is.null(paired_summary) || !nrow(paired_summary) ||
     !"scenario" %in% names(paired_summary)) {
     return(NULL)
@@ -1022,27 +1039,20 @@ step3_headline_cards <- function(paired_summary,
   fut_effects <- paired_summary[!grepl("^Historical", levels), , drop = FALSE]
   focus <- if (nrow(fut_effects)) fut_effects[1L, , drop = FALSE] else paired_summary[1L, , drop = FALSE]
   focus_scen <- as.character(focus$scenario[[1L]])
+  spec <- metric_context %||% metric_metadata(method, so)
+  fmt_level <- function(x) if (is.finite(x)) format_metric_value(x, spec) else "Unavailable"
+  fmt_change <- function(x) if (is.finite(x)) format_metric_value(x, spec, change = TRUE) else "Unavailable"
 
-  # Baseline & Policy absolute levels context
-  b_mean <- NA_real_
-  p_mean <- NA_real_
-  if (!is.null(baseline_agg) && !is.null(policy_agg)) {
-    b_entry <- baseline_agg[[focus_scen]]
-    p_entry <- policy_agg[[focus_scen]]
-    if (!is.null(b_entry) && !is.null(b_entry$out) && "value" %in% names(b_entry$out)) {
-      b_mean <- mean(b_entry$out$value, na.rm = TRUE)
-    }
-    if (!is.null(p_entry) && !is.null(p_entry$out) && "value" %in% names(p_entry$out)) {
-      p_mean <- mean(p_entry$out$value, na.rm = TRUE)
-    }
-  }
+  # Levels and contrast must use the same matched model/year support.
+  b_mean <- if ("baseline" %in% names(focus)) focus$baseline[[1L]] else NA_real_
+  p_mean <- if ("policy" %in% names(focus)) focus$policy[[1L]] else NA_real_
 
   # 1. Expected policy effect
   effect_val <- focus$value[[1L]] %||% focus$effect[[1L]] %||% NA_real_
-  val_1 <- if (is.finite(effect_val)) sprintf("%+.2f", effect_val) else "Unavailable"
+  val_1 <- fmt_change(effect_val)
 
   line1_1 <- if (is.finite(b_mean) && is.finite(p_mean)) {
-    paste0("Policy: ", fmt_num(p_mean, 2), " vs Base: ", fmt_num(b_mean, 2))
+    paste0("Policy: ", fmt_level(p_mean), " vs Base: ", fmt_level(b_mean))
   } else {
     "Paired policy minus baseline"
   }
@@ -1055,15 +1065,22 @@ step3_headline_cards <- function(paired_summary,
   card1 <- list(
     label = "Expected policy effect",
     value = val_1,
-    note = paste(line1_1, line2_1, sep = " \u00b7 "),
+    note = paste(line1_1, line2_1, "Equal-model mean", sep = " \u00b7 "),
     note_html = shiny::tagList(
       shiny::tags$div(line1_1),
-      shiny::tags$div(style = "font-weight: 600;", line2_1)
+      shiny::tags$div(style = "font-weight: 600;", line2_1),
+      shiny::tags$div("Equal-model mean")
     ),
     info = paste(
-      "Average paired difference (policy minus baseline) across simulated weather",
-      "years and climate models for the fixed population. A positive value",
-      "indicates higher welfare under the policy."
+      "Paired difference (policy minus baseline) for the fixed population.",
+      "Years averaged within model; climate models weighted equally. A positive value",
+      "indicates an increase in the selected metric, not necessarily a benefit.",
+      metric_context_note(spec),
+      if ("n_dropped_model_years" %in% names(focus) &&
+          focus$n_dropped_model_years[[1L]] > 0) {
+        paste(focus$n_dropped_model_years[[1L]],
+          "nonfinite matched model/year cells excluded from both endpoints and effect.")
+      } else ""
     )
   )
 
@@ -1092,24 +1109,23 @@ step3_headline_cards <- function(paired_summary,
     eff_50 <- get_eff(rp_50)
   }
 
-  val_2 <- if (is.finite(eff_20)) sprintf("%+.2f", eff_20) else "Unavailable"
+  val_2 <- fmt_change(eff_20)
 
   tail_parts <- character(0)
-  if (is.finite(eff_10)) tail_parts <- c(tail_parts, paste0("1-in-10: ", sprintf("%+.2f", eff_10)))
-  if (is.finite(eff_50)) tail_parts <- c(tail_parts, paste0("1-in-50: ", sprintf("%+.2f", eff_50)))
+  if (is.finite(eff_10)) tail_parts <- c(tail_parts, paste0("1-in-10: ", fmt_change(eff_10)))
+  if (is.finite(eff_50)) tail_parts <- c(tail_parts, paste0("1-in-50: ", fmt_change(eff_50)))
   line1_2 <- if (length(tail_parts)) paste(tail_parts, collapse = " \u00b7 ") else "Adverse year protection"
 
   card2 <- list(
-    label = "Adverse 1-in-20 year protection",
+    label = "Policy effect at the adverse 1-in-20 threshold",
     value = val_2,
     note = line1_2,
     note_html = shiny::tagList(
       shiny::tags$div(line1_2)
     ),
     info = paste(
-      "Paired policy effect during severe adverse weather years (1-in-10, 1-in-20,",
-      "and 1-in-50 year events). Compares policy and baseline outcomes at identical",
-      "return-period probabilities, evaluating extreme-year loss buffering."
+      "Policy minus baseline at the same return-period probability; not necessarily the same weather years.",
+      "Thresholds retain the median across climate models, not the equal-model-mean expected headline."
     )
   )
 
@@ -1232,13 +1248,25 @@ step3_headline_cards <- function(paired_summary,
       shiny::tags$div(style = "font-weight: 600;", line2_5)
     ),
     info = paste(
-      "Consistency of the policy benefit across all simulated CMIP6 climate models",
+      "Consistency of the signed policy change across all simulated CMIP6 climate models",
       "and weather years. Disagreement across models indicates climate uncertainty",
       "in policy effectiveness."
     )
   )
 
-  list(card1, card2, card3, card4, card5)
+  card1$metric_note <- metric_context_note(spec)
+  card1$note <- paste(card1$note, card1$metric_note, sep = " \u00b7 ")
+  card1$note_html <- shiny::tagList(card1$note_html, shiny::tags$div(card1$metric_note))
+  cards <- list(card1, card2, card3, card4, card5)
+  if (!identical(endpoint_status$status, "ok")) {
+    for (id in c(1L, 2L, 3L, 5L)) {
+      cards[[id]]$value <- "Unavailable"
+      cards[[id]]$note <- cards[[id]]$info <- endpoint_status$reason
+      cards[[id]]$note_html <- shiny::tags$div(endpoint_status$reason)
+    }
+  }
+
+  cards
 }
 
 step3_headline_df <- function(cards) {
@@ -1744,7 +1772,7 @@ plot_step3_variance_contribution <- function(var_tbl) {
   pov_units <- if (!is.null(so) && "units" %in% names(so) && !is.null(so[["units"]]) && nzchar(as.character(so[["units"]][1]))) {
     as.character(so[["units"]][1])
   } else {
-    "$/day, 2021 PPP"
+    "selected outcome units"
   }
   pov_val <- if (!is.null(so) && "povline" %in% names(so) && !is.null(so[["povline"]]) && is.finite(so[["povline"]][1]) && so[["povline"]][1] > 0) {
     so[["povline"]][1]
@@ -1755,6 +1783,8 @@ plot_step3_variance_contribution <- function(var_tbl) {
   tagList(
     # 0. Stale banner (INT-08), policy summary, & headline cards ----
     shiny::uiOutput(ns("stale_banner_ui")),
+    shiny::uiOutput(ns("policy_method_note")),
+    shiny::uiOutput(ns("metric_context_note")),
     shiny::uiOutput(ns("policy_summary_ui")),
 
     # 1. Analysis controls: Aggregation method & poverty line ----
@@ -1800,7 +1830,7 @@ plot_step3_variance_contribution <- function(var_tbl) {
         ),
         shiny::conditionalPanel(
           condition = paste0(
-            "['headcount_ratio','gap','fgt2','prosperity_gap']",
+            "['headcount_ratio','gap','fgt2']",
             ".indexOf(input['", ns("cmp_agg_method"), "']) > -1"
           ),
           shiny::div(
@@ -1985,7 +2015,7 @@ plot_step3_variance_contribution <- function(var_tbl) {
       shiny::tags$p(
         class = "text-muted small",
         style = "margin-top: 8px; margin-bottom: 0;",
-        "Central estimates show median outcomes across weather years and climate models for baseline and policy. Bounds capture CMIP6 climate model disagreement (Ensemble), econometric sampling precision (Coef), and combined uncertainty (Pooled)."
+        "Central estimates summarize each model's weather years at the selected return period, then take the median across climate models for baseline and policy; distinct from the equal-model-mean expected-effect headline. Bounds capture CMIP6 climate model disagreement (Ensemble), econometric sampling precision (Coef), and combined uncertainty (Pooled)."
       )
     ),
   )
@@ -2016,8 +2046,25 @@ plot_step3_variance_contribution <- function(var_tbl) {
                                decomp_context = reactive(NULL),
                                baseline_svy = reactive(NULL),
                                 policy_svy = reactive(NULL),
-                                aggregation_cache = NULL) {
+                                aggregation_cache = NULL,
+                                analysis_unit = reactive(NULL)) {
   ns <- session$ns
+
+  aggregation_method <- reactive({
+    hs <- baseline_hist_sim()
+    choices <- unname(hist_aggregate_choices(hs$so$type, hs$so$name))
+    selected <- input$cmp_agg_method %||% "mean"
+    if (selected %in% choices) selected else choices[[1L]]
+  })
+  policy_endpoint_status <- reactive({
+    .policy_endpoint_status(baseline_hist_sim()$so, decomp_context())
+  })
+  output$policy_method_note <- shiny::renderUI({
+    status <- policy_endpoint_status()
+    if (!identical(status$status, "ok")) {
+      shiny::div(class = "alert alert-warning", role = "alert", status$reason)
+    }
+  })
 
   # INT-08: stale banner above the results pane. This surface gates its
   # CSV export while stale.
@@ -2050,9 +2097,14 @@ plot_step3_variance_contribution <- function(var_tbl) {
   })
 
   headline_cards_data_rv <- reactive({
-    req(headline_paired_effect_summary_rv())
+    summary <- headline_paired_effect_summary_rv()
+    if (!nrow(summary) && !identical(policy_endpoint_status()$status, "ok")) {
+      summary <- tibble::tibble(scenario = focus_scenario(), value = NA_real_,
+        intermod_lo = NA_real_, intermod_hi = NA_real_, n_models = NA_integer_)
+    }
+    req(summary)
     step3_headline_cards(
-      paired_summary    = headline_paired_effect_summary_rv(),
+      paired_summary    = summary,
       threshold_tbl     = threshold_table_rv(),
       baseline_agg      = baseline_agg_scenarios(),
       policy_agg        = policy_agg_scenarios(),
@@ -2060,9 +2112,11 @@ plot_step3_variance_contribution <- function(var_tbl) {
       policy_svy        = policy_svy(),
       sp_scenario       = sp_scenario(),
       timeseries_curves = timeseries_curves_rv(),
-      method            = input$cmp_agg_method %||% "mean",
+      method            = aggregation_method(),
       so                = baseline_hist_sim()$so,
-      baseline_svy      = baseline_svy()
+      baseline_svy      = baseline_svy(),
+      metric_context    = metric_context(),
+      endpoint_status   = policy_endpoint_status()
     )
   })
 
@@ -2075,8 +2129,34 @@ plot_step3_variance_contribution <- function(var_tbl) {
     key = "policy_headline_summary",
     label = "Policy headline summary cards",
     step = 3L,
-    fun = function() step3_headline_df(headline_cards_data_rv()),
-    description = "At a glance headline policy findings, tail risk protection, channels, and scale."
+    fun = function() {
+      df <- step3_headline_df(headline_cards_data_rv())
+      summary <- headline_paired_effect_summary_rv()
+      focus <- if (nrow(summary)) {
+        summary[summary$scenario == focus_scenario(), , drop = FALSE]
+      } else summary
+      df$baseline_native <- df$policy_native <- df$effect_native <- NA_real_
+      if (nrow(focus)) {
+        df$baseline_native[1L] <- focus$baseline[[1L]]
+        df$policy_native[1L] <- focus$policy[[1L]]
+        df$effect_native[1L] <- focus$value[[1L]]
+      }
+      df$scenario <- focus_scenario()
+      df$center_method <- ifelse(df$card == 1L, "equal_model_mean",
+        ifelse(df$card == 2L, "median_model_quantile", "not_applicable"))
+      df$availability <- policy_endpoint_status()$status
+      df$reason <- policy_endpoint_status()$reason %||% ""
+      annotate_visualization_export(df, aggregation_method(), baseline_hist_sim()$so,
+        observation_unit = "headline for fixed survey population",
+        aggregation_order = "matched years averaged within model; equal-model mean for expected effect",
+        uncertainty = "central headline; component uncertainty not estimated",
+        context = metric_context())
+    },
+    description = paste(
+      "Expected effect and endpoint levels: years averaged within model, then equal-model mean on matched support.",
+      "Adverse effects compare equal-probability thresholds, not necessarily the same weather years;",
+      "technical resilience channels and program scale remain separate."
+    )
   )
 
   # Sync aggregation method choices when simulation changes
@@ -2135,10 +2215,7 @@ plot_step3_variance_contribution <- function(var_tbl) {
     shiny::updateNumericInput(session, "cmp_pov_line", value = v)
   })
 
-  poverty_methods <- c(
-    "headcount_ratio", "gap", "fgt2",
-    "prosperity_gap"
-  )
+  poverty_methods <- c("headcount_ratio", "gap", "fgt2")
   valid_pov_line <- function(x) {
     x <- suppressWarnings(as.numeric(x)[1L])
     if (length(x) && is.finite(x) && x > 0) x else NULL
@@ -2152,7 +2229,7 @@ plot_step3_variance_contribution <- function(var_tbl) {
   }), 400)
 
   pov_line_val <- reactive({
-    method <- input$cmp_agg_method %||% "mean"
+    method <- aggregation_method()
     if (!method %in% poverty_methods) {
       return(NULL)
     }
@@ -2175,6 +2252,26 @@ plot_step3_variance_contribution <- function(var_tbl) {
       return(character(0))
     }
     names(sc)
+  })
+
+  focus_scenario <- reactive({
+    sc <- selected_scenario_names()
+    if (length(sc)) sc[[1L]] else hist_label()
+  })
+  metric_context <- reactive({
+    hs <- baseline_hist_sim()
+    spec <- metric_metadata(aggregation_method(), hs$so,
+      pov_line = pov_line_val(), analysis_unit = analysis_unit(),
+      weighted = !is.null(hs$pipeline$weight))
+    spec$scenario <- focus_scenario()
+    spec$run_identity <- if (!is.null(decomp_context())) decomp_context()$run_identity else NULL
+    spec$requested_residuals <- active_residuals(hs)
+    spec$availability <- if (isTRUE(stale())) "unavailable" else policy_endpoint_status()$status
+    spec$reason <- if (isTRUE(stale())) "Policy run is stale." else policy_endpoint_status()$reason
+    spec
+  })
+  output$metric_context_note <- shiny::renderUI({
+    shiny::tags$p(class = "diagnostic-note", metric_context_note(metric_context()))
   })
 
   # PERF-31: per-method aggregation cache ----
@@ -2241,7 +2338,7 @@ plot_step3_variance_contribution <- function(var_tbl) {
     if (is.null(pl) || is.null(pl$y_point)) {
       return(NULL)
     }
-    method <- input$cmp_agg_method %||% "mean"
+    method <- aggregation_method()
     poverty_line <- pov_line_val()
     if (method %in% poverty_methods && is.null(poverty_line)) poverty_line <- 3.00
 
@@ -2336,7 +2433,7 @@ plot_step3_variance_contribution <- function(var_tbl) {
     if (length(sc) == 0) {
       return(list())
     }
-    method <- input$cmp_agg_method %||% "mean"
+    method <- aggregation_method()
     poverty_line <- pov_line_val()
     if (method %in% poverty_methods && is.null(poverty_line)) poverty_line <- 3.00
     use_w <- TRUE
@@ -2420,6 +2517,7 @@ plot_step3_variance_contribution <- function(var_tbl) {
     make_agg_hist(baseline_hist_sim(), "baseline_hist")
   })
   policy_agg_hist <- reactive({
+    if (!identical(policy_endpoint_status()$status, "ok")) return(NULL)
     req(policy_hist_sim())
     make_agg_hist(policy_hist_sim(), "policy_hist")
   })
@@ -2432,6 +2530,7 @@ plot_step3_variance_contribution <- function(var_tbl) {
     )
   })
   policy_agg_scenarios <- reactive({
+    if (!identical(policy_endpoint_status()$status, "ok")) return(list())
     req(policy_hist_sim())
     make_agg_scenarios(
       policy_saved_scenarios(), policy_hist_sim(),
@@ -2486,6 +2585,7 @@ plot_step3_variance_contribution <- function(var_tbl) {
   # model/year aggregate level and coefficient gradients are contrasted before
   # uncertainty is calculated, preserving baseline-policy covariance.
   paired_effect_data <- reactive({
+    if (!identical(policy_endpoint_status()$status, "ok")) return(list())
     b <- baseline_all_series()
     p <- policy_all_series()
     if (!length(b) || !length(p)) {
@@ -2509,7 +2609,8 @@ plot_step3_variance_contribution <- function(var_tbl) {
       resolve_band_q(input$ensemble_band %||% "none")
     }
     dplyr::bind_rows(lapply(names(dat), function(nm) {
-      paired_effect_summary(dat[[nm]], band_q = bq, scenario = nm)
+      paired_effect_summary(dat[[nm]], band_q = bq, scenario = nm,
+        center = "equal_model_mean")
     }))
   })
 
@@ -2521,7 +2622,8 @@ plot_step3_variance_contribution <- function(var_tbl) {
       return(tibble::tibble())
     }
     dplyr::bind_rows(lapply(names(dat), function(nm) {
-      paired_effect_summary(dat[[nm]], band_q = c(lo = 0, hi = 1), scenario = nm)
+      paired_effect_summary(dat[[nm]], band_q = c(lo = 0, hi = 1), scenario = nm,
+        center = "equal_model_mean")
     }))
   })
 
@@ -2564,8 +2666,9 @@ plot_step3_variance_contribution <- function(var_tbl) {
       return(tibble::tibble())
     }
     dplyr::bind_rows(lapply(names(dat), function(nm) {
-      x <- paired_adverse_effect_table(dat[[nm]], input$cmp_agg_method %||% "mean")
-      if (nrow(x)) dplyr::mutate(x, scenario = nm) else x
+      x <- paired_adverse_effect_table(dat[[nm]], aggregation_method())
+      if (nrow(x)) dplyr::mutate(x, scenario = nm,
+        center_method = "median_model_quantile") else x
     }))
   })
 
@@ -2633,7 +2736,7 @@ plot_step3_variance_contribution <- function(var_tbl) {
   }
 
   .build_exceedance_rows <- function(agg_hist, agg_scn, hist_ref, source_label) {
-    method <- input$cmp_agg_method %||% "mean"
+    method <- aggregation_method()
     so_obj <- tryCatch(if (!is.null(baseline_hist_sim())) baseline_hist_sim()$so else NULL, error = function(e) NULL)
     spec <- metric_metadata(method, so_obj)
     adverse_tail <- spec$adverse_tail
@@ -2711,7 +2814,7 @@ plot_step3_variance_contribution <- function(var_tbl) {
                                     bq_coef, bq_ens) {
     z_lo <- stats::qnorm(bq_coef[["lo"]])
     z_hi <- stats::qnorm(bq_coef[["hi"]])
-    method <- input$cmp_agg_method %||% "mean"
+    method <- aggregation_method()
     so_obj <- tryCatch(
       if (!is.null(baseline_hist_sim())) baseline_hist_sim()$so else NULL,
       error = function(e) NULL
@@ -2824,6 +2927,7 @@ plot_step3_variance_contribution <- function(var_tbl) {
   }
 
   timeseries_curves_rv <- reactive({
+    if (!identical(policy_endpoint_status()$status, "ok")) return(tibble::tibble())
     req(baseline_agg_hist())
     hr <- hist_ref_val()
     dplyr::bind_rows(
@@ -2839,6 +2943,7 @@ plot_step3_variance_contribution <- function(var_tbl) {
   })
 
   exceedance_curves_rv <- reactive({
+    if (!identical(policy_endpoint_status()$status, "ok")) return(tibble::tibble())
     req(baseline_agg_hist())
     hr <- hist_ref_val()
     dplyr::bind_rows(
@@ -2854,6 +2959,7 @@ plot_step3_variance_contribution <- function(var_tbl) {
   })
 
   threshold_table_rv <- reactive({
+    if (!identical(policy_endpoint_status()$status, "ok")) return(tibble::tibble())
     req(baseline_agg_hist())
     bq_coef <- resolve_band_q(input$uncertainty_band %||% "p10_p90")
     bq_ens <- if (identical(input$ensemble_band %||% "none", "none")) {
@@ -2882,7 +2988,7 @@ plot_step3_variance_contribution <- function(var_tbl) {
     echart_step3_annual_distribution(
       timeseries_curves_rv(),
       x_label = metric_axis_label(
-        input$cmp_agg_method %||% "mean",
+        aggregation_method(),
         baseline_hist_sim()$so,
         input$cmp_deviation %||% "none"
       ),
@@ -2902,7 +3008,7 @@ plot_step3_variance_contribution <- function(var_tbl) {
     req(threshold_table_rv())
     dot <- step3_adverse_dot_data(
       threshold_table_rv(),
-      method = input$cmp_agg_method %||% "mean",
+      method = aggregation_method(),
       so     = baseline_hist_sim()$so
     )
     if (identical(input$ensemble_band %||% "none", "none") && nrow(dot)) {
@@ -2918,7 +3024,7 @@ plot_step3_variance_contribution <- function(var_tbl) {
     echart_step3_adverse_dot(
       adverse_dot_data_rv(),
       x_label = metric_axis_label(
-        input$cmp_agg_method %||% "mean",
+        aggregation_method(),
         baseline_hist_sim()$so,
         input$cmp_deviation %||% "none"
       ),
@@ -2953,7 +3059,7 @@ plot_step3_variance_contribution <- function(var_tbl) {
       group_order   = input$cmp_group_order %||% "scenario_x_year",
       show_coef     = TRUE,
       adverse_only  = TRUE,
-      method        = input$cmp_agg_method %||% "mean",
+      method        = aggregation_method(),
       so            = so_obj,
       n_hist_years  = n_h_yrs
     )
@@ -2964,6 +3070,7 @@ plot_step3_variance_contribution <- function(var_tbl) {
   # it replaced is gone.
 
   step3_incidence_data <- reactive({
+    if (!identical(policy_endpoint_status()$status, "ok")) return(tibble::tibble())
     res <- tryCatch(decomp_result(), error = function(e) NULL)
     bs <- tryCatch(baseline_svy(), error = function(e) NULL)
     bh <- baseline_hist_sim()
@@ -2992,7 +3099,7 @@ plot_step3_variance_contribution <- function(var_tbl) {
     step = 3L,
     fun = function() {
       annotate_visualization_export(
-        step3_incidence_data(), input$cmp_agg_method %||% "mean", baseline_hist_sim()$so,
+        step3_incidence_data(), aggregation_method(), baseline_hist_sim()$so,
         observation_unit = "household-level paired policy minus baseline effect",
         aggregation_order = "fixed weighted baseline decile; weighted mean over households",
         uncertainty = "paired contrast"
@@ -3003,29 +3110,30 @@ plot_step3_variance_contribution <- function(var_tbl) {
 
   paired_effect_summary_export <- function() {
     annotate_visualization_export(
-      paired_effect_summary_rv(), input$cmp_agg_method %||% "mean",
+      paired_effect_summary_rv(), aggregation_method(),
       baseline_hist_sim()$so,
       observation_unit = "scenario-period paired annual aggregate effect",
-      aggregation_order = "paired policy minus baseline by model and weather-year; model means, then median across equally weighted models",
-      uncertainty = "paired coefficient contrast and inter-model spread"
+      aggregation_order = "paired policy minus baseline by model and weather-year; years averaged within model, then equal-model mean",
+      uncertainty = "paired coefficient contrast (baseline-X approximation) and inter-model spread",
+      context = metric_context()
     )
   }
   paired_annual_effect_export <- function() {
     annotate_visualization_export(
-      paired_annual_effects_rv(), input$cmp_agg_method %||% "mean",
+      paired_annual_effects_rv(), aggregation_method(),
       baseline_hist_sim()$so,
       observation_unit = "paired annual aggregate effect for one model-weather-year draw",
       aggregation_order = "policy aggregate minus baseline aggregate on matched household, model, and weather-year draws",
-      uncertainty = "paired coefficient contrast"
+      uncertainty = "paired coefficient contrast", context = metric_context()
     )
   }
   paired_adverse_effect_export <- function() {
     annotate_visualization_export(
-      paired_adverse_effects_rv(), input$cmp_agg_method %||% "mean",
+      paired_adverse_effects_rv(), aggregation_method(),
       baseline_hist_sim()$so,
       observation_unit = "scenario-period equal-probability tail contrast",
       aggregation_order = "policy quantile minus baseline quantile within each model, then median across equally weighted models",
-      uncertainty = "inter-model spread of paired quantile contrasts"
+      uncertainty = "inter-model spread of paired quantile contrasts", context = metric_context()
     )
   }
   wise_export_table(
@@ -3055,11 +3163,12 @@ plot_step3_variance_contribution <- function(var_tbl) {
     step = 3L,
     fun = function() {
       annotate_visualization_export(
-        paired_adverse_table_rv(), input$cmp_agg_method %||% "mean",
+        paired_adverse_table_rv(), aggregation_method(),
         baseline_hist_sim()$so,
         observation_unit = "scenario-period equal-probability tail contrast",
         aggregation_order = "per-model policy and baseline quantiles, paired by probability, then median across models",
-        uncertainty = "inter-model spread of policy-minus-baseline quantile effects"
+        uncertainty = "inter-model spread of policy-minus-baseline quantile effects",
+        context = metric_context()
       )
     },
     description = "Expected, 1-in-5, 1-in-10, and 1-in-20 equal-probability paired tail effects where supported."
@@ -3091,10 +3200,11 @@ plot_step3_variance_contribution <- function(var_tbl) {
       }
       annotate_visualization_export(
         df,
-        input$cmp_agg_method %||% "mean", baseline_hist_sim()$so,
+        aggregation_method(), baseline_hist_sim()$so,
         observation_unit = "scenario-period return-period annual aggregate",
         aggregation_order = "per-model return-period interpolation, then across-model summary",
-        uncertainty = "coefficient, ensemble, and pooled bands where supported"
+        uncertainty = "coefficient, ensemble, and pooled bands where supported",
+        context = metric_context()
       )
     },
     stale = stale,
@@ -3119,7 +3229,7 @@ plot_step3_variance_contribution <- function(var_tbl) {
       paired_effect_plot(
         paired_effect_summary_rv(),
         metric_axis_label(
-          input$cmp_agg_method %||% "mean",
+          aggregation_method(),
           baseline_hist_sim()$so,
           input$cmp_deviation %||% "none"
         )
@@ -3147,7 +3257,7 @@ plot_step3_variance_contribution <- function(var_tbl) {
     echart_exceedance(
       curves_tbl = curves,
       x_label = metric_axis_label(
-        input$cmp_agg_method %||% "mean",
+        aggregation_method(),
         baseline_hist_sim()$so,
         input$cmp_deviation %||% "none"
       ),
@@ -3193,6 +3303,14 @@ plot_step3_variance_contribution <- function(var_tbl) {
     matrix_transform = matrix_transform,
     hist_label = hist_label,
     threshold_table = threshold_table_rv,
+    paired_effect_summary = paired_effect_summary_rv,
+    headline_paired_effect_summary = headline_paired_effect_summary_rv,
+    headline_cards = headline_cards_data_rv,
+    aggregation_method = aggregation_method,
+    poverty_line = pov_line_val,
+    focus_scenario = focus_scenario,
+    metric_context = metric_context,
+    policy_endpoint_status = policy_endpoint_status,
     selected_scenario_names = selected_scenario_names,
     pov_line_val = pov_line_val
   ))

@@ -133,6 +133,60 @@ test_that("policy correction changes only y_point and preserves pipeline types",
 })
 
 
+test_that("production broadcasts period-mean correction unlike per-year channels", {
+  baseline <- data.frame(
+    welfare = exp(c(1, 1)), loc_id = 1:2, temp = c(10, 20),
+    electricity = c(0, 0)
+  )
+  train <- expand.grid(temp = c(10, 20), electricity = 0:1)
+  train$welfare <- exp(
+    1 + 0.1 * train$temp + 0.2 * train$electricity +
+      0.05 * train$temp * train$electricity
+  )
+  model_fit <- list(
+    engine = "fixest",
+    fit3 = lm(log(welfare) ~ temp * electricity, data = train),
+    weather_terms = "temp",
+    train_data = train
+  )
+  policy <- baseline
+  policy$electricity <- 1L
+  so <- list(name = "welfare", transform = "log")
+  weather <- data.frame(
+    loc_id = c(1L, 2L, 1L, 2L),
+    sim_year = c(2030L, 2030L, 2031L, 2031L),
+    temp = c(10, 20, 30, 40)
+  )
+  pipeline <- list(
+    y_point = rep(0, 4L),
+    svy_row_id = c(1L, 2L, 1L, 2L),
+    sim_year = c(2030L, 2030L, 2031L, 2031L)
+  )
+
+  production <- apply_policy_delta_to_baseline(
+    baseline, policy, model_fit, so,
+    list(pipeline = pipeline, weather_raw = weather)
+  )$hist_sim$pipeline$y_point
+  period_mean_delta <- .policy_central_delta(
+    baseline, policy, model_fit, so, weather_raw = weather
+  )
+  explicit_annual_delta <- c(
+    .policy_central_delta(
+      baseline, policy, model_fit, so,
+      weather_raw = weather[weather$sim_year == 2030L, , drop = FALSE]
+    ),
+    .policy_central_delta(
+      baseline, policy, model_fit, so,
+      weather_raw = weather[weather$sim_year == 2031L, , drop = FALSE]
+    )
+  )
+
+  expect_equal(production, period_mean_delta[c(1L, 2L, 1L, 2L)])
+  expect_equal(explicit_annual_delta, c(0.7, 1.2, 1.7, 2.2), tolerance = 1e-10)
+  expect_false(isTRUE(all.equal(production, explicit_annual_delta)))
+})
+
+
 test_that("deployed fixest path resolves weather references and shared IDs", {
   skip_if_not_installed("fixest")
   root <- withr::local_tempdir()
@@ -269,6 +323,13 @@ test_that("central kernel matches the current logistic analytic path", {
     baseline, policy, model_fit,
     list(name = "welfare", transform = "none")
   )
+  so <- list(name = "welfare", type = "numeric", transform = "none")
+  ctx <- .build_decomposition_context(baseline, policy, model_fit, so)
+  expect_identical(ctx$model_type, "logistic")
+  expect_identical(.policy_endpoint_status(so, ctx)$status, "unsupported")
+  model_fit$model_type <- NULL
+  family_ctx <- .build_decomposition_context(baseline, policy, model_fit, so)
+  expect_identical(.policy_endpoint_status(so, family_ctx)$status, "unsupported")
 })
 
 

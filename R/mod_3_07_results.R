@@ -54,8 +54,9 @@ mod_3_07_results_server <- function(id,
                                     decomp_result = reactive(NULL),
                                     decomp_context = reactive(NULL),
                                     baseline_svy = reactive(NULL),
-                                     policy_svy = reactive(NULL),
-                                     aggregation_cache = NULL) {
+                                    policy_svy = reactive(NULL),
+                                    aggregation_cache = NULL,
+                                    analysis_unit = reactive(NULL)) {
   moduleServer(id, function(input, output, session) {
     ns <- session$ns
     session$userData$wise_step3_stale <- stale
@@ -72,7 +73,7 @@ mod_3_07_results_server <- function(id,
 
     tabs_added <- reactiveVal(FALSE)
 
-    .wire_results_pane(
+    results_api <- .wire_results_pane(
       input, output, session,
       baseline_hist_sim = baseline_hist_sim,
       baseline_saved_scenarios = baseline_saved_scenarios,
@@ -92,7 +93,8 @@ mod_3_07_results_server <- function(id,
       decomp_context = decomp_context,
       baseline_svy = baseline_svy,
        policy_svy = policy_svy,
-       aggregation_cache = aggregation_cache
+        aggregation_cache = aggregation_cache,
+        analysis_unit = analysis_unit
     )
 
     observeEvent(sim_run_id(),
@@ -138,7 +140,11 @@ mod_3_07_results_server <- function(id,
 
     # Expose the current uncertainty settings to sibling tabs.
     list(
-      show_coef_uncertainty = reactive(isTRUE(input$show_coef_uncertainty))
+      show_coef_uncertainty = reactive(isTRUE(input$show_coef_uncertainty)),
+      aggregation_method = results_api$aggregation_method,
+      poverty_line = results_api$poverty_line,
+      focus_scenario = results_api$focus_scenario,
+      metric_context = results_api$metric_context
     )
   })
 }

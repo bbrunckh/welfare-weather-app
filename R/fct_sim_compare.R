@@ -387,15 +387,23 @@ paired_model_year_effects <- function(baseline_tbl, policy_tbl) {
   dplyr::bind_rows(Filter(Negate(is.null), rows))
 }
 
+# The mean option also reports matched endpoint levels. The median default
+# preserves secondary callers; medians of levels/components need not reconcile.
 paired_effect_summary <- function(effect_tbl,
                                   band_q = c(lo = 0.10, hi = 0.90),
-                                  scenario = "") {
+                                  scenario = "",
+                                  center = c("median", "equal_model_mean")) {
+  center <- match.arg(center)
   if (is.null(effect_tbl) || !nrow(effect_tbl)) {
     return(NULL)
   }
   models <- split(effect_tbl, effect_tbl$model_id)
   model_rows <- lapply(models, function(x) {
-    x <- x[is.finite(x$effect), , drop = FALSE]
+    valid <- is.finite(x$effect)
+    if (identical(center, "equal_model_mean")) {
+      valid <- valid & is.finite(x$baseline) & is.finite(x$policy)
+    }
+    x <- x[valid, , drop = FALSE]
     if (!nrow(x)) {
       return(NULL)
     }
@@ -419,6 +427,8 @@ paired_effect_summary <- function(effect_tbl,
     tibble::tibble(
       model_id = x$model_id[[1L]],
       mean_effect = mean(x$effect),
+      baseline = if ("baseline" %in% names(x)) mean(x$baseline) else NA_real_,
+      policy = if ("policy" %in% names(x)) mean(x$policy) else NA_real_,
       annual_lo = q[[1L]], annual_hi = q[[2L]],
       coef_sd = coef_sd,
       n_years = nrow(x)
@@ -428,7 +438,8 @@ paired_effect_summary <- function(effect_tbl,
   if (!nrow(model_rows)) {
     return(NULL)
   }
-  center <- stats::median(model_rows$mean_effect, na.rm = TRUE)
+  center_fn <- if (identical(center, "equal_model_mean")) mean else stats::median
+  center_value <- center_fn(model_rows$mean_effect, na.rm = TRUE)
   intermod <- stats::quantile(model_rows$mean_effect,
     probs = band_q,
     na.rm = TRUE, names = FALSE
@@ -440,12 +451,17 @@ paired_effect_summary <- function(effect_tbl,
   z <- stats::qnorm(band_q)
   coef_sd <- mean(model_rows$coef_sd, na.rm = TRUE)
   tibble::tibble(
-    scenario = scenario, value = center,
-    coef_lo = center + z[[1L]] * coef_sd,
-    coef_hi = center + z[[2L]] * coef_sd,
+    scenario = scenario, value = center_value,
+    baseline = center_fn(model_rows$baseline, na.rm = TRUE),
+    policy = center_fn(model_rows$policy, na.rm = TRUE),
+    center_method = if (identical(center, "median")) "median_model_mean" else center,
+    coef_lo = center_value + z[[1L]] * coef_sd,
+    coef_hi = center_value + z[[2L]] * coef_sd,
     interann_lo = interann[[1L]], interann_hi = interann[[2L]],
     intermod_lo = intermod[[1L]], intermod_hi = intermod[[2L]],
-    n_models = nrow(model_rows), n_years = min(model_rows$n_years)
+    n_models = nrow(model_rows), n_years = min(model_rows$n_years),
+    n_model_years = sum(model_rows$n_years),
+    n_dropped_model_years = nrow(effect_tbl) - sum(model_rows$n_years)
   )
 }
 
@@ -505,7 +521,11 @@ paired_effect_plot <- function(tbl, x_label = "Policy effect (outcome units)") {
     ) +
     ggplot2::labs(
       x = x_label, y = NULL,
-      subtitle = "Thick interval = ensemble spread; thin interval = coefficient uncertainty."
+      subtitle = paste(
+        if ("center_method" %in% names(tbl) &&
+          all(tbl$center_method == "equal_model_mean")) "Equal-model mean." else "Median across climate-model means.",
+        "Thick interval = ensemble spread; thin interval = coefficient uncertainty (baseline-X approximation)."
+      )
     ) +
     theme_wise()
 }
@@ -1057,7 +1077,9 @@ step2_headline_cards <- function(bands,
                                  hist_sim = NULL,
                                  saved_scenarios = list(),
                                  method = "mean",
-                                 timeseries_curves = NULL) {
+                                 timeseries_curves = NULL,
+                                 deviation = "none",
+                                 metadata = NULL) {
   if (is.null(bands) || !nrow(bands) ||
     !all(c("is_historical", "scenario") %in% names(bands))) {
     return(NULL)
@@ -1074,22 +1096,43 @@ step2_headline_cards <- function(bands,
   has_future <- nrow(fut_rows) > 0L
 
   so <- if (!is.null(hist_sim)) hist_sim$so else NULL
+  metadata <- metadata %||% metric_metadata(method, so)
+  is_change <- !identical(deviation, "none")
+  deviation_label <- switch(deviation,
+    none = "Outcome level",
+    mean = "Difference from historical mean",
+    median = "Difference from historical median",
+    "Outcome level"
+  )
+  display_value <- function(x, change = is_change) {
+    if (length(x) != 1L || !is.finite(suppressWarnings(as.numeric(x)))) {
+      return("Unavailable")
+    }
+    if (isTRUE(change)) {
+      return(format_metric_value(as.numeric(x), metadata, change = TRUE, digits = 2))
+    }
+    value <- format_metric_value(as.numeric(x), metadata, change = FALSE, digits = 2)
+    if (identical(metadata$format, "percent")) return(value)
+    unit <- metadata$level_unit %||% "outcome units"
+    suffix <- paste0(" ", unit)
+    if (endsWith(value, suffix)) substr(value, 1L, nchar(value) - nchar(suffix)) else value
+  }
 
   # 1. Typical weather year outcome
   val_1 <- if (has_future) {
-    paste0(fmt_num(hist$value, 2), " vs ", fmt_num(focus$value, 2))
+    paste0(display_value(hist$value), " vs ", display_value(focus$value))
   } else {
-    fmt_num(hist$value, 2)
+    display_value(hist$value)
   }
 
   line1_1 <- if (has_future) {
-    "Historical vs SSP"
+    paste(if (is_change) deviation_label else "Outcome level", "· Historical vs SSP")
   } else {
-    "Historical baseline"
+    paste(if (is_change) deviation_label else "Outcome level", "· Historical baseline")
   }
   # The expected outcome is the mean across simulated weather years. This is
   # separate from the selected household-level aggregation within each year.
-  weather_year_label <- "Mean weather year"
+  weather_year_label <- "Years averaged within model; climate models weighted equally"
 
   card1 <- list(
     label = "Expected outcome",
@@ -1102,9 +1145,21 @@ step2_headline_cards <- function(bands,
     info = paste(
       "Expected annual aggregate outcome under the historical baseline compared with the",
       "focus climate scenario (mean across weather years and climate models).",
-      "Differences reflect simulated climate conditions for the fixed survey population."
+      "Differences reflect simulated climate conditions for the fixed survey population.",
+      metric_context_note(metadata)
     )
   )
+  card1$value_native <- as.numeric(c(hist$value, if (has_future) focus$value else NA_real_))
+  card1$change_native <- if (has_future) focus$value - hist$value else NA_real_
+  card1$change_display <- if (has_future) {
+    display_value(focus$value - hist$value, change = TRUE)
+  } else {
+    ""
+  }
+  if (nzchar(card1$change_display)) {
+    card1$note <- paste(card1$note, paste("Difference:", card1$change_display), sep = " · ")
+    card1$note_html <- shiny::tagList(card1$note_html, shiny::tags$div(paste("Difference:", card1$change_display)))
+  }
 
   # 2. Adverse weather year outcomes (1-in-20 year)
   v20_hist <- NA_real_
@@ -1124,15 +1179,15 @@ step2_headline_cards <- function(bands,
   }
 
   if (has_future && is.finite(v20_hist) && is.finite(v20_ssp)) {
-    val_2 <- paste0(fmt_num(v20_hist, 2), " vs ", fmt_num(v20_ssp, 2))
-    line1_2 <- "Historical vs SSP"
+    val_2 <- paste0(display_value(v20_hist, change = FALSE), " vs ", display_value(v20_ssp, change = FALSE))
+    line1_2 <- paste(if (is_change) deviation_label else "Outcome level", "· Historical vs SSP")
     line2_2 <- "1-in-20 year"
   } else if (!has_future && is.finite(v20_hist)) {
-    val_2 <- fmt_num(v20_hist, 2)
-    line1_2 <- "Historical baseline"
+    val_2 <- display_value(v20_hist, change = FALSE)
+    line1_2 <- paste(if (is_change) deviation_label else "Outcome level", "· Historical baseline")
     line2_2 <- "1-in-20 year"
   } else if (has_future && is.finite(v20_ssp)) {
-    val_2 <- fmt_num(v20_ssp, 2)
+    val_2 <- display_value(v20_ssp, change = FALSE)
     line1_2 <- as.character(focus$scenario)
     line2_2 <- "1-in-20 year"
   } else {
@@ -1153,9 +1208,26 @@ step2_headline_cards <- function(bands,
       "Simulated aggregate outcome in adverse 1-in-20 weather years under the historical",
       "baseline compared with the focus climate regime. A 1-in-20 year event occurs in",
       "approximately 5% of simulated weather years. The adverse tail is determined",
-      "automatically by the selected metric."
+      "automatically by the selected metric. Thresholds use the median across climate models,",
+      "not the equal-model-mean expected headline.",
+      metric_context_note(metadata)
     )
   )
+  card2$value_native <- as.numeric(c(v20_hist, v20_ssp))
+  card2$change_native <- if (has_future && is.finite(v20_hist) && is.finite(v20_ssp)) {
+    v20_ssp - v20_hist
+  } else {
+    NA_real_
+  }
+  card2$change_display <- if (has_future && is.finite(v20_hist) && is.finite(v20_ssp)) {
+    display_value(v20_ssp - v20_hist, change = TRUE)
+  } else {
+    ""
+  }
+  if (nzchar(card2$change_display)) {
+    card2$note <- paste(card2$note, paste("Difference:", card2$change_display), sep = " · ")
+    card2$note_html <- shiny::tagList(card2$note_html, shiny::tags$div(paste("Difference:", card2$change_display)))
+  }
 
   # 3. Range across years (inter-annual weather variability). For future
   # scenarios, first calculate each model's observed year range, then average
@@ -1202,15 +1274,15 @@ step2_headline_cards <- function(bands,
   }
 
   val_3 <- if (has_future && all(is.finite(focus_range))) {
-    paste(fmt_num(focus_range[["lo"]], 2), "to", fmt_num(focus_range[["hi"]], 2))
+    paste(display_value(focus_range[["lo"]]), "to", display_value(focus_range[["hi"]]))
   } else if (all(is.finite(hist_range))) {
-    paste(fmt_num(hist_range[["lo"]], 2), "to", fmt_num(hist_range[["hi"]], 2))
+    paste(display_value(hist_range[["lo"]]), "to", display_value(hist_range[["hi"]]))
   } else {
     "Unavailable"
   }
 
   line1_3 <- if (has_future && all(is.finite(hist_range))) {
-    paste0("Hist: ", fmt_num(hist_range[["lo"]], 2), " to ", fmt_num(hist_range[["hi"]], 2))
+    paste0("Hist: ", display_value(hist_range[["lo"]]), " to ", display_value(hist_range[["hi"]]))
   } else {
     "Historical baseline"
   }
@@ -1231,6 +1303,13 @@ step2_headline_cards <- function(bands,
       "time forecasting."
     )
   )
+  card3$value_range_native <- if (has_future && all(is.finite(focus_range))) {
+    as.numeric(focus_range)
+  } else if (all(is.finite(hist_range))) {
+    as.numeric(hist_range)
+  } else {
+    c(NA_real_, NA_real_)
+  }
 
   # 4. Climate-model spread (full range of model means at expected outcome)
   n_mods <- suppressWarnings(as.integer(focus$n_models %||% 1L))[1L]
@@ -1250,9 +1329,9 @@ step2_headline_cards <- function(bands,
   focus_model_means <- as.numeric(focus_model_means[is.finite(focus_model_means)])
 
   val_4 <- if (has_future && length(focus_model_means) > 1L) {
-    paste(fmt_num(min(focus_model_means), 2), "to", fmt_num(max(focus_model_means), 2))
+    paste(display_value(min(focus_model_means)), "to", display_value(max(focus_model_means)))
   } else if (has_future) {
-    fmt_num(focus$value, 2)
+    display_value(focus$value)
   } else {
     "Not applicable"
   }
@@ -1280,6 +1359,13 @@ step2_headline_cards <- function(bands,
       "central expected outcome."
     )
   )
+  card4$value_range_native <- if (has_future && length(focus_model_means) > 1L) {
+    c(min(focus_model_means), max(focus_model_means))
+  } else if (has_future) {
+    c(focus$value, NA_real_)
+  } else {
+    c(NA_real_, NA_real_)
+  }
 
   # 5. Tally of simulation years (e.g. scenarios * models * years...)
   run_info <- if (!is.null(hist_sim)) hist_sim$sim_summary %||% list() else list()
@@ -1338,26 +1424,87 @@ step2_headline_cards <- function(bands,
       "(scenarios \u00d7 models \u00d7 weather years)."
     )
   )
+  card5$value_native <- as.numeric(total_runs)
 
-  list(card1, card2, card3, card4, card5)
+  cards <- list(card1, card2, card3, card4, card5)
+  for (i in seq_along(cards)) {
+    cards[[i]]$metadata <- metadata
+    cards[[i]]$deviation <- deviation
+    cards[[i]]$summary_method <- if (i %in% c(1L, 3L, 4L)) {
+      "equal_model_mean"
+    } else if (i == 2L) {
+      "median_across_climate_models"
+    } else {
+      "simulation_count"
+    }
+  }
+  cards
 }
 
 #' Convert Step 2 Headline Cards to a Tidy Data Frame
 #'
 #' @param cards List returned by \code{step2_headline_cards()}.
-#' @return A tidy data frame with columns `Metric`, `Value`, `Note`.
+#' @param metadata Optional metric metadata from \code{metric_metadata()}.
+#' @param summary Optional summary context to append to every row.
+#' @return A tidy data frame with display values, native numeric values, and context.
 #' @noRd
-step2_headline_df <- function(cards) {
+step2_headline_df <- function(cards, metadata = NULL, summary = NULL) {
   if (is.null(cards) || !length(cards)) {
     return(data.frame(
       Metric = character(0), Value = character(0), Note = character(0),
+      Historical_native = numeric(0), Focus_native = numeric(0),
+      Difference_native = numeric(0), Difference_display = character(0),
+      Range_lower_native = numeric(0), Range_upper_native = numeric(0),
+      Native_unit = character(0), Display_unit = character(0),
+      Threshold_kind = character(0), Threshold_value = numeric(0),
+      Threshold_unit = character(0), Analysis_unit = character(0),
+      Weight_interpretation = character(0), Deviation = character(0),
+      Summary_method = character(0), Summary_scope = character(0), Context = character(0),
       stringsAsFactors = FALSE
     ))
   }
+  metadata <- metadata %||% cards[[1L]]$metadata %||% metric_metadata()
+  number_or_na <- function(x, i = NULL) {
+    if (is.null(x)) return(NA_real_)
+    if (!is.null(i)) {
+      if (length(x) < i) return(NA_real_)
+      x <- x[[i]]
+    }
+    x <- suppressWarnings(as.numeric(x))[1L]
+    if (length(x) && is.finite(x)) x else NA_real_
+  }
+  summary_method <- vapply(cards, function(card) {
+    as.character(card$summary_method %||% "")
+  }, character(1L))
+  context <- summary %||% metric_context_note(metadata)
   data.frame(
     Metric = vapply(cards, function(c) as.character(c$label %||% ""), character(1L)),
     Value = vapply(cards, function(c) as.character(c$value %||% ""), character(1L)),
     Note = vapply(cards, function(c) as.character(c$note %||% ""), character(1L)),
+    Historical_native = vapply(cards, function(c) number_or_na(c$value_native, 1L), numeric(1L)),
+    Focus_native = vapply(cards, function(c) number_or_na(c$value_native, 2L), numeric(1L)),
+    Difference_native = vapply(cards, function(c) number_or_na(c$change_native), numeric(1L)),
+    Difference_display = vapply(cards, function(c) as.character(c$change_display %||% ""), character(1L)),
+    Range_lower_native = vapply(cards, function(c) number_or_na(c$value_range_native, 1L), numeric(1L)),
+    Range_upper_native = vapply(cards, function(c) number_or_na(c$value_range_native, 2L), numeric(1L)),
+    Native_unit = rep(metadata$native_unit %||% "outcome units", length(cards)),
+    Display_unit = vapply(cards, function(card) {
+      if (!identical(card$deviation %||% "none", "none")) {
+        metadata$change_unit %||% "outcome units"
+      } else metadata$level_unit %||% "outcome units"
+    }, character(1L)),
+    Threshold_kind = rep(metadata$threshold_kind %||% "none", length(cards)),
+    Threshold_value = rep(number_or_na(metadata$threshold_value), length(cards)),
+    Threshold_unit = rep(metadata$threshold_unit %||% "", length(cards)),
+    Analysis_unit = rep(metadata$analysis_unit %||% "", length(cards)),
+    Weight_interpretation = rep(metadata$weight_interpretation %||% "", length(cards)),
+    Deviation = vapply(cards, function(c) as.character(c$deviation %||% "none"), character(1L)),
+    Summary_method = summary_method,
+    Summary_scope = rep(paste(
+      if (identical(metadata$weighted, TRUE)) "survey-weighted annual aggregate" else if (identical(metadata$weighted, FALSE)) "unweighted annual aggregate" else "annual aggregate; weight status unknown",
+      "for fixed survey population; focus climate scenario"
+    ), length(cards)),
+    Context = rep(as.character(context)[1L], length(cards)),
     stringsAsFactors = FALSE
   )
 }

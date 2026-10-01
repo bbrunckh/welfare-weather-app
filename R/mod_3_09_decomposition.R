@@ -478,8 +478,27 @@ mod_3_09_decomposition_server <- function(id,
                                           labor_scenario = reactive(NULL),
                                           education_scenario = reactive(NULL),
                                           policy_saved_scenarios = reactive(list()),
-                                          stale = reactive(FALSE)) {
+                                          stale = reactive(FALSE),
+                                          aggregation_method = reactive("mean"),
+                                          poverty_line = reactive(NULL),
+                                          focus_scenario = reactive(NULL),
+                                          metric_context = reactive(NULL),
+                                          analysis_unit = reactive(NULL)) {
   moduleServer(id, function(input, output, session) {
+    raw_decomp_result <- decomp_result
+    raw_decomp_scenarios <- decomp_scenarios
+    policy_method_status <- reactive({
+      mf <- model_fit()
+      .policy_endpoint_status(so(), decomp_context() %||% mf)
+    })
+    decomp_result <- reactive({
+      if (!identical(policy_method_status()$status, "ok")) return(NULL)
+      raw_decomp_result()
+    })
+    decomp_scenarios <- reactive({
+      if (!identical(policy_method_status()$status, "ok")) return(list())
+      raw_decomp_scenarios()
+    })
     ns <- session$ns
     session$userData$wise_step3_stale <- stale
     output$stale_banner_ui <- shiny::renderUI({
@@ -615,6 +634,7 @@ mod_3_09_decomposition_server <- function(id,
     }
 
     decomp_for_basis <- function(basis) {
+      if (!identical(policy_method_status()$status, "ok")) return(NULL)
       if (identical(basis, "mean")) {
         return(decomp_result())
       }
@@ -655,6 +675,7 @@ mod_3_09_decomposition_server <- function(id,
     })
 
     headline_decomp_data <- reactive({
+      if (!identical(policy_method_status()$status, "ok")) return(data.frame())
       basis <- input$decomp_weather_basis %||% "mean"
       outcome <- so() %||% list()
       hist <- decomposition_summary_data(selected_decomp_result(), is_rif())
@@ -684,6 +705,9 @@ mod_3_09_decomposition_server <- function(id,
       dplyr::bind_rows(hist, future)
     })
     output$headline_decomp_note_ui <- renderUI({
+      if (!identical(policy_method_status()$status, "ok")) {
+        return(shiny::tags$p(class = "alert alert-warning", policy_method_status()$reason))
+      }
       shiny::tags$p(class = "diagnostic-note", paste0(
         "This figure summarizes the policy effect using ", weather_basis_label(),
         ". It is not a future climate-scenario result."
@@ -750,9 +774,12 @@ mod_3_09_decomposition_server <- function(id,
     )
     wise_export_table(
       key = "policy_decomposition_headline_data",
-      label = "Headline decomposition data",
-      step = 3L,
-      fun = function() {
+        label = "Headline decomposition data",
+        step = 3L,
+        fun = function() {
+          if (!identical(policy_method_status()$status, "ok")) {
+            return(data.frame(availability = "unsupported", reason = policy_method_status()$reason))
+          }
         out <- headline_decomp_data()
         out <- out[out$channel_id %in% c("level", "resilience", "total"), , drop = FALSE]
         data.frame(
@@ -995,6 +1022,9 @@ mod_3_09_decomposition_server <- function(id,
     }
 
     technical_decomp_table <- reactive({
+      if (!identical(policy_method_status()$status, "ok")) {
+        return(data.frame(availability = "unsupported", reason = policy_method_status()$reason))
+      }
       bases <- list(
         `Mean weather` = decomp_result(),
         `Adverse 1-in-5` = .decomposition_context_adverse_result(

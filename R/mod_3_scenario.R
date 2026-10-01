@@ -272,7 +272,8 @@ mod_3_scenario_server <- function(id,
       decomp_context = s6$decomp_context,
       baseline_svy = s6$baseline_svy,
       policy_svy = s6$policy_svy,
-      aggregation_cache = shared_aggregation_cache
+      aggregation_cache = shared_aggregation_cache,
+      analysis_unit = analysis_unit
     )
 
     # Diagnostics tab: before/after variable analysis ----
@@ -325,7 +326,12 @@ mod_3_scenario_server <- function(id,
         hs <- hist_sim()
         if (!is.null(hs)) hs$so else NULL
       }),
-      show_coef_uncertainty = s7$show_coef_uncertainty
+      show_coef_uncertainty = s7$show_coef_uncertainty,
+      aggregation_method = s7$aggregation_method,
+      poverty_line = s7$poverty_line,
+      focus_scenario = s7$focus_scenario,
+      metric_context = s7$metric_context,
+      analysis_unit = analysis_unit
     )
 
     # Wire decomposition tab into tabset on first successful run

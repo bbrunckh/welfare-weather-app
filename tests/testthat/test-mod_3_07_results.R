@@ -6,10 +6,64 @@
 library(testthat)
 library(shiny)
 
+test_that("technical decomposition cannot export logistic policy effects", {
+  testServer(mod_3_09_decomposition_server, args = list(id = "decomp",
+    decomp_result = reactiveVal(data.frame(delta_total = .1)),
+    model_fit = reactiveVal(list(engine = "fixest", model_type = "logistic")),
+    so = reactiveVal(list(name = "indicator", type = "numeric", transform = "none"))), {
+    session$flushReact()
+    expect_null(selected_decomp_result())
+    expect_equal(nrow(headline_decomp_data()), 0)
+    exported <- session$userData$wise_exports$items$policy_decomposition_summary$fun()
+    expect_identical(exported$availability, "unsupported")
+    expect_match(exported$reason, "response-scale", fixed = TRUE)
+    expect_identical(session$userData$wise_exports$items$policy_decomposition_headline_data$fun()$availability,
+      "unsupported")
+  })
+})
+
+test_that("Step 3 cards format rate levels and absolute changes without benefit claims", {
+  summary <- tibble::tibble(scenario = "Historical", baseline = .32, policy = .28,
+    value = -.04, intermod_lo = -.04, intermod_hi = -.04, n_models = 1L)
+  spec <- metric_metadata("headcount_ratio", list(name = "welfare", type = "numeric", units = "PPP"),
+    pov_line = 3, weighted = TRUE, analysis_unit = "hh")
+  cards <- step3_headline_cards(summary, method = "headcount_ratio",
+    so = list(name = "welfare", type = "numeric", units = "PPP"), metric_context = spec)
+  expect_match(cards[[1]]$value, "-4.00 pp", fixed = TRUE)
+  expect_match(cards[[1]]$note, "28.00%", fixed = TRUE)
+  expect_match(cards[[1]]$note, "32.00%", fixed = TRUE)
+  expect_match(cards[[1]]$note, "3", fixed = TRUE)
+  expect_match(cards[[1]]$info, "not necessarily a benefit", fixed = TRUE)
+  binary <- step3_headline_cards(summary, so = list(name = "indicator", type = "binary"))
+  expect_match(binary[[1]]$value, "-4.00 pp", fixed = TRUE)
+  expect_match(binary[[1]]$note, "indicator", fixed = TRUE)
+})
+
+test_that("Results module returns selection API while preserving uncertainty reactive", {
+  hs <- list(so = list(name = "welfare", type = "numeric", transform = "none"),
+    pipeline = list(y_point = c(1, 2, 3, 4), sim_year = c(2020, 2020, 2021, 2021),
+      F_loading = matrix(0, 4, 1)), residuals = "none")
+  testServer(mod_3_07_results_server, args = list(id = "results",
+    baseline_hist_sim = reactiveVal(hs), policy_hist_sim = reactiveVal(hs),
+    baseline_saved_scenarios = reactiveVal(list()), policy_saved_scenarios = reactiveVal(list()),
+    tabset_id = "tabs", analysis_unit = reactiveVal("ind")), {
+    session$flushReact()
+    api <- session$returned
+    expect_true(all(c("aggregation_method", "poverty_line", "focus_scenario", "metric_context",
+                      "show_coef_uncertainty") %in% names(api)))
+    expect_identical(api$aggregation_method(), "mean")
+    expect_identical(api$metric_context()$analysis_unit, "ind")
+    session$setInputs(show_coef_uncertainty = TRUE)
+    expect_true(api$show_coef_uncertainty())
+  })
+})
+
 test_that("step3_headline_cards builds 5 concise policy cards", {
   paired_sum <- tibble::tibble(
     scenario    = c("Historical", "SSP2-4.5 / 2030-2040"),
     value       = c(0.00, 0.45),
+    baseline    = c(3, 3.2),
+    policy      = c(3, 3.65),
     intermod_lo = c(0.00, 0.32),
     intermod_hi = c(0.00, 0.58),
     n_models    = c(1L, 4L),
@@ -44,11 +98,11 @@ test_that("step3_headline_cards builds 5 concise policy cards", {
 
   # Card 1: Expected policy effect
   expect_identical(cards[[1]]$label, "Expected policy effect")
-  expect_identical(cards[[1]]$value, "+0.45")
-  expect_match(cards[[1]]$note, "Policy: 3.65 vs Base: 3.20", fixed = TRUE)
+  expect_identical(cards[[1]]$value, "+0.45 outcome units")
+  expect_match(cards[[1]]$note, "Policy: 3.65 outcome units vs Base: 3.20 outcome units", fixed = TRUE)
 
   # Card 2: Adverse 1-in-10 protection
-  expect_identical(cards[[2]]$label, "Adverse 1-in-20 year protection")
+  expect_identical(cards[[2]]$label, "Policy effect at the adverse 1-in-20 threshold")
   expect_identical(cards[[2]]$value, "Unavailable")
   expect_match(cards[[2]]$note, "1-in-10: +0.58", fixed = TRUE)
 
@@ -70,7 +124,7 @@ test_that("step3_headline_cards builds 5 concise policy cards", {
   df <- step3_headline_df(cards)
   expect_s3_class(df, "data.frame")
   expect_equal(nrow(df), 5L)
-  expect_identical(df$label, c("Expected policy effect", "Adverse 1-in-20 year protection",
+  expect_identical(df$label, c("Expected policy effect", "Policy effect at the adverse 1-in-20 threshold",
                                "Resilience effect", "Program scale & reach", "Policy robustness"))
 })
 

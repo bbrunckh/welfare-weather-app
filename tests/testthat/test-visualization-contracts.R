@@ -1,5 +1,28 @@
 library(testthat)
 
+test_that("selected binary outcome does not gain direction from its variable name", {
+  for (name in c("poor", "arbitrary_indicator")) {
+    outcome <- build_selected_outcome(data.frame(name = name, type = "logical", units = ""))
+    expect_identical(outcome$direction, "unknown")
+    expect_false(metric_metadata("mean", outcome)$direction_known)
+  }
+})
+
+test_that("export metadata consumes one effective context and preserves empty exports", {
+  context <- metric_metadata("headcount_ratio", list(name = "welfare", units = "PPP"),
+    pov_line = 7, analysis_unit = "hh", weighted = TRUE)
+  export <- annotate_visualization_export(data.frame(value = .2), "headcount_ratio",
+    observation_unit = "annual", aggregation_order = "matched", context = context)
+  expect_equal(export$threshold_value, 7)
+  expect_identical(export$analysis_unit, "hh")
+  expect_equal(nrow(annotate_visualization_export(data.frame(value = numeric(0)),
+    observation_unit = "annual", aggregation_order = "matched", context = context)), 0)
+  expect_match(metric_axis_label("headcount_ratio", deviation = "mean"), "pp", fixed = TRUE)
+  expect_identical(metric_metadata("mean", list(type = "binary", direction = "lower_is_better"))$direction,
+    "lower_is_better")
+  expect_match(metric_metadata("mean", list(units = "score"))$level_unit, "score", fixed = TRUE)
+})
+
 test_that("metric metadata carries direction and adverse tail", {
   low <- wiseapp:::metric_metadata("headcount_ratio")
   high <- wiseapp:::metric_metadata("mean")
@@ -16,6 +39,124 @@ test_that("selected built-in metric direction overrides stale outcome metadata",
   )
   expect_identical(spec$direction, "lower_is_better")
   expect_identical(spec$adverse_tail, "high")
+})
+
+test_that("metric metadata covers native units, changes, and thresholds", {
+  expected <- c(
+    mean = "outcome units", median = "outcome units",
+    total = "outcome units", headcount_ratio = "fraction",
+    gap = "fraction", fgt2 = "fraction",
+    gini = "native Gini index", prosperity_gap = "ratio",
+    avg_poverty = "inverse outcome units"
+  )
+  specs <- lapply(names(expected), wiseapp:::metric_metadata)
+  names(specs) <- names(expected)
+  expect_identical(vapply(specs, `[[`, character(1), "native_unit"), expected)
+  expect_true(all(vapply(specs[c("headcount_ratio", "gap", "fgt2")],
+                         `[[`, logical(1), "uses_poverty_line")))
+  expect_false(specs$prosperity_gap$uses_poverty_line)
+  expect_true(specs$prosperity_gap$poverty_line)
+  expect_equal(specs$prosperity_gap$threshold_value, 28)
+  expect_identical(specs$headcount_ratio$change_unit, "pp")
+  expect_identical(specs$gap$change_unit, "pp")
+  expect_identical(specs$fgt2$change_unit, "pp")
+  expect_identical(specs$gini$change_unit, "index points")
+  expect_match(specs$avg_poverty$caveat, "positive-welfare", fixed = TRUE)
+})
+
+test_that("metadata only claims the confirmed PPP or LCU basis", {
+  ppp <- wiseapp:::metric_metadata(
+    "mean", list(name = "welfare", label = "Welfare", units = "PPP", type = "numeric"),
+    analysis_unit = "hh"
+  )
+  lcu <- wiseapp:::metric_metadata(
+    "median", list(name = "welfare", label = "Welfare", units = "LCU", type = "numeric")
+  )
+  unknown <- wiseapp:::metric_metadata(
+    "mean", list(name = "consumption", label = "Consumption", units = "", type = "numeric")
+  )
+  expect_identical(ppp$currency_basis, "selected PPP units (2021)")
+  expect_identical(lcu$currency_basis, "selected LCU units (2021)")
+  expect_match(ppp$level_unit, "selected PPP units", fixed = TRUE)
+  expect_false(grepl("\\$|/day|per person", ppp$level_unit))
+  expect_true("welfare/time basis unavailable" %in% ppp$missing_context)
+  expect_true(any(grepl("currency/unit basis unavailable", unknown$missing_context)))
+  expect_identical(ppp$analysis_unit, "hh")
+})
+
+test_that("weighted total and inverse-welfare units remain qualified", {
+  total <- wiseapp:::metric_metadata(
+    "total",
+    list(name = "welfare", label = "Welfare", units = "PPP", type = "numeric"),
+    analysis_unit = "hh", weighted = TRUE
+  )
+  total_unknown <- wiseapp:::metric_metadata("total", weighted = NULL)
+  inverse <- wiseapp:::metric_metadata("avg_poverty", weighted = TRUE)
+  expect_match(total$level_unit, "weighted sum", fixed = TRUE)
+  expect_match(total$level_unit, "survey-weight units", fixed = TRUE)
+  expect_match(total$weight_interpretation, "expansion semantics unknown", fixed = TRUE)
+  expect_match(total_unknown$level_unit, "weight status unknown", fixed = TRUE)
+  expect_identical(inverse$level_unit, "inverse outcome units")
+  expect_true(any(grepl("positive welfare", inverse$missing_context, fixed = TRUE)))
+})
+
+test_that("binary means use percent and pp without inferring direction", {
+  meta <- wiseapp:::metric_metadata(
+    "mean", list(name = "employed", label = "Employment", type = "binary", units = "")
+  )
+  expect_identical(meta$format, "percent")
+  expect_identical(meta$change_unit, "pp")
+  expect_identical(meta$direction, "unknown")
+  expect_false(meta$direction_known)
+  expect_identical(meta$adverse_tail, "low")
+  expect_match(meta$adverse_note, "Direction unknown", fixed = TRUE)
+  expect_match(wiseapp:::metric_context_note(meta), "without a benefit claim", fixed = TRUE)
+})
+
+test_that("metric formatter applies scale once and shows change units", {
+  rate <- wiseapp:::metric_metadata("headcount_ratio", pov_line = 3)
+  welfare <- wiseapp:::metric_metadata(
+    "mean", list(name = "welfare", label = "Welfare", units = "PPP", type = "numeric")
+  )
+  gini <- wiseapp:::metric_metadata("gini")
+  expect_identical(wiseapp:::format_metric_value(0.32, rate), "32.00%")
+  expect_identical(wiseapp:::format_metric_value(-0.04, rate, change = TRUE), "-4.00 pp")
+  expect_identical(wiseapp:::format_metric_value(0.32, welfare),
+                   "0.32 selected PPP units (2021)")
+  expect_identical(wiseapp:::format_metric_value(0.02, welfare, change = TRUE),
+                   "+0.02 selected PPP units (2021)")
+  expect_identical(wiseapp:::format_metric_value(0.02, gini, change = TRUE),
+                   "+0.02 index points")
+  expect_identical(wiseapp:::format_metric_value(NA_real_, rate), "Not available")
+})
+
+test_that("metric context identifies outcome, threshold, and missing basis", {
+  meta <- wiseapp:::metric_metadata(
+    "headcount_ratio",
+    list(name = "welfare", label = "Welfare", units = "PPP", type = "numeric"),
+    pov_line = 3, analysis_unit = "hh", weighted = TRUE
+  )
+  note <- wiseapp:::metric_context_note(meta)
+  expect_match(note, "Welfare: Poverty rate", fixed = TRUE)
+  expect_match(note, "Poverty line 3", fixed = TRUE)
+  expect_match(note, "Analysis unit: hh", fixed = TRUE)
+  expect_match(note, "poverty-line welfare/time compatibility unavailable", fixed = TRUE)
+})
+
+test_that("metric export context arguments are optional and appended", {
+  legacy <- wiseapp:::annotate_visualization_export(
+    data.frame(value = 1), "mean", NULL, "annual", "weighted", "none"
+  )
+  extended <- wiseapp:::annotate_visualization_export(
+    data.frame(value = 1), method = "prosperity_gap",
+    observation_unit = "annual", aggregation_order = "weighted",
+    pov_line = 3, analysis_unit = "hh", weighted = TRUE,
+    context = "Focus scenario"
+  )
+  expect_true(is.logical(legacy$poverty_line))
+  expect_false(extended$uses_poverty_line)
+  expect_equal(extended$threshold_value, 28)
+  expect_match(extended$metric_context, "Focus scenario", fixed = TRUE)
 })
 
 test_that("return-period interpolation selects the adverse tail", {

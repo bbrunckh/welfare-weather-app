@@ -717,6 +717,10 @@
       skip_coef = skip_coef
     ),
     engine = engine, outcome = outcome, is_log = is_log, n = n,
+    model_type = model_fit$model_type %||% if (!is.null(model_fit$fit3)) {
+      model_fit$fit3$family$family %||%
+        tryCatch(stats::family(model_fit$fit3)$family, error = function(e) NULL)
+    } else NULL,
     weather_vars = snapshot(weather_vars), deltas = snapshot(deltas),
     sp_transfer = snapshot(sp_transfer),
     y_baseline = snapshot(y_baseline),

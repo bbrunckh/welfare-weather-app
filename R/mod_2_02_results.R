@@ -71,7 +71,7 @@ mod_2_02_results_ui <- function(id) {
               "Choose how household-level welfare is aggregated into an annual",
               "population outcome for each simulated weather year and climate model.",
               "Poverty and prosperity metrics evaluate outcomes relative to the",
-              "specified poverty line."
+              "specified poverty line; prosperity gap uses a fixed threshold of 28."
             )
           ),
           style = "font-size: 0.92rem; font-weight: 700; color: #173042; margin: 0;"
@@ -91,15 +91,15 @@ mod_2_02_results_ui <- function(id) {
           label = NULL,
           choices = c(
             "Outcome level"                 = "none",
-            "Change from historical mean"   = "mean",
-            "Change from historical median" = "median"
+            "Difference from historical mean"   = "mean",
+            "Difference from historical median" = "median"
           ),
           selected = "none",
           layout = "horizontal"
         ),
         shiny::conditionalPanel(
           condition = paste0(
-            "['headcount_ratio','gap','fgt2','prosperity_gap']",
+            "['headcount_ratio','gap','fgt2']",
             ".indexOf(input['", ns("cmp_agg_method"), "']) > -1"
           ),
           shiny::div(
@@ -117,6 +117,16 @@ mod_2_02_results_ui <- function(id) {
               step  = 0.5,
               width = "105px"
             )
+          )
+        ),
+        shiny::conditionalPanel(
+          condition = paste0(
+            "input['", ns("cmp_agg_method"), "'] === 'prosperity_gap'"
+          ),
+          shiny::div(
+            class = "text-muted small",
+            style = "font-size: 0.8rem;",
+            "Prosperity gap uses a fixed threshold of 28; currency and time applicability are described in the headline context."
           )
         )
       )
@@ -211,7 +221,7 @@ mod_2_02_results_ui <- function(id) {
       shiny::tags$p(
         class = "text-muted small",
         style = "margin-top: 8px; margin-bottom: 0;",
-        "Adverse tail direction is mapped automatically according to the selected outcome metric. Horizontal bars show inter-model ensemble spread across climate projections."
+        "Median across climate models; distinct from the equal-model-mean expected headline. Adverse tail direction is mapped automatically according to the selected outcome metric. Horizontal bars show inter-model ensemble spread across climate projections."
       )
     ),
 
@@ -289,7 +299,7 @@ mod_2_02_results_ui <- function(id) {
       shiny::tags$p(
         class = "text-muted small",
         style = "margin-top: 8px; margin-bottom: 0;",
-        "Central estimates show median outcomes across weather years and climate models. Bounds capture CMIP6 climate model disagreement (Ensemble), econometric sampling precision (Coef), and combined uncertainty (Pooled)."
+        "Central estimates summarize each model's weather years at the selected return period, then take the median across climate models; distinct from the equal-model-mean expected headline. Bounds capture CMIP6 climate model disagreement (Ensemble), econometric sampling precision (Coef), and combined uncertainty (Pooled)."
       )
     ),
 
@@ -389,8 +399,8 @@ mod_2_02_results_server <- function(id,
     })
 
     headline_cards_data_rv <- reactive({
-      req(pointrange_bands_rv())
-      bands <- pointrange_bands_rv()
+      req(headline_bands_rv())
+      bands <- headline_bands_rv()
       if (!nrow(bands) ||
         !all(c("is_historical", "scenario") %in% names(bands))) {
         return(NULL)
@@ -402,8 +412,20 @@ mod_2_02_results_server <- function(id,
         saved_scenarios = tryCatch(if (!is.null(saved_scenarios)) saved_scenarios() else list(),
           error = function(e) list()
         ),
-        method = input$cmp_agg_method %||% "mean",
-        timeseries_curves = tryCatch(timeseries_curves_rv(), error = function(e) NULL)
+        method = .selected_method(),
+        timeseries_curves = tryCatch(timeseries_curves_rv(), error = function(e) NULL),
+        deviation = input$cmp_deviation %||% "none",
+        metadata = {
+          hs <- tryCatch(hist_sim(), error = function(e) NULL)
+          selected <- .selected_method()
+          metric_metadata(
+            selected,
+            hs$so %||% NULL,
+            pov_line = if (identical(selected, "prosperity_gap")) NULL else pov_line_val(),
+            analysis_unit = hs$analysis_unit %||% hs$so$level %||% NULL,
+            weighted = identical(weight_key(), "weighted")
+          )
+        }
       )
     })
 
@@ -423,6 +445,14 @@ mod_2_02_results_server <- function(id,
       req(hist_sim())
       so <- hist_sim()$so
       unname(hist_aggregate_choices(so$type, so$name))
+    })
+
+    # Input updates can lag outcome changes by a browser round-trip. Keep every
+    # aggregation consumer on a method supported by the current outcome.
+    .selected_method <- reactive({
+      choices <- agg_methods()
+      selected <- input$cmp_agg_method %||% "mean"
+      if (length(choices) && selected %in% choices) selected else "mean"
     })
 
     # pov_line is always supplied (the aggregation pre-computes every method
@@ -681,9 +711,9 @@ mod_2_02_results_server <- function(id,
       bq <- AGG_BAND_Q
       is_log <- isTRUE(ws$hs$so$transform == "log")
        build_for <- function(weighted) {
-          if (isTRUE(weighted) || !isTRUE(has_w)) {
-            suite_pov <- pl_v %||% 3
-            suite_key <- paste0("hist_suite_", weighted, "_", format(suite_pov), "_", format(bandwidth_p0()))
+             if ((isTRUE(weighted) || !isTRUE(has_w)) && !identical(method, "prosperity_gap")) {
+              suite_pov <- pl_v %||% 3
+              suite_key <- paste0("hist_suite_", weighted, "_", format(suite_pov), "_", format(bandwidth_p0()))
             shared_key <- shared_aggregation_cache_key(
               ws$hs$.sig %||% list(pipeline = "step2"), suite_pov,
               bandwidth_p0(), weighted, ws$res, ws$skip, is_log, agg_methods()
@@ -717,7 +747,7 @@ mod_2_02_results_server <- function(id,
           pipelines = pl,
           method = method,
           weighted = weighted,
-          pov_line = pl_v,
+           pov_line = pl_v,
           residuals = ws$res,
           is_log = is_log,
           band_q = bq,
@@ -754,15 +784,16 @@ mod_2_02_results_server <- function(id,
         is_log <- isTRUE(s$so$transform == "log")
         has_w <- !is.null(pipes[[1L]]$weight)
          build_for <- function(weighted) {
-           if (isTRUE(weighted) || !isTRUE(has_w)) {
-             suite_key <- paste0("scenario_suite_", names(sc)[[s_idx]], "_", format(pl_v), "_", format(bandwidth_p0()))
+             if ((isTRUE(weighted) || !isTRUE(has_w)) && !identical(method, "prosperity_gap")) {
+              suite_pov <- pl_v %||% 3
+              suite_key <- paste0("scenario_suite_", names(sc)[[s_idx]], "_", format(suite_pov), "_", format(bandwidth_p0()))
              suite <- get0(suite_key, envir = ws$weighted_suite_cache)
              if (is.null(suite)) {
                suite <- aggregate_pipeline_tables_multi(
                  pipelines = pipes,
                  methods = agg_methods(),
                  weighted = weighted,
-                 pov_lines = setNames(lapply(agg_methods(), function(x) pl_v %||% 3), agg_methods()),
+                  pov_lines = setNames(lapply(agg_methods(), function(x) pl_v %||% 3), agg_methods()),
                  residuals = ws$res,
                  is_log = is_log,
                  band_q = bq,
@@ -781,7 +812,7 @@ mod_2_02_results_server <- function(id,
             pipelines = pipes,
             method = method,
             weighted = weighted,
-            pov_line = pl_v,
+              pov_line = pl_v,
             residuals = ws$res,
             is_log = is_log,
             band_q = bq,
@@ -836,7 +867,7 @@ mod_2_02_results_server <- function(id,
     }
 
     hist_agg_rv <- reactive({
-      method <- input$cmp_agg_method %||% "mean"
+      method <- .selected_method()
       .get_hist_agg(method)
     })
 
@@ -845,7 +876,7 @@ mod_2_02_results_server <- function(id,
       if (length(saved_scenarios()) == 0L) {
         return(NULL)
       }
-      method <- input$cmp_agg_method %||% "mean"
+      method <- .selected_method()
       .get_scn_agg(method)
     })
 
@@ -870,7 +901,7 @@ mod_2_02_results_server <- function(id,
     # Shared deviation reference - used by all_series_tbl and exceedance_ribbon
     hist_ref_val <- reactive({
       req(hist_agg_rv())
-      method <- input$cmp_agg_method %||% "mean"
+      method <- .selected_method()
       wk <- weight_key()
       deviation <- input$cmp_deviation %||% "none"
       if (identical(deviation, "none")) {
@@ -892,7 +923,7 @@ mod_2_02_results_server <- function(id,
     # paired counterfactual analysis on the same population.
     hist_F_agg_ref <- reactive({
       req(hist_agg_rv())
-      method <- input$cmp_agg_method %||% "mean"
+      method <- .selected_method()
       wk <- weight_key()
       deviation <- input$cmp_deviation %||% "none"
       if (identical(deviation, "none")) {
@@ -957,7 +988,7 @@ mod_2_02_results_server <- function(id,
     derived_results_frame_rv <- reactive({
       req(hist_agg_rv())
       wk <- weight_key()
-      method <- input$cmp_agg_method %||% "mean"
+      method <- .selected_method()
       deviation <- input$cmp_deviation %||% "none"
       F_ref <- hist_F_agg_ref()
       entries <- list()
@@ -1016,7 +1047,7 @@ mod_2_02_results_server <- function(id,
 
     agg_hist <- reactive({
       req(hist_agg_rv())
-      method <- input$cmp_agg_method %||% "mean"
+      method <- .selected_method()
       deviation <- input$cmp_deviation %||% "none"
       out <- hist_agg_rv()[[weight_key()]][[method]]
       req(!is.null(out))
@@ -1069,7 +1100,7 @@ mod_2_02_results_server <- function(id,
       }
       hist_ref <- hist_ref_val()
       wk <- weight_key()
-      method <- input$cmp_agg_method %||% "mean"
+      method <- .selected_method()
 
       one_scenario <- function(tbl, scenario_label, is_hist) {
         if (is.null(tbl) || nrow(tbl) == 0L) {
@@ -1114,9 +1145,8 @@ mod_2_02_results_server <- function(id,
           )
         }
 
-        # Coefficient uncertainty: per-outcome SE, centred on ensemble mean.
-        # Owner-approved convention: summarise each model across its weather
-        # years, then take the median across equally weighted models.
+        # Retained chart center: summarise each model across its weather years,
+        # then take the median across models (not the expected headline center).
         ens_mean <- if (is_hist) {
           mean(as.numeric(vals), na.rm = TRUE)
         } else {
@@ -1152,12 +1182,27 @@ mod_2_02_results_server <- function(id,
       dplyr::bind_rows(Filter(Negate(is.null), rows))
     })
 
+    # Only the expected headline changes center; all existing chart/threshold
+    # reactives retain their median ensemble convention and deviation behavior.
+    headline_bands_rv <- reactive({
+      bands <- pointrange_bands_rv()
+      frame <- derived_results_frame_rv()
+      for (i in seq_len(nrow(bands))) {
+        entry <- .results_frame_entry(frame, bands$scenario[[i]])
+        vals <- entry$matrix$vals
+        vals[!is.finite(vals)] <- NA_real_
+        bands$value[[i]] <- mean(rowMeans(vals, na.rm = TRUE), na.rm = TRUE) - hist_ref_val()
+      }
+      bands$center_method <- "equal_model_mean"
+      bands
+    })
+
     # timeseries_curves_rv: per (scenario, model, sim_year) values ----
     build_timeseries_curves <- function(selected_only = TRUE) {
       req(hist_agg_rv())
       hist_ref <- hist_ref_val()
       wk <- weight_key()
-      method <- input$cmp_agg_method %||% "mean"
+      method <- .selected_method()
 
       one_scenario <- function(tbl, scenario_label, is_hist) {
         if (is.null(tbl) || nrow(tbl) == 0L) {
@@ -1267,7 +1312,7 @@ mod_2_02_results_server <- function(id,
       req(hist_agg_rv())
       hist_ref <- hist_ref_val()
       wk <- weight_key()
-      method <- input$cmp_agg_method %||% "mean"
+      method <- .selected_method()
       so_obj <- tryCatch(if (!is.null(hist_sim())) hist_sim()$so else NULL, error = function(e) NULL)
       spec <- metric_metadata(method, so_obj)
       adverse_tail <- spec$adverse_tail
@@ -1368,7 +1413,7 @@ mod_2_02_results_server <- function(id,
       z_coef_hi <- stats::qnorm(bq_coef[["hi"]])
       hist_ref <- hist_ref_val()
       wk <- weight_key()
-      method <- input$cmp_agg_method %||% "mean"
+      method <- .selected_method()
       so_obj <- tryCatch(if (!is.null(hist_sim())) hist_sim()$so else NULL,
         error = function(e) NULL
       )
@@ -1516,7 +1561,10 @@ mod_2_02_results_server <- function(id,
       label = "Climate headline summary cards",
       step = 2L,
       fun = function() step2_headline_df(headline_cards_data_rv()),
-      description = "At-a-glance summary cards for the focus climate scenario."
+      description = paste(
+        "Headline values are display-formatted; native numeric endpoints, units, selected deviation, metric context, and summary operators are included.",
+        "Expected and range summaries average years within model and weight climate models equally; adverse thresholds retain the median across climate models."
+      )
     )
 
     # Zero-arg echarts closures shared by the renders and the export bundle
@@ -1542,7 +1590,7 @@ mod_2_02_results_server <- function(id,
       label = "Simulated welfare by scenario and period",
       step = 2L,
       fun = pointrange_chart,
-      description = "Simulated welfare by climate scenario and projection period.",
+      description = "Simulated welfare by climate scenario and projection period; median across climate-model means, distinct from the equal-model-mean expected headline.",
       width = 10, height = 6.5
     )
 
@@ -1551,7 +1599,7 @@ mod_2_02_results_server <- function(id,
       echart_annual_distribution(
         annual_distribution_curves_rv(),
         x_label = metric_axis_label(
-          input$cmp_agg_method %||% "mean",
+          .selected_method(),
           hist_sim()$so,
           input$cmp_deviation %||% "none"
         ),
@@ -1609,7 +1657,7 @@ mod_2_02_results_server <- function(id,
       step = 2L,
       fun = function() {
         annotate_visualization_export(
-          incidence_data_rv(), input$cmp_agg_method %||% "mean", hist_sim()$so,
+          incidence_data_rv(), .selected_method(), hist_sim()$so,
           observation_unit = "household-level simulated welfare effect",
           aggregation_order = "fixed weighted observed baseline decile; weighted mean over households and model summaries",
           uncertainty = "scenario/model variation summarized by selected model set"
@@ -1624,7 +1672,7 @@ mod_2_02_results_server <- function(id,
       req(curves)
       annotate_visualization_export(
         curves,
-        input$cmp_agg_method %||% "mean",
+        .selected_method(),
         hist_sim()$so,
         observation_unit = "annual aggregate for fixed survey population under one weather-year draw",
         aggregation_order = "weighted household aggregate by model and weather-year; model means retained",
@@ -1668,7 +1716,7 @@ mod_2_02_results_server <- function(id,
         group_order   = input$cmp_group_order %||% "scenario_x_year",
         show_coef     = TRUE,
         adverse_only  = TRUE,
-        method        = input$cmp_agg_method %||% "mean",
+        method        = .selected_method(),
         so            = so_obj,
         n_hist_years  = n_h_yrs
       )
@@ -1679,7 +1727,7 @@ mod_2_02_results_server <- function(id,
       echart_variance_contribution(
         variance_breakdown_rv(), height = "300px",
         percent = identical(metric_metadata(
-          input$cmp_agg_method %||% "mean", hist_sim()$so
+          .selected_method(), hist_sim()$so
         )$format, "percent")
       )
     }
@@ -1703,7 +1751,7 @@ mod_2_02_results_server <- function(id,
       req(threshold_table_rv())
       dot <- step2_adverse_dot_data(
         threshold_table_rv(),
-        method = input$cmp_agg_method %||% "mean",
+        method = .selected_method(),
         so = hist_sim()$so
       )
       if (identical(input$ensemble_band %||% "none", "none") && nrow(dot)) {
@@ -1717,7 +1765,7 @@ mod_2_02_results_server <- function(id,
       echart_step2_adverse_dot(
         adverse_dot_data_rv(),
         x_label = metric_axis_label(
-          input$cmp_agg_method %||% "mean",
+          .selected_method(),
           hist_sim()$so,
           input$cmp_deviation %||% "none"
         ),
@@ -1783,7 +1831,7 @@ mod_2_02_results_server <- function(id,
       echart_exceedance(
         curves_tbl = curves,
         x_label = metric_axis_label(
-          input$cmp_agg_method %||% "mean",
+          .selected_method(),
           hist_sim()$so,
           input$cmp_deviation %||% "none"
         ),
@@ -1942,7 +1990,7 @@ mod_2_02_results_server <- function(id,
         }
         list(
           tbl     = timeseries_curves_rv(),
-          x_label = metric_axis_label(input$cmp_agg_method %||% "mean", hist_sim()$so),
+          x_label = metric_axis_label(.selected_method(), hist_sim()$so),
           ens_q   = ens_q
         )
       })

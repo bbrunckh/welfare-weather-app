@@ -192,7 +192,13 @@ build_selected_outcome <- function(info, currency = NULL, poverty_line = NULL) {
   type <- as.character(info$type[1])
 
   info$transform <- outcome_transform(type)
-  info$direction <- outcome_direction(name, type)
+  if (tolower(type) %in% c("binary", "logical", "boolean")) {
+    explicit <- if ("direction" %in% names(info)) as.character(info$direction[[1L]]) else "unknown"
+    info$direction <- if (!is.na(explicit) && explicit %in%
+      c("higher_is_better", "lower_is_better")) explicit else "unknown"
+  } else {
+    info$direction <- outcome_direction(name, type)
+  }
 
   if (is_monetary_outcome(name, units)) {
     info$units <- if (!is.null(currency) && nzchar(currency)) currency else units

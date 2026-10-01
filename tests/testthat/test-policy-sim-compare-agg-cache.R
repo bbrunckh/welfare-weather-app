@@ -58,6 +58,124 @@ make_step3_scenarios_fixture_multi <- function() {
   )
 }
 
+test_that("Results owns validated selection and fixed prosperity threshold without rerunning policy", {
+  hs <- reactiveVal(make_step3_hist_fixture())
+  internals <- NULL
+  testServer(function(input, output, session) {
+    internals <<- .wire_results_pane(input, output, session,
+      hs, reactiveVal(list()), hs, reactiveVal(list()), selected_hist = reactiveVal(NULL),
+      analysis_unit = reactiveVal("hh"))
+  }, {
+    session$setInputs(cmp_agg_method = "prosperity_gap", cmp_pov_line = 3)
+    session$elapse(500); session$flushReact()
+    before <- hs()$pipeline
+    agg <- internals$baseline_agg_hist()
+    keys <- internals$agg_cache_keys()
+    expect_null(internals$poverty_line())
+    expect_equal(internals$metric_context()$threshold_value, 28)
+    expect_identical(internals$metric_context()$analysis_unit, "hh")
+    expect_identical(internals$focus_scenario(), "Historical")
+    session$setInputs(cmp_pov_line = 7)
+    session$elapse(500); session$flushReact()
+    expect_identical(internals$baseline_agg_hist(), agg)
+    expect_identical(internals$agg_cache_keys(), keys)
+    session$setInputs(cmp_agg_method = "headcount_ratio")
+    session$flushReact()
+    expect_equal(internals$poverty_line(), 7)
+    expect_equal(internals$metric_context()$threshold_value, 7)
+    export <- session$userData$wise_exports$items$policy_adverse_effect_table$fun()
+    if (nrow(export)) expect_true(all(export$threshold_value == 7))
+    session$setInputs(cmp_pov_line = 9, cmp_agg_method = "gap")
+    session$flushReact()
+    expect_identical(internals$aggregation_method(), "gap")
+    expect_equal(internals$metric_context()$threshold_value, internals$poverty_line())
+    session$elapse(500); session$flushReact()
+    expect_equal(internals$metric_context()$threshold_value, 9)
+    expect_identical(hs()$pipeline, before)
+    changed <- hs()
+    changed$so$type <- "logical"
+    hs(changed)
+    session$flushReact()
+    expect_identical(internals$aggregation_method(), "mean")
+  })
+})
+
+test_that("unvalidated logistic policy endpoints are withheld in cards, comparisons and exports", {
+  hs <- make_step3_hist_fixture()
+  hs$so <- list(name = "poor", type = "numeric", transform = "none")
+  hs$pipeline$y_point <- rep(c(.2, .4), length.out = length(hs$pipeline$y_point))
+  internals <- NULL
+  testServer(function(input, output, session) {
+    internals <<- .wire_results_pane(input, output, session,
+      reactiveVal(hs), reactiveVal(list()), reactiveVal(hs), reactiveVal(list()),
+      selected_hist = reactiveVal(NULL),
+      decomp_context = reactiveVal(list(model_type = "logistic", run_identity = "logit-run")))
+  }, {
+    session$flushReact()
+    expect_identical(internals$policy_endpoint_status()$status, "unsupported")
+    expect_null(internals$policy_agg_hist())
+    expect_length(internals$policy_agg_scenarios(), 0)
+    expect_equal(nrow(internals$paired_effect_summary()), 0)
+    expect_equal(nrow(internals$threshold_table()), 0)
+    expect_identical(internals$headline_cards()[[1]]$value, "Unavailable")
+    expect_match(internals$headline_cards()[[1]]$note, "response-scale", fixed = TRUE)
+    expect_true(all(is.finite(internals$baseline_agg_hist()$out$value)))
+    items <- session$userData$wise_exports$items
+    for (key in c("policy_paired_effect_summary", "policy_annual_effect_data",
+                  "policy_adverse_effects", "policy_distributional_incidence_data")) {
+      expect_equal(nrow(items[[key]]$fun()), 0)
+    }
+    headline <- items$policy_headline_summary$fun()
+    expect_true(all(is.na(headline$effect_native)))
+    expect_true(all(headline$availability == "unsupported"))
+    for (key in c("policy_annual_distribution", "policy_adverse_distribution",
+                  "policy_outcome_distribution", "policy_exceedance")) {
+      if (!is.null(items[[key]])) expect_no_error(items[[key]]$fun())
+    }
+  })
+})
+
+test_that("Step 3 paired and headline reactives explicitly use equal-model means", {
+  hist <- make_step3_hist_fixture()
+  hist$so$transform <- "identity"
+  baseline <- policy <- make_step3_scenarios_fixture()
+  name <- names(baseline)[[1L]]
+  pipe <- make_step3_pipe_fixture(n = 20L)
+  pipe$y_point <- rep(c(1, 2), each = 20L)
+  baseline[[name]]$so <- policy[[name]]$so <- hist$so
+  baseline[[name]]$pipelines <- setNames(rep(list(pipe), 3), paste0("m", 1:3))
+  policy[[name]]$pipelines <- lapply(c(0, 1, 9), function(delta) {
+    out <- pipe
+    out$y_point <- out$y_point + delta
+    out
+  })
+  names(policy[[name]]$pipelines) <- names(baseline[[name]]$pipelines)
+  internals <- NULL
+  testServer(function(input, output, session) {
+    internals <<- .wire_results_pane(input, output, session,
+      reactiveVal(hist), reactiveVal(baseline), reactiveVal(hist), reactiveVal(policy),
+      selected_hist = reactiveVal(NULL), residuals = reactiveVal("none"))
+  }, {
+    session$setInputs(cmp_agg_method = "mean", cmp_deviation = "none")
+    session$flushReact()
+    for (summary in list(internals$paired_effect_summary(),
+                         internals$headline_paired_effect_summary())) {
+      focus <- summary[summary$scenario == name, ]
+      expect_equal(focus$value, 10 / 3)
+      expect_equal(focus$baseline, 1.5)
+      expect_equal(focus$policy - focus$baseline, focus$value)
+      expect_identical(focus$center_method, "equal_model_mean")
+    }
+    expect_match(internals$headline_cards()[[1]]$note,
+                 "Policy: 4.83 outcome units vs Base: 1.50 outcome units", fixed = TRUE)
+    session$setInputs(cmp_deviation = "median")
+    session$flushReact()
+    summary <- internals$headline_paired_effect_summary()
+    expect_equal(summary$baseline[summary$scenario == name], 1.5)
+    expect_equal(summary$value[summary$scenario == name], 10 / 3)
+  })
+})
+
 test_that("future metric switches preserve scenario keys and reuse prepared suites", {
   hist <- make_step3_hist_fixture()
   scenarios <- make_step3_scenarios_fixture_multi()
