@@ -867,14 +867,18 @@ mod_3_09_decomposition_server <- function(id,
       tails <- tails[tails$scope %in% c("equal_probability", "baseline_adverse_years"), , drop = FALSE]
       tails$return_period_label <- paste0("1-in-", format(tails$return_period, trim = TRUE))
       meta <- metric_meta() %||% list()
+      repositioning_modeled <- identical(result$mechanisms$repositioning_status, "modeled")
+      interaction_included <- identical(result$mechanisms$interaction_status, "included")
       display <- function(field) {
         values <- if (field %in% names(tails)) tails[[field]] else rep(NA_real_, nrow(tails))
         vapply(values, format_metric_value, character(1), metadata = meta, change = TRUE)
       }
       tails$main_display <- display("main")
-      tails$repositioning_display <- if (identical(result$mechanisms$repositioning_status, "modeled")) display("repositioning") else "Not modeled by this engine"
-      tails$interaction_display <- if (identical(result$mechanisms$interaction_status, "included")) display("interaction") else "Not included in fitted model"
-      tails$resilience_display <- display("resilience")
+      tails$repositioning_display <- if (repositioning_modeled) display("repositioning") else "Not modeled by this engine"
+      tails$interaction_display <- if (interaction_included) display("interaction") else "Not included in fitted model"
+      tails$resilience_display <- if (repositioning_modeled || interaction_included) {
+        display("resilience")
+      } else "Unavailable"
       tails$total_display <- display("total")
       tails$scope_label <- ifelse(tails$scope == "equal_probability",
         "Outcome-distribution quantile contrast (not necessarily same years)",
@@ -884,6 +888,9 @@ mod_3_09_decomposition_server <- function(id,
                       "main", "repositioning", "interaction", "resilience", "total")) {
         tails[[paste0(field, "_native")]] <- if (field %in% names(tails)) tails[[field]] else NA_real_
       }
+      if (!repositioning_modeled) tails$repositioning_native <- NA_real_
+      if (!interaction_included) tails$interaction_native <- NA_real_
+      if (!repositioning_modeled && !interaction_included) tails$resilience_native <- NA_real_
       for (field in c("achieved_fraction_min", "achieved_fraction_max")) {
         if (!field %in% names(tails)) tails[[field]] <- NA_real_
       }

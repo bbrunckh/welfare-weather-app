@@ -357,6 +357,28 @@ test_that("primary metric decomposition renders native contributions, tails and 
         "included_terms", "excluded_terms", "scale", "uncertainty_status") %in% names(mechanisms_back)))
       expect_true(all(mechanisms_back$scale == "model_scale"))
 
+      no_channels <- result
+      no_channels$mechanisms$repositioning_status <- "Not modeled by this engine"
+      no_channels$mechanisms$interaction_status <- "Interaction not included in fitted model"
+      no_channels$metadata$repositioning_modeled <- FALSE
+      no_channels$metadata$interaction_included <- FALSE
+      no_channels$scenarios[[1L]]$return_period$repositioning <- 0
+      no_channels$scenarios[[1L]]$return_period$interaction <- 0
+      no_channels$scenarios[[1L]]$return_period$resilience <- 0
+      metric_decomposition(no_channels)
+      session$flushReact()
+      unavailable_tails <- metric_tail_data()
+      expect_true(all(unavailable_tails$Repositioning == "Not modeled by this engine"))
+      expect_true(all(unavailable_tails$Interaction == "Not included in fitted model"))
+      expect_true(all(unavailable_tails$Resilience == "Unavailable"))
+      expect_true(all(is.na(unavailable_tails$`Repositioning native`)))
+      expect_true(all(is.na(unavailable_tails$`Interaction native`)))
+      expect_true(all(is.na(unavailable_tails$`Resilience native`)))
+      unavailable_tail_export <- items$policy_metric_adverse_attribution$fun()
+      expect_true(all(is.na(unavailable_tail_export$repositioning_native)))
+      expect_true(all(is.na(unavailable_tail_export$interaction_native)))
+      expect_true(all(is.na(unavailable_tail_export$resilience_native)))
+
       stale(TRUE)
       session$flushReact()
       stale_contributions <- metric_contribution_data()
