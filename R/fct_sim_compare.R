@@ -2686,7 +2686,7 @@ echart_pointrange_climate <- function(bands_tbl,
 #' per (scenario, source) on the same sqrt-of-variance statistics, Okabe-Ito
 #' source colours, legend bottom (the ggplot showed one).
 #' @noRd
-echart_variance_contribution <- function(var_tbl, height = "300px") {
+echart_variance_contribution <- function(var_tbl, height = "300px", percent = FALSE) {
   if (is.null(var_tbl) || nrow(var_tbl) == 0L) {
     return(echart_blank("Run a simulation to see SD contributions.", height = height))
   }
@@ -2725,9 +2725,12 @@ echart_variance_contribution <- function(var_tbl, height = "300px") {
 
   e$x$opts$xAxis <- list(
     type = "value",
-    name = "Standard deviation (outcome units)",
+    name = if (percent) "Standard deviation (percentage points)" else "Standard deviation (outcome units)",
+    nameLocation = "middle",
+    nameGap = 30,
+    nameMoveOverlap = FALSE,
     nameTextStyle = wise_eaxis_name(),
-    axisLabel = wise_eaxis_label(),
+    axisLabel = .wise_result_axis_label(if (percent) "(percent)" else ""),
     splitLine = wise_esplit_line(),
     axisLine = list(lineStyle = list(color = .wise_grid))
   )
@@ -2744,8 +2747,21 @@ echart_variance_contribution <- function(var_tbl, height = "300px") {
     list(bottom = 0, left = 0, orient = "horizontal"),
     wise_elegend_style()
   )
-  e$x$opts$tooltip <- list(trigger = "axis", axisPointer = list(type = "shadow"))
-  e$x$opts$grid <- list(containLabel = TRUE, left = 8, right = 20, top = 10, bottom = 42)
+  e$x$opts$tooltip <- list(
+    trigger = "axis", confine = TRUE, axisPointer = list(type = "shadow"),
+    formatter = htmlwidgets::JS(sprintf("function(ps) {
+      function esc(s) { return String(s).replace(/[&<>\"']/g, function(c) {
+        return {'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',\"'\":'&#39;'}[c]; }); }
+      if (!ps.length) return '';
+      var percent = %s;
+      return esc(ps[0].axisValueLabel) + '<br>' + ps.map(function(p) {
+        var v = Array.isArray(p.value) ? p.value[0] : p.value;
+        return p.marker + esc(p.seriesName) + ': <b>' +
+          (Number.isFinite(v) ? (percent ? v*100 : v).toLocaleString('en-US', {maximumFractionDigits: 3}) + (percent ? ' pp' : '') : 'Not available') + '</b>';
+      }).join('<br>');
+    }", tolower(as.character(percent))))
+  )
+  e$x$opts$grid <- list(containLabel = TRUE, left = 8, right = 24, top = 24, bottom = 88)
   e$x$opts$color <- unname(src_cols)
   wise_echart_theme(e)
 }
@@ -2796,9 +2812,7 @@ echart_step2_adverse_dot <- function(tbl, x_label = "Outcome level",
   )
 
   y_breaks <- sort(unique(tbl$rp_y))
-  y_cats <- as.character(seq_along(y_breaks) - 1L)
   y_labels <- levels(tbl$rp_label)[y_breaks]
-  tbl$y_cat <- y_cats[match(tbl$rp_y, y_breaks)]
 
   top_y <- max(tbl$rp_y)
   top_keys <- unique(tbl$scenario_key[tbl$rp_y == top_y])
@@ -2809,22 +2823,23 @@ echart_step2_adverse_dot <- function(tbl, x_label = "Outcome level",
     rows <- tbl[tbl$scenario_key == scn, , drop = FALSE]
     if (!nrow(rows)) next
     col <- unname(scenario_colours[[scn]])
-    y_pos <- as.numeric(rows$y_cat) + rows$dodge_offset
-    # Floating ensemble bar per point: unique stack per point so segments at
-    # the same row do not pile up.
+    y_pos <- rows$rp_y + rows$dodge_offset
+    # Match each spread interval to its scenario's vertically-dodged marker.
     for (j in seq_len(nrow(rows))) {
       if (is.finite(rows$intermod_lo[[j]]) && is.finite(rows$intermod_hi[[j]])) {
-        series <- c(series, .e_band_pair(
-          rows$y_cat[[j]],
-          rows$intermod_lo[[j]],
-          rows$intermod_hi[[j]],
-          col,
-          stack = paste0("rp_", scn, "_", j),
-          bar_width = 7,
-          opacity = 0.5,
-          z = 1,
-          horizontal = TRUE
-        ))
+        series <- c(series, list(list(
+          name = paste0("rp_", scn, "_", j, "__spread"),
+          type = "line",
+          data = unname(rbind(
+            c(rows$intermod_lo[[j]], y_pos[[j]]),
+            c(rows$intermod_hi[[j]], y_pos[[j]])
+          )),
+          symbol = "none",
+          silent = TRUE,
+          tooltip = list(show = FALSE),
+          lineStyle = list(color = col, width = 3, opacity = 0.4, cap = "round"),
+          z = 1
+        )))
       }
     }
     labs <- rep(NA_character_, nrow(rows))
@@ -2833,32 +2848,52 @@ echart_step2_adverse_dot <- function(tbl, x_label = "Outcome level",
     if (any(lab_rows)) {
       labs[[which(lab_rows)[[1L]]]] <- scn
     }
-    series <- c(series, .e_dot_series(
+    dots <- .e_dot_series(
       scn, rows$value, y_pos,
-      colour = col, fill = col, size = 12, border_width = 1.1,
+      colour = col, fill = col, size = 8, border_width = 1.1,
       labels = labs
-    ))
+    )[[1L]]
+    dots$data <- lapply(seq_len(nrow(rows)), function(i) {
+      modifyList(dots$data[[i]], list(
+        scenario = scn, rp_label = as.character(rows$rp_label[[i]]),
+        outcome = rows$value[[i]], lo = rows$intermod_lo[[i]], hi = rows$intermod_hi[[i]]
+      ))
+    })
+    series <- c(series, list(dots))
   }
 
+  x_vals <- c(tbl$value, tbl$intermod_lo, tbl$intermod_hi)
+  x_vals <- x_vals[is.finite(x_vals)]
+  if (!length(x_vals)) {
+    return(echart_blank("No finite adverse-year outcomes available.", height = height))
+  }
+  x_span <- diff(range(x_vals))
+  if (!is.finite(x_span) || x_span <= 0) x_span <- max(abs(x_vals), 1) * 0.1
   e$x$opts$xAxis <- list(
     type = "value",
-    scale = TRUE,
+    min = min(x_vals) - 0.02 * x_span,
+    max = max(x_vals) + 0.12 * x_span,
     name = x_label,
     nameLocation = "middle",
     nameGap = 30,
     nameTextStyle = wise_eaxis_name(),
-    axisLabel = wise_eaxis_label(),
+    axisLabel = .wise_result_axis_label(x_label),
     splitLine = wise_esplit_line(),
     axisLine = list(lineStyle = list(color = .wise_grid))
   )
+  y_label_map <- stats::setNames(as.list(y_labels), as.character(y_breaks))
+  names(y_label_map) <- as.character(y_breaks)
   e$x$opts$yAxis <- list(
-    type = "category",
-    data = y_cats,
+    type = "value",
+    min = 0,
+    max = max(y_breaks) + 1,
+    interval = 1,
     axisLabel = wise_eaxis_label(
-      interval = 0L,
+      showMinLabel = FALSE,
+      showMaxLabel = FALSE,
       formatter = htmlwidgets::JS(sprintf(
-        "function(v){ var m = %s; return m[v] === undefined ? '' : m[v]; }",
-        jsonlite::toJSON(as.list(stats::setNames(y_labels, y_cats)), auto_unbox = TRUE)
+        "function(v){ var m = %s; return m[String(Math.round(v))] || ''; }",
+        jsonlite::toJSON(y_label_map, auto_unbox = TRUE)
       ))
     ),
     axisLine = list(lineStyle = list(color = .wise_grid)),
@@ -2866,8 +2901,8 @@ echart_step2_adverse_dot <- function(tbl, x_label = "Outcome level",
     splitLine = wise_esplit_line(show = FALSE)
   )
   e$x$opts$series <- series
-  e$x$opts$tooltip <- list(trigger = "item")
-  e$x$opts$grid <- list(containLabel = TRUE, left = 8, right = 90, top = 12, bottom = 10)
+  e$x$opts$tooltip <- list(trigger = "item", confine = TRUE, formatter = .wise_result_tooltip(x_label))
+  e$x$opts$grid <- list(containLabel = TRUE, left = 8, right = 90, top = 12, bottom = 58)
   wise_echart_theme(e)
 }
 
@@ -2875,20 +2910,9 @@ echart_step2_adverse_dot <- function(tbl, x_label = "Outcome level",
 
 #' Interactive annual outcome distribution
 #'
-#' echarts counterpart of [plot_annual_distribution()] (single-source Step 2
-#' path; source-dodged policy data keep the ggplot builder). One row per
-#' scenario, Historical on top, raw weather-year draws as scatter dots and:
-#' - `"boxplot"` mode: precomputed quartiles as a floating bar pair (Q1-Q3)
-#'   plus a min-max whisker markLine - the bar+markLine recipe from §7, since
-#'   e_boxplot() computes its statistics client-side.
-#' - `"violin"` mode: a ridgeline-style density area per row. Densities are
-#'   computed in R with the same parameters as ggplot's stat_ydensity
-#'   (bw = "nrd0", kernel = gaussian, n = 512, trimmed to the data range) and
-#'   normalised like ggplot's scale = "width"; the outline is drawn one-sided
-#'   above the row baseline (echarts has no custom geometry for mirrored
-#'   violins).
-#'
-#' The dashed historical-mean reference line is kept.
+#' Step 2 counterpart of [plot_annual_distribution()]. Delegates to the
+#' shared Step 3 ECharts builder so both steps use the same annual distribution
+#' geometry, labels, and interaction.
 #' @noRd
 echart_annual_distribution <- function(tbl, x_label = "Outcome (outcome units)",
                                        plot_type = "violin",
@@ -2896,215 +2920,9 @@ echart_annual_distribution <- function(tbl, x_label = "Outcome (outcome units)",
   if (is.null(tbl) || !nrow(tbl)) {
     return(echart_blank("No annual simulation results available.", height = height))
   }
-  df <- tbl
-  df$scenario <- as.character(df$scenario)
-  df$period <- ifelse(df$scenario == "Historical", "Historical",
-    vapply(df$scenario, .parse_year, character(1L))
+  echart_step3_annual_distribution(
+    tbl, x_label = x_label, plot_type = plot_type, height = height
   )
-  df$ssp <- ifelse(df$scenario == "Historical", "Historical",
-    vapply(df$scenario, .normalise_ssp, character(1L))
-  )
-  scenario_levels <- c("Historical", sort(unique(df$scenario[df$scenario != "Historical"])))
-  scenario_palette <- c(Historical = .wise_history)
-  for (ssp in unique(df$ssp[df$ssp != "Historical"])) {
-    members <- scenario_levels[scenario_levels != "Historical"]
-    members <- members[vapply(members, function(s) {
-      identical(.normalise_ssp(s), ssp)
-    }, logical(1L))]
-    members <- members[order(vapply(members, .parse_year, character(1L)))]
-    base_col <- if (ssp %in% names(.ssp_colours)) {
-      unname(.ssp_colours[[ssp]])
-    } else {
-      "#0072B2"
-    }
-    shades <- if (length(members) > 1L) {
-      colorspace::lighten(base_col, seq(0.30, 0, length.out = length(members)))
-    } else {
-      base_col
-    }
-    scenario_palette[members] <- shades
-  }
-
-  n_rows <- length(scenario_levels)
-  # Row anchor per scenario level; level 1 (Historical) gets the top row.
-  row_y <- setNames(n_rows - match(scenario_levels, scenario_levels), scenario_levels)
-  hist_vals <- df$value[df$scenario == "Historical"]
-  hist_mean <- if (length(hist_vals)) mean(hist_vals, na.rm = TRUE) else NA_real_
-
-  e <- .e_step2_base(height)
-  series <- list()
-  for (scn in scenario_levels) {
-    rows <- df[df$scenario == scn, , drop = FALSE]
-    if (!nrow(rows)) next
-    vals <- as.numeric(rows$value)
-    vals <- vals[is.finite(vals)]
-    if (!length(vals)) next
-    col <- unname(scenario_palette[[scn]] %||% .wise_history)
-    y0 <- row_y[[scn]]
-    y_cat <- as.character(y0)
-
-    if (identical(plot_type, "boxplot")) {
-      st <- suppressWarnings(grDevices::boxplot.stats(vals)$stats)
-      if (length(st) == 5L && all(is.finite(st))) {
-        half_h <- 0.18
-        q1 <- st[[2L]]
-        med <- st[[3L]]
-        q3 <- st[[4L]]
-        # Native line polygons stay aligned with the numeric ridge axis;
-        # category-oriented bar stacks would disappear after the violin-axis
-        # migration.
-        series <- c(series, list(
-          list(
-            name = paste0(scn, "__whisker"),
-            type = "line",
-            data = unname(rbind(c(st[[1L]], y0), c(st[[5L]], y0))),
-            symbol = "none",
-            silent = TRUE,
-            lineStyle = list(color = .wise_support, width = 1),
-            z = 1
-          ),
-          list(
-            name = paste0(scn, "__box"),
-            type = "line",
-            data = unname(rbind(
-              c(q1, y0 - half_h), c(q3, y0 - half_h),
-              c(q3, y0 + half_h), c(q1, y0 + half_h),
-              c(q1, y0 - half_h)
-            )),
-            symbol = "none",
-            silent = TRUE,
-            lineStyle = list(color = .wise_support, width = 1),
-            areaStyle = list(color = col, opacity = 0.45),
-            emphasis = list(focus = "series"),
-            z = 2
-          ),
-          list(
-            name = paste0(scn, "__median"),
-            type = "line",
-            data = unname(rbind(c(med, y0 - half_h), c(med, y0 + half_h))),
-            symbol = "none",
-            silent = TRUE,
-            lineStyle = list(color = .wise_support, width = 2),
-            z = 3
-          )
-        ))
-      }
-    } else {
-      # Density outline, ggplot stat_ydensity parameters, scale = "width".
-      d <- stats::density(vals, bw = "nrd0", kernel = "gaussian", n = 512)
-      keep <- d$x >= min(vals) & d$x <= max(vals)
-      dx <- d$x[keep]
-      dy <- d$y[keep]
-      dy <- dy / max(dy, na.rm = TRUE) # scale = "width"
-      series <- c(series, list(
-        list(
-          name = paste0(scn, "__density"), type = "line",
-          symbol = "none", silent = TRUE, z = 1,
-          tooltip = list(show = FALSE),
-          lineStyle = list(width = 1.2, color = col, opacity = 0.9),
-          areaStyle = list(color = col, opacity = 0.32),
-          emphasis = list(focus = "series"),
-          data = unname(rbind(
-            cbind(dx, y0 + dy * 0.31),
-            cbind(rev(dx), rep(y0, length(dx)))
-          ))
-        )
-      ))
-    }
-
-    # Raw draws: deterministic vertical jitter keeps the raincloud points
-    # legible without changing their x values or summary statistics.
-    idx <- .e_downsample_idx(length(vals))
-    jitter <- ((seq_along(vals) * 37L) %% 101L) / 100 - 0.5
-    draws <- list(
-      name = paste0(scn, "__draws"),
-      type = "scatter",
-      symbolSize = 5,
-      z = 3,
-      silent = TRUE,
-      itemStyle = list(color = col, opacity = 0.4),
-      data = lapply(idx, function(i) {
-        list(value = list(vals[[i]], y0 + jitter[[i]] * 0.22))
-      })
-    )
-    draws$tooltip <- list(show = FALSE)
-    series <- c(series, list(draws))
-
-    # Open-circle mean marker (ggplot shape 21, white fill, slate border).
-    series <- c(series, .e_dot_series(
-      paste0(scn, "__mean"), mean(vals, na.rm = TRUE), y0,
-      colour = .wise_slate, fill = "white", size = 10, border_width = 1.0
-    ))
-  }
-
-  # Dashed historical-mean reference line (.wise_zero) with its label.
-  if (is.finite(hist_mean)) {
-    series <- c(series, list(list(
-      name = "Historical mean",
-      type = "line",
-      symbol = "none",
-      silent = TRUE,
-      z = 0,
-      markLine = list(
-        silent = TRUE,
-        symbol = "none",
-        lineStyle = list(color = .wise_zero, type = "dashed", width = 1),
-        label = list(
-          show = TRUE,
-          position = "insideEndTop",
-          formatter = "Historical mean",
-          color = .wise_zero,
-          fontSize = 12
-        ),
-        data = list(list(xAxis = hist_mean))
-      ),
-      data = list()
-    )))
-  }
-
-  # Historical (level 1) on top: numeric y rows preserve the fractional
-  # silhouette coordinates while the formatter supplies scenario labels.
-  y_cats <- as.character(seq_len(n_rows) - 1L)
-  e$x$opts$xAxis <- list(
-    type = "value",
-    scale = TRUE,
-    name = x_label,
-    nameLocation = "middle",
-    nameGap = 30,
-    nameTextStyle = wise_eaxis_name(),
-    axisLabel = wise_eaxis_label(),
-    splitLine = wise_esplit_line(),
-    axisLine = list(lineStyle = list(color = .wise_grid))
-  )
-  e$x$opts$yAxis <- list(
-    # Density polygons use fractional y coordinates above each row baseline;
-    # a category axis would discard those coordinates and leave only the raw
-    # draw points visible.
-    type = "value",
-    data = y_cats,
-    min = -0.45,
-    max = max(as.numeric(y_cats)) + 0.45,
-    interval = 1,
-    axisLabel = wise_eaxis_label(
-      interval = 0L,
-      formatter = htmlwidgets::JS(sprintf(
-        "function(v){ var m = %s; return m[v] === undefined ? '' : m[v]; }",
-        jsonlite::toJSON(as.list(stats::setNames(
-          vapply(scenario_levels, function(s) sub(" / ", "\n", s, fixed = TRUE),
-            character(1L)
-          ), as.character(seq_len(n_rows) - 1L)
-        )), auto_unbox = TRUE)
-      ))
-    ),
-    axisLine = list(lineStyle = list(color = .wise_grid)),
-    axisTick = list(show = FALSE),
-    splitLine = wise_esplit_line(show = FALSE),
-    inverse = FALSE
-  )
-  e$x$opts$series <- series
-  e$x$opts$tooltip <- list(trigger = "item")
-  e$x$opts$grid <- list(containLabel = TRUE, left = 8, right = 20, top = 12, bottom = 10)
-  wise_echart_theme(e)
 }
 
 # ---- echart_timeseries_spaghetti --------------------------------------------
@@ -3114,10 +2932,7 @@ echart_annual_distribution <- function(tbl, x_label = "Outcome (outcome units)",
 #' echarts counterpart of [plot_timeseries_spaghetti()]: same envelope
 #' statistics (per (scenario, sim_year) median and quantiles at
 #' `ensemble_band_q`), one thin translucent line per model, one bold median
-#' line per scenario. The inter-model ribbon is drawn as a stacked
-#' transparent-base + translucent-fill area pair (the band recipe), which is
-#' exact here because every scenario's envelope shares one sim_year grid.
-#' Legend bottom-left, as in the ggplot builder.
+#' line per scenario/source, and a custom polygon for the inter-model ribbon.
 #' @noRd
 echart_timeseries_spaghetti <- function(ts_tbl, x_label = "",
                                         ensemble_band_q = c(lo = 0, hi = 1),
@@ -3127,13 +2942,32 @@ echart_timeseries_spaghetti <- function(ts_tbl, x_label = "",
   }
   df <- ts_tbl
   has_source <- "source" %in% names(df)
-  if (has_source) {
-    df <- df[!(df$is_historical & df$source == "Policy"), , drop = FALSE]
+  required <- c("scenario", "model_id", "sim_year", "value", "is_historical")
+  if (!all(required %in% names(df))) {
+    return(echart_blank("No model trajectories available.", height = height))
   }
-  df$ssp_key <- ifelse(df$is_historical, "Historical",
-    vapply(df$scenario, .normalise_ssp, character(1L))
-  )
+  if (has_source) {
+    df <- df[!(df$is_historical %in% TRUE & df$source == "Policy"), , drop = FALSE]
+  }
+  df$scenario <- as.character(df$scenario)
+  df$model_id <- as.character(df$model_id)
+  df$is_historical <- df$is_historical %in% TRUE
+  df$sim_year <- suppressWarnings(as.numeric(as.character(df$sim_year)))
+  df$value <- suppressWarnings(as.numeric(as.character(df$value)))
+  keep <- !is.na(df$scenario) & nzchar(df$scenario) &
+    !is.na(df$model_id) & nzchar(df$model_id) &
+    is.finite(df$sim_year) & is.finite(df$value)
+  if (has_source) {
+    df$source <- as.character(df$source)
+    keep <- keep & !is.na(df$source) & nzchar(df$source)
+  }
+  df <- df[keep, , drop = FALSE]
+  if (!nrow(df)) {
+    return(echart_blank("No finite model trajectories available.", height = height))
+  }
+
   scen_levels <- c("Historical", sort(unique(df$scenario[!df$is_historical])))
+  scen_levels <- scen_levels[scen_levels %in% df$scenario]
   scen_colour_map <- vapply(scen_levels, function(s) {
     if (s == "Historical") {
       return(.wise_support)
@@ -3142,11 +2976,7 @@ echart_timeseries_spaghetti <- function(ts_tbl, x_label = "",
     if (ssp %in% names(.ssp_colours)) unname(.ssp_colours[[ssp]]) else "grey50"
   }, character(1L))
 
-  env_grp <- if (has_source) {
-    c("scenario", "source", "sim_year")
-  } else {
-    c("scenario", "sim_year")
-  }
+  env_grp <- c("scenario", if (has_source) "source", "sim_year")
   env_df <- df |>
     dplyr::group_by(dplyr::across(dplyr::all_of(env_grp))) |>
     dplyr::summarise(
@@ -3163,49 +2993,44 @@ echart_timeseries_spaghetti <- function(ts_tbl, x_label = "",
   series <- list()
   legend_names <- character(0)
 
-  # Inter-model envelope (futures only, when >1 model): stacked transparent
-  # base + translucent fill.
-  for (scn in unique(as.character(fut_env$scenario))) {
-    env <- fut_env[fut_env$scenario == scn, , drop = FALSE]
+  # Inter-model envelope (futures only, when >1 model): explicit data-space
+  # polygon, so neither the lower edge nor the fill is anchored at zero.
+  env_groups <- unique(fut_env[intersect(c("scenario", "source"), names(fut_env))])
+  for (i in seq_len(nrow(env_groups))) {
+    group <- env_groups[i, , drop = FALSE]
+    scn <- as.character(group$scenario[[1L]])
+    env <- fut_env[as.character(fut_env$scenario) == scn, , drop = FALSE]
+    if (has_source) env <- env[as.character(env$source) == as.character(group$source[[1L]]), , drop = FALSE]
     env <- env[order(env$sim_year), , drop = FALSE]
     col <- unname(scen_colour_map[[scn]] %||% "grey50")
-    xs <- as.numeric(env$sim_year)
-    base <- list(
-      name = paste0(scn, "__env_base"), type = "line",
-      stack = paste0("env_", scn), symbol = "none", silent = TRUE, z = 1,
+    band_name <- paste(c(scn, if (has_source) as.character(group$source[[1L]]), "envelope"), collapse = " / ")
+    points <- unname(rbind(cbind(env$sim_year, env$lo),
+      cbind(rev(env$sim_year), rev(env$hi))))
+    series <- c(series, list(list(
+      name = band_name,
+      type = "custom",
+      renderItem = htmlwidgets::JS(sprintf(
+        "function(params, api) { var pts = %s; return {type: 'polygon', shape: {points: pts.map(function(p){return api.coord(p);})}, style: {fill: '%s', opacity: 0.16, stroke: 'none'}}; }",
+        jsonlite::toJSON(points, digits = NA), col
+      )),
+      data = list(list(min(env$sim_year), min(env$lo), max(env$sim_year), max(env$hi))),
+      encode = list(x = c(0, 2), y = c(1, 3)),
+      itemStyle = list(color = col),
+      silent = TRUE,
       tooltip = list(show = FALSE),
-      lineStyle = list(width = 0, opacity = 0),
-      areaStyle = list(color = "rgba(0,0,0,0)"),
-      data = lapply(seq_along(xs), function(i) list(value = list(xs[[i]], env$lo[[i]])))
-    )
-    band <- list(
-      name = paste0(scn, "__env_band"), type = "line",
-      stack = paste0("env_", scn), symbol = "none", silent = TRUE, z = 1,
-      tooltip = list(show = FALSE),
-      lineStyle = list(width = 0, opacity = 0),
-      areaStyle = list(color = col, opacity = 0.15),
-      data = lapply(seq_along(xs), function(i) {
-        list(value = list(xs[[i]], max(env$hi[[i]] - env$lo[[i]], 0)))
-      })
-    )
-    series <- c(series, list(base, band))
+      legendHoverLink = FALSE,
+      z = 1
+    )))
   }
 
   # Spaghetti: one thin translucent line per (scenario, model).
-  spaghetti_grp <- if (has_source) {
-    c("scenario", "source", "model_id")
-  } else {
-    c("scenario", "model_id")
-  }
-  for (key in unique(do.call(paste, c(df[intersect(spaghetti_grp, names(df))], sep = "__")))) {
-    parts <- strsplit(key, "__", fixed = TRUE)[[1L]]
-    scn <- parts[[1L]]
-    rows <- df[df$scenario == scn & as.character(df$model_id) == parts[[length(parts)]], ,
-      drop = FALSE
-    ]
-    if (has_source && length(parts) > 2L) {
-      rows <- rows[as.character(rows$source) == parts[[2L]], , drop = FALSE]
-    }
+  spaghetti_grp <- c("scenario", if (has_source) "source", "model_id")
+  model_groups <- unique(df[spaghetti_grp])
+  for (i in seq_len(nrow(model_groups))) {
+    group <- model_groups[i, , drop = FALSE]
+    scn <- as.character(group$scenario[[1L]])
+    rows <- df[as.character(df$scenario) == scn & df$model_id == as.character(group$model_id[[1L]]), , drop = FALSE]
+    if (has_source) rows <- rows[as.character(rows$source) == as.character(group$source[[1L]]), , drop = FALSE]
     rows <- rows[order(rows$sim_year), , drop = FALSE]
     # Guard: raw model lines above 10k points are deterministically
     # downsampled (even stride); aggregated envelopes stay exact.
@@ -3213,55 +3038,130 @@ echart_timeseries_spaghetti <- function(ts_tbl, x_label = "",
     xs <- as.numeric(rows$sim_year)[idx]
     ys <- as.numeric(rows$value)[idx]
     col <- unname(scen_colour_map[[scn]] %||% "grey50")
-    series <- c(series, list(list(
-      name = key, type = "line", symbol = "none", silent = TRUE, z = 1,
-      tooltip = list(show = FALSE),
+    member_col <- intersect(c("member_id", "member"), names(rows))
+    model_name <- as.character(group$model_id[[1L]])
+    source_name <- if (has_source) as.character(group$source[[1L]]) else NULL
+    raw_name <- paste(c(scn, source_name, model_name), collapse = " / ")
+    raw <- list(
+      name = raw_name, type = "line", symbol = "none", showSymbol = FALSE, z = 2,
       lineStyle = list(color = col, width = 1, opacity = 0.35),
       itemStyle = list(color = col),
-      data = lapply(seq_along(xs), function(i) list(value = list(xs[[i]], ys[[i]])))
-    )))
+      data = lapply(seq_along(xs), function(j) {
+        row_idx <- idx[[j]]
+        point <- list(
+          value = list(xs[[j]], ys[[j]]),
+          scenario = scn,
+          source = source_name,
+          model = model_name,
+          kind = "model"
+        )
+        if (length(member_col) && !is.na(rows[[member_col[[1L]]]][[row_idx]])) {
+          point$member <- as.character(rows[[member_col[[1L]]]][[row_idx]])
+        }
+        point
+      })
+    )
+    series <- c(series, list(raw))
   }
 
-  # Bold across-model median per scenario (legend entry).
-  for (scn in scen_levels) {
+  # Bold across-model median per scenario/source (legend entry).
+  median_groups <- unique(env_df[intersect(c("scenario", "source"), names(env_df))])
+  for (i in seq_len(nrow(median_groups))) {
+    group <- median_groups[i, , drop = FALSE]
+    scn <- as.character(group$scenario[[1L]])
     env <- env_df[as.character(env_df$scenario) == scn, , drop = FALSE]
+    if (has_source) env <- env[as.character(env$source) == as.character(group$source[[1L]]), , drop = FALSE]
     if (!nrow(env)) next
     env <- env[order(env$sim_year), , drop = FALSE]
-    series <- c(series, .e_line_series(
-      scn, as.numeric(env$sim_year), env$central,
+    label <- paste(c(scn, if (has_source) as.character(group$source[[1L]])), collapse = " / ")
+    line <- .e_line_series(
+      label, as.numeric(env$sim_year), env$central,
       colour = unname(scen_colour_map[[scn]] %||% "grey50"),
       width = 3, opacity = 1
+    )[[1L]]
+    line$data <- lapply(seq_len(nrow(env)), function(j) list(
+      value = list(as.numeric(env$sim_year[[j]]), as.numeric(env$central[[j]])),
+      scenario = scn,
+      source = if (has_source) as.character(group$source[[1L]]) else NULL,
+      model = "Across-model median",
+      kind = "median"
     ))
-    legend_names <- c(legend_names, scn)
+    line$z <- 4
+    series <- c(series, list(line))
+    legend_names <- c(legend_names, label)
   }
 
+  y_vals <- c(df$value, env_df$lo, env_df$hi, env_df$central)
+  y_vals <- y_vals[is.finite(y_vals)]
+  if (!length(y_vals)) {
+    return(echart_blank("No finite model trajectories available.", height = height))
+  }
+  x_vals <- df$sim_year[is.finite(df$sim_year)]
+  x_span <- diff(range(x_vals))
+  x_pad <- if (x_span > 0) x_span * 0.005 else max(abs(x_vals[[1L]]) * 0.005, 0.01)
+  y_span <- diff(range(y_vals))
+  y_pad <- if (y_span > 0) y_span * 0.04 else max(abs(y_vals[[1L]]) * 0.04, 0.01)
+  percent <- grepl("(percent)", x_label, fixed = TRUE)
   e$x$opts$xAxis <- list(
     type = "value",
+    min = min(x_vals) - x_pad,
+    max = max(x_vals) + x_pad,
     name = "Historical weather-year draw (simulated)",
     nameLocation = "middle",
     nameGap = 30,
+    nameMoveOverlap = FALSE,
     nameTextStyle = wise_eaxis_name(),
-    axisLabel = wise_eaxis_label(),
+    axisLabel = wise_eaxis_label(formatter = htmlwidgets::JS(
+      "function(v){ return String(Math.round(v)); }"
+    )),
     splitLine = wise_esplit_line(),
     axisLine = list(lineStyle = list(color = .wise_grid))
   )
   e$x$opts$yAxis <- list(
     type = "value",
+    min = min(y_vals) - y_pad,
+    max = max(y_vals) + y_pad,
     name = x_label,
-    nameLocation = "middle",
-    nameGap = 48,
-    nameRotate = 90,
-    nameTextStyle = wise_eaxis_name(),
-    axisLabel = wise_eaxis_label(),
+    nameLocation = "end",
+    nameGap = 20,
+    nameRotate = 0,
+    nameMoveOverlap = FALSE,
+    nameTextStyle = wise_eaxis_name(align = "left"),
+    axisLabel = .wise_result_axis_label(x_label),
     splitLine = wise_esplit_line()
   )
   e$x$opts$series <- series
   e$x$opts$legend <- modifyList(
-    list(bottom = 0, left = 0, orient = "horizontal", data = as.list(legend_names)),
+    list(top = 4, left = "center", orient = "horizontal", data = as.list(legend_names)),
     wise_elegend_style()
   )
-  e$x$opts$tooltip <- list(trigger = "axis")
-  e$x$opts$grid <- list(containLabel = TRUE, left = 8, right = 16, top = 12, bottom = 42)
+  e$x$opts$tooltip <- list(
+    trigger = "axis", confine = TRUE,
+    axisPointer = list(type = "line", snap = TRUE),
+    formatter = htmlwidgets::JS(sprintf("function(ps) {
+      function esc(s) { return String(s == null ? '' : s).replace(/[&<>\"']/g, function(c) {
+        return {'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',\"'\":'&#39;'}[c]; }); }
+      var percent = %s;
+      function num(v) { return Number.isFinite(v) ? (percent ? v*100 : v).toLocaleString('en-US', {maximumFractionDigits: percent ? 1 : 3}) + (percent ? '%%' : '') : 'Not available'; }
+      var groups = {}, order = [];
+      ps.forEach(function(p) {
+        var d = p.data || {}; if (d.kind !== 'model') return;
+        var label = d.scenario + (d.source ? ' / ' + d.source : '');
+        if (!groups[label]) { groups[label] = {values:[], marker:p.marker}; order.push(label); }
+        var v = p.value[1]; if (Number.isFinite(v)) groups[label].values.push(v);
+      });
+      var out = order.map(function(label) {
+        var g = groups[label], v = g.values.sort(function(a,b){return a-b;}), n = v.length;
+        if (!n) return '';
+        var median = n%%2 ? v[(n-1)/2] : (v[n/2-1]+v[n/2])/2;
+        return g.marker + '<b>' + esc(label) + '</b>: ' + (n === 1 ? num(v[0]) :
+          'Min ' + num(v[0]) + ' / Median ' + num(median) + ' / Max ' + num(v[n-1]));
+      });
+      if (!out.length) return '';
+      return '<b>Weather year ' + String(Math.round(ps[0].value[0])) + '</b><br>' + out.join('<br>');
+    }", tolower(as.character(percent)))
+  ))
+  e$x$opts$grid <- list(containLabel = TRUE, left = 8, right = 20, top = 86, bottom = 54)
   wise_echart_theme(e)
 }
 
@@ -3270,8 +3170,8 @@ echart_timeseries_spaghetti <- function(ts_tbl, x_label = "",
 #' Interactive climate-model robustness scatter
 #'
 #' echarts counterpart of [plot_model_robustness()]: one point per climate
-#' model's mean across weather-year draws (.wise_support), plus the green
-#' ensemble-median marker (#009E73) per scenario. Item tooltip.
+#' model's mean across weather-year draws in its scenario colour, plus the
+#' orange ensemble-median marker per scenario. Item tooltip.
 #' @noRd
 echart_model_robustness <- function(tbl, x_label = "Expected annual outcome",
                                     height = "420px") {
@@ -3280,6 +3180,11 @@ echart_model_robustness <- function(tbl, x_label = "Expected annual outcome",
   }
   cats <- unique(as.character(tbl$scenario))
   cat_idx <- setNames(as.character(seq_along(cats) - 1L), cats)
+  colours <- stats::setNames(vapply(cats, function(s) {
+    if (identical(s, "Historical")) return(.wise_history)
+    ssp <- .normalise_ssp(s)
+    if (ssp %in% names(.ssp_colours)) unname(.ssp_colours[[ssp]]) else .wise_slate
+  }, character(1)), cats)
 
   e <- .e_step2_base(height)
   means <- list(
@@ -3289,10 +3194,13 @@ echart_model_robustness <- function(tbl, x_label = "Expected annual outcome",
     z = 2,
     itemStyle = list(color = .wise_support, opacity = 0.7),
     data = lapply(seq_len(nrow(tbl)), function(i) {
-      list(value = list(
-        tbl$model_mean[[i]],
-        cat_idx[[as.character(tbl$scenario)[[i]]]]
-      ))
+      list(
+        value = list(tbl$model_mean[[i]], cat_idx[[as.character(tbl$scenario)[[i]]]]),
+        scenario = as.character(tbl$scenario[[i]]),
+        model = if ("model_id" %in% names(tbl)) as.character(tbl$model_id[[i]]) else NULL,
+        n_years = if ("n_weather_years" %in% names(tbl)) tbl$n_weather_years[[i]] else NULL,
+        itemStyle = list(color = unname(colours[[as.character(tbl$scenario[[i]])]]), opacity = .65)
+      )
     })
   )
   centers <- unique(tbl[c("scenario", "center")])
@@ -3301,12 +3209,10 @@ echart_model_robustness <- function(tbl, x_label = "Expected annual outcome",
     type = "scatter",
     symbolSize = 13,
     z = 3,
-    itemStyle = list(color = "#009E73", borderColor = .wise_support, borderWidth = 1.2),
+    itemStyle = list(color = .wise_policy, borderColor = .wise_policy_dark, borderWidth = 1.2),
     data = lapply(seq_len(nrow(centers)), function(i) {
-      list(value = list(
-        centers$center[[i]],
-        cat_idx[[as.character(centers$scenario)[[i]]]]
-      ))
+      list(value = list(centers$center[[i]], cat_idx[[as.character(centers$scenario)[[i]]]]),
+        scenario = as.character(centers$scenario[[i]]))
     })
   )
   e$x$opts$xAxis <- list(
@@ -3315,8 +3221,9 @@ echart_model_robustness <- function(tbl, x_label = "Expected annual outcome",
     name = x_label,
     nameLocation = "middle",
     nameGap = 30,
+    nameMoveOverlap = FALSE,
     nameTextStyle = wise_eaxis_name(),
-    axisLabel = wise_eaxis_label(),
+    axisLabel = .wise_result_axis_label(x_label),
     splitLine = wise_esplit_line(),
     axisLine = list(lineStyle = list(color = .wise_grid))
   )
@@ -3338,8 +3245,21 @@ echart_model_robustness <- function(tbl, x_label = "Expected annual outcome",
     splitLine = wise_esplit_line(show = FALSE)
   )
   e$x$opts$series <- list(means, centers)
-  e$x$opts$tooltip <- list(trigger = "item")
-  e$x$opts$grid <- list(containLabel = TRUE, left = 8, right = 20, top = 12, bottom = 10)
+  e$x$opts$tooltip <- list(trigger = "item", confine = TRUE,
+    formatter = htmlwidgets::JS(sprintf("function(p) {
+      var d = p.data || {};
+      function esc(s) { return String(s).replace(/[&<>\"']/g, function(c) {
+        return {'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',\"'\":'&#39;'}[c]; }); }
+      var percent = %s, v = p.value[0];
+      var label = d.model ? 'Model mean' : 'Ensemble median';
+      var text = '<b>' + esc(d.scenario) + '</b>';
+      if (d.model) text += '<br>Model/member: ' + esc(d.model);
+      text += '<br>' + label + ': <b>' + (Number.isFinite(v) ?
+        (percent ? v*100 : v).toLocaleString('en-US', {maximumFractionDigits: percent ? 1 : 3}) + (percent ? '%%' : '') : 'Not available') + '</b>';
+      if (Number.isFinite(d.n_years)) text += '<br>Weather years: ' + d.n_years;
+      return text;
+    }", tolower(as.character(grepl("(percent)", x_label, fixed = TRUE))))))
+  e$x$opts$grid <- list(containLabel = TRUE, left = 8, right = 24, top = 24, bottom = 62)
   wise_echart_theme(e)
 }
 
@@ -3362,8 +3282,7 @@ echart_model_robustness <- function(tbl, x_label = "Expected annual outcome",
 #'   produces an incorrect ribbon on the log probability axis.
 #' - logit_x has no echarts counterpart: the probability axis uses log10
 #'   with the same supported return-period tick labels (percent-formatted).
-#'   Custom tick values require ECharts >= 5.6 (axisLabel.customValues);
-#'   older cores fall back to default log ticks, still percent-formatted.
+#'   Custom label and tick positions use ECharts >= 5.5.1.
 #' @noRd
 echart_exceedance <- function(curves_tbl,
                               x_label,
@@ -3483,6 +3402,10 @@ echart_exceedance <- function(curves_tbl,
     scn <- as.character(rows$scenario[[1L]])
     col <- unname(scenario_colour_map[[scn]] %||% .wise_slate)
     lty <- e_type_of(scn)
+    if (has_source && identical(as.character(rows$source[[1L]]), "Policy")) {
+      col <- .wise_policy
+      lty <- "dashed"
+    }
     p <- rows$exceed_prob
 
     if (show_ens && !rows$is_historical[[1L]]) {
@@ -3499,10 +3422,14 @@ echart_exceedance <- function(curves_tbl,
         lower_type = "dashed", z = 1
       ))
     }
-    series <- c(series, .e_line_series(
-      lid, p, rows$central, col, width = 2, type = lty,
-      endpoint_label = TRUE
-    ))
+    line <- .e_line_series(lid, p, rows$central, col, width = 2, type = lty)[[1L]]
+    line$endLabel <- list(
+      show = TRUE, formatter = gsub(" / | \\| ", "\n", lid),
+      color = col, fontSize = 12, fontWeight = "bold", distance = 8
+    )
+    line$labelLayout <- list(moveOverlap = "shiftY")
+    line$emphasis <- list(focus = "series")
+    series <- c(series, list(line))
   }
 
   # Probability axis: log10 with return-period ticks in the adverse tail
@@ -3550,10 +3477,15 @@ echart_exceedance <- function(curves_tbl,
       "Annual exceedance probability"
     },
     nameLocation = "middle",
-    nameGap = 34,
+    nameGap = 48,
+    nameMoveOverlap = FALSE,
     nameTextStyle = wise_eaxis_name(),
+    axisTick = list(show = TRUE, customValues = as.list(tick_vals)),
     axisLabel = wise_eaxis_label(
       fontSize = 11,
+      showMinLabel = TRUE,
+      showMaxLabel = TRUE,
+      hideOverlap = FALSE,
       customValues = as.list(tick_vals),
       formatter = htmlwidgets::JS(sprintf(
         "function(v){ var m = %s; return m[v] === undefined ? v : m[v]; }",
@@ -3572,15 +3504,34 @@ echart_exceedance <- function(curves_tbl,
     nameLocation = "middle",
     nameGap = 48,
     nameRotate = 90,
+    nameMoveOverlap = FALSE,
     nameTextStyle = wise_eaxis_name(),
-    axisLabel = wise_eaxis_label(),
+    axisLabel = .wise_result_axis_label(x_label),
     splitLine = wise_esplit_line()
   )
   e$x$opts$series <- series
-  e$x$opts$tooltip <- list(trigger = "axis")
+  e$x$opts$tooltip <- list(
+    trigger = "axis", confine = TRUE,
+    axisPointer = list(type = "line", snap = TRUE),
+    formatter = htmlwidgets::JS(sprintf("function(ps) {
+      function esc(s) { return String(s).replace(/[&<>\"']/g, function(c) {
+        return {'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',\"'\":'&#39;'}[c]; }); }
+      ps = ps.filter(function(p) { return p.seriesName.indexOf('__') === -1; });
+      if (!ps.length) return '';
+      var prob = ps[0].value[0];
+      var heading = (prob * 100).toLocaleString('en-US', {maximumFractionDigits: 1}) + '%% annual probability';
+      if (prob > 0) heading += ' (1 in ' + (1 / prob).toLocaleString('en-US', {maximumFractionDigits: 1}) + ')';
+      var percent = %s;
+      return heading + '<br>' + ps.map(function(p) {
+        var v = p.value[1];
+        return p.marker + esc(p.seriesName) + ': <b>' +
+          (Number.isFinite(v) ? (percent ? v*100 : v).toLocaleString('en-US', {maximumFractionDigits: percent ? 1 : 3}) + (percent ? '%%' : '') : 'Not available') + '</b>';
+      }).join('<br>');
+    }", tolower(as.character(grepl("(percent)", x_label, fixed = TRUE)))))
+  )
   # Right-hand gutter so the endpoint scenario labels stay clear of the
   # curves, mirroring the ggplot builder's 22% expansion.
-  e$x$opts$grid <- list(containLabel = TRUE, left = 8, right = 120, top = 12, bottom = 10)
+  e$x$opts$grid <- list(containLabel = TRUE, left = 65, right = 145, top = 28, bottom = 82)
   wise_echart_theme(e)
 }
 

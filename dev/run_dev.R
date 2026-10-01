@@ -19,7 +19,8 @@ rm(list=ls(all.names = TRUE))
 
 # Reload for normal launches; opt into documentation when roxygen changes.
 # options(wiseapp.dev.document = TRUE)
-if (isTRUE(getOption("wiseapp.dev.document", FALSE))) devtools::document()
+# if (isTRUE(getOption("wiseapp.dev.document", FALSE))) 
+devtools::document()
 devtools::load_all()
 
 # Run the application

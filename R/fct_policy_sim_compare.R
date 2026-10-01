@@ -20,38 +20,35 @@
 
 #' Before/after histogram for one manipulated variable (echarts4r)
 #'
-#' Binary variables render as
-#' grouped proportion bars; continuous variables render the same ridge
-#' densities (`build_ridge_distribution_data`, n_bins/n_grid 256, scale 1.5)
-#' as precomputed closed polygons.
+#' Binary variables render as grouped proportion bars; continuous variables
+#' reuse the shared binned ridge-density renderer with empirical CDF tooltips.
 #'
 #' @param baseline_vals,policy_vals Raw baseline/policy values.
-#' @param var_name Variable name (x-axis title).
+#' @param var_name Display label (x-axis title).
 #' @param height   Widget height (the UI slot's height).
 #'
 #' @return An `echarts4r` widget.
 #' @noRd
 echart_before_after_hist <- function(baseline_vals, policy_vals,
                                      var_name, height = "300px") {
-  baseline_clean <- baseline_vals[!is.na(baseline_vals)]
-  policy_clean <- policy_vals[!is.na(policy_vals)]
+  as_finite_numeric <- function(x) {
+    if (is.null(x)) return(numeric())
+    x <- suppressWarnings(as.numeric(unname(x)))
+    x[is.finite(x)]
+  }
+  baseline_clean <- as_finite_numeric(baseline_vals)
+  policy_clean <- as_finite_numeric(policy_vals)
   all_vals <- c(baseline_clean, policy_clean)
 
   if (length(all_vals) == 0) {
     return(echart_blank("No data available", height = height))
   }
-  fill_vals <- c(Baseline = .wise_baseline, `Policy-adjusted` = .wise_policy)
   uniq_vals <- unique(all_vals)
-  is_binary <- length(uniq_vals) <= 2 && all(uniq_vals %in% c(0, 1))
-
-  fmt <- htmlwidgets::JS(
-    "function(v){ if (v == null || isNaN(v)) return '-';",
-    " return Number(v).toFixed(2); }"
-  )
+  is_binary <- length(uniq_vals) <= 2L && all(uniq_vals %in% c(0, 1))
 
   if (is_binary) {
     df <- data.frame(
-      Value = factor(c("0", "1"), levels = c("0", "1")),
+      Value = factor(c("No", "Yes"), levels = c("No", "Yes")),
       Baseline = c(
         if (length(baseline_clean)) mean(baseline_clean == 0) else NA_real_,
         if (length(baseline_clean)) mean(baseline_clean == 1) else NA_real_
@@ -65,44 +62,49 @@ echart_before_after_hist <- function(baseline_vals, policy_vals,
     e <- df |>
       echarts4r::e_charts(Value, height = height) |>
       echarts4r::e_bar(Baseline) |>
-      echarts4r::e_bar(Policy, name = "Policy-adjusted") |>
-      echarts4r::e_color(unname(fill_vals)) |>
-      # ggplot put the legend at the top, left-justified.
-      echarts4r::e_legend(orient = "horizontal", left = 0, top = 0) |>
+      echarts4r::e_bar(Policy, name = "Policy") |>
+      echarts4r::e_color(c(.wise_baseline, .wise_policy)) |>
+      echarts4r::e_legend(orient = "horizontal", left = "center", top = 0) |>
       echarts4r::e_x_axis(
         name = var_name,
         nameLocation = "middle",
         nameGap = 26,
+        nameMoveOverlap = FALSE,
         nameTextStyle = wise_eaxis_name(fontSize = 13),
         axisLabel = wise_eaxis_label(fontSize = 12),
         axisTick = list(alignWithLabel = TRUE)
       ) |>
       echarts4r::e_y_axis(
-        name = "Proportion",
+        name = NULL,
         max = 1,
-        nameTextStyle = wise_eaxis_name(),
-        axisLabel = wise_eaxis_label(),
+        axisLabel = wise_eaxis_label(formatter = htmlwidgets::JS(
+          "function(v){return (Number(v)*100).toLocaleString('en-US',{maximumFractionDigits:0})+'%';}"
+        )),
         splitLine = wise_esplit_line()
       ) |>
-      echarts4r::e_tooltip(trigger = "axis", valueFormatter = fmt) |>
-      echarts4r::e_grid(containLabel = TRUE, left = 8, right = 14, top = 36, bottom = 24) |>
+      echarts4r::e_tooltip(
+        trigger = "axis",
+        valueFormatter = htmlwidgets::JS(
+          "function(v){return (Number(v)*100).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})+'%';}"
+        )
+      ) |>
+      echarts4r::e_grid(containLabel = TRUE, left = 8, right = 14, top = 38, bottom = 54) |>
       wise_echart_theme()
     return(e)
   }
 
-  use_log <- all(all_vals > 0)
   df <- data.frame(
     Group = factor(
       c(
         rep("Baseline", length(baseline_clean)),
-        rep("Policy-adjusted", length(policy_clean))
+        rep("Policy", length(policy_clean))
       ),
-      levels = c("Baseline", "Policy-adjusted")
+      levels = c("Baseline", "Policy")
     ),
     Value = c(baseline_clean, policy_clean),
     stringsAsFactors = FALSE
   )
-  # Same ridge statistics as the ggplot builder: identical call parameters.
+  use_log <- all(all_vals > 0)
   rd <- build_ridge_distribution_data(
     df,
     x_var = "Value",
@@ -111,82 +113,77 @@ echart_before_after_hist <- function(baseline_vals, policy_vals,
     ridge_var = "Group",
     log_transform = use_log,
     n_bins = 256L,
-    n_grid = 256L
+    n_grid = 256L,
+    bandwidth_scale = 1.5
   )
   if (is.null(rd)) {
     return(echart_blank("No data available", height = height))
   }
 
-  ridge_scale <- 1.5
-  ridges <- rd$ridges
-  line_vals <- c(Baseline = .wise_baseline, `Policy-adjusted` = .wise_policy_dark)
-  series_list <- lapply(seq_along(ridges), function(i) {
-    g <- rd$data[rd$data$group == ridges[[i]], , drop = FALSE]
-    g <- g[order(g$x), ]
-    col <- unname(fill_vals[[if (identical(ridges[[i]], "Policy-adjusted")) 2L else 1L]])
-    poly <- rbind(
-      cbind(g$x, g$y + g$height * ridge_scale),
-      cbind(rev(g$x), g$y)
-    )
-    list(
-      type = "line",
-      name = ridges[[i]],
-      data = unname(poly),
-      symbol = "none",
-      lineStyle = list(
-        color = unname(line_vals[[ridges[[i]]]] %||% .wise_support),
-        width = 1.2
-      ),
-      areaStyle = list(color = col, opacity = 0.62),
-      emphasis = list(focus = "series"),
-      z = 2
-    )
-  })
-
-  e <- echarts4r::e_charts(
-    data.frame(x = c(0, 1), y = c(0, 1)),
-    x,
-    height = height
+  rd$data$tooltip_value <- unlist(lapply(rd$groups, function(group) {
+    vals <- sort(df$Value[as.character(df$Group) == group])
+    x <- rd$data$x[rd$data$group == group]
+    findInterval(x, vals) / length(vals)
+  }), use.names = FALSE)
+  group_colours <- c(Baseline = .wise_baseline, Policy = .wise_policy)
+  styles <- data.frame(
+    group = rd$groups,
+    fill = unname(group_colours[rd$groups]),
+    line = unname(c(Baseline = .wise_slate, Policy = .wise_policy_dark)[rd$groups]),
+    dashed = FALSE,
+    stringsAsFactors = FALSE
   )
-  e$x$opts$series <- series_list
-  e$x$opts$xAxis <- list(
-    type = if (use_log) "log" else "value",
-    name = if (use_log) paste0(var_name, " (log scale)") else var_name,
-    nameLocation = "middle",
-    nameGap = 26,
-    nameTextStyle = wise_eaxis_name(fontSize = 13),
-    axisLabel = wise_eaxis_label(
-      fontSize = 12,
-      formatter = htmlwidgets::JS(
-        "function(v){ return Number(v).toLocaleString('en-US'); }"
-      )
-    ),
-    axisLine = list(lineStyle = list(color = .wise_grid)),
-    splitLine = wise_esplit_line()
+  e <- ridge_echart_widget(
+    rd$data, rd$ridges, rd$ridges, styles,
+    height = height, log_scale = use_log, x_name = var_name,
+    tooltip_x_name = var_name
   )
-  e$x$opts$yAxis <- list(
-    type = "value",
-    min = 0.5,
-    max = length(ridges) + 0.5,
-    interval = 1,
-    axisLabel = wise_eaxis_label(
-      fontSize = 12,
-      formatter = htmlwidgets::JS(sprintf(
-        "function(v){ var r = Math.round(v); var m = %s; return m[r] || ''; }",
-        jsonlite::toJSON(as.list(stats::setNames(ridges, seq_along(ridges))))
-      ))
-    ),
-    axisLine = list(show = FALSE),
-    splitLine = list(show = FALSE),
-    axisTick = list(show = FALSE)
+  e$x$opts$legend <- list(
+    show = TRUE, orient = "horizontal", left = "center", top = 0,
+    data = c("Baseline", "Policy"),
+    textStyle = list(color = .wise_charcoal, fontSize = 12)
+  )
+  e$x$opts$xAxis$axisLabel$formatter <- htmlwidgets::JS(
+    "function(v){return Number(v).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});}"
   )
   e$x$opts$tooltip <- list(
-    trigger = "item",
+    trigger = "axis", confine = TRUE,
+    formatter = htmlwidgets::JS(sprintf(
+      "function(params){var p=(params||[]).filter(function(x){return x&&x.value;});if(!p.length)return '';var x=Number(p[0].axisValue);var fmt=function(v){return Number(v).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});};var rows=[];var seen={};p.forEach(function(s){var d=s.value;var share=Array.isArray(d)?Number(d[2]):NaN;if(seen[s.seriesName]||!isFinite(share))return;seen[s.seriesName]=true;rows.push((s.marker||'')+s.seriesName+': CDF share = <b>'+fmt(share*100)+'%%</b>');});return '<b>'+%s+': '+fmt(x)+'</b><br>'+rows.join('<br>');}",
+      jsonlite::toJSON(as.character(var_name)[1L], auto_unbox = TRUE)
+    )),
     textStyle = list(color = .wise_charcoal, fontSize = 13)
   )
-  e$x$opts$textStyle <- list(fontFamily = "Helvetica, Arial, sans-serif")
-  e$x$opts$grid <- list(containLabel = TRUE, left = 8, right = 14, top = 10, bottom = 20)
-  e
+  e$x$opts$grid <- list(
+    containLabel = TRUE, left = 8, right = 20, top = 42, bottom = 54,
+    width = "auto", height = "auto"
+  )
+  wise_echart_theme(e)
+}
+
+.wise_result_axis_label <- function(x_label) {
+  if (!grepl("(percent)", x_label, fixed = TRUE)) return(wise_eaxis_label())
+  wise_eaxis_label(formatter = htmlwidgets::JS(
+    "function(v){return (v*100).toLocaleString('en-US',{maximumFractionDigits:1})+'%';}"
+  ))
+}
+
+.wise_result_tooltip <- function(x_label) {
+  htmlwidgets::JS(sprintf("function(p) {
+    var d = p.data || {};
+    function esc(s) { return String(s).replace(/[&<>\"']/g, function(c) {
+      return {'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',\"'\":'&#39;'}[c]; }); }
+    var percent = %s;
+    function num(v) { return Number.isFinite(v) ? (percent ? v*100 : v).toLocaleString('en-US', {maximumFractionDigits: percent ? 1 : 3}) + (percent ? '%%' : '') : 'Not available'; }
+    var text = '<b>' + esc(d.scenario || p.seriesName) + '</b>';
+    if (d.rp_label) text += '<br>' + esc(d.rp_label);
+    if (d.source && d.source !== 'All') text += '<br>' + esc(d.source);
+    text += '<br>' + esc(d.is_mean ? 'Scenario mean' : %s) + ': <b>' + num(d.outcome) + '</b>';
+    if (Number.isFinite(d.baseline)) text += '<br>Baseline: ' + num(d.baseline) + '<br>Policy: ' + num(d.policy) + '<br>Policy change: ' + num(d.policy - d.baseline);
+    if (Number.isFinite(d.lo) && Number.isFinite(d.hi) && d.hi > d.lo) text += '<br>Climate-model spread: ' + num(d.lo) + ' to ' + num(d.hi);
+    return text;
+  }", tolower(as.character(grepl("(percent)", x_label, fixed = TRUE))),
+    jsonlite::toJSON(x_label, auto_unbox = TRUE)))
 }
 
 #' Step 3 annual baseline/policy distribution chart (echarts4r)
@@ -198,7 +195,7 @@ echart_before_after_hist <- function(baseline_vals, policy_vals,
 #' Violin/box statistics are precomputed in R: violin densities use
 #' `stats::density()` with default bandwidth (ggplot's nrd0/trim behaviour),
 #' scaled to the ggplot's row width; boxes use `boxplot.stats()`. The ggplot
-#' builder stays the static export renderer and the visual reference.
+#' builder remains available as the visual reference.
 #'
 #' @param tbl       A `timeseries_curves`-style data frame (scenario, value,
 #'   and optionally source).
@@ -209,11 +206,14 @@ echart_before_after_hist <- function(baseline_vals, policy_vals,
 #' @return An `echarts4r` widget.
 #' @noRd
 echart_step3_annual_distribution <- function(tbl, x_label = "Outcome (outcome units)",
-                                                  plot_type = "violin",
+                                        plot_type = "violin",
                                        height = "470px") {
   plot_type <- match.arg(plot_type, c("violin", "boxplot"))
   if (is.null(tbl) || !nrow(tbl)) {
     return(echart_blank("No annual simulation results available.", height = height))
+  }
+  if (!any(is.finite(tbl$value))) {
+    return(echart_blank("No finite annual simulation results available.", height = height))
   }
   df <- tbl
   df$scenario <- as.character(df$scenario)
@@ -252,6 +252,7 @@ echart_step3_annual_distribution <- function(tbl, x_label = "Outcome (outcome un
   } else {
     df$value[df$scenario == "Historical"]
   }
+  # The reference and marker use the same displayed historical baseline draws.
   hist_mean <- if (length(hist_vals)) mean(hist_vals, na.rm = TRUE) else NA_real_
 
   n_rows <- length(scenario_levels)
@@ -264,7 +265,7 @@ echart_step3_annual_distribution <- function(tbl, x_label = "Outcome (outcome un
   if (has_source) {
     src_off <- c(Baseline = 0.19, Policy = -0.19)
     df$y_off <- unname(src_off[as.character(df$source)])
-    alpha_map <- c(Baseline = 0.30, Policy = 0.85)
+    alpha_map <- c(Baseline = 0.22, Policy = 0.35)
   }
 
   e <- echarts4r::e_charts(
@@ -294,8 +295,8 @@ echart_step3_annual_distribution <- function(tbl, x_label = "Outcome (outcome un
     s
   }
 
-  # Violin silhouettes as closed polygons (forward along the upper edge,
-  # back along the lower), mirroring geom_violin's trim + scale = "width".
+  # Render each violin as an explicit polygon so it closes along both density
+  # edges instead of filling from its outline to the row baseline.
   violin_series <- function(y, half_w, x_vals, col, opacity) {
     if (length(x_vals) < 2L) {
       return(NULL)
@@ -309,14 +310,20 @@ echart_step3_annual_distribution <- function(tbl, x_label = "Outcome (outcome un
     d$x <- d$x[keep]
     d$y <- d$y[keep]
     w <- if (max(d$y) > 0) half_w * d$y / max(d$y) else rep(0, length(d$y))
-    poly <- rbind(cbind(d$x, y + w), cbind(rev(d$x), y - w))
+    points <- unname(rbind(cbind(d$x, y + w), cbind(rev(d$x), y - rev(w))))
     list(
-      type = "line",
-      data = unname(poly),
-      symbol = "none",
-      silent = TRUE,
-      lineStyle = list(width = 1, color = col, opacity = 0.9),
+      type = "custom",
+      renderItem = htmlwidgets::JS(sprintf(
+        "function(params, api) { var pts = %s; return {type: 'polygon', shape: {points: pts.map(function(p){return api.coord(p);})}, style: {fill: '%s', opacity: %s, stroke: '%s', lineWidth: 1}}; }",
+        jsonlite::toJSON(points, digits = NA), col, format(opacity), col
+      )),
+      data = list(list(min(d$x), y - half_w, max(d$x), y + half_w)),
+      encode = list(x = c(0, 2), y = c(1, 3)),
+      itemStyle = list(color = col),
       areaStyle = list(color = col, opacity = opacity),
+      lineStyle = list(color = col, width = 1, opacity = 0.9),
+      tooltip = list(show = FALSE),
+      silent = TRUE,
       z = 2
     )
   }
@@ -341,15 +348,16 @@ echart_step3_annual_distribution <- function(tbl, x_label = "Outcome (outcome un
         z = 2
       ),
       box = list(
-        type = "line",
-        data = unname(rbind(
-          c(q1, y - half_h), c(q3, y - half_h),
-          c(q3, y + half_h), c(q1, y + half_h), c(q1, y - half_h)
+        type = "custom",
+        renderItem = htmlwidgets::JS(sprintf(
+          "function(params, api) { var a = api.coord([api.value(0), api.value(1)]); var b = api.coord([api.value(2), api.value(3)]); var rect = echarts.graphic.clipRectByRect({x: a[0], y: b[1], width: b[0]-a[0], height: a[1]-b[1]}, params.coordSys); return rect && {type: 'rect', shape: rect, style: {fill: '%s', opacity: %s, stroke: '%s', lineWidth: 1}}; }",
+          col, format(opacity), .wise_support
         )),
-        symbol = "none",
+        data = list(list(q1, y - half_h, q3, y + half_h)),
+        encode = list(x = c(0, 2), y = c(1, 3)),
+        itemStyle = list(color = col),
         silent = TRUE,
-        lineStyle = list(color = .wise_support, width = 1),
-        areaStyle = list(color = col, opacity = opacity),
+        tooltip = list(show = FALSE),
         z = 3
       ),
       median = list(
@@ -421,34 +429,34 @@ echart_step3_annual_distribution <- function(tbl, x_label = "Outcome (outcome un
     }
   }
 
-  # Raw weather-year draws as jittered dots (jitter is cosmetic; drawn
-  # deterministically with a fixed seed).
-  dot_spread <- if (has_source) 0.07 else if (identical(plot_type, "violin")) 0.18 else 0.26
-  dot_alpha <- if (has_source) {
-    unname(alpha_map[as.character(df$source)])
-  } else {
-    rep(if (identical(plot_type, "violin")) 0.40 else 0.30, nrow(df))
-  }
-  set.seed(1)
-  jit <- stats::runif(nrow(df), -dot_spread, dot_spread)
-  dot_rows <- which(is.finite(df$value))
+  # Raw weather-year draws use deterministic jitter without changing RNG state.
+  dot_spread <- if (has_source) 0.20 else 0.36
+  jit <- (((seq_len(nrow(df)) * 37L) %% 101L) / 100 - 0.5) * 2 * dot_spread
+  # Matrix-derived outcomes retain year names; a named list serializes as an
+  # object rather than the array ECharts requires for series.data.
+  dot_rows <- unname(which(is.finite(df$value)))
+  dot_rows <- dot_rows[.wise_stride_downsample(seq_along(dot_rows), max_points = 10000L)]
   dots <- lapply(dot_rows, function(i) {
     base_y <- df$row_y[[i]] + if (has_source) df$y_off[[i]] else 0
+    src <- if (has_source) as.character(df$source[[i]]) else "All"
     list(
       value = c(df$value[[i]], base_y + jit[[i]]),
+      outcome = df$value[[i]], scenario = as.character(df$scenario[[i]]),
+      source = src,
       itemStyle = list(
         color = unname(scenario_palette[[as.character(df$scenario_key[[i]])]]),
-        opacity = dot_alpha[[i]]
+        opacity = 0.4
       )
     )
   })
+  # Muted individual years sit behind the summaries and mean markers.
   push(list(
     type = "scatter",
     name = "Draws",
     data = dots,
-    symbolSize = 2,
-    z = 5,
-    large = TRUE
+    symbol = "circle",
+    symbolSize = 5,
+    z = 1
   ))
 
   # Series means: open slate-ringed (baseline) and filled policy markers.
@@ -476,7 +484,11 @@ echart_step3_annual_distribution <- function(tbl, x_label = "Outcome (outcome un
     list(
       type = "scatter",
       name = paste("Mean", src),
-      data = lapply(pts, function(v) list(value = v)),
+      data = lapply(seq_along(pts), function(i) list(
+        value = pts[[i]], outcome = m$value[[i]],
+        scenario = as.character(m$scenario_key[[i]]),
+        source = if (has_source) src else "All", mean = m$value[[i]], is_mean = TRUE
+      )),
       symbol = "circle",
       symbolSize = size,
       itemStyle = list(
@@ -532,12 +544,16 @@ echart_step3_annual_distribution <- function(tbl, x_label = "Outcome (outcome un
     series[[length(series)]]$markLine <- list(
       silent = TRUE,
       symbol = "none",
+      precision = 12,
       lineStyle = list(type = "dashed", color = .wise_zero, width = 1),
       data = list(list(xAxis = hist_mean)),
       label = list(
         show = TRUE,
         formatter = "Historical mean",
         position = "insideEndTop",
+        rotate = 0,
+        align = "left",
+        offset = c(8, 22),
         color = .wise_zero,
         fontSize = 12
       )
@@ -545,40 +561,44 @@ echart_step3_annual_distribution <- function(tbl, x_label = "Outcome (outcome un
   }
   e$x$opts$series <- series
 
-  y_pad <- 0.6
   e$x$opts$xAxis <- list(
     type = "value",
+    scale = TRUE,
     name = x_label,
     nameLocation = "middle",
     nameGap = 28,
     nameTextStyle = wise_eaxis_name(fontSize = 13),
-    axisLabel = wise_eaxis_label(fontSize = 12),
+    axisLabel = modifyList(.wise_result_axis_label(x_label), list(fontSize = 12)),
     axisLine = list(lineStyle = list(color = .wise_grid)),
     splitLine = wise_esplit_line()
   )
+  y_label_map <- stats::setNames(as.list(y_labs), as.character(y_breaks))
+  names(y_label_map) <- as.character(y_breaks)
   e$x$opts$yAxis <- list(
     type = "value",
-    min = min(y_breaks) - y_pad,
-    max = max(y_breaks) + y_pad,
+    min = 0,
+    max = n_rows + 1L,
     interval = 1,
     axisLabel = wise_eaxis_label(
       fontSize = 12,
-      customValues = as.list(y_breaks),
+      showMinLabel = FALSE,
+      showMaxLabel = FALSE,
       formatter = htmlwidgets::JS(sprintf(
-        "function(v){ var m = %s; return m[v] || ''; }",
-        jsonlite::toJSON(stats::setNames(as.list(y_labs), as.character(y_breaks)))
+        "function(v){ var m = %s; return m[String(Math.round(v))] || ''; }",
+        jsonlite::toJSON(y_label_map, auto_unbox = TRUE)
       ))
     ),
     axisLine = list(show = FALSE),
     splitLine = list(show = FALSE)
   )
   e$x$opts$tooltip <- list(
-    trigger = "item",
+    trigger = "item", confine = TRUE,
+    formatter = .wise_result_tooltip(x_label),
     textStyle = list(color = .wise_charcoal, fontSize = 13)
   )
   e$x$opts$textStyle <- list(fontFamily = "Helvetica, Arial, sans-serif")
-  e$x$opts$grid <- list(containLabel = TRUE, left = 8, right = 90, top = 10, bottom = 24)
-  e
+  e$x$opts$grid <- list(containLabel = TRUE, left = 8, right = 90, top = 10, bottom = 58)
+  wise_echart_theme(e)
 }
 
 #' Adverse return-period dumbbell chart (echarts4r)
@@ -649,7 +669,6 @@ echart_step3_adverse_dot <- function(tbl, x_label = "Outcome level",
     if (!is.finite(hi)) hi <- r$policy_val[[1L]]
     hi + lab_gap
   }, numeric(1L))
-  cap_row <- top_rows[which.max(top_rows$dodge_offset), , drop = FALSE]
   right_mult <- if (is.finite(x_span) && x_span > 0) {
     max(0.12, max(nchar(as.character(top_rows$scenario_key)), 0L) * 0.012)
   } else {
@@ -738,6 +757,8 @@ echart_step3_adverse_dot <- function(tbl, x_label = "Outcome level",
     data = Filter(Negate(is.null), conn),
     symbol = c("none", "arrow"),
     symbolSize = 7,
+    silent = TRUE,
+    tooltip = list(show = FALSE),
     lineStyle = list(width = 1),
     z = 3
   ))
@@ -750,6 +771,10 @@ echart_step3_adverse_dot <- function(tbl, x_label = "Outcome level",
     data = lapply(which(is.finite(tbl$baseline_val)), function(i) {
       list(
         value = c(tbl$baseline_val[[i]], y_off_i(i)),
+        outcome = tbl$baseline_val[[i]], source = "Baseline",
+        scenario = as.character(tbl$scenario[[i]]), rp_label = as.character(tbl$rp_label[[i]]),
+        baseline = tbl$baseline_val[[i]], policy = tbl$policy_val[[i]],
+        lo = tbl$base_lo[[i]], hi = tbl$base_hi[[i]],
         itemStyle = list(
           color = "white",
           borderColor = unname(scenario_colours[as.character(tbl$scenario_key[[i]])]),
@@ -757,7 +782,7 @@ echart_step3_adverse_dot <- function(tbl, x_label = "Outcome level",
         )
       )
     }),
-    symbolSize = 6,
+    symbolSize = 8,
     z = 5
   ))
   .push_marked(list(
@@ -766,6 +791,10 @@ echart_step3_adverse_dot <- function(tbl, x_label = "Outcome level",
     data = lapply(which(is.finite(tbl$policy_val)), function(i) {
       list(
         value = c(tbl$policy_val[[i]], y_off_i(i)),
+        outcome = tbl$policy_val[[i]], source = "Policy",
+        scenario = as.character(tbl$scenario[[i]]), rp_label = as.character(tbl$rp_label[[i]]),
+        baseline = tbl$baseline_val[[i]], policy = tbl$policy_val[[i]],
+        lo = tbl$policy_lo[[i]], hi = tbl$policy_hi[[i]],
         itemStyle = list(
           color = .wise_policy,
           borderColor = .wise_policy_dark,
@@ -773,7 +802,7 @@ echart_step3_adverse_dot <- function(tbl, x_label = "Outcome level",
         )
       )
     }),
-    symbolSize = 6.8,
+    symbolSize = 8,
     z = 6
   ))
 
@@ -797,71 +826,62 @@ echart_step3_adverse_dot <- function(tbl, x_label = "Outcome level",
     silent = TRUE,
     z = 7
   ))
-  # One-time Baseline/Policy captions above the topmost dumbbell.
-  if (nrow(cap_row)) {
-    cap_y <- cap_row$rp_y[[1L]] + cap_row$dodge_offset[[1L]]
-    .push_marked(list(
-      type = "scatter",
-      data = list(
-        list(
-          value = c(cap_row$baseline_val[[1L]], cap_y),
-          label = list(
-            show = TRUE, formatter = "Baseline", position = "top",
-            color = .wise_slate, fontWeight = "bold", fontSize = 12
-          ),
-          symbolSize = 0
-        ),
-        list(
-          value = c(cap_row$policy_val[[1L]], cap_y),
-          label = list(
-            show = TRUE, formatter = "Policy", position = "top",
-            color = .wise_policy_dark, fontWeight = "bold", fontSize = 12
-          ),
-          symbolSize = 0
-        )
-      ),
-      silent = TRUE,
-      z = 7
-    ))
-  }
+  e$x$opts$legend <- list(
+    top = 0, left = "center", selectedMode = FALSE,
+    data = list(
+      list(name = "Baseline", icon = "circle", itemStyle = list(color = "white", borderColor = .wise_slate, borderWidth = 1.2)),
+      list(name = "Policy", icon = "circle", itemStyle = list(color = .wise_policy, borderColor = .wise_policy_dark))
+    ),
+    textStyle = list(color = .wise_charcoal, fontSize = 12)
+  )
 
   # Baseline markers after all markArea hosting is done: the markArea rides
   # on the first pushed series only, so the remaining pushes are plain.
   e$x$opts$series <- series
+  finite_x <- x_vals[is.finite(x_vals)]
+  if (!length(finite_x)) {
+    return(echart_blank("No finite adverse-year outcomes available.", height = height))
+  }
+  x_span <- diff(range(finite_x))
+  if (!is.finite(x_span) || x_span <= 0) {
+    x_span <- max(abs(finite_x), 1) * 0.1
+  }
   e$x$opts$xAxis <- list(
     type = "value",
-    min = min(x_vals, na.rm = TRUE) - 0.02 * x_span,
-    max = max(x_vals, na.rm = TRUE) + right_mult * x_span,
+    min = min(finite_x) - 0.02 * x_span,
+    max = max(finite_x) + right_mult * x_span,
     name = x_label,
     nameLocation = "middle",
     nameGap = 28,
     nameTextStyle = wise_eaxis_name(fontSize = 13),
-    axisLabel = wise_eaxis_label(fontSize = 12),
+    axisLabel = modifyList(.wise_result_axis_label(x_label), list(fontSize = 12)),
     axisLine = list(lineStyle = list(color = .wise_grid)),
     splitLine = wise_esplit_line()
   )
   e$x$opts$yAxis <- list(
     type = "value",
-    min = min(y_breaks) - 0.6,
-    max = max(y_breaks) + 0.6,
+    min = 0,
+    max = max(y_breaks) + 1L,
+    interval = 1,
     axisLabel = wise_eaxis_label(
       fontSize = 12,
-      customValues = as.list(y_breaks),
+      showMinLabel = FALSE,
+      showMaxLabel = FALSE,
       formatter = htmlwidgets::JS(sprintf(
-        "function(v){ var m = %s; return m[v] || ''; }",
-        jsonlite::toJSON(stats::setNames(as.list(y_labs), as.character(y_breaks)))
+        "function(v){ var m = %s; return m[String(Math.round(v))] || ''; }",
+        jsonlite::toJSON(stats::setNames(as.list(y_labs), as.character(y_breaks)), auto_unbox = TRUE)
       ))
     ),
     axisLine = list(show = FALSE),
     splitLine = list(show = FALSE)
   )
   e$x$opts$tooltip <- list(
-    trigger = "item",
+    trigger = "item", confine = TRUE, formatter = .wise_result_tooltip(x_label),
     textStyle = list(color = .wise_charcoal, fontSize = 13)
   )
   e$x$opts$textStyle <- list(fontFamily = "Helvetica, Arial, sans-serif")
-  e$x$opts$grid <- list(containLabel = TRUE, left = 8, right = 110, top = 10, bottom = 24)
-  e
+  e$x$opts$grid <- list(containLabel = TRUE, left = 8, right = 110, top = 35, bottom = 58)
+  wise_echart_theme(e)
 }
 
 #' Detect columns that differ between the baseline and policy-adjusted frames
@@ -2332,7 +2352,11 @@ plot_step3_variance_contribution <- function(var_tbl) {
     suite_cache <- attr(ws, "suite_cache")
     suite <- get0(suite_key, envir = suite_cache)
     if (!is.null(suite)) {
-      hit <- list(out = suite[[method]])
+      # Unlike the historical suite, future suites are keyed by scenario first.
+      hit <- lapply(suite, function(value) {
+        if (is.null(value)) return(NULL)
+        list(out = value[[method]])
+      })
       .agg_cache_put(ws, cache_key, hit)
       return(hit)
     }

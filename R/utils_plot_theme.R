@@ -288,7 +288,22 @@ wise_echart_theme <- function(e, base_size = 14) {
       )
     )
   }
-  e
+  # Dynamic results panes can first render while narrow or hidden; window resize
+  # alone does not notify the widget when its own container subsequently grows.
+  htmlwidgets::onRender(e, "function(el) {
+    if (el._wiseChartResizeObserver) el._wiseChartResizeObserver.disconnect();
+    var widget = this;
+    var resize = function() {
+      if (!el.isConnected) { el._wiseChartResizeObserver.disconnect(); return; }
+      if (el.clientWidth > 0 && el.clientHeight > 0) {
+        var chart = widget.getChart();
+        if (chart && !chart.isDisposed()) chart.resize({width: el.clientWidth, height: el.clientHeight});
+      }
+    };
+    el._wiseChartResizeObserver = new ResizeObserver(function() { requestAnimationFrame(resize); });
+    el._wiseChartResizeObserver.observe(el);
+    requestAnimationFrame(resize);
+  }")
 }
 
 #' Uniform echarts placeholder for figures whose inputs are unavailable

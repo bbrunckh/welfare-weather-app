@@ -88,11 +88,11 @@ test_that("weather density echarts keeps the historical reference and legend", {
   )
   expect_s3_class(ch, "echarts4r")
   names_s <- vapply(ch$x$opts$series, `[[`, character(1), "name")
-  expect_match(names_s[[1]], "Full historical", fixed = TRUE)
+  expect_match(names_s[[1]], "Historical", fixed = TRUE)
   expect_true("Model support" %in% names_s)
   expect_true(any(grepl("SSP2", names_s)))
   # Legend shows the reference series (the ggplot panel had one).
-  expect_true("Full historical" %in%
+  expect_true("Historical" %in%
     as.character(unlist(ch$x$opts$legend$data)))
 })
 
@@ -110,7 +110,7 @@ test_that("weather density echarts collapses multi-variable panels into one widg
   # Unknown variables are intersected away, like the ggplot panel.
   blank <- echart_weather_density_panel(f$survey, f$weather_raw, "nope")
   expect_match(blank$x$opts$title[[1]]$text,
-    "No selected weather variables found in weather_raw.", fixed = TRUE)
+    "Selected weather variable(s) not found", fixed = TRUE)
 })
 
 test_that("robustness and trajectory charts render from precomputed data", {
@@ -131,7 +131,7 @@ test_that("robustness and trajectory charts render from precomputed data", {
   sp <- echart_timeseries_spaghetti(ts, "Mean welfare", c(lo = 0.1, hi = 0.9))
   expect_s3_class(sp, "echarts4r")
   types <- vapply(sp$x$opts$series, `[[`, character(1), "type")
-  expect_true(all(types == "line"))
+  expect_true(all(types %in% c("line", "custom")))
   # One bold median series per scenario with a legend entry.
   expect_true("Historical" %in% as.character(unlist(sp$x$opts$legend$data)))
 
@@ -141,14 +141,13 @@ test_that("robustness and trajectory charts render from precomputed data", {
   )
 })
 
-test_that("diagnostics UI mounts chart outputs and the reactable CSV button", {
+test_that("diagnostics UI mounts chart outputs without the support table", {
   html <- as.character(htmltools::renderTags(
     mod_2_03_diagnostics_ui("diagnostics")
   )$html)
   expect_match(html, "diagnostics-diag_weather_density", fixed = TRUE)
   expect_match(html, "diagnostics-model_robustness_plot", fixed = TRUE)
   expect_match(html, "diagnostics-timeseries_plot", fixed = TRUE)
-  expect_match(html, "diagnostics-weather_support_table", fixed = TRUE)
-  expect_match(html, "Reactable.downloadDataCSV", fixed = TRUE)
-  expect_match(html, "simulation_weather_support_summary.csv", fixed = TRUE)
+  expect_false(grepl("diagnostics-weather_support_table", html, fixed = TRUE))
+  expect_false(grepl("Reactable.downloadDataCSV", html, fixed = TRUE))
 })

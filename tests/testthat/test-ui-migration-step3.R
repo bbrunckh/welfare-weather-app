@@ -90,9 +90,17 @@ test_that("echart_decomposition_headline draws one bar series per scenario", {
     identical(s$type, "bar"), logical(1L))))
   # Dashed zero reference line rides on the first series.
   expect_identical(w$x$opts$series[[1]]$markLine$data[[1]]$yAxis, 0)
-  # Scenario legend sits at the bottom-left.
-  expect_identical(w$x$opts$legend$top, "bottom")
-  expect_identical(w$x$opts$legend$left, 0)
+  expect_identical(w$x$opts$legend$top, 4)
+  expect_identical(w$x$opts$legend$left, "center")
+  expect_identical(w$x$opts$yAxis[[1L]]$nameLocation, "end")
+  expect_match(as.character(w$x$opts$yAxis[[1L]]$axisLabel$formatter), "+'%'", fixed = TRUE)
+})
+
+test_that("decomposition selectors align to the right above the charts", {
+  html <- htmltools::renderTags(mod_3_09_decomposition_ui("decomposition"))$html
+  expect_match(html, "justify-content:flex-end", fixed = TRUE)
+  expect_match(html, "decomposition-decomp_weather_basis", fixed = TRUE)
+  expect_match(html, "decomposition-decile_weather_basis", fixed = TRUE)
 })
 
 test_that("echart_decomposition_headline keeps the empty-state message", {
@@ -116,6 +124,10 @@ test_that("echart_decomposition_channels_by_decile stacks channels and marks tot
   expect_true(all(types == "bar" | types == "scatter"))
   expect_identical(sum(types == "scatter"), 1L) # total-effect marker series
   expect_identical(w$x$opts$series[[1]]$stack, "channels")
+  expect_identical(w$x$opts$legend$left, "center")
+  expect_identical(w$x$opts$legend$top, 4)
+  expect_identical(w$x$opts$yAxis[[1L]]$nameLocation, "end")
+  expect_match(as.character(w$x$opts$yAxis[[1L]]$axisLabel$formatter), "+'%'", fixed = TRUE)
   expect_true(all(vapply(w$x$opts$series[types == "bar"], function(s)
     identical(s$stack, "channels"), logical(1L))))
 })

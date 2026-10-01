@@ -48,6 +48,11 @@ metric_metadata <- function(method = "mean", so = NULL) {
     direction <- "higher_is_better"
   }
   out$method <- method
+  if (identical(method, "mean") && !is.null(so) &&
+      tolower(as.character(so$type %||% ""))[1L] %in% c("logical", "binary", "boolean")) {
+    out$format <- "percent"
+    out$unit <- "percent"
+  }
   out$label <- out$label %||% unname(fallback_labels[[method]] %||% method)
   out$direction <- direction
   out$adverse_tail <- if (identical(direction, "lower_is_better")) "high" else "low"

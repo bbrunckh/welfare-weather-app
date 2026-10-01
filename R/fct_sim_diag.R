@@ -1328,9 +1328,9 @@ plot_year_anchored_ridge <- function(kde_data,
 #
 # Design (documented judgment call): the patchwork multi-variable panel is
 # collapsed into ONE echarts widget. With a single selected variable the
-# widget is a plain overlapping-densities chart (grey filled Full historical
-# area, dashed Model support line, SSP-coloured scenario lines), matching the
-# ggplot panel. With several variables the curves become a ridgeline: each
+# widget uses the Step 1 ridge computation and value/share tooltips, with one
+# row per source. Binned variables use percentage bars and Step 1 bin labels.
+# With several continuous variables the curves become a ridgeline: each
 # variable's densities are normalised and offset vertically on its own row,
 # so one interactive widget replaces the patchwork without re-rendering
 # per-variable plots. Densities are computed in R with the same parameters as
@@ -1360,7 +1360,9 @@ plot_year_anchored_ridge <- function(kde_data,
     z = if (area) 1 else 2,
     lineStyle = list(color = colour, width = width, type = line_type),
     itemStyle = list(color = colour),
-    data = lapply(seq_along(x), function(i) list(value = list(x[[i]], y[[i]])))
+    data = unname(lapply(seq_along(x), function(i) {
+      list(value = list(unname(x[[i]]), unname(y[[i]])))
+    }))
   )
 
   if (area) {
@@ -1371,6 +1373,37 @@ plot_year_anchored_ridge <- function(kde_data,
   list(st)
 }
 
+.diag_weather_source_label <- function(x) {
+  if (identical(x, "Full historical")) return("Historical")
+  if (identical(x, "Model support")) return(x)
+  ssp <- .normalise_ssp(x)
+  if (is.na(ssp)) {
+    digits <- regmatches(x, regexpr("(?i)SSP[2345]", x, perl = TRUE))
+    ssp <- if (length(digits) && nzchar(digits)) .normalise_ssp(toupper(digits)) else NA_character_
+  }
+  years <- regmatches(x, gregexpr("[0-9]{4}", x, perl = TRUE))[[1L]]
+  if (!is.na(ssp)) return(if (length(years) >= 2L) paste(ssp, "/", paste(tail(years, 2L), collapse = "-")) else ssp)
+  x
+}
+
+.diag_weather_spec_row <- function(weather_specs, weather_var) {
+  if (is.null(weather_specs) || !is.data.frame(weather_specs) ||
+    !all(c("name", "cont_binned") %in% names(weather_specs))) {
+    return(NULL)
+  }
+  i <- match(weather_var, as.character(weather_specs$name))
+  if (is.na(i)) NULL else weather_specs[i, , drop = FALSE]
+}
+
+.diag_weather_is_binned <- function(weather_specs, weather_var, raw_col) {
+  spec <- .diag_weather_spec_row(weather_specs, weather_var)
+  if (!is.null(spec) && !is.na(spec$cont_binned[[1L]])) {
+    return(identical(as.character(spec$cont_binned[[1L]]), "Binned"))
+  }
+  is.factor(raw_col) || is.character(raw_col) ||
+    (is.integer(raw_col) && length(unique(raw_col[!is.na(raw_col)])) <= 20L)
+}
+
 echart_weather_density_panel <- function(survey_weather,
                                          weather_raw,
                                          weather_vars,
@@ -1379,12 +1412,20 @@ echart_weather_density_panel <- function(survey_weather,
                                          active_scenarios = NULL,
                                          log_x = FALSE,
                                          show_regression = FALSE,
-                                         height = "340px") {
+                                         height = "340px",
+                                         weather_specs = NULL,
+                                         stored_breaks = NULL) {
   if (is.null(weather_vars) || !is.character(weather_vars) ||
     !length(weather_vars)) {
     return(echart_blank("No selected weather variables found in weather_raw.",
       height = height
     ))
+  }
+  missing_vars <- setdiff(weather_vars, names(weather_raw))
+  if (length(missing_vars)) {
+    return(echart_blank(paste0(
+      "Selected weather variable(s) not found: ", paste(missing_vars, collapse = ", "), "."
+    ), height = height))
   }
   weather_vars <- intersect(weather_vars, names(weather_raw))
   if (!length(weather_vars)) {
@@ -1398,28 +1439,71 @@ echart_weather_density_panel <- function(survey_weather,
     if (!is.null(weather_labels) && wv %in% names(weather_labels)) {
       weather_labels[[wv]]
     } else {
-      wv
+      spec <- .diag_weather_spec_row(weather_specs, wv)
+      if (!is.null(spec) && "label" %in% names(spec)) as.character(spec$label[[1L]]) else wv
     }
   }
 
+  continuous_raw <- attr(weather_raw, "continuous_weather")
+  stored_breaks <- stored_breaks %||% attr(weather_raw, "stored_breaks")
+
   e <- .e_diag_base(height)
 
-  # ---- Multi-variable: single ridgeline widget -----------------------------
+  hist_filt <- .filter_hist_weather(weather_raw, survey_weather)
+  if (!"int_month" %in% names(survey_weather) && "timestamp" %in% names(survey_weather)) {
+    survey_weather$int_month <- as.integer(format(as.Date(survey_weather$timestamp), "%m"))
+  }
+  if ("timestamp" %in% names(survey_weather)) {
+    survey_weather$cal_year <- as.integer(format(as.Date(survey_weather$timestamp), "%Y"))
+  }
+  continuous_filt <- if (is.data.frame(continuous_raw)) {
+    .filter_hist_weather(continuous_raw, survey_weather)
+  } else NULL
+  if (!is.null(continuous_filt)) {
+    continuous_filt <- continuous_filt[
+      !duplicated(continuous_filt[, c("loc_id", "int_month", "cal_year")]), ,
+      drop = FALSE
+    ]
+  }
+  reg_filt <- hist_filt[hist_filt$cal_year %in% unique(survey_weather$cal_year), , drop = FALSE]
+  visible_nms <- names(scenario_weather %||% list())
+  if (!is.null(active_scenarios)) visible_nms <- intersect(visible_nms, active_scenarios)
+
+  is_binned <- vapply(weather_vars, function(wv) {
+    .diag_weather_is_binned(weather_specs, wv, weather_raw[[wv]])
+  }, logical(1L))
+
+  # ---- Multi-variable: one ridge widget for continuous selections -----------
   if (length(weather_vars) > 1L) {
+    if (any(is_binned) && !all(is_binned)) {
+      return(echart_blank(
+        "Select either continuous or binned weather variables together; mixed selections use incompatible x axes.",
+        height = height
+      ))
+    }
+    if (all(is_binned)) {
+      return(.echart_weather_binned_panel(
+        hist_filt, reg_filt, weather_raw, weather_vars, weather_specs,
+        scenario_weather, visible_nms, weather_labels, height, stored_breaks, show_regression
+      ))
+    }
     multi_ok <- TRUE
     curve_sets <- list()
     for (i in seq_along(weather_vars)) {
       wv <- weather_vars[[i]]
       raw_col <- weather_raw[[wv]]
-      is_factor <- is.factor(raw_col) || is.character(raw_col) ||
-        (is.integer(raw_col) &&
-          length(unique(raw_col[is.finite(raw_col)])) <= 20)
+      is_factor <- .diag_weather_is_binned(weather_specs, wv, raw_col)
       if (is_factor) {
         multi_ok <- FALSE
         break
       }
-      hist_filt <- .filter_hist_weather(weather_raw, survey_weather)
-      hist_vals <- as.numeric(hist_filt[[wv]])
+      hist_source <- if (isTRUE(is_binned[match(wv, weather_vars)]) &&
+        is.data.frame(continuous_filt) && wv %in% names(continuous_filt)) {
+        continuous_filt
+      } else {
+        hist_filt
+      }
+      hist_vals <- as.numeric(hist_source[[wv]])
       hist_vals <- hist_vals[is.finite(hist_vals)]
       if (!length(hist_vals)) {
         multi_ok <- FALSE
@@ -1429,11 +1513,19 @@ echart_weather_density_panel <- function(survey_weather,
       curve_sets[[wv]] <- list(
         x = d$x,
         historical = d$y,
-        scenarios = list()
+        scenarios = list(),
+        support = numeric(0)
       )
-      visible_nms <- names(scenario_weather %||% list())
-      if (!is.null(active_scenarios)) {
-        visible_nms <- intersect(visible_nms, active_scenarios)
+      reg_source <- if (is_binned[[i]] && is.data.frame(continuous_filt) &&
+        wv %in% names(continuous_filt)) continuous_filt else reg_filt
+      if (is_binned[[i]] && "cal_year" %in% names(reg_source)) {
+        reg_source <- reg_source[reg_source$cal_year %in% unique(survey_weather$cal_year), , drop = FALSE]
+      }
+      reg_vals <- as.numeric(reg_source[[wv]])
+      reg_vals <- reg_vals[is.finite(reg_vals)]
+      if (isTRUE(show_regression) && length(reg_vals)) {
+        dr <- stats::density(reg_vals, bw = "nrd0", kernel = "gaussian", n = 512)
+        curve_sets[[wv]]$support <- stats::approx(dr$x, dr$y, xout = d$x, rule = 2)$y
       }
       for (nm in visible_nms) {
         sw_df <- scenario_weather[[nm]]
@@ -1450,9 +1542,10 @@ echart_weather_density_panel <- function(survey_weather,
       }
     }
     if (!multi_ok) {
-      # Categorical variables or empty histories across the selection fall
-      # back to one variable per chart: render the first valid one alone.
-      weather_vars <- weather_vars[[1L]]
+      return(echart_blank(
+        "No continuous historical distribution is available for every selected variable.",
+        height = height
+      ))
     } else {
       n_rows <- length(weather_vars)
       series <- list()
@@ -1461,22 +1554,30 @@ echart_weather_density_panel <- function(survey_weather,
         wv <- weather_vars[[i]]
         cs <- curve_sets[[wv]]
         y0 <- i - 1L
-        ymax_all <- max(unlist(c(list(cs$historical), cs$scenarios)), na.rm = TRUE)
+        ymax_all <- max(unlist(c(list(cs$historical, cs$support), cs$scenarios)), na.rm = TRUE)
         if (!is.finite(ymax_all) || ymax_all <= 0) ymax_all <- 1
         series <- c(series, .e_density_series(
-          paste0(wv, " | Full historical"), cs$x,
+          paste(disp_label(wv), "| Historical"), cs$x,
           y0 + cs$historical / ymax_all * ridge_scale,
           .wise_history, area = TRUE
         ))
+        if (length(cs$support)) {
+          series <- c(series, .e_density_series(
+            paste(disp_label(wv), "| Model support"), cs$x,
+            y0 + cs$support / ymax_all * ridge_scale,
+            .wise_support, line_type = "dashed", width = 1
+          ))
+        }
         for (nm in names(cs$scenarios)) {
-          ssp_key <- .normalise_ssp(nm)
+          display_source <- .diag_weather_source_label(nm)
+          ssp_key <- .normalise_ssp(display_source)
           col <- if (!is.na(ssp_key) && ssp_key %in% names(.ssp_colours)) {
             unname(.ssp_colours[[ssp_key]])
           } else {
             "#cccccc"
           }
           series <- c(series, .e_density_series(
-            paste0(wv, " | ", nm), cs$x,
+            paste(disp_label(wv), "|", display_source), cs$x,
             y0 + cs$scenarios[[nm]] / ymax_all * ridge_scale,
             col, area = FALSE, width = 1
           ))
@@ -1497,7 +1598,11 @@ echart_weather_density_panel <- function(survey_weather,
           formatter = htmlwidgets::JS(sprintf(
             "function(v){ var m = %s; return m[v] === undefined ? '' : m[v]; }",
             jsonlite::toJSON(as.list(stats::setNames(
-              as.list(vapply(weather_vars, disp_label, character(1L))),
+             as.list(vapply(weather_vars, function(wv) {
+               spec <- .diag_weather_spec_row(weather_specs, wv)
+               units <- if (!is.null(spec) && "units" %in% names(spec)) as.character(spec$units[[1L]]) else NULL
+               .weather_display_axis_label(disp_label(wv), units)
+             }, character(1L))),
               as.list(as.character(seq_len(n_rows) - 1L))
             )), auto_unbox = TRUE)
           ))
@@ -1506,208 +1611,293 @@ echart_weather_density_panel <- function(survey_weather,
         axisTick = list(show = FALSE),
         splitLine = wise_esplit_line(show = FALSE)
       )
-      e$x$opts$series <- series
+      e$x$opts$series <- unname(series)
       e$x$opts$legend <- modifyList(
-        list(bottom = 0, left = 0, orient = "horizontal", type = "scroll"),
+        list(top = 4, left = "center", orient = "horizontal", type = "scroll"),
         wise_elegend_style()
       )
       e$x$opts$tooltip <- list(trigger = "axis")
-      e$x$opts$grid <- list(containLabel = TRUE, left = 8, right = 16, top = 12, bottom = 50)
+      e$x$opts$grid <- list(containLabel = TRUE, left = 8, right = 16, top = 42, bottom = 18)
       return(wise_echart_theme(e))
     }
   }
 
   # ---- Single variable -----------------------------------------------------
   wv <- weather_vars[[1L]]
-  raw_col <- weather_raw[[wv]]
-  is_factor <- is.factor(raw_col) || is.character(raw_col) ||
-    (is.integer(raw_col) && length(unique(raw_col[is.finite(raw_col)])) <= 20)
   lbl <- disp_label(wv)
+  if (is_binned[[1L]]) {
+    return(.echart_weather_binned_panel(
+      hist_filt, reg_filt, weather_raw, wv, weather_specs,
+      scenario_weather, visible_nms, weather_labels, height, stored_breaks, show_regression
+    ))
+  }
+  source_rows <- list()
+  add_source <- function(source, values) {
+    values <- suppressWarnings(as.numeric(values))
+    values <- values[is.finite(values)]
+    if (!length(values)) return(invisible(NULL))
+    key <- source
+    source_rows[[key]] <<- dplyr::bind_rows(source_rows[[key]], data.frame(
+      x = values, source = source, group = key,
+      stringsAsFactors = FALSE
+    ))
+    invisible(NULL)
+  }
+  historical_source <- if (is.data.frame(continuous_filt) && wv %in% names(continuous_filt)) {
+    continuous_filt
+  } else {
+    hist_filt
+  }
+  add_source("Historical", historical_source[[wv]])
 
-  if (!wv %in% names(weather_raw)) {
-    return(echart_blank(paste0("'", lbl, "' not found."), height = height))
+  support_source <- if (is.data.frame(continuous_filt) && wv %in% names(continuous_filt)) {
+    continuous_filt[continuous_filt$cal_year %in% unique(survey_weather$cal_year), , drop = FALSE]
+  } else {
+    reg_filt
+  }
+  if (isTRUE(show_regression)) {
+    add_source("Model support", support_source[[wv]])
   }
 
-  hist_filt <- .filter_hist_weather(weather_raw, survey_weather)
-  sw_years <- NULL
-  if (!"int_month" %in% names(survey_weather) && "timestamp" %in% names(survey_weather)) {
-    survey_weather$int_month <- as.integer(format(as.Date(survey_weather$timestamp), "%m"))
-  }
-  if ("timestamp" %in% names(survey_weather)) {
-    survey_weather$cal_year <- as.integer(format(as.Date(survey_weather$timestamp), "%Y"))
-  }
-  reg_filt <- hist_filt[hist_filt$cal_year %in% unique(survey_weather$cal_year), ,
-    drop = FALSE
-  ]
-
-  visible_nms <- names(scenario_weather %||% list())
-  if (!is.null(active_scenarios)) {
-    visible_nms <- intersect(visible_nms, active_scenarios)
-  }
-  scen_sources <- list()
+  source_colours <- c(Historical = .wise_history, `Model support` = .wise_support)
+  source_dashes <- c(Historical = FALSE, `Model support` = TRUE)
   for (nm in visible_nms) {
     sw_df <- scenario_weather[[nm]]
     if (is.null(sw_df) || !wv %in% names(sw_df)) next
-    scen_sources[[nm]] <- sw_df[[wv]]
-  }
-
-  source_order <- c("Full historical",
-    if (isTRUE(show_regression)) "Model support",
-    names(scen_sources)
-  )
-  colour_of <- function(s) {
-    if (identical(s, "Full historical")) return(.wise_history)
-    if (identical(s, "Model support")) return(.wise_support)
-    ssp_key <- .normalise_ssp(s)
-    if (!is.na(ssp_key) && ssp_key %in% names(.ssp_colours)) {
+    source <- .diag_weather_source_label(nm)
+    ssp_key <- .normalise_ssp(source)
+    colour <- if (!is.na(ssp_key) && ssp_key %in% names(.ssp_colours)) {
       unname(.ssp_colours[[ssp_key]])
     } else {
       "#cccccc"
     }
+    add_source(source, sw_df[[wv]])
+    source_colours[[source]] <- colour
+    source_dashes[[source]] <- FALSE
   }
-
-  if (is_factor) {
-    # Categorical: dodged proportion bars per source (geom_bar after_stat(prop)).
-    levels <- if (is.factor(raw_col)) levels(raw_col) else NULL
-    to_chr <- function(x) as.character(x)
-    keep_finite <- function(x) {
-      x <- to_chr(x)
-      x[!is.na(x) & nzchar(x)]
-    }
-    hist_levels <- levels
-    if (is.null(hist_levels)) {
-      hist_levels <- sort(unique(keep_finite(hist_filt[[wv]])))
-    }
-    hist_vals <- keep_finite(hist_filt[[wv]])
-    if (!length(hist_vals)) {
-      return(echart_blank("No values to plot.", height = height))
-    }
-    series <- list()
-    for (s in source_order) {
-      vals <- if (identical(s, "Full historical")) {
-        hist_vals
-      } else if (identical(s, "Model support")) {
-        keep_finite(reg_filt[[wv]])
-      } else {
-        keep_finite(scen_sources[[s]])
-      }
-      if (!length(vals)) next
-      prop <- as.numeric(table(factor(vals, levels = hist_levels))) / length(vals)
-      fill <- colour_of(s)
-      series <- c(series, list(list(
-        name = s,
-        type = "bar",
-        barGap = "10%",
-        barMaxWidth = 26,
-        itemStyle = list(
-          color = if (identical(s, "Model support")) "#ffffff" else fill,
-          opacity = 0.6,
-          borderColor = fill,
-          borderWidth = 0.4
-        ),
-        data = lapply(seq_along(hist_levels), function(i) {
-          list(value = list(hist_levels[[i]], prop[[i]]))
-        })
-      )))
-    }
-    legend_names <- vapply(series, function(s) s$name, character(1L))
-    e$x$opts$xAxis <- list(
-      type = "category",
-      data = as.list(hist_levels),
-      name = lbl,
-      nameLocation = "middle",
-      nameGap = 34,
-      nameTextStyle = wise_eaxis_name(),
-      axisLabel = wise_eaxis_label(interval = 0L, rotate = 30),
-      axisLine = list(lineStyle = list(color = .wise_grid)),
-      axisTick = list(alignWithLabel = TRUE),
-      splitLine = wise_esplit_line(show = FALSE)
-    )
-    e$x$opts$yAxis <- list(
-      type = "value",
-      name = "Relative frequency",
-      nameTextStyle = wise_eaxis_name(),
-      axisLabel = wise_eaxis_label(
-        formatter = htmlwidgets::JS(
-          "function(v){ return (100 * v).toFixed(0) + '%'; }"
-        )
-      ),
-      splitLine = wise_esplit_line()
-    )
-    e$x$opts$series <- series
-    e$x$opts$legend <- modifyList(
-      list(bottom = 0, left = 0, orient = "horizontal", data = as.list(legend_names)),
-      wise_elegend_style()
-    )
-    e$x$opts$tooltip <- list(trigger = "axis", axisPointer = list(type = "shadow"))
-    e$x$opts$grid <- list(containLabel = TRUE, left = 8, right = 16, top = 12, bottom = 62)
-    return(wise_echart_theme(e))
-  }
-
-  # Continuous: overlapping densities (Full historical filled grey area,
-  # dashed Model support line, SSP-coloured scenario lines).
-  hist_vals <- as.numeric(hist_filt[[wv]])
-  hist_vals <- hist_vals[is.finite(hist_vals)]
-  if (!length(hist_vals)) {
+  if (!length(source_rows) || is.null(source_rows$Historical)) {
     return(echart_blank("No finite values to plot.", height = height))
   }
-  d0 <- stats::density(hist_vals, bw = "nrd0", kernel = "gaussian", n = 512)
-  series <- .e_density_series(
-    "Full historical", d0$x, d0$y, .wise_history,
-    area = TRUE, area_opacity = 0.35, width = 1.2
+
+  ridge_input <- do.call(rbind, unname(source_rows))
+  ridge_input$group <- as.character(ridge_input$group)
+  log_transform <- isTRUE(log_x[[1L]])
+  all_values <- ridge_input$x[is.finite(ridge_input$x) &
+    (!log_transform | ridge_input$x > 0)]
+  x_range <- if (length(all_values)) {
+    as.numeric(stats::quantile(all_values, c(0.01, 0.99), names = FALSE, type = 8))
+  } else NULL
+  rd <- build_ridge_distribution_data(
+    ridge_input,
+    x_var = "x", group_var = "group", fill_var = "group",
+    ridge_var = "source", n_bins = 256L, n_grid = 256L,
+    log_transform = log_transform,
+    x_range = if (log_transform && !is.null(x_range)) log10(x_range) else x_range,
+    bandwidth_scale = 0.85
   )
-  legend_names <- "Full historical"
-  if (isTRUE(show_regression)) {
-    reg_vals <- as.numeric(reg_filt[[wv]])
-    reg_vals <- reg_vals[is.finite(reg_vals)]
-    if (length(reg_vals)) {
-      dr <- stats::density(reg_vals, bw = "nrd0", kernel = "gaussian", n = 512)
-      series <- c(series, .e_density_series(
-        "Model support", dr$x, dr$y, .wise_support,
-        area = FALSE, line_type = "dashed", width = 1.4
-      ))
-      legend_names <- c(legend_names, "Model support")
-    }
-  }
-  for (nm in names(scen_sources)) {
-    vals <- as.numeric(scen_sources[[nm]])
-    vals <- vals[is.finite(vals)]
-    if (!length(vals)) next
-    ds <- stats::density(vals, bw = "nrd0", kernel = "gaussian", n = 512)
-    series <- c(series, .e_density_series(
-      nm, ds$x, ds$y, colour_of(nm), area = FALSE, width = 1.2
-    ))
-    legend_names <- c(legend_names, nm)
-  }
-  e$x$opts$xAxis <- list(
-    type = "value",
-    scale = TRUE,
-    name = lbl,
-    nameLocation = "middle",
-    nameGap = 30,
-    nameTextStyle = wise_eaxis_name(),
-    axisLabel = wise_eaxis_label(),
-    splitLine = wise_esplit_line(),
-    axisLine = list(lineStyle = list(color = .wise_grid))
+  if (is.null(rd)) return(echart_blank("No finite values to plot.", height = height))
+
+  rd_groups <- as.character(rd$data$group)
+  rd$data$tooltip_value <- unlist(lapply(unique(rd_groups), function(source) {
+    values <- ridge_input$x[ridge_input$group == source]
+    values <- values[is.finite(values) & (!log_transform | values > 0)]
+    x_grid <- rd$data$x[rd_groups == source]
+    ord <- order(values)
+    values <- values[ord]
+    vapply(x_grid, function(x) findInterval(x, values) / length(values), numeric(1L))
+  }), use.names = FALSE)
+  styles <- data.frame(
+    group = names(source_rows),
+    fill = unname(source_colours[names(source_rows)]),
+    line = unname(source_colours[names(source_rows)]),
+    dashed = unname(source_dashes[names(source_rows)]),
+    stringsAsFactors = FALSE
   )
-  if (isTRUE(log_x[[1L]])) e$x$opts$xAxis$type <- "log"
-  e$x$opts$yAxis <- list(
-    type = "value",
-    name = "Density",
-    nameLocation = "middle",
-    nameGap = 40,
-    nameRotate = 90,
-    nameTextStyle = wise_eaxis_name(),
-    axisLabel = wise_eaxis_label(),
-    splitLine = wise_esplit_line()
+  spec <- .diag_weather_spec_row(weather_specs, wv)
+  units <- if (!is.null(spec) && "units" %in% names(spec)) as.character(spec$units[[1L]]) else NULL
+  chart <- ridge_echart_widget(
+    rd$data, rd$ridges, rd$ridges, styles,
+    height = height, log_scale = log_transform,
+    x_name = stringr::str_wrap(.weather_display_axis_label(lbl, units), 40),
+    tooltip_x_name = stringr::str_wrap(.weather_display_axis_label(lbl, units), 40),
+    hide_extreme_x = TRUE
   )
-  e$x$opts$series <- series
-  e$x$opts$legend <- modifyList(
-    list(bottom = 0, left = 0, orient = "horizontal",
-      data = as.list(unique(legend_names))),
+  chart$x$opts$legend <- modifyList(
+    list(top = 4, left = "center", orient = "horizontal",
+      data = as.list(unname(names(source_rows)))),
     wise_elegend_style()
   )
-  e$x$opts$tooltip <- list(trigger = "axis")
-  e$x$opts$grid <- list(containLabel = TRUE, left = 8, right = 16, top = 12, bottom = 62)
+  if (!is.null(x_range) && all(is.finite(x_range)) && x_range[[1L]] < x_range[[2L]]) {
+    if (log_transform) {
+      chart$x$opts$xAxis$min <- max(x_range[[1L]], .Machine$double.xmin)
+      chart$x$opts$xAxis$max <- x_range[[2L]]
+    } else {
+      pad <- 0.025 * diff(x_range)
+      chart$x$opts$xAxis$min <- x_range[[1L]] - pad
+      chart$x$opts$xAxis$max <- x_range[[2L]] + pad
+    }
+  }
+  chart$x$opts$grid$top <- 42
+  wise_echart_theme(chart)
+}
+
+.echart_weather_binned_panel <- function(hist_filt, reg_filt, weather_raw,
+                                         weather_vars, weather_specs,
+                                         scenario_weather, visible_nms,
+                                         weather_labels, height,
+                                         stored_breaks = NULL, show_regression = TRUE) {
+  multi <- length(weather_vars) > 1L
+  source_values <- list(Historical = hist_filt)
+  if (isTRUE(show_regression) && nrow(reg_filt)) source_values[["Model support"]] <- reg_filt
+  scenario_labels <- vapply(visible_nms, .diag_weather_source_label, character(1L))
+  for (i in seq_along(visible_nms)) {
+    nm <- visible_nms[[i]]
+    source <- scenario_labels[[i]]
+    source_values[[source]] <- dplyr::bind_rows(source_values[[source]], scenario_weather[[nm]])
+  }
+
+  labels <- function(wv) {
+    if (!is.null(weather_labels) && wv %in% names(weather_labels)) {
+      as.character(weather_labels[[wv]])
+    } else {
+      spec <- .diag_weather_spec_row(weather_specs, wv)
+      if (!is.null(spec) && "label" %in% names(spec)) as.character(spec$label[[1L]]) else wv
+    }
+  }
+  colors <- function(source) {
+    if (identical(source, "Historical")) return(.wise_history)
+    if (identical(source, "Model support")) return(.wise_support)
+    key <- .normalise_ssp(source)
+    if (!is.na(key) && key %in% names(.ssp_colours)) unname(.ssp_colours[[key]]) else "#cccccc"
+  }
+
+  continuous_raw <- attr(weather_raw, "continuous_weather")
+  continuous_filt <- if (is.data.frame(continuous_raw)) {
+    .filter_hist_weather(continuous_raw, data.frame(
+      loc_id = hist_filt$loc_id,
+      int_month = hist_filt$int_month
+    ))
+  } else NULL
+  if (!is.null(continuous_filt)) {
+    continuous_filt <- continuous_filt[
+      !duplicated(continuous_filt[, c("loc_id", "int_month", "cal_year")]), ,
+      drop = FALSE
+    ]
+  }
+  categories <- list()
+  proportions <- list()
+  for (wv in weather_vars) {
+    brks <- stored_breaks[[wv]] %||% attr(weather_raw, "stored_breaks")[[wv]]
+    lev <- if (!is.null(brks)) {
+      levels(relabel_bin_levels(
+        data.frame(value = factor(character(0), levels = levels(cut(
+          brks[is.finite(brks)], breaks = brks,
+          include.lowest = TRUE, right = TRUE
+        )))),
+        list(value = brks)
+      )$value)
+    } else if (is.factor(weather_raw[[wv]])) {
+      .bin_level_order(levels(weather_raw[[wv]]))
+    } else {
+      vals <- unlist(lapply(source_values, function(df) {
+        if (is.data.frame(df) && wv %in% names(df)) as.character(df[[wv]]) else character(0)
+      }), use.names = FALSE)
+      sort(unique(vals[!is.na(vals) & nzchar(vals)]))
+    }
+    lev <- .bin_level_order(lev)
+    if (!length(lev)) next
+    for (source in names(source_values)) {
+      df <- source_values[[source]]
+      if (!is.data.frame(df) || !wv %in% names(df)) next
+      source_df <- df
+      if (identical(source, "Historical") && is.data.frame(continuous_filt) && wv %in% names(continuous_filt)) {
+        source_df <- continuous_filt
+      } else if (identical(source, "Model support") && is.data.frame(continuous_filt) &&
+        wv %in% names(continuous_filt)) {
+        source_df <- continuous_filt[continuous_filt$cal_year %in% unique(reg_filt$cal_year), , drop = FALSE]
+      }
+      brks <- stored_breaks[[wv]] %||% attr(weather_raw, "stored_breaks")[[wv]]
+      if (!is.null(brks) && is.numeric(source_df[[wv]])) {
+        bin_id <- cut(as.numeric(source_df[[wv]]), breaks = brks,
+          include.lowest = TRUE, right = TRUE, labels = FALSE)
+        vals <- rep(NA_character_, length(bin_id))
+        keep_bin <- !is.na(bin_id) & bin_id >= 1L & bin_id <= length(lev)
+        vals[keep_bin] <- lev[bin_id[keep_bin]]
+      } else {
+        vals <- as.character(source_df[[wv]])
+      }
+      vals <- vals[!is.na(vals) & nzchar(vals)]
+      if (!length(vals)) next
+      key <- paste(wv, source, sep = "\r")
+      categories[[key]] <- lev
+      proportions[[key]] <- as.numeric(table(factor(vals, levels = lev))) / length(vals)
+    }
+  }
+  if (!length(proportions)) return(echart_blank("No binned weather values to plot.", height = height))
+  e <- .e_diag_base(height)
+  cat_keys <- names(categories)
+  var_levels <- function(wv) {
+    keys <- cat_keys[startsWith(cat_keys, paste0(wv, "\r"))]
+    if (length(keys)) categories[[keys[[1L]]]] else character(0)
+  }
+  if (multi) {
+    # One categorical axis keeps every selected variable visible in one widget.
+    all_labels <- unname(unlist(lapply(weather_vars, function(wv) {
+      lev <- var_levels(wv)
+      paste(labels(wv), vapply(lev, .weather_display_bin_label, character(1L)), sep = ": ")
+    }), use.names = FALSE))
+  } else {
+    wv <- weather_vars[[1L]]
+    all_labels <- unname(vapply(var_levels(wv), .weather_display_bin_label, character(1L)))
+  }
+  e$x$opts$xAxis <- list(type = "category", data = as.list(all_labels),
+    name = if (multi) "Weather variable and bin" else {
+      spec <- .diag_weather_spec_row(weather_specs, weather_vars[[1L]])
+      units <- if (!is.null(spec) && "units" %in% names(spec)) as.character(spec$units[[1L]]) else NULL
+      .weather_display_axis_label(labels(weather_vars[[1L]]), units, binned = TRUE)
+    },
+    nameLocation = "middle", nameGap = 36, nameTextStyle = wise_eaxis_name(),
+    axisLabel = wise_eaxis_label(interval = 0L, rotate = if (multi) 35 else 0),
+    axisLine = list(lineStyle = list(color = .wise_grid)),
+    splitLine = wise_esplit_line(show = FALSE))
+  e$x$opts$yAxis <- list(type = "value",
+    axisLabel = wise_eaxis_label(formatter = htmlwidgets::JS("function(v){return (100*v).toFixed(0)+'%';}")),
+    splitLine = wise_esplit_line())
+
+  series <- list()
+  for (source in unique(sub(".*\\r", "", cat_keys))) {
+    dat <- numeric(length(all_labels))
+    cursor <- 0L
+    for (wv in weather_vars) {
+      lev <- var_levels(wv)
+      key <- paste(wv, source, sep = "\r")
+      value <- proportions[[key]] %||% rep(0, length(lev))
+      if (multi) dat[cursor + seq_along(lev)] <- value
+      else if (identical(wv, weather_vars[[1L]])) dat <- value
+      cursor <- cursor + length(lev)
+    }
+    series[[length(series) + 1L]] <- list(name = source, type = "bar",
+      barMaxWidth = 24, itemStyle = list(color = colors(source), opacity = 0.72),
+      data = as.list(unname(dat)))
+  }
+  e$x$opts$series <- unname(series)
+  e$x$opts$legend <- modifyList(list(top = 4, left = "center", orient = "horizontal",
+    data = as.list(unname(unique(vapply(series, `[[`, character(1L), "name"))))), wise_elegend_style())
+  e$x$opts$tooltip <- list(
+    trigger = "axis", confine = TRUE, axisPointer = list(type = "shadow"),
+    formatter = htmlwidgets::JS(
+      "function(params){
+        function esc(s){return String(s).replace(/[&<>\"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',\"'\":'&#39;'}[c];});}
+        var rows=[];
+        (params||[]).forEach(function(p){
+          var v=Number(Array.isArray(p.value)?p.value[1]:p.value);
+          if(!isFinite(v)) return;
+          rows.push((p.marker||'')+esc(p.seriesName)+': <b>'+(100*v).toLocaleString('en-US',{maximumFractionDigits:1})+'%</b>');
+        });
+        return (params&&params.length?esc(params[0].axisValueLabel):'')+(rows.length?'<br/>'+rows.join('<br/>'):'');
+      }"
+    )
+  )
+  e$x$opts$grid <- list(containLabel = TRUE, left = 8, right = 16, top = 42, bottom = if (multi) 84 else 72)
   wise_echart_theme(e)
 }

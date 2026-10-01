@@ -39,18 +39,10 @@ mod_2_03_diagnostics_ui <- function(id) {
         shiny::uiOutput(ns("diag_weather_scenario_ui"))
       ),
       wise_chart_output(ns("diag_weather_density"),
-        "Density plot comparing the selected weather variable in the historical sample against its own climate history",
+        "Weather distribution comparing model support, historical weather and future scenarios",
         height = "340px"
       ),
       shiny::uiOutput(ns("weather_support_warning_ui")),
-      shiny::div(
-        class = "wise-reactable-controls",
-        wise_reactable_csv_button(
-          ns("weather_support_table"),
-          "simulation_weather_support_summary"
-        )
-      ),
-      reactable::reactableOutput(ns("weather_support_table")),
       shiny::tags$p(
         class = "diagnostic-note",
         "Distributions are normalized separately so samples with different sizes can be compared. Overlap does not by itself establish model validity."
@@ -79,7 +71,7 @@ mod_2_03_diagnostics_ui <- function(id) {
       ),
       shiny::tags$p(
         class = "diagnostic-note",
-        "Each dark point is one climate model's mean across simulated weather-year draws. The green point is the median model mean."
+        "Each scenario-coloured point is one climate model's mean across simulated weather-year draws. The orange point is the median model mean."
       )
     ),
 
@@ -123,6 +115,7 @@ mod_2_03_diagnostics_ui <- function(id) {
 #' @param saved_scenarios  ReactiveVal holding named scenario entries.
 #' @param survey_weather   Reactive data frame of merged survey-weather data.
 #' @param selected_weather Reactive data frame of selected weather variable metadata.
+#' @param stored_breaks    Reactive named list of Step 1 weather bin breaks.
 #' @param tabset_id        Character id of the parent tabset panel.
 #' @param tabset_session   Shiny session for the tabset.
 #'
@@ -136,7 +129,8 @@ mod_2_03_diagnostics_server <- function(id,
                                         timeseries_curves = NULL,
                                         tabset_id,
                                         tabset_session = NULL,
-                                        stale = reactive(FALSE)) {
+                                        stale = reactive(FALSE),
+                                        stored_breaks = reactive(NULL)) {
   moduleServer(id, function(input, output, session) {
     ns <- session$ns
 
@@ -229,15 +223,12 @@ mod_2_03_diagnostics_server <- function(id,
       }
       choices <- if ("label" %in% names(sw)) setNames(sw$name, sw$label) else sw$name
       current <- isolate(input$diag_weather_vars)
-      selected <- if (length(current) > 0 && current %in% unname(choices)) {
-        current
-      } else {
-        unname(choices)[[1L]]
-      }
+      selected <- intersect(current, unname(choices))
+      if (!length(selected)) selected <- unname(choices)[[1L]]
       pill_toggle(
         ns("diag_weather_vars"),
         label = NULL,
-        choices = choices, selected = selected,
+        choices = choices, selected = selected[[1L]],
         layout = "horizontal"
       )
     })
@@ -270,6 +261,7 @@ mod_2_03_diagnostics_server <- function(id,
       req(length(vars) > 0)
 
       sw <- if (!is.null(selected_weather)) selected_weather() else NULL
+      breaks <- if (is.function(stored_breaks)) stored_breaks() else stored_breaks
       lbl_map <- if (!is.null(sw) && all(c("name", "label") %in% names(sw))) {
         setNames(sw$label, sw$name)
       } else {
@@ -285,7 +277,9 @@ mod_2_03_diagnostics_server <- function(id,
         active_scenarios = active_weather_scenarios(),
         log_x            = rep(FALSE, length(vars)),
         show_regression  = TRUE,
-        height           = "340px"
+        height           = "340px",
+        weather_specs    = sw,
+        stored_breaks    = breaks
       )
       req(!is.null(ch))
       ch
@@ -311,8 +305,8 @@ mod_2_03_diagnostics_server <- function(id,
       )
     })
 
-    # Shared display frame for the weather-support reactable and its export
-    # bundle artefact (one builder, two consumers).
+    # Display frame retained for the lazy bundle export; it is not rendered in
+    # the Diagnostics tab.
     weather_support_display <- function() {
       tbl <- weather_support_data()
       if (is.null(tbl) || !nrow(tbl)) {
@@ -346,14 +340,6 @@ mod_2_03_diagnostics_server <- function(id,
       )
     }
 
-    output$weather_support_table <- reactable::renderReactable({
-      display <- weather_support_display()
-      if (is.null(display)) {
-        return(.step2_reactable_note("No weather-support summary is available."))
-      }
-      .step2_reactable(display, default_page_size = 25)
-    })
-    outputOptions(output, "weather_support_table", suspendWhenHidden = TRUE)
     output$weather_support_warning_ui <- renderUI({
       tbl <- weather_support_data()
       if (is.null(tbl) || !nrow(tbl) || !any(tbl$warning)) {
@@ -400,6 +386,7 @@ mod_2_03_diagnostics_server <- function(id,
         vars <- input$diag_weather_vars
         req(length(vars) > 0L)
         sw <- if (!is.null(selected_weather)) selected_weather() else NULL
+        breaks <- if (is.function(stored_breaks)) stored_breaks() else stored_breaks
         lbl_map <- if (!is.null(sw) && all(c("name", "label") %in% names(sw))) {
           setNames(sw$label, sw$name)
         } else {
@@ -412,7 +399,9 @@ mod_2_03_diagnostics_server <- function(id,
           active_scenarios = active_weather_scenarios(),
           log_x = rep(FALSE, length(vars)),
           show_regression = TRUE,
-          height = "500px"
+          height = "500px",
+          weather_specs = sw,
+          stored_breaks = breaks
         )
         req(!is.null(ch))
         ch

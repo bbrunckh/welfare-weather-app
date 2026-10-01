@@ -890,7 +890,7 @@ test_that("echart_annual_distribution keeps violin and boxplot modes", {
   box <- echart_annual_distribution(curves, "Mean", "boxplot")
   expect_s3_class(box, "echarts4r")
   types <- vapply(box$x$opts$series, `[[`, character(1), "type")
-  expect_true(all(types == "bar" | types == "scatter" | types == "line"))
+  expect_true(all(types %in% c("custom", "scatter", "line")))
 
   blank <- echart_annual_distribution(NULL, "Mean", "violin")
   expect_match(blank$x$opts$title[[1]]$text, "No annual simulation results available.",

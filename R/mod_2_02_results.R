@@ -1676,7 +1676,12 @@ mod_2_02_results_server <- function(id,
 
     uncertainty_chart <- function() {
       req(variance_breakdown_rv())
-      echart_variance_contribution(variance_breakdown_rv(), height = "300px")
+      echart_variance_contribution(
+        variance_breakdown_rv(), height = "300px",
+        percent = identical(metric_metadata(
+          input$cmp_agg_method %||% "mean", hist_sim()$so
+        )$format, "percent")
+      )
     }
     output$uncertainty_sources_plot <- echarts4r::renderEcharts4r({
       ch <- uncertainty_chart()
@@ -1937,7 +1942,7 @@ mod_2_02_results_server <- function(id,
         }
         list(
           tbl     = timeseries_curves_rv(),
-          x_label = agg_hist()$x_label,
+          x_label = metric_axis_label(input$cmp_agg_method %||% "mean", hist_sim()$so),
           ens_q   = ens_q
         )
       })

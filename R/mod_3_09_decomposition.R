@@ -356,16 +356,19 @@ mod_3_09_decomposition_ui <- function(id) {
     ),
     shiny::div(
       class = "results-section-card diagnostic-section-card",
-      pill_toggle(
-        ns("decomp_weather_basis"),
-        label = "Weather-year basis",
-        choices = c(
-          "Mean" = "mean",
-          "Adverse 1-in-10" = "adverse_10",
-          "Adverse 1-in-20" = "adverse_20"
-        ),
-        selected = "mean",
-        layout = "horizontal"
+      shiny::div(
+        style = "display:flex; justify-content:flex-end; flex-wrap:wrap; margin-bottom:12px;",
+        pill_toggle(
+          ns("decomp_weather_basis"),
+          label = "Weather-year basis",
+          choices = c(
+            "Mean" = "mean",
+            "Adverse 1-in-10" = "adverse_10",
+            "Adverse 1-in-20" = "adverse_20"
+          ),
+          selected = "mean",
+          layout = "horizontal"
+        )
       ),
       wise_chart_output(ns("headline_decomp_plot"),
         "Main effect, resilience, and total policy effect decomposition",
@@ -403,7 +406,7 @@ mod_3_09_decomposition_ui <- function(id) {
     shiny::div(
       class = "results-section-card diagnostic-section-card",
       shiny::div(
-        style = "display: flex; gap: 14px; flex-wrap: wrap; align-items: center; margin-bottom: 8px;",
+        style = "display: flex; justify-content:flex-end; gap: 14px; flex-wrap: wrap; align-items: center; margin-bottom: 12px;",
         pill_toggle(
           ns("decile_weather_basis"),
           label = "Weather-year basis",

@@ -58,6 +58,72 @@ make_step3_scenarios_fixture_multi <- function() {
   )
 }
 
+test_that("future metric switches preserve scenario keys and reuse prepared suites", {
+  hist <- make_step3_hist_fixture()
+  scenarios <- make_step3_scenarios_fixture_multi()
+  policy_scenarios <- scenarios
+  for (i in seq_along(policy_scenarios)) {
+    policy_scenarios[[i]]$pipelines <- lapply(policy_scenarios[[i]]$pipelines, function(pipe) {
+      pipe$y_point <- pipe$y_point + .1
+      pipe
+    })
+  }
+  bh <- shiny::reactiveVal(hist)
+  ph <- shiny::reactiveVal(hist)
+  bsc <- shiny::reactiveVal(scenarios)
+  psc <- shiny::reactiveVal(policy_scenarios)
+  internals <- NULL
+  shiny::testServer(function(input, output, session) {
+    internals <<- .wire_results_pane(input, output, session, bh, bsc, ph, psc,
+      selected_hist = shiny::reactiveVal(NULL), residuals = shiny::reactiveVal("none"))
+  }, {
+    session$setInputs(cmp_agg_method = "mean", cmp_deviation = "none", cmp_pov_line = 3)
+    session$elapse(500); session$flushReact()
+    expect_named(internals$baseline_agg_scenarios(), names(scenarios))
+    cache <- attr(internals$agg_cache_ws(), "suite_cache")
+    baseline_key <- ls(cache)[grepl("baseline_scn", ls(cache), fixed = TRUE)][[1L]]
+    policy_key <- ls(cache)[grepl("policy_scn", ls(cache), fixed = TRUE)][[1L]]
+    baseline_suite <- get(baseline_key, envir = cache)
+    policy_suite <- get(policy_key, envir = cache)
+    for (method in c("gini", "median", "total", "prosperity_gap", "avg_poverty", "mean", "gini")) {
+      session$setInputs(cmp_agg_method = method)
+      session$flushReact()
+      baseline <- internals$baseline_agg_scenarios()
+      policy <- internals$policy_agg_scenarios()
+      expect_named(baseline, names(scenarios))
+      expect_named(policy, names(policy_scenarios))
+      for (nm in names(scenarios)) {
+        expect_identical(baseline[[nm]]$out, baseline_suite[[nm]][[method]])
+        expect_identical(policy[[nm]]$out, policy_suite[[nm]][[method]])
+        expect_true(all(is.finite(baseline[[nm]]$out$value)))
+      }
+      expect_identical(get(baseline_key, envir = cache), baseline_suite)
+      expect_identical(get(policy_key, envir = cache), policy_suite)
+      expect_true(all(paste("Baseline", names(scenarios), sep = "\r") %in%
+        names(internals$matrix_transforms())))
+      expect_true(all(names(scenarios) %in% internals$threshold_table()$scenario))
+    }
+    # Poverty methods share their own threshold-keyed suite.
+    session$setInputs(cmp_agg_method = "headcount_ratio")
+    session$elapse(500); session$flushReact()
+    poverty_keys <- ls(cache)[grepl("baseline_scn", ls(cache), fixed = TRUE)]
+    poverty_key <- setdiff(poverty_keys, baseline_key)[[1L]]
+    poverty_suite <- get(poverty_key, envir = cache)
+    for (method in c("gap", "fgt2", "headcount_ratio")) {
+      session$setInputs(cmp_agg_method = method)
+      session$flushReact()
+      baseline <- internals$baseline_agg_scenarios()
+      expect_named(baseline, names(scenarios))
+      expect_named(internals$policy_agg_scenarios(), names(policy_scenarios))
+      for (nm in names(scenarios)) {
+        expect_identical(baseline[[nm]]$out, poverty_suite[[nm]][[method]])
+      }
+      expect_identical(get(poverty_key, envir = cache), poverty_suite)
+      expect_true(all(names(scenarios) %in% internals$threshold_table()$scenario))
+    }
+  })
+})
+
 test_that("shared pipeline table preserves historical and ensemble schemas", {
   hist_pipe <- make_step3_pipe_fixture(n = 80L, yrs = 2020:2021)
   hist <- aggregate_pipeline_table(

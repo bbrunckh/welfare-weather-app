@@ -163,7 +163,7 @@ echart_decomposition_headline <- function(summary_df,
     echarts4r::e_bar(percent) |>
     echarts4r::e_color(unname(scenario_colours)) |>
     echarts4r::e_legend(
-      orient = "horizontal", left = 0, top = "bottom"
+      orient = "horizontal", left = "center", top = 4
     ) |>
     echarts4r::e_x_axis(
       axisLabel = wise_eaxis_label(fontSize = 13),
@@ -172,12 +172,16 @@ echart_decomposition_headline <- function(summary_df,
     ) |>
     echarts4r::e_y_axis(
       name = y_label,
-      nameTextStyle = wise_eaxis_name(),
-      axisLabel = wise_eaxis_label(),
+      nameLocation = "end", nameRotate = 0, nameGap = 20,
+      nameMoveOverlap = FALSE,
+      nameTextStyle = wise_eaxis_name(align = "left"),
+      axisLabel = wise_eaxis_label(formatter = htmlwidgets::JS(
+        "function(v){return Number(v).toLocaleString('en-US',{maximumFractionDigits:1})+'%';}"
+      )),
       splitLine = wise_esplit_line()
     ) |>
     echarts4r::e_tooltip(trigger = "axis", valueFormatter = fmt) |>
-    echarts4r::e_grid(containLabel = TRUE, left = 8, right = 14, top = 24, bottom = 44) |>
+    echarts4r::e_grid(containLabel = TRUE, left = 8, right = 14, top = 86, bottom = 30) |>
     wise_echart_theme() |>
     .wise_zero_markline()
 }
@@ -264,13 +268,14 @@ echart_decomposition_channels_by_decile <- function(tbl,
     echarts4r::e_bar(effect, stack = "channels") |>
     echarts4r::e_color(unname(colours[unname(channel_labels[channel_cols])])) |>
     echarts4r::e_legend(
-      orient = "horizontal", left = 0, top = "bottom",
+      orient = "horizontal", left = "center", top = 4,
       data = as.list(unname(channel_labels[channel_cols]))
     ) |>
     echarts4r::e_x_axis(
       name = "Fixed observed baseline welfare decile (1 = poorest)",
       nameLocation = "middle",
       nameGap = 28,
+      nameMoveOverlap = FALSE,
       nameTextStyle = wise_eaxis_name(fontSize = 13),
       axisLabel = wise_eaxis_label(fontSize = 13),
       axisTick = list(alignWithLabel = TRUE),
@@ -278,12 +283,16 @@ echart_decomposition_channels_by_decile <- function(tbl,
     ) |>
     echarts4r::e_y_axis(
       name = "Policy effect (percent change)",
-      nameTextStyle = wise_eaxis_name(),
-      axisLabel = wise_eaxis_label(),
+      nameLocation = "end", nameRotate = 0, nameGap = 20,
+      nameMoveOverlap = FALSE,
+      nameTextStyle = wise_eaxis_name(align = "left"),
+      axisLabel = wise_eaxis_label(formatter = htmlwidgets::JS(
+        "function(v){return Number(v).toLocaleString('en-US',{maximumFractionDigits:1})+'%';}"
+      )),
       splitLine = wise_esplit_line()
     ) |>
     echarts4r::e_tooltip(trigger = "axis", valueFormatter = fmt) |>
-    echarts4r::e_grid(containLabel = TRUE, left = 8, right = 14, top = 24, bottom = 58) |>
+    echarts4r::e_grid(containLabel = TRUE, left = 8, right = 14, top = 106, bottom = 62) |>
     wise_echart_theme() |>
     .wise_zero_markline()
 

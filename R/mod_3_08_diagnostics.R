@@ -6,6 +6,21 @@
   tools::toTitleCase(x)
 }
 
+.policy_diagnostic_label <- function(var_name, variable_list = NULL,
+                                     selected_outcome = NULL) {
+  if (identical(var_name, SP_TRANSFER_COL)) {
+    return("Social protection transfer ($ per day)")
+  }
+  if (!is.null(selected_outcome) && is.data.frame(selected_outcome) &&
+    nrow(selected_outcome) && all(c("name", "label") %in% names(selected_outcome)) &&
+    identical(var_name, as.character(selected_outcome$name[[1L]])) &&
+    !is.na(selected_outcome$label[[1L]]) &&
+    nzchar(as.character(selected_outcome$label[[1L]]))) {
+    return(as.character(selected_outcome$label[[1L]]))
+  }
+  .label_lookup(variable_list)(var_name)
+}
+
 .policy_input_table_raw <- function(df) {
   if (is.null(df) || !nrow(df)) {
     return(df)
@@ -295,6 +310,8 @@ mod_3_08_diagnostics_server <- function(id,
                                         policy_scenarios = reactive(list()),
                                         baseline_hist_sim = reactive(NULL),
                                         selected_weather = reactive(NULL),
+                                        selected_outcome = reactive(NULL),
+                                        variable_list = reactive(NULL),
                                         sp_scenario = reactive(NULL),
                                         infra_scenario = reactive(NULL),
                                         digital_scenario = reactive(NULL),
@@ -339,6 +356,14 @@ mod_3_08_diagnostics_server <- function(id,
       } else {
         word
       }
+    }
+
+    variable_label <- function(var_name) {
+      .policy_diagnostic_label(
+        var_name,
+        variable_list = tryCatch(variable_list(), error = function(e) NULL),
+        selected_outcome = tryCatch(selected_outcome(), error = function(e) NULL)
+      )
     }
 
     # Diagnostics data preparation ----
@@ -515,15 +540,16 @@ mod_3_08_diagnostics_server <- function(id,
       }
 
       tags <- lapply(vars, function(var) {
+        label <- variable_label(var)
         shiny::div(
           style = "margin-bottom: 30px;",
           shiny::h6(
-            paste0(toupper(substr(var, 1, 1)), substr(var, 2, nchar(var))),
+            label,
             style = "margin-bottom: 8px; font-weight: 600;"
           ),
           wise_chart_output(
             ns(paste0("hist_", var)),
-            paste("Histogram of", var, "before and after the policy adjustment"),
+            paste("Distribution of", label, "before and after the policy adjustment"),
             height = "300px"
           )
         )
@@ -553,13 +579,14 @@ mod_3_08_diagnostics_server <- function(id,
         for (var in vars) {
           local({
             var_name <- var
+            display_label <- variable_label(var_name)
             baseline_vals <- d$baseline_values[[var_name]]
             policy_vals <- d$policy_values[[var_name]]
             # Zero-arg echarts closure shared by the on-screen render and the
             # export bundle (guidelines §7 pattern).
             hist_chart <- function() {
               echart_before_after_hist(
-                baseline_vals, policy_vals, var_name,
+                baseline_vals, policy_vals, display_label,
                 height = "300px"
               )
             }
@@ -571,12 +598,12 @@ mod_3_08_diagnostics_server <- function(id,
             })
             wise_export_figure(
               key = paste0("policy_before_after_", var_name),
-              label = paste("Policy-adjusted before/after", var_name),
+              label = paste("Policy-adjusted before/after", display_label),
               step = 3L,
               fun = hist_chart,
               description = paste(
                 "Baseline and policy-adjusted distributions for the manipulated",
-                "variable", var_name, "."
+                "variable", display_label, "."
               ),
               width = 9, height = 5,
               stale = stale
