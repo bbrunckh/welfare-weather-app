@@ -75,16 +75,17 @@ test_that("metadata only claims the confirmed PPP or LCU basis", {
   unknown <- wiseapp:::metric_metadata(
     "mean", list(name = "consumption", label = "Consumption", units = "", type = "numeric")
   )
-  expect_identical(ppp$currency_basis, "selected PPP units (2021)")
-  expect_identical(lcu$currency_basis, "selected LCU units (2021)")
-  expect_match(ppp$level_unit, "selected PPP units", fixed = TRUE)
-  expect_false(grepl("\\$|/day|per person", ppp$level_unit))
+  expect_identical(ppp$currency_basis, "PPP 2021")
+  expect_identical(lcu$currency_basis, "LCU 2021")
+  expect_identical(ppp$level_unit, "$ per day")
+  expect_identical(lcu$level_unit, "LCU per day")
+  expect_identical(ppp$level_unit, "$ per day")
   expect_true("welfare/time basis unavailable" %in% ppp$missing_context)
   expect_true(any(grepl("currency/unit basis unavailable", unknown$missing_context)))
   expect_identical(ppp$analysis_unit, "hh")
 })
 
-test_that("weighted total and inverse-welfare units remain qualified", {
+test_that("population weighted sum and average-poverty units are concise", {
   total <- wiseapp:::metric_metadata(
     "total",
     list(name = "welfare", label = "Welfare", units = "PPP", type = "numeric"),
@@ -92,10 +93,23 @@ test_that("weighted total and inverse-welfare units remain qualified", {
   )
   total_unknown <- wiseapp:::metric_metadata("total", weighted = NULL)
   inverse <- wiseapp:::metric_metadata("avg_poverty", weighted = TRUE)
-  expect_match(total$level_unit, "weighted sum", fixed = TRUE)
-  expect_match(total$level_unit, "survey-weight units", fixed = TRUE)
+  expect_identical(total$label, "Population weighted sum")
+  expect_identical(total$level_unit, "$ per day")
   expect_match(total$weight_interpretation, "expansion semantics unknown", fixed = TRUE)
-  expect_match(total_unknown$level_unit, "weight status unknown", fixed = TRUE)
+  expect_identical(total_unknown$level_unit, "outcome units")
+  expect_identical(metric_axis_label("total", list(units = "LCU")),
+    "Population weighted sum (LCU per day)")
+  expect_identical(metric_axis_label("total", list(units = "PPP"), deviation = "mean"),
+    "Population weighted sum - deviation from mean year ($ per day)")
+  expect_identical(wiseapp:::metric_metadata("avg_poverty", list(units = "PPP"))$level_unit,
+    "days per $")
+  expect_identical(wiseapp:::metric_metadata("avg_poverty", list(units = "LCU"))$level_unit,
+    "days per LCU")
+  expect_identical(metric_axis_label("prosperity_gap"), "Prosperity gap")
+  expect_identical(wiseapp:::metric_metadata("prosperity_gap")$native_unit, "ratio")
+  expect_identical(wiseapp:::metric_metadata("prosperity_gap")$level_unit, "")
+  expect_identical(wiseapp:::format_metric_value(1.2,
+    wiseapp:::metric_metadata("prosperity_gap")), "1.20")
   expect_identical(inverse$level_unit, "inverse outcome units")
   expect_true(any(grepl("positive welfare", inverse$missing_context, fixed = TRUE)))
 })
@@ -122,11 +136,14 @@ test_that("metric formatter applies scale once and shows change units", {
   expect_identical(wiseapp:::format_metric_value(0.32, rate), "32.00%")
   expect_identical(wiseapp:::format_metric_value(-0.04, rate, change = TRUE), "-4.00 pp")
   expect_identical(wiseapp:::format_metric_value(0.32, welfare),
-                   "0.32 selected PPP units (2021)")
+                   "0.32 $ per day")
   expect_identical(wiseapp:::format_metric_value(0.02, welfare, change = TRUE),
-                   "+0.02 selected PPP units (2021)")
+                   "+0.02 $ per day")
   expect_identical(wiseapp:::format_metric_value(0.02, gini, change = TRUE),
                    "+0.02 index points")
+  total <- metric_metadata("total", list(type = "numeric", units = "PPP"), weighted = TRUE)
+  expect_identical(wiseapp:::format_metric_value(1234.6, total, digits = 0), "1,235 $ per day")
+  expect_identical(wiseapp:::format_metric_value(-1234.6, total, change = TRUE, digits = 0), "-1,235 $ per day")
   expect_identical(wiseapp:::format_metric_value(NA_real_, rate), "Not available")
 })
 

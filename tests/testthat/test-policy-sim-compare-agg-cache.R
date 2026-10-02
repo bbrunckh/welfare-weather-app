@@ -261,7 +261,9 @@ test_that("Step 3 paired and headline reactives explicitly use equal-model means
       expect_identical(focus$center_method, "equal_model_mean")
     }
     expect_match(internals$headline_cards()[[1]]$note,
-                 "Policy: 4.83 outcome units vs Base: 1.50 outcome units", fixed = TRUE)
+                 "Policy vs baseline", fixed = TRUE)
+    expect_match(internals$headline_cards()[[1]]$info,
+                 "Policy: 4.83 outcome units vs baseline: 1.50 outcome units", fixed = TRUE)
     session$setInputs(cmp_deviation = "median")
     session$flushReact()
     summary <- internals$headline_paired_effect_summary()

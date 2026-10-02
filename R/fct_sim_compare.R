@@ -1099,19 +1099,22 @@ step2_headline_cards <- function(bands,
   metadata <- metadata %||% metric_metadata(method, so)
   is_change <- !identical(deviation, "none")
   deviation_label <- switch(deviation,
-    none = "Outcome level",
+    none = "",
     mean = "Difference from historical mean",
     median = "Difference from historical median",
-    "Outcome level"
+    ""
   )
   display_value <- function(x, change = is_change) {
     if (length(x) != 1L || !is.finite(suppressWarnings(as.numeric(x)))) {
       return("Unavailable")
     }
+    display_digits <- if (identical(method, "total")) 0L else 2L
     if (isTRUE(change)) {
-      return(format_metric_value(as.numeric(x), metadata, change = TRUE, digits = 2))
+      return(format_metric_value(as.numeric(x), metadata, change = TRUE,
+        digits = display_digits))
     }
-    value <- format_metric_value(as.numeric(x), metadata, change = FALSE, digits = 2)
+    value <- format_metric_value(as.numeric(x), metadata, change = FALSE,
+      digits = display_digits)
     if (identical(metadata$format, "percent")) return(value)
     unit <- metadata$level_unit %||% "outcome units"
     suffix <- paste0(" ", unit)
@@ -1125,14 +1128,16 @@ step2_headline_cards <- function(bands,
     display_value(hist$value)
   }
 
-  line1_1 <- if (has_future) {
-    paste(if (is_change) deviation_label else "Outcome level", "· Historical vs SSP")
+  line1_1 <- if (is_change) {
+    paste(deviation_label, "· Historical vs SSP")
+  } else if (has_future) {
+    "Historical vs SSP"
   } else {
-    paste(if (is_change) deviation_label else "Outcome level", "· Historical baseline")
+    "Historical baseline"
   }
   # The expected outcome is the mean across simulated weather years. This is
   # separate from the selected household-level aggregation within each year.
-  weather_year_label <- "Years averaged within model; climate models weighted equally"
+  weather_year_label <- "Average year"
 
   card1 <- list(
     label = "Expected outcome",
@@ -1180,11 +1185,11 @@ step2_headline_cards <- function(bands,
 
   if (has_future && is.finite(v20_hist) && is.finite(v20_ssp)) {
     val_2 <- paste0(display_value(v20_hist, change = FALSE), " vs ", display_value(v20_ssp, change = FALSE))
-    line1_2 <- paste(if (is_change) deviation_label else "Outcome level", "· Historical vs SSP")
+    line1_2 <- if (is_change) paste(deviation_label, "· Historical vs SSP") else "Historical vs SSP"
     line2_2 <- "1-in-20 year"
   } else if (!has_future && is.finite(v20_hist)) {
     val_2 <- display_value(v20_hist, change = FALSE)
-    line1_2 <- paste(if (is_change) deviation_label else "Outcome level", "· Historical baseline")
+    line1_2 <- if (is_change) paste(deviation_label, "· Historical baseline") else "Historical baseline"
     line2_2 <- "1-in-20 year"
   } else if (has_future && is.finite(v20_ssp)) {
     val_2 <- display_value(v20_ssp, change = FALSE)
@@ -1389,6 +1394,9 @@ step2_headline_cards <- function(bands,
   }
 
   n_scenarios <- length(saved_scenarios %||% list())
+  if (!n_scenarios && nrow(fut_rows)) {
+    n_scenarios <- length(unique(as.character(fut_rows$scenario)))
+  }
 
   # Total simulated model-years across all scenarios, models, and weather years
   total_runs <- if (!is.null(timeseries_curves) && nrow(timeseries_curves)) {
@@ -1400,6 +1408,11 @@ step2_headline_cards <- function(bands,
   }
 
   val_5 <- format(total_runs, big.mark = ",")
+  sample_rows <- if (!is.null(hist_sim$svy)) nrow(hist_sim$svy) else NA_integer_
+  prediction_count <- if (is.finite(sample_rows) && sample_rows > 0L) {
+    as.numeric(total_runs) * sample_rows
+  } else NA_real_
+  prediction_note <- format_prediction_count(prediction_count, metadata$analysis_unit)
 
   line1_5 <- if (n_scenarios > 0L) {
     paste0(
@@ -1413,18 +1426,23 @@ step2_headline_cards <- function(bands,
   card5 <- list(
     label = "Simulation years",
     value = val_5,
-    note = line1_5,
+    note = paste(line1_5, prediction_note, sep = " · "),
     note_html = shiny::tagList(
-      shiny::tags$div(line1_5)
+      shiny::tags$div(line1_5),
+      shiny::tags$div(style = "font-weight: 600;", prediction_note)
     ),
     class = "neutral",
     info = paste(
       "Total number of simulated population aggregates across all configured",
       "climate scenarios, ensemble climate models, and annual weather draws",
-      "(scenarios \u00d7 models \u00d7 weather years)."
+      "(scenarios \u00d7 models \u00d7 weather years). The prediction count multiplies",
+      "simulation years by the number of sampled survey rows."
     )
   )
   card5$value_native <- as.numeric(total_runs)
+  card5$prediction_count_native <- prediction_count
+    card5$prediction_count_note <- prediction_note
+  card5$prediction_sample_rows <- sample_rows
 
   cards <- list(card1, card2, card3, card4, card5)
   for (i in seq_along(cards)) {
@@ -1481,6 +1499,9 @@ step2_headline_df <- function(cards, metadata = NULL, summary = NULL) {
     Metric = vapply(cards, function(c) as.character(c$label %||% ""), character(1L)),
     Value = vapply(cards, function(c) as.character(c$value %||% ""), character(1L)),
     Note = vapply(cards, function(c) as.character(c$note %||% ""), character(1L)),
+    Prediction_count_native = vapply(cards, function(c) number_or_na(c$prediction_count_native), numeric(1L)),
+    Prediction_sample_rows = vapply(cards, function(c) number_or_na(c$prediction_sample_rows), numeric(1L)),
+    Prediction_count_display = vapply(cards, function(c) as.character(c$prediction_count_note %||% ""), character(1L)),
     Historical_native = vapply(cards, function(c) number_or_na(c$value_native, 1L), numeric(1L)),
     Focus_native = vapply(cards, function(c) number_or_na(c$value_native, 2L), numeric(1L)),
     Difference_native = vapply(cards, function(c) number_or_na(c$change_native), numeric(1L)),

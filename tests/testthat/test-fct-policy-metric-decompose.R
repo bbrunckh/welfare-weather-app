@@ -130,18 +130,13 @@ test_that("equal-model summaries and ordered quantile contrasts do not average c
     expect_equal(valid$total, valid$main + valid$repositioning + valid$interaction)
     expect_equal(valid$total, valid$policy - valid$baseline)
     expect_true(all(result$status[result$return_period == 50] == "unavailable"))
+    expect_true(all(result$scope == "equal_probability"))
     q <- valid[valid$scope == "equal_probability" & valid$return_period == 20, ]
     endpoint <- function(s) median(vapply(split(annual, annual$model_id), function(x) {
       rank_interp(sort(x[[s]]), if (tail == "high") .05 else .95)
     }, numeric(1)))
     expect_equal(q$total, endpoint("policy") - endpoint("baseline"))
-    fixed <- valid[valid$scope == "baseline_adverse_years", ]
-    expect_true(all(fixed$achieved_fraction_min >= fixed$probability))
-    expect_true(all(nzchar(fixed$selected_year_keys)))
   }
-  annual$baseline <- 1 # ties choose smallest year keys deterministically
-  tied <- .policy_metric_tails(annual, "future", "high")
-  expect_match(tied$selected_year_keys[tied$scope == "baseline_adverse_years" & tied$return_period == 20], "a:1;a:2;a:3")
 })
 
 test_that("endpoint parity failures preserve independent Results summaries and never alter support", {
@@ -288,9 +283,7 @@ test_that("tail attribution is withheld when matched support differs from Result
   expect_identical(expected$status, "unavailable")
   expect_match(expected$reason, "marginal threshold endpoints")
   expect_true(is.na(expected$total))
-  selected <- result$return_period[result$return_period$scope == "baseline_adverse_years" &
-    result$return_period$return_period == 5, ]
-  expect_identical(selected$status, "ok")
+  expect_true(all(result$return_period$scope == "equal_probability"))
 })
 
 test_that("the real shared Results calculation follows edits without re-preparing or predicting", {

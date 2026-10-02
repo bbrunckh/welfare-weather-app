@@ -271,6 +271,27 @@ headline_cards_ui <- function(cards) {
   )
 }
 
+format_prediction_count <- function(count, analysis_unit = NULL) {
+  count <- suppressWarnings(as.numeric(count))[1L]
+  if (!length(count) || !is.finite(count)) return("Unavailable")
+  value <- if (count >= 1e9) {
+    paste0(formatC(count / 1e9, format = "f", digits = 1), "B")
+  } else if (count >= 1e6) {
+    paste0(formatC(count / 1e6, format = "f", digits = 1), "M")
+  } else if (count >= 1e3) {
+    paste0(formatC(count / 1e3, format = "f", digits = 1), "K")
+  } else {
+    format(round(count), big.mark = ",", scientific = FALSE)
+  }
+  unit <- switch(as.character(analysis_unit %||% "")[1L],
+    hh = "household-years", ind = "individual-years", firm = "firm-years",
+    if (!is.null(analysis_unit) && nzchar(as.character(analysis_unit)[1L])) {
+      paste0(as.character(analysis_unit)[1L], "-years")
+    } else "observation-years"
+  )
+  paste(value, unit)
+}
+
 #' Compact summary of the selected Step 3 policy scenarios
 #'
 #' @noRd

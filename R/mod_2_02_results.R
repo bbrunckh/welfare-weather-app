@@ -422,7 +422,8 @@ mod_2_02_results_server <- function(id,
             selected,
             hs$so %||% NULL,
             pov_line = if (identical(selected, "prosperity_gap")) NULL else pov_line_val(),
-            analysis_unit = hs$analysis_unit %||% hs$so$level %||% NULL,
+            analysis_unit = hs$analysis_unit %||%
+              .metric_context_value(hs$so, "level"),
             weighted = identical(weight_key(), "weighted")
           )
         }

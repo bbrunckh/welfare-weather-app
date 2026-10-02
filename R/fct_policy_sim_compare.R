@@ -164,6 +164,7 @@ echart_before_after_hist <- function(baseline_vals, policy_vals,
 .wise_result_rate_unit <- function(x_label) {
   if (grepl("(percent)", x_label, fixed = TRUE)) return("%")
   if (grepl("(pp)", x_label, fixed = TRUE)) return(" pp")
+  if (grepl("Poverty rate|Poverty gap|Poverty severity", x_label)) return("%")
   ""
 }
 
@@ -1038,8 +1039,8 @@ step3_headline_cards <- function(paired_summary,
                                   so = NULL,
                                   baseline_svy = NULL,
                                   metric_context = NULL,
-                                  metric_decomposition = NULL,
-                                  endpoint_status = list(status = "ok", reason = NULL)) {
+                                 metric_decomposition = NULL,
+                                 endpoint_status = list(status = "ok", reason = NULL)) {
   if (is.null(paired_summary) || !nrow(paired_summary) ||
     !"scenario" %in% names(paired_summary)) {
     return(NULL)
@@ -1050,8 +1051,10 @@ step3_headline_cards <- function(paired_summary,
   focus <- if (nrow(fut_effects)) fut_effects[1L, , drop = FALSE] else paired_summary[1L, , drop = FALSE]
   focus_scen <- as.character(focus$scenario[[1L]])
   spec <- metric_context %||% metric_metadata(method, so)
-  fmt_level <- function(x) if (is.finite(x)) format_metric_value(x, spec) else "Unavailable"
-  fmt_change <- function(x) if (is.finite(x)) format_metric_value(x, spec, change = TRUE) else "Unavailable"
+  analysis_unit <- spec$analysis_unit %||% NULL
+  card_digits <- if (identical(method, "total")) 0L else 2L
+  fmt_level <- function(x) if (is.finite(x)) format_metric_value(x, spec, digits = card_digits) else "Unavailable"
+  fmt_change <- function(x) if (is.finite(x)) format_metric_value(x, spec, change = TRUE, digits = card_digits) else "Unavailable"
 
   # Levels and contrast must use the same matched model/year support.
   b_mean <- if ("baseline" %in% names(focus)) focus$baseline[[1L]] else NA_real_
@@ -1062,7 +1065,7 @@ step3_headline_cards <- function(paired_summary,
   val_1 <- fmt_change(effect_val)
 
   line1_1 <- if (is.finite(b_mean) && is.finite(p_mean)) {
-    paste0("Policy: ", fmt_level(p_mean), " vs Base: ", fmt_level(b_mean))
+    "Policy vs baseline"
   } else {
     "Paired policy minus baseline"
   }
@@ -1075,13 +1078,16 @@ step3_headline_cards <- function(paired_summary,
   card1 <- list(
     label = "Expected policy effect",
     value = val_1,
-    note = paste(line1_1, line2_1, "Equal-model mean", sep = " \u00b7 "),
+    note = paste(line1_1, line2_1, sep = " \u00b7 "),
     note_html = shiny::tagList(
       shiny::tags$div(line1_1),
-      shiny::tags$div(style = "font-weight: 600;", line2_1),
-      shiny::tags$div("Equal-model mean")
+      shiny::tags$div(style = "font-weight: 600;", line2_1)
     ),
     info = paste(
+      if (is.finite(b_mean) && is.finite(p_mean)) {
+        paste0("Policy: ", fmt_level(p_mean), " vs baseline: ", fmt_level(b_mean), ".")
+      } else "",
+      "Equal-model mean.",
       "Paired difference (policy minus baseline) for the fixed population.",
       "Years averaged within model; climate models weighted equally. A positive value",
       "indicates an increase in the selected metric, not necessarily a benefit.",
@@ -1120,6 +1126,7 @@ step3_headline_cards <- function(paired_summary,
   }
 
   metric_focus <- NULL
+  metric_tail_focus <- NULL
   metric_focus_reason <- "Metric-aware channel summary is unavailable."
   if (is.list(metric_decomposition) && identical(metric_decomposition$status, "ok")) {
     candidate <- metric_decomposition$scenarios[[focus_scen]]
@@ -1145,6 +1152,11 @@ step3_headline_cards <- function(paired_summary,
       if (nrow(tail_row) && identical(tail_row$status[[1L]], "ok") &&
           is.finite(tail_row$total[[1L]])) tail_row$total[[1L]] else NA_real_
     }
+    tail_20 <- if (is.data.frame(tail) && nrow(tail)) {
+      tail[tail$scenario == focus_scen & tail$scope == "equal_probability" &
+        abs(tail$return_period - 20) < 1e-8 & tail$status == "ok", , drop = FALSE]
+    } else data.frame()
+    if (nrow(tail_20)) metric_tail_focus <- tail_20[1L, , drop = FALSE]
     for (rp in c(10, 20, 50)) {
       value <- get_metric_tail(rp)
       if (!is.finite(value)) next
@@ -1156,23 +1168,21 @@ step3_headline_cards <- function(paired_summary,
 
   val_2 <- fmt_change(eff_20)
 
-  tail_parts <- character(0)
-  if (is.finite(eff_10)) tail_parts <- c(tail_parts, paste0("1-in-10: ", fmt_change(eff_10)))
-  if (is.finite(eff_50)) tail_parts <- c(tail_parts, paste0("1-in-50: ", fmt_change(eff_50)))
-  line1_2 <- if (length(tail_parts)) paste(tail_parts, collapse = " \u00b7 ") else "Adverse outcome contrast"
-  line1_2 <- paste(line1_2, "View adverse channel attribution", sep = " \u00b7 ")
+  line1_2 <- "Policy vs baseline"
+  line2_2 <- "1-in-20 year"
 
   card2 <- list(
-    label = "Policy effect at the adverse 1-in-20 threshold",
+    label = "Adverse weather years",
     value = val_2,
-    note = line1_2,
+    note = paste(line1_2, line2_2, focus_scen, sep = " \u00b7 "),
     note_html = shiny::tagList(
       shiny::tags$div(line1_2),
-      shiny::tags$div(shiny::tags$a("View adverse channel attribution", href = "#metric_adverse_attribution"))
+      shiny::tags$div(style = "font-weight: 600;", line2_2),
+      shiny::tags$div(focus_scen)
     ),
     info = paste(
       "Policy minus baseline at the same return-period probability; not necessarily the same weather years.",
-      "Thresholds retain the median across climate models, not the equal-model-mean expected headline."
+      "Each cumulative state is summarized with the median across model-specific quantiles; component uncertainty is not estimated."
     )
   )
 
@@ -1181,42 +1191,66 @@ step3_headline_cards <- function(paired_summary,
   resilience_modeled <- !is.null(metric_decomposition) &&
     (isTRUE(metric_decomposition$metadata$repositioning_modeled) ||
       isTRUE(metric_decomposition$metadata$interaction_included))
-  val_3 <- if (!is.null(metric_focus) && resilience_modeled &&
-      is.finite(metric_focus$resilience[[1L]])) {
-    format_metric_value(metric_focus$resilience[[1L]], spec, change = TRUE)
+  val_3 <- if (!is.null(metric_tail_focus) && resilience_modeled &&
+      length(metric_tail_focus$resilience) && is.finite(metric_tail_focus$resilience[[1L]])) {
+    fmt_change(metric_tail_focus$resilience[[1L]])
   } else "Unavailable"
   main_text <- repositioning_text <- interaction_text <- "Unavailable"
   if (!is.null(metric_focus)) {
-    main_text <- format_metric_value(metric_focus$main[[1L]], spec, change = TRUE)
     repositioning_modeled <- isTRUE(metric_decomposition$metadata$repositioning_modeled)
     interaction_included <- isTRUE(metric_decomposition$metadata$interaction_included)
-    repositioning_text <- if (repositioning_modeled) {
-      format_metric_value(metric_focus$repositioning[[1L]], spec, change = TRUE)
+    main_text <- fmt_change(metric_focus$main[[1L]])
+  }
+  if (!is.null(metric_tail_focus) && resilience_modeled &&
+      length(metric_tail_focus$resilience) && is.finite(metric_tail_focus$resilience[[1L]])) {
+    val_3 <- fmt_change(metric_tail_focus$resilience[[1L]])
+  }
+  if (!is.null(metric_tail_focus)) {
+    repositioning_modeled <- isTRUE(metric_decomposition$metadata$repositioning_modeled)
+    interaction_included <- isTRUE(metric_decomposition$metadata$interaction_included)
+    if (length(metric_tail_focus$main) && is.finite(metric_tail_focus$main[[1L]])) {
+      main_text <- fmt_change(metric_tail_focus$main[[1L]])
+    }
+    repositioning_text <- if (repositioning_modeled && length(metric_tail_focus$repositioning) &&
+        is.finite(metric_tail_focus$repositioning[[1L]])) {
+      fmt_change(metric_tail_focus$repositioning[[1L]])
+    } else if (repositioning_modeled) {
+      "Unavailable"
     } else "Not modeled by this engine"
-    interaction_text <- if (interaction_included) {
-      format_metric_value(metric_focus$interaction[[1L]], spec, change = TRUE)
+    interaction_text <- if (interaction_included && length(metric_tail_focus$interaction) &&
+        is.finite(metric_tail_focus$interaction[[1L]])) {
+      fmt_change(metric_tail_focus$interaction[[1L]])
+    } else if (interaction_included) {
+      "Unavailable"
     } else "Not included in fitted model"
   }
-  line1_3 <- if (!is.null(metric_focus)) {
-    paste0("Main: ", main_text, " · Repositioning: ", repositioning_text,
+  line1_3 <- if (!is.null(metric_tail_focus)) {
+    paste0("Main: ", main_text, " · Repositioning: ",
+      if (identical(repositioning_text, "Not modeled by this engine")) "Not modeled" else repositioning_text,
       " · Interaction: ", interaction_text)
+  } else if (!is.null(metric_focus)) {
+    "1-in-20 year attribution unavailable"
   } else metric_focus_reason
+  line2_3 <- paste(focus_scen, "· 1-in-20 year")
 
   card3 <- list(
     label = "Resilience effect",
     value = val_3,
-    note = line1_3,
+    note = paste(line1_3, line2_3, sep = " \u00b7 "),
     note_html = shiny::tagList(
       shiny::tags$div(line1_3),
-      shiny::tags$div(
-        shiny::tags$a("How the Policy Changes Weather Sensitivity", href = "#metric_weather_sensitivity")
-      )
+      shiny::tags$div(style = "font-weight: 600;", line2_3)
     ),
     info = paste(
-      "Ordered selected-metric attribution at simulated weather conditions:",
+      "Ordered selected-metric attribution at the equal-probability 1-in-20 year outcome threshold:",
       "the main policy package, then modeled repositioning, then interaction.",
+      "The resilience subtotal is repositioning plus interaction, not the main package.",
+      "Each cumulative state uses its own adverse outcome quantile; these need not be the same weather years.",
       "This is not an avoided-loss estimate. Component uncertainty is not estimated.",
-      metric_context_note(spec)
+      metric_context_note(spec),
+      "Main policy package:", main_text,
+      "Repositioning:", repositioning_text,
+      "Interaction:", interaction_text
     )
   )
 
@@ -1252,7 +1286,7 @@ step3_headline_cards <- function(paired_summary,
   }
 
   card4 <- list(
-    label = "Program scale & reach",
+    label = "Program reach",
     value = scale_val,
     note = line1_4,
     note_html = shiny::tagList(
@@ -1276,8 +1310,7 @@ step3_headline_cards <- function(paired_summary,
   val_5 <- if (is.finite(lo_val) && is.finite(hi_val) && lo_val > 0) {
     "100% positive"
   } else if (is.finite(lo_val) && is.finite(hi_val)) {
-    paste(format_metric_value(lo_val, spec, change = TRUE), "to",
-      format_metric_value(hi_val, spec, change = TRUE))
+    paste(fmt_change(lo_val), "to", fmt_change(hi_val))
   } else if (n_mods > 1L) {
     paste0(n_mods, " models agreed")
   } else {
@@ -1285,8 +1318,18 @@ step3_headline_cards <- function(paired_summary,
   }
 
   line1_5 <- if (is.finite(lo_val) && is.finite(hi_val) && n_mods > 1L) {
-    paste0("Model range: ", format_metric_value(lo_val, spec, change = TRUE),
-      " to ", format_metric_value(hi_val, spec, change = TRUE))
+    range_value <- function(x) {
+      formatted <- fmt_change(x)
+      suffix <- paste0(" ", spec$change_unit)
+      if (endsWith(formatted, suffix)) {
+        substr(formatted, 1L, nchar(formatted) - nchar(suffix))
+      } else {
+        formatted
+      }
+    }
+    paste0("Model range: ", range_value(lo_val), " to ", range_value(hi_val),
+      if (identical(spec$format, "percent")) " pp" else
+        if (is.null(spec$change_unit) || !nzchar(spec$change_unit)) "" else paste0(" ", spec$change_unit))
   } else if (n_mods > 1L) {
     paste0("Ensemble across ", n_mods, " models")
   } else {
@@ -1300,25 +1343,32 @@ step3_headline_cards <- function(paired_summary,
   }
 
   line2_5 <- paste0("Across ", total_runs, " simulations")
+  sample_rows <- if (is.data.frame(baseline_svy)) nrow(baseline_svy) else NA_integer_
+  prediction_count <- if (is.finite(sample_rows) && sample_rows > 0L) {
+    as.numeric(total_runs) * sample_rows
+  } else NA_real_
+  prediction_note <- format_prediction_count(prediction_count, analysis_unit)
 
   card5 <- list(
     label = "Policy robustness",
     value = val_5,
-    note = paste(line1_5, line2_5, sep = " \u00b7 "),
+    note = paste(line1_5, line2_5, prediction_note, sep = " \u00b7 "),
     note_html = shiny::tagList(
       shiny::tags$div(line1_5),
-      shiny::tags$div(style = "font-weight: 600;", line2_5)
+      shiny::tags$div(style = "font-weight: 600;", line2_5),
+      shiny::tags$div(style = "font-weight: 600;", prediction_note)
     ),
-    info = paste(
-      "Consistency of the signed policy change across all simulated CMIP6 climate models",
-      "and weather years. Disagreement across models indicates climate uncertainty",
-      "in policy effectiveness."
-    )
+      info = paste(
+        "Consistency of the signed policy change across all simulated CMIP6 climate models",
+        "and weather years. Disagreement across models indicates climate uncertainty",
+        "in policy effectiveness. Model range values use the metric's displayed units."
+      )
   )
+  card5$prediction_count_native <- prediction_count
+  card5$prediction_count_note <- prediction_note
+  card5$prediction_sample_rows <- sample_rows
 
   card1$metric_note <- metric_context_note(spec)
-  card1$note <- paste(card1$note, card1$metric_note, sep = " \u00b7 ")
-  card1$note_html <- shiny::tagList(card1$note_html, shiny::tags$div(card1$metric_note))
   cards <- list(card1, card2, card3, card4, card5)
   if (!identical(endpoint_status$status, "ok")) {
     for (id in c(1L, 2L, 3L, 5L)) {
@@ -1342,6 +1392,9 @@ step3_headline_df <- function(cards) {
       label      = as.character(c_info$label %||% ""),
       value      = as.character(c_info$value %||% ""),
       note       = as.character(c_info$note %||% ""),
+      prediction_count_native = suppressWarnings(as.numeric(c_info$prediction_count_native %||% NA_real_)),
+      prediction_sample_rows = suppressWarnings(as.numeric(c_info$prediction_sample_rows %||% NA_real_)),
+      prediction_count_display = as.character(c_info$prediction_count_note %||% ""),
       info       = as.character(c_info$info %||% "")
     )
   }))

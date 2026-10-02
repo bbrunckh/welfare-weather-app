@@ -230,15 +230,13 @@ test_that("primary metric decomposition renders native contributions, tails and 
     resilience = -.02, total = -.03, n_prediction_rows = 100L, n_retained_rows = 100L,
     n_excluded_rows = 0L, parity_error = 0, requested_residuals = "original",
     effective_residuals = "none", scope = "production_prediction_rows")
-  tails <- data.frame(scenario = rep("SSP2-4.5", 2), return_period = c(20, 20),
-    scope = c("equal_probability", "baseline_adverse_years"), status = "ok", reason = "",
+  tails <- data.frame(scenario = "SSP2-4.5", return_period = 20,
+    scope = "equal_probability", status = "ok", reason = "",
     baseline = .1, after_main = .09, after_repositioning = .08, policy = .07,
     main = -.01, repositioning = -.01, interaction = -.01, resilience = -.02,
     total = -.03, probability = .05, n_models = 2L, n_model_years = 60L,
-    achieved_fraction_min = c(NA, .05), achieved_fraction_max = c(NA, .05),
-    selected_year_keys = c(NA_character_, "model-a:2020"),
-    center_method = c("median_model_quantile", "equal_model_mean"),
-    quantile_method = c("rank_interp_n_p_plus_half", "selected_tail_mean_ceiling_n_p_year_key_ties"))
+    center_method = "median_model_quantile",
+    quantile_method = "rank_interp_n_p_plus_half")
   mechanisms <- data.frame(scenario = "SSP2-4.5", hazard = "temp", category = NA_character_,
     contrast = "continuous_coefficient_change", repositioning = .02, interaction = -.01,
     positive_repositioning_share = .6, negative_repositioning_share = .4,
@@ -289,9 +287,11 @@ test_that("primary metric decomposition renders native contributions, tails and 
       expect_true(all(c("metric_id", "threshold_value", "run_identity", "correction_version",
         "scale", "uncertainty_status", "n_models", "native_field") %in% names(visible_contributions)))
       expect_true(all(visible_contributions$run_identity == "run-1"))
-      visible_tails <- metric_tail_data()
-      expect_true(all(c("Probability", "Selected year keys", "Quantile method", "Availability",
-        "run_identity", "correction_version", "component_order", "uncertainty_status") %in% names(visible_tails)))
+       visible_tails <- metric_tail_data()
+       expect_true(all(c("Probability", "Quantile method", "Availability",
+         "run_identity", "correction_version", "component_order", "uncertainty_status") %in% names(visible_tails)))
+       expect_identical(unique(visible_tails$scope_identifier), "equal_probability")
+       expect_true(all(grepl(" year$", visible_tails$`Return period`)))
       visible_mechanisms <- metric_mechanism_data()
       expect_true(all(c("hazard", "category", "tau_pre", "tau_post", "run_identity",
         "correction_version", "scale", "rank_convention", "uncertainty_status") %in%
@@ -308,10 +308,8 @@ test_that("primary metric decomposition renders native contributions, tails and 
       expect_equal(contributions$threshold_value, rep(3, nrow(contributions)))
       expect_true(all(contributions$correction_version == "row_aligned_annual_v1"))
       adverse <- items$policy_metric_adverse_attribution$fun()
-      expect_setequal(adverse$record_type, c("equal_probability_quantile_contrast",
-        "baseline_selected_adverse_year_mean"))
-      expect_true(all(c("probability", "selected_year_keys", "achieved_fraction_min",
-        "achieved_fraction_max", "quantile_method") %in% names(adverse)))
+       expect_identical(adverse$record_type, "equal_probability_quantile_contrast")
+       expect_true(all(c("probability", "quantile_method") %in% names(adverse)))
       mechanisms_export <- items$policy_weather_sensitivity$fun()
       expect_setequal(mechanisms_export$record_type,
         c("equal_model_mean_mechanism_summary", "annual_mechanism_diagnostic"))
@@ -346,10 +344,9 @@ test_that("primary metric decomposition renders native contributions, tails and 
       expect_length(mechanism_csv, 1L)
       tails_back <- utils::read.csv(tail_csv, stringsAsFactors = FALSE)
       mechanisms_back <- utils::read.csv(mechanism_csv, stringsAsFactors = FALSE)
-      expect_setequal(tails_back$record_type, c("equal_probability_quantile_contrast",
-        "baseline_selected_adverse_year_mean"))
-      expect_true(all(c("probability", "return_period", "selected_year_keys",
-        "achieved_fraction_min", "quantile_method", "availability", "reason") %in% names(tails_back)))
+       expect_identical(tails_back$record_type, "equal_probability_quantile_contrast")
+       expect_true(all(c("probability", "return_period", "quantile_method",
+         "availability", "reason") %in% names(tails_back)))
       expect_setequal(mechanisms_back$record_type,
         c("equal_model_mean_mechanism_summary", "annual_mechanism_diagnostic"))
       expect_true(all(c("hazard", "contrast", "category", "repositioning", "interaction",

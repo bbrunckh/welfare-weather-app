@@ -106,6 +106,25 @@ test_that("only Step 2 expected headlines use equal-model means and align with S
   })
 })
 
+test_that("Step 2 outcome metadata tolerates a missing optional level column", {
+  so <- tibble::tibble(
+    type = "numeric", name = "welfare", label = "Welfare", units = "PPP"
+  )
+  expect_no_warning({
+    analysis_unit <- wiseapp:::.metric_context_value(so, "level")
+    metadata <- metric_metadata("mean", so, analysis_unit = analysis_unit,
+      weighted = TRUE)
+  })
+  expect_null(analysis_unit)
+  expect_identical(metadata$analysis_unit, NULL)
+})
+
+test_that("simulation prediction counts are compact and identify their row unit", {
+  expect_identical(format_prediction_count(4500000, "hh"), "4.5M household-years")
+  expect_identical(format_prediction_count(1250, "ind"), "1.2K individual-years")
+  expect_identical(format_prediction_count(42, NULL), "42 observation-years")
+})
+
 test_that("Results frame is immutable and scoped to method/deviation", {
   skip_if_not_installed("shiny")
   hist_sim <- shiny::reactiveVal(make_hist_sim_fixture())
@@ -589,6 +608,7 @@ test_that("step2_headline_cards returns 5 cards with mod_1 styling", {
 
   hist_sim <- list(
     so = list(type = "numeric", name = "welfare", label = "Consumption", units = "$/day"),
+    svy = data.frame(welfare = rep(1, 100)),
     sim_summary = list(
       total_runs = 690L,
       historical_years = c(1991L, 2020L)
@@ -635,7 +655,13 @@ test_that("step2_headline_cards returns 5 cards with mod_1 styling", {
   # Card 1: Typical outcome
   expect_identical(cards[[1]]$value, "4.50 vs 4.52")
   expect_match(cards[[1]]$note, "Historical vs SSP", fixed = TRUE)
-  expect_match(cards[[1]]$note, "Years averaged within model; climate models weighted equally", fixed = TRUE)
+  expect_match(cards[[1]]$note, "Average year", fixed = TRUE)
+  expect_match(cards[[1]]$note, "Historical vs SSP", fixed = TRUE)
+  expect_false(grepl("Outcome level", cards[[1]]$note, fixed = TRUE))
+  expect_false(grepl("weighted equally", cards[[1]]$note, fixed = TRUE))
+  expect_false(grepl("Outcome level", cards[[2]]$note, fixed = TRUE))
+  expect_match(cards[[1]]$info, "mean across weather years and climate models", fixed = TRUE)
+  expect_match(cards[[1]]$info, "mean across weather years and climate models", fixed = TRUE)
 
   median_cards <- step2_headline_cards(
     bands            = bands,
@@ -645,7 +671,7 @@ test_that("step2_headline_cards returns 5 cards with mod_1 styling", {
     method           = "median",
     timeseries_curves = timeseries
   )
-  expect_match(median_cards[[1]]$note, "Years averaged within model; climate models weighted equally", fixed = TRUE)
+  expect_match(median_cards[[1]]$note, "Average year", fixed = TRUE)
   expect_false(grepl("Median weather year", median_cards[[1]]$note, fixed = TRUE))
 
   # Card 2: Adverse weather years (1-in-20 year)
@@ -666,6 +692,10 @@ test_that("step2_headline_cards returns 5 cards with mod_1 styling", {
 
   # Card 5: Simulation years
   expect_identical(cards[[5]]$value, "6")
+  expect_identical(cards[[5]]$prediction_count_note, "600 observation-years")
+  expect_identical(cards[[5]]$prediction_count_native, 600)
+  expect_match(cards[[5]]$note, "600 observation-years", fixed = TRUE)
+  expect_match(as.character(cards[[5]]$note_html), "font-weight: 600", fixed = TRUE)
   expect_match(cards[[5]]$note, "(1 SSP \u00d7 22 models + 1 historical) \u00d7 3 yrs", fixed = TRUE)
   expect_identical(cards[[5]]$class, "neutral")
 
@@ -677,6 +707,16 @@ test_that("step2_headline_cards returns 5 cards with mod_1 styling", {
   expect_equal(df$Historical_native[[1]], 4.5)
   expect_equal(df$Focus_native[[1]], 4.52)
   expect_identical(df$Summary_method[[1]], "equal_model_mean")
+  expect_match(df$Note[[5]], "600 observation-years", fixed = TRUE)
+  expect_identical(df$Prediction_count_native[[5]], 600)
+  expect_identical(df$Prediction_sample_rows[[5]], 100)
+
+  total_cards <- step2_headline_cards(
+    bands = bands, threshold_tbl = thresh_tbl, hist_sim = hist_sim,
+    saved_scenarios = saved, method = "total", timeseries_curves = timeseries,
+    metadata = metric_metadata("total", hist_sim$so, weighted = TRUE)
+  )
+  expect_identical(total_cards[[1]]$value, "4 vs 5")
 })
 
 test_that("headline levels and deviation changes use metric-native display units", {

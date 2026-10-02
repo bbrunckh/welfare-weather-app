@@ -472,6 +472,8 @@ mod_3_09_decomposition_ui <- function(id) {
       shiny::tags$p(class = "diagnostic-note",
         "Ordered attribution at production weather conditions: main policy package, repositioning, then interaction. Central estimates only; component uncertainty is not estimated. This is not an avoided-loss contrast."),
       shiny::h5("Resilience in Adverse Weather"),
+      shiny::tags$p(class = "diagnostic-note",
+        "Equal-probability 1-in-N outcome quantile contrasts. Each cumulative state uses its own adverse outcome quantile; contrasts need not use the same weather years."),
       shiny::div(id = "metric_adverse_attribution"),
       shiny::uiOutput(ns("metric_scenario_ui")),
       shiny::div(
@@ -479,7 +481,6 @@ mod_3_09_decomposition_ui <- function(id) {
         wise_reactable_csv_button(ns("metric_tail_table"), "policy_metric_adverse_attribution")
       ),
       reactable::reactableOutput(ns("metric_tail_table")),
-      shiny::uiOutput(ns("metric_tail_note_ui"))
     ),
     shiny::h4(
       "How the Policy Changes Weather Sensitivity",
@@ -860,12 +861,12 @@ mod_3_09_decomposition_server <- function(id,
       tails <- if (is.null(reason)) selected$return_period else NULL
       if (!is.data.frame(tails) || !nrow(tails)) {
         return(.policy_metric_export_annotate(data.frame(), result, metric_scenario(),
-          export_scope = "adverse_probability_or_baseline_selected_years", so = so(),
+          export_scope = "adverse_probability_quantile_contrasts", so = so(),
           analysis_unit = analysis_unit(), status = metric_display_status(selected),
           reason = reason %||% "Adverse attribution unavailable"))
       }
-      tails <- tails[tails$scope %in% c("equal_probability", "baseline_adverse_years"), , drop = FALSE]
-      tails$return_period_label <- paste0("1-in-", format(tails$return_period, trim = TRUE))
+      tails <- tails[tails$scope == "equal_probability", , drop = FALSE]
+      tails$return_period_label <- paste0("1-in-", format(tails$return_period, trim = TRUE), " year")
       meta <- metric_meta() %||% list()
       repositioning_modeled <- identical(result$mechanisms$repositioning_status, "modeled")
       interaction_included <- identical(result$mechanisms$interaction_status, "included")
@@ -880,9 +881,7 @@ mod_3_09_decomposition_server <- function(id,
         display("resilience")
       } else "Unavailable"
       tails$total_display <- display("total")
-      tails$scope_label <- ifelse(tails$scope == "equal_probability",
-        "Outcome-distribution quantile contrast (not necessarily same years)",
-        "Mean on same baseline-selected adverse years")
+      tails$scope_label <- "Equal-probability outcome quantile contrast"
       tails$availability <- ifelse(tails$status == "ok", "Available", tails$reason)
       for (field in c("baseline", "after_main", "after_repositioning", "policy",
                       "main", "repositioning", "interaction", "resilience", "total")) {
@@ -891,10 +890,7 @@ mod_3_09_decomposition_server <- function(id,
       if (!repositioning_modeled) tails$repositioning_native <- NA_real_
       if (!interaction_included) tails$interaction_native <- NA_real_
       if (!repositioning_modeled && !interaction_included) tails$resilience_native <- NA_real_
-      for (field in c("achieved_fraction_min", "achieved_fraction_max")) {
-        if (!field %in% names(tails)) tails[[field]] <- NA_real_
-      }
-      for (field in c("selected_year_keys", "center_method", "quantile_method")) {
+      for (field in c("center_method", "quantile_method")) {
         if (!field %in% names(tails)) tails[[field]] <- ""
       }
       out <- tails[, c("return_period_label", "scope_label", "main_display",
@@ -903,20 +899,18 @@ mod_3_09_decomposition_server <- function(id,
         intersect(c("scenario", "member", "model_id", "sim_year"), names(tails)),
         "baseline_native", "after_main_native", "after_repositioning_native", "policy_native",
         "main_native", "repositioning_native", "interaction_native", "resilience_native",
-        "total_native", "probability", "achieved_fraction_min", "achieved_fraction_max",
-        "selected_year_keys", "center_method", "quantile_method", "availability"), drop = FALSE]
+        "total_native", "probability", "center_method", "quantile_method", "availability"), drop = FALSE]
       names(out) <- c("Return period", "Scope", "Main", "Repositioning", "Interaction",
         "Resilience", "Total", if ("n_models" %in% names(out)) "Models", if ("n_model_years" %in% names(out)) "Model-years",
         intersect(c("scenario", "member", "model_id", "sim_year"), names(tails)),
         "Baseline native", "After main native", "After repositioning native", "Policy native",
         "Main native", "Repositioning native", "Interaction native", "Resilience native",
-        "Total native", "Probability", "Achieved fraction min", "Achieved fraction max",
-        "Selected year keys", "Center method", "Quantile method", "Availability")
+        "Total native", "Probability", "Center method", "Quantile method", "Availability")
       out$scope_identifier <- tails$scope
       out$status <- tails$status
       out$reason <- tails$reason
       .policy_metric_export_annotate(out, metric_decomposition(), metric_scenario(),
-        export_scope = "adverse_probability_or_baseline_selected_years", so = so(),
+        export_scope = "adverse_probability_quantile_contrasts", so = so(),
         analysis_unit = analysis_unit(), status = selected$status, reason = selected$reason)
     })
     output$metric_tail_table <- reactable::renderReactable({
@@ -935,18 +929,6 @@ mod_3_09_decomposition_server <- function(id,
           else reactable::colDef(show = name %in% visible,
             class = "wise-dt-wrap", minWidth = 130)
         }), names(tbl)))
-    })
-    output$metric_tail_note_ui <- shiny::renderUI({
-      selected <- selected_metric_result()
-      tails <- selected$return_period %||% data.frame()
-      fixed <- tails[tails$scope == "baseline_adverse_years" & tails$status == "ok", , drop = FALSE]
-      if (!nrow(fixed)) return(NULL)
-      shiny::tags$p(class = "diagnostic-note", paste0(
-        "Same-year rows use baseline-selected adverse years; achieved empirical tail fraction ",
-        format(min(fixed$achieved_fraction_min), digits = 3), " to ",
-        format(max(fixed$achieved_fraction_max), digits = 3),
-        ". Year keys and model support are retained in the underlying result."
-      ))
     })
     output$metric_mechanism_status_ui <- shiny::renderUI({
       selected <- selected_metric_result()
@@ -1050,9 +1032,7 @@ mod_3_09_decomposition_server <- function(id,
       selected <- result$scenarios[[scenario]]
       rows <- if (is.list(selected) && identical(selected$status, "ok")) selected$return_period else NULL
       rows <- if (is.data.frame(rows) && nrow(rows)) rows[rows$scope %in% scopes, , drop = FALSE] else data.frame()
-      label <- if (identical(scopes, "equal_probability")) {
-        "equal_probability_cumulative_quantiles"
-      } else "baseline_selected_adverse_years"
+      label <- "equal_probability_cumulative_quantiles"
       .policy_metric_export_annotate(rows, result, scenario,
         export_scope = label, so = so(), analysis_unit = analysis_unit(),
         status = if (nrow(rows)) selected$status %||% "unavailable" else "unavailable",
@@ -1112,11 +1092,9 @@ mod_3_09_decomposition_server <- function(id,
       fun = function() {
         equal_probability <- metric_tail_export("equal_probability")
         if (nrow(equal_probability)) equal_probability$record_type <- "equal_probability_quantile_contrast"
-        baseline_years <- metric_tail_export("baseline_adverse_years")
-        if (nrow(baseline_years)) baseline_years$record_type <- "baseline_selected_adverse_year_mean"
-        dplyr::bind_rows(equal_probability, baseline_years)
+        equal_probability
       },
-      description = "Native cumulative-state attribution for equal-probability outcome quantiles and the separately scoped mean on identical baseline-selected adverse years, including probabilities, selected keys, support, and achieved tail fraction."
+      description = "Native cumulative-state attribution for equal-probability outcome quantiles, including probabilities, quantile and ensemble conventions, model support, and the distinct-year caveat."
     )
     wise_export_table(
       key = "policy_weather_sensitivity",

@@ -91,6 +91,10 @@ test_that("annual charts use closed violins, readable numeric axes, and honest t
 test_that("rate and binary mean charts format fractional outcomes as percentages", {
   expect_identical(metric_metadata("mean", list(type = "logical"))$format, "percent")
   expect_identical(metric_metadata("mean", list(type = "continuous"))$format, "number")
+  expect_identical(metric_axis_label("headcount_ratio"), "Poverty rate")
+  expect_identical(metric_axis_label("gap"), "Poverty gap")
+  expect_identical(metric_axis_label("fgt2"), "Poverty severity")
+  expect_identical(metric_axis_label("gini"), "Gini coefficient")
   for (label in c(metric_axis_label("headcount_ratio"), metric_axis_label("mean", list(type = "binary")))) {
     chart <- echart_annual_distribution(data.frame(scenario = "Historical", value = c(.4, .42, .43)), label)
     expect_match(as.character(chart$x$opts$xAxis$axisLabel$formatter), "v*100", fixed = TRUE)

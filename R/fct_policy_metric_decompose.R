@@ -333,7 +333,7 @@
     # Never silently change the model ensemble to manufacture a sparse tail.
     if (!all(eligible)) {
       rows[[length(rows) + 1L]] <- data.frame(scenario = scenario,
-        probability = p, return_period = 1 / p, scope = c("equal_probability", "baseline_adverse_years"),
+        probability = p, return_period = 1 / p, scope = "equal_probability",
         status = "unavailable", reason = "Insufficient years in one or more matched models.")
       next
     }
@@ -345,25 +345,7 @@
       probability = p, return_period = 1 / p, scope = "equal_probability",
       center_method = "median_model_quantile", quantile_method = "rank_interp_n_p_plus_half",
       n_models = length(models), n_model_years = nrow(annual), status = "ok", reason = "")
-    selected <- lapply(models, function(x) {
-      ord <- order(if (identical(adverse_tail, "high")) -x$baseline else x$baseline, x$sim_year)
-      k <- ceiling(nrow(x) * p)
-      x <- x[ord[seq_len(k)], , drop = FALSE]
-      x$achieved_fraction <- k / nrow(models[[as.character(x$model_id[1L])]])
-      x
-    })
-    fixed <- dplyr::bind_rows(selected)
-    fixed_row <- .policy_metric_summary(fixed, scenario)
-    fixed_row$scope <- "baseline_adverse_years"
-    fixed_row$probability <- p
-    fixed_row$return_period <- 1 / p
-    fixed_row$achieved_fraction_min <- min(fixed$achieved_fraction)
-    fixed_row$achieved_fraction_max <- max(fixed$achieved_fraction)
-    fixed_row$selected_year_keys <- paste(paste(fixed$model_id, fixed$sim_year, sep = ":"), collapse = ";")
-    fixed_row$quantile_method <- "selected_tail_mean_ceiling_n_p_year_key_ties"
-    fixed_row$status <- "ok"
-    fixed_row$reason <- ""
-    rows <- c(rows, list(quantile_row, fixed_row))
+    rows <- c(rows, list(quantile_row))
   }
   dplyr::bind_rows(rows)
 }

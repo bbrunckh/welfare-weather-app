@@ -3,7 +3,7 @@
 .WISE_METRIC_REGISTRY <- list(
   mean = list(label = "Mean", native_unit = "outcome units", format = "number", direction = "higher_is_better", change_kind = "absolute", percent_change = TRUE, poverty_line = FALSE, engines = c("ols", "rif"), uncertainty = c("coefficient", "weather", "ensemble"), caveat = "Weighted annual aggregate for the fixed survey population."),
   median = list(label = "Median", native_unit = "outcome units", format = "number", direction = "higher_is_better", change_kind = "absolute", percent_change = TRUE, poverty_line = FALSE, engines = c("ols", "rif"), uncertainty = c("coefficient", "weather", "ensemble"), caveat = "Weighted median aggregate; not a household distribution."),
-  total = list(label = "Total", native_unit = "outcome units", format = "number", direction = "higher_is_better", change_kind = "absolute", percent_change = TRUE, poverty_line = FALSE, engines = c("ols", "rif"), uncertainty = c("coefficient", "weather", "ensemble"), caveat = "Sum of the selected outcome, with survey weights when supplied."),
+  total = list(label = "Population weighted sum", native_unit = "outcome units", format = "number", direction = "higher_is_better", change_kind = "absolute", percent_change = TRUE, poverty_line = FALSE, engines = c("ols", "rif"), uncertainty = c("coefficient", "weather", "ensemble"), caveat = "Sum of the selected outcome using survey weights when available."),
   headcount_ratio = list(label = "Poverty rate", native_unit = "fraction", format = "percent", direction = "lower_is_better", change_kind = "percentage_points", poverty_line = TRUE, engines = c("ols", "rif"), uncertainty = c("coefficient", "weather", "ensemble"), caveat = "Share below the selected poverty line; changes are percentage points."),
   gap = list(label = "Poverty gap", native_unit = "fraction", format = "percent", direction = "lower_is_better", change_kind = "percentage_points", poverty_line = TRUE, engines = c("ols", "rif"), uncertainty = c("coefficient", "weather", "ensemble"), caveat = "Average normalized shortfall below the selected poverty line."),
   fgt2 = list(label = "Poverty severity", native_unit = "fraction", format = "percent", direction = "lower_is_better", change_kind = "percentage_points", poverty_line = TRUE, engines = c("ols", "rif"), uncertainty = c("coefficient", "weather", "ensemble"), caveat = "Squared normalized poverty shortfall."),
@@ -34,7 +34,7 @@ metric_metadata <- function(method = "mean", so = NULL, pov_line = NULL,
                             analysis_unit = NULL, weighted = NULL) {
   method <- as.character(method %||% "mean")[1]
   fallback_labels <- c(
-    mean = "Mean", median = "Median", total = "Total",
+    mean = "Mean", median = "Median", total = "Population weighted sum",
     headcount_ratio = "Poverty rate", gap = "Poverty gap",
     fgt2 = "Poverty severity", gini = "Gini coefficient",
     prosperity_gap = "Prosperity gap", avg_poverty = "Average poverty"
@@ -77,8 +77,13 @@ metric_metadata <- function(method = "mean", so = NULL, pov_line = NULL,
     .metric_context_value(so, "units")
   ) %||% "")
   currency_basis <- switch(selected_units,
-    PPP = "selected PPP units (2021)",
-    LCU = "selected LCU units (2021)",
+    PPP = "PPP 2021",
+    LCU = "LCU 2021",
+    NULL
+  )
+  display_currency_unit <- switch(selected_units,
+    PPP = "$ per day",
+    LCU = "LCU per day",
     NULL
   )
   time_basis <- .metric_scalar_text(.metric_context_value(so, "time_basis"))
@@ -87,20 +92,20 @@ metric_metadata <- function(method = "mean", so = NULL, pov_line = NULL,
   )
   native_unit <- out$native_unit %||% out$unit %||% "outcome units"
   level_unit <- native_unit
-  input_unit <- currency_basis %||% .metric_scalar_text(.metric_context_value(so, "units")) %||% "outcome units"
+  input_unit <- display_currency_unit %||% currency_basis %||%
+    .metric_scalar_text(.metric_context_value(so, "units")) %||% "outcome units"
   if (method %in% c("mean", "median") && !binary_mean) {
     level_unit <- input_unit
   } else if (identical(method, "total")) {
-    is_weighted <- isTRUE(weighted)
-    level_unit <- if (is_weighted) {
-      paste0("weighted sum (", input_unit, " x survey-weight units)")
-    } else if (identical(weighted, FALSE)) {
-      paste("unweighted sum of", input_unit)
-    } else {
-      paste("sum of", input_unit, "(weight status unknown)")
-    }
+    level_unit <- input_unit
+  } else if (identical(method, "prosperity_gap")) {
+    level_unit <- ""
   } else if (identical(method, "avg_poverty")) {
-    level_unit <- paste("inverse", input_unit)
+    level_unit <- switch(selected_units,
+      PPP = "days per $",
+      LCU = "days per LCU",
+      paste("inverse", .metric_scalar_text(.metric_context_value(so, "units")) %||% "outcome units")
+    )
   }
   if (identical(out$format, "percent")) {
     level_unit <- "percent"
@@ -135,6 +140,7 @@ metric_metadata <- function(method = "mean", so = NULL, pov_line = NULL,
     threshold_unit <- input_unit
   }
   if (method %in% c("mean", "median") && !binary_mean &&
+      is.null(display_currency_unit) &&
       !is.null(time_basis) && nzchar(time_basis) && !is.null(welfare_denominator)) {
     level_unit <- paste(level_unit, "per", welfare_denominator, "per", time_basis)
   }
@@ -143,6 +149,7 @@ metric_metadata <- function(method = "mean", so = NULL, pov_line = NULL,
     index_points = "index points",
     level_unit
   )
+  if (identical(method, "total")) change_unit <- level_unit
   if (!binary_mean && method %in% c("mean", "median", "total", "avg_poverty") &&
       identical(selected_units %||% "", "")) {
     missing_context <- c(missing_context, "currency/unit basis unavailable")
@@ -174,6 +181,9 @@ metric_metadata <- function(method = "mean", so = NULL, pov_line = NULL,
     weight_interpretation <- "unweighted"
   }
   out$label <- out$label %||% unname(fallback_labels[[method]] %||% method)
+  if (identical(method, "total") && identical(weighted, FALSE)) {
+    out$label <- "Population sum"
+  }
   out$direction <- direction
   out$direction_known <- !identical(direction, "unknown")
   out$adverse_tail <- if (identical(direction, "lower_is_better")) "high" else "low"
@@ -285,6 +295,15 @@ metric_axis_label <- function(method = "mean", so = NULL, deviation = "none") {
     paste0(spec$label, " - ", label_deviation(deviation))
   }
   unit <- if (!identical(deviation, "none")) spec$change_unit else spec$level_unit
+  if (identical(deviation, "none") && method == "prosperity_gap") {
+    return(label)
+  }
+  if (is.null(unit) || !nzchar(unit)) return(label)
+  if (identical(deviation, "none") &&
+      (method %in% c("headcount_ratio", "gap", "fgt2") ||
+       identical(method, "gini"))) {
+    return(label)
+  }
   paste0(label, " (", unit, ")")
 }
 
