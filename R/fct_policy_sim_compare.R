@@ -769,7 +769,7 @@ echart_step3_adverse_dot <- function(tbl, x_label = "Outcome level",
     symbolSize = 7,
     silent = TRUE,
     tooltip = list(show = FALSE),
-    lineStyle = list(width = 1),
+      lineStyle = list(width = 1.6),
     z = 3
   ))
 

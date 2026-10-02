@@ -57,6 +57,8 @@ test_that("Step 3 adverse markers match Step 2 dot size", {
   chart <- echart_step3_adverse_dot(tbl)
   baseline <- Filter(function(s) identical(s$name, "Baseline"), chart$x$opts$series)[[1L]]
   policy <- Filter(function(s) identical(s$name, "Policy"), chart$x$opts$series)[[1L]]
+  connectors <- Filter(function(s) identical(s$type, "lines"), chart$x$opts$series)[[1L]]
   expect_identical(baseline$symbolSize, 8)
   expect_identical(policy$symbolSize, 8)
+  expect_identical(connectors$lineStyle$width, 1.6)
 })
