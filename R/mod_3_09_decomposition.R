@@ -346,7 +346,7 @@ select_decomp_weather_basis <- function(decomp_df, basis = "mean", so = NULL) {
   if (is.null(data) || !is.data.frame(data)) data <- data.frame()
   metadata <- result$metadata %||% list()
   status <- status %||% result$status %||% "unavailable"
-  reason <- reason %||% result$reason
+  reason <- reason %||% if (identical(status, "ok")) "" else result$reason
   if (!nrow(data)) {
     data <- data.frame(status = status, availability = status,
       reason = reason %||% "No rows are available for this export.",
@@ -923,6 +923,9 @@ mod_3_09_decomposition_server <- function(id,
       tbl <- metric_tail_data()
       visible <- c("Return period", "Scope", "Main", "Repositioning", "Interaction",
         "Resilience", "Total", "Models", "Model-years")
+      if ("status" %in% names(tbl) && any(tbl$status != "ok")) {
+        visible <- c(visible, "Availability", "reason")
+      }
       if (!"Return period" %in% names(tbl)) visible <- c(visible, "status", "availability", "reason")
       reactable::reactable(tbl, compact = TRUE, searchable = FALSE, defaultPageSize = 8,
         defaultColDef = reactable::colDef(show = FALSE), highlight = TRUE,
@@ -1033,7 +1036,8 @@ mod_3_09_decomposition_server <- function(id,
       expected <- selected$summary
       expected$center_method <- "equal_model_mean"
       .policy_metric_export_annotate(expected, result, scenario,
-        export_scope = "expected_endpoint_equal_model_mean", so = so(), analysis_unit = analysis_unit())
+        export_scope = "expected_endpoint_equal_model_mean", so = so(), analysis_unit = analysis_unit(),
+        status = selected$status, reason = selected$reason)
     }
     metric_annual_export <- function() {
       result <- metric_export_result()
@@ -1052,7 +1056,7 @@ mod_3_09_decomposition_server <- function(id,
       .policy_metric_export_annotate(rows, result, scenario,
         export_scope = label, so = so(), analysis_unit = analysis_unit(),
         status = if (nrow(rows)) selected$status %||% "unavailable" else "unavailable",
-        reason = selected$reason %||% if (!nrow(rows)) "No rows for this adverse-attribution scope." else result$reason)
+        reason = selected$reason %||% if (!nrow(rows)) "No rows for this adverse-attribution scope." else "")
     }
     metric_mechanism_export <- function() {
       result <- metric_export_result()
@@ -1073,7 +1077,7 @@ mod_3_09_decomposition_server <- function(id,
       rows <- .policy_metric_export_annotate(rows, result, scenario,
         export_scope = "production_prediction_rows", scale = "model_scale",
         so = so(), analysis_unit = analysis_unit(),
-        status = selected$status %||% "unavailable", reason = selected$reason %||% result$reason)
+        status = selected$status %||% "unavailable", reason = selected$reason)
       rows$rank_convention <- result$mechanisms$metadata$rank_convention %||%
         "fixed main-derived pre/post ranks; interaction evaluated at post-main rank"
       rows$included_terms <- result$mechanisms$metadata$included_terms %||%

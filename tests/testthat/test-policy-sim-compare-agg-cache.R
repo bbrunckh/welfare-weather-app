@@ -336,6 +336,38 @@ test_that("future metric switches preserve scenario keys and reuse prepared suit
   })
 })
 
+test_that("threshold edits retain only bounded aggregation suites", {
+  hist <- make_step3_hist_fixture()
+  scenarios <- make_step3_scenarios_fixture()
+  internals <- NULL
+  testServer(function(input, output, session) {
+    internals <<- .wire_results_pane(input, output, session,
+      reactiveVal(hist), reactiveVal(scenarios), reactiveVal(hist), reactiveVal(scenarios),
+      selected_hist = reactiveVal(NULL), residuals = reactiveVal("none"))
+  }, {
+    session$setInputs(cmp_agg_method = "headcount_ratio", cmp_pov_line = 3)
+    session$elapse(500); session$flushReact()
+    first <- internals$baseline_agg_hist()
+    cache <- attr(internals$agg_cache_ws(), "suite_cache")
+    first_keys <- ls(cache)
+    for (line in 4:14) {
+      session$setInputs(cmp_pov_line = line)
+      session$elapse(500); session$flushReact()
+      internals$baseline_agg_hist()
+      internals$policy_agg_hist()
+      internals$baseline_agg_scenarios()
+      internals$policy_agg_scenarios()
+      expect_lte(length(ls(cache)), attr(cache, "max_entries"))
+      expect_setequal(ls(cache), attr(cache, "keys"))
+    }
+    expect_false(any(first_keys %in% ls(cache)))
+    session$setInputs(cmp_pov_line = 3)
+    session$elapse(500); session$flushReact()
+    expect_identical(internals$baseline_agg_hist(), first)
+    expect_lte(length(ls(cache)), attr(cache, "max_entries"))
+  })
+})
+
 test_that("shared pipeline table preserves historical and ensemble schemas", {
   hist_pipe <- make_step3_pipe_fixture(n = 80L, yrs = 2020:2021)
   hist <- aggregate_pipeline_table(

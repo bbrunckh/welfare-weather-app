@@ -100,6 +100,25 @@ test_that("rate and binary mean charts format fractional outcomes as percentages
   }
 })
 
+test_that("rate deviations and policy changes use percentage points", {
+  for (method in c("headcount_ratio", "gap", "fgt2")) {
+    metadata <- metric_metadata(method)
+    expect_identical(metadata$native_unit, "fraction")
+    expect_identical(metadata$level_unit, "percent")
+    expect_identical(metadata$change_unit, "pp")
+    label <- metric_axis_label(method, deviation = "mean")
+    chart <- echart_annual_distribution(
+      data.frame(scenario = "Historical", value = c(-.04, .02, .03)), label)
+    expect_match(as.character(chart$x$opts$xAxis$axisLabel$formatter), "v*100", fixed = TRUE)
+    expect_match(as.character(chart$x$opts$xAxis$axisLabel$formatter), '" pp"', fixed = TRUE)
+    expect_match(as.character(chart$x$opts$tooltip$formatter), "percent = true", fixed = TRUE)
+    expect_match(as.character(chart$x$opts$tooltip$formatter), '" pp"', fixed = TRUE)
+  }
+  tooltip <- as.character(.wise_result_tooltip(metric_axis_label("headcount_ratio")))
+  expect_match(tooltip, "change ? ' pp'", fixed = TRUE)
+  expect_match(tooltip, "num(d.policy - d.baseline, true)", fixed = TRUE)
+})
+
 test_that("annual scatter retains finite jittered coordinates at production draw counts", {
   tbl <- data.frame(
     scenario = rep(c("Historical", "SSP3-7.0 / 2025-2035"), each = 6000),

@@ -101,10 +101,17 @@ test_that("one residual realization is reused across states and compact shared c
   }
   fx <- metric_channel_fixture()
   fx$hist$shared_context <- fx$policy_hist$shared_context <- list(train_aug = data.frame(id = 1:12))
-  result <- .policy_metric_decomposition(fx$hist, fx$policy_hist, list(), list(), fx$prepared,
-    "mean", requested_residuals = "normal")
-  expect_identical(result$status, "ok")
-  expect_identical(result$metadata$effective_residuals, "none")
+  for (mode in c("original", "normal", "resample")) {
+    result <- .policy_metric_decomposition(fx$hist, fx$policy_hist, list(), list(), fx$prepared,
+      "mean", requested_residuals = mode)
+    expect_identical(result$status, "ok")
+    expect_identical(result$metadata$effective_residuals, "none")
+    for (skip_coef in c(TRUE, FALSE)) {
+      canonical <- aggregate_pipeline_per_year(fx$hist$pipeline, "mean", residuals = mode,
+        is_log = FALSE, skip_coef = skip_coef, shared_context = fx$hist$shared_context)
+      expect_equal(result$annual$baseline, vapply(canonical, `[[`, numeric(1), "value"))
+    }
+  }
 })
 
 test_that("equal-model summaries and ordered quantile contrasts do not average component medians", {

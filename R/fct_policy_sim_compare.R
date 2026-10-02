@@ -161,10 +161,18 @@ echart_before_after_hist <- function(baseline_vals, policy_vals,
   wise_echart_theme(e)
 }
 
+.wise_result_rate_unit <- function(x_label) {
+  if (grepl("(percent)", x_label, fixed = TRUE)) return("%")
+  if (grepl("(pp)", x_label, fixed = TRUE)) return(" pp")
+  ""
+}
+
 .wise_result_axis_label <- function(x_label) {
-  if (!grepl("(percent)", x_label, fixed = TRUE)) return(wise_eaxis_label())
+  unit <- .wise_result_rate_unit(x_label)
+  if (!nzchar(unit)) return(wise_eaxis_label())
   wise_eaxis_label(formatter = htmlwidgets::JS(
-    "function(v){return (v*100).toLocaleString('en-US',{maximumFractionDigits:1})+'%';}"
+    sprintf("function(v){return (v*100).toLocaleString('en-US',{maximumFractionDigits:1})+%s;}",
+      jsonlite::toJSON(unit, auto_unbox = TRUE))
   ))
 }
 
@@ -174,15 +182,16 @@ echart_before_after_hist <- function(baseline_vals, policy_vals,
     function esc(s) { return String(s).replace(/[&<>\"']/g, function(c) {
       return {'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',\"'\":'&#39;'}[c]; }); }
     var percent = %s;
-    function num(v) { return Number.isFinite(v) ? (percent ? v*100 : v).toLocaleString('en-US', {maximumFractionDigits: percent ? 1 : 3}) + (percent ? '%%' : '') : 'Not available'; }
+    function num(v, change) { return Number.isFinite(v) ? (percent ? v*100 : v).toLocaleString('en-US', {maximumFractionDigits: percent ? 1 : 3}) + (percent ? (change ? ' pp' : %s) : '') : 'Not available'; }
     var text = '<b>' + esc(d.scenario || p.seriesName) + '</b>';
     if (d.rp_label) text += '<br>' + esc(d.rp_label);
     if (d.source && d.source !== 'All') text += '<br>' + esc(d.source);
     text += '<br>' + esc(d.is_mean ? 'Scenario mean' : %s) + ': <b>' + num(d.outcome) + '</b>';
-    if (Number.isFinite(d.baseline)) text += '<br>Baseline: ' + num(d.baseline) + '<br>Policy: ' + num(d.policy) + '<br>Policy change: ' + num(d.policy - d.baseline);
+    if (Number.isFinite(d.baseline)) text += '<br>Baseline: ' + num(d.baseline) + '<br>Policy: ' + num(d.policy) + '<br>Policy change: ' + num(d.policy - d.baseline, true);
     if (Number.isFinite(d.lo) && Number.isFinite(d.hi) && d.hi > d.lo) text += '<br>Climate-model spread: ' + num(d.lo) + ' to ' + num(d.hi);
     return text;
-  }", tolower(as.character(grepl("(percent)", x_label, fixed = TRUE))),
+  }", tolower(as.character(nzchar(.wise_result_rate_unit(x_label)))),
+    jsonlite::toJSON(.wise_result_rate_unit(x_label), auto_unbox = TRUE),
     jsonlite::toJSON(x_label, auto_unbox = TRUE)))
 }
 
@@ -1267,7 +1276,8 @@ step3_headline_cards <- function(paired_summary,
   val_5 <- if (is.finite(lo_val) && is.finite(hi_val) && lo_val > 0) {
     "100% positive"
   } else if (is.finite(lo_val) && is.finite(hi_val)) {
-    paste(sprintf("%+.2f", lo_val), "to", sprintf("%+.2f", hi_val))
+    paste(format_metric_value(lo_val, spec, change = TRUE), "to",
+      format_metric_value(hi_val, spec, change = TRUE))
   } else if (n_mods > 1L) {
     paste0(n_mods, " models agreed")
   } else {
@@ -1275,7 +1285,8 @@ step3_headline_cards <- function(paired_summary,
   }
 
   line1_5 <- if (is.finite(lo_val) && is.finite(hi_val) && n_mods > 1L) {
-    paste0("Model range: ", sprintf("%+.2f", lo_val), " to ", sprintf("%+.2f", hi_val))
+    paste0("Model range: ", format_metric_value(lo_val, spec, change = TRUE),
+      " to ", format_metric_value(hi_val, spec, change = TRUE))
   } else if (n_mods > 1L) {
     paste0("Ensemble across ", n_mods, " models")
   } else {
@@ -2347,7 +2358,10 @@ plot_step3_variance_contribution <- function(var_tbl) {
     ws <- new.env(parent = emptyenv())
     attr(ws, "keys") <- character(0)
     attr(ws, "max_entries") <- 32L
-    attr(ws, "suite_cache") <- new.env(parent = emptyenv())
+    suite_cache <- new.env(parent = emptyenv())
+    attr(suite_cache, "keys") <- character(0)
+    attr(suite_cache, "max_entries") <- 8L
+    attr(ws, "suite_cache") <- suite_cache
     ws
   })
   .agg_cache_key <- function(tag, method, pov_line) {
@@ -2405,7 +2419,7 @@ plot_step3_variance_contribution <- function(var_tbl) {
 
     suite_key <- .agg_cache_key(tag, "__suite__", poverty_line)
     suite_cache <- attr(ws, "suite_cache")
-    suite <- get0(suite_key, envir = suite_cache)
+    suite <- .agg_cache_get(suite_cache, suite_key)
     if (!is.null(suite)) {
       hit <- list(out = suite[[method]])
       .agg_cache_put(ws, cache_key, hit)
@@ -2424,7 +2438,7 @@ plot_step3_variance_contribution <- function(var_tbl) {
     )
     shared <- shared_aggregation_cache_get(aggregation_cache, shared_key)
     if (!is.null(shared)) {
-      assign(suite_key, shared, envir = suite_cache)
+      .agg_cache_put(suite_cache, suite_key, shared)
       hit <- list(out = shared[[method]])
       .agg_cache_put(ws, cache_key, hit)
       return(hit)
@@ -2444,7 +2458,7 @@ plot_step3_variance_contribution <- function(var_tbl) {
       scenario = "Historical",
       shared_context = hs$shared_context
     )
-    assign(suite_key, agg, envir = suite_cache)
+    .agg_cache_put(suite_cache, suite_key, agg)
     shared_aggregation_cache_put(aggregation_cache, shared_key, agg)
     .agg_cache_put(ws, cache_key, list(out = agg[[method]]))
     list(out = agg[[method]])
@@ -2501,7 +2515,7 @@ plot_step3_variance_contribution <- function(var_tbl) {
 
     suite_key <- .agg_cache_key(tag, "__suite__", poverty_line)
     suite_cache <- attr(ws, "suite_cache")
-    suite <- get0(suite_key, envir = suite_cache)
+    suite <- .agg_cache_get(suite_cache, suite_key)
     if (!is.null(suite)) {
       # Unlike the historical suite, future suites are keyed by scenario first.
       hit <- lapply(suite, function(value) {
@@ -2557,7 +2571,7 @@ plot_step3_variance_contribution <- function(var_tbl) {
       if (is.null(value)) return(NULL)
       value$out
     })
-    assign(suite_key, suite, envir = suite_cache)
+    .agg_cache_put(suite_cache, suite_key, suite)
     selected <- lapply(suite, function(value) {
       if (is.null(value)) return(NULL)
       list(out = value[[method]])

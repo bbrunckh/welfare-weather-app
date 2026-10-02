@@ -357,6 +357,29 @@ test_that("primary metric decomposition renders native contributions, tails and 
         "included_terms", "excluded_terms", "scale", "uncertainty_status") %in% names(mechanisms_back)))
       expect_true(all(mechanisms_back$scale == "model_scale"))
 
+      mixed <- result
+      mixed$status <- "unavailable"
+      mixed$reason <- "Focus scenario unavailable"
+      mixed$metadata$focus_scenario <- "Failed focus"
+      mixed$scenarios[["Failed focus"]] <- list(status = "unavailable",
+        reason = "Focus scenario unavailable")
+      mixed$scenarios[["SSP2-4.5"]]$return_period$status[1L] <- "unavailable"
+      mixed$scenarios[["SSP2-4.5"]]$return_period$reason[1L] <- "Tail endpoint parity mismatch"
+      metric_decomposition(mixed)
+      session$flushReact()
+      expected_export <- metric_expected_export()
+      expect_true(all(expected_export$availability == "ok"))
+      expect_true(all(expected_export$reason == ""))
+      mixed_mechanisms <- items$policy_weather_sensitivity$fun()
+      expect_true(all(mixed_mechanisms$availability == "ok"))
+      expect_true(all(mixed_mechanisms$reason == ""))
+      mixed_tails <- items$policy_metric_adverse_attribution$fun()
+      expect_true(all(mixed_tails$reason[mixed_tails$status == "ok"] == ""))
+      tail_widget <- jsonlite::fromJSON(session$output$metric_tail_table)$x
+      tail_columns <- tail_widget$tag$attribs$columns
+      expect_true(tail_columns$show[tail_columns$id == "Availability"])
+      expect_true(tail_columns$show[tail_columns$id == "reason"])
+
       no_channels <- result
       no_channels$mechanisms$repositioning_status <- "Not modeled by this engine"
       no_channels$mechanisms$interaction_status <- "Interaction not included in fitted model"

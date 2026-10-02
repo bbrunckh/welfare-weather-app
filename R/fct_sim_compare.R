@@ -3248,7 +3248,7 @@ echart_timeseries_spaghetti <- function(ts_tbl, x_label = "",
   x_pad <- if (x_span > 0) x_span * 0.005 else max(abs(x_vals[[1L]]) * 0.005, 0.01)
   y_span <- diff(range(y_vals))
   y_pad <- if (y_span > 0) y_span * 0.04 else max(abs(y_vals[[1L]]) * 0.04, 0.01)
-  percent <- grepl("(percent)", x_label, fixed = TRUE)
+  percent <- nzchar(.wise_result_rate_unit(x_label))
   e$x$opts$xAxis <- list(
     type = "value",
     min = min(x_vals) - x_pad,
@@ -3289,7 +3289,7 @@ echart_timeseries_spaghetti <- function(ts_tbl, x_label = "",
       function esc(s) { return String(s == null ? '' : s).replace(/[&<>\"']/g, function(c) {
         return {'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',\"'\":'&#39;'}[c]; }); }
       var percent = %s;
-      function num(v) { return Number.isFinite(v) ? (percent ? v*100 : v).toLocaleString('en-US', {maximumFractionDigits: percent ? 1 : 3}) + (percent ? '%%' : '') : 'Not available'; }
+      function num(v) { return Number.isFinite(v) ? (percent ? v*100 : v).toLocaleString('en-US', {maximumFractionDigits: percent ? 1 : 3}) + %s : 'Not available'; }
       var groups = {}, order = [];
       ps.forEach(function(p) {
         var d = p.data || {}; if (d.kind !== 'model') return;
@@ -3306,7 +3306,8 @@ echart_timeseries_spaghetti <- function(ts_tbl, x_label = "",
       });
       if (!out.length) return '';
       return '<b>Weather year ' + String(Math.round(ps[0].value[0])) + '</b><br>' + out.join('<br>');
-    }", tolower(as.character(percent)))
+    }", tolower(as.character(percent)),
+      jsonlite::toJSON(.wise_result_rate_unit(x_label), auto_unbox = TRUE))
   ))
   e$x$opts$grid <- list(containLabel = TRUE, left = 8, right = 20, top = 86, bottom = 54)
   wise_echart_theme(e)
@@ -3402,10 +3403,11 @@ echart_model_robustness <- function(tbl, x_label = "Expected annual outcome",
       var text = '<b>' + esc(d.scenario) + '</b>';
       if (d.model) text += '<br>Model/member: ' + esc(d.model);
       text += '<br>' + label + ': <b>' + (Number.isFinite(v) ?
-        (percent ? v*100 : v).toLocaleString('en-US', {maximumFractionDigits: percent ? 1 : 3}) + (percent ? '%%' : '') : 'Not available') + '</b>';
+        (percent ? v*100 : v).toLocaleString('en-US', {maximumFractionDigits: percent ? 1 : 3}) + %s : 'Not available') + '</b>';
       if (Number.isFinite(d.n_years)) text += '<br>Weather years: ' + d.n_years;
       return text;
-    }", tolower(as.character(grepl("(percent)", x_label, fixed = TRUE))))))
+    }", tolower(as.character(nzchar(.wise_result_rate_unit(x_label)))),
+      jsonlite::toJSON(.wise_result_rate_unit(x_label), auto_unbox = TRUE))))
   e$x$opts$grid <- list(containLabel = TRUE, left = 8, right = 24, top = 24, bottom = 62)
   wise_echart_theme(e)
 }
@@ -3672,9 +3674,10 @@ echart_exceedance <- function(curves_tbl,
       return heading + '<br>' + ps.map(function(p) {
         var v = p.value[1];
         return p.marker + esc(p.seriesName) + ': <b>' +
-          (Number.isFinite(v) ? (percent ? v*100 : v).toLocaleString('en-US', {maximumFractionDigits: percent ? 1 : 3}) + (percent ? '%%' : '') : 'Not available') + '</b>';
+          (Number.isFinite(v) ? (percent ? v*100 : v).toLocaleString('en-US', {maximumFractionDigits: percent ? 1 : 3}) + %s : 'Not available') + '</b>';
       }).join('<br>');
-    }", tolower(as.character(grepl("(percent)", x_label, fixed = TRUE)))))
+    }", tolower(as.character(nzchar(.wise_result_rate_unit(x_label)))),
+      jsonlite::toJSON(.wise_result_rate_unit(x_label), auto_unbox = TRUE)))
   )
   # Right-hand gutter so the endpoint scenario labels stay clear of the
   # curves, mirroring the ggplot builder's 22% expansion.

@@ -102,7 +102,7 @@ metric_metadata <- function(method = "mean", so = NULL, pov_line = NULL,
   } else if (identical(method, "avg_poverty")) {
     level_unit <- paste("inverse", input_unit)
   }
-  if (identical(method, "mean") && binary_mean) {
+  if (identical(out$format, "percent")) {
     level_unit <- "percent"
   }
   uses_poverty_line <- isTRUE(out$poverty_line) &&

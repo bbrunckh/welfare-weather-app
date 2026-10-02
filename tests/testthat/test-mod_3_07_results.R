@@ -37,6 +37,12 @@ test_that("Step 3 cards format rate levels and absolute changes without benefit 
   binary <- step3_headline_cards(summary, so = list(name = "indicator", type = "binary"))
   expect_match(binary[[1]]$value, "-4.00 pp", fixed = TRUE)
   expect_match(binary[[1]]$note, "indicator", fixed = TRUE)
+  summary$intermod_lo <- -.2
+  summary$intermod_hi <- .7
+  summary$n_models <- 3L
+  binary <- step3_headline_cards(summary, so = list(name = "indicator", type = "binary"))
+  expect_match(binary[[5]]$value, "-20.00 pp to +70.00 pp", fixed = TRUE)
+  expect_match(binary[[5]]$note, "Model range: -20.00 pp to +70.00 pp", fixed = TRUE)
 })
 
 test_that("resilience and adverse headline cards use metric-aware shared results", {
@@ -151,7 +157,7 @@ test_that("step3_headline_cards builds 5 concise policy cards", {
   # Card 5: Policy robustness
   expect_identical(cards[[5]]$label, "Policy robustness")
   expect_identical(cards[[5]]$value, "100% positive")
-  expect_match(cards[[5]]$note, "Model range: +0.32 to +0.58", fixed = TRUE)
+  expect_match(cards[[5]]$note, "Model range: +0.32 outcome units to +0.58 outcome units", fixed = TRUE)
 
   # Serializer
   df <- step3_headline_df(cards)

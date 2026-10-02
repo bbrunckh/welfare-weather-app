@@ -114,6 +114,32 @@ test_that("runtime option metadata records every requested current option", {
   )
 })
 
+test_that("failed metric switches fail the overall Step 3 benchmark", {
+  metric_switches <- .bench_step3_metric_switches
+  run <- .bench_run_step3
+  environment(run) <- new.env(parent = environment(run))
+  environment(run)$.bench_step3_metric_switches <- function(...) {
+    result <- metric_switches(...)
+    result$status[result$method == "headcount_ratio"] <- "unavailable"
+    result$error[result$method == "headcount_ratio"] <- "Endpoint parity mismatch"
+    result
+  }
+  input <- .bench_small_step3_input(n = 40L)
+  result <- run(
+    baseline_result = .bench_small_step2_result(input, "ols", "historical"),
+    input = input, model_label = "ols", policy_label = "combined",
+    policy_fixture = .bench_step3_policy_fixtures("combined")[[1L]],
+    identity = .test_bench_identity("historical"), config = .test_bench_config(),
+    size_fn = .test_bench_size, rss_state_fn = .test_bench_rss_state,
+    rss_sample_fn = .test_bench_rss_sample
+  )
+  expect_identical(result$status, "error")
+  expect_match(result$error, "Metric-switch verification failed", fixed = TRUE)
+  expect_match(result$error, "Endpoint parity mismatch", fixed = TRUE)
+  expect_identical(result$metric_headcount_ratio_status, "unavailable")
+  expect_true(is.na(result$output_fingerprint_sha256))
+})
+
 test_that("Step 2 execution passes current runtime options without filtering", {
   captured <- NULL
   run_fn <- function(payload_mode, weather_storage, weather_collect,

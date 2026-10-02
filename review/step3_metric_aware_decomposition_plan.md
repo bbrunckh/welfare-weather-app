@@ -677,6 +677,13 @@ Independent review follow-up (2026-10-01):
 - Made intended Reactable columns explicitly visible despite hidden-by-default provenance columns; added regression assertions for display and stale status.
 - Focused Step 3, aggregation and export suites passed after these fixes. Full browser interaction and the multi-scenario performance/memory release gates above remain incomplete.
 
+Independent phases 1-7 review (2026-10-02):
+
+- Reviewed summary/headline alignment, annual channel ownership/exposure/residual/tail correctness, and primary UI/export contracts in independent passes. Fixed percent level metadata and chart scaling (including pp deviations and policy changes), unit-aware robustness ranges, incomplete training-residual fallback parity, scenario-scoped export availability/reasons, and visible reasons for unavailable tail rows.
+- Bounded the Results aggregation-suite cache to eight LRU entries, reusing the existing eviction helper; repeated threshold edits no longer retain every previous suite. The benchmark now fails its overall status when a required metric-switch verification is unavailable or errors, rather than reporting a successful run.
+- Added regressions for these cases. The final non-overlapping `Rscript -e 'devtools::test(reporter = "summary", stop_on_failure = TRUE)'` passed, including the previously failing chart assertions and browser-backed bundle tests. Existing glmnet deprecation and deliberate incomplete weather-cache warnings remain. Focused regression suites, `devtools::load_all(quiet = TRUE)` and `git diff --check` also passed. Earlier runs during editing loaded older code; one concurrent browser-backed run had intermittent Chromote PNG failures, not reproduced in the final full run.
+- No new real-data benchmarks or interactive application checks were performed. The multi-scenario memory/runtime, full-row real-data reference parity, real RIF/bin performance, and interactive release gates above remain open; this review does not declare production release readiness or introduce an async redesign.
+
 Example commands from the repository root:
 
 ```sh

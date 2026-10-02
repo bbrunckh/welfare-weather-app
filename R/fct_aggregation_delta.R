@@ -563,10 +563,11 @@ aggregate_pipeline_per_year <- function(pipe,
   train_aug <- context$train_aug
   id_col <- context$id_col
 
-  # train_aug carries .resid for "original"/"resample" residual paths. RIF
-  # pipelines set train_aug = NULL by construction; honour that.
+  # All residual modes require retained training residuals, including compact
+  # shared contexts. Incomplete training state uses the same no-residual fallback.
   res_mode <- residuals %||% "original"
-  if (is.null(train_aug) && !identical(res_mode, "none")) {
+  if ((is.null(train_aug) || !".resid" %in% names(train_aug)) &&
+      !identical(res_mode, "none")) {
     res_mode <- "none"
   }
 

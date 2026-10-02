@@ -528,6 +528,12 @@
       baseline_result, policy_result,
       hist_sim$residuals %||% "original", config$unit, size_fn
     )
+    failed_metrics <- metric_switches[metric_switches$status != "ok", , drop = FALSE]
+    if (nrow(failed_metrics)) {
+      stop("Metric-switch verification failed: ", paste(
+        paste0(failed_metrics$method, " (", failed_metrics$status, "): ",
+               failed_metrics$error), collapse = " | "), call. = FALSE)
+    }
     rss_sample_fn(rss_state)
   }, error = function(e) {
     status <<- "error"
