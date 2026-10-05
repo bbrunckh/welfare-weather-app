@@ -156,8 +156,7 @@ Key environment variables for production:
 
 ## Git Remotes
 
-- `origin`: user fork (`bbrunckh/wise-app`)
-- `upstream`: official World Bank repo (`worldbank/wise-app`)
+- `origin`: official World Bank repo dev branch (`worldbank/wise-app:dev`)
 
 ## Testing
 
