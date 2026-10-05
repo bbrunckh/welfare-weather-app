@@ -50,7 +50,7 @@ Development workflow scripts are in `dev/01_start.R`, `dev/02_dev.R`, and `dev/0
 1. **Step 0 – Overview** (`mod_0_overview`): Data source configuration (local/S3/GCS/Azure/HuggingFace/Databricks), loads survey metadata.
 2. **Step 1 – Modelling** (`mod_1_modelling` + 8 sub-modules): Select sample → explore data → define outcome variable → pick weather variables → configure model → view results.
 3. **Step 2 – Simulation** (`mod_2_simulation` + 3 sub-modules): Define historical/future weather scenarios (including CMIP6 climate models), generate welfare predictions.
-4. **Step 3 – Policy Scenarios** (`mod_3_scenario` + 5 sub-modules): Model social protection, infrastructure, digital, and labor market interventions and estimate welfare impacts.
+4. **Step 3 – Policy Scenarios** (`mod_3_scenario` + 9 sub-modules): Model social protection, infrastructure, digital, labor market, and education interventions (`mod_3_01`-`mod_3_05`), then run the policy simulation, results, diagnostics, and decomposition (`mod_3_06`-`mod_3_09`).
 
 Reactive data flows forward through the pipeline: Step 0 outputs feed Step 1, which feeds Steps 2 and 3.
 
@@ -62,7 +62,8 @@ R/
 ├── app_config.R               # Environment detection (dev/Posit Connect/Databricks)
 ├── run_app.R                  # Entry point
 ├── mod_*.R                    # 24 Shiny modules (each has a UI and server function)
-└── fct_*.R                    # 39 business logic files (no Shiny dependencies)
+├── fct_*.R                    # 41 business logic files (no Shiny dependencies)
+└── utils_*.R                  # shared math, UI, plot-theme, and Step 1 helpers
 ```
 
 **`fct_` files are the core engine:**
@@ -75,14 +76,18 @@ R/
 - `fct_results.R` – output formatting, coefficient plots, tables
 - `fct_policy_sim.R` – policy scenario variable discovery and placeholder UI
 - `fct_policy_decompose.R` – **policy effect decomposition** (main effect + resilience: repositioning + interaction)
+- `fct_policy_metric_decompose.R` / `fct_decomposition_summary.R` – metric-aware Step 3 decomposition (per-metric channels) and its summaries
+- `fct_metric_registry.R` – metric metadata (labels, units, direction, change kind, supported engines and uncertainty sources)
 - `fct_rif_sim.R` – Recentered Influence Function (RIF) quantile regression helpers
 - `fct_weatherstats.R` – weather statistics computation
 - `fct_hexmap.R` – **hex-map engine bridge**: vendored MapLibre GL + h3-js (`inst/app/vendor/` — outside the `bundle_resources()` scan tree, served once via the explicit dependency; browser side `hexmap.js`), columnar payload contract (`hexmap_payload()`, senders `hexmap_update`/`hexmap_clear`/`hexmap_fit`), container `hexmap_ui()`. Used by mod_1_02, mod_1_03, mod_1_05; no Leaflet fallback — MapLibre is the only map surface. Asset pins and behavior details live in-file.
+- `fct_step2_compute.R` – pure, serial Step 2 compute boundary (reference numerics remain in `fct_run_simulation()`)
+- `fct_export.R` / `fct_provenance.R` – export bundles (config, tables, figures, metadata) and the immutable run-provenance record
 - `fct_step2_async.R` – process-wide mirai async coordinator for Step 2 (FIFO queue, worker snapshots, secrets scrubbing) and the shared daemon pool for Overview metadata loads (credentials policy: see `review/optimization_guidelines.md` §0)
 
 ### Modeling Engine Registry
 
-`fct_fit_model.R` defines `ENGINE_REGISTRY` with four fields per engine:
+`fct_fit_model.R` defines `ENGINE_REGISTRY` with six fields per engine:
 - `$requires` – package dependencies
 - `$model_types` – supported model types (Linear regression, Logistic regression, Quantile regression)
 - `$build_formulas` – creates nested formulae for progressive models
@@ -156,4 +161,4 @@ Key environment variables for production:
 
 ## Testing
 
-Tests are in `tests/testthat/` (62 files, named after the `fct_`/`mod_` file or concept they cover, e.g. `test-fct_hexmap.R`, `test-active-mask.R`) plus `tests/spelling.R`. Areas with dedicated coverage: connection/data loading, model fitting + coefficient uncertainty decomposition, aggregation delta, RIF helpers, hexmap payload contract, policy decomposition uncertainty, weather selection/stats, export bundles, determinism.
+Tests are in `tests/testthat/` (80 files, named after the `fct_`/`mod_` file or concept they cover, e.g. `test-fct_hexmap.R`, `test-active-mask.R`) plus `tests/spelling.R`. Areas with dedicated coverage: connection/data loading, model fitting + coefficient uncertainty decomposition, aggregation delta, RIF helpers, hexmap payload contract, policy decomposition uncertainty, metric-aware decomposition, weather selection/stats, export bundles, determinism.
