@@ -621,15 +621,14 @@ mod_3_01_sp_server <- function(id,
         return(selection_summary_card(
           title = program_title,
           rows = list(list(
-            name = paste("Population in recipient", unit_pl),
+            name = paste("Recipient", unit_pl),
             pills = "Not available"
           )),
           compact = TRUE
         ))
       }
 
-      # The headline count is a population-weighted count; the sample count is
-      # explained in the info popover rather than taking up a visible row.
+      # Report household recipients separately from their represented people.
       count_hint <- if (isTRUE(r$weighted)) {
         paste0(
           "Survey-weighted; ", fmt_count(r$n_rows), " of ",
@@ -642,11 +641,7 @@ mod_3_01_sp_server <- function(id,
         )
       }
 
-      cost_label <- if (isTRUE(r$budget_first)) {
-        "Configured annual budget"
-      } else {
-        "Estimated annual cost"
-      }
+      cost_label <- "Estimated annual cost"
 
       targeting <- preview_spec$targeting
       targeting_info <- switch(targeting,
@@ -672,7 +667,15 @@ mod_3_01_sp_server <- function(id,
         title = program_title,
         rows = list(
           selection_card_row(
-            name  = paste("Population in recipient", unit_pl),
+            name  = paste("Recipient", unit_pl),
+            pills = fmt_count(r$n_recipient_units)
+          ),
+          selection_card_row(
+            name  = if (identical(analysis_unit(), "hh")) {
+              "People represented"
+            } else {
+              "Population represented"
+            },
             pills = fmt_count(r$n_pop)
           ),
           selection_card_row(

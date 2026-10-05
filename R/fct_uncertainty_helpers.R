@@ -155,3 +155,86 @@ rank_interp <- function(sorted_vals, p) {
     sorted_vals[lo] + (k - lo) * (sorted_vals[hi] - sorted_vals[lo])
   }
 }
+
+# Baseline-selected annual support shared by metric-aware and technical tails.
+# Year keys are retained explicitly so later states cannot accidentally apply
+# the ranks to a different row order.
+adverse_year_support <- function(values, sim_years, probability,
+                                 adverse_tail = c("high", "low")) {
+  adverse_tail <- tryCatch(match.arg(adverse_tail), error = function(e) NA_character_)
+  empty <- list(status = "unavailable", reason = NULL,
+    baseline_value = NA_real_, probability = NA_real_, return_period = NA_real_,
+    adverse_tail = adverse_tail, n_years_total = length(values),
+    n_years_finite = 0L, n_years_excluded = length(values), min_years = NA_integer_,
+    rank_lo = NA_integer_, rank_hi = NA_integer_, year_lo = NA_real_, year_hi = NA_real_,
+    weight_lo = NA_real_, weight_hi = NA_real_,
+    quantile_method = "rank_interp_n_p_plus_half",
+    tie_method = "value_then_sim_year_ascending")
+  fail <- function(reason) { empty$reason <- reason; empty }
+  if (is.na(adverse_tail)) return(fail("Unknown adverse-tail direction."))
+  if (!is.numeric(values) || !is.numeric(sim_years) || length(values) != length(sim_years)) {
+    return(fail("Annual values and numeric year keys must have matching lengths."))
+  }
+  if (any(!is.finite(sim_years)) || anyDuplicated(sim_years)) {
+    return(fail("Annual year keys must be finite and unique."))
+  }
+  if (length(probability) != 1L || !is.finite(probability) || probability <= 0 || probability >= 1) {
+    return(fail("Adverse probability must be a finite scalar between zero and one."))
+  }
+  empty$probability <- probability
+  empty$return_period <- 1 / probability
+  empty$min_years <- max(2L, as.integer(ceiling(1 / min(probability, 1 - probability))))
+  finite <- is.finite(values)
+  empty$n_years_finite <- sum(finite)
+  empty$n_years_excluded <- sum(!finite)
+  if (sum(finite) < empty$min_years) {
+    return(fail("Insufficient finite baseline years for the requested return period."))
+  }
+  ord <- order(values[finite], sim_years[finite])
+  sorted_values <- values[finite][ord]
+  sorted_years <- sim_years[finite][ord]
+  q_exceed <- if (identical(adverse_tail, "high")) probability else 1 - probability
+  k <- length(sorted_values) * (1 - q_exceed) + 0.5
+  if (!is.finite(k) || k < 1 || k > length(sorted_values)) {
+    return(fail("Requested adverse rank is outside retained baseline-year support."))
+  }
+  lo <- as.integer(floor(k)); hi <- as.integer(ceiling(k))
+  whi <- if (lo == hi) 0 else k - lo
+  wlo <- 1 - whi
+  empty$status <- "ok"
+  empty$reason <- ""
+  empty$baseline_value <- wlo * sorted_values[lo] + whi * sorted_values[hi]
+  empty$rank_lo <- lo; empty$rank_hi <- hi
+  empty$year_lo <- sorted_years[lo]; empty$year_hi <- sorted_years[hi]
+  empty$weight_lo <- wlo; empty$weight_hi <- whi
+  empty
+}
+
+apply_adverse_year_support <- function(values, sim_years, support) {
+  fail <- function(reason) list(status = "unavailable", reason = reason, value = NA_real_)
+  if (is.data.frame(support) && nrow(support)) {
+    row <- support[1L, , drop = FALSE]
+    support <- lapply(names(row), function(name) row[[name]][[1L]])
+    names(support) <- names(row)
+  }
+  if (!is.list(support) || !identical(support$status, "ok")) {
+    return(fail(support$reason %||% "Baseline adverse support is unavailable."))
+  }
+  if (!is.numeric(values) || !is.numeric(sim_years) || length(values) != length(sim_years) ||
+      any(!is.finite(sim_years)) || anyDuplicated(sim_years)) {
+    return(fail("Annual state values require unique finite numeric year keys."))
+  }
+  use_lo <- support$weight_lo != 0
+  use_hi <- support$weight_hi != 0
+  idx_lo <- if (use_lo) which(sim_years == support$year_lo) else integer()
+  idx_hi <- if (use_hi) which(sim_years == support$year_hi) else integer()
+  if ((use_lo && length(idx_lo) != 1L) || (use_hi && length(idx_hi) != 1L)) {
+    return(fail("State does not contain each nonzero-weight baseline support year exactly once."))
+  }
+  selected <- c(if (use_lo) values[idx_lo], if (use_hi) values[idx_hi])
+  if (any(!is.finite(selected))) return(fail("State is nonfinite at a selected baseline support year."))
+  value <- 0
+  if (use_lo) value <- value + support$weight_lo * values[idx_lo]
+  if (use_hi) value <- value + support$weight_hi * values[idx_hi]
+  list(status = "ok", reason = "", value = value)
+}

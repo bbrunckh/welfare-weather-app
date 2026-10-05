@@ -983,7 +983,7 @@ wise_export_readme <- function(entries, provenance = list(), config = list(),
     if ("config" %in% included) {
       "| `configuration.json` | Every input in the app at export time, plus the random seed and per-step run provenance. Re-import it through Export -> Import configuration to restore this analysis. |"
     },
-    "| `manifest.csv` | Machine-readable index of every file below: name, kind, step, title, description, and row/column counts. |",
+    "| `manifest.csv` | Machine-readable index of every file below: name, kind, step, title, description, row/column counts, and registered metadata. |",
     "| `README.md` | This document. |",
     if ("tables" %in% included) {
       "| `*.csv` | One file per table the session produced. |"

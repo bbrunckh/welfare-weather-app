@@ -1390,18 +1390,22 @@ test_that("loc_panel is identical on the lazy view and its local temp table", {
     "microdata/h3/TST/TST_2020_lsms_h3.parquet", cp, collect = FALSE
   )
 
-  direct <- suppressWarnings(loc_panel(lazy, id_col = loc_id, h3_col = h3,
-                      weight_col = pop_2020,
-                      group_cols = c("code", "year", "survname")))
+  expect_no_warning(
+    direct <- loc_panel(lazy, id_col = loc_id, h3_col = h3,
+                        weight_col = pop_2020,
+                        group_cols = c("code", "year", "survname"))
+  )
 
   nm <- basename(tempfile(pattern = "ss_h3_"))
   local_tbl <- dplyr::compute(lazy, name = nm, temporary = TRUE)
   on.exit(try(DBI::dbRemoveTable(
     dbplyr::remote_con(local_tbl), nm), silent = TRUE), add = TRUE)
 
-  from_temp <- suppressWarnings(loc_panel(local_tbl, id_col = loc_id, h3_col = h3,
-                         weight_col = pop_2020,
-                         group_cols = c("code", "year", "survname")))
+  expect_no_warning(
+    from_temp <- loc_panel(local_tbl, id_col = loc_id, h3_col = h3,
+                           weight_col = pop_2020,
+                           group_cols = c("code", "year", "survname"))
+  )
 
   expect_identical(direct, from_temp)
 })

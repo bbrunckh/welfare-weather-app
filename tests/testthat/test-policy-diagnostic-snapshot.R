@@ -113,6 +113,19 @@ test_that("diagnostic snapshot caches transfer-adjusted summaries and vectors", 
   expect_false("baseline_svy" %in% names(snapshot))
   expect_false("policy_svy" %in% names(snapshot))
   expect_identical(snapshot$analysis_unit, "hh")
+  treated <- snapshot$treatment_matrix[snapshot$treatment_matrix$treated_policy, ]
+  received <- policy[[SP_TRANSFER_COL]] > 0
+  expect_equal(sum(treated$weighted_households),
+    sum(baseline$weight[received] / baseline$hhsize[received]))
+  sp_component <- snapshot$component_matrix[
+    snapshot$component_matrix$component == "Social protection", ]
+  expect_equal(sp_component$weighted_households,
+    sum(baseline$weight[received] / baseline$hhsize[received]))
+  expect_true("Households represented" %in%
+    names(.policy_treatment_table_raw(snapshot$treatment_matrix, "hh")))
+  component_table <- .policy_component_table_raw(snapshot$component_matrix, "hh")
+  expect_true("Households represented" %in% names(component_table))
+  expect_true("Sample households affected / covered" %in% names(component_table))
 
   policy$electricity[] <- 0L
   expect_identical(snapshot$policy_values$electricity, c(1L, 1L, 1L))

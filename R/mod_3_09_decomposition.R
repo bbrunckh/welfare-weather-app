@@ -5,7 +5,7 @@ select_decomp_weather_basis <- function(decomp_df, basis = "mean", so = NULL) {
   if (is.null(decomp_df) || !is.data.frame(decomp_df) || !nrow(decomp_df) ||
     identical(basis, "mean") || !"sim_year" %in% names(decomp_df) ||
     !"delta_total" %in% names(decomp_df)) {
-    return(decomp_df)
+    return(if (identical(basis, "mean")) decomp_df else decomp_df[0, , drop = FALSE])
   }
 
   target <- if (identical(basis, "adverse_10")) 0.10 else 0.05
@@ -27,8 +27,8 @@ select_decomp_weather_basis <- function(decomp_df, basis = "mean", so = NULL) {
     outcome_direction(so$name %||% "welfare", so$type %||% "numeric"),
     "lower_is_better"
   )
-  ordered <- order(year_total, decreasing = adverse_high)
-  take <- max(1L, min(length(ordered), round(length(ordered) * target)))
+    ordered <- order(year_total, decreasing = adverse_high)
+    take <- max(1L, ceiling(length(ordered) * target))
   selected_year <- names(year_total)[ordered[[take]]]
   decomp_df[as.character(decomp_df$sim_year) == selected_year, , drop = FALSE]
 }
@@ -221,6 +221,56 @@ select_decomp_weather_basis <- function(decomp_df, basis = "mean", so = NULL) {
   annual[ordered[[take]], , drop = FALSE]
 }
 
+.compact_supported_values <- function(rows, support_rows, probability) {
+  support_rows <- support_rows[support_rows$probability == probability, , drop = FALSE]
+  ids <- unique(as.character(support_rows$model_id))
+  if (!length(ids) || !nrow(rows)) return(NULL)
+  channels <- list()
+  for (id in ids) {
+    support_row <- support_rows[support_rows$model_id == id, , drop = FALSE]
+    if (nrow(support_row) != 1L) return(NULL)
+    members <- if (identical(id, "Historical")) "Historical" else id
+    annual <- rows[as.character(rows$member) == members, , drop = FALSE]
+    if (!nrow(annual) || !identical(support_row$status[[1L]], "ok")) return(NULL)
+    support <- support_row[1L, , drop = FALSE]
+    model <- setNames(vector("list", length(.compact_decomp_channels)), .compact_decomp_channels)
+    for (name in .compact_decomp_channels) {
+      sums <- annual[[paste0("sum_", name)]]
+      weights <- annual[[paste0("weight_", name)]]
+      annual_value <- ifelse(is.finite(sums) & is.finite(weights) & weights > 0, sums / weights, NA_real_)
+      applied <- apply_adverse_year_support(annual_value, as.numeric(annual$sim_year), support)
+      if (!identical(applied$status, "ok")) return(NULL)
+      model[[name]] <- applied$value
+    }
+    baseline <- if (all(c("sum_baseline_y_point", "weight_baseline_y_point") %in% names(annual))) {
+      annual$sum_baseline_y_point / annual$weight_baseline_y_point
+    } else rep(NA_real_, nrow(annual))
+    baseline_applied <- apply_adverse_year_support(baseline,
+      as.numeric(annual$sim_year), support)
+    if (!identical(baseline_applied$status, "ok") ||
+        abs(baseline_applied$value - support_row$baseline_value[[1L]]) >
+          .policy_metric_tolerance * max(1, abs(support_row$baseline_value[[1L]]))) return(NULL)
+    channels[[id]] <- unlist(model, use.names = TRUE)
+  }
+  as.list(colMeans(do.call(rbind, channels)))
+}
+
+.compact_supported_decomp <- function(x, scenario, basis, metric_result,
+                                      is_rif = x$is_rif) {
+  probability <- if (identical(basis, "adverse_10")) 0.10 else if (identical(basis, "adverse_5")) 0.20 else 0.05
+  support <- metric_result$adverse_support
+  support <- if (is.data.frame(support) && nrow(support)) support[support$scenario == scenario, , drop = FALSE] else data.frame()
+  selected_member_ids <- unique(as.character(support$model_id))
+  rows <- x$channel_summary[as.character(x$channel_summary$scenario) == scenario &
+    as.character(x$channel_summary$member) %in% selected_member_ids, , drop = FALSE]
+  values <- .compact_supported_values(rows, support, probability)
+  if (is.null(values)) return(data.frame())
+  out <- as.data.frame(as.list(values), stringsAsFactors = FALSE)
+  out$delta_res1 <- values$delta_res1
+  out$weight <- 1
+  out
+}
+
 .compact_future_combine <- function(rows, prefix = "") {
   if (is.null(rows) || !nrow(rows)) {
     return(setNames(numeric(0), character(0)))
@@ -247,11 +297,23 @@ select_decomp_weather_basis <- function(decomp_df, basis = "mean", so = NULL) {
 }
 
 .compact_future_summary <- function(x, scenario, basis = "mean", so = NULL,
-                                    is_rif = x$is_rif) {
-  rows <- .compact_future_year(x, scenario, basis, so)
-  if (!nrow(rows)) {
-    return(decomposition_summary_data(NULL, is_rif))
+                                    is_rif = x$is_rif, metric_result = NULL) {
+  if (!identical(basis, "mean")) {
+    probability <- if (identical(basis, "adverse_10")) 0.10 else if (identical(basis, "adverse_5")) 0.20 else 0.05
+    support <- metric_result$adverse_support
+    support <- if (is.data.frame(support) && nrow(support)) support[support$scenario == scenario, , drop = FALSE] else data.frame()
+    rows <- x$channel_summary[as.character(x$channel_summary$scenario) == scenario &
+      as.character(x$channel_summary$member) %in% unique(as.character(support$model_id)), , drop = FALSE]
+    if (!nrow(rows)) return(decomposition_summary_data(NULL, is_rif))
+    values <- .compact_supported_values(rows, support, probability)
+    if (is.null(values)) return(decomposition_summary_data(NULL, is_rif))
+    out <- as.data.frame(as.list(values), stringsAsFactors = FALSE)
+    out$delta_res1 <- values$delta_res1
+    out$weight <- 1
+    return(decomposition_summary_data(out, is_rif = is_rif))
   }
+  rows <- .compact_future_year(x, scenario, basis, so)
+  if (!nrow(rows)) return(decomposition_summary_data(NULL, is_rif))
   decomposition_summary_data(
     .compact_future_as_decomp(rows, is_rif = is_rif),
     is_rif = is_rif
@@ -275,6 +337,18 @@ select_decomp_weather_basis <- function(decomp_df, basis = "mean", so = NULL) {
   if (!nrow(rows)) {
     return(tibble::tibble())
   }
+  if (!identical(basis, "mean")) {
+    selected_years <- .compact_future_year(x, scenario, basis, so)
+    if (nrow(selected_years)) {
+      if ("member" %in% names(rows) && "member" %in% names(selected_years)) {
+        rows <- rows[paste(rows$member, rows$sim_year) %in%
+          paste(selected_years$member, selected_years$sim_year), , drop = FALSE]
+      } else {
+        rows <- rows[rows$sim_year %in% selected_years$sim_year, , drop = FALSE]
+      }
+    }
+    if (!nrow(rows)) return(tibble::tibble())
+  }
   out <- dplyr::bind_rows(lapply(sort(unique(rows$decile)), function(d) {
     group <- rows[rows$decile == d, , drop = FALSE]
     values <- .compact_future_combine(group)
@@ -283,6 +357,10 @@ select_decomp_weather_basis <- function(decomp_df, basis = "mean", so = NULL) {
       level_log = values[["delta_main"]],
       resilience_log = values[["delta_res"]],
       total_log = values[["delta_total"]],
+      main = values[["delta_main"]],
+      repositioning = values[["delta_res1"]],
+      interaction = values[["delta_res2"]],
+      total = values[["delta_total"]],
       level_percent = log_effect_to_percent(values[["delta_main"]]),
       resilience_percent = log_effect_to_percent(values[["delta_res"]]),
       main_percent = log_effect_to_percent(values[["delta_main"]]),
@@ -295,10 +373,18 @@ select_decomp_weather_basis <- function(decomp_df, basis = "mean", so = NULL) {
       weighted_population = sum(group$weighted_population)
     )
   }))
+  if ("baseline_annual" %in% names(rows)) {
+    baseline <- rows |>
+      dplyr::group_by(decile) |>
+      dplyr::summarise(baseline_annual = .weighted_mean_safe(
+        baseline_annual, weight_baseline_y_point), .groups = "drop")
+    out <- dplyr::left_join(out, baseline, by = "decile")
+  }
   out
 }
 
-.prepare_decomp_adverse_bases <- function(weather_raw, hist_sim, so) {
+.prepare_decomp_adverse_bases <- function(weather_raw, hist_sim, so,
+                                          metric_support = NULL) {
   raw <- step2_resolve_weather(weather_raw, hist_sim)
   if (is.null(raw) || !nrow(raw)) {
     return(list())
@@ -325,15 +411,18 @@ select_decomp_weather_basis <- function(decomp_df, basis = "mean", so = NULL) {
   if (!length(agg)) {
     return(out)
   }
-  adverse_high <- identical(
-    outcome_direction(so$name %||% "welfare", so$type %||% "numeric"),
-    "lower_is_better"
-  )
-  ordered <- order(agg, decreasing = adverse_high)
   probabilities <- c(adverse_5 = 0.20, adverse_10 = 0.10, adverse_20 = 0.05)
   for (basis in names(probabilities)) {
-    take <- max(1L, min(length(ordered), round(length(ordered) * probabilities[[basis]])))
-    out[[basis]] <- year_values[[names(agg)[ordered[[take]]]]]
+    probability <- probabilities[[basis]]
+    support <- if (is.data.frame(metric_support) && nrow(metric_support)) {
+      metric_support[metric_support$probability == probability & metric_support$status == "ok", , drop = FALSE]
+    } else data.frame()
+    if (nrow(support)) {
+      years <- c(support$year_lo, support$year_hi)
+      years <- unique(as.character(years[is.finite(suppressWarnings(as.numeric(years)))]))
+      panels <- year_values[intersect(years, names(year_values))]
+      if (length(panels)) out[[basis]] <- do.call(rbind, panels)
+    }
   }
   out
 }
@@ -456,139 +545,51 @@ mod_3_09_decomposition_ui <- function(id) {
   tagList(
     shiny::uiOutput(ns("stale_banner_ui")),
     shiny::uiOutput(ns("policy_summary_ui")),
-    shiny::h4(
-      "Policy Effect in the Selected Metric",
-      class = "diagnostic-section-heading"
-    ),
-    shiny::div(
-      class = "results-section-card diagnostic-section-card",
-      shiny::uiOutput(ns("metric_scope_ui")),
-      shiny::div(
-        class = "wise-reactable-controls",
-        wise_reactable_csv_button(ns("metric_contribution_table"), "policy_metric_contributions")
-      ),
-      shiny::uiOutput(ns("metric_contribution_unit_ui")),
-      reactable::reactableOutput(ns("metric_contribution_table")),
-      shiny::tags$p(class = "diagnostic-note",
-        "Ordered attribution at production weather conditions: main policy package, repositioning, then interaction. Central estimates only; component uncertainty is not estimated. This is not an avoided-loss contrast."),
-      shiny::h5("Resilience in Adverse Weather"),
-      shiny::tags$p(class = "diagnostic-note",
-        "Equal-probability 1-in-N outcome quantile contrasts. Each cumulative state uses its own adverse outcome quantile; contrasts need not use the same weather years."),
-      shiny::div(id = "metric_adverse_attribution"),
-      shiny::uiOutput(ns("metric_scenario_ui")),
-      shiny::div(
-        class = "wise-reactable-controls",
-        wise_reactable_csv_button(ns("metric_tail_table"), "policy_metric_adverse_attribution")
-      ),
-      reactable::reactableOutput(ns("metric_tail_table")),
-    ),
-    shiny::h4(
-      "How the Policy Changes Weather Sensitivity",
-      class = "diagnostic-section-heading"
-    ),
-    shiny::div(
-      id = "metric_weather_sensitivity",
-      class = "results-section-card diagnostic-section-card",
-      shiny::uiOutput(ns("metric_mechanism_status_ui")),
-      shiny::div(
-        class = "wise-reactable-controls",
-        wise_reactable_csv_button(ns("metric_mechanism_table"), "policy_weather_sensitivity")
-      ),
-      reactable::reactableOutput(ns("metric_mechanism_table")),
-      shiny::uiOutput(ns("metric_rif_curve_ui")),
-      shiny::tags$p(class = "diagnostic-note",
-        "Sensitivity changes are channel-implied model-scale diagnostics, not currency changes or percentage-point effects. Positive/negative household shares reveal opposing changes that can cancel in the mean.")
-    ),
-    shiny::h4(
-      "Technical Decomposition on the Model Scale",
-      class = "diagnostic-section-heading"
-    ),
+    shiny::h4("What drives the total policy effect?",
+      class = "diagnostic-section-heading"),
     shiny::div(
       class = "results-section-card diagnostic-section-card",
       shiny::div(
-        style = "display:flex; justify-content:flex-end; flex-wrap:wrap; margin-bottom:12px;",
-        pill_toggle(
-          ns("decomp_weather_basis"),
-          label = "Weather-year basis",
-          choices = c(
-            "Mean" = "mean",
-            "Adverse 1-in-10" = "adverse_10",
-            "Adverse 1-in-20" = "adverse_20"
-          ),
-          selected = "mean",
-          layout = "horizontal"
-        )
+        style = "display:flex; justify-content:flex-end; flex-wrap:wrap; gap:14px; margin-bottom:12px;",
+        shiny::uiOutput(ns("headline_weather_basis_ui")),
+        shiny::uiOutput(ns("headline_scenario_ui"))
       ),
       wise_chart_output(ns("headline_decomp_plot"),
-        "Main effect, resilience, and total policy effect decomposition",
-        height = "360px"
-      ),
-      # Table starts collapsed: the plot carries the message, the table is
-      # there for anyone who wants the numbers.
-      shiny::tags$button(
-        class = "btn btn-sm btn-outline-secondary mt-2",
-        type = "button",
-        `data-bs-toggle` = "collapse",
-        `data-bs-target` = paste0("#", ns("headline_decomp_table_wrap")),
-        `aria-expanded` = "false",
-        `aria-controls` = ns("headline_decomp_table_wrap"),
-        "Show / hide data table"
-      ),
-      shiny::div(
-        id = ns("headline_decomp_table_wrap"),
-        class = "collapse",
-        shiny::div(
-          style = "margin-top: 10px;",
-          shiny::div(
-            class = "wise-reactable-controls",
-            wise_reactable_csv_button(ns("headline_decomp_table"), "policy_decomposition_headline_data")
-          ),
-          reactable::reactableOutput(ns("headline_decomp_table")),
-          shiny::uiOutput(ns("headline_decomp_note_ui"))
-        )
+        "Weighted average main effect, repositioning, interaction, and total policy effect",
+        height = "360px"),
+      shiny::uiOutput(ns("headline_decomp_note_ui")),
+      shiny::uiOutput(ns("interaction_warning_ui")),
+      shiny::tags$details(
+        class = "decomposition-data-details",
+        shiny::tags$summary("View decomposition data"),
+        shiny::div(class = "wise-reactable-controls",
+          shiny::uiOutput(ns("headline_decomp_csv_ui"))),
+        DT::DTOutput(ns("headline_decomp_table"))
       )
     ),
-    shiny::h4(
-      "Who gains, and through which channel?",
-      class = "diagnostic-section-heading"
-    ),
+    shiny::h4("Who gains, and through which channel?",
+      class = "diagnostic-section-heading"),
     shiny::div(
       class = "results-section-card diagnostic-section-card",
       shiny::div(
-        style = "display: flex; justify-content:flex-end; gap: 14px; flex-wrap: wrap; align-items: center; margin-bottom: 12px;",
-        pill_toggle(
-          ns("decile_weather_basis"),
-          label = "Weather-year basis",
-          choices = c("Mean" = "mean", "Adverse 1-in-10" = "adverse_10", "Adverse 1-in-20" = "adverse_20"),
-          selected = "mean",
-          layout = "horizontal"
-        ),
+        style = "display:flex; justify-content:flex-end; flex-wrap:wrap; gap:14px; margin:16px 0 12px;",
+        shiny::uiOutput(ns("decile_weather_basis_ui")),
         shiny::uiOutput(ns("decile_scenario_ui"))
       ),
       wise_chart_output(ns("decomp_bar_plot"),
-        "Stacked policy-effect channels by baseline welfare decile",
-        height = "450px"
+        "Weighted average policy effect by baseline welfare decile", height = "450px"),
+      shiny::uiOutput(ns("decomp_bar_note_ui")),
+      shiny::tags$details(
+        class = "decomposition-data-details",
+        shiny::tags$summary("View decomposition data"),
+        shiny::div(class = "wise-reactable-controls",
+          shiny::uiOutput(ns("decile_decomp_csv_ui"))),
+        DT::DTOutput(ns("decile_decomp_table"))
       ),
-      shiny::uiOutput(ns("decomp_bar_note_ui"))
+      shiny::tags$p(class = "diagnostic-note",
+        "Effects use the selected outcome's registry mean units. Deciles are fixed from weighted baseline welfare; adverse-year choices select a historical weather year. Component, residual, and survey-sampling uncertainty are not shown.")
     ),
-    shiny::uiOutput(ns("beta_curve_ui")),
-    shiny::h4(
-      "How do decomposition channels vary by weather year?",
-      class = "diagnostic-section-heading"
-    ),
-    shiny::div(
-      class = "results-section-card diagnostic-section-card",
-      shiny::div(
-        class = "wise-reactable-controls",
-        wise_reactable_csv_button(ns("decomp_summary_table"), "policy_decomposition_summary")
-      ),
-      reactable::reactableOutput(ns("decomp_summary_table")),
-      shiny::uiOutput(ns("interaction_warning_ui")),
-      shiny::tags$p(
-        class = "diagnostic-note",
-        "Columns show weighted policy effects under mean weather and adverse historical weather years. Coefficient SE is the delta-method standard error from the fitted coefficient covariance; it is not a 95% confidence interval. Residual and survey-sampling uncertainty are not included."
-      )
-    )
+    shiny::uiOutput(ns("beta_curve_ui"))
   )
 }
 
@@ -626,14 +627,16 @@ mod_3_09_decomposition_server <- function(id,
                                           digital_scenario = reactive(NULL),
                                           labor_scenario = reactive(NULL),
                                           education_scenario = reactive(NULL),
-                                          policy_saved_scenarios = reactive(list()),
-                                          stale = reactive(FALSE),
-                                          aggregation_method = reactive("mean"),
-                                          metric_decomposition = reactive(NULL),
-                                          poverty_line = reactive(NULL),
-                                          focus_scenario = reactive(NULL),
-                                          metric_context = reactive(NULL),
-                                          analysis_unit = reactive(NULL)) {
+                                           policy_saved_scenarios = reactive(list()),
+                                           stale = reactive(FALSE),
+                                           aggregation_method = reactive("mean"),
+                                           poverty_line = reactive(NULL),
+                                           analysis_unit = reactive(NULL),
+                                           metric_decomposition = reactive(NULL),
+                                           focus_scenario = reactive(NULL),
+                                           metric_context = reactive(NULL),
+                                           metric_adverse_support = reactive(NULL),
+                                           metric_adverse_by_model = reactive(NULL)) {
   moduleServer(id, function(input, output, session) {
     raw_decomp_result <- decomp_result
     raw_decomp_scenarios <- decomp_scenarios
@@ -704,13 +707,6 @@ mod_3_09_decomposition_server <- function(id,
       if (!is.null(preferred) && preferred %in% scenarios) return(preferred)
       if (length(scenarios)) scenarios[[1L]] else NULL
     })
-    output$metric_scenario_ui <- shiny::renderUI({
-      result <- metric_decomposition()
-      choices <- names(result$scenarios %||% list())
-      if (length(choices) < 2L) return(NULL)
-      shiny::selectInput(ns("metric_scenario"), "Scenario", choices = choices,
-        selected = metric_scenario())
-    })
     selected_metric_result <- reactive({
       result <- metric_decomposition()
       scenario <- metric_scenario()
@@ -721,11 +717,11 @@ mod_3_09_decomposition_server <- function(id,
       result <- metric_decomposition()
       if (is.list(result$metadata) && length(result$metadata)) result$metadata else metric_context()
     })
-    metric_status_text <- function(selected, result = metric_decomposition()) {
+    metric_status_text <- function(selected, result = metric_decomposition(), tail = FALSE) {
       if (isTRUE(stale())) {
         return("Policy run is stale; metric-aware results are withheld.")
       }
-      if (is.null(selected) || !identical(selected$status, "ok")) {
+      if (is.null(selected) || (!tail && !identical(selected$status, "ok"))) {
         return(selected$reason %||% result$reason %||% "Metric-aware channel attribution is unavailable.")
       }
       NULL
@@ -739,6 +735,7 @@ mod_3_09_decomposition_server <- function(id,
       result$status <- "unavailable"
       result$reason <- "Policy run is stale; metric-aware exports are withheld."
       result$annual <- result$summary <- result$return_period <- data.frame()
+      result$adverse_support <- result$adverse_by_model <- data.frame()
       result$endpoint_summary <- data.frame()
       result$scenarios <- list()
       result$mechanisms <- list()
@@ -747,7 +744,7 @@ mod_3_09_decomposition_server <- function(id,
     output$metric_scope_ui <- shiny::renderUI({
       result <- metric_decomposition()
       selected <- selected_metric_result()
-      reason <- metric_status_text(selected, result)
+      reason <- metric_status_text(selected, result, tail = TRUE)
       if (!is.null(reason)) {
         return(shiny::div(class = "alert alert-warning", role = "status", reason))
       }
@@ -796,7 +793,7 @@ mod_3_09_decomposition_server <- function(id,
         format_metric_value(row[[field]][[1L]], metadata, change = change)
       }
       out <- data.frame(
-        `Cumulative state / contribution` = c("Baseline", "After main package", "After repositioning", "Policy", "Main package", "Repositioning", "Weather-policy interaction", "Resilience subtotal", "Total policy effect"),
+        `Cumulative state / contribution` = c("Baseline", "After main effect", "After repositioning", "Policy", "Main effect", "Repositioning", "Weather-policy interaction", "Resilience subtotal", "Total policy effect"),
         `Selected metric value` = c(value("baseline"), value("after_main"), value("after_repositioning"), value("policy"), value("main", TRUE), if (repositioning_modeled) value("repositioning", TRUE) else "Not modeled by this engine", if (interaction_included) value("interaction", TRUE) else "Not included in fitted model", if (repositioning_modeled || interaction_included) value("resilience", TRUE) else "Unavailable", value("total", TRUE)),
         `Native numeric value` = c(row$baseline, row$after_main, row$after_repositioning, row$policy, row$main, if (repositioning_modeled) row$repositioning else NA_real_, if (interaction_included) row$interaction else NA_real_, if (repositioning_modeled || interaction_included) row$resilience else NA_real_, row$total),
         check.names = FALSE, stringsAsFactors = FALSE
@@ -857,16 +854,29 @@ mod_3_09_decomposition_server <- function(id,
     metric_tail_data <- reactive({
       selected <- selected_metric_result()
       result <- metric_decomposition()
-      reason <- metric_status_text(selected, result)
-      tails <- if (is.null(reason)) selected$return_period else NULL
-      if (!is.data.frame(tails) || !nrow(tails)) {
-        return(.policy_metric_export_annotate(data.frame(), result, metric_scenario(),
-          export_scope = "adverse_probability_quantile_contrasts", so = so(),
-          analysis_unit = analysis_unit(), status = metric_display_status(selected),
-          reason = reason %||% "Adverse attribution unavailable"))
+      reason <- metric_status_text(selected, result, tail = TRUE)
+      scenario <- metric_scenario()
+      if (length(scenario) != 1L || is.na(scenario) || !nzchar(scenario)) scenario <- "Unavailable scenario"
+      tails <- if (!isTRUE(stale())) result$return_period else NULL
+      if (!is.data.frame(tails)) tails <- data.frame()
+      tails <- tails[tails$scope == "baseline_anchored" & tails$scenario == scenario, , drop = FALSE]
+      if (!nrow(tails)) {
+        unavailable_reason <- reason
+        if (length(unavailable_reason) != 1L || is.na(unavailable_reason) || !nzchar(unavailable_reason)) {
+          unavailable_reason <- "Baseline-anchored adverse support unavailable."
+        }
+        tails <- data.frame(scenario = scenario, return_period = NA_real_, scope = "baseline_anchored",
+          status = "unavailable", reason = unavailable_reason,
+          baseline = NA_real_, after_main = NA_real_, after_repositioning = NA_real_, policy = NA_real_,
+          main = NA_real_, repositioning = NA_real_, interaction = NA_real_, resilience = NA_real_, total = NA_real_,
+          probability = NA_real_, center_method = "", quantile_method = "rank_interp_n_p_plus_half",
+          n_models = NA_integer_, n_model_years = NA_integer_, adverse_basis = "baseline_selected_metric",
+          year_lo = NA_real_, year_hi = NA_real_, rank_lo = NA_integer_, rank_hi = NA_integer_,
+          weight_lo = NA_real_, weight_hi = NA_real_, stringsAsFactors = FALSE)
       }
-      tails <- tails[tails$scope == "equal_probability", , drop = FALSE]
-      tails$return_period_label <- paste0("1-in-", format(tails$return_period, trim = TRUE), " year")
+      tails$return_period_label <- ifelse(is.finite(tails$return_period),
+        paste0("Adverse 1-in-", format(tails$return_period, trim = TRUE), " year"),
+        "Adverse quantile unavailable")
       meta <- metric_meta() %||% list()
       repositioning_modeled <- identical(result$mechanisms$repositioning_status, "modeled")
       interaction_included <- identical(result$mechanisms$interaction_status, "included")
@@ -881,7 +891,7 @@ mod_3_09_decomposition_server <- function(id,
         display("resilience")
       } else "Unavailable"
       tails$total_display <- display("total")
-      tails$scope_label <- "Equal-probability outcome quantile contrast"
+      tails$scope_label <- rep("Baseline-anchored adverse quantile", nrow(tails))
       tails$availability <- ifelse(tails$status == "ok", "Available", tails$reason)
       for (field in c("baseline", "after_main", "after_repositioning", "policy",
                       "main", "repositioning", "interaction", "resilience", "total")) {
@@ -896,30 +906,36 @@ mod_3_09_decomposition_server <- function(id,
       out <- tails[, c("return_period_label", "scope_label", "main_display",
         "repositioning_display", "interaction_display", "resilience_display",
         "total_display", intersect(c("n_models", "n_model_years"), names(tails)),
-        intersect(c("scenario", "member", "model_id", "sim_year"), names(tails)),
+        intersect(c("scenario", "member", "model_id", "sim_year", "adverse_basis", "year_lo", "year_hi", "rank_lo", "rank_hi", "weight_lo", "weight_hi"), names(tails)),
         "baseline_native", "after_main_native", "after_repositioning_native", "policy_native",
         "main_native", "repositioning_native", "interaction_native", "resilience_native",
         "total_native", "probability", "center_method", "quantile_method", "availability"), drop = FALSE]
       names(out) <- c("Return period", "Scope", "Main", "Repositioning", "Interaction",
         "Resilience", "Total", if ("n_models" %in% names(out)) "Models", if ("n_model_years" %in% names(out)) "Model-years",
-        intersect(c("scenario", "member", "model_id", "sim_year"), names(tails)),
+        intersect(c("scenario", "member", "model_id", "sim_year", "adverse_basis", "year_lo", "year_hi", "rank_lo", "rank_hi", "weight_lo", "weight_hi"), names(tails)),
         "Baseline native", "After main native", "After repositioning native", "Policy native",
         "Main native", "Repositioning native", "Interaction native", "Resilience native",
         "Total native", "Probability", "Center method", "Quantile method", "Availability")
       out$scope_identifier <- tails$scope
+      out$adverse_basis <- tails$adverse_basis
+      out$year_lo <- tails$year_lo
+      out$year_hi <- tails$year_hi
+      out$rank_lo <- tails$rank_lo
+      out$rank_hi <- tails$rank_hi
+      out$weight_lo <- tails$weight_lo
+      out$weight_hi <- tails$weight_hi
       out$status <- tails$status
       out$reason <- tails$reason
       .policy_metric_export_annotate(out, metric_decomposition(), metric_scenario(),
-        export_scope = "adverse_probability_quantile_contrasts", so = so(),
-        analysis_unit = analysis_unit(), status = selected$status, reason = selected$reason)
+        export_scope = "baseline_anchored_adverse_quantiles", so = so(),
+        analysis_unit = analysis_unit(), status = if (nrow(tails)) tails$status[[1L]] else "unavailable",
+        reason = if (nrow(tails)) tails$reason[[1L]] else "Baseline-anchored adverse support is unavailable.")
     })
     output$metric_tail_table <- reactable::renderReactable({
       tbl <- metric_tail_data()
       visible <- c("Return period", "Scope", "Main", "Repositioning", "Interaction",
         "Resilience", "Total", "Models", "Model-years")
-      if ("status" %in% names(tbl) && any(tbl$status != "ok")) {
-        visible <- c(visible, "Availability", "reason")
-      }
+      if ("status" %in% names(tbl)) visible <- c(visible, "Availability", "reason")
       if (!"Return period" %in% names(tbl)) visible <- c(visible, "status", "availability", "reason")
       reactable::reactable(tbl, compact = TRUE, searchable = FALSE, defaultPageSize = 8,
         defaultColDef = reactable::colDef(show = FALSE), highlight = TRUE,
@@ -1030,9 +1046,19 @@ mod_3_09_decomposition_server <- function(id,
       result <- metric_export_result()
       scenario <- metric_scenario()
       selected <- result$scenarios[[scenario]]
-      rows <- if (is.list(selected) && identical(selected$status, "ok")) selected$return_period else NULL
+      rows <- if (is.data.frame(result$return_period)) result$return_period else NULL
+      rows <- if (is.data.frame(rows)) rows[rows$scenario == scenario, , drop = FALSE] else data.frame()
       rows <- if (is.data.frame(rows) && nrow(rows)) rows[rows$scope %in% scopes, , drop = FALSE] else data.frame()
-      label <- "equal_probability_cumulative_quantiles"
+      if (!nrow(rows)) {
+        rows <- data.frame(scenario = scenario, probability = NA_real_, return_period = NA_real_,
+          status = "unavailable", reason = "Baseline-anchored adverse support unavailable.", baseline = NA_real_, after_main = NA_real_,
+          after_repositioning = NA_real_, policy = NA_real_, main = NA_real_, repositioning = NA_real_,
+          interaction = NA_real_, resilience = NA_real_, total = NA_real_, scope = "baseline_anchored",
+          adverse_basis = "baseline_selected_metric", center_method = "equal_model_mean", quantile_method = "rank_interp_n_p_plus_half",
+          year_lo = NA_real_, year_hi = NA_real_, rank_lo = NA_integer_, rank_hi = NA_integer_,
+          weight_lo = NA_real_, weight_hi = NA_real_, stringsAsFactors = FALSE)
+      }
+      label <- "baseline_anchored_adverse_quantile"
       .policy_metric_export_annotate(rows, result, scenario,
         export_scope = label, so = so(), analysis_unit = analysis_unit(),
         status = if (nrow(rows)) selected$status %||% "unavailable" else "unavailable",
@@ -1090,11 +1116,45 @@ mod_3_09_decomposition_server <- function(id,
       label = "Metric-aware adverse-weather attribution",
       step = 3L,
       fun = function() {
-        equal_probability <- metric_tail_export("equal_probability")
-        if (nrow(equal_probability)) equal_probability$record_type <- "equal_probability_quantile_contrast"
-        equal_probability
+        adverse <- metric_tail_export("baseline_anchored")
+        if (nrow(adverse)) adverse$record_type <- "baseline_anchored_adverse_quantile"
+        adverse
       },
-      description = "Native cumulative-state attribution for equal-probability outcome quantiles, including probabilities, quantile and ensemble conventions, model support, and the distinct-year caveat."
+       description = "Native selected-metric cumulative levels and contributions under baseline-anchored interpolated support; SSP rows use an equal-model mean."
+    )
+    wise_export_table(
+      key = "policy_adverse_support",
+      label = "Policy baseline-anchored adverse support",
+      step = 3L,
+      fun = function() {
+        result <- metric_export_result()
+        rows <- result$adverse_support
+        if (is.data.frame(rows) && nrow(rows)) rows[rows$scenario == metric_scenario(), , drop = FALSE] else data.frame()
+      },
+      description = "Per-model selected-metric baseline quantiles and interpolated year-rank support."
+    )
+    wise_export_table(
+      key = "policy_adverse_by_model",
+      label = "Policy adverse values by model",
+      step = 3L,
+      fun = function() {
+        result <- metric_export_result()
+        rows <- result$adverse_by_model
+        if (is.data.frame(rows) && nrow(rows)) rows[rows$scenario == metric_scenario(), , drop = FALSE] else data.frame()
+      },
+      description = "Metric-aware state values and adjacent contributions by model under baseline-selected support."
+    )
+    wise_export_table(
+      key = "policy_decomposition_adverse_support",
+      label = "Technical adverse values by model",
+      step = 3L,
+      fun = function() {
+        support <- metric_adverse_support()
+        rows <- if (is.data.frame(support)) support else data.frame()
+        if (nrow(rows)) rows$scale <- "model_scale"
+        rows
+      },
+      description = "Results-owned year-rank support reused by technical model-scale diagnostics."
     )
     wise_export_table(
       key = "policy_weather_sensitivity",
@@ -1166,14 +1226,14 @@ mod_3_09_decomposition_server <- function(id,
       }
     }
 
-    weather_basis_label <- reactive({
-      switch(input$decomp_weather_basis %||% "mean",
+    weather_basis_label <- function(basis = "mean") {
+      switch(basis %||% "mean",
         mean = "mean historical-baseline weather",
         adverse_10 = "adverse 1-in-10 historical weather year",
         adverse_20 = "adverse 1-in-20 historical weather year",
         "mean historical-baseline weather"
       )
-    })
+    }
 
     historical_weather_basis_for_probability <- function(target_p) {
       ctx <- decomp_context()
@@ -1228,7 +1288,7 @@ mod_3_09_decomposition_server <- function(id,
         "lower_is_better"
       )
       ordered <- order(agg, decreasing = adverse_high)
-      take <- max(1L, min(length(ordered), round(length(ordered) * target_p)))
+      take <- max(1L, min(length(ordered), ceiling(length(ordered) * target_p)))
       year_values[[names(agg)[ordered[[take]]]]]
     }
 
@@ -1243,9 +1303,7 @@ mod_3_09_decomposition_server <- function(id,
 
     decomp_for_basis <- function(basis) {
       if (!identical(policy_method_status()$status, "ok")) return(NULL)
-      if (identical(basis, "mean")) {
-        return(decomp_result())
-      }
+      if (identical(basis, "mean")) return(decomp_result())
       ctx <- decomp_context()
       cached_result <- if (!is.null(ctx)) {
         key <- if (identical(basis, "adverse_10")) "adverse_10" else "adverse_20"
@@ -1258,7 +1316,8 @@ mod_3_09_decomposition_server <- function(id,
         NULL
       }
       if (!is.null(cached_result)) {
-        return(cached_result)
+        return(if ("sim_year" %in% names(cached_result))
+          select_decomp_weather_basis(cached_result, basis, so()) else cached_result)
       }
       hs <- baseline_hist_sim()
       svy_b <- baseline_svy()
@@ -1275,57 +1334,93 @@ mod_3_09_decomposition_server <- function(id,
           context = decomp_context(),
           run_identity = if (!is.null(decomp_context())) decomp_context()$run_identity else NULL
         ),
-        error = function(e) decomp_result()
+        error = function(e) select_decomp_weather_basis(decomp_result(), basis, so())
       )
     }
     selected_decomp_result <- reactive({
       decomp_for_basis(input$decomp_weather_basis %||% "mean")
     })
 
-    headline_decomp_data <- reactive({
-      if (!identical(policy_method_status()$status, "ok")) return(data.frame())
-      basis <- input$decomp_weather_basis %||% "mean"
-      outcome <- so() %||% list()
-      hist <- decomposition_summary_data(selected_decomp_result(), is_rif())
-      hist$scenario <- "Historical"
-      sc <- decomp_scenarios()
-      if (.is_compact_decomp_scenarios(sc)) {
-        scenarios <- .compact_future_scenarios(sc)
-        if (!length(scenarios)) {
-          return(hist)
-        }
-        future <- dplyr::bind_rows(lapply(sort(scenarios), function(scenario) {
-          out <- .compact_future_summary(sc, scenario, basis, outcome, is_rif())
-          out$scenario <- scenario
-          out
-        }))
-      } else {
-        if (is.null(sc) || !is.data.frame(sc) || !nrow(sc)) {
-          return(hist)
-        }
-        future <- dplyr::bind_rows(lapply(split(sc, sc$scenario), function(x) {
-          x <- select_decomp_weather_basis(x, basis, outcome)
-          out <- decomposition_summary_data(x, is_rif())
-          out$scenario <- as.character(x$scenario[[1L]])
-          out
-        }))
+    decomposition_scenarios <- reactive({
+      scenarios <- c(baseline_hist_sim()$hist_label %||% "Historical",
+        .compact_future_scenarios(decomp_scenarios()))
+      raw <- decomp_scenarios()
+      if (is.data.frame(raw) && nrow(raw) && "scenario" %in% names(raw)) {
+        scenarios <- c(scenarios, unique(as.character(raw$scenario)))
       }
-      dplyr::bind_rows(hist, future)
+      unique(scenarios)
+    })
+    headline_scenario_ui <- shiny::renderUI({
+      scenarios <- decomposition_scenarios()
+      pill_toggle(ns("headline_scenario"), label = "Scenario",
+        choices = stats::setNames(scenarios, scenarios),
+        selected = isolate(input$headline_scenario) %||% scenarios[[1L]],
+        layout = "horizontal")
+    })
+    output$headline_scenario_ui <- headline_scenario_ui
+    output$headline_weather_basis_ui <- shiny::renderUI({
+      pill_toggle(ns("headline_weather_basis"), label = "Weather-year basis",
+        choices = c("Mean" = "mean", "Adverse 1-in-10" = "adverse_10",
+          "Adverse 1-in-20" = "adverse_20"),
+        selected = isolate(input$headline_weather_basis) %||% "mean",
+        layout = "horizontal")
+    })
+    output$decile_weather_basis_ui <- shiny::renderUI({
+      pill_toggle(ns("decile_weather_basis"), label = "Weather-year basis",
+        choices = c("Mean" = "mean", "Adverse 1-in-10" = "adverse_10",
+          "Adverse 1-in-20" = "adverse_20"),
+        selected = isolate(input$decile_weather_basis) %||% "mean",
+        layout = "horizontal")
+    })
+    headline_decomp_data <- reactive({
+      if (isTRUE(stale())) return(data.frame())
+      if (!identical(policy_method_status()$status, "ok")) return(data.frame())
+      scenario <- input$headline_scenario %||% baseline_hist_sim()$hist_label %||% "Historical"
+      basis <- input$headline_weather_basis %||% "mean"
+      is_historical <- identical(scenario, baseline_hist_sim()$hist_label %||% "Historical")
+        res <- if (is_historical) decomp_for_basis(basis) else NULL
+        if (!is_historical) {
+          compact <- decomp_scenarios()
+          if (.is_compact_decomp_scenarios(compact)) {
+          rows <- .compact_future_year(compact, scenario, basis, so())
+          res <- .compact_future_as_decomp(rows, is_rif())
+          if (nrow(res) && identical(so()$transform %||% "", "log")) {
+            res$baseline_annual <- .weighted_mean_safe(rows$baseline_annual,
+              rows$weight_baseline_y_point)
+          }
+        } else if (is.data.frame(compact) && nrow(compact)) {
+          res <- compact[compact$scenario == scenario, , drop = FALSE]
+          res <- select_decomp_weather_basis(res, basis, so())
+        } else res <- NULL
+      }
+      out <- if (!is_historical && .is_compact_decomp_scenarios(decomp_scenarios())) {
+        .decomposition_outcome_summary(res, so(), baseline_svy())
+      } else .decomposition_outcome_summary(res, so(), baseline_svy())
+      if (nrow(out)) out$scenario <- scenario
+      out
+    })
+    outcome_metric <- reactive({
+      metric_metadata("mean", so(), poverty_line(), analysis_unit(), weighted = TRUE)
     })
     output$headline_decomp_note_ui <- renderUI({
       if (!identical(policy_method_status()$status, "ok")) {
         return(shiny::tags$p(class = "alert alert-warning", policy_method_status()$reason))
       }
+      scenario <- input$headline_scenario %||% baseline_hist_sim()$hist_label %||% "Historical"
+      metric <- outcome_metric()
+      unit <- metric$change_unit %||% "outcome units"
+      outcome <- metric$outcome_label %||% metric$outcome_name %||% so()$name %||% "selected outcome"
       shiny::tags$p(class = "diagnostic-note", paste0(
-        "Illustrative technical decomposition using ", weather_basis_label(),
-        ". These transformed model-scale summaries are not selected-metric contributions or currency changes."
+        "Weighted average change in ", outcome, " (", unit, ") for ", scenario,
+        " under ", weather_basis_label(input$headline_weather_basis %||% "mean"), "."
       ))
     })
     # Zero-arg echarts closures shared by the on-screen render and the
     # export bundle (guidelines §7 pattern).
     headline_decomp_chart <- function() {
-      echart_decomposition_headline(
+      echart_outcome_decomposition_headline(
         headline_decomp_data(),
+        y_label = paste0("Weighted average change (", outcome_metric()$change_unit %||% "outcome units", ")"),
         height = "360px"
       )
     }
@@ -1337,158 +1432,124 @@ mod_3_09_decomposition_server <- function(id,
     # The Decomposition UI is inserted after the server starts. Keep plots
     # live before their DOM nodes exist so they render immediately on tab open.
     outputOptions(output, "headline_decomp_plot", suspendWhenHidden = FALSE)
-    output$headline_decomp_table <- reactable::renderReactable({
-      req(headline_decomp_data())
-      tbl <- headline_decomp_data()
-      tbl <- tbl[tbl$channel_id %in% c("level", "resilience", "total"), , drop = FALSE]
-      # Raw values in the data; display rounding lives in colFormat.
-      tbl <- data.frame(
-        Scenario = as.character(tbl$scenario),
-        `Effect component` = as.character(tbl$channel),
-        `Mean effect (%)` = suppressWarnings(as.numeric(tbl$percent)),
-        `Share of total (%)` = 100 * suppressWarnings(as.numeric(tbl$share_of_total)),
-        check.names = FALSE
-      )
-      reactable::reactable(
-        tbl,
-        columns = list(
-          Scenario = reactable::colDef(class = "wise-dt-wrap", minWidth = 70),
-          `Effect component` = reactable::colDef(class = "wise-dt-wrap", minWidth = 170),
-          `Mean effect (%)` = reactable::colDef(
-            format = reactable::colFormat(digits = 2),
-            class = "wise-dt-wrap"
-          ),
-          `Share of total (%)` = reactable::colDef(
-            format = reactable::colFormat(digits = 1),
-            class = "wise-dt-wrap"
-          )
-        ),
-        compact = TRUE,
-        searchable = FALSE,
-        defaultPageSize = 10,
-        showPageSizeOptions = TRUE,
-        pageSizeOptions = c(10, 25, 50, 100),
-        highlight = TRUE
-      )
-    })
-    outputOptions(output, "headline_decomp_table", suspendWhenHidden = FALSE)
     wise_export_figure(
       key = "policy_decomposition_headline",
-      label = "Headline main effect and resilience decomposition",
+      label = "Headline mean outcome decomposition",
       step = 3L,
       fun = headline_decomp_chart,
-      description = "Headline decomposition into main effect, resilience, and total effects with reconciliation on the model scale.",
-      width = 9, height = 5
+      description = "Registry mean-metric weighted average decomposition in the selected outcome's change units.",
+      width = 9, height = 5, stale = stale
     )
     wise_export_table(
       key = "policy_decomposition_headline_data",
-        label = "Headline decomposition data",
-        step = 3L,
-        fun = function() {
-          if (!identical(policy_method_status()$status, "ok")) {
-            return(data.frame(availability = "unsupported", reason = policy_method_status()$reason))
-          }
-        out <- headline_decomp_data()
-        out <- out[out$channel_id %in% c("level", "resilience", "total"), , drop = FALSE]
-        data.frame(
-          Scenario = out$scenario,
-          `Effect component` = out$channel,
-          `Mean effect (%)` = round(out$percent, 2),
-          `Share of total (%)` = round(100 * out$share_of_total, 1),
-          check.names = FALSE
-        )
+      label = "Headline outcome decomposition",
+      step = 3L,
+      fun = function() {
+        data <- headline_decomp_data()
+        metric <- outcome_metric()
+        if (!nrow(data)) return(data.frame(Message = "Decomposition data is not available for this selection."))
+        n <- nrow(data)
+        data.frame(Scenario = rep(data$scenario[[1L]], n),
+          Metric = rep(metric$label %||% "Mean", n),
+          Outcome = rep(metric$outcome_label %||% metric$outcome_name %||% "", n),
+          `Change unit` = rep(metric$change_unit %||% "outcome units", n),
+          `Effect component` = data$channel,
+          `Weighted average change` = data$value,
+          check.names = FALSE)
       },
-      description = "Mean-historical-weather decomposition into main effect, resilience, and total policy effects."
+      description = "Registry mean-metric weighted average decomposition in the selected outcome's change units.",
+      stale = stale
     )
 
     # --- Stacked bar chart by decile ---
     # UI-48: register Step 3's decomposition figures for the export bundle.
-    wise_export_figure(
-      key = "policy_decomposition_channels",
-      label = "Policy effect by channel",
-      step = 3L,
-      fun = function() {
-        res <- selected_decomp_result()
-        if (is.null(res) || !is.data.frame(res) || nrow(res) == 0) {
-          return(NULL)
-        }
-        plot_decomposition_channels_by_decile(
-          decomposition_channels_by_decile(res, baseline_svy(), so()$name %||% "welfare", is_rif(), baseline_deciles()),
-          is_rif()
-        )
-      },
-      description = paste(
-        "The policy effect split into its main effect and resilience",
-        "channels (repositioning and weather interaction)."
-      ),
-      width = 9, height = 6
-    )
-    wise_export_table(
-      key = "policy_decomposition_channels_by_decile",
-      label = "Decomposition channels by baseline decile",
-      step = 3L,
-      fun = function() {
-        decomposition_decile_export(
-          decomposition_channels_by_decile(
-            selected_decomp_result(), baseline_svy(), so()$name %||% "welfare", is_rif(), baseline_deciles()
-          ),
-          is_rif()
-        )
-      },
-      description = "Engine-specific decomposition channels, total, and counts by fixed weighted baseline welfare decile."
-    )
-
     output$decile_scenario_ui <- shiny::renderUI({
-      sc <- decomp_scenarios()
-      choices <- c("Historical" = "Historical")
-      if (.is_compact_decomp_scenarios(sc)) {
-        future <- .compact_future_scenarios(sc)
-        choices <- c(choices, stats::setNames(future, future))
-      } else if (is.data.frame(sc) && nrow(sc) && "scenario" %in% names(sc)) {
-        future <- unique(as.character(sc$scenario))
-        choices <- c(choices, stats::setNames(future, future))
-      }
-      pill_toggle(ns("decile_scenario"),
-        label = "Scenario", choices = choices,
-        selected = isolate(input$decile_scenario) %||% "Historical",
-        layout = "horizontal"
-      )
+      choices <- decomposition_scenarios()
+      selected <- isolate(input$decile_scenario) %||% choices[[1L]]
+      if (!selected %in% choices) selected <- choices[[1L]]
+      pill_toggle(ns("decile_scenario"), label = "Scenario",
+        choices = stats::setNames(choices, choices), selected = selected,
+        layout = "horizontal")
     })
 
     decile_decomp_data <- reactive({
-      outcome <- so()
-      if (is.null(outcome)) {
-        return(tibble::tibble())
-      }
-      scenario <- input$decile_scenario %||% "Historical"
+      if (isTRUE(stale()) || !identical(policy_method_status()$status, "ok")) return(data.frame())
+      scenario <- input$decile_scenario %||% baseline_hist_sim()$hist_label %||% "Historical"
       basis <- input$decile_weather_basis %||% "mean"
-      if (identical(scenario, "Historical")) {
-        res <- decomp_for_basis(basis)
+      is_historical <- identical(scenario, baseline_hist_sim()$hist_label %||% "Historical")
+      res <- if (is_historical) {
+        decomp_for_basis(basis)
       } else if (.is_compact_decomp_scenarios(decomp_scenarios())) {
-        return(.compact_future_decile_summary(
-          decomp_scenarios(), scenario, basis, outcome, is_rif()
-        ))
+        compact <- .compact_future_decile_summary(decomp_scenarios(), scenario,
+          basis, so(), is_rif())
+        if (!nrow(compact)) return(data.frame())
+        baseline_annual <- rep(NA_real_, nrow(compact))
+        if (identical(so()$transform %||% "", "log")) {
+          survey <- baseline_svy()
+          baseline_decile <- weighted_baseline_deciles(survey, so()$name %||% "welfare",
+            baseline_weight_column(survey))
+          survey_weights <- .decomp_weights(survey)
+          baseline_annual <- vapply(compact$decile, function(d) {
+            keep <- baseline_decile == d
+            .weighted_mean_safe(as.numeric(survey[[so()$name]][keep]), survey_weights[keep])
+          }, numeric(1))
+        }
+        compact_decomp <- data.frame(decile = compact$decile,
+          delta_main = compact$main, delta_res1 = compact$repositioning,
+          delta_res2 = compact$interaction, delta_total = compact$total,
+          weight = compact$weighted_population,
+          baseline_annual = baseline_annual)
+        return(structure(.decomposition_outcome_deciles(compact_decomp, so(), baseline_svy()),
+          outcome_units = TRUE))
       } else {
         sc <- decomp_scenarios()
-        res <- if (is.data.frame(sc) && nrow(sc)) {
-          sc[sc$scenario == scenario, , drop = FALSE]
-        } else {
-          NULL
-        }
-        res <- select_decomp_weather_basis(res, basis, outcome)
+        selected <- if (is.data.frame(sc) && nrow(sc)) sc[sc$scenario == scenario, , drop = FALSE] else NULL
+        select_decomp_weather_basis(selected, basis, so())
       }
-      if (is.null(res) || !is.data.frame(res) || !nrow(res)) {
-        return(tibble::tibble())
+      if (!is_historical && is.data.frame(res) && isTRUE(attr(res, "outcome_units"))) {
+        return(res)
       }
-      decomposition_channels_by_decile(
-        res, baseline_svy(), outcome$name %||% "welfare", is_rif(), baseline_deciles()
-      )
+      .decomposition_outcome_deciles(res, so(), baseline_svy())
     })
 
+    output$headline_decomp_csv_ui <- shiny::renderUI({
+      wise_reactable_csv_button(ns("headline_decomp_table"), "policy_decomposition_headline_data")
+    })
+    output$decile_decomp_csv_ui <- shiny::renderUI({
+      wise_reactable_csv_button(ns("decile_decomp_table"), "policy_decomposition_channels_by_decile")
+    })
+    output$headline_decomp_table <- DT::renderDT({
+      data <- headline_decomp_data()
+      metric <- outcome_metric()
+      if (!nrow(data)) return(DT::datatable(data.frame(Message =
+        "Decomposition data is not available for this selection."), rownames = FALSE, options = list(dom = "t")))
+      n <- nrow(data)
+      DT::datatable(data.frame(Scenario = rep(data$scenario[[1L]], n),
+        Metric = rep(metric$label %||% "Mean", n),
+        Outcome = rep(metric$outcome_label %||% metric$outcome_name %||% "", n),
+        `Change unit` = rep(metric$change_unit %||% "outcome units", n),
+        `Effect component` = data$channel,
+        `Weighted average change` = data$value, check.names = FALSE),
+        rownames = FALSE, class = "compact stripe")
+    })
+    outputOptions(output, "headline_decomp_table", suspendWhenHidden = TRUE)
+    output$decile_decomp_table <- DT::renderDT({
+      data <- decile_decomp_data()
+      if (!nrow(data)) return(DT::datatable(data.frame(Message =
+        "Decomposition data is not available for this selection."), rownames = FALSE, options = list(dom = "t")))
+      unit <- outcome_metric()$change_unit %||% "outcome units"
+      channels <- data[c("main", "repositioning", "interaction", "total")]
+      names(channels) <- paste(c("Main effect", "Repositioning", "Interaction", "Total policy effect"),
+        paste0("(", unit, ")"))
+      table <- stats::setNames(data.frame(data$decile, channels, check.names = FALSE),
+        c("Baseline welfare decile", names(channels)))
+      DT::datatable(table, rownames = FALSE, class = "compact stripe")
+    })
+    outputOptions(output, "decile_decomp_table", suspendWhenHidden = TRUE)
     decomp_bar_chart <- function() {
-      echart_decomposition_channels_by_decile(
+      echart_outcome_decomposition_deciles(
         decile_decomp_data(),
-        is_rif(),
+        y_label = paste0("Weighted average change (", outcome_metric()$change_unit %||% "outcome units", ")"),
         height = "450px"
       )
     }
@@ -1498,14 +1559,34 @@ mod_3_09_decomposition_server <- function(id,
       ch
     })
     outputOptions(output, "decomp_bar_plot", suspendWhenHidden = FALSE)
+    wise_export_table(
+      key = "policy_decomposition_channels_by_decile",
+      label = "Mean outcome decomposition by baseline decile",
+      step = 3L,
+      fun = function() {
+        data <- decile_decomp_data()
+        if (!nrow(data)) return(data.frame(Message = "Decomposition data is not available for this selection."))
+        unit <- outcome_metric()$change_unit %||% "outcome units"
+        channels <- data[c("main", "repositioning", "interaction", "total")]
+        names(channels) <- paste(c("Main effect", "Repositioning", "Interaction", "Total policy effect"),
+          paste0("(", unit, ")"))
+        stats::setNames(data.frame(data$decile, channels, check.names = FALSE),
+          c("Baseline welfare decile", names(channels)))
+      },
+      description = "Weighted average mean-metric channel contributions in registry outcome units by fixed baseline welfare decile.",
+      stale = stale
+    )
     wise_export_figure(
-      key = "policy_decomposition_channels_selected",
+      key = "policy_decomposition_channels_by_decile_plot",
       label = "Selected policy decomposition channels",
       step = 3L,
       fun = decomp_bar_chart,
-      description = "Policy-effect channels by fixed baseline welfare decile for the selected scenario and weather basis.",
-      width = 9, height = 6
+      description = "Weighted average mean-metric channel contributions in registry outcome units by fixed baseline welfare decile.",
+      width = 9, height = 6, stale = stale
     )
+    wise_export_remove(c("policy_metric_contributions", "policy_metric_adverse_attribution",
+      "policy_adverse_support", "policy_adverse_by_model", "policy_decomposition_adverse_support",
+      "policy_weather_sensitivity"))
     output$decomp_bar_note_ui <- renderUI({
       basis <- input$decile_weather_basis %||% "mean"
       basis_label <- switch(basis,
@@ -1516,7 +1597,8 @@ mod_3_09_decomposition_server <- function(id,
       shiny::tags$p(
         class = "diagnostic-note",
         paste0(
-          "Decile 1 is the poorest. Stacked bars separate direct transfer, covariate shift, weather-policy interaction, and - for RIF models only - repositioning. The marker shows the total policy effect for ",
+          "Decile 1 is the poorest. Bars show weighted mean-effect channel changes in ",
+          outcome_metric()$change_unit %||% "outcome units", "; the marker is total policy change for ",
           basis_label, " under the ", input$decile_scenario %||% "Historical",
           " scenario. Deciles are fixed from weighted observed baseline welfare."
         )
@@ -1647,49 +1729,6 @@ mod_3_09_decomposition_server <- function(id,
       )
       .build_decomp_table_by_basis(bases, is_rif())
     })
-
-    # --- Summary table ---
-    output$decomp_summary_table <- reactable::renderReactable({
-      req(technical_decomp_table())
-      tbl <- as.data.frame(technical_decomp_table())
-      if (!nrow(tbl)) {
-        tbl <- data.frame(Note = "No decomposition data available")
-      }
-      cols <- lapply(names(tbl), function(nm) {
-        x <- tbl[[nm]]
-        if (is.numeric(x)) {
-          reactable::colDef(
-            format = reactable::colFormat(digits = 2),
-            class = "wise-dt-wrap"
-          )
-        } else if (is.character(x) || is.factor(x)) {
-          reactable::colDef(class = "wise-dt-wrap", minWidth = 170)
-        } else {
-          reactable::colDef(class = "wise-dt-wrap", minWidth = 70)
-        }
-      })
-      names(cols) <- names(tbl)
-      reactable::reactable(
-        tbl,
-        columns = cols,
-        compact = TRUE,
-        searchable = FALSE,
-        defaultPageSize = 10,
-        showPageSizeOptions = TRUE,
-        pageSizeOptions = c(10, 25, 50, 100),
-        highlight = TRUE
-      )
-    })
-    outputOptions(output, "decomp_summary_table", suspendWhenHidden = FALSE)
-    wise_export_table(
-      key = "policy_decomposition_summary",
-      label = "Policy decomposition summary",
-      step = 3L,
-      fun = function() {
-        technical_decomp_table()
-      },
-      description = "Weighted policy-effect decomposition under mean weather and adverse historical weather years."
-    )
 
     # --- Interaction warning ---
     output$interaction_warning_ui <- renderUI({

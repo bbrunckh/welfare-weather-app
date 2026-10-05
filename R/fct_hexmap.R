@@ -54,7 +54,7 @@ hexmap_dependency <- function() {
     name = "wiseapp-hexmap",
     # Bump on every engine change: the version is part of the script URL,
     # so browsers re-fetch instead of serving a stale cached engine.
-    version = "1.0.5",
+    version = "1.0.6",
     src = app_sys("app", "vendor"),
     script = c(
       "maplibre-gl.js",

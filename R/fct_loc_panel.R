@@ -154,7 +154,7 @@ loc_panel <- function(data,
       overlap_x = shared_x / total_x,
       overlap_y = shared_y / total_y
     ) |>
-    dplyr::filter(pmin(overlap_x, overlap_y) >= threshold) |>
+    dplyr::filter(overlap_x >= threshold, overlap_y >= threshold) |>
     dplyr::select(from = loc_id_x, to = loc_id_y)
 
   # --- 5. Collect - single trip to DuckDB for both edges and all IDs ---------

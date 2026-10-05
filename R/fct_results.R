@@ -4451,9 +4451,11 @@ echart_weather_effect_plot <- function(fit, pred_var, interaction_terms, is_binn
 # ggplot histogram prep (bins = 30, y = 100 * count / sum(count)).
 .e_hist_shares <- function(x, breaks) {
   h <- graphics::hist(x, breaks = breaks, plot = FALSE)
+  counts <- h$counts
+  total <- sum(counts)
   data.frame(
     mid = (head(breaks, -1) + tail(breaks, -1)) / 2,
-    share = 100 * h$counts / sum(h$counts),
+    share = if (is.finite(total) && total > 0) 100 * counts / total else rep(0, length(counts)),
     stringsAsFactors = FALSE
   )
 }
@@ -4805,13 +4807,19 @@ echart_pred_vs_actual <- function(model, is_logistic, outcome_label = "outcome",
     predicted <- predicted[seq_len(n)]
 
     all_vals <- c(actual, predicted)
+    all_vals <- all_vals[is.finite(all_vals)]
+    if (length(all_vals) < 2L || diff(range(all_vals)) <= 0) {
+      return(echart_blank("Outcome distribution unavailable.", height = height))
+    }
     brks <- seq(min(all_vals, na.rm = TRUE), max(all_vals, na.rm = TRUE),
       length.out = 31
     )
     ha <- .e_hist_shares(actual, brks)
     hp <- .e_hist_shares(predicted, brks)
     labels <- formatC(ha$mid, format = "f", digits = 2)
-    y_max <- max(5, ceiling(max(c(ha$share, hp$share), na.rm = TRUE) / 5) * 5)
+    observed_max <- max(c(ha$share, hp$share), na.rm = TRUE)
+    y_max <- max(1, ceiling(observed_max * 1.12))
+    y_interval <- y_max / 5
 
     e <- .e_new(height)
     bar <- function(d, nm, col) {
@@ -4836,7 +4844,7 @@ echart_pred_vs_actual <- function(model, is_logistic, outcome_label = "outcome",
       splitLine = wise_esplit_line()
     ))
     e$x$opts$yAxis <- list(list(
-      type = "value", min = 0, max = y_max, interval = y_max / 5,
+      type = "value", min = 0, max = y_max, interval = y_interval,
       name = "Share of households (%)",
       nameLocation = "end",
       nameTextStyle = wise_eyaxis_name(),
@@ -4965,6 +4973,7 @@ echart_welfare_quantile_hist <- function(y, taus, x_label, height = "400px") {
   }
   h <- .e_hist_shares(y, brks)
   labels <- formatC(h$mid, format = "f", digits = 2)
+  y_max <- max(1, ceiling(max(h$share, na.rm = TRUE) * 1.12))
 
   q_vals <- stats::quantile(y, probs = taus, names = FALSE)
   tau_marks <- lapply(seq_along(taus), function(i) {
@@ -5003,11 +5012,13 @@ echart_welfare_quantile_hist <- function(y, taus, x_label, height = "400px") {
     splitLine = wise_esplit_line()
   ))
     e$x$opts$yAxis <- list(list(
-      type = "value", min = 0, max = 100, interval = 20,
+      type = "value", min = 0, max = y_max, interval = y_max / 5,
       name = "Share of households (%)",
       nameLocation = "end",
       nameTextStyle = wise_eyaxis_name(),
-    axisLabel = wise_eaxis_label(formatter = .e_percent_formatter()),
+    axisLabel = wise_eaxis_label(
+      formatter = htmlwidgets::JS("function(v){ return v + '%'; }")
+    ),
     splitLine = wise_esplit_line()
   ))
   e$x$opts$grid <- list(

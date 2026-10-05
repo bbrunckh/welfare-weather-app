@@ -2,7 +2,8 @@
 # Construction, treatment assignment, and covariate support diagnostics.
 
 policy_treatment_matrix <- function(baseline_svy, policy_svy,
-                                    eligibility = NULL, weight_col = "weight") {
+                                    eligibility = NULL, weight_col = "weight",
+                                    analysis_unit = "hh") {
   if (is.null(baseline_svy) || is.null(policy_svy) ||
     nrow(baseline_svy) != nrow(policy_svy)) {
     return(data.frame())
@@ -27,6 +28,18 @@ policy_treatment_matrix <- function(baseline_svy, policy_svy,
   p[is.na(p)] <- FALSE
   w <- if (weight_col %in% names(baseline_svy)) as.numeric(baseline_svy[[weight_col]]) else rep(1, nrow(baseline_svy))
   w[!is.finite(w) | w < 0] <- 0
+  hhsize <- if (identical(analysis_unit, "hh") && "hhsize" %in% names(baseline_svy)) {
+    hs <- suppressWarnings(as.numeric(baseline_svy$hhsize))
+    hs[!is.finite(hs) | hs <= 0] <- 1
+    hs
+  } else {
+    rep(1, nrow(baseline_svy))
+  }
+  household_w <- if (identical(analysis_unit, "hh") && weight_col %in% names(baseline_svy)) {
+    w / hhsize
+  } else {
+    w
+  }
   status <- interaction(b, p, drop = TRUE, sep = "_")
   labels <- c(
     `FALSE_FALSE` = "Not eligible, not treated",
@@ -41,6 +54,7 @@ policy_treatment_matrix <- function(baseline_svy, policy_svy,
       eligible_baseline = startsWith(k, "TRUE"),
       treated_policy = endsWith(k, "TRUE"),
       n = sum(ok), weighted_n = sum(w[ok]),
+      weighted_households = sum(household_w[ok]),
       weighted_share = if (sum(w) > 0) sum(w[ok]) / sum(w) else NA_real_,
       stringsAsFactors = FALSE
     )
@@ -48,8 +62,7 @@ policy_treatment_matrix <- function(baseline_svy, policy_svy,
 }
 
 # Unit-level masks shared by the diagnostics coverage table and the Step 3
-# Results headline card, so "population represented" cannot drift between the
-# two surfaces.
+# Results headline card, so reach cannot drift between the two surfaces.
 
 .policy_sp_mask <- function(policy_svy) {
   if (SP_TRANSFER_COL %in% names(policy_svy)) {
@@ -97,6 +110,18 @@ policy_component_matrix <- function(baseline_svy, policy_svy,
   }
   w <- if (weight_col %in% names(baseline_svy)) as.numeric(baseline_svy[[weight_col]]) else rep(1, nrow(baseline_svy))
   w[!is.finite(w) | w < 0] <- 0
+  hhsize <- if (identical(analysis_unit, "hh") && "hhsize" %in% names(baseline_svy)) {
+    hs <- suppressWarnings(as.numeric(baseline_svy$hhsize))
+    hs[!is.finite(hs) | hs <= 0] <- 1
+    hs
+  } else {
+    rep(1, nrow(baseline_svy))
+  }
+  household_w <- if (identical(analysis_unit, "hh") && weight_col %in% names(baseline_svy)) {
+    w / hhsize
+  } else {
+    w
+  }
   total_w <- sum(w)
   changed <- detect_manipulated_vars(
     baseline_svy, policy_svy,
@@ -115,6 +140,7 @@ policy_component_matrix <- function(baseline_svy, policy_svy,
     rows[[length(rows) + 1L]] <<- data.frame(
       component = component, n_affected = sum(mask, na.rm = TRUE),
       weighted_affected = sum(w[mask], na.rm = TRUE),
+      weighted_households = sum(household_w[mask], na.rm = TRUE),
       population_share = if (total_w > 0) sum(w[mask], na.rm = TRUE) / total_w else NA_real_,
       realized_cost = cost, stringsAsFactors = FALSE
     )

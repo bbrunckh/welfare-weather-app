@@ -60,11 +60,11 @@
   }, numeric(1L)), vars)
 }
 
-.policy_treatment_table_raw <- function(df) {
+.policy_treatment_table_raw <- function(df, analysis_unit = "hh") {
   if (is.null(df) || !nrow(df)) {
     return(df)
   }
-  data.frame(
+  out <- data.frame(
     `Coverage status` = df$status,
     `Sample units` = suppressWarnings(as.numeric(df$n)),
     `Population represented` = suppressWarnings(as.numeric(df$weighted_n)),
@@ -72,14 +72,18 @@
     stringsAsFactors = FALSE,
     check.names = FALSE
   )
+  if (identical(analysis_unit, "hh") && "weighted_households" %in% names(df)) {
+    out$`Households represented` <- suppressWarnings(as.numeric(df$weighted_households))
+  }
+  out
 }
 
-.format_policy_treatment_table <- function(df) {
-  raw <- .policy_treatment_table_raw(df)
+.format_policy_treatment_table <- function(df, analysis_unit = "hh") {
+  raw <- .policy_treatment_table_raw(df, analysis_unit)
   if (is.null(raw) || !nrow(raw)) {
     return(raw)
   }
-  data.frame(
+  out <- data.frame(
     `Coverage status` = raw$`Coverage status`,
     `Sample units` = fmt_num(raw$`Sample units`, digits = 0),
     `Population represented` = fmt_num(raw$`Population represented`, digits = 0),
@@ -87,6 +91,10 @@
     stringsAsFactors = FALSE,
     check.names = FALSE
   )
+  if ("Households represented" %in% names(raw)) {
+    out$`Households represented` <- fmt_num(raw$`Households represented`, digits = 0)
+  }
+  out
 }
 
 .policy_treatment_explanation <- function(sp) {
@@ -134,8 +142,8 @@
   if (is.null(df) || !nrow(df)) {
     return(df)
   }
-  unit_label <- if (identical(analysis_unit, "hh")) "Households affected / covered" else "Observations affected / covered"
-  data.frame(
+  unit_label <- if (identical(analysis_unit, "hh")) "Sample households affected / covered" else "Sample observations affected / covered"
+  out <- data.frame(
     `Policy component` = df$component,
     setNames(list(suppressWarnings(as.numeric(df$n_affected))), unit_label),
     `Population represented` = suppressWarnings(as.numeric(df$weighted_affected)),
@@ -143,6 +151,10 @@
     `Realized cost` = suppressWarnings(as.numeric(df$realized_cost)),
     check.names = FALSE, stringsAsFactors = FALSE
   )
+  if (identical(analysis_unit, "hh") && "weighted_households" %in% names(df)) {
+    out$`Households represented` <- suppressWarnings(as.numeric(df$weighted_households))
+  }
+  out
 }
 
 .format_policy_component_table <- function(df, analysis_unit = "hh") {
@@ -150,7 +162,7 @@
   if (is.null(raw) || !nrow(raw)) {
     return(raw)
   }
-  data.frame(
+  out <- data.frame(
     `Policy component` = raw$`Policy component`,
     raw[setdiff(names(raw), c(
       "Policy component", "Population represented", "Population share", "Realized cost"
@@ -160,6 +172,10 @@
     `Realized cost` = fmt_num(raw$`Realized cost`, digits = 0, prefix = "$"),
     check.names = FALSE, stringsAsFactors = FALSE
   )
+  if ("Households represented" %in% names(raw)) {
+    out$`Households represented` <- fmt_num(raw$`Households represented`, digits = 0)
+  }
+  out
 }
 
 # Shared reactable styling for the diagnostics tables (guidelines §6): raw
@@ -404,11 +420,14 @@ mod_3_08_diagnostics_server <- function(id,
       # applied by colFormat.
       df <- data.frame(
         Type = c(
-          "Total transfer $ amount (population-level)",
+          if (length(d$transfer_households) && is.finite(d$transfer_households)) {
+            "Estimated annual cost (recipient households)"
+          } else {
+            "Estimated annual cost (recipient population)"
+          },
           paste0(
-            "Per-", unit_word(plural = FALSE, au = d$analysis_unit),
-            " $ equivalent (eligible ",
-            unit_word(plural = TRUE, au = d$analysis_unit), ")"
+            "Annual transfer per recipient ",
+            if (identical(d$analysis_unit, "hh")) "household" else "unit"
           )
         ),
         Value = c(d$transfer_sum, d$transfer_pp),
@@ -478,11 +497,14 @@ mod_3_08_diagnostics_server <- function(id,
         }
         data.frame(
           Type = c(
-            "Total transfer $ amount (population-level)",
+            if (length(d$transfer_households) && is.finite(d$transfer_households)) {
+              "Estimated annual cost (recipient households)"
+            } else {
+              "Estimated annual cost (recipient population)"
+            },
             paste0(
-              "Per-", unit_word(plural = FALSE, au = d$analysis_unit),
-              " $ equivalent (eligible ",
-              unit_word(plural = TRUE, au = d$analysis_unit), ")"
+              "Annual transfer per recipient ",
+              if (identical(d$analysis_unit, "hh")) "household" else "unit"
             )
           ),
           Value = fmt_num(c(d$transfer_sum, d$transfer_pp), prefix = "$"),
@@ -491,8 +513,8 @@ mod_3_08_diagnostics_server <- function(id,
       },
       stale = stale,
       description = paste(
-        "Population-level annual cost of the social protection transfer and",
-        "the per-recipient equivalent."
+        "Annual cost of social protection across represented recipients",
+        "and annual transfer per recipient household or unit."
       )
     )
 
@@ -662,11 +684,12 @@ mod_3_08_diagnostics_server <- function(id,
       d <- diag_data()
       req(d)
       .wise_diag_reactable(
-        .policy_treatment_table_raw(d$treatment_matrix),
+        .policy_treatment_table_raw(d$treatment_matrix, d$analysis_unit),
         formats = list(
           `Sample units` = list(digits = 0, separators = TRUE),
           `Population represented` = list(digits = 0, separators = TRUE),
-          `Population share` = list(digits = 1, suffix = "%")
+          `Population share` = list(digits = 1, suffix = "%"),
+          `Households represented` = list(digits = 0, separators = TRUE)
         )
       )
     })
@@ -680,16 +703,18 @@ mod_3_08_diagnostics_server <- function(id,
       d <- diag_data()
       req(d)
       unit_col <- if (identical(d$analysis_unit, "hh")) {
-        "Households affected / covered"
+        "Sample households affected / covered"
       } else {
-        "Observations affected / covered"
+        "Sample observations affected / covered"
       }
       .wise_diag_reactable(
         .policy_component_table_raw(d$component_matrix, d$analysis_unit),
         formats = list(
-          unit_col = list(digits = 0, separators = TRUE),
+          `Sample households affected / covered` = list(digits = 0, separators = TRUE),
+          `Sample observations affected / covered` = list(digits = 0, separators = TRUE),
           `Population represented` = list(digits = 0, separators = TRUE),
           `Population share` = list(digits = 1, suffix = "%"),
+          `Households represented` = list(digits = 0, separators = TRUE),
           `Realized cost` = list(digits = 0, prefix = "$", separators = TRUE)
         )
       )
@@ -703,7 +728,7 @@ mod_3_08_diagnostics_server <- function(id,
         if (is.null(d) || !is.data.frame(d$treatment_matrix)) {
           return(NULL)
         }
-        .format_policy_treatment_table(d$treatment_matrix)
+        .format_policy_treatment_table(d$treatment_matrix, d$analysis_unit)
       },
       stale = stale,
       description = paste(

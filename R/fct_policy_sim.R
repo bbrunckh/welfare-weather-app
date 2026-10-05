@@ -246,17 +246,20 @@ has_sp_change <- function(sp) {
 #' cannot drift from what was actually applied.
 #'
 #' `SP_TRANSFER_COL` holds a *daily* amount, already divided by household size
-#' where welfare is per-capita (analysis unit "hh"). Multiplying back by
-#' `hhsize` recovers what a household receives; weighting and annualising then
-#' gives the population-level cost.
+#' where welfare is per-capita (analysis unit "hh"). With survey weights, each
+#' household row's weight represents people, so multiplying the per-capita
+#' transfer by that weight gives the population cost. Without weights, each row
+#' represents one household and `hhsize` restores its household-level amount.
 #'
 #' @param svy_policy    Survey frame after `apply_policy_to_svy()`.
 #' @param analysis_unit `"hh"`, `"ind"` or `"firm"`.
 #'
 #' @return A named list: `total` (annual population cost), `per_unit` (annual
 #'   amount per recipient), `n_recipients` (sample rows receiving a transfer),
-#'   `n_recipients_weighted` (population equivalent) and `weighted` (whether
-#'   survey weights were used).
+#'   `n_recipients_weighted` (people represented),
+#'   `n_households_weighted` (recipient households represented in household
+#'   mode) and `weighted`
+#'   (whether survey weights were used).
 #' @keywords internal
 .sp_transfer_totals <- function(svy_policy, analysis_unit = "hh") {
   if (is.null(svy_policy) || !is.data.frame(svy_policy) ||
@@ -287,9 +290,8 @@ has_sp_change <- function(sp) {
     rep(1, nrow(svy))
   }
 
-  # Undo the per-capita scaling apply_policy_to_svy() applied, guarding the
-  # same way it did so a missing or non-positive hhsize cannot turn the whole
-  # sum into NA.
+  # In household mode, row weights represent population; divide by household
+  # size to recover recipient-household equivalents for cost arithmetic.
   hh <- if (identical(analysis_unit, "hh") && "hhsize" %in% names(svy)) {
     h <- suppressWarnings(as.numeric(svy$hhsize))
     h[!is.finite(h) | h <= 0] <- 1
@@ -303,11 +305,18 @@ has_sp_change <- function(sp) {
     return(zero)
   }
 
-  total <- sum(v[ok] * w[ok] * hh[ok]) * 365
+  cost_scale <- if (identical(analysis_unit, "hh") && !has_w) {
+    hh
+  } else {
+    rep(1, nrow(svy))
+  }
+  total <- sum(v[ok] * w[ok] * cost_scale[ok]) * 365
 
   elig <- ok & v > 0
-  per_unit <- if (any(elig) && sum(w[elig]) > 0) {
-    (sum(v[elig] * w[elig] * hh[elig]) / sum(w[elig])) * 365
+  unit_weight <- if (identical(analysis_unit, "hh") && has_w) w / hh else w
+  per_unit <- if (any(elig) && sum(unit_weight[elig]) > 0) {
+    (sum(v[elig] * w[elig] * cost_scale[elig]) /
+       sum(unit_weight[elig])) * 365
   } else {
     0
   }
@@ -317,6 +326,11 @@ has_sp_change <- function(sp) {
     per_unit              = per_unit,
     n_recipients          = sum(elig),
     n_recipients_weighted = if (any(elig)) sum(w[elig]) else 0,
+    n_households_weighted = if (identical(analysis_unit, "hh")) {
+      if (any(elig)) sum(unit_weight[elig]) else 0
+    } else {
+      NA_real_
+    },
     weighted              = has_w
   )
 }
@@ -346,8 +360,14 @@ has_sp_change <- function(sp) {
     n_eligible <- sum(eligible)
     if (n_eligible <= 0) return(NULL)
     w_elig <- if ("weight" %in% names(svy)) {
-      w <- svy$weight[eligible]
-      sum(w[is.finite(w) & w > 0], na.rm = TRUE)
+      w <- suppressWarnings(as.numeric(svy$weight[eligible]))
+      valid <- is.finite(w) & w > 0
+      if (identical(analysis_unit, "hh")) {
+        hs <- hhsize_scale[eligible]
+        sum(w[valid] / hs[valid], na.rm = TRUE)
+      } else {
+        sum(w[valid], na.rm = TRUE)
+      }
     } else {
       0
     }
@@ -388,8 +408,10 @@ has_sp_change <- function(sp) {
 #'   \describe{
 #'     \item{n_rows}{Sample rows receiving a transfer.}
 #'     \item{n_total}{Sample rows in the survey.}
-#'     \item{n_pop}{Population-weighted recipient count (sample count when the
+#'     \item{n_pop}{Person-weighted recipient count (sample count when the
 #'       survey carries no weights).}
+#'     \item{n_recipient_units}{Recipient count, using weight / household size
+#'       when household rows are person weighted.}
 #'     \item{share_pct}{Weighted recipient share of the population, 0-100.}
 #'     \item{weighted}{TRUE when survey weights were used.}
 #'     \item{transfer_per_unit}{Annual transfer per recipient.}
@@ -440,11 +462,25 @@ has_sp_change <- function(sp) {
 
   w_elig <- sum(w[eligible])
   w_total <- sum(w)
+  hhsize <- if (identical(analysis_unit, "hh") && "hhsize" %in% names(svy)) {
+    hs <- suppressWarnings(as.numeric(svy$hhsize))
+    hs[!is.finite(hs) | hs <= 0] <- 1
+    hs
+  } else {
+    rep(1, nrow(svy))
+  }
+  household_weights <- if (identical(analysis_unit, "hh") && weighted) {
+    w / hhsize
+  } else {
+    w
+  }
 
   list(
     n_rows = sum(eligible),
     n_total = nrow(svy),
     n_pop = w_elig,
+    n_recipient_units = sum(household_weights[eligible]),
+    n_households_total = sum(household_weights),
     share_pct = if (w_total > 0) 100 * w_elig / w_total else NA_real_,
     weighted = weighted,
     transfer_per_unit = totals$per_unit,
@@ -575,11 +611,13 @@ has_sp_change <- function(sp) {
     changed_counts = changed_counts,
     transfer_sum = totals$total,
     transfer_pp = totals$per_unit,
+    transfer_households = totals$n_households_weighted,
     input_summary = input_summary,
     analysis_unit = analysis_unit,
     treatment_matrix = policy_treatment_matrix(
       svy_baseline, policy_diag,
-      eligibility = eligibility
+      eligibility = eligibility,
+      analysis_unit = analysis_unit
     ),
     component_matrix = policy_component_matrix(
       svy_baseline, policy_diag,
@@ -1293,11 +1331,13 @@ apply_policy_delta_to_baseline <- function(svy_baseline,
     stop("Annual policy source/context mismatch.", call. = FALSE)
   }
   hist_result <- .apply_policy_annual_pipeline(
-    hist_sim_baseline$pipeline, annual_channels, run_identity, chunk_size = chunk_size
+    hist_sim_baseline$pipeline, annual_channels, run_identity,
+    scenario = hist_sim_baseline$hist_label %||% "Historical", member = "Historical",
+    chunk_size = chunk_size
   )
   hist_sim_new <- hist_sim_baseline
   hist_sim_new$pipeline <- hist_result$pipeline
-  parts <- list()
+  parts <- list(hist_result$compact)
   saved_scenarios_new <- lapply(seq_along(saved_scenarios_baseline), function(i) {
     s <- saved_scenarios_baseline[[i]]
     if (is.null(s) || is.null(s$pipelines)) {

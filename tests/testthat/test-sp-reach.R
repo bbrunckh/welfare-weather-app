@@ -41,9 +41,11 @@ test_that("the preview reproduces the run's eligibility and cost exactly", {
 
   # Same eligible population...
   expect_equal(preview$n_pop, sum(svy$weight[ok & v > 0]))
-  # ...and the same annual cost the diagnostics tab reports.
+  expect_equal(preview$n_recipient_units,
+    sum(svy$weight[ok & v > 0] / svy$hhsize[ok & v > 0]))
+  # Cost uses represented recipient households, not people in those households.
   expect_equal(preview$transfer_total,
-               sum(v[ok] * svy$weight[ok] * svy$hhsize[ok]) * 365)
+               sum(v[ok] * svy$weight[ok]) * 365)
 })
 
 test_that("the preview is stable across calls despite the error draws", {
@@ -85,6 +87,12 @@ test_that("the seeded preview matches policy transfers without copying the surve
       expect_equal(reach$transfer_per_unit, totals$per_unit)
       expect_equal(reach$n_rows, sum(is.finite(received) & received > 0))
       expect_equal(reach$n_pop, sum(weights[is.finite(received) & received > 0]))
+      if (identical(unit, "hh")) {
+        recipient <- is.finite(received) & received > 0
+        hhsize <- svy$hhsize[recipient]
+        hhsize[!is.finite(hhsize) | hhsize <= 0] <- 1
+        expect_equal(reach$n_recipient_units, sum(weights[recipient] / hhsize))
+      }
     }
   }
 })
@@ -95,6 +103,7 @@ test_that("universal targeting reaches the whole population", {
   expect_equal(r$n_rows, nrow(svy))
   expect_equal(r$share_pct, 100)
   expect_equal(r$n_pop, sum(svy$weight))
+  expect_equal(r$n_recipient_units, sum(svy$weight / svy$hhsize))
 })
 
 test_that("a tighter cutoff reaches fewer units", {
@@ -122,8 +131,15 @@ test_that("budget-first mode derives the per-unit transfer from the budget", {
     svy, base_sp(budget_mode = "budget_first", budget_fixed = 1e6), "hh")
   expect_true(r$budget_first)
   expect_equal(r$transfer_total, 1e6)
-  # Per-unit is the budget spread over the weighted eligible population.
-  expect_equal(r$transfer_per_unit, 1e6 / r$n_pop)
+  # Per-household is the budget spread over represented eligible households.
+  policy <- apply_policy_to_svy(svy, sp = base_sp(
+    budget_mode = "budget_first", budget_fixed = 1e6
+  ), analysis_unit = "hh")
+  eligible <- policy[[SP_TRANSFER_COL]] > 0
+  expect_equal(r$transfer_per_unit,
+    1e6 / sum(svy$weight[eligible] / svy$hhsize[eligible]))
+  expect_equal(r$n_recipient_units,
+    sum(svy$weight[eligible] / svy$hhsize[eligible]))
 })
 
 test_that("an unweighted survey reports sample counts and says so", {
@@ -131,6 +147,7 @@ test_that("an unweighted survey reports sample counts and says so", {
   r <- .sp_scenario_reach(svy, base_sp(targeting = "universal"), "hh")
   expect_false(r$weighted)
   expect_equal(r$n_pop, nrow(svy))
+  expect_equal(r$n_recipient_units, nrow(svy))
 })
 
 test_that("a zero transfer costs nothing", {
@@ -241,10 +258,11 @@ test_that("transfer totals undo the per-capita scaling applied to welfare", {
   pol <- apply_policy_to_svy(svy, sp = sp, analysis_unit = "hh")
   t   <- .sp_transfer_totals(pol, "hh")
 
-  # Everyone is eligible, so the annual cost is the annual per-household
-  # amount times the weighted population.
+  # Everyone is eligible; person expansion weights convert to household counts
+  # by dividing by household size.
   expect_equal(t$per_unit, 120)
-  expect_equal(t$total, 120 * sum(svy$weight))
+  expect_equal(t$total, 120 * sum(svy$weight / svy$hhsize))
+  expect_equal(t$n_households_weighted, sum(svy$weight / svy$hhsize))
   expect_equal(t$n_recipients, nrow(svy))
 })
 

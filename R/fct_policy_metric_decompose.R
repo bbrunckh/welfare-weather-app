@@ -203,6 +203,8 @@
   if (!identical(prepared$run_identity, run_identity)) {
     stop("Annual channel run identity mismatch.", call. = FALSE)
   }
+  year_range <- suppressWarnings(as.integer(as.character(year_range)))
+  if (length(year_range) != 2L) year_range <- c(NA_integer_, NA_integer_)
   if (is.null(pipeline$y_point)) stop("Missing baseline prediction pipeline.", call. = FALSE)
   exposure <- .validate_policy_annual_exposure(pipeline, prepared$context)
   n <- length(pipeline$y_point)
@@ -210,6 +212,8 @@
   channel_stats <- decile_stats <- NULL
   stat_names <- as.vector(rbind(paste0("sum_", .compact_decomp_channels),
     paste0("weight_", .compact_decomp_channels)))
+  baseline_stat_names <- c("sum_baseline_y_point", "weight_baseline_y_point")
+  stat_names <- c(stat_names, baseline_stat_names)
   accumulate <- function(current, values, group, n_groups) {
     if (is.null(current)) current <- matrix(0, n_groups, ncol(values))
     grouped <- rowsum(values, group, reorder = FALSE)
@@ -232,8 +236,15 @@
       values <- cbind(ch$delta_total, ch$delta_main, ch$delta_sp,
         ch$delta_main_covar, ch$delta_res1 + ch$delta_res2, ch$delta_res1, ch$delta_res2)
       stats <- matrix(0, length(rows), length(stat_names))
-      stats[, seq.int(1L, length(stat_names), 2L)] <- values * weights
-      stats[, seq.int(2L, length(stat_names), 2L)] <- weights
+      channel_count <- length(.compact_decomp_channels) * 2L
+      stats[, seq.int(1L, channel_count, 2L)] <- values * weights
+      stats[, seq.int(2L, channel_count, 2L)] <- weights
+      baseline_value <- as.numeric(pipeline$y_point[rows])
+      baseline_weight <- weights
+      baseline_weight[!is.finite(baseline_value)] <- 0
+      baseline_value[!is.finite(baseline_value)] <- 0
+      stats[, channel_count + 1L] <- baseline_value * baseline_weight
+      stats[, channel_count + 2L] <- baseline_weight
       year_id <- match(pipeline$sim_year[rows], years)
       channel_stats <- accumulate(channel_stats, stats, year_id, length(years))
       deciles <- prepared$context$baseline_deciles[pipeline$svy_row_id[rows]]
@@ -274,6 +285,16 @@
     metadata = list(scenario = scenario, year_start = year_range[[1L]], year_end = year_range[[2L]]),
     engine = prepared$context$engine, is_rif = prepared$repositioning_modeled
   ) else NULL
+  if (!is.null(compact)) {
+    compact$channel_summary$baseline_annual <- ifelse(
+      is.finite(compact$channel_summary$weight_baseline_y_point) & compact$channel_summary$weight_baseline_y_point > 0,
+      compact$channel_summary$sum_baseline_y_point / compact$channel_summary$weight_baseline_y_point,
+      NA_real_)
+    compact$decile_summary$baseline_annual <- ifelse(
+      is.finite(compact$decile_summary$weight_baseline_y_point) & compact$decile_summary$weight_baseline_y_point > 0,
+      compact$decile_summary$sum_baseline_y_point / compact$decile_summary$weight_baseline_y_point,
+      NA_real_)
+  }
   out$policy_correction <- list(version = prepared$correction_version,
     run_identity = run_identity, exposure_source = "step2_prediction_row_mapping",
     n_prediction_rows = n, n_exposure_anchors = nrow(exposure$table),
@@ -324,30 +345,122 @@
     center_method = "equal_model_mean", scope = "production_prediction_rows")
 }
 
-.policy_metric_tails <- function(annual, scenario, adverse_tail) {
+.policy_metric_tails <- function(annual, scenario, adverse_tail,
+                                 baseline_series = NULL, required_models = NULL) {
   states <- .policy_metric_fields[1:4]
-  models <- split(annual, annual$model_id)
-  rows <- list()
+  annual_models <- if (is.data.frame(annual) && "model_id" %in% names(annual)) {
+    split(annual, as.character(annual$model_id))
+  } else list()
+  required_models <- as.character(required_models %||% names(annual_models))
+  required_models <- unique(required_models[!is.na(required_models) & nzchar(required_models)])
+  baseline_models <- if (is.list(baseline_series) && !is.null(baseline_series$vals)) {
+    baseline_series$model_ids
+  } else names(annual_models)
+  model_ids <- unique(c(required_models, as.character(baseline_models)))
+  support_rows <- list()
+  model_rows <- list()
+  scenario_rows <- list()
   for (p in unname(RP_LOW)) {
-    eligible <- vapply(models, function(x) nrow(x) >= ceiling(1 / p), logical(1))
-    # Never silently change the model ensemble to manufacture a sparse tail.
-    if (!all(eligible)) {
-      rows[[length(rows) + 1L]] <- data.frame(scenario = scenario,
-        probability = p, return_period = 1 / p, scope = "equal_probability",
-        status = "unavailable", reason = "Insufficient years in one or more matched models.")
-      next
+    supported_levels <- list()
+    support_ok <- logical(length(model_ids))
+    for (i in seq_along(model_ids)) {
+      id <- model_ids[[i]]
+      annual_model <- annual_models[[id]]
+      source_values <- NULL
+      source_years <- NULL
+      source_name <- "reconstructed_baseline_annual_metric"
+      if (!is.null(baseline_series) && !is.null(baseline_series$vals) && id %in% baseline_series$model_ids) {
+        row <- match(id, baseline_series$model_ids)
+        source_values <- as.numeric(baseline_series$vals[row, ])
+        source_years <- suppressWarnings(as.numeric(baseline_series$sim_years))
+        source_name <- "results_baseline_endpoint"
+      } else if (!is.null(annual_model)) {
+        source_values <- annual_model$baseline
+        source_years <- annual_model$sim_year
+      }
+      support <- if (is.null(source_values)) {
+        adverse_year_support(numeric(), numeric(), p, adverse_tail)
+      } else adverse_year_support(source_values, source_years, p, adverse_tail)
+      support_row <- as.data.frame(c(list(scenario = scenario, model_id = id), support),
+        stringsAsFactors = FALSE)
+      support_row$adverse_basis <- "baseline_selected_metric"
+      support_row$scope <- "baseline_anchored"
+      support_row$support_source <- source_name
+      support_rows[[length(support_rows) + 1L]] <- support_row
+      state_result <- setNames(as.list(rep(NA_real_, length(states))), states)
+      status <- support$status
+      reason <- support$reason
+      if (identical(status, "ok") && !is.null(annual_model)) {
+        if (anyDuplicated(annual_model$sim_year)) {
+          status <- "unavailable"; reason <- "Duplicate model/year annual metric keys."
+        } else {
+          applied <- lapply(states, function(state) apply_adverse_year_support(
+            annual_model[[state]], annual_model$sim_year, support))
+          names(applied) <- states
+          bad <- states[!vapply(applied, function(x) identical(x$status, "ok"), logical(1))]
+          if (length(bad)) {
+            status <- "unavailable"
+            reason <- paste0("Selected baseline support unavailable for state(s): ", paste(bad, collapse = ", "), ".")
+          } else {
+            state_result <- lapply(applied, `[[`, "value")
+            if (!is.null(baseline_series) && identical(source_name, "results_baseline_endpoint")) {
+              parity <- abs(state_result$baseline - support$baseline_value) <=
+                .policy_metric_tolerance * max(1, abs(support$baseline_value))
+              if (!parity) {
+                status <- "unavailable"; reason <- "Reconstructed annual baseline metric does not match Results endpoint."
+              }
+            }
+          }
+        }
+      } else if (identical(status, "ok")) {
+        status <- "unavailable"; reason <- "Annual state channels unavailable at baseline support."
+      }
+      contribution <- .policy_metric_contributions(state_result)
+      model_row <- as.data.frame(c(list(scenario = scenario, model_id = id,
+        probability = p, return_period = 1 / p), support[
+          c("baseline_value", "rank_lo", "rank_hi", "year_lo", "year_hi", "weight_lo", "weight_hi",
+            "n_years_total", "n_years_finite", "n_years_excluded", "min_years", "quantile_method", "tie_method")
+        ], contribution), stringsAsFactors = FALSE)
+      model_row$status <- status; model_row$reason <- reason
+      model_row$adverse_basis <- "baseline_selected_metric"
+      model_row$scope <- "baseline_anchored"
+      model_rows[[length(model_rows) + 1L]] <- model_row
+      support_ok[[i]] <- identical(status, "ok")
+      if (support_ok[[i]]) supported_levels[[id]] <- contribution
     }
-    per_model <- lapply(models, function(x) vapply(states, function(s) {
-      rank_interp(sort(x[[s]]), if (identical(adverse_tail, "high")) p else 1 - p)
-    }, numeric(1)))
-    levels <- as.list(apply(do.call(rbind, per_model), 2, stats::median))
-    quantile_row <- data.frame(scenario = scenario, .policy_metric_contributions(levels),
-      probability = p, return_period = 1 / p, scope = "equal_probability",
-      center_method = "median_model_quantile", quantile_method = "rank_interp_n_p_plus_half",
-      n_models = length(models), n_model_years = nrow(annual), status = "ok", reason = "")
-    rows <- c(rows, list(quantile_row))
+    ok <- length(model_ids) > 0L && length(support_ok) == length(model_ids) && all(support_ok)
+    if (ok) {
+      means <- lapply(supported_levels, function(x) unlist(x[states], use.names = TRUE))
+      levels <- as.list(colMeans(do.call(rbind, means)))
+      row <- as.data.frame(c(list(scenario = scenario), .policy_metric_contributions(levels)),
+        stringsAsFactors = FALSE)
+      row$status <- "ok"; row$reason <- ""
+    } else {
+      reasons <- unique(vapply(model_rows[(length(model_rows) - length(model_ids) + 1L):length(model_rows)],
+        function(x) as.character(x$reason[[1L]]), character(1)))
+      row <- as.data.frame(c(list(scenario = scenario),
+        setNames(as.list(rep(NA_real_, length(.policy_metric_fields))), .policy_metric_fields)),
+        stringsAsFactors = FALSE)
+      row$status <- "unavailable"
+      row$reason <- paste(reasons[nzchar(reasons)], collapse = " ")
+      if (!nzchar(row$reason)) row$reason <- "One or more required models lack baseline support or a selected state value."
+    }
+    row$probability <- p; row$return_period <- 1 / p
+    row$scope <- "baseline_anchored"
+    row$adverse_basis <- "baseline_selected_metric"
+    row$center_method <- if (identical(scenario, "Historical")) "single_historical" else "equal_model_mean"
+    row$ensemble_center <- row$center_method
+    row$quantile_method <- "rank_interp_n_p_plus_half"
+    row$tie_method <- "value_then_sim_year_ascending"
+    row$n_models <- length(model_ids)
+    row$n_supported_models <- sum(support_ok)
+    row$n_model_years <- if (length(annual_models)) sum(vapply(annual_models, nrow, integer(1))) else 0L
+    scenario_rows[[length(scenario_rows) + 1L]] <- row
   }
-  dplyr::bind_rows(rows)
+  out <- dplyr::bind_rows(scenario_rows)
+  attr(out, "adverse_support") <- dplyr::bind_rows(support_rows)
+  attr(out, "adverse_by_model") <- dplyr::bind_rows(model_rows)
+  out
 }
 
 .policy_metric_pipeline <- function(baseline, policy, prepared, method, pov_line,
@@ -381,11 +494,12 @@
   is_log <- isTRUE(context$so$transform == "log")
   aggregate <- resolve_agg_fn(method)
   years <- sort(unique(baseline$sim_year))
-  annual <- mechanisms <- list()
+  deciles <- prepared$context$baseline_deciles
+  annual <- decile_annual <- mechanisms <- list()
   for (year in years) {
     all_rows <- which(baseline$sim_year == year)
     rows <- all_rows[!is.na(baseline$y_point[all_rows])]
-    if (!length(rows)) stop("No valid prediction rows in a simulated year.", call. = FALSE)
+    if (!length(rows)) next
     ch <- .policy_annual_channel_block(baseline, prepared, exposure, rows)
     y <- baseline$y_point[rows]
     target <- policy$y_point[rows]
@@ -402,12 +516,15 @@
       seed = wise_seed(WISEAPP_DEFAULT_SEED, "residual", year),
       resid_lookup = lookup, resid_sigma2 = sigma2)
     w <- if (!is.null(baseline$weight)) as.numeric(baseline$weight[rows]) else NULL
+    row_deciles <- deciles[baseline$svy_row_id[rows]]
     excluded <- integer(4)
     deltas <- list(rep(0, length(rows)), ch$delta_main, ch$delta_res1, ch$delta_res2)
     values <- numeric(4)
+    state_values <- vector("list", 4L)
     for (j in seq_len(4)) {
       if (j > 1L) y <- y + deltas[[j]]
       mu <- if (is_log) exp(y + residual) else y + residual
+      state_values[[j]] <- mu
       values[j] <- aggregate(mu, w, pov_line)
       excluded[j] <- sum(!is.finite(mu) | (method == "avg_poverty" & mu <= 0))
     }
@@ -419,6 +536,20 @@
       excluded_baseline = excluded[1L], excluded_after_main = excluded[2L],
       excluded_after_repositioning = excluded[3L], excluded_policy = excluded[4L],
       parity_error = error, requested_residuals = requested_residuals, effective_residuals = effective)
+    valid_deciles <- sort(unique(row_deciles[is.finite(row_deciles) & row_deciles >= 1 & row_deciles <= 10]))
+    for (decile in valid_deciles) {
+      selected <- which(row_deciles == decile)
+      decile_states <- lapply(state_values, function(mu) aggregate(
+        mu[selected], if (is.null(w)) NULL else w[selected], pov_line
+      ))
+      names(decile_states) <- .policy_metric_fields[1:4]
+      decile_row <- as.data.frame(c(list(scenario = scenario, member = member,
+        model_id = member, sim_year = year, decile = as.integer(decile)),
+        .policy_metric_contributions(decile_states)), stringsAsFactors = FALSE)
+      decile_row$n_prediction_rows <- length(selected)
+      decile_row$n_retained_rows <- length(selected)
+      decile_annual[[length(decile_annual) + 1L]] <- decile_row
+    }
     ids <- baseline$svy_row_id[rows]
     weighted_mean <- function(x) resolve_agg_fn("mean")(x, w, NULL)
     for (hazard in names(prepared$products)) {
@@ -445,7 +576,8 @@
       }
     }
   }
-  list(annual = dplyr::bind_rows(annual), mechanisms = dplyr::bind_rows(mechanisms))
+  list(annual = dplyr::bind_rows(annual), decile_annual = dplyr::bind_rows(decile_annual),
+    mechanisms = dplyr::bind_rows(mechanisms))
 }
 
 # Pure run-owned calculation. Only small annual/summary tables escape; cumulative
@@ -483,7 +615,8 @@
     paired_effect_summary(endpoint[[nm]], scenario = nm, center = "equal_model_mean")
   }))
   result <- list(status = "unavailable", reason = "Annual channel source unavailable.",
-    annual = data.frame(), summary = data.frame(), return_period = data.frame(),
+    annual = data.frame(), decile_annual = data.frame(), summary = data.frame(), return_period = data.frame(),
+    adverse_support = data.frame(), adverse_by_model = data.frame(),
     mechanisms = list(), metadata = metadata, endpoint_summary = endpoint_summary, scenarios = list())
   status <- .policy_endpoint_status(so, if (is.environment(prepared)) prepared$context else NULL)
   if (!identical(status$status, "ok")) {
@@ -516,30 +649,53 @@
       members <- lapply(names(b$pipelines), function(id) .policy_metric_pipeline(
         b$pipelines[[id]], p$pipelines[[id]], prepared, method, pov_line,
         requested_residuals, b$shared_context, p$shared_context, nm, id))
-      annual <- dplyr::bind_rows(lapply(members, `[[`, "annual"))
+      annual_full <- dplyr::bind_rows(lapply(members, `[[`, "annual"))
+      decile_annual_full <- dplyr::bind_rows(lapply(members, `[[`, "decile_annual"))
+      annual <- annual_full
       ep <- endpoint[[nm]]
       dropped <- 0L
+      bmatrix <- if (!is.null(endpoint_series_baseline[[nm]]$out)) {
+        by_model_matrix(endpoint_series_baseline[[nm]]$out)
+      } else NULL
+      required_models <- unique(c(names(b$pipelines), if (!is.null(bmatrix)) bmatrix$model_ids))
       if (!is.null(ep)) {
         ep <- ep[is.finite(ep$baseline) & is.finite(ep$policy) & is.finite(ep$effect), , drop = FALSE]
         key <- function(x) paste(x$model_id, x$sim_year, sep = "\r")
-        if (anyDuplicated(key(annual)) || anyDuplicated(key(ep))) stop("Duplicate model/year aggregate keys.")
-        index <- match(key(ep), key(annual))
+        if (anyDuplicated(key(annual_full)) || anyDuplicated(key(ep))) stop("Duplicate model/year aggregate keys.")
+        index <- match(key(ep), key(annual_full))
         if (anyNA(index)) stop("Channel summary cannot cover Results endpoint support.")
-        dropped <- nrow(annual) - nrow(ep)
-        annual <- annual[index, , drop = FALSE]
-        for (field in c("baseline", "policy")) {
-          if (any(!is.finite(annual[[field]])) || any(abs(annual[[field]] - ep[[field]]) >
-            .policy_metric_tolerance * pmax(1, abs(ep[[field]])))) stop("Results endpoint aggregate parity mismatch.")
+        dropped <- nrow(annual_full) - nrow(ep)
+        annual <- annual_full[index, , drop = FALSE]
+        if (any(!is.finite(annual$baseline)) || any(abs(annual$baseline - ep$baseline) >
+          .policy_metric_tolerance * pmax(1, abs(ep$baseline)))) {
+          stop("Results endpoint baseline aggregate parity mismatch.")
         }
       }
-      if (!nrow(annual) || any(!is.finite(as.matrix(annual[, .policy_metric_fields])))) {
-        stop("Nonfinite cumulative aggregates would change Results endpoint support.")
+      if (!nrow(annual_full)) {
+        tails <- .policy_metric_tails(annual_full, nm, metadata$adverse_tail,
+          baseline_series = bmatrix, required_models = required_models)
+        return(list(status = "unavailable", reason = "No annual channel rows are available.",
+          annual = data.frame(), annual_full = annual_full, decile_annual = data.frame(), summary = data.frame(),
+          return_period = tails, adverse_support = attr(tails, "adverse_support"),
+          adverse_by_model = attr(tails, "adverse_by_model"), mechanisms = data.frame()))
       }
-      summary <- .policy_metric_summary(annual, nm)
+      complete_expected <- if (nrow(annual)) {
+        annual[apply(is.finite(as.matrix(annual[, .policy_metric_fields])), 1L, all), , drop = FALSE]
+      } else annual
+      decile_annual <- if (nrow(decile_annual_full) && nrow(complete_expected)) {
+        key <- paste(complete_expected$model_id, complete_expected$sim_year, sep = "\r")
+        decile_key <- paste(decile_annual_full$model_id, decile_annual_full$sim_year, sep = "\r")
+        decile_annual_full[decile_key %in% key, , drop = FALSE]
+      } else data.frame()
+      decile_annual <- dplyr::bind_rows(lapply(split(decile_annual, decile_annual$model_id), function(rows) {
+        rows$scenario <- nm
+        rows
+      }))
+      summary <- if (nrow(complete_expected)) .policy_metric_summary(complete_expected, nm) else data.frame()
       summary$n_dropped_model_years <- dropped
       diagnostic <- dplyr::bind_rows(lapply(members, `[[`, "mechanisms"))
       diagnostic <- diagnostic[paste(diagnostic$model_id, diagnostic$sim_year, sep = "\r") %in%
-        paste(annual$model_id, annual$sim_year, sep = "\r"), , drop = FALSE]
+        paste(complete_expected$model_id, complete_expected$sim_year, sep = "\r"), , drop = FALSE]
       weather <- baseline_hist$sim_summary$weather
       if (is.data.frame(weather) && all(c("name", "units") %in% names(weather))) {
       units <- as.character(weather$units[match(diagnostic$hazard, weather$name)])
@@ -549,41 +705,45 @@
     }
     diagnostic$weather_units[diagnostic$contrast != "continuous_coefficient_change"] <-
       "category contrast; no per-unit slope"
-      tails <- .policy_metric_tails(annual, nm, metadata$adverse_tail)
-      # Results thresholds can use different marginal support from the matched
-      # expected-effect headline. Do not assert tail parity merely by relabeling.
-      if (!is.null(ep)) {
-        bmatrix <- by_model_matrix(endpoint_series_baseline[[nm]]$out)
-        pmatrix <- by_model_matrix(endpoint_series_policy[[nm]]$out)
-        for (i in which(tails$scope == "equal_probability" & tails$status == "ok")) {
-          probability <- tails$probability[i]
-          endpoint_threshold <- function(mm) {
-            if (is.null(mm) || probability < 1 / ncol(mm$vals)) return(NA_real_)
-            thresholds <- by_model_rp_matrix(mm$vals, mm$sds, probability,
-              metadata$adverse_tail)$rp
-            stats::median(thresholds, na.rm = TRUE)
-          }
-          levels <- c(endpoint_threshold(bmatrix), endpoint_threshold(pmatrix))
-          observed <- c(tails$baseline[i], tails$policy[i])
-          parity <- all(is.finite(levels)) && all(abs(levels - observed) <=
-            .policy_metric_tolerance * pmax(1, abs(levels)))
-          if (!parity) {
-            tails$status[i] <- "unavailable"
-            tails$reason[i] <- "Matched channel scope does not reproduce Results marginal threshold endpoints."
-            tails[i, .policy_metric_fields] <- NA_real_
-          }
-        }
-      }
-      list(status = "ok", reason = NULL, annual = annual, summary = summary,
-        return_period = tails,
+      tails <- .policy_metric_tails(annual_full, nm, metadata$adverse_tail,
+        baseline_series = bmatrix, required_models = required_models)
+      scenario_status <- if (nrow(summary)) "ok" else "unavailable"
+      scenario_reason <- if (nrow(summary)) NULL else "No complete finite annual states for expected summary."
+      list(status = scenario_status, reason = scenario_reason, annual = complete_expected,
+        decile_annual = decile_annual,
+        annual_full = annual_full, summary = summary,
+        return_period = tails, adverse_support = attr(tails, "adverse_support"),
+        adverse_by_model = attr(tails, "adverse_by_model"),
         mechanisms = diagnostic)
-    }, error = function(e) list(status = "unavailable", reason = conditionMessage(e)))
+    }, error = function(e) {
+      bmatrix <- if (!is.null(endpoint_series_baseline[[nm]]$out)) {
+        by_model_matrix(endpoint_series_baseline[[nm]]$out)
+      } else NULL
+      required <- unique(c(names(owners_b[[nm]]$pipelines), if (!is.null(bmatrix)) bmatrix$model_ids))
+      tails <- .policy_metric_tails(data.frame(), nm, metadata$adverse_tail,
+        baseline_series = bmatrix, required_models = required)
+      list(status = "unavailable", reason = conditionMessage(e), annual = data.frame(),
+        summary = data.frame(), decile_annual = data.frame(), return_period = tails,
+        adverse_support = attr(tails, "adverse_support"),
+        adverse_by_model = attr(tails, "adverse_by_model"), mechanisms = data.frame())
+    })
     result$scenarios[[nm]] <- calculated
   }
   good <- Filter(function(x) identical(x$status, "ok"), result$scenarios)
   result$annual <- dplyr::bind_rows(lapply(good, `[[`, "annual"))
+  result$decile_annual <- dplyr::bind_rows(lapply(good, `[[`, "decile_annual"))
   result$summary <- dplyr::bind_rows(lapply(good, `[[`, "summary"))
-  result$return_period <- dplyr::bind_rows(lapply(good, `[[`, "return_period"))
+  result$return_period <- dplyr::bind_rows(lapply(result$scenarios, `[[`, "return_period"))
+  result$adverse_support <- dplyr::bind_rows(lapply(result$scenarios, `[[`, "adverse_support"))
+  result$adverse_by_model <- dplyr::bind_rows(lapply(result$scenarios, `[[`, "adverse_by_model"))
+  if (nrow(result$adverse_support)) {
+    result$adverse_support$required_model_count <- ave(result$adverse_support$model_id,
+      result$adverse_support$scenario, FUN = function(x) length(unique(x)))
+    result$adverse_support$supported_model_count <- ave(
+      as.integer(result$adverse_support$status == "ok"), result$adverse_support$scenario,
+      FUN = sum)
+  }
+  # Tail availability is independent from expected-summary availability.
   mechanism_annual <- dplyr::bind_rows(lapply(good, `[[`, "mechanisms"))
   mechanism_summary <- data.frame()
   if (nrow(mechanism_annual)) {

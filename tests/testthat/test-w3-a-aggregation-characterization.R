@@ -84,8 +84,10 @@ test_that("Step 3 level context comes from paired summary, not marginal means", 
     baseline_agg = list("SSP2-4.5" = list(out = data.frame(value = 999))),
     policy_agg = list("SSP2-4.5" = list(out = data.frame(value = 999))))
   expect_identical(cards[[1]]$value, "+3.33 outcome units")
-  expect_match(cards[[1]]$note, "Policy: 40.33 outcome units vs Base: 37.00 outcome units", fixed = TRUE)
-  expect_match(cards[[1]]$note, "Equal-model mean", fixed = TRUE)
+  expect_match(cards[[1]]$note, "Policy vs baseline", fixed = TRUE)
+  expect_match(cards[[1]]$info,
+    "Policy: 40.33 outcome units vs baseline: 37.00 outcome units.", fixed = TRUE)
+  expect_match(cards[[1]]$info, "Equal-model mean", fixed = TRUE)
 })
 
 w3a_pov_line <- function(method) {

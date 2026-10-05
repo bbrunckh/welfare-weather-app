@@ -209,3 +209,12 @@ test_that("hexmap_dependency: scripts in engine order", {
   ))
   expect_false(file.exists(file.path(app_sys("app", "www"), "hexmap.js")))
 })
+
+test_that("hexmap attribution starts collapsed but remains toggleable", {
+  js <- paste(readLines(app_sys("app", "vendor", "hexmap.js"), warn = FALSE),
+              collapse = "\n")
+  expect_true(grepl('querySelector(".maplibregl-ctrl-attrib")', js, fixed = TRUE))
+  expect_true(grepl('removeAttribute("open")', js, fixed = TRUE))
+  expect_true(grepl('classList.remove("maplibregl-compact-show")', js, fixed = TRUE))
+  expect_true(grepl("attributionControl: { compact: true }", js, fixed = TRUE))
+})

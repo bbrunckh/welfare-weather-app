@@ -253,7 +253,7 @@ test_that("Step 3 paired and headline reactives explicitly use equal-model means
     session$setInputs(cmp_agg_method = "mean", cmp_deviation = "none")
     session$flushReact()
     for (summary in list(internals$paired_effect_summary(),
-                         internals$headline_paired_effect_summary())) {
+                         internals$expected_paired_effect_summary())) {
       focus <- summary[summary$scenario == name, ]
       expect_equal(focus$value, 10 / 3)
       expect_equal(focus$baseline, 1.5)
@@ -266,7 +266,7 @@ test_that("Step 3 paired and headline reactives explicitly use equal-model means
                  "Policy: 4.83 outcome units vs baseline: 1.50 outcome units", fixed = TRUE)
     session$setInputs(cmp_deviation = "median")
     session$flushReact()
-    summary <- internals$headline_paired_effect_summary()
+    summary <- internals$expected_paired_effect_summary()
     expect_equal(summary$baseline[summary$scenario == name], 1.5)
     expect_equal(summary$value[summary$scenario == name], 10 / 3)
   })
@@ -587,7 +587,7 @@ test_that("threshold table has unique keys with two years and two members", {
       expect_equal(nrow(tbl), 18L)
       expect_setequal(
         tbl$Estimate[tbl$scenario != "Historical"],
-        c("Central (P50)", "Coef P10", "Coef P90",
+        c("Equal-model mean", "Coef P10", "Coef P90",
           "Ensemble P50", "Pooled P10", "Pooled P90")
       )
     }

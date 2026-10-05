@@ -81,7 +81,7 @@ test_that("smoke fixture runs active Step 3 path and emits stable metrics", {
   expect_equal(first$n_future_members, 1L)
   expect_equal(first$n_historical_decomposition_rows, 60L)
   # Production annual summaries are compact member/year rows, not household rows.
-  expect_equal(first$n_future_decomposition_rows, 2L)
+  expect_equal(first$n_future_decomposition_rows, 4L)
   expect_identical(first$metric_mean_status, "ok")
   expect_identical(first$metric_headcount_ratio_status, "ok")
   expect_gt(first$metric_mean_annual_rows, 0L)
@@ -254,6 +254,6 @@ test_that("smoke fixture supports RIF and historical-only Step 3", {
 
   expect_identical(result$status, "ok")
   expect_equal(result$n_future_scenarios, 0L)
-  expect_equal(result$n_future_decomposition_rows, 0L)
+  expect_equal(result$n_future_decomposition_rows, 2L)
   expect_gt(result$historical_decomposition_serialized_bytes, 0)
 })

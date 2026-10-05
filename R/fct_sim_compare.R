@@ -853,11 +853,13 @@ step2_adverse_dot_data <- function(threshold_tbl, method = "mean", so = NULL) {
     return(tibble::tibble())
   }
 
-  central <- tbl[tbl$Estimate == "Central (P50)", , drop = FALSE]
+  central <- tbl[tbl$Estimate %in% c("Equal-model mean", "Single historical estimate", "Central (P50)"), , drop = FALSE]
   if (!nrow(central)) {
     return(tibble::tibble())
   }
   central$rp_label <- names(rp_map)[match(central$rp_name, unname(rp_map))]
+  central <- filter_historically_supported_return_periods(central, rp_map)
+  if (!nrow(central)) return(tibble::tibble())
 
   ens_rows <- tbl[grepl("^Ensemble ", tbl$Estimate), , drop = FALSE]
   if (nrow(ens_rows)) {
@@ -898,13 +900,12 @@ step2_adverse_dot_data <- function(threshold_tbl, method = "mean", so = NULL) {
   central$yr_lbl <- ifelse(central$is_historical, "Historical",
     vapply(central$scenario, .parse_year, character(1L))
   )
-  central$rp_label <- factor(
-    central$rp_label,
-    levels = rev(c(
-      "Expected", "Adverse 1-in-5", "Adverse 1-in-10",
-      "Adverse 1-in-20", "Adverse 1-in-50"
-    ))
-  )
+  central <- central[is.finite(central$value), , drop = FALSE]
+  if (!nrow(central)) return(tibble::tibble())
+  present <- c("Expected", "Adverse 1-in-5", "Adverse 1-in-10",
+    "Adverse 1-in-20", "Adverse 1-in-50")
+  central$rp_label <- factor(central$rp_label,
+    levels = rev(present[present %in% as.character(central$rp_label)]))
   central
 }
 
@@ -1175,10 +1176,10 @@ step2_headline_cards <- function(bands,
     rp_20 <- unname(rp_map[["Adverse 1-in-20"]])
     r20_hist <- threshold_tbl[threshold_tbl$scenario == "Historical" &
       threshold_tbl$rp_name == rp_20 &
-      threshold_tbl$Estimate == "Central (P50)", , drop = FALSE]
+      threshold_tbl$Estimate %in% c("Equal-model mean", "Single historical estimate", "Central (P50)"), , drop = FALSE]
     r20_ssp <- threshold_tbl[threshold_tbl$scenario == focus$scenario &
       threshold_tbl$rp_name == rp_20 &
-      threshold_tbl$Estimate == "Central (P50)", , drop = FALSE]
+      threshold_tbl$Estimate %in% c("Equal-model mean", "Single historical estimate", "Central (P50)"), , drop = FALSE]
     if (nrow(r20_hist) && is.finite(r20_hist$value[[1L]])) v20_hist <- r20_hist$value[[1L]]
     if (nrow(r20_ssp) && is.finite(r20_ssp$value[[1L]])) v20_ssp <- r20_ssp$value[[1L]]
   }

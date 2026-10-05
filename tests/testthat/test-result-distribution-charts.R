@@ -13,6 +13,8 @@ test_that("annual charts use closed violins, readable numeric axes, and honest t
 
   for (chart in list(step2, step3)) {
     expect_s3_class(chart, "echarts4r")
+    dots <- Filter(function(s) identical(s$name, "Draws"), chart$x$opts$series)[[1L]]
+    expect_true(all(vapply(dots$data, function(p) identical(p$itemStyle$opacity, .2), logical(1))))
     violins <- Filter(function(s) identical(s$type, "custom"), chart$x$opts$series)
     expect_length(violins, 4L)
     expect_true(all(vapply(violins, function(s) {
@@ -70,7 +72,7 @@ test_that("annual charts use closed violins, readable numeric axes, and honest t
   expect_lt(dots$z, min(vapply(boxes, function(s) s$z, numeric(1))))
   expect_gt(policy_means$z, dots$z)
   expect_identical(dots$symbol, "circle")
-  expect_true(all(vapply(dots$data, function(p) identical(p$itemStyle$opacity, .4), logical(1))))
+  expect_true(all(vapply(dots$data, function(p) identical(p$itemStyle$opacity, .2), logical(1))))
   expect_true(all(vapply(dots$data, function(p) is.null(p$mean), logical(1))))
   expect_true(all(vapply(violins, function(s) s$areaStyle$opacity <= .35, logical(1))))
   policy_dots <- Filter(function(p) identical(p$source, "Policy"), dots$data)

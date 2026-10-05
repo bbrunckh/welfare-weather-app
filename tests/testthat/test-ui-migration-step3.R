@@ -99,14 +99,53 @@ test_that("echart_decomposition_headline draws one bar series per scenario", {
 test_that("decomposition selectors align to the right above the charts", {
   html <- htmltools::renderTags(mod_3_09_decomposition_ui("decomposition"))$html
   expect_match(html, "justify-content:flex-end", fixed = TRUE)
-  expect_match(html, "decomposition-decomp_weather_basis", fixed = TRUE)
+  expect_match(html, "decomposition-headline_scenario", fixed = TRUE)
+  expect_match(html, "decomposition-decile_scenario", fixed = TRUE)
   expect_match(html, "decomposition-decile_weather_basis", fixed = TRUE)
+  expect_match(html, "What drives the total policy effect?", fixed = TRUE)
+  expect_match(html, "Who gains, and through which channel?", fixed = TRUE)
+  expect_match(html, "View decomposition data", fixed = TRUE)
+  expect_match(html, "headline_decomp_table", fixed = TRUE)
+  expect_match(html, "decile_decomp_table", fixed = TRUE)
+  expect_false(grepl("Technical Decomposition on the Model Scale", html, fixed = TRUE))
+  expect_false(grepl("How the Policy Changes Weather Sensitivity", html, fixed = TRUE))
 })
 
 test_that("echart_decomposition_headline keeps the empty-state message", {
   w <- echart_decomposition_headline(NULL)
   expect_s3_class(w, "echarts4r")
   expect_match(w$x$opts$title[[1]]$text, "Decomposition is unavailable.", fixed = TRUE)
+})
+
+test_that("outcome decomposition charts report weighted outcome-unit channels", {
+  decomp <- data.frame(id = 1:2, weight = c(1, 3), delta_main = log(c(2, 3)),
+    delta_res1 = c(0.1, 0.2), delta_res2 = c(0.2, 0.1),
+    delta_total = log(c(2, 3)) + c(0.1, 0.2) + c(0.2, 0.1))
+  survey <- data.frame(welfare = c(10, 20), weight = c(1, 3))
+  so <- list(name = "welfare", transform = "log", units = "currency")
+  summary <- .decomposition_outcome_summary(decomp, so, survey)
+  expect_equal(summary$value[[1]], stats::weighted.mean(
+    (exp(decomp$delta_main) - 1) * survey$welfare, c(1, 3)))
+  expect_equal(summary$value[[4]], stats::weighted.mean(
+    (exp(decomp$delta_total) - 1) * survey$welfare, c(1, 3)))
+  headline <- echart_outcome_decomposition_headline(summary)
+  expect_s3_class(headline, "echarts4r")
+  decile_survey <- data.frame(welfare = 1:10, weight = 1)
+  decile_rows <- data.frame(id = 1:10, decile = 1:10,
+    delta_main = rep(.1, 10), delta_res1 = rep(.02, 10),
+    delta_res2 = rep(.01, 10), delta_total = rep(.13, 10), weight = 1)
+  deciles <- .decomposition_outcome_deciles(decile_rows, so, decile_survey)
+  expect_true(all(c("main", "repositioning", "interaction", "total") %in% names(deciles)))
+  bars <- echart_outcome_decomposition_deciles(deciles)
+  expect_s3_class(bars, "echarts4r")
+})
+
+test_that("historical adverse basis selects one adverse weather year", {
+  decomp <- data.frame(sim_year = c(2001, 2002, 2003),
+    delta_total = c(-1, 2, -3), weight = 1)
+  selected <- select_decomp_weather_basis(decomp, "adverse_10",
+    list(name = "welfare", type = "numeric"))
+  expect_equal(selected$sim_year, 2003)
 })
 
 test_that("echart_decomposition_channels_by_decile stacks channels and marks totals", {
@@ -296,7 +335,7 @@ test_that("mod_3_08 diagnostics tables render as reactable widgets", {
 # mod_3_09 module renders
 # ---------------------------------------------------------------------------
 
-test_that("mod_3_09 headline chart and table render echarts/reactable widgets", {
+test_that("mod_3_09 outcome-unit decomposition charts render", {
   # Same fixture shape as the W3-B characterization tests (self-contained
   # here so this file runs standalone).
   base <- data.frame(
@@ -334,8 +373,7 @@ test_that("mod_3_09 headline chart and table render echarts/reactable widgets", 
       expect_s3_class(headline_decomp_chart(), "echarts4r")
       expect_s3_class(decomp_bar_chart(), "echarts4r")
       expect_s3_class(output$headline_decomp_plot, "json")
-      expect_s3_class(output$headline_decomp_table, "json")
-      expect_s3_class(output$decomp_summary_table, "json")
+      expect_s3_class(output$decomp_bar_plot, "json")
     }
   )
 })

@@ -323,6 +323,36 @@ metric_decision_return_periods <- function(method = "mean", so = NULL) {
   c("Expected" = "1:1", tail_names)
 }
 
+# Keep adverse comparison rows only when the historical baseline has enough
+# finite annual aggregates to support their requested return period.
+filter_historically_supported_return_periods <- function(central, rp_map,
+                                                         historical_scenario = "Historical",
+                                                         source_col = NULL) {
+  if (is.null(central) || !nrow(central) || !"rp_label" %in% names(central)) {
+    return(central)
+  }
+  hist <- central$scenario == historical_scenario
+  if (!is.null(source_col) && source_col %in% names(central)) {
+    hist <- hist & central[[source_col]] == "Baseline"
+  }
+  expected_id <- unname(rp_map[["Expected"]])
+  hist <- hist & central$rp_name == expected_id
+  n_years <- if ("n_obs" %in% names(central) && any(hist)) {
+    suppressWarnings(max(as.numeric(central$n_obs[hist]), na.rm = TRUE))
+  } else NA_real_
+  supported <- names(rp_map)[names(rp_map) == "Expected"]
+  if (is.finite(n_years)) {
+    supported <- c(supported, names(rp_map)[vapply(names(rp_map), function(label) {
+      if (identical(label, "Expected")) return(FALSE)
+      period <- suppressWarnings(as.numeric(sub("^Adverse 1-in-", "", label)))
+      is.finite(period) && period >= 1 && n_years >= ceiling(period)
+    }, logical(1))])
+  } else {
+    supported <- character()
+  }
+  central[central$rp_label %in% supported, , drop = FALSE]
+}
+
 # Add the definitions needed to interpret a chart-data export. Keeping these
 # fields beside the values makes a CSV useful outside the live Shiny session.
 visualization_export_metadata <- function(method = "mean", so = NULL,

@@ -91,10 +91,261 @@ decomposition_summary_data <- function(decomp_df, is_rif = TRUE,
   rows
 }
 
+.decomposition_outcome_channels <- function(decomp_df, so, baseline_svy = NULL) {
+  if (is.null(decomp_df) || !is.data.frame(decomp_df) || !nrow(decomp_df)) {
+    return(data.frame())
+  }
+  main <- decomp_df$delta_main %||% rep(0, nrow(decomp_df))
+  repositioning <- decomp_df$delta_res1 %||% rep(0, nrow(decomp_df))
+  interaction <- decomp_df$delta_res2 %||% rep(0, nrow(decomp_df))
+  main <- suppressWarnings(as.numeric(main))
+  repositioning <- suppressWarnings(as.numeric(repositioning))
+  interaction <- suppressWarnings(as.numeric(interaction))
+  is_log <- identical(so$transform %||% "", "log")
+  ids <- if ("id" %in% names(decomp_df)) suppressWarnings(as.integer(decomp_df$id)) else rep(NA_integer_, nrow(decomp_df))
+  outcome <- so$name %||% ""
+  if (is_log && (is.null(baseline_svy) || !outcome %in% names(baseline_svy) ||
+      (any(is.finite(ids)) && (any(!is.finite(ids)) || any(ids < 1L | ids > nrow(baseline_svy)))))) {
+    return(data.frame())
+  }
+  if (is_log) {
+    if ("baseline_mean" %in% names(decomp_df)) {
+      baseline <- suppressWarnings(as.numeric(decomp_df$baseline_mean))
+    } else if (all(is.finite(ids))) {
+      baseline <- suppressWarnings(as.numeric(baseline_svy[[outcome]][ids]))
+    } else if ("baseline_annual" %in% names(decomp_df)) {
+      field <- "baseline_annual"
+      baseline <- suppressWarnings(as.numeric(decomp_df[[field]]))
+    } else if ("baseline_annual" %in% names(decomp_df)) {
+      baseline <- suppressWarnings(as.numeric(decomp_df$baseline_annual))
+    } else if ("decile" %in% names(decomp_df)) {
+      baseline_deciles <- weighted_baseline_deciles(baseline_svy, outcome,
+        baseline_weight_column(baseline_svy))
+      weights <- .decomp_weights(baseline_svy)
+      baseline_by_decile <- vapply(sort(unique(decomp_df$decile)), function(d) {
+        keep <- baseline_deciles == d
+        .weighted_mean_safe(as.numeric(baseline_svy[[outcome]][keep]), weights[keep])
+      }, numeric(1))
+      baseline <- unname(baseline_by_decile[as.character(decomp_df$decile)])
+    } else {
+      baseline <- rep(.weighted_mean_safe(as.numeric(baseline_svy[[outcome]]),
+        .decomp_weights(baseline_svy)), nrow(decomp_df))
+    }
+    out <- data.frame(
+      main = (exp(main) - 1) * baseline,
+      repositioning = exp(main) * (exp(repositioning) - 1) * baseline,
+      interaction = exp(main + repositioning) * (exp(interaction) - 1) * baseline,
+      total = (exp(main + repositioning + interaction) - 1) * baseline
+    )
+  } else {
+    out <- data.frame(main = main, repositioning = repositioning,
+      interaction = interaction,
+      total = decomp_df$delta_total %||% (main + repositioning + interaction))
+  }
+  out$weight <- .decomp_weights(decomp_df)
+  if (!is.null(baseline_svy) && all(is.finite(ids))) {
+    deciles <- weighted_baseline_deciles(baseline_svy, so$name %||% "welfare",
+      baseline_weight_column(baseline_svy))
+    mapped <- is.finite(ids) & ids >= 1L & ids <= length(deciles)
+    out$decile <- NA_integer_
+    out$decile[mapped] <- deciles[ids[mapped]]
+  } else if ("decile" %in% names(decomp_df)) out$decile <- decomp_df$decile
+  out
+}
+
+.decomposition_outcome_summary <- function(decomp_df, so, baseline_svy = NULL) {
+  channels <- .decomposition_outcome_channels(decomp_df, so, baseline_svy)
+  if (!nrow(channels)) return(data.frame())
+  data.frame(
+    channel = c("Main effect", "Repositioning", "Interaction", "Total"),
+    value = vapply(c("main", "repositioning", "interaction", "total"), function(field) {
+      .weighted_mean_safe(channels[[field]], channels$weight)
+    }, numeric(1)),
+    stringsAsFactors = FALSE
+  )
+}
+
+.decomposition_outcome_deciles <- function(decomp_df, so, baseline_svy = NULL) {
+  channels <- .decomposition_outcome_channels(decomp_df, so, baseline_svy)
+  if (!nrow(channels) || !"decile" %in% names(channels)) return(data.frame())
+  dplyr::bind_rows(lapply(sort(unique(channels$decile[is.finite(channels$decile)])), function(d) {
+    rows <- channels[channels$decile == d, , drop = FALSE]
+    data.frame(decile = as.integer(d),
+      main = .weighted_mean_safe(rows$main, rows$weight),
+      repositioning = .weighted_mean_safe(rows$repositioning, rows$weight),
+      interaction = .weighted_mean_safe(rows$interaction, rows$weight),
+      total = .weighted_mean_safe(rows$total, rows$weight))
+  }))
+}
+
+.decomposition_outcome_unit <- function(so) {
+  metric_metadata("mean", so)$change_unit %||% "outcome units"
+}
+
+echart_outcome_decomposition_headline <- function(data, y_label = "Weighted average change (outcome units)", height = "360px") {
+  if (is.null(data) || !nrow(data)) return(echart_blank("Decomposition is unavailable.", height))
+  data$channel <- factor(data$channel,
+    levels = c("Main effect", "Repositioning", "Interaction", "Total"))
+  fmt <- htmlwidgets::JS("function(v){ if (v == null || isNaN(v)) return '-'; return Number(v).toLocaleString('en-US',{maximumFractionDigits:2}); }")
+  e <- data |>
+    echarts4r::e_charts(channel, height = height) |>
+    echarts4r::e_bar(value, name = "Weighted average change") |>
+    echarts4r::e_color(c(.wise_cat[[4]], .wise_cat[[3]], .wise_cat[[6]], .wise_support)) |>
+    echarts4r::e_x_axis(axisLabel = wise_eaxis_label(fontSize = 13),
+      axisTick = list(alignWithLabel = TRUE), axisLine = list(lineStyle = list(color = .wise_grid))) |>
+    echarts4r::e_y_axis(name = y_label, nameLocation = "end", nameRotate = 0,
+      nameGap = 20, nameTextStyle = wise_eaxis_name(align = "left"),
+      axisLabel = wise_eaxis_label(), splitLine = wise_esplit_line()) |>
+    echarts4r::e_tooltip(trigger = "axis", valueFormatter = fmt) |>
+    echarts4r::e_grid(containLabel = TRUE, left = 54, right = 14, top = 32, bottom = 38) |>
+    wise_echart_theme()
+  e$x$opts$xAxis[[1L]]$data <- as.character(data$channel)
+  e$x$opts$legend <- list(show = FALSE)
+  e$x$opts$series[[1L]]$data <- as.list(data$value)
+  e$x$opts$yAxis[[1L]]$name <- y_label
+  e$x$opts$yAxis[[1L]]$nameLocation <- "end"
+  e$x$opts$yAxis[[1L]]$nameRotate <- 0
+  .wise_zero_markline(e)
+}
+
+echart_outcome_decomposition_deciles <- function(data, y_label = "Weighted average change (outcome units)", height = "450px") {
+  if (is.null(data) || !nrow(data)) return(echart_blank("Decile decomposition is unavailable for this run.", height))
+  channel_names <- c(main = "Main effect", repositioning = "Repositioning", interaction = "Interaction")
+  active <- names(channel_names)[vapply(names(channel_names), function(n) {
+    values <- suppressWarnings(as.numeric(data[[n]]))
+    any(abs(values) > 1e-12, na.rm = TRUE)
+  }, logical(1))]
+  if (!length(active)) active <- "main"
+  long <- do.call(rbind, lapply(active, function(n) data.frame(
+    decile = as.character(data$decile), channel = unname(channel_names[[n]]),
+    value = data[[n]], stringsAsFactors = FALSE)))
+  levels_decile <- as.character(sort(unique(data$decile)))
+  long$decile <- factor(long$decile, levels = levels_decile)
+  long$channel <- factor(long$channel, levels = unname(channel_names[active]))
+  colours <- c("Main effect" = .wise_cat[[4]], "Repositioning" = .wise_cat[[3]],
+    "Interaction" = .wise_cat[[6]])
+  fmt <- htmlwidgets::JS("function(v){ if (v == null || isNaN(v)) return '-'; return Number(v).toLocaleString('en-US',{maximumFractionDigits:2}); }")
+  e <- long |>
+    echarts4r::group_by(channel) |>
+    echarts4r::e_charts(decile, height = height) |>
+    echarts4r::e_bar(value, stack = "channels") |>
+    echarts4r::e_color(unname(colours[unname(channel_names[active])])) |>
+    echarts4r::e_legend(orient = "horizontal", left = "center", top = 4) |>
+    echarts4r::e_x_axis(name = "Fixed observed baseline welfare decile (1 = poorest)",
+      nameLocation = "middle", nameGap = 28, nameTextStyle = wise_eaxis_name(fontSize = 13),
+      axisLabel = wise_eaxis_label(fontSize = 13), axisTick = list(alignWithLabel = TRUE),
+      axisLine = list(lineStyle = list(color = .wise_grid))) |>
+    echarts4r::e_y_axis(name = y_label, nameLocation = "end", nameRotate = 0,
+      nameGap = 20, nameTextStyle = wise_eaxis_name(align = "left"),
+      axisLabel = wise_eaxis_label(), splitLine = wise_esplit_line()) |>
+    echarts4r::e_tooltip(trigger = "axis", valueFormatter = fmt) |>
+    echarts4r::e_grid(containLabel = TRUE, left = 8, right = 14, top = 86, bottom = 62) |>
+    wise_echart_theme() |>
+    .wise_zero_markline()
+  e$x$opts$legend$data <- as.list(unname(channel_names[active]))
+  pts <- lapply(seq_len(nrow(data)), function(i) list(
+    value = c(match(as.character(data$decile[[i]]), levels_decile) - 1L, data$total[[i]])))
+  e$x$opts$series <- append(e$x$opts$series, list(list(type = "scatter", name = "Total effect",
+    data = pts, symbol = "circle", symbolSize = 8,
+    itemStyle = list(color = "white", borderColor = .wise_support, borderWidth = 1.2),
+    tooltip = list(valueFormatter = fmt), z = 6)))
+  e
+}
+
 decomposition_reconciliation <- function(summary_df) {
   attr(summary_df, "reconciliation") %||% list(
     status = "unavailable", residual = NA_real_, tolerance = NA_real_
   )
+}
+
+.policy_metric_decile_summary <- function(decile_annual, scenario, basis = "mean",
+                                           adverse_support = NULL) {
+  fields <- .policy_metric_fields
+  if (!is.data.frame(decile_annual) || !nrow(decile_annual)) return(data.frame())
+  data <- decile_annual[decile_annual$scenario == scenario, , drop = FALSE]
+  if (!nrow(data)) return(data.frame())
+  if (!identical(basis, "mean")) {
+    probability <- if (identical(basis, "adverse_10")) 0.10 else 0.05
+    support <- if (is.data.frame(adverse_support) && nrow(adverse_support)) {
+      adverse_support[adverse_support$scenario == scenario &
+        adverse_support$probability == probability, , drop = FALSE]
+    } else data.frame()
+    if (!nrow(support) || any(support$status != "ok")) return(data.frame())
+    deciles <- sort(unique(data$decile))
+    models <- unique(as.character(support$model_id))
+    values <- list()
+    for (decile in deciles) {
+      by_model <- lapply(models, function(model) {
+        rows <- data[data$decile == decile & as.character(data$model_id) == model, , drop = FALSE]
+        rank <- support[as.character(support$model_id) == model, , drop = FALSE]
+        if (!nrow(rows) || nrow(rank) != 1L) return(NULL)
+        rows <- rows[order(rows$sim_year), , drop = FALSE]
+        applied <- lapply(fields[1:4], function(field) apply_adverse_year_support(
+          rows[[field]], rows$sim_year, rank))
+        if (!all(vapply(applied, function(x) identical(x$status, "ok"), logical(1)))) return(NULL)
+        setNames(vapply(applied, `[[`, numeric(1), "value"), fields[1:4])
+      })
+      if (any(vapply(by_model, is.null, logical(1)))) next
+      states <- as.list(colMeans(do.call(rbind, by_model)))
+      row <- as.data.frame(c(list(scenario = scenario, decile = as.integer(decile)),
+        .policy_metric_contributions(states)), stringsAsFactors = FALSE)
+      row$n_models <- length(models)
+      values[[length(values) + 1L]] <- row
+    }
+    return(dplyr::bind_rows(values))
+  }
+  models <- split(data, as.character(data$model_id))
+  values <- list()
+  for (decile in sort(unique(data$decile))) {
+    by_model <- lapply(models, function(rows) {
+      rows <- rows[rows$decile == decile, , drop = FALSE]
+      if (!nrow(rows) || any(!is.finite(as.matrix(rows[, fields, drop = FALSE])))) return(NULL)
+      rows <- rows[order(rows$sim_year), , drop = FALSE]
+      states <- as.matrix(rows[, fields[1:4], drop = FALSE])
+      colMeans(states)
+    })
+    if (any(vapply(by_model, is.null, logical(1)))) next
+    states <- as.list(colMeans(do.call(rbind, by_model)))[fields[1:4]]
+    row <- as.data.frame(c(list(scenario = scenario, decile = as.integer(decile)),
+      .policy_metric_contributions(states)), stringsAsFactors = FALSE)
+    row$n_models <- length(models)
+    values[[length(values) + 1L]] <- row
+  }
+  dplyr::bind_rows(values)
+}
+
+.policy_metric_headline_data <- function(result, scenario, basis = "mean") {
+  if (!is.list(result) || !length(result$scenarios) || is.null(scenario)) return(data.frame())
+  selected <- result$scenarios[[scenario]]
+  if (is.null(selected) || !identical(selected$status, "ok")) return(data.frame())
+  if (identical(basis, "mean")) {
+    summary <- selected$summary
+    if (!is.data.frame(summary) || nrow(summary) != 1L) return(data.frame())
+    row <- summary[1L, , drop = FALSE]
+    return(data.frame(scenario = scenario,
+      channel_id = c("level", "resilience", "total"),
+      channel = c("Main effect", "Resilience", "Total"),
+      value = as.numeric(unlist(row[1L, c("main", "resilience", "total")], use.names = FALSE)),
+      stringsAsFactors = FALSE))
+  }
+  probability <- if (identical(basis, "adverse_10")) 0.10 else 0.05
+  rows <- selected$return_period
+  rows <- if (is.data.frame(rows)) rows[rows$scope == "baseline_anchored" &
+    rows$probability == probability & rows$status == "ok" &
+    rows$scenario == scenario, , drop = FALSE] else data.frame()
+  if (nrow(rows) != 1L) return(data.frame())
+  data.frame(scenario = scenario, channel_id = c("level", "resilience", "total"),
+    channel = c("Main effect", "Resilience", "Total"),
+    value = as.numeric(unlist(rows[1L, c("main", "resilience", "total")], use.names = FALSE)),
+    stringsAsFactors = FALSE)
+}
+
+.policy_metric_headline_summary <- function(result, basis = "mean") {
+  if (!is.list(result) || !length(result$scenarios)) return(data.frame())
+  values <- lapply(names(result$scenarios), function(scenario) {
+    .policy_metric_headline_data(result, scenario, basis)
+  })
+  dplyr::bind_rows(values)
 }
 
 # Shared echarts colour mapping for decomposition scenarios: Historical in the
@@ -184,6 +435,93 @@ echart_decomposition_headline <- function(summary_df,
     echarts4r::e_grid(containLabel = TRUE, left = 8, right = 14, top = 86, bottom = 30) |>
     wise_echart_theme() |>
     .wise_zero_markline()
+}
+
+echart_policy_metric_headline <- function(summary_df, metadata, height = "360px") {
+  if (is.null(summary_df) || !nrow(summary_df)) {
+    return(echart_blank("Metric-aware decomposition is unavailable.", height = height))
+  }
+  summary_df <- summary_df[summary_df$channel %in% c("Main effect", "Resilience", "Total"), , drop = FALSE]
+  if (!nrow(summary_df)) return(echart_blank("Metric-aware decomposition is unavailable.", height = height))
+  summary_df$channel <- factor(summary_df$channel,
+    levels = c("Main effect", "Resilience", "Total"))
+  multiplier <- suppressWarnings(as.numeric(metadata$display_multiplier))[1L]
+  if (!length(multiplier) || !is.finite(multiplier)) multiplier <- 1
+  summary_df$display_value <- summary_df$value * multiplier
+  fmt <- htmlwidgets::JS("function(v){ if (v == null || isNaN(v)) return '-'; return Number(v).toLocaleString('en-US',{maximumFractionDigits:2}); }")
+  channels <- levels(droplevels(summary_df$channel))
+  channel_colours <- c("Main effect" = .wise_cat[[4]],
+    "Resilience" = .wise_cat[[3]], "Total" = .wise_support)
+  e <- summary_df |>
+    echarts4r::e_charts(channel, height = height) |>
+    echarts4r::e_bar(display_value, name = "Selected metric change") |>
+    echarts4r::e_x_axis(axisLabel = wise_eaxis_label(fontSize = 13),
+      axisTick = list(alignWithLabel = TRUE), axisLine = list(lineStyle = list(color = .wise_grid))) |>
+    echarts4r::e_y_axis(name = metadata$change_unit %||% "Selected metric change",
+      nameLocation = "end", nameRotate = 0, nameGap = 20,
+      nameTextStyle = wise_eaxis_name(align = "left"),
+      axisLabel = wise_eaxis_label(), splitLine = wise_esplit_line()) |>
+    echarts4r::e_tooltip(trigger = "axis", valueFormatter = fmt) |>
+    echarts4r::e_grid(containLabel = TRUE, left = 8, right = 14, top = 24, bottom = 30) |>
+    wise_echart_theme()
+  e$x$opts$xAxis[[1L]]$data <- channels
+  e$x$opts$legend <- list(show = FALSE)
+  e$x$opts$series[[1L]]$data <- lapply(seq_len(nrow(summary_df)), function(i) {
+    channel <- as.character(summary_df$channel[[i]])
+    list(value = summary_df$display_value[[i]],
+      itemStyle = list(color = unname(channel_colours[[channel]])))
+  })
+  .wise_zero_markline(e)
+}
+
+echart_policy_metric_deciles <- function(data, metadata, height = "450px") {
+  if (is.null(data) || !nrow(data)) {
+    return(echart_blank("Metric-aware decile decomposition is unavailable.", height = height))
+  }
+  channel_cols <- c("main", "repositioning", "interaction")
+  labels <- c(main = "Main effect", repositioning = "Repositioning", interaction = "Interaction")
+  active <- vapply(channel_cols, function(field) any(abs(data[[field]]) > 1e-12, na.rm = TRUE), logical(1))
+  if (any(active)) channel_cols <- channel_cols[active]
+  multiplier <- suppressWarnings(as.numeric(metadata$display_multiplier))[1L]
+  if (!length(multiplier) || !is.finite(multiplier)) multiplier <- 1
+  long <- do.call(rbind, lapply(channel_cols, function(field) data.frame(
+    decile = as.character(data$decile), channel = unname(labels[[field]]),
+    value = data[[field]] * multiplier, stringsAsFactors = FALSE)))
+  levels_decile <- as.character(sort(unique(data$decile)))
+  long$decile <- factor(long$decile, levels = levels_decile)
+  long$channel <- factor(long$channel, levels = unname(labels[channel_cols]))
+  colours <- stats::setNames(c(.wise_cat[[4]], .wise_cat[[3]], .wise_cat[[6]])[
+    match(unname(labels[channel_cols]), c("Main effect", "Repositioning", "Interaction"))],
+    unname(labels[channel_cols]))
+  fmt <- htmlwidgets::JS("function(v){ if (v == null || isNaN(v)) return '-'; return Number(v).toLocaleString('en-US',{maximumFractionDigits:2}); }")
+  e <- long |>
+    echarts4r::group_by(channel) |>
+    echarts4r::e_charts(decile, height = height) |>
+    echarts4r::e_bar(value, stack = "channels") |>
+    echarts4r::e_color(unname(colours)) |>
+    echarts4r::e_legend(orient = "horizontal", left = "center", top = 4) |>
+    echarts4r::e_x_axis(name = "Fixed observed baseline welfare decile (1 = poorest)",
+      nameLocation = "middle", nameGap = 28, nameTextStyle = wise_eaxis_name(fontSize = 13),
+      axisLabel = wise_eaxis_label(fontSize = 13), axisTick = list(alignWithLabel = TRUE),
+      axisLine = list(lineStyle = list(color = .wise_grid))) |>
+    echarts4r::e_y_axis(name = metadata$change_unit %||% "Selected metric change",
+      nameLocation = "end", nameRotate = 0, nameGap = 20,
+      nameTextStyle = wise_eaxis_name(align = "left"), axisLabel = wise_eaxis_label(),
+      splitLine = wise_esplit_line()) |>
+    echarts4r::e_tooltip(trigger = "axis", valueFormatter = fmt) |>
+    echarts4r::e_grid(containLabel = TRUE, left = 8, right = 14, top = 86, bottom = 62) |>
+    wise_echart_theme() |>
+    .wise_zero_markline()
+  marker_pts <- lapply(seq_len(nrow(data)), function(i) {
+    d <- as.character(data$decile[[i]])
+    if (!d %in% levels_decile || !is.finite(data$total[[i]])) return(NULL)
+    list(value = c(match(d, levels_decile) - 1L, data$total[[i]] * multiplier))
+  })
+  e$x$opts$series <- append(e$x$opts$series, list(list(type = "scatter", name = "Total effect",
+    data = Filter(Negate(is.null), marker_pts), symbol = "circle", symbolSize = 8,
+    itemStyle = list(color = "white", borderColor = .wise_support, borderWidth = 1.2),
+    tooltip = list(valueFormatter = fmt), z = 6)))
+  e
 }
 
 # Inject a dashed zero reference line on the first series (echarts4r has no

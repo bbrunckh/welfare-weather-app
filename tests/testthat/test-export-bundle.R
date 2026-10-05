@@ -35,7 +35,7 @@ test_that("modules register artefacts through the shared session userData", {
 })
 
 test_that("re-registering a key replaces rather than duplicates", {
-  testServer(function(input, output, session) {
+  shiny::testServer(function(input, output, session) {
     for (i in 1:3) {
       wise_export_table("t", paste("Version", i), 1L,
                         function() data.frame(x = i), session = session)
@@ -63,7 +63,6 @@ test_that("registering outside a session is a no-op rather than an error", {
                                   session = NULL))
   expect_length(wise_export_items(NULL), 0L)
 })
-
 
 # ---- File naming ------------------------------------------------------------
 

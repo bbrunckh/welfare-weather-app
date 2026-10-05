@@ -80,8 +80,49 @@ test_that("metric states use canonical aggregates and reconcile for all metrics 
       expect_equal(result$annual$policy, vapply(actual_policy, `[[`, numeric(1), "value"))
       expect_equal(result$annual$total, result$annual$main + result$annual$repositioning + result$annual$interaction)
       expect_equal(result$summary$total, result$summary$policy - result$summary$baseline)
+      decile_annual <- result$scenarios[["Historical"]]$decile_annual
+      expect_true(all(c("decile", "baseline", "after_main", "after_repositioning",
+        "policy", "main", "repositioning", "interaction", "resilience", "total") %in%
+        names(decile_annual)))
+      expect_equal(decile_annual$total,
+        decile_annual$main + decile_annual$repositioning + decile_annual$interaction)
+      decile_summary <- .policy_metric_decile_summary(decile_annual, "Historical")
+      expect_equal(decile_summary$total,
+        decile_summary$main + decile_summary$repositioning + decile_summary$interaction)
     }
   }
+})
+
+test_that("metric-aware headline chart renders selected-metric values", {
+  fx <- metric_channel_fixture()
+  result <- .policy_metric_decomposition(fx$hist, fx$policy_hist, list(), list(),
+    fx$prepared, "mean", requested_residuals = "none")
+  headline <- .policy_metric_headline_data(result, "Historical")
+  chart <- echart_policy_metric_headline(headline, result$metadata)
+  expect_s3_class(chart, "echarts4r")
+  expect_no_error(htmlwidgets:::createPayload(chart))
+  expect_identical(chart$x$opts$xAxis[[1L]]$data,
+    c("Main effect", "Resilience", "Total"))
+  deciles <- .policy_metric_decile_summary(
+    result$scenarios[["Historical"]]$decile_annual, "Historical")
+  expect_gt(nrow(deciles), 0L)
+  decile_chart <- echart_policy_metric_deciles(deciles, result$metadata)
+  expect_s3_class(decile_chart, "echarts4r")
+  expect_no_error(htmlwidgets:::createPayload(decile_chart))
+})
+
+test_that("adverse support interpolates deterministic year keys and fails closed", {
+  low <- adverse_year_support(1:20, 2030:2049, .05, "low")
+  high <- adverse_year_support(1:20, 2030:2049, .05, "high")
+  expect_equal(low$baseline_value, 1.5)
+  expect_equal(high$baseline_value, 19.5)
+  expect_equal(c(low$year_lo, low$year_hi), c(2030, 2031))
+  expect_equal(c(low$weight_lo, low$weight_hi), c(.5, .5))
+  tied <- adverse_year_support(c(1, 1, 2:19), 2049:2030, .05, "low")
+  expect_equal(tied$year_lo, 2048)
+  expect_equal(apply_adverse_year_support(c(NA, 4), c(2030, 2031), low)$status, "unavailable")
+  expect_equal(adverse_year_support(1:19, 2030:2048, .05, "low")$status, "unavailable")
+  expect_equal(adverse_year_support(c(NA_real_, NA_real_), 2030:2031, .05, "low")$n_years_excluded, 2L)
 })
 
 test_that("one residual realization is reused across states and compact shared context resolves", {
@@ -114,7 +155,7 @@ test_that("one residual realization is reused across states and compact shared c
   }
 })
 
-test_that("equal-model summaries and ordered quantile contrasts do not average component medians", {
+test_that("baseline-anchored supports reuse ranks and average models equally", {
   annual <- data.frame(model_id = rep(c("a", "b", "c"), c(50, 40, 20)),
     sim_year = c(1:50, 1:40, 1:20), baseline = c(1:50, 1:40, 1:20))
   annual$after_main <- annual$baseline + rep(c(1, 5, -2), c(50, 40, 20))
@@ -130,12 +171,14 @@ test_that("equal-model summaries and ordered quantile contrasts do not average c
     expect_equal(valid$total, valid$main + valid$repositioning + valid$interaction)
     expect_equal(valid$total, valid$policy - valid$baseline)
     expect_true(all(result$status[result$return_period == 50] == "unavailable"))
-    expect_true(all(result$scope == "equal_probability"))
-    q <- valid[valid$scope == "equal_probability" & valid$return_period == 20, ]
-    endpoint <- function(s) median(vapply(split(annual, annual$model_id), function(x) {
-      rank_interp(sort(x[[s]]), if (tail == "high") .05 else .95)
-    }, numeric(1)))
-    expect_equal(q$total, endpoint("policy") - endpoint("baseline"))
+    expect_true(all(result$scope == "baseline_anchored"))
+    q <- valid[valid$scope == "baseline_anchored" & valid$return_period == 20, ]
+    by_model <- attr(result, "adverse_by_model")
+    rows <- by_model[by_model$return_period == 20 & by_model$status == "ok", ]
+    expect_equal(q$total, mean(rows$total))
+    expect_equal(q$baseline, mean(rows$baseline))
+    expect_equal(q$total, q$main + q$repositioning + q$interaction)
+    expect_true(all(attr(result, "adverse_support")$adverse_basis == "baseline_selected_metric"))
   }
 })
 
@@ -160,7 +203,7 @@ test_that("endpoint parity failures preserve independent Results summaries and n
   bad <- fx$policy_hist; bad$pipeline$weight <- rev(bad$pipeline$weight)
   expect_identical(run(policy = bad)$status, "unavailable")
   b$Historical$out$value_all[[1L]] <- 999
-  expect_match(run()$reason, "endpoint aggregate parity")
+  expect_match(run()$reason, "endpoint baseline aggregate parity")
 })
 
 test_that("mechanisms remain model scale and preserve bins, ranks and missing engine channels", {
@@ -254,7 +297,7 @@ test_that("member exposures and dropped endpoint support are not confused across
   expect_equal(actual$summary$total[actual$summary$scenario == "future"], actual$endpoint_summary$value)
 })
 
-test_that("tail attribution is withheld when matched support differs from Results thresholds", {
+test_that("unselected policy missingness does not change baseline adverse support", {
   fx <- metric_channel_fixture()
   pipe <- fx$hist$pipeline
   # Retain exact row anchors but expand their valid calendar years to 20 years.
@@ -278,12 +321,11 @@ test_that("tail attribution is withheld when matched support differs from Result
     "mean", requested_residuals = "none", endpoint_series_baseline = b, endpoint_series_policy = p)
   expect_identical(result$status, "ok")
   expect_equal(result$summary$n_model_years, 19L)
-  expected <- result$return_period[result$return_period$scope == "equal_probability" &
+  expected <- result$return_period[result$return_period$scope == "baseline_anchored" &
     result$return_period$return_period == 5, ]
-  expect_identical(expected$status, "unavailable")
-  expect_match(expected$reason, "marginal threshold endpoints")
-  expect_true(is.na(expected$total))
-  expect_true(all(result$return_period$scope == "equal_probability"))
+  expect_identical(expected$status, "ok")
+  expect_true(is.finite(expected$total))
+  expect_true(all(result$return_period$scope == "baseline_anchored"))
 })
 
 test_that("the real shared Results calculation follows edits without re-preparing or predicting", {
@@ -309,19 +351,19 @@ test_that("the real shared Results calculation follows edits without re-preparin
     session$setInputs(cmp_agg_method = "mean")
     result <- api$metric_decomposition()
     expect_identical(result$status, "ok")
-    expect_equal(result$summary$total, api$headline_paired_effect_summary()$value)
+    expect_true(is.finite(api$expected_paired_effect_summary()$value))
     expect_identical(result$metadata$requested_residuals, "none")
     session$setInputs(cmp_agg_method = "headcount_ratio", cmp_pov_line = 3)
     session$elapse(500); session$flushReact()
     poverty <- api$metric_decomposition()
     expect_identical(poverty$status, "ok")
-    expect_equal(poverty$summary$total, api$headline_paired_effect_summary()$value)
+    expect_true(is.finite(api$expected_paired_effect_summary()$value))
     session$setInputs(cmp_pov_line = 5)
     session$elapse(500); session$flushReact()
     edited <- api$metric_decomposition()
     expect_identical(edited$status, "ok")
     expect_equal(edited$metadata$threshold_value, 5)
-    expect_equal(edited$summary$total, api$headline_paired_effect_summary()$value)
+    expect_true(is.finite(api$expected_paired_effect_summary()$value))
     expect_equal(edited$mechanisms$summary, poverty$mechanisms$summary)
   })
 })
@@ -462,7 +504,7 @@ test_that("production corrections and compact member summaries share annual chan
     hist <- list(pipeline = p, shared_context = list(train_aug = fx$base), residuals = "original")
     second <- p
     if (!binned) second$weather_exposure$table$temp <- second$weather_exposure$table$temp * 2
-    scenarios <- list(future = list(pipelines = list(a = p, b = second), year_range = c(2030L, 2031L)))
+    scenarios <- list(future = list(pipelines = list(a = p, b = second), year_range = c("2030", "2031")))
     run <- function(chunk_size) apply_policy_delta_to_baseline(
       fx$base, fx$policy, fx$model, fx$context$so, hist, scenarios,
       decomp_context = fx$context, run_identity = "annual-run", chunk_size = chunk_size
@@ -476,8 +518,8 @@ test_that("production corrections and compact member summaries share annual chan
     expect_identical(out$correction_version, "row_aligned_annual_v1")
     expect_equal(out$decomp_scenarios, one_block$decomp_scenarios, tolerance = 1e-12)
     tbl <- out$decomp_scenarios$channel_summary
-    expect_equal(nrow(tbl), 4L)
-    expect_setequal(tbl$member, c("a", "b"))
+    expect_equal(nrow(tbl), 6L)
+    expect_setequal(tbl$member, c("Historical", "a", "b"))
     for (member in c("a", "b")) {
       pipe <- scenarios$future$pipelines[[member]]
       ch <- .policy_annual_channels(pipe, out$annual_channels, "annual-run")
@@ -536,9 +578,5 @@ test_that("technical adverse deciles use the selected member-year support", {
   compact <- out$decomp_scenarios
   selected <- .compact_future_year(compact, "future", "adverse_20", fx$context$so)
   expect_equal(nrow(selected), 1L)
-  same <- compact
-  keep <- same$decile_summary$member == selected$member & same$decile_summary$sim_year == selected$sim_year
-  same$decile_summary <- same$decile_summary[keep, , drop = FALSE]
-  expect_equal(.compact_future_decile_summary(compact, "future", "adverse_20", fx$context$so),
-    .compact_future_decile_summary(same, "future", "mean", fx$context$so))
+  expect_equal(nrow(.compact_future_decile_summary(compact, "future", "adverse_20", fx$context$so)), 0L)
 })

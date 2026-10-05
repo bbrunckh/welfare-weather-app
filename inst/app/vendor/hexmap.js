@@ -327,6 +327,14 @@
     });
 
     map.on("load", function () {
+      // Keep attribution available behind its toggle, but don't let its full
+      // source text cover the map on initial render.
+      var attribution = map.getContainer().querySelector(".maplibregl-ctrl-attrib");
+      if (attribution) {
+        attribution.removeAttribute("open");
+        attribution.classList.remove("maplibregl-compact-show");
+      }
+
       map.addSource("hex", { type: "geojson", data: EMPTY_FC, buffer: 0, tolerance: 0 });
       var expr = colourExpr(state);
       map.addLayer({

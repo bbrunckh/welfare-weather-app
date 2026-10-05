@@ -147,7 +147,8 @@ mod_3_07_results_server <- function(id,
       poverty_line = results_api$poverty_line,
       focus_scenario = results_api$focus_scenario,
       metric_context = results_api$metric_context,
-      metric_decomposition = results_api$metric_decomposition
+      metric_decomposition = results_api$metric_decomposition,
+      analysis_unit = analysis_unit
     )
   })
 }

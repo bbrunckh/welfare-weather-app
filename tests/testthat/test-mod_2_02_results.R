@@ -552,9 +552,9 @@ test_that("all Module 2 summaries use the same complete scenario set", {
       expect_setequal(unique(exceedance$scenario), expected)
       expect_equal(dplyr::n_distinct(round(bands$value, 8)), 3L)
 
-      central <- thresholds[thresholds$Estimate == "Central (P50)" &
+      central <- thresholds[thresholds$Estimate == "Equal-model mean" &
                               thresholds$rp_name == "1:1", , drop = FALSE]
-      expect_equal(dplyr::n_distinct(round(central$value, 8)), 3L)
+      expect_equal(dplyr::n_distinct(round(central$value, 8)), 2L)
     }
   )
 })
@@ -892,14 +892,18 @@ test_that("adverse plot uses the selected climate-model spread", {
     is_historical = FALSE,
     n_obs = 30L
   )
+  threshold_tbl <- dplyr::bind_rows(threshold_tbl, tibble::tibble(
+    scenario = "Historical", Estimate = "Single historical estimate",
+    rp_name = "1:1", value = 0, is_historical = TRUE, n_obs = 30L
+  ))
 
   dot <- step2_adverse_dot_data(threshold_tbl, method = "mean")
-  expect_equal(dot$intermod_lo, c(4, 3))
-  expect_equal(dot$intermod_hi, c(6, 7))
+  expect_equal(dot$intermod_lo[!dot$is_historical], c(4, 3))
+  expect_equal(dot$intermod_hi[!dot$is_historical], c(6, 7))
 
   plot <- plot_step2_adverse_dot(dot)
-  expect_equal(plot$data$intermod_lo, c(4, 3))
-  expect_equal(plot$data$intermod_hi, c(6, 7))
+  expect_equal(plot$data$intermod_lo[!plot$data$is_historical], c(4, 3))
+  expect_equal(plot$data$intermod_hi[!plot$data$is_historical], c(6, 7))
 })
 
 test_that("adverse plot labels scenarios directly on one shared x-axis", {
@@ -914,6 +918,10 @@ test_that("adverse plot labels scenarios directly on one shared x-axis", {
     is_historical = FALSE,
     n_obs = 30L
   )
+  threshold_tbl <- dplyr::bind_rows(threshold_tbl, tibble::tibble(
+    scenario = "Historical", Estimate = "Single historical estimate",
+    rp_name = "1:1", value = 0, is_historical = TRUE, n_obs = 30L
+  ))
 
   dot <- step2_adverse_dot_data(threshold_tbl, method = "mean")
   plot <- plot_step2_adverse_dot(dot)
@@ -929,7 +937,7 @@ test_that("adverse plot labels scenarios directly on one shared x-axis", {
   text_layers <- Filter(function(l) inherits(l$geom, "GeomText"), plot$layers)
   expect_equal(length(text_layers), 1L)
   expect_setequal(text_layers[[1L]]$data$scenario_key,
-                  c("SSP2-4.5 / 2030-2040", "SSP2-4.5 / 2050-2060"))
+                  c("SSP2-4.5 / 2030-2040", "SSP2-4.5 / 2050-2060", "Historical"))
 })
 
 test_that("adverse dot plot offsets scenario dumbbells vertically", {
@@ -944,6 +952,10 @@ test_that("adverse dot plot offsets scenario dumbbells vertically", {
     is_historical = FALSE,
     n_obs = 30L
   )
+  threshold_tbl <- dplyr::bind_rows(threshold_tbl, tibble::tibble(
+    scenario = "Historical", Estimate = "Single historical estimate",
+    rp_name = "1:1", value = 0, is_historical = TRUE, n_obs = 30L
+  ))
   dot <- step2_adverse_dot_data(threshold_tbl, method = "mean")
   plot <- plot_step2_adverse_dot(dot)
 

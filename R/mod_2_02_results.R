@@ -299,7 +299,7 @@ mod_2_02_results_ui <- function(id) {
       shiny::tags$p(
         class = "text-muted small",
         style = "margin-top: 8px; margin-bottom: 0;",
-        "Central estimates summarize each model's weather years at the selected return period, then take the median across climate models; distinct from the equal-model-mean expected headline. Bounds capture CMIP6 climate model disagreement (Ensemble), econometric sampling precision (Coef), and combined uncertainty (Pooled)."
+          "Adverse point estimates use the selected metric's baseline annual quantile within each model and an equal-model mean across SSP models; this differs from distribution-curve medians. Bounds are existing diagnostics, not uncertainty estimates for the equal-model mean."
       )
     ),
 
@@ -1180,8 +1180,22 @@ mod_2_02_results_server <- function(id,
           )
         }
       }
-      dplyr::bind_rows(Filter(Negate(is.null), rows))
+      support_tables <- lapply(Filter(Negate(is.null), rows), attr, which = "adverse_support")
+      out <- dplyr::bind_rows(Filter(Negate(is.null), rows))
+      attr(out, "adverse_support") <- dplyr::bind_rows(Filter(Negate(is.null), support_tables))
+      out
     })
+
+    wise_export_table(
+      key = "climate_adverse_support",
+      label = "Climate baseline-anchored adverse support",
+      step = 2L,
+      fun = function() {
+        support <- attr(threshold_table_rv(), "adverse_support")
+        if (is.data.frame(support)) support else data.frame()
+      },
+      description = "Per-model annual selected-metric baseline quantile and interpolation year-rank support. SSP point centers are equal-model means."
+    )
 
     # Only the expected headline changes center; all existing chart/threshold
     # reactives retain their median ensemble convention and deviation behavior.
@@ -1435,11 +1449,13 @@ mod_2_02_results_server <- function(id,
         n_yrs <- ncol(vals)
         n_pts <- if (is_hist) sum(is.finite(as.numeric(vals))) else n_yrs
 
-        # Drop RPs that aren't comfortably supported by n_yrs of data. A 1-in-N
-        # return period needs at least N observations (p in [1/n, 1-1/n]); we
-        # don't report tighter probabilities - they'd rest on the single most
-        # extreme observed year and are not meaningful as a "1-in-N" estimate.
-        rp_ok <- RPs >= (1 / n_yrs) & RPs <= (1 - 1 / n_yrs)
+        # Each model must independently support each rank; a longer member
+        # cannot manufacture support for a shorter one.
+        rp_ok <- vapply(RPs, function(p) all(vapply(seq_len(nrow(vals)), function(i) {
+          support <- adverse_year_support(vals[i, ], suppressWarnings(as.numeric(mm$sim_years)),
+            p, adverse_tail)
+          identical(support$status, "ok")
+        }, logical(1))), logical(1))
         RPs_keep <- RPs[rp_ok]
         if (length(RPs_keep) == 0L) {
           return(NULL)
@@ -1447,16 +1463,40 @@ mod_2_02_results_server <- function(id,
 
         # Per-model rank-interp at each kept RP (matrix: model * RP) - shape
         # guaranteed by the helper (see by_model_rp_matrix()).
-        mm <- by_model_rp_matrix(vals, sds, RPs_keep, adverse_tail)
-        per_model_rp <- mm$rp
-        per_model_sd_at_rp <- mm$sd
+        per_model_rp <- matrix(NA_real_, nrow = nrow(vals), ncol = length(RPs_keep),
+          dimnames = list(mm$model_ids, names(RPs_keep)))
+        per_model_sd_at_rp <- matrix(NA_real_, nrow = nrow(vals), ncol = length(RPs_keep),
+          dimnames = list(mm$model_ids, names(RPs_keep)))
+        sd_years <- suppressWarnings(as.numeric(colnames(sds)))
+        if (length(sd_years) != ncol(sds) || any(!is.finite(sd_years))) {
+          sd_years <- suppressWarnings(as.numeric(mm$sim_years))
+        }
+        support_records <- vector("list", nrow(vals) * length(RPs_keep))
+        for (i in seq_len(nrow(vals))) for (j in seq_along(RPs_keep)) {
+          support <- adverse_year_support(vals[i, ], suppressWarnings(as.numeric(mm$sim_years)),
+            RPs_keep[[j]], adverse_tail)
+          support_records[[(i - 1L) * length(RPs_keep) + j]] <- data.frame(
+            scenario = scenario_label, model_id = mm$model_ids[[i]],
+            probability = RPs_keep[[j]], as.list(support), stringsAsFactors = FALSE)
+          if (identical(support$status, "ok")) {
+            applied <- apply_adverse_year_support(vals[i, ], suppressWarnings(as.numeric(mm$sim_years)), support)
+            per_model_rp[i, j] <- applied$value
+            sd_value <- if (identical(support$year_lo, support$year_hi) && support$weight_hi == 0) {
+              if (is.finite(sds[i, match(support$year_lo, sd_years)])) sds[i, match(support$year_lo, sd_years)] else NA_real_
+            } else {
+              lo <- match(support$year_lo, sd_years); hi <- match(support$year_hi, sd_years)
+              if (anyNA(c(lo, hi)) || any(!is.finite(sds[i, c(lo, hi)]))) NA_real_ else
+                support$weight_lo * sds[i, lo] + support$weight_hi * sds[i, hi]
+            }
+            per_model_sd_at_rp[i, j] <- sd_value
+          }
+        }
 
         # Aggregate across models for each RP
-        central_vec <- if (is_hist) {
-          per_model_rp[1L, ]
-        } else {
-          apply(per_model_rp, 2L, stats::median, na.rm = TRUE)
-        }
+        central_vec <- vapply(seq_len(ncol(per_model_rp)), function(j) {
+          column <- per_model_rp[, j]
+          if (!all(is.finite(column))) NA_real_ else mean(column)
+        }, numeric(1))
         coef_sd_vec <- if (is_hist) {
           per_model_sd_at_rp[1L, ]
         } else {
@@ -1502,6 +1542,7 @@ mod_2_02_results_server <- function(id,
             rp_name = names(RPs_keep),
             rp_label = names(RPs_keep),
             value = vec - hist_ref,
+            absolute_value = vec,
             n_obs = n_pts,
             is_historical = is_hist
           )
@@ -1518,7 +1559,7 @@ mod_2_02_results_server <- function(id,
         pooled_hi_lbl <- paste0("Pooled ", .pct_label(bq_coef[["hi"]]))
 
         rows <- list(
-          make_row("Central (P50)", central_vec),
+          make_row(if (is_hist) "Single historical estimate" else "Equal-model mean", central_vec),
           make_row(coef_lo_lbl, coef_lo_vec),
           make_row(coef_hi_lbl, coef_hi_vec)
         )
@@ -1536,7 +1577,10 @@ mod_2_02_results_server <- function(id,
             make_row(pooled_hi_lbl, total_hi_vec)
           ))
         }
-        dplyr::bind_rows(rows)
+        out <- dplyr::bind_rows(rows)
+        supports <- dplyr::bind_rows(support_records)
+        attr(out, "adverse_support") <- supports
+        out
       }
 
       rows <- list(one_scenario(
@@ -1564,7 +1608,7 @@ mod_2_02_results_server <- function(id,
       fun = function() step2_headline_df(headline_cards_data_rv()),
       description = paste(
         "Headline values are display-formatted; native numeric endpoints, units, selected deviation, metric context, and summary operators are included.",
-        "Expected and range summaries average years within model and weight climate models equally; adverse thresholds retain the median across climate models."
+        "Expected and range summaries average years within model and weight climate models equally; adverse annual selected-metric quantiles use an equal-model mean."
       )
     )
 
@@ -1750,8 +1794,22 @@ mod_2_02_results_server <- function(id,
 
     adverse_dot_data_rv <- reactive({
       req(threshold_table_rv())
+      table <- threshold_table_rv()
+      historical_rows <- table$scenario == "Historical" &
+        table$Estimate %in% c("Single historical estimate", "Equal-model mean", "Central (P50)")
+      historical_year_count <- if ("n_obs" %in% names(table) && any(historical_rows)) {
+        max(as.numeric(table$n_obs[historical_rows]), na.rm = TRUE)
+      } else NA_real_
+      rp_map <- metric_decision_return_periods(.selected_method(), hist_sim()$so)
+      if (is.finite(historical_year_count)) {
+        rp_map <- rp_map[names(rp_map) == "Expected" |
+          vapply(names(rp_map), function(label) {
+            if (identical(label, "Expected")) return(TRUE)
+            historical_year_count >= as.integer(sub("^Adverse 1-in-", "", label))
+          }, logical(1))]
+      }
       dot <- step2_adverse_dot_data(
-        threshold_table_rv(),
+        table[table$rp_name %in% unname(rp_map), , drop = FALSE],
         method = .selected_method(),
         so = hist_sim()$so
       )

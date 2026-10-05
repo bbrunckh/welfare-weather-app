@@ -58,7 +58,7 @@ test_that("resilience and adverse headline cards use metric-aware shared results
       after_repositioning = .29, policy = .28, main = -.02,
       repositioning = -.01, interaction = -.01, resilience = -.02, total = -.04))),
     return_period = data.frame(scenario = "SSP2-4.5 / 2030-2040", return_period = 20,
-      scope = "equal_probability", status = "ok", total = -.08,
+      scope = "baseline_anchored", status = "ok", total = -.08,
       main = -.02, resilience = -.06, repositioning = -.01, interaction = -.05),
     mechanisms = list(repositioning_status = "modeled", interaction_status = "included")
   )
@@ -174,7 +174,7 @@ test_that("step3_headline_cards builds 5 concise policy cards", {
   # Card 2: Adverse 1-in-10 protection
   expect_identical(cards[[2]]$label, "Adverse weather years")
   expect_identical(cards[[2]]$value, "Unavailable")
-  expect_match(cards[[2]]$note, "Policy vs baseline · 1-in-20 year · SSP2-4.5 / 2030-2040", fixed = TRUE)
+  expect_match(cards[[2]]$note, "Baseline-anchored adverse result unavailable · 1-in-20 year · SSP2-4.5 / 2030-2040", fixed = TRUE)
 
   # Card 3: Policy channels
   expect_identical(cards[[3]]$label, "Resilience effect")
@@ -223,14 +223,17 @@ test_that("Program scale & reach counts units affected by all implemented polici
   cards <- step3_headline_cards(
     paired_summary = paired_sum,
     policy_svy     = pol,
-    baseline_svy   = base
+    baseline_svy   = base,
+    analysis_unit  = "hh"
   )
 
   # Touched rows: 1, 2, 3 -> represented population = 100 + 200 + 300 = 600
   expect_identical(cards[[4]]$value, paste0(fmt_num(600 / 1e6, 1), "M"))
+  expect_equal(cards[[4]]$households_represented,
+    100 / 4 + 200 / 3 + 300 / 2)
   expect_identical(cards[[5]]$prediction_count_native, 960)
-  expect_identical(cards[[5]]$prediction_count_note, "960 observation-years")
-  expect_match(cards[[5]]$note, "960 observation-years", fixed = TRUE)
+  expect_identical(cards[[5]]$prediction_count_note, "960 household-years")
+  expect_match(cards[[5]]$note, "960 household-years", fixed = TRUE)
   expect_match(as.character(cards[[5]]$note_html), "font-weight: 600", fixed = TRUE)
   expect_identical(step3_headline_df(cards)$prediction_count_native[[5]], 960)
   expect_identical(step3_headline_df(cards)$prediction_sample_rows[[5]], 4)
@@ -239,9 +242,12 @@ test_that("Program scale & reach counts units affected by all implemented polici
   # Without a baseline frame, falls back to SP recipients only (rows 1 and 3).
   cards_sp <- step3_headline_cards(
     paired_summary = paired_sum,
-    policy_svy     = pol
+    policy_svy     = pol,
+    analysis_unit  = "hh"
   )
   expect_identical(cards_sp[[4]]$value, paste0(fmt_num(400 / 1e6, 1), "M"))
+  expect_equal(cards_sp[[4]]$households_represented, 100 / 4 + 300 / 2)
+  expect_match(cards_sp[[4]]$note, "recipient households reported in Diagnostics", fixed = TRUE)
 
   # No touched units at all -> Unavailable.
   pol_none <- base
@@ -261,7 +267,7 @@ test_that("step3_adverse_dot_data and plot_step3_adverse_dot work correctly", {
     rp_name       = rep(c("1:1", "1:10", "1:10", "1:10"), 4),
     value         = c(3.0, 2.0, 2.0, 2.0, 3.0, 2.0, 2.0, 2.0,
                       3.2, 2.1, 2.1, 2.1, 3.65, 2.4, 2.9, 2.68),
-    n_obs         = 30L,
+    n_obs         = c(rep(30L, 8), rep(5L, 8)),
     is_historical = rep(c(TRUE, FALSE), each = 8)
   )
 
@@ -294,11 +300,15 @@ test_that("step3 adverse dot data carries model spread for baseline and policy",
     Estimate      = rep(c("Central (P50)", "Ensemble 0%", "Ensemble 100%", "Central (P50)"), 2),
     rp_name       = rep(c("1:1", "1:10", "1:10", "1:10"), 2),
     value         = c(3.2, 2.9, 3.1, 3.2, 3.65, 2.4, 2.9, 2.68),
-    n_obs         = 30L,
+    n_obs         = c(30L, 5L, 5L, 30L, 30L, 5L, 5L, 30L),
     is_historical = FALSE
   )
+  thresh <- dplyr::bind_rows(thresh, tibble::tibble(
+    scenario = "Historical", source = "Baseline", Estimate = "Single historical estimate",
+    rp_name = "1:1", value = 3.1, n_obs = 30L, is_historical = TRUE
+  ))
   dot_df <- step3_adverse_dot_data(thresh, method = "mean", so = list(type = "numeric", name = "welfare"))
-  rp10 <- dot_df$rp_name == "1:10"
+  rp10 <- dot_df$rp_name == "1:10" & dot_df$scenario != "Historical"
   expect_true(all(c("base_lo", "base_hi", "policy_lo", "policy_hi") %in% names(dot_df)))
   expect_equal(dot_df$base_lo[rp10], 2.9)
   expect_equal(dot_df$base_hi[rp10], 3.1)
@@ -318,6 +328,29 @@ test_that("step3 adverse dot data carries model spread for baseline and policy",
   }, character(1))
   expect_equal(sum(band_cols == "#0072B2", na.rm = TRUE), 1L)
   expect_equal(sum(band_cols == "#D55E00", na.rm = TRUE), 1L)
+})
+
+test_that("Step 3 adverse plot uses Step 2 periods and historical support", {
+  periods <- c("1:1", "1:5", "1:10", "1:20", "1:50")
+  labels <- c("Equal-model mean", rep("Equal-model mean", 4))
+  tbl <- tibble::tibble(
+    scenario = rep(c("Historical", "SSP2-4.5 / 2030-2040"), each = length(periods) * 2),
+    source = rep(rep(c("Baseline", "Policy"), each = length(periods)), 2),
+    Estimate = rep(labels, 4),
+    rp_name = rep(periods, 4),
+    value = seq_len(20),
+    n_obs = rep(c(30L, 30L, 30L, 30L, 30L), 4),
+    is_historical = rep(c(TRUE, FALSE), each = length(periods) * 2)
+  )
+  dot <- step3_adverse_dot_data(tbl, method = "mean", so = list(type = "numeric", name = "welfare"))
+  expect_setequal(as.character(dot$rp_label), c("Expected", "Adverse 1-in-5", "Adverse 1-in-10", "Adverse 1-in-20"))
+  expect_false(any(dot$rp_label == "Adverse 1-in-50"))
+  expect_equal(dot$effect, dot$policy_val - dot$baseline_val)
+  expect_true(all(is.finite(dot$baseline_val) & is.finite(dot$policy_val)))
+
+  tbl$n_obs <- 50L
+  dot_50 <- step3_adverse_dot_data(tbl, method = "mean", so = list(type = "numeric", name = "welfare"))
+  expect_true(any(dot_50$rp_label == "Adverse 1-in-50"))
 })
 
 test_that("step3_variance_breakdown and plot_step3_variance_contribution work correctly", {
