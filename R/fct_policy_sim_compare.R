@@ -1131,9 +1131,7 @@ step3_headline_cards <- function(paired_summary,
   )
 
   # 2. Adverse weather year protection (1-in-20 headline)
-  eff_10 <- NA_real_
   eff_20 <- NA_real_
-  eff_50 <- NA_real_
   if (!is.null(threshold_tbl) && nrow(threshold_tbl) && "source" %in% names(threshold_tbl)) {
     rp_map <- metric_decision_return_periods(method %||% "mean", so)
     rp_10 <- unname(rp_map[["Adverse 1-in-10"]])
@@ -2136,8 +2134,6 @@ plot_step3_adverse_dot <- function(tbl, x_label = "Outcome level",
                                  aggregation_cache = NULL,
                                  analysis_unit = reactive(NULL),
                                  annual_channels = reactive(NULL)) {
-  ns <- session$ns
-
   aggregation_method <- reactive({
     hs <- baseline_hist_sim()
     choices <- unname(hist_aggregate_choices(hs$so$type, hs$so$name))
@@ -2895,17 +2891,6 @@ plot_step3_adverse_dot <- function(tbl, x_label = "Outcome level",
     } else {
       0
     }
-  })
-
-  has_draws <- reactive({
-    bh <- baseline_hist_sim()
-    ph <- policy_hist_sim()
-    # Mod 2 schema: F_loading lives on $pipeline; check there first and fall
-    # back to top-level for any caller still on the older flat shape.
-    isTRUE(
-      !is.null(bh$pipeline$F_loading) || !is.null(bh$F_loading) ||
-        !is.null(ph$pipeline$F_loading) || !is.null(ph$F_loading)
-    )
   })
 
   # Per-source helpers that mirror Mod 2's reactive trio ----

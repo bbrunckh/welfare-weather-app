@@ -1694,7 +1694,6 @@ build_weather_stats_table <- function(survey_weather, selected_weather,
   norm <- gsub("\\s*[-\u2013\u2014]\\s*", ";", lv, perl = TRUE)
   nums <- lapply(regmatches(norm, gregexpr("[-+]?[0-9]+(\\.[0-9]+)?", norm, perl = TRUE)),
                  as.numeric)
-  has <- vapply(nums, function(x) length(x) > 0L && all(is.finite(x)), logical(1))
   lo <- vapply(nums, function(x) if (length(x)) min(x) else Inf, numeric(1))
   hi <- vapply(nums, function(x) if (length(x)) max(x) else Inf, numeric(1))
   lv[order(lo, hi, seq_along(lv))]
@@ -2318,8 +2317,6 @@ echart_binscatter <- function(df, hv, hv_label = hv, y_var, y_label = y_var,
     }
     out
   }
-
-  y_rng <- if (is_binary_y) c(0, 1) else NULL
 
   if (is_binned_x) {
     summary_df <- summarise_bins(d$x)

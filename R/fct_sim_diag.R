@@ -208,8 +208,6 @@
     fill_map <- colour_map
     fill_map["Model support"] <- "#ffffff" # white fill with a clear outline
 
-    n_scen_shown <- length(unique(all_df$source)) -
-      sum(c("Full historical", "Model support") %in% all_df$source)
 
     p <- ggplot2::ggplot(
       all_df,

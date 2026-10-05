@@ -1283,11 +1283,6 @@ mod_2_02_results_server <- function(id,
 
     # Reactive computations (carried over from mod_2_06) ----
 
-    hist_label <- reactive({
-      nm <- if (!is.null(selected_hist)) selected_hist()$scenario_name else NULL
-      if (!is.null(nm) && nzchar(nm)) nm else "Historical"
-    })
-
 
     # Always use survey weights when available (UI toggle removed - weighting
     # is the correct default for survey-based welfare estimates).
@@ -1484,7 +1479,6 @@ mod_2_02_results_server <- function(id,
       by_model_matrix(tbl)
     }
     .pct_label <- pct_label
-    .rank_interp <- rank_interp
 
     # pointrange_bands_rv: one row per scenario, three nested bands ----
     pointrange_bands_rv <- reactive({

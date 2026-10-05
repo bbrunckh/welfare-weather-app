@@ -345,7 +345,6 @@ mod_1_02_surveystats_server <- function(
 
           tryCatch(
             {
-              con <- dbplyr::remote_con(h3_local)
               .duck_load_ext("spatial")
               .duck_load_ext("h3")
 

@@ -551,18 +551,6 @@ pipeline_runner <- function(triggers, results, on_state = NULL,
     emit()
   }
 
-  fire <- function(key) {
-    set_stage(key, "running")
-    active(key)
-    baseline(results[[key]]$generation())
-    fired(FALSE)
-    deadline(Sys.time() + stage_timeout)
-    settling(key)
-    settle_until(Sys.time() + .pipeline_settle_seconds())
-    if (is.function(on_settle)) on_settle()
-    emit()
-  }
-
   shiny::observe({
     key <- settling()
     until <- settle_until()

@@ -285,7 +285,6 @@ build_ridge_distribution_data <- function(
       (target - prev) / span
   }
   iqr_x <- hist_quantile(0.75) - hist_quantile(0.25)
-  scale_x <- min(sd_x, iqr_x / 1.34)
   bin_width <- diff(breaks)[1L]
   if (is.null(bandwidth)) {
     # Estimate each series independently using effective sample size. Raw

@@ -1046,7 +1046,6 @@ apply_policy_to_svy <- function(svy,
             # reallocation logic).
             target_ind <- min((labor$sector_manufacturing %||% 0) / 100, 1)
             target_serv <- min((labor$sector_services %||% 0) / 100, 1 - target_ind)
-            target_agri <- 1.0 - target_ind - target_serv
 
             # Convert targets to row counts
             n_target_ind <- round(n_working * target_ind)

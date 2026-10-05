@@ -3938,24 +3938,6 @@ echart_weather_effect_plot <- function(fit, pred_var, interaction_terms, is_binn
 
             e <- .e_new(height)
 
-            js_err <- htmlwidgets::JS("function(params, api) {
-              var x = api.coord([api.value(0), api.value(1)])[0];
-              var high = api.coord([api.value(0), api.value(2)])[1];
-              var low = api.coord([api.value(0), api.value(3)])[1];
-              var barWidth = 0;
-              var stroke = api.visual('color') || '#0071BC';
-              return {
-                type: 'group',
-                children: [
-                  {
-                    type: 'line',
-                    shape: { x1: x, y1: high, x2: x, y2: low },
-                    style: { stroke: stroke, lineWidth: 1.5 }
-                  },
-                ]
-              };
-            }")
-
             if (is.null(modx_var)) {
               bins_df$conf.low <- bins_df$Estimate - 1.96 * bins_df$`Std. Error`
               bins_df$conf.high <- bins_df$Estimate + 1.96 * bins_df$`Std. Error`

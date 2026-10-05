@@ -367,10 +367,6 @@ mod_1_07_results_server <- function(id,
         has_controls <- n_covs > 0 ||
           !identical(snap$model$covariate_selection, "User-defined")
 
-        # Short outcome phrase for probability wording (strips the poverty-line
-        # parenthetical from labels like "Poor (welfare < poverty line)").
-        y_short <- sub("\\s*\\(.*$", "", y_lab_lower)
-
         # Reference-profile linear predictor for binary outcomes: the same map
         # the headline cards use, so binned-plot pp effects match the cards.
         profile_eta0 <- if (is_logit) {
@@ -392,7 +388,6 @@ mod_1_07_results_server <- function(id,
           if (identical(as.character(outcome_snap$name[1]), "poor")) {
             line <- suppressWarnings(as.numeric(outcome_snap$povline[1]))
             if (is.finite(line)) {
-              poor_label <- paste0("Poor ($", formatC(line, format = "f", digits = 2), "/day)")
               if (binned) {
                 return("Effect size (percentage points vs reference bin)")
               }

@@ -356,24 +356,6 @@ mod_3_08_diagnostics_server <- function(id,
 
     diag_tab_added <- reactiveVal(FALSE)
 
-    # Helper: human-readable unit word ("individual" / "individuals" /
-    # "Household" / "Households" / "Firm" / "Firms") driven by analysis_unit().
-    unit_word <- function(plural = TRUE, capitalize = FALSE, au = NULL) {
-      au <- au %||% tryCatch(analysis_unit(), error = function(e) "hh")
-      au <- if (is.null(au) || !nzchar(au)) "hh" else au
-      word <- switch(au,
-        ind  = if (plural) "individuals" else "individual",
-        hh   = if (plural) "households" else "household",
-        firm = if (plural) "firms" else "firm",
-        if (plural) "households" else "household"
-      )
-      if (capitalize) {
-        paste0(toupper(substr(word, 1, 1)), substr(word, 2, nchar(word)))
-      } else {
-        word
-      }
-    }
-
     variable_label <- function(var_name) {
       .policy_diagnostic_label(
         var_name,
@@ -702,11 +684,6 @@ mod_3_08_diagnostics_server <- function(id,
     output$policy_component_table <- reactable::renderReactable({
       d <- diag_data()
       req(d)
-      unit_col <- if (identical(d$analysis_unit, "hh")) {
-        "Sample households affected / covered"
-      } else {
-        "Sample observations affected / covered"
-      }
       .wise_diag_reactable(
         .policy_component_table_raw(d$component_matrix, d$analysis_unit),
         formats = list(

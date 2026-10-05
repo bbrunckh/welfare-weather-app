@@ -886,9 +886,6 @@ step1_fmt_effect <- function(est, se, scale, digits = 1, ci = NULL) {
   info_bits <- character(0)
   rif_p_line <- NULL
   rif_cmp_line <- NULL
-  interaction_value_line <- NULL
-  interaction_p_line <- NULL
-  interaction_cmp_line <- NULL
 
   # Distribution sensitivity (RIF only)
   if (engine == "rif") {

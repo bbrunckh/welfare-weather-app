@@ -331,7 +331,7 @@ WISEAPP_WX_ROUND_DIGITS <- 5L
   }
 
   if (!file.exists(path)) {
-    ok_create <- dir.create(dir, showWarnings = FALSE, recursive = TRUE)
+    dir.create(dir, showWarnings = FALSE, recursive = TRUE)
     filtered <- apply_slice(lazy)
     con <- .duck_con()
     tmp_path <- paste0(path, ".tmp")
@@ -1100,12 +1100,6 @@ get_weather <- function(
     value
   }
 
-  .profile_relation <- function(stage, value, detail = NULL) {
-    if (is.null(weather_profile)) return(value)
-    .profile_record(stage, proc.time()[["elapsed"]], value, detail)
-    value
-  }
-
   # -- Temp-table cleanup ledger (SEC-02) --------------------------------------
   # DuckDB connections are process-wide, so materialised temp tables survive
   # errors until the worker exits. Every table created below is registered here
@@ -1721,8 +1715,6 @@ get_weather <- function(
       }
 
       for (spec in period_specs) {
-        fp_start <- spec$start
-        fp_end <- spec$end
         fp_label <- spec$label
         current_period_id <- spec$id
 

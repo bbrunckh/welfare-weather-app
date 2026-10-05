@@ -419,20 +419,6 @@ mod_3_09_decomposition_server <- function(id,
       mf <- model_fit()
       !is.null(mf) && identical(tolower(as.character(mf$engine %||% "")), "rif")
     })
-    baseline_deciles <- reactive({
-      ctx <- decomp_context()
-      if (is.null(ctx)) {
-        NULL
-      } else if (exists(
-        ".decomposition_context_baseline_deciles",
-        mode = "function"
-      )) {
-        .decomposition_context_baseline_deciles(ctx)
-      } else {
-        ctx$baseline_deciles
-      }
-    })
-
     output$policy_summary_ui <- shiny::renderUI({
       policy_summary_card(
         selected_policies = selected_policies(),

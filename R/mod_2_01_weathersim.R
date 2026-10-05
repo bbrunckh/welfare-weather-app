@@ -1341,7 +1341,6 @@ mod_2_01_weathersim_server <- function(id,
           # INT-05: bind the historical scenario label into the result so the
           # Step 3 pane describes the simulated run, not the live selection.
           result$hist_sim_result$hist_label <- sh$scenario_name
-          model_spec <- mf$.snap$model %||% list()
           result$hist_sim_result$sim_summary <- list(
             weather = sw,
             historical_years = unlist(sh$year_range[[1]], use.names = FALSE),

@@ -249,9 +249,7 @@ plot_pointrange_climate <- function(bands_tbl,
   has_source <- prep$has_source
   colour_palette <- prep$palette
   ordered_levels <- prep$ordered_levels
-  spacer_ids <- prep$spacer_ids
   x_label_map <- prep$x_label_map
-  data_levels <- prep$data_levels
 
   if (nrow(df) == 0L) {
     return(blank_plot("Run a future simulation to see scenario comparisons."))
@@ -1524,7 +1522,6 @@ build_threshold_table_df <- function(threshold_tbl,
   }
 
   # Pivot: one column per RP threshold, value rounded.
-  rp_levels <- unique(df$rp_label)
   df$value_round <- round(df$value, 2)
 
   pivot_cols <- if (has_source) {
@@ -2593,7 +2590,6 @@ echart_pointrange_climate <- function(bands_tbl,
   }
   palette <- prep$palette
   ordered_levels <- prep$ordered_levels
-  x_label_map <- prep$x_label_map
 
   e <- .e_step2_base(height)
   series <- list()

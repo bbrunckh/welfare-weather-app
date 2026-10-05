@@ -58,8 +58,6 @@ mod_3_06_policy_sim_server <- function(id,
                                        sim_stale = reactive(FALSE),
                                        run_trigger = reactive(NULL)) {
   moduleServer(id, function(input, output, session) {
-    ns <- session$ns
-
     baseline_svy_rv <- reactiveVal(NULL)
     policy_svy_rv <- reactiveVal(NULL)
     sim_run_id <- reactiveVal(0L)
