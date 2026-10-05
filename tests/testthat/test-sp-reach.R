@@ -138,6 +138,9 @@ test_that("budget-first mode derives the per-unit transfer from the budget", {
   eligible <- policy[[SP_TRANSFER_COL]] > 0
   expect_equal(r$transfer_per_unit,
     1e6 / sum(svy$weight[eligible] / svy$hhsize[eligible]))
+  expect_equal(fmt_num(r$transfer_per_unit, digits = 2, prefix = "$"),
+    fmt_num(1e6 / sum(svy$weight[eligible] / svy$hhsize[eligible]),
+      digits = 2, prefix = "$"))
   expect_equal(r$n_recipient_units,
     sum(svy$weight[eligible] / svy$hhsize[eligible]))
 })

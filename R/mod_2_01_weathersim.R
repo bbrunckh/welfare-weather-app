@@ -224,8 +224,7 @@ mod_2_01_weathersim_ui <- function(id) {
     shiny::tags$hr(style = "margin: 10px 0;"),
 
     # Run simulation button (hidden for RIF engine) ----
-    shiny::uiOutput(ns("run_sim_ui")),
-    shiny::uiOutput(ns("historical_preview_ui"))
+    shiny::uiOutput(ns("run_sim_ui"))
   )
 }
 
@@ -245,6 +244,91 @@ mod_2_01_weathersim_ui <- function(id) {
   selected_surveys[wave_key %in% baseline_selection, , drop = FALSE]
 }
 
+# Expected scenario labels of a run, in run order: SSP outer, period inner
+# (the order of get_weather()'s .process_ssp loop), keyed exactly like the
+# worker's partials and the adopted scenarios.
+.step2_scenario_labels <- function(ssps, periods) {
+  if (!length(ssps) || !length(periods)) return(character(0))
+  unlist(lapply(ssps, function(ssp) {
+    vapply(periods, function(yr) {
+      .step2_scenario_display_key(ssp, c(yr[[1L]], yr[[2L]]))
+    }, character(1))
+  }), use.names = FALSE)
+}
+
+# Mean seconds per completed scenario group times the remaining groups.
+# NULL until one group is done or when nothing remains.
+.step2_live_eta <- function(groups_done, groups_total, base, now = Sys.time()) {
+  if (is.null(groups_done) || is.null(groups_total) || is.null(base) ||
+      groups_done < 1L || groups_total <= groups_done) return(NULL)
+  per_group <- as.numeric(difftime(now, base, units = "secs")) / groups_done
+  max(0, per_group * (groups_total - groups_done))
+}
+
+.step2_eta_text <- function(eta_seconds) {
+  if (is.null(eta_seconds) || !is.finite(eta_seconds)) return(NULL)
+  if (eta_seconds < 60) return("under a minute remaining")
+  paste0("about ", ceiling(eta_seconds / 60), " min remaining")
+}
+
+# Fraction complete of a streaming run, or NULL when it cannot be determined.
+# `view` carries has_hist, groups_total, groups_done, current_label,
+# member_index, period_members and done_labels.
+.step2_live_pct <- function(view) {
+  total <- view$groups_total %||% 0L
+  done <- view$groups_done %||% 0L
+  hist_done <- if (isTRUE(view$has_hist)) 1L else 0L
+  if (total <= 0L && !hist_done && done == 0L) return(NULL)
+  frac <- 0
+  if (!is.null(view$member_index) && !is.null(view$period_members) &&
+      view$period_members > 0L && !(view$current_label %in% view$done_labels)) {
+    frac <- min(1, view$member_index / view$period_members)
+  }
+  min(1, (hist_done + done + frac) / (1 + total))
+}
+
+.step2_progress_ui <- function(view) {
+  pct <- .step2_live_pct(view)
+  bar <- if (is.null(pct)) {
+    shiny::div(class = "progress-bar progress-bar-striped active",
+      role = "progressbar", style = "width: 100%;")
+  } else {
+    shiny::div(class = "progress-bar", role = "progressbar",
+      `aria-valuenow` = round(100 * pct), `aria-valuemin` = 0,
+      `aria-valuemax` = 100, style = sprintf("width: %d%%;", round(100 * pct)))
+  }
+  row <- function(label, done, current, detail = NULL) {
+    shiny::div(
+      class = if (done || current) "" else "text-muted",
+      shiny::icon(if (done) "check" else if (current) "spinner" else "circle"),
+      " ", label, if (!done && !is.null(detail)) paste0(" (", detail, ")")
+    )
+  }
+  rows <- NULL
+  if (isTRUE(view$has_hist) || length(view$scenario_labels)) {
+    cur <- view$current_label
+    models <- if (!is.null(view$member_index) && !is.null(view$period_members) &&
+        view$period_members > 0L) {
+      paste0(view$member_index, " / ", view$period_members, " climate models")
+    }
+    rows <- c(
+      list(row("Historical", isTRUE(view$has_hist), FALSE)),
+      lapply(view$scenario_labels, function(lbl) {
+        done <- lbl %in% view$done_labels
+        is_cur <- !done && identical(lbl, cur)
+        row(lbl, done, is_cur, if (is_cur) models)
+      })
+    )
+  }
+  shiny::tagList(
+    shiny::div(class = "progress", style = "height: 4px; margin: 4px 0 2px;", bar),
+    if (length(rows)) shiny::div(
+      class = "small", style = paste0("font-size: 12px;",
+        if (length(rows) > 8L) " max-height: 160px; overflow-y: auto;" else ""),
+      rows)
+  )
+}
+
 
 #' 2_01_weathersim Server Functions
 #'
@@ -262,6 +346,9 @@ mod_2_01_weathersim_ui <- function(id) {
 #'   histogram break points for the weather density plot. Defaults to
 #'   \code{reactive(NULL)} - breaks computed on demand when not supplied.
 #' @param run_trigger Optional reactive trigger for a programmatic run.
+#' @param display_settings Optional reactive list(method, pov_line,
+#'   bandwidth_p0) read at submit so the worker streams the Results tab's
+#'   current metric.
 #'
 #' @noRd
 mod_2_01_weathersim_server <- function(id,
@@ -273,7 +360,8 @@ mod_2_01_weathersim_server <- function(id,
                                        model_fit,
                                        stored_breaks = reactive(NULL),
                                        survey_version = reactive(0L),
-                                       run_trigger = reactive(NULL)) {
+                                       run_trigger = reactive(NULL),
+                                       display_settings = reactive(NULL)) {
   moduleServer(id, function(input, output, session) {
     ns <- session$ns
 
@@ -287,7 +375,12 @@ mod_2_01_weathersim_server <- function(id,
     run_status <- reactiveVal("idle")
     run_detail <- reactiveVal(NULL)
     weather_store_lease <- reactiveVal(NULL)
-    historical_preview <- reactiveVal(NULL)
+    # Streaming state of the current async run (see
+    # review/step2_live_run_contract.md) and the partials of the last adopted
+    # run. live_hist_at times the historical partial for the ETA.
+    live_run <- reactiveVal(NULL)
+    adopted_partials <- reactiveVal(NULL)
+    live_hist_at <- NULL
     session_ended <- FALSE
 
     session_callback <- function(fn) {
@@ -686,12 +779,7 @@ mod_2_01_weathersim_server <- function(id,
                    shiny::icon("spinner"),
                   shiny::textOutput(ns("simulation_progress"), inline = TRUE)
                ),
-               shiny::div(
-                 class = "progress",
-                 style = "height: 4px; margin: 4px 0 2px;",
-                 shiny::div(class = "progress-bar progress-bar-striped active",
-                   role = "progressbar", style = "width: 100%;")
-               ),
+               shiny::uiOutput(ns("run_progress_ui")),
                shiny::actionButton(
                  ns("stop_sim"), "Stop simulation",
                  class = "btn btn-link btn-sm text-muted p-0",
@@ -717,47 +805,37 @@ mod_2_01_weathersim_server <- function(id,
     submission_sequence <- 0L
     session$onSessionEnded(function() {
       session_ended <<- TRUE
+      try(shiny::isolate(live_run(NULL)), silent = TRUE)
       pending_submission <<- FALSE
       submission_sequence <<- submission_sequence + 1L
       .wise_step2_async_detach_session(session$token)
     })
 
     output$simulation_progress <- shiny::renderText({
-      paste0(" ", run_detail() %||% "Simulation running")
+      lr <- live_run()
+      paste0(" ", run_detail() %||% "Simulation running",
+        if (!is.null(lr$eta_seconds)) paste0(" | ", .step2_eta_text(lr$eta_seconds)))
     })
 
-    output$historical_preview_ui <- shiny::renderUI({
-      preview <- historical_preview()
-      if (is.null(preview)) return(NULL)
-      rows <- preview$data
-      shiny::tags$section(
-        class = "card mt-3", `aria-label` = "Provisional historical preview",
-        shiny::tags$div(class = "card-body p-2",
-          shiny::tags$strong("Historical preview"),
-          shiny::tags$p(class = "text-muted small mb-2",
-            "Provisional mean welfare. Final results are still computing; this preview is not available to policies or exports."),
-          shiny::tags$p(class = "small mb-2", preview$metadata$historical_label %||%
-            preview$labels$historical %||% "Historical weather",
-            shiny::tags$br(), preview$metadata$baseline_label %||%
-              preview$labels$baseline %||% "Captured baseline survey",
-            shiny::tags$br(), if (isTRUE(preview$metadata$weighted)) "Survey-weighted mean" else "Unweighted mean"),
-          if (!is.null(hist_sim())) shiny::tags$p(class = "small text-muted",
-            "The Results tab still shows the previous completed run."),
-          shiny::tags$div(style = "max-height: 240px; overflow-y: auto;",
-            shiny::tags$table(class = "table table-sm mb-0", style = "font-size: 12px;",
-              shiny::tags$thead(shiny::tags$tr(shiny::tags$th("Weather year"),
-                shiny::tags$th("Mean"), shiny::tags$th("Uncertainty SD"))),
-              shiny::tags$tbody(lapply(seq_len(nrow(rows)), function(i) {
-                shiny::tags$tr(shiny::tags$td(rows$sim_year[[i]]),
-                  shiny::tags$td(formatC(rows$value[[i]], format = "fg", digits = 4)),
-                  shiny::tags$td(if ("uncertainty" %in% names(rows)) {
-                    formatC(rows$uncertainty[[i]], format = "fg", digits = 3)
-                  } else "-"))
-              }))
-            )
-          )
-        )
+    # The bar and checklist re-render only when their inputs change, not on
+    # every progress tick (elapsed/eta live in live_run only).
+    live_view <- shiny::reactiveVal(NULL)
+    shiny::observe({
+      lr <- live_run()
+      view <- if (is.null(lr)) NULL else list(
+        has_hist = !is.null(lr$partials$historical),
+        done_labels = names(lr$partials$scenarios) %||% character(0),
+        groups_total = lr$groups_total, groups_done = lr$groups_done,
+        scenario_labels = lr$scenario_labels, current_label = lr$current_label,
+        member_index = lr$member_index, period_members = lr$period_members
       )
+      if (!identical(shiny::isolate(live_view()), view)) live_view(view)
+    })
+    output$run_progress_ui <- shiny::renderUI({
+      if (!run_status() %in% c("queued", "running", "adopting")) return(NULL)
+      view <- live_view()
+      if (is.null(view)) return(.step2_progress_ui(list()))
+      .step2_progress_ui(view)
     })
 
     shiny::observeEvent(input$stop_sim, {
@@ -768,7 +846,7 @@ mod_2_01_weathersim_server <- function(id,
         if (!is.null(job_id)) .wise_step2_async_cancel(job_id)
         async_job_id(NULL)
         run_generation(run_generation() + 1L)
-        historical_preview(NULL)
+        live_run(NULL)
         run_status("cancelled")
         run_detail("Cancelled; the worker will finish its current operation before another run starts")
         sim_guard$end()
@@ -823,7 +901,7 @@ mod_2_01_weathersim_server <- function(id,
             .wise_step2_async_cancel(job$id, "Inputs changed.")
             async_job_id(NULL)
             run_generation(run_generation() + 1L)
-            historical_preview(NULL)
+            live_run(NULL)
             run_status("stale")
             run_detail("Inputs changed; run the simulation again")
             sim_guard$end()
@@ -933,12 +1011,22 @@ mod_2_01_weathersim_server <- function(id,
           isTRUE(input$propagate_all_covariate_uncertainty),
         fit_multi = if (is_rif) mf$fit3 else NULL,
         taus = if (is_rif) mf$taus else NULL,
-        weather_cols = if (is_rif) mf$weather_terms else NULL
-      ), preview_labels = list(
-        historical = sh$scenario_name,
-        baseline = captured_baseline
+        weather_cols = if (is_rif) mf$weather_terms else NULL,
+        display = isolate(display_settings())
       ))
-      historical_preview(NULL)
+      live_hist_at <<- NULL
+      adopted_partials(NULL)
+      started_at <- Sys.time()
+      live_run(list(
+        generation = generation, dependency_signature = dependency_signature,
+        status = "queued", started_at = started_at, elapsed = 0,
+        groups_total = length(ssps) * length(fp_list), groups_done = 0L,
+        scenario_labels = .step2_scenario_labels(ssps, fut_periods),
+        current_label = NULL, member_index = NULL, period_members = NULL,
+        eta_seconds = NULL,
+        display = isolate(display_settings()),
+        partials = list(historical = NULL, scenarios = list())
+      ))
       run_status("queued")
       clicked_at_epoch <- async_clicked_at_epoch()
       job <- tryCatch(
@@ -952,6 +1040,13 @@ mod_2_01_weathersim_server <- function(id,
           on_status = session_callback(function(status, job, detail) {
             if (identical(job$generation, run_generation())) {
               run_status(status)
+              lr <- live_run()
+              if (status %in% c("cancelled", "failed", "stale")) {
+                live_run(NULL)
+              } else if (!is.null(lr)) {
+                lr$status <- status
+                live_run(lr)
+              }
               if (identical(status, "queued")) run_detail("Simulation queued; waiting for the shared worker")
               if (identical(status, "running")) run_detail("Dispatched; waiting for worker acknowledgement")
               if (identical(status, "adopting")) run_detail("Loading completed results")
@@ -965,6 +1060,7 @@ mod_2_01_weathersim_server <- function(id,
               weather = "Loading weather", pipeline = "Predicting welfare",
               simulation = "Computing scenarios", historical_ready = "Historical prediction ready",
               preview_ready = "Historical preview ready; computing future scenarios",
+              group_completed = "Summarising scenario results",
               finalizing = "Finalizing simulation", writing_result = "Writing completed results",
               result_written = "Results written", manifest_written = "Results ready to load"
             )
@@ -972,12 +1068,37 @@ mod_2_01_weathersim_server <- function(id,
             if (length(label) != 1L || is.na(label)) label <- "Simulation running"
             if (!is.null(record$completed)) label <- paste0(label, " (", record$completed, " predictions completed)")
             run_detail(paste0(label, " | ", round(record$elapsed), " s"))
+            lr <- live_run()
+            if (!is.null(lr)) {
+              lr$elapsed <- as.numeric(record$elapsed)
+              lr$status <- "running"
+              if (!is.null(record$groups_total)) lr$groups_total <- record$groups_total
+              if (!is.null(record$groups_done)) lr$groups_done <- record$groups_done
+              lr$current_label <- record$current_label
+              lr$member_index <- record$member_index
+              lr$period_members <- record$period_members
+              lr$eta_seconds <- .step2_live_eta(
+                lr$groups_done, lr$groups_total, live_hist_at %||% lr$started_at
+              )
+              live_run(lr)
+            }
             invisible(TRUE)
           }),
-          on_preview = session_callback(function(preview, job) {
+          on_partial = session_callback(function(partial, job) {
             if (!identical(job$generation, run_generation()) ||
                 !identical(live_sim_sig(), job$dependency_signature)) return(invisible(FALSE))
-            historical_preview(preview)
+            lr <- live_run()
+            if (is.null(lr)) return(invisible(FALSE))
+            if (identical(partial$kind, "historical")) {
+              live_hist_at <<- Sys.time()
+              lr$partials$historical <- partial
+            } else {
+              lr$partials$scenarios[[partial$label]] <- partial
+            }
+            if (!isTRUE(lr$groups_total > 0L) && !is.null(partial$groups_total)) {
+              lr$groups_total <- as.integer(partial$groups_total)
+            }
+            live_run(lr)
             invisible(TRUE)
           }),
           on_result = session_callback(function(manifest, job) {
@@ -986,7 +1107,7 @@ mod_2_01_weathersim_server <- function(id,
               sim_stale(TRUE)
               run_status("stale")
               async_job_id(NULL)
-              historical_preview(NULL)
+              live_run(NULL)
               sim_guard$end()
               return(invisible(FALSE))
             }
@@ -1010,14 +1131,22 @@ mod_2_01_weathersim_server <- function(id,
                weather_store_lease(new_lease)
                hist_sim(result$hist_sim_result)
                saved_scenarios(result$new_scenarios)
+               adopted_partials(list(
+                 dependency_signature = job$dependency_signature,
+                 partials = live_run()$partials %||%
+                   list(historical = NULL, scenarios = list())
+               ))
+               live_run(NULL)
                adopted <- TRUE
                step2_weather_store_release(old_lease)
                TRUE
              })
-             if (!isTRUE(committed)) return(committed)
+             if (!isTRUE(committed)) {
+               live_run(NULL)
+               return(committed)
+             }
             run_status("success")
              run_detail("Results ready")
-             historical_preview(NULL)
             async_job_id(NULL)
             sim_guard$end()
             sim_failures <- result$failures %||% list()
@@ -1044,7 +1173,7 @@ mod_2_01_weathersim_server <- function(id,
             if (identical(job$generation, run_generation())) {
               run_status("failure")
                async_job_id(NULL)
-               historical_preview(NULL)
+               live_run(NULL)
               sim_guard$end()
               shiny::showNotification(
                 paste0("Simulation failed: ", conditionMessage(error)),
@@ -1055,7 +1184,7 @@ mod_2_01_weathersim_server <- function(id,
         ),
         error = function(e) {
           run_status("failure")
-          historical_preview(NULL)
+          live_run(NULL)
           sim_guard$end()
           shiny::showNotification(
             paste0("Simulation failed: ", conditionMessage(e)),
@@ -1099,6 +1228,7 @@ mod_2_01_weathersim_server <- function(id,
           return(invisible(NULL))
         }
         run_generation(run_generation() + 1L)
+        adopted_partials(NULL)
         run_status("running")
         completed <- FALSE
         on.exit(
@@ -1294,7 +1424,9 @@ mod_2_01_weathersim_server <- function(id,
         reactive(isTRUE(input$propagate_all_covariate_uncertainty)),
       stale = sim_stale,
       run_generation = run_generation,
-      run_status = run_status
+      run_status = run_status,
+      live_run = live_run,
+      adopted_partials = adopted_partials
     )
   })
 }

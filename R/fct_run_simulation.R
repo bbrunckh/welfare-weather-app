@@ -31,6 +31,44 @@
 }
 environment(.run_simulation_parallel_chunk) <- baseenv()
 
+.STEP2_SSP_LABELS <- c(
+  "ssp2_4_5" = "SSP2-4.5",
+  "ssp3_7_0" = "SSP3-7.0",
+  "ssp5_8_5" = "SSP5-8.5"
+)
+
+# Display key of a future scenario group, e.g. "SSP2-4.5 / 2030-2040". Shared
+# by the new_scenarios assembly and the group_completed progress event.
+.step2_scenario_display_key <- function(ssp_code, year_range) {
+  ssp_pretty <- .STEP2_SSP_LABELS[ssp_code] %||% ssp_code
+  paste0(ssp_pretty, " / ", year_range[1], "-", year_range[2])
+}
+
+# Results-tab display settings the streamed partial tables are computed for.
+# Falls back like the module: unsupported method -> "mean"; poverty line from
+# the outcome metadata (as .results_content_ui()), else 3.00; bandwidth 0.05.
+.step2_resolve_display <- function(display, so, residuals, skip_coef_draws) {
+  methods <- unname(hist_aggregate_choices(so$type, so$name))
+  method <- as.character(display$method %||% "mean")[1L]
+  if (!length(methods) || !method %in% methods) method <- "mean"
+  finite_pos <- function(x) {
+    is.numeric(x) && length(x) >= 1L && is.finite(x[[1L]]) && x[[1L]] > 0
+  }
+  pov <- if (finite_pos(display$pov_line)) {
+    display$pov_line[[1L]]
+  } else if (finite_pos(so[["povline"]])) {
+    so[["povline"]][[1L]]
+  } else {
+    3
+  }
+  bw <- if (finite_pos(display$bandwidth_p0)) display$bandwidth_p0[[1L]] else 0.05
+  list(
+    method = method, pov_line = as.numeric(pov), bandwidth_p0 = as.numeric(bw),
+    residuals = residuals, skip_coef = isTRUE(skip_coef_draws),
+    is_log = isTRUE(so$transform == "log")
+  )
+}
+
 # REACT-12: parse a future simulation key into its (SSP x period) group.
 # Key format: "ssp2_4_5_2030_2040_ensemble_mean" ->
 #   ssp_code "ssp2_4_5", yr_parts c(2030, 2040), gk "ssp2_4_5_2030_2040".
@@ -262,6 +300,13 @@ prepare_weather_manifest <- function(
 #'   for tests. Default [run_sim_pipeline].
 #' @param preview_fn       Optional function receiving a bounded historical
 #'   mean summary after historical prediction and before future weather work.
+#' @param partial_fn       Optional function receiving one display-ready
+#'   aggregated table (schema 1 list) after the historical key and after each
+#'   completed (SSP x period) group. Errors are swallowed except conditions
+#'   inheriting `wiseapp_step2_cancelled`.
+#' @param display          Optional list(method, pov_line, bandwidth_p0) of
+#'   the Results tab settings the partial tables are computed for. Defaults:
+#'   "mean", `so$povline` (else 3), 0.05.
 #' @param checkpoint_fn    Optional cooperative checkpoint function receiving
 #'   a fixed-stage/member context. Throw a condition inheriting
 #'   `wiseapp_step2_cancelled` to cancel the run.
@@ -323,6 +368,8 @@ fct_run_simulation <- function(sw,
                                 weather_fn = get_weather,
                                 pipeline_fn = run_sim_pipeline,
                                 preview_fn = NULL,
+                                partial_fn = NULL,
+                                display = NULL,
                                 checkpoint_fn = NULL) {
   memory_profile <- if (identical(tolower(Sys.getenv("WISEAPP_MEMORY_PROFILE", "")), "1")) {
     new.env(parent = emptyenv())
@@ -394,11 +441,8 @@ fct_run_simulation <- function(sw,
     )
   }
 
-  ssp_labels <- c(
-    "ssp2_4_5" = "SSP2-4.5",
-    "ssp3_7_0" = "SSP3-7.0",
-    "ssp5_8_5" = "SSP5-8.5"
-  )
+  ssp_labels <- .STEP2_SSP_LABELS
+  groups_total <- if (has_future) length(ssps) * length(fp_list) else 0L
 
   # Total elapsed timer - starts here, covers everything ----
   t_start_total <- proc.time()[["elapsed"]]
@@ -587,15 +631,26 @@ fct_run_simulation <- function(sw,
   n_pipeline_completed <- 0L
   n_pipeline_failed <- 0L
 
-  checkpoint <- function(stage, member_ordinal = 0L) {
+  # Group progress state: every checkpoint event carries the cumulative
+  # groups_done/groups_total so the latest record is always sufficient.
+  groups_done <- 0L
+  groups_completed <- character(0)
+  open_gk <- NULL
+  current_member <- list()
+
+  checkpoint <- function(stage, member_ordinal = 0L, extra = NULL) {
     if (!is.function(checkpoint_fn)) return(invisible(NULL))
     event <- list(
       stage = stage,
       member_ordinal = as.integer(member_ordinal),
       completed = n_pipeline_completed,
       failed = n_pipeline_failed,
-      requested = NA_integer_
+      requested = NA_integer_,
+      groups_done = as.integer(groups_done),
+      groups_total = as.integer(groups_total)
     )
+    if (is.null(extra)) extra <- current_member
+    if (length(extra)) event[names(extra)] <- extra
     tryCatch(
       checkpoint_fn(event),
       error = function(e) {
@@ -613,6 +668,81 @@ fct_run_simulation <- function(sw,
   t_start_pipeline <- proc.time()[["elapsed"]]
   message("[wiseapp] Running simulation pipelines...")
   progress_fn(0.15, "Preparing climate scenarios...")
+
+  # Shared display context, built once after the historical pipeline. The same
+  # object the preview and compact_step2_result() use, so partial tables see
+  # exactly the inputs the Results module sees later.
+  shared_ctx <- NULL
+  partial_display <- .step2_resolve_display(display, so, residuals, skip_coef_draws)
+
+  # Phase 3: compute the displayed table with the module's helper and hand it
+  # to partial_fn. Never fails the run, except for cancellation.
+  emit_partial <- function(kind, label, ordinal, pipes, n_models,
+                           n_models_requested, historical = FALSE) {
+    if (!is.function(partial_fn) || is.null(shared_ctx)) return(invisible(NULL))
+    tryCatch({
+      agg <- step2_display_aggregation_suite(
+        pipelines = pipes,
+        method = partial_display$method,
+        so = so,
+        residuals = residuals,
+        skip_coef = isTRUE(skip_coef_draws),
+        pov_line = partial_display$pov_line,
+        bandwidth_p0 = partial_display$bandwidth_p0,
+        shared_context = shared_ctx,
+        historical = historical
+      )
+      shown <- agg$tables[[partial_display$method]]
+      if (is.null(shown)) return(invisible(NULL))
+      partial_fn(list(
+        schema = 1L,
+        kind = kind,
+        label = label,
+        ordinal = as.integer(ordinal),
+        groups_total = as.integer(groups_total),
+        n_models = as.integer(n_models),
+        n_models_requested = as.integer(n_models_requested),
+        display = c(partial_display, list(
+          weight_key = agg$weight_key,
+          methods = names(agg$tables)
+        )),
+        so = so,
+        has_weights = agg$weighted,
+        has_draws = !is.null(chol_obj),
+        table = shown,
+        tables = agg$tables
+      ))
+    }, error = function(e) {
+      if (inherits(e, "wiseapp_step2_cancelled")) stop(e)
+      invisible(NULL)
+    })
+    invisible(NULL)
+  }
+
+  # A group is complete when its last member arrives (metadata), when a key of
+  # another group arrives, or when the weather loop ends. Exactly once each.
+  on_group_complete <- function(gk) {
+    if (is.null(gk) || gk %in% groups_completed) return(invisible(NULL))
+    groups_completed <<- c(groups_completed, gk)
+    groups_done <<- groups_done + 1L
+    if (identical(open_gk, gk)) open_gk <<- NULL
+    meta <- group_meta[[gk]]
+    label <- if (is.null(meta)) gk else {
+      .step2_scenario_display_key(meta$ssp_code, meta$year_range)
+    }
+    n_ok <- as.integer(group_n[[gk]] %||% 0L)
+    n_req <- as.integer(group_requested[[gk]] %||% 0L)
+    checkpoint("group_completed", n_keys, extra = list(
+      label = label, n_models = n_ok, n_models_requested = n_req
+    ))
+    if (n_ok >= 1L && !is.null(group_agg[[gk]])) {
+      emit_partial(
+        "scenario", label, groups_done,
+        lapply(group_agg[[gk]], .compact_pipeline), n_ok, n_req
+      )
+    }
+    invisible(NULL)
+  }
 
   weather_refs <- list()
   emitted_keys <- character(0)
@@ -633,6 +763,29 @@ fct_run_simulation <- function(sw,
           ssp_code = key_group$ssp_code,
           year_range = key_group$yr_parts
         )
+      }
+    }
+    # Trigger (b): a key from another group (or historical) closes the open one.
+    if (!is.null(open_gk) && !identical(open_gk, key_group$gk)) {
+      on_group_complete(open_gk)
+    }
+    current_member <<- list()
+    last_of_group <- FALSE
+    if (!is.null(key_group)) {
+      open_gk <<- key_group$gk
+      mi <- metadata$member_index
+      pm <- metadata$period_members
+      if (is.numeric(mi) && length(mi) == 1L && is.finite(mi) &&
+          is.numeric(pm) && length(pm) == 1L && is.finite(pm)) {
+        current_member <<- list(
+          member_index = as.integer(mi), period_members = as.integer(pm),
+          current_label = .step2_scenario_display_key(
+            key_group$ssp_code, key_group$yr_parts
+          )
+        )
+        # Trigger (a): last member by metadata. May be unreachable if empty
+        # models were skipped upstream; (b) and (c) cover that case.
+        last_of_group <- mi >= pm
       }
     }
     checkpoint("pipeline_started", n_keys)
@@ -669,6 +822,7 @@ fct_run_simulation <- function(sw,
         is_hist = is_hist, error = key_err
       )
       checkpoint("pipeline_failed", n_keys)
+      if (last_of_group) on_group_complete(key_group$gk)
       return(invisible(NULL))
     }
     if (identical(weather_storage, "reference") && !is_hist) {
@@ -686,9 +840,9 @@ fct_run_simulation <- function(sw,
       profile_memory("historical_pipeline", hist_sim_result$pipeline, detail = key)
       out$weather_raw <- NULL
       checkpoint("historical_ready", n_keys)
-      if (is.function(preview_fn)) {
-        tryCatch({
-          preview_context <- step2_shared_context(
+      if (is.function(preview_fn) || is.function(partial_fn)) {
+        shared_ctx <<- tryCatch(
+          step2_shared_context(
             train_aug = .compact_residual_context(
               precomputed_train_aug, shared_id_col, residuals,
               compact = identical(payload_mode, "compact")
@@ -701,7 +855,13 @@ fct_run_simulation <- function(sw,
               fit_multi = !is.null(fit_multi),
               taus = taus
             )
-          )
+          ),
+          error = function(e) NULL
+        )
+      }
+      if (is.function(preview_fn) && !is.null(shared_ctx)) {
+        preview_context <- shared_ctx
+        tryCatch({
           weighted <- !is.null(out$weight)
           is_log <- isTRUE(so$transform == "log")
           withr::with_seed(WISEAPP_DEFAULT_SEED, {
@@ -747,6 +907,10 @@ fct_run_simulation <- function(sw,
           })
         }, error = function(e) invisible(NULL))
       }
+      emit_partial(
+        "historical", "Historical", 0L, .compact_pipeline(out), 1L, 1L,
+        historical = TRUE
+      )
     } else {
       gk <- key_group$gk
       if (is.null(group_agg[[gk]])) group_agg[[gk]] <<- list()
@@ -768,6 +932,7 @@ fct_run_simulation <- function(sw,
       group_n[[gk]] <<- group_n[[gk]] + 1L
     }
     checkpoint("pipeline_completed", n_keys)
+    if (last_of_group) on_group_complete(key_group$gk)
     invisible(NULL)
   }
 
@@ -821,6 +986,8 @@ fct_run_simulation <- function(sw,
       consume_key(key, weather_result[[key]])
     }
   }
+  # Trigger (c): the weather loop is finished, so the open group is complete.
+  on_group_complete(open_gk)
   all_keys <- emitted_keys
   if (is.list(weather_result)) {
     all_keys <- unique(c(all_keys, setdiff(names(weather_result), emitted_keys)))
@@ -905,9 +1072,7 @@ fct_run_simulation <- function(sw,
       }
     }
     meta <- group_meta[[gk]]
-    ssp_pretty <- ssp_labels[meta$ssp_code] %||% meta$ssp_code
-    period_lbl <- paste0(meta$year_range[1], "-", meta$year_range[2])
-    display_key <- paste0(ssp_pretty, " / ", period_lbl)
+    display_key <- .step2_scenario_display_key(meta$ssp_code, meta$year_range)
     new_scenarios[[display_key]] <- list(
       pipelines = group_agg[[gk]],
       weather_raw = group_weather_rep[[gk]],

@@ -151,6 +151,9 @@
 #' @param event_fn Function receiving one structured stage-event list.
 #' @param preview_fn Optional function receiving the reduced historical mean
 #'   summary before future processing.
+#' @param partial_fn Optional function receiving one display-ready aggregated
+#'   table (schema 1 list) for the historical key and each completed group.
+#'   The snapshot may carry `display = list(method, pov_line, bandwidth_p0)`.
 #' @param checkpoint_fn Optional cooperative cancellation checkpoint function.
 #' @param cache_dir Optional process/run-scoped weather-cache directory.
 #' @param weather_fn,pipeline_fn Injectable serial reference functions.
@@ -168,6 +171,7 @@ step2_compute <- function(input,
                           weather_fn = get_weather,
                           pipeline_fn = run_sim_pipeline,
                           preview_fn = NULL,
+                          partial_fn = NULL,
                           checkpoint_fn = NULL) {
   .step2_compute_validate(input)
   weather_storage <- match.arg(weather_storage)
@@ -277,6 +281,7 @@ step2_compute <- function(input,
   simulation_args$weather_fn <- weather_wrapper
   simulation_args$pipeline_fn <- pipeline_wrapper
   simulation_args$preview_fn <- preview_fn
+  simulation_args$partial_fn <- partial_fn
   simulation_args$checkpoint_fn <- checkpoint_wrapper
   simulation_args$weather_storage <- weather_storage
   simulation_args$weather_store_root <- weather_store_root

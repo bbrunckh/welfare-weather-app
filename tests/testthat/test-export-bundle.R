@@ -558,16 +558,6 @@ test_that("the import validator rejects non-WISE-APP and newer-format files", {
                      app_version = NA_character_)$notes, 0L)
 })
 
-test_that("already-in-force values are not counted as changes", {
-  expect_true(.import_value_same(50, 50))
-  expect_true(.import_value_same(50L, 50))   # JSON round-trip: int -> double
-  expect_true(.import_value_same(c("tx", "r"), c("tx", "r")))
-  expect_false(.import_value_same(50, 51))
-  expect_false(.import_value_same("a", "b"))
-  expect_false(.import_value_same(NULL, 1))
-  expect_true(.import_value_same(NULL, NULL))
-})
-
 # The deferred-retry mechanism end to end. The proxy session records what the
 # retry pushes without replacing the test session itself.
 .import_e2e_server <- function(sent) {

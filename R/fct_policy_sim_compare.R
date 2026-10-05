@@ -212,12 +212,17 @@ echart_before_after_hist <- function(baseline_vals, policy_vals,
 #' @param x_label   Outcome-axis title.
 #' @param plot_type "violin" or "boxplot".
 #' @param height    Widget height (the UI slot's height).
+#' @param pending   Scenario labels still computing (Step 2 progressive
+#'   results). They get a fixed, empty category row with a muted
+#'   "(computing)" axis label so rows do not shift as scenarios land. The
+#'   default leaves the output unchanged (Step 3).
 #'
 #' @return An `echarts4r` widget.
 #' @noRd
 echart_step3_annual_distribution <- function(tbl, x_label = "Outcome (outcome units)",
                                         plot_type = "violin",
-                                       height = "470px") {
+                                       height = "470px",
+                                       pending = character(0)) {
   plot_type <- match.arg(plot_type, c("violin", "boxplot"))
   if (is.null(tbl) || !nrow(tbl)) {
     return(echart_blank("No annual simulation results available.", height = height))
@@ -233,9 +238,13 @@ echart_step3_annual_distribution <- function(tbl, x_label = "Outcome (outcome un
   df$ssp <- ifelse(df$scenario == "Historical", "Historical",
     vapply(df$scenario, .normalise_ssp, character(1L))
   )
-  scenario_levels <- c("Historical", sort(unique(df$scenario[df$scenario != "Historical"])))
+  pending <- setdiff(as.character(pending), c(df$scenario, "Historical"))
+  scenario_levels <- c("Historical", sort(unique(c(
+    df$scenario[df$scenario != "Historical"], pending
+  ))))
   scenario_palette <- c(Historical = .wise_history)
-  for (ssp in unique(df$ssp[df$ssp != "Historical"])) {
+  pending_ssps <- vapply(pending, .normalise_ssp, character(1L))
+  for (ssp in unique(c(df$ssp[df$ssp != "Historical"], unname(pending_ssps)))) {
     members <- scenario_levels[scenario_levels != "Historical"]
     members <- members[vapply(members, function(s) {
       identical(.normalise_ssp(s), ssp)
@@ -267,9 +276,15 @@ echart_step3_annual_distribution <- function(tbl, x_label = "Outcome (outcome un
 
   n_rows <- length(scenario_levels)
   df$row_y <- n_rows + 1L - as.integer(df$scenario_key)
-  y_breaks <- sort(unique(df$row_y))
+  y_breaks <- seq_len(n_rows)
   y_labs <- vapply(y_breaks, function(b) {
-    sub(" / ", "\n", scenario_levels[n_rows + 1L - b], fixed = TRUE)
+    lab <- sub(" / ", "\n", scenario_levels[n_rows + 1L - b], fixed = TRUE)
+    if (scenario_levels[n_rows + 1L - b] %in% pending) {
+      lines <- strsplit(lab, "\n", fixed = TRUE)[[1L]]
+      lines[[length(lines)]] <- paste(lines[[length(lines)]], "(computing)")
+      lab <- paste0("{pending|", lines, "}", collapse = "\n")
+    }
+    lab
   }, character(1L))
   band_ys <- y_breaks[(max(y_breaks) - y_breaks) %% 2 == 1]
   if (has_source) {
@@ -601,6 +616,11 @@ echart_step3_annual_distribution <- function(tbl, x_label = "Outcome (outcome un
     axisLine = list(show = FALSE),
     splitLine = list(show = FALSE)
   )
+  if (length(pending)) {
+    e$x$opts$yAxis$axisLabel$rich <- list(
+      pending = list(color = "#9aa9b5", fontStyle = "italic", fontSize = 12)
+    )
+  }
   e$x$opts$tooltip <- list(
     trigger = "item", confine = TRUE,
     formatter = .wise_result_tooltip(x_label),
@@ -1031,7 +1051,6 @@ step3_headline_cards <- function(paired_summary,
                                  threshold_tbl = NULL,
                                  baseline_agg = NULL,
                                  policy_agg = NULL,
-                                 decomp_res = NULL,
                                  policy_svy = NULL,
                                  sp_scenario = NULL,
                                  timeseries_curves = NULL,
@@ -1778,105 +1797,6 @@ plot_step3_adverse_dot <- function(tbl, x_label = "Outcome level",
   p
 }
 
-step3_variance_breakdown <- function(baseline_series, policy_series,
-                                     selected_scenarios = NULL,
-                                     method = "mean") {
-  one_source <- function(series_list, source_label) {
-    if (is.null(series_list) || length(series_list) == 0L) {
-      return(NULL)
-    }
-    rows <- list()
-    for (nm in names(series_list)) {
-      if (!is.null(selected_scenarios) && length(selected_scenarios) > 0L) {
-        if (!nm %in% selected_scenarios && !identical(nm, "Historical")) next
-      }
-      entry <- series_list[[nm]]
-      tbl <- if (is.list(entry) && !is.null(entry$out)) entry$out else entry
-      if (is.null(tbl) || nrow(tbl) == 0L) next
-
-      is_hist <- identical(nm, "Historical")
-      sds_flat <- as.numeric(unlist(tbl$value_all_sd))
-      var_coef <- if (length(sds_flat)) mean(sds_flat^2, na.rm = TRUE) else 0
-
-      mm <- by_model_matrix(tbl)
-      vals <- if (is.null(mm)) NULL else mm$vals
-      var_within <- if (!is.null(vals) && ncol(vals) > 1L) {
-        v <- mean(apply(vals, 1L, stats::var, na.rm = TRUE), na.rm = TRUE)
-        if (is.finite(v)) v else 0
-      } else {
-        0
-      }
-      var_across <- if (!is_hist && !is.null(vals) && nrow(vals) > 1L) {
-        v <- stats::var(rowMeans(vals, na.rm = TRUE), na.rm = TRUE)
-        if (is.finite(v)) v else 0
-      } else {
-        0
-      }
-
-      rows[[length(rows) + 1L]] <- tibble::tibble(
-        scenario      = nm,
-        source        = source_label,
-        var_coef      = var_coef,
-        var_within    = var_within,
-        var_across    = var_across,
-        sd_coef       = sqrt(pmax(var_coef, 0)),
-        sd_within     = sqrt(pmax(var_within, 0)),
-        sd_across     = sqrt(pmax(var_across, 0)),
-        is_historical = is_hist
-      )
-    }
-    dplyr::bind_rows(rows)
-  }
-
-  b_df <- one_source(baseline_series, "Baseline")
-  p_df <- one_source(policy_series, "Policy")
-  dplyr::bind_rows(b_df, p_df)
-}
-
-plot_step3_variance_contribution <- function(var_tbl) {
-  if (is.null(var_tbl) || nrow(var_tbl) == 0L) {
-    return(ggplot2::ggplot() +
-      ggplot2::labs(title = "Run a simulation to see SD contributions."))
-  }
-  df <- var_tbl
-  long <- tidyr::pivot_longer(
-    df,
-    cols      = c("sd_within", "sd_across", "sd_coef"),
-    names_to  = "component",
-    values_to = "sd"
-  )
-  long$component <- factor(
-    long$component,
-    levels = c("sd_within", "sd_across", "sd_coef"),
-    labels = c("Inter-annual variability", "Inter-model spread", "Coefficient uncertainty")
-  )
-  long$source <- factor(long$source, levels = c("Baseline", "Policy"))
-  long$scenario <- factor(long$scenario, levels = rev(unique(df$scenario)))
-
-  fill_map <- c(
-    "Baseline" = "#9aa9b5",
-    "Policy"   = "#D55E00"
-  )
-
-  ggplot2::ggplot(long, ggplot2::aes(x = .data$scenario, y = .data$sd, fill = .data$source)) +
-    ggplot2::geom_col(position = ggplot2::position_dodge(width = 0.7), width = 0.65) +
-    ggplot2::facet_wrap(~component, scales = "free_x") +
-    ggplot2::scale_fill_manual(values = fill_map, name = "Series") +
-    ggplot2::scale_y_continuous(expand = ggplot2::expansion(mult = c(0, 0.08))) +
-    ggplot2::labs(
-      x = NULL,
-      y = "Standard deviation (outcome units)",
-      subtitle = "Comparing baseline and policy standard deviations across distinct uncertainty sources."
-    ) +
-    theme_wise(base_size = 11) +
-    ggplot2::theme(
-      legend.position    = "bottom",
-      panel.grid.major.y = ggplot2::element_blank(),
-      panel.grid.minor   = ggplot2::element_blank()
-    ) +
-    ggplot2::coord_flip()
-}
-
 # Reactable styling for the return-period threshold table (guidelines §6):
 # the frame arrives with RP values already rounded to 2 dp by
 # build_threshold_table_df(); display keeps that precision.
@@ -2209,7 +2129,7 @@ plot_step3_variance_contribution <- function(var_tbl) {
                                education_scenario = reactive(NULL),
                                residuals = reactive("original"),
                                stale = reactive(FALSE),
-                               decomp_result = reactive(NULL),
+                               decomp_scenarios = reactive(list()),
                                decomp_context = reactive(NULL),
                                baseline_svy = reactive(NULL),
                                  policy_svy = reactive(NULL),
@@ -2277,7 +2197,6 @@ plot_step3_variance_contribution <- function(var_tbl) {
       threshold_tbl     = threshold_table_rv(),
       baseline_agg      = baseline_agg_scenarios(),
       policy_agg        = policy_agg_scenarios(),
-      decomp_res        = decomp_result(),
       metric_decomposition = metric_decomposition(),
       policy_svy        = policy_svy(),
       sp_scenario       = sp_scenario(),
@@ -3408,17 +3327,9 @@ plot_step3_variance_contribution <- function(var_tbl) {
 
   step3_incidence_data <- reactive({
     if (!identical(policy_endpoint_status()$status, "ok")) return(tibble::tibble())
-    res <- tryCatch(decomp_result(), error = function(e) NULL)
-    bs <- tryCatch(baseline_svy(), error = function(e) NULL)
-    bh <- baseline_hist_sim()
-    if (is.null(res) || !is.data.frame(res) || !nrow(res) || is.null(bs)) {
-      return(tibble::tibble())
-    }
-    so_name <- bh$so$name %||% "welfare"
-    ctx <- tryCatch(decomp_context(), error = function(e) NULL)
     step3_incidence_by_decile(
-      res, bs, so_name,
-      baseline_deciles = if (is.null(ctx)) NULL else ctx$baseline_deciles
+      tryCatch(decomp_scenarios(), error = function(e) NULL),
+      so = baseline_hist_sim()$so
     )
   })
 
@@ -3438,7 +3349,7 @@ plot_step3_variance_contribution <- function(var_tbl) {
       annotate_visualization_export(
         step3_incidence_data(), aggregation_method(), baseline_hist_sim()$so,
         observation_unit = "household-level paired policy minus baseline effect",
-        aggregation_order = "fixed weighted baseline decile; weighted mean over households",
+        aggregation_order = "fixed weighted baseline decile; weighted mean over households, then years averaged within model and equal-model mean",
         uncertainty = "paired contrast"
       )
     },

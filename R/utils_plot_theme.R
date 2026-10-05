@@ -114,19 +114,6 @@ wise_scale_fill_okabe_ito <- wise_scale_fill_cat
   "SSP5-8.5" = "#D55E00" # vermillion    (high emissions)
 )
 
-#' Discrete scales bound to the fixed SSP scenario mapping.
-#' @name wise_scale_ssp
-#' @noRd
-wise_scale_colour_ssp <- function(...) {
-  ggplot2::scale_colour_manual(values = .ssp_colours, ...)
-}
-
-#' @rdname wise_scale_ssp
-#' @noRd
-wise_scale_fill_ssp <- function(...) {
-  ggplot2::scale_fill_manual(values = .ssp_colours, ...)
-}
-
 # Sequential ramp (charts) ----
 # Single-hue brand-blue ramp for magnitude fills in ggplot charts. Map ramps
 # (YlOrRd / RdBu / Mako in fct_weatherstats.R, fct_surveystats.R,

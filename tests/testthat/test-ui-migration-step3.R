@@ -70,32 +70,6 @@ test_that("echart_before_after_hist keeps the empty-state message", {
 # mod_3_09 decomposition builders
 # ---------------------------------------------------------------------------
 
-test_that("echart_decomposition_headline draws one bar series per scenario", {
-  df <- decomposition_summary_data(
-    data.frame(
-      delta_total = c(0.10, 0.10), delta_main = c(0.07, 0.07),
-      delta_sp = c(0.04, 0.04), delta_res1 = c(0.01, 0.01),
-      delta_res2 = c(0.02, 0.02), weight = c(1, 1)
-    ),
-    is_rif = TRUE
-  )
-  df <- rbind(
-    transform(df, scenario = "Historical"),
-    transform(df, scenario = "SSP2-4.5 / 2030")
-  )
-  w <- echart_decomposition_headline(df)
-  expect_s3_class(w, "echarts4r")
-  expect_length(w$x$opts$series, 2L)
-  expect_true(all(vapply(w$x$opts$series, function(s)
-    identical(s$type, "bar"), logical(1L))))
-  # Dashed zero reference line rides on the first series.
-  expect_identical(w$x$opts$series[[1]]$markLine$data[[1]]$yAxis, 0)
-  expect_identical(w$x$opts$legend$top, 4)
-  expect_identical(w$x$opts$legend$left, "center")
-  expect_identical(w$x$opts$yAxis[[1L]]$nameLocation, "end")
-  expect_match(as.character(w$x$opts$yAxis[[1L]]$axisLabel$formatter), "+'%'", fixed = TRUE)
-})
-
 test_that("decomposition selectors align to the right above the charts", {
   html <- htmltools::renderTags(mod_3_09_decomposition_ui("decomposition"))$html
   expect_match(html, "justify-content:flex-end", fixed = TRUE)
@@ -109,12 +83,6 @@ test_that("decomposition selectors align to the right above the charts", {
   expect_match(html, "decile_decomp_table", fixed = TRUE)
   expect_false(grepl("Technical Decomposition on the Model Scale", html, fixed = TRUE))
   expect_false(grepl("How the Policy Changes Weather Sensitivity", html, fixed = TRUE))
-})
-
-test_that("echart_decomposition_headline keeps the empty-state message", {
-  w <- echart_decomposition_headline(NULL)
-  expect_s3_class(w, "echarts4r")
-  expect_match(w$x$opts$title[[1]]$text, "Decomposition is unavailable.", fixed = TRUE)
 })
 
 test_that("outcome decomposition charts report weighted outcome-unit channels", {
@@ -352,7 +320,6 @@ test_that("mod_3_09 outcome-unit decomposition charts render", {
     mod_3_09_decomposition_server,
     args = list(
       id = "decomposition",
-      decomp_result = reactiveVal(base),
       decomp_scenarios = reactiveVal(list()),
       model_fit = reactiveVal(list(engine = "fixest", rif_grid = data.frame())),
       so = reactiveVal(so),

@@ -559,6 +559,15 @@
   margin: 2px 0 12px;
 }
 
+.headline-card-note.provisional-note {
+  font-style: italic;
+}
+
+.provisional-banner .progress {
+  height: 4px;
+  margin: 6px 0 4px;
+}
+
 .headline-card-label {
   color: #526575;
   font-size: 0.72rem;
@@ -1665,6 +1674,22 @@ button.wise-csv-btn .fa {
 .toggle-slider input[type="radio"]:focus-visible + label {
   outline: 2px solid var(--bs-primary, #0071bc);
   outline-offset: 1px;
+}
+
+/* Server-disabled pills (update_pill_toggle_disabled): muted, no hover lift.
+   The label keeps pointer events so its title tooltip still shows. */
+.toggle-slider .pill-disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.toggle-slider .pill-disabled:hover span {
+  color: #495057;
+  background-color: transparent;
+}
+
+input.form-control:disabled {
+  cursor: not-allowed;
 }
 
 /* Long-label pills stack vertically after the base segmented-control rules. */

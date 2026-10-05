@@ -972,7 +972,9 @@ pill_toggle <- function(
   choiceNames = NULL,
   choiceValues = NULL,
   extra_class = NULL,
-  layout = c("horizontal", "vertical")
+  layout = c("horizontal", "vertical"),
+  disabled = FALSE,
+  disabled_tooltip = NULL
 ) {
   layout <- match.arg(layout)
   if (is.null(choiceNames) && is.null(selected) && length(choices) > 0) {
@@ -994,6 +996,40 @@ pill_toggle <- function(
   }
 
   rb <- do.call(shiny::radioButtons, args)
+  # `disabled`: TRUE (every pill) or a character vector of choice values.
+  # The selected pill is never disabled. Server-side changes after render go
+  # through update_pill_toggle_disabled().
+  if (!isFALSE(disabled) && length(disabled) > 0L) {
+    walk <- function(x) {
+      if (!inherits(x, "shiny.tag")) {
+        if (is.list(x)) x[] <- lapply(x, walk)
+        return(x)
+      }
+      kids <- x$children
+      is_item <- grepl("radio-inline|form-check-inline", x$attribs$class %||% "")
+      if (is_item) {
+        inp <- Filter(function(k) inherits(k, "shiny.tag") && identical(k$name, "input"), kids)
+        val <- if (length(inp)) inp[[1L]]$attribs$value else NULL
+        off <- !is.null(val) && !identical(val, selected) &&
+          (isTRUE(disabled) || (is.character(disabled) && val %in% disabled))
+        if (off) {
+          x$children <- lapply(kids, function(k) {
+            if (inherits(k, "shiny.tag") && identical(k$name, "input")) {
+              k$attribs$disabled <- "disabled"
+              k$attribs[["aria-disabled"]] <- "true"
+            }
+            k
+          })
+          x$attribs$class <- paste(x$attribs$class, "pill-disabled")
+          if (!is.null(disabled_tooltip)) x$attribs$title <- disabled_tooltip
+        }
+        return(x)
+      }
+      x$children <- lapply(kids, walk)
+      x
+    }
+    rb <- walk(rb)
+  }
   classes <- c(
     "toggle-slider",
     "pill-toggle",
@@ -1004,6 +1040,38 @@ pill_toggle <- function(
     rb,
     class = paste(classes[!is.na(classes) & nzchar(classes)], collapse = " ")
   )
+}
+
+#' Enable or disable pill_toggle() choices from the server
+#'
+#' Sends the `wise_set_disabled` custom message handled in
+#' inst/app/www/custom.js (no shinyjs). `disabled` is TRUE (all pills), FALSE
+#' (re-enable everything) or a character vector of choice values.
+#' @noRd
+update_pill_toggle_disabled <- function(session, inputId, disabled = FALSE,
+                                        tooltip = NULL) {
+  session$sendCustomMessage("wise_set_disabled", list(
+    id = session$ns(inputId),
+    kind = "pill",
+    all = isTRUE(disabled),
+    values = I(if (is.character(disabled)) disabled else character(0)),
+    tooltip = tooltip
+  ))
+  invisible(NULL)
+}
+
+#' Enable or disable a plain input (e.g. numericInput) from the server
+#' @noRd
+update_input_disabled <- function(session, inputId, disabled = FALSE,
+                                  tooltip = NULL) {
+  session$sendCustomMessage("wise_set_disabled", list(
+    id = session$ns(inputId),
+    kind = "input",
+    all = isTRUE(disabled),
+    values = I(character(0)),
+    tooltip = tooltip
+  ))
+  invisible(NULL)
 }
 
 # Wave / Survey Year Toggle Slider ----

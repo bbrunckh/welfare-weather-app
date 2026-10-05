@@ -83,8 +83,11 @@
   prepared
 }
 
-.validate_policy_annual_exposure <- function(pipeline, context) {
-  exposure <- pipeline$weather_exposure
+.validate_policy_annual_exposure <- function(pipeline, context, owner = NULL,
+                                              cache = NULL) {
+  # Schema-2 pipelines store a compact recipe; rebuild the exact mapping from
+  # the pipeline's weather, resolved against its owning scenario.
+  exposure <- step2_exposure_resolve(pipeline, owner, cache)
   if (is.null(exposure) || !identical(exposure$status, "ok")) {
     stop("Exact prediction-row weather exposure mapping unavailable.", call. = FALSE)
   }
@@ -162,7 +165,8 @@
 }
 
 .policy_annual_channels <- function(pipeline, prepared, run_identity,
-                                    rows = seq_along(pipeline$y_point)) {
+                                    rows = seq_along(pipeline$y_point),
+                                    owner = NULL) {
   if (!is.environment(prepared) || !environmentIsLocked(prepared)) {
     stop("Invalid prepared annual channel source.", call. = FALSE)
   }
@@ -171,7 +175,7 @@
   if (!identical(prepared$run_identity, run_identity)) {
     stop("Annual channel run identity mismatch.", call. = FALSE)
   }
-  exposure <- .validate_policy_annual_exposure(pipeline, context)
+  exposure <- .validate_policy_annual_exposure(pipeline, context, owner)
   if (!is.numeric(rows) || anyNA(rows) || any(rows != as.integer(rows)) ||
     any(rows < 1 | rows > length(pipeline$y_point)) || anyDuplicated(rows)) {
     stop("Invalid annual channel row selection.", call. = FALSE)
@@ -210,7 +214,8 @@
 .apply_policy_annual_pipeline <- function(pipeline, prepared, run_identity,
                                           scenario = NULL, member = NULL,
                                           year_range = c(NA_integer_, NA_integer_),
-                                          chunk_size = 100000L) {
+                                          chunk_size = 100000L, owner = NULL,
+                                          exposure_cache = NULL) {
   .validate_run_decomposition_context(prepared$context, run_identity)
   if (!identical(prepared$run_identity, run_identity)) {
     stop("Annual channel run identity mismatch.", call. = FALSE)
@@ -218,7 +223,8 @@
   year_range <- suppressWarnings(as.integer(as.character(year_range)))
   if (length(year_range) != 2L) year_range <- c(NA_integer_, NA_integer_)
   if (is.null(pipeline$y_point)) stop("Missing baseline prediction pipeline.", call. = FALSE)
-  exposure <- .validate_policy_annual_exposure(pipeline, prepared$context)
+  exposure <- .validate_policy_annual_exposure(pipeline, prepared$context,
+    owner, exposure_cache)
   n <- length(pipeline$y_point)
   years <- sort(unique(pipeline$sim_year))
   channel_stats <- decile_stats <- NULL
@@ -339,11 +345,12 @@
 
 # Deliberately slow reference for tests/benchmarks only: evaluate the original
 # central kernels against each row's exact exposures, then select its household.
-.policy_annual_channels_reference <- function(pipeline, context, run_identity) {
+.policy_annual_channels_reference <- function(pipeline, context, run_identity,
+                                              owner = NULL) {
   .validate_run_decomposition_context(context, run_identity)
   endpoint <- .policy_annual_channel_status(context)
   if (!identical(endpoint$status, "ok")) return(endpoint)
-  exposure <- .validate_policy_annual_exposure(pipeline, context)
+  exposure <- .validate_policy_annual_exposure(pipeline, context, owner)
   columns <- c("delta_sp", "delta_main_covar", "delta_main", "delta_res1", "delta_res2", "delta_total")
   out <- setNames(lapply(columns, function(x) numeric(length(pipeline$y_point))), columns)
   for (i in seq_along(pipeline$y_point)) {
@@ -500,10 +507,14 @@
 
 .policy_metric_pipeline <- function(baseline, policy, prepared, method, pov_line,
                                     requested_residuals, shared_baseline, shared_policy,
-                                    scenario, member) {
+                                    scenario, member, owner = NULL,
+                                    exposure_cache = NULL) {
   context <- prepared$context
-  exposure <- .validate_policy_annual_exposure(baseline, context)
-  for (field in c("svy_row_id", "sim_year", "weight", "id_vec", "weather_exposure")) {
+  exposure <- .validate_policy_annual_exposure(baseline, context, owner, exposure_cache)
+  # weather_raw is part of the alignment: schema-2 exposure tables are rebuilt
+  # from it, so equal recipes must also share the same weather.
+  for (field in c("svy_row_id", "sim_year", "weight", "id_vec", "weather_exposure",
+    "weather_raw")) {
     if (!identical(baseline[[field]], policy[[field]])) {
       stop("Baseline/policy row alignment mismatch: ", field, call. = FALSE)
     }
@@ -681,9 +692,11 @@
       if (!length(b$pipelines) || !identical(names(b$pipelines), names(p$pipelines))) {
         stop("Baseline/policy member identity mismatch.", call. = FALSE)
       }
+      exposure_cache <- new.env(parent = emptyenv())
       members <- lapply(names(b$pipelines), function(id) .policy_metric_pipeline(
         b$pipelines[[id]], p$pipelines[[id]], prepared, method, pov_line,
-        requested_residuals, b$shared_context, p$shared_context, nm, id))
+        requested_residuals, b$shared_context, p$shared_context, nm, id,
+        owner = b, exposure_cache = exposure_cache))
       annual_full <- dplyr::bind_rows(lapply(members, `[[`, "annual"))
       decile_annual_full <- dplyr::bind_rows(lapply(members, `[[`, "decile_annual"))
       annual <- annual_full

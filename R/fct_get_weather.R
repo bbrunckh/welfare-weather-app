@@ -1379,7 +1379,8 @@ get_weather <- function(
     emitted_order <- emitted_order + 1L
     weather_consumer(
       "historical", result[["historical"]],
-      list(order = emitted_order, is_historical = TRUE)
+      list(order = emitted_order, is_historical = TRUE,
+           member_index = 1L, period_members = 1L)
     )
   }
 
@@ -1826,7 +1827,8 @@ get_weather <- function(
             )
           )$model
           model_out <- if (is.function(weather_consumer)) NULL else list()
-          for (model_name in model_names) {
+          for (model_i in seq_along(model_names)) {
+             model_name <- model_names[[model_i]]
              model_df <- .profile_timed(
                "future_collect", rolled |>
                dplyr::filter(model == !!model_name) |>
@@ -1858,6 +1860,9 @@ get_weather <- function(
                   order = emitted_order, is_historical = FALSE,
                   ssp = ssp_i, period = fp_label,
                   collection = "bounded",
+                  # Empty models are skipped, so period_members can overcount.
+                  member_index = as.integer(model_i),
+                  period_members = length(model_names),
                   rss_bytes = guard$rss,
                   budget_exceeded = guard$exceeded,
                   buffered_members = 1L
@@ -1873,13 +1878,16 @@ get_weather <- function(
         }
         if (!is.function(weather_consumer)) out <- c(out, period_out)
         if (is.function(weather_consumer) && length(period_out)) {
-          invisible(lapply(names(period_out), function(key) {
+          invisible(lapply(seq_along(period_out), function(member_i) {
+            key <- names(period_out)[[member_i]]
             emitted_order <<- emitted_order + 1L
             weather_consumer(
               key, period_out[[key]],
               list(
                 order = emitted_order, is_historical = FALSE,
-                ssp = ssp_i, period = fp_label
+                ssp = ssp_i, period = fp_label,
+                member_index = as.integer(member_i),
+                period_members = length(period_out)
               )
             )
           }))

@@ -554,28 +554,6 @@
   value
 }
 
-.decomposition_context_adverse_basis <- function(context, basis) {
-  if (is.null(context) || !is.environment(context)) {
-    return(NULL)
-  }
-  value <- context$adverse_bases[[basis]]
-  if (!is.null(value)) {
-    .decomposition_context_counter_add(context, "adverse_basis_reuses")
-  }
-  value
-}
-
-.decomposition_context_adverse_result <- function(context, basis) {
-  if (is.null(context) || !is.environment(context)) {
-    return(NULL)
-  }
-  value <- context$adverse_decompositions[[basis]]
-  if (!is.null(value)) {
-    .decomposition_context_counter_add(context, "adverse_result_cache_hits")
-  }
-  value
-}
-
 .decomposition_context_hazard_values <- function(context, svy_baseline,
                                                  weather_raw, weather_vars,
                                                  resolved = FALSE, key = NULL) {
@@ -625,9 +603,7 @@
                                          deltas = NULL, skip_coef = FALSE,
                                          F_hat = NULL, baseline_deciles = NULL,
                                          run_identity = NULL,
-                                         weather_panels = list(),
-                                         adverse_bases = list(),
-                                         adverse_decompositions = list()) {
+                                         weather_panels = list()) {
   if (is.null(svy_baseline) || is.null(svy_policy) || is.null(model_fit) ||
     is.null(so)) {
     return(NULL)
@@ -670,9 +646,8 @@
 
   reuse_counters <- new.env(parent = emptyenv())
   for (counter in c(
-    "hazard_cache_hits", "hazard_cache_misses", "adverse_basis_reuses",
-    "adverse_result_cache_hits", "fixed_decile_reuses", "rif_invariant_reuses",
-    "term_map_reuses", "delta_reuses"
+    "hazard_cache_hits", "hazard_cache_misses", "fixed_decile_reuses",
+    "rif_invariant_reuses", "term_map_reuses", "delta_reuses"
   )) {
     reuse_counters[[counter]] <- 0L
   }
@@ -740,14 +715,11 @@
     hazard_products = setNames(lapply(weather_panels, function(panel) {
       .compute_hazard_values(baseline_snapshot, panel, weather_vars)
     }), weather_keys),
-    adverse_bases = snapshot(adverse_bases),
-    adverse_decompositions = adverse_decompositions,
     reuse_counters = reuse_counters,
     cache_entries = cache_entries
   )
   ctx$cache_entries$hazard_prepared <- length(weather_panels)
   ctx$cache_entries$hazard_cache_entries <- length(weather_keys)
-  ctx$cache_entries$adverse_basis_entries <- length(adverse_bases)
   ctx$cache_entries$fixed_decile_entries <- 1L
   ctx$cache_entries$rif_invariant_entries <- 0L
   if (engine == "rif") {
@@ -863,120 +835,11 @@
   invisible(context)
 }
 
-.decompose_policy_effect_run <- function(context, run_identity, weather_raw = NULL,
-                                         central_only = FALSE) {
-  .validate_run_decomposition_context(context, run_identity)
-  svy_baseline <- context$svy_baseline
-  model_fit <- context$model_fit
-  so <- context$so
-  n <- context$n
-  weather_vars <- context$weather_vars
-  if (!length(weather_vars)) return(NULL)
-
-  weather_raw <- step2_resolve_weather(weather_raw)
-  hazard_key <- .weather_context_key(weather_raw, resolved = TRUE)
-  hazard_values <- .decomposition_context_hazard_values(
-    context, svy_baseline, weather_raw, weather_vars,
-    resolved = TRUE, key = hazard_key
-  )
-  if (isTRUE(central_only)) {
-    if (identical(context$engine, "rif")) {
-      channels <- .compute_rif_channels(
-        svy_baseline = svy_baseline,
-        deltas = context$deltas,
-        sp_transfer = context$sp_transfer,
-        hazard_values = hazard_values,
-        weather_vars = weather_vars,
-        rif_grid = model_fit$rif_grid,
-        taus = model_fit$taus,
-        train_data = model_fit$train_data,
-        outcome = context$outcome,
-        is_log = context$is_log,
-        skip_coef = TRUE,
-        central_only = TRUE,
-        F_hat = context$F_hat,
-        context = context
-      )
-      if (is.null(channels)) return(NULL)
-      if (!channels$has_interactions && length(context$deltas)) {
-        warning(
-          "[decompose_policy_effect] No weather\u00d7policy interaction terms found ",
-          "in the model. The interaction channel (res2) will be zero. ",
-          "Consider including interaction terms in Step 1 model specification.",
-          call. = FALSE
-        )
-      }
-    } else {
-      channels <- .decompose_ols(
-        svy_baseline, model_fit, so, context$deltas, context$sp_transfer,
-        hazard_values, weather_vars, n, central_only = TRUE, context = context
-      )
-      if (is.null(channels)) return(NULL)
-    }
-    return(channels)
-  }
-
-  if (identical(context$engine, "rif")) {
-    .decompose_rif(
-      svy_baseline, model_fit, so, context$deltas, context$sp_transfer,
-      hazard_values, weather_vars, n, skip_coef = context$skip_coef,
-      F_hat = context$F_hat, context = context
-    )
-  } else if (identical(context$engine, "fixest")) {
-    .decompose_ols(
-      svy_baseline, model_fit, so, context$deltas, context$sp_transfer,
-      hazard_values, weather_vars, n, skip_coef = context$skip_coef,
-      context = context
-    )
-  } else {
-    NULL
-  }
-}
-
-.compact_run_future_decomposition <- function(context, run_identity, weather_raw,
-                                              scenario, sim_year,
-                                              year_start = NA_integer_,
-                                              year_end = NA_integer_) {
-  channels <- .decompose_policy_effect_run(
-    context, run_identity, weather_raw, central_only = TRUE
-  )
-  if (is.null(channels)) return(NULL)
-  n <- context$n
-  svy_baseline <- context$svy_baseline
-  weight_col <- grep("^weight$|^hhweight$|^wgt$|^pw$",
-    names(svy_baseline), value = TRUE, ignore.case = TRUE
-  )[1L]
-  compact <- data.frame(
-    id = seq_len(n),
-    weight = if (!is.na(weight_col)) svy_baseline[[weight_col]] else rep(1, n),
-    delta_sp = channels$delta_sp,
-    delta_main_covar = channels$delta_main_covar,
-    delta_main = channels$delta_main,
-    delta_res1 = channels$delta_res1,
-    delta_res2 = channels$delta_res2,
-    delta_total = channels$delta_total
-  )
-  .compact_future_decomposition(
-    compact, scenario, sim_year, year_start, year_end,
-    baseline_deciles = context$baseline_deciles,
-    is_rif = identical(context$engine, "rif"), engine = context$engine
-  )
-}
-
-.policy_central_delta_run <- function(context, run_identity, weather_raw = NULL) {
-  channels <- .decompose_policy_effect_run(
-    context, run_identity, weather_raw, central_only = TRUE
-  )
-  if (is.null(channels)) NULL else channels$delta_total
-}
-
-.finalize_decomposition_context <- function(context, adverse_decompositions = list()) {
+.finalize_decomposition_context <- function(context) {
   if (is.null(context) || !is.environment(context)) {
     return(NULL)
   }
   values <- as.list(context, all.names = TRUE)
-  values$adverse_decompositions <- adverse_decompositions
-  values$cache_entries$adverse_result_entries <- length(adverse_decompositions)
   out <- list2env(values, parent = emptyenv())
   lockEnvironment(out, bindings = TRUE)
   out

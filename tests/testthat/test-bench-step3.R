@@ -87,7 +87,6 @@ test_that("smoke fixture runs active Step 3 path and emits stable metrics", {
   expect_gt(first$metric_mean_annual_rows, 0L)
   expect_gt(first$metric_mean_serialized_bytes, 0)
   expect_equal(first$metric_prediction_reruns, 0L)
-  expect_gt(first$context_adverse_cache_hits, 0L)
   expect_gt(first$context_fixed_decile_reuses, 0L)
 })
 

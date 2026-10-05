@@ -243,24 +243,6 @@
   out
 }
 
-.bench_step3_old_correction <- function(pipeline, context, run_identity,
-                                        weather_raw) {
-  started <- proc.time()[["elapsed"]]
-  error <- ""
-  value <- tryCatch(
-    .policy_central_delta_run(context, run_identity, weather_raw),
-    error = function(e) {
-      error <<- conditionMessage(e)
-      NULL
-    }
-  )
-  list(
-    value = value,
-    seconds = proc.time()[["elapsed"]] - started,
-    error = error
-  )
-}
-
 .bench_step3_fingerprint <- function(svy_baseline, svy_policy, policy_result,
                                      historical_decomposition,
                                      future_decomposition, aggregations) {
@@ -315,8 +297,6 @@
   historical_decomposition_seconds <- NA_real_
   future_decomposition_seconds <- NA_real_
   annual_preparation_seconds <- NA_real_
-  old_correction_seconds <- NA_real_
-  old_correction_calls <- 0L
   annual_reference_seconds <- 0
   annual_optimized_seconds <- 0
   annual_blocking_seconds <- NA_real_
@@ -324,12 +304,9 @@
   annual_reference_total_rows <- 0L
   annual_reference_max_abs_difference <- NA_real_
   annual_reference_mean_abs_difference <- NA_real_
-  old_new_max_abs_difference <- NA_real_
-  old_correction_error <- ""
   annual_reference_error <- ""
   annual_prepared <- NULL
   annual_checks <- list()
-  old_differences <- numeric(0)
   results_aggregation_seconds <- NA_real_
   svy_policy <- policy_result <- historical_decomposition <- NULL
   decomp_context <- NULL
@@ -383,8 +360,7 @@
       weather_panels = Filter(Negate(is.null), c(
         list(step2_resolve_weather(hist_sim$weather_raw, hist_sim)),
         lapply(saved_scenarios, function(x) step2_resolve_weather(x$weather_raw, x))
-      )),
-      adverse_decompositions = list(adverse_10 = data.frame())
+      ))
     )
 
     t0 <- proc.time()[["elapsed"]]
@@ -399,24 +375,8 @@
 
     max_reference_rows <- config$step3_reference_rows %||% 16L
     pipeline_pairs <- .bench_step3_pipeline_pairs(hist_sim, saved_scenarios)
-    old_errors <- character(0)
-    old_elapsed <- numeric(0)
     for (pair in pipeline_pairs) {
       pipe <- pair$pipeline
-      old <- .bench_step3_old_correction(
-        pipe, decomp_context, run_identity, pair$weather
-      )
-      old_elapsed <- c(old_elapsed, old$seconds)
-      old_correction_calls <- old_correction_calls + 1L
-      if (nzchar(old$error)) old_errors <- c(old_errors, old$error)
-      if (!is.null(old$value) && !is.null(pipe$weather_exposure) &&
-          identical(pipe$weather_exposure$status, "ok")) {
-        rows <- seq_len(min(length(pipe$y_point), max_reference_rows))
-        difference <- tryCatch(abs(old$value[pipe$svy_row_id[rows]] -
-          .policy_annual_channels(pipe, annual_prepared, run_identity,
-            rows = rows)$delta_total), error = function(e) numeric(0))
-        old_differences <- c(old_differences, difference)
-      }
       check <- tryCatch(.bench_step3_annual_check(
         pipe, annual_prepared, decomp_context, run_identity,
         max_reference_rows
@@ -437,10 +397,6 @@
                                         sep = if (nzchar(annual_reference_error)) " | " else "")
       }
     }
-    old_correction_seconds <- sum(old_elapsed)
-    if (length(old_errors)) old_correction_error <- paste(unique(old_errors),
-                                                           collapse = " | ")
-    if (length(old_differences)) old_new_max_abs_difference <- max(old_differences)
     check_diffs <- vapply(annual_checks, `[[`, numeric(1), "max_abs_difference")
     check_means <- vapply(annual_checks, `[[`, numeric(1), "mean_abs_difference")
     if (any(is.finite(check_diffs))) {
@@ -511,8 +467,6 @@
     # panes so benchmark counters report observed accesses, not scenario shape.
     if (!is.null(decomp_context)) {
       .decomposition_context_baseline_deciles(decomp_context)
-      .decomposition_context_adverse_basis(decomp_context, "mean")
-      .decomposition_context_adverse_result(decomp_context, "adverse_10")
     }
 
     t0 <- proc.time()[["elapsed"]]
@@ -623,10 +577,6 @@
       annual_prepared$correction_version
     } else NA_character_,
     annual_preparation_seconds = annual_preparation_seconds,
-    old_full_panel_correction_seconds = old_correction_seconds,
-    old_full_panel_correction_calls = old_correction_calls,
-    old_full_panel_correction_error = old_correction_error,
-    old_new_sample_max_abs_difference = old_new_max_abs_difference,
     annual_reference_scope = if (length(annual_checks)) {
       "first_rows_per_pipeline"
     } else NA_character_,
@@ -687,8 +637,6 @@
     metric_prediction_reruns = if (nrow(metric_switches)) sum(metric_switches$prediction_reruns) else NA_integer_,
     context_hazard_cache_hits = if (is.null(decomp_context)) NA_integer_ else
       .decomposition_context_counter(decomp_context, "hazard_cache_hits", NA_integer_),
-    context_adverse_cache_hits = if (is.null(decomp_context)) NA_integer_ else
-      .decomposition_context_counter(decomp_context, "adverse_result_cache_hits", NA_integer_),
     context_fixed_decile_reuses = if (is.null(decomp_context)) NA_integer_ else
       .decomposition_context_counter(decomp_context, "fixed_decile_reuses", NA_integer_),
     context_rif_invariant_reuses = if (is.null(decomp_context)) NA_integer_ else

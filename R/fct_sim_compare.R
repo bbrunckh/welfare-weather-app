@@ -465,32 +465,6 @@ paired_effect_summary <- function(effect_tbl,
   )
 }
 
-# Equal-probability tail contrast: calculate the adverse quantile separately
-# in each arm for each matched model, then subtract policy minus baseline.
-paired_equal_probability_effects <- function(effect_tbl, probs) {
-  if (is.null(effect_tbl) || !nrow(effect_tbl) || !length(probs)) {
-    return(tibble::tibble())
-  }
-  rows <- lapply(split(effect_tbl, effect_tbl$model_id), function(x) {
-    do.call(rbind, lapply(probs, function(prob) {
-      if (sum(is.finite(x$baseline)) < 2L || sum(is.finite(x$policy)) < 2L) {
-        return(NULL)
-      }
-      tibble::tibble(
-        model_id = x$model_id[[1L]], probability = prob,
-        baseline = as.numeric(stats::quantile(x$baseline, prob,
-          na.rm = TRUE, names = FALSE
-        )),
-        policy = as.numeric(stats::quantile(x$policy, prob,
-          na.rm = TRUE, names = FALSE
-        ))
-      ) |>
-        dplyr::mutate(effect = policy - baseline)
-    }))
-  })
-  dplyr::bind_rows(Filter(Negate(is.null), rows))
-}
-
 paired_effect_plot <- function(tbl, x_label = "Policy effect (outcome units)") {
   if (is.null(tbl) || !nrow(tbl)) {
     return(blank_plot("Paired policy effects are unavailable."))
@@ -784,61 +758,6 @@ plot_annual_distribution <- function(tbl, x_label = "Outcome (outcome units)",
   p
 }
 
-
-paired_adverse_effect_table <- function(effect_tbl,
-                                        metric = NULL,
-                                        band_q = c(lo = 0.10, hi = 0.90)) {
-  if (is.null(effect_tbl) || !nrow(effect_tbl)) {
-    return(tibble::tibble())
-  }
-  probs <- c(
-    "Expected" = 0.50, "Adverse 1-in-5" = 0.20,
-    "Adverse 1-in-10" = 0.10, "Adverse 1-in-20" = 0.05
-  )
-  spec <- metric_metadata(metric %||% "mean")
-  target <- if (identical(spec$adverse_tail, "high")) 1 - probs else probs
-  rows <- lapply(split(effect_tbl, effect_tbl$model_id), function(x) {
-    do.call(rbind, lapply(seq_along(probs), function(i) {
-      b <- x$baseline[is.finite(x$baseline)]
-      p <- x$policy[is.finite(x$policy)]
-      # An empirical 1-in-N tail is reported only when the model has at least
-      # N usable weather years. This avoids presenting the single most extreme
-      # draw as a supported return-period estimate.
-      support_n <- ceiling(1 / min(probs[[i]], 1 - probs[[i]]))
-      if (length(b) < support_n || length(p) < support_n) {
-        return(NULL)
-      }
-      data.frame(
-        model_id = x$model_id[[1L]], period = names(probs)[[i]],
-        probability = probs[[i]],
-        baseline = as.numeric(stats::quantile(b, target[[i]], names = FALSE)),
-        policy = as.numeric(stats::quantile(p, target[[i]], names = FALSE)),
-        stringsAsFactors = FALSE
-      )
-    }))
-  })
-  long <- dplyr::bind_rows(Filter(Negate(is.null), rows))
-  if (!nrow(long)) {
-    return(long)
-  }
-  dplyr::group_by(long, .data$period, .data$probability) |>
-    dplyr::summarise(
-      baseline = stats::median(.data$baseline, na.rm = TRUE),
-      policy = stats::median(.data$policy, na.rm = TRUE),
-      effect = .data$policy - .data$baseline,
-      ensemble_lo = stats::quantile(.data$policy - .data$baseline,
-        band_q[[1L]],
-        na.rm = TRUE
-      ),
-      ensemble_hi = stats::quantile(.data$policy - .data$baseline,
-        band_q[[2L]],
-        na.rm = TRUE
-      ),
-      n_models = dplyr::n_distinct(.data$model_id),
-      n_weather_years = dplyr::n(),
-      .groups = "drop"
-    )
-}
 
 #' Data behind the Step 2 return-period dot plot (Figure S2-4)
 #' @noRd
@@ -1930,113 +1849,6 @@ plot_timeseries_spaghetti <- function(ts_tbl,
 
 # Variance-contribution stacked bar ----
 
-#' Aligned SD-Contribution Bars by Scenario
-#'
-#' For each scenario, plots a horizontal bar stacking each uncertainty
-#' source's standard deviation contribution (sqrt of its variance):
-#'   - Coefficient uncertainty (regression-fit per-outcome SE)
-#'   - Inter-annual variability (within-model year-to-year)
-#'   - Inter-model spread (across-model disagreement; future only)
-#'
-#' Each bar is one source's SD on the outcome scale. Bars are deliberately
-#' aligned rather than stacked: SD components are not additive and covariance
-#' assumptions must not be hidden in the visual encoding.
-#'
-#' @param var_tbl Tibble with columns: scenario, var_coef, var_within,
-#'   var_across, is_historical.
-#' @return A ggplot object.
-#' @importFrom ggplot2 ggplot aes geom_col scale_fill_manual
-#'   scale_y_continuous labs theme_minimal theme coord_flip
-#' @importFrom tidyr pivot_longer
-#' @importFrom rlang .data
-#' @export
-plot_variance_contribution <- function(var_tbl) {
-  if (is.null(var_tbl) || nrow(var_tbl) == 0L) {
-    return(blank_plot("Run a simulation to see SD contributions."))
-  }
-
-  df <- var_tbl
-  df$sd_coef <- sqrt(pmax(df$var_coef, 0))
-  df$sd_within <- sqrt(pmax(df$var_within, 0))
-  df$sd_across <- sqrt(pmax(df$var_across, 0))
-  long <- tidyr::pivot_longer(
-    df[, c("scenario", "sd_coef", "sd_within", "sd_across")],
-    cols      = c("sd_coef", "sd_within", "sd_across"),
-    names_to  = "source",
-    values_to = "sd"
-  )
-
-  long$source <- factor(long$source,
-    levels = c("sd_across", "sd_within", "sd_coef"),
-    labels = c(
-      "Inter-model spread",
-      "Inter-annual variability",
-      "Coefficient uncertainty"
-    )
-  )
-  long$scenario <- factor(long$scenario, levels = rev(unique(df$scenario)))
-
-  fill_map <- c(
-    "Coefficient uncertainty"  = .wise_cat[[1]], # blue
-    "Inter-annual variability" = .wise_cat[[2]], # vermillion
-    "Inter-model spread"       = .wise_cat[[3]] # bluish green
-  )
-
-  ggplot2::ggplot(
-    long,
-    ggplot2::aes(x = .data$scenario, y = .data$sd, fill = .data$source)
-  ) +
-    ggplot2::geom_col(width = 0.7, position = "dodge") +
-    ggplot2::scale_fill_manual(values = fill_map, name = NULL) +
-    ggplot2::scale_y_continuous(expand = c(0, 0)) +
-    ggplot2::labs(
-      x = NULL,
-      y = "Standard deviation (outcome units)",
-      subtitle = NULL
-    ) +
-    theme_wise() +
-    ggplot2::theme(
-      legend.position    = "bottom",
-      panel.grid.major.y = ggplot2::element_blank(),
-      panel.grid.minor   = ggplot2::element_blank()
-    ) +
-    ggplot2::coord_flip()
-}
-
-variance_component_data <- function(var_tbl, include_shares = FALSE,
-                                    share_tolerance = 1e-12) {
-  if (is.null(var_tbl) || !nrow(var_tbl)) {
-    return(tibble::tibble())
-  }
-  df <- var_tbl
-  df$sd_coef <- sqrt(pmax(df$var_coef %||% 0, 0))
-  df$sd_within <- sqrt(pmax(df$var_within %||% 0, 0))
-  df$sd_across <- sqrt(pmax(df$var_across %||% 0, 0))
-  out <- tidyr::pivot_longer(
-    df[, intersect(c("scenario", "sd_coef", "sd_within", "sd_across"), names(df)),
-      drop = FALSE
-    ],
-    cols = c("sd_coef", "sd_within", "sd_across"),
-    names_to = "source", values_to = "sd"
-  )
-  out$variance <- out$sd^2
-  if (isTRUE(include_shares)) {
-    totals <- stats::setNames(
-      tapply(out$variance, out$scenario, sum, na.rm = TRUE),
-      unique(out$scenario)
-    )
-    out$share_approx <- out$variance / pmax(
-      totals[as.character(out$scenario)],
-      share_tolerance
-    )
-    out$share_warning <- "Approximate zero-covariance share; not a full variance decomposition."
-  } else {
-    out$share_approx <- NA_real_
-    out$share_warning <- NA_character_
-  }
-  out
-}
-
 model_robustness_data <- function(ts_tbl, band_q = c(lo = 0.10, hi = 0.90)) {
   if (is.null(ts_tbl) || !nrow(ts_tbl) ||
     !all(c("scenario", "model_id", "sim_year", "value") %in% names(ts_tbl))) {
@@ -2820,7 +2632,7 @@ echart_pointrange_climate <- function(bands_tbl,
 
   e$x$opts$xAxis <- list(
     type = "category",
-    data = ordered_levels,
+    data = as.list(ordered_levels),
     axisLabel = wise_eaxis_label(interval = 0L, formatter = htmlwidgets::JS(
       "function(v){ return v === undefined ? '' : v; }"
     )),
@@ -2905,7 +2717,9 @@ echart_variance_contribution <- function(var_tbl, height = "300px", percent = FA
   )
   e$x$opts$yAxis <- list(
     type = "category",
-    data = cats,
+    # as.list(): a single category must stay a JSON array (auto_unbox would
+    # emit a string, which ECharts splits into one category per character).
+    data = as.list(cats),
     axisLabel = wise_eaxis_label(),
     axisLine = list(lineStyle = list(color = .wise_grid)),
     axisTick = list(show = FALSE),
@@ -2944,16 +2758,21 @@ echart_variance_contribution <- function(var_tbl, height = "300px", percent = FA
 #' marker, scenario labels anchored right of the top-row (Expected) markers
 #' exactly like the ggplot direct labels. No legend (the ggplot used direct
 #' labels only).
+#'
+#' `pending` lists scenario labels still computing (progressive Step 2
+#' results). Their dodge slots are reserved, so landed points keep their
+#' position as more scenarios arrive, and each gets a muted "(computing)"
+#' label on the top row. Empty (default) leaves the output unchanged.
 #' @noRd
 echart_step2_adverse_dot <- function(tbl, x_label = "Outcome level",
-                                     height = "380px") {
+                                     height = "380px",
+                                     pending = character(0)) {
   if (is.null(tbl) || !nrow(tbl)) {
     return(echart_blank("Return-period outcomes are unavailable.", height = height))
   }
-  scenario_levels <- c(
-    "Historical",
-    sort(unique(as.character(tbl$scenario[!tbl$is_historical])))
-  )
+  present <- sort(unique(as.character(tbl$scenario[!tbl$is_historical])))
+  pending <- setdiff(as.character(pending), c(present, "Historical"))
+  scenario_levels <- c("Historical", sort(unique(c(present, pending))))
   scenario_colours <- stats::setNames(vapply(scenario_levels, function(s) {
     if (identical(s, "Historical")) {
       return(.wise_support)
@@ -2970,6 +2789,12 @@ echart_step2_adverse_dot <- function(tbl, x_label = "Outcome level",
     seq_len(nrow(tbl)),
     tbl$rp_y,
     FUN = function(idx) {
+      if (length(pending)) {
+        # Fixed slots over the full scenario list (landed + pending).
+        k_all <- length(scenario_levels)
+        slot <- match(tbl$scenario_key[idx], scenario_levels)
+        return((slot - 1L - (k_all - 1L) / 2) * (dodge_width / max(k_all - 1L, 1)))
+      }
       k <- length(idx)
       if (k <= 1L) {
         return(0)
@@ -3036,6 +2861,27 @@ echart_step2_adverse_dot <- function(tbl, x_label = "Outcome level",
   if (!length(x_vals)) {
     return(echart_blank("No finite adverse-year outcomes available.", height = height))
   }
+  # Pending scenarios: label-only points on the top row, in their own slot.
+  k_all <- length(scenario_levels)
+  for (scn in pending) {
+    slot <- match(scn, scenario_levels)
+    off <- (slot - 1L - (k_all - 1L) / 2) * (dodge_width / max(k_all - 1L, 1))
+    series <- c(series, list(list(
+      name = paste0(scn, " (computing)"),
+      type = "scatter",
+      data = list(list(
+        value = c(stats::median(x_vals), top_y + off),
+        label = list(
+          show = TRUE, formatter = paste0(scn, " (computing)"),
+          position = "right", color = "#9aa9b5", fontStyle = "italic"
+        )
+      )),
+      symbolSize = 0,
+      silent = TRUE,
+      tooltip = list(show = FALSE),
+      z = 1
+    )))
+  }
   x_span <- diff(range(x_vals))
   if (!is.finite(x_span) || x_span <= 0) x_span <- max(abs(x_vals), 1) * 0.1
   e$x$opts$xAxis <- list(
@@ -3085,12 +2931,14 @@ echart_step2_adverse_dot <- function(tbl, x_label = "Outcome level",
 #' @noRd
 echart_annual_distribution <- function(tbl, x_label = "Outcome (outcome units)",
                                        plot_type = "violin",
-                                       height = "470px") {
+                                       height = "470px",
+                                       pending = character(0)) {
   if (is.null(tbl) || !nrow(tbl)) {
     return(echart_blank("No annual simulation results available.", height = height))
   }
   echart_step3_annual_distribution(
-    tbl, x_label = x_label, plot_type = plot_type, height = height
+    tbl, x_label = x_label, plot_type = plot_type, height = height,
+    pending = pending
   )
 }
 
@@ -3399,7 +3247,7 @@ echart_model_robustness <- function(tbl, x_label = "Expected annual outcome",
   )
   e$x$opts$yAxis <- list(
     type = "category",
-    data = as.character(seq_along(cats) - 1L),
+    data = as.list(as.character(seq_along(cats) - 1L)),
     axisLabel = wise_eaxis_label(
       interval = 0L,
       formatter = htmlwidgets::JS(sprintf(

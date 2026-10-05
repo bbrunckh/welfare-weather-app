@@ -477,7 +477,7 @@ resolve_id_col <- function(a, b) {
 #'       \code{compute_factor_loading()}, or \code{NULL} when
 #'       \code{chol_obj = NULL}.}
 #'     \item{sim_year}{Integer vector length N. Simulation year per row.}
-#'     \item{weather_exposure}{Compact exact weather exposure table and
+#'     \item{weather_exposure}{Compact (schema 2) exact weather exposure recipe and
 #'       prediction-row mapping, or explicit unavailable status if prediction
 #'       output loses its row identity.}
 #'     \item{weight}{Numeric vector length N or \code{NULL}. Survey weights.}
@@ -851,7 +851,7 @@ run_sim_pipeline <- function(weather_raw,
     id_vec      = id_vec,
     id_col      = id_col,
     svy_row_id  = svy_row_id,
-    weather_exposure = weather_exposure,
+    weather_exposure = .policy_exposure_compact(weather_exposure),
     n_pre_join  = n_pre_join,
     weather_raw = weather_raw,
     train_aug   = train_aug
@@ -866,17 +866,20 @@ run_sim_pipeline <- function(weather_raw,
   result
 }
 
-.policy_exposure_table <- function(weather_raw, weather_columns = NULL) {
+.policy_exposure_key_cols <- c(
+  ".policy_exposure_id", "code", "year", "survname", "loc_id",
+  "int_month", "sim_year", "timestamp"
+)
+
+.policy_exposure_table <- function(weather_raw, weather_columns = NULL,
+                                   ts_parts = NULL) {
   if (!is.data.frame(weather_raw) || !all(c(
     "code", "year", "survname", "loc_id", "timestamp"
   ) %in% names(weather_raw))) {
     return(NULL)
   }
-  derived <- .add_sim_timestamp_fields(weather_raw)
-  key_cols <- c(
-    ".policy_exposure_id", "code", "year", "survname", "loc_id",
-    "int_month", "sim_year", "timestamp"
-  )
+  derived <- .add_sim_timestamp_fields(weather_raw, ts_parts)
+  key_cols <- .policy_exposure_key_cols
   weather_cols <- intersect(weather_columns %||% character(), names(weather_raw))
   weather_cols <- setdiff(weather_cols, c(
     "code", "year", "survname", "loc_id", "timestamp"
@@ -933,6 +936,89 @@ run_sim_pipeline <- function(weather_raw,
     weight = weight,
     id_vec = id_vec,
     id_col = id_col
+  )
+}
+
+# Compact exposure (schema 2) ----
+# The full mapping is about 28 MB per climate-model pipeline: its `table` is a
+# deterministic function of the pipeline's own `weather_raw`, and svy_row_id /
+# sim_year / weight / id_vec duplicate the pipeline's fields. Pipelines store
+# only the recipe; consumers rebuild the exact schema-1 mapping on demand with
+# step2_exposure_resolve(). See review/step2_weather_exposure_dedup_plan.md.
+.policy_exposure_compact <- function(mapping) {
+  if (!is.list(mapping) || !identical(mapping$status, "ok") ||
+    !is.data.frame(mapping$table)) {
+    if (is.list(mapping)) mapping$table <- NULL
+    return(mapping)
+  }
+  list(
+    schema = 2L,
+    status = "ok",
+    available = TRUE,
+    reason = NULL,
+    row_index = mapping$row_index,
+    prediction_row_id = mapping$prediction_row_id,
+    id_col = mapping$id_col,
+    weather_columns = setdiff(names(mapping$table), .policy_exposure_key_cols),
+    table_class = class(mapping$table),
+    table_rows = nrow(mapping$table)
+  )
+}
+
+#' Rebuild a pipeline's exact schema-1 weather exposure mapping
+#'
+#' Schema-1 mappings (and unavailable ones) pass through unchanged. For
+#' schema 2 the exposure table is rebuilt from the pipeline's `weather_raw`,
+#' resolved against `owner` (the scenario that owns shared or referenced
+#' weather). `cache`, an environment shared across the members of one owner,
+#' reuses the timestamp-derived fields when timestamps are identical.
+#' @noRd
+step2_exposure_resolve <- function(pipeline, owner = NULL, cache = NULL) {
+  ex <- pipeline$weather_exposure
+  if (!is.list(ex) || !identical(ex$schema, 2L) || !identical(ex$status, "ok")) {
+    return(ex)
+  }
+  unavailable <- function(reason) {
+    list(status = "unavailable", available = FALSE, reason = reason)
+  }
+  weather <- tryCatch(step2_resolve_weather(pipeline$weather_raw, owner),
+    error = function(e) NULL
+  )
+  if (!is.data.frame(weather) || !identical(nrow(weather), ex$table_rows) ||
+    !all(ex$weather_columns %in% names(weather))) {
+    return(unavailable("weather exposure source unavailable"))
+  }
+  ts_parts <- NULL
+  if (is.environment(cache)) {
+    if (identical(cache$timestamp, weather$timestamp)) {
+      ts_parts <- cache$ts_parts
+    } else {
+      ts_parts <- .sim_timestamp_parts(weather$timestamp)
+      cache$timestamp <- weather$timestamp
+      cache$ts_parts <- ts_parts
+    }
+  }
+  table <- .policy_exposure_table(weather, ex$weather_columns, ts_parts = ts_parts)
+  table <- if ("tbl_df" %in% ex$table_class) {
+    tibble::as_tibble(table)
+  } else {
+    as.data.frame(table)
+  }
+  if (!identical(class(table), ex$table_class)) {
+    return(unavailable("weather exposure table could not be rebuilt"))
+  }
+  list(
+    status = "ok",
+    available = TRUE,
+    reason = NULL,
+    table = table,
+    row_index = ex$row_index,
+    prediction_row_id = ex$prediction_row_id,
+    svy_row_id = pipeline$svy_row_id,
+    sim_year = pipeline$sim_year,
+    weight = pipeline$weight,
+    id_vec = pipeline$id_vec,
+    id_col = ex$id_col
   )
 }
 
@@ -1026,14 +1112,25 @@ build_perturbation_method <- function(selected_weather) {
 #' the way `format()` rounding could.
 #'
 #' @param df A data frame with a `timestamp` column.
+#' @param ts_parts Optional precomputed `.sim_timestamp_parts(df$timestamp)`.
 #'
 #' @return `df` with `year` as character and `int_month`/`sim_year` integers.
 #' @noRd
-.add_sim_timestamp_fields <- function(df) {
-  ts_lt <- as.POSIXlt(df$timestamp)
+.add_sim_timestamp_fields <- function(df, ts_parts = NULL) {
+  ts_parts <- ts_parts %||% .sim_timestamp_parts(df$timestamp)
   dplyr::mutate(
     df,
     year      = as.character(year),
+    int_month = ts_parts$int_month,
+    sim_year  = ts_parts$sim_year
+  )
+}
+
+# The POSIXlt conversion dominates exposure-table rebuilds; members of one
+# scenario share timestamps, so callers may compute this once and reuse it.
+.sim_timestamp_parts <- function(timestamp) {
+  ts_lt <- as.POSIXlt(timestamp)
+  list(
     int_month = as.integer(ts_lt$mon + 1L),
     sim_year  = as.integer(ts_lt$year + 1900L)
   )

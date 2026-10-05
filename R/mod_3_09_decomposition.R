@@ -53,8 +53,7 @@
   if (!nrow(rows)) return(data.frame())
   if (identical(basis, "mean")) {
     values <- .compact_future_combine(rows)
-    baseline <- sum(rows$sum_baseline_level, na.rm = TRUE) /
-      sum(rows$weight_baseline_level, na.rm = TRUE)
+    baseline <- .compact_member_mean(rows, "sum_baseline_level", "weight_baseline_level")
   } else {
     values <- .decomp_adverse_values(rows, .decomp_adverse_supports(x, scenario, basis, so))
     if (is.null(values)) return(data.frame())
@@ -76,8 +75,7 @@
     group <- rows[rows$decile == d, , drop = FALSE]
     if (identical(basis, "mean")) {
       values <- .compact_future_combine(group)
-      baseline <- sum(group$sum_baseline_level, na.rm = TRUE) /
-        sum(group$weight_baseline_level, na.rm = TRUE)
+      baseline <- .compact_member_mean(group, "sum_baseline_level", "weight_baseline_level")
     } else {
       values <- .decomp_adverse_values(group, supports)
       if (is.null(values)) return(NULL)
@@ -116,124 +114,6 @@
 # Main / repositioning / interaction / total in outcome units, converted per
 # household before aggregation (see `.policy_level_channels()`).
 .compact_level_channels <- c("lvl_main", "lvl_res1", "lvl_res2", "lvl_total")
-
-.compact_decomp_stat <- function(values, weights) {
-  values <- suppressWarnings(as.numeric(values))
-  weights <- suppressWarnings(as.numeric(weights))
-  ok <- is.finite(values) & is.finite(weights) & weights > 0
-  if (!any(ok)) {
-    return(c(sum = NA_real_, weight = NA_real_))
-  }
-  c(
-    sum = sum(values[ok] * weights[ok]),
-    weight = sum(weights[ok])
-  )
-}
-
-.compact_decomp_values <- function(decomp_df) {
-  n <- nrow(decomp_df)
-  zero <- rep(0, n)
-  main <- decomp_df$delta_main %||% zero
-  direct <- decomp_df$delta_sp %||% zero
-  covariate <- decomp_df$delta_main_covar %||% (main - direct)
-  res1 <- decomp_df$delta_res1 %||% zero
-  res2 <- decomp_df$delta_res2 %||% zero
-  total <- decomp_df$delta_total %||% (main + res1 + res2)
-  list(
-    delta_total = total,
-    delta_main = main,
-    delta_sp = direct,
-    delta_main_covar = covariate,
-    delta_res = res1 + res2,
-    delta_res1 = res1,
-    delta_res2 = res2
-  )
-}
-
-.compact_decomp_stats <- function(values, weights, prefix = "") {
-  out <- lapply(values, .compact_decomp_stat, weights = weights)
-  out <- unlist(out, use.names = TRUE)
-  names(out) <- unlist(lapply(names(values), function(name) {
-    c(paste0(prefix, "sum_", name), paste0(prefix, "weight_", name))
-  }))
-  out
-}
-
-.compact_decomp_deciles <- function(decomp_df, baseline_deciles) {
-  ids <- suppressWarnings(as.integer(decomp_df$id))
-  deciles <- if (!is.null(baseline_deciles) && length(baseline_deciles)) {
-    mapped <- rep(NA_integer_, nrow(decomp_df))
-    ok <- is.finite(ids) & ids >= 1L & ids <= length(baseline_deciles)
-    mapped[ok] <- suppressWarnings(as.integer(baseline_deciles[ids[ok]]))
-    mapped
-  } else {
-    rep(NA_integer_, nrow(decomp_df))
-  }
-  if (!any(is.finite(deciles)) && "decile" %in% names(decomp_df)) {
-    deciles <- suppressWarnings(as.integer(decomp_df$decile))
-  }
-  deciles
-}
-
-.compact_future_decomposition <- function(decomp_df, scenario, sim_year,
-                                          year_start = NA_integer_,
-                                          year_end = NA_integer_,
-                                          baseline_deciles = NULL,
-                                          is_rif = FALSE, engine = NULL) {
-  if (is.null(decomp_df) || !is.data.frame(decomp_df) || !nrow(decomp_df)) {
-    return(NULL)
-  }
-  weights <- if ("weight" %in% names(decomp_df)) {
-    suppressWarnings(as.numeric(decomp_df$weight))
-  } else {
-    rep(1, nrow(decomp_df))
-  }
-  weights[!is.finite(weights) | weights < 0] <- NA_real_
-  values <- .compact_decomp_values(decomp_df)
-  metadata <- list(
-    scenario = as.character(scenario),
-    sim_year = sim_year,
-    year_start = year_start,
-    year_end = year_end
-  )
-  channel <- as.data.frame(c(metadata, .compact_decomp_stats(values, weights)),
-    stringsAsFactors = FALSE
-  )
-  channel$engine <- engine %||% if (isTRUE(is_rif)) "rif" else "fixest"
-  channel$is_rif <- isTRUE(is_rif)
-
-  deciles <- .compact_decomp_deciles(decomp_df, baseline_deciles)
-  decile_rows <- lapply(sort(unique(deciles[is.finite(deciles)])), function(d) {
-    ok <- deciles == d
-    row <- c(metadata, list(
-      decile = as.integer(d),
-      n_households = sum(ok, na.rm = TRUE),
-      weighted_population = sum(weights[ok], na.rm = TRUE)
-    ))
-    row <- c(row, .compact_decomp_stats(
-      lapply(values, `[`, ok), weights[ok]
-    ))
-    as.data.frame(row, stringsAsFactors = FALSE)
-  })
-  deciles_out <- if (length(decile_rows)) {
-    dplyr::bind_rows(decile_rows)
-  } else {
-    data.frame()
-  }
-  if (nrow(deciles_out)) {
-    deciles_out$decile <- as.integer(deciles_out$decile)
-    deciles_out$n_households <- as.integer(deciles_out$n_households)
-    deciles_out$weighted_population <- as.numeric(deciles_out$weighted_population)
-  }
-
-  list(
-    channel = channel,
-    decile = deciles_out,
-    metadata = metadata,
-    engine = channel$engine[[1L]],
-    is_rif = isTRUE(is_rif)
-  )
-}
 
 .bind_compact_future_decompositions <- function(parts, engine = NULL,
                                                 is_rif = FALSE) {
@@ -275,6 +155,21 @@
   x$scenario_order %||% unique(as.character(x$channel_summary$scenario))
 }
 
+# Equal-model mean of one summed/weighted statistic: each member's years are
+# pooled first (weighted mean over its simulated years), then members are
+# averaged equally, matching the Step 2 and Step 3 results. Rows without a
+# `member` column (single-source frames) are treated as one member.
+.compact_member_mean <- function(rows, sum_col, weight_col) {
+  sums <- rows[[sum_col]]
+  weights <- rows[[weight_col]]
+  ok <- is.finite(sums) & is.finite(weights) & weights > 0
+  if (!any(ok)) return(NA_real_)
+  member <- if ("member" %in% names(rows)) as.character(rows$member) else rep("", nrow(rows))
+  by_member <- vapply(split(seq_along(ok)[ok], member[ok]),
+    function(i) sum(sums[i]) / sum(weights[i]), numeric(1))
+  mean(by_member)
+}
+
 .compact_future_combine <- function(rows, prefix = "") {
   if (is.null(rows) || !nrow(rows)) {
     return(setNames(numeric(0), character(0)))
@@ -282,10 +177,8 @@
   channels <- c(.compact_decomp_channels, .compact_level_channels)
   out <- setNames(numeric(length(channels)), channels)
   for (name in channels) {
-    sums <- rows[[paste0(prefix, "sum_", name)]]
-    weights <- rows[[paste0(prefix, "weight_", name)]]
-    ok <- is.finite(sums) & is.finite(weights) & weights > 0
-    out[[name]] <- if (any(ok)) sum(sums[ok]) / sum(weights[ok]) else NA_real_
+    out[[name]] <- .compact_member_mean(
+      rows, paste0(prefix, "sum_", name), paste0(prefix, "weight_", name))
   }
   out
 }
@@ -408,6 +301,7 @@ mod_3_09_decomposition_ui <- function(id) {
   tagList(
     shiny::uiOutput(ns("stale_banner_ui")),
     shiny::uiOutput(ns("policy_summary_ui")),
+    shiny::uiOutput(ns("units_ui")),
     shiny::h4("What drives the total policy effect?",
       class = "diagnostic-section-heading"),
     shiny::div(
@@ -450,7 +344,7 @@ mod_3_09_decomposition_ui <- function(id) {
         DT::DTOutput(ns("decile_decomp_table"))
       ),
       shiny::tags$p(class = "diagnostic-note",
-        "Effects are weighted means in the outcome's units, by baseline welfare decile. Uncertainty is not shown.")
+        "Effects are weighted means by baseline welfare decile, in the outcome's units or percent of baseline as selected. Uncertainty is not shown.")
     ),
     shiny::uiOutput(ns("beta_curve_ui"))
   )
@@ -459,7 +353,6 @@ mod_3_09_decomposition_ui <- function(id) {
 #' 3_09_decomposition Server Functions
 #'
 #' @param id Module id.
-#' @param decomp_result Reactive data frame from decompose_policy_effect().
 #' @param decomp_scenarios Reactive compact future decomposition payload.
 #' @param model_fit Reactive model fit list (for rif_grid / engine detection).
 #' @param so Reactive selected outcome metadata.
@@ -472,7 +365,6 @@ mod_3_09_decomposition_ui <- function(id) {
 #'
 #' @noRd
 mod_3_09_decomposition_server <- function(id,
-                                          decomp_result = reactive(NULL),
                                           decomp_scenarios = reactive(list()),
                                           decomp_context = reactive(NULL),
                                           model_fit = reactive(NULL),
@@ -501,15 +393,10 @@ mod_3_09_decomposition_server <- function(id,
                                            metric_adverse_support = reactive(NULL),
                                            metric_adverse_by_model = reactive(NULL)) {
   moduleServer(id, function(input, output, session) {
-    raw_decomp_result <- decomp_result
     raw_decomp_scenarios <- decomp_scenarios
     policy_method_status <- reactive({
       mf <- model_fit()
       .policy_endpoint_status(so(), decomp_context() %||% mf)
-    })
-    decomp_result <- reactive({
-      if (!identical(policy_method_status()$status, "ok")) return(NULL)
-      raw_decomp_result()
     })
     decomp_scenarios <- reactive({
       if (!identical(policy_method_status()$status, "ok")) return(list())
@@ -1093,7 +980,7 @@ mod_3_09_decomposition_server <- function(id,
     # `.decomp_basis_probability`), for the figure notes.
     weather_basis_text <- function(basis = "mean", outcome = "the outcome") {
       p <- .decomp_basis_probability[basis]
-      if (is.na(p)) return("mean weather")
+      if (is.na(p)) return("the mean across simulated weather years (models weighted equally)")
       paste0(
         "the adverse 1-in-", round(1 / p), " weather year, ranked on baseline mean ",
         outcome, " within each scenario-model (models weighted equally), as in Results"
@@ -1143,8 +1030,8 @@ mod_3_09_decomposition_server <- function(id,
         selected = isolate(input$decile_weather_basis) %||% "mean",
         layout = "horizontal")
     })
-    # Historical mean weather uses the household-level decomposition; every
-    # other selection reads the per-year compact channels (Historical included).
+    # Every scenario (Historical included) reads the per-year compact channels,
+    # so Mean is the equal-model mean over simulated years, as in Steps 2 and 3.
     hist_label <- function() baseline_hist_sim()$hist_label %||% "Historical"
     # Compact channels are already in outcome units, so they bypass the
     # log-to-level conversion applied to household-level decompositions.
@@ -1165,21 +1052,40 @@ mod_3_09_decomposition_server <- function(id,
       if (isTRUE(stale()) || !identical(policy_method_status()$status, "ok")) return(data.frame())
       scenario <- input$headline_scenario %||% hist_label()
       basis <- input$headline_weather_basis %||% "mean"
-      if (identical(scenario, hist_label()) && identical(basis, "mean")) {
-        decomp_result()
-      } else compact_decomp_data(scenario, basis)
+      compact_decomp_data(scenario, basis)
     })
     headline_decomp_data <- reactive({
       scenario <- input$headline_scenario %||% hist_label()
-      household_level <- identical(scenario, hist_label()) &&
-        identical(input$headline_weather_basis %||% "mean", "mean")
       out <- .decomposition_outcome_summary(headline_decomp_res(),
-        if (household_level) so() else so_levels(), baseline_svy())
+        so_levels(), baseline_svy())
       if (nrow(out)) out$scenario <- scenario
+      if (nrow(out) && is_relative()) {
+        out <- .decomposition_as_relative(out,
+          .decomposition_baseline_mean(so(), baseline_svy()), "value")
+      }
       out
     })
     outcome_metric <- reactive({
       metric_metadata("mean", so(), poverty_line(), analysis_unit(), weighted = TRUE)
+    })
+    # Relative change (% of observed baseline mean) only for level-type outcomes
+    # with a positive baseline; rates and indices stay in their native change units.
+    relative_available <- reactive({
+      identical(outcome_metric()$change_kind, "absolute") &&
+        is.finite(.decomposition_baseline_mean(so(), baseline_svy()))
+    })
+    output$units_ui <- shiny::renderUI({
+      if (!isTRUE(relative_available())) return(NULL)
+      shiny::div(style = "display:flex; justify-content:flex-end; margin-bottom:8px;",
+        pill_toggle(ns("decomp_units"), label = "Units",
+          choices = c("Absolute (outcome units)" = "absolute", "% of baseline" = "relative"),
+          selected = isolate(input$decomp_units) %||% "absolute",
+          layout = "horizontal"))
+    })
+    is_relative <- reactive(isTRUE(relative_available()) &&
+      identical(input$decomp_units %||% "absolute", "relative"))
+    change_unit_text <- reactive({
+      if (is_relative()) "% of baseline mean" else outcome_metric()$change_unit %||% "outcome units"
     })
     output$headline_decomp_note_ui <- renderUI({
       if (!identical(policy_method_status()$status, "ok")) {
@@ -1187,7 +1093,7 @@ mod_3_09_decomposition_server <- function(id,
       }
       scenario <- input$headline_scenario %||% hist_label()
       basis <- input$headline_weather_basis %||% "mean"
-      unit <- outcome_metric()$change_unit %||% "outcome units"
+      unit <- change_unit_text()
       outcome <- outcome_label_text()
       res <- headline_decomp_res()
       if (!is.data.frame(res) || !nrow(res)) {
@@ -1196,7 +1102,8 @@ mod_3_09_decomposition_server <- function(id,
       }
       shiny::tags$p(class = "diagnostic-note", paste0(
         "Weighted average change in ", outcome, " (", unit, ") under ", scenario,
-        " for ", weather_basis_text(basis, outcome), "."
+        " for ", weather_basis_text(basis, outcome), ".",
+        if (is_relative()) " Percent of observed baseline mean, the same for all channels."
       ))
     })
     # Zero-arg echarts closures shared by the on-screen render and the
@@ -1204,7 +1111,7 @@ mod_3_09_decomposition_server <- function(id,
     headline_decomp_chart <- function() {
       echart_outcome_decomposition_headline(
         headline_decomp_data(),
-        y_label = paste0("Weighted average change (", outcome_metric()$change_unit %||% "outcome units", ")"),
+        y_label = paste0("Weighted average change (", change_unit_text(), ")"),
         height = "360px"
       )
     }
@@ -1236,7 +1143,7 @@ mod_3_09_decomposition_server <- function(id,
         data.frame(Scenario = rep(data$scenario[[1L]], n),
           Metric = rep(metric$label %||% "Mean", n),
           Outcome = rep(metric$outcome_label %||% metric$outcome_name %||% "", n),
-          `Change unit` = rep(metric$change_unit %||% "outcome units", n),
+          `Change unit` = rep(change_unit_text(), n),
           `Effect component` = data$channel,
           `Weighted average change` = data$value,
           check.names = FALSE)
@@ -1256,21 +1163,24 @@ mod_3_09_decomposition_server <- function(id,
         layout = "horizontal")
     })
 
+    decile_relative <- function(data) {
+      if (!nrow(data) || !is_relative()) return(data)
+      .decomposition_as_relative(data,
+        .decomposition_baseline_mean(so(), baseline_svy(), data$decile),
+        c("main", "repositioning", "interaction", "total"))
+    }
     decile_decomp_data <- reactive({
       if (isTRUE(stale()) || !identical(policy_method_status()$status, "ok")) return(data.frame())
       scenario <- input$decile_scenario %||% hist_label()
       basis <- input$decile_weather_basis %||% "mean"
-      if (identical(scenario, hist_label()) && identical(basis, "mean")) {
-        return(.decomposition_outcome_deciles(decomp_result(), so(), baseline_svy()))
-      }
       compact <- decomp_scenarios()
       if (!.is_compact_decomp_scenarios(compact)) return(data.frame())
       deciles <- .compact_future_decile_summary(compact, scenario, basis, so(), is_rif())
       if (!nrow(deciles)) return(data.frame())
-      .decomposition_outcome_deciles(data.frame(decile = deciles$decile,
+      decile_relative(.decomposition_outcome_deciles(data.frame(decile = deciles$decile,
         delta_main = deciles$main, delta_res1 = deciles$repositioning,
         delta_res2 = deciles$interaction, delta_total = deciles$total,
-        weight = deciles$weighted_population), so_levels(), baseline_svy())
+        weight = deciles$weighted_population), so_levels(), baseline_svy()))
     })
 
     output$headline_decomp_csv_ui <- shiny::renderUI({
@@ -1288,7 +1198,7 @@ mod_3_09_decomposition_server <- function(id,
       DT::datatable(data.frame(Scenario = rep(data$scenario[[1L]], n),
         Metric = rep(metric$label %||% "Mean", n),
         Outcome = rep(metric$outcome_label %||% metric$outcome_name %||% "", n),
-        `Change unit` = rep(metric$change_unit %||% "outcome units", n),
+        `Change unit` = rep(change_unit_text(), n),
         `Effect component` = data$channel,
         `Weighted average change` = data$value, check.names = FALSE),
         rownames = FALSE, class = "compact stripe")
@@ -1298,7 +1208,7 @@ mod_3_09_decomposition_server <- function(id,
       data <- decile_decomp_data()
       if (!nrow(data)) return(DT::datatable(data.frame(Message =
         "Decomposition data is not available for this selection."), rownames = FALSE, options = list(dom = "t")))
-      unit <- outcome_metric()$change_unit %||% "outcome units"
+      unit <- change_unit_text()
       channels <- data[c("main", "repositioning", "interaction", "total")]
       names(channels) <- paste(c("Main effect", "Repositioning", "Interaction", "Total policy effect"),
         paste0("(", unit, ")"))
@@ -1310,7 +1220,7 @@ mod_3_09_decomposition_server <- function(id,
     decomp_bar_chart <- function() {
       echart_outcome_decomposition_deciles(
         decile_decomp_data(),
-        y_label = paste0("Weighted average change (", outcome_metric()$change_unit %||% "outcome units", ")"),
+        y_label = paste0("Weighted average change (", change_unit_text(), ")"),
         height = "450px"
       )
     }
@@ -1327,7 +1237,7 @@ mod_3_09_decomposition_server <- function(id,
       fun = function() {
         data <- decile_decomp_data()
         if (!nrow(data)) return(data.frame(Message = "Decomposition data is not available for this selection."))
-        unit <- outcome_metric()$change_unit %||% "outcome units"
+        unit <- change_unit_text()
         channels <- data[c("main", "repositioning", "interaction", "total")]
         names(channels) <- paste(c("Main effect", "Repositioning", "Interaction", "Total policy effect"),
           paste0("(", unit, ")"))
@@ -1357,10 +1267,11 @@ mod_3_09_decomposition_server <- function(id,
         class = "diagnostic-note",
         paste0(
           "Bars: weighted average change in ", outcome, " (",
-          outcome_metric()$change_unit %||% "outcome units",
+          change_unit_text(),
           ") by channel; marker: total, for ", input$decile_scenario %||% hist_label(),
           " under ", weather_basis_text(basis, outcome),
-          ". Decile 1 is the poorest, fixed from weighted baseline welfare."
+          ". Decile 1 is the poorest, fixed from weighted baseline welfare.",
+          if (is_relative()) " Percent of each decile's observed baseline mean."
         )
       )
     })
@@ -1473,11 +1384,11 @@ mod_3_09_decomposition_server <- function(id,
 
     # --- Interaction warning ---
     output$interaction_warning_ui <- renderUI({
-      res <- decomp_result()
-      if (is.null(res)) {
+      compact <- decomp_scenarios()
+      if (!.is_compact_decomp_scenarios(compact) || !nrow(compact$channel_summary)) {
         return(NULL)
       }
-      if (!"delta_res2" %in% names(res) || all(abs(res$delta_res2) < 1e-10)) {
+      if (all(abs(compact$channel_summary$sum_delta_res2) < 1e-10, na.rm = TRUE)) {
         shiny::div(
           class = "alert alert-warning",
           style = "margin-top: 10px; font-size: 13px;",
@@ -1496,93 +1407,3 @@ mod_3_09_decomposition_server <- function(id,
 
 
 # Plot helpers ----
-
-#' @noRd
-.build_decomp_table <- function(decomp_df, is_rif) {
-  w <- if ("weight" %in% names(decomp_df)) decomp_df$weight else rep(1, nrow(decomp_df))
-  w[!is.finite(w) | w < 0] <- 0
-  if (!sum(w) > 0) w <- rep(1, nrow(decomp_df))
-  w_norm <- w / sum(w, na.rm = TRUE)
-  has_sd <- all(c("sd_main", "sd_res1", "sd_res2", "sd_total") %in% names(decomp_df))
-
-  # Aggregated SE on a log-scale delta given a per-household SD column.
-  # Var(Sigma w*delta_i) ~ Sigma w_i^2 * Var(delta_i) under household independence.
-  agg_se <- function(sd_col) {
-    if (!has_sd || is.null(decomp_df[[sd_col]])) {
-      return(NA_real_)
-    }
-    sqrt(sum((w_norm^2) * (decomp_df[[sd_col]])^2, na.rm = TRUE))
-  }
-
-  summary_row <- function(label, vals, sd_col = NULL) {
-    mean_log <- stats::weighted.mean(vals, w, na.rm = TRUE)
-    mean_pct <- (exp(mean_log) - 1) * 100
-    se_log <- if (is.null(sd_col)) NA_real_ else agg_se(sd_col)
-    se_pct <- if (is.na(se_log)) NA_real_ else abs(exp(mean_log)) * se_log * 100
-    data.frame(
-      Channel = label,
-      `Mean (%)` = round(mean_pct, 2),
-      `+/- SE (%)` = if (is.na(se_pct)) NA_real_ else round(se_pct, 2),
-      check.names = FALSE
-    )
-  }
-
-  rows <- list(
-    summary_row("Total effect", decomp_df$delta_total, sd_col = "sd_total"),
-    summary_row("Main effect (direct transfer and covariate shift)",
-      decomp_df$delta_main,
-      sd_col = "sd_main"
-    ),
-    summary_row("Direct transfer component", decomp_df$delta_sp)
-  )
-
-  if (is_rif) {
-    rows <- c(rows, list(
-      summary_row("Repositioning effect", decomp_df$delta_res1, sd_col = "sd_res1"),
-      summary_row("Weather-policy interaction", decomp_df$delta_res2, sd_col = "sd_res2")
-    ))
-  } else {
-    rows <- c(rows, list(
-      summary_row("Weather-policy interaction", decomp_df$delta_res2, sd_col = "sd_res2")
-    ))
-  }
-
-  df <- do.call(rbind, rows)
-
-  data.frame(
-    `Effect component` = trimws(df$Channel),
-    `Mean effect (%)` = df$`Mean (%)`,
-    `Coefficient SE (%)` = df$`+/- SE (%)`,
-    check.names = FALSE
-  )
-}
-
-.build_decomp_table_by_basis <- function(bases, is_rif) {
-  if (is.null(bases) || !length(bases)) {
-    return(data.frame())
-  }
-  tables <- lapply(bases, function(x) {
-    if (is.null(x) || !is.data.frame(x) || !nrow(x)) {
-      return(NULL)
-    }
-    .build_decomp_table(x, is_rif)
-  })
-  available <- Filter(Negate(is.null), tables)
-  if (!length(available)) {
-    return(data.frame())
-  }
-  template <- available[[1L]]
-  out <- template["Effect component"]
-  for (nm in names(tables)) {
-    tbl <- tables[[nm]]
-    if (is.null(tbl)) {
-      out[[paste0(nm, " (%)")]] <- NA_real_
-      next
-    }
-    out[[paste0(nm, " (%)")]] <- tbl[["Mean effect (%)"]]
-    if (identical(nm, "Mean weather")) {
-      out[["Coefficient SE (%)"]] <- tbl[["Coefficient SE (%)"]]
-    }
-  }
-  out
-}

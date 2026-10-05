@@ -1035,6 +1035,169 @@ aggregate_pipeline_tables_multi <- function(pipelines,
   setNames(lapply(methods, build_table), methods)
 }
 
+# The single table the Results tab displays for one method.
+#
+# Faithful extraction of the argument sets in mod_2_02_results.R
+# (.build_hist_for_method() / .build_scn_for_method(), inner build_for()). The
+# worker calls this to compute streamed partial tables; the module must call
+# this helper too (Phase 5 switches it) so the two sides cannot drift.
+#
+# Branches: weighted when the pipelines carry weights, otherwise unweighted;
+# prosperity_gap goes through aggregate_pipeline_table(); every other method
+# is read from the full-suite aggregate_pipeline_tables_multi() call. With
+# `suite = FALSE` only the requested method is computed (same values, checked
+# by tests; not the default until parity is established on real runs).
+#
+# @param pipelines One historical pipeline (`historical = TRUE`) or a named
+#   list of scenario member pipelines.
+# @param so Outcome metadata (type, name, transform).
+# @return list(table, weight_key, weighted): `weight_key` is "weighted" or
+#   "unweighted", the slot the module displays.
+# @noRd
+step2_display_aggregation <- function(pipelines,
+                                      method,
+                                      so,
+                                      residuals,
+                                      skip_coef,
+                                      pov_line,
+                                      bandwidth_p0 = 0.05,
+                                      shared_context = NULL,
+                                      historical = FALSE,
+                                      preparation_cache = NULL,
+                                      suite = TRUE) {
+  first <- if (isTRUE(historical) || !is.null(pipelines$y_point)) {
+    pipelines
+  } else {
+    pipelines[[1L]]
+  }
+  has_w <- !is.null(first$weight)
+  weighted <- has_w
+  is_log <- isTRUE(so$transform == "log")
+  band_q <- c(lo = 0.10, hi = 0.90)
+  model_ids <- if (isTRUE(historical)) {
+    "Historical"
+  } else {
+    names(pipelines) %||% paste0("m", seq_along(pipelines))
+  }
+  scenario <- if (isTRUE(historical)) "Historical" else NULL
+
+  if (!identical(method, "prosperity_gap")) {
+    suite_pov <- pov_line %||% 3
+    methods <- if (isTRUE(suite)) {
+      unname(hist_aggregate_choices(so$type, so$name))
+    } else {
+      method
+    }
+    out <- aggregate_pipeline_tables_multi(
+      pipelines = pipelines,
+      methods = methods,
+      weighted = weighted,
+      pov_lines = setNames(lapply(methods, function(x) suite_pov), methods),
+      residuals = residuals,
+      is_log = is_log,
+      band_q = band_q,
+      skip_coef = skip_coef,
+      bandwidth_p0 = bandwidth_p0,
+      model_ids = model_ids,
+      scenario = scenario,
+      shared_context = shared_context,
+      preparation_cache = preparation_cache
+    )[[method]]
+  } else {
+    out <- aggregate_pipeline_table(
+      pipelines = pipelines,
+      method = method,
+      weighted = weighted,
+      pov_line = pov_line,
+      residuals = residuals,
+      is_log = is_log,
+      band_q = band_q,
+      skip_coef = skip_coef,
+      bandwidth_p0 = bandwidth_p0,
+      model_ids = model_ids,
+      scenario = scenario,
+      shared_context = shared_context,
+      preparation_cache = preparation_cache
+    )
+  }
+  list(
+    table = out,
+    weight_key = if (has_w) "weighted" else "unweighted",
+    weighted = weighted
+  )
+}
+
+# The full method suite the Results tab can display, for one group.
+#
+# Computes aggregate_pipeline_tables_multi() ONCE over every method the
+# outcome supports except prosperity_gap, with the same arguments as the
+# module's suite branch (the captured pov_line for every method), so each
+# table is identical() to what the module displays for that method.
+# prosperity_gap is not part of the module's suite path (it uses
+# aggregate_pipeline_table()); it is added only when it is the captured
+# display `method`, via step2_display_aggregation().
+#
+# @inheritParams step2_display_aggregation
+# @return list(tables, weight_key, weighted): `tables` is a named list
+#   method -> table, in hist_aggregate_choices() order.
+# @noRd
+step2_display_aggregation_suite <- function(pipelines,
+                                            method,
+                                            so,
+                                            residuals,
+                                            skip_coef,
+                                            pov_line,
+                                            bandwidth_p0 = 0.05,
+                                            shared_context = NULL,
+                                            historical = FALSE,
+                                            preparation_cache = NULL) {
+  first <- if (isTRUE(historical) || !is.null(pipelines$y_point)) {
+    pipelines
+  } else {
+    pipelines[[1L]]
+  }
+  weighted <- !is.null(first$weight)
+  methods <- setdiff(
+    unname(hist_aggregate_choices(so$type, so$name)), "prosperity_gap"
+  )
+  if (is.null(preparation_cache)) {
+    preparation_cache <- .new_aggregation_preparation_cache()
+  }
+  suite_pov <- pov_line %||% 3
+  tables <- aggregate_pipeline_tables_multi(
+    pipelines = pipelines,
+    methods = methods,
+    weighted = weighted,
+    pov_lines = setNames(lapply(methods, function(x) suite_pov), methods),
+    residuals = residuals,
+    is_log = isTRUE(so$transform == "log"),
+    band_q = c(lo = 0.10, hi = 0.90),
+    skip_coef = skip_coef,
+    bandwidth_p0 = bandwidth_p0,
+    model_ids = if (isTRUE(historical)) {
+      "Historical"
+    } else {
+      names(pipelines) %||% paste0("m", seq_along(pipelines))
+    },
+    scenario = if (isTRUE(historical)) "Historical" else NULL,
+    shared_context = shared_context,
+    preparation_cache = preparation_cache
+  )
+  if (identical(method, "prosperity_gap")) {
+    tables[["prosperity_gap"]] <- step2_display_aggregation(
+      pipelines = pipelines, method = method, so = so, residuals = residuals,
+      skip_coef = skip_coef, pov_line = pov_line,
+      bandwidth_p0 = bandwidth_p0, shared_context = shared_context,
+      historical = historical, preparation_cache = preparation_cache
+    )$table
+  }
+  list(
+    tables = tables,
+    weight_key = if (weighted) "weighted" else "unweighted",
+    weighted = weighted
+  )
+}
+
 # Session-scoped cache for compact aggregation suites shared by Results tabs.
 new_shared_aggregation_cache <- function(max_entries = 16L) {
   cache <- new.env(parent = emptyenv())
@@ -1107,96 +1270,4 @@ apply_deviation <- function(d, deviation, hist_ref = NA_real_) {
     }
   }
   dplyr::mutate(d, value = value - hist_ref)
-}
-
-#' Compute exceedance curve ribbon from Cholesky draw values
-#'
-#' For each of S coefficient draws, computes the exceedance probability
-#' (1 - ECDF) at a grid of welfare values across all N simulation years.
-#' Returns p10/p90 envelope across S draws - the coefficient uncertainty
-#' ribbon for the exceedance plot.
-#'
-#' @param agg_tbl  Tibble. Output of compute_hist_agg() or
-#'   compute_scenario_agg() for one method. Must have columns:
-#'   value (point estimate per year) and draw_values (list column,
-#'   S draws per year).
-#' @param band_q   Named numeric(2). Quantile bounds for ribbon.
-#'   Default c(lo = 0.10, hi = 0.90).
-#'
-#' @return Tibble with columns: exceed_prob (y-axis exceedance probability),
-#'   welfare_mid (point estimate welfare), welfare_lo, welfare_hi
-#'   (p10/p90 coefficient uncertainty bounds). NULL if draw_values unavailable.
-#' @noRd
-compute_exceedance_ribbon <- function(agg_tbl,
-                                      band_q = c(lo = 0.10, hi = 0.90),
-                                      model_lo = NULL, model_hi = NULL) {
-  N_years <- nrow(agg_tbl)
-  if (N_years == 0L) {
-    return(NULL)
-  }
-
-  rank_order <- order(agg_tbl$value, decreasing = TRUE)
-  probs <- (seq_len(N_years) - 0.5) / N_years
-  welfare_sorted <- sort(agg_tbl$value, decreasing = TRUE)
-
-  draw_list <- agg_tbl$draw_values
-  has_draws <- !is.null(draw_list) && length(draw_list) > 0L &&
-    !is.null(draw_list[[1L]]) && length(draw_list[[1L]]) >= 2L
-
-  if (has_draws) {
-    S <- length(draw_list[[1L]])
-    # Build N_years * S matrix - each column = one draw across all years
-    draw_mat <- matrix(
-      unlist(draw_list, use.names = FALSE),
-      nrow = N_years,
-      ncol = S,
-      byrow = TRUE
-    )
-    ordered_mat <- draw_mat[rank_order, ]
-    coef_lo <- matrixStats::rowQuantiles(
-      ordered_mat,
-      probs = band_q[["lo"]], na.rm = TRUE
-    )
-    coef_hi <- matrixStats::rowQuantiles(
-      ordered_mat,
-      probs = band_q[["hi"]], na.rm = TRUE
-    )
-  } else if (all(c("coef_lo", "coef_hi") %in% names(agg_tbl))) {
-    # Delta-method path - use analytic band columns directly.
-    # Re-order to match the descending welfare ranking.
-    coef_lo <- agg_tbl$coef_lo[rank_order]
-    coef_hi <- agg_tbl$coef_hi[rank_order]
-  } else {
-    return(NULL)
-  }
-
-  # Option A approximation - apply coef width to ensemble bounds
-  # Ensemble uncertainty bands use coefficient uncertainty width from
-  # the mean ensemble member applied to lo/hi members.
-  # This approximates the joint distribution. Error is small for linear
-  # aggregates (<5% of band width) and conservative for poverty measures
-  # (understates true joint uncertainty by ~10-20%).
-  # Option B (per-member Cholesky draws) available if tighter bounds needed.
-  # See known_issues.md #18 and methodology workplan for full discussion.
-  coef_width_lo <- welfare_sorted - coef_lo # half-width below central
-  coef_width_hi <- coef_hi - welfare_sorted # half-width above central
-
-  final_lo <- if (!is.null(model_lo)) {
-    pmin(coef_lo, model_lo - coef_width_lo)
-  } else {
-    coef_lo
-  }
-
-  final_hi <- if (!is.null(model_hi)) {
-    pmax(coef_hi, model_hi + coef_width_hi)
-  } else {
-    coef_hi
-  }
-
-  tibble::tibble(
-    exceed_prob  = probs,
-    welfare_mid  = welfare_sorted,
-    welfare_lo   = final_lo,
-    welfare_hi   = final_hi
-  )
 }

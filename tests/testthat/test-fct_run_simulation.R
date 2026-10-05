@@ -78,7 +78,8 @@ make_ledger_pipeline_fn <- function() {
 }
 
 run_ledger_sim <- function(weather_result,
-                           pipeline_fn = make_ledger_pipeline_fn(), ...) {
+                           pipeline_fn = make_ledger_pipeline_fn(),
+                           weather_fn = function(...) weather_result, ...) {
   fct_run_simulation(
     sw                  = data.frame(name = "temp", stringsAsFactors = FALSE),
     so                  = data.frame(name = "welfare", type = "numeric",
@@ -97,7 +98,7 @@ run_ledger_sim <- function(weather_result,
     sim_dates           = c("2020-01-01", "2020-12-31"),
     perturbation_method = NULL,
     stored_breaks       = NULL,
-    weather_fn          = function(...) weather_result,
+    weather_fn          = weather_fn,
     pipeline_fn         = pipeline_fn,
     ...
   )
@@ -419,4 +420,97 @@ test_that("cooperative cancellation propagates rather than entering failure ledg
   expect_true(any(vapply(checkpoints, function(event) {
     identical(event$stage, "historical_ready")
   }, logical(1))))
+})
+
+# Consumer-style weather_fn: emits each key through weather_consumer with
+# get_weather()-style metadata (member_index / period_members).
+make_consumer_weather_fn <- function(weather_result, with_metadata = TRUE) {
+  function(..., weather_consumer) {
+    gks <- vapply(names(weather_result), function(k) {
+      if (identical(k, "historical")) NA_character_ else .key_group(k)$gk
+    }, character(1))
+    for (k in names(weather_result)) {
+      meta <- list(order = 1L)
+      if (with_metadata && !is.na(gks[[k]])) {
+        siblings <- names(weather_result)[!is.na(gks) & gks == gks[[k]]]
+        meta$member_index <- match(k, siblings)
+        meta$period_members <- length(siblings)
+      }
+      weather_consumer(k, weather_result[[k]], meta)
+    }
+    list()
+  }
+}
+
+collect_group_events <- function(wr, with_metadata, expect_error = FALSE) {
+  events <- list()
+  run <- function() {
+    suppressWarnings(run_ledger_sim(
+      wr,
+      weather_fn = make_consumer_weather_fn(wr, with_metadata),
+      checkpoint_fn = function(event) events[[length(events) + 1L]] <<- event
+    ))
+  }
+  if (expect_error) expect_error(run(), "All ensemble members failed") else run()
+  events
+}
+
+test_that("group_completed fires once per group, in order, with metadata", {
+  events <- collect_group_events(make_ledger_weather_result(), TRUE)
+  done <- Filter(function(e) identical(e$stage, "group_completed"), events)
+  expect_length(done, 2L)
+  expect_identical(
+    vapply(done, `[[`, character(1), "label"),
+    c("SSP2-4.5 / 2030-2040", "SSP5-8.5 / 2030-2040")
+  )
+  expect_identical(vapply(done, `[[`, integer(1), "groups_done"), 1:2)
+  expect_identical(vapply(done, `[[`, integer(1), "groups_total"), c(2L, 2L))
+  expect_identical(vapply(done, `[[`, integer(1), "n_models"), c(2L, 1L))
+  expect_identical(vapply(done, `[[`, integer(1), "n_models_requested"), c(2L, 1L))
+  # Metadata trigger: the first group completes before the SSP5 member starts.
+  stages <- vapply(events, `[[`, character(1), "stage")
+  starts <- which(stages == "pipeline_started" &
+    vapply(events, function(e) identical(e$current_label, "SSP5-8.5 / 2030-2040"), logical(1)))
+  expect_lt(which(stages == "group_completed")[[1L]], starts[[1L]])
+  # Member events carry determinate progress fields.
+  member <- Filter(function(e) identical(e$current_label, "SSP2-4.5 / 2030-2040") &&
+    identical(e$stage, "pipeline_started"), events)
+  expect_identical(vapply(member, `[[`, integer(1), "member_index"), 1:2)
+  expect_true(all(vapply(member, `[[`, integer(1), "period_members") == 2L))
+  expect_true(all(vapply(events, function(e) !is.null(e$groups_total), logical(1))))
+})
+
+test_that("group_completed fires once per group without consumer metadata", {
+  wr <- make_ledger_weather_result()
+  for (events in list(
+    collect_group_events(wr, FALSE),
+    {
+      ev <- list()
+      suppressWarnings(run_ledger_sim(
+        wr, checkpoint_fn = function(event) ev[[length(ev) + 1L]] <<- event
+      ))
+      ev
+    }
+  )) {
+    done <- Filter(function(e) identical(e$stage, "group_completed"), events)
+    expect_identical(
+      vapply(done, `[[`, character(1), "label"),
+      c("SSP2-4.5 / 2030-2040", "SSP5-8.5 / 2030-2040")
+    )
+    expect_identical(vapply(done, `[[`, integer(1), "groups_done"), 1:2)
+    expect_identical(vapply(done, `[[`, integer(1), "n_models"), c(2L, 1L))
+  }
+})
+
+test_that("a group whose members all fail still completes once, then the run errors", {
+  wr <- mark_fail(make_ledger_weather_result(), "ssp5_8_5_2030_2040_ensemble_mean")
+  for (with_metadata in c(TRUE, FALSE)) {
+    events <- collect_group_events(wr, with_metadata, expect_error = TRUE)
+    done <- Filter(function(e) identical(e$stage, "group_completed"), events)
+    expect_length(done, 2L)
+    expect_identical(done[[2L]]$label, "SSP5-8.5 / 2030-2040")
+    expect_identical(done[[2L]]$n_models, 0L)
+    expect_identical(done[[2L]]$n_models_requested, 1L)
+    expect_identical(done[[2L]]$groups_done, 2L)
+  }
 })

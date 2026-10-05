@@ -32,32 +32,6 @@ library(testthat)
   }))
 }
 
-test_that("future channel summaries preserve weighted current output", {
-  future <- .s3p1_future()
-  one_year <- future[future$scenario == "Scenario A" & future$sim_year == 2030, , drop = FALSE]
-  summary <- wiseapp:::decomposition_summary_data(one_year, is_rif = TRUE)
-
-  expect_identical(
-    summary$channel_id,
-    c("total", "level", "cash_transfer", "covariate_shift",
-      "resilience", "repositioning", "interaction")
-  )
-  expect_equal(
-    summary$model_value,
-    c(23 / 75, 4 / 15, 2 / 15, 2 / 15, 1 / 25, 2 / 75, 1 / 75),
-    tolerance = 1e-10
-  )
-  expect_equal(summary$percent, (exp(summary$model_value) - 1) * 100)
-
-  by_year <- lapply(split(future, list(future$scenario, future$sim_year)), function(x) {
-    wiseapp:::decomposition_summary_data(x, is_rif = TRUE)
-  })
-  expect_length(by_year, 4L)
-  expect_true(all(vapply(by_year, nrow, integer(1L)) == 7L))
-  expect_true(all(vapply(by_year, function(x) all(is.finite(x$model_value)), logical(1L)))
-  )
-})
-
 test_that("future channel-by-decile summaries use fixed baseline deciles", {
   future <- .s3p1_future()
   one_year <- future[future$scenario == "Scenario A" & future$sim_year == 2030, , drop = FALSE]
@@ -141,55 +115,10 @@ test_that("adverse basis is unavailable without enough simulated years", {
   expect_equal(nrow(.compact_future_decomp(compact, "Scenario A", "mean", welfare)), 1L)
 })
 
-test_that("compact future summaries match the full future frame for OLS and RIF", {
-  future <- .s3p1_future()
-  baseline_deciles <- c(2L, 5L, 7L, 10L)
-  so <- list(name = "welfare", type = "numeric")
-  for (engine in c("fixest", "rif")) {
-    is_rif <- identical(engine, "rif")
-    full <- wiseapp:::decomposition_summary_data(.compact_future_decomp(
-      .bind_compact_future_decompositions(lapply(split(future, list(
-        future$scenario, future$sim_year
-      )), function(x) .compact_future_decomposition(
-        x, x$scenario[[1L]], x$sim_year[[1L]], 2030L, 2040L,
-        baseline_deciles, is_rif, engine
-      )), engine, is_rif),
-      "Scenario A", "mean", so
-    ), is_rif = is_rif)
-    raw <- wiseapp:::decomposition_summary_data(
-      future[future$scenario == "Scenario A" & future$sim_year == 2030, , drop = FALSE],
-      is_rif = is_rif
-    )
-    expect_equal(full, raw, tolerance = 0)
-
-    compact <- .bind_compact_future_decompositions(lapply(split(future, list(
-      future$scenario, future$sim_year
-    )), function(x) .compact_future_decomposition(
-      x, x$scenario[[1L]], x$sim_year[[1L]], 2030L, 2040L,
-      baseline_deciles, is_rif, engine
-    )), engine, is_rif)
-    compact_decile <- .compact_future_decile_summary(
-      compact, "Scenario A", "mean", so, is_rif
-    )
-    raw_decile <- wiseapp:::decomposition_channels_by_decile(
-      future[future$scenario == "Scenario A", , drop = FALSE],
-      data.frame(welfare = 1:4, weight = c(1, 2, 1, 2)),
-      "welfare", is_rif, baseline_deciles
-    )
-    expect_equal(compact_decile[setdiff(names(compact_decile),
-      c("main", "repositioning", "interaction", "total", "baseline_annual"))], raw_decile, tolerance = 0)
-  }
-})
-
 test_that("decomposition export contracts expose current future and historical products", {
-  base <- .s3p1_fixture()
-  future <- .s3p1_future()
-  compact <- .bind_compact_future_decompositions(lapply(split(
-    future, list(future$scenario, future$sim_year)
-  ), function(x) .compact_future_decomposition(
-    x, x$scenario[[1L]], x$sim_year[[1L]], 2030L, 2040L,
-        c(2L, 5L, 7L, 10L), TRUE, "rif"
-  )), "rif", TRUE)
+  compact <- .adverse_compact(list(a = function(y) y - 2000))
+  compact$engine <- "rif"
+  compact$is_rif <- TRUE
   model <- list(engine = "rif", rif_grid = data.frame())
   survey <- data.frame(welfare = c(1, 2, 3, 4), weight = c(1, 2, 1, 2))
   so <- list(name = "welfare", label = "Welfare", units = "PPP",
@@ -202,7 +131,6 @@ test_that("decomposition export contracts expose current future and historical p
       wiseapp:::mod_3_09_decomposition_server,
       args = list(
         id = "decomposition",
-        decomp_result = shiny::reactiveVal(base),
         decomp_scenarios = shiny::reactiveVal(scenarios),
         model_fit = shiny::reactiveVal(model),
         so = shiny::reactiveVal(so),

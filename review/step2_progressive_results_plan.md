@@ -1,6 +1,6 @@
 # Step 2 progressive results: plan
 
-Status: proposal (inspection and planning only, nothing implemented).
+Status: phases 1-7 implemented in the working tree (uncommitted), unit-tested; in-browser validation, section 7 benchmarks and RIF parity outstanding. Interface: `review/step2_live_run_contract.md`.
 Date: 2026-10-05.
 Scope: Step 2 simulation run lifecycle. This covers the async worker (`R/fct_step2_async.R`), the compute path (`R/fct_step2_compute.R`, `R/fct_run_simulation.R`), the sidebar run controls (`R/mod_2_01_weathersim.R`) and the Results tab (`R/mod_2_02_results.R`).
 
@@ -257,5 +257,161 @@ Phases 1-2 are low risk and immediately useful. Phases 3-4 can land behind an op
 ## 10. Decisions (2026-10-05)
 
 1. **Re-run behaviour: switch to the live run.** When a committed result is on screen, the Results tab switches to the live run as soon as its historical partial lands, with the provisional banner. On cancel or failure it reverts to the committed run. (User decision.)
-2. **Selected method only; no full suite.** Existing measurements put the full suite at about 5.5x the mean-only cost for BFA (6.0 s vs 1.1 s per group, which is +33% on an 18 s group) and about 1.7x for IRN (16.8 s vs 10.1 s). Selected-only costs about 6% (BFA) and 12% (IRN), and that time is not new work, because the main process does the same aggregation after adoption today. Most users only look at the default method while waiting, and the full suite would also make every partial roughly 9x larger. Capturing the live method and poverty line at submit covers users who want a poverty metric streamed. (Recommendation, accepted pending user confirmation.)
+2. **Superseded (2026-10-05): stream all suite methods.** Re-measured at real scale (BFA, 2 SSP x 1 period, current kernel): the full suite costs about 2.6 s per scenario versus 1.1-1.7 s for one method, and the suite partial is about 0.45 MB (8 methods, BFA). The worker now streams every suite method; prosperity gap only when it is the captured method. Method switching works during streaming, and Phase 7 seeds every method on adoption. Original decision: selected method only, based on older benchmark figures (suite 5.5x mean for BFA).
 3. **Disable, don't defer.** Other methods and the poverty line are disabled during streaming, with an "Available when the simulation completes" tooltip. The alternative, allowing a selection with an "updates on completion" note, leaves the charts either empty or labelled with a metric they are not showing. It would also need a worker back-channel to compute the new method for the remaining groups and backfill the finished ones, which is new coordinator complexity for little benefit. Display-only toggles (deviation, ensemble band, chart type) stay live. (Recommendation, accepted pending user confirmation.)
+
+
+## Appendix A: mod_2_02_results.R hist_sim()/saved_scenarios() call sites
+
+Inventory taken on branch `dev` against `R/mod_2_02_results.R` (2058 lines) with `grep -nE 'hist_sim\(|saved_scenarios\(' `. There are 48 grep matches: 2 are comments (line 489 and line 1965, ignored), leaving 46 call-site lines (some lines read the reactive twice). Counts by class: **S = 24, C = 11, L = 11**.
+
+Classes: **S** display source (must work in provisional mode, will read `results_source()`); **C** committed only (needs full pipelines/svy, or is an export/side effect; suppressed or placeholder in provisional mode); **L** lifecycle (tab, cache, choices sync).
+
+| Line | Enclosing reactive/output/observer | Fields read | Class |
+|---|---|---|---|
+| 394 | `output$simulation_summary_ui` (renderUI) | whole object (`simulation_summary_card()` reads `$so`, `$sim_summary`, `$hist_label`) | S (ambiguous, see below) |
+| 395 | `output$simulation_summary_ui` | whole list; names and `$n_models` per scenario | S (ambiguous) |
+| 411 | `headline_cards_data_rv` | whole object (`step2_headline_cards()` reads `$so`, `$sim_summary`, `$svy` (nrow only)) | S (ambiguous) |
+| 412 | `headline_cards_data_rv` | whole list (length only) | S |
+| 419 | `headline_cards_data_rv` (metadata block) | `$so`, `$analysis_unit` | S |
+| 446 | `agg_methods` | null-check (`req`) | S |
+| 447 | `agg_methods` | `$so` | S |
+| 604 | `aggregation_cache()` (plain function) | null-check (isolate) | L |
+| 612 | `agg_workspace` | null-check (`req`) | C |
+| 621 | `agg_workspace` (`ws$hs`) | whole object; downstream `$pipeline`, `$so`, `$.sig`, `$shared_context` | C |
+| 622 | `agg_workspace` (`ws$sc`) | whole list; downstream `$pipelines`, `$so`, `$shared_context` | C |
+| 623 | `agg_workspace` (`ws$res`) | `$residuals` | C (the `residuals` field itself is S, see contract) |
+| 635 | `observeEvent(hist_sim())` cache clear | trigger | L |
+| 637 | same | null-check | L |
+| 876 | `scenario_agg_rv` | null-check (`req`) | S |
+| 877 | `scenario_agg_rv` | length | S |
+| 895 | `weight_key` (two reads) | null-check, `$has_weights` | S |
+| 1036 | `has_draws` | null-check (`req`) | S |
+| 1037 | `has_draws` | `$chol_obj` (null-check only) | S |
+| 1042 | `selected_scenario_names` | names | S |
+| 1331 | `exceedance_curves_rv` (two reads) | null-check, `$so` | S |
+| 1432 | `threshold_table_rv` (two reads) | null-check, `$so` | S |
+| 1648 | `annual_distribution_chart` | `$so` | S |
+| 1662 | `incidence_data_rv` | `req(hist_sim(), saved_scenarios())` null-checks | C |
+| 1667 | `incidence_data_rv` | `$so$transform` | C |
+| 1668 | `incidence_data_rv` (two reads) | `$svy`, `$survey` | C |
+| 1673 | `incidence_data_rv` | `saved_scenarios()[[nm]]$pipelines` (or `$pipeline`) | C |
+| 1676 | `incidence_data_rv` | `$so$name`, `$pipeline` | C |
+| 1705 | `wise_export_table("climate_distributional_incidence_data")` fun | `$so` | C |
+| 1721 | `annual_distribution_export` (export fun) | `$so` | C |
+| 1749 | `threshold_table_df` (on-screen table and export) | null-check, `$so` | S |
+| 1752 | `threshold_table_df` (two reads) | null-check, `$sim_summary$historical_years` | S |
+| 1775 | `uncertainty_chart` | `$so` (only `metric_metadata()$format`) | S |
+| 1803 | `adverse_dot_data_rv` | `$so` | S |
+| 1814 | `adverse_dot_data_rv` | `$so` | S |
+| 1828 | `adverse_dot_chart` | `$so` | S |
+| 1894 | `exceedance_chart` | `$so` | S |
+| 1930 | `observeEvent(hist_sim())` tab insert/remove | trigger | L |
+| 1932 | same | null-check | L |
+| 1990 | same (`insertUI`, `.results_content_ui`) | `$so` | L |
+| 1998 | `observeEvent(hist_sim())` select tab | trigger | L |
+| 2000 | same | null-check | L |
+| 2012 | `observeEvent(hist_sim())` method choices sync | trigger | L |
+| 2014 | same | `req($so)` | L |
+| 2015 | same | `$so` | L |
+| 2052 | return API `timeseries_curves` (Diagnostics) | `$so` | S (ambiguous) |
+
+Note on the 1749/1752 and 1648/1705/1721 groupings: the builder closures (`threshold_table_df`, `annual_distribution_chart`) are shared between on-screen output and the `wise_export_*` fun. The display use is S. The export registrations themselves stay committed-only (see below), so no per-line split is needed.
+
+### Ambiguous call sites
+
+- **394/395 (summary card)**: the card reads `$sim_summary`, `$hist_label` and per-scenario `$n_models`. Not currently in the worker partial contract. Either add `sim_summary`/`hist_label`/`n_models` per scenario to the partial, or show a reduced card in provisional mode.
+- **411 (headline cards)**: `step2_headline_cards()` reads `hist_sim$svy` only for `nrow()` (prediction count) and `$sim_summary`. Provisional: pass a `svy_nrow` scalar (or accept the "Unavailable" prediction note). It also uses `length(saved_scenarios)` for the scenario tally; in provisional mode this must be the number of *landed* scenarios (the "Simulation years" card then understates total runs; decide whether to show it as "so far").
+- **1752**: needs `sim_summary$historical_years` for `n_hist_years`; falls back to `max(tbl$n_obs)` when missing, so provisional is safe even without it, but the fallback may differ from committed. Prefer including `historical_years` in the partial.
+- **2052 (return API)**: Diagnostics consumes `timeseries_curves`. Plan 5.3 says Step 3 and Diagnostics do not receive `live_run`. Decide whether the export of this reactive stays tied to committed (`hist_sim()`) or follows `results_source()`. Recommended: keep it committed-only (use committed `so`), so the Diagnostics tab is not driven by provisional data.
+- **623 `$residuals`**: committed-only inside the workspace, but the S side also needs it (display of the residual note, and the seeding match in 5.5).
+- **`selected_scenario_names()` filters** (lines 1176, 1250, 1315, 1400, 1593): in provisional mode these must filter to *landed* names only; pending names are handled separately by the placeholders.
+- **`scenario_agg_rv` `req(saved_scenarios())`** (876): in provisional mode there may be zero landed scenarios (historical only). The current `NULL` return path (`length == 0`) already covers it.
+
+### Proposed `results_source()` contract
+
+One internal `reactive` returning a plain list (locked), recomputed on `hist_sim()`, `saved_scenarios()`, `live_run()` (the module needs a new `live_run` argument, default `reactive(NULL)`). Which source wins: provisional when `live_run()` has a historical partial for the current run (decision 1 in section 10), otherwise committed.
+
+| Field | Type | Committed source expression | Provisional source (worker partials) |
+|---|---|---|---|
+| `mode` | `"committed"`/`"provisional"` | `"committed"` | `"provisional"` |
+| `has_data` | logical | `!is.null(hist_sim())` | `!is.null(live$historical)` |
+| `so` | list | `hist_sim()$so` | `live$so` (captured at submit, same object as the committed one would get) |
+| `has_weights` | logical | `isTRUE(hist_sim()$has_weights)` | `isTRUE(live$has_weights)` |
+| `has_draws` | logical | `!is.null(hist_sim()$chol_obj)` | `isTRUE(live$has_draws)` |
+| `residuals` | chr | `hist_sim()$residuals %\|\|% residuals() %\|\|% "original"` | `live$residuals` |
+| `analysis_unit` | chr/NULL | `hist_sim()$analysis_unit` | `live$analysis_unit` |
+| `sim_summary` | list | `hist_sim()$sim_summary` | `live$sim_summary` (at minimum `historical_years`) |
+| `hist_label` | chr | `hist_sim()$hist_label` | `live$hist_label` |
+| `svy_nrow` | integer/NA | `nrow(hist_sim()$svy %\|\|% hist_sim()$survey)` | `live$svy_nrow` |
+| `scenario_names` | chr | `names(saved_scenarios())` (or `character(0)`) | names of landed scenarios, in landing order |
+| `scenario_n_models` | named integer | `lengths(lapply(saved_scenarios(), function(s) s$pipelines))` or `$n_models` | per-partial `n_models` |
+| `pending_names` | chr | `character(0)` | planned scenario names (from `live$plan`) minus landed |
+| `methods_available` | chr | `unname(hist_aggregate_choices(so$type, so$name))` | `live$method` (single entry) |
+| `locked_method` | chr/NULL | `NULL` | `live$method` (disables other pills) |
+| `locked_pov_line`, `locked_bandwidth` | numeric/NULL | `NULL` | values captured at submit (disable the numeric inputs) |
+| `hist_agg(method, pov_line, bandwidth)` | function returning `list(unweighted=, weighted=)`, each `list(<method>=tibble)` (lazy-list or plain) | `.get_hist_agg(method)` (existing workspace, existing cache key) | wrap `live$hist_tbl` in the same shape; return `NULL` if `method` differs from `live$method` |
+| `scn_agg(method, pov_line, bandwidth)` | named list label -> same shape, or `NULL` if none | `.get_scn_agg(method)` | wrap `live$scn_tbl[[label]]` for landed labels only |
+| `progress` | list (`groups_done`, `groups_total`) | `NULL` | from `live_run()` (banner only) |
+
+Notes: `.lazy_aggregation_table()` already accepts plain tables, so provisional `hist_agg`/`scn_agg` can return plain nested lists with no lazy wrapper. The `pov_line`/`bandwidth` arguments exist only so the committed path keeps its cache key; the provisional path ignores them (inputs are disabled).
+
+**Stay committed-only (read `hist_sim()`/`saved_scenarios()` directly, not through `results_source()`)**: `agg_workspace` (and so `.get_hist_agg`/`.get_scn_agg` in committed mode, and the 5.5 seeding hook), `incidence_data_rv`, every `wise_export_*` fun, `aggregation_cache()`, the stale/cache-clear observer, and the Diagnostics return API (recommended).
+
+**Become pure functions of `results_source()`** (all S rows): `agg_methods`, `.selected_method` (via `methods_available`/`locked_method`), `hist_agg_rv`, `scenario_agg_rv`, `weight_key`, `has_draws`, `selected_scenario_names`, `hist_ref_val`, `hist_F_agg_ref`, `agg_hist`, `derived_results_frame_rv` and everything downstream (pointrange/headline bands, curves, variance breakdown, exceedance, threshold table, adverse dot data, headline cards), `simulation_summary_ui`, `headline_cards_ui`, `output$annual_distribution_plot`, `output$adverse_dot_plot`, `output$exceedance_plot`, `output$uncertainty_sources_plot`, `output$summary_threshold_table`. Provisional caveat: `hist_F_agg_ref`/`.apply_contrast_sd` need the `F_agg_all` matrix column in the partial tables; it is present in the `aggregate_pipeline_table()` output, so the worker must not strip it (otherwise deviation modes would silently fall back to level-CI SDs; flag in the parity test).
+
+The tab-insertion observers (1930, 1998, 2012) key on `results_source()$has_data` and `results_source()$so`; they are L and stay lifecycle observers but must (a) not rebuild the pane when only `mode` flips committed to provisional with an unchanged `so`, and (b) re-send the control disabled state after `insertUI` (see below).
+
+### `wise_export_*` registrations (all committed-only)
+
+All are in `R/mod_2_02_results.R`; each `fun` reads reactives that, in provisional mode, would be fed by `results_source()`, so each must be gated on `results_source()$mode == "committed"` (return `NULL`/empty, or better, read a committed-only frozen view).
+
+| Line | Key | Kind |
+|---|---|---|
+| 1189 | `climate_adverse_support` | table (reads `attr(threshold_table_rv(), "adverse_support")`) |
+| 1604 | `climate_headline_summary` | table |
+| 1633 | `climate_outcome_distribution` | figure (`pointrange_chart`) |
+| 1691 | `climate_distributional_incidence` | figure |
+| 1699 | `climate_distributional_incidence_data` | table |
+| 1727 | `climate_annual_distribution` | figure |
+| 1735 | `climate_annual_distribution_data` | table |
+| 1786 | `climate_uncertainty_sources` | figure |
+| 1841 | `climate_adverse_return_periods` | figure |
+| 1850 | `climate_outcome_thresholds` | table |
+| 1904 | `climate_exceedance_curve` | figure |
+
+Since the shared closures (`threshold_table_df`, `annual_distribution_chart`, `adverse_dot_chart`, `exceedance_chart`, `uncertainty_chart`, `pointrange_chart`, `headline_cards_data_rv`) feed both display and export, the cleanest gate is a wrapper at registration time: `fun = function() if (committed()) <original>() else NULL` (check how `wise_export_*` treats a NULL/empty result before relying on that). Alternatively, build exports from the existing committed-mode reactive chain duplicated over `committed_source()`; not recommended (doubles reactives).
+
+### Output ids and `suspendWhenHidden`
+
+Explicit `outputOptions(..., suspendWhenHidden = TRUE)` (this is also the Shiny default, so they are no-ops in effect, kept for documentation):
+
+- `uncertainty_sources_plot` (line 1784)
+- `adverse_dot_plot` (line 1839)
+- `annual_distribution_plot` (line 2029)
+- `summary_threshold_table` (line 2030)
+- `exceedance_plot` (line 2031)
+
+Other outputs with default (suspended when hidden): `stale_banner` (381), `simulation_summary_ui` (392), `headline_cards_ui` (433). No output uses `suspendWhenHidden = FALSE`, so charts only render while the Results tab is visible; a provisional render therefore costs nothing while the user is on another tab. (Provisional partials will still invalidate `results_source()` reactives, but lazy reactive consumers do not run until an output requests them.)
+
+### Changes needed for provisional UI (inspection only, no code edited)
+
+**(a) `pill_toggle()` disabled state** (`R/utils_ui.R:966`, CSS `inst/app/www/custom.css` near line 1559).
+
+Current: `pill_toggle(inputId, choices, selected, label, width, choiceNames, choiceValues, extra_class, layout)` wraps `shiny::radioButtons` and only appends classes. No server-side update path exists, and `inst/app/www` has no custom message handlers (only `inst/app/vendor/hexmap.js` registers one), and `shinyjs` is not allowed.
+
+1. Add two arguments: `disabled = character(0)` (choice *values* to disable; `TRUE` means all) and `disabled_tooltip = NULL`. Initial render: for each `<input type=radio value=v>` whose value is in `disabled`, add `disabled` and `aria-disabled="true"` on the input and class `pill-disabled` plus `title = disabled_tooltip` on the enclosing `label.radio-inline` / `.form-check-inline` (use `htmltools::tagQuery(rb)$find("input")`; do this after building `rb`, before the class append). The selected pill is never disabled.
+2. Add `update_pill_toggle(session, inputId, disabled = NULL, tooltip = NULL)` in `utils_ui.R`. It calls `session$sendCustomMessage("wise_pill_toggle_state", list(id = session$ns(inputId), disabled = I(as.character(disabled)), tooltip = tooltip))`. Do not use `session$sendInputMessage`: the radio binding only understands `value`/`label`/`options`.
+3. Add a small handler to a new `inst/app/www/pill_toggle.js` (loaded the same way other `www` assets are): find `input[name="<id>"]`, set `.disabled` and toggle `pill-disabled` on the parent label per value, set `title`. `disabled = I(character(0))` clears everything (re-enable).
+4. CSS: `.pill-toggle .pill-disabled { opacity: .45; cursor: not-allowed; }` and `.pill-toggle .pill-disabled > span { pointer-events: auto }` (the radio input itself already has `pointer-events: none`, so clicks reach the label; the `disabled` radio then ignores the click and no `input$` change is sent). Do not put `pointer-events: none` on the label, or the `title` tooltip will not show.
+5. Server wiring in `mod_2_02_results_server`: one `observe()` on `results_source()$mode` (and on `results_tab_added()`/the insertUI flush) calls `update_pill_toggle(session, "cmp_agg_method", disabled = setdiff(all_choices, locked_method), tooltip = "Available when the simulation completes")` when provisional, and `disabled = character(0)` when committed. Because this derives from `mode`, every exit path (complete, cancel, stale, failure) re-enables with no extra code. The re-run path rebuilds the pane via `insertUI`, which discards client state, so re-send inside `session$onFlushed(once = TRUE)` after the insert. `pov_line` (a `numericInput`) cannot use the pill handler; send `{id, disabled}` for it through the same handler (generalise the handler to also match `#id` inputs by `.prop("disabled")`), and also gate its `conditionalPanel` hint. Keep the `.selected_method()` guard: if `cmp_agg_method` ever differs from `locked_method` in provisional mode, `.selected_method()` must return `locked_method`.
+
+**(b) Pending-scenario placeholder categories** (`R/fct_sim_compare.R`, `R/fct_policy_sim_compare.R`, `R/utils_ui.R`).
+
+Shared design: add a `pending = character(0)` argument (scenario labels still computing) to each builder, build the fixed category order from `union(present, pending)` with the same sort/ordering rules as today, and render pending categories as an axis label with a muted style (`axisLabel.rich` with grey colour, label suffixed with "(computing)") plus no data series. Because ordering is derived from the union, a scenario landing later does not shift any other category. `pending` is passed from `results_source()$pending_names`; committed mode passes `character(0)` and output must be identical (covered by the characterisation snapshot).
+
+- **`echart_annual_distribution()`** (`fct_sim_compare.R:3086`) is a thin wrapper over `echart_step3_annual_distribution()` (`fct_policy_sim_compare.R:218`), which Step 3 also uses. Add `pending` to both (default `character(0)` keeps Step 3 unchanged). In the inner builder: `scenario_levels <- c("Historical", sort(unique(c(df$scenario[df$scenario != "Historical"], pending))))`; `n_rows <- length(scenario_levels)`; `y_breaks <- seq_len(n_rows)` instead of `sort(unique(df$row_y))` (today a category without data would vanish); `band_ys` is computed from `y_breaks` already. Palette: the SSP shading loop uses `scenario_levels`, so pending members get their final shade automatically; use the muted colour only on the axis label (`y_labs`), appending "\n(computing)".
+- **`echart_pointrange_climate()`** (`fct_sim_compare.R:2765`) -> `.pointrange_prep()` (`:144`): add `pending` to both. Before the `ordered_levels` loop, build `fut_df_levels <- rbind(fut_df[, c("ssp_short","yr_lbl")], parsed pending)` where pending labels go through `.normalise_ssp`/`.parse_year`/`SSP_SHORT_LABELS` as for real rows; use it for `ssps_present`/`yrs_present`/`ssp_yrs`. In the series loop nothing is drawn for pending (no row in `df`); only `ordered_levels` gains the category, and `x_label_map` gets the muted "(computing)" label. Note: in the current module this builder is used only by `pointrange_chart()` (export-only; there is no mounted Results output), so it is low priority and can be skipped for v1.
+- **`echart_step2_adverse_dot()`** (`:2948`): add `pending`. `scenario_levels` (used for colours and for the dodge slot) must include pending so dumbbell slots in each return-period row stay fixed: change the `dodge_offset` computation to use `length(scenario_levels)` and `match(scenario_key, scenario_levels)` slots instead of `k = length(idx)`, otherwise points shift when a scenario lands. Add a legend entry per pending scenario with a muted marker and name "<label> (computing)" (an empty `scatter` series with no data).
+- **`echart_exceedance()`** (`:3458`): add `pending`. Today palette order follows the data; add an empty dashed grey `line` series per pending label (name "<label> (computing)") so the legend order is stable. The curves themselves are unchanged.
+- **Headline cards** (`step2_headline_cards()` at `:1076`, `headline_cards_ui()` at `utils_ui.R:247`): the cards are not per scenario today (5 fixed cards; the future cards use the *first* future row as `focus`). Concrete: add `pending = character(0)`; when `pending` is non-empty and there are no future rows, return the historical card(s) plus skeleton cards for the future-dependent ones; in `headline_cards_ui()` the existing `card$class` hook already adds a class, so emit `class = "skeleton"`, `value = "Computing..."`, and add `.headline-card.skeleton` CSS (muted background and text). If the plan's "one skeleton per pending scenario" is wanted instead, that is a new per-scenario card layout and should be confirmed with the user first (flagged as ambiguous; recommended: keep five fixed cards, skeleton the future ones until the first future partial lands, then fill them and keep `focus` as the first landed future scenario, noting "n of N scenarios").

@@ -1,10 +1,10 @@
 # Keep the last successful result/context pair intact until the next run has
 # completed all work. A failed run therefore has no publication side effect.
-.publish_decomposition_bundle <- function(previous, result, context, success) {
+.publish_decomposition_bundle <- function(previous, context, success) {
   if (!isTRUE(success)) {
     return(previous)
   }
-  list(result = result, context = context)
+  list(context = context)
 }
 
 #' 3_06_policy_sim Server Functions
@@ -67,8 +67,7 @@ mod_3_06_policy_sim_server <- function(id,
     sim_running <- reactiveVal(FALSE)
     run_generation <- reactiveVal(0L)
     run_status <- reactiveVal("idle")
-    decomp_bundle_rv <- reactiveVal(list(result = NULL, context = NULL))
-    decomp_rv <- reactive(decomp_bundle_rv()$result)
+    decomp_bundle_rv <- reactiveVal(list(context = NULL))
     decomp_context_rv <- reactive(decomp_bundle_rv()$context)
     annual_channels_rv <- reactive(decomp_bundle_rv()$annual_channels)
     decomp_scenarios_rv <- reactiveVal(list())
@@ -355,18 +354,10 @@ mod_3_06_policy_sim_server <- function(id,
                 stop("Policy simulation produced no results.", call. = FALSE)
               }
 
-              # Decompose policy effects using HISTORICAL mean weather.
-              # REACT-05: a decomposition failure now fails the whole run
-              # instead of silently presenting the previous run as new.
+              # REACT-05: the production annual channels were computed above, so
+              # a failure there already fails the whole run instead of silently
+              # presenting the previous run as new.
               shiny::setProgress(value = 0.85, detail = "Summarizing policy effects...")
-              decomp <- .decompose_policy_effect_run(
-                context = decomp_context,
-                run_identity = decomp_context$run_identity,
-                weather_raw = step2_resolve_weather(hs$weather_raw, hs)
-              )
-              if (is.null(decomp)) {
-                stop("Effect decomposition produced no results.", call. = FALSE)
-              }
 
               # Production future summaries have already been reduced from the
               # exact channel blocks used to correct every member's predictions.
@@ -396,7 +387,7 @@ mod_3_06_policy_sim_server <- function(id,
           # INT-08: the policy run signature is stored with both result arms.
           final_context <- .finalize_decomposition_context(decomp_context)
           final_bundle <- .publish_decomposition_bundle(
-            decomp_bundle_rv(), decomp, final_context, success = TRUE
+            decomp_bundle_rv(), final_context, success = TRUE
           )
           final_bundle$annual_channels <- pol_out$annual_channels
           baseline_out$.sig <- policy_sig
@@ -464,7 +455,6 @@ mod_3_06_policy_sim_server <- function(id,
       sim_run_id = sim_run_id,
       run_generation = run_generation,
       run_status = run_status,
-      decomp_result = decomp_rv,
       decomp_context = decomp_context_rv,
       annual_channels = annual_channels_rv,
       decomp_scenarios = decomp_scenarios_rv,

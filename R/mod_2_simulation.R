@@ -67,6 +67,10 @@ mod_2_simulation_server <- function(id,
                                       shared_aggregation_cache = NULL) {
   moduleServer(id, function(input, output, session) {
 
+    # Results-tab display settings (method, poverty line, bandwidth), written
+    # by mod_2_02 in committed mode and read by mod_2_01 at submit.
+    display_settings <- reactiveVal(NULL)
+
     # 1. Unified sidebar + simulation engine ----
     s1 <- mod_2_01_weathersim_server(
       "weathersim",
@@ -78,7 +82,8 @@ mod_2_simulation_server <- function(id,
       model_fit         = model_fit,
       stored_breaks     = stored_breaks,
        survey_version    = survey_version,
-       run_trigger       = run_trigger
+       run_trigger       = run_trigger,
+      display_settings  = display_settings
     )
 
     # 2. Results tab ----
@@ -93,7 +98,10 @@ mod_2_simulation_server <- function(id,
        residuals       = s1$residuals,
        shared_aggregation_cache = shared_aggregation_cache,
       skip_coef_draws = s1$skip_coef_draws,
-      stale           = s1$stale
+      stale           = s1$stale,
+      live_run        = s1$live_run %||% reactive(NULL),
+      adopted_partials = s1$adopted_partials %||% reactive(NULL),
+      display_settings_out = display_settings
     )
 
     # 3. Diagnostics tab ----

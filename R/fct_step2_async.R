@@ -25,6 +25,11 @@
   value %in% c("1", "true", "yes", "on")
 }
 
+# qs2 threads for the result artifact. Measured on BFA 2 SSP x 1 period
+# (196 MB file): 1 -> 2 threads cut write 5.2 -> 2.2 s and read 3.9 -> 2.3 s;
+# 4 threads gave no further read gain.
+.WISE_STEP2_QS2_THREADS <- 2L
+
 .wise_step2_async_queue_memory <- function() {
   value <- suppressWarnings(as.numeric(
     Sys.getenv("WISEAPP_ASYNC_QUEUE_MEMORY_MB", "512")
@@ -156,6 +161,11 @@
 
 .wise_step2_async_dispatch <- function() {
   state <- .wise_step2_async_state
+  # A slot held by a job that no longer exists is free (defensive: every
+  # settle path releases it, but a stale slot would block the queue forever).
+  if (!is.null(state$active) && is.null(.wise_step2_async_job(state$active))) {
+    state$active <- NULL
+  }
   if (!is.null(state$active) || !length(state$queue)) {
     return(invisible(NULL))
   }
@@ -172,7 +182,6 @@
   lock_file <- job$lock_file
   retired_file <- job$retired_file
   progress_file <- job$progress_file
-  preview_file <- job$preview_file
   dependency_signature_digest <- job$dependency_signature_digest
   weather_store_root <- job$weather_store_root
   generation <- job$generation
@@ -207,7 +216,6 @@
       lock_file = lock_file,
       retired_file = retired_file,
       progress_file = progress_file,
-      preview_file = preview_file,
       dependency_signature_digest = dependency_signature_digest,
         weather_store_root = weather_store_root,
         submitted_at_epoch = submitted_at_epoch,
@@ -234,7 +242,6 @@
       lock_file = job$lock_file,
       retired_file = job$retired_file,
       progress_file = job$progress_file,
-      preview_file = job$preview_file,
       dependency_signature_digest = job$dependency_signature_digest,
       weather_store_root = job$weather_store_root,
       submitted_at_epoch = submitted_at_epoch,
@@ -304,7 +311,7 @@
   if (is.null(job)) return(invisible(FALSE))
   job$on_status <- NULL
   job$on_progress <- NULL
-  job$on_preview <- NULL
+  job$on_partial <- NULL
   job$on_result <- NULL
   job$on_error <- NULL
   job$detached <- TRUE
@@ -383,6 +390,8 @@
       identical(manifest$status, "succeeded") && is.function(current$on_result)) {
     current$settling <- TRUE
     on.exit(current$settling <- FALSE, add = TRUE)
+    # Deliver partials written since the last poll before the result lands.
+    try(.wise_step2_async_poll_partials(current), silent = TRUE)
     callback_error <- tryCatch({
       accepted <- current$on_result(manifest, current)
       adopted <- isTRUE(accepted)
@@ -392,6 +401,9 @@
   }
   .wise_step2_async_unlock(gate)
   gate <- NULL
+  # Release the worker slot; otherwise the next queued run never dispatches.
+  if (identical(state$active, current$id)) state$active <- NULL
+  current$active <- FALSE
   .wise_step2_async_cleanup_job(current, remove_weather = !adopted)
   if (exists(current$id, envir = state$jobs, inherits = FALSE)) {
     rm(list = current$id, envir = state$jobs)
@@ -431,19 +443,19 @@
   invisible(NULL)
 }
 
+.WISE_STEP2_PROGRESS_INT_FIELDS <- c(
+  "groups_total", "groups_done", "member_index", "period_members",
+  "n_models", "n_models_requested"
+)
+
 .wise_step2_async_poll_progress <- function(job) {
   path <- job$progress_file
   if (!file.exists(path)) return(invisible(NULL))
   info <- file.info(path)
   if (is.na(info$size) || info$size > 65536) return(invisible(NULL))
   value <- tryCatch(readRDS(path), error = function(e) NULL)
-  descriptor <- NULL
-  if (!is.null(job$preview_descriptor_file) && file.exists(job$preview_descriptor_file) &&
-      isTRUE(file.info(job$preview_descriptor_file)$size <= 65536)) {
-    descriptor <- tryCatch(readRDS(job$preview_descriptor_file), error = function(e) NULL)
-  }
-  if (is.list(descriptor)) .wise_step2_async_poll_preview(job, descriptor)
-  if (!is.list(value) || !identical(value$schema, 1L) ||
+  .wise_step2_async_poll_partials(job)
+  if (!is.list(value) || !value$schema %in% c(1L, 2L) ||
       !identical(value$job_id, job$id) ||
       !identical(value$generation, job$generation) ||
       !identical(value$dependency_signature_digest, job$dependency_signature_digest) ||
@@ -457,8 +469,8 @@
       !is.finite(value$elapsed) || value$elapsed < 0) return(invisible(NULL))
   job$progress_sequence <- as.integer(value$sequence)
   phases <- c("worker_started", "initialize", "weather", "pipeline", "simulation",
-    "historical_ready", "preview_ready", "finalizing", "writing_result",
-    "result_written", "manifest_written")
+    "historical_ready", "preview_ready", "group_completed", "finalizing",
+    "writing_result", "result_written", "manifest_written")
   phase <- value$phase %||% value$stage
   if (!is.character(phase) || length(phase) != 1L || !phase %in% phases) {
     return(invisible(NULL))
@@ -466,44 +478,108 @@
   completed <- value$completed
   if (!is.null(completed) && (!is.numeric(completed) || length(completed) != 1L ||
       !is.finite(completed) || completed < 0)) return(invisible(NULL))
-  if (!is.null(value$preview)) {
-    .wise_step2_async_poll_preview(job, value$preview)
+  extra <- list()
+  for (nm in .WISE_STEP2_PROGRESS_INT_FIELDS) {
+    v <- value[[nm]]
+    if (is.null(v)) next
+    if (!is.numeric(v) || length(v) != 1L || !is.finite(v) || v < 0) {
+      return(invisible(NULL))
+    }
+    extra[[nm]] <- as.integer(v)
+  }
+  if (!is.null(extra$groups_total)) job$groups_total <- extra$groups_total
+  for (nm in c("label", "current_label")) {
+    v <- value[[nm]]
+    if (is.null(v)) next
+    if (!is.character(v) || length(v) != 1L || is.na(v) || nchar(v) > 200L) {
+      return(invisible(NULL))
+    }
+    extra[[nm]] <- v
   }
   if (is.function(job$on_progress)) {
-    try(job$on_progress(list(stage = value$stage, status = value$status,
+    try(job$on_progress(c(list(stage = value$stage, status = value$status,
       phase = phase, completed = completed,
-      elapsed = as.numeric(value$elapsed), sequence = job$progress_sequence), job), silent = TRUE)
+      elapsed = as.numeric(value$elapsed), sequence = job$progress_sequence),
+      extra), job), silent = TRUE)
   }
   invisible(NULL)
 }
 
-.wise_step2_async_poll_preview <- function(job, descriptor) {
-  if (!is.list(descriptor) || !identical(descriptor$schema, 1L) ||
-      !identical(descriptor$job_id, job$id) ||
-      !identical(descriptor$generation, job$generation) ||
-      !identical(descriptor$dependency_signature_digest, job$dependency_signature_digest) ||
-      !identical(descriptor$path, job$preview_file) ||
-      !is.numeric(descriptor$size) || length(descriptor$size) != 1L ||
-      !is.finite(descriptor$size) || descriptor$size < 0 ||
-      descriptor$size > 1024 * 1024 || !file.exists(job$preview_file)) return(invisible(FALSE))
-  root <- normalizePath(job$artifact_dir, winslash = "/", mustWork = TRUE)
-  path <- normalizePath(job$preview_file, winslash = "/", mustWork = TRUE)
-  if (!startsWith(path, paste0(root, "/")) ||
-      !identical(as.numeric(file.info(path)$size), as.numeric(descriptor$size))) return(invisible(FALSE))
-  preview <- tryCatch(readRDS(path), error = function(e) NULL)
-  if (!is.list(preview) || !is.data.frame(preview$data) ||
-      nrow(preview$data) > 100L ||
-      !all(c("sim_year", "value", "uncertainty") %in% names(preview$data)) ||
-      any(!vapply(preview$data, function(x) is.atomic(x) && is.null(dim(x)), logical(1))) ||
-      !is.list(preview$metadata) ||
-      !is.character(preview$metadata$historical_label) ||
-      !is.character(preview$metadata$baseline_label)) {
-    return(invisible(FALSE))
+.WISE_STEP2_PARTIAL_MAX_BYTES <- 2 * 1024 * 1024
+
+# Validate one partial payload against the Step 2 live-run contract (schema 1).
+.wise_step2_async_valid_partial <- function(p) {
+  is.list(p) && identical(p$schema, 1L) &&
+    is.character(p$kind) && length(p$kind) == 1L &&
+    p$kind %in% c("historical", "scenario") &&
+    is.character(p$label) && length(p$label) == 1L && !is.na(p$label) &&
+    nchar(p$label) <= 200L &&
+    is.numeric(p$ordinal) && length(p$ordinal) == 1L && is.finite(p$ordinal) &&
+    is.data.frame(p$table) && nrow(p$table) > 0L &&
+    is.list(p$display) &&
+    is.character(p$display$method) && length(p$display$method) == 1L &&
+    !is.na(p$display$method) &&
+    is.character(p$display$weight_key) && length(p$display$weight_key) == 1L &&
+    p$display$weight_key %in% c("weighted", "unweighted") &&
+    .wise_step2_async_valid_partial_tables(p$tables, p$display$method)
+}
+
+# Optional `tables` (method -> table, all streamed methods): when present it
+# must be a fully named list of non-empty data frames that includes the
+# display method.
+.wise_step2_async_valid_partial_tables <- function(tables, method) {
+  if (is.null(tables)) return(TRUE)
+  nms <- names(tables)
+  is.list(tables) && !is.data.frame(tables) && length(tables) > 0L &&
+    !is.null(nms) && !anyNA(nms) && all(nzchar(nms)) && !anyDuplicated(nms) &&
+    all(vapply(tables, function(t) is.data.frame(t) && nrow(t) > 0L, logical(1))) &&
+    method %in% nms
+}
+
+# Deliver new partials in ascending seq order; stops at the first invalid entry.
+.wise_step2_async_poll_partials <- function(job) {
+  if (isTRUE(job$retired) || isTRUE(job$detached)) return(invisible(0L))
+  index_file <- job$partials_index_file
+  if (is.null(index_file) || !file.exists(index_file)) return(invisible(0L))
+  info <- file.info(index_file)
+  if (is.na(info$size) || info$size > 256 * 1024) return(invisible(0L))
+  index <- tryCatch(readRDS(index_file), error = function(e) NULL)
+  if (!is.list(index) || !identical(index$schema, 1L) ||
+      !identical(index$job_id, job$id) ||
+      !identical(index$generation, job$generation) ||
+      !identical(index$dependency_signature_digest, job$dependency_signature_digest) ||
+      !is.list(index$entries)) return(invisible(0L))
+  total <- job$groups_total
+  cap <- if (is.numeric(total) && length(total) == 1L && is.finite(total)) total + 1L else 64L
+  if (length(index$entries) > cap) return(invisible(0L))
+  root <- tryCatch(normalizePath(job$artifact_dir, winslash = "/", mustWork = TRUE),
+    error = function(e) NULL)
+  if (is.null(root)) return(invisible(0L))
+  seqs <- vapply(index$entries, function(e) {
+    s <- if (is.list(e)) e$seq else NULL
+    if (is.numeric(s) && length(s) == 1L && is.finite(s)) as.numeric(s) else NA_real_
+  }, numeric(1))
+  delivered <- 0L
+  for (i in order(seqs)) {
+    entry <- index$entries[[i]]
+    if (is.na(seqs[i]) || seqs[i] <= job$partials_delivered) next
+    if (seqs[i] != job$partials_delivered + 1) break
+    if (isTRUE(job$retired) || isTRUE(job$detached)) break
+    if (!is.character(entry$path) || length(entry$path) != 1L ||
+        !is.numeric(entry$size) || length(entry$size) != 1L ||
+        !is.finite(entry$size) || entry$size < 0 ||
+        entry$size > .WISE_STEP2_PARTIAL_MAX_BYTES ||
+        !file.exists(entry$path)) break
+    path <- normalizePath(entry$path, winslash = "/", mustWork = TRUE)
+    if (!startsWith(path, paste0(root, "/")) ||
+        !identical(as.numeric(file.info(path)$size), as.numeric(entry$size))) break
+    partial <- tryCatch(readRDS(path), error = function(e) NULL)
+    if (!.wise_step2_async_valid_partial(partial)) break
+    if (is.function(job$on_partial)) try(job$on_partial(partial, job), silent = TRUE)
+    job$partials_delivered <- as.integer(seqs[i])
+    delivered <- delivered + 1L
   }
-  if (isTRUE(job$preview_delivered)) return(invisible(FALSE))
-  if (is.function(job$on_preview)) try(job$on_preview(preview, job), silent = TRUE)
-  job$preview_delivered <- TRUE
-  invisible(TRUE)
+  invisible(delivered)
 }
 
 .wise_step2_async_init <- function() {
@@ -543,7 +619,7 @@
                                      clicked_at_epoch = NA_real_,
                                      on_status = NULL,
                                      on_progress = NULL,
-                                     on_preview = NULL,
+                                     on_partial = NULL,
                                      on_result = NULL,
                                      on_error = NULL) {
   if (!.wise_step2_async_init()) {
@@ -581,8 +657,8 @@
     lock_file = file.path(control_dir, "publication.lock"),
     retired_file = file.path(control_dir, "retired.rds"),
     progress_file = file.path(job_dir, "progress.rds"),
-    preview_file = file.path(job_dir, "preview.rds"),
-    preview_descriptor_file = file.path(job_dir, "preview-descriptor.rds"),
+    partials_index_file = file.path(job_dir, "partials-index.rds"),
+    partials_delivered = 0L,
     weather_store_root = weather_root,
     status = "queued",
     weather_storage = snapshot$weather_storage,
@@ -599,7 +675,7 @@
     progress_sequence = 0L,
     on_status = on_status,
     on_progress = on_progress,
-    on_preview = on_preview,
+    on_partial = on_partial,
     on_result = on_result,
     on_error = on_error
   )
@@ -660,7 +736,7 @@
     active$retire_reason <- reason
     active$on_status <- NULL
     active$on_progress <- NULL
-    active$on_preview <- NULL
+    active$on_partial <- NULL
     active$on_result <- NULL
     active$on_error <- NULL
     .wise_step2_async_stop_poll(active)
@@ -708,7 +784,7 @@
       !identical(as.numeric(file.info(result_file)$size), as.numeric(manifest$result_bytes))) {
     stop("Step 2 result artifact is missing.", call. = FALSE)
   }
-  result <- qs2::qs_read(result_file, nthreads = 1L, validate_checksum = TRUE)
+  result <- qs2::qs_read(result_file, nthreads = .WISE_STEP2_QS2_THREADS, validate_checksum = TRUE)
   if (!is.list(result) || !is.list(result$hist_sim_result) ||
       !is.list(result$.run) || !identical(result$.run$id, job$id) ||
       !identical(result$.run$schema, 1L) ||
@@ -750,7 +826,6 @@ step2_async_worker <- function(snapshot,
                                lock_file = file.path(control_dir, "publication.lock"),
                                retired_file = file.path(control_dir, "retired.rds"),
                                progress_file = file.path(artifact_dir, "progress.rds"),
-                               preview_file = file.path(artifact_dir, "preview.rds"),
                                dependency_signature_digest = "",
                                weather_store_root,
                                submitted_at_epoch = NA_real_,
@@ -765,33 +840,56 @@ step2_async_worker <- function(snapshot,
   result_file <- file.path(artifact_dir, "result.qs2")
   manifest_file <- file.path(artifact_dir, "manifest.rds")
   dir.create(control_dir, recursive = TRUE, showWarnings = FALSE)
-  preview_descriptor_file <- file.path(artifact_dir, "preview-descriptor.rds")
+  partials_dir <- file.path(artifact_dir, "partials")
+  partials_index_file <- file.path(artifact_dir, "partials-index.rds")
+  partial_entries <- list()
   sequence <- 0L
   started <- proc.time()[["elapsed"]]
   last_phase <- NULL
   last_status <- NULL
   last_write <- -Inf
+  sticky_groups <- list()
   event_fn <- function(event) {
-    if (!is.list(event) || !event$stage %in% c("initialize", "weather", "pipeline", "simulation", "publish", "historical_ready", "pipeline_started", "pipeline_completed", "pipeline_failed") ||
+    if (!is.list(event) || !event$stage %in% c("initialize", "weather", "pipeline", "simulation", "publish", "historical_ready", "pipeline_started", "pipeline_completed", "pipeline_failed", "group_completed") ||
         !event$status %in% c("started", "completed", "progress", "failed", "checkpoint")) return(invisible(NULL))
     phase <- event$phase %||% switch(event$stage,
       pipeline_started = "pipeline", pipeline_completed = "pipeline",
-      pipeline_failed = "pipeline", publish = "finalizing", event$stage)
+      pipeline_failed = "pipeline", group_completed = "group_completed",
+      publish = "finalizing", event$stage)
     now <- proc.time()[["elapsed"]]
-    if (identical(phase, last_phase) && identical(event$status, last_status) &&
+    # group_completed records are distinct events and are never throttled.
+    if (!identical(phase, "group_completed") &&
+        identical(phase, last_phase) && identical(event$status, last_status) &&
         now - last_write < 0.25) return(invisible(NULL))
     if (file.exists(retired_file)) return(invisible(NULL))
     sequence <<- sequence + 1L
     record <- list(
-      schema = 1L, job_id = job_id, generation = as.integer(generation),
+      schema = 2L, job_id = job_id, generation = as.integer(generation),
       dependency_signature_digest = dependency_signature_digest,
       sequence = sequence,
       phase = phase,
-      stage = if (event$stage %in% c("pipeline_started", "pipeline_completed", "pipeline_failed")) "pipeline" else if (event$stage == "historical_ready") "simulation" else event$stage,
+      stage = if (event$stage %in% c("pipeline_started", "pipeline_completed", "pipeline_failed", "group_completed")) "pipeline" else if (event$stage == "historical_ready") "simulation" else event$stage,
       status = if (event$status == "checkpoint") "progress" else event$status,
       elapsed = max(0, now - started)
     )
     if (!is.null(event$completed)) record$completed <- as.integer(event$completed)
+    for (nm in .WISE_STEP2_PROGRESS_INT_FIELDS) {
+      v <- event[[nm]]
+      if (is.numeric(v) && length(v) == 1L && is.finite(v) && v >= 0) {
+        record[[nm]] <- as.integer(v)
+        if (nm %in% c("groups_total", "groups_done")) sticky_groups[[nm]] <<- record[[nm]]
+      }
+    }
+    # Progress is cumulative: later records without group fields (publish
+    # events) still carry the last known values.
+    for (nm in names(sticky_groups)) {
+      if (is.null(record[[nm]])) record[[nm]] <- sticky_groups[[nm]]
+    }
+    lbl <- event$label %||% event$current_label
+    if (is.character(lbl) && length(lbl) == 1L && !is.na(lbl) && nchar(lbl) <= 200L) {
+      if (!is.null(event$label)) record$label <- lbl
+      record$current_label <- lbl
+    }
     try(.wise_step2_async_write_control(progress_file, record), silent = TRUE)
     last_phase <<- phase
     last_status <<- event$status
@@ -827,32 +925,36 @@ step2_async_worker <- function(snapshot,
     weather_collect = weather_collect,
     weather_threads = weather_threads,
     event_fn = event_fn,
-    preview_fn = function(summary) {
-      labels <- snapshot$preview_labels %||% list()
-      if (!is.list(summary) || !is.data.frame(summary$data) || nrow(summary$data) > 100L ||
-          !all(c("sim_year", "value", "uncertainty") %in% names(summary$data)) ||
-          any(!vapply(summary$data, function(x) is.atomic(x) && is.null(dim(x)), logical(1))) ||
-          !is.list(summary$metadata)) {
-        stop("Preview summary is outside the bounded scalar schema.", call. = FALSE)
-      }
-      summary$metadata$historical_label <- as.character(labels$historical %||% "Historical")
-      summary$metadata$baseline_label <- as.character(labels$baseline %||% "Selected baseline survey")
-      tmp <- paste0(preview_file, ".tmp")
-      on.exit(unlink(tmp, force = TRUE), add = TRUE)
-      saveRDS(summary, tmp, version = 3L)
-      size <- file.info(tmp)$size
-      if (is.na(size) || size > 1024 * 1024) stop("Preview summary exceeds 1 MiB.", call. = FALSE)
-      preview_lock <- filelock::lock(lock_file, timeout = Inf)
-      on.exit(.wise_step2_async_unlock(preview_lock), add = TRUE)
-      checkpoint_fn()
-      if (!file.rename(tmp, preview_file)) stop("Could not publish preview summary.", call. = FALSE)
-      .wise_step2_async_write_control(preview_descriptor_file, list(
-        schema = 1L, job_id = job_id, generation = as.integer(generation),
-        dependency_signature_digest = dependency_signature_digest,
-        path = preview_file, size = as.numeric(size)
-      ))
-      event_fn(list(stage = "simulation", status = "progress", phase = "preview_ready"))
-      invisible(TRUE)
+    partial_fn = function(partial) {
+      # Partials never fail the run (oversize or I/O problems are skipped);
+      # only cancellation propagates.
+      tryCatch({
+        partial_seq <- length(partial_entries) + 1L
+        tmp <- file.path(partials_dir, sprintf("%d.rds.tmp", partial_seq))
+        on.exit(unlink(tmp, force = TRUE), add = TRUE)
+        dir.create(partials_dir, recursive = TRUE, showWarnings = FALSE)
+        saveRDS(partial, tmp, version = 3L)
+        size <- file.info(tmp)$size
+        if (is.na(size) || size > .WISE_STEP2_PARTIAL_MAX_BYTES) return(invisible(FALSE))
+        partial_lock <- filelock::lock(lock_file, timeout = Inf)
+        on.exit(.wise_step2_async_unlock(partial_lock), add = TRUE)
+        checkpoint_fn()
+        path <- file.path(partials_dir, sprintf("%d.rds", partial_seq))
+        if (!file.rename(tmp, path)) return(invisible(FALSE))
+        partial_entries[[length(partial_entries) + 1L]] <<- list(
+          seq = partial_seq, kind = partial$kind, label = partial$label,
+          ordinal = as.integer(partial$ordinal), path = path, size = as.numeric(size)
+        )
+        .wise_step2_async_write_control(partials_index_file, list(
+          schema = 1L, job_id = job_id, generation = as.integer(generation),
+          dependency_signature_digest = dependency_signature_digest,
+          entries = partial_entries
+        ))
+        invisible(TRUE)
+      }, error = function(e) {
+        if (inherits(e, "wiseapp_step2_cancelled")) stop(e)
+        invisible(FALSE)
+      })
     },
     checkpoint_fn = checkpoint_fn,
     weather_fn = weather_fn,
@@ -869,7 +971,7 @@ step2_async_worker <- function(snapshot,
   tmp_result <- paste0(result_file, ".tmp")
   checkpoint_fn()
   event_fn(list(stage = "publish", status = "started", phase = "writing_result"))
-  qs2::qs_save(computed$result, tmp_result, nthreads = 1L)
+  qs2::qs_save(computed$result, tmp_result, nthreads = .WISE_STEP2_QS2_THREADS)
   lock <- filelock::lock(lock_file, timeout = Inf)
   on.exit(.wise_step2_async_unlock(lock), add = TRUE)
   checkpoint_fn()

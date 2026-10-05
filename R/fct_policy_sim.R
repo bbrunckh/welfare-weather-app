@@ -1333,7 +1333,7 @@ apply_policy_delta_to_baseline <- function(svy_baseline,
   hist_result <- .apply_policy_annual_pipeline(
     hist_sim_baseline$pipeline, annual_channels, run_identity,
     scenario = hist_sim_baseline$hist_label %||% "Historical", member = "Historical",
-    chunk_size = chunk_size
+    chunk_size = chunk_size, owner = hist_sim_baseline
   )
   hist_sim_new <- hist_sim_baseline
   hist_sim_new$pipeline <- hist_result$pipeline
@@ -1343,13 +1343,16 @@ apply_policy_delta_to_baseline <- function(svy_baseline,
     if (is.null(s) || is.null(s$pipelines)) {
       stop("Missing saved scenario prediction pipelines.", call. = FALSE)
     }
+    # Members of one scenario share timestamps: rebuild exposure tables with
+    # one cached timestamp decomposition per scenario.
+    exposure_cache <- new.env(parent = emptyenv())
     pipes_new <- lapply(seq_along(s$pipelines), function(j) {
       result <- .apply_policy_annual_pipeline(
         s$pipelines[[j]], annual_channels, run_identity,
         scenario = names(saved_scenarios_baseline)[i] %||% paste0("Scenario ", i),
         member = names(s$pipelines)[j] %||% paste0("Member ", j),
         year_range = s$year_range %||% c(NA_integer_, NA_integer_),
-        chunk_size = chunk_size
+        chunk_size = chunk_size, owner = s, exposure_cache = exposure_cache
       )
       parts[[length(parts) + 1L]] <<- result$compact
       result$pipeline

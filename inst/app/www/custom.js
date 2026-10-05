@@ -181,3 +181,41 @@
     sync(false);
   });
 })();
+
+// Server-driven disabled state for pill_toggle() radios and plain inputs
+// (update_pill_toggle_disabled() / update_input_disabled() in utils_ui.R).
+// Inserted controls may not be in the DOM yet when the message arrives, so
+// the handler retries briefly.
+(function () {
+  function apply(msg) {
+    if (msg.kind === 'input') {
+      var el = document.getElementById(msg.id);
+      if (!el) return false;
+      el.disabled = !!msg.all;
+      if (msg.all && msg.tooltip) el.title = msg.tooltip; else el.removeAttribute('title');
+      return true;
+    }
+    var radios = document.querySelectorAll('input[type="radio"][name="' + msg.id + '"]');
+    if (!radios.length) return false;
+    var values = [].concat(msg.values || []);
+    radios.forEach(function (r) {
+      var off = !!msg.all || values.indexOf(r.value) > -1;
+      r.disabled = off;
+      if (off) r.setAttribute('aria-disabled', 'true'); else r.removeAttribute('aria-disabled');
+      var wrap = r.closest('.radio-inline, .form-check-inline, .radio, .form-check') || r.parentElement;
+      if (!wrap) return;
+      wrap.classList.toggle('pill-disabled', off);
+      if (off && msg.tooltip) wrap.title = msg.tooltip; else wrap.removeAttribute('title');
+    });
+    return true;
+  }
+  function run(msg, tries) {
+    if (apply(msg) || tries <= 0) return;
+    setTimeout(function () { run(msg, tries - 1); }, 100);
+  }
+  function register() {
+    Shiny.addCustomMessageHandler('wise_set_disabled', function (msg) { run(msg, 30); });
+  }
+  if (window.Shiny && Shiny.addCustomMessageHandler) register();
+  else document.addEventListener('shiny:connected', register, { once: true });
+})();

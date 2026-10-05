@@ -684,7 +684,7 @@ mod_3_01_sp_server <- function(id,
           ),
           selection_card_row(
             name  = paste("Annual transfer per", unit_sg),
-            pills = fmt_num(r$transfer_per_unit, digits = 0, prefix = "$")
+            pills = fmt_num(r$transfer_per_unit, digits = 2, prefix = "$")
           ),
           selection_card_row(
             name  = cost_label,

@@ -186,23 +186,6 @@ weather_form_label <- function(cont_binned, num_bins, binning_method,
   ))
 }
 
-#' Year-range strip on a 1950-to-today track, configured window highlighted.
-#' @noRd
-.wx_years_svg <- function(from, to, min_year = 1950L, width = 110, height = 10) {
-  this_year <- as.integer(format(Sys.Date(), "%Y"))
-  span <- max(this_year - min_year, 1L)
-  x <- (as.integer(from) - min_year) / span * width
-  w <- (as.integer(to) - as.integer(from)) / span * width
-  h <- height - 2
-  htmltools::HTML(paste0(
-    '<svg width="', width, '" height="', height, '" viewBox="0 0 ', width, " ",
-    height, '" aria-hidden="true">',
-    '<rect x="0" y="1" width="', width, '" height="', h, '" rx="1.5" fill="#e3e9ee"/>',
-    '<rect x="', round(x, 1), '" y="1" width="', round(w, 1), '" height="', h,
-    '" rx="1.5" fill="#0071BC"/></svg>'
-  ))
-}
-
 
 # Pipeline assembly ----
 

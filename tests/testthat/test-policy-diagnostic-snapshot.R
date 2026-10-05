@@ -190,9 +190,7 @@ test_that("failed annual policy runs retain all previously published results", {
   policy_hs <- hs
   policy_hs$pipeline$y_point <- c(2, 4)
   old_scenarios <- list()
-  context_for_run <- function(...) list(
-    run_identity = "test-run", adverse_bases = list()
-  )
+  context_for_run <- function(...) list(run_identity = "test-run")
 
   local_mocked_bindings(
     apply_policy_to_svy = function(...) policy,
@@ -203,12 +201,10 @@ test_that("failed annual policy runs retain all previously published results", {
            decomp_scenarios = data.frame(run = "first"),
            correction_version = "row_aligned_annual_v1"),
     .finalize_decomposition_context = function(context, ...) context,
-    .decompose_policy_effect_run = function(...) {
-      if (fail_decomp) stop("forced decomposition failure")
-      data.frame(delta_total = c(0, 1))
-    },
-    .policy_diagnostics_snapshot = function(...)
+    .policy_diagnostics_snapshot = function(...) {
+      if (fail_decomp) stop("forced late-stage failure")
       list(run = "first", status = NULL)
+    }
   )
 
   testServer(

@@ -8,11 +8,10 @@ library(shiny)
 
 test_that("technical decomposition cannot export logistic policy effects", {
   testServer(mod_3_09_decomposition_server, args = list(id = "decomp",
-    decomp_result = reactiveVal(data.frame(delta_total = .1)),
     model_fit = reactiveVal(list(engine = "fixest", model_type = "logistic")),
     so = reactiveVal(list(name = "indicator", type = "numeric", transform = "none"))), {
     session$flushReact()
-    expect_null(decomp_result())
+    expect_length(decomp_scenarios(), 0L)
     expect_identical(policy_method_status()$status, "unsupported")
     expect_match(policy_method_status()$reason, "response-scale", fixed = TRUE)
     expect_equal(nrow(headline_decomp_data()), 0)
@@ -140,7 +139,6 @@ test_that("step3_headline_cards builds 5 concise policy cards", {
     threshold_tbl     = thresh,
     baseline_agg      = list("SSP2-4.5 / 2030-2040" = list(out = data.frame(value = 3.2))),
     policy_agg        = list("SSP2-4.5 / 2030-2040" = list(out = data.frame(value = 3.65))),
-    decomp_res        = NULL,
     policy_svy        = NULL,
     sp_scenario       = list(budget_fixed = 12500000),
     timeseries_curves = data.frame(scenario = "SSP2-4.5 / 2030-2040", source = "Policy", sim_year = 2030:2031),
@@ -351,32 +349,6 @@ test_that("Step 3 adverse plot uses Step 2 periods and historical support", {
   tbl$n_obs <- 50L
   dot_50 <- step3_adverse_dot_data(tbl, method = "mean", so = list(type = "numeric", name = "welfare"))
   expect_true(any(dot_50$rp_label == "Adverse 1-in-50"))
-})
-
-test_that("step3_variance_breakdown and plot_step3_variance_contribution work correctly", {
-  hist_entry <- list(out = tibble::tibble(
-    sim_year = 2020:2029,
-    value_all_sd = list(rep(0.1, 2)),
-    model_id = list(c("M1", "M2")),
-    value_all = list(c(3.0, 3.1))
-  ))
-  fut_entry <- list(out = tibble::tibble(
-    sim_year = 2030:2039,
-    value_all_sd = list(rep(0.12, 2)),
-    model_id = list(c("M1", "M2")),
-    value_all = list(c(3.2, 3.5))
-  ))
-
-  b_series <- list("Historical" = hist_entry, "SSP2-4.5 / 2030-2040" = fut_entry)
-  p_series <- list("Historical" = hist_entry, "SSP2-4.5 / 2030-2040" = fut_entry)
-
-  vb <- step3_variance_breakdown(b_series, p_series, selected_scenarios = "SSP2-4.5 / 2030-2040")
-  expect_s3_class(vb, "data.frame")
-  expect_true(all(c("scenario", "source", "sd_coef", "sd_within", "sd_across") %in% names(vb)))
-  expect_setequal(unique(vb$source), c("Baseline", "Policy"))
-
-  plt <- plot_step3_variance_contribution(vb)
-  expect_s3_class(plt, "ggplot")
 })
 
 test_that(".results_pane_ui renders aggregation panel and results sections", {

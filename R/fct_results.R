@@ -2854,36 +2854,6 @@ plot_importance <- function(model, label_fun = identity) {
   )
 }
 
-# Vertical CI whiskers as per-point markLine segments on an existing series.
-.e_add_whiskers <- function(e, series_idx, x, lo, hi, color = .wise_slate) {
-  ok <- is.finite(x) & is.finite(lo) & is.finite(hi)
-  x <- x[ok]; lo <- lo[ok]; hi <- hi[ok]
-  if (!length(x)) {
-    return(e)
-  }
-  seg <- lapply(seq_along(x), function(i) {
-    list(
-      list(coord = list(x[i], lo[i])),
-      list(coord = list(x[i], hi[i]))
-    )
-  })
-  e$x$opts$series[[series_idx]]$markLine <- list(
-    symbol = "none", silent = TRUE,
-    lineStyle = list(color = color, width = 1),
-    label = list(show = FALSE),
-    animation = FALSE,
-    data = seg
-  )
-  e
-}
-
-.e_effect_formatter <- function(percent = FALSE, digits = if (percent) 1L else 2L) {
-  htmlwidgets::JS(sprintf(
-    "function(v){var n=Number(v); if(!isFinite(n)) return ''; return n.toLocaleString('en-US',{minimumFractionDigits:%d,maximumFractionDigits:%d}) + '%s';}",
-    digits, digits, if (percent) "%%" else ""
-  ))
-}
-
 .e_effect_tooltip <- function(percent = FALSE, trigger = "axis", label_prefix = NULL) {
   fmt <- if (percent) {
     "function(v){var n=Number(v); return isFinite(n) ? n.toLocaleString('en-US',{minimumFractionDigits:1,maximumFractionDigits:1})+'%' : '';}"

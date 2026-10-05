@@ -54,7 +54,10 @@ mod_2_02_results_ui <- function(id) {
 
   tagList(
     # 0. Stale banner (INT-08) ----
-    shiny::uiOutput(ns("stale_banner")),
+    shiny::tagList(
+      shiny::uiOutput(ns("stale_banner")),
+      shiny::uiOutput(ns("provisional_banner"))
+    ),
     shiny::uiOutput(ns("simulation_summary_ui")),
 
     # 1. Analysis controls: Aggregation method & poverty line ----
@@ -341,6 +344,29 @@ mod_2_02_results_ui <- function(id) {
 }
 
 
+#' Placeholder rows for scenarios still computing (provisional mode only)
+#'
+#' Appends one row per pending scenario to the threshold table: scenario label,
+#' Estimate "computing...", every other column blank.
+#' @noRd
+.append_pending_threshold_rows <- function(df, pending) {
+  pending <- as.character(pending %||% character(0))
+  scn_col <- intersect(c("Scenario / Period", "Scenario"), names(df))[1L]
+  if (is.null(df) || !nrow(df) || !length(pending) || is.na(scn_col) ||
+      !"Estimate" %in% names(df)) {
+    return(df)
+  }
+  pending <- setdiff(pending, df[[scn_col]])
+  if (!length(pending)) return(df)
+  new <- df[rep(NA_integer_, length(pending)), , drop = FALSE]
+  new[[scn_col]] <- pending
+  new$Estimate <- "computing..."
+  out <- rbind(df, new)
+  # rbind() leaves character row names, which reactable would display.
+  rownames(out) <- NULL
+  out
+}
+
 #' 2_02_results Server Functions
 #'
 #' Appends a Results tab to the main tabset once the historical simulation
@@ -358,6 +384,13 @@ mod_2_02_results_ui <- function(id) {
 #' @param selected_weather Reactive data frame of selected weather variables.
 #' @param tabset_id       Character id of the parent tabset panel.
 #' @param tabset_session  Shiny session for the tabset.
+#' @param live_run        Reactive; NULL or the streaming-run list from
+#'   mod_2_01 (see review/step2_live_run_contract.md). Drives the provisional
+#'   display source.
+#' @param adopted_partials Reactive; accepted for the cache-seeding phase,
+#'   not read yet.
+#' @param display_settings_out Optional reactiveVal written with
+#'   \code{list(method, pov_line, bandwidth_p0)} in committed mode only.
 #'
 #' @noRd
 mod_2_02_results_server <- function(id,
@@ -370,7 +403,10 @@ mod_2_02_results_server <- function(id,
                                      residuals = reactive("original"),
                                      skip_coef_draws = reactive(FALSE),
                                      shared_aggregation_cache = NULL,
-                                     stale = reactive(FALSE)) {
+                                     stale = reactive(FALSE),
+                                     live_run = reactive(NULL),
+                                     adopted_partials = reactive(NULL),
+                                     display_settings_out = NULL) {
   moduleServer(id, function(input, output, session) {
     ns <- session$ns
 
@@ -389,14 +425,229 @@ mod_2_02_results_server <- function(id,
       }
     })
 
+    # Exports are committed-only. While a run streams (provisional mode) the
+    # shared display closures are fed by partials, so each registered `fun`
+    # is wrapped to signal "not ready" (req), which the bundle skips silently.
+    # Once the run is adopted, or cancelled with the committed run showing,
+    # exports work again from the committed data.
+    # The condition is a wise_export_skip, which the bundle reports as a
+    # skipped artefact with this note (README and notification) rather than
+    # dropping it silently.
+    .committed_only <- function(fun) {
+      force(fun)
+      function() {
+        if (.is_provisional()) {
+          stop(structure(
+            class = c("wise_export_skip", "error", "condition"),
+            list(
+              message = paste(
+                "A new Step 2 run is still in progress; export again once",
+                "it has finished."
+              ),
+              call = NULL
+            )
+          ))
+        }
+        fun()
+      }
+    }
+
+    # results_source(): single display source ----
+    # Every display consumer reads this instead of hist_sim()/saved_scenarios().
+    # Returns NULL when there is nothing to show, otherwise a plain list:
+    #   mode              "committed" | "provisional"
+    #   so                outcome row
+    #   has_weights, has_draws, residuals, weight_key
+    #   analysis_unit, sim_summary, hist_label  (NULL when provisional)
+    #   scenario_names    landed scenario labels (NULL only when committed
+    #                     saved_scenarios() is NULL)
+    #   scenario_n_models named integer, same order as scenario_names
+    #   pending_names     labels still computing (provisional only)
+    #   methods_available aggregation methods the outcome supports
+    #   locked_method / locked_pov_line / locked_bandwidth
+    #                     NULL when committed; the partial's display settings
+    #                     when provisional
+    #   progress          NULL when committed; list(groups_done, groups_total)
+    #   hist_agg(method), scn_agg(method)
+    #                     nested list(<weight slot> = list(<method> = table));
+    #                     committed: today's lazy workspace path; provisional:
+    #                     streamed partial tables (every method in
+    #                     methods_available), NULL for other methods.
+    # Provisional wins when live_run() has a historical partial. C-class
+    # consumers (incidence, aggregation workspace/cache, exports, the
+    # Diagnostics return API) keep reading hist_sim()/saved_scenarios().
+    # live_run() is rewritten on every 0.5 s progress tick (elapsed, member
+    # counters). Display consumers depend only on the run identity and its
+    # partials, so mirror those into a reactiveVal: identical writes do not
+    # invalidate, and charts re-render once per landed partial, not per tick.
+    live_data <- reactiveVal(NULL)
+    observe({
+      lr <- live_run()
+      live_data(if (is.null(lr)) NULL else list(
+        generation = lr$generation,
+        scenario_labels = lr$scenario_labels,
+        groups_total = lr$groups_total,
+        partials = lr$partials
+      ))
+    })
+
+    results_source <- reactive({
+      live <- live_data()
+      hp <- live$partials$historical
+      if (!is.null(live) && !is.null(hp)) {
+        disp <- hp$display %||% list()
+        method <- disp$method %||% "mean"
+        wk <- disp$weight_key %||%
+          if (isTRUE(hp$has_weights)) "weighted" else "unweighted"
+        landed <- live$partials$scenarios %||% list()
+        labels <- as.character(live$scenario_labels %||% character(0))
+        # names(list()) is NULL and intersect(x, NULL) is NULL in R >= 4.2;
+        # a NULL scenario_names would read as "no scenarios" and req() out
+        # every chart while only the historical partial has landed.
+        landed_names <- as.character(names(landed) %||% character(0))
+        scn_names <- c(
+          intersect(labels, landed_names),
+          setdiff(landed_names, labels)
+        )
+        # Every streamed method is served from the partial's `tables`; a
+        # partial without `tables` carries only the captured method (`table`).
+        tbl_of <- function(p, m) {
+          p$tables[[m]] %||% if (identical(m, method)) p$table else NULL
+        }
+        streamed <- unique(c(
+          method,
+          as.character(hp$display$methods %||% names(hp$tables))
+        ))
+        streamed <- intersect(
+          c(unname(hist_aggregate_choices(hp$so$type, hp$so$name)), method),
+          streamed
+        )
+        wrap <- function(tbl, m) {
+          if (is.null(tbl)) return(NULL)
+          list(
+            unweighted = setNames(list(tbl), m),
+            weighted = setNames(list(tbl), m)
+          )
+        }
+        return(list(
+          mode = "provisional",
+          so = hp$so,
+          has_weights = isTRUE(hp$has_weights),
+          has_draws = isTRUE(hp$has_draws),
+          residuals = disp$residuals %||% "original",
+          weight_key = wk,
+          analysis_unit = NULL,
+          sim_summary = NULL,
+          hist_label = NULL,
+          scenario_names = scn_names,
+          scenario_n_models = vapply(
+            scn_names, function(nm) as.integer(landed[[nm]]$n_models %||% NA_integer_),
+            integer(1)
+          ),
+          pending_names = setdiff(labels, scn_names),
+          methods_available = streamed,
+          locked_method = method,
+          locked_pov_line = disp$pov_line,
+          locked_bandwidth = disp$bandwidth_p0,
+          progress = list(
+            groups_done = length(landed),
+            groups_total = live$groups_total %||% length(labels)
+          ),
+          hist_agg = function(m) {
+            if (m %in% streamed) wrap(tbl_of(hp, m), m) else NULL
+          },
+          scn_agg = function(m) {
+            if (!m %in% streamed || !length(scn_names)) return(NULL)
+            setNames(
+              lapply(scn_names, function(nm) wrap(tbl_of(landed[[nm]], m), m)),
+              scn_names
+            )
+          }
+        ))
+      }
+      hs <- hist_sim()
+      if (is.null(hs)) {
+        return(NULL)
+      }
+      sc <- if (!is.null(saved_scenarios)) saved_scenarios() else NULL
+      so <- hs$so
+      list(
+        mode = "committed",
+        so = so,
+        has_weights = isTRUE(hs$has_weights),
+        has_draws = !is.null(hs$chol_obj),
+        residuals = hs$residuals %||% residuals() %||% "original",
+        weight_key = if (isTRUE(hs$has_weights)) "weighted" else "unweighted",
+        analysis_unit = hs$analysis_unit,
+        sim_summary = hs$sim_summary,
+        hist_label = hs$hist_label,
+        scenario_names = if (is.null(sc)) NULL else if (length(sc)) names(sc) else character(0),
+        scenario_n_models = NULL,
+        pending_names = character(0),
+        methods_available = unname(hist_aggregate_choices(so$type, so$name)),
+        locked_method = NULL,
+        locked_pov_line = NULL,
+        locked_bandwidth = NULL,
+        progress = NULL,
+        hist_agg = function(m) .get_hist_agg(m),
+        scn_agg = function(m) .get_scn_agg(m)
+      )
+    })
+    .is_provisional <- reactive({
+      !is.null(live_data()$partials$historical)
+    })
+
     output$simulation_summary_ui <- renderUI({
+      src <- results_source()
+      # Provisional: reduced card from what the partials carry (no
+      # sim_summary / baseline survey); n_models comes from each partial.
+      summary_hist <- if (is.null(src)) {
+        NULL
+      } else if (identical(src$mode, "provisional")) {
+        list(so = src$so)
+      } else {
+        hist_sim()
+      }
+      summary_scn <- if (is.null(src)) {
+        NULL
+      } else if (identical(src$mode, "provisional")) {
+        setNames(
+          lapply(src$scenario_names, function(nm) {
+            list(n_models = unname(src$scenario_n_models[[nm]]))
+          }),
+          src$scenario_names
+        )
+      } else {
+        saved_scenarios()
+      }
       simulation_summary_card(
-        hist_sim = hist_sim(),
-        saved_scenarios = saved_scenarios(),
+        hist_sim = summary_hist,
+        saved_scenarios = summary_scn,
         selected_hist = if (!is.null(selected_hist)) selected_hist() else NULL,
         selected_weather = if (is.function(selected_weather)) selected_weather() else selected_weather
       )
     })
+
+    # Metadata views for the headline cards. Committed: the objects
+    # themselves. Provisional: only what the partials carry (so, landed
+    # scenario names), which makes the cards degrade to "Unavailable" for
+    # the prediction-count note.
+    .display_hist_sim <- function() {
+      src <- results_source()
+      if (!is.null(src) && identical(src$mode, "provisional")) {
+        return(list(so = src$so))
+      }
+      hist_sim()
+    }
+    .display_saved_scenarios <- function() {
+      src <- results_source()
+      if (!is.null(src) && identical(src$mode, "provisional")) {
+        return(setNames(
+          vector("list", length(src$scenario_names)), src$scenario_names
+        ))
+      }
+      if (!is.null(saved_scenarios)) saved_scenarios() else list()
+    }
 
     headline_cards_data_rv <- reactive({
       req(headline_bands_rv())
@@ -408,15 +659,15 @@ mod_2_02_results_server <- function(id,
       step2_headline_cards(
         bands = bands,
         threshold_tbl = tryCatch(threshold_table_rv(), error = function(e) NULL),
-        hist_sim = tryCatch(hist_sim(), error = function(e) NULL),
-        saved_scenarios = tryCatch(if (!is.null(saved_scenarios)) saved_scenarios() else list(),
+        hist_sim = tryCatch(.display_hist_sim(), error = function(e) NULL),
+        saved_scenarios = tryCatch(.display_saved_scenarios(),
           error = function(e) list()
         ),
         method = .selected_method(),
         timeseries_curves = tryCatch(timeseries_curves_rv(), error = function(e) NULL),
         deviation = input$cmp_deviation %||% "none",
         metadata = {
-          hs <- tryCatch(hist_sim(), error = function(e) NULL)
+          hs <- tryCatch(.display_hist_sim(), error = function(e) NULL)
           selected <- .selected_method()
           metric_metadata(
             selected,
@@ -435,7 +686,18 @@ mod_2_02_results_server <- function(id,
       if (is.null(cards)) {
         return(NULL)
       }
-      headline_cards_ui(cards)
+      src <- results_source()
+      note <- if (identical(src$mode, "provisional")) {
+        shiny::div(
+          class = "headline-card-note provisional-note",
+          style = "margin: -4px 0 10px;",
+          paste0(
+            "Based on ", length(src$scenario_names), " of ",
+            length(src$scenario_names) + length(src$pending_names), " scenarios"
+          )
+        )
+      }
+      shiny::tagList(headline_cards_ui(cards), note)
     })
 
     # Lazy delta-method aggregation ----
@@ -444,13 +706,27 @@ mod_2_02_results_server <- function(id,
     # downstream consumers in fct_sim_compare.R see a compatible schema.
     agg_methods <- reactive({
       req(hist_sim())
-      so <- hist_sim()$so
+      so <- results_source()$so
       unname(hist_aggregate_choices(so$type, so$name))
     })
 
     # Input updates can lag outcome changes by a browser round-trip. Keep every
     # aggregation consumer on a method supported by the current outcome.
     .selected_method <- reactive({
+      src <- results_source()
+      req(src)
+      # Provisional: follow the control among the streamed methods, else the
+      # method captured at submit.
+      if (identical(src$mode, "provisional")) {
+        selected <- input$cmp_agg_method
+        return(
+          if (!is.null(selected) && selected %in% src$methods_available) {
+            selected
+          } else {
+            src$locked_method
+          }
+        )
+      }
       choices <- agg_methods()
       selected <- input$cmp_agg_method %||% "mean"
       if (length(choices) && selected %in% choices) selected else "mean"
@@ -460,11 +736,22 @@ mod_2_02_results_server <- function(id,
     # per year, not just the currently selected one). Non-poverty methods
     # ignore it; poverty methods need it. Default 3.00 USD/day if the input
     # hasn't been initialised yet.
-    pov_line_val <- debounce(reactive({
+    .pov_line_input <- debounce(reactive({
       as.numeric(input$pov_line %||% 3.00)
     }), 400)
+    pov_line_val <- reactive({
+      if (.is_provisional()) {
+        locked <- results_source()$locked_pov_line
+        if (!is.null(locked)) return(as.numeric(locked))
+      }
+      .pov_line_input()
+    })
 
     bandwidth_p0 <- reactive({
+      if (.is_provisional()) {
+        locked <- results_source()$locked_bandwidth
+        if (!is.null(locked)) return(as.numeric(locked))
+      }
       as.numeric(input$bandwidth_p0 %||% 0.05)
     })
 
@@ -628,6 +915,7 @@ mod_2_02_results_server <- function(id,
          weighted_suite_cache = new.env(parent = emptyenv())
        )
       cache_workspace_ref$current <- ws
+      .seed_aggregation_cache(ws)
       ws
     })
 
@@ -837,6 +1125,117 @@ mod_2_02_results_server <- function(id,
       }), names(sc))
     }
 
+    # Cache seeding from adopted partials (plan 5.5) ----
+    # When the workspace is built for the run whose partials were just adopted
+    # (hist_sim()$.sig identical to the adoption signature), the displayed
+    # method's tables are pre-inserted under the keys .get_hist_agg() /
+    # .get_scn_agg() would use, so the first committed render does not
+    # re-aggregate it. Pure cache: any mismatch (signature, method, residuals,
+    # skip_coef, is_log, weight slot, model count) leaves the cache untouched.
+    # The pov_line/bandwidth are folded into the key exactly as for a normal
+    # lookup, so a different poverty line in the committed controls simply
+    # misses the seeded entry. adopted_partials() is read with isolate():
+    # mod_2_01 sets it in the same commit as hist_sim()/saved_scenarios().
+    # Scenarios are seeded per slot: a scenario without a matching partial
+    # keeps its normal lazy builder inside the same cached value.
+    .seeded_lazy <- function(tbl, method) {
+      x <- .new_lazy_aggregation_method_list(function() NULL, method)
+      state <- attr(x, "state", exact = TRUE)
+      state$value <- setNames(list(tbl), method)
+      state$built <- TRUE
+      x
+    }
+
+    .seed_aggregation_cache <- function(ws) {
+      ap <- shiny::isolate(adopted_partials())
+      hp <- ap$partials$historical
+      sig <- ws$hs$.sig
+      if (is.null(hp) || is.null(sig) || !identical(sig, ap$dependency_signature)) {
+        return(invisible(FALSE))
+      }
+      expected_wk <- if (isTRUE(ws$hs$has_weights)) "weighted" else "unweighted"
+      # Table of method m carried by partial p (`tables`, else the captured
+      # method's `table`).
+      tbl_of <- function(p, m) {
+        tbl <- p$tables[[m]] %||%
+          if (identical(m, p$display$method)) p$table else NULL
+        if (is.data.frame(tbl)) tbl else NULL
+      }
+      matches <- function(p, so, expect_models = NULL) {
+        d <- p$display
+        if (is.null(d)) return(FALSE)
+        if (is.null(d$method) || !is.character(d$method) || length(d$method) != 1L) {
+          return(FALSE)
+        }
+        if (is.null(tbl_of(p, d$method))) return(FALSE)
+        if (!identical(d$method, hp$display$method)) return(FALSE)
+        if (!identical(d$weight_key, expected_wk)) return(FALSE)
+        if (!identical(d$residuals, ws$res)) return(FALSE)
+        if (!identical(isTRUE(d$skip_coef), isTRUE(ws$skip))) return(FALSE)
+        if (!identical(isTRUE(d$is_log), isTRUE(so$transform == "log"))) return(FALSE)
+        if (!identical(d$pov_line, hp$display$pov_line) ||
+            !identical(d$bandwidth_p0, hp$display$bandwidth_p0)) {
+          return(FALSE)
+        }
+        if (!is.null(expect_models) && !is.null(p$n_models) &&
+            !identical(as.integer(p$n_models), as.integer(expect_models))) {
+          return(FALSE)
+        }
+        TRUE
+      }
+      if (!matches(hp, ws$hs$so)) return(invisible(FALSE))
+      pl_v <- hp$display$pov_line
+      bw <- hp$display$bandwidth_p0
+      wk <- hp$display$weight_key
+      supported <- unname(hist_aggregate_choices(ws$hs$so$type, ws$hs$so$name))
+      methods <- intersect(
+        supported,
+        unique(c(hp$display$method, hp$display$methods, names(hp$tables)))
+      )
+      methods <- methods[vapply(methods, function(m) !is.null(tbl_of(hp, m)), logical(1))]
+      if (!length(methods)) return(invisible(FALSE))
+
+      # One historical entry and one scenario entry per method. The workspace
+      # cache is capped at 8 entries, which would evict seeded methods as
+      # soon as the whole suite (up to 2 entries per method) is inserted;
+      # size it to the seeded method count, still bounded.
+      ws$cache_order$max_entries <- max(
+        ws$cache_order$max_entries, 2L * length(methods) + 2L
+      )
+
+      sc <- ws$sc
+      landed <- ap$partials$scenarios %||% list()
+      ok_scn <- if (length(sc) > 0L) {
+        Filter(function(nm) {
+          p <- landed[[nm]]
+          !is.null(p) &&
+            matches(p, sc[[nm]]$so %||% ws$hs$so, length(sc[[nm]]$pipelines))
+        }, names(sc))
+      } else {
+        character(0)
+      }
+      for (method in methods) {
+        key_sfx <- .pl_bw_key(method, pl_v, bw)
+        hist_val <- .build_hist_for_method(ws, method, pl_v)
+        hist_val[[wk]] <- .seeded_lazy(tbl_of(hp, method), method)
+        .cache_put(ws, paste0("h_", method, key_sfx), hist_val)
+
+        seeded <- FALSE
+        if (length(sc) > 0L) {
+          scn_val <- .build_scn_for_method(ws, method, pl_v)
+          for (nm in ok_scn) {
+            tbl <- tbl_of(landed[[nm]], method)
+            if (!is.null(tbl)) {
+              scn_val[[nm]][[wk]] <- .seeded_lazy(tbl, method)
+              seeded <- TRUE
+            }
+          }
+          if (seeded) .cache_put(ws, paste0("s_", method, key_sfx), scn_val)
+        }
+      }
+      invisible(TRUE)
+    }
+
     .get_hist_agg <- function(method) {
       ws <- agg_workspace()
       pl_v <- pov_line_val()
@@ -869,16 +1268,17 @@ mod_2_02_results_server <- function(id,
 
     hist_agg_rv <- reactive({
       method <- .selected_method()
-      .get_hist_agg(method)
+      results_source()$hist_agg(method)
     })
 
     scenario_agg_rv <- reactive({
-      req(saved_scenarios())
-      if (length(saved_scenarios()) == 0L) {
+      src <- results_source()
+      req(src, !is.null(src$scenario_names))
+      if (length(src$scenario_names) == 0L) {
         return(NULL)
       }
       method <- .selected_method()
-      .get_scn_agg(method)
+      src$scn_agg(method)
     })
 
     # Reactive computations (carried over from mod_2_06) ----
@@ -892,11 +1292,8 @@ mod_2_02_results_server <- function(id,
     # Always use survey weights when available (UI toggle removed - weighting
     # is the correct default for survey-based welfare estimates).
     weight_key <- reactive({
-      if (!is.null(hist_sim()) && isTRUE(hist_sim()$has_weights)) {
-        "weighted"
-      } else {
-        "unweighted"
-      }
+      src <- results_source()
+      if (!is.null(src)) src$weight_key else "unweighted"
     })
 
     # Shared deviation reference - used by all_series_tbl and exceedance_ribbon
@@ -1033,17 +1430,15 @@ mod_2_02_results_server <- function(id,
 
     # Coefficient draws availability ----
     has_draws <- reactive({
-      req(hist_sim())
-      !is.null(hist_sim()$chol_obj)
+      src <- results_source()
+      req(src)
+      isTRUE(src$has_draws)
     })
 
 
+    # Landed scenario names only; pending ones are handled by placeholders.
     selected_scenario_names <- reactive({
-      sc <- saved_scenarios()
-      if (length(sc) == 0L) {
-        return(character(0))
-      }
-      names(sc)
+      results_source()$scenario_names %||% character(0)
     })
 
     agg_hist <- reactive({
@@ -1190,10 +1585,10 @@ mod_2_02_results_server <- function(id,
       key = "climate_adverse_support",
       label = "Climate baseline-anchored adverse support",
       step = 2L,
-      fun = function() {
+      fun = .committed_only(function() {
         support <- attr(threshold_table_rv(), "adverse_support")
         if (is.data.frame(support)) support else data.frame()
-      },
+      }),
       description = "Per-model annual selected-metric baseline quantile and interpolation year-rank support. SSP point centers are equal-model means."
     )
 
@@ -1328,7 +1723,7 @@ mod_2_02_results_server <- function(id,
       hist_ref <- hist_ref_val()
       wk <- weight_key()
       method <- .selected_method()
-      so_obj <- tryCatch(if (!is.null(hist_sim())) hist_sim()$so else NULL, error = function(e) NULL)
+      so_obj <- tryCatch(results_source()$so, error = function(e) NULL)
       spec <- metric_metadata(method, so_obj)
       adverse_tail <- spec$adverse_tail
 
@@ -1429,9 +1824,7 @@ mod_2_02_results_server <- function(id,
       hist_ref <- hist_ref_val()
       wk <- weight_key()
       method <- .selected_method()
-      so_obj <- tryCatch(if (!is.null(hist_sim())) hist_sim()$so else NULL,
-        error = function(e) NULL
-      )
+      so_obj <- tryCatch(results_source()$so, error = function(e) NULL)
       adverse_tail <- metric_metadata(method, so_obj)$adverse_tail
 
       RPs <- c(RP_LOW, c("1:1" = 0.5), RP_HIGH)
@@ -1605,7 +1998,7 @@ mod_2_02_results_server <- function(id,
       key = "climate_headline_summary",
       label = "Climate headline summary cards",
       step = 2L,
-      fun = function() step2_headline_df(headline_cards_data_rv()),
+      fun = .committed_only(function() step2_headline_df(headline_cards_data_rv())),
       description = paste(
         "Headline values are display-formatted; native numeric endpoints, units, selected deviation, metric context, and summary operators are included.",
         "Expected and range summaries average years within model and weight climate models equally; adverse annual selected-metric quantiles use an equal-model mean."
@@ -1634,7 +2027,7 @@ mod_2_02_results_server <- function(id,
       key = "climate_outcome_distribution",
       label = "Simulated welfare by scenario and period",
       step = 2L,
-      fun = pointrange_chart,
+      fun = .committed_only(pointrange_chart),
       description = "Simulated welfare by climate scenario and projection period; median across climate-model means, distinct from the equal-model-mean expected headline.",
       width = 10, height = 6.5
     )
@@ -1645,21 +2038,50 @@ mod_2_02_results_server <- function(id,
         annual_distribution_curves_rv(),
         x_label = metric_axis_label(
           .selected_method(),
-          hist_sim()$so,
+          results_source()$so,
           input$cmp_deviation %||% "none"
         ),
         plot_type = input$annual_distribution_type %||% "violin",
-        height = "470px"
+        height = "470px",
+        pending = results_source()$pending_names
       )
     }
+    # Streaming renders: while provisional, keep the existing ECharts instance
+    # (dispose = FALSE) when only new scenario data arrived, so ECharts animates
+    # the added series instead of redrawing the whole chart from zero. A change
+    # of run, mode or display control, or the last pending scenario landing,
+    # forces a full redraw because setOption() merging cannot remove series.
+    .SMOOTH_CONTROLS <- c(
+      "cmp_agg_method", "cmp_deviation", "annual_distribution_type",
+      "ensemble_band", "exceedance_model_spread", "cmp_group_order",
+      "show_coef_uncertainty"
+    )
+    smooth_state <- new.env(parent = emptyenv())
+    .smooth_echart <- function(ch, id) {
+      key <- shiny::isolate({
+        src <- results_source()
+        list(
+          provisional = identical(src$mode, "provisional"),
+          generation = live_data()$generation,
+          pending = length(src$pending_names) > 0L,
+          controls = lapply(.SMOOTH_CONTROLS, function(nm) input[[nm]])
+        )
+      })
+      prev <- smooth_state[[id]]
+      smooth_state[[id]] <- key
+      if (isTRUE(key$provisional) && identical(prev, key)) ch$x$dispose <- FALSE
+      ch
+    }
+
     output$annual_distribution_plot <- echarts4r::renderEcharts4r({
       ch <- annual_distribution_chart()
       req(!is.null(ch))
-      ch
+      .smooth_echart(ch, "annual_distribution_plot")
     })
 
     incidence_data_rv <- reactive({
-      req(hist_sim(), saved_scenarios(), shiny::isolate(input$cmp_agg_method))
+      # Committed only: needs full pipelines and the survey.
+      req(!.is_provisional(), hist_sim(), saved_scenarios(), shiny::isolate(input$cmp_agg_method))
       sc <- selected_scenario_names()
       if (!length(sc)) {
         return(tibble::tibble())
@@ -1692,7 +2114,7 @@ mod_2_02_results_server <- function(id,
       key = "climate_distributional_incidence",
       label = "Distributional incidence by baseline decile",
       step = 2L,
-      fun = incidence_chart,
+      fun = .committed_only(incidence_chart),
       description = "Weighted household-level simulated effects by fixed observed baseline welfare decile.",
       width = 10, height = 6
     )
@@ -1700,14 +2122,14 @@ mod_2_02_results_server <- function(id,
       key = "climate_distributional_incidence_data",
       label = "Distributional incidence data",
       step = 2L,
-      fun = function() {
+      fun = .committed_only(function() {
         annotate_visualization_export(
           incidence_data_rv(), .selected_method(), hist_sim()$so,
           observation_unit = "household-level simulated welfare effect",
           aggregation_order = "fixed weighted observed baseline decile; weighted mean over households and model summaries",
           uncertainty = "scenario/model variation summarized by selected model set"
         )
-      },
+      }),
       description = "Tidy weighted incidence data by fixed baseline welfare decile."
     )
 
@@ -1718,7 +2140,7 @@ mod_2_02_results_server <- function(id,
       annotate_visualization_export(
         curves,
         .selected_method(),
-        hist_sim()$so,
+        results_source()$so,
         observation_unit = "annual aggregate for fixed survey population under one weather-year draw",
         aggregation_order = "weighted household aggregate by model and weather-year; model means retained",
         uncertainty = "inter-annual weather variation"
@@ -1728,7 +2150,7 @@ mod_2_02_results_server <- function(id,
       key = "climate_annual_distribution",
       label = "Annual outcome distribution across weather years",
       step = 2L,
-      fun = annual_distribution_chart,
+      fun = .committed_only(annual_distribution_chart),
       description = "Annual aggregate distribution for the fixed population; one observation is one model-weather-year draw.",
       width = 10, height = 6.5
     )
@@ -1736,7 +2158,7 @@ mod_2_02_results_server <- function(id,
       key = "climate_annual_distribution_data",
       label = "Annual outcome distribution data",
       step = 2L,
-      fun = annual_distribution_export,
+      fun = .committed_only(annual_distribution_export),
       description = "Tidy data behind the annual aggregate distribution, including metric and aggregation metadata."
     )
     # UI-48: one builder behind the on-screen table, its CSV button and the
@@ -1746,10 +2168,10 @@ mod_2_02_results_server <- function(id,
       if (is.null(tbl) || !nrow(tbl) || !"Estimate" %in% names(tbl)) {
         return(NULL)
       }
-      so_obj <- tryCatch(if (!is.null(hist_sim())) hist_sim()$so else NULL, error = function(e) NULL)
+      so_obj <- tryCatch(results_source()$so, error = function(e) NULL)
       n_h_yrs <- tryCatch(
         {
-          run_info <- if (!is.null(hist_sim())) hist_sim()$sim_summary %||% list() else list()
+          run_info <- results_source()$sim_summary %||% list()
           hy <- run_info$historical_years %||% integer(0)
           if (length(hy) >= 2L) as.integer(hy[2] - hy[1] + 1L) else max(tbl$n_obs, na.rm = TRUE)
         },
@@ -1772,14 +2194,14 @@ mod_2_02_results_server <- function(id,
       echart_variance_contribution(
         variance_breakdown_rv(), height = "300px",
         percent = identical(metric_metadata(
-          .selected_method(), hist_sim()$so
+          .selected_method(), results_source()$so
         )$format, "percent")
       )
     }
     output$uncertainty_sources_plot <- echarts4r::renderEcharts4r({
       ch <- uncertainty_chart()
       req(!is.null(ch))
-      ch
+      .smooth_echart(ch, "uncertainty_sources_plot")
     })
     outputOptions(output, "uncertainty_sources_plot", suspendWhenHidden = TRUE)
 
@@ -1787,7 +2209,7 @@ mod_2_02_results_server <- function(id,
       key = "climate_uncertainty_sources",
       label = "Climate simulation uncertainty sources",
       step = 2L,
-      fun = uncertainty_chart,
+      fun = .committed_only(uncertainty_chart),
       description = "Standard deviation contribution from weather-year, coefficient, residual, and climate-model uncertainty sources.",
       width = 9, height = 5
     )
@@ -1800,7 +2222,7 @@ mod_2_02_results_server <- function(id,
       historical_year_count <- if ("n_obs" %in% names(table) && any(historical_rows)) {
         max(as.numeric(table$n_obs[historical_rows]), na.rm = TRUE)
       } else NA_real_
-      rp_map <- metric_decision_return_periods(.selected_method(), hist_sim()$so)
+      rp_map <- metric_decision_return_periods(.selected_method(), results_source()$so)
       if (is.finite(historical_year_count)) {
         rp_map <- rp_map[names(rp_map) == "Expected" |
           vapply(names(rp_map), function(label) {
@@ -1811,7 +2233,7 @@ mod_2_02_results_server <- function(id,
       dot <- step2_adverse_dot_data(
         table[table$rp_name %in% unname(rp_map), , drop = FALSE],
         method = .selected_method(),
-        so = hist_sim()$so
+        so = results_source()$so
       )
       if (identical(input$ensemble_band %||% "none", "none") && nrow(dot)) {
         dot$intermod_lo <- NA_real_
@@ -1825,16 +2247,17 @@ mod_2_02_results_server <- function(id,
         adverse_dot_data_rv(),
         x_label = metric_axis_label(
           .selected_method(),
-          hist_sim()$so,
+          results_source()$so,
           input$cmp_deviation %||% "none"
         ),
-        height = "380px"
+        height = "380px",
+        pending = results_source()$pending_names
       )
     }
     output$adverse_dot_plot <- echarts4r::renderEcharts4r({
       ch <- adverse_dot_chart()
       req(!is.null(ch))
-      ch
+      .smooth_echart(ch, "adverse_dot_plot")
     })
     outputOptions(output, "adverse_dot_plot", suspendWhenHidden = TRUE)
 
@@ -1842,7 +2265,7 @@ mod_2_02_results_server <- function(id,
       key = "climate_adverse_return_periods",
       label = "Outcome in adverse weather years",
       step = 2L,
-      fun = adverse_dot_chart,
+      fun = .committed_only(adverse_dot_chart),
       description = "Expected and adverse return-period outcomes with inter-model ensemble spread.",
       width = 9, height = 5
     )
@@ -1851,7 +2274,7 @@ mod_2_02_results_server <- function(id,
       key = "climate_outcome_thresholds",
       label = "Outcome threshold exceedance",
       step = 2L,
-      fun = threshold_table_df,
+      fun = .committed_only(threshold_table_df),
       description = paste(
         "Simulated welfare outcomes against each threshold, by climate",
         "scenario and projection period, with uncertainty bounds."
@@ -1867,6 +2290,10 @@ mod_2_02_results_server <- function(id,
       df <- threshold_table_df()
       if (is.null(df) || nrow(df) == 0L) {
         return(.step2_reactable_note("Insufficient data"))
+      }
+      src <- results_source()
+      if (identical(src$mode, "provisional")) {
+        df <- .append_pending_threshold_rows(df, src$pending_names)
       }
       .step2_reactable(df)
     }
@@ -1891,7 +2318,7 @@ mod_2_02_results_server <- function(id,
         curves_tbl = curves,
         x_label = metric_axis_label(
           .selected_method(),
-          hist_sim()$so,
+          results_source()$so,
           input$cmp_deviation %||% "none"
         ),
         n_sim_years = nrow(ah$out),
@@ -1905,7 +2332,7 @@ mod_2_02_results_server <- function(id,
       key = "climate_exceedance_curve",
       label = "Welfare exceedance probability",
       step = 2L,
-      fun = exceedance_chart,
+      fun = .committed_only(exceedance_chart),
       description = paste(
         "Probability of welfare falling below each level in adverse weather years, by climate scenario",
         "and projection period."
@@ -1916,20 +2343,49 @@ mod_2_02_results_server <- function(id,
     output$exceedance_plot <- echarts4r::renderEcharts4r({
       ch <- exceedance_chart()
       req(!is.null(ch))
-      ch
+      .smooth_echart(ch, "exceedance_plot")
     })
 
 
     # observeEvent handlers ----
 
-    # Insert Results tab + content on first hist_sim; remove it again when
-    # hist_sim is cleared (INT-07) so the empty state returns and a later
-    # run re-inserts a fresh tab instead of writing into a stale one.
+    # Insert the Results tab once the display source first has data
+    # (provisional or committed); remove it again when the source is empty
+    # (INT-07) so the empty state returns and a later run re-inserts a fresh
+    # tab instead of writing into a stale one.
+    #
+    # The pane is built from the outcome (`so`) only; values flow through
+    # reactives. It is therefore rebuilt (clear + insert) only when the
+    # outcome changes or a committed run replaces a committed run (today's
+    # behaviour) - never on each partial, and not on provisional -> committed
+    # adoption or committed <-> provisional switches with an unchanged `so`.
     results_tab_added <- reactiveVal(FALSE)
+    # Bumped each time the pane is (re)built, so control state can be re-sent.
+    pane_rev <- reactiveVal(0L)
 
-    observeEvent(hist_sim(),
+    # Run identity of the provisional source. A reactiveVal drops identical
+    # writes, so the lifecycle observers below do not re-fire per partial.
+    live_pane_key <- reactiveVal(NULL)
+    observe({
+      lr <- live_run()
+      hp <- lr$partials$historical
+      live_pane_key(
+        if (is.null(hp)) NULL else list(generation = lr$generation, so = hp$so)
+      )
+    })
+    .pane_trigger <- function() list(hist_sim(), live_pane_key())
+    .pane_so <- function() {
+      lk <- live_pane_key()
+      if (!is.null(lk)) lk$so else hist_sim()$so
+    }
+    pane_state <- new.env(parent = emptyenv())
+    pane_state$mode <- NULL
+    pane_state$so <- NULL
+
+    observeEvent(.pane_trigger(),
       {
-        if (is.null(hist_sim())) {
+        provisional <- !is.null(live_pane_key())
+        if (is.null(.pane_so())) {
           if (results_tab_added()) {
             shiny::removeTab(
               inputId = tabset_id,
@@ -1938,6 +2394,18 @@ mod_2_02_results_server <- function(id,
             )
             results_tab_added(FALSE)
           }
+          pane_state$mode <- NULL
+          pane_state$so <- NULL
+          return()
+        }
+        so <- .pane_so()
+        mode <- if (provisional) "provisional" else "committed"
+        keep_pane <- results_tab_added() &&
+          identical(so, pane_state$so) &&
+          !(identical(mode, "committed") && identical(pane_state$mode, "committed"))
+        pane_state$mode <- mode
+        pane_state$so <- so
+        if (keep_pane) {
           return()
         }
 
@@ -1962,7 +2430,8 @@ mod_2_02_results_server <- function(id,
         } else {
           # The tab is already there. Clear its contents so the re-run's results
           # replace the previous run's rather than stacking beneath them - the
-          # pane is built from `hist_sim()$so`, which a new run may have changed.
+          # pane is built from the outcome (`so`), which a new run may have
+          # changed.
           # Both this and the insert below are deferred to the end of the flush
           # and run in call order, so the clear always precedes the rewrite.
           # Deferring also keeps the first-run path byte-for-byte as it was:
@@ -1987,17 +2456,18 @@ mod_2_02_results_server <- function(id,
         shiny::insertUI(
           selector = "#results_section",
           where    = "afterBegin",
-          ui       = .results_content_ui(ns, hist_sim()$so, weather_var = wx_lbl)
+          ui       = .results_content_ui(ns, so, weather_var = wx_lbl)
         )
+        pane_rev(isolate(pane_rev()) + 1L)
       },
       ignoreInit = TRUE,
       ignoreNULL = FALSE
     )
 
     # On subsequent runs, just re-select the tab.
-    observeEvent(hist_sim(),
+    observeEvent(.pane_trigger(),
       {
-        if (!is.null(hist_sim())) {
+        if (!is.null(.pane_so())) {
           shiny::updateTabsetPanel(
             session  = tabset_session,
             inputId  = tabset_id,
@@ -2009,13 +2479,18 @@ mod_2_02_results_server <- function(id,
     )
 
     # Keep agg method choices in sync with outcome.
-    observeEvent(hist_sim(),
+    observeEvent(.pane_trigger(),
       {
-        req(hist_sim()$so)
-        so <- hist_sim()$so
+        req(.pane_so())
+        so <- .pane_so()
         choices <- hist_aggregate_choices(so$type, so$name)
         current <- isolate(input$cmp_agg_method)
         new_sel <- if (!is.null(current) && current %in% choices) current else "mean"
+        src <- isolate(results_source())
+        if (identical(src$mode, "provisional") &&
+            !new_sel %in% src$methods_available) {
+          new_sel <- src$locked_method
+        }
         shiny::updateRadioButtons(session, "cmp_agg_method",
           choices  = choices,
           selected = new_sel,
@@ -2025,12 +2500,133 @@ mod_2_02_results_server <- function(id,
       ignoreInit = TRUE
     )
 
+    # Provisional banner ----
+    # Shown only while a streaming run drives the display. Progress uses the
+    # same fraction as the sidebar run panel (.step2_live_pct()).
+    output$provisional_banner <- renderUI({
+      src <- results_source()
+      if (is.null(src) || !identical(src$mode, "provisional")) {
+        return(NULL)
+      }
+      lr <- live_run()
+      n_done <- length(src$scenario_names)
+      n_all <- n_done + length(src$pending_names)
+      pct <- .step2_live_pct(list(
+        has_hist = TRUE,
+        done_labels = names(lr$partials$scenarios) %||% character(0),
+        groups_total = lr$groups_total, groups_done = lr$groups_done,
+        current_label = lr$current_label,
+        member_index = lr$member_index, period_members = lr$period_members
+      ))
+      shiny::div(
+        class = "alert alert-info provisional-banner",
+        style = "margin-bottom: 12px; padding: 8px 12px; font-size: 0.85rem;",
+        # While streaming, keep landed charts fully visible during the
+        # per-partial recalculation instead of Shiny's dimmed state. Removed
+        # with the banner, so committed-mode loading cues are unchanged.
+        shiny::tags$style(
+          "#results_section .recalculating { opacity: 1 !important; transition: none; }"
+        ),
+        shiny::div(
+          shiny::strong("Simulation in progress: "),
+          paste0(n_done, " of ", n_all, " scenarios ready. Results are provisional.")
+        ),
+        if (!is.null(pct)) {
+          shiny::div(
+            class = "progress",
+            shiny::div(
+              class = "progress-bar", role = "progressbar",
+              `aria-valuenow` = round(100 * pct), `aria-valuemin` = 0,
+              `aria-valuemax` = 100,
+              style = sprintf("width: %d%%;", round(100 * pct))
+            )
+          )
+        },
+        shiny::div(
+          class = "text-muted",
+          paste(
+            "The poverty line unlocks when the run finishes.",
+            if (length(setdiff(
+              unname(hist_aggregate_choices(src$so$type, src$so$name)),
+              src$methods_available
+            ))) "Prosperity gap is also unavailable until then.",
+            "Step 3 uses the last completed run, and Step 2 exports",
+            "wait for the run to finish."
+          )
+        )
+      )
+    })
+
+    # Control gating ----
+    # One observer keyed on the display mode: in provisional mode only the
+    # method pills that were not streamed (typically prosperity_gap) and the
+    # poverty line are disabled; any exit (adoption, cancel, stale, failure)
+    # flips the mode back and re-enables them. pane_rev() re-sends the state
+    # after the pane is (re)built, because inserted controls start enabled.
+    # The pill selection is only forced to the captured method when the
+    # current one is unavailable; it is not written to display_settings_out
+    # (committed-only).
+    .gate_key <- reactive({
+      src <- results_source()
+      if (is.null(src) || !identical(src$mode, "provisional")) {
+        list(provisional = FALSE)
+      } else {
+        list(
+          provisional = TRUE, locked = src$locked_method, so = src$so,
+          available = src$methods_available
+        )
+      }
+    })
+    observe({
+      key <- .gate_key()
+      pane_rev()
+      req(results_tab_added())
+      if (isTRUE(key$provisional)) {
+        choices <- unname(hist_aggregate_choices(key$so$type, key$so$name))
+        update_pill_toggle_disabled(
+          session, "cmp_agg_method",
+          disabled = setdiff(choices, key$available),
+          tooltip = "Available when the simulation completes"
+        )
+        update_input_disabled(session, "pov_line", TRUE,
+          tooltip = "Available when the simulation completes"
+        )
+        current <- shiny::isolate(input$cmp_agg_method)
+        if (is.null(current) || !current %in% key$available) {
+          shiny::updateRadioButtons(session, "cmp_agg_method",
+            selected = key$locked
+          )
+        }
+      } else {
+        update_pill_toggle_disabled(session, "cmp_agg_method", FALSE)
+        update_input_disabled(session, "pov_line", FALSE)
+      }
+    })
+
+    # Display settings writer ----
+    # Publishes the committed-mode controls so the next run is submitted with
+    # them (mod_2_01 reads this at submit). Not written while provisional,
+    # and not before the controls exist.
+    if (!is.null(display_settings_out)) {
+      observe({
+        src <- results_source()
+        req(src, identical(src$mode, "committed"), input$cmp_agg_method)
+        display_settings_out(list(
+          method = .selected_method(),
+          pov_line = pov_line_val(),
+          bandwidth_p0 = bandwidth_p0()
+        ))
+      })
+    }
+
     # Suspend outputs when Results tab is hidden ----
     outputOptions(output, "annual_distribution_plot", suspendWhenHidden = TRUE)
     outputOptions(output, "summary_threshold_table", suspendWhenHidden = TRUE)
     outputOptions(output, "exceedance_plot", suspendWhenHidden = TRUE)
 
     # Return API ----
+    ts_committed <- new.env(parent = emptyenv())
+    ts_committed$value <- NULL
     # timeseries_curves bundles everything the Diagnostics tab needs to render
     # the per-model trajectories plot (the plot lives there now): the
     # per-(scenario, model, sim_year) table, the x-axis label, and the
@@ -2041,17 +2637,28 @@ mod_2_02_results_server <- function(id,
       aggregation_cache = aggregation_cache,
       derived_results_frame = derived_results_frame_rv,
       timeseries_curves = reactive({
+        # Diagnostics is never driven by provisional data: while a run
+        # streams, return the last committed value (no dependency on the
+        # partials, so it does not recompute per partial). Kept lazily rather
+        # than by an eager observer so the table is only built when the
+        # Diagnostics tab asks for it. NULL if nothing was committed yet.
+        if (.is_provisional()) {
+          return(ts_committed$value)
+        }
+        if (is.null(hist_sim())) ts_committed$value <- NULL
         req(timeseries_curves_rv())
         ens_q <- if (!identical(input$ensemble_band %||% "none", "none")) {
           resolve_band_q(input$ensemble_band %||% "none")
         } else {
           c(lo = 0.5, hi = 0.5)
         }
-        list(
+        out <- list(
           tbl     = timeseries_curves_rv(),
-          x_label = metric_axis_label(.selected_method(), hist_sim()$so),
+          x_label = metric_axis_label(.selected_method(), results_source()$so),
           ens_q   = ens_q
         )
+        ts_committed$value <- out
+        out
       })
     )
   })

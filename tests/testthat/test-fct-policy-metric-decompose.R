@@ -62,7 +62,6 @@ metric_channel_fixture <- function(engine = "rif", transform = "none", residuals
   policy_hist <- hist; policy_hist$pipeline <- policy
   list(fx = fx, prepared = prepared, hist = hist, policy_hist = policy_hist)
 }
-
 test_that("metric states use canonical aggregates and reconcile for all metrics and engines", {
   for (engine in c("fixest", "rif")) for (trans in c("none", "log")) {
     fx <- metric_channel_fixture(engine, trans)
@@ -86,30 +85,10 @@ test_that("metric states use canonical aggregates and reconcile for all metrics 
         names(decile_annual)))
       expect_equal(decile_annual$total,
         decile_annual$main + decile_annual$repositioning + decile_annual$interaction)
-      decile_summary <- .policy_metric_decile_summary(decile_annual, "Historical")
-      expect_equal(decile_summary$total,
-        decile_summary$main + decile_summary$repositioning + decile_summary$interaction)
     }
   }
 })
 
-test_that("metric-aware headline chart renders selected-metric values", {
-  fx <- metric_channel_fixture()
-  result <- .policy_metric_decomposition(fx$hist, fx$policy_hist, list(), list(),
-    fx$prepared, "mean", requested_residuals = "none")
-  headline <- .policy_metric_headline_data(result, "Historical")
-  chart <- echart_policy_metric_headline(headline, result$metadata)
-  expect_s3_class(chart, "echarts4r")
-  expect_no_error(htmlwidgets:::createPayload(chart))
-  expect_identical(chart$x$opts$xAxis[[1L]]$data,
-    c("Main effect", "Resilience", "Total"))
-  deciles <- .policy_metric_decile_summary(
-    result$scenarios[["Historical"]]$decile_annual, "Historical")
-  expect_gt(nrow(deciles), 0L)
-  decile_chart <- echart_policy_metric_deciles(deciles, result$metadata)
-  expect_s3_class(decile_chart, "echarts4r")
-  expect_no_error(htmlwidgets:::createPayload(decile_chart))
-})
 
 test_that("adverse support interpolates deterministic year keys and fails closed", {
   low <- adverse_year_support(1:20, 2030:2049, .05, "low")
@@ -388,16 +367,9 @@ test_that("annual continuous and category channels equal explicit reference row 
   }
 })
 
-test_that("fixed comparable exposure reproduces legacy correction and zero policy is zero", {
+test_that("zero policy gives zero annual channels", {
   for (engine in c("fixest", "rif")) {
     fx <- annual_channel_fixture(engine)
-    pipe <- fx$pipeline
-    pipe$weather_exposure$table$temp <- 20
-    pipe$weather_exposure$table$rain <- 2
-    actual <- .policy_annual_channels(pipe,
-      .prepare_policy_annual_channels(fx$context, "annual-run"), "annual-run")
-    old <- .policy_central_delta_run(fx$context, "annual-run", data.frame(temp = 20, rain = 2))
-    expect_equal(actual$delta_total, old[pipe$svy_row_id], tolerance = 1e-12)
     zero <- annual_channel_fixture(engine, zero_policy = TRUE)
     out <- .policy_annual_channels(zero$pipeline,
       .prepare_policy_annual_channels(zero$context, "annual-run"), "annual-run")
@@ -545,8 +517,7 @@ test_that("production validates once per pipeline and fails closed without predi
   local_mocked_bindings(
     .validate_policy_annual_exposure = function(...) { calls <<- calls + 1L; validate(...) },
     .policy_central_delta = function(...) stop("Period mean forbidden"),
-    run_sim_pipeline = function(...) stop("Prediction forbidden"),
-    .compact_run_future_decomposition = function(...) stop("Duplicate channels forbidden")
+    run_sim_pipeline = function(...) stop("Prediction forbidden")
   )
   out <- apply_policy_delta_to_baseline(fx$base, fx$policy, fx$model, fx$context$so,
     hist, decomp_context = fx$context, run_identity = "annual-run", chunk_size = 1L)

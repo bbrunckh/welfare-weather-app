@@ -53,6 +53,14 @@ run_policy_exposure_fixture <- function(cached) {
   ))
 }
 
+# The schema-1 mapping run_sim_pipeline() computed before compaction.
+run_policy_exposure_fixture_v1 <- function() {
+  local({
+    local_mocked_bindings(.policy_exposure_compact = function(mapping) mapping)
+    run_policy_exposure_fixture(FALSE)
+  })
+}
+
 test_that("inline and cached joins retain exact exposure-to-prediction mapping", {
   inline <- run_policy_exposure_fixture(FALSE)
   cached <- run_policy_exposure_fixture(TRUE)
@@ -61,7 +69,10 @@ test_that("inline and cached joins retain exact exposure-to-prediction mapping",
   expect_true(cached$weather_exposure$available)
   expect_identical(inline$weather_exposure$status, "ok")
   expect_identical(inline$weather_exposure, cached$weather_exposure)
-  mapping <- inline$weather_exposure
+  # Pipelines store the compact schema-2 recipe; resolve the exact mapping.
+  expect_identical(inline$weather_exposure$schema, 2L)
+  expect_null(inline$weather_exposure$table)
+  mapping <- step2_exposure_resolve(inline)
   expect_identical(nrow(mapping$table), 3L)
   expect_identical(mapping$table$timestamp[1], mapping$table$timestamp[2])
   expect_identical(mapping$table$exposure, factor(
@@ -92,7 +103,7 @@ test_that("inline and cached joins retain exact exposure-to-prediction mapping",
     .policy_annual_channels_reference(inline, context, "mapping-run")$delta_total)
 })
 
-test_that("compact Step 2 pipelines retain exposure mapping vectors and table", {
+test_that("compact Step 2 pipelines retain the exposure mapping recipe", {
   pipe <- run_policy_exposure_fixture(FALSE)
   compact <- .compact_pipeline(pipe)
 
@@ -143,4 +154,79 @@ test_that("mapping follows prediction filtering and reordering, not position", {
     expect_identical(invalid$status, "unavailable")
     expect_match(invalid$reason, "nonintegral")
   }
+})
+
+test_that("compact exposure resolves to the exact schema-1 mapping", {
+  v1 <- run_policy_exposure_fixture_v1()
+  v2 <- run_policy_exposure_fixture(FALSE)
+  expect_null(v1$weather_exposure$schema)
+  expect_identical(v2$weather_exposure$schema, 2L)
+  expect_identical(step2_exposure_resolve(v2), v1$weather_exposure)
+  # Schema-1 mappings pass through unchanged.
+  expect_identical(step2_exposure_resolve(v1), v1$weather_exposure)
+  # A shared timestamp cache gives the same result on first and repeat use.
+  cache <- new.env(parent = emptyenv())
+  expect_identical(step2_exposure_resolve(v2, cache = cache), v1$weather_exposure)
+  expect_identical(step2_exposure_resolve(v2, cache = cache), v1$weather_exposure)
+})
+
+test_that("compact exposure resolves through shared-key weather members", {
+  v1 <- run_policy_exposure_fixture_v1()
+  v2 <- run_policy_exposure_fixture(FALSE)
+  shared <- step2_weather_share_members(list(a = v2$weather_raw, b = v2$weather_raw))
+  expect_false(is.null(shared$shared))
+  v2$weather_raw <- shared$members[[1L]]
+  owner <- list(weather_shared = shared$shared)
+  expect_identical(step2_exposure_resolve(v2, owner), v1$weather_exposure)
+})
+
+test_that("compact exposure without its weather is explicitly unavailable", {
+  pipe <- run_policy_exposure_fixture(FALSE)
+  pipe$weather_raw <- NULL
+  out <- step2_exposure_resolve(pipe)
+  expect_identical(out$status, "unavailable")
+  expect_error(
+    .validate_policy_annual_exposure(pipe, list()),
+    "exposure mapping unavailable"
+  )
+})
+
+test_that("compact exposure is a small fraction of the full mapping", {
+  v1 <- run_policy_exposure_fixture_v1()
+  v2 <- run_policy_exposure_fixture(FALSE)
+  expect_false("table" %in% names(v2$weather_exposure))
+  expect_false(any(c("svy_row_id", "sim_year", "weight", "id_vec") %in%
+    names(v2$weather_exposure)))
+  expect_lt(utils::object.size(v2$weather_exposure), utils::object.size(v1$weather_exposure))
+})
+
+test_that("annual policy correction is identical for compact and schema-1 pipelines", {
+  v1 <- run_policy_exposure_fixture_v1()
+  v2 <- run_policy_exposure_fixture(FALSE)
+  fixture <- test_policy_exposure_fixture()
+  survey <- fixture$survey
+  survey$exposure <- factor("dry", levels = c("dry", "wet"))
+  policy <- survey
+  policy[[SP_TRANSFER_COL]] <- 0.5
+  context <- .build_decomposition_context(survey, policy,
+    list(engine = "fixest", fit3 = stats::lm(welfare ~ exposure, fixture$train),
+      weather_terms = "exposure", train_data = fixture$train),
+    list(name = "welfare", transform = "none"), skip_coef = TRUE,
+    run_identity = "mapping-run")
+  prepared <- .prepare_policy_annual_channels(context, "mapping-run")
+  strip <- function(x) { x$pipeline$weather_exposure <- NULL; x }
+  ref <- strip(.apply_policy_annual_pipeline(v1, prepared, "mapping-run"))
+  expect_identical(strip(.apply_policy_annual_pipeline(v2, prepared, "mapping-run")), ref)
+  # Shared-key weather member resolved through its owning scenario.
+  shared <- step2_weather_share_members(list(a = v2$weather_raw, b = v2$weather_raw))
+  v2s <- v2
+  v2s$weather_raw <- shared$members[[1L]]
+  owner <- list(weather_shared = shared$shared)
+  got <- .apply_policy_annual_pipeline(v2s, prepared, "mapping-run", owner = owner,
+    exposure_cache = new.env(parent = emptyenv()))
+  got$pipeline$weather_raw <- v1$weather_raw
+  expect_identical(strip(got), ref)
+  # Without the owner, a shared member cannot be resolved and fails loudly.
+  expect_error(.apply_policy_annual_pipeline(v2s, prepared, "mapping-run"),
+    "exposure mapping unavailable")
 })

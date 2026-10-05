@@ -407,20 +407,6 @@ wise_config_apply <- function(config, session, existing = character(0)) {
   list(ok = TRUE, text = character(0), notes = notes)
 }
 
-#' Compare an imported value with the control's current value
-#'
-#' `all.equal()` rather than `identical()`: the JSON round-trip turns integers
-#' into doubles, and a restored setting equal to what the control already
-#' shows is not a restoration - it must not be reported as one.
-#'
-#' @noRd
-.import_value_same <- function(a, b) {
-  if (is.null(a) || is.null(b)) {
-    return(is.null(a) && is.null(b))
-  }
-  isTRUE(all.equal(a, b))
-}
-
 
 # Configuration pipeline runner ----
 
@@ -794,6 +780,11 @@ pipeline_runner <- function(triggers, results, on_state = NULL,
     # "Not exported" section rather than vanishing beside the not-run ones.
     if (inherits(value, "shiny.silent.error")) {
       return(NULL)
+    }
+    # An item can ask to be skipped with a note (e.g. a Step 2 run is still
+    # streaming); the note reaches the README and the export notification.
+    if (inherits(value, "wise_export_skip")) {
+      return(list(status = "skipped", note = conditionMessage(value)))
     }
     msg <- conditionMessage(value)
     if (!nzchar(msg)) msg <- "artefact could not be produced"

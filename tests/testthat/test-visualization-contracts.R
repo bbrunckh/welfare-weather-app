@@ -202,32 +202,6 @@ test_that("paired effects are zero for identical baseline and policy tables", {
   expect_equal(summary$coef_hi, 0)
 })
 
-test_that("paired adverse effects use equal-probability arm quantiles", {
-  effects <- tibble::tibble(
-    model_id = rep(c("m1", "m2"), each = 4L),
-    sim_year = rep(2018:2021, 2L),
-    baseline = rep(c(1, 2, 3, 4), 2L),
-    policy = rep(c(2, 3, 4, 5), 2L),
-    effect = 1,
-    effect_sd = 0
-  )
-  out <- wiseapp:::paired_equal_probability_effects(
-    effects, c(`1-in-10` = 0.1, `1-in-5` = 0.2)
-  )
-  expect_true(all(abs(out$effect - 1) < 1e-12))
-  expect_equal(sort(unique(out$probability)), c(0.1, 0.2))
-})
-
-test_that("variance display uses separate aligned bars", {
-  p <- wiseapp:::plot_variance_contribution(tibble::tibble(
-    scenario = "SSP2-4.5 / 2030-2040", var_coef = 1,
-    var_within = 4, var_across = 9, is_historical = FALSE
-  ))
-  expect_s3_class(p, "ggplot")
-  expect_true(any(vapply(p$layers, function(x) inherits(x$position, "PositionDodge"),
-                         logical(1L))))
-})
-
 test_that("visualization exports carry metric and observation metadata", {
   out <- wiseapp:::annotate_visualization_export(
     data.frame(value = 1:2),
@@ -270,35 +244,6 @@ test_that("weighted baseline deciles are fixed and cover supported households", 
   expect_true(all(d >= 1L & d <= 10L))
 })
 
-test_that("paired adverse table includes expected supported periods", {
-  x <- tibble::tibble(
-    model_id = "m1", baseline = 1:20, policy = 2:21,
-    effect = 1, effect_sd = 0
-  )
-  out <- wiseapp:::paired_adverse_effect_table(x, "mean")
-  expect_setequal(out$period, c("Expected", "Adverse 1-in-5", "Adverse 1-in-10", "Adverse 1-in-20"))
-  expect_true(all(abs(out$effect - 1) < 1e-12))
-})
-
-test_that("unsupported adverse return periods are omitted", {
-  x <- tibble::tibble(
-    model_id = "m1", baseline = 1:10, policy = 2:11,
-    effect = 1, effect_sd = 0
-  )
-  out <- wiseapp:::paired_adverse_effect_table(x, "mean")
-  expect_false("Adverse 1-in-20" %in% out$period)
-})
-
-test_that("variance shares are opt-in and explicitly approximate", {
-  x <- data.frame(scenario = "SSP2 / 2030", var_coef = 1,
-                  var_within = 4, var_across = 9)
-  hidden <- wiseapp:::variance_component_data(x, FALSE)
-  shown <- wiseapp:::variance_component_data(x, TRUE)
-  expect_true(all(is.na(hidden$share_approx)))
-  expect_true(all(is.finite(shown$share_approx)))
-  expect_true(all(grepl("zero-covariance", shown$share_warning)))
-})
-
 test_that("weather support uses robust interval and warning share", {
   ref <- data.frame(temp = 1:100)
   sc <- list(`SSP2 / 2030` = data.frame(temp = c(rep(1, 90), rep(1000, 10))))
@@ -306,26 +251,6 @@ test_that("weather support uses robust interval and warning share", {
   expect_equal(out$n_reference, 100)
   expect_true(out$warning)
   expect_equal(out$warning_rule, "Robust 1%-99% reference interval; warn above 5% outside")
-})
-
-test_that("policy covariate support flags range and rare categories", {
-  train <- data.frame(x = 1:10, sector = rep(c("a", "b"), 5))
-  policy <- data.frame(x = c(1, 20), sector = c("a", "new"))
-  out <- wiseapp:::policy_covariate_support(train, policy)
-  expect_true(out$warning[out$variable == "x"])
-  expect_true(out$warning[out$variable == "sector"])
-})
-
-test_that("policy covariate support tolerates unmatched and missing categories", {
-  train <- data.frame(sector = factor(c("a", "b", "a")), x = c(1, 2, NA))
-  policy <- data.frame(sector = c("a", NA, ""), x = c(1, 3, NA))
-  out <- wiseapp:::policy_covariate_support(
-    train, policy, vars = c("sector", "x", "missing_from_both")
-  )
-
-  expect_setequal(out$variable, c("sector", "x"))
-  expect_true(out$warning[out$variable == "sector"])
-  expect_true(out$warning[out$variable == "x"])
 })
 
 test_that("log effects convert to percent without losing model-scale additivity", {
@@ -395,29 +320,6 @@ test_that("step2 adverse dot data extracts supported periods and ensemble bounds
   }
 })
 
-test_that("new export keys return valid figures or data frames", {
-  # 1. climate_adverse_return_periods
-  tbl <- data.frame(
-    scenario = "SSP2 / 2030", Estimate = "Central (P50)",
-    rp_name = "1:1", value = 10, is_historical = FALSE, stringsAsFactors = FALSE
-  )
-  dot_data <- wiseapp:::step2_adverse_dot_data(tbl, "mean")
-  p_dot <- wiseapp:::plot_step2_adverse_dot(dot_data)
-  expect_s3_class(p_dot, "ggplot")
-
-  # 2. policy_distributional_incidence
-  inc <- data.frame(decile = 1:10, effect = rep(1, 10))
-  p_inc <- wiseapp:::plot_incidence_by_decile(inc)
-  expect_s3_class(p_inc, "ggplot")
-
-  # 4. policy_construction_summary & treatment_matrix & covariate_support
-  df1 <- data.frame(welfare = 1:5, x = 1:5)
-  df2 <- data.frame(welfare = 2:6, x = 2:6)
-  expect_s3_class(wiseapp:::policy_construction_summary(df1, df2), "data.frame")
-  expect_s3_class(wiseapp:::policy_treatment_matrix(df1, df2), "data.frame")
-  expect_s3_class(wiseapp:::policy_covariate_support(df1, df2), "data.frame")
-})
-
 test_that("treatment diagnostics distinguish eligibility from realized treatment", {
   baseline <- data.frame(weight = c(1, 1, 1, 1))
   policy <- data.frame(
@@ -467,4 +369,24 @@ test_that("selected eligibility omits inclusion and exclusion errors", {
   )
   expect_equal(sum(ideal), 2L)
   expect_equal(sum(realized), 8L)
+})
+
+test_that("new export keys return valid figures or data frames", {
+  # 1. climate_adverse_return_periods
+  tbl <- data.frame(
+    scenario = "SSP2 / 2030", Estimate = "Central (P50)",
+    rp_name = "1:1", value = 10, is_historical = FALSE, stringsAsFactors = FALSE
+  )
+  dot_data <- wiseapp:::step2_adverse_dot_data(tbl, "mean")
+  p_dot <- wiseapp:::plot_step2_adverse_dot(dot_data)
+  expect_s3_class(p_dot, "ggplot")
+
+  # 2. policy_distributional_incidence
+  inc <- data.frame(decile = 1:10, effect = rep(1, 10))
+  p_inc <- wiseapp:::plot_incidence_by_decile(inc)
+  expect_s3_class(p_inc, "ggplot")
+
+  df1 <- data.frame(welfare = 1:5, x = 1:5)
+  df2 <- data.frame(welfare = 2:6, x = 2:6)
+  expect_s3_class(wiseapp:::policy_treatment_matrix(df1, df2), "data.frame")
 })

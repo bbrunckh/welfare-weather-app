@@ -1,0 +1,12 @@
+test_that("relative decomposition scales channels by the observed baseline mean", {
+  svy <- data.frame(welfare = c(1, 2, 3, 4), weight = c(1, 1, 1, 1))
+  so <- list(name = "welfare", transform = "none")
+  base <- .decomposition_baseline_mean(so, svy)
+  expect_equal(base, 2.5)
+  x <- data.frame(main = 0.5, repositioning = -0.25, interaction = 0.1, total = 0.35)
+  rel <- .decomposition_as_relative(x, base, names(x))
+  expect_equal(rel$main, 20)
+  expect_equal(rel$main + rel$repositioning + rel$interaction, rel$total)
+  expect_true(is.na(.decomposition_baseline_mean(list(name = "missing"), svy)))
+  expect_true(is.na(.decomposition_baseline_mean(so, data.frame(welfare = c(-1, 1), weight = c(1, 1)))))
+})

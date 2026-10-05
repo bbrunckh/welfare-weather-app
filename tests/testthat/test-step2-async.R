@@ -138,6 +138,58 @@ testthat::test_that("progress latest record validates identity and sequence", {
   expect_length(received, 1L)
 })
 
+testthat::test_that("progress schema 2 optional fields are validated and forwarded", {
+  root <- tempfile("wiseapp-async-progress2-")
+  dir.create(root)
+  on.exit(unlink(root, recursive = TRUE, force = TRUE), add = TRUE)
+  path <- file.path(root, "progress.rds")
+  base <- list(
+    schema = 2L, job_id = "job-p2", generation = 1L,
+    dependency_signature_digest = "digest", sequence = 1L,
+    phase = "group_completed", stage = "pipeline", status = "progress",
+    elapsed = 2, completed = 4L, groups_total = 3L, groups_done = 1L,
+    label = "SSP2-4.5 / 2030-2040", current_label = "SSP2-4.5 / 2030-2040",
+    member_index = 2L, period_members = 2L, n_models = 2L,
+    n_models_requested = 2L
+  )
+  poll <- function(record) {
+    saveRDS(record, path)
+    received <- list()
+    job <- list2env(list(
+      id = "job-p2", generation = 1L, dependency_signature_digest = "digest",
+      progress_file = path, progress_sequence = 0L,
+      on_progress = function(r, ...) received[[length(received) + 1L]] <<- r
+    ), parent = emptyenv())
+    .wise_step2_async_poll_progress(job)
+    received
+  }
+  got <- poll(base)
+  expect_length(got, 1L)
+  expect_identical(got[[1L]]$phase, "group_completed")
+  expect_identical(got[[1L]]$groups_done, 1L)
+  expect_identical(got[[1L]]$groups_total, 3L)
+  expect_identical(got[[1L]]$label, "SSP2-4.5 / 2030-2040")
+  expect_identical(got[[1L]]$n_models_requested, 2L)
+  # schema 1 stays accepted
+  v1 <- base[setdiff(names(base), c("groups_total", "groups_done", "label",
+    "current_label", "member_index", "period_members", "n_models",
+    "n_models_requested"))]
+  v1$schema <- 1L
+  v1$phase <- "pipeline"
+  got1 <- poll(v1)
+  expect_length(got1, 1L)
+  expect_null(got1[[1L]]$groups_done)
+  # invalid optional fields drop the record
+  for (bad in list(
+    list(groups_done = -1L), list(groups_total = c(1L, 2L)),
+    list(member_index = NA_integer_), list(n_models = "2"),
+    list(label = strrep("x", 201L)), list(current_label = c("a", "b"))
+  )) {
+    expect_length(poll(utils::modifyList(base, bad)), 0L)
+  }
+  expect_length(poll(utils::modifyList(base, list(schema = 3L))), 0L)
+})
+
 testthat::test_that("async cleanup can preserve adopted weather artifacts", {
   root <- tempfile("wiseapp-async-adopt-")
   artifact_dir <- file.path(root, "artifact")
@@ -259,6 +311,18 @@ testthat::test_that("async worker matches synchronous Step 2 fixture output", {
   expect_identical(worker_result$n_keys_ok, synchronous$result$n_keys_ok)
   expect_identical(worker_result$failures, synchronous$result$failures)
   expect_identical(manifest$result_signature, synchronous$signature)
+
+  # Real-worker partial transport: index + entry files validate and deliver.
+  index <- readRDS(file.path(artifact_dir, "partials-index.rds"))
+  expect_identical(index$job_id, "async-parity-job")
+  expect_gte(length(index$entries), 1L)
+  expect_identical(index$entries[[1L]]$kind, "historical")
+  pjob <- list2env(list(id = "async-parity-job", generation = 1L,
+    dependency_signature_digest = "", artifact_dir = artifact_dir,
+    partials_index_file = file.path(artifact_dir, "partials-index.rds"),
+    partials_delivered = 0L, retired = FALSE, detached = FALSE,
+    on_partial = function(p, job) NULL), parent = emptyenv())
+  expect_identical(.wise_step2_async_poll_partials(pjob), length(index$entries))
 })
 
 
@@ -274,4 +338,234 @@ testthat::test_that("async sync-mode flag defaults off and honors env override",
 
   withr::local_envvar(WISEAPP_ASYNC_SYNC = "garbage")
   expect_false(.wise_step2_async_sync())
+})
+
+# ---- partial transport -------------------------------------------------------
+
+.test_partial <- function(kind = "scenario", label = "SSP2-4.5 2030-2040",
+                          ordinal = 1L) {
+  list(schema = 1L, kind = kind, label = label, ordinal = ordinal,
+    groups_total = 2L, n_models = 1L, n_models_requested = 1L,
+    display = list(method = "mean", weight_key = "weighted"),
+    table = data.frame(sim_year = 2030L, value = 1))
+}
+
+.test_partial_job <- function(on_partial = NULL, groups_total = NULL) {
+  root <- tempfile("wiseapp-partials-")
+  dir.create(file.path(root, "partials"), recursive = TRUE)
+  job <- list2env(list(
+    id = "pj", generation = 3L, dependency_signature_digest = "dig",
+    artifact_dir = root, partials_index_file = file.path(root, "partials-index.rds"),
+    partials_delivered = 0L, groups_total = groups_total,
+    retired = FALSE, detached = FALSE, on_partial = on_partial
+  ), parent = emptyenv())
+  job
+}
+
+.test_write_partials <- function(job, partials, id = job$id, generation = job$generation,
+                                 digest = job$dependency_signature_digest,
+                                 seqs = seq_along(partials), sizes = NULL, dir = NULL) {
+  entries <- lapply(seq_along(partials), function(i) {
+    path <- file.path(dir %||% file.path(job$artifact_dir, "partials"),
+      sprintf("%d.rds", seqs[i]))
+    saveRDS(partials[[i]], path, version = 3L)
+    list(seq = seqs[i], kind = "x", label = "x", ordinal = i, path = path,
+      size = if (is.null(sizes)) as.numeric(file.info(path)$size) else sizes[i])
+  })
+  saveRDS(list(schema = 1L, job_id = id, generation = generation,
+    dependency_signature_digest = digest, entries = entries),
+    job$partials_index_file, version = 3L)
+}
+
+testthat::test_that("partials are delivered once, in order, and advance the cursor", {
+  got <- list()
+  job <- .test_partial_job(function(p, job) got[[length(got) + 1L]] <<- p$label)
+  on.exit(unlink(job$artifact_dir, recursive = TRUE), add = TRUE)
+  parts <- list(.test_partial("historical", "Historical", 0L),
+    .test_partial(label = "A", ordinal = 1L))
+  .test_write_partials(job, parts)
+  testthat::expect_identical(.wise_step2_async_poll_partials(job), 2L)
+  testthat::expect_identical(unlist(got), c("Historical", "A"))
+  testthat::expect_identical(job$partials_delivered, 2L)
+  testthat::expect_identical(.wise_step2_async_poll_partials(job), 0L)
+  testthat::expect_length(got, 2L)
+  parts[[3L]] <- .test_partial(label = "B", ordinal = 2L)
+  .test_write_partials(job, parts)
+  .wise_step2_async_poll_partials(job)
+  testthat::expect_identical(unlist(got), c("Historical", "A", "B"))
+})
+
+testthat::test_that("partial index with foreign identity is ignored", {
+  got <- 0L
+  job <- .test_partial_job(function(p, job) got <<- got + 1L)
+  on.exit(unlink(job$artifact_dir, recursive = TRUE), add = TRUE)
+  parts <- list(.test_partial())
+  for (args in list(list(id = "other"), list(generation = 9L), list(digest = "zzz"))) {
+    do.call(.test_write_partials, c(list(job, parts), args))
+    .wise_step2_async_poll_partials(job)
+  }
+  testthat::expect_identical(got, 0L)
+  # missing / unreadable index is tolerated
+  unlink(job$partials_index_file)
+  testthat::expect_identical(.wise_step2_async_poll_partials(job), 0L)
+  writeLines("garbage", job$partials_index_file)
+  testthat::expect_identical(.wise_step2_async_poll_partials(job), 0L)
+})
+
+testthat::test_that("invalid partial entries stop delivery without skipping ahead", {
+  bad <- list(
+    schema = within(.test_partial(), schema <- 2L),
+    kind = within(.test_partial(), kind <- "other"),
+    label = within(.test_partial(), label <- strrep("x", 201)),
+    table = within(.test_partial(), table <- data.frame()),
+    not_df = within(.test_partial(), table <- list(1)),
+    method = within(.test_partial(), display$method <- 1),
+    weight = within(.test_partial(), display$weight_key <- "both"),
+    ordinal = within(.test_partial(), ordinal <- "a")
+  )
+  for (nm in names(bad)) {
+    got <- character()
+    job <- .test_partial_job(function(p, job) got <<- c(got, p$label))
+    .test_write_partials(job, list(bad[[nm]], .test_partial(label = "ok")))
+    .wise_step2_async_poll_partials(job)
+    testthat::expect_length(got, 0L)
+    testthat::expect_identical(job$partials_delivered, 0L)
+    unlink(job$artifact_dir, recursive = TRUE)
+  }
+})
+
+testthat::test_that("partial `tables` are optional but validated when present", {
+  tbl <- data.frame(sim_year = 2030L, value = 1)
+  good <- within(.test_partial(), tables <- list(mean = tbl, gini = tbl))
+  testthat::expect_true(.wise_step2_async_valid_partial(good))
+  testthat::expect_true(.wise_step2_async_valid_partial(.test_partial()))
+  bad <- list(
+    not_list = within(.test_partial(), tables <- tbl),
+    unnamed = within(.test_partial(), tables <- list(tbl)),
+    empty_name = within(.test_partial(), tables <- list(mean = tbl, tbl)),
+    dup_name = within(.test_partial(), tables <- list(mean = tbl, mean = tbl)),
+    not_df = within(.test_partial(), tables <- list(mean = tbl, gini = 1)),
+    empty_df = within(.test_partial(), tables <- list(mean = tbl, gini = tbl[0, ])),
+    no_display_method = within(.test_partial(), tables <- list(gini = tbl)),
+    empty_list = within(.test_partial(), tables <- list())
+  )
+  for (nm in names(bad)) {
+    testthat::expect_false(.wise_step2_async_valid_partial(bad[[nm]]), info = nm)
+  }
+})
+
+testthat::test_that("partial entries enforce size, root, count and sequence rules", {
+  got <- 0L
+  mk <- function(...) .test_partial_job(function(p, job) got <<- got + 1L, ...)
+  # size mismatch
+  job <- mk()
+  .test_write_partials(job, list(.test_partial()), sizes = 1)
+  .wise_step2_async_poll_partials(job)
+  # oversize declared
+  .test_write_partials(job, list(.test_partial()), sizes = 3 * 1024^2)
+  .wise_step2_async_poll_partials(job)
+  unlink(job$artifact_dir, recursive = TRUE)
+  # path outside the artifact root
+  job <- mk()
+  outside <- tempfile("outside-"); dir.create(outside)
+  .test_write_partials(job, list(.test_partial()), dir = outside)
+  .wise_step2_async_poll_partials(job)
+  unlink(c(job$artifact_dir, outside), recursive = TRUE)
+  # more entries than groups_total + 1
+  job <- mk(groups_total = 1L)
+  .test_write_partials(job, rep(list(.test_partial()), 3L))
+  .wise_step2_async_poll_partials(job)
+  unlink(job$artifact_dir, recursive = TRUE)
+  # out-of-order start (gap) and duplicate seq
+  job <- mk()
+  .test_write_partials(job, rep(list(.test_partial()), 2L), seqs = c(2L, 3L))
+  .wise_step2_async_poll_partials(job)
+  testthat::expect_identical(got, 0L)
+  .test_write_partials(job, rep(list(.test_partial()), 2L), seqs = c(1L, 1L))
+  .wise_step2_async_poll_partials(job)
+  testthat::expect_identical(got, 1L)
+  testthat::expect_identical(job$partials_delivered, 1L)
+  unlink(job$artifact_dir, recursive = TRUE)
+})
+
+testthat::test_that("no partial delivery after cancel or detach", {
+  got <- 0L
+  job <- .test_partial_job(function(p, job) got <<- got + 1L)
+  on.exit(unlink(job$artifact_dir, recursive = TRUE), add = TRUE)
+  .test_write_partials(job, list(.test_partial()))
+  job$retired <- TRUE
+  testthat::expect_identical(.wise_step2_async_poll_partials(job), 0L)
+  job$retired <- FALSE; job$detached <- TRUE
+  testthat::expect_identical(.wise_step2_async_poll_partials(job), 0L)
+  testthat::expect_identical(got, 0L)
+
+  state <- .wise_step2_async_state
+  det <- list2env(list(id = "det-partial", on_partial = function(...) NULL,
+    on_status = function(...) NULL), parent = emptyenv())
+  assign(det$id, det, envir = state$jobs)
+  on.exit(rm(list = "det-partial", envir = state$jobs), add = TRUE)
+  .wise_step2_async_detach("det-partial")
+  testthat::expect_null(det$on_partial)
+})
+
+testthat::test_that("settle drains outstanding partials before on_result", {
+  state <- .wise_step2_async_state
+  old_active <- state$active
+  on.exit(state$active <- old_active, add = TRUE)
+  order <- character()
+  root <- tempfile("wiseapp-settle-"); dir.create(file.path(root, "partials"), recursive = TRUE)
+  ctl <- tempfile("wiseapp-ctl-"); dir.create(ctl)
+  on.exit(unlink(c(root, ctl), recursive = TRUE), add = TRUE)
+  job <- list2env(list(
+    id = "settle-drain", generation = 1L, dependency_signature_digest = "d",
+    artifact_dir = root, control_dir = ctl,
+    lock_file = file.path(ctl, "publication.lock"),
+    retired_file = file.path(ctl, "retired.rds"),
+    partials_index_file = file.path(root, "partials-index.rds"),
+    partials_delivered = 0L, retired = FALSE, detached = FALSE,
+    weather_store_root = file.path(root, "weather"),
+    on_partial = function(p, job) order <<- c(order, "partial"),
+    on_result = function(manifest, job) { order <<- c(order, "result"); TRUE }
+  ), parent = emptyenv())
+  assign(job$id, job, envir = state$jobs)
+  .test_write_partials(job, list(.test_partial("historical", "Historical", 0L)))
+  .wise_step2_async_settle(job, manifest = list(status = "succeeded"))
+  testthat::expect_identical(order, c("partial", "result"))
+})
+
+testthat::test_that("successful settle releases the worker slot so the next run dispatches", {
+  state <- .wise_step2_async_state
+  old_active <- state$active
+  old_queue <- state$queue
+  on.exit({ state$active <- old_active; state$queue <- old_queue }, add = TRUE)
+  root <- tempfile("wiseapp-settle-"); dir.create(file.path(root, "partials"), recursive = TRUE)
+  ctl <- tempfile("wiseapp-ctl-"); dir.create(ctl)
+  on.exit(unlink(c(root, ctl), recursive = TRUE), add = TRUE)
+  job <- list2env(list(
+    id = "settle-release", generation = 1L, dependency_signature_digest = "d",
+    artifact_dir = root, control_dir = ctl,
+    lock_file = file.path(ctl, "publication.lock"),
+    retired_file = file.path(ctl, "retired.rds"),
+    partials_index_file = file.path(root, "partials-index.rds"),
+    partials_delivered = 0L, retired = FALSE, detached = FALSE,
+    weather_store_root = file.path(root, "weather"),
+    on_result = function(manifest, job) TRUE
+  ), parent = emptyenv())
+  assign(job$id, job, envir = state$jobs)
+  state$active <- job$id
+  state$queue <- list()
+  .wise_step2_async_settle(job, manifest = list(status = "succeeded"))
+  testthat::expect_null(state$active)
+  testthat::expect_false(exists(job$id, envir = state$jobs, inherits = FALSE))
+})
+
+testthat::test_that("dispatch frees a slot held by a job that no longer exists", {
+  state <- .wise_step2_async_state
+  old_active <- state$active
+  old_queue <- state$queue
+  on.exit({ state$active <- old_active; state$queue <- old_queue }, add = TRUE)
+  state$active <- "gone-job"
+  state$queue <- list()
+  .wise_step2_async_dispatch()
+  testthat::expect_null(state$active)
 })

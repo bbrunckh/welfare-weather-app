@@ -268,7 +268,7 @@ mod_3_scenario_server <- function(id,
       education_scenario = s6$education_scenario,
       residuals = residuals,
       stale = s6$stale,
-      decomp_result = s6$decomp_result,
+      decomp_scenarios = s6$decomp_scenarios,
       decomp_context = s6$decomp_context,
       annual_channels = s6$annual_channels,
       baseline_svy = s6$baseline_svy,
@@ -305,7 +305,6 @@ mod_3_scenario_server <- function(id,
     # Decomposition tab: effect channels ----
     mod_3_09_decomposition_server(
       "decomposition",
-      decomp_result = s6$decomp_result,
       decomp_scenarios = s6$decomp_scenarios,
       decomp_context = s6$decomp_context,
       model_fit = model_fit,
@@ -340,7 +339,7 @@ mod_3_scenario_server <- function(id,
     decomp_tab_added <- reactiveVal(FALSE)
     observeEvent(s6$sim_run_id(),
       {
-        req(s6$sim_run_id() > 0, s6$decomp_result())
+        req(s6$sim_run_id() > 0, s6$decomp_scenarios())
         if (!decomp_tab_added()) {
           shiny::appendTab(
             inputId = "step3_output_tabs",

@@ -131,28 +131,33 @@ step2_incidence_by_decile <- function(svy, outcome, hist_pipeline,
     )
 }
 
-step3_incidence_by_decile <- function(decomp, svy, outcome,
-                                      baseline_deciles = NULL) {
-  if (is.null(decomp) || !nrow(decomp) || is.null(svy)) {
+#' Step 3 policy effect by fixed baseline decile, on the decomposition basis.
+#'
+#' Reads the compact per-year channels used by the decomposition tab, so every
+#' scenario (Historical included) follows the same weather-year bases as its
+#' selector: the equal-model mean over simulated years or the shared adverse-year
+#' rule, in outcome units. Bases that are unavailable (too few simulated years)
+#' are omitted.
+step3_incidence_by_decile <- function(compact, so = NULL, bases = .decomp_basis_choices) {
+  if (!.is_compact_decomp_scenarios(compact)) {
     return(data.frame())
   }
-  weight_col <- baseline_weight_column(svy)
-  deciles <- baseline_deciles %||% weighted_baseline_deciles(svy, outcome, weight_col)
-  if (!"id" %in% names(decomp)) decomp$id <- seq_len(nrow(decomp))
-  decomp$decile <- deciles[as.integer(decomp$id)]
-  decomp$weight <- if ("weight" %in% names(decomp)) decomp$weight else if (!is.null(weight_col)) as.numeric(svy[[weight_col]])[decomp$id] else 1
-  value_col <- if ("delta_total" %in% names(decomp)) "delta_total" else "effect"
-  dplyr::filter(
-    decomp, is.finite(.data$decile), is.finite(.data[[value_col]]),
-    is.finite(.data$weight), .data$weight > 0
-  ) |>
-    dplyr::group_by(.data$decile) |>
-    dplyr::summarise(
-      effect = stats::weighted.mean(.data[[value_col]], .data$weight),
-      n_households = dplyr::n(),
-      weighted_population = sum(.data$weight),
-      .groups = "drop"
-    )
+  rows <- lapply(unname(bases), function(basis) {
+    lapply(.compact_future_scenarios(compact), function(scenario) {
+      deciles <- .compact_future_decile_summary(compact, scenario, basis, so)
+      if (!nrow(deciles)) {
+        return(NULL)
+      }
+      members <- .decomp_scenario_rows(compact, scenario, decile = TRUE)$member
+      data.frame(
+        scenario = scenario, basis = basis, decile = deciles$decile,
+        effect = deciles$total,
+        n_models = length(unique(as.character(members))),
+        stringsAsFactors = FALSE
+      )
+    })
+  })
+  dplyr::bind_rows(rows)
 }
 
 plot_incidence_by_decile <- function(tbl, y_label = "Household-level simulated welfare effect") {
@@ -160,7 +165,12 @@ plot_incidence_by_decile <- function(tbl, y_label = "Household-level simulated w
     return(blank_plot("Distributional incidence is unavailable."))
   }
   if (!"scenario" %in% names(tbl)) tbl$scenario <- "Effect"
-  ggplot2::ggplot(tbl, ggplot2::aes(
+  multi_basis <- "basis" %in% names(tbl) && length(unique(tbl$basis)) > 1L
+  if (multi_basis) {
+    tbl$basis <- factor(tbl$basis, levels = unname(.decomp_basis_choices),
+      labels = names(.decomp_basis_choices))
+  }
+  p <- ggplot2::ggplot(tbl, ggplot2::aes(
     x = factor(.data$decile), y = .data$effect,
     fill = .data$scenario
   )) +
@@ -174,6 +184,8 @@ plot_incidence_by_decile <- function(tbl, y_label = "Household-level simulated w
     ) +
     theme_wise(base_size = 13) +
     ggplot2::theme(legend.position = "bottom")
+  if (multi_basis) p <- p + ggplot2::facet_wrap(ggplot2::vars(.data$basis))
+  p
 }
 
 # Interactive (echarts4r) counterpart of plot_incidence_by_decile().
