@@ -202,7 +202,6 @@ test_that("failed annual policy runs retain all previously published results", {
            annual_channels = new.env(parent = emptyenv()),
            decomp_scenarios = data.frame(run = "first"),
            correction_version = "row_aligned_annual_v1"),
-    .prepare_decomp_adverse_bases = function(...) list(),
     .finalize_decomposition_context = function(context, ...) context,
     .decompose_policy_effect_run = function(...) {
       if (fail_decomp) stop("forced decomposition failure")

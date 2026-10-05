@@ -140,14 +140,6 @@ test_that("outcome decomposition charts report weighted outcome-unit channels", 
   expect_s3_class(bars, "echarts4r")
 })
 
-test_that("historical adverse basis selects one adverse weather year", {
-  decomp <- data.frame(sim_year = c(2001, 2002, 2003),
-    delta_total = c(-1, 2, -3), weight = 1)
-  selected <- select_decomp_weather_basis(decomp, "adverse_10",
-    list(name = "welfare", type = "numeric"))
-  expect_equal(selected$sim_year, 2003)
-})
-
 test_that("echart_decomposition_channels_by_decile stacks channels and marks totals", {
   set.seed(3)
   rows <- data.frame(

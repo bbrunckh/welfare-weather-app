@@ -347,8 +347,6 @@ filter_historically_supported_return_periods <- function(central, rp_map,
       period <- suppressWarnings(as.numeric(sub("^Adverse 1-in-", "", label)))
       is.finite(period) && period >= 1 && n_years >= ceiling(period)
     }, logical(1))])
-  } else {
-    supported <- character()
   }
   central[central$rp_label %in% supported, , drop = FALSE]
 }

@@ -321,14 +321,6 @@ mod_3_06_policy_sim_server <- function(id,
                 NULL
               }
 
-              adverse_bases_pre <- if (exists(".prepare_decomp_adverse_bases",
-                mode = "function"
-              )) {
-                .prepare_decomp_adverse_bases(hs$weather_raw, hs, hs$so)
-              } else {
-                list()
-              }
-
               # W2-D: all decomposition calls in this published run share
               # invariant survey/model state. Weather hazards remain supplied
               # per panel so member-specific and year-specific weather cannot
@@ -338,11 +330,9 @@ mod_3_06_policy_sim_server <- function(id,
                 so = hs$so, deltas = deltas_pre,
                 skip_coef = skip_coef_val, F_hat = F_hat_pre,
                 run_identity = paste0("generation-", run_generation()),
-                weather_panels = Filter(Negate(is.null), c(
-                  list(step2_resolve_weather(hs$weather_raw, hs)),
-                  unname(adverse_bases_pre)
-                )),
-                adverse_bases = adverse_bases_pre
+                weather_panels = Filter(Negate(is.null), list(
+                  step2_resolve_weather(hs$weather_raw, hs)
+                ))
               )
               if (is.null(decomp_context)) {
                 stop("Unable to prepare policy decomposition context.", call. = FALSE)
@@ -378,22 +368,6 @@ mod_3_06_policy_sim_server <- function(id,
                 stop("Effect decomposition produced no results.", call. = FALSE)
               }
 
-              adverse_decompositions <- lapply(
-                names(decomp_context$adverse_bases),
-                function(basis) {
-                  tryCatch(
-                    .decompose_policy_effect_run(
-                      context = decomp_context,
-                      run_identity = decomp_context$run_identity,
-                      weather_raw = decomp_context$adverse_bases[[basis]]
-                    ),
-                    error = function(e) NULL
-                  )
-                }
-              )
-              names(adverse_decompositions) <- names(decomp_context$adverse_bases)
-              adverse_decompositions <- Filter(Negate(is.null), adverse_decompositions)
-
               # Production future summaries have already been reduced from the
               # exact channel blocks used to correct every member's predictions.
               shiny::setProgress(value = 0.90, detail = "Finalizing scenario summaries...")
@@ -420,9 +394,7 @@ mod_3_06_policy_sim_server <- function(id,
           # (simulation + decomposition) succeeded, so a failure anywhere
           # above leaves the previous results, diagnostics, and run ID intact.
           # INT-08: the policy run signature is stored with both result arms.
-          final_context <- .finalize_decomposition_context(
-            decomp_context, adverse_decompositions
-          )
+          final_context <- .finalize_decomposition_context(decomp_context)
           final_bundle <- .publish_decomposition_bundle(
             decomp_bundle_rv(), decomp, final_context, success = TRUE
           )

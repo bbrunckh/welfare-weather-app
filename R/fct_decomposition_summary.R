@@ -202,6 +202,8 @@ echart_outcome_decomposition_headline <- function(data, y_label = "Weighted aver
   e$x$opts$xAxis[[1L]]$data <- as.character(data$channel)
   e$x$opts$legend <- list(show = FALSE)
   e$x$opts$series[[1L]]$data <- as.list(data$value)
+  # One series, one colour per channel bar (matches the decile chart palette).
+  e$x$opts$series[[1L]]$colorBy <- "data"
   e$x$opts$yAxis[[1L]]$name <- y_label
   e$x$opts$yAxis[[1L]]$nameLocation <- "end"
   e$x$opts$yAxis[[1L]]$nameRotate <- 0

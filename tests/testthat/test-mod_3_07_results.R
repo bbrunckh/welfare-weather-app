@@ -12,13 +12,13 @@ test_that("technical decomposition cannot export logistic policy effects", {
     model_fit = reactiveVal(list(engine = "fixest", model_type = "logistic")),
     so = reactiveVal(list(name = "indicator", type = "numeric", transform = "none"))), {
     session$flushReact()
-    expect_null(selected_decomp_result())
+    expect_null(decomp_result())
+    expect_identical(policy_method_status()$status, "unsupported")
+    expect_match(policy_method_status()$reason, "response-scale", fixed = TRUE)
     expect_equal(nrow(headline_decomp_data()), 0)
-    exported <- session$userData$wise_exports$items$policy_decomposition_summary$fun()
-    expect_identical(exported$availability, "unsupported")
-    expect_match(exported$reason, "response-scale", fixed = TRUE)
-    expect_identical(session$userData$wise_exports$items$policy_decomposition_headline_data$fun()$availability,
-      "unsupported")
+    expect_equal(nrow(decile_decomp_data()), 0)
+    exported <- session$userData$wise_exports$items$policy_decomposition_headline_data$fun()
+    expect_identical(names(exported), "Message")
   })
 })
 

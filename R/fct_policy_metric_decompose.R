@@ -149,6 +149,18 @@
   exposure
 }
 
+# Household-level channel changes in outcome units. For log outcomes this is
+# the same conversion as `.decomposition_outcome_channels()`.
+.policy_level_channels <- function(ch, is_log, baseline) {
+  if (!is_log) return(cbind(ch$delta_main, ch$delta_res1, ch$delta_res2, ch$delta_total))
+  cbind(
+    (exp(ch$delta_main) - 1) * baseline,
+    exp(ch$delta_main) * (exp(ch$delta_res1) - 1) * baseline,
+    exp(ch$delta_main + ch$delta_res1) * (exp(ch$delta_res2) - 1) * baseline,
+    (exp(ch$delta_main + ch$delta_res1 + ch$delta_res2) - 1) * baseline
+  )
+}
+
 .policy_annual_channels <- function(pipeline, prepared, run_identity,
                                     rows = seq_along(pipeline$y_point)) {
   if (!is.environment(prepared) || !environmentIsLocked(prepared)) {
@@ -212,8 +224,12 @@
   channel_stats <- decile_stats <- NULL
   stat_names <- as.vector(rbind(paste0("sum_", .compact_decomp_channels),
     paste0("weight_", .compact_decomp_channels)))
-  baseline_stat_names <- c("sum_baseline_y_point", "weight_baseline_y_point")
+  baseline_stat_names <- c("sum_baseline_y_point", "weight_baseline_y_point",
+    "sum_baseline_level", "weight_baseline_level",
+    as.vector(rbind(paste0("sum_", .compact_level_channels),
+      paste0("weight_", .compact_level_channels))))
   stat_names <- c(stat_names, baseline_stat_names)
+  is_log_outcome <- identical(prepared$context$so$transform %||% "", "log")
   accumulate <- function(current, values, group, n_groups) {
     if (is.null(current)) current <- matrix(0, n_groups, ncol(values))
     grouped <- rowsum(values, group, reorder = FALSE)
@@ -245,6 +261,25 @@
       baseline_value[!is.finite(baseline_value)] <- 0
       stats[, channel_count + 1L] <- baseline_value * baseline_weight
       stats[, channel_count + 2L] <- baseline_weight
+      # Outcome-level baseline (back-transformed for log outcomes): the annual
+      # mean ranked by the adverse-year rule, as in Step 2 and Step 3 results.
+      level_value <- if (is_log_outcome) exp(baseline_value) else baseline_value
+      level_weight <- baseline_weight
+      level_weight[!is.finite(level_value)] <- 0
+      level_value[!is.finite(level_value)] <- 0
+      stats[, channel_count + 3L] <- level_value * level_weight
+      stats[, channel_count + 4L] <- level_weight
+      # Outcome-unit channels, converted household by household against the
+      # observed baseline outcome (the level each log effect was computed on).
+      # Averaging log effects first and converting afterwards is biased.
+      lvl <- .policy_level_channels(ch, is_log_outcome, as.numeric(
+        prepared$context$svy_baseline[[prepared$context$outcome]])[pipeline$svy_row_id[rows]])
+      lvl_weight <- weights * is.finite(lvl)
+      lvl[!is.finite(lvl)] <- 0
+      for (k in seq_along(.compact_level_channels)) {
+        stats[, channel_count + 4L + 2L * k - 1L] <- lvl[, k] * lvl_weight[, k]
+        stats[, channel_count + 4L + 2L * k] <- lvl_weight[, k]
+      }
       year_id <- match(pipeline$sim_year[rows], years)
       channel_stats <- accumulate(channel_stats, stats, year_id, length(years))
       deciles <- prepared$context$baseline_deciles[pipeline$svy_row_id[rows]]

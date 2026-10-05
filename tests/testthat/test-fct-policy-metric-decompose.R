@@ -567,7 +567,7 @@ test_that("production validates once per pipeline and fails closed without predi
   }
 })
 
-test_that("technical adverse deciles use the selected member-year support", {
+test_that("adverse decomposition is unavailable without enough baseline years", {
   fx <- annual_channel_fixture()
   other <- fx$pipeline
   other$weather_exposure$table$temp <- other$weather_exposure$table$temp * 10
@@ -576,7 +576,29 @@ test_that("technical adverse deciles use the selected member-year support", {
     list(future = list(pipelines = list(a = fx$pipeline, b = other))),
     decomp_context = fx$context, run_identity = "annual-run")
   compact <- out$decomp_scenarios
-  selected <- .compact_future_year(compact, "future", "adverse_20", fx$context$so)
-  expect_equal(nrow(selected), 1L)
+  expect_true(all(c("sum_baseline_level", "weight_baseline_level") %in%
+    names(compact$channel_summary)))
+  expect_true(all(c("sum_baseline_level", "weight_baseline_level") %in%
+    names(compact$decile_summary)))
+  expect_true("Historical" %in% compact$scenario_order)
+  # Too few simulated years for a 1-in-20 rank: unavailable, not a fallback year.
+  expect_equal(nrow(.compact_future_decomp(compact, "future", "adverse_20", fx$context$so)), 0L)
   expect_equal(nrow(.compact_future_decile_summary(compact, "future", "adverse_20", fx$context$so)), 0L)
+})
+
+test_that("compact level channels convert log effects per household before averaging", {
+  fx <- annual_channel_fixture(transform = "log")
+  out <- apply_policy_delta_to_baseline(fx$base, fx$policy, fx$model, fx$context$so,
+    list(pipeline = fx$pipeline), decomp_context = fx$context, run_identity = "annual-run")
+  rows <- out$decomp_scenarios$channel_summary
+  ch <- .policy_annual_channels(fx$pipeline, out$annual_channels, "annual-run")
+  w <- fx$pipeline$weight %||% rep(1, length(fx$pipeline$y_point))
+  b <- fx$base$welfare[fx$pipeline$svy_row_id]
+  year <- fx$pipeline$sim_year == rows$sim_year[[1L]]
+  expected <- stats::weighted.mean(((exp(ch$delta_total) - 1) * b)[year], w[year])
+  expect_equal(rows$sum_lvl_total[[1L]] / rows$weight_lvl_total[[1L]], expected)
+  # Not the (biased) conversion of the averaged log effect.
+  naive <- (exp(stats::weighted.mean(ch$delta_total[year], w[year])) - 1) *
+    stats::weighted.mean(b[year], w[year])
+  expect_false(isTRUE(all.equal(expected, naive, tolerance = 1e-12)))
 })

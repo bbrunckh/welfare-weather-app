@@ -378,14 +378,16 @@ test_that("step2 adverse dot data extracts supported periods and ensemble bounds
   tbl <- data.frame(
     scenario = c("Historical", "Historical", "SSP2-4.5 / 2030", "SSP2-4.5 / 2030", "SSP2-4.5 / 2030"),
     Estimate = c("Central (P50)", "Central (P50)", "Central (P50)", "Ensemble 0%", "Ensemble 100%"),
-    rp_name = c("1:1", "9:10", "1:1", "1:1", "1:1"),
+    rp_name = c("1:1", "1:10", "1:1", "1:1", "1:1"),
     value = c(10, 8, 12, 11, 14),
+    n_obs = 20,
     is_historical = c(TRUE, TRUE, FALSE, FALSE, FALSE),
     stringsAsFactors = FALSE
   )
   out <- wiseapp:::step2_adverse_dot_data(tbl, method = "mean")
   expect_true(nrow(out) >= 1)
   expect_true("rp_label" %in% names(out))
+  expect_setequal(as.character(out$rp_label[out$is_historical]), c("Expected", "Adverse 1-in-10"))
   fut <- out[!out$is_historical, ]
   if (nrow(fut)) {
     expect_equal(fut$intermod_lo[[1]], 11)

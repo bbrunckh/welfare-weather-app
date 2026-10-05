@@ -374,20 +374,6 @@ test_that("technical decomposition table handles unavailable weather bases", {
   )
 })
 
-test_that("weather basis selects adverse years for future decompositions", {
-  sc <- data.frame(
-    scenario = rep("SSP3-7.0 / 2025-2035", 3),
-    sim_year = 2025:2027,
-    delta_total = c(0.10, 0.30, 0.20),
-    weight = 1
-  )
-
-  selected <- wiseapp:::select_decomp_weather_basis(
-    sc, basis = "adverse_10", so = list(name = "welfare", type = "numeric")
-  )
-  expect_identical(selected$sim_year, 2025L)
-})
-
 test_that("one decomposition context preserves central values and schemas", {
   fx <- make_ols_fixture()
   ctx <- wiseapp:::.build_decomposition_context(
