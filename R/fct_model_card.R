@@ -64,9 +64,10 @@ model_covariate_counts <- function(selected_model) {
     )],
     function(x) length(unlist(x)), integer(1)
   )
-  n <- n[n > 0L]
-  names(n) <- c("household", "area", "individual", "firm")[seq_along(n)]
-  n[n > 0]
+  # Name before dropping zero roles so an area-only spec is not labelled
+  # "household".
+  names(n) <- c("household", "area", "individual", "firm")
+  n[n > 0L]
 }
 
 #' Total number of covariates in the model spec

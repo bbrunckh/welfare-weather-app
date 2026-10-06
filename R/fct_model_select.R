@@ -285,12 +285,13 @@ filter_vars_by_role <- function(variable_list, role, extra_filter = NULL) {
     return(variable_list[0L, , drop = FALSE])
   }
 
-  out <- variable_list[variable_list[[role]] == 1L, , drop = FALSE]
+  # %in% is NA-safe: a missing role flag must not inject an all-NA row.
+  out <- variable_list[variable_list[[role]] %in% 1L, , drop = FALSE]
 
   if (!is.null(extra_filter)) {
     for (col in names(extra_filter)) {
       if (col %in% names(out)) {
-        out <- out[out[[col]] != extra_filter[[col]], , drop = FALSE]
+        out <- out[!out[[col]] %in% extra_filter[[col]], , drop = FALSE]
       }
     }
   }

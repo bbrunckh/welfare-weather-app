@@ -1185,7 +1185,7 @@ merge_loc_values_to_cells <- function(cell_map, loc_vals, by_wave = TRUE) {
 #' @return The display-ready summary data frame.
 #' @noRd
 stats_table_frame <- function(df, vl, flag_col = NULL, vars = NULL, base = NULL) {
-  target <- if (!is.null(vars)) vars else vl$name[vl[[flag_col]] == 1]
+  target <- if (!is.null(vars)) vars else vl$name[vl[[flag_col]] %in% 1]
   vars <- intersect(target, names(df))
   if (length(vars) == 0) {
     tag <- flag_col %||% "specified"
@@ -1374,7 +1374,7 @@ stats_display_base <- function(df, vl, vars) {
 stats_display_slice <- function(base, vl, flag_col = NULL, vars = NULL,
                                 round_digits = NULL) {
   display <- base$display
-  target <- if (!is.null(vars)) vars else vl$name[vl[[flag_col]] == 1]
+  target <- if (!is.null(vars)) vars else vl$name[vl[[flag_col]] %in% 1]
   tab <- display[display$.var %in% target, , drop = FALSE]
   tab$.var <- NULL
   if (!nrow(tab)) {
@@ -1477,7 +1477,7 @@ build_stats_table <- function(survey_data, variable_list, flag_col = NULL,
   base_value <- tryCatch(if (is.function(base)) base() else base,
     error = function(e) NULL
   )
-  target <- if (!is.null(vars)) vars else vl$name[vl[[flag_col]] == 1]
+  target <- if (!is.null(vars)) vars else vl$name[vl[[flag_col]] %in% 1]
   if (!is.null(base_value) && !is.null(base_value$display) &&
     !is.null(base_value$vars) && all(target %in% base_value$vars)) {
     return(stats_display_slice(base_value, vl,

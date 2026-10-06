@@ -47,6 +47,32 @@ test_that("covariate counts break down by role, dropping zeros", {
   expect_identical(model_covariate_total(sm), 7L)
 })
 
+test_that("R2-BUG-20: covariate counts keep role names when roles are empty", {
+  sm <- make_model_spec(
+    ind_covariates = character(0), hh_covariates = character(0)
+  )
+  expect_identical(model_covariate_counts(sm), c(area = 2L))
+  sm <- make_model_spec()
+  expect_identical(
+    model_covariate_counts(sm),
+    c(household = 3L, area = 2L, individual = 2L)
+  )
+})
+
+test_that("R2-BUG-20: role filters ignore NA flags instead of adding NA rows", {
+  vl <- data.frame(
+    name = c("a", "b", "c", "d"),
+    hh   = c(1L, NA, 0L, 1L),
+    type = c("numeric", "numeric", "binary", NA),
+    stringsAsFactors = FALSE
+  )
+  out <- filter_vars_by_role(vl, "hh")
+  expect_identical(out$name, c("a", "d"))
+  out <- filter_vars_by_role(vl, "hh", extra_filter = list(type = "binary"))
+  expect_identical(out$name, c("a", "d"))
+  expect_false(anyNA(out$name))
+})
+
 test_that("model_card_rows renders one concise equation line", {
   rows <- model_card_rows(
     make_model_spec(),

@@ -374,7 +374,8 @@ run_lasso_selection <- function(
   # 4. Candidate pool (now correctly excludes int_vars) ----
   if (is.null(valid_vl) || nrow(valid_vl) == 0) stop("Variable list not available or empty.")
   allowed <- valid_vl$name[
-    (valid_vl$ind == 1 | valid_vl$hh == 1 | valid_vl$area == 1 | valid_vl$firm == 1) &
+    (valid_vl$ind %in% 1 | valid_vl$hh %in% 1 | valid_vl$area %in% 1 |
+      valid_vl$firm %in% 1) &
       (is.na(valid_vl$outcome) | valid_vl$outcome == 0)
   ]
   exclude <- unique(c(y_var, core_main_terms))
