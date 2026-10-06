@@ -899,7 +899,14 @@ fct_run_simulation <- function(sw,
       if (is.null(group_n[[gk]])) group_n[[gk]] <<- 0L
       member_type <- sub(".*_(ensemble_mean|ensemble_lo|ensemble_hi)$", "\\1", key)
       if (!nchar(member_type) || member_type == key) {
-        member_type <- paste0("model_", group_n[[gk]] + 1L)
+        # Keep the GCM name from the member key; fall back to model_<n>.
+        gcm <- sub("^ssp[^_]+_[^_]+_[^_]+_[0-9]{4}_[0-9]{4}_", "", key)
+        member_type <- if (nzchar(gcm) && gcm != key &&
+                           !gcm %in% names(group_agg[[gk]])) {
+          gcm
+        } else {
+          paste0("model_", group_n[[gk]] + 1L)
+        }
       }
       if (identical(weather_storage, "reference")) out$weather_raw <- weather_refs[[key]]
       group_agg[[gk]][[member_type]] <<- out

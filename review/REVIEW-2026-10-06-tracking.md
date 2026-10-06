@@ -173,7 +173,7 @@ Triage each: fix, or mark `✗` with a reason. Group by file to keep diffs small
 | CR-BUG-10 | L | S | ☐ | One Gini definition; NA-safe weighted median | Only without weights |
 | CR-BUG-11 | L | S | ☑ | Four orphan inputs in `mod_2_02` | f8b564f: orphan inputs replaced by defaults (bw 0.05, p10_p90, scenario_x_year, show_coef FALSE); tests updated. |
 | CR-BUG-12 | L | S | ☑ | Namespace `#results_section` | 72a8d9f: results_section container and selectors use ns(); static test. |
-| CR-BUG-13 | L | S | ☐ | Keep GCM names in `model_n` | |
+| CR-BUG-13 | L | S | ☑ | Keep GCM names in `model_n` | |
 | CR-BUG-15 | L | S | ☑ | Move S3 methods out of module closure | 073f290: methods at top level, registered as S3 in NAMESPACE (needed for testServer dispatch); laziness test. |
 | CR-BUG-17 | L | S | ☑ | `ORDER BY` before `head(1)` for H3 resolution | 6ebfcb5: .h3_resolution() over all rows, errors on mixed resolutions; test. CMIP6 path still falls back silently to target resolution on error (flag). |
 | CR-BUG-18 | L | S | ☐ | Consistent `skip_coef_draws` flag; safe env parsing | |
