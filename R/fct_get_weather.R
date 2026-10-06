@@ -27,10 +27,15 @@
 # scan would have produced, in the same scan order (DuckDB is pinned to one    #
 # thread for the duration of get_weather, so order is deterministic).          #
 #                                                                              #
-# Keying: digest of (cache version, resolved file paths, variable columns,     #
-# date bounds). The version constant must be bumped whenever the upstream      #
-# file layout changes. Kill switch: WISEAPP_WEATHER_CACHE_DISABLE=1. Size cap: #
-# WISEAPP_WEATHER_CACHE_MAX_MB (default 2048), LRU-evicted by mtime.           #
+# Keying: digest of (cache version, source identity, resolved file paths,      #
+# variable columns, date bounds). The source identity (backend type, host,     #
+# bucket/container, prefix, path root, repo - never credentials) keeps two     #
+# data sources with the same relative file names apart. The version constant  #
+# must be bumped whenever the upstream file layout changes. Kill switch:       #
+# WISEAPP_WEATHER_CACHE_DISABLE=1. Size cap: WISEAPP_WEATHER_CACHE_MAX_MB      #
+# (default 2048), LRU-evicted by mtime (touched on every hit); files younger   #
+# than the async run timeout are never evicted. The directory is created      #
+# owner-only (0700) and writes go through a unique temp file plus rename.      #
 
 WISEAPP_WX_CACHE_VERSION <- "v1"
 WISEAPP_WX_ROUND_DIGITS <- 5L
@@ -262,14 +267,48 @@ WISEAPP_WX_ROUND_DIGITS <- 5L
   if (total_mb <= max_mb) {
     return(invisible(NULL))
   }
-  # LRU: delete oldest-accessed files first until under budget
+  # Never evict a file a live run may still be reading: anything used within
+  # the async run timeout (default 90 minutes, also when the timeout is off).
+  min_age_sec <- (.wise_step2_async_timeout_ms("step2") %||% (90 * 60 * 1000)) / 1000
+  evictable <- difftime(Sys.time(), info$mtime, units = "secs") >= min_age_sec
+  evictable[is.na(evictable)] <- FALSE
+  # LRU: delete least recently used files first (hits touch mtime) until
+  # under budget
   ord <- order(info$mtime)
-  for (f in files[ord]) {
+  for (f in files[ord][evictable[ord]]) {
     if (total_mb <= max_mb) break
     sz <- info[f, "size"]
     if (unlink(f) == 0 && is.finite(sz)) total_mb <- total_mb - sz / 1024^2
   }
   invisible(NULL)
+}
+
+# Identity of the data source for cache keys: backend type plus the fields
+# that locate the store. Credentials are deliberately excluded.
+.wx_cache_source_id <- function(connection_params) {
+  cp <- connection_params %||% list()
+  type <- cp$type %||% "local"
+  fields <- switch(type,
+    local = "path",
+    s3 = c("bucket", "prefix", "region"),
+    gcs = c("bucket", "prefix"),
+    azure = c("account", "container", "prefix"),
+    hf = c("repo", "subdir"),
+    databricks = c("workspace", "volume_path"),
+    character()
+  )
+  id <- vapply(fields, function(f) as.character(cp[[f]] %||% "")[1L], character(1L))
+  if (identical(type, "local") && nzchar(id[["path"]])) {
+    id[["path"]] <- normalizePath(id[["path"]], winslash = "/", mustWork = FALSE)
+  }
+  c(type = type, id)
+}
+
+# Unique temp file next to `path`, so concurrent writers (main process, async
+# worker, other Connect processes) never share a partial file.
+.wx_cache_tmp_path <- function(path) {
+  tempfile(pattern = paste0(basename(path), "-"), tmpdir = dirname(path),
+           fileext = ".tmp")
 }
 
 #' Load a remote weather/h3 parquet set through the bounded disk cache.
@@ -308,7 +347,10 @@ WISEAPP_WX_ROUND_DIGITS <- 5L
   use_cache <- (!identical(type, "local") || force_cache) &&
     !isTRUE(Sys.getenv("WISEAPP_WEATHER_CACHE_DISABLE") %in% c("1", "true", "TRUE"))
 
-  key <- digest::digest(list(cache_version, sort(fnames), cols, tcol, tmin, tmax))
+  key <- digest::digest(list(
+    cache_version, .wx_cache_source_id(connection_params),
+    sort(fnames), cols, tcol, tmin, tmax
+  ))
   dir <- .weather_cache_dir()
   path <- file.path(dir, paste0(key, ".parquet"))
 
@@ -320,6 +362,8 @@ WISEAPP_WX_ROUND_DIGITS <- 5L
       error = function(e) NULL
     )
     if (!is.null(local)) {
+      # LRU: a hit marks the slice as recently used for eviction.
+      try(Sys.setFileTime(path, Sys.time()), silent = TRUE)
       return(apply_slice(local))
     }
   }
@@ -331,19 +375,20 @@ WISEAPP_WX_ROUND_DIGITS <- 5L
   }
 
   if (!file.exists(path)) {
-    dir.create(dir, showWarnings = FALSE, recursive = TRUE)
+    dir.create(dir, showWarnings = FALSE, recursive = TRUE, mode = "0700")
     filtered <- apply_slice(lazy)
     con <- .duck_con()
-    tmp_path <- paste0(path, ".tmp")
+    tmp_path <- .wx_cache_tmp_path(path)
     ok <- tryCatch(
       {
         DBI::dbExecute(con, sprintf(
-          "COPY (%s) TO '%s' (FORMAT PARQUET, COMPRESSION ZSTD);",
-          dbplyr::sql_render(filtered), tmp_path
+          "COPY (%s) TO %s (FORMAT PARQUET, COMPRESSION ZSTD);",
+          dbplyr::sql_render(filtered), .sql_literal(tmp_path)
         ))
         TRUE
       },
       error = function(e) {
+        try(unlink(tmp_path), silent = TRUE)
         warning("[wiseapp] weather disk cache write failed; continuing remote: ",
           conditionMessage(e),
           call. = FALSE
@@ -405,11 +450,14 @@ WISEAPP_WX_LOC_CACHE_VERSION <- "v1"
   }
   ok <- tryCatch(
     {
-      if (!dir.exists(dir)) dir.create(dir, showWarnings = FALSE, recursive = TRUE)
-      tmp_path <- paste0(path, ".tmp")
+      if (!dir.exists(dir)) {
+        dir.create(dir, showWarnings = FALSE, recursive = TRUE, mode = "0700")
+      }
+      tmp_path <- .wx_cache_tmp_path(path)
+      on.exit(if (file.exists(tmp_path)) unlink(tmp_path), add = TRUE)
       DBI::dbExecute(con, sprintf(
-        "COPY (SELECT * FROM %s) TO '%s' (FORMAT PARQUET, COMPRESSION ZSTD);",
-        temp_table, tmp_path
+        "COPY (SELECT * FROM %s) TO %s (FORMAT PARQUET, COMPRESSION ZSTD);",
+        temp_table, .sql_literal(tmp_path)
       ))
       if (!file.rename(tmp_path, path)) {
         # Concurrent write race: another session won; discard our copy
@@ -442,8 +490,8 @@ WISEAPP_WX_LOC_CACHE_VERSION <- "v1"
   ok <- tryCatch(
     {
       DBI::dbExecute(con, sprintf(
-        "CREATE TEMP TABLE %s AS SELECT * FROM read_parquet('%s');",
-        temp_table, path
+        "CREATE TEMP TABLE %s AS SELECT * FROM read_parquet(%s);",
+        temp_table, .sql_literal(path)
       ))
       TRUE
     },
@@ -452,13 +500,16 @@ WISEAPP_WX_LOC_CACHE_VERSION <- "v1"
   if (is.null(ok)) {
     return(NULL)
   }
+  try(Sys.setFileTime(path, Sys.time()), silent = TRUE)
   dplyr::tbl(con, temp_table)
 }
 
 .wx_loc_cache_key <- function(weather_fnames, h3_fnames, weather_vars,
-                              date_min, date_max, res_micro, res_weather) {
+                              date_min, date_max, res_micro, res_weather,
+                              connection_params) {
   digest::digest(list(
     "loc-monthly", WISEAPP_WX_LOC_CACHE_VERSION, WISEAPP_WX_CACHE_VERSION,
+    .wx_cache_source_id(connection_params),
     sort(weather_fnames), sort(h3_fnames), weather_vars,
     date_min, date_max, res_micro, res_weather
   ))
@@ -1276,7 +1327,7 @@ get_weather <- function(
   loc_cache_enabled <- !.wx_env_flag("WISEAPP_WEATHER_CACHE_DISABLE")
   loc_base_key <- .wx_loc_cache_key(
     weather_fnames, h3_fnames, weather_vars, date_min, date_max,
-    h3_harmonised$res_micro, h3_harmonised$res_weather
+    h3_harmonised$res_micro, h3_harmonised$res_weather, connection_params
   )
   h3_weights_key <- digest::digest(list(loc_base_key, "h3_weights"))
   loc_monthly_key <- digest::digest(list(loc_base_key, "loc_monthly"))
