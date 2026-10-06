@@ -88,6 +88,30 @@
   invisible(TRUE)
 }
 
+# CR-BUG-07: every per-row pipeline field must align with y_point, otherwise
+# the delta-method aggregation silently pairs predictions with the wrong
+# factor-loading rows, weights or households.
+.step2_compute_assert_alignment <- function(pipe) {
+  if (!is.list(pipe) || is.null(pipe$y_point)) return(pipe)
+  n <- length(pipe$y_point)
+  lens <- c(
+    sim_year = length(pipe$sim_year),
+    weight = length(pipe$weight),
+    id_vec = length(pipe$id_vec),
+    svy_row_id = length(pipe$svy_row_id),
+    F_loading = if (is.null(pipe$F_loading)) 0L else NROW(pipe$F_loading)
+  )
+  present <- !vapply(pipe[names(lens)], is.null, logical(1))
+  bad <- present & lens != n
+  if (any(bad)) {
+    stop(sprintf(
+      "Pipeline rows are not aligned with %d predictions: %s.", n,
+      paste(sprintf("%s has %d", names(lens)[bad], lens[bad]), collapse = ", ")
+    ), call. = FALSE)
+  }
+  pipe
+}
+
 .step2_compute_signature <- function(input, seed, run_id) {
   list(
     step = "sim",
@@ -264,7 +288,7 @@ step2_compute <- function(input,
   pipeline_wrapper <- function(...) {
     pipeline_index <<- pipeline_index + 1L
     value <- tryCatch(
-      pipeline_fn(...),
+      .step2_compute_assert_alignment(pipeline_fn(...)),
       error = function(e) {
         emit("pipeline", "failed", error = e,
              fields = list(member_ordinal = pipeline_index))

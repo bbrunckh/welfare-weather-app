@@ -150,10 +150,18 @@ predict_outcome <- function(model,
       stats::predict(model, newdata = newdata, type = "response"),
       error = function(e) stop(sprintf("fixest predict failed: %s", conditionMessage(e)))
     )
-    # fixest::predict() silently drops rows where FE levels are absent from
-    # training data. Trim newdata to match preds_vec length before mutating,
-    # so that preds, X_nonFE (from model.matrix), and resid_draw are all
-    # sized consistently downstream.
+    # fixest::predict(newdata =) returns one value per newdata row: rows with
+    # an FE level absent from training data, or an NA regressor, get NA rather
+    # than being dropped (fixest 0.14), and no "rowids" attribute is set, so
+    # predicted_rows is seq_len(nrow(newdata)). model.matrix(data = newdata)
+    # likewise keeps every row, so preds and X_nonFE stay row-aligned; NA
+    # predictions are handled downstream (aggregation).
+    if (length(preds_vec) != nrow(newdata)) {
+      stop(sprintf(
+        "fixest predict returned %d values for %d rows; predictions are not row-aligned.",
+        length(preds_vec), nrow(newdata)
+      ))
+    }
     predicted_rows <- attr(preds_vec, "rowids") %||% seq_along(preds_vec)
     preds <- dplyr::mutate(newdata[predicted_rows, ], .fitted = as.numeric(preds_vec))
     #
