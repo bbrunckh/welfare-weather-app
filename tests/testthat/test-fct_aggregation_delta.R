@@ -76,8 +76,10 @@ test_that("point-estimate fast path returns exact values without uncertainty wor
     oracle <- lapply(seq_along(fast), function(i) {
       idx <- pipe$sim_year == fast[[i]]$sim_year
       mu <- exp(pipe$y_point[idx])
-      aggregate_point_estimate(mu, method, pipe$weights[idx], pov) |>
-        within(sim_year <- fast[[i]]$sim_year)
+      x <- aggregate_point_estimate(mu, method, pipe$weights[idx], pov)
+      x$sim_year <- fast[[i]]$sim_year
+      x$n_na_dropped <- 0L
+      x
     })
     expect_identical(fast, oracle, info = method)
     expect_true(all(vapply(fast, function(x) is.null(x$F_agg), logical(1))))
@@ -370,6 +372,32 @@ test_that("one non-finite row is dropped and counted, not zeroing variance (R2-B
       expect_lt(abs(res$var_coef / clean$var_coef - 1), 0.01, label = info)
     }
   }
+})
+
+test_that("NA household-year predictions are counted per year (R2-BUG-28)", {
+  pipe <- make_pipeline(N = 60, K = 3)
+  pipe$weight <- pipe$weights
+  pipe$sim_year <- rep(c(2030L, 2031L, 2032L), each = 20L)
+  pipe$y_point[c(3L, 5L, 45L)] <- NA
+  clean <- pipe
+  clean$y_point[c(3L, 5L, 45L)] <- log(3)
+
+  expect_message(
+    single <- aggregate_pipeline_per_year(pipe, "mean", residuals = "none"),
+    "3 NA household-year prediction\\(s\\) excluded .*2030: 2, 2032: 1"
+  )
+  expect_identical(vapply(single, `[[`, integer(1), "n_na_dropped"),
+                   c(2L, 0L, 1L))
+  multi <- suppressMessages(aggregate_pipeline_per_year_multi(
+    pipe, c("mean", "gini"), residuals = "none"
+  ))
+  expect_identical(vapply(multi$gini, `[[`, integer(1), "n_na_dropped"),
+                   c(2L, 0L, 1L))
+  # Report only: the rows used are unchanged (NA rows still excluded).
+  expect_identical(single[[2]]$value,
+                   aggregate_pipeline_per_year(clean, "mean",
+                                               residuals = "none")[[2]]$value)
+  expect_silent(aggregate_pipeline_per_year(clean, "mean", residuals = "none"))
 })
 
 test_that("F_loading = NULL gives zero coefficient variance", {

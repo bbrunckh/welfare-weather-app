@@ -486,6 +486,18 @@ apply_band_transform <- function(method, value_pt, se, z_lo, z_hi) {
   years <- sort(unique(pipe$sim_year))
   rows <- lapply(years, function(year) which(pipe$sim_year == year))
   valid <- lapply(rows, function(idx) !is.na(pipe$y_point[idx]))
+  # R2-BUG-28: NA household-year predictions are excluded from each year's
+  # statistics. Count them per year (this pipeline = one model/member) and
+  # report; which rows are used is unchanged.
+  n_na_dropped <- vapply(valid, function(v) sum(!v), integer(1))
+  if (sum(n_na_dropped) > 0L) {
+    message(sprintf(
+      "[wiseapp] %d NA household-year prediction(s) excluded from per-year statistics (%s).",
+      sum(n_na_dropped),
+      paste(sprintf("%s: %d", years, n_na_dropped)[n_na_dropped > 0L],
+            collapse = ", ")
+    ))
+  }
   weights <- lapply(seq_along(rows), function(i) {
     idx <- rows[[i]][valid[[i]]]
     if (!is.null(pipe$weight)) as.numeric(pipe$weight[idx]) else NULL
@@ -537,6 +549,7 @@ apply_band_transform <- function(method, value_pt, se, z_lo, z_hi) {
     years = years,
     rows = rows,
     valid = valid,
+    n_na_dropped = n_na_dropped,
     weights = weights,
     weights_normalized = weights_normalized,
     residuals = residual_vectors,
@@ -650,6 +663,7 @@ aggregate_pipeline_per_year <- function(pipe,
       prepared_mu = prep$mu[[i]]
     )
     m$sim_year <- yr
+    m$n_na_dropped <- prep$n_na_dropped[[i]]
     m
   })
 }
@@ -798,6 +812,7 @@ aggregate_pipeline_per_year_multi <- function(pipe,
         F_row_ss = F_row_ss
       )
       value$sim_year <- yr
+      value$n_na_dropped <- prep$n_na_dropped[[i]]
       out[[method]][[i]] <- value
     }
   }
