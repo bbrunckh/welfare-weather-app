@@ -950,7 +950,7 @@ mod_1_06_model_server <- function(id,
       )
       cluster_var <- if ("loc_id_panel" %in% sw_cols) "loc_id_panel" else NULL
 
-      build_selected_model(
+      sm <- build_selected_model(
         model_type          = input$model_type,
         interactions        = interactions,
         fixedeffects        = fe_sel,
@@ -968,6 +968,14 @@ mod_1_06_model_server <- function(id,
         stability_threshold = input$stability_threshold,
         cluster             = cluster_var
       )
+      # R2-BUG-11: flag a Lasso spec that has no successful selection behind it
+      # (not yet run, or the run failed) so mod_1_07 refuses to fit it instead
+      # of fitting the forced-in covariates only under a "Lasso" label. An
+      # attribute keeps the spec contents (and so the run signature) unchanged.
+      if (identical(cov_method, "Lasso")) {
+        attr(sm, "lasso_missing") <- is.null(lasso_store())
+      }
+      sm
     })
 
     selected_policies_rv <- reactive({

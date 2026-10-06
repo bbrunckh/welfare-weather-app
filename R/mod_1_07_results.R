@@ -149,6 +149,18 @@ mod_1_07_results_server <- function(id,
           }
           on.exit(fit_guard$end(), add = TRUE)
         }
+        # R2-BUG-11: a Lasso spec without a successful selection must not fit.
+        if (isTRUE(attr(selected_model(), "lasso_missing"))) {
+          shiny::showNotification(
+            paste(
+              "Model not fitted: the Lasso covariate selection did not",
+              "complete. Fix the Lasso error or switch to user-defined",
+              "covariates."
+            ),
+            type = "error", duration = 10
+          )
+          req(FALSE)
+        }
 
         nid <- shiny::showNotification("Fitting the welfare model...",
           type = "message", duration = NULL,
@@ -359,13 +371,13 @@ mod_1_07_results_server <- function(id,
 
         # Spec (3) is only "FE + controls" when controls were actually chosen;
         # otherwise it is numerically identical to spec (2) and the labels must
-        # say so (coefplot legend + spec comparison table).
+        # say so (coefplot legend + spec comparison table). A Lasso spec carries
+        # its resolved selection, so an empty selection counts as no controls.
         n_covs <- length(unique(c(
           snap$model$hh_covariates, snap$model$area_covariates,
           snap$model$ind_covariates, snap$model$firm_covariates
         )))
-        has_controls <- n_covs > 0 ||
-          !identical(snap$model$covariate_selection, "User-defined")
+        has_controls <- n_covs > 0
 
         # Reference-profile linear predictor for binary outcomes: the same map
         # the headline cards use, so binned-plot pp effects match the cards.

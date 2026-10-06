@@ -268,3 +268,33 @@ test_that("P14: force selector guards preserve choices and selections", {
     expect_equal(input$force_out_hh, "hhsize")
   })
 })
+
+test_that("R2-BUG-11: a failed Lasso flags the spec as missing its selection", {
+  fail <- TRUE
+  local_mocked_bindings(
+    run_lasso_selection = function(...) {
+      if (fail) stop("glmnet did not converge")
+      list(selected_covariates = "hhsize", selection_frequency = c(hhsize = 1))
+    },
+    prepare_outcome_df = function(df, so) df
+  )
+
+  testServer(mod_1_06_model_server, args = model_args(), {
+    session$setInputs(model_type = "Linear regression", covariates = "Lasso")
+    # Not run yet: no selection behind the Lasso spec.
+    expect_true(isTRUE(attr(selected_model(), "lasso_missing")))
+
+    session$setInputs(run_model = 1L)
+    expect_true(isTRUE(attr(selected_model(), "lasso_missing")))
+
+    fail <<- FALSE
+    session$setInputs(run_model = 2L)
+    expect_false(isTRUE(attr(selected_model(), "lasso_missing")))
+    expect_equal(selected_model()$hh_covariates, "hhsize")
+
+    # User-defined covariates never carry the flag.
+    session$setInputs(covariates = "User-defined")
+    session$flushReact()
+    expect_null(attr(selected_model(), "lasso_missing"))
+  })
+})
