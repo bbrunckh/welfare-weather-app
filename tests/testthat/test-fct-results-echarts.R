@@ -505,3 +505,15 @@ test_that("echart resid weather jitter leaves the global RNG untouched (R2-BUG-1
                               weather_df = data.frame(tx_bin = ec_dat$tx_bin))
   expect_identical(ch1$x$opts$series[[1]]$data, ch2$x$opts$series[[1]]$data)
 })
+
+test_that("echart resid weather orders negative bins by signed lower bound (R2-BUG-22)", {
+  skip_if_not_installed("echarts4r")
+  d <- ec_dat
+  d$anom_bin <- cut(d$tx - stats::median(d$tx), c(-Inf, -2.5, -0.5, 0.5, Inf))
+  fit <- fixest::feols(welfare ~ anom_bin + urban, data = d)
+  ch <- echart_resid_weather(fit, "anom_bin",
+                             weather_df = data.frame(anom_bin = d$anom_bin))
+  expect_s3_class(ch, "echarts4r")
+  expected <- unname(vapply(levels(d$anom_bin), .cut_bin_label, character(1)))
+  expect_identical(ch$x$opts$xAxis[[1]]$data, expected)
+})

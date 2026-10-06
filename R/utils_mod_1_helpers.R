@@ -901,9 +901,12 @@ echart_resid_weather <- function(model, haz_var, weather_df, x_label = haz_var,
 
   if (is_binned) {
     lvls <- levels(as.factor(x_vals))
-    num_lo <- suppressWarnings(as.numeric(
-      regmatches(lvls, regexpr("[0-9]+(\\.[0-9]+)?", lvls))
-    ))
+    # Lower bound = first signed number in the label, so negative bins
+    # (anomalies, SPEI) and open -Inf bins sort correctly; labels without a
+    # number sort last.
+    lo_m <- regexpr("-?([0-9]+(\\.[0-9]+)?|Inf)", lvls)
+    num_lo <- rep(NA_real_, length(lvls))
+    num_lo[lo_m > 0] <- suppressWarnings(as.numeric(regmatches(lvls, lo_m)))
     lvls <- lvls[order(ifelse(is.na(num_lo), Inf, num_lo))]
     new_lab <- vapply(lvls, .cut_bin_label, character(1))
 
