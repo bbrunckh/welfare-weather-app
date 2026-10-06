@@ -891,14 +891,6 @@
   result
 }
 
-.wise_step2_async_find_stores <- function(value) {
-  if (is.list(value) && !is.null(value$dir) && !is.null(value$run_id)) {
-    return(list(value))
-  }
-  if (!is.list(value)) return(list())
-  unlist(lapply(value, .wise_step2_async_find_stores), recursive = FALSE)
-}
-
 .wise_step2_async_normalize_input <- function(input) {
   if (!is.list(input)) {
     return(input)
