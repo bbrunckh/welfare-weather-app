@@ -1682,3 +1682,33 @@ test_that("R2-BUG-29: zero reference SD gives NA standardized anomalies and one 
   )
   expect_no_warning(.warn_zero_sd_reference(deviation))
 })
+
+test_that("CR-BUG-17: H3 resolution uses every row and rejects mixed resolutions", {
+  skip_if_not_installed("duckdb")
+  skip_if_not_installed("bit64")
+
+  con <- make_h3_con()
+  on.exit(DBI::dbDisconnect(con, shutdown = TRUE), add = TRUE)
+
+  res5 <- "85283473fffffff"
+  res4 <- "8428347ffffffff"
+  single <- dplyr::tbl(con, dplyr::sql(sprintf(
+    "SELECT * FROM (VALUES (NULL::VARCHAR), ('%s'), ('%s')) t(h3)", res5, res5
+  )))
+  expect_identical(.h3_resolution(single, con, "Test"), 5L)
+
+  # The old probe read one arbitrary row, so the detected resolution depended
+  # on scan order. Mixed resolutions now fail regardless of row order.
+  for (cells in list(c(res5, res4), c(res4, res5))) {
+    mixed <- dplyr::tbl(con, dplyr::sql(sprintf(
+      "SELECT * FROM (VALUES ('%s'), ('%s')) t(h3)", cells[1], cells[2]
+    )))
+    expect_error(
+      .h3_resolution(mixed, con, "Test"),
+      "mixes H3 resolutions 4 to 5"
+    )
+  }
+
+  empty <- dplyr::tbl(con, dplyr::sql("SELECT NULL::VARCHAR AS h3"))
+  expect_error(.h3_resolution(empty, con, "Test"), "contains no H3 cells")
+})

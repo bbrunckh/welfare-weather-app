@@ -466,10 +466,43 @@ WISEAPP_WX_LOC_CACHE_VERSION <- "v1"
 
 # H3 spatial helpers ----
 
+#' Detect the single H3 resolution of a lazy table's `h3` column.
+#'
+#' Scans every non-missing cell (not one arbitrary row), so the result does
+#' not depend on scan order, and stops when the table mixes resolutions.
+#'
+#' @param tbl   Lazy `dplyr::tbl` with an `h3` column (string or bigint).
+#' @param con   DBI connection with the H3 extension loaded.
+#' @param label Table description used in error messages.
+#' @return The H3 resolution (integer).
+#' @noRd
+.h3_resolution <- function(tbl, con, label) {
+  h3_sql <- dbplyr::sql_render(
+    tbl |> dplyr::filter(!is.na(h3)) |> dplyr::select(h3)
+  )
+  res <- DBI::dbGetQuery(con, sprintf(
+    paste(
+      "SELECT MIN(h3_get_resolution(h3)) AS lo,",
+      "MAX(h3_get_resolution(h3)) AS hi FROM (%s) _t"
+    ),
+    h3_sql
+  ))
+  if (is.na(res$lo[[1L]])) {
+    stop(label, " data contains no H3 cells.", call. = FALSE)
+  }
+  if (res$lo[[1L]] != res$hi[[1L]]) {
+    stop(sprintf(
+      "%s data mixes H3 resolutions %d to %d; expected a single resolution.",
+      label, res$lo[[1L]], res$hi[[1L]]
+    ), call. = FALSE)
+  }
+  res$lo[[1L]]
+}
+
 #' Harmonise H3 resolution and type between microdata and weather tables.
 #'
 #' This helper:
-#' 1. Detects the H3 resolution of each table by sampling one row.
+#' 1. Detects the H3 resolution of each table (`.h3_resolution()`).
 #' 2. Chooses the **coarser** (lower numeric) resolution as the join key.
 #'    This handles all three cases:
 #'    * weather coarser than microdata  -> map microdata up to weather res
@@ -494,22 +527,8 @@ WISEAPP_WX_LOC_CACHE_VERSION <- "v1"
 #'   * `same_res`     - logical, TRUE when no parent lookup was needed.
 #' @noRd
 .harmonise_h3 <- function(h3_slim, weather, con) {
-  micro_h3_sql <- dbplyr::sql_render(
-    h3_slim |> dplyr::filter(!is.na(h3)) |> dplyr::select(h3) |> head(1)
-  )
-  weather_h3_sql <- dbplyr::sql_render(
-    weather |> dplyr::filter(!is.na(h3)) |> dplyr::select(h3) |> head(1)
-  )
-
-  res_micro <- DBI::dbGetQuery(
-    con,
-    sprintf("SELECT h3_get_resolution(h3) AS res FROM (%s) _t", micro_h3_sql)
-  )$res[[1L]]
-
-  res_weather <- DBI::dbGetQuery(
-    con,
-    sprintf("SELECT h3_get_resolution(h3) AS res FROM (%s) _t", weather_h3_sql)
-  )$res[[1L]]
+  res_micro <- .h3_resolution(h3_slim, con, "H3 mapping")
+  res_weather <- .h3_resolution(weather, con, "Weather")
 
   target_res <- min(res_micro, res_weather)
   same_res <- (res_micro == res_weather)
@@ -1495,18 +1514,7 @@ get_weather <- function(
     )
 
     cmip6_res <- tryCatch(
-      {
-        probe_sql <- dbplyr::sql_render(
-          cmip6_hist_raw_lazy |>
-            dplyr::filter(!is.na(h3)) |>
-            dplyr::select(h3) |>
-            head(1)
-        )
-        DBI::dbGetQuery(
-          con,
-          sprintf("SELECT h3_get_resolution(h3) AS res FROM (%s) _t", probe_sql)
-        )$res[[1L]]
-      },
+      .h3_resolution(cmip6_hist_raw_lazy, con, "CMIP6 historical"),
       error = function(e) h3_harmonised$target_res
     )
 
