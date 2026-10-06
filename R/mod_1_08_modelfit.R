@@ -1,16 +1,3 @@
-#' 1_08_modelfit UI Function
-#'
-#' @description A shiny Module.
-#'
-#' @param id,input,output,session Internal parameters for {shiny}.
-#'
-#' @noRd
-#'
-#' @importFrom shiny NS tagList
-mod_1_08_modelfit_ui <- function(id) {
-  tagList()
-}
-
 #' 1_08_modelfit Server Functions
 #'
 #' All display data comes from the fit snapshot (`model_fit()$.snap`), so no

@@ -398,6 +398,21 @@ test_that("echart residual panels draw a two-grid widget for linear models", {
   expect_equal(length(ch$x$opts$series[[3]]$markLine$data[[1]]), 2L)
 })
 
+test_that("echart residual panels serialise the loess trend as numeric pairs (R2-BUG-27)", {
+  skip_if_not_installed("echarts4r")
+  ch <- echart_residual_panels(ec_fit_cont, is_logistic = FALSE)
+  trend <- Filter(function(s) identical(s$name, "Trend"), ch$x$opts$series)
+  expect_length(trend, 1L)
+  # htmlwidgets' own serialiser (keep_vec_names = TRUE turns named values
+  # into JSON objects).
+  json <- as.character(htmlwidgets:::toJSON(trend[[1]]$data))
+  parsed <- jsonlite::fromJSON(json, simplifyVector = FALSE)
+  expect_true(all(vapply(parsed, function(p) {
+    length(p) == 2L && is.numeric(p[[1]]) && is.numeric(p[[2]])
+  }, logical(1))))
+  expect_false(grepl("{", json, fixed = TRUE))
+})
+
 test_that("echart residual panels fall back to binned residuals for logit", {
   skip_if_not_installed("echarts4r")
   m_glm <- glm(urban ~ tx + pr, data = ec_dat, family = binomial)
@@ -476,4 +491,29 @@ test_that("echart resid weather orders binned predictors numerically", {
   # recovered from the binned-column fallback.
   expect_equal(length(ch$x$opts$series[[2]]$data), 4L)
   expect_s3_class(ch$x$opts$xAxis[[1]]$axisLabel$formatter, "JS_EVAL")
+})
+
+test_that("echart resid weather jitter leaves the global RNG untouched (R2-BUG-18)", {
+  skip_if_not_installed("echarts4r")
+  set.seed(42)
+  before <- .Random.seed
+  ch1 <- echart_resid_weather(ec_fit_bin, "tx_bin",
+                              weather_df = data.frame(tx_bin = ec_dat$tx_bin))
+  expect_identical(.Random.seed, before)
+  # The jitter itself stays reproducible.
+  ch2 <- echart_resid_weather(ec_fit_bin, "tx_bin",
+                              weather_df = data.frame(tx_bin = ec_dat$tx_bin))
+  expect_identical(ch1$x$opts$series[[1]]$data, ch2$x$opts$series[[1]]$data)
+})
+
+test_that("echart resid weather orders negative bins by signed lower bound (R2-BUG-22)", {
+  skip_if_not_installed("echarts4r")
+  d <- ec_dat
+  d$anom_bin <- cut(d$tx - stats::median(d$tx), c(-Inf, -2.5, -0.5, 0.5, Inf))
+  fit <- fixest::feols(welfare ~ anom_bin + urban, data = d)
+  ch <- echart_resid_weather(fit, "anom_bin",
+                             weather_df = data.frame(anom_bin = d$anom_bin))
+  expect_s3_class(ch, "echarts4r")
+  expected <- unname(vapply(levels(d$anom_bin), .cut_bin_label, character(1)))
+  expect_identical(ch$x$opts$xAxis[[1]]$data, expected)
 })

@@ -136,9 +136,7 @@ mod_1_modelling_server <- function(id,
 
     s4 <- mod_1_04_weather_server(
       "weather",
-      variable_list    = variable_list,
-      selected_surveys = s1$selected_surveys,
-      survey_data      = s2$survey_data
+      variable_list    = variable_list
     )
 
     # 5. Weather stats ----

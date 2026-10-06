@@ -1,21 +1,3 @@
-#' 2_02_results UI Function
-#'
-#' @description A shiny Module. Renders the Results tab content: point-range
-#'   chart, threshold table/bar, and exceedance curve. Consolidates logic from
-#'   the former mod_2_02_historical_sim (tab insertion) and
-#'   mod_2_06_sim_compare (all visualisations).
-#'
-#' @param id Internal parameter for {shiny}.
-#'
-#' @noRd
-#'
-#' @importFrom shiny NS tagList
-mod_2_02_results_ui <- function(id) {
-  # Placeholder - the real content is injected via insertUI in the server.
-  tagList()
-}
-
-
 #' Results tab content UI (inserted into the Results tabPanel once).
 #' @noRd
 .results_content_ui <- function(ns, so, weather_var = NULL) {
@@ -366,6 +348,47 @@ mod_2_02_results_ui <- function(id) {
   rownames(out) <- NULL
   out
 }
+
+# Lazy per-method aggregation list ----
+# Built inside mod_2_02_results_server(); the S3 methods force the builder on
+# first access. Defined at top level and registered (not in the module
+# closure) so dispatch does not depend on the caller's environment.
+
+.force_lazy_aggregation_method <- function(x) {
+  if (!inherits(x, "wise_lazy_aggregation_method_list")) {
+    return(x)
+  }
+  state <- attr(x, "state", exact = TRUE)
+  if (!isTRUE(state$built)) {
+    state$value <- state$builder()
+    state$built <- TRUE
+  }
+  x
+}
+
+#' @export
+#' @noRd
+`[[.wise_lazy_aggregation_method_list` <- function(x, i, ...) {
+  x <- .force_lazy_aggregation_method(x)
+  attr(x, "state", exact = TRUE)$value[[i]]
+}
+
+#' @export
+#' @noRd
+`$.wise_lazy_aggregation_method_list` <- function(x, name) {
+  x <- .force_lazy_aggregation_method(x)
+  attr(x, "state", exact = TRUE)$value[[name]]
+}
+
+#' @export
+#' @noRd
+names.wise_lazy_aggregation_method_list <- function(x) {
+  names(unclass(x))
+}
+
+#' @export
+#' @noRd
+length.wise_lazy_aggregation_method_list <- function(x) 1L
 
 #' 2_02_results Server Functions
 #'
@@ -752,7 +775,8 @@ mod_2_02_results_server <- function(id,
         locked <- results_source()$locked_bandwidth
         if (!is.null(locked)) return(as.numeric(locked))
       }
-      as.numeric(input$bandwidth_p0 %||% 0.05)
+      # No UI control sets the kernel bandwidth; use the fixed default.
+      0.05
     })
 
     # Value-affecting aggregation inputs ----
@@ -953,18 +977,6 @@ mod_2_02_results_server <- function(id,
       .new_lazy_aggregation_method_list(builder, method)
     }
 
-    .force_lazy_aggregation_method <- function(x) {
-      if (!inherits(x, "wise_lazy_aggregation_method_list")) {
-        return(x)
-      }
-      state <- attr(x, "state", exact = TRUE)
-      if (!isTRUE(state$built)) {
-        state$value <- state$builder()
-        state$built <- TRUE
-      }
-      x
-    }
-
     .lazy_aggregation_value <- function(x) {
       if (inherits(x, "wise_lazy_aggregation_method_list")) {
         state <- attr(x, "state", exact = TRUE)
@@ -978,22 +990,6 @@ mod_2_02_results_server <- function(id,
       value <- .lazy_aggregation_value(x)
       if (is.list(value) && !is.null(value[[method]])) value[[method]] else value
     }
-
-    `[[.wise_lazy_aggregation_method_list` <- function(x, i, ...) {
-      x <- .force_lazy_aggregation_method(x)
-      attr(x, "state", exact = TRUE)$value[[i]]
-    }
-
-    `$.wise_lazy_aggregation_method_list` <- function(x, name) {
-      x <- .force_lazy_aggregation_method(x)
-      attr(x, "state", exact = TRUE)$value[[name]]
-    }
-
-    names.wise_lazy_aggregation_method_list <- function(x) {
-      names(unclass(x))
-    }
-
-    length.wise_lazy_aggregation_method_list <- function(x) 1L
 
      .build_hist_for_method <- function(ws, method, pl_v) {
       pl <- ws$hs$pipeline
@@ -1807,7 +1803,7 @@ mod_2_02_results_server <- function(id,
     # they would duplicate the Coef rows.
     threshold_table_rv <- reactive({
       req(hist_agg_rv())
-      bq_coef <- resolve_band_q(input$uncertainty_band %||% "p10_p90")
+      bq_coef <- resolve_band_q("p10_p90")
       bq_ens <- if (identical(input$ensemble_band %||% "none", "none")) {
         c(lo = 0.5, hi = 0.5)
       } else {
@@ -2012,8 +2008,8 @@ mod_2_02_results_server <- function(id,
       echart_pointrange_climate(
         bands_tbl    = bands,
         x_label      = agg_hist()$x_label,
-        group_order  = input$cmp_group_order %||% "scenario_x_year",
-        show_coef    = isTRUE(input$show_coef_uncertainty) && has_draws(),
+        group_order  = "scenario_x_year",
+        show_coef    = FALSE,
         height       = "600px"
       )
     }
@@ -2047,8 +2043,7 @@ mod_2_02_results_server <- function(id,
     # forces a full redraw because setOption() merging cannot remove series.
     .SMOOTH_CONTROLS <- c(
       "cmp_agg_method", "cmp_deviation", "annual_distribution_type",
-      "ensemble_band", "exceedance_model_spread", "cmp_group_order",
-      "show_coef_uncertainty"
+      "ensemble_band", "exceedance_model_spread"
     )
     smooth_state <- new.env(parent = emptyenv())
     .smooth_echart <- function(ch, id) {
@@ -2174,7 +2169,7 @@ mod_2_02_results_server <- function(id,
 
       build_threshold_table_df(
         threshold_tbl = tbl,
-        group_order   = input$cmp_group_order %||% "scenario_x_year",
+        group_order   = "scenario_x_year",
         show_coef     = TRUE,
         adverse_only  = TRUE,
         method        = .selected_method(),
@@ -2276,7 +2271,7 @@ mod_2_02_results_server <- function(id,
     )
 
     # Return-period decision table as a reactable (guidelines §6): raw values
-    # in the data (already 2-dp rounded by build_threshold_table_df), rendered
+    # in the data, rounded only for display (.threshold_col_defs()), rendered
     # client-side; the CSV download moved to the shared client-side
     # wise_reactable_csv_button() next to the widget. INT-08: while the
     # results are stale the table stays visible.
@@ -2289,7 +2284,7 @@ mod_2_02_results_server <- function(id,
       if (identical(src$mode, "provisional")) {
         df <- .append_pending_threshold_rows(df, src$pending_names)
       }
-      .step2_reactable(df)
+      .step2_reactable(df, col_defs = .threshold_col_defs(df))
     }
     output$summary_threshold_table <- reactable::renderReactable({
       threshold_reactable()
@@ -2415,7 +2410,7 @@ mod_2_02_results_server <- function(id,
             shiny::tabPanel(
               title = "Results",
               value = "sim_tab",
-              shiny::div(id = "results_section")
+              shiny::div(id = ns("results_section"))
             ),
             select = TRUE,
             session = tabset_session
@@ -2431,7 +2426,7 @@ mod_2_02_results_server <- function(id,
           # Deferring also keeps the first-run path byte-for-byte as it was:
           # appendTab's DOM insertion lands before anything targets
           # #results_section.
-          shiny::removeUI(selector = "#results_section > *", multiple = TRUE)
+          shiny::removeUI(selector = paste0("#", ns("results_section"), " > *"), multiple = TRUE)
           try(shiny::updateTabsetPanel(tabset_session,
             inputId = tabset_id,
             selected = "sim_tab"
@@ -2448,7 +2443,7 @@ mod_2_02_results_server <- function(id,
         }
 
         shiny::insertUI(
-          selector = "#results_section",
+          selector = paste0("#", ns("results_section")),
           where    = "afterBegin",
           ui       = .results_content_ui(ns, so, weather_var = wx_lbl)
         )
@@ -2519,7 +2514,7 @@ mod_2_02_results_server <- function(id,
         # per-partial recalculation instead of Shiny's dimmed state. Removed
         # with the banner, so committed-mode loading cues are unchanged.
         shiny::tags$style(
-          "#results_section .recalculating { opacity: 1 !important; transition: none; }"
+          paste0("#", ns("results_section"), " .recalculating { opacity: 1 !important; transition: none; }")
         ),
         shiny::div(
           shiny::strong("Simulation in progress: "),

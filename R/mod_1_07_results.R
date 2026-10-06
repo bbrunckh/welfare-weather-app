@@ -769,7 +769,7 @@ mod_1_07_results_server <- function(id,
         vcv_note <- if (length(cluster_txt)) {
           paste0("SEs clustered by ", paste(cluster_txt, collapse = ", "))
         } else {
-          "HC1 robust SEs"
+          "IID (non-robust) SEs"
         }
         focused_subheader <- paste0(
           "Weather effects, full specification (3) \u2014 Dependent variable: ",

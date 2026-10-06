@@ -280,6 +280,8 @@ test_that("display settings are written in committed mode only", {
   out <- reactiveVal(NULL)
   suppressWarnings(testServer(mod_2_02_results_server, args = .pv_args(live, hist_sim, saved,
     display_settings_out = out), {
+    # bandwidth_p0 has no UI control (CR-BUG-11): a stray input value is
+    # ignored and the fixed default is reported.
     session$setInputs(cmp_agg_method = "mean", pov_line = 2, bandwidth_p0 = 0.1)
     .pv_settle(session)
     expect_null(out())
@@ -289,7 +291,7 @@ test_that("display settings are written in committed mode only", {
     live(NULL)
     .pv_settle(session)
     expect_identical(
-      out(), list(method = "mean", pov_line = 2, bandwidth_p0 = 0.1)
+      out(), list(method = "mean", pov_line = 2, bandwidth_p0 = 0.05)
     )
   }))
 })

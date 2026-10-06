@@ -5,14 +5,13 @@
 # Called by:
 #   - mod_2_01_weathersim.R (via fct_run_simulation)
 #   - mod_2_02_results.R    (hist_aggregate_choices, combine_ensemble_results)
-#   - mod_3_07_results.R    (apply_deviation)
 #
 # Exports:
 #   resolve_agg_fn
 #   combine_ensemble_results
 #   hist_aggregate_choices
 #   aggregate_outcome, deviation_from_centre
-#   aggregate_sim_preds, apply_deviation
+#   aggregate_sim_preds
 #
 # Internal:
 #   draw_residuals_vec
@@ -1236,38 +1235,4 @@ shared_aggregation_cache_key <- function(run_signature, poverty_line,
     weighted = isTRUE(weighted), residuals = residuals,
     skip_coef = isTRUE(skip_coef), is_log = isTRUE(is_log), methods = methods
   ), algo = "xxhash64")
-}
-
-#' Apply Deviation from Historical Reference Value
-#'
-#' Subtracts a historical reference value from a data frame's \code{value}
-#' column to express results as deviations from a baseline. Used in Module 2
-#' results and Module 3 comparison to centre scenario values against the
-#' historical mean or median.
-#'
-#' @param d          Data frame with a \code{value} column. Returns \code{d}
-#'   unchanged if \code{deviation = "none"} or \code{d} is \code{NULL}.
-#' @param deviation  Character. One of \code{"none"}, \code{"mean"},
-#'   \code{"median"}. Determines how the reference value is computed when
-#'   \code{hist_ref} is not supplied.
-#' @param hist_ref   Numeric. Pre-computed reference value (e.g. historical
-#'   mean). When \code{NA} (default), computed from \code{d$value} using
-#'   \code{deviation}.
-#'
-#' @return Data frame with \code{value} column replaced by
-#'   \code{value - hist_ref}.
-#'
-#' @export
-apply_deviation <- function(d, deviation, hist_ref = NA_real_) {
-  if (identical(deviation, "none") || is.null(d)) {
-    return(d)
-  }
-  if (is.na(hist_ref)) {
-    hist_ref <- if (identical(deviation, "mean")) {
-      mean(d$value, na.rm = TRUE)
-    } else {
-      stats::median(d$value, na.rm = TRUE)
-    }
-  }
-  dplyr::mutate(d, value = value - hist_ref)
 }

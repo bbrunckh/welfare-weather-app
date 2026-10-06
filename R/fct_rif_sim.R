@@ -479,7 +479,7 @@ predict_rif <- function(fit_multi, newdata, svy, train_data, taus, outcome,
   profile_stage <- function(stage, expr, rows = NA_integer_, detail = NULL) {
     started <- proc.time()[["elapsed"]]
     value <- force(expr)
-    if (!is.null(prediction_profile) && exists(".prediction_profile_record", mode = "function")) {
+    if (!is.null(prediction_profile)) {
       .prediction_profile_record(prediction_profile, stage, started, value, rows, detail)
     }
     value

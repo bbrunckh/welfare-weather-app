@@ -194,7 +194,7 @@ test_that("agg cache: display-only controls do not invalidate unaffected methods
       m2 <- .get_hist_agg("mean")
       expect_identical(h1, m2)
       expect_true(all(g2$unweighted$gap$value > g1$unweighted$gap$value))
-      # headcount reads both pl and bandwidth; gap ignores bandwidth
+      # headcount reads pl and the fixed bandwidth; gap ignores bandwidth
       session$setInputs(bandwidth_p0 = 0.10); settle()
       hc1 <- .get_hist_agg("headcount_ratio")
       expect_length(ls(envir = ws()$cache), 4L)
@@ -206,11 +206,12 @@ test_that("agg cache: display-only controls do not invalidate unaffected methods
       expect_identical(h1, m3)
       expect_length(ls(envir = ws()$cache), 4L)
 
-      # New bandwidth invalidates only headcount
+      # bandwidth_p0 has no UI control (CR-BUG-11): a stray input value is
+      # ignored, so headcount stays cached at the fixed default bandwidth.
       session$setInputs(bandwidth_p0 = 0.20); settle()
       hc3 <- .get_hist_agg("headcount_ratio")
-      expect_false(identical(hc2, hc3))
-      expect_length(ls(envir = ws()$cache), 5L)
+      expect_identical(hc2, hc3)
+      expect_length(ls(envir = ws()$cache), 4L)
       g4 <- .get_hist_agg("gap")
       expect_identical(g2, g4)
       m4 <- .get_hist_agg("mean")
@@ -1238,4 +1239,39 @@ test_that("results content UI mounts chart outputs and the reactable CSV button"
   expect_match(html, "Reactable.downloadDataCSV", fixed = TRUE)
   expect_match(html, "climate_outcome_thresholds.csv", fixed = TRUE)
   expect_false(grepl("threshold_csv", html, fixed = TRUE))
+})
+
+test_that("results_section container id is namespaced (CR-BUG-12)", {
+  src <- testthat::test_path("..", "..", "R", "mod_2_02_results.R")
+  skip_if(!file.exists(src), "R/ source tree not available (installed package)")
+  text <- readLines(src, warn = FALSE)
+  code <- text[!grepl("^\\s*#", text)]
+  # Every reference goes through ns(); no bare id or selector remains.
+  expect_false(any(grepl("\"#results_section|id = \"results_section", code)))
+  expect_true(any(grepl("ns(\"results_section\")", code, fixed = TRUE)))
+})
+
+test_that("lazy aggregation S3 methods live at package top level (CR-BUG-15)", {
+  ns <- asNamespace("wiseapp")
+  for (m in c("[[.wise_lazy_aggregation_method_list", "$.wise_lazy_aggregation_method_list",
+              "names.wise_lazy_aggregation_method_list", "length.wise_lazy_aggregation_method_list",
+              ".force_lazy_aggregation_method")) {
+    expect_true(exists(m, envir = ns, inherits = FALSE), info = m)
+  }
+  calls <- 0L
+  state <- new.env(parent = emptyenv())
+  state$builder <- function() {
+    calls <<- calls + 1L
+    list(mean = data.frame(v = 1))
+  }
+  state$built <- FALSE
+  x <- structure(list(mean = NULL), class = c("wise_lazy_aggregation_method_list", "list"),
+    state = state)
+  expect_identical(calls, 0L)
+  expect_identical(length(x), 1L)
+  expect_identical(names(x), "mean")
+  expect_identical(calls, 0L)
+  expect_identical(x[["mean"]]$v, 1)
+  expect_identical(x$mean$v, 1)
+  expect_identical(calls, 1L)
 })

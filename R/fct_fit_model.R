@@ -864,7 +864,7 @@ fit_model <- function(df, selected_outcome, selected_weather, selected_model,
     fallbacks <- c(fallbacks, list(list(
       kind = "vcv",
       requested = paste0("clustered (", paste(cluster_vars, collapse = ", "), ")"),
-      used = "default (heteroskedasticity-robust)",
+      used = "default (IID, non-robust)",
       reason = sprintf(
         "cluster variable(s) not found in data: %s",
         paste(cluster_missing, collapse = ", ")

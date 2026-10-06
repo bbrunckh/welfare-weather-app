@@ -24,9 +24,7 @@ test_that("weather configuration card renders pipeline stages live", {
     mod_1_04_weather_server,
     args = list(
       id               = "weather",
-      variable_list    = shiny::reactiveVal(make_vl_weather()),
-      selected_surveys = shiny::reactiveVal(data.frame()),
-      survey_data      = shiny::reactiveVal(NULL)
+      variable_list    = shiny::reactiveVal(make_vl_weather())
     ),
     {
       session$setInputs(weather_variable_selector = "tx")

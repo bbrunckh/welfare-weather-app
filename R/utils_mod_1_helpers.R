@@ -830,8 +830,7 @@ ridge_echart_widget <- function(rd_data, ridge_levels, ridge_labels, styles,
 
 #' Echarts residuals vs weather plot
 #'
-#' Interactive counterpart of `plot_resid_weather()` (fct_results.R,
-#' guidelines §7): the same data preparation (model frame / binned column
+#' Residuals against one weather predictor (model frame / binned column
 #' fallback, bin ordering and labels) drawn as an `echarts4r` widget. Grey
 #' points are individual residuals (jittered within bins for binned
 #' predictors), orange marks are bin means, and the dashed line marks zero.
@@ -844,12 +843,11 @@ ridge_echart_widget <- function(rd_data, ridge_levels, ridge_labels, styles,
 #' @param height     Widget height; a CSS length or a number of pixels.
 #'
 #' @return An `echarts4r` widget, or `NULL` invisibly when there is nothing
-#'   to draw (same contract as the ggplot builder).
+#'   to draw.
 #'
 #' @noRd
 echart_resid_weather <- function(model, haz_var, weather_df, x_label = haz_var,
                                  height = "300px") {
-  # Data preparation copied verbatim from plot_resid_weather().
   df <- tryCatch(stats::model.frame(model), error = function(e) NULL)
 
   if (is.null(df) || !haz_var %in% names(df)) {
@@ -903,15 +901,19 @@ echart_resid_weather <- function(model, haz_var, weather_df, x_label = haz_var,
 
   if (is_binned) {
     lvls <- levels(as.factor(x_vals))
-    num_lo <- suppressWarnings(as.numeric(
-      regmatches(lvls, regexpr("[0-9]+(\\.[0-9]+)?", lvls))
-    ))
+    # Lower bound = first signed number in the label, so negative bins
+    # (anomalies, SPEI) and open -Inf bins sort correctly; labels without a
+    # number sort last.
+    lo_m <- regexpr("-?([0-9]+(\\.[0-9]+)?|Inf)", lvls)
+    num_lo <- rep(NA_real_, length(lvls))
+    num_lo[lo_m > 0] <- suppressWarnings(as.numeric(regmatches(lvls, lo_m)))
     lvls <- lvls[order(ifelse(is.na(num_lo), Inf, num_lo))]
     new_lab <- vapply(lvls, .cut_bin_label, character(1))
 
     bin_idx <- match(as.character(x_vals), lvls)
-    set.seed(1)
-    jit <- (bin_idx - 1L) + stats::runif(length(bin_idx), -0.18, 0.18)
+    # Fixed jitter without touching the caller's RNG stream.
+    jit <- (bin_idx - 1L) +
+      withr::with_seed(1, stats::runif(length(bin_idx), -0.18, 0.18))
     means <- unname(vapply(lvls, function(l) {
       mean(res[as.character(x_vals) == l], na.rm = TRUE)
     }, numeric(1)))

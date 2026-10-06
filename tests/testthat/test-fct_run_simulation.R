@@ -514,3 +514,13 @@ test_that("a group whose members all fail still completes once, then the run err
     expect_identical(done[[2L]]$groups_done, 2L)
   }
 })
+
+test_that("profiling helpers are called without defensive exists() guards (CR-CQ-05)", {
+  src <- testthat::test_path("..", "..", "R", c("fct_run_simulation.R", "fct_rif_sim.R"))
+  skip_if(!all(file.exists(src)), "R/ source tree not available (installed package)")
+  text <- unlist(lapply(src, readLines, warn = FALSE))
+  expect_false(any(grepl(
+    "exists\\(\"\\.(wx_process_tree_rss_bytes|prediction_profile_record)\"", text)))
+  expect_true(is.function(.wx_process_tree_rss_bytes))
+  expect_true(is.function(.prediction_profile_record))
+})

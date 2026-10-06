@@ -329,9 +329,6 @@ mod_3_scenario_server <- function(id,
       show_coef_uncertainty = s7$show_coef_uncertainty,
       aggregation_method = s7$aggregation_method,
       poverty_line = s7$poverty_line,
-      metric_decomposition = s7$metric_decomposition,
-      focus_scenario = s7$focus_scenario,
-      metric_context = s7$metric_context,
       analysis_unit = analysis_unit
     )
 

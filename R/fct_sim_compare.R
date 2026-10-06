@@ -1521,20 +1521,20 @@ build_threshold_table_df <- function(threshold_tbl,
     df$rp_label <- gsub("-", " ", df$rp_label)
   }
 
-  # Pivot: one column per RP threshold, value rounded.
-  df$value_round <- round(df$value, 2)
-
+  # Pivot: one column per RP threshold. Values stay unrounded so rates and
+  # indices keep their resolution in the CSV; rounding is display-only
+  # (.threshold_col_defs()).
   pivot_cols <- if (has_source) {
-    c("scenario", "source", "Estimate", "rp_label", "value_round")
+    c("scenario", "source", "Estimate", "rp_label", "value")
   } else {
-    c("scenario", "Estimate", "rp_label", "value_round")
+    c("scenario", "Estimate", "rp_label", "value")
   }
   if (!isTRUE(adverse_only)) pivot_cols <- c(pivot_cols, "n_obs")
 
   wide <- tidyr::pivot_wider(
     df[, pivot_cols],
     names_from  = "rp_label",
-    values_from = "value_round",
+    values_from = "value",
     values_fn   = function(x) mean(x, na.rm = TRUE)
   )
   wide <- as.data.frame(wide)
@@ -1631,219 +1631,6 @@ build_threshold_table_df <- function(threshold_tbl,
 }
 
 
-# Time-series spaghetti and envelope plot ----
-
-#' Per-Model Time-Series Spaghetti With Ensemble Envelope
-#'
-#' Draws one thin translucent line per (scenario, model) over sim_year, with
-#' a bold across-model median curve and a translucent inter-model ribbon
-#' on top. Historical scenarios are drawn as a single bold line (no ribbon
-#' - only one "model"). The aim is to show model disagreement directly
-#' alongside year-to-year variation.
-#'
-#' @param ts_tbl Tibble with columns: scenario, model_id, sim_year, value,
-#'   is_historical.
-#' @param x_label Y-axis label.
-#' @param ensemble_band_q Named numeric `c(lo, hi)` quantile pair for the
-#'   inter-model ribbon.
-#' @return A ggplot object.
-#' @importFrom ggplot2 ggplot aes geom_line geom_ribbon scale_color_manual
-#'   scale_fill_manual labs theme_minimal theme
-#' @importFrom dplyr group_by summarise first n
-#' @importFrom rlang .data
-#' @export
-plot_timeseries_spaghetti <- function(ts_tbl,
-                                      x_label = "",
-                                      ensemble_band_q = c(lo = 0, hi = 1)) {
-  if (is.null(ts_tbl) || nrow(ts_tbl) == 0L) {
-    return(blank_plot("Run a simulation to see model trajectories."))
-  }
-
-  df <- ts_tbl
-  has_source <- "source" %in% names(df)
-  if (has_source) {
-    df <- df[!(df$is_historical & df$source == "Policy"), , drop = FALSE]
-    df$source <- factor(df$source, levels = c("Baseline", "Policy"))
-  }
-  df$ssp_key <- ifelse(df$is_historical, "Historical",
-    vapply(df$scenario, .normalise_ssp, character(1L))
-  )
-  df$yr_lbl <- ifelse(df$is_historical, "Historical",
-    vapply(df$scenario, .parse_year, character(1L))
-  )
-
-  fut_yr_labels <- sort(unique(df$yr_lbl[df$yr_lbl != "Historical"]))
-  yr_styles <- .resolve_year_styles(fut_yr_labels)
-  present_ssps <- sort(unique(df$ssp_key[df$ssp_key != "Historical"]))
-  colour_map_ssp <- c(
-    "Historical" = .wise_support,
-    .ssp_colours[intersect(
-      names(.ssp_colours),
-      present_ssps
-    )]
-  )
-  ltype_map_yr <- c("Historical" = "solid", yr_styles$linetype_map)
-
-  # Combined legend: per-scenario colour (SSP) and linetype (period).
-  scen_levels <- c(
-    "Historical",
-    sort(unique(df$scenario[!df$is_historical]))
-  )
-  scen_colour_map <- vapply(scen_levels, function(s) {
-    if (s == "Historical") {
-      return(unname(colour_map_ssp[["Historical"]]))
-    }
-    unname(colour_map_ssp[[.normalise_ssp(s)]] %||% "grey50")
-  }, character(1L))
-  scen_ltype_map <- vapply(scen_levels, function(s) {
-    if (s == "Historical") {
-      return(unname(ltype_map_yr[["Historical"]]))
-    }
-    yr <- .parse_year(s)
-    unname(ltype_map_yr[[yr]] %||% "solid")
-  }, character(1L))
-  df$scenario_f <- factor(df$scenario, levels = scen_levels)
-
-  # Per-(scenario [, source], sim_year) envelope across models
-  env_grp <- if (has_source) {
-    c("scenario", "source", "sim_year")
-  } else {
-    c("scenario", "sim_year")
-  }
-  env_df <- df |>
-    dplyr::group_by(dplyr::across(dplyr::all_of(env_grp))) |>
-    dplyr::summarise(
-      central = stats::median(.data$value, na.rm = TRUE),
-      lo = unname(stats::quantile(.data$value,
-        ensemble_band_q[["lo"]],
-        na.rm = TRUE
-      )),
-      hi = unname(stats::quantile(.data$value,
-        ensemble_band_q[["hi"]],
-        na.rm = TRUE
-      )),
-      n_models = dplyr::n(),
-      is_historical = any(.data$is_historical),
-      .groups = "drop"
-    )
-  env_df$scenario_f <- factor(env_df$scenario, levels = scen_levels)
-
-  fut_env <- env_df[!env_df$is_historical & env_df$n_models > 1L, ,
-    drop = FALSE
-  ]
-
-  p <- ggplot2::ggplot()
-
-  # Inter-model ribbon (futures only, when >1 model)
-  if (nrow(fut_env) > 0L) {
-    ribbon_aes <- if (has_source) {
-      ggplot2::aes(
-        x = .data$sim_year, ymin = .data$lo, ymax = .data$hi,
-        fill = .data$scenario_f,
-        group = interaction(.data$scenario_f, .data$source)
-      )
-    } else {
-      ggplot2::aes(
-        x = .data$sim_year, ymin = .data$lo, ymax = .data$hi,
-        fill = .data$scenario_f, group = .data$scenario_f
-      )
-    }
-    p <- p + ggplot2::geom_ribbon(
-      data        = fut_env,
-      mapping     = ribbon_aes,
-      alpha       = if (has_source) 0.10 else 0.15,
-      show.legend = FALSE
-    )
-  }
-
-  # Spaghetti: thin translucent line per (scenario [, source], model)
-  spaghetti_aes <- if (has_source) {
-    ggplot2::aes(
-      x = .data$sim_year, y = .data$value,
-      colour = .data$scenario_f,
-      linetype = .data$scenario_f,
-      alpha = .data$source,
-      group = interaction(
-        .data$scenario_f, .data$source,
-        .data$model_id
-      )
-    )
-  } else {
-    ggplot2::aes(
-      x = .data$sim_year, y = .data$value,
-      colour = .data$scenario_f, linetype = .data$scenario_f,
-      group = interaction(.data$scenario_f, .data$model_id)
-    )
-  }
-  p <- p + if (has_source) {
-    ggplot2::geom_line(
-      data = df, mapping = spaghetti_aes,
-      linewidth = 0.3, na.rm = TRUE, show.legend = FALSE
-    )
-  } else {
-    ggplot2::geom_line(
-      data = df, mapping = spaghetti_aes,
-      linewidth = 0.3, alpha = 0.35, na.rm = TRUE, show.legend = FALSE
-    )
-  }
-
-  # Bold median curve per (scenario [, source])
-  median_aes <- if (has_source) {
-    ggplot2::aes(
-      x = .data$sim_year, y = .data$central,
-      colour = .data$scenario_f, linetype = .data$scenario_f,
-      alpha = .data$source,
-      group = interaction(.data$scenario_f, .data$source)
-    )
-  } else {
-    ggplot2::aes(
-      x = .data$sim_year, y = .data$central,
-      colour = .data$scenario_f, linetype = .data$scenario_f,
-      group = .data$scenario_f
-    )
-  }
-  p <- p + ggplot2::geom_line(
-    data = env_df, mapping = median_aes,
-    linewidth = 1.1, na.rm = TRUE
-  )
-
-  p <- p +
-    ggplot2::scale_color_manual(
-      values = scen_colour_map, breaks = scen_levels,
-      name = "Scenario",
-      guide = ggplot2::guide_legend(override.aes = list(linewidth = 0.9))
-    ) +
-    ggplot2::scale_fill_manual(
-      values = scen_colour_map, breaks = scen_levels, guide = "none"
-    ) +
-    ggplot2::scale_linetype_manual(
-      values = scen_ltype_map, breaks = scen_levels,
-      name = "Scenario"
-    )
-  if (has_source) {
-    p <- p + ggplot2::scale_alpha_manual(
-      values = c(Baseline = 0.35, Policy = 1.0),
-      breaks = c("Baseline", "Policy"),
-      name   = "Source",
-      guide  = ggplot2::guide_legend(override.aes = list(linewidth = 0.9))
-    )
-  }
-  p <- p +
-    ggplot2::labs(
-      x = "Historical weather-year draw (simulated)",
-      y = x_label,
-      subtitle = NULL
-    ) +
-    theme_wise() +
-    ggplot2::guides(
-      colour = ggplot2::guide_legend(title = NULL),
-      linetype = ggplot2::guide_legend(title = NULL),
-      alpha = ggplot2::guide_legend(title = NULL)
-    ) +
-    ggplot2::theme(legend.position = "bottom")
-  p
-}
-
 # Variance-contribution stacked bar ----
 
 model_robustness_data <- function(ts_tbl, band_q = c(lo = 0.10, hi = 0.90)) {
@@ -1864,22 +1651,6 @@ model_robustness_data <- function(ts_tbl, band_q = c(lo = 0.10, hi = 0.90)) {
       n_models = dplyr::n_distinct(.data$model_id), .groups = "drop"
     )
   dplyr::left_join(x, centers, by = "scenario")
-}
-
-plot_model_robustness <- function(tbl, x_label = "Expected annual outcome") {
-  if (is.null(tbl) || !nrow(tbl)) {
-    return(blank_plot("Climate-model robustness is unavailable."))
-  }
-  ggplot2::ggplot(tbl, ggplot2::aes(x = .data$model_mean, y = .data$scenario)) +
-    ggplot2::geom_point(size = 2, colour = .wise_support, alpha = 0.7) +
-    ggplot2::geom_point(
-      data = unique(tbl[c("scenario", "center")]),
-      ggplot2::aes(x = .data$center, y = .data$scenario),
-      shape = 21, fill = "#009E73", colour = .wise_support,
-      size = 3
-    ) +
-    ggplot2::labs(x = x_label, y = NULL) +
-    theme_wise()
 }
 
 # Enhanced exceedance curve ----
@@ -2942,9 +2713,8 @@ echart_annual_distribution <- function(tbl, x_label = "Outcome (outcome units)",
 
 #' Interactive per-model trajectories with ensemble envelope
 #'
-#' echarts counterpart of [plot_timeseries_spaghetti()]: same envelope
-#' statistics (per (scenario, sim_year) median and quantiles at
-#' `ensemble_band_q`), one thin translucent line per model, one bold median
+#' Envelope statistics are the per (scenario, sim_year) median and quantiles
+#' at `ensemble_band_q`. Draws one thin translucent line per model, one bold median
 #' line per scenario/source, and a custom polygon for the inter-model ribbon.
 #' @noRd
 echart_timeseries_spaghetti <- function(ts_tbl, x_label = "",
@@ -3183,7 +2953,7 @@ echart_timeseries_spaghetti <- function(ts_tbl, x_label = "",
 
 #' Interactive climate-model robustness scatter
 #'
-#' echarts counterpart of [plot_model_robustness()]: one point per climate
+#' Climate-model robustness chart: one point per climate
 #' model's mean across weather-year draws in its scenario colour, plus the
 #' orange ensemble-median marker per scenario. Item tooltip.
 #' @noRd
@@ -3576,6 +3346,24 @@ echart_exceedance <- function(curves_tbl,
     pageSizeOptions = c(10, 25, 50, 100),
     highlight = TRUE
   )
+}
+
+# Display-only number formats for the return-period threshold table. Values
+# within [-1, 1] (rates, poverty gap/severity, Gini) get 4 decimals so
+# sub-percentage-point differences stay visible; other outcomes get 2.
+# The integer Obs column is left unformatted.
+.threshold_col_defs <- function(df) {
+  num <- names(df)[vapply(df, is.numeric, logical(1))]
+  num <- setdiff(num, "Obs")
+  vals <- unlist(df[num], use.names = FALSE)
+  vals <- vals[is.finite(vals)]
+  digits <- if (length(vals) && max(abs(vals)) <= 1) 4L else 2L
+  stats::setNames(lapply(num, function(nm) {
+    reactable::colDef(
+      format = reactable::colFormat(digits = digits),
+      class = "wise-dt-wrap", minWidth = 70
+    )
+  }), num)
 }
 
 .step2_reactable_note <- function(note) {
