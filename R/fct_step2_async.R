@@ -122,7 +122,8 @@
   }
   # R2-SEC-01: a UI connection carries the user's own credentials to the
   # local daemon (guidelines section 0; .wise_step2_async_launch() only starts
-  # local daemons, never url= ones). The worker never fills a missing UI
+  # local daemons, never url= ones, and dispatch re-checks this with
+  # .wise_async_require_local_daemon()). The worker never fills a missing UI
   # field from its environment (.connection_field()).
   if (identical(params$origin, "ui")) {
     return(params)
@@ -246,7 +247,8 @@
   .wise_step2_async_ensure_daemon()
   submit_started <- proc.time()[["elapsed"]]
   submitted_at_epoch <- as.numeric(Sys.time())
-  mirai_job <- tryCatch(
+  mirai_job <- tryCatch({
+    .wise_async_require_local_daemon(job$snapshot$input$cp)
     mirai::try_mirai(
       worker_expr,
       .timeout = .wise_step2_async_timeout_ms("step2"),
@@ -268,9 +270,8 @@
       weather_storage = job$weather_storage,
       weather_collect = job$weather_collect,
       weather_threads = job$weather_threads
-    ),
-    error = function(e) e
-  )
+    )
+  }, error = function(e) e)
   if (inherits(mirai_job, "error")) {
     state$active <- NULL
     .wise_step2_async_settle(job, error = mirai_job)
@@ -636,6 +637,26 @@
 .wise_step2_async_daemon_alive <- function() {
   status <- tryCatch(mirai::status(.compute = "default"), error = function(e) NULL)
   is.list(status) && isTRUE(status$connections >= 1L)
+}
+
+# TRUE when every daemon of the shared pool listens on a local transport
+# (ipc, abstract socket or in-process sync mode). tcp/tls daemons may run on
+# another host.
+.wise_async_daemons_local <- function() {
+  url <- tryCatch(mirai::status(.compute = "default")$daemons, error = function(e) NULL)
+  is.character(url) && length(url) > 0L &&
+    all(grepl("^(ipc|abstract|inproc)://", url))
+}
+
+# R2-SEC-01: credentials typed in the UI may only be sent to local daemons
+# (guidelines section 0). Environment connections carry no credentials.
+.wise_async_require_local_daemon <- function(params) {
+  if (is.list(params) && identical(params$origin, "ui") &&
+      !.wise_async_daemons_local()) {
+    stop("The background worker is not local, so the connection credentials ",
+      "entered in the app were not sent to it.", call. = FALSE)
+  }
+  invisible(TRUE)
 }
 
 .wise_step2_async_launch <- function() {

@@ -102,7 +102,9 @@ overview_metadata_cache_store <- function(connection_params, value) {
   # Explicit params are allowed only on this local shared pool (guidelines §0).
   submit <- function() {
     if (!isTRUE(is_current())) return(invisible(NULL))
-    task <- tryCatch(mirai::try_mirai({
+    task <- tryCatch({
+      .wise_async_require_local_daemon(params)
+      mirai::try_mirai({
       if (!isTRUE(getOption("wiseapp.async.worker_initialized", FALSE))) {
         if (isTRUE(development_package)) {
           pkgload::load_all(package_path, export_all = FALSE, helpers = FALSE,
@@ -115,7 +117,8 @@ overview_metadata_cache_store <- function(connection_params, value) {
       wiseapp:::load_overview_metadata(params)
     }, package_path = package_path, development_package = development_package,
       params = params, .compute = "default",
-      .timeout = .wise_step2_async_timeout_ms("metadata")), error = function(e) e)
+      .timeout = .wise_step2_async_timeout_ms("metadata"))
+    }, error = function(e) e)
     if (inherits(task, "error")) {
       on_error(task)
     } else if (is.null(task)) {
