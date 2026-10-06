@@ -298,3 +298,19 @@ test_that("R2-BUG-11: a failed Lasso flags the spec as missing its selection", {
     expect_null(attr(selected_model(), "lasso_missing"))
   })
 })
+
+test_that("CR-A11Y-03: prerequisite messages use the themed warning with an icon", {
+  args <- model_args()
+  args$selected_outcome <- reactiveVal(NULL)
+  testServer(mod_1_06_model_server, args = args, {
+    html <- output$model_selector_ui$html
+    expect_match(html, "warning-message", fixed = TRUE)
+    expect_match(html, "triangle-exclamation", fixed = TRUE)
+    expect_false(grepl("color:\\s*red", html))
+  })
+
+  src <- file.path("..", "..", "R", "mod_1_06_model.R")
+  skip_if_not(file.exists(src), "R sources not found")
+  code <- paste(readLines(src, warn = FALSE), collapse = "\n")
+  expect_false(grepl("color:\\s*(red|grey|gray)", code))
+})
