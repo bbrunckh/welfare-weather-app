@@ -21,14 +21,14 @@ Batch order: B1 -> B2 -> B3 -> B4 are the report's "Now" list (§11 items 1-5). 
 | Batch | Scope | Items | Status | Branch / PR |
 |---|---|---:|---|---|
 | B1 | Deployment blockers and dependency drift | 8 | ◐ | |
-| B2 | Security | 15 | ☐ | |
-| B3 | Headline numerics (Steps 1-2) | 9 | ☐ | |
-| B4 | Step 3 levers and decomposition | 10 | ☐ | |
+| B2 | Security | 15 | ◐ | fix/rev-w1-security, fix/rev-w1-weather | |
+| B3 | Headline numerics (Steps 1-2) | 9 | ◐ | fix/rev-w1-weather, fix/rev-w1-delta | |
+| B4 | Step 3 levers and decomposition | 10 | ◐ | fix/rev-w1-levers | |
 | B5 | Robustness, CI and test hygiene | 13 | ◐ | |
 | B6 | Performance (ranked, §5.6) | 23 | ☐ | |
-| B7 | Remaining Medium and Low bugs | 33 | ☐ | |
+| B7 | Remaining Medium and Low bugs | 33 | ◐ | fix/rev-w1-cleanup | |
 | B8 | Accessibility | 16 | ☐ | |
-| B9 | Code quality and docs | 11 | ☐ | |
+| B9 | Code quality and docs | 11 | ◐ | fix/rev-w1-cleanup | |
 
 ## B1 - Deployment blockers and dependency drift (§10.1, §3)
 
@@ -51,19 +51,19 @@ Goal: close the credential-mixing paths first (CR-SEC-01, R2-SEC-01); the rest a
 
 | ID | Sev | Eff | Status | Task | Notes |
 |---|---|---|---|---|---|
-| CR-SEC-01 | C | M | ☐ | Auto-connect: do not register apply observer or read connection inputs; never mix UI and env fields; allowlist source types and Databricks hosts (https, no user-info/port) | Rotate secret after release |
-| R2-SEC-01 | H | M | ☐ | Track connection provenance; UI connections pass user credentials to the local worker or refuse async; re-validate allowlist in worker | `build_connection_params()` fix alone does not close this |
+| CR-SEC-01 | C | M | ☑ | Auto-connect: do not register apply observer or read connection inputs; never mix UI and env fields; allowlist source types and Databricks hosts (https, no user-info/port) | dbb179e: auto-connect mode registers no apply/source observers and connection_params() refuses; connection all-UI or all-env ($origin field); source-type allowlist; Databricks host = configured host or https Databricks domain, no user-info/port/path, re-checked in workers; testServer + offline tests. Behaviour: partial UI entry no longer picks up env creds; auto-connect failure needs reload. Rotate SP secret after release. |
+| R2-SEC-01 | H | M | ☑ | Track connection provenance; UI connections pass user credentials to the local worker or refuse async; re-validate allowlist in worker | 8b5f537: UI connections passed whole (with creds) to the local daemon, env connections still scrubbed; .connection_field() never fills UI fields from env; UI Azure without creds errors (no managed-identity fallback); tests. No runtime check that daemons are local (comment only). |
 | CR-SEC-02 | H | M | ☐ | Allowlist buckets/volume roots/local roots in config; disable `local` in production; DuckDB `enable_external_access`/`allowed_directories`/`lock_configuration`; validate path tokens | |
 | CR-SEC-03 | H | M | ☐ | `SCOPE` on every `CREATE SECRET`; per-session secret names dropped at session end; per-session or per-task connection | |
-| CR-SEC-04 | H | S-M | ☐ | Source identity in weather cache keys; private 0700 dir; `tempfile(tmpdir=)` + rename; LRU via `Sys.setFileTime()`; no eviction under live view; `.sql_literal()` on paths | |
+| CR-SEC-04 | H | S-M | ☑ | Source identity in weather cache keys; private 0700 dir; `tempfile(tmpdir=)` + rename; LRU via `Sys.setFileTime()`; no eviction under live view; `.sql_literal()` on paths | 3319344: source identity in cache keys (no creds), tempfile+rename, LRU via Sys.setFileTime, no eviction younger than async timeout, .sql_literal paths, 0700 cache dir; tests. Not done: h3 mappings still on disk; fct_step2_compute.R:131 base dir not 0700. Existing cache entries invalidated once. |
 | R2-SEC-02 | M | S-M | ☐ | Clear secrets/token cache/views in `on.exit()` of tasks carrying credentials | Depends on CR-SEC-03 design |
 | CR-SEC-05 | M | S | ☐ | Drop `^overview-` connection ids on config import; fix success message; deployment label in exports/provenance | |
-| CR-SEC-06 | M | S | ☐ | `httr2` `req_timeout()`, `req_retry()`, summarised errors | Helps R2-OPS-06 |
+| CR-SEC-06 | M | S | ☑ | `httr2` `req_timeout()`, `req_retry()`, summarised errors | 15723cd: req_timeout 30 s token / 300 s file, req_retry 3 tries on transient errors, status-only messages; tests check request config (httr2 mock skips retry loop). |
 | CR-SEC-07 | M | L | ☐ | Per-run size limits from config; cap Step 2 queue by bytes; separate small profile for metadata | Rest of async coverage tracked under CR-PERF-04 (B6) |
 | CR-SEC-08 | L-M | S | ☐ | Central `wise_user_error()`: log full condition with id, show short classified message | |
-| R2-SEC-03 | L | S | ☐ | Hash token-cache key (SHA-256); cap and expire entries | |
-| R2-SEC-04 | L | S | ☐ | `dir.create(mode = "0700")` for configured artifact/weather roots; unlink in `onStop()` | |
-| R2-SEC-05 | L | S | ☐ | `on.exit(unlink())` for `.export_write_echarts()` temp files | |
+| R2-SEC-03 | L | S | ☑ | Hash token-cache key (SHA-256); cap and expire entries | 872a8d5: SHA-256 (digest) key, expiry-5 min drop, cap 16; test. |
+| R2-SEC-04 | L | S | ☑ | `dir.create(mode = "0700")` for configured artifact/weather roots; unlink in `onStop()` | 24590bf: artifact and weather-store roots 0700; app-created artifact root removed in onStop. Configured weather-store root not removed (ownership unclear). |
+| R2-SEC-05 | L | S | ☑ | `on.exit(unlink())` for `.export_write_echarts()` temp files | e2221c5: temp html and _files removed on every exit path; test. |
 | CR-SEC-09 (rest) | L | S | ☐ | Move inline JS/CSS to `custom.js`/`custom.css` (enables CSP); extension version/checksum check | `rel` links in B1 |
 | R2-SEC-07 | Info | S | ☐ | Fix identity/storage of the prepared-weather persistent cache before ever enabling it | Off by default; may close as ✗ |
 
@@ -73,14 +73,14 @@ Goal: correct the biased headline numbers. One finding per commit. Each needs a 
 
 | ID | Sev | Eff | Status | Task | Notes |
 |---|---|---|---|---|---|
-| R2-BUG-01 | H | S | ☐ | `dates <- as.Date(dates)` at top of `get_weather()`; async-vs-sync parity test with transformed variable and window ending before 2020 | Also fixes cache-key mismatch between paths |
-| CR-BUG-01 | H | S | ☐ | CMIP6 baseline: union raw monthly rows (hist `< 2015-01-01`, SSP `>=`), one `AVG` per (model, h3, month); characterisation test with unequal part lengths | Expect near-term welfare loss and poverty increase to rise ~9-10% (BFA SSP3-7.0) |
+| R2-BUG-01 | H | S | ☑ | `dates <- as.Date(dates)` at top of `get_weather()`; async-vs-sync parity test with transformed variable and window ending before 2020 | 7e460ee: as.Date(dates) in get_weather(); parity test (character vs Date, transformed vars, window ending before 2020). BFA: no change with default 1991-2020 window; 1981-2010 window changed 91-100% of rows before fix. |
+| CR-BUG-01 | H | S | ☑ | CMIP6 baseline: union raw monthly rows (hist `< 2015-01-01`, SSP `>=`), one `AVG` per (model, h3, month); characterisation test with unequal part lengths | 4e644aa: hist rows < 2015, SSP rows >= 2015, one AVG per (model, h3, month); unequal-length + overlap test. BFA delta-t SSP3-7.0 2025-35: 0.619 -> 0.755 C (matches report). See Decision log. |
 | CR-BUG-02 | H | M | ☐ | One `outcome_to_model_scale()` used in training, `predict_rif`, decomposition context and level channels; store scale on `model_fit`; assert in `predict_rif`; LCU test | Until done, disable LCU for RIF and SP lever. Pairs with R2-BUG-04 (B4) |
-| R2-BUG-03 | H | S | ☐ | Median gradient: smoothed-quantile derivative `h_i = k_i mu_i / sum k`; test vs Monte Carlo (target ratio ~1, was 0.18 on BFA) | Shared with Step 3 decomposition |
-| R2-BUG-02 | H | S | ☐ | Drop NA rows consistently from `h` and `F` (or `h = 0`), count and report; assert row alignment at `step2_compute()` | |
-| CR-BUG-07 | L | S | ☐ | Fix `rowids` comment; assert prediction/row alignment | Folds into R2-BUG-02 |
-| R2-BUG-28 | M | S-M | ☐ | Count and report NA household-year predictions per year/member; decide impute/exclude/fail | 2.4% on BFA 3x3 |
-| R2-BUG-29 | M | S | ☐ | Guard zero reference SD in standardised anomalies; floor or drop month with warning | 5.9% NaN on BFA survey dates |
+| R2-BUG-03 | H | S | ☑ | Median gradient: smoothed-quantile derivative `h_i = k_i mu_i / sum k`; test vs Monte Carlo (target ratio ~1, was 0.18 on BFA) | e734037: smoothed-quantile derivative k_i = w phi((m-mu)/b)/b, h = k mu / sum k, b = bw.nrd0. Synthetic delta/MC SD 0.00/0.25/0.01 -> 1.00/1.01/1.01; BFA median 0.011 -> 0.971; mean/Gini/headcount bit-identical. |
+| R2-BUG-02 | H | S | ☑ | Drop NA rows consistently from `h` and `F` (or `h = 0`), count and report; assert row alignment at `step2_compute()` | e77f50a: non-finite rows dropped from h and F, count returned as n_coef_dropped; apply_band_transform() guards non-finite point. Test: one NA -> var_coef within 1% of clean. Not yet surfaced in UI. |
+| CR-BUG-07 | L | S | ☑ | Fix `rowids` comment; assert prediction/row alignment | 290e183: rowids comment corrected; predict_outcomes() length check and .step2_compute_assert_alignment() at step2_compute(); tests. |
+| R2-BUG-28 | M | S-M | ☑ | Count and report NA household-year predictions per year/member; decide impute/exclude/fail | 843e416: per-year n_na_dropped on per-year results plus one [wiseapp] message per preparation; report only (rows used unchanged). Not yet surfaced in UI. |
+| R2-BUG-29 | M | S | ☑ | Guard zero reference SD in standardised anomalies; floor or drop month with warning | 0870dbe: zero reference SD -> NA plus one warning with counts (user decision: no floor); test. |
 | CR-BUG-06 | M | S | ☐ | Require full coverage for CMIP6 members or report/exclude | Feeds R2-BUG-02 |
 
 ## B4 - Step 3 levers and decomposition (§4.1, §4.2)
@@ -89,15 +89,15 @@ Goal: correct policy results. Keep separate from B3 so output changes are attrib
 
 | ID | Sev | Eff | Status | Task | Notes |
 |---|---|---|---|---|---|
-| CR-BUG-08 | H | S | ☐ | One exact term matcher (`%in%` or anchored escaped regex) shared by UI, gating and term maps | `piped` vs `piped_to_prem` test |
+| CR-BUG-08 | H | S | ☑ | One exact term matcher (`%in%` or anchored escaped regex) shared by UI, gating and term maps | 0f620d9: shared exact matcher .policy_lever_terms()/.lever_in_model() for UI gating, apply_policy_to_svy and decompose term maps; test-policy-lever-matching (fails before, passes after). |
 | R2-BUG-04 | H | S | ☐ | Store currency with SP config; convert per row or force PPP input | After CR-BUG-02 |
-| R2-BUG-05 | H | S | ☐ | Run labour reallocation only when a sector target changed; init sliders to observed shares | |
+| R2-BUG-05 | H | S | ☑ | Run labour reallocation only when a sector target changed; init sliders to observed shares | 0d30ae5: sector targets NULL until a slider moves; reallocation only when a target is set; sliders start at observed weighted shares; test-policy-labor-sectors (synthetic: 188/133/149 -> 470/0/0 before, unchanged after; reach 312 -> 30). |
 | R2-BUG-06 | H (RIF) | M | ☐ | Repositioning: subtract survey-time weather (`W_t - W_svy`); parity test vs `predict_rif` | Reference implementation shares the wrong convention; fix both |
 | R2-BUG-07 | M | M | ☐ | SP effect against predicted year-t level; level channels from predicted states | |
-| R2-BUG-12 | M | S | ☐ | Per-lever `wise_seed(seed, "policy", "<lever>")` streams | |
+| R2-BUG-12 | M | S | ☑ | Per-lever `wise_seed(seed, "policy", "<lever>")` streams | e47f815: per-lever wise_seed streams; SP preview uses the sp stream. Changes draws vs earlier runs with the same seed. test-policy-lever-streams. |
 | R2-BUG-13 | M | S-M | ☐ | NA outcome/covariate rows: restrict to referenced rows, treat NA as untreated, report count | |
 | R2-BUG-14 | M | S | ☐ | Block Step 3 when Step 2 is stale, or snapshot `mf` into `hist_sim` | Also CR-BUG-14 residual |
-| R2-BUG-17 | L | S | ☐ | `idx[sample.int(length(idx), k)]` in all nine places | |
+| R2-BUG-17 | L | S | ☑ | `idx[sample.int(length(idx), k)]` in all nine places | 6a71600: idx[sample.int(length(idx), k)] at all 9 sites; test-policy-sample-single. |
 | R2-BUG-26 | L | S | ☐ | Weighted ECDF in legacy decile decomposition; weighted policy input diagnostics; consistent ensemble ranking | |
 
 ## B5 - Robustness, CI and test hygiene (§10.1-10.3)
@@ -163,26 +163,26 @@ Triage each: fix, or mark `✗` with a reason. Group by file to keep diffs small
 | CR-BUG-04 | M | S | ☐ | Weighted targeting quantile; model-card note on unweighted fits (method-owner decision on weighting) | Needs decision |
 | CR-BUG-05 | M | M | ☐ | Gap-aware lag windows (`RANGE BETWEEN INTERVAL`); per-variable NA handling | |
 | R2-BUG-08 | M | M | ☐ | LASSO: partial out FE (FWL) or sparse factor FE | |
-| R2-BUG-09 | M | S | ☐ | `vcov = "hetero"` or relabel "HC1 robust" | |
+| R2-BUG-09 | M | S | ☑ | `vcov = "hetero"` or relabel "HC1 robust" | 7f157c4: relabelled unclustered SEs as IID (non-robust); vcov unchanged (user decision); test. |
 | R2-BUG-10 | M | S | ☐ | Cluster the RIF heterogeneity Wald test; disclose N*K cap | |
 | R2-BUG-11 | M | S | ☐ | `req()` a successful LASSO when covariates = Lasso | |
-| R2-BUG-15 | M | S | ☐ | Do not round threshold table before pivoting | |
+| R2-BUG-15 | M | S | ☑ | Do not round threshold table before pivoting | c5f7295: raw values pivoted; .threshold_col_defs() formats display only (4 dp within [-1,1], else 2); CSVs raw; also used by fct_policy_sim_compare.R; test. |
 | CR-BUG-16 | M | S | ☐ | Join guards (`relationship`, `unmatched`); report dropped rows | |
 | R2-BUG-16 | M | S | ☐ | Align labels ("median" vs mean) and plotting position | |
-| R2-BUG-27 | M | S | ☐ | `unname()` loess predictions | Fixed by CR-PERF-08 if done there |
+| R2-BUG-27 | M | S | ☑ | `unname()` loess predictions | 49a4649: unname() loess predictions; htmlwidgets JSON test. |
 | CR-BUG-10 | L | S | ☐ | One Gini definition; NA-safe weighted median | Only without weights |
-| CR-BUG-11 | L | S | ☐ | Four orphan inputs in `mod_2_02` | |
-| CR-BUG-12 | L | S | ☐ | Namespace `#results_section` | |
+| CR-BUG-11 | L | S | ☑ | Four orphan inputs in `mod_2_02` | f8b564f: orphan inputs replaced by defaults (bw 0.05, p10_p90, scenario_x_year, show_coef FALSE); tests updated. |
+| CR-BUG-12 | L | S | ☑ | Namespace `#results_section` | 72a8d9f: results_section container and selectors use ns(); static test. |
 | CR-BUG-13 | L | S | ☐ | Keep GCM names in `model_n` | |
-| CR-BUG-15 | L | S | ☐ | Move S3 methods out of module closure | |
-| CR-BUG-17 | L | S | ☐ | `ORDER BY` before `head(1)` for H3 resolution | |
+| CR-BUG-15 | L | S | ☑ | Move S3 methods out of module closure | 073f290: methods at top level, registered as S3 in NAMESPACE (needed for testServer dispatch); laziness test. |
+| CR-BUG-17 | L | S | ☑ | `ORDER BY` before `head(1)` for H3 resolution | 6ebfcb5: .h3_resolution() over all rows, errors on mixed resolutions; test. CMIP6 path still falls back silently to target resolution on error (flag). |
 | CR-BUG-18 | L | S | ☐ | Consistent `skip_coef_draws` flag; safe env parsing | |
-| CR-BUG-19 | L | S | ☐ | `detectCores()` -> `availableCores()` | Also in B5 |
-| R2-BUG-18 | L | S | ☐ | `withr::with_seed()`; `tempfile()` ids | |
+| CR-BUG-19 | L | S | ◐ | `detectCores()` -> `availableCores()` | mod_1_06 fixed earlier (6ee04f3). Left: fct_get_weather.R:53 detectCores (NA-safe, not container-aware); parallelly installed but undeclared. |
+| R2-BUG-18 | L | S | ◐ | `withr::with_seed()`; `tempfile()` ids | 1c0d9db: withr::with_seed jitter in utils_mod_1_helpers.R; test. Left: runif ids in fct_step2_async.R:130, fct_step2_payload.R:403. |
 | R2-BUG-19 | L | S | ☐ | RIF coefficient plot: add covariance term | |
 | R2-BUG-20 | L | S | ☐ | NA-safe role-flag comparisons | |
 | R2-BUG-21 | L | S | ☐ | Weather-load short-circuit must consider outcome | |
-| R2-BUG-22 | L | S | ☐ | Bin ordering regex: handle minus signs | |
+| R2-BUG-22 | L | S | ☑ | Bin ordering regex: handle minus signs | 1098d5f: signed/-Inf bin ordering regex; fixed regmatches misalignment; test. |
 | R2-BUG-23 | L | S | ☐ | Pre-2015 period starts; accurate artifact-cap error | |
 | R2-BUG-24 | L | S | ☐ | Contrast SD residual variance; fallback error scaling; incidence weights; residual-mode checks | |
 | R2-BUG-25 | L | S | ☐ | `batch/02_weather_stats.R:218` signature | Same as RED-06 task |
@@ -222,8 +222,8 @@ Largest, least urgent; one PR per file with characterisation tests. Delete dead 
 
 | ID | Sev | Eff | Status | Task | Notes |
 |---|---|---|---|---|---|
-| CR-CQ-08 | L | S | ☐ | Delete dead exports/internals/UI stubs, ~500 unmounted lines in `mod_3_09`; fix `.step2_compute_copy()` warnings | Do first |
-| CR-CQ-05 | L | S | ☐ | Remove five defensive `exists()` checks | |
+| CR-CQ-08 | L | S | ☑ | Delete dead exports/internals/UI stubs, ~500 unmounted lines in `mod_3_09`; fix `.step2_compute_copy()` warnings | 4e0a678: deleted dead exports/internals/UI stubs (~1,490 lines incl. mod_3_09 437-950, make_regtable, plot_resid_weather, .run_simulation_parallel_chunk); NAMESPACE regenerated. Left (see log): compute_cluster_counts, COEF_VCOV_SPEC_MOULTON, .wise_step2_async_find_stores, .step2_compute_copy, test-only plot helpers. |
+| CR-CQ-05 | L | S | ◐ | Remove five defensive `exists()` checks | 6c32786: removed guards in fct_run_simulation.R and fct_rif_sim.R (+ source-scan test). Left: fct_load_data.R:293, fct_policy_decompose.R:703-706, fct_simulations.R:395. |
 | CR-CQ-09 | L | S | ☐ | One default data path from config | |
 | CR-CQ-10 | L | S | ☐ | Update `AGENTS.md` (test count, deleted dev scripts, residual modes, engines, Step 0 sources, install one-liner, `test_dir`) | Stale refs in `fct_load_data.R:241`, `dev/00_make_manifest.R:16` |
 | R2-CQ-01 | L | S | ☐ | Track `man/` or `@noRd`; update `NEWS.md` | |
@@ -240,12 +240,12 @@ Record before/after for the BFA headline numbers whenever a batch changes output
 
 | Quantity | Baseline (df37cdb) | After B3 | After B4 | Notes |
 |---|---:|---:|---:|---|
-| Mean welfare change | -2.52% | | | CR-BUG-01 pooled prototype: -2.77% |
-| Poverty headcount change ($3/day) | +1.70 pp | | | prototype: +1.86 pp |
-| Median welfare change | -2.59% | | | prototype: -2.82% |
+| Mean welfare change | -2.52% | -2.84% (CR-BUG-01 only) | | Local re-run (t only, 22 members, year + panel-location FE, point est.): -2.35% -> -2.84%. t + spei6 (15 members): -3.51% -> -3.71%. Baseline def. differs from report, so use local before. |
+| Poverty headcount change ($3/day) | +1.70 pp | +1.88 pp (CR-BUG-01 only) | | Local: +1.53 -> +1.88 pp (t only); +2.43 -> +2.54 pp (t + spei6). |
+| Median welfare change | -2.59% | -2.94% (CR-BUG-01 only) | | Local: -2.42% -> -2.94% (t only); -3.58% -> -3.72% (t + spei6). |
 | RIF historical mean welfare (PPP $/day) | 4.22 (LCU model) | | | PPP model: 4.40 (CR-BUG-02) |
 | RIF poverty headcount change | +2.27 pp (LCU model) | | | PPP model: +2.06 pp |
-| Median delta SD / Monte Carlo SD | 0.18 | | | target ~1 (R2-BUG-03) |
+| Median delta SD / Monte Carlo SD | 0.18 | 0.971 | | Local BFA (OLS, FE year + loc_id_panel, 400 draws): 0.011 -> 0.971 (R2-BUG-03). |
 
 ## Performance baselines (BFA, report container, medians)
 
@@ -269,4 +269,11 @@ Re-measure locally before B6 and replace these. Source: §1.2, §5.
 - 2026-10-06 - B1 and B5 implemented on `dev` (uncommitted). Verified: new tests (deploy-contract, duckdb-bundle, resource-limits, step2-async-daemon, stage-log, batch-scripts) and the affected existing test files pass; Step 2 benchmark harness smoke-run on local BFA (weather 17.1 s vs pipelines 3.7 s of 21.3 s total). Open: manifest regeneration (needs commit), CR-PERF-15, RED-06 consolidation, default resource-limit values, Azure extension decision.
 - 2026-10-06 - Manifest regenerated and committed (b89aa7d). CR-PERF-15 deferred by decision (keep option 1: `load_all()`, git deploy).
 - 2026-10-06 - Pushed dev (d2a6991) and redeployed on Posit Connect from the regenerated manifest: deploy succeeded (restore + start). In-app checks on Connect (Step 3 run, stage log lines with rss_mb, auto-connect) still to be confirmed.
+- 2026-10-06 - Wave 1 started: five parallel worktree branches off dev (security, weather, delta, levers, cleanup), merged locally into dev after tests. Decisions: R2-BUG-29 -> NA + warning (no floor); R2-BUG-09 -> relabel to IID (no vcov change); R2-BUG-28 -> count/report only; CR-BUG-01/R2-BUG-01/R2-BUG-03 fixed now with BFA before/after.
 - 2026-10-06 - Benchmarked igraph vs base-R and all-in-DuckDB connected components for `loc_panel()` (see B6 row "igraph removal"). No code changed.
+- 2026-10-06 - fix/rev-w1-levers merged into dev (8610124): CR-BUG-08, R2-BUG-05, R2-BUG-17, R2-BUG-12. Verified: devtools::test(filter='policy|determinism|sp-reach|step3|decompos') 1798 passed, 0 failed. Other wave-1 branches (security, weather, delta, cleanup) resumed after a usage pause.
+- 2026-10-06 - fix/rev-w1-weather merged into dev (2b9a386): R2-BUG-01, CR-BUG-01, R2-BUG-29, CR-BUG-17, CR-SEC-04. Agent verified weather test files (get_weather 144, wx_cache 26, perf02 11, determinism 43, weather_select 83, run_simulation 89, step2-compute 36 passed). CR-BUG-01 moves headline numbers (Decision log). Observations: CR-BUG-06 excludes 7/22 SSP3-7.0 members with t + spei6 (warning only); existing get_weather tests write to the real user cache dir.
+- 2026-10-06 - fix/rev-w1-delta merged into dev (8af59ff): R2-BUG-03, R2-BUG-02, CR-BUG-07, R2-BUG-28. Follow-ups found: (a) delta gradients multiply by mu even for level (non-log) outcomes - every method affected on level outcomes, needs is_log in gradient_for_method (numerics, needs decision log); (b) NA weights make point estimates NA (drop vs fail: product decision); (c) n_coef_dropped / n_na_dropped not yet shown in UI (fct_aggregation.R / mod_2_02).
+- 2026-10-06 - fix/rev-w1-security-dev merged into dev (049739c): CR-SEC-01, R2-SEC-01, R2-SEC-03, CR-SEC-06, R2-SEC-04, R2-SEC-05. Agent verified connection 129, overview 26, overview-metadata 47, step2-async 111, step2-payload 119, step2-compute 36, export-bundle 156, provenance 43, weathersim 66 passed. R2-SEC-02 now more important: UI credentials reach the shared worker during Step 2. Remaining CR-SEC-08 instance: Databricks file errors include host/volume URL.
+- 2026-10-06 - fix/rev-w1-cleanup merged into dev (4a953e0): CR-CQ-08, CR-BUG-11/12/15, R2-BUG-15/27/22/09 done; CR-CQ-05, R2-BUG-18, CR-BUG-19 partial (remainders in files owned by other wave-1 agents). devtools::document(): no NAMESPACE drift. Further dead-code candidates (test-only plot helpers, welfare_stats_suite, .wise_navy, okabe-ito scales, unused mod_3_09 args) listed for a later CR-CQ-08 pass.
+- 2026-10-06 - Wave 1 integrated on dev (4a953e0). Full suite: 7130 passed, 0 failed, 0 errors (30 'Unknown or uninitialised column' warnings in test-rerun-regressions.R are pre-existing at fb5e4db). devtools::document(): no NAMESPACE drift. Manifest regenerated; test-deploy-contract passes.
