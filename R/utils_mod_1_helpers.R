@@ -908,8 +908,9 @@ echart_resid_weather <- function(model, haz_var, weather_df, x_label = haz_var,
     new_lab <- vapply(lvls, .cut_bin_label, character(1))
 
     bin_idx <- match(as.character(x_vals), lvls)
-    set.seed(1)
-    jit <- (bin_idx - 1L) + stats::runif(length(bin_idx), -0.18, 0.18)
+    # Fixed jitter without touching the caller's RNG stream.
+    jit <- (bin_idx - 1L) +
+      withr::with_seed(1, stats::runif(length(bin_idx), -0.18, 0.18))
     means <- unname(vapply(lvls, function(l) {
       mean(res[as.character(x_vals) == l], na.rm = TRUE)
     }, numeric(1)))

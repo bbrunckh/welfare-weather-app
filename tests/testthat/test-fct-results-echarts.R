@@ -492,3 +492,16 @@ test_that("echart resid weather orders binned predictors numerically", {
   expect_equal(length(ch$x$opts$series[[2]]$data), 4L)
   expect_s3_class(ch$x$opts$xAxis[[1]]$axisLabel$formatter, "JS_EVAL")
 })
+
+test_that("echart resid weather jitter leaves the global RNG untouched (R2-BUG-18)", {
+  skip_if_not_installed("echarts4r")
+  set.seed(42)
+  before <- .Random.seed
+  ch1 <- echart_resid_weather(ec_fit_bin, "tx_bin",
+                              weather_df = data.frame(tx_bin = ec_dat$tx_bin))
+  expect_identical(.Random.seed, before)
+  # The jitter itself stays reproducible.
+  ch2 <- echart_resid_weather(ec_fit_bin, "tx_bin",
+                              weather_df = data.frame(tx_bin = ec_dat$tx_bin))
+  expect_identical(ch1$x$opts$series[[1]]$data, ch2$x$opts$series[[1]]$data)
+})
