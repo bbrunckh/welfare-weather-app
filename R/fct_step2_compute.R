@@ -132,7 +132,7 @@
 .step2_compute_init_process <- function(input, cache_dir = NULL) {
   .duck_con()
   if (!is.null(cache_dir)) {
-    dir.create(cache_dir, recursive = TRUE, showWarnings = FALSE)
+    dir.create(cache_dir, recursive = TRUE, showWarnings = FALSE, mode = "0700")
     Sys.setenv(
       WISEAPP_WEATHER_CACHE_DIR = normalizePath(cache_dir, mustWork = FALSE),
       WISEAPP_WEATHER_CACHE_DISABLE = "0"

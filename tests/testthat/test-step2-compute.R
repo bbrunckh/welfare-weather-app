@@ -297,3 +297,17 @@ test_that("step2_compute does not warn about tibble row names (CR-CQ-08)", {
   expect_false(exists(".step2_compute_copy", envir = asNamespace("wiseapp"), inherits = FALSE))
   expect_false(exists(".wise_step2_async_find_stores", envir = asNamespace("wiseapp"), inherits = FALSE))
 })
+
+test_that("the Step 2 cache directory is created private (CR-SEC-04)", {
+  skip_on_os("windows")
+  old_umask <- Sys.umask("022")
+  on.exit(Sys.umask(old_umask), add = TRUE)
+  withr::local_envvar(c(
+    WISEAPP_WEATHER_CACHE_DIR = NA_character_,
+    WISEAPP_WEATHER_CACHE_DISABLE = NA_character_
+  ))
+  cache_dir <- tempfile("step2-cache-private-")
+  on.exit(unlink(cache_dir, recursive = TRUE, force = TRUE), add = TRUE)
+  .step2_compute_init_process(list(), cache_dir)
+  expect_identical(as.character(file.info(cache_dir)$mode), "700")
+})
