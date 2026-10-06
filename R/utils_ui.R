@@ -213,7 +213,7 @@ simulation_summary_card <- function(hist_sim, saved_scenarios = list(),
       )
     )
   }
-  separator <- shiny::tags$span(class = "step2-summary-separator", "·")
+  separator <- shiny::tags$span(class = "step2-summary-separator", "\u00b7")
   summary_row <- c(
     scenario_items,
     list(separator),
@@ -747,14 +747,14 @@ stale_after_import <- function(has_result, is_stale = NULL, imported = NULL) {
 }
 
 
-# Table CSV export (UI-45, guidelines §6) ----
+# Table CSV export (UI-45, guidelines sec. 6) ----
 #
 # Every rendered table in the app is a `reactable` table and offers the same
 # export affordance: one small, quiet "Download CSV" control implemented
 # client-side via `Reactable.downloadDataCSV()` (JavaScript), so the download
 # never round-trips the server. No R-side download handlers for table data.
 
-#' Client-side "Download CSV" button for a reactable table (guidelines §6)
+#' Client-side "Download CSV" button for a reactable table (guidelines sec. 6)
 #'
 #' reactable tables export through the browser: the button calls
 #' `Reactable.downloadDataCSV()` on the table's element id, so the download
@@ -845,7 +845,7 @@ wise_reactable_csv_button <- function(table_id, filename) {
   }
   function(var_name) {
     # Polynomial terms arrive as fixest's double-wrapped "I(I(x^2))" (or the
-    # plain "I(x^2)") - render as "<label of x>²/³" instead of raw syntax.
+    # plain "I(x^2)") - render as "<label of x>^2/^3" instead of raw syntax.
     m <- regmatches(
       var_name,
       regexec(

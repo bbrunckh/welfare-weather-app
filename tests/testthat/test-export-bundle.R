@@ -88,7 +88,7 @@ test_that("slugs are filesystem- and archive-safe", {
 # ---- Bundle assembly --------------------------------------------------------
 
 test_that("a bundle contains the artefacts, manifest and README", {
-  skip_if_not(nzchar(Sys.which("zip")), "system zip not available")
+  skip_if_not_installed("zip")
   zf <- withr::local_tempfile(fileext = ".zip")
   items <- list(item("survey_summary"), item("coefficients"))
 
@@ -102,7 +102,7 @@ test_that("a bundle contains the artefacts, manifest and README", {
 })
 
 test_that("surfaces that produced nothing are skipped; numbering keeps their slots", {
-  skip_if_not(nzchar(Sys.which("zip")), "system zip not available")
+  skip_if_not_installed("zip")
   zf <- withr::local_tempfile(fileext = ".zip")
   items <- list(
     item("first"),
@@ -119,7 +119,7 @@ test_that("surfaces that produced nothing are skipped; numbering keeps their slo
 })
 
 test_that("file names are stable across bundles whose steps differ (UI-57)", {
-  skip_if_not(nzchar(Sys.which("zip")), "system zip not available")
+  skip_if_not_installed("zip")
   items_all_ok <- list(item("first"), item("ok"), item("ok2"), item("second"))
   items_partial <- list(
     item("first"),
@@ -140,7 +140,7 @@ test_that("file names are stable across bundles whose steps differ (UI-57)", {
 })
 
 test_that("bundle assembly does not consume the session RNG (UI-58)", {
-  skip_if_not(nzchar(Sys.which("zip")), "system zip not available")
+  skip_if_not_installed("zip")
   zf <- withr::local_tempfile(fileext = ".zip")
   items <- list(item("first"), item("never_run", fun = function() NULL))
   before <- .Random.seed
@@ -149,7 +149,7 @@ test_that("bundle assembly does not consume the session RNG (UI-58)", {
 })
 
 test_that("an artefact that errors is skipped with a warning, not fatal", {
-  skip_if_not(nzchar(Sys.which("zip")), "system zip not available")
+  skip_if_not_installed("zip")
   zf <- withr::local_tempfile(fileext = ".zip")
   items <- list(item("ok"), item("boom", fun = function() stop("kaboom")))
 
@@ -162,7 +162,7 @@ test_that("an artefact that errors is skipped with a warning, not fatal", {
 })
 
 test_that("the bundle reports per-item progress (UI-59)", {
-  skip_if_not(nzchar(Sys.which("zip")), "system zip not available")
+  skip_if_not_installed("zip")
   seen <- list(); n <- 0L
   wise_export_bundle(
     withr::local_tempfile(fileext = ".zip"),
@@ -223,7 +223,7 @@ test_that("an echarts figure renders to PNG through the headless browser", {
 })
 
 test_that("a req() throw inside a registered artefact leaves no failure note", {
-  skip_if_not(nzchar(Sys.which("zip")), "system zip not available")
+  skip_if_not_installed("zip")
   zf <- withr::local_tempfile(fileext = ".zip")
   items <- list(item("ok"),
                 item("pending", kind = "figure",
@@ -240,7 +240,7 @@ test_that("a req() throw inside a registered artefact leaves no failure note", {
 })
 
 test_that("include= selects which parts are written", {
-  skip_if_not(nzchar(Sys.which("zip")), "system zip not available")
+  skip_if_not_installed("zip")
   skip_if_not_installed("ggplot2")
   fig <- item("plot", kind = "figure",
               fun = function() ggplot2::ggplot(mtcars, ggplot2::aes(wt, mpg)) +
@@ -740,7 +740,7 @@ test_that("list-column numbers keep full double precision in the CSV (UI-55)", {
 })
 
 test_that("a table that cannot be written is skipped, not fatal", {
-  skip_if_not(nzchar(Sys.which("zip")), "system zip not available")
+  skip_if_not_installed("zip")
   hostile <- item("hostile", fun = function() {
     d <- data.frame(x = 1); d$fn <- list(mean); d
   })
@@ -753,7 +753,7 @@ test_that("a table that cannot be written is skipped, not fatal", {
 })
 
 test_that("a figure whose builder throws is skipped and named in the README", {
-  skip_if_not(nzchar(Sys.which("zip")), "system zip not available")
+  skip_if_not_installed("zip")
   skip_if_not_installed("ggplot2")
   items <- list(
     item("good_fig", kind = "figure",
@@ -777,7 +777,7 @@ test_that("a figure whose builder throws is skipped and named in the README", {
 })
 
 test_that("a real list-column table round-trips through a bundle", {
-  skip_if_not(nzchar(Sys.which("zip")), "system zip not available")
+  skip_if_not_installed("zip")
   sw <- data.frame(name = "tx", label = "Max temp", stringsAsFactors = FALSE)
   sw$polynomial <- list(c(1, 2))
   zf <- withr::local_tempfile(fileext = ".zip")

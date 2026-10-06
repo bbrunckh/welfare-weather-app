@@ -534,7 +534,7 @@ mod_2_01_weathersim_server <- function(id,
           }
         )
       }
-      separator <- shiny::tags$span(class = "step2-summary-separator", "·")
+      separator <- shiny::tags$span(class = "step2-summary-separator", "\u00b7")
       scenario_items <- unlist(lapply(ssp_sel, function(ssp) {
         lapply(period_values, function(period) {
           shiny::tags$span(

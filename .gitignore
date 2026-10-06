@@ -38,6 +38,9 @@
 # never tracked by git)
 !.Rbuildignore
 
+# Keep the lintr configuration
+!.lintr
+
 # Keep Posit Connect deploy manifest and its exclude list
 !.rscignore
 !manifest.json
@@ -144,6 +147,11 @@
 # them automatically); uncompressed binaries stay untracked.
 !/**/*.duckdb_extension.gz
 !/**/*.duckdb_extension
+
+# Self-hosted brand font (inst/app/_brand.yml). The page cannot render offline
+# without these files, so they must be committed for the git-backed deployment.
+!/**/inst/app/fonts/*.woff2
+!/**/inst/app/fonts/OFL.txt
 
 #######################
 # Include all the files with passwords or tokens here. All files named

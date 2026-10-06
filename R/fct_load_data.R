@@ -188,11 +188,84 @@ collect_deterministic <- function(data, keys = NULL) {
     return(.duck$con)
   }
   .duck$con <- DBI::dbConnect(duckdb::duckdb(), dbdir = ":memory:")
+  .duck_apply_limits(.duck$con)
   .duck$extensions <- character(0)
   # Metadata may cache a token before DuckDB is initialized.
   if (is.null(.duck$db_tokens)) .duck$db_tokens <- list()
   .duck$db_secrets <- list()
   .duck$con
+}
+
+# DuckDB version the bundled extension binaries in inst/duckdb_extensions were
+# built for. DuckDB refuses to load an extension built for another version, so
+# DESCRIPTION pins duckdb to the same version. Rebuild the binaries, update
+# these two constants and the DESCRIPTION pin together when upgrading.
+.DUCKDB_BUNDLE_VERSION <- "1.5.5"
+.DUCKDB_BUNDLE_SHA256 <- c(
+  h3 = "5da3520ef7055e893e7551aaef0a6ed9073e3545f6fbb621e7524ab970bfdb8b",
+  httpfs = "b2ee03ff84b8df7e24730a5362d652413cfdd7270bb17a43dad246e2164e3e00",
+  spatial = "17df6f89c7f689d8f0a8cc42f1f8c3a9b34323b6286748e40337bb7a9d389f01"
+)
+
+#' Check that a bundled extension binary matches the installed DuckDB and the
+#' pinned checksum before it is installed.
+#' @noRd
+.duck_check_bundled_ext <- function(ext, path) {
+  installed <- as.character(utils::packageVersion("duckdb"))
+  if (!identical(installed, .DUCKDB_BUNDLE_VERSION)) {
+    stop(
+      "The bundled DuckDB extensions were built for duckdb ",
+      .DUCKDB_BUNDLE_VERSION, " but duckdb ", installed, " is installed. ",
+      "Install duckdb ", .DUCKDB_BUNDLE_VERSION, " or rebuild the binaries ",
+      "in inst/duckdb_extensions.",
+      call. = FALSE
+    )
+  }
+  expected <- unname(.DUCKDB_BUNDLE_SHA256[ext])
+  # Only the compressed binaries are checksummed; an uncompressed fallback has
+  # no pinned hash.
+  if (grepl("\\.gz$", path) && !is.na(expected)) {
+    actual <- digest::digest(path, algo = "sha256", file = TRUE)
+    if (!identical(actual, expected)) {
+      stop(
+        "Bundled DuckDB extension '", ext, "' does not match its pinned ",
+        "SHA-256 checksum; refusing to load it.",
+        call. = FALSE
+      )
+    }
+  }
+  invisible(NULL)
+}
+
+#' Apply per-process resource limits to a new DuckDB connection.
+#'
+#' Every process (the Shiny process and each async worker) owns its own
+#' in-memory DuckDB, which by default may use 80% of the machine's RAM and every
+#' core. On a shared host, set `WISEAPP_DUCKDB_MEMORY_LIMIT` (for example
+#' "4GB") and `WISEAPP_DUCKDB_THREADS`. Spill files go to a per-process temp
+#' directory (`WISEAPP_DUCKDB_TEMP_DIR` overrides it) instead of DuckDB's
+#' default of `.tmp` in the working directory.
+#' @noRd
+.duck_apply_limits <- function(con) {
+  limit <- trimws(Sys.getenv("WISEAPP_DUCKDB_MEMORY_LIMIT", ""))
+  if (nzchar(limit)) {
+    if (grepl("^[0-9]+(\\.[0-9]+)?[[:space:]]?(KB|MB|GB|TB|KiB|MiB|GiB|TiB)$", limit)) {
+      DBI::dbExecute(con, sprintf("SET memory_limit = %s;", .sql_literal(limit)))
+    } else {
+      warning("Ignoring invalid WISEAPP_DUCKDB_MEMORY_LIMIT: ", limit, call. = FALSE)
+    }
+  }
+  threads <- .env_positive_int("WISEAPP_DUCKDB_THREADS")
+  if (!is.na(threads)) {
+    DBI::dbExecute(con, sprintf("SET threads = %d;", threads))
+  }
+  temp_dir <- Sys.getenv("WISEAPP_DUCKDB_TEMP_DIR", "")
+  if (!nzchar(temp_dir)) temp_dir <- file.path(tempdir(), "duckdb-spill")
+  dir.create(temp_dir, recursive = TRUE, showWarnings = FALSE)
+  if (dir.exists(temp_dir)) {
+    DBI::dbExecute(con, sprintf("SET temp_directory = %s;", .sql_literal(temp_dir)))
+  }
+  invisible(con)
 }
 
 #' Install and load a DuckDB extension exactly once per process.
@@ -237,12 +310,12 @@ collect_deterministic <- function(data, keys = NULL) {
         "DuckDB extension '", ext, "' is not bundled with this deployment ",
         "(expected inst/duckdb_extensions/", ext, ".duckdb_extension.gz). ",
         "Posit Connect cannot reach the public extension repository, so every ",
-        "required extension binary must ship with the package (see the ",
-        "git-backed deployment notes in dev/03_deploy.R).",
+        "required extension binary must ship with the package.",
         call. = FALSE
       )
     }
 
+    .duck_check_bundled_ext(ext, bundled)
     DBI::dbExecute(con, sprintf("INSTALL '%s';", bundled))
     DBI::dbExecute(con, sprintf("LOAD '%s';", ext))
   } else {

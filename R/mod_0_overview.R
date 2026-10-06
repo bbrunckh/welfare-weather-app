@@ -32,7 +32,8 @@ mod_0_overview_ui <- function(id) {
         p(tags$a(
           icon("book-open"), "WISE-APP User Guide",
           href = "https://datanalytics.worldbank.org/wise-app-docs",
-          target = "_blank"
+          target = "_blank",
+          rel = "noopener noreferrer"
         ))
       )
     )
@@ -77,7 +78,8 @@ mod_0_overview_ui <- function(id) {
         tags$a(
           "important caveats.",
           href = "https://datanalytics.worldbank.org/wise-app-docs/#limitations",
-          target = "_blank"
+          target = "_blank",
+          rel = "noopener noreferrer"
         )
       )
     )

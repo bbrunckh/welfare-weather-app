@@ -1,5 +1,40 @@
 # wiseapp 0.2.0
 
+## Unreleased - 2026-10-06
+
+Review remediation, batches 1 and 5 (`review/REVIEW-2026-10-06-tracking.md`).
+
+### Fixed
+
+- **Deployment.** `brand.yml`, `later` and `tidyselect` are now declared in
+  `DESCRIPTION`; the Step 3 decomposition tables use reactable instead of the
+  undeclared `DT` (the first Step 3 run no longer ends the session where `DT`
+  is missing). Open Sans is served from `inst/app/fonts/` instead of being
+  downloaded from Google Fonts on every page render. `duckdb` is pinned to the
+  version the bundled extension binaries were built for (1.5.5), and the bundled
+  binaries are version- and SHA-256-checked before they are installed.
+- **Async worker.** A dead mirai daemon (for example killed for memory) is now
+  detected and relaunched before the next run instead of hanging every later
+  run in that process. Step 2 runs (90 min) and Overview metadata loads (5 min)
+  have a timeout (`WISEAPP_ASYNC_TIMEOUT_MIN`,
+  `WISEAPP_ASYNC_METADATA_TIMEOUT_SEC`) and report a readable error.
+
+### Changed
+
+- The parallel multiple-imputation LASSO path (`future`/`futuremice`) is removed;
+  imputed LASSO runs sequentially. `future` and `future.apply` are no longer
+  dependencies; `parsnip`, `ranger` and `xgboost` moved to Suggests.
+- `Depends: R (>= 4.4.0)` (the code uses base `%||%`).
+- New environment variables for shared hosts: `WISEAPP_DUCKDB_MEMORY_LIMIT`,
+  `WISEAPP_DUCKDB_THREADS`, `WISEAPP_DUCKDB_TEMP_DIR`, `WISEAPP_THREADS`
+  (fixest and collapse), `WISEAPP_STAGE_LOG` (see `AGENTS.md`).
+- One log line per Step 2 and Step 3 run (stage, outcome, run id, elapsed,
+  memory) is written to the process log.
+- Step 2 benchmark harness: weather time no longer includes pipeline time,
+  per-key rows carry their real key, memory profiling is opt-in
+  (`WISEAPP_STEP2_MEMORY_PROFILE=1`), `WISEAPP_STEP2_DATA_SOURCE=databricks`
+  reads remote data, and `dev/run_step2_benchmark.sh` runs on Linux.
+
 ## Unreleased — 2026-09-03
 
 ### Changed

@@ -1,0 +1,81 @@
+# R CMD check plus the deployment contract tests.
+#
+# Dependencies come from DESCRIPTION only (Imports, Depends, LinkingTo and the
+# declared Suggests), so a package used in R/ but missing from DESCRIPTION
+# fails here instead of on Posit Connect. Benchmarks are not run on shared CI.
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+    branches: [main, dev]
+
+name: R-CMD-check
+
+permissions: read-all
+
+jobs:
+  R-CMD-check:
+    runs-on: ubuntu-latest
+    env:
+      GITHUB_PAT: ${{ secrets.GITHUB_TOKEN }}
+      R_KEEP_PKG_SOURCE: yes
+      NOT_CRAN: "true"
+      LANG: C.UTF-8
+      LC_ALL: C.UTF-8
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: r-lib/actions/setup-r@v2
+        with:
+          use-public-rspm: true
+
+      - uses: r-lib/actions/setup-r-dependencies@v2
+        with:
+          extra-packages: any::rcmdcheck any::devtools any::roxygen2
+          needs: check
+
+      # man/ is generated and not tracked, so document before checking. A
+      # NAMESPACE that changes here was committed out of sync with the roxygen
+      # tags.
+      - name: Document and verify NAMESPACE
+        shell: bash
+        run: |
+          Rscript -e 'roxygen2::roxygenise()'
+          git diff --exit-code NAMESPACE
+
+      # Fails on errors only for now: the roxygen blocks of about 25 functions
+      # lack @param entries, which R CMD check reports as WARNINGs (tracked in
+      # review/REVIEW-2026-10-06-tracking.md, R2-CQ-01). Tighten to "warning"
+      # once those are documented.
+      - uses: r-lib/actions/check-r-package@v2
+        with:
+          upload-snapshots: true
+          error-on: '"error"'
+          build_args: 'c("--no-manual", "--compact-vignettes=gs+qpdf")'
+
+      # manifest.json is excluded from the built package, so the manifest-sync
+      # and other source-tree contract tests run from the checkout instead.
+      - name: Deployment contract tests
+        shell: Rscript {0}
+        run: |
+          options(testthat.progress.max_fails = 1000)
+          devtools::test(filter = "deploy-contract|duckdb-bundle", stop_on_failure = TRUE)
+
+  lintr:
+    runs-on: ubuntu-latest
+    # Informational only until the existing findings are worked down.
+    continue-on-error: true
+    env:
+      GITHUB_PAT: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: r-lib/actions/setup-r@v2
+        with:
+          use-public-rspm: true
+      - uses: r-lib/actions/setup-r-dependencies@v2
+        with:
+          extra-packages: any::lintr
+          needs: lint
+      - name: Lint
+        shell: Rscript {0}
+        run: lintr::lint_package()

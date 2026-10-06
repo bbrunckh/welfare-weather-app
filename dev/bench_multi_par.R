@@ -4,7 +4,10 @@
 suppressPackageStartupMessages({library(duckdb); options(golem.app.prod = FALSE)})
 pkgload::load_all(quiet = TRUE)
 
-data_dir <- "/Users/bbrunckhorst/Library/CloudStorage/OneDrive-WBG/wiseapp - Documents/microdata/hh"
+if (!nzchar(Sys.getenv("WISEAPP_DATA_PATH"))) {
+  stop("Set WISEAPP_DATA_PATH to the local data directory.", call. = FALSE)
+}
+data_dir <- file.path(Sys.getenv("WISEAPP_DATA_PATH"), "microdata", "hh")
 
 make_pipe <- function(file, n_years, k, seed = 42L) {
   con <- DBI::dbConnect(duckdb::duckdb(), read_only = TRUE, shared_home = FALSE)

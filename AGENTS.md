@@ -145,6 +145,16 @@ See `fct_connection.R` and `fct_load_data.R` for implementation details.
 
 Target platform: **Posit Connect**. Automatic startup data-source selection is controlled by `WISEAPP_DATA_SOURCE`; see the environment variables below and the deployment scripts for deployment steps.
 
+Runtime egress: the app serves its fonts locally (`inst/app/fonts/`), but the hex map loads its basemap style and tiles from CARTO (`tiles.basemaps.cartocdn.com`, see `inst/app/vendor/hexmap.js`). The server must allow HTTPS to that host for map views; everything else needs only the configured data source.
+
+Bundled DuckDB extensions (`inst/duckdb_extensions/`) are built for the exact `duckdb` version pinned in `DESCRIPTION` (currently 1.5.5) and are checked against pinned SHA-256 values in `R/fct_load_data.R` before they are installed on Connect. To upgrade DuckDB, rebuild the binaries and update the pin, the version constant and the checksums together.
+
+Optional resource limits (unset = package/DuckDB defaults). Every Connect process runs a main R process plus a mirai daemon, each with its own in-memory DuckDB, so cap them on shared hosts:
+- `WISEAPP_DUCKDB_MEMORY_LIMIT` (for example `4GB`) and `WISEAPP_DUCKDB_THREADS` (per DuckDB instance); `WISEAPP_DUCKDB_TEMP_DIR` (spill directory, default a per-process temp dir)
+- `WISEAPP_THREADS` (fixest and collapse threads)
+- `WISEAPP_ASYNC_TIMEOUT_MIN` (Step 2 run limit, default 90) and `WISEAPP_ASYNC_METADATA_TIMEOUT_SEC` (default 300); `0` disables
+- `WISEAPP_STAGE_LOG=0` turns off the one-line-per-run stage log
+
 Key environment variables for production:
 - `WISEAPP_DATA_SOURCE` (automatic source selector: `local`, `s3`, `gcs`, `azure`, `hf`, or `databricks`)
 - `WISEAPP_DATA_PATH` (local data backend)

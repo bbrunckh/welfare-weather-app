@@ -276,14 +276,7 @@ ENGINE_REGISTRY <- list(
 #'   mice multiple-imputation path (`mi_m` / `mi_maxit` / `mi_method`) is
 #'   restored.
 #' @param stability_threshold numeric in (0,1)
-#' @param use_parallel logical; use future.apply / futuremice for parallel runs
-#' @param n_workers integer; number of workers for parallel plan (capped at mi_m)
-#' @param parallel_min_n integer; auto-disable parallelism when the analytic
-#'   sample size (post NA-drop) is below this threshold. Default 20000, which
-#'   is the empirical break-even point on a 16-core Mac for `mi_m = 5`; below
-#'   it, multisession fork + globals-export overhead dominates the work.
-#' @param parallel_seed integer; seed for parallel-safe reproducibility
-#' @param globals_max_size numeric; override for future.globals.maxSize (bytes)
+#' @param parallel_seed integer; base seed for reproducible selection
 #' @param cv_selection character; fold assignment mode for CV ("default" or "random")
 #' @param glmnet_tol numeric; convergence tolerance passed to glmnet (thresh)
 #'
@@ -306,11 +299,7 @@ run_lasso_selection <- function(
   mi_method = "pmm",
   use_mice = FALSE,
   stability_threshold = 0.5,
-  use_parallel = FALSE,
-  n_workers = NULL,
-  parallel_min_n = 20000L,
   parallel_seed = WISEAPP_DEFAULT_SEED,
-  globals_max_size = NULL,
   cv_selection = c("random", "default"),
   glmnet_tol = 1e-4
 ) {
@@ -429,28 +418,9 @@ run_lasso_selection <- function(
   }
 
   # 5. Parallel plan (workers capped at mi_m - extra workers idle) ----
-  #
-  # Auto-disable parallelism on small samples: below `parallel_min_n` rows the
-  # multisession fork + globals-export overhead exceeds the actual work. The
-  # 20k default reflects the break-even point on a 16-core Mac with mi_m = 5
-  # (see dev/archive/bench_lasso.R).
   m <- max(1L, as.integer(mi_m))
   family_type <- if (is_logit) "binomial" else "gaussian"
   cv_selection <- match.arg(cv_selection)
-
-  if (isTRUE(use_parallel) && nrow(df) < as.integer(parallel_min_n)) {
-    message(sprintf(
-      "run_lasso_selection: n = %d below parallel_min_n = %d; running sequentially.",
-      nrow(df), as.integer(parallel_min_n)
-    ))
-    use_parallel <- FALSE
-  }
-
-  # Parallel plan setup is deferred to the MI path (step 8) where map_fun is
-
-  # actually used. The fast path (step 7, no NAs) forces sequential lapply -
-  # spawning multisession workers here would waste startup time.
-  map_fun <- lapply
 
   # 6. Build design matrices (X_core + X_lasso) ----
   core_formula <- if (length(core_main_terms) == 0 && length(interaction_terms) == 0) {
@@ -531,32 +501,6 @@ run_lasso_selection <- function(
   } else {
     # 8. MI path: impute candidates, rebuild X_lasso per imputation ----
 
-    # Set up parallel plan here (not earlier) so the fast path never pays the
-    # multisession worker-spawn cost.
-    if (isTRUE(use_parallel)) {
-      if (!requireNamespace("future", quietly = TRUE) ||
-        !requireNamespace("future.apply", quietly = TRUE)) {
-        stop("Parallel LASSO requires packages 'future' and 'future.apply'.")
-      }
-      old_plan <- future::plan()
-      on.exit(future::plan(old_plan), add = TRUE)
-      old_max_size <- getOption("future.globals.maxSize")
-      on.exit(options(future.globals.maxSize = old_max_size), add = TRUE)
-      if (is.null(globals_max_size)) {
-        globals_max_size <- max(2 * 1024^3, old_max_size %||% 0)
-      }
-      options(future.globals.maxSize = globals_max_size)
-      workers <- if (is.null(n_workers)) future::availableCores() else as.integer(n_workers)
-      workers <- max(1L, min(workers, m))
-      future::plan(future::multisession, workers = workers)
-      map_fun <- function(x, fun) {
-        future.apply::future_lapply(
-          x, fun,
-          future.seed = wise_seed(parallel_seed, "lasso", "future-workers")
-        )
-      }
-    }
-
     mi_cols <- unique(c(y_var, core_main_terms, candidate_vars))
     mi_frame <- df[, mi_cols, drop = FALSE]
 
@@ -573,40 +517,23 @@ run_lasso_selection <- function(
       })
     }
 
-    use_futuremice <- isTRUE(use_parallel) &&
-      utils::packageVersion("mice") >= "3.16.0"
-    if (use_futuremice) {
-      imp <- withr::with_seed(
-        wise_seed(parallel_seed, "lasso", "futuremice"),
-        mice::futuremice(
-          mi_frame,
-          m = m,
-          maxit = max(1L, as.integer(mi_maxit)),
-          method = mi_method,
-          n.core = workers,
-          parallelseed = wise_seed(parallel_seed, "lasso", "futuremice-parallel"),
-          print = FALSE
-        )
+    imp <- withr::with_seed(
+      wise_seed(parallel_seed, "lasso", "mice"),
+      mice::mice(
+        mi_frame,
+        m = m,
+        maxit = max(1L, as.integer(mi_maxit)),
+        method = mi_method,
+        print = FALSE
       )
-    } else {
-      imp <- withr::with_seed(
-        wise_seed(parallel_seed, "lasso", "mice"),
-        mice::mice(
-          mi_frame,
-          m = m,
-          maxit = max(1L, as.integer(mi_maxit)),
-          method = mi_method,
-          print = FALSE
-        )
-      )
-    }
+    )
     completed_cands_list <- lapply(
       seq_len(m),
       function(i) mice::complete(imp, action = i)[, candidate_vars, drop = FALSE]
     )
     rm(mi_frame, imp)
 
-    selection_results <- map_fun(seq_len(m), function(i) {
+    selection_results <- lapply(seq_len(m), function(i) {
       withr::with_seed(wise_seed(parallel_seed, "lasso", "imputation", i), {
         X_lasso <- drop_constant(as.matrix(completed_cands_list[[i]]))
         if (ncol(X_lasso) == 0) {

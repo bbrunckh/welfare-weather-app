@@ -8,8 +8,7 @@
 #                                 plot_decomposition_channels_by_decile)
 #   - adverse return-period dots (echart_step3_adverse_dot vs
 #                                 plot_step3_adverse_dot)
-#   - threshold table widget     (.wise_threshold_reactable vs DT::datatable
-#                                 + formatRound)
+#   - threshold table widget     (.wise_threshold_reactable)
 # Payloads are synthetic frames shaped like the module reactives (draws per
 # model/year for exceedance, decile channel summaries, return-period rows).
 # Medians of 10 iterations via bench::mark (memory = FALSE: htmlwidget
@@ -69,7 +68,7 @@ bm_exceed <- bench::mark(
     ensemble_band_q = c(lo = 0, hi = 1)
   ),
   echarts  = echart_exceedance(
-    curves_tbl = curves, x_label = "Outcome", return_period = TRUE,
+    curves_tbl = curves, x_label = "Outcome",
     n_sim_years = 30, logit_x = TRUE, band_q = NULL,
     ensemble_band_q = c(lo = 0, hi = 1)
   ),
@@ -146,21 +145,7 @@ thresh <- do.call(rbind, lapply(seq_len(20), function(i) {
     stringsAsFactors = FALSE, check.names = FALSE
   )
 }))
-build_dt <- function(df) {
-  dt <- DT::datatable(df, rownames = FALSE, class = "compact stripe",
-    options = list(
-      pageLength = 20, dom = wise_csv_dom("tip"), ordering = FALSE,
-      columnDefs = list(list(className = "dt-center", targets = "_all")),
-      buttons = list()
-    ),
-    extensions = "Buttons"
-  )
-  num_cols <- names(df)[vapply(df, is.numeric, logical(1L))]
-  if (length(num_cols)) dt <- DT::formatRound(dt, columns = num_cols, digits = 2)
-  dt
-}
 bm_table <- bench::mark(
-  dt        = build_dt(thresh),
   reactable = .wise_threshold_reactable(thresh),
   min_time = 1, iterations = 10, check = FALSE, memory = FALSE
 )

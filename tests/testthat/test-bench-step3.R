@@ -1,5 +1,10 @@
 library(testthat)
 
+# dev/ is not part of the built package, so these helpers only exist in a
+# source checkout (not under R CMD check).
+skip_if_not(file.exists(testthat::test_path("../../dev/bench_step3_helpers.R")),
+  "dev/ benchmark helpers not available")
+
 source(testthat::test_path("../../dev/bench_step3_helpers.R"), local = TRUE)
 source(testthat::test_path("../../dev/bench_step2_helpers.R"), local = TRUE)
 

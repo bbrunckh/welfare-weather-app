@@ -21,3 +21,6 @@
 ^\.kilo$
 ^\.posit$
 ^AGENTS\.md$
+^docs$
+^\.github$
+^\.lintr$

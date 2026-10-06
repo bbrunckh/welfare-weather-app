@@ -191,43 +191,10 @@ test_that("MICE Lasso path is deterministic and restores caller RNG", {
     mi_maxit = 1L,
     mi_method = "norm.predict",
     nfolds = 3L,
-    use_mice = TRUE,
-    use_parallel = FALSE
+    use_mice = TRUE
   )
 
   set.seed(906)
-  before <- .Random.seed
-  a <- do.call(run_lasso_selection, args)
-  expect_identical(.Random.seed, before)
-  stats::runif(10)
-  b <- do.call(run_lasso_selection, args)
-
-  expect_identical(a, b)
-})
-
-test_that("parallel MICE Lasso is deterministic and restores caller RNG", {
-  skip_if_not_installed("mice")
-  skip_if_not_installed("future")
-  skip_if_not_installed("future.apply")
-
-  df <- make_lasso_fixture(150L)
-  df$noise[seq(5L, 25L, by = 5L)] <- NA_real_
-  args <- list(
-    df = df,
-    selected_outcome = list(name = "welfare", type = "numeric"),
-    weather_vars = "temp",
-    valid_vl = lasso_variable_list(),
-    mi_m = 2L,
-    mi_maxit = 1L,
-    mi_method = "pmm",
-    nfolds = 3L,
-    use_mice = TRUE,
-    use_parallel = TRUE,
-    n_workers = 1L,
-    parallel_min_n = 1L
-  )
-
-  set.seed(907)
   before <- .Random.seed
   a <- do.call(run_lasso_selection, args)
   expect_identical(.Random.seed, before)

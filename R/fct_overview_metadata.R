@@ -114,7 +114,8 @@ overview_metadata_cache_store <- function(connection_params, value) {
       }
       wiseapp:::load_overview_metadata(params)
     }, package_path = package_path, development_package = development_package,
-      params = params, .compute = "default"), error = function(e) e)
+      params = params, .compute = "default",
+      .timeout = .wise_step2_async_timeout_ms("metadata")), error = function(e) e)
     if (inherits(task, "error")) {
       on_error(task)
     } else if (is.null(task)) {
@@ -125,7 +126,7 @@ overview_metadata_cache_store <- function(connection_params, value) {
           if (isTRUE(is_current())) tryCatch(on_result(value), error = on_error)
         },
         onRejected = function(e) {
-          if (isTRUE(is_current())) on_error(e)
+          if (isTRUE(is_current())) on_error(.wise_step2_async_describe_error(e))
         })
     }
     invisible(NULL)

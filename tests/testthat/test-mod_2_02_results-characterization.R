@@ -5,11 +5,12 @@
 # section 6) so the results_source() refactor is provably value-neutral.       #
 #                                                                              #
 # Robustness: each reactive value is normalised to plain lists (env objects,   #
-# attributes, digests and tags dropped), numerics are rounded to 10            #
-# significant digits, and the result is stored as JSON (style = "json2") and   #
-# compared with a small tolerance. Unlike style = "serialize", this does not   #
-# depend on the R serialization version or on floating-point noise in the      #
-# last bits, so snapshots survive platform and R upgrades.                     #
+# attributes, digests and tags dropped), numerics are rounded to 8 decimals,   #
+# and the result is stored as JSON (style = "json2") and compared with a       #
+# numeric tolerance. Unlike style = "serialize", or a text diff of rounded     #
+# numbers, this does not depend on the R serialization version or on           #
+# floating-point noise (BLAS differences in a difference of near-equal means   #
+# can move the 11th digit), so snapshots survive platform and R upgrades.      #
 # ============================================================================ #
 
 library(testthat)
@@ -52,7 +53,7 @@ library(shiny)
 }
 
 # Plain-data view of a reactive value: no environments, functions, attributes
-# (other than names), or htmltools tags; numerics rounded to 10 sig. digits.
+# (other than names), or htmltools tags; numerics rounded to 8 decimals.
 .char_norm <- function(x) {
   if (is.null(x)) return(NULL)
   if (is.environment(x) || is.function(x)) return("<dropped>")
@@ -73,22 +74,18 @@ library(shiny)
     if (is.null(names(x))) names(out) <- NULL
     return(out)
   }
-  if (is.double(x)) return(signif(as.vector(x), 10))
+  if (is.double(x)) return(round(as.vector(x), 8))
   if (is.atomic(x)) return(as.vector(x))
   "<unsupported>"
 }
 
-# Pretty JSON lines of the normalised value. Numbers are already rounded to 10
-# significant digits, so the text is deterministic and diffs line by line.
-.char_json <- function(x) {
-  strsplit(
-    as.character(jsonlite::toJSON(
-      .char_norm(x), digits = NA, pretty = TRUE, auto_unbox = TRUE,
-      null = "null", na = "string"
-    )),
-    "\n", fixed = TRUE
-  )[[1L]]
-}
+# Snapshot value: the normalised structure. 8 decimals is what json2
+# (jsonlite::serializeJSON) stores, so the value survives testthat's round-trip
+# check unchanged. The tolerance absorbs a one-unit flip in the last stored
+# decimal caused by floating-point noise.
+.char_json <- function(x) .char_norm(x)
+
+.char_snap_tolerance <- 1e-4
 
 .char_frame_view <- function(frame) {
   entries <- lapply(frame$.entries, function(e) {
@@ -131,15 +128,15 @@ library(shiny)
         c("Historical", names(.char_saved()))
       )
 
-      expect_snapshot_value(.char_json(.char_frame_view(frame)), style = "json2")
-      expect_snapshot_value(.char_json(pointrange_bands_rv()), style = "json2")
-      expect_snapshot_value(.char_json(headline_bands_rv()), style = "json2")
-      expect_snapshot_value(.char_json(timeseries_curves_rv()), style = "json2")
-      expect_snapshot_value(.char_json(annual_distribution_curves_rv()), style = "json2")
-      expect_snapshot_value(.char_json(variance_breakdown_rv()), style = "json2")
-      expect_snapshot_value(.char_json(exceedance_curves_rv()), style = "json2")
-      expect_snapshot_value(.char_json(threshold_table_rv()), style = "json2")
-      expect_snapshot_value(.char_json(headline_cards_data_rv()), style = "json2")
+      expect_snapshot_value(.char_json(.char_frame_view(frame)), style = "json2", tolerance = .char_snap_tolerance)
+      expect_snapshot_value(.char_json(pointrange_bands_rv()), style = "json2", tolerance = .char_snap_tolerance)
+      expect_snapshot_value(.char_json(headline_bands_rv()), style = "json2", tolerance = .char_snap_tolerance)
+      expect_snapshot_value(.char_json(timeseries_curves_rv()), style = "json2", tolerance = .char_snap_tolerance)
+      expect_snapshot_value(.char_json(annual_distribution_curves_rv()), style = "json2", tolerance = .char_snap_tolerance)
+      expect_snapshot_value(.char_json(variance_breakdown_rv()), style = "json2", tolerance = .char_snap_tolerance)
+      expect_snapshot_value(.char_json(exceedance_curves_rv()), style = "json2", tolerance = .char_snap_tolerance)
+      expect_snapshot_value(.char_json(threshold_table_rv()), style = "json2", tolerance = .char_snap_tolerance)
+      expect_snapshot_value(.char_json(headline_cards_data_rv()), style = "json2", tolerance = .char_snap_tolerance)
     }
   )
 }

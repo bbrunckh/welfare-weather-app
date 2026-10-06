@@ -7,7 +7,7 @@
 #                                   plot_annual_distribution, violin + boxplot)
 #   - weather-density ridgeline   (echart_weather_density_panel vs
 #                                   plot_weather_density_panel, 3 variables)
-#   - threshold table widget      (.step2_reactable vs the old DT::datatable)
+#   - threshold table widget      (.step2_reactable)
 # Payloads are synthetic frames shaped like the module reactives. Statistics
 # are identical by construction in each pair, so the comparison isolates the
 # rendering layer (guidelines §7 / §9). Medians of 10 iterations via
@@ -66,7 +66,7 @@ print_pair(
     ),
     new = echart_exceedance(
       curves_tbl = ex_curves, x_label = "Mean welfare ($/day, 2021 PPP)",
-      return_period = TRUE, n_sim_years = 30L, logit_x = TRUE,
+      n_sim_years = 30L, logit_x = TRUE,
       band_q = NULL, ensemble_band_q = c(lo = 0.25, hi = 0.75)
     ),
     iterations = 10L, memory = FALSE, check = FALSE
@@ -188,23 +188,10 @@ thr_tbl <- build_threshold_table_df(do.call(rbind, lapply(scen, function(s) {
 })), group_order = "scenario_x_year", show_coef = TRUE, adverse_only = FALSE,
 method = "mean")
 
-print_pair(
-  "threshold table: old DT::datatable vs .step2_reactable",
-  bench::mark(
-    old = DT::datatable(
-      thr_tbl,
-      rownames = FALSE, class = "compact stripe",
-      options = list(
-        pageLength = 20, dom = wise_csv_dom("tip"),
-        ordering = FALSE,
-        columnDefs = list(list(className = "dt-center", targets = "_all")),
-        buttons = wise_csv_button("climate_outcome_thresholds")
-      ),
-      extensions = "Buttons"
-    ),
-    new = .step2_reactable(thr_tbl),
-    iterations = 10L, memory = FALSE, check = FALSE
-  )
-)
+cat("\n== threshold table: .step2_reactable ==\n")
+print(bench::mark(
+  reactable = .step2_reactable(thr_tbl),
+  iterations = 10L, memory = FALSE, check = FALSE
+))
 
 cat("\nbench_ui_step2: done\n")

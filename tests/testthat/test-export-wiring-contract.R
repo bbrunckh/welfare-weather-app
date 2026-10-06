@@ -10,6 +10,8 @@ library(testthat)
 }
 
 .export_wiring_text <- function() {
+  skip_if(!length(.export_wiring_files()),
+    "R/ source tree not available (installed package)")
   paste(vapply(.export_wiring_files(), function(path) {
     paste(readLines(path, warn = FALSE), collapse = "\n")
   }, character(1)),

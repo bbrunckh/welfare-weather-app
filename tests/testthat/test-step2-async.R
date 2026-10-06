@@ -275,11 +275,18 @@ testthat::test_that("async worker matches synchronous Step 2 fixture output", {
   on.exit(unlink(root, recursive = TRUE, force = TRUE), add = TRUE)
 
   package_path <- getNamespaceInfo(asNamespace("wiseapp"), "path")
+  # Mirror production: a development checkout is loaded with pkgload, an
+  # installed package (R CMD check) with loadNamespace().
+  development_package <- .wise_step2_async_is_dev_package()
   mirai::daemons(1L)
   on.exit(mirai::daemons(0L), add = TRUE)
   async <- mirai::mirai({
-    pkgload::load_all(package_path, export_all = FALSE, helpers = FALSE,
-      attach_testthat = FALSE, quiet = TRUE)
+    if (isTRUE(development_package)) {
+      pkgload::load_all(package_path, export_all = FALSE, helpers = FALSE,
+        attach_testthat = FALSE, quiet = TRUE)
+    } else {
+      loadNamespace("wiseapp")
+    }
     wiseapp:::step2_async_worker(
       snapshot = list(input = input), job_id = "async-parity-job",
       generation = 1L, artifact_dir = artifact_dir,
@@ -287,7 +294,8 @@ testthat::test_that("async worker matches synchronous Step 2 fixture output", {
       weather_fn = function(...) weather_data,
       pipeline_fn = pipeline_fn
     )
-  }, package_path = package_path, input = input,
+  }, package_path = package_path, development_package = development_package,
+  input = input,
   artifact_dir = artifact_dir, weather_root = weather_root,
   weather_data = weather,
   pipeline_fn = pipeline)

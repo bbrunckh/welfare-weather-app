@@ -27,8 +27,17 @@ color:
 typography:
   fonts:
     - family: Open Sans
-      source: google
-      weight: [400, 600, 700]
+      source: file
+      files:
+        - path: fonts/open-sans-latin-400-normal.woff2
+          weight: 400
+          style: normal
+        - path: fonts/open-sans-latin-600-normal.woff2
+          weight: 600
+          style: normal
+        - path: fonts/open-sans-latin-700-normal.woff2
+          weight: 700
+          style: normal
   base:
     family: Open Sans
     size: 15px

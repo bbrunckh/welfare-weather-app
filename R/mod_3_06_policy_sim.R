@@ -217,6 +217,7 @@ mod_3_06_policy_sim_server <- function(id,
         return(.fail("Survey data not available."))
       }
 
+      run_started <- proc.time()[["elapsed"]]
       tryCatch(
         {
           # INT-08: the signature is captured up front from the exact inputs
@@ -414,6 +415,8 @@ mod_3_06_policy_sim_server <- function(id,
           policy_stale(FALSE)
 
           sim_run_id(isolate(sim_run_id()) + 1L)
+          .wise_log_stage("step3_run", "succeeded", run_id = paste0("step3-", sim_run_id()),
+            elapsed = proc.time()[["elapsed"]] - run_started)
           run_status("success")
           completed <- TRUE
           shiny::showNotification(
@@ -422,6 +425,8 @@ mod_3_06_policy_sim_server <- function(id,
           )
         },
         error = function(e) {
+          .wise_log_stage("step3_run", "failed", run_id = paste0("step3-", isolate(sim_run_id()) + 1L),
+            elapsed = proc.time()[["elapsed"]] - run_started)
           shiny::showNotification(
             paste0("Policy simulation failed: ", conditionMessage(e)),
             type = "error", duration = 8

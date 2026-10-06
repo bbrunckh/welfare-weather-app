@@ -215,7 +215,7 @@ for (code in COUNTRIES_02) {
       vs <- wx_prof[[v]]
       p  <- paste0(v, "_")
       spec_inputs[[paste0(p, "relativePeriod")]]  <- c(vs$ref_start %||% 1L, vs$ref_end)
-      spec_inputs[[paste0(p, "temporalAgg")]]      <- vs$temporal_agg %||% weather_agg_for(v, WEATHER_AGG_OVERRIDE)
+      spec_inputs[[paste0(p, "temporalAgg")]]      <- vs$temporal_agg %||% weather_agg_for(v, get_weather_vars(var_info_02), WEATHER_AGG_OVERRIDE)
       spec_inputs[[paste0(p, "varConstruction")]]  <- vs$weather_transformation %||% WEATHER_TRANSFORMATION
       spec_inputs[[paste0(p, "contOrBinned")]]     <- if (vs$transformation == "binned") "Binned" else "Continuous"
       spec_inputs[[paste0(p, "numBins")]]          <- vs$n_bins %||% N_BINS

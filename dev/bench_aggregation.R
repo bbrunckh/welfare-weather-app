@@ -13,8 +13,10 @@ suppressPackageStartupMessages({
 })
 pkgload::load_all(quiet = TRUE)
 
-data_dir <- Sys.getenv("WISEAPP_DATA_PATH",
-  "/Users/bbrunckhorst/Library/CloudStorage/OneDrive-WBG/wiseapp - Documents")
+if (!nzchar(Sys.getenv("WISEAPP_DATA_PATH"))) {
+  stop("Set WISEAPP_DATA_PATH to the local data directory.", call. = FALSE)
+}
+data_dir <- Sys.getenv("WISEAPP_DATA_PATH")
 
 payloads <- list(
   bfa = list(file = "BFA/BFA_2021_EHCVM_GMD_hh.parquet", n_years = 30L,

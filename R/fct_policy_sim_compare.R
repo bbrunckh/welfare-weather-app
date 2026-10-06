@@ -1,4 +1,4 @@
-# Echarts4r builders (guidelines §7) -----------------------------------------
+# Echarts4r builders (guidelines sec. 7) -----------------------------------------
 #
 # Browser-side counterparts of the ggplot builders above. Statistics stay in
 # R with the same parameters as the ggplot versions; echarts only draws the
@@ -7,7 +7,7 @@
 # `echart_blank("<message>")` so the user-facing message is preserved.
 
 # Deterministic even-stride downsample to <= max_points for very large raw
-# series (guidelines §7); aggregated series are never downsampled.
+# series (guidelines sec. 7); aggregated series are never downsampled.
 #' @noRd
 .wise_stride_downsample <- function(x, max_points = 10000L) {
   n <- length(x)
@@ -1264,13 +1264,13 @@ step3_headline_cards <- function(paired_summary,
     } else "Not included in fitted model"
   }
   line1_3 <- if (!is.null(metric_tail_focus)) {
-    paste0("Main: ", main_text, " · Repositioning: ",
+    paste0("Main: ", main_text, " \u00b7 Repositioning: ",
       if (identical(repositioning_text, "Not modeled by this engine")) "Not modeled" else repositioning_text,
-      " · Interaction: ", interaction_text)
+      " \u00b7 Interaction: ", interaction_text)
   } else if (!is.null(metric_focus)) {
     "1-in-20 year attribution unavailable"
   } else metric_focus_reason
-  line2_3 <- paste(focus_scen, "· 1-in-20 year")
+  line2_3 <- paste(focus_scen, "\u00b7 1-in-20 year")
 
   card3 <- list(
     label = "Resilience effect",
@@ -1352,7 +1352,7 @@ step3_headline_cards <- function(paired_summary,
   )
   if (is.finite(reach_households)) {
     card4$households_represented <- reach_households
-    card4$note <- paste0(line1_4, " · ", fmt_num(reach_households), " households")
+    card4$note <- paste0(line1_4, " \u00b7 ", fmt_num(reach_households), " households")
     card4$note_html <- shiny::tagList(
       shiny::tags$div(line1_4),
       shiny::tags$div(style = "font-weight: 600;", paste0(
@@ -1795,7 +1795,7 @@ plot_step3_adverse_dot <- function(tbl, x_label = "Outcome level",
   p
 }
 
-# Reactable styling for the return-period threshold table (guidelines §6):
+# Reactable styling for the return-period threshold table (guidelines sec. 6):
 # the frame arrives with RP values already rounded to 2 dp by
 # build_threshold_table_df(); display keeps that precision.
 #' @noRd
@@ -3223,7 +3223,7 @@ plot_step3_adverse_dot <- function(tbl, x_label = "Outcome level",
 
   # Section 1: Annual weather variation (baseline and policy) ----
   # Zero-arg echarts closures shared by the on-screen renders and the export
-  # bundle (guidelines §7 pattern); the ggplot builders remain the static
+  # bundle (guidelines sec. 7 pattern); the ggplot builders remain the static
   # export reference.
   annual_distribution_chart <- function() {
     echart_step3_annual_distribution(
@@ -3307,7 +3307,7 @@ plot_step3_adverse_dot <- function(tbl, x_label = "Outcome level",
   }
 
   # The threshold table's Download CSV is a client-side
-  # wise_reactable_csv_button() (guidelines §6); the R-side download handler
+  # wise_reactable_csv_button() (guidelines sec. 6); the R-side download handler
   # it replaced is gone.
 
   step3_incidence_data <- reactive({

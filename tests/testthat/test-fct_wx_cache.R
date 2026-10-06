@@ -117,7 +117,9 @@ test_that("wx disk cache: eviction keeps the cache under budget", {
     # Two cached slices with distinct mtimes
     .wx_cache_load(fx$fnames, cp, cols = c("h3", "timestamp", "tx"),
                    tmin = as.Date("2018-01-01"), tmax = as.Date("2018-12-31"))
-    Sys.sleep(0.05)
+    # Age the first slice explicitly instead of sleeping for a distinct mtime.
+    first <- list.files(cache_dir, pattern = "\\.parquet$", full.names = TRUE)
+    Sys.setFileTime(first, Sys.time() - 3600)
     .wx_cache_load(fx$fnames, cp, cols = c("h3", "timestamp", "tx"),
                    tmin = as.Date("2019-01-01"), tmax = as.Date("2019-12-31"))
     expect_length(list.files(cache_dir, pattern = "\\.parquet$"), 2L)

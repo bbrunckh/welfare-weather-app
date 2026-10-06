@@ -117,7 +117,10 @@ library(shiny)
 }
 
 run <- .pv_run()
-skip_if(length(run$partials) != 3L, "partial fixture did not produce 3 partials")
+
+test_that("the partial-results fixture produces three partials", {
+  expect_length(run$partials, 3L)
+})
 
 frame_tables <- function(frame) {
   lapply(frame$.entries, function(e) e$table)

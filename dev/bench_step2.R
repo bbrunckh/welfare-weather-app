@@ -135,6 +135,12 @@ source(file.path(.bench_repo_root, "dev", "bench_step3_helpers.R"), local = TRUE
     ),
     snapshot_rds  = .bench_env("WISEAPP_STEP2_SNAPSHOT_RDS", ""),
     data_path     = .bench_env("WISEAPP_DATA_PATH", ""),
+    # "local" reads WISEAPP_DATA_PATH; "databricks" reads the DATABRICKS_*
+    # variables like the app's auto-connect.
+    data_source   = .bench_env("WISEAPP_STEP2_DATA_SOURCE", "local"),
+    # Serialises every pipeline to size it, which dominates the timings, so it
+    # is opt-in.
+    memory_profile = .bench_env_flag("WISEAPP_STEP2_MEMORY_PROFILE", FALSE),
     output_dir    = .bench_env(
       "WISEAPP_STEP2_OUTPUT_DIR",
       file.path(.bench_repo_root, "dev", "outputs", "step2-benchmark")
@@ -227,13 +233,17 @@ RNGkind("Mersenne-Twister", "Inversion", "Rejection")
 
 .bench_connection <- function(config) {
   if (identical(config$fixture_mode, "smoke")) return(NULL)
+  if (identical(config$data_source, "databricks")) {
+    return(build_connection_params("databricks"))
+  }
   if (nzchar(config$data_path)) {
     path <- normalizePath(path.expand(config$data_path), mustWork = TRUE)
     return(build_connection_params("local", path = path))
   }
   if (nzchar(config$snapshot_rds)) return(NULL)
   stop(
-    "Set WISEAPP_DATA_PATH for local-data mode or ",
+    "Set WISEAPP_DATA_PATH for local-data mode, ",
+    "WISEAPP_STEP2_DATA_SOURCE=databricks, or ",
     "WISEAPP_STEP2_SNAPSHOT_RDS for snapshot mode.",
     call. = FALSE
   )
@@ -819,7 +829,7 @@ inputs_by_country <- setNames(
   cache_dir <- .bench_prepare_cache(config, state, cache_state)
   case_config <- config
   old_memory_profile <- Sys.getenv("WISEAPP_MEMORY_PROFILE", unset = NA_character_)
-  Sys.setenv(WISEAPP_MEMORY_PROFILE = "1")
+  if (isTRUE(config$memory_profile)) Sys.setenv(WISEAPP_MEMORY_PROFILE = "1")
   withr::defer(
     if (is.na(old_memory_profile)) Sys.unsetenv("WISEAPP_MEMORY_PROFILE")
     else Sys.setenv(WISEAPP_MEMORY_PROFILE = old_memory_profile),
@@ -842,10 +852,25 @@ inputs_by_country <- setNames(
   result <- NULL
   error_text <- NULL
 
+  # get_weather() runs every pipeline through its consumer, so its wall time
+  # includes the pipelines. Weather time is that wall time minus the pipeline
+  # time spent inside it, and the consumer is wrapped to know which key the
+  # pipeline that follows belongs to.
   weather_fn <- function(...) {
+    call_args <- list(...)
+    if (is.function(call_args$weather_consumer)) {
+      inner_consumer <- call_args$weather_consumer
+      call_args$weather_consumer <- function(key, ...) {
+        state$current_key <- key
+        inner_consumer(key, ...)
+      }
+    }
+    pipeline_before <- sum(state$pipeline_elapsed, na.rm = TRUE)
     t0 <- proc.time()[["elapsed"]]
-    value <- get_weather(...)
-    state$weather_elapsed <- proc.time()[["elapsed"]] - t0
+    value <- do.call(get_weather, call_args)
+    wall <- proc.time()[["elapsed"]] - t0
+    pipeline_inside <- sum(state$pipeline_elapsed, na.rm = TRUE) - pipeline_before
+    state$weather_elapsed <- max(0, wall - pipeline_inside)
     state$expected_keys <- c("historical", setdiff(names(value), "historical"))
     state$weather_raw_count <- length(value)
     state$weather_raw_sizes <- vapply(value, function(x) {
@@ -858,9 +883,11 @@ inputs_by_country <- setNames(
 
   pipeline_fn <- function(...) {
     state$pipeline_index <- state$pipeline_index + 1L
-    key <- if (state$pipeline_index <= length(state$expected_keys)) {
-      state$expected_keys[[state$pipeline_index]]
-    } else paste0("key_", state$pipeline_index)
+    key <- state$current_key %||%
+      if (state$pipeline_index <= length(state$expected_keys)) {
+        state$expected_keys[[state$pipeline_index]]
+      } else paste0("key_", state$pipeline_index)
+    state$current_key <- NULL
     t0 <- proc.time()[["elapsed"]]
     value <- tryCatch(run_sim_pipeline(...), error = function(e) {
       attr(e, "wise_bench_key") <- key

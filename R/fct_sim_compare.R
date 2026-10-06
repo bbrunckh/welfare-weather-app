@@ -139,7 +139,7 @@ resolve_band_q <- function(band_key) {
 # Shared preparation behind plot_pointrange_climate() and its echarts
 # counterpart echart_pointrange_climate(): scenario keys, the SSP x period
 # colour palette, and the category order with spacer gutters. Pure data prep
-# - no rendering - so both surfaces stay in lockstep (guidelines §7).
+# - no rendering - so both surfaces stay in lockstep (guidelines sec. 7).
 # @noRd
 .pointrange_prep <- function(bands_tbl, group_order = "scenario_x_year") {
   df <- bands_tbl
@@ -1047,7 +1047,7 @@ step2_headline_cards <- function(bands,
   }
 
   line1_1 <- if (is_change) {
-    paste(deviation_label, "· Historical vs SSP")
+    paste(deviation_label, "\u00b7 Historical vs SSP")
   } else if (has_future) {
     "Historical vs SSP"
   } else {
@@ -1080,7 +1080,7 @@ step2_headline_cards <- function(bands,
     ""
   }
   if (nzchar(card1$change_display)) {
-    card1$note <- paste(card1$note, paste("Difference:", card1$change_display), sep = " · ")
+    card1$note <- paste(card1$note, paste("Difference:", card1$change_display), sep = " \u00b7 ")
     card1$note_html <- shiny::tagList(card1$note_html, shiny::tags$div(paste("Difference:", card1$change_display)))
   }
 
@@ -1103,11 +1103,11 @@ step2_headline_cards <- function(bands,
 
   if (has_future && is.finite(v20_hist) && is.finite(v20_ssp)) {
     val_2 <- paste0(display_value(v20_hist, change = FALSE), " vs ", display_value(v20_ssp, change = FALSE))
-    line1_2 <- if (is_change) paste(deviation_label, "· Historical vs SSP") else "Historical vs SSP"
+    line1_2 <- if (is_change) paste(deviation_label, "\u00b7 Historical vs SSP") else "Historical vs SSP"
     line2_2 <- "1-in-20 year"
   } else if (!has_future && is.finite(v20_hist)) {
     val_2 <- display_value(v20_hist, change = FALSE)
-    line1_2 <- if (is_change) paste(deviation_label, "· Historical baseline") else "Historical baseline"
+    line1_2 <- if (is_change) paste(deviation_label, "\u00b7 Historical baseline") else "Historical baseline"
     line2_2 <- "1-in-20 year"
   } else if (has_future && is.finite(v20_ssp)) {
     val_2 <- display_value(v20_ssp, change = FALSE)
@@ -1148,7 +1148,7 @@ step2_headline_cards <- function(bands,
     ""
   }
   if (nzchar(card2$change_display)) {
-    card2$note <- paste(card2$note, paste("Difference:", card2$change_display), sep = " · ")
+    card2$note <- paste(card2$note, paste("Difference:", card2$change_display), sep = " \u00b7 ")
     card2$note_html <- shiny::tagList(card2$note_html, shiny::tags$div(paste("Difference:", card2$change_display)))
   }
 
@@ -1344,7 +1344,7 @@ step2_headline_cards <- function(bands,
   card5 <- list(
     label = "Simulation years",
     value = val_5,
-    note = paste(line1_5, prediction_note, sep = " · "),
+    note = paste(line1_5, prediction_note, sep = " \u00b7 "),
     note_html = shiny::tagList(
       shiny::tags$div(line1_5),
       shiny::tags$div(style = "font-weight: 600;", prediction_note)
@@ -2356,7 +2356,7 @@ enhance_exceedance <- function(curves_tbl,
 
 # ============================================================================
 # Interactive (echarts4r) counterparts of the ggplot builders above.
-# Guidelines §7: same statistics computed in R with the same parameters,
+# Guidelines sec. 7: same statistics computed in R with the same parameters,
 # echarts only draws precomputed values; theme tokens come from
 # utils_plot_theme.R (wise_eaxis_label / wise_echart_theme, etc.).
 # The ggplot builders above remain the static fallback and are still used by
@@ -2543,7 +2543,7 @@ enhance_exceedance <- function(curves_tbl,
 }
 
 # Deterministic even-stride downsample for raw series above `cap` points
-# (guidelines §7). Aggregated series are never downsampled.
+# (guidelines sec. 7). Aggregated series are never downsampled.
 .e_downsample_idx <- function(n, cap = 10000L) {
   if (n <= cap) {
     return(seq_len(n))
@@ -3552,7 +3552,7 @@ echart_exceedance <- function(curves_tbl,
 }
 
 # ============================================================================
-# Shared reactable styling for the Step 2 tables (guidelines §6). Mirrors the
+# Shared reactable styling for the Step 2 tables (guidelines sec. 6). Mirrors the
 # mod_1_02 .stats_reactable() recipe: compact client-side table, soft-wrapped
 # text cells, raw (unrounded) values in the data - display rounding only via
 # colFormat where the old DT rounded.

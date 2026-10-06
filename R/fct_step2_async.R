@@ -227,11 +227,13 @@
     )
   })
 
+  .wise_step2_async_ensure_daemon()
   submit_started <- proc.time()[["elapsed"]]
   submitted_at_epoch <- as.numeric(Sys.time())
   mirai_job <- tryCatch(
     mirai::try_mirai(
       worker_expr,
+      .timeout = .wise_step2_async_timeout_ms("step2"),
       package_path = package_path,
       development_package = development_package,
       snapshot = job$snapshot,
@@ -278,6 +280,7 @@
     NA_real_
   }
   job$handle <- mirai_job
+  job$submitted_at_epoch <- submitted_at_epoch
   .wise_step2_async_start_poll(job$id)
   promises::then(
     mirai_job,
@@ -294,7 +297,7 @@
       if (is.null(job)) return(invisible(NULL))
       job$settled <- TRUE
       .wise_step2_async_stop_poll(job)
-      .wise_step2_async_settle(job, error = error)
+      .wise_step2_async_settle(job, error = .wise_step2_async_describe_error(error))
       invisible(NULL)
     }
   )
@@ -376,6 +379,11 @@
     .wise_step2_async_cleanup_job(current, remove_weather = TRUE)
     if (identical(state$active, current$id)) state$active <- NULL
     current$active <- FALSE
+    .wise_log_stage(
+      "step2_run", if (retired) "cancelled" else "failed", run_id = current$run_id,
+      elapsed = if (is.null(current$submitted_at_epoch)) NULL else
+        as.numeric(Sys.time()) - current$submitted_at_epoch
+    )
     .wise_step2_async_notify(current, if (retired) "cancelled" else "failed",
       if (retired) current$retire_reason %||% "Session ended." else conditionMessage(error %||% callback_error))
     if (!retired && is.function(current$on_error)) try(current$on_error(error %||% callback_error, current), silent = TRUE)
@@ -408,6 +416,13 @@
   if (exists(current$id, envir = state$jobs, inherits = FALSE)) {
     rm(list = current$id, envir = state$jobs)
   }
+  .wise_log_stage(
+    "step2_run",
+    if (retired) "cancelled" else if (!is.null(callback_error)) "failed" else if (adopted) "succeeded" else "stale",
+    run_id = current$run_id,
+    elapsed = if (is.null(current$submitted_at_epoch)) NULL else
+      as.numeric(Sys.time()) - current$submitted_at_epoch
+  )
   if (retired) {
     .wise_step2_async_notify(current, "cancelled", current$retire_reason %||% "Session ended.")
   } else if (!is.null(callback_error)) {
@@ -582,6 +597,72 @@
   invisible(delivered)
 }
 
+# Seconds after a (re)launch during which a daemon that has not connected yet
+# is not treated as dead.
+.WISE_ASYNC_DAEMON_GRACE_SEC <- 15
+
+# Per-task wall-clock limit on the shared daemon, in milliseconds. A task that
+# exceeds it is interrupted by mirai, so one stuck run cannot hold the single
+# daemon (and every later run in this process) forever. NULL disables it.
+.wise_step2_async_timeout_ms <- function(kind = c("step2", "metadata")) {
+  kind <- match.arg(kind)
+  spec <- switch(kind,
+    step2 = list(env = "WISEAPP_ASYNC_TIMEOUT_MIN", default = "90", scale = 60 * 1000),
+    metadata = list(env = "WISEAPP_ASYNC_METADATA_TIMEOUT_SEC", default = "300", scale = 1000)
+  )
+  value <- suppressWarnings(as.numeric(Sys.getenv(spec$env, spec$default)))
+  if (!is.finite(value) || value <= 0) NULL else value * spec$scale
+}
+
+# TRUE when the daemon is connected to the dispatcher. mirai keeps accepting
+# tasks when the daemon has died (for example killed for memory), but they then
+# wait for a connection that never comes.
+.wise_step2_async_daemon_alive <- function() {
+  status <- tryCatch(mirai::status(.compute = "default"), error = function(e) NULL)
+  is.list(status) && isTRUE(status$connections >= 1L)
+}
+
+.wise_step2_async_launch <- function() {
+  state <- .wise_step2_async_state
+  mirai::daemons(
+    1L, dispatcher = TRUE, memory = .wise_step2_async_queue_memory(),
+    .compute = "default", sync = .wise_step2_async_sync()
+  )
+  state$started <- TRUE
+  state$launched_at <- proc.time()[["elapsed"]]
+  invisible(TRUE)
+}
+
+# Relaunch the daemon when it has died. Tasks already waiting on the dead
+# daemon are rejected by mirai (connection reset) and settle as failures.
+.wise_step2_async_ensure_daemon <- function() {
+  state <- .wise_step2_async_state
+  if (!isTRUE(state$started) || .wise_step2_async_sync()) return(invisible(FALSE))
+  launched_at <- state$launched_at %||% -Inf
+  if (proc.time()[["elapsed"]] - launched_at < .WISE_ASYNC_DAEMON_GRACE_SEC ||
+      .wise_step2_async_daemon_alive()) {
+    return(invisible(FALSE))
+  }
+  try(mirai::daemons(0L, .compute = "default"), silent = TRUE)
+  .wise_step2_async_launch()
+  invisible(TRUE)
+}
+
+# Replace mirai's terse error values with a message a user can act on.
+.wise_step2_async_describe_error <- function(e) {
+  msg <- tryCatch(conditionMessage(e), error = function(err) "")
+  text <- if (grepl("Timed out", msg, fixed = TRUE)) {
+    "The background run took too long and was stopped. Try fewer scenarios or periods."
+  } else if (grepl("Connection reset|Connection aborted|Object closed", msg)) {
+    paste("The background worker stopped unexpectedly (often because it ran out of",
+      "memory). It will be restarted; try fewer scenarios or periods.")
+  } else {
+    return(e)
+  }
+  structure(class = c("wise_async_error", "error", "condition"),
+    list(message = text, call = NULL, parent = e))
+}
+
 .wise_step2_async_init <- function() {
   state <- .wise_step2_async_state
   if (!.wise_step2_async_enabled()) {
@@ -594,19 +675,17 @@
     )
   }
   if (!isTRUE(state$started)) {
-    mirai::daemons(
-      1L, dispatcher = TRUE, memory = .wise_step2_async_queue_memory(),
-      .compute = "default", sync = .wise_step2_async_sync()
-    )
+    .wise_step2_async_launch()
     # The first task loads the package inside the daemon. Never wait for that
     # cold load in the Shiny process; task rejection reports initialization errors.
-    state$started <- TRUE
     shiny::onStop(function() {
       if (isTRUE(state$started)) {
         mirai::daemons(0L)
         state$started <- FALSE
       }
     }, session = NULL)
+  } else {
+    .wise_step2_async_ensure_daemon()
   }
   TRUE
 }
@@ -836,6 +915,8 @@ step2_async_worker <- function(snapshot,
                                weather_threads = "auto",
                                weather_fn = get_weather,
                                pipeline_fn = run_sim_pipeline) {
+  .wise_apply_thread_limits()
+  worker_started <- proc.time()[["elapsed"]]
   dir.create(artifact_dir, recursive = TRUE, showWarnings = FALSE)
   result_file <- file.path(artifact_dir, "result.qs2")
   manifest_file <- file.path(artifact_dir, "manifest.rds")
@@ -1002,5 +1083,10 @@ step2_async_worker <- function(snapshot,
   event_fn(list(stage = "publish", status = "completed", phase = "manifest_written"))
   .wise_step2_async_unlock(lock)
   lock <- NULL
+  .wise_log_stage(
+    "step2_worker", "succeeded", run_id = run_id,
+    elapsed = proc.time()[["elapsed"]] - worker_started,
+    keys = computed$result$n_keys
+  )
   manifest
 }

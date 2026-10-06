@@ -235,6 +235,8 @@ test_that("pipeline prerequisite controls render while their pages are hidden", 
     mod_3_05_education.R = c("primary_ui", "secondary_ui", "postsec_ui")
   )
 
+  skip_if_not(dir.exists(testthat::test_path("..", "..", "R")),
+    "R/ source tree not available (installed package)")
   for (file in names(expected)) {
     text <- paste(readLines(testthat::test_path("..", "..", "R", file),
                             warn = FALSE), collapse = "\n")

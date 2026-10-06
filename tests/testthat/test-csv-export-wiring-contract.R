@@ -14,6 +14,7 @@ scan_keys <- function(pattern) {
     # load_all() layout: fall back to the source tree relative to the test.
     files <- list.files("../../R", pattern = "[.]R$", full.names = TRUE)
   }
+  skip_if(!length(files), "R/ source tree not available (installed package)")
   keys <- character(0)
   for (f in files) {
     txt <- paste(readLines(f, warn = FALSE), collapse = "\n")

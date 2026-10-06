@@ -321,7 +321,7 @@ mod_3_09_decomposition_ui <- function(id) {
         shiny::tags$summary("View decomposition data"),
         shiny::div(class = "wise-reactable-controls",
           shiny::uiOutput(ns("headline_decomp_csv_ui"))),
-        DT::DTOutput(ns("headline_decomp_table"))
+        reactable::reactableOutput(ns("headline_decomp_table"))
       )
     ),
     shiny::h4("Who gains, and through which channel?",
@@ -341,7 +341,7 @@ mod_3_09_decomposition_ui <- function(id) {
         shiny::tags$summary("View decomposition data"),
         shiny::div(class = "wise-reactable-controls",
           shiny::uiOutput(ns("decile_decomp_csv_ui"))),
-        DT::DTOutput(ns("decile_decomp_table"))
+        reactable::reactableOutput(ns("decile_decomp_table"))
       ),
       shiny::tags$p(class = "diagnostic-note",
         "Effects are weighted means by baseline welfare decile, in the outcome's units or percent of baseline as selected. Uncertainty is not shown.")
@@ -494,18 +494,18 @@ mod_3_09_decomposition_server <- function(id,
           metadata$label %||% metadata$method %||% "Selected metric",
           paste0("levels: ", metadata$level_unit %||% "native units"),
           paste0("changes: ", metadata$change_unit %||% "native units"),
-          sep = " · "
+          sep = " \u00b7 "
         )),
         shiny::p(class = "diagnostic-note", metric_context_note(metadata)),
         shiny::p(class = "diagnostic-note", paste0(
           "Scenario: ", scenario,
-          if (!same_focus) " · Different scenario from Results headline" else " · Results focus scenario",
-          " · ", metadata$population_scope %||% "Fixed survey population",
-          " · ", metadata$weight_interpretation %||% "Canonical annual metric aggregation",
+          if (!same_focus) " \u00b7 Different scenario from Results headline" else " \u00b7 Results focus scenario",
+          " \u00b7 ", metadata$population_scope %||% "Fixed survey population",
+          " \u00b7 ", metadata$weight_interpretation %||% "Canonical annual metric aggregation",
           "; years averaged within model then climate models weighted equally",
-          " · row-aligned annual weather correction (", metadata$correction_version %||% "unavailable", ")",
-          " · ", metadata$component_order %||% "main -> repositioning -> interaction",
-          " · central estimates only"
+          " \u00b7 row-aligned annual weather correction (", metadata$correction_version %||% "unavailable", ")",
+          " \u00b7 ", metadata$component_order %||% "main -> repositioning -> interaction",
+          " \u00b7 central estimates only"
         )),
         if ("n_dropped_model_years" %in% names(row) && is.finite(row$n_dropped_model_years[[1L]]) && row$n_dropped_model_years[[1L]] > 0L) {
           shiny::p(class = "diagnostic-note", paste(row$n_dropped_model_years[[1L]],
@@ -583,8 +583,8 @@ mod_3_09_decomposition_server <- function(id,
       metadata <- metric_meta() %||% list()
       shiny::tags$p(class = "diagnostic-note", paste(
         "Displayed levels:", metadata$level_unit %||% "native outcome units",
-        "· displayed changes:", metadata$change_unit %||% "native units",
-        "· numeric values remain in native metric units in the table/export."
+        "\u00b7 displayed changes:", metadata$change_unit %||% "native units",
+        "\u00b7 numeric values remain in native metric units in the table/export."
       ))
     })
     metric_tail_data <- reactive({
@@ -1093,7 +1093,7 @@ mod_3_09_decomposition_server <- function(id,
       ))
     })
     # Zero-arg echarts closures shared by the on-screen render and the
-    # export bundle (guidelines §7 pattern).
+    # export bundle (guidelines sec. 7 pattern).
     headline_decomp_chart <- function() {
       echart_outcome_decomposition_headline(
         headline_decomp_data(),
@@ -1175,32 +1175,38 @@ mod_3_09_decomposition_server <- function(id,
     output$decile_decomp_csv_ui <- shiny::renderUI({
       wise_reactable_csv_button(ns("decile_decomp_table"), "policy_decomposition_channels_by_decile")
     })
-    output$headline_decomp_table <- DT::renderDT({
+    output$headline_decomp_table <- reactable::renderReactable({
       data <- headline_decomp_data()
       metric <- outcome_metric()
-      if (!nrow(data)) return(DT::datatable(data.frame(Message =
-        "Decomposition data is not available for this selection."), rownames = FALSE, options = list(dom = "t")))
+      if (!nrow(data)) return(.step2_reactable_note(
+        "Decomposition data is not available for this selection."))
       n <- nrow(data)
-      DT::datatable(data.frame(Scenario = rep(data$scenario[[1L]], n),
+      tab <- data.frame(Scenario = rep(data$scenario[[1L]], n),
         Metric = rep(metric$label %||% "Mean", n),
         Outcome = rep(metric$outcome_label %||% metric$outcome_name %||% "", n),
         `Change unit` = rep(change_unit_text(), n),
         `Effect component` = data$channel,
-        `Weighted average change` = data$value, check.names = FALSE),
-        rownames = FALSE, class = "compact stripe")
+        `Weighted average change` = data$value, check.names = FALSE)
+      .step2_reactable(tab, col_defs = list(
+        `Weighted average change` = reactable::colDef(
+          format = reactable::colFormat(digits = 4), minWidth = 70)))
     })
     outputOptions(output, "headline_decomp_table", suspendWhenHidden = TRUE)
-    output$decile_decomp_table <- DT::renderDT({
+    output$decile_decomp_table <- reactable::renderReactable({
       data <- decile_decomp_data()
-      if (!nrow(data)) return(DT::datatable(data.frame(Message =
-        "Decomposition data is not available for this selection."), rownames = FALSE, options = list(dom = "t")))
+      if (!nrow(data)) return(.step2_reactable_note(
+        "Decomposition data is not available for this selection."))
       unit <- change_unit_text()
       channels <- data[c("main", "repositioning", "interaction", "total")]
       names(channels) <- paste(c("Main effect", "Repositioning", "Interaction", "Total policy effect"),
         paste0("(", unit, ")"))
       table <- stats::setNames(data.frame(data$decile, channels, check.names = FALSE),
         c("Baseline welfare decile", names(channels)))
-      DT::datatable(table, rownames = FALSE, class = "compact stripe")
+      num_defs <- stats::setNames(
+        lapply(names(channels), function(nm) reactable::colDef(
+          format = reactable::colFormat(digits = 4), minWidth = 70)),
+        names(channels))
+      .step2_reactable(table, col_defs = num_defs)
     })
     outputOptions(output, "decile_decomp_table", suspendWhenHidden = TRUE)
     decomp_bar_chart <- function() {
