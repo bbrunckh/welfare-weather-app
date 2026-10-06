@@ -1523,10 +1523,22 @@ get_weather <- function(
       tbl
     }
 
-    # CMIP6 historical baseline - shared across all SSPs (same files)
+    # CMIP6 baseline rows. The historical file ends in 2014 and the SSP files
+    # start in 2015, so the baseline climatology must pool the raw monthly rows
+    # of both parts and average once (CR-BUG-01): averaging two separate
+    # climatologies gives the few SSP years far too much weight. Each part is
+    # clipped at the boundary so an overlap is never counted twice.
+    cmip6_ssp_start <- as.Date("2015-01-01")
+
+    # Historical-file baseline rows - shared across all SSPs (same files)
     h3_hist_raw <- .profile_timed(
       "cmip6_historical_aggregate",
-      .cmip6_h3_monthly(cmip6_hist_raw_lazy, baseline_start, baseline_end),
+      cmip6_hist_raw_lazy |>
+        dplyr::select(dplyr::all_of(cmip6_cols)) |>
+        dplyr::filter(
+          timestamp >= baseline_start, timestamp <= baseline_end,
+          timestamp < cmip6_ssp_start
+        ),
       detail = "shared historical baseline"
     )
     if (!is.null(weather_profile) && identical(weather_profile$plan, "shared_hist")) {
@@ -1582,20 +1594,20 @@ get_weather <- function(
         tmax = ssp_tmax
       )
 
-      # SSP baseline overlap - shared across all future periods
+      # SSP-file baseline rows (2015 onwards) - shared across all future periods
        h3_ssp_raw <- .profile_timed(
          "cmip6_ssp_baseline_aggregate",
-         .cmip6_h3_monthly(ssp_raw_lazy, baseline_start, baseline_end),
+         ssp_raw_lazy |>
+           dplyr::select(dplyr::all_of(cmip6_cols)) |>
+           dplyr::filter(timestamp >= cmip6_ssp_start),
          detail = ssp_i
        )
 
-      # Combined CMIP6 historical baseline (hist + ssp overlap period)
-       h3_hist <- dplyr::union_all(h3_hist_raw, h3_ssp_raw) |>
-        dplyr::group_by(model, h3, month) |>
-        dplyr::summarise(
-          dplyr::across(dplyr::all_of(weather_vars), ~ mean(.x, na.rm = TRUE)),
-          .groups = "drop"
-        )
+      # Combined CMIP6 baseline: one monthly mean over the pooled raw rows
+       h3_hist <- .cmip6_h3_monthly(
+         dplyr::union_all(h3_hist_raw, h3_ssp_raw),
+         baseline_start, baseline_end
+       )
 
       # Aggregate every requested period once, then join the combined relation
       # to h3_slim once. This removes the repeated location-level spatial join

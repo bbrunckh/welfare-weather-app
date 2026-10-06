@@ -1566,3 +1566,73 @@ test_that("R2-BUG-01: character and Date dates give identical weather and cache 
     expect_identical(list.files(cache_dir, recursive = TRUE), cached, info = tf)
   }
 })
+
+test_that("CR-BUG-01: CMIP6 baseline pools historical and SSP rows once", {
+  skip_if_not_installed("arrow")
+  skip_if_not_installed("duckdb")
+  skip_if_not_installed("duckdbfs")
+  skip_if_not_installed("bit64")
+
+  dir <- withr::local_tempdir()
+  fx <- make_long_history_fixture(dir)
+  withr::local_envvar(WISEAPP_WEATHER_CACHE_DISABLE = "1")
+  code <- fx$selected_surveys$code
+  cells <- unique(arrow::read_parquet(file.path(
+    dir, "hazard", "weather", "historical", code,
+    paste0(code, "_era5land.parquet")
+  ))$h3)
+
+  cmip6_df <- function(from, to, tx) {
+    months <- seq(as.Date(from), as.Date(to), by = "1 month")
+    df <- expand.grid(h3 = cells, timestamp = months)
+    df$model <- "TESTMOD"
+    df$tx <- tx
+    df[, c("h3", "model", "timestamp", "tx")]
+  }
+  proj_dir <- file.path(dir, "hazard", "weather", "projections", code)
+  dir.create(proj_dir, recursive = TRUE, showWarnings = FALSE)
+  # Historical part: 24 baseline years (1991-2014) at 20. Rows past 2014 must
+  # be ignored (they belong to the SSP part).
+  arrow::write_parquet(
+    rbind(
+      cmip6_df("1991-01-01", "2014-12-01", 20),
+      cmip6_df("2015-01-01", "2020-12-01", 100)
+    ),
+    file.path(proj_dir, paste0(code, "_cmip6_historical.parquet"))
+  )
+  # SSP part: 6 baseline years (2015-2020) at 25 and the future at 30. Rows
+  # before 2015 overlap the historical part and must not be counted again.
+  arrow::write_parquet(
+    rbind(
+      cmip6_df("2010-01-01", "2014-12-01", 100),
+      cmip6_df("2015-01-01", "2020-12-01", 25),
+      cmip6_df("2025-01-01", "2025-12-01", 30)
+    ),
+    file.path(proj_dir, paste0(code, "_cmip6_ssp245.parquet"))
+  )
+
+  dates <- seq(as.Date("1991-01-01"), as.Date("2020-12-01"), by = "1 month")
+  result <- get_weather(
+    survey_data = fx$survey_data,
+    selected_surveys = fx$selected_surveys,
+    selected_weather = sw_continuous("tx"),
+    dates = dates,
+    connection_params = fx$connection_params,
+    ssp = "ssp2_4_5",
+    future_period = c("2025-01-01", "2025-12-31"),
+    perturbation_method = c(tx = "additive")
+  )
+
+  scen_name <- grep("ssp2_4_5", names(result), value = TRUE)
+  expect_length(scen_name, 1L)
+  cmp <- merge(
+    result[[scen_name]][, c("loc_id", "timestamp", "tx")],
+    result$historical[, c("loc_id", "timestamp", "tx")],
+    by = c("loc_id", "timestamp"), suffixes = c("_fut", "_hist")
+  )
+  cmp <- cmp[stats::complete.cases(cmp), , drop = FALSE]
+  expect_gt(nrow(cmp), 0L)
+  # Pooled baseline = 0.8 * 20 + 0.2 * 25 = 21, so the delta is 30 - 21 = 9.
+  # The old mean of two climatologies gave (20 + 25) / 2 = 22.5 (delta 7.5).
+  expect_equal(cmp$tx_fut - cmp$tx_hist, rep(9, nrow(cmp)), tolerance = 1e-6)
+})
