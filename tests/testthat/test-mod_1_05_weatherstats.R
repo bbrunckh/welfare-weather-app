@@ -314,3 +314,41 @@ test_that("P7: weather plotting frames are reused until their source changes", {
     }
   )
 })
+
+test_that("R2-BUG-21: the load short-circuit does not keep a stale outcome", {
+  sw <- make_selected_weather(1)
+  swd <- make_survey_weather(waves = 2018)
+  loads <- 0L
+  local_mocked_bindings(
+    get_weather = function(...) {
+      loads <<- loads + 1L
+      list(historical = swd)
+    },
+    merge_survey_weather = function(svy, wd) swd,
+    join_hist_sample_cells = function(...) NULL
+  )
+  outcome <- shiny::reactiveVal(data.frame(name = "welfare", label = "A"))
+  args <- weatherstats_args(sw, NULL, survey_data = swd)
+  args$selected_surveys <- shiny::reactive(data.frame(code = "TST", year = "2018"))
+  args$selected_outcome <- outcome
+
+  shiny::testServer(mod_1_05_weatherstats_server, args = args, {
+    session$setInputs(weather_stats = 0L)
+    session$setInputs(weather_stats = 1L)
+    session$flushReact()
+    expect_equal(loads, 1L)
+    expect_equal(wx_spec()$so$label, "A")
+
+    # Same weather selection, same outcome: served from state.
+    session$setInputs(weather_stats = 2L)
+    session$flushReact()
+    expect_equal(loads, 1L)
+
+    # A new outcome must not be answered with "already loaded".
+    outcome(data.frame(name = "poor", label = "B"))
+    session$setInputs(weather_stats = 3L)
+    session$flushReact()
+    expect_equal(wx_spec()$so$label, "B")
+    expect_equal(load_status(), "success")
+  })
+})

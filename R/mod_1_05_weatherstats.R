@@ -191,9 +191,12 @@ mod_1_05_weatherstats_server <- function(
         # REACT-03: an identical request to the last completed load is served
         # from state instead of re-running the weather I/O. `survey_version()`
         # stands in for the (large) survey frame itself; it is stored only when
-        # the load finishes, so a failed load always retries.
+        # the load finishes, so a failed load always retries. The outcome is part
+        # of the key because the tab outputs (binscatter) bind to the outcome
+        # snapshotted in `wx_spec()` below (R2-BUG-21).
         sig <- digest::digest(list(
-          sw, ss, survey_version(), connection_params(), hy
+          sw, ss, survey_version(), connection_params(), hy,
+          selected_outcome()
         ))
         if (identical(sig, last_wx_load_sig())) {
           showNotification("Weather data is already loaded for this selection.",
