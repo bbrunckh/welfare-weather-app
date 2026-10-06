@@ -143,7 +143,7 @@
 .wise_step2_async_id <- function() {
   paste0(
     "step2-", format(Sys.time(), "%Y%m%dT%H%M%OS3", tz = "UTC"), "-",
-    substr(digest::digest(list(Sys.getpid(), Sys.time(), runif(1L))), 1L, 16L)
+    substr(digest::digest(list(Sys.getpid(), Sys.time(), basename(tempfile()))), 1L, 16L)
   )
 }
 

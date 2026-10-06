@@ -607,3 +607,11 @@ testthat::test_that("dispatch frees a slot held by a job that no longer exists",
   .wise_step2_async_dispatch()
   testthat::expect_null(state$active)
 })
+
+testthat::test_that("async job ids leave the global RNG untouched (R2-BUG-18)", {
+  set.seed(42)
+  before <- .Random.seed
+  ids <- c(.wise_step2_async_id(), .wise_step2_async_id())
+  testthat::expect_identical(.Random.seed, before)
+  testthat::expect_false(identical(ids[[1L]], ids[[2L]]))
+})
