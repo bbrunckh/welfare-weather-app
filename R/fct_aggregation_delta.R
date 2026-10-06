@@ -61,6 +61,8 @@
 #'     \item{value}{Numeric scalar. Point estimate.}
 #'     \item{value_lo, value_p50, value_hi}{Numeric scalars. Coefficient-uncertainty band.}
 #'     \item{var_coef, var_resid}{Numeric scalars. Variance components.}
+#'     \item{n_coef_dropped}{Integer. Rows excluded from the variance because
+#'       their welfare, weight, factor-loading row or gradient is not finite.}
 #'     \item{draw_values}{\code{NULL}. Compatibility slot; downstream code reads
 #'       \code{value_lo}/\code{value_hi} directly.}
 #'   }
@@ -115,20 +117,48 @@ aggregate_with_uncertainty_delta <- function(y_point,
     resolve_agg_fn(method)(mu, weights, pov_line)
   }
 
+  # R2-BUG-02: rows with a non-finite welfare, weight or factor-loading row
+  # are excluded from both the gradient and F (and counted) instead of
+  # zeroing the coefficient variance of the whole aggregate. Clean data
+  # takes the unchanged full-length path.
+  keep <- NULL
+  if (!is.null(F_loading)) {
+    keep <- is.finite(mu) & is.finite(F_row_ss %||% rowSums(F_loading))
+    if (!is.null(weights)) keep <- keep & is.finite(weights)
+    if (all(keep)) keep <- NULL
+  }
+
   # Welfare-scale gradient h_i = (dT/dw_i) * mu_i
-  h <- gradient_for_method(method, mu, weights, pov_line, value_pt,
-    bandwidth_p0 = bandwidth_p0,
-    F_loading    = F_loading,
-    prepared_order = prepared_order,
-    F_row_ss     = F_row_ss
-  )
+  h <- if (is.null(keep)) {
+    gradient_for_method(method, mu, weights, pov_line, value_pt,
+      bandwidth_p0 = bandwidth_p0,
+      F_loading    = F_loading,
+      prepared_order = prepared_order,
+      F_row_ss     = F_row_ss
+    )
+  } else {
+    F_loading <- F_loading[keep, , drop = FALSE]
+    gradient_for_method(method, mu[keep], weights[keep], pov_line, value_pt,
+      bandwidth_p0 = bandwidth_p0,
+      F_loading    = F_loading,
+      prepared_order = NULL,
+      F_row_ss     = F_row_ss[keep]
+    )
+  }
+  n_coef_dropped <- if (is.null(keep)) 0L else sum(!keep)
+  if (!is.null(F_loading) && !all(is.finite(h))) {
+    ok <- is.finite(h)
+    n_coef_dropped <- n_coef_dropped + sum(!ok)
+    h <- h[ok]
+    F_loading <- F_loading[ok, , drop = FALSE]
+  }
 
   # Coefficient variance: ||F' h||^2
   # F_agg is the per-coefficient gradient of the aggregated scalar with
   # respect to beta; ||F_agg||^2 = var_coef. Exposing F_agg lets callers
   # build contrast variances such as ||F_agg_scn - F_agg_hist||^2, which
   # is the right SE for paired counterfactuals on the same population.
-  F_agg <- if (!is.null(F_loading) && !any(!is.finite(h))) {
+  F_agg <- if (!is.null(F_loading)) {
     as.numeric(crossprod(F_loading, h))
   } else {
     NULL
@@ -163,6 +193,7 @@ aggregate_with_uncertainty_delta <- function(y_point,
     var_coef    = var_coef,
     var_resid   = var_resid,
     F_agg       = F_agg,
+    n_coef_dropped = n_coef_dropped,
     draw_values = NULL
   )
 }
@@ -186,6 +217,7 @@ aggregate_point_estimate <- function(mu, method, weights = NULL, pov_line = NULL
     var_coef = 0,
     var_resid = 0,
     F_agg = NULL,
+    n_coef_dropped = 0L,
     draw_values = NULL
   )
 }
@@ -273,28 +305,27 @@ gradient_for_method <- function(method, mu, weights, pov_line, value_pt,
       h
     },
     median = {
-      # Hampel IF: IF_i = -(1{w_i<=m} - 0.5) / f(m)
-      # Lift to log scale: h_i = w_tilde_i * mu_i * IF_i, with mu_i chain rule
-      # cancelling because median is in welfare units.
-      f_hat <- tryCatch(
-        {
-          d <- if (!is.null(weights)) {
-            suppressWarnings(stats::density(mu,
-              weights = weights / sum(weights, na.rm = TRUE),
-              na.rm = TRUE
-            ))
-          } else {
-            stats::density(mu, na.rm = TRUE)
-          }
-          approx_y <- stats::approx(d$x, d$y, xout = value_pt)$y
-          if (is.finite(approx_y) && approx_y > 1e-12) approx_y else NA_real_
-        },
-        error = function(e) NA_real_
-      )
-      if (is.na(f_hat)) {
+      # Smoothed-quantile derivative (R2-BUG-03). The median m solves
+      #   sum_i w_tilde_i * Phi((m - w_i)/b) = 0.5,
+      # so by implicit differentiation dm/dw_i = k_i / sum(k) with
+      #   k_i = w_tilde_i * phi((m - w_i)/b) / b.
+      # Lifted to log scale like every other method here:
+      #   h_i = (dm/dw_i) * mu_i = k_i * mu_i / sum(k).
+      # Under a common log shift delta, sum(h) * delta ~ m * delta, as it
+      # should. (The Hampel influence function used previously is the
+      # sampling-variance IF; its gradients sum to ~0 under that shift.)
+      # b is the bandwidth stats::density() used for f(m) before: bw.nrd0.
+      ok <- is.finite(mu)
+      if (sum(ok) < 2L) {
         return(rep(0, N))
       }
-      w_tilde * (0.5 - as.numeric(mu <= value_pt)) / f_hat
+      b <- stats::bw.nrd0(mu[ok])
+      k <- w_tilde * stats::dnorm((value_pt - mu) / b) / b
+      k_sum <- sum(k, na.rm = TRUE)
+      if (!is.finite(b) || b <= 0 || !is.finite(k_sum) || k_sum <= 0) {
+        return(rep(0, N))
+      }
+      k * mu / k_sum
     },
     gini = {
       # Partial-derivative gradient of the weighted Gini wrt y_i, used in
@@ -343,7 +374,7 @@ gradient_for_method <- function(method, mu, weights, pov_line, value_pt,
 # they respect natural bounds.
 
 apply_band_transform <- function(method, value_pt, se, z_lo, z_hi) {
-  if (!is.finite(se) || se == 0) {
+  if (!is.finite(se) || se == 0 || !is.finite(value_pt)) {
     return(list(lo = value_pt, hi = value_pt))
   }
 
@@ -455,6 +486,18 @@ apply_band_transform <- function(method, value_pt, se, z_lo, z_hi) {
   years <- sort(unique(pipe$sim_year))
   rows <- lapply(years, function(year) which(pipe$sim_year == year))
   valid <- lapply(rows, function(idx) !is.na(pipe$y_point[idx]))
+  # R2-BUG-28: NA household-year predictions are excluded from each year's
+  # statistics. Count them per year (this pipeline = one model/member) and
+  # report; which rows are used is unchanged.
+  n_na_dropped <- vapply(valid, function(v) sum(!v), integer(1))
+  if (sum(n_na_dropped) > 0L) {
+    message(sprintf(
+      "[wiseapp] %d NA household-year prediction(s) excluded from per-year statistics (%s).",
+      sum(n_na_dropped),
+      paste(sprintf("%s: %d", years, n_na_dropped)[n_na_dropped > 0L],
+            collapse = ", ")
+    ))
+  }
   weights <- lapply(seq_along(rows), function(i) {
     idx <- rows[[i]][valid[[i]]]
     if (!is.null(pipe$weight)) as.numeric(pipe$weight[idx]) else NULL
@@ -506,6 +549,7 @@ apply_band_transform <- function(method, value_pt, se, z_lo, z_hi) {
     years = years,
     rows = rows,
     valid = valid,
+    n_na_dropped = n_na_dropped,
     weights = weights,
     weights_normalized = weights_normalized,
     residuals = residual_vectors,
@@ -619,6 +663,7 @@ aggregate_pipeline_per_year <- function(pipe,
       prepared_mu = prep$mu[[i]]
     )
     m$sim_year <- yr
+    m$n_na_dropped <- prep$n_na_dropped[[i]]
     m
   })
 }
@@ -767,6 +812,7 @@ aggregate_pipeline_per_year_multi <- function(pipe,
         F_row_ss = F_row_ss
       )
       value$sim_year <- yr
+      value$n_na_dropped <- prep$n_na_dropped[[i]]
       out[[method]][[i]] <- value
     }
   }

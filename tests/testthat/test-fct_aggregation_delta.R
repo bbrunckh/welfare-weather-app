@@ -76,8 +76,10 @@ test_that("point-estimate fast path returns exact values without uncertainty wor
     oracle <- lapply(seq_along(fast), function(i) {
       idx <- pipe$sim_year == fast[[i]]$sim_year
       mu <- exp(pipe$y_point[idx])
-      aggregate_point_estimate(mu, method, pipe$weights[idx], pov) |>
-        within(sim_year <- fast[[i]]$sim_year)
+      x <- aggregate_point_estimate(mu, method, pipe$weights[idx], pov)
+      x$sim_year <- fast[[i]]$sim_year
+      x$n_na_dropped <- 0L
+      x
     })
     expect_identical(fast, oracle, info = method)
     expect_true(all(vapply(fast, function(x) is.null(x$F_agg), logical(1))))
@@ -218,7 +220,8 @@ test_that("prosperity_gap gradient matches MC and exact formula", {
 test_that("all smooth delta-method gradients match finite differences (unweighted)", {
   # h_i = (dT/dw_i) * w_i, so a small relative welfare perturbation
   # dw_i/w_i = eps must move the point estimate by h_i * eps. Excluded:
-  # median (piecewise-constant estimate — Hampel IF is not FD-visible) and
+  # median (piecewise-constant estimate; the gradient is the smoothed-quantile
+  # derivative, validated against Monte Carlo below) and
   # headcount_ratio (discontinuous estimate; the gradient is defined on the
   # kernel-smoothed surrogate, validated separately below).
   pipe  <- make_pipeline()
@@ -302,6 +305,100 @@ test_that("kernel-smoothed headcount_ratio gradient matches finite differences",
   expect_near_fd(T1 - T0, h[idx] * eps, tol = 1e-4, info = "headcount_ratio")
 })
 
+test_that("median delta-method SD matches Monte Carlo (R2-BUG-03)", {
+  # The Hampel-IF gradient gave ratios of ~0 (intercept-like loading) and
+  # ~0.25 (correlated loading); the smoothed-quantile derivative gives ~1.
+  set.seed(3)
+  N <- 4000
+  y <- stats::rnorm(N, log(3), 0.6)
+  w <- stats::runif(N, 0.5, 2)
+  cases <- list(
+    intercept  = matrix(0.05, N, 1),
+    correlated = cbind(0.03 + 0.02 * (y - mean(y)), stats::rnorm(N, 0, 0.02)),
+    mixed      = cbind(rep(0.04, N), stats::rnorm(N, 0, 0.05),
+                       stats::rnorm(N, 0, 0.05))
+  )
+  for (nm in names(cases)) {
+    pipe <- list(y_point = y, F_loading = cases[[nm]])
+    res <- wiseapp:::aggregate_with_uncertainty_delta(
+      y_point = y, F_loading = pipe$F_loading, method = "median",
+      weights = w, residuals = "none"
+    )
+    ratio <- sqrt(res$var_coef) / mc_se(pipe, "median", weights = w, S = 2000)
+    expect_gt(ratio, 0.9, label = paste(nm, "ratio"))
+    expect_lt(ratio, 1.1, label = paste(nm, "ratio"))
+  }
+
+  # Common log shift: gradients sum to ~ m (median moves by m * delta).
+  h <- wiseapp:::gradient_for_method(
+    method = "median", mu = exp(y), weights = w, pov_line = NULL,
+    value_pt = wiseapp:::resolve_agg_fn("median")(exp(y), w, NULL)
+  )
+  m <- wiseapp:::resolve_agg_fn("median")(exp(y), w, NULL)
+  expect_lt(abs(sum(h) / m - 1), 0.02)
+})
+
+
+test_that("one non-finite row is dropped and counted, not zeroing variance (R2-BUG-02)", {
+  pipe <- make_pipeline()
+  run <- function(y, F, w, method) {
+    pov <- if (method == "headcount_ratio") 3 else NULL
+    wiseapp:::aggregate_with_uncertainty_delta(
+      y_point = y, F_loading = F, method = method, weights = w,
+      pov_line = pov, residuals = "none"
+    )
+  }
+  for (method in c("mean", "median", "gini", "headcount_ratio")) {
+    clean <- run(pipe$y_point, pipe$F_loading, pipe$weights, method)
+    expect_identical(clean$n_coef_dropped, 0L)
+
+    F_na <- pipe$F_loading; F_na[17L, 2L] <- NA
+    w_na <- pipe$weights;   w_na[17L] <- NA
+    y_na <- pipe$y_point;   y_na[17L] <- NA
+    cases <- list(
+      F_row  = run(pipe$y_point, F_na, pipe$weights, method),
+      y      = run(y_na, pipe$F_loading, pipe$weights, method)
+    )
+    # An NA weight makes most point estimates NA (resolver behaviour, out of
+    # scope here); the mean gradient does not depend on the point estimate.
+    if (method == "mean") {
+      cases$weight <- run(pipe$y_point, pipe$F_loading, w_na, method)
+    }
+    for (nm in names(cases)) {
+      res <- cases[[nm]]
+      info <- paste(method, nm)
+      expect_identical(res$n_coef_dropped, 1L, info = info)
+      expect_gt(res$var_coef, 0)
+      expect_lt(abs(res$var_coef / clean$var_coef - 1), 0.01, label = info)
+    }
+  }
+})
+
+test_that("NA household-year predictions are counted per year (R2-BUG-28)", {
+  pipe <- make_pipeline(N = 60, K = 3)
+  pipe$weight <- pipe$weights
+  pipe$sim_year <- rep(c(2030L, 2031L, 2032L), each = 20L)
+  pipe$y_point[c(3L, 5L, 45L)] <- NA
+  clean <- pipe
+  clean$y_point[c(3L, 5L, 45L)] <- log(3)
+
+  expect_message(
+    single <- aggregate_pipeline_per_year(pipe, "mean", residuals = "none"),
+    "3 NA household-year prediction\\(s\\) excluded .*2030: 2, 2032: 1"
+  )
+  expect_identical(vapply(single, `[[`, integer(1), "n_na_dropped"),
+                   c(2L, 0L, 1L))
+  multi <- suppressMessages(aggregate_pipeline_per_year_multi(
+    pipe, c("mean", "gini"), residuals = "none"
+  ))
+  expect_identical(vapply(multi$gini, `[[`, integer(1), "n_na_dropped"),
+                   c(2L, 0L, 1L))
+  # Report only: the rows used are unchanged (NA rows still excluded).
+  expect_identical(single[[2]]$value,
+                   aggregate_pipeline_per_year(clean, "mean",
+                                               residuals = "none")[[2]]$value)
+  expect_silent(aggregate_pipeline_per_year(clean, "mean", residuals = "none"))
+})
 
 test_that("F_loading = NULL gives zero coefficient variance", {
   pipe <- make_pipeline()

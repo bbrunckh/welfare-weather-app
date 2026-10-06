@@ -245,3 +245,33 @@ test_that("step2_compute is deterministic for equal inputs and seed", {
                    b$result$hist_sim_result$pipeline)
   expect_identical(a$result$new_scenarios, b$result$new_scenarios)
 })
+
+test_that("step2_compute rejects pipelines whose rows are not aligned (CR-BUG-07)", {
+  expect_error(
+    wiseapp:::.step2_compute_assert_alignment(list(
+      y_point = c(1, 2, 3), F_loading = matrix(0, 2, 1), sim_year = 1:3
+    )),
+    "not aligned with 3 predictions: F_loading has 2"
+  )
+  aligned <- step2_compute_pipeline(NULL)
+  expect_identical(wiseapp:::.step2_compute_assert_alignment(aligned), aligned)
+
+  input <- step2_compute_fixture()
+  weather <- step2_compute_weather()
+  misaligned <- function(weather_raw, ...) {
+    out <- step2_compute_pipeline(weather_raw, ...)
+    out$svy_row_id <- 1L
+    out
+  }
+  events <- list()
+  try(suppressWarnings(step2_compute(
+    input, seed = 123L,
+    event_fn = function(event) events[[length(events) + 1L]] <<- event,
+    weather_fn = function(...) weather,
+    pipeline_fn = misaligned
+  )), silent = TRUE)
+  failed <- Filter(function(e) identical(e$stage, "pipeline") &&
+                     identical(e$status, "failed"), events)
+  expect_true(length(failed) > 0L)
+  expect_match(paste(unlist(failed), collapse = " "), "svy_row_id has 1")
+})

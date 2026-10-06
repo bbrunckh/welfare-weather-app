@@ -790,6 +790,9 @@ run_sim_pipeline <- function(weather_raw,
     rm(out)
     if (!is.null(chol_obj)) {
       # Standard OLS path only - skip for RIF (model is fixest_multi)
+      # model.matrix(data =) keeps rows with NA regressors or unseen FE levels
+      # (as NA / finite rows), matching predict(), so F_loading rows align
+      # with y_point. The step2_compute() boundary asserts this.
       X_nonFE <- profile_stage("design_matrix", tryCatch(
         stats::model.matrix(model, data = survey_wd_sim, type = "rhs"),
         error = function(e) {
