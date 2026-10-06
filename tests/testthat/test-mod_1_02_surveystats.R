@@ -408,3 +408,46 @@ test_that("CR-BUG-16: panel join reports unmatched records and rejects duplicate
     }
   )
 })
+
+test_that("R2-PERF-14: H3 cell bbox needs only the h3 extension and matches the boundary", {
+  skip_if_not_installed("duckdb")
+  con <- DBI::dbConnect(duckdb::duckdb())
+  on.exit(DBI::dbDisconnect(con, shutdown = TRUE), add = TRUE)
+  h3_ok <- tryCatch({
+    tryCatch(DBI::dbExecute(con, "LOAD h3"), error = function(e) {
+      DBI::dbExecute(con, "INSTALL h3 FROM community; LOAD h3;")
+    })
+    TRUE
+  }, error = function(e) FALSE)
+  skip_if_not(h3_ok, "DuckDB h3 extension unavailable")
+
+  # Cells north and south of the equator, east and west of Greenwich, near
+  # the equator and at a high latitude, at several resolutions.
+  DBI::dbExecute(con, "
+    CREATE TEMP TABLE cells AS
+    SELECT h3_latlng_to_cell_string(lat, lng, res) AS h3
+    FROM (VALUES (12.3, -1.5, 6), (35.7, 51.4, 5), (-33.9, 18.4, 7),
+                 (0.01, -78.5, 4), (64.1, -21.9, 6)) t(lat, lng, res)")
+  got <- dplyr::tbl(con, "cells") |> .h3_cell_bbox() |> dplyr::collect()
+  expect_named(got, c("h3", "xmin", "ymin", "xmax", "ymax"))
+  expect_equal(nrow(got), 5L)
+  loaded <- DBI::dbGetQuery(
+    con, "SELECT extension_name FROM duckdb_extensions() WHERE loaded"
+  )$extension_name
+  expect_false("spatial" %in% loaded)
+
+  # Reference: min/max of the boundary vertices parsed in R.
+  wkt <- DBI::dbGetQuery(
+    con, "SELECT h3, h3_cell_to_boundary_wkt(h3) AS wkt FROM cells"
+  )
+  for (i in seq_len(nrow(wkt))) {
+    xy <- matrix(as.numeric(unlist(strsplit(
+      gsub("POLYGON \\(\\(|\\)\\)", "", wkt$wkt[[i]]), "[ ,]+"
+    ))), ncol = 2L, byrow = TRUE)
+    row <- got[got$h3 == wkt$h3[[i]], ]
+    expect_identical(
+      c(row$xmin, row$ymin, row$xmax, row$ymax),
+      c(min(xy[, 1]), min(xy[, 2]), max(xy[, 1]), max(xy[, 2]))
+    )
+  }
+})

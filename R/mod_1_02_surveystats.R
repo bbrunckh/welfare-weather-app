@@ -355,7 +355,6 @@ mod_1_02_surveystats_server <- function(
 
           tryCatch(
             {
-              .duck_load_ext("spatial")
               .duck_load_ext("h3")
 
               # Location of interviews map ----
@@ -366,16 +365,7 @@ mod_1_02_surveystats_server <- function(
               # and weather maps.
               cell_geo <- h3_local |>
                 dplyr::distinct(h3) |>
-                dplyr::mutate(g = st_geomfromtext(h3_cell_to_boundary_wkt(h3))) |>
-                dplyr::mutate(
-                  # PERF-36: per-cell bbox beside the geometry.
-                  env = st_extent(g)
-                ) |>
-                dplyr::mutate(
-                  xmin = st_xmin(env), ymin = st_ymin(env),
-                  xmax = st_xmax(env), ymax = st_ymax(env)
-                ) |>
-                dplyr::select(-g, -env) |>
+                .h3_cell_bbox() |>
                 collect_deterministic("h3")
 
               cell_map <- h3_local |>
@@ -920,4 +910,34 @@ mod_1_02_surveystats_server <- function(
       load_status = load_status
     )
   })
+}
+
+#' Per-cell bounding box of H3 cells, computed with the h3 extension only.
+#'
+#' R2-PERF-14: the bbox used to come from the `spatial` extension
+#' (`st_extent(st_geomfromtext(h3_cell_to_boundary_wkt(h3)))`), which cost a
+#' 1.5 s extension load per process for this one query. The same boundary WKT
+#' ("POLYGON ((lng lat, lng lat, ...))") is parsed here with DuckDB string
+#' functions, so the min/max are taken over exactly the same vertex
+#' coordinates.
+#'
+#' @param cells Lazy DuckDB table with an `h3` column (cell id string).
+#' @return Lazy table with `h3`, `xmin`, `ymin`, `xmax`, `ymax`.
+#' @noRd
+.h3_cell_bbox <- function(cells) {
+  cells |>
+    dplyr::mutate(wkt = dplyr::sql("h3_cell_to_boundary_wkt(h3)")) |>
+    dplyr::mutate(
+      lng = dplyr::sql(
+        "CAST(regexp_extract_all(wkt, '(-?[0-9.]+) -?[0-9.]+', 1) AS DOUBLE[])"
+      ),
+      lat = dplyr::sql(
+        "CAST(regexp_extract_all(wkt, '-?[0-9.]+ (-?[0-9.]+)', 1) AS DOUBLE[])"
+      )
+    ) |>
+    dplyr::transmute(
+      h3,
+      xmin = dplyr::sql("list_min(lng)"), ymin = dplyr::sql("list_min(lat)"),
+      xmax = dplyr::sql("list_max(lng)"), ymax = dplyr::sql("list_max(lat)")
+    )
 }
