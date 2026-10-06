@@ -532,7 +532,7 @@ has_sp_change <- function(sp) {
   # The run and preview share one eligibility draw and transfer calculation;
   # the preview needs only this vector and the columns used by its totals.
   values <- tryCatch(
-    withr::with_seed(wise_seed(seed, "policy"), {
+    withr::with_seed(wise_seed(seed, "policy", "sp"), {
       eligible <- .determine_sp_eligibility(svy, sp)
       transfer <- .sp_transfer_values(svy, sp, analysis_unit, eligible)
       list(eligible = eligible, transfer = transfer)
@@ -952,7 +952,11 @@ apply_policy_to_svy <- function(svy,
   if (is.null(svy)) {
     return(svy)
   }
-  withr::with_seed(wise_seed(seed, "policy"), {
+  # R2-BUG-12: each lever draws from its own seeded stream, so toggling one
+  # lever never redraws another lever's recipients, and the SP preview
+  # (.sp_scenario_reach) matches the run whatever else is enabled.
+  lever_seed <- function(lever) wise_seed(seed, "policy", lever)
+  local({
     cols <- names(svy)
 
     # Columns eligible for covariate-lever manipulation. A lever whose variable
@@ -972,46 +976,46 @@ apply_policy_to_svy <- function(svy,
     if (!is.null(infra)) {
       if (has_infra_change(infra)) {
         if ("electricity" %in% lever_cols) {
-          svy$electricity <- .apply_binary_access(
+          svy$electricity <- withr::with_seed(lever_seed("electricity"), .apply_binary_access(
             svy$electricity,
             infra$elec_universal,
             infra$elec_access_change_pct
-          )
+          ))
         }
         if ("imp_wat_rec" %in% lever_cols) {
-          svy$imp_wat_rec <- .apply_binary_access(
+          svy$imp_wat_rec <- withr::with_seed(lever_seed("imp_wat_rec"), .apply_binary_access(
             svy$imp_wat_rec,
             infra$water_universal,
             infra$water_access_change_pct
-          )
+          ))
         }
         if ("imp_san_rec" %in% lever_cols) {
-          svy$imp_san_rec <- .apply_binary_access(
+          svy$imp_san_rec <- withr::with_seed(lever_seed("imp_san_rec"), .apply_binary_access(
             svy$imp_san_rec,
             infra$sanitation_universal,
             infra$sanitation_access_change_pct
-          )
+          ))
         }
         if ("piped" %in% lever_cols) {
-          svy$piped <- .apply_binary_access(
+          svy$piped <- withr::with_seed(lever_seed("piped"), .apply_binary_access(
             svy$piped,
             infra$piped_universal,
             infra$piped_access_change_pct
-          )
+          ))
         }
         if ("piped_to_prem" %in% lever_cols) {
-          svy$piped_to_prem <- .apply_binary_access(
+          svy$piped_to_prem <- withr::with_seed(lever_seed("piped_to_prem"), .apply_binary_access(
             svy$piped_to_prem,
             infra$piped_to_prem_universal,
             infra$piped_to_prem_access_change_pct
-          )
+          ))
         }
         if ("imp_wat_san_rec" %in% lever_cols) {
-          svy$imp_wat_san_rec <- .apply_binary_access(
+          svy$imp_wat_san_rec <- withr::with_seed(lever_seed("imp_wat_san_rec"), .apply_binary_access(
             svy$imp_wat_san_rec,
             infra$imp_wat_san_universal,
             infra$imp_wat_san_access_change_pct
-          )
+          ))
         }
         if ("ttime_health" %in% lever_cols) {
           svy$ttime_health <- .apply_health_travel(
@@ -1028,18 +1032,18 @@ apply_policy_to_svy <- function(svy,
     if (!is.null(digital)) {
       if (has_digital_change(digital)) {
         if ("internet" %in% lever_cols) {
-          svy$internet <- .apply_binary_access(
+          svy$internet <- withr::with_seed(lever_seed("internet"), .apply_binary_access(
             svy$internet,
             digital$internet_universal,
             digital$internet_access_change_pct
-          )
+          ))
         }
         if ("cellphone" %in% lever_cols) {
-          svy$cellphone <- .apply_binary_access(
+          svy$cellphone <- withr::with_seed(lever_seed("cellphone"), .apply_binary_access(
             svy$cellphone,
             digital$mobile_universal,
             digital$mobile_access_change_pct
-          )
+          ))
         }
       }
     }
@@ -1048,25 +1052,25 @@ apply_policy_to_svy <- function(svy,
     if (!is.null(education)) {
       if (has_education_change(education)) {
         if ("educ_com1_hh" %in% lever_cols) {
-          svy$educ_com1_hh <- .apply_binary_access(
+          svy$educ_com1_hh <- withr::with_seed(lever_seed("educ_com1_hh"), .apply_binary_access(
             svy$educ_com1_hh,
             education$primary_universal,
             education$primary_access_change_pct
-          )
+          ))
         }
         if ("educ_com2_hh" %in% lever_cols) {
-          svy$educ_com2_hh <- .apply_binary_access(
+          svy$educ_com2_hh <- withr::with_seed(lever_seed("educ_com2_hh"), .apply_binary_access(
             svy$educ_com2_hh,
             education$secondary_universal,
             education$secondary_access_change_pct
-          )
+          ))
         }
         if ("educ_com3_hh" %in% lever_cols) {
-          svy$educ_com3_hh <- .apply_binary_access(
+          svy$educ_com3_hh <- withr::with_seed(lever_seed("educ_com3_hh"), .apply_binary_access(
             svy$educ_com3_hh,
             education$postsec_universal,
             education$postsec_access_change_pct
-          )
+          ))
         }
       }
     }
@@ -1078,7 +1082,7 @@ apply_policy_to_svy <- function(svy,
         # Requires all three employment status columns to be present
         emp_change <- (labor$employment_change_pp %||% 0) / 100
         if (emp_change != 0 && all(c("employed", "selfemployed", "unemployed") %in%
-          lever_cols)) {
+          lever_cols)) withr::with_seed(lever_seed("labor_employment"), {
           # Find unemployed individuals and current ratio of employed/selfemployed
           unemp_idx <- which(svy$unemployed == 1L & !is.na(svy$unemployed))
           employed_idx <- which(svy$employed == 1L & !is.na(svy$employed))
@@ -1128,7 +1132,7 @@ apply_policy_to_svy <- function(svy,
               svy$unemployed[flip_idx] <- 1L
             }
           }
-        }
+        })
 
         # Sectoral composition: minimize reallocation to achieve target percentages
         # Only move workers from sectors exceeding their target. Runs only when
@@ -1136,7 +1140,7 @@ apply_policy_to_svy <- function(svy,
         # keeps that sector's current count.
         sector_set <- .sector_target_set(labor$sector_manufacturing) ||
           .sector_target_set(labor$sector_services)
-        if (sector_set && all(c("employed", "selfemployed", "agriculture", "industry", "services") %in% lever_cols)) {
+        if (sector_set && all(c("employed", "selfemployed", "agriculture", "industry", "services") %in% lever_cols)) withr::with_seed(lever_seed("labor_sector"), {
           working <- (svy$employed == 1L | svy$selfemployed == 1L) &
             !is.na(svy$employed) & !is.na(svy$selfemployed)
 
@@ -1304,7 +1308,7 @@ apply_policy_to_svy <- function(svy,
               }
             }
           }
-        }
+        })
       }
     }
 
@@ -1321,7 +1325,9 @@ apply_policy_to_svy <- function(svy,
     # "ind" the SP transfer is already per-individual and applies to every
     # eligible (individual) row as-is.
     if (!is.null(sp) && "welfare" %in% cols) {
-      eligible <- .determine_sp_eligibility(svy, sp)
+      eligible <- withr::with_seed(
+        lever_seed("sp"), .determine_sp_eligibility(svy, sp)
+      )
       transfer <- .sp_transfer_values(svy, sp, analysis_unit, eligible)
       if (!is.null(transfer)) {
         svy[[SP_TRANSFER_COL]] <- transfer
