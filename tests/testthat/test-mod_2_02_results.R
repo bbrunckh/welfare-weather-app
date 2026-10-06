@@ -194,7 +194,7 @@ test_that("agg cache: display-only controls do not invalidate unaffected methods
       m2 <- .get_hist_agg("mean")
       expect_identical(h1, m2)
       expect_true(all(g2$unweighted$gap$value > g1$unweighted$gap$value))
-      # headcount reads both pl and bandwidth; gap ignores bandwidth
+      # headcount reads pl and the fixed bandwidth; gap ignores bandwidth
       session$setInputs(bandwidth_p0 = 0.10); settle()
       hc1 <- .get_hist_agg("headcount_ratio")
       expect_length(ls(envir = ws()$cache), 4L)
@@ -206,11 +206,12 @@ test_that("agg cache: display-only controls do not invalidate unaffected methods
       expect_identical(h1, m3)
       expect_length(ls(envir = ws()$cache), 4L)
 
-      # New bandwidth invalidates only headcount
+      # bandwidth_p0 has no UI control (CR-BUG-11): a stray input value is
+      # ignored, so headcount stays cached at the fixed default bandwidth.
       session$setInputs(bandwidth_p0 = 0.20); settle()
       hc3 <- .get_hist_agg("headcount_ratio")
-      expect_false(identical(hc2, hc3))
-      expect_length(ls(envir = ws()$cache), 5L)
+      expect_identical(hc2, hc3)
+      expect_length(ls(envir = ws()$cache), 4L)
       g4 <- .get_hist_agg("gap")
       expect_identical(g2, g4)
       m4 <- .get_hist_agg("mean")

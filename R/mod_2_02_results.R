@@ -734,7 +734,8 @@ mod_2_02_results_server <- function(id,
         locked <- results_source()$locked_bandwidth
         if (!is.null(locked)) return(as.numeric(locked))
       }
-      as.numeric(input$bandwidth_p0 %||% 0.05)
+      # No UI control sets the kernel bandwidth; use the fixed default.
+      0.05
     })
 
     # Value-affecting aggregation inputs ----
@@ -1789,7 +1790,7 @@ mod_2_02_results_server <- function(id,
     # they would duplicate the Coef rows.
     threshold_table_rv <- reactive({
       req(hist_agg_rv())
-      bq_coef <- resolve_band_q(input$uncertainty_band %||% "p10_p90")
+      bq_coef <- resolve_band_q("p10_p90")
       bq_ens <- if (identical(input$ensemble_band %||% "none", "none")) {
         c(lo = 0.5, hi = 0.5)
       } else {
@@ -1994,8 +1995,8 @@ mod_2_02_results_server <- function(id,
       echart_pointrange_climate(
         bands_tbl    = bands,
         x_label      = agg_hist()$x_label,
-        group_order  = input$cmp_group_order %||% "scenario_x_year",
-        show_coef    = isTRUE(input$show_coef_uncertainty) && has_draws(),
+        group_order  = "scenario_x_year",
+        show_coef    = FALSE,
         height       = "600px"
       )
     }
@@ -2029,8 +2030,7 @@ mod_2_02_results_server <- function(id,
     # forces a full redraw because setOption() merging cannot remove series.
     .SMOOTH_CONTROLS <- c(
       "cmp_agg_method", "cmp_deviation", "annual_distribution_type",
-      "ensemble_band", "exceedance_model_spread", "cmp_group_order",
-      "show_coef_uncertainty"
+      "ensemble_band", "exceedance_model_spread"
     )
     smooth_state <- new.env(parent = emptyenv())
     .smooth_echart <- function(ch, id) {
@@ -2156,7 +2156,7 @@ mod_2_02_results_server <- function(id,
 
       build_threshold_table_df(
         threshold_tbl = tbl,
-        group_order   = input$cmp_group_order %||% "scenario_x_year",
+        group_order   = "scenario_x_year",
         show_coef     = TRUE,
         adverse_only  = TRUE,
         method        = .selected_method(),
