@@ -126,6 +126,34 @@ ensure_outcome_column <- function(df, so) {
   stats::vcov(fit)
 }
 
+# RIF sub-fit (one fixest per tau) for `tau`, or NULL. `taus` is the full
+# quantile grid in the order the fixest_multi was estimated.
+.rif_subfit <- function(fit_multi, taus, tau) {
+  if (is.null(fit_multi) || !length(taus)) {
+    return(NULL)
+  }
+  if (inherits(fit_multi, "fixest")) {
+    return(fit_multi)
+  }
+  i <- which.min(abs(taus - tau))
+  tryCatch(fit_multi[[i]], error = function(e) NULL)
+}
+
+# Standard error of a weighted sum of coefficients, sqrt(w' V w), from the
+# fit's full VCV so polynomial terms keep their covariance (R2-BUG-19). Falls
+# back to the independent-terms formula when the VCV or a term is unavailable.
+.rif_combined_se <- function(fit, terms, weights, se) {
+  keep <- weights != 0
+  terms <- terms[keep]
+  w <- weights[keep]
+  V <- if (is.null(fit)) NULL else tryCatch(.fixest_vcov(fit), error = function(e) NULL)
+  if (!is.null(V) && length(terms) && all(terms %in% colnames(V))) {
+    v <- as.numeric(t(w) %*% V[terms, terms, drop = FALSE] %*% w)
+    return(sqrt(max(v, 0)))
+  }
+  sqrt(sum((weights * se)^2, na.rm = TRUE))
+}
+
 .fixest_vcov_spec <- function(fit) {
   # Try the fit-time VCV first (respects cluster= arg passed at estimation)
   ok <- tryCatch(
@@ -2561,6 +2589,8 @@ echart_make_coefplot <- function(fit1, fit2, fit3,
       related <- c(pred_var, poly_terms)
       selected <- grid[grid$.term %in% related, , drop = FALSE]
       groups <- split(selected, interaction(selected$model, selected$tau, drop = TRUE))
+      model_fits <- list(fit1, fit2, fit3)
+      names(model_fits) <- c("No FE or covariates", "No covariates", lab3)
       combined <- lapply(groups, function(d) {
         weights <- vapply(d$.term, function(term) {
           if (identical(term, pred_var)) return(1)
@@ -2568,7 +2598,10 @@ echart_make_coefplot <- function(fit1, fit2, fit3,
           p * x_mean^(p - 1L)
         }, numeric(1))
         estimate <- sum(weights * d$Estimate, na.rm = TRUE)
-        se <- sqrt(sum((weights * d$std.error)^2, na.rm = TRUE))
+        se <- .rif_combined_se(
+          .rif_subfit(model_fits[[d$model[1L]]], taus, d$tau[1L]),
+          d$.term, weights, d$std.error
+        )
         row <- d[1L, , drop = FALSE]
         row$Estimate <- estimate
         row$std.error <- se
@@ -3164,12 +3197,19 @@ echart_weather_effect_plot <- function(fit, pred_var, interaction_terms, is_binn
             0
           }
           plot_data$weight <- vapply(plot_data$term, term_weight, numeric(1))
-          combined <- dplyr::summarise(
-            dplyr::group_by(plot_data, .data$tau),
-            estimate = sum(.data$estimate * .data$weight, na.rm = TRUE),
-            std.error = sqrt(sum((.data$std.error * .data$weight)^2, na.rm = TRUE)),
-            .groups = "drop"
-          )
+          combined <- do.call(rbind, lapply(
+            split(plot_data, plot_data$tau),
+            function(d) {
+              data.frame(
+                tau = d$tau[1L],
+                estimate = sum(d$estimate * d$weight, na.rm = TRUE),
+                std.error = .rif_combined_se(
+                  .rif_subfit(fit, taus, d$tau[1L]),
+                  d$term, d$weight, d$std.error
+                )
+              )
+            }
+          ))
           combined$conf.low <- combined$estimate - 1.96 * combined$std.error
           combined$conf.high <- combined$estimate + 1.96 * combined$std.error
           tri <- panel_ribbon(combined, .wise_blue, 1L, 8)

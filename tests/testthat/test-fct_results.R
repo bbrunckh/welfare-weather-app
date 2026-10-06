@@ -115,3 +115,52 @@ test_that("welfare outcome defaults to the $3.00 PPP line", {
   expect_equal(so$povline, 3.00)
   expect_equal(so$transform, "log")
 })
+
+# R2-BUG-19: RIF polynomial coefficient SE uses the full VCV ------------------
+
+test_that("R2-BUG-19: RIF coefplot combines polynomial SEs with their covariance", {
+  skip_if_not_installed("fixest")
+  skip_if_not_installed("echarts4r")
+  set.seed(19)
+  n <- 800
+  df <- data.frame(temp = stats::rnorm(n, 3, 1))
+  df$welfare <- 1 + 0.5 * df$temp - 0.1 * df$temp^2 + stats::rnorm(n)
+  sm <- build_selected_model(
+    model_type = "Unconditional quantile regression (RIF)", engine = "rif"
+  )
+  sw <- data.frame(name = "temp", cont_binned = "Continuous",
+                   stringsAsFactors = FALSE)
+  sw$polynomial <- list("2")
+  mf <- fit_model(df, list(name = "welfare", type = "numeric"), sw, sm)
+
+  ch <- echart_make_coefplot(
+    mf$fit1, mf$fit2, mf$fit3, "temp", character(0),
+    engine = "rif", rif_grid = mf$rif_grid, pred_var = "temp", tau = 0.5,
+    train_data = mf$train_data
+  )
+  pt <- ch$x$opts$series[[3]]$data[[1]]
+  est <- unlist(pt$value)[1]
+
+  # Manual delta method on the median sub-fit of spec 3: w' V w.
+  sub <- mf$fit3[[5]]
+  b <- stats::coef(sub)
+  V <- stats::vcov(sub)
+  sq <- setdiff(names(b), c("(Intercept)", "temp"))
+  expect_length(sq, 1L)
+  w <- c(1, 2 * mean(mf$train_data$temp))
+  terms <- c("temp", sq)
+  se <- sqrt(as.numeric(t(w) %*% V[terms, terms] %*% w))
+  se_diag <- sqrt(sum((w * sqrt(diag(V)[terms]))^2))
+  expect_equal(est, sum(w * b[terms]))
+  expect_equal(pt$confLow, est - 1.96 * se)
+  expect_equal(pt$confHigh, est + 1.96 * se)
+  # The covariance term matters here, so the old formula is distinguishable.
+  expect_gt(abs(se - se_diag) / se, 0.05)
+})
+
+test_that("R2-BUG-19: .rif_combined_se falls back without a VCV", {
+  expect_equal(
+    .rif_combined_se(NULL, c("a", "b"), c(1, 2), c(0.3, 0.4)),
+    sqrt(0.3^2 + 0.8^2)
+  )
+})
