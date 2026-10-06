@@ -1636,3 +1636,49 @@ test_that("CR-BUG-01: CMIP6 baseline pools historical and SSP rows once", {
   # The old mean of two climatologies gave (20 + 25) / 2 = 22.5 (delta 7.5).
   expect_equal(cmp$tx_fut - cmp$tx_hist, rep(9, nrow(cmp)), tolerance = 1e-6)
 })
+
+test_that("R2-BUG-29: zero reference SD gives NA standardized anomalies and one warning", {
+  skip_if_not_installed("duckdb")
+
+  con <- DBI::dbConnect(duckdb::duckdb(), dbdir = ":memory:")
+  withr::defer(DBI::dbDisconnect(con, shutdown = TRUE))
+
+  # January is dry in every reference year (SD 0); February varies. The 2021
+  # January row is wet, which used to give Inf; dry reference rows gave NaN.
+  base <- data.frame(
+    code = "A", year = 2021L, survname = "S", loc_id = "L1",
+    timestamp = as.Date(c(
+      "1995-01-01", "2000-01-01", "2005-01-01", "2021-01-01",
+      "1995-02-01", "2000-02-01", "2005-02-01"
+    )),
+    r = c(0, 0, 0, 3, 1, 2, 6),
+    stringsAsFactors = FALSE
+  )
+  base_tbl <- dplyr::copy_to(con, base, "r2bug29_base", temporary = TRUE)
+  selected <- data.frame(
+    name = "r", transformation = "Standardized anomaly",
+    stringsAsFactors = FALSE
+  )
+
+  ref <- .build_climate_reference(base_tbl, selected)
+  out <- .apply_transformations(base_tbl, selected, base_tbl, climate_ref = ref) |>
+    dplyr::arrange(timestamp) |>
+    dplyr::collect()
+
+  jan <- format(out$timestamp, "%m") == "01"
+  expect_true(all(is.na(out$r[jan])))
+  expect_false(any(is.nan(out$r)))
+  expect_true(all(is.finite(out$r[!jan])))
+  expect_equal(out$r[!jan], (c(1, 2, 6) - 3) / stats::sd(c(1, 2, 6)))
+
+  expect_warning(
+    n <- .warn_zero_sd_reference(ref),
+    "1 location-month\\(s\\) have a zero 1991-2020 reference SD.*r: 1"
+  )
+  expect_equal(n, 1)
+
+  deviation <- .build_climate_reference(
+    base_tbl, transform(selected, transformation = "Deviation from mean")
+  )
+  expect_no_warning(.warn_zero_sd_reference(deviation))
+})

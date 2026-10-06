@@ -686,8 +686,11 @@ WISEAPP_WX_LOC_CACHE_VERSION <- "v1"
       if (tf == "Deviation from mean") {
         dbplyr::sql(paste0(v, " - ", specs$mean_col[i]))
       } else if (tf == "Standardized anomaly") {
+        # A zero reference SD (e.g. dry-season precipitation) has no defined
+        # anomaly: return NA instead of NaN/Inf (R2-BUG-29).
         dbplyr::sql(paste0(
-          "(", v, " - ", specs$mean_col[i], ") / ", specs$sd_col[i]
+          "CASE WHEN ", specs$sd_col[i], " = 0 THEN NULL ELSE (",
+          v, " - ", specs$mean_col[i], ") / ", specs$sd_col[i], " END"
         ))
       } else {
         NULL
@@ -700,6 +703,40 @@ WISEAPP_WX_LOC_CACHE_VERSION <- "v1"
 
   tbl |>
     dplyr::select(-month, -dplyr::all_of(ref_cols))
+}
+
+#' Warn once about location-months whose standardized-anomaly reference SD is 0.
+#'
+#' @param climate_ref Result from `.build_climate_reference()`.
+#' @return Invisibly, the number of affected location-month rows.
+#' @noRd
+.warn_zero_sd_reference <- function(climate_ref) {
+  specs <- climate_ref$specs
+  specs <- specs[specs$transformation == "Standardized anomaly", , drop = FALSE]
+  if (!nrow(specs)) {
+    return(invisible(0))
+  }
+  counts <- climate_ref$tbl |>
+    dplyr::summarise(!!!stats::setNames(
+      lapply(specs$sd_col, function(col) {
+        dbplyr::sql(paste0("COUNT(*) FILTER (WHERE ", col, " = 0)"))
+      }),
+      specs$name
+    )) |>
+    dplyr::collect()
+  counts <- vapply(counts, as.numeric, numeric(1L))
+  if (sum(counts) > 0) {
+    hit <- counts[counts > 0]
+    warning(sprintf(
+      paste0(
+        "Standardized anomaly: %s location-month(s) have a zero 1991-2020 ",
+        "reference SD and were set to NA (%s)."
+      ),
+      format(sum(hit), big.mark = ","),
+      paste0(names(hit), ": ", format(hit, big.mark = ","), collapse = ", ")
+    ), call. = FALSE)
+  }
+  invisible(sum(counts))
 }
 
 #' Compute bin breakpoints from a reference data frame.
@@ -1312,6 +1349,7 @@ get_weather <- function(
       name = tmp_ref_name,
       temporary = TRUE
     ))
+    .warn_zero_sd_reference(climate_ref)
   }
 
   # -- Assemble result -------------------------------------------------------
