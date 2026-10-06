@@ -292,7 +292,7 @@ collect_deterministic <- function(data, keys = NULL) {
 
   # Posit Connect cannot reach the public extension repository, so use the
   # bundled binary there. Automatic source selection is independent of this.
-  if (exists(".on_posit_connect") && .on_posit_connect()) {
+  if (.on_posit_connect()) {
     # Check for a bundled binary first (avoids any network call).
     # Prefer .gz (DuckDB INSTALL decompresses it automatically); fall back
     # to an uncompressed binary if present.

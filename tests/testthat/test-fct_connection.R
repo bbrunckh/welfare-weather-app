@@ -470,3 +470,16 @@ test_that("token requests use the token timeout and summarise errors", {
   expect_match(conditionMessage(err), "HTTP 401 Unauthorized", fixed = TRUE)
   expect_false(grepl("top-secret-value", conditionMessage(err), fixed = TRUE))
 })
+
+test_that("extension loading calls .on_posit_connect() without an exists() guard (CR-CQ-05)", {
+  src <- testthat::test_path("..", "..", "R", "fct_load_data.R")
+  skip_if(!file.exists(src), "R/ source tree not available (installed package)")
+  expect_false(any(grepl("exists\\(\"\\.on_posit_connect\"", readLines(src, warn = FALSE))))
+
+  skip_if_not_installed("duckdb")
+  restore_duck <- .duck_state_restore()
+  withr::defer(restore_duck())
+  local_mocked_bindings(.on_posit_connect = function() TRUE)
+  .duck$extensions <- character(0)
+  expect_error(.duck_load_ext("not_a_bundled_ext"), "is not bundled")
+})
