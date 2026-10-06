@@ -119,7 +119,7 @@ mod_3_03_digital_server <- function(id,
     # Internet access ----
 
     show_internet <- reactive({
-      any(grepl("internet", coeffs(), ignore.case = TRUE))
+      .lever_in_model("internet", coeffs())
     })
 
     output$internet_ui <- renderUI({
@@ -130,7 +130,7 @@ mod_3_03_digital_server <- function(id,
     # Mobile phone ownership ----
 
     show_mobile <- reactive({
-      any(grepl("cellphone", coeffs(), ignore.case = TRUE))
+      .lever_in_model("cellphone", coeffs())
     })
 
     output$mobile_ui <- renderUI({

@@ -195,10 +195,8 @@
   var_main <- if (isTRUE(central_only)) NULL else rep(0, n)
   for (v in names(deltas)) {
     .decomposition_context_counter_add(context, "term_map_reuses")
-    term_v <- context$rif_term_map[[v]] %||% if (v %in% all_terms) {
-      v
-    } else {
-      matches <- grep(paste0("^", v), all_terms, value = TRUE)
+    term_v <- context$rif_term_map[[v]] %||% {
+      matches <- .policy_lever_terms(v, all_terms, svy_baseline[[v]])
       if (length(matches) > 0) matches[1] else NULL
     }
     if (!is.null(term_v)) {
@@ -288,7 +286,7 @@
           candidates <- if (!is.null(context)) {
             context$rif_interaction_map[[wv]][[v]] %||% character(0)
           } else {
-            .resolve_interaction_terms(all_terms, weather_vars, deltas)[[wv]][[v]] %||%
+            .resolve_interaction_terms(all_terms, weather_vars, deltas, svy_baseline)[[wv]][[v]] %||%
               character(0)
           }
           matched <- c(cand1, cand2)[c(cand1, cand2) %in% candidates]
@@ -310,7 +308,7 @@
         candidates <- if (!is.null(context)) {
           context$rif_interaction_map[[wv]][[v]] %||% character(0)
         } else {
-          .resolve_interaction_terms(all_terms, weather_vars, deltas)[[wv]][[v]] %||%
+          .resolve_interaction_terms(all_terms, weather_vars, deltas, svy_baseline)[[wv]][[v]] %||%
             character(0)
         }
         int_term <- if (length(candidates)) candidates[[1L]] else NULL
@@ -578,13 +576,13 @@
   digest::digest(.sig_plain(weather_raw), algo = "xxhash64")
 }
 
-.resolve_interaction_terms <- function(coef_names, weather_vars, deltas) {
+.resolve_interaction_terms <- function(coef_names, weather_vars, deltas,
+                                       svy = NULL) {
   setNames(lapply(weather_vars, function(wv) {
     setNames(lapply(names(deltas), function(v) {
-      pattern <- paste0("^", wv, "[^:]*:", v, "|^", v, "[^:]*:", wv)
       unique(c(
         intersect(c(paste0(wv, ":", v), paste0(v, ":", wv)), coef_names),
-        grep(pattern, coef_names, value = TRUE)
+        .policy_lever_terms(v, coef_names, svy[[v]], partner = wv)
       ))
     }), names(deltas))
   }), weather_vars)
@@ -738,15 +736,11 @@
     ctx$all_terms <- unique(ctx$grid3$term)
     ctx$rif_curve_index <- .build_rif_curve_index(ctx$grid3)
     ctx$rif_term_map <- setNames(lapply(names(deltas), function(v) {
-      if (v %in% ctx$all_terms) {
-        v
-      } else {
-        hit <- grep(paste0("^", v), ctx$all_terms, value = TRUE)
-        if (length(hit)) hit[[1L]] else NULL
-      }
+      hit <- .policy_lever_terms(v, ctx$all_terms, svy_baseline[[v]])
+      if (length(hit)) hit[[1L]] else NULL
     }), names(deltas))
     ctx$rif_interaction_map <- .resolve_interaction_terms(
-      ctx$all_terms, weather_vars, deltas
+      ctx$all_terms, weather_vars, deltas, svy_baseline
     )
     beta_at <- function(term, tau) {
       curve <- ctx$rif_curve_index[[term]]
@@ -791,12 +785,11 @@
     }
     ctx$coef_names <- names(ctx$coefs)
     ctx$ols_term_map <- setNames(lapply(names(deltas), function(v) {
-      hit <- c(v, grep(paste0("^", v), ctx$coef_names, value = TRUE))
-      hit <- hit[hit %in% ctx$coef_names]
+      hit <- .policy_lever_terms(v, ctx$coef_names, svy_baseline[[v]])
       if (length(hit)) hit[[1L]] else NULL
     }), names(deltas))
     ctx$ols_interaction_map <- .resolve_interaction_terms(
-      ctx$coef_names, weather_vars, deltas
+      ctx$coef_names, weather_vars, deltas, svy_baseline
     )
     delta_sp <- if (is_log) {
       log(pmax(exp(y_baseline) + sp_transfer, 1e-10)) -
@@ -1326,7 +1319,7 @@ decompose_policy_effect <- function(svy_baseline,
     .decomposition_context_counter_add(context, "term_map_reuses")
     term_used <- context$ols_term_map[[v]] %||% v
     if (!term_used %in% coef_names) {
-      matches <- grep(paste0("^", v), coef_names, value = TRUE)
+      matches <- .policy_lever_terms(v, coef_names, svy_baseline[[v]])
       if (length(matches)) term_used <- matches[[1L]]
     }
     beta_v <- coefs[term_used]
@@ -1377,8 +1370,9 @@ decompose_policy_effect <- function(svy_baseline,
           exact_matches <- exact[exact %in% coef_names]
           int_term <- if (length(exact_matches)) exact_matches[[1L]] else NULL
           if (is.null(int_term)) {
-            pattern <- paste0("^", wv, "[^:]*:", v, "|^", v, "[^:]*:", wv)
-            matches <- grep(pattern, coef_names, value = TRUE)
+            matches <- .policy_lever_terms(
+              v, coef_names, svy_baseline[[v]], partner = wv
+            )
             if (length(matches)) int_term <- matches[[1L]]
           }
         }

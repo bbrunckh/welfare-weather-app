@@ -26,6 +26,76 @@ SP_TRANSFER_COL <- ".wiseapp_sp_transfer"
   isTRUE(universal) || .lever_moved(change_pct)
 }
 
+# Sector sliders carry a target share only when the user changed it from the
+# observed share; NULL means "unchanged", and 0 is a valid target.
+.sector_target_set <- function(x) {
+  is.numeric(x) && length(x) == 1L && is.finite(x)
+}
+
+# Exact lever/term matching (CR-BUG-08) ----
+
+#' Match a policy lever variable against model variable or coefficient names
+#'
+#' The single matcher shared by the lever UI gating, `apply_policy_to_svy()`
+#' gating and the decomposition term maps. Each name is split on `:` and a
+#' component matches when it equals `var`, or `var` followed by one of its
+#' factor levels (`values` is the survey column, used only to derive the
+#' levels of factor, character or logical columns). Matching is exact and
+#' case-insensitive, so `piped` never matches `piped_to_prem`.
+#'
+#' @param var Lever variable name (scalar).
+#' @param terms Character vector of model variable or coefficient names.
+#' @param values Optional survey column for `var`.
+#' @param partner Optional weather variable. When NULL, returns the main-effect
+#'   terms of `var` (no `:`), exact name first. When supplied, returns the
+#'   two-way interaction terms whose other component starts with `partner`.
+#' @param any_component When TRUE, returns every name in which `var` appears
+#'   as a component (main effect or interaction); used for lever gating.
+#' @return Character vector of matching names.
+#' @keywords internal
+.policy_lever_terms <- function(var, terms, values = NULL, partner = NULL,
+                                any_component = FALSE) {
+  terms <- as.character(terms %||% character(0))
+  if (!length(terms) || is.null(var) || !nzchar(var)) {
+    return(character(0))
+  }
+  lvls <- if (is.factor(values)) {
+    levels(values)
+  } else if (is.character(values)) {
+    unique(values[!is.na(values)])
+  } else if (is.logical(values)) {
+    "TRUE"
+  } else {
+    character(0)
+  }
+  keys <- tolower(unique(c(var, paste0(var, lvls))))
+  parts <- strsplit(tolower(terms), ":", fixed = TRUE)
+  hit <- vapply(parts, function(p) {
+    if (isTRUE(any_component)) {
+      return(any(p %in% keys))
+    }
+    if (is.null(partner)) {
+      return(length(p) == 1L && p %in% keys)
+    }
+    length(p) == 2L && sum(p %in% keys) == 1L &&
+      startsWith(p[!p %in% keys], tolower(partner))
+  }, logical(1))
+  out <- terms[hit]
+  # Prefer the exact variable name over level-suffixed terms.
+  out[order(tolower(out) != tolower(var))]
+}
+
+#' Is a lever variable referenced by the Step 1 model?
+#' @param var Lever variable name(s).
+#' @param model_vars Model variable or term names.
+#' @return Logical vector, one per `var`.
+#' @keywords internal
+.lever_in_model <- function(var, model_vars) {
+  vapply(var, function(v) {
+    length(.policy_lever_terms(v, model_vars, any_component = TRUE)) > 0L
+  }, logical(1), USE.NAMES = FALSE)
+}
+
 #' Has the infrastructure scenario been changed from its defaults?
 #' @param infra Scenario list from `mod_3_02_infra_server()`.
 #' @return Scalar logical.
@@ -102,8 +172,40 @@ has_labor_change <- function(labor) {
     return(FALSE)
   }
   .lever_moved(labor$employment_change_pp) ||
-    .lever_moved(labor$sector_manufacturing) ||
-    .lever_moved(labor$sector_services)
+    .sector_target_set(labor$sector_manufacturing) ||
+    .sector_target_set(labor$sector_services)
+}
+
+#' Observed sector shares of the working population
+#'
+#' Initial values for the labour lever's sector sliders, so an untouched
+#' slider means "no change". Uses survey `weight` when present (as the SP
+#' reach preview does), otherwise row counts.
+#' @param svy Survey frame with `employed`, `selfemployed`, `agriculture`,
+#'   `industry` and `services`.
+#' @return Named numeric vector (`industry`, `services`, `agriculture`) of
+#'   percentages, or NULL when the shares cannot be computed.
+#' @keywords internal
+.labor_sector_shares <- function(svy) {
+  need <- c("employed", "selfemployed", "agriculture", "industry", "services")
+  if (!is.data.frame(svy) || !all(need %in% names(svy))) {
+    return(NULL)
+  }
+  working <- (svy$employed == 1L | svy$selfemployed == 1L) &
+    !is.na(svy$employed) & !is.na(svy$selfemployed)
+  w <- if ("weight" %in% names(svy)) {
+    suppressWarnings(as.numeric(svy$weight))
+  } else {
+    rep(1, nrow(svy))
+  }
+  w[!is.finite(w) | w < 0] <- 0
+  total <- sum(w[working])
+  if (!any(working) || total <= 0) {
+    return(NULL)
+  }
+  vapply(c("industry", "services", "agriculture"), function(sec) {
+    100 * sum(w[working & svy[[sec]] == 1L], na.rm = TRUE) / total
+  }, numeric(1))
 }
 
 #' Has social protection been configured to spend money?
@@ -220,7 +322,8 @@ has_sp_change <- function(sp) {
     if (changed(labor$employment_change_pp)) {
       candidates <- c(candidates, "employed", "selfemployed", "unemployed")
     }
-    if (changed(labor$sector_manufacturing) || changed(labor$sector_services)) {
+    if (.sector_target_set(labor$sector_manufacturing) ||
+      .sector_target_set(labor$sector_services)) {
       candidates <- c(
         candidates, "employed", "selfemployed",
         "agriculture", "industry", "services"
@@ -230,10 +333,7 @@ has_sp_change <- function(sp) {
 
   candidates <- unique(candidates)
   if (!is.null(model_vars)) {
-    candidates <- Filter(
-      function(v) any(grepl(v, model_vars, ignore.case = TRUE)),
-      candidates
-    )
+    candidates <- candidates[.lever_in_model(candidates, model_vars)]
   }
   unique(c(candidates, outcome))
 }
@@ -432,7 +532,7 @@ has_sp_change <- function(sp) {
   # The run and preview share one eligibility draw and transfer calculation;
   # the preview needs only this vector and the columns used by its totals.
   values <- tryCatch(
-    withr::with_seed(wise_seed(seed, "policy"), {
+    withr::with_seed(wise_seed(seed, "policy", "sp"), {
       eligible <- .determine_sp_eligibility(svy, sp)
       transfer <- .sp_transfer_values(svy, sp, analysis_unit, eligible)
       list(eligible = eligible, transfer = transfer)
@@ -730,14 +830,14 @@ policy_placeholder_tag <- function(category_label, candidate_df) {
     idx0 <- which(x_out == 0L & !is.na(x_out))
     n_flip <- round(length(idx0) * change_pct / 100)
     if (n_flip > 0 && length(idx0) > 0) {
-      flip <- sample(idx0, min(n_flip, length(idx0)))
+      flip <- idx0[sample.int(length(idx0), min(n_flip, length(idx0)))]
       x_out[flip] <- 1L
     }
   } else {
     idx1 <- which(x_out == 1L & !is.na(x_out))
     n_flip <- round(length(idx1) * abs(change_pct) / 100)
     if (n_flip > 0 && length(idx1) > 0) {
-      flip <- sample(idx1, min(n_flip, length(idx1)))
+      flip <- idx1[sample.int(length(idx1), min(n_flip, length(idx1)))]
       x_out[flip] <- 0L
     }
   }
@@ -802,12 +902,12 @@ policy_placeholder_tag <- function(category_label, candidate_df) {
     elig <- which(eligible)
     if (length(non_elig) > 0 && incl_rate > 0) {
       n_flip <- round(length(non_elig) * incl_rate)
-      eligible[sample(non_elig, min(n_flip, length(non_elig)))] <-
+      eligible[non_elig[sample.int(length(non_elig), min(n_flip, length(non_elig)))]] <-
         TRUE
     }
     if (length(elig) > 0 && excl_rate > 0) {
       n_flip <- round(length(elig) * excl_rate)
-      eligible[sample(elig, min(n_flip, length(elig)))] <- FALSE
+      eligible[elig[sample.int(length(elig), min(n_flip, length(elig)))]] <- FALSE
     }
   }
 
@@ -852,66 +952,70 @@ apply_policy_to_svy <- function(svy,
   if (is.null(svy)) {
     return(svy)
   }
-  withr::with_seed(wise_seed(seed, "policy"), {
+  # R2-BUG-12: each lever draws from its own seeded stream, so toggling one
+  # lever never redraws another lever's recipients, and the SP preview
+  # (.sp_scenario_reach) matches the run whatever else is enabled.
+  lever_seed <- function(lever) wise_seed(seed, "policy", lever)
+  local({
     cols <- names(svy)
 
     # Columns eligible for covariate-lever manipulation. A lever whose variable
     # has been removed from the Step 1 model (its UI control is hidden) must not
     # mutate the survey, otherwise the diagnostics tab would surface phantom
     # "manipulated" variables that the model - and hence the Results and
-    # Decomposition tabs - ignore. Matching mirrors the lever modules' show_*
-    # logic (substring match against model term names). SP transfers act on
+    # Decomposition tabs - ignore. Matching is shared with the lever modules'
+    # show_* logic (exact match via .lever_in_model()). SP transfers act on
     # `welfare` (the outcome, not a covariate) and are intentionally not gated.
     lever_cols <- if (is.null(model_vars)) {
       cols
     } else {
-      Filter(function(v) any(grepl(v, model_vars, ignore.case = TRUE)), cols)
+      cols[.lever_in_model(cols, model_vars)]
     }
 
     # Infrastructure: only apply if user has specified non-zero changes
     if (!is.null(infra)) {
       if (has_infra_change(infra)) {
         if ("electricity" %in% lever_cols) {
-          svy$electricity <- .apply_binary_access(
+          svy$electricity <- withr::with_seed(lever_seed("electricity"), .apply_binary_access(
             svy$electricity,
             infra$elec_universal,
             infra$elec_access_change_pct
-          )
+          ))
         }
         if ("imp_wat_rec" %in% lever_cols) {
-          svy$imp_wat_rec <- .apply_binary_access(
+          svy$imp_wat_rec <- withr::with_seed(lever_seed("imp_wat_rec"), .apply_binary_access(
             svy$imp_wat_rec,
             infra$water_universal,
             infra$water_access_change_pct
-          )
+          ))
         }
         if ("imp_san_rec" %in% lever_cols) {
-          svy$imp_san_rec <- .apply_binary_access(
+          svy$imp_san_rec <- withr::with_seed(lever_seed("imp_san_rec"), .apply_binary_access(
             svy$imp_san_rec,
             infra$sanitation_universal,
             infra$sanitation_access_change_pct
-          )
+          ))
         }
         if ("piped" %in% lever_cols) {
-          svy$piped <- .apply_binary_access(
+          svy$piped <- withr::with_seed(lever_seed("piped"), .apply_binary_access(
             svy$piped,
             infra$piped_universal,
             infra$piped_access_change_pct
-          )
+          ))
         }
         if ("piped_to_prem" %in% lever_cols) {
-          svy$piped_to_prem <- .apply_binary_access(
+          svy$piped_to_prem <- withr::with_seed(lever_seed("piped_to_prem"), .apply_binary_access(
             svy$piped_to_prem,
             infra$piped_to_prem_universal,
             infra$piped_to_prem_access_change_pct
-          )
+          ))
         }
         if ("imp_wat_san_rec" %in% lever_cols) {
-          svy$imp_wat_san_rec <- .apply_binary_access(
+          svy$imp_wat_san_rec <- withr::with_seed(lever_seed("imp_wat_san_rec"), .apply_binary_access(
             svy$imp_wat_san_rec,
             infra$imp_wat_san_universal,
             infra$imp_wat_san_access_change_pct
-          )
+          ))
         }
         if ("ttime_health" %in% lever_cols) {
           svy$ttime_health <- .apply_health_travel(
@@ -928,18 +1032,18 @@ apply_policy_to_svy <- function(svy,
     if (!is.null(digital)) {
       if (has_digital_change(digital)) {
         if ("internet" %in% lever_cols) {
-          svy$internet <- .apply_binary_access(
+          svy$internet <- withr::with_seed(lever_seed("internet"), .apply_binary_access(
             svy$internet,
             digital$internet_universal,
             digital$internet_access_change_pct
-          )
+          ))
         }
         if ("cellphone" %in% lever_cols) {
-          svy$cellphone <- .apply_binary_access(
+          svy$cellphone <- withr::with_seed(lever_seed("cellphone"), .apply_binary_access(
             svy$cellphone,
             digital$mobile_universal,
             digital$mobile_access_change_pct
-          )
+          ))
         }
       }
     }
@@ -948,25 +1052,25 @@ apply_policy_to_svy <- function(svy,
     if (!is.null(education)) {
       if (has_education_change(education)) {
         if ("educ_com1_hh" %in% lever_cols) {
-          svy$educ_com1_hh <- .apply_binary_access(
+          svy$educ_com1_hh <- withr::with_seed(lever_seed("educ_com1_hh"), .apply_binary_access(
             svy$educ_com1_hh,
             education$primary_universal,
             education$primary_access_change_pct
-          )
+          ))
         }
         if ("educ_com2_hh" %in% lever_cols) {
-          svy$educ_com2_hh <- .apply_binary_access(
+          svy$educ_com2_hh <- withr::with_seed(lever_seed("educ_com2_hh"), .apply_binary_access(
             svy$educ_com2_hh,
             education$secondary_universal,
             education$secondary_access_change_pct
-          )
+          ))
         }
         if ("educ_com3_hh" %in% lever_cols) {
-          svy$educ_com3_hh <- .apply_binary_access(
+          svy$educ_com3_hh <- withr::with_seed(lever_seed("educ_com3_hh"), .apply_binary_access(
             svy$educ_com3_hh,
             education$postsec_universal,
             education$postsec_access_change_pct
-          )
+          ))
         }
       }
     }
@@ -978,7 +1082,7 @@ apply_policy_to_svy <- function(svy,
         # Requires all three employment status columns to be present
         emp_change <- (labor$employment_change_pp %||% 0) / 100
         if (emp_change != 0 && all(c("employed", "selfemployed", "unemployed") %in%
-          lever_cols)) {
+          lever_cols)) withr::with_seed(lever_seed("labor_employment"), {
           # Find unemployed individuals and current ratio of employed/selfemployed
           unemp_idx <- which(svy$unemployed == 1L & !is.na(svy$unemployed))
           employed_idx <- which(svy$employed == 1L & !is.na(svy$employed))
@@ -1002,7 +1106,7 @@ apply_policy_to_svy <- function(svy,
 
             n_flip <- min(round(n_total * emp_change), length(unemp_idx))
             if (n_flip > 0) {
-              flip_idx <- sample(unemp_idx, n_flip)
+              flip_idx <- unemp_idx[sample.int(length(unemp_idx), n_flip)]
               n_to_employed <- round(length(flip_idx) * ratio_employed)
               n_to_selfemp <- length(flip_idx) - n_to_employed
 
@@ -1022,17 +1126,21 @@ apply_policy_to_svy <- function(svy,
             employed_all <- c(employed_idx, selfemp_idx)
             n_flip <- min(round(n_total * abs(emp_change)), length(employed_all))
             if (n_flip > 0) {
-              flip_idx <- sample(employed_all, n_flip)
+              flip_idx <- employed_all[sample.int(length(employed_all), n_flip)]
               svy$employed[flip_idx] <- 0L
               svy$selfemployed[flip_idx] <- 0L
               svy$unemployed[flip_idx] <- 1L
             }
           }
-        }
+        })
 
         # Sectoral composition: minimize reallocation to achieve target percentages
-        # Only move workers from sectors exceeding their target
-        if (all(c("employed", "selfemployed", "agriculture", "industry", "services") %in% lever_cols)) {
+        # Only move workers from sectors exceeding their target. Runs only when
+        # a sector target was actually changed (R2-BUG-05); an unset target
+        # keeps that sector's current count.
+        sector_set <- .sector_target_set(labor$sector_manufacturing) ||
+          .sector_target_set(labor$sector_services)
+        if (sector_set && all(c("employed", "selfemployed", "agriculture", "industry", "services") %in% lever_cols)) withr::with_seed(lever_seed("labor_sector"), {
           working <- (svy$employed == 1L | svy$selfemployed == 1L) &
             !is.na(svy$employed) & !is.na(svy$selfemployed)
 
@@ -1040,22 +1148,28 @@ apply_policy_to_svy <- function(svy,
             working_idx <- which(working)
             n_working <- length(working_idx)
 
-            # Target percentages: manufacturing and services chosen by user,
-            # agriculture is the residual. Clamp so targets cannot exceed 100%
-            # combined (which would make target_agri negative and corrupt the
-            # reallocation logic).
-            target_ind <- min((labor$sector_manufacturing %||% 0) / 100, 1)
-            target_serv <- min((labor$sector_services %||% 0) / 100, 1 - target_ind)
-
-            # Convert targets to row counts
-            n_target_ind <- round(n_working * target_ind)
-            n_target_serv <- round(n_working * target_serv)
-            n_target_agri <- n_working - n_target_ind - n_target_serv
-
             # Count current sector distribution (within working population)
             n_curr_agri <- sum(svy$agriculture[working_idx] == 1L, na.rm = TRUE)
             n_curr_ind <- sum(svy$industry[working_idx] == 1L, na.rm = TRUE)
             n_curr_serv <- sum(svy$services[working_idx] == 1L, na.rm = TRUE)
+
+            # Target counts: manufacturing and services chosen by user (an
+            # unset target keeps the current count), agriculture is the
+            # residual. Clamp so targets cannot exceed 100% combined (which
+            # would make target_agri negative and corrupt the reallocation).
+            n_target_ind <- if (.sector_target_set(labor$sector_manufacturing)) {
+              round(n_working * min(max(labor$sector_manufacturing, 0) / 100, 1))
+            } else {
+              n_curr_ind
+            }
+            n_target_ind <- min(n_target_ind, n_working)
+            n_target_serv <- if (.sector_target_set(labor$sector_services)) {
+              round(n_working * max(labor$sector_services, 0) / 100)
+            } else {
+              n_curr_serv
+            }
+            n_target_serv <- min(n_target_serv, n_working - n_target_ind)
+            n_target_agri <- n_working - n_target_ind - n_target_serv
 
             # Surplus = current exceeds target; deficit = current below target
             surplus_agri <- max(0L, n_curr_agri - n_target_agri)
@@ -1080,7 +1194,7 @@ apply_policy_to_svy <- function(svy,
               agri_workers <- which(working & svy$agriculture == 1L)
               if (length(agri_workers) > 0) {
                 n_to_move <- min(surplus_agri, length(agri_workers))
-                candidates <- sample(agri_workers, n_to_move)
+                candidates <- agri_workers[sample.int(length(agri_workers), n_to_move)]
                 n_to_ind <- if (deficit_ind > 0) min(n_to_move, deficit_ind) else 0L
                 n_to_serv <- if (deficit_serv > 0) max(0L, n_to_move - n_to_ind) else 0L
                 targets <- c(
@@ -1111,7 +1225,7 @@ apply_policy_to_svy <- function(svy,
                   surplus_ind, length(ind_workers),
                   deficit_agri + deficit_serv
                 )
-                candidates <- sample(ind_workers, n_to_move)
+                candidates <- ind_workers[sample.int(length(ind_workers), n_to_move)]
                 n_to_agri <- if (deficit_agri > 0) {
                   min(n_to_move, deficit_agri)
                 } else {
@@ -1150,7 +1264,7 @@ apply_policy_to_svy <- function(svy,
                   surplus_serv, length(serv_workers),
                   deficit_agri + deficit_ind
                 )
-                candidates <- sample(serv_workers, n_to_move)
+                candidates <- serv_workers[sample.int(length(serv_workers), n_to_move)]
                 n_to_agri <- if (deficit_agri > 0) {
                   min(n_to_move, deficit_agri)
                 } else {
@@ -1194,7 +1308,7 @@ apply_policy_to_svy <- function(svy,
               }
             }
           }
-        }
+        })
       }
     }
 
@@ -1211,7 +1325,9 @@ apply_policy_to_svy <- function(svy,
     # "ind" the SP transfer is already per-individual and applies to every
     # eligible (individual) row as-is.
     if (!is.null(sp) && "welfare" %in% cols) {
-      eligible <- .determine_sp_eligibility(svy, sp)
+      eligible <- withr::with_seed(
+        lever_seed("sp"), .determine_sp_eligibility(svy, sp)
+      )
       transfer <- .sp_transfer_values(svy, sp, analysis_unit, eligible)
       if (!is.null(transfer)) {
         svy[[SP_TRANSFER_COL]] <- transfer

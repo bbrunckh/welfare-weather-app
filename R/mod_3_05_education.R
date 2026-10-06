@@ -122,7 +122,7 @@ mod_3_05_education_server <- function(id,
     # Primary attainment ----
 
     show_primary <- reactive({
-      any(grepl("educ_com1_hh", coeffs(), ignore.case = TRUE))
+      .lever_in_model("educ_com1_hh", coeffs())
     })
 
     output$primary_ui <- renderUI({
@@ -133,7 +133,7 @@ mod_3_05_education_server <- function(id,
     # Secondary attainment ----
 
     show_secondary <- reactive({
-      any(grepl("educ_com2_hh", coeffs(), ignore.case = TRUE))
+      .lever_in_model("educ_com2_hh", coeffs())
     })
 
     output$secondary_ui <- renderUI({
@@ -144,7 +144,7 @@ mod_3_05_education_server <- function(id,
     # Post-secondary attainment ----
 
     show_postsec <- reactive({
-      any(grepl("educ_com3_hh", coeffs(), ignore.case = TRUE))
+      .lever_in_model("educ_com3_hh", coeffs())
     })
 
     output$postsec_ui <- renderUI({
