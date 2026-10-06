@@ -402,3 +402,37 @@ test_that("load_data never mixes env credentials into UI s3/azure connections", 
   )
   expect_false(any(grepl("CREDENTIAL_CHAIN", captured, fixed = TRUE)))
 })
+
+# R2-SEC-03: token cache keys are digests; entries expire and are capped.
+test_that("Databricks token cache is hashed, expiring and bounded", {
+  restore_duck <- .duck_state_restore()
+  withr::defer(restore_duck())
+  .duck$db_tokens <- list()
+  requests <- 0L
+  expires_in <- 3600
+  withr::local_options(httr2_mock = function(req) {
+    requests <<- requests + 1L
+    httr2::response_json(
+      body = list(access_token = paste0("tok-", requests), expires_in = expires_in),
+      url = req$url
+    )
+  })
+  host <- "https://cache.cloud.databricks.com"
+
+  expect_identical(.get_db_token(host, "cid", "plain-secret"), "tok-1")
+  expect_identical(.get_db_token(host, "cid", "plain-secret"), "tok-1")
+  expect_equal(requests, 1L)
+  keys <- names(.duck$db_tokens)
+  expect_match(keys, "^[0-9a-f]{64}$")
+  expect_false(any(grepl("plain-secret|cid|cache", keys)))
+
+  # A token inside its 5-minute refresh window is dropped and refetched.
+  .duck$db_tokens[[1]]$expires_at <- Sys.time() + 60
+  expect_identical(.get_db_token(host, "cid", "plain-secret"), "tok-2")
+  expect_length(.duck$db_tokens, 1L)
+
+  for (i in seq_len(.DB_TOKEN_CACHE_MAX + 5L)) {
+    .get_db_token(host, paste0("client-", i), "s")
+  }
+  expect_length(.duck$db_tokens, .DB_TOKEN_CACHE_MAX)
+})

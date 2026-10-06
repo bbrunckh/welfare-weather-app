@@ -362,8 +362,10 @@ collect_deterministic <- function(data, keys = NULL) {
 
 #' Obtain a Databricks M2M OAuth token, reusing a cached one when valid.
 #'
-#' Tokens are cached keyed on a hash of (host, client_id, client_secret) and
-#' reused until fewer than 5 minutes of lifetime remain.
+#' Tokens are cached keyed on a SHA-256 of (host, client_id, client_secret)
+#' and reused until fewer than 5 minutes of lifetime remain. Entries past that
+#' point are dropped, and at most `.DB_TOKEN_CACHE_MAX` entries are kept
+#' (soonest-expiring evicted first) (R2-SEC-03).
 #'
 #' @param host          Databricks workspace URL.
 #' @param client_id     OAuth2 client ID.
@@ -372,11 +374,14 @@ collect_deterministic <- function(data, keys = NULL) {
 #' @noRd
 .get_db_token <- function(host, client_id, client_secret) {
   if (is.null(.duck$db_tokens)) .duck$db_tokens <- list()
-  key <- paste(host, client_id, client_secret, sep = "\n")
+  key <- digest::digest(list(host, client_id, client_secret), algo = "sha256")
+  usable <- function(entry) {
+    difftime(entry$expires_at, Sys.time(), units = "secs") > 300
+  }
+  .duck$db_tokens <- Filter(usable, .duck$db_tokens)
   cached <- .duck$db_tokens[[key]]
 
-  if (!is.null(cached) &&
-    difftime(cached$expires_at, Sys.time(), units = "secs") > 300) {
+  if (!is.null(cached)) {
     return(cached$token)
   }
 
@@ -400,8 +405,16 @@ collect_deterministic <- function(data, keys = NULL) {
     token      = parsed$access_token,
     expires_at = Sys.time() + as.numeric(parsed$expires_in %||% 3600)
   )
+  excess <- length(.duck$db_tokens) - .DB_TOKEN_CACHE_MAX
+  if (excess > 0L) {
+    expiry <- vapply(.duck$db_tokens, function(e) as.numeric(e$expires_at), numeric(1))
+    .duck$db_tokens[order(expiry)[seq_len(excess)]] <- NULL
+  }
   parsed$access_token
 }
+
+# Upper bound on cached Databricks tokens per process (R2-SEC-03).
+.DB_TOKEN_CACHE_MAX <- 16L
 
 
 #' Register a Databricks bearer token as a DuckDB HTTP secret.
