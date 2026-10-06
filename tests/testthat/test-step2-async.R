@@ -22,6 +22,36 @@ testthat::test_that("async connection snapshots never contain credentials", {
   testthat::expect_false(any(c("key_id", "secret") %in% names(safe)))
 })
 
+testthat::test_that("configured async and weather-store roots are private (R2-SEC-04)", {
+  testthat::skip_on_os("windows")
+  base <- tempfile("wiseapp-sec04-")
+  on.exit(unlink(base, recursive = TRUE, force = TRUE), add = TRUE)
+  old_umask <- Sys.umask("022")
+  on.exit(Sys.umask(old_umask), add = TRUE)
+  state <- .wise_step2_async_state
+  old_roots <- state$created_roots
+  on.exit(state$created_roots <- old_roots, add = TRUE)
+
+  root <- file.path(base, "artifacts")
+  withr::local_envvar(WISEAPP_ASYNC_ARTIFACT_ROOT = root)
+  out <- .wise_step2_async_artifact_root()
+  testthat::expect_identical(as.character(file.info(out)$mode), "700")
+  testthat::expect_true(out %in% state$created_roots)
+
+  # A pre-existing user directory is used but never scheduled for removal.
+  existing <- file.path(base, "existing")
+  dir.create(existing)
+  withr::local_envvar(WISEAPP_ASYNC_ARTIFACT_ROOT = existing)
+  out2 <- .wise_step2_async_artifact_root()
+  testthat::expect_false(out2 %in% state$created_roots)
+
+  wroot <- file.path(base, "weather")
+  store <- step2_weather_store_create("sec04", "sig", root = wroot)
+  testthat::expect_identical(as.character(file.info(wroot)$mode), "700")
+  testthat::expect_identical(as.character(file.info(store$dir)$mode), "700")
+  step2_weather_store_cleanup(store)
+})
+
 testthat::test_that("async manifest validation rejects mismatched jobs", {
   root <- tempfile("wiseapp-async-manifest-")
   dir.create(root, recursive = TRUE)

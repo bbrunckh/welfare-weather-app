@@ -282,7 +282,9 @@ step2_weather_store_dir <- function(run_id, root = NULL) {
 
 step2_weather_store_create <- function(run_id, signature, root = NULL) {
   dir <- step2_weather_store_dir(run_id, root)
-  if (!dir.create(dir, recursive = TRUE, showWarnings = FALSE) && !dir.exists(dir)) {
+  # R2-SEC-04: private (0700) directories, including a configured root.
+  if (!dir.create(dir, recursive = TRUE, showWarnings = FALSE, mode = "0700") &&
+      !dir.exists(dir)) {
     stop("Could not create Step 2 weather store: ", dir, call. = FALSE)
   }
   manifest <- list(

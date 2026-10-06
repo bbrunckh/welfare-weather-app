@@ -65,7 +65,15 @@
   if (!nzchar(root)) {
     root <- file.path(tempdir(), "wiseapp-step2-async", Sys.getpid())
   }
-  dir.create(root, recursive = TRUE, showWarnings = FALSE)
+  # R2-SEC-04: private directories; a root this process creates is removed
+  # at app stop, a pre-existing (user-provided) one is never deleted.
+  if (!dir.exists(root) &&
+      dir.create(root, recursive = TRUE, showWarnings = FALSE, mode = "0700")) {
+    state <- .wise_step2_async_state
+    state$created_roots <- unique(c(
+      state$created_roots, normalizePath(root, winslash = "/", mustWork = FALSE)
+    ))
+  }
   normalizePath(root, winslash = "/", mustWork = FALSE)
 }
 
@@ -691,6 +699,8 @@
         mirai::daemons(0L)
         state$started <- FALSE
       }
+      unlink(state$created_roots, recursive = TRUE, force = TRUE)
+      state$created_roots <- NULL
     }, session = NULL)
   } else {
     .wise_step2_async_ensure_daemon()
