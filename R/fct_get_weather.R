@@ -915,7 +915,11 @@ get_weather <- function(
   weather_threads = c("auto", "1", "2"),
   weather_consumer = NULL
 ) {
-  weather_profile <- if (.wx_profile_enabled()) new.env(parent = emptyenv()) else NULL
+  # The async Step 2 worker passes dates as character. Coerce once so the
+  # climate-reference window (max() against a Date below), the date filters
+  # and the cache keys behave exactly as on the synchronous Date path.
+  dates <- as.Date(dates)
+  weather_profile <-if (.wx_profile_enabled()) new.env(parent = emptyenv()) else NULL
   if (!is.null(weather_profile)) {
     weather_profile$records <- list()
     weather_profile$plan <- .wx_profile_plan()

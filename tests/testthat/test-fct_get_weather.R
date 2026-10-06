@@ -1499,3 +1499,70 @@ test_that("baseline-wave filtering preserves historical and future keys across s
     expect_setequal(unique(actual$survname), baseline$survname)
   }
 })
+
+# ============================================================================ #
+# 8. Review 2026-10-06 weather fixes                                           #
+# ============================================================================ #
+
+# Long-history fixture: the basic h3 mapping plus monthly weather from 1985 to
+# 2020, so the 1991-2020 climate reference is fully covered. Survey dates sit
+# in 2005, i.e. a historical window that ends well before 2020.
+make_long_history_fixture <- function(dir) {
+  fx <- make_test_fixtures(dir)
+  code <- fx$selected_surveys$code
+  weather_path <- file.path(
+    dir, "hazard", "weather", "historical", code,
+    paste0(code, "_era5land.parquet")
+  )
+  cells <- unique(arrow::read_parquet(weather_path)$h3)
+  timestamps <- seq(as.Date("1985-01-01"), as.Date("2020-12-01"), by = "1 month")
+  weather_df <- expand.grid(
+    cell_idx = seq_along(cells), timestamp = timestamps,
+    stringsAsFactors = FALSE
+  )
+  weather_df$h3 <- cells[weather_df$cell_idx]
+  weather_df$cell_idx <- NULL
+  set.seed(7)
+  # A warming trend makes the reference depend on which years it covers.
+  trend <- as.numeric(format(weather_df$timestamp, "%Y")) - 1985
+  weather_df$tx <- 25 + 0.05 * trend + stats::rnorm(nrow(weather_df), sd = 1)
+  arrow::write_parquet(weather_df, weather_path)
+
+  fx$dates <- seq(as.Date("2005-01-01"), as.Date("2005-12-01"), by = "1 month")
+  fx$survey_data$timestamp <- rep(fx$dates, length.out = nrow(fx$survey_data))
+  fx
+}
+
+test_that("R2-BUG-01: character and Date dates give identical weather and cache keys", {
+  skip_if_not_installed("arrow")
+  skip_if_not_installed("duckdb")
+  skip_if_not_installed("duckdbfs")
+  skip_if_not_installed("bit64")
+
+  fx <- make_long_history_fixture(withr::local_tempdir())
+  cache_dir <- withr::local_tempdir()
+  withr::local_envvar(
+    WISEAPP_WEATHER_CACHE_DIR = cache_dir,
+    WISEAPP_WEATHER_CACHE_FORCE = "1",
+    WISEAPP_WEATHER_CACHE_DISABLE = NA
+  )
+
+  run <- function(dates, transformation) get_weather(
+    survey_data = fx$survey_data,
+    selected_surveys = fx$selected_surveys,
+    selected_weather = sw_continuous("tx", transformation = transformation),
+    dates = dates,
+    connection_params = fx$connection_params
+  )
+
+  for (tf in c("Deviation from mean", "Standardized anomaly")) {
+    sync <- run(fx$dates, tf)
+    cached <- list.files(cache_dir, recursive = TRUE)
+    async <- run(as.character(fx$dates), tf)
+    expect_identical(async$historical, sync$historical, info = tf)
+    expect_true(all(is.finite(sync$historical$tx)), info = tf)
+    # The async (character) call must reuse every cache entry the sync call
+    # wrote, i.e. both derive identical cache keys.
+    expect_identical(list.files(cache_dir, recursive = TRUE), cached, info = tf)
+  }
+})
