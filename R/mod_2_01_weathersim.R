@@ -870,7 +870,7 @@ mod_2_01_weathersim_server <- function(id,
         fut_sel = .sig_plain(selected_fut()),
         baseline_survey = input$baseline_survey,
         residuals = input$residuals,
-        skip_coef_draws = isTRUE(input$include_coef_uncertainty),
+        skip_coef_draws = !isTRUE(input$include_coef_uncertainty),
         propagate_all_covariate_uncertainty =
           isTRUE(input$propagate_all_covariate_uncertainty)
       )
