@@ -385,17 +385,24 @@ collect_deterministic <- function(data, keys = NULL) {
     return(cached$token)
   }
 
-  resp <- httr2::request(paste0(host, "/oidc/v1/token")) |>
-    httr2::req_auth_basic(client_id, client_secret) |>
-    httr2::req_body_form(grant_type = "client_credentials", scope = "all-apis") |>
-    httr2::req_options(http_version = 2L) |>
-    httr2::req_error(is_error = \(r) FALSE) |>
-    httr2::req_perform()
+  resp <- tryCatch(
+    httr2::request(paste0(host, "/oidc/v1/token")) |>
+      httr2::req_auth_basic(client_id, client_secret) |>
+      httr2::req_body_form(grant_type = "client_credentials", scope = "all-apis") |>
+      httr2::req_options(http_version = 2L) |>
+      httr2::req_error(is_error = \(r) FALSE) |>
+      .db_req_limits(.DB_TOKEN_TIMEOUT_SEC) |>
+      httr2::req_perform(),
+    error = function(e) {
+      stop("load_data(): Failed to obtain Databricks OAuth token: ",
+           .http_error_summary(e), call. = FALSE)
+    }
+  )
 
   if (httr2::resp_is_error(resp)) {
     stop(
       "load_data(): Failed to obtain Databricks OAuth token: ",
-      httr2::resp_status_desc(resp)
+      .http_error_summary(resp)
     )
   }
 
@@ -415,6 +422,36 @@ collect_deterministic <- function(data, keys = NULL) {
 
 # Upper bound on cached Databricks tokens per process (R2-SEC-03).
 .DB_TOKEN_CACHE_MAX <- 16L
+
+# Databricks HTTP limits (CR-SEC-06): a stalled request must not hold the
+# shared worker. Transient statuses and connection failures are retried with
+# a short exponential backoff (1 s, 2 s).
+.DB_TOKEN_TIMEOUT_SEC <- 30
+.DB_FILE_TIMEOUT_SEC <- 300
+.DB_RETRY_STATUS <- c(429L, 500L, 502L, 503L, 504L)
+
+.db_req_limits <- function(req, timeout) {
+  req |>
+    httr2::req_timeout(timeout) |>
+    httr2::req_retry(
+      max_tries = 3L,
+      retry_on_failure = TRUE,
+      is_transient = \(resp) httr2::resp_status(resp) %in% .DB_RETRY_STATUS,
+      backoff = \(attempt) 2^(attempt - 1)
+    )
+}
+
+#' One-line summary of an HTTP failure: the status line for a response, or
+#' the transport-level cause for a condition. Never includes request headers,
+#' bodies or response bodies.
+#' @noRd
+.http_error_summary <- function(x) {
+  if (inherits(x, "httr2_response")) {
+    return(paste0("HTTP ", httr2::resp_status(x), " ", httr2::resp_status_desc(x)))
+  }
+  cause <- if (inherits(x$parent, "condition")) x$parent else x
+  strsplit(conditionMessage(cause), "\n", fixed = TRUE)[[1]][1]
+}
 
 
 #' Register a Databricks bearer token as a DuckDB HTTP secret.
@@ -491,8 +528,10 @@ collect_deterministic <- function(data, keys = NULL) {
 
 # Direct CSV loading avoids DuckDB setup for small Databricks files.
 .fetch_db_csv_direct <- function(url, token) {
-  resp <- .db_csv_request(url, token) |>
-    httr2::req_perform()
+  resp <- tryCatch(
+    .db_csv_request(url, token) |> httr2::req_perform(),
+    error = identity
+  )
 
   .parse_db_csv_response(resp, url)
 }
@@ -500,24 +539,19 @@ collect_deterministic <- function(data, keys = NULL) {
 
 .db_csv_request <- function(url, token) {
   httr2::request(url) |>
-    httr2::req_headers(Authorization = paste("Bearer", token)) |>
+    httr2::req_headers(Authorization = paste("Bearer", token), .redact = "Authorization") |>
     httr2::req_options(http_version = 2L) |>
-    httr2::req_error(is_error = \(r) FALSE)
+    httr2::req_error(is_error = \(r) FALSE) |>
+    .db_req_limits(.DB_FILE_TIMEOUT_SEC)
 }
 
 
 .parse_db_csv_response <- function(resp, url) {
-  if (inherits(resp, "error")) {
+  if (inherits(resp, "error") || httr2::resp_is_error(resp)) {
     stop(
       "load_data(): Failed to fetch CSV from Databricks (", url, "): ",
-      conditionMessage(resp)
-    )
-  }
-
-  if (httr2::resp_is_error(resp)) {
-    stop(
-      "load_data(): Failed to fetch CSV from Databricks (", url, "): ",
-      httr2::resp_status_desc(resp)
+      .http_error_summary(resp),
+      call. = FALSE
     )
   }
 

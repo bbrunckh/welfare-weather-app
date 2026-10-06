@@ -436,3 +436,37 @@ test_that("Databricks token cache is hashed, expiring and bounded", {
   }
   expect_length(.duck$db_tokens, .DB_TOKEN_CACHE_MAX)
 })
+
+# CR-SEC-06: Databricks requests have timeouts, bounded retries and short errors.
+test_that("Databricks requests set timeouts and retry policies", {
+  req <- .db_csv_request("https://x.cloud.databricks.com/api/2.0/fs/files/a.csv", "tok")
+  expect_equal(req$options$timeout_ms, .DB_FILE_TIMEOUT_SEC * 1000)
+  expect_equal(req$policies$retry_max_tries, 3L)
+  expect_true(isTRUE(req$policies$retry_on_failure))
+})
+
+test_that("token requests use the token timeout and summarise errors", {
+  restore_duck <- .duck_state_restore()
+  withr::defer(restore_duck())
+  .duck$db_tokens <- list()
+  seen <- NULL
+  withr::local_options(httr2_mock = function(req) {
+    seen <<- req
+    httr2::response(status_code = 401, url = req$url,
+                    body = charToRaw("detail mentioning top-secret-value"))
+  })
+  err <- tryCatch(.get_db_token("https://r.cloud.databricks.com", "id", "sec"),
+                  error = identity)
+  expect_equal(seen$options$timeout_ms, .DB_TOKEN_TIMEOUT_SEC * 1000)
+  expect_equal(seen$policies$retry_max_tries, 3L)
+  expect_true(503 %in% .DB_RETRY_STATUS && 429 %in% .DB_RETRY_STATUS)
+
+  withr::local_options(httr2_mock = function(req) {
+    httr2::response(status_code = 401, url = req$url,
+                    body = charToRaw("detail mentioning top-secret-value"))
+  })
+  err <- tryCatch(.get_db_token("https://r.cloud.databricks.com", "id2", "top-secret-value"),
+                  error = identity)
+  expect_match(conditionMessage(err), "HTTP 401 Unauthorized", fixed = TRUE)
+  expect_false(grepl("top-secret-value", conditionMessage(err), fixed = TRUE))
+})
