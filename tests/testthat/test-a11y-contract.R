@@ -35,3 +35,12 @@ test_that("CR-A11Y-01: info icons keep a visible keyboard focus outline", {
                            a11y_css_bodies(rules, sel))), info = sel)
   }
 })
+
+test_that("R2-A11Y-01: sidebar accordion headers keep a focus indicator", {
+  rules <- a11y_css_rules()
+  focus <- paste(
+    a11y_css_bodies(rules, ".sidebar .accordion-button:focus-visible"),
+    collapse = ";"
+  )
+  expect_match(focus, "outline:\\s*2px solid")
+})
