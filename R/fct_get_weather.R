@@ -253,7 +253,7 @@ WISEAPP_WX_ROUND_DIGITS <- 5L
 .weather_cache_evict <- function(dir, max_mb = NULL) {
   if (is.null(max_mb)) {
     max_mb <- suppressWarnings(as.numeric(Sys.getenv("WISEAPP_WEATHER_CACHE_MAX_MB")))
-    if (is.na(max_mb) || max_mb < 0) max_mb <- 2048
+    if (!is.finite(max_mb) || max_mb < 0) max_mb <- 2048
   }
   files <- list.files(dir,
     pattern = "\\.parquet$", full.names = TRUE,

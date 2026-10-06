@@ -176,7 +176,7 @@ Triage each: fix, or mark `✗` with a reason. Group by file to keep diffs small
 | CR-BUG-13 | L | S | ☑ | Keep GCM names in `model_n` | |
 | CR-BUG-15 | L | S | ☑ | Move S3 methods out of module closure | 073f290: methods at top level, registered as S3 in NAMESPACE (needed for testServer dispatch); laziness test. |
 | CR-BUG-17 | L | S | ☑ | `ORDER BY` before `head(1)` for H3 resolution | 6ebfcb5: .h3_resolution() over all rows, errors on mixed resolutions; test. CMIP6 path still falls back silently to target resolution on error (flag). |
-| CR-BUG-18 | L | S | ◐ | Consistent `skip_coef_draws` flag; safe env parsing | |
+| CR-BUG-18 | L | S | ☑ | Consistent `skip_coef_draws` flag; safe env parsing | |
 | CR-BUG-19 | L | S | ◐ | `detectCores()` -> `availableCores()` | mod_1_06 fixed earlier (6ee04f3). Left: fct_get_weather.R:53 detectCores (NA-safe, not container-aware); parallelly installed but undeclared. |
 | R2-BUG-18 | L | S | ◐ | `withr::with_seed()`; `tempfile()` ids | 1c0d9db: withr::with_seed jitter in utils_mod_1_helpers.R; test. Left: runif ids in fct_step2_async.R:130, fct_step2_payload.R:403. |
 | R2-BUG-19 | L | S | ☑ | RIF coefficient plot: add covariance term | 3cd6bc3: sqrt(w'Vw) from RIF sub-fit VCV (diag fallback); test. Pre-existing: echart_weather_effect_plot RIF poly curve uses x_mean 0 and misses I(I(temp^2)) term (linear only). |
