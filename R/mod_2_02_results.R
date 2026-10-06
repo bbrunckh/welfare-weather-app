@@ -349,6 +349,47 @@
   out
 }
 
+# Lazy per-method aggregation list ----
+# Built inside mod_2_02_results_server(); the S3 methods force the builder on
+# first access. Defined at top level and registered (not in the module
+# closure) so dispatch does not depend on the caller's environment.
+
+.force_lazy_aggregation_method <- function(x) {
+  if (!inherits(x, "wise_lazy_aggregation_method_list")) {
+    return(x)
+  }
+  state <- attr(x, "state", exact = TRUE)
+  if (!isTRUE(state$built)) {
+    state$value <- state$builder()
+    state$built <- TRUE
+  }
+  x
+}
+
+#' @export
+#' @noRd
+`[[.wise_lazy_aggregation_method_list` <- function(x, i, ...) {
+  x <- .force_lazy_aggregation_method(x)
+  attr(x, "state", exact = TRUE)$value[[i]]
+}
+
+#' @export
+#' @noRd
+`$.wise_lazy_aggregation_method_list` <- function(x, name) {
+  x <- .force_lazy_aggregation_method(x)
+  attr(x, "state", exact = TRUE)$value[[name]]
+}
+
+#' @export
+#' @noRd
+names.wise_lazy_aggregation_method_list <- function(x) {
+  names(unclass(x))
+}
+
+#' @export
+#' @noRd
+length.wise_lazy_aggregation_method_list <- function(x) 1L
+
 #' 2_02_results Server Functions
 #'
 #' Appends a Results tab to the main tabset once the historical simulation
@@ -936,18 +977,6 @@ mod_2_02_results_server <- function(id,
       .new_lazy_aggregation_method_list(builder, method)
     }
 
-    .force_lazy_aggregation_method <- function(x) {
-      if (!inherits(x, "wise_lazy_aggregation_method_list")) {
-        return(x)
-      }
-      state <- attr(x, "state", exact = TRUE)
-      if (!isTRUE(state$built)) {
-        state$value <- state$builder()
-        state$built <- TRUE
-      }
-      x
-    }
-
     .lazy_aggregation_value <- function(x) {
       if (inherits(x, "wise_lazy_aggregation_method_list")) {
         state <- attr(x, "state", exact = TRUE)
@@ -961,22 +990,6 @@ mod_2_02_results_server <- function(id,
       value <- .lazy_aggregation_value(x)
       if (is.list(value) && !is.null(value[[method]])) value[[method]] else value
     }
-
-    `[[.wise_lazy_aggregation_method_list` <- function(x, i, ...) {
-      x <- .force_lazy_aggregation_method(x)
-      attr(x, "state", exact = TRUE)$value[[i]]
-    }
-
-    `$.wise_lazy_aggregation_method_list` <- function(x, name) {
-      x <- .force_lazy_aggregation_method(x)
-      attr(x, "state", exact = TRUE)$value[[name]]
-    }
-
-    names.wise_lazy_aggregation_method_list <- function(x) {
-      names(unclass(x))
-    }
-
-    length.wise_lazy_aggregation_method_list <- function(x) 1L
 
      .build_hist_for_method <- function(ws, method, pl_v) {
       pl <- ws$hs$pipeline

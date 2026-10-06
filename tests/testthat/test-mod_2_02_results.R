@@ -1250,3 +1250,28 @@ test_that("results_section container id is namespaced (CR-BUG-12)", {
   expect_false(any(grepl("\"#results_section|id = \"results_section", code)))
   expect_true(any(grepl("ns(\"results_section\")", code, fixed = TRUE)))
 })
+
+test_that("lazy aggregation S3 methods live at package top level (CR-BUG-15)", {
+  ns <- asNamespace("wiseapp")
+  for (m in c("[[.wise_lazy_aggregation_method_list", "$.wise_lazy_aggregation_method_list",
+              "names.wise_lazy_aggregation_method_list", "length.wise_lazy_aggregation_method_list",
+              ".force_lazy_aggregation_method")) {
+    expect_true(exists(m, envir = ns, inherits = FALSE), info = m)
+  }
+  calls <- 0L
+  state <- new.env(parent = emptyenv())
+  state$builder <- function() {
+    calls <<- calls + 1L
+    list(mean = data.frame(v = 1))
+  }
+  state$built <- FALSE
+  x <- structure(list(mean = NULL), class = c("wise_lazy_aggregation_method_list", "list"),
+    state = state)
+  expect_identical(calls, 0L)
+  expect_identical(length(x), 1L)
+  expect_identical(names(x), "mean")
+  expect_identical(calls, 0L)
+  expect_identical(x[["mean"]]$v, 1)
+  expect_identical(x$mean$v, 1)
+  expect_identical(calls, 1L)
+})
