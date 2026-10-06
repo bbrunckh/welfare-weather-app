@@ -26,6 +26,70 @@ SP_TRANSFER_COL <- ".wiseapp_sp_transfer"
   isTRUE(universal) || .lever_moved(change_pct)
 }
 
+# Exact lever/term matching (CR-BUG-08) ----
+
+#' Match a policy lever variable against model variable or coefficient names
+#'
+#' The single matcher shared by the lever UI gating, `apply_policy_to_svy()`
+#' gating and the decomposition term maps. Each name is split on `:` and a
+#' component matches when it equals `var`, or `var` followed by one of its
+#' factor levels (`values` is the survey column, used only to derive the
+#' levels of factor, character or logical columns). Matching is exact and
+#' case-insensitive, so `piped` never matches `piped_to_prem`.
+#'
+#' @param var Lever variable name (scalar).
+#' @param terms Character vector of model variable or coefficient names.
+#' @param values Optional survey column for `var`.
+#' @param partner Optional weather variable. When NULL, returns the main-effect
+#'   terms of `var` (no `:`), exact name first. When supplied, returns the
+#'   two-way interaction terms whose other component starts with `partner`.
+#' @param any_component When TRUE, returns every name in which `var` appears
+#'   as a component (main effect or interaction); used for lever gating.
+#' @return Character vector of matching names.
+#' @keywords internal
+.policy_lever_terms <- function(var, terms, values = NULL, partner = NULL,
+                                any_component = FALSE) {
+  terms <- as.character(terms %||% character(0))
+  if (!length(terms) || is.null(var) || !nzchar(var)) {
+    return(character(0))
+  }
+  lvls <- if (is.factor(values)) {
+    levels(values)
+  } else if (is.character(values)) {
+    unique(values[!is.na(values)])
+  } else if (is.logical(values)) {
+    "TRUE"
+  } else {
+    character(0)
+  }
+  keys <- tolower(unique(c(var, paste0(var, lvls))))
+  parts <- strsplit(tolower(terms), ":", fixed = TRUE)
+  hit <- vapply(parts, function(p) {
+    if (isTRUE(any_component)) {
+      return(any(p %in% keys))
+    }
+    if (is.null(partner)) {
+      return(length(p) == 1L && p %in% keys)
+    }
+    length(p) == 2L && sum(p %in% keys) == 1L &&
+      startsWith(p[!p %in% keys], tolower(partner))
+  }, logical(1))
+  out <- terms[hit]
+  # Prefer the exact variable name over level-suffixed terms.
+  out[order(tolower(out) != tolower(var))]
+}
+
+#' Is a lever variable referenced by the Step 1 model?
+#' @param var Lever variable name(s).
+#' @param model_vars Model variable or term names.
+#' @return Logical vector, one per `var`.
+#' @keywords internal
+.lever_in_model <- function(var, model_vars) {
+  vapply(var, function(v) {
+    length(.policy_lever_terms(v, model_vars, any_component = TRUE)) > 0L
+  }, logical(1), USE.NAMES = FALSE)
+}
+
 #' Has the infrastructure scenario been changed from its defaults?
 #' @param infra Scenario list from `mod_3_02_infra_server()`.
 #' @return Scalar logical.
@@ -230,10 +294,7 @@ has_sp_change <- function(sp) {
 
   candidates <- unique(candidates)
   if (!is.null(model_vars)) {
-    candidates <- Filter(
-      function(v) any(grepl(v, model_vars, ignore.case = TRUE)),
-      candidates
-    )
+    candidates <- candidates[.lever_in_model(candidates, model_vars)]
   }
   unique(c(candidates, outcome))
 }
@@ -859,13 +920,13 @@ apply_policy_to_svy <- function(svy,
     # has been removed from the Step 1 model (its UI control is hidden) must not
     # mutate the survey, otherwise the diagnostics tab would surface phantom
     # "manipulated" variables that the model - and hence the Results and
-    # Decomposition tabs - ignore. Matching mirrors the lever modules' show_*
-    # logic (substring match against model term names). SP transfers act on
+    # Decomposition tabs - ignore. Matching is shared with the lever modules'
+    # show_* logic (exact match via .lever_in_model()). SP transfers act on
     # `welfare` (the outcome, not a covariate) and are intentionally not gated.
     lever_cols <- if (is.null(model_vars)) {
       cols
     } else {
-      Filter(function(v) any(grepl(v, model_vars, ignore.case = TRUE)), cols)
+      cols[.lever_in_model(cols, model_vars)]
     }
 
     # Infrastructure: only apply if user has specified non-zero changes

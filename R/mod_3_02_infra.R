@@ -122,7 +122,7 @@ mod_3_02_infra_server <- function(id,
     # Electricity access ----
 
     show_elec <- reactive({
-      any(grepl("electricity", coeffs(), ignore.case = TRUE))
+      .lever_in_model("electricity", coeffs())
     })
 
     output$elec_ui <- renderUI({
@@ -133,7 +133,7 @@ mod_3_02_infra_server <- function(id,
     # Improved water access ----
 
     show_water <- reactive({
-      any(grepl("imp_wat_rec", coeffs(), ignore.case = TRUE))
+      .lever_in_model("imp_wat_rec", coeffs())
     })
 
     output$water_ui <- renderUI({
@@ -144,7 +144,7 @@ mod_3_02_infra_server <- function(id,
     # Improved sanitation access ----
 
     show_sanitation <- reactive({
-      any(grepl("imp_san_rec", coeffs(), ignore.case = TRUE))
+      .lever_in_model("imp_san_rec", coeffs())
     })
 
     output$sanitation_ui <- renderUI({
@@ -155,7 +155,7 @@ mod_3_02_infra_server <- function(id,
     # Piped water access ----
 
     show_piped <- reactive({
-      any(grepl("piped", coeffs(), ignore.case = TRUE))
+      .lever_in_model("piped", coeffs())
     })
 
     output$piped_ui <- renderUI({
@@ -166,7 +166,7 @@ mod_3_02_infra_server <- function(id,
     # Piped to premesis water access ----
 
     show_piped_to_prem <- reactive({
-      any(grepl("piped_to_prem", coeffs(), ignore.case = TRUE))
+      .lever_in_model("piped_to_prem", coeffs())
     })
 
     output$piped_to_prem_ui <- renderUI({
@@ -177,7 +177,7 @@ mod_3_02_infra_server <- function(id,
     # Improved water and sanitation access ----
 
     show_imp_wat_san <- reactive({
-      any(grepl("imp_wat_san_rec", coeffs(), ignore.case = TRUE))
+      .lever_in_model("imp_wat_san_rec", coeffs())
     })
 
     output$imp_wat_san_ui <- renderUI({
@@ -189,7 +189,7 @@ mod_3_02_infra_server <- function(id,
     # Two modes: reduce travel time by % OR cap at maximum minutes.
 
     show_health <- reactive({
-      any(grepl("ttime_health", coeffs(), ignore.case = TRUE))
+      .lever_in_model("ttime_health", coeffs())
     })
 
     output$health_ui <- renderUI({
