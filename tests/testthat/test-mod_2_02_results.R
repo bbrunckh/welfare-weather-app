@@ -1240,3 +1240,13 @@ test_that("results content UI mounts chart outputs and the reactable CSV button"
   expect_match(html, "climate_outcome_thresholds.csv", fixed = TRUE)
   expect_false(grepl("threshold_csv", html, fixed = TRUE))
 })
+
+test_that("results_section container id is namespaced (CR-BUG-12)", {
+  src <- testthat::test_path("..", "..", "R", "mod_2_02_results.R")
+  skip_if(!file.exists(src), "R/ source tree not available (installed package)")
+  text <- readLines(src, warn = FALSE)
+  code <- text[!grepl("^\\s*#", text)]
+  # Every reference goes through ns(); no bare id or selector remains.
+  expect_false(any(grepl("\"#results_section|id = \"results_section", code)))
+  expect_true(any(grepl("ns(\"results_section\")", code, fixed = TRUE)))
+})

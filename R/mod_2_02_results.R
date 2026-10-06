@@ -2397,7 +2397,7 @@ mod_2_02_results_server <- function(id,
             shiny::tabPanel(
               title = "Results",
               value = "sim_tab",
-              shiny::div(id = "results_section")
+              shiny::div(id = ns("results_section"))
             ),
             select = TRUE,
             session = tabset_session
@@ -2413,7 +2413,7 @@ mod_2_02_results_server <- function(id,
           # Deferring also keeps the first-run path byte-for-byte as it was:
           # appendTab's DOM insertion lands before anything targets
           # #results_section.
-          shiny::removeUI(selector = "#results_section > *", multiple = TRUE)
+          shiny::removeUI(selector = paste0("#", ns("results_section"), " > *"), multiple = TRUE)
           try(shiny::updateTabsetPanel(tabset_session,
             inputId = tabset_id,
             selected = "sim_tab"
@@ -2430,7 +2430,7 @@ mod_2_02_results_server <- function(id,
         }
 
         shiny::insertUI(
-          selector = "#results_section",
+          selector = paste0("#", ns("results_section")),
           where    = "afterBegin",
           ui       = .results_content_ui(ns, so, weather_var = wx_lbl)
         )
@@ -2501,7 +2501,7 @@ mod_2_02_results_server <- function(id,
         # per-partial recalculation instead of Shiny's dimmed state. Removed
         # with the banner, so committed-mode loading cues are unchanged.
         shiny::tags$style(
-          "#results_section .recalculating { opacity: 1 !important; transition: none; }"
+          paste0("#", ns("results_section"), " .recalculating { opacity: 1 !important; transition: none; }")
         ),
         shiny::div(
           shiny::strong("Simulation in progress: "),
