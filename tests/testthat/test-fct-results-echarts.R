@@ -398,6 +398,21 @@ test_that("echart residual panels draw a two-grid widget for linear models", {
   expect_equal(length(ch$x$opts$series[[3]]$markLine$data[[1]]), 2L)
 })
 
+test_that("echart residual panels serialise the loess trend as numeric pairs (R2-BUG-27)", {
+  skip_if_not_installed("echarts4r")
+  ch <- echart_residual_panels(ec_fit_cont, is_logistic = FALSE)
+  trend <- Filter(function(s) identical(s$name, "Trend"), ch$x$opts$series)
+  expect_length(trend, 1L)
+  # htmlwidgets' own serialiser (keep_vec_names = TRUE turns named values
+  # into JSON objects).
+  json <- as.character(htmlwidgets:::toJSON(trend[[1]]$data))
+  parsed <- jsonlite::fromJSON(json, simplifyVector = FALSE)
+  expect_true(all(vapply(parsed, function(p) {
+    length(p) == 2L && is.numeric(p[[1]]) && is.numeric(p[[2]])
+  }, logical(1))))
+  expect_false(grepl("{", json, fixed = TRUE))
+})
+
 test_that("echart residual panels fall back to binned residuals for logit", {
   skip_if_not_installed("echarts4r")
   m_glm <- glm(urban ~ tx + pr, data = ec_dat, family = binomial)

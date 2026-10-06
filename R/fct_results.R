@@ -4216,7 +4216,9 @@ echart_residual_panels <- function(model, is_logistic = FALSE, height = "400px")
           lo <- stats::loess(residuals ~ fitted, data = df[keep, ],
             span = 0.75, degree = 2
           )
-          pr <- stats::predict(lo, newdata = data.frame(fitted = xs))
+          # predict() returns a named vector; unname it so each point
+          # serialises as [x, y] rather than [x, {"<name>": y}].
+          pr <- unname(stats::predict(lo, newdata = data.frame(fitted = xs)))
           ok <- is.finite(pr)
           lapply(seq_along(xs)[ok], function(i) list(xs[i], pr[i]))
         } else {
