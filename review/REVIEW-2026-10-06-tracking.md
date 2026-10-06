@@ -159,15 +159,15 @@ Triage each: fix, or mark `✗` with a reason. Group by file to keep diffs small
 
 | ID | Sev | Eff | Status | Task | Notes |
 |---|---|---|---|---|---|
-| CR-BUG-03 | M | S | ☐ | Compute RIF after the complete-case filter | |
+| CR-BUG-03 | M | S | ☑ | Compute RIF after the complete-case filter | eb7c6f0: prepare_outcome/RIF after complete-case filter; test-fct_fit_model (synthetic tau 0.9: 0.78 vs 0.58 before). BFA default spec: no rows dropped, zero change. |
 | CR-BUG-04 | M | S | ☐ | Weighted targeting quantile; model-card note on unweighted fits (method-owner decision on weighting) | Needs decision |
 | CR-BUG-05 | M | M | ☐ | Gap-aware lag windows (`RANGE BETWEEN INTERVAL`); per-variable NA handling | |
 | R2-BUG-08 | M | M | ☐ | LASSO: partial out FE (FWL) or sparse factor FE | |
 | R2-BUG-09 | M | S | ☑ | `vcov = "hetero"` or relabel "HC1 robust" | 7f157c4: relabelled unclustered SEs as IID (non-robust); vcov unchanged (user decision); test. |
-| R2-BUG-10 | M | S | ☐ | Cluster the RIF heterogeneity Wald test; disclose N*K cap | |
-| R2-BUG-11 | M | S | ☐ | `req()` a successful LASSO when covariates = Lasso | |
+| R2-BUG-10 | M | S | ☑ | Cluster the RIF heterogeneity Wald test; disclose N*K cap | e402f9c: stacked feols clustered on model cluster (else household row id); cap returns NA + note shown on card; tests. |
+| R2-BUG-11 | M | S | ☑ | `req()` a successful LASSO when covariates = Lasso | b2735f8: selected_model() lasso_missing attr; fit observer notifies + req(FALSE) (status failure, no hang); has_controls = n_covs > 0; tests. |
 | R2-BUG-15 | M | S | ☑ | Do not round threshold table before pivoting | c5f7295: raw values pivoted; .threshold_col_defs() formats display only (4 dp within [-1,1], else 2); CSVs raw; also used by fct_policy_sim_compare.R; test. |
-| CR-BUG-16 | M | S | ☐ | Join guards (`relationship`, `unmatched`); report dropped rows | |
+| CR-BUG-16 | M | S | ☑ | Join guards (`relationship`, `unmatched`); report dropped rows | 45ff019: many-to-one/one-to-one join guards + dropped-record messages/notifications (weather join, CPI/PPP, panel id); BFA: 407/14,186 records dropped, now reported; tests. |
 | R2-BUG-16 | M | S | ☐ | Align labels ("median" vs mean) and plotting position | |
 | R2-BUG-27 | M | S | ☑ | `unname()` loess predictions | 49a4649: unname() loess predictions; htmlwidgets JSON test. |
 | CR-BUG-10 | L | S | ☐ | One Gini definition; NA-safe weighted median | Only without weights |
@@ -179,9 +179,9 @@ Triage each: fix, or mark `✗` with a reason. Group by file to keep diffs small
 | CR-BUG-18 | L | S | ☐ | Consistent `skip_coef_draws` flag; safe env parsing | |
 | CR-BUG-19 | L | S | ◐ | `detectCores()` -> `availableCores()` | mod_1_06 fixed earlier (6ee04f3). Left: fct_get_weather.R:53 detectCores (NA-safe, not container-aware); parallelly installed but undeclared. |
 | R2-BUG-18 | L | S | ◐ | `withr::with_seed()`; `tempfile()` ids | 1c0d9db: withr::with_seed jitter in utils_mod_1_helpers.R; test. Left: runif ids in fct_step2_async.R:130, fct_step2_payload.R:403. |
-| R2-BUG-19 | L | S | ☐ | RIF coefficient plot: add covariance term | |
-| R2-BUG-20 | L | S | ☐ | NA-safe role-flag comparisons | |
-| R2-BUG-21 | L | S | ☐ | Weather-load short-circuit must consider outcome | |
+| R2-BUG-19 | L | S | ☑ | RIF coefficient plot: add covariance term | 3cd6bc3: sqrt(w'Vw) from RIF sub-fit VCV (diag fallback); test. Pre-existing: echart_weather_effect_plot RIF poly curve uses x_mean 0 and misses I(I(temp^2)) term (linear only). |
+| R2-BUG-20 | L | S | ☑ | NA-safe role-flag comparisons | 1edd698: %in% NA-safe role filters (model_select, fit_model Lasso pool, surveystats); model card role counts; tests. |
+| R2-BUG-21 | L | S | ☑ | Weather-load short-circuit must consider outcome | 9037208: outcome in mod_1_05 short-circuit key (re-runs weather load, ~1.5 s warm); test. |
 | R2-BUG-22 | L | S | ☑ | Bin ordering regex: handle minus signs | 1098d5f: signed/-Inf bin ordering regex; fixed regmatches misalignment; test. |
 | R2-BUG-23 | L | S | ☐ | Pre-2015 period starts; accurate artifact-cap error | |
 | R2-BUG-24 | L | S | ☐ | Contrast SD residual variance; fallback error scaling; incidence weights; residual-mode checks | |
@@ -277,3 +277,6 @@ Re-measure locally before B6 and replace these. Source: §1.2, §5.
 - 2026-10-06 - fix/rev-w1-security-dev merged into dev (049739c): CR-SEC-01, R2-SEC-01, R2-SEC-03, CR-SEC-06, R2-SEC-04, R2-SEC-05. Agent verified connection 129, overview 26, overview-metadata 47, step2-async 111, step2-payload 119, step2-compute 36, export-bundle 156, provenance 43, weathersim 66 passed. R2-SEC-02 now more important: UI credentials reach the shared worker during Step 2. Remaining CR-SEC-08 instance: Databricks file errors include host/volume URL.
 - 2026-10-06 - fix/rev-w1-cleanup merged into dev (4a953e0): CR-CQ-08, CR-BUG-11/12/15, R2-BUG-15/27/22/09 done; CR-CQ-05, R2-BUG-18, CR-BUG-19 partial (remainders in files owned by other wave-1 agents). devtools::document(): no NAMESPACE drift. Further dead-code candidates (test-only plot helpers, welfare_stats_suite, .wise_navy, okabe-ito scales, unused mod_3_09 args) listed for a later CR-CQ-08 pass.
 - 2026-10-06 - Wave 1 integrated on dev (4a953e0). Full suite: 7130 passed, 0 failed, 0 errors (30 'Unknown or uninitialised column' warnings in test-rerun-regressions.R are pre-existing at fb5e4db). devtools::document(): no NAMESPACE drift. Manifest regenerated; test-deploy-contract passes.
+- 2026-10-06 - Wave 2 started (branches off dev 7d13c3a): fix/rev-w2-security (R2-SEC-02, local-daemon check, CR-SEC-05, CR-SEC-08 partial, R2-BUG-18 rest, CR-BUG-18, R2-BUG-23, leftovers), fix/rev-w2-step1 (CR-BUG-03, R2-BUG-10/11/19/20/21, CR-BUG-16 report-only), fix/rev-w2-step3 (R2-BUG-14, R2-BUG-13, level-outcome delta gradients, CR-BUG-10, CR-BUG-13, leftovers), fix/rev-w2-a11y (B8 quick wins), fix/rev-w2-weather (CR-BUG-05, CR-PERF-10, R2-PERF-14). Decisions: R2-BUG-14 -> block Step 3 when model changed; R2-BUG-13 -> NA rows untreated + reported; level-outcome gradients -> fix now with MC check; CR-SEC-05 -> drop overview-* ids on import, exports/provenance record source type + origin only.
+- 2026-10-06 - Wave 2 mostly blocked: a hook rewrites git to `rtk git` and the worktree-isolation guard refuses it, so security, step3, a11y and weather agents stopped without changes (items back to todo in practice). Step 1 agent finished all 7 findings as patches (plumbing-only git); coordinator applied and committed them on dev (eb7c6f0..45ff019). Agent ran 19+ related test files (0 failures); full suite on dev not run yet (run was denied by the permission classifier).
+- 2026-10-06 - Full suite on dev after Step 1 commits (45ff019): 7185 passed, 0 failed, 0 errors. Manifest regenerated. Wave 2 remainder (security, step3, a11y, weather) not started: worktree agents need git; pending user edit of rtk config ([hooks] exclude_commands = ["git"]) since the isolation guard rejects `rtk git`.
