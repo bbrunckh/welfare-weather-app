@@ -744,16 +744,6 @@ fit_model <- function(df, selected_outcome, selected_weather, selected_model,
 
   model_type <- if (use_logit) "logistic" else "linear"
 
-  # 3. Prepare variables in df ----
-
-  # Outcome coercion delegated to backend (factor, integer, or unchanged)
-  df <- backend$prepare_outcome(df, y_var, use_logit)
-
-  # Extract RIF metadata (set by the rif engine's prepare_outcome)
-  rif_taus <- attr(df, "rif_taus")
-  rif_cols <- attr(df, "rif_cols")
-  is_rif <- !is.null(rif_taus)
-
   # 4. Build formula terms ----
 
   weather_formula_terms <- unlist(lapply(seq_along(weather_vars), function(i) {
@@ -881,6 +871,18 @@ fit_model <- function(df, selected_outcome, selected_weather, selected_model,
   df <- df[stats::complete.cases(df[, vars_used, drop = FALSE]), ]
 
   if (nrow(df) == 0) stop("No complete cases after dropping NA rows.")
+
+  # 6b. Prepare the outcome on the estimation sample ----
+
+  # Outcome coercion delegated to backend (factor, integer, or unchanged).
+  # This runs after the complete-case filter so the RIF engine computes
+  # q_tau and f(q_tau) from the rows that are actually fitted (CR-BUG-03).
+  df <- backend$prepare_outcome(df, y_var, use_logit)
+
+  # Extract RIF metadata (set by the rif engine's prepare_outcome)
+  rif_taus <- attr(df, "rif_taus")
+  rif_cols <- attr(df, "rif_cols")
+  is_rif <- !is.null(rif_taus)
 
   # 7. Build model spec + engine-level options ----
 
