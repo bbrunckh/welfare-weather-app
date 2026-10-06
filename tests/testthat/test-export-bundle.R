@@ -791,3 +791,29 @@ test_that("a real list-column table round-trips through a bundle", {
   back <- utils::read.csv(csv, stringsAsFactors = FALSE)
   expect_equal(back$polynomial, "1; 2")
 })
+
+test_that("echarts PNG export removes its temporary page and _files dir (R2-SEC-05)", {
+  skip_if_not_installed("htmlwidgets")
+  skip_if_not_installed("webshot2")
+  seen <- NULL
+  local_mocked_bindings(saveWidget = function(widget, file, ...) {
+    seen <<- file
+    writeLines("<html></html>", file)
+    libdir <- paste0(tools::file_path_sans_ext(file), "_files")
+    dir.create(libdir)
+    writeLines("x", file.path(libdir, "dep.js"))
+  }, .package = "htmlwidgets")
+  fail_shot <- FALSE
+  local_mocked_bindings(webshot = function(url, file, ...) {
+    if (fail_shot) stop("browser crashed")
+    writeLines("png", file)
+  }, .package = "webshot2")
+  out <- withr::local_tempfile(fileext = ".png")
+  item <- list(width = 4, height = 3)
+  for (fail_shot in c(FALSE, TRUE)) {
+    res <- .export_write_echarts(list(x = list(opts = list())), out, item)
+    expect_identical(res$status, if (fail_shot) "error" else "ok")
+    expect_false(file.exists(seen))
+    expect_false(dir.exists(paste0(tools::file_path_sans_ext(seen), "_files")))
+  }
+})

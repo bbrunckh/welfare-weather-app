@@ -142,7 +142,7 @@ test_that("metadata backpressure retries stop when the request is retired", {
 
 
 .overview_databricks_params <- function(
-  workspace = "https://workspace.example",
+  workspace = "https://workspace.cloud.databricks.com",
   client_secret = "secret"
 ) {
   list(
@@ -219,12 +219,12 @@ test_that("shared data path resolution preserves connection contracts", {
     .resolve_data_path(
       "file.csv",
       list(
-        type = "databricks", workspace = "https://workspace.example",
+        type = "databricks", workspace = "https://workspace.cloud.databricks.com",
         volume_path = "/Volumes/catalog/schema/data"
       )
     ),
     paste0(
-      "https://workspace.example/api/2.0/fs/files",
+      "https://workspace.cloud.databricks.com/api/2.0/fs/files",
       "/Volumes/catalog/schema/data/file.csv"
     )
   )
@@ -347,7 +347,7 @@ test_that("Databricks metadata does not initialize DuckDB", {
   )
 
   load_overview_metadata(.overview_databricks_params(
-    workspace = "https://no-duck-workspace.example"
+    workspace = "https://no-duck-workspace.cloud.databricks.com"
   ))
 
   expect_false(exists("con", envir = .duck, inherits = FALSE))
@@ -376,7 +376,7 @@ test_that("Databricks token cache survives later DuckDB initialization", {
   }
   withr::local_options(httr2_mock = mock)
 
-  host <- "https://persistent-token-workspace.example"
+  host <- "https://persistent-token-workspace.cloud.databricks.com"
   .get_db_token(host, "client", "secret")
   .duck_con()
   .get_db_token(host, "client", "secret")
@@ -449,7 +449,7 @@ test_that("remote metadata cache avoids repeat requests and can be disabled", {
   )
 
   params <- .overview_databricks_params(
-    workspace = "https://cache-workspace.example"
+    workspace = "https://cache-workspace.cloud.databricks.com"
   )
   load_overview_metadata(params)
   expect_equal(requests, 4L)
@@ -475,7 +475,7 @@ test_that("remote metadata cache avoids repeat requests and can be disabled", {
   .reset_overview_metadata_cache()
   load_overview_metadata(params)
   different_credentials <- .overview_databricks_params(
-    workspace = "https://cache-workspace.example",
+    workspace = "https://cache-workspace.cloud.databricks.com",
     client_secret = "different-secret"
   )
   load_overview_metadata(different_credentials)

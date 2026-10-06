@@ -47,7 +47,8 @@ test_that("auto-connect surfaces failure when async is disabled", {
       fixed = TRUE
     )
     expect_match(.status_html(output), "WISEAPP_DATA_SOURCE", fixed = TRUE)
-    expect_match(.card_html(output), "Connect to data", fixed = TRUE)
+    # CR-SEC-01: auto-connect mode never falls back to the browser form.
+    expect_false(grepl("Connect to data", .card_html(output), fixed = TRUE))
   })
 })
 
@@ -150,5 +151,37 @@ test_that("warm automatic connection publishes parent metadata without a worker"
     expect_identical(applied_connection(), params)
     expect_identical(survey_list(), metadata$survey_list)
     expect_identical(pov_lines(), metadata$pov_lines)
+  })
+})
+
+test_that("auto-connect mode ignores browser connection inputs (CR-SEC-01)", {
+  withr::local_envvar(
+    WISEAPP_DATA_SOURCE = "databricks",
+    DATABRICKS_HOST = "https://configured.cloud.databricks.com",
+    DATABRICKS_CLIENT_ID = "env-client-id",
+    DATABRICKS_CLIENT_SECRET = "env-client-secret",
+    DATABRICKS_VOLUME_PATH = "/Volumes/env"
+  )
+  requests <- list()
+  local_mocked_bindings(.overview_metadata_load = function(params, on_result,
+    on_error, is_current) {
+    requests[[length(requests) + 1L]] <<- params
+  }, .package = "wiseapp")
+  testServer(mod_0_overview_server, {
+    session$flushReact()
+    expect_length(requests, 1L)
+    expect_identical(requests[[1L]]$origin, "env")
+    # A crafted client sends connection fields and clicks apply anyway.
+    session$setInputs(
+      connection_type = "databricks",
+      db_workspace = "https://attacker.cloud.databricks.com",
+      db_client_id = "", db_client_secret = "", db_volume_path = "/Volumes/x"
+    )
+    session$setInputs(apply_connection = 1L)
+    session$setInputs(apply_connection = 2L)
+    expect_length(requests, 1L)
+    expect_identical(requests[[1L]]$workspace,
+                     "https://configured.cloud.databricks.com")
+    expect_error(connection_params())
   })
 })

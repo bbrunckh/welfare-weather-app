@@ -144,9 +144,9 @@ collect_deterministic <- function(data, keys = NULL) {
       connection_params$subdir %||% "", path
     ),
     "databricks" = {
-      host <- connection_params$workspace %||% Sys.getenv("DATABRICKS_HOST")
-      vol_path <- connection_params$volume_path %||%
-        Sys.getenv("DATABRICKS_VOLUME_PATH")
+      db_params <- .databricks_connection_params(connection_params)
+      host <- db_params$host
+      vol_path <- db_params$volume_path
       if (!nzchar(vol_path %||% "")) {
         stop(
           "load_data(): Set DATABRICKS_VOLUME_PATH in .Renviron:\n",
@@ -162,15 +162,17 @@ collect_deterministic <- function(data, keys = NULL) {
 }
 
 
+# Resolves the Databricks connection and checks the host against the allowlist
+# (CR-SEC-01) in every process that uses it, including async workers.
+# A "ui"-origin connection never fills a missing field from the environment
+# (R2-SEC-01).
 .databricks_connection_params <- function(connection_params) {
+  field <- function(name, env_var) .connection_field(connection_params, name, env_var)
   list(
-    host = connection_params$workspace %||% Sys.getenv("DATABRICKS_HOST"),
-    client_id = connection_params$client_id %||%
-      Sys.getenv("DATABRICKS_CLIENT_ID"),
-    client_secret = connection_params$client_secret %||%
-      Sys.getenv("DATABRICKS_CLIENT_SECRET"),
-    volume_path = connection_params$volume_path %||%
-      Sys.getenv("DATABRICKS_VOLUME_PATH")
+    host = .validate_databricks_host(field("workspace", "DATABRICKS_HOST")),
+    client_id = field("client_id", "DATABRICKS_CLIENT_ID"),
+    client_secret = field("client_secret", "DATABRICKS_CLIENT_SECRET"),
+    volume_path = field("volume_path", "DATABRICKS_VOLUME_PATH")
   )
 }
 
@@ -360,8 +362,10 @@ collect_deterministic <- function(data, keys = NULL) {
 
 #' Obtain a Databricks M2M OAuth token, reusing a cached one when valid.
 #'
-#' Tokens are cached keyed on a hash of (host, client_id, client_secret) and
-#' reused until fewer than 5 minutes of lifetime remain.
+#' Tokens are cached keyed on a SHA-256 of (host, client_id, client_secret)
+#' and reused until fewer than 5 minutes of lifetime remain. Entries past that
+#' point are dropped, and at most `.DB_TOKEN_CACHE_MAX` entries are kept
+#' (soonest-expiring evicted first) (R2-SEC-03).
 #'
 #' @param host          Databricks workspace URL.
 #' @param client_id     OAuth2 client ID.
@@ -370,25 +374,35 @@ collect_deterministic <- function(data, keys = NULL) {
 #' @noRd
 .get_db_token <- function(host, client_id, client_secret) {
   if (is.null(.duck$db_tokens)) .duck$db_tokens <- list()
-  key <- paste(host, client_id, client_secret, sep = "\n")
+  key <- digest::digest(list(host, client_id, client_secret), algo = "sha256")
+  usable <- function(entry) {
+    difftime(entry$expires_at, Sys.time(), units = "secs") > 300
+  }
+  .duck$db_tokens <- Filter(usable, .duck$db_tokens)
   cached <- .duck$db_tokens[[key]]
 
-  if (!is.null(cached) &&
-    difftime(cached$expires_at, Sys.time(), units = "secs") > 300) {
+  if (!is.null(cached)) {
     return(cached$token)
   }
 
-  resp <- httr2::request(paste0(host, "/oidc/v1/token")) |>
-    httr2::req_auth_basic(client_id, client_secret) |>
-    httr2::req_body_form(grant_type = "client_credentials", scope = "all-apis") |>
-    httr2::req_options(http_version = 2L) |>
-    httr2::req_error(is_error = \(r) FALSE) |>
-    httr2::req_perform()
+  resp <- tryCatch(
+    httr2::request(paste0(host, "/oidc/v1/token")) |>
+      httr2::req_auth_basic(client_id, client_secret) |>
+      httr2::req_body_form(grant_type = "client_credentials", scope = "all-apis") |>
+      httr2::req_options(http_version = 2L) |>
+      httr2::req_error(is_error = \(r) FALSE) |>
+      .db_req_limits(.DB_TOKEN_TIMEOUT_SEC) |>
+      httr2::req_perform(),
+    error = function(e) {
+      stop("load_data(): Failed to obtain Databricks OAuth token: ",
+           .http_error_summary(e), call. = FALSE)
+    }
+  )
 
   if (httr2::resp_is_error(resp)) {
     stop(
       "load_data(): Failed to obtain Databricks OAuth token: ",
-      httr2::resp_status_desc(resp)
+      .http_error_summary(resp)
     )
   }
 
@@ -398,7 +412,45 @@ collect_deterministic <- function(data, keys = NULL) {
     token      = parsed$access_token,
     expires_at = Sys.time() + as.numeric(parsed$expires_in %||% 3600)
   )
+  excess <- length(.duck$db_tokens) - .DB_TOKEN_CACHE_MAX
+  if (excess > 0L) {
+    expiry <- vapply(.duck$db_tokens, function(e) as.numeric(e$expires_at), numeric(1))
+    .duck$db_tokens[order(expiry)[seq_len(excess)]] <- NULL
+  }
   parsed$access_token
+}
+
+# Upper bound on cached Databricks tokens per process (R2-SEC-03).
+.DB_TOKEN_CACHE_MAX <- 16L
+
+# Databricks HTTP limits (CR-SEC-06): a stalled request must not hold the
+# shared worker. Transient statuses and connection failures are retried with
+# a short exponential backoff (1 s, 2 s).
+.DB_TOKEN_TIMEOUT_SEC <- 30
+.DB_FILE_TIMEOUT_SEC <- 300
+.DB_RETRY_STATUS <- c(429L, 500L, 502L, 503L, 504L)
+
+.db_req_limits <- function(req, timeout) {
+  req |>
+    httr2::req_timeout(timeout) |>
+    httr2::req_retry(
+      max_tries = 3L,
+      retry_on_failure = TRUE,
+      is_transient = \(resp) httr2::resp_status(resp) %in% .DB_RETRY_STATUS,
+      backoff = \(attempt) 2^(attempt - 1)
+    )
+}
+
+#' One-line summary of an HTTP failure: the status line for a response, or
+#' the transport-level cause for a condition. Never includes request headers,
+#' bodies or response bodies.
+#' @noRd
+.http_error_summary <- function(x) {
+  if (inherits(x, "httr2_response")) {
+    return(paste0("HTTP ", httr2::resp_status(x), " ", httr2::resp_status_desc(x)))
+  }
+  cause <- if (inherits(x$parent, "condition")) x$parent else x
+  strsplit(conditionMessage(cause), "\n", fixed = TRUE)[[1]][1]
 }
 
 
@@ -476,8 +528,10 @@ collect_deterministic <- function(data, keys = NULL) {
 
 # Direct CSV loading avoids DuckDB setup for small Databricks files.
 .fetch_db_csv_direct <- function(url, token) {
-  resp <- .db_csv_request(url, token) |>
-    httr2::req_perform()
+  resp <- tryCatch(
+    .db_csv_request(url, token) |> httr2::req_perform(),
+    error = identity
+  )
 
   .parse_db_csv_response(resp, url)
 }
@@ -485,24 +539,19 @@ collect_deterministic <- function(data, keys = NULL) {
 
 .db_csv_request <- function(url, token) {
   httr2::request(url) |>
-    httr2::req_headers(Authorization = paste("Bearer", token)) |>
+    httr2::req_headers(Authorization = paste("Bearer", token), .redact = "Authorization") |>
     httr2::req_options(http_version = 2L) |>
-    httr2::req_error(is_error = \(r) FALSE)
+    httr2::req_error(is_error = \(r) FALSE) |>
+    .db_req_limits(.DB_FILE_TIMEOUT_SEC)
 }
 
 
 .parse_db_csv_response <- function(resp, url) {
-  if (inherits(resp, "error")) {
+  if (inherits(resp, "error") || httr2::resp_is_error(resp)) {
     stop(
       "load_data(): Failed to fetch CSV from Databricks (", url, "): ",
-      conditionMessage(resp)
-    )
-  }
-
-  if (httr2::resp_is_error(resp)) {
-    stop(
-      "load_data(): Failed to fetch CSV from Databricks (", url, "): ",
-      httr2::resp_status_desc(resp)
+      .http_error_summary(resp),
+      call. = FALSE
     )
   }
 
@@ -581,7 +630,7 @@ load_data <- function(
   }
 
   paths <- as.character(paths)
-  type <- connection_params$type %||% "local"
+  type <- .check_connection_type(connection_params$type %||% "local")
   con <- .duck_con()
 
   # 1. Detect format early - fail before any network calls ----
@@ -605,11 +654,13 @@ load_data <- function(
 
   # 3. Configure credentials / load extensions per backend ----
 
+  # Environment fallback only for environment-origin params (R2-SEC-01).
+  field <- function(name, env_var) .connection_field(connection_params, name, env_var)
   if (type == "s3") {
     .duck_load_ext("httpfs")
     s3_creds <- list(
-      key_id = connection_params$key_id %||% Sys.getenv("AWS_ACCESS_KEY_ID"),
-      secret = connection_params$secret %||% Sys.getenv("AWS_SECRET_ACCESS_KEY"),
+      key_id = field("key_id", "AWS_ACCESS_KEY_ID"),
+      secret = field("secret", "AWS_SECRET_ACCESS_KEY"),
       region = connection_params$region %||% "us-east-1"
     )
     .register_cached_secret(
@@ -629,8 +680,8 @@ load_data <- function(
   } else if (type == "gcs") {
     .duck_load_ext("httpfs")
     gcs_creds <- list(
-      key_id = connection_params$key_id %||% Sys.getenv("GCS_ACCESS_KEY_ID"),
-      secret = connection_params$secret %||% Sys.getenv("GCS_SECRET_ACCESS_KEY")
+      key_id = field("key_id", "GCS_ACCESS_KEY_ID"),
+      secret = field("secret", "GCS_SECRET_ACCESS_KEY")
     )
     .register_cached_secret(
       con, "gcs_secret", gcs_creds,
@@ -648,10 +699,10 @@ load_data <- function(
     .duck_load_ext("azure")
     .duck_load_ext("delta")
 
-    key <- connection_params$key %||% Sys.getenv("AZURE_STORAGE_KEY")
-    client_id <- connection_params$client_id %||% Sys.getenv("AZURE_CLIENT_ID")
-    client_secret <- connection_params$client_secret %||% Sys.getenv("AZURE_CLIENT_SECRET")
-    tenant_id <- connection_params$tenant_id %||% Sys.getenv("AZURE_TENANT_ID")
+    key <- field("key", "AZURE_STORAGE_KEY")
+    client_id <- field("client_id", "AZURE_CLIENT_ID")
+    client_secret <- field("client_secret", "AZURE_CLIENT_SECRET")
+    tenant_id <- field("tenant_id", "AZURE_TENANT_ID")
 
     if (nzchar(key)) {
       az_creds <- list(
@@ -691,6 +742,13 @@ load_data <- function(
            );",
           .sql_literal(tenant_id), .sql_literal(client_id), .sql_literal(client_secret)
         )
+      )
+    } else if (identical(connection_params$origin, "ui")) {
+      # The credential chain is the server's identity; never lend it to a
+      # user-chosen location (R2-SEC-01).
+      stop(
+        "load_data(): Enter an Azure account key or service principal, or ",
+        "leave all fields blank to use the configured data source."
       )
     } else {
       tryCatch(

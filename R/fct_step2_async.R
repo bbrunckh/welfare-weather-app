@@ -65,7 +65,15 @@
   if (!nzchar(root)) {
     root <- file.path(tempdir(), "wiseapp-step2-async", Sys.getpid())
   }
-  dir.create(root, recursive = TRUE, showWarnings = FALSE)
+  # R2-SEC-04: private directories; a root this process creates is removed
+  # at app stop, a pre-existing (user-provided) one is never deleted.
+  if (!dir.exists(root) &&
+      dir.create(root, recursive = TRUE, showWarnings = FALSE, mode = "0700")) {
+    state <- .wise_step2_async_state
+    state$created_roots <- unique(c(
+      state$created_roots, normalizePath(root, winslash = "/", mustWork = FALSE)
+    ))
+  }
   normalizePath(root, winslash = "/", mustWork = FALSE)
 }
 
@@ -112,8 +120,16 @@
   if (is.null(params) || !is.list(params)) {
     return(params)
   }
-  # Credentials are intentionally never serialized into a worker snapshot.
-  # load_data() resolves these names from the worker's environment instead.
+  # R2-SEC-01: a UI connection carries the user's own credentials to the
+  # local daemon (guidelines section 0; .wise_step2_async_launch() only starts
+  # local daemons, never url= ones). The worker never fills a missing UI
+  # field from its environment (.connection_field()).
+  if (identical(params$origin, "ui")) {
+    return(params)
+  }
+  # Environment connections are scrubbed: credentials are never serialized
+  # into a worker snapshot and load_data() resolves them from the worker's
+  # environment instead.
   secret_like <- grepl(
     "secret|key|token|password|credential|client_id|tenant",
     names(params), ignore.case = TRUE
@@ -683,6 +699,8 @@
         mirai::daemons(0L)
         state$started <- FALSE
       }
+      unlink(state$created_roots, recursive = TRUE, force = TRUE)
+      state$created_roots <- NULL
     }, session = NULL)
   } else {
     .wise_step2_async_ensure_daemon()

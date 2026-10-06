@@ -859,10 +859,16 @@ pipeline_runner <- function(triggers, results, on_state = NULL,
     return(skip("PNG export of echarts figures needs the webshot2 package"))
   }
 
+  # R2-SEC-05: remove the intermediate page and any non-self-contained
+  # "<name>_files" dependency folder on every exit path.
+  html <- tempfile(fileext = ".html")
+  on.exit(unlink(c(
+    html, paste0(tools::file_path_sans_ext(html), "_files")
+  ), recursive = TRUE, force = TRUE), add = TRUE)
+
   tryCatch(
     {
       value$x$opts$animation <- FALSE
-      html <- tempfile(fileext = ".html")
       htmlwidgets::saveWidget(value, html)
       webshot2::webshot(html, path,
         vwidth = max(round(item$width * 150), 1L),

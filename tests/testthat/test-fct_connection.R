@@ -12,7 +12,7 @@ test_that("automatic connection parameters use the source selector", {
     WISEAPP_DATA_PATH = "/data/foo"
   )
   p <- auto_connection_params()
-  expect_identical(p, list(type = "local", path = "/data/foo"))
+  expect_identical(p, list(type = "local", path = "/data/foo", origin = "env"))
 })
 
 test_that("remote automatic parameters use standard provider variables", {
@@ -42,6 +42,76 @@ test_that("automatic connection parameters reject an unknown source", {
 
 test_that("build_connection_params errors on unknown type", {
   expect_error(build_connection_params("unknown"), "Unknown connection type")
+})
+
+# CR-SEC-01: a connection comes entirely from the UI or entirely from the env.
+test_that("browser host with blank credentials never picks up env credentials", {
+  withr::local_envvar(
+    DATABRICKS_HOST = "https://configured.cloud.databricks.com",
+    DATABRICKS_CLIENT_ID = "env-client-id",
+    DATABRICKS_CLIENT_SECRET = "env-client-secret",
+    DATABRICKS_VOLUME_PATH = "/Volumes/env"
+  )
+  p <- build_connection_params(
+    "databricks", db_workspace = "https://other.cloud.databricks.com",
+    db_client_id = "", db_client_secret = "", db_volume_path = ""
+  )
+  expect_identical(p$origin, "ui")
+  expect_identical(p$workspace, "https://other.cloud.databricks.com")
+  expect_identical(p$client_id, "")
+  expect_identical(p$client_secret, "")
+  expect_identical(p$volume_path, "")
+  expect_false(validate_connection_params(p))
+
+  s3 <- withr::with_envvar(
+    c(AWS_ACCESS_KEY_ID = "env-key", AWS_SECRET_ACCESS_KEY = "env-secret"),
+    build_connection_params("s3", s3_bucket = "user-bucket", s3_key_id = "")
+  )
+  expect_identical(s3$origin, "ui")
+  expect_identical(s3[c("key_id", "secret")], list(key_id = "", secret = ""))
+})
+
+test_that("all-blank UI fields use the environment configuration as a whole", {
+  withr::local_envvar(
+    DATABRICKS_HOST = "https://configured.cloud.databricks.com",
+    DATABRICKS_CLIENT_ID = "env-client-id",
+    DATABRICKS_CLIENT_SECRET = "env-client-secret",
+    DATABRICKS_VOLUME_PATH = "/Volumes/env"
+  )
+  p <- build_connection_params("databricks", db_workspace = "", db_client_id = NULL)
+  expect_identical(p$origin, "env")
+  expect_identical(p$workspace, "https://configured.cloud.databricks.com")
+  expect_identical(p$client_id, "env-client-id")
+  expect_true(validate_connection_params(p))
+})
+
+test_that("connection types outside the allowlist are rejected", {
+  for (bad in list("ftp", c("local", "s3"), NA_character_, NULL, 1)) {
+    expect_error(build_connection_params(bad), "Unknown connection type")
+  }
+  expect_false(validate_connection_params(list(type = "ftp")))
+  expect_error(load_data("x.parquet", list(type = "ftp")), "Unknown connection type")
+})
+
+test_that("Databricks hosts are restricted to https Databricks domains", {
+  withr::local_envvar(DATABRICKS_HOST = "https://configured.example.org")
+  ok <- c(
+    "https://adb-1.2.azuredatabricks.net", "https://x.cloud.databricks.com/",
+    "https://x.gcp.databricks.com", "https://configured.example.org"
+  )
+  for (h in ok) expect_identical(.validate_databricks_host(h), sub("/$", "", h))
+  bad <- c(
+    "http://x.cloud.databricks.com", "https://user@x.cloud.databricks.com",
+    "https://x.cloud.databricks.com:8443", "https://x.cloud.databricks.com/path",
+    "https://evil.example.com", "https://cloud.databricks.com.evil.com",
+    "https://.cloud.databricks.com", "x.cloud.databricks.com"
+  )
+  for (h in bad) expect_error(.validate_databricks_host(h), "Databricks workspace", info = h)
+  # The loader re-checks the host wherever it runs (e.g. an async worker).
+  expect_error(
+    .databricks_connection_params(list(type = "databricks", workspace = bad[[5]])),
+    "Databricks workspace"
+  )
 })
 
 test_that("validate_connection_params: local requires non-empty path", {
@@ -269,4 +339,134 @@ test_that("load_data gcs and azure secret SQL escapes quote-bearing credentials"
   expect_match(az[2], "TENANT_ID\\s+'T''ID'")
   expect_match(az[2], "CLIENT_ID\\s+'C''ID'")
   expect_match(az[2], "CLIENT_SECRET\\s+'CS''EC'")
+})
+
+# R2-SEC-01: UI connections never borrow worker/server environment credentials.
+test_that("a UI connection snapshot keeps its own credentials and gets no env fill", {
+  withr::local_envvar(
+    DATABRICKS_HOST = "https://server.cloud.databricks.com",
+    DATABRICKS_CLIENT_ID = "server-client-id",
+    DATABRICKS_CLIENT_SECRET = "server-client-secret",
+    DATABRICKS_VOLUME_PATH = "/Volumes/server"
+  )
+  ui <- build_connection_params(
+    "databricks", db_workspace = "https://user.cloud.databricks.com",
+    db_client_id = "user-client-id", db_client_secret = "user-secret",
+    db_volume_path = "/Volumes/user"
+  )
+  snap <- .wise_step2_async_connection_params(ui)
+  expect_identical(snap, ui)
+
+  # Worker side: a UI snapshot missing a field is not completed from env.
+  partial <- ui[setdiff(names(ui), "client_secret")]
+  db <- .databricks_connection_params(partial)
+  expect_identical(db$host, "https://user.cloud.databricks.com")
+  expect_identical(db$client_id, "user-client-id")
+  expect_identical(db$client_secret, "")
+  expect_false(validate_connection_params(partial))
+
+  # Environment connections stay scrubbed and resolve in the worker's env.
+  env <- build_connection_params("databricks")
+  snap_env <- .wise_step2_async_connection_params(env)
+  expect_false(any(c("client_id", "client_secret") %in% names(snap_env)))
+  expect_identical(.databricks_connection_params(snap_env)$client_secret,
+                   "server-client-secret")
+})
+
+test_that("load_data never mixes env credentials into UI s3/azure connections", {
+  skip_if_not_installed("duckdb")
+  restore_duck <- .duck_state_restore()
+  withr::defer(restore_duck())
+  withr::local_envvar(
+    AWS_ACCESS_KEY_ID = "server-key", AWS_SECRET_ACCESS_KEY = "server-secret"
+  )
+  captured <- character(0)
+  local_mocked_bindings(
+    dbExecute = function(con, statement, ...) {
+      captured <<- c(captured, statement)
+      0L
+    },
+    .package = "DBI"
+  )
+  try(load_data("f.parquet", list(type = "s3", bucket = "user-bucket",
+                                  region = "us-east-1", origin = "ui")),
+      silent = TRUE)
+  s3 <- captured[grepl("SECRET s3_secret", captured, fixed = TRUE)]
+  expect_length(s3, 1)
+  expect_false(grepl("server-", s3, fixed = TRUE))
+
+  expect_error(
+    load_data("f.parquet", list(type = "azure", account = "a", container = "c",
+                                origin = "ui")),
+    "Azure account key"
+  )
+  expect_false(any(grepl("CREDENTIAL_CHAIN", captured, fixed = TRUE)))
+})
+
+# R2-SEC-03: token cache keys are digests; entries expire and are capped.
+test_that("Databricks token cache is hashed, expiring and bounded", {
+  restore_duck <- .duck_state_restore()
+  withr::defer(restore_duck())
+  .duck$db_tokens <- list()
+  requests <- 0L
+  expires_in <- 3600
+  withr::local_options(httr2_mock = function(req) {
+    requests <<- requests + 1L
+    httr2::response_json(
+      body = list(access_token = paste0("tok-", requests), expires_in = expires_in),
+      url = req$url
+    )
+  })
+  host <- "https://cache.cloud.databricks.com"
+
+  expect_identical(.get_db_token(host, "cid", "plain-secret"), "tok-1")
+  expect_identical(.get_db_token(host, "cid", "plain-secret"), "tok-1")
+  expect_equal(requests, 1L)
+  keys <- names(.duck$db_tokens)
+  expect_match(keys, "^[0-9a-f]{64}$")
+  expect_false(any(grepl("plain-secret|cid|cache", keys)))
+
+  # A token inside its 5-minute refresh window is dropped and refetched.
+  .duck$db_tokens[[1]]$expires_at <- Sys.time() + 60
+  expect_identical(.get_db_token(host, "cid", "plain-secret"), "tok-2")
+  expect_length(.duck$db_tokens, 1L)
+
+  for (i in seq_len(.DB_TOKEN_CACHE_MAX + 5L)) {
+    .get_db_token(host, paste0("client-", i), "s")
+  }
+  expect_length(.duck$db_tokens, .DB_TOKEN_CACHE_MAX)
+})
+
+# CR-SEC-06: Databricks requests have timeouts, bounded retries and short errors.
+test_that("Databricks requests set timeouts and retry policies", {
+  req <- .db_csv_request("https://x.cloud.databricks.com/api/2.0/fs/files/a.csv", "tok")
+  expect_equal(req$options$timeout_ms, .DB_FILE_TIMEOUT_SEC * 1000)
+  expect_equal(req$policies$retry_max_tries, 3L)
+  expect_true(isTRUE(req$policies$retry_on_failure))
+})
+
+test_that("token requests use the token timeout and summarise errors", {
+  restore_duck <- .duck_state_restore()
+  withr::defer(restore_duck())
+  .duck$db_tokens <- list()
+  seen <- NULL
+  withr::local_options(httr2_mock = function(req) {
+    seen <<- req
+    httr2::response(status_code = 401, url = req$url,
+                    body = charToRaw("detail mentioning top-secret-value"))
+  })
+  err <- tryCatch(.get_db_token("https://r.cloud.databricks.com", "id", "sec"),
+                  error = identity)
+  expect_equal(seen$options$timeout_ms, .DB_TOKEN_TIMEOUT_SEC * 1000)
+  expect_equal(seen$policies$retry_max_tries, 3L)
+  expect_true(503 %in% .DB_RETRY_STATUS && 429 %in% .DB_RETRY_STATUS)
+
+  withr::local_options(httr2_mock = function(req) {
+    httr2::response(status_code = 401, url = req$url,
+                    body = charToRaw("detail mentioning top-secret-value"))
+  })
+  err <- tryCatch(.get_db_token("https://r.cloud.databricks.com", "id2", "top-secret-value"),
+                  error = identity)
+  expect_match(conditionMessage(err), "HTTP 401 Unauthorized", fixed = TRUE)
+  expect_false(grepl("top-secret-value", conditionMessage(err), fixed = TRUE))
 })
