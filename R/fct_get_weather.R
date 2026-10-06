@@ -1974,7 +1974,9 @@ get_weather <- function(
                 )
               )
               rm(model_df)
-              gc(verbose = FALSE)
+              # CR-PERF-10: a forced collection per member was ~40% of the
+              # warm weather stage; collect only once over the RSS budget.
+              if (isTRUE(guard$exceeded)) gc(verbose = FALSE)
             } else {
               model_out[[member_key]] <- model_df
             }
@@ -2008,7 +2010,9 @@ get_weather <- function(
         if (exists("model_list", inherits = FALSE)) rm(model_list)
         if (exists("model_names", inherits = FALSE)) rm(model_names)
         if (exists("model_out", inherits = FALSE)) rm(model_out)
-        gc(verbose = FALSE)
+        if (isTRUE(.wx_collection_rss_guard(collection_policy)$exceeded)) {
+          gc(verbose = FALSE)
+        }
       }
 
       try(DBI::dbRemoveTable(con, tmp_delta_all_name), silent = TRUE)

@@ -1229,6 +1229,58 @@ test_that("fast and bounded future collection preserve the weather contract", {
   }
 })
 
+test_that("CR-PERF-10: future weather forces gc() only when the RSS guard trips", {
+  skip_if_not_installed("arrow")
+  skip_if_not_installed("duckdb")
+  skip_if_not_installed("duckdbfs")
+  skip_if_not_installed("bit64")
+
+  fx <- cached_weather_fixture("cross_res_cmip6")
+  withr::local_envvar(
+    WISEAPP_WEATHER_CACHE_DIR = withr::local_tempdir(),
+    WISEAPP_WEATHER_CACHE_DISABLE = "1"
+  )
+  counter <- new.env()
+  counter$gc <- 0L
+  counter$guard <- 0L
+  count_gc <- function() counter$gc <- counter$gc + 1L
+  suppressMessages(trace(
+    "gc", bquote(.(count_gc)()), print = FALSE, where = baseenv()
+  ))
+  on.exit(suppressMessages(untrace("gc", where = baseenv())), add = TRUE)
+
+  run <- function(exceeded) {
+    local_mocked_bindings(.wx_collection_rss_guard = function(policy) {
+      counter$guard <- counter$guard + 1L
+      list(rss = 1, exceeded = exceeded)
+    })
+    frames <- list()
+    counter$gc <- 0L
+    counter$guard <- 0L
+    get_weather(
+      survey_data         = fx$survey_data,
+      selected_surveys    = fx$selected_surveys,
+      selected_weather    = sw_continuous("tx"),
+      dates               = fx$dates,
+      connection_params   = fx$connection_params,
+      ssp                 = "ssp2_4_5",
+      future_period       = c("2025-01-01", "2025-12-31"),
+      perturbation_method = c(tx = "additive"),
+      weather_consumer    = function(key, weather, metadata = NULL) {
+        frames[[key]] <<- weather
+      }
+    )
+    list(frames = frames, gc = counter$gc, guard = counter$guard)
+  }
+
+  under <- run(FALSE)
+  over <- run(TRUE)
+  expect_gt(under$guard, 0L)
+  expect_identical(under$gc, 0L)
+  expect_gt(over$gc, 0L)
+  expect_identical(under$frames, over$frames)
+})
+
 test_that("materialized multi-period future deltas preserve each period", {
   skip_if_not_installed("arrow")
   skip_if_not_installed("duckdb")
