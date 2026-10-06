@@ -49,7 +49,11 @@ resolve_agg_fn <- function(method) {
     },
     median = function(welfare, weights, pov_line) {
       if (!is.null(weights)) {
-        # Weighted median via cumulative weight
+        # Weighted median via cumulative weight. Missing welfare rows are
+        # dropped first so their weight does not shift the 0.5 crossing.
+        valid <- !is.na(welfare)
+        welfare <- welfare[valid]
+        weights <- weights[valid]
         ord <- order(welfare)
         w <- weights[ord] / sum(weights, na.rm = TRUE)
         cumw <- cumsum(w)
@@ -93,7 +97,9 @@ resolve_agg_fn <- function(method) {
       }
     },
     gini = function(welfare, weights, pov_line) {
-      # Weighted Gini via the covariance formula - NA guard first
+      # The app's single Gini definition (CR-BUG-10): weighted covariance
+      # form, equal to the weighted Lorenz-curve area. No weights means
+      # equal weights, which gives the standard sample Gini.
       valid <- !is.na(welfare)
       welfare <- welfare[valid]
       if (!is.null(weights)) weights <- weights[valid]
@@ -101,18 +107,12 @@ resolve_agg_fn <- function(method) {
       if (n < 2L) {
         return(NA_real_)
       }
-      if (!is.null(weights)) {
-        ord <- order(welfare)
-        w <- weights[ord] / sum(weights, na.rm = TRUE)
-        y <- welfare[ord]
-        F_i <- cumsum(w) - w / 2
-        2 * sum(w * y * F_i) / sum(w * y) - 1
-      } else {
-        ord <- order(welfare)
-        y <- welfare[ord]
-        n <- length(y)
-        2 * sum((seq_len(n) / n - 0.5) * y) / (n * mean(y))
-      }
+      if (is.null(weights)) weights <- rep(1, n)
+      ord <- order(welfare)
+      w <- weights[ord] / sum(weights, na.rm = TRUE)
+      y <- welfare[ord]
+      F_i <- cumsum(w) - w / 2
+      2 * sum(w * y * F_i) / sum(w * y) - 1
     },
     prosperity_gap = function(welfare, weights, pov_line) {
       # Average factor by which incomes must be multiplied to reach $28/day.
@@ -477,25 +477,11 @@ aggregate_outcome <- function(df,
   }
 
   gini_coef <- function(x, w) {
-    # Remove NA / non-finite values (present in future sim predictions)
+    # Remove NA / non-finite values (present in future sim predictions),
+    # then use the app's single Gini definition in resolve_agg_fn().
     ok <- is.finite(x)
     if (!is.null(w)) ok <- ok & is.finite(w)
-    x <- x[ok]
-    w <- if (!is.null(w)) w[ok] else NULL
-
-    if (length(x) < 2) {
-      return(NA_real_)
-    }
-
-    ord <- order(x)
-    x <- x[ord]
-    w <- if (is.null(w)) rep(1, length(x)) else w[ord]
-    w <- w / sum(w)
-    lorenz <- cumsum(w * x) / sum(w * x)
-    lorenz <- c(0, lorenz)
-    cx <- c(0, cumsum(w))
-    B <- sum(diff(cx) * (lorenz[-length(lorenz)] + lorenz[-1]) / 2)
-    1 - 2 * B
+    resolve_agg_fn("gini")(x[ok], if (!is.null(w)) w[ok], NULL)
   }
 
   compute <- function(x, w) {

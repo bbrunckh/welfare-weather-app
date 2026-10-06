@@ -14,13 +14,14 @@
 //     filter except at (line == 0, welfare == 0) where the shortfall is NaN;
 //   total is sum(welfare * weights, na.rm = TRUE);
 //   avg_poverty filters is.finite(welfare) & welfare > 0;
-//   weighted median = first sorted welfare value where the cumulative
-//     normalised weight reaches 0.5 (missing welfare sorts last, NA weights
-//     poison the cumulative sum from their position onward);
+//   weighted median = first sorted non-missing welfare value where the
+//     cumulative normalised weight reaches 0.5 (missing welfare rows are
+//     dropped first; NA weights poison the cumulative sum from their
+//     position onward);
 //   unweighted median = stats::median(x, na.rm = TRUE) (even-n mean of the
 //     two middle values);
 //   gini drops is.na(welfare) first, requires n >= 2, and uses the weighted
-//     covariance form / unweighted rank form.
+//     covariance form (equal weights when unweighted).
 // Naive double accumulation differs from R's long-double `sum()` in the
 // last ulps; callers must compare with determinism tolerance, not identical().
 
@@ -236,25 +237,26 @@ NumericVector welfare_stats_all(NumericVector y, NumericVector w,
   // --- median ----
   double median_v = NA_REAL;
   if (has_w) {
-    // Weighted: R denominator is sum(weights, na.rm = TRUE) - NA weights
-    // are dropped from the denominator but retained in the cumulative sum,
-    // poisoning it from their sorted position onward.
+    // Weighted: R drops missing welfare rows, then the denominator is
+    // sum(weights, na.rm = TRUE) - NA weights are dropped from the
+    // denominator but retained in the cumulative sum, poisoning it from
+    // their sorted position onward.
     double denom_med = 0.0;
-    for (int i = 0; i < n; ++i) {
+    for (int i = 0; i < n_valid; ++i) {
       const double wi = sorted[i].w;
       if (ISNAN(wi)) {
         continue; // na.rm = TRUE drops NA/NaN from the denominator sum
       }
       denom_med += wi;
     }
-    if (n > 0) {
+    if (n_valid > 0) {
       double cumw = 0.0;
-      for (int i = 0; i < n; ++i) {
+      for (int i = 0; i < n_valid; ++i) {
         const double wn = sorted[i].w / denom_med;
         if (ISNAN(wn)) break; // NA weight: cumulative sum poisoned onward
         cumw += wn;
         if (cumw >= 0.5) {
-          median_v = sorted[i].y; // missing-zone values return as in R
+          median_v = sorted[i].y;
           break;
         }
       }
@@ -273,57 +275,45 @@ NumericVector welfare_stats_all(NumericVector y, NumericVector w,
   // --- gini ----
   double gini_v = NA_REAL;
   if (n_valid >= 2) {
-    if (has_w) {
-      // R: w <- weights[valid][ord] / sum(weights[valid], na.rm = TRUE);
-      //    2 * sum(w * y * (cumsum(w) - w / 2)) / sum(w * y) - 1
-      // An NA weight keeps its NA into the products, so the R result is NA.
-      double denom_g = 0.0;
+    // Unweighted rows carry w = 1 (equal weights), so both cases share
+    // the one Gini definition.
+    // R: w <- weights[valid][ord] / sum(weights[valid], na.rm = TRUE);
+    //    2 * sum(w * y * (cumsum(w) - w / 2)) / sum(w * y) - 1
+    // An NA weight keeps its NA into the products, so the R result is NA.
+    double denom_g = 0.0;
+    for (int i = 0; i < n_valid; ++i) {
+      const double wi = sorted[i].w;
+      if (ISNAN(wi)) {
+        continue; // denominator drops NA/NaN weights (na.rm = TRUE)
+      }
+      denom_g += wi;
+    }
+    if (!ISNAN(denom_g)) {
+      PoisonSum s_g;  // sum(w * y * F_i) with normalised w
+      PoisonSum wy_g; // sum(w * y)
+      double cum = 0.0;
+      bool poison_na = false;
+      bool poison_nan = false;
       for (int i = 0; i < n_valid; ++i) {
-        const double wi = sorted[i].w;
-        if (ISNAN(wi)) {
-          continue; // denominator drops NA/NaN weights (na.rm = TRUE)
+        const double wn = sorted[i].w / denom_g;
+        if (ISNAN(wn)) {
+          // NA weight -> R products become NA (gini NA); a NaN quotient
+          // (0/0, Inf/Inf) becomes NaN (gini NaN). Mirrors R exactly.
+          if (R_IsNA(wn)) poison_na = true; else poison_nan = true;
+          break;
         }
-        denom_g += wi;
+        cum += wn;
+        const double F = cum - 0.5 * wn;
+        s_g.add_prod(wn * sorted[i].y, F);
+        wy_g.add_prod(wn, sorted[i].y);
       }
-      if (!ISNAN(denom_g)) {
-        PoisonSum s_g;  // sum(w * y * F_i) with normalised w
-        PoisonSum wy_g; // sum(w * y)
-        double cum = 0.0;
-        bool poison_na = false;
-        bool poison_nan = false;
-        for (int i = 0; i < n_valid; ++i) {
-          const double wn = sorted[i].w / denom_g;
-          if (ISNAN(wn)) {
-            // NA weight -> R products become NA (gini NA); a NaN quotient
-            // (0/0, Inf/Inf) becomes NaN (gini NaN). Mirrors R exactly.
-            if (R_IsNA(wn)) poison_na = true; else poison_nan = true;
-            break;
-          }
-          cum += wn;
-          const double F = cum - 0.5 * wn;
-          s_g.add_prod(wn * sorted[i].y, F);
-          wy_g.add_prod(wn, sorted[i].y);
-        }
-        if (!poison_na && !poison_nan) {
-          gini_v = 2.0 * s_g.value() / wy_g.value() - 1.0;
-        } else if (poison_na) {
-          gini_v = NA_REAL;
-        } else {
-          gini_v = R_NaN;
-        }
+      if (!poison_na && !poison_nan) {
+        gini_v = 2.0 * s_g.value() / wy_g.value() - 1.0;
+      } else if (poison_na) {
+        gini_v = NA_REAL;
+      } else {
+        gini_v = R_NaN;
       }
-    } else {
-      // R: 2 * sum((i / n - 0.5) * y) / (n * mean(y)) - no "-1" term; the
-      // app's unweighted definition returns G + 1/n by construction.
-      PoisonSum s_g;
-      double ysum = 0.0;
-      for (int i = 0; i < n_valid; ++i) {
-        s_g.add((static_cast<double>(i + 1) / n_valid - 0.5) * sorted[i].y);
-        ysum += sorted[i].y;
-      }
-      const double mean_y = ysum / n_valid;
-      const double denom = static_cast<double>(n_valid) * mean_y;
-      gini_v = 2.0 * s_g.value() / denom;
     }
   }
 
