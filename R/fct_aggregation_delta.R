@@ -61,6 +61,8 @@
 #'     \item{value}{Numeric scalar. Point estimate.}
 #'     \item{value_lo, value_p50, value_hi}{Numeric scalars. Coefficient-uncertainty band.}
 #'     \item{var_coef, var_resid}{Numeric scalars. Variance components.}
+#'     \item{n_coef_dropped}{Integer. Rows excluded from the variance because
+#'       their welfare, weight, factor-loading row or gradient is not finite.}
 #'     \item{draw_values}{\code{NULL}. Compatibility slot; downstream code reads
 #'       \code{value_lo}/\code{value_hi} directly.}
 #'   }
@@ -115,20 +117,48 @@ aggregate_with_uncertainty_delta <- function(y_point,
     resolve_agg_fn(method)(mu, weights, pov_line)
   }
 
+  # R2-BUG-02: rows with a non-finite welfare, weight or factor-loading row
+  # are excluded from both the gradient and F (and counted) instead of
+  # zeroing the coefficient variance of the whole aggregate. Clean data
+  # takes the unchanged full-length path.
+  keep <- NULL
+  if (!is.null(F_loading)) {
+    keep <- is.finite(mu) & is.finite(F_row_ss %||% rowSums(F_loading))
+    if (!is.null(weights)) keep <- keep & is.finite(weights)
+    if (all(keep)) keep <- NULL
+  }
+
   # Welfare-scale gradient h_i = (dT/dw_i) * mu_i
-  h <- gradient_for_method(method, mu, weights, pov_line, value_pt,
-    bandwidth_p0 = bandwidth_p0,
-    F_loading    = F_loading,
-    prepared_order = prepared_order,
-    F_row_ss     = F_row_ss
-  )
+  h <- if (is.null(keep)) {
+    gradient_for_method(method, mu, weights, pov_line, value_pt,
+      bandwidth_p0 = bandwidth_p0,
+      F_loading    = F_loading,
+      prepared_order = prepared_order,
+      F_row_ss     = F_row_ss
+    )
+  } else {
+    F_loading <- F_loading[keep, , drop = FALSE]
+    gradient_for_method(method, mu[keep], weights[keep], pov_line, value_pt,
+      bandwidth_p0 = bandwidth_p0,
+      F_loading    = F_loading,
+      prepared_order = NULL,
+      F_row_ss     = F_row_ss[keep]
+    )
+  }
+  n_coef_dropped <- if (is.null(keep)) 0L else sum(!keep)
+  if (!is.null(F_loading) && !all(is.finite(h))) {
+    ok <- is.finite(h)
+    n_coef_dropped <- n_coef_dropped + sum(!ok)
+    h <- h[ok]
+    F_loading <- F_loading[ok, , drop = FALSE]
+  }
 
   # Coefficient variance: ||F' h||^2
   # F_agg is the per-coefficient gradient of the aggregated scalar with
   # respect to beta; ||F_agg||^2 = var_coef. Exposing F_agg lets callers
   # build contrast variances such as ||F_agg_scn - F_agg_hist||^2, which
   # is the right SE for paired counterfactuals on the same population.
-  F_agg <- if (!is.null(F_loading) && !any(!is.finite(h))) {
+  F_agg <- if (!is.null(F_loading)) {
     as.numeric(crossprod(F_loading, h))
   } else {
     NULL
@@ -163,6 +193,7 @@ aggregate_with_uncertainty_delta <- function(y_point,
     var_coef    = var_coef,
     var_resid   = var_resid,
     F_agg       = F_agg,
+    n_coef_dropped = n_coef_dropped,
     draw_values = NULL
   )
 }
@@ -186,6 +217,7 @@ aggregate_point_estimate <- function(mu, method, weights = NULL, pov_line = NULL
     var_coef = 0,
     var_resid = 0,
     F_agg = NULL,
+    n_coef_dropped = 0L,
     draw_values = NULL
   )
 }
@@ -342,7 +374,7 @@ gradient_for_method <- function(method, mu, weights, pov_line, value_pt,
 # they respect natural bounds.
 
 apply_band_transform <- function(method, value_pt, se, z_lo, z_hi) {
-  if (!is.finite(se) || se == 0) {
+  if (!is.finite(se) || se == 0 || !is.finite(value_pt)) {
     return(list(lo = value_pt, hi = value_pt))
   }
 

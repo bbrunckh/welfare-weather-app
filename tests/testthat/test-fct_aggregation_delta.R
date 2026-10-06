@@ -337,6 +337,41 @@ test_that("median delta-method SD matches Monte Carlo (R2-BUG-03)", {
 })
 
 
+test_that("one non-finite row is dropped and counted, not zeroing variance (R2-BUG-02)", {
+  pipe <- make_pipeline()
+  run <- function(y, F, w, method) {
+    pov <- if (method == "headcount_ratio") 3 else NULL
+    wiseapp:::aggregate_with_uncertainty_delta(
+      y_point = y, F_loading = F, method = method, weights = w,
+      pov_line = pov, residuals = "none"
+    )
+  }
+  for (method in c("mean", "median", "gini", "headcount_ratio")) {
+    clean <- run(pipe$y_point, pipe$F_loading, pipe$weights, method)
+    expect_identical(clean$n_coef_dropped, 0L)
+
+    F_na <- pipe$F_loading; F_na[17L, 2L] <- NA
+    w_na <- pipe$weights;   w_na[17L] <- NA
+    y_na <- pipe$y_point;   y_na[17L] <- NA
+    cases <- list(
+      F_row  = run(pipe$y_point, F_na, pipe$weights, method),
+      y      = run(y_na, pipe$F_loading, pipe$weights, method)
+    )
+    # An NA weight makes most point estimates NA (resolver behaviour, out of
+    # scope here); the mean gradient does not depend on the point estimate.
+    if (method == "mean") {
+      cases$weight <- run(pipe$y_point, pipe$F_loading, w_na, method)
+    }
+    for (nm in names(cases)) {
+      res <- cases[[nm]]
+      info <- paste(method, nm)
+      expect_identical(res$n_coef_dropped, 1L, info = info)
+      expect_gt(res$var_coef, 0)
+      expect_lt(abs(res$var_coef / clean$var_coef - 1), 0.01, label = info)
+    }
+  }
+})
+
 test_that("F_loading = NULL gives zero coefficient variance", {
   pipe <- make_pipeline()
   res <- wiseapp:::aggregate_with_uncertainty_delta(
