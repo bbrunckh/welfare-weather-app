@@ -65,9 +65,11 @@ test_that("manifest.json lists every Import and every R/ source file", {
   skip_if_not(file.exists(manifest_path), "manifest.json not available")
 
   manifest <- jsonlite::fromJSON(manifest_path, simplifyVector = FALSE)
-  imports <- setdiff(declared_packages(root), c(
-    # Suggests are not part of the runtime closure.
-    "covr", "parsnip", "ranger", "spelling", "testthat", "xgboost"))
+  # Runtime closure only: Suggests (test and optional engine packages) are not
+  # part of the manifest.
+  d <- read.dcf(file.path(root, "DESCRIPTION"), fields = c("Depends", "Imports", "LinkingTo"))
+  imports <- trimws(sub("\\(.*", "", unlist(strsplit(paste(d, collapse = ","), ",|\n"))))
+  imports <- setdiff(imports[nzchar(imports) & !is.na(imports)], "R")
   imports <- setdiff(imports, rownames(utils::installed.packages(priority = "base")))
   expect_identical(sort(setdiff(imports, names(manifest$packages))), character(0))
 
