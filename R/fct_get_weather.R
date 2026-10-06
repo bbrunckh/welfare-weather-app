@@ -27,10 +27,15 @@
 # scan would have produced, in the same scan order (DuckDB is pinned to one    #
 # thread for the duration of get_weather, so order is deterministic).          #
 #                                                                              #
-# Keying: digest of (cache version, resolved file paths, variable columns,     #
-# date bounds). The version constant must be bumped whenever the upstream      #
-# file layout changes. Kill switch: WISEAPP_WEATHER_CACHE_DISABLE=1. Size cap: #
-# WISEAPP_WEATHER_CACHE_MAX_MB (default 2048), LRU-evicted by mtime.           #
+# Keying: digest of (cache version, source identity, resolved file paths,      #
+# variable columns, date bounds). The source identity (backend type, host,     #
+# bucket/container, prefix, path root, repo - never credentials) keeps two     #
+# data sources with the same relative file names apart. The version constant  #
+# must be bumped whenever the upstream file layout changes. Kill switch:       #
+# WISEAPP_WEATHER_CACHE_DISABLE=1. Size cap: WISEAPP_WEATHER_CACHE_MAX_MB      #
+# (default 2048), LRU-evicted by mtime (touched on every hit); files younger   #
+# than the async run timeout are never evicted. The directory is created      #
+# owner-only (0700) and writes go through a unique temp file plus rename.      #
 
 WISEAPP_WX_CACHE_VERSION <- "v1"
 WISEAPP_WX_ROUND_DIGITS <- 5L
@@ -262,14 +267,48 @@ WISEAPP_WX_ROUND_DIGITS <- 5L
   if (total_mb <= max_mb) {
     return(invisible(NULL))
   }
-  # LRU: delete oldest-accessed files first until under budget
+  # Never evict a file a live run may still be reading: anything used within
+  # the async run timeout (default 90 minutes, also when the timeout is off).
+  min_age_sec <- (.wise_step2_async_timeout_ms("step2") %||% (90 * 60 * 1000)) / 1000
+  evictable <- difftime(Sys.time(), info$mtime, units = "secs") >= min_age_sec
+  evictable[is.na(evictable)] <- FALSE
+  # LRU: delete least recently used files first (hits touch mtime) until
+  # under budget
   ord <- order(info$mtime)
-  for (f in files[ord]) {
+  for (f in files[ord][evictable[ord]]) {
     if (total_mb <= max_mb) break
     sz <- info[f, "size"]
     if (unlink(f) == 0 && is.finite(sz)) total_mb <- total_mb - sz / 1024^2
   }
   invisible(NULL)
+}
+
+# Identity of the data source for cache keys: backend type plus the fields
+# that locate the store. Credentials are deliberately excluded.
+.wx_cache_source_id <- function(connection_params) {
+  cp <- connection_params %||% list()
+  type <- cp$type %||% "local"
+  fields <- switch(type,
+    local = "path",
+    s3 = c("bucket", "prefix", "region"),
+    gcs = c("bucket", "prefix"),
+    azure = c("account", "container", "prefix"),
+    hf = c("repo", "subdir"),
+    databricks = c("workspace", "volume_path"),
+    character()
+  )
+  id <- vapply(fields, function(f) as.character(cp[[f]] %||% "")[1L], character(1L))
+  if (identical(type, "local") && nzchar(id[["path"]])) {
+    id[["path"]] <- normalizePath(id[["path"]], winslash = "/", mustWork = FALSE)
+  }
+  c(type = type, id)
+}
+
+# Unique temp file next to `path`, so concurrent writers (main process, async
+# worker, other Connect processes) never share a partial file.
+.wx_cache_tmp_path <- function(path) {
+  tempfile(pattern = paste0(basename(path), "-"), tmpdir = dirname(path),
+           fileext = ".tmp")
 }
 
 #' Load a remote weather/h3 parquet set through the bounded disk cache.
@@ -308,7 +347,10 @@ WISEAPP_WX_ROUND_DIGITS <- 5L
   use_cache <- (!identical(type, "local") || force_cache) &&
     !isTRUE(Sys.getenv("WISEAPP_WEATHER_CACHE_DISABLE") %in% c("1", "true", "TRUE"))
 
-  key <- digest::digest(list(cache_version, sort(fnames), cols, tcol, tmin, tmax))
+  key <- digest::digest(list(
+    cache_version, .wx_cache_source_id(connection_params),
+    sort(fnames), cols, tcol, tmin, tmax
+  ))
   dir <- .weather_cache_dir()
   path <- file.path(dir, paste0(key, ".parquet"))
 
@@ -320,6 +362,8 @@ WISEAPP_WX_ROUND_DIGITS <- 5L
       error = function(e) NULL
     )
     if (!is.null(local)) {
+      # LRU: a hit marks the slice as recently used for eviction.
+      try(Sys.setFileTime(path, Sys.time()), silent = TRUE)
       return(apply_slice(local))
     }
   }
@@ -331,19 +375,20 @@ WISEAPP_WX_ROUND_DIGITS <- 5L
   }
 
   if (!file.exists(path)) {
-    dir.create(dir, showWarnings = FALSE, recursive = TRUE)
+    dir.create(dir, showWarnings = FALSE, recursive = TRUE, mode = "0700")
     filtered <- apply_slice(lazy)
     con <- .duck_con()
-    tmp_path <- paste0(path, ".tmp")
+    tmp_path <- .wx_cache_tmp_path(path)
     ok <- tryCatch(
       {
         DBI::dbExecute(con, sprintf(
-          "COPY (%s) TO '%s' (FORMAT PARQUET, COMPRESSION ZSTD);",
-          dbplyr::sql_render(filtered), tmp_path
+          "COPY (%s) TO %s (FORMAT PARQUET, COMPRESSION ZSTD);",
+          dbplyr::sql_render(filtered), .sql_literal(tmp_path)
         ))
         TRUE
       },
       error = function(e) {
+        try(unlink(tmp_path), silent = TRUE)
         warning("[wiseapp] weather disk cache write failed; continuing remote: ",
           conditionMessage(e),
           call. = FALSE
@@ -405,11 +450,14 @@ WISEAPP_WX_LOC_CACHE_VERSION <- "v1"
   }
   ok <- tryCatch(
     {
-      if (!dir.exists(dir)) dir.create(dir, showWarnings = FALSE, recursive = TRUE)
-      tmp_path <- paste0(path, ".tmp")
+      if (!dir.exists(dir)) {
+        dir.create(dir, showWarnings = FALSE, recursive = TRUE, mode = "0700")
+      }
+      tmp_path <- .wx_cache_tmp_path(path)
+      on.exit(if (file.exists(tmp_path)) unlink(tmp_path), add = TRUE)
       DBI::dbExecute(con, sprintf(
-        "COPY (SELECT * FROM %s) TO '%s' (FORMAT PARQUET, COMPRESSION ZSTD);",
-        temp_table, tmp_path
+        "COPY (SELECT * FROM %s) TO %s (FORMAT PARQUET, COMPRESSION ZSTD);",
+        temp_table, .sql_literal(tmp_path)
       ))
       if (!file.rename(tmp_path, path)) {
         # Concurrent write race: another session won; discard our copy
@@ -442,8 +490,8 @@ WISEAPP_WX_LOC_CACHE_VERSION <- "v1"
   ok <- tryCatch(
     {
       DBI::dbExecute(con, sprintf(
-        "CREATE TEMP TABLE %s AS SELECT * FROM read_parquet('%s');",
-        temp_table, path
+        "CREATE TEMP TABLE %s AS SELECT * FROM read_parquet(%s);",
+        temp_table, .sql_literal(path)
       ))
       TRUE
     },
@@ -452,13 +500,16 @@ WISEAPP_WX_LOC_CACHE_VERSION <- "v1"
   if (is.null(ok)) {
     return(NULL)
   }
+  try(Sys.setFileTime(path, Sys.time()), silent = TRUE)
   dplyr::tbl(con, temp_table)
 }
 
 .wx_loc_cache_key <- function(weather_fnames, h3_fnames, weather_vars,
-                              date_min, date_max, res_micro, res_weather) {
+                              date_min, date_max, res_micro, res_weather,
+                              connection_params) {
   digest::digest(list(
     "loc-monthly", WISEAPP_WX_LOC_CACHE_VERSION, WISEAPP_WX_CACHE_VERSION,
+    .wx_cache_source_id(connection_params),
     sort(weather_fnames), sort(h3_fnames), weather_vars,
     date_min, date_max, res_micro, res_weather
   ))
@@ -466,10 +517,43 @@ WISEAPP_WX_LOC_CACHE_VERSION <- "v1"
 
 # H3 spatial helpers ----
 
+#' Detect the single H3 resolution of a lazy table's `h3` column.
+#'
+#' Scans every non-missing cell (not one arbitrary row), so the result does
+#' not depend on scan order, and stops when the table mixes resolutions.
+#'
+#' @param tbl   Lazy `dplyr::tbl` with an `h3` column (string or bigint).
+#' @param con   DBI connection with the H3 extension loaded.
+#' @param label Table description used in error messages.
+#' @return The H3 resolution (integer).
+#' @noRd
+.h3_resolution <- function(tbl, con, label) {
+  h3_sql <- dbplyr::sql_render(
+    tbl |> dplyr::filter(!is.na(h3)) |> dplyr::select(h3)
+  )
+  res <- DBI::dbGetQuery(con, sprintf(
+    paste(
+      "SELECT MIN(h3_get_resolution(h3)) AS lo,",
+      "MAX(h3_get_resolution(h3)) AS hi FROM (%s) _t"
+    ),
+    h3_sql
+  ))
+  if (is.na(res$lo[[1L]])) {
+    stop(label, " data contains no H3 cells.", call. = FALSE)
+  }
+  if (res$lo[[1L]] != res$hi[[1L]]) {
+    stop(sprintf(
+      "%s data mixes H3 resolutions %d to %d; expected a single resolution.",
+      label, res$lo[[1L]], res$hi[[1L]]
+    ), call. = FALSE)
+  }
+  res$lo[[1L]]
+}
+
 #' Harmonise H3 resolution and type between microdata and weather tables.
 #'
 #' This helper:
-#' 1. Detects the H3 resolution of each table by sampling one row.
+#' 1. Detects the H3 resolution of each table (`.h3_resolution()`).
 #' 2. Chooses the **coarser** (lower numeric) resolution as the join key.
 #'    This handles all three cases:
 #'    * weather coarser than microdata  -> map microdata up to weather res
@@ -494,22 +578,8 @@ WISEAPP_WX_LOC_CACHE_VERSION <- "v1"
 #'   * `same_res`     - logical, TRUE when no parent lookup was needed.
 #' @noRd
 .harmonise_h3 <- function(h3_slim, weather, con) {
-  micro_h3_sql <- dbplyr::sql_render(
-    h3_slim |> dplyr::filter(!is.na(h3)) |> dplyr::select(h3) |> head(1)
-  )
-  weather_h3_sql <- dbplyr::sql_render(
-    weather |> dplyr::filter(!is.na(h3)) |> dplyr::select(h3) |> head(1)
-  )
-
-  res_micro <- DBI::dbGetQuery(
-    con,
-    sprintf("SELECT h3_get_resolution(h3) AS res FROM (%s) _t", micro_h3_sql)
-  )$res[[1L]]
-
-  res_weather <- DBI::dbGetQuery(
-    con,
-    sprintf("SELECT h3_get_resolution(h3) AS res FROM (%s) _t", weather_h3_sql)
-  )$res[[1L]]
+  res_micro <- .h3_resolution(h3_slim, con, "H3 mapping")
+  res_weather <- .h3_resolution(weather, con, "Weather")
 
   target_res <- min(res_micro, res_weather)
   same_res <- (res_micro == res_weather)
@@ -686,8 +756,11 @@ WISEAPP_WX_LOC_CACHE_VERSION <- "v1"
       if (tf == "Deviation from mean") {
         dbplyr::sql(paste0(v, " - ", specs$mean_col[i]))
       } else if (tf == "Standardized anomaly") {
+        # A zero reference SD (e.g. dry-season precipitation) has no defined
+        # anomaly: return NA instead of NaN/Inf (R2-BUG-29).
         dbplyr::sql(paste0(
-          "(", v, " - ", specs$mean_col[i], ") / ", specs$sd_col[i]
+          "CASE WHEN ", specs$sd_col[i], " = 0 THEN NULL ELSE (",
+          v, " - ", specs$mean_col[i], ") / ", specs$sd_col[i], " END"
         ))
       } else {
         NULL
@@ -700,6 +773,40 @@ WISEAPP_WX_LOC_CACHE_VERSION <- "v1"
 
   tbl |>
     dplyr::select(-month, -dplyr::all_of(ref_cols))
+}
+
+#' Warn once about location-months whose standardized-anomaly reference SD is 0.
+#'
+#' @param climate_ref Result from `.build_climate_reference()`.
+#' @return Invisibly, the number of affected location-month rows.
+#' @noRd
+.warn_zero_sd_reference <- function(climate_ref) {
+  specs <- climate_ref$specs
+  specs <- specs[specs$transformation == "Standardized anomaly", , drop = FALSE]
+  if (!nrow(specs)) {
+    return(invisible(0))
+  }
+  counts <- climate_ref$tbl |>
+    dplyr::summarise(!!!stats::setNames(
+      lapply(specs$sd_col, function(col) {
+        dbplyr::sql(paste0("COUNT(*) FILTER (WHERE ", col, " = 0)"))
+      }),
+      specs$name
+    )) |>
+    dplyr::collect()
+  counts <- vapply(counts, as.numeric, numeric(1L))
+  if (sum(counts) > 0) {
+    hit <- counts[counts > 0]
+    warning(sprintf(
+      paste0(
+        "Standardized anomaly: %s location-month(s) have a zero 1991-2020 ",
+        "reference SD and were set to NA (%s)."
+      ),
+      format(sum(hit), big.mark = ","),
+      paste0(names(hit), ": ", format(hit, big.mark = ","), collapse = ", ")
+    ), call. = FALSE)
+  }
+  invisible(sum(counts))
 }
 
 #' Compute bin breakpoints from a reference data frame.
@@ -915,7 +1022,11 @@ get_weather <- function(
   weather_threads = c("auto", "1", "2"),
   weather_consumer = NULL
 ) {
-  weather_profile <- if (.wx_profile_enabled()) new.env(parent = emptyenv()) else NULL
+  # The async Step 2 worker passes dates as character. Coerce once so the
+  # climate-reference window (max() against a Date below), the date filters
+  # and the cache keys behave exactly as on the synchronous Date path.
+  dates <- as.Date(dates)
+  weather_profile <-if (.wx_profile_enabled()) new.env(parent = emptyenv()) else NULL
   if (!is.null(weather_profile)) {
     weather_profile$records <- list()
     weather_profile$plan <- .wx_profile_plan()
@@ -1216,7 +1327,7 @@ get_weather <- function(
   loc_cache_enabled <- !.wx_env_flag("WISEAPP_WEATHER_CACHE_DISABLE")
   loc_base_key <- .wx_loc_cache_key(
     weather_fnames, h3_fnames, weather_vars, date_min, date_max,
-    h3_harmonised$res_micro, h3_harmonised$res_weather
+    h3_harmonised$res_micro, h3_harmonised$res_weather, connection_params
   )
   h3_weights_key <- digest::digest(list(loc_base_key, "h3_weights"))
   loc_monthly_key <- digest::digest(list(loc_base_key, "loc_monthly"))
@@ -1308,6 +1419,7 @@ get_weather <- function(
       name = tmp_ref_name,
       temporary = TRUE
     ))
+    .warn_zero_sd_reference(climate_ref)
   }
 
   # -- Assemble result -------------------------------------------------------
@@ -1453,18 +1565,7 @@ get_weather <- function(
     )
 
     cmip6_res <- tryCatch(
-      {
-        probe_sql <- dbplyr::sql_render(
-          cmip6_hist_raw_lazy |>
-            dplyr::filter(!is.na(h3)) |>
-            dplyr::select(h3) |>
-            head(1)
-        )
-        DBI::dbGetQuery(
-          con,
-          sprintf("SELECT h3_get_resolution(h3) AS res FROM (%s) _t", probe_sql)
-        )$res[[1L]]
-      },
+      .h3_resolution(cmip6_hist_raw_lazy, con, "CMIP6 historical"),
       error = function(e) h3_harmonised$target_res
     )
 
@@ -1519,10 +1620,22 @@ get_weather <- function(
       tbl
     }
 
-    # CMIP6 historical baseline - shared across all SSPs (same files)
+    # CMIP6 baseline rows. The historical file ends in 2014 and the SSP files
+    # start in 2015, so the baseline climatology must pool the raw monthly rows
+    # of both parts and average once (CR-BUG-01): averaging two separate
+    # climatologies gives the few SSP years far too much weight. Each part is
+    # clipped at the boundary so an overlap is never counted twice.
+    cmip6_ssp_start <- as.Date("2015-01-01")
+
+    # Historical-file baseline rows - shared across all SSPs (same files)
     h3_hist_raw <- .profile_timed(
       "cmip6_historical_aggregate",
-      .cmip6_h3_monthly(cmip6_hist_raw_lazy, baseline_start, baseline_end),
+      cmip6_hist_raw_lazy |>
+        dplyr::select(dplyr::all_of(cmip6_cols)) |>
+        dplyr::filter(
+          timestamp >= baseline_start, timestamp <= baseline_end,
+          timestamp < cmip6_ssp_start
+        ),
       detail = "shared historical baseline"
     )
     if (!is.null(weather_profile) && identical(weather_profile$plan, "shared_hist")) {
@@ -1578,20 +1691,20 @@ get_weather <- function(
         tmax = ssp_tmax
       )
 
-      # SSP baseline overlap - shared across all future periods
+      # SSP-file baseline rows (2015 onwards) - shared across all future periods
        h3_ssp_raw <- .profile_timed(
          "cmip6_ssp_baseline_aggregate",
-         .cmip6_h3_monthly(ssp_raw_lazy, baseline_start, baseline_end),
+         ssp_raw_lazy |>
+           dplyr::select(dplyr::all_of(cmip6_cols)) |>
+           dplyr::filter(timestamp >= cmip6_ssp_start),
          detail = ssp_i
        )
 
-      # Combined CMIP6 historical baseline (hist + ssp overlap period)
-       h3_hist <- dplyr::union_all(h3_hist_raw, h3_ssp_raw) |>
-        dplyr::group_by(model, h3, month) |>
-        dplyr::summarise(
-          dplyr::across(dplyr::all_of(weather_vars), ~ mean(.x, na.rm = TRUE)),
-          .groups = "drop"
-        )
+      # Combined CMIP6 baseline: one monthly mean over the pooled raw rows
+       h3_hist <- .cmip6_h3_monthly(
+         dplyr::union_all(h3_hist_raw, h3_ssp_raw),
+         baseline_start, baseline_end
+       )
 
       # Aggregate every requested period once, then join the combined relation
       # to h3_slim once. This removes the repeated location-level spatial join

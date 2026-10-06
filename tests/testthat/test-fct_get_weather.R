@@ -1499,3 +1499,216 @@ test_that("baseline-wave filtering preserves historical and future keys across s
     expect_setequal(unique(actual$survname), baseline$survname)
   }
 })
+
+# ============================================================================ #
+# 8. Review 2026-10-06 weather fixes                                           #
+# ============================================================================ #
+
+# Long-history fixture: the basic h3 mapping plus monthly weather from 1985 to
+# 2020, so the 1991-2020 climate reference is fully covered. Survey dates sit
+# in 2005, i.e. a historical window that ends well before 2020.
+make_long_history_fixture <- function(dir) {
+  fx <- make_test_fixtures(dir)
+  code <- fx$selected_surveys$code
+  weather_path <- file.path(
+    dir, "hazard", "weather", "historical", code,
+    paste0(code, "_era5land.parquet")
+  )
+  cells <- unique(arrow::read_parquet(weather_path)$h3)
+  timestamps <- seq(as.Date("1985-01-01"), as.Date("2020-12-01"), by = "1 month")
+  weather_df <- expand.grid(
+    cell_idx = seq_along(cells), timestamp = timestamps,
+    stringsAsFactors = FALSE
+  )
+  weather_df$h3 <- cells[weather_df$cell_idx]
+  weather_df$cell_idx <- NULL
+  set.seed(7)
+  # A warming trend makes the reference depend on which years it covers.
+  trend <- as.numeric(format(weather_df$timestamp, "%Y")) - 1985
+  weather_df$tx <- 25 + 0.05 * trend + stats::rnorm(nrow(weather_df), sd = 1)
+  arrow::write_parquet(weather_df, weather_path)
+
+  fx$dates <- seq(as.Date("2005-01-01"), as.Date("2005-12-01"), by = "1 month")
+  fx$survey_data$timestamp <- rep(fx$dates, length.out = nrow(fx$survey_data))
+  fx
+}
+
+test_that("R2-BUG-01: character and Date dates give identical weather and cache keys", {
+  skip_if_not_installed("arrow")
+  skip_if_not_installed("duckdb")
+  skip_if_not_installed("duckdbfs")
+  skip_if_not_installed("bit64")
+
+  fx <- make_long_history_fixture(withr::local_tempdir())
+  cache_dir <- withr::local_tempdir()
+  withr::local_envvar(
+    WISEAPP_WEATHER_CACHE_DIR = cache_dir,
+    WISEAPP_WEATHER_CACHE_FORCE = "1",
+    WISEAPP_WEATHER_CACHE_DISABLE = NA
+  )
+
+  run <- function(dates, transformation) get_weather(
+    survey_data = fx$survey_data,
+    selected_surveys = fx$selected_surveys,
+    selected_weather = sw_continuous("tx", transformation = transformation),
+    dates = dates,
+    connection_params = fx$connection_params
+  )
+
+  for (tf in c("Deviation from mean", "Standardized anomaly")) {
+    sync <- run(fx$dates, tf)
+    cached <- list.files(cache_dir, recursive = TRUE)
+    async <- run(as.character(fx$dates), tf)
+    expect_identical(async$historical, sync$historical, info = tf)
+    expect_true(all(is.finite(sync$historical$tx)), info = tf)
+    # The async (character) call must reuse every cache entry the sync call
+    # wrote, i.e. both derive identical cache keys.
+    expect_identical(list.files(cache_dir, recursive = TRUE), cached, info = tf)
+  }
+})
+
+test_that("CR-BUG-01: CMIP6 baseline pools historical and SSP rows once", {
+  skip_if_not_installed("arrow")
+  skip_if_not_installed("duckdb")
+  skip_if_not_installed("duckdbfs")
+  skip_if_not_installed("bit64")
+
+  dir <- withr::local_tempdir()
+  fx <- make_long_history_fixture(dir)
+  withr::local_envvar(WISEAPP_WEATHER_CACHE_DISABLE = "1")
+  code <- fx$selected_surveys$code
+  cells <- unique(arrow::read_parquet(file.path(
+    dir, "hazard", "weather", "historical", code,
+    paste0(code, "_era5land.parquet")
+  ))$h3)
+
+  cmip6_df <- function(from, to, tx) {
+    months <- seq(as.Date(from), as.Date(to), by = "1 month")
+    df <- expand.grid(h3 = cells, timestamp = months)
+    df$model <- "TESTMOD"
+    df$tx <- tx
+    df[, c("h3", "model", "timestamp", "tx")]
+  }
+  proj_dir <- file.path(dir, "hazard", "weather", "projections", code)
+  dir.create(proj_dir, recursive = TRUE, showWarnings = FALSE)
+  # Historical part: 24 baseline years (1991-2014) at 20. Rows past 2014 must
+  # be ignored (they belong to the SSP part).
+  arrow::write_parquet(
+    rbind(
+      cmip6_df("1991-01-01", "2014-12-01", 20),
+      cmip6_df("2015-01-01", "2020-12-01", 100)
+    ),
+    file.path(proj_dir, paste0(code, "_cmip6_historical.parquet"))
+  )
+  # SSP part: 6 baseline years (2015-2020) at 25 and the future at 30. Rows
+  # before 2015 overlap the historical part and must not be counted again.
+  arrow::write_parquet(
+    rbind(
+      cmip6_df("2010-01-01", "2014-12-01", 100),
+      cmip6_df("2015-01-01", "2020-12-01", 25),
+      cmip6_df("2025-01-01", "2025-12-01", 30)
+    ),
+    file.path(proj_dir, paste0(code, "_cmip6_ssp245.parquet"))
+  )
+
+  dates <- seq(as.Date("1991-01-01"), as.Date("2020-12-01"), by = "1 month")
+  result <- get_weather(
+    survey_data = fx$survey_data,
+    selected_surveys = fx$selected_surveys,
+    selected_weather = sw_continuous("tx"),
+    dates = dates,
+    connection_params = fx$connection_params,
+    ssp = "ssp2_4_5",
+    future_period = c("2025-01-01", "2025-12-31"),
+    perturbation_method = c(tx = "additive")
+  )
+
+  scen_name <- grep("ssp2_4_5", names(result), value = TRUE)
+  expect_length(scen_name, 1L)
+  cmp <- merge(
+    result[[scen_name]][, c("loc_id", "timestamp", "tx")],
+    result$historical[, c("loc_id", "timestamp", "tx")],
+    by = c("loc_id", "timestamp"), suffixes = c("_fut", "_hist")
+  )
+  cmp <- cmp[stats::complete.cases(cmp), , drop = FALSE]
+  expect_gt(nrow(cmp), 0L)
+  # Pooled baseline = 0.8 * 20 + 0.2 * 25 = 21, so the delta is 30 - 21 = 9.
+  # The old mean of two climatologies gave (20 + 25) / 2 = 22.5 (delta 7.5).
+  expect_equal(cmp$tx_fut - cmp$tx_hist, rep(9, nrow(cmp)), tolerance = 1e-6)
+})
+
+test_that("R2-BUG-29: zero reference SD gives NA standardized anomalies and one warning", {
+  skip_if_not_installed("duckdb")
+
+  con <- DBI::dbConnect(duckdb::duckdb(), dbdir = ":memory:")
+  withr::defer(DBI::dbDisconnect(con, shutdown = TRUE))
+
+  # January is dry in every reference year (SD 0); February varies. The 2021
+  # January row is wet, which used to give Inf; dry reference rows gave NaN.
+  base <- data.frame(
+    code = "A", year = 2021L, survname = "S", loc_id = "L1",
+    timestamp = as.Date(c(
+      "1995-01-01", "2000-01-01", "2005-01-01", "2021-01-01",
+      "1995-02-01", "2000-02-01", "2005-02-01"
+    )),
+    r = c(0, 0, 0, 3, 1, 2, 6),
+    stringsAsFactors = FALSE
+  )
+  base_tbl <- dplyr::copy_to(con, base, "r2bug29_base", temporary = TRUE)
+  selected <- data.frame(
+    name = "r", transformation = "Standardized anomaly",
+    stringsAsFactors = FALSE
+  )
+
+  ref <- .build_climate_reference(base_tbl, selected)
+  out <- .apply_transformations(base_tbl, selected, base_tbl, climate_ref = ref) |>
+    dplyr::arrange(timestamp) |>
+    dplyr::collect()
+
+  jan <- format(out$timestamp, "%m") == "01"
+  expect_true(all(is.na(out$r[jan])))
+  expect_false(any(is.nan(out$r)))
+  expect_true(all(is.finite(out$r[!jan])))
+  expect_equal(out$r[!jan], (c(1, 2, 6) - 3) / stats::sd(c(1, 2, 6)))
+
+  expect_warning(
+    n <- .warn_zero_sd_reference(ref),
+    "1 location-month\\(s\\) have a zero 1991-2020 reference SD.*r: 1"
+  )
+  expect_equal(n, 1)
+
+  deviation <- .build_climate_reference(
+    base_tbl, transform(selected, transformation = "Deviation from mean")
+  )
+  expect_no_warning(.warn_zero_sd_reference(deviation))
+})
+
+test_that("CR-BUG-17: H3 resolution uses every row and rejects mixed resolutions", {
+  skip_if_not_installed("duckdb")
+  skip_if_not_installed("bit64")
+
+  con <- make_h3_con()
+  on.exit(DBI::dbDisconnect(con, shutdown = TRUE), add = TRUE)
+
+  res5 <- "85283473fffffff"
+  res4 <- "8428347ffffffff"
+  single <- dplyr::tbl(con, dplyr::sql(sprintf(
+    "SELECT * FROM (VALUES (NULL::VARCHAR), ('%s'), ('%s')) t(h3)", res5, res5
+  )))
+  expect_identical(.h3_resolution(single, con, "Test"), 5L)
+
+  # The old probe read one arbitrary row, so the detected resolution depended
+  # on scan order. Mixed resolutions now fail regardless of row order.
+  for (cells in list(c(res5, res4), c(res4, res5))) {
+    mixed <- dplyr::tbl(con, dplyr::sql(sprintf(
+      "SELECT * FROM (VALUES ('%s'), ('%s')) t(h3)", cells[1], cells[2]
+    )))
+    expect_error(
+      .h3_resolution(mixed, con, "Test"),
+      "mixes H3 resolutions 4 to 5"
+    )
+  }
+
+  empty <- dplyr::tbl(con, dplyr::sql("SELECT NULL::VARCHAR AS h3"))
+  expect_error(.h3_resolution(empty, con, "Test"), "contains no H3 cells")
+})
