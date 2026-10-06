@@ -802,7 +802,7 @@ get_first_bin_label <- function(df, hv) {
 
 #' Build a coefficient plot across three progressive model fits
 #'
-#' Uses `fixest` HC-robust SEs and plots all three models side-by-side,
+#' Uses the fits' stored `fixest` SEs and plots all three models side-by-side,
 #' replicating the `jtools::plot_summs()` style. For RIF engines, produces
 #' beta-curve plots (coefficient vs quantile, faceted by term).
 #'

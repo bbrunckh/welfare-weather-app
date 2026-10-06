@@ -314,13 +314,24 @@ test_that("redesigned sections render: who-panel, focused table, RIF suppression
       # Focused table + spec comparison render; AER table inside details
       expect_match(html_of("focused_table"), "focused-reactable", fixed = TRUE)
       expect_match(html_of("specs_table"), "specs-reactable", fixed = TRUE)
+      expect_match(html_of("focused_header_ui"), "SEs clustered by loc_id_panel",
+                   fixed = TRUE)
+
+      # R2-BUG-09: without a cluster, fixest's default VCOV is IID, so the
+      # table must not claim robust SEs.
+      sel_model(list(engine = "fixest"))
+      session$elapse(500); session$flushReact()
+      run_model(3L); settle()
+      run_model(4L); settle()
+      expect_match(html_of("focused_header_ui"), "IID (non-robust) SEs", fixed = TRUE)
+      expect_no_match(html_of("focused_header_ui"), "HC1", fixed = TRUE)
 
       # Refit as RIF: coefficient stability gets a tau selector, the who note
       # switches to quantile wording, and specs comparison is hidden.
       sel_model(list(engine = "rif"))
       session$elapse(500); session$flushReact()
-      run_model(3L); settle()
-      run_model(4L); settle()
+      run_model(5L); settle()
+      run_model(6L); settle()
       expect_match(html_of("heading_coef"), "stable across specifications")
       expect_match(html_of("rif_tau_selector"), "Welfare quantile")
       expect_match(html_of("rif_tau_selector"), "τ = 0.5")
