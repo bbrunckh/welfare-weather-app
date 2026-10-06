@@ -13,24 +13,6 @@
 
 # Run full simulation pipeline ----
 
-.run_simulation_parallel_chunk <- function(jobs, pipeline_args, package_path = NULL) {
-  if (!is.null(package_path) && !isNamespaceLoaded("wiseapp")) {
-    pkgload::load_all(package_path, quiet = TRUE)
-  }
-  worker_pipeline <- get("run_sim_pipeline", envir = asNamespace("wiseapp"))
-  lapply(jobs, function(job) {
-    started <- proc.time()[["elapsed"]]
-    tryCatch(
-      c(list(index = job$index, key = job$key),
-        list(out = do.call(worker_pipeline, c(list(weather_raw = job$weather), pipeline_args)),
-          error = NULL, elapsed = proc.time()[["elapsed"]] - started)),
-      error = function(e) list(index = job$index, key = job$key, out = NULL,
-        error = conditionMessage(e), elapsed = proc.time()[["elapsed"]] - started)
-    )
-  })
-}
-environment(.run_simulation_parallel_chunk) <- baseenv()
-
 .STEP2_SSP_LABELS <- c(
   "ssp2_4_5" = "SSP2-4.5",
   "ssp3_7_0" = "SSP3-7.0",
@@ -511,9 +493,6 @@ fct_run_simulation <- function(sw,
       paste(wt_detected, collapse = ", "), weight_col_sim
     ))
   }
-
-  # Serial execution only - parallelisation removed
-  n_workers_safe <- 1L
 
   # Precompute objects shared across all keys ----
 

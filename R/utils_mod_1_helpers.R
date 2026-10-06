@@ -830,8 +830,7 @@ ridge_echart_widget <- function(rd_data, ridge_levels, ridge_labels, styles,
 
 #' Echarts residuals vs weather plot
 #'
-#' Interactive counterpart of `plot_resid_weather()` (fct_results.R,
-#' guidelines §7): the same data preparation (model frame / binned column
+#' Residuals against one weather predictor (model frame / binned column
 #' fallback, bin ordering and labels) drawn as an `echarts4r` widget. Grey
 #' points are individual residuals (jittered within bins for binned
 #' predictors), orange marks are bin means, and the dashed line marks zero.
@@ -844,12 +843,11 @@ ridge_echart_widget <- function(rd_data, ridge_levels, ridge_labels, styles,
 #' @param height     Widget height; a CSS length or a number of pixels.
 #'
 #' @return An `echarts4r` widget, or `NULL` invisibly when there is nothing
-#'   to draw (same contract as the ggplot builder).
+#'   to draw.
 #'
 #' @noRd
 echart_resid_weather <- function(model, haz_var, weather_df, x_label = haz_var,
                                  height = "300px") {
-  # Data preparation copied verbatim from plot_resid_weather().
   df <- tryCatch(stats::model.frame(model), error = function(e) NULL)
 
   if (is.null(df) || !haz_var %in% names(df)) {

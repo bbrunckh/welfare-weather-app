@@ -218,38 +218,6 @@ build_selected_outcome <- function(info, currency = NULL, poverty_line = NULL) {
 }
 
 
-# Outcome missingness summary ----
-
-#' Compute missingness summary for the selected outcome variable
-#'
-#' @param df      Survey data frame.
-#' @param outcome Single character string - the outcome variable name.
-#'
-#' @return A one-row data frame with columns \code{variable}, \code{n_total},
-#'   \code{n_available}, \code{n_missing}, \code{pct_available}.
-#' @export
-outcome_missing_summary <- function(df, outcome) {
-  if (is.null(df) || !outcome %in% names(df)) {
-    return(data.frame(
-      variable = outcome, n_total = NA_integer_,
-      n_available = NA_integer_, n_missing = NA_integer_,
-      pct_available = NA_real_, stringsAsFactors = FALSE
-    ))
-  }
-  x <- df[[outcome]]
-  n <- length(x)
-  n_ok <- sum(!is.na(x))
-  data.frame(
-    variable = outcome,
-    n_total = n,
-    n_available = n_ok,
-    n_missing = n - n_ok,
-    pct_available = round(100 * n_ok / max(n, 1), 1),
-    stringsAsFactors = FALSE
-  )
-}
-
-
 # Outcome ridges use one colour per economy, matching the wave series in the
 # interview-date and weather charts. The ridge labels already identify each
 # wave, so a quiet economy-level fill is clearer than a separate legend entry

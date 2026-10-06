@@ -1,18 +1,3 @@
-#' 3_07_results UI Function
-#'
-#' @description A shiny Module. The Baseline and Policy results tabs are
-#'   inserted into the parent tabset on the first successful policy
-#'   simulation run, so this UI returns nothing.
-#'
-#' @param id Internal parameter for {shiny}.
-#'
-#' @noRd
-#'
-#' @importFrom shiny NS tagList
-mod_3_07_results_ui <- function(id) {
-  tagList()
-}
-
 #' 3_07_results Server Functions
 #'
 #' Renders Baseline and Policy results tabs in the Step 3 tabset, each a

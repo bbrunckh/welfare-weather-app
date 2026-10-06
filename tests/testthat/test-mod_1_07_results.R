@@ -44,7 +44,6 @@ test_that("fit snapshot captures fit-time labels; headings follow re-fit engine"
     # internals need real fitted models which are irrelevant here.
     echart_make_coefplot      = function(...) NULL,
     echart_weather_effect_plot = function(...) NULL,
-    make_regtable           = function(...) shiny::tags$p("table"),
     is_logistic_fit         = function(mf) FALSE
   )
 
@@ -152,7 +151,6 @@ test_that("REACT-14: specification fallbacks render the provenance banner", {
     },
     echart_make_coefplot      = function(...) NULL,
     echart_weather_effect_plot = function(...) NULL,
-    make_regtable            = function(...) shiny::tags$p("table"),
     is_logistic_fit          = function(mf) FALSE
   )
 

@@ -23,11 +23,9 @@ mod_1_04_weather_ui <- function(id) {
 #'
 #' @param id              Module id.
 #' @param variable_list   Reactive data frame of variable metadata.
-#' @param selected_surveys Reactive data frame of selected surveys.
-#' @param survey_data     Reactive data frame of loaded survey data.
 #'
 #' @noRd
-mod_1_04_weather_server <- function(id, variable_list, selected_surveys, survey_data) {
+mod_1_04_weather_server <- function(id, variable_list) {
   moduleServer(id, function(input, output, session) {
     ns <- session$ns
 

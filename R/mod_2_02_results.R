@@ -1,21 +1,3 @@
-#' 2_02_results UI Function
-#'
-#' @description A shiny Module. Renders the Results tab content: point-range
-#'   chart, threshold table/bar, and exceedance curve. Consolidates logic from
-#'   the former mod_2_02_historical_sim (tab insertion) and
-#'   mod_2_06_sim_compare (all visualisations).
-#'
-#' @param id Internal parameter for {shiny}.
-#'
-#' @noRd
-#'
-#' @importFrom shiny NS tagList
-mod_2_02_results_ui <- function(id) {
-  # Placeholder - the real content is injected via insertUI in the server.
-  tagList()
-}
-
-
 #' Results tab content UI (inserted into the Results tabPanel once).
 #' @noRd
 .results_content_ui <- function(ns, so, weather_var = NULL) {
