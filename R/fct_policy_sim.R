@@ -830,14 +830,14 @@ policy_placeholder_tag <- function(category_label, candidate_df) {
     idx0 <- which(x_out == 0L & !is.na(x_out))
     n_flip <- round(length(idx0) * change_pct / 100)
     if (n_flip > 0 && length(idx0) > 0) {
-      flip <- sample(idx0, min(n_flip, length(idx0)))
+      flip <- idx0[sample.int(length(idx0), min(n_flip, length(idx0)))]
       x_out[flip] <- 1L
     }
   } else {
     idx1 <- which(x_out == 1L & !is.na(x_out))
     n_flip <- round(length(idx1) * abs(change_pct) / 100)
     if (n_flip > 0 && length(idx1) > 0) {
-      flip <- sample(idx1, min(n_flip, length(idx1)))
+      flip <- idx1[sample.int(length(idx1), min(n_flip, length(idx1)))]
       x_out[flip] <- 0L
     }
   }
@@ -902,12 +902,12 @@ policy_placeholder_tag <- function(category_label, candidate_df) {
     elig <- which(eligible)
     if (length(non_elig) > 0 && incl_rate > 0) {
       n_flip <- round(length(non_elig) * incl_rate)
-      eligible[sample(non_elig, min(n_flip, length(non_elig)))] <-
+      eligible[non_elig[sample.int(length(non_elig), min(n_flip, length(non_elig)))]] <-
         TRUE
     }
     if (length(elig) > 0 && excl_rate > 0) {
       n_flip <- round(length(elig) * excl_rate)
-      eligible[sample(elig, min(n_flip, length(elig)))] <- FALSE
+      eligible[elig[sample.int(length(elig), min(n_flip, length(elig)))]] <- FALSE
     }
   }
 
@@ -1102,7 +1102,7 @@ apply_policy_to_svy <- function(svy,
 
             n_flip <- min(round(n_total * emp_change), length(unemp_idx))
             if (n_flip > 0) {
-              flip_idx <- sample(unemp_idx, n_flip)
+              flip_idx <- unemp_idx[sample.int(length(unemp_idx), n_flip)]
               n_to_employed <- round(length(flip_idx) * ratio_employed)
               n_to_selfemp <- length(flip_idx) - n_to_employed
 
@@ -1122,7 +1122,7 @@ apply_policy_to_svy <- function(svy,
             employed_all <- c(employed_idx, selfemp_idx)
             n_flip <- min(round(n_total * abs(emp_change)), length(employed_all))
             if (n_flip > 0) {
-              flip_idx <- sample(employed_all, n_flip)
+              flip_idx <- employed_all[sample.int(length(employed_all), n_flip)]
               svy$employed[flip_idx] <- 0L
               svy$selfemployed[flip_idx] <- 0L
               svy$unemployed[flip_idx] <- 1L
@@ -1190,7 +1190,7 @@ apply_policy_to_svy <- function(svy,
               agri_workers <- which(working & svy$agriculture == 1L)
               if (length(agri_workers) > 0) {
                 n_to_move <- min(surplus_agri, length(agri_workers))
-                candidates <- sample(agri_workers, n_to_move)
+                candidates <- agri_workers[sample.int(length(agri_workers), n_to_move)]
                 n_to_ind <- if (deficit_ind > 0) min(n_to_move, deficit_ind) else 0L
                 n_to_serv <- if (deficit_serv > 0) max(0L, n_to_move - n_to_ind) else 0L
                 targets <- c(
@@ -1221,7 +1221,7 @@ apply_policy_to_svy <- function(svy,
                   surplus_ind, length(ind_workers),
                   deficit_agri + deficit_serv
                 )
-                candidates <- sample(ind_workers, n_to_move)
+                candidates <- ind_workers[sample.int(length(ind_workers), n_to_move)]
                 n_to_agri <- if (deficit_agri > 0) {
                   min(n_to_move, deficit_agri)
                 } else {
@@ -1260,7 +1260,7 @@ apply_policy_to_svy <- function(svy,
                   surplus_serv, length(serv_workers),
                   deficit_agri + deficit_ind
                 )
-                candidates <- sample(serv_workers, n_to_move)
+                candidates <- serv_workers[sample.int(length(serv_workers), n_to_move)]
                 n_to_agri <- if (deficit_agri > 0) {
                   min(n_to_move, deficit_agri)
                 } else {
