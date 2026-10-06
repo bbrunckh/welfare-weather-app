@@ -859,6 +859,9 @@
   invisible(FALSE)
 }
 
+# Largest result artifact the Shiny process will read back (R2-BUG-23).
+.WISE_STEP2_RESULT_MAX_BYTES <- 2 * 1024^3
+
 .wise_step2_async_read_manifest <- function(manifest, job) {
   if (!is.list(manifest) || !identical(manifest$schema, 2L) ||
       !identical(manifest$job_id, job$id) ||
@@ -871,13 +874,22 @@
   }
   root <- normalizePath(job$artifact_dir, winslash = "/", mustWork = TRUE)
   result_file <- file.path(root, manifest$result_basename)
+  if (is.numeric(manifest$result_bytes) && length(manifest$result_bytes) == 1L &&
+      is.finite(manifest$result_bytes) &&
+      manifest$result_bytes > .WISE_STEP2_RESULT_MAX_BYTES) {
+    stop(sprintf(
+      paste("The Step 2 result (%.1f GB) is larger than the %.0f GB limit.",
+        "Try fewer scenarios or periods."),
+      manifest$result_bytes / 1024^3, .WISE_STEP2_RESULT_MAX_BYTES / 1024^3
+    ), call. = FALSE)
+  }
   if (!identical(manifest$manifest_basename %||% "manifest.rds", "manifest.rds") ||
       !file.exists(file.path(root, "manifest.rds")) ||
       !file.exists(result_file) ||
       !startsWith(normalizePath(result_file, winslash = "/", mustWork = TRUE), paste0(root, "/")) ||
       !is.numeric(manifest$result_bytes) || length(manifest$result_bytes) != 1L ||
       !is.finite(manifest$result_bytes) || manifest$result_bytes < 0 ||
-      manifest$result_bytes > 2 * 1024^3 ||
+      manifest$result_bytes > .WISE_STEP2_RESULT_MAX_BYTES ||
       !identical(as.numeric(file.info(result_file)$size), as.numeric(manifest$result_bytes))) {
     stop("Step 2 result artifact is missing.", call. = FALSE)
   }

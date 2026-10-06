@@ -82,7 +82,7 @@ mod_2_01_weathersim_ui <- function(id) {
           shiny::sliderInput(
             ns("fut_period_1"),
             label = shiny::tags$span(class = "visually-hidden", "Projection period 1"),
-            min = 2010, max = 2100, value = c(2025, 2035), step = 1, sep = ""
+            min = .STEP2_SSP_START_YEAR, max = 2100, value = c(2025, 2035), step = 1, sep = ""
           ),
           9
         )
@@ -133,7 +133,7 @@ mod_2_01_weathersim_ui <- function(id) {
           shiny::sliderInput(
             ns("fut_period_2"),
             label = shiny::tags$span(class = "visually-hidden", "Projection period 2"),
-            min = 2010, max = 2100, value = c(2015, 2015), step = 1, sep = ""
+            min = .STEP2_SSP_START_YEAR, max = 2100, value = c(2015, 2015), step = 1, sep = ""
           ),
           9
         )
@@ -146,7 +146,7 @@ mod_2_01_weathersim_ui <- function(id) {
           shiny::sliderInput(
             ns("fut_period_3"),
             label = shiny::tags$span(class = "visually-hidden", "Projection period 3"),
-            min = 2010, max = 2100, value = c(2015, 2015), step = 1, sep = ""
+            min = .STEP2_SSP_START_YEAR, max = 2100, value = c(2015, 2015), step = 1, sep = ""
           ),
           9
         )
@@ -242,6 +242,21 @@ mod_2_01_weathersim_ui <- function(id) {
     as.character(selected_surveys$year)
   )
   selected_surveys[wave_key %in% baseline_selection, , drop = FALSE]
+}
+
+# First year of the CMIP6 SSP projections. A future period that starts earlier
+# would silently average only its SSP years (R2-BUG-23), so it is excluded.
+.STEP2_SSP_START_YEAR <- 2015L
+
+# A future period slider value as an integer (start, end) pair, or NULL when
+# it is incomplete, empty (end <= start) or starts before the SSP projections.
+.step2_valid_future_period <- function(period) {
+  if (length(period) >= 2 && all(is.finite(period)) && period[2] > period[1] &&
+      period[1] >= .STEP2_SSP_START_YEAR) {
+    as.integer(period[1:2])
+  } else {
+    NULL
+  }
 }
 
 # Expected scenario labels of a run, in run order: SSP outer, period inner
@@ -514,12 +529,7 @@ mod_2_01_weathersim_server <- function(id,
       }
 
       period_values <- lapply(seq_len(3), function(i) {
-        period <- input[[paste0("fut_period_", i)]]
-        if (length(period) >= 2 && all(is.finite(period)) && period[2] > period[1]) {
-          as.integer(period[1:2])
-        } else {
-          NULL
-        }
+        .step2_valid_future_period(input[[paste0("fut_period_", i)]])
       })
       period_values <- Filter(Negate(is.null), period_values)
 
@@ -592,9 +602,9 @@ mod_2_01_weathersim_server <- function(id,
       }
     })
 
-    # Display-only check for fully supplied future periods with end <= start.
-    # Mirrors future_periods() below, which silently excludes such periods;
-    # Run is not disabled.
+    # Display-only check for fully supplied future periods with end < start or
+    # a start before the SSP projections. Mirrors future_periods() below, which
+    # excludes such periods; Run is not disabled.
     output$fut_years_warning <- shiny::renderUI({
       issues <- character(0)
       for (i in 1:3) {
@@ -603,6 +613,13 @@ mod_2_01_weathersim_server <- function(id,
           issues <- c(issues, paste0(
             "Period ", i, " (", period[1], "-", period[2],
             "): end year is not after start year."
+          ))
+        } else if (length(period) >= 2 && all(is.finite(period)) &&
+                   period[2] > period[1] && period[1] < .STEP2_SSP_START_YEAR) {
+          issues <- c(issues, paste0(
+            "Period ", i, " (", period[1], "-", period[2],
+            "): starts before ", .STEP2_SSP_START_YEAR,
+            ", the first year of the climate projections."
           ))
         }
       }
@@ -659,7 +676,7 @@ mod_2_01_weathersim_server <- function(id,
       periods <- list()
       for (i in 1:3) {
         period <- input[[paste0("fut_period_", i)]]
-        if (length(period) >= 2 && all(is.finite(period)) && period[2] > period[1]) {
+        if (!is.null(.step2_valid_future_period(period))) {
           periods[[length(periods) + 1L]] <- period[1:2]
         }
       }
