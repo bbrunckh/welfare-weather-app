@@ -14,7 +14,14 @@ app_ui <- function(request) {
     lang = "en",
     theme = bslib::bs_theme(
       version = 5,
-      brand   = app_sys("app/_brand.yml")
+      brand   = app_sys("app/_brand.yml"),
+      # R2-A11Y-02 (WCAG 1.4.11): Bootstrap's default focus glow is the
+      # primary colour at 25% alpha (about 1.4:1 on white). Use a solid 2px
+      # ring in the brand blue instead (5.1:1 on white, 3.1:1 on the navbar).
+      "input-btn-focus-width"         = "2px",
+      "input-btn-focus-color-opacity" = 1,
+      "focus-ring-width"              = "2px",
+      "focus-ring-opacity"            = 1
     ),
     navbar_options = bslib::navbar_options(theme = "dark", bg = "#002244"),
     header = tagList(

@@ -72,6 +72,16 @@
   min-width: 1.35em;
 }
 
+/* ---- Focus ring (R2-A11Y-02, WCAG 1.4.11) --------------------------------
+   The theme (app_ui.R) makes the input/nav/accordion focus ring a solid 2px
+   brand blue. Buttons build theirs from a per-variant colour at 50% alpha,
+   so give them the same ring, separated from filled buttons by a 2px gap.
+   `body .btn` outranks Bootstrap's `.btn` regardless of stylesheet order. */
+body .btn {
+  --bs-btn-focus-box-shadow: 0 0 0 2px var(--bs-body-bg, #fff),
+    0 0 0 4px var(--bs-primary, #0071bc);
+}
+
 /* ---- Step pages ---------------------------------------------------------- */
 
 .step-question {
@@ -108,6 +118,7 @@
 .sidebar .accordion-button:focus-visible {
   outline: 2px solid var(--bs-primary, #0071bc);
   outline-offset: -2px;
+  box-shadow: none;
 }
 
 .sidebar .accordion-body {
@@ -1681,7 +1692,11 @@ button.wise-csv-btn .fa {
   background-color: #ffffff !important;
   color: var(--bs-primary, #0071bc) !important;
   font-weight: 600 !important;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12), 0 1px 2px rgba(0, 0, 0, 0.06) !important;
+  /* The inset 1px brand-blue edge keeps the selected pill distinguishable
+     from the #f1f3f5 track (4.6:1); white on the track alone is 1.1:1
+     (WCAG 1.4.11). */
+  box-shadow: inset 0 0 0 1px var(--bs-primary, #0071bc),
+    0 1px 3px rgba(0, 0, 0, 0.12), 0 1px 2px rgba(0, 0, 0, 0.06) !important;
 }
 
 .toggle-slider input[type="radio"]:focus-visible + span,
