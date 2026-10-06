@@ -144,9 +144,9 @@ collect_deterministic <- function(data, keys = NULL) {
       connection_params$subdir %||% "", path
     ),
     "databricks" = {
-      host <- connection_params$workspace %||% Sys.getenv("DATABRICKS_HOST")
-      vol_path <- connection_params$volume_path %||%
-        Sys.getenv("DATABRICKS_VOLUME_PATH")
+      db_params <- .databricks_connection_params(connection_params)
+      host <- db_params$host
+      vol_path <- db_params$volume_path
       if (!nzchar(vol_path %||% "")) {
         stop(
           "load_data(): Set DATABRICKS_VOLUME_PATH in .Renviron:\n",
@@ -162,9 +162,13 @@ collect_deterministic <- function(data, keys = NULL) {
 }
 
 
+# Resolves the Databricks connection and checks the host against the allowlist
+# (CR-SEC-01) in every process that uses it, including async workers.
 .databricks_connection_params <- function(connection_params) {
   list(
-    host = connection_params$workspace %||% Sys.getenv("DATABRICKS_HOST"),
+    host = .validate_databricks_host(
+      connection_params$workspace %||% Sys.getenv("DATABRICKS_HOST")
+    ),
     client_id = connection_params$client_id %||%
       Sys.getenv("DATABRICKS_CLIENT_ID"),
     client_secret = connection_params$client_secret %||%
@@ -581,7 +585,7 @@ load_data <- function(
   }
 
   paths <- as.character(paths)
-  type <- connection_params$type %||% "local"
+  type <- .check_connection_type(connection_params$type %||% "local")
   con <- .duck_con()
 
   # 1. Detect format early - fail before any network calls ----

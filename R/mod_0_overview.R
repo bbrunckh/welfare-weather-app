@@ -182,7 +182,8 @@ mod_0_overview_server <- function(id) {
             textInput(ns("s3_key_id"), "Access key ID:", placeholder = "AKIA..."),
             passwordInput(ns("s3_secret"), "Secret access key:", placeholder = ""),
             helpText(
-              "Leave key ID and secret blank to use environment credentials (AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY).",
+              "Leave all fields blank to use the S3_* / AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY environment configuration;",
+              " values entered here are never combined with environment credentials.",
               style = "font-size: 12px;"
             )
           ),
@@ -192,8 +193,8 @@ mod_0_overview_server <- function(id) {
             textInput(ns("gcs_key_id"), "HMAC access key ID (optional):", placeholder = ""),
             passwordInput(ns("gcs_secret"), "HMAC secret (optional):", placeholder = ""),
             helpText(
-              "GCS uses HMAC (interoperability) keys. Leave both blank to use",
-              " GCS_ACCESS_KEY_ID / GCS_SECRET_ACCESS_KEY from .Renviron.",
+              "GCS uses HMAC (interoperability) keys. Leave all fields blank to use",
+              " the GCS_* configuration from .Renviron.",
               style = "font-size: 12px;"
             )
           ),
@@ -206,9 +207,8 @@ mod_0_overview_server <- function(id) {
             passwordInput(ns("azure_client_secret"), "Client secret (optional):", placeholder = ""),
             textInput(ns("azure_tenant_id"), "Tenant ID (optional):", placeholder = ""),
             helpText(
-              "Credentials are optional if a service principal is set via AZURE_CLIENT_ID /",
-              "AZURE_CLIENT_SECRET / AZURE_TENANT_ID in .Renviron.",
-              "Alternatively supply the storage account key in the key field.",
+              "Leave all fields blank to use the AZURE_* configuration from .Renviron.",
+              "Otherwise supply the storage account key or service principal here.",
               style = "font-size: 12px;"
             )
           ),
@@ -246,8 +246,10 @@ mod_0_overview_server <- function(id) {
 
     # Collect connection parameters (delegates to fct_connection.R) ----
 
+    # CR-SEC-01: in auto-connect mode the connection comes from the server
+    # environment only; browser connection inputs are never read.
     connection_params <- reactive({
-      req(input$connection_type)
+      req(!.auto_connect(), input$connection_type)
       build_connection_params(
         type = input$connection_type,
         path = input$local_path,
@@ -288,7 +290,6 @@ mod_0_overview_server <- function(id) {
     # no attempt yet). "Verified" means the metadata actually loaded; the
     # plain field check below only says "configured" (DEP-03).
     connection_status <- reactiveVal(NULL)
-    auto_connect_failed <- reactiveVal(FALSE)
     metadata_generation <- 0L
     metadata_ended <- FALSE
     metadata_notification <- NULL
@@ -308,7 +309,9 @@ mod_0_overview_server <- function(id) {
     }
 
     output$connection_card_ui <- renderUI({
-      if (.auto_connect() && !isTRUE(auto_connect_failed())) {
+      # Auto-connect mode never offers the connection form, even after a
+      # failure (CR-SEC-01); the status card asks for a reload instead.
+      if (.auto_connect()) {
         return(uiOutput(ns("connection_status_ui")))
       }
 
@@ -368,7 +371,7 @@ mod_0_overview_server <- function(id) {
           }
         ))
       }
-      if (.auto_connect() && !isTRUE(auto_connect_failed())) {
+      if (.auto_connect()) {
         return(p(
           icon("spinner", class = "fa-spin"), " Connecting to data source...",
           style = "color: var(--bs-secondary); font-size: 0.87rem; margin: 0;"
@@ -390,10 +393,10 @@ mod_0_overview_server <- function(id) {
 
     # Apply connection on button click ----
 
-    # A source switch invalidates the previous attempt's status
-    observeEvent(connection_params(),
+    # A source switch invalidates the previous attempt's status. Neither this
+    # nor the apply observer below is registered in auto-connect mode.
+    if (!.auto_connect()) observeEvent(connection_params(),
       {
-        if (.auto_connect() && !isTRUE(auto_connect_failed())) return()
         metadata_generation <<- metadata_generation + 1L
         if (!is.null(metadata_notification)) {
           removeNotification(metadata_notification, session = session)
@@ -427,7 +430,6 @@ mod_0_overview_server <- function(id) {
         auto_connect_fail <- function(e) {
           msg <- conditionMessage(e)
           message("[overview] automatic data-source connection failed: ", msg)
-          auto_connect_failed(TRUE)
           # Persist the failure state before any transient UX: the status
           # card must update even if the notification itself fails (e.g.
           # session already closing — this handler also runs from promise
@@ -476,7 +478,7 @@ mod_0_overview_server <- function(id) {
       }) |> bindEvent(TRUE, once = TRUE)
     }
 
-    observeEvent(input$apply_connection,
+    if (!.auto_connect()) observeEvent(input$apply_connection,
       {
         if (!isTRUE(connection_valid())) {
           showNotification(

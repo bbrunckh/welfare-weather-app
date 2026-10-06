@@ -12,7 +12,7 @@ test_that("automatic connection parameters use the source selector", {
     WISEAPP_DATA_PATH = "/data/foo"
   )
   p <- auto_connection_params()
-  expect_identical(p, list(type = "local", path = "/data/foo"))
+  expect_identical(p, list(type = "local", path = "/data/foo", origin = "env"))
 })
 
 test_that("remote automatic parameters use standard provider variables", {
@@ -42,6 +42,76 @@ test_that("automatic connection parameters reject an unknown source", {
 
 test_that("build_connection_params errors on unknown type", {
   expect_error(build_connection_params("unknown"), "Unknown connection type")
+})
+
+# CR-SEC-01: a connection comes entirely from the UI or entirely from the env.
+test_that("browser host with blank credentials never picks up env credentials", {
+  withr::local_envvar(
+    DATABRICKS_HOST = "https://configured.cloud.databricks.com",
+    DATABRICKS_CLIENT_ID = "env-client-id",
+    DATABRICKS_CLIENT_SECRET = "env-client-secret",
+    DATABRICKS_VOLUME_PATH = "/Volumes/env"
+  )
+  p <- build_connection_params(
+    "databricks", db_workspace = "https://other.cloud.databricks.com",
+    db_client_id = "", db_client_secret = "", db_volume_path = ""
+  )
+  expect_identical(p$origin, "ui")
+  expect_identical(p$workspace, "https://other.cloud.databricks.com")
+  expect_identical(p$client_id, "")
+  expect_identical(p$client_secret, "")
+  expect_identical(p$volume_path, "")
+  expect_false(validate_connection_params(p))
+
+  s3 <- withr::with_envvar(
+    c(AWS_ACCESS_KEY_ID = "env-key", AWS_SECRET_ACCESS_KEY = "env-secret"),
+    build_connection_params("s3", s3_bucket = "user-bucket", s3_key_id = "")
+  )
+  expect_identical(s3$origin, "ui")
+  expect_identical(s3[c("key_id", "secret")], list(key_id = "", secret = ""))
+})
+
+test_that("all-blank UI fields use the environment configuration as a whole", {
+  withr::local_envvar(
+    DATABRICKS_HOST = "https://configured.cloud.databricks.com",
+    DATABRICKS_CLIENT_ID = "env-client-id",
+    DATABRICKS_CLIENT_SECRET = "env-client-secret",
+    DATABRICKS_VOLUME_PATH = "/Volumes/env"
+  )
+  p <- build_connection_params("databricks", db_workspace = "", db_client_id = NULL)
+  expect_identical(p$origin, "env")
+  expect_identical(p$workspace, "https://configured.cloud.databricks.com")
+  expect_identical(p$client_id, "env-client-id")
+  expect_true(validate_connection_params(p))
+})
+
+test_that("connection types outside the allowlist are rejected", {
+  for (bad in list("ftp", c("local", "s3"), NA_character_, NULL, 1)) {
+    expect_error(build_connection_params(bad), "Unknown connection type")
+  }
+  expect_false(validate_connection_params(list(type = "ftp")))
+  expect_error(load_data("x.parquet", list(type = "ftp")), "Unknown connection type")
+})
+
+test_that("Databricks hosts are restricted to https Databricks domains", {
+  withr::local_envvar(DATABRICKS_HOST = "https://configured.example.org")
+  ok <- c(
+    "https://adb-1.2.azuredatabricks.net", "https://x.cloud.databricks.com/",
+    "https://x.gcp.databricks.com", "https://configured.example.org"
+  )
+  for (h in ok) expect_identical(.validate_databricks_host(h), sub("/$", "", h))
+  bad <- c(
+    "http://x.cloud.databricks.com", "https://user@x.cloud.databricks.com",
+    "https://x.cloud.databricks.com:8443", "https://x.cloud.databricks.com/path",
+    "https://evil.example.com", "https://cloud.databricks.com.evil.com",
+    "https://.cloud.databricks.com", "x.cloud.databricks.com"
+  )
+  for (h in bad) expect_error(.validate_databricks_host(h), "Databricks workspace", info = h)
+  # The loader re-checks the host wherever it runs (e.g. an async worker).
+  expect_error(
+    .databricks_connection_params(list(type = "databricks", workspace = bad[[5]])),
+    "Databricks workspace"
+  )
 })
 
 test_that("validate_connection_params: local requires non-empty path", {
