@@ -24,6 +24,30 @@ a11y_css_bodies <- function(rules, selector) {
   rules$body[hit]
 }
 
+# WCAG 2.x contrast ratio between two hex colours.
+a11y_contrast <- function(fg, bg) {
+  lum <- function(h) {
+    v <- grDevices::col2rgb(h)[, 1] / 255
+    v <- ifelse(v <= 0.03928, v / 12.92, ((v + 0.055) / 1.055)^2.4)
+    sum(c(0.2126, 0.7152, 0.0722) * v)
+  }
+  l <- sort(c(lum(fg), lum(bg)), decreasing = TRUE)
+  (l[1] + 0.05) / (l[2] + 0.05)
+}
+
+# `fg` composited at `alpha` over `bg`.
+a11y_blend <- function(fg, bg, alpha) {
+  f <- grDevices::col2rgb(fg)[, 1]
+  b <- grDevices::col2rgb(bg)[, 1]
+  grDevices::rgb(t(round(alpha * f + (1 - alpha) * b)), maxColorValue = 255)
+}
+
+a11y_decl <- function(bodies, prop) {
+  m <- regmatches(bodies, regexpr(paste0("(^|[;\\s])", prop,
+                                         ":\\s*[^;]+"), bodies, perl = TRUE))
+  trimws(sub(paste0("^.*", prop, ":\\s*"), "", m))
+}
+
 test_that("CR-A11Y-01: info icons keep a visible keyboard focus outline", {
   rules <- a11y_css_rules()
   focus <- paste(a11y_css_bodies(rules, ".wise-info-icon:focus-visible"),
@@ -75,4 +99,33 @@ test_that("R2-A11Y-02: buttons and selected pills meet 3:1 non-text contrast", {
     collapse = ";"
   )
   expect_match(pill, "inset 0 0 0 1px var\\(--bs-primary")
+})
+
+test_that("CR-A11Y-02: small muted and status text reaches 4.5:1", {
+  rules <- a11y_css_rules()
+  # Text rules flagged in the review; all sit on white or near-white cards.
+  sels <- c(".step1-headline-note", ".headline-card-note", ".diagnostic-note",
+            ".wise-table .se", ".wise-table .t2-note", ".selection-card-op",
+            ".selection-card-chevron", ".step2-summary-separator",
+            ".pipeline-done", ".pipeline-failed")
+  for (sel in sels) {
+    col <- a11y_decl(a11y_css_bodies(rules, sel), "color")
+    expect_length(col, 1L)
+    expect_true(grepl("^#[0-9a-fA-F]{6}$", col), info = sel)
+    expect_gte(a11y_contrast(col, "#f8fafc"), 4.5)
+  }
+  # Hero text is translucent white on a navy-to-blue gradient; check every
+  # text rule against the lightest (last) gradient stop.
+  bg <- a11y_css_bodies(rules, ".hero-panel")
+  stops <- regmatches(bg, gregexpr("#[0-9a-fA-F]{6}", bg))[[1L]]
+  lightest <- stops[length(stops)]
+  for (sel in c(".hero-panel h1", ".hero-panel .hero-subtitle",
+                ".hero-panel p", ".hero-panel .hero-team")) {
+    op <- a11y_decl(a11y_css_bodies(rules, sel), "opacity")
+    alpha <- if (length(op)) as.numeric(op) else 1
+    expect_gte(a11y_contrast(a11y_blend("#ffffff", lightest, alpha),
+                             lightest), 4.5)
+  }
+  link <- a11y_decl(a11y_css_bodies(rules, ".hero-panel a"), "color")
+  expect_gte(a11y_contrast(link, lightest), 4.5)
 })

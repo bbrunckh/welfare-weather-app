@@ -226,7 +226,7 @@ body .btn {
 }
 
 .selection-card-op {
-  color: #9fb0be;
+  color: #5f6f7d;
   font-weight: 700;
   margin: 0 0.12rem;
 }
@@ -275,7 +275,7 @@ body .btn {
 }
 
 .selection-card-chevron {
-  color: #9fb0be;
+  color: #5f6f7d;
   font-weight: 700;
   font-size: 0.8rem;
 }
@@ -566,7 +566,7 @@ body .btn {
 }
 
 .step1-headline-note {
-  color: #718292;
+  color: #5f6f7d;
   font-size: 0.78rem;
   line-height: 1.35;
   margin: 8px 0 4px;
@@ -604,7 +604,7 @@ body .btn {
 }
 
 .headline-card-note {
-  color: #718292;
+  color: #5f6f7d;
   font-size: 0.73rem;
   line-height: 1.25;
   margin-top: 3px;
@@ -841,8 +841,10 @@ body.bslib-page-navbar:has(> .container-fluid > .tab-content > .tab-pane.active 
   margin: 0 auto 0.5rem;
 }
 
+/* The gradient ends at a darker blue than the brand #0071bc so the
+   translucent white hero text stays >= 4.5:1 across the panel (WCAG 1.4.3). */
 .hero-panel {
-  background: linear-gradient(135deg, #002244 0%, #0a3a6b 60%, #0071bc 100%);
+  background: linear-gradient(135deg, #002244 0%, #0a3a6b 60%, #005a96 100%);
   color: #fff;
   border-radius: var(--bs-border-radius-lg);
   padding: 1.45rem 1.75rem;
@@ -892,7 +894,7 @@ body.bslib-page-navbar:has(> .container-fluid > .tab-content > .tab-pane.active 
   font-size: 0.78rem;
   text-transform: uppercase;
   letter-spacing: 0.08em;
-  opacity: 0.65;
+  opacity: 0.8;
 }
 
 @media (max-width: 700px) {
@@ -1312,12 +1314,14 @@ table.reactable td.wise-dt-wrap {
   color: var(--bs-primary, #0d6efd);
 }
 
+/* Darker than the brand success/danger tokens (3.0:1 and 4.4:1 on white) so
+   the stage text reaches 4.5:1 (WCAG 1.4.3): 4.8:1 and 5.3:1. */
 .pipeline-done {
-  color: var(--bs-success, #198754);
+  color: #00843d;
 }
 
 .pipeline-failed {
-  color: var(--bs-danger, #dc3545);
+  color: #d4192b;
 }
 
 .pipeline-note {
@@ -1485,7 +1489,7 @@ button.wise-csv-btn .fa {
 }
 
 .diagnostic-note {
-  color: #718292;
+  color: #5f6f7d;
   font-size: 0.78rem;
   line-height: 1.4;
   margin: 0.55rem 0 0;
@@ -2002,7 +2006,7 @@ input.form-control:disabled {
 }
 
 .step2-summary-separator {
-  color: #9fb0be;
+  color: #5f6f7d;
   font-size: 0.78rem;
   font-weight: 700;
 }
@@ -2035,8 +2039,8 @@ input.form-control:disabled {
 .wise-table td.num, .wise-table th.num { text-align: right; font-variant-numeric: tabular-nums; }
 .wise-table .group td { background: #eef3f8; font-weight: 700; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; color: #526575; text-align: left; }
 .wise-table tr.hi td { background: #eef7f2; }
-.wise-table .se { color: #718292; font-size: 0.8rem; }
-.wise-table .t2-note { color: #718292; font-size: 0.75rem; text-align: left; border-bottom: none; }
+.wise-table .se { color: #5f6f7d; font-size: 0.8rem; }
+.wise-table .t2-note { color: #5f6f7d; font-size: 0.75rem; text-align: left; border-bottom: none; }
 
 /* Reactable group separator / weather-highlight rows for the Step 1
    regression tables (rowClass from .t2_reactable_row_class()). Mirrors the
