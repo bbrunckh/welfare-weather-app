@@ -164,17 +164,15 @@ collect_deterministic <- function(data, keys = NULL) {
 
 # Resolves the Databricks connection and checks the host against the allowlist
 # (CR-SEC-01) in every process that uses it, including async workers.
+# A "ui"-origin connection never fills a missing field from the environment
+# (R2-SEC-01).
 .databricks_connection_params <- function(connection_params) {
+  field <- function(name, env_var) .connection_field(connection_params, name, env_var)
   list(
-    host = .validate_databricks_host(
-      connection_params$workspace %||% Sys.getenv("DATABRICKS_HOST")
-    ),
-    client_id = connection_params$client_id %||%
-      Sys.getenv("DATABRICKS_CLIENT_ID"),
-    client_secret = connection_params$client_secret %||%
-      Sys.getenv("DATABRICKS_CLIENT_SECRET"),
-    volume_path = connection_params$volume_path %||%
-      Sys.getenv("DATABRICKS_VOLUME_PATH")
+    host = .validate_databricks_host(field("workspace", "DATABRICKS_HOST")),
+    client_id = field("client_id", "DATABRICKS_CLIENT_ID"),
+    client_secret = field("client_secret", "DATABRICKS_CLIENT_SECRET"),
+    volume_path = field("volume_path", "DATABRICKS_VOLUME_PATH")
   )
 }
 
@@ -609,11 +607,13 @@ load_data <- function(
 
   # 3. Configure credentials / load extensions per backend ----
 
+  # Environment fallback only for environment-origin params (R2-SEC-01).
+  field <- function(name, env_var) .connection_field(connection_params, name, env_var)
   if (type == "s3") {
     .duck_load_ext("httpfs")
     s3_creds <- list(
-      key_id = connection_params$key_id %||% Sys.getenv("AWS_ACCESS_KEY_ID"),
-      secret = connection_params$secret %||% Sys.getenv("AWS_SECRET_ACCESS_KEY"),
+      key_id = field("key_id", "AWS_ACCESS_KEY_ID"),
+      secret = field("secret", "AWS_SECRET_ACCESS_KEY"),
       region = connection_params$region %||% "us-east-1"
     )
     .register_cached_secret(
@@ -633,8 +633,8 @@ load_data <- function(
   } else if (type == "gcs") {
     .duck_load_ext("httpfs")
     gcs_creds <- list(
-      key_id = connection_params$key_id %||% Sys.getenv("GCS_ACCESS_KEY_ID"),
-      secret = connection_params$secret %||% Sys.getenv("GCS_SECRET_ACCESS_KEY")
+      key_id = field("key_id", "GCS_ACCESS_KEY_ID"),
+      secret = field("secret", "GCS_SECRET_ACCESS_KEY")
     )
     .register_cached_secret(
       con, "gcs_secret", gcs_creds,
@@ -652,10 +652,10 @@ load_data <- function(
     .duck_load_ext("azure")
     .duck_load_ext("delta")
 
-    key <- connection_params$key %||% Sys.getenv("AZURE_STORAGE_KEY")
-    client_id <- connection_params$client_id %||% Sys.getenv("AZURE_CLIENT_ID")
-    client_secret <- connection_params$client_secret %||% Sys.getenv("AZURE_CLIENT_SECRET")
-    tenant_id <- connection_params$tenant_id %||% Sys.getenv("AZURE_TENANT_ID")
+    key <- field("key", "AZURE_STORAGE_KEY")
+    client_id <- field("client_id", "AZURE_CLIENT_ID")
+    client_secret <- field("client_secret", "AZURE_CLIENT_SECRET")
+    tenant_id <- field("tenant_id", "AZURE_TENANT_ID")
 
     if (nzchar(key)) {
       az_creds <- list(
@@ -695,6 +695,13 @@ load_data <- function(
            );",
           .sql_literal(tenant_id), .sql_literal(client_id), .sql_literal(client_secret)
         )
+      )
+    } else if (identical(connection_params$origin, "ui")) {
+      # The credential chain is the server's identity; never lend it to a
+      # user-chosen location (R2-SEC-01).
+      stop(
+        "load_data(): Enter an Azure account key or service principal, or ",
+        "leave all fields blank to use the configured data source."
       )
     } else {
       tryCatch(

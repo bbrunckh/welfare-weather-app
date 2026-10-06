@@ -340,3 +340,65 @@ test_that("load_data gcs and azure secret SQL escapes quote-bearing credentials"
   expect_match(az[2], "CLIENT_ID\\s+'C''ID'")
   expect_match(az[2], "CLIENT_SECRET\\s+'CS''EC'")
 })
+
+# R2-SEC-01: UI connections never borrow worker/server environment credentials.
+test_that("a UI connection snapshot keeps its own credentials and gets no env fill", {
+  withr::local_envvar(
+    DATABRICKS_HOST = "https://server.cloud.databricks.com",
+    DATABRICKS_CLIENT_ID = "server-client-id",
+    DATABRICKS_CLIENT_SECRET = "server-client-secret",
+    DATABRICKS_VOLUME_PATH = "/Volumes/server"
+  )
+  ui <- build_connection_params(
+    "databricks", db_workspace = "https://user.cloud.databricks.com",
+    db_client_id = "user-client-id", db_client_secret = "user-secret",
+    db_volume_path = "/Volumes/user"
+  )
+  snap <- .wise_step2_async_connection_params(ui)
+  expect_identical(snap, ui)
+
+  # Worker side: a UI snapshot missing a field is not completed from env.
+  partial <- ui[setdiff(names(ui), "client_secret")]
+  db <- .databricks_connection_params(partial)
+  expect_identical(db$host, "https://user.cloud.databricks.com")
+  expect_identical(db$client_id, "user-client-id")
+  expect_identical(db$client_secret, "")
+  expect_false(validate_connection_params(partial))
+
+  # Environment connections stay scrubbed and resolve in the worker's env.
+  env <- build_connection_params("databricks")
+  snap_env <- .wise_step2_async_connection_params(env)
+  expect_false(any(c("client_id", "client_secret") %in% names(snap_env)))
+  expect_identical(.databricks_connection_params(snap_env)$client_secret,
+                   "server-client-secret")
+})
+
+test_that("load_data never mixes env credentials into UI s3/azure connections", {
+  skip_if_not_installed("duckdb")
+  restore_duck <- .duck_state_restore()
+  withr::defer(restore_duck())
+  withr::local_envvar(
+    AWS_ACCESS_KEY_ID = "server-key", AWS_SECRET_ACCESS_KEY = "server-secret"
+  )
+  captured <- character(0)
+  local_mocked_bindings(
+    dbExecute = function(con, statement, ...) {
+      captured <<- c(captured, statement)
+      0L
+    },
+    .package = "DBI"
+  )
+  try(load_data("f.parquet", list(type = "s3", bucket = "user-bucket",
+                                  region = "us-east-1", origin = "ui")),
+      silent = TRUE)
+  s3 <- captured[grepl("SECRET s3_secret", captured, fixed = TRUE)]
+  expect_length(s3, 1)
+  expect_false(grepl("server-", s3, fixed = TRUE))
+
+  expect_error(
+    load_data("f.parquet", list(type = "azure", account = "a", container = "c",
+                                origin = "ui")),
+    "Azure account key"
+  )
+  expect_false(any(grepl("CREDENTIAL_CHAIN", captured, fixed = TRUE)))
+})
