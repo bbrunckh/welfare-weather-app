@@ -597,11 +597,15 @@
 # Approximate Wald screen for differences in the weather effect across the
 # quantile grid (tau = 0.1 ... 0.9). Restacks the RIF responses (already stored
 # on fit_model()'s train data) and fits one feols with tau-specific weather
-# columns, keeping control and fixed-effect slopes tau-invariant. Household
-# clustering captures the cross-quantile covariance, so the test is internally
-# consistent with the stacked fit; the tau-invariant controls make it an
-# approximation of the exact quantile-by-quantile comparison. Returns a p-value
-# or NULL when the screen cannot be run (falls back to no p-value on the card).
+# columns, keeping control and fixed-effect slopes tau-invariant. Standard
+# errors are clustered on the model's cluster variable (e.g. loc_id_panel, which
+# nests households) or, without one, on the household row, so the K stacked
+# copies of a household are never treated as independent and the cross-quantile
+# covariance is captured; the tau-invariant controls make it an approximation
+# of the exact quantile-by-quantile comparison. Returns a p-value or NULL when
+# the screen cannot be run (falls back to no p-value on the card). Samples above
+# the stacked-row cap return NA_real_ with a "note" attribute that the card
+# discloses instead of dropping the p-value silently.
 step1_rif_heterogeneity_p <- function(mf, snap, var) {
   tryCatch(
     {
@@ -637,7 +641,13 @@ step1_rif_heterogeneity_p <- function(mf, snap, var) {
       tds <- td[idx, , drop = FALSE]
       N <- nrow(tds)
       if (N * K > 250000) {
-        return(NULL)
+        return(structure(NA_real_, note = sprintf(
+          paste0(
+            "The distribution p-value was not computed: the stacked test is ",
+            "limited to 250,000 rows (%s observations x %d quantiles)."
+          ),
+          format(N, big.mark = ","), K
+        )))
       }
 
       covs <- unique(unlist(snap$model[c(
@@ -652,7 +662,9 @@ step1_rif_heterogeneity_p <- function(mf, snap, var) {
       # Keep only the columns the stacked fit needs; configuration columns that
       # ride along on train_data (e.g. the polynomial list-column) would break
       # fixest's model frame.
-      keep <- unique(c(covs, fe))
+      cl <- as.character(snap$model$cluster %||% character(0))
+      cl <- cl[!is.na(cl) & nzchar(cl) & cl %in% names(tds)]
+      keep <- unique(c(covs, fe, cl))
       keep <- keep[vapply(keep, function(v) !is.list(tds[[v]]), logical(1))]
       base_cols <- tds[, intersect(keep, names(tds)), drop = FALSE]
 
@@ -665,6 +677,7 @@ step1_rif_heterogeneity_p <- function(mf, snap, var) {
         d <- base_cols
         d$.rif_y <- tds[[rif_cols[k]]]
         d$.tau <- k
+        d$.row_id <- seq_len(N)
         for (v in vnames) d[[v]] <- 0
         for (j in seq_along(vcols)) d[[paste0(".v", k, "_", j)]] <- M[, j]
         d
@@ -676,7 +689,13 @@ step1_rif_heterogeneity_p <- function(mf, snap, var) {
         "`.rif_y` ~ 0 +", paste(rhs, collapse = " + "),
         if (length(fe)) paste0(" | ", paste(fe, collapse = " + ")) else ""
       ))
-      fit <- suppressWarnings(fixest::feols(fml, data = stack, warn = FALSE))
+      cl_fml <- stats::as.formula(paste(
+        "~", if (length(cl)) paste(cl, collapse = " + ") else ".row_id"
+      ))
+      fit <- suppressWarnings(fixest::feols(fml,
+        data = stack, cluster = cl_fml,
+        warn = FALSE
+      ))
       b <- stats::coef(fit)
       V <- .fixest_vcov(fit)
       if (is.null(b) || is.null(V)) {
@@ -914,6 +933,9 @@ step1_fmt_effect <- function(est, se, scale, digits = 1, ci = NULL) {
         rif_p
       } else {
         tryCatch(step1_rif_heterogeneity_p(mf, snap, var), error = function(e) NULL)
+      }
+      if (!is.null(attr(p, "note"))) {
+        info_bits <- c(info_bits, attr(p, "note"))
       }
       if (!is.null(p) && is.finite(p)) {
         p_line <- if (p < 0.001) "RIF distribution p < 0.001" else sprintf("RIF distribution p = %.3f", p)
