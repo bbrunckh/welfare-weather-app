@@ -365,11 +365,7 @@ fct_run_simulation <- function(sw,
   profile_memory <- function(stage, value = NULL, detail = NULL,
                              serialize_value = TRUE) {
     if (is.null(memory_profile)) return(invisible(NULL))
-    rss <- if (exists(".wx_process_tree_rss_bytes", mode = "function")) {
-      .wx_process_tree_rss_bytes()
-    } else {
-      NA_real_
-    }
+    rss <- .wx_process_tree_rss_bytes()
     memory_profile$records[[length(memory_profile$records) + 1L]] <- data.frame(
       stage = stage,
       elapsed_seconds = proc.time()[["elapsed"]] - memory_profile$started,
