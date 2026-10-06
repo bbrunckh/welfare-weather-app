@@ -53,10 +53,11 @@ test_that("access predicates recognise universal and negative changes", {
 
 test_that("labor activity reads only labor fields", {
   expect_true(has_labor_change(list(sector_services = 3)))
+  # Sector targets are NULL until moved from the observed share (R2-BUG-05).
   expect_false(has_labor_change(list(
     employment_change_pp = 0,
-    sector_manufacturing = 0,
-    sector_services = 0
+    sector_manufacturing = NULL,
+    sector_services = NULL
   )))
   expect_false(has_labor_change(list(elec_access_change_pct = 5)))
   expect_false(has_labor_change(list(employment_change_pp = NA_real_)))

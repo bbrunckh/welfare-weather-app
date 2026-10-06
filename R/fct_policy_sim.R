@@ -26,6 +26,12 @@ SP_TRANSFER_COL <- ".wiseapp_sp_transfer"
   isTRUE(universal) || .lever_moved(change_pct)
 }
 
+# Sector sliders carry a target share only when the user changed it from the
+# observed share; NULL means "unchanged", and 0 is a valid target.
+.sector_target_set <- function(x) {
+  is.numeric(x) && length(x) == 1L && is.finite(x)
+}
+
 # Exact lever/term matching (CR-BUG-08) ----
 
 #' Match a policy lever variable against model variable or coefficient names
@@ -166,8 +172,40 @@ has_labor_change <- function(labor) {
     return(FALSE)
   }
   .lever_moved(labor$employment_change_pp) ||
-    .lever_moved(labor$sector_manufacturing) ||
-    .lever_moved(labor$sector_services)
+    .sector_target_set(labor$sector_manufacturing) ||
+    .sector_target_set(labor$sector_services)
+}
+
+#' Observed sector shares of the working population
+#'
+#' Initial values for the labour lever's sector sliders, so an untouched
+#' slider means "no change". Uses survey `weight` when present (as the SP
+#' reach preview does), otherwise row counts.
+#' @param svy Survey frame with `employed`, `selfemployed`, `agriculture`,
+#'   `industry` and `services`.
+#' @return Named numeric vector (`industry`, `services`, `agriculture`) of
+#'   percentages, or NULL when the shares cannot be computed.
+#' @keywords internal
+.labor_sector_shares <- function(svy) {
+  need <- c("employed", "selfemployed", "agriculture", "industry", "services")
+  if (!is.data.frame(svy) || !all(need %in% names(svy))) {
+    return(NULL)
+  }
+  working <- (svy$employed == 1L | svy$selfemployed == 1L) &
+    !is.na(svy$employed) & !is.na(svy$selfemployed)
+  w <- if ("weight" %in% names(svy)) {
+    suppressWarnings(as.numeric(svy$weight))
+  } else {
+    rep(1, nrow(svy))
+  }
+  w[!is.finite(w) | w < 0] <- 0
+  total <- sum(w[working])
+  if (!any(working) || total <= 0) {
+    return(NULL)
+  }
+  vapply(c("industry", "services", "agriculture"), function(sec) {
+    100 * sum(w[working & svy[[sec]] == 1L], na.rm = TRUE) / total
+  }, numeric(1))
 }
 
 #' Has social protection been configured to spend money?
@@ -284,7 +322,8 @@ has_sp_change <- function(sp) {
     if (changed(labor$employment_change_pp)) {
       candidates <- c(candidates, "employed", "selfemployed", "unemployed")
     }
-    if (changed(labor$sector_manufacturing) || changed(labor$sector_services)) {
+    if (.sector_target_set(labor$sector_manufacturing) ||
+      .sector_target_set(labor$sector_services)) {
       candidates <- c(
         candidates, "employed", "selfemployed",
         "agriculture", "industry", "services"
@@ -1092,8 +1131,12 @@ apply_policy_to_svy <- function(svy,
         }
 
         # Sectoral composition: minimize reallocation to achieve target percentages
-        # Only move workers from sectors exceeding their target
-        if (all(c("employed", "selfemployed", "agriculture", "industry", "services") %in% lever_cols)) {
+        # Only move workers from sectors exceeding their target. Runs only when
+        # a sector target was actually changed (R2-BUG-05); an unset target
+        # keeps that sector's current count.
+        sector_set <- .sector_target_set(labor$sector_manufacturing) ||
+          .sector_target_set(labor$sector_services)
+        if (sector_set && all(c("employed", "selfemployed", "agriculture", "industry", "services") %in% lever_cols)) {
           working <- (svy$employed == 1L | svy$selfemployed == 1L) &
             !is.na(svy$employed) & !is.na(svy$selfemployed)
 
@@ -1101,22 +1144,28 @@ apply_policy_to_svy <- function(svy,
             working_idx <- which(working)
             n_working <- length(working_idx)
 
-            # Target percentages: manufacturing and services chosen by user,
-            # agriculture is the residual. Clamp so targets cannot exceed 100%
-            # combined (which would make target_agri negative and corrupt the
-            # reallocation logic).
-            target_ind <- min((labor$sector_manufacturing %||% 0) / 100, 1)
-            target_serv <- min((labor$sector_services %||% 0) / 100, 1 - target_ind)
-
-            # Convert targets to row counts
-            n_target_ind <- round(n_working * target_ind)
-            n_target_serv <- round(n_working * target_serv)
-            n_target_agri <- n_working - n_target_ind - n_target_serv
-
             # Count current sector distribution (within working population)
             n_curr_agri <- sum(svy$agriculture[working_idx] == 1L, na.rm = TRUE)
             n_curr_ind <- sum(svy$industry[working_idx] == 1L, na.rm = TRUE)
             n_curr_serv <- sum(svy$services[working_idx] == 1L, na.rm = TRUE)
+
+            # Target counts: manufacturing and services chosen by user (an
+            # unset target keeps the current count), agriculture is the
+            # residual. Clamp so targets cannot exceed 100% combined (which
+            # would make target_agri negative and corrupt the reallocation).
+            n_target_ind <- if (.sector_target_set(labor$sector_manufacturing)) {
+              round(n_working * min(max(labor$sector_manufacturing, 0) / 100, 1))
+            } else {
+              n_curr_ind
+            }
+            n_target_ind <- min(n_target_ind, n_working)
+            n_target_serv <- if (.sector_target_set(labor$sector_services)) {
+              round(n_working * max(labor$sector_services, 0) / 100)
+            } else {
+              n_curr_serv
+            }
+            n_target_serv <- min(n_target_serv, n_working - n_target_ind)
+            n_target_agri <- n_working - n_target_ind - n_target_serv
 
             # Surplus = current exceeds target; deficit = current below target
             surplus_agri <- max(0L, n_curr_agri - n_target_agri)
