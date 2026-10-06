@@ -67,10 +67,14 @@ merge_survey_weather <- function(survey_data, weather_data) {
     return(NULL)
   }
 
+  # CR-BUG-16: weather is one row per location-month, so a duplicated weather
+  # key errors instead of silently multiplying survey records. Records without
+  # weather are still dropped (inner join), but the count is reported.
   joined <- survey_data |>
     dplyr::inner_join(
       weather_data,
-      by = c("code", "year", "survname", "loc_id", "timestamp")
+      by = c("code", "year", "survname", "loc_id", "timestamp"),
+      relationship = "many-to-one"
     ) |>
     dplyr::mutate(year = as.factor(.data$year)) |>
     dplyr::group_by(.data$code, .data$year, .data$survname) |>
@@ -79,6 +83,14 @@ merge_survey_weather <- function(survey_data, weather_data) {
   if (nrow(joined) == 0) {
     return(NULL)
   }
+  n_dropped <- nrow(survey_data) - nrow(joined)
+  if (n_dropped > 0L) {
+    message(sprintf(
+      "merge_survey_weather: %d of %d survey records have no matching weather and were dropped.",
+      n_dropped, nrow(survey_data)
+    ))
+  }
+  attr(joined, "n_dropped") <- n_dropped
   joined
 }
 

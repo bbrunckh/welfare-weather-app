@@ -280,6 +280,17 @@ mod_1_05_weatherstats_server <- function(
 
         removeNotification(notif_merge)
         req(!is.null(survey_wd))
+        # CR-BUG-16: disclose survey records the weather inner join dropped.
+        n_wx_dropped <- attr(survey_wd, "n_dropped") %||% 0L
+        if (n_wx_dropped > 0L) {
+          showNotification(
+            sprintf(
+              "%d of %d survey records have no matching weather data and are excluded.",
+              n_wx_dropped, nrow(svy)
+            ),
+            type = "warning", duration = 8
+          )
+        }
 
         survey_weather(survey_wd)
 

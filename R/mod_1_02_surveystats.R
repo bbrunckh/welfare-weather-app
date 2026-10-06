@@ -294,6 +294,16 @@ mod_1_02_surveystats_server <- function(
           convert_lcu_to_ppp(cpi_ppp(), lcu_vars) |>
           bottom_code_welfare(0.28) |>
           apply_policy_derivations()
+        # CR-BUG-16: report records the LCU -> PPP join could not convert.
+        if (length(lcu_vars) && all(c("cpi", "ppp2021") %in% names(df))) {
+          n_no_ppp <- sum(is.na(df$cpi) | is.na(df$ppp2021))
+          if (n_no_ppp > 0L) {
+            notify(sprintf(
+              "%d of %d survey records have no CPI/PPP deflator, so their currency values are missing.",
+              n_no_ppp, nrow(df)
+            ), type = "warning", duration = 8)
+          }
+        }
 
         publish_new_survey_data(df)
 
@@ -398,11 +408,24 @@ mod_1_02_surveystats_server <- function(
                 dplyr::distinct(code, year, survname, loc_id) |>
                 collect_deterministic(c("code", "year", "survname", "loc_id"))
 
+              # CR-BUG-16: duplicated panel keys error (handled below) instead
+              # of multiplying survey records; unmatched records are counted.
               df <- df |>
                 dplyr::left_join(
-                  dplyr::left_join(loc_keys, panel_map, by = c("code", "year", "survname", "loc_id")),
-                  by = c("code", "year", "survname", "loc_id")
+                  dplyr::left_join(loc_keys, panel_map,
+                    by = c("code", "year", "survname", "loc_id"),
+                    relationship = "one-to-one"
+                  ),
+                  by = c("code", "year", "survname", "loc_id"),
+                  relationship = "many-to-one"
                 )
+              n_no_panel <- if ("loc_id_panel" %in% names(df)) sum(is.na(df$loc_id_panel)) else 0L
+              if (n_no_panel > 0L) {
+                notify(sprintf(
+                  "%d of %d survey records have no location panel id and are excluded from clustered models.",
+                  n_no_panel, nrow(df)
+                ), type = "warning", duration = 8)
+              }
               publish_new_survey_data(df)
               survey_version(survey_version() + 1L)
             },

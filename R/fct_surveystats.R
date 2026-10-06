@@ -106,11 +106,25 @@ convert_lcu_to_ppp <- function(df, cpi_ppp_data, lcu_vars) {
   if (length(lcu_vars) == 0) {
     return(df)
   }
-  df |>
-    dplyr::left_join(cpi_ppp_data, by = c("code", "year", "data_level")) |>
+  # CR-BUG-16: one deflator row per (code, year, data_level); a duplicated key
+  # errors instead of multiplying survey records. Records without a deflator
+  # keep NA converted values (unchanged behaviour) and are counted.
+  out <- df |>
+    dplyr::left_join(cpi_ppp_data,
+      by = c("code", "year", "data_level"),
+      relationship = "many-to-one"
+    ) |>
     dplyr::mutate(
       dplyr::across(dplyr::any_of(lcu_vars), ~ .x / cpi / ppp2021)
     )
+  n_unmatched <- sum(is.na(out$cpi) | is.na(out$ppp2021))
+  if (n_unmatched > 0L) {
+    message(sprintf(
+      "convert_lcu_to_ppp: %d of %d survey records have no CPI/PPP deflator; their LCU values are NA.",
+      n_unmatched, nrow(out)
+    ))
+  }
+  out
 }
 
 # Bottom code welfare (2021 PPP) ----

@@ -345,3 +345,66 @@ test_that("an unmet survey prerequisite releases the load guard", {
     }
   )
 })
+
+test_that("CR-BUG-16: panel join reports unmatched records and rejects duplicates", {
+  notes <- character(0)
+  panel <- data.frame(
+    code = "TST", year = "2021", survname = "SRV", loc_id = c("L1", "L2"),
+    loc_id_panel = c("P1", "P2"), stringsAsFactors = FALSE
+  )
+  local_mocked_bindings(
+    load_data = function(fnames, ...) {
+      if (any(grepl("/h3/", fnames))) {
+        return(data.frame(
+          code = "TST", year = "2021", survname = "SRV",
+          loc_id = c("L1", "L2", "L3"), h3 = "x", pop_2020 = 1,
+          stringsAsFactors = FALSE
+        ))
+      }
+      make_raw_survey()
+    },
+    .duck_load_ext = function(...) stop("no spatial in tests"),
+    loc_panel = function(...) panel,
+    collect_deterministic = function(data, keys = NULL) as.data.frame(data)
+  )
+  local_mocked_bindings(
+    showNotification = function(ui, ...) {
+      notes <<- c(notes, paste(as.character(ui), collapse = " "))
+      invisible("id")
+    },
+    .package = "shiny"
+  )
+
+  shiny::testServer(
+    mod_1_02_surveystats_server,
+    args = list(
+      id                = "ss",
+      connection_params = shiny::reactiveVal(list()),
+      variable_list     = shiny::reactiveVal(
+        data.frame(name = character(0), units = character(0))
+      ),
+      selected_surveys  = shiny::reactiveVal(make_selected_surveys_fixture()),
+      cpi_ppp           = shiny::reactiveVal(data.frame()),
+      tabset_id         = "step1_tabs"
+    ),
+    {
+      session$setInputs(survey_stats = 0L)
+      session$setInputs(survey_stats = 1L)
+      session$flushReact()
+      sd <- survey_data()
+      expect_equal(nrow(sd), 3L)
+      expect_equal(sum(is.na(sd$loc_id_panel)), 1L)
+      expect_true(any(grepl(
+        "1 of 3 survey records have no location panel id", notes, fixed = TRUE
+      )))
+
+      # A location mapped to two panel ids errors instead of duplicating rows.
+      panel <<- rbind(panel, transform(panel[1, ], loc_id_panel = "P9"))
+      notes <<- character(0)
+      session$setInputs(survey_stats = 2L)
+      session$flushReact()
+      expect_equal(nrow(survey_data()), 3L)
+      expect_true(any(grepl("Location-level uncertainty", notes, fixed = TRUE)))
+    }
+  )
+})

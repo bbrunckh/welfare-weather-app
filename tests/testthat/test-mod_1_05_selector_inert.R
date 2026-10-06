@@ -15,7 +15,9 @@ make_wx_rows <- function(var = "tx") {
     code      = "TST",
     year      = "2021",
     survname  = "SRV",
-    loc_id    = "L1",
+    # One weather row per location-month (CR-BUG-16: merge_survey_weather
+    # rejects duplicated weather keys).
+    loc_id    = c("L1", "L2"),
     timestamp = as.Date("2021-06-01"),
     value     = c(25, 30),
     check.names = FALSE

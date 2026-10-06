@@ -95,6 +95,44 @@ test_that("merge_survey_weather returns NULL when join produces zero rows", {
   expect_null(merge_survey_weather(make_survey(), wd))
 })
 
+test_that("CR-BUG-16: merge_survey_weather counts dropped records", {
+  sv <- make_survey(with_na = TRUE)
+  expect_message(
+    out <- merge_survey_weather(sv, make_weather()),
+    "1 of 4 survey records have no matching weather"
+  )
+  expect_equal(nrow(out), 3L)
+  expect_identical(attr(out, "n_dropped"), 1L)
+  out <- merge_survey_weather(make_survey(), make_weather())
+  expect_identical(attr(out, "n_dropped"), 0L)
+})
+
+test_that("CR-BUG-16: duplicated weather keys error instead of multiplying records", {
+  wd <- rbind(make_weather(), make_weather()[1, ])
+  expect_error(merge_survey_weather(make_survey(), wd), "many-to-one|multiple")
+})
+
+test_that("CR-BUG-16: LCU -> PPP join guards duplicates and counts unmatched", {
+  df <- data.frame(
+    code = c("A", "A", "B"), year = 2020L, data_level = "national",
+    welfare_lcu = c(100, 200, 300), stringsAsFactors = FALSE
+  )
+  defl <- data.frame(
+    code = "A", year = 2020L, data_level = "national",
+    cpi = 1, ppp2021 = 10, stringsAsFactors = FALSE
+  )
+  expect_message(
+    out <- convert_lcu_to_ppp(df, defl, "welfare_lcu"),
+    "1 of 3 survey records have no CPI/PPP deflator"
+  )
+  expect_equal(nrow(out), 3L)
+  expect_equal(out$welfare_lcu, c(10, 20, NA))
+  expect_error(
+    convert_lcu_to_ppp(df, rbind(defl, defl), "welfare_lcu"),
+    "many-to-one|multiple"
+  )
+})
+
 test_that("historical cell joins preserve duplicate-sensitive multiplicity", {
   hist <- data.frame(
     code = c("A", "A", "A", "A"),
