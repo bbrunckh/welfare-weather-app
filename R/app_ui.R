@@ -11,6 +11,7 @@ app_ui <- function(request) {
       tags$span(class = "app-version", golem::get_golem_version())
     ),
     window_title = "WISE-APP",
+    lang = "en",
     theme = bslib::bs_theme(
       version = 5,
       brand   = app_sys("app/_brand.yml")

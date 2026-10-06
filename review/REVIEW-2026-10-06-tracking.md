@@ -199,7 +199,7 @@ Quick wins first (R2-A11Y-01/03, CR-A11Y-01..04), then the map table alternative
 
 | ID | Sev | Eff | Status | Task | Notes |
 |---|---|---|---|---|---|
-| R2-A11Y-03 | M | S | ☐ | `page_navbar(lang = "en")` | |
+| R2-A11Y-03 | M | S | ☑ | `page_navbar(lang = "en")` | |
 | CR-A11Y-01 | M | S | ☐ | `:focus-visible` outline on `.wise-info-icon` | |
 | R2-A11Y-01 | M | S | ☐ | Restore focus style on sidebar accordion headers | |
 | CR-A11Y-02 | M | S | ☐ | Text colours >= 4.5:1 (`#5f6f7d`, status colours, hero text) | |
