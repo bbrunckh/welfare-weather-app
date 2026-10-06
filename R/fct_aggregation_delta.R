@@ -273,28 +273,27 @@ gradient_for_method <- function(method, mu, weights, pov_line, value_pt,
       h
     },
     median = {
-      # Hampel IF: IF_i = -(1{w_i<=m} - 0.5) / f(m)
-      # Lift to log scale: h_i = w_tilde_i * mu_i * IF_i, with mu_i chain rule
-      # cancelling because median is in welfare units.
-      f_hat <- tryCatch(
-        {
-          d <- if (!is.null(weights)) {
-            suppressWarnings(stats::density(mu,
-              weights = weights / sum(weights, na.rm = TRUE),
-              na.rm = TRUE
-            ))
-          } else {
-            stats::density(mu, na.rm = TRUE)
-          }
-          approx_y <- stats::approx(d$x, d$y, xout = value_pt)$y
-          if (is.finite(approx_y) && approx_y > 1e-12) approx_y else NA_real_
-        },
-        error = function(e) NA_real_
-      )
-      if (is.na(f_hat)) {
+      # Smoothed-quantile derivative (R2-BUG-03). The median m solves
+      #   sum_i w_tilde_i * Phi((m - w_i)/b) = 0.5,
+      # so by implicit differentiation dm/dw_i = k_i / sum(k) with
+      #   k_i = w_tilde_i * phi((m - w_i)/b) / b.
+      # Lifted to log scale like every other method here:
+      #   h_i = (dm/dw_i) * mu_i = k_i * mu_i / sum(k).
+      # Under a common log shift delta, sum(h) * delta ~ m * delta, as it
+      # should. (The Hampel influence function used previously is the
+      # sampling-variance IF; its gradients sum to ~0 under that shift.)
+      # b is the bandwidth stats::density() used for f(m) before: bw.nrd0.
+      ok <- is.finite(mu)
+      if (sum(ok) < 2L) {
         return(rep(0, N))
       }
-      w_tilde * (0.5 - as.numeric(mu <= value_pt)) / f_hat
+      b <- stats::bw.nrd0(mu[ok])
+      k <- w_tilde * stats::dnorm((value_pt - mu) / b) / b
+      k_sum <- sum(k, na.rm = TRUE)
+      if (!is.finite(b) || b <= 0 || !is.finite(k_sum) || k_sum <= 0) {
+        return(rep(0, N))
+      }
+      k * mu / k_sum
     },
     gini = {
       # Partial-derivative gradient of the weighted Gini wrt y_i, used in

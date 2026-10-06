@@ -218,7 +218,8 @@ test_that("prosperity_gap gradient matches MC and exact formula", {
 test_that("all smooth delta-method gradients match finite differences (unweighted)", {
   # h_i = (dT/dw_i) * w_i, so a small relative welfare perturbation
   # dw_i/w_i = eps must move the point estimate by h_i * eps. Excluded:
-  # median (piecewise-constant estimate — Hampel IF is not FD-visible) and
+  # median (piecewise-constant estimate; the gradient is the smoothed-quantile
+  # derivative, validated against Monte Carlo below) and
   # headcount_ratio (discontinuous estimate; the gradient is defined on the
   # kernel-smoothed surrogate, validated separately below).
   pipe  <- make_pipeline()
@@ -300,6 +301,39 @@ test_that("kernel-smoothed headcount_ratio gradient matches finite differences",
     pov_line = pov_line, value_pt = T0, bandwidth_p0 = 0.05
   )
   expect_near_fd(T1 - T0, h[idx] * eps, tol = 1e-4, info = "headcount_ratio")
+})
+
+test_that("median delta-method SD matches Monte Carlo (R2-BUG-03)", {
+  # The Hampel-IF gradient gave ratios of ~0 (intercept-like loading) and
+  # ~0.25 (correlated loading); the smoothed-quantile derivative gives ~1.
+  set.seed(3)
+  N <- 4000
+  y <- stats::rnorm(N, log(3), 0.6)
+  w <- stats::runif(N, 0.5, 2)
+  cases <- list(
+    intercept  = matrix(0.05, N, 1),
+    correlated = cbind(0.03 + 0.02 * (y - mean(y)), stats::rnorm(N, 0, 0.02)),
+    mixed      = cbind(rep(0.04, N), stats::rnorm(N, 0, 0.05),
+                       stats::rnorm(N, 0, 0.05))
+  )
+  for (nm in names(cases)) {
+    pipe <- list(y_point = y, F_loading = cases[[nm]])
+    res <- wiseapp:::aggregate_with_uncertainty_delta(
+      y_point = y, F_loading = pipe$F_loading, method = "median",
+      weights = w, residuals = "none"
+    )
+    ratio <- sqrt(res$var_coef) / mc_se(pipe, "median", weights = w, S = 2000)
+    expect_gt(ratio, 0.9, label = paste(nm, "ratio"))
+    expect_lt(ratio, 1.1, label = paste(nm, "ratio"))
+  }
+
+  # Common log shift: gradients sum to ~ m (median moves by m * delta).
+  h <- wiseapp:::gradient_for_method(
+    method = "median", mu = exp(y), weights = w, pov_line = NULL,
+    value_pt = wiseapp:::resolve_agg_fn("median")(exp(y), w, NULL)
+  )
+  m <- wiseapp:::resolve_agg_fn("median")(exp(y), w, NULL)
+  expect_lt(abs(sum(h) / m - 1), 0.02)
 })
 
 
