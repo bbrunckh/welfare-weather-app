@@ -141,3 +141,26 @@ test_that("build_threshold_table_df pivots long input wide and orders rows", {
   )
   expect_false(any(vapply(out3, is.list, logical(1L))))
 })
+
+test_that("threshold table keeps raw values and rounds only for display (R2-BUG-15)", {
+  RPs <- c("1:10", "1:1")
+  rates <- tibble::tibble(scenario = "Historical", Estimate = "Central (P50)",
+                          rp_name = RPs, rp_label = RPs, value = c(0.32154, 0.32449),
+                          n_obs = 30L, is_historical = TRUE)
+  out <- build_threshold_table_df(rates, show_coef = TRUE)
+  # 0.32154 vs 0.32449 differ by < 0.5 pp; both were 0.32 when rounded first.
+  expect_equal(out[["1:10"]], 0.32154)
+  expect_equal(out[["1:1"]], 0.32449)
+
+  defs <- .threshold_col_defs(out)
+  expect_setequal(names(defs), RPs)
+  expect_identical(defs[["1:10"]]$format$cell$digits, 4L)
+
+  levels <- out
+  levels[RPs] <- lapply(levels[RPs], function(x) x * 1000)
+  expect_identical(.threshold_col_defs(levels)[["1:1"]]$format$cell$digits, 2L)
+
+  # Both Step 2 and Step 3 renderers accept the raw frame.
+  expect_s3_class(.step2_reactable(out, col_defs = defs), "reactable")
+  expect_s3_class(.wise_threshold_reactable(out), "reactable")
+})

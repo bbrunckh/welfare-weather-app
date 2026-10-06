@@ -2271,7 +2271,7 @@ mod_2_02_results_server <- function(id,
     )
 
     # Return-period decision table as a reactable (guidelines §6): raw values
-    # in the data (already 2-dp rounded by build_threshold_table_df), rendered
+    # in the data, rounded only for display (.threshold_col_defs()), rendered
     # client-side; the CSV download moved to the shared client-side
     # wise_reactable_csv_button() next to the widget. INT-08: while the
     # results are stale the table stays visible.
@@ -2284,7 +2284,7 @@ mod_2_02_results_server <- function(id,
       if (identical(src$mode, "provisional")) {
         df <- .append_pending_threshold_rows(df, src$pending_names)
       }
-      .step2_reactable(df)
+      .step2_reactable(df, col_defs = .threshold_col_defs(df))
     }
     output$summary_threshold_table <- reactable::renderReactable({
       threshold_reactable()

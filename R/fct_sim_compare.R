@@ -1521,20 +1521,20 @@ build_threshold_table_df <- function(threshold_tbl,
     df$rp_label <- gsub("-", " ", df$rp_label)
   }
 
-  # Pivot: one column per RP threshold, value rounded.
-  df$value_round <- round(df$value, 2)
-
+  # Pivot: one column per RP threshold. Values stay unrounded so rates and
+  # indices keep their resolution in the CSV; rounding is display-only
+  # (.threshold_col_defs()).
   pivot_cols <- if (has_source) {
-    c("scenario", "source", "Estimate", "rp_label", "value_round")
+    c("scenario", "source", "Estimate", "rp_label", "value")
   } else {
-    c("scenario", "Estimate", "rp_label", "value_round")
+    c("scenario", "Estimate", "rp_label", "value")
   }
   if (!isTRUE(adverse_only)) pivot_cols <- c(pivot_cols, "n_obs")
 
   wide <- tidyr::pivot_wider(
     df[, pivot_cols],
     names_from  = "rp_label",
-    values_from = "value_round",
+    values_from = "value",
     values_fn   = function(x) mean(x, na.rm = TRUE)
   )
   wide <- as.data.frame(wide)
@@ -3346,6 +3346,24 @@ echart_exceedance <- function(curves_tbl,
     pageSizeOptions = c(10, 25, 50, 100),
     highlight = TRUE
   )
+}
+
+# Display-only number formats for the return-period threshold table. Values
+# within [-1, 1] (rates, poverty gap/severity, Gini) get 4 decimals so
+# sub-percentage-point differences stay visible; other outcomes get 2.
+# The integer Obs column is left unformatted.
+.threshold_col_defs <- function(df) {
+  num <- names(df)[vapply(df, is.numeric, logical(1))]
+  num <- setdiff(num, "Obs")
+  vals <- unlist(df[num], use.names = FALSE)
+  vals <- vals[is.finite(vals)]
+  digits <- if (length(vals) && max(abs(vals)) <= 1) 4L else 2L
+  stats::setNames(lapply(num, function(nm) {
+    reactable::colDef(
+      format = reactable::colFormat(digits = digits),
+      class = "wise-dt-wrap", minWidth = 70
+    )
+  }), num)
 }
 
 .step2_reactable_note <- function(note) {

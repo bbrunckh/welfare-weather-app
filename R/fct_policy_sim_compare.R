@@ -1796,17 +1796,17 @@ plot_step3_adverse_dot <- function(tbl, x_label = "Outcome level",
 }
 
 # Reactable styling for the return-period threshold table (guidelines sec. 6):
-# the frame arrives with RP values already rounded to 2 dp by
-# build_threshold_table_df(); display keeps that precision.
+# the frame arrives with raw RP values from build_threshold_table_df();
+# numeric columns are rounded for display only (.threshold_col_defs()).
 #' @noRd
 .wise_threshold_reactable <- function(df) {
+  num_defs <- .threshold_col_defs(df)
   cols <- lapply(names(df), function(nm) {
     x <- df[[nm]]
-    if (is.numeric(x)) {
-      reactable::colDef(
-        format = reactable::colFormat(digits = 2),
-        class = "wise-dt-wrap"
-      )
+    if (!is.null(num_defs[[nm]])) {
+      reactable::colDef(format = num_defs[[nm]]$format, class = "wise-dt-wrap")
+    } else if (is.numeric(x)) {
+      reactable::colDef(class = "wise-dt-wrap")
     } else if (is.character(x) || is.factor(x)) {
       reactable::colDef(class = "wise-dt-wrap", minWidth = 170)
     } else {
