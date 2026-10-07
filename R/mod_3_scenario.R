@@ -313,7 +313,6 @@ mod_3_scenario_server <- function(id,
       policy_scenarios = s6$policy_scenarios,
       baseline_hist_sim = s6$baseline_hist_sim,
       baseline_svy = s6$baseline_svy,
-      policy_svy = s6$policy_svy,
       selected_weather = selected_weather,
       sp_scenario = s6$sp_scenario,
       infra_scenario = s6$infra_scenario,
@@ -326,8 +325,6 @@ mod_3_scenario_server <- function(id,
         hs <- hist_sim()
         if (!is.null(hs)) hs$so else NULL
       }),
-      show_coef_uncertainty = s7$show_coef_uncertainty,
-      aggregation_method = s7$aggregation_method,
       poverty_line = s7$poverty_line,
       analysis_unit = analysis_unit
     )

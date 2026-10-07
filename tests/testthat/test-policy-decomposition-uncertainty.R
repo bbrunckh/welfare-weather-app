@@ -167,8 +167,7 @@ test_that("decomposition module renders core plots for OLS and RIF schemas", {
         decomp_scenarios = shiny::reactiveVal(scenarios),
         model_fit = shiny::reactiveVal(model),
         so = shiny::reactiveVal(fx$so),
-        baseline_svy = shiny::reactiveVal(fx$svy_base),
-        policy_svy = shiny::reactiveVal(fx$svy_policy)
+        baseline_svy = shiny::reactiveVal(fx$svy_base)
       ),
       {
         session$flushReact()

@@ -159,8 +159,7 @@ source(file.path(.bench_repo_root, "dev", "bench_step3_helpers.R"), local = TRUE
     weather_collect = .bench_env("WISEAPP_STEP2_WEATHER_COLLECT", "fast"),
     weather_threads = .bench_env("WISEAPP_STEP2_WEATHER_THREADS", "auto"),
     join_cache = .bench_env_flag("WISEAPP_STEP2_JOIN_CACHE", FALSE),
-    direct_rif_predictions = .bench_env_flag("WISEAPP_STEP2_DIRECT_RIF_PREDICTIONS", TRUE),
-    key_workers = max(1L, min(2L, .bench_env_int("WISEAPP_STEP2_KEY_WORKERS", 1L)))
+    direct_rif_predictions = .bench_env_flag("WISEAPP_STEP2_DIRECT_RIF_PREDICTIONS", TRUE)
   )
 }
 
@@ -732,7 +731,6 @@ inputs_by_country <- setNames(
     weather_collect = config$weather_collect,
     weather_threads = config$weather_threads,
     join_cache = config$join_cache,
-    key_workers = config$key_workers,
     direct_rif_predictions = config$direct_rif_predictions
   )
 }
@@ -925,7 +923,7 @@ inputs_by_country <- setNames(
       weather_fn = weather_fn
     )
   )
-  if (config$key_workers <= 1L) call_args$pipeline_fn <- pipeline_fn
+  call_args$pipeline_fn <- pipeline_fn
   evidence_class <- if (identical(config$fixture_mode, "smoke")) {
     "smoke_only_not_production_evidence"
   } else {
@@ -980,7 +978,6 @@ inputs_by_country <- setNames(
     weather_collect = case_config$weather_collect,
     weather_threads = case_config$weather_threads,
     join_cache = case_config$join_cache,
-    key_workers = case_config$key_workers,
     direct_rif_predictions = case_config$direct_rif_predictions,
     uncertainty = if (isTRUE(args$skip_coef_draws)) "disabled" else "enabled",
     cache = cache_state,
@@ -1100,7 +1097,6 @@ for (country in names(inputs_by_country)) {
                 weather_collect = cfg$weather_collect,
                 weather_threads = cfg$weather_threads,
                 join_cache = cfg$join_cache,
-                key_workers = cfg$key_workers,
                 direct_rif_predictions = cfg$direct_rif_predictions,
                 uncertainty = uncertainty, cache = cache_state,
                 repetition = repetition, fixture_mode = cfg$fixture_mode,

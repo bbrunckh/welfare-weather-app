@@ -323,8 +323,7 @@ test_that("mod_3_09 outcome-unit decomposition charts render", {
       decomp_scenarios = reactiveVal(list()),
       model_fit = reactiveVal(list(engine = "fixest", rif_grid = data.frame())),
       so = reactiveVal(so),
-      baseline_svy = reactiveVal(survey),
-      policy_svy = reactiveVal(survey)
+      baseline_svy = reactiveVal(survey)
     ),
     {
       session$flushReact()

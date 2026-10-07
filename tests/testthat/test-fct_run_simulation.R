@@ -325,18 +325,6 @@ test_that("weather thread mode is forwarded to the weather loader", {
   expect_identical(captured, "2")
 })
 
-test_that("key worker count is bounded to the characterization range", {
-  wr <- make_ledger_weather_result(with_ssp5 = FALSE)
-  expect_error(
-    run_ledger_sim(wr, key_workers = 0L),
-    "key_workers must be an integer between 1 and 2"
-  )
-  expect_error(
-    run_ledger_sim(wr, key_workers = 3L),
-    "key_workers must be an integer between 1 and 2"
-  )
-})
-
 test_that("historical preview is emitted before future keys and stays bounded", {
   wr <- make_ledger_weather_result(with_ssp5 = FALSE)
   order <- character(0)
