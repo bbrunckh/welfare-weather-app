@@ -200,7 +200,6 @@ test_that("per-pipeline vector and row alignment contract is stable", {
 })
 
 test_that("run_sim_pipeline contract preserves joins and disabled uncertainty", {
-  skip_if_not_installed("broom")
 
   train <- data.frame(
     welfare = c(1, 2, 3, 4), temp = c(0, 1, 2, 3),
@@ -248,7 +247,6 @@ test_that("run_sim_pipeline contract preserves joins and disabled uncertainty", 
 })
 
 test_that("enabled coefficient uncertainty preserves F_loading dimensions and order", {
-  skip_if_not_installed("fixest")
 
   train <- data.frame(
     welfare = c(1, 2, 3, 4), temp = c(0, 1, 2, 3),

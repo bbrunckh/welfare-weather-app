@@ -30,7 +30,6 @@ test_that("stale bundle items are recorded as skipped, not exported", {
 })
 
 test_that("Step 3 preview labels and calculations use one debounced snapshot", {
-  skip_if_not_installed("shiny")
   svy <- data.frame(welfare = 1:4, weight = 1)
   hs <- shiny::reactiveVal(list(svy = svy, so = list(name = "welfare")))
   testServer(mod_3_01_sp_server, args = list(

@@ -44,7 +44,6 @@ library(testthat)
 }
 
 test_that("stacked RIF Wald test clusters on the model cluster variable", {
-  skip_if_not_installed("fixest")
   fx <- .het_fixture(600L, cluster = "loc_id_panel")
   res <- .capture_feols_cluster(fx$mf, fx$snap)
   expect_true(is.numeric(res$p) && is.finite(res$p))
@@ -53,7 +52,6 @@ test_that("stacked RIF Wald test clusters on the model cluster variable", {
 })
 
 test_that("stacked RIF Wald test clusters on the household row without a model cluster", {
-  skip_if_not_installed("fixest")
   fx <- .het_fixture(600L)
   res <- .capture_feols_cluster(fx$mf, fx$snap)
   expect_true(is.numeric(res$p) && is.finite(res$p))
@@ -61,7 +59,6 @@ test_that("stacked RIF Wald test clusters on the household row without a model c
 })
 
 test_that("stacked-row cap is disclosed instead of returning NULL silently", {
-  skip_if_not_installed("fixest")
   fx <- .het_fixture(28000L)
   p <- step1_rif_heterogeneity_p(fx$mf, fx$snap, "temp")
   expect_false(is.null(p))

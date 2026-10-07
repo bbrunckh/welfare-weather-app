@@ -57,7 +57,6 @@ test_that("seed derivation and keyed fallbacks have stable golden values", {
 
 test_that("deterministic collection is invariant to source row order", {
   skip_if_not_installed("arrow")
-  skip_if_not_installed("duckdb")
 
   dir <- withr::local_tempdir()
   x <- data.frame(
@@ -94,7 +93,6 @@ test_that("household rows remain contiguous when person IDs are present", {
 })
 
 test_that("loc_panel labels are stable across row order", {
-  skip_if_not_installed("duckdb")
 
   con <- DBI::dbConnect(duckdb::duckdb())
   withr::defer(DBI::dbDisconnect(con, shutdown = TRUE))
@@ -127,7 +125,6 @@ test_that("loc_panel labels are stable across row order", {
 })
 
 test_that("weather thread pin is restored after validation errors", {
-  skip_if_not_installed("duckdb")
 
   con <- .duck_con()
   before <- DBI::dbGetQuery(
@@ -178,7 +175,6 @@ test_that("Lasso is deterministic and restores caller RNG", {
 })
 
 test_that("MICE Lasso path is deterministic and restores caller RNG", {
-  skip_if_not_installed("mice")
 
   df <- make_lasso_fixture(120L)
   df$noise[seq(5L, 25L, by = 5L)] <- NA_real_
@@ -205,7 +201,6 @@ test_that("MICE Lasso path is deterministic and restores caller RNG", {
 })
 
 test_that("Step 1 fixest fits are identical across repeated runs", {
-  skip_if_not_installed("fixest")
 
   df <- make_lasso_fixture(160L)
   df$loc_id_panel <- rep(letters[1:8], length.out = nrow(df))
@@ -228,7 +223,6 @@ test_that("Step 1 fixest fits are identical across repeated runs", {
 })
 
 test_that("Step 2 simulation pipeline is identical across repeated runs", {
-  skip_if_not_installed("fixest")
 
   df <- make_lasso_fixture(120L)
   df$code <- "TST"

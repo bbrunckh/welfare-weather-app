@@ -216,7 +216,6 @@ test_that(".register_db_secret quotes bearer tokens safely in secret SQL", {
 })
 
 test_that("shared DuckDB state is released after the last root session ends", {
-  skip_if_not_installed("duckdb")
   restore_duck <- .duck_state_restore()
   withr::defer(restore_duck())
 
@@ -257,7 +256,6 @@ test_that("shared DuckDB state is released after the last root session ends", {
 })
 
 test_that("load_data s3 secret SQL escapes quote-bearing credentials", {
-  skip_if_not_installed("duckdb")
   restore_duck <- .duck_state_restore()
   withr::defer(restore_duck())
   captured <- character(0)
@@ -297,7 +295,6 @@ test_that("load_data s3 secret SQL escapes quote-bearing credentials", {
 })
 
 test_that("load_data gcs and azure secret SQL escapes quote-bearing credentials", {
-  skip_if_not_installed("duckdb")
   restore_duck <- .duck_state_restore()
   withr::defer(restore_duck())
   captured <- character(0)
@@ -374,7 +371,6 @@ test_that("a UI connection snapshot keeps its own credentials and gets no env fi
 })
 
 test_that("load_data never mixes env credentials into UI s3/azure connections", {
-  skip_if_not_installed("duckdb")
   restore_duck <- .duck_state_restore()
   withr::defer(restore_duck())
   withr::local_envvar(
@@ -476,7 +472,6 @@ test_that("extension loading calls .on_posit_connect() without an exists() guard
   skip_if(!file.exists(src), "R/ source tree not available (installed package)")
   expect_false(any(grepl("exists\\(\"\\.on_posit_connect\"", readLines(src, warn = FALSE))))
 
-  skip_if_not_installed("duckdb")
   restore_duck <- .duck_state_restore()
   withr::defer(restore_duck())
   local_mocked_bindings(.on_posit_connect = function() TRUE)
@@ -502,7 +497,6 @@ test_that("extension loading calls .on_posit_connect() without an exists() guard
 }
 
 test_that(".duck_drop_credentials removes secrets, tokens and load_data views", {
-  skip_if_not_installed("duckdb")
   restore_duck <- .duck_state_restore()
   withr::defer(restore_duck())
   con <- .sec02_seed_credentials()
@@ -520,7 +514,6 @@ test_that(".duck_drop_credentials removes secrets, tokens and load_data views", 
 })
 
 test_that("credential-carrying worker tasks drop credentials on exit, even on error", {
-  skip_if_not_installed("duckdb")
   restore_duck <- .duck_state_restore()
   withr::defer(restore_duck())
   root <- withr::local_tempdir()

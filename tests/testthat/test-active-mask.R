@@ -356,7 +356,6 @@ test_that("RIF end-to-end: full production chain shrinks var_coef", {
   # to a RIF model does NOT inflate var_coef when the additive-decomp
   # gate is on. Regression test for a reported bug where the mask
   # appeared not to reach interpolate_F_loading().
-  skip_if_not_installed("fixest")
   set.seed(42)
   n <- 300
   df <- data.frame(

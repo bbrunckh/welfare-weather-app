@@ -21,7 +21,6 @@ library(testthat)
 
 
 test_that("auto-connect surfaces failure when async is disabled", {
-  skip_if_not_installed("httr2")
   # Env must be set in this frame (not a helper): withr restores at helper exit.
   withr::local_envvar(
     RSTUDIO_PRODUCT = "CONNECT",
@@ -54,8 +53,6 @@ test_that("auto-connect surfaces failure when async is disabled", {
 
 
 test_that("auto-connect dispatches the metadata load to the mirai worker", {
-  skip_if_not_installed("mirai")
-  skip_if_not_installed("httr2")
   withr::local_envvar(
     RSTUDIO_PRODUCT = "CONNECT",
     WISEAPP_DATA_SOURCE = "databricks",

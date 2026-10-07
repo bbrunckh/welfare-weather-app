@@ -50,7 +50,6 @@ make_wx_selected <- function(name = "tx", label = "Max temp") {
 }
 
 test_that("weather stats tab is inert to selector changes until re-pressed", {
-  skip_if_not_installed("shiny")
 
   loc_calls <- 0L
   real_swl  <- summarise_weather_by_loc

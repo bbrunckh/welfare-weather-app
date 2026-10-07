@@ -8,7 +8,6 @@ library(testthat)
 library(shiny)
 
 test_that("diagnostics tab is appended, removed on clear, re-appended on rerun", {
-  skip_if_not_installed("shiny")
 
   hist_sim <- shiny::reactiveVal(NULL)
 
@@ -41,7 +40,6 @@ test_that("diagnostics tab is appended, removed on clear, re-appended on rerun",
 })
 
 test_that("diagnostics accepts absent scenarios without eager forcing", {
-  skip_if_not_installed("shiny")
   hist_sim <- shiny::reactiveVal(NULL)
   shiny::testServer(
     mod_2_03_diagnostics_server,

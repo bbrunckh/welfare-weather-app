@@ -244,7 +244,6 @@ test_that("normal and resample residual streams remain per-year and arm-independ
 })
 
 test_that("Results weighting arms remain lazy until a consumer requests them", {
-  skip_if_not_installed("shiny")
   n <- 400L
   set.seed(7)
   hist_sim <- shiny::reactiveVal(list(

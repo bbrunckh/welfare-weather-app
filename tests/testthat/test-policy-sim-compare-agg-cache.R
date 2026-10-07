@@ -415,7 +415,6 @@ test_that("shared pipeline table preserves historical and ensemble schemas", {
 # ---- INT-01: Step 3 filters and poverty line survive pane rebuilds ----------
 
 test_that("Step 3 scenario filter grid and poverty line survive rebuilds (INT-01)", {
-  skip_if_not_installed("shiny")
 
   bh  <- shiny::reactiveVal(make_step3_hist_fixture())
   ph  <- shiny::reactiveVal(make_step3_hist_fixture())
@@ -467,7 +466,6 @@ test_that("Step 3 scenario filter grid and poverty line survive rebuilds (INT-01
 # ---- INT-05: the historical label is bound to the simulated run --------------
 
 test_that("Step 3 historical label comes from the run snapshot, not live selection", {
-  skip_if_not_installed("shiny")
 
   bh <- shiny::reactiveVal({
     hs <- make_step3_hist_fixture()
@@ -515,7 +513,6 @@ test_that("Step 3 historical label comes from the run snapshot, not live selecti
 # ---- INT-08: stale banner on the Step 3 results pane -------------------------
 
 test_that("Step 3 results pane shows the stale banner while stale", {
-  skip_if_not_installed("shiny")
 
   bh  <- shiny::reactiveVal(make_step3_hist_fixture())
   ph  <- shiny::reactiveVal(make_step3_hist_fixture())
@@ -554,7 +551,6 @@ test_that("Step 3 results pane shows the stale banner while stale", {
 # ---- Regression: threshold rows stay unique with one admissible RP ----------
 
 test_that("threshold table has unique keys with two years and two members", {
-  skip_if_not_installed("shiny")
 
   bh  <- shiny::reactiveVal(make_step3_hist_fixture())
   ph  <- shiny::reactiveVal(make_step3_hist_fixture())
@@ -595,7 +591,6 @@ test_that("threshold table has unique keys with two years and two members", {
 })
 
 test_that("Step 3 agg cache: deviation changes reuse cache; method/pov-line key entries", {
-  skip_if_not_installed("shiny")
 
   bh  <- shiny::reactiveVal(make_step3_hist_fixture())
   ph  <- shiny::reactiveVal(make_step3_hist_fixture())
@@ -663,7 +658,6 @@ test_that("Step 3 agg cache: deviation changes reuse cache; method/pov-line key 
 })
 
 test_that("Step 3 aggregation cache is bounded, LRU, and value-preserving", {
-  skip_if_not_installed("shiny")
   bh <- shiny::reactiveVal(make_step3_hist_fixture())
   ph <- shiny::reactiveVal(make_step3_hist_fixture())
   bsc <- shiny::reactiveVal(make_step3_scenarios_fixture())
@@ -687,7 +681,6 @@ test_that("Step 3 aggregation cache is bounded, LRU, and value-preserving", {
 })
 
 test_that("Step 3 shared cache keeps baseline and policy historical arms distinct", {
-  skip_if_not_installed("shiny")
   baseline <- make_step3_hist_fixture()
   policy <- baseline
   policy$pipeline$y_point <- policy$pipeline$y_point + 5
@@ -719,7 +712,6 @@ test_that("Step 3 shared cache keeps baseline and policy historical arms distinc
 })
 
 test_that("historical matrix transforms use the canonical cache key and preserve values", {
-  skip_if_not_installed("shiny")
   hist <- make_step3_hist_fixture()
   hist$hist_label <- "Hist run 1991-2020"
   bh <- shiny::reactiveVal(hist)
@@ -745,7 +737,6 @@ test_that("historical matrix transforms use the canonical cache key and preserve
 })
 
 test_that("switching directly to a poverty method always has a poverty line", {
-  skip_if_not_installed("shiny")
 
   bh  <- shiny::reactiveVal(make_step3_hist_fixture())
   ph  <- shiny::reactiveVal(make_step3_hist_fixture())
@@ -784,7 +775,6 @@ test_that("switching directly to a poverty method always has a poverty line", {
 })
 
 test_that("Step 3 agg cache is invalidated on simulation republish; recompute identical", {
-  skip_if_not_installed("shiny")
 
   bh  <- shiny::reactiveVal(make_step3_hist_fixture())
   ph  <- shiny::reactiveVal(make_step3_hist_fixture())
@@ -827,7 +817,6 @@ test_that("Step 3 agg cache is invalidated on simulation republish; recompute id
 })
 
 test_that("cached scenario aggregation is identical to uncached recomputation", {
-  skip_if_not_installed("shiny")
 
   hist <- make_step3_hist_fixture()
   sc   <- make_step3_scenarios_fixture()
@@ -882,7 +871,6 @@ test_that("cached scenario aggregation is identical to uncached recomputation", 
 })
 
 test_that("scenario aggregation preserves scenario names across both arms", {
-  skip_if_not_installed("shiny")
 
   # Regression: make_agg_scenarios() iterates with seq_along(sc) so the
   # failure ledger can name the dropped scenario; lapply over the indices

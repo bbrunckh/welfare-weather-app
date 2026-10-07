@@ -23,7 +23,6 @@ test_that("weather_support_from_stored returns the stored rows in variable and s
 })
 
 test_that("the Diagnostics weather-support table reads the stored summary without weather files", {
-  skip_if_not_installed("shiny")
   stored <- data.frame(
     weather_variable = "temp", scenario = "SSP2 / 2030", n_reference = 100,
     n_scenario = 200, robust_lo = 1, robust_hi = 99, reference_label = NA_character_,

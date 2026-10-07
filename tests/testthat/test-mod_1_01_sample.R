@@ -21,7 +21,6 @@ make_survey_list <- function() {
 }
 
 test_that("year picker renders with data; warning shows and picker hides without data", {
-  skip_if_not_installed("shiny")
 
   data_dir <- tempfile("wise-data-")
   dir.create(file.path(data_dir, "microdata", "hh", "bfa"), recursive = TRUE)

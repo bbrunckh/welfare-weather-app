@@ -25,7 +25,6 @@ make_vl <- function() {
 }
 
 test_that("fit snapshot captures fit-time labels; headings follow re-fit engine", {
-  skip_if_not_installed("shiny")
 
   local_mocked_bindings(
     # The test targets snapshot binding, not the prep/fit internals.
@@ -129,7 +128,6 @@ test_that("fit snapshot captures fit-time labels; headings follow re-fit engine"
 })
 
 test_that("REACT-14: specification fallbacks render the provenance banner", {
-  skip_if_not_installed("shiny")
 
   local_mocked_bindings(
     prepare_outcome_df = function(df, so) df,
@@ -235,7 +233,6 @@ test_that("P16: one fit-signature observer preserves exact stale transitions", {
 })
 
 test_that("redesigned sections render: who-panel, focused table, RIF suppression", {
-  skip_if_not_installed("shiny")
 
   local_mocked_bindings(
     prepare_outcome_df = function(df, so) df,
@@ -411,7 +408,6 @@ test_that("fit-scoped headline inputs preserve values without recomputation", {
 })
 
 test_that("R2-BUG-11: a Lasso spec without a successful selection is not fitted", {
-  skip_if_not_installed("shiny")
   fits <- 0L
   local_mocked_bindings(
     prepare_outcome_df = function(df, so) df,

@@ -209,7 +209,6 @@ test_that("P8: survey-wave metadata preserves wave ordering and labels", {
 # ---- Interview-dates echarts renderer (guidelines §7) ------------------------
 
 test_that("echart_interview_dates builds one series per wave over 12 months", {
-  skip_if_not_installed("echarts4r")
   d <- data.frame(
     economy = rep("A", 4),
     countryyear = rep(c("A, 2018", "A, 2021"), each = 2),

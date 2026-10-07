@@ -70,7 +70,6 @@ test_that("R2-A11Y-01: sidebar accordion headers keep a focus indicator", {
 })
 
 test_that("R2-A11Y-02: theme focus ring is a solid brand-blue ring", {
-  skip_if_not_installed("brand.yml")
   local_mocked_bindings(get_golem_version = function(...) "0.0.0",
                         .package = "golem")
   deps <- htmltools::resolveDependencies(
@@ -201,7 +200,6 @@ test_that("CR-A11Y-04: social protection select and slider have hidden labels", 
 })
 
 test_that("R2-A11Y-05: skip link, main landmark and heading levels", {
-  skip_if_not_installed("brand.yml")
   local_mocked_bindings(get_golem_version = function(...) "0.0.0",
                         .package = "golem")
   r <- htmltools::renderTags(app_ui(NULL))

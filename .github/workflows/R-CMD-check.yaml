@@ -1,4 +1,4 @@
-# R CMD check plus the deployment contract tests.
+# R CMD check plus the full test suite.
 #
 # Dependencies come from DESCRIPTION only (Imports, Depends, LinkingTo and the
 # declared Suggests), so a package used in R/ but missing from DESCRIPTION
@@ -16,6 +16,7 @@ permissions: read-all
 jobs:
   R-CMD-check:
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     env:
       GITHUB_PAT: ${{ secrets.GITHUB_TOKEN }}
       R_KEEP_PKG_SOURCE: yes
@@ -51,15 +52,24 @@ jobs:
         with:
           upload-snapshots: true
           error-on: '"error"'
+          # Tests run once, in the "Tests" step, from the checkout: manifest.json,
+          # batch/ and the R/ sources that the contract tests scan are not part
+          # of the built package.
+          args: 'c("--no-manual", "--as-cran", "--no-tests")'
           build_args: 'c("--no-manual", "--compact-vignettes=gs+qpdf")'
 
-      # manifest.json is excluded from the built package, so the manifest-sync
-      # and other source-tree contract tests run from the checkout instead.
-      - name: Deployment contract tests
+      # The h3 weather fixtures install the DuckDB h3 community extension on
+      # first use; cache it so most runs do not depend on that download.
+      - uses: actions/cache@v4
+        with:
+          path: ~/.duckdb/extensions
+          key: duckdb-ext-${{ runner.os }}-${{ hashFiles('DESCRIPTION') }}
+
+      - name: Tests
         shell: Rscript {0}
         run: |
           options(testthat.progress.max_fails = 1000)
-          devtools::test(filter = "deploy-contract|duckdb-bundle", stop_on_failure = TRUE)
+          testthat::test_local(stop_on_failure = TRUE)
 
   lintr:
     runs-on: ubuntu-latest

@@ -1,7 +1,6 @@
 # UI-45: every table exports to CSV through one shared affordance.
 
 test_that("make_regtable_df returns one row per specification and term", {
-  skip_if_not_installed("fixest")
   set.seed(42)
   d <- data.frame(y = rnorm(200), x1 = rnorm(200), x2 = rnorm(200),
                   g = factor(sample(1:5, 200, TRUE)))
@@ -26,7 +25,6 @@ test_that("make_regtable_df returns one row per specification and term", {
 })
 
 test_that("make_regtable_df labels terms via label_fun", {
-  skip_if_not_installed("fixest")
   set.seed(1)
   d <- data.frame(y = rnorm(100), x1 = rnorm(100))
   f <- fixest::feols(y ~ x1, data = d)

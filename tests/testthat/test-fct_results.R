@@ -119,8 +119,6 @@ test_that("welfare outcome defaults to the $3.00 PPP line", {
 # R2-BUG-19: RIF polynomial coefficient SE uses the full VCV ------------------
 
 test_that("R2-BUG-19: RIF coefplot combines polynomial SEs with their covariance", {
-  skip_if_not_installed("fixest")
-  skip_if_not_installed("echarts4r")
   set.seed(19)
   n <- 800
   df <- data.frame(temp = stats::rnorm(n, 3, 1))

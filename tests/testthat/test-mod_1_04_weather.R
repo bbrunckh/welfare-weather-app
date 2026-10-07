@@ -18,7 +18,6 @@ make_vl_weather <- function() {
 }
 
 test_that("weather configuration card renders pipeline stages live", {
-  skip_if_not_installed("shiny")
 
   shiny::testServer(
     mod_1_04_weather_server,

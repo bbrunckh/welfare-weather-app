@@ -184,7 +184,6 @@ test_that("historical cell joins retain NA-key rows and exact sample dates", {
 })
 
 test_that("interactive binned weather distribution keeps labels and tooltip visible", {
-  skip_if_not_installed("echarts4r")
   df <- data.frame(
     countryyear = rep(c("TST, 2018", "TST, 2021"), each = 4),
     tx = factor(
@@ -206,7 +205,6 @@ test_that("interactive binned weather distribution keeps labels and tooltip visi
 })
 
 test_that("interactive binscatter serializes readable bin labels as strings", {
-  skip_if_not_installed("echarts4r")
   binned <- data.frame(
     tx = factor(
       rep(c("[0, 10]", "(10, 20]"), 20),

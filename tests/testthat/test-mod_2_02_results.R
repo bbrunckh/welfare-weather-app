@@ -126,7 +126,6 @@ test_that("simulation prediction counts are compact and identify their row unit"
 })
 
 test_that("Results frame is immutable and scoped to method/deviation", {
-  skip_if_not_installed("shiny")
   hist_sim <- shiny::reactiveVal(make_hist_sim_fixture())
   stale <- shiny::reactiveVal(FALSE)
   shiny::testServer(
@@ -156,7 +155,6 @@ test_that("Results frame is immutable and scoped to method/deviation", {
 })
 
 test_that("agg cache: display-only controls do not invalidate unaffected methods", {
-  skip_if_not_installed("shiny")
 
   hist_sim <- shiny::reactiveVal(make_hist_sim_fixture())
 
@@ -221,7 +219,6 @@ test_that("agg cache: display-only controls do not invalidate unaffected methods
 })
 
 test_that("agg cache is bounded, observable, and recomputes evicted values", {
-  skip_if_not_installed("shiny")
 
   hist_sim <- shiny::reactiveVal(make_hist_sim_fixture())
 
@@ -263,7 +260,6 @@ test_that("agg cache is bounded, observable, and recomputes evicted values", {
 })
 
 test_that("agg cache clears with the published Results lifecycle", {
-  skip_if_not_installed("shiny")
 
   hist_sim <- shiny::reactiveVal(make_hist_sim_fixture())
 
@@ -293,7 +289,6 @@ test_that("agg cache clears with the published Results lifecycle", {
 })
 
 test_that("agg cache preserves the active result while reruns become stale", {
-  skip_if_not_installed("shiny")
 
   first <- make_hist_sim_fixture()
   second <- make_hist_sim_fixture()
@@ -336,7 +331,6 @@ test_that("agg cache preserves the active result while reruns become stale", {
 })
 
 test_that("agg cache records hits, misses, and value-affecting key changes", {
-  skip_if_not_installed("shiny")
 
   hist_sim <- shiny::reactiveVal(make_hist_sim_fixture())
 
@@ -374,7 +368,6 @@ test_that("agg cache records hits, misses, and value-affecting key changes", {
 })
 
 test_that("session end releases aggregation cache entries", {
-  skip_if_not_installed("shiny")
 
   hist_sim <- shiny::reactiveVal(make_hist_sim_fixture())
   cache_state <- NULL
@@ -404,7 +397,6 @@ test_that("session end releases aggregation cache entries", {
 # ---- INT-08: stale banner on the Step 2 results pane ------------------------
 
 test_that("Step 2 results pane shows the stale banner while stale", {
-  skip_if_not_installed("shiny")
 
   hist_sim <- shiny::reactiveVal(make_hist_sim_fixture())
   stale    <- shiny::reactiveVal(FALSE)
@@ -437,7 +429,6 @@ test_that("Step 2 results pane shows the stale banner while stale", {
 # ---- INT-07: results tab follows the hist_sim lifecycle ---------------------
 
 test_that("results tab is appended, removed on clear, re-appended on rerun", {
-  skip_if_not_installed("shiny")
 
   hist_sim <- shiny::reactiveVal(NULL)
 
@@ -473,7 +464,6 @@ test_that("results tab is appended, removed on clear, re-appended on rerun", {
 # ---- Scenario coverage ------------------------------------------------------
 
 test_that("all saved scenarios feed results when no scenario filter is shown", {
-  skip_if_not_installed("shiny")
 
   hist_sim <- shiny::reactiveVal(make_hist_sim_fixture())
   saved    <- shiny::reactiveVal(list(
@@ -502,7 +492,6 @@ test_that("all saved scenarios feed results when no scenario filter is shown", {
 })
 
 test_that("all Module 2 summaries use the same complete scenario set", {
-  skip_if_not_installed("shiny")
 
   hist <- make_hist_sim_fixture()
   shifted_pipeline <- function(shift) {
@@ -561,7 +550,6 @@ test_that("all Module 2 summaries use the same complete scenario set", {
 })
 
 test_that("formatted threshold table preserves output across repeated builds", {
-  skip_if_not_installed("shiny")
   testServer(
     mod_2_02_results_server,
     args = list(
@@ -1081,7 +1069,6 @@ test_that("echart_variance_contribution draws one bar series per source", {
 })
 
 test_that("results module renders echarts charts and a reactable threshold table", {
-  skip_if_not_installed("shiny")
   testServer(
     mod_2_02_results_server,
     args = list(

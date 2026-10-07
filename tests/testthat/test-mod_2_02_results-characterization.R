@@ -142,16 +142,13 @@ library(shiny)
 }
 
 test_that("characterisation: mean, outcome level (committed mode)", {
-  skip_if_not_installed("shiny")
   .char_snapshot_config("mean", "none")
 })
 
 test_that("characterisation: mean, difference from historical mean", {
-  skip_if_not_installed("shiny")
   .char_snapshot_config("mean", "mean", ensemble_band = "minmax")
 })
 
 test_that("characterisation: headcount ratio, difference from historical mean", {
-  skip_if_not_installed("shiny")
   .char_snapshot_config("headcount_ratio", "mean", ensemble_band = "p10_p90")
 })

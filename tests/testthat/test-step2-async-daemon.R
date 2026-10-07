@@ -49,7 +49,6 @@ test_that("mirai error values are described for users", {
 
 test_that("a dead daemon is relaunched and runs tasks again", {
   skip_on_cran()
-  skip_if_not_installed("mirai")
   local_mocked_bindings(.WISE_ASYNC_DAEMON_GRACE_SEC = 0)
   local_daemon()
 
@@ -68,7 +67,6 @@ test_that("a dead daemon is relaunched and runs tasks again", {
 
 test_that("a daemon that is still starting is not relaunched", {
   skip_on_cran()
-  skip_if_not_installed("mirai")
   local_daemon()
   state <- .wise_step2_async_state
   state$launched_at <- proc.time()[["elapsed"]]
@@ -78,7 +76,6 @@ test_that("a daemon that is still starting is not relaunched", {
 
 test_that("a task past its timeout is interrupted and the daemon stays usable", {
   skip_on_cran()
-  skip_if_not_installed("mirai")
   local_daemon()
 
   slow <- mirai::try_mirai({Sys.sleep(30); "late"}, .compute = "default", .timeout = 500)
@@ -95,7 +92,6 @@ test_that("a task past its timeout is interrupted and the daemon stays usable", 
 
 # R2-SEC-01 follow-up: UI credentials only ever go to local daemons.
 test_that("daemon transports are classified as local or remote", {
-  skip_if_not_installed("mirai")
   url <- NULL
   local_mocked_bindings(status = function(...) list(connections = 1L, daemons = url),
     .package = "mirai")
@@ -120,13 +116,11 @@ test_that("daemon transports are classified as local or remote", {
 
 test_that("the coordinator's own daemon is local", {
   skip_on_cran()
-  skip_if_not_installed("mirai")
   local_daemon()
   expect_true(.wise_async_daemons_local())
 })
 
 test_that("Step 2 dispatch refuses to send UI credentials to a remote daemon", {
-  skip_if_not_installed("mirai")
   state <- .wise_step2_async_state
   old_active <- state$active
   old_queue <- state$queue
@@ -162,7 +156,6 @@ test_that("Step 2 dispatch refuses to send UI credentials to a remote daemon", {
 })
 
 test_that("Overview metadata refuses to send UI credentials to a remote daemon", {
-  skip_if_not_installed("mirai")
   withr::local_envvar(WISEAPP_METADATA_CACHE_DISABLE = "1", WISEAPP_ASYNC_SYNC = "0")
   submissions <- 0L
   local_mocked_bindings(.wise_step2_async_init = function() TRUE)

@@ -275,7 +275,6 @@ testthat::test_that("worker result artifacts are atomically published", {
 })
 
 testthat::test_that("async worker matches synchronous Step 2 fixture output", {
-  skip_if_not_installed("mirai")
   input <- list(
     sw = data.frame(name = "temp", stringsAsFactors = FALSE),
     so = data.frame(name = "welfare", type = "numeric", transform = "log",

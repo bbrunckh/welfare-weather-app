@@ -15,7 +15,6 @@ library(testthat)
 
 make_wx_cache_fixture <- function(dir) {
   skip_if_not_installed("arrow")
-  skip_if_not_installed("duckdb")
   d <- file.path(dir, "hazard", "weather", "historical", "TST")
   dir.create(d, recursive = TRUE, showWarnings = FALSE)
   set.seed(5)

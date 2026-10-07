@@ -44,7 +44,6 @@ test_that("Suggests-only engine packages are not imported unconditionally", {
 })
 
 test_that("the page renders without third-party font or script hosts", {
-  skip_if_not_installed("brand.yml")
   local_mocked_bindings(get_golem_version = function(...) "0.0.0",
                         .package = "golem")
   html <- htmltools::renderTags(app_ui(NULL))

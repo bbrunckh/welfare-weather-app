@@ -41,7 +41,6 @@ test_that("without limits DuckDB keeps its defaults but spills to a temp directo
 })
 
 test_that("the thread cap applies to fixest and collapse", {
-  skip_if_not_installed("fixest")
   old_fixest <- fixest::getFixest_nthreads()
   old_collapse <- collapse::get_collapse()$nthreads
   withr::defer({

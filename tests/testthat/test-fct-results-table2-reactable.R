@@ -73,7 +73,6 @@ test_that("focused reactable pivots the RIF grid over taus", {
 })
 
 test_that("specs reactable compares three specifications with (SE) cells", {
-  skip_if_not_installed("fixest")
   set.seed(7)
   d <- data.frame(
     y = rnorm(200), x1 = rnorm(200), x2 = rnorm(200),
@@ -96,7 +95,6 @@ test_that("specs reactable compares three specifications with (SE) cells", {
 })
 
 test_that("specs reactable returns NULL for the RIF engine", {
-  skip_if_not_installed("fixest")
   f <- fixest::feols(y ~ x1, data = data.frame(y = 1:10, x1 = 1:10))
   expect_null(make_regtable_specs_reactable(f, f, f, "x1", character(0), engine = "rif"))
 })

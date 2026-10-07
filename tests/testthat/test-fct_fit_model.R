@@ -6,7 +6,6 @@
 library(testthat)
 
 test_that("RIF is computed on the complete-case estimation sample (CR-BUG-03)", {
-  skip_if_not_installed("fixest")
 
   set.seed(303)
   n <- 4000L

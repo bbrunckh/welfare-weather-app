@@ -45,7 +45,6 @@ ec_terms_bin <- paste0("tx_bin", levels(ec_dat$tx_bin)[2:4])
 # ---- echart_weather_effect_plot ---------------------------------------------
 
 test_that("continuous branch draws ribbon + line + rug as one widget", {
-  skip_if_not_installed("echarts4r")
   ch <- echart_weather_effect_plot(
     ec_fit_cont, "tx", character(0), FALSE, ec_lf, "fixest",
     x_label = "Max temp (deg C)", y_label = "Effect size (log points)"
@@ -84,7 +83,6 @@ test_that("continuous all-negative effect plot leaves room for a labeled zero", 
 })
 
 test_that("moderated continuous branch draws one curve per moderator level", {
-  skip_if_not_installed("echarts4r")
   ch <- echart_weather_effect_plot(
     ec_fit_mod, "tx", "tx:urban", FALSE, ec_lf, "fixest"
   )
@@ -95,7 +93,6 @@ test_that("moderated continuous branch draws one curve per moderator level", {
 })
 
 test_that("binned branch draws a ribbon and estimate line over bins", {
-  skip_if_not_installed("echarts4r")
   ch <- echart_weather_effect_plot(
     ec_fit_bin, "tx_bin", character(0), TRUE, ec_lf, "fixest",
     weather_df = data.frame(tx_bin = ec_dat$tx_bin),
@@ -112,7 +109,6 @@ test_that("binned branch draws a ribbon and estimate line over bins", {
 })
 
 test_that("RIF multi-bin branch facets one grid per bin with tau marks", {
-  skip_if_not_installed("echarts4r")
   grid <- ec_mk_grid(ec_terms_bin, ec_taus)
   ch <- echart_weather_effect_plot(
     ec_fit_bin, "tx_bin", character(0), TRUE, ec_lf, "rif",
@@ -142,7 +138,6 @@ test_that("RIF multi-bin branch facets one grid per bin with tau marks", {
 })
 
 test_that("RIF single-term branch draws one beta(tau) panel", {
-  skip_if_not_installed("echarts4r")
   grid <- ec_mk_grid("tx", ec_taus)
   ch <- echart_weather_effect_plot(
     ec_fit_cont, "tx", character(0), FALSE, ec_lf, "rif", rif_grid = grid
@@ -153,7 +148,6 @@ test_that("RIF single-term branch draws one beta(tau) panel", {
 })
 
 test_that("RIF moderated branch draws one curve per moderator level", {
-  skip_if_not_installed("echarts4r")
   grid <- rbind(
     ec_mk_grid("tx", ec_taus),
     ec_mk_grid("tx:urban", ec_taus)
@@ -178,7 +172,6 @@ test_that("RIF moderated branch draws one curve per moderator level", {
 })
 
 test_that("RIF binned Who plot separates readable panels from its legend", {
-  skip_if_not_installed("echarts4r")
   bins <- paste0("tx_bin", levels(ec_dat$tx_bin)[2:4])
   rif_grid <- do.call(rbind, lapply(c(bins, paste0(bins, ":urban")), function(term) {
     ec_mk_grid(term, ec_taus)
@@ -211,7 +204,6 @@ test_that("RIF binned Who plot separates readable panels from its legend", {
 })
 
 test_that("unusable inputs return an informative blank widget", {
-  skip_if_not_installed("echarts4r")
   ch <- echart_weather_effect_plot(
     ec_fit_cont, "zz", character(0), FALSE, ec_lf, "fixest"
   )
@@ -232,7 +224,6 @@ test_that("unusable inputs return an informative blank widget", {
 # ---- echart_make_coefplot ----------------------------------------------------
 
 test_that("echart coefplot draws dodged specifications with CI whiskers", {
-  skip_if_not_installed("echarts4r")
   ch <- echart_make_coefplot(
     fit1 = fixest::feols(welfare ~ tx, data = ec_dat),
     fit2 = fixest::feols(welfare ~ tx | urban, data = ec_dat),
@@ -301,7 +292,6 @@ test_that("echart coefplot draws dodged specifications with CI whiskers", {
 })
 
 test_that("RIF polynomial stability combines coefficients into total effect", {
-  skip_if_not_installed("echarts4r")
   tau <- 0.5
   terms <- c("tx", "I(tx^2)")
   grid <- do.call(rbind, lapply(1:3, function(model) {
@@ -347,7 +337,6 @@ test_that("RIF stability predictor lookup matches wrapped predictor tokens only"
 })
 
 test_that("RIF continuous polynomial effects use one marginal-effect panel", {
-  skip_if_not_installed("echarts4r")
   rif_poly <- ec_mk_grid(c("tx", "I(tx^2)"), ec_taus)
   ch <- echart_weather_effect_plot(
     ec_fit_cont, "tx", character(0), FALSE, ec_lf, "rif",
@@ -362,7 +351,6 @@ test_that("RIF continuous polynomial effects use one marginal-effect panel", {
 # ---- echart_importance -------------------------------------------------------
 
 test_that("echart importance draws horizontal share bars, largest on top", {
-  skip_if_not_installed("echarts4r")
   ch <- echart_importance(ec_fit_cont, label_fun = ec_lf)
   expect_s3_class(ch, "echarts4r")
   expect_equal(length(ch$x$opts$series), 1L)
@@ -386,7 +374,6 @@ test_that("echart importance draws horizontal share bars, largest on top", {
 # ---- echart_residual_panels --------------------------------------------------
 
 test_that("echart residual panels draw a two-grid widget for linear models", {
-  skip_if_not_installed("echarts4r")
   ch <- echart_residual_panels(ec_fit_cont, is_logistic = FALSE)
   expect_s3_class(ch, "echarts4r")
   expect_equal(length(ch$x$opts$grid), 2L)
@@ -399,7 +386,6 @@ test_that("echart residual panels draw a two-grid widget for linear models", {
 })
 
 test_that("echart residual panels serialise the loess trend as numeric pairs (R2-BUG-27)", {
-  skip_if_not_installed("echarts4r")
   ch <- echart_residual_panels(ec_fit_cont, is_logistic = FALSE)
   trend <- Filter(function(s) identical(s$name, "Trend"), ch$x$opts$series)
   expect_length(trend, 1L)
@@ -414,7 +400,6 @@ test_that("echart residual panels serialise the loess trend as numeric pairs (R2
 })
 
 test_that("echart residual panels fall back to binned residuals for logit", {
-  skip_if_not_installed("echarts4r")
   m_glm <- glm(urban ~ tx + pr, data = ec_dat, family = binomial)
   ch <- echart_residual_panels(m_glm, is_logistic = TRUE)
   expect_s3_class(ch, "echarts4r")
@@ -425,7 +410,6 @@ test_that("echart residual panels fall back to binned residuals for logit", {
 # ---- echart_pred_vs_actual ---------------------------------------------------
 
 test_that("echart pred vs actual overlays actual and predicted histograms", {
-  skip_if_not_installed("echarts4r")
   ch <- echart_pred_vs_actual(ec_fit_cont, is_logistic = FALSE,
                               outcome_label = "Welfare ($/day)")
   expect_s3_class(ch, "echarts4r")
@@ -443,7 +427,6 @@ test_that("echart pred vs actual overlays actual and predicted histograms", {
 })
 
 test_that("echart pred vs actual draws the calibration curve for logit", {
-  skip_if_not_installed("echarts4r")
   m_glm <- glm(urban ~ tx + pr, data = ec_dat, family = binomial)
   ch <- echart_pred_vs_actual(m_glm, is_logistic = TRUE)
   expect_s3_class(ch, "echarts4r")
@@ -456,7 +439,6 @@ test_that("echart pred vs actual draws the calibration curve for logit", {
 # ---- echart_welfare_quantile_hist --------------------------------------------
 
 test_that("echart welfare histogram marks the estimated quantiles", {
-  skip_if_not_installed("echarts4r")
   ch <- echart_welfare_quantile_hist(ec_dat$welfare, c(0.1, 0.5, 0.9),
                                      "Welfare ($/day)")
   expect_s3_class(ch, "echarts4r")
@@ -471,7 +453,6 @@ test_that("echart welfare histogram marks the estimated quantiles", {
 # ---- echart_resid_weather ----------------------------------------------------
 
 test_that("echart resid weather draws scatter + bin means over a value axis", {
-  skip_if_not_installed("echarts4r")
   ch <- echart_resid_weather(ec_fit_cont, "tx", weather_df = ec_dat,
                              x_label = "Max temp (deg C)")
   expect_s3_class(ch, "echarts4r")
@@ -483,7 +464,6 @@ test_that("echart resid weather draws scatter + bin means over a value axis", {
 })
 
 test_that("echart resid weather orders binned predictors numerically", {
-  skip_if_not_installed("echarts4r")
   ch <- echart_resid_weather(ec_fit_bin, "tx_bin",
                              weather_df = data.frame(tx_bin = ec_dat$tx_bin))
   expect_s3_class(ch, "echarts4r")
@@ -494,7 +474,6 @@ test_that("echart resid weather orders binned predictors numerically", {
 })
 
 test_that("echart resid weather jitter leaves the global RNG untouched (R2-BUG-18)", {
-  skip_if_not_installed("echarts4r")
   set.seed(42)
   before <- .Random.seed
   ch1 <- echart_resid_weather(ec_fit_bin, "tx_bin",
@@ -507,7 +486,6 @@ test_that("echart resid weather jitter leaves the global RNG untouched (R2-BUG-1
 })
 
 test_that("echart resid weather orders negative bins by signed lower bound (R2-BUG-22)", {
-  skip_if_not_installed("echarts4r")
   d <- ec_dat
   d$anom_bin <- cut(d$tx - stats::median(d$tx), c(-Inf, -2.5, -0.5, 0.5, Inf))
   fit <- fixest::feols(welfare ~ anom_bin + urban, data = d)

@@ -42,10 +42,20 @@ sw_binned <- function(name = "tx", method = "Equal frequency",
 
 # Open a fresh DuckDB connection with H3 loaded and bigint = integer64 so H3
 # cell IDs (which exceed 2^53) round-trip without precision loss.
+# The h3 extension is a DuckDB community extension; skip (rather than error)
+# when it is neither installed nor downloadable, for example offline.
 make_h3_con <- function() {
   con <- DBI::dbConnect(duckdb::duckdb(), bigint = "integer64")
-  tryCatch(DBI::dbExecute(con, "INSTALL h3 FROM community"), error = function(e) NULL)
-  DBI::dbExecute(con, "LOAD h3")
+  loaded <- tryCatch({
+    tryCatch(DBI::dbExecute(con, "LOAD h3"), error = function(e) {
+      DBI::dbExecute(con, "INSTALL h3 FROM community; LOAD h3;")
+    })
+    TRUE
+  }, error = function(e) FALSE)
+  if (!loaded) {
+    DBI::dbDisconnect(con, shutdown = TRUE)
+    testthat::skip("DuckDB h3 extension unavailable")
+  }
   con
 }
 
@@ -65,7 +75,6 @@ make_test_fixtures <- function(
     n_months       = 36
 ) {
   skip_if_not_installed("arrow")
-  skip_if_not_installed("duckdb")
   skip_if_not_installed("bit64")
 
   con <- make_h3_con()
@@ -203,7 +212,6 @@ make_test_fixtures_cross_res <- function(
     n_months       = 12L
 ) {
   skip_if_not_installed("arrow")
-  skip_if_not_installed("duckdb")
   skip_if_not_installed("bit64")
 
   con <- make_h3_con()
@@ -527,7 +535,6 @@ test_that("outer bins capture values outside survey range", {
 })
 
 test_that("binned simulation levels match relabelled model levels", {
-  skip_if_not_installed("fixest")
 
   breaks <- list(temp = c(-Inf, 20, 30, Inf))
   attr(breaks$temp, "observed") <- c(10, 20, 30, 40)
@@ -662,8 +669,6 @@ test_that(".compute_breaks: K-means works when caller has no .Random.seed (DET-0
 
 test_that("get_weather returns data frame with expected columns (continuous)", {
   skip_if_not_installed("arrow")
-  skip_if_not_installed("duckdb")
-  skip_if_not_installed("duckdbfs")
 
   fx <- cached_weather_fixture()
 
@@ -688,8 +693,6 @@ test_that("get_weather returns data frame with expected columns (continuous)", {
 
 test_that("one- and two-thread weather output has canonical parity", {
   skip_if_not_installed("arrow")
-  skip_if_not_installed("duckdb")
-  skip_if_not_installed("duckdbfs")
 
   fx <- cached_weather_fixture()
   run <- function(threads) get_weather(
@@ -717,8 +720,6 @@ test_that("one- and two-thread weather output has canonical parity", {
 
 test_that("get_weather returns only rows matching requested dates", {
   skip_if_not_installed("arrow")
-  skip_if_not_installed("duckdb")
-  skip_if_not_installed("duckdbfs")
 
   fx <- cached_weather_fixture()
 
@@ -735,8 +736,6 @@ test_that("get_weather returns only rows matching requested dates", {
 
 test_that("get_weather: binned (equal frequency) returns factor with correct levels", {
   skip_if_not_installed("arrow")
-  skip_if_not_installed("duckdb")
-  skip_if_not_installed("duckdbfs")
 
   fx <- cached_weather_fixture()
 
@@ -754,8 +753,6 @@ test_that("get_weather: binned (equal frequency) returns factor with correct lev
 
 test_that("get_weather: binned (equal width) returns factor with correct levels", {
   skip_if_not_installed("arrow")
-  skip_if_not_installed("duckdb")
-  skip_if_not_installed("duckdbfs")
 
   fx <- cached_weather_fixture()
 
@@ -773,8 +770,6 @@ test_that("get_weather: binned (equal width) returns factor with correct levels"
 
 test_that("get_weather: binned (K-means) returns factor", {
   skip_if_not_installed("arrow")
-  skip_if_not_installed("duckdb")
-  skip_if_not_installed("duckdbfs")
 
   fx <- cached_weather_fixture()
 
@@ -791,8 +786,6 @@ test_that("get_weather: binned (K-means) returns factor", {
 
 test_that("get_weather: binned (Custom) produces factor whose interior breaks are the supplied cuts", {
   skip_if_not_installed("arrow")
-  skip_if_not_installed("duckdb")
-  skip_if_not_installed("duckdbfs")
 
   fx <- cached_weather_fixture()
 
@@ -818,8 +811,6 @@ test_that("get_weather: binned (Custom) produces factor whose interior breaks ar
 
 test_that("get_weather: outer bins contain no NAs (values outside survey range)", {
   skip_if_not_installed("arrow")
-  skip_if_not_installed("duckdb")
-  skip_if_not_installed("duckdbfs")
 
   fx <- cached_weather_fixture()
 
@@ -847,8 +838,6 @@ test_that("get_weather: outer bins contain no NAs (values outside survey range)"
 
 test_that("get_weather: two variables, mixed continuous and binned", {
   skip_if_not_installed("arrow")
-  skip_if_not_installed("duckdb")
-  skip_if_not_installed("duckdbfs")
 
   fx <- cached_weather_fixture()
 
@@ -873,8 +862,6 @@ test_that("get_weather: two variables, mixed continuous and binned", {
 
 test_that("get_weather: bin cutoffs use only survey timestamps (not all dates)", {
   skip_if_not_installed("arrow")
-  skip_if_not_installed("duckdb")
-  skip_if_not_installed("duckdbfs")
 
   fx <- cached_weather_fixture()
 
@@ -899,7 +886,6 @@ test_that("get_weather: bin cutoffs use only survey timestamps (not all dates)",
 # ============================================================================ #
 
 test_that(".harmonise_h3: same-resolution adds h3_weather string->bigint cast", {
-  skip_if_not_installed("duckdb")
   skip_if_not_installed("bit64")
 
   con <- make_h3_con()
@@ -934,7 +920,6 @@ test_that(".harmonise_h3: same-resolution adds h3_weather string->bigint cast", 
 })
 
 test_that(".harmonise_h3: microdata finer than weather maps micro up to weather res", {
-  skip_if_not_installed("duckdb")
   skip_if_not_installed("bit64")
 
   con <- make_h3_con()
@@ -969,7 +954,6 @@ test_that(".harmonise_h3: microdata finer than weather maps micro up to weather 
 })
 
 test_that(".harmonise_h3: weather finer than microdata maps weather up to micro res", {
-  skip_if_not_installed("duckdb")
   skip_if_not_installed("bit64")
 
   con <- make_h3_con()
@@ -1015,8 +999,6 @@ test_that(".harmonise_h3: weather finer than microdata maps weather up to micro 
 
 test_that("get_weather joins correctly when weather is coarser than microdata", {
   skip_if_not_installed("arrow")
-  skip_if_not_installed("duckdb")
-  skip_if_not_installed("duckdbfs")
   skip_if_not_installed("bit64")
 
   # micro res 5, weather res 4  (the common production case)
@@ -1040,8 +1022,6 @@ test_that("get_weather joins correctly when weather is coarser than microdata", 
 
 test_that("get_weather joins correctly when weather is finer than microdata", {
   skip_if_not_installed("arrow")
-  skip_if_not_installed("duckdb")
-  skip_if_not_installed("duckdbfs")
   skip_if_not_installed("bit64")
 
   # micro res 4, weather res 5  (unusual but must be handled).
@@ -1126,8 +1106,6 @@ make_test_fixtures_cmip6_coarser <- function(
 
 test_that("get_weather climate scenario works when CMIP6 is coarser than microdata", {
   skip_if_not_installed("arrow")
-  skip_if_not_installed("duckdb")
-  skip_if_not_installed("duckdbfs")
   skip_if_not_installed("bit64")
 
   # micro res 5, weather res 4 → target res 4; CMIP6 at res 3 is coarser,
@@ -1175,7 +1153,6 @@ test_that("get_weather climate scenario works when CMIP6 is coarser than microda
 
 test_that("get_weather is identical across repeated end-to-end calls", {
   skip_if_not_installed("arrow")
-  skip_if_not_installed("duckdb")
   skip_if_not_installed("bit64")
 
   fx <- cached_weather_fixture("repeated")
@@ -1203,8 +1180,6 @@ test_that("get_weather is identical across repeated end-to-end calls", {
 
 test_that("fast and bounded future collection preserve the weather contract", {
   skip_if_not_installed("arrow")
-  skip_if_not_installed("duckdb")
-  skip_if_not_installed("duckdbfs")
   skip_if_not_installed("bit64")
 
   fx <- cached_weather_fixture("cross_res_cmip6")
@@ -1231,8 +1206,6 @@ test_that("fast and bounded future collection preserve the weather contract", {
 
 test_that("CR-PERF-10: future weather forces gc() only when the RSS guard trips", {
   skip_if_not_installed("arrow")
-  skip_if_not_installed("duckdb")
-  skip_if_not_installed("duckdbfs")
   skip_if_not_installed("bit64")
 
   fx <- cached_weather_fixture("cross_res_cmip6")
@@ -1283,8 +1256,6 @@ test_that("CR-PERF-10: future weather forces gc() only when the RSS guard trips"
 
 test_that("materialized multi-period future deltas preserve each period", {
   skip_if_not_installed("arrow")
-  skip_if_not_installed("duckdb")
-  skip_if_not_installed("duckdbfs")
   skip_if_not_installed("bit64")
 
   fx <- cached_weather_fixture("cross_res_cmip6")
@@ -1332,8 +1303,6 @@ test_that("materialized multi-period future deltas preserve each period", {
 
 test_that("SSP perturbation with equal-frequency bins is deterministic", {
   skip_if_not_installed("arrow")
-  skip_if_not_installed("duckdb")
-  skip_if_not_installed("duckdbfs")
   skip_if_not_installed("bit64")
 
   fx <- cached_weather_fixture("cross_res_cmip6")
@@ -1373,8 +1342,6 @@ test_that("SSP perturbation with equal-frequency bins is deterministic", {
 
 test_that("forced weather disk cache is bit-identical, cold and warm (PERF-13)", {
   skip_if_not_installed("arrow")
-  skip_if_not_installed("duckdb")
-  skip_if_not_installed("duckdbfs")
   skip_if_not_installed("bit64")
 
   fx <- cached_weather_fixture("cross_res_cmip6")
@@ -1423,7 +1390,6 @@ test_that("forced weather disk cache is bit-identical, cold and warm (PERF-13)",
 
 test_that("loc_panel is identical on the lazy view and its local temp table", {
   skip_if_not_installed("arrow")
-  skip_if_not_installed("duckdb")
 
   tmp <- withr::local_tempdir()
   h3_dir <- file.path(tmp, "microdata", "h3", "TST")
@@ -1502,8 +1468,6 @@ test_that("baseline-wave filtering removes unused weather rows with parity", {
 
 test_that("baseline-wave filtering preserves historical and future keys across sources", {
   skip_if_not_installed("arrow")
-  skip_if_not_installed("duckdb")
-  skip_if_not_installed("duckdbfs")
   skip_if_not_installed("bit64")
   fx <- cached_weather_fixture("cross_res_cmip6")
   current <- fx$selected_surveys
@@ -1587,8 +1551,6 @@ make_long_history_fixture <- function(dir) {
 
 test_that("R2-BUG-01: character and Date dates give identical weather and cache keys", {
   skip_if_not_installed("arrow")
-  skip_if_not_installed("duckdb")
-  skip_if_not_installed("duckdbfs")
   skip_if_not_installed("bit64")
 
   fx <- make_long_history_fixture(withr::local_tempdir())
@@ -1621,8 +1583,6 @@ test_that("R2-BUG-01: character and Date dates give identical weather and cache 
 
 test_that("CR-BUG-01: CMIP6 baseline pools historical and SSP rows once", {
   skip_if_not_installed("arrow")
-  skip_if_not_installed("duckdb")
-  skip_if_not_installed("duckdbfs")
   skip_if_not_installed("bit64")
 
   dir <- withr::local_tempdir()
@@ -1690,7 +1650,6 @@ test_that("CR-BUG-01: CMIP6 baseline pools historical and SSP rows once", {
 })
 
 test_that("R2-BUG-29: zero reference SD gives NA standardized anomalies and one warning", {
-  skip_if_not_installed("duckdb")
 
   con <- DBI::dbConnect(duckdb::duckdb(), dbdir = ":memory:")
   withr::defer(DBI::dbDisconnect(con, shutdown = TRUE))
@@ -1736,7 +1695,6 @@ test_that("R2-BUG-29: zero reference SD gives NA standardized anomalies and one 
 })
 
 test_that("CR-BUG-17: H3 resolution uses every row and rejects mixed resolutions", {
-  skip_if_not_installed("duckdb")
   skip_if_not_installed("bit64")
 
   con <- make_h3_con()
@@ -1767,8 +1725,6 @@ test_that("CR-BUG-17: H3 resolution uses every row and rejects mixed resolutions
 
 test_that("CR-BUG-05: lag windows are gap-aware and NA handling is per variable", {
   skip_if_not_installed("arrow")
-  skip_if_not_installed("duckdb")
-  skip_if_not_installed("duckdbfs")
   skip_if_not_installed("bit64")
 
   dir <- withr::local_tempdir()

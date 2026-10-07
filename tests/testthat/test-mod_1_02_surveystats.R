@@ -410,7 +410,6 @@ test_that("CR-BUG-16: panel join reports unmatched records and rejects duplicate
 })
 
 test_that("R2-PERF-14: H3 cell bbox needs only the h3 extension and matches the boundary", {
-  skip_if_not_installed("duckdb")
   con <- DBI::dbConnect(duckdb::duckdb())
   on.exit(DBI::dbDisconnect(con, shutdown = TRUE), add = TRUE)
   h3_ok <- tryCatch({

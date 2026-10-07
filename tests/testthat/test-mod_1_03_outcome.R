@@ -29,7 +29,6 @@ make_survey_df <- function() {
 }
 
 test_that("outcome stats tab re-renders only on button press", {
-  skip_if_not_installed("shiny")
 
   plot_calls <- 0L
   local_mocked_bindings(
@@ -107,7 +106,6 @@ test_that("outcome stats tab re-renders only on button press", {
 })
 
 test_that("outcome map switches between coverage and mean-value views", {
-  skip_if_not_installed("shiny")
 
   geo <- data.frame(
     h3   = c("8975492ffffffff", "8975493ffffffff"),
@@ -198,7 +196,6 @@ make_wave_survey_df <- function() {
 }
 
 test_that("PERF-41: summary table shows deciles and switches waves via the pill", {
-  skip_if_not_installed("shiny")
 
   local_mocked_bindings(
     echart_welfare_dist = function(...) NULL
@@ -255,7 +252,6 @@ test_that("PERF-41: summary table shows deciles and switches waves via the pill"
 })
 
 test_that("PERF-41: summary wave pill is hidden for single-wave data", {
-  skip_if_not_installed("shiny")
 
   local_mocked_bindings(
     echart_welfare_dist = function(...) NULL

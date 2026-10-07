@@ -6,7 +6,6 @@
 # of the single-method oracle path.
 
 test_that("welfare_stats_suite matches resolve_agg_fn on random draws", {
-  skip_if_not_installed("Rcpp")
   set.seed(20260918)
   methods <- c(
     "mean", "median", "total", "headcount_ratio", "gap", "fgt2",

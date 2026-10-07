@@ -23,7 +23,6 @@
 }
 
 test_that("effect card contrasts per +1 SD in physical units with the CI and no verdict flag", {
-  skip_if_not_installed("fixest")
   fx <- .s1_fixture()
   res <- step1_headline_cards(fx$mf, fx$snap)
   card <- res$rows[[1]]$cards[[1]]
@@ -36,7 +35,6 @@ test_that("effect card contrasts per +1 SD in physical units with the CI and no 
 })
 
 test_that("an effect indistinguishable from zero shows its interval without a verdict", {
-  skip_if_not_installed("fixest")
   fx <- .s1_fixture(beta = 0, seed = 7, n = 300L)
   card <- step1_headline_cards(fx$mf, fx$snap)$rows[[1]]$cards[[1]]
   expect_false(card$significant)
@@ -45,7 +43,6 @@ test_that("an effect indistinguishable from zero shows its interval without a ve
 })
 
 test_that("robustness card compares fixed-effects and full specifications", {
-  skip_if_not_installed("fixest")
   fx <- .s1_fixture()
   card <- step1_headline_cards(fx$mf, fx$snap)$rows[[1]]$cards[[3]]
   expect_identical(card$label, "Spec robustness")
@@ -56,7 +53,6 @@ test_that("robustness card compares fixed-effects and full specifications", {
 })
 
 test_that("model fit card leads with overall R2 and the sample size", {
-  skip_if_not_installed("fixest")
   fx <- .s1_fixture()
   card <- step1_headline_cards(fx$mf, fx$snap)$rows[[1]]$cards[[4]]
   expect_identical(card$label, "Model fit")
@@ -70,7 +66,6 @@ test_that("model fit card leads with overall R2 and the sample size", {
 })
 
 test_that("RIF who card uses percentile wording and no verdict flag", {
-  skip_if_not_installed("fixest")
   fx <- .s1_fixture(
     engine = "rif", model_type = "Unconditional quantile regression (RIF)"
   )
@@ -84,7 +79,6 @@ test_that("RIF who card uses percentile wording and no verdict flag", {
 })
 
 test_that("quadratic weather terms report a turning point inside the observed range", {
-  skip_if_not_installed("fixest")
   set.seed(3)
   n <- 1500L
   temp <- stats::rnorm(n, 25, 4)
@@ -105,7 +99,6 @@ test_that("quadratic weather terms report a turning point inside the observed ra
 })
 
 test_that("binned weather effect card popover names the largest bin", {
-  skip_if_not_installed("fixest")
   set.seed(11)
   n <- 2000L
   temp <- stats::runif(n, 15, 40)
@@ -149,7 +142,6 @@ test_that("binned weather effect card popover names the largest bin", {
 }
 
 test_that("polynomial weather adds a shape card with the upper-tail effect and turning point", {
-  skip_if_not_installed("fixest")
   fx <- .s1_poly_fixture()
   skip_if(is.null(.s1_turning_point(fx$mf, fx$snap, "temp")), "polynomial not built")
   cards <- step1_headline_cards(fx$mf, fx$snap)$rows[[1]]$cards
@@ -169,7 +161,6 @@ test_that("polynomial weather adds a shape card with the upper-tail effect and t
 })
 
 test_that("linear weather has no shape card", {
-  skip_if_not_installed("fixest")
   fx <- .s1_fixture()
   cards <- step1_headline_cards(fx$mf, fx$snap)$rows[[1]]$cards
   expect_length(cards, 4L)
@@ -177,7 +168,6 @@ test_that("linear weather has no shape card", {
 })
 
 test_that("binned weather shape card reports where the response starts", {
-  skip_if_not_installed("fixest")
   set.seed(11)
   n <- 3000L
   temp <- stats::runif(n, 15, 40)

@@ -122,7 +122,6 @@ test_that("RIF engine preparation preserves tau order, schema, and factors", {
 })
 
 test_that("predict_rif returns correct structure", {
-  skip_if_not_installed("fixest")
   set.seed(42)
   n <- 200
   df <- data.frame(y = rnorm(n, 10, 2), temp = rnorm(n), rain = rnorm(n), loc = factor(sample(letters[1:4], n, replace = TRUE)), year = factor(sample(2010:2015, n, replace = TRUE)))
@@ -150,7 +149,6 @@ test_that("predict_rif returns correct structure", {
 })
 
 test_that("streamed RIF interpolation matches the full matrix oracle", {
-  skip_if_not_installed("fixest")
   set.seed(148)
   n <- 180
   taus <- c(0.1, 0.3, 0.7, 0.9)
@@ -186,7 +184,6 @@ test_that("streamed RIF interpolation matches the full matrix oracle", {
 })
 
 test_that("direct RIF prediction matches fixest prediction with fixed effects", {
-  skip_if_not_installed("fixest")
   set.seed(142)
   n <- 160
   df <- data.frame(
@@ -222,7 +219,6 @@ test_that("direct RIF prediction matches fixest prediction with fixed effects", 
 })
 
 test_that("direct RIF prediction reuses one design and preserves nine-tau parity", {
-  skip_if_not_installed("fixest")
   set.seed(145)
   n <- 220
   taus <- seq(0.1, 0.9, by = 0.1)
@@ -261,7 +257,6 @@ test_that("direct RIF prediction reuses one design and preserves nine-tau parity
 })
 
 test_that("cross-key direct RIF reuse caches only the baseline design", {
-  skip_if_not_installed("fixest")
   set.seed(147)
   n <- 220
   taus <- seq(0.1, 0.9, by = 0.1)
@@ -320,7 +315,6 @@ test_that("cross-key direct RIF reuse caches only the baseline design", {
 })
 
 test_that("predict_rif direct mode matches fallback within numeric tolerance", {
-  skip_if_not_installed("fixest")
   set.seed(143)
   n <- 140
   df <- data.frame(
@@ -353,7 +347,6 @@ test_that("predict_rif direct mode matches fallback within numeric tolerance", {
 })
 
 test_that("direct RIF metadata rejects unsupported model structures", {
-  skip_if_not_installed("fixest")
   set.seed(144)
   d <- data.frame(y = rnorm(80), x = rnorm(80), fe = factor(sample(letters[1:3], 80, TRUE)))
   fit <- fixest::feols(y ~ x | fe, data = d, warn = FALSE)
@@ -369,7 +362,6 @@ test_that("predict_rif F_loading contrast is ~0 when scenario == baseline weathe
   # deviation/contrast (F_agg_scenario - F_agg_historical) must reduce to
   # zero when scenario weather equals historical weather. If it doesn't, the
   # change has silently broken the deviation-mode uncertainty bands.
-  skip_if_not_installed("fixest")
   set.seed(7)
   n <- 120
   df <- data.frame(
@@ -417,7 +409,6 @@ test_that("predict_rif F_loading contrast is ~0 when scenario == baseline weathe
 })
 
 test_that("direct RIF F_loading reuses the shared scenario design exactly", {
-  skip_if_not_installed("fixest")
   set.seed(146)
   n <- 140
   taus <- seq(0.1, 0.9, by = 0.2)
@@ -451,7 +442,6 @@ test_that("direct RIF F_loading reuses the shared scenario design exactly", {
 })
 
 test_that("predict_rif delta is ~0 when scenario == baseline weather", {
-  skip_if_not_installed("fixest")
   set.seed(123)
   n <- 100
   df <- data.frame(y = rnorm(n, 10, 2), temp = rnorm(n), rain = rnorm(n), loc = factor(sample(letters[1:3], n, replace = TRUE)), year = factor(sample(2010:2012, n, replace = TRUE)))

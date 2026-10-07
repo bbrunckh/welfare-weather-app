@@ -257,7 +257,6 @@ test_that("production applies exact annual exposure instead of period-mean broad
 
 
 test_that("deployed fixest path resolves weather references and shared IDs", {
-  skip_if_not_installed("fixest")
   root <- withr::local_tempdir()
   store <- step2_weather_store_create("policy-path", "sig-policy", root)
   on.exit(step2_weather_store_cleanup(store), add = TRUE)

@@ -1,6 +1,4 @@
 test_that("wide climate references preserve legacy transformations", {
-  skip_if_not_installed("duckdb")
-  skip_if_not_installed("dplyr")
 
   con <- DBI::dbConnect(duckdb::duckdb(), dbdir = ":memory:")
   withr::defer(DBI::dbDisconnect(con, shutdown = TRUE))

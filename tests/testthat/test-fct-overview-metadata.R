@@ -257,7 +257,6 @@ test_that("local Overview metadata loads as one validated bundle", {
 
 
 test_that("metadata variable order can be preserved on collection", {
-  skip_if_not_installed("duckdb")
   path <- tempfile("wiseapp-order-")
   dir.create(path, recursive = TRUE)
   withr::defer(unlink(path, recursive = TRUE, force = TRUE))
@@ -537,8 +536,6 @@ test_that("overview_metadata_cache_store serves warm sessions without a reload",
 
 
 test_that("metadata bundle loads in a real mirai worker from verbatim params", {
-  skip_if_not_installed("mirai")
-  skip_if_not_installed("pkgload")
   path <- tempfile("wiseapp-overview-worker-")
   dir.create(path, recursive = TRUE)
   withr::defer(unlink(path, recursive = TRUE, force = TRUE))

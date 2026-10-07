@@ -294,7 +294,6 @@ module_displayed_table <- function(result, method, pl_in, bw_in,
 }
 
 test_that("partial tables are identical to the module's displayed tables", {
-  skip_if_not_installed("shiny")
   for (weighted in c(TRUE, FALSE)) {
     for (method in c("mean", "headcount_ratio", "gini", "prosperity_gap")) {
       info <- paste0(if (weighted) "weighted/" else "unweighted/", method)
@@ -357,7 +356,6 @@ module_displayed_tables <- function(result, methods, pl_in, bw_in, labels) {
 }
 
 test_that("every streamed method's table is identical to the module's", {
-  skip_if_not_installed("shiny")
   for (weighted in c(TRUE, FALSE)) {
     for (display_method in c("mean", "prosperity_gap")) {
       info <- paste0(if (weighted) "weighted/" else "unweighted/", display_method)
@@ -390,7 +388,6 @@ test_that("every streamed method's table is identical to the module's", {
 })
 
 test_that("parity holds with point estimates only and no residuals", {
-  skip_if_not_installed("shiny")
   run <- collect_partials(
     display = list(method = "mean"), residuals = "none", skip_coef_draws = TRUE
   )

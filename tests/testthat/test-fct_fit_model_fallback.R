@@ -21,7 +21,6 @@ make_lasso_fixture <- function(n = 180L) {
 }
 
 test_that("logistic request on a non-logical outcome records a model-family fallback", {
-  skip_if_not_installed("fixest")
 
   df <- make_lasso_fixture(120L)
   so <- list(name = "welfare", type = "numeric")
@@ -42,7 +41,6 @@ test_that("logistic request on a non-logical outcome records a model-family fall
 })
 
 test_that("missing cluster variable records a VCV fallback", {
-  skip_if_not_installed("fixest")
 
   df <- make_lasso_fixture(120L)
   df$loc_id_panel <- rep(letters[1:8], length.out = nrow(df))
@@ -68,7 +66,6 @@ test_that("missing cluster variable records a VCV fallback", {
 })
 
 test_that("a clean fit records no fallbacks", {
-  skip_if_not_installed("fixest")
 
   df <- make_lasso_fixture(120L)
   so <- list(name = "welfare", type = "numeric")
