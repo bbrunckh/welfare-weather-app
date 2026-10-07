@@ -71,6 +71,10 @@ jobs:
         shell: Rscript {0}
         run: |
           options(testthat.progress.max_fails = 1000)
+          # Chrome is preinstalled on the runner but cannot start sandboxed
+          # there (Ubuntu 24.04 restricts user namespaces); the PNG export test
+          # needs it.
+          chromote::set_chrome_args(c(chromote::default_chrome_args(), "--no-sandbox"))
           testthat::test_local(stop_on_failure = TRUE)
 
   lintr:
