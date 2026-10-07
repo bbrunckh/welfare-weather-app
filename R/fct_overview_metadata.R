@@ -108,20 +108,20 @@ overview_metadata_cache_store <- function(connection_params, value) {
     task <- tryCatch({
       .wise_async_require_local_daemon(params)
       mirai::try_mirai({
-      if (!isTRUE(getOption("wiseapp.async.worker_initialized", FALSE))) {
-        if (isTRUE(development_package)) {
-          pkgload::load_all(package_path, export_all = FALSE, helpers = FALSE,
-            attach_testthat = FALSE, quiet = TRUE)
-        } else {
-          loadNamespace("wiseapp")
+        if (!isTRUE(getOption("wiseapp.async.worker_initialized", FALSE))) {
+          if (isTRUE(development_package)) {
+            pkgload::load_all(package_path, export_all = FALSE, helpers = FALSE,
+              attach_testthat = FALSE, quiet = TRUE)
+          } else {
+            loadNamespace("wiseapp")
+          }
+          options(wiseapp.async.worker_initialized = TRUE)
         }
-        options(wiseapp.async.worker_initialized = TRUE)
-      }
-      wiseapp:::load_overview_metadata(params, clear_credentials = clear_credentials)
-    }, package_path = package_path, development_package = development_package,
-      params = params, clear_credentials = identical(params$origin, "ui"),
-      .compute = "default",
-      .timeout = .wise_step2_async_timeout_ms("metadata"))
+        wiseapp:::load_overview_metadata(params, clear_credentials = clear_credentials)
+      }, package_path = package_path, development_package = development_package,
+        params = params, clear_credentials = identical(params$origin, "ui"),
+        .compute = "default",
+        .timeout = .wise_step2_async_timeout_ms("metadata"))
     }, error = function(e) e)
     if (inherits(task, "error")) {
       on_error(task)
