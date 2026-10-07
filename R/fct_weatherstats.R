@@ -1894,7 +1894,8 @@ build_weather_binned_table <- function(survey_weather, selected_weather,
 #'                 and plot 2. Only `ids[1]` is used when `n_vars < 2`.
 #' @param height   CSS height passed to `shiny::plotOutput`.
 #' @param alts     Optional character vector of alt texts (UI-36), one per
-#'                 plot id; entries beyond `n_vars` are unused.
+#'                 plot id; entries beyond `n_vars` are unused. Missing or
+#'                 empty entries get a generic default alt text.
 #' @param echarts  Logical. When `TRUE` the slots are `echarts4r` chart
 #'                 outputs (`wise_chart_output`) for modules migrated to
 #'                 echarts (guidelines §7); the default keeps ggplot
@@ -1909,22 +1910,18 @@ weather_plot_layout <- function(ns, n_vars, ids, height = "500px",
       !is.na(alts[i]) && nzchar(alts[i])) {
       alts[i]
     } else {
-      NULL
+      # A11Y-ALT: never leave a chart unnamed; fall back to a generic but
+      # meaningful description of the slot.
+      if (isTRUE(n_vars >= 2)) {
+        sprintf("Chart for weather variable %d of 2", i)
+      } else {
+        "Chart for the selected weather variable"
+      }
     }
     if (!echarts) {
-      return(
-        if (is.null(alt)) {
-          shiny::plotOutput(ns(ids[i]), height = height)
-        } else {
-          wise_plot_output(ns(ids[i]), alt, height = height)
-        }
-      )
+      return(wise_plot_output(ns(ids[i]), alt, height = height))
     }
-    if (is.null(alt)) {
-      echarts4r::echarts4rOutput(ns(ids[i]), height = height)
-    } else {
-      wise_chart_output(ns(ids[i]), alt, height = height)
-    }
+    wise_chart_output(ns(ids[i]), alt, height = height)
   }
   if (isTRUE(n_vars >= 2)) {
     bslib::layout_columns(
