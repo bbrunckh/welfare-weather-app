@@ -296,9 +296,23 @@ mod_2_03_diagnostics_server <- function(id,
     )
 
     weather_support_data <- reactive({
-      req(hist_sim(), survey_weather())
+      req(hist_sim())
       vars <- input$diag_weather_vars
-      req(length(vars) > 0L, !is.null(hist_sim()$weather_raw))
+      req(length(vars) > 0L)
+      # Use the summary computed during the run (pooled across every climate
+      # model member, no file reads). Runs made before it existed fall back to
+      # recomputing from the scenario weather.
+      sc <- if (!is.null(saved_scenarios)) saved_scenarios() else list()
+      stored <- weather_support_from_stored(
+        sc, vars, visible = {
+          active <- active_weather_scenarios()
+          if (is.null(active)) names(sc) else intersect(names(sc), active)
+        }
+      )
+      if (!is.null(stored)) {
+        return(stored)
+      }
+      req(survey_weather(), !is.null(hist_sim()$weather_raw))
       ref <- .filter_hist_weather(hist_sim()$weather_raw, survey_weather())
       scenarios <- scenario_weather_data()
       weather_support_summary(

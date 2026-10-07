@@ -186,6 +186,25 @@ weather_support_scenario <- function(ref, x_raw, scenario, warn_share = 0.05) {
   )
 }
 
+# Weather-support table for the Diagnostics tab from the summaries stored on
+# the scenario entries during the run (pooled across climate-model members).
+# NULL when any visible scenario has no stored summary (a run made before the
+# summary existed), so the caller can fall back to recomputing from weather.
+weather_support_from_stored <- function(scenarios, vars, visible = names(scenarios)) {
+  visible <- intersect(visible, names(scenarios))
+  if (!length(visible)) {
+    return(NULL)
+  }
+  tbls <- lapply(scenarios[visible], function(e) e[["weather_support"]])
+  if (!all(vapply(tbls, is.data.frame, logical(1L)))) {
+    return(NULL)
+  }
+  out <- dplyr::bind_rows(tbls)
+  out <- out[out$weather_variable %in% vars, , drop = FALSE]
+  out[order(match(out$weather_variable, vars), match(out$scenario, visible)), ,
+    drop = FALSE]
+}
+
 # Pool member-level support rows (one per climate-model member) into one row
 # per weather variable for a scenario: counts add, the share is recomputed.
 weather_support_pool <- function(rows, scenario, warn_share = 0.05) {
